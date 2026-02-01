@@ -1,0 +1,78 @@
+package exchange
+
+import "testing"
+
+func TestPercentageFeeInQuote(t *testing.T) {
+	fee := &PercentageFee{
+		MakerBps: 5,
+		TakerBps: 10,
+		InQuote:  true,
+	}
+
+	exec := &Execution{
+		Price: 50000 * SATOSHI,
+		Qty:   SATOSHI,
+	}
+
+	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD")
+	if takerFee.Asset != "USD" {
+		t.Errorf("Taker fee asset should be USD, got %s", takerFee.Asset)
+	}
+	expectedTakerFee := int64((50000 * SATOSHI * SATOSHI * 10) / (BPS * SATOSHI))
+	if takerFee.Amount != expectedTakerFee {
+		t.Errorf("Taker fee should be %d, got %d", expectedTakerFee, takerFee.Amount)
+	}
+
+	makerFee := fee.CalculateFee(exec, Sell, true, "BTC", "USD")
+	if makerFee.Asset != "USD" {
+		t.Errorf("Maker fee asset should be USD, got %s", makerFee.Asset)
+	}
+	expectedMakerFee := int64((50000 * SATOSHI * SATOSHI * 5) / (BPS * SATOSHI))
+	if makerFee.Amount != expectedMakerFee {
+		t.Errorf("Maker fee should be %d, got %d", expectedMakerFee, makerFee.Amount)
+	}
+}
+
+func TestPercentageFeeInBase(t *testing.T) {
+	fee := &PercentageFee{
+		MakerBps: 5,
+		TakerBps: 10,
+		InQuote:  false,
+	}
+
+	exec := &Execution{
+		Price: 50000 * SATOSHI,
+		Qty:   SATOSHI,
+	}
+
+	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD")
+	if takerFee.Asset != "BTC" {
+		t.Errorf("Taker fee asset should be BTC, got %s", takerFee.Asset)
+	}
+	expectedTakerFee := int64((SATOSHI * 10) / BPS)
+	if takerFee.Amount != expectedTakerFee {
+		t.Errorf("Taker fee should be %d, got %d", expectedTakerFee, takerFee.Amount)
+	}
+}
+
+func TestFixedFee(t *testing.T) {
+	fee := &FixedFee{
+		MakerFee: Fee{Asset: "USD", Amount: 100},
+		TakerFee: Fee{Asset: "USD", Amount: 200},
+	}
+
+	exec := &Execution{
+		Price: 50000 * SATOSHI,
+		Qty:   SATOSHI,
+	}
+
+	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD")
+	if takerFee.Amount != 200 {
+		t.Errorf("Taker fee should be 200, got %d", takerFee.Amount)
+	}
+
+	makerFee := fee.CalculateFee(exec, Sell, true, "BTC", "USD")
+	if makerFee.Amount != 100 {
+		t.Errorf("Maker fee should be 100, got %d", makerFee.Amount)
+	}
+}

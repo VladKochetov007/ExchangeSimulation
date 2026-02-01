@@ -1,0 +1,376 @@
+package exchange
+
+import (
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+type Exchange struct {
+	Clients       map[uint64]*Client
+	Gateways      map[uint64]*ClientGateway
+	Books         map[string]*OrderBook
+	Instruments   map[string]Instrument
+	Positions     *PositionManager
+	NextOrderID   uint64
+	Matcher       MatchingEngine
+	MDPublisher   *MDPublisher
+	mu            sync.RWMutex
+	running       bool
+	shutdownCh    chan struct{}
+}
+
+type OrderBook struct {
+	Symbol     string
+	Instrument Instrument
+	Bids       *Book
+	Asks       *Book
+	LastTrade  *Trade
+	SeqNum     uint64
+}
+
+func NewExchange(estimatedClients int) *Exchange {
+	return &Exchange{
+		Clients:     make(map[uint64]*Client, estimatedClients),
+		Gateways:    make(map[uint64]*ClientGateway, estimatedClients),
+		Books:       make(map[string]*OrderBook, 16),
+		Instruments: make(map[string]Instrument, 16),
+		Positions:   NewPositionManager(),
+		NextOrderID: 1,
+		Matcher:     NewDefaultMatcher(),
+		MDPublisher: NewMDPublisher(),
+		running:     false,
+		shutdownCh:  make(chan struct{}),
+	}
+}
+
+func (e *Exchange) AddInstrument(instrument Instrument) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	symbol := instrument.Symbol()
+	e.Instruments[symbol] = instrument
+	e.Books[symbol] = &OrderBook{
+		Symbol:     symbol,
+		Instrument: instrument,
+		Bids:       newBook(Buy),
+		Asks:       newBook(Sell),
+		LastTrade:  nil,
+		SeqNum:     0,
+	}
+}
+
+func (e *Exchange) ConnectClient(clientID uint64, initialBalances map[string]int64, feePlan FeeModel) *ClientGateway {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	client := NewClient(clientID, feePlan)
+	for asset, amount := range initialBalances {
+		client.AddBalance(asset, amount)
+	}
+	e.Clients[clientID] = client
+
+	gateway := NewClientGateway(clientID)
+	gateway.Running = true
+	e.Gateways[clientID] = gateway
+
+	go e.handleClientRequests(gateway)
+	return gateway
+}
+
+func (e *Exchange) DisconnectClient(clientID uint64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if gateway := e.Gateways[clientID]; gateway != nil {
+		gateway.Close()
+		delete(e.Gateways, clientID)
+	}
+}
+
+func (e *Exchange) handleClientRequests(gateway *ClientGateway) {
+	for req := range gateway.RequestCh {
+		var resp Response
+		switch req.Type {
+		case ReqPlaceOrder:
+			resp = e.placeOrder(gateway.ClientID, req.OrderReq)
+		case ReqCancelOrder:
+			resp = e.cancelOrder(gateway.ClientID, req.CancelReq)
+		case ReqQueryBalance:
+			resp = e.queryBalance(gateway.ClientID, req.QueryReq)
+		case ReqSubscribe:
+			resp = e.subscribe(gateway.ClientID, req.QueryReq, gateway)
+		case ReqUnsubscribe:
+			resp = e.unsubscribe(gateway.ClientID, req.QueryReq)
+		}
+		select {
+		case gateway.ResponseCh <- resp:
+		default:
+		}
+	}
+}
+
+func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	client := e.Clients[clientID]
+	if client == nil {
+		return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownClient}
+	}
+
+	book := e.Books[req.Symbol]
+	if book == nil {
+		return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownInstrument}
+	}
+
+	instrument := book.Instrument
+	if req.Type == LimitOrder && !instrument.ValidatePrice(req.Price) {
+		return Response{RequestID: req.RequestID, Success: false, Error: RejectInvalidPrice}
+	}
+	if !instrument.ValidateQty(req.Qty) {
+		return Response{RequestID: req.RequestID, Success: false, Error: RejectInvalidQty}
+	}
+
+	orderID := atomic.AddUint64(&e.NextOrderID, 1)
+	order := getOrder()
+	order.ID = orderID
+	order.ClientID = clientID
+	order.Side = req.Side
+	order.Type = req.Type
+	order.TimeInForce = req.TimeInForce
+	order.Price = req.Price
+	order.Qty = req.Qty
+	order.Visibility = req.Visibility
+	order.IcebergQty = req.IcebergQty
+	order.Status = Open
+	order.Timestamp = time.Now().UnixNano()
+
+	if req.Type == Market {
+		if req.Side == Buy {
+			if book.Asks.Best != nil {
+				maxCost := (req.Qty * book.Asks.Best.Price) / 100000000
+				if client.GetAvailable(instrument.QuoteAsset()) < maxCost {
+					putOrder(order)
+					return Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+				}
+			}
+		} else {
+			if client.GetAvailable(instrument.BaseAsset()) < req.Qty {
+				putOrder(order)
+				return Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+			}
+		}
+	} else if req.Type == LimitOrder {
+		asset := instrument.QuoteAsset()
+		amount := (req.Qty * req.Price) / 100000000
+		if req.Side == Buy {
+			if !client.Reserve(asset, amount) {
+				putOrder(order)
+				return Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+			}
+		} else {
+			asset = instrument.BaseAsset()
+			if !client.Reserve(asset, req.Qty) {
+				putOrder(order)
+				return Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+			}
+		}
+	}
+
+	executions := e.Matcher.Match(book.Bids, book.Asks, order)
+	e.processExecutions(book, executions, order)
+
+	for _, exec := range executions {
+		makerOrder := book.Bids.Orders[exec.MakerOrderID]
+		if makerOrder == nil {
+			makerOrder = book.Asks.Orders[exec.MakerOrderID]
+		}
+		if makerOrder != nil && makerOrder.Status == Filled {
+			if makerOrder.Side == Buy {
+				book.Bids.cancelOrder(exec.MakerOrderID)
+			} else {
+				book.Asks.cancelOrder(exec.MakerOrderID)
+			}
+			e.Clients[exec.MakerClientID].RemoveOrder(exec.MakerOrderID)
+			putOrder(makerOrder)
+		}
+	}
+
+	if order.Status != Filled && req.Type == LimitOrder {
+		if order.Side == Buy {
+			book.Bids.addOrder(order)
+		} else {
+			book.Asks.addOrder(order)
+		}
+		client.AddOrder(orderID)
+	} else {
+		if order.FilledQty < order.Qty {
+			if order.Side == Buy {
+				remainingNotional := ((order.Qty - order.FilledQty) * order.Price) / 100000000
+				client.Release(instrument.QuoteAsset(), remainingNotional)
+			} else {
+				client.Release(instrument.BaseAsset(), order.Qty-order.FilledQty)
+			}
+		}
+		putOrder(order)
+	}
+
+	return Response{RequestID: req.RequestID, Success: true, Data: orderID}
+}
+
+func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	client := e.Clients[clientID]
+	if client == nil {
+		return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownClient}
+	}
+
+	var order *Order
+	var book *OrderBook
+	for _, b := range e.Books {
+		if o := b.Bids.Orders[req.OrderID]; o != nil && o.ClientID == clientID {
+			order = o
+			book = b
+			break
+		}
+		if o := b.Asks.Orders[req.OrderID]; o != nil && o.ClientID == clientID {
+			order = o
+			book = b
+			break
+		}
+	}
+
+	if order == nil {
+		return Response{RequestID: req.RequestID, Success: false}
+	}
+
+	instrument := book.Instrument
+	remainingQty := order.Qty - order.FilledQty
+	if order.Side == Buy {
+		amount := (remainingQty * order.Price) / 100000000
+		client.Release(instrument.QuoteAsset(), amount)
+		book.Bids.cancelOrder(req.OrderID)
+	} else {
+		client.Release(instrument.BaseAsset(), remainingQty)
+		book.Asks.cancelOrder(req.OrderID)
+	}
+
+	client.RemoveOrder(req.OrderID)
+	order.Status = Cancelled
+	putOrder(order)
+
+	return Response{RequestID: req.RequestID, Success: true}
+}
+
+func (e *Exchange) queryBalance(clientID uint64, req *QueryRequest) Response {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	client := e.Clients[clientID]
+	if client == nil {
+		return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownClient}
+	}
+
+	snapshot := client.GetBalanceSnapshot(time.Now().UnixNano())
+	return Response{RequestID: req.RequestID, Success: true, Data: snapshot}
+}
+
+func (e *Exchange) subscribe(clientID uint64, req *QueryRequest, gateway *ClientGateway) Response {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	book := e.Books[req.Symbol]
+	if book == nil {
+		return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownInstrument}
+	}
+
+	types := []MDType{MDSnapshot, MDDelta, MDTrade}
+	e.MDPublisher.Subscribe(clientID, req.Symbol, types, gateway)
+
+	snapshot := &BookSnapshot{
+		Bids: book.Bids.getSnapshot(),
+		Asks: book.Asks.getSnapshot(),
+	}
+	e.MDPublisher.Publish(req.Symbol, MDSnapshot, snapshot, time.Now().UnixNano())
+
+	return Response{RequestID: req.RequestID, Success: true}
+}
+
+func (e *Exchange) unsubscribe(clientID uint64, req *QueryRequest) Response {
+	e.MDPublisher.Unsubscribe(clientID, req.Symbol)
+	return Response{RequestID: req.RequestID, Success: true}
+}
+
+func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order) {
+	instrument := book.Instrument
+	timestamp := time.Now().UnixNano()
+
+	for _, exec := range executions {
+		taker := e.Clients[exec.TakerClientID]
+		maker := e.Clients[exec.MakerClientID]
+
+		takerFee := taker.FeePlan.CalculateFee(exec, takerOrder.Side, false, instrument.BaseAsset(), instrument.QuoteAsset())
+		makerSide := Sell
+		if takerOrder.Side == Sell {
+			makerSide = Buy
+		}
+		makerFee := maker.FeePlan.CalculateFee(exec, makerSide, true, instrument.BaseAsset(), instrument.QuoteAsset())
+
+		notional := (exec.Price * exec.Qty) / 100000000
+
+		if takerOrder.Side == Buy {
+			taker.Release(instrument.QuoteAsset(), notional)
+			taker.Balances[instrument.QuoteAsset()] -= notional + takerFee.Amount
+			taker.Balances[instrument.BaseAsset()] += exec.Qty
+			maker.Release(instrument.BaseAsset(), exec.Qty)
+			maker.Balances[instrument.QuoteAsset()] += notional - makerFee.Amount
+			maker.Balances[instrument.BaseAsset()] -= exec.Qty
+		} else {
+			taker.Release(instrument.BaseAsset(), exec.Qty)
+			taker.Balances[instrument.BaseAsset()] -= exec.Qty
+			taker.Balances[instrument.QuoteAsset()] += notional - takerFee.Amount
+			maker.Release(instrument.QuoteAsset(), notional)
+			maker.Balances[instrument.BaseAsset()] += exec.Qty
+			maker.Balances[instrument.QuoteAsset()] -= notional + makerFee.Amount
+		}
+
+		taker.TakerVolume += notional
+		maker.MakerVolume += notional
+
+		if instrument.IsPerp() {
+			e.Positions.UpdatePosition(exec.TakerClientID, book.Symbol, exec.Qty, exec.Price, takerOrder.Side)
+			e.Positions.UpdatePosition(exec.MakerClientID, book.Symbol, exec.Qty, exec.Price, makerSide)
+		}
+
+		trade := &Trade{
+			TradeID:      book.SeqNum,
+			Price:        exec.Price,
+			Qty:          exec.Qty,
+			Side:         takerOrder.Side,
+			TakerOrderID: exec.TakerOrderID,
+			MakerOrderID: exec.MakerOrderID,
+		}
+		book.SeqNum++
+		book.LastTrade = trade
+
+		e.MDPublisher.PublishTrade(book.Symbol, trade, timestamp)
+	}
+}
+
+func (e *Exchange) Shutdown() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if !e.running {
+		return
+	}
+
+	close(e.shutdownCh)
+	for _, gateway := range e.Gateways {
+		gateway.Close()
+	}
+	e.running = false
+}
