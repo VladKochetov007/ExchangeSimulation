@@ -45,6 +45,9 @@ func (pm *PositionManager) UpdatePosition(clientID uint64, symbol string, qty in
 	if newSize == 0 {
 		pos.Size = 0
 		pos.EntryPrice = 0
+	} else if pos.Size == 0 {
+		pos.Size = newSize
+		pos.EntryPrice = price
 	} else if (pos.Size > 0 && newSize > pos.Size) || (pos.Size < 0 && newSize < pos.Size) {
 		totalNotional := (pos.Size * pos.EntryPrice) + (deltaSize * price)
 		pos.EntryPrice = totalNotional / newSize

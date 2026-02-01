@@ -276,3 +276,4 @@ nautilus_trader/
 *.db
 **/*.tmp
 uv.lock
+coverage.out
