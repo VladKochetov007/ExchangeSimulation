@@ -40,14 +40,19 @@ func (m *DefaultMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) []*
 		}
 
 		limit := book.Best
+		matched := false
 		for order := limit.Head; order != nil && incomingOrder.FilledQty < incomingOrder.Qty; {
 			next := order.Next
 			if m.shouldMatch(incomingOrder, order) {
 				exec := m.execute(incomingOrder, order)
 				executions = append(executions, exec)
+				matched = true
 
 				if order.FilledQty >= order.Qty {
 					order.Status = Filled
+					unlinkOrder(order)
+					delete(book.Orders, order.ID)
+					putOrder(order)
 				} else {
 					order.Status = PartialFill
 				}
@@ -57,6 +62,8 @@ func (m *DefaultMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) []*
 
 		if isEmpty(limit) {
 			book.removeLimit(limit)
+		} else if !matched {
+			break
 		}
 	}
 

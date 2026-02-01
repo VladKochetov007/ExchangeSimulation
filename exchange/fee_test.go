@@ -18,7 +18,8 @@ func TestPercentageFeeInQuote(t *testing.T) {
 	if takerFee.Asset != "USD" {
 		t.Errorf("Taker fee asset should be USD, got %s", takerFee.Asset)
 	}
-	expectedTakerFee := int64((50000 * SATOSHI * SATOSHI * 10) / (BPS * SATOSHI))
+	tradeValue := (exec.Price * exec.Qty) / SATOSHI
+	expectedTakerFee := (tradeValue * 10) / BPS
 	if takerFee.Amount != expectedTakerFee {
 		t.Errorf("Taker fee should be %d, got %d", expectedTakerFee, takerFee.Amount)
 	}
@@ -27,7 +28,7 @@ func TestPercentageFeeInQuote(t *testing.T) {
 	if makerFee.Asset != "USD" {
 		t.Errorf("Maker fee asset should be USD, got %s", makerFee.Asset)
 	}
-	expectedMakerFee := int64((50000 * SATOSHI * SATOSHI * 5) / (BPS * SATOSHI))
+	expectedMakerFee := (tradeValue * 5) / BPS
 	if makerFee.Amount != expectedMakerFee {
 		t.Errorf("Maker fee should be %d, got %d", expectedMakerFee, makerFee.Amount)
 	}

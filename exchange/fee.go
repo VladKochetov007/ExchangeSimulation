@@ -25,7 +25,8 @@ func (f *PercentageFee) CalculateFee(exec *Execution, side Side, isMaker bool, b
 	var asset string
 
 	if f.InQuote {
-		amount = (exec.Price * exec.Qty * bps) / (BPS * SATOSHI)
+		tradeValue := (exec.Price * exec.Qty) / SATOSHI
+		amount = (tradeValue * bps) / BPS
 		asset = quoteAsset
 	} else {
 		amount = (exec.Qty * bps) / BPS
