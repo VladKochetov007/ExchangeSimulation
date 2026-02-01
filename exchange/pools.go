@@ -53,6 +53,8 @@ func getExecution() *Execution {
 func putExecution(e *Execution) {
 	e.TakerOrderID = 0
 	e.MakerOrderID = 0
+	e.TakerClientID = 0
+	e.MakerClientID = 0
 	e.Price = 0
 	e.Qty = 0
 	e.Timestamp = 0

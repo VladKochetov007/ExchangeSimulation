@@ -11,12 +11,9 @@ type Book struct {
 
 func newBook(side Side) *Book {
 	return &Book{
-		Side:       side,
-		Best:       nil,
-		ActiveHead: nil,
-		ActiveTail: nil,
-		Orders:     make(map[uint64]*Order, 1024),
-		Limits:     make(map[int64]*Limit, 256),
+		Side:   side,
+		Orders: make(map[uint64]*Order, 1024),
+		Limits: make(map[int64]*Limit, 256),
 	}
 }
 

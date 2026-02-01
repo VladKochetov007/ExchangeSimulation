@@ -13,14 +13,11 @@ type Client struct {
 
 func NewClient(id uint64, feePlan FeeModel) *Client {
 	return &Client{
-		ID:          id,
-		Balances:    make(map[string]int64, 8),
-		Reserved:    make(map[string]int64, 8),
-		OrderIDs:    make([]uint64, 0, 16),
-		FeePlan:     feePlan,
-		VIPLevel:    0,
-		MakerVolume: 0,
-		TakerVolume: 0,
+		ID:       id,
+		Balances: make(map[string]int64, 8),
+		Reserved: make(map[string]int64, 8),
+		OrderIDs: make([]uint64, 0, 16),
+		FeePlan:  feePlan,
 	}
 }
 
@@ -58,9 +55,6 @@ func (c *Client) Reserve(asset string, amount int64) bool {
 
 func (c *Client) Release(asset string, amount int64) {
 	c.Reserved[asset] -= amount
-	if c.Reserved[asset] < 0 {
-		c.Reserved[asset] = 0
-	}
 }
 
 func (c *Client) AddOrder(orderID uint64) {
