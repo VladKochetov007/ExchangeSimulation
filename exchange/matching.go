@@ -108,10 +108,3 @@ func (m *DefaultMatcher) execute(taker, maker *Order) *Execution {
 	exec.Timestamp = m.clock.NowUnixNano()
 	return exec
 }
-
-func min(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
-}
