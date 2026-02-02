@@ -142,7 +142,7 @@ func TestSimpleFundingCalcZeroIndex(t *testing.T) {
 }
 
 func TestPositionManagerGetPosition(t *testing.T) {
-	pm := NewPositionManager()
+	pm := NewPositionManager(&RealClock{})
 
 	pos := pm.GetPosition(1, "BTC-PERP")
 	if pos != nil {
@@ -161,7 +161,7 @@ func TestPositionManagerGetPosition(t *testing.T) {
 }
 
 func TestPositionManagerUpdatePositionNewLong(t *testing.T) {
-	pm := NewPositionManager()
+	pm := NewPositionManager(&RealClock{})
 
 	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*SATOSHI, Buy)
 
@@ -175,7 +175,7 @@ func TestPositionManagerUpdatePositionNewLong(t *testing.T) {
 }
 
 func TestPositionManagerUpdatePositionNewShort(t *testing.T) {
-	pm := NewPositionManager()
+	pm := NewPositionManager(&RealClock{})
 
 	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*SATOSHI, Sell)
 
@@ -189,7 +189,7 @@ func TestPositionManagerUpdatePositionNewShort(t *testing.T) {
 }
 
 func TestPositionManagerUpdatePositionIncreaseLong(t *testing.T) {
-	pm := NewPositionManager()
+	pm := NewPositionManager(&RealClock{})
 
 	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*SATOSHI, Buy)
 	pm.UpdatePosition(1, "BTC-PERP", 100, 51000*SATOSHI, Buy)
@@ -206,7 +206,7 @@ func TestPositionManagerUpdatePositionIncreaseLong(t *testing.T) {
 }
 
 func TestPositionManagerUpdatePositionClosePosition(t *testing.T) {
-	pm := NewPositionManager()
+	pm := NewPositionManager(&RealClock{})
 
 	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*SATOSHI, Buy)
 	pm.UpdatePosition(1, "BTC-PERP", 100, 51000*SATOSHI, Sell)
@@ -221,7 +221,7 @@ func TestPositionManagerUpdatePositionClosePosition(t *testing.T) {
 }
 
 func TestPositionManagerUpdatePositionFlipLongToShort(t *testing.T) {
-	pm := NewPositionManager()
+	pm := NewPositionManager(&RealClock{})
 
 	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*SATOSHI, Buy)
 	pm.UpdatePosition(1, "BTC-PERP", 150, 51000*SATOSHI, Sell)
@@ -236,7 +236,7 @@ func TestPositionManagerUpdatePositionFlipLongToShort(t *testing.T) {
 }
 
 func TestPositionManagerSettleFundingLongPosition(t *testing.T) {
-	pm := NewPositionManager()
+	pm := NewPositionManager(&RealClock{})
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", 1, 100)
 
 	clients := make(map[uint64]*Client)
@@ -259,7 +259,7 @@ func TestPositionManagerSettleFundingLongPosition(t *testing.T) {
 }
 
 func TestPositionManagerSettleFundingShortPosition(t *testing.T) {
-	pm := NewPositionManager()
+	pm := NewPositionManager(&RealClock{})
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", 1, 100)
 
 	clients := make(map[uint64]*Client)
@@ -282,7 +282,7 @@ func TestPositionManagerSettleFundingShortPosition(t *testing.T) {
 }
 
 func TestPositionManagerSettleFundingNoPosition(t *testing.T) {
-	pm := NewPositionManager()
+	pm := NewPositionManager(&RealClock{})
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", 1, 100)
 
 	clients := make(map[uint64]*Client)

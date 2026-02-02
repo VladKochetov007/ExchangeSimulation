@@ -6,7 +6,7 @@ import (
 )
 
 func TestClientNotificationsOnPlaceOrder(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -47,7 +47,7 @@ func TestClientNotificationsOnPlaceOrder(t *testing.T) {
 }
 
 func TestClientNotificationsOnFill(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -118,7 +118,7 @@ func TestClientNotificationsOnFill(t *testing.T) {
 }
 
 func TestClientNotificationsViaMarketData(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -198,7 +198,7 @@ func TestClientNotificationsViaMarketData(t *testing.T) {
 }
 
 func TestClientNotificationsOnPartialFill(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -261,7 +261,7 @@ func TestClientNotificationsOnPartialFill(t *testing.T) {
 }
 
 func TestClientNotificationsOnReject(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 

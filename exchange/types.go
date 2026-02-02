@@ -50,6 +50,9 @@ const (
 	RejectUnknownInstrument
 	RejectSelfTrade
 	RejectDuplicateOrderID
+	RejectOrderNotFound
+	RejectOrderNotOwned
+	RejectOrderAlreadyFilled
 )
 
 type Order struct {

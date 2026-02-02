@@ -1,14 +1,14 @@
 package exchange
 
-import "time"
-
 type PositionManager struct {
 	positions map[uint64]map[string]*Position
+	clock     Clock
 }
 
-func NewPositionManager() *PositionManager {
+func NewPositionManager(clock Clock) *PositionManager {
 	return &PositionManager{
 		positions: make(map[uint64]map[string]*Position),
+		clock:     clock,
 	}
 }
 
@@ -83,7 +83,7 @@ func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpF
 		}
 	}
 
-	fundingRate.NextFunding = time.Now().Unix() + fundingRate.Interval
+	fundingRate.NextFunding = pm.clock.NowUnixNano() + (fundingRate.Interval * 1e9)
 }
 
 func abs(x int64) int64 {

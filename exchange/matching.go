@@ -1,7 +1,5 @@
 package exchange
 
-import "time"
-
 type MatchingEngine interface {
 	Match(bidBook, askBook *Book, incomingOrder *Order) []*Execution
 	Priority() Priority
@@ -9,6 +7,7 @@ type MatchingEngine interface {
 
 type DefaultMatcher struct {
 	priority Priority
+	clock    Clock
 }
 
 func NewDefaultMatcher() *DefaultMatcher {
@@ -18,6 +17,7 @@ func NewDefaultMatcher() *DefaultMatcher {
 			Secondary: PriorityVisibility,
 			Tertiary:  PriorityTime,
 		},
+		clock: &RealClock{},
 	}
 }
 
@@ -105,7 +105,7 @@ func (m *DefaultMatcher) execute(taker, maker *Order) *Execution {
 	exec.MakerClientID = maker.ClientID
 	exec.Price = maker.Price
 	exec.Qty = execQty
-	exec.Timestamp = time.Now().UnixNano()
+	exec.Timestamp = m.clock.NowUnixNano()
 	return exec
 }
 

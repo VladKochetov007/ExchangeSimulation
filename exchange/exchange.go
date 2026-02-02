@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+type Clock interface {
+	NowUnixNano() int64
+	NowUnix() int64
+}
+
 type Exchange struct {
 	Clients       map[uint64]*Client
 	Gateways      map[uint64]*ClientGateway
@@ -15,6 +20,7 @@ type Exchange struct {
 	NextOrderID   uint64
 	Matcher       MatchingEngine
 	MDPublisher   *MDPublisher
+	Clock         Clock
 	mu            sync.RWMutex
 	running       bool
 	shutdownCh    chan struct{}
@@ -29,16 +35,27 @@ type OrderBook struct {
 	SeqNum     uint64
 }
 
-func NewExchange(estimatedClients int) *Exchange {
+type RealClock struct{}
+
+func (c *RealClock) NowUnixNano() int64 { return time.Now().UnixNano() }
+func (c *RealClock) NowUnix() int64     { return time.Now().Unix() }
+
+func NewExchange(estimatedClients int, clock Clock) *Exchange {
+	if clock == nil {
+		clock = &RealClock{}
+	}
+	matcher := NewDefaultMatcher()
+	matcher.clock = clock
 	return &Exchange{
 		Clients:     make(map[uint64]*Client, estimatedClients),
 		Gateways:    make(map[uint64]*ClientGateway, estimatedClients),
 		Books:       make(map[string]*OrderBook, 16),
 		Instruments: make(map[string]Instrument, 16),
-		Positions:   NewPositionManager(),
+		Positions:   NewPositionManager(clock),
 		NextOrderID: 1,
-		Matcher:     NewDefaultMatcher(),
+		Matcher:     matcher,
 		MDPublisher: NewMDPublisher(),
+		Clock:       clock,
 		running:     false,
 		shutdownCh:  make(chan struct{}),
 	}
@@ -144,7 +161,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	order.Visibility = req.Visibility
 	order.IcebergQty = req.IcebergQty
 	order.Status = Open
-	order.Timestamp = time.Now().UnixNano()
+	order.Timestamp = e.Clock.NowUnixNano()
 
 	if req.Type == Market {
 		if req.Side == Buy {
@@ -231,12 +248,12 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 	var order *Order
 	var book *OrderBook
 	for _, b := range e.Books {
-		if o := b.Bids.Orders[req.OrderID]; o != nil && o.ClientID == clientID {
+		if o := b.Bids.Orders[req.OrderID]; o != nil {
 			order = o
 			book = b
 			break
 		}
-		if o := b.Asks.Orders[req.OrderID]; o != nil && o.ClientID == clientID {
+		if o := b.Asks.Orders[req.OrderID]; o != nil {
 			order = o
 			book = b
 			break
@@ -244,7 +261,13 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 	}
 
 	if order == nil {
-		return Response{RequestID: req.RequestID, Success: false}
+		return Response{RequestID: req.RequestID, Success: false, Error: RejectOrderNotFound}
+	}
+	if order.ClientID != clientID {
+		return Response{RequestID: req.RequestID, Success: false, Error: RejectOrderNotOwned}
+	}
+	if order.Status == Filled {
+		return Response{RequestID: req.RequestID, Success: false, Error: RejectOrderAlreadyFilled}
 	}
 
 	instrument := book.Instrument
@@ -262,7 +285,7 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 	order.Status = Cancelled
 	putOrder(order)
 
-	return Response{RequestID: req.RequestID, Success: true}
+	return Response{RequestID: req.RequestID, Success: true, Data: remainingQty}
 }
 
 func (e *Exchange) queryBalance(clientID uint64, req *QueryRequest) Response {
@@ -274,7 +297,7 @@ func (e *Exchange) queryBalance(clientID uint64, req *QueryRequest) Response {
 		return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownClient}
 	}
 
-	snapshot := client.GetBalanceSnapshot(time.Now().UnixNano())
+	snapshot := client.GetBalanceSnapshot(e.Clock.NowUnixNano())
 	return Response{RequestID: req.RequestID, Success: true, Data: snapshot}
 }
 
@@ -294,7 +317,7 @@ func (e *Exchange) subscribe(clientID uint64, req *QueryRequest, gateway *Client
 		Bids: book.Bids.getSnapshot(),
 		Asks: book.Asks.getSnapshot(),
 	}
-	e.MDPublisher.Publish(req.Symbol, MDSnapshot, snapshot, time.Now().UnixNano())
+	e.MDPublisher.Publish(req.Symbol, MDSnapshot, snapshot, e.Clock.NowUnixNano())
 
 	return Response{RequestID: req.RequestID, Success: true}
 }
@@ -306,7 +329,7 @@ func (e *Exchange) unsubscribe(clientID uint64, req *QueryRequest) Response {
 
 func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order) {
 	instrument := book.Instrument
-	timestamp := time.Now().UnixNano()
+	timestamp := e.Clock.NowUnixNano()
 
 	for _, exec := range executions {
 		taker := e.Clients[exec.TakerClientID]
@@ -358,6 +381,39 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 
 		e.MDPublisher.PublishTrade(book.Symbol, trade, timestamp)
 	}
+}
+
+type InstrumentInfo struct {
+	Symbol    string
+	BaseAsset string
+	QuoteAsset string
+	TickSize  int64
+	MinSize   int64
+	IsPerp    bool
+}
+
+func (e *Exchange) ListInstruments(baseFilter, quoteFilter string) []InstrumentInfo {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	result := make([]InstrumentInfo, 0, len(e.Instruments))
+	for _, inst := range e.Instruments {
+		if baseFilter != "" && inst.BaseAsset() != baseFilter {
+			continue
+		}
+		if quoteFilter != "" && inst.QuoteAsset() != quoteFilter {
+			continue
+		}
+		result = append(result, InstrumentInfo{
+			Symbol:     inst.Symbol(),
+			BaseAsset:  inst.BaseAsset(),
+			QuoteAsset: inst.QuoteAsset(),
+			TickSize:   inst.TickSize(),
+			MinSize:    inst.MinOrderSize(),
+			IsPerp:     inst.IsPerp(),
+		})
+	}
+	return result
 }
 
 func (e *Exchange) Shutdown() {

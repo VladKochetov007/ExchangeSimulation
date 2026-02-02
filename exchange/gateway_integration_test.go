@@ -6,7 +6,7 @@ import (
 )
 
 func TestHandleClientRequestsCancelOrder(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -56,7 +56,7 @@ func TestHandleClientRequestsCancelOrder(t *testing.T) {
 }
 
 func TestHandleClientRequestsSubscribeUnsubscribe(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -99,7 +99,7 @@ func TestHandleClientRequestsSubscribeUnsubscribe(t *testing.T) {
 }
 
 func TestHandleClientRequestsFullChannelSkipsResponse(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -132,7 +132,7 @@ func TestHandleClientRequestsFullChannelSkipsResponse(t *testing.T) {
 }
 
 func TestPlaceOrderSellReservesBase(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -162,7 +162,7 @@ func TestPlaceOrderSellReservesBase(t *testing.T) {
 }
 
 func TestPlaceOrderMarketSellNoAskBook(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -185,7 +185,7 @@ func TestPlaceOrderMarketSellNoAskBook(t *testing.T) {
 }
 
 func TestProcessExecutionsTakerSell(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -231,7 +231,7 @@ func TestProcessExecutionsTakerSell(t *testing.T) {
 }
 
 func TestCancelOrderSellSide(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 

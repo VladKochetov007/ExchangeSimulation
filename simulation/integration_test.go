@@ -1,0 +1,67 @@
+package simulation
+
+import (
+	"context"
+	"os"
+	"testing"
+	"time"
+
+	"exchange_sim/actor"
+	"exchange_sim/exchange"
+)
+
+func TestSimulationIntegration(t *testing.T) {
+	os.MkdirAll("testdata", 0755)
+	defer os.RemoveAll("testdata")
+
+	config := RunnerConfig{
+		UseSimulatedClock: true,
+		Duration:          0,
+		Iterations:        100,
+	}
+	runner := NewRunner(config)
+	ex := runner.Exchange()
+
+	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000)
+	ex.AddInstrument(btcusd)
+
+	balances := map[string]int64{
+		"BTC": 10000000000,
+		"USD": 1000000000000,
+	}
+	feePlan := &exchange.PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true}
+
+	gateway := ex.ConnectClient(1, balances, feePlan)
+	mm := actor.NewMarketMaker(1, gateway, actor.MarketMakerConfig{
+		Symbol:        "BTCUSD",
+		SpreadBps:     20,
+		QuoteQty:      100000000,
+		RefreshOnFill: false,
+	})
+	runner.AddActor(mm)
+
+	recorderGateway := ex.ConnectClient(999, balances, feePlan)
+	recorder, err := actor.NewRecorder(999, recorderGateway, actor.RecorderConfig{
+		Symbols:       []string{"BTCUSD"},
+		TradesPath:    "testdata/trades.csv",
+		SnapshotsPath: "testdata/snapshots.csv",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.AddActor(recorder)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := runner.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat("testdata/trades.csv"); os.IsNotExist(err) {
+		t.Error("trades.csv not created")
+	}
+	if _, err := os.Stat("testdata/snapshots.csv"); os.IsNotExist(err) {
+		t.Error("snapshots.csv not created")
+	}
+}

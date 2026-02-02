@@ -6,7 +6,7 @@ import (
 )
 
 func TestExchangeCancelOrder(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -53,7 +53,7 @@ func TestExchangeCancelOrder(t *testing.T) {
 }
 
 func TestCancelOrderUnknownClient(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	cancelReq := &CancelRequest{RequestID: 1, OrderID: 999}
 	resp := ex.cancelOrder(999, cancelReq)
 	if resp.Success {
@@ -65,7 +65,7 @@ func TestCancelOrderUnknownClient(t *testing.T) {
 }
 
 func TestCancelOrderNotFound(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	balances := map[string]int64{"BTC": 10 * SATOSHI}
 	ex.ConnectClient(1, balances, &FixedFee{})
 
@@ -77,7 +77,7 @@ func TestCancelOrderNotFound(t *testing.T) {
 }
 
 func TestQueryBalance(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	balances := map[string]int64{
 		"BTC": 5 * SATOSHI,
 		"USD": 10000 * SATOSHI,
@@ -123,7 +123,7 @@ func TestQueryBalance(t *testing.T) {
 }
 
 func TestQueryBalanceUnknownClient(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	req := &QueryRequest{RequestID: 1}
 	resp := ex.queryBalance(999, req)
 	if resp.Success {
@@ -135,7 +135,7 @@ func TestQueryBalanceUnknownClient(t *testing.T) {
 }
 
 func TestSubscribeUnsubscribe(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -172,7 +172,7 @@ func TestSubscribeUnsubscribe(t *testing.T) {
 }
 
 func TestSubscribeUnknownInstrument(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	balances := map[string]int64{"BTC": 10 * SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &FixedFee{})
 
@@ -192,7 +192,7 @@ func TestSubscribeUnknownInstrument(t *testing.T) {
 }
 
 func TestHandleClientRequestsIntegration(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -271,7 +271,7 @@ func TestClientRemoveOrder(t *testing.T) {
 }
 
 func TestShutdown(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	balances := map[string]int64{"BTC": 10 * SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &FixedFee{})
 

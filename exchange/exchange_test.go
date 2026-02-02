@@ -3,7 +3,7 @@ package exchange
 import "testing"
 
 func TestNewExchange(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	if ex == nil {
 		t.Fatal("Exchange should not be nil")
 	}
@@ -13,7 +13,7 @@ func TestNewExchange(t *testing.T) {
 }
 
 func TestAddInstrument(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 100, 1000)
 	ex.AddInstrument(instrument)
 
@@ -26,7 +26,7 @@ func TestAddInstrument(t *testing.T) {
 }
 
 func TestConnectClient(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 100, 1000)
 	ex.AddInstrument(instrument)
 
@@ -48,7 +48,7 @@ func TestConnectClient(t *testing.T) {
 }
 
 func TestPlaceOrderDirect(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 100, 1000)
 	ex.AddInstrument(instrument)
 
@@ -80,7 +80,7 @@ func TestPlaceOrderDirect(t *testing.T) {
 }
 
 func TestMatchingAndSettlement(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 100, 1000)
 	ex.AddInstrument(instrument)
 

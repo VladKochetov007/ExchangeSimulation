@@ -3,7 +3,7 @@ package exchange
 import "testing"
 
 func TestInsufficientLiquidityLimitOrder(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -60,7 +60,7 @@ func TestInsufficientLiquidityLimitOrder(t *testing.T) {
 }
 
 func TestInsufficientLiquidityMarketOrder(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -111,7 +111,7 @@ func TestInsufficientLiquidityMarketOrder(t *testing.T) {
 }
 
 func TestFOKOrderNotImplemented(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -150,7 +150,7 @@ func TestFOKOrderNotImplemented(t *testing.T) {
 }
 
 func TestEmptyBookMarketOrder(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -179,7 +179,7 @@ func TestEmptyBookMarketOrder(t *testing.T) {
 }
 
 func TestPartialFillReleasesCorrectAmount(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 

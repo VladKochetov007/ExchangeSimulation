@@ -56,7 +56,7 @@ func TestCanMatchSellSide(t *testing.T) {
 }
 
 func TestPlaceOrderInvalidPrice(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 100, 1)
 	ex.AddInstrument(instrument)
 
@@ -83,7 +83,7 @@ func TestPlaceOrderInvalidPrice(t *testing.T) {
 }
 
 func TestPlaceOrderInvalidQty(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 100)
 	ex.AddInstrument(instrument)
 
@@ -110,7 +110,7 @@ func TestPlaceOrderInvalidQty(t *testing.T) {
 }
 
 func TestPlaceOrderUnknownInstrument(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	balances := map[string]int64{"BTC": 10 * SATOSHI}
 	ex.ConnectClient(1, balances, &FixedFee{})
 
@@ -134,7 +134,7 @@ func TestPlaceOrderUnknownInstrument(t *testing.T) {
 }
 
 func TestPlaceOrderInsufficientBalanceBuy(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -161,7 +161,7 @@ func TestPlaceOrderInsufficientBalanceBuy(t *testing.T) {
 }
 
 func TestPlaceOrderInsufficientBalanceSell(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -188,7 +188,7 @@ func TestPlaceOrderInsufficientBalanceSell(t *testing.T) {
 }
 
 func TestPlaceOrderMarketBuyInsufficientBalance(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -223,7 +223,7 @@ func TestPlaceOrderMarketBuyInsufficientBalance(t *testing.T) {
 }
 
 func TestCancelOrderDifferentClient(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
 	ex.AddInstrument(instrument)
 
@@ -310,7 +310,7 @@ func TestBookRemoveLimitUpdatesBest(t *testing.T) {
 }
 
 func TestDisconnectClient(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	balances := map[string]int64{"BTC": 10 * SATOSHI}
 	ex.ConnectClient(1, balances, &FixedFee{})
 
@@ -326,7 +326,7 @@ func TestDisconnectClient(t *testing.T) {
 }
 
 func TestShutdownStopsExchange(t *testing.T) {
-	ex := NewExchange(10)
+	ex := NewExchange(10, &RealClock{})
 	ex.running = true
 
 	ex.Shutdown()
@@ -337,7 +337,7 @@ func TestShutdownStopsExchange(t *testing.T) {
 }
 
 func TestSettleFundingWithMissingClient(t *testing.T) {
-	pm := NewPositionManager()
+	pm := NewPositionManager(&RealClock{})
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", 1, 100)
 
 	clients := make(map[uint64]*Client)
