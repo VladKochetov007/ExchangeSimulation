@@ -35,12 +35,18 @@
 ## Test Coverage
 
 ```
-Package         Coverage    Status
----------------------------------------
-exchange        96.5%       ✅ Excellent
-simulation      81.8%       ✅ Very Good
-actor           47.3%       ✅ Good (framework code)
+Package         Before      After       Improvement
+-----------------------------------------------------
+exchange        96.5%       96.4%       Stable ✅
+simulation      81.8%       95.5%       +13.7% ✅
+actor           47.3%       98.6%       +51.3% ✅
+-----------------------------------------------------
+Overall         ~80%        ~97%        +17% ✅
 ```
+
+**Tests added:** 53 new tests across 7 test files
+**Execution time:** ~1.5s for full suite
+**All tests passing:** ✅
 
 ## File Count
 
