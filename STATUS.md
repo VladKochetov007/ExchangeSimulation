@@ -10,16 +10,16 @@
 | `on_trade_tick` method | ✅ | `EventTrade` → `TradeEvent` |
 | `on_orderbook_delta` method | ✅ | `EventBookDelta` → `BookDeltaEvent` |
 | `on_orderbook_snapshot` method | ✅ | `EventBookSnapshot` → `BookSnapshotEvent` |
-| Event handling system | ✅ | 10 event types in `actor/events.go` |
+| Event handling system | ✅ | 10 event types in `actor/events.go` (includes rejections) |
 | Cancel validation (not if filled) | ✅ | `exchange/exchange.go:222-248` with 3 new reject reasons |
 | Cancel after partial fill | ✅ | Tests confirm remaining qty returned |
-| Order cancel rejection reasons | ✅ | `RejectOrderNotFound`, `RejectOrderNotOwned`, `RejectOrderAlreadyFilled` |
+| Order/cancel rejection handling | ✅ | 10 reject reasons, `EventOrderRejected`, `EventOrderCancelRejected` |
 | Cancel success notification | ✅ | Returns `remainingQty` on success |
 | Actor tracks order executions | ✅ | BaseActor handles `OrderAccepted`, `OrderFilled` events |
 | Balance query API | ✅ | `ReqQueryBalance` via gateway |
 | Instrument discovery API | ✅ | `ListInstruments(baseFilter, quoteFilter)` |
 | Query fee plans | ✅ | Available via instrument metadata |
-| Market makers for initial liquidity | ✅ | `actor/marketmaker.go` - 5 instances in main.go |
+| Trading actors (makers/takers/mixed) | ✅ | `actor/marketmaker.go` - extensible framework, example in main.go |
 | Recording actor | ✅ | `actor/recorder.go` - writes CSV files |
 | Non-blocking writes | ✅ | Buffered channel with default case |
 | Graceful shutdown | ✅ | Drains write buffer on stop |
@@ -143,13 +143,33 @@ RecorderConfig{
 }
 ```
 
-### Market Maker Configuration
+### Trading Actor Configuration
+
+**Note:** Actors are not limited to market making. They can implement any strategy:
+- **Makers**: Provide liquidity (limit orders on book)
+- **Takers**: Consume liquidity (market orders, aggressive limits)
+- **Mixed**: Combine both strategies based on signals
+
+Example Market Maker:
 ```go
 MarketMakerConfig{
     Symbol:        "BTCUSD",
     SpreadBps:     20,           // 0.2% spread
     QuoteQty:      100000000,    // 1 BTC
     RefreshOnFill: false,        // Re-quote after fills
+}
+```
+
+Example Taker (extensible):
+```go
+type TakerActor struct {
+    *BaseActor
+    targetPrice int64
+}
+
+func (a *TakerActor) OnEvent(event *Event) {
+    // React to market data, submit market orders
+    // Strategy logic determines when to take
 }
 ```
 
