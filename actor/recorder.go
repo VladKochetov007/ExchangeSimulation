@@ -35,7 +35,7 @@ type snapshotRecord struct {
 type RecorderActor struct {
 	*BaseActor
 	config     RecorderConfig
-	writeCh    chan interface{}
+	writeCh    chan any
 	tradesFile *os.File
 	snapsFile  *os.File
 	tradesBuf  *bufio.Writer
@@ -61,7 +61,7 @@ func NewRecorder(id uint64, gateway *exchange.ClientGateway, config RecorderConf
 	r := &RecorderActor{
 		BaseActor:  NewBaseActor(id, gateway),
 		config:     config,
-		writeCh:    make(chan interface{}, 10000),
+		writeCh:    make(chan any, 10000),
 		tradesFile: tradesFile,
 		snapsFile:  snapsFile,
 		tradesBuf:  bufio.NewWriter(tradesFile),
@@ -173,7 +173,7 @@ func (r *RecorderActor) drainWriteBuffer() {
 	}
 }
 
-func (r *RecorderActor) writeRecord(rec interface{}) {
+func (r *RecorderActor) writeRecord(rec any) {
 	switch v := rec.(type) {
 	case tradeRecord:
 		side := "buy"

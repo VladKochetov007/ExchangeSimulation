@@ -160,7 +160,7 @@ const (
 type Response struct {
     RequestID uint64
     Success   bool
-    Data      interface{}  // OrderAck, BalanceSnapshot, etc.
+    Data      any  // OrderAck, BalanceSnapshot, etc.
     Error     RejectReason
 }
 
@@ -231,7 +231,7 @@ type MarketDataMsg struct {
     Symbol    string
     SeqNum    uint64
     Timestamp int64
-    Data      interface{}  // Snapshot, Delta, or Trade
+    Data      any  // Snapshot, Delta, or Trade
 }
 
 type MDType uint8
@@ -685,13 +685,13 @@ For perp instruments only:
 
 ```go
 var orderPool = sync.Pool{
-    New: func() interface{} {
+    New: func() any {
         return &Order{}
     },
 }
 
 var limitPool = sync.Pool{
-    New: func() interface{} {
+    New: func() any {
         return &Limit{}
     },
 }

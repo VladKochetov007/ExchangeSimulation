@@ -115,7 +115,7 @@ type Request struct {
 type Response struct {
 	RequestID uint64
 	Success   bool
-	Data      interface{}
+	Data      any
 	Error     RejectReason
 }
 
@@ -168,7 +168,7 @@ type MarketDataMsg struct {
 	Symbol    string
 	SeqNum    uint64
 	Timestamp int64
-	Data      interface{}
+	Data      any
 }
 
 type BookSnapshot struct {
@@ -203,13 +203,13 @@ type Subscription struct {
 }
 
 type Execution struct {
-	TakerOrderID uint64
-	MakerOrderID uint64
+	TakerOrderID  uint64
+	MakerOrderID  uint64
 	TakerClientID uint64
 	MakerClientID uint64
-	Price        int64
-	Qty          int64
-	Timestamp    int64
+	Price         int64
+	Qty           int64
+	Timestamp     int64
 }
 
 type Fee struct {

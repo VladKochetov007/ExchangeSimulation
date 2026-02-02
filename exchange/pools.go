@@ -3,25 +3,25 @@ package exchange
 import "sync"
 
 var orderPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &Order{}
 	},
 }
 
 var limitPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &Limit{}
 	},
 }
 
 var executionPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &Execution{}
 	},
 }
 
 var mdMsgPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &MarketDataMsg{}
 	},
 }

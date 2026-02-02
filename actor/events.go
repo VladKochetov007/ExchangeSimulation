@@ -19,7 +19,7 @@ const (
 
 type Event struct {
 	Type EventType
-	Data interface{}
+	Data any
 }
 
 type OrderAcceptedEvent struct {

@@ -47,7 +47,7 @@ func (p *MDPublisher) Unsubscribe(clientID uint64, symbol string) {
 	}
 }
 
-func (p *MDPublisher) Publish(symbol string, mdType MDType, data interface{}, timestamp int64) {
+func (p *MDPublisher) Publish(symbol string, mdType MDType, data any, timestamp int64) {
 	p.mu.RLock()
 	subs := p.subscriptions[symbol]
 	if len(subs) == 0 {
