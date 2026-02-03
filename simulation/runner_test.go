@@ -64,10 +64,10 @@ func TestRunnerAddActor(t *testing.T) {
 	runner := NewRunner(config)
 	gateway := runner.Exchange().ConnectClient(1, map[string]int64{"USD": 1000000}, &exchange.PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
 
-	mm := actor.NewMarketMaker(1, gateway, actor.MarketMakerConfig{
-		Symbol:   "BTCUSD",
-		SpreadBps: 20,
-		QuoteQty: 100000000,
+	mm := actor.NewFirstLP(1, gateway, actor.FirstLPConfig{
+		Symbol:            "BTCUSD",
+		SpreadBps:         20,
+		LiquidityMultiple: 10,
 	})
 
 	runner.AddActor(mm)
@@ -186,20 +186,18 @@ func TestRunnerRunWithActors(t *testing.T) {
 	feePlan := &exchange.PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true}
 
 	gateway1 := ex.ConnectClient(1, balances, feePlan)
-	mm1 := actor.NewMarketMaker(1, gateway1, actor.MarketMakerConfig{
-		Symbol:        "BTCUSD",
-		SpreadBps:     20,
-		QuoteQty:      100000000,
-		RefreshOnFill: false,
+	mm1 := actor.NewFirstLP(1, gateway1, actor.FirstLPConfig{
+		Symbol:            "BTCUSD",
+		SpreadBps:         20,
+		LiquidityMultiple: 10,
 	})
 	runner.AddActor(mm1)
 
 	gateway2 := ex.ConnectClient(2, balances, feePlan)
-	mm2 := actor.NewMarketMaker(2, gateway2, actor.MarketMakerConfig{
-		Symbol:        "BTCUSD",
-		SpreadBps:     30,
-		QuoteQty:      100000000,
-		RefreshOnFill: false,
+	mm2 := actor.NewFirstLP(2, gateway2, actor.FirstLPConfig{
+		Symbol:            "BTCUSD",
+		SpreadBps:         30,
+		LiquidityMultiple: 10,
 	})
 	runner.AddActor(mm2)
 

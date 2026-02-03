@@ -5,9 +5,10 @@ import (
 	"time"
 )
 
+
 func TestExchangeCancelOrder(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
@@ -136,7 +137,7 @@ func TestQueryBalanceUnknownClient(t *testing.T) {
 
 func TestSubscribeUnsubscribe(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": 10 * SATOSHI}
@@ -193,7 +194,7 @@ func TestSubscribeUnknownInstrument(t *testing.T) {
 
 func TestHandleClientRequestsIntegration(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{

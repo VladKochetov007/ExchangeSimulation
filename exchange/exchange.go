@@ -142,6 +142,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	}
 
 	instrument := book.Instrument
+	precision := instrument.TickSize()
 	if req.Type == LimitOrder && !instrument.ValidatePrice(req.Price) {
 		return Response{RequestID: req.RequestID, Success: false, Error: RejectInvalidPrice}
 	}
@@ -166,7 +167,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	if req.Type == Market {
 		if req.Side == Buy {
 			if book.Asks.Best != nil {
-				maxCost := (req.Qty * book.Asks.Best.Price) / 100000000
+				maxCost := (req.Qty * book.Asks.Best.Price) / precision
 				if client.GetAvailable(instrument.QuoteAsset()) < maxCost {
 					putOrder(order)
 					return Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
@@ -180,7 +181,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 		}
 	} else if req.Type == LimitOrder {
 		asset := instrument.QuoteAsset()
-		amount := (req.Qty * req.Price) / 100000000
+		amount := (req.Qty * req.Price) / precision
 		if req.Side == Buy {
 			if !client.Reserve(asset, amount) {
 				putOrder(order)
@@ -224,7 +225,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	} else {
 		if order.FilledQty < order.Qty {
 			if order.Side == Buy {
-				remainingNotional := ((order.Qty - order.FilledQty) * order.Price) / 100000000
+				remainingNotional := ((order.Qty - order.FilledQty) * order.Price) / precision
 				client.Release(instrument.QuoteAsset(), remainingNotional)
 			} else {
 				client.Release(instrument.BaseAsset(), order.Qty-order.FilledQty)
@@ -271,9 +272,10 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 	}
 
 	instrument := book.Instrument
+	precision := instrument.TickSize()
 	remainingQty := order.Qty - order.FilledQty
 	if order.Side == Buy {
-		amount := (remainingQty * order.Price) / 100000000
+		amount := (remainingQty * order.Price) / precision
 		client.Release(instrument.QuoteAsset(), amount)
 		book.Bids.cancelOrder(req.OrderID)
 	} else {
@@ -330,19 +332,21 @@ func (e *Exchange) unsubscribe(clientID uint64, req *QueryRequest) Response {
 func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order) {
 	instrument := book.Instrument
 	timestamp := e.Clock.NowUnixNano()
+	precision := instrument.TickSize()
+	positionChanged := false
 
 	for _, exec := range executions {
 		taker := e.Clients[exec.TakerClientID]
 		maker := e.Clients[exec.MakerClientID]
 
-		takerFee := taker.FeePlan.CalculateFee(exec, takerOrder.Side, false, instrument.BaseAsset(), instrument.QuoteAsset())
+		takerFee := taker.FeePlan.CalculateFee(exec, takerOrder.Side, false, instrument.BaseAsset(), instrument.QuoteAsset(), precision)
 		makerSide := Sell
 		if takerOrder.Side == Sell {
 			makerSide = Buy
 		}
-		makerFee := maker.FeePlan.CalculateFee(exec, makerSide, true, instrument.BaseAsset(), instrument.QuoteAsset())
+		makerFee := maker.FeePlan.CalculateFee(exec, makerSide, true, instrument.BaseAsset(), instrument.QuoteAsset(), precision)
 
-		notional := (exec.Price * exec.Qty) / 100000000
+		notional := (exec.Price * exec.Qty) / precision
 
 		if takerOrder.Side == Buy {
 			taker.Release(instrument.QuoteAsset(), notional)
@@ -366,6 +370,7 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 		if instrument.IsPerp() {
 			e.Positions.UpdatePosition(exec.TakerClientID, book.Symbol, exec.Qty, exec.Price, takerOrder.Side)
 			e.Positions.UpdatePosition(exec.MakerClientID, book.Symbol, exec.Qty, exec.Price, makerSide)
+			positionChanged = true
 		}
 
 		trade := &Trade{
@@ -380,6 +385,66 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 		book.LastTrade = trade
 
 		e.MDPublisher.PublishTrade(book.Symbol, trade, timestamp)
+
+		// Send fill notifications to both taker and maker
+		takerGateway := e.Gateways[exec.TakerClientID]
+		if takerGateway != nil && takerGateway.Running {
+			takerGateway.ResponseCh <- Response{
+				RequestID: 0, // Fill notifications don't have a RequestID
+				Success:   true,
+				Data: &FillNotification{
+					OrderID:   exec.TakerOrderID,
+					ClientID:  exec.TakerClientID,
+					TradeID:   trade.TradeID,
+					Qty:       exec.Qty,
+					Price:     exec.Price,
+					Side:      takerOrder.Side,
+					IsFull:    takerOrder.Status == Filled,
+					FeeAmount: takerFee.Amount,
+					FeeAsset:  takerFee.Asset,
+				},
+			}
+		}
+
+		makerGateway := e.Gateways[exec.MakerClientID]
+		if makerGateway != nil && makerGateway.Running {
+			// Get maker order to check if fully filled
+			makerOrder := book.Bids.Orders[exec.MakerOrderID]
+			if makerOrder == nil {
+				makerOrder = book.Asks.Orders[exec.MakerOrderID]
+			}
+			isFull := false
+			if makerOrder != nil {
+				isFull = makerOrder.Status == Filled
+			}
+
+			makerGateway.ResponseCh <- Response{
+				RequestID: 0, // Fill notifications don't have a RequestID
+				Success:   true,
+				Data: &FillNotification{
+					OrderID:   exec.MakerOrderID,
+					ClientID:  exec.MakerClientID,
+					TradeID:   trade.TradeID,
+					Qty:       exec.Qty,
+					Price:     exec.Price,
+					Side:      makerSide,
+					IsFull:    isFull,
+					FeeAmount: makerFee.Amount,
+					FeeAsset:  makerFee.Asset,
+				},
+			}
+		}
+	}
+
+	// Publish open interest if positions changed
+	if positionChanged {
+		totalOI := e.Positions.CalculateOpenInterest(book.Symbol)
+		oi := &OpenInterest{
+			Symbol:         book.Symbol,
+			TotalContracts: totalOI,
+			Timestamp:      timestamp,
+		}
+		e.MDPublisher.PublishOpenInterest(book.Symbol, oi, timestamp)
 	}
 }
 

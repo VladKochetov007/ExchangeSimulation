@@ -119,6 +119,18 @@ type Response struct {
 	Error     RejectReason
 }
 
+type FillNotification struct {
+	OrderID   uint64
+	ClientID  uint64
+	TradeID   uint64
+	Qty       int64
+	Price     int64
+	Side      Side
+	IsFull    bool
+	FeeAmount int64
+	FeeAsset  string
+}
+
 type OrderRequest struct {
 	RequestID   uint64
 	Side        Side
@@ -161,6 +173,7 @@ const (
 	MDDelta
 	MDTrade
 	MDFunding
+	MDOpenInterest
 )
 
 type MarketDataMsg struct {
@@ -224,6 +237,12 @@ type FundingRate struct {
 	Interval    int64
 	MarkPrice   int64
 	IndexPrice  int64
+}
+
+type OpenInterest struct {
+	Symbol         string
+	TotalContracts int64
+	Timestamp      int64
 }
 
 type Position struct {

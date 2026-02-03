@@ -2,6 +2,7 @@ package actor
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 
 	"exchange_sim/exchange"
@@ -22,6 +23,17 @@ type BaseActor struct {
 	stopCh     chan struct{}
 	running    atomic.Bool
 	requestSeq uint64
+
+	// Order tracking for fill notifications
+	activeOrders  sync.Map // orderID -> *OrderInfo
+	requestToOrder sync.Map // requestID -> orderID
+}
+
+type OrderInfo struct {
+	OrderID   uint64
+	RequestID uint64
+	FilledQty int64
+	TotalQty  int64
 }
 
 func NewBaseActor(id uint64, gateway *exchange.ClientGateway) *BaseActor {
@@ -88,6 +100,7 @@ func (a *BaseActor) handleResponse(resp exchange.Response) {
 
 	switch data := resp.Data.(type) {
 	case uint64:
+		// Order accepted
 		a.eventCh <- &Event{
 			Type: EventOrderAccepted,
 			Data: OrderAcceptedEvent{
@@ -95,12 +108,63 @@ func (a *BaseActor) handleResponse(resp exchange.Response) {
 				RequestID: resp.RequestID,
 			},
 		}
+		// Track the order
+		a.requestToOrder.Store(resp.RequestID, data)
+		a.activeOrders.Store(data, &OrderInfo{
+			OrderID:   data,
+			RequestID: resp.RequestID,
+			FilledQty: 0,
+			TotalQty:  0, // We don't know TotalQty here, would need to track from request
+		})
+
 	case int64:
+		// Order cancelled
+		orderID := uint64(0)
+		if val, ok := a.requestToOrder.Load(resp.RequestID); ok {
+			orderID = val.(uint64)
+			a.activeOrders.Delete(orderID)
+			a.requestToOrder.Delete(resp.RequestID)
+		}
 		a.eventCh <- &Event{
 			Type: EventOrderCancelled,
 			Data: OrderCancelledEvent{
+				OrderID:      orderID,
 				RequestID:    resp.RequestID,
 				RemainingQty: data,
+			},
+		}
+
+	case *exchange.FillNotification:
+		// Fill notification
+		isFull := data.IsFull
+
+		// Update order tracking
+		if val, ok := a.activeOrders.Load(data.OrderID); ok {
+			info := val.(*OrderInfo)
+			info.FilledQty += data.Qty
+			if isFull {
+				a.activeOrders.Delete(data.OrderID)
+				a.requestToOrder.Delete(info.RequestID)
+			}
+		}
+
+		// Generate fill event
+		eventType := EventOrderPartialFill
+		if isFull {
+			eventType = EventOrderFilled
+		}
+
+		a.eventCh <- &Event{
+			Type: eventType,
+			Data: OrderFillEvent{
+				OrderID:   data.OrderID,
+				Qty:       data.Qty,
+				Price:     data.Price,
+				Side:      data.Side,
+				IsFull:    isFull,
+				TradeID:   data.TradeID,
+				FeeAmount: data.FeeAmount,
+				FeeAsset:  data.FeeAsset,
 			},
 		}
 	}
@@ -146,6 +210,16 @@ func (a *BaseActor) handleMarketData(md *exchange.MarketDataMsg) {
 				Symbol:      md.Symbol,
 				FundingRate: fundingRate,
 				Timestamp:   md.Timestamp,
+			},
+		}
+	case exchange.MDOpenInterest:
+		oi := md.Data.(*exchange.OpenInterest)
+		a.eventCh <- &Event{
+			Type: EventOpenInterest,
+			Data: OpenInterestEvent{
+				Symbol:       md.Symbol,
+				OpenInterest: oi,
+				Timestamp:    md.Timestamp,
 			},
 		}
 	}

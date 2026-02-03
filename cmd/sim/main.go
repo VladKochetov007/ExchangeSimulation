@@ -46,13 +46,15 @@ func run() error {
 
 	for i := uint64(1); i <= 5; i++ {
 		gateway := ex.ConnectClient(i, initialBalances, feePlan)
-		mm := actor.NewMarketMaker(i, gateway, actor.MarketMakerConfig{
-			Symbol:        "BTCUSD",
-			SpreadBps:     20,
-			QuoteQty:      100000000,
-			RefreshOnFill: false,
+		lp := actor.NewFirstLP(i, gateway, actor.FirstLPConfig{
+			Symbol:            "BTCUSD",
+			SpreadBps:         20,
+			LiquidityMultiple: 10,
+			BootstrapPrice:    100000000000, // $100,000 per BTC (100000000 precision)
 		})
-		runner.AddActor(mm)
+		lp.SetInitialState(100000000, "BTC", "USD")
+		lp.UpdateBalances(initialBalances["BTC"], initialBalances["USD"])
+		runner.AddActor(lp)
 	}
 
 	recorderGateway := ex.ConnectClient(999, initialBalances, feePlan)

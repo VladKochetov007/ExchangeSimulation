@@ -1,8 +1,11 @@
 package exchange
 
+import "sync"
+
 type PositionManager struct {
 	positions map[uint64]map[string]*Position
 	clock     Clock
+	mu        sync.RWMutex
 }
 
 func NewPositionManager(clock Clock) *PositionManager {
@@ -13,6 +16,9 @@ func NewPositionManager(clock Clock) *PositionManager {
 }
 
 func (pm *PositionManager) GetPosition(clientID uint64, symbol string) *Position {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
 	if pm.positions[clientID] == nil {
 		return nil
 	}
@@ -20,6 +26,9 @@ func (pm *PositionManager) GetPosition(clientID uint64, symbol string) *Position
 }
 
 func (pm *PositionManager) UpdatePosition(clientID uint64, symbol string, qty int64, price int64, side Side) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
 	if pm.positions[clientID] == nil {
 		pm.positions[clientID] = make(map[string]*Position)
 	}
@@ -60,8 +69,22 @@ func (pm *PositionManager) UpdatePosition(clientID uint64, symbol string, qty in
 	}
 }
 
+func (pm *PositionManager) CalculateOpenInterest(symbol string) int64 {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	var total int64
+	for _, clientPositions := range pm.positions {
+		if pos := clientPositions[symbol]; pos != nil && pos.Size != 0 {
+			total += abs(pos.Size)
+		}
+	}
+	return total
+}
+
 func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpFutures) {
 	fundingRate := perp.GetFundingRate()
+	precision := perp.TickSize()
 	for clientID, clientPos := range pm.positions {
 		pos := clientPos[perp.Symbol()]
 		if pos == nil || pos.Size == 0 {
@@ -73,7 +96,7 @@ func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpF
 			continue
 		}
 
-		positionValue := abs(pos.Size) * pos.EntryPrice / 100000000
+		positionValue := abs(pos.Size) * pos.EntryPrice / precision
 		funding := (positionValue * fundingRate.Rate) / 10000
 
 		if pos.Size > 0 {

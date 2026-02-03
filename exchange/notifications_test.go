@@ -7,10 +7,10 @@ import (
 
 func TestClientNotificationsOnPlaceOrder(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
 	gateway := ex.ConnectClient(1, balances, &FixedFee{})
 
 	go ex.handleClientRequests(gateway)
@@ -20,7 +20,7 @@ func TestClientNotificationsOnPlaceOrder(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        LimitOrder,
-		Price:       50000,
+		Price:       PriceUSD(50000, CENT_TICK),
 		Qty:         SATOSHI,
 		TimeInForce: GTC,
 	}
@@ -48,10 +48,10 @@ func TestClientNotificationsOnPlaceOrder(t *testing.T) {
 
 func TestClientNotificationsOnFill(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
 	gateway1 := ex.ConnectClient(1, balances, &FixedFee{})
 	gateway2 := ex.ConnectClient(2, balances, &FixedFee{})
 
@@ -63,7 +63,7 @@ func TestClientNotificationsOnFill(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Sell,
 		Type:        LimitOrder,
-		Price:       50000,
+		Price:       PriceUSD(50000, CENT_TICK),
 		Qty:         SATOSHI,
 		TimeInForce: GTC,
 	}
@@ -119,10 +119,10 @@ func TestClientNotificationsOnFill(t *testing.T) {
 
 func TestClientNotificationsViaMarketData(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
 	gateway1 := ex.ConnectClient(1, balances, &FixedFee{})
 	gateway2 := ex.ConnectClient(2, balances, &FixedFee{})
 
@@ -199,10 +199,10 @@ func TestClientNotificationsViaMarketData(t *testing.T) {
 
 func TestClientNotificationsOnPartialFill(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
 	gateway1 := ex.ConnectClient(1, balances, &FixedFee{})
 	gateway2 := ex.ConnectClient(2, balances, &FixedFee{})
 
@@ -214,7 +214,7 @@ func TestClientNotificationsOnPartialFill(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Sell,
 		Type:        LimitOrder,
-		Price:       50000,
+		Price:       50000 * SATOSHI,
 		Qty:         SATOSHI / 2,
 		TimeInForce: GTC,
 	}
@@ -226,7 +226,7 @@ func TestClientNotificationsOnPartialFill(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        LimitOrder,
-		Price:       50000,
+		Price:       50000 * SATOSHI,
 		Qty:         SATOSHI,
 		TimeInForce: GTC,
 	}
@@ -262,7 +262,7 @@ func TestClientNotificationsOnPartialFill(t *testing.T) {
 
 func TestClientNotificationsOnReject(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"USD": 1000}

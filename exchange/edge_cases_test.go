@@ -60,7 +60,7 @@ func TestPlaceOrderInvalidPrice(t *testing.T) {
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 100, 1)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
 	ex.ConnectClient(1, balances, &FixedFee{})
 
 	req := &OrderRequest{
@@ -87,7 +87,7 @@ func TestPlaceOrderInvalidQty(t *testing.T) {
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 100)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
 	ex.ConnectClient(1, balances, &FixedFee{})
 
 	req := &OrderRequest{
@@ -111,7 +111,7 @@ func TestPlaceOrderInvalidQty(t *testing.T) {
 
 func TestPlaceOrderUnknownInstrument(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	balances := map[string]int64{"BTC": 10 * SATOSHI}
+	balances := map[string]int64{"BTC": BTCAmount(10)}
 	ex.ConnectClient(1, balances, &FixedFee{})
 
 	req := &OrderRequest{
@@ -135,7 +135,7 @@ func TestPlaceOrderUnknownInstrument(t *testing.T) {
 
 func TestPlaceOrderInsufficientBalanceBuy(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"USD": 1000}
@@ -146,7 +146,7 @@ func TestPlaceOrderInsufficientBalanceBuy(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        LimitOrder,
-		Price:       50000 * SATOSHI,
+		Price:       PriceUSD(50000, SATOSHI),
 		Qty:         SATOSHI,
 		TimeInForce: GTC,
 	}
@@ -162,7 +162,7 @@ func TestPlaceOrderInsufficientBalanceBuy(t *testing.T) {
 
 func TestPlaceOrderInsufficientBalanceSell(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": 100}
@@ -173,7 +173,7 @@ func TestPlaceOrderInsufficientBalanceSell(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Sell,
 		Type:        LimitOrder,
-		Price:       50000,
+		Price:       PriceUSD(50000, CENT_TICK),
 		Qty:         SATOSHI,
 		TimeInForce: GTC,
 	}
@@ -189,10 +189,10 @@ func TestPlaceOrderInsufficientBalanceSell(t *testing.T) {
 
 func TestPlaceOrderMarketBuyInsufficientBalance(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"USD": 1000, "BTC": 10 * SATOSHI}
+	balances := map[string]int64{"USD": 1000, "BTC": BTCAmount(10)}
 	ex.ConnectClient(1, balances, &FixedFee{})
 	ex.ConnectClient(2, balances, &FixedFee{})
 
@@ -201,7 +201,7 @@ func TestPlaceOrderMarketBuyInsufficientBalance(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Sell,
 		Type:        LimitOrder,
-		Price:       50000 * SATOSHI,
+		Price:       PriceUSD(50000, SATOSHI),
 		Qty:         SATOSHI,
 		TimeInForce: GTC,
 	}
@@ -224,10 +224,10 @@ func TestPlaceOrderMarketBuyInsufficientBalance(t *testing.T) {
 
 func TestCancelOrderDifferentClient(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
 	ex.ConnectClient(1, balances, &FixedFee{})
 	ex.ConnectClient(2, balances, &FixedFee{})
 
@@ -236,7 +236,7 @@ func TestCancelOrderDifferentClient(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        LimitOrder,
-		Price:       50000,
+		Price:       PriceUSD(50000, CENT_TICK),
 		Qty:         SATOSHI,
 		TimeInForce: GTC,
 	}
@@ -311,7 +311,7 @@ func TestBookRemoveLimitUpdatesBest(t *testing.T) {
 
 func TestDisconnectClient(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	balances := map[string]int64{"BTC": 10 * SATOSHI}
+	balances := map[string]int64{"BTC": BTCAmount(10)}
 	ex.ConnectClient(1, balances, &FixedFee{})
 
 	if ex.Gateways[1] == nil {

@@ -2,8 +2,9 @@ package exchange
 
 import "testing"
 
+
 func TestNewPerpFutures(t *testing.T) {
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", 1, 100)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", SATOSHI, SATOSHI/100)
 
 	if perp.Symbol() != "BTC-PERP" {
 		t.Errorf("Expected symbol BTC-PERP, got %s", perp.Symbol())
@@ -31,7 +32,7 @@ func TestNewPerpFutures(t *testing.T) {
 }
 
 func TestPerpFuturesUpdateFundingRate(t *testing.T) {
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", 1, 100)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", SATOSHI, SATOSHI/100)
 
 	indexPrice := int64(50000 * SATOSHI)
 	markPrice := int64(50100 * SATOSHI)
@@ -237,7 +238,7 @@ func TestPositionManagerUpdatePositionFlipLongToShort(t *testing.T) {
 
 func TestPositionManagerSettleFundingLongPosition(t *testing.T) {
 	pm := NewPositionManager(&RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", 1, 100)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", SATOSHI, SATOSHI/100)
 
 	clients := make(map[uint64]*Client)
 	clients[1] = NewClient(1, &FixedFee{})
@@ -260,7 +261,7 @@ func TestPositionManagerSettleFundingLongPosition(t *testing.T) {
 
 func TestPositionManagerSettleFundingShortPosition(t *testing.T) {
 	pm := NewPositionManager(&RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", 1, 100)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", SATOSHI, SATOSHI/100)
 
 	clients := make(map[uint64]*Client)
 	clients[1] = NewClient(1, &FixedFee{})
@@ -283,7 +284,7 @@ func TestPositionManagerSettleFundingShortPosition(t *testing.T) {
 
 func TestPositionManagerSettleFundingNoPosition(t *testing.T) {
 	pm := NewPositionManager(&RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", 1, 100)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", SATOSHI, SATOSHI/100)
 
 	clients := make(map[uint64]*Client)
 	clients[1] = NewClient(1, &FixedFee{})
@@ -325,5 +326,49 @@ func TestInstrumentMinOrderSize(t *testing.T) {
 
 	if spot.MinOrderSize() != 1000 {
 		t.Errorf("Expected min order size 1000, got %d", spot.MinOrderSize())
+	}
+}
+
+func TestCalculateOpenInterest(t *testing.T) {
+	pm := NewPositionManager(&RealClock{})
+
+	pm.UpdatePosition(1, "BTC-PERP", SATOSHI, PriceUSD(50000, CENT_TICK), Buy)
+	pm.UpdatePosition(2, "BTC-PERP", -SATOSHI/2, PriceUSD(50000, CENT_TICK), Sell)
+
+	oi := pm.CalculateOpenInterest("BTC-PERP")
+	expected := int64(SATOSHI + SATOSHI/2)
+	if oi != expected {
+		t.Errorf("Expected open interest %d, got %d", expected, oi)
+	}
+}
+
+func TestPublishOpenInterest(t *testing.T) {
+	mdp := NewMDPublisher()
+	gateway := &ClientGateway{
+		ClientID:   1,
+		MarketData: make(chan *MarketDataMsg, 100),
+	}
+
+	types := []MDType{MDOpenInterest}
+	mdp.Subscribe(1, "BTC-PERP", types, gateway)
+
+	oi := &OpenInterest{
+		Symbol:         "BTC-PERP",
+		TotalContracts: 1000000,
+		Timestamp:      123456,
+	}
+	mdp.PublishOpenInterest("BTC-PERP", oi, 123456)
+
+	select {
+	case msg := <-gateway.MarketData:
+		if msg.Type != MDOpenInterest {
+			t.Errorf("Expected MDOpenInterest, got %v", msg.Type)
+		}
+		receivedOI := msg.Data.(*OpenInterest)
+		if receivedOI.TotalContracts != 1000000 {
+			t.Errorf("Expected OI 1000000, got %d", receivedOI.TotalContracts)
+		}
+	default:
+		t.Error("Should receive open interest message")
 	}
 }

@@ -2,6 +2,7 @@ package exchange
 
 import "testing"
 
+
 func TestPercentageFeeInQuote(t *testing.T) {
 	fee := &PercentageFee{
 		MakerBps: 5,
@@ -14,7 +15,7 @@ func TestPercentageFeeInQuote(t *testing.T) {
 		Qty:   SATOSHI,
 	}
 
-	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD")
+	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD", SATOSHI)
 	if takerFee.Asset != "USD" {
 		t.Errorf("Taker fee asset should be USD, got %s", takerFee.Asset)
 	}
@@ -24,7 +25,7 @@ func TestPercentageFeeInQuote(t *testing.T) {
 		t.Errorf("Taker fee should be %d, got %d", expectedTakerFee, takerFee.Amount)
 	}
 
-	makerFee := fee.CalculateFee(exec, Sell, true, "BTC", "USD")
+	makerFee := fee.CalculateFee(exec, Sell, true, "BTC", "USD", SATOSHI)
 	if makerFee.Asset != "USD" {
 		t.Errorf("Maker fee asset should be USD, got %s", makerFee.Asset)
 	}
@@ -46,7 +47,7 @@ func TestPercentageFeeInBase(t *testing.T) {
 		Qty:   SATOSHI,
 	}
 
-	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD")
+	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD", SATOSHI)
 	if takerFee.Asset != "BTC" {
 		t.Errorf("Taker fee asset should be BTC, got %s", takerFee.Asset)
 	}
@@ -67,12 +68,12 @@ func TestFixedFee(t *testing.T) {
 		Qty:   SATOSHI,
 	}
 
-	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD")
+	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD", SATOSHI)
 	if takerFee.Amount != 200 {
 		t.Errorf("Taker fee should be 200, got %d", takerFee.Amount)
 	}
 
-	makerFee := fee.CalculateFee(exec, Sell, true, "BTC", "USD")
+	makerFee := fee.CalculateFee(exec, Sell, true, "BTC", "USD", SATOSHI)
 	if makerFee.Amount != 100 {
 		t.Errorf("Maker fee should be 100, got %d", makerFee.Amount)
 	}

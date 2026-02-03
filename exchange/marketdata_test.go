@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+
 func TestBookGetSnapshot(t *testing.T) {
 	book := newBook(Buy)
 

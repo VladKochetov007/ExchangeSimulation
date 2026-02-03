@@ -2,6 +2,7 @@ package exchange
 
 import "testing"
 
+
 func TestNewExchange(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	if ex == nil {
@@ -31,7 +32,7 @@ func TestConnectClient(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	feePlan := &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true}
-	balances := map[string]int64{"USD": 100000 * SATOSHI}
+	balances := map[string]int64{"USD": USDAmount(100000)}
 	gateway := ex.ConnectClient(1, balances, feePlan)
 
 	if gateway == nil {
@@ -40,7 +41,7 @@ func TestConnectClient(t *testing.T) {
 	if ex.Clients[1] == nil {
 		t.Error("Client should be added")
 	}
-	if ex.Clients[1].Balances["USD"] != 100000*SATOSHI {
+	if ex.Clients[1].Balances["USD"] != USDAmount(100000) {
 		t.Error("Client balance should be set")
 	}
 
@@ -49,11 +50,11 @@ func TestConnectClient(t *testing.T) {
 
 func TestPlaceOrderDirect(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 100, 1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI)
 	ex.AddInstrument(instrument)
 
 	feePlan := &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true}
-	balances := map[string]int64{"USD": 100000 * SATOSHI}
+	balances := map[string]int64{"USD": USDAmount(100000)}
 	ex.ConnectClient(1, balances, feePlan)
 
 	orderReq := &OrderRequest{
@@ -61,8 +62,8 @@ func TestPlaceOrderDirect(t *testing.T) {
 		Symbol:    "BTC/USD",
 		Side:      Buy,
 		Type:      LimitOrder,
-		Price:     50000 * 100,
-		Qty:       SATOSHI,
+		Price:     PriceUSD(50000, SATOSHI),
+		Qty:       SATOSHI / 100,     // 0.01 BTC
 		TimeInForce: GTC,
 		Visibility: Normal,
 	}
@@ -73,7 +74,7 @@ func TestPlaceOrderDirect(t *testing.T) {
 	}
 
 	client := ex.Clients[1]
-	notional := int64((SATOSHI * 50000 * 100) / SATOSHI)
+	notional := int64((orderReq.Qty * orderReq.Price) / SATOSHI)
 	if client.Reserved["USD"] != notional {
 		t.Errorf("Should have reserved %d USD, got %d", notional, client.Reserved["USD"])
 	}
@@ -86,10 +87,10 @@ func TestMatchingAndSettlement(t *testing.T) {
 
 	feePlan := &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true}
 
-	balances1 := map[string]int64{"USD": 100000 * SATOSHI}
+	balances1 := map[string]int64{"USD": USDAmount(100000)}
 	ex.ConnectClient(1, balances1, feePlan)
 
-	balances2 := map[string]int64{"BTC": 10 * SATOSHI}
+	balances2 := map[string]int64{"BTC": BTCAmount(10)}
 	ex.ConnectClient(2, balances2, feePlan)
 
 	sellReq := &OrderRequest{

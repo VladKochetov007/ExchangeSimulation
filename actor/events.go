@@ -15,6 +15,7 @@ const (
 	EventBookDelta
 	EventBookSnapshot
 	EventFundingUpdate
+	EventOpenInterest
 )
 
 type Event struct {
@@ -77,4 +78,10 @@ type FundingUpdateEvent struct {
 	Symbol      string
 	FundingRate *exchange.FundingRate
 	Timestamp   int64
+}
+
+type OpenInterestEvent struct {
+	Symbol       string
+	OpenInterest *exchange.OpenInterest
+	Timestamp    int64
 }

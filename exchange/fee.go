@@ -1,12 +1,11 @@
 package exchange
 
 const (
-	SATOSHI = 100000000
-	BPS     = 10000
+	BPS = 10000
 )
 
 type FeeModel interface {
-	CalculateFee(exec *Execution, side Side, isMaker bool, baseAsset, quoteAsset string) Fee
+	CalculateFee(exec *Execution, side Side, isMaker bool, baseAsset, quoteAsset string, precision int64) Fee
 }
 
 type PercentageFee struct {
@@ -15,7 +14,7 @@ type PercentageFee struct {
 	InQuote  bool
 }
 
-func (f *PercentageFee) CalculateFee(exec *Execution, side Side, isMaker bool, baseAsset, quoteAsset string) Fee {
+func (f *PercentageFee) CalculateFee(exec *Execution, side Side, isMaker bool, baseAsset, quoteAsset string, precision int64) Fee {
 	bps := f.TakerBps
 	if isMaker {
 		bps = f.MakerBps
@@ -25,7 +24,7 @@ func (f *PercentageFee) CalculateFee(exec *Execution, side Side, isMaker bool, b
 	var asset string
 
 	if f.InQuote {
-		tradeValue := (exec.Price * exec.Qty) / SATOSHI
+		tradeValue := (exec.Price * exec.Qty) / precision
 		amount = (tradeValue * bps) / BPS
 		asset = quoteAsset
 	} else {
@@ -41,7 +40,7 @@ type FixedFee struct {
 	TakerFee Fee
 }
 
-func (f *FixedFee) CalculateFee(exec *Execution, side Side, isMaker bool, baseAsset, quoteAsset string) Fee {
+func (f *FixedFee) CalculateFee(exec *Execution, side Side, isMaker bool, baseAsset, quoteAsset string, precision int64) Fee {
 	if isMaker {
 		return f.MakerFee
 	}

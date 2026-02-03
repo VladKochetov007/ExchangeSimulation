@@ -32,11 +32,10 @@ func TestSimulationIntegration(t *testing.T) {
 	feePlan := &exchange.PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true}
 
 	gateway := ex.ConnectClient(1, balances, feePlan)
-	mm := actor.NewMarketMaker(1, gateway, actor.MarketMakerConfig{
-		Symbol:        "BTCUSD",
-		SpreadBps:     20,
-		QuoteQty:      100000000,
-		RefreshOnFill: false,
+	mm := actor.NewFirstLP(1, gateway, actor.FirstLPConfig{
+		Symbol:            "BTCUSD",
+		SpreadBps:         20,
+		LiquidityMultiple: 10,
 	})
 	runner.AddActor(mm)
 

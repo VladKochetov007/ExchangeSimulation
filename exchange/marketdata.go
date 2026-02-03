@@ -92,3 +92,7 @@ func (p *MDPublisher) PublishTrade(symbol string, trade *Trade, timestamp int64)
 func (p *MDPublisher) PublishFunding(symbol string, funding *FundingRate, timestamp int64) {
 	p.Publish(symbol, MDFunding, funding, timestamp)
 }
+
+func (p *MDPublisher) PublishOpenInterest(symbol string, oi *OpenInterest, timestamp int64) {
+	p.Publish(symbol, MDOpenInterest, oi, timestamp)
+}
