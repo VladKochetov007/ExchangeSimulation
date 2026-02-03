@@ -181,22 +181,16 @@ func (f *FirstLiquidityProvidingActor) onBookSnapshot(snap BookSnapshotEvent) {
 }
 
 func (f *FirstLiquidityProvidingActor) onBookDelta(delta BookDeltaEvent) {
-	// Update best bid/ask for exit monitoring
-	// Simplified tracking: update if this delta is better than current best
 	if delta.Delta.Side == exchange.Buy {
-		// Bid side update
 		if delta.Delta.Price >= f.BestBid {
 			f.BestBid = delta.Delta.Price
 			if delta.Delta.VisibleQty > 0 {
-				// New/updated level
 				f.BidLiquidity = delta.Delta.VisibleQty
 			} else {
-				// Level removed - would need full book for accurate tracking
 				f.BidLiquidity = 0
 			}
 		}
 	} else {
-		// Ask side update
 		if f.BestAsk == 0 || delta.Delta.Price <= f.BestAsk {
 			f.BestAsk = delta.Delta.Price
 			if delta.Delta.VisibleQty > 0 {
@@ -298,7 +292,6 @@ func (f *FirstLiquidityProvidingActor) CheckExitConditions() {
 		return
 	}
 
-	// Use configured exit strategy
 	shouldExit := f.Config.ExitStrategy(
 		f.NetPosition,
 		f.BestBid,
@@ -318,7 +311,6 @@ func (f *FirstLiquidityProvidingActor) ExecuteExit() {
 		return
 	}
 
-	// Cancel active quotes first to avoid hitting our own orders
 	f.CancelActiveOrders()
 
 	exitSize := f.NetPosition
@@ -327,10 +319,8 @@ func (f *FirstLiquidityProvidingActor) ExecuteExit() {
 	}
 
 	if f.NetPosition > 0 {
-		// Long - sell to exit
 		f.SubmitOrder(f.Symbol, exchange.Sell, exchange.Market, 0, exitSize)
 	} else {
-		// Short - buy to exit
 		f.SubmitOrder(f.Symbol, exchange.Buy, exchange.Market, 0, exitSize)
 	}
 }
@@ -362,7 +352,6 @@ func (f *FirstLiquidityProvidingActor) UpdatePosition(deltaQty int64, price int6
 	}
 }
 
-// TEST ONLY - Expose position for verification
 func (f *FirstLiquidityProvidingActor) GetPosition() (netPosition, avgEntryPrice int64) {
 	return f.NetPosition, f.AvgEntryPrice
 }

@@ -66,23 +66,17 @@ func TestFirstLP_FillEventGeneration(t *testing.T) {
 	}
 	defer lp.Stop()
 
-	// Wait for LP to place initial quotes
 	time.Sleep(200 * time.Millisecond)
 
-	// Create taker and hit the LP's bid
 	_ = createTaker(t, ex, 2)
-	defer ex.DisconnectClient(2)
 
-	// Place market sell to hit LP's bid
 	_, err := exchange.InjectMarketOrder(ex, 2, "BTCUSD", exchange.Sell, exchange.BTCAmount(0.1))
 	if err != 0 {
 		t.Fatalf("Failed to inject market order: %v", err)
 	}
 
-	// Wait for fill processing
 	time.Sleep(200 * time.Millisecond)
 
-	// Verify LP received the fill and updated position
 	netPos, avgEntry := lp.GetPosition()
 	if netPos == 0 {
 		t.Error("Expected non-zero position after fill, got 0")
@@ -116,12 +110,9 @@ func TestFirstLP_ExitLongPosition(t *testing.T) {
 	}
 	defer lp.Stop()
 
-	// Wait for LP to place initial quotes
 	time.Sleep(200 * time.Millisecond)
 
-	// Create long position by selling to LP (LP buys)
 	_ = createTaker(t, ex, 2)
-	defer ex.DisconnectClient(2)
 
 	fillQty := exchange.BTCAmount(0.5)
 	_, err := exchange.InjectMarketOrder(ex, 2, "BTCUSD", exchange.Sell, fillQty)
@@ -198,7 +189,6 @@ func TestFirstLP_ExitShortPosition(t *testing.T) {
 
 	// Create short position by buying from LP (LP sells)
 	_ = createTaker(t, ex, 2)
-	defer ex.DisconnectClient(2)
 
 	fillQty := exchange.BTCAmount(0.3)
 	_, err := exchange.InjectMarketOrder(ex, 2, "BTCUSD", exchange.Buy, fillQty)
@@ -291,7 +281,6 @@ func TestFirstLP_CustomExitStrategy(t *testing.T) {
 
 	// Create long position
 	_ = createTaker(t, ex, 2)
-	defer ex.DisconnectClient(2)
 
 	fillQty := exchange.BTCAmount(0.5)
 	_, err := exchange.InjectMarketOrder(ex, 2, "BTCUSD", exchange.Sell, fillQty)
@@ -359,7 +348,6 @@ func TestFirstLP_PositionAccumulation(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	_ = createTaker(t, ex, 2)
-	defer ex.DisconnectClient(2)
 
 	// First fill at ~$50,000
 	qty1 := exchange.BTCAmount(0.1)

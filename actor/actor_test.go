@@ -322,8 +322,8 @@ func TestBaseActorHandleMarketDataSnapshot(t *testing.T) {
 	actor.Start(ctx)
 
 	snapshot := &exchange.BookSnapshot{
-		Bids: []exchange.PriceLevel{{Price: 5000000000000, Qty: 100000000}},
-		Asks: []exchange.PriceLevel{{Price: 5001000000000, Qty: 100000000}},
+		Bids: []exchange.PriceLevel{{Price: 5000000000000, VisibleQty: 100000000}},
+		Asks: []exchange.PriceLevel{{Price: 5001000000000, VisibleQty: 100000000}},
 	}
 
 	md := &exchange.MarketDataMsg{

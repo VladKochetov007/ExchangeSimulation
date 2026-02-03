@@ -411,23 +411,48 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 		book.LastTrade = trade
 
 		e.MDPublisher.PublishTrade(book.Symbol, trade, timestamp)
-		
-		// Publish book update for the maker's price level as their order was partially/fully filled
-		// Note from previous logic: executions happen, then maker order might be removed if filled.
-		// We need to publish the level update AFTER the maker order state has changed in the book.
-		// In placeOrder logic:
-		// 1. match -> executions
-		// 2. processExecutions -> (here)
-		//    Wait, processExecutions just sends notifications and updates positions.
-		//    The actual book modification happens in placeOrder:203 loop! 
-		//    So we should NOT publish here if the book isn't updated here?
-		//    Actually placeOrder:203 loop removes filled orders. 
-		//    Partial fills update FilledQty but don't remove order.
-		
-		// Let's look at placeOrder:203 again.
-		
-		// Send fill notifications...
-		// ...
+
+		takerGw := e.Gateways[exec.TakerClientID]
+		if takerGw != nil {
+			takerFillIsFull := takerOrder.FilledQty >= takerOrder.Qty
+			takerGw.ResponseCh <- Response{
+				Success: true,
+				Data: &FillNotification{
+					OrderID:   exec.TakerOrderID,
+					ClientID:  exec.TakerClientID,
+					TradeID:   book.SeqNum - 1,
+					Qty:       exec.Qty,
+					Price:     exec.Price,
+					Side:      takerOrder.Side,
+					IsFull:    takerFillIsFull,
+					FeeAmount: takerFee.Amount,
+					FeeAsset:  takerFee.Asset,
+				},
+			}
+		}
+
+		makerGw := e.Gateways[exec.MakerClientID]
+		if makerGw != nil {
+			makerOrder := book.Bids.Orders[exec.MakerOrderID]
+			if makerOrder == nil {
+				makerOrder = book.Asks.Orders[exec.MakerOrderID]
+			}
+			makerFillIsFull := makerOrder != nil && makerOrder.FilledQty >= makerOrder.Qty
+			makerGw.ResponseCh <- Response{
+				Success: true,
+				Data: &FillNotification{
+					OrderID:   exec.MakerOrderID,
+					ClientID:  exec.MakerClientID,
+					TradeID:   book.SeqNum - 1,
+					Qty:       exec.Qty,
+					Price:     exec.Price,
+					Side:      makerSide,
+					IsFull:    makerFillIsFull,
+					FeeAmount: makerFee.Amount,
+					FeeAsset:  makerFee.Asset,
+				},
+			}
+		}
 	}
 
 	// Publish open interest if positions changed

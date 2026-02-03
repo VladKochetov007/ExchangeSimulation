@@ -29,7 +29,7 @@ def parse_args():
         "--orderbook",
         type=Path,
         required=True,
-        help="Path to orderbook observable CSV file",
+        help="Path to orderbook CSV file (e.g., BTCUSD_PERP_orderbook.csv)",
     )
     parser.add_argument(
         "--symbol",
@@ -68,8 +68,6 @@ def load_trades(trades_path: Path, symbol: str, time_unit: str) -> pl.DataFrame:
     """Load and process trades data."""
     df = pl.read_csv(trades_path)
 
-    df = df.filter(pl.col("symbol") == symbol)
-
     time_col = pl.col("timestamp")
     if time_unit == "ns":
         time_col = time_col / 1e9
@@ -88,8 +86,6 @@ def load_orderbook(
 ) -> pl.DataFrame:
     """Load and process orderbook data."""
     df = pl.read_csv(orderbook_path)
-
-    df = df.filter(pl.col("symbol") == symbol)
 
     time_col = pl.col("timestamp")
     if time_unit == "ns":
@@ -129,15 +125,19 @@ def compute_best_bid_ask(ob_df: pl.DataFrame, bin_width: float) -> tuple:
         .alias("bin")
     )
 
+    deltas_and_snapshots = ob_df.filter(
+        (pl.col("type") == "delta") | (pl.col("type") == "snapshot")
+    )
+
     bids = (
-        ob_df.filter(pl.col("side") == "bid")
+        deltas_and_snapshots.filter(pl.col("side") == "bid")
         .group_by("bin")
         .agg(pl.col("price").max().alias("best_bid"))
         .sort("bin")
     )
 
     asks = (
-        ob_df.filter(pl.col("side") == "ask")
+        deltas_and_snapshots.filter(pl.col("side") == "ask")
         .group_by("bin")
         .agg(pl.col("price").min().alias("best_ask"))
         .sort("bin")

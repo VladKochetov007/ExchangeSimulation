@@ -100,15 +100,36 @@ func run() error {
 		runner.AddActor(maker)
 	}
 
+	// Add NoisyTraders to provide random liquidity around mid-price
+	for i := uint64(400); i <= 403; i++ {
+		gateway := ex.ConnectClient(i, initialBalances, feePlan)
+		noisy := actor.NewNoisyTrader(i, gateway, actor.NoisyTraderConfig{
+			Symbol:          "BTCUSD",
+			Interval:        1500 * time.Millisecond,
+			PriceRangeBps:   100, // +/- 1% from mid
+			MinQty:          exchange.BTCAmount(0.1),
+			MaxQty:          exchange.BTCAmount(1.0),
+			MaxActiveOrders: 3,
+			OrderLifetime:   5 * time.Second,
+		})
+		runner.AddActor(noisy)
+	}
+
 	simDuration := 15 * time.Second
 	recorderGateway := ex.ConnectClient(999, initialBalances, feePlan)
 	recorder, err := actor.NewRecorder(999, recorderGateway, actor.RecorderConfig{
-		Symbols:          []string{"BTCUSD", "ETHUSD"},
-		TradesPath:       "output/trades.csv",
-		ObservedPath:     "output/book_observed.csv",
-		HiddenPath:       "output/book_hidden.csv",
-		SnapshotInterval: 2 * time.Second,
-	})
+		OutputDir:           "output",
+		Symbols:             []string{"BTCUSD", "ETHUSD"},
+		FlushInterval:       time.Second,
+		SnapshotInterval:    5 * time.Second,
+		SnapshotDeltaCount:  50,
+		RotationStrategy:    actor.RotationNone,
+		RecordTrades:        true,
+		RecordOrderbook:     true,
+		RecordOpenInterest:  true,
+		RecordFunding:       true,
+		SeparateHiddenFiles: false,
+	}, ex.Instruments)
 	if err != nil {
 		return err
 	}

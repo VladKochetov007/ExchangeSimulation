@@ -1,5 +1,7 @@
 package exchange
 
+import "time"
+
 const (
 	SATOSHI = 100_000_000
 
@@ -86,22 +88,25 @@ func InjectMarketOrder(ex *Exchange, clientID uint64, symbol string, side Side, 
 		},
 	}
 
-	// Send request
 	gateway.RequestCh <- req
 
-	// Wait for response (might be accept or fill notification)
-	resp := <-gateway.ResponseCh
-	if !resp.Success {
-		return 0, resp.Error
-	}
-
-	// For market orders, we might get OrderID or FillNotification first
-	switch data := resp.Data.(type) {
-	case uint64:
-		return data, 0
-	case *FillNotification:
-		return data.OrderID, 0
-	default:
-		return 0, RejectUnknownInstrument // Generic error
+	timeout := time.After(200 * time.Millisecond)
+	for {
+		select {
+		case resp := <-gateway.ResponseCh:
+			if !resp.Success {
+				return 0, resp.Error
+			}
+			switch data := resp.Data.(type) {
+			case uint64:
+				return data, 0
+			case *FillNotification:
+				return data.OrderID, 0
+			default:
+				continue
+			}
+		case <-timeout:
+			panic("test timeout: InjectMarketOrder did not receive response - this indicates a real bug")
+		}
 	}
 }

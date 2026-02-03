@@ -43,7 +43,7 @@ func (m *DefaultMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) []*
 		matched := false
 		for order := limit.Head; order != nil && incomingOrder.FilledQty < incomingOrder.Qty; {
 			next := order.Next
-			if m.shouldMatch(incomingOrder, order) {
+			if order.FilledQty < order.Qty && m.shouldMatch(incomingOrder, order) {
 				exec := m.execute(incomingOrder, order)
 				executions = append(executions, exec)
 				matched = true
@@ -92,6 +92,10 @@ func (m *DefaultMatcher) shouldMatch(incoming, resting *Order) bool {
 
 func (m *DefaultMatcher) execute(taker, maker *Order) *Execution {
 	execQty := min(taker.Qty-taker.FilledQty, maker.Qty-maker.FilledQty)
+	if execQty <= 0 {
+		panic("matching engine bug: attempted zero-quantity execution")
+	}
+
 	taker.FilledQty += execQty
 	maker.FilledQty += execQty
 	if maker.Parent != nil {

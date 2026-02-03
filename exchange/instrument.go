@@ -9,6 +9,7 @@ type Instrument interface {
 	ValidatePrice(price int64) bool
 	ValidateQty(qty int64) bool
 	IsPerp() bool
+	InstrumentType() string
 }
 
 type SpotInstrument struct {
@@ -61,6 +62,10 @@ func (i *SpotInstrument) IsPerp() bool {
 	return false
 }
 
+func (i *SpotInstrument) InstrumentType() string {
+	return "SPOT"
+}
+
 type PerpFutures struct {
 	SpotInstrument
 	fundingRate *FundingRate
@@ -94,6 +99,10 @@ func NewPerpFutures(symbol, base, quote string, tickSize, minOrderSize int64) *P
 
 func (p *PerpFutures) IsPerp() bool {
 	return true
+}
+
+func (p *PerpFutures) InstrumentType() string {
+	return "PERP"
 }
 
 func (p *PerpFutures) GetFundingRate() *FundingRate {

@@ -40,11 +40,18 @@ func TestSimulationIntegration(t *testing.T) {
 	runner.AddActor(mm)
 
 	recorderGateway := ex.ConnectClient(999, balances, feePlan)
+	instruments := map[string]exchange.Instrument{
+		"BTCUSD": btcusd,
+	}
 	recorder, err := actor.NewRecorder(999, recorderGateway, actor.RecorderConfig{
-		Symbols:       []string{"BTCUSD"},
-		TradesPath:    "testdata/trades.csv",
-		SnapshotsPath: "testdata/snapshots.csv",
-	})
+		Symbols:             []string{"BTCUSD"},
+		OutputDir:           "testdata",
+		RecordTrades:        true,
+		RecordOrderbook:     true,
+		RecordOpenInterest:  false,
+		RecordFunding:       false,
+		SeparateHiddenFiles: false,
+	}, instruments)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,10 +64,10 @@ func TestSimulationIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := os.Stat("testdata/trades.csv"); os.IsNotExist(err) {
-		t.Error("trades.csv not created")
+	if _, err := os.Stat("testdata/BTCUSD_SPOT_trades.csv"); os.IsNotExist(err) {
+		t.Error("BTCUSD_SPOT_trades.csv not created")
 	}
-	if _, err := os.Stat("testdata/snapshots.csv"); os.IsNotExist(err) {
-		t.Error("snapshots.csv not created")
+	if _, err := os.Stat("testdata/BTCUSD_SPOT_orderbook.csv"); os.IsNotExist(err) {
+		t.Error("BTCUSD_SPOT_orderbook.csv not created")
 	}
 }

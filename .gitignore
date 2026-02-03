@@ -279,3 +279,4 @@ uv.lock
 coverage.out
 **/*.csv
 **.png
+sim
