@@ -277,3 +277,4 @@ nautilus_trader/
 **/*.tmp
 uv.lock
 coverage.out
+**/*.csv

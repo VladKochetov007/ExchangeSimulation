@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
@@ -57,6 +58,33 @@ func run() error {
 		runner.AddActor(lp)
 	}
 
+	// Add taker actors to generate trading activity
+	for i := uint64(100); i <= 101; i++ {
+		gateway := ex.ConnectClient(i, initialBalances, feePlan)
+		taker := actor.NewRandomizedTaker(i, gateway, actor.RandomizedTakerConfig{
+			Symbol:   "BTCUSD",
+			Interval: 2 * time.Second,
+			MinQty:   exchange.BTCAmount(0.05),
+			MaxQty:   exchange.BTCAmount(0.5),
+		})
+		runner.AddActor(taker)
+	}
+
+	// Add DelayedMaker actors to provide competition later
+	for i := uint64(200); i <= 201; i++ {
+		gateway := ex.ConnectClient(i, initialBalances, feePlan)
+		maker := actor.NewDelayedMaker(i, gateway, actor.DelayedMakerConfig{
+			Symbol:      "BTCUSD",
+			StartDelay:  5 * time.Second, // Arrive after 5 seconds
+			OrderCount:  5,
+			BasePrice:   100000 * 100000000,
+			PriceSpread: 50 * 100000000, // Tighter or similar spread
+			Qty:         1 * 100000000,
+		})
+		runner.AddActor(maker)
+	}
+
+	simDuration := 15 * time.Second
 	recorderGateway := ex.ConnectClient(999, initialBalances, feePlan)
 	recorder, err := actor.NewRecorder(999, recorderGateway, actor.RecorderConfig{
 		Symbols:       []string{"BTCUSD", "ETHUSD"},
@@ -69,6 +97,10 @@ func run() error {
 	runner.AddActor(recorder)
 
 	fmt.Println("Starting simulation...")
-	fmt.Println("Press Ctrl+C to stop")
-	return runner.Run(context.Background())
+	fmt.Printf("Running for %v...\n", simDuration)
+	
+	ctx, cancel := context.WithTimeout(context.Background(), simDuration)
+	defer cancel()
+	
+	return runner.Run(ctx)
 }

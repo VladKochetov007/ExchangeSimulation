@@ -1,0 +1,117 @@
+package actor
+
+import (
+	"context"
+	"math/rand"
+	"time"
+
+	"exchange_sim/exchange"
+)
+
+type RandomizedTakerConfig struct {
+	Symbol         string
+	Interval       time.Duration
+	MinQty         int64
+	MaxQty         int64
+	BasePrecision  int64
+	QuotePrecision int64
+}
+
+type RandomizedTakerActor struct {
+	*BaseActor
+	Config RandomizedTakerConfig
+	ticker *time.Ticker
+	rng    *rand.Rand
+	side   exchange.Side
+}
+
+func NewRandomizedTaker(id uint64, gateway *exchange.ClientGateway, config RandomizedTakerConfig) *RandomizedTakerActor {
+	if config.Interval == 0 {
+		config.Interval = 2 * time.Second
+	}
+	if config.MinQty == 0 {
+		config.MinQty = exchange.BTCAmount(0.1)
+	}
+	if config.MaxQty == 0 {
+		config.MaxQty = exchange.BTCAmount(1.0)
+	}
+	if config.BasePrecision == 0 {
+		config.BasePrecision = exchange.SATOSHI
+	}
+	if config.QuotePrecision == 0 {
+		config.QuotePrecision = exchange.SATOSHI / 1000
+	}
+
+	return &RandomizedTakerActor{
+		BaseActor: NewBaseActor(id, gateway),
+		Config:    config,
+		rng:       rand.New(rand.NewSource(time.Now().UnixNano() + int64(id))),
+		side:      exchange.Buy,
+	}
+}
+
+func (s *RandomizedTakerActor) Start(ctx context.Context) error {
+	s.Subscribe(s.Config.Symbol)
+	s.ticker = time.NewTicker(s.Config.Interval)
+
+	go s.eventLoop(ctx)
+	go s.tradingLoop(ctx)
+
+	return s.BaseActor.Start(ctx)
+}
+
+func (s *RandomizedTakerActor) Stop() error {
+	if s.ticker != nil {
+		s.ticker.Stop()
+	}
+	return s.BaseActor.Stop()
+}
+
+func (s *RandomizedTakerActor) eventLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event := <-s.EventChannel():
+			s.OnEvent(event)
+		}
+	}
+}
+
+func (s *RandomizedTakerActor) tradingLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.ticker.C:
+			s.executeRandomTrade()
+			s.side = s.flipSide(s.side)
+		}
+	}
+}
+
+func (s *RandomizedTakerActor) OnEvent(event *Event) {
+	// RandomizedTaker doesn't need to react to events
+	// Just lets market orders execute
+}
+
+func (s *RandomizedTakerActor) executeRandomTrade() {
+	qtyRange := s.Config.MaxQty - s.Config.MinQty
+	if qtyRange <= 0 {
+		qtyRange = s.Config.MinQty
+	}
+
+	qty := s.Config.MinQty
+	if qtyRange > 0 {
+		qty += s.rng.Int63n(qtyRange)
+	}
+
+	s.SubmitOrder(s.Config.Symbol, s.side, exchange.Market, 0, qty)
+}
+
+func (s *RandomizedTakerActor) flipSide(side exchange.Side) exchange.Side {
+	if side == exchange.Buy {
+		return exchange.Sell
+	}
+	return exchange.Buy
+}

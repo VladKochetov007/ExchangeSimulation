@@ -89,29 +89,53 @@ func TestClientNotificationsOnFill(t *testing.T) {
 	}
 	gateway2.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: buyReq}
 
-	select {
-	case resp := <-gateway2.ResponseCh:
-		if !resp.Success {
-			t.Fatalf("Buy order should succeed")
+	// Taker expects both Order Ack and Fill Notification
+	// Since order corresponds to immediate execution, Fill might arrive before Ack
+	receivedAck := false
+	receivedFill := false
+
+	timeout := time.After(100 * time.Millisecond)
+	for i := 0; i < 2; i++ { // Expecting 2 messages: Ack + Fill
+		select {
+		case resp := <-gateway2.ResponseCh:
+			if resp.RequestID == buyReq.RequestID {
+				if !resp.Success {
+					t.Fatalf("Buy order should succeed")
+				}
+				receivedAck = true
+				t.Logf("✅ TAKER receives: Order ack (orderID=%d)", resp.Data.(uint64))
+			} else if resp.RequestID == 0 {
+				if _, ok := resp.Data.(*FillNotification); ok {
+					receivedFill = true
+					t.Logf("✅ TAKER receives: Fill Notification")
+				} else {
+					t.Errorf("Received unexpected data with ID 0: %T", resp.Data)
+				}
+			}
+		case <-timeout:
+			t.Fatalf("Timeout waiting for taker responses")
 		}
-		t.Logf("✅ TAKER receives: Order ack (orderID=%d)", resp.Data.(uint64))
-	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("Timeout")
+	}
+
+	if !receivedAck {
+		t.Error("Taker did not receive Order Ack")
+	}
+	if !receivedFill {
+		t.Error("Taker did not receive Fill Notification")
 	}
 
 	select {
-	case <-gateway1.ResponseCh:
-		t.Errorf("❌ GAP: Maker should receive fill notification but doesn't!")
+	case resp := <-gateway1.ResponseCh:
+		if _, ok := resp.Data.(*FillNotification); ok {
+			t.Logf("✅ MAKER receives: Fill notification")
+		} else {
+			t.Errorf("MAKER received unexpected data: %T", resp.Data)
+		}
 	case <-time.After(50 * time.Millisecond):
-		t.Logf("❌ MISSING: Maker receives NO fill notification")
+		t.Errorf("❌ MISSING: Maker received NO fill notification")
 	}
 
-	select {
-	case <-gateway2.ResponseCh:
-		t.Errorf("❌ GAP: Taker should receive fill notification but doesn't!")
-	case <-time.After(50 * time.Millisecond):
-		t.Logf("❌ MISSING: Taker receives NO fill notification")
-	}
+	// Taker fill check already done above
 
 	gateway1.Close()
 	gateway2.Close()
@@ -232,21 +256,39 @@ func TestClientNotificationsOnPartialFill(t *testing.T) {
 	}
 	gateway2.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: buyReq}
 
-	select {
-	case resp := <-gateway2.ResponseCh:
-		if !resp.Success {
-			t.Fatalf("Order should succeed")
+	// Taker expects both Order Ack and Partial Fill Notification
+	// Since order corresponds to immediate execution (limit buy crossing sell), Fill might arrive before Ack
+	receivedAck := false
+	receivedFill := false
+
+	timeout := time.After(100 * time.Millisecond)
+	for i := 0; i < 2; i++ { // Expecting 2 messages: Ack + Fill
+		select {
+		case resp := <-gateway2.ResponseCh:
+			if resp.RequestID == buyReq.RequestID {
+				if !resp.Success {
+					t.Fatalf("Order should succeed")
+				}
+				receivedAck = true
+				t.Logf("✅ Taker receives: Order ack (orderID=%d)", resp.Data.(uint64))
+			} else if resp.RequestID == 0 {
+				if _, ok := resp.Data.(*FillNotification); ok {
+					receivedFill = true
+					t.Logf("✅ Taker receives: Partial Fill Notification")
+				} else {
+					t.Errorf("Received unexpected data with ID 0: %T", resp.Data)
+				}
+			}
+		case <-timeout:
+			t.Fatalf("Timeout waiting for taker responses")
 		}
-		t.Logf("✅ Taker receives: Order ack (orderID=%d)", resp.Data.(uint64))
-	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("Timeout")
 	}
 
-	select {
-	case <-gateway2.ResponseCh:
-		t.Logf("✅ WOULD BE GOOD: Partial fill notification")
-	case <-time.After(50 * time.Millisecond):
-		t.Logf("❌ MISSING: Taker receives NO partial fill notification")
+	if !receivedAck {
+		t.Error("Taker did not receive Order Ack")
+	}
+	if !receivedFill {
+		t.Error("Taker did not receive Partial Fill Notification")
 	}
 
 	select {

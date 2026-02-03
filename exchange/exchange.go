@@ -164,7 +164,8 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	order.Status = Open
 	order.Timestamp = e.Clock.NowUnixNano()
 
-	if req.Type == Market {
+	switch req.Type {
+	case Market:
 		if req.Side == Buy {
 			if book.Asks.Best != nil {
 				maxCost := (req.Qty * book.Asks.Best.Price) / precision
@@ -179,7 +180,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 				return Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
 			}
 		}
-	} else if req.Type == LimitOrder {
+	case LimitOrder:
 		asset := instrument.QuoteAsset()
 		amount := (req.Qty * req.Price) / precision
 		if req.Side == Buy {
@@ -234,6 +235,8 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 		putOrder(order)
 	}
 
+	e.publishSnapshot(req.Symbol, e.Clock.NowUnixNano())
+
 	return Response{RequestID: req.RequestID, Success: true, Data: orderID}
 }
 
@@ -286,6 +289,8 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 	client.RemoveOrder(req.OrderID)
 	order.Status = Cancelled
 	putOrder(order)
+
+	e.publishSnapshot(instrument.Symbol(), e.Clock.NowUnixNano())
 
 	return Response{RequestID: req.RequestID, Success: true, Data: remainingQty}
 }
@@ -479,6 +484,20 @@ func (e *Exchange) ListInstruments(baseFilter, quoteFilter string) []InstrumentI
 		})
 	}
 	return result
+}
+
+// publishSnapshot publishes a full order book snapshot to all subscribers
+// Caller must hold e.mu lock
+func (e *Exchange) publishSnapshot(symbol string, timestamp int64) {
+	book := e.Books[symbol]
+	if book == nil {
+		return
+	}
+	snapshot := &BookSnapshot{
+		Bids: book.Bids.getSnapshot(),
+		Asks: book.Asks.getSnapshot(),
+	}
+	e.MDPublisher.Publish(symbol, MDSnapshot, snapshot, timestamp)
 }
 
 func (e *Exchange) Shutdown() {

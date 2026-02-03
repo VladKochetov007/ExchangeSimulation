@@ -148,6 +148,12 @@ func TestCancelOrderValidationAfterPartialFill(t *testing.T) {
 	gateway2.RequestCh <- buyReq
 	<-gateway2.ResponseCh
 
+	// Consume the fill notification for the maker (gateway1)
+	fillResp := <-gateway1.ResponseCh
+	if _, ok := fillResp.Data.(*FillNotification); !ok {
+		t.Fatalf("Expected FillNotification for maker, got %T", fillResp.Data)
+	}
+
 	cancelReq := Request{
 		Type: ReqCancelOrder,
 		CancelReq: &CancelRequest{
