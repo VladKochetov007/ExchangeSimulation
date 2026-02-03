@@ -19,7 +19,8 @@ func TestRecorderCreatesFiles(t *testing.T) {
 	config := RecorderConfig{
 		Symbols:       []string{"BTCUSD"},
 		TradesPath:    "testdata/trades.csv",
-		SnapshotsPath: "testdata/snapshots.csv",
+		ObservedPath:  "testdata/book_observed.csv",
+		HiddenPath:    "testdata/book_hidden.csv",
 		FlushInterval: 100 * time.Millisecond,
 	}
 
@@ -32,8 +33,11 @@ func TestRecorderCreatesFiles(t *testing.T) {
 	if _, err := os.Stat("testdata/trades.csv"); os.IsNotExist(err) {
 		t.Error("trades.csv not created")
 	}
-	if _, err := os.Stat("testdata/snapshots.csv"); os.IsNotExist(err) {
-		t.Error("snapshots.csv not created")
+	if _, err := os.Stat("testdata/book_observed.csv"); os.IsNotExist(err) {
+		t.Error("book_observed.csv not created")
+	}
+	if _, err := os.Stat("testdata/book_hidden.csv"); os.IsNotExist(err) {
+		t.Error("book_hidden.csv not created")
 	}
 }
 
@@ -45,7 +49,8 @@ func TestRecorderWritesTrade(t *testing.T) {
 	config := RecorderConfig{
 		Symbols:       []string{"BTCUSD"},
 		TradesPath:    "testdata/trades.csv",
-		SnapshotsPath: "testdata/snapshots.csv",
+		ObservedPath:  "testdata/book_observed.csv",
+		HiddenPath:    "testdata/book_hidden.csv",
 		FlushInterval: 10 * time.Millisecond,
 	}
 
@@ -116,7 +121,8 @@ func TestRecorderWritesSnapshot(t *testing.T) {
 	config := RecorderConfig{
 		Symbols:       []string{"ETHUSD"},
 		TradesPath:    "testdata/trades.csv",
-		SnapshotsPath: "testdata/snapshots.csv",
+		ObservedPath:  "testdata/book_observed.csv",
+		HiddenPath:    "testdata/book_hidden.csv",
 		FlushInterval: 10 * time.Millisecond,
 	}
 
@@ -134,11 +140,11 @@ func TestRecorderWritesSnapshot(t *testing.T) {
 
 	snapshot := &exchange.BookSnapshot{
 		Bids: []exchange.PriceLevel{
-			{Price: 3000000000000, Qty: 500000000},
-			{Price: 2999000000000, Qty: 300000000},
+			{Price: 3000000000000, VisibleQty: 500000000},
+			{Price: 2999000000000, VisibleQty: 300000000},
 		},
 		Asks: []exchange.PriceLevel{
-			{Price: 3001000000000, Qty: 400000000},
+			{Price: 3001000000000, VisibleQty: 400000000},
 		},
 	}
 
@@ -156,7 +162,7 @@ func TestRecorderWritesSnapshot(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	recorder.Stop()
 
-	file, err := os.Open("testdata/snapshots.csv")
+	file, err := os.Open("testdata/book_observed.csv")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +202,8 @@ func TestRecorderMultipleTrades(t *testing.T) {
 	config := RecorderConfig{
 		Symbols:       []string{"BTCUSD"},
 		TradesPath:    "testdata/trades.csv",
-		SnapshotsPath: "testdata/snapshots.csv",
+		ObservedPath:  "testdata/book_observed.csv",
+		HiddenPath:    "testdata/book_hidden.csv",
 		FlushInterval: 10 * time.Millisecond,
 	}
 
@@ -262,7 +269,8 @@ func TestRecorderNonBlockingWrite(t *testing.T) {
 	config := RecorderConfig{
 		Symbols:       []string{"BTCUSD"},
 		TradesPath:    "testdata/trades.csv",
-		SnapshotsPath: "testdata/snapshots.csv",
+		ObservedPath:  "testdata/book_observed.csv",
+		HiddenPath:    "testdata/book_hidden.csv",
 		FlushInterval: 1 * time.Second,
 	}
 
@@ -319,7 +327,8 @@ func TestRecorderGracefulShutdown(t *testing.T) {
 	config := RecorderConfig{
 		Symbols:       []string{"BTCUSD"},
 		TradesPath:    "testdata/trades.csv",
-		SnapshotsPath: "testdata/snapshots.csv",
+		ObservedPath:  "testdata/book_observed.csv",
+		HiddenPath:    "testdata/book_hidden.csv",
 		FlushInterval: 10 * time.Millisecond,
 	}
 
@@ -385,7 +394,8 @@ func TestRecorderSideFormatting(t *testing.T) {
 	config := RecorderConfig{
 		Symbols:       []string{"BTCUSD"},
 		TradesPath:    "testdata/trades.csv",
-		SnapshotsPath: "testdata/snapshots.csv",
+		ObservedPath:  "testdata/book_observed.csv",
+		HiddenPath:    "testdata/book_hidden.csv",
 		FlushInterval: 10 * time.Millisecond,
 	}
 

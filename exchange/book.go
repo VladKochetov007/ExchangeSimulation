@@ -122,9 +122,14 @@ func (b *Book) updateBest(limit *Limit) {
 func (b *Book) getSnapshot() []PriceLevel {
 	levels := make([]PriceLevel, 0, 20)
 	for l := b.ActiveHead; l != nil && len(levels) < 20; l = l.Next {
-		qty := visibleQty(l)
-		if qty > 0 {
-			levels = append(levels, PriceLevel{Price: l.Price, Qty: qty})
+		visible := visibleQty(l)
+		hidden := l.TotalQty - visible
+		if visible > 0 || hidden > 0 {
+			levels = append(levels, PriceLevel{
+				Price:      l.Price,
+				VisibleQty: visible,
+				HiddenQty:  hidden,
+			})
 		}
 	}
 	return levels

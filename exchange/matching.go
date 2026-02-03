@@ -50,9 +50,6 @@ func (m *DefaultMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) []*
 
 				if order.FilledQty >= order.Qty {
 					order.Status = Filled
-					unlinkOrder(order)
-					delete(book.Orders, order.ID)
-					putOrder(order)
 				} else {
 					order.Status = PartialFill
 				}
@@ -97,6 +94,9 @@ func (m *DefaultMatcher) execute(taker, maker *Order) *Execution {
 	execQty := min(taker.Qty-taker.FilledQty, maker.Qty-maker.FilledQty)
 	taker.FilledQty += execQty
 	maker.FilledQty += execQty
+	if maker.Parent != nil {
+		maker.Parent.TotalQty -= execQty
+	}
 
 	exec := getExecution()
 	exec.TakerOrderID = taker.ID

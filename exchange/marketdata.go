@@ -48,10 +48,10 @@ func (p *MDPublisher) Unsubscribe(clientID uint64, symbol string) {
 }
 
 func (p *MDPublisher) Publish(symbol string, mdType MDType, data any, timestamp int64) {
-	p.mu.RLock()
+	p.mu.Lock()
 	subs := p.subscriptions[symbol]
 	if len(subs) == 0 {
-		p.mu.RUnlock()
+		p.mu.Unlock()
 		return
 	}
 
@@ -67,20 +67,18 @@ func (p *MDPublisher) Publish(symbol string, mdType MDType, data any, timestamp 
 				Timestamp: timestamp,
 				Data:      data,
 			}
-			select {
-			case gateway.MarketData <- msgCopy:
-			default:
-			}
+			gateway.MarketData <- msgCopy
 		}
 	}
-	p.mu.RUnlock()
+	p.mu.Unlock()
 }
 
-func (p *MDPublisher) PublishDelta(symbol string, side Side, price, qty int64, timestamp int64) {
+func (p *MDPublisher) PublishDelta(symbol string, side Side, price, visible, hidden int64, timestamp int64) {
 	delta := &BookDelta{
-		Side:  side,
-		Price: price,
-		Qty:   qty,
+		Side:       side,
+		Price:      price,
+		VisibleQty: visible,
+		HiddenQty:  hidden,
 	}
 	p.Publish(symbol, MDDelta, delta, timestamp)
 }

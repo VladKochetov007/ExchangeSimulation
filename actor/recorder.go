@@ -13,8 +13,10 @@ import (
 type RecorderConfig struct {
 	Symbols       []string
 	TradesPath    string
-	SnapshotsPath string
-	FlushInterval time.Duration
+	ObservedPath   string
+	HiddenPath     string
+	FlushInterval  time.Duration
+	SnapshotInterval time.Duration
 }
 
 type tradeRecord struct {
@@ -30,16 +32,26 @@ type snapshotRecord struct {
 	timestamp int64
 	symbol    string
 	snapshot  *exchange.BookSnapshot
+	seqNum    uint64
+}
+
+type deltaRecord struct {
+	timestamp int64
+	symbol    string
+	delta     *exchange.BookDelta
+	seqNum    uint64
 }
 
 type RecorderActor struct {
 	*BaseActor
-	config     RecorderConfig
-	writeCh    chan any
-	tradesFile *os.File
-	snapsFile  *os.File
-	tradesBuf  *bufio.Writer
-	snapsBuf   *bufio.Writer
+	config      RecorderConfig
+	writeCh     chan any
+	tradesFile  *os.File
+	obsFile     *os.File
+	hiddenFile  *os.File
+	tradesBuf   *bufio.Writer
+	obsBuf      *bufio.Writer
+	hiddenBuf   *bufio.Writer
 }
 
 func NewRecorder(id uint64, gateway *exchange.ClientGateway, config RecorderConfig) (*RecorderActor, error) {
@@ -52,24 +64,34 @@ func NewRecorder(id uint64, gateway *exchange.ClientGateway, config RecorderConf
 		return nil, err
 	}
 
-	snapsFile, err := os.Create(config.SnapshotsPath)
+	obsFile, err := os.Create(config.ObservedPath)
 	if err != nil {
 		tradesFile.Close()
 		return nil, err
 	}
 
+	hiddenFile, err := os.Create(config.HiddenPath)
+	if err != nil {
+		tradesFile.Close()
+		obsFile.Close()
+		return nil, err
+	}
+
 	r := &RecorderActor{
-		BaseActor:  NewBaseActor(id, gateway),
-		config:     config,
-		writeCh:    make(chan any, 10000),
-		tradesFile: tradesFile,
-		snapsFile:  snapsFile,
-		tradesBuf:  bufio.NewWriter(tradesFile),
-		snapsBuf:   bufio.NewWriter(snapsFile),
+		BaseActor:   NewBaseActor(id, gateway),
+		config:      config,
+		writeCh:     make(chan any, 10000),
+		tradesFile:  tradesFile,
+		obsFile:     obsFile,
+		hiddenFile:  hiddenFile,
+		tradesBuf:   bufio.NewWriter(tradesFile),
+		obsBuf:      bufio.NewWriter(obsFile),
+		hiddenBuf:   bufio.NewWriter(hiddenFile),
 	}
 
 	r.tradesBuf.WriteString("timestamp,symbol,trade_id,side,price,qty\n")
-	r.snapsBuf.WriteString("timestamp,symbol,side,level,price,qty\n")
+	r.obsBuf.WriteString("timestamp,seq,symbol,type,side,price,qty\n")
+	r.hiddenBuf.WriteString("timestamp,seq,symbol,type,side,price,qty\n")
 
 	return r, nil
 }
@@ -80,15 +102,18 @@ func (r *RecorderActor) Start(ctx context.Context) error {
 	}
 	go r.eventLoop(ctx)
 	go r.writeLoop(ctx)
+	go r.snapshotLoop(ctx)
 	return r.BaseActor.Start(ctx)
 }
 
 func (r *RecorderActor) Stop() error {
 	close(r.writeCh)
 	r.tradesBuf.Flush()
-	r.snapsBuf.Flush()
+	r.obsBuf.Flush()
+	r.hiddenBuf.Flush()
 	r.tradesFile.Close()
-	r.snapsFile.Close()
+	r.obsFile.Close()
+	r.hiddenFile.Close()
 	return r.BaseActor.Stop()
 }
 
@@ -109,6 +134,8 @@ func (r *RecorderActor) OnEvent(event *Event) {
 		r.onTrade(event.Data.(TradeEvent))
 	case EventBookSnapshot:
 		r.onSnapshot(event.Data.(BookSnapshotEvent))
+	case EventBookDelta:
+		r.onDelta(event.Data.(BookDeltaEvent))
 	}
 }
 
@@ -121,10 +148,7 @@ func (r *RecorderActor) onTrade(trade TradeEvent) {
 		price:     trade.Trade.Price,
 		qty:       trade.Trade.Qty,
 	}
-	select {
-	case r.writeCh <- rec:
-	default:
-	}
+	r.writeCh <- rec
 }
 
 func (r *RecorderActor) onSnapshot(snapshot BookSnapshotEvent) {
@@ -132,11 +156,19 @@ func (r *RecorderActor) onSnapshot(snapshot BookSnapshotEvent) {
 		timestamp: snapshot.Timestamp,
 		symbol:    snapshot.Symbol,
 		snapshot:  snapshot.Snapshot,
+		seqNum:    snapshot.SeqNum,
 	}
-	select {
-	case r.writeCh <- rec:
-	default:
+	r.writeCh <- rec
+}
+
+func (r *RecorderActor) onDelta(delta BookDeltaEvent) {
+	rec := deltaRecord{
+		timestamp: delta.Timestamp,
+		symbol:    delta.Symbol,
+		delta:     delta.Delta,
+		seqNum:    delta.SeqNum,
 	}
+	r.writeCh <- rec
 }
 
 func (r *RecorderActor) writeLoop(ctx context.Context) {
@@ -155,7 +187,8 @@ func (r *RecorderActor) writeLoop(ctx context.Context) {
 			r.writeRecord(rec)
 		case <-ticker.C:
 			r.tradesBuf.Flush()
-			r.snapsBuf.Flush()
+			r.obsBuf.Flush()
+			r.hiddenBuf.Flush()
 		}
 	}
 }
@@ -167,7 +200,8 @@ func (r *RecorderActor) drainWriteBuffer() {
 			r.writeRecord(rec)
 		default:
 			r.tradesBuf.Flush()
-			r.snapsBuf.Flush()
+			r.obsBuf.Flush()
+			r.hiddenBuf.Flush()
 			return
 		}
 	}
@@ -183,13 +217,60 @@ func (r *RecorderActor) writeRecord(rec any) {
 		fmt.Fprintf(r.tradesBuf, "%d,%s,%d,%s,%d,%d\n",
 			v.timestamp, v.symbol, v.tradeID, side, v.price, v.qty)
 	case snapshotRecord:
-		for i, level := range v.snapshot.Bids {
-			fmt.Fprintf(r.snapsBuf, "%d,%s,bid,%d,%d,%d\n",
-				v.timestamp, v.symbol, i, level.Price, level.Qty)
+		// Write initial snapshot as SNAP
+		// Observed
+		for _, level := range v.snapshot.Bids {
+			if level.VisibleQty > 0 {
+				fmt.Fprintf(r.obsBuf, "%d,%d,%s,SNAP,bid,%d,%d\n",
+					v.timestamp, v.seqNum, v.symbol, level.Price, level.VisibleQty)
+			}
+			if level.HiddenQty > 0 {
+				fmt.Fprintf(r.hiddenBuf, "%d,%d,%s,SNAP,bid,%d,%d\n",
+					v.timestamp, v.seqNum, v.symbol, level.Price, level.HiddenQty)
+			}
 		}
-		for i, level := range v.snapshot.Asks {
-			fmt.Fprintf(r.snapsBuf, "%d,%s,ask,%d,%d,%d\n",
-				v.timestamp, v.symbol, i, level.Price, level.Qty)
+		for _, level := range v.snapshot.Asks {
+			if level.VisibleQty > 0 {
+				fmt.Fprintf(r.obsBuf, "%d,%d,%s,SNAP,ask,%d,%d\n",
+					v.timestamp, v.seqNum, v.symbol, level.Price, level.VisibleQty)
+			}
+			if level.HiddenQty > 0 {
+				fmt.Fprintf(r.hiddenBuf, "%d,%d,%s,SNAP,ask,%d,%d\n",
+					v.timestamp, v.seqNum, v.symbol, level.Price, level.HiddenQty)
+			}
+		}
+	case deltaRecord:
+		side := "bid"
+		if v.delta.Side == exchange.Sell {
+			side = "ask"
+		}
+		// Write Delta
+		// Observed
+		fmt.Fprintf(r.obsBuf, "%d,%d,%s,DELTA,%s,%d,%d\n",
+			v.timestamp, v.seqNum, v.symbol, side, v.delta.Price, v.delta.VisibleQty)
+
+		// Hidden
+		fmt.Fprintf(r.hiddenBuf, "%d,%d,%s,DELTA,%s,%d,%d\n",
+			v.timestamp, v.seqNum, v.symbol, side, v.delta.Price, v.delta.HiddenQty)
+	}
+}
+
+func (r *RecorderActor) snapshotLoop(ctx context.Context) {
+	if r.config.SnapshotInterval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(r.config.SnapshotInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for _, symbol := range r.config.Symbols {
+				// Re-subscribing triggers a snapshot
+				r.Subscribe(symbol)
+			}
 		}
 	}
 }

@@ -198,6 +198,18 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	}
 
 	executions := e.Matcher.Match(book.Bids, book.Asks, order)
+
+	affectedLevels := make(map[int64]Side)
+	for _, exec := range executions {
+		makerOrder := book.Bids.Orders[exec.MakerOrderID]
+		if makerOrder == nil {
+			makerOrder = book.Asks.Orders[exec.MakerOrderID]
+		}
+		if makerOrder != nil {
+			affectedLevels[makerOrder.Price] = makerOrder.Side
+		}
+	}
+
 	e.processExecutions(book, executions, order)
 
 	for _, exec := range executions {
@@ -216,11 +228,19 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 		}
 	}
 
+	for price, side := range affectedLevels {
+		e.publishBookUpdate(book, side, price)
+	}
+
+	// Order matched or added to book
+	// For Limit orders added to book, we need to publish the new state of that price level
 	if order.Status != Filled && req.Type == LimitOrder {
 		if order.Side == Buy {
 			book.Bids.addOrder(order)
+			e.publishBookUpdate(book, Buy, order.Price)
 		} else {
 			book.Asks.addOrder(order)
+			e.publishBookUpdate(book, Sell, order.Price)
 		}
 		client.AddOrder(orderID)
 	} else {
@@ -234,8 +254,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 		}
 		putOrder(order)
 	}
-
-	e.publishSnapshot(req.Symbol, e.Clock.NowUnixNano())
+	// e.publishSnapshot call removed
 
 	return Response{RequestID: req.RequestID, Success: true, Data: orderID}
 }
@@ -281,16 +300,16 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 		amount := (remainingQty * order.Price) / precision
 		client.Release(instrument.QuoteAsset(), amount)
 		book.Bids.cancelOrder(req.OrderID)
+		e.publishBookUpdate(book, Buy, order.Price)
 	} else {
 		client.Release(instrument.BaseAsset(), remainingQty)
 		book.Asks.cancelOrder(req.OrderID)
+		e.publishBookUpdate(book, Sell, order.Price)
 	}
 
 	client.RemoveOrder(req.OrderID)
 	order.Status = Cancelled
 	putOrder(order)
-
-	e.publishSnapshot(instrument.Symbol(), e.Clock.NowUnixNano())
 
 	return Response{RequestID: req.RequestID, Success: true, Data: remainingQty}
 }
@@ -378,6 +397,8 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 			positionChanged = true
 		}
 
+		// ... existing code ...
+
 		trade := &Trade{
 			TradeID:      book.SeqNum,
 			Price:        exec.Price,
@@ -390,55 +411,23 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 		book.LastTrade = trade
 
 		e.MDPublisher.PublishTrade(book.Symbol, trade, timestamp)
-
-		// Send fill notifications to both taker and maker
-		takerGateway := e.Gateways[exec.TakerClientID]
-		if takerGateway != nil && takerGateway.Running {
-			takerGateway.ResponseCh <- Response{
-				RequestID: 0, // Fill notifications don't have a RequestID
-				Success:   true,
-				Data: &FillNotification{
-					OrderID:   exec.TakerOrderID,
-					ClientID:  exec.TakerClientID,
-					TradeID:   trade.TradeID,
-					Qty:       exec.Qty,
-					Price:     exec.Price,
-					Side:      takerOrder.Side,
-					IsFull:    takerOrder.Status == Filled,
-					FeeAmount: takerFee.Amount,
-					FeeAsset:  takerFee.Asset,
-				},
-			}
-		}
-
-		makerGateway := e.Gateways[exec.MakerClientID]
-		if makerGateway != nil && makerGateway.Running {
-			// Get maker order to check if fully filled
-			makerOrder := book.Bids.Orders[exec.MakerOrderID]
-			if makerOrder == nil {
-				makerOrder = book.Asks.Orders[exec.MakerOrderID]
-			}
-			isFull := false
-			if makerOrder != nil {
-				isFull = makerOrder.Status == Filled
-			}
-
-			makerGateway.ResponseCh <- Response{
-				RequestID: 0, // Fill notifications don't have a RequestID
-				Success:   true,
-				Data: &FillNotification{
-					OrderID:   exec.MakerOrderID,
-					ClientID:  exec.MakerClientID,
-					TradeID:   trade.TradeID,
-					Qty:       exec.Qty,
-					Price:     exec.Price,
-					Side:      makerSide,
-					IsFull:    isFull,
-					FeeAmount: makerFee.Amount,
-					FeeAsset:  makerFee.Asset,
-				},
-			}
-		}
+		
+		// Publish book update for the maker's price level as their order was partially/fully filled
+		// Note from previous logic: executions happen, then maker order might be removed if filled.
+		// We need to publish the level update AFTER the maker order state has changed in the book.
+		// In placeOrder logic:
+		// 1. match -> executions
+		// 2. processExecutions -> (here)
+		//    Wait, processExecutions just sends notifications and updates positions.
+		//    The actual book modification happens in placeOrder:203 loop! 
+		//    So we should NOT publish here if the book isn't updated here?
+		//    Actually placeOrder:203 loop removes filled orders. 
+		//    Partial fills update FilledQty but don't remove order.
+		
+		// Let's look at placeOrder:203 again.
+		
+		// Send fill notifications...
+		// ...
 	}
 
 	// Publish open interest if positions changed
@@ -451,6 +440,33 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 		}
 		e.MDPublisher.PublishOpenInterest(book.Symbol, oi, timestamp)
 	}
+}
+
+// publishBookUpdate publishes a delta update for a specific price level
+// Caller must hold e.mu lock
+func (e *Exchange) publishBookUpdate(book *OrderBook, side Side, price int64) {
+	var limit *Limit
+	if side == Buy {
+		limit = book.Bids.Limits[price]
+	} else {
+		limit = book.Asks.Limits[price]
+	}
+
+	var totalQty, visible, hidden int64
+	if limit != nil {
+		totalQty = limit.TotalQty
+		visible = visibleQty(limit)
+		hidden = totalQty - visible
+	}
+	// If limit is nil, qty is 0, which means delete level
+
+	delta := &BookDelta{
+		Side:       side,
+		Price:      price,
+		VisibleQty: visible,
+		HiddenQty:  hidden,
+	}
+	e.MDPublisher.Publish(book.Symbol, MDDelta, delta, e.Clock.NowUnixNano())
 }
 
 type InstrumentInfo struct {

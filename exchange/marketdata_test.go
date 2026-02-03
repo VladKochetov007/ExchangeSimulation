@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-
 func TestBookGetSnapshot(t *testing.T) {
 	book := newBook(Buy)
 
@@ -42,8 +41,8 @@ func TestBookGetSnapshot(t *testing.T) {
 	if snapshot[0].Price != 50000 {
 		t.Errorf("First level should be 50000, got %d", snapshot[0].Price)
 	}
-	if snapshot[0].Qty != 100 {
-		t.Errorf("First level qty should be 100, got %d", snapshot[0].Qty)
+	if snapshot[0].VisibleQty != 100 {
+		t.Errorf("First level qty should be 100, got %d", snapshot[0].VisibleQty)
 	}
 
 	if snapshot[1].Price != 49000 {
@@ -109,7 +108,7 @@ func TestVisibleQtyWithHidden(t *testing.T) {
 func TestMDPublisherSubscribeUnsubscribe(t *testing.T) {
 	mdp := NewMDPublisher()
 	gateway := &ClientGateway{
-		ClientID:     1,
+		ClientID:   1,
 		MarketData: make(chan *MarketDataMsg, 100),
 	}
 
@@ -141,14 +140,14 @@ func TestMDPublisherSubscribeUnsubscribe(t *testing.T) {
 func TestMDPublisherPublishDelta(t *testing.T) {
 	mdp := NewMDPublisher()
 	gateway := &ClientGateway{
-		ClientID:     1,
+		ClientID:   1,
 		MarketData: make(chan *MarketDataMsg, 100),
 	}
 
 	types := []MDType{MDDelta}
 	mdp.Subscribe(1, "BTC/USD", types, gateway)
 
-	mdp.PublishDelta("BTC/USD", Buy, 50000, 100, time.Now().UnixNano())
+	mdp.PublishDelta("BTC/USD", Buy, 50000, 100, 0, time.Now().UnixNano())
 
 	select {
 	case msg := <-gateway.MarketData:
@@ -159,8 +158,8 @@ func TestMDPublisherPublishDelta(t *testing.T) {
 		if receivedDelta.Price != 50000 {
 			t.Errorf("Expected price 50000, got %d", receivedDelta.Price)
 		}
-		if receivedDelta.Qty != 100 {
-			t.Errorf("Expected qty 100, got %d", receivedDelta.Qty)
+		if receivedDelta.VisibleQty != 100 {
+			t.Errorf("Expected visible qty 100, got %d", receivedDelta.VisibleQty)
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatalf("Timeout waiting for delta message")
@@ -170,7 +169,7 @@ func TestMDPublisherPublishDelta(t *testing.T) {
 func TestMDPublisherPublishFunding(t *testing.T) {
 	mdp := NewMDPublisher()
 	gateway := &ClientGateway{
-		ClientID:     1,
+		ClientID:   1,
 		MarketData: make(chan *MarketDataMsg, 100),
 	}
 
@@ -209,11 +208,11 @@ func TestMDPublisherMultipleSubscribers(t *testing.T) {
 	mdp := NewMDPublisher()
 
 	gateway1 := &ClientGateway{
-		ClientID:     1,
+		ClientID:   1,
 		MarketData: make(chan *MarketDataMsg, 100),
 	}
 	gateway2 := &ClientGateway{
-		ClientID:     2,
+		ClientID:   2,
 		MarketData: make(chan *MarketDataMsg, 100),
 	}
 

@@ -364,9 +364,9 @@ func TestBaseActorHandleMarketDataDelta(t *testing.T) {
 	actor.Start(ctx)
 
 	delta := &exchange.BookDelta{
-		Side:  exchange.Buy,
-		Price: 5000000000000,
-		Qty:   100000000,
+		Side:       exchange.Buy,
+		Price:      5000000000000,
+		VisibleQty: 100000000,
 	}
 
 	md := &exchange.MarketDataMsg{

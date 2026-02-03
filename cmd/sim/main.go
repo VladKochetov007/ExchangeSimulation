@@ -84,12 +84,30 @@ func run() error {
 		runner.AddActor(maker)
 	}
 
+	// Add IcebergMaker to provide hidden liquidity
+	for i := uint64(300); i <= 300; i++ {
+		gateway := ex.ConnectClient(i, initialBalances, feePlan)
+		maker := actor.NewDelayedMaker(i, gateway, actor.DelayedMakerConfig{
+			Symbol:      "BTCUSD",
+			StartDelay:  8 * time.Second,
+			OrderCount:  3,
+			BasePrice:   100000 * 100000000,
+			PriceSpread: 20 * 100000000,
+			Qty:         5 * 100000000, // 5 BTC
+			Visibility:  exchange.Iceberg,
+			IcebergQty:  1 * 100000000, // Show 1 BTC
+		})
+		runner.AddActor(maker)
+	}
+
 	simDuration := 15 * time.Second
 	recorderGateway := ex.ConnectClient(999, initialBalances, feePlan)
 	recorder, err := actor.NewRecorder(999, recorderGateway, actor.RecorderConfig{
-		Symbols:       []string{"BTCUSD", "ETHUSD"},
-		TradesPath:    "output/trades.csv",
-		SnapshotsPath: "output/snapshots.csv",
+		Symbols:          []string{"BTCUSD", "ETHUSD"},
+		TradesPath:       "output/trades.csv",
+		ObservedPath:     "output/book_observed.csv",
+		HiddenPath:       "output/book_hidden.csv",
+		SnapshotInterval: 2 * time.Second,
 	})
 	if err != nil {
 		return err

@@ -66,12 +66,14 @@ type BookDeltaEvent struct {
 	Symbol    string
 	Delta     *exchange.BookDelta
 	Timestamp int64
+	SeqNum    uint64
 }
 
 type BookSnapshotEvent struct {
 	Symbol    string
 	Snapshot  *exchange.BookSnapshot
 	Timestamp int64
+	SeqNum    uint64
 }
 
 type FundingUpdateEvent struct {

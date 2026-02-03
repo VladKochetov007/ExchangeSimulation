@@ -190,6 +190,7 @@ func (a *BaseActor) handleMarketData(md *exchange.MarketDataMsg) {
 				Symbol:    md.Symbol,
 				Delta:     delta,
 				Timestamp: md.Timestamp,
+				SeqNum:    md.SeqNum,
 			},
 		}
 	case exchange.MDSnapshot:
@@ -200,6 +201,7 @@ func (a *BaseActor) handleMarketData(md *exchange.MarketDataMsg) {
 				Symbol:    md.Symbol,
 				Snapshot:  snapshot,
 				Timestamp: md.Timestamp,
+				SeqNum:    md.SeqNum,
 			},
 		}
 	case exchange.MDFunding:
@@ -238,6 +240,25 @@ func (a *BaseActor) SubmitOrder(symbol string, side exchange.Side, orderType exc
 			Symbol:      symbol,
 			TimeInForce: exchange.GTC,
 			Visibility:  exchange.Normal,
+		},
+	}
+	a.gateway.RequestCh <- req
+}
+
+func (a *BaseActor) SubmitOrderFull(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64, visibility exchange.Visibility, icebergQty int64) {
+	reqID := atomic.AddUint64(&a.requestSeq, 1)
+	req := exchange.Request{
+		Type: exchange.ReqPlaceOrder,
+		OrderReq: &exchange.OrderRequest{
+			RequestID:   reqID,
+			Side:        side,
+			Type:        orderType,
+			Price:       price,
+			Qty:         qty,
+			Symbol:      symbol,
+			TimeInForce: exchange.GTC,
+			Visibility:  visibility,
+			IcebergQty:  icebergQty,
 		},
 	}
 	a.gateway.RequestCh <- req

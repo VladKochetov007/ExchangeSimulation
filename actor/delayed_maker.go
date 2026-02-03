@@ -14,6 +14,8 @@ type DelayedMakerConfig struct {
 	BasePrice   int64
 	PriceSpread int64
 	Qty         int64
+	Visibility  exchange.Visibility
+	IcebergQty  int64
 }
 
 type DelayedMakerActor struct {
@@ -55,11 +57,11 @@ func (a *DelayedMakerActor) placeOrders() {
 	for i := 0; i < a.Config.OrderCount; i++ {
 		// Create a Buy order
 		buyPrice := a.Config.BasePrice - (int64(i+1) * a.Config.PriceSpread)
-		a.SubmitOrder(a.Config.Symbol, exchange.Buy, exchange.LimitOrder, buyPrice, a.Config.Qty)
+		a.SubmitOrderFull(a.Config.Symbol, exchange.Buy, exchange.LimitOrder, buyPrice, a.Config.Qty, a.Config.Visibility, a.Config.IcebergQty)
 
 		// Create a Sell order
 		sellPrice := a.Config.BasePrice + (int64(i+1) * a.Config.PriceSpread)
-		a.SubmitOrder(a.Config.Symbol, exchange.Sell, exchange.LimitOrder, sellPrice, a.Config.Qty)
+		a.SubmitOrderFull(a.Config.Symbol, exchange.Sell, exchange.LimitOrder, sellPrice, a.Config.Qty, a.Config.Visibility, a.Config.IcebergQty)
 	}
 }
 

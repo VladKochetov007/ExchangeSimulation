@@ -190,9 +190,10 @@ type BookSnapshot struct {
 }
 
 type BookDelta struct {
-	Side  Side
-	Price int64
-	Qty   int64
+	Side       Side
+	Price      int64
+	VisibleQty int64
+	HiddenQty  int64
 }
 
 type Trade struct {
@@ -205,8 +206,9 @@ type Trade struct {
 }
 
 type PriceLevel struct {
-	Price int64
-	Qty   int64
+	Price      int64
+	VisibleQty int64
+	HiddenQty  int64
 }
 
 type Subscription struct {

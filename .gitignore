@@ -278,3 +278,4 @@ nautilus_trader/
 uv.lock
 coverage.out
 **/*.csv
+**.png

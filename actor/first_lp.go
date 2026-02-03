@@ -159,11 +159,11 @@ func (f *FirstLiquidityProvidingActor) onBookSnapshot(snap BookSnapshotEvent) {
 	// Update market state
 	if len(snap.Snapshot.Bids) > 0 {
 		f.BestBid = snap.Snapshot.Bids[0].Price
-		f.BidLiquidity = snap.Snapshot.Bids[0].Qty
+		f.BidLiquidity = snap.Snapshot.Bids[0].VisibleQty
 	}
 	if len(snap.Snapshot.Asks) > 0 {
 		f.BestAsk = snap.Snapshot.Asks[0].Price
-		f.AskLiquidity = snap.Snapshot.Asks[0].Qty
+		f.AskLiquidity = snap.Snapshot.Asks[0].VisibleQty
 	}
 
 	if f.BestBid > 0 && f.BestAsk > 0 {
@@ -187,9 +187,9 @@ func (f *FirstLiquidityProvidingActor) onBookDelta(delta BookDeltaEvent) {
 		// Bid side update
 		if delta.Delta.Price >= f.BestBid {
 			f.BestBid = delta.Delta.Price
-			if delta.Delta.Qty > 0 {
+			if delta.Delta.VisibleQty > 0 {
 				// New/updated level
-				f.BidLiquidity = delta.Delta.Qty
+				f.BidLiquidity = delta.Delta.VisibleQty
 			} else {
 				// Level removed - would need full book for accurate tracking
 				f.BidLiquidity = 0
@@ -199,8 +199,8 @@ func (f *FirstLiquidityProvidingActor) onBookDelta(delta BookDeltaEvent) {
 		// Ask side update
 		if f.BestAsk == 0 || delta.Delta.Price <= f.BestAsk {
 			f.BestAsk = delta.Delta.Price
-			if delta.Delta.Qty > 0 {
-				f.AskLiquidity = delta.Delta.Qty
+			if delta.Delta.VisibleQty > 0 {
+				f.AskLiquidity = delta.Delta.VisibleQty
 			} else {
 				f.AskLiquidity = 0
 			}
