@@ -3,7 +3,7 @@
 ## System Overview
 
 ```mermaid
-graph TB
+graph LR
     subgraph "Simulation Layer"
         Runner[Simulation Runner]
         Clock[Clock Interface]

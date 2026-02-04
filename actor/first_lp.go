@@ -184,11 +184,7 @@ func (f *FirstLiquidityProvidingActor) onBookDelta(delta BookDeltaEvent) {
 	if delta.Delta.Side == exchange.Buy {
 		if delta.Delta.Price >= f.BestBid {
 			f.BestBid = delta.Delta.Price
-			if delta.Delta.VisibleQty > 0 {
-				f.BidLiquidity = delta.Delta.VisibleQty
-			} else {
-				f.BidLiquidity = 0
-			}
+			f.BidLiquidity = max(delta.Delta.VisibleQty, 0)
 		}
 	} else {
 		if f.BestAsk == 0 || delta.Delta.Price <= f.BestAsk {

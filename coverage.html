@@ -1,0 +1,4444 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>actor: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">exchange_sim/actor/actor.go (91.8%)</option>
+				
+				<option value="file1">exchange_sim/actor/delayed_maker.go (93.8%)</option>
+				
+				<option value="file2">exchange_sim/actor/first_lp.go (88.7%)</option>
+				
+				<option value="file3">exchange_sim/actor/noisy_trader.go (91.4%)</option>
+				
+				<option value="file4">exchange_sim/actor/oms.go (95.8%)</option>
+				
+				<option value="file5">exchange_sim/actor/randomized_taker.go (100.0%)</option>
+				
+				<option value="file6">exchange_sim/actor/recorder.go (77.5%)</option>
+				
+				<option value="file7">exchange_sim/cmd/sim/main.go (0.0%)</option>
+				
+				<option value="file8">exchange_sim/exchange/book.go (95.7%)</option>
+				
+				<option value="file9">exchange_sim/exchange/client.go (100.0%)</option>
+				
+				<option value="file10">exchange_sim/exchange/exchange.go (92.1%)</option>
+				
+				<option value="file11">exchange_sim/exchange/fee.go (100.0%)</option>
+				
+				<option value="file12">exchange_sim/exchange/funding.go (96.5%)</option>
+				
+				<option value="file13">exchange_sim/exchange/gateway.go (100.0%)</option>
+				
+				<option value="file14">exchange_sim/exchange/instrument.go (92.3%)</option>
+				
+				<option value="file15">exchange_sim/exchange/limit.go (90.9%)</option>
+				
+				<option value="file16">exchange_sim/exchange/marketdata.go (100.0%)</option>
+				
+				<option value="file17">exchange_sim/exchange/matching.go (94.6%)</option>
+				
+				<option value="file18">exchange_sim/exchange/order.go (100.0%)</option>
+				
+				<option value="file19">exchange_sim/exchange/pools.go (100.0%)</option>
+				
+				<option value="file20">exchange_sim/exchange/test_helpers.go (12.9%)</option>
+				
+				<option value="file21">exchange_sim/simulation/clock.go (100.0%)</option>
+				
+				<option value="file22">exchange_sim/simulation/delayed_gateway.go (93.2%)</option>
+				
+				<option value="file23">exchange_sim/simulation/latency.go (100.0%)</option>
+				
+				<option value="file24">exchange_sim/simulation/runner.go (92.7%)</option>
+				
+				<option value="file25">exchange_sim/simulation/venue.go (67.9%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package actor
+
+import (
+        "context"
+        "sync"
+        "sync/atomic"
+
+        "exchange_sim/exchange"
+)
+
+type Actor interface {
+        OnEvent(event *Event)
+        Start(ctx context.Context) error
+        Stop() error
+        ID() uint64
+        Gateway() *exchange.ClientGateway
+}
+
+type BaseActor struct {
+        id         uint64
+        gateway    *exchange.ClientGateway
+        eventCh    chan *Event
+        stopCh     chan struct{}
+        running    atomic.Bool
+        requestSeq uint64
+
+        // Order tracking for fill notifications
+        activeOrders  sync.Map // orderID -&gt; *OrderInfo
+        requestToOrder sync.Map // requestID -&gt; orderID
+}
+
+type OrderInfo struct {
+        OrderID   uint64
+        RequestID uint64
+        FilledQty int64
+        TotalQty  int64
+}
+
+func NewBaseActor(id uint64, gateway *exchange.ClientGateway) *BaseActor <span class="cov8" title="1">{
+        return &amp;BaseActor{
+                id:      id,
+                gateway: gateway,
+                eventCh: make(chan *Event, 1000),
+                stopCh:  make(chan struct{}),
+        }
+}</span>
+
+func (a *BaseActor) ID() uint64 <span class="cov8" title="1">{
+        return a.id
+}</span>
+
+func (a *BaseActor) Gateway() *exchange.ClientGateway <span class="cov8" title="1">{
+        return a.gateway
+}</span>
+
+func (a *BaseActor) Start(ctx context.Context) error <span class="cov8" title="1">{
+        if !a.running.CompareAndSwap(false, true) </span><span class="cov0" title="0">{
+                return nil
+        }</span>
+        <span class="cov8" title="1">go a.run(ctx)
+        return nil</span>
+}
+
+func (a *BaseActor) Stop() error <span class="cov8" title="1">{
+        if !a.running.Load() </span><span class="cov8" title="1">{
+                return nil
+        }</span>
+        <span class="cov8" title="1">close(a.stopCh)
+        return nil</span>
+}
+
+func (a *BaseActor) run(ctx context.Context) <span class="cov8" title="1">{
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        a.running.Store(false)
+                        return</span>
+                case &lt;-a.stopCh:<span class="cov8" title="1">
+                        a.running.Store(false)
+                        return</span>
+                case resp := &lt;-a.gateway.ResponseCh:<span class="cov8" title="1">
+                        a.handleResponse(resp)</span>
+                case md := &lt;-a.gateway.MarketData:<span class="cov8" title="1">
+                        a.handleMarketData(md)</span>
+                }
+        }
+}
+
+func (a *BaseActor) handleResponse(resp exchange.Response) <span class="cov8" title="1">{
+        if !resp.Success </span><span class="cov8" title="1">{
+                a.eventCh &lt;- &amp;Event{
+                        Type: EventOrderRejected,
+                        Data: OrderRejectedEvent{
+                                RequestID: resp.RequestID,
+                                Reason:    resp.Error,
+                        },
+                }
+                return
+        }</span>
+
+        <span class="cov8" title="1">switch data := resp.Data.(type) </span>{
+        case uint64:<span class="cov8" title="1">
+                // Order accepted
+                a.eventCh &lt;- &amp;Event{
+                        Type: EventOrderAccepted,
+                        Data: OrderAcceptedEvent{
+                                OrderID:   data,
+                                RequestID: resp.RequestID,
+                        },
+                }
+                // Track the order
+                a.requestToOrder.Store(resp.RequestID, data)
+                a.activeOrders.Store(data, &amp;OrderInfo{
+                        OrderID:   data,
+                        RequestID: resp.RequestID,
+                        FilledQty: 0,
+                        TotalQty:  0, // We don't know TotalQty here, would need to track from request
+                })</span>
+
+        case int64:<span class="cov8" title="1">
+                // Order cancelled
+                orderID := uint64(0)
+                if val, ok := a.requestToOrder.Load(resp.RequestID); ok </span><span class="cov0" title="0">{
+                        orderID = val.(uint64)
+                        a.activeOrders.Delete(orderID)
+                        a.requestToOrder.Delete(resp.RequestID)
+                }</span>
+                <span class="cov8" title="1">a.eventCh &lt;- &amp;Event{
+                        Type: EventOrderCancelled,
+                        Data: OrderCancelledEvent{
+                                OrderID:      orderID,
+                                RequestID:    resp.RequestID,
+                                RemainingQty: data,
+                        },
+                }</span>
+
+        case *exchange.FillNotification:<span class="cov8" title="1">
+                // Fill notification
+                isFull := data.IsFull
+
+                // Update order tracking
+                if val, ok := a.activeOrders.Load(data.OrderID); ok </span><span class="cov8" title="1">{
+                        info := val.(*OrderInfo)
+                        info.FilledQty += data.Qty
+                        if isFull </span><span class="cov8" title="1">{
+                                a.activeOrders.Delete(data.OrderID)
+                                a.requestToOrder.Delete(info.RequestID)
+                        }</span>
+                }
+
+                // Generate fill event
+                <span class="cov8" title="1">eventType := EventOrderPartialFill
+                if isFull </span><span class="cov8" title="1">{
+                        eventType = EventOrderFilled
+                }</span>
+
+                <span class="cov8" title="1">a.eventCh &lt;- &amp;Event{
+                        Type: eventType,
+                        Data: OrderFillEvent{
+                                OrderID:   data.OrderID,
+                                Qty:       data.Qty,
+                                Price:     data.Price,
+                                Side:      data.Side,
+                                IsFull:    isFull,
+                                TradeID:   data.TradeID,
+                                FeeAmount: data.FeeAmount,
+                                FeeAsset:  data.FeeAsset,
+                        },
+                }</span>
+        }
+}
+
+func (a *BaseActor) handleMarketData(md *exchange.MarketDataMsg) <span class="cov8" title="1">{
+        switch md.Type </span>{
+        case exchange.MDTrade:<span class="cov8" title="1">
+                trade := md.Data.(*exchange.Trade)
+                a.eventCh &lt;- &amp;Event{
+                        Type: EventTrade,
+                        Data: TradeEvent{
+                                Symbol:    md.Symbol,
+                                Trade:     trade,
+                                Timestamp: md.Timestamp,
+                        },
+                }</span>
+        case exchange.MDDelta:<span class="cov8" title="1">
+                delta := md.Data.(*exchange.BookDelta)
+                a.eventCh &lt;- &amp;Event{
+                        Type: EventBookDelta,
+                        Data: BookDeltaEvent{
+                                Symbol:    md.Symbol,
+                                Delta:     delta,
+                                Timestamp: md.Timestamp,
+                                SeqNum:    md.SeqNum,
+                        },
+                }</span>
+        case exchange.MDSnapshot:<span class="cov8" title="1">
+                snapshot := md.Data.(*exchange.BookSnapshot)
+                a.eventCh &lt;- &amp;Event{
+                        Type: EventBookSnapshot,
+                        Data: BookSnapshotEvent{
+                                Symbol:    md.Symbol,
+                                Snapshot:  snapshot,
+                                Timestamp: md.Timestamp,
+                                SeqNum:    md.SeqNum,
+                        },
+                }</span>
+        case exchange.MDFunding:<span class="cov8" title="1">
+                fundingRate := md.Data.(*exchange.FundingRate)
+                a.eventCh &lt;- &amp;Event{
+                        Type: EventFundingUpdate,
+                        Data: FundingUpdateEvent{
+                                Symbol:      md.Symbol,
+                                FundingRate: fundingRate,
+                                Timestamp:   md.Timestamp,
+                        },
+                }</span>
+        case exchange.MDOpenInterest:<span class="cov0" title="0">
+                oi := md.Data.(*exchange.OpenInterest)
+                a.eventCh &lt;- &amp;Event{
+                        Type: EventOpenInterest,
+                        Data: OpenInterestEvent{
+                                Symbol:       md.Symbol,
+                                OpenInterest: oi,
+                                Timestamp:    md.Timestamp,
+                        },
+                }</span>
+        }
+}
+
+func (a *BaseActor) SubmitOrder(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64) <span class="cov8" title="1">{
+        reqID := atomic.AddUint64(&amp;a.requestSeq, 1)
+        req := exchange.Request{
+                Type: exchange.ReqPlaceOrder,
+                OrderReq: &amp;exchange.OrderRequest{
+                        RequestID:   reqID,
+                        Side:        side,
+                        Type:        orderType,
+                        Price:       price,
+                        Qty:         qty,
+                        Symbol:      symbol,
+                        TimeInForce: exchange.GTC,
+                        Visibility:  exchange.Normal,
+                },
+        }
+        a.gateway.RequestCh &lt;- req
+}</span>
+
+func (a *BaseActor) SubmitOrderFull(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64, visibility exchange.Visibility, icebergQty int64) <span class="cov8" title="1">{
+        reqID := atomic.AddUint64(&amp;a.requestSeq, 1)
+        req := exchange.Request{
+                Type: exchange.ReqPlaceOrder,
+                OrderReq: &amp;exchange.OrderRequest{
+                        RequestID:   reqID,
+                        Side:        side,
+                        Type:        orderType,
+                        Price:       price,
+                        Qty:         qty,
+                        Symbol:      symbol,
+                        TimeInForce: exchange.GTC,
+                        Visibility:  visibility,
+                        IcebergQty:  icebergQty,
+                },
+        }
+        a.gateway.RequestCh &lt;- req
+}</span>
+
+func (a *BaseActor) CancelOrder(orderID uint64) <span class="cov8" title="1">{
+        reqID := atomic.AddUint64(&amp;a.requestSeq, 1)
+        req := exchange.Request{
+                Type: exchange.ReqCancelOrder,
+                CancelReq: &amp;exchange.CancelRequest{
+                        RequestID: reqID,
+                        OrderID:   orderID,
+                },
+        }
+        a.gateway.RequestCh &lt;- req
+}</span>
+
+func (a *BaseActor) QueryBalance() <span class="cov8" title="1">{
+        reqID := atomic.AddUint64(&amp;a.requestSeq, 1)
+        req := exchange.Request{
+                Type: exchange.ReqQueryBalance,
+                QueryReq: &amp;exchange.QueryRequest{
+                        RequestID: reqID,
+                        QueryType: exchange.QueryBalance,
+                },
+        }
+        a.gateway.RequestCh &lt;- req
+}</span>
+
+func (a *BaseActor) Subscribe(symbol string) <span class="cov8" title="1">{
+        reqID := atomic.AddUint64(&amp;a.requestSeq, 1)
+        req := exchange.Request{
+                Type: exchange.ReqSubscribe,
+                QueryReq: &amp;exchange.QueryRequest{
+                        RequestID: reqID,
+                        Symbol:    symbol,
+                },
+        }
+        a.gateway.RequestCh &lt;- req
+}</span>
+
+func (a *BaseActor) Unsubscribe(symbol string) <span class="cov8" title="1">{
+        reqID := atomic.AddUint64(&amp;a.requestSeq, 1)
+        req := exchange.Request{
+                Type: exchange.ReqUnsubscribe,
+                QueryReq: &amp;exchange.QueryRequest{
+                        RequestID: reqID,
+                        Symbol:    symbol,
+                },
+        }
+        a.gateway.RequestCh &lt;- req
+}</span>
+
+func (a *BaseActor) EventChannel() &lt;-chan *Event <span class="cov8" title="1">{
+        return a.eventCh
+}</span>
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package actor
+
+import (
+        "context"
+        "time"
+
+        "exchange_sim/exchange"
+)
+
+type DelayedMakerConfig struct {
+        Symbol      string
+        StartDelay  time.Duration
+        OrderCount  int
+        BasePrice   int64
+        PriceSpread int64
+        Qty         int64
+        Visibility  exchange.Visibility
+        IcebergQty  int64
+}
+
+type DelayedMakerActor struct {
+        *BaseActor
+        Config DelayedMakerConfig
+}
+
+func NewDelayedMaker(id uint64, gateway *exchange.ClientGateway, config DelayedMakerConfig) *DelayedMakerActor <span class="cov8" title="1">{
+        return &amp;DelayedMakerActor{
+                BaseActor: NewBaseActor(id, gateway),
+                Config:    config,
+        }
+}</span>
+
+func (a *DelayedMakerActor) Start(ctx context.Context) error <span class="cov8" title="1">{
+        a.Subscribe(a.Config.Symbol)
+        err := a.BaseActor.Start(ctx)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov8" title="1">a.StartLogic(ctx)
+        return nil</span>
+}
+
+func (a *DelayedMakerActor) StartLogic(ctx context.Context) <span class="cov8" title="1">{
+        go func() </span><span class="cov8" title="1">{
+                // Wait for delay
+                select </span>{
+                case &lt;-time.After(a.Config.StartDelay):<span class="cov8" title="1"></span>
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        return</span>
+                }
+                <span class="cov8" title="1">a.placeOrders()</span>
+        }()
+}
+
+func (a *DelayedMakerActor) placeOrders() <span class="cov8" title="1">{
+        // Place a few orders around BasePrice
+        for i := 0; i &lt; a.Config.OrderCount; i++ </span><span class="cov8" title="1">{
+                // Create a Buy order
+                buyPrice := a.Config.BasePrice - (int64(i+1) * a.Config.PriceSpread)
+                a.SubmitOrderFull(a.Config.Symbol, exchange.Buy, exchange.LimitOrder, buyPrice, a.Config.Qty, a.Config.Visibility, a.Config.IcebergQty)
+
+                // Create a Sell order
+                sellPrice := a.Config.BasePrice + (int64(i+1) * a.Config.PriceSpread)
+                a.SubmitOrderFull(a.Config.Symbol, exchange.Sell, exchange.LimitOrder, sellPrice, a.Config.Qty, a.Config.Visibility, a.Config.IcebergQty)
+        }</span>
+}
+
+func (a *DelayedMakerActor) OnEvent(event *Event) {<span class="cov8" title="1">
+        // DelayedMaker doesn't need to react to events for this simulation
+}</span>
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package actor
+
+import (
+        "context"
+        "time"
+
+        "exchange_sim/exchange"
+)
+
+type ExitStrategyFunc func(exposure, bestBid, bestAsk, bidLiquidity, askLiquidity, liquidityMultiple int64) bool
+
+type FirstLPConfig struct {
+        Symbol            string              // Trading pair
+        SpreadBps         int64               // Spread around mid in basis points (e.g., 10 = 0.1%)
+        LiquidityMultiple int64               // Exit when market has this multiple of our exposure (default: 10)
+        MonitorInterval   time.Duration       // How often to check exit conditions (default: 100ms)
+        MinExitSize       int64               // Don't exit if exposure below this (default: 0)
+        ExitStrategy      ExitStrategyFunc    // Custom exit logic (optional, uses default if nil)
+        BootstrapPrice    int64               // Initial mid price if book is empty (0 = wait for market)
+}
+
+type FirstLiquidityProvidingActor struct {
+        *BaseActor
+        Config FirstLPConfig
+
+        Symbol        string
+        Precision     int64
+        BaseAsset     string
+        QuoteAsset    string
+        BaseBalance   int64
+        QuoteBalance  int64
+        NetPosition   int64
+        AvgEntryPrice int64
+        ActiveBidID   uint64
+        ActiveAskID   uint64
+        BidSize       int64
+        AskSize       int64
+        lastBidReqID  uint64
+        lastAskReqID  uint64
+        LastMidPrice  int64
+        BestBid       int64
+        BestAsk       int64
+        BidLiquidity  int64
+        AskLiquidity  int64
+        monitorTicker *time.Ticker
+}
+
+func DefaultExitStrategy(exposure, bestBid, bestAsk, bidLiq, askLiq, multiple int64) bool <span class="cov8" title="1">{
+        if exposure == 0 </span><span class="cov8" title="1">{
+                return false
+        }</span>
+
+        <span class="cov8" title="1">absExposure := exposure
+        if absExposure &lt; 0 </span><span class="cov8" title="1">{
+                absExposure = -absExposure
+        }</span>
+
+        <span class="cov8" title="1">threshold := absExposure * multiple
+
+        if exposure &gt; 0 </span><span class="cov8" title="1">{
+                // Long position - need to sell - check bid liquidity
+                return bidLiq &gt;= threshold
+        }</span>
+        // Short position - need to buy - check ask liquidity
+        <span class="cov8" title="1">return askLiq &gt;= threshold</span>
+}
+
+func NewFirstLP(id uint64, gateway *exchange.ClientGateway, config FirstLPConfig) *FirstLiquidityProvidingActor <span class="cov8" title="1">{
+        // Set defaults
+        if config.LiquidityMultiple == 0 </span><span class="cov0" title="0">{
+                config.LiquidityMultiple = 10
+        }</span>
+        <span class="cov8" title="1">if config.MonitorInterval == 0 </span><span class="cov8" title="1">{
+                config.MonitorInterval = 100 * time.Millisecond
+        }</span>
+        <span class="cov8" title="1">if config.ExitStrategy == nil </span><span class="cov8" title="1">{
+                config.ExitStrategy = DefaultExitStrategy
+        }</span>
+
+        <span class="cov8" title="1">return &amp;FirstLiquidityProvidingActor{
+                BaseActor: NewBaseActor(id, gateway),
+                Config:    config,
+                Symbol:    config.Symbol,
+        }</span>
+}
+
+func (f *FirstLiquidityProvidingActor) Start(ctx context.Context) error <span class="cov8" title="1">{
+        f.Subscribe(f.Symbol)
+        f.QueryBalance()
+
+        f.monitorTicker = time.NewTicker(f.Config.MonitorInterval)
+
+        go f.eventLoop(ctx)
+        go f.monitorLoop(ctx)
+
+        return f.BaseActor.Start(ctx)
+}</span>
+
+func (f *FirstLiquidityProvidingActor) Stop() error <span class="cov8" title="1">{
+        if f.monitorTicker != nil </span><span class="cov8" title="1">{
+                f.monitorTicker.Stop()
+        }</span>
+        <span class="cov8" title="1">return f.BaseActor.Stop()</span>
+}
+
+func (f *FirstLiquidityProvidingActor) eventLoop(ctx context.Context) <span class="cov8" title="1">{
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        return</span>
+                case event := &lt;-f.EventChannel():<span class="cov8" title="1">
+                        f.OnEvent(event)</span>
+                }
+        }
+}
+
+func (f *FirstLiquidityProvidingActor) monitorLoop(ctx context.Context) <span class="cov8" title="1">{
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        return</span>
+                case &lt;-f.monitorTicker.C:<span class="cov8" title="1">
+                        f.CheckExitConditions()</span>
+                }
+        }
+}
+
+func (f *FirstLiquidityProvidingActor) OnEvent(event *Event) <span class="cov8" title="1">{
+        switch event.Type </span>{
+        case EventBookSnapshot:<span class="cov8" title="1">
+                f.onBookSnapshot(event.Data.(BookSnapshotEvent))</span>
+        case EventBookDelta:<span class="cov8" title="1">
+                f.onBookDelta(event.Data.(BookDeltaEvent))</span>
+        case EventOrderAccepted:<span class="cov8" title="1">
+                f.onOrderAccepted(event.Data.(OrderAcceptedEvent))</span>
+        case EventOrderFilled, EventOrderPartialFill:<span class="cov8" title="1">
+                f.onOrderFilled(event.Data.(OrderFillEvent))</span>
+        case EventOrderCancelled:<span class="cov8" title="1">
+                f.onOrderCancelled(event.Data.(OrderCancelledEvent))</span>
+        }
+}
+
+func (f *FirstLiquidityProvidingActor) SetInitialState(precision int64, baseAsset, quoteAsset string) <span class="cov8" title="1">{
+        f.Precision = precision
+        f.BaseAsset = baseAsset
+        f.QuoteAsset = quoteAsset
+}</span>
+
+func (f *FirstLiquidityProvidingActor) UpdateBalances(baseBalance, quoteBalance int64) <span class="cov8" title="1">{
+        f.BaseBalance = baseBalance
+        f.QuoteBalance = quoteBalance
+}</span>
+
+func (f *FirstLiquidityProvidingActor) onBookSnapshot(snap BookSnapshotEvent) <span class="cov8" title="1">{
+        if snap.Symbol != f.Symbol </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        // Update market state
+        <span class="cov8" title="1">if len(snap.Snapshot.Bids) &gt; 0 </span><span class="cov0" title="0">{
+                f.BestBid = snap.Snapshot.Bids[0].Price
+                f.BidLiquidity = snap.Snapshot.Bids[0].VisibleQty
+        }</span>
+        <span class="cov8" title="1">if len(snap.Snapshot.Asks) &gt; 0 </span><span class="cov0" title="0">{
+                f.BestAsk = snap.Snapshot.Asks[0].Price
+                f.AskLiquidity = snap.Snapshot.Asks[0].VisibleQty
+        }</span>
+
+        <span class="cov8" title="1">if f.BestBid &gt; 0 &amp;&amp; f.BestAsk &gt; 0 </span><span class="cov0" title="0">{
+                f.LastMidPrice = (f.BestBid + f.BestAsk) / 2
+        }</span> else<span class="cov8" title="1"> if f.LastMidPrice == 0 &amp;&amp; f.Config.BootstrapPrice &gt; 0 </span><span class="cov8" title="1">{
+                // Bootstrap: use configured price when book is empty
+                f.LastMidPrice = f.Config.BootstrapPrice
+        }</span>
+
+        // If we have balances and no active orders, place quotes
+        <span class="cov8" title="1">if f.LastMidPrice &gt; 0 &amp;&amp; f.BaseBalance &gt; 0 &amp;&amp; f.QuoteBalance &gt; 0 &amp;&amp;
+                f.ActiveBidID == 0 &amp;&amp; f.ActiveAskID == 0 </span><span class="cov8" title="1">{
+                f.PlaceQuotes()
+        }</span>
+}
+
+func (f *FirstLiquidityProvidingActor) onBookDelta(delta BookDeltaEvent) <span class="cov8" title="1">{
+        if delta.Delta.Side == exchange.Buy </span><span class="cov8" title="1">{
+                if delta.Delta.Price &gt;= f.BestBid </span><span class="cov8" title="1">{
+                        f.BestBid = delta.Delta.Price
+                        f.BidLiquidity = max(delta.Delta.VisibleQty, 0)
+                }</span>
+        } else<span class="cov8" title="1"> {
+                if f.BestAsk == 0 || delta.Delta.Price &lt;= f.BestAsk </span><span class="cov8" title="1">{
+                        f.BestAsk = delta.Delta.Price
+                        if delta.Delta.VisibleQty &gt; 0 </span><span class="cov8" title="1">{
+                                f.AskLiquidity = delta.Delta.VisibleQty
+                        }</span> else<span class="cov8" title="1"> {
+                                f.AskLiquidity = 0
+                        }</span>
+                }
+        }
+}
+
+func (f *FirstLiquidityProvidingActor) onOrderFilled(fill OrderFillEvent) <span class="cov8" title="1">{
+        // Update position and balances
+        if fill.Side == exchange.Buy </span><span class="cov8" title="1">{
+                f.UpdatePosition(fill.Qty, fill.Price)
+                f.BaseBalance += fill.Qty
+                notional := (fill.Qty * fill.Price) / f.Precision
+                f.QuoteBalance -= (notional + fill.FeeAmount)
+        }</span> else<span class="cov8" title="1"> {
+                f.UpdatePosition(-fill.Qty, fill.Price)
+                f.BaseBalance -= fill.Qty
+                notional := (fill.Qty * fill.Price) / f.Precision
+                f.QuoteBalance += (notional - fill.FeeAmount)
+        }</span>
+
+        // Cancel unfilled orders
+        <span class="cov8" title="1">f.CancelActiveOrders()
+
+        // Requote with updated balances
+        // Clear active order IDs immediately to allow requoting
+        f.ActiveBidID = 0
+        f.ActiveAskID = 0
+        f.PlaceQuotes()</span>
+
+        // Exit check happens in monitor loop
+}
+
+func (f *FirstLiquidityProvidingActor) onOrderCancelled(cancelled OrderCancelledEvent) <span class="cov8" title="1">{
+        // Clear tracking
+        if cancelled.OrderID == f.ActiveBidID </span><span class="cov8" title="1">{
+                f.ActiveBidID = 0
+        }</span>
+        <span class="cov8" title="1">if cancelled.OrderID == f.ActiveAskID </span><span class="cov8" title="1">{
+                f.ActiveAskID = 0
+        }</span>
+}
+
+func (f *FirstLiquidityProvidingActor) PlaceQuotes() <span class="cov8" title="1">{
+        if f.LastMidPrice == 0 || f.Precision == 0 </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">halfSpread := (f.LastMidPrice * f.Config.SpreadBps) / (2 * 10000)
+        bidPrice := f.LastMidPrice - halfSpread
+        askPrice := f.LastMidPrice + halfSpread
+
+        // Spot market: use base for sell, quote for buy
+        if f.BaseBalance &gt; 0 </span><span class="cov8" title="1">{
+                // Track that we're placing an ask order
+                // Note: In real implementation, would need to track the actual RequestID
+                f.SubmitOrder(f.Symbol, exchange.Sell, exchange.LimitOrder, askPrice, f.BaseBalance)
+                f.AskSize = f.BaseBalance
+        }</span>
+        <span class="cov8" title="1">if f.QuoteBalance &gt; 0 </span><span class="cov8" title="1">{
+                bidQty := (f.QuoteBalance * f.Precision) / bidPrice
+                if bidQty &gt; 0 </span><span class="cov8" title="1">{
+                        // Track that we're placing a bid order
+                        f.SubmitOrder(f.Symbol, exchange.Buy, exchange.LimitOrder, bidPrice, bidQty)
+                        f.BidSize = bidQty
+                }</span>
+        }
+}
+
+func (f *FirstLiquidityProvidingActor) onOrderAccepted(accepted OrderAcceptedEvent) <span class="cov8" title="1">{
+        // Simple heuristic: if we have a bid size pending and no bid ID, this is the bid
+        if f.BidSize &gt; 0 &amp;&amp; f.ActiveBidID == 0 </span><span class="cov8" title="1">{
+                f.ActiveBidID = accepted.OrderID
+        }</span> else<span class="cov8" title="1"> if f.AskSize &gt; 0 &amp;&amp; f.ActiveAskID == 0 </span><span class="cov8" title="1">{
+                f.ActiveAskID = accepted.OrderID
+        }</span>
+}
+
+func (f *FirstLiquidityProvidingActor) CancelActiveOrders() <span class="cov8" title="1">{
+        if f.ActiveBidID != 0 </span><span class="cov8" title="1">{
+                f.CancelOrder(f.ActiveBidID)
+        }</span>
+        <span class="cov8" title="1">if f.ActiveAskID != 0 </span><span class="cov8" title="1">{
+                f.CancelOrder(f.ActiveAskID)
+        }</span>
+}
+
+func (f *FirstLiquidityProvidingActor) CheckExitConditions() <span class="cov8" title="1">{
+        absExposure := f.NetPosition
+        if absExposure &lt; 0 </span><span class="cov8" title="1">{
+                absExposure = -absExposure
+        }</span>
+
+        <span class="cov8" title="1">if absExposure &lt; f.Config.MinExitSize </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">shouldExit := f.Config.ExitStrategy(
+                f.NetPosition,
+                f.BestBid,
+                f.BestAsk,
+                f.BidLiquidity,
+                f.AskLiquidity,
+                f.Config.LiquidityMultiple,
+        )
+
+        if shouldExit </span><span class="cov8" title="1">{
+                f.ExecuteExit()
+        }</span>
+}
+
+func (f *FirstLiquidityProvidingActor) ExecuteExit() <span class="cov8" title="1">{
+        if f.NetPosition == 0 </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">f.CancelActiveOrders()
+
+        exitSize := f.NetPosition
+        if exitSize &lt; 0 </span><span class="cov8" title="1">{
+                exitSize = -exitSize
+        }</span>
+
+        <span class="cov8" title="1">if f.NetPosition &gt; 0 </span><span class="cov8" title="1">{
+                f.SubmitOrder(f.Symbol, exchange.Sell, exchange.Market, 0, exitSize)
+        }</span> else<span class="cov8" title="1"> {
+                f.SubmitOrder(f.Symbol, exchange.Buy, exchange.Market, 0, exitSize)
+        }</span>
+}
+
+func (f *FirstLiquidityProvidingActor) UpdatePosition(deltaQty int64, price int64) <span class="cov8" title="1">{
+        if f.NetPosition == 0 </span><span class="cov8" title="1">{
+                // New position
+                f.NetPosition = deltaQty
+                f.AvgEntryPrice = price
+                return
+        }</span>
+
+        <span class="cov8" title="1">if (f.NetPosition &gt; 0 &amp;&amp; deltaQty &gt; 0) || (f.NetPosition &lt; 0 &amp;&amp; deltaQty &lt; 0) </span><span class="cov0" title="0">{
+                // Increasing position - weighted average
+                totalNotional := (f.NetPosition * f.AvgEntryPrice) + (deltaQty * price)
+                f.NetPosition += deltaQty
+                if f.NetPosition != 0 </span><span class="cov0" title="0">{
+                        f.AvgEntryPrice = totalNotional / f.NetPosition
+                }</span>
+        } else<span class="cov8" title="1"> {
+                // Reducing or flipping position
+                f.NetPosition += deltaQty
+                if f.NetPosition == 0 </span><span class="cov8" title="1">{
+                        f.AvgEntryPrice = 0
+                }</span> else<span class="cov0" title="0"> if (f.NetPosition &gt; 0 &amp;&amp; deltaQty &lt; 0) || (f.NetPosition &lt; 0 &amp;&amp; deltaQty &gt; 0) </span><span class="cov0" title="0">{
+                        // Position flipped
+                        f.AvgEntryPrice = price
+                }</span>
+        }
+}
+
+func (f *FirstLiquidityProvidingActor) GetPosition() (netPosition, avgEntryPrice int64) <span class="cov8" title="1">{
+        return f.NetPosition, f.AvgEntryPrice
+}</span>
+
+// TEST ONLY - Expose balances for verification
+func (f *FirstLiquidityProvidingActor) GetBalances() (base, quote int64) <span class="cov8" title="1">{
+        return f.BaseBalance, f.QuoteBalance
+}</span>
+
+// TEST ONLY - Set market state for testing
+func (f *FirstLiquidityProvidingActor) SetMarketState(bestBid, bidLiq, bestAsk, askLiq int64) <span class="cov8" title="1">{
+        f.BestBid = bestBid
+        f.BidLiquidity = bidLiq
+        f.BestAsk = bestAsk
+        f.AskLiquidity = askLiq
+}</span>
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package actor
+
+import (
+        "context"
+        "math/rand"
+        "sync"
+        "time"
+
+        "exchange_sim/exchange"
+)
+
+type NoisyTraderConfig struct {
+        Symbol          string
+        Interval        time.Duration
+        PriceRangeBps   int64
+        MinQty          int64
+        MaxQty          int64
+        MaxActiveOrders int
+        OrderLifetime   time.Duration
+}
+
+type activeOrder struct {
+        orderID  uint64
+        placedAt time.Time
+}
+
+type NoisyTraderActor struct {
+        *BaseActor
+        Config       NoisyTraderConfig
+        midPrice     int64
+        bestBid      int64
+        bestAsk      int64
+        activeOrders map[uint64]*activeOrder
+        rngMu        sync.Mutex
+        rng          *rand.Rand
+}
+
+func NewNoisyTrader(id uint64, gateway *exchange.ClientGateway, config NoisyTraderConfig) *NoisyTraderActor <span class="cov8" title="1">{
+        return &amp;NoisyTraderActor{
+                BaseActor:    NewBaseActor(id, gateway),
+                Config:       config,
+                activeOrders: make(map[uint64]*activeOrder),
+                rng:          rand.New(rand.NewSource(time.Now().UnixNano() + int64(id))),
+        }
+}</span>
+
+func (a *NoisyTraderActor) Start(ctx context.Context) error <span class="cov8" title="1">{
+        a.Subscribe(a.Config.Symbol)
+        go a.eventLoop(ctx)
+        go a.tradingLoop(ctx)
+        go a.cleanupLoop(ctx)
+        return a.BaseActor.Start(ctx)
+}</span>
+
+func (a *NoisyTraderActor) eventLoop(ctx context.Context) <span class="cov8" title="1">{
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        return</span>
+                case event := &lt;-a.EventChannel():<span class="cov8" title="1">
+                        a.OnEvent(event)</span>
+                }
+        }
+}
+
+func (a *NoisyTraderActor) OnEvent(event *Event) <span class="cov8" title="1">{
+        switch event.Type </span>{
+        case EventBookSnapshot:<span class="cov8" title="1">
+                a.onBookSnapshot(event.Data.(BookSnapshotEvent))</span>
+        case EventBookDelta:<span class="cov8" title="1">
+                a.onBookDelta(event.Data.(BookDeltaEvent))</span>
+        case EventOrderAccepted:<span class="cov8" title="1">
+                a.onOrderAccepted(event.Data.(OrderAcceptedEvent))</span>
+        case EventOrderFilled, EventOrderPartialFill:<span class="cov0" title="0">
+                a.onOrderFilled(event.Data.(OrderFillEvent))</span>
+        case EventOrderCancelled:<span class="cov0" title="0">
+                a.onOrderCancelled(event.Data.(OrderCancelledEvent))</span>
+        }
+}
+
+func (a *NoisyTraderActor) onBookSnapshot(snap BookSnapshotEvent) <span class="cov8" title="1">{
+        if len(snap.Snapshot.Bids) &gt; 0 </span><span class="cov8" title="1">{
+                a.bestBid = snap.Snapshot.Bids[0].Price
+        }</span>
+        <span class="cov8" title="1">if len(snap.Snapshot.Asks) &gt; 0 </span><span class="cov8" title="1">{
+                a.bestAsk = snap.Snapshot.Asks[0].Price
+        }</span>
+        <span class="cov8" title="1">a.updateMidPrice()</span>
+}
+
+func (a *NoisyTraderActor) onBookDelta(delta BookDeltaEvent) <span class="cov8" title="1">{
+        if delta.Delta.Side == exchange.Buy &amp;&amp; (a.bestBid == 0 || delta.Delta.Price &gt;= a.bestBid) </span><span class="cov8" title="1">{
+                if delta.Delta.VisibleQty &gt; 0 </span><span class="cov8" title="1">{
+                        a.bestBid = delta.Delta.Price
+                }</span>
+        } else<span class="cov8" title="1"> if delta.Delta.Side == exchange.Sell &amp;&amp; (a.bestAsk == 0 || delta.Delta.Price &lt;= a.bestAsk) </span><span class="cov8" title="1">{
+                if delta.Delta.VisibleQty &gt; 0 </span><span class="cov8" title="1">{
+                        a.bestAsk = delta.Delta.Price
+                }</span>
+        }
+        <span class="cov8" title="1">a.updateMidPrice()</span>
+}
+
+func (a *NoisyTraderActor) updateMidPrice() <span class="cov8" title="1">{
+        if a.bestBid &gt; 0 &amp;&amp; a.bestAsk &gt; 0 </span><span class="cov8" title="1">{
+                a.midPrice = (a.bestBid + a.bestAsk) / 2
+        }</span>
+}
+
+func (a *NoisyTraderActor) onOrderAccepted(event OrderAcceptedEvent) <span class="cov8" title="1">{
+        a.activeOrders[event.OrderID] = &amp;activeOrder{
+                orderID:  event.OrderID,
+                placedAt: time.Now(),
+        }
+}</span>
+
+func (a *NoisyTraderActor) onOrderFilled(event OrderFillEvent) <span class="cov8" title="1">{
+        if event.IsFull </span><span class="cov8" title="1">{
+                delete(a.activeOrders, event.OrderID)
+        }</span>
+}
+
+func (a *NoisyTraderActor) onOrderCancelled(event OrderCancelledEvent) <span class="cov8" title="1">{
+        delete(a.activeOrders, event.OrderID)
+}</span>
+
+func (a *NoisyTraderActor) tradingLoop(ctx context.Context) <span class="cov8" title="1">{
+        ticker := time.NewTicker(a.Config.Interval)
+        defer ticker.Stop()
+
+        a.rngMu.Lock()
+        initialDelay := time.Duration(a.rng.Int63n(int64(a.Config.Interval)))
+        a.rngMu.Unlock()
+        time.Sleep(initialDelay)
+
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        return</span>
+                case &lt;-ticker.C:<span class="cov8" title="1">
+                        if len(a.activeOrders) &lt; a.Config.MaxActiveOrders &amp;&amp; a.midPrice &gt; 0 </span><span class="cov8" title="1">{
+                                a.placeRandomOrder()
+                        }</span>
+                }
+        }
+}
+
+func (a *NoisyTraderActor) placeRandomOrder() <span class="cov8" title="1">{
+        a.rngMu.Lock()
+        side := exchange.Buy
+        if a.rng.Float64() &lt; 0.5 </span><span class="cov8" title="1">{
+                side = exchange.Sell
+        }</span>
+
+        <span class="cov8" title="1">offsetBps := a.rng.Int63n(a.Config.PriceRangeBps*2) - a.Config.PriceRangeBps
+        qtyRange := a.Config.MaxQty - a.Config.MinQty
+        qty := a.Config.MinQty
+        if qtyRange &gt; 0 </span><span class="cov8" title="1">{
+                qty += a.rng.Int63n(qtyRange)
+        }</span>
+        <span class="cov8" title="1">a.rngMu.Unlock()
+
+        price := a.midPrice + (a.midPrice * offsetBps / 10000)
+
+        if price &lt;= 0 </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">a.SubmitOrder(a.Config.Symbol, side, exchange.LimitOrder, price, qty)</span>
+}
+
+func (a *NoisyTraderActor) cleanupLoop(ctx context.Context) <span class="cov8" title="1">{
+        if a.Config.OrderLifetime == 0 </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">ticker := time.NewTicker(a.Config.OrderLifetime / 2)
+        defer ticker.Stop()
+
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        return</span>
+                case &lt;-ticker.C:<span class="cov8" title="1">
+                        now := time.Now()
+                        for orderID, order := range a.activeOrders </span><span class="cov0" title="0">{
+                                if now.Sub(order.placedAt) &gt; a.Config.OrderLifetime </span><span class="cov0" title="0">{
+                                        a.CancelOrder(orderID)
+                                }</span>
+                        }
+                }
+        }
+}
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">package actor
+
+import (
+        "exchange_sim/exchange"
+        "sync"
+)
+
+type OMSType uint8
+
+const (
+        OMSNetting OMSType = iota
+        OMSHedging
+)
+
+type Position struct {
+        InstrumentID string
+        PositionID   string
+        Side         exchange.Side
+        Qty          int64
+        AvgPrice     int64
+        RealizedPnL  int64
+}
+
+type OMS interface {
+        OnFill(instrumentID string, fill OrderFillEvent, precision int64)
+        GetNetPosition(instrumentID string) int64
+        GetPosition(instrumentID string) *Position
+        GetPositions(instrumentID string) []*Position
+        Reset(instrumentID string)
+}
+
+type NettingOMS struct {
+        positions map[string]*Position
+        mu        sync.RWMutex
+}
+
+func NewNettingOMS() *NettingOMS <span class="cov8" title="1">{
+        return &amp;NettingOMS{
+                positions: make(map[string]*Position),
+        }
+}</span>
+
+func (o *NettingOMS) OnFill(instrumentID string, fill OrderFillEvent, precision int64) <span class="cov8" title="1">{
+        o.mu.Lock()
+        defer o.mu.Unlock()
+
+        pos := o.positions[instrumentID]
+        if pos == nil </span><span class="cov8" title="1">{
+                pos = &amp;Position{
+                        InstrumentID: instrumentID,
+                        PositionID:   "net",
+                        Qty:          0,
+                        AvgPrice:     0,
+                        RealizedPnL:  0,
+                }
+                o.positions[instrumentID] = pos
+        }</span>
+
+        <span class="cov8" title="1">deltaQty := fill.Qty
+        if fill.Side == exchange.Sell </span><span class="cov8" title="1">{
+                deltaQty = -deltaQty
+        }</span>
+
+        <span class="cov8" title="1">if pos.Qty == 0 </span><span class="cov8" title="1">{
+                pos.Qty = deltaQty
+                pos.AvgPrice = fill.Price
+                pos.Side = fill.Side
+                return
+        }</span>
+
+        <span class="cov8" title="1">sameDirection := (pos.Qty &gt; 0 &amp;&amp; deltaQty &gt; 0) || (pos.Qty &lt; 0 &amp;&amp; deltaQty &lt; 0)
+
+        if sameDirection </span><span class="cov8" title="1">{
+                oldQty := pos.Qty
+                newQty := pos.Qty + deltaQty
+                if newQty != 0 </span><span class="cov8" title="1">{
+                        w1 := (oldQty * 1000) / newQty
+                        w2 := (deltaQty * 1000) / newQty
+                        pos.AvgPrice = (pos.AvgPrice*w1 + fill.Price*w2) / 1000
+                }</span>
+                <span class="cov8" title="1">pos.Qty = newQty</span>
+        } else<span class="cov8" title="1"> {
+                absQty := deltaQty
+                if absQty &lt; 0 </span><span class="cov8" title="1">{
+                        absQty = -absQty
+                }</span>
+                <span class="cov8" title="1">absPos := pos.Qty
+                if absPos &lt; 0 </span><span class="cov0" title="0">{
+                        absPos = -absPos
+                }</span>
+
+                <span class="cov8" title="1">if absQty &lt;= absPos </span><span class="cov8" title="1">{
+                        pnl := (fill.Price - pos.AvgPrice) / precision * absQty
+                        if pos.Qty &lt; 0 </span><span class="cov0" title="0">{
+                                pnl = -pnl
+                        }</span>
+                        <span class="cov8" title="1">pos.RealizedPnL += pnl
+
+                        pos.Qty += deltaQty
+                        if pos.Qty == 0 </span><span class="cov8" title="1">{
+                                pos.AvgPrice = 0
+                                pos.Side = exchange.Buy
+                        }</span>
+                } else<span class="cov8" title="1"> {
+                        pnl := (fill.Price - pos.AvgPrice) / precision * absPos
+                        if pos.Qty &lt; 0 </span><span class="cov0" title="0">{
+                                pnl = -pnl
+                        }</span>
+                        <span class="cov8" title="1">pos.RealizedPnL += pnl
+
+                        pos.Qty += deltaQty
+                        pos.AvgPrice = fill.Price
+                        if pos.Qty &gt; 0 </span><span class="cov0" title="0">{
+                                pos.Side = exchange.Buy
+                        }</span> else<span class="cov8" title="1"> {
+                                pos.Side = exchange.Sell
+                        }</span>
+                }
+        }
+}
+
+func (o *NettingOMS) GetNetPosition(instrumentID string) int64 <span class="cov8" title="1">{
+        o.mu.RLock()
+        pos := o.positions[instrumentID]
+        o.mu.RUnlock()
+        if pos == nil </span><span class="cov8" title="1">{
+                return 0
+        }</span>
+        <span class="cov8" title="1">return pos.Qty</span>
+}
+
+func (o *NettingOMS) GetPosition(instrumentID string) *Position <span class="cov8" title="1">{
+        o.mu.RLock()
+        pos := o.positions[instrumentID]
+        o.mu.RUnlock()
+        if pos == nil </span><span class="cov8" title="1">{
+                return &amp;Position{InstrumentID: instrumentID, PositionID: "net"}
+        }</span>
+        <span class="cov8" title="1">return &amp;Position{
+                InstrumentID: pos.InstrumentID,
+                PositionID:   pos.PositionID,
+                Side:         pos.Side,
+                Qty:          pos.Qty,
+                AvgPrice:     pos.AvgPrice,
+                RealizedPnL:  pos.RealizedPnL,
+        }</span>
+}
+
+func (o *NettingOMS) GetPositions(instrumentID string) []*Position <span class="cov8" title="1">{
+        pos := o.GetPosition(instrumentID)
+        if pos.Qty == 0 </span><span class="cov8" title="1">{
+                return nil
+        }</span>
+        <span class="cov8" title="1">return []*Position{pos}</span>
+}
+
+func (o *NettingOMS) Reset(instrumentID string) <span class="cov8" title="1">{
+        o.mu.Lock()
+        delete(o.positions, instrumentID)
+        o.mu.Unlock()
+}</span>
+
+type HedgingOMS struct {
+        positions   map[string]map[string]*Position
+        nextPosID   map[string]uint64
+        mu          sync.RWMutex
+}
+
+func NewHedgingOMS() *HedgingOMS <span class="cov8" title="1">{
+        return &amp;HedgingOMS{
+                positions: make(map[string]map[string]*Position),
+                nextPosID: make(map[string]uint64),
+        }
+}</span>
+
+func (o *HedgingOMS) OnFill(instrumentID string, fill OrderFillEvent, precision int64) <span class="cov8" title="1">{
+        o.mu.Lock()
+        defer o.mu.Unlock()
+
+        if o.positions[instrumentID] == nil </span><span class="cov8" title="1">{
+                o.positions[instrumentID] = make(map[string]*Position)
+        }</span>
+        <span class="cov8" title="1">if o.nextPosID[instrumentID] == 0 </span><span class="cov8" title="1">{
+                o.nextPosID[instrumentID] = 1
+        }</span>
+
+        <span class="cov8" title="1">posID := ""
+        for id, pos := range o.positions[instrumentID] </span><span class="cov8" title="1">{
+                if pos.Side == fill.Side </span><span class="cov8" title="1">{
+                        posID = id
+                        break</span>
+                }
+        }
+
+        <span class="cov8" title="1">if posID == "" </span><span class="cov8" title="1">{
+                posID = instrumentID + "-" + string(rune('0'+o.nextPosID[instrumentID]))
+                o.nextPosID[instrumentID]++
+        }</span>
+
+        <span class="cov8" title="1">pos := o.positions[instrumentID][posID]
+        if pos == nil </span><span class="cov8" title="1">{
+                pos = &amp;Position{
+                        InstrumentID: instrumentID,
+                        PositionID:   posID,
+                        Side:         fill.Side,
+                        Qty:          0,
+                        AvgPrice:     0,
+                        RealizedPnL:  0,
+                }
+                o.positions[instrumentID][posID] = pos
+        }</span>
+
+        <span class="cov8" title="1">oldQty := pos.Qty
+        newQty := pos.Qty + fill.Qty
+        if newQty &gt; 0 </span><span class="cov8" title="1">{
+                w1 := (oldQty * 1000) / newQty
+                w2 := (fill.Qty * 1000) / newQty
+                pos.AvgPrice = (pos.AvgPrice*w1 + fill.Price*w2) / 1000
+        }</span>
+        <span class="cov8" title="1">pos.Qty = newQty</span>
+}
+
+func (o *HedgingOMS) GetNetPosition(instrumentID string) int64 <span class="cov8" title="1">{
+        o.mu.RLock()
+        defer o.mu.RUnlock()
+
+        net := int64(0)
+        if o.positions[instrumentID] == nil </span><span class="cov0" title="0">{
+                return 0
+        }</span>
+
+        <span class="cov8" title="1">for _, pos := range o.positions[instrumentID] </span><span class="cov8" title="1">{
+                if pos.Side == exchange.Buy </span><span class="cov8" title="1">{
+                        net += pos.Qty
+                }</span> else<span class="cov8" title="1"> {
+                        net -= pos.Qty
+                }</span>
+        }
+        <span class="cov8" title="1">return net</span>
+}
+
+func (o *HedgingOMS) GetPosition(instrumentID string) *Position <span class="cov8" title="1">{
+        positions := o.GetPositions(instrumentID)
+        if len(positions) == 0 </span><span class="cov8" title="1">{
+                return &amp;Position{InstrumentID: instrumentID}
+        }</span>
+        <span class="cov8" title="1">return positions[0]</span>
+}
+
+func (o *HedgingOMS) GetPositions(instrumentID string) []*Position <span class="cov8" title="1">{
+        o.mu.RLock()
+        defer o.mu.RUnlock()
+
+        if o.positions[instrumentID] == nil </span><span class="cov8" title="1">{
+                return nil
+        }</span>
+
+        <span class="cov8" title="1">result := make([]*Position, 0, len(o.positions[instrumentID]))
+        for _, pos := range o.positions[instrumentID] </span><span class="cov8" title="1">{
+                result = append(result, &amp;Position{
+                        InstrumentID: pos.InstrumentID,
+                        PositionID:   pos.PositionID,
+                        Side:         pos.Side,
+                        Qty:          pos.Qty,
+                        AvgPrice:     pos.AvgPrice,
+                        RealizedPnL:  pos.RealizedPnL,
+                })
+        }</span>
+        <span class="cov8" title="1">return result</span>
+}
+
+func (o *HedgingOMS) Reset(instrumentID string) <span class="cov8" title="1">{
+        o.mu.Lock()
+        delete(o.positions, instrumentID)
+        delete(o.nextPosID, instrumentID)
+        o.mu.Unlock()
+}</span>
+</pre>
+		
+		<pre class="file" id="file5" style="display: none">package actor
+
+import (
+        "context"
+        "math/rand"
+        "time"
+
+        "exchange_sim/exchange"
+)
+
+type RandomizedTakerConfig struct {
+        Symbol         string
+        Interval       time.Duration
+        MinQty         int64
+        MaxQty         int64
+        BasePrecision  int64
+        QuotePrecision int64
+}
+
+type RandomizedTakerActor struct {
+        *BaseActor
+        Config RandomizedTakerConfig
+        ticker *time.Ticker
+        rng    *rand.Rand
+        side   exchange.Side
+}
+
+func NewRandomizedTaker(id uint64, gateway *exchange.ClientGateway, config RandomizedTakerConfig) *RandomizedTakerActor <span class="cov8" title="1">{
+        if config.Interval == 0 </span><span class="cov8" title="1">{
+                config.Interval = 2 * time.Second
+        }</span>
+        <span class="cov8" title="1">if config.MinQty == 0 </span><span class="cov8" title="1">{
+                config.MinQty = exchange.BTCAmount(0.1)
+        }</span>
+        <span class="cov8" title="1">if config.MaxQty == 0 </span><span class="cov8" title="1">{
+                config.MaxQty = exchange.BTCAmount(1.0)
+        }</span>
+        <span class="cov8" title="1">if config.BasePrecision == 0 </span><span class="cov8" title="1">{
+                config.BasePrecision = exchange.SATOSHI
+        }</span>
+        <span class="cov8" title="1">if config.QuotePrecision == 0 </span><span class="cov8" title="1">{
+                config.QuotePrecision = exchange.SATOSHI / 1000
+        }</span>
+
+        <span class="cov8" title="1">return &amp;RandomizedTakerActor{
+                BaseActor: NewBaseActor(id, gateway),
+                Config:    config,
+                rng:       rand.New(rand.NewSource(time.Now().UnixNano() + int64(id))),
+                side:      exchange.Buy,
+        }</span>
+}
+
+func (s *RandomizedTakerActor) Start(ctx context.Context) error <span class="cov8" title="1">{
+        s.Subscribe(s.Config.Symbol)
+        s.ticker = time.NewTicker(s.Config.Interval)
+
+        go s.eventLoop(ctx)
+        go s.tradingLoop(ctx)
+
+        return s.BaseActor.Start(ctx)
+}</span>
+
+func (s *RandomizedTakerActor) Stop() error <span class="cov8" title="1">{
+        if s.ticker != nil </span><span class="cov8" title="1">{
+                s.ticker.Stop()
+        }</span>
+        <span class="cov8" title="1">return s.BaseActor.Stop()</span>
+}
+
+func (s *RandomizedTakerActor) eventLoop(ctx context.Context) <span class="cov8" title="1">{
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        return</span>
+                case event := &lt;-s.EventChannel():<span class="cov8" title="1">
+                        s.OnEvent(event)</span>
+                }
+        }
+}
+
+func (s *RandomizedTakerActor) tradingLoop(ctx context.Context) <span class="cov8" title="1">{
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        return</span>
+                case &lt;-s.ticker.C:<span class="cov8" title="1">
+                        s.executeRandomTrade()
+                        s.side = s.flipSide(s.side)</span>
+                }
+        }
+}
+
+func (s *RandomizedTakerActor) OnEvent(event *Event) {<span class="cov8" title="1">
+        // RandomizedTaker doesn't need to react to events
+        // Just lets market orders execute
+}</span>
+
+func (s *RandomizedTakerActor) executeRandomTrade() <span class="cov8" title="1">{
+        qtyRange := s.Config.MaxQty - s.Config.MinQty
+        if qtyRange &lt;= 0 </span><span class="cov8" title="1">{
+                qtyRange = s.Config.MinQty
+        }</span>
+
+        <span class="cov8" title="1">qty := s.Config.MinQty
+        if qtyRange &gt; 0 </span><span class="cov8" title="1">{
+                qty += s.rng.Int63n(qtyRange)
+        }</span>
+
+        <span class="cov8" title="1">s.SubmitOrder(s.Config.Symbol, s.side, exchange.Market, 0, qty)</span>
+}
+
+func (s *RandomizedTakerActor) flipSide(side exchange.Side) exchange.Side <span class="cov8" title="1">{
+        if side == exchange.Buy </span><span class="cov8" title="1">{
+                return exchange.Sell
+        }</span>
+        <span class="cov8" title="1">return exchange.Buy</span>
+}
+</pre>
+		
+		<pre class="file" id="file6" style="display: none">package actor
+
+import (
+        "bufio"
+        "context"
+        "fmt"
+        "os"
+        "path/filepath"
+        "sync"
+        "time"
+
+        "exchange_sim/exchange"
+)
+
+type RotationStrategy uint8
+
+const (
+        RotationNone RotationStrategy = iota
+        RotationDaily
+        RotationHourly
+)
+
+type RecorderConfig struct {
+        OutputDir            string
+        Symbols              []string
+        FlushInterval        time.Duration
+        SnapshotInterval     time.Duration
+        SnapshotDeltaCount   uint64
+        RotationStrategy     RotationStrategy
+        RecordTrades         bool
+        RecordOrderbook      bool
+        RecordOpenInterest   bool
+        RecordFunding        bool
+        SeparateHiddenFiles  bool
+}
+
+type instrumentRecorder struct {
+        symbol              string
+        instrumentType      string
+        orderbookFile       *os.File
+        orderbookBuf        *bufio.Writer
+        orderbookHiddenFile *os.File
+        orderbookHiddenBuf  *bufio.Writer
+        tradesFile          *os.File
+        tradesBuf           *bufio.Writer
+        oiFile              *os.File
+        oiBuf               *bufio.Writer
+        fundingFile         *os.File
+        fundingBuf          *bufio.Writer
+        deltasSinceSnapshot uint64
+        lastSnapshotTime    int64
+}
+
+type recordEvent struct {
+        symbol    string
+        eventType EventType
+        data      any
+}
+
+type RecorderActor struct {
+        *BaseActor
+        config      RecorderConfig
+        recorders   map[string]*instrumentRecorder
+        writeCh     chan recordEvent
+        instruments map[string]exchange.Instrument
+        writeWg     sync.WaitGroup
+}
+
+func NewRecorder(id uint64, gateway *exchange.ClientGateway, config RecorderConfig, instruments map[string]exchange.Instrument) (*RecorderActor, error) <span class="cov8" title="1">{
+        if config.FlushInterval == 0 </span><span class="cov0" title="0">{
+                config.FlushInterval = time.Second
+        }</span>
+        <span class="cov8" title="1">if config.SnapshotInterval == 0 </span><span class="cov8" title="1">{
+                config.SnapshotInterval = 30 * time.Second
+        }</span>
+        <span class="cov8" title="1">if config.SnapshotDeltaCount == 0 </span><span class="cov8" title="1">{
+                config.SnapshotDeltaCount = 100
+        }</span>
+        <span class="cov8" title="1">if config.OutputDir == "" </span><span class="cov0" title="0">{
+                config.OutputDir = "output"
+        }</span>
+
+        <span class="cov8" title="1">os.MkdirAll(config.OutputDir, 0755)
+
+        r := &amp;RecorderActor{
+                BaseActor:   NewBaseActor(id, gateway),
+                config:      config,
+                recorders:   make(map[string]*instrumentRecorder),
+                writeCh:     make(chan recordEvent, 10000),
+                instruments: instruments,
+        }
+
+        for _, symbol := range config.Symbols </span><span class="cov8" title="1">{
+                instrument := instruments[symbol]
+                if instrument == nil </span><span class="cov0" title="0">{
+                        r.cleanup()
+                        return nil, fmt.Errorf("unknown instrument: %s", symbol)
+                }</span>
+
+                <span class="cov8" title="1">rec, err := r.createInstrumentRecorder(symbol, instrument)
+                if err != nil </span><span class="cov0" title="0">{
+                        r.cleanup()
+                        return nil, err
+                }</span>
+                <span class="cov8" title="1">r.recorders[symbol] = rec</span>
+        }
+
+        <span class="cov8" title="1">return r, nil</span>
+}
+
+func (r *RecorderActor) createInstrumentRecorder(symbol string, instrument exchange.Instrument) (*instrumentRecorder, error) <span class="cov8" title="1">{
+        instType := instrument.InstrumentType()
+
+        rec := &amp;instrumentRecorder{
+                symbol:         symbol,
+                instrumentType: instType,
+        }
+
+        if r.config.RecordOrderbook </span><span class="cov8" title="1">{
+                obPath := r.getFilePath(symbol, instType, "orderbook")
+                obFile, err := os.Create(obPath)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+                <span class="cov8" title="1">rec.orderbookFile = obFile
+                rec.orderbookBuf = bufio.NewWriter(obFile)
+
+                if r.config.SeparateHiddenFiles </span><span class="cov8" title="1">{
+                        rec.orderbookBuf.WriteString("timestamp,seq,type,side,price,qty\n")
+
+                        hiddenPath := r.getFilePath(symbol, instType, "orderbook_hidden")
+                        hiddenFile, err := os.Create(hiddenPath)
+                        if err != nil </span><span class="cov0" title="0">{
+                                return nil, err
+                        }</span>
+                        <span class="cov8" title="1">rec.orderbookHiddenFile = hiddenFile
+                        rec.orderbookHiddenBuf = bufio.NewWriter(hiddenFile)
+                        rec.orderbookHiddenBuf.WriteString("timestamp,seq,type,side,price,qty\n")</span>
+                } else<span class="cov8" title="1"> {
+                        rec.orderbookBuf.WriteString("timestamp,seq,type,side,price,visible_qty,hidden_qty\n")
+                }</span>
+        }
+
+        <span class="cov8" title="1">if r.config.RecordTrades </span><span class="cov8" title="1">{
+                tradesPath := r.getFilePath(symbol, instType, "trades")
+                tradesFile, err := os.Create(tradesPath)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+                <span class="cov8" title="1">rec.tradesFile = tradesFile
+                rec.tradesBuf = bufio.NewWriter(tradesFile)
+                rec.tradesBuf.WriteString("timestamp,seq,trade_id,side,price,qty\n")</span>
+        }
+
+        <span class="cov8" title="1">if r.config.RecordOpenInterest &amp;&amp; instrument.IsPerp() </span><span class="cov8" title="1">{
+                oiPath := r.getFilePath(symbol, instType, "openinterest")
+                oiFile, err := os.Create(oiPath)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+                <span class="cov8" title="1">rec.oiFile = oiFile
+                rec.oiBuf = bufio.NewWriter(oiFile)
+                rec.oiBuf.WriteString("timestamp,seq,total_contracts\n")</span>
+        }
+
+        <span class="cov8" title="1">if r.config.RecordFunding &amp;&amp; instrument.IsPerp() </span><span class="cov8" title="1">{
+                fundingPath := r.getFilePath(symbol, instType, "funding")
+                fundingFile, err := os.Create(fundingPath)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+                <span class="cov8" title="1">rec.fundingFile = fundingFile
+                rec.fundingBuf = bufio.NewWriter(fundingFile)
+                rec.fundingBuf.WriteString("timestamp,seq,rate,mark_price,index_price,next_funding_time,interval_seconds\n")</span>
+        }
+
+        <span class="cov8" title="1">return rec, nil</span>
+}
+
+func (r *RecorderActor) getFilePath(symbol, instType, dataType string) string <span class="cov8" title="1">{
+        filename := fmt.Sprintf("%s_%s_%s.csv", symbol, instType, dataType)
+
+        if r.config.RotationStrategy != RotationNone </span><span class="cov0" title="0">{
+                now := time.Now()
+                var timeSuffix string
+                switch r.config.RotationStrategy </span>{
+                case RotationDaily:<span class="cov0" title="0">
+                        timeSuffix = now.Format("20060102")</span>
+                case RotationHourly:<span class="cov0" title="0">
+                        timeSuffix = now.Format("2006010215")</span>
+                }
+                <span class="cov0" title="0">filename = fmt.Sprintf("%s_%s_%s_%s.csv", symbol, instType, dataType, timeSuffix)</span>
+        }
+
+        <span class="cov8" title="1">return filepath.Join(r.config.OutputDir, filename)</span>
+}
+
+func (r *RecorderActor) Start(ctx context.Context) error <span class="cov8" title="1">{
+        for _, symbol := range r.config.Symbols </span><span class="cov8" title="1">{
+                r.Subscribe(symbol)
+        }</span>
+        <span class="cov8" title="1">go r.eventLoop(ctx)
+        r.writeWg.Add(1)
+        go r.writeLoop(ctx)
+        return r.BaseActor.Start(ctx)</span>
+}
+
+func (r *RecorderActor) Stop() error <span class="cov8" title="1">{
+        close(r.writeCh)
+        r.writeWg.Wait()
+        r.cleanup()
+        return r.BaseActor.Stop()
+}</span>
+
+func (r *RecorderActor) cleanup() <span class="cov8" title="1">{
+        for _, rec := range r.recorders </span><span class="cov8" title="1">{
+                if rec.orderbookFile != nil </span><span class="cov8" title="1">{
+                        rec.orderbookBuf.Flush()
+                        rec.orderbookFile.Close()
+                }</span>
+                <span class="cov8" title="1">if rec.orderbookHiddenFile != nil </span><span class="cov8" title="1">{
+                        rec.orderbookHiddenBuf.Flush()
+                        rec.orderbookHiddenFile.Close()
+                }</span>
+                <span class="cov8" title="1">if rec.tradesFile != nil </span><span class="cov8" title="1">{
+                        rec.tradesBuf.Flush()
+                        rec.tradesFile.Close()
+                }</span>
+                <span class="cov8" title="1">if rec.oiFile != nil </span><span class="cov8" title="1">{
+                        rec.oiBuf.Flush()
+                        rec.oiFile.Close()
+                }</span>
+                <span class="cov8" title="1">if rec.fundingFile != nil </span><span class="cov8" title="1">{
+                        rec.fundingBuf.Flush()
+                        rec.fundingFile.Close()
+                }</span>
+        }
+}
+
+func (r *RecorderActor) eventLoop(ctx context.Context) <span class="cov8" title="1">{
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        return</span>
+                case event := &lt;-r.EventChannel():<span class="cov0" title="0">
+                        r.OnEvent(event)</span>
+                }
+        }
+}
+
+func (r *RecorderActor) OnEvent(event *Event) <span class="cov8" title="1">{
+        switch event.Type </span>{
+        case EventTrade:<span class="cov8" title="1">
+                r.onTrade(event.Data.(TradeEvent))</span>
+        case EventBookSnapshot:<span class="cov8" title="1">
+                r.onSnapshot(event.Data.(BookSnapshotEvent))</span>
+        case EventBookDelta:<span class="cov8" title="1">
+                r.onDelta(event.Data.(BookDeltaEvent))</span>
+        case EventOpenInterest:<span class="cov8" title="1">
+                r.onOpenInterest(event.Data.(OpenInterestEvent))</span>
+        case EventFundingUpdate:<span class="cov8" title="1">
+                r.onFunding(event.Data.(FundingUpdateEvent))</span>
+        }
+}
+
+func (r *RecorderActor) onSnapshot(snap BookSnapshotEvent) <span class="cov8" title="1">{
+        rec := r.recorders[snap.Symbol]
+        if rec == nil || !r.config.RecordOrderbook </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">rec.deltasSinceSnapshot = 0
+        rec.lastSnapshotTime = snap.Timestamp
+
+        r.writeCh &lt;- recordEvent{
+                symbol:    snap.Symbol,
+                eventType: EventBookSnapshot,
+                data:      snap,
+        }</span>
+}
+
+func (r *RecorderActor) onDelta(delta BookDeltaEvent) <span class="cov8" title="1">{
+        rec := r.recorders[delta.Symbol]
+        if rec == nil || !r.config.RecordOrderbook </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">rec.deltasSinceSnapshot++
+
+        r.writeCh &lt;- recordEvent{
+                symbol:    delta.Symbol,
+                eventType: EventBookDelta,
+                data:      delta,
+        }
+
+        needSnapshot := false
+        if r.config.SnapshotDeltaCount &gt; 0 &amp;&amp; rec.deltasSinceSnapshot &gt;= r.config.SnapshotDeltaCount </span><span class="cov0" title="0">{
+                needSnapshot = true
+        }</span>
+        <span class="cov8" title="1">if r.config.SnapshotInterval &gt; 0 </span><span class="cov8" title="1">{
+                elapsed := delta.Timestamp - rec.lastSnapshotTime
+                if elapsed &gt;= r.config.SnapshotInterval.Nanoseconds() </span><span class="cov8" title="1">{
+                        needSnapshot = true
+                }</span>
+        }
+
+        <span class="cov8" title="1">if needSnapshot </span><span class="cov8" title="1">{
+                r.Subscribe(delta.Symbol)
+        }</span>
+}
+
+func (r *RecorderActor) onTrade(trade TradeEvent) <span class="cov8" title="1">{
+        if !r.config.RecordTrades </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">r.writeCh &lt;- recordEvent{
+                symbol:    trade.Symbol,
+                eventType: EventTrade,
+                data:      trade,
+        }</span>
+}
+
+func (r *RecorderActor) onOpenInterest(oi OpenInterestEvent) <span class="cov8" title="1">{
+        if !r.config.RecordOpenInterest </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">r.writeCh &lt;- recordEvent{
+                symbol:    oi.Symbol,
+                eventType: EventOpenInterest,
+                data:      oi,
+        }</span>
+}
+
+func (r *RecorderActor) onFunding(funding FundingUpdateEvent) <span class="cov8" title="1">{
+        if !r.config.RecordFunding </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">r.writeCh &lt;- recordEvent{
+                symbol:    funding.Symbol,
+                eventType: EventFundingUpdate,
+                data:      funding,
+        }</span>
+}
+
+func (r *RecorderActor) writeLoop(ctx context.Context) <span class="cov8" title="1">{
+        defer r.writeWg.Done()
+        ticker := time.NewTicker(r.config.FlushInterval)
+        defer ticker.Stop()
+
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-ctx.Done():<span class="cov0" title="0">
+                        r.drainWriteBuffer()
+                        return</span>
+                case event, ok := &lt;-r.writeCh:<span class="cov8" title="1">
+                        if !ok </span><span class="cov8" title="1">{
+                                r.drainWriteBuffer()
+                                return
+                        }</span>
+                        <span class="cov8" title="1">r.writeRecordEvent(event)</span>
+                case &lt;-ticker.C:<span class="cov8" title="1">
+                        r.flushAll()</span>
+                }
+        }
+}
+
+func (r *RecorderActor) drainWriteBuffer() <span class="cov8" title="1">{
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case event, ok := &lt;-r.writeCh:<span class="cov8" title="1">
+                        if !ok </span><span class="cov8" title="1">{
+                                r.flushAll()
+                                return
+                        }</span>
+                        <span class="cov0" title="0">r.writeRecordEvent(event)</span>
+                default:<span class="cov0" title="0">
+                        r.flushAll()
+                        return</span>
+                }
+        }
+}
+
+func (r *RecorderActor) writeRecordEvent(event recordEvent) <span class="cov8" title="1">{
+        rec := r.recorders[event.symbol]
+        if rec == nil </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">switch event.eventType </span>{
+        case EventBookSnapshot:<span class="cov8" title="1">
+                r.writeSnapshot(rec, event.data.(BookSnapshotEvent))</span>
+        case EventBookDelta:<span class="cov8" title="1">
+                r.writeDelta(rec, event.data.(BookDeltaEvent))</span>
+        case EventTrade:<span class="cov8" title="1">
+                r.writeTrade(rec, event.data.(TradeEvent))</span>
+        case EventOpenInterest:<span class="cov8" title="1">
+                r.writeOpenInterest(rec, event.data.(OpenInterestEvent))</span>
+        case EventFundingUpdate:<span class="cov8" title="1">
+                r.writeFunding(rec, event.data.(FundingUpdateEvent))</span>
+        }
+}
+
+func (r *RecorderActor) writeSnapshot(rec *instrumentRecorder, snap BookSnapshotEvent) <span class="cov8" title="1">{
+        if r.config.SeparateHiddenFiles </span><span class="cov0" title="0">{
+                for _, level := range snap.Snapshot.Bids </span><span class="cov0" title="0">{
+                        if level.VisibleQty &gt; 0 </span><span class="cov0" title="0">{
+                                fmt.Fprintf(rec.orderbookBuf, "%d,%d,snapshot,bid,%d,%d\n",
+                                        snap.Timestamp, snap.SeqNum, level.Price, level.VisibleQty)
+                        }</span>
+                }
+                <span class="cov0" title="0">for _, level := range snap.Snapshot.Asks </span><span class="cov0" title="0">{
+                        if level.VisibleQty &gt; 0 </span><span class="cov0" title="0">{
+                                fmt.Fprintf(rec.orderbookBuf, "%d,%d,snapshot,ask,%d,%d\n",
+                                        snap.Timestamp, snap.SeqNum, level.Price, level.VisibleQty)
+                        }</span>
+                }
+
+                <span class="cov0" title="0">for _, level := range snap.Snapshot.Bids </span><span class="cov0" title="0">{
+                        if level.HiddenQty &gt; 0 </span><span class="cov0" title="0">{
+                                fmt.Fprintf(rec.orderbookHiddenBuf, "%d,%d,snapshot,bid,%d,%d\n",
+                                        snap.Timestamp, snap.SeqNum, level.Price, level.HiddenQty)
+                        }</span>
+                }
+                <span class="cov0" title="0">for _, level := range snap.Snapshot.Asks </span><span class="cov0" title="0">{
+                        if level.HiddenQty &gt; 0 </span><span class="cov0" title="0">{
+                                fmt.Fprintf(rec.orderbookHiddenBuf, "%d,%d,snapshot,ask,%d,%d\n",
+                                        snap.Timestamp, snap.SeqNum, level.Price, level.HiddenQty)
+                        }</span>
+                }
+        } else<span class="cov8" title="1"> {
+                for _, level := range snap.Snapshot.Bids </span><span class="cov8" title="1">{
+                        fmt.Fprintf(rec.orderbookBuf, "%d,%d,snapshot,bid,%d,%d,%d\n",
+                                snap.Timestamp, snap.SeqNum, level.Price, level.VisibleQty, level.HiddenQty)
+                }</span>
+                <span class="cov8" title="1">for _, level := range snap.Snapshot.Asks </span><span class="cov8" title="1">{
+                        fmt.Fprintf(rec.orderbookBuf, "%d,%d,snapshot,ask,%d,%d,%d\n",
+                                snap.Timestamp, snap.SeqNum, level.Price, level.VisibleQty, level.HiddenQty)
+                }</span>
+        }
+}
+
+func (r *RecorderActor) writeDelta(rec *instrumentRecorder, delta BookDeltaEvent) <span class="cov8" title="1">{
+        side := "bid"
+        if delta.Delta.Side == exchange.Sell </span><span class="cov0" title="0">{
+                side = "ask"
+        }</span>
+
+        <span class="cov8" title="1">if r.config.SeparateHiddenFiles </span><span class="cov0" title="0">{
+                fmt.Fprintf(rec.orderbookBuf, "%d,%d,delta,%s,%d,%d\n",
+                        delta.Timestamp, delta.SeqNum, side, delta.Delta.Price, delta.Delta.VisibleQty)
+
+                fmt.Fprintf(rec.orderbookHiddenBuf, "%d,%d,delta,%s,%d,%d\n",
+                        delta.Timestamp, delta.SeqNum, side, delta.Delta.Price, delta.Delta.HiddenQty)
+        }</span> else<span class="cov8" title="1"> {
+                fmt.Fprintf(rec.orderbookBuf, "%d,%d,delta,%s,%d,%d,%d\n",
+                        delta.Timestamp, delta.SeqNum, side, delta.Delta.Price,
+                        delta.Delta.VisibleQty, delta.Delta.HiddenQty)
+        }</span>
+}
+
+func (r *RecorderActor) writeTrade(rec *instrumentRecorder, trade TradeEvent) <span class="cov8" title="1">{
+        side := "Buy"
+        if trade.Trade.Side == exchange.Sell </span><span class="cov0" title="0">{
+                side = "Sell"
+        }</span>
+
+        <span class="cov8" title="1">fmt.Fprintf(rec.tradesBuf, "%d,%d,%d,%s,%d,%d\n",
+                trade.Timestamp, trade.Trade.TradeID, trade.Trade.TradeID,
+                side, trade.Trade.Price, trade.Trade.Qty)</span>
+}
+
+func (r *RecorderActor) writeOpenInterest(rec *instrumentRecorder, oi OpenInterestEvent) <span class="cov8" title="1">{
+        fmt.Fprintf(rec.oiBuf, "%d,0,%d\n",
+                oi.Timestamp, oi.OpenInterest.TotalContracts)
+}</span>
+
+func (r *RecorderActor) writeFunding(rec *instrumentRecorder, funding FundingUpdateEvent) <span class="cov8" title="1">{
+        fmt.Fprintf(rec.fundingBuf, "%d,0,%d,%d,%d,%d,%d\n",
+                funding.Timestamp,
+                funding.FundingRate.Rate,
+                funding.FundingRate.MarkPrice,
+                funding.FundingRate.IndexPrice,
+                funding.FundingRate.NextFunding,
+                funding.FundingRate.Interval)
+}</span>
+
+func (r *RecorderActor) flushAll() <span class="cov8" title="1">{
+        for _, rec := range r.recorders </span><span class="cov8" title="1">{
+                if rec.orderbookBuf != nil </span><span class="cov8" title="1">{
+                        rec.orderbookBuf.Flush()
+                }</span>
+                <span class="cov8" title="1">if rec.orderbookHiddenBuf != nil </span><span class="cov0" title="0">{
+                        rec.orderbookHiddenBuf.Flush()
+                }</span>
+                <span class="cov8" title="1">if rec.tradesBuf != nil </span><span class="cov8" title="1">{
+                        rec.tradesBuf.Flush()
+                }</span>
+                <span class="cov8" title="1">if rec.oiBuf != nil </span><span class="cov8" title="1">{
+                        rec.oiBuf.Flush()
+                }</span>
+                <span class="cov8" title="1">if rec.fundingBuf != nil </span><span class="cov8" title="1">{
+                        rec.fundingBuf.Flush()
+                }</span>
+        }
+}
+</pre>
+		
+		<pre class="file" id="file7" style="display: none">package main
+
+import (
+        "context"
+        "fmt"
+        "os"
+        "time"
+
+        "exchange_sim/actor"
+        "exchange_sim/exchange"
+        "exchange_sim/simulation"
+)
+
+func main() <span class="cov0" title="0">{
+        if err := run(); err != nil </span><span class="cov0" title="0">{
+                fmt.Fprintf(os.Stderr, "error: %v\n", err)
+                os.Exit(1)
+        }</span>
+}
+
+func run() error <span class="cov0" title="0">{
+        os.MkdirAll("output", 0755)
+
+        config := simulation.RunnerConfig{
+                UseSimulatedClock: false,
+                Duration:          0,
+                Iterations:        0,
+        }
+        runner := simulation.NewRunner(config)
+        ex := runner.Exchange()
+
+        btcusd := exchange.NewPerpFutures("BTCUSD", "BTC", "USD", 100000000, 1000000)
+        ethusd := exchange.NewSpotInstrument("ETHUSD", "ETH", "USD", 10000000, 10000000)
+        ex.AddInstrument(btcusd)
+        ex.AddInstrument(ethusd)
+
+        initialBalances := map[string]int64{
+                "BTC": 10000000000,
+                "ETH": 100000000000,
+                "USD": 1000000000000,
+        }
+        feePlan := &amp;exchange.PercentageFee{
+                MakerBps: 2,
+                TakerBps: 5,
+                InQuote:  true,
+        }
+
+        for i := uint64(1); i &lt;= 5; i++ </span><span class="cov0" title="0">{
+                gateway := ex.ConnectClient(i, initialBalances, feePlan)
+                lp := actor.NewFirstLP(i, gateway, actor.FirstLPConfig{
+                        Symbol:            "BTCUSD",
+                        SpreadBps:         20,
+                        LiquidityMultiple: 10,
+                        BootstrapPrice:    100000000000, // $100,000 per BTC (100000000 precision)
+                })
+                lp.SetInitialState(100000000, "BTC", "USD")
+                lp.UpdateBalances(initialBalances["BTC"], initialBalances["USD"])
+                runner.AddActor(lp)
+        }</span>
+
+        // Add taker actors to generate trading activity
+        <span class="cov0" title="0">for i := uint64(100); i &lt;= 101; i++ </span><span class="cov0" title="0">{
+                gateway := ex.ConnectClient(i, initialBalances, feePlan)
+                taker := actor.NewRandomizedTaker(i, gateway, actor.RandomizedTakerConfig{
+                        Symbol:   "BTCUSD",
+                        Interval: 2 * time.Second,
+                        MinQty:   exchange.BTCAmount(0.05),
+                        MaxQty:   exchange.BTCAmount(0.5),
+                })
+                runner.AddActor(taker)
+        }</span>
+
+        // Add DelayedMaker actors to provide competition later
+        <span class="cov0" title="0">for i := uint64(200); i &lt;= 201; i++ </span><span class="cov0" title="0">{
+                gateway := ex.ConnectClient(i, initialBalances, feePlan)
+                maker := actor.NewDelayedMaker(i, gateway, actor.DelayedMakerConfig{
+                        Symbol:      "BTCUSD",
+                        StartDelay:  5 * time.Second, // Arrive after 5 seconds
+                        OrderCount:  5,
+                        BasePrice:   100000 * 100000000,
+                        PriceSpread: 50 * 100000000, // Tighter or similar spread
+                        Qty:         1 * 100000000,
+                })
+                runner.AddActor(maker)
+        }</span>
+
+        // Add IcebergMaker to provide hidden liquidity
+        <span class="cov0" title="0">for i := uint64(300); i &lt;= 300; i++ </span><span class="cov0" title="0">{
+                gateway := ex.ConnectClient(i, initialBalances, feePlan)
+                maker := actor.NewDelayedMaker(i, gateway, actor.DelayedMakerConfig{
+                        Symbol:      "BTCUSD",
+                        StartDelay:  8 * time.Second,
+                        OrderCount:  3,
+                        BasePrice:   100000 * 100000000,
+                        PriceSpread: 20 * 100000000,
+                        Qty:         5 * 100000000, // 5 BTC
+                        Visibility:  exchange.Iceberg,
+                        IcebergQty:  1 * 100000000, // Show 1 BTC
+                })
+                runner.AddActor(maker)
+        }</span>
+
+        // Add NoisyTraders to provide random liquidity around mid-price
+        <span class="cov0" title="0">for i := uint64(400); i &lt;= 403; i++ </span><span class="cov0" title="0">{
+                gateway := ex.ConnectClient(i, initialBalances, feePlan)
+                noisy := actor.NewNoisyTrader(i, gateway, actor.NoisyTraderConfig{
+                        Symbol:          "BTCUSD",
+                        Interval:        1500 * time.Millisecond,
+                        PriceRangeBps:   100, // +/- 1% from mid
+                        MinQty:          exchange.BTCAmount(0.1),
+                        MaxQty:          exchange.BTCAmount(1.0),
+                        MaxActiveOrders: 3,
+                        OrderLifetime:   5 * time.Second,
+                })
+                runner.AddActor(noisy)
+        }</span>
+
+        <span class="cov0" title="0">simDuration := 15 * time.Second
+        recorderGateway := ex.ConnectClient(999, initialBalances, feePlan)
+        recorder, err := actor.NewRecorder(999, recorderGateway, actor.RecorderConfig{
+                OutputDir:           "output",
+                Symbols:             []string{"BTCUSD", "ETHUSD"},
+                FlushInterval:       time.Second,
+                SnapshotInterval:    5 * time.Second,
+                SnapshotDeltaCount:  50,
+                RotationStrategy:    actor.RotationNone,
+                RecordTrades:        true,
+                RecordOrderbook:     true,
+                RecordOpenInterest:  true,
+                RecordFunding:       true,
+                SeparateHiddenFiles: false,
+        }, ex.Instruments)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">runner.AddActor(recorder)
+
+        fmt.Println("Starting simulation...")
+        fmt.Printf("Running for %v...\n", simDuration)
+        
+        ctx, cancel := context.WithTimeout(context.Background(), simDuration)
+        defer cancel()
+        
+        return runner.Run(ctx)</span>
+}
+</pre>
+		
+		<pre class="file" id="file8" style="display: none">package exchange
+
+type Book struct {
+        Side       Side
+        Best       *Limit
+        ActiveHead *Limit
+        ActiveTail *Limit
+        Orders     map[uint64]*Order
+        Limits     map[int64]*Limit
+}
+
+func newBook(side Side) *Book <span class="cov8" title="1">{
+        return &amp;Book{
+                Side:   side,
+                Orders: make(map[uint64]*Order, 1024),
+                Limits: make(map[int64]*Limit, 256),
+        }
+}</span>
+
+func (b *Book) addOrder(order *Order) <span class="cov8" title="1">{
+        limit := b.Limits[order.Price]
+        if limit == nil </span><span class="cov8" title="1">{
+                limit = getLimit(order.Price)
+                b.Limits[order.Price] = limit
+                b.insertLimit(limit)
+                b.updateBest(limit)
+        }</span>
+        <span class="cov8" title="1">linkOrder(limit, order)
+        b.Orders[order.ID] = order</span>
+}
+
+func (b *Book) cancelOrder(orderID uint64) *Order <span class="cov8" title="1">{
+        order := b.Orders[orderID]
+        if order == nil </span><span class="cov0" title="0">{
+                return nil
+        }</span>
+        <span class="cov8" title="1">limit := order.Parent
+        unlinkOrder(order)
+        delete(b.Orders, orderID)
+        if isEmpty(limit) </span><span class="cov8" title="1">{
+                b.removeLimit(limit)
+        }</span>
+        <span class="cov8" title="1">return order</span>
+}
+
+func (b *Book) insertLimit(limit *Limit) <span class="cov8" title="1">{
+        if b.ActiveHead == nil </span><span class="cov8" title="1">{
+                b.ActiveHead = limit
+                b.ActiveTail = limit
+                return
+        }</span>
+
+        <span class="cov8" title="1">if b.Side == Buy </span><span class="cov8" title="1">{
+                for l := b.ActiveHead; l != nil; l = l.Next </span><span class="cov8" title="1">{
+                        if limit.Price &gt; l.Price </span><span class="cov8" title="1">{
+                                limit.Next = l
+                                limit.Prev = l.Prev
+                                if l.Prev != nil </span><span class="cov0" title="0">{
+                                        l.Prev.Next = limit
+                                }</span> else<span class="cov8" title="1"> {
+                                        b.ActiveHead = limit
+                                }</span>
+                                <span class="cov8" title="1">l.Prev = limit
+                                return</span>
+                        }
+                }
+        } else<span class="cov8" title="1"> {
+                for l := b.ActiveHead; l != nil; l = l.Next </span><span class="cov8" title="1">{
+                        if limit.Price &lt; l.Price </span><span class="cov8" title="1">{
+                                limit.Next = l
+                                limit.Prev = l.Prev
+                                if l.Prev != nil </span><span class="cov0" title="0">{
+                                        l.Prev.Next = limit
+                                }</span> else<span class="cov8" title="1"> {
+                                        b.ActiveHead = limit
+                                }</span>
+                                <span class="cov8" title="1">l.Prev = limit
+                                return</span>
+                        }
+                }
+        }
+
+        <span class="cov8" title="1">b.ActiveTail.Next = limit
+        limit.Prev = b.ActiveTail
+        b.ActiveTail = limit</span>
+}
+
+func (b *Book) removeLimit(limit *Limit) <span class="cov8" title="1">{
+        if limit.Prev != nil </span><span class="cov8" title="1">{
+                limit.Prev.Next = limit.Next
+        }</span> else<span class="cov8" title="1"> {
+                b.ActiveHead = limit.Next
+        }</span>
+        <span class="cov8" title="1">if limit.Next != nil </span><span class="cov8" title="1">{
+                limit.Next.Prev = limit.Prev
+        }</span> else<span class="cov8" title="1"> {
+                b.ActiveTail = limit.Prev
+        }</span>
+        <span class="cov8" title="1">delete(b.Limits, limit.Price)
+        if b.Best == limit </span><span class="cov8" title="1">{
+                b.Best = b.ActiveHead
+        }</span>
+        <span class="cov8" title="1">putLimit(limit)</span>
+}
+
+func (b *Book) updateBest(limit *Limit) <span class="cov8" title="1">{
+        if b.Best == nil </span><span class="cov8" title="1">{
+                b.Best = limit
+                return
+        }</span>
+        <span class="cov8" title="1">if b.Side == Buy </span><span class="cov8" title="1">{
+                if limit.Price &gt; b.Best.Price </span><span class="cov8" title="1">{
+                        b.Best = limit
+                }</span>
+        } else<span class="cov8" title="1"> {
+                if limit.Price &lt; b.Best.Price </span><span class="cov8" title="1">{
+                        b.Best = limit
+                }</span>
+        }
+}
+
+func (b *Book) getSnapshot() []PriceLevel <span class="cov8" title="1">{
+        levels := make([]PriceLevel, 0, 20)
+        for l := b.ActiveHead; l != nil &amp;&amp; len(levels) &lt; 20; l = l.Next </span><span class="cov8" title="1">{
+                visible := visibleQty(l)
+                hidden := l.TotalQty - visible
+                if visible &gt; 0 || hidden &gt; 0 </span><span class="cov8" title="1">{
+                        levels = append(levels, PriceLevel{
+                                Price:      l.Price,
+                                VisibleQty: visible,
+                                HiddenQty:  hidden,
+                        })
+                }</span>
+        }
+        <span class="cov8" title="1">return levels</span>
+}
+</pre>
+		
+		<pre class="file" id="file9" style="display: none">package exchange
+
+type Client struct {
+        ID          uint64
+        Balances    map[string]int64
+        Reserved    map[string]int64
+        OrderIDs    []uint64
+        FeePlan     FeeModel
+        VIPLevel    int
+        MakerVolume int64
+        TakerVolume int64
+}
+
+func NewClient(id uint64, feePlan FeeModel) *Client <span class="cov8" title="1">{
+        return &amp;Client{
+                ID:       id,
+                Balances: make(map[string]int64, 8),
+                Reserved: make(map[string]int64, 8),
+                OrderIDs: make([]uint64, 0, 16),
+                FeePlan:  feePlan,
+        }
+}</span>
+
+func (c *Client) GetBalance(asset string) int64 <span class="cov8" title="1">{
+        return c.Balances[asset]
+}</span>
+
+func (c *Client) GetAvailable(asset string) int64 <span class="cov8" title="1">{
+        return c.Balances[asset] - c.Reserved[asset]
+}</span>
+
+func (c *Client) GetReserved(asset string) int64 <span class="cov8" title="1">{
+        return c.Reserved[asset]
+}</span>
+
+func (c *Client) AddBalance(asset string, amount int64) <span class="cov8" title="1">{
+        c.Balances[asset] += amount
+}</span>
+
+func (c *Client) SubBalance(asset string, amount int64) bool <span class="cov8" title="1">{
+        if c.GetAvailable(asset) &lt; amount </span><span class="cov8" title="1">{
+                return false
+        }</span>
+        <span class="cov8" title="1">c.Balances[asset] -= amount
+        return true</span>
+}
+
+func (c *Client) Reserve(asset string, amount int64) bool <span class="cov8" title="1">{
+        if c.GetAvailable(asset) &lt; amount </span><span class="cov8" title="1">{
+                return false
+        }</span>
+        <span class="cov8" title="1">c.Reserved[asset] += amount
+        return true</span>
+}
+
+func (c *Client) Release(asset string, amount int64) <span class="cov8" title="1">{
+        c.Reserved[asset] -= amount
+}</span>
+
+func (c *Client) AddOrder(orderID uint64) <span class="cov8" title="1">{
+        c.OrderIDs = append(c.OrderIDs, orderID)
+}</span>
+
+func (c *Client) RemoveOrder(orderID uint64) <span class="cov8" title="1">{
+        for i, id := range c.OrderIDs </span><span class="cov8" title="1">{
+                if id == orderID </span><span class="cov8" title="1">{
+                        c.OrderIDs[i] = c.OrderIDs[len(c.OrderIDs)-1]
+                        c.OrderIDs = c.OrderIDs[:len(c.OrderIDs)-1]
+                        return
+                }</span>
+        }
+}
+
+func (c *Client) GetBalanceSnapshot(timestamp int64) *BalanceSnapshot <span class="cov8" title="1">{
+        balances := make([]AssetBalance, 0, len(c.Balances))
+        for asset, total := range c.Balances </span><span class="cov8" title="1">{
+                reserved := c.Reserved[asset]
+                balances = append(balances, AssetBalance{
+                        Asset:     asset,
+                        Total:     total,
+                        Available: total - reserved,
+                        Reserved:  reserved,
+                })
+        }</span>
+        <span class="cov8" title="1">return &amp;BalanceSnapshot{
+                Timestamp: timestamp,
+                Balances:  balances,
+        }</span>
+}
+</pre>
+		
+		<pre class="file" id="file10" style="display: none">package exchange
+
+import (
+        "sync"
+        "sync/atomic"
+        "time"
+)
+
+type Clock interface {
+        NowUnixNano() int64
+        NowUnix() int64
+}
+
+type Exchange struct {
+        Clients       map[uint64]*Client
+        Gateways      map[uint64]*ClientGateway
+        Books         map[string]*OrderBook
+        Instruments   map[string]Instrument
+        Positions     *PositionManager
+        NextOrderID   uint64
+        Matcher       MatchingEngine
+        MDPublisher   *MDPublisher
+        Clock         Clock
+        mu            sync.RWMutex
+        running       bool
+        shutdownCh    chan struct{}
+}
+
+type OrderBook struct {
+        Symbol     string
+        Instrument Instrument
+        Bids       *Book
+        Asks       *Book
+        LastTrade  *Trade
+        SeqNum     uint64
+}
+
+type RealClock struct{}
+
+func (c *RealClock) NowUnixNano() int64 <span class="cov8" title="1">{ return time.Now().UnixNano() }</span>
+func (c *RealClock) NowUnix() int64     <span class="cov0" title="0">{ return time.Now().Unix() }</span>
+
+func NewExchange(estimatedClients int, clock Clock) *Exchange <span class="cov8" title="1">{
+        if clock == nil </span><span class="cov0" title="0">{
+                clock = &amp;RealClock{}
+        }</span>
+        <span class="cov8" title="1">matcher := NewDefaultMatcher()
+        matcher.clock = clock
+        return &amp;Exchange{
+                Clients:     make(map[uint64]*Client, estimatedClients),
+                Gateways:    make(map[uint64]*ClientGateway, estimatedClients),
+                Books:       make(map[string]*OrderBook, 16),
+                Instruments: make(map[string]Instrument, 16),
+                Positions:   NewPositionManager(clock),
+                NextOrderID: 1,
+                Matcher:     matcher,
+                MDPublisher: NewMDPublisher(),
+                Clock:       clock,
+                running:     false,
+                shutdownCh:  make(chan struct{}),
+        }</span>
+}
+
+func (e *Exchange) AddInstrument(instrument Instrument) <span class="cov8" title="1">{
+        e.mu.Lock()
+        defer e.mu.Unlock()
+
+        symbol := instrument.Symbol()
+        e.Instruments[symbol] = instrument
+        e.Books[symbol] = &amp;OrderBook{
+                Symbol:     symbol,
+                Instrument: instrument,
+                Bids:       newBook(Buy),
+                Asks:       newBook(Sell),
+                LastTrade:  nil,
+                SeqNum:     0,
+        }
+}</span>
+
+func (e *Exchange) ConnectClient(clientID uint64, initialBalances map[string]int64, feePlan FeeModel) *ClientGateway <span class="cov8" title="1">{
+        e.mu.Lock()
+        defer e.mu.Unlock()
+
+        client := NewClient(clientID, feePlan)
+        for asset, amount := range initialBalances </span><span class="cov8" title="1">{
+                client.AddBalance(asset, amount)
+        }</span>
+        <span class="cov8" title="1">e.Clients[clientID] = client
+
+        gateway := NewClientGateway(clientID)
+        gateway.Running = true
+        e.Gateways[clientID] = gateway
+
+        go e.handleClientRequests(gateway)
+        return gateway</span>
+}
+
+func (e *Exchange) DisconnectClient(clientID uint64) <span class="cov8" title="1">{
+        e.mu.Lock()
+        defer e.mu.Unlock()
+
+        if gateway := e.Gateways[clientID]; gateway != nil </span><span class="cov8" title="1">{
+                gateway.Close()
+                delete(e.Gateways, clientID)
+        }</span>
+}
+
+func (e *Exchange) handleClientRequests(gateway *ClientGateway) <span class="cov8" title="1">{
+        for req := range gateway.RequestCh </span><span class="cov8" title="1">{
+                var resp Response
+                switch req.Type </span>{
+                case ReqPlaceOrder:<span class="cov8" title="1">
+                        resp = e.placeOrder(gateway.ClientID, req.OrderReq)</span>
+                case ReqCancelOrder:<span class="cov8" title="1">
+                        resp = e.cancelOrder(gateway.ClientID, req.CancelReq)</span>
+                case ReqQueryBalance:<span class="cov8" title="1">
+                        resp = e.queryBalance(gateway.ClientID, req.QueryReq)</span>
+                case ReqSubscribe:<span class="cov8" title="1">
+                        resp = e.subscribe(gateway.ClientID, req.QueryReq, gateway)</span>
+                case ReqUnsubscribe:<span class="cov8" title="1">
+                        resp = e.unsubscribe(gateway.ClientID, req.QueryReq)</span>
+                }
+                <span class="cov8" title="1">select </span>{
+                case gateway.ResponseCh &lt;- resp:<span class="cov8" title="1"></span>
+                default:<span class="cov8" title="1"></span>
+                }
+        }
+}
+
+func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response <span class="cov8" title="1">{
+        e.mu.Lock()
+        defer e.mu.Unlock()
+
+        client := e.Clients[clientID]
+        if client == nil </span><span class="cov0" title="0">{
+                return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownClient}
+        }</span>
+
+        <span class="cov8" title="1">book := e.Books[req.Symbol]
+        if book == nil </span><span class="cov8" title="1">{
+                return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownInstrument}
+        }</span>
+
+        <span class="cov8" title="1">instrument := book.Instrument
+        precision := instrument.TickSize()
+        if req.Type == LimitOrder &amp;&amp; !instrument.ValidatePrice(req.Price) </span><span class="cov8" title="1">{
+                return Response{RequestID: req.RequestID, Success: false, Error: RejectInvalidPrice}
+        }</span>
+        <span class="cov8" title="1">if !instrument.ValidateQty(req.Qty) </span><span class="cov8" title="1">{
+                return Response{RequestID: req.RequestID, Success: false, Error: RejectInvalidQty}
+        }</span>
+
+        <span class="cov8" title="1">orderID := atomic.AddUint64(&amp;e.NextOrderID, 1)
+        order := getOrder()
+        order.ID = orderID
+        order.ClientID = clientID
+        order.Side = req.Side
+        order.Type = req.Type
+        order.TimeInForce = req.TimeInForce
+        order.Price = req.Price
+        order.Qty = req.Qty
+        order.Visibility = req.Visibility
+        order.IcebergQty = req.IcebergQty
+        order.Status = Open
+        order.Timestamp = e.Clock.NowUnixNano()
+
+        switch req.Type </span>{
+        case Market:<span class="cov8" title="1">
+                if req.Side == Buy </span><span class="cov8" title="1">{
+                        if book.Asks.Best != nil </span><span class="cov8" title="1">{
+                                maxCost := (req.Qty * book.Asks.Best.Price) / precision
+                                if client.GetAvailable(instrument.QuoteAsset()) &lt; maxCost </span><span class="cov8" title="1">{
+                                        putOrder(order)
+                                        return Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+                                }</span>
+                        }
+                } else<span class="cov8" title="1"> {
+                        if client.GetAvailable(instrument.BaseAsset()) &lt; req.Qty </span><span class="cov0" title="0">{
+                                putOrder(order)
+                                return Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+                        }</span>
+                }
+        case LimitOrder:<span class="cov8" title="1">
+                asset := instrument.QuoteAsset()
+                amount := (req.Qty * req.Price) / precision
+                if req.Side == Buy </span><span class="cov8" title="1">{
+                        if !client.Reserve(asset, amount) </span><span class="cov8" title="1">{
+                                putOrder(order)
+                                return Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+                        }</span>
+                } else<span class="cov8" title="1"> {
+                        asset = instrument.BaseAsset()
+                        if !client.Reserve(asset, req.Qty) </span><span class="cov8" title="1">{
+                                putOrder(order)
+                                return Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+                        }</span>
+                }
+        }
+
+        <span class="cov8" title="1">result := e.Matcher.Match(book.Bids, book.Asks, order)
+
+        if req.TimeInForce == FOK &amp;&amp; !result.FullyFilled </span><span class="cov8" title="1">{
+                if req.Type == LimitOrder </span><span class="cov0" title="0">{
+                        if req.Side == Buy </span><span class="cov0" title="0">{
+                                client.Release(instrument.QuoteAsset(), (req.Qty*req.Price)/precision)
+                        }</span> else<span class="cov0" title="0"> {
+                                client.Release(instrument.BaseAsset(), req.Qty)
+                        }</span>
+                }
+                <span class="cov8" title="1">putOrder(order)
+                return Response{RequestID: req.RequestID, Success: false, Error: RejectFOKNotFilled}</span>
+        }
+
+        <span class="cov8" title="1">affectedLevels := make(map[int64]Side)
+        for _, exec := range result.Executions </span><span class="cov8" title="1">{
+                makerOrder := book.Bids.Orders[exec.MakerOrderID]
+                if makerOrder == nil </span><span class="cov8" title="1">{
+                        makerOrder = book.Asks.Orders[exec.MakerOrderID]
+                }</span>
+                <span class="cov8" title="1">if makerOrder != nil </span><span class="cov8" title="1">{
+                        affectedLevels[makerOrder.Price] = makerOrder.Side
+                }</span>
+        }
+
+        <span class="cov8" title="1">e.processExecutions(book, result.Executions, order)
+
+        for _, exec := range result.Executions </span><span class="cov8" title="1">{
+                makerOrder := book.Bids.Orders[exec.MakerOrderID]
+                if makerOrder == nil </span><span class="cov8" title="1">{
+                        makerOrder = book.Asks.Orders[exec.MakerOrderID]
+                }</span>
+                <span class="cov8" title="1">if makerOrder != nil &amp;&amp; makerOrder.Status == Filled </span><span class="cov8" title="1">{
+                        if makerOrder.Side == Buy </span><span class="cov8" title="1">{
+                                book.Bids.cancelOrder(exec.MakerOrderID)
+                        }</span> else<span class="cov8" title="1"> {
+                                book.Asks.cancelOrder(exec.MakerOrderID)
+                        }</span>
+                        <span class="cov8" title="1">e.Clients[exec.MakerClientID].RemoveOrder(exec.MakerOrderID)
+                        putOrder(makerOrder)</span>
+                }
+        }
+
+        <span class="cov8" title="1">for price, side := range affectedLevels </span><span class="cov8" title="1">{
+                e.publishBookUpdate(book, side, price)
+        }</span>
+
+        <span class="cov8" title="1">if order.Status != Filled &amp;&amp; req.Type == LimitOrder &amp;&amp; req.TimeInForce == GTC </span><span class="cov8" title="1">{
+                if order.Side == Buy </span><span class="cov8" title="1">{
+                        book.Bids.addOrder(order)
+                        e.publishBookUpdate(book, Buy, order.Price)
+                }</span> else<span class="cov8" title="1"> {
+                        book.Asks.addOrder(order)
+                        e.publishBookUpdate(book, Sell, order.Price)
+                }</span>
+                <span class="cov8" title="1">client.AddOrder(orderID)</span>
+        } else<span class="cov8" title="1"> {
+                if order.FilledQty &lt; order.Qty </span><span class="cov8" title="1">{
+                        if order.Side == Buy </span><span class="cov8" title="1">{
+                                remainingNotional := ((order.Qty - order.FilledQty) * order.Price) / precision
+                                client.Release(instrument.QuoteAsset(), remainingNotional)
+                        }</span> else<span class="cov8" title="1"> {
+                                client.Release(instrument.BaseAsset(), order.Qty-order.FilledQty)
+                        }</span>
+                }
+                <span class="cov8" title="1">putOrder(order)</span>
+        }
+
+        <span class="cov8" title="1">return Response{RequestID: req.RequestID, Success: true, Data: orderID}</span>
+}
+
+func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response <span class="cov8" title="1">{
+        e.mu.Lock()
+        defer e.mu.Unlock()
+
+        client := e.Clients[clientID]
+        if client == nil </span><span class="cov8" title="1">{
+                return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownClient}
+        }</span>
+
+        <span class="cov8" title="1">var order *Order
+        var book *OrderBook
+        for _, b := range e.Books </span><span class="cov8" title="1">{
+                if o := b.Bids.Orders[req.OrderID]; o != nil </span><span class="cov8" title="1">{
+                        order = o
+                        book = b
+                        break</span>
+                }
+                <span class="cov8" title="1">if o := b.Asks.Orders[req.OrderID]; o != nil </span><span class="cov8" title="1">{
+                        order = o
+                        book = b
+                        break</span>
+                }
+        }
+
+        <span class="cov8" title="1">if order == nil </span><span class="cov8" title="1">{
+                return Response{RequestID: req.RequestID, Success: false, Error: RejectOrderNotFound}
+        }</span>
+        <span class="cov8" title="1">if order.ClientID != clientID </span><span class="cov8" title="1">{
+                return Response{RequestID: req.RequestID, Success: false, Error: RejectOrderNotOwned}
+        }</span>
+        <span class="cov8" title="1">if order.Status == Filled </span><span class="cov0" title="0">{
+                return Response{RequestID: req.RequestID, Success: false, Error: RejectOrderAlreadyFilled}
+        }</span>
+
+        <span class="cov8" title="1">instrument := book.Instrument
+        precision := instrument.TickSize()
+        remainingQty := order.Qty - order.FilledQty
+        if order.Side == Buy </span><span class="cov8" title="1">{
+                amount := (remainingQty * order.Price) / precision
+                client.Release(instrument.QuoteAsset(), amount)
+                book.Bids.cancelOrder(req.OrderID)
+                e.publishBookUpdate(book, Buy, order.Price)
+        }</span> else<span class="cov8" title="1"> {
+                client.Release(instrument.BaseAsset(), remainingQty)
+                book.Asks.cancelOrder(req.OrderID)
+                e.publishBookUpdate(book, Sell, order.Price)
+        }</span>
+
+        <span class="cov8" title="1">client.RemoveOrder(req.OrderID)
+        order.Status = Cancelled
+        putOrder(order)
+
+        return Response{RequestID: req.RequestID, Success: true, Data: remainingQty}</span>
+}
+
+func (e *Exchange) queryBalance(clientID uint64, req *QueryRequest) Response <span class="cov8" title="1">{
+        e.mu.RLock()
+        defer e.mu.RUnlock()
+
+        client := e.Clients[clientID]
+        if client == nil </span><span class="cov8" title="1">{
+                return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownClient}
+        }</span>
+
+        <span class="cov8" title="1">snapshot := client.GetBalanceSnapshot(e.Clock.NowUnixNano())
+        return Response{RequestID: req.RequestID, Success: true, Data: snapshot}</span>
+}
+
+func (e *Exchange) subscribe(clientID uint64, req *QueryRequest, gateway *ClientGateway) Response <span class="cov8" title="1">{
+        e.mu.RLock()
+        defer e.mu.RUnlock()
+
+        book := e.Books[req.Symbol]
+        if book == nil </span><span class="cov8" title="1">{
+                return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownInstrument}
+        }</span>
+
+        <span class="cov8" title="1">types := []MDType{MDSnapshot, MDDelta, MDTrade}
+        e.MDPublisher.Subscribe(clientID, req.Symbol, types, gateway)
+
+        snapshot := &amp;BookSnapshot{
+                Bids: book.Bids.getSnapshot(),
+                Asks: book.Asks.getSnapshot(),
+        }
+        e.MDPublisher.Publish(req.Symbol, MDSnapshot, snapshot, e.Clock.NowUnixNano())
+
+        return Response{RequestID: req.RequestID, Success: true}</span>
+}
+
+func (e *Exchange) unsubscribe(clientID uint64, req *QueryRequest) Response <span class="cov8" title="1">{
+        e.MDPublisher.Unsubscribe(clientID, req.Symbol)
+        return Response{RequestID: req.RequestID, Success: true}
+}</span>
+
+func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order) <span class="cov8" title="1">{
+        instrument := book.Instrument
+        timestamp := e.Clock.NowUnixNano()
+        precision := instrument.TickSize()
+        positionChanged := false
+
+        for _, exec := range executions </span><span class="cov8" title="1">{
+                taker := e.Clients[exec.TakerClientID]
+                maker := e.Clients[exec.MakerClientID]
+
+                takerFee := taker.FeePlan.CalculateFee(exec, takerOrder.Side, false, instrument.BaseAsset(), instrument.QuoteAsset(), precision)
+                makerSide := Sell
+                if takerOrder.Side == Sell </span><span class="cov8" title="1">{
+                        makerSide = Buy
+                }</span>
+                <span class="cov8" title="1">makerFee := maker.FeePlan.CalculateFee(exec, makerSide, true, instrument.BaseAsset(), instrument.QuoteAsset(), precision)
+
+                notional := (exec.Price * exec.Qty) / precision
+
+                if takerOrder.Side == Buy </span><span class="cov8" title="1">{
+                        taker.Release(instrument.QuoteAsset(), notional)
+                        taker.Balances[instrument.QuoteAsset()] -= notional + takerFee.Amount
+                        taker.Balances[instrument.BaseAsset()] += exec.Qty
+                        maker.Release(instrument.BaseAsset(), exec.Qty)
+                        maker.Balances[instrument.QuoteAsset()] += notional - makerFee.Amount
+                        maker.Balances[instrument.BaseAsset()] -= exec.Qty
+                }</span> else<span class="cov8" title="1"> {
+                        taker.Release(instrument.BaseAsset(), exec.Qty)
+                        taker.Balances[instrument.BaseAsset()] -= exec.Qty
+                        taker.Balances[instrument.QuoteAsset()] += notional - takerFee.Amount
+                        maker.Release(instrument.QuoteAsset(), notional)
+                        maker.Balances[instrument.BaseAsset()] += exec.Qty
+                        maker.Balances[instrument.QuoteAsset()] -= notional + makerFee.Amount
+                }</span>
+
+                <span class="cov8" title="1">taker.TakerVolume += notional
+                maker.MakerVolume += notional
+
+                if instrument.IsPerp() </span><span class="cov0" title="0">{
+                        e.Positions.UpdatePosition(exec.TakerClientID, book.Symbol, exec.Qty, exec.Price, takerOrder.Side)
+                        e.Positions.UpdatePosition(exec.MakerClientID, book.Symbol, exec.Qty, exec.Price, makerSide)
+                        positionChanged = true
+                }</span>
+
+                // ... existing code ...
+
+                <span class="cov8" title="1">trade := &amp;Trade{
+                        TradeID:      book.SeqNum,
+                        Price:        exec.Price,
+                        Qty:          exec.Qty,
+                        Side:         takerOrder.Side,
+                        TakerOrderID: exec.TakerOrderID,
+                        MakerOrderID: exec.MakerOrderID,
+                }
+                book.SeqNum++
+                book.LastTrade = trade
+
+                e.MDPublisher.PublishTrade(book.Symbol, trade, timestamp)
+
+                takerGw := e.Gateways[exec.TakerClientID]
+                if takerGw != nil </span><span class="cov8" title="1">{
+                        takerFillIsFull := takerOrder.FilledQty &gt;= takerOrder.Qty
+                        takerGw.ResponseCh &lt;- Response{
+                                Success: true,
+                                Data: &amp;FillNotification{
+                                        OrderID:   exec.TakerOrderID,
+                                        ClientID:  exec.TakerClientID,
+                                        TradeID:   book.SeqNum - 1,
+                                        Qty:       exec.Qty,
+                                        Price:     exec.Price,
+                                        Side:      takerOrder.Side,
+                                        IsFull:    takerFillIsFull,
+                                        FeeAmount: takerFee.Amount,
+                                        FeeAsset:  takerFee.Asset,
+                                },
+                        }
+                }</span>
+
+                <span class="cov8" title="1">makerGw := e.Gateways[exec.MakerClientID]
+                if makerGw != nil </span><span class="cov8" title="1">{
+                        makerOrder := book.Bids.Orders[exec.MakerOrderID]
+                        if makerOrder == nil </span><span class="cov8" title="1">{
+                                makerOrder = book.Asks.Orders[exec.MakerOrderID]
+                        }</span>
+                        <span class="cov8" title="1">makerFillIsFull := makerOrder != nil &amp;&amp; makerOrder.FilledQty &gt;= makerOrder.Qty
+                        makerGw.ResponseCh &lt;- Response{
+                                Success: true,
+                                Data: &amp;FillNotification{
+                                        OrderID:   exec.MakerOrderID,
+                                        ClientID:  exec.MakerClientID,
+                                        TradeID:   book.SeqNum - 1,
+                                        Qty:       exec.Qty,
+                                        Price:     exec.Price,
+                                        Side:      makerSide,
+                                        IsFull:    makerFillIsFull,
+                                        FeeAmount: makerFee.Amount,
+                                        FeeAsset:  makerFee.Asset,
+                                },
+                        }</span>
+                }
+        }
+
+        // Publish open interest if positions changed
+        <span class="cov8" title="1">if positionChanged </span><span class="cov0" title="0">{
+                totalOI := e.Positions.CalculateOpenInterest(book.Symbol)
+                oi := &amp;OpenInterest{
+                        Symbol:         book.Symbol,
+                        TotalContracts: totalOI,
+                        Timestamp:      timestamp,
+                }
+                e.MDPublisher.PublishOpenInterest(book.Symbol, oi, timestamp)
+        }</span>
+}
+
+// publishBookUpdate publishes a delta update for a specific price level
+// Caller must hold e.mu lock
+func (e *Exchange) publishBookUpdate(book *OrderBook, side Side, price int64) <span class="cov8" title="1">{
+        var limit *Limit
+        if side == Buy </span><span class="cov8" title="1">{
+                limit = book.Bids.Limits[price]
+        }</span> else<span class="cov8" title="1"> {
+                limit = book.Asks.Limits[price]
+        }</span>
+
+        <span class="cov8" title="1">var totalQty, visible, hidden int64
+        if limit != nil </span><span class="cov8" title="1">{
+                totalQty = limit.TotalQty
+                visible = visibleQty(limit)
+                hidden = totalQty - visible
+        }</span>
+        // If limit is nil, qty is 0, which means delete level
+
+        <span class="cov8" title="1">delta := &amp;BookDelta{
+                Side:       side,
+                Price:      price,
+                VisibleQty: visible,
+                HiddenQty:  hidden,
+        }
+        e.MDPublisher.Publish(book.Symbol, MDDelta, delta, e.Clock.NowUnixNano())</span>
+}
+
+type InstrumentInfo struct {
+        Symbol    string
+        BaseAsset string
+        QuoteAsset string
+        TickSize  int64
+        MinSize   int64
+        IsPerp    bool
+}
+
+func (e *Exchange) ListInstruments(baseFilter, quoteFilter string) []InstrumentInfo <span class="cov8" title="1">{
+        e.mu.RLock()
+        defer e.mu.RUnlock()
+
+        result := make([]InstrumentInfo, 0, len(e.Instruments))
+        for _, inst := range e.Instruments </span><span class="cov8" title="1">{
+                if baseFilter != "" &amp;&amp; inst.BaseAsset() != baseFilter </span><span class="cov8" title="1">{
+                        continue</span>
+                }
+                <span class="cov8" title="1">if quoteFilter != "" &amp;&amp; inst.QuoteAsset() != quoteFilter </span><span class="cov8" title="1">{
+                        continue</span>
+                }
+                <span class="cov8" title="1">result = append(result, InstrumentInfo{
+                        Symbol:     inst.Symbol(),
+                        BaseAsset:  inst.BaseAsset(),
+                        QuoteAsset: inst.QuoteAsset(),
+                        TickSize:   inst.TickSize(),
+                        MinSize:    inst.MinOrderSize(),
+                        IsPerp:     inst.IsPerp(),
+                })</span>
+        }
+        <span class="cov8" title="1">return result</span>
+}
+
+// publishSnapshot publishes a full order book snapshot to all subscribers
+// Caller must hold e.mu lock
+func (e *Exchange) publishSnapshot(symbol string, timestamp int64) <span class="cov0" title="0">{
+        book := e.Books[symbol]
+        if book == nil </span><span class="cov0" title="0">{
+                return
+        }</span>
+        <span class="cov0" title="0">snapshot := &amp;BookSnapshot{
+                Bids: book.Bids.getSnapshot(),
+                Asks: book.Asks.getSnapshot(),
+        }
+        e.MDPublisher.Publish(symbol, MDSnapshot, snapshot, timestamp)</span>
+}
+
+func (e *Exchange) Shutdown() <span class="cov8" title="1">{
+        e.mu.Lock()
+        defer e.mu.Unlock()
+
+        if !e.running </span><span class="cov8" title="1">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">close(e.shutdownCh)
+        for _, gateway := range e.Gateways </span><span class="cov0" title="0">{
+                gateway.Close()
+        }</span>
+        <span class="cov8" title="1">e.running = false</span>
+}
+</pre>
+		
+		<pre class="file" id="file11" style="display: none">package exchange
+
+const (
+        BPS = 10000
+)
+
+type FeeModel interface {
+        CalculateFee(exec *Execution, side Side, isMaker bool, baseAsset, quoteAsset string, precision int64) Fee
+}
+
+type PercentageFee struct {
+        MakerBps int64
+        TakerBps int64
+        InQuote  bool
+}
+
+func (f *PercentageFee) CalculateFee(exec *Execution, side Side, isMaker bool, baseAsset, quoteAsset string, precision int64) Fee <span class="cov8" title="1">{
+        bps := f.TakerBps
+        if isMaker </span><span class="cov8" title="1">{
+                bps = f.MakerBps
+        }</span>
+
+        <span class="cov8" title="1">var amount int64
+        var asset string
+
+        if f.InQuote </span><span class="cov8" title="1">{
+                tradeValue := (exec.Price * exec.Qty) / precision
+                amount = (tradeValue * bps) / BPS
+                asset = quoteAsset
+        }</span> else<span class="cov8" title="1"> {
+                amount = (exec.Qty * bps) / BPS
+                asset = baseAsset
+        }</span>
+
+        <span class="cov8" title="1">return Fee{Asset: asset, Amount: amount}</span>
+}
+
+type FixedFee struct {
+        MakerFee Fee
+        TakerFee Fee
+}
+
+func (f *FixedFee) CalculateFee(exec *Execution, side Side, isMaker bool, baseAsset, quoteAsset string, precision int64) Fee <span class="cov8" title="1">{
+        if isMaker </span><span class="cov8" title="1">{
+                return f.MakerFee
+        }</span>
+        <span class="cov8" title="1">return f.TakerFee</span>
+}
+</pre>
+		
+		<pre class="file" id="file12" style="display: none">package exchange
+
+import "sync"
+
+type PositionManager struct {
+        positions map[uint64]map[string]*Position
+        clock     Clock
+        mu        sync.RWMutex
+}
+
+func NewPositionManager(clock Clock) *PositionManager <span class="cov8" title="1">{
+        return &amp;PositionManager{
+                positions: make(map[uint64]map[string]*Position),
+                clock:     clock,
+        }
+}</span>
+
+func (pm *PositionManager) GetPosition(clientID uint64, symbol string) *Position <span class="cov8" title="1">{
+        pm.mu.RLock()
+        defer pm.mu.RUnlock()
+
+        if pm.positions[clientID] == nil </span><span class="cov8" title="1">{
+                return nil
+        }</span>
+        <span class="cov8" title="1">return pm.positions[clientID][symbol]</span>
+}
+
+func (pm *PositionManager) UpdatePosition(clientID uint64, symbol string, qty int64, price int64, side Side) <span class="cov8" title="1">{
+        pm.mu.Lock()
+        defer pm.mu.Unlock()
+
+        if pm.positions[clientID] == nil </span><span class="cov8" title="1">{
+                pm.positions[clientID] = make(map[string]*Position)
+        }</span>
+
+        <span class="cov8" title="1">pos := pm.positions[clientID][symbol]
+        if pos == nil </span><span class="cov8" title="1">{
+                pos = &amp;Position{
+                        ClientID:   clientID,
+                        Symbol:     symbol,
+                        Size:       0,
+                        EntryPrice: 0,
+                        Margin:     0,
+                }
+                pm.positions[clientID][symbol] = pos
+        }</span>
+
+        <span class="cov8" title="1">deltaSize := qty
+        if side == Sell </span><span class="cov8" title="1">{
+                deltaSize = -qty
+        }</span>
+
+        <span class="cov8" title="1">newSize := pos.Size + deltaSize
+        if newSize == 0 </span><span class="cov8" title="1">{
+                pos.Size = 0
+                pos.EntryPrice = 0
+        }</span> else<span class="cov8" title="1"> if pos.Size == 0 </span><span class="cov8" title="1">{
+                pos.Size = newSize
+                pos.EntryPrice = price
+        }</span> else<span class="cov8" title="1"> if (pos.Size &gt; 0 &amp;&amp; newSize &gt; pos.Size) || (pos.Size &lt; 0 &amp;&amp; newSize &lt; pos.Size) </span><span class="cov8" title="1">{
+                totalNotional := (pos.Size * pos.EntryPrice) + (deltaSize * price)
+                pos.EntryPrice = totalNotional / newSize
+                pos.Size = newSize
+        }</span> else<span class="cov8" title="1"> if (pos.Size &gt; 0 &amp;&amp; newSize &lt; 0) || (pos.Size &lt; 0 &amp;&amp; newSize &gt; 0) </span><span class="cov8" title="1">{
+                pos.EntryPrice = price
+                pos.Size = newSize
+        }</span> else<span class="cov0" title="0"> {
+                pos.Size = newSize
+        }</span>
+}
+
+func (pm *PositionManager) CalculateOpenInterest(symbol string) int64 <span class="cov8" title="1">{
+        pm.mu.RLock()
+        defer pm.mu.RUnlock()
+
+        var total int64
+        for _, clientPositions := range pm.positions </span><span class="cov8" title="1">{
+                if pos := clientPositions[symbol]; pos != nil &amp;&amp; pos.Size != 0 </span><span class="cov8" title="1">{
+                        total += abs(pos.Size)
+                }</span>
+        }
+        <span class="cov8" title="1">return total</span>
+}
+
+func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpFutures) <span class="cov8" title="1">{
+        fundingRate := perp.GetFundingRate()
+        precision := perp.TickSize()
+        for clientID, clientPos := range pm.positions </span><span class="cov8" title="1">{
+                pos := clientPos[perp.Symbol()]
+                if pos == nil || pos.Size == 0 </span><span class="cov0" title="0">{
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">client := clients[clientID]
+                if client == nil </span><span class="cov8" title="1">{
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">positionValue := abs(pos.Size) * pos.EntryPrice / precision
+                funding := (positionValue * fundingRate.Rate) / 10000
+
+                if pos.Size &gt; 0 </span><span class="cov8" title="1">{
+                        client.SubBalance(perp.QuoteAsset(), funding)
+                }</span> else<span class="cov8" title="1"> {
+                        client.AddBalance(perp.QuoteAsset(), funding)
+                }</span>
+        }
+
+        <span class="cov8" title="1">fundingRate.NextFunding = pm.clock.NowUnixNano() + (fundingRate.Interval * 1e9)</span>
+}
+
+func abs(x int64) int64 <span class="cov8" title="1">{
+        if x &lt; 0 </span><span class="cov8" title="1">{
+                return -x
+        }</span>
+        <span class="cov8" title="1">return x</span>
+}
+</pre>
+		
+		<pre class="file" id="file13" style="display: none">package exchange
+
+import "sync"
+
+const (
+        RequestChSize    = 1000
+        ResponseChSize   = 1000
+        MarketDataChSize = 10000
+)
+
+type ClientGateway struct {
+        ClientID   uint64
+        RequestCh  chan Request
+        ResponseCh chan Response
+        MarketData chan *MarketDataMsg
+        Running    bool
+        mu         sync.Mutex
+}
+
+func NewClientGateway(clientID uint64) *ClientGateway <span class="cov8" title="1">{
+        return &amp;ClientGateway{
+                ClientID:   clientID,
+                RequestCh:  make(chan Request, RequestChSize),
+                ResponseCh: make(chan Response, ResponseChSize),
+                MarketData: make(chan *MarketDataMsg, MarketDataChSize),
+                Running:    false,
+        }
+}</span>
+
+func (g *ClientGateway) Close() <span class="cov8" title="1">{
+        g.mu.Lock()
+        defer g.mu.Unlock()
+
+        if g.Running </span><span class="cov8" title="1">{
+                close(g.RequestCh)
+                close(g.ResponseCh)
+                close(g.MarketData)
+                g.Running = false
+        }</span>
+}
+</pre>
+		
+		<pre class="file" id="file14" style="display: none">package exchange
+
+type Instrument interface {
+        Symbol() string
+        BaseAsset() string
+        QuoteAsset() string
+        TickSize() int64
+        MinOrderSize() int64
+        ValidatePrice(price int64) bool
+        ValidateQty(qty int64) bool
+        IsPerp() bool
+        InstrumentType() string
+}
+
+type SpotInstrument struct {
+        symbol       string
+        base         string
+        quote        string
+        tickSize     int64
+        minOrderSize int64
+}
+
+func NewSpotInstrument(symbol, base, quote string, tickSize, minOrderSize int64) *SpotInstrument <span class="cov8" title="1">{
+        return &amp;SpotInstrument{
+                symbol:       symbol,
+                base:         base,
+                quote:        quote,
+                tickSize:     tickSize,
+                minOrderSize: minOrderSize,
+        }
+}</span>
+
+func (i *SpotInstrument) Symbol() string <span class="cov8" title="1">{
+        return i.symbol
+}</span>
+
+func (i *SpotInstrument) BaseAsset() string <span class="cov8" title="1">{
+        return i.base
+}</span>
+
+func (i *SpotInstrument) QuoteAsset() string <span class="cov8" title="1">{
+        return i.quote
+}</span>
+
+func (i *SpotInstrument) TickSize() int64 <span class="cov8" title="1">{
+        return i.tickSize
+}</span>
+
+func (i *SpotInstrument) MinOrderSize() int64 <span class="cov8" title="1">{
+        return i.minOrderSize
+}</span>
+
+func (i *SpotInstrument) ValidatePrice(price int64) bool <span class="cov8" title="1">{
+        return price &gt; 0 &amp;&amp; price%i.tickSize == 0
+}</span>
+
+func (i *SpotInstrument) ValidateQty(qty int64) bool <span class="cov8" title="1">{
+        return qty &gt; 0
+}</span>
+
+func (i *SpotInstrument) IsPerp() bool <span class="cov8" title="1">{
+        return false
+}</span>
+
+func (i *SpotInstrument) InstrumentType() string <span class="cov0" title="0">{
+        return "SPOT"
+}</span>
+
+type PerpFutures struct {
+        SpotInstrument
+        fundingRate *FundingRate
+        fundingCalc FundingCalculator
+}
+
+func NewPerpFutures(symbol, base, quote string, tickSize, minOrderSize int64) *PerpFutures <span class="cov8" title="1">{
+        return &amp;PerpFutures{
+                SpotInstrument: SpotInstrument{
+                        symbol:       symbol,
+                        base:         base,
+                        quote:        quote,
+                        tickSize:     tickSize,
+                        minOrderSize: minOrderSize,
+                },
+                fundingRate: &amp;FundingRate{
+                        Symbol:      symbol,
+                        Rate:        0,
+                        NextFunding: 0,
+                        Interval:    28800,
+                        MarkPrice:   0,
+                        IndexPrice:  0,
+                },
+                fundingCalc: &amp;SimpleFundingCalc{
+                        BaseRate: 10,
+                        Damping:  100,
+                        MaxRate:  75,
+                },
+        }
+}</span>
+
+func (p *PerpFutures) IsPerp() bool <span class="cov8" title="1">{
+        return true
+}</span>
+
+func (p *PerpFutures) InstrumentType() string <span class="cov0" title="0">{
+        return "PERP"
+}</span>
+
+func (p *PerpFutures) GetFundingRate() *FundingRate <span class="cov8" title="1">{
+        return p.fundingRate
+}</span>
+
+func (p *PerpFutures) UpdateFundingRate(indexPrice int64, markPrice int64) <span class="cov8" title="1">{
+        p.fundingRate.IndexPrice = indexPrice
+        p.fundingRate.MarkPrice = markPrice
+        p.fundingRate.Rate = p.fundingCalc.Calculate(indexPrice, markPrice)
+}</span>
+
+type FundingCalculator interface {
+        Calculate(indexPrice, markPrice int64) int64
+}
+
+type SimpleFundingCalc struct {
+        BaseRate int64
+        Damping  int64
+        MaxRate  int64
+}
+
+func (c *SimpleFundingCalc) Calculate(indexPrice, markPrice int64) int64 <span class="cov8" title="1">{
+        if indexPrice == 0 </span><span class="cov8" title="1">{
+                return 0
+        }</span>
+        <span class="cov8" title="1">premium := ((markPrice - indexPrice) * 10000) / indexPrice
+        rate := c.BaseRate + (premium * c.Damping / 100)
+        if rate &gt; c.MaxRate </span><span class="cov8" title="1">{
+                return c.MaxRate
+        }</span>
+        <span class="cov8" title="1">if rate &lt; -c.MaxRate </span><span class="cov8" title="1">{
+                return -c.MaxRate
+        }</span>
+        <span class="cov8" title="1">return rate</span>
+}
+</pre>
+		
+		<pre class="file" id="file15" style="display: none">package exchange
+
+func isEmpty(limit *Limit) bool <span class="cov8" title="1">{
+        return limit.OrderCnt == 0
+}</span>
+
+func visibleQty(limit *Limit) int64 <span class="cov8" title="1">{
+        var qty int64
+        for o := limit.Head; o != nil; o = o.Next </span><span class="cov8" title="1">{
+                remaining := o.Qty - o.FilledQty
+                if o.Visibility == Normal </span><span class="cov8" title="1">{
+                        qty += remaining
+                }</span> else<span class="cov8" title="1"> if o.Visibility == Iceberg </span><span class="cov8" title="1">{
+                        if remaining &lt; o.IcebergQty </span><span class="cov0" title="0">{
+                                qty += remaining
+                        }</span> else<span class="cov8" title="1"> {
+                                qty += o.IcebergQty
+                        }</span>
+                }
+        }
+        <span class="cov8" title="1">return qty</span>
+}
+</pre>
+		
+		<pre class="file" id="file16" style="display: none">package exchange
+
+import (
+        "sync"
+        "sync/atomic"
+)
+
+type MDPublisher struct {
+        subscriptions map[string]map[uint64]*Subscription
+        gateways      map[uint64]*ClientGateway
+        mu            sync.RWMutex
+        seqNum        uint64
+}
+
+func NewMDPublisher() *MDPublisher <span class="cov8" title="1">{
+        return &amp;MDPublisher{
+                subscriptions: make(map[string]map[uint64]*Subscription),
+                gateways:      make(map[uint64]*ClientGateway),
+                seqNum:        0,
+        }
+}</span>
+
+func (p *MDPublisher) Subscribe(clientID uint64, symbol string, types []MDType, gateway *ClientGateway) <span class="cov8" title="1">{
+        p.mu.Lock()
+        defer p.mu.Unlock()
+
+        if p.subscriptions[symbol] == nil </span><span class="cov8" title="1">{
+                p.subscriptions[symbol] = make(map[uint64]*Subscription)
+        }</span>
+        <span class="cov8" title="1">p.subscriptions[symbol][clientID] = &amp;Subscription{
+                ClientID: clientID,
+                Symbol:   symbol,
+                Types:    types,
+        }
+        p.gateways[clientID] = gateway</span>
+}
+
+func (p *MDPublisher) Unsubscribe(clientID uint64, symbol string) <span class="cov8" title="1">{
+        p.mu.Lock()
+        defer p.mu.Unlock()
+
+        if p.subscriptions[symbol] != nil </span><span class="cov8" title="1">{
+                delete(p.subscriptions[symbol], clientID)
+                if len(p.subscriptions[symbol]) == 0 </span><span class="cov8" title="1">{
+                        delete(p.subscriptions, symbol)
+                }</span>
+        }
+}
+
+func (p *MDPublisher) Publish(symbol string, mdType MDType, data any, timestamp int64) <span class="cov8" title="1">{
+        p.mu.Lock()
+        subs := p.subscriptions[symbol]
+        if len(subs) == 0 </span><span class="cov8" title="1">{
+                p.mu.Unlock()
+                return
+        }</span>
+
+        <span class="cov8" title="1">seqNum := atomic.AddUint64(&amp;p.seqNum, 1)
+
+        for clientID := range subs </span><span class="cov8" title="1">{
+                gateway := p.gateways[clientID]
+                if gateway != nil </span><span class="cov8" title="1">{
+                        msgCopy := &amp;MarketDataMsg{
+                                Type:      mdType,
+                                Symbol:    symbol,
+                                SeqNum:    seqNum,
+                                Timestamp: timestamp,
+                                Data:      data,
+                        }
+                        gateway.MarketData &lt;- msgCopy
+                }</span>
+        }
+        <span class="cov8" title="1">p.mu.Unlock()</span>
+}
+
+func (p *MDPublisher) PublishDelta(symbol string, side Side, price, visible, hidden int64, timestamp int64) <span class="cov8" title="1">{
+        delta := &amp;BookDelta{
+                Side:       side,
+                Price:      price,
+                VisibleQty: visible,
+                HiddenQty:  hidden,
+        }
+        p.Publish(symbol, MDDelta, delta, timestamp)
+}</span>
+
+func (p *MDPublisher) PublishTrade(symbol string, trade *Trade, timestamp int64) <span class="cov8" title="1">{
+        p.Publish(symbol, MDTrade, trade, timestamp)
+}</span>
+
+func (p *MDPublisher) PublishFunding(symbol string, funding *FundingRate, timestamp int64) <span class="cov8" title="1">{
+        p.Publish(symbol, MDFunding, funding, timestamp)
+}</span>
+
+func (p *MDPublisher) PublishOpenInterest(symbol string, oi *OpenInterest, timestamp int64) <span class="cov8" title="1">{
+        p.Publish(symbol, MDOpenInterest, oi, timestamp)
+}</span>
+</pre>
+		
+		<pre class="file" id="file17" style="display: none">package exchange
+
+type MatchResult struct {
+        Executions []*Execution
+        FullyFilled bool
+}
+
+type MatchingEngine interface {
+        Match(bidBook, askBook *Book, incomingOrder *Order) *MatchResult
+        Priority() Priority
+}
+
+type DefaultMatcher struct {
+        priority Priority
+        clock    Clock
+}
+
+func NewDefaultMatcher() *DefaultMatcher <span class="cov8" title="1">{
+        return &amp;DefaultMatcher{
+                priority: Priority{
+                        Primary:   PriorityPrice,
+                        Secondary: PriorityVisibility,
+                        Tertiary:  PriorityTime,
+                },
+                clock: &amp;RealClock{},
+        }
+}</span>
+
+func (m *DefaultMatcher) Priority() Priority <span class="cov8" title="1">{
+        return m.priority
+}</span>
+
+func (m *DefaultMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) *MatchResult <span class="cov8" title="1">{
+        executions := make([]*Execution, 0, 8)
+        var book *Book
+        if incomingOrder.Side == Buy </span><span class="cov8" title="1">{
+                book = askBook
+        }</span> else<span class="cov8" title="1"> {
+                book = bidBook
+        }</span>
+
+        <span class="cov8" title="1">for incomingOrder.FilledQty &lt; incomingOrder.Qty &amp;&amp; book.Best != nil </span><span class="cov8" title="1">{
+                if !m.canMatch(incomingOrder, book.Best) </span><span class="cov0" title="0">{
+                        break</span>
+                }
+
+                <span class="cov8" title="1">limit := book.Best
+                matched := false
+                for order := limit.Head; order != nil &amp;&amp; incomingOrder.FilledQty &lt; incomingOrder.Qty; </span><span class="cov8" title="1">{
+                        next := order.Next
+                        if order.FilledQty &lt; order.Qty &amp;&amp; m.shouldMatch(incomingOrder, order) </span><span class="cov8" title="1">{
+                                exec := m.execute(incomingOrder, order)
+                                executions = append(executions, exec)
+                                matched = true
+
+                                if order.FilledQty &gt;= order.Qty </span><span class="cov8" title="1">{
+                                        order.Status = Filled
+                                }</span> else<span class="cov8" title="1"> {
+                                        order.Status = PartialFill
+                                }</span>
+                        }
+                        <span class="cov8" title="1">order = next</span>
+                }
+
+                <span class="cov8" title="1">if isEmpty(limit) </span><span class="cov0" title="0">{
+                        book.removeLimit(limit)
+                }</span> else<span class="cov8" title="1"> if !matched </span><span class="cov8" title="1">{
+                        break</span>
+                }
+        }
+
+        <span class="cov8" title="1">fullyFilled := incomingOrder.FilledQty &gt;= incomingOrder.Qty
+        if fullyFilled </span><span class="cov8" title="1">{
+                incomingOrder.Status = Filled
+        }</span> else<span class="cov8" title="1"> if incomingOrder.FilledQty &gt; 0 </span><span class="cov8" title="1">{
+                incomingOrder.Status = PartialFill
+        }</span>
+
+        <span class="cov8" title="1">return &amp;MatchResult{
+                Executions:  executions,
+                FullyFilled: fullyFilled,
+        }</span>
+}
+
+func (m *DefaultMatcher) canMatch(incoming *Order, limit *Limit) bool <span class="cov8" title="1">{
+        if incoming.Type == Market </span><span class="cov8" title="1">{
+                return true
+        }</span>
+        <span class="cov8" title="1">if incoming.Side == Buy </span><span class="cov8" title="1">{
+                return incoming.Price &gt;= limit.Price
+        }</span>
+        <span class="cov8" title="1">return incoming.Price &lt;= limit.Price</span>
+}
+
+func (m *DefaultMatcher) shouldMatch(incoming, resting *Order) bool <span class="cov8" title="1">{
+        if incoming.ClientID == resting.ClientID </span><span class="cov8" title="1">{
+                return false
+        }</span>
+        <span class="cov8" title="1">return true</span>
+}
+
+func (m *DefaultMatcher) execute(taker, maker *Order) *Execution <span class="cov8" title="1">{
+        execQty := min(taker.Qty-taker.FilledQty, maker.Qty-maker.FilledQty)
+        if execQty &lt;= 0 </span><span class="cov0" title="0">{
+                panic("matching engine bug: attempted zero-quantity execution")</span>
+        }
+
+        <span class="cov8" title="1">taker.FilledQty += execQty
+        maker.FilledQty += execQty
+        if maker.Parent != nil </span><span class="cov8" title="1">{
+                maker.Parent.TotalQty -= execQty
+        }</span>
+
+        <span class="cov8" title="1">exec := getExecution()
+        exec.TakerOrderID = taker.ID
+        exec.MakerOrderID = maker.ID
+        exec.TakerClientID = taker.ClientID
+        exec.MakerClientID = maker.ClientID
+        exec.Price = maker.Price
+        exec.Qty = execQty
+        exec.Timestamp = m.clock.NowUnixNano()
+        return exec</span>
+}
+</pre>
+		
+		<pre class="file" id="file18" style="display: none">package exchange
+
+func linkOrder(limit *Limit, order *Order) <span class="cov8" title="1">{
+        order.Parent = limit
+        if limit.Head == nil </span><span class="cov8" title="1">{
+                limit.Head = order
+                limit.Tail = order
+                order.Prev = nil
+                order.Next = nil
+        }</span> else<span class="cov8" title="1"> {
+                limit.Tail.Next = order
+                order.Prev = limit.Tail
+                order.Next = nil
+                limit.Tail = order
+        }</span>
+        <span class="cov8" title="1">limit.TotalQty += order.Qty - order.FilledQty
+        limit.OrderCnt++</span>
+}
+
+func unlinkOrder(order *Order) <span class="cov8" title="1">{
+        limit := order.Parent
+        if order.Prev != nil </span><span class="cov8" title="1">{
+                order.Prev.Next = order.Next
+        }</span> else<span class="cov8" title="1"> {
+                limit.Head = order.Next
+        }</span>
+        <span class="cov8" title="1">if order.Next != nil </span><span class="cov8" title="1">{
+                order.Next.Prev = order.Prev
+        }</span> else<span class="cov8" title="1"> {
+                limit.Tail = order.Prev
+        }</span>
+        <span class="cov8" title="1">limit.TotalQty -= order.Qty - order.FilledQty
+        limit.OrderCnt--
+        order.Prev = nil
+        order.Next = nil
+        order.Parent = nil</span>
+}
+
+func resetOrder(order *Order) <span class="cov8" title="1">{
+        order.ID = 0
+        order.ClientID = 0
+        order.Side = Buy
+        order.Type = Market
+        order.TimeInForce = GTC
+        order.Price = 0
+        order.Qty = 0
+        order.FilledQty = 0
+        order.Visibility = Normal
+        order.IcebergQty = 0
+        order.Status = Open
+        order.Timestamp = 0
+        order.Prev = nil
+        order.Next = nil
+        order.Parent = nil
+}</span>
+
+func resetLimit(limit *Limit) <span class="cov8" title="1">{
+        limit.Price = 0
+        limit.TotalQty = 0
+        limit.OrderCnt = 0
+        limit.Head = nil
+        limit.Tail = nil
+        limit.Prev = nil
+        limit.Next = nil
+}</span>
+</pre>
+		
+		<pre class="file" id="file19" style="display: none">package exchange
+
+import "sync"
+
+var orderPool = sync.Pool{
+        New: func() any <span class="cov8" title="1">{
+                return &amp;Order{}
+        }</span>,
+}
+
+var limitPool = sync.Pool{
+        New: func() any <span class="cov8" title="1">{
+                return &amp;Limit{}
+        }</span>,
+}
+
+var executionPool = sync.Pool{
+        New: func() any <span class="cov8" title="1">{
+                return &amp;Execution{}
+        }</span>,
+}
+
+var mdMsgPool = sync.Pool{
+        New: func() any <span class="cov8" title="1">{
+                return &amp;MarketDataMsg{}
+        }</span>,
+}
+
+func getOrder() *Order <span class="cov8" title="1">{
+        return orderPool.Get().(*Order)
+}</span>
+
+func putOrder(o *Order) <span class="cov8" title="1">{
+        resetOrder(o)
+        orderPool.Put(o)
+}</span>
+
+func getLimit(price int64) *Limit <span class="cov8" title="1">{
+        l := limitPool.Get().(*Limit)
+        l.Price = price
+        return l
+}</span>
+
+func putLimit(l *Limit) <span class="cov8" title="1">{
+        resetLimit(l)
+        limitPool.Put(l)
+}</span>
+
+func getExecution() *Execution <span class="cov8" title="1">{
+        return executionPool.Get().(*Execution)
+}</span>
+
+func putExecution(e *Execution) <span class="cov8" title="1">{
+        e.TakerOrderID = 0
+        e.MakerOrderID = 0
+        e.TakerClientID = 0
+        e.MakerClientID = 0
+        e.Price = 0
+        e.Qty = 0
+        e.Timestamp = 0
+        executionPool.Put(e)
+}</span>
+
+func getMDMsg() *MarketDataMsg <span class="cov8" title="1">{
+        return mdMsgPool.Get().(*MarketDataMsg)
+}</span>
+
+func putMDMsg(m *MarketDataMsg) <span class="cov8" title="1">{
+        m.Type = MDSnapshot
+        m.Symbol = ""
+        m.SeqNum = 0
+        m.Timestamp = 0
+        m.Data = nil
+        mdMsgPool.Put(m)
+}</span>
+</pre>
+		
+		<pre class="file" id="file20" style="display: none">package exchange
+
+import "time"
+
+const (
+        SATOSHI = 100_000_000
+
+        CENT_TICK    = SATOSHI / 100
+        DOLLAR_TICK  = SATOSHI
+        HUNDRED_TICK = 100 * SATOSHI
+)
+
+// TEST ONLY - Limited precision (~15 decimal digits), not for production.
+func BTCAmount(btc float64) int64 <span class="cov8" title="1">{
+        return int64(btc * float64(SATOSHI))
+}</span>
+
+// TEST ONLY - Limited precision (~15 decimal digits), not for production.
+func USDAmount(usd float64) int64 <span class="cov8" title="1">{
+        return int64(usd * float64(SATOSHI))
+}</span>
+
+// TEST ONLY - Rounds price DOWN to nearest tickSize.
+func PriceUSD(price float64, tickSize int64) int64 <span class="cov8" title="1">{
+        raw := int64(price * float64(SATOSHI))
+        return (raw / tickSize) * tickSize
+}</span>
+
+// TEST ONLY - Injects a limit order directly into the exchange for testing.
+// Returns the OrderID and RejectReason (0 if successful).
+func InjectLimitOrder(ex *Exchange, clientID uint64, symbol string, side Side, price, qty int64) (uint64, RejectReason) <span class="cov0" title="0">{
+        gateway := ex.Gateways[clientID]
+        if gateway == nil </span><span class="cov0" title="0">{
+                return 0, RejectUnknownClient
+        }</span>
+
+        <span class="cov0" title="0">req := Request{
+                Type: ReqPlaceOrder,
+                OrderReq: &amp;OrderRequest{
+                        RequestID:   1000000, // Use high request ID for test orders
+                        Side:        side,
+                        Type:        LimitOrder,
+                        Price:       price,
+                        Qty:         qty,
+                        Symbol:      symbol,
+                        TimeInForce: GTC,
+                        Visibility:  Normal,
+                },
+        }
+
+        // Send request
+        gateway.RequestCh &lt;- req
+
+        // Wait for response
+        resp := &lt;-gateway.ResponseCh
+        if !resp.Success </span><span class="cov0" title="0">{
+                return 0, resp.Error
+        }</span>
+
+        // Response data should be the OrderID
+        <span class="cov0" title="0">orderID, ok := resp.Data.(uint64)
+        if !ok </span><span class="cov0" title="0">{
+                return 0, RejectUnknownInstrument // Generic error
+        }</span>
+
+        <span class="cov0" title="0">return orderID, 0</span>
+}
+
+// TEST ONLY - Injects a market order directly into the exchange for testing.
+// Returns the OrderID and RejectReason (0 if successful).
+func InjectMarketOrder(ex *Exchange, clientID uint64, symbol string, side Side, qty int64) (uint64, RejectReason) <span class="cov0" title="0">{
+        gateway := ex.Gateways[clientID]
+        if gateway == nil </span><span class="cov0" title="0">{
+                return 0, RejectUnknownClient
+        }</span>
+
+        <span class="cov0" title="0">req := Request{
+                Type: ReqPlaceOrder,
+                OrderReq: &amp;OrderRequest{
+                        RequestID:   1000000, // Use high request ID for test orders
+                        Side:        side,
+                        Type:        Market,
+                        Price:       0,
+                        Qty:         qty,
+                        Symbol:      symbol,
+                        TimeInForce: GTC,
+                        Visibility:  Normal,
+                },
+        }
+
+        gateway.RequestCh &lt;- req
+
+        timeout := time.After(200 * time.Millisecond)
+        for </span><span class="cov0" title="0">{
+                select </span>{
+                case resp := &lt;-gateway.ResponseCh:<span class="cov0" title="0">
+                        if !resp.Success </span><span class="cov0" title="0">{
+                                return 0, resp.Error
+                        }</span>
+                        <span class="cov0" title="0">switch data := resp.Data.(type) </span>{
+                        case uint64:<span class="cov0" title="0">
+                                return data, 0</span>
+                        case *FillNotification:<span class="cov0" title="0">
+                                return data.OrderID, 0</span>
+                        default:<span class="cov0" title="0">
+                                continue</span>
+                        }
+                case &lt;-timeout:<span class="cov0" title="0">
+                        panic("test timeout: InjectMarketOrder did not receive response - this indicates a real bug")</span>
+                }
+        }
+}
+</pre>
+		
+		<pre class="file" id="file21" style="display: none">package simulation
+
+import (
+        "sync"
+        "time"
+)
+
+type Clock interface {
+        NowUnixNano() int64
+        NowUnix() int64
+}
+
+type RealClock struct{}
+
+func (c *RealClock) NowUnixNano() int64 <span class="cov8" title="1">{
+        return time.Now().UnixNano()
+}</span>
+
+func (c *RealClock) NowUnix() int64 <span class="cov8" title="1">{
+        return time.Now().Unix()
+}</span>
+
+type SimulatedClock struct {
+        current int64
+        mu      sync.RWMutex
+}
+
+func NewSimulatedClock(start int64) *SimulatedClock <span class="cov8" title="1">{
+        return &amp;SimulatedClock{
+                current: start,
+        }
+}</span>
+
+func (c *SimulatedClock) NowUnixNano() int64 <span class="cov8" title="1">{
+        c.mu.RLock()
+        defer c.mu.RUnlock()
+        return c.current
+}</span>
+
+func (c *SimulatedClock) NowUnix() int64 <span class="cov8" title="1">{
+        c.mu.RLock()
+        defer c.mu.RUnlock()
+        return c.current / 1e9
+}</span>
+
+func (c *SimulatedClock) Advance(delta time.Duration) <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+        c.current += int64(delta)
+}</span>
+
+func (c *SimulatedClock) SetTime(t int64) <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+        c.current = t
+}</span>
+</pre>
+		
+		<pre class="file" id="file22" style="display: none">package simulation
+
+import (
+        "exchange_sim/exchange"
+        "sync/atomic"
+        "time"
+)
+
+type LatencyMode uint8
+
+const (
+        LatencyRequest    LatencyMode = 1 &lt;&lt; 0
+        LatencyResponse   LatencyMode = 1 &lt;&lt; 1
+        LatencyMarketData LatencyMode = 1 &lt;&lt; 2
+        LatencyAll                    = LatencyRequest | LatencyResponse | LatencyMarketData
+)
+
+type LatencyConfig struct {
+        RequestLatency    LatencyProvider
+        ResponseLatency   LatencyProvider
+        MarketDataLatency LatencyProvider
+        Mode              LatencyMode
+        Clock             Clock
+}
+
+type DelayedGateway struct {
+        gateway      *exchange.ClientGateway
+        config       LatencyConfig
+        requestCh    chan exchange.Request
+        responseCh   chan exchange.Response
+        marketDataCh chan *exchange.MarketDataMsg
+        running      atomic.Bool
+        stopCh       chan struct{}
+}
+
+func NewDelayedGateway(gateway *exchange.ClientGateway, config LatencyConfig) *DelayedGateway <span class="cov8" title="1">{
+        if config.Clock == nil </span><span class="cov0" title="0">{
+                config.Clock = &amp;RealClock{}
+        }</span>
+        <span class="cov8" title="1">if config.RequestLatency == nil </span><span class="cov8" title="1">{
+                config.RequestLatency = NewConstantLatency(0)
+        }</span>
+        <span class="cov8" title="1">if config.ResponseLatency == nil </span><span class="cov8" title="1">{
+                config.ResponseLatency = NewConstantLatency(0)
+        }</span>
+        <span class="cov8" title="1">if config.MarketDataLatency == nil </span><span class="cov8" title="1">{
+                config.MarketDataLatency = NewConstantLatency(0)
+        }</span>
+
+        <span class="cov8" title="1">return &amp;DelayedGateway{
+                gateway:      gateway,
+                config:       config,
+                requestCh:    make(chan exchange.Request, 100),
+                responseCh:   make(chan exchange.Response, 100),
+                marketDataCh: make(chan *exchange.MarketDataMsg, 1000),
+                stopCh:       make(chan struct{}),
+        }</span>
+}
+
+func (d *DelayedGateway) Start() <span class="cov8" title="1">{
+        if !d.running.CompareAndSwap(false, true) </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">go d.forwardRequests()
+        go d.forwardResponses()
+        go d.forwardMarketData()</span>
+}
+
+func (d *DelayedGateway) Stop() <span class="cov8" title="1">{
+        if !d.running.CompareAndSwap(true, false) </span><span class="cov0" title="0">{
+                return
+        }</span>
+        <span class="cov8" title="1">close(d.stopCh)</span>
+}
+
+func (d *DelayedGateway) RequestCh() chan&lt;- exchange.Request <span class="cov8" title="1">{
+        return d.requestCh
+}</span>
+
+func (d *DelayedGateway) ResponseCh() &lt;-chan exchange.Response <span class="cov8" title="1">{
+        return d.responseCh
+}</span>
+
+func (d *DelayedGateway) MarketData() &lt;-chan *exchange.MarketDataMsg <span class="cov8" title="1">{
+        return d.marketDataCh
+}</span>
+
+func (d *DelayedGateway) forwardRequests() <span class="cov8" title="1">{
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-d.stopCh:<span class="cov8" title="1">
+                        return</span>
+                case req := &lt;-d.requestCh:<span class="cov8" title="1">
+                        if d.config.Mode&amp;LatencyRequest != 0 </span><span class="cov8" title="1">{
+                                delay := d.config.RequestLatency.Delay()
+                                if delay &gt; 0 </span><span class="cov8" title="1">{
+                                        time.Sleep(delay)
+                                }</span>
+                        }
+                        <span class="cov8" title="1">d.gateway.RequestCh &lt;- req</span>
+                }
+        }
+}
+
+func (d *DelayedGateway) forwardResponses() <span class="cov8" title="1">{
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-d.stopCh:<span class="cov8" title="1">
+                        return</span>
+                case resp := &lt;-d.gateway.ResponseCh:<span class="cov8" title="1">
+                        if d.config.Mode&amp;LatencyResponse != 0 </span><span class="cov8" title="1">{
+                                delay := d.config.ResponseLatency.Delay()
+                                if delay &gt; 0 </span><span class="cov8" title="1">{
+                                        time.Sleep(delay)
+                                }</span>
+                        }
+                        <span class="cov8" title="1">select </span>{
+                        case d.responseCh &lt;- resp:<span class="cov8" title="1"></span>
+                        default:<span class="cov0" title="0"></span>
+                        }
+                }
+        }
+}
+
+func (d *DelayedGateway) forwardMarketData() <span class="cov8" title="1">{
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-d.stopCh:<span class="cov8" title="1">
+                        return</span>
+                case msg := &lt;-d.gateway.MarketData:<span class="cov8" title="1">
+                        if d.config.Mode&amp;LatencyMarketData != 0 </span><span class="cov8" title="1">{
+                                delay := d.config.MarketDataLatency.Delay()
+                                if delay &gt; 0 </span><span class="cov8" title="1">{
+                                        time.Sleep(delay)
+                                }</span>
+                        }
+                        <span class="cov8" title="1">select </span>{
+                        case d.marketDataCh &lt;- msg:<span class="cov8" title="1"></span>
+                        default:<span class="cov0" title="0"></span>
+                        }
+                }
+        }
+}
+</pre>
+		
+		<pre class="file" id="file23" style="display: none">package simulation
+
+import (
+        "math/rand"
+        "time"
+)
+
+type LatencyProvider interface {
+        Delay() time.Duration
+}
+
+type ConstantLatency struct {
+        delay time.Duration
+}
+
+func NewConstantLatency(delay time.Duration) *ConstantLatency <span class="cov8" title="1">{
+        return &amp;ConstantLatency{delay: delay}
+}</span>
+
+func (c *ConstantLatency) Delay() time.Duration <span class="cov8" title="1">{
+        return c.delay
+}</span>
+
+type UniformRandomLatency struct {
+        min time.Duration
+        max time.Duration
+        rng *rand.Rand
+}
+
+func NewUniformRandomLatency(min, max time.Duration, seed int64) *UniformRandomLatency <span class="cov8" title="1">{
+        return &amp;UniformRandomLatency{
+                min: min,
+                max: max,
+                rng: rand.New(rand.NewSource(seed)),
+        }
+}</span>
+
+func (u *UniformRandomLatency) Delay() time.Duration <span class="cov8" title="1">{
+        delta := u.max - u.min
+        return u.min + time.Duration(u.rng.Int63n(int64(delta)))
+}</span>
+
+type NormalLatency struct {
+        mean   time.Duration
+        stddev time.Duration
+        rng    *rand.Rand
+}
+
+func NewNormalLatency(mean, stddev time.Duration, seed int64) *NormalLatency <span class="cov8" title="1">{
+        return &amp;NormalLatency{
+                mean:   mean,
+                stddev: stddev,
+                rng:    rand.New(rand.NewSource(seed)),
+        }
+}</span>
+
+func (n *NormalLatency) Delay() time.Duration <span class="cov8" title="1">{
+        delay := time.Duration(n.rng.NormFloat64()*float64(n.stddev) + float64(n.mean))
+        if delay &lt; 0 </span><span class="cov8" title="1">{
+                delay = 0
+        }</span>
+        <span class="cov8" title="1">return delay</span>
+}
+</pre>
+		
+		<pre class="file" id="file24" style="display: none">package simulation
+
+import (
+        "context"
+        "os"
+        "os/signal"
+        "sync"
+        "syscall"
+        "time"
+
+        "exchange_sim/actor"
+        "exchange_sim/exchange"
+)
+
+type RunnerConfig struct {
+        UseSimulatedClock bool
+        Duration          time.Duration
+        Iterations        int
+}
+
+type Runner struct {
+        exchange *exchange.Exchange
+        actors   []actor.Actor
+        config   RunnerConfig
+        clock    Clock
+}
+
+func NewRunner(config RunnerConfig) *Runner <span class="cov8" title="1">{
+        var clock Clock
+        if config.UseSimulatedClock </span><span class="cov8" title="1">{
+                clock = NewSimulatedClock(time.Now().UnixNano())
+        }</span> else<span class="cov8" title="1"> {
+                clock = &amp;RealClock{}
+        }</span>
+
+        <span class="cov8" title="1">return &amp;Runner{
+                exchange: exchange.NewExchange(100, clock),
+                actors:   make([]actor.Actor, 0),
+                config:   config,
+                clock:    clock,
+        }</span>
+}
+
+func (r *Runner) Exchange() *exchange.Exchange <span class="cov8" title="1">{
+        return r.exchange
+}</span>
+
+func (r *Runner) AddActor(a actor.Actor) <span class="cov8" title="1">{
+        r.actors = append(r.actors, a)
+}</span>
+
+func (r *Runner) Run(ctx context.Context) error <span class="cov8" title="1">{
+        ctx, cancel := context.WithCancel(ctx)
+        defer cancel()
+
+        sigCh := make(chan os.Signal, 1)
+        signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+        for _, a := range r.actors </span><span class="cov8" title="1">{
+                if err := a.Start(ctx); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+        }
+
+        <span class="cov8" title="1">var wg sync.WaitGroup
+        if r.config.Duration &gt; 0 </span><span class="cov8" title="1">{
+                wg.Add(1)
+                go func() </span><span class="cov8" title="1">{
+                        defer wg.Done()
+                        timer := time.NewTimer(r.config.Duration)
+                        defer timer.Stop()
+                        select </span>{
+                        case &lt;-timer.C:<span class="cov8" title="1">
+                                cancel()</span>
+                        case &lt;-ctx.Done():<span class="cov8" title="1"></span>
+                        }
+                }()
+        }
+
+        <span class="cov8" title="1">if r.config.Iterations &gt; 0 </span><span class="cov8" title="1">{
+                wg.Add(1)
+                go func() </span><span class="cov8" title="1">{
+                        defer wg.Done()
+                        if simClock, ok := r.clock.(*SimulatedClock); ok </span><span class="cov8" title="1">{
+                                for i := 0; i &lt; r.config.Iterations; i++ </span><span class="cov8" title="1">{
+                                        select </span>{
+                                        case &lt;-ctx.Done():<span class="cov0" title="0">
+                                                return</span>
+                                        default:<span class="cov8" title="1">
+                                                simClock.Advance(time.Millisecond)
+                                                time.Sleep(time.Microsecond)</span>
+                                        }
+                                }
+                                <span class="cov8" title="1">cancel()</span>
+                        }
+                }()
+        }
+
+        <span class="cov8" title="1">select </span>{
+        case &lt;-sigCh:<span class="cov0" title="0">
+                cancel()</span>
+        case &lt;-ctx.Done():<span class="cov8" title="1"></span>
+        }
+
+        <span class="cov8" title="1">for _, a := range r.actors </span><span class="cov8" title="1">{
+                a.Stop()
+        }</span>
+
+        <span class="cov8" title="1">wg.Wait()
+        r.exchange.Shutdown()
+        return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file25" style="display: none">package simulation
+
+import (
+        "exchange_sim/exchange"
+        "fmt"
+        "sync"
+        "sync/atomic"
+)
+
+type VenueID string
+
+type VenueRegistry struct {
+        venues map[VenueID]*exchange.Exchange
+        mu     sync.RWMutex
+}
+
+func NewVenueRegistry() *VenueRegistry <span class="cov8" title="1">{
+        return &amp;VenueRegistry{
+                venues: make(map[VenueID]*exchange.Exchange),
+        }
+}</span>
+
+func (r *VenueRegistry) Register(id VenueID, ex *exchange.Exchange) <span class="cov8" title="1">{
+        r.mu.Lock()
+        r.venues[id] = ex
+        r.mu.Unlock()
+}</span>
+
+func (r *VenueRegistry) Get(id VenueID) *exchange.Exchange <span class="cov8" title="1">{
+        r.mu.RLock()
+        ex := r.venues[id]
+        r.mu.RUnlock()
+        return ex
+}</span>
+
+func (r *VenueRegistry) ListVenues() []VenueID <span class="cov8" title="1">{
+        r.mu.RLock()
+        ids := make([]VenueID, 0, len(r.venues))
+        for id := range r.venues </span><span class="cov8" title="1">{
+                ids = append(ids, id)
+        }</span>
+        <span class="cov8" title="1">r.mu.RUnlock()
+        return ids</span>
+}
+
+type VenueResponse struct {
+        Venue    VenueID
+        Response exchange.Response
+}
+
+type VenueMarketData struct {
+        Venue VenueID
+        Data  *exchange.MarketDataMsg
+}
+
+type MultiVenueGateway struct {
+        clientID     uint64
+        gateways     map[VenueID]*exchange.ClientGateway
+        registry     *VenueRegistry
+        responseCh   chan VenueResponse
+        marketDataCh chan VenueMarketData
+        running      atomic.Bool
+        stopCh       chan struct{}
+        mu           sync.RWMutex
+}
+
+func NewMultiVenueGateway(
+        clientID uint64,
+        registry *VenueRegistry,
+        initialBalances map[VenueID]map[string]int64,
+        feePlans map[VenueID]exchange.FeeModel,
+) *MultiVenueGateway <span class="cov8" title="1">{
+        gateways := make(map[VenueID]*exchange.ClientGateway)
+
+        for venue, ex := range registry.venues </span><span class="cov8" title="1">{
+                balances := initialBalances[venue]
+                if balances == nil </span><span class="cov0" title="0">{
+                        balances = make(map[string]int64)
+                }</span>
+                <span class="cov8" title="1">feePlan := feePlans[venue]
+                if feePlan == nil </span><span class="cov0" title="0">{
+                        feePlan = &amp;exchange.FixedFee{}
+                }</span>
+                <span class="cov8" title="1">gateways[venue] = ex.ConnectClient(clientID, balances, feePlan)</span>
+        }
+
+        <span class="cov8" title="1">mgw := &amp;MultiVenueGateway{
+                clientID:     clientID,
+                gateways:     gateways,
+                registry:     registry,
+                responseCh:   make(chan VenueResponse, 100),
+                marketDataCh: make(chan VenueMarketData, 1000),
+                stopCh:       make(chan struct{}),
+        }
+
+        return mgw</span>
+}
+
+func (m *MultiVenueGateway) Start() <span class="cov8" title="1">{
+        if !m.running.CompareAndSwap(false, true) </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">for venue, gw := range m.gateways </span><span class="cov8" title="1">{
+                go m.forwardResponses(venue, gw)
+                go m.forwardMarketData(venue, gw)
+        }</span>
+}
+
+func (m *MultiVenueGateway) Stop() <span class="cov8" title="1">{
+        if !m.running.CompareAndSwap(true, false) </span><span class="cov0" title="0">{
+                return
+        }</span>
+        <span class="cov8" title="1">close(m.stopCh)</span>
+}
+
+func (m *MultiVenueGateway) SubmitOrder(venue VenueID, req *exchange.OrderRequest) <span class="cov8" title="1">{
+        m.mu.RLock()
+        gw := m.gateways[venue]
+        m.mu.RUnlock()
+
+        if gw == nil </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">gw.RequestCh &lt;- exchange.Request{
+                Type:     exchange.ReqPlaceOrder,
+                OrderReq: req,
+        }</span>
+}
+
+func (m *MultiVenueGateway) CancelOrder(venue VenueID, req *exchange.CancelRequest) <span class="cov0" title="0">{
+        m.mu.RLock()
+        gw := m.gateways[venue]
+        m.mu.RUnlock()
+
+        if gw == nil </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov0" title="0">gw.RequestCh &lt;- exchange.Request{
+                Type:      exchange.ReqCancelOrder,
+                CancelReq: req,
+        }</span>
+}
+
+func (m *MultiVenueGateway) QueryBalance(venue VenueID, req *exchange.QueryRequest) <span class="cov0" title="0">{
+        m.mu.RLock()
+        gw := m.gateways[venue]
+        m.mu.RUnlock()
+
+        if gw == nil </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov0" title="0">gw.RequestCh &lt;- exchange.Request{
+                Type:     exchange.ReqQueryBalance,
+                QueryReq: req,
+        }</span>
+}
+
+func (m *MultiVenueGateway) Subscribe(venue VenueID, symbol string) <span class="cov8" title="1">{
+        m.mu.RLock()
+        gw := m.gateways[venue]
+        m.mu.RUnlock()
+
+        if gw == nil </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">gw.RequestCh &lt;- exchange.Request{
+                Type: exchange.ReqSubscribe,
+                QueryReq: &amp;exchange.QueryRequest{
+                        RequestID: 0,
+                        Symbol:    symbol,
+                },
+        }</span>
+}
+
+func (m *MultiVenueGateway) Unsubscribe(venue VenueID, symbol string) <span class="cov0" title="0">{
+        m.mu.RLock()
+        gw := m.gateways[venue]
+        m.mu.RUnlock()
+
+        if gw == nil </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov0" title="0">gw.RequestCh &lt;- exchange.Request{
+                Type: exchange.ReqUnsubscribe,
+                QueryReq: &amp;exchange.QueryRequest{
+                        RequestID: 0,
+                        Symbol:    symbol,
+                },
+        }</span>
+}
+
+func (m *MultiVenueGateway) GetGateway(venue VenueID) *exchange.ClientGateway <span class="cov8" title="1">{
+        m.mu.RLock()
+        gw := m.gateways[venue]
+        m.mu.RUnlock()
+        return gw
+}</span>
+
+func (m *MultiVenueGateway) ResponseCh() &lt;-chan VenueResponse <span class="cov8" title="1">{
+        return m.responseCh
+}</span>
+
+func (m *MultiVenueGateway) MarketDataCh() &lt;-chan VenueMarketData <span class="cov8" title="1">{
+        return m.marketDataCh
+}</span>
+
+func (m *MultiVenueGateway) forwardResponses(venue VenueID, gw *exchange.ClientGateway) <span class="cov8" title="1">{
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-m.stopCh:<span class="cov8" title="1">
+                        return</span>
+                case resp := &lt;-gw.ResponseCh:<span class="cov8" title="1">
+                        select </span>{
+                        case m.responseCh &lt;- VenueResponse{Venue: venue, Response: resp}:<span class="cov8" title="1"></span>
+                        default:<span class="cov0" title="0"></span>
+                        }
+                }
+        }
+}
+
+func (m *MultiVenueGateway) forwardMarketData(venue VenueID, gw *exchange.ClientGateway) <span class="cov8" title="1">{
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-m.stopCh:<span class="cov8" title="1">
+                        return</span>
+                case msg := &lt;-gw.MarketData:<span class="cov8" title="1">
+                        select </span>{
+                        case m.marketDataCh &lt;- VenueMarketData{Venue: venue, Data: msg}:<span class="cov8" title="1"></span>
+                        default:<span class="cov0" title="0"></span>
+                        }
+                }
+        }
+}
+
+func (m *MultiVenueGateway) String() string <span class="cov0" title="0">{
+        return fmt.Sprintf("MultiVenueGateway(clientID=%d, venues=%d)", m.clientID, len(m.gateways))
+}</span>
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>
