@@ -1,7 +1,7 @@
 package exchange
 
 type MatchResult struct {
-	Executions []*Execution
+	Executions  []*Execution
 	FullyFilled bool
 }
 

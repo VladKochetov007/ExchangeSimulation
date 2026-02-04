@@ -25,7 +25,7 @@ type BaseActor struct {
 	requestSeq uint64
 
 	// Order tracking for fill notifications
-	activeOrders  sync.Map // orderID -> *OrderInfo
+	activeOrders   sync.Map // orderID -> *OrderInfo
 	requestToOrder sync.Map // requestID -> orderID
 }
 

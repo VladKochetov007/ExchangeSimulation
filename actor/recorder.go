@@ -21,17 +21,17 @@ const (
 )
 
 type RecorderConfig struct {
-	OutputDir            string
-	Symbols              []string
-	FlushInterval        time.Duration
-	SnapshotInterval     time.Duration
-	SnapshotDeltaCount   uint64
-	RotationStrategy     RotationStrategy
-	RecordTrades         bool
-	RecordOrderbook      bool
-	RecordOpenInterest   bool
-	RecordFunding        bool
-	SeparateHiddenFiles  bool
+	OutputDir           string
+	Symbols             []string
+	FlushInterval       time.Duration
+	SnapshotInterval    time.Duration
+	SnapshotDeltaCount  uint64
+	RotationStrategy    RotationStrategy
+	RecordTrades        bool
+	RecordOrderbook     bool
+	RecordOpenInterest  bool
+	RecordFunding       bool
+	SeparateHiddenFiles bool
 }
 
 type instrumentRecorder struct {

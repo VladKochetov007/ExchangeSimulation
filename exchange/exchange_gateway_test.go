@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-
 func TestExchangeCancelOrder(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
@@ -15,12 +14,12 @@ func TestExchangeCancelOrder(t *testing.T) {
 	gateway := ex.ConnectClient(1, balances, &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true})
 
 	req := &OrderRequest{
-		RequestID: 1,
-		Symbol:    "BTC/USD",
-		Side:      Buy,
-		Type:      LimitOrder,
-		Price:     50000 * SATOSHI,
-		Qty:       SATOSHI,
+		RequestID:   1,
+		Symbol:      "BTC/USD",
+		Side:        Buy,
+		Type:        LimitOrder,
+		Price:       50000 * SATOSHI,
+		Qty:         SATOSHI,
 		TimeInForce: GTC,
 	}
 
@@ -86,7 +85,7 @@ func TestQueryBalance(t *testing.T) {
 	ex.ConnectClient(1, balances, &FixedFee{})
 
 	client := ex.Clients[1]
-	client.Reserve("USD", 1000 * SATOSHI)
+	client.Reserve("USD", 1000*SATOSHI)
 
 	req := &QueryRequest{RequestID: 1}
 	resp := ex.queryBalance(1, req)
@@ -112,13 +111,13 @@ func TestQueryBalance(t *testing.T) {
 		t.Fatalf("USD balance not found")
 	}
 
-	if usdBalance.Total != 10000 * SATOSHI {
+	if usdBalance.Total != 10000*SATOSHI {
 		t.Errorf("Expected total 10000 SATOSHI, got %d", usdBalance.Total)
 	}
-	if usdBalance.Reserved != 1000 * SATOSHI {
+	if usdBalance.Reserved != 1000*SATOSHI {
 		t.Errorf("Expected reserved 1000 SATOSHI, got %d", usdBalance.Reserved)
 	}
-	if usdBalance.Available != 9000 * SATOSHI {
+	if usdBalance.Available != 9000*SATOSHI {
 		t.Errorf("Expected available 9000 SATOSHI, got %d", usdBalance.Available)
 	}
 }
@@ -206,12 +205,12 @@ func TestHandleClientRequestsIntegration(t *testing.T) {
 	go ex.handleClientRequests(gateway)
 
 	orderReq := &OrderRequest{
-		RequestID: 1,
-		Symbol:    "BTC/USD",
-		Side:      Buy,
-		Type:      LimitOrder,
-		Price:     50000 * SATOSHI,
-		Qty:       SATOSHI,
+		RequestID:   1,
+		Symbol:      "BTC/USD",
+		Side:        Buy,
+		Type:        LimitOrder,
+		Price:       50000 * SATOSHI,
+		Qty:         SATOSHI,
 		TimeInForce: GTC,
 	}
 	gateway.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: orderReq}

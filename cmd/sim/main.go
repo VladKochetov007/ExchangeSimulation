@@ -137,9 +137,9 @@ func run() error {
 
 	fmt.Println("Starting simulation...")
 	fmt.Printf("Running for %v...\n", simDuration)
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), simDuration)
 	defer cancel()
-	
+
 	return runner.Run(ctx)
 }

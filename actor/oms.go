@@ -161,9 +161,9 @@ func (o *NettingOMS) Reset(instrumentID string) {
 }
 
 type HedgingOMS struct {
-	positions   map[string]map[string]*Position
-	nextPosID   map[string]uint64
-	mu          sync.RWMutex
+	positions map[string]map[string]*Position
+	nextPosID map[string]uint64
+	mu        sync.RWMutex
 }
 
 func NewHedgingOMS() *HedgingOMS {

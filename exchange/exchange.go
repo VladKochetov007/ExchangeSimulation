@@ -12,18 +12,18 @@ type Clock interface {
 }
 
 type Exchange struct {
-	Clients       map[uint64]*Client
-	Gateways      map[uint64]*ClientGateway
-	Books         map[string]*OrderBook
-	Instruments   map[string]Instrument
-	Positions     *PositionManager
-	NextOrderID   uint64
-	Matcher       MatchingEngine
-	MDPublisher   *MDPublisher
-	Clock         Clock
-	mu            sync.RWMutex
-	running       bool
-	shutdownCh    chan struct{}
+	Clients     map[uint64]*Client
+	Gateways    map[uint64]*ClientGateway
+	Books       map[string]*OrderBook
+	Instruments map[string]Instrument
+	Positions   *PositionManager
+	NextOrderID uint64
+	Matcher     MatchingEngine
+	MDPublisher *MDPublisher
+	Clock       Clock
+	mu          sync.RWMutex
+	running     bool
+	shutdownCh  chan struct{}
 }
 
 type OrderBook struct {
@@ -504,12 +504,12 @@ func (e *Exchange) publishBookUpdate(book *OrderBook, side Side, price int64) {
 }
 
 type InstrumentInfo struct {
-	Symbol    string
-	BaseAsset string
+	Symbol     string
+	BaseAsset  string
 	QuoteAsset string
-	TickSize  int64
-	MinSize   int64
-	IsPerp    bool
+	TickSize   int64
+	MinSize    int64
+	IsPerp     bool
 }
 
 func (e *Exchange) ListInstruments(baseFilter, quoteFilter string) []InstrumentInfo {

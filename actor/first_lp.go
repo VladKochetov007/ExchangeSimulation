@@ -10,13 +10,13 @@ import (
 type ExitStrategyFunc func(exposure, bestBid, bestAsk, bidLiquidity, askLiquidity, liquidityMultiple int64) bool
 
 type FirstLPConfig struct {
-	Symbol            string              // Trading pair
-	SpreadBps         int64               // Spread around mid in basis points (e.g., 10 = 0.1%)
-	LiquidityMultiple int64               // Exit when market has this multiple of our exposure (default: 10)
-	MonitorInterval   time.Duration       // How often to check exit conditions (default: 100ms)
-	MinExitSize       int64               // Don't exit if exposure below this (default: 0)
-	ExitStrategy      ExitStrategyFunc    // Custom exit logic (optional, uses default if nil)
-	BootstrapPrice    int64               // Initial mid price if book is empty (0 = wait for market)
+	Symbol            string           // Trading pair
+	SpreadBps         int64            // Spread around mid in basis points (e.g., 10 = 0.1%)
+	LiquidityMultiple int64            // Exit when market has this multiple of our exposure (default: 10)
+	MonitorInterval   time.Duration    // How often to check exit conditions (default: 100ms)
+	MinExitSize       int64            // Don't exit if exposure below this (default: 0)
+	ExitStrategy      ExitStrategyFunc // Custom exit logic (optional, uses default if nil)
+	BootstrapPrice    int64            // Initial mid price if book is empty (0 = wait for market)
 }
 
 type FirstLiquidityProvidingActor struct {

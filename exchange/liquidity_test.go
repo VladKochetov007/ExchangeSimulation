@@ -2,7 +2,6 @@ package exchange
 
 import "testing"
 
-
 func TestInsufficientLiquidityLimitOrder(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)

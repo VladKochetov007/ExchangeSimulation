@@ -64,10 +64,10 @@ func TestRecorderWritesTrade(t *testing.T) {
 	}
 
 	config := RecorderConfig{
-		OutputDir:      "testdata",
-		Symbols:        []string{"BTCUSD"},
-		FlushInterval:  10 * time.Millisecond,
-		RecordTrades:   true,
+		OutputDir:       "testdata",
+		Symbols:         []string{"BTCUSD"},
+		FlushInterval:   10 * time.Millisecond,
+		RecordTrades:    true,
 		RecordOrderbook: false,
 	}
 
@@ -358,7 +358,7 @@ func TestRecorderWritesOpenInterest(t *testing.T) {
 	event := &Event{
 		Type: EventOpenInterest,
 		Data: OpenInterestEvent{
-			Symbol:       "BTCUSD",
+			Symbol: "BTCUSD",
 			OpenInterest: &exchange.OpenInterest{
 				Symbol:         "BTCUSD",
 				TotalContracts: 123456789,

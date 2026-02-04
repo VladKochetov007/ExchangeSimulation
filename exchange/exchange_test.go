@@ -2,7 +2,6 @@ package exchange
 
 import "testing"
 
-
 func TestNewExchange(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	if ex == nil {
@@ -58,14 +57,14 @@ func TestPlaceOrderDirect(t *testing.T) {
 	ex.ConnectClient(1, balances, feePlan)
 
 	orderReq := &OrderRequest{
-		RequestID: 1,
-		Symbol:    "BTC/USD",
-		Side:      Buy,
-		Type:      LimitOrder,
-		Price:     PriceUSD(50000, SATOSHI),
-		Qty:       SATOSHI / 100,     // 0.01 BTC
+		RequestID:   1,
+		Symbol:      "BTC/USD",
+		Side:        Buy,
+		Type:        LimitOrder,
+		Price:       PriceUSD(50000, SATOSHI),
+		Qty:         SATOSHI / 100, // 0.01 BTC
 		TimeInForce: GTC,
-		Visibility: Normal,
+		Visibility:  Normal,
 	}
 
 	resp := ex.placeOrder(1, orderReq)
@@ -94,26 +93,26 @@ func TestMatchingAndSettlement(t *testing.T) {
 	ex.ConnectClient(2, balances2, feePlan)
 
 	sellReq := &OrderRequest{
-		RequestID: 1,
-		Symbol:    "BTC/USD",
-		Side:      Sell,
-		Type:      LimitOrder,
-		Price:     50000 * 100,
-		Qty:       SATOSHI,
+		RequestID:   1,
+		Symbol:      "BTC/USD",
+		Side:        Sell,
+		Type:        LimitOrder,
+		Price:       50000 * 100,
+		Qty:         SATOSHI,
 		TimeInForce: GTC,
-		Visibility: Normal,
+		Visibility:  Normal,
 	}
 	ex.placeOrder(2, sellReq)
 
 	buyReq := &OrderRequest{
-		RequestID: 2,
-		Symbol:    "BTC/USD",
-		Side:      Buy,
-		Type:      LimitOrder,
-		Price:     50000 * 100,
-		Qty:       SATOSHI,
+		RequestID:   2,
+		Symbol:      "BTC/USD",
+		Side:        Buy,
+		Type:        LimitOrder,
+		Price:       50000 * 100,
+		Qty:         SATOSHI,
 		TimeInForce: GTC,
-		Visibility: Normal,
+		Visibility:  Normal,
 	}
 	ex.placeOrder(1, buyReq)
 

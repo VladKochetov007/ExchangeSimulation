@@ -2,7 +2,6 @@ package exchange
 
 import "testing"
 
-
 func TestNewPerpFutures(t *testing.T) {
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", SATOSHI, SATOSHI/100)
 

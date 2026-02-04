@@ -2,7 +2,6 @@ package exchange
 
 import "testing"
 
-
 func TestPercentageFeeInQuote(t *testing.T) {
 	fee := &PercentageFee{
 		MakerBps: 5,
