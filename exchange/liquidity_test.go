@@ -113,7 +113,7 @@ func TestInsufficientLiquidityMarketOrder(t *testing.T) {
 
 func TestFOKOrderNotImplemented(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
@@ -125,7 +125,7 @@ func TestFOKOrderNotImplemented(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Sell,
 		Type:        LimitOrder,
-		Price:       50000,
+		Price:       PriceUSD(50000, CENT_TICK),
 		Qty:         SATOSHI / 2,
 		TimeInForce: GTC,
 	}
@@ -143,10 +143,122 @@ func TestFOKOrderNotImplemented(t *testing.T) {
 	resp := ex.placeOrder(2, buyReq)
 
 	if !resp.Success {
-		t.Logf("FOK order rejected as expected (if implemented)")
+		if resp.Error != RejectFOKNotFilled {
+			t.Fatalf("FOK rejection expected RejectFOKNotFilled, got %v", resp.Error)
+		}
 	} else {
-		t.Logf("WARNING: FOK order partially filled - TimeInForce not implemented!")
-		t.Logf("FOK should reject if cannot fill completely, but it accepted partial fill")
+		t.Fatal("FOK order should reject on partial fill")
+	}
+}
+
+func TestFOKOrderFullyFilled(t *testing.T) {
+	ex := NewExchange(10, &RealClock{})
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
+	ex.AddInstrument(instrument)
+
+	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
+	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectClient(2, balances, &FixedFee{})
+
+	sellReq := &OrderRequest{
+		RequestID:   1,
+		Symbol:      "BTC/USD",
+		Side:        Sell,
+		Type:        LimitOrder,
+		Price:       PriceUSD(50000, CENT_TICK),
+		Qty:         SATOSHI,
+		TimeInForce: GTC,
+	}
+	ex.placeOrder(1, sellReq)
+
+	buyReq := &OrderRequest{
+		RequestID:   2,
+		Symbol:      "BTC/USD",
+		Side:        Buy,
+		Type:        Market,
+		Qty:         SATOSHI,
+		TimeInForce: FOK,
+	}
+
+	resp := ex.placeOrder(2, buyReq)
+	if !resp.Success {
+		t.Fatalf("FOK order with sufficient liquidity should succeed, got error %v", resp.Error)
+	}
+}
+
+func TestIOCOrderPartialFill(t *testing.T) {
+	ex := NewExchange(10, &RealClock{})
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
+	ex.AddInstrument(instrument)
+
+	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
+	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectClient(2, balances, &FixedFee{})
+
+	sellReq := &OrderRequest{
+		RequestID:   1,
+		Symbol:      "BTC/USD",
+		Side:        Sell,
+		Type:        LimitOrder,
+		Price:       PriceUSD(50000, CENT_TICK),
+		Qty:         SATOSHI / 2,
+		TimeInForce: GTC,
+	}
+	ex.placeOrder(1, sellReq)
+
+	buyReq := &OrderRequest{
+		RequestID:   2,
+		Symbol:      "BTC/USD",
+		Side:        Buy,
+		Type:        LimitOrder,
+		Price:       PriceUSD(50000, CENT_TICK),
+		Qty:         SATOSHI,
+		TimeInForce: IOC,
+	}
+
+	resp := ex.placeOrder(2, buyReq)
+	if !resp.Success {
+		t.Fatalf("IOC order should accept partial fill, got error %v", resp.Error)
+	}
+
+	book := ex.Books["BTC/USD"]
+	if book.Bids.Best != nil {
+		t.Fatal("IOC order should not rest on book after partial fill")
+	}
+
+	client2 := ex.Clients[2]
+	btcBalance := client2.Balances["BTC"]
+	if btcBalance != SATOSHI/2+BTCAmount(10) {
+		t.Fatalf("Expected client2 to receive 0.5 BTC from partial fill, got %d", btcBalance)
+	}
+}
+
+func TestIOCOrderNoFill(t *testing.T) {
+	ex := NewExchange(10, &RealClock{})
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
+	ex.AddInstrument(instrument)
+
+	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
+	ex.ConnectClient(1, balances, &FixedFee{})
+
+	buyReq := &OrderRequest{
+		RequestID:   1,
+		Symbol:      "BTC/USD",
+		Side:        Buy,
+		Type:        LimitOrder,
+		Price:       PriceUSD(50000, CENT_TICK),
+		Qty:         SATOSHI,
+		TimeInForce: IOC,
+	}
+
+	resp := ex.placeOrder(1, buyReq)
+	if !resp.Success {
+		t.Fatalf("IOC order with no match should still succeed, got error %v", resp.Error)
+	}
+
+	book := ex.Books["BTC/USD"]
+	if book.Bids.Best != nil {
+		t.Fatal("IOC order should not rest on book when no match")
 	}
 }
 

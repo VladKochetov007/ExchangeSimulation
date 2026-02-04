@@ -53,6 +53,7 @@ const (
 	RejectOrderNotFound
 	RejectOrderNotOwned
 	RejectOrderAlreadyFilled
+	RejectFOKNotFilled
 )
 
 type Order struct {

@@ -197,10 +197,22 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 		}
 	}
 
-	executions := e.Matcher.Match(book.Bids, book.Asks, order)
+	result := e.Matcher.Match(book.Bids, book.Asks, order)
+
+	if req.TimeInForce == FOK && !result.FullyFilled {
+		if req.Type == LimitOrder {
+			if req.Side == Buy {
+				client.Release(instrument.QuoteAsset(), (req.Qty*req.Price)/precision)
+			} else {
+				client.Release(instrument.BaseAsset(), req.Qty)
+			}
+		}
+		putOrder(order)
+		return Response{RequestID: req.RequestID, Success: false, Error: RejectFOKNotFilled}
+	}
 
 	affectedLevels := make(map[int64]Side)
-	for _, exec := range executions {
+	for _, exec := range result.Executions {
 		makerOrder := book.Bids.Orders[exec.MakerOrderID]
 		if makerOrder == nil {
 			makerOrder = book.Asks.Orders[exec.MakerOrderID]
@@ -210,9 +222,9 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 		}
 	}
 
-	e.processExecutions(book, executions, order)
+	e.processExecutions(book, result.Executions, order)
 
-	for _, exec := range executions {
+	for _, exec := range result.Executions {
 		makerOrder := book.Bids.Orders[exec.MakerOrderID]
 		if makerOrder == nil {
 			makerOrder = book.Asks.Orders[exec.MakerOrderID]
@@ -232,9 +244,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 		e.publishBookUpdate(book, side, price)
 	}
 
-	// Order matched or added to book
-	// For Limit orders added to book, we need to publish the new state of that price level
-	if order.Status != Filled && req.Type == LimitOrder {
+	if order.Status != Filled && req.Type == LimitOrder && req.TimeInForce == GTC {
 		if order.Side == Buy {
 			book.Bids.addOrder(order)
 			e.publishBookUpdate(book, Buy, order.Price)
@@ -254,7 +264,6 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 		}
 		putOrder(order)
 	}
-	// e.publishSnapshot call removed
 
 	return Response{RequestID: req.RequestID, Success: true, Data: orderID}
 }

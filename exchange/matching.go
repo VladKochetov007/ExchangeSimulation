@@ -1,7 +1,12 @@
 package exchange
 
+type MatchResult struct {
+	Executions []*Execution
+	FullyFilled bool
+}
+
 type MatchingEngine interface {
-	Match(bidBook, askBook *Book, incomingOrder *Order) []*Execution
+	Match(bidBook, askBook *Book, incomingOrder *Order) *MatchResult
 	Priority() Priority
 }
 
@@ -25,7 +30,7 @@ func (m *DefaultMatcher) Priority() Priority {
 	return m.priority
 }
 
-func (m *DefaultMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) []*Execution {
+func (m *DefaultMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) *MatchResult {
 	executions := make([]*Execution, 0, 8)
 	var book *Book
 	if incomingOrder.Side == Buy {
@@ -64,13 +69,17 @@ func (m *DefaultMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) []*
 		}
 	}
 
-	if incomingOrder.FilledQty >= incomingOrder.Qty {
+	fullyFilled := incomingOrder.FilledQty >= incomingOrder.Qty
+	if fullyFilled {
 		incomingOrder.Status = Filled
 	} else if incomingOrder.FilledQty > 0 {
 		incomingOrder.Status = PartialFill
 	}
 
-	return executions
+	return &MatchResult{
+		Executions:  executions,
+		FullyFilled: fullyFilled,
+	}
 }
 
 func (m *DefaultMatcher) canMatch(incoming *Order, limit *Limit) bool {

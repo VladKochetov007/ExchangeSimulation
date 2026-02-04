@@ -22,13 +22,13 @@ func TestMatchBuyOrderFullFill(t *testing.T) {
 	buyOrder.Price = 100000
 	buyOrder.Qty = 100
 
-	executions := matcher.Match(bidBook, askBook, buyOrder)
+	result := matcher.Match(bidBook, askBook, buyOrder)
 
-	if len(executions) != 1 {
-		t.Fatalf("Should have 1 execution, got %d", len(executions))
+	if len(result.Executions) != 1 {
+		t.Fatalf("Should have 1 execution, got %d", len(result.Executions))
 	}
-	if executions[0].Qty != 100 {
-		t.Errorf("Execution qty should be 100, got %d", executions[0].Qty)
+	if result.Executions[0].Qty != 100 {
+		t.Errorf("Execution qty should be 100, got %d", result.Executions[0].Qty)
 	}
 	if buyOrder.Status != Filled {
 		t.Errorf("Buy order should be Filled, got %v", buyOrder.Status)
@@ -55,13 +55,13 @@ func TestMatchPartialFill(t *testing.T) {
 	buyOrder.Price = 100000
 	buyOrder.Qty = 100
 
-	executions := matcher.Match(bidBook, askBook, buyOrder)
+	result := matcher.Match(bidBook, askBook, buyOrder)
 
-	if len(executions) != 1 {
-		t.Fatalf("Should have 1 execution, got %d", len(executions))
+	if len(result.Executions) != 1 {
+		t.Fatalf("Should have 1 execution, got %d", len(result.Executions))
 	}
-	if executions[0].Qty != 50 {
-		t.Errorf("Execution qty should be 50, got %d", executions[0].Qty)
+	if result.Executions[0].Qty != 50 {
+		t.Errorf("Execution qty should be 50, got %d", result.Executions[0].Qty)
 	}
 	if buyOrder.FilledQty != 50 {
 		t.Errorf("Buy order FilledQty should be 50, got %d", buyOrder.FilledQty)
@@ -91,10 +91,10 @@ func TestMatchRejectsSelfTrade(t *testing.T) {
 	buyOrder.Price = 100000
 	buyOrder.Qty = 100
 
-	executions := matcher.Match(bidBook, askBook, buyOrder)
+	result := matcher.Match(bidBook, askBook, buyOrder)
 
-	if len(executions) != 0 {
-		t.Errorf("Should have 0 executions (self-trade rejected), got %d", len(executions))
+	if len(result.Executions) != 0 {
+		t.Errorf("Should have 0 executions (self-trade rejected), got %d", len(result.Executions))
 	}
 }
 
@@ -117,12 +117,12 @@ func TestMatchMarketOrder(t *testing.T) {
 	buyOrder.Type = Market
 	buyOrder.Qty = 100
 
-	executions := matcher.Match(bidBook, askBook, buyOrder)
+	result := matcher.Match(bidBook, askBook, buyOrder)
 
-	if len(executions) != 1 {
-		t.Fatalf("Should have 1 execution, got %d", len(executions))
+	if len(result.Executions) != 1 {
+		t.Fatalf("Should have 1 execution, got %d", len(result.Executions))
 	}
-	if executions[0].Price != 100000 {
-		t.Errorf("Execution price should be maker price (100000), got %d", executions[0].Price)
+	if result.Executions[0].Price != 100000 {
+		t.Errorf("Execution price should be maker price (100000), got %d", result.Executions[0].Price)
 	}
 }

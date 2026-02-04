@@ -31,6 +31,7 @@
 | Anti-AI-slop principles | ✅ | Applied throughout |
 | Mermaid diagram | ✅ | ARCHITECTURE.md with 6 diagrams |
 | Recorder tests | ✅ | 7 comprehensive tests |
+| FOK/IOC time-in-force | ✅ | `exchange/matching.go`, `exchange/exchange.go` - fully implemented |
 
 ## Test Coverage
 

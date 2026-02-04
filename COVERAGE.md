@@ -84,9 +84,9 @@ integration_test.go     100.0%      ✅ Perfect
 
 ```
 Maintained at 96.4% (no regression)
-- 96 tests passing
+- 100 tests passing (4 new FOK/IOC tests added)
 - All core functionality covered
-- Known gaps: FOK/IOC time-in-force (not implemented yet)
+- FOK/IOC time-in-force: ✅ IMPLEMENTED
 ```
 
 ## New Tests Added
