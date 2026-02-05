@@ -7,7 +7,7 @@ import (
 
 func TestExchangeCancelOrder(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
@@ -18,7 +18,7 @@ func TestExchangeCancelOrder(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        LimitOrder,
-		Price:       50000 * SATOSHI,
+		Price:       PriceUSD(50000, DOLLAR_TICK),
 		Qty:         SATOSHI,
 		TimeInForce: GTC,
 	}
@@ -136,7 +136,7 @@ func TestQueryBalanceUnknownClient(t *testing.T) {
 
 func TestSubscribeUnsubscribe(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": 10 * SATOSHI}
@@ -193,7 +193,7 @@ func TestSubscribeUnknownInstrument(t *testing.T) {
 
 func TestHandleClientRequestsIntegration(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{
@@ -209,7 +209,7 @@ func TestHandleClientRequestsIntegration(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        LimitOrder,
-		Price:       50000 * SATOSHI,
+		Price:       PriceUSD(50000, DOLLAR_TICK),
 		Qty:         SATOSHI,
 		TimeInForce: GTC,
 	}

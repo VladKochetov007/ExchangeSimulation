@@ -29,8 +29,12 @@ func run() error {
 	runner := simulation.NewRunner(config)
 	ex := runner.Exchange()
 
-	btcusd := exchange.NewPerpFutures("BTCUSD", "BTC", "USD", 100000000, 1000000)
-	ethusd := exchange.NewSpotInstrument("ETHUSD", "ETH", "USD", 10000000, 10000000)
+	btcusd := exchange.NewPerpFutures("BTCUSD", "BTC", "USD",
+		exchange.BTC_PRECISION, exchange.USD_PRECISION,
+		exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	ethusd := exchange.NewSpotInstrument("ETHUSD", "ETH", "USD",
+		exchange.ETH_PRECISION, exchange.USD_PRECISION,
+		exchange.ETH_PRECISION/100, exchange.ETH_PRECISION/1000)
 	ex.AddInstrument(btcusd)
 	ex.AddInstrument(ethusd)
 
@@ -53,7 +57,7 @@ func run() error {
 			LiquidityMultiple: 10,
 			BootstrapPrice:    100000000000, // $100,000 per BTC (100000000 precision)
 		})
-		lp.SetInitialState(100000000, "BTC", "USD")
+		lp.SetInitialState(btcusd)
 		lp.UpdateBalances(initialBalances["BTC"], initialBalances["USD"])
 		runner.AddActor(lp)
 	}

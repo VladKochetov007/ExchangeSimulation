@@ -3,7 +3,8 @@ package exchange
 import "testing"
 
 func TestNewPerpFutures(t *testing.T) {
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", SATOSHI, SATOSHI/100)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD",
+		BTC_PRECISION, USD_PRECISION, SATOSHI, SATOSHI/100)
 
 	if perp.Symbol() != "BTC-PERP" {
 		t.Errorf("Expected symbol BTC-PERP, got %s", perp.Symbol())
@@ -31,7 +32,8 @@ func TestNewPerpFutures(t *testing.T) {
 }
 
 func TestPerpFuturesUpdateFundingRate(t *testing.T) {
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", SATOSHI, SATOSHI/100)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD",
+		BTC_PRECISION, USD_PRECISION, SATOSHI, SATOSHI/100)
 
 	indexPrice := int64(50000 * SATOSHI)
 	markPrice := int64(50100 * SATOSHI)
@@ -237,7 +239,8 @@ func TestPositionManagerUpdatePositionFlipLongToShort(t *testing.T) {
 
 func TestPositionManagerSettleFundingLongPosition(t *testing.T) {
 	pm := NewPositionManager(&RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", SATOSHI, SATOSHI/100)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD",
+		BTC_PRECISION, USD_PRECISION, SATOSHI, SATOSHI/100)
 
 	clients := make(map[uint64]*Client)
 	clients[1] = NewClient(1, &FixedFee{})
@@ -260,7 +263,8 @@ func TestPositionManagerSettleFundingLongPosition(t *testing.T) {
 
 func TestPositionManagerSettleFundingShortPosition(t *testing.T) {
 	pm := NewPositionManager(&RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", SATOSHI, SATOSHI/100)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD",
+		BTC_PRECISION, USD_PRECISION, SATOSHI, SATOSHI/100)
 
 	clients := make(map[uint64]*Client)
 	clients[1] = NewClient(1, &FixedFee{})
@@ -283,7 +287,8 @@ func TestPositionManagerSettleFundingShortPosition(t *testing.T) {
 
 func TestPositionManagerSettleFundingNoPosition(t *testing.T) {
 	pm := NewPositionManager(&RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", SATOSHI, SATOSHI/100)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD",
+		BTC_PRECISION, USD_PRECISION, SATOSHI, SATOSHI/100)
 
 	clients := make(map[uint64]*Client)
 	clients[1] = NewClient(1, &FixedFee{})
@@ -313,7 +318,7 @@ func TestAbsFunction(t *testing.T) {
 }
 
 func TestInstrumentTickSize(t *testing.T) {
-	spot := NewSpotInstrument("BTC/USD", "BTC", "USD", 100, 1000)
+	spot := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, 100, 1000)
 
 	if spot.TickSize() != 100 {
 		t.Errorf("Expected tick size 100, got %d", spot.TickSize())
@@ -321,7 +326,7 @@ func TestInstrumentTickSize(t *testing.T) {
 }
 
 func TestInstrumentMinOrderSize(t *testing.T) {
-	spot := NewSpotInstrument("BTC/USD", "BTC", "USD", 100, 1000)
+	spot := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, 100, 1000)
 
 	if spot.MinOrderSize() != 1000 {
 		t.Errorf("Expected min order size 1000, got %d", spot.MinOrderSize())

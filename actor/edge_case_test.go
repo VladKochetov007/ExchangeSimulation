@@ -36,11 +36,11 @@ func TestBaseActorStopBeforeStart(t *testing.T) {
 
 func TestBaseActorResponseHandling(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	actor := NewBaseActor(1, gateway)
@@ -63,7 +63,7 @@ func TestBaseActorResponseHandling(t *testing.T) {
 	actor.Start(ctx)
 	defer actor.Stop()
 
-	actor.SubmitOrder("BTC/USD", exchange.Buy, exchange.LimitOrder, -1, SATOSHI)
+	actor.SubmitOrder("BTC/USD", exchange.Buy, exchange.LimitOrder, -1, exchange.SATOSHI)
 
 	select {
 	case received := <-eventReceived:
@@ -77,19 +77,19 @@ func TestBaseActorResponseHandling(t *testing.T) {
 
 func TestNoisyTraderEdgeCases(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := NoisyTraderConfig{
 		Symbol:          "BTC/USD",
 		Interval:        50 * time.Millisecond,
 		PriceRangeBps:   100,
-		MinQty:          SATOSHI / 10,
-		MaxQty:          SATOSHI,
+		MinQty:          exchange.SATOSHI / 10,
+		MaxQty:          exchange.SATOSHI,
 		MaxActiveOrders: 5,
 		OrderLifetime:   100 * time.Millisecond,
 	}
@@ -114,19 +114,19 @@ func TestNoisyTraderEdgeCases(t *testing.T) {
 
 func TestNoisyTraderPartialFillPath(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := NoisyTraderConfig{
 		Symbol:          "BTC/USD",
 		Interval:        100 * time.Millisecond,
 		PriceRangeBps:   100,
-		MinQty:          SATOSHI / 10,
-		MaxQty:          SATOSHI,
+		MinQty:          exchange.SATOSHI / 10,
+		MaxQty:          exchange.SATOSHI,
 		MaxActiveOrders: 5,
 		OrderLifetime:   0,
 	}
@@ -144,11 +144,11 @@ func TestNoisyTraderPartialFillPath(t *testing.T) {
 
 func TestDelayedMakerEarlyContextCancel(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := DelayedMakerConfig{
@@ -157,7 +157,7 @@ func TestDelayedMakerEarlyContextCancel(t *testing.T) {
 		OrderCount:  3,
 		BasePrice:   exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 		PriceSpread: exchange.PriceUSD(100, exchange.DOLLAR_TICK),
-		Qty:         SATOSHI / 10,
+		Qty:         exchange.SATOSHI / 10,
 		Visibility:  exchange.Normal,
 		IcebergQty:  0,
 	}
@@ -178,20 +178,20 @@ func TestDelayedMakerEarlyContextCancel(t *testing.T) {
 
 func TestRandomizedTakerEdgeCases(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := RandomizedTakerConfig{
 		Symbol:         "BTC/USD",
 		Interval:       50 * time.Millisecond,
-		MinQty:         SATOSHI,
-		MaxQty:         SATOSHI,
-		BasePrecision:  SATOSHI,
-		QuotePrecision: SATOSHI / 1000,
+		MinQty:         exchange.SATOSHI,
+		MaxQty:         exchange.SATOSHI,
+		BasePrecision:  exchange.SATOSHI,
+		QuotePrecision: exchange.SATOSHI / 1000,
 	}
 
 	taker := NewRandomizedTaker(1, gateway, config)
@@ -216,17 +216,17 @@ func TestOMSEdgeCases(t *testing.T) {
 
 	fill1 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 50000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill1, SATOSHI)
+	oms.OnFill("BTC/USD", fill1, exchange.SATOSHI)
 
 	fill2 := OrderFillEvent{
 		Side:  exchange.Sell,
-		Price: 51000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 51000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill2, SATOSHI)
+	oms.OnFill("BTC/USD", fill2, exchange.SATOSHI)
 
 	netPos := oms.GetNetPosition("BTC/USD")
 	if netPos != 0 {
@@ -235,13 +235,13 @@ func TestOMSEdgeCases(t *testing.T) {
 
 	fill3 := OrderFillEvent{
 		Side:  exchange.Sell,
-		Price: 52000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 52000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill3, SATOSHI)
+	oms.OnFill("BTC/USD", fill3, exchange.SATOSHI)
 
 	netPos = oms.GetNetPosition("BTC/USD")
-	if netPos != -SATOSHI {
+	if netPos != -exchange.SATOSHI {
 		t.Fatalf("Expected net position -1 BTC, got %d", netPos)
 	}
 }
@@ -251,29 +251,29 @@ func TestHedgingOMSEdgeCases(t *testing.T) {
 
 	fill1 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * SATOSHI,
-		Qty:   SATOSHI / 2,
+		Price: 50000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI / 2,
 	}
-	oms.OnFill("BTC/USD", fill1, SATOSHI)
+	oms.OnFill("BTC/USD", fill1, exchange.SATOSHI)
 
 	fill2 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 51000 * SATOSHI,
-		Qty:   SATOSHI / 2,
+		Price: 51000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI / 2,
 	}
-	oms.OnFill("BTC/USD", fill2, SATOSHI)
+	oms.OnFill("BTC/USD", fill2, exchange.SATOSHI)
 
 	netPos := oms.GetNetPosition("BTC/USD")
-	if netPos != SATOSHI {
+	if netPos != exchange.SATOSHI {
 		t.Fatalf("Expected net position 1 BTC, got %d", netPos)
 	}
 
 	fill3 := OrderFillEvent{
 		Side:  exchange.Sell,
-		Price: 52000 * SATOSHI,
-		Qty:   SATOSHI / 4,
+		Price: 52000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI / 4,
 	}
-	oms.OnFill("BTC/USD", fill3, SATOSHI)
+	oms.OnFill("BTC/USD", fill3, exchange.SATOSHI)
 
 	positions := oms.GetPositions("BTC/USD")
 	if len(positions) != 2 {
@@ -284,8 +284,10 @@ func TestHedgingOMSEdgeCases(t *testing.T) {
 func TestRecorderEdgeCases(t *testing.T) {
 	gateway := exchange.NewClientGateway(1)
 
-	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000)
-	ethusd := exchange.NewPerpFutures("ETHUSD", "ETH", "USD", 10000000, 10000000)
+	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	ethusd := exchange.NewPerpFutures("ETHUSD", "ETH", "USD",
+		exchange.ETH_PRECISION, exchange.USD_PRECISION,
+		exchange.ETH_PRECISION/100, exchange.ETH_PRECISION/1000)
 	instruments := map[string]exchange.Instrument{
 		"BTCUSD": btcusd,
 		"ETHUSD": ethusd,

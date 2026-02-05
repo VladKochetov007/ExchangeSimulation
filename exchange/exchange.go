@@ -142,7 +142,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	}
 
 	instrument := book.Instrument
-	precision := instrument.TickSize()
+	precision := instrument.BasePrecision()
 	if req.Type == LimitOrder && !instrument.ValidatePrice(req.Price) {
 		return Response{RequestID: req.RequestID, Success: false, Error: RejectInvalidPrice}
 	}
@@ -303,7 +303,7 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 	}
 
 	instrument := book.Instrument
-	precision := instrument.TickSize()
+	precision := instrument.BasePrecision()
 	remainingQty := order.Qty - order.FilledQty
 	if order.Side == Buy {
 		amount := (remainingQty * order.Price) / precision

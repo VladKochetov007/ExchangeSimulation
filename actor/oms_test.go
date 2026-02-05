@@ -12,19 +12,19 @@ func TestNettingOMSNewPosition(t *testing.T) {
 
 	fill := OrderFillEvent{
 		Side:      exchange.Buy,
-		Price:     50000 * SATOSHI,
-		Qty:       SATOSHI,
+		Price:     50000 * exchange.SATOSHI,
+		Qty:       exchange.SATOSHI,
 		FeeAmount: 0,
 	}
 
-	oms.OnFill("BTC/USD", fill, SATOSHI)
+	oms.OnFill("BTC/USD", fill, exchange.SATOSHI)
 
 	pos := oms.GetPosition("BTC/USD")
-	if pos.Qty != SATOSHI {
-		t.Fatalf("Expected position qty %d, got %d", SATOSHI, pos.Qty)
+	if pos.Qty != exchange.SATOSHI {
+		t.Fatalf("Expected position qty %d, got %d", exchange.SATOSHI, pos.Qty)
 	}
-	if pos.AvgPrice != 50000*SATOSHI {
-		t.Fatalf("Expected avg price %d, got %d", 50000*SATOSHI, pos.AvgPrice)
+	if pos.AvgPrice != 50000*exchange.SATOSHI {
+		t.Fatalf("Expected avg price %d, got %d", 50000*exchange.SATOSHI, pos.AvgPrice)
 	}
 }
 
@@ -33,24 +33,24 @@ func TestNettingOMSIncreasePosition(t *testing.T) {
 
 	fill1 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 50000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill1, SATOSHI)
+	oms.OnFill("BTC/USD", fill1, exchange.SATOSHI)
 
 	fill2 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 51000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 51000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill2, SATOSHI)
+	oms.OnFill("BTC/USD", fill2, exchange.SATOSHI)
 
 	pos := oms.GetPosition("BTC/USD")
-	if pos.Qty != 2*SATOSHI {
-		t.Fatalf("Expected position qty %d, got %d", 2*SATOSHI, pos.Qty)
+	if pos.Qty != 2*exchange.SATOSHI {
+		t.Fatalf("Expected position qty %d, got %d", 2*exchange.SATOSHI, pos.Qty)
 	}
 
-	expectedAvg := int64((50000 + 51000) / 2 * SATOSHI)
+	expectedAvg := int64((50000 + 51000) / 2 * exchange.SATOSHI)
 	if pos.AvgPrice != expectedAvg {
 		t.Fatalf("Expected avg price %d, got %d", expectedAvg, pos.AvgPrice)
 	}
@@ -61,24 +61,24 @@ func TestNettingOMSReducePosition(t *testing.T) {
 
 	fill1 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * SATOSHI,
-		Qty:   2 * SATOSHI,
+		Price: 50000 * exchange.SATOSHI,
+		Qty:   2 * exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill1, SATOSHI)
+	oms.OnFill("BTC/USD", fill1, exchange.SATOSHI)
 
 	fill2 := OrderFillEvent{
 		Side:  exchange.Sell,
-		Price: 51000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 51000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill2, SATOSHI)
+	oms.OnFill("BTC/USD", fill2, exchange.SATOSHI)
 
 	pos := oms.GetPosition("BTC/USD")
-	if pos.Qty != SATOSHI {
-		t.Fatalf("Expected position qty %d, got %d", SATOSHI, pos.Qty)
+	if pos.Qty != exchange.SATOSHI {
+		t.Fatalf("Expected position qty %d, got %d", exchange.SATOSHI, pos.Qty)
 	}
 
-	expectedPnL := int64((51000 - 50000) * SATOSHI)
+	expectedPnL := int64((51000 - 50000) * exchange.SATOSHI)
 	if pos.RealizedPnL != expectedPnL {
 		t.Fatalf("Expected realized PnL %d, got %d", expectedPnL, pos.RealizedPnL)
 	}
@@ -89,24 +89,24 @@ func TestNettingOMSClosePosition(t *testing.T) {
 
 	fill1 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 50000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill1, SATOSHI)
+	oms.OnFill("BTC/USD", fill1, exchange.SATOSHI)
 
 	fill2 := OrderFillEvent{
 		Side:  exchange.Sell,
-		Price: 51000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 51000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill2, SATOSHI)
+	oms.OnFill("BTC/USD", fill2, exchange.SATOSHI)
 
 	pos := oms.GetPosition("BTC/USD")
 	if pos.Qty != 0 {
 		t.Fatalf("Expected position qty 0, got %d", pos.Qty)
 	}
 
-	expectedPnL := int64((51000 - 50000) * SATOSHI)
+	expectedPnL := int64((51000 - 50000) * exchange.SATOSHI)
 	if pos.RealizedPnL != expectedPnL {
 		t.Fatalf("Expected realized PnL %d, got %d", expectedPnL, pos.RealizedPnL)
 	}
@@ -117,27 +117,27 @@ func TestNettingOMSFlipPosition(t *testing.T) {
 
 	fill1 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 50000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill1, SATOSHI)
+	oms.OnFill("BTC/USD", fill1, exchange.SATOSHI)
 
 	fill2 := OrderFillEvent{
 		Side:  exchange.Sell,
-		Price: 51000 * SATOSHI,
-		Qty:   2 * SATOSHI,
+		Price: 51000 * exchange.SATOSHI,
+		Qty:   2 * exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill2, SATOSHI)
+	oms.OnFill("BTC/USD", fill2, exchange.SATOSHI)
 
 	pos := oms.GetPosition("BTC/USD")
-	if pos.Qty != -SATOSHI {
-		t.Fatalf("Expected position qty %d, got %d", -SATOSHI, pos.Qty)
+	if pos.Qty != -exchange.SATOSHI {
+		t.Fatalf("Expected position qty %d, got %d", -exchange.SATOSHI, pos.Qty)
 	}
-	if pos.AvgPrice != 51000*SATOSHI {
-		t.Fatalf("Expected avg price %d (flip price), got %d", 51000*SATOSHI, pos.AvgPrice)
+	if pos.AvgPrice != 51000*exchange.SATOSHI {
+		t.Fatalf("Expected avg price %d (flip price), got %d", 51000*exchange.SATOSHI, pos.AvgPrice)
 	}
 
-	expectedPnL := int64((51000 - 50000) * SATOSHI)
+	expectedPnL := int64((51000 - 50000) * exchange.SATOSHI)
 	if pos.RealizedPnL != expectedPnL {
 		t.Fatalf("Expected realized PnL %d, got %d", expectedPnL, pos.RealizedPnL)
 	}
@@ -148,17 +148,17 @@ func TestNettingOMSShortPosition(t *testing.T) {
 
 	fill := OrderFillEvent{
 		Side:  exchange.Sell,
-		Price: 50000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 50000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill, SATOSHI)
+	oms.OnFill("BTC/USD", fill, exchange.SATOSHI)
 
 	pos := oms.GetPosition("BTC/USD")
-	if pos.Qty != -SATOSHI {
-		t.Fatalf("Expected position qty %d, got %d", -SATOSHI, pos.Qty)
+	if pos.Qty != -exchange.SATOSHI {
+		t.Fatalf("Expected position qty %d, got %d", -exchange.SATOSHI, pos.Qty)
 	}
-	if pos.AvgPrice != 50000*SATOSHI {
-		t.Fatalf("Expected avg price %d, got %d", 50000*SATOSHI, pos.AvgPrice)
+	if pos.AvgPrice != 50000*exchange.SATOSHI {
+		t.Fatalf("Expected avg price %d, got %d", 50000*exchange.SATOSHI, pos.AvgPrice)
 	}
 }
 
@@ -167,14 +167,14 @@ func TestNettingOMSGetNetPosition(t *testing.T) {
 
 	fill := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 50000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill, SATOSHI)
+	oms.OnFill("BTC/USD", fill, exchange.SATOSHI)
 
 	net := oms.GetNetPosition("BTC/USD")
-	if net != SATOSHI {
-		t.Fatalf("Expected net position %d, got %d", SATOSHI, net)
+	if net != exchange.SATOSHI {
+		t.Fatalf("Expected net position %d, got %d", exchange.SATOSHI, net)
 	}
 
 	netEmpty := oms.GetNetPosition("ETH/USD")
@@ -188,17 +188,17 @@ func TestHedgingOMSMultiplePositions(t *testing.T) {
 
 	fill1 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 50000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill1, SATOSHI)
+	oms.OnFill("BTC/USD", fill1, exchange.SATOSHI)
 
 	fill2 := OrderFillEvent{
 		Side:  exchange.Sell,
-		Price: 51000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 51000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill2, SATOSHI)
+	oms.OnFill("BTC/USD", fill2, exchange.SATOSHI)
 
 	positions := oms.GetPositions("BTC/USD")
 	if len(positions) != 2 {
@@ -216,28 +216,28 @@ func TestHedgingOMSIncreaseLongPosition(t *testing.T) {
 
 	fill1 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 50000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill1, SATOSHI)
+	oms.OnFill("BTC/USD", fill1, exchange.SATOSHI)
 
 	fill2 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 51000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 51000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill2, SATOSHI)
+	oms.OnFill("BTC/USD", fill2, exchange.SATOSHI)
 
 	positions := oms.GetPositions("BTC/USD")
 	if len(positions) != 1 {
 		t.Fatalf("Expected 1 position, got %d", len(positions))
 	}
 
-	if positions[0].Qty != 2*SATOSHI {
-		t.Fatalf("Expected position qty %d, got %d", 2*SATOSHI, positions[0].Qty)
+	if positions[0].Qty != 2*exchange.SATOSHI {
+		t.Fatalf("Expected position qty %d, got %d", 2*exchange.SATOSHI, positions[0].Qty)
 	}
 
-	expectedAvg := int64((50000 + 51000) / 2 * SATOSHI)
+	expectedAvg := int64((50000 + 51000) / 2 * exchange.SATOSHI)
 	if positions[0].AvgPrice != expectedAvg {
 		t.Fatalf("Expected avg price %d, got %d", expectedAvg, positions[0].AvgPrice)
 	}
@@ -248,13 +248,13 @@ func TestOMSReset(t *testing.T) {
 
 	fill := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 50000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill, SATOSHI)
+	oms.OnFill("BTC/USD", fill, exchange.SATOSHI)
 
 	pos := oms.GetPosition("BTC/USD")
-	if pos.Qty != SATOSHI {
+	if pos.Qty != exchange.SATOSHI {
 		t.Fatalf("Expected position before reset, got %d", pos.Qty)
 	}
 
@@ -271,17 +271,17 @@ func TestNettingOMSGetPositions(t *testing.T) {
 
 	fill := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 50000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill, SATOSHI)
+	oms.OnFill("BTC/USD", fill, exchange.SATOSHI)
 
 	positions := oms.GetPositions("BTC/USD")
 	if len(positions) != 1 {
 		t.Fatalf("Expected 1 position, got %d", len(positions))
 	}
-	if positions[0].Qty != SATOSHI {
-		t.Fatalf("Expected position qty %d, got %d", SATOSHI, positions[0].Qty)
+	if positions[0].Qty != exchange.SATOSHI {
+		t.Fatalf("Expected position qty %d, got %d", exchange.SATOSHI, positions[0].Qty)
 	}
 
 	emptyPositions := oms.GetPositions("ETH/USD")
@@ -295,14 +295,14 @@ func TestHedgingOMSGetPosition(t *testing.T) {
 
 	fill1 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 50000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill1, SATOSHI)
+	oms.OnFill("BTC/USD", fill1, exchange.SATOSHI)
 
 	pos := oms.GetPosition("BTC/USD")
-	if pos.Qty != SATOSHI {
-		t.Fatalf("Expected position qty %d, got %d", SATOSHI, pos.Qty)
+	if pos.Qty != exchange.SATOSHI {
+		t.Fatalf("Expected position qty %d, got %d", exchange.SATOSHI, pos.Qty)
 	}
 
 	emptyPos := oms.GetPosition("ETH/USD")
@@ -316,17 +316,17 @@ func TestHedgingOMSReset(t *testing.T) {
 
 	fill1 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 50000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill1, SATOSHI)
+	oms.OnFill("BTC/USD", fill1, exchange.SATOSHI)
 
 	fill2 := OrderFillEvent{
 		Side:  exchange.Sell,
-		Price: 51000 * SATOSHI,
-		Qty:   SATOSHI,
+		Price: 51000 * exchange.SATOSHI,
+		Qty:   exchange.SATOSHI,
 	}
-	oms.OnFill("BTC/USD", fill2, SATOSHI)
+	oms.OnFill("BTC/USD", fill2, exchange.SATOSHI)
 
 	positions := oms.GetPositions("BTC/USD")
 	if len(positions) != 2 {

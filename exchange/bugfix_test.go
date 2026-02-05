@@ -16,7 +16,7 @@ func TestTotalQtyUpdatesOnPartialFill(t *testing.T) {
 	clock := &testClock{now: 1000000000}
 	ex := NewExchange(10, clock)
 
-	inst := NewSpotInstrument("BTCUSDT", "BTC", "USDT", 100000000, 1000000)
+	inst := NewSpotInstrument("BTCUSDT", "BTC", "USDT", 100000000, 1000000, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(inst)
 
 	maker := ex.ConnectClient(1, map[string]int64{"USDT": 100000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
@@ -90,7 +90,7 @@ func TestDeltasPublishedForMakerFills(t *testing.T) {
 	clock := &testClock{now: 1000000000}
 	ex := NewExchange(10, clock)
 
-	inst := NewSpotInstrument("BTCUSDT", "BTC", "USDT", 100000000, 1000000)
+	inst := NewSpotInstrument("BTCUSDT", "BTC", "USDT", 100000000, 1000000, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(inst)
 
 	recorder := ex.ConnectClient(1, map[string]int64{}, &PercentageFee{MakerBps: 0, TakerBps: 0, InQuote: true})
@@ -175,7 +175,7 @@ func TestSequenceNumbersInEvents(t *testing.T) {
 	clock := &testClock{now: 1000000000}
 	ex := NewExchange(10, clock)
 
-	inst := NewSpotInstrument("BTCUSDT", "BTC", "USDT", 100000000, 1000000)
+	inst := NewSpotInstrument("BTCUSDT", "BTC", "USDT", 100000000, 1000000, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(inst)
 
 	client := ex.ConnectClient(1, map[string]int64{"USDT": 100000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
@@ -239,7 +239,7 @@ func TestNoOrdersLeakedToPool(t *testing.T) {
 	clock := &testClock{now: 1000000000}
 	ex := NewExchange(10, clock)
 
-	inst := NewSpotInstrument("BTCUSDT", "BTC", "USDT", 100000000, 1000000)
+	inst := NewSpotInstrument("BTCUSDT", "BTC", "USDT", 100000000, 1000000, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(inst)
 
 	maker := ex.ConnectClient(1, map[string]int64{"USDT": 100000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})

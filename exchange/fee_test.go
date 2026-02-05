@@ -10,7 +10,7 @@ func TestPercentageFeeInQuote(t *testing.T) {
 	}
 
 	exec := &Execution{
-		Price: 50000 * SATOSHI,
+		Price: PriceUSD(50000, DOLLAR_TICK),
 		Qty:   SATOSHI,
 	}
 
@@ -42,7 +42,7 @@ func TestPercentageFeeInBase(t *testing.T) {
 	}
 
 	exec := &Execution{
-		Price: 50000 * SATOSHI,
+		Price: PriceUSD(50000, DOLLAR_TICK),
 		Qty:   SATOSHI,
 	}
 
@@ -63,7 +63,7 @@ func TestFixedFee(t *testing.T) {
 	}
 
 	exec := &Execution{
-		Price: 50000 * SATOSHI,
+		Price: PriceUSD(50000, DOLLAR_TICK),
 		Qty:   SATOSHI,
 	}
 

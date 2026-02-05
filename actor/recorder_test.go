@@ -17,7 +17,9 @@ func TestRecorderCreatesFiles(t *testing.T) {
 
 	gateway := exchange.NewClientGateway(1)
 
-	btcusd := exchange.NewPerpFutures("BTCUSD", "BTC", "USD", 100000000, 1000000)
+	btcusd := exchange.NewPerpFutures("BTCUSD", "BTC", "USD",
+		exchange.BTC_PRECISION, exchange.USD_PRECISION,
+		exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	instruments := map[string]exchange.Instrument{
 		"BTCUSD": btcusd,
 	}
@@ -58,7 +60,7 @@ func TestRecorderWritesTrade(t *testing.T) {
 
 	gateway := exchange.NewClientGateway(1)
 
-	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000)
+	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	instruments := map[string]exchange.Instrument{
 		"BTCUSD": btcusd,
 	}
@@ -137,7 +139,7 @@ func TestRecorderWritesSnapshot(t *testing.T) {
 
 	gateway := exchange.NewClientGateway(1)
 
-	ethusd := exchange.NewSpotInstrument("ETHUSD", "ETH", "USD", 10000000, 10000000)
+	ethusd := exchange.NewSpotInstrument("ETHUSD", "ETH", "USD", exchange.ETH_PRECISION, exchange.USD_PRECISION, exchange.ETH_PRECISION/100, exchange.ETH_PRECISION/1000)
 	instruments := map[string]exchange.Instrument{
 		"ETHUSD": ethusd,
 	}
@@ -220,7 +222,7 @@ func TestRecorderSeparateHiddenFiles(t *testing.T) {
 
 	gateway := exchange.NewClientGateway(1)
 
-	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000)
+	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	instruments := map[string]exchange.Instrument{
 		"BTCUSD": btcusd,
 	}
@@ -253,7 +255,7 @@ func TestRecorderWritesDelta(t *testing.T) {
 
 	gateway := exchange.NewClientGateway(1)
 
-	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000)
+	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	instruments := map[string]exchange.Instrument{
 		"BTCUSD": btcusd,
 	}
@@ -331,7 +333,9 @@ func TestRecorderWritesOpenInterest(t *testing.T) {
 
 	gateway := exchange.NewClientGateway(1)
 
-	btcusd := exchange.NewPerpFutures("BTCUSD", "BTC", "USD", 100000000, 1000000)
+	btcusd := exchange.NewPerpFutures("BTCUSD", "BTC", "USD",
+		exchange.BTC_PRECISION, exchange.USD_PRECISION,
+		exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	instruments := map[string]exchange.Instrument{
 		"BTCUSD": btcusd,
 	}
@@ -406,7 +410,9 @@ func TestRecorderWritesFunding(t *testing.T) {
 
 	gateway := exchange.NewClientGateway(1)
 
-	btcusd := exchange.NewPerpFutures("BTCUSD", "BTC", "USD", 100000000, 1000000)
+	btcusd := exchange.NewPerpFutures("BTCUSD", "BTC", "USD",
+		exchange.BTC_PRECISION, exchange.USD_PRECISION,
+		exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	instruments := map[string]exchange.Instrument{
 		"BTCUSD": btcusd,
 	}

@@ -7,7 +7,7 @@ import (
 
 func TestClientNotificationsOnPlaceOrder(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, CENT_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
@@ -48,7 +48,7 @@ func TestClientNotificationsOnPlaceOrder(t *testing.T) {
 
 func TestClientNotificationsOnFill(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, CENT_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
@@ -143,7 +143,7 @@ func TestClientNotificationsOnFill(t *testing.T) {
 
 func TestClientNotificationsViaMarketData(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
@@ -223,7 +223,7 @@ func TestClientNotificationsViaMarketData(t *testing.T) {
 
 func TestClientNotificationsOnPartialFill(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
@@ -238,7 +238,7 @@ func TestClientNotificationsOnPartialFill(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Sell,
 		Type:        LimitOrder,
-		Price:       50000 * SATOSHI,
+		Price:       PriceUSD(50000, DOLLAR_TICK),
 		Qty:         SATOSHI / 2,
 		TimeInForce: GTC,
 	}
@@ -250,7 +250,7 @@ func TestClientNotificationsOnPartialFill(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        LimitOrder,
-		Price:       50000 * SATOSHI,
+		Price:       PriceUSD(50000, DOLLAR_TICK),
 		Qty:         SATOSHI,
 		TimeInForce: GTC,
 	}
@@ -304,7 +304,7 @@ func TestClientNotificationsOnPartialFill(t *testing.T) {
 
 func TestClientNotificationsOnReject(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"USD": 1000}
@@ -317,7 +317,7 @@ func TestClientNotificationsOnReject(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        LimitOrder,
-		Price:       50000 * SATOSHI,
+		Price:       PriceUSD(50000, DOLLAR_TICK),
 		Qty:         SATOSHI,
 		TimeInForce: GTC,
 	}

@@ -4,6 +4,8 @@ type Instrument interface {
 	Symbol() string
 	BaseAsset() string
 	QuoteAsset() string
+	BasePrecision() int64  // Units per whole unit of base asset
+	QuotePrecision() int64 // Units per whole unit of quote asset
 	TickSize() int64
 	MinOrderSize() int64
 	ValidatePrice(price int64) bool
@@ -13,20 +15,24 @@ type Instrument interface {
 }
 
 type SpotInstrument struct {
-	symbol       string
-	base         string
-	quote        string
-	tickSize     int64
-	minOrderSize int64
+	symbol         string
+	base           string
+	quote          string
+	basePrecision  int64
+	quotePrecision int64
+	tickSize       int64
+	minOrderSize   int64
 }
 
-func NewSpotInstrument(symbol, base, quote string, tickSize, minOrderSize int64) *SpotInstrument {
+func NewSpotInstrument(symbol, base, quote string, basePrecision, quotePrecision, tickSize, minOrderSize int64) *SpotInstrument {
 	return &SpotInstrument{
-		symbol:       symbol,
-		base:         base,
-		quote:        quote,
-		tickSize:     tickSize,
-		minOrderSize: minOrderSize,
+		symbol:         symbol,
+		base:           base,
+		quote:          quote,
+		basePrecision:  basePrecision,
+		quotePrecision: quotePrecision,
+		tickSize:       tickSize,
+		minOrderSize:   minOrderSize,
 	}
 }
 
@@ -40,6 +46,14 @@ func (i *SpotInstrument) BaseAsset() string {
 
 func (i *SpotInstrument) QuoteAsset() string {
 	return i.quote
+}
+
+func (i *SpotInstrument) BasePrecision() int64 {
+	return i.basePrecision
+}
+
+func (i *SpotInstrument) QuotePrecision() int64 {
+	return i.quotePrecision
 }
 
 func (i *SpotInstrument) TickSize() int64 {
@@ -72,14 +86,16 @@ type PerpFutures struct {
 	fundingCalc FundingCalculator
 }
 
-func NewPerpFutures(symbol, base, quote string, tickSize, minOrderSize int64) *PerpFutures {
+func NewPerpFutures(symbol, base, quote string, basePrecision, quotePrecision, tickSize, minOrderSize int64) *PerpFutures {
 	return &PerpFutures{
 		SpotInstrument: SpotInstrument{
-			symbol:       symbol,
-			base:         base,
-			quote:        quote,
-			tickSize:     tickSize,
-			minOrderSize: minOrderSize,
+			symbol:         symbol,
+			base:           base,
+			quote:          quote,
+			basePrecision:  basePrecision,
+			quotePrecision: quotePrecision,
+			tickSize:       tickSize,
+			minOrderSize:   minOrderSize,
 		},
 		fundingRate: &FundingRate{
 			Symbol:      symbol,

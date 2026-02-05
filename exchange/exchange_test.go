@@ -14,7 +14,7 @@ func TestNewExchange(t *testing.T) {
 
 func TestAddInstrument(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 100, 1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, 100, 1000)
 	ex.AddInstrument(instrument)
 
 	if ex.Instruments["BTC/USD"] == nil {
@@ -27,7 +27,7 @@ func TestAddInstrument(t *testing.T) {
 
 func TestConnectClient(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 100, 1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, 100, 1000)
 	ex.AddInstrument(instrument)
 
 	feePlan := &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true}
@@ -49,7 +49,7 @@ func TestConnectClient(t *testing.T) {
 
 func TestPlaceOrderDirect(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, SATOSHI, SATOSHI)
 	ex.AddInstrument(instrument)
 
 	feePlan := &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true}
@@ -81,7 +81,7 @@ func TestPlaceOrderDirect(t *testing.T) {
 
 func TestMatchingAndSettlement(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 100, 1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, 100, 1000)
 	ex.AddInstrument(instrument)
 
 	feePlan := &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true}

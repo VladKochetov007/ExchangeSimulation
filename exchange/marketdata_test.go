@@ -182,7 +182,7 @@ func TestMDPublisherPublishFunding(t *testing.T) {
 		NextFunding: time.Now().Unix() + 28800,
 		Interval:    28800,
 		MarkPrice:   50100 * SATOSHI,
-		IndexPrice:  50000 * SATOSHI,
+		IndexPrice:  PriceUSD(50000, DOLLAR_TICK),
 	}
 
 	mdp.PublishFunding("BTC-PERP", funding, time.Now().UnixNano())

@@ -4,7 +4,7 @@ import "testing"
 
 func TestInsufficientLiquidityLimitOrder(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, CENT_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
@@ -61,7 +61,7 @@ func TestInsufficientLiquidityLimitOrder(t *testing.T) {
 
 func TestInsufficientLiquidityMarketOrder(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
@@ -112,7 +112,7 @@ func TestInsufficientLiquidityMarketOrder(t *testing.T) {
 
 func TestFOKOrderNotImplemented(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, CENT_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
@@ -152,7 +152,7 @@ func TestFOKOrderNotImplemented(t *testing.T) {
 
 func TestFOKOrderFullyFilled(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, CENT_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
@@ -187,7 +187,7 @@ func TestFOKOrderFullyFilled(t *testing.T) {
 
 func TestIOCOrderPartialFill(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, CENT_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
@@ -234,7 +234,7 @@ func TestIOCOrderPartialFill(t *testing.T) {
 
 func TestIOCOrderNoFill(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, CENT_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
@@ -263,7 +263,7 @@ func TestIOCOrderNoFill(t *testing.T) {
 
 func TestEmptyBookMarketOrder(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"USD": 100000 * SATOSHI}
@@ -292,7 +292,7 @@ func TestEmptyBookMarketOrder(t *testing.T) {
 
 func TestPartialFillReleasesCorrectAmount(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
@@ -304,7 +304,7 @@ func TestPartialFillReleasesCorrectAmount(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Sell,
 		Type:        LimitOrder,
-		Price:       50000 * SATOSHI,
+		Price:       PriceUSD(50000, DOLLAR_TICK),
 		Qty:         SATOSHI / 2,
 		TimeInForce: GTC,
 	}
@@ -317,7 +317,7 @@ func TestPartialFillReleasesCorrectAmount(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        LimitOrder,
-		Price:       50000 * SATOSHI,
+		Price:       PriceUSD(50000, DOLLAR_TICK),
 		Qty:         SATOSHI,
 		TimeInForce: GTC,
 	}

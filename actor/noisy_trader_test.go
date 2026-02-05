@@ -9,18 +9,18 @@ import (
 
 func TestNoisyTraderCreation(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := NoisyTraderConfig{
 		Symbol:          "BTC/USD",
 		Interval:        100 * time.Millisecond,
 		PriceRangeBps:   100,
-		MinQty:          SATOSHI / 10,
-		MaxQty:          SATOSHI,
+		MinQty:          exchange.SATOSHI / 10,
+		MaxQty:          exchange.SATOSHI,
 		MaxActiveOrders: 3,
 		OrderLifetime:   500 * time.Millisecond,
 	}
@@ -36,23 +36,23 @@ func TestNoisyTraderCreation(t *testing.T) {
 
 func TestNoisyTraderPlacesOrders(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway100 := ex.ConnectClient(100, balances, &exchange.FixedFee{})
 	gateway1 := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	actor100 := NewBaseActor(100, gateway100)
-	actor100.SubmitOrder("BTC/USD", exchange.Sell, exchange.LimitOrder, 50000*SATOSHI, SATOSHI)
+	actor100.SubmitOrder("BTC/USD", exchange.Sell, exchange.LimitOrder, 50000*exchange.SATOSHI, exchange.SATOSHI)
 	<-gateway100.ResponseCh
 
 	config := NoisyTraderConfig{
 		Symbol:          "BTC/USD",
 		Interval:        50 * time.Millisecond,
 		PriceRangeBps:   100,
-		MinQty:          SATOSHI / 10,
-		MaxQty:          SATOSHI,
+		MinQty:          exchange.SATOSHI / 10,
+		MaxQty:          exchange.SATOSHI,
 		MaxActiveOrders: 5,
 		OrderLifetime:   1 * time.Second,
 	}
@@ -75,18 +75,18 @@ func TestNoisyTraderPlacesOrders(t *testing.T) {
 
 func TestNoisyTraderOrderAccepted(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := NoisyTraderConfig{
 		Symbol:          "BTC/USD",
 		Interval:        100 * time.Millisecond,
 		PriceRangeBps:   100,
-		MinQty:          SATOSHI / 10,
-		MaxQty:          SATOSHI,
+		MinQty:          exchange.SATOSHI / 10,
+		MaxQty:          exchange.SATOSHI,
 		MaxActiveOrders: 3,
 		OrderLifetime:   500 * time.Millisecond,
 	}
@@ -107,18 +107,18 @@ func TestNoisyTraderOrderAccepted(t *testing.T) {
 
 func TestNoisyTraderOrderFilled(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := NoisyTraderConfig{
 		Symbol:          "BTC/USD",
 		Interval:        100 * time.Millisecond,
 		PriceRangeBps:   100,
-		MinQty:          SATOSHI / 10,
-		MaxQty:          SATOSHI,
+		MinQty:          exchange.SATOSHI / 10,
+		MaxQty:          exchange.SATOSHI,
 		MaxActiveOrders: 3,
 		OrderLifetime:   500 * time.Millisecond,
 	}
@@ -139,18 +139,18 @@ func TestNoisyTraderOrderFilled(t *testing.T) {
 
 func TestNoisyTraderPartialFill(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := NoisyTraderConfig{
 		Symbol:          "BTC/USD",
 		Interval:        100 * time.Millisecond,
 		PriceRangeBps:   100,
-		MinQty:          SATOSHI / 10,
-		MaxQty:          SATOSHI,
+		MinQty:          exchange.SATOSHI / 10,
+		MaxQty:          exchange.SATOSHI,
 		MaxActiveOrders: 3,
 		OrderLifetime:   500 * time.Millisecond,
 	}
@@ -171,18 +171,18 @@ func TestNoisyTraderPartialFill(t *testing.T) {
 
 func TestNoisyTraderOrderCancelled(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := NoisyTraderConfig{
 		Symbol:          "BTC/USD",
 		Interval:        100 * time.Millisecond,
 		PriceRangeBps:   100,
-		MinQty:          SATOSHI / 10,
-		MaxQty:          SATOSHI,
+		MinQty:          exchange.SATOSHI / 10,
+		MaxQty:          exchange.SATOSHI,
 		MaxActiveOrders: 3,
 		OrderLifetime:   500 * time.Millisecond,
 	}
@@ -202,18 +202,18 @@ func TestNoisyTraderOrderCancelled(t *testing.T) {
 
 func TestNoisyTraderBookSnapshot(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := NoisyTraderConfig{
 		Symbol:          "BTC/USD",
 		Interval:        100 * time.Millisecond,
 		PriceRangeBps:   100,
-		MinQty:          SATOSHI / 10,
-		MaxQty:          SATOSHI,
+		MinQty:          exchange.SATOSHI / 10,
+		MaxQty:          exchange.SATOSHI,
 		MaxActiveOrders: 3,
 		OrderLifetime:   500 * time.Millisecond,
 	}
@@ -223,37 +223,37 @@ func TestNoisyTraderBookSnapshot(t *testing.T) {
 	snapEvent := BookSnapshotEvent{
 		Symbol: "BTC/USD",
 		Snapshot: &exchange.BookSnapshot{
-			Bids: []exchange.PriceLevel{{Price: 49000 * SATOSHI, VisibleQty: SATOSHI}},
-			Asks: []exchange.PriceLevel{{Price: 51000 * SATOSHI, VisibleQty: SATOSHI}},
+			Bids: []exchange.PriceLevel{{Price: 49000 * exchange.SATOSHI, VisibleQty: exchange.SATOSHI}},
+			Asks: []exchange.PriceLevel{{Price: 51000 * exchange.SATOSHI, VisibleQty: exchange.SATOSHI}},
 		},
 	}
 	noisy.onBookSnapshot(snapEvent)
 
-	if noisy.bestBid != 49000*SATOSHI {
-		t.Fatalf("Expected bestBid 49000, got %d", noisy.bestBid/SATOSHI)
+	if noisy.bestBid != 49000*exchange.SATOSHI {
+		t.Fatalf("Expected bestBid 49000, got %d", noisy.bestBid/exchange.SATOSHI)
 	}
-	if noisy.bestAsk != 51000*SATOSHI {
-		t.Fatalf("Expected bestAsk 51000, got %d", noisy.bestAsk/SATOSHI)
+	if noisy.bestAsk != 51000*exchange.SATOSHI {
+		t.Fatalf("Expected bestAsk 51000, got %d", noisy.bestAsk/exchange.SATOSHI)
 	}
-	if noisy.midPrice != 50000*SATOSHI {
-		t.Fatalf("Expected midPrice 50000, got %d", noisy.midPrice/SATOSHI)
+	if noisy.midPrice != 50000*exchange.SATOSHI {
+		t.Fatalf("Expected midPrice 50000, got %d", noisy.midPrice/exchange.SATOSHI)
 	}
 }
 
 func TestNoisyTraderBookDelta(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := NoisyTraderConfig{
 		Symbol:          "BTC/USD",
 		Interval:        100 * time.Millisecond,
 		PriceRangeBps:   100,
-		MinQty:          SATOSHI / 10,
-		MaxQty:          SATOSHI,
+		MinQty:          exchange.SATOSHI / 10,
+		MaxQty:          exchange.SATOSHI,
 		MaxActiveOrders: 3,
 		OrderLifetime:   500 * time.Millisecond,
 	}
@@ -266,31 +266,31 @@ func TestNoisyTraderBookDelta(t *testing.T) {
 		Symbol: "BTC/USD",
 		Delta: &exchange.BookDelta{
 			Side:       exchange.Buy,
-			Price:      50000 * SATOSHI,
-			VisibleQty: SATOSHI,
+			Price:      50000 * exchange.SATOSHI,
+			VisibleQty: exchange.SATOSHI,
 		},
 	}
 	noisy.onBookDelta(deltaEvent)
 
-	if noisy.bestBid != 50000*SATOSHI {
-		t.Fatalf("Expected bestBid updated to 50000, got %d", noisy.bestBid/SATOSHI)
+	if noisy.bestBid != 50000*exchange.SATOSHI {
+		t.Fatalf("Expected bestBid updated to 50000, got %d", noisy.bestBid/exchange.SATOSHI)
 	}
 }
 
 func TestNoisyTraderStaleOrderCleanup(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := NoisyTraderConfig{
 		Symbol:          "BTC/USD",
 		Interval:        1 * time.Second,
 		PriceRangeBps:   100,
-		MinQty:          SATOSHI / 10,
-		MaxQty:          SATOSHI,
+		MinQty:          exchange.SATOSHI / 10,
+		MaxQty:          exchange.SATOSHI,
 		MaxActiveOrders: 3,
 		OrderLifetime:   100 * time.Millisecond,
 	}
@@ -316,18 +316,18 @@ func TestNoisyTraderStaleOrderCleanup(t *testing.T) {
 
 func TestNoisyTraderMaxActiveOrders(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := NoisyTraderConfig{
 		Symbol:          "BTC/USD",
 		Interval:        20 * time.Millisecond,
 		PriceRangeBps:   100,
-		MinQty:          SATOSHI / 10,
-		MaxQty:          SATOSHI,
+		MinQty:          exchange.SATOSHI / 10,
+		MaxQty:          exchange.SATOSHI,
 		MaxActiveOrders: 2,
 		OrderLifetime:   10 * time.Second,
 	}

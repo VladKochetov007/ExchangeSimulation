@@ -3,26 +3,45 @@ package exchange
 import "time"
 
 const (
-	SATOSHI = 100_000_000
+	// Asset precisions (units per whole unit)
+	BTC_PRECISION  = 100_000_000 // 1 BTC = 100,000,000 satoshis
+	ETH_PRECISION  = 1_000_000   // 1 ETH = 1,000,000 micro-ETH (gwei would be 1B)
+	USD_PRECISION  = 100_000     // 1 USD = 100,000 units (0.001 USD minimum)
+	USDT_PRECISION = 100_000     // Same as USD
 
-	CENT_TICK    = SATOSHI / 100
-	DOLLAR_TICK  = SATOSHI
-	HUNDRED_TICK = 100 * SATOSHI
+	// Legacy constant (backward compatibility - do NOT use for non-BTC assets!)
+	SATOSHI = BTC_PRECISION
+
+	// Price tick sizes (for price alignment in BTC/USD pairs)
+	CENT_TICK    = BTC_PRECISION / 100 // 0.01 USD tick
+	DOLLAR_TICK  = BTC_PRECISION       // 1 USD tick
+	HUNDRED_TICK = 100 * BTC_PRECISION // 100 USD tick
 )
 
 // TEST ONLY - Limited precision (~15 decimal digits), not for production.
 func BTCAmount(btc float64) int64 {
-	return int64(btc * float64(SATOSHI))
+	return int64(btc * float64(BTC_PRECISION))
+}
+
+// TEST ONLY - Limited precision (~15 decimal digits), not for production.
+func ETHAmount(eth float64) int64 {
+	return int64(eth * float64(ETH_PRECISION))
 }
 
 // TEST ONLY - Limited precision (~15 decimal digits), not for production.
 func USDAmount(usd float64) int64 {
-	return int64(usd * float64(SATOSHI))
+	return int64(usd * float64(USD_PRECISION))
+}
+
+// TEST ONLY - Limited precision (~15 decimal digits), not for production.
+func USDTAmount(usdt float64) int64 {
+	return int64(usdt * float64(USDT_PRECISION))
 }
 
 // TEST ONLY - Rounds price DOWN to nearest tickSize.
+// Price is in USD per BTC, returns value in USD_PRECISION units.
 func PriceUSD(price float64, tickSize int64) int64 {
-	raw := int64(price * float64(SATOSHI))
+	raw := int64(price * float64(USD_PRECISION))
 	return (raw / tickSize) * tickSize
 }
 

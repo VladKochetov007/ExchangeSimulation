@@ -9,17 +9,19 @@ import (
 )
 
 // Helper to create test exchange with real clock for simpler testing
-func setupTestExchange(t *testing.T) *exchange.Exchange {
+func setupTestExchange(t *testing.T) (*exchange.Exchange, exchange.Instrument) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
 
-	instrument := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", exchange.SATOSHI, exchange.SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD",
+		exchange.BTC_PRECISION, exchange.USD_PRECISION,
+		exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
-	return ex
+	return ex, instrument
 }
 
 // Helper to create FirstLP actor with default config
-func createFirstLP(t *testing.T, ex *exchange.Exchange, clientID uint64, config FirstLPConfig) *FirstLiquidityProvidingActor {
+func createFirstLP(t *testing.T, ex *exchange.Exchange, instrument exchange.Instrument, clientID uint64, config FirstLPConfig) *FirstLiquidityProvidingActor {
 	balances := map[string]int64{
 		"BTC": exchange.BTCAmount(1.0),   // 1 BTC
 		"USD": exchange.USDAmount(50000), // $50,000
@@ -28,7 +30,7 @@ func createFirstLP(t *testing.T, ex *exchange.Exchange, clientID uint64, config 
 
 	gateway := ex.ConnectClient(clientID, balances, feePlan)
 	lp := NewFirstLP(clientID, gateway, config)
-	lp.SetInitialState(exchange.SATOSHI, "BTC", "USD")
+	lp.SetInitialState(instrument)
 	lp.UpdateBalances(balances["BTC"], balances["USD"])
 
 	return lp
@@ -47,7 +49,7 @@ func createTaker(t *testing.T, ex *exchange.Exchange, clientID uint64) *exchange
 
 // TestFirstLP_FillEventGeneration verifies that fill events are generated and received
 func TestFirstLP_FillEventGeneration(t *testing.T) {
-	ex := setupTestExchange(t)
+	ex, instrument := setupTestExchange(t)
 	defer ex.Shutdown()
 
 	config := FirstLPConfig{
@@ -57,7 +59,7 @@ func TestFirstLP_FillEventGeneration(t *testing.T) {
 		BootstrapPrice:    exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 	}
 
-	lp := createFirstLP(t, ex, 1, config)
+	lp := createFirstLP(t, ex, instrument, 1, config)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -90,7 +92,7 @@ func TestFirstLP_FillEventGeneration(t *testing.T) {
 
 // TestFirstLP_ExitLongPosition verifies exit from long position
 func TestFirstLP_ExitLongPosition(t *testing.T) {
-	ex := setupTestExchange(t)
+	ex, instrument := setupTestExchange(t)
 	defer ex.Shutdown()
 
 	config := FirstLPConfig{
@@ -101,7 +103,7 @@ func TestFirstLP_ExitLongPosition(t *testing.T) {
 		MonitorInterval:   50 * time.Millisecond,
 	}
 
-	lp := createFirstLP(t, ex, 1, config)
+	lp := createFirstLP(t, ex, instrument, 1, config)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -164,7 +166,7 @@ func TestFirstLP_ExitLongPosition(t *testing.T) {
 
 // TestFirstLP_ExitShortPosition verifies exit from short position
 func TestFirstLP_ExitShortPosition(t *testing.T) {
-	ex := setupTestExchange(t)
+	ex, instrument := setupTestExchange(t)
 	defer ex.Shutdown()
 
 	config := FirstLPConfig{
@@ -175,7 +177,7 @@ func TestFirstLP_ExitShortPosition(t *testing.T) {
 		MonitorInterval:   50 * time.Millisecond,
 	}
 
-	lp := createFirstLP(t, ex, 1, config)
+	lp := createFirstLP(t, ex, instrument, 1, config)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -236,7 +238,7 @@ func TestFirstLP_ExitShortPosition(t *testing.T) {
 
 // TestFirstLP_CustomExitStrategy verifies custom exit logic is used
 func TestFirstLP_CustomExitStrategy(t *testing.T) {
-	ex := setupTestExchange(t)
+	ex, instrument := setupTestExchange(t)
 	defer ex.Shutdown()
 
 	// Aggressive exit strategy: exit when liquidity >= 2x exposure
@@ -267,7 +269,7 @@ func TestFirstLP_CustomExitStrategy(t *testing.T) {
 		ExitStrategy:      customExit,
 	}
 
-	lp := createFirstLP(t, ex, 1, config)
+	lp := createFirstLP(t, ex, instrument, 1, config)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -324,7 +326,7 @@ func TestFirstLP_CustomExitStrategy(t *testing.T) {
 
 // TestFirstLP_PositionAccumulation verifies weighted average entry price
 func TestFirstLP_PositionAccumulation(t *testing.T) {
-	ex := setupTestExchange(t)
+	ex, instrument := setupTestExchange(t)
 	defer ex.Shutdown()
 
 	config := FirstLPConfig{
@@ -335,7 +337,7 @@ func TestFirstLP_PositionAccumulation(t *testing.T) {
 		MonitorInterval:   50 * time.Millisecond,
 	}
 
-	lp := createFirstLP(t, ex, 1, config)
+	lp := createFirstLP(t, ex, instrument, 1, config)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 

@@ -9,20 +9,20 @@ import (
 
 func TestRandomizedTakerCreation(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := RandomizedTakerConfig{
 		Symbol:         "BTC/USD",
 		Interval:       100 * time.Millisecond,
-		MinQty:         SATOSHI / 10,
-		MaxQty:         SATOSHI,
-		BasePrecision:  SATOSHI,
-		QuotePrecision: SATOSHI / 1000,
+		MinQty:         exchange.SATOSHI / 10,
+		MaxQty:         exchange.SATOSHI,
+		BasePrecision:  exchange.SATOSHI,
+		QuotePrecision: exchange.SATOSHI / 1000,
 	}
 
 	taker := NewRandomizedTaker(1, gateway, config)
@@ -36,11 +36,11 @@ func TestRandomizedTakerCreation(t *testing.T) {
 
 func TestRandomizedTakerDefaultConfig(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := RandomizedTakerConfig{
@@ -58,34 +58,34 @@ func TestRandomizedTakerDefaultConfig(t *testing.T) {
 		t.Fatalf("Expected default MaxQty 1.0 BTC, got %d", taker.Config.MaxQty)
 	}
 	if taker.Config.BasePrecision != exchange.SATOSHI {
-		t.Fatalf("Expected default BasePrecision SATOSHI, got %d", taker.Config.BasePrecision)
+		t.Fatalf("Expected default BasePrecision exchange.SATOSHI, got %d", taker.Config.BasePrecision)
 	}
 	if taker.Config.QuotePrecision != exchange.SATOSHI/1000 {
-		t.Fatalf("Expected default QuotePrecision SATOSHI/1000, got %d", taker.Config.QuotePrecision)
+		t.Fatalf("Expected default QuotePrecision exchange.SATOSHI/1000, got %d", taker.Config.QuotePrecision)
 	}
 }
 
 func TestRandomizedTakerStart(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	gateway100 := ex.ConnectClient(100, balances, &exchange.FixedFee{})
 	actor100 := NewBaseActor(100, gateway100)
-	actor100.SubmitOrder("BTC/USD", exchange.Sell, exchange.LimitOrder, exchange.PriceUSD(50000, exchange.DOLLAR_TICK), SATOSHI)
+	actor100.SubmitOrder("BTC/USD", exchange.Sell, exchange.LimitOrder, exchange.PriceUSD(50000, exchange.DOLLAR_TICK), exchange.SATOSHI)
 	<-gateway100.ResponseCh
 
 	config := RandomizedTakerConfig{
 		Symbol:         "BTC/USD",
 		Interval:       100 * time.Millisecond,
-		MinQty:         SATOSHI / 10,
-		MaxQty:         SATOSHI / 10,
-		BasePrecision:  SATOSHI,
-		QuotePrecision: SATOSHI / 1000,
+		MinQty:         exchange.SATOSHI / 10,
+		MaxQty:         exchange.SATOSHI / 10,
+		BasePrecision:  exchange.SATOSHI,
+		QuotePrecision: exchange.SATOSHI / 1000,
 	}
 
 	taker := NewRandomizedTaker(1, gateway, config)
@@ -103,20 +103,20 @@ func TestRandomizedTakerStart(t *testing.T) {
 
 func TestRandomizedTakerStop(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := RandomizedTakerConfig{
 		Symbol:         "BTC/USD",
 		Interval:       100 * time.Millisecond,
-		MinQty:         SATOSHI / 10,
-		MaxQty:         SATOSHI,
-		BasePrecision:  SATOSHI,
-		QuotePrecision: SATOSHI / 1000,
+		MinQty:         exchange.SATOSHI / 10,
+		MaxQty:         exchange.SATOSHI,
+		BasePrecision:  exchange.SATOSHI,
+		QuotePrecision: exchange.SATOSHI / 1000,
 	}
 
 	taker := NewRandomizedTaker(1, gateway, config)
@@ -133,20 +133,20 @@ func TestRandomizedTakerStop(t *testing.T) {
 
 func TestRandomizedTakerSideFlip(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := RandomizedTakerConfig{
 		Symbol:         "BTC/USD",
 		Interval:       100 * time.Millisecond,
-		MinQty:         SATOSHI / 10,
-		MaxQty:         SATOSHI,
-		BasePrecision:  SATOSHI,
-		QuotePrecision: SATOSHI / 1000,
+		MinQty:         exchange.SATOSHI / 10,
+		MaxQty:         exchange.SATOSHI,
+		BasePrecision:  exchange.SATOSHI,
+		QuotePrecision: exchange.SATOSHI / 1000,
 	}
 
 	taker := NewRandomizedTaker(1, gateway, config)
@@ -168,20 +168,20 @@ func TestRandomizedTakerSideFlip(t *testing.T) {
 
 func TestRandomizedTakerOnEvent(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := RandomizedTakerConfig{
 		Symbol:         "BTC/USD",
 		Interval:       100 * time.Millisecond,
-		MinQty:         SATOSHI / 10,
-		MaxQty:         SATOSHI,
-		BasePrecision:  SATOSHI,
-		QuotePrecision: SATOSHI / 1000,
+		MinQty:         exchange.SATOSHI / 10,
+		MaxQty:         exchange.SATOSHI,
+		BasePrecision:  exchange.SATOSHI,
+		QuotePrecision: exchange.SATOSHI / 1000,
 	}
 
 	taker := NewRandomizedTaker(1, gateway, config)
@@ -195,20 +195,20 @@ func TestRandomizedTakerOnEvent(t *testing.T) {
 
 func TestRandomizedTakerExecuteRandomTrade(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := RandomizedTakerConfig{
 		Symbol:         "BTC/USD",
 		Interval:       100 * time.Millisecond,
-		MinQty:         SATOSHI / 10,
-		MaxQty:         SATOSHI / 10,
-		BasePrecision:  SATOSHI,
-		QuotePrecision: SATOSHI / 1000,
+		MinQty:         exchange.SATOSHI / 10,
+		MaxQty:         exchange.SATOSHI / 10,
+		BasePrecision:  exchange.SATOSHI,
+		QuotePrecision: exchange.SATOSHI / 1000,
 	}
 
 	taker := NewRandomizedTaker(1, gateway, config)
@@ -225,20 +225,20 @@ func TestRandomizedTakerExecuteRandomTrade(t *testing.T) {
 
 func TestRandomizedTakerZeroQtyRange(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := RandomizedTakerConfig{
 		Symbol:         "BTC/USD",
 		Interval:       100 * time.Millisecond,
-		MinQty:         SATOSHI / 10,
-		MaxQty:         SATOSHI / 10,
-		BasePrecision:  SATOSHI,
-		QuotePrecision: SATOSHI / 1000,
+		MinQty:         exchange.SATOSHI / 10,
+		MaxQty:         exchange.SATOSHI / 10,
+		BasePrecision:  exchange.SATOSHI,
+		QuotePrecision: exchange.SATOSHI / 1000,
 	}
 
 	taker := NewRandomizedTaker(1, gateway, config)
@@ -254,20 +254,20 @@ func TestRandomizedTakerZeroQtyRange(t *testing.T) {
 
 func TestRandomizedTakerNegativeQtyRange(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := RandomizedTakerConfig{
 		Symbol:         "BTC/USD",
 		Interval:       100 * time.Millisecond,
-		MinQty:         SATOSHI,
-		MaxQty:         SATOSHI / 10,
-		BasePrecision:  SATOSHI,
-		QuotePrecision: SATOSHI / 1000,
+		MinQty:         exchange.SATOSHI,
+		MaxQty:         exchange.SATOSHI / 10,
+		BasePrecision:  exchange.SATOSHI,
+		QuotePrecision: exchange.SATOSHI / 1000,
 	}
 
 	taker := NewRandomizedTaker(1, gateway, config)

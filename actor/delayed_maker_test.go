@@ -9,11 +9,11 @@ import (
 
 func TestDelayedMakerCreation(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := DelayedMakerConfig{
@@ -22,7 +22,7 @@ func TestDelayedMakerCreation(t *testing.T) {
 		OrderCount:  3,
 		BasePrice:   exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 		PriceSpread: exchange.PriceUSD(100, exchange.DOLLAR_TICK),
-		Qty:         SATOSHI / 10,
+		Qty:         exchange.SATOSHI / 10,
 		Visibility:  exchange.Normal,
 		IcebergQty:  0,
 	}
@@ -41,11 +41,11 @@ func TestDelayedMakerCreation(t *testing.T) {
 
 func TestDelayedMakerStart(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := DelayedMakerConfig{
@@ -54,7 +54,7 @@ func TestDelayedMakerStart(t *testing.T) {
 		OrderCount:  2,
 		BasePrice:   exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 		PriceSpread: exchange.PriceUSD(100, exchange.DOLLAR_TICK),
-		Qty:         SATOSHI / 10,
+		Qty:         exchange.SATOSHI / 10,
 		Visibility:  exchange.Normal,
 		IcebergQty:  0,
 	}
@@ -74,11 +74,11 @@ func TestDelayedMakerStart(t *testing.T) {
 
 func TestDelayedMakerZeroOrderCount(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := DelayedMakerConfig{
@@ -87,7 +87,7 @@ func TestDelayedMakerZeroOrderCount(t *testing.T) {
 		OrderCount:  0,
 		BasePrice:   exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 		PriceSpread: exchange.PriceUSD(100, exchange.DOLLAR_TICK),
-		Qty:         SATOSHI / 10,
+		Qty:         exchange.SATOSHI / 10,
 		Visibility:  exchange.Normal,
 		IcebergQty:  0,
 	}
@@ -105,11 +105,11 @@ func TestDelayedMakerZeroOrderCount(t *testing.T) {
 
 func TestDelayedMakerContextCancellation(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := DelayedMakerConfig{
@@ -118,7 +118,7 @@ func TestDelayedMakerContextCancellation(t *testing.T) {
 		OrderCount:  3,
 		BasePrice:   exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 		PriceSpread: exchange.PriceUSD(100, exchange.DOLLAR_TICK),
-		Qty:         SATOSHI / 10,
+		Qty:         exchange.SATOSHI / 10,
 		Visibility:  exchange.Normal,
 		IcebergQty:  0,
 	}
@@ -136,11 +136,11 @@ func TestDelayedMakerContextCancellation(t *testing.T) {
 
 func TestDelayedMakerIcebergOrders(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := DelayedMakerConfig{
@@ -149,9 +149,9 @@ func TestDelayedMakerIcebergOrders(t *testing.T) {
 		OrderCount:  2,
 		BasePrice:   exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 		PriceSpread: exchange.PriceUSD(100, exchange.DOLLAR_TICK),
-		Qty:         SATOSHI,
+		Qty:         exchange.SATOSHI,
 		Visibility:  exchange.Iceberg,
-		IcebergQty:  SATOSHI / 10,
+		IcebergQty:  exchange.SATOSHI / 10,
 	}
 
 	maker := NewDelayedMaker(1, gateway, config)
@@ -167,11 +167,11 @@ func TestDelayedMakerIcebergOrders(t *testing.T) {
 
 func TestDelayedMakerOnEvent(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	config := DelayedMakerConfig{
@@ -180,7 +180,7 @@ func TestDelayedMakerOnEvent(t *testing.T) {
 		OrderCount:  1,
 		BasePrice:   exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 		PriceSpread: exchange.PriceUSD(100, exchange.DOLLAR_TICK),
-		Qty:         SATOSHI / 10,
+		Qty:         exchange.SATOSHI / 10,
 		Visibility:  exchange.Normal,
 		IcebergQty:  0,
 	}

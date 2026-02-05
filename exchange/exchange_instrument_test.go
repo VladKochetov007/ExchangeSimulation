@@ -5,9 +5,10 @@ import "testing"
 func TestListInstruments(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 
-	btcusd := NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000)
-	ethusd := NewSpotInstrument("ETHUSD", "ETH", "USD", 10000000, 10000000)
-	ethbtc := NewSpotInstrument("ETHBTC", "ETH", "BTC", 1000000, 10000000)
+	btcusd := NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, DOLLAR_TICK, SATOSHI/1000)
+	ethusd := NewSpotInstrument("ETHUSD", "ETH", "USD", ETH_PRECISION, USD_PRECISION, ETH_PRECISION/100, ETH_PRECISION/1000)
+	ethbtc := NewSpotInstrument("ETHBTC", "ETH", "BTC",
+		ETH_PRECISION, BTC_PRECISION, BTC_PRECISION/100, ETH_PRECISION/1000)
 
 	ex.AddInstrument(btcusd)
 	ex.AddInstrument(ethusd)
@@ -39,7 +40,7 @@ func TestListInstruments(t *testing.T) {
 
 func TestCancelOrderValidationNotFound(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	btcusd := NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000)
+	btcusd := NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(btcusd)
 
 	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000}
@@ -65,7 +66,7 @@ func TestCancelOrderValidationNotFound(t *testing.T) {
 
 func TestCancelOrderValidationNotOwned(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	btcusd := NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000)
+	btcusd := NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(btcusd)
 
 	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000}
@@ -110,7 +111,7 @@ func TestCancelOrderValidationNotOwned(t *testing.T) {
 
 func TestCancelOrderValidationAfterPartialFill(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	btcusd := NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000)
+	btcusd := NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(btcusd)
 
 	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000}

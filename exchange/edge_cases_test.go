@@ -57,7 +57,8 @@ func TestCanMatchSellSide(t *testing.T) {
 
 func TestPlaceOrderInvalidPrice(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 100, 1)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD",
+		BTC_PRECISION, USD_PRECISION, 100, 1)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
@@ -84,7 +85,8 @@ func TestPlaceOrderInvalidPrice(t *testing.T) {
 
 func TestPlaceOrderInvalidQty(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 100)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD",
+		BTC_PRECISION, USD_PRECISION, 1, 100)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
@@ -135,7 +137,7 @@ func TestPlaceOrderUnknownInstrument(t *testing.T) {
 
 func TestPlaceOrderInsufficientBalanceBuy(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"USD": 1000}
@@ -162,7 +164,7 @@ func TestPlaceOrderInsufficientBalanceBuy(t *testing.T) {
 
 func TestPlaceOrderInsufficientBalanceSell(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, CENT_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": 100}
@@ -189,7 +191,7 @@ func TestPlaceOrderInsufficientBalanceSell(t *testing.T) {
 
 func TestPlaceOrderMarketBuyInsufficientBalance(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"USD": 1000, "BTC": BTCAmount(10)}
@@ -224,7 +226,7 @@ func TestPlaceOrderMarketBuyInsufficientBalance(t *testing.T) {
 
 func TestCancelOrderDifferentClient(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", CENT_TICK, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, CENT_TICK, SATOSHI/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
@@ -338,7 +340,8 @@ func TestShutdownStopsExchange(t *testing.T) {
 
 func TestSettleFundingWithMissingClient(t *testing.T) {
 	pm := NewPositionManager(&RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", 1, 100)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD",
+		BTC_PRECISION, USD_PRECISION, 1, 100)
 
 	clients := make(map[uint64]*Client)
 

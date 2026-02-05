@@ -24,7 +24,7 @@ type FirstLiquidityProvidingActor struct {
 	Config FirstLPConfig
 
 	Symbol        string
-	Precision     int64
+	Instrument    exchange.Instrument
 	BaseAsset     string
 	QuoteAsset    string
 	BaseBalance   int64
@@ -85,15 +85,21 @@ func NewFirstLP(id uint64, gateway *exchange.ClientGateway, config FirstLPConfig
 }
 
 func (f *FirstLiquidityProvidingActor) Start(ctx context.Context) error {
-	f.Subscribe(f.Symbol)
-	f.QueryBalance()
-
 	f.monitorTicker = time.NewTicker(f.Config.MonitorInterval)
 
 	go f.eventLoop(ctx)
 	go f.monitorLoop(ctx)
 
-	return f.BaseActor.Start(ctx)
+	// Start BaseActor first to ensure it's ready to process responses
+	if err := f.BaseActor.Start(ctx); err != nil {
+		return err
+	}
+
+	// Now send requests after BaseActor is running
+	f.Subscribe(f.Symbol)
+	f.QueryBalance()
+
+	return nil
 }
 
 func (f *FirstLiquidityProvidingActor) Stop() error {
@@ -140,10 +146,10 @@ func (f *FirstLiquidityProvidingActor) OnEvent(event *Event) {
 	}
 }
 
-func (f *FirstLiquidityProvidingActor) SetInitialState(precision int64, baseAsset, quoteAsset string) {
-	f.Precision = precision
-	f.BaseAsset = baseAsset
-	f.QuoteAsset = quoteAsset
+func (f *FirstLiquidityProvidingActor) SetInitialState(instrument exchange.Instrument) {
+	f.Instrument = instrument
+	f.BaseAsset = instrument.BaseAsset()
+	f.QuoteAsset = instrument.QuoteAsset()
 }
 
 func (f *FirstLiquidityProvidingActor) UpdateBalances(baseBalance, quoteBalance int64) {
@@ -174,8 +180,10 @@ func (f *FirstLiquidityProvidingActor) onBookSnapshot(snap BookSnapshotEvent) {
 	}
 
 	// If we have balances and no active orders, place quotes
-	if f.LastMidPrice > 0 && f.BaseBalance > 0 && f.QuoteBalance > 0 &&
-		f.ActiveBidID == 0 && f.ActiveAskID == 0 {
+	shouldPlace := f.LastMidPrice > 0 && f.BaseBalance > 0 && f.QuoteBalance > 0 &&
+		f.ActiveBidID == 0 && f.ActiveAskID == 0
+
+	if shouldPlace {
 		f.PlaceQuotes()
 	}
 }
@@ -199,16 +207,25 @@ func (f *FirstLiquidityProvidingActor) onBookDelta(delta BookDeltaEvent) {
 }
 
 func (f *FirstLiquidityProvidingActor) onOrderFilled(fill OrderFillEvent) {
+	if f.Instrument == nil {
+		// DEBUG: This should never happen if SetInitialState was called
+		return
+	}
+
+	basePrecision := f.Instrument.BasePrecision()
+
 	// Update position and balances
 	if fill.Side == exchange.Buy {
+		// DEBUG: Buying means position increases (long)
 		f.UpdatePosition(fill.Qty, fill.Price)
 		f.BaseBalance += fill.Qty
-		notional := (fill.Qty * fill.Price) / f.Precision
+		notional := (fill.Qty * fill.Price) / basePrecision
 		f.QuoteBalance -= (notional + fill.FeeAmount)
 	} else {
+		// DEBUG: Selling means position decreases (short)
 		f.UpdatePosition(-fill.Qty, fill.Price)
 		f.BaseBalance -= fill.Qty
-		notional := (fill.Qty * fill.Price) / f.Precision
+		notional := (fill.Qty * fill.Price) / basePrecision
 		f.QuoteBalance += (notional - fill.FeeAmount)
 	}
 
@@ -235,9 +252,16 @@ func (f *FirstLiquidityProvidingActor) onOrderCancelled(cancelled OrderCancelled
 }
 
 func (f *FirstLiquidityProvidingActor) PlaceQuotes() {
-	if f.LastMidPrice == 0 || f.Precision == 0 {
+	if f.LastMidPrice == 0 {
+		// DEBUG: Waiting for market data or bootstrap price
 		return
 	}
+	if f.Instrument == nil {
+		// DEBUG: Instrument not set - check SetInitialState
+		return
+	}
+
+	basePrecision := f.Instrument.BasePrecision()
 
 	halfSpread := (f.LastMidPrice * f.Config.SpreadBps) / (2 * 10000)
 	bidPrice := f.LastMidPrice - halfSpread
@@ -251,7 +275,7 @@ func (f *FirstLiquidityProvidingActor) PlaceQuotes() {
 		f.AskSize = f.BaseBalance
 	}
 	if f.QuoteBalance > 0 {
-		bidQty := (f.QuoteBalance * f.Precision) / bidPrice
+		bidQty := (f.QuoteBalance * basePrecision) / bidPrice
 		if bidQty > 0 {
 			// Track that we're placing a bid order
 			f.SubmitOrder(f.Symbol, exchange.Buy, exchange.LimitOrder, bidPrice, bidQty)
