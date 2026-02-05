@@ -180,10 +180,10 @@ func (f *FirstLiquidityProvidingActor) onBookSnapshot(snap BookSnapshotEvent) {
 	}
 
 	// If we have balances and no active orders, place quotes
-	shouldPlace := f.LastMidPrice > 0 && f.BaseBalance > 0 && f.QuoteBalance > 0 &&
+	canPlace := f.LastMidPrice > 0 && f.BaseBalance > 0 && f.QuoteBalance > 0 &&
 		f.ActiveBidID == 0 && f.ActiveAskID == 0
 
-	if shouldPlace {
+	if canPlace {
 		f.PlaceQuotes()
 	}
 }
@@ -197,18 +197,13 @@ func (f *FirstLiquidityProvidingActor) onBookDelta(delta BookDeltaEvent) {
 	} else {
 		if f.BestAsk == 0 || delta.Delta.Price <= f.BestAsk {
 			f.BestAsk = delta.Delta.Price
-			if delta.Delta.VisibleQty > 0 {
-				f.AskLiquidity = delta.Delta.VisibleQty
-			} else {
-				f.AskLiquidity = 0
-			}
+			f.AskLiquidity = max(delta.Delta.VisibleQty, 0)
 		}
 	}
 }
 
 func (f *FirstLiquidityProvidingActor) onOrderFilled(fill OrderFillEvent) {
 	if f.Instrument == nil {
-		// DEBUG: This should never happen if SetInitialState was called
 		return
 	}
 
@@ -216,13 +211,11 @@ func (f *FirstLiquidityProvidingActor) onOrderFilled(fill OrderFillEvent) {
 
 	// Update position and balances
 	if fill.Side == exchange.Buy {
-		// DEBUG: Buying means position increases (long)
 		f.UpdatePosition(fill.Qty, fill.Price)
 		f.BaseBalance += fill.Qty
 		notional := (fill.Qty * fill.Price) / basePrecision
 		f.QuoteBalance -= (notional + fill.FeeAmount)
 	} else {
-		// DEBUG: Selling means position decreases (short)
 		f.UpdatePosition(-fill.Qty, fill.Price)
 		f.BaseBalance -= fill.Qty
 		notional := (fill.Qty * fill.Price) / basePrecision
@@ -252,32 +245,29 @@ func (f *FirstLiquidityProvidingActor) onOrderCancelled(cancelled OrderCancelled
 }
 
 func (f *FirstLiquidityProvidingActor) PlaceQuotes() {
-	if f.LastMidPrice == 0 {
-		// DEBUG: Waiting for market data or bootstrap price
-		return
-	}
-	if f.Instrument == nil {
-		// DEBUG: Instrument not set - check SetInitialState
+	if f.LastMidPrice == 0 || f.Instrument == nil {
 		return
 	}
 
 	basePrecision := f.Instrument.BasePrecision()
+	tickSize := f.Instrument.TickSize()
 
 	halfSpread := (f.LastMidPrice * f.Config.SpreadBps) / (2 * 10000)
 	bidPrice := f.LastMidPrice - halfSpread
 	askPrice := f.LastMidPrice + halfSpread
 
+	// Align prices to tick size (required for order acceptance)
+	bidPrice = (bidPrice / tickSize) * tickSize
+	askPrice = (askPrice / tickSize) * tickSize
+
 	// Spot market: use base for sell, quote for buy
 	if f.BaseBalance > 0 {
-		// Track that we're placing an ask order
-		// Note: In real implementation, would need to track the actual RequestID
 		f.SubmitOrder(f.Symbol, exchange.Sell, exchange.LimitOrder, askPrice, f.BaseBalance)
 		f.AskSize = f.BaseBalance
 	}
 	if f.QuoteBalance > 0 {
 		bidQty := (f.QuoteBalance * basePrecision) / bidPrice
 		if bidQty > 0 {
-			// Track that we're placing a bid order
 			f.SubmitOrder(f.Symbol, exchange.Buy, exchange.LimitOrder, bidPrice, bidQty)
 			f.BidSize = bidQty
 		}
