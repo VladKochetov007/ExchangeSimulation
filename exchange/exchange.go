@@ -35,6 +35,44 @@ type OrderBook struct {
 	SeqNum     uint64
 }
 
+// GetLastPrice returns the price of the last trade, or 0 if no trades
+func (ob *OrderBook) GetLastPrice() int64 {
+	if ob.LastTrade != nil {
+		return ob.LastTrade.Price
+	}
+	return 0
+}
+
+// GetBestBid returns the best bid price, or 0 if no bids
+func (ob *OrderBook) GetBestBid() int64 {
+	if ob.Bids.Best != nil {
+		return ob.Bids.Best.Price
+	}
+	return 0
+}
+
+// GetBestAsk returns the best ask price, or 0 if no asks
+func (ob *OrderBook) GetBestAsk() int64 {
+	if ob.Asks.Best != nil {
+		return ob.Asks.Best.Price
+	}
+	return 0
+}
+
+// GetMidPrice returns the mid price between best bid and ask
+// Falls back to last price if order book is empty
+func (ob *OrderBook) GetMidPrice() int64 {
+	bestBid := ob.GetBestBid()
+	bestAsk := ob.GetBestAsk()
+
+	if bestBid > 0 && bestAsk > 0 {
+		return (bestBid + bestAsk) / 2
+	}
+
+	// Fallback to last trade price
+	return ob.GetLastPrice()
+}
+
 type RealClock struct{}
 
 func (c *RealClock) NowUnixNano() int64 { return time.Now().UnixNano() }
