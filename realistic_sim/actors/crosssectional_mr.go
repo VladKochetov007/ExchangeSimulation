@@ -12,31 +12,30 @@ import (
 )
 
 type CrossSectionalMRConfig struct {
-	Symbols           []string
-	Horizons          []time.Duration
-	AllocatedCapital  int64
-	RebalanceInterval time.Duration
-	MaxPositionSize   int64
+	Symbols            []string
+	LookbackWindow     int
+	AllocatedCapital   int64
+	RebalanceInterval  time.Duration
+	MaxPositionSize    int64
 	MinSignalThreshold int64
 }
 
 type CrossSectionalMRActor struct {
 	*actor.BaseActor
-	config         CrossSectionalMRConfig
-	instruments    map[string]exchange.Instrument
-	signals        *signals.CrossSectionalSignals
-	positionMgr    *position.PositionManager
-	riskFilter     *position.CompositeFilter
-	lastMidPrices  map[string]int64
+	config          CrossSectionalMRConfig
+	instruments     map[string]exchange.Instrument
+	signals         *signals.CrossSectionalSignals
+	positionMgr     *position.PositionManager
+	riskFilter      *position.CompositeFilter
+	lastMidPrices   map[string]int64
 	rebalanceTicker *time.Ticker
-	requestSeq     uint64
+	requestSeq      uint64
 }
 
 func NewCrossSectionalMR(
 	id uint64,
 	gateway *exchange.ClientGateway,
 	config CrossSectionalMRConfig,
-	horizonTracker *signals.HorizonTracker,
 	oms *actor.NettingOMS,
 	policy position.SizingPolicy,
 	filters ...position.RiskFilter,
@@ -44,15 +43,23 @@ func NewCrossSectionalMR(
 	if config.RebalanceInterval == 0 {
 		config.RebalanceInterval = 10 * time.Second
 	}
+	if config.LookbackWindow == 0 {
+		config.LookbackWindow = 60
+	}
+
+	csSignals := signals.NewCrossSectionalSignals(config.LookbackWindow, 10000)
+	for _, symbol := range config.Symbols {
+		csSignals.AddSymbol(symbol, config.LookbackWindow, 10000)
+	}
 
 	return &CrossSectionalMRActor{
-		BaseActor:      actor.NewBaseActor(id, gateway),
-		config:         config,
-		instruments:    make(map[string]exchange.Instrument),
-		signals:        signals.NewCrossSectionalSignals(horizonTracker),
-		positionMgr:    position.NewPositionManager(oms, policy, config.AllocatedCapital),
-		riskFilter:     position.NewCompositeFilter(filters...),
-		lastMidPrices:  make(map[string]int64),
+		BaseActor:     actor.NewBaseActor(id, gateway),
+		config:        config,
+		instruments:   make(map[string]exchange.Instrument),
+		signals:       csSignals,
+		positionMgr:   position.NewPositionManager(oms, policy, config.AllocatedCapital),
+		riskFilter:    position.NewCompositeFilter(filters...),
+		lastMidPrices: make(map[string]int64),
 	}
 }
 
@@ -121,58 +128,57 @@ func (csmr *CrossSectionalMRActor) onBookSnapshot(snap actor.BookSnapshotEvent) 
 
 func (csmr *CrossSectionalMRActor) onTrade(trade actor.TradeEvent) {
 	csmr.lastMidPrices[trade.Symbol] = trade.Trade.Price
+	csmr.signals.AddPrice(trade.Symbol, trade.Trade.Price)
 }
 
 func (csmr *CrossSectionalMRActor) rebalance() {
-	for _, horizon := range csmr.config.Horizons {
-		signals := csmr.signals.Calculate(csmr.config.Symbols, horizon)
-		if len(signals) == 0 {
+	signalMap := csmr.signals.Calculate(csmr.config.Symbols)
+	if len(signalMap) == 0 {
+		return
+	}
+
+	totalSignal := int64(0)
+	for _, signal := range signalMap {
+		absSignal := signal
+		if absSignal < 0 {
+			absSignal = -absSignal
+		}
+		totalSignal += absSignal
+	}
+
+	if totalSignal == 0 {
+		return
+	}
+
+	for symbol, signal := range signalMap {
+		absSignal := signal
+		if absSignal < 0 {
+			absSignal = -absSignal
+		}
+		if absSignal < csmr.config.MinSignalThreshold {
 			continue
 		}
 
-		totalSignal := int64(0)
-		for _, signal := range signals {
-			absSignal := signal
-			if absSignal < 0 {
-				absSignal = -absSignal
-			}
-			totalSignal += absSignal
-		}
-
-		if totalSignal == 0 {
+		midPrice := csmr.lastMidPrices[symbol]
+		if midPrice == 0 {
 			continue
 		}
 
-		for symbol, signal := range signals {
-			absSignal := signal
-			if absSignal < 0 {
-				absSignal = -absSignal
-			}
-			if absSignal < csmr.config.MinSignalThreshold {
-				continue
-			}
+		currentPosition := csmr.positionMgr.GetPosition(symbol)
+		targetPosition := csmr.positionMgr.TargetPosition(signal, totalSignal, midPrice)
 
-			midPrice := csmr.lastMidPrices[symbol]
-			if midPrice == 0 {
-				continue
-			}
-
-			currentPosition := csmr.positionMgr.GetPosition(symbol)
-			targetPosition := csmr.positionMgr.TargetPosition(signal, totalSignal, midPrice)
-
-			if targetPosition > csmr.config.MaxPositionSize {
-				targetPosition = csmr.config.MaxPositionSize
-			} else if targetPosition < -csmr.config.MaxPositionSize {
-				targetPosition = -csmr.config.MaxPositionSize
-			}
-
-			orderQty := targetPosition - currentPosition
-			if orderQty == 0 {
-				continue
-			}
-
-			csmr.submitRebalanceOrder(symbol, orderQty)
+		if targetPosition > csmr.config.MaxPositionSize {
+			targetPosition = csmr.config.MaxPositionSize
+		} else if targetPosition < -csmr.config.MaxPositionSize {
+			targetPosition = -csmr.config.MaxPositionSize
 		}
+
+		orderQty := targetPosition - currentPosition
+		if orderQty == 0 {
+			continue
+		}
+
+		csmr.submitRebalanceOrder(symbol, orderQty)
 	}
 }
 

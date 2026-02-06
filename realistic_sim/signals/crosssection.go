@@ -1,29 +1,50 @@
 package signals
 
 import (
-	"time"
+	"sync"
 )
 
 type CrossSectionalSignals struct {
-	horizonTracker *HorizonTracker
+	priceHistories map[string]*PriceHistory
+	mu             sync.RWMutex
 }
 
-func NewCrossSectionalSignals(horizonTracker *HorizonTracker) *CrossSectionalSignals {
+func NewCrossSectionalSignals(windowSize int, scale int64) *CrossSectionalSignals {
 	return &CrossSectionalSignals{
-		horizonTracker: horizonTracker,
+		priceHistories: make(map[string]*PriceHistory),
 	}
 }
 
-func (cs *CrossSectionalSignals) Calculate(symbols []string, horizon time.Duration) map[string]int64 {
+func (cs *CrossSectionalSignals) AddSymbol(symbol string, windowSize int, scale int64) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.priceHistories[symbol] = NewPriceHistory(windowSize, scale)
+}
+
+func (cs *CrossSectionalSignals) AddPrice(symbol string, price int64) {
+	cs.mu.RLock()
+	ph := cs.priceHistories[symbol]
+	cs.mu.RUnlock()
+
+	if ph != nil {
+		ph.AddPrice(price)
+	}
+}
+
+func (cs *CrossSectionalSignals) Calculate(symbols []string) map[string]int64 {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+
 	signals := make(map[string]int64)
 	returns := make([]int64, 0, len(symbols))
 	validSymbols := make([]string, 0, len(symbols))
 
 	for _, symbol := range symbols {
-		if !cs.horizonTracker.IsReady(symbol, horizon) {
+		ph := cs.priceHistories[symbol]
+		if ph == nil || !ph.IsReady() {
 			continue
 		}
-		ret := cs.horizonTracker.GetReturn(symbol, horizon)
+		ret := ph.GetReturn()
 		returns = append(returns, ret)
 		validSymbols = append(validSymbols, symbol)
 	}

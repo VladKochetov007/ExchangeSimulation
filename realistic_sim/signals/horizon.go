@@ -2,112 +2,39 @@ package signals
 
 import (
 	simmath "exchange_sim/realistic_sim/math"
-	"sync"
-	"time"
 )
 
-type TimeWindow struct {
-	Duration     time.Duration
-	Buffer       *simmath.CircularBuffer
-	lastUpdate   time.Time
-	samplePeriod time.Duration
+type PriceHistory struct {
+	buffer *simmath.CircularBuffer
+	scale  int64
 }
 
-type HorizonTracker struct {
-	windows       map[string]map[time.Duration]*TimeWindow
-	horizons      []time.Duration
-	windowSizes   map[time.Duration]int
-	samplePeriods map[time.Duration]time.Duration
-	scale         int64
-	mu            sync.RWMutex
-}
-
-func NewHorizonTracker(horizons []time.Duration, scale int64) *HorizonTracker {
-	windowSizes := map[time.Duration]int{
-		30 * time.Second: 60,
-		3 * time.Minute:  60,
-		10 * time.Minute: 60,
-		1 * time.Hour:    60,
-	}
-
-	samplePeriods := map[time.Duration]time.Duration{
-		30 * time.Second: 500 * time.Millisecond,
-		3 * time.Minute:  3 * time.Second,
-		10 * time.Minute: 10 * time.Second,
-		1 * time.Hour:    1 * time.Minute,
-	}
-
-	return &HorizonTracker{
-		windows:       make(map[string]map[time.Duration]*TimeWindow),
-		horizons:      horizons,
-		windowSizes:   windowSizes,
-		samplePeriods: samplePeriods,
-		scale:         scale,
+func NewPriceHistory(windowSize int, scale int64) *PriceHistory {
+	return &PriceHistory{
+		buffer: simmath.NewCircularBuffer(windowSize),
+		scale:  scale,
 	}
 }
 
-func (ht *HorizonTracker) AddPrice(symbol string, price int64, timestamp time.Time) {
-	ht.mu.Lock()
-	defer ht.mu.Unlock()
-
-	if ht.windows[symbol] == nil {
-		ht.windows[symbol] = make(map[time.Duration]*TimeWindow)
-		for _, horizon := range ht.horizons {
-			windowSize := ht.windowSizes[horizon]
-			if windowSize == 0 {
-				windowSize = 60
-			}
-			samplePeriod := ht.samplePeriods[horizon]
-			if samplePeriod == 0 {
-				samplePeriod = horizon / 60
-			}
-			ht.windows[symbol][horizon] = &TimeWindow{
-				Duration:     horizon,
-				Buffer:       simmath.NewCircularBuffer(windowSize),
-				samplePeriod: samplePeriod,
-			}
-		}
-	}
-
-	for _, tw := range ht.windows[symbol] {
-		if timestamp.Sub(tw.lastUpdate) >= tw.samplePeriod {
-			tw.Buffer.Add(price)
-			tw.lastUpdate = timestamp
-		}
-	}
+func (ph *PriceHistory) AddPrice(price int64) {
+	ph.buffer.Add(price)
 }
 
-func (ht *HorizonTracker) GetReturn(symbol string, horizon time.Duration) int64 {
-	ht.mu.RLock()
-	defer ht.mu.RUnlock()
-
-	if ht.windows[symbol] == nil {
+func (ph *PriceHistory) GetReturn() int64 {
+	if !ph.buffer.IsFull() {
 		return 0
 	}
 
-	tw := ht.windows[symbol][horizon]
-	if tw == nil || !tw.Buffer.IsFull() {
-		return 0
-	}
-
-	oldest := tw.Buffer.Get(0)
-	newest := tw.Buffer.Latest()
+	oldest := ph.buffer.Get(0)
+	newest := ph.buffer.Latest()
 
 	if oldest == 0 {
 		return 0
 	}
 
-	return simmath.LogReturn(newest, oldest, ht.scale)
+	return simmath.LogReturn(newest, oldest, ph.scale)
 }
 
-func (ht *HorizonTracker) IsReady(symbol string, horizon time.Duration) bool {
-	ht.mu.RLock()
-	defer ht.mu.RUnlock()
-
-	if ht.windows[symbol] == nil {
-		return false
-	}
-
-	tw := ht.windows[symbol][horizon]
-	return tw != nil && tw.Buffer.IsFull()
+func (ph *PriceHistory) IsReady() bool {
+	return ph.buffer.IsFull()
 }
