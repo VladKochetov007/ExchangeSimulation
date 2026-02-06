@@ -53,10 +53,13 @@ func InjectLimitOrder(ex *Exchange, clientID uint64, symbol string, side Side, p
 		return 0, RejectUnknownClient
 	}
 
+	// Generate unique request ID using timestamp
+	reqID := uint64(1000000 + ex.Clock.NowUnixNano()%1000000)
+
 	req := Request{
 		Type: ReqPlaceOrder,
 		OrderReq: &OrderRequest{
-			RequestID:   1000000, // Use high request ID for test orders
+			RequestID:   reqID,
 			Side:        side,
 			Type:        LimitOrder,
 			Price:       price,
@@ -70,19 +73,27 @@ func InjectLimitOrder(ex *Exchange, clientID uint64, symbol string, side Side, p
 	// Send request
 	gateway.RequestCh <- req
 
-	// Wait for response
-	resp := <-gateway.ResponseCh
-	if !resp.Success {
-		return 0, resp.Error
+	// Wait for matching response (with timeout)
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case resp := <-gateway.ResponseCh:
+			if resp.RequestID == reqID {
+				if !resp.Success {
+					return 0, resp.Error
+				}
+				// Response data should be the OrderID
+				orderID, ok := resp.Data.(uint64)
+				if !ok {
+					return 0, RejectUnknownInstrument // Generic error
+				}
+				return orderID, 0
+			}
+			// Wrong response, keep reading
+		case <-timeout:
+			return 0, RejectUnknownInstrument // Timeout treated as error
+		}
 	}
-
-	// Response data should be the OrderID
-	orderID, ok := resp.Data.(uint64)
-	if !ok {
-		return 0, RejectUnknownInstrument // Generic error
-	}
-
-	return orderID, 0
 }
 
 // TEST ONLY - Injects a market order directly into the exchange for testing.
