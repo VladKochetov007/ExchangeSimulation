@@ -37,6 +37,7 @@ type FirstLiquidityProvidingActor struct {
 	AskSize       int64
 	lastBidReqID  uint64
 	lastAskReqID  uint64
+	requestSeq    uint64
 	LastMidPrice  int64
 	BestBid       int64
 	BestAsk       int64
@@ -143,6 +144,10 @@ func (f *FirstLiquidityProvidingActor) OnEvent(event *Event) {
 		f.onOrderFilled(event.Data.(OrderFillEvent))
 	case EventOrderCancelled:
 		f.onOrderCancelled(event.Data.(OrderCancelledEvent))
+	case EventOrderRejected:
+		f.onOrderRejected(event.Data.(OrderRejectedEvent))
+	case EventOrderCancelRejected:
+		f.onOrderCancelRejected(event.Data.(OrderCancelRejectedEvent))
 	}
 }
 
@@ -244,6 +249,27 @@ func (f *FirstLiquidityProvidingActor) onOrderCancelled(cancelled OrderCancelled
 	}
 }
 
+func (f *FirstLiquidityProvidingActor) onOrderRejected(rejected OrderRejectedEvent) {
+	if rejected.RequestID == f.lastBidReqID {
+		f.lastBidReqID = 0
+	} else if rejected.RequestID == f.lastAskReqID {
+		f.lastAskReqID = 0
+	}
+}
+
+func (f *FirstLiquidityProvidingActor) onOrderCancelRejected(rejected OrderCancelRejectedEvent) {
+	if rejected.OrderID == f.ActiveBidID {
+		f.ActiveBidID = 0
+	} else if rejected.OrderID == f.ActiveAskID {
+		f.ActiveAskID = 0
+	}
+}
+
+func (f *FirstLiquidityProvidingActor) nextRequestID() uint64 {
+	f.requestSeq++
+	return f.requestSeq
+}
+
 func (f *FirstLiquidityProvidingActor) PlaceQuotes() {
 	if f.LastMidPrice == 0 || f.Instrument == nil {
 		return
@@ -262,12 +288,14 @@ func (f *FirstLiquidityProvidingActor) PlaceQuotes() {
 
 	// Spot market: use base for sell, quote for buy
 	if f.BaseBalance > 0 {
+		f.lastAskReqID = f.nextRequestID()
 		f.SubmitOrder(f.Symbol, exchange.Sell, exchange.LimitOrder, askPrice, f.BaseBalance)
 		f.AskSize = f.BaseBalance
 	}
 	if f.QuoteBalance > 0 {
 		bidQty := (f.QuoteBalance * basePrecision) / bidPrice
 		if bidQty > 0 {
+			f.lastBidReqID = f.nextRequestID()
 			f.SubmitOrder(f.Symbol, exchange.Buy, exchange.LimitOrder, bidPrice, bidQty)
 			f.BidSize = bidQty
 		}
@@ -275,11 +303,12 @@ func (f *FirstLiquidityProvidingActor) PlaceQuotes() {
 }
 
 func (f *FirstLiquidityProvidingActor) onOrderAccepted(accepted OrderAcceptedEvent) {
-	// Simple heuristic: if we have a bid size pending and no bid ID, this is the bid
-	if f.BidSize > 0 && f.ActiveBidID == 0 {
+	if accepted.RequestID == f.lastBidReqID {
 		f.ActiveBidID = accepted.OrderID
-	} else if f.AskSize > 0 && f.ActiveAskID == 0 {
+		f.lastBidReqID = 0
+	} else if accepted.RequestID == f.lastAskReqID {
 		f.ActiveAskID = accepted.OrderID
+		f.lastAskReqID = 0
 	}
 }
 

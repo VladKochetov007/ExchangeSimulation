@@ -2,6 +2,7 @@ package actors
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"exchange_sim/actor"
@@ -22,14 +23,17 @@ type AvellanedaStoikovConfig struct {
 
 type AvellanedaStoikovActor struct {
 	*actor.BaseActor
-	config      AvellanedaStoikovConfig
-	instrument  exchange.Instrument
-	volatility  *simmath.RollingVolatility
-	inventory   int64
-	startTime   time.Time
-	activeBidID uint64
-	activeAskID uint64
-	lastMid     int64
+	config        AvellanedaStoikovConfig
+	instrument    exchange.Instrument
+	volatility    *simmath.RollingVolatility
+	inventory     int64
+	startTime     time.Time
+	activeBidID   uint64
+	activeAskID   uint64
+	lastBidReqID  uint64
+	lastAskReqID  uint64
+	lastMid       int64
+	requestSeq    uint64
 	requeueTicker *time.Ticker
 }
 
@@ -101,6 +105,10 @@ func (as *AvellanedaStoikovActor) OnEvent(event *actor.Event) {
 		as.onOrderAccepted(event.Data.(actor.OrderAcceptedEvent))
 	case actor.EventOrderCancelled:
 		as.onOrderCancelled(event.Data.(actor.OrderCancelledEvent))
+	case actor.EventOrderRejected:
+		as.onOrderRejected(event.Data.(actor.OrderRejectedEvent))
+	case actor.EventOrderCancelRejected:
+		as.onOrderCancelRejected(event.Data.(actor.OrderCancelRejectedEvent))
 	}
 }
 
@@ -136,10 +144,12 @@ func (as *AvellanedaStoikovActor) onOrderFilled(fill actor.OrderFillEvent) {
 }
 
 func (as *AvellanedaStoikovActor) onOrderAccepted(accepted actor.OrderAcceptedEvent) {
-	if as.activeBidID == 0 {
+	if accepted.RequestID == as.lastBidReqID {
 		as.activeBidID = accepted.OrderID
-	} else if as.activeAskID == 0 {
+		as.lastBidReqID = 0
+	} else if accepted.RequestID == as.lastAskReqID {
 		as.activeAskID = accepted.OrderID
+		as.lastAskReqID = 0
 	}
 }
 
@@ -148,6 +158,22 @@ func (as *AvellanedaStoikovActor) onOrderCancelled(cancelled actor.OrderCancelle
 		as.activeBidID = 0
 	}
 	if cancelled.OrderID == as.activeAskID {
+		as.activeAskID = 0
+	}
+}
+
+func (as *AvellanedaStoikovActor) onOrderRejected(rejected actor.OrderRejectedEvent) {
+	if rejected.RequestID == as.lastBidReqID {
+		as.lastBidReqID = 0
+	} else if rejected.RequestID == as.lastAskReqID {
+		as.lastAskReqID = 0
+	}
+}
+
+func (as *AvellanedaStoikovActor) onOrderCancelRejected(rejected actor.OrderCancelRejectedEvent) {
+	if rejected.OrderID == as.activeBidID {
+		as.activeBidID = 0
+	} else if rejected.OrderID == as.activeAskID {
 		as.activeAskID = 0
 	}
 }
@@ -205,30 +231,31 @@ func (as *AvellanedaStoikovActor) placeQuotes() {
 	as.cancelActiveQuotes()
 
 	if as.inventory >= as.config.MaxInventory {
+		as.lastAskReqID = atomic.AddUint64(&as.requestSeq, 1)
 		as.SubmitOrder(as.config.Symbol, exchange.Sell, exchange.LimitOrder, askPrice, as.config.QuoteQty)
-		as.activeAskID = 0
-		as.activeBidID = 0
 		return
 	}
 
 	if as.inventory <= -as.config.MaxInventory {
+		as.lastBidReqID = atomic.AddUint64(&as.requestSeq, 1)
 		as.SubmitOrder(as.config.Symbol, exchange.Buy, exchange.LimitOrder, bidPrice, as.config.QuoteQty)
-		as.activeBidID = 0
-		as.activeAskID = 0
 		return
 	}
 
+	as.lastBidReqID = atomic.AddUint64(&as.requestSeq, 1)
 	as.SubmitOrder(as.config.Symbol, exchange.Buy, exchange.LimitOrder, bidPrice, as.config.QuoteQty)
+
+	as.lastAskReqID = atomic.AddUint64(&as.requestSeq, 1)
 	as.SubmitOrder(as.config.Symbol, exchange.Sell, exchange.LimitOrder, askPrice, as.config.QuoteQty)
-	as.activeBidID = 0
-	as.activeAskID = 0
 }
 
 func (as *AvellanedaStoikovActor) cancelActiveQuotes() {
 	if as.activeBidID != 0 {
+		atomic.AddUint64(&as.requestSeq, 1)
 		as.CancelOrder(as.activeBidID)
 	}
 	if as.activeAskID != 0 {
+		atomic.AddUint64(&as.requestSeq, 1)
 		as.CancelOrder(as.activeAskID)
 	}
 }

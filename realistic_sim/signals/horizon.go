@@ -1,7 +1,6 @@
 package signals
 
 import (
-	"exchange_sim/realistic_sim/actors"
 	simmath "exchange_sim/realistic_sim/math"
 	"sync"
 	"time"
@@ -9,7 +8,7 @@ import (
 
 type TimeWindow struct {
 	Duration     time.Duration
-	Buffer       *actors.CircularBuffer
+	Buffer       *simmath.CircularBuffer
 	lastUpdate   time.Time
 	samplePeriod time.Duration
 }
@@ -64,7 +63,7 @@ func (ht *HorizonTracker) AddPrice(symbol string, price int64, timestamp time.Ti
 			}
 			ht.windows[symbol][horizon] = &TimeWindow{
 				Duration:     horizon,
-				Buffer:       actors.NewCircularBuffer(windowSize),
+				Buffer:       simmath.NewCircularBuffer(windowSize),
 				samplePeriod: samplePeriod,
 			}
 		}
