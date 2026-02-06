@@ -11,7 +11,8 @@ import (
 )
 
 func TestCrossSectionalMRSignalToPosition(t *testing.T) {
-	ex := exchange.NewExchange(100, &exchange.RealClock{})
+	clock := &exchange.RealClock{}
+	ex := exchange.NewExchange(100, clock)
 
 	symbols := []string{"BTC/USD", "ETH/USD", "SOL/USD"}
 	for _, symbol := range symbols {
@@ -33,7 +34,7 @@ func TestCrossSectionalMRSignalToPosition(t *testing.T) {
 
 	config := CrossSectionalMRConfig{
 		Symbols:            symbols,
-		LookbackWindow:     60,
+		LookbackPeriod:     30 * time.Second,
 		AllocatedCapital:   100000 * exchange.USD_PRECISION,
 		RebalanceInterval:  100 * time.Millisecond,
 		MaxPositionSize:    10 * exchange.BTC_PRECISION,
@@ -41,7 +42,7 @@ func TestCrossSectionalMRSignalToPosition(t *testing.T) {
 	}
 
 	policy := &position.ProportionalSizing{}
-	csActor := NewCrossSectionalMR(1, gateway, config, oms, policy)
+	csActor := NewCrossSectionalMR(1, gateway, config, clock, oms, policy)
 
 	for _, symbol := range symbols {
 		instrument := ex.Instruments[symbol]
@@ -53,16 +54,19 @@ func TestCrossSectionalMRSignalToPosition(t *testing.T) {
 	csActor.lastMidPrices["ETH/USD"] = basePrice
 	csActor.lastMidPrices["SOL/USD"] = basePrice
 
+	baseTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC).UnixNano()
 	for i := 0; i < 60; i++ {
+		timestamp := baseTime + int64(i)*int64(time.Second)
 		btcPrice := basePrice + int64(i)*50*exchange.USD_PRECISION
 		ethPrice := basePrice + int64(i)*20*exchange.USD_PRECISION
 		solPrice := basePrice - int64(i)*30*exchange.USD_PRECISION
-		csActor.signals.AddPrice("BTC/USD", btcPrice)
-		csActor.signals.AddPrice("ETH/USD", ethPrice)
-		csActor.signals.AddPrice("SOL/USD", solPrice)
+		csActor.signals.AddPrice("BTC/USD", btcPrice, timestamp)
+		csActor.signals.AddPrice("ETH/USD", ethPrice, timestamp)
+		csActor.signals.AddPrice("SOL/USD", solPrice, timestamp)
 	}
 
-	signalMap := csActor.signals.Calculate(symbols)
+	currentTime := baseTime + 60*int64(time.Second)
+	signalMap := csActor.signals.Calculate(symbols, currentTime)
 
 	if len(signalMap) != 3 {
 		t.Fatalf("Expected 3 signals, got %d", len(signalMap))
@@ -75,7 +79,11 @@ func TestCrossSectionalMRSignalToPosition(t *testing.T) {
 	t.Logf("Signals: BTC=%d, ETH=%d, SOL=%d", btcSignal, ethSignal, solSignal)
 
 	if btcSignal <= solSignal {
-		t.Errorf("BTC signal (%d) should be greater than SOL signal (%d)", btcSignal, solSignal)
+		t.Errorf("BTC outperformed SOL, so BTC signal (%d) should be > SOL signal (%d)", btcSignal, solSignal)
+	}
+
+	if btcSignal <= ethSignal {
+		t.Errorf("BTC outperformed ETH, so BTC signal (%d) should be > ETH signal (%d)", btcSignal, ethSignal)
 	}
 
 	totalSignal := int64(0)
@@ -101,7 +109,8 @@ func TestCrossSectionalMRSignalToPosition(t *testing.T) {
 }
 
 func TestCrossSectionalMRPositionLimits(t *testing.T) {
-	ex := exchange.NewExchange(100, &exchange.RealClock{})
+	clock := &exchange.RealClock{}
+	ex := exchange.NewExchange(100, clock)
 	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD",
 		exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/100)
 	ex.AddInstrument(instrument)
@@ -118,7 +127,7 @@ func TestCrossSectionalMRPositionLimits(t *testing.T) {
 	maxPos := int64(1 * exchange.BTC_PRECISION)
 	config := CrossSectionalMRConfig{
 		Symbols:            []string{"BTC/USD"},
-		LookbackWindow:     60,
+		LookbackPeriod:     30 * time.Second,
 		AllocatedCapital:   10000000 * exchange.USD_PRECISION,
 		RebalanceInterval:  100 * time.Millisecond,
 		MaxPositionSize:    maxPos,
@@ -126,7 +135,7 @@ func TestCrossSectionalMRPositionLimits(t *testing.T) {
 	}
 
 	policy := &position.ProportionalSizing{}
-	csActor := NewCrossSectionalMR(1, gateway, config, oms, policy)
+	csActor := NewCrossSectionalMR(1, gateway, config, clock, oms, policy)
 	csActor.SetInstrument("BTC/USD", instrument)
 
 	midPrice := int64(50000 * exchange.USD_PRECISION)
@@ -179,7 +188,8 @@ func TestCrossSectionalMRRiskFilterBlocking(t *testing.T) {
 }
 
 func TestCrossSectionalMRRebalancing(t *testing.T) {
-	ex := exchange.NewExchange(100, &exchange.RealClock{})
+	clock := &exchange.RealClock{}
+	ex := exchange.NewExchange(100, clock)
 
 	symbols := []string{"BTC/USD", "ETH/USD"}
 	for _, symbol := range symbols {
@@ -200,7 +210,7 @@ func TestCrossSectionalMRRebalancing(t *testing.T) {
 
 	config := CrossSectionalMRConfig{
 		Symbols:            symbols,
-		LookbackWindow:     60,
+		LookbackPeriod:     30 * time.Second,
 		AllocatedCapital:   100000 * exchange.USD_PRECISION,
 		RebalanceInterval:  200 * time.Millisecond,
 		MaxPositionSize:    10 * exchange.BTC_PRECISION,
@@ -208,7 +218,7 @@ func TestCrossSectionalMRRebalancing(t *testing.T) {
 	}
 
 	policy := &position.ProportionalSizing{}
-	csActor := NewCrossSectionalMR(1, gateway, config, oms, policy)
+	csActor := NewCrossSectionalMR(1, gateway, config, clock, oms, policy)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
@@ -227,11 +237,13 @@ func TestCrossSectionalMRRebalancing(t *testing.T) {
 	csActor.lastMidPrices["BTC/USD"] = basePrice
 	csActor.lastMidPrices["ETH/USD"] = basePrice
 
+	baseTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC).UnixNano()
 	for i := 0; i < 60; i++ {
+		timestamp := baseTime + int64(i)*int64(time.Second)
 		btcPrice := basePrice + int64(i)*100*exchange.USD_PRECISION
 		ethPrice := basePrice - int64(i)*50*exchange.USD_PRECISION
-		csActor.signals.AddPrice("BTC/USD", btcPrice)
-		csActor.signals.AddPrice("ETH/USD", ethPrice)
+		csActor.signals.AddPrice("BTC/USD", btcPrice, timestamp)
+		csActor.signals.AddPrice("ETH/USD", ethPrice, timestamp)
 	}
 
 	time.Sleep(300 * time.Millisecond)
@@ -244,8 +256,9 @@ func TestCrossSectionalMRRebalancing(t *testing.T) {
 	}
 }
 
-func TestCrossSectionalMRMinSignalThreshold(t *testing.T) {
-	ex := exchange.NewExchange(100, &exchange.RealClock{})
+func TestCrossSectionalMRTimeBased(t *testing.T) {
+	clock := &exchange.RealClock{}
+	ex := exchange.NewExchange(100, clock)
 	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD",
 		exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/100)
 	ex.AddInstrument(instrument)
@@ -259,44 +272,36 @@ func TestCrossSectionalMRMinSignalThreshold(t *testing.T) {
 
 	oms := actor.NewNettingOMS()
 
-	minThreshold := int64(1000)
 	config := CrossSectionalMRConfig{
 		Symbols:            []string{"BTC/USD", "ETH/USD"},
-		LookbackWindow:     60,
+		LookbackPeriod:     10 * time.Second,
 		AllocatedCapital:   100000 * exchange.USD_PRECISION,
 		RebalanceInterval:  100 * time.Millisecond,
 		MaxPositionSize:    10 * exchange.BTC_PRECISION,
-		MinSignalThreshold: minThreshold,
+		MinSignalThreshold: 0,
 	}
 
 	policy := &position.ProportionalSizing{}
-	csActor := NewCrossSectionalMR(1, gateway, config, oms, policy)
+	csActor := NewCrossSectionalMR(1, gateway, config, clock, oms, policy)
 	csActor.SetInstrument("BTC/USD", instrument)
 
 	basePrice := int64(50000 * exchange.USD_PRECISION)
-	csActor.lastMidPrices["BTC/USD"] = basePrice
-	csActor.lastMidPrices["ETH/USD"] = basePrice
+	baseTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC).UnixNano()
 
-	for i := 0; i < 60; i++ {
-		price := basePrice
-		if i%2 == 0 {
-			price += 10 * exchange.USD_PRECISION
-		}
-		csActor.signals.AddPrice("BTC/USD", price)
-		csActor.signals.AddPrice("ETH/USD", price)
-	}
+	csActor.signals.AddPrice("BTC/USD", basePrice, baseTime)
+	csActor.signals.AddPrice("BTC/USD", basePrice+1000*exchange.USD_PRECISION, baseTime+5*int64(time.Second))
+	csActor.signals.AddPrice("BTC/USD", basePrice+2000*exchange.USD_PRECISION, baseTime+15*int64(time.Second))
 
-	signalMap := csActor.signals.Calculate([]string{"BTC/USD", "ETH/USD"})
-	btcSignal := signalMap["BTC/USD"]
+	csActor.signals.AddPrice("ETH/USD", basePrice, baseTime)
+	csActor.signals.AddPrice("ETH/USD", basePrice, baseTime+5*int64(time.Second))
+	csActor.signals.AddPrice("ETH/USD", basePrice, baseTime+15*int64(time.Second))
 
-	absSignal := btcSignal
-	if absSignal < 0 {
-		absSignal = -absSignal
-	}
+	currentTime := baseTime + 15*int64(time.Second)
+	signalMap := csActor.signals.Calculate([]string{"BTC/USD", "ETH/USD"}, currentTime)
 
-	if absSignal < minThreshold {
-		t.Logf("Signal %d below threshold %d - would be filtered", btcSignal, minThreshold)
-	} else {
-		t.Logf("Signal %d above threshold %d - would be processed", btcSignal, minThreshold)
+	t.Logf("Signals with 10s lookback: %+v", signalMap)
+
+	if len(signalMap) != 2 {
+		t.Errorf("Expected 2 signals, got %d", len(signalMap))
 	}
 }

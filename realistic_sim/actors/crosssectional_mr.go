@@ -13,7 +13,7 @@ import (
 
 type CrossSectionalMRConfig struct {
 	Symbols            []string
-	LookbackWindow     int
+	LookbackPeriod     time.Duration
 	AllocatedCapital   int64
 	RebalanceInterval  time.Duration
 	MaxPositionSize    int64
@@ -28,6 +28,7 @@ type CrossSectionalMRActor struct {
 	positionMgr     *position.PositionManager
 	riskFilter      *position.CompositeFilter
 	lastMidPrices   map[string]int64
+	clock           exchange.Clock
 	rebalanceTicker *time.Ticker
 	requestSeq      uint64
 }
@@ -36,6 +37,7 @@ func NewCrossSectionalMR(
 	id uint64,
 	gateway *exchange.ClientGateway,
 	config CrossSectionalMRConfig,
+	clock exchange.Clock,
 	oms *actor.NettingOMS,
 	policy position.SizingPolicy,
 	filters ...position.RiskFilter,
@@ -43,13 +45,13 @@ func NewCrossSectionalMR(
 	if config.RebalanceInterval == 0 {
 		config.RebalanceInterval = 10 * time.Second
 	}
-	if config.LookbackWindow == 0 {
-		config.LookbackWindow = 60
+	if config.LookbackPeriod == 0 {
+		config.LookbackPeriod = 30 * time.Second
 	}
 
-	csSignals := signals.NewCrossSectionalSignals(config.LookbackWindow, 10000)
+	csSignals := signals.NewCrossSectionalSignals(config.LookbackPeriod, 10000)
 	for _, symbol := range config.Symbols {
-		csSignals.AddSymbol(symbol, config.LookbackWindow, 10000)
+		csSignals.AddSymbol(symbol, config.LookbackPeriod, 10000)
 	}
 
 	return &CrossSectionalMRActor{
@@ -60,6 +62,7 @@ func NewCrossSectionalMR(
 		positionMgr:   position.NewPositionManager(oms, policy, config.AllocatedCapital),
 		riskFilter:    position.NewCompositeFilter(filters...),
 		lastMidPrices: make(map[string]int64),
+		clock:         clock,
 	}
 }
 
@@ -128,11 +131,13 @@ func (csmr *CrossSectionalMRActor) onBookSnapshot(snap actor.BookSnapshotEvent) 
 
 func (csmr *CrossSectionalMRActor) onTrade(trade actor.TradeEvent) {
 	csmr.lastMidPrices[trade.Symbol] = trade.Trade.Price
-	csmr.signals.AddPrice(trade.Symbol, trade.Trade.Price)
+	timestamp := csmr.clock.NowUnixNano()
+	csmr.signals.AddPrice(trade.Symbol, trade.Trade.Price, timestamp)
 }
 
 func (csmr *CrossSectionalMRActor) rebalance() {
-	signalMap := csmr.signals.Calculate(csmr.config.Symbols)
+	currentTime := csmr.clock.NowUnixNano()
+	signalMap := csmr.signals.Calculate(csmr.config.Symbols, currentTime)
 	if len(signalMap) == 0 {
 		return
 	}

@@ -2,6 +2,7 @@ package signals
 
 import (
 	"sync"
+	"time"
 )
 
 type CrossSectionalSignals struct {
@@ -9,29 +10,29 @@ type CrossSectionalSignals struct {
 	mu             sync.RWMutex
 }
 
-func NewCrossSectionalSignals(windowSize int, scale int64) *CrossSectionalSignals {
+func NewCrossSectionalSignals(lookbackPeriod time.Duration, scale int64) *CrossSectionalSignals {
 	return &CrossSectionalSignals{
 		priceHistories: make(map[string]*PriceHistory),
 	}
 }
 
-func (cs *CrossSectionalSignals) AddSymbol(symbol string, windowSize int, scale int64) {
+func (cs *CrossSectionalSignals) AddSymbol(symbol string, lookbackPeriod time.Duration, scale int64) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	cs.priceHistories[symbol] = NewPriceHistory(windowSize, scale)
+	cs.priceHistories[symbol] = NewPriceHistory(lookbackPeriod, scale)
 }
 
-func (cs *CrossSectionalSignals) AddPrice(symbol string, price int64) {
+func (cs *CrossSectionalSignals) AddPrice(symbol string, price int64, timestamp int64) {
 	cs.mu.RLock()
 	ph := cs.priceHistories[symbol]
 	cs.mu.RUnlock()
 
 	if ph != nil {
-		ph.AddPrice(price)
+		ph.AddPrice(price, timestamp)
 	}
 }
 
-func (cs *CrossSectionalSignals) Calculate(symbols []string) map[string]int64 {
+func (cs *CrossSectionalSignals) Calculate(symbols []string, currentTime int64) map[string]int64 {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
 
@@ -41,10 +42,10 @@ func (cs *CrossSectionalSignals) Calculate(symbols []string) map[string]int64 {
 
 	for _, symbol := range symbols {
 		ph := cs.priceHistories[symbol]
-		if ph == nil || !ph.IsReady() {
+		if ph == nil || !ph.IsReady(currentTime) {
 			continue
 		}
-		ret := ph.GetReturn()
+		ret := ph.GetReturn(currentTime)
 		returns = append(returns, ret)
 		validSymbols = append(validSymbols, symbol)
 	}
