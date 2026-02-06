@@ -27,7 +27,7 @@ type OMS interface {
 	GetPosition(instrumentID string) *Position
 	GetPositions(instrumentID string) []*Position
 	Reset(instrumentID string)
-}
+}	
 
 type NettingOMS struct {
 	positions map[string]*Position
