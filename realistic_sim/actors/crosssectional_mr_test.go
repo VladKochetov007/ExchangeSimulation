@@ -237,7 +237,7 @@ func TestCrossSectionalMRRebalancing(t *testing.T) {
 	csActor.lastMidPrices["BTC/USD"] = basePrice
 	csActor.lastMidPrices["ETH/USD"] = basePrice
 
-	baseTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC).UnixNano()
+	baseTime := clock.NowUnixNano() - 60*int64(time.Second)
 	for i := 0; i < 60; i++ {
 		timestamp := baseTime + int64(i)*int64(time.Second)
 		btcPrice := basePrice + int64(i)*100*exchange.USD_PRECISION

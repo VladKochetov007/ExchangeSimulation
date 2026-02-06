@@ -218,8 +218,8 @@ func TestFirstLP_ExitShortPosition(t *testing.T) {
 	}
 
 	// Manually set market state since book deltas aren't published
-	midPrice := exchange.PriceUSD(50000, exchange.DOLLAR_TICK)
-	lp.SetMarketState(midPrice-500*exchange.SATOSHI, 0, askPrice, liquidityNeeded)
+	bidPrice := exchange.PriceUSD(49900, exchange.DOLLAR_TICK) // Below mid
+	lp.SetMarketState(bidPrice, 0, askPrice, liquidityNeeded)
 
 	// Wait for exit monitoring to trigger
 	time.Sleep(config.MonitorInterval * 5) // Extra time for cancel + exit

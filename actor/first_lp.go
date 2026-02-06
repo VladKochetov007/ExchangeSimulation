@@ -2,6 +2,7 @@ package actor
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"exchange_sim/exchange"
@@ -37,7 +38,6 @@ type FirstLiquidityProvidingActor struct {
 	AskSize       int64
 	lastBidReqID  uint64
 	lastAskReqID  uint64
-	requestSeq    uint64
 	LastMidPrice  int64
 	BestBid       int64
 	BestAsk       int64
@@ -266,8 +266,8 @@ func (f *FirstLiquidityProvidingActor) onOrderCancelRejected(rejected OrderCance
 }
 
 func (f *FirstLiquidityProvidingActor) nextRequestID() uint64 {
-	f.requestSeq++
-	return f.requestSeq
+	// Return what the NEXT request ID will be (SubmitOrder will increment it)
+	return atomic.LoadUint64(&f.BaseActor.requestSeq) + 1
 }
 
 func (f *FirstLiquidityProvidingActor) PlaceQuotes() {
