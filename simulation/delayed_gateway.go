@@ -142,3 +142,15 @@ func (d *DelayedGateway) forwardMarketData() {
 		}
 	}
 }
+
+// ToClientGateway returns a standard ClientGateway that uses this delayed gateway's channels.
+// This allows actors to use the delayed gateway as if it were a direct connection.
+func (d *DelayedGateway) ToClientGateway() *exchange.ClientGateway {
+	return &exchange.ClientGateway{
+		ClientID:   d.gateway.ClientID,
+		RequestCh:  d.requestCh,
+		ResponseCh: d.responseCh,
+		MarketData: d.marketDataCh,
+		Running:    true,
+	}
+}

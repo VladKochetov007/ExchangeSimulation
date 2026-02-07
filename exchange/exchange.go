@@ -286,7 +286,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	}
 
 	if log != nil {
-		log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderAccepted", req)
+		log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderAccepted", order)
 	}
 
 	result := e.Matcher.Match(book.Bids, book.Asks, order)
@@ -469,6 +469,15 @@ func (e *Exchange) subscribe(clientID uint64, req *QueryRequest, gateway *Client
 		Asks: book.Asks.getSnapshot(),
 	}
 	e.MDPublisher.Publish(req.Symbol, MDSnapshot, snapshot, e.Clock.NowUnixNano())
+
+	// Log snapshot to file
+	if log := e.Loggers[req.Symbol]; log != nil {
+		snapshotLog := map[string]any{
+			"bids": snapshot.Bids,
+			"asks": snapshot.Asks,
+		}
+		log.LogEvent(e.Clock.NowUnixNano(), clientID, "BookSnapshot", snapshotLog)
+	}
 
 	return Response{RequestID: req.RequestID, Success: true}
 }
@@ -660,6 +669,18 @@ func (e *Exchange) publishBookUpdate(book *OrderBook, side Side, price int64) {
 		HiddenQty:  hidden,
 	}
 	e.MDPublisher.Publish(book.Symbol, MDDelta, delta, e.Clock.NowUnixNano())
+
+	// Log delta to file
+	if log := e.Loggers[book.Symbol]; log != nil {
+		deltaLog := map[string]any{
+			"side":        side.String(),
+			"price":       price,
+			"visible_qty": visible,
+			"hidden_qty":  hidden,
+			"total_qty":   totalQty,
+		}
+		log.LogEvent(e.Clock.NowUnixNano(), 0, "BookDelta", deltaLog)
+	}
 }
 
 type InstrumentInfo struct {
