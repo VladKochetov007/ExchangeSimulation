@@ -27,8 +27,10 @@ type Exchange struct {
 	Clock       Clock
 	Loggers     map[string]Logger
 	mu          sync.RWMutex
-	running     bool
-	shutdownCh  chan struct{}
+	running          bool
+	shutdownCh       chan struct{}
+	snapshotInterval time.Duration
+	snapshotStopCh   chan struct{}
 }
 
 type OrderBook struct {
@@ -100,8 +102,62 @@ func NewExchange(estimatedClients int, clock Clock) *Exchange {
 		MDPublisher: NewMDPublisher(),
 		Clock:       clock,
 		Loggers:     make(map[string]Logger),
-		running:     false,
-		shutdownCh:  make(chan struct{}),
+		running:          false,
+		shutdownCh:       make(chan struct{}),
+		snapshotStopCh:   make(chan struct{}),
+		snapshotInterval: 0,
+	}
+}
+
+func (e *Exchange) EnablePeriodicSnapshots(interval time.Duration) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.running {
+		// If already running, start the loop now
+		if e.snapshotInterval == 0 && interval > 0 {
+			go e.runSnapshotLoop(interval)
+		}
+	}
+	e.snapshotInterval = interval
+}
+
+func (e *Exchange) runSnapshotLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			e.logSnapshots()
+		case <-e.snapshotStopCh:
+			return
+		case <-e.shutdownCh:
+			return
+		}
+	}
+}
+
+func (e *Exchange) logSnapshots() {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	timestamp := e.Clock.NowUnixNano()
+	for symbol, book := range e.Books {
+		// Log snapshot to file if logger exists
+		if log := e.Loggers[symbol]; log != nil {
+			// Create snapshot
+			snapshot := &BookSnapshot{
+				Bids: book.Bids.getSnapshot(),
+				Asks: book.Asks.getSnapshot(),
+			}
+
+			snapshotLog := map[string]any{
+				"bids": snapshot.Bids,
+				"asks": snapshot.Asks,
+			}
+			log.LogEvent(timestamp, 0, "BookSnapshot", snapshotLog)
+		}
 	}
 }
 
@@ -146,6 +202,14 @@ func (e *Exchange) ConnectClient(clientID uint64, initialBalances map[string]int
 	e.Gateways[clientID] = gateway
 
 	go e.handleClientRequests(gateway)
+
+	if !e.running {
+		e.running = true
+		if e.snapshotInterval > 0 {
+			go e.runSnapshotLoop(e.snapshotInterval)
+		}
+	}
+
 	return gateway
 }
 
@@ -751,6 +815,7 @@ func (e *Exchange) Shutdown() {
 	}
 
 	close(e.shutdownCh)
+	close(e.snapshotStopCh)
 	for _, gateway := range e.Gateways {
 		gateway.Close()
 	}

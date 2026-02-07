@@ -668,6 +668,12 @@ func (mm *MultiSymbolMM) onOrderFilled(fill OrderFillEvent) {
 			state.ActiveAskID = 0
 		}
 	}
+
+	// Replenish liquidity
+	// Use stored LastMidPrice since we don't have a fresh snap/delta
+	if state.LastMidPrice > 0 {
+		mm.requoteSymbol(state, state.LastMidPrice)
+	}
 }
 
 func (mm *MultiSymbolMM) onOrderCancelled(cancelled OrderCancelledEvent) {
@@ -706,7 +712,11 @@ func (mm *MultiSymbolMM) requoteSymbol(state *symbolMMState, midPrice int64) {
 	bidPrice = (bidPrice / tickSize) * tickSize
 	askPrice = (askPrice / tickSize) * tickSize
 
-	if bidPrice == state.CurrentBid && askPrice == state.CurrentAsk {
+	// Check if prices changed OR if we need to replenish missing orders
+	pricesUnchanged := bidPrice == state.CurrentBid && askPrice == state.CurrentAsk
+	ordersActive := state.ActiveBidID != 0 && state.ActiveAskID != 0
+
+	if pricesUnchanged && ordersActive {
 		return
 	}
 

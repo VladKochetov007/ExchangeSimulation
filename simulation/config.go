@@ -33,6 +33,8 @@ type MultiSimConfig struct {
 	Duration        time.Duration    // Simulation duration
 	LogDir          string           // Log output directory
 
+	SnapshotInterval time.Duration // Interval for full book snapshots (0 = disabled)
+
 	SimSpeedup   float64 // Speedup factor (e.g., 50.0 for 50x speed)
 	LPSkewFactor float64 // How much inventory affects price (e.g. 0.0001 per unit)
 }
@@ -65,6 +67,7 @@ func DefaultMultiSimConfig() MultiSimConfig {
 		},
 		Duration:     0,
 		LogDir:       "logs",
+		SnapshotInterval: 1 * time.Second, // 1 second snapshot interval by default
 		SimSpeedup:   50.0,   // 50x speedup
 		LPSkewFactor: 0.0005, // 5 bps per unit inventory skew (will need tuning)
 	}
@@ -162,10 +165,10 @@ func GenerateInstruments(assets []string, quoteAsset string, spotRatio float64) 
 // GetBootstrapPrices returns reasonable bootstrap prices for common assets
 func GetBootstrapPrices() map[string]int64 {
 	return map[string]int64{
-		"BTCUSD":  100000 * exchange.BTC_PRECISION, // $100,000
-		"ETHUSD":  3500 * exchange.ETH_PRECISION,   // $3,500
-		"SOLUSD":  150 * exchange.SATOSHI,          // $150
-		"XRPUSD":  2 * exchange.SATOSHI,            // $2
-		"DOGEUSD": exchange.SATOSHI / 10,           // $0.10
+		"BTCUSD":  100000 * exchange.USD_PRECISION, // $100,000
+		"ETHUSD":  3500 * exchange.USD_PRECISION,   // $3,500
+		"SOLUSD":  150 * exchange.USD_PRECISION,    // $150
+		"XRPUSD":  2 * exchange.USD_PRECISION,      // $2
+		"DOGEUSD": 10 * exchange.USD_PRECISION / 100, // $0.10
 	}
 }

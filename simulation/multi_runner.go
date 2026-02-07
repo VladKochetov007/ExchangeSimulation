@@ -38,6 +38,9 @@ func NewMultiExchangeRunner(config MultiSimConfig) (*MultiExchangeRunner, error)
 	// Create exchanges
 	for _, exConfig := range config.Exchanges {
 		ex := exchange.NewExchange(100, runner.clock)
+		if config.SnapshotInterval > 0 {
+			ex.EnablePeriodicSnapshots(config.SnapshotInterval)
+		}
 		runner.exchanges[VenueID(exConfig.Name)] = ex
 	}
 
