@@ -11,6 +11,7 @@ type testClock struct {
 
 func (c *testClock) NowUnixNano() int64 { return c.now }
 func (c *testClock) NowUnix() int64     { return c.now / 1e9 }
+func (c *testClock) SetTime(t int64)    { c.now = t }
 
 func TestTotalQtyUpdatesOnPartialFill(t *testing.T) {
 	clock := &testClock{now: 1000000000}

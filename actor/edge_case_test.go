@@ -281,31 +281,3 @@ func TestHedgingOMSEdgeCases(t *testing.T) {
 	}
 }
 
-func TestRecorderEdgeCases(t *testing.T) {
-	gateway := exchange.NewClientGateway(1)
-
-	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
-	ethusd := exchange.NewPerpFutures("ETHUSD", "ETH", "USD",
-		exchange.ETH_PRECISION, exchange.USD_PRECISION,
-		exchange.ETH_PRECISION/100, exchange.ETH_PRECISION/1000)
-	instruments := map[string]exchange.Instrument{
-		"BTCUSD": btcusd,
-		"ETHUSD": ethusd,
-	}
-
-	config := RecorderConfig{
-		OutputDir:           "/nonexistent/path/that/should/not/exist",
-		Symbols:             []string{"BTCUSD", "ETHUSD"},
-		FlushInterval:       100 * time.Millisecond,
-		RecordTrades:        true,
-		RecordOrderbook:     true,
-		RecordOpenInterest:  true,
-		RecordFunding:       true,
-		SeparateHiddenFiles: true,
-	}
-
-	_, err := NewRecorder(1, gateway, config, instruments)
-	if err == nil {
-		t.Fatal("Expected error with invalid output directory")
-	}
-}

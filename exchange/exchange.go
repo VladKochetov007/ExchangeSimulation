@@ -11,6 +11,10 @@ type Clock interface {
 	NowUnix() int64
 }
 
+type Logger interface {
+	LogEvent(simTime int64, clientID uint64, eventName string, event any)
+}
+
 type Exchange struct {
 	Clients     map[uint64]*Client
 	Gateways    map[uint64]*ClientGateway
@@ -21,6 +25,7 @@ type Exchange struct {
 	Matcher     MatchingEngine
 	MDPublisher *MDPublisher
 	Clock       Clock
+	Loggers     map[string]Logger
 	mu          sync.RWMutex
 	running     bool
 	shutdownCh  chan struct{}
@@ -94,9 +99,20 @@ func NewExchange(estimatedClients int, clock Clock) *Exchange {
 		Matcher:     matcher,
 		MDPublisher: NewMDPublisher(),
 		Clock:       clock,
+		Loggers:     make(map[string]Logger),
 		running:     false,
 		shutdownCh:  make(chan struct{}),
 	}
+}
+
+func (e *Exchange) SetLogger(symbol string, log Logger) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.Loggers[symbol] = log
+}
+
+func (e *Exchange) getLogger(symbol string) Logger {
+	return e.Loggers[symbol]
 }
 
 func (e *Exchange) AddInstrument(instrument Instrument) {
@@ -171,21 +187,39 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 
 	client := e.Clients[clientID]
 	if client == nil {
-		return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownClient}
+		resp := Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownClient}
+		if log := e.getLogger(req.Symbol); log != nil {
+			log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+		}
+		return resp
 	}
 
 	book := e.Books[req.Symbol]
 	if book == nil {
-		return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownInstrument}
+		resp := Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownInstrument}
+		if log := e.getLogger(req.Symbol); log != nil {
+			log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+		}
+		return resp
 	}
 
 	instrument := book.Instrument
 	precision := instrument.BasePrecision()
+	log := e.getLogger(req.Symbol)
+
 	if req.Type == LimitOrder && !instrument.ValidatePrice(req.Price) {
-		return Response{RequestID: req.RequestID, Success: false, Error: RejectInvalidPrice}
+		resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInvalidPrice}
+		if log != nil {
+			log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+		}
+		return resp
 	}
 	if !instrument.ValidateQty(req.Qty) {
-		return Response{RequestID: req.RequestID, Success: false, Error: RejectInvalidQty}
+		resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInvalidQty}
+		if log != nil {
+			log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+		}
+		return resp
 	}
 
 	orderID := atomic.AddUint64(&e.NextOrderID, 1)
@@ -209,13 +243,21 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 				maxCost := (req.Qty * book.Asks.Best.Price) / precision
 				if client.GetAvailable(instrument.QuoteAsset()) < maxCost {
 					putOrder(order)
-					return Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+					resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+					if log != nil {
+						log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+					}
+					return resp
 				}
 			}
 		} else {
 			if client.GetAvailable(instrument.BaseAsset()) < req.Qty {
 				putOrder(order)
-				return Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+				resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+				if log != nil {
+					log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+				}
+				return resp
 			}
 		}
 	case LimitOrder:
@@ -224,15 +266,27 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 		if req.Side == Buy {
 			if !client.Reserve(asset, amount) {
 				putOrder(order)
-				return Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+				resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+				if log != nil {
+					log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+				}
+				return resp
 			}
 		} else {
 			asset = instrument.BaseAsset()
 			if !client.Reserve(asset, req.Qty) {
 				putOrder(order)
-				return Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+				resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+				if log != nil {
+					log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+				}
+				return resp
 			}
 		}
+	}
+
+	if log != nil {
+		log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderAccepted", req)
 	}
 
 	result := e.Matcher.Match(book.Bids, book.Asks, order)
@@ -246,7 +300,11 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 			}
 		}
 		putOrder(order)
-		return Response{RequestID: req.RequestID, Success: false, Error: RejectFOKNotFilled}
+		resp := Response{RequestID: req.RequestID, Success: false, Error: RejectFOKNotFilled}
+		if log != nil {
+			log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+		}
+		return resp
 	}
 
 	affectedLevels := make(map[int64]Side)
@@ -333,11 +391,22 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 	if order == nil {
 		return Response{RequestID: req.RequestID, Success: false, Error: RejectOrderNotFound}
 	}
+
+	log := e.getLogger(book.Symbol)
+
 	if order.ClientID != clientID {
-		return Response{RequestID: req.RequestID, Success: false, Error: RejectOrderNotOwned}
+		resp := Response{RequestID: req.RequestID, Success: false, Error: RejectOrderNotOwned}
+		if log != nil {
+			log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderCancelRejected", resp)
+		}
+		return resp
 	}
 	if order.Status == Filled {
-		return Response{RequestID: req.RequestID, Success: false, Error: RejectOrderAlreadyFilled}
+		resp := Response{RequestID: req.RequestID, Success: false, Error: RejectOrderAlreadyFilled}
+		if log != nil {
+			log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderCancelRejected", resp)
+		}
+		return resp
 	}
 
 	instrument := book.Instrument
@@ -357,6 +426,15 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 	client.RemoveOrder(req.OrderID)
 	order.Status = Cancelled
 	putOrder(order)
+
+	if log != nil {
+		cancelEvent := map[string]any{
+			"order_id":      req.OrderID,
+			"request_id":    req.RequestID,
+			"remaining_qty": remainingQty,
+		}
+		log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderCancelled", cancelEvent)
+	}
 
 	return Response{RequestID: req.RequestID, Success: true, Data: remainingQty}
 }
@@ -405,6 +483,7 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 	timestamp := e.Clock.NowUnixNano()
 	precision := instrument.TickSize()
 	positionChanged := false
+	log := e.getLogger(book.Symbol)
 
 	for _, exec := range executions {
 		taker := e.Clients[exec.TakerClientID]
@@ -444,8 +523,6 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 			positionChanged = true
 		}
 
-		// ... existing code ...
-
 		trade := &Trade{
 			TradeID:      book.SeqNum,
 			Price:        exec.Price,
@@ -456,6 +533,10 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 		}
 		book.SeqNum++
 		book.LastTrade = trade
+
+		if log != nil {
+			log.LogEvent(timestamp, 0, "Trade", trade)
+		}
 
 		e.MDPublisher.PublishTrade(book.Symbol, trade, timestamp)
 
@@ -478,6 +559,23 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 			}
 		}
 
+		if log != nil {
+			takerFill := map[string]any{
+				"order_id":      exec.TakerOrderID,
+				"qty":           exec.Qty,
+				"price":         exec.Price,
+				"side":          takerOrder.Side.String(),
+				"filled_qty":    takerOrder.FilledQty,
+				"remaining_qty": takerOrder.Qty - takerOrder.FilledQty,
+				"is_full":       takerOrder.FilledQty >= takerOrder.Qty,
+				"trade_id":      book.SeqNum - 1,
+				"role":          "taker",
+				"fee_amount":    takerFee.Amount,
+				"fee_asset":     takerFee.Asset,
+			}
+			log.LogEvent(timestamp, exec.TakerClientID, "OrderFill", takerFill)
+		}
+
 		makerGw := e.Gateways[exec.MakerClientID]
 		if makerGw != nil {
 			makerOrder := book.Bids.Orders[exec.MakerOrderID]
@@ -498,6 +596,29 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 					FeeAmount: makerFee.Amount,
 					FeeAsset:  makerFee.Asset,
 				},
+			}
+		}
+
+		if log != nil {
+			makerOrder := book.Bids.Orders[exec.MakerOrderID]
+			if makerOrder == nil {
+				makerOrder = book.Asks.Orders[exec.MakerOrderID]
+			}
+			if makerOrder != nil {
+				makerFill := map[string]any{
+					"order_id":      exec.MakerOrderID,
+					"qty":           exec.Qty,
+					"price":         exec.Price,
+					"side":          makerSide.String(),
+					"filled_qty":    makerOrder.FilledQty,
+					"remaining_qty": makerOrder.Qty - makerOrder.FilledQty,
+					"is_full":       makerOrder.FilledQty >= makerOrder.Qty,
+					"trade_id":      book.SeqNum - 1,
+					"role":          "maker",
+					"fee_amount":    makerFee.Amount,
+					"fee_asset":     makerFee.Asset,
+				}
+				log.LogEvent(timestamp, exec.MakerClientID, "OrderFill", makerFill)
 			}
 		}
 	}

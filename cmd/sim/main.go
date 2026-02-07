@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/logger"
 	"exchange_sim/simulation"
 )
 
@@ -19,8 +21,6 @@ func main() {
 }
 
 func run() error {
-	os.MkdirAll("output", 0755)
-
 	config := simulation.RunnerConfig{
 		UseSimulatedClock: false,
 		Duration:          0,
@@ -37,6 +37,28 @@ func run() error {
 		exchange.ETH_PRECISION/100, exchange.ETH_PRECISION/1000)
 	ex.AddInstrument(btcusd)
 	ex.AddInstrument(ethusd)
+
+	if err := os.MkdirAll(filepath.Join("logs", "bybit", "perp"), 0755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join("logs", "bybit", "spot"), 0755); err != nil {
+		return err
+	}
+
+	btcLogFile, err := os.Create(filepath.Join("logs", "bybit", "perp", "BTCUSD.log"))
+	if err != nil {
+		return err
+	}
+	defer btcLogFile.Close()
+
+	ethLogFile, err := os.Create(filepath.Join("logs", "bybit", "spot", "ETHUSD.log"))
+	if err != nil {
+		return err
+	}
+	defer ethLogFile.Close()
+
+	ex.SetLogger("BTCUSD", logger.New(btcLogFile))
+	ex.SetLogger("ETHUSD", logger.New(ethLogFile))
 
 	initialBalances := map[string]int64{
 		"BTC": 10000000000,
@@ -120,27 +142,10 @@ func run() error {
 	}
 
 	simDuration := 15 * time.Second
-	recorderGateway := ex.ConnectClient(999, initialBalances, feePlan)
-	recorder, err := actor.NewRecorder(999, recorderGateway, actor.RecorderConfig{
-		OutputDir:           "output",
-		Symbols:             []string{"BTCUSD", "ETHUSD"},
-		FlushInterval:       time.Second,
-		SnapshotInterval:    5 * time.Second,
-		SnapshotDeltaCount:  50,
-		RotationStrategy:    actor.RotationNone,
-		RecordTrades:        true,
-		RecordOrderbook:     true,
-		RecordOpenInterest:  true,
-		RecordFunding:       true,
-		SeparateHiddenFiles: false,
-	}, ex.Instruments)
-	if err != nil {
-		return err
-	}
-	runner.AddActor(recorder)
 
 	fmt.Println("Starting simulation...")
 	fmt.Printf("Running for %v...\n", simDuration)
+	fmt.Println("Logging to logs/bybit/perp/BTCUSD.log and logs/bybit/spot/ETHUSD.log")
 
 	ctx, cancel := context.WithTimeout(context.Background(), simDuration)
 	defer cancel()

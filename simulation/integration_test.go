@@ -3,11 +3,13 @@ package simulation
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/logger"
 )
 
 func TestSimulationIntegration(t *testing.T) {
@@ -36,38 +38,48 @@ func TestSimulationIntegration(t *testing.T) {
 		Symbol:            "BTCUSD",
 		SpreadBps:         20,
 		LiquidityMultiple: 10,
+		BootstrapPrice:    exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 	})
+	mm.SetInitialState(btcusd)
+	mm.UpdateBalances(balances["BTC"], balances["USD"])
 	runner.AddActor(mm)
 
-	recorderGateway := ex.ConnectClient(999, balances, feePlan)
-	instruments := map[string]exchange.Instrument{
-		"BTCUSD": btcusd,
-	}
-	recorder, err := actor.NewRecorder(999, recorderGateway, actor.RecorderConfig{
-		Symbols:             []string{"BTCUSD"},
-		OutputDir:           "testdata",
-		RecordTrades:        true,
-		RecordOrderbook:     true,
-		RecordOpenInterest:  false,
-		RecordFunding:       false,
-		SeparateHiddenFiles: false,
-	}, instruments)
+	gateway2 := ex.ConnectClient(2, balances, feePlan)
+	taker := actor.NewRandomizedTaker(2, gateway2, actor.RandomizedTakerConfig{
+		Symbol:   "BTCUSD",
+		Interval: 100 * time.Millisecond,
+		MinQty:   exchange.BTCAmount(0.01),
+		MaxQty:   exchange.BTCAmount(0.1),
+	})
+	runner.AddActor(taker)
+
+	logFile, err := os.Create(filepath.Join("testdata", "BTCUSD.log"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner.AddActor(recorder)
+	defer logFile.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ex.SetLogger("BTCUSD", logger.New(logFile))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	if err := runner.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := os.Stat("testdata/BTCUSD_SPOT_trades.csv"); os.IsNotExist(err) {
-		t.Error("BTCUSD_SPOT_trades.csv not created")
+	logFile.Close()
+
+	if _, err := os.Stat(filepath.Join("testdata", "BTCUSD.log")); os.IsNotExist(err) {
+		t.Error("BTCUSD.log not created")
 	}
-	if _, err := os.Stat("testdata/BTCUSD_SPOT_orderbook.csv"); os.IsNotExist(err) {
-		t.Error("BTCUSD_SPOT_orderbook.csv not created")
+
+	data, err := os.ReadFile(filepath.Join("testdata", "BTCUSD.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(data) == 0 {
+		t.Error("BTCUSD.log is empty")
 	}
 }

@@ -280,3 +280,5 @@ coverage.out
 **/*.csv
 **.png
 sim
+latency_arb
+good_plan.md
