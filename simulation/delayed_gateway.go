@@ -98,7 +98,12 @@ func (d *DelayedGateway) forwardRequests() {
 					time.Sleep(delay)
 				}
 			}
-			d.gateway.RequestCh <- req
+			// Use select/default to avoid panic if gateway is closed
+			select {
+			case d.gateway.RequestCh <- req:
+			default:
+				// Gateway closed, silently drop request
+			}
 		}
 	}
 }

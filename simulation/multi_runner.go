@@ -156,6 +156,7 @@ func (r *MultiExchangeRunner) createActorsForExchange(
 		BootstrapPrices:   bootstrapPrices,
 		LiquidityMultiple: 10,
 		MinExitSize:       50 * exchange.SATOSHI, // 0.5 BTC minimum position before considering exit
+		SkewFactor:        r.config.LPSkewFactor,
 	}
 	if r.config.SimSpeedup > 0 {
 		lpConfig.MonitorInterval = time.Duration(float64(100*time.Millisecond) / r.config.SimSpeedup)

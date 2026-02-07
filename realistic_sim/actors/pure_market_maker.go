@@ -11,13 +11,13 @@ import (
 
 // PureMarketMakerConfig configures a pure market making strategy with fixed spreads.
 type PureMarketMakerConfig struct {
-	Symbol           string               // Trading symbol
-	Instrument       exchange.Instrument  // Trading instrument (for tick size, precision)
-	SpreadBps        int64                // Fixed spread in basis points
-	QuoteSize        int64                // Order size per side
-	MaxInventory     int64                // Maximum absolute position limit
-	RequoteThreshold int64                // Minimum mid-price change to trigger requote (bps)
-	MonitorInterval  time.Duration        // How often to check for requote conditions
+	Symbol           string              // Trading symbol
+	Instrument       exchange.Instrument // Trading instrument (for tick size, precision)
+	SpreadBps        int64               // Fixed spread in basis points
+	QuoteSize        int64               // Order size per side
+	MaxInventory     int64               // Maximum absolute position limit
+	RequoteThreshold int64               // Minimum mid-price change to trigger requote (bps)
+	MonitorInterval  time.Duration       // How often to check for requote conditions
 }
 
 // PureMarketMakerActor implements a simple market making strategy with fixed spreads.
@@ -29,13 +29,13 @@ type PureMarketMakerActor struct {
 	baseAsset  string
 	quoteAsset string
 
-	lastMidPrice  int64
-	currentBid    int64
-	currentAsk    int64
-	activeBidID   uint64
-	activeAskID   uint64
-	lastBidReqID  uint64
-	lastAskReqID  uint64
+	lastMidPrice int64
+	currentBid   int64
+	currentAsk   int64
+	activeBidID  uint64
+	activeAskID  uint64
+	lastBidReqID uint64
+	lastAskReqID uint64
 
 	inventory int64
 
@@ -170,6 +170,11 @@ func (pmm *PureMarketMakerActor) onOrderFilled(fill actor.OrderFillEvent) {
 			pmm.activeAskID = 0
 		}
 	}
+
+	// Replenish liquidity after fill using stored mid-price
+	if pmm.lastMidPrice > 0 {
+		pmm.requote(pmm.lastMidPrice)
+	}
 }
 
 func (pmm *PureMarketMakerActor) onOrderCancelled(cancelled actor.OrderCancelledEvent) {
@@ -186,12 +191,11 @@ func (pmm *PureMarketMakerActor) requote(midPrice int64) {
 	}
 
 	// Check inventory limits
-	absInventory := pmm.inventory
-	if absInventory < 0 {
-		absInventory = -absInventory
-	}
-	if absInventory >= pmm.config.MaxInventory {
-		// Stop quoting if inventory limit reached
+	canBuy := pmm.inventory < pmm.config.MaxInventory
+	canSell := pmm.inventory > -pmm.config.MaxInventory
+
+	if !canBuy && !canSell {
+		// Stop quoting if inventory limit reached in both directions
 		pmm.cancelOrders()
 		return
 	}
@@ -207,8 +211,11 @@ func (pmm *PureMarketMakerActor) requote(midPrice int64) {
 	bidPrice = (bidPrice / tickSize) * tickSize
 	askPrice = (askPrice / tickSize) * tickSize
 
-	// Skip if no change
-	if bidPrice == pmm.currentBid && askPrice == pmm.currentAsk {
+	// Check if we need to requote
+	bidFine := !canBuy || (canBuy && bidPrice == pmm.currentBid && pmm.activeBidID != 0)
+	askFine := !canSell || (canSell && askPrice == pmm.currentAsk && pmm.activeAskID != 0)
+
+	if bidFine && askFine {
 		return
 	}
 
@@ -219,23 +226,27 @@ func (pmm *PureMarketMakerActor) requote(midPrice int64) {
 	pmm.currentBid = bidPrice
 	pmm.currentAsk = askPrice
 
-	pmm.lastBidReqID = atomic.AddUint64(&pmm.requestSeq, 1)
-	pmm.BaseActor.SubmitOrder(
-		pmm.config.Symbol,
-		exchange.Buy,
-		exchange.LimitOrder,
-		bidPrice,
-		pmm.config.QuoteSize,
-	)
+	if canBuy {
+		pmm.lastBidReqID = atomic.AddUint64(&pmm.requestSeq, 1)
+		pmm.BaseActor.SubmitOrder(
+			pmm.config.Symbol,
+			exchange.Buy,
+			exchange.LimitOrder,
+			bidPrice,
+			pmm.config.QuoteSize,
+		)
+	}
 
-	pmm.lastAskReqID = atomic.AddUint64(&pmm.requestSeq, 1)
-	pmm.BaseActor.SubmitOrder(
-		pmm.config.Symbol,
-		exchange.Sell,
-		exchange.LimitOrder,
-		askPrice,
-		pmm.config.QuoteSize,
-	)
+	if canSell {
+		pmm.lastAskReqID = atomic.AddUint64(&pmm.requestSeq, 1)
+		pmm.BaseActor.SubmitOrder(
+			pmm.config.Symbol,
+			exchange.Sell,
+			exchange.LimitOrder,
+			askPrice,
+			pmm.config.QuoteSize,
+		)
+	}
 }
 
 func (pmm *PureMarketMakerActor) cancelOrders() {

@@ -238,10 +238,16 @@ func (e *Exchange) handleClientRequests(gateway *ClientGateway) {
 		case ReqUnsubscribe:
 			resp = e.unsubscribe(gateway.ClientID, req.QueryReq)
 		}
-		select {
-		case gateway.ResponseCh <- resp:
-		default:
+		
+		// Send response only if gateway is still running
+		gateway.Mu.Lock()
+		if gateway.Running {
+			select {
+			case gateway.ResponseCh <- resp:
+			default:
+			}
 		}
+		gateway.Mu.Unlock()
 	}
 }
 

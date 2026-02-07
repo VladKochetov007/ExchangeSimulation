@@ -348,10 +348,7 @@ func TestCalculateOpenInterest(t *testing.T) {
 
 func TestPublishOpenInterest(t *testing.T) {
 	mdp := NewMDPublisher()
-	gateway := &ClientGateway{
-		ClientID:   1,
-		MarketData: make(chan *MarketDataMsg, 100),
-	}
+	gateway := NewClientGateway(1)
 
 	types := []MDType{MDOpenInterest}
 	mdp.Subscribe(1, "BTC-PERP", types, gateway)

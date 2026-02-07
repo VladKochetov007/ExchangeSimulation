@@ -2,7 +2,6 @@ package actor
 
 import (
 	"context"
-	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -19,9 +18,10 @@ type symbolLPState struct {
 	ActiveAskID   uint64
 	lastBidReqID  uint64
 	lastAskReqID  uint64
-	BidSize       int64
-	AskSize       int64
-	LastMidPrice  int64
+	BidSize           int64
+	AskSize           int64
+	ReservedQuote     int64 // Quote reserved for active bid order
+	LastMidPrice      int64
 	BestBid       int64
 	BestAsk       int64
 	BidLiquidity  int64
@@ -51,8 +51,9 @@ type MultiSymbolLP struct {
 	symbolStates map[string]*symbolLPState
 
 	// Shared balances across all symbols
-	baseBalances map[string]int64 // Asset -> balance
-	quoteBalance int64            // Shared quote balance (USD)
+	baseBalances        map[string]int64 // Asset -> balance
+	quoteBalance        int64            // Shared quote balance (USD)
+	reservedQuoteBalance int64            // Reserved for pending buy orders
 
 	monitorTicker *time.Ticker
 	stopCh        chan struct{}
@@ -255,6 +256,14 @@ func (m *MultiSymbolLP) onOrderFilled(fill OrderFillEvent) {
 		m.baseBalances[state.BaseAsset] += fill.Qty
 		notional := (fill.Qty * fill.Price) / basePrecision
 		m.quoteBalance -= (notional + fill.FeeAmount)
+		// Unreserve the filled amount
+		if fill.OrderID == state.ActiveBidID && state.ReservedQuote > 0 {
+			m.reservedQuoteBalance -= state.ReservedQuote
+			if m.reservedQuoteBalance < 0 {
+				m.reservedQuoteBalance = 0
+			}
+			state.ReservedQuote = 0
+		}
 	} else {
 		m.updatePosition(state, -fill.Qty, fill.Price)
 		m.baseBalances[state.BaseAsset] -= fill.Qty
@@ -281,6 +290,14 @@ func (m *MultiSymbolLP) onOrderFilled(fill OrderFillEvent) {
 func (m *MultiSymbolLP) onOrderCancelled(cancelled OrderCancelledEvent) {
 	for _, state := range m.symbolStates {
 		if cancelled.OrderID == state.ActiveBidID {
+			// Unreserve quote balance for cancelled buy order
+			if state.ReservedQuote > 0 {
+				m.reservedQuoteBalance -= state.ReservedQuote
+				if m.reservedQuoteBalance < 0 {
+					m.reservedQuoteBalance = 0
+				}
+				state.ReservedQuote = 0
+			}
 			state.ActiveBidID = 0
 			return
 		}
@@ -294,6 +311,14 @@ func (m *MultiSymbolLP) onOrderCancelled(cancelled OrderCancelledEvent) {
 func (m *MultiSymbolLP) onOrderRejected(rejected OrderRejectedEvent) {
 	for _, state := range m.symbolStates {
 		if rejected.RequestID == state.lastBidReqID {
+			// Unreserve quote balance for rejected buy order
+			if state.ReservedQuote > 0 {
+				m.reservedQuoteBalance -= state.ReservedQuote
+				if m.reservedQuoteBalance < 0 {
+					m.reservedQuoteBalance = 0
+				}
+				state.ReservedQuote = 0
+			}
 			state.lastBidReqID = 0
 			return
 		} else if rejected.RequestID == state.lastAskReqID {
@@ -354,25 +379,24 @@ func (m *MultiSymbolLP) placeQuotesForSymbol(state *symbolLPState) {
 		state.AskSize = baseBalance
 	}
 
-	// Place buy order if we have quote (allocate portion of quote balance)
+	// Place buy order if we have quote (allocate portion of available quote balance)
 	numSymbols := int64(len(m.config.Symbols))
 	if numSymbols == 0 {
 		return
 	}
-	quotePerSymbol := m.quoteBalance / numSymbols
+	availableQuote := m.quoteBalance - m.reservedQuoteBalance
+	quotePerSymbol := availableQuote / numSymbols
 	if quotePerSymbol > 0 && bidPrice > 0 {
 		bidQty := (quotePerSymbol * basePrecision) / bidPrice
 		if bidQty > 0 {
 			state.lastBidReqID = m.nextRequestID()
 			m.SubmitOrder(state.Symbol, exchange.Buy, exchange.LimitOrder, bidPrice, bidQty)
 			state.BidSize = bidQty
-		} else {
-			fmt.Printf("LP %d: bidQty is 0! quotePerSymbol=%d basePrecision=%d bidPrice=%d\n",
-				m.ID(), quotePerSymbol, basePrecision, bidPrice)
+			// Reserve the quote balance for this order
+			reserveAmount := (bidQty * bidPrice) / basePrecision
+			state.ReservedQuote = reserveAmount
+			m.reservedQuoteBalance += reserveAmount
 		}
-	} else {
-		fmt.Printf("LP %d: Cannot place buy for %s - quotePerSymbol=%d bidPrice=%d\n",
-			m.ID(), state.Symbol, quotePerSymbol, bidPrice)
 	}
 }
 
@@ -694,11 +718,11 @@ func (mm *MultiSymbolMM) requoteSymbol(state *symbolMMState, midPrice int64) {
 		return
 	}
 
-	absInventory := state.Inventory
-	if absInventory < 0 {
-		absInventory = -absInventory
-	}
-	if absInventory >= mm.config.MaxInventory {
+	// Check inventory limits
+	canBuy := state.Inventory < mm.config.MaxInventory
+	canSell := state.Inventory > -mm.config.MaxInventory
+
+	if !canBuy && !canSell {
 		mm.cancelOrdersForSymbol(state)
 		return
 	}
@@ -713,10 +737,11 @@ func (mm *MultiSymbolMM) requoteSymbol(state *symbolMMState, midPrice int64) {
 	askPrice = (askPrice / tickSize) * tickSize
 
 	// Check if prices changed OR if we need to replenish missing orders
-	pricesUnchanged := bidPrice == state.CurrentBid && askPrice == state.CurrentAsk
-	ordersActive := state.ActiveBidID != 0 && state.ActiveAskID != 0
+	// logic: if (canBuy AND activeBid matches) AND (canSell AND activeAsk matches) -> return
+	bidFine := !canBuy || (canBuy && bidPrice == state.CurrentBid && state.ActiveBidID != 0)
+	askFine := !canSell || (canSell && askPrice == state.CurrentAsk && state.ActiveAskID != 0)
 
-	if pricesUnchanged && ordersActive {
+	if bidFine && askFine {
 		return
 	}
 
@@ -725,11 +750,15 @@ func (mm *MultiSymbolMM) requoteSymbol(state *symbolMMState, midPrice int64) {
 	state.CurrentBid = bidPrice
 	state.CurrentAsk = askPrice
 
-	state.lastBidReqID = atomic.AddUint64(&mm.BaseActor.requestSeq, 1)
-	mm.SubmitOrder(state.Symbol, exchange.Buy, exchange.LimitOrder, bidPrice, mm.config.QuoteSize)
+	if canBuy {
+		state.lastBidReqID = atomic.AddUint64(&mm.BaseActor.requestSeq, 1)
+		mm.SubmitOrder(state.Symbol, exchange.Buy, exchange.LimitOrder, bidPrice, mm.config.QuoteSize)
+	}
 
-	state.lastAskReqID = atomic.AddUint64(&mm.BaseActor.requestSeq, 1)
-	mm.SubmitOrder(state.Symbol, exchange.Sell, exchange.LimitOrder, askPrice, mm.config.QuoteSize)
+	if canSell {
+		state.lastAskReqID = atomic.AddUint64(&mm.BaseActor.requestSeq, 1)
+		mm.SubmitOrder(state.Symbol, exchange.Sell, exchange.LimitOrder, askPrice, mm.config.QuoteSize)
+	}
 }
 
 func (mm *MultiSymbolMM) cancelOrdersForSymbol(state *symbolMMState) {

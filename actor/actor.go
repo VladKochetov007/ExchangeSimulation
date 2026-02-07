@@ -171,6 +171,9 @@ func (a *BaseActor) handleResponse(resp exchange.Response) {
 }
 
 func (a *BaseActor) handleMarketData(md *exchange.MarketDataMsg) {
+	if md == nil {
+		return
+	}
 	switch md.Type {
 	case exchange.MDTrade:
 		trade := md.Data.(*exchange.Trade)
@@ -242,7 +245,20 @@ func (a *BaseActor) SubmitOrder(symbol string, side exchange.Side, orderType exc
 			Visibility:  exchange.Normal,
 		},
 	}
-	a.gateway.RequestCh <- req
+	if a.gateway == nil {
+		return
+	}
+	a.gateway.Mu.Lock()
+	if !a.gateway.Running {
+		a.gateway.Mu.Unlock()
+		return
+	}
+	a.gateway.Mu.Unlock()
+	select {
+	case a.gateway.RequestCh <- req:
+	default:
+		// Gateway closed, silently drop request
+	}
 }
 
 func (a *BaseActor) SubmitOrderFull(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64, visibility exchange.Visibility, icebergQty int64) {
@@ -261,7 +277,20 @@ func (a *BaseActor) SubmitOrderFull(symbol string, side exchange.Side, orderType
 			IcebergQty:  icebergQty,
 		},
 	}
-	a.gateway.RequestCh <- req
+	if a.gateway == nil {
+		return
+	}
+	a.gateway.Mu.Lock()
+	if !a.gateway.Running {
+		a.gateway.Mu.Unlock()
+		return
+	}
+	a.gateway.Mu.Unlock()
+	select {
+	case a.gateway.RequestCh <- req:
+	default:
+		// Gateway closed, silently drop request
+	}
 }
 
 func (a *BaseActor) CancelOrder(orderID uint64) {
@@ -273,7 +302,20 @@ func (a *BaseActor) CancelOrder(orderID uint64) {
 			OrderID:   orderID,
 		},
 	}
-	a.gateway.RequestCh <- req
+	if a.gateway == nil {
+		return
+	}
+	a.gateway.Mu.Lock()
+	if !a.gateway.Running {
+		a.gateway.Mu.Unlock()
+		return
+	}
+	a.gateway.Mu.Unlock()
+	select {
+	case a.gateway.RequestCh <- req:
+	default:
+		// Gateway closed, silently drop request
+	}
 }
 
 func (a *BaseActor) QueryBalance() {
@@ -285,7 +327,20 @@ func (a *BaseActor) QueryBalance() {
 			QueryType: exchange.QueryBalance,
 		},
 	}
-	a.gateway.RequestCh <- req
+	if a.gateway == nil {
+		return
+	}
+	a.gateway.Mu.Lock()
+	if !a.gateway.Running {
+		a.gateway.Mu.Unlock()
+		return
+	}
+	a.gateway.Mu.Unlock()
+	select {
+	case a.gateway.RequestCh <- req:
+	default:
+		// Gateway closed, silently drop request
+	}
 }
 
 func (a *BaseActor) Subscribe(symbol string) {
@@ -297,7 +352,20 @@ func (a *BaseActor) Subscribe(symbol string) {
 			Symbol:    symbol,
 		},
 	}
-	a.gateway.RequestCh <- req
+	if a.gateway == nil {
+		return
+	}
+	a.gateway.Mu.Lock()
+	if !a.gateway.Running {
+		a.gateway.Mu.Unlock()
+		return
+	}
+	a.gateway.Mu.Unlock()
+	select {
+	case a.gateway.RequestCh <- req:
+	default:
+		// Gateway closed, silently drop request
+	}
 }
 
 func (a *BaseActor) Unsubscribe(symbol string) {
@@ -309,7 +377,20 @@ func (a *BaseActor) Unsubscribe(symbol string) {
 			Symbol:    symbol,
 		},
 	}
-	a.gateway.RequestCh <- req
+	if a.gateway == nil {
+		return
+	}
+	a.gateway.Mu.Lock()
+	if !a.gateway.Running {
+		a.gateway.Mu.Unlock()
+		return
+	}
+	a.gateway.Mu.Unlock()
+	select {
+	case a.gateway.RequestCh <- req:
+	default:
+		// Gateway closed, silently drop request
+	}
 }
 
 func (a *BaseActor) EventChannel() <-chan *Event {

@@ -3,8 +3,8 @@ package exchange
 import "sync"
 
 const (
-	RequestChSize    = 1000
-	ResponseChSize   = 1000
+	RequestChSize    = 10000
+	ResponseChSize   = 10000
 	MarketDataChSize = 10000
 )
 
@@ -14,7 +14,7 @@ type ClientGateway struct {
 	ResponseCh chan Response
 	MarketData chan *MarketDataMsg
 	Running    bool
-	mu         sync.Mutex
+	Mu         sync.Mutex
 }
 
 func NewClientGateway(clientID uint64) *ClientGateway {
@@ -23,13 +23,13 @@ func NewClientGateway(clientID uint64) *ClientGateway {
 		RequestCh:  make(chan Request, RequestChSize),
 		ResponseCh: make(chan Response, ResponseChSize),
 		MarketData: make(chan *MarketDataMsg, MarketDataChSize),
-		Running:    false,
+		Running:    true,
 	}
 }
 
 func (g *ClientGateway) Close() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.Mu.Lock()
+	defer g.Mu.Unlock()
 
 	if g.Running {
 		close(g.RequestCh)

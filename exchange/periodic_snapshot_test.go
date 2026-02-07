@@ -39,22 +39,27 @@ func TestPeriodicSnapshots(t *testing.T) {
 	ex.Loggers["BTCUSD"] = logger
 
 	// Add instrument
-	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", 8, 2, 1, 100)
+	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
 	ex.AddInstrument(inst)
 
 	// Add some orders to make the snapshot interesting
-	gw := ex.ConnectClient(1, map[string]int64{"USD": 100000000, "BTC": 100000000}, &PercentageFee{})
+	balances := map[string]int64{
+		"BTC": 100 * BTC_PRECISION,
+		"USD": 1000000 * USD_PRECISION,
+	}
+	gw := ex.ConnectClient(1, balances, &PercentageFee{})
 	
 	// Place a buy order
 	gw.RequestCh <- Request{
 		Type: ReqPlaceOrder,
 		OrderReq: &OrderRequest{
-			Symbol: "BTCUSD",
-			Side:   Buy,
-			Type:   LimitOrder,
-			Price:  5000000, // 50000.00
-			Qty:    1000000, // 0.01 BTC
+			Symbol:      "BTCUSD",
+			Side:        Buy,
+			Type:        LimitOrder,
+			Price:       PriceUSD(50000, DOLLAR_TICK),
+			Qty:         BTCAmount(1),
 			TimeInForce: GTC,
+			Visibility:  Normal,
 		},
 	}
 	<-gw.ResponseCh
@@ -107,8 +112,9 @@ func TestPeriodicSnapshots(t *testing.T) {
 	if len(bids) != 1 {
 		t.Errorf("expected 1 bid level, got %d", len(bids))
 	} else {
-		if bids[0].Price != 5000000 {
-			t.Errorf("expected bid price 5000000, got %d", bids[0].Price)
+		expectedPrice := PriceUSD(50000, DOLLAR_TICK)
+		if bids[0].Price != expectedPrice {
+			t.Errorf("expected bid price %d, got %d", expectedPrice, bids[0].Price)
 		}
 	}
 }

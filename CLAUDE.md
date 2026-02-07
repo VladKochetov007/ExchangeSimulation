@@ -118,3 +118,38 @@ Example: `feature/user-authentication`
 - Don't assume - ask if testing is required
 
 Do not delete test after implementation and passing it.
+
+## Build System
+
+### Makefile
+The project uses a Makefile for build automation. See [BUILD.md](BUILD.md) for complete documentation.
+
+**Common commands**:
+```bash
+make build          # Build all binaries to bin/
+make test           # Run all tests
+make coverage-html  # Generate and view coverage report
+make clean          # Remove built artifacts
+make all            # Format, vet, test, and build
+```
+
+**Testing**:
+```bash
+make test           # Concise test output
+make test-verbose   # Full verbose output
+make test-race      # Run with race detector
+make coverage       # Generate coverage report
+make coverage-html  # View coverage in browser
+```
+
+**Development**:
+```bash
+make fmt            # Format code
+make vet            # Run static analysis
+make lint           # Run linter (requires golangci-lint)
+make run-multisim   # Build and run simulation
+```
+
+**Always run `make test` before committing code.**
+
+For detailed build instructions, troubleshooting, and CI/CD integration, see [BUILD.md](BUILD.md).

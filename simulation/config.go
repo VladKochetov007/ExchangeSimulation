@@ -65,10 +65,10 @@ func DefaultMultiSimConfig() MultiSimConfig {
 			"DOGE": 1000000 * exchange.SATOSHI,
 			"USD":  100000000 * exchange.USD_PRECISION,
 		},
-		Duration:     0,
+		Duration:     5 * time.Second,
 		LogDir:       "logs",
 		SnapshotInterval: 1 * time.Second, // 1 second snapshot interval by default
-		SimSpeedup:   50.0,   // 50x speedup
+		SimSpeedup:   10.0,   // 10x speedup (reduced from 50x)
 		LPSkewFactor: 0.0005, // 5 bps per unit inventory skew (will need tuning)
 	}
 

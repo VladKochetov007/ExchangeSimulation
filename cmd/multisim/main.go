@@ -50,10 +50,11 @@ func run() error {
 		},
 
 
-		Duration:     10 * time.Second,
-		LogDir:       "logs",
-		SimSpeedup:   50.0,   // 50x speedup
-		LPSkewFactor: 0.0005, // 5 bps per unit inventory skew
+		Duration:         10 * time.Second,
+		LogDir:           "logs",
+		SimSpeedup:       50.0,                   // 50x speedup
+		LPSkewFactor:     0.0005,                 // 5 bps per unit inventory skew
+		SnapshotInterval: 100 * time.Millisecond, // Snapshot every 100ms for L3 reconstruction
 	}
 
 	// Create and start the runner

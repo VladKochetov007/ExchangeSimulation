@@ -60,6 +60,12 @@ func (p *MDPublisher) Publish(symbol string, mdType MDType, data any, timestamp 
 	for clientID := range subs {
 		gateway := p.gateways[clientID]
 		if gateway != nil {
+			gateway.Mu.Lock()
+			if !gateway.Running {
+				gateway.Mu.Unlock()
+				continue
+			}
+			gateway.Mu.Unlock()
 			msgCopy := &MarketDataMsg{
 				Type:      mdType,
 				Symbol:    symbol,
@@ -67,7 +73,11 @@ func (p *MDPublisher) Publish(symbol string, mdType MDType, data any, timestamp 
 				Timestamp: timestamp,
 				Data:      data,
 			}
-			gateway.MarketData <- msgCopy
+			select {
+			case gateway.MarketData <- msgCopy:
+			default:
+				// Gateway closed, silently drop
+			}
 		}
 	}
 	p.mu.Unlock()
