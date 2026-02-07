@@ -66,15 +66,16 @@ func TestExchangeLogging(t *testing.T) {
 	gw1.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: buyReq}
 	<-gw1.ResponseCh
 
-	// Verify OrderAccepted was logged
-	if len(logger.events) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(logger.events))
+	// Verify OrderAccepted and BookDelta were logged
+	if len(logger.events) != 2 {
+		t.Fatalf("expected 2 events (OrderAccepted + BookDelta), got %d", len(logger.events))
 	}
 	if logger.events[0]["event"] != "OrderAccepted" {
 		t.Errorf("expected OrderAccepted event, got %v", logger.events[0]["event"])
 	}
-	if logger.events[0]["request_id"] != float64(1) {
-		t.Errorf("expected request_id=1, got %v", logger.events[0]["request_id"])
+	// Note: OrderAccepted logs the order object, not request details
+	if logger.events[0]["order_id"] == nil {
+		t.Errorf("expected order_id in OrderAccepted event")
 	}
 
 	// Place a sell order that will match
@@ -231,16 +232,16 @@ func TestExchangeLoggingCancel(t *testing.T) {
 	gw1.RequestCh <- Request{Type: ReqCancelOrder, CancelReq: cancelReq}
 	<-gw1.ResponseCh
 
-	// Should have: OrderAccepted, OrderCancelled
-	if len(logger.events) != 2 {
-		t.Fatalf("expected 2 events, got %d", len(logger.events))
+	// Should have: OrderAccepted, BookDelta (post), BookDelta (cancel), OrderCancelled
+	if len(logger.events) != 4 {
+		t.Fatalf("expected 4 events (OrderAccepted + BookDelta + BookDelta + OrderCancelled), got %d", len(logger.events))
 	}
 
-	if logger.events[1]["event"] != "OrderCancelled" {
-		t.Errorf("expected OrderCancelled event, got %v", logger.events[1]["event"])
+	if logger.events[3]["event"] != "OrderCancelled" {
+		t.Errorf("expected OrderCancelled event, got %v", logger.events[3]["event"])
 	}
 
-	if logger.events[1]["order_id"] != float64(orderID) {
-		t.Errorf("expected order_id=%d, got %v", orderID, logger.events[1]["order_id"])
+	if logger.events[3]["order_id"] != float64(orderID) {
+		t.Errorf("expected order_id=%d, got %v", orderID, logger.events[3]["order_id"])
 	}
 }

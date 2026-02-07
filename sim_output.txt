@@ -13,3 +13,8 @@ Log directory: logs/
 Starting simulation...
 Press Ctrl+C to stop early
 
+
+Shutting down...
+
+Simulation completed in 1m6.132s
+Logs saved to: logs/

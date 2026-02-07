@@ -251,13 +251,16 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 				}
 			}
 		} else {
-			if client.GetAvailable(instrument.BaseAsset()) < req.Qty {
-				putOrder(order)
-				resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-				if log != nil {
-					log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+			// Spot requires base asset, perp does not (can short)
+			if !instrument.IsPerp() {
+				if client.GetAvailable(instrument.BaseAsset()) < req.Qty {
+					putOrder(order)
+					resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+					if log != nil {
+						log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+					}
+					return resp
 				}
-				return resp
 			}
 		}
 	case LimitOrder:
@@ -273,14 +276,17 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 				return resp
 			}
 		} else {
-			asset = instrument.BaseAsset()
-			if !client.Reserve(asset, req.Qty) {
-				putOrder(order)
-				resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-				if log != nil {
-					log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+			// Spot requires base asset reservation, perp does not
+			if !instrument.IsPerp() {
+				asset = instrument.BaseAsset()
+				if !client.Reserve(asset, req.Qty) {
+					putOrder(order)
+					resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+					if log != nil {
+						log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+					}
+					return resp
 				}
-				return resp
 			}
 		}
 	}
@@ -296,7 +302,9 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 			if req.Side == Buy {
 				client.Release(instrument.QuoteAsset(), (req.Qty*req.Price)/precision)
 			} else {
-				client.Release(instrument.BaseAsset(), req.Qty)
+				if !instrument.IsPerp() {
+					client.Release(instrument.BaseAsset(), req.Qty)
+				}
 			}
 		}
 		putOrder(order)
@@ -355,7 +363,9 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 				remainingNotional := ((order.Qty - order.FilledQty) * order.Price) / precision
 				client.Release(instrument.QuoteAsset(), remainingNotional)
 			} else {
-				client.Release(instrument.BaseAsset(), order.Qty-order.FilledQty)
+				if !instrument.IsPerp() {
+					client.Release(instrument.BaseAsset(), order.Qty-order.FilledQty)
+				}
 			}
 		}
 		putOrder(order)
@@ -418,7 +428,9 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 		book.Bids.cancelOrder(req.OrderID)
 		e.publishBookUpdate(book, Buy, order.Price)
 	} else {
-		client.Release(instrument.BaseAsset(), remainingQty)
+		if !instrument.IsPerp() {
+			client.Release(instrument.BaseAsset(), remainingQty)
+		}
 		book.Asks.cancelOrder(req.OrderID)
 		e.publishBookUpdate(book, Sell, order.Price)
 	}

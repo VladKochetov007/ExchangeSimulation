@@ -2,6 +2,7 @@ package actor
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -365,7 +366,13 @@ func (m *MultiSymbolLP) placeQuotesForSymbol(state *symbolLPState) {
 			state.lastBidReqID = m.nextRequestID()
 			m.SubmitOrder(state.Symbol, exchange.Buy, exchange.LimitOrder, bidPrice, bidQty)
 			state.BidSize = bidQty
+		} else {
+			fmt.Printf("LP %d: bidQty is 0! quotePerSymbol=%d basePrecision=%d bidPrice=%d\n",
+				m.ID(), quotePerSymbol, basePrecision, bidPrice)
 		}
+	} else {
+		fmt.Printf("LP %d: Cannot place buy for %s - quotePerSymbol=%d bidPrice=%d\n",
+			m.ID(), state.Symbol, quotePerSymbol, bidPrice)
 	}
 }
 

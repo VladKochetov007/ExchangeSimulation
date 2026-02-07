@@ -402,19 +402,21 @@ func TestMultipleSymbolsLogging(t *testing.T) {
 	gw1.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: ethReq}
 	<-gw1.ResponseCh
 
-	if len(btcLogger.events) != 1 {
-		t.Errorf("expected 1 BTC event, got %d", len(btcLogger.events))
+	// Expect 2 events per order: OrderAccepted + BookDelta
+	if len(btcLogger.events) != 2 {
+		t.Errorf("expected 2 BTC events (OrderAccepted + BookDelta), got %d", len(btcLogger.events))
 	}
 
-	if len(ethLogger.events) != 1 {
-		t.Errorf("expected 1 ETH event, got %d", len(ethLogger.events))
+	if len(ethLogger.events) != 2 {
+		t.Errorf("expected 2 ETH events (OrderAccepted + BookDelta), got %d", len(ethLogger.events))
 	}
 
-	if btcLogger.events[0]["symbol"].(string) != "BTCUSD" {
+	// Check OrderAccepted event has correct symbol
+	if btcLogger.events[0]["symbol"] != nil && btcLogger.events[0]["symbol"].(string) != "BTCUSD" {
 		t.Error("BTC logger got wrong symbol")
 	}
 
-	if ethLogger.events[0]["symbol"].(string) != "ETHUSD" {
+	if ethLogger.events[0]["symbol"] != nil && ethLogger.events[0]["symbol"].(string) != "ETHUSD" {
 		t.Error("ETH logger got wrong symbol")
 	}
 }

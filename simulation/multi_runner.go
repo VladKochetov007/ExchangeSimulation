@@ -50,6 +50,24 @@ func NewMultiExchangeRunner(config MultiSimConfig) (*MultiExchangeRunner, error)
 
 	bootstrapPrices := GetBootstrapPrices()
 
+	// Calculate total actors across all exchanges to divide balances
+	totalActors := 0
+	for i := range config.Exchanges {
+		assets := assetSets[i]
+		instruments := GenerateInstruments(assets, config.QuoteAsset, config.SpotToFuturesRatio)
+		numSymbols := len(instruments)
+
+		// LPs and MMs are per exchange, Takers are per symbol
+		actorsForExchange := config.LPsPerSymbol + config.MMsPerSymbol + (numSymbols * config.TakersPerSymbol)
+		totalActors += actorsForExchange
+	}
+
+	// Divide initial balances among all actors
+	dividedBalances := make(map[string]int64)
+	for asset, amount := range config.InitialBalances {
+		dividedBalances[asset] = amount / int64(totalActors)
+	}
+
 	// Setup each exchange
 	for i, exConfig := range config.Exchanges {
 		venueID := VenueID(exConfig.Name)
@@ -98,7 +116,7 @@ func NewMultiExchangeRunner(config MultiSimConfig) (*MultiExchangeRunner, error)
 		}
 
 		// Create actors for this exchange
-		if err := runner.createActorsForExchange(venueID, ex, instruments, bootstrapPrices); err != nil {
+		if err := runner.createActorsForExchange(venueID, ex, instruments, bootstrapPrices, dividedBalances); err != nil {
 			runner.Close()
 			return nil, err
 		}
@@ -112,6 +130,7 @@ func (r *MultiExchangeRunner) createActorsForExchange(
 	ex *exchange.Exchange,
 	instruments map[string]exchange.Instrument,
 	bootstrapPrices map[string]int64,
+	dividedBalances map[string]int64,
 ) error {
 	symbols := make([]string, 0, len(instruments))
 	for symbol := range instruments {
@@ -133,6 +152,7 @@ func (r *MultiExchangeRunner) createActorsForExchange(
 		SpreadBps:         r.config.LPSpreadBps,
 		BootstrapPrices:   bootstrapPrices,
 		LiquidityMultiple: 10,
+		MinExitSize:       50 * exchange.SATOSHI, // 0.5 BTC minimum position before considering exit
 	}
 	if r.config.SimSpeedup > 0 {
 		lpConfig.MonitorInterval = time.Duration(float64(100*time.Millisecond) / r.config.SimSpeedup)
@@ -141,18 +161,18 @@ func (r *MultiExchangeRunner) createActorsForExchange(
 	}
 
 	for i := 0; i < r.config.LPsPerSymbol; i++ {
-		gateway := ex.ConnectClient(actorID, r.config.InitialBalances, feePlan)
+		gateway := ex.ConnectClient(actorID, dividedBalances, feePlan)
 
 		lp := actor.NewMultiSymbolLP(actorID, gateway, lpConfig)
 
 		// Set initial balances
 		baseBalances := make(map[string]int64)
-		for asset, balance := range r.config.InitialBalances {
+		for asset, balance := range dividedBalances {
 			if asset != r.config.QuoteAsset {
 				baseBalances[asset] = balance
 			}
 		}
-		lp.SetBalances(baseBalances, r.config.InitialBalances[r.config.QuoteAsset])
+		lp.SetBalances(baseBalances, dividedBalances[r.config.QuoteAsset])
 
 		r.actors = append(r.actors, lp)
 		actorID++
@@ -169,8 +189,8 @@ func (r *MultiExchangeRunner) createActorsForExchange(
 			Symbols:          symbols,
 			Instruments:      instruments,
 			SpreadBps:        spread,
-			QuoteSize:        exchange.BTCAmount(0.5),
-			MaxInventory:     exchange.BTCAmount(10),
+			QuoteSize:        exchange.BTCAmount(0.05), // Reduced to 0.05 BTC to fit limited balances
+			MaxInventory:     exchange.BTCAmount(1),    // Reduced to 1 BTC
 			RequoteThreshold: 5,
 		}
 
@@ -180,7 +200,7 @@ func (r *MultiExchangeRunner) createActorsForExchange(
 			mmConfig.MonitorInterval = 50 * time.Millisecond
 		}
 
-		gateway := ex.ConnectClient(actorID, r.config.InitialBalances, feePlan)
+		gateway := ex.ConnectClient(actorID, dividedBalances, feePlan)
 		mm := actor.NewMultiSymbolMM(actorID, gateway, mmConfig)
 
 		r.actors = append(r.actors, mm)
@@ -221,7 +241,7 @@ func (r *MultiExchangeRunner) createActorsForExchange(
 
 	for symbol := range instruments {
 		for i := 0; i < r.config.TakersPerSymbol; i++ {
-			baseGateway := ex.ConnectClient(actorID, r.config.InitialBalances, feePlan)
+			baseGateway := ex.ConnectClient(actorID, dividedBalances, feePlan)
 
 			delayedMktData := NewDelayedGateway(baseGateway, mktLatencyConfig)
 			delayedOrderEntry := NewDelayedGateway(baseGateway, orderLatencyConfig)

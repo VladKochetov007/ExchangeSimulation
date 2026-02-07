@@ -41,16 +41,16 @@ func run() error {
 		TakerInterval: 500 * time.Millisecond, // Trade every 500ms
 
 		InitialBalances: map[string]int64{
-			"BTC":  100 * exchange.BTC_PRECISION,
-			"ETH":  1000 * exchange.ETH_PRECISION,
-			"SOL":  10000 * exchange.SATOSHI,
-			"XRP":  100000 * exchange.SATOSHI,
-			"DOGE": 1000000 * exchange.SATOSHI,
-			"USD":  1000000 * exchange.USD_PRECISION, // 1 million USD
+			"BTC":  50 * exchange.BTC_PRECISION,              // 50 BTC (~$5M @ $100k, ~1.7 BTC per actor)
+			"ETH":  1250 * exchange.ETH_PRECISION,            // 1250 ETH (~$5M @ $4k, ~43 ETH per actor)
+			"SOL":  25000 * exchange.SATOSHI,                 // 25,000 SOL (~$5M @ $200, ~862 SOL per actor)
+			"XRP":  1666666 * exchange.SATOSHI,               // 1.67M XRP (~$5M @ $3, ~57K XRP per actor)
+			"DOGE": 12500000 * exchange.SATOSHI,              // 12.5M DOGE (~$5M @ $0.40, ~431K DOGE per actor)
+			"USD":  5000000 * exchange.USD_PRECISION,         // 5 million USD (~172K per actor)
 		},
 
 
-		Duration:     0,
+		Duration:     10 * time.Second,
 		LogDir:       "logs",
 		SimSpeedup:   50.0,   // 50x speedup
 		LPSkewFactor: 0.0005, // 5 bps per unit inventory skew
