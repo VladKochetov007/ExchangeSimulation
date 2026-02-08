@@ -282,3 +282,6 @@ coverage.out
 sim
 latency_arb
 good_plan.md
+
+# Go binaries
+bin/
