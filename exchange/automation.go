@@ -10,16 +10,27 @@ import (
 // - Automatic mark/index price calculation
 // - Automatic funding rate updates
 // - Automatic funding settlement on schedule
+// - Liquidation checks after price updates
+// - Collateral interest charging on borrowed amounts
 type ExchangeAutomation struct {
 	exchange            *Exchange
 	markPriceCalc       MarkPriceCalculator
 	indexProvider       IndexPriceProvider
 	priceUpdateInterval time.Duration
+	collateralRate      int64 // annual rate in bps (e.g. 500 = 5%)
+	liquidationHandler  LiquidationHandler
 
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	mu     sync.RWMutex
+}
+
+// LiquidationHandler is called when a liquidation event occurs.
+type LiquidationHandler interface {
+	OnMarginCall(event *MarginCallEvent)
+	OnLiquidation(event *LiquidationEvent)
+	OnInsuranceFund(event *InsuranceFundEvent)
 }
 
 // AutomationConfig configures the automatic exchange operations
@@ -32,6 +43,12 @@ type AutomationConfig struct {
 
 	// PriceUpdateInterval is how often to update funding rates (default: 3s)
 	PriceUpdateInterval time.Duration
+
+	// CollateralRate is annual interest rate on borrowed amounts in bps (default: 500 = 5%)
+	CollateralRate int64
+
+	// LiquidationHandler receives liquidation events (optional)
+	LiquidationHandler LiquidationHandler
 }
 
 // NewExchangeAutomation creates a new automation manager
@@ -39,9 +56,11 @@ func NewExchangeAutomation(exchange *Exchange, config AutomationConfig) *Exchang
 	if config.MarkPriceCalc == nil {
 		config.MarkPriceCalc = NewMidPriceCalculator()
 	}
-
 	if config.PriceUpdateInterval == 0 {
 		config.PriceUpdateInterval = 3 * time.Second
+	}
+	if config.CollateralRate == 0 {
+		config.CollateralRate = 500 // 5% APR default
 	}
 
 	return &ExchangeAutomation{
@@ -49,6 +68,8 @@ func NewExchangeAutomation(exchange *Exchange, config AutomationConfig) *Exchang
 		markPriceCalc:       config.MarkPriceCalc,
 		indexProvider:       config.IndexProvider,
 		priceUpdateInterval: config.PriceUpdateInterval,
+		collateralRate:      config.CollateralRate,
+		liquidationHandler:  config.LiquidationHandler,
 	}
 }
 
@@ -64,13 +85,14 @@ func (a *ExchangeAutomation) Start(ctx context.Context) {
 
 	a.ctx, a.cancel = context.WithCancel(ctx)
 
-	// Start price update loop
 	a.wg.Add(1)
 	go a.priceUpdateLoop()
 
-	// Start funding settlement loop
 	a.wg.Add(1)
 	go a.fundingSettlementLoop()
+
+	a.wg.Add(1)
+	go a.collateralChargeLoop()
 }
 
 // Stop stops all automatic operations and waits for completion
@@ -129,37 +151,246 @@ func (a *ExchangeAutomation) fundingSettlementLoop() {
 
 // updateAllPerpPrices updates funding rates for all perpetual instruments
 func (a *ExchangeAutomation) updateAllPerpPrices() {
+	timestamp := a.exchange.Clock.NowUnixNano()
+
 	a.exchange.mu.RLock()
-	books := make([]*OrderBook, 0, len(a.exchange.Books))
+	type perpUpdate struct {
+		symbol     string
+		perp       *PerpFutures
+		markPrice  int64
+		indexPrice int64
+	}
+	updates := make([]perpUpdate, 0, len(a.exchange.Books))
 	for _, book := range a.exchange.Books {
-		if book.Instrument.IsPerp() {
-			books = append(books, book)
+		if !book.Instrument.IsPerp() {
+			continue
 		}
+		markPrice := a.markPriceCalc.Calculate(book)
+		if markPrice == 0 {
+			continue
+		}
+		indexPrice := a.indexProvider.GetIndexPrice(book.Symbol, timestamp)
+		if indexPrice == 0 {
+			continue
+		}
+		updates = append(updates, perpUpdate{
+			symbol:     book.Symbol,
+			perp:       book.Instrument.(*PerpFutures),
+			markPrice:  markPrice,
+			indexPrice: indexPrice,
+		})
 	}
 	a.exchange.mu.RUnlock()
 
-	timestamp := a.exchange.Clock.NowUnixNano()
+	for _, u := range updates {
+		u.perp.UpdateFundingRate(u.indexPrice, u.markPrice)
+		a.exchange.MDPublisher.PublishFunding(u.symbol, u.perp.GetFundingRate(), timestamp)
+		a.checkLiquidations(u.symbol, u.perp, u.markPrice)
+	}
+}
 
-	for _, book := range books {
-		perp := book.Instrument.(*PerpFutures)
+// collateralChargeLoop charges interest on borrowed amounts periodically (every hour of sim time).
+func (a *ExchangeAutomation) collateralChargeLoop() {
+	defer a.wg.Done()
 
-		// Calculate mark price from order book
-		markPrice := a.markPriceCalc.Calculate(book)
-		if markPrice == 0 {
-			continue // No valid mark price yet
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case <-ticker.C:
+			a.chargeCollateralInterest()
+		}
+	}
+}
+
+func (a *ExchangeAutomation) chargeCollateralInterest() {
+	a.exchange.mu.Lock()
+	defer a.exchange.mu.Unlock()
+
+	const dtSeconds = 60
+	const secondsPerYear = 365 * 24 * 3600
+
+	for _, client := range a.exchange.Clients {
+		for asset, borrowed := range client.Borrowed {
+			if borrowed <= 0 {
+				continue
+			}
+			// interest = borrowed * rate * dt / (seconds_per_year * precision)
+			// rate is in bps so divide by 10000
+			interest := borrowed * a.collateralRate * dtSeconds / (int64(secondsPerYear) * 10000)
+			if interest > 0 {
+				client.Balances[asset] -= interest
+				a.exchange.ExchangeBalance.FeeRevenue[asset] += interest
+			}
+		}
+	}
+}
+
+// checkLiquidations evaluates all positions for a symbol after a mark price update.
+func (a *ExchangeAutomation) checkLiquidations(symbol string, perp *PerpFutures, markPrice int64) {
+	if markPrice == 0 {
+		return
+	}
+	precision := perp.TickSize()
+
+	a.exchange.mu.Lock()
+	defer a.exchange.mu.Unlock()
+
+	for clientID, client := range a.exchange.Clients {
+		pos := a.exchange.Positions.GetPosition(clientID, symbol)
+		if pos == nil || pos.Size == 0 {
+			continue
 		}
 
-		// Get index price from provider
-		indexPrice := a.indexProvider.GetIndexPrice(book.Symbol, timestamp)
-		if indexPrice == 0 {
-			continue // No valid index price yet
+		// Unrealized PnL
+		sign := int64(1)
+		if pos.Size < 0 {
+			sign = -1
+		}
+		unrealizedPnL := abs(pos.Size) * sign * (markPrice - pos.EntryPrice) / precision
+
+		// Initial margin posted = abs(size) * entryPrice * marginRate / (precision * 10000)
+		initMargin := abs(pos.Size) * pos.EntryPrice * perp.MarginRate / (precision * 10000)
+		if initMargin == 0 {
+			continue
 		}
 
-		// Update funding rate
-		perp.UpdateFundingRate(indexPrice, markPrice)
+		equity := client.PerpAvailable(perp.QuoteAsset()) + unrealizedPnL
+		marginRatio := equity * 10000 / initMargin // in bps
 
-		// Publish funding update event
-		a.exchange.MDPublisher.PublishFunding(book.Symbol, perp.GetFundingRate(), timestamp)
+		timestamp := a.exchange.Clock.NowUnixNano()
+
+		if marginRatio < perp.MaintenanceMarginRate {
+			a.liquidate(clientID, client, symbol, pos, perp, markPrice, timestamp)
+		} else if marginRatio < perp.WarningMarginRate && a.liquidationHandler != nil {
+			liqPrice := a.estimateLiquidationPrice(pos, client, perp, precision)
+			a.liquidationHandler.OnMarginCall(&MarginCallEvent{
+				Timestamp:        timestamp,
+				ClientID:         clientID,
+				Symbol:           symbol,
+				MarginRatioBps:   marginRatio,
+				LiquidationPrice: liqPrice,
+			})
+		}
+	}
+}
+
+// estimateLiquidationPrice returns the price at which the position would be liquidated.
+func (a *ExchangeAutomation) estimateLiquidationPrice(pos *Position, client *Client, perp *PerpFutures, precision int64) int64 {
+	// margin runs out when equity = 0
+	// equity = available + size * (liqPrice - entry) / precision = 0
+	// liqPrice = entry - available * precision / size  (for long)
+	// liqPrice = entry + available * precision / size  (for short)
+	available := client.PerpAvailable(perp.QuoteAsset())
+	if pos.Size == 0 {
+		return 0
+	}
+	if pos.Size > 0 {
+		return pos.EntryPrice - available*precision/pos.Size
+	}
+	return pos.EntryPrice + available*precision/(-pos.Size)
+}
+
+// liquidate forcibly closes a position via market order when maintenance margin is breached.
+// Caller must hold exchange.mu.
+func (a *ExchangeAutomation) liquidate(clientID uint64, client *Client, symbol string, pos *Position, perp *PerpFutures, markPrice, timestamp int64) {
+	book := a.exchange.Books[symbol]
+	if book == nil {
+		return
+	}
+
+	// Force close: opposite side market order
+	closeSide := Sell
+	if pos.Size < 0 {
+		closeSide = Buy
+	}
+	closeQty := abs(pos.Size)
+
+	// Cancel all existing orders for this client on this symbol first
+	for _, orderID := range append([]uint64{}, client.OrderIDs...) {
+		var order *Order
+		if o := book.Bids.Orders[orderID]; o != nil {
+			order = o
+		} else if o := book.Asks.Orders[orderID]; o != nil {
+			order = o
+		}
+		if order == nil || order.ClientID != clientID {
+			continue
+		}
+		remainingQty := order.Qty - order.FilledQty
+		remainingMargin := (remainingQty * order.Price / perp.BasePrecision()) * perp.MarginRate / 10000
+		client.ReleasePerp(perp.QuoteAsset(), remainingMargin)
+		if order.Side == Buy {
+			book.Bids.cancelOrder(orderID)
+		} else {
+			book.Asks.cancelOrder(orderID)
+		}
+		client.RemoveOrder(orderID)
+	}
+
+	// Place forced market order (execute against best available)
+	orderID := a.exchange.NextOrderID
+	a.exchange.NextOrderID++
+	order := getOrder()
+	order.ID = orderID
+	order.ClientID = clientID
+	order.Side = closeSide
+	order.Type = Market
+	order.Qty = closeQty
+	order.Status = Open
+	order.Timestamp = timestamp
+
+	result := a.exchange.Matcher.Match(book.Bids, book.Asks, order)
+
+	fillPrice := int64(0)
+	if len(result.Executions) > 0 {
+		fillPrice = result.Executions[len(result.Executions)-1].Price
+	}
+
+	// Settle PnL
+	precision := perp.TickSize()
+	pnl := realizedPerpPnL(pos.Size, pos.EntryPrice, closeQty, fillPrice, closeSide, precision)
+	client.PerpBalances[perp.QuoteAsset()] += pnl
+
+	// Clear position
+	a.exchange.Positions.UpdatePosition(clientID, symbol, closeQty, fillPrice, closeSide)
+
+	// Check for deficit/surplus
+	remainingEquity := client.PerpAvailable(perp.QuoteAsset())
+	debt := int64(0)
+	if remainingEquity < 0 {
+		debt = -remainingEquity
+		client.PerpBalances[perp.QuoteAsset()] = 0
+		client.PerpReserved[perp.QuoteAsset()] = 0
+		a.exchange.ExchangeBalance.InsuranceFund[perp.QuoteAsset()] -= debt
+	} else if remainingEquity > 0 {
+		a.exchange.ExchangeBalance.InsuranceFund[perp.QuoteAsset()] += remainingEquity
+		client.PerpBalances[perp.QuoteAsset()] = 0
+		client.PerpReserved[perp.QuoteAsset()] = 0
+	}
+
+	putOrder(order)
+
+	if a.liquidationHandler != nil {
+		a.liquidationHandler.OnLiquidation(&LiquidationEvent{
+			Timestamp:     timestamp,
+			ClientID:      clientID,
+			Symbol:        symbol,
+			PositionSize:  pos.Size,
+			FillPrice:     fillPrice,
+			RemainingDebt: debt,
+		})
+		if debt > 0 || remainingEquity > 0 {
+			a.liquidationHandler.OnInsuranceFund(&InsuranceFundEvent{
+				Timestamp: timestamp,
+				Symbol:    symbol,
+				Delta:     remainingEquity - debt,
+				Balance:   a.exchange.ExchangeBalance.InsuranceFund[perp.QuoteAsset()],
+			})
+		}
 	}
 }
 

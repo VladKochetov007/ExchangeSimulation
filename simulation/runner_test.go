@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/realistic_sim/actors"
 )
 
 func TestNewRunnerWithSimulatedClock(t *testing.T) {
@@ -64,9 +64,9 @@ func TestRunnerAddActor(t *testing.T) {
 	runner := NewRunner(config)
 	gateway := runner.Exchange().ConnectClient(1, map[string]int64{"USD": 1000000}, &exchange.PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
 
-	mm := actor.NewFirstLP(1, gateway, actor.FirstLPConfig{
+	mm := actors.NewFirstLP(1, gateway, actors.FirstLPConfig{
 		Symbol:            "BTCUSD",
-		SpreadBps:         20,
+		HalfSpreadBps:     10, // 0.1% half-spread (was 20 bps / 2)
 		LiquidityMultiple: 10,
 	})
 
@@ -186,17 +186,17 @@ func TestRunnerRunWithActors(t *testing.T) {
 	feePlan := &exchange.PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true}
 
 	gateway1 := ex.ConnectClient(1, balances, feePlan)
-	mm1 := actor.NewFirstLP(1, gateway1, actor.FirstLPConfig{
+	mm1 := actors.NewFirstLP(1, gateway1, actors.FirstLPConfig{
 		Symbol:            "BTCUSD",
-		SpreadBps:         20,
+		HalfSpreadBps:     10, // 0.1% half-spread (was 20 bps / 2)
 		LiquidityMultiple: 10,
 	})
 	runner.AddActor(mm1)
 
 	gateway2 := ex.ConnectClient(2, balances, feePlan)
-	mm2 := actor.NewFirstLP(2, gateway2, actor.FirstLPConfig{
+	mm2 := actors.NewFirstLP(2, gateway2, actors.FirstLPConfig{
 		Symbol:            "BTCUSD",
-		SpreadBps:         30,
+		HalfSpreadBps:     15, // 0.15% half-spread (was 30 bps / 2)
 		LiquidityMultiple: 10,
 	})
 	runner.AddActor(mm2)

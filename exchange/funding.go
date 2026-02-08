@@ -22,7 +22,45 @@ func (pm *PositionManager) GetPosition(clientID uint64, symbol string) *Position
 	if pm.positions[clientID] == nil {
 		return nil
 	}
-	return pm.positions[clientID][symbol]
+	p := pm.positions[clientID][symbol]
+	if p == nil {
+		return nil
+	}
+	// Return copy to avoid races with callers using the value after lock release
+	copy := *p
+	return &copy
+}
+
+// PositionDelta contains position state before and after an update.
+type PositionDelta struct {
+	OldSize       int64
+	OldEntryPrice int64
+	NewSize       int64
+	NewEntryPrice int64
+}
+
+// UpdatePositionWithDelta updates the position and returns old and new state.
+func (pm *PositionManager) UpdatePositionWithDelta(clientID uint64, symbol string, qty int64, price int64, side Side) PositionDelta {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	if pm.positions[clientID] == nil {
+		pm.positions[clientID] = make(map[string]*Position)
+	}
+
+	pos := pm.positions[clientID][symbol]
+	if pos == nil {
+		pos = &Position{ClientID: clientID, Symbol: symbol}
+		pm.positions[clientID][symbol] = pos
+	}
+
+	delta := PositionDelta{OldSize: pos.Size, OldEntryPrice: pos.EntryPrice}
+
+	pm.applyPositionChange(pos, qty, price, side)
+
+	delta.NewSize = pos.Size
+	delta.NewEntryPrice = pos.EntryPrice
+	return delta
 }
 
 func (pm *PositionManager) UpdatePosition(clientID uint64, symbol string, qty int64, price int64, side Side) {
@@ -35,16 +73,14 @@ func (pm *PositionManager) UpdatePosition(clientID uint64, symbol string, qty in
 
 	pos := pm.positions[clientID][symbol]
 	if pos == nil {
-		pos = &Position{
-			ClientID:   clientID,
-			Symbol:     symbol,
-			Size:       0,
-			EntryPrice: 0,
-			Margin:     0,
-		}
+		pos = &Position{ClientID: clientID, Symbol: symbol}
 		pm.positions[clientID][symbol] = pos
 	}
 
+	pm.applyPositionChange(pos, qty, price, side)
+}
+
+func (pm *PositionManager) applyPositionChange(pos *Position, qty int64, price int64, side Side) {
 	deltaSize := qty
 	if side == Sell {
 		deltaSize = -qty
@@ -82,6 +118,7 @@ func (pm *PositionManager) CalculateOpenInterest(symbol string) int64 {
 	return total
 }
 
+// SettleFunding applies funding payments from/to client PerpBalances.
 func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpFutures) {
 	fundingRate := perp.GetFundingRate()
 	precision := perp.TickSize()
@@ -100,13 +137,38 @@ func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpF
 		funding := (positionValue * fundingRate.Rate) / 10000
 
 		if pos.Size > 0 {
-			client.SubBalance(perp.QuoteAsset(), funding)
+			client.PerpBalances[perp.QuoteAsset()] -= funding
 		} else {
-			client.AddBalance(perp.QuoteAsset(), funding)
+			client.PerpBalances[perp.QuoteAsset()] += funding
 		}
 	}
 
 	fundingRate.NextFunding = pm.clock.NowUnixNano() + (fundingRate.Interval * 1e9)
+}
+
+// realizedPerpPnL calculates the realized PnL for a perp fill.
+// Only non-zero when the trade reduces or closes an existing position.
+func realizedPerpPnL(oldSize, oldEntryPrice, tradeQty, tradePrice int64, tradeSide Side, precision int64) int64 {
+	if oldSize == 0 {
+		return 0
+	}
+	deltaSize := tradeQty
+	if tradeSide == Sell {
+		deltaSize = -tradeQty
+	}
+	// Only realize PnL if this trade reduces the position magnitude
+	if (oldSize > 0 && deltaSize >= 0) || (oldSize < 0 && deltaSize <= 0) {
+		return 0
+	}
+	closedQty := abs(deltaSize)
+	if closedQty > abs(oldSize) {
+		closedQty = abs(oldSize)
+	}
+	sign := int64(1)
+	if oldSize < 0 {
+		sign = -1
+	}
+	return closedQty * sign * (tradePrice - oldEntryPrice) / precision
 }
 
 func abs(x int64) int64 {

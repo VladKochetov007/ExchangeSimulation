@@ -1,4 +1,4 @@
-package actor
+package actors
 
 import (
 	"context"
@@ -54,7 +54,7 @@ func TestFirstLP_FillEventGeneration(t *testing.T) {
 
 	config := FirstLPConfig{
 		Symbol:            "BTCUSD",
-		SpreadBps:         100, // 1%
+		HalfSpreadBps:     50, // 0.5% half-spread (was 100 bps / 2)
 		LiquidityMultiple: 10,
 		BootstrapPrice:    exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 	}
@@ -97,7 +97,7 @@ func TestFirstLP_ExitLongPosition(t *testing.T) {
 
 	config := FirstLPConfig{
 		Symbol:            "BTCUSD",
-		SpreadBps:         100,
+		HalfSpreadBps:     50, // 0.5% half-spread (was 100 bps / 2)
 		LiquidityMultiple: 10,
 		BootstrapPrice:    exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 		MonitorInterval:   50 * time.Millisecond,
@@ -171,7 +171,7 @@ func TestFirstLP_ExitShortPosition(t *testing.T) {
 
 	config := FirstLPConfig{
 		Symbol:            "BTCUSD",
-		SpreadBps:         100,
+		HalfSpreadBps:     50, // 0.5% half-spread (was 100 bps / 2)
 		LiquidityMultiple: 10,
 		BootstrapPrice:    exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 		MonitorInterval:   50 * time.Millisecond,
@@ -262,7 +262,7 @@ func TestFirstLP_CustomExitStrategy(t *testing.T) {
 
 	config := FirstLPConfig{
 		Symbol:            "BTCUSD",
-		SpreadBps:         100,
+		HalfSpreadBps:     50, // 0.5% half-spread (was 100 bps / 2)
 		LiquidityMultiple: 10, // This should be ignored
 		BootstrapPrice:    exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 		MonitorInterval:   50 * time.Millisecond,
@@ -331,7 +331,7 @@ func TestFirstLP_PositionAccumulation(t *testing.T) {
 
 	config := FirstLPConfig{
 		Symbol:            "BTCUSD",
-		SpreadBps:         100,
+		HalfSpreadBps:     50, // 0.5% half-spread (was 100 bps / 2)
 		LiquidityMultiple: 1000, // High threshold to prevent exit
 		BootstrapPrice:    exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 		MonitorInterval:   50 * time.Millisecond,

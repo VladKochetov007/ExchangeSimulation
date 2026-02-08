@@ -1,10 +1,12 @@
-package actor
+package actors
 
 import (
 	"context"
-	"exchange_sim/exchange"
 	"testing"
 	"time"
+
+	"exchange_sim/actor"
+	"exchange_sim/exchange"
 )
 
 func TestNoisyTraderCreation(t *testing.T) {
@@ -43,7 +45,7 @@ func TestNoisyTraderPlacesOrders(t *testing.T) {
 	gateway100 := ex.ConnectClient(100, balances, &exchange.FixedFee{})
 	gateway1 := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
-	actor100 := NewBaseActor(100, gateway100)
+	actor100 := actor.NewBaseActor(100, gateway100)
 	actor100.SubmitOrder("BTC/USD", exchange.Sell, exchange.LimitOrder, 50000*exchange.SATOSHI, exchange.SATOSHI)
 	<-gateway100.ResponseCh
 
@@ -58,7 +60,7 @@ func TestNoisyTraderPlacesOrders(t *testing.T) {
 	}
 
 	noisy := NewNoisyTrader(1, gateway1, config)
-	noisy.midPrice = 50000 * SATOSHI
+	noisy.midPrice = 50000 * exchange.SATOSHI
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -92,9 +94,9 @@ func TestNoisyTraderOrderAccepted(t *testing.T) {
 	}
 
 	noisy := NewNoisyTrader(1, gateway, config)
-	noisy.midPrice = 50000 * SATOSHI
+	noisy.midPrice = 50000 * exchange.SATOSHI
 
-	event := OrderAcceptedEvent{
+	event := actor.OrderAcceptedEvent{
 		OrderID:   123,
 		RequestID: 1,
 	}
@@ -126,7 +128,7 @@ func TestNoisyTraderOrderFilled(t *testing.T) {
 	noisy := NewNoisyTrader(1, gateway, config)
 	noisy.activeOrders[123] = &activeOrder{orderID: 123, placedAt: time.Now()}
 
-	fillEvent := OrderFillEvent{
+	fillEvent := actor.OrderFillEvent{
 		OrderID: 123,
 		IsFull:  true,
 	}
@@ -158,7 +160,7 @@ func TestNoisyTraderPartialFill(t *testing.T) {
 	noisy := NewNoisyTrader(1, gateway, config)
 	noisy.activeOrders[123] = &activeOrder{orderID: 123, placedAt: time.Now()}
 
-	fillEvent := OrderFillEvent{
+	fillEvent := actor.OrderFillEvent{
 		OrderID: 123,
 		IsFull:  false,
 	}
@@ -190,7 +192,7 @@ func TestNoisyTraderOrderCancelled(t *testing.T) {
 	noisy := NewNoisyTrader(1, gateway, config)
 	noisy.activeOrders[123] = &activeOrder{orderID: 123, placedAt: time.Now()}
 
-	cancelEvent := OrderCancelledEvent{
+	cancelEvent := actor.OrderCancelledEvent{
 		OrderID: 123,
 	}
 	noisy.onOrderCancelled(cancelEvent)
@@ -220,7 +222,7 @@ func TestNoisyTraderBookSnapshot(t *testing.T) {
 
 	noisy := NewNoisyTrader(1, gateway, config)
 
-	snapEvent := BookSnapshotEvent{
+	snapEvent := actor.BookSnapshotEvent{
 		Symbol: "BTC/USD",
 		Snapshot: &exchange.BookSnapshot{
 			Bids: []exchange.PriceLevel{{Price: 49000 * exchange.SATOSHI, VisibleQty: exchange.SATOSHI}},
@@ -259,10 +261,10 @@ func TestNoisyTraderBookDelta(t *testing.T) {
 	}
 
 	noisy := NewNoisyTrader(1, gateway, config)
-	noisy.bestBid = 49000 * SATOSHI
-	noisy.bestAsk = 51000 * SATOSHI
+	noisy.bestBid = 49000 * exchange.SATOSHI
+	noisy.bestAsk = 51000 * exchange.SATOSHI
 
-	deltaEvent := BookDeltaEvent{
+	deltaEvent := actor.BookDeltaEvent{
 		Symbol: "BTC/USD",
 		Delta: &exchange.BookDelta{
 			Side:       exchange.Buy,
@@ -296,7 +298,7 @@ func TestNoisyTraderStaleOrderCleanup(t *testing.T) {
 	}
 
 	noisy := NewNoisyTrader(1, gateway, config)
-	noisy.midPrice = 50000 * SATOSHI
+	noisy.midPrice = 50000 * exchange.SATOSHI
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -333,7 +335,7 @@ func TestNoisyTraderMaxActiveOrders(t *testing.T) {
 	}
 
 	noisy := NewNoisyTrader(1, gateway, config)
-	noisy.midPrice = 50000 * SATOSHI
+	noisy.midPrice = 50000 * exchange.SATOSHI
 
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()

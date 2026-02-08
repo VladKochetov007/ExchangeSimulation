@@ -1,23 +1,29 @@
 package exchange
 
 type Client struct {
-	ID          uint64
-	Balances    map[string]int64
-	Reserved    map[string]int64
-	OrderIDs    []uint64
-	FeePlan     FeeModel
-	VIPLevel    int
-	MakerVolume int64
-	TakerVolume int64
+	ID           uint64
+	Balances     map[string]int64 // spot wallet totals
+	Reserved     map[string]int64 // spot wallet reserved
+	PerpBalances map[string]int64 // perp collateral wallet
+	PerpReserved map[string]int64 // perp initial margin reserved
+	Borrowed     map[string]int64 // outstanding margin loans
+	OrderIDs     []uint64
+	FeePlan      FeeModel
+	VIPLevel     int
+	MakerVolume  int64
+	TakerVolume  int64
 }
 
 func NewClient(id uint64, feePlan FeeModel) *Client {
 	return &Client{
-		ID:       id,
-		Balances: make(map[string]int64, 8),
-		Reserved: make(map[string]int64, 8),
-		OrderIDs: make([]uint64, 0, 16),
-		FeePlan:  feePlan,
+		ID:           id,
+		Balances:     make(map[string]int64, 8),
+		Reserved:     make(map[string]int64, 8),
+		PerpBalances: make(map[string]int64, 4),
+		PerpReserved: make(map[string]int64, 4),
+		Borrowed:     make(map[string]int64, 4),
+		OrderIDs:     make([]uint64, 0, 16),
+		FeePlan:      feePlan,
 	}
 }
 
@@ -57,6 +63,22 @@ func (c *Client) Release(asset string, amount int64) {
 	c.Reserved[asset] -= amount
 }
 
+func (c *Client) PerpAvailable(asset string) int64 {
+	return c.PerpBalances[asset] - c.PerpReserved[asset]
+}
+
+func (c *Client) ReservePerp(asset string, amount int64) bool {
+	if c.PerpAvailable(asset) < amount {
+		return false
+	}
+	c.PerpReserved[asset] += amount
+	return true
+}
+
+func (c *Client) ReleasePerp(asset string, amount int64) {
+	c.PerpReserved[asset] -= amount
+}
+
 func (c *Client) AddOrder(orderID uint64) {
 	c.OrderIDs = append(c.OrderIDs, orderID)
 }
@@ -72,7 +94,7 @@ func (c *Client) RemoveOrder(orderID uint64) {
 }
 
 func (c *Client) GetBalanceSnapshot(timestamp int64) *BalanceSnapshot {
-	balances := make([]AssetBalance, 0, len(c.Balances))
+	balances := make([]AssetBalance, 0, len(c.Balances)+len(c.PerpBalances))
 	for asset, total := range c.Balances {
 		reserved := c.Reserved[asset]
 		balances = append(balances, AssetBalance{

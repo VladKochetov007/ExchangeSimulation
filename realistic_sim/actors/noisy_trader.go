@@ -1,4 +1,4 @@
-package actor
+package actors
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"exchange_sim/actor"
 	"exchange_sim/exchange"
 )
 
@@ -25,7 +26,7 @@ type activeOrder struct {
 }
 
 type NoisyTraderActor struct {
-	*BaseActor
+	*actor.BaseActor
 	Config       NoisyTraderConfig
 	midPrice     int64
 	bestBid      int64
@@ -37,7 +38,7 @@ type NoisyTraderActor struct {
 
 func NewNoisyTrader(id uint64, gateway *exchange.ClientGateway, config NoisyTraderConfig) *NoisyTraderActor {
 	return &NoisyTraderActor{
-		BaseActor:    NewBaseActor(id, gateway),
+		BaseActor:    actor.NewBaseActor(id, gateway),
 		Config:       config,
 		activeOrders: make(map[uint64]*activeOrder),
 		rng:          rand.New(rand.NewSource(time.Now().UnixNano() + int64(id))),
@@ -92,22 +93,22 @@ func (a *NoisyTraderActor) loop(ctx context.Context) {
 	}
 }
 
-func (a *NoisyTraderActor) OnEvent(event *Event) {
+func (a *NoisyTraderActor) OnEvent(event *actor.Event) {
 	switch event.Type {
-	case EventBookSnapshot:
-		a.onBookSnapshot(event.Data.(BookSnapshotEvent))
-	case EventBookDelta:
-		a.onBookDelta(event.Data.(BookDeltaEvent))
-	case EventOrderAccepted:
-		a.onOrderAccepted(event.Data.(OrderAcceptedEvent))
-	case EventOrderFilled, EventOrderPartialFill:
-		a.onOrderFilled(event.Data.(OrderFillEvent))
-	case EventOrderCancelled:
-		a.onOrderCancelled(event.Data.(OrderCancelledEvent))
+	case actor.EventBookSnapshot:
+		a.onBookSnapshot(event.Data.(actor.BookSnapshotEvent))
+	case actor.EventBookDelta:
+		a.onBookDelta(event.Data.(actor.BookDeltaEvent))
+	case actor.EventOrderAccepted:
+		a.onOrderAccepted(event.Data.(actor.OrderAcceptedEvent))
+	case actor.EventOrderFilled, actor.EventOrderPartialFill:
+		a.onOrderFilled(event.Data.(actor.OrderFillEvent))
+	case actor.EventOrderCancelled:
+		a.onOrderCancelled(event.Data.(actor.OrderCancelledEvent))
 	}
 }
 
-func (a *NoisyTraderActor) onBookSnapshot(snap BookSnapshotEvent) {
+func (a *NoisyTraderActor) onBookSnapshot(snap actor.BookSnapshotEvent) {
 	if len(snap.Snapshot.Bids) > 0 {
 		a.bestBid = snap.Snapshot.Bids[0].Price
 	}
@@ -117,7 +118,7 @@ func (a *NoisyTraderActor) onBookSnapshot(snap BookSnapshotEvent) {
 	a.updateMidPrice()
 }
 
-func (a *NoisyTraderActor) onBookDelta(delta BookDeltaEvent) {
+func (a *NoisyTraderActor) onBookDelta(delta actor.BookDeltaEvent) {
 	if delta.Delta.Side == exchange.Buy && (a.bestBid == 0 || delta.Delta.Price >= a.bestBid) {
 		if delta.Delta.VisibleQty > 0 {
 			a.bestBid = delta.Delta.Price
@@ -136,20 +137,20 @@ func (a *NoisyTraderActor) updateMidPrice() {
 	}
 }
 
-func (a *NoisyTraderActor) onOrderAccepted(event OrderAcceptedEvent) {
+func (a *NoisyTraderActor) onOrderAccepted(event actor.OrderAcceptedEvent) {
 	a.activeOrders[event.OrderID] = &activeOrder{
 		orderID:  event.OrderID,
 		placedAt: time.Now(),
 	}
 }
 
-func (a *NoisyTraderActor) onOrderFilled(event OrderFillEvent) {
+func (a *NoisyTraderActor) onOrderFilled(event actor.OrderFillEvent) {
 	if event.IsFull {
 		delete(a.activeOrders, event.OrderID)
 	}
 }
 
-func (a *NoisyTraderActor) onOrderCancelled(event OrderCancelledEvent) {
+func (a *NoisyTraderActor) onOrderCancelled(event actor.OrderCancelledEvent) {
 	delete(a.activeOrders, event.OrderID)
 }
 

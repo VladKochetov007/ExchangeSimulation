@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/realistic_sim/actors"
 )
 
 func TestLatencyArbitrageActorCreation(t *testing.T) {
@@ -145,9 +145,9 @@ func TestLatencyArbitrageActorWithLiquidity(t *testing.T) {
 
 	// Market maker on fast venue
 	fastGW := fastEx.ConnectClient(100, lpBalances, &exchange.FixedFee{})
-	fastLP := actor.NewFirstLP(100, fastGW, actor.FirstLPConfig{
+	fastLP := actors.NewFirstLP(100, fastGW, actors.FirstLPConfig{
 		Symbol:            "BTC/USD",
-		SpreadBps:         20,
+		HalfSpreadBps:     10, // 0.1% half-spread (was 20 bps / 2)
 		LiquidityMultiple: 10,
 		BootstrapPrice:    exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 	})
@@ -160,9 +160,9 @@ func TestLatencyArbitrageActorWithLiquidity(t *testing.T) {
 
 	// Market maker on slow venue
 	slowGW := slowEx.ConnectClient(200, lpBalances, &exchange.FixedFee{})
-	slowLP := actor.NewFirstLP(200, slowGW, actor.FirstLPConfig{
+	slowLP := actors.NewFirstLP(200, slowGW, actors.FirstLPConfig{
 		Symbol:            "BTC/USD",
-		SpreadBps:         20,
+		HalfSpreadBps:     10, // 0.1% half-spread (was 20 bps / 2)
 		LiquidityMultiple: 10,
 		BootstrapPrice:    exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 	})
@@ -386,9 +386,9 @@ func TestLatencyArbitrageActorArbitrageDetection(t *testing.T) {
 
 	// Market maker on fast venue with HIGHER price (51000)
 	fastGW := fastEx.ConnectClient(100, lpBalances, &exchange.FixedFee{})
-	fastLP := actor.NewFirstLP(100, fastGW, actor.FirstLPConfig{
+	fastLP := actors.NewFirstLP(100, fastGW, actors.FirstLPConfig{
 		Symbol:            "BTC/USD",
-		SpreadBps:         20,
+		HalfSpreadBps:     10, // 0.1% half-spread (was 20 bps / 2)
 		LiquidityMultiple: 10,
 		BootstrapPrice:    exchange.PriceUSD(51000, exchange.DOLLAR_TICK),
 	})
@@ -401,9 +401,9 @@ func TestLatencyArbitrageActorArbitrageDetection(t *testing.T) {
 
 	// Market maker on slow venue with LOWER price (50000)
 	slowGW := slowEx.ConnectClient(200, lpBalances, &exchange.FixedFee{})
-	slowLP := actor.NewFirstLP(200, slowGW, actor.FirstLPConfig{
+	slowLP := actors.NewFirstLP(200, slowGW, actors.FirstLPConfig{
 		Symbol:            "BTC/USD",
-		SpreadBps:         20,
+		HalfSpreadBps:     10, // 0.1% half-spread (was 20 bps / 2)
 		LiquidityMultiple: 10,
 		BootstrapPrice:    exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 	})

@@ -448,7 +448,7 @@ func (m *MultiSymbolLP) checkExitConditionForSymbol(state *symbolLPState) {
 		return
 	}
 
-	shouldExit := DefaultExitStrategy(
+	shouldExit := m.defaultExitStrategy(
 		state.NetPosition,
 		state.BestBid,
 		state.BestAsk,
@@ -479,6 +479,24 @@ func (m *MultiSymbolLP) executeExitForSymbol(state *symbolLPState) {
 	} else {
 		m.SubmitOrder(state.Symbol, exchange.Buy, exchange.Market, 0, exitSize)
 	}
+}
+
+func (m *MultiSymbolLP) defaultExitStrategy(exposure, bestBid, bestAsk, bidLiq, askLiq, multiple int64) bool {
+	if exposure == 0 {
+		return false
+	}
+
+	absExposure := exposure
+	if absExposure < 0 {
+		absExposure = -absExposure
+	}
+
+	threshold := absExposure * multiple
+
+	if exposure > 0 {
+		return bidLiq >= threshold
+	}
+	return askLiq >= threshold
 }
 
 // GetSymbolState returns the state for a symbol (for testing)

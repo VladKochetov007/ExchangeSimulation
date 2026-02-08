@@ -1,10 +1,12 @@
-package actor
+package actors
 
 import (
 	"context"
-	"exchange_sim/exchange"
 	"testing"
 	"time"
+
+	"exchange_sim/actor"
+	"exchange_sim/exchange"
 )
 
 func TestRandomizedTakerCreation(t *testing.T) {
@@ -75,7 +77,7 @@ func TestRandomizedTakerStart(t *testing.T) {
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	gateway100 := ex.ConnectClient(100, balances, &exchange.FixedFee{})
-	actor100 := NewBaseActor(100, gateway100)
+	actor100 := actor.NewBaseActor(100, gateway100)
 	actor100.SubmitOrder("BTC/USD", exchange.Sell, exchange.LimitOrder, exchange.PriceUSD(50000, exchange.DOLLAR_TICK), exchange.SATOSHI)
 	<-gateway100.ResponseCh
 
@@ -186,9 +188,9 @@ func TestRandomizedTakerOnEvent(t *testing.T) {
 
 	taker := NewRandomizedTaker(1, gateway, config)
 
-	event := &Event{
-		Type: EventOrderAccepted,
-		Data: OrderAcceptedEvent{OrderID: 123, RequestID: 1},
+	event := &actor.Event{
+		Type: actor.EventOrderAccepted,
+		Data: actor.OrderAcceptedEvent{OrderID: 123, RequestID: 1},
 	}
 	taker.OnEvent(event)
 }

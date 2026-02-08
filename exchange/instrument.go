@@ -84,6 +84,12 @@ type PerpFutures struct {
 	SpotInstrument
 	fundingRate *FundingRate
 	fundingCalc FundingCalculator
+	// MarginRate is initial margin in bps (e.g. 1000 = 10% = 10x leverage)
+	MarginRate int64
+	// MaintenanceMarginRate is the minimum margin ratio in bps before liquidation
+	MaintenanceMarginRate int64
+	// WarningMarginRate triggers a margin call warning before liquidation
+	WarningMarginRate int64
 }
 
 func NewPerpFutures(symbol, base, quote string, basePrecision, quotePrecision, tickSize, minOrderSize int64) *PerpFutures {
@@ -110,6 +116,9 @@ func NewPerpFutures(symbol, base, quote string, basePrecision, quotePrecision, t
 			Damping:  100,
 			MaxRate:  75,
 		},
+		MarginRate:            1000, // 10% initial margin = 10x leverage
+		MaintenanceMarginRate: 500,  // 5% maintenance margin
+		WarningMarginRate:     750,  // 7.5% warning threshold
 	}
 }
 

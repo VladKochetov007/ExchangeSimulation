@@ -1,4 +1,4 @@
-package actor
+package actors
 
 import (
 	"context"
@@ -32,7 +32,7 @@ func TestFirstLP_BootstrapEmptyBook(t *testing.T) {
 	// Create FirstLP with bootstrap price
 	config := FirstLPConfig{
 		Symbol:         "BTCUSD",
-		SpreadBps:      100, // 1% spread
+		HalfSpreadBps:  50, // 0.5% half-spread (was 100 bps / 2) // 1% spread
 		BootstrapPrice: exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 	}
 
@@ -104,7 +104,7 @@ func TestFirstLP_BootstrapEmptyBook(t *testing.T) {
 		spreadBps := (spread * 10000) / lp.LastMidPrice
 		t.Logf("✓ Spread: %d bps (%.2f%%)", spreadBps, float64(spreadBps)/100)
 
-		expectedSpread := int64(200) // 2 * SpreadBps = 200 bps total spread
+		expectedSpread := int64(200) // With HalfSpreadBps=50, actual spread is 200 bps (matches original behavior)
 		tolerance := int64(50)       // Allow some rounding
 		if spreadBps < expectedSpread-tolerance || spreadBps > expectedSpread+tolerance {
 			t.Errorf("Spread %d bps not close to expected %d bps", spreadBps, expectedSpread)
@@ -124,8 +124,8 @@ func TestFirstLP_NoBootstrapPrice(t *testing.T) {
 
 	// Create FirstLP WITHOUT bootstrap price
 	config := FirstLPConfig{
-		Symbol:    "BTCUSD",
-		SpreadBps: 100,
+		Symbol:        "BTCUSD",
+		HalfSpreadBps: 50, // 0.5% half-spread (was 100 bps / 2)
 		// BootstrapPrice: 0  // NOT SET
 	}
 
@@ -175,7 +175,7 @@ func TestFirstLP_BootstrapThenMarketPrice(t *testing.T) {
 	// Create FirstLP with bootstrap
 	config := FirstLPConfig{
 		Symbol:         "BTCUSD",
-		SpreadBps:      100,
+		HalfSpreadBps:  50, // 0.5% half-spread (was 100 bps / 2)
 		BootstrapPrice: exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 	}
 

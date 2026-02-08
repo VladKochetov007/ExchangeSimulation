@@ -396,3 +396,7 @@ func (a *BaseActor) Unsubscribe(symbol string) {
 func (a *BaseActor) EventChannel() <-chan *Event {
 	return a.eventCh
 }
+
+func (a *BaseActor) PeekNextRequestID() uint64 {
+	return atomic.LoadUint64(&a.requestSeq) + 1
+}

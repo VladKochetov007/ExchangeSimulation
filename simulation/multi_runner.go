@@ -11,6 +11,7 @@ import (
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
 	"exchange_sim/logger"
+	"exchange_sim/realistic_sim/actors"
 )
 
 // MultiExchangeRunner manages a multi-exchange simulation
@@ -261,7 +262,7 @@ func (r *MultiExchangeRunner) createActorsForExchange(
 				Running:    true,
 			}
 
-			taker := actor.NewRandomizedTaker(actorID, gw, actor.RandomizedTakerConfig{
+			taker := actors.NewRandomizedTaker(actorID, gw, actors.RandomizedTakerConfig{
 				Symbol:   symbol,
 				Interval: takerInterval,
 				MinQty:   exchange.BTCAmount(0.01),

@@ -1,10 +1,11 @@
-package actor
+package actors
 
 import (
 	"context"
 	"math/rand"
 	"time"
 
+	"exchange_sim/actor"
 	"exchange_sim/exchange"
 )
 
@@ -18,7 +19,7 @@ type RandomizedTakerConfig struct {
 }
 
 type RandomizedTakerActor struct {
-	*BaseActor
+	*actor.BaseActor
 	Config RandomizedTakerConfig
 	ticker *time.Ticker
 	rng    *rand.Rand
@@ -43,7 +44,7 @@ func NewRandomizedTaker(id uint64, gateway *exchange.ClientGateway, config Rando
 	}
 
 	return &RandomizedTakerActor{
-		BaseActor: NewBaseActor(id, gateway),
+		BaseActor: actor.NewBaseActor(id, gateway),
 		Config:    config,
 		rng:       rand.New(rand.NewSource(time.Now().UnixNano() + int64(id))),
 		side:      exchange.Buy,
@@ -90,9 +91,8 @@ func (s *RandomizedTakerActor) tradingLoop(ctx context.Context) {
 	}
 }
 
-func (s *RandomizedTakerActor) OnEvent(event *Event) {
+func (s *RandomizedTakerActor) OnEvent(event *actor.Event) {
 	// RandomizedTaker doesn't need to react to events
-	// Just lets market orders execute
 }
 
 func (s *RandomizedTakerActor) executeRandomTrade() {

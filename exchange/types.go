@@ -345,6 +345,46 @@ type Position struct {
 	Margin     int64
 }
 
+type MarginCallEvent struct {
+	Timestamp        int64  `json:"timestamp"`
+	ClientID         uint64 `json:"client_id"`
+	Symbol           string `json:"symbol"`
+	MarginRatioBps   int64  `json:"margin_ratio_bps"`
+	LiquidationPrice int64  `json:"liquidation_price"`
+}
+
+type LiquidationEvent struct {
+	Timestamp     int64  `json:"timestamp"`
+	ClientID      uint64 `json:"client_id"`
+	Symbol        string `json:"symbol"`
+	PositionSize  int64  `json:"position_size"`
+	FillPrice     int64  `json:"fill_price"`
+	RemainingDebt int64  `json:"remaining_debt"`
+}
+
+type InsuranceFundEvent struct {
+	Timestamp int64  `json:"timestamp"`
+	Symbol    string `json:"symbol"`
+	Delta     int64  `json:"delta"`
+	Balance   int64  `json:"balance"`
+}
+
+type MarginInterestEvent struct {
+	Timestamp int64  `json:"timestamp"`
+	ClientID  uint64 `json:"client_id"`
+	Asset     string `json:"asset"`
+	Amount    int64  `json:"amount"`
+}
+
+type TransferEvent struct {
+	Timestamp  int64  `json:"timestamp"`
+	ClientID   uint64 `json:"client_id"`
+	FromWallet string `json:"from_wallet"`
+	ToWallet   string `json:"to_wallet"`
+	Asset      string `json:"asset"`
+	Amount     int64  `json:"amount"`
+}
+
 type PriorityType uint8
 
 const (

@@ -10,6 +10,7 @@ import (
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
 	"exchange_sim/logger"
+	"exchange_sim/realistic_sim/actors"
 	"exchange_sim/simulation"
 )
 
@@ -73,21 +74,20 @@ func run() error {
 
 	for i := uint64(1); i <= 5; i++ {
 		gateway := ex.ConnectClient(i, initialBalances, feePlan)
-		lp := actor.NewFirstLP(i, gateway, actor.FirstLPConfig{
+		lp := actors.NewFirstLP(i, gateway, actors.FirstLPConfig{
 			Symbol:            "BTCUSD",
-			SpreadBps:         20,
+			HalfSpreadBps:     10,
 			LiquidityMultiple: 10,
-			BootstrapPrice:    100000000000, // $100,000 per BTC (100000000 precision)
+			BootstrapPrice:    100000000000,
 		})
 		lp.SetInitialState(btcusd)
 		lp.UpdateBalances(initialBalances["BTC"], initialBalances["USD"])
 		runner.AddActor(lp)
 	}
 
-	// Add taker actors to generate trading activity
 	for i := uint64(100); i <= 101; i++ {
 		gateway := ex.ConnectClient(i, initialBalances, feePlan)
-		taker := actor.NewRandomizedTaker(i, gateway, actor.RandomizedTakerConfig{
+		taker := actors.NewRandomizedTaker(i, gateway, actors.RandomizedTakerConfig{
 			Symbol:   "BTCUSD",
 			Interval: 2 * time.Second,
 			MinQty:   exchange.BTCAmount(0.05),
@@ -129,7 +129,7 @@ func run() error {
 	// Add NoisyTraders to provide random liquidity around mid-price
 	for i := uint64(400); i <= 403; i++ {
 		gateway := ex.ConnectClient(i, initialBalances, feePlan)
-		noisy := actor.NewNoisyTrader(i, gateway, actor.NoisyTraderConfig{
+		noisy := actors.NewNoisyTrader(i, gateway, actors.NoisyTraderConfig{
 			Symbol:          "BTCUSD",
 			Interval:        1500 * time.Millisecond,
 			PriceRangeBps:   100, // +/- 1% from mid

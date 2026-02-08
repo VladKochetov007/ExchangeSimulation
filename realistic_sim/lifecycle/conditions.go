@@ -37,17 +37,8 @@ func NewLiquiditySufficientCondition(ex *exchange.Exchange, symbol string, minBi
 }
 
 func (lc *LiquiditySufficientCondition) IsSatisfied() bool {
-	book := lc.exchange.Books[lc.symbol]
-	if book == nil {
-		return false
-	}
-
-	if book.Bids.Best == nil || book.Asks.Best == nil {
-		return false
-	}
-
-	return book.Bids.Best.TotalQty >= lc.minBidLiquidity &&
-		   book.Asks.Best.TotalQty >= lc.minAskLiquidity
+	bidQty, askQty := lc.exchange.GetBestLiquidity(lc.symbol)
+	return bidQty >= lc.minBidLiquidity && askQty >= lc.minAskLiquidity
 }
 
 func (lc *LiquiditySufficientCondition) Description() string {

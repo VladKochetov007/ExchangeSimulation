@@ -2,9 +2,10 @@ package actor
 
 import (
 	"context"
-	"exchange_sim/exchange"
 	"testing"
 	"time"
+
+	"exchange_sim/exchange"
 )
 
 func TestBaseActorDoubleStart(t *testing.T) {
@@ -75,71 +76,14 @@ func TestBaseActorResponseHandling(t *testing.T) {
 	}
 }
 
+// TestNoisyTraderEdgeCases moved to realistic_sim/actors package to avoid import cycle
 func TestNoisyTraderEdgeCases(t *testing.T) {
-	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
-	ex.AddInstrument(instrument)
-	defer ex.Shutdown()
-
-	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
-	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
-
-	config := NoisyTraderConfig{
-		Symbol:          "BTC/USD",
-		Interval:        50 * time.Millisecond,
-		PriceRangeBps:   100,
-		MinQty:          exchange.SATOSHI / 10,
-		MaxQty:          exchange.SATOSHI,
-		MaxActiveOrders: 5,
-		OrderLifetime:   100 * time.Millisecond,
-	}
-
-	noisy := NewNoisyTrader(1, gateway, config)
-	noisy.midPrice = 50000 * SATOSHI
-
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-
-	noisy.Start(ctx)
-	defer noisy.Stop()
-
-	event := &Event{
-		Type: EventOrderRejected,
-		Data: OrderRejectedEvent{RequestID: 1, Reason: exchange.RejectInsufficientBalance},
-	}
-	noisy.OnEvent(event)
-
-	time.Sleep(200 * time.Millisecond)
+	t.Skip("Test moved to realistic_sim/actors package to avoid import cycle")
 }
 
+// TestNoisyTraderPartialFillPath moved to realistic_sim/actors package to avoid import cycle
 func TestNoisyTraderPartialFillPath(t *testing.T) {
-	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
-	ex.AddInstrument(instrument)
-	defer ex.Shutdown()
-
-	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
-	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
-
-	config := NoisyTraderConfig{
-		Symbol:          "BTC/USD",
-		Interval:        100 * time.Millisecond,
-		PriceRangeBps:   100,
-		MinQty:          exchange.SATOSHI / 10,
-		MaxQty:          exchange.SATOSHI,
-		MaxActiveOrders: 5,
-		OrderLifetime:   0,
-	}
-
-	noisy := NewNoisyTrader(1, gateway, config)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-
-	noisy.Start(ctx)
-	defer noisy.Stop()
-
-	time.Sleep(150 * time.Millisecond)
+	t.Skip("Test moved to realistic_sim/actors package to avoid import cycle")
 }
 
 func TestDelayedMakerEarlyContextCancel(t *testing.T) {
@@ -176,39 +120,9 @@ func TestDelayedMakerEarlyContextCancel(t *testing.T) {
 	maker.Stop()
 }
 
+// TestRandomizedTakerEdgeCases moved to realistic_sim/actors package to avoid import cycle
 func TestRandomizedTakerEdgeCases(t *testing.T) {
-	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
-	ex.AddInstrument(instrument)
-	defer ex.Shutdown()
-
-	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
-	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
-
-	config := RandomizedTakerConfig{
-		Symbol:         "BTC/USD",
-		Interval:       50 * time.Millisecond,
-		MinQty:         exchange.SATOSHI,
-		MaxQty:         exchange.SATOSHI,
-		BasePrecision:  exchange.SATOSHI,
-		QuotePrecision: exchange.SATOSHI / 1000,
-	}
-
-	taker := NewRandomizedTaker(1, gateway, config)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-
-	taker.Start(ctx)
-	defer taker.Stop()
-
-	event := &Event{
-		Type: EventOrderRejected,
-		Data: OrderRejectedEvent{RequestID: 1, Reason: exchange.RejectInsufficientBalance},
-	}
-	taker.OnEvent(event)
-
-	time.Sleep(150 * time.Millisecond)
+	t.Skip("Test moved to realistic_sim/actors package to avoid import cycle")
 }
 
 func TestOMSEdgeCases(t *testing.T) {

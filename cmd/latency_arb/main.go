@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/realistic_sim/actors"
 	"exchange_sim/simulation"
 )
 
@@ -52,9 +52,9 @@ func run() error {
 	// Market makers on fast venue (coinbase)
 	for i := uint64(100); i <= 101; i++ {
 		gateway := fastEx.ConnectClient(i, balances, &exchange.FixedFee{})
-		lp := actor.NewFirstLP(i, gateway, actor.FirstLPConfig{
+		lp := actors.NewFirstLP(i, gateway, actors.FirstLPConfig{
 			Symbol:            "BTC/USD",
-			SpreadBps:         20,
+			HalfSpreadBps:     10,
 			LiquidityMultiple: 50,
 			BootstrapPrice:    exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 		})
@@ -68,12 +68,11 @@ func run() error {
 		defer lp.Stop()
 	}
 
-	// Market makers on slow venue (binance)
 	for i := uint64(200); i <= 201; i++ {
 		gateway := slowEx.ConnectClient(i, balances, &exchange.FixedFee{})
-		lp := actor.NewFirstLP(i, gateway, actor.FirstLPConfig{
+		lp := actors.NewFirstLP(i, gateway, actors.FirstLPConfig{
 			Symbol:            "BTC/USD",
-			SpreadBps:         20,
+			HalfSpreadBps:     10,
 			LiquidityMultiple: 50,
 			BootstrapPrice:    exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 		})
@@ -134,7 +133,7 @@ func run() error {
 	fmt.Println("Adding noisy traders to fast venue to create price movements...")
 	for i := uint64(300); i <= 301; i++ {
 		gateway := fastEx.ConnectClient(i, balances, &exchange.FixedFee{})
-		noisy := actor.NewNoisyTrader(i, gateway, actor.NoisyTraderConfig{
+		noisy := actors.NewNoisyTrader(i, gateway, actors.NoisyTraderConfig{
 			Symbol:          "BTC/USD",
 			Interval:        500 * time.Millisecond,
 			PriceRangeBps:   50,

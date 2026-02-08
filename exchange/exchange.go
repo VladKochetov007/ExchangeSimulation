@@ -15,18 +15,25 @@ type Logger interface {
 	LogEvent(simTime int64, clientID uint64, eventName string, event any)
 }
 
+// ExchangeBalance tracks the exchange's own accumulated revenue and safety fund.
+type ExchangeBalance struct {
+	FeeRevenue    map[string]int64 `json:"fee_revenue"`
+	InsuranceFund map[string]int64 `json:"insurance_fund"`
+}
+
 type Exchange struct {
-	Clients     map[uint64]*Client
-	Gateways    map[uint64]*ClientGateway
-	Books       map[string]*OrderBook
-	Instruments map[string]Instrument
-	Positions   *PositionManager
-	NextOrderID uint64
-	Matcher     MatchingEngine
-	MDPublisher *MDPublisher
-	Clock       Clock
-	Loggers     map[string]Logger
-	mu          sync.RWMutex
+	Clients         map[uint64]*Client
+	Gateways        map[uint64]*ClientGateway
+	Books           map[string]*OrderBook
+	Instruments     map[string]Instrument
+	Positions       *PositionManager
+	ExchangeBalance *ExchangeBalance
+	NextOrderID     uint64
+	Matcher         MatchingEngine
+	MDPublisher     *MDPublisher
+	Clock           Clock
+	Loggers         map[string]Logger
+	mu              sync.RWMutex
 	running          bool
 	shutdownCh       chan struct{}
 	snapshotInterval time.Duration
@@ -97,6 +104,10 @@ func NewExchange(estimatedClients int, clock Clock) *Exchange {
 		Books:       make(map[string]*OrderBook, 16),
 		Instruments: make(map[string]Instrument, 16),
 		Positions:   NewPositionManager(clock),
+		ExchangeBalance: &ExchangeBalance{
+			FeeRevenue:    make(map[string]int64),
+			InsuranceFund: make(map[string]int64),
+		},
 		NextOrderID: 1,
 		Matcher:     matcher,
 		MDPublisher: NewMDPublisher(),
@@ -213,6 +224,50 @@ func (e *Exchange) ConnectClient(clientID uint64, initialBalances map[string]int
 	return gateway
 }
 
+// AddPerpBalance adds initial perp wallet balance for a client.
+func (e *Exchange) AddPerpBalance(clientID uint64, asset string, amount int64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if client := e.Clients[clientID]; client != nil {
+		client.PerpBalances[asset] += amount
+	}
+}
+
+// Transfer moves funds between a client's spot and perp wallets.
+func (e *Exchange) Transfer(clientID uint64, fromWallet, toWallet, asset string, amount int64) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	client := e.Clients[clientID]
+	if client == nil {
+		return &TransferError{"unknown client"}
+	}
+
+	switch {
+	case fromWallet == "spot" && toWallet == "perp":
+		if client.GetAvailable(asset) < amount {
+			return &TransferError{"insufficient spot balance"}
+		}
+		client.Balances[asset] -= amount
+		client.PerpBalances[asset] += amount
+	case fromWallet == "perp" && toWallet == "spot":
+		if client.PerpAvailable(asset) < amount {
+			return &TransferError{"insufficient perp balance"}
+		}
+		client.PerpBalances[asset] -= amount
+		client.Balances[asset] += amount
+	default:
+		return &TransferError{"invalid wallet type"}
+	}
+
+	return nil
+}
+
+type TransferError struct{ msg string }
+
+func (e *TransferError) Error() string { return e.msg }
+
 func (e *Exchange) DisconnectClient(clientID uint64) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -308,7 +363,27 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 
 	switch req.Type {
 	case Market:
-		if req.Side == Buy {
+		if instrument.IsPerp() {
+			perp := instrument.(*PerpFutures)
+			refPrice := book.GetMidPrice()
+			if refPrice == 0 && book.Asks.Best != nil {
+				refPrice = book.Asks.Best.Price
+			}
+			if refPrice == 0 && book.Bids.Best != nil {
+				refPrice = book.Bids.Best.Price
+			}
+			if refPrice > 0 {
+				estMargin := (req.Qty * refPrice / precision) * perp.MarginRate / 10000
+				if client.PerpAvailable(instrument.QuoteAsset()) < estMargin {
+					putOrder(order)
+					resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+					if log != nil {
+						log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+					}
+					return resp
+				}
+			}
+		} else if req.Side == Buy {
 			if book.Asks.Best != nil {
 				maxCost := (req.Qty * book.Asks.Best.Price) / precision
 				if client.GetAvailable(instrument.QuoteAsset()) < maxCost {
@@ -321,23 +396,30 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 				}
 			}
 		} else {
-			// Spot requires base asset, perp does not (can short)
-			if !instrument.IsPerp() {
-				if client.GetAvailable(instrument.BaseAsset()) < req.Qty {
-					putOrder(order)
-					resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-					if log != nil {
-						log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-					}
-					return resp
+			if client.GetAvailable(instrument.BaseAsset()) < req.Qty {
+				putOrder(order)
+				resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+				if log != nil {
+					log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
 				}
+				return resp
 			}
 		}
 	case LimitOrder:
-		asset := instrument.QuoteAsset()
-		amount := (req.Qty * req.Price) / precision
-		if req.Side == Buy {
-			if !client.Reserve(asset, amount) {
+		if instrument.IsPerp() {
+			perp := instrument.(*PerpFutures)
+			initialMargin := (req.Qty * req.Price / precision) * perp.MarginRate / 10000
+			if !client.ReservePerp(instrument.QuoteAsset(), initialMargin) {
+				putOrder(order)
+				resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+				if log != nil {
+					log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+				}
+				return resp
+			}
+		} else if req.Side == Buy {
+			amount := (req.Qty * req.Price) / precision
+			if !client.Reserve(instrument.QuoteAsset(), amount) {
 				putOrder(order)
 				resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
 				if log != nil {
@@ -346,17 +428,13 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 				return resp
 			}
 		} else {
-			// Spot requires base asset reservation, perp does not
-			if !instrument.IsPerp() {
-				asset = instrument.BaseAsset()
-				if !client.Reserve(asset, req.Qty) {
-					putOrder(order)
-					resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-					if log != nil {
-						log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-					}
-					return resp
+			if !client.Reserve(instrument.BaseAsset(), req.Qty) {
+				putOrder(order)
+				resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+				if log != nil {
+					log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
 				}
+				return resp
 			}
 		}
 	}
@@ -369,12 +447,14 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 
 	if req.TimeInForce == FOK && !result.FullyFilled {
 		if req.Type == LimitOrder {
-			if req.Side == Buy {
+			if instrument.IsPerp() {
+				perp := instrument.(*PerpFutures)
+				initMargin := (req.Qty * req.Price / precision) * perp.MarginRate / 10000
+				client.ReleasePerp(instrument.QuoteAsset(), initMargin)
+			} else if req.Side == Buy {
 				client.Release(instrument.QuoteAsset(), (req.Qty*req.Price)/precision)
 			} else {
-				if !instrument.IsPerp() {
-					client.Release(instrument.BaseAsset(), req.Qty)
-				}
+				client.Release(instrument.BaseAsset(), req.Qty)
 			}
 		}
 		putOrder(order)
@@ -429,13 +509,16 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 		client.AddOrder(orderID)
 	} else {
 		if order.FilledQty < order.Qty {
-			if order.Side == Buy {
-				remainingNotional := ((order.Qty - order.FilledQty) * order.Price) / precision
+			remaining := order.Qty - order.FilledQty
+			if instrument.IsPerp() {
+				perp := instrument.(*PerpFutures)
+				remainingMargin := (remaining * order.Price / precision) * perp.MarginRate / 10000
+				client.ReleasePerp(instrument.QuoteAsset(), remainingMargin)
+			} else if order.Side == Buy {
+				remainingNotional := (remaining * order.Price) / precision
 				client.Release(instrument.QuoteAsset(), remainingNotional)
 			} else {
-				if !instrument.IsPerp() {
-					client.Release(instrument.BaseAsset(), order.Qty-order.FilledQty)
-				}
+				client.Release(instrument.BaseAsset(), remaining)
 			}
 		}
 		putOrder(order)
@@ -492,15 +575,19 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 	instrument := book.Instrument
 	precision := instrument.BasePrecision()
 	remainingQty := order.Qty - order.FilledQty
+	if instrument.IsPerp() {
+		perp := instrument.(*PerpFutures)
+		remainingMargin := (remainingQty * order.Price / precision) * perp.MarginRate / 10000
+		client.ReleasePerp(instrument.QuoteAsset(), remainingMargin)
+	} else if order.Side == Buy {
+		client.Release(instrument.QuoteAsset(), (remainingQty*order.Price)/precision)
+	} else {
+		client.Release(instrument.BaseAsset(), remainingQty)
+	}
 	if order.Side == Buy {
-		amount := (remainingQty * order.Price) / precision
-		client.Release(instrument.QuoteAsset(), amount)
 		book.Bids.cancelOrder(req.OrderID)
 		e.publishBookUpdate(book, Buy, order.Price)
 	} else {
-		if !instrument.IsPerp() {
-			client.Release(instrument.BaseAsset(), remainingQty)
-		}
 		book.Asks.cancelOrder(req.OrderID)
 		e.publishBookUpdate(book, Sell, order.Price)
 	}
@@ -589,13 +676,36 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 
 		notional := (exec.Price * exec.Qty) / precision
 
-		if takerOrder.Side == Buy {
+		if instrument.IsPerp() {
+			perp := instrument.(*PerpFutures)
+			quote := instrument.QuoteAsset()
+
+			// Snapshot old positions before update for PnL calculation
+			takerDelta := e.Positions.UpdatePositionWithDelta(exec.TakerClientID, book.Symbol, exec.Qty, exec.Price, takerOrder.Side)
+			makerDelta := e.Positions.UpdatePositionWithDelta(exec.MakerClientID, book.Symbol, exec.Qty, exec.Price, makerSide)
+
+			// Release initial margin for the filled portion
+			initMargin := (exec.Qty * exec.Price / precision) * perp.MarginRate / 10000
+			taker.ReleasePerp(quote, initMargin)
+			maker.ReleasePerp(quote, initMargin)
+
+			// Realize PnL for closing trades
+			takerPnL := realizedPerpPnL(takerDelta.OldSize, takerDelta.OldEntryPrice, exec.Qty, exec.Price, takerOrder.Side, precision)
+			makerPnL := realizedPerpPnL(makerDelta.OldSize, makerDelta.OldEntryPrice, exec.Qty, exec.Price, makerSide, precision)
+
+			taker.PerpBalances[quote] += takerPnL - takerFee.Amount
+			maker.PerpBalances[quote] += makerPnL - makerFee.Amount
+
+			e.ExchangeBalance.FeeRevenue[quote] += takerFee.Amount + makerFee.Amount
+			positionChanged = true
+		} else if takerOrder.Side == Buy {
 			taker.Release(instrument.QuoteAsset(), notional)
 			taker.Balances[instrument.QuoteAsset()] -= notional + takerFee.Amount
 			taker.Balances[instrument.BaseAsset()] += exec.Qty
 			maker.Release(instrument.BaseAsset(), exec.Qty)
 			maker.Balances[instrument.QuoteAsset()] += notional - makerFee.Amount
 			maker.Balances[instrument.BaseAsset()] -= exec.Qty
+			e.ExchangeBalance.FeeRevenue[instrument.QuoteAsset()] += takerFee.Amount + makerFee.Amount
 		} else {
 			taker.Release(instrument.BaseAsset(), exec.Qty)
 			taker.Balances[instrument.BaseAsset()] -= exec.Qty
@@ -603,16 +713,11 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 			maker.Release(instrument.QuoteAsset(), notional)
 			maker.Balances[instrument.BaseAsset()] += exec.Qty
 			maker.Balances[instrument.QuoteAsset()] -= notional + makerFee.Amount
+			e.ExchangeBalance.FeeRevenue[instrument.QuoteAsset()] += takerFee.Amount + makerFee.Amount
 		}
 
 		taker.TakerVolume += notional
 		maker.MakerVolume += notional
-
-		if instrument.IsPerp() {
-			e.Positions.UpdatePosition(exec.TakerClientID, book.Symbol, exec.Qty, exec.Price, takerOrder.Side)
-			e.Positions.UpdatePosition(exec.MakerClientID, book.Symbol, exec.Qty, exec.Price, makerSide)
-			positionChanged = true
-		}
 
 		trade := &Trade{
 			TradeID:      book.SeqNum,
@@ -772,6 +877,24 @@ type InstrumentInfo struct {
 	TickSize   int64
 	MinSize    int64
 	IsPerp     bool
+}
+
+// GetBestLiquidity returns best bid qty, best ask qty for a symbol, thread-safe.
+func (e *Exchange) GetBestLiquidity(symbol string) (bidQty, askQty int64) {
+	e.mu.RLock()
+	book := e.Books[symbol]
+	if book == nil {
+		e.mu.RUnlock()
+		return 0, 0
+	}
+	if book.Bids.Best != nil {
+		bidQty = book.Bids.Best.TotalQty
+	}
+	if book.Asks.Best != nil {
+		askQty = book.Asks.Best.TotalQty
+	}
+	e.mu.RUnlock()
+	return bidQty, askQty
 }
 
 func (e *Exchange) ListInstruments(baseFilter, quoteFilter string) []InstrumentInfo {

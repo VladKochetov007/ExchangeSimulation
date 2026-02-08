@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"exchange_sim/actor"
 	"exchange_sim/exchange"
 	"exchange_sim/logger"
+	"exchange_sim/realistic_sim/actors"
 )
 
 func TestSimulationIntegration(t *testing.T) {
@@ -34,9 +34,9 @@ func TestSimulationIntegration(t *testing.T) {
 	feePlan := &exchange.PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true}
 
 	gateway := ex.ConnectClient(1, balances, feePlan)
-	mm := actor.NewFirstLP(1, gateway, actor.FirstLPConfig{
+	mm := actors.NewFirstLP(1, gateway, actors.FirstLPConfig{
 		Symbol:            "BTCUSD",
-		SpreadBps:         20,
+		HalfSpreadBps:     10, // 0.1% half-spread (was 20 bps / 2)
 		LiquidityMultiple: 10,
 		BootstrapPrice:    exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
 	})
@@ -45,7 +45,7 @@ func TestSimulationIntegration(t *testing.T) {
 	runner.AddActor(mm)
 
 	gateway2 := ex.ConnectClient(2, balances, feePlan)
-	taker := actor.NewRandomizedTaker(2, gateway2, actor.RandomizedTakerConfig{
+	taker := actors.NewRandomizedTaker(2, gateway2, actors.RandomizedTakerConfig{
 		Symbol:   "BTCUSD",
 		Interval: 100 * time.Millisecond,
 		MinQty:   exchange.BTCAmount(0.01),

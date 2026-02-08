@@ -244,17 +244,17 @@ func TestPositionManagerSettleFundingLongPosition(t *testing.T) {
 
 	clients := make(map[uint64]*Client)
 	clients[1] = NewClient(1, &FixedFee{})
-	clients[1].AddBalance("USD", 10000*SATOSHI)
+	clients[1].PerpBalances["USD"] = 10000 * SATOSHI
 
 	pm.UpdatePosition(1, "BTC-PERP", SATOSHI, 50000*SATOSHI, Buy)
 
 	perp.UpdateFundingRate(50000*SATOSHI, 50100*SATOSHI)
 
-	balanceBefore := clients[1].GetBalance("USD")
+	balanceBefore := clients[1].PerpBalances["USD"]
 
 	pm.SettleFunding(clients, perp)
 
-	balanceAfter := clients[1].GetBalance("USD")
+	balanceAfter := clients[1].PerpBalances["USD"]
 
 	if balanceAfter >= balanceBefore {
 		t.Errorf("Long position should pay funding, balance should decrease")
@@ -268,17 +268,17 @@ func TestPositionManagerSettleFundingShortPosition(t *testing.T) {
 
 	clients := make(map[uint64]*Client)
 	clients[1] = NewClient(1, &FixedFee{})
-	clients[1].AddBalance("USD", 10000*SATOSHI)
+	clients[1].PerpBalances["USD"] = 10000 * SATOSHI
 
 	pm.UpdatePosition(1, "BTC-PERP", SATOSHI, 50000*SATOSHI, Sell)
 
 	perp.UpdateFundingRate(50000*SATOSHI, 50100*SATOSHI)
 
-	balanceBefore := clients[1].GetBalance("USD")
+	balanceBefore := clients[1].PerpBalances["USD"]
 
 	pm.SettleFunding(clients, perp)
 
-	balanceAfter := clients[1].GetBalance("USD")
+	balanceAfter := clients[1].PerpBalances["USD"]
 
 	if balanceAfter <= balanceBefore {
 		t.Errorf("Short position should receive funding when mark > index, balance should increase")
@@ -292,13 +292,13 @@ func TestPositionManagerSettleFundingNoPosition(t *testing.T) {
 
 	clients := make(map[uint64]*Client)
 	clients[1] = NewClient(1, &FixedFee{})
-	clients[1].AddBalance("USD", 10000*SATOSHI)
+	clients[1].PerpBalances["USD"] = 10000 * SATOSHI
 
-	balanceBefore := clients[1].GetBalance("USD")
+	balanceBefore := clients[1].PerpBalances["USD"]
 
 	pm.SettleFunding(clients, perp)
 
-	balanceAfter := clients[1].GetBalance("USD")
+	balanceAfter := clients[1].PerpBalances["USD"]
 
 	if balanceAfter != balanceBefore {
 		t.Errorf("Balance should not change with no position")

@@ -1,27 +1,27 @@
-package actor
+package actors
 
 import (
 	"context"
-	"sync/atomic"
 	"time"
 
+	"exchange_sim/actor"
 	"exchange_sim/exchange"
 )
 
 type ExitStrategyFunc func(exposure, bestBid, bestAsk, bidLiquidity, askLiquidity, liquidityMultiple int64) bool
 
 type FirstLPConfig struct {
-	Symbol            string           // Trading pair
-	SpreadBps         int64            // Spread around mid in basis points (e.g., 10 = 0.1%)
-	LiquidityMultiple int64            // Exit when market has this multiple of our exposure (default: 10)
-	MonitorInterval   time.Duration    // How often to check exit conditions (default: 100ms)
-	MinExitSize       int64            // Don't exit if exposure below this (default: 0)
-	ExitStrategy      ExitStrategyFunc // Custom exit logic (optional, uses default if nil)
-	BootstrapPrice    int64            // Initial mid price if book is empty (0 = wait for market)
+	Symbol            string
+	HalfSpreadBps     int64
+	LiquidityMultiple int64
+	MonitorInterval   time.Duration
+	MinExitSize       int64
+	ExitStrategy      ExitStrategyFunc
+	BootstrapPrice    int64
 }
 
 type FirstLiquidityProvidingActor struct {
-	*BaseActor
+	*actor.BaseActor
 	Config FirstLPConfig
 
 	Symbol        string
@@ -59,15 +59,12 @@ func DefaultExitStrategy(exposure, bestBid, bestAsk, bidLiq, askLiq, multiple in
 	threshold := absExposure * multiple
 
 	if exposure > 0 {
-		// Long position - need to sell - check bid liquidity
 		return bidLiq >= threshold
 	}
-	// Short position - need to buy - check ask liquidity
 	return askLiq >= threshold
 }
 
 func NewFirstLP(id uint64, gateway *exchange.ClientGateway, config FirstLPConfig) *FirstLiquidityProvidingActor {
-	// Set defaults
 	if config.LiquidityMultiple == 0 {
 		config.LiquidityMultiple = 10
 	}
@@ -79,7 +76,7 @@ func NewFirstLP(id uint64, gateway *exchange.ClientGateway, config FirstLPConfig
 	}
 
 	return &FirstLiquidityProvidingActor{
-		BaseActor: NewBaseActor(id, gateway),
+		BaseActor: actor.NewBaseActor(id, gateway),
 		Config:    config,
 		Symbol:    config.Symbol,
 	}
@@ -90,12 +87,10 @@ func (f *FirstLiquidityProvidingActor) Start(ctx context.Context) error {
 
 	go f.eventLoop(ctx)
 
-	// Start BaseActor first to ensure it's ready to process responses
 	if err := f.BaseActor.Start(ctx); err != nil {
 		return err
 	}
 
-	// Now send requests after BaseActor is running
 	f.Subscribe(f.Symbol)
 	f.QueryBalance()
 
@@ -122,22 +117,22 @@ func (f *FirstLiquidityProvidingActor) eventLoop(ctx context.Context) {
 	}
 }
 
-func (f *FirstLiquidityProvidingActor) OnEvent(event *Event) {
+func (f *FirstLiquidityProvidingActor) OnEvent(event *actor.Event) {
 	switch event.Type {
-	case EventBookSnapshot:
-		f.onBookSnapshot(event.Data.(BookSnapshotEvent))
-	case EventBookDelta:
-		f.onBookDelta(event.Data.(BookDeltaEvent))
-	case EventOrderAccepted:
-		f.onOrderAccepted(event.Data.(OrderAcceptedEvent))
-	case EventOrderFilled, EventOrderPartialFill:
-		f.onOrderFilled(event.Data.(OrderFillEvent))
-	case EventOrderCancelled:
-		f.onOrderCancelled(event.Data.(OrderCancelledEvent))
-	case EventOrderRejected:
-		f.onOrderRejected(event.Data.(OrderRejectedEvent))
-	case EventOrderCancelRejected:
-		f.onOrderCancelRejected(event.Data.(OrderCancelRejectedEvent))
+	case actor.EventBookSnapshot:
+		f.onBookSnapshot(event.Data.(actor.BookSnapshotEvent))
+	case actor.EventBookDelta:
+		f.onBookDelta(event.Data.(actor.BookDeltaEvent))
+	case actor.EventOrderAccepted:
+		f.onOrderAccepted(event.Data.(actor.OrderAcceptedEvent))
+	case actor.EventOrderFilled, actor.EventOrderPartialFill:
+		f.onOrderFilled(event.Data.(actor.OrderFillEvent))
+	case actor.EventOrderCancelled:
+		f.onOrderCancelled(event.Data.(actor.OrderCancelledEvent))
+	case actor.EventOrderRejected:
+		f.onOrderRejected(event.Data.(actor.OrderRejectedEvent))
+	case actor.EventOrderCancelRejected:
+		f.onOrderCancelRejected(event.Data.(actor.OrderCancelRejectedEvent))
 	}
 }
 
@@ -152,12 +147,11 @@ func (f *FirstLiquidityProvidingActor) UpdateBalances(baseBalance, quoteBalance 
 	f.QuoteBalance = quoteBalance
 }
 
-func (f *FirstLiquidityProvidingActor) onBookSnapshot(snap BookSnapshotEvent) {
+func (f *FirstLiquidityProvidingActor) onBookSnapshot(snap actor.BookSnapshotEvent) {
 	if snap.Symbol != f.Symbol {
 		return
 	}
 
-	// Update market state
 	if len(snap.Snapshot.Bids) > 0 {
 		f.BestBid = snap.Snapshot.Bids[0].Price
 		f.BidLiquidity = snap.Snapshot.Bids[0].VisibleQty
@@ -170,11 +164,9 @@ func (f *FirstLiquidityProvidingActor) onBookSnapshot(snap BookSnapshotEvent) {
 	if f.BestBid > 0 && f.BestAsk > 0 {
 		f.LastMidPrice = (f.BestBid + f.BestAsk) / 2
 	} else if f.LastMidPrice == 0 && f.Config.BootstrapPrice > 0 {
-		// Bootstrap: use configured price when book is empty
 		f.LastMidPrice = f.Config.BootstrapPrice
 	}
 
-	// If we have balances and no active orders, place quotes
 	canPlace := f.LastMidPrice > 0 && f.BaseBalance > 0 && f.QuoteBalance > 0 &&
 		f.ActiveBidID == 0 && f.ActiveAskID == 0
 
@@ -183,7 +175,7 @@ func (f *FirstLiquidityProvidingActor) onBookSnapshot(snap BookSnapshotEvent) {
 	}
 }
 
-func (f *FirstLiquidityProvidingActor) onBookDelta(delta BookDeltaEvent) {
+func (f *FirstLiquidityProvidingActor) onBookDelta(delta actor.BookDeltaEvent) {
 	if delta.Delta.Side == exchange.Buy {
 		if delta.Delta.Price >= f.BestBid {
 			f.BestBid = delta.Delta.Price
@@ -197,14 +189,13 @@ func (f *FirstLiquidityProvidingActor) onBookDelta(delta BookDeltaEvent) {
 	}
 }
 
-func (f *FirstLiquidityProvidingActor) onOrderFilled(fill OrderFillEvent) {
+func (f *FirstLiquidityProvidingActor) onOrderFilled(fill actor.OrderFillEvent) {
 	if f.Instrument == nil {
 		return
 	}
 
 	basePrecision := f.Instrument.BasePrecision()
 
-	// Update position and balances
 	if fill.Side == exchange.Buy {
 		f.UpdatePosition(fill.Qty, fill.Price)
 		f.BaseBalance += fill.Qty
@@ -217,20 +208,14 @@ func (f *FirstLiquidityProvidingActor) onOrderFilled(fill OrderFillEvent) {
 		f.QuoteBalance += (notional - fill.FeeAmount)
 	}
 
-	// Cancel unfilled orders
 	f.CancelActiveOrders()
 
-	// Requote with updated balances
-	// Clear active order IDs immediately to allow requoting
 	f.ActiveBidID = 0
 	f.ActiveAskID = 0
 	f.PlaceQuotes()
-
-	// Exit check happens in monitor loop
 }
 
-func (f *FirstLiquidityProvidingActor) onOrderCancelled(cancelled OrderCancelledEvent) {
-	// Clear tracking
+func (f *FirstLiquidityProvidingActor) onOrderCancelled(cancelled actor.OrderCancelledEvent) {
 	if cancelled.OrderID == f.ActiveBidID {
 		f.ActiveBidID = 0
 	}
@@ -239,7 +224,7 @@ func (f *FirstLiquidityProvidingActor) onOrderCancelled(cancelled OrderCancelled
 	}
 }
 
-func (f *FirstLiquidityProvidingActor) onOrderRejected(rejected OrderRejectedEvent) {
+func (f *FirstLiquidityProvidingActor) onOrderRejected(rejected actor.OrderRejectedEvent) {
 	if rejected.RequestID == f.lastBidReqID {
 		f.lastBidReqID = 0
 	} else if rejected.RequestID == f.lastAskReqID {
@@ -247,7 +232,7 @@ func (f *FirstLiquidityProvidingActor) onOrderRejected(rejected OrderRejectedEve
 	}
 }
 
-func (f *FirstLiquidityProvidingActor) onOrderCancelRejected(rejected OrderCancelRejectedEvent) {
+func (f *FirstLiquidityProvidingActor) onOrderCancelRejected(rejected actor.OrderCancelRejectedEvent) {
 	if rejected.OrderID == f.ActiveBidID {
 		f.ActiveBidID = 0
 	} else if rejected.OrderID == f.ActiveAskID {
@@ -256,8 +241,7 @@ func (f *FirstLiquidityProvidingActor) onOrderCancelRejected(rejected OrderCance
 }
 
 func (f *FirstLiquidityProvidingActor) nextRequestID() uint64 {
-	// Return what the NEXT request ID will be (SubmitOrder will increment it)
-	return atomic.LoadUint64(&f.BaseActor.requestSeq) + 1
+	return f.PeekNextRequestID()
 }
 
 func (f *FirstLiquidityProvidingActor) PlaceQuotes() {
@@ -268,15 +252,13 @@ func (f *FirstLiquidityProvidingActor) PlaceQuotes() {
 	basePrecision := f.Instrument.BasePrecision()
 	tickSize := f.Instrument.TickSize()
 
-	halfSpread := (f.LastMidPrice * f.Config.SpreadBps) / (2 * 10000)
+	halfSpread := (f.LastMidPrice * f.Config.HalfSpreadBps) / 10000
 	bidPrice := f.LastMidPrice - halfSpread
 	askPrice := f.LastMidPrice + halfSpread
 
-	// Align prices to tick size (required for order acceptance)
 	bidPrice = (bidPrice / tickSize) * tickSize
 	askPrice = (askPrice / tickSize) * tickSize
 
-	// Spot market: use base for sell, quote for buy
 	if f.BaseBalance > 0 {
 		f.lastAskReqID = f.nextRequestID()
 		f.SubmitOrder(f.Symbol, exchange.Sell, exchange.LimitOrder, askPrice, f.BaseBalance)
@@ -292,7 +274,7 @@ func (f *FirstLiquidityProvidingActor) PlaceQuotes() {
 	}
 }
 
-func (f *FirstLiquidityProvidingActor) onOrderAccepted(accepted OrderAcceptedEvent) {
+func (f *FirstLiquidityProvidingActor) onOrderAccepted(accepted actor.OrderAcceptedEvent) {
 	if accepted.RequestID == f.lastBidReqID {
 		f.ActiveBidID = accepted.OrderID
 		f.lastBidReqID = 0
@@ -356,26 +338,22 @@ func (f *FirstLiquidityProvidingActor) ExecuteExit() {
 
 func (f *FirstLiquidityProvidingActor) UpdatePosition(deltaQty int64, price int64) {
 	if f.NetPosition == 0 {
-		// New position
 		f.NetPosition = deltaQty
 		f.AvgEntryPrice = price
 		return
 	}
 
 	if (f.NetPosition > 0 && deltaQty > 0) || (f.NetPosition < 0 && deltaQty < 0) {
-		// Increasing position - weighted average
 		totalNotional := (f.NetPosition * f.AvgEntryPrice) + (deltaQty * price)
 		f.NetPosition += deltaQty
 		if f.NetPosition != 0 {
 			f.AvgEntryPrice = totalNotional / f.NetPosition
 		}
 	} else {
-		// Reducing or flipping position
 		f.NetPosition += deltaQty
 		if f.NetPosition == 0 {
 			f.AvgEntryPrice = 0
 		} else if (f.NetPosition > 0 && deltaQty < 0) || (f.NetPosition < 0 && deltaQty > 0) {
-			// Position flipped
 			f.AvgEntryPrice = price
 		}
 	}
@@ -385,12 +363,10 @@ func (f *FirstLiquidityProvidingActor) GetPosition() (netPosition, avgEntryPrice
 	return f.NetPosition, f.AvgEntryPrice
 }
 
-// TEST ONLY - Expose balances for verification
 func (f *FirstLiquidityProvidingActor) GetBalances() (base, quote int64) {
 	return f.BaseBalance, f.QuoteBalance
 }
 
-// TEST ONLY - Set market state for testing
 func (f *FirstLiquidityProvidingActor) SetMarketState(bestBid, bidLiq, bestAsk, askLiq int64) {
 	f.BestBid = bestBid
 	f.BidLiquidity = bidLiq
