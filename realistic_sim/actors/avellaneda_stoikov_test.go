@@ -204,38 +204,20 @@ func TestAvellanedaStoikovInventoryLimits(t *testing.T) {
 	}
 
 	asActor := NewAvellanedaStoikov(1, gateway, config)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	err := asActor.Start(ctx)
-	if err != nil {
-		t.Fatalf("Failed to start actor: %v", err)
-	}
-	defer asActor.Stop()
-
-	asActor.Subscribe("BTC/USD")
-
 	asActor.SetInstrument(instrument)
 	asActor.lastMid = 50000 * exchange.USD_PRECISION
-
 	for i := 0; i < 20; i++ {
 		asActor.volatility.AddPrice(50000 * exchange.USD_PRECISION)
 	}
 
 	asActor.inventory = 6 * exchange.BTC_PRECISION
 	asActor.placeQuotes()
-
-	time.Sleep(50 * time.Millisecond)
-
 	if asActor.activeBidID != 0 {
 		t.Error("Should not place bid when at max long inventory")
 	}
 
 	asActor.inventory = -6 * exchange.BTC_PRECISION
 	asActor.placeQuotes()
-
-	time.Sleep(50 * time.Millisecond)
-
 	if asActor.activeAskID != 0 {
 		t.Error("Should not place ask when at max short inventory")
 	}
@@ -271,6 +253,12 @@ func TestAvellanedaStoikovIntegration(t *testing.T) {
 	}
 
 	asActor := NewAvellanedaStoikov(1, mmGateway, config)
+	asActor.SetInstrument(instrument)
+	asActor.lastMid = 50000 * exchange.USD_PRECISION
+	for i := 0; i < 20; i++ {
+		asActor.volatility.AddPrice(50000 * exchange.USD_PRECISION)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -279,13 +267,6 @@ func TestAvellanedaStoikovIntegration(t *testing.T) {
 		t.Fatalf("Failed to start AS actor: %v", err)
 	}
 	defer asActor.Stop()
-
-	asActor.SetInstrument(instrument)
-	asActor.lastMid = 50000 * exchange.USD_PRECISION
-
-	for i := 0; i < 20; i++ {
-		asActor.volatility.AddPrice(50000 * exchange.USD_PRECISION)
-	}
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -349,6 +330,12 @@ func TestAvellanedaStoikovOrderRejection(t *testing.T) {
 	}
 
 	asActor := NewAvellanedaStoikov(1, gateway, config)
+	asActor.SetInstrument(instrument)
+	asActor.lastMid = 50000 * exchange.USD_PRECISION
+	for i := 0; i < 20; i++ {
+		asActor.volatility.AddPrice(50000 * exchange.USD_PRECISION)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -357,13 +344,6 @@ func TestAvellanedaStoikovOrderRejection(t *testing.T) {
 		t.Fatalf("Failed to start actor: %v", err)
 	}
 	defer asActor.Stop()
-
-	asActor.SetInstrument(instrument)
-	asActor.lastMid = 50000 * exchange.USD_PRECISION
-
-	for i := 0; i < 20; i++ {
-		asActor.volatility.AddPrice(50000 * exchange.USD_PRECISION)
-	}
 
 	asActor.placeQuotes()
 

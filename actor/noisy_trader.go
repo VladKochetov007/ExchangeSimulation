@@ -46,19 +46,48 @@ func NewNoisyTrader(id uint64, gateway *exchange.ClientGateway, config NoisyTrad
 
 func (a *NoisyTraderActor) Start(ctx context.Context) error {
 	a.Subscribe(a.Config.Symbol)
-	go a.eventLoop(ctx)
-	go a.tradingLoop(ctx)
-	go a.cleanupLoop(ctx)
+	go a.loop(ctx)
 	return a.BaseActor.Start(ctx)
 }
 
-func (a *NoisyTraderActor) eventLoop(ctx context.Context) {
+func (a *NoisyTraderActor) loop(ctx context.Context) {
+	tradingTicker := time.NewTicker(a.Config.Interval)
+	defer tradingTicker.Stop()
+
+	var cleanupCh <-chan time.Time
+	if a.Config.OrderLifetime > 0 {
+		cleanupTicker := time.NewTicker(a.Config.OrderLifetime / 2)
+		defer cleanupTicker.Stop()
+		cleanupCh = cleanupTicker.C
+	}
+
+	a.rngMu.Lock()
+	initialDelay := time.Duration(a.rng.Int63n(int64(a.Config.Interval)))
+	a.rngMu.Unlock()
+
+	delayTimer := time.NewTimer(initialDelay)
+	defer delayTimer.Stop()
+	tradingEnabled := false
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case event := <-a.EventChannel():
 			a.OnEvent(event)
+		case <-delayTimer.C:
+			tradingEnabled = true
+		case <-tradingTicker.C:
+			if tradingEnabled && len(a.activeOrders) < a.Config.MaxActiveOrders && a.midPrice > 0 {
+				a.placeRandomOrder()
+			}
+		case <-cleanupCh:
+			now := time.Now()
+			for orderID, order := range a.activeOrders {
+				if now.Sub(order.placedAt) > a.Config.OrderLifetime {
+					a.CancelOrder(orderID)
+				}
+			}
 		}
 	}
 }
@@ -124,26 +153,6 @@ func (a *NoisyTraderActor) onOrderCancelled(event OrderCancelledEvent) {
 	delete(a.activeOrders, event.OrderID)
 }
 
-func (a *NoisyTraderActor) tradingLoop(ctx context.Context) {
-	ticker := time.NewTicker(a.Config.Interval)
-	defer ticker.Stop()
-
-	a.rngMu.Lock()
-	initialDelay := time.Duration(a.rng.Int63n(int64(a.Config.Interval)))
-	a.rngMu.Unlock()
-	time.Sleep(initialDelay)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if len(a.activeOrders) < a.Config.MaxActiveOrders && a.midPrice > 0 {
-				a.placeRandomOrder()
-			}
-		}
-	}
-}
 
 func (a *NoisyTraderActor) placeRandomOrder() {
 	a.rngMu.Lock()
@@ -169,25 +178,3 @@ func (a *NoisyTraderActor) placeRandomOrder() {
 	a.SubmitOrder(a.Config.Symbol, side, exchange.LimitOrder, price, qty)
 }
 
-func (a *NoisyTraderActor) cleanupLoop(ctx context.Context) {
-	if a.Config.OrderLifetime == 0 {
-		return
-	}
-
-	ticker := time.NewTicker(a.Config.OrderLifetime / 2)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			now := time.Now()
-			for orderID, order := range a.activeOrders {
-				if now.Sub(order.placedAt) > a.Config.OrderLifetime {
-					a.CancelOrder(orderID)
-				}
-			}
-		}
-	}
-}

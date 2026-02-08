@@ -54,7 +54,6 @@ func (as *AvellanedaStoikovActor) Start(ctx context.Context) error {
 	as.requeueTicker = time.NewTicker(as.config.RequoteInterval)
 
 	go as.eventLoop(ctx)
-	go as.requoteLoop(ctx)
 
 	if err := as.BaseActor.Start(ctx); err != nil {
 		return err
@@ -78,15 +77,6 @@ func (as *AvellanedaStoikovActor) eventLoop(ctx context.Context) {
 			return
 		case event := <-as.EventChannel():
 			as.OnEvent(event)
-		}
-	}
-}
-
-func (as *AvellanedaStoikovActor) requoteLoop(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
 		case <-as.requeueTicker.C:
 			as.placeQuotes()
 		}

@@ -215,7 +215,10 @@ func (m *MultiVenueGateway) forwardResponses(venue VenueID, gw *exchange.ClientG
 		select {
 		case <-m.stopCh:
 			return
-		case resp := <-gw.ResponseCh:
+		case resp, ok := <-gw.ResponseCh:
+			if !ok {
+				return
+			}
 			select {
 			case m.responseCh <- VenueResponse{Venue: venue, Response: resp}:
 			default:
@@ -229,7 +232,10 @@ func (m *MultiVenueGateway) forwardMarketData(venue VenueID, gw *exchange.Client
 		select {
 		case <-m.stopCh:
 			return
-		case msg := <-gw.MarketData:
+		case msg, ok := <-gw.MarketData:
+			if !ok {
+				return
+			}
 			select {
 			case m.marketDataCh <- VenueMarketData{Venue: venue, Data: msg}:
 			default:

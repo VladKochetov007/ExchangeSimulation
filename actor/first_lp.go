@@ -89,7 +89,6 @@ func (f *FirstLiquidityProvidingActor) Start(ctx context.Context) error {
 	f.monitorTicker = time.NewTicker(f.Config.MonitorInterval)
 
 	go f.eventLoop(ctx)
-	go f.monitorLoop(ctx)
 
 	// Start BaseActor first to ensure it's ready to process responses
 	if err := f.BaseActor.Start(ctx); err != nil {
@@ -117,15 +116,6 @@ func (f *FirstLiquidityProvidingActor) eventLoop(ctx context.Context) {
 			return
 		case event := <-f.EventChannel():
 			f.OnEvent(event)
-		}
-	}
-}
-
-func (f *FirstLiquidityProvidingActor) monitorLoop(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
 		case <-f.monitorTicker.C:
 			f.CheckExitConditions()
 		}
