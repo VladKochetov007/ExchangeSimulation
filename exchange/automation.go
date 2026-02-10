@@ -193,6 +193,15 @@ func (a *ExchangeAutomation) updateAllPerpPrices() {
 				MarkPrice:  u.markPrice,
 				IndexPrice: u.indexPrice,
 			})
+
+			// Log funding rate update (real exchanges log this with mark prices)
+			fundingRate := u.perp.GetFundingRate()
+			log.LogEvent(timestamp, 0, "funding_rate_update", FundingRateUpdateEvent{
+				Timestamp:   timestamp,
+				Symbol:      u.symbol,
+				Rate:        fundingRate.Rate,
+				NextFunding: fundingRate.NextFunding,
+			})
 		}
 
 		a.checkLiquidations(u.symbol, u.perp, u.markPrice)

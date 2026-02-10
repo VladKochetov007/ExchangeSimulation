@@ -77,6 +77,16 @@ func (pm *PositionManager) UpdatePositionWithDelta(clientID uint64, symbol strin
 				TradeSide:     side.String(),
 				Reason:        reason,
 			})
+
+				// Log open interest after position change (real exchanges log this)
+			// Open interest = sum of all absolute position sizes
+			// Use unsafe version since we're already holding the lock
+			openInterest := pm.calculateOpenInterestUnsafe(symbol)
+			log.LogEvent(timestamp, 0, "open_interest", OpenInterestEvent{
+				Timestamp:    timestamp,
+				Symbol:       symbol,
+				OpenInterest: openInterest,
+			})
 		}
 	}
 
@@ -128,7 +138,11 @@ func (pm *PositionManager) applyPositionChange(pos *Position, qty int64, price i
 func (pm *PositionManager) CalculateOpenInterest(symbol string) int64 {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
+	return pm.calculateOpenInterestUnsafe(symbol)
+}
 
+// calculateOpenInterestUnsafe calculates open interest without locking (caller must hold lock)
+func (pm *PositionManager) calculateOpenInterestUnsafe(symbol string) int64 {
 	var total int64
 	for _, clientPositions := range pm.positions {
 		if pos := clientPositions[symbol]; pos != nil && pos.Size != 0 {

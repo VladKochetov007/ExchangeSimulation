@@ -927,6 +927,19 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 			})
 
 			e.ExchangeBalance.FeeRevenue[quote] += takerFee.Amount + makerFee.Amount
+
+			// Log fee revenue per trade (real exchanges track this)
+			if globalLog := e.getLogger("_global"); globalLog != nil {
+				globalLog.LogEvent(timestamp, 0, "fee_revenue", FeeRevenueEvent{
+					Timestamp: timestamp,
+					Symbol:    book.Symbol,
+					TradeID:   book.SeqNum,
+					TakerFee:  takerFee.Amount,
+					MakerFee:  makerFee.Amount,
+					Asset:     quote,
+				})
+			}
+
 			positionChanged = true
 		} else if takerOrder.Side == Buy {
 			taker.Release(instrument.QuoteAsset(), notional)
@@ -950,6 +963,18 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 			})
 
 			e.ExchangeBalance.FeeRevenue[instrument.QuoteAsset()] += takerFee.Amount + makerFee.Amount
+
+			// Log fee revenue for spot buy trades
+			if globalLog := e.getLogger("_global"); globalLog != nil {
+				globalLog.LogEvent(timestamp, 0, "fee_revenue", FeeRevenueEvent{
+					Timestamp: timestamp,
+					Symbol:    book.Symbol,
+					TradeID:   book.SeqNum,
+					TakerFee:  takerFee.Amount,
+					MakerFee:  makerFee.Amount,
+					Asset:     instrument.QuoteAsset(),
+				})
+			}
 		} else {
 			taker.Release(instrument.BaseAsset(), exec.Qty)
 			oldTakerBase := taker.Balances[instrument.BaseAsset()]
@@ -972,6 +997,18 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 			})
 
 			e.ExchangeBalance.FeeRevenue[instrument.QuoteAsset()] += takerFee.Amount + makerFee.Amount
+
+			// Log fee revenue for spot sell trades
+			if globalLog := e.getLogger("_global"); globalLog != nil {
+				globalLog.LogEvent(timestamp, 0, "fee_revenue", FeeRevenueEvent{
+					Timestamp: timestamp,
+					Symbol:    book.Symbol,
+					TradeID:   book.SeqNum,
+					TakerFee:  takerFee.Amount,
+					MakerFee:  makerFee.Amount,
+					Asset:     instrument.QuoteAsset(),
+				})
+			}
 		}
 
 		taker.TakerVolume += notional

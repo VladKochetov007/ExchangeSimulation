@@ -462,6 +462,31 @@ type MarkPriceUpdateEvent struct {
 	IndexPrice int64  `json:"index_price"`
 }
 
+// FundingRateUpdateEvent logs funding rate changes for perpetual futures
+type FundingRateUpdateEvent struct {
+	Timestamp   int64  `json:"timestamp"`
+	Symbol      string `json:"symbol"`
+	Rate        int64  `json:"rate"`         // Funding rate in basis points (e.g., 10 = 0.1%)
+	NextFunding int64  `json:"next_funding"` // Unix nano timestamp of next settlement
+}
+
+// OpenInterestEvent logs total open interest for a symbol
+type OpenInterestEvent struct {
+	Timestamp    int64  `json:"timestamp"`
+	Symbol       string `json:"symbol"`
+	OpenInterest int64  `json:"open_interest"` // Total open interest in base asset satoshis
+}
+
+// FeeRevenueEvent logs exchange fee revenue per trade
+type FeeRevenueEvent struct {
+	Timestamp int64  `json:"timestamp"`
+	Symbol    string `json:"symbol"`
+	TradeID   uint64 `json:"trade_id"`
+	TakerFee  int64  `json:"taker_fee"`
+	MakerFee  int64  `json:"maker_fee"`
+	Asset     string `json:"asset"` // Fee asset (usually quote)
+}
+
 type MarginMode int
 
 const (
