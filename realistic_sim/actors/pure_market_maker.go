@@ -18,6 +18,7 @@ type PureMarketMakerConfig struct {
 	MaxInventory     int64               // Maximum absolute position limit
 	RequoteThreshold int64               // Minimum mid-price change to trigger requote (bps)
 	MonitorInterval  time.Duration       // How often to check for requote conditions
+	BootstrapPrice   int64               // Price to use when book is empty (0 = wait for book)
 }
 
 // PureMarketMakerActor implements a simple market making strategy with fixed spreads.
@@ -116,17 +117,19 @@ func (pmm *PureMarketMakerActor) onBookSnapshot(snap actor.BookSnapshotEvent) {
 	}
 
 	if pmm.instrument == nil {
-		// Instrument should be set in config, but handle gracefully
 		return
 	}
 
-	if len(snap.Snapshot.Bids) == 0 || len(snap.Snapshot.Asks) == 0 {
+	var midPrice int64
+	if len(snap.Snapshot.Bids) > 0 && len(snap.Snapshot.Asks) > 0 {
+		bestBid := snap.Snapshot.Bids[0].Price
+		bestAsk := snap.Snapshot.Asks[0].Price
+		midPrice = (bestBid + bestAsk) / 2
+	} else if pmm.lastMidPrice == 0 && pmm.config.BootstrapPrice > 0 {
+		midPrice = pmm.config.BootstrapPrice
+	} else {
 		return
 	}
-
-	bestBid := snap.Snapshot.Bids[0].Price
-	bestAsk := snap.Snapshot.Asks[0].Price
-	midPrice := (bestBid + bestAsk) / 2
 
 	if pmm.lastMidPrice == 0 {
 		pmm.lastMidPrice = midPrice
@@ -134,7 +137,6 @@ func (pmm *PureMarketMakerActor) onBookSnapshot(snap actor.BookSnapshotEvent) {
 		return
 	}
 
-	// Check if mid-price changed significantly
 	bpsChange := BPSChange(pmm.lastMidPrice, midPrice)
 	if bpsChange < 0 {
 		bpsChange = -bpsChange

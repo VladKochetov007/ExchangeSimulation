@@ -15,10 +15,11 @@ GOMOD=$(GOCMD) mod
 BIN_DIR=bin
 
 # Binary names and paths
-BINARIES=multisim sim latency_arb
+BINARIES=multisim sim latency_arb simplesim
 MULTISIM_BINARY=$(BIN_DIR)/multisim
 SIM_BINARY=$(BIN_DIR)/sim
 LATENCY_ARB_BINARY=$(BIN_DIR)/latency_arb
+SIMPLESIM_BINARY=$(BIN_DIR)/simplesim
 
 # Coverage output
 COVERAGE_FILE=coverage.out
@@ -36,7 +37,7 @@ help:
 ##@ Building
 
 ## build: Build all binaries
-build: $(MULTISIM_BINARY) $(SIM_BINARY) $(LATENCY_ARB_BINARY)
+build: $(MULTISIM_BINARY) $(SIM_BINARY) $(LATENCY_ARB_BINARY) $(SIMPLESIM_BINARY)
 	@echo "✓ All binaries built successfully"
 
 $(BIN_DIR):
@@ -53,6 +54,10 @@ $(SIM_BINARY): $(BIN_DIR)
 $(LATENCY_ARB_BINARY): $(BIN_DIR)
 	@echo "Building latency_arb..."
 	@$(GOBUILD) -o $(LATENCY_ARB_BINARY) ./cmd/latency_arb
+
+$(SIMPLESIM_BINARY): $(BIN_DIR)
+	@echo "Building simplesim..."
+	@$(GOBUILD) -o $(SIMPLESIM_BINARY) ./cmd/simplesim
 
 ## rebuild: Clean and rebuild all binaries
 rebuild: clean build
@@ -165,6 +170,11 @@ run-multisim: $(MULTISIM_BINARY)
 run-sim: $(SIM_BINARY)
 	@echo "Running sim..."
 	@./$(SIM_BINARY)
+
+## run-simplesim: Build and run simplesim
+run-simplesim: $(SIMPLESIM_BINARY)
+	@echo "Running simplesim..."
+	@./$(SIMPLESIM_BINARY)
 
 ## all: Run fmt, vet, test, and build
 all: fmt vet test build
