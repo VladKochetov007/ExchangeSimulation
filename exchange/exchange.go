@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,22 +23,27 @@ type ExchangeBalance struct {
 }
 
 type Exchange struct {
-	Clients         map[uint64]*Client
-	Gateways        map[uint64]*ClientGateway
-	Books           map[string]*OrderBook
-	Instruments     map[string]Instrument
-	Positions       *PositionManager
-	ExchangeBalance *ExchangeBalance
-	NextOrderID     uint64
-	Matcher         MatchingEngine
-	MDPublisher     *MDPublisher
-	Clock           Clock
-	Loggers         map[string]Logger
-	mu              sync.RWMutex
-	running          bool
-	shutdownCh       chan struct{}
-	snapshotInterval time.Duration
-	snapshotStopCh   chan struct{}
+	Clients                 map[uint64]*Client
+	Gateways                map[uint64]*ClientGateway
+	Books                   map[string]*OrderBook
+	Instruments             map[string]Instrument
+	Positions               *PositionManager
+	ExchangeBalance         *ExchangeBalance
+	NextOrderID             uint64
+	Matcher                 MatchingEngine
+	MDPublisher             *MDPublisher
+	Clock                   Clock
+	Loggers                 map[string]Logger
+	balanceTracker          *BalanceChangeTracker
+	BorrowingMgr            *BorrowingManager
+	MarginModeMgr           *MarginModeManager
+	mu                      sync.RWMutex
+	running                 bool
+	shutdownCh              chan struct{}
+	snapshotInterval        time.Duration
+	snapshotStopCh          chan struct{}
+	balanceSnapshotInterval time.Duration
+	balanceSnapshotStopCh   chan struct{}
 }
 
 type OrderBook struct {
@@ -98,7 +104,7 @@ func NewExchange(estimatedClients int, clock Clock) *Exchange {
 	}
 	matcher := NewDefaultMatcher()
 	matcher.clock = clock
-	return &Exchange{
+	ex := &Exchange{
 		Clients:     make(map[uint64]*Client, estimatedClients),
 		Gateways:    make(map[uint64]*ClientGateway, estimatedClients),
 		Books:       make(map[string]*OrderBook, 16),
@@ -108,16 +114,20 @@ func NewExchange(estimatedClients int, clock Clock) *Exchange {
 			FeeRevenue:    make(map[string]int64),
 			InsuranceFund: make(map[string]int64),
 		},
-		NextOrderID: 1,
-		Matcher:     matcher,
-		MDPublisher: NewMDPublisher(),
-		Clock:       clock,
-		Loggers:     make(map[string]Logger),
-		running:          false,
-		shutdownCh:       make(chan struct{}),
-		snapshotStopCh:   make(chan struct{}),
-		snapshotInterval: 0,
+		NextOrderID:             1,
+		Matcher:                 matcher,
+		MDPublisher:             NewMDPublisher(),
+		Clock:                   clock,
+		Loggers:                 make(map[string]Logger),
+		running:                 false,
+		shutdownCh:              make(chan struct{}),
+		snapshotStopCh:          make(chan struct{}),
+		snapshotInterval:        0,
+		balanceSnapshotStopCh:   make(chan struct{}),
+		balanceSnapshotInterval: 0,
 	}
+	ex.balanceTracker = &BalanceChangeTracker{exchange: ex}
+	return ex
 }
 
 func (e *Exchange) EnablePeriodicSnapshots(interval time.Duration) {
@@ -172,6 +182,81 @@ func (e *Exchange) logSnapshots() {
 	}
 }
 
+func (e *Exchange) EnableBalanceSnapshots(snapshotInterval time.Duration) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.balanceSnapshotInterval = snapshotInterval
+	if e.running && snapshotInterval > 0 {
+		e.balanceSnapshotStopCh = make(chan struct{})
+		go e.runBalanceSnapshotLoop(snapshotInterval)
+	}
+}
+
+func (e *Exchange) runBalanceSnapshotLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-e.balanceSnapshotStopCh:
+			return
+		case <-e.shutdownCh:
+			return
+		case <-ticker.C:
+			e.logAllBalances()
+		}
+	}
+}
+
+func (e *Exchange) logAllBalances() {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	timestamp := e.Clock.NowUnixNano()
+	log := e.getLogger("_global")
+	if log == nil {
+		return
+	}
+
+	for clientID, client := range e.Clients {
+		spotBalances := make([]AssetBalance, 0, len(client.Balances))
+		for asset, total := range client.Balances {
+			reserved := client.Reserved[asset]
+			spotBalances = append(spotBalances, AssetBalance{
+				Asset:     asset,
+				Total:     total,
+				Available: total - reserved,
+				Reserved:  reserved,
+			})
+		}
+
+		perpBalances := make([]AssetBalance, 0, len(client.PerpBalances))
+		for asset, total := range client.PerpBalances {
+			reserved := client.PerpReserved[asset]
+			perpBalances = append(perpBalances, AssetBalance{
+				Asset:     asset,
+				Total:     total,
+				Available: total - reserved,
+				Reserved:  reserved,
+			})
+		}
+
+		borrowed := make(map[string]int64, len(client.Borrowed))
+		for asset, amount := range client.Borrowed {
+			borrowed[asset] = amount
+		}
+
+		snapshot := BalanceSnapshotComplete{
+			Timestamp:    timestamp,
+			ClientID:     clientID,
+			SpotBalances: spotBalances,
+			PerpBalances: perpBalances,
+			Borrowed:     borrowed,
+		}
+		log.LogEvent(timestamp, clientID, "balance_snapshot", snapshot)
+	}
+}
+
 func (e *Exchange) SetLogger(symbol string, log Logger) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -180,6 +265,19 @@ func (e *Exchange) SetLogger(symbol string, log Logger) {
 
 func (e *Exchange) getLogger(symbol string) Logger {
 	return e.Loggers[symbol]
+}
+
+func (e *Exchange) EnableBorrowing(config BorrowingConfig) error {
+	if config.Enabled && config.PriceOracle == nil {
+		return errors.New("price oracle required")
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.BorrowingMgr = NewBorrowingManager(e, config)
+	e.MarginModeMgr = NewMarginModeManager(e)
+	return nil
 }
 
 func (e *Exchange) AddInstrument(instrument Instrument) {
@@ -203,10 +301,16 @@ func (e *Exchange) ConnectClient(clientID uint64, initialBalances map[string]int
 	defer e.mu.Unlock()
 
 	client := NewClient(clientID, feePlan)
+	timestamp := e.Clock.NowUnixNano()
+	var changes []BalanceDelta
 	for asset, amount := range initialBalances {
 		client.AddBalance(asset, amount)
+		changes = append(changes, spotDelta(asset, 0, amount))
 	}
 	e.Clients[clientID] = client
+	if len(changes) > 0 {
+		e.balanceTracker.LogBalanceChange(timestamp, clientID, "", "initial_deposit", changes)
+	}
 
 	gateway := NewClientGateway(clientID)
 	gateway.Running = true
@@ -219,6 +323,10 @@ func (e *Exchange) ConnectClient(clientID uint64, initialBalances map[string]int
 		if e.snapshotInterval > 0 {
 			go e.runSnapshotLoop(e.snapshotInterval)
 		}
+		if e.balanceSnapshotInterval > 0 {
+			e.balanceSnapshotStopCh = make(chan struct{})
+			go e.runBalanceSnapshotLoop(e.balanceSnapshotInterval)
+		}
 	}
 
 	return gateway
@@ -230,7 +338,12 @@ func (e *Exchange) AddPerpBalance(clientID uint64, asset string, amount int64) {
 	defer e.mu.Unlock()
 
 	if client := e.Clients[clientID]; client != nil {
+		oldBalance := client.PerpBalances[asset]
 		client.PerpBalances[asset] += amount
+		timestamp := e.Clock.NowUnixNano()
+		e.balanceTracker.LogBalanceChange(timestamp, clientID, "", "initial_deposit", []BalanceDelta{
+			perpDelta(asset, oldBalance, client.PerpBalances[asset]),
+		})
 	}
 }
 
@@ -244,22 +357,49 @@ func (e *Exchange) Transfer(clientID uint64, fromWallet, toWallet, asset string,
 		return &TransferError{"unknown client"}
 	}
 
+	timestamp := e.Clock.NowUnixNano()
+	var changes []BalanceDelta
+
 	switch {
 	case fromWallet == "spot" && toWallet == "perp":
 		if client.GetAvailable(asset) < amount {
 			return &TransferError{"insufficient spot balance"}
 		}
+		oldSpot := client.Balances[asset]
+		oldPerp := client.PerpBalances[asset]
 		client.Balances[asset] -= amount
 		client.PerpBalances[asset] += amount
+		changes = []BalanceDelta{
+			spotDelta(asset, oldSpot, client.Balances[asset]),
+			perpDelta(asset, oldPerp, client.PerpBalances[asset]),
+		}
 	case fromWallet == "perp" && toWallet == "spot":
 		if client.PerpAvailable(asset) < amount {
 			return &TransferError{"insufficient perp balance"}
 		}
+		oldPerp := client.PerpBalances[asset]
+		oldSpot := client.Balances[asset]
 		client.PerpBalances[asset] -= amount
 		client.Balances[asset] += amount
+		changes = []BalanceDelta{
+			perpDelta(asset, oldPerp, client.PerpBalances[asset]),
+			spotDelta(asset, oldSpot, client.Balances[asset]),
+		}
 	default:
 		return &TransferError{"invalid wallet type"}
 	}
+
+	if log := e.getLogger("_global"); log != nil {
+		log.LogEvent(timestamp, clientID, "transfer", TransferEvent{
+			Timestamp:  timestamp,
+			ClientID:   clientID,
+			FromWallet: fromWallet,
+			ToWallet:   toWallet,
+			Asset:      asset,
+			Amount:     amount,
+		})
+	}
+	e.balanceTracker.LogBalanceChange(timestamp, clientID, "", "transfer", changes)
 
 	return nil
 }
@@ -410,31 +550,79 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 			perp := instrument.(*PerpFutures)
 			initialMargin := (req.Qty * req.Price / precision) * perp.MarginRate / 10000
 			if !client.ReservePerp(instrument.QuoteAsset(), initialMargin) {
-				putOrder(order)
-				resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-				if log != nil {
-					log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+				if e.BorrowingMgr != nil {
+					e.mu.Unlock()
+					borrowed, _ := e.BorrowingMgr.AutoBorrowForPerpTrade(clientID, instrument.QuoteAsset(), initialMargin)
+					e.mu.Lock()
+					if borrowed && client.ReservePerp(instrument.QuoteAsset(), initialMargin) {
+						// Successfully borrowed and reserved
+					} else {
+						putOrder(order)
+						resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+						if log != nil {
+							log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+						}
+						return resp
+					}
+				} else {
+					putOrder(order)
+					resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+					if log != nil {
+						log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+					}
+					return resp
 				}
-				return resp
 			}
 		} else if req.Side == Buy {
 			amount := (req.Qty * req.Price) / precision
 			if !client.Reserve(instrument.QuoteAsset(), amount) {
-				putOrder(order)
-				resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-				if log != nil {
-					log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+				if e.BorrowingMgr != nil {
+					e.mu.Unlock()
+					borrowed, _ := e.BorrowingMgr.AutoBorrowForSpotTrade(clientID, instrument.QuoteAsset(), amount)
+					e.mu.Lock()
+					if borrowed && client.Reserve(instrument.QuoteAsset(), amount) {
+						// Successfully borrowed and reserved
+					} else {
+						putOrder(order)
+						resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+						if log != nil {
+							log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+						}
+						return resp
+					}
+				} else {
+					putOrder(order)
+					resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+					if log != nil {
+						log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+					}
+					return resp
 				}
-				return resp
 			}
 		} else {
 			if !client.Reserve(instrument.BaseAsset(), req.Qty) {
-				putOrder(order)
-				resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-				if log != nil {
-					log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+				if e.BorrowingMgr != nil {
+					e.mu.Unlock()
+					borrowed, _ := e.BorrowingMgr.AutoBorrowForSpotTrade(clientID, instrument.BaseAsset(), req.Qty)
+					e.mu.Lock()
+					if borrowed && client.Reserve(instrument.BaseAsset(), req.Qty) {
+						// Successfully borrowed and reserved
+					} else {
+						putOrder(order)
+						resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+						if log != nil {
+							log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+						}
+						return resp
+					}
+				} else {
+					putOrder(order)
+					resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
+					if log != nil {
+						log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+					}
+					return resp
 				}
-				return resp
 			}
 		}
 	}
@@ -693,26 +881,63 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 			takerPnL := realizedPerpPnL(takerDelta.OldSize, takerDelta.OldEntryPrice, exec.Qty, exec.Price, takerOrder.Side, precision)
 			makerPnL := realizedPerpPnL(makerDelta.OldSize, makerDelta.OldEntryPrice, exec.Qty, exec.Price, makerSide, precision)
 
+			oldTakerBalance := taker.PerpBalances[quote]
+			oldMakerBalance := maker.PerpBalances[quote]
 			taker.PerpBalances[quote] += takerPnL - takerFee.Amount
 			maker.PerpBalances[quote] += makerPnL - makerFee.Amount
+
+			e.balanceTracker.LogBalanceChange(timestamp, exec.TakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
+				perpDelta(quote, oldTakerBalance, taker.PerpBalances[quote]),
+			})
+			e.balanceTracker.LogBalanceChange(timestamp, exec.MakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
+				perpDelta(quote, oldMakerBalance, maker.PerpBalances[quote]),
+			})
 
 			e.ExchangeBalance.FeeRevenue[quote] += takerFee.Amount + makerFee.Amount
 			positionChanged = true
 		} else if takerOrder.Side == Buy {
 			taker.Release(instrument.QuoteAsset(), notional)
+			oldTakerQuote := taker.Balances[instrument.QuoteAsset()]
+			oldTakerBase := taker.Balances[instrument.BaseAsset()]
 			taker.Balances[instrument.QuoteAsset()] -= notional + takerFee.Amount
 			taker.Balances[instrument.BaseAsset()] += exec.Qty
+			e.balanceTracker.LogBalanceChange(timestamp, exec.TakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
+				spotDelta(instrument.QuoteAsset(), oldTakerQuote, taker.Balances[instrument.QuoteAsset()]),
+				spotDelta(instrument.BaseAsset(), oldTakerBase, taker.Balances[instrument.BaseAsset()]),
+			})
+
 			maker.Release(instrument.BaseAsset(), exec.Qty)
+			oldMakerQuote := maker.Balances[instrument.QuoteAsset()]
+			oldMakerBase := maker.Balances[instrument.BaseAsset()]
 			maker.Balances[instrument.QuoteAsset()] += notional - makerFee.Amount
 			maker.Balances[instrument.BaseAsset()] -= exec.Qty
+			e.balanceTracker.LogBalanceChange(timestamp, exec.MakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
+				spotDelta(instrument.QuoteAsset(), oldMakerQuote, maker.Balances[instrument.QuoteAsset()]),
+				spotDelta(instrument.BaseAsset(), oldMakerBase, maker.Balances[instrument.BaseAsset()]),
+			})
+
 			e.ExchangeBalance.FeeRevenue[instrument.QuoteAsset()] += takerFee.Amount + makerFee.Amount
 		} else {
 			taker.Release(instrument.BaseAsset(), exec.Qty)
+			oldTakerBase := taker.Balances[instrument.BaseAsset()]
+			oldTakerQuote := taker.Balances[instrument.QuoteAsset()]
 			taker.Balances[instrument.BaseAsset()] -= exec.Qty
 			taker.Balances[instrument.QuoteAsset()] += notional - takerFee.Amount
+			e.balanceTracker.LogBalanceChange(timestamp, exec.TakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
+				spotDelta(instrument.BaseAsset(), oldTakerBase, taker.Balances[instrument.BaseAsset()]),
+				spotDelta(instrument.QuoteAsset(), oldTakerQuote, taker.Balances[instrument.QuoteAsset()]),
+			})
+
 			maker.Release(instrument.QuoteAsset(), notional)
+			oldMakerBase := maker.Balances[instrument.BaseAsset()]
+			oldMakerQuote := maker.Balances[instrument.QuoteAsset()]
 			maker.Balances[instrument.BaseAsset()] += exec.Qty
 			maker.Balances[instrument.QuoteAsset()] -= notional + makerFee.Amount
+			e.balanceTracker.LogBalanceChange(timestamp, exec.MakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
+				spotDelta(instrument.BaseAsset(), oldMakerBase, maker.Balances[instrument.BaseAsset()]),
+				spotDelta(instrument.QuoteAsset(), oldMakerQuote, maker.Balances[instrument.QuoteAsset()]),
+			})
+
 			e.ExchangeBalance.FeeRevenue[instrument.QuoteAsset()] += takerFee.Amount + makerFee.Amount
 		}
 
@@ -945,6 +1170,9 @@ func (e *Exchange) Shutdown() {
 
 	close(e.shutdownCh)
 	close(e.snapshotStopCh)
+	if e.balanceSnapshotStopCh != nil {
+		close(e.balanceSnapshotStopCh)
+	}
 	for _, gateway := range e.Gateways {
 		gateway.Close()
 	}

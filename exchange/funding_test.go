@@ -252,7 +252,7 @@ func TestPositionManagerSettleFundingLongPosition(t *testing.T) {
 
 	balanceBefore := clients[1].PerpBalances["USD"]
 
-	pm.SettleFunding(clients, perp)
+	pm.SettleFunding(clients, perp, nil)
 
 	balanceAfter := clients[1].PerpBalances["USD"]
 
@@ -276,7 +276,7 @@ func TestPositionManagerSettleFundingShortPosition(t *testing.T) {
 
 	balanceBefore := clients[1].PerpBalances["USD"]
 
-	pm.SettleFunding(clients, perp)
+	pm.SettleFunding(clients, perp, nil)
 
 	balanceAfter := clients[1].PerpBalances["USD"]
 
@@ -296,7 +296,7 @@ func TestPositionManagerSettleFundingNoPosition(t *testing.T) {
 
 	balanceBefore := clients[1].PerpBalances["USD"]
 
-	pm.SettleFunding(clients, perp)
+	pm.SettleFunding(clients, perp, nil)
 
 	balanceAfter := clients[1].PerpBalances["USD"]
 

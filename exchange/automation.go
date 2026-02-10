@@ -212,18 +212,31 @@ func (a *ExchangeAutomation) chargeCollateralInterest() {
 
 	const dtSeconds = 60
 	const secondsPerYear = 365 * 24 * 3600
+	timestamp := a.exchange.Clock.NowUnixNano()
 
 	for _, client := range a.exchange.Clients {
 		for asset, borrowed := range client.Borrowed {
 			if borrowed <= 0 {
 				continue
 			}
-			// interest = borrowed * rate * dt / (seconds_per_year * precision)
-			// rate is in bps so divide by 10000
 			interest := borrowed * a.collateralRate * dtSeconds / (int64(secondsPerYear) * 10000)
 			if interest > 0 {
+				oldBalance := client.Balances[asset]
 				client.Balances[asset] -= interest
 				a.exchange.ExchangeBalance.FeeRevenue[asset] += interest
+
+				a.exchange.balanceTracker.LogBalanceChange(timestamp, client.ID, "", "interest_charge", []BalanceDelta{
+					spotDelta(asset, oldBalance, client.Balances[asset]),
+				})
+
+				if log := a.exchange.getLogger("_global"); log != nil {
+					log.LogEvent(timestamp, client.ID, "margin_interest", MarginInterestEvent{
+						Timestamp: timestamp,
+						ClientID:  client.ID,
+						Asset:     asset,
+						Amount:    interest,
+					})
+				}
 			}
 		}
 	}
@@ -353,23 +366,77 @@ func (a *ExchangeAutomation) liquidate(clientID uint64, client *Client, symbol s
 	// Settle PnL
 	precision := perp.TickSize()
 	pnl := realizedPerpPnL(pos.Size, pos.EntryPrice, closeQty, fillPrice, closeSide, precision)
+	oldPerpBalance := client.PerpBalances[perp.QuoteAsset()]
 	client.PerpBalances[perp.QuoteAsset()] += pnl
+
+	a.exchange.balanceTracker.LogBalanceChange(timestamp, clientID, symbol, "liquidation_pnl", []BalanceDelta{
+		perpDelta(perp.QuoteAsset(), oldPerpBalance, client.PerpBalances[perp.QuoteAsset()]),
+	})
 
 	// Clear position
 	a.exchange.Positions.UpdatePosition(clientID, symbol, closeQty, fillPrice, closeSide)
+
+	// Repay borrowed amounts from liquidation proceeds
+	if a.exchange.BorrowingMgr != nil {
+		borrowed := client.Borrowed[perp.QuoteAsset()]
+		if borrowed > 0 {
+			availableForRepay := client.PerpAvailable(perp.QuoteAsset())
+			if availableForRepay > 0 {
+				repayAmount := borrowed
+				if repayAmount > availableForRepay {
+					repayAmount = availableForRepay
+				}
+
+				oldBorrowed := client.Borrowed[perp.QuoteAsset()]
+				oldPerp := client.PerpBalances[perp.QuoteAsset()]
+				client.Borrowed[perp.QuoteAsset()] -= repayAmount
+				client.PerpBalances[perp.QuoteAsset()] -= repayAmount
+
+				a.exchange.balanceTracker.LogBalanceChange(timestamp, clientID, symbol, "liquidation_repay", []BalanceDelta{
+					perpDelta(perp.QuoteAsset(), oldPerp, client.PerpBalances[perp.QuoteAsset()]),
+					borrowedDelta(perp.QuoteAsset(), oldBorrowed, client.Borrowed[perp.QuoteAsset()]),
+				})
+
+				if log := a.exchange.getLogger("_global"); log != nil {
+					log.LogEvent(timestamp, clientID, "repay", RepayEvent{
+						Timestamp:     timestamp,
+						ClientID:      clientID,
+						Asset:         perp.QuoteAsset(),
+						Principal:     repayAmount,
+						Interest:      0,
+						RemainingDebt: client.Borrowed[perp.QuoteAsset()],
+					})
+				}
+			}
+		}
+	}
 
 	// Check for deficit/surplus
 	remainingEquity := client.PerpAvailable(perp.QuoteAsset())
 	debt := int64(0)
 	if remainingEquity < 0 {
 		debt = -remainingEquity
+		oldBalance := client.PerpBalances[perp.QuoteAsset()]
+		oldReserved := client.PerpReserved[perp.QuoteAsset()]
 		client.PerpBalances[perp.QuoteAsset()] = 0
 		client.PerpReserved[perp.QuoteAsset()] = 0
 		a.exchange.ExchangeBalance.InsuranceFund[perp.QuoteAsset()] -= debt
+
+		a.exchange.balanceTracker.LogBalanceChange(timestamp, clientID, symbol, "liquidation_deficit", []BalanceDelta{
+			perpDelta(perp.QuoteAsset(), oldBalance, 0),
+			reservedPerpDelta(perp.QuoteAsset(), oldReserved, 0),
+		})
 	} else if remainingEquity > 0 {
 		a.exchange.ExchangeBalance.InsuranceFund[perp.QuoteAsset()] += remainingEquity
+		oldBalance := client.PerpBalances[perp.QuoteAsset()]
+		oldReserved := client.PerpReserved[perp.QuoteAsset()]
 		client.PerpBalances[perp.QuoteAsset()] = 0
 		client.PerpReserved[perp.QuoteAsset()] = 0
+
+		a.exchange.balanceTracker.LogBalanceChange(timestamp, clientID, symbol, "liquidation_surplus", []BalanceDelta{
+			perpDelta(perp.QuoteAsset(), oldBalance, 0),
+			reservedPerpDelta(perp.QuoteAsset(), oldReserved, 0),
+		})
 	}
 
 	putOrder(order)
@@ -413,10 +480,10 @@ func (a *ExchangeAutomation) checkAndSettleFunding() {
 
 		// Check if it's time for settlement
 		if now >= fundingRate.NextFunding {
-			// Settle funding
-			a.exchange.Positions.SettleFunding(clients, perp)
+			a.exchange.mu.Lock()
+			a.exchange.Positions.SettleFunding(clients, perp, a.exchange)
+			a.exchange.mu.Unlock()
 
-			// Publish funding event (NextFunding updated by SettleFunding)
 			a.exchange.MDPublisher.PublishFunding(perp.Symbol(), perp.GetFundingRate(), now)
 		}
 	}

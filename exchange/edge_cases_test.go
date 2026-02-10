@@ -349,5 +349,5 @@ func TestSettleFundingWithMissingClient(t *testing.T) {
 
 	perp.UpdateFundingRate(50000*SATOSHI, 50100*SATOSHI)
 
-	pm.SettleFunding(clients, perp)
+	pm.SettleFunding(clients, perp, nil)
 }

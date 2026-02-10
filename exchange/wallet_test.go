@@ -243,7 +243,7 @@ func TestPerpFundingUsesPerpWallet(t *testing.T) {
 	perp.UpdateFundingRate(PriceUSD(50000, SATOSHI), PriceUSD(50100, SATOSHI))
 
 	spotBefore := clients[1].Balances["USD"]
-	pm.SettleFunding(clients, perp)
+	pm.SettleFunding(clients, perp, nil)
 
 	// Spot wallet must not change
 	if clients[1].Balances["USD"] != spotBefore {

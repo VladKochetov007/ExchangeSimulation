@@ -82,7 +82,7 @@ All events are logged to `logs/simulation.log` in JSONL format with fields:
 
 - Uses simulated clock for deterministic replay
 - 10x speedup (10ms sim time per 1ms real time)
-- Integer arithmetic throughout (satoshi precision)
+- Integer arithmetic throughout
 - No fees for simplicity (can be enabled with fee plans)
 - Market makers use bootstrap price to quote on empty book
 - Taker alternates between buy/sell to balance order flow

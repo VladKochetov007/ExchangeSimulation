@@ -1,29 +1,33 @@
 package exchange
 
 type Client struct {
-	ID           uint64
-	Balances     map[string]int64 // spot wallet totals
-	Reserved     map[string]int64 // spot wallet reserved
-	PerpBalances map[string]int64 // perp collateral wallet
-	PerpReserved map[string]int64 // perp initial margin reserved
-	Borrowed     map[string]int64 // outstanding margin loans
-	OrderIDs     []uint64
-	FeePlan      FeeModel
-	VIPLevel     int
-	MakerVolume  int64
-	TakerVolume  int64
+	ID                uint64
+	Balances          map[string]int64
+	Reserved          map[string]int64
+	PerpBalances      map[string]int64
+	PerpReserved      map[string]int64
+	Borrowed          map[string]int64
+	OrderIDs          []uint64
+	FeePlan           FeeModel
+	VIPLevel          int
+	MakerVolume       int64
+	TakerVolume       int64
+	MarginMode        MarginMode
+	IsolatedPositions map[string]*IsolatedPosition
 }
 
 func NewClient(id uint64, feePlan FeeModel) *Client {
 	return &Client{
-		ID:           id,
-		Balances:     make(map[string]int64, 8),
-		Reserved:     make(map[string]int64, 8),
-		PerpBalances: make(map[string]int64, 4),
-		PerpReserved: make(map[string]int64, 4),
-		Borrowed:     make(map[string]int64, 4),
-		OrderIDs:     make([]uint64, 0, 16),
-		FeePlan:      feePlan,
+		ID:                id,
+		Balances:          make(map[string]int64, 8),
+		Reserved:          make(map[string]int64, 8),
+		PerpBalances:      make(map[string]int64, 4),
+		PerpReserved:      make(map[string]int64, 4),
+		Borrowed:          make(map[string]int64, 4),
+		OrderIDs:          make([]uint64, 0, 16),
+		FeePlan:           feePlan,
+		MarginMode:        CrossMargin,
+		IsolatedPositions: make(map[string]*IsolatedPosition),
 	}
 }
 

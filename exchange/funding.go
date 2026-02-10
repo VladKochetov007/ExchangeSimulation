@@ -119,9 +119,12 @@ func (pm *PositionManager) CalculateOpenInterest(symbol string) int64 {
 }
 
 // SettleFunding applies funding payments from/to client PerpBalances.
-func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpFutures) {
+func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpFutures, exchange *Exchange) {
 	fundingRate := perp.GetFundingRate()
 	precision := perp.TickSize()
+	timestamp := pm.clock.NowUnixNano()
+	quote := perp.QuoteAsset()
+
 	for clientID, clientPos := range pm.positions {
 		pos := clientPos[perp.Symbol()]
 		if pos == nil || pos.Size == 0 {
@@ -136,10 +139,17 @@ func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpF
 		positionValue := abs(pos.Size) * pos.EntryPrice / precision
 		funding := (positionValue * fundingRate.Rate) / 10000
 
+		oldBalance := client.PerpBalances[quote]
 		if pos.Size > 0 {
-			client.PerpBalances[perp.QuoteAsset()] -= funding
+			client.PerpBalances[quote] -= funding
 		} else {
-			client.PerpBalances[perp.QuoteAsset()] += funding
+			client.PerpBalances[quote] += funding
+		}
+
+		if exchange != nil && exchange.balanceTracker != nil {
+			exchange.balanceTracker.LogBalanceChange(timestamp, clientID, perp.Symbol(), "funding_settlement", []BalanceDelta{
+				perpDelta(quote, oldBalance, client.PerpBalances[quote]),
+			})
 		}
 	}
 

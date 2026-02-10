@@ -210,15 +210,15 @@ type Response struct {
 }
 
 type FillNotification struct {
-	OrderID   uint64
-	ClientID  uint64
-	TradeID   uint64
-	Qty       int64
-	Price     int64
-	Side      Side
-	IsFull    bool
-	FeeAmount int64
-	FeeAsset  string
+	OrderID   uint64 `json:"order_id"`
+	ClientID  uint64 `json:"client_id"`
+	TradeID   uint64 `json:"trade_id"`
+	Qty       int64  `json:"qty"`
+	Price     int64  `json:"price"`
+	Side      Side   `json:"side"`
+	IsFull    bool   `json:"is_full"`
+	FeeAmount int64  `json:"fee_amount"`
+	FeeAsset  string `json:"fee_asset"`
 }
 
 type OrderRequest struct {
@@ -239,21 +239,21 @@ type CancelRequest struct {
 }
 
 type QueryRequest struct {
-	RequestID uint64
-	QueryType QueryType
-	Symbol    string
+	RequestID uint64    `json:"request_id"`
+	QueryType QueryType `json:"query_type"`
+	Symbol    string    `json:"symbol"`
 }
 
 type BalanceSnapshot struct {
-	Timestamp int64
-	Balances  []AssetBalance
+	Timestamp int64            `json:"timestamp"`
+	Balances  []AssetBalance   `json:"balances"`
 }
 
 type AssetBalance struct {
-	Asset     string
-	Total     int64
-	Available int64
-	Reserved  int64
+	Asset     string `json:"asset"`
+	Total     int64  `json:"total"`
+	Available int64  `json:"available"`
+	Reserved  int64  `json:"reserved"`
 }
 
 type MDType uint8
@@ -275,15 +275,15 @@ type MarketDataMsg struct {
 }
 
 type BookSnapshot struct {
-	Bids []PriceLevel
-	Asks []PriceLevel
+	Bids []PriceLevel `json:"bids"`
+	Asks []PriceLevel `json:"asks"`
 }
 
 type BookDelta struct {
-	Side       Side
-	Price      int64
-	VisibleQty int64
-	HiddenQty  int64
+	Side       Side  `json:"side"`
+	Price      int64 `json:"price"`
+	VisibleQty int64 `json:"visible_qty"`
+	HiddenQty  int64 `json:"hidden_qty"`
 }
 
 type Trade struct {
@@ -296,53 +296,53 @@ type Trade struct {
 }
 
 type PriceLevel struct {
-	Price      int64
-	VisibleQty int64
-	HiddenQty  int64
+	Price      int64 `json:"price"`
+	VisibleQty int64 `json:"visible_qty"`
+	HiddenQty  int64 `json:"hidden_qty"`
 }
 
 type Subscription struct {
-	ClientID uint64
-	Symbol   string
-	Types    []MDType
+	ClientID uint64   `json:"client_id"`
+	Symbol   string   `json:"symbol"`
+	Types    []MDType `json:"types"`
 }
 
 type Execution struct {
-	TakerOrderID  uint64
-	MakerOrderID  uint64
-	TakerClientID uint64
-	MakerClientID uint64
-	Price         int64
-	Qty           int64
-	Timestamp     int64
+	TakerOrderID  uint64 `json:"taker_order_id"`
+	MakerOrderID  uint64 `json:"maker_order_id"`
+	TakerClientID uint64 `json:"taker_client_id"`
+	MakerClientID uint64 `json:"maker_client_id"`
+	Price         int64  `json:"price"`
+	Qty           int64  `json:"qty"`
+	Timestamp     int64  `json:"timestamp"`
 }
 
 type Fee struct {
-	Asset  string
-	Amount int64
+	Asset  string `json:"asset"`
+	Amount int64  `json:"amount"`
 }
 
 type FundingRate struct {
-	Symbol      string
-	Rate        int64
-	NextFunding int64
-	Interval    int64
-	MarkPrice   int64
-	IndexPrice  int64
+	Symbol      string `json:"symbol"`
+	Rate        int64  `json:"rate"`
+	NextFunding int64  `json:"next_funding"`
+	Interval    int64  `json:"interval"`
+	MarkPrice   int64  `json:"mark_price"`
+	IndexPrice  int64  `json:"index_price"`
 }
 
 type OpenInterest struct {
-	Symbol         string
-	TotalContracts int64
-	Timestamp      int64
+	Symbol         string `json:"symbol"`
+	TotalContracts int64  `json:"total_contracts"`
+	Timestamp      int64  `json:"timestamp"`
 }
 
 type Position struct {
-	ClientID   uint64
-	Symbol     string
-	Size       int64
-	EntryPrice int64
-	Margin     int64
+	ClientID   uint64 `json:"client_id"`
+	Symbol     string `json:"symbol"`
+	Size       int64  `json:"size"`
+	EntryPrice int64  `json:"entry_price"`
+	Margin     int64  `json:"margin"`
 }
 
 type MarginCallEvent struct {
@@ -383,6 +383,91 @@ type TransferEvent struct {
 	ToWallet   string `json:"to_wallet"`
 	Asset      string `json:"asset"`
 	Amount     int64  `json:"amount"`
+}
+
+type BalanceChangeEvent struct {
+	Timestamp int64          `json:"timestamp"`
+	ClientID  uint64         `json:"client_id"`
+	Symbol    string         `json:"symbol"`
+	Reason    string         `json:"reason"`
+	Changes   []BalanceDelta `json:"changes"`
+}
+
+type BalanceDelta struct {
+	Asset      string `json:"asset"`
+	Wallet     string `json:"wallet"`
+	OldBalance int64  `json:"old_balance"`
+	NewBalance int64  `json:"new_balance"`
+	Delta      int64  `json:"delta"`
+}
+
+type BalanceSnapshotComplete struct {
+	Timestamp    int64            `json:"timestamp"`
+	ClientID     uint64           `json:"client_id"`
+	SpotBalances []AssetBalance   `json:"spot_balances"`
+	PerpBalances []AssetBalance   `json:"perp_balances"`
+	Borrowed     map[string]int64 `json:"borrowed"`
+}
+
+type BorrowEvent struct {
+	Timestamp      int64  `json:"timestamp"`
+	ClientID       uint64 `json:"client_id"`
+	Asset          string `json:"asset"`
+	Amount         int64  `json:"amount"`
+	Reason         string `json:"reason"`
+	MarginMode     string `json:"margin_mode"`
+	InterestRate   int64  `json:"interest_rate_bps"`
+	CollateralUsed int64  `json:"collateral_used"`
+}
+
+type RepayEvent struct {
+	Timestamp     int64  `json:"timestamp"`
+	ClientID      uint64 `json:"client_id"`
+	Asset         string `json:"asset"`
+	Principal     int64  `json:"principal"`
+	Interest      int64  `json:"interest"`
+	RemainingDebt int64  `json:"remaining_debt"`
+}
+
+type MarginMode int
+
+const (
+	CrossMargin    MarginMode = 0
+	IsolatedMargin MarginMode = 1
+)
+
+func (m MarginMode) String() string {
+	switch m {
+	case CrossMargin:
+		return "cross"
+	case IsolatedMargin:
+		return "isolated"
+	default:
+		return "unknown"
+	}
+}
+
+type BorrowingConfig struct {
+	Enabled           bool
+	AutoBorrowSpot    bool
+	AutoBorrowPerp    bool
+	DefaultMarginMode MarginMode
+
+	BorrowRates       map[string]int64
+	CollateralFactors map[string]float64
+	MaxBorrowPerAsset map[string]int64
+
+	PriceOracle CollateralPriceOracle
+}
+
+type CollateralPriceOracle interface {
+	GetPrice(asset string) int64
+}
+
+type IsolatedPosition struct {
+	Symbol     string
+	Collateral map[string]int64
+	Borrowed   map[string]int64
 }
 
 type PriorityType uint8
