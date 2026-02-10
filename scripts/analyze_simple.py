@@ -2,8 +2,19 @@
 import polars as pl
 import matplotlib.pyplot as plt
 from pathlib import Path
+import sys
 
-log_file = Path("logs/simulation.log")
+# Auto-detect log file
+if len(sys.argv) > 1:
+    log_file = Path(sys.argv[1])
+else:
+    # Try to find the log file in structured format
+    log_files = list(Path("logs").rglob("*.log"))
+    if not log_files:
+        print("No log files found in logs/")
+        sys.exit(1)
+    log_file = log_files[0]
+    print(f"Using log file: {log_file}")
 
 if not log_file.exists():
     print(f"Log file {log_file} not found")

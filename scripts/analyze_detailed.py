@@ -3,8 +3,19 @@ import polars as pl
 import matplotlib.pyplot as plt
 from pathlib import Path
 import numpy as np
+import sys
 
-log_file = Path("logs/simulation.log")
+# Auto-detect log file
+if len(sys.argv) > 1:
+    log_file = Path(sys.argv[1])
+else:
+    log_files = list(Path("logs").rglob("*.log"))
+    if not log_files:
+        print("No log files found in logs/")
+        sys.exit(1)
+    log_file = log_files[0]
+    print(f"Using log file: {log_file}")
+
 df = pl.read_ndjson(log_file)
 
 start_time = df["sim_time"].min()

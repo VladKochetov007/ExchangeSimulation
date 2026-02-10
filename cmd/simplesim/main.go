@@ -23,16 +23,18 @@ func main() {
 func run() error {
 	simDuration := 60 * time.Second
 	logDir := "logs"
+	exchangeName := "simex"
 
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return fmt.Errorf("create log directory: %w", err)
+	spotDir := fmt.Sprintf("%s/%s/spot", logDir, exchangeName)
+	if err := os.MkdirAll(spotDir, 0755); err != nil {
+		return fmt.Errorf("create spot log directory: %w", err)
 	}
 
 	startTime := time.Now().UnixNano()
 	simClock := simulation.NewSimulatedClock(startTime)
 	ex := exchange.NewExchange(100, simClock)
 
-	symbol := "BTC/USD"
+	symbol := "BTC-USD"
 	inst := exchange.NewSpotInstrument(
 		symbol,
 		"BTC", "USD",
@@ -43,7 +45,7 @@ func run() error {
 	)
 	ex.AddInstrument(inst)
 
-	logFile, err := os.Create(fmt.Sprintf("%s/simulation.log", logDir))
+	logFile, err := os.Create(fmt.Sprintf("%s/%s.log", spotDir, symbol))
 	if err != nil {
 		return fmt.Errorf("create log file: %w", err)
 	}
@@ -115,10 +117,11 @@ func run() error {
 	clientID++
 
 	fmt.Println("=== Simple Exchange Simulation ===")
+	fmt.Printf("Exchange: %s\n", exchangeName)
 	fmt.Printf("Symbol: %s\n", symbol)
 	fmt.Printf("Actors: 1 LP + %d MMs (spreads: %v bps) + 1 Taker\n", len(mmSpreads), mmSpreads)
 	fmt.Printf("Duration: %v\n", simDuration)
-	fmt.Printf("Log: %s/simulation.log\n", logDir)
+	fmt.Printf("Log: %s/%s/spot/%s.log\n", logDir, exchangeName, symbol)
 	fmt.Println()
 
 	ctx, cancel := context.WithTimeout(context.Background(), simDuration)
