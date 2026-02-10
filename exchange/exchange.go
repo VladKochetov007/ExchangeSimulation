@@ -869,8 +869,8 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 			quote := instrument.QuoteAsset()
 
 			// Snapshot old positions before update for PnL calculation
-			takerDelta := e.Positions.UpdatePositionWithDelta(exec.TakerClientID, book.Symbol, exec.Qty, exec.Price, takerOrder.Side)
-			makerDelta := e.Positions.UpdatePositionWithDelta(exec.MakerClientID, book.Symbol, exec.Qty, exec.Price, makerSide)
+			takerDelta := e.Positions.UpdatePositionWithDelta(exec.TakerClientID, book.Symbol, exec.Qty, exec.Price, takerOrder.Side, e, "trade")
+			makerDelta := e.Positions.UpdatePositionWithDelta(exec.MakerClientID, book.Symbol, exec.Qty, exec.Price, makerSide, e, "trade")
 
 			// Release initial margin for the filled portion
 			initMargin := (exec.Qty * exec.Price / precision) * perp.MarginRate / 10000
@@ -878,8 +878,41 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 			maker.ReleasePerp(quote, initMargin)
 
 			// Realize PnL for closing trades
-			takerPnL := realizedPerpPnL(takerDelta.OldSize, takerDelta.OldEntryPrice, exec.Qty, exec.Price, takerOrder.Side, precision)
-			makerPnL := realizedPerpPnL(makerDelta.OldSize, makerDelta.OldEntryPrice, exec.Qty, exec.Price, makerSide, precision)
+			basePrecision := perp.BasePrecision()
+			takerPnL := realizedPerpPnL(takerDelta.OldSize, takerDelta.OldEntryPrice, exec.Qty, exec.Price, takerOrder.Side, basePrecision)
+			makerPnL := realizedPerpPnL(makerDelta.OldSize, makerDelta.OldEntryPrice, exec.Qty, exec.Price, makerSide, basePrecision)
+
+			// Log realized PnL if position was closed/reduced
+			if takerPnL != 0 {
+				if log := e.getLogger("_global"); log != nil {
+					log.LogEvent(timestamp, exec.TakerClientID, "realized_pnl", RealizedPnLEvent{
+						Timestamp:  timestamp,
+						ClientID:   exec.TakerClientID,
+						Symbol:     book.Symbol,
+						TradeID:    book.SeqNum,
+						ClosedQty:  calculateClosedQty(takerDelta.OldSize, exec.Qty, takerOrder.Side),
+						EntryPrice: takerDelta.OldEntryPrice,
+						ExitPrice:  exec.Price,
+						PnL:        takerPnL,
+						Side:       takerOrder.Side.String(),
+					})
+				}
+			}
+			if makerPnL != 0 {
+				if log := e.getLogger("_global"); log != nil {
+					log.LogEvent(timestamp, exec.MakerClientID, "realized_pnl", RealizedPnLEvent{
+						Timestamp:  timestamp,
+						ClientID:   exec.MakerClientID,
+						Symbol:     book.Symbol,
+						TradeID:    book.SeqNum,
+						ClosedQty:  calculateClosedQty(makerDelta.OldSize, exec.Qty, makerSide),
+						EntryPrice: makerDelta.OldEntryPrice,
+						ExitPrice:  exec.Price,
+						PnL:        makerPnL,
+						Side:       makerSide.String(),
+					})
+				}
+			}
 
 			oldTakerBalance := taker.PerpBalances[quote]
 			oldMakerBalance := maker.PerpBalances[quote]
@@ -1177,4 +1210,22 @@ func (e *Exchange) Shutdown() {
 		gateway.Close()
 	}
 	e.running = false
+}
+
+func calculateClosedQty(oldSize, tradeQty int64, side Side) int64 {
+	if oldSize == 0 {
+		return 0
+	}
+	deltaSize := tradeQty
+	if side == Sell {
+		deltaSize = -tradeQty
+	}
+	if (oldSize > 0 && deltaSize >= 0) || (oldSize < 0 && deltaSize <= 0) {
+		return 0
+	}
+	closedQty := abs(deltaSize)
+	if closedQty > abs(oldSize) {
+		closedQty = abs(oldSize)
+	}
+	return closedQty
 }

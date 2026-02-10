@@ -185,6 +185,16 @@ func (a *ExchangeAutomation) updateAllPerpPrices() {
 	for _, u := range updates {
 		u.perp.UpdateFundingRate(u.indexPrice, u.markPrice)
 		a.exchange.MDPublisher.PublishFunding(u.symbol, u.perp.GetFundingRate(), timestamp)
+
+		if log := a.exchange.getLogger("_global"); log != nil {
+			log.LogEvent(timestamp, 0, "mark_price_update", MarkPriceUpdateEvent{
+				Timestamp:  timestamp,
+				Symbol:     u.symbol,
+				MarkPrice:  u.markPrice,
+				IndexPrice: u.indexPrice,
+			})
+		}
+
 		a.checkLiquidations(u.symbol, u.perp, u.markPrice)
 	}
 }
@@ -364,8 +374,8 @@ func (a *ExchangeAutomation) liquidate(clientID uint64, client *Client, symbol s
 	}
 
 	// Settle PnL
-	precision := perp.TickSize()
-	pnl := realizedPerpPnL(pos.Size, pos.EntryPrice, closeQty, fillPrice, closeSide, precision)
+	basePrecision := perp.BasePrecision()
+	pnl := realizedPerpPnL(pos.Size, pos.EntryPrice, closeQty, fillPrice, closeSide, basePrecision)
 	oldPerpBalance := client.PerpBalances[perp.QuoteAsset()]
 	client.PerpBalances[perp.QuoteAsset()] += pnl
 

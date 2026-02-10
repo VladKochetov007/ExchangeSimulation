@@ -40,7 +40,7 @@ type PositionDelta struct {
 }
 
 // UpdatePositionWithDelta updates the position and returns old and new state.
-func (pm *PositionManager) UpdatePositionWithDelta(clientID uint64, symbol string, qty int64, price int64, side Side) PositionDelta {
+func (pm *PositionManager) UpdatePositionWithDelta(clientID uint64, symbol string, qty int64, price int64, side Side, exchange *Exchange, reason string) PositionDelta {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -60,6 +60,26 @@ func (pm *PositionManager) UpdatePositionWithDelta(clientID uint64, symbol strin
 
 	delta.NewSize = pos.Size
 	delta.NewEntryPrice = pos.EntryPrice
+
+	if exchange != nil && exchange.balanceTracker != nil {
+		timestamp := pm.clock.NowUnixNano()
+		if log := exchange.getLogger("_global"); log != nil {
+			log.LogEvent(timestamp, clientID, "position_update", PositionUpdateEvent{
+				Timestamp:     timestamp,
+				ClientID:      clientID,
+				Symbol:        symbol,
+				OldSize:       delta.OldSize,
+				OldEntryPrice: delta.OldEntryPrice,
+				NewSize:       delta.NewSize,
+				NewEntryPrice: delta.NewEntryPrice,
+				TradeQty:      qty,
+				TradePrice:    price,
+				TradeSide:     side.String(),
+				Reason:        reason,
+			})
+		}
+	}
+
 	return delta
 }
 
@@ -158,7 +178,9 @@ func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpF
 
 // realizedPerpPnL calculates the realized PnL for a perp fill.
 // Only non-zero when the trade reduces or closes an existing position.
-func realizedPerpPnL(oldSize, oldEntryPrice, tradeQty, tradePrice int64, tradeSide Side, precision int64) int64 {
+// Returns PnL in quote asset satoshis (e.g., USD satoshis).
+// Prices must be in quote precision (e.g., USD_PRECISION), not base precision.
+func realizedPerpPnL(oldSize, oldEntryPrice, tradeQty, tradePrice int64, tradeSide Side, basePrecision int64) int64 {
 	if oldSize == 0 {
 		return 0
 	}
@@ -178,7 +200,11 @@ func realizedPerpPnL(oldSize, oldEntryPrice, tradeQty, tradePrice int64, tradeSi
 	if oldSize < 0 {
 		sign = -1
 	}
-	return closedQty * sign * (tradePrice - oldEntryPrice) / precision
+	// PnL formula: prices are in quotePrecision per full base asset
+	// closedQty is in base satoshis, priceDiff is in quote satoshis per full base
+	// Result is in quote satoshis
+	priceDiff := tradePrice - oldEntryPrice
+	return (closedQty * sign * priceDiff) / basePrecision
 }
 
 func abs(x int64) int64 {

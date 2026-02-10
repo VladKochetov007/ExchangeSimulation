@@ -429,6 +429,39 @@ type RepayEvent struct {
 	RemainingDebt int64  `json:"remaining_debt"`
 }
 
+type PositionUpdateEvent struct {
+	Timestamp     int64  `json:"timestamp"`
+	ClientID      uint64 `json:"client_id"`
+	Symbol        string `json:"symbol"`
+	OldSize       int64  `json:"old_size"`
+	OldEntryPrice int64  `json:"old_entry_price"`
+	NewSize       int64  `json:"new_size"`
+	NewEntryPrice int64  `json:"new_entry_price"`
+	TradeQty      int64  `json:"trade_qty"`
+	TradePrice    int64  `json:"trade_price"`
+	TradeSide     string `json:"trade_side"`
+	Reason        string `json:"reason"`
+}
+
+type RealizedPnLEvent struct {
+	Timestamp     int64  `json:"timestamp"`
+	ClientID      uint64 `json:"client_id"`
+	Symbol        string `json:"symbol"`
+	TradeID       uint64 `json:"trade_id"`
+	ClosedQty     int64  `json:"closed_qty"`
+	EntryPrice    int64  `json:"entry_price"`
+	ExitPrice     int64  `json:"exit_price"`
+	PnL           int64  `json:"pnl"`
+	Side          string `json:"side"`
+}
+
+type MarkPriceUpdateEvent struct {
+	Timestamp  int64  `json:"timestamp"`
+	Symbol     string `json:"symbol"`
+	MarkPrice  int64  `json:"mark_price"`
+	IndexPrice int64  `json:"index_price"`
+}
+
 type MarginMode int
 
 const (
