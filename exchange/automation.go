@@ -266,7 +266,7 @@ func (a *ExchangeAutomation) checkLiquidations(symbol string, perp *PerpFutures,
 	if markPrice == 0 {
 		return
 	}
-	precision := perp.TickSize()
+	precision := perp.BasePrecision() // Fixed: use BasePrecision not TickSize
 
 	a.exchange.mu.Lock()
 	defer a.exchange.mu.Unlock()
@@ -295,7 +295,26 @@ func (a *ExchangeAutomation) checkLiquidations(symbol string, perp *PerpFutures,
 
 		timestamp := a.exchange.Clock.NowUnixNano()
 
+		// Debug logging before liquidation
 		if marginRatio < perp.MaintenanceMarginRate {
+			if log := a.exchange.getLogger("_global"); log != nil {
+				log.LogEvent(timestamp, clientID, "liquidation_check", map[string]interface{}{
+					"timestamp":       timestamp,
+					"client_id":       clientID,
+					"symbol":          symbol,
+					"position_size":   pos.Size,
+					"entry_price":     pos.EntryPrice,
+					"mark_price":      markPrice,
+					"balance":         client.PerpBalances[perp.QuoteAsset()],
+					"reserved":        client.PerpReserved[perp.QuoteAsset()],
+					"available":       client.PerpAvailable(perp.QuoteAsset()),
+					"unrealized_pnl":  unrealizedPnL,
+					"equity":          equity,
+					"init_margin":     initMargin,
+					"margin_ratio":    marginRatio,
+					"threshold":       perp.MaintenanceMarginRate,
+				})
+			}
 			a.liquidate(clientID, client, symbol, pos, perp, markPrice, timestamp)
 		} else if marginRatio < perp.WarningMarginRate && a.liquidationHandler != nil {
 			liqPrice := a.estimateLiquidationPrice(pos, client, perp, precision)
@@ -434,6 +453,7 @@ func (a *ExchangeAutomation) liquidate(clientID uint64, client *Client, symbol s
 	remainingEquity := client.PerpAvailable(perp.QuoteAsset())
 	debt := int64(0)
 	if remainingEquity < 0 {
+		// Deficit: insurance fund covers the loss
 		debt = -remainingEquity
 		oldBalance := client.PerpBalances[perp.QuoteAsset()]
 		oldReserved := client.PerpReserved[perp.QuoteAsset()]
@@ -446,14 +466,12 @@ func (a *ExchangeAutomation) liquidate(clientID uint64, client *Client, symbol s
 			reservedPerpDelta(perp.QuoteAsset(), oldReserved, 0),
 		})
 	} else if remainingEquity > 0 {
-		a.exchange.ExchangeBalance.InsuranceFund[perp.QuoteAsset()] += remainingEquity
-		oldBalance := client.PerpBalances[perp.QuoteAsset()]
+		// Surplus: return to client by releasing reserved margin
+		// The balance stays with the client, we just release the reserved portion
 		oldReserved := client.PerpReserved[perp.QuoteAsset()]
-		client.PerpBalances[perp.QuoteAsset()] = 0
 		client.PerpReserved[perp.QuoteAsset()] = 0
 
 		a.exchange.balanceTracker.LogBalanceChange(timestamp, clientID, symbol, "liquidation_surplus", []BalanceDelta{
-			perpDelta(perp.QuoteAsset(), oldBalance, 0),
 			reservedPerpDelta(perp.QuoteAsset(), oldReserved, 0),
 		})
 	}
