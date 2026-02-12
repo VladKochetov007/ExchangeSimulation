@@ -13,9 +13,9 @@ const (
 	SATOSHI = BTC_PRECISION
 
 	// Price tick sizes (for price alignment in BTC/USD pairs)
-	CENT_TICK    = BTC_PRECISION / 100 // 0.01 USD tick
-	DOLLAR_TICK  = BTC_PRECISION       // 1 USD tick
-	HUNDRED_TICK = 100 * BTC_PRECISION // 100 USD tick
+	CENT_TICK    = USD_PRECISION / 100 // 0.01 USD tick = 1,000 units
+	DOLLAR_TICK  = USD_PRECISION       // 1 USD tick
+	HUNDRED_TICK = 100 * USD_PRECISION // 100 USD tick
 )
 
 // TEST ONLY - Limited precision (~15 decimal digits), not for production.

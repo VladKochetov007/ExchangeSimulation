@@ -43,11 +43,24 @@ func NewRandomizedTaker(id uint64, gateway *exchange.ClientGateway, config Rando
 		config.QuotePrecision = exchange.SATOSHI / 1000
 	}
 
+	// Use better seed to avoid correlation between actors
+	// Multiply ID by large prime to ensure seed diversity
+	seed := time.Now().UnixNano() + (int64(id) * 104729)
+	rng := rand.New(rand.NewSource(seed))
+
+	// Randomize initial side (don't hardcode to Buy!)
+	var initialSide exchange.Side
+	if rng.Intn(2) == 0 {
+		initialSide = exchange.Buy
+	} else {
+		initialSide = exchange.Sell
+	}
+
 	return &RandomizedTakerActor{
 		BaseActor: actor.NewBaseActor(id, gateway),
 		Config:    config,
-		rng:       rand.New(rand.NewSource(time.Now().UnixNano() + int64(id))),
-		side:      exchange.Buy,
+		rng:       rng,
+		side:      initialSide,
 	}
 }
 

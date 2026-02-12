@@ -39,12 +39,12 @@ func run() error {
 		"BTC", "USD",
 		exchange.BTC_PRECISION,
 		exchange.USD_PRECISION,
-		exchange.CENT_TICK, // Changed from DOLLAR_TICK ($1000) to CENT_TICK ($0.01)
+		exchange.CENT_TICK, // $0.01 tick size
 		exchange.BTC_PRECISION/10000,
 	)
 	ex.AddInstrument(perpInst)
 
-	logDir := "logs/randomwalk"
+	logDir := "logs/randomwalk_stoikov"
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return fmt.Errorf("create log dir: %w", err)
 	}
@@ -63,7 +63,7 @@ func run() error {
 	ex.EnableBalanceSnapshots(10 * time.Second)
 
 	indexProvider := exchange.NewFixedIndexProvider()
-	indexProvider.SetPrice("BTC-PERP", exchange.PriceUSD(bootstrapPrice, exchange.DOLLAR_TICK))
+	indexProvider.SetPrice("BTC-PERP", exchange.PriceUSD(bootstrapPrice, exchange.CENT_TICK))
 
 	automation := exchange.NewExchangeAutomation(ex, exchange.AutomationConfig{
 		MarkPriceCalc:       exchange.NewMidPriceCalculator(),
@@ -72,40 +72,43 @@ func run() error {
 		CollateralRate:      500,
 	})
 
+	// FirstLP for initial liquidity
 	lpID := uint64(1)
 	lpGateway := ex.ConnectClient(lpID, map[string]int64{}, &exchange.FixedFee{})
 	ex.AddPerpBalance(lpID, "USD", 1000000*exchange.USD_PRECISION)
 
 	firstLP := actors.NewFirstLP(lpID, lpGateway, actors.FirstLPConfig{
 		Symbol:            "BTC-PERP",
-		HalfSpreadBps:     50,
-		LiquidityMultiple: 10,
+		HalfSpreadBps:     20,
+		LiquidityMultiple: 5,
 		MonitorInterval:   100 * time.Millisecond,
 		MinExitSize:       exchange.BTC_PRECISION / 10,
 		BootstrapPrice:    exchange.PriceUSD(bootstrapPrice, exchange.CENT_TICK),
 	})
 
-	spreads := []int64{5, 10, 20, 40, 80, 160, 320, 640}
+	// Avellaneda-Stoikov Market Makers (5 with different risk aversion)
 	var marketMakers []actor.Actor
+	gammas := []int64{100, 200, 500, 1000, 2000} // Risk aversion parameters
 
-	for i, spreadBps := range spreads {
+	for i, gamma := range gammas {
 		mmID := uint64(2 + i)
 		mmGateway := ex.ConnectClient(mmID, map[string]int64{}, &exchange.FixedFee{})
 		ex.AddPerpBalance(mmID, "USD", 1000000*exchange.USD_PRECISION)
 
-		mm := actors.NewPureMarketMaker(mmID, mmGateway, actors.PureMarketMakerConfig{
+		mm := actors.NewAvellanedaStoikov(mmID, mmGateway, actors.AvellanedaStoikovConfig{
 			Symbol:           "BTC-PERP",
-			Instrument:       perpInst,
-			SpreadBps:        spreadBps,
-			QuoteSize:        2 * exchange.BTC_PRECISION / 100,
-			MaxInventory:     10 * exchange.BTC_PRECISION,
-			RequoteThreshold: 5,
-			MonitorInterval:  100 * time.Millisecond,
-			BootstrapPrice:   exchange.PriceUSD(bootstrapPrice, exchange.CENT_TICK),
+			Gamma:            gamma,                              // Risk aversion
+			K:                150,                                // Order book depth parameter
+			T:                3600,                               // Time horizon (1 hour)
+			QuoteQty:         2 * exchange.BTC_PRECISION / 100,   // 0.02 BTC
+			MaxInventory:     10 * exchange.BTC_PRECISION,        // 10 BTC max
+			VolatilityWindow: 20,                                 // 20 price samples for volatility
+			RequoteInterval:  500 * time.Millisecond,
 		})
 		marketMakers = append(marketMakers, mm)
 	}
 
+	// Small frequent takers
 	intervals := []time.Duration{
 		200 * time.Millisecond,
 		300 * time.Millisecond,
@@ -131,6 +134,7 @@ func run() error {
 		smallTakers = append(smallTakers, taker)
 	}
 
+	// Large infrequent takers
 	var largeTakers []actor.Actor
 
 	for i := 0; i < 2; i++ {

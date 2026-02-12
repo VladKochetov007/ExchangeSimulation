@@ -230,7 +230,7 @@ func (a *BaseActor) handleMarketData(md *exchange.MarketDataMsg) {
 	}
 }
 
-func (a *BaseActor) SubmitOrder(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64) {
+func (a *BaseActor) SubmitOrder(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64) uint64 {
 	reqID := atomic.AddUint64(&a.requestSeq, 1)
 	req := exchange.Request{
 		Type: exchange.ReqPlaceOrder,
@@ -246,12 +246,12 @@ func (a *BaseActor) SubmitOrder(symbol string, side exchange.Side, orderType exc
 		},
 	}
 	if a.gateway == nil {
-		return
+		return reqID
 	}
 	a.gateway.Mu.Lock()
 	if !a.gateway.Running {
 		a.gateway.Mu.Unlock()
-		return
+		return reqID
 	}
 	a.gateway.Mu.Unlock()
 	select {
@@ -259,6 +259,7 @@ func (a *BaseActor) SubmitOrder(symbol string, side exchange.Side, orderType exc
 	default:
 		// Gateway closed, silently drop request
 	}
+	return reqID
 }
 
 func (a *BaseActor) SubmitOrderFull(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64, visibility exchange.Visibility, icebergQty int64) {
