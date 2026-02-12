@@ -76,8 +76,13 @@ func run() error {
 
 	// 3 Simple makers: just mediators for taker flow
 	// High inventory limits - makers should absorb all flow without backing away
-	// 1s requote timer - simple, no memory/state complexity
-	spreads := []int64{5, 10, 20} // Tight spreads only
+	// Staggered requote timers - break synchronization for independent price discovery
+	spreads := []int64{5, 10, 20}
+	requoteIntervals := []time.Duration{
+		800 * time.Millisecond,  // MM1: 0.8s (fast, tight spread)
+		1000 * time.Millisecond, // MM2: 1.0s (medium)
+		1200 * time.Millisecond, // MM3: 1.2s (slow, wide spread)
+	}
 	var marketMakers []actor.Actor
 
 	for i, spreadBps := range spreads {
@@ -91,7 +96,7 @@ func run() error {
 			SpreadBps:       spreadBps,
 			QuoteSize:       50 * exchange.BTC_PRECISION / 100, // 0.5 BTC per level
 			MaxInventory:    10000 * exchange.BTC_PRECISION,    // 10,000 BTC - effectively unlimited for perps
-			RequoteInterval: 1 * time.Second,                    // 1s simple timer
+			RequoteInterval: requoteIntervals[i],                // Staggered to prevent synchronized requotes
 			BootstrapPrice:  exchange.PriceUSD(bootstrapPrice, exchange.CENT_TICK),
 		})
 		marketMakers = append(marketMakers, mm)
@@ -105,16 +110,16 @@ func run() error {
 		interval      time.Duration
 		minQty, maxQty int64
 	}{
-		{300 * time.Millisecond, 20, 80},   // Fast, small
-		{400 * time.Millisecond, 30, 100},  // Fast, medium
-		{500 * time.Millisecond, 40, 120},  // Medium, medium
-		{600 * time.Millisecond, 50, 150},  // Medium, large
-		{700 * time.Millisecond, 30, 100},  // Slow, medium
-		{400 * time.Millisecond, 25, 90},   // Fast, small-medium
-		{500 * time.Millisecond, 35, 110},  // Medium, medium
-		{600 * time.Millisecond, 45, 130},  // Medium, large
-		{350 * time.Millisecond, 20, 70},   // Very fast, small
-		{550 * time.Millisecond, 40, 120},  // Medium, medium
+		{300 * time.Millisecond, 50, 150},  // Fast, medium-large (always >= 0.5 BTC)
+		{400 * time.Millisecond, 60, 180},  // Fast, large
+		{500 * time.Millisecond, 70, 200},  // Medium, large
+		{600 * time.Millisecond, 80, 220},  // Medium, very large
+		{700 * time.Millisecond, 60, 180},  // Slow, large
+		{400 * time.Millisecond, 55, 170},  // Fast, medium-large
+		{500 * time.Millisecond, 65, 190},  // Medium, large
+		{600 * time.Millisecond, 75, 210},  // Medium, very large
+		{350 * time.Millisecond, 50, 150},  // Very fast, medium
+		{550 * time.Millisecond, 70, 200},  // Medium, large
 	}
 
 	for i, config := range takerConfigs {
