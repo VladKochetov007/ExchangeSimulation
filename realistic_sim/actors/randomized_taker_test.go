@@ -133,7 +133,7 @@ func TestRandomizedTakerStop(t *testing.T) {
 	}
 }
 
-func TestRandomizedTakerSideFlip(t *testing.T) {
+func TestRandomizedTakerSideRandomization(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
 	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
 	ex.AddInstrument(instrument)
@@ -157,14 +157,22 @@ func TestRandomizedTakerSideFlip(t *testing.T) {
 		t.Fatalf("Expected initial side to be Buy, got %v", taker.side)
 	}
 
-	flipped := taker.flipSide(taker.side)
-	if flipped != exchange.Sell {
-		t.Fatalf("Expected flipped side to be Sell, got %v", flipped)
+	buyCount := 0
+	sellCount := 0
+	for i := 0; i < 100; i++ {
+		side := taker.randomSide()
+		if side == exchange.Buy {
+			buyCount++
+		} else {
+			sellCount++
+		}
 	}
 
-	flippedAgain := taker.flipSide(flipped)
-	if flippedAgain != exchange.Buy {
-		t.Fatalf("Expected flipped side to be Buy, got %v", flippedAgain)
+	if buyCount == 0 || sellCount == 0 {
+		t.Fatalf("Expected both buy and sell sides to be selected, got %d buys and %d sells", buyCount, sellCount)
+	}
+	if buyCount < 30 || buyCount > 70 {
+		t.Fatalf("Expected roughly 50/50 distribution, got %d buys out of 100", buyCount)
 	}
 }
 

@@ -872,10 +872,52 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 			takerDelta := e.Positions.UpdatePositionWithDelta(exec.TakerClientID, book.Symbol, exec.Qty, exec.Price, takerOrder.Side, e, "trade")
 			makerDelta := e.Positions.UpdatePositionWithDelta(exec.MakerClientID, book.Symbol, exec.Qty, exec.Price, makerSide, e, "trade")
 
-			// Release initial margin for the filled portion
-			initMargin := (exec.Qty * exec.Price / precision) * perp.MarginRate / 10000
-			taker.ReleasePerp(quote, initMargin)
-			maker.ReleasePerp(quote, initMargin)
+			// Calculate closed quantities
+			takerClosedQty := calculateClosedQty(takerDelta.OldSize, exec.Qty, takerOrder.Side)
+			makerClosedQty := calculateClosedQty(makerDelta.OldSize, exec.Qty, makerSide)
+
+			// Handle margin for taker
+			if takerOrder.Type == Market {
+				// Market orders: reserve margin for opened portion only
+				takerOpenedQty := exec.Qty - takerClosedQty
+				if takerOpenedQty > 0 {
+					marginToReserve := (takerOpenedQty * exec.Price / precision) * perp.MarginRate / 10000
+					taker.ReservePerp(quote, marginToReserve)
+				}
+			} else {
+				// Limit orders: order margin was pre-reserved
+				// For closing portion, release order margin
+				if takerClosedQty > 0 {
+					orderMargin := (takerClosedQty * takerOrder.Price / precision) * perp.MarginRate / 10000
+					taker.ReleasePerp(quote, orderMargin)
+				}
+				// For opening portion, margin stays reserved (transfers from order to position)
+			}
+
+			// Release position margin for closed portion (use entry price, not execution price)
+			if takerClosedQty > 0 && takerDelta.OldSize != 0 {
+				posMargin := (takerClosedQty * takerDelta.OldEntryPrice / precision) * perp.MarginRate / 10000
+				taker.ReleasePerp(quote, posMargin)
+			}
+
+			// Handle margin for maker (always limit orders)
+			if makerClosedQty > 0 {
+				// Release order margin for closing portion
+				makerOrder := book.Bids.Orders[exec.MakerOrderID]
+				if makerOrder == nil {
+					makerOrder = book.Asks.Orders[exec.MakerOrderID]
+				}
+				if makerOrder != nil {
+					orderMargin := (makerClosedQty * makerOrder.Price / precision) * perp.MarginRate / 10000
+					maker.ReleasePerp(quote, orderMargin)
+				}
+				// Release position margin (use entry price, not execution price)
+				if makerDelta.OldSize != 0 {
+					posMargin := (makerClosedQty * makerDelta.OldEntryPrice / precision) * perp.MarginRate / 10000
+					maker.ReleasePerp(quote, posMargin)
+				}
+			}
+			// For opening portion, margin stays reserved (transfers from order to position)
 
 			// Realize PnL for closing trades
 			basePrecision := perp.BasePrecision()

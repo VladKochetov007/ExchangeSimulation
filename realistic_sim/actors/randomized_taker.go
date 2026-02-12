@@ -86,7 +86,7 @@ func (s *RandomizedTakerActor) tradingLoop(ctx context.Context) {
 			return
 		case <-s.ticker.C:
 			s.executeRandomTrade()
-			s.side = s.flipSide(s.side)
+			s.side = s.randomSide()
 		}
 	}
 }
@@ -109,9 +109,9 @@ func (s *RandomizedTakerActor) executeRandomTrade() {
 	s.SubmitOrder(s.Config.Symbol, s.side, exchange.Market, 0, qty)
 }
 
-func (s *RandomizedTakerActor) flipSide(side exchange.Side) exchange.Side {
-	if side == exchange.Buy {
-		return exchange.Sell
+func (s *RandomizedTakerActor) randomSide() exchange.Side {
+	if s.rng.Intn(2) == 0 {
+		return exchange.Buy
 	}
-	return exchange.Buy
+	return exchange.Sell
 }
