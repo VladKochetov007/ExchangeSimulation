@@ -49,7 +49,7 @@ func TestConnectClient(t *testing.T) {
 
 func TestPlaceOrderDirect(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, SATOSHI, SATOSHI)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, USD_PRECISION, USD_PRECISION/100)
 	ex.AddInstrument(instrument)
 
 	feePlan := &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true}

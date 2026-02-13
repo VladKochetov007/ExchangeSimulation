@@ -14,17 +14,17 @@ func TestPercentageFeeInQuote(t *testing.T) {
 		Qty:   SATOSHI,
 	}
 
-	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD", SATOSHI)
+	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD", BTC_PRECISION)
 	if takerFee.Asset != "USD" {
 		t.Errorf("Taker fee asset should be USD, got %s", takerFee.Asset)
 	}
-	tradeValue := (exec.Price * exec.Qty) / SATOSHI
+	tradeValue := (exec.Price * exec.Qty) / BTC_PRECISION
 	expectedTakerFee := (tradeValue * 10) / BPS
 	if takerFee.Amount != expectedTakerFee {
 		t.Errorf("Taker fee should be %d, got %d", expectedTakerFee, takerFee.Amount)
 	}
 
-	makerFee := fee.CalculateFee(exec, Sell, true, "BTC", "USD", SATOSHI)
+	makerFee := fee.CalculateFee(exec, Sell, true, "BTC", "USD", BTC_PRECISION)
 	if makerFee.Asset != "USD" {
 		t.Errorf("Maker fee asset should be USD, got %s", makerFee.Asset)
 	}
@@ -46,7 +46,7 @@ func TestPercentageFeeInBase(t *testing.T) {
 		Qty:   SATOSHI,
 	}
 
-	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD", SATOSHI)
+	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD", USD_PRECISION)
 	if takerFee.Asset != "BTC" {
 		t.Errorf("Taker fee asset should be BTC, got %s", takerFee.Asset)
 	}
@@ -67,12 +67,12 @@ func TestFixedFee(t *testing.T) {
 		Qty:   SATOSHI,
 	}
 
-	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD", SATOSHI)
+	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD", USD_PRECISION)
 	if takerFee.Amount != 200 {
 		t.Errorf("Taker fee should be 200, got %d", takerFee.Amount)
 	}
 
-	makerFee := fee.CalculateFee(exec, Sell, true, "BTC", "USD", SATOSHI)
+	makerFee := fee.CalculateFee(exec, Sell, true, "BTC", "USD", USD_PRECISION)
 	if makerFee.Amount != 100 {
 		t.Errorf("Maker fee should be 100, got %d", makerFee.Amount)
 	}

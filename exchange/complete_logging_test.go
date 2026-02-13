@@ -38,7 +38,7 @@ func TestFundingRateLogging(t *testing.T) {
 	logger := &completeLogger{}
 	ex.SetLogger("_global", logger)
 
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(perp)
 
 	// Setup clients with liquidity
@@ -108,7 +108,7 @@ func TestOpenInterestLogging(t *testing.T) {
 	logger := &completeLogger{}
 	ex.SetLogger("_global", logger)
 
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(perp)
 
 	client1 := ex.ConnectClient(1, map[string]int64{}, &PercentageFee{})
@@ -186,7 +186,7 @@ func TestFeeRevenueLoggingPerp(t *testing.T) {
 	logger := &completeLogger{}
 	ex.SetLogger("_global", logger)
 
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(perp)
 
 	// Client with 10 bps maker, 20 bps taker fees
@@ -236,7 +236,7 @@ func TestFeeRevenueLoggingPerp(t *testing.T) {
 	}
 
 	totalFee := fee.TakerFee + fee.MakerFee
-	t.Logf("Fee revenue: Taker=%d, Maker=%d, Total=%d (in USD satoshis)", fee.TakerFee, fee.MakerFee, totalFee)
+	t.Logf("Fee revenue: Taker=%d, Maker=%d, Total=%d (in USD precision units)", fee.TakerFee, fee.MakerFee, totalFee)
 
 	ex.Shutdown()
 }
@@ -301,7 +301,7 @@ func TestCompleteLoggingIntegration(t *testing.T) {
 	logger := &completeLogger{}
 	ex.SetLogger("_global", logger)
 
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(perp)
 
 	client1 := ex.ConnectClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})

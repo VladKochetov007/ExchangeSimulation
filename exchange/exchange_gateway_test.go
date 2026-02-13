@@ -7,10 +7,10 @@ import (
 
 func TestExchangeCancelOrder(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * USD_PRECISION}
 	gateway := ex.ConnectClient(1, balances, &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true})
 
 	req := &OrderRequest{
@@ -80,12 +80,12 @@ func TestQueryBalance(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	balances := map[string]int64{
 		"BTC": 5 * SATOSHI,
-		"USD": 10000 * SATOSHI,
+		"USD": 10000 * USD_PRECISION,
 	}
 	ex.ConnectClient(1, balances, &FixedFee{})
 
 	client := ex.Clients[1]
-	client.Reserve("USD", 1000*SATOSHI)
+	client.Reserve("USD", 1000*USD_PRECISION)
 
 	req := &QueryRequest{RequestID: 1}
 	resp := ex.queryBalance(1, req)
@@ -111,14 +111,14 @@ func TestQueryBalance(t *testing.T) {
 		t.Fatalf("USD balance not found")
 	}
 
-	if usdBalance.Total != 10000*SATOSHI {
-		t.Errorf("Expected total 10000 SATOSHI, got %d", usdBalance.Total)
+	if usdBalance.Total != 10000*USD_PRECISION {
+		t.Errorf("Expected total 10000 USD_PRECISION, got %d", usdBalance.Total)
 	}
-	if usdBalance.Reserved != 1000*SATOSHI {
-		t.Errorf("Expected reserved 1000 SATOSHI, got %d", usdBalance.Reserved)
+	if usdBalance.Reserved != 1000*USD_PRECISION {
+		t.Errorf("Expected reserved 1000 USD_PRECISION, got %d", usdBalance.Reserved)
 	}
-	if usdBalance.Available != 9000*SATOSHI {
-		t.Errorf("Expected available 9000 SATOSHI, got %d", usdBalance.Available)
+	if usdBalance.Available != 9000*USD_PRECISION {
+		t.Errorf("Expected available 9000 USD_PRECISION, got %d", usdBalance.Available)
 	}
 }
 
@@ -136,7 +136,7 @@ func TestQueryBalanceUnknownClient(t *testing.T) {
 
 func TestSubscribeUnsubscribe(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": 10 * SATOSHI}
@@ -193,12 +193,12 @@ func TestSubscribeUnknownInstrument(t *testing.T) {
 
 func TestHandleClientRequestsIntegration(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI/1000)
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{
 		"BTC": 10 * SATOSHI,
-		"USD": 100000 * SATOSHI,
+		"USD": 100000 * USD_PRECISION,
 	}
 	gateway := ex.ConnectClient(1, balances, &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true})
 

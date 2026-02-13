@@ -34,11 +34,11 @@ func TestSpotIndexProvider(t *testing.T) {
 	ex := NewExchange(10, clock)
 
 	// Add spot instrument
-	spotInst := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000, DOLLAR_TICK, SATOSHI/100)
+	spotInst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(spotInst)
 
 	// Add perp instrument
-	perpInst := NewPerpFutures("BTC-PERP", "BTC", "USD", SATOSHI, SATOSHI/1000, DOLLAR_TICK, SATOSHI/100)
+	perpInst := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(perpInst)
 
 	// Create provider and map perp to spot

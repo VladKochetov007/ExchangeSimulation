@@ -13,7 +13,7 @@ func TestComprehensiveBorrowRepayLogging(t *testing.T) {
 	ex.SetLogger("_global", logger)
 
 	oracle := NewStaticPriceOracle(map[string]int64{
-		"USD": 1 * SATOSHI,
+		"USD": 1 * USD_PRECISION,
 		"BTC": 50000 * SATOSHI,
 		"ETH": 3000 * SATOSHI,
 	})
@@ -348,7 +348,7 @@ func TestMultiVenueBorrowingLogging(t *testing.T) {
 	ex2.SetLogger("_global", logger2)
 
 	oracle := NewStaticPriceOracle(map[string]int64{
-		"USD": 1 * SATOSHI,
+		"USD": 1 * USD_PRECISION,
 		"BTC": 50000 * SATOSHI,
 	})
 
@@ -437,7 +437,7 @@ func TestCollateralLogging(t *testing.T) {
 	ex.SetLogger("_global", logger)
 
 	oracle := NewStaticPriceOracle(map[string]int64{
-		"USD": 1 * SATOSHI,
+		"USD": 1 * USD_PRECISION,
 		"BTC": 50000 * SATOSHI,
 	})
 

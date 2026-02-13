@@ -244,7 +244,7 @@ func TestPositionManagerSettleFundingLongPosition(t *testing.T) {
 
 	clients := make(map[uint64]*Client)
 	clients[1] = NewClient(1, &FixedFee{})
-	clients[1].PerpBalances["USD"] = 10000 * SATOSHI
+	clients[1].PerpBalances["USD"] = 10000 * USD_PRECISION
 
 	pm.UpdatePosition(1, "BTC-PERP", SATOSHI, 50000*SATOSHI, Buy)
 
@@ -268,7 +268,7 @@ func TestPositionManagerSettleFundingShortPosition(t *testing.T) {
 
 	clients := make(map[uint64]*Client)
 	clients[1] = NewClient(1, &FixedFee{})
-	clients[1].PerpBalances["USD"] = 10000 * SATOSHI
+	clients[1].PerpBalances["USD"] = 10000 * USD_PRECISION
 
 	pm.UpdatePosition(1, "BTC-PERP", SATOSHI, 50000*SATOSHI, Sell)
 
@@ -292,7 +292,7 @@ func TestPositionManagerSettleFundingNoPosition(t *testing.T) {
 
 	clients := make(map[uint64]*Client)
 	clients[1] = NewClient(1, &FixedFee{})
-	clients[1].PerpBalances["USD"] = 10000 * SATOSHI
+	clients[1].PerpBalances["USD"] = 10000 * USD_PRECISION
 
 	balanceBefore := clients[1].PerpBalances["USD"]
 

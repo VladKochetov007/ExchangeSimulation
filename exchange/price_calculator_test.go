@@ -48,7 +48,7 @@ func TestMidPriceCalculator(t *testing.T) {
 
 	// Create exchange and instrument
 	ex := NewExchange(10, clock)
-	inst := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000, DOLLAR_TICK, SATOSHI/100)
+	inst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(inst)
 
 	book := ex.Books["BTC/USD"]
@@ -111,7 +111,7 @@ func TestWeightedMidPriceCalculator(t *testing.T) {
 
 	// Create exchange and instrument
 	ex := NewExchange(10, clock)
-	inst := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000, DOLLAR_TICK, SATOSHI/100)
+	inst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(inst)
 
 	book := ex.Books["BTC/USD"]
@@ -162,7 +162,7 @@ func TestWeightedMidPriceCalculator(t *testing.T) {
 func TestOrderBookGetters(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
-	inst := NewSpotInstrument("BTC/USD", "BTC", "USD", SATOSHI, SATOSHI/1000, DOLLAR_TICK, SATOSHI/100)
+	inst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(inst)
 
 	book := ex.Books["BTC/USD"]
