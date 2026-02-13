@@ -38,8 +38,20 @@ func run() error {
 	startTime := time.Now().UnixNano()
 	simClock := simulation.NewSimulatedClock(startTime)
 
+	// Create event scheduler for simulation-time tickers
+	scheduler := simulation.NewEventScheduler(simClock)
+	simClock.SetScheduler(scheduler)
+
+	// Create ticker factory for simulation mode
+	tickerFactory := simulation.NewSimTickerFactory(scheduler)
+
 	clientCount := 100
-	ex := exchange.NewExchange(clientCount, simClock)
+	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
+		EstimatedClients: clientCount,
+		Clock:            simClock,
+		TickerFactory:    tickerFactory,
+		SnapshotInterval: 100 * time.Millisecond,
+	})
 
 	perpInst := exchange.NewPerpFutures(
 		"BTC-PERP",
@@ -81,6 +93,7 @@ func run() error {
 		IndexProvider:       indexProvider,
 		PriceUpdateInterval: 3 * time.Second,
 		CollateralRate:      0, // ZERO funding - no anchoring to index price
+		TickerFactory:       tickerFactory,
 	})
 
 	// 3 Simple makers: just mediators for taker flow
@@ -162,6 +175,17 @@ func run() error {
 
 	automation.Start(ctx)
 	defer automation.Stop()
+
+	// Inject ticker factory into all actors before starting them
+	for _, a := range allActors {
+		// All actors in this sim embed BaseActor, so we can use type assertions
+		switch act := a.(type) {
+		case *actors.SlowMarketMakerActor:
+			act.SetTickerFactory(tickerFactory)
+		case *actors.RandomizedTakerActor:
+			act.SetTickerFactory(tickerFactory)
+		}
+	}
 
 	for _, actor := range allActors {
 		if err := actor.Start(ctx); err != nil {

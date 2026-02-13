@@ -21,7 +21,7 @@ type RandomizedTakerConfig struct {
 type RandomizedTakerActor struct {
 	*actor.BaseActor
 	Config RandomizedTakerConfig
-	ticker *time.Ticker
+	ticker exchange.Ticker
 	rng    *rand.Rand
 	side   exchange.Side
 }
@@ -66,7 +66,7 @@ func NewRandomizedTaker(id uint64, gateway *exchange.ClientGateway, config Rando
 
 func (s *RandomizedTakerActor) Start(ctx context.Context) error {
 	s.Subscribe(s.Config.Symbol)
-	s.ticker = time.NewTicker(s.Config.Interval)
+	s.ticker = s.GetTickerFactory().NewTicker(s.Config.Interval)
 
 	go s.eventLoop(ctx)
 	go s.tradingLoop(ctx)
@@ -97,7 +97,7 @@ func (s *RandomizedTakerActor) tradingLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.ticker.C:
+		case <-s.ticker.C():
 			s.executeRandomTrade()
 			s.side = s.randomSide()
 		}

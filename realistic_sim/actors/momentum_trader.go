@@ -41,7 +41,7 @@ type MomentumTraderActor struct {
 	// State
 	lastMidPrice int64
 
-	monitorTicker *time.Ticker
+	monitorTicker exchange.Ticker
 	stopCh        chan struct{}
 }
 
@@ -76,7 +76,7 @@ func NewMomentumTrader(id uint64, gateway *exchange.ClientGateway, config Moment
 
 // Start starts the actor.
 func (mt *MomentumTraderActor) Start(ctx context.Context) error {
-	mt.monitorTicker = time.NewTicker(mt.config.MonitorInterval)
+	mt.monitorTicker = mt.GetTickerFactory().NewTicker(mt.config.MonitorInterval)
 
 	go mt.eventLoop(ctx)
 	go mt.monitorLoop(ctx)
@@ -162,7 +162,7 @@ func (mt *MomentumTraderActor) monitorLoop(ctx context.Context) {
 			return
 		case <-mt.stopCh:
 			return
-		case <-mt.monitorTicker.C:
+		case <-mt.monitorTicker.C():
 			mt.checkSignals()
 		}
 	}

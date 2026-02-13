@@ -34,7 +34,7 @@ type AvellanedaStoikovActor struct {
 	lastAskReqID  uint64
 	lastMid       int64
 	requestSeq    uint64
-	requeueTicker *time.Ticker
+	requeueTicker exchange.Ticker
 }
 
 func NewAvellanedaStoikov(id uint64, gateway *exchange.ClientGateway, config AvellanedaStoikovConfig) *AvellanedaStoikovActor {
@@ -51,7 +51,7 @@ func NewAvellanedaStoikov(id uint64, gateway *exchange.ClientGateway, config Ave
 
 func (as *AvellanedaStoikovActor) Start(ctx context.Context) error {
 	as.startTime = time.Now()
-	as.requeueTicker = time.NewTicker(as.config.RequoteInterval)
+	as.requeueTicker = as.GetTickerFactory().NewTicker(as.config.RequoteInterval)
 
 	go as.eventLoop(ctx)
 
@@ -77,7 +77,7 @@ func (as *AvellanedaStoikovActor) eventLoop(ctx context.Context) {
 			return
 		case event := <-as.EventChannel():
 			as.OnEvent(event)
-		case <-as.requeueTicker.C:
+		case <-as.requeueTicker.C():
 			as.placeQuotes()
 		}
 	}

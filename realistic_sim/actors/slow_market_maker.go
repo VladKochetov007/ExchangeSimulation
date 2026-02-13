@@ -40,7 +40,7 @@ type SlowMarketMakerActor struct {
 
 	inventory int64
 
-	requoteTicker *time.Ticker
+	requoteTicker exchange.Ticker
 	stopCh        chan struct{}
 }
 
@@ -67,7 +67,7 @@ func NewSlowMarketMaker(id uint64, gateway *exchange.ClientGateway, config SlowM
 
 // Start starts the actor.
 func (smm *SlowMarketMakerActor) Start(ctx context.Context) error {
-	smm.requoteTicker = time.NewTicker(smm.config.RequoteInterval)
+	smm.requoteTicker = smm.GetTickerFactory().NewTicker(smm.config.RequoteInterval)
 
 	go smm.eventLoop(ctx)
 	go smm.requoteLoop(ctx)
@@ -218,7 +218,7 @@ func (smm *SlowMarketMakerActor) requoteLoop(ctx context.Context) {
 			return
 		case <-smm.stopCh:
 			return
-		case <-smm.requoteTicker.C:
+		case <-smm.requoteTicker.C():
 			// ALWAYS requote on timer (not just when orders missing)
 			// This allows adaptation even with partial fills
 			if smm.lastMidPrice > 0 {

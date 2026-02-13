@@ -17,12 +17,13 @@ type Actor interface {
 }
 
 type BaseActor struct {
-	id         uint64
-	gateway    *exchange.ClientGateway
-	eventCh    chan *Event
-	stopCh     chan struct{}
-	running    atomic.Bool
-	requestSeq uint64
+	id            uint64
+	gateway       *exchange.ClientGateway
+	eventCh       chan *Event
+	stopCh        chan struct{}
+	running       atomic.Bool
+	requestSeq    uint64
+	tickerFactory exchange.TickerFactory
 
 	// Order tracking for fill notifications
 	activeOrders   sync.Map // orderID -> *OrderInfo
@@ -38,10 +39,11 @@ type OrderInfo struct {
 
 func NewBaseActor(id uint64, gateway *exchange.ClientGateway) *BaseActor {
 	return &BaseActor{
-		id:      id,
-		gateway: gateway,
-		eventCh: make(chan *Event, 1000),
-		stopCh:  make(chan struct{}),
+		id:            id,
+		gateway:       gateway,
+		eventCh:       make(chan *Event, 1000),
+		stopCh:        make(chan struct{}),
+		tickerFactory: &exchange.RealTickerFactory{}, // Default to real-time
 	}
 }
 
@@ -400,4 +402,15 @@ func (a *BaseActor) EventChannel() <-chan *Event {
 
 func (a *BaseActor) PeekNextRequestID() uint64 {
 	return atomic.LoadUint64(&a.requestSeq) + 1
+}
+
+// SetTickerFactory sets the ticker factory for this actor
+// Must be called before Start() if using simulation time
+func (a *BaseActor) SetTickerFactory(factory exchange.TickerFactory) {
+	a.tickerFactory = factory
+}
+
+// GetTickerFactory returns the ticker factory for this actor
+func (a *BaseActor) GetTickerFactory() exchange.TickerFactory {
+	return a.tickerFactory
 }

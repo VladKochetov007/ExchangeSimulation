@@ -52,14 +52,14 @@ func (a *NoisyTraderActor) Start(ctx context.Context) error {
 }
 
 func (a *NoisyTraderActor) loop(ctx context.Context) {
-	tradingTicker := time.NewTicker(a.Config.Interval)
+	tradingTicker := a.GetTickerFactory().NewTicker(a.Config.Interval)
 	defer tradingTicker.Stop()
 
 	var cleanupCh <-chan time.Time
 	if a.Config.OrderLifetime > 0 {
-		cleanupTicker := time.NewTicker(a.Config.OrderLifetime / 2)
+		cleanupTicker := a.GetTickerFactory().NewTicker(a.Config.OrderLifetime / 2)
 		defer cleanupTicker.Stop()
-		cleanupCh = cleanupTicker.C
+		cleanupCh = cleanupTicker.C()
 	}
 
 	a.rngMu.Lock()
@@ -78,7 +78,7 @@ func (a *NoisyTraderActor) loop(ctx context.Context) {
 			a.OnEvent(event)
 		case <-delayTimer.C:
 			tradingEnabled = true
-		case <-tradingTicker.C:
+		case <-tradingTicker.C():
 			if tradingEnabled && len(a.activeOrders) < a.Config.MaxActiveOrders && a.midPrice > 0 {
 				a.placeRandomOrder()
 			}

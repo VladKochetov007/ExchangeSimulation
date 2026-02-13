@@ -12,6 +12,17 @@ type Clock interface {
 	NowUnix() int64
 }
 
+// Ticker interface matches the relevant parts of time.Ticker
+type Ticker interface {
+	C() <-chan time.Time
+	Stop()
+}
+
+// TickerFactory creates tickers that work with either real-time or simulation time
+type TickerFactory interface {
+	NewTicker(d time.Duration) Ticker
+}
+
 type Logger interface {
 	LogEvent(simTime int64, clientID uint64, eventName string, event any)
 }
@@ -37,6 +48,7 @@ type Exchange struct {
 	balanceTracker          *BalanceChangeTracker
 	BorrowingMgr            *BorrowingManager
 	MarginModeMgr           *MarginModeManager
+	tickerFactory           TickerFactory
 	mu                      sync.RWMutex
 	running                 bool
 	shutdownCh              chan struct{}
@@ -55,11 +67,15 @@ type ExchangeConfig struct {
 	// Clock provides time abstraction (default: RealClock)
 	Clock Clock
 
+	// TickerFactory creates tickers for periodic operations (default: RealTickerFactory)
+	TickerFactory TickerFactory
+
 	// SnapshotInterval is how often to publish market data snapshots (default: 100ms)
 	SnapshotInterval time.Duration
 
 	// SnapshotPollInterval is how often to check if snapshot is due (default: 1ms)
 	// Lower values = more responsive to simulation time jumps but higher CPU usage
+	// DEPRECATED: Use TickerFactory instead for proper simulation time support
 	SnapshotPollInterval time.Duration
 
 	// BalanceSnapshotInterval is how often to log balance snapshots (default: 0 = disabled)
@@ -118,6 +134,20 @@ type RealClock struct{}
 func (c *RealClock) NowUnixNano() int64 { return time.Now().UnixNano() }
 func (c *RealClock) NowUnix() int64     { return time.Now().Unix() }
 
+// RealTickerFactory creates real-time tickers for production use
+type RealTickerFactory struct{}
+
+func (f *RealTickerFactory) NewTicker(d time.Duration) Ticker {
+	return &realTicker{ticker: time.NewTicker(d)}
+}
+
+type realTicker struct {
+	ticker *time.Ticker
+}
+
+func (t *realTicker) C() <-chan time.Time { return t.ticker.C }
+func (t *realTicker) Stop()               { t.ticker.Stop() }
+
 // NewExchange creates an exchange with default configuration
 func NewExchange(estimatedClients int, clock Clock) *Exchange {
 	return NewExchangeWithConfig(ExchangeConfig{
@@ -134,6 +164,9 @@ func NewExchangeWithConfig(config ExchangeConfig) *Exchange {
 	}
 	if config.Clock == nil {
 		config.Clock = &RealClock{}
+	}
+	if config.TickerFactory == nil {
+		config.TickerFactory = &RealTickerFactory{}
 	}
 	if config.SnapshotInterval == 0 {
 		config.SnapshotInterval = 100 * time.Millisecond
@@ -159,6 +192,7 @@ func NewExchangeWithConfig(config ExchangeConfig) *Exchange {
 		MDPublisher:             NewMDPublisher(),
 		Clock:                   config.Clock,
 		Loggers:                 make(map[string]Logger),
+		tickerFactory:           config.TickerFactory,
 		running:                 false,
 		shutdownCh:              make(chan struct{}),
 		snapshotStopCh:          make(chan struct{}),
@@ -185,25 +219,13 @@ func (e *Exchange) EnablePeriodicSnapshots(interval time.Duration) {
 }
 
 func (e *Exchange) runSnapshotLoop(interval time.Duration) {
-	lastSnapshotTime := e.Clock.NowUnixNano()
-	intervalNanos := interval.Nanoseconds()
-
-	// Poll at configured interval (real-time) to avoid busy-waiting
-	// But publish based on simulation time elapsed
-	// Lower poll interval = more responsive to sim time jumps but higher CPU
-	ticker := time.NewTicker(e.snapshotPollInterval)
+	ticker := e.tickerFactory.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-ticker.C:
-			// Check if enough SIMULATION time has elapsed
-			// Handle time jumps by publishing multiple snapshots if needed
-			now := e.Clock.NowUnixNano()
-			for now-lastSnapshotTime >= intervalNanos {
-				e.logSnapshots()
-				lastSnapshotTime += intervalNanos
-			}
+		case <-ticker.C():
+			e.logSnapshots()
 		case <-e.snapshotStopCh:
 			return
 		case <-e.shutdownCh:

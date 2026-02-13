@@ -21,8 +21,9 @@ func (c *RealClock) NowUnix() int64 {
 }
 
 type SimulatedClock struct {
-	current int64
-	mu      sync.RWMutex
+	current   int64
+	mu        sync.RWMutex
+	scheduler *EventScheduler
 }
 
 func NewSimulatedClock(start int64) *SimulatedClock {
@@ -45,12 +46,26 @@ func (c *SimulatedClock) NowUnix() int64 {
 
 func (c *SimulatedClock) Advance(delta time.Duration) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.current += int64(delta)
+	newTime := c.current
+	c.mu.Unlock()
+
+	// Process all events up to new time
+	if c.scheduler != nil {
+		c.scheduler.ProcessUntil(newTime)
+	}
 }
 
 func (c *SimulatedClock) SetTime(t int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.current = t
+}
+
+// SetScheduler sets the event scheduler for this clock
+// Must be called before Advance() if using event scheduling
+func (c *SimulatedClock) SetScheduler(scheduler *EventScheduler) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.scheduler = scheduler
 }

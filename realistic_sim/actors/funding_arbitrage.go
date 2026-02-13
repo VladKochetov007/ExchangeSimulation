@@ -46,7 +46,7 @@ type FundingArbActor struct {
 	// Strategy state
 	isActive bool // Whether we have an active hedge position
 
-	monitorTicker *time.Ticker
+	monitorTicker exchange.Ticker
 	stopCh        chan struct{}
 }
 
@@ -82,7 +82,7 @@ func NewFundingArbitrage(id uint64, gateway *exchange.ClientGateway, config Fund
 
 // Start starts the actor.
 func (fa *FundingArbActor) Start(ctx context.Context) error {
-	fa.monitorTicker = time.NewTicker(fa.config.MonitorInterval)
+	fa.monitorTicker = fa.GetTickerFactory().NewTicker(fa.config.MonitorInterval)
 
 	go fa.eventLoop(ctx)
 	go fa.monitorLoop(ctx)
@@ -168,7 +168,7 @@ func (fa *FundingArbActor) monitorLoop(ctx context.Context) {
 			return
 		case <-fa.stopCh:
 			return
-		case <-fa.monitorTicker.C:
+		case <-fa.monitorTicker.C():
 			fa.evaluateStrategy()
 		}
 	}

@@ -19,6 +19,7 @@ type ExchangeAutomation struct {
 	priceUpdateInterval time.Duration
 	collateralRate      int64 // annual rate in bps (e.g. 500 = 5%)
 	liquidationHandler  LiquidationHandler
+	tickerFactory       TickerFactory
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -49,6 +50,9 @@ type AutomationConfig struct {
 
 	// LiquidationHandler receives liquidation events (optional)
 	LiquidationHandler LiquidationHandler
+
+	// TickerFactory creates tickers for periodic operations (default: RealTickerFactory)
+	TickerFactory TickerFactory
 }
 
 // NewExchangeAutomation creates a new automation manager
@@ -62,6 +66,9 @@ func NewExchangeAutomation(exchange *Exchange, config AutomationConfig) *Exchang
 	if config.CollateralRate == 0 {
 		config.CollateralRate = 500 // 5% APR default
 	}
+	if config.TickerFactory == nil {
+		config.TickerFactory = &RealTickerFactory{}
+	}
 
 	return &ExchangeAutomation{
 		exchange:            exchange,
@@ -70,6 +77,7 @@ func NewExchangeAutomation(exchange *Exchange, config AutomationConfig) *Exchang
 		priceUpdateInterval: config.PriceUpdateInterval,
 		collateralRate:      config.CollateralRate,
 		liquidationHandler:  config.LiquidationHandler,
+		tickerFactory:       config.TickerFactory,
 	}
 }
 
@@ -115,7 +123,7 @@ func (a *ExchangeAutomation) Stop() {
 func (a *ExchangeAutomation) priceUpdateLoop() {
 	defer a.wg.Done()
 
-	ticker := time.NewTicker(a.priceUpdateInterval)
+	ticker := a.tickerFactory.NewTicker(a.priceUpdateInterval)
 	defer ticker.Stop()
 
 	// Immediate first update
@@ -125,7 +133,7 @@ func (a *ExchangeAutomation) priceUpdateLoop() {
 		select {
 		case <-a.ctx.Done():
 			return
-		case <-ticker.C:
+		case <-ticker.C():
 			a.updateAllPerpPrices()
 		}
 	}
@@ -136,14 +144,14 @@ func (a *ExchangeAutomation) fundingSettlementLoop() {
 	defer a.wg.Done()
 
 	// Check every second for funding settlements
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := a.tickerFactory.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-a.ctx.Done():
 			return
-		case <-ticker.C:
+		case <-ticker.C():
 			a.checkAndSettleFunding()
 		}
 	}
@@ -212,14 +220,14 @@ func (a *ExchangeAutomation) updateAllPerpPrices() {
 func (a *ExchangeAutomation) collateralChargeLoop() {
 	defer a.wg.Done()
 
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := a.tickerFactory.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-a.ctx.Done():
 			return
-		case <-ticker.C:
+		case <-ticker.C():
 			a.chargeCollateralInterest()
 		}
 	}

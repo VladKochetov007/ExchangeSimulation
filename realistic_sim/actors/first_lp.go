@@ -43,7 +43,7 @@ type FirstLiquidityProvidingActor struct {
 	BestAsk       int64
 	BidLiquidity  int64
 	AskLiquidity  int64
-	monitorTicker *time.Ticker
+	monitorTicker exchange.Ticker
 }
 
 func DefaultExitStrategy(exposure, bestBid, bestAsk, bidLiq, askLiq, multiple int64) bool {
@@ -83,7 +83,7 @@ func NewFirstLP(id uint64, gateway *exchange.ClientGateway, config FirstLPConfig
 }
 
 func (f *FirstLiquidityProvidingActor) Start(ctx context.Context) error {
-	f.monitorTicker = time.NewTicker(f.Config.MonitorInterval)
+	f.monitorTicker = f.GetTickerFactory().NewTicker(f.Config.MonitorInterval)
 
 	go f.eventLoop(ctx)
 
@@ -111,7 +111,7 @@ func (f *FirstLiquidityProvidingActor) eventLoop(ctx context.Context) {
 			return
 		case event := <-f.EventChannel():
 			f.OnEvent(event)
-		case <-f.monitorTicker.C:
+		case <-f.monitorTicker.C():
 			f.CheckExitConditions()
 		}
 	}

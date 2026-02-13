@@ -41,7 +41,7 @@ type PureMarketMakerActor struct {
 	inventory int64
 
 	requestSeq    uint64
-	monitorTicker *time.Ticker
+	monitorTicker exchange.Ticker
 	stopCh        chan struct{}
 }
 
@@ -71,7 +71,7 @@ func NewPureMarketMaker(id uint64, gateway *exchange.ClientGateway, config PureM
 
 // Start starts the actor.
 func (pmm *PureMarketMakerActor) Start(ctx context.Context) error {
-	pmm.monitorTicker = time.NewTicker(pmm.config.MonitorInterval)
+	pmm.monitorTicker = pmm.GetTickerFactory().NewTicker(pmm.config.MonitorInterval)
 
 	go pmm.eventLoop(ctx)
 	go pmm.monitorLoop(ctx)
@@ -282,7 +282,7 @@ func (pmm *PureMarketMakerActor) monitorLoop(ctx context.Context) {
 			return
 		case <-pmm.stopCh:
 			return
-		case <-pmm.monitorTicker.C:
+		case <-pmm.monitorTicker.C():
 			// Periodic health check - could add logic here
 		}
 	}

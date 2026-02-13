@@ -32,7 +32,7 @@ type EnhancedRandomActor struct {
 	lastMidPrice int64
 	rng          *rand.Rand
 
-	tradeTicker *time.Ticker
+	tradeTicker exchange.Ticker
 	stopCh      chan struct{}
 }
 
@@ -66,7 +66,7 @@ func NewEnhancedRandom(id uint64, gateway *exchange.ClientGateway, config Enhanc
 
 // Start starts the actor.
 func (er *EnhancedRandomActor) Start(ctx context.Context) error {
-	er.tradeTicker = time.NewTicker(er.config.TradeInterval)
+	er.tradeTicker = er.GetTickerFactory().NewTicker(er.config.TradeInterval)
 
 	go er.eventLoop(ctx)
 	go er.tradingLoop(ctx)
@@ -123,7 +123,7 @@ func (er *EnhancedRandomActor) tradingLoop(ctx context.Context) {
 			return
 		case <-er.stopCh:
 			return
-		case <-er.tradeTicker.C:
+		case <-er.tradeTicker.C():
 			er.executeTrade()
 		}
 	}

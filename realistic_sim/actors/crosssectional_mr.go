@@ -29,7 +29,7 @@ type CrossSectionalMRActor struct {
 	riskFilter      *position.CompositeFilter
 	lastMidPrices   map[string]int64
 	clock           exchange.Clock
-	rebalanceTicker *time.Ticker
+	rebalanceTicker exchange.Ticker
 	requestSeq      uint64
 }
 
@@ -67,7 +67,7 @@ func NewCrossSectionalMR(
 }
 
 func (csmr *CrossSectionalMRActor) Start(ctx context.Context) error {
-	csmr.rebalanceTicker = time.NewTicker(csmr.config.RebalanceInterval)
+	csmr.rebalanceTicker = csmr.GetTickerFactory().NewTicker(csmr.config.RebalanceInterval)
 
 	go csmr.eventLoop(ctx)
 	go csmr.rebalanceLoop(ctx)
@@ -106,7 +106,7 @@ func (csmr *CrossSectionalMRActor) rebalanceLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-csmr.rebalanceTicker.C:
+		case <-csmr.rebalanceTicker.C():
 			csmr.rebalance()
 		}
 	}
