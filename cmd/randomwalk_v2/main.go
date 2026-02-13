@@ -21,6 +21,13 @@ const (
 	bootstrapPrice = 50000
 )
 
+// ZeroFundingCalc returns zero funding rate for simulations testing without funding effects
+type ZeroFundingCalc struct{}
+
+func (c *ZeroFundingCalc) Calculate(indexPrice, markPrice int64) int64 {
+	return 0
+}
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatal(err)
@@ -42,6 +49,8 @@ func run() error {
 		exchange.CENT_TICK,
 		exchange.BTC_PRECISION/10000,
 	)
+	// Disable funding rates for pure random walk simulation
+	perpInst.SetFundingCalculator(&ZeroFundingCalc{})
 	ex.AddInstrument(perpInst)
 
 	logDir := "logs/randomwalk_v2"
@@ -77,11 +86,17 @@ func run() error {
 	// 3 Simple makers: just mediators for taker flow
 	// High inventory limits - makers should absorb all flow without backing away
 	// Staggered requote timers - break synchronization for independent price discovery
+	// Different EMA decay rates - each maker has different view of fair value
 	spreads := []int64{5, 10, 20}
 	requoteIntervals := []time.Duration{
 		800 * time.Millisecond,  // MM1: 0.8s (fast, tight spread)
 		1000 * time.Millisecond, // MM2: 1.0s (medium)
 		1200 * time.Millisecond, // MM3: 1.2s (slow, wide spread)
+	}
+	emaDecays := []float64{
+		0.3, // MM1: Fast adaptation (30% weight on new trades)
+		0.2, // MM2: Medium adaptation (20% weight)
+		0.1, // MM3: Slow adaptation (10% weight)
 	}
 	var marketMakers []actor.Actor
 
@@ -98,6 +113,7 @@ func run() error {
 			MaxInventory:    10000 * exchange.BTC_PRECISION,    // 10,000 BTC - effectively unlimited for perps
 			RequoteInterval: requoteIntervals[i],                // Staggered to prevent synchronized requotes
 			BootstrapPrice:  exchange.PriceUSD(bootstrapPrice, exchange.CENT_TICK),
+			EMADecay:        emaDecays[i], // Different decay rates prevent perfect synchronization
 		})
 		marketMakers = append(marketMakers, mm)
 	}
