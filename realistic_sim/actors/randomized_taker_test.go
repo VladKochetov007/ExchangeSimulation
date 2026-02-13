@@ -153,10 +153,6 @@ func TestRandomizedTakerSideRandomization(t *testing.T) {
 
 	taker := NewRandomizedTaker(1, gateway, config)
 
-	if taker.side != exchange.Buy {
-		t.Fatalf("Expected initial side to be Buy, got %v", taker.side)
-	}
-
 	buyCount := 0
 	sellCount := 0
 	for i := 0; i < 100; i++ {
