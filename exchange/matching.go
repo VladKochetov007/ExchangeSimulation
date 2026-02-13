@@ -55,6 +55,9 @@ func (m *DefaultMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) *Ma
 
 				if order.FilledQty >= order.Qty {
 					order.Status = Filled
+					// CRITICAL: Remove filled order from book so matching can continue to next level
+					unlinkOrder(order)
+					delete(book.Orders, order.ID)
 				} else {
 					order.Status = PartialFill
 				}
