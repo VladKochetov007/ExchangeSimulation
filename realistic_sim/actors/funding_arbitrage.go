@@ -133,7 +133,7 @@ func (fa *FundingArbActor) onBookSnapshot(snap actor.BookSnapshotEvent) {
 
 	bestBid := snap.Snapshot.Bids[0].Price
 	bestAsk := snap.Snapshot.Asks[0].Price
-	mid := (bestBid + bestAsk) / 2
+	mid := bestBid + (bestAsk-bestBid)/2
 
 	if snap.Symbol == fa.config.SpotSymbol {
 		fa.spotMid = mid

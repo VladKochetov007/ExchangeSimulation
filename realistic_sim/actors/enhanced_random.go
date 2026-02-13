@@ -113,7 +113,7 @@ func (er *EnhancedRandomActor) onBookSnapshot(snap actor.BookSnapshotEvent) {
 
 	bestBid := snap.Snapshot.Bids[0].Price
 	bestAsk := snap.Snapshot.Asks[0].Price
-	er.lastMidPrice = (bestBid + bestAsk) / 2
+	er.lastMidPrice = bestBid + (bestAsk-bestBid)/2
 }
 
 func (er *EnhancedRandomActor) tradingLoop(ctx context.Context) {

@@ -125,7 +125,7 @@ func (csmr *CrossSectionalMRActor) onBookSnapshot(snap actor.BookSnapshotEvent) 
 	if len(snap.Snapshot.Bids) > 0 && len(snap.Snapshot.Asks) > 0 {
 		bestBid := snap.Snapshot.Bids[0].Price
 		bestAsk := snap.Snapshot.Asks[0].Price
-		csmr.lastMidPrices[snap.Symbol] = (bestBid + bestAsk) / 2
+		csmr.lastMidPrices[snap.Symbol] = bestBid + (bestAsk-bestBid)/2
 	}
 }
 

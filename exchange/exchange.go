@@ -126,7 +126,7 @@ func (ob *OrderBook) GetMidPrice() int64 {
 	bestAsk := ob.GetBestAsk()
 
 	if bestBid > 0 && bestAsk > 0 {
-		return (bestBid + bestAsk) / 2
+		return bestBid + (bestAsk-bestBid)/2
 	}
 
 	// Fallback to last trade price

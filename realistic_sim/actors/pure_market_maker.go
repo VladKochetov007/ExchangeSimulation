@@ -124,7 +124,7 @@ func (pmm *PureMarketMakerActor) onBookSnapshot(snap actor.BookSnapshotEvent) {
 	if len(snap.Snapshot.Bids) > 0 && len(snap.Snapshot.Asks) > 0 {
 		bestBid := snap.Snapshot.Bids[0].Price
 		bestAsk := snap.Snapshot.Asks[0].Price
-		midPrice = (bestBid + bestAsk) / 2
+		midPrice = bestBid + (bestAsk-bestBid)/2
 	} else if pmm.lastMidPrice == 0 && pmm.config.BootstrapPrice > 0 {
 		midPrice = pmm.config.BootstrapPrice
 	} else {

@@ -162,7 +162,7 @@ func (f *FirstLiquidityProvidingActor) onBookSnapshot(snap actor.BookSnapshotEve
 	}
 
 	if f.BestBid > 0 && f.BestAsk > 0 {
-		f.LastMidPrice = (f.BestBid + f.BestAsk) / 2
+		f.LastMidPrice = f.BestBid + (f.BestAsk-f.BestBid)/2
 	} else if f.LastMidPrice == 0 && f.Config.BootstrapPrice > 0 {
 		f.LastMidPrice = f.Config.BootstrapPrice
 	}

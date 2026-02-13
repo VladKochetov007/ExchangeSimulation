@@ -143,7 +143,7 @@ func (mt *MomentumTraderActor) onBookSnapshot(snap actor.BookSnapshotEvent) {
 
 	bestBid := snap.Snapshot.Bids[0].Price
 	bestAsk := snap.Snapshot.Asks[0].Price
-	mt.lastMidPrice = (bestBid + bestAsk) / 2
+	mt.lastMidPrice = bestBid + (bestAsk-bestBid)/2
 }
 
 func (mt *MomentumTraderActor) onOrderFilled(fill actor.OrderFillEvent) {

@@ -190,7 +190,7 @@ func (m *MultiSymbolLP) onBookSnapshot(snap BookSnapshotEvent) {
 	}
 
 	if state.BestBid > 0 && state.BestAsk > 0 {
-		state.LastMidPrice = (state.BestBid + state.BestAsk) / 2
+		state.LastMidPrice = state.BestBid + (state.BestAsk-state.BestBid)/2
 	} else if state.LastMidPrice == 0 && state.BootstrapPrice > 0 {
 		state.LastMidPrice = state.BootstrapPrice
 	}
@@ -654,7 +654,7 @@ func (mm *MultiSymbolMM) onBookSnapshot(snap BookSnapshotEvent) {
 
 	bestBid := snap.Snapshot.Bids[0].Price
 	bestAsk := snap.Snapshot.Asks[0].Price
-	midPrice := (bestBid + bestAsk) / 2
+	midPrice := bestBid + (bestAsk-bestBid)/2
 
 	if state.LastMidPrice == 0 {
 		state.LastMidPrice = midPrice

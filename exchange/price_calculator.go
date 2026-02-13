@@ -48,7 +48,7 @@ func (c *WeightedMidPriceCalculator) Calculate(book *OrderBook) int64 {
 	askPrice := book.Asks.Best.Price
 
 	if bidQty == 0 && askQty == 0 {
-		return (bidPrice + askPrice) / 2
+		return bidPrice + (askPrice-bidPrice)/2
 	}
 
 	if bidQty == 0 {

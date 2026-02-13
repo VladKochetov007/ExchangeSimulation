@@ -110,7 +110,7 @@ func (as *AvellanedaStoikovActor) onBookSnapshot(snap actor.BookSnapshotEvent) {
 	if len(snap.Snapshot.Bids) > 0 && len(snap.Snapshot.Asks) > 0 {
 		bestBid := snap.Snapshot.Bids[0].Price
 		bestAsk := snap.Snapshot.Asks[0].Price
-		as.lastMid = (bestBid + bestAsk) / 2
+		as.lastMid = bestBid + (bestAsk-bestBid)/2
 	}
 }
 

@@ -133,7 +133,7 @@ func (a *NoisyTraderActor) onBookDelta(delta actor.BookDeltaEvent) {
 
 func (a *NoisyTraderActor) updateMidPrice() {
 	if a.bestBid > 0 && a.bestAsk > 0 {
-		a.midPrice = (a.bestBid + a.bestAsk) / 2
+		a.midPrice = a.bestBid + (a.bestAsk-a.bestBid)/2
 	}
 }
 

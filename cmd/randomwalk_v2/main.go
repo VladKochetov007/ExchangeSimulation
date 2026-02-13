@@ -230,7 +230,7 @@ func run() error {
 				if book != nil && book.Bids.Best != nil && book.Asks.Best != nil {
 					bestBid := book.Bids.Best.Price
 					bestAsk := book.Asks.Best.Price
-					midPrice := (bestBid + bestAsk) / 2
+					midPrice := bestBid + (bestAsk-bestBid)/2
 					midPriceUSD := float64(midPrice) / float64(exchange.USD_PRECISION)
 
 					fmt.Printf("[%v] Mid: $%.2f | Bid: $%.2f | Ask: $%.2f | Spread: $%.2f\n",
