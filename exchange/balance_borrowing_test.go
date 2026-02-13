@@ -44,8 +44,8 @@ func TestBorrowMarginBasic(t *testing.T) {
 	ex.SetLogger("_global", logger)
 
 	oracle := NewStaticPriceOracle(map[string]int64{
-		"USD": 1 * USD_PRECISION,
-		"BTC": 50000 * SATOSHI,
+		"USD": SATOSHI,              // 100,000,000 (value of 100M USD units = 1000 USD)
+		"BTC": 50000 * USD_PRECISION, // 5,000,000,000 (value of 1 BTC in USD_PRECISION)
 	})
 
 	config := BorrowingConfig{

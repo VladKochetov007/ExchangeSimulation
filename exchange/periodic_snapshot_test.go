@@ -30,8 +30,9 @@ func (t *TestLogger) LogEvent(simTime int64, clientID uint64, eventName string, 
 
 // SimulatedClock for testing - allows manual time advancement
 type SimulatedClock struct {
-	time int64
-	mu   sync.RWMutex
+	time    int64
+	tickers []*simTestTicker
+	mu      sync.RWMutex
 }
 
 func (c *SimulatedClock) NowUnixNano() int64 {
@@ -48,8 +49,70 @@ func (c *SimulatedClock) NowUnix() int64 {
 
 func (c *SimulatedClock) Advance(d time.Duration) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.time += int64(d)
+	// Notify all tickers about time advancement
+	for _, ticker := range c.tickers {
+		ticker.checkAndFire(c.time)
+	}
+	c.mu.Unlock()
+}
+
+func (c *SimulatedClock) registerTicker(t *simTestTicker) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.tickers == nil {
+		c.tickers = make([]*simTestTicker, 0)
+	}
+	c.tickers = append(c.tickers, t)
+}
+
+// SimulatedTickerFactory for testing with SimulatedClock
+type SimulatedTickerFactory struct {
+	clock *SimulatedClock
+}
+
+func (f *SimulatedTickerFactory) NewTicker(d time.Duration) Ticker {
+	t := &simTestTicker{
+		clock:      f.clock,
+		interval:   int64(d),
+		ch:         make(chan time.Time, 10), // Buffered
+		nextFire:   f.clock.NowUnixNano() + int64(d),
+	}
+	f.clock.registerTicker(t)
+	return t
+}
+
+type simTestTicker struct {
+	clock    *SimulatedClock
+	interval int64
+	ch       chan time.Time
+	nextFire int64
+	stopped  bool
+}
+
+func (t *simTestTicker) C() <-chan time.Time {
+	return t.ch
+}
+
+func (t *simTestTicker) Stop() {
+	if !t.stopped {
+		t.stopped = true
+		close(t.ch)
+	}
+}
+
+func (t *simTestTicker) checkAndFire(now int64) {
+	if t.stopped {
+		return
+	}
+	for now >= t.nextFire {
+		select {
+		case t.ch <- time.Unix(0, now):
+		default:
+			// Channel full, skip
+		}
+		t.nextFire += t.interval
+	}
 }
 
 func TestPeriodicSnapshots(t *testing.T) {
@@ -135,7 +198,13 @@ func TestPeriodicSnapshots(t *testing.T) {
 func TestPeriodicSnapshotsWithSimulatedClock(t *testing.T) {
 	// Test that periodic snapshots work with simulation time jumping ahead
 	clock := &SimulatedClock{time: 0}
-	ex := NewExchange(10, clock)
+	tickerFactory := &SimulatedTickerFactory{clock: clock}
+
+	ex := NewExchangeWithConfig(ExchangeConfig{
+		EstimatedClients: 10,
+		Clock:            clock,
+		TickerFactory:    tickerFactory,
+	})
 
 	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
 	ex.AddInstrument(inst)

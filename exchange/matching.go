@@ -122,5 +122,8 @@ func (m *DefaultMatcher) execute(taker, maker *Order) *Execution {
 	exec.Price = maker.Price
 	exec.Qty = execQty
 	exec.Timestamp = m.clock.NowUnixNano()
+	exec.MakerFilledQty = maker.FilledQty
+	exec.MakerTotalQty = maker.Qty
+	exec.MakerSide = maker.Side
 	return exec
 }

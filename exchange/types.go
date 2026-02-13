@@ -308,13 +308,16 @@ type Subscription struct {
 }
 
 type Execution struct {
-	TakerOrderID  uint64 `json:"taker_order_id"`
-	MakerOrderID  uint64 `json:"maker_order_id"`
-	TakerClientID uint64 `json:"taker_client_id"`
-	MakerClientID uint64 `json:"maker_client_id"`
-	Price         int64  `json:"price"`
-	Qty           int64  `json:"qty"`
-	Timestamp     int64  `json:"timestamp"`
+	TakerOrderID     uint64 `json:"taker_order_id"`
+	MakerOrderID     uint64 `json:"maker_order_id"`
+	TakerClientID    uint64 `json:"taker_client_id"`
+	MakerClientID    uint64 `json:"maker_client_id"`
+	Price            int64  `json:"price"`
+	Qty              int64  `json:"qty"`
+	Timestamp        int64  `json:"timestamp"`
+	MakerFilledQty   int64  `json:"maker_filled_qty"`   // Maker order's filled qty after this execution
+	MakerTotalQty    int64  `json:"maker_total_qty"`    // Maker order's total qty
+	MakerSide        Side   `json:"maker_side"`         // Maker order's side
 }
 
 type Fee struct {

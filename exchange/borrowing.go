@@ -194,7 +194,8 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(
 		}
 		price := bm.config.PriceOracle.GetPrice(asset)
 		if price > 0 {
-			totalCollateralValue += balance * price / SATOSHI
+			// Avoid overflow
+			totalCollateralValue += (balance / SATOSHI) * price
 		}
 	}
 
@@ -205,7 +206,8 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(
 		}
 		price := bm.config.PriceOracle.GetPrice(asset)
 		if price > 0 {
-			existingBorrowValue += borrowed * price / SATOSHI
+			// Avoid overflow
+			existingBorrowValue += (borrowed / SATOSHI) * price
 		}
 	}
 
@@ -213,7 +215,8 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(
 	if borrowPrice == 0 {
 		return errors.New("price unavailable")
 	}
-	newBorrowValue := borrowAmount * borrowPrice / SATOSHI
+	// Avoid overflow
+	newBorrowValue := (borrowAmount / SATOSHI) * borrowPrice
 
 	factor := bm.getCollateralFactor(borrowAsset)
 
@@ -257,6 +260,7 @@ func (bm *BorrowingManager) calculateCollateralUsed(asset string, amount int64) 
 	if factor == 0 {
 		return 0
 	}
-	borrowValue := amount * price / SATOSHI
+	// Avoid overflow
+	borrowValue := (amount / SATOSHI) * price
 	return int64(float64(borrowValue) / factor)
 }

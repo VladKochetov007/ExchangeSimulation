@@ -934,10 +934,7 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 		maker := e.Clients[exec.MakerClientID]
 
 		takerFee := taker.FeePlan.CalculateFee(exec, takerOrder.Side, false, instrument.BaseAsset(), instrument.QuoteAsset(), basePrecision)
-		makerSide := Sell
-		if takerOrder.Side == Sell {
-			makerSide = Buy
-		}
+		makerSide := exec.MakerSide
 		makerFee := maker.FeePlan.CalculateFee(exec, makerSide, true, instrument.BaseAsset(), instrument.QuoteAsset(), basePrecision)
 
 		notional := (exec.Price * exec.Qty) / basePrecision
@@ -981,14 +978,10 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 			// Handle margin for maker (always limit orders)
 			if makerClosedQty > 0 {
 				// Release order margin for closing portion
-				makerOrder := book.Bids.Orders[exec.MakerOrderID]
-				if makerOrder == nil {
-					makerOrder = book.Asks.Orders[exec.MakerOrderID]
-				}
-				if makerOrder != nil {
-					orderMargin := (makerClosedQty * makerOrder.Price / basePrecision) * perp.MarginRate / 10000
-					maker.ReleasePerp(quote, orderMargin)
-				}
+				// Use exec.Price since order may have been removed from book after full fill
+				orderMargin := (makerClosedQty * exec.Price / basePrecision) * perp.MarginRate / 10000
+				maker.ReleasePerp(quote, orderMargin)
+
 				// Release position margin (use entry price, not execution price)
 				if makerDelta.OldSize != 0 {
 					posMargin := (makerClosedQty * makerDelta.OldEntryPrice / basePrecision) * perp.MarginRate / 10000
@@ -1210,26 +1203,20 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 		}
 
 		if log != nil {
-			makerOrder := book.Bids.Orders[exec.MakerOrderID]
-			if makerOrder == nil {
-				makerOrder = book.Asks.Orders[exec.MakerOrderID]
+			makerFill := map[string]any{
+				"order_id":      exec.MakerOrderID,
+				"qty":           exec.Qty,
+				"price":         exec.Price,
+				"side":          exec.MakerSide.String(),
+				"filled_qty":    exec.MakerFilledQty,
+				"remaining_qty": exec.MakerTotalQty - exec.MakerFilledQty,
+				"is_full":       exec.MakerFilledQty >= exec.MakerTotalQty,
+				"trade_id":      book.SeqNum - 1,
+				"role":          "maker",
+				"fee_amount":    makerFee.Amount,
+				"fee_asset":     makerFee.Asset,
 			}
-			if makerOrder != nil {
-				makerFill := map[string]any{
-					"order_id":      exec.MakerOrderID,
-					"qty":           exec.Qty,
-					"price":         exec.Price,
-					"side":          makerSide.String(),
-					"filled_qty":    makerOrder.FilledQty,
-					"remaining_qty": makerOrder.Qty - makerOrder.FilledQty,
-					"is_full":       makerOrder.FilledQty >= makerOrder.Qty,
-					"trade_id":      book.SeqNum - 1,
-					"role":          "maker",
-					"fee_amount":    makerFee.Amount,
-					"fee_asset":     makerFee.Asset,
-				}
-				log.LogEvent(timestamp, exec.MakerClientID, "OrderFill", makerFill)
-			}
+			log.LogEvent(timestamp, exec.MakerClientID, "OrderFill", makerFill)
 		}
 	}
 
