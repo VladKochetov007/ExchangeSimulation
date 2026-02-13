@@ -134,6 +134,10 @@ func (p *PerpFutures) GetFundingRate() *FundingRate {
 	return p.fundingRate
 }
 
+func (p *PerpFutures) SetFundingCalculator(calc FundingCalculator) {
+	p.fundingCalc = calc
+}
+
 func (p *PerpFutures) UpdateFundingRate(indexPrice int64, markPrice int64) {
 	p.fundingRate.IndexPrice = indexPrice
 	p.fundingRate.MarkPrice = markPrice
