@@ -41,9 +41,29 @@ type Exchange struct {
 	running                 bool
 	shutdownCh              chan struct{}
 	snapshotInterval        time.Duration
+	snapshotPollInterval    time.Duration
 	snapshotStopCh          chan struct{}
 	balanceSnapshotInterval time.Duration
 	balanceSnapshotStopCh   chan struct{}
+}
+
+// ExchangeConfig configures exchange behavior
+type ExchangeConfig struct {
+	// EstimatedClients pre-allocates capacity for client maps (default: 10)
+	EstimatedClients int
+
+	// Clock provides time abstraction (default: RealClock)
+	Clock Clock
+
+	// SnapshotInterval is how often to publish market data snapshots (default: 100ms)
+	SnapshotInterval time.Duration
+
+	// SnapshotPollInterval is how often to check if snapshot is due (default: 1ms)
+	// Lower values = more responsive to simulation time jumps but higher CPU usage
+	SnapshotPollInterval time.Duration
+
+	// BalanceSnapshotInterval is how often to log balance snapshots (default: 0 = disabled)
+	BalanceSnapshotInterval time.Duration
 }
 
 type OrderBook struct {
@@ -98,18 +118,38 @@ type RealClock struct{}
 func (c *RealClock) NowUnixNano() int64 { return time.Now().UnixNano() }
 func (c *RealClock) NowUnix() int64     { return time.Now().Unix() }
 
+// NewExchange creates an exchange with default configuration
 func NewExchange(estimatedClients int, clock Clock) *Exchange {
-	if clock == nil {
-		clock = &RealClock{}
+	return NewExchangeWithConfig(ExchangeConfig{
+		EstimatedClients: estimatedClients,
+		Clock:            clock,
+	})
+}
+
+// NewExchangeWithConfig creates an exchange with custom configuration
+func NewExchangeWithConfig(config ExchangeConfig) *Exchange {
+	// Apply defaults
+	if config.EstimatedClients <= 0 {
+		config.EstimatedClients = 10
 	}
+	if config.Clock == nil {
+		config.Clock = &RealClock{}
+	}
+	if config.SnapshotInterval == 0 {
+		config.SnapshotInterval = 100 * time.Millisecond
+	}
+	if config.SnapshotPollInterval == 0 {
+		config.SnapshotPollInterval = 1 * time.Millisecond
+	}
+
 	matcher := NewDefaultMatcher()
-	matcher.clock = clock
+	matcher.clock = config.Clock
 	ex := &Exchange{
-		Clients:     make(map[uint64]*Client, estimatedClients),
-		Gateways:    make(map[uint64]*ClientGateway, estimatedClients),
+		Clients:     make(map[uint64]*Client, config.EstimatedClients),
+		Gateways:    make(map[uint64]*ClientGateway, config.EstimatedClients),
 		Books:       make(map[string]*OrderBook, 16),
 		Instruments: make(map[string]Instrument, 16),
-		Positions:   NewPositionManager(clock),
+		Positions:   NewPositionManager(config.Clock),
 		ExchangeBalance: &ExchangeBalance{
 			FeeRevenue:    make(map[string]int64),
 			InsuranceFund: make(map[string]int64),
@@ -117,14 +157,15 @@ func NewExchange(estimatedClients int, clock Clock) *Exchange {
 		NextOrderID:             1,
 		Matcher:                 matcher,
 		MDPublisher:             NewMDPublisher(),
-		Clock:                   clock,
+		Clock:                   config.Clock,
 		Loggers:                 make(map[string]Logger),
 		running:                 false,
 		shutdownCh:              make(chan struct{}),
 		snapshotStopCh:          make(chan struct{}),
-		snapshotInterval:        0,
+		snapshotInterval:        config.SnapshotInterval,
+		snapshotPollInterval:    config.SnapshotPollInterval,
 		balanceSnapshotStopCh:   make(chan struct{}),
-		balanceSnapshotInterval: 0,
+		balanceSnapshotInterval: config.BalanceSnapshotInterval,
 	}
 	ex.balanceTracker = &BalanceChangeTracker{exchange: ex}
 	return ex
@@ -144,13 +185,25 @@ func (e *Exchange) EnablePeriodicSnapshots(interval time.Duration) {
 }
 
 func (e *Exchange) runSnapshotLoop(interval time.Duration) {
-	ticker := time.NewTicker(interval)
+	lastSnapshotTime := e.Clock.NowUnixNano()
+	intervalNanos := interval.Nanoseconds()
+
+	// Poll at configured interval (real-time) to avoid busy-waiting
+	// But publish based on simulation time elapsed
+	// Lower poll interval = more responsive to sim time jumps but higher CPU
+	ticker := time.NewTicker(e.snapshotPollInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			e.logSnapshots()
+			// Check if enough SIMULATION time has elapsed
+			// Handle time jumps by publishing multiple snapshots if needed
+			now := e.Clock.NowUnixNano()
+			for now-lastSnapshotTime >= intervalNanos {
+				e.logSnapshots()
+				lastSnapshotTime += intervalNanos
+			}
 		case <-e.snapshotStopCh:
 			return
 		case <-e.shutdownCh:
@@ -165,14 +218,17 @@ func (e *Exchange) logSnapshots() {
 
 	timestamp := e.Clock.NowUnixNano()
 	for symbol, book := range e.Books {
-		// Log snapshot to file if logger exists
-		if log := e.Loggers[symbol]; log != nil {
-			// Create snapshot
-			snapshot := &BookSnapshot{
-				Bids: book.Bids.getSnapshot(),
-				Asks: book.Asks.getSnapshot(),
-			}
+		// Create snapshot
+		snapshot := &BookSnapshot{
+			Bids: book.Bids.getSnapshot(),
+			Asks: book.Asks.getSnapshot(),
+		}
 
+		// Publish to all subscribers (WebSocket-style streaming)
+		e.MDPublisher.Publish(symbol, MDSnapshot, snapshot, timestamp)
+
+		// Also log snapshot to file if logger exists
+		if log := e.Loggers[symbol]; log != nil {
 			snapshotLog := map[string]any{
 				"bids": snapshot.Bids,
 				"asks": snapshot.Asks,

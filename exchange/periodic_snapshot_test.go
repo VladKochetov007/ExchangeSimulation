@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 )
@@ -27,29 +28,47 @@ func (t *TestLogger) LogEvent(simTime int64, clientID uint64, eventName string, 
 	t.events = append(t.events, entry)
 }
 
+// SimulatedClock for testing - allows manual time advancement
+type SimulatedClock struct {
+	time int64
+	mu   sync.RWMutex
+}
+
+func (c *SimulatedClock) NowUnixNano() int64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.time
+}
+
+func (c *SimulatedClock) NowUnix() int64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.time / 1_000_000_000
+}
+
+func (c *SimulatedClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.time += int64(d)
+}
+
 func TestPeriodicSnapshots(t *testing.T) {
-	// Setup exchange with a logger
+	// Setup exchange with real clock
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
-	
-	// Create a test logger
-	logger := &TestLogger{
-		events: make([]map[string]any, 0),
-	}
-	ex.Loggers["BTCUSD"] = logger
 
 	// Add instrument
 	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
 	ex.AddInstrument(inst)
 
-	// Add some orders to make the snapshot interesting
+	// Connect client with balances
 	balances := map[string]int64{
 		"BTC": 100 * BTC_PRECISION,
 		"USD": 1000000 * USD_PRECISION,
 	}
 	gw := ex.ConnectClient(1, balances, &PercentageFee{})
-	
-	// Place a buy order
+
+	// Place a buy order to make the snapshot interesting
 	gw.RequestCh <- Request{
 		Type: ReqPlaceOrder,
 		OrderReq: &OrderRequest{
@@ -63,62 +82,261 @@ func TestPeriodicSnapshots(t *testing.T) {
 		},
 	}
 	<-gw.ResponseCh
-	
-	// Enable periodic snapshots with a short interval
-	interval := 100 * time.Millisecond
-	ex.EnablePeriodicSnapshots(interval)
-	
-	// Wait for a few intervals
-	time.Sleep(350 * time.Millisecond)
-	
+
+	// Subscribe to market data - this should trigger periodic snapshots
+	gw.RequestCh <- Request{
+		Type: ReqSubscribe,
+		QueryReq: &QueryRequest{
+			RequestID: 2,
+			Symbol:    "BTCUSD",
+		},
+	}
+	<-gw.ResponseCh
+
+	// Collect snapshots from the market data stream
+	snapshots := make([]*BookSnapshot, 0)
+	timeout := time.After(350 * time.Millisecond)
+	done := false
+
+	for !done {
+		select {
+		case msg := <-gw.MarketData:
+			if msg.Type == MDSnapshot {
+				snapshot := msg.Data.(*BookSnapshot)
+				snapshots = append(snapshots, snapshot)
+			}
+		case <-timeout:
+			done = true
+		}
+	}
+
 	ex.Shutdown()
-	
-	// Count snapshots
-	snapshotCount := 0
-	for _, event := range logger.events {
-		if event["event"] == "BookSnapshot" {
-			snapshotCount++
-		}
-	}
-	
-	// Should have at least 3 snapshots (one initial maybe? no, subscribe does initial, periodic loop does 3 in 350ms for 100ms interval)
-	// We didn't subscribe, so no initial snapshot from subscription.
-	// So we expect ~3 snapshots from the loop.
-	if snapshotCount < 3 {
-		t.Errorf("expected at least 3 snapshots, got %d", snapshotCount)
+
+	// Should have received multiple snapshots (initial + periodic)
+	// With 100ms interval over 350ms, expect at least 3-4 snapshots
+	if len(snapshots) < 3 {
+		t.Errorf("expected at least 3 snapshots, got %d", len(snapshots))
 	}
 
-	// Verify snapshot content
-	var lastSnapshot map[string]any
-	for _, event := range logger.events {
-		if event["event"] == "BookSnapshot" {
-			lastSnapshot = event
+	// Verify snapshot content - all should have the bid we placed
+	for i, snapshot := range snapshots {
+		if len(snapshot.Bids) != 1 {
+			t.Errorf("snapshot %d: expected 1 bid level, got %d", i, len(snapshot.Bids))
+			continue
 		}
-	}
-	
-	if lastSnapshot == nil {
-		t.Fatal("no snapshot found")
-	}
 
-	// Helper to extract PriceLevel from map
-	getPriceLevels := func(data any) []PriceLevel {
-		var levels []PriceLevel
-		bytes, _ := json.Marshal(data)
-		json.Unmarshal(bytes, &levels)
-		return levels
-	}
-	
-	bids := getPriceLevels(lastSnapshot["bids"])
-	if len(bids) != 1 {
-		t.Errorf("expected 1 bid level, got %d", len(bids))
-	} else {
 		expectedPrice := PriceUSD(50000, DOLLAR_TICK)
-		if bids[0].Price != expectedPrice {
-			t.Errorf("expected bid price %d, got %d", expectedPrice, bids[0].Price)
+		if snapshot.Bids[0].Price != expectedPrice {
+			t.Errorf("snapshot %d: expected bid price %d, got %d", i, expectedPrice, snapshot.Bids[0].Price)
 		}
 	}
 }
 
-// Reuse TestLogger from logging_test.go if available, or redefine here if it's not exported
-// Since we are in the same package (exchange), we can use TestLogger from logging_test.go IF it is defined there.
-// Let me double check logging_test.go content.
+func TestPeriodicSnapshotsWithSimulatedClock(t *testing.T) {
+	// Test that periodic snapshots work with simulation time jumping ahead
+	clock := &SimulatedClock{time: 0}
+	ex := NewExchange(10, clock)
+
+	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	ex.AddInstrument(inst)
+
+	balances := map[string]int64{
+		"BTC": 100 * BTC_PRECISION,
+		"USD": 1000000 * USD_PRECISION,
+	}
+	gw := ex.ConnectClient(1, balances, &PercentageFee{})
+
+	// Subscribe
+	gw.RequestCh <- Request{
+		Type: ReqSubscribe,
+		QueryReq: &QueryRequest{
+			RequestID: 1,
+			Symbol:    "BTCUSD",
+		},
+	}
+	<-gw.ResponseCh
+
+	// Collect initial snapshot
+	initialMsg := <-gw.MarketData
+	if initialMsg.Type != MDSnapshot {
+		t.Fatalf("Expected initial snapshot, got %v", initialMsg.Type)
+	}
+
+	// Advance simulation time by 250ms (should trigger 2 more snapshots)
+	clock.Advance(250 * time.Millisecond)
+
+	// Give the loop time to process (real-time)
+	time.Sleep(50 * time.Millisecond)
+
+	// Collect snapshots
+	snapshots := make([]*BookSnapshot, 0)
+	timeout := time.After(10 * time.Millisecond)
+	done := false
+
+	for !done {
+		select {
+		case msg := <-gw.MarketData:
+			if msg.Type == MDSnapshot {
+				snapshot := msg.Data.(*BookSnapshot)
+				snapshots = append(snapshots, snapshot)
+			}
+		case <-timeout:
+			done = true
+		}
+	}
+
+	ex.Shutdown()
+
+	// Should have received at least 2 snapshots (at t=100ms and t=200ms)
+	if len(snapshots) < 2 {
+		t.Errorf("expected at least 2 snapshots after 250ms sim time, got %d", len(snapshots))
+	}
+}
+
+func TestMultipleSubscribersReceiveSnapshots(t *testing.T) {
+	clock := &RealClock{}
+	ex := NewExchange(10, clock)
+
+	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	ex.AddInstrument(inst)
+
+	balances := map[string]int64{
+		"BTC": 100 * BTC_PRECISION,
+		"USD": 1000000 * USD_PRECISION,
+	}
+
+	// Connect two clients
+	gw1 := ex.ConnectClient(1, balances, &PercentageFee{})
+	gw2 := ex.ConnectClient(2, balances, &PercentageFee{})
+
+	// Both subscribe to same symbol
+	for _, gw := range []*ClientGateway{gw1, gw2} {
+		gw.RequestCh <- Request{
+			Type: ReqSubscribe,
+			QueryReq: &QueryRequest{
+				RequestID: 1,
+				Symbol:    "BTCUSD",
+			},
+		}
+		<-gw.ResponseCh
+	}
+
+	// Collect snapshots from both clients
+	time.Sleep(250 * time.Millisecond)
+
+	count1 := 0
+	count2 := 0
+
+	timeout := time.After(10 * time.Millisecond)
+
+	// Drain gw1
+	for {
+		select {
+		case msg := <-gw1.MarketData:
+			if msg.Type == MDSnapshot {
+				count1++
+			}
+		case <-timeout:
+			goto drainGw2
+		}
+	}
+
+drainGw2:
+	timeout = time.After(10 * time.Millisecond)
+	for {
+		select {
+		case msg := <-gw2.MarketData:
+			if msg.Type == MDSnapshot {
+				count2++
+			}
+		case <-timeout:
+			goto checkCounts
+		}
+	}
+
+checkCounts:
+	ex.Shutdown()
+
+	// Both clients should have received snapshots
+	if count1 < 2 {
+		t.Errorf("client 1: expected at least 2 snapshots, got %d", count1)
+	}
+	if count2 < 2 {
+		t.Errorf("client 2: expected at least 2 snapshots, got %d", count2)
+	}
+}
+
+func TestDeltasInterleavedWithSnapshots(t *testing.T) {
+	clock := &RealClock{}
+	ex := NewExchange(10, clock)
+
+	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	ex.AddInstrument(inst)
+
+	balances := map[string]int64{
+		"BTC": 100 * BTC_PRECISION,
+		"USD": 1000000 * USD_PRECISION,
+	}
+
+	gw := ex.ConnectClient(1, balances, &PercentageFee{})
+
+	// Subscribe
+	gw.RequestCh <- Request{
+		Type: ReqSubscribe,
+		QueryReq: &QueryRequest{
+			RequestID: 1,
+			Symbol:    "BTCUSD",
+		},
+	}
+	<-gw.ResponseCh
+
+	// Wait a bit
+	time.Sleep(50 * time.Millisecond)
+
+	// Place an order - should trigger delta
+	gw.RequestCh <- Request{
+		Type: ReqPlaceOrder,
+		OrderReq: &OrderRequest{
+			Symbol:      "BTCUSD",
+			Side:        Buy,
+			Type:        LimitOrder,
+			Price:       PriceUSD(50000, DOLLAR_TICK),
+			Qty:         BTCAmount(1),
+			TimeInForce: GTC,
+			Visibility:  Normal,
+		},
+	}
+	<-gw.ResponseCh
+
+	// Collect messages for 250ms
+	time.Sleep(250 * time.Millisecond)
+
+	snapshotCount := 0
+	deltaCount := 0
+
+	timeout := time.After(10 * time.Millisecond)
+	for {
+		select {
+		case msg := <-gw.MarketData:
+			switch msg.Type {
+			case MDSnapshot:
+				snapshotCount++
+			case MDDelta:
+				deltaCount++
+			}
+		case <-timeout:
+			goto checkResults
+		}
+	}
+
+checkResults:
+	ex.Shutdown()
+
+	// Should have received both snapshots and deltas
+	if snapshotCount < 2 {
+		t.Errorf("expected at least 2 snapshots, got %d", snapshotCount)
+	}
+	if deltaCount < 1 {
+		t.Errorf("expected at least 1 delta (from order placement), got %d", deltaCount)
+	}
+}

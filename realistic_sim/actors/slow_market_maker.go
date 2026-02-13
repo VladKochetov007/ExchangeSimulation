@@ -18,6 +18,7 @@ type SlowMarketMakerConfig struct {
 	MaxInventory     int64
 	RequoteInterval  time.Duration // Only requotes on this timer, NOT after fills
 	BootstrapPrice   int64
+	EMADecay         float64       // EMA decay factor for trade price (0.0-1.0, higher = faster adaptation)
 }
 
 // SlowMarketMakerActor implements a market maker that requotes on timer only (no instant refills).
@@ -97,6 +98,8 @@ func (smm *SlowMarketMakerActor) OnEvent(event *actor.Event) {
 		smm.onBookSnapshot(event.Data.(actor.BookSnapshotEvent))
 	case actor.EventBookDelta:
 		smm.onBookDelta(event.Data.(actor.BookDeltaEvent))
+	case actor.EventTrade:
+		smm.onTrade(event.Data.(actor.TradeEvent))
 	case actor.EventOrderAccepted:
 		smm.onOrderAccepted(event.Data.(actor.OrderAcceptedEvent))
 	case actor.EventOrderFilled:
@@ -106,13 +109,34 @@ func (smm *SlowMarketMakerActor) OnEvent(event *actor.Event) {
 	}
 }
 
-func (smm *SlowMarketMakerActor) onBookDelta(delta actor.BookDeltaEvent) {
-	// Request fresh snapshot when best level is consumed
-	// This ensures we get the true new BBO instead of using stale data
-	if delta.Delta.VisibleQty == 0 {
-		// Level removed - request fresh snapshot to get new BBO
-		smm.Subscribe(smm.config.Symbol)
+func (smm *SlowMarketMakerActor) onTrade(trade actor.TradeEvent) {
+	if trade.Symbol != smm.config.Symbol {
+		return
 	}
+
+	// Use EMA of trade prices instead of raw last trade
+	// This gives each maker a different view of fair value based on their decay rate
+	// Prevents all makers from converging to identical prices (which creates oscillation)
+	tradePrice := float64(trade.Trade.Price)
+
+	if smm.lastMidPrice == 0 {
+		// Bootstrap with first trade
+		smm.lastMidPrice = trade.Trade.Price
+	} else {
+		// EMA update: ema_new = alpha * trade + (1-alpha) * ema_old
+		alpha := smm.config.EMADecay
+		if alpha <= 0 || alpha > 1 {
+			alpha = 0.1 // Default 10% decay if not configured
+		}
+		currentEMA := float64(smm.lastMidPrice)
+		newEMA := alpha*tradePrice + (1-alpha)*currentEMA
+		smm.lastMidPrice = int64(newEMA)
+	}
+}
+
+func (smm *SlowMarketMakerActor) onBookDelta(delta actor.BookDeltaEvent) {
+	// Periodic snapshots now stream automatically every 100ms simulation time
+	// No need to manually request snapshots - they arrive via the stream
 }
 
 func (smm *SlowMarketMakerActor) onBookSnapshot(snap actor.BookSnapshotEvent) {
@@ -124,20 +148,23 @@ func (smm *SlowMarketMakerActor) onBookSnapshot(snap actor.BookSnapshotEvent) {
 		return
 	}
 
-	// Use raw BBO without skipping own orders
-	// The market dynamics (takers consuming levels) will naturally cause drift
-	var midPrice int64
-	if len(snap.Snapshot.Bids) > 0 && len(snap.Snapshot.Asks) > 0 {
-		bestBid := snap.Snapshot.Bids[0].Price
-		bestAsk := snap.Snapshot.Asks[0].Price
-		midPrice = (bestBid + bestAsk) / 2
-	} else if smm.lastMidPrice == 0 && smm.config.BootstrapPrice > 0 {
-		midPrice = smm.config.BootstrapPrice
-	} else {
-		return
-	}
+	// FALLBACK: Only use BBO for initial bootstrapping (before first trade)
+	// After trades start, onTrade() handles price discovery
+	// This prevents circular dependency where makers quote around their own quotes
+	if smm.lastMidPrice == 0 {
+		var midPrice int64
+		if len(snap.Snapshot.Bids) > 0 && len(snap.Snapshot.Asks) > 0 {
+			bestBid := snap.Snapshot.Bids[0].Price
+			bestAsk := snap.Snapshot.Asks[0].Price
+			midPrice = (bestBid + bestAsk) / 2
+		} else if smm.config.BootstrapPrice > 0 {
+			midPrice = smm.config.BootstrapPrice
+		} else {
+			return
+		}
 
-	smm.lastMidPrice = midPrice
+		smm.lastMidPrice = midPrice
+	}
 }
 
 func (smm *SlowMarketMakerActor) onOrderAccepted(accepted actor.OrderAcceptedEvent) {
