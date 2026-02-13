@@ -437,6 +437,7 @@ func TestMarkPriceLogging(t *testing.T) {
 	ex := NewExchange(16, clock)
 	logger := &positionPnLLogger{}
 	ex.SetLogger("_global", logger)
+	ex.SetLogger("BTC-PERP", logger)
 
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
 	ex.AddInstrument(perp)

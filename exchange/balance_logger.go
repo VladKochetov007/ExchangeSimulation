@@ -11,7 +11,12 @@ func (t *BalanceChangeTracker) LogBalanceChange(
 	reason string,
 	changes []BalanceDelta,
 ) {
-	log := t.exchange.getLogger("_global")
+	// Route to symbol logger if symbol provided, otherwise to _global
+	logKey := "_global"
+	if symbol != "" {
+		logKey = symbol
+	}
+	log := t.exchange.getLogger(logKey)
 	if log == nil {
 		return
 	}

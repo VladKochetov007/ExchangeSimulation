@@ -34,6 +34,7 @@ type ExchangeBalance struct {
 }
 
 type Exchange struct {
+	ID                      string
 	Clients                 map[uint64]*Client
 	Gateways                map[uint64]*ClientGateway
 	Books                   map[string]*OrderBook
@@ -61,6 +62,9 @@ type Exchange struct {
 
 // ExchangeConfig configures exchange behavior
 type ExchangeConfig struct {
+	// ID identifies the exchange for logging (default: "exchange")
+	ID string
+
 	// EstimatedClients pre-allocates capacity for client maps (default: 10)
 	EstimatedClients int
 
@@ -159,6 +163,9 @@ func NewExchange(estimatedClients int, clock Clock) *Exchange {
 // NewExchangeWithConfig creates an exchange with custom configuration
 func NewExchangeWithConfig(config ExchangeConfig) *Exchange {
 	// Apply defaults
+	if config.ID == "" {
+		config.ID = "exchange"
+	}
 	if config.EstimatedClients <= 0 {
 		config.EstimatedClients = 10
 	}
@@ -178,6 +185,7 @@ func NewExchangeWithConfig(config ExchangeConfig) *Exchange {
 	matcher := NewDefaultMatcher()
 	matcher.clock = config.Clock
 	ex := &Exchange{
+		ID:          config.ID,
 		Clients:     make(map[uint64]*Client, config.EstimatedClients),
 		Gateways:    make(map[uint64]*ClientGateway, config.EstimatedClients),
 		Books:       make(map[string]*OrderBook, 16),

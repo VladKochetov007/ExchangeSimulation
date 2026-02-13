@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"exchange_sim/actor"
@@ -47,6 +48,7 @@ func run() error {
 
 	clientCount := 100
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
+		ID:               "randomwalk_v2",
 		EstimatedClients: clientCount,
 		Clock:            simClock,
 		TickerFactory:    tickerFactory,
@@ -66,20 +68,28 @@ func run() error {
 	ex.AddInstrument(perpInst)
 
 	logDir := "logs/randomwalk_v2"
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	perpDir := filepath.Join(logDir, "perp")
+	if err := os.MkdirAll(perpDir, 0755); err != nil {
 		return fmt.Errorf("create log dir: %w", err)
 	}
 
-	logFilePath := fmt.Sprintf("%s/_global.log", logDir)
-	logFile, err := os.Create(logFilePath)
+	// Create general.log for exchange-wide events
+	generalLogFile, err := os.Create(filepath.Join(logDir, "general.log"))
 	if err != nil {
-		return fmt.Errorf("create log file: %w", err)
+		return fmt.Errorf("create general log file: %w", err)
 	}
-	defer logFile.Close()
+	defer generalLogFile.Close()
+	generalLogger := logger.New(generalLogFile)
+	ex.SetLogger("_global", generalLogger)
 
-	globalLogger := logger.New(logFile)
-	ex.SetLogger("_global", globalLogger)
-	ex.SetLogger("BTC-PERP", globalLogger)
+	// Create BTC-PERP.log for symbol-specific events
+	perpLogFile, err := os.Create(filepath.Join(perpDir, "BTC-PERP.log"))
+	if err != nil {
+		return fmt.Errorf("create perp log file: %w", err)
+	}
+	defer perpLogFile.Close()
+	perpLogger := logger.New(perpLogFile)
+	ex.SetLogger("BTC-PERP", perpLogger)
 
 	ex.EnableBalanceSnapshots(10 * time.Second)
 
@@ -116,7 +126,7 @@ func run() error {
 	for i, spreadBps := range spreads {
 		mmID := uint64(2 + i)
 		mmGateway := ex.ConnectClient(mmID, map[string]int64{}, &exchange.FixedFee{})
-		ex.AddPerpBalance(mmID, "USD", 10000000*exchange.USD_PRECISION) // $10M capital
+		ex.AddPerpBalance(mmID, "USD", 10_000_000*exchange.USD_PRECISION) // $10M capital
 
 		mm := actors.NewSlowMarketMaker(mmID, mmGateway, actors.SlowMarketMakerConfig{
 			Symbol:          "BTC-PERP",
@@ -249,7 +259,7 @@ shutdown:
 	fmt.Printf("Wall-clock time: %v\n", wallElapsed)
 	fmt.Printf("Simulated time: %v\n", simElapsed.Round(time.Second))
 	fmt.Printf("Actual speedup: %.2fx\n", actualSpeedup)
-	fmt.Printf("Log file: %s\n", logFilePath)
+	fmt.Printf("Log directory: %s\n", logDir)
 
 	return nil
 }

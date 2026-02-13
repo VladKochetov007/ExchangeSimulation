@@ -38,7 +38,11 @@ func NewMultiExchangeRunner(config MultiSimConfig) (*MultiExchangeRunner, error)
 
 	// Create exchanges
 	for _, exConfig := range config.Exchanges {
-		ex := exchange.NewExchange(100, runner.clock)
+		ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
+			ID:               exConfig.Name,
+			EstimatedClients: 100,
+			Clock:            runner.clock,
+		})
 		if config.SnapshotInterval > 0 {
 			ex.EnablePeriodicSnapshots(config.SnapshotInterval)
 		}
@@ -82,8 +86,9 @@ func NewMultiExchangeRunner(config MultiSimConfig) (*MultiExchangeRunner, error)
 		instruments := GenerateInstruments(assets, config.QuoteAsset, config.SpotToFuturesRatio)
 
 		// Create log directories
-		spotDir := filepath.Join(config.LogDir, exConfig.Name, "spot")
-		perpDir := filepath.Join(config.LogDir, exConfig.Name, "perp")
+		exchangeDir := filepath.Join(config.LogDir, exConfig.Name)
+		spotDir := filepath.Join(exchangeDir, "spot")
+		perpDir := filepath.Join(exchangeDir, "perp")
 		if err := os.MkdirAll(spotDir, 0755); err != nil {
 			runner.Close()
 			return nil, fmt.Errorf("create spot log dir: %w", err)
@@ -92,6 +97,18 @@ func NewMultiExchangeRunner(config MultiSimConfig) (*MultiExchangeRunner, error)
 			runner.Close()
 			return nil, fmt.Errorf("create perp log dir: %w", err)
 		}
+
+		// Create general.log for exchange-wide events (balance snapshots, borrow, repay)
+		generalLogPath := filepath.Join(exchangeDir, "general.log")
+		generalLogFile, err := os.Create(generalLogPath)
+		if err != nil {
+			runner.Close()
+			return nil, fmt.Errorf("create general log file %s: %w", generalLogPath, err)
+		}
+		runner.logFiles = append(runner.logFiles, generalLogFile)
+		generalLogger := logger.New(generalLogFile)
+		runner.loggers[exConfig.Name+":_global"] = generalLogger
+		ex.SetLogger("_global", generalLogger)
 
 		// Add instruments and setup logging
 		for symbol, inst := range instruments {

@@ -5,10 +5,11 @@ from pathlib import Path
 import json
 import numpy as np
 
-LOG_FILE = Path("logs/randomwalk_v2/_global.log")
+# New logging structure: trades are in symbol-specific log files
+LOG_FILE = Path("logs/randomwalk_v2/perp/BTC-PERP.log")
 OUTPUT_FILE = Path("logs/randomwalk_v2/price_evolution.png")
 
-# Load trade data
+# Load trade data from symbol log
 with open(LOG_FILE) as f:
     data = [json.loads(line) for line in f]
 

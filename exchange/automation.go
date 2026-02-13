@@ -194,7 +194,7 @@ func (a *ExchangeAutomation) updateAllPerpPrices() {
 		u.perp.UpdateFundingRate(u.indexPrice, u.markPrice)
 		a.exchange.MDPublisher.PublishFunding(u.symbol, u.perp.GetFundingRate(), timestamp)
 
-		if log := a.exchange.getLogger("_global"); log != nil {
+		if log := a.exchange.getLogger(u.symbol); log != nil {
 			log.LogEvent(timestamp, 0, "mark_price_update", MarkPriceUpdateEvent{
 				Timestamp:  timestamp,
 				Symbol:     u.symbol,

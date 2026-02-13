@@ -37,6 +37,7 @@ func TestFundingRateLogging(t *testing.T) {
 	ex := NewExchange(16, clock)
 	logger := &completeLogger{}
 	ex.SetLogger("_global", logger)
+	ex.SetLogger("BTC-PERP", logger)
 
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(perp)
@@ -300,6 +301,7 @@ func TestCompleteLoggingIntegration(t *testing.T) {
 	ex := NewExchange(16, clock)
 	logger := &completeLogger{}
 	ex.SetLogger("_global", logger)
+	ex.SetLogger("BTC-PERP", logger)
 
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(perp)
