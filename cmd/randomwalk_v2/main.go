@@ -122,11 +122,13 @@ func run() error {
 			Symbol:          "BTC-PERP",
 			Instrument:      perpInst,
 			SpreadBps:       spreadBps,
-			QuoteSize:       50 * exchange.BTC_PRECISION / 100, // 0.5 BTC per level
-			MaxInventory:    10000 * exchange.BTC_PRECISION,    // 10,000 BTC - effectively unlimited for perps
-			RequoteInterval: requoteIntervals[i],                // Staggered to prevent synchronized requotes
+			QuoteSize:       100 * exchange.BTC_PRECISION / 100, // 1.0 BTC per level (increased from 0.5)
+			MaxInventory:    10000 * exchange.BTC_PRECISION,     // 10,000 BTC - effectively unlimited for perps
+			RequoteInterval: requoteIntervals[i],                 // Staggered to prevent synchronized requotes
 			BootstrapPrice:  exchange.PriceUSD(bootstrapPrice, exchange.CENT_TICK),
-			EMADecay:        emaDecays[i], // Different decay rates prevent perfect synchronization
+			EMADecay:        emaDecays[i],    // Different decay rates prevent perfect synchronization
+			Levels:          4,                // 4 levels deep per side
+			LevelSpacingBps: spreadBps / 2,    // Space levels at half the spread (tighter levels)
 		})
 		marketMakers = append(marketMakers, mm)
 	}

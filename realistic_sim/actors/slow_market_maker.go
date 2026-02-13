@@ -18,7 +18,9 @@ type SlowMarketMakerConfig struct {
 	MaxInventory     int64
 	RequoteInterval  time.Duration // Only requotes on this timer, NOT after fills
 	BootstrapPrice   int64
-	EMADecay         float64       // EMA decay factor for trade price (0.0-1.0, higher = faster adaptation)
+	EMADecay         float64 // EMA decay factor for trade price (0.0-1.0, higher = faster adaptation)
+	Levels           int     // Number of price levels to quote (default: 1)
+	LevelSpacingBps  int64   // Spacing between levels in bps (default: SpreadBps)
 }
 
 // SlowMarketMakerActor implements a market maker that requotes on timer only (no instant refills).
@@ -31,12 +33,12 @@ type SlowMarketMakerActor struct {
 	quoteAsset string
 
 	lastMidPrice int64
-	currentBid   int64
-	currentAsk   int64
-	activeBidID  uint64
-	activeAskID  uint64
-	lastBidReqID uint64
-	lastAskReqID uint64
+
+	// Multi-level order tracking
+	activeBidIDs  []uint64 // Order IDs for each bid level
+	activeAskIDs  []uint64 // Order IDs for each ask level
+	lastBidReqIDs []uint64 // Request IDs for bid orders
+	lastAskReqIDs []uint64 // Request IDs for ask orders
 
 	inventory int64
 
@@ -49,11 +51,21 @@ func NewSlowMarketMaker(id uint64, gateway *exchange.ClientGateway, config SlowM
 	if config.RequoteInterval == 0 {
 		config.RequoteInterval = 1 * time.Second
 	}
+	if config.Levels <= 0 {
+		config.Levels = 1 // Default: single level
+	}
+	if config.LevelSpacingBps <= 0 {
+		config.LevelSpacingBps = config.SpreadBps // Default: same as spread
+	}
 
 	mm := &SlowMarketMakerActor{
-		BaseActor: actor.NewBaseActor(id, gateway),
-		config:    config,
-		stopCh:    make(chan struct{}),
+		BaseActor:     actor.NewBaseActor(id, gateway),
+		config:        config,
+		stopCh:        make(chan struct{}),
+		activeBidIDs:  make([]uint64, config.Levels),
+		activeAskIDs:  make([]uint64, config.Levels),
+		lastBidReqIDs: make([]uint64, config.Levels),
+		lastAskReqIDs: make([]uint64, config.Levels),
 	}
 
 	if config.Instrument != nil {
@@ -168,10 +180,18 @@ func (smm *SlowMarketMakerActor) onBookSnapshot(snap actor.BookSnapshotEvent) {
 }
 
 func (smm *SlowMarketMakerActor) onOrderAccepted(accepted actor.OrderAcceptedEvent) {
-	if accepted.RequestID == smm.lastBidReqID {
-		smm.activeBidID = accepted.OrderID
-	} else if accepted.RequestID == smm.lastAskReqID {
-		smm.activeAskID = accepted.OrderID
+	// Match request ID to the appropriate level
+	for i := range smm.lastBidReqIDs {
+		if accepted.RequestID == smm.lastBidReqIDs[i] {
+			smm.activeBidIDs[i] = accepted.OrderID
+			return
+		}
+	}
+	for i := range smm.lastAskReqIDs {
+		if accepted.RequestID == smm.lastAskReqIDs[i] {
+			smm.activeAskIDs[i] = accepted.OrderID
+			return
+		}
 	}
 }
 
@@ -185,10 +205,17 @@ func (smm *SlowMarketMakerActor) onOrderFilled(fill actor.OrderFillEvent) {
 
 	// Clear active order IDs on full fill
 	if fill.IsFull {
-		if fill.OrderID == smm.activeBidID {
-			smm.activeBidID = 0
-		} else if fill.OrderID == smm.activeAskID {
-			smm.activeAskID = 0
+		for i := range smm.activeBidIDs {
+			if fill.OrderID == smm.activeBidIDs[i] {
+				smm.activeBidIDs[i] = 0
+				return
+			}
+		}
+		for i := range smm.activeAskIDs {
+			if fill.OrderID == smm.activeAskIDs[i] {
+				smm.activeAskIDs[i] = 0
+				return
+			}
 		}
 	}
 
@@ -197,10 +224,17 @@ func (smm *SlowMarketMakerActor) onOrderFilled(fill actor.OrderFillEvent) {
 }
 
 func (smm *SlowMarketMakerActor) onOrderCancelled(cancelled actor.OrderCancelledEvent) {
-	if cancelled.OrderID == smm.activeBidID {
-		smm.activeBidID = 0
-	} else if cancelled.OrderID == smm.activeAskID {
-		smm.activeAskID = 0
+	for i := range smm.activeBidIDs {
+		if cancelled.OrderID == smm.activeBidIDs[i] {
+			smm.activeBidIDs[i] = 0
+			return
+		}
+	}
+	for i := range smm.activeAskIDs {
+		if cancelled.OrderID == smm.activeAskIDs[i] {
+			smm.activeAskIDs[i] = 0
+			return
+		}
 	}
 }
 
@@ -244,60 +278,62 @@ func (smm *SlowMarketMakerActor) requote(midPrice int64) {
 
 	tickSize := smm.instrument.TickSize()
 
-	// SIMPLE: Just quote around the provided mid-price with our spread
-	// No drift calculations, no complexity - let market dynamics create drift
+	// ALWAYS cancel ALL existing orders at all levels
+	smm.cancelOrders()
+
+	// Calculate base spread
 	spreadHalf := (midPrice * smm.config.SpreadBps) / (2 * 10000)
-	targetBid := midPrice - spreadHalf
-	targetAsk := midPrice + spreadHalf
+	levelSpacing := (midPrice * smm.config.LevelSpacingBps) / 10000
 
-	// Align to tick size
-	targetBid = (targetBid / tickSize) * tickSize
-	targetAsk = (targetAsk / tickSize) * tickSize
+	// Place orders at each level
+	for level := 0; level < smm.config.Levels; level++ {
+		// Calculate price for this level (farther from mid with each level)
+		levelOffset := int64(level) * levelSpacing
+		targetBid := midPrice - spreadHalf - levelOffset
+		targetAsk := midPrice + spreadHalf + levelOffset
 
-	// ALWAYS cancel ALL existing orders (even if partially filled)
-	// This ensures we adapt to current mid-price and don't leave stale orders
-	if smm.activeBidID != 0 {
-		smm.CancelOrder(smm.activeBidID)
-		smm.activeBidID = 0
-	}
-	if smm.activeAskID != 0 {
-		smm.CancelOrder(smm.activeAskID)
-		smm.activeAskID = 0
-	}
+		// Align to tick size
+		targetBid = (targetBid / tickSize) * tickSize
+		targetAsk = (targetAsk / tickSize) * tickSize
 
-	// Update tracked prices
-	smm.currentBid = targetBid
-	smm.currentAsk = targetAsk
+		// Place bid at this level
+		if canBuy {
+			smm.lastBidReqIDs[level] = smm.BaseActor.SubmitOrder(
+				smm.config.Symbol,
+				exchange.Buy,
+				exchange.LimitOrder,
+				targetBid,
+				smm.config.QuoteSize,
+			)
+		}
 
-	if canBuy && smm.activeBidID == 0 {
-		smm.lastBidReqID = smm.BaseActor.SubmitOrder(
-			smm.config.Symbol,
-			exchange.Buy,
-			exchange.LimitOrder,
-			targetBid,
-			smm.config.QuoteSize,
-		)
-	}
-
-	if canSell && smm.activeAskID == 0 {
-		smm.lastAskReqID = smm.BaseActor.SubmitOrder(
-			smm.config.Symbol,
-			exchange.Sell,
-			exchange.LimitOrder,
-			targetAsk,
-			smm.config.QuoteSize,
-		)
+		// Place ask at this level
+		if canSell {
+			smm.lastAskReqIDs[level] = smm.BaseActor.SubmitOrder(
+				smm.config.Symbol,
+				exchange.Sell,
+				exchange.LimitOrder,
+				targetAsk,
+				smm.config.QuoteSize,
+			)
+		}
 	}
 }
 
 func (smm *SlowMarketMakerActor) cancelOrders() {
-	if smm.activeBidID != 0 {
-		smm.CancelOrder(smm.activeBidID)
-		smm.activeBidID = 0
+	// Cancel all bid levels
+	for i := range smm.activeBidIDs {
+		if smm.activeBidIDs[i] != 0 {
+			smm.CancelOrder(smm.activeBidIDs[i])
+			smm.activeBidIDs[i] = 0
+		}
 	}
-	if smm.activeAskID != 0 {
-		smm.CancelOrder(smm.activeAskID)
-		smm.activeAskID = 0
+	// Cancel all ask levels
+	for i := range smm.activeAskIDs {
+		if smm.activeAskIDs[i] != 0 {
+			smm.CancelOrder(smm.activeAskIDs[i])
+			smm.activeAskIDs[i] = 0
+		}
 	}
 }
 

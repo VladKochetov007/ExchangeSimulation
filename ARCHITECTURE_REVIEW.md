@@ -393,7 +393,7 @@ for venue, ex := range registry.venues {
 | ClientID represents a **person/entity** | ✅ YES - Same person has separate accounts on different exchanges |
 | ClientID should be **globally unique** | ❌ NO - Same ID shouldn't exist across exchanges |
 
-**Recommendation**: Document the semantic meaning of ClientID in multi-venue context. Current implementation treats it as "same entity, separate accounts" which is **realistic** (e.g., user 1001 has accounts on Binance, Coinbase, FTX).
+**Recommendation**: Document the semantic meaning of ClientID in multi-venue context. Current implementation treats it as "same entity, separate accounts" which is **realistic** (e.g., user 1001 has accounts on Binance, Coinbase, OKX).
 
 ---
 
