@@ -126,14 +126,14 @@ func run() error {
 	for i, spreadBps := range spreads {
 		mmID := uint64(2 + i)
 		mmGateway := ex.ConnectClient(mmID, map[string]int64{}, &exchange.FixedFee{})
-		ex.AddPerpBalance(mmID, "USD", 10_000_000*exchange.USD_PRECISION) // $10M capital
+		ex.AddPerpBalance(mmID, "USD", 100_000_000*exchange.USD_PRECISION) // $100M capital (10x increase)
 
 		mm := actors.NewSlowMarketMaker(mmID, mmGateway, actors.SlowMarketMakerConfig{
 			Symbol:          "BTC-PERP",
 			Instrument:      perpInst,
 			SpreadBps:       spreadBps,
-			QuoteSize:       100 * exchange.BTC_PRECISION / 100, // 1.0 BTC per level (increased from 0.5)
-			MaxInventory:    10000 * exchange.BTC_PRECISION,     // 10,000 BTC - effectively unlimited for perps
+			QuoteSize:       100 * exchange.BTC_PRECISION / 100, // 1.0 BTC per level
+			MaxInventory:    1000 * exchange.BTC_PRECISION,      // 1,000 BTC max inventory (down from 10k)
 			RequoteInterval: requoteIntervals[i],                 // Staggered to prevent synchronized requotes
 			BootstrapPrice:  exchange.PriceUSD(bootstrapPrice, exchange.CENT_TICK),
 			EMADecay:        emaDecays[i],    // Different decay rates prevent perfect synchronization
@@ -166,7 +166,7 @@ func run() error {
 	for i, config := range takerConfigs {
 		takerID := uint64(10 + i)
 		takerGateway := ex.ConnectClient(takerID, map[string]int64{}, &exchange.FixedFee{})
-		ex.AddPerpBalance(takerID, "USD", 3000000*exchange.USD_PRECISION) // $3M capital each
+		ex.AddPerpBalance(takerID, "USD", 10_000_000*exchange.USD_PRECISION) // $10M capital each (3x increase)
 
 		taker := actors.NewRandomizedTaker(takerID, takerGateway, actors.RandomizedTakerConfig{
 			Symbol:         "BTC-PERP",

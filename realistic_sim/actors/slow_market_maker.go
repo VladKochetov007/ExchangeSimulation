@@ -285,8 +285,33 @@ func (smm *SlowMarketMakerActor) requote(midPrice int64) {
 	spreadHalf := (midPrice * smm.config.SpreadBps) / (2 * 10000)
 	levelSpacing := (midPrice * smm.config.LevelSpacingBps) / 10000
 
+	// Calculate margin-adjusted order size and levels
+	// As inventory grows, we need more margin for position, leaving less for orders
+	// Reduce order size or skip levels if inventory is large
+
+	// Estimate position margin (rough heuristic: position needs margin too)
+	// Larger inventory = more conservative quoting
+	inventoryFraction := float64(smm.inventory) / float64(smm.config.MaxInventory)
+	if inventoryFraction < 0 {
+		inventoryFraction = -inventoryFraction
+	}
+
+	// Reduce levels or size when inventory is high
+	effectiveLevels := smm.config.Levels
+	effectiveSize := smm.config.QuoteSize
+
+	// When inventory > 50% of max, start reducing
+	if inventoryFraction > 0.5 {
+		// Scale down levels: at 50% inventory → 100% levels, at 100% inventory → 25% levels
+		scaleFactor := 1.5 - inventoryFraction // 1.0 at 50%, 0.5 at 100%
+		effectiveLevels = int(float64(smm.config.Levels) * scaleFactor)
+		if effectiveLevels < 1 {
+			effectiveLevels = 1
+		}
+	}
+
 	// Place orders at each level
-	for level := 0; level < smm.config.Levels; level++ {
+	for level := 0; level < effectiveLevels; level++ {
 		// Calculate price for this level (farther from mid with each level)
 		levelOffset := int64(level) * levelSpacing
 		targetBid := midPrice - spreadHalf - levelOffset
@@ -303,7 +328,7 @@ func (smm *SlowMarketMakerActor) requote(midPrice int64) {
 				exchange.Buy,
 				exchange.LimitOrder,
 				targetBid,
-				smm.config.QuoteSize,
+				effectiveSize,
 			)
 		}
 
@@ -314,7 +339,7 @@ func (smm *SlowMarketMakerActor) requote(midPrice int64) {
 				exchange.Sell,
 				exchange.LimitOrder,
 				targetAsk,
-				smm.config.QuoteSize,
+				effectiveSize,
 			)
 		}
 	}
