@@ -332,7 +332,7 @@ func (e *Exchange) logAllBalances() {
 			borrowed[asset] = amount
 		}
 
-		snapshot := BalanceSnapshotComplete{
+		snapshot := BalanceSnapshot{
 			Timestamp:    timestamp,
 			ClientID:     clientID,
 			SpotBalances: spotBalances,

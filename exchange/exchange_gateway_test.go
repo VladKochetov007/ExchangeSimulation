@@ -95,14 +95,14 @@ func TestQueryBalance(t *testing.T) {
 	}
 
 	snapshot := resp.Data.(*BalanceSnapshot)
-	if len(snapshot.Balances) != 2 {
-		t.Errorf("Expected 2 balances, got %d", len(snapshot.Balances))
+	if len(snapshot.SpotBalances) != 2 {
+		t.Errorf("Expected 2 spot balances, got %d", len(snapshot.SpotBalances))
 	}
 
 	var usdBalance *AssetBalance
-	for i := range snapshot.Balances {
-		if snapshot.Balances[i].Asset == "USD" {
-			usdBalance = &snapshot.Balances[i]
+	for i := range snapshot.SpotBalances {
+		if snapshot.SpotBalances[i].Asset == "USD" {
+			usdBalance = &snapshot.SpotBalances[i]
 			break
 		}
 	}
@@ -233,7 +233,7 @@ func TestHandleClientRequestsIntegration(t *testing.T) {
 			t.Errorf("Query should succeed")
 		}
 		snapshot := resp.Data.(*BalanceSnapshot)
-		if len(snapshot.Balances) == 0 {
+		if len(snapshot.SpotBalances) == 0 && len(snapshot.PerpBalances) == 0 {
 			t.Errorf("Expected balances in snapshot")
 		}
 	case <-time.After(100 * time.Millisecond):

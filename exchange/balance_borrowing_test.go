@@ -7,7 +7,7 @@ import (
 
 type testBalanceLogger struct {
 	balanceChanges []BalanceChangeEvent
-	snapshots      []BalanceSnapshotComplete
+	snapshots      []BalanceSnapshot
 	borrows        []BorrowEvent
 	repays         []RepayEvent
 }
@@ -19,7 +19,7 @@ func (t *testBalanceLogger) LogEvent(simTime int64, clientID uint64, eventName s
 			t.balanceChanges = append(t.balanceChanges, bce)
 		}
 	case "balance_snapshot":
-		if bsc, ok := event.(BalanceSnapshotComplete); ok {
+		if bsc, ok := event.(BalanceSnapshot); ok {
 			t.snapshots = append(t.snapshots, bsc)
 		}
 	case "borrow":

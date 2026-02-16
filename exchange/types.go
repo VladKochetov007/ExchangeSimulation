@@ -245,8 +245,11 @@ type QueryRequest struct {
 }
 
 type BalanceSnapshot struct {
-	Timestamp int64            `json:"timestamp"`
-	Balances  []AssetBalance   `json:"balances"`
+	Timestamp    int64            `json:"timestamp"`
+	ClientID     uint64           `json:"client_id"`
+	SpotBalances []AssetBalance   `json:"spot_balances"`
+	PerpBalances []AssetBalance   `json:"perp_balances"`
+	Borrowed     map[string]int64 `json:"borrowed"`
 }
 
 type AssetBalance struct {
@@ -402,14 +405,6 @@ type BalanceDelta struct {
 	OldBalance int64  `json:"old_balance"`
 	NewBalance int64  `json:"new_balance"`
 	Delta      int64  `json:"delta"`
-}
-
-type BalanceSnapshotComplete struct {
-	Timestamp    int64            `json:"timestamp"`
-	ClientID     uint64           `json:"client_id"`
-	SpotBalances []AssetBalance   `json:"spot_balances"`
-	PerpBalances []AssetBalance   `json:"perp_balances"`
-	Borrowed     map[string]int64 `json:"borrowed"`
 }
 
 type BorrowEvent struct {
