@@ -139,6 +139,7 @@ func TestDeltasPublishedForMakerFills(t *testing.T) {
 
 	gotTrade := false
 	gotDelta := false
+readLoop:
 	for i := 0; i < 10; i++ {
 		select {
 		case msg := <-recorder.MarketData:
@@ -156,7 +157,7 @@ func TestDeltasPublishedForMakerFills(t *testing.T) {
 				}
 			}
 		case <-time.After(100 * time.Millisecond):
-			break
+			break readLoop
 		}
 	}
 
