@@ -31,7 +31,7 @@ func TestClientNotificationsOnPlaceOrder(t *testing.T) {
 		if !resp.Success {
 			t.Fatalf("Order should succeed")
 		}
-		t.Logf("✅ CLIENT RECEIVES: Order acknowledgment with orderID=%d", resp.Data.(uint64))
+		t.Logf("CLIENT RECEIVES: Order acknowledgment with orderID=%d", resp.Data.(uint64))
 	case <-time.After(100 * time.Millisecond):
 		t.Fatalf("Timeout waiting for response")
 	}
@@ -40,7 +40,7 @@ func TestClientNotificationsOnPlaceOrder(t *testing.T) {
 	case <-gateway.ResponseCh:
 		t.Errorf("❌ UNEXPECTED: Client should NOT receive execution report for resting order")
 	case <-time.After(50 * time.Millisecond):
-		t.Logf("✅ CORRECT: No execution report sent (order resting on book)")
+		t.Logf("CORRECT: No execution report sent (order resting on book)")
 	}
 
 	gateway.Close()
@@ -74,7 +74,7 @@ func TestClientNotificationsOnFill(t *testing.T) {
 		if !resp.Success {
 			t.Fatalf("Sell order should succeed")
 		}
-		t.Logf("✅ MAKER receives: Order ack (orderID=%d)", resp.Data.(uint64))
+		t.Logf("MAKER receives: Order ack (orderID=%d)", resp.Data.(uint64))
 	case <-time.After(100 * time.Millisecond):
 		t.Fatalf("Timeout")
 	}
@@ -103,11 +103,11 @@ func TestClientNotificationsOnFill(t *testing.T) {
 					t.Fatalf("Buy order should succeed")
 				}
 				receivedAck = true
-				t.Logf("✅ TAKER receives: Order ack (orderID=%d)", resp.Data.(uint64))
+				t.Logf("TAKER receives: Order ack (orderID=%d)", resp.Data.(uint64))
 			} else if resp.RequestID == 0 {
 				if _, ok := resp.Data.(*FillNotification); ok {
 					receivedFill = true
-					t.Logf("✅ TAKER receives: Fill Notification")
+					t.Logf("TAKER receives: Fill Notification")
 				} else {
 					t.Errorf("Received unexpected data with ID 0: %T", resp.Data)
 				}
@@ -127,7 +127,7 @@ func TestClientNotificationsOnFill(t *testing.T) {
 	select {
 	case resp := <-gateway1.ResponseCh:
 		if _, ok := resp.Data.(*FillNotification); ok {
-			t.Logf("✅ MAKER receives: Fill notification")
+			t.Logf("MAKER receives: Fill notification")
 		} else {
 			t.Errorf("MAKER received unexpected data: %T", resp.Data)
 		}
@@ -194,7 +194,7 @@ func TestClientNotificationsViaMarketData(t *testing.T) {
 	case msg := <-gateway1.MarketData:
 		if msg.Type == MDTrade {
 			trade := msg.Data.(*Trade)
-			t.Logf("✅ Maker via MarketData: Trade (price=%d, qty=%d)", trade.Price, trade.Qty)
+			t.Logf("Maker via MarketData: Trade (price=%d, qty=%d)", trade.Price, trade.Qty)
 			tradeReceived1 = true
 		}
 	case <-time.After(100 * time.Millisecond):
@@ -204,17 +204,17 @@ func TestClientNotificationsViaMarketData(t *testing.T) {
 	case msg := <-gateway2.MarketData:
 		if msg.Type == MDTrade {
 			trade := msg.Data.(*Trade)
-			t.Logf("✅ Taker via MarketData: Trade (price=%d, qty=%d)", trade.Price, trade.Qty)
+			t.Logf("Taker via MarketData: Trade (price=%d, qty=%d)", trade.Price, trade.Qty)
 			tradeReceived2 = true
 		}
 	case <-time.After(100 * time.Millisecond):
 	}
 
 	if !tradeReceived1 {
-		t.Logf("⚠️  Maker did NOT receive trade via market data")
+		t.Logf("Maker did NOT receive trade via market data")
 	}
 	if !tradeReceived2 {
-		t.Logf("⚠️  Taker did NOT receive trade via market data")
+		t.Logf("Taker did NOT receive trade via market data")
 	}
 
 	gateway1.Close()
@@ -270,11 +270,11 @@ func TestClientNotificationsOnPartialFill(t *testing.T) {
 					t.Fatalf("Order should succeed")
 				}
 				receivedAck = true
-				t.Logf("✅ Taker receives: Order ack (orderID=%d)", resp.Data.(uint64))
+				t.Logf("Taker receives: Order ack (orderID=%d)", resp.Data.(uint64))
 			} else if resp.RequestID == 0 {
 				if _, ok := resp.Data.(*FillNotification); ok {
 					receivedFill = true
-					t.Logf("✅ Taker receives: Partial Fill Notification")
+					t.Logf("Taker receives: Partial Fill Notification")
 				} else {
 					t.Errorf("Received unexpected data with ID 0: %T", resp.Data)
 				}
@@ -293,7 +293,7 @@ func TestClientNotificationsOnPartialFill(t *testing.T) {
 
 	select {
 	case <-gateway1.ResponseCh:
-		t.Logf("✅ WOULD BE GOOD: Maker fill notification")
+		t.Logf("WOULD BE GOOD: Maker fill notification")
 	case <-time.After(50 * time.Millisecond):
 		t.Logf("❌ MISSING: Maker receives NO fill notification")
 	}
@@ -328,7 +328,7 @@ func TestClientNotificationsOnReject(t *testing.T) {
 		if resp.Success {
 			t.Fatalf("Order should be rejected due to insufficient balance")
 		}
-		t.Logf("✅ CLIENT RECEIVES: Rejection (reason=%v)", resp.Error)
+		t.Logf("CLIENT RECEIVES: Rejection (reason=%v)", resp.Error)
 		if resp.Error != RejectInsufficientBalance {
 			t.Errorf("Expected RejectInsufficientBalance, got %v", resp.Error)
 		}

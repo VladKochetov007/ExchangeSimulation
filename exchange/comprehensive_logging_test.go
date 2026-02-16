@@ -291,7 +291,7 @@ func TestComprehensiveFundingLogging(t *testing.T) {
 
 		// All 3 clients with positions should have funding events
 		if len(fundingEvents) < 1 {
-			t.Logf("Warning: Funding settlement may not be logging balance changes")
+			t.Logf("Funding settlement may not be logging balance changes")
 			t.Logf("Total balance changes: %d", len(logger.balanceChanges))
 			for _, bc := range logger.balanceChanges {
 				t.Logf("  Reason=%s, ClientID=%d", bc.Reason, bc.ClientID)
@@ -403,7 +403,7 @@ func TestMultiVenueBorrowingLogging(t *testing.T) {
 		t.Errorf("Exchange 2 client borrowed = %d, want %d", client2.Borrowed["USD"], 60000*USD_PRECISION)
 	}
 
-	t.Logf("✓ Multi-venue borrowing tracked independently")
+	t.Logf("Multi-venue borrowing tracked independently")
 	t.Logf("  Venue 1: Client %d borrowed %d USD", clientID, client1.Borrowed["USD"])
 	t.Logf("  Venue 2: Client %d borrowed %d USD", clientID, client2.Borrowed["USD"])
 }
@@ -424,7 +424,7 @@ func TestOrderBookStateLogging(t *testing.T) {
 		t.Error("Logger not set up correctly")
 	}
 
-	t.Log("✓ Order book logging infrastructure verified")
+	t.Log("Order book logging infrastructure verified")
 	t.Log("  (Full trade execution with logging covered in existing integration tests)")
 }
 
@@ -476,7 +476,7 @@ func TestCollateralLogging(t *testing.T) {
 		t.Errorf("CollateralUsed should be positive, got %d", borrow.CollateralUsed)
 	}
 
-	t.Logf("✓ Borrow logged with collateral: Amount=%d, CollateralUsed=%d, Rate=%d bps",
+	t.Logf("Borrow logged with collateral: Amount=%d, CollateralUsed=%d, Rate=%d bps",
 		borrow.Amount, borrow.CollateralUsed, borrow.InterestRate)
 }
 

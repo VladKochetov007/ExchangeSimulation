@@ -27,7 +27,7 @@ func TestFirstLP_BootstrapEmptyBook(t *testing.T) {
 	if book.Bids.Best != nil || book.Asks.Best != nil {
 		t.Fatal("Book should be empty initially")
 	}
-	t.Log("✓ Book is empty initially")
+	t.Log("Book is empty initially")
 
 	// Create FirstLP with bootstrap price
 	config := FirstLPConfig{
@@ -62,7 +62,7 @@ func TestFirstLP_BootstrapEmptyBook(t *testing.T) {
 	if lp.LastMidPrice == 0 {
 		t.Error("LastMidPrice should be set from BootstrapPrice")
 	} else {
-		t.Logf("✓ LastMidPrice set to: %d (%.2f USD)",
+		t.Logf("LastMidPrice set to: %d (%.2f USD)",
 			lp.LastMidPrice, float64(lp.LastMidPrice)/100000)
 	}
 
@@ -70,13 +70,13 @@ func TestFirstLP_BootstrapEmptyBook(t *testing.T) {
 	if lp.ActiveBidID == 0 {
 		t.Error("❌ No bid order placed - FirstLP failed to provide first liquidity!")
 	} else {
-		t.Logf("✓ Bid order placed: orderID=%d", lp.ActiveBidID)
+		t.Logf("Bid order placed: orderID=%d", lp.ActiveBidID)
 	}
 
 	if lp.ActiveAskID == 0 {
 		t.Error("❌ No ask order placed - FirstLP failed to provide first liquidity!")
 	} else {
-		t.Logf("✓ Ask order placed: orderID=%d", lp.ActiveAskID)
+		t.Logf("Ask order placed: orderID=%d", lp.ActiveAskID)
 	}
 
 	// Check: Book should now have liquidity
@@ -84,7 +84,7 @@ func TestFirstLP_BootstrapEmptyBook(t *testing.T) {
 		t.Error("❌ No bids on book after FirstLP started")
 	} else {
 		bestBid := book.Bids.Best
-		t.Logf("✓ Best bid: price=%d (%.2f USD), qty=%d (%.8f BTC)",
+		t.Logf("Best bid: price=%d (%.2f USD), qty=%d (%.8f BTC)",
 			bestBid.Price, float64(bestBid.Price)/100000,
 			bestBid.TotalQty, float64(bestBid.TotalQty)/100000000)
 	}
@@ -93,7 +93,7 @@ func TestFirstLP_BootstrapEmptyBook(t *testing.T) {
 		t.Error("❌ No asks on book after FirstLP started")
 	} else {
 		bestAsk := book.Asks.Best
-		t.Logf("✓ Best ask: price=%d (%.2f USD), qty=%d (%.8f BTC)",
+		t.Logf("Best ask: price=%d (%.2f USD), qty=%d (%.8f BTC)",
 			bestAsk.Price, float64(bestAsk.Price)/100000,
 			bestAsk.TotalQty, float64(bestAsk.TotalQty)/100000000)
 	}
@@ -102,7 +102,7 @@ func TestFirstLP_BootstrapEmptyBook(t *testing.T) {
 	if book.Bids.Best != nil && book.Asks.Best != nil {
 		spread := book.Asks.Best.Price - book.Bids.Best.Price
 		spreadBps := (spread * 10000) / lp.LastMidPrice
-		t.Logf("✓ Spread: %d bps (%.2f%%)", spreadBps, float64(spreadBps)/100)
+		t.Logf("Spread: %d bps (%.2f%%)", spreadBps, float64(spreadBps)/100)
 
 		expectedSpread := int64(200) // With HalfSpreadBps=100, total spread is 200 bps (2%)
 		tolerance := int64(50)       // Allow some rounding
@@ -158,7 +158,7 @@ func TestFirstLP_NoBootstrapPrice(t *testing.T) {
 	if lp.ActiveBidID != 0 || lp.ActiveAskID != 0 {
 		t.Error("Orders should NOT be placed without bootstrap price on empty book")
 	} else {
-		t.Log("✓ Correctly did NOT place orders without bootstrap price")
+		t.Log("Correctly did NOT place orders without bootstrap price")
 	}
 }
 
@@ -219,7 +219,7 @@ func TestFirstLP_BootstrapThenMarketPrice(t *testing.T) {
 	if err != 0 {
 		t.Fatalf("Failed to inject order: error=%d", err)
 	}
-	t.Logf("✓ Injected external order: orderID=%d at price=%d", orderID, newPrice)
+	t.Logf("Injected external order: orderID=%d at price=%d", orderID, newPrice)
 
 	time.Sleep(300 * time.Millisecond)
 
@@ -228,8 +228,8 @@ func TestFirstLP_BootstrapThenMarketPrice(t *testing.T) {
 	t.Logf("New mid price after external order: %d", newMid)
 
 	if newMid == bootstrapMid {
-		t.Log("⚠️  Mid price unchanged - may need external trade to trigger update")
+		t.Log("Mid price unchanged - may need external trade to trigger update")
 	} else {
-		t.Logf("✓ Mid price updated from bootstrap to market price")
+		t.Logf("Mid price updated from bootstrap to market price")
 	}
 }
