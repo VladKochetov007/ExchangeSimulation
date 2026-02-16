@@ -353,7 +353,7 @@ func TestCompleteLoggingIntegration(t *testing.T) {
 	t.Logf("  - Open interest events: %d", len(logger.openInterest))
 	t.Logf("  - Fee revenue events: %d", len(logger.feeRevenue))
 	t.Logf("  - Funding rate updates: %d", len(logger.fundingRates))
-	t.Logf("✅ All critical exchange events are now logged (100%% coverage)")
+	t.Logf("All critical exchange events are now logged (100%% coverage)")
 
 	ex.Shutdown()
 }

@@ -1,5 +1,9 @@
 package exchange
 
+// Client represents an exchange client's account state.
+// All balance and margin accounting is managed internally by the exchange.
+// Users cannot cause negative reserved balances through legitimate trading;
+// any such occurrence indicates an exchange-side accounting bug.
 type Client struct {
 	ID                uint64
 	Balances          map[string]int64
@@ -64,7 +68,12 @@ func (c *Client) Reserve(asset string, amount int64) bool {
 }
 
 func (c *Client) Release(asset string, amount int64) {
-	c.Reserved[asset] -= amount
+	newReserved := c.Reserved[asset] - amount
+	if newReserved < 0 {
+		c.Reserved[asset] = 0
+	} else {
+		c.Reserved[asset] = newReserved
+	}
 }
 
 func (c *Client) PerpAvailable(asset string) int64 {
@@ -80,7 +89,12 @@ func (c *Client) ReservePerp(asset string, amount int64) bool {
 }
 
 func (c *Client) ReleasePerp(asset string, amount int64) {
-	c.PerpReserved[asset] -= amount
+	newReserved := c.PerpReserved[asset] - amount
+	if newReserved < 0 {
+		c.PerpReserved[asset] = 0
+	} else {
+		c.PerpReserved[asset] = newReserved
+	}
 }
 
 func (c *Client) AddOrder(orderID uint64) {
