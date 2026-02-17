@@ -248,12 +248,12 @@ func (a *ExchangeAutomation) chargeCollateralInterest() {
 			}
 			interest := borrowed * a.collateralRate * dtSeconds / (int64(secondsPerYear) * 10000)
 			if interest > 0 {
-				oldBalance := client.Balances[asset]
-				client.Balances[asset] -= interest
+				oldBalance := client.PerpBalances[asset]
+				client.PerpBalances[asset] -= interest
 				a.exchange.ExchangeBalance.FeeRevenue[asset] += interest
 
 				a.exchange.balanceTracker.LogBalanceChange(timestamp, client.ID, "", "interest_charge", []BalanceDelta{
-					spotDelta(asset, oldBalance, client.Balances[asset]),
+					perpDelta(asset, oldBalance, client.PerpBalances[asset]),
 				})
 
 				if log := a.exchange.getLogger("_global"); log != nil {
@@ -409,18 +409,8 @@ func (a *ExchangeAutomation) liquidate(clientID uint64, client *Client, symbol s
 		fillPrice = result.Executions[len(result.Executions)-1].Price
 	}
 
-	// Settle PnL
-	basePrecision := perp.BasePrecision()
-	pnl := realizedPerpPnL(pos.Size, pos.EntryPrice, closeQty, fillPrice, closeSide, basePrecision)
-	oldPerpBalance := client.PerpBalances[perp.QuoteAsset()]
-	client.PerpBalances[perp.QuoteAsset()] += pnl
-
-	a.exchange.balanceTracker.LogBalanceChange(timestamp, clientID, symbol, "liquidation_pnl", []BalanceDelta{
-		perpDelta(perp.QuoteAsset(), oldPerpBalance, client.PerpBalances[perp.QuoteAsset()]),
-	})
-
-	// Clear position
-	a.exchange.Positions.UpdatePosition(clientID, symbol, closeQty, fillPrice, closeSide)
+	// processExecutions settles both sides: margins, PnL, positions, fees.
+	a.exchange.processExecutions(book, result.Executions, order)
 
 	// Repay borrowed amounts from liquidation proceeds
 	if a.exchange.BorrowingMgr != nil {
