@@ -188,3 +188,54 @@ func TestAutoBorrowForPerpTrade_BorrowsWhenShortfall(t *testing.T) {
 		t.Error("expected borrow to occur when perp balance is insufficient")
 	}
 }
+
+func TestBorrowingRate_DefaultKey(t *testing.T) {
+	ex := NewExchange(10, &RealClock{})
+	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.AddPerpBalance(1, "USD", USDAmount(100_000))
+
+	oracle := NewStaticPriceOracle(map[string]int64{"USD": USD_PRECISION})
+	bm := NewBorrowingManager(ex, BorrowingConfig{
+		Enabled:           true,
+		BorrowRates:       map[string]int64{"default": 300},
+		CollateralFactors: map[string]float64{"default": 1.0},
+		PriceOracle:       oracle,
+	})
+
+	// BorrowMargin internally calls getRate("USD") → falls through to "default" key
+	if err := bm.BorrowMargin(1, "USD", USDAmount(1_000), "test"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBorrowingRate_HardcodedDefault(t *testing.T) {
+	ex := NewExchange(10, &RealClock{})
+	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.AddPerpBalance(1, "USD", USDAmount(100_000))
+
+	// Empty BorrowRates and CollateralFactors maps → hardcoded defaults (500 bps, 0.75)
+	oracle := NewStaticPriceOracle(map[string]int64{"USD": USD_PRECISION})
+	bm := NewBorrowingManager(ex, BorrowingConfig{
+		Enabled:           true,
+		BorrowRates:       map[string]int64{},
+		CollateralFactors: map[string]float64{},
+		PriceOracle:       oracle,
+	})
+
+	if err := bm.BorrowMargin(1, "USD", USDAmount(1_000), "test"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRepayMargin_CapsAtBorrowed(t *testing.T) {
+	ex, bm := setupBorrowingExchange()
+	_ = bm.BorrowMargin(1, "USD", USDAmount(1_000), "test")
+
+	// Try to repay more than borrowed — should cap at borrowed amount, not error
+	if err := bm.RepayMargin(1, "USD", USDAmount(999_999)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ex.Clients[1].Borrowed["USD"] != 0 {
+		t.Errorf("borrowed should be 0 after capped repay, got %d", ex.Clients[1].Borrowed["USD"])
+	}
+}
