@@ -292,8 +292,10 @@ func (a *ExchangeAutomation) checkLiquidations(symbol string, perp *PerpFutures,
 		}
 		unrealizedPnL := abs(pos.Size) * sign * (markPrice - pos.EntryPrice) / precision
 
-		// Initial margin posted = abs(size) * entryPrice * marginRate / (precision * 10000)
-		initMargin := abs(pos.Size) * pos.EntryPrice * perp.MarginRate / (precision * 10000)
+		// Initial margin posted = notional * marginRate / 10000
+		// Divide by precision first to avoid int64 overflow at real BTC prices.
+		notional := abs(pos.Size) * pos.EntryPrice / precision
+		initMargin := notional * perp.MarginRate / 10000
 		if initMargin == 0 {
 			continue
 		}
@@ -505,7 +507,6 @@ func (a *ExchangeAutomation) checkAndSettleFunding() {
 			perps = append(perps, inst.(*PerpFutures))
 		}
 	}
-	clients := a.exchange.Clients
 	a.exchange.mu.RUnlock()
 
 	now := a.exchange.Clock.NowUnixNano()
@@ -516,7 +517,8 @@ func (a *ExchangeAutomation) checkAndSettleFunding() {
 		// Check if it's time for settlement
 		if now >= fundingRate.NextFunding {
 			a.exchange.mu.Lock()
-			a.exchange.Positions.SettleFunding(clients, perp, a.exchange)
+			// Read Clients under the write lock so SettleFunding sees a consistent snapshot.
+			a.exchange.Positions.SettleFunding(a.exchange.Clients, perp, a.exchange)
 			a.exchange.mu.Unlock()
 
 			a.exchange.MDPublisher.PublishFunding(perp.Symbol(), perp.GetFundingRate(), now)

@@ -209,3 +209,95 @@ func TestMoneyConservation_FundingPayments(t *testing.T) {
 		t.Errorf("USD conservation violated after perp trades: delta=%d", afterTrades-initialUSD)
 	}
 }
+
+// TestSettleFunding_CorrectMagnitudeAtBTCPrices is a regression test for Bug 1:
+// SettleFunding previously used TickSize (1e5) instead of BasePrecision (1e8),
+// causing funding payments to be 1000x too large at real BTC prices.
+//
+// Expected: 1 BTC long at $50k with +10 bps rate pays exactly $50.
+// Old bug:  the same position would pay $50,000.
+func TestSettleFunding_CorrectMagnitudeAtBTCPrices(t *testing.T) {
+	ex := NewExchange(10, &RealClock{})
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	ex.AddInstrument(perp)
+
+	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectClient(2, map[string]int64{}, &FixedFee{})
+
+	entryUSD := PriceUSD(50_000, DOLLAR_TICK) // $50,000 in USD units = 5_000_000_000
+	qty := BTCAmount(1.0)                     // 1 BTC = 100_000_000 satoshis
+	collateral := USDAmount(10_000)           // $10k each, well above initMargin
+
+	injectPerpPosition(ex, 1, "BTC-PERP", qty, entryUSD, collateral, 0)   // client 1: long
+	injectPerpPosition(ex, 2, "BTC-PERP", -qty, entryUSD, collateral, 0)  // client 2: short
+
+	perp.fundingRate.Rate = 10 // +10 bps: longs pay shorts
+
+	longBefore := ex.Clients[1].PerpBalances["USD"]
+	shortBefore := ex.Clients[2].PerpBalances["USD"]
+
+	ex.Positions.SettleFunding(ex.Clients, perp, ex)
+
+	longAfter := ex.Clients[1].PerpBalances["USD"]
+	shortAfter := ex.Clients[2].PerpBalances["USD"]
+
+	// positionValue = 1e8 * 5e9 / 1e8 = 5e9 = $50,000 notional
+	// funding = 5e9 * 10 / 10000 = 5_000_000 = $50
+	wantPayment := int64(5_000_000)
+
+	if got := longBefore - longAfter; got != wantPayment {
+		t.Errorf("long paid %d (%.4f USD), want %d (%.4f USD); old bug would give %d",
+			got, float64(got)/float64(USD_PRECISION),
+			wantPayment, float64(wantPayment)/float64(USD_PRECISION),
+			wantPayment*1000)
+	}
+	if got := shortAfter - shortBefore; got != wantPayment {
+		t.Errorf("short received %d (%.4f USD), want %d (%.4f USD)",
+			got, float64(got)/float64(USD_PRECISION),
+			wantPayment, float64(wantPayment)/float64(USD_PRECISION))
+	}
+}
+
+// TestSettleFunding_AsymmetricOIRoutesToExchange verifies Bug 3 fix:
+// when long and short notionals differ (different entry prices), the imbalance
+// routes to ExchangeBalance.FeeRevenue rather than creating/destroying money.
+func TestSettleFunding_AsymmetricOIRoutesToExchange(t *testing.T) {
+	ex := NewExchange(10, &RealClock{})
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	ex.AddInstrument(perp)
+
+	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectClient(2, map[string]int64{}, &FixedFee{})
+
+	// Client 1: long 1 BTC entered at $50k → notional $50k
+	// Client 2: short 1 BTC entered at $40k → notional $40k
+	// Different entry prices → asymmetric notionals even though qty is equal.
+	qty := BTCAmount(1.0)
+	collateral := USDAmount(20_000)
+	injectPerpPosition(ex, 1, "BTC-PERP", qty, PriceUSD(50_000, DOLLAR_TICK), collateral, 0)
+	injectPerpPosition(ex, 2, "BTC-PERP", -qty, PriceUSD(40_000, DOLLAR_TICK), collateral, 0)
+
+	perp.fundingRate.Rate = 10 // +10 bps: longs pay
+
+	initialTotal := totalMoney(ex, "USD")
+	feeRevenueBefore := ex.ExchangeBalance.FeeRevenue["USD"]
+
+	ex.Positions.SettleFunding(ex.Clients, perp, ex)
+
+	// Long pays: 1e8 * 5e9 / 1e8 * 10 / 10000 = 5_000_000 ($50)
+	// Short receives: 1e8 * 4e9 / 1e8 * 10 / 10000 = 4_000_000 ($40)
+	// Exchange absorbs: 5_000_000 - 4_000_000 = 1_000_000 ($10)
+	wantExchangeDelta := int64(1_000_000)
+	gotExchangeDelta := ex.ExchangeBalance.FeeRevenue["USD"] - feeRevenueBefore
+
+	if gotExchangeDelta != wantExchangeDelta {
+		t.Errorf("exchange fee revenue delta = %d (%.4f USD), want %d (%.4f USD)",
+			gotExchangeDelta, float64(gotExchangeDelta)/float64(USD_PRECISION),
+			wantExchangeDelta, float64(wantExchangeDelta)/float64(USD_PRECISION))
+	}
+
+	// Total money must be conserved
+	if got := totalMoney(ex, "USD"); got != initialTotal {
+		t.Errorf("money conservation violated: delta=%d", got-initialTotal)
+	}
+}

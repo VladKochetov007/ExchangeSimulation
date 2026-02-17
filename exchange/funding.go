@@ -153,11 +153,17 @@ func (pm *PositionManager) calculateOpenInterestUnsafe(symbol string) int64 {
 }
 
 // SettleFunding applies funding payments from/to client PerpBalances.
+// Payments are zero-sum: the net flow between longs and shorts routes to/from
+// exchange.ExchangeBalance.FeeRevenue so money is conserved.
 func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpFutures, exchange *Exchange) {
 	fundingRate := perp.GetFundingRate()
-	precision := perp.TickSize()
+	precision := perp.BasePrecision() // satoshis per whole base asset (not TickSize)
 	timestamp := pm.clock.NowUnixNano()
 	quote := perp.QuoteAsset()
+
+	// netExchangeFlow > 0: exchange received more from longs than it paid to shorts.
+	// netExchangeFlow < 0: exchange paid out more to shorts than it received from longs.
+	netExchangeFlow := int64(0)
 
 	for clientID, clientPos := range pm.positions {
 		pos := clientPos[perp.Symbol()]
@@ -171,13 +177,17 @@ func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpF
 		}
 
 		positionValue := abs(pos.Size) * pos.EntryPrice / precision
-		funding := (positionValue * fundingRate.Rate) / 10000
+		funding := positionValue * fundingRate.Rate / 10000
 
 		oldBalance := client.PerpBalances[quote]
 		if pos.Size > 0 {
+			// Long pays: deducted from client, flows into exchange pool
 			client.PerpBalances[quote] -= funding
+			netExchangeFlow += funding
 		} else {
+			// Short receives: added to client, flows out of exchange pool
 			client.PerpBalances[quote] += funding
+			netExchangeFlow -= funding
 		}
 
 		if exchange != nil && exchange.balanceTracker != nil {
@@ -185,6 +195,12 @@ func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpF
 				perpDelta(quote, oldBalance, client.PerpBalances[quote]),
 			})
 		}
+	}
+
+	// Route net imbalance to exchange fee revenue (or drain from it if negative).
+	// On real exchanges this goes to the insurance fund when the exchange is the residual payer.
+	if exchange != nil && netExchangeFlow != 0 {
+		exchange.ExchangeBalance.FeeRevenue[quote] += netExchangeFlow
 	}
 
 	fundingRate.NextFunding = pm.clock.NowUnixNano() + (fundingRate.Interval * 1e9)
