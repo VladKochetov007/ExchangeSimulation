@@ -126,6 +126,16 @@ func (pmm *PureMMSubActor) requote(ctx *actor.SharedContext, submit actor.OrderS
 	inventorySkewBps := (currentPos * 100) / pmm.config.MaxInventory
 	skew := (mid * inventorySkewBps) / 10000
 
+	// Cap skew to ±halfSpread so every actor's ask stays at or above mid and
+	// bid stays at or below mid. Without this, two sub-actors within the same
+	// CompositeActor with opposite extreme inventory cross each other's quotes,
+	// and the exchange's self-trade prevention leaves a persistent crossed book.
+	if skew > halfSpread {
+		skew = halfSpread
+	} else if skew < -halfSpread {
+		skew = -halfSpread
+	}
+
 	bidPrice := mid - halfSpread - skew
 	askPrice := mid + halfSpread - skew
 

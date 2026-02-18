@@ -109,7 +109,7 @@ func main() {
 bootstrapComplete:
 	fmt.Println("Bootstrap complete, starting main groups...")
 
-	fmt.Println("=== 6-Group Simulation Started ===")
+	fmt.Println("=== 8-Group Simulation Started ===")
 	factory := NewGroupFactory(ex, marketConfig)
 	factory.nextActorID = nextActorID
 
@@ -139,9 +139,11 @@ bootstrapComplete:
 	}
 
 	simDuration := 24 * time.Hour
-	simTimeStep := 10 * time.Millisecond
+	simTimeStep := time.Duration(float64(wallTickInterval) * speedup) // same speedup as bootstrap
 
-	simCtx, simCancel := context.WithTimeout(ctx, simDuration)
+	// Wall-clock timeout = simDuration / speedup so we finish in real minutes, not hours.
+	wallSimDuration := time.Duration(float64(simDuration) / speedup)
+	simCtx, simCancel := context.WithTimeout(ctx, wallSimDuration)
 	defer simCancel()
 
 	lastLogTime := simClock.NowUnixNano()
