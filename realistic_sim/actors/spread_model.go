@@ -31,9 +31,16 @@ type OFISpreadModel struct {
 	BaseBps      int64 // minimum half-spread in bps
 	MaxExtraBps  int64 // additional spread when OFI is maximally imbalanced
 	WindowVolume int64 // rolling volume denominator (normalises OFI to [−1, 1])
+	// DecayFactor is the per-trade OFI decay multiplier × 1000.
+	// Default (0): 900 = retain 90% per trade; half-life ≈ 6.6 trades.
+	// Calibrating by desired half-life H (in trades): DecayFactor = 1000 * exp(-ln2/H).
+	//   H=3  → 794   fast, reacts within a few trades
+	//   H=7  → 906   moderate (≈ default 900)
+	//   H=20 → 966   slow, persistent memory
+	DecayFactor  int64
 
-	signedVolume int64 // accumulator: positive = buy pressure
-	totalVolume  int64 // abs volume in window for normalisation
+	signedVolume int64
+	totalVolume  int64
 }
 
 // OnTrade updates the OFI state. Call from the actor's trade event handler.
@@ -45,10 +52,12 @@ func (o *OFISpreadModel) OnTrade(side exchange.Side, qty int64) {
 	}
 	o.totalVolume += qty
 
-	// Rolling decay: drop oldest contribution by scaling window.
-	// Simple exponential decay with factor 0.9 per trade.
-	o.signedVolume = o.signedVolume * 9 / 10
-	o.totalVolume = o.totalVolume * 9 / 10
+	decay := o.DecayFactor
+	if decay == 0 {
+		decay = 900
+	}
+	o.signedVolume = o.signedVolume * decay / 1000
+	o.totalVolume = o.totalVolume * decay / 1000
 	o.totalVolume = max(o.totalVolume, 1)
 }
 
