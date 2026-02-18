@@ -14,8 +14,22 @@ import json
 import numpy as np
 from collections import defaultdict
 
-# Configuration
-LOG_DIR = Path("logs/microstructure_v1")
+# Configuration — auto-select the latest timestamped run directory.
+# Pass an explicit path as first CLI argument to override.
+import sys as _sys
+
+def _find_log_dir() -> Path:
+    if len(_sys.argv) > 1:
+        return Path(_sys.argv[1])
+    base = Path("logs/microstructure_v1")
+    runs = sorted(
+        [d for d in base.iterdir() if d.is_dir() and (d / "spot").exists()],
+        key=lambda d: d.name,
+        reverse=True,
+    ) if base.exists() else []
+    return runs[0] if runs else base
+
+LOG_DIR = _find_log_dir()
 OUTPUT_DIR = LOG_DIR / "plots"
 USD_PRECISION = 100_000
 ASSET_PRECISION = 100_000_000
@@ -364,10 +378,11 @@ def main():
     print("=" * 60)
     print("Microstructure V1 Analysis")
     print("=" * 60)
+    print(f"\nRun directory: {LOG_DIR}")
 
     # Create output directory
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"\nOutput directory: {OUTPUT_DIR}")
+    print(f"Output directory: {OUTPUT_DIR}")
 
     # Process each instrument
     all_metrics = []

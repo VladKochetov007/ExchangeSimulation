@@ -31,7 +31,9 @@ func main() {
 		fmt.Printf("Added instrument: %s\n", symbol)
 	}
 
-	logDir := "logs/microstructure_v1"
+	runID := time.Now().Format("20060102_150405")
+	logDir := "logs/microstructure_v1/" + runID
+	fmt.Printf("Log directory: %s\n", logDir)
 	if err := SetupLogDirectories(logDir); err != nil {
 		log.Fatalf("setup log directories: %v", err)
 	}
@@ -177,7 +179,6 @@ shutdown:
 	simElapsed := time.Duration(simClock.NowUnixNano() - simStart)
 	fmt.Printf("\nWall-clock: %v, Simulated: %v, Speedup: %.2fx\n",
 		wallElapsed, simElapsed, float64(simElapsed)/float64(wallElapsed))
-	fmt.Printf("Log directory: %s\n", logDir)
 }
 
 func printGroupStats(groups []*actor.CompositeActor, elapsed time.Duration) {
