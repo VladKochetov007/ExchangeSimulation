@@ -35,6 +35,7 @@ type AvellanedaStoikovActor struct {
 	lastMid       int64
 	requestSeq    uint64
 	requeueTicker exchange.Ticker
+	spreadModel   SpreadModel // optional; if set, overrides the AS spread half-delta
 }
 
 func NewAvellanedaStoikov(id uint64, gateway *exchange.ClientGateway, config AvellanedaStoikovConfig) *AvellanedaStoikovActor {
@@ -119,6 +120,9 @@ func (as *AvellanedaStoikovActor) onTrade(trade actor.TradeEvent) {
 		return
 	}
 	as.volatility.AddPrice(trade.Trade.Price)
+	if ofi, ok := as.spreadModel.(*OFISpreadModel); ok {
+		ofi.OnTrade(trade.Trade.Side, trade.Trade.Qty)
+	}
 }
 
 func (as *AvellanedaStoikovActor) onOrderFilled(fill actor.OrderFillEvent) {
@@ -201,6 +205,12 @@ func (as *AvellanedaStoikovActor) calculateQuotes() (bidPrice, askPrice int64) {
 	spreadPart2 := (10000 * lnTerm) / as.config.Gamma
 
 	delta := spreadPart1 + spreadPart2
+	if as.spreadModel != nil {
+		// OFI or other toxicity model overrides the AS spread component.
+		// Reservation price adjustment is kept; only spread width changes.
+		halfSpreadBps := as.spreadModel.HalfSpread(as.instrument, as.inventory)
+		delta = mid * halfSpreadBps / 10000
+	}
 
 	bidPrice = r - delta
 	askPrice = r + delta
@@ -252,6 +262,14 @@ func (as *AvellanedaStoikovActor) cancelActiveQuotes() {
 
 func (as *AvellanedaStoikovActor) SetInstrument(instrument exchange.Instrument) {
 	as.instrument = instrument
+}
+
+// SetSpreadModel replaces the AS spread half-delta with an external model.
+// Useful for injecting OFI-based toxicity widening:
+//
+//	as.SetSpreadModel(&OFISpreadModel{BaseBps: 5, MaxExtraBps: 20, WindowVolume: 10*BTC_PRECISION})
+func (as *AvellanedaStoikovActor) SetSpreadModel(m SpreadModel) {
+	as.spreadModel = m
 }
 
 func (as *AvellanedaStoikovActor) GetInventory() int64 {

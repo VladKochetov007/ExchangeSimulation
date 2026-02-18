@@ -1,36 +1,31 @@
 package exchange
 
-// MarkPriceCalculator calculates the mark price from an order book
+// MarkPriceCalculator calculates the mark price from an order book.
 type MarkPriceCalculator interface {
 	Calculate(book *OrderBook) int64
 }
 
-// LastPriceCalculator uses the last trade price as mark price
-// Simplest but can be manipulated by wash trading
+// LastPriceCalculator uses the last trade price as mark price.
+// Simplest but manipulable by wash trading. Do not use for liquidation triggers.
 type LastPriceCalculator struct{}
 
-func NewLastPriceCalculator() *LastPriceCalculator {
-	return &LastPriceCalculator{}
-}
+func NewLastPriceCalculator() *LastPriceCalculator { return &LastPriceCalculator{} }
 
 func (c *LastPriceCalculator) Calculate(book *OrderBook) int64 {
 	return book.GetLastPrice()
 }
 
-// MidPriceCalculator uses the mid price between best bid and ask
-// Standard approach, more resistant to manipulation
+// MidPriceCalculator uses the mid price between best bid and ask.
 type MidPriceCalculator struct{}
 
-func NewMidPriceCalculator() *MidPriceCalculator {
-	return &MidPriceCalculator{}
-}
+func NewMidPriceCalculator() *MidPriceCalculator { return &MidPriceCalculator{} }
 
 func (c *MidPriceCalculator) Calculate(book *OrderBook) int64 {
 	return book.GetMidPrice()
 }
 
-// WeightedMidPriceCalculator uses quantity-weighted mid price
-// Weights by available quantity at best levels
+// WeightedMidPriceCalculator uses quantity-weighted mid price.
+// Weights by available quantity at best levels: thicker side pulls mid toward it.
 type WeightedMidPriceCalculator struct{}
 
 func NewWeightedMidPriceCalculator() *WeightedMidPriceCalculator {
@@ -50,16 +45,237 @@ func (c *WeightedMidPriceCalculator) Calculate(book *OrderBook) int64 {
 	if bidQty == 0 && askQty == 0 {
 		return bidPrice + (askPrice-bidPrice)/2
 	}
-
 	if bidQty == 0 {
 		return askPrice
 	}
-
 	if askQty == 0 {
 		return bidPrice
 	}
 
-	// Weighted by inverse of quantity (more weight to thicker side)
 	totalWeight := bidQty + askQty
 	return (bidPrice*askQty + askPrice*bidQty) / totalWeight
+}
+
+// --- Index-anchored mark price models ---
+//
+// All manipulation-resistant models below require an IndexPriceProvider.
+// The index is an external spot reference (e.g. aggregated spot prices from
+// multiple venues) that an attacker cannot move by trading the perp book alone.
+// Manipulation then requires moving two independent inputs simultaneously.
+
+// BinanceMarkPrice implements the Binance perpetuals mark price model.
+//
+//	mark = median(index, best_bid, best_ask)
+//
+// Requires moving two of three inputs to manipulate. The index is external,
+// so an attacker must control both sides of the perp book simultaneously.
+// Binance style.
+type BinanceMarkPrice struct {
+	index  IndexPriceProvider
+	symbol string
+}
+
+func NewBinanceMarkPrice(symbol string, index IndexPriceProvider) *BinanceMarkPrice {
+	return &BinanceMarkPrice{symbol: symbol, index: index}
+}
+
+func (c *BinanceMarkPrice) Calculate(book *OrderBook) int64 {
+	indexPrice := c.index.GetIndexPrice(c.symbol, 0)
+
+	var bid, ask int64
+	if book.Bids.Best != nil {
+		bid = book.Bids.Best.Price
+	}
+	if book.Asks.Best != nil {
+		ask = book.Asks.Best.Price
+	}
+
+	if bid == 0 || ask == 0 || indexPrice == 0 {
+		if indexPrice != 0 {
+			return indexPrice
+		}
+		return book.GetMidPrice()
+	}
+
+	return median3(bid, ask, indexPrice)
+}
+
+// BitMEXMarkPrice implements the BitMEX fair price mark model.
+//
+//	mark = index + EMA(perp_mid - index)
+//
+// The EMA smooths transient basis noise. windowSamples is the effective EMA
+// window (e.g. 600 for 30 min at 3s sampling). An attacker shifting the perp
+// mid only nudges the EMA incrementally; the basis cannot be moved abruptly.
+// BitMEX style.
+type BitMEXMarkPrice struct {
+	alpha    int64 // 2/(N+1) * 10000, fixed-point
+	emaBasis int64
+	index    IndexPriceProvider
+	symbol   string
+}
+
+func NewBitMEXMarkPrice(symbol string, index IndexPriceProvider, windowSamples int) *BitMEXMarkPrice {
+	if windowSamples < 1 {
+		windowSamples = 1
+	}
+	return &BitMEXMarkPrice{
+		alpha:  20000 / int64(windowSamples+1),
+		index:  index,
+		symbol: symbol,
+	}
+}
+
+func (c *BitMEXMarkPrice) Calculate(book *OrderBook) int64 {
+	indexPrice := c.index.GetIndexPrice(c.symbol, 0)
+	if indexPrice == 0 {
+		return book.GetMidPrice()
+	}
+
+	perpMid := book.GetMidPrice()
+	if perpMid == 0 {
+		return indexPrice
+	}
+
+	basis := perpMid - indexPrice
+	if c.emaBasis == 0 {
+		c.emaBasis = basis
+	} else {
+		c.emaBasis = (c.alpha*basis + (10000-c.alpha)*c.emaBasis) / 10000
+	}
+
+	return indexPrice + c.emaBasis
+}
+
+// BybitMarkPrice implements the Bybit mark price model.
+//
+//	mark = index + clamp(EMA(perp_mid - index), -band, +band)
+//
+// Adds a hard clamp so the mark can never drift more than bandBps/2 away from
+// the index regardless of basis EMA. bandBps is typically the initial margin rate
+// in bps (e.g. 1000 for 10x). Bybit style.
+type BybitMarkPrice struct {
+	alpha    int64
+	emaBasis int64
+	bandBps  int64 // half-band = bandBps/2 * index / 10000
+	index    IndexPriceProvider
+	symbol   string
+}
+
+func NewBybitMarkPrice(symbol string, index IndexPriceProvider, windowSamples int, bandBps int64) *BybitMarkPrice {
+	if windowSamples < 1 {
+		windowSamples = 1
+	}
+	return &BybitMarkPrice{
+		alpha:   20000 / int64(windowSamples+1),
+		bandBps: bandBps,
+		index:   index,
+		symbol:  symbol,
+	}
+}
+
+func (c *BybitMarkPrice) Calculate(book *OrderBook) int64 {
+	indexPrice := c.index.GetIndexPrice(c.symbol, 0)
+	if indexPrice == 0 {
+		return book.GetMidPrice()
+	}
+
+	perpMid := book.GetMidPrice()
+	if perpMid == 0 {
+		return indexPrice
+	}
+
+	basis := perpMid - indexPrice
+	if c.emaBasis == 0 {
+		c.emaBasis = basis
+	} else {
+		c.emaBasis = (c.alpha*basis + (10000-c.alpha)*c.emaBasis) / 10000
+	}
+
+	// clamp: |mark - index| <= index * bandBps/2 / 10000
+	halfBand := indexPrice * c.bandBps / 2 / 10000
+	if c.emaBasis > halfBand {
+		c.emaBasis = halfBand
+	} else if c.emaBasis < -halfBand {
+		c.emaBasis = -halfBand
+	}
+
+	return indexPrice + c.emaBasis
+}
+
+// DydxMarkPrice implements the dYdX oracle-anchored mark price model.
+//
+//	mark = index + clamp(TWAP(perp_mid - index, window), -band, +band)
+//
+// dYdX uses a TWAP (time-weighted average) of the premium rather than EMA,
+// computed over a configurable window of samples. The oracle (index) is
+// supplied externally (Chainlink/Pyth in production). dYdX style.
+type DydxMarkPrice struct {
+	window  []int64 // rolling window of recent basis samples
+	pos     int
+	size    int
+	bandBps int64
+	index   IndexPriceProvider
+	symbol  string
+}
+
+func NewDydxMarkPrice(symbol string, index IndexPriceProvider, windowSamples int, bandBps int64) *DydxMarkPrice {
+	if windowSamples < 1 {
+		windowSamples = 1
+	}
+	return &DydxMarkPrice{
+		window:  make([]int64, windowSamples),
+		bandBps: bandBps,
+		index:   index,
+		symbol:  symbol,
+	}
+}
+
+func (c *DydxMarkPrice) Calculate(book *OrderBook) int64 {
+	indexPrice := c.index.GetIndexPrice(c.symbol, 0)
+	if indexPrice == 0 {
+		return book.GetMidPrice()
+	}
+
+	perpMid := book.GetMidPrice()
+	if perpMid == 0 {
+		return indexPrice
+	}
+
+	// update circular TWAP buffer
+	c.window[c.pos] = perpMid - indexPrice
+	c.pos = (c.pos + 1) % len(c.window)
+	if c.size < len(c.window) {
+		c.size++
+	}
+
+	twapBasis := int64(0)
+	for i := 0; i < c.size; i++ {
+		twapBasis += c.window[i]
+	}
+	twapBasis /= int64(c.size)
+
+	halfBand := indexPrice * c.bandBps / 2 / 10000
+	if twapBasis > halfBand {
+		twapBasis = halfBand
+	} else if twapBasis < -halfBand {
+		twapBasis = -halfBand
+	}
+
+	return indexPrice + twapBasis
+}
+
+// median3 returns the median of three int64 values.
+func median3(a, b, d int64) int64 {
+	if a > b {
+		a, b = b, a
+	}
+	if b > d {
+		b, d = d, b
+	}
+	if a > b {
+		b = a
+	}
+	_ = d
+	return b
 }

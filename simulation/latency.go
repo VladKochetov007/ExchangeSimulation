@@ -2,6 +2,7 @@ package simulation
 
 import (
 	"math/rand"
+	"sync/atomic"
 	"time"
 )
 
@@ -60,4 +61,30 @@ func (n *NormalLatency) Delay() time.Duration {
 		delay = 0
 	}
 	return delay
+}
+
+// LoadScaledLatency scales base latency linearly with the number of in-flight requests.
+// Useful for modelling exchange processing queues: as more orders pile up, round-trip
+// latency grows. Users call Inc() on order submit and Dec() on acknowledgement.
+//
+// Effective delay = base + load * perRequest. Both are configurable at construction.
+type LoadScaledLatency struct {
+	base       time.Duration
+	perRequest time.Duration
+	load       atomic.Int64
+}
+
+func NewLoadScaledLatency(base, perRequest time.Duration) *LoadScaledLatency {
+	return &LoadScaledLatency{base: base, perRequest: perRequest}
+}
+
+func (l *LoadScaledLatency) Inc() { l.load.Add(1) }
+func (l *LoadScaledLatency) Dec() { l.load.Add(-1) }
+
+func (l *LoadScaledLatency) Delay() time.Duration {
+	n := l.load.Load()
+	if n < 0 {
+		n = 0
+	}
+	return l.base + time.Duration(n)*l.perRequest
 }
