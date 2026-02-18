@@ -181,11 +181,9 @@ func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpF
 
 		oldBalance := client.PerpBalances[quote]
 		if pos.Size > 0 {
-			// Long pays: deducted from client, flows into exchange pool
 			client.PerpBalances[quote] -= funding
 			netExchangeFlow += funding
 		} else {
-			// Short receives: added to client, flows out of exchange pool
 			client.PerpBalances[quote] += funding
 			netExchangeFlow -= funding
 		}
