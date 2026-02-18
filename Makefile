@@ -15,12 +15,13 @@ GOMOD=$(GOCMD) mod
 BIN_DIR=bin
 
 # Binary names and paths
-BINARIES=multisim sim latency_arb simplesim microstructure_v1
+BINARIES=multisim sim latency_arb simplesim microstructure_v1 liquidity_report
 MULTISIM_BINARY=$(BIN_DIR)/multisim
 SIM_BINARY=$(BIN_DIR)/sim
 LATENCY_ARB_BINARY=$(BIN_DIR)/latency_arb
 SIMPLESIM_BINARY=$(BIN_DIR)/simplesim
 MICROSTRUCTURE_V1_BINARY=$(BIN_DIR)/microstructure_v1
+LIQUIDITY_REPORT_BINARY=$(BIN_DIR)/liquidity_report
 
 # Coverage output
 COVERAGE_FILE=coverage.out
@@ -38,7 +39,7 @@ help:
 ##@ Building
 
 ## build: Build all binaries
-build: $(MULTISIM_BINARY) $(SIM_BINARY) $(LATENCY_ARB_BINARY) $(SIMPLESIM_BINARY) $(MICROSTRUCTURE_V1_BINARY)
+build: $(MULTISIM_BINARY) $(SIM_BINARY) $(LATENCY_ARB_BINARY) $(SIMPLESIM_BINARY) $(MICROSTRUCTURE_V1_BINARY) $(LIQUIDITY_REPORT_BINARY)
 	@echo "✓ All binaries built successfully"
 
 $(BIN_DIR):
@@ -63,6 +64,10 @@ $(SIMPLESIM_BINARY): $(BIN_DIR)
 $(MICROSTRUCTURE_V1_BINARY): $(BIN_DIR)
 	@echo "Building microstructure_v1..."
 	@$(GOBUILD) -o $(MICROSTRUCTURE_V1_BINARY) ./cmd/microstructure_v1
+
+$(LIQUIDITY_REPORT_BINARY): $(BIN_DIR)
+	@echo "Building liquidity_report..."
+	@$(GOBUILD) -o $(LIQUIDITY_REPORT_BINARY) ./cmd/liquidity_report
 
 ## rebuild: Clean and rebuild all binaries
 rebuild: clean build
@@ -185,6 +190,11 @@ run-simplesim: $(SIMPLESIM_BINARY)
 run-microstructure-v1: $(MICROSTRUCTURE_V1_BINARY)
 	@echo "Running microstructure_v1..."
 	@./$(MICROSTRUCTURE_V1_BINARY)
+
+## liquidity-report: Build and run liquidity_report, then generate plots
+liquidity-report: $(LIQUIDITY_REPORT_BINARY)
+	@./$(LIQUIDITY_REPORT_BINARY)
+	@.venv/bin/python scripts/plot_liquidity.py
 
 ## all: Run fmt, vet, test, and build
 all: fmt vet test build

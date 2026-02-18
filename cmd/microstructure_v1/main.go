@@ -31,6 +31,7 @@ func main() {
 		EstimatedClients: 20,
 		Clock:            simClock,
 		TickerFactory:    tickerFactory,
+		SnapshotInterval: 60 * time.Second,
 	})
 
 	marketConfig := CreateMarketConfig()
@@ -189,14 +190,14 @@ bootstrapComplete:
 			}
 		}
 	} else {
-		// Max-CPU tight loop: advance 100ms of simulated time per iteration.
-		const simStep = 100 * time.Millisecond
+		const simStep = 60 * time.Second
 		for {
 			select {
 			case <-simCtx.Done():
 				goto shutdown
 			default:
 				simClock.Advance(simStep)
+				time.Sleep(time.Millisecond)
 				now := simClock.NowUnixNano()
 				if simDuration > 0 && now >= simEndNano {
 					goto shutdown

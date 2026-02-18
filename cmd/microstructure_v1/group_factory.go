@@ -1,12 +1,11 @@
 package main
 
 import (
-	"time"
-
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
 	"exchange_sim/realistic_sim/actors"
 	"exchange_sim/simulation"
+	"time"
 )
 
 type GroupFactory struct {
@@ -45,7 +44,6 @@ func (gf *GroupFactory) CreatePerpMMGroup() *actor.CompositeActor {
 
 	latencyConfig := simulation.LatencyConfig{
 		MarketDataLatency: simulation.NewUniformRandomLatency(1*time.Millisecond, 2*time.Millisecond, int64(gf.nextClientID)),
-		Mode:              simulation.LatencyMarketData,
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
 	delayedGateway.Start()
@@ -100,7 +98,6 @@ func (gf *GroupFactory) CreateSpotMMGroup() *actor.CompositeActor {
 
 	latencyConfig := simulation.LatencyConfig{
 		MarketDataLatency: simulation.NewUniformRandomLatency(500*time.Microsecond, 1*time.Millisecond, int64(gf.nextClientID)),
-		Mode:              simulation.LatencyMarketData,
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
 	delayedGateway.Start()
@@ -157,7 +154,6 @@ func (gf *GroupFactory) CreateSpotABCMMGroup() *actor.CompositeActor {
 
 	latencyConfig := simulation.LatencyConfig{
 		MarketDataLatency: simulation.NewUniformRandomLatency(500*time.Microsecond, 1*time.Millisecond, int64(gf.nextClientID)),
-		Mode:              simulation.LatencyMarketData,
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
 	delayedGateway.Start()
@@ -205,7 +201,7 @@ func (gf *GroupFactory) CreateSpotTakerGroup() *actor.CompositeActor {
 		"CDE": 5000 * ASSET_PRECISION,
 		"DEF": 10000 * ASSET_PRECISION,
 		"EFG": 50000 * ASSET_PRECISION,
-		"USD": 500_000 * USD_PRECISION,
+		"USD": 5_000_000 * USD_PRECISION,
 	}
 
 	fees := &exchange.PercentageFee{MakerBps: 10, TakerBps: 15, InQuote: true}
@@ -214,7 +210,6 @@ func (gf *GroupFactory) CreateSpotTakerGroup() *actor.CompositeActor {
 
 	latencyConfig := simulation.LatencyConfig{
 		MarketDataLatency: simulation.NewUniformRandomLatency(5*time.Millisecond, 10*time.Millisecond, int64(gf.nextClientID)),
-		Mode:              simulation.LatencyMarketData,
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
 	delayedGateway.Start()
@@ -251,7 +246,7 @@ func (gf *GroupFactory) CreateSpotTakerGroup() *actor.CompositeActor {
 		"DEF": 10000 * ASSET_PRECISION,
 		"EFG": 50000 * ASSET_PRECISION,
 	}
-	composite.InitializeBalances(baseBalances, 500_000*USD_PRECISION)
+	composite.InitializeBalances(baseBalances, 5_000_000*USD_PRECISION)
 
 	return composite
 }
@@ -264,7 +259,7 @@ func (gf *GroupFactory) CreateSpotABCTakerGroup() *actor.CompositeActor {
 		"CDE": 5000 * ASSET_PRECISION,
 		"DEF": 10000 * ASSET_PRECISION,
 		"EFG": 50000 * ASSET_PRECISION,
-		"ABC": 1000 * ASSET_PRECISION, // quote for buying
+		"ABC": 10_000 * ASSET_PRECISION,
 	}
 
 	fees := &exchange.PercentageFee{MakerBps: 10, TakerBps: 15, InQuote: true}
@@ -273,7 +268,6 @@ func (gf *GroupFactory) CreateSpotABCTakerGroup() *actor.CompositeActor {
 
 	latencyConfig := simulation.LatencyConfig{
 		MarketDataLatency: simulation.NewUniformRandomLatency(5*time.Millisecond, 10*time.Millisecond, int64(gf.nextClientID)),
-		Mode:              simulation.LatencyMarketData,
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
 	delayedGateway.Start()
@@ -310,7 +304,7 @@ func (gf *GroupFactory) CreateSpotABCTakerGroup() *actor.CompositeActor {
 		"EFG": 50000 * ASSET_PRECISION,
 	}
 	// quoteBalance represents ABC for this group.
-	composite.InitializeBalances(baseBalances, 1000*ASSET_PRECISION)
+	composite.InitializeBalances(baseBalances, 10_000*ASSET_PRECISION)
 
 	return composite
 }
@@ -322,7 +316,7 @@ func (gf *GroupFactory) CreatePerpTakerGroup() *actor.CompositeActor {
 		"CDE": 5000 * ASSET_PRECISION,
 		"DEF": 10000 * ASSET_PRECISION,
 		"EFG": 50000 * ASSET_PRECISION,
-		"USD": 500_000 * USD_PRECISION,
+		"USD": 5_000_000 * USD_PRECISION,
 	}
 
 	fees := &exchange.PercentageFee{MakerBps: 10, TakerBps: 15, InQuote: true}
@@ -335,7 +329,6 @@ func (gf *GroupFactory) CreatePerpTakerGroup() *actor.CompositeActor {
 
 	latencyConfig := simulation.LatencyConfig{
 		MarketDataLatency: simulation.NewUniformRandomLatency(5*time.Millisecond, 10*time.Millisecond, int64(gf.nextClientID)),
-		Mode:              simulation.LatencyMarketData,
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
 	delayedGateway.Start()
@@ -372,7 +365,7 @@ func (gf *GroupFactory) CreatePerpTakerGroup() *actor.CompositeActor {
 		"DEF": 10000 * ASSET_PRECISION,
 		"EFG": 50000 * ASSET_PRECISION,
 	}
-	composite.InitializeBalances(baseBalances, 500_000*USD_PRECISION)
+	composite.InitializeBalances(baseBalances, 5_000_000*USD_PRECISION)
 
 	return composite
 }
@@ -397,7 +390,6 @@ func (gf *GroupFactory) CreateFundingArbGroup() *actor.CompositeActor {
 
 	latencyConfig := simulation.LatencyConfig{
 		MarketDataLatency: simulation.NewUniformRandomLatency(2*time.Millisecond, 3*time.Millisecond, int64(gf.nextClientID)),
-		Mode:              simulation.LatencyMarketData,
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
 	delayedGateway.Start()
@@ -455,7 +447,6 @@ func (gf *GroupFactory) CreateTriangleArbGroup() *actor.CompositeActor {
 
 	latencyConfig := simulation.LatencyConfig{
 		MarketDataLatency: simulation.NewUniformRandomLatency(1*time.Millisecond, 2*time.Millisecond, int64(gf.nextClientID)),
-		Mode:              simulation.LatencyMarketData,
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
 	delayedGateway.Start()
