@@ -86,7 +86,7 @@ func TestOFI_BalancedFlowCollapseToBase(t *testing.T) {
 func TestOFI_TotalVolumeFloorAtOne(t *testing.T) {
 	// DecayFactor=1 (0.1% retention) → totalVolume floor must prevent div-by-zero.
 	m := &OFISpreadModel{BaseBps: 5, MaxExtraBps: 20, WindowVolume: 0, DecayFactor: 1}
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		m.OnTrade(exchange.Buy, 100)
 	}
 	defer func() {
