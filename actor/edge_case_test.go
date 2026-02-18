@@ -76,16 +76,6 @@ func TestBaseActorResponseHandling(t *testing.T) {
 	}
 }
 
-// TestNoisyTraderEdgeCases moved to realistic_sim/actors package to avoid import cycle
-func TestNoisyTraderEdgeCases(t *testing.T) {
-	t.Skip("Test moved to realistic_sim/actors package to avoid import cycle")
-}
-
-// TestNoisyTraderPartialFillPath moved to realistic_sim/actors package to avoid import cycle
-func TestNoisyTraderPartialFillPath(t *testing.T) {
-	t.Skip("Test moved to realistic_sim/actors package to avoid import cycle")
-}
-
 func TestDelayedMakerEarlyContextCancel(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
 	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
@@ -118,11 +108,6 @@ func TestDelayedMakerEarlyContextCancel(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	maker.Stop()
-}
-
-// TestRandomizedTakerEdgeCases moved to realistic_sim/actors package to avoid import cycle
-func TestRandomizedTakerEdgeCases(t *testing.T) {
-	t.Skip("Test moved to realistic_sim/actors package to avoid import cycle")
 }
 
 func TestOMSEdgeCases(t *testing.T) {

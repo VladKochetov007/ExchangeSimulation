@@ -175,13 +175,14 @@ func (m *ProRataMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) *Ma
 			break
 		}
 
-		// Distribute fills proportionally. Each maker gets floor(remaining * share).
+		// Distribute fills proportionally. Each maker gets floor(remaining * share),
+		// capped at available so remaining > totalQty never over-fills a maker.
 		// Leftovers are assigned in resting order (FIFO tiebreaker) until exhausted.
 		filled := int64(0)
 		shares := make([]int64, len(candidates))
 		for i, c := range candidates {
 			available := c.order.Qty - c.order.FilledQty
-			shares[i] = remaining * available / totalQty
+			shares[i] = min(remaining*available/totalQty, available)
 			filled += shares[i]
 		}
 		leftover := remaining - filled
