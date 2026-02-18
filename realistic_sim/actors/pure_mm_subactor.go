@@ -49,7 +49,7 @@ func (pmm *PureMMSubActor) OnEvent(event *actor.Event, ctx *actor.SharedContext,
 		pmm.onBookSnapshot(event.Data.(actor.BookSnapshotEvent), ctx, submit)
 
 	case actor.EventOrderFilled, actor.EventOrderPartialFill:
-		pmm.onOrderFilled(event.Data.(actor.OrderFillEvent), ctx)
+		pmm.onOrderFilled(event.Data.(actor.OrderFillEvent), ctx, submit)
 
 	case actor.EventOrderCancelled:
 		pmm.onOrderCancelled(event.Data.(actor.OrderCancelledEvent))
@@ -86,7 +86,7 @@ func (pmm *PureMMSubActor) onBookSnapshot(snap actor.BookSnapshotEvent, ctx *act
 	}
 }
 
-func (pmm *PureMMSubActor) onOrderFilled(fill actor.OrderFillEvent, ctx *actor.SharedContext) {
+func (pmm *PureMMSubActor) onOrderFilled(fill actor.OrderFillEvent, ctx *actor.SharedContext, submit actor.OrderSubmitter) {
 	pmm.oms.OnFill(pmm.symbol, fill, pmm.config.Precision)
 
 	baseAsset := extractBaseAsset(pmm.symbol)
@@ -97,6 +97,11 @@ func (pmm *PureMMSubActor) onOrderFilled(fill actor.OrderFillEvent, ctx *actor.S
 	}
 	if fill.OrderID == pmm.activeAskID {
 		pmm.hasActiveAsk = false
+	}
+
+	// Requote the depleted side immediately so the book stays two-sided.
+	if fill.IsFull && pmm.lastMid > 0 {
+		pmm.requote(ctx, submit, pmm.lastMid)
 	}
 }
 

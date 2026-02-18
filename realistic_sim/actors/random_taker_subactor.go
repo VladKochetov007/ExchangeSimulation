@@ -8,10 +8,12 @@ import (
 )
 
 type RandomTakerSubActorConfig struct {
-	Interval  time.Duration
-	MinQty    int64
-	MaxQty    int64
-	Precision int64
+	Interval    time.Duration
+	MinQty      int64
+	MaxQty      int64
+	Precision   int64
+	Instrument  exchange.Instrument // optional; drives IsPerp and precision override
+	TakerFeeBps int64               // pre-trade fee estimate in bps; defaults to 20
 }
 
 type RandomTakerSubActor struct {
@@ -81,13 +83,22 @@ func (rt *RandomTakerSubActor) onBookSnapshot(snap actor.BookSnapshotEvent, ctx 
 		qty = rt.config.MinQty + rt.rng.Int63n(rt.config.MaxQty-rt.config.MinQty)
 	}
 
+	feeBps := rt.config.TakerFeeBps
+	if feeBps == 0 {
+		feeBps = 20
+	}
+
+	isPerp := rt.config.Instrument != nil && rt.config.Instrument.IsPerp()
+
 	if side == exchange.Buy {
 		notional := (qty * bestAsk) / rt.config.Precision
-		notionalWithFees := notional + (notional * 20 / 10000)
+		notionalWithFees := notional + (notional*feeBps/10000)
 		if notionalWithFees > ctx.GetAvailableQuote() {
 			return
 		}
-	} else {
+	} else if !isPerp {
+		// Spot sell requires holding the base asset.
+		// Perp shorts only require USD margin, which the exchange enforces directly.
 		if qty > ctx.GetBaseBalance(extractBaseAsset(rt.symbol)) {
 			return
 		}

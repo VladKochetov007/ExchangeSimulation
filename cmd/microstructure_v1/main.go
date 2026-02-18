@@ -115,17 +115,20 @@ bootstrapComplete:
 
 	perpMMGroup := factory.CreatePerpMMGroup()
 	spotMMGroup := factory.CreateSpotMMGroup()
+	spotABCMMGroup := factory.CreateSpotABCMMGroup()
 	spotTakerGroup := factory.CreateSpotTakerGroup()
+	spotABCTakerGroup := factory.CreateSpotABCTakerGroup()
 	perpTakerGroup := factory.CreatePerpTakerGroup()
 	fundingArbGroup := factory.CreateFundingArbGroup()
 	triangleArbGroup := factory.CreateTriangleArbGroup()
 
 	allGroups := []*actor.CompositeActor{
-		perpMMGroup, spotMMGroup, spotTakerGroup,
-		perpTakerGroup, fundingArbGroup, triangleArbGroup,
+		perpMMGroup, spotMMGroup, spotABCMMGroup,
+		spotTakerGroup, spotABCTakerGroup, perpTakerGroup,
+		fundingArbGroup, triangleArbGroup,
 	}
 
-	fmt.Printf("Groups: %d\n", len(allGroups))
+	fmt.Printf("Groups: %d (perp-MM, spot-USD-MM, spot-ABC-MM, spot-USD-taker, spot-ABC-taker, perp-taker, funding-arb, triangle-arb)\n", len(allGroups))
 	fmt.Printf("Markets: %d\n", len(marketConfig.Instruments))
 	fmt.Println("Duration: 24 hours")
 
@@ -177,7 +180,7 @@ shutdown:
 
 func printGroupStats(groups []*actor.CompositeActor, elapsed time.Duration) {
 	fmt.Printf("\n[%v] Group Balances:\n", elapsed.Round(time.Minute))
-	groupNames := []string{"PerpMM", "SpotMM", "SpotTaker", "PerpTaker", "FundingArb", "TriangleArb"}
+	groupNames := []string{"PerpMM", "SpotUSDMM", "SpotABCMM", "SpotUSDTaker", "SpotABCTaker", "PerpTaker", "FundingArb", "TriangleArb"}
 	for i, group := range groups {
 		ctx := group.GetSharedContext()
 		quoteBalance := ctx.GetQuoteBalance()

@@ -83,13 +83,14 @@ func TestTriangleArb_SnapshotUpdatesDirect(t *testing.T) {
 }
 
 func TestTriangleArb_ProfitableArbSubmitsThreeOrders(t *testing.T) {
-	// baseMid=100_000_000, crossMid=200_000_000, directMid=150_000_000
-	// impliedDirect = (100_000_000 * 200_000_000) / 100_000_000 = 200_000_000
+	// Correct formula: impliedDirect = baseMid * precision / crossMid
+	// baseMid=100_000_000, crossMid=50_000_000, directMid=150_000_000, precision=100_000_000
+	// impliedDirect = 100_000_000 * 100_000_000 / 50_000_000 = 200_000_000
 	// profitBps = ((200_000_000 - 150_000_000) * 10000) / 150_000_000 ≈ 3333
-	// takerFee=15, threshold=10 → 3333 > 25 → fires
+	// TakerFeeBps=0 (not set), threshold=10 → 3333 > 10 → fires
 	ta := newTriArb(10)
 	ta.baseMid = 100_000_000
-	ta.crossMid = 200_000_000
+	ta.crossMid = 50_000_000
 	ta.directMid = 150_000_000
 
 	ctx := actor.NewSharedContext()
@@ -99,15 +100,15 @@ func TestTriangleArb_ProfitableArbSubmitsThreeOrders(t *testing.T) {
 	if len(*sides) != 3 {
 		t.Fatalf("want 3 orders, got %d", len(*sides))
 	}
-	// base: Buy, cross: Buy, direct: Sell
+	// Legs: Buy DirectSymbol, Buy CrossSymbol, Sell BaseSymbol.
 	if (*sides)[0] != exchange.Buy {
-		t.Errorf("order[0]: want Buy, got %v", (*sides)[0])
+		t.Errorf("order[0] (Direct buy): want Buy, got %v", (*sides)[0])
 	}
 	if (*sides)[1] != exchange.Buy {
-		t.Errorf("order[1]: want Buy, got %v", (*sides)[1])
+		t.Errorf("order[1] (Cross buy): want Buy, got %v", (*sides)[1])
 	}
 	if (*sides)[2] != exchange.Sell {
-		t.Errorf("order[2]: want Sell, got %v", (*sides)[2])
+		t.Errorf("order[2] (Base sell): want Sell, got %v", (*sides)[2])
 	}
 }
 
