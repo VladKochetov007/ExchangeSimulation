@@ -15,11 +15,12 @@ GOMOD=$(GOCMD) mod
 BIN_DIR=bin
 
 # Binary names and paths
-BINARIES=multisim sim latency_arb simplesim
+BINARIES=multisim sim latency_arb simplesim microstructure_v1
 MULTISIM_BINARY=$(BIN_DIR)/multisim
 SIM_BINARY=$(BIN_DIR)/sim
 LATENCY_ARB_BINARY=$(BIN_DIR)/latency_arb
 SIMPLESIM_BINARY=$(BIN_DIR)/simplesim
+MICROSTRUCTURE_V1_BINARY=$(BIN_DIR)/microstructure_v1
 
 # Coverage output
 COVERAGE_FILE=coverage.out
@@ -37,7 +38,7 @@ help:
 ##@ Building
 
 ## build: Build all binaries
-build: $(MULTISIM_BINARY) $(SIM_BINARY) $(LATENCY_ARB_BINARY) $(SIMPLESIM_BINARY)
+build: $(MULTISIM_BINARY) $(SIM_BINARY) $(LATENCY_ARB_BINARY) $(SIMPLESIM_BINARY) $(MICROSTRUCTURE_V1_BINARY)
 	@echo "✓ All binaries built successfully"
 
 $(BIN_DIR):
@@ -58,6 +59,10 @@ $(LATENCY_ARB_BINARY): $(BIN_DIR)
 $(SIMPLESIM_BINARY): $(BIN_DIR)
 	@echo "Building simplesim..."
 	@$(GOBUILD) -o $(SIMPLESIM_BINARY) ./cmd/simplesim
+
+$(MICROSTRUCTURE_V1_BINARY): $(BIN_DIR)
+	@echo "Building microstructure_v1..."
+	@$(GOBUILD) -o $(MICROSTRUCTURE_V1_BINARY) ./cmd/microstructure_v1
 
 ## rebuild: Clean and rebuild all binaries
 rebuild: clean build
@@ -175,6 +180,11 @@ run-sim: $(SIM_BINARY)
 run-simplesim: $(SIMPLESIM_BINARY)
 	@echo "Running simplesim..."
 	@./$(SIMPLESIM_BINARY)
+
+## run-microstructure-v1: Build and run microstructure_v1
+run-microstructure-v1: $(MICROSTRUCTURE_V1_BINARY)
+	@echo "Running microstructure_v1..."
+	@./$(MICROSTRUCTURE_V1_BINARY)
 
 ## all: Run fmt, vet, test, and build
 all: fmt vet test build

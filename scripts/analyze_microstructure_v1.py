@@ -14,22 +14,9 @@ import json
 import numpy as np
 from collections import defaultdict
 
-# Configuration — auto-select the latest timestamped run directory.
-# Pass an explicit path as first CLI argument to override.
 import sys as _sys
 
-def _find_log_dir() -> Path:
-    if len(_sys.argv) > 1:
-        return Path(_sys.argv[1])
-    base = Path("logs/microstructure_v1")
-    runs = sorted(
-        [d for d in base.iterdir() if d.is_dir() and (d / "spot").exists()],
-        key=lambda d: d.name,
-        reverse=True,
-    ) if base.exists() else []
-    return runs[0] if runs else base
-
-LOG_DIR = _find_log_dir()
+LOG_DIR = Path(_sys.argv[1]) if len(_sys.argv) > 1 else Path("logs/microstructure_v1")
 OUTPUT_DIR = LOG_DIR / "plots"
 USD_PRECISION = 100_000
 ASSET_PRECISION = 100_000_000

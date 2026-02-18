@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"exchange_sim/actor"
@@ -11,7 +13,13 @@ import (
 	"exchange_sim/simulation"
 )
 
+var (
+	durationFlag = flag.Duration("duration", 25*time.Hour, "simulated duration (0 = infinite)")
+	speedupFlag  = flag.Float64("speedup", 0, "sim speedup factor (0 = max CPU tight loop)")
+)
+
 func main() {
+	flag.Parse()
 	startTime := time.Date(2024, 1, 1, 9, 0, 0, 0, time.UTC)
 	simClock := simulation.NewSimulatedClock(startTime.UnixNano())
 	scheduler := simulation.NewEventScheduler(simClock)
@@ -31,8 +39,7 @@ func main() {
 		fmt.Printf("Added instrument: %s\n", symbol)
 	}
 
-	runID := time.Now().Format("20060102_150405")
-	logDir := "logs/microstructure_v1/" + runID
+	logDir := "logs/microstructure_v1"
 	fmt.Printf("Log directory: %s\n", logDir)
 	if err := SetupLogDirectories(logDir); err != nil {
 		log.Fatalf("setup log directories: %v", err)
@@ -88,28 +95,27 @@ func main() {
 
 	fmt.Println("Waiting for initial liquidity (2 simulated minutes)...")
 	wallStart := time.Now()
-	simStart := simClock.NowUnixNano()
-	bootstrapDuration := 2 * time.Minute
-	speedup := 100.0
-	wallTickInterval := 10 * time.Millisecond
+	const wallTickInterval = 10 * time.Millisecond
+	bootstrapEnd := simClock.NowUnixNano() + int64(2*time.Minute)
 
-	wallTicker := time.NewTicker(wallTickInterval)
-	defer wallTicker.Stop()
-
-	bootstrapCtx, bootstrapCancel := context.WithTimeout(ctx, bootstrapDuration)
-	defer bootstrapCancel()
+	bootstrapTicker := time.NewTicker(wallTickInterval)
+	defer bootstrapTicker.Stop()
 
 	for {
 		select {
-		case <-bootstrapCtx.Done():
+		case <-ctx.Done():
 			goto bootstrapComplete
-		case <-wallTicker.C:
-			simClock.Advance(time.Duration(float64(wallTickInterval) * speedup))
+		case <-bootstrapTicker.C:
+			simClock.Advance(time.Duration(float64(wallTickInterval) * 100.0))
+			if simClock.NowUnixNano() >= bootstrapEnd {
+				goto bootstrapComplete
+			}
 		}
 	}
 
 bootstrapComplete:
 	fmt.Println("Bootstrap complete, starting main groups...")
+	simStart := simClock.NowUnixNano() // duration counts from here, not from process start
 
 	fmt.Println("=== 8-Group Simulation Started ===")
 	factory := NewGroupFactory(ex, marketConfig)
@@ -132,7 +138,11 @@ bootstrapComplete:
 
 	fmt.Printf("Groups: %d (perp-MM, spot-USD-MM, spot-ABC-MM, spot-USD-taker, spot-ABC-taker, perp-taker, funding-arb, triangle-arb)\n", len(allGroups))
 	fmt.Printf("Markets: %d\n", len(marketConfig.Instruments))
-	fmt.Println("Duration: 24 hours")
+	if *durationFlag == 0 {
+		fmt.Println("Duration: infinite (Ctrl+C to stop)")
+	} else {
+		fmt.Printf("Duration: %v simulated\n", *durationFlag)
+	}
 
 	for i, group := range allGroups {
 		if err := group.Start(ctx); err != nil {
@@ -140,45 +150,82 @@ bootstrapComplete:
 		}
 	}
 
-	simDuration := 24 * time.Hour
-	simTimeStep := time.Duration(float64(wallTickInterval) * speedup) // same speedup as bootstrap
+	simDuration := *durationFlag
+	simEndNano := simStart + simDuration.Nanoseconds() // 0 boundary check handled below
 
-	// Wall-clock timeout = simDuration / speedup so we finish in real minutes, not hours.
-	wallSimDuration := time.Duration(float64(simDuration) / speedup)
-	simCtx, simCancel := context.WithTimeout(ctx, wallSimDuration)
+	var simCtx context.Context
+	var simCancel context.CancelFunc
+	if simDuration == 0 || *speedupFlag == 0 {
+		// Infinite or tight-loop: context cancelled only on parent cancel or sim-time check
+		simCtx, simCancel = context.WithCancel(ctx)
+	} else {
+		// Fixed speedup: use wall-clock timeout
+		wallSimDuration := time.Duration(float64(simDuration) / *speedupFlag)
+		simCtx, simCancel = context.WithTimeout(ctx, wallSimDuration)
+	}
 	defer simCancel()
 
 	lastLogTime := simClock.NowUnixNano()
+	const logInterval = int64(5 * time.Minute)
 
-	for {
-		select {
-		case <-simCtx.Done():
-			goto shutdown
-		case <-wallTicker.C:
-			simClock.Advance(simTimeStep)
-
-			if simClock.NowUnixNano()-lastLogTime >= 5*int64(time.Minute) {
-				lastLogTime = simClock.NowUnixNano()
-				elapsed := time.Duration(simClock.NowUnixNano() - simStart)
-				printGroupStats(allGroups, elapsed)
+	if *speedupFlag > 0 {
+		simStep := time.Duration(float64(wallTickInterval) * *speedupFlag)
+		simTicker := time.NewTicker(wallTickInterval)
+		defer simTicker.Stop()
+		for {
+			select {
+			case <-simCtx.Done():
+				goto shutdown
+			case <-simTicker.C:
+				simClock.Advance(simStep)
+				now := simClock.NowUnixNano()
+				if simDuration > 0 && now >= simEndNano {
+					goto shutdown
+				}
+				if now-lastLogTime >= logInterval {
+					lastLogTime = now
+					printGroupStats(allGroups, time.Duration(now-simStart))
+				}
+			}
+		}
+	} else {
+		// Max-CPU tight loop: advance 100ms of simulated time per iteration.
+		const simStep = 100 * time.Millisecond
+		for {
+			select {
+			case <-simCtx.Done():
+				goto shutdown
+			default:
+				simClock.Advance(simStep)
+				now := simClock.NowUnixNano()
+				if simDuration > 0 && now >= simEndNano {
+					goto shutdown
+				}
+				if now-lastLogTime >= logInterval {
+					lastLogTime = now
+					printGroupStats(allGroups, time.Duration(now-simStart))
+				}
 			}
 		}
 	}
 
 shutdown:
 	fmt.Println("\n=== Shutting Down ===")
-	for _, a := range bootstrapActors {
-		a.Stop()
-	}
-	for _, group := range allGroups {
-		group.Stop()
-	}
-	ex.Shutdown()
+	cancel()
 
 	wallElapsed := time.Since(wallStart)
 	simElapsed := time.Duration(simClock.NowUnixNano() - simStart)
 	fmt.Printf("\nWall-clock: %v, Simulated: %v, Speedup: %.2fx\n",
 		wallElapsed, simElapsed, float64(simElapsed)/float64(wallElapsed))
+
+	// Log files are written via direct syscalls (no userspace buffer), so os.Exit is safe.
+	// Calling automation.Stop() / ex.Shutdown() deadlocks: automation goroutines are stuck
+	// waiting on e.mu which Shutdown() also needs. Kill the process cleanly instead.
+	generalLogFile.Close()
+	for _, f := range symbolLogFiles {
+		f.Close()
+	}
+	os.Exit(0)
 }
 
 func printGroupStats(groups []*actor.CompositeActor, elapsed time.Duration) {

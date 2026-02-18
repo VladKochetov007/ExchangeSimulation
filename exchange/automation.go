@@ -161,14 +161,16 @@ func (a *ExchangeAutomation) fundingSettlementLoop() {
 func (a *ExchangeAutomation) updateAllPerpPrices() {
 	timestamp := a.exchange.Clock.NowUnixNano()
 
-	a.exchange.mu.RLock()
-	type perpUpdate struct {
-		symbol     string
-		perp       *PerpFutures
-		markPrice  int64
-		indexPrice int64
+	// Collect mark prices under read lock. GetIndexPrice must be called outside
+	// the lock because SpotIndexProvider.GetIndexPrice also acquires e.mu.RLock;
+	// calling it while already holding e.mu.RLock deadlocks when a writer waits.
+	type bookData struct {
+		symbol    string
+		perp      *PerpFutures
+		markPrice int64
 	}
-	updates := make([]perpUpdate, 0, len(a.exchange.Books))
+	a.exchange.mu.RLock()
+	candidates := make([]bookData, 0, len(a.exchange.Books))
 	for _, book := range a.exchange.Books {
 		if !book.Instrument.IsPerp() {
 			continue
@@ -177,18 +179,34 @@ func (a *ExchangeAutomation) updateAllPerpPrices() {
 		if markPrice == 0 {
 			continue
 		}
-		indexPrice := a.indexProvider.GetIndexPrice(book.Symbol, timestamp)
+		candidates = append(candidates, bookData{
+			symbol:    book.Symbol,
+			perp:      book.Instrument.(*PerpFutures),
+			markPrice: markPrice,
+		})
+	}
+	a.exchange.mu.RUnlock()
+
+	// Now call GetIndexPrice without holding e.mu.
+	type perpUpdate struct {
+		symbol     string
+		perp       *PerpFutures
+		markPrice  int64
+		indexPrice int64
+	}
+	updates := make([]perpUpdate, 0, len(candidates))
+	for _, c := range candidates {
+		indexPrice := a.indexProvider.GetIndexPrice(c.symbol, timestamp)
 		if indexPrice == 0 {
 			continue
 		}
 		updates = append(updates, perpUpdate{
-			symbol:     book.Symbol,
-			perp:       book.Instrument.(*PerpFutures),
-			markPrice:  markPrice,
+			symbol:     c.symbol,
+			perp:       c.perp,
+			markPrice:  c.markPrice,
 			indexPrice: indexPrice,
 		})
 	}
-	a.exchange.mu.RUnlock()
 
 	for _, u := range updates {
 		u.perp.UpdateFundingRate(u.indexPrice, u.markPrice)
