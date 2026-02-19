@@ -31,7 +31,7 @@ func main() {
 		EstimatedClients: 20,
 		Clock:            simClock,
 		TickerFactory:    tickerFactory,
-		SnapshotInterval: 60 * time.Second,
+		SnapshotInterval: 5 * time.Second,
 	})
 
 	marketConfig := CreateMarketConfig()
@@ -88,8 +88,9 @@ func main() {
 	bootstrapActors, nextActorID := CreateBootstrapActors(ex, marketConfig, 1)
 	fmt.Printf("Starting %d bootstrap actors...\n", len(bootstrapActors))
 
+	bootstrapCtx, bootstrapCancel := context.WithCancel(ctx)
 	for _, a := range bootstrapActors {
-		if err := a.Start(ctx); err != nil {
+		if err := a.Start(bootstrapCtx); err != nil {
 			log.Fatalf("start bootstrap actor: %v", err)
 		}
 	}
@@ -115,6 +116,12 @@ func main() {
 	}
 
 bootstrapComplete:
+	ShutdownBootstrapActors(ex, bootstrapActors)
+	bootstrapCancel()
+	for _, a := range bootstrapActors {
+		a.Stop()
+	}
+	time.Sleep(5 * time.Millisecond) // let bootstrap goroutines fully exit
 	fmt.Println("Bootstrap complete, starting main groups...")
 	simStart := simClock.NowUnixNano() // duration counts from here, not from process start
 
@@ -197,7 +204,7 @@ bootstrapComplete:
 				goto shutdown
 			default:
 				simClock.Advance(simStep)
-				time.Sleep(time.Millisecond)
+				time.Sleep(10 * time.Millisecond)
 				now := simClock.NowUnixNano()
 				if simDuration > 0 && now >= simEndNano {
 					goto shutdown
