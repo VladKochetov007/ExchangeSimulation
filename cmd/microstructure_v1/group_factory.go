@@ -376,39 +376,43 @@ func (gf *GroupFactory) CreatePerpTakerGroup() *actor.CompositeActor {
 	return composite
 }
 
-func (gf *GroupFactory) CreateFundingArbGroup() *actor.CompositeActor {
-	initialBalances := map[string]int64{
-		"ABC": 3 * ASSET_PRECISION,
-		"BCD": 6 * ASSET_PRECISION,
-		"CDE": 15 * ASSET_PRECISION,
-		"DEF": 30 * ASSET_PRECISION,
-		"EFG": 150 * ASSET_PRECISION,
-		"USD": 1_500_000 * USD_PRECISION,
+func (gf *GroupFactory) CreateFundingArbGroups() []*actor.CompositeActor {
+	type assetCfg struct {
+		asset   string
+		baseQty int64
+		usdBal  int64
+	}
+	perAsset := []assetCfg{
+		{"ABC", 3 * ASSET_PRECISION, 300_000 * USD_PRECISION},
+		{"BCD", 6 * ASSET_PRECISION, 300_000 * USD_PRECISION},
+		{"CDE", 15 * ASSET_PRECISION, 300_000 * USD_PRECISION},
+		{"DEF", 30 * ASSET_PRECISION, 300_000 * USD_PRECISION},
+		{"EFG", 150 * ASSET_PRECISION, 300_000 * USD_PRECISION},
 	}
 
 	fees := &exchange.PercentageFee{MakerBps: 5, TakerBps: 8, InQuote: true}
-	gateway := gf.ex.ConnectClient(gf.nextClientID, initialBalances, fees)
+	groups := make([]*actor.CompositeActor, 0, len(perAsset))
 
-	for asset, balance := range initialBalances {
-		gf.ex.AddPerpBalance(gf.nextClientID, asset, balance)
-	}
-	gf.nextClientID++
+	for _, cfg := range perAsset {
+		initialBalances := map[string]int64{
+			cfg.asset: cfg.baseQty,
+			"USD":     cfg.usdBal,
+		}
+		gateway := gf.ex.ConnectClient(gf.nextClientID, initialBalances, fees)
+		gf.ex.AddPerpBalance(gf.nextClientID, cfg.asset, cfg.baseQty)
+		gf.ex.AddPerpBalance(gf.nextClientID, "USD", cfg.usdBal)
+		gf.nextClientID++
 
-	latencyConfig := simulation.LatencyConfig{
-		Mode:              simulation.LatencyMarketData,
-		MarketDataLatency: simulation.NewUniformRandomLatency(2*time.Millisecond, 3*time.Millisecond, int64(gf.nextClientID)),
-	}
-	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
-	delayedGateway.Start()
-	wrappedGateway := delayedGateway.ToClientGateway()
+		latencyConfig := simulation.LatencyConfig{
+			Mode:              simulation.LatencyMarketData,
+			MarketDataLatency: simulation.NewUniformRandomLatency(2*time.Millisecond, 3*time.Millisecond, int64(gf.nextClientID)),
+		}
+		delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
+		delayedGateway.Start()
+		wrappedGateway := delayedGateway.ToClientGateway()
 
-	assets := []string{"ABC", "BCD", "CDE", "DEF", "EFG"}
-	subActors := []actor.SubActor{}
-
-	for _, asset := range assets {
-		spotSymbol := asset + "/USD"
-		perpSymbol := asset + "-PERP"
-
+		spotSymbol := cfg.asset + "/USD"
+		perpSymbol := cfg.asset + "-PERP"
 		sub := actors.NewInternalFundingArb(actors.InternalFundingArbConfig{
 			ActorID:         gf.nextActorID,
 			SpotSymbol:      spotSymbol,
@@ -419,54 +423,54 @@ func (gf *GroupFactory) CreateFundingArbGroup() *actor.CompositeActor {
 			ExitFundingRate: 1,
 			MaxPositionSize: 5 * ASSET_PRECISION,
 		})
-		subActors = append(subActors, sub)
 		gf.nextActorID++
+
+		composite := actor.NewCompositeActor(gf.nextActorID, wrappedGateway, []actor.SubActor{sub})
+		gf.nextActorID++
+		composite.InitializeBalances(map[string]int64{cfg.asset: cfg.baseQty}, cfg.usdBal)
+		groups = append(groups, composite)
 	}
 
-	composite := actor.NewCompositeActor(gf.nextActorID, wrappedGateway, subActors)
-	gf.nextActorID++
-
-	baseBalances := map[string]int64{
-		"ABC": 3 * ASSET_PRECISION,
-		"BCD": 6 * ASSET_PRECISION,
-		"CDE": 15 * ASSET_PRECISION,
-		"DEF": 30 * ASSET_PRECISION,
-		"EFG": 150 * ASSET_PRECISION,
-	}
-	composite.InitializeBalances(baseBalances, 1_500_000*USD_PRECISION)
-
-	return composite
+	return groups
 }
 
-func (gf *GroupFactory) CreateTriangleArbGroup() *actor.CompositeActor {
-	initialBalances := map[string]int64{
-		"ABC": 40 * ASSET_PRECISION,
-		"BCD": 80 * ASSET_PRECISION,
-		"CDE": 200 * ASSET_PRECISION,
-		"DEF": 400 * ASSET_PRECISION,
-		"EFG": 2000 * ASSET_PRECISION,
-		"USD": 2_000_000 * USD_PRECISION,
+func (gf *GroupFactory) CreateTriangleArbGroups() []*actor.CompositeActor {
+	type assetCfg struct {
+		asset   string
+		baseQty int64
+		abcQty  int64
+		usdBal  int64
+	}
+	perAsset := []assetCfg{
+		{"BCD", 80 * ASSET_PRECISION, 10 * ASSET_PRECISION, 500_000 * USD_PRECISION},
+		{"CDE", 200 * ASSET_PRECISION, 10 * ASSET_PRECISION, 500_000 * USD_PRECISION},
+		{"DEF", 400 * ASSET_PRECISION, 10 * ASSET_PRECISION, 500_000 * USD_PRECISION},
+		{"EFG", 2000 * ASSET_PRECISION, 10 * ASSET_PRECISION, 500_000 * USD_PRECISION},
 	}
 
 	fees := &exchange.PercentageFee{MakerBps: 0, TakerBps: 1, InQuote: true}
-	gateway := gf.ex.ConnectClient(gf.nextClientID, initialBalances, fees)
-	gf.nextClientID++
+	groups := make([]*actor.CompositeActor, 0, len(perAsset))
 
-	latencyConfig := simulation.LatencyConfig{
-		Mode:              simulation.LatencyMarketData,
-		MarketDataLatency: simulation.NewUniformRandomLatency(1*time.Millisecond, 2*time.Millisecond, int64(gf.nextClientID)),
-	}
-	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
-	delayedGateway.Start()
-	wrappedGateway := delayedGateway.ToClientGateway()
+	for _, cfg := range perAsset {
+		initialBalances := map[string]int64{
+			cfg.asset: cfg.baseQty,
+			"ABC":     cfg.abcQty,
+			"USD":     cfg.usdBal,
+		}
+		gateway := gf.ex.ConnectClient(gf.nextClientID, initialBalances, fees)
+		gf.nextClientID++
 
-	abcQuotedAssets := []string{"BCD", "CDE", "DEF", "EFG"}
-	subActors := []actor.SubActor{}
+		latencyConfig := simulation.LatencyConfig{
+			Mode:              simulation.LatencyMarketData,
+			MarketDataLatency: simulation.NewUniformRandomLatency(1*time.Millisecond, 2*time.Millisecond, int64(gf.nextClientID)),
+		}
+		delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
+		delayedGateway.Start()
+		wrappedGateway := delayedGateway.ToClientGateway()
 
-	for _, asset := range abcQuotedAssets {
-		baseSymbol := asset + "/USD"  // e.g. BCD/USD: sell (fwd) or buy (rev) to close circuit
-		crossSymbol := asset + "/ABC" // e.g. BCD/ABC: buy (fwd) or sell (rev) BCD with/for ABC
-		directSymbol := "ABC/USD"     // buy (fwd) or sell (rev) ABC with/for USD
+		baseSymbol := cfg.asset + "/USD"
+		crossSymbol := cfg.asset + "/ABC"
+		directSymbol := "ABC/USD"
 
 		sub := actors.NewTriangleArbitrage(actors.TriangleArbConfig{
 			ActorID:          gf.nextActorID,
@@ -478,23 +482,15 @@ func (gf *GroupFactory) CreateTriangleArbGroup() *actor.CompositeActor {
 			DirectInstrument: gf.marketConfig.Instruments[directSymbol],
 			ThresholdBps:     1,
 			MaxTradeSize:     ASSET_PRECISION / 10,
-			TakerFeeBps:      3, // 1bps × 3 legs
+			TakerFeeBps:      3,
 		})
-		subActors = append(subActors, sub)
 		gf.nextActorID++
+
+		composite := actor.NewCompositeActor(gf.nextActorID, wrappedGateway, []actor.SubActor{sub})
+		gf.nextActorID++
+		composite.InitializeBalances(map[string]int64{cfg.asset: cfg.baseQty, "ABC": cfg.abcQty}, cfg.usdBal)
+		groups = append(groups, composite)
 	}
 
-	composite := actor.NewCompositeActor(gf.nextActorID, wrappedGateway, subActors)
-	gf.nextActorID++
-
-	baseBalances := map[string]int64{
-		"ABC": 40 * ASSET_PRECISION,
-		"BCD": 80 * ASSET_PRECISION,
-		"CDE": 200 * ASSET_PRECISION,
-		"DEF": 400 * ASSET_PRECISION,
-		"EFG": 2000 * ASSET_PRECISION,
-	}
-	composite.InitializeBalances(baseBalances, 2_000_000*USD_PRECISION)
-
-	return composite
+	return groups
 }

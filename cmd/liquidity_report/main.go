@@ -51,7 +51,7 @@ type clientReport struct {
 	Cancels  int     `json:"cancels"`
 	Rejects  int     `json:"rejects"`
 	Fills    int     `json:"fills"`
-	VolBase  float64 `json:"vol_base"`
+	VolQuote float64 `json:"vol_quote"`
 }
 
 type report struct {
@@ -142,7 +142,7 @@ func processFile(path string, rep *report) {
 			if mainPhase {
 				cr := ensureClient(rep, ev.ClientID)
 				cr.Fills++
-				cr.VolBase += ev.FilledQty / assetPrecision
+				cr.VolQuote += (ev.FilledQty * ev.Price) / (assetPrecision * qprec)
 			}
 
 		case "OrderCancelled":
@@ -260,17 +260,17 @@ func printReport(rep *report) {
 	sort.Slice(clients, func(i, j int) bool { return clients[i].ClientID < clients[j].ClientID })
 
 	fmt.Println("\n=== Per-Client Stats (main phase) ===")
-	fmt.Printf("%-8s %7s %7s %7s %7s %7s %12s\n",
-		"ClientID", "Limits", "Mkts", "Cancels", "Rejects", "Fills", "VolBase")
-	fmt.Println(strings.Repeat("-", 65))
+	fmt.Printf("%-8s %7s %7s %7s %7s %7s %14s\n",
+		"ClientID", "Limits", "Mkts", "Cancels", "Rejects", "Fills", "VolQuote")
+	fmt.Println(strings.Repeat("-", 67))
 
 	noFills := []int{}
 	for _, c := range clients {
 		if c.Fills == 0 && c.Limits+c.Markets > 0 {
 			noFills = append(noFills, c.ClientID)
 		}
-		fmt.Printf("%-8d %7d %7d %7d %7d %7d %12.2f\n",
-			c.ClientID, c.Limits, c.Markets, c.Cancels, c.Rejects, c.Fills, c.VolBase)
+		fmt.Printf("%-8d %7d %7d %7d %7d %7d %14.2f\n",
+			c.ClientID, c.Limits, c.Markets, c.Cancels, c.Rejects, c.Fills, c.VolQuote)
 	}
 
 	if len(noFills) > 0 {
@@ -292,7 +292,7 @@ func printReport(rep *report) {
 	fmt.Printf("\n=== Totals ===\n")
 	fmt.Printf("Trades: %d  Limits: %d  Markets: %d  Cancels: %d  Rejects: %d  Fills: %d\n",
 		totTrades, totLimits, totMkts, totCancels, totRejects, totFills)
-	fmt.Printf("VolBase: %.2f  VolQuote: %.2f\n", totVolBase, totVolQuote)
+	fmt.Printf("VolQuote(USD): %.2f  VolBase: %.2f\n", totVolQuote, totVolBase)
 
 	fmt.Println("\n=== LP First Exit After Bootstrap ===")
 	exited := 0

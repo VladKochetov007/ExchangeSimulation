@@ -128,6 +128,7 @@ bootstrapComplete:
 	fmt.Println("=== 8-Group Simulation Started ===")
 	factory := NewGroupFactory(ex, marketConfig)
 	factory.nextActorID = nextActorID
+	factory.nextClientID = nextActorID
 
 	perpMMGroup := factory.CreatePerpMMGroup()
 	spotMMGroup := factory.CreateSpotMMGroup()
@@ -135,16 +136,18 @@ bootstrapComplete:
 	spotTakerGroup := factory.CreateSpotTakerGroup()
 	spotABCTakerGroup := factory.CreateSpotABCTakerGroup()
 	perpTakerGroup := factory.CreatePerpTakerGroup()
-	fundingArbGroup := factory.CreateFundingArbGroup()
+	fundingArbGroups := factory.CreateFundingArbGroups()
 	triangleArbGroup := factory.CreateTriangleArbGroup()
 
-	allGroups := []*actor.CompositeActor{
-		perpMMGroup, spotMMGroup, spotABCMMGroup,
-		spotTakerGroup, spotABCTakerGroup, perpTakerGroup,
-		fundingArbGroup, triangleArbGroup,
-	}
+	allGroups := append(
+		[]*actor.CompositeActor{
+			perpMMGroup, spotMMGroup, spotABCMMGroup,
+			spotTakerGroup, spotABCTakerGroup, perpTakerGroup,
+		},
+		append(fundingArbGroups, triangleArbGroup)...,
+	)
 
-	fmt.Printf("Groups: %d (perp-MM, spot-USD-MM, spot-ABC-MM, spot-USD-taker, spot-ABC-taker, perp-taker, funding-arb, triangle-arb)\n", len(allGroups))
+	fmt.Printf("Groups: %d (perp-MM, spot-USD-MM, spot-ABC-MM, spot-USD-taker, spot-ABC-taker, perp-taker, 5×funding-arb, triangle-arb)\n", len(allGroups))
 	fmt.Printf("Markets: %d\n", len(marketConfig.Instruments))
 	if *durationFlag == 0 {
 		fmt.Println("Duration: infinite (Ctrl+C to stop)")
@@ -238,11 +241,16 @@ shutdown:
 
 func printGroupStats(groups []*actor.CompositeActor, elapsed time.Duration) {
 	fmt.Printf("\n[%v] Group Balances:\n", elapsed.Round(time.Minute))
-	groupNames := []string{"PerpMM", "SpotUSDMM", "SpotABCMM", "SpotUSDTaker", "SpotABCTaker", "PerpTaker", "FundingArb", "TriangleArb"}
-	for i, group := range groups {
-		ctx := group.GetSharedContext()
-		quoteBalance := ctx.GetQuoteBalance()
-		fmt.Printf("  %-12s: Quote=$%10.2f\n",
-			groupNames[i], float64(quoteBalance)/float64(USD_PRECISION))
+	assets := []string{"ABC", "BCD", "CDE", "DEF", "EFG"}
+	groupNames := []string{"PerpMM", "SpotUSDMM", "SpotABCMM", "SpotUSDTaker", "SpotABCTaker", "PerpTaker"}
+	for i := range groupNames {
+		ctx := groups[i].GetSharedContext()
+		fmt.Printf("  %-14s: Quote=$%10.2f\n", groupNames[i], float64(ctx.GetQuoteBalance())/float64(USD_PRECISION))
 	}
+	for i, asset := range assets {
+		ctx := groups[6+i].GetSharedContext()
+		fmt.Printf("  FundingArb%-4s: Quote=$%10.2f\n", asset, float64(ctx.GetQuoteBalance())/float64(USD_PRECISION))
+	}
+	ctx := groups[len(groups)-1].GetSharedContext()
+	fmt.Printf("  %-14s: Quote=$%10.2f\n", "TriangleArb", float64(ctx.GetQuoteBalance())/float64(USD_PRECISION))
 }

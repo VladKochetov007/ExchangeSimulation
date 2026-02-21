@@ -60,6 +60,8 @@ func (ta *TriangleArbitrage) OnEvent(event *actor.Event, ctx *actor.SharedContex
 	switch event.Type {
 	case actor.EventBookSnapshot:
 		ta.onBookSnapshot(event.Data.(actor.BookSnapshotEvent))
+	case actor.EventBookDelta:
+		ta.onBookDelta(event.Data.(actor.BookDeltaEvent))
 	case actor.EventOrderAccepted:
 		ta.onOrderAccepted(event.Data.(actor.OrderAcceptedEvent))
 	case actor.EventOrderFilled, actor.EventOrderPartialFill:
@@ -86,6 +88,42 @@ func (ta *TriangleArbitrage) onBookSnapshot(snap actor.BookSnapshotEvent) {
 		ta.crossBid, ta.crossAsk = bid, ask
 	case ta.config.DirectSymbol:
 		ta.directBid, ta.directAsk = bid, ask
+	}
+}
+
+func (ta *TriangleArbitrage) bestPrices(symbol string) (*int64, *int64) {
+	switch symbol {
+	case ta.config.BaseSymbol:
+		return &ta.baseBid, &ta.baseAsk
+	case ta.config.CrossSymbol:
+		return &ta.crossBid, &ta.crossAsk
+	case ta.config.DirectSymbol:
+		return &ta.directBid, &ta.directAsk
+	}
+	return nil, nil
+}
+
+func (ta *TriangleArbitrage) onBookDelta(delta actor.BookDeltaEvent) {
+	bid, ask := ta.bestPrices(delta.Symbol)
+	if bid == nil {
+		return
+	}
+	if delta.Delta.Side == exchange.Buy {
+		if delta.Delta.VisibleQty > 0 {
+			if delta.Delta.Price > *bid {
+				*bid = delta.Delta.Price
+			}
+		} else if delta.Delta.Price == *bid {
+			*bid = 0 // best level removed; snapshot will restore
+		}
+	} else {
+		if delta.Delta.VisibleQty > 0 {
+			if *ask == 0 || delta.Delta.Price < *ask {
+				*ask = delta.Delta.Price
+			}
+		} else if delta.Delta.Price == *ask {
+			*ask = 0
+		}
 	}
 }
 
@@ -128,10 +166,10 @@ func (ta *TriangleArbitrage) onOrderFilled(fill actor.OrderFillEvent, ctx *actor
 			quote := ta.config.CrossInstrument.QuoteAsset()
 			if fill.Side == exchange.Buy {
 				ctx.UpdateBalances(base, fill.Qty, 0)
-				ctx.UpdateBalances(quote, -notional, 0)
+				ctx.UpdateBalances(quote, -(notional+fill.FeeAmount), 0)
 			} else {
 				ctx.UpdateBalances(base, -fill.Qty, 0)
-				ctx.UpdateBalances(quote, notional, 0)
+				ctx.UpdateBalances(quote, notional-fill.FeeAmount, 0)
 			}
 		}
 	case ta.baseOrderID:
@@ -173,18 +211,20 @@ func (ta *TriangleArbitrage) evaluateArbitrage(_ *actor.SharedContext, submit ac
 
 	// Forward: USD → ABC → base → USD.
 	// Execute: buy directAsk, buy crossAsk, sell baseBid.
-	// Profit bps = (baseBid×precision − directAsk×crossAsk) × 10000 / (directAsk×crossAsk)
+	// Use float64 to avoid int64 overflow: forwardNumer*10000 can exceed int64 max
+	// at ~44 bps BCD divergence (2.5e17 scale × 10000 → ~2.5e21 for large mismatches).
 	forwardNumer := ta.baseBid*precision - ta.directAsk*ta.crossAsk
-	if forwardNumer*10000 > minProfit*(ta.directAsk*ta.crossAsk) {
+	dac := float64(ta.directAsk) * float64(ta.crossAsk)
+	if float64(forwardNumer)*10000 > float64(minProfit)*dac {
 		ta.executeArbitrage(false, submit)
 		return
 	}
 
 	// Reverse: USD → base → ABC → USD.
 	// Execute: buy baseAsk, sell crossBid, sell directBid.
-	// Profit bps = (directBid×crossBid − baseAsk×precision) × 10000 / (baseAsk×precision)
 	reverseNumer := ta.directBid*ta.crossBid - ta.baseAsk*precision
-	if reverseNumer*10000 > minProfit*(ta.baseAsk*precision) {
+	bap := float64(ta.baseAsk) * float64(precision)
+	if float64(reverseNumer)*10000 > float64(minProfit)*bap {
 		ta.executeArbitrage(true, submit)
 	}
 }

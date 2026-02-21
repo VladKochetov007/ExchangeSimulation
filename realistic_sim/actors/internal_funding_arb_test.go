@@ -177,13 +177,10 @@ func TestInternalFundingArb_ExitsOnLowFunding(t *testing.T) {
 	submit, orders := newCapture()
 	ifa.evaluateStrategy(ctx, submit)
 
-	if ifa.isActive {
-		t.Error("isActive must be false after exit")
-	}
+	// Exit orders must be submitted.
 	if len(*orders) != 2 {
 		t.Fatalf("want 2 exit orders, got %d", len(*orders))
 	}
-	// spot sell + perp buy
 	spotExit := (*orders)[0]
 	perpExit := (*orders)[1]
 	if spotExit.symbol != "BTC/USD" || spotExit.side != exchange.Sell {
@@ -191,5 +188,36 @@ func TestInternalFundingArb_ExitsOnLowFunding(t *testing.T) {
 	}
 	if perpExit.symbol != "BTC-PERP" || perpExit.side != exchange.Buy {
 		t.Errorf("exit[1]: want Buy BTC-PERP, got %v %v", perpExit.side, perpExit.symbol)
+	}
+
+	// isActive stays true and pendingExit is set until fills confirm flat OMS.
+	if !ifa.isActive {
+		t.Error("isActive must remain true while exit fills are pending")
+	}
+	if !ifa.pendingExit {
+		t.Error("pendingExit must be true after exit orders submitted")
+	}
+
+	// Simulate fills arriving: reset OMS to flat.
+	ifa.spotOMS.OnFill("BTC/USD", actor.OrderFillEvent{
+		Side:  exchange.Sell,
+		Qty:   exchange.BTC_PRECISION,
+		Price: 50_000 * exchange.USD_PRECISION,
+		IsFull: true,
+	}, exchange.BTC_PRECISION)
+	ifa.perpOMS.OnFill("BTC-PERP", actor.OrderFillEvent{
+		Side:  exchange.Buy,
+		Qty:   exchange.BTC_PRECISION,
+		Price: 50_200 * exchange.USD_PRECISION,
+		IsFull: true,
+	}, exchange.BTC_PRECISION)
+
+	// evaluateStrategy now sees flat OMS and clears isActive.
+	ifa.evaluateStrategy(ctx, submit)
+	if ifa.isActive {
+		t.Error("isActive must be false after OMS confirms flat position")
+	}
+	if ifa.pendingExit {
+		t.Error("pendingExit must be cleared after OMS confirms flat")
 	}
 }

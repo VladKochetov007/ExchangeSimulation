@@ -56,17 +56,17 @@ func TestAvellanedaStoikovReservationPrice(t *testing.T) {
 	if bid0 == 0 || ask0 == 0 {
 		t.Fatalf("calculateQuotes returned zero: bid0=%d, ask0=%d", bid0, ask0)
 	}
-	mid0 := (bid0 + ask0) / 2
+	mid0 := bid0 + (ask0-bid0)/2
 	t.Logf("inventory=0: bid=%d, ask=%d, mid=%d", bid0, ask0, mid0)
 
 	asActor.inventory = 5 * exchange.BTC_PRECISION
 	bidLong, askLong := asActor.calculateQuotes()
-	midLong := (bidLong + askLong) / 2
+	midLong := bidLong + (askLong-bidLong)/2
 	t.Logf("inventory=5 BTC: bid=%d, ask=%d, mid=%d", bidLong, askLong, midLong)
 
 	asActor.inventory = -5 * exchange.BTC_PRECISION
 	bidShort, askShort := asActor.calculateQuotes()
-	midShort := (bidShort + askShort) / 2
+	midShort := bidShort + (askShort-bidShort)/2
 	t.Logf("inventory=-5 BTC: bid=%d, ask=%d, mid=%d", bidShort, askShort, midShort)
 
 	t.Logf("mid0=$%.8f, midLong=$%.8f, midShort=$%.8f",

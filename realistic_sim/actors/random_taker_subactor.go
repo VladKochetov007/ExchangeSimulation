@@ -13,7 +13,7 @@ type RandomTakerSubActorConfig struct {
 	MaxQty      int64
 	Precision   int64
 	Instrument  exchange.Instrument // optional; drives IsPerp and precision override
-	TakerFeeBps int64               // pre-trade fee estimate in bps; defaults to 20
+	TakerFeeBps int64               // pre-trade fee estimate in bps for balance pre-check; 0 means no fee buffer
 }
 
 type RandomTakerSubActor struct {
@@ -83,16 +83,11 @@ func (rt *RandomTakerSubActor) onBookSnapshot(snap actor.BookSnapshotEvent, ctx 
 		qty = rt.config.MinQty + rt.rng.Int63n(rt.config.MaxQty-rt.config.MinQty)
 	}
 
-	feeBps := rt.config.TakerFeeBps
-	if feeBps == 0 {
-		feeBps = 20
-	}
-
 	isPerp := rt.config.Instrument != nil && rt.config.Instrument.IsPerp()
 
 	if side == exchange.Buy {
 		notional := (qty * bestAsk) / rt.config.Precision
-		notionalWithFees := notional + (notional*feeBps/10000)
+		notionalWithFees := notional + (notional*rt.config.TakerFeeBps/10000)
 		if notionalWithFees > ctx.GetAvailableQuote() {
 			return
 		}

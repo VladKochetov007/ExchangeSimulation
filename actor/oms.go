@@ -90,7 +90,7 @@ func (o *NettingOMS) OnFill(instrumentID string, fill OrderFillEvent, precision 
 		}
 
 		if absQty <= absPos {
-			pnl := (fill.Price - pos.AvgPrice) / precision * absQty
+			pnl := (fill.Price - pos.AvgPrice) * absQty / precision
 			if pos.Qty < 0 {
 				pnl = -pnl
 			}
@@ -102,7 +102,7 @@ func (o *NettingOMS) OnFill(instrumentID string, fill OrderFillEvent, precision 
 				pos.Side = exchange.Buy
 			}
 		} else {
-			pnl := (fill.Price - pos.AvgPrice) / precision * absPos
+			pnl := (fill.Price - pos.AvgPrice) * absPos / precision
 			if pos.Qty < 0 {
 				pnl = -pnl
 			}

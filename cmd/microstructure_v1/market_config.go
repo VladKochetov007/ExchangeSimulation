@@ -69,7 +69,7 @@ func CreateMarketConfig() *MarketConfig {
 	allPrices := make(map[string]int64)
 	for asset, usdPrice := range usdPrices {
 		allPrices[asset+"/USD"] = usdPrice
-		allPrices[asset+"-PERP"] = usdPrice
+		allPrices[asset+"-PERP"] = usdPrice * 10020 / 10000
 	}
 
 	for _, asset := range assets[1:] {

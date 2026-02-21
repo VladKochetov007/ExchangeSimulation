@@ -200,7 +200,7 @@ if args.verbose >= 1:
         "12": "Bootstrap",  "13": "Bootstrap",   "14": "Bootstrap",
     }
     hdr = (f"{'Client':<8} {'Role':<13} {'Limits':>6} {'Mkts':>5} "
-           f"{'Fills':>5} {'Rejects':>7} {'VolBase':>8} {'Notes'}")
+           f"{'Fills':>5} {'Rejects':>7} {'VolQuote':>10} {'Notes'}")
     print(f"  {hdr}")
     hr()
     for cid in sorted(clients_data, key=int):
@@ -216,7 +216,7 @@ if args.verbose >= 1:
         if role == "TriangleArb" and d["markets"] < 20:
             notes.append("LOW")
         row = (f"  {cid:<8} {role:<13} {d['limits']:>6} {d['markets']:>5} "
-               f"{d['fills']:>5} {d['rejects']:>7} {d['vol_base']:>8.2f}  "
+               f"{d['fills']:>5} {d['rejects']:>7} {d.get('vol_quote', 0.0):>10.2f}  "
                + ("  ".join(notes) if notes else "ok"))
         print(row)
     hr()
@@ -286,19 +286,19 @@ ax.set_ylabel("count")
 ax.legend(handles=legend_patches, fontsize=7, loc="upper right")
 
 ax = axes[0, 1]
-ax.bar(x, vol_base, color=colors, width=w, edgecolor="white", linewidth=0.4)
-ax.set_xticks(x); ax.set_xticklabels(short, fontsize=6.5)
-ax.set_title("Base Volume per Symbol", fontweight="bold")
-ax.set_ylabel("base units")
-
-ax = axes[0, 2]
 ax.bar(x, vol_quote, color=colors, width=w, edgecolor="white", linewidth=0.4)
-nonzero = vol_quote[vol_quote > 0]
-if nonzero.size > 0 and nonzero.max() / max(nonzero.min(), 1) > 100:
+nonzero_q = vol_quote[vol_quote > 0]
+if nonzero_q.size > 0 and nonzero_q.max() / max(nonzero_q.min(), 1) > 100:
     ax.set_yscale("log")
 ax.set_xticks(x); ax.set_xticklabels(short, fontsize=6.5)
 ax.set_title("Quote Volume per Symbol", fontweight="bold")
 ax.set_ylabel("quote units")
+
+ax = axes[0, 2]
+ax.bar(x, vol_base, color=colors, width=w, edgecolor="white", linewidth=0.4)
+ax.set_xticks(x); ax.set_xticklabels(short, fontsize=6.5)
+ax.set_title("Base Volume per Symbol", fontweight="bold")
+ax.set_ylabel("base units")
 
 ax = axes[1, 0]
 ax.bar(x, limits,  width=w, label="Limits",  color="#3498db", edgecolor="white", linewidth=0.4)
@@ -356,12 +356,12 @@ ax.set_ylabel("count")
 ax.legend(fontsize=8)
 
 ax = axes[1]
-cv = np.array([clients_data[c]["vol_base"] for c in client_ids], dtype=float)
+cv = np.array([clients_data[c].get("vol_quote", 0.0) for c in client_ids], dtype=float)
 bar_colors = ["#1abc9c" if int(c) <= 8 else "#e74c3c" for c in client_ids]
 ax.bar(cx, cv, color=bar_colors, width=0.55)
 ax.set_xticks(cx); ax.set_xticklabels([f"c{c}" for c in client_ids], fontsize=8)
-ax.set_title("Base Volume per Client", fontweight="bold")
-ax.set_ylabel("base units")
+ax.set_title("Quote Volume per Client", fontweight="bold")
+ax.set_ylabel("quote units")
 mm_patch  = mpatches.Patch(color="#1abc9c", label="Main actors (c1-8)")
 bst_patch = mpatches.Patch(color="#e74c3c", label="Bootstrap (c9-14)")
 ax.legend(handles=[mm_patch, bst_patch], fontsize=8)
@@ -463,8 +463,8 @@ rows = [
     ("Limit orders",          f"{total_limits:,}"),
     ("Market orders",         f"{total_markets:,}"),
     ("Rejections",            f"{total_rejects:,}  ({total_rejects/max(total_markets,1)*100:.0f}% of markets)"),
-    ("Base volume",           f"{total_vol_b:.2f} units"),
     ("Quote volume (USD)",    f"${total_vol_q:,.0f}"),
+    ("Base volume",           f"{total_vol_b:.2f} units"),
     ("Symbols with 0 trades", f"{len(zero_trade_syms)}  {zero_trade_syms if zero_trade_syms else '(none)'}"),
     ("LP exits after bootstrap", f"{len(lp_exits)}/{len(symbols)} symbols"),
 ]

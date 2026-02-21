@@ -56,9 +56,8 @@ func TestTriangleArb_SnapshotUpdatesBase(t *testing.T) {
 	ctx := actor.NewSharedContext()
 	submit, _ := captureSubmit()
 	ta.OnEvent(snapEvent("BTC/USD", 99, 101), ctx, submit)
-	// mid = 99 + (101-99)/2 = 100
-	if ta.baseMid != 100 {
-		t.Errorf("baseMid: want 100, got %d", ta.baseMid)
+	if ta.baseBid != 99 || ta.baseAsk != 101 {
+		t.Errorf("base bid/ask: want 99/101, got %d/%d", ta.baseBid, ta.baseAsk)
 	}
 }
 
@@ -67,8 +66,8 @@ func TestTriangleArb_SnapshotUpdatesCross(t *testing.T) {
 	ctx := actor.NewSharedContext()
 	submit, _ := captureSubmit()
 	ta.OnEvent(snapEvent("ETH/USD", 199, 201), ctx, submit)
-	if ta.crossMid != 200 {
-		t.Errorf("crossMid: want 200, got %d", ta.crossMid)
+	if ta.crossBid != 199 || ta.crossAsk != 201 {
+		t.Errorf("cross bid/ask: want 199/201, got %d/%d", ta.crossBid, ta.crossAsk)
 	}
 }
 
@@ -77,21 +76,23 @@ func TestTriangleArb_SnapshotUpdatesDirect(t *testing.T) {
 	ctx := actor.NewSharedContext()
 	submit, _ := captureSubmit()
 	ta.OnEvent(snapEvent("ETH/BTC", 149, 151), ctx, submit)
-	if ta.directMid != 150 {
-		t.Errorf("directMid: want 150, got %d", ta.directMid)
+	if ta.directBid != 149 || ta.directAsk != 151 {
+		t.Errorf("direct bid/ask: want 149/151, got %d/%d", ta.directBid, ta.directAsk)
 	}
 }
 
-func TestTriangleArb_ProfitableArbSubmitsThreeOrders(t *testing.T) {
-	// Correct formula: impliedDirect = baseMid * precision / crossMid
-	// baseMid=100_000_000, crossMid=50_000_000, directMid=150_000_000, precision=100_000_000
-	// impliedDirect = 100_000_000 * 100_000_000 / 50_000_000 = 200_000_000
-	// profitBps = ((200_000_000 - 150_000_000) * 10000) / 150_000_000 ≈ 3333
-	// TakerFeeBps=0 (not set), threshold=10 → 3333 > 10 → fires
+func TestTriangleArb_ProfitableForwardArbSubmitsThreeOrders(t *testing.T) {
+	// Forward arb: baseBid*precision > directAsk*crossAsk
+	// baseBid=100e6, crossAsk=50e6, directAsk=150e6, precision=100e6
+	// forwardNumer = 100e6*100e6 - 150e6*50e6 = 1e16 - 7.5e15 = 2.5e15 > 0
+	// profit_bps ≈ 3333 >> threshold=10 → fires forward direction
 	ta := newTriArb(10)
-	ta.baseMid = 100_000_000
-	ta.crossMid = 50_000_000
-	ta.directMid = 150_000_000
+	ta.baseBid = 100_000_000
+	ta.baseAsk = 100_000_000
+	ta.crossBid = 50_000_000
+	ta.crossAsk = 50_000_000
+	ta.directBid = 150_000_000
+	ta.directAsk = 150_000_000
 
 	ctx := actor.NewSharedContext()
 	submit, sides := captureSubmit()
@@ -100,24 +101,59 @@ func TestTriangleArb_ProfitableArbSubmitsThreeOrders(t *testing.T) {
 	if len(*sides) != 3 {
 		t.Fatalf("want 3 orders, got %d", len(*sides))
 	}
-	// Legs: Buy DirectSymbol, Buy CrossSymbol, Sell BaseSymbol.
+	// Forward: buy direct, buy cross, sell base.
 	if (*sides)[0] != exchange.Buy {
-		t.Errorf("order[0] (Direct buy): want Buy, got %v", (*sides)[0])
+		t.Errorf("order[0] (direct buy): want Buy, got %v", (*sides)[0])
 	}
 	if (*sides)[1] != exchange.Buy {
-		t.Errorf("order[1] (Cross buy): want Buy, got %v", (*sides)[1])
+		t.Errorf("order[1] (cross buy): want Buy, got %v", (*sides)[1])
 	}
 	if (*sides)[2] != exchange.Sell {
-		t.Errorf("order[2] (Base sell): want Sell, got %v", (*sides)[2])
+		t.Errorf("order[2] (base sell): want Sell, got %v", (*sides)[2])
+	}
+}
+
+func TestTriangleArb_ProfitableReverseArbSubmitsThreeOrders(t *testing.T) {
+	// Reverse arb: directBid*crossBid > baseAsk*precision
+	// directBid=200e6, crossBid=50e6, baseAsk=100e6, precision=100e6
+	// reverseNumer = 200e6*50e6 - 100e6*100e6 = 1e16 - 1e16 = 0... let me tweak:
+	// directBid=210e6 → reverseNumer = 210e6*50e6 - 100e6*100e6 = 10.5e15 - 10e15 = 5e14 > 0
+	ta := newTriArb(10)
+	ta.baseBid = 100_000_000
+	ta.baseAsk = 100_000_000
+	ta.crossBid = 50_000_000
+	ta.crossAsk = 50_000_000
+	ta.directBid = 210_000_000
+	ta.directAsk = 210_000_000
+
+	ctx := actor.NewSharedContext()
+	submit, sides := captureSubmit()
+	ta.evaluateArbitrage(ctx, submit)
+
+	if len(*sides) != 3 {
+		t.Fatalf("want 3 orders, got %d", len(*sides))
+	}
+	// Reverse: buy base, sell cross, sell direct.
+	if (*sides)[0] != exchange.Buy {
+		t.Errorf("order[0] (base buy): want Buy, got %v", (*sides)[0])
+	}
+	if (*sides)[1] != exchange.Sell {
+		t.Errorf("order[1] (cross sell): want Sell, got %v", (*sides)[1])
+	}
+	if (*sides)[2] != exchange.Sell {
+		t.Errorf("order[2] (direct sell): want Sell, got %v", (*sides)[2])
 	}
 }
 
 func TestTriangleArb_UnprofitableArbNoOrders(t *testing.T) {
-	// All mids equal → profitBps = 0 → not above fee+threshold
+	// Balanced prices: baseBid*precision == directAsk*crossAsk → no arb in either direction.
 	ta := newTriArb(10)
-	ta.baseMid = 100_000_000
-	ta.crossMid = 100_000_000
-	ta.directMid = 100_000_000
+	ta.baseBid = 100_000_000
+	ta.baseAsk = 100_000_000
+	ta.crossBid = 100_000_000
+	ta.crossAsk = 100_000_000
+	ta.directBid = 100_000_000
+	ta.directAsk = 100_000_000
 
 	ctx := actor.NewSharedContext()
 	submit, sides := captureSubmit()
@@ -130,9 +166,11 @@ func TestTriangleArb_UnprofitableArbNoOrders(t *testing.T) {
 
 func TestTriangleArb_IncompleteDataNoOrders(t *testing.T) {
 	ta := newTriArb(5)
-	ta.baseMid = 100_000_000
-	ta.crossMid = 200_000_000
-	// ta.directMid == 0
+	ta.baseBid = 100_000_000
+	ta.baseAsk = 100_000_000
+	ta.crossBid = 200_000_000
+	ta.crossAsk = 200_000_000
+	// directBid/directAsk == 0
 
 	ctx := actor.NewSharedContext()
 	submit, sides := captureSubmit()
@@ -140,5 +178,35 @@ func TestTriangleArb_IncompleteDataNoOrders(t *testing.T) {
 
 	if len(*sides) != 0 {
 		t.Errorf("want no orders with incomplete market data, got %d", len(*sides))
+	}
+}
+
+func TestTriangleArb_ExecutingFlagPreventsReentry(t *testing.T) {
+	// After a profitable arb fires via OnEvent, a subsequent OnEvent must not
+	// submit another round while executing=true.
+	ta := newTriArb(10)
+	ta.baseBid = 100_000_000
+	ta.baseAsk = 100_000_000
+	ta.crossBid = 50_000_000
+	ta.crossAsk = 50_000_000
+	ta.directBid = 150_000_000
+	ta.directAsk = 150_000_000
+
+	ctx := actor.NewSharedContext()
+	submit, sides := captureSubmit()
+
+	// First OnEvent triggers the arb (prices already profitable before this snapshot).
+	ta.OnEvent(snapEvent("BTC/USD", 100_000_000, 100_000_000), ctx, submit)
+	if len(*sides) != 3 {
+		t.Fatalf("first fire: want 3 orders, got %d", len(*sides))
+	}
+	if !ta.executing {
+		t.Fatal("executing should be true after first fire")
+	}
+
+	// Second snapshot while executing: OnEvent guard must block re-entry.
+	ta.OnEvent(snapEvent("BTC/USD", 100_000_000, 100_000_000), ctx, submit)
+	if len(*sides) != 3 {
+		t.Errorf("re-entry prevention failed: got %d orders, want 3", len(*sides))
 	}
 }

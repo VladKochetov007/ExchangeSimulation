@@ -382,6 +382,72 @@ func (e *Exchange) AddInstrument(instrument Instrument) {
 	}
 }
 
+// CancelAllClientOrders atomically cancels all resting orders for clientID across all books.
+// Scans books directly by order.ClientID rather than relying on client.OrderIDs, which can
+// be momentarily empty if the actor is mid-cycle (cancel+resubmit in-flight).
+// Releases reserved balances and publishes book updates. Safe to call concurrently.
+// Returns the number of orders cancelled.
+func (e *Exchange) CancelAllClientOrders(clientID uint64) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	client := e.Clients[clientID]
+	if client == nil {
+		return 0
+	}
+
+	type cancelTarget struct {
+		order *Order
+		book  *OrderBook
+	}
+	var targets []cancelTarget
+	for _, b := range e.Books {
+		for _, order := range b.Bids.Orders {
+			if order.ClientID == clientID {
+				targets = append(targets, cancelTarget{order, b})
+			}
+		}
+		for _, order := range b.Asks.Orders {
+			if order.ClientID == clientID {
+				targets = append(targets, cancelTarget{order, b})
+			}
+		}
+	}
+
+	count := 0
+	for _, t := range targets {
+		order := t.order
+		book := t.book
+		instrument := book.Instrument
+		precision := instrument.BasePrecision()
+		remainingQty := order.Qty - order.FilledQty
+
+		if instrument.IsPerp() {
+			perp := instrument.(*PerpFutures)
+			remainingMargin := (remainingQty * order.Price / precision) * perp.MarginRate / 10000
+			client.ReleasePerp(instrument.QuoteAsset(), remainingMargin)
+		} else if order.Side == Buy {
+			client.Release(instrument.QuoteAsset(), (remainingQty*order.Price)/precision)
+		} else {
+			client.Release(instrument.BaseAsset(), remainingQty)
+		}
+
+		if order.Side == Buy {
+			book.Bids.cancelOrder(order.ID)
+			e.publishBookUpdate(book, Buy, order.Price)
+		} else {
+			book.Asks.cancelOrder(order.ID)
+			e.publishBookUpdate(book, Sell, order.Price)
+		}
+
+		client.RemoveOrder(order.ID)
+		order.Status = Cancelled
+		putOrder(order)
+		count++
+	}
+	return count
+}
+
 func (e *Exchange) ConnectClient(clientID uint64, initialBalances map[string]int64, feePlan FeeModel) *ClientGateway {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -506,6 +572,21 @@ func (e *Exchange) DisconnectClient(clientID uint64) {
 
 func (e *Exchange) handleClientRequests(gateway *ClientGateway) {
 	for req := range gateway.RequestCh {
+		// Discard order and subscribe requests for shut-down gateways.
+		// CancelOrder/Unsubscribe/QueryBalance are still processed so they
+		// can clean up state, but new orders and subscriptions must never be
+		// processed after gateway.Running is set to false. Blocking ReqSubscribe
+		// closes the race where a queued subscribe arrives after Unsubscribe was
+		// called directly on MDPublisher during bootstrap shutdown.
+		if req.Type == ReqPlaceOrder || req.Type == ReqSubscribe {
+			gateway.Mu.Lock()
+			running := gateway.Running
+			gateway.Mu.Unlock()
+			if !running {
+				continue
+			}
+		}
+
 		var resp Response
 		switch req.Type {
 		case ReqPlaceOrder:
@@ -535,6 +616,20 @@ func (e *Exchange) handleClientRequests(gateway *ClientGateway) {
 func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	// Close the TOCTOU window between handleClientRequests checking Running=true
+	// and CancelAllClientOrders running under e.mu. Since Running is set to false
+	// before CancelAllClientOrders is called (both operations are in ShutdownBootstrapActors),
+	// this check (while holding e.mu) is race-free: any placeOrder that arrives after
+	// CancelAllClientOrders completes will see Running=false and be silently discarded.
+	if gw := e.Gateways[clientID]; gw != nil {
+		gw.Mu.Lock()
+		running := gw.Running
+		gw.Mu.Unlock()
+		if !running {
+			return Response{RequestID: req.RequestID, Success: false}
+		}
+	}
 
 	client := e.Clients[clientID]
 	if client == nil {

@@ -61,14 +61,14 @@ func TestNettingOMSReducePosition(t *testing.T) {
 
 	fill1 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * exchange.SATOSHI,
+		Price: 50000 * exchange.USD_PRECISION,
 		Qty:   2 * exchange.SATOSHI,
 	}
 	oms.OnFill("BTC/USD", fill1, exchange.SATOSHI)
 
 	fill2 := OrderFillEvent{
 		Side:  exchange.Sell,
-		Price: 51000 * exchange.SATOSHI,
+		Price: 51000 * exchange.USD_PRECISION,
 		Qty:   exchange.SATOSHI,
 	}
 	oms.OnFill("BTC/USD", fill2, exchange.SATOSHI)
@@ -78,7 +78,7 @@ func TestNettingOMSReducePosition(t *testing.T) {
 		t.Fatalf("Expected position qty %d, got %d", exchange.SATOSHI, pos.Qty)
 	}
 
-	expectedPnL := int64((51000 - 50000) * exchange.SATOSHI)
+	expectedPnL := int64(1000 * exchange.USD_PRECISION)
 	if pos.RealizedPnL != expectedPnL {
 		t.Fatalf("Expected realized PnL %d, got %d", expectedPnL, pos.RealizedPnL)
 	}
@@ -89,14 +89,14 @@ func TestNettingOMSClosePosition(t *testing.T) {
 
 	fill1 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * exchange.SATOSHI,
+		Price: 50000 * exchange.USD_PRECISION,
 		Qty:   exchange.SATOSHI,
 	}
 	oms.OnFill("BTC/USD", fill1, exchange.SATOSHI)
 
 	fill2 := OrderFillEvent{
 		Side:  exchange.Sell,
-		Price: 51000 * exchange.SATOSHI,
+		Price: 51000 * exchange.USD_PRECISION,
 		Qty:   exchange.SATOSHI,
 	}
 	oms.OnFill("BTC/USD", fill2, exchange.SATOSHI)
@@ -106,7 +106,7 @@ func TestNettingOMSClosePosition(t *testing.T) {
 		t.Fatalf("Expected position qty 0, got %d", pos.Qty)
 	}
 
-	expectedPnL := int64((51000 - 50000) * exchange.SATOSHI)
+	expectedPnL := int64(1000 * exchange.USD_PRECISION)
 	if pos.RealizedPnL != expectedPnL {
 		t.Fatalf("Expected realized PnL %d, got %d", expectedPnL, pos.RealizedPnL)
 	}
@@ -117,14 +117,14 @@ func TestNettingOMSFlipPosition(t *testing.T) {
 
 	fill1 := OrderFillEvent{
 		Side:  exchange.Buy,
-		Price: 50000 * exchange.SATOSHI,
+		Price: 50000 * exchange.USD_PRECISION,
 		Qty:   exchange.SATOSHI,
 	}
 	oms.OnFill("BTC/USD", fill1, exchange.SATOSHI)
 
 	fill2 := OrderFillEvent{
 		Side:  exchange.Sell,
-		Price: 51000 * exchange.SATOSHI,
+		Price: 51000 * exchange.USD_PRECISION,
 		Qty:   2 * exchange.SATOSHI,
 	}
 	oms.OnFill("BTC/USD", fill2, exchange.SATOSHI)
@@ -133,11 +133,11 @@ func TestNettingOMSFlipPosition(t *testing.T) {
 	if pos.Qty != -exchange.SATOSHI {
 		t.Fatalf("Expected position qty %d, got %d", -exchange.SATOSHI, pos.Qty)
 	}
-	if pos.AvgPrice != 51000*exchange.SATOSHI {
-		t.Fatalf("Expected avg price %d (flip price), got %d", 51000*exchange.SATOSHI, pos.AvgPrice)
+	if pos.AvgPrice != 51000*exchange.USD_PRECISION {
+		t.Fatalf("Expected avg price %d (flip price), got %d", 51000*exchange.USD_PRECISION, pos.AvgPrice)
 	}
 
-	expectedPnL := int64((51000 - 50000) * exchange.SATOSHI)
+	expectedPnL := int64(1000 * exchange.USD_PRECISION)
 	if pos.RealizedPnL != expectedPnL {
 		t.Fatalf("Expected realized PnL %d, got %d", expectedPnL, pos.RealizedPnL)
 	}
