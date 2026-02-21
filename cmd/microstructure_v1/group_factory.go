@@ -356,14 +356,16 @@ func (gf *GroupFactory) CreateFundingArbGroups() []*actor.CompositeActor {
 		spotSymbol := cfg.asset + "/USD"
 		perpSymbol := cfg.asset + "-PERP"
 		sub := actors.NewInternalFundingArb(actors.InternalFundingArbConfig{
-			ActorID:         gf.nextActorID,
-			SpotSymbol:      spotSymbol,
-			PerpSymbol:      perpSymbol,
-			SpotInstrument:  gf.marketConfig.Instruments[spotSymbol],
-			PerpInstrument:  gf.marketConfig.Instruments[perpSymbol],
-			MinFundingRate:  3,
-			ExitFundingRate: 1,
-			MaxPositionSize: 100 * ASSET_PRECISION, // Increased limit
+			ActorID:               gf.nextActorID,
+			SpotSymbol:            spotSymbol,
+			PerpSymbol:            perpSymbol,
+			SpotInstrument:        gf.marketConfig.Instruments[spotSymbol],
+			PerpInstrument:        gf.marketConfig.Instruments[perpSymbol],
+			MinFundingRate:        5,   // Enter if funding > 5 bps
+			ExitFundingRate:       1,   // Exit if funding < 1 bps
+			BasisThresholdBps:     10,  // Enter if price diff > 10 bps
+			ExitBasisThresholdBps: 2,   // Exit if price diff < 2 bps
+			MaxPositionSize:       200 * ASSET_PRECISION, // Increased limit
 		})
 		gf.nextActorID++
 

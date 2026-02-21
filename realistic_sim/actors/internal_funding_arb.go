@@ -1,6 +1,8 @@
 package actors
 
 import (
+	"log"
+
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
 )
@@ -11,10 +13,25 @@ type InternalFundingArbConfig struct {
 	PerpSymbol      string
 	SpotInstrument  exchange.Instrument
 	PerpInstrument  exchange.Instrument
+	
+	// Funding Rate Trigger (bps)
 	MinFundingRate  int64
 	ExitFundingRate int64
+	
+	// Basis Trigger (bps) - (PerpPrice - SpotPrice) / SpotPrice
+	BasisThresholdBps     int64 
+	ExitBasisThresholdBps int64
+	
 	MaxPositionSize int64
 }
+
+type ArbMode int
+
+const (
+	ModeNone ArbMode = iota
+	ModeContango    // Long Spot, Short Perp (Positive basis or funding)
+	ModeBackwardation // Short Spot, Long Perp (Negative basis or funding)
+)
 
 type InternalFundingArb struct {
 	id        uint64
@@ -27,8 +44,9 @@ type InternalFundingArb struct {
 	perpMid         int64
 	fundingRate     int64
 	lastNextFunding int64
-	isActive        bool
-	pendingExit     bool // exit orders submitted, waiting for fills
+	
+	currentMode ArbMode
+	pendingExit bool // exit orders submitted, waiting for fills
 
 	pendingRequests map[uint64]string // requestID → symbol
 	orderSymbols    map[uint64]string // orderID → symbol
@@ -48,6 +66,7 @@ func NewInternalFundingArb(config InternalFundingArbConfig) *InternalFundingArb 
 		baseAsset:       baseAsset,
 		pendingRequests: make(map[uint64]string),
 		orderSymbols:    make(map[uint64]string),
+		currentMode:     ModeNone,
 	}
 }
 
@@ -105,11 +124,19 @@ func (ifa *InternalFundingArb) onOrderFilled(fill actor.OrderFillEvent, ctx *act
 
 	symbol, ok := ifa.orderSymbols[fill.OrderID]
 	if !ok {
-		// Fallback: entry is always spot=Buy, perp=Sell
+		// Fallback detection logic if orderIDs lost
 		if fill.Side == exchange.Buy {
-			symbol = ifa.config.SpotSymbol
+			if ifa.currentMode == ModeContango {
+				symbol = ifa.config.SpotSymbol
+			} else {
+				symbol = ifa.config.PerpSymbol
+			}
 		} else {
-			symbol = ifa.config.PerpSymbol
+			if ifa.currentMode == ModeContango {
+				symbol = ifa.config.PerpSymbol
+			} else {
+				symbol = ifa.config.SpotSymbol
+			}
 		}
 	}
 	if fill.IsFull {
@@ -129,7 +156,8 @@ func (ifa *InternalFundingArb) onFundingUpdate(update actor.FundingUpdateEvent, 
 	if update.Symbol != ifa.config.PerpSymbol {
 		return
 	}
-	if ifa.lastNextFunding != 0 && update.FundingRate.NextFunding > ifa.lastNextFunding && ifa.isActive {
+	// Funding settlement logic
+	if ifa.lastNextFunding != 0 && update.FundingRate.NextFunding > ifa.lastNextFunding && ifa.currentMode != ModeNone {
 		precision := int64(100_000_000)
 		if ifa.config.PerpInstrument != nil {
 			precision = ifa.config.PerpInstrument.BasePrecision()
@@ -141,10 +169,17 @@ func (ifa *InternalFundingArb) onFundingUpdate(update actor.FundingUpdateEvent, 
 				absPos = -absPos
 			}
 			entryPrice := ifa.perpOMS.GetPosition(ifa.config.PerpSymbol).AvgPrice
+			if entryPrice == 0 {
+				entryPrice = ifa.perpMid
+			}
 			fundingAmount := absPos * entryPrice / precision * ifa.fundingRate / 10000
-			if perpPos < 0 {
+			
+			// Pay or Receive funding
+			if (perpPos < 0 && ifa.fundingRate > 0) || (perpPos > 0 && ifa.fundingRate < 0) {
+				// Receive funding
 				ctx.UpdateBalances("", 0, fundingAmount)
-			} else {
+			} else if (perpPos < 0 && ifa.fundingRate < 0) || (perpPos > 0 && ifa.fundingRate > 0) {
+				// Pay funding
 				ctx.UpdateBalances("", 0, -fundingAmount)
 			}
 		}
@@ -161,7 +196,7 @@ func (ifa *InternalFundingArb) onOrderRejected(rejected actor.OrderRejectedEvent
 	if ifa.pendingExit {
 		ifa.pendingExit = false // allow exit retry
 	} else {
-		ifa.isActive = false // entry rejected: allow re-entry
+		ifa.currentMode = ModeNone // entry rejected: allow re-entry
 	}
 }
 
@@ -170,9 +205,15 @@ func (ifa *InternalFundingArb) evaluateStrategy(ctx *actor.SharedContext, submit
 		return
 	}
 
-	if !ifa.isActive {
-		if ifa.fundingRate >= ifa.config.MinFundingRate {
-			ifa.enterPosition(ctx, submit)
+	// Basis calculation in bps: (Perp - Spot) / Spot * 10000
+	basisBps := (ifa.perpMid - ifa.spotMid) * 10000 / ifa.spotMid
+
+	if ifa.currentMode == ModeNone {
+		// Entry logic
+		if basisBps >= ifa.config.BasisThresholdBps || ifa.fundingRate >= ifa.config.MinFundingRate {
+			ifa.enterPosition(ctx, submit, ModeContango)
+		} else if basisBps <= -ifa.config.BasisThresholdBps || ifa.fundingRate <= -ifa.config.MinFundingRate {
+			ifa.enterPosition(ctx, submit, ModeBackwardation)
 		}
 	} else {
 		if ifa.pendingExit {
@@ -180,16 +221,32 @@ func (ifa *InternalFundingArb) evaluateStrategy(ctx *actor.SharedContext, submit
 			spotFlat := ifa.spotOMS.GetNetPosition(ifa.config.SpotSymbol) == 0
 			perpFlat := ifa.perpOMS.GetNetPosition(ifa.config.PerpSymbol) == 0
 			if spotFlat && perpFlat {
-				ifa.isActive = false
+				ifa.currentMode = ModeNone
 				ifa.pendingExit = false
 			}
-		} else if ifa.fundingRate < ifa.config.ExitFundingRate {
-			ifa.exitPosition(ctx, submit)
+		} else {
+			// Exit logic
+			shouldExit := false
+			if ifa.currentMode == ModeContango {
+				// Exit if basis shrinks or funding turns negative
+				if basisBps < ifa.config.ExitBasisThresholdBps && ifa.fundingRate < ifa.config.ExitFundingRate {
+					shouldExit = true
+				}
+			} else if ifa.currentMode == ModeBackwardation {
+				// Exit if negative basis shrinks or funding turns positive
+				if basisBps > -ifa.config.ExitBasisThresholdBps && ifa.fundingRate > -ifa.config.ExitFundingRate {
+					shouldExit = true
+				}
+			}
+			
+			if shouldExit {
+				ifa.exitPosition(ctx, submit)
+			}
 		}
 	}
 }
 
-func (ifa *InternalFundingArb) enterPosition(ctx *actor.SharedContext, submit actor.OrderSubmitter) {
+func (ifa *InternalFundingArb) enterPosition(ctx *actor.SharedContext, submit actor.OrderSubmitter, mode ArbMode) {
 	spotPos := ifa.spotOMS.GetNetPosition(ifa.config.SpotSymbol)
 	perpPos := ifa.perpOMS.GetNetPosition(ifa.config.PerpSymbol)
 
@@ -197,35 +254,74 @@ func (ifa *InternalFundingArb) enterPosition(ctx *actor.SharedContext, submit ac
 		return
 	}
 
-	if !ctx.CanSubmitOrder(ifa.id, ifa.config.SpotSymbol, exchange.Buy, ifa.config.MaxPositionSize, ifa.config.MaxPositionSize) {
-		return
-	}
-	if !ctx.CanSubmitOrder(ifa.id, ifa.config.PerpSymbol, exchange.Sell, ifa.config.MaxPositionSize, ifa.config.MaxPositionSize) {
-		return
+	ifa.currentMode = mode
+	log.Printf("[InternalFundingArb %d] Entering %v: SpotMid=%d, PerpMid=%d, Funding=%d bps", 
+		ifa.id, mode, ifa.spotMid, ifa.perpMid, ifa.fundingRate)
+
+	precision := int64(100_000_000)
+	if ifa.config.SpotInstrument != nil {
+		precision = ifa.config.SpotInstrument.BasePrecision()
 	}
 
-	spotReqID := submit(ifa.config.SpotSymbol, exchange.Buy, exchange.Market, 0, ifa.config.MaxPositionSize)
-	perpReqID := submit(ifa.config.PerpSymbol, exchange.Sell, exchange.Market, 0, ifa.config.MaxPositionSize)
-	ifa.pendingRequests[spotReqID] = ifa.config.SpotSymbol
-	ifa.pendingRequests[perpReqID] = ifa.config.PerpSymbol
-
-	ifa.isActive = true
+	if mode == ModeContango {
+		// Long Spot, Short Perp
+		if !ctx.CanReserveQuote(ifa.config.MaxPositionSize * ifa.spotMid / precision) {
+			ifa.currentMode = ModeNone
+			return
+		}
+		spotReqID := submit(ifa.config.SpotSymbol, exchange.Buy, exchange.Market, 0, ifa.config.MaxPositionSize)
+		perpReqID := submit(ifa.config.PerpSymbol, exchange.Sell, exchange.Market, 0, ifa.config.MaxPositionSize)
+		ifa.pendingRequests[spotReqID] = ifa.config.SpotSymbol
+		ifa.pendingRequests[perpReqID] = ifa.config.PerpSymbol
+	} else {
+		// Short Spot, Long Perp
+		// (Warning: Shorting spot requires borrowing, which must be enabled in exchange)
+		spotReqID := submit(ifa.config.SpotSymbol, exchange.Sell, exchange.Market, 0, ifa.config.MaxPositionSize)
+		perpReqID := submit(ifa.config.PerpSymbol, exchange.Buy, exchange.Market, 0, ifa.config.MaxPositionSize)
+		ifa.pendingRequests[spotReqID] = ifa.config.SpotSymbol
+		ifa.pendingRequests[perpReqID] = ifa.config.PerpSymbol
+	}
 }
 
 func (ifa *InternalFundingArb) exitPosition(_ *actor.SharedContext, submit actor.OrderSubmitter) {
 	spotPos := ifa.spotOMS.GetNetPosition(ifa.config.SpotSymbol)
 	perpPos := ifa.perpOMS.GetNetPosition(ifa.config.PerpSymbol)
 
-	if spotPos > 0 {
-		reqID := submit(ifa.config.SpotSymbol, exchange.Sell, exchange.Market, 0, spotPos)
+	log.Printf("[InternalFundingArb %d] Exiting Mode %v: SpotPos=%d, PerpPos=%d", 
+		ifa.id, ifa.currentMode, spotPos, perpPos)
+
+	if spotPos != 0 {
+		side := exchange.Sell
+		qty := spotPos
+		if spotPos < 0 {
+			side = exchange.Buy
+			qty = -spotPos
+		}
+		reqID := submit(ifa.config.SpotSymbol, side, exchange.Market, 0, qty)
 		ifa.pendingRequests[reqID] = ifa.config.SpotSymbol
 	}
 
-	if perpPos < 0 {
-		reqID := submit(ifa.config.PerpSymbol, exchange.Buy, exchange.Market, 0, -perpPos)
+	if perpPos != 0 {
+		side := exchange.Buy
+		qty := -perpPos
+		if perpPos > 0 {
+			side = exchange.Sell
+			qty = perpPos
+		}
+		reqID := submit(ifa.config.PerpSymbol, side, exchange.Market, 0, qty)
 		ifa.pendingRequests[reqID] = ifa.config.PerpSymbol
 	}
 
-	// isActive stays true; evaluateStrategy clears it once OMS confirms flat.
 	ifa.pendingExit = true
+}
+
+func (m ArbMode) String() string {
+	switch m {
+	case ModeContango:
+		return "Contango (L Spot/S Perp)"
+	case ModeBackwardation:
+		return "Backwardation (S Spot/L Perp)"
+	default:
+		return "None"
+	}
 }

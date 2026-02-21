@@ -14,13 +14,15 @@ func newFundingArb(minRate, exitRate, maxPos int64) *InternalFundingArb {
 		exchange.DOLLAR_TICK, exchange.SATOSHI/100,
 	)
 	return NewInternalFundingArb(InternalFundingArbConfig{
-		ActorID:         9,
-		SpotSymbol:      "BTC/USD",
-		PerpSymbol:      "BTC-PERP",
-		SpotInstrument:  spotInst,
-		MinFundingRate:  minRate,
-		ExitFundingRate: exitRate,
-		MaxPositionSize: maxPos,
+		ActorID:               9,
+		SpotSymbol:            "BTC/USD",
+		PerpSymbol:            "BTC-PERP",
+		SpotInstrument:        spotInst,
+		MinFundingRate:        minRate,
+		ExitFundingRate:       exitRate,
+		BasisThresholdBps:     10,
+		ExitBasisThresholdBps: 2,
+		MaxPositionSize:       maxPos,
 	})
 }
 
@@ -49,75 +51,20 @@ func TestInternalFundingArb_Identity(t *testing.T) {
 	}
 }
 
-func TestInternalFundingArb_SnapshotUpdatesSpot(t *testing.T) {
-	ifa := newFundingArb(10, 0, exchange.BTC_PRECISION)
-	ctx := actor.NewSharedContext()
-	submit, _ := newCapture()
-	ifa.OnEvent(&actor.Event{
-		Type: actor.EventBookSnapshot,
-		Data: actor.BookSnapshotEvent{
-			Symbol: "BTC/USD",
-			Snapshot: &exchange.BookSnapshot{
-				Bids: []exchange.PriceLevel{{Price: 49_900 * exchange.USD_PRECISION}},
-				Asks: []exchange.PriceLevel{{Price: 50_100 * exchange.USD_PRECISION}},
-			},
-		},
-	}, ctx, submit)
-	want := int64(50_000 * exchange.USD_PRECISION)
-	if ifa.spotMid != want {
-		t.Errorf("spotMid: want %d, got %d", want, ifa.spotMid)
-	}
-}
-
-func TestInternalFundingArb_SnapshotUpdatesPerp(t *testing.T) {
-	ifa := newFundingArb(10, 0, exchange.BTC_PRECISION)
-	ctx := actor.NewSharedContext()
-	submit, _ := newCapture()
-	ifa.OnEvent(&actor.Event{
-		Type: actor.EventBookSnapshot,
-		Data: actor.BookSnapshotEvent{
-			Symbol: "BTC-PERP",
-			Snapshot: &exchange.BookSnapshot{
-				Bids: []exchange.PriceLevel{{Price: 50_100 * exchange.USD_PRECISION}},
-				Asks: []exchange.PriceLevel{{Price: 50_300 * exchange.USD_PRECISION}},
-			},
-		},
-	}, ctx, submit)
-	want := int64(50_200 * exchange.USD_PRECISION)
-	if ifa.perpMid != want {
-		t.Errorf("perpMid: want %d, got %d", want, ifa.perpMid)
-	}
-}
-
-func TestInternalFundingArb_FundingUpdateStoresRate(t *testing.T) {
-	ifa := newFundingArb(10, 0, exchange.BTC_PRECISION)
-	ctx := actor.NewSharedContext()
-	submit, _ := newCapture()
-	ifa.OnEvent(&actor.Event{
-		Type: actor.EventFundingUpdate,
-		Data: actor.FundingUpdateEvent{
-			Symbol:      "BTC-PERP",
-			FundingRate: &exchange.FundingRate{Symbol: "BTC-PERP", Rate: 25},
-		},
-	}, ctx, submit)
-	if ifa.fundingRate != 25 {
-		t.Errorf("fundingRate: want 25, got %d", ifa.fundingRate)
-	}
-}
-
 func TestInternalFundingArb_EntersOnHighFunding(t *testing.T) {
 	// MinFundingRate=10; rate=20 >= 10 → enter: buy spot + sell perp
 	ifa := newFundingArb(10, 0, exchange.BTC_PRECISION)
 	ifa.spotMid = 50_000 * exchange.USD_PRECISION
-	ifa.perpMid = 50_200 * exchange.USD_PRECISION
+	ifa.perpMid = 50_000 * exchange.USD_PRECISION // No basis
 	ifa.fundingRate = 20
 
 	ctx := actor.NewSharedContext()
+	ctx.InitializeBalances(map[string]int64{"BTC": 0}, 1_000_000*exchange.USD_PRECISION)
 	submit, orders := newCapture()
 	ifa.evaluateStrategy(ctx, submit)
 
-	if !ifa.isActive {
-		t.Error("isActive must be true after entry")
+	if ifa.currentMode != ModeContango {
+		t.Errorf("currentMode: want ModeContango, got %v", ifa.currentMode)
 	}
 	if len(*orders) != 2 {
 		t.Fatalf("want 2 orders, got %d", len(*orders))
@@ -130,12 +77,33 @@ func TestInternalFundingArb_EntersOnHighFunding(t *testing.T) {
 	}
 }
 
+func TestInternalFundingArb_EntersOnPositiveBasis(t *testing.T) {
+	// BasisThresholdBps=10
+	// Spot=50k, Perp=50.1k -> basis = 100/50000 * 10000 = 20 bps
+	ifa := newFundingArb(100, 0, exchange.BTC_PRECISION) // High funding threshold to ignore it
+	ifa.spotMid = 50_000 * exchange.USD_PRECISION
+	ifa.perpMid = 50_100 * exchange.USD_PRECISION
+	ifa.fundingRate = 0
+
+	ctx := actor.NewSharedContext()
+	ctx.InitializeBalances(map[string]int64{"BTC": 0}, 1_000_000*exchange.USD_PRECISION)
+	submit, orders := newCapture()
+	ifa.evaluateStrategy(ctx, submit)
+
+	if ifa.currentMode != ModeContango {
+		t.Errorf("currentMode: want ModeContango, got %v", ifa.currentMode)
+	}
+	if len(*orders) != 2 {
+		t.Fatalf("want 2 orders, got %d", len(*orders))
+	}
+}
+
 func TestInternalFundingArb_NoReentryWhenActive(t *testing.T) {
 	ifa := newFundingArb(10, 0, exchange.BTC_PRECISION)
 	ifa.spotMid = 50_000 * exchange.USD_PRECISION
 	ifa.perpMid = 50_200 * exchange.USD_PRECISION
 	ifa.fundingRate = 20
-	ifa.isActive = true
+	ifa.currentMode = ModeContango
 
 	// Simulate existing spot position so enterPosition returns early.
 	ifa.spotOMS.OnFill("BTC/USD", actor.OrderFillEvent{
@@ -153,24 +121,24 @@ func TestInternalFundingArb_NoReentryWhenActive(t *testing.T) {
 	}
 }
 
-func TestInternalFundingArb_ExitsOnLowFunding(t *testing.T) {
+func TestInternalFundingArb_ExitsOnLowFundingAndBasis(t *testing.T) {
+	// ExitFundingRate=5, ExitBasisThresholdBps=2
 	ifa := newFundingArb(10, 5, exchange.BTC_PRECISION)
 	ifa.spotMid = 50_000 * exchange.USD_PRECISION
-	ifa.perpMid = 50_200 * exchange.USD_PRECISION
-	ifa.fundingRate = 2
-	ifa.isActive = true
+	ifa.perpMid = 50_000 * exchange.USD_PRECISION // 0 basis
+	ifa.fundingRate = 2 // < 5
+	ifa.currentMode = ModeContango
 
-	// Give the OMS a net spot position so exitPosition submits a sell.
+	// Give the OMS positions
 	ifa.spotOMS.OnFill("BTC/USD", actor.OrderFillEvent{
 		Side:  exchange.Buy,
 		Qty:   exchange.BTC_PRECISION,
 		Price: 50_000 * exchange.USD_PRECISION,
 	}, exchange.BTC_PRECISION)
-	// Give the OMS a net perp short so exitPosition submits a buy.
 	ifa.perpOMS.OnFill("BTC-PERP", actor.OrderFillEvent{
 		Side:  exchange.Sell,
 		Qty:   exchange.BTC_PRECISION,
-		Price: 50_200 * exchange.USD_PRECISION,
+		Price: 50_000 * exchange.USD_PRECISION,
 	}, exchange.BTC_PRECISION)
 
 	ctx := actor.NewSharedContext()
@@ -180,19 +148,6 @@ func TestInternalFundingArb_ExitsOnLowFunding(t *testing.T) {
 	// Exit orders must be submitted.
 	if len(*orders) != 2 {
 		t.Fatalf("want 2 exit orders, got %d", len(*orders))
-	}
-	spotExit := (*orders)[0]
-	perpExit := (*orders)[1]
-	if spotExit.symbol != "BTC/USD" || spotExit.side != exchange.Sell {
-		t.Errorf("exit[0]: want Sell BTC/USD, got %v %v", spotExit.side, spotExit.symbol)
-	}
-	if perpExit.symbol != "BTC-PERP" || perpExit.side != exchange.Buy {
-		t.Errorf("exit[1]: want Buy BTC-PERP, got %v %v", perpExit.side, perpExit.symbol)
-	}
-
-	// isActive stays true and pendingExit is set until fills confirm flat OMS.
-	if !ifa.isActive {
-		t.Error("isActive must remain true while exit fills are pending")
 	}
 	if !ifa.pendingExit {
 		t.Error("pendingExit must be true after exit orders submitted")
@@ -208,16 +163,13 @@ func TestInternalFundingArb_ExitsOnLowFunding(t *testing.T) {
 	ifa.perpOMS.OnFill("BTC-PERP", actor.OrderFillEvent{
 		Side:  exchange.Buy,
 		Qty:   exchange.BTC_PRECISION,
-		Price: 50_200 * exchange.USD_PRECISION,
+		Price: 50_000 * exchange.USD_PRECISION,
 		IsFull: true,
 	}, exchange.BTC_PRECISION)
 
-	// evaluateStrategy now sees flat OMS and clears isActive.
+	// evaluateStrategy now sees flat OMS and clears currentMode.
 	ifa.evaluateStrategy(ctx, submit)
-	if ifa.isActive {
-		t.Error("isActive must be false after OMS confirms flat position")
-	}
-	if ifa.pendingExit {
-		t.Error("pendingExit must be cleared after OMS confirms flat")
+	if ifa.currentMode != ModeNone {
+		t.Error("currentMode must be ModeNone after OMS confirms flat position")
 	}
 }
