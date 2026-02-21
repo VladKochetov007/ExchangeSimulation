@@ -43,6 +43,7 @@ func (gf *GroupFactory) CreatePerpMMGroup() *actor.CompositeActor {
 	gf.nextClientID++
 
 	latencyConfig := simulation.LatencyConfig{
+		Mode:              simulation.LatencyMarketData,
 		MarketDataLatency: simulation.NewUniformRandomLatency(1*time.Millisecond, 2*time.Millisecond, int64(gf.nextClientID)),
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
@@ -97,6 +98,7 @@ func (gf *GroupFactory) CreateSpotMMGroup() *actor.CompositeActor {
 	gf.nextClientID++
 
 	latencyConfig := simulation.LatencyConfig{
+		Mode:              simulation.LatencyMarketData,
 		MarketDataLatency: simulation.NewUniformRandomLatency(500*time.Microsecond, 1*time.Millisecond, int64(gf.nextClientID)),
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
@@ -153,6 +155,7 @@ func (gf *GroupFactory) CreateSpotABCMMGroup() *actor.CompositeActor {
 	gf.nextClientID++
 
 	latencyConfig := simulation.LatencyConfig{
+		Mode:              simulation.LatencyMarketData,
 		MarketDataLatency: simulation.NewUniformRandomLatency(500*time.Microsecond, 1*time.Millisecond, int64(gf.nextClientID)),
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
@@ -209,6 +212,7 @@ func (gf *GroupFactory) CreateSpotTakerGroup() *actor.CompositeActor {
 	gf.nextClientID++
 
 	latencyConfig := simulation.LatencyConfig{
+		Mode:              simulation.LatencyMarketData,
 		MarketDataLatency: simulation.NewUniformRandomLatency(5*time.Millisecond, 10*time.Millisecond, int64(gf.nextClientID)),
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
@@ -224,8 +228,8 @@ func (gf *GroupFactory) CreateSpotTakerGroup() *actor.CompositeActor {
 		for i := range 2 {
 			sub := actors.NewRandomTakerSubActor(gf.nextActorID, symbol, actors.RandomTakerSubActorConfig{
 				Interval:    time.Duration(1000+i*500) * time.Millisecond,
-				MinQty:      ASSET_PRECISION / 10,
-				MaxQty:      ASSET_PRECISION / 2,
+				MinQty:      ASSET_PRECISION / 5,
+				MaxQty:      2 * ASSET_PRECISION,
 				Precision:   ASSET_PRECISION,
 				Instrument:  inst,
 				TakerFeeBps: 15,
@@ -267,6 +271,7 @@ func (gf *GroupFactory) CreateSpotABCTakerGroup() *actor.CompositeActor {
 	gf.nextClientID++
 
 	latencyConfig := simulation.LatencyConfig{
+		Mode:              simulation.LatencyMarketData,
 		MarketDataLatency: simulation.NewUniformRandomLatency(5*time.Millisecond, 10*time.Millisecond, int64(gf.nextClientID)),
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
@@ -282,8 +287,8 @@ func (gf *GroupFactory) CreateSpotABCTakerGroup() *actor.CompositeActor {
 		for i := range 2 {
 			sub := actors.NewRandomTakerSubActor(gf.nextActorID, symbol, actors.RandomTakerSubActorConfig{
 				Interval:    time.Duration(1000+i*500) * time.Millisecond,
-				MinQty:      ASSET_PRECISION / 10,
-				MaxQty:      ASSET_PRECISION / 2,
+				MinQty:      ASSET_PRECISION / 5,
+				MaxQty:      2 * ASSET_PRECISION,
 				Precision:   ASSET_PRECISION,
 				Instrument:  inst,
 				TakerFeeBps: 15,
@@ -328,6 +333,7 @@ func (gf *GroupFactory) CreatePerpTakerGroup() *actor.CompositeActor {
 	gf.nextClientID++
 
 	latencyConfig := simulation.LatencyConfig{
+		Mode:              simulation.LatencyMarketData,
 		MarketDataLatency: simulation.NewUniformRandomLatency(5*time.Millisecond, 10*time.Millisecond, int64(gf.nextClientID)),
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
@@ -343,10 +349,10 @@ func (gf *GroupFactory) CreatePerpTakerGroup() *actor.CompositeActor {
 		for i := range 2 {
 			sub := actors.NewRandomTakerSubActor(gf.nextActorID, symbol, actors.RandomTakerSubActorConfig{
 				Interval:    time.Duration(1000+i*500) * time.Millisecond,
-				MinQty:      ASSET_PRECISION / 10,
-				MaxQty:      ASSET_PRECISION / 2,
+				MinQty:      ASSET_PRECISION / 5,
+				MaxQty:      2 * ASSET_PRECISION,
 				Precision:   ASSET_PRECISION,
-				Instrument:  inst,  // IsPerp() == true: skips spot base-balance sell check
+				Instrument:  inst, // IsPerp() == true: skips spot base-balance sell check
 				TakerFeeBps: 15,
 			}, seed)
 			subActors = append(subActors, sub)
@@ -389,6 +395,7 @@ func (gf *GroupFactory) CreateFundingArbGroup() *actor.CompositeActor {
 	gf.nextClientID++
 
 	latencyConfig := simulation.LatencyConfig{
+		Mode:              simulation.LatencyMarketData,
 		MarketDataLatency: simulation.NewUniformRandomLatency(2*time.Millisecond, 3*time.Millisecond, int64(gf.nextClientID)),
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)
@@ -446,6 +453,7 @@ func (gf *GroupFactory) CreateTriangleArbGroup() *actor.CompositeActor {
 	gf.nextClientID++
 
 	latencyConfig := simulation.LatencyConfig{
+		Mode:              simulation.LatencyMarketData,
 		MarketDataLatency: simulation.NewUniformRandomLatency(1*time.Millisecond, 2*time.Millisecond, int64(gf.nextClientID)),
 	}
 	delayedGateway := simulation.NewDelayedGateway(gateway, latencyConfig)

@@ -104,7 +104,17 @@ func (ca *CompositeActor) SubmitOrder(symbol string, side exchange.Side, orderTy
 		},
 	}
 
-	ca.Gateway().RequestCh <- req
+	gw := ca.Gateway()
+	gw.Mu.Lock()
+	if !gw.Running {
+		gw.Mu.Unlock()
+		return reqID
+	}
+	gw.Mu.Unlock()
+	select {
+	case gw.RequestCh <- req:
+	default:
+	}
 	return reqID
 }
 

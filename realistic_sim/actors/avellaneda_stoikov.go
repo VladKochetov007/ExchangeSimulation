@@ -2,7 +2,7 @@ package actors
 
 import (
 	"context"
-	"sync/atomic"
+	"math"
 	"time"
 
 	"exchange_sim/actor"
@@ -33,7 +33,6 @@ type AvellanedaStoikovActor struct {
 	lastBidReqID  uint64
 	lastAskReqID  uint64
 	lastMid       int64
-	requestSeq    uint64
 	requeueTicker exchange.Ticker
 	spreadModel   SpreadModel // optional; if set, overrides the AS spread half-delta
 }
@@ -200,8 +199,7 @@ func (as *AvellanedaStoikovActor) calculateQuotes() (bidPrice, askPrice int64) {
 
 	spreadPart1 := ((as.config.Gamma * sigma / scale) * sigma * tau) / (2 * scale * secondsPerYear)
 
-	x := (as.config.Gamma * 10000) / as.config.K
-	lnTerm := x - (x*x)/(2*10000) + (x*x*x)/(3*10000*10000)
+	lnTerm := int64(math.Log(float64(as.config.K+as.config.Gamma)/float64(as.config.K)) * 10000)
 	spreadPart2 := (10000 * lnTerm) / as.config.Gamma
 
 	delta := spreadPart1 + spreadPart2
@@ -231,31 +229,24 @@ func (as *AvellanedaStoikovActor) placeQuotes() {
 	as.cancelActiveQuotes()
 
 	if as.inventory >= as.config.MaxInventory {
-		as.lastAskReqID = atomic.AddUint64(&as.requestSeq, 1)
-		as.SubmitOrder(as.config.Symbol, exchange.Sell, exchange.LimitOrder, askPrice, as.config.QuoteQty)
+		as.lastAskReqID = as.SubmitOrder(as.config.Symbol, exchange.Sell, exchange.LimitOrder, askPrice, as.config.QuoteQty)
 		return
 	}
 
 	if as.inventory <= -as.config.MaxInventory {
-		as.lastBidReqID = atomic.AddUint64(&as.requestSeq, 1)
-		as.SubmitOrder(as.config.Symbol, exchange.Buy, exchange.LimitOrder, bidPrice, as.config.QuoteQty)
+		as.lastBidReqID = as.SubmitOrder(as.config.Symbol, exchange.Buy, exchange.LimitOrder, bidPrice, as.config.QuoteQty)
 		return
 	}
 
-	as.lastBidReqID = atomic.AddUint64(&as.requestSeq, 1)
-	as.SubmitOrder(as.config.Symbol, exchange.Buy, exchange.LimitOrder, bidPrice, as.config.QuoteQty)
-
-	as.lastAskReqID = atomic.AddUint64(&as.requestSeq, 1)
-	as.SubmitOrder(as.config.Symbol, exchange.Sell, exchange.LimitOrder, askPrice, as.config.QuoteQty)
+	as.lastBidReqID = as.SubmitOrder(as.config.Symbol, exchange.Buy, exchange.LimitOrder, bidPrice, as.config.QuoteQty)
+	as.lastAskReqID = as.SubmitOrder(as.config.Symbol, exchange.Sell, exchange.LimitOrder, askPrice, as.config.QuoteQty)
 }
 
 func (as *AvellanedaStoikovActor) cancelActiveQuotes() {
 	if as.activeBidID != 0 {
-		atomic.AddUint64(&as.requestSeq, 1)
 		as.CancelOrder(as.activeBidID)
 	}
 	if as.activeAskID != 0 {
-		atomic.AddUint64(&as.requestSeq, 1)
 		as.CancelOrder(as.activeAskID)
 	}
 }

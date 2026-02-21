@@ -15,15 +15,17 @@ type PureMMSubActorConfig struct {
 }
 
 type PureMMSubActor struct {
-	id              uint64
-	symbol          string
-	config          PureMMSubActorConfig
-	lastMid         int64
-	activeBidID     uint64
-	activeAskID     uint64
-	hasActiveBid    bool
-	hasActiveAsk    bool
-	oms             *actor.NettingOMS
+	id           uint64
+	symbol       string
+	config       PureMMSubActorConfig
+	lastMid      int64
+	activeBidID  uint64
+	activeAskID  uint64
+	lastBidReqID uint64
+	lastAskReqID uint64
+	hasActiveBid bool
+	hasActiveAsk bool
+	oms          *actor.NettingOMS
 }
 
 func NewPureMMSubActor(id uint64, symbol string, config PureMMSubActorConfig) *PureMMSubActor {
@@ -50,6 +52,9 @@ func (pmm *PureMMSubActor) OnEvent(event *actor.Event, ctx *actor.SharedContext,
 
 	case actor.EventOrderFilled, actor.EventOrderPartialFill:
 		pmm.onOrderFilled(event.Data.(actor.OrderFillEvent), ctx, submit)
+
+	case actor.EventOrderAccepted:
+		pmm.onOrderAccepted(event.Data.(actor.OrderAcceptedEvent))
 
 	case actor.EventOrderCancelled:
 		pmm.onOrderCancelled(event.Data.(actor.OrderCancelledEvent))
@@ -78,7 +83,8 @@ func (pmm *PureMMSubActor) onBookSnapshot(snap actor.BookSnapshotEvent, ctx *act
 		return
 	}
 
-	if abs(mid-pmm.lastMid) >= pmm.config.RequoteThreshold {
+	bothDepleted := !pmm.hasActiveBid && !pmm.hasActiveAsk
+	if abs(mid-pmm.lastMid) >= pmm.config.RequoteThreshold || bothDepleted {
 		pmm.lastMid = mid
 		pmm.hasActiveBid = false
 		pmm.hasActiveAsk = false
@@ -105,6 +111,14 @@ func (pmm *PureMMSubActor) onOrderFilled(fill actor.OrderFillEvent, ctx *actor.S
 	}
 }
 
+
+func (pmm *PureMMSubActor) onOrderAccepted(accepted actor.OrderAcceptedEvent) {
+	if accepted.RequestID == pmm.lastBidReqID {
+		pmm.activeBidID = accepted.OrderID
+	} else if accepted.RequestID == pmm.lastAskReqID {
+		pmm.activeAskID = accepted.OrderID
+	}
+}
 
 func (pmm *PureMMSubActor) onOrderCancelled(cancelled actor.OrderCancelledEvent) {
 	if cancelled.OrderID == pmm.activeBidID {
@@ -148,14 +162,14 @@ func (pmm *PureMMSubActor) requote(ctx *actor.SharedContext, submit actor.OrderS
 
 	if currentPos+pmm.config.QuoteSize <= pmm.config.MaxInventory && !pmm.hasActiveBid {
 		if ctx.CanSubmitOrder(pmm.id, pmm.symbol, exchange.Buy, pmm.config.QuoteSize, pmm.config.MaxInventory) {
-			pmm.activeBidID = submit(pmm.symbol, exchange.Buy, exchange.LimitOrder, bidPrice, pmm.config.QuoteSize)
+			pmm.lastBidReqID = submit(pmm.symbol, exchange.Buy, exchange.LimitOrder, bidPrice, pmm.config.QuoteSize)
 			pmm.hasActiveBid = true
 		}
 	}
 
 	if currentPos-pmm.config.QuoteSize >= -pmm.config.MaxInventory && !pmm.hasActiveAsk {
 		if ctx.CanSubmitOrder(pmm.id, pmm.symbol, exchange.Sell, pmm.config.QuoteSize, pmm.config.MaxInventory) {
-			pmm.activeAskID = submit(pmm.symbol, exchange.Sell, exchange.LimitOrder, askPrice, pmm.config.QuoteSize)
+			pmm.lastAskReqID = submit(pmm.symbol, exchange.Sell, exchange.LimitOrder, askPrice, pmm.config.QuoteSize)
 			pmm.hasActiveAsk = true
 		}
 	}

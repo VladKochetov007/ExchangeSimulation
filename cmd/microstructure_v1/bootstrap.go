@@ -56,3 +56,21 @@ func CreateBootstrapActors(ex *exchange.Exchange, marketConfig *MarketConfig, st
 
 	return bootstrapActors, nextActorID
 }
+
+func ShutdownBootstrapActors(ex *exchange.Exchange, bootstrapActors []actor.Actor) {
+	for _, a := range bootstrapActors {
+		lp, ok := a.(*actors.FirstLiquidityProvidingActor)
+		if !ok {
+			continue
+		}
+
+		gw := a.Gateway()
+
+		gw.Mu.Lock()
+		gw.Running = false
+		gw.Mu.Unlock()
+
+		ex.CancelAllClientOrders(gw.ClientID)
+		ex.MDPublisher.Unsubscribe(gw.ClientID, lp.Symbol)
+	}
+}
