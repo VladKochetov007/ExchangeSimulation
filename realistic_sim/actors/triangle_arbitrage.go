@@ -1,6 +1,8 @@
 package actors
 
 import (
+	"log"
+
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
 )
@@ -216,6 +218,7 @@ func (ta *TriangleArbitrage) evaluateArbitrage(_ *actor.SharedContext, submit ac
 	forwardNumer := ta.baseBid*precision - ta.directAsk*ta.crossAsk
 	dac := float64(ta.directAsk) * float64(ta.crossAsk)
 	if float64(forwardNumer)*10000 > float64(minProfit)*dac {
+		log.Printf("[TriangleArb %d] Forward opportunity: spread=%d bps, minProfit=%d bps", ta.id, forwardNumer*10000/int64(dac), minProfit)
 		ta.executeArbitrage(false, submit)
 		return
 	}
@@ -225,6 +228,7 @@ func (ta *TriangleArbitrage) evaluateArbitrage(_ *actor.SharedContext, submit ac
 	reverseNumer := ta.directBid*ta.crossBid - ta.baseAsk*precision
 	bap := float64(ta.baseAsk) * float64(precision)
 	if float64(reverseNumer)*10000 > float64(minProfit)*bap {
+		log.Printf("[TriangleArb %d] Reverse opportunity: spread=%d bps, minProfit=%d bps", ta.id, reverseNumer*10000/int64(bap), minProfit)
 		ta.executeArbitrage(true, submit)
 	}
 }
@@ -240,21 +244,25 @@ func (ta *TriangleArbitrage) executeArbitrage(reverse bool, submit actor.OrderSu
 
 	if !reverse {
 		// USD → ABC → base → USD
-		// Buy MaxTradeSize base via crossSymbol; ABC needed = MaxTradeSize * crossAsk / precision
 		directQty := ta.config.MaxTradeSize * ta.crossAsk / precision
 		if directQty == 0 {
 			directQty = 1
 		}
+		log.Printf("[TriangleArb %d] Executing Forward: BaseSymbol=%s, CrossSymbol=%s, DirectSymbol=%s, Qty=%d, DirectQty=%d",
+			ta.id, ta.config.BaseSymbol, ta.config.CrossSymbol, ta.config.DirectSymbol, ta.config.MaxTradeSize, directQty)
+
 		ta.directReqID = submit(ta.config.DirectSymbol, exchange.Buy, exchange.Market, 0, directQty)
 		ta.crossReqID = submit(ta.config.CrossSymbol, exchange.Buy, exchange.Market, 0, ta.config.MaxTradeSize)
 		ta.baseReqID = submit(ta.config.BaseSymbol, exchange.Sell, exchange.Market, 0, ta.config.MaxTradeSize)
 	} else {
 		// USD → base → ABC → USD
-		// Sell MaxTradeSize base via crossSymbol; ABC received = MaxTradeSize * crossBid / precision
 		directQty := ta.config.MaxTradeSize * ta.crossBid / precision
 		if directQty == 0 {
 			directQty = 1
 		}
+		log.Printf("[TriangleArb %d] Executing Reverse: BaseSymbol=%s, CrossSymbol=%s, DirectSymbol=%s, Qty=%d, DirectQty=%d",
+			ta.id, ta.config.BaseSymbol, ta.config.CrossSymbol, ta.config.DirectSymbol, ta.config.MaxTradeSize, directQty)
+
 		ta.baseReqID = submit(ta.config.BaseSymbol, exchange.Buy, exchange.Market, 0, ta.config.MaxTradeSize)
 		ta.crossReqID = submit(ta.config.CrossSymbol, exchange.Sell, exchange.Market, 0, ta.config.MaxTradeSize)
 		ta.directReqID = submit(ta.config.DirectSymbol, exchange.Sell, exchange.Market, 0, directQty)

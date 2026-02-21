@@ -40,7 +40,7 @@ func CreateBootstrapActors(ex *exchange.Exchange, marketConfig *MarketConfig, st
 		firstLP := actors.NewFirstLP(nextActorID, gateway, actors.FirstLPConfig{
 			Symbol:            symbol,
 			HalfSpreadBps:     50,
-			LiquidityMultiple: 10,
+			LiquidityMultiple: 50,
 			MonitorInterval:   100 * time.Millisecond,
 			MinExitSize:       ASSET_PRECISION / 100,
 			BootstrapPrice:    bootstrapPrice,
