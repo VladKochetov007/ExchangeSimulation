@@ -24,24 +24,16 @@ High-performance exchange simulator for spot and perpetual futures markets. Buil
 - [Balance Snapshots](core-concepts/balance-snapshots.md) - Complete balance state across all wallet types
 
 ### Actor System
-- [Actor System](actors/actor-system.md) - Event-driven actor interface, BaseActor implementation
-- [Market Makers](actors/market-makers.md) - PureMarketMaker, SlowMarketMaker, Avellaneda-Stoikov
-- [Takers](actors/takers.md) - RandomizedTaker, NoiseTrader, MomentumTrader
-- [Arbitrage](actors/arbitrage.md) - Funding arbitrage strategies
+- [Actor System](actors/actor-system.md) - BaseActor, CompositeActor, SubActor, SharedContext
+- [Market Makers](actors/market-makers.md) - SlowMarketMaker, PureMMSubActor, AvellanedaStoikov, SpreadModel
+- [Takers](actors/takers.md) - RandomizedTaker, RandomTakerSubActor, InformedTrader
+- [Arbitrage](actors/arbitrage.md) - InternalFundingArb, TriangleArbitrage
 - [Microstructure Patterns](actors/microstructure-patterns.md) - SimTicker constraints, timer-based MMs, EMA on trades, anti-patterns
 
 ### Simulation Infrastructure
 - [Simulated Time](simulation/simulated-time.md) - Clock abstraction, event scheduling, time compression
 - [Ticker Factories](simulation/ticker-factories.md) - Real vs simulated time tickers
-- [Multi-Venue](simulation/multi-venue.md) - Multi-exchange support and routing
-
-### Advanced Topics
-- [Custom Models](advanced/custom-models.md) - Create custom instruments, matching engines, fee models, price oracles
-- [Fees and Revenue](advanced/fees-and-revenue.md) - Fee models, maker/taker fees, revenue tracking
-- [Borrowing and Leverage](advanced/borrowing-and-leverage.md) - Margin borrowing, cross/isolated margin
-- [Liquidation](advanced/liquidation.md) - Liquidation mechanics, insurance fund
-- [Latency Models](advanced/latency-models.md) - Network latency simulation
-- [Price Oracles](advanced/price-oracles.md) - Mark price, index price, collateral valuation
+- [Price Processes](simulation/price-processes.md) - GBMProcess, latency models
 
 ### Observability
 - [Logging System](observability/logging-system.md) - NDJSON event logging, per-symbol loggers

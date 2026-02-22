@@ -190,6 +190,39 @@ func (c *ZeroFundingCalc) Calculate(indexPrice, markPrice int64) int64 {
 
 Used in randomwalk_v2 to disable funding and isolate price discovery.
 
+### Mark Price Calculators
+
+The mark price fed into `FundingCalc.Calculate` comes from a `MarkPriceCalculator`:
+
+```go
+// MidPriceCalculator — (bestBid + bestAsk) / 2. Default.
+exchange.NewMidPriceCalculator()
+
+// LastPriceCalculator — last traded price. Simple but manipulable.
+exchange.NewLastPriceCalculator()
+
+// WeightedMidPriceCalculator — quantity-weighted mid: thicker side pulls mid toward it.
+exchange.NewWeightedMidPriceCalculator()
+
+// BinanceMarkPrice — median(indexPrice, bestBid, bestAsk).
+// Requires moving two independent inputs to manipulate.
+exchange.NewBinanceMarkPrice("BTC-PERP", indexProvider)
+```
+
+Wire via `ExchangeAutomation`:
+
+```go
+automation := exchange.NewExchangeAutomation(ex, exchange.AutomationConfig{
+    MarkPriceCalc: exchange.NewBinanceMarkPrice("BTC-PERP", gbm),
+    IndexProvider: gbm, // exchange.IndexPriceProvider
+    ...
+})
+```
+
+Index providers: `exchange.NewSpotIndexProvider(ex)` (derives from spot book mid),
+`exchange.NewFixedIndexProvider()` (constant, for testing),
+`simulation.NewGBMProcess(...)` (stochastic fundamental value).
+
 ## Settlement
 
 Funding is charged periodically (e.g., every 8 hours):

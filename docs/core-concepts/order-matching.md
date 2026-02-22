@@ -442,14 +442,12 @@ Reduces GC pressure in high-frequency matching (1M+ orders/second).
 - Rewards large orders at price level
 
 ```go
-type ProRataMatcher struct{}
-
-func (m *ProRataMatcher) Match(bidBook, askBook *Book, order *Order) *MatchResult {
-    // Calculate each resting order's proportion
-    // Distribute incoming order proportionally
-    // Round up/down to handle remainders
-}
+matcher := exchange.NewProRataMatcher()
+ex.AddInstrumentWithMatcher(inst, matcher)
 ```
+
+Fills are distributed proportionally across all resting orders at the best price.
+Remainder after integer division goes to the largest resting order.
 
 **Time-Weighted:**
 - Orders get priority based on time at level
@@ -477,6 +475,27 @@ func (m *CustomMatcher) Match(...) *MatchResult {
     // Match in priority order
 }
 ```
+
+### Circuit Breakers
+
+Two injection points wrap the matching engine:
+
+- **`CircuitBreaker`** (pre-trade): called before matching; can `CBReject` or `CBHalt` a symbol
+- **`HaltEvaluator`** (post-trade): called after each match; can halt on execution data
+
+```go
+// Symmetric ±5% band around last traded price
+cb := &exchange.PercentBandCircuitBreaker{BandBps: 500}
+ex.AddInstrumentWithCircuitBreaker(inst, cb)
+
+// Tiered: wider band → longer halt
+tiered := exchange.NewTieredCircuitBreaker([]exchange.BreakerTier{
+    {BandBps: 500,  HaltDuration: 5 * time.Minute},
+    {BandBps: 1000, HaltDuration: 15 * time.Minute},
+})
+```
+
+Composite breakers combine multiple checks with `CompositeCircuitBreaker{Breakers: []CircuitBreaker{...}}`.
 
 **Supported order types (extensible):**
 

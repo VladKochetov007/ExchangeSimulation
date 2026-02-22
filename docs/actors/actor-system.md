@@ -952,6 +952,67 @@ case EventOrderRejected:
     }
 ```
 
+## CompositeActor and SubActor
+
+For simulations with multiple coordinated strategies sharing one exchange connection and
+one pool of capital, use `CompositeActor` + `SubActor` instead of standalone actors.
+
+### Why
+
+A standalone actor owns its own gateway. If you run a spot MM and a funding arb actor
+separately, they each hold independent USD balances and don't see each other's positions.
+`CompositeActor` wraps N sub-actors behind a single gateway with a shared `SharedContext`.
+
+### SubActor interface
+
+```go
+type SubActor interface {
+    OnEvent(event *Event, ctx *SharedContext, submit OrderSubmitter)
+    GetSymbols() []string
+    GetID() uint64
+}
+
+type OrderSubmitter func(symbol string, side Side, orderType OrderType, price, qty int64) uint64
+```
+
+Events are routed by symbol: each sub-actor only receives events for symbols it returns
+from `GetSymbols()`. Order-lifecycle events (accepted, filled, rejected, cancelled) are
+broadcast to all sub-actors.
+
+### SharedContext
+
+Holds the group's shared balance state. Sub-actors call it to check/update balances
+and track positions.
+
+```go
+ctx.GetQuoteBalance()               // total USD
+ctx.GetAvailableQuote()             // USD minus reserved
+ctx.CanReserveQuote(amount)         // pre-flight check (does NOT deduct)
+ctx.GetBaseBalance("BTC")           // spot base balance
+
+ctx.CanSubmitOrder(id, sym, side, qty, maxInv)  // guard before quoting
+ctx.OnFill(id, sym, fill, prec, base)           // update position + balances
+ctx.UpdateBalances(base, baseDelta, quoteDelta) // direct balance adjustment
+```
+
+### Wiring
+
+```go
+mm := NewPureMMSubActor(1, "BTC/USD", PureMMSubActorConfig{...})
+taker := NewRandomTakerSubActor(2, "BTC/USD", RandomTakerSubActorConfig{...}, seed)
+arb := NewInternalFundingArb(InternalFundingArbConfig{...})
+
+composite := NewCompositeActor(id, gateway, []SubActor{mm, taker, arb})
+composite.InitializeBalances(map[string]int64{"BTC": 100 * BTC_PRECISION}, 10_000 * USD_PRECISION)
+
+// inject cancel capability into sub-actors that need it
+mm.SetCancelFn(composite.CancelOrder)
+
+composite.Start(ctx)
+```
+
+The composite subscribes to all unique symbols from all sub-actors automatically.
+
 ## Best Practices
 
 **Event handling:**
