@@ -437,17 +437,17 @@ Reduces GC pressure in high-frequency matching (1M+ orders/second).
 ### Alternative Matching Models
 
 **Pro-Rata Allocation:**
-- Used by some traditional futures exchanges
-- Distributes fills proportionally by order size
-- Rewards large orders at price level
+- Used by CME Globex, Euronext for liquid futures contracts
+- Distributes fills proportionally by resting order size at each level
+- Rewards larger quotes; queue position (time priority) used only as tiebreaker
 
 ```go
-matcher := exchange.NewProRataMatcher()
-ex.AddInstrumentWithMatcher(inst, matcher)
+ex.Matcher = exchange.NewProRataMatcher()
 ```
 
-Fills are distributed proportionally across all resting orders at the best price.
-Remainder after integer division goes to the largest resting order.
+Set before any orders are placed. Fills are distributed proportionally across all
+resting orders at the best price; remainder after integer division is assigned in
+arrival order (FIFO tiebreaker) until exhausted.
 
 **Time-Weighted:**
 - Orders get priority based on time at level
@@ -480,22 +480,36 @@ func (m *CustomMatcher) Match(...) *MatchResult {
 
 Two injection points wrap the matching engine:
 
-- **`CircuitBreaker`** (pre-trade): called before matching; can `CBReject` or `CBHalt` a symbol
-- **`HaltEvaluator`** (post-trade): called after each match; can halt on execution data
+- **`CircuitBreaker`** (pre-trade): called before each match; can `CBReject` or `CBHalt` a symbol
+- **`HaltEvaluator`** (post-match): called after match with actual executions; halts on fill price
+
+Wire by replacing `ex.Matcher` with a `CircuitBreakerMatcher`:
 
 ```go
 // Symmetric ±5% band around last traded price
 cb := &exchange.PercentBandCircuitBreaker{BandBps: 500}
-ex.AddInstrumentWithCircuitBreaker(inst, cb)
+ex.Matcher = exchange.NewCircuitBreakerMatcher(
+    exchange.NewDefaultMatcher(),
+    cb,
+    ex.Books,
+    ex.Clock,
+)
 
-// Tiered: wider band → longer halt
+// Tiered: ±5% → reject; ±10% → 15-minute halt
 tiered := exchange.NewTieredCircuitBreaker([]exchange.BreakerTier{
-    {BandBps: 500,  HaltDuration: 5 * time.Minute},
-    {BandBps: 1000, HaltDuration: 15 * time.Minute},
+    {ThresholdBps: 500,  Action: exchange.CBReject},
+    {ThresholdBps: 1000, Action: exchange.CBHalt, HaltDuration: 15 * time.Minute},
 })
+tiered.SetRefPrice("BTCUSD", 100_000*exchange.USD_PRECISION)
+ex.Matcher = exchange.NewCircuitBreakerMatcher(exchange.NewDefaultMatcher(), tiered, ex.Books, ex.Clock)
 ```
 
-Composite breakers combine multiple checks with `CompositeCircuitBreaker{Breakers: []CircuitBreaker{...}}`.
+Composite breakers chain multiple checks:
+```go
+&exchange.CompositeCircuitBreaker{Breakers: []exchange.CircuitBreaker{cb1, cb2}}
+```
+
+**Available implementations:** `PercentBandCircuitBreaker` (symmetric ±N%), `AsymmetricBandCircuitBreaker` (independent up/down bands), `TieredCircuitBreaker` (escalating actions), `CompositeCircuitBreaker` (combine multiple).
 
 **Supported order types (extensible):**
 

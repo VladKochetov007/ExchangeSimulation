@@ -114,42 +114,7 @@ Each regime is persistent (Markov chain), not memoryless. This matters for:
 
 ---
 
-## Gap 5 — No Pro-Rata Matching Option
-
-**What exists**: Strict price-time (FIFO) matching only.
-
-**What's missing**: Many futures exchanges (CME, Euronext) use pro-rata at the best price — all resting orders at the best level share fills proportionally to their size, not by arrival time.
-
-This changes MM strategy fundamentally:
-- FIFO: value is in being first in queue (speed matters)
-- Pro-rata: value is in posting large size (queue position irrelevant)
-
-**What to build**:
-- `MatchingAlgorithm` interface injected into `Matcher`
-- `ProRataMatcher`: distribute fill proportionally at each price level
-- `FIFOMatcher` (current behavior): existing `Match()` implementation
-
-This is a library-level change but is clean: `NewExchange` already has a `Matcher` field — the interface just needs to be wider.
-
----
-
-## Gap 6 — No Circuit Breakers / Reference Price Bands
-
-**What's missing**: A flash crash in the simulation immediately liquidates every position in sequence. No halt, no reference price, no cooling-off.
-
-Real exchanges implement:
-- Price band: reject orders more than X% from last traded price
-- Trading halt: pause matching when price moves more than Y% in Z seconds
-- Limit-up/limit-down: daily price limits (futures)
-
-**What to build**:
-- `CircuitBreaker` interface: `ShouldHalt(symbol string, lastPrice, newPrice int64) bool`
-- Plugged into the matching loop before executing each fill
-- `PercentBandCircuitBreaker`: simplest implementation
-
----
-
-## Gap 7 — Funding Rate Uses Static Mark/Index Gap, No Volume-Weighted Mark Price
+## Gap 5 — Funding Rate Uses Static Mark/Index Gap, No Volume-Weighted Mark Price
 
 **What exists**: `SimpleFundingCalc` computes rate from `(markPrice - indexPrice) / indexPrice`. Mark price comes from `MarkPriceCalculator` (currently mid or weighted mid of book).
 
@@ -173,8 +138,6 @@ Real exchanges implement:
 | MM toxicity-blind | Spread realism, MM P&L realism | Small |
 | No fundamental value process | Impact permanence, index anchoring | Small |
 | Latency not load-dependent | HFT latency race realism | Small |
-| No pro-rata matching | CME/futures venue realism | Medium |
-| No circuit breakers | Flash crash behavior | Small |
 | Mark price not EMA/median | Funding rate manipulation resistance | Small |
 
 All gaps are **actor/simulation layer only**. The exchange core (matching, margin, funding, liquidation) is correct and does not need to change. All can be addressed by implementing new actors or injecting new interface implementations without modifying library code.
