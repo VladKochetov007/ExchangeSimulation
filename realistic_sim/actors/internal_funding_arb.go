@@ -225,16 +225,16 @@ func (ifa *InternalFundingArb) evaluateStrategy(ctx *actor.SharedContext, submit
 				ifa.pendingExit = false
 			}
 		} else {
-			// Exit logic
+			// Exit when either signal has reversed — OR so that an arb entered
+			// on basis alone exits when basis compresses, even if funding hasn't
+			// dropped (and vice-versa).
 			shouldExit := false
 			if ifa.currentMode == ModeContango {
-				// Exit if basis shrinks or funding turns negative
-				if basisBps < ifa.config.ExitBasisThresholdBps && ifa.fundingRate < ifa.config.ExitFundingRate {
+				if basisBps < ifa.config.ExitBasisThresholdBps || ifa.fundingRate < ifa.config.ExitFundingRate {
 					shouldExit = true
 				}
 			} else if ifa.currentMode == ModeBackwardation {
-				// Exit if negative basis shrinks or funding turns positive
-				if basisBps > -ifa.config.ExitBasisThresholdBps && ifa.fundingRate > -ifa.config.ExitFundingRate {
+				if basisBps > -ifa.config.ExitBasisThresholdBps || ifa.fundingRate > -ifa.config.ExitFundingRate {
 					shouldExit = true
 				}
 			}
@@ -274,8 +274,11 @@ func (ifa *InternalFundingArb) enterPosition(ctx *actor.SharedContext, submit ac
 		ifa.pendingRequests[spotReqID] = ifa.config.SpotSymbol
 		ifa.pendingRequests[perpReqID] = ifa.config.PerpSymbol
 	} else {
-		// Short Spot, Long Perp
-		// (Warning: Shorting spot requires borrowing, which must be enabled in exchange)
+		// Short Spot, Long Perp — requires holding the base asset to sell spot.
+		if ctx.GetBaseBalance(ifa.baseAsset) < ifa.config.MaxPositionSize {
+			ifa.currentMode = ModeNone
+			return
+		}
 		spotReqID := submit(ifa.config.SpotSymbol, exchange.Sell, exchange.Market, 0, ifa.config.MaxPositionSize)
 		perpReqID := submit(ifa.config.PerpSymbol, exchange.Buy, exchange.Market, 0, ifa.config.MaxPositionSize)
 		ifa.pendingRequests[spotReqID] = ifa.config.SpotSymbol

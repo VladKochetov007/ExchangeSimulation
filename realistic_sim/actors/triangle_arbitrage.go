@@ -153,6 +153,10 @@ func (ta *TriangleArbitrage) onOrderRejected(rejected actor.OrderRejectedEvent) 
 }
 
 func (ta *TriangleArbitrage) onOrderFilled(fill actor.OrderFillEvent, ctx *actor.SharedContext) {
+	// Ignore fills that arrive after a rejection reset all order IDs to zero.
+	if fill.OrderID == 0 {
+		return
+	}
 	switch fill.OrderID {
 	case ta.directOrderID:
 		if ta.config.DirectInstrument != nil {
@@ -218,7 +222,7 @@ func (ta *TriangleArbitrage) evaluateArbitrage(_ *actor.SharedContext, submit ac
 	forwardNumer := ta.baseBid*precision - ta.directAsk*ta.crossAsk
 	dac := float64(ta.directAsk) * float64(ta.crossAsk)
 	if float64(forwardNumer)*10000 > float64(minProfit)*dac {
-		log.Printf("[TriangleArb %d] Forward opportunity: spread=%d bps, minProfit=%d bps", ta.id, forwardNumer*10000/int64(dac), minProfit)
+		log.Printf("[TriangleArb %d] Forward opportunity: spread=%.2f bps, minProfit=%d bps", ta.id, float64(forwardNumer)*10000/dac, minProfit)
 		ta.executeArbitrage(false, submit)
 		return
 	}

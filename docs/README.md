@@ -28,6 +28,7 @@ High-performance exchange simulator for spot and perpetual futures markets. Buil
 - [Market Makers](actors/market-makers.md) - PureMarketMaker, SlowMarketMaker, Avellaneda-Stoikov
 - [Takers](actors/takers.md) - RandomizedTaker, NoiseTrader, MomentumTrader
 - [Arbitrage](actors/arbitrage.md) - Funding arbitrage strategies
+- [Microstructure Patterns](actors/microstructure-patterns.md) - SimTicker constraints, timer-based MMs, EMA on trades, anti-patterns
 
 ### Simulation Infrastructure
 - [Simulated Time](simulation/simulated-time.md) - Clock abstraction, event scheduling, time compression

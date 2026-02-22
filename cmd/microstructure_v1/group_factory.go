@@ -56,17 +56,19 @@ func (gf *GroupFactory) CreatePerpMMGroups() []*actor.CompositeActor {
 
 			sub := actors.NewPureMMSubActor(gf.nextActorID, symbol, actors.PureMMSubActorConfig{
 				SpreadBps:        spreadBps,
-				QuoteSize:        ASSET_PRECISION * 5, // Increased volume
+				QuoteSize:        ASSET_PRECISION * 5,
 				MaxInventory:     100 * ASSET_PRECISION,
 				RequoteThreshold: gf.marketConfig.BootstrapPrices[symbol] / 10000,
 				Precision:        ASSET_PRECISION,
 				BootstrapPrice:   gf.marketConfig.BootstrapPrices[symbol],
+				EMAAlpha:         20,
 			})
 			gf.nextActorID++
 
 			composite := actor.NewCompositeActor(gf.nextActorID, wrappedGateway, []actor.SubActor{sub})
 			gf.nextActorID++
 			composite.InitializeBalances(initialBalances, 100_000_000*USD_PRECISION)
+			sub.SetCancelFn(composite.CancelOrder)
 			groups = append(groups, composite)
 		}
 	}
@@ -154,12 +156,14 @@ func (gf *GroupFactory) CreateSpotABCMMGroups() []*actor.CompositeActor {
 				RequoteThreshold: gf.marketConfig.BootstrapPrices[symbol] / 500,
 				Precision:        ASSET_PRECISION,
 				BootstrapPrice:   gf.marketConfig.BootstrapPrices[symbol],
+				EMAAlpha:         20,
 			})
 			gf.nextActorID++
 
 			composite := actor.NewCompositeActor(gf.nextActorID, wrappedGateway, []actor.SubActor{sub})
 			gf.nextActorID++
 			composite.InitializeBalances(initialBalances, 10_000*ASSET_PRECISION)
+			sub.SetCancelFn(composite.CancelOrder)
 			groups = append(groups, composite)
 		}
 	}
@@ -197,7 +201,7 @@ func (gf *GroupFactory) CreateSpotTakerGroups() []*actor.CompositeActor {
 			wrappedGateway := delayedGateway.ToClientGateway()
 
 			sub := actors.NewRandomTakerSubActor(gf.nextActorID, symbol, actors.RandomTakerSubActorConfig{
-				Interval:    time.Duration(1000+i*500) * time.Millisecond,
+				Interval:    time.Duration(600+i*400) * time.Millisecond,
 				MinQty:      ASSET_PRECISION / 5,
 				MaxQty:      2 * ASSET_PRECISION,
 				Precision:   ASSET_PRECISION,
@@ -246,7 +250,7 @@ func (gf *GroupFactory) CreateSpotABCTakerGroups() []*actor.CompositeActor {
 			wrappedGateway := delayedGateway.ToClientGateway()
 
 			sub := actors.NewRandomTakerSubActor(gf.nextActorID, symbol, actors.RandomTakerSubActorConfig{
-				Interval:    time.Duration(1000+i*500) * time.Millisecond,
+				Interval:    time.Duration(600+i*400) * time.Millisecond,
 				MinQty:      ASSET_PRECISION / 5,
 				MaxQty:      2 * ASSET_PRECISION,
 				Precision:   ASSET_PRECISION,
@@ -299,7 +303,7 @@ func (gf *GroupFactory) CreatePerpTakerGroups() []*actor.CompositeActor {
 			wrappedGateway := delayedGateway.ToClientGateway()
 
 			sub := actors.NewRandomTakerSubActor(gf.nextActorID, symbol, actors.RandomTakerSubActorConfig{
-				Interval:    time.Duration(1000+i*500) * time.Millisecond,
+				Interval:    time.Duration(600+i*400) * time.Millisecond,
 				MinQty:      ASSET_PRECISION / 5,
 				MaxQty:      2 * ASSET_PRECISION,
 				Precision:   ASSET_PRECISION,
@@ -362,7 +366,7 @@ func (gf *GroupFactory) CreateFundingArbGroups() []*actor.CompositeActor {
 			SpotInstrument:        gf.marketConfig.Instruments[spotSymbol],
 			PerpInstrument:        gf.marketConfig.Instruments[perpSymbol],
 			MinFundingRate:        5,   // Enter if funding > 5 bps
-			ExitFundingRate:       1,   // Exit if funding < 1 bps
+			ExitFundingRate:       12,  // Exit when funding returns near base rate (SimpleFundingCalc floor ~10 bps)
 			BasisThresholdBps:     10,  // Enter if price diff > 10 bps
 			ExitBasisThresholdBps: 2,   // Exit if price diff < 2 bps
 			MaxPositionSize:       200 * ASSET_PRECISION, // Increased limit

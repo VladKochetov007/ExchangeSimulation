@@ -31,7 +31,7 @@ func main() {
 		EstimatedClients: 20,
 		Clock:            simClock,
 		TickerFactory:    tickerFactory,
-		SnapshotInterval: 5 * time.Second,
+		SnapshotInterval: 500 * time.Millisecond,
 	})
 
 	marketConfig := CreateMarketConfig()
@@ -205,14 +205,16 @@ bootstrapComplete:
 			}
 		}
 	} else {
-		const simStep = 60 * time.Second
+		// simStep must be ≤ SnapshotInterval (500ms) to avoid SimTicker tick-drops.
+		// The capacity-1 channel drops all but the first tick per Advance call.
+		const simStep = 500 * time.Millisecond
 		for {
 			select {
 			case <-simCtx.Done():
 				goto shutdown
 			default:
 				simClock.Advance(simStep)
-				time.Sleep(10 * time.Millisecond)
+				time.Sleep(1 * time.Millisecond)
 				now := simClock.NowUnixNano()
 				if simDuration > 0 && now >= simEndNano {
 					goto shutdown

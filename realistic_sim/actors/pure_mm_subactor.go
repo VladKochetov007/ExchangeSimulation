@@ -12,13 +12,19 @@ type PureMMSubActorConfig struct {
 	RequoteThreshold int64
 	Precision        int64
 	BootstrapPrice   int64
+	// EMAAlpha is the weight (0–100) applied to each fill price when updating
+	// the EMA mid. Higher values = more aggressive price impact per fill.
+	// Defaults to 20 if zero.
+	EMAAlpha int64
 }
 
 type PureMMSubActor struct {
 	id           uint64
 	symbol       string
 	config       PureMMSubActorConfig
-	lastMid      int64
+	lastMid      int64 // mid used at last requote, for threshold comparison
+	emaMid       int64 // EMA of fill prices — drives quoted mid
+	cancelFn     func(uint64)
 	activeBidID  uint64
 	activeAskID  uint64
 	lastBidReqID uint64
@@ -35,6 +41,12 @@ func NewPureMMSubActor(id uint64, symbol string, config PureMMSubActorConfig) *P
 		config: config,
 		oms:    actor.NewNettingOMS(),
 	}
+}
+
+// SetCancelFn wires a cancel callback so the MM can cancel stale quotes before
+// repricing. Must be called after the CompositeActor is created.
+func (pmm *PureMMSubActor) SetCancelFn(fn func(uint64)) {
+	pmm.cancelFn = fn
 }
 
 func (pmm *PureMMSubActor) GetID() uint64 {
@@ -77,18 +89,20 @@ func (pmm *PureMMSubActor) onBookSnapshot(snap actor.BookSnapshotEvent, ctx *act
 		mid = snap.Snapshot.Bids[0].Price + (snap.Snapshot.Asks[0].Price-snap.Snapshot.Bids[0].Price)/2
 	}
 
+	// Seed EMA from book mid on first observation.
+	if pmm.emaMid == 0 {
+		pmm.emaMid = mid
+	}
+
 	if pmm.lastMid == 0 {
-		pmm.lastMid = mid
-		pmm.requote(ctx, submit, mid)
+		pmm.lastMid = pmm.emaMid
+		pmm.requote(ctx, submit, pmm.emaMid)
 		return
 	}
 
 	bothDepleted := !pmm.hasActiveBid && !pmm.hasActiveAsk
-	if abs(mid-pmm.lastMid) >= pmm.config.RequoteThreshold || bothDepleted {
-		pmm.lastMid = mid
-		pmm.hasActiveBid = false
-		pmm.hasActiveAsk = false
-		pmm.requote(ctx, submit, mid)
+	if abs(pmm.emaMid-pmm.lastMid) >= pmm.config.RequoteThreshold || bothDepleted {
+		pmm.cancelAndRequote(ctx, submit, pmm.emaMid)
 	}
 }
 
@@ -98,19 +112,46 @@ func (pmm *PureMMSubActor) onOrderFilled(fill actor.OrderFillEvent, ctx *actor.S
 	baseAsset := extractBaseAsset(pmm.symbol)
 	ctx.OnFill(pmm.id, pmm.symbol, fill, pmm.config.Precision, baseAsset)
 
-	if fill.OrderID == pmm.activeBidID {
-		pmm.hasActiveBid = false
+	// EMA update: shift quoted mid toward fill price on every trade.
+	alpha := pmm.config.EMAAlpha
+	if alpha <= 0 {
+		alpha = 20
 	}
-	if fill.OrderID == pmm.activeAskID {
-		pmm.hasActiveAsk = false
+	if pmm.emaMid == 0 {
+		pmm.emaMid = fill.Price
+	} else {
+		pmm.emaMid = pmm.emaMid + (fill.Price-pmm.emaMid)*alpha/100
 	}
 
-	// Requote the depleted side immediately so the book stays two-sided.
-	if fill.IsFull && pmm.lastMid > 0 {
-		pmm.requote(ctx, submit, pmm.lastMid)
+	// Cancel both sides and reprice immediately at the EMA-shifted mid.
+	// This is the core price-impact mechanism: every fill moves the book.
+	if pmm.lastMid > 0 {
+		pmm.cancelAndRequote(ctx, submit, pmm.emaMid)
 	}
 }
 
+// cancelAndRequote cancels any live quotes and submits fresh ones at newMid.
+// Zeroing the active order IDs before sending the cancel request ensures that
+// cancel confirmations arriving later do not incorrectly clear the flags for
+// the newly placed orders.
+func (pmm *PureMMSubActor) cancelAndRequote(ctx *actor.SharedContext, submit actor.OrderSubmitter, newMid int64) {
+	if pmm.hasActiveBid {
+		if pmm.cancelFn != nil {
+			pmm.cancelFn(pmm.activeBidID)
+		}
+		pmm.activeBidID = 0
+		pmm.hasActiveBid = false
+	}
+	if pmm.hasActiveAsk {
+		if pmm.cancelFn != nil {
+			pmm.cancelFn(pmm.activeAskID)
+		}
+		pmm.activeAskID = 0
+		pmm.hasActiveAsk = false
+	}
+	pmm.lastMid = newMid
+	pmm.requote(ctx, submit, newMid)
+}
 
 func (pmm *PureMMSubActor) onOrderAccepted(accepted actor.OrderAcceptedEvent) {
 	if accepted.RequestID == pmm.lastBidReqID {
@@ -121,10 +162,12 @@ func (pmm *PureMMSubActor) onOrderAccepted(accepted actor.OrderAcceptedEvent) {
 }
 
 func (pmm *PureMMSubActor) onOrderCancelled(cancelled actor.OrderCancelledEvent) {
-	if cancelled.OrderID == pmm.activeBidID {
+	// Only clear flags if the cancel matches the currently tracked order.
+	// Cancels for old (zeroed) IDs are intentionally ignored here.
+	if cancelled.OrderID != 0 && cancelled.OrderID == pmm.activeBidID {
 		pmm.hasActiveBid = false
 	}
-	if cancelled.OrderID == pmm.activeAskID {
+	if cancelled.OrderID != 0 && cancelled.OrderID == pmm.activeAskID {
 		pmm.hasActiveAsk = false
 	}
 }
@@ -140,10 +183,6 @@ func (pmm *PureMMSubActor) requote(ctx *actor.SharedContext, submit actor.OrderS
 	inventorySkewBps := (currentPos * 100) / pmm.config.MaxInventory
 	skew := (mid * inventorySkewBps) / 10000
 
-	// Cap skew to ±halfSpread so every actor's ask stays at or above mid and
-	// bid stays at or below mid. Without this, two sub-actors within the same
-	// CompositeActor with opposite extreme inventory cross each other's quotes,
-	// and the exchange's self-trade prevention leaves a persistent crossed book.
 	if skew > halfSpread {
 		skew = halfSpread
 	} else if skew < -halfSpread {
