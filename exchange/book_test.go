@@ -22,7 +22,7 @@ func TestAddOrderCreatesLimit(t *testing.T) {
 	order.Price = 100000
 	order.Qty = 100
 
-	book.addOrder(order)
+	book.AddOrder(order)
 
 	if book.Best == nil {
 		t.Fatal("Best should not be nil")
@@ -42,8 +42,8 @@ func TestCancelOrder(t *testing.T) {
 	order.Price = 100000
 	order.Qty = 100
 
-	book.addOrder(order)
-	cancelled := book.cancelOrder(1)
+	book.AddOrder(order)
+	cancelled := book.CancelOrder(1)
 
 	if cancelled == nil {
 		t.Fatal("Should return cancelled order")
@@ -68,12 +68,12 @@ func TestBestBidUpdates(t *testing.T) {
 	order2.Price = 110000
 	order2.Qty = 100
 
-	book.addOrder(order1)
+	book.AddOrder(order1)
 	if book.Best.Price != 100000 {
 		t.Errorf("Best should be 100000, got %d", book.Best.Price)
 	}
 
-	book.addOrder(order2)
+	book.AddOrder(order2)
 	if book.Best.Price != 110000 {
 		t.Errorf("Best should be 110000 (highest bid), got %d", book.Best.Price)
 	}
@@ -91,12 +91,12 @@ func TestBestAskUpdates(t *testing.T) {
 	order2.Price = 100000
 	order2.Qty = 100
 
-	book.addOrder(order1)
+	book.AddOrder(order1)
 	if book.Best.Price != 110000 {
 		t.Errorf("Best should be 110000, got %d", book.Best.Price)
 	}
 
-	book.addOrder(order2)
+	book.AddOrder(order2)
 	if book.Best.Price != 100000 {
 		t.Errorf("Best should be 100000 (lowest ask), got %d", book.Best.Price)
 	}

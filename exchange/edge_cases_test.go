@@ -25,17 +25,17 @@ func TestCanMatchSellSide(t *testing.T) {
 
 	limit := &Limit{Price: 49000}
 
-	if matcher.canMatch(sellOrder, limit) {
+	if matcher.CanMatch(sellOrder, limit) {
 		t.Errorf("Sell at 50000 should not match bid at 49000")
 	}
 
 	limit.Price = 50000
-	if !matcher.canMatch(sellOrder, limit) {
+	if !matcher.CanMatch(sellOrder, limit) {
 		t.Errorf("Sell at 50000 should match bid at 50000")
 	}
 
 	limit.Price = 51000
-	if !matcher.canMatch(sellOrder, limit) {
+	if !matcher.CanMatch(sellOrder, limit) {
 		t.Errorf("Sell at 50000 should match bid at 51000")
 	}
 }
@@ -252,13 +252,13 @@ func TestBookCancelOrderRemovesLimit(t *testing.T) {
 	order.ClientID = 100
 	order.Price = 50000
 	order.Qty = 100
-	book.addOrder(order)
+	book.AddOrder(order)
 
 	if len(book.Limits) != 1 {
 		t.Fatalf("Expected 1 limit, got %d", len(book.Limits))
 	}
 
-	book.cancelOrder(1)
+	book.CancelOrder(1)
 
 	if len(book.Limits) != 0 {
 		t.Errorf("Expected 0 limits after canceling last order, got %d", len(book.Limits))
@@ -276,20 +276,20 @@ func TestBookRemoveLimitUpdatesBest(t *testing.T) {
 	order1.ClientID = 100
 	order1.Price = 50000
 	order1.Qty = 100
-	book.addOrder(order1)
+	book.AddOrder(order1)
 
 	order2 := getOrder()
 	order2.ID = 2
 	order2.ClientID = 101
 	order2.Price = 49000
 	order2.Qty = 100
-	book.addOrder(order2)
+	book.AddOrder(order2)
 
 	if book.Best.Price != 50000 {
 		t.Fatalf("Best should be 50000, got %d", book.Best.Price)
 	}
 
-	book.cancelOrder(1)
+	book.CancelOrder(1)
 
 	if book.Best.Price != 49000 {
 		t.Errorf("Best should be updated to 49000, got %d", book.Best.Price)

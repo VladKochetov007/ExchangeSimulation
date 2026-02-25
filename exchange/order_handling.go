@@ -49,7 +49,7 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 	var order *Order
 	var book *OrderBook
 	for _, b := range e.Books {
-		if o := b.findOrder(req.OrderID); o != nil {
+		if o := b.FindOrder(req.OrderID); o != nil {
 			order = o
 			book = b
 			break
@@ -81,10 +81,10 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 	remainingQty := order.Qty - order.FilledQty
 	releaseOrderFunds(client, instrument, order.Side, remainingQty, order.Price)
 	if order.Side == Buy {
-		book.Bids.cancelOrder(req.OrderID)
+		book.Bids.CancelOrder(req.OrderID)
 		e.publishBookUpdate(book, Buy, order.Price)
 	} else {
-		book.Asks.cancelOrder(req.OrderID)
+		book.Asks.CancelOrder(req.OrderID)
 		e.publishBookUpdate(book, Sell, order.Price)
 	}
 
@@ -130,8 +130,8 @@ func (e *Exchange) subscribe(clientID uint64, req *QueryRequest, gateway *Client
 	e.MDPublisher.Subscribe(clientID, req.Symbol, types, gateway)
 
 	snapshot := &BookSnapshot{
-		Bids: book.Bids.getSnapshot(),
-		Asks: book.Asks.getSnapshot(),
+		Bids: book.Bids.GetSnapshot(),
+		Asks: book.Asks.GetSnapshot(),
 	}
 	e.MDPublisher.Publish(req.Symbol, MDSnapshot, snapshot, e.Clock.NowUnixNano())
 
@@ -302,7 +302,7 @@ func (e *Exchange) reserveOrderFunds(client *Client, book *OrderBook, order *Ord
 func collectAffectedLevels(book *OrderBook, executions []*Execution) map[int64]Side {
 	levels := make(map[int64]Side, len(executions))
 	for _, exec := range executions {
-		if makerOrder := book.findOrder(exec.MakerOrderID); makerOrder != nil {
+		if makerOrder := book.FindOrder(exec.MakerOrderID); makerOrder != nil {
 			levels[makerOrder.Price] = makerOrder.Side
 		}
 	}
@@ -313,14 +313,14 @@ func collectAffectedLevels(book *OrderBook, executions []*Execution) map[int64]S
 // Caller must hold e.mu.Lock().
 func (e *Exchange) removeMakerOrders(book *OrderBook, executions []*Execution) {
 	for _, exec := range executions {
-		makerOrder := book.findOrder(exec.MakerOrderID)
+		makerOrder := book.FindOrder(exec.MakerOrderID)
 		if makerOrder == nil || makerOrder.Status != Filled {
 			continue
 		}
 		if makerOrder.Side == Buy {
-			book.Bids.cancelOrder(exec.MakerOrderID)
+			book.Bids.CancelOrder(exec.MakerOrderID)
 		} else {
-			book.Asks.cancelOrder(exec.MakerOrderID)
+			book.Asks.CancelOrder(exec.MakerOrderID)
 		}
 		e.Clients[exec.MakerClientID].RemoveOrder(exec.MakerOrderID)
 		putOrder(makerOrder)
@@ -338,10 +338,10 @@ func (e *Exchange) publishLevels(book *OrderBook, levels map[int64]Side) {
 func (e *Exchange) restOrReleaseOrder(client *Client, book *OrderBook, order *Order, req *OrderRequest) {
 	if order.Status != Filled && req.Type == LimitOrder && req.TimeInForce == GTC {
 		if order.Side == Buy {
-			book.Bids.addOrder(order)
+			book.Bids.AddOrder(order)
 			e.publishBookUpdate(book, Buy, order.Price)
 		} else {
-			book.Asks.addOrder(order)
+			book.Asks.AddOrder(order)
 			e.publishBookUpdate(book, Sell, order.Price)
 		}
 		client.AddOrder(order.ID)

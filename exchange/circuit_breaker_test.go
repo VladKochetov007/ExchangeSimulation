@@ -444,7 +444,7 @@ func TestCBMatcher_HaltBlocksMatch(t *testing.T) {
 	m := NewCircuitBreakerMatcher(inner, &PercentBandCircuitBreaker{BandBps: 500}, books, clk)
 
 	// Impose a halt that expires well in the future.
-	m.haltUntil["X"] = clk.now + int64(time.Hour)
+	m.HaltUntil["X"] = clk.now + int64(time.Hour)
 	result := m.Match(ob.Bids, ob.Asks, &Order{Side: Buy})
 
 	if inner.called {
@@ -462,7 +462,7 @@ func TestCBMatcher_ExpiredHaltAllows(t *testing.T) {
 	m := NewCircuitBreakerMatcher(inner, &PercentBandCircuitBreaker{BandBps: 500}, books, clk)
 
 	// Halt expired 1 second ago.
-	m.haltUntil["X"] = clk.now - int64(time.Second)
+	m.HaltUntil["X"] = clk.now - int64(time.Second)
 	m.Match(ob.Bids, ob.Asks, &Order{Side: Buy})
 
 	if !inner.called {
@@ -476,7 +476,7 @@ func TestCBMatcher_ForeverHaltBlocks(t *testing.T) {
 	clk := &testClock{now: 999_999_999_999}
 	m := NewCircuitBreakerMatcher(inner, &PercentBandCircuitBreaker{BandBps: 500}, books, clk)
 
-	m.haltUntil["X"] = haltForever
+	m.HaltUntil["X"] = haltForever
 	m.Match(ob.Bids, ob.Asks, &Order{Side: Buy})
 
 	if inner.called {
@@ -490,7 +490,7 @@ func TestCBMatcher_ClearHalt(t *testing.T) {
 	clk := &testClock{now: 1_000_000_000}
 	m := NewCircuitBreakerMatcher(inner, &PercentBandCircuitBreaker{BandBps: 500}, books, clk)
 
-	m.haltUntil["X"] = haltForever
+	m.HaltUntil["X"] = haltForever
 	m.ClearHalt("X")
 	m.Match(ob.Bids, ob.Asks, &Order{Side: Buy})
 
@@ -508,7 +508,7 @@ func TestCBMatcher_IsHalted(t *testing.T) {
 		t.Error("symbol must not be halted initially")
 	}
 
-	m.haltUntil["X"] = haltForever
+	m.HaltUntil["X"] = haltForever
 	if !m.IsHalted("X") {
 		t.Error("symbol must be halted after setting haltForever")
 	}

@@ -28,8 +28,8 @@ func TestMidPriceOracle_ReturnsMidPrice(t *testing.T) {
 	book := ex.Books["BTC/USD"]
 	bid := &Order{ID: 1, ClientID: 1, Price: PriceUSD(49_000, DOLLAR_TICK), Qty: BTC_PRECISION, Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
 	ask := &Order{ID: 2, ClientID: 1, Price: PriceUSD(51_000, DOLLAR_TICK), Qty: BTC_PRECISION, Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
-	book.Bids.addOrder(bid)
-	book.Asks.addOrder(ask)
+	book.Bids.AddOrder(bid)
+	book.Asks.AddOrder(ask)
 
 	o := NewMidPriceOracle(ex)
 	o.MapSymbol("BTC", "BTC/USD")

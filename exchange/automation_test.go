@@ -441,7 +441,7 @@ func TestCheckAndSettleFunding_SkipsWhenNotDue(t *testing.T) {
 
 	// Set NextFunding far in the future so settlement must not fire.
 	// 9e18 ns ≈ year 2255; current wall-clock (~1.7e18) is safely below.
-	perp.fundingRate.NextFunding = int64(9e18)
+	perp.GetFundingRate().NextFunding = int64(9e18)
 
 	entryPrice := PriceUSD(50_000, DOLLAR_TICK)
 	qty := BTCAmount(0.1)
@@ -500,8 +500,8 @@ func TestMidPriceOracle_UpdatesWithNewOrders(t *testing.T) {
 		Price: PriceUSD(51_000, DOLLAR_TICK), Qty: BTC_PRECISION,
 		Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano(),
 	}
-	spotBook.Bids.addOrder(bid1)
-	spotBook.Asks.addOrder(ask1)
+	spotBook.Bids.AddOrder(bid1)
+	spotBook.Asks.AddOrder(ask1)
 
 	firstMid := oracle.GetPrice("BTC-PERP")
 	expectedFirst := (PriceUSD(49_000, DOLLAR_TICK) + PriceUSD(51_000, DOLLAR_TICK)) / 2
@@ -509,8 +509,8 @@ func TestMidPriceOracle_UpdatesWithNewOrders(t *testing.T) {
 		t.Errorf("first mid-price: expected %d, got %d", expectedFirst, firstMid)
 	}
 
-	spotBook.Bids.cancelOrder(1)
-	spotBook.Asks.cancelOrder(2)
+	spotBook.Bids.CancelOrder(1)
+	spotBook.Asks.CancelOrder(2)
 
 	bid2 := &Order{
 		ID: 3, ClientID: 1,
@@ -522,8 +522,8 @@ func TestMidPriceOracle_UpdatesWithNewOrders(t *testing.T) {
 		Price: PriceUSD(54_000, DOLLAR_TICK), Qty: BTC_PRECISION,
 		Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano(),
 	}
-	spotBook.Bids.addOrder(bid2)
-	spotBook.Asks.addOrder(ask2)
+	spotBook.Bids.AddOrder(bid2)
+	spotBook.Asks.AddOrder(ask2)
 
 	secondMid := oracle.GetPrice("BTC-PERP")
 	expectedSecond := (PriceUSD(52_000, DOLLAR_TICK) + PriceUSD(54_000, DOLLAR_TICK)) / 2

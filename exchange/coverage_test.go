@@ -150,8 +150,8 @@ func TestWeightedMidPriceCalculator_ZeroBidQty(t *testing.T) {
 	// Add bid with qty=0 (isEmpty=true but Best set via addOrder — set TotalQty to 0 directly)
 	bid := &Order{ID: 1, ClientID: 1, Price: PriceUSD(49_000, DOLLAR_TICK), Qty: BTCAmount(1), Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
 	ask := &Order{ID: 2, ClientID: 1, Price: PriceUSD(51_000, DOLLAR_TICK), Qty: BTCAmount(2), Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
-	book.Bids.addOrder(bid)
-	book.Asks.addOrder(ask)
+	book.Bids.AddOrder(bid)
+	book.Asks.AddOrder(ask)
 	// Set bid TotalQty to 0 to trigger "bidQty == 0" branch — returns askPrice
 	book.Bids.Best.TotalQty = 0
 
@@ -170,8 +170,8 @@ func TestWeightedMidPriceCalculator_ZeroAskQty(t *testing.T) {
 
 	bid := &Order{ID: 1, ClientID: 1, Price: PriceUSD(49_000, DOLLAR_TICK), Qty: BTCAmount(2), Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
 	ask := &Order{ID: 2, ClientID: 1, Price: PriceUSD(51_000, DOLLAR_TICK), Qty: BTCAmount(1), Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
-	book.Bids.addOrder(bid)
-	book.Asks.addOrder(ask)
+	book.Bids.AddOrder(bid)
+	book.Asks.AddOrder(ask)
 	book.Asks.Best.TotalQty = 0
 
 	calc := NewWeightedMidPriceCalculator()
@@ -189,8 +189,8 @@ func TestWeightedMidPriceCalculator_BothZeroQty(t *testing.T) {
 
 	bid := &Order{ID: 1, ClientID: 1, Price: PriceUSD(49_000, DOLLAR_TICK), Qty: BTCAmount(1), Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
 	ask := &Order{ID: 2, ClientID: 1, Price: PriceUSD(51_000, DOLLAR_TICK), Qty: BTCAmount(1), Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
-	book.Bids.addOrder(bid)
-	book.Asks.addOrder(ask)
+	book.Bids.AddOrder(bid)
+	book.Asks.AddOrder(ask)
 	book.Bids.Best.TotalQty = 0
 	book.Asks.Best.TotalQty = 0
 

@@ -44,6 +44,8 @@ func (g *ClientGateway) IsRunning() bool {
 	return g.running.Load()
 }
 
+func (g *ClientGateway) MarketDataChan() chan *MarketDataMsg { return g.MarketData }
+
 func (g *ClientGateway) Close() {
 	if !g.running.CompareAndSwap(true, false) {
 		return

@@ -70,7 +70,7 @@ func (e *Exchange) notifyFill(
 	logFill(log, timestamp, exec.TakerClientID, exec.TakerOrderID, exec,
 		takerOrder.Side, takerOrder.FilledQty, takerOrder.Qty, tradeID, takerFee, "taker")
 
-	makerOrder := book.findOrder(exec.MakerOrderID)
+	makerOrder := book.FindOrder(exec.MakerOrderID)
 	sendFillNotification(e.Gateways[exec.MakerClientID], exec.MakerOrderID, exec.MakerClientID,
 		tradeID, exec, exec.MakerSide, makerFee, makerOrder != nil && makerOrder.FilledQty >= makerOrder.Qty)
 	logFill(log, timestamp, exec.MakerClientID, exec.MakerOrderID, exec,

@@ -280,14 +280,14 @@ func TestBookInsertLimitSellSide(t *testing.T) {
 	order1.ClientID = 100
 	order1.Price = 50000
 	order1.Qty = 100
-	book.addOrder(order1)
+	book.AddOrder(order1)
 
 	order2 := getOrder()
 	order2.ID = 2
 	order2.ClientID = 101
 	order2.Price = 49000
 	order2.Qty = 100
-	book.addOrder(order2)
+	book.AddOrder(order2)
 
 	if book.Best.Price != 49000 {
 		t.Errorf("Best ask should be 49000, got %d", book.Best.Price)
@@ -298,7 +298,7 @@ func TestBookInsertLimitSellSide(t *testing.T) {
 	order3.ClientID = 102
 	order3.Price = 51000
 	order3.Qty = 100
-	book.addOrder(order3)
+	book.AddOrder(order3)
 
 	if book.ActiveTail.Price != 51000 {
 		t.Errorf("Tail should be 51000, got %d", book.ActiveTail.Price)
@@ -313,23 +313,23 @@ func TestBookRemoveLimitMiddle(t *testing.T) {
 	order1.ClientID = 100
 	order1.Price = 50000
 	order1.Qty = 100
-	book.addOrder(order1)
+	book.AddOrder(order1)
 
 	order2 := getOrder()
 	order2.ID = 2
 	order2.ClientID = 101
 	order2.Price = 49000
 	order2.Qty = 100
-	book.addOrder(order2)
+	book.AddOrder(order2)
 
 	order3 := getOrder()
 	order3.ID = 3
 	order3.ClientID = 102
 	order3.Price = 48000
 	order3.Qty = 100
-	book.addOrder(order3)
+	book.AddOrder(order3)
 
-	book.cancelOrder(2)
+	book.CancelOrder(2)
 
 	if len(book.Limits) != 2 {
 		t.Errorf("Expected 2 limits after removing middle, got %d", len(book.Limits))

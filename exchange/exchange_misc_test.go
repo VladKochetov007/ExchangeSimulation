@@ -21,8 +21,8 @@ func TestGetBestLiquidity_WithOrders(t *testing.T) {
 	book := ex.Books["BTC/USD"]
 	bidQty := int64(2 * BTC_PRECISION)
 	askQty := int64(3 * BTC_PRECISION)
-	book.Bids.addOrder(&Order{ID: 1, ClientID: 1, Price: PriceUSD(49_000, DOLLAR_TICK), Qty: bidQty, Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()})
-	book.Asks.addOrder(&Order{ID: 2, ClientID: 1, Price: PriceUSD(51_000, DOLLAR_TICK), Qty: askQty, Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano()})
+	book.Bids.AddOrder(&Order{ID: 1, ClientID: 1, Price: PriceUSD(49_000, DOLLAR_TICK), Qty: bidQty, Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()})
+	book.Asks.AddOrder(&Order{ID: 2, ClientID: 1, Price: PriceUSD(51_000, DOLLAR_TICK), Qty: askQty, Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano()})
 
 	bid, ask := ex.GetBestLiquidity("BTC/USD")
 	if bid != bidQty {
@@ -103,8 +103,8 @@ func TestWeightedMidPriceCalculator_BothSides(t *testing.T) {
 
 	bid := &Order{ID: 1, ClientID: 1, Price: PriceUSD(49_000, DOLLAR_TICK), Qty: BTCAmount(2), Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
 	ask := &Order{ID: 2, ClientID: 1, Price: PriceUSD(51_000, DOLLAR_TICK), Qty: BTCAmount(1), Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
-	book.Bids.addOrder(bid)
-	book.Asks.addOrder(ask)
+	book.Bids.AddOrder(bid)
+	book.Asks.AddOrder(ask)
 
 	calc := NewWeightedMidPriceCalculator()
 	mid := calc.Calculate(book)
@@ -120,7 +120,7 @@ func TestWeightedMidPriceCalculator_OnlyBid(t *testing.T) {
 	book := ex.Books["BTC/USD"]
 
 	bid := &Order{ID: 1, ClientID: 1, Price: PriceUSD(49_000, DOLLAR_TICK), Qty: BTCAmount(1), Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
-	book.Bids.addOrder(bid)
+	book.Bids.AddOrder(bid)
 
 	calc := NewWeightedMidPriceCalculator()
 	// No ask — falls back to last trade price (0 here since no trades occurred)

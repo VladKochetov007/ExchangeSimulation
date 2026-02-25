@@ -74,8 +74,8 @@ func TestMidPriceCalculator(t *testing.T) {
 		Timestamp: clock.NowUnixNano(),
 	}
 
-	book.Bids.addOrder(bidOrder)
-	book.Asks.addOrder(askOrder)
+	book.Bids.AddOrder(bidOrder)
+	book.Asks.AddOrder(askOrder)
 
 	// Mid price should be average
 	price := calc.Calculate(book)
@@ -137,8 +137,8 @@ func TestWeightedMidPriceCalculator(t *testing.T) {
 		Timestamp: clock.NowUnixNano(),
 	}
 
-	book.Bids.addOrder(bidOrder)
-	book.Asks.addOrder(askOrder)
+	book.Bids.AddOrder(bidOrder)
+	book.Asks.AddOrder(askOrder)
 
 	// Weighted mid should favor bid side (more liquidity)
 	price := calc.Calculate(book)
@@ -197,8 +197,8 @@ func TestOrderBookGetters(t *testing.T) {
 		Timestamp: clock.NowUnixNano(),
 	}
 
-	book.Bids.addOrder(bidOrder)
-	book.Asks.addOrder(askOrder)
+	book.Bids.AddOrder(bidOrder)
+	book.Asks.AddOrder(askOrder)
 
 	// Check getters
 	if book.GetBestBid() != 49900*BTC_PRECISION {

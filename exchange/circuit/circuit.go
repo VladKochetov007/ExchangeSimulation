@@ -1,6 +1,12 @@
-package exchange
+package circuit
 
-import "time"
+import (
+	"time"
+
+	ebook "exchange_sim/exchange/book"
+	ematching "exchange_sim/exchange/matching"
+	etypes "exchange_sim/exchange/types"
+)
 
 type CBAction uint8
 
@@ -20,17 +26,15 @@ type CBResult struct {
 // CircuitBreaker is the pre-trade layer.
 // lastPrice is the symbol's last traded price; bestOpposing is the best price
 // on the side the incoming order would match against.
-// Return CBReject to drop the order silently, or CBHalt to drop it and pause
-// the symbol.
 type CircuitBreaker interface {
-	Check(symbol string, lastPrice, bestOpposing int64, side Side) CBResult
+	Check(symbol string, lastPrice, bestOpposing int64, side etypes.Side) CBResult
 }
 
 // HaltEvaluator is the post-match layer.
 // Called after every match with the actual executions; return halt=true to
 // pause the symbol for the given duration (0 = indefinite).
 type HaltEvaluator interface {
-	Evaluate(symbol string, execs []*Execution) (halt bool, duration time.Duration)
+	Evaluate(symbol string, execs []*etypes.Execution) (halt bool, duration time.Duration)
 }
 
 // scaleMax guards against int64 overflow: diff*10000 overflows when diff > scaleMax.
@@ -51,7 +55,6 @@ func bandExceeded(ref, price, bandBps int64) bool {
 
 // PercentBandCircuitBreaker rejects orders whose best opposing price deviates
 // more than BandBps basis points from the last traded price (symmetric).
-// Zero lastPrice disables the check (cold start).
 //
 //	BandBps 500  → ±5%   (NASDAQ LULD style)
 //	BandBps 1000 → ±10%  (wider volatile-instrument band)
@@ -59,7 +62,7 @@ type PercentBandCircuitBreaker struct {
 	BandBps int64
 }
 
-func (cb *PercentBandCircuitBreaker) Check(_ string, lastPrice, bestOpposing int64, _ Side) CBResult {
+func (cb *PercentBandCircuitBreaker) Check(_ string, lastPrice, bestOpposing int64, _ etypes.Side) CBResult {
 	if lastPrice == 0 || !bandExceeded(lastPrice, bestOpposing, cb.BandBps) {
 		return CBResult{Action: CBAllow}
 	}
@@ -67,22 +70,19 @@ func (cb *PercentBandCircuitBreaker) Check(_ string, lastPrice, bestOpposing int
 }
 
 // AsymmetricBandCircuitBreaker applies independent up/down bands.
-// Buy orders are checked against UpBandBps (best ask rising too far);
-// sell orders are checked against DownBandBps (best bid falling too far).
-// Moves in the favourable direction are never rejected.
 type AsymmetricBandCircuitBreaker struct {
 	UpBandBps   int64
 	DownBandBps int64
 }
 
-func (cb *AsymmetricBandCircuitBreaker) Check(_ string, lastPrice, bestOpposing int64, side Side) CBResult {
+func (cb *AsymmetricBandCircuitBreaker) Check(_ string, lastPrice, bestOpposing int64, side etypes.Side) CBResult {
 	if lastPrice == 0 {
 		return CBResult{Action: CBAllow}
 	}
-	if side == Buy && bestOpposing > lastPrice && bandExceeded(lastPrice, bestOpposing, cb.UpBandBps) {
+	if side == etypes.Buy && bestOpposing > lastPrice && bandExceeded(lastPrice, bestOpposing, cb.UpBandBps) {
 		return CBResult{Action: CBReject}
 	}
-	if side == Sell && bestOpposing < lastPrice && bandExceeded(lastPrice, bestOpposing, cb.DownBandBps) {
+	if side == etypes.Sell && bestOpposing < lastPrice && bandExceeded(lastPrice, bestOpposing, cb.DownBandBps) {
 		return CBResult{Action: CBReject}
 	}
 	return CBResult{Action: CBAllow}
@@ -96,10 +96,8 @@ type BreakerTier struct {
 	HaltDuration time.Duration // only relevant when Action == CBHalt; 0 = indefinite
 }
 
-// TieredCircuitBreaker applies escalating actions as price moves grow, using
-// a per-symbol reference price set via SetRefPrice.
+// TieredCircuitBreaker applies escalating actions as price moves grow.
 // Modelled after CME three-level circuit breakers and Chinese A-share daily limits.
-// The most severe tier breached wins; tiers must be sorted ascending by ThresholdBps.
 type TieredCircuitBreaker struct {
 	Tiers     []BreakerTier
 	refPrices map[string]int64
@@ -113,7 +111,7 @@ func (cb *TieredCircuitBreaker) SetRefPrice(symbol string, price int64) {
 	cb.refPrices[symbol] = price
 }
 
-func (cb *TieredCircuitBreaker) Check(symbol string, _ int64, bestOpposing int64, _ Side) CBResult {
+func (cb *TieredCircuitBreaker) Check(symbol string, _ int64, bestOpposing int64, _ etypes.Side) CBResult {
 	ref := cb.refPrices[symbol]
 	if ref == 0 {
 		return CBResult{Action: CBAllow}
@@ -128,9 +126,6 @@ func (cb *TieredCircuitBreaker) Check(symbol string, _ int64, bestOpposing int64
 }
 
 // TieredHaltEvaluator is the post-match counterpart of TieredCircuitBreaker.
-// It checks actual execution prices against tiered thresholds and triggers a
-// per-symbol halt when any execution breaches a tier.
-// Tiers must be sorted ascending by ThresholdBps.
 type TieredHaltEvaluator struct {
 	Tiers     []BreakerTier
 	refPrices map[string]int64
@@ -144,7 +139,7 @@ func (e *TieredHaltEvaluator) SetRefPrice(symbol string, price int64) {
 	e.refPrices[symbol] = price
 }
 
-func (e *TieredHaltEvaluator) Evaluate(symbol string, execs []*Execution) (bool, time.Duration) {
+func (e *TieredHaltEvaluator) Evaluate(symbol string, execs []*etypes.Execution) (bool, time.Duration) {
 	ref := e.refPrices[symbol]
 	if ref == 0 {
 		return false, 0
@@ -161,13 +156,12 @@ func (e *TieredHaltEvaluator) Evaluate(symbol string, execs []*Execution) (bool,
 }
 
 // CompositeCircuitBreaker delegates to multiple breakers and returns the most
-// restrictive result. Among two CBHalt results, the longer duration wins
-// (0 = indefinite, which always dominates).
+// restrictive result.
 type CompositeCircuitBreaker struct {
 	Breakers []CircuitBreaker
 }
 
-func (c *CompositeCircuitBreaker) Check(symbol string, lastPrice, bestOpposing int64, side Side) CBResult {
+func (c *CompositeCircuitBreaker) Check(symbol string, lastPrice, bestOpposing int64, side etypes.Side) CBResult {
 	result := CBResult{Action: CBAllow}
 	for _, b := range c.Breakers {
 		result = moreRestrictive(result, b.Check(symbol, lastPrice, bestOpposing, side))
@@ -195,39 +189,29 @@ func moreRestrictive(a, b CBResult) CBResult {
 	return a
 }
 
-// haltForever encodes an indefinite halt in the haltUntil map.
-const haltForever = -1
+// HaltForever encodes an indefinite halt in the HaltUntil map.
+const HaltForever = int64(-1)
 
 // CircuitBreakerMatcher wraps an inner MatchingEngine with a pre-trade
 // CircuitBreaker and an optional post-match HaltEvaluator.
-//
-// Pre-trade: before each match the best opposing price is checked.
-// CBReject silently drops the order; CBHalt drops it and halts the symbol.
-//
-// Post-match: the HaltEvaluator (if set) inspects actual executions and may
-// trigger a per-symbol halt based on fill prices.
-//
-// Halted symbols reject all incoming orders until ClearHalt is called or the
-// halt duration expires. The reverse index from Book pointer to symbol is
-// rebuilt lazily when the books map grows, keeping Match O(1) amortised.
 type CircuitBreakerMatcher struct {
-	Inner         MatchingEngine
+	Inner         ematching.MatchingEngine
 	Breaker       CircuitBreaker
-	books         map[string]*OrderBook
-	clock         Clock
-	haltUntil     map[string]int64
-	reverseIdx    map[*Book]string
+	books         map[string]*ebook.OrderBook
+	clock         etypes.Clock
+	HaltUntil     map[string]int64
+	reverseIdx    map[*ebook.Book]string
 	haltEvaluator HaltEvaluator
 }
 
-func NewCircuitBreakerMatcher(inner MatchingEngine, breaker CircuitBreaker, books map[string]*OrderBook, clock Clock) *CircuitBreakerMatcher {
+func NewCircuitBreakerMatcher(inner ematching.MatchingEngine, breaker CircuitBreaker, books map[string]*ebook.OrderBook, clock etypes.Clock) *CircuitBreakerMatcher {
 	return &CircuitBreakerMatcher{
 		Inner:      inner,
 		Breaker:    breaker,
 		books:      books,
 		clock:      clock,
-		haltUntil:  make(map[string]int64),
-		reverseIdx: make(map[*Book]string),
+		HaltUntil:  make(map[string]int64),
+		reverseIdx: make(map[*ebook.Book]string),
 	}
 }
 
@@ -240,22 +224,22 @@ func (m *CircuitBreakerMatcher) IsHalted(symbol string) bool {
 }
 
 func (m *CircuitBreakerMatcher) ClearHalt(symbol string) {
-	delete(m.haltUntil, symbol)
+	delete(m.HaltUntil, symbol)
 }
 
-func (m *CircuitBreakerMatcher) Match(bidBook, askBook *Book, order *Order) *MatchResult {
+func (m *CircuitBreakerMatcher) Match(bidBook, askBook *ebook.Book, order *etypes.Order) *ematching.MatchResult {
 	sym, known := m.symbolFor(bidBook)
 
 	if known {
 		if m.isHaltedAt(sym, m.clock.NowUnixNano()) {
-			return &MatchResult{}
+			return &ematching.MatchResult{}
 		}
 
 		ob := m.books[sym]
 		lastPrice := ob.GetLastPrice()
 
-		var opposing *Book
-		if order.Side == Buy {
+		var opposing *ebook.Book
+		if order.Side == etypes.Buy {
 			opposing = askBook
 		} else {
 			opposing = bidBook
@@ -265,10 +249,10 @@ func (m *CircuitBreakerMatcher) Match(bidBook, askBook *Book, order *Order) *Mat
 			res := m.Breaker.Check(sym, lastPrice, opposing.Best.Price, order.Side)
 			switch res.Action {
 			case CBReject:
-				return &MatchResult{}
+				return &ematching.MatchResult{}
 			case CBHalt:
 				m.setHalt(sym, res.HaltDuration)
-				return &MatchResult{}
+				return &ematching.MatchResult{}
 			}
 		}
 	}
@@ -284,9 +268,9 @@ func (m *CircuitBreakerMatcher) Match(bidBook, askBook *Book, order *Order) *Mat
 	return result
 }
 
-func (m *CircuitBreakerMatcher) symbolFor(bidBook *Book) (string, bool) {
+func (m *CircuitBreakerMatcher) symbolFor(bidBook *ebook.Book) (string, bool) {
 	if len(m.reverseIdx) != len(m.books) {
-		m.reverseIdx = make(map[*Book]string, len(m.books))
+		m.reverseIdx = make(map[*ebook.Book]string, len(m.books))
 		for sym, ob := range m.books {
 			m.reverseIdx[ob.Bids] = sym
 		}
@@ -296,11 +280,11 @@ func (m *CircuitBreakerMatcher) symbolFor(bidBook *Book) (string, bool) {
 }
 
 func (m *CircuitBreakerMatcher) isHaltedAt(sym string, now int64) bool {
-	until, ok := m.haltUntil[sym]
+	until, ok := m.HaltUntil[sym]
 	if !ok {
 		return false
 	}
-	if until == haltForever {
+	if until == HaltForever {
 		return true
 	}
 	return now < until
@@ -308,8 +292,8 @@ func (m *CircuitBreakerMatcher) isHaltedAt(sym string, now int64) bool {
 
 func (m *CircuitBreakerMatcher) setHalt(sym string, dur time.Duration) {
 	if dur == 0 {
-		m.haltUntil[sym] = haltForever
+		m.HaltUntil[sym] = HaltForever
 	} else {
-		m.haltUntil[sym] = m.clock.NowUnixNano() + dur.Nanoseconds()
+		m.HaltUntil[sym] = m.clock.NowUnixNano() + dur.Nanoseconds()
 	}
 }

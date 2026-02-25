@@ -12,7 +12,7 @@ func TestMatchBuyOrderFullFill(t *testing.T) {
 	sellOrder.ClientID = 100
 	sellOrder.Price = 100000
 	sellOrder.Qty = 100
-	askBook.addOrder(sellOrder)
+	askBook.AddOrder(sellOrder)
 
 	buyOrder := getOrder()
 	buyOrder.ID = 2
@@ -45,7 +45,7 @@ func TestMatchPartialFill(t *testing.T) {
 	sellOrder.ClientID = 100
 	sellOrder.Price = 100000
 	sellOrder.Qty = 50
-	askBook.addOrder(sellOrder)
+	askBook.AddOrder(sellOrder)
 
 	buyOrder := getOrder()
 	buyOrder.ID = 2
@@ -81,7 +81,7 @@ func TestMatchRejectsSelfTrade(t *testing.T) {
 	sellOrder.ClientID = 100
 	sellOrder.Price = 100000
 	sellOrder.Qty = 100
-	askBook.addOrder(sellOrder)
+	askBook.AddOrder(sellOrder)
 
 	buyOrder := getOrder()
 	buyOrder.ID = 2
@@ -108,7 +108,7 @@ func TestMatchMarketOrder(t *testing.T) {
 	sellOrder.ClientID = 100
 	sellOrder.Price = 100000
 	sellOrder.Qty = 100
-	askBook.addOrder(sellOrder)
+	askBook.AddOrder(sellOrder)
 
 	buyOrder := getOrder()
 	buyOrder.ID = 2

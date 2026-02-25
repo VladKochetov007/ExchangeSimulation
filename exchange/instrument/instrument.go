@@ -1,18 +1,6 @@
-package exchange
+package instrument
 
-type Instrument interface {
-	Symbol() string
-	BaseAsset() string
-	QuoteAsset() string
-	BasePrecision() int64  // Units per whole unit of base asset
-	QuotePrecision() int64 // Units per whole unit of quote asset
-	TickSize() int64
-	MinOrderSize() int64
-	ValidatePrice(price int64) bool
-	ValidateQty(qty int64) bool
-	IsPerp() bool
-	InstrumentType() string
-}
+import etypes "exchange_sim/exchange/types"
 
 type SpotInstrument struct {
 	symbol         string
@@ -36,33 +24,15 @@ func NewSpotInstrument(symbol, base, quote string, basePrecision, quotePrecision
 	}
 }
 
-func (i *SpotInstrument) Symbol() string {
-	return i.symbol
-}
-
-func (i *SpotInstrument) BaseAsset() string {
-	return i.base
-}
-
-func (i *SpotInstrument) QuoteAsset() string {
-	return i.quote
-}
-
-func (i *SpotInstrument) BasePrecision() int64 {
-	return i.basePrecision
-}
-
-func (i *SpotInstrument) QuotePrecision() int64 {
-	return i.quotePrecision
-}
-
-func (i *SpotInstrument) TickSize() int64 {
-	return i.tickSize
-}
-
-func (i *SpotInstrument) MinOrderSize() int64 {
-	return i.minOrderSize
-}
+func (i *SpotInstrument) Symbol() string         { return i.symbol }
+func (i *SpotInstrument) BaseAsset() string       { return i.base }
+func (i *SpotInstrument) QuoteAsset() string      { return i.quote }
+func (i *SpotInstrument) BasePrecision() int64    { return i.basePrecision }
+func (i *SpotInstrument) QuotePrecision() int64   { return i.quotePrecision }
+func (i *SpotInstrument) TickSize() int64         { return i.tickSize }
+func (i *SpotInstrument) MinOrderSize() int64     { return i.minOrderSize }
+func (i *SpotInstrument) IsPerp() bool            { return false }
+func (i *SpotInstrument) InstrumentType() string  { return "SPOT" }
 
 func (i *SpotInstrument) ValidatePrice(price int64) bool {
 	return price > 0 && price%i.tickSize == 0
@@ -72,17 +42,14 @@ func (i *SpotInstrument) ValidateQty(qty int64) bool {
 	return qty > 0
 }
 
-func (i *SpotInstrument) IsPerp() bool {
-	return false
-}
-
-func (i *SpotInstrument) InstrumentType() string {
-	return "SPOT"
+// FundingCalculator computes the funding rate from index and mark prices.
+type FundingCalculator interface {
+	Calculate(indexPrice, markPrice int64) int64
 }
 
 type PerpFutures struct {
 	SpotInstrument
-	fundingRate *FundingRate
+	fundingRate *etypes.FundingRate
 	fundingCalc FundingCalculator
 	// MarginRate is initial margin in bps (e.g. 1000 = 10% = 10x leverage)
 	MarginRate int64
@@ -103,7 +70,7 @@ func NewPerpFutures(symbol, base, quote string, basePrecision, quotePrecision, t
 			tickSize:       tickSize,
 			minOrderSize:   minOrderSize,
 		},
-		fundingRate: &FundingRate{
+		fundingRate: &etypes.FundingRate{
 			Symbol:      symbol,
 			Rate:        0,
 			NextFunding: 0,
@@ -116,23 +83,15 @@ func NewPerpFutures(symbol, base, quote string, basePrecision, quotePrecision, t
 			Damping:  100,
 			MaxRate:  75,
 		},
-		MarginRate:            1000, // 10% initial margin = 10x leverage
-		MaintenanceMarginRate: 500,  // 5% maintenance margin
-		WarningMarginRate:     750,  // 7.5% warning threshold
+		MarginRate:            1000,
+		MaintenanceMarginRate: 500,
+		WarningMarginRate:     750,
 	}
 }
 
-func (p *PerpFutures) IsPerp() bool {
-	return true
-}
-
-func (p *PerpFutures) InstrumentType() string {
-	return "PERP"
-}
-
-func (p *PerpFutures) GetFundingRate() *FundingRate {
-	return p.fundingRate
-}
+func (p *PerpFutures) IsPerp() bool           { return true }
+func (p *PerpFutures) InstrumentType() string  { return "PERP" }
+func (p *PerpFutures) GetFundingRate() *etypes.FundingRate { return p.fundingRate }
 
 func (p *PerpFutures) SetFundingCalculator(calc FundingCalculator) {
 	p.fundingCalc = calc
@@ -142,10 +101,6 @@ func (p *PerpFutures) UpdateFundingRate(indexPrice int64, markPrice int64) {
 	p.fundingRate.IndexPrice = indexPrice
 	p.fundingRate.MarkPrice = markPrice
 	p.fundingRate.Rate = p.fundingCalc.Calculate(indexPrice, markPrice)
-}
-
-type FundingCalculator interface {
-	Calculate(indexPrice, markPrice int64) int64
 }
 
 type SimpleFundingCalc struct {

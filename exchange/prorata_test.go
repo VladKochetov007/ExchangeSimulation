@@ -7,7 +7,7 @@ func TestProRata_SingleRestingOrderFullFill(t *testing.T) {
 	bids := newBook(Buy)
 	asks := newBook(Sell)
 
-	asks.addOrder(mkSellOrder(1, 100, 100, 100))
+	asks.AddOrder(mkSellOrder(1, 100, 100, 100))
 
 	incoming := mkBuyOrder(2, 200, LimitOrder, 100, 100)
 	result := m.Match(bids, asks, incoming)
@@ -51,9 +51,9 @@ func TestProRata_ProportionalSplit(t *testing.T) {
 	bids := newBook(Buy)
 	asks := newBook(Sell)
 
-	asks.addOrder(mkSellOrder(1, 10, 100, 600))
-	asks.addOrder(mkSellOrder(2, 20, 100, 300))
-	asks.addOrder(mkSellOrder(3, 30, 100, 100))
+	asks.AddOrder(mkSellOrder(1, 10, 100, 600))
+	asks.AddOrder(mkSellOrder(2, 20, 100, 300))
+	asks.AddOrder(mkSellOrder(3, 30, 100, 100))
 
 	incoming := mkBuyOrder(4, 40, LimitOrder, 100, 100)
 	result := m.Match(bids, asks, incoming)
@@ -81,9 +81,9 @@ func TestProRata_LeftoverFIFO(t *testing.T) {
 	bids := newBook(Buy)
 	asks := newBook(Sell)
 
-	asks.addOrder(mkSellOrder(1, 10, 100, 100))
-	asks.addOrder(mkSellOrder(2, 20, 100, 100))
-	asks.addOrder(mkSellOrder(3, 30, 100, 100))
+	asks.AddOrder(mkSellOrder(1, 10, 100, 100))
+	asks.AddOrder(mkSellOrder(2, 20, 100, 100))
+	asks.AddOrder(mkSellOrder(3, 30, 100, 100))
 
 	incoming := mkBuyOrder(4, 40, LimitOrder, 100, 100)
 	result := m.Match(bids, asks, incoming)
@@ -106,8 +106,8 @@ func TestProRata_PricePriorityFillsBestFirst(t *testing.T) {
 	bids := newBook(Buy)
 	asks := newBook(Sell)
 
-	asks.addOrder(mkSellOrder(1, 10, 99, 100))  // best ask
-	asks.addOrder(mkSellOrder(2, 20, 101, 100)) // worse ask
+	asks.AddOrder(mkSellOrder(1, 10, 99, 100))  // best ask
+	asks.AddOrder(mkSellOrder(2, 20, 101, 100)) // worse ask
 
 	incoming := mkBuyOrder(3, 30, LimitOrder, 101, 100)
 	result := m.Match(bids, asks, incoming)
@@ -131,7 +131,7 @@ func TestProRata_LimitBuyDoesNotMatchAbovePrice(t *testing.T) {
 	bids := newBook(Buy)
 	asks := newBook(Sell)
 
-	asks.addOrder(mkSellOrder(1, 10, 110, 100)) // ask above buy limit
+	asks.AddOrder(mkSellOrder(1, 10, 110, 100)) // ask above buy limit
 
 	incoming := mkBuyOrder(2, 20, LimitOrder, 100, 100)
 	result := m.Match(bids, asks, incoming)
@@ -153,7 +153,7 @@ func TestProRata_LimitSellDoesNotMatchBelowPrice(t *testing.T) {
 	bid.Type = LimitOrder
 	bid.Price = 90
 	bid.Qty = 100
-	bids.addOrder(bid)
+	bids.AddOrder(bid)
 
 	incoming := getOrder() // limit sell at 100, bid only at 90
 	incoming.ID = 2
@@ -174,7 +174,7 @@ func TestProRata_SelfTradeSkipped(t *testing.T) {
 	bids := newBook(Buy)
 	asks := newBook(Sell)
 
-	asks.addOrder(mkSellOrder(1, 99, 100, 100)) // same clientID as incoming
+	asks.AddOrder(mkSellOrder(1, 99, 100, 100)) // same clientID as incoming
 
 	incoming := mkBuyOrder(2, 99, LimitOrder, 100, 100)
 	result := m.Match(bids, asks, incoming)
@@ -189,7 +189,7 @@ func TestProRata_MarketOrderAlwaysMatches(t *testing.T) {
 	bids := newBook(Buy)
 	asks := newBook(Sell)
 
-	asks.addOrder(mkSellOrder(1, 10, 999, 100)) // very high ask price
+	asks.AddOrder(mkSellOrder(1, 10, 999, 100)) // very high ask price
 
 	incoming := mkBuyOrder(2, 20, Market, 0, 100)
 	result := m.Match(bids, asks, incoming)
@@ -204,7 +204,7 @@ func TestProRata_PartialFill(t *testing.T) {
 	bids := newBook(Buy)
 	asks := newBook(Sell)
 
-	asks.addOrder(mkSellOrder(1, 10, 100, 40)) // only 40 available
+	asks.AddOrder(mkSellOrder(1, 10, 100, 40)) // only 40 available
 
 	incoming := mkBuyOrder(2, 20, LimitOrder, 100, 100)
 	result := m.Match(bids, asks, incoming)
@@ -225,8 +225,8 @@ func TestProRata_MultiLevelFill(t *testing.T) {
 	bids := newBook(Buy)
 	asks := newBook(Sell)
 
-	asks.addOrder(mkSellOrder(1, 10, 100, 60)) // best level: 60
-	asks.addOrder(mkSellOrder(2, 20, 101, 60)) // next level: 60
+	asks.AddOrder(mkSellOrder(1, 10, 100, 60)) // best level: 60
+	asks.AddOrder(mkSellOrder(2, 20, 101, 60)) // next level: 60
 
 	incoming := mkBuyOrder(3, 30, LimitOrder, 101, 100)
 	result := m.Match(bids, asks, incoming)
@@ -247,7 +247,7 @@ func TestProRata_FilledRestingOrderRemovedFromBook(t *testing.T) {
 	bids := newBook(Buy)
 	asks := newBook(Sell)
 
-	asks.addOrder(mkSellOrder(1, 10, 100, 100))
+	asks.AddOrder(mkSellOrder(1, 10, 100, 100))
 
 	incoming := mkBuyOrder(2, 20, LimitOrder, 100, 100)
 	m.Match(bids, asks, incoming)
@@ -267,8 +267,8 @@ func TestProRata_ZeroShareMakersEmitNoExecution(t *testing.T) {
 	bids := newBook(Buy)
 	asks := newBook(Sell)
 
-	asks.addOrder(mkSellOrder(1, 10, 100, 1))
-	asks.addOrder(mkSellOrder(2, 20, 100, 999))
+	asks.AddOrder(mkSellOrder(1, 10, 100, 1))
+	asks.AddOrder(mkSellOrder(2, 20, 100, 999))
 
 	incoming := mkBuyOrder(3, 30, LimitOrder, 100, 1)
 	result := m.Match(bids, asks, incoming)

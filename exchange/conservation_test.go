@@ -231,7 +231,7 @@ func TestSettleFunding_CorrectMagnitudeAtBTCPrices(t *testing.T) {
 	injectPerpPosition(ex, 1, "BTC-PERP", qty, entryUSD, collateral, 0)   // client 1: long
 	injectPerpPosition(ex, 2, "BTC-PERP", -qty, entryUSD, collateral, 0)  // client 2: short
 
-	perp.fundingRate.Rate = 10 // +10 bps: longs pay shorts
+	perp.GetFundingRate().Rate = 10 // +10 bps: longs pay shorts
 
 	longBefore := ex.Clients[1].PerpBalances["USD"]
 	shortBefore := ex.Clients[2].PerpBalances["USD"]
@@ -277,7 +277,7 @@ func TestSettleFunding_AsymmetricOIRoutesToExchange(t *testing.T) {
 	injectPerpPosition(ex, 1, "BTC-PERP", qty, PriceUSD(50_000, DOLLAR_TICK), collateral, 0)
 	injectPerpPosition(ex, 2, "BTC-PERP", -qty, PriceUSD(40_000, DOLLAR_TICK), collateral, 0)
 
-	perp.fundingRate.Rate = 10 // +10 bps: longs pay
+	perp.GetFundingRate().Rate = 10 // +10 bps: longs pay
 
 	initialTotal := totalMoney(ex, "USD")
 	feeRevenueBefore := ex.ExchangeBalance.FeeRevenue["USD"]

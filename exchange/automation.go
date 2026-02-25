@@ -403,9 +403,9 @@ func (a *ExchangeAutomation) liquidate(clientID uint64, client *Client, symbol s
 		remainingMargin := (remainingQty * order.Price / perp.BasePrecision()) * perp.MarginRate / 10000
 		client.ReleasePerp(perp.QuoteAsset(), remainingMargin)
 		if order.Side == Buy {
-			book.Bids.cancelOrder(orderID)
+			book.Bids.CancelOrder(orderID)
 		} else {
-			book.Asks.cancelOrder(orderID)
+			book.Asks.CancelOrder(orderID)
 		}
 		client.RemoveOrder(orderID)
 	}

@@ -1,4 +1,6 @@
-package exchange
+package types
+
+import "time"
 
 type Side uint8
 
@@ -311,16 +313,16 @@ type Subscription struct {
 }
 
 type Execution struct {
-	TakerOrderID     uint64 `json:"taker_order_id"`
-	MakerOrderID     uint64 `json:"maker_order_id"`
-	TakerClientID    uint64 `json:"taker_client_id"`
-	MakerClientID    uint64 `json:"maker_client_id"`
-	Price            int64  `json:"price"`
-	Qty              int64  `json:"qty"`
-	Timestamp        int64  `json:"timestamp"`
-	MakerFilledQty   int64  `json:"maker_filled_qty"`   // Maker order's filled qty after this execution
-	MakerTotalQty    int64  `json:"maker_total_qty"`    // Maker order's total qty
-	MakerSide        Side   `json:"maker_side"`         // Maker order's side
+	TakerOrderID   uint64 `json:"taker_order_id"`
+	MakerOrderID   uint64 `json:"maker_order_id"`
+	TakerClientID  uint64 `json:"taker_client_id"`
+	MakerClientID  uint64 `json:"maker_client_id"`
+	Price          int64  `json:"price"`
+	Qty            int64  `json:"qty"`
+	Timestamp      int64  `json:"timestamp"`
+	MakerFilledQty int64  `json:"maker_filled_qty"`
+	MakerTotalQty  int64  `json:"maker_total_qty"`
+	MakerSide      Side   `json:"maker_side"`
 }
 
 type Fee struct {
@@ -442,15 +444,15 @@ type PositionUpdateEvent struct {
 }
 
 type RealizedPnLEvent struct {
-	Timestamp     int64  `json:"timestamp"`
-	ClientID      uint64 `json:"client_id"`
-	Symbol        string `json:"symbol"`
-	TradeID       uint64 `json:"trade_id"`
-	ClosedQty     int64  `json:"closed_qty"`
-	EntryPrice    int64  `json:"entry_price"`
-	ExitPrice     int64  `json:"exit_price"`
-	PnL           int64  `json:"pnl"`
-	Side          string `json:"side"`
+	Timestamp  int64  `json:"timestamp"`
+	ClientID   uint64 `json:"client_id"`
+	Symbol     string `json:"symbol"`
+	TradeID    uint64 `json:"trade_id"`
+	ClosedQty  int64  `json:"closed_qty"`
+	EntryPrice int64  `json:"entry_price"`
+	ExitPrice  int64  `json:"exit_price"`
+	PnL        int64  `json:"pnl"`
+	Side       string `json:"side"`
 }
 
 type MarkPriceUpdateEvent struct {
@@ -464,15 +466,15 @@ type MarkPriceUpdateEvent struct {
 type FundingRateUpdateEvent struct {
 	Timestamp   int64  `json:"timestamp"`
 	Symbol      string `json:"symbol"`
-	Rate        int64  `json:"rate"`         // Funding rate in basis points (e.g., 10 = 0.1%)
-	NextFunding int64  `json:"next_funding"` // Unix nano timestamp of next settlement
+	Rate        int64  `json:"rate"`
+	NextFunding int64  `json:"next_funding"`
 }
 
 // OpenInterestEvent logs total open interest for a symbol
 type OpenInterestEvent struct {
 	Timestamp    int64  `json:"timestamp"`
 	Symbol       string `json:"symbol"`
-	OpenInterest int64  `json:"open_interest"` // Total open interest in base asset satoshis
+	OpenInterest int64  `json:"open_interest"`
 }
 
 // FeeRevenueEvent logs exchange fee revenue per trade
@@ -482,7 +484,7 @@ type FeeRevenueEvent struct {
 	TradeID   uint64 `json:"trade_id"`
 	TakerFee  int64  `json:"taker_fee"`
 	MakerFee  int64  `json:"maker_fee"`
-	Asset     string `json:"asset"` // Fee asset (usually quote)
+	Asset     string `json:"asset"`
 }
 
 type MarginMode uint8
@@ -526,3 +528,52 @@ type IsolatedPosition struct {
 	Borrowed   map[string]int64
 }
 
+// PositionDelta contains position state before and after an update.
+type PositionDelta struct {
+	OldSize       int64
+	OldEntryPrice int64
+	NewSize       int64
+	NewEntryPrice int64
+}
+
+// Logger is the event logging interface for the exchange.
+type Logger interface {
+	LogEvent(simTime int64, clientID uint64, eventName string, event any)
+}
+
+// FeeModel calculates trading fees for each execution.
+type FeeModel interface {
+	CalculateFee(exec *Execution, side Side, isMaker bool, baseAsset, quoteAsset string, precision int64) Fee
+}
+
+// Instrument describes a tradeable asset pair.
+type Instrument interface {
+	Symbol() string
+	BaseAsset() string
+	QuoteAsset() string
+	BasePrecision() int64
+	QuotePrecision() int64
+	TickSize() int64
+	MinOrderSize() int64
+	ValidatePrice(price int64) bool
+	ValidateQty(qty int64) bool
+	IsPerp() bool
+	InstrumentType() string
+}
+
+// Clock is the time abstraction used throughout the exchange.
+type Clock interface {
+	NowUnixNano() int64
+	NowUnix() int64
+}
+
+// Ticker matches the relevant parts of time.Ticker.
+type Ticker interface {
+	C() <-chan time.Time
+	Stop()
+}
+
+// TickerFactory creates tickers that work with either real-time or simulation time.
+type TickerFactory interface {
+	NewTicker(d time.Duration) Ticker
+}

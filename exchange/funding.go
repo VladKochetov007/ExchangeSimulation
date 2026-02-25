@@ -31,14 +31,6 @@ func (pm *PositionManager) GetPosition(clientID uint64, symbol string) *Position
 	return &copy
 }
 
-// PositionDelta contains position state before and after an update.
-type PositionDelta struct {
-	OldSize       int64
-	OldEntryPrice int64
-	NewSize       int64
-	NewEntryPrice int64
-}
-
 // UpdatePositionWithDelta updates the position and returns old and new state.
 func (pm *PositionManager) UpdatePositionWithDelta(clientID uint64, symbol string, qty int64, price int64, side Side, exchange *Exchange, reason string) PositionDelta {
 	pm.mu.Lock()

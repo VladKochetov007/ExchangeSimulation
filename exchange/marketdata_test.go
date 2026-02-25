@@ -14,7 +14,7 @@ func TestBookGetSnapshot(t *testing.T) {
 	order1.Price = 50000
 	order1.Qty = 100
 	order1.Visibility = Normal
-	book.addOrder(order1)
+	book.AddOrder(order1)
 
 	order2 := getOrder()
 	order2.ID = 2
@@ -22,7 +22,7 @@ func TestBookGetSnapshot(t *testing.T) {
 	order2.Price = 49000
 	order2.Qty = 200
 	order2.Visibility = Normal
-	book.addOrder(order2)
+	book.AddOrder(order2)
 
 	order3 := getOrder()
 	order3.ID = 3
@@ -30,9 +30,9 @@ func TestBookGetSnapshot(t *testing.T) {
 	order3.Price = 48000
 	order3.Qty = 150
 	order3.Visibility = Normal
-	book.addOrder(order3)
+	book.AddOrder(order3)
 
-	snapshot := book.getSnapshot()
+	snapshot := book.GetSnapshot()
 
 	if len(snapshot) != 3 {
 		t.Fatalf("Expected 3 levels, got %d", len(snapshot))
@@ -113,11 +113,11 @@ func TestMDPublisherSubscribeUnsubscribe(t *testing.T) {
 	types := []MDType{MDSnapshot, MDDelta, MDTrade}
 	mdp.Subscribe(1, "BTC/USD", types, gateway)
 
-	if len(mdp.subscriptions["BTC/USD"]) != 1 {
-		t.Errorf("Expected 1 subscription, got %d", len(mdp.subscriptions["BTC/USD"]))
+	if len(mdp.Subscriptions["BTC/USD"]) != 1 {
+		t.Errorf("Expected 1 subscription, got %d", len(mdp.Subscriptions["BTC/USD"]))
 	}
 
-	sub := mdp.subscriptions["BTC/USD"][1]
+	sub := mdp.Subscriptions["BTC/USD"][1]
 	if sub == nil {
 		t.Fatalf("Subscription not found")
 	}
@@ -130,8 +130,8 @@ func TestMDPublisherSubscribeUnsubscribe(t *testing.T) {
 
 	mdp.Unsubscribe(1, "BTC/USD")
 
-	if len(mdp.subscriptions["BTC/USD"]) != 0 {
-		t.Errorf("Expected 0 subscriptions after unsubscribe, got %d", len(mdp.subscriptions["BTC/USD"]))
+	if len(mdp.Subscriptions["BTC/USD"]) != 0 {
+		t.Errorf("Expected 0 subscriptions after unsubscribe, got %d", len(mdp.Subscriptions["BTC/USD"]))
 	}
 }
 

@@ -44,7 +44,7 @@ func TestBookCancelOrder_NotFound(t *testing.T) {
 		Asks: newBook(Sell),
 	}
 	// Cancel non-existent orderID — should return nil without panic
-	result := book.Bids.cancelOrder(99999)
+	result := book.Bids.CancelOrder(99999)
 	if result != nil {
 		t.Errorf("expected nil for non-existent order, got %v", result)
 	}

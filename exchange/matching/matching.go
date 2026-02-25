@@ -1,33 +1,72 @@
-package exchange
+package matching
 
+import (
+	ebook "exchange_sim/exchange/book"
+	eclock "exchange_sim/exchange/clock"
+	etypes "exchange_sim/exchange/types"
+	"sync"
+)
+
+// Execution pool — only used within this package.
+var executionPool = sync.Pool{
+	New: func() any { return &etypes.Execution{} },
+}
+
+func getExecution() *etypes.Execution {
+	return executionPool.Get().(*etypes.Execution)
+}
+
+// GetExecution retrieves an Execution from the pool.
+func GetExecution() *etypes.Execution {
+	return executionPool.Get().(*etypes.Execution)
+}
+
+// PutExecution returns an execution to the pool.
+func PutExecution(e *etypes.Execution) {
+	e.TakerOrderID = 0
+	e.MakerOrderID = 0
+	e.TakerClientID = 0
+	e.MakerClientID = 0
+	e.Price = 0
+	e.Qty = 0
+	e.Timestamp = 0
+	executionPool.Put(e)
+}
+
+// MatchResult holds the output of a single matching pass.
 type MatchResult struct {
-	Executions  []*Execution
+	Executions  []*etypes.Execution
 	FullyFilled bool
 }
 
+// MatchingEngine is the matching algorithm interface.
 type MatchingEngine interface {
-	Match(bidBook, askBook *Book, incomingOrder *Order) *MatchResult
+	Match(bidBook, askBook *ebook.Book, incomingOrder *etypes.Order) *MatchResult
 }
 
+// DefaultMatcher implements price-time priority (FIFO) matching.
 type DefaultMatcher struct {
-	clock Clock
+	clock etypes.Clock
 }
 
-func NewDefaultMatcher() *DefaultMatcher {
-	return &DefaultMatcher{clock: &RealClock{}}
+func NewDefaultMatcher(clock etypes.Clock) *DefaultMatcher {
+	if clock == nil {
+		clock = &eclock.RealClock{}
+	}
+	return &DefaultMatcher{clock: clock}
 }
 
-func (m *DefaultMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) *MatchResult {
-	executions := make([]*Execution, 0, 8)
-	var book *Book
-	if incomingOrder.Side == Buy {
+func (m *DefaultMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etypes.Order) *MatchResult {
+	executions := make([]*etypes.Execution, 0, 8)
+	var book *ebook.Book
+	if incomingOrder.Side == etypes.Buy {
 		book = askBook
 	} else {
 		book = bidBook
 	}
 
 	for incomingOrder.FilledQty < incomingOrder.Qty && book.Best != nil {
-		if !m.canMatch(incomingOrder, book.Best) {
+		if !m.CanMatch(incomingOrder, book.Best) {
 			break
 		}
 
@@ -41,19 +80,19 @@ func (m *DefaultMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) *Ma
 				matched = true
 
 				if order.FilledQty >= order.Qty {
-					order.Status = Filled
+					order.Status = etypes.Filled
 					// CRITICAL: Remove filled order from book so matching can continue to next level
-					unlinkOrder(order)
+					ebook.UnlinkOrder(order)
 					delete(book.Orders, order.ID)
 				} else {
-					order.Status = PartialFill
+					order.Status = etypes.PartialFill
 				}
 			}
 			order = next
 		}
 
-		if isEmpty(limit) {
-			book.removeLimit(limit)
+		if ebook.IsEmpty(limit) {
+			book.RemoveLimit(limit)
 		} else if !matched {
 			break
 		}
@@ -61,9 +100,9 @@ func (m *DefaultMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) *Ma
 
 	fullyFilled := incomingOrder.FilledQty >= incomingOrder.Qty
 	if fullyFilled {
-		incomingOrder.Status = Filled
+		incomingOrder.Status = etypes.Filled
 	} else if incomingOrder.FilledQty > 0 {
-		incomingOrder.Status = PartialFill
+		incomingOrder.Status = etypes.PartialFill
 	}
 
 	return &MatchResult{
@@ -72,24 +111,21 @@ func (m *DefaultMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) *Ma
 	}
 }
 
-func (m *DefaultMatcher) canMatch(incoming *Order, limit *Limit) bool {
-	if incoming.Type == Market {
+func (m *DefaultMatcher) CanMatch(incoming *etypes.Order, limit *etypes.Limit) bool {
+	if incoming.Type == etypes.Market {
 		return true
 	}
-	if incoming.Side == Buy {
+	if incoming.Side == etypes.Buy {
 		return incoming.Price >= limit.Price
 	}
 	return incoming.Price <= limit.Price
 }
 
-func (m *DefaultMatcher) shouldMatch(incoming, resting *Order) bool {
-	if incoming.ClientID == resting.ClientID {
-		return false
-	}
-	return true
+func (m *DefaultMatcher) shouldMatch(incoming, resting *etypes.Order) bool {
+	return incoming.ClientID != resting.ClientID
 }
 
-func (m *DefaultMatcher) execute(taker, maker *Order) *Execution {
+func (m *DefaultMatcher) execute(taker, maker *etypes.Order) *etypes.Execution {
 	execQty := min(taker.Qty-taker.FilledQty, maker.Qty-maker.FilledQty)
 	if execQty <= 0 {
 		panic("matching engine bug: attempted zero-quantity execution")
@@ -115,29 +151,31 @@ func (m *DefaultMatcher) execute(taker, maker *Order) *Execution {
 	return exec
 }
 
-// ProRataMatcher matches at each price level by distributing fills proportionally
-// to resting order size rather than by arrival time (FIFO).
+// ProRataMatcher distributes fills proportionally to resting order size at each level.
 // Used by CME Globex and Euronext for liquid futures contracts.
 // Time priority is used only as a tiebreaker when quantities are equal.
 type ProRataMatcher struct {
-	clock Clock
+	clock etypes.Clock
 }
 
-func NewProRataMatcher() *ProRataMatcher {
-	return &ProRataMatcher{clock: &RealClock{}}
+func NewProRataMatcher(clock etypes.Clock) *ProRataMatcher {
+	if clock == nil {
+		clock = &eclock.RealClock{}
+	}
+	return &ProRataMatcher{clock: clock}
 }
 
-func (m *ProRataMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) *MatchResult {
-	executions := make([]*Execution, 0, 8)
-	var book *Book
-	if incomingOrder.Side == Buy {
+func (m *ProRataMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etypes.Order) *MatchResult {
+	executions := make([]*etypes.Execution, 0, 8)
+	var book *ebook.Book
+	if incomingOrder.Side == etypes.Buy {
 		book = askBook
 	} else {
 		book = bidBook
 	}
 
 	for incomingOrder.FilledQty < incomingOrder.Qty && book.Best != nil {
-		if !m.canMatch(incomingOrder, book.Best) {
+		if !m.CanMatch(incomingOrder, book.Best) {
 			break
 		}
 
@@ -145,7 +183,7 @@ func (m *ProRataMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) *Ma
 		remaining := incomingOrder.Qty - incomingOrder.FilledQty
 
 		// Collect eligible resting orders and total available qty at this level.
-		type candidate struct{ order *Order }
+		type candidate struct{ order *etypes.Order }
 		var candidates []candidate
 		totalQty := int64(0)
 		for o := limit.Head; o != nil; o = o.Next {
@@ -212,34 +250,34 @@ func (m *ProRataMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) *Ma
 			executions = append(executions, exec)
 
 			if c.order.FilledQty >= c.order.Qty {
-				c.order.Status = Filled
-				unlinkOrder(c.order)
+				c.order.Status = etypes.Filled
+				ebook.UnlinkOrder(c.order)
 				delete(book.Orders, c.order.ID)
 			} else {
-				c.order.Status = PartialFill
+				c.order.Status = etypes.PartialFill
 			}
 		}
 
-		if isEmpty(limit) {
-			book.removeLimit(limit)
+		if ebook.IsEmpty(limit) {
+			book.RemoveLimit(limit)
 		}
 	}
 
 	fullyFilled := incomingOrder.FilledQty >= incomingOrder.Qty
 	if fullyFilled {
-		incomingOrder.Status = Filled
+		incomingOrder.Status = etypes.Filled
 	} else if incomingOrder.FilledQty > 0 {
-		incomingOrder.Status = PartialFill
+		incomingOrder.Status = etypes.PartialFill
 	}
 
 	return &MatchResult{Executions: executions, FullyFilled: fullyFilled}
 }
 
-func (m *ProRataMatcher) canMatch(incoming *Order, limit *Limit) bool {
-	if incoming.Type == Market {
+func (m *ProRataMatcher) CanMatch(incoming *etypes.Order, limit *etypes.Limit) bool {
+	if incoming.Type == etypes.Market {
 		return true
 	}
-	if incoming.Side == Buy {
+	if incoming.Side == etypes.Buy {
 		return incoming.Price >= limit.Price
 	}
 	return incoming.Price <= limit.Price

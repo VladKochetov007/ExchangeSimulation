@@ -148,7 +148,7 @@ func TestSettleFunding_SkipsZeroSizePositions(t *testing.T) {
 	totalBefore := totalMoney(ex, "USD")
 
 	// SettleFunding should skip the zero-size position
-	perp.fundingRate.NextFunding = 0 // force settlement
+	perp.GetFundingRate().NextFunding = 0 // force settlement
 	auto := NewExchangeAutomation(ex, AutomationConfig{})
 	auto.checkAndSettleFunding()
 

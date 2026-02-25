@@ -151,8 +151,8 @@ func TestSubscribeUnsubscribe(t *testing.T) {
 		t.Fatalf("Subscribe should succeed")
 	}
 
-	if len(ex.MDPublisher.subscriptions["BTC/USD"]) != 1 {
-		t.Errorf("Expected 1 subscription, got %d", len(ex.MDPublisher.subscriptions["BTC/USD"]))
+	if len(ex.MDPublisher.Subscriptions["BTC/USD"]) != 1 {
+		t.Errorf("Expected 1 subscription, got %d", len(ex.MDPublisher.Subscriptions["BTC/USD"]))
 	}
 
 	unsubReq := &QueryRequest{
@@ -164,8 +164,8 @@ func TestSubscribeUnsubscribe(t *testing.T) {
 		t.Fatalf("Unsubscribe should succeed")
 	}
 
-	if len(ex.MDPublisher.subscriptions["BTC/USD"]) != 0 {
-		t.Errorf("Expected 0 subscriptions, got %d", len(ex.MDPublisher.subscriptions["BTC/USD"]))
+	if len(ex.MDPublisher.Subscriptions["BTC/USD"]) != 0 {
+		t.Errorf("Expected 0 subscriptions, got %d", len(ex.MDPublisher.Subscriptions["BTC/USD"]))
 	}
 
 	gateway.Close()

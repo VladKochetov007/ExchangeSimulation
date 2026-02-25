@@ -29,8 +29,8 @@ func TestMidPriceOracle_PerpToSpot(t *testing.T) {
 	oracle.MapSymbol("BTC-PERP", "BTC/USD")
 
 	spotBook := ex.Books["BTC/USD"]
-	spotBook.Bids.addOrder(&Order{ID: 1, ClientID: 1, Price: 49900 * BTC_PRECISION, Qty: BTC_PRECISION, Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()})
-	spotBook.Asks.addOrder(&Order{ID: 2, ClientID: 1, Price: 50100 * BTC_PRECISION, Qty: BTC_PRECISION, Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano()})
+	spotBook.Bids.AddOrder(&Order{ID: 1, ClientID: 1, Price: 49900 * BTC_PRECISION, Qty: BTC_PRECISION, Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()})
+	spotBook.Asks.AddOrder(&Order{ID: 2, ClientID: 1, Price: 50100 * BTC_PRECISION, Qty: BTC_PRECISION, Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano()})
 
 	expected := int64((49900*BTC_PRECISION + 50100*BTC_PRECISION) / 2)
 	if p := oracle.GetPrice("BTC-PERP"); p != expected {

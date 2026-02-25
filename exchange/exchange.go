@@ -1,15 +1,13 @@
 package exchange
 
 import (
-	"maps"
 	"errors"
+	"maps"
 	"sync"
 	"time"
-)
 
-type Logger interface {
-	LogEvent(simTime int64, clientID uint64, eventName string, event any)
-}
+	ematching "exchange_sim/exchange/matching"
+)
 
 // ExchangeBalance tracks the exchange's own accumulated revenue and safety fund.
 type ExchangeBalance struct {
@@ -99,8 +97,7 @@ func NewExchangeWithConfig(config ExchangeConfig) *Exchange {
 		config.SnapshotPollInterval = 1 * time.Millisecond
 	}
 
-	matcher := NewDefaultMatcher()
-	matcher.clock = config.Clock
+	matcher := ematching.NewDefaultMatcher(config.Clock)
 	ex := &Exchange{
 		ID:          config.ID,
 		Clients:     make(map[uint64]*Client, config.EstimatedClients),
@@ -165,8 +162,8 @@ func (e *Exchange) logSnapshots() {
 	timestamp := e.Clock.NowUnixNano()
 	for symbol, book := range e.Books {
 		snapshot := &BookSnapshot{
-			Bids: book.Bids.getSnapshot(),
-			Asks: book.Asks.getSnapshot(),
+			Bids: book.Bids.GetSnapshot(),
+			Asks: book.Asks.GetSnapshot(),
 		}
 		e.MDPublisher.Publish(symbol, MDSnapshot, snapshot, timestamp)
 
@@ -332,10 +329,10 @@ func (e *Exchange) CancelAllClientOrders(clientID uint64) int {
 		releaseOrderFunds(client, book.Instrument, order.Side, remainingQty, order.Price)
 
 		if order.Side == Buy {
-			book.Bids.cancelOrder(order.ID)
+			book.Bids.CancelOrder(order.ID)
 			e.publishBookUpdate(book, Buy, order.Price)
 		} else {
-			book.Asks.cancelOrder(order.ID)
+			book.Asks.CancelOrder(order.ID)
 			e.publishBookUpdate(book, Sell, order.Price)
 		}
 
@@ -524,6 +521,14 @@ func (e *Exchange) GetBestLiquidity(symbol string) (bidQty, askQty int64) {
 	return bidQty, askQty
 }
 
+// GetBook returns the OrderBook for symbol, acquiring a read lock.
+// Implements price.BookProvider for MidPriceOracle.
+func (e *Exchange) GetBook(symbol string) *OrderBook {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.Books[symbol]
+}
+
 func (e *Exchange) ListInstruments(baseFilter, quoteFilter string) []Instrument {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -549,8 +554,8 @@ func (e *Exchange) publishSnapshot(symbol string, timestamp int64) {
 		return
 	}
 	snapshot := &BookSnapshot{
-		Bids: book.Bids.getSnapshot(),
-		Asks: book.Asks.getSnapshot(),
+		Bids: book.Bids.GetSnapshot(),
+		Asks: book.Asks.GetSnapshot(),
 	}
 	e.MDPublisher.Publish(symbol, MDSnapshot, snapshot, timestamp)
 }
