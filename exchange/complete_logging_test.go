@@ -2,18 +2,22 @@ package exchange
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
 
 // completeLogger captures all three new event types
 type completeLogger struct {
+	mu           sync.Mutex
 	fundingRates []FundingRateUpdateEvent
 	openInterest []OpenInterestEvent
 	feeRevenue   []FeeRevenueEvent
 }
 
 func (l *completeLogger) LogEvent(simTime int64, clientID uint64, eventName string, event any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	switch eventName {
 	case "funding_rate_update":
 		if e, ok := event.(FundingRateUpdateEvent); ok {
@@ -79,13 +83,18 @@ func TestFundingRateLogging(t *testing.T) {
 	time.Sleep(250 * time.Millisecond)
 	automation.Stop()
 
+	logger.mu.Lock()
+	fundingRates := make([]FundingRateUpdateEvent, len(logger.fundingRates))
+	copy(fundingRates, logger.fundingRates)
+	logger.mu.Unlock()
+
 	// Should have logged funding rates (same frequency as mark prices)
-	if len(logger.fundingRates) < 3 {
-		t.Fatalf("Expected at least 3 funding rate updates, got %d", len(logger.fundingRates))
+	if len(fundingRates) < 3 {
+		t.Fatalf("Expected at least 3 funding rate updates, got %d", len(fundingRates))
 	}
 
 	// Check funding rate event structure
-	fr := logger.fundingRates[0]
+	fr := fundingRates[0]
 	if fr.Symbol != "BTC-PERP" {
 		t.Errorf("Expected symbol BTC-PERP, got %s", fr.Symbol)
 	}
@@ -95,7 +104,7 @@ func TestFundingRateLogging(t *testing.T) {
 	}
 
 	// Real exchange behavior: Funding rates logged with every mark price update
-	t.Logf("Logged %d funding rate updates in 250ms", len(logger.fundingRates))
+	t.Logf("Logged %d funding rate updates in 250ms", len(fundingRates))
 	t.Logf("Funding rate: %d bps, NextFunding: %d", fr.Rate, fr.NextFunding)
 
 	ex.Shutdown()
@@ -129,13 +138,18 @@ func TestOpenInterestLogging(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
+	logger.mu.Lock()
+	oi := make([]OpenInterestEvent, len(logger.openInterest))
+	copy(oi, logger.openInterest)
+	logger.mu.Unlock()
+
 	// Should have 2 open interest events (one for each position update)
-	if len(logger.openInterest) < 2 {
-		t.Fatalf("Expected at least 2 open interest events, got %d", len(logger.openInterest))
+	if len(oi) < 2 {
+		t.Fatalf("Expected at least 2 open interest events, got %d", len(oi))
 	}
 
 	// First OI should be for first position
-	oi1 := logger.openInterest[0]
+	oi1 := oi[0]
 	if oi1.Symbol != "BTC-PERP" {
 		t.Errorf("Expected symbol BTC-PERP, got %s", oi1.Symbol)
 	}
@@ -144,13 +158,15 @@ func TestOpenInterestLogging(t *testing.T) {
 	}
 
 	// Second OI should be total of both positions
-	oi2 := logger.openInterest[1]
+	oi2 := oi[1]
 	if oi2.OpenInterest != 20*BTC_PRECISION {
 		t.Errorf("Expected OI %d after both positions, got %d", 20*BTC_PRECISION, oi2.OpenInterest)
 	}
 
 	// Trade 2: Close partial positions
-	logger.openInterest = nil // Reset
+	logger.mu.Lock()
+	logger.openInterest = nil
+	logger.mu.Unlock()
 
 	req3 := &OrderRequest{RequestID: 3, Side: Buy, Type: LimitOrder, Price: 51000 * USD_PRECISION, Qty: 5 * BTC_PRECISION, Symbol: "BTC-PERP"}
 	client2.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: req3}
@@ -162,13 +178,18 @@ func TestOpenInterestLogging(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
+	logger.mu.Lock()
+	oi3 := make([]OpenInterestEvent, len(logger.openInterest))
+	copy(oi3, logger.openInterest)
+	logger.mu.Unlock()
+
 	// OI should decrease as positions close
-	if len(logger.openInterest) < 2 {
-		t.Fatalf("Expected at least 2 OI events after partial close, got %d", len(logger.openInterest))
+	if len(oi3) < 2 {
+		t.Fatalf("Expected at least 2 OI events after partial close, got %d", len(oi3))
 	}
 
 	// After closing 5 BTC from each side, OI should be 10 BTC (5+5)
-	finalOI := logger.openInterest[len(logger.openInterest)-1]
+	finalOI := oi3[len(oi3)-1]
 	if finalOI.OpenInterest != 10*BTC_PRECISION {
 		t.Errorf("Expected final OI %d, got %d", 10*BTC_PRECISION, finalOI.OpenInterest)
 	}
@@ -208,12 +229,17 @@ func TestFeeRevenueLoggingPerp(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
+	logger.mu.Lock()
+	feeRevenue := make([]FeeRevenueEvent, len(logger.feeRevenue))
+	copy(feeRevenue, logger.feeRevenue)
+	logger.mu.Unlock()
+
 	// Should have 1 fee revenue event
-	if len(logger.feeRevenue) != 1 {
-		t.Fatalf("Expected 1 fee revenue event, got %d", len(logger.feeRevenue))
+	if len(feeRevenue) != 1 {
+		t.Fatalf("Expected 1 fee revenue event, got %d", len(feeRevenue))
 	}
 
-	fee := logger.feeRevenue[0]
+	fee := feeRevenue[0]
 	if fee.Symbol != "BTC-PERP" {
 		t.Errorf("Expected symbol BTC-PERP, got %s", fee.Symbol)
 	}
@@ -268,12 +294,17 @@ func TestFeeRevenueLoggingSpot(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
+	logger.mu.Lock()
+	spotFees := make([]FeeRevenueEvent, len(logger.feeRevenue))
+	copy(spotFees, logger.feeRevenue)
+	logger.mu.Unlock()
+
 	// Should have 1 fee revenue event for spot trade
-	if len(logger.feeRevenue) != 1 {
-		t.Fatalf("Expected 1 fee revenue event for spot, got %d", len(logger.feeRevenue))
+	if len(spotFees) != 1 {
+		t.Fatalf("Expected 1 fee revenue event for spot, got %d", len(spotFees))
 	}
 
-	fee := logger.feeRevenue[0]
+	fee := spotFees[0]
 	if fee.Symbol != "BTCUSD" {
 		t.Errorf("Expected symbol BTCUSD, got %s", fee.Symbol)
 	}
@@ -337,22 +368,28 @@ func TestCompleteLoggingIntegration(t *testing.T) {
 	time.Sleep(120 * time.Millisecond)
 	automation.Stop()
 
+	logger.mu.Lock()
+	nOI := len(logger.openInterest)
+	nFee := len(logger.feeRevenue)
+	nFunding := len(logger.fundingRates)
+	logger.mu.Unlock()
+
 	// Verify all three types of events were logged
-	if len(logger.openInterest) < 2 {
-		t.Errorf("Expected at least 2 open interest events, got %d", len(logger.openInterest))
+	if nOI < 2 {
+		t.Errorf("Expected at least 2 open interest events, got %d", nOI)
 	}
-	if len(logger.feeRevenue) != 1 {
-		t.Errorf("Expected 1 fee revenue event, got %d", len(logger.feeRevenue))
+	if nFee != 1 {
+		t.Errorf("Expected 1 fee revenue event, got %d", nFee)
 	}
-	if len(logger.fundingRates) < 2 {
-		t.Errorf("Expected at least 2 funding rate updates, got %d", len(logger.fundingRates))
+	if nFunding < 2 {
+		t.Errorf("Expected at least 2 funding rate updates, got %d", nFunding)
 	}
 
 	// Summary
 	t.Logf("Complete logging verified:")
-	t.Logf("  - Open interest events: %d", len(logger.openInterest))
-	t.Logf("  - Fee revenue events: %d", len(logger.feeRevenue))
-	t.Logf("  - Funding rate updates: %d", len(logger.fundingRates))
+	t.Logf("  - Open interest events: %d", nOI)
+	t.Logf("  - Fee revenue events: %d", nFee)
+	t.Logf("  - Funding rate updates: %d", nFunding)
 	t.Logf("All critical exchange events are now logged (100%% coverage)")
 
 	ex.Shutdown()

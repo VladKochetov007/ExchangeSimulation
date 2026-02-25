@@ -22,9 +22,6 @@ func TestPerpMarginReleaseOnlyWhenClosing(t *testing.T) {
 	ex.AddPerpBalance(takerID, "USD", initialBalance)
 	ex.AddPerpBalance(makerID, "USD", initialBalance)
 
-	taker := ex.Clients[takerID]
-	maker := ex.Clients[makerID]
-
 	// Maker places sell limit order
 	req1 := &OrderRequest{RequestID: 1, Side: Sell, Type: LimitOrder, Price: PriceUSD(50000, DOLLAR_TICK), Qty: BTCAmount(1.0), Symbol: "BTC-PERP"}
 	makerGateway.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: req1}
@@ -48,13 +45,16 @@ func TestPerpMarginReleaseOnlyWhenClosing(t *testing.T) {
 		t.Fatalf("Expected taker position 0.5 BTC, got %v", takerPos)
 	}
 
-	takerReserved := taker.PerpReserved["USD"]
+	ex.mu.Lock()
+	takerReserved := ex.Clients[takerID].PerpReserved["USD"]
+	makerReserved := ex.Clients[makerID].PerpReserved["USD"]
+	ex.mu.Unlock()
+
 	if takerReserved < 0 {
 		t.Fatalf("Taker reserved should not be negative after opening, got %d", takerReserved)
 	}
 
 	// Maker should have margin reserved for remaining order
-	makerReserved := maker.PerpReserved["USD"]
 	if makerReserved < 0 {
 		t.Fatalf("Maker reserved should not be negative, got %d", makerReserved)
 	}
@@ -82,7 +82,10 @@ func TestPerpMarginReleaseOnlyWhenClosing(t *testing.T) {
 		t.Fatalf("Expected taker position 1.0 BTC, got %v", takerPos)
 	}
 
-	takerReserved = taker.PerpReserved["USD"]
+	ex.mu.Lock()
+	takerReserved = ex.Clients[takerID].PerpReserved["USD"]
+	ex.mu.Unlock()
+
 	if takerReserved < 0 {
 		t.Fatalf("Taker reserved should not be negative after adding, got %d", takerReserved)
 	}
@@ -112,7 +115,10 @@ func TestPerpMarginReleaseOnlyWhenClosing(t *testing.T) {
 		t.Fatalf("Expected taker position 0.5 BTC after reduce, got %v", takerPos)
 	}
 
-	afterCloseReserved := taker.PerpReserved["USD"]
+	ex.mu.Lock()
+	afterCloseReserved := ex.Clients[takerID].PerpReserved["USD"]
+	ex.mu.Unlock()
+
 	if afterCloseReserved < 0 {
 		t.Fatalf("Taker reserved should not be negative after reducing, got %d", afterCloseReserved)
 	}
@@ -132,18 +138,22 @@ func TestPerpMarginReleaseOnlyWhenClosing(t *testing.T) {
 		t.Fatalf("Expected taker position 0 after close, got %d", takerPos.Size)
 	}
 
-	finalReserved := taker.PerpReserved["USD"]
+	ex.mu.Lock()
+	finalReserved := ex.Clients[takerID].PerpReserved["USD"]
+	available := ex.Clients[takerID].PerpAvailable("USD")
+	takerBalance := ex.Clients[takerID].PerpBalances["USD"]
+	ex.mu.Unlock()
+
 	if finalReserved < 0 {
 		t.Fatalf("Taker reserved should not be negative after closing, got %d", finalReserved)
 	}
 
 	// Verify available balance calculation is correct
-	available := taker.PerpAvailable("USD")
 	if available < 0 {
 		t.Fatalf("Taker available should not be negative, got %d", available)
 	}
-	if available > taker.PerpBalances["USD"] {
-		t.Fatalf("Taker available should not exceed balance, available=%d, balance=%d", available, taker.PerpBalances["USD"])
+	if available > takerBalance {
+		t.Fatalf("Taker available should not exceed balance, available=%d, balance=%d", available, takerBalance)
 	}
 }
 
@@ -201,20 +211,35 @@ func TestPerpMarginMultipleTraders(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 
 		// Check reserved balances never go negative
-		client := ex.Clients[takerID]
-		if client.PerpReserved["USD"] < 0 {
-			t.Fatalf("Taker %d reserved went negative after trade %d: %d", takerIdx, i, client.PerpReserved["USD"])
+		ex.mu.Lock()
+		reserved := ex.Clients[takerID].PerpReserved["USD"]
+		ex.mu.Unlock()
+		if reserved < 0 {
+			t.Fatalf("Taker %d reserved went negative after trade %d: %d", takerIdx, i, reserved)
 		}
 	}
 
 	// Verify all clients have non-negative reserved balances
+	ex.mu.Lock()
+	type clientSnapshot struct {
+		reserved  int64
+		available int64
+	}
+	snapshots := make(map[uint64]clientSnapshot, len(ex.Clients))
 	for clientID, client := range ex.Clients {
-		if client.PerpReserved["USD"] < 0 {
-			t.Fatalf("Client %d has negative reserved balance: %d", clientID, client.PerpReserved["USD"])
+		snapshots[clientID] = clientSnapshot{
+			reserved:  client.PerpReserved["USD"],
+			available: client.PerpAvailable("USD"),
 		}
-		available := client.PerpAvailable("USD")
-		if available < 0 {
-			t.Fatalf("Client %d has negative available balance: %d", clientID, available)
+	}
+	ex.mu.Unlock()
+
+	for clientID, snap := range snapshots {
+		if snap.reserved < 0 {
+			t.Fatalf("Client %d has negative reserved balance: %d", clientID, snap.reserved)
+		}
+		if snap.available < 0 {
+			t.Fatalf("Client %d has negative available balance: %d", clientID, snap.available)
 		}
 	}
 }

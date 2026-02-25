@@ -1,11 +1,13 @@
 package exchange
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
 
 type testBalanceLogger struct {
+	mu             sync.Mutex
 	balanceChanges []BalanceChangeEvent
 	snapshots      []BalanceSnapshot
 	borrows        []BorrowEvent
@@ -13,6 +15,8 @@ type testBalanceLogger struct {
 }
 
 func (t *testBalanceLogger) LogEvent(simTime int64, clientID uint64, eventName string, event any) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	switch eventName {
 	case "balance_change":
 		if bce, ok := event.(BalanceChangeEvent); ok {
@@ -124,12 +128,17 @@ func TestPeriodicBalanceSnapshots(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	ex.Shutdown()
 
-	if len(logger.snapshots) == 0 {
+	logger.mu.Lock()
+	snapshots := make([]BalanceSnapshot, len(logger.snapshots))
+	copy(snapshots, logger.snapshots)
+	logger.mu.Unlock()
+
+	if len(snapshots) == 0 {
 		t.Fatal("Expected at least one balance snapshot")
 	}
 
 	found := false
-	for _, snap := range logger.snapshots {
+	for _, snap := range snapshots {
 		if snap.ClientID == 1 {
 			found = true
 			break

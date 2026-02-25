@@ -113,9 +113,6 @@ func TestPerpPartialFillMarginAccounting(t *testing.T) {
 	makerGW := ex.ConnectClient(makerID, map[string]int64{}, &FixedFee{})
 	takerGW := ex.ConnectClient(takerID, map[string]int64{}, &FixedFee{})
 
-	go ex.handleClientRequests(makerGW)
-	go ex.handleClientRequests(takerGW)
-
 	ex.AddPerpBalance(makerID, "USD", 100_000*USD_PRECISION)
 	ex.AddPerpBalance(takerID, "USD", 100_000*USD_PRECISION)
 
@@ -154,9 +151,12 @@ func TestPerpPartialFillMarginAccounting(t *testing.T) {
 	}
 	<-takerGW.ResponseCh
 
-	maker := ex.Clients[makerID]
-	if maker.PerpReserved["USD"] < 0 {
-		t.Errorf("Maker reserved went negative after partial fill: %d", maker.PerpReserved["USD"])
+	ex.mu.Lock()
+	makerReserved := ex.Clients[makerID].PerpReserved["USD"]
+	ex.mu.Unlock()
+
+	if makerReserved < 0 {
+		t.Errorf("Maker reserved went negative after partial fill: %d", makerReserved)
 	}
 
 	makerGW.Close()
@@ -173,9 +173,6 @@ func TestPerpPositionFlipMarginAccounting(t *testing.T) {
 
 	traderGW := ex.ConnectClient(traderID, map[string]int64{}, &FixedFee{})
 	mmGW := ex.ConnectClient(mmID, map[string]int64{}, &FixedFee{})
-
-	go ex.handleClientRequests(traderGW)
-	go ex.handleClientRequests(mmGW)
 
 	ex.AddPerpBalance(traderID, "USD", 1_000_000*USD_PRECISION)
 	ex.AddPerpBalance(mmID, "USD", 1_000_000*USD_PRECISION)
@@ -208,8 +205,9 @@ func TestPerpPositionFlipMarginAccounting(t *testing.T) {
 	<-mmGW.ResponseCh
 	<-traderGW.ResponseCh
 
-	trader := ex.Clients[traderID]
-	reservedAfterOpen := trader.PerpReserved["USD"]
+	ex.mu.Lock()
+	reservedAfterOpen := ex.Clients[traderID].PerpReserved["USD"]
+	ex.mu.Unlock()
 
 	if reservedAfterOpen < 0 {
 		t.Errorf("Reserved negative after opening position: %d", reservedAfterOpen)
@@ -241,7 +239,9 @@ func TestPerpPositionFlipMarginAccounting(t *testing.T) {
 	<-mmGW.ResponseCh
 	<-traderGW.ResponseCh
 
-	reservedAfterFlip := trader.PerpReserved["USD"]
+	ex.mu.Lock()
+	reservedAfterFlip := ex.Clients[traderID].PerpReserved["USD"]
+	ex.mu.Unlock()
 
 	if reservedAfterFlip < 0 {
 		t.Errorf("Reserved negative after position flip: %d", reservedAfterFlip)
@@ -259,7 +259,6 @@ func TestMultipleOrderCancellationsMarginAccounting(t *testing.T) {
 
 	clientID := uint64(1)
 	gw := ex.ConnectClient(clientID, map[string]int64{}, &FixedFee{})
-	go ex.handleClientRequests(gw)
 
 	ex.AddPerpBalance(clientID, "USD", 100_000*USD_PRECISION)
 
@@ -294,15 +293,19 @@ func TestMultipleOrderCancellationsMarginAccounting(t *testing.T) {
 			t.Fatalf("Cancel %d failed: %v", i, cancelResp.Error)
 		}
 
-		client := ex.Clients[clientID]
-		if client.PerpReserved["USD"] < 0 {
-			t.Fatalf("Reserved went negative on iteration %d: %d", i, client.PerpReserved["USD"])
+		ex.mu.Lock()
+		reserved := ex.Clients[clientID].PerpReserved["USD"]
+		ex.mu.Unlock()
+		if reserved < 0 {
+			t.Fatalf("Reserved went negative on iteration %d: %d", i, reserved)
 		}
 	}
 
-	client := ex.Clients[clientID]
-	if client.PerpReserved["USD"] != 0 {
-		t.Errorf("Expected all margin released after 50 place/cancel cycles, reserved: %d", client.PerpReserved["USD"])
+	ex.mu.Lock()
+	finalReserved := ex.Clients[clientID].PerpReserved["USD"]
+	ex.mu.Unlock()
+	if finalReserved != 0 {
+		t.Errorf("Expected all margin released after 50 place/cancel cycles, reserved: %d", finalReserved)
 	}
 
 	gw.Close()
@@ -314,10 +317,10 @@ func TestEdgeCaseMarginCalculations(t *testing.T) {
 		price int64
 		qty   int64
 	}{
-		{"Min tick odd qty", PriceUSD(49999, DOLLAR_TICK) + DOLLAR_TICK, 33*BTC_PRECISION/100},
-		{"Prime number price", PriceUSD(49991, DOLLAR_TICK), 17*BTC_PRECISION/100},
+		{"Min tick odd qty", PriceUSD(49999, DOLLAR_TICK) + DOLLAR_TICK, 33 * BTC_PRECISION / 100},
+		{"Prime number price", PriceUSD(49991, DOLLAR_TICK), 17 * BTC_PRECISION / 100},
 		{"Very small qty", PriceUSD(50000, DOLLAR_TICK), BTC_PRECISION},
-		{"Large prime qty", PriceUSD(50000, DOLLAR_TICK), 137*BTC_PRECISION/100},
+		{"Large prime qty", PriceUSD(50000, DOLLAR_TICK), 137 * BTC_PRECISION / 100},
 	}
 
 	for _, tc := range testCases {
@@ -331,9 +334,6 @@ func TestEdgeCaseMarginCalculations(t *testing.T) {
 
 			makerGW := ex.ConnectClient(makerID, map[string]int64{}, &FixedFee{})
 			takerGW := ex.ConnectClient(takerID, map[string]int64{}, &FixedFee{})
-
-			go ex.handleClientRequests(makerGW)
-			go ex.handleClientRequests(takerGW)
 
 			ex.AddPerpBalance(makerID, "USD", 1_000_000*USD_PRECISION)
 			ex.AddPerpBalance(takerID, "USD", 1_000_000*USD_PRECISION)
@@ -366,14 +366,16 @@ func TestEdgeCaseMarginCalculations(t *testing.T) {
 			<-makerGW.ResponseCh
 			<-takerGW.ResponseCh
 
-			maker := ex.Clients[makerID]
-			taker := ex.Clients[takerID]
+			ex.mu.Lock()
+			makerReserved := ex.Clients[makerID].PerpReserved["USD"]
+			takerReserved := ex.Clients[takerID].PerpReserved["USD"]
+			ex.mu.Unlock()
 
-			if maker.PerpReserved["USD"] < 0 {
-				t.Errorf("Maker reserved went negative: %d", maker.PerpReserved["USD"])
+			if makerReserved < 0 {
+				t.Errorf("Maker reserved went negative: %d", makerReserved)
 			}
-			if taker.PerpReserved["USD"] < 0 {
-				t.Errorf("Taker reserved went negative: %d", taker.PerpReserved["USD"])
+			if takerReserved < 0 {
+				t.Errorf("Taker reserved went negative: %d", takerReserved)
 			}
 
 			makerGW.Close()

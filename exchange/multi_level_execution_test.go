@@ -1,12 +1,14 @@
 package exchange
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
 
 // multiLevelLogger captures all events during multi-level execution
 type multiLevelLogger struct {
+	mu              sync.Mutex
 	positionUpdates []PositionUpdateEvent
 	realizedPnL     []RealizedPnLEvent
 	openInterest    []OpenInterestEvent
@@ -15,6 +17,8 @@ type multiLevelLogger struct {
 }
 
 func (l *multiLevelLogger) LogEvent(simTime int64, clientID uint64, eventName string, event any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	switch eventName {
 	case "position_update":
 		if e, ok := event.(PositionUpdateEvent); ok {
@@ -100,9 +104,11 @@ func TestMultiLevelExecution(t *testing.T) {
 	t.Logf("Level 3: 30 BTC @ $50,200 (Maker3)")
 
 	time.Sleep(10 * time.Millisecond)
+	logger.mu.Lock()
 	logger.positionUpdates = nil
 	logger.openInterest = nil
 	logger.feeRevenue = nil
+	logger.mu.Unlock()
 
 	t.Logf("\n=== Taker Order: BUY 160 BTC ===")
 
@@ -119,15 +125,23 @@ func TestMultiLevelExecution(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	t.Logf("\n=== EXECUTION ANALYSIS ===")
-	t.Logf("Position updates: %d", len(logger.positionUpdates))
+	logger.mu.Lock()
+	posUpdates := make([]PositionUpdateEvent, len(logger.positionUpdates))
+	copy(posUpdates, logger.positionUpdates)
+	oiEvents := make([]OpenInterestEvent, len(logger.openInterest))
+	copy(oiEvents, logger.openInterest)
+	nFeeRevenue := len(logger.feeRevenue)
+	logger.mu.Unlock()
 
-	if len(logger.positionUpdates) != 6 {
-		t.Errorf("Expected 6 position updates, got %d", len(logger.positionUpdates))
+	t.Logf("\n=== EXECUTION ANALYSIS ===")
+	t.Logf("Position updates: %d", len(posUpdates))
+
+	if len(posUpdates) != 6 {
+		t.Errorf("Expected 6 position updates, got %d", len(posUpdates))
 	}
 
 	positionsByClient := make(map[uint64][]PositionUpdateEvent)
-	for _, pu := range logger.positionUpdates {
+	for _, pu := range posUpdates {
 		positionsByClient[pu.ClientID] = append(positionsByClient[pu.ClientID], pu)
 	}
 
@@ -148,19 +162,19 @@ func TestMultiLevelExecution(t *testing.T) {
 			takerUpdates[2].OldSize/BTC_PRECISION, takerUpdates[2].NewSize/BTC_PRECISION)
 	}
 
-	t.Logf("Open interest updates: %d", len(logger.openInterest))
-	if len(logger.openInterest) != 6 {
-		t.Errorf("Expected 6 OI updates, got %d", len(logger.openInterest))
+	t.Logf("Open interest updates: %d", len(oiEvents))
+	if len(oiEvents) != 6 {
+		t.Errorf("Expected 6 OI updates, got %d", len(oiEvents))
 	}
 
-	finalOI := logger.openInterest[len(logger.openInterest)-1].OpenInterest
+	finalOI := oiEvents[len(oiEvents)-1].OpenInterest
 	if finalOI != 320*BTC_PRECISION {
 		t.Errorf("Expected final OI 320 BTC, got %d BTC", finalOI/BTC_PRECISION)
 	}
 
-	t.Logf("Fee revenue events: %d", len(logger.feeRevenue))
-	if len(logger.feeRevenue) != 3 {
-		t.Errorf("Expected 3 fee revenue events, got %d", len(logger.feeRevenue))
+	t.Logf("Fee revenue events: %d", nFeeRevenue)
+	if nFeeRevenue != 3 {
+		t.Errorf("Expected 3 fee revenue events, got %d", nFeeRevenue)
 	}
 
 	avgPrice := (100*50000 + 50*50100 + 10*50200) / 160

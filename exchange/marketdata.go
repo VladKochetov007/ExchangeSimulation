@@ -1,9 +1,6 @@
 package exchange
 
-import (
-	"sync"
-	"sync/atomic"
-)
+import "sync"
 
 type MDPublisher struct {
 	subscriptions map[string]map[uint64]*Subscription
@@ -55,7 +52,8 @@ func (p *MDPublisher) Publish(symbol string, mdType MDType, data any, timestamp 
 		return
 	}
 
-	seqNum := atomic.AddUint64(&p.seqNum, 1)
+	p.seqNum++
+	seqNum := p.seqNum
 
 	for clientID := range subs {
 		gateway := p.gateways[clientID]

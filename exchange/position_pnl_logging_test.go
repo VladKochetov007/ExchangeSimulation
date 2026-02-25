@@ -2,17 +2,21 @@ package exchange
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
 
 type positionPnLLogger struct {
+	mu              sync.Mutex
 	positionUpdates []PositionUpdateEvent
 	realizedPnL     []RealizedPnLEvent
 	markPrices      []MarkPriceUpdateEvent
 }
 
 func (l *positionPnLLogger) LogEvent(simTime int64, clientID uint64, eventName string, event any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	switch eventName {
 	case "position_update":
 		if e, ok := event.(PositionUpdateEvent); ok {
@@ -27,6 +31,25 @@ func (l *positionPnLLogger) LogEvent(simTime int64, clientID uint64, eventName s
 			l.markPrices = append(l.markPrices, e)
 		}
 	}
+}
+
+func (l *positionPnLLogger) snapshot() ([]PositionUpdateEvent, []RealizedPnLEvent, []MarkPriceUpdateEvent) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	pos := make([]PositionUpdateEvent, len(l.positionUpdates))
+	copy(pos, l.positionUpdates)
+	pnl := make([]RealizedPnLEvent, len(l.realizedPnL))
+	copy(pnl, l.realizedPnL)
+	marks := make([]MarkPriceUpdateEvent, len(l.markPrices))
+	copy(marks, l.markPrices)
+	return pos, pnl, marks
+}
+
+func (l *positionPnLLogger) reset() {
+	l.mu.Lock()
+	l.positionUpdates = nil
+	l.realizedPnL = nil
+	l.mu.Unlock()
 }
 
 // Edge Case 1: Simple position open (no PnL)
@@ -71,21 +94,23 @@ func TestPositionUpdateOpenPosition(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
+	pos, pnl, _ := logger.snapshot()
+
 	// Should have 2 position updates (taker and maker)
-	if len(logger.positionUpdates) != 2 {
-		t.Fatalf("Expected 2 position updates, got %d", len(logger.positionUpdates))
+	if len(pos) != 2 {
+		t.Fatalf("Expected 2 position updates, got %d", len(pos))
 	}
 
 	// Should have NO realized PnL (opening positions)
-	if len(logger.realizedPnL) != 0 {
-		t.Errorf("Expected 0 realized PnL events for opening positions, got %d", len(logger.realizedPnL))
+	if len(pnl) != 0 {
+		t.Errorf("Expected 0 realized PnL events for opening positions, got %d", len(pnl))
 	}
 
 	// Check taker position update
 	var takerUpdate *PositionUpdateEvent
-	for i := range logger.positionUpdates {
-		if logger.positionUpdates[i].ClientID == 2 {
-			takerUpdate = &logger.positionUpdates[i]
+	for i := range pos {
+		if pos[i].ClientID == 2 {
+			takerUpdate = &pos[i]
 			break
 		}
 	}
@@ -135,8 +160,7 @@ func TestPositionUpdatePartialClose(t *testing.T) {
 	<-client.ResponseCh
 
 	time.Sleep(10 * time.Millisecond)
-	logger.positionUpdates = nil
-	logger.realizedPnL = nil
+	logger.reset()
 
 	// Close 30 BTC @ $51k (profit)
 	req3 := &OrderRequest{RequestID: 3, Side: Buy, Type: LimitOrder, Price: 51000 * USD_PRECISION, Qty: 30 * BTC_PRECISION, Symbol: "BTC-PERP"}
@@ -149,24 +173,26 @@ func TestPositionUpdatePartialClose(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
+	pos, pnl, _ := logger.snapshot()
+
 	// Should have 2 position updates
-	if len(logger.positionUpdates) != 2 {
-		t.Fatalf("Expected 2 position updates, got %d", len(logger.positionUpdates))
+	if len(pos) != 2 {
+		t.Fatalf("Expected 2 position updates, got %d", len(pos))
 	}
 
 	// Should have 2 realized PnL events (both sides closing 30 BTC)
 	// Client1: long 100 → 70 (profit), Client2: short -100 → -70 (loss)
-	if len(logger.realizedPnL) != 2 {
-		t.Fatalf("Expected 2 realized PnL events (both sides closing), got %d", len(logger.realizedPnL))
+	if len(pnl) != 2 {
+		t.Fatalf("Expected 2 realized PnL events (both sides closing), got %d", len(pnl))
 	}
 
 	// Find client1's PnL (profit)
 	var client1PnL, client2PnL *RealizedPnLEvent
-	for i := range logger.realizedPnL {
-		if logger.realizedPnL[i].ClientID == 1 {
-			client1PnL = &logger.realizedPnL[i]
-		} else if logger.realizedPnL[i].ClientID == 2 {
-			client2PnL = &logger.realizedPnL[i]
+	for i := range pnl {
+		if pnl[i].ClientID == 1 {
+			client1PnL = &pnl[i]
+		} else if pnl[i].ClientID == 2 {
+			client2PnL = &pnl[i]
 		}
 	}
 
@@ -203,9 +229,9 @@ func TestPositionUpdatePartialClose(t *testing.T) {
 
 	// Check position reduced from 100 to 70
 	var posUpdate *PositionUpdateEvent
-	for i := range logger.positionUpdates {
-		if logger.positionUpdates[i].ClientID == 1 {
-			posUpdate = &logger.positionUpdates[i]
+	for i := range pos {
+		if pos[i].ClientID == 1 {
+			posUpdate = &pos[i]
 			break
 		}
 	}
@@ -249,8 +275,7 @@ func TestPositionUpdateFlipLongToShort(t *testing.T) {
 	<-client.ResponseCh
 
 	time.Sleep(10 * time.Millisecond)
-	logger.positionUpdates = nil
-	logger.realizedPnL = nil
+	logger.reset()
 
 	// Sell 150 BTC @ $51k (close 100 + open 50 short)
 	req3 := &OrderRequest{RequestID: 3, Side: Buy, Type: LimitOrder, Price: 51000 * USD_PRECISION, Qty: 150 * BTC_PRECISION, Symbol: "BTC-PERP"}
@@ -263,24 +288,26 @@ func TestPositionUpdateFlipLongToShort(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
+	pos, pnl, _ := logger.snapshot()
+
 	// Should have position update
-	if len(logger.positionUpdates) < 1 {
-		t.Fatalf("Expected at least 1 position update, got %d", len(logger.positionUpdates))
+	if len(pos) < 1 {
+		t.Fatalf("Expected at least 1 position update, got %d", len(pos))
 	}
 
 	// Should have 2 realized PnL events (both sides closing positions)
 	// Client1: long 100 → short -50 (closes 100, profit), Client2: short -100 → long 50 (closes 100, loss)
-	if len(logger.realizedPnL) != 2 {
-		t.Fatalf("Expected 2 realized PnL events (both sides closing), got %d", len(logger.realizedPnL))
+	if len(pnl) != 2 {
+		t.Fatalf("Expected 2 realized PnL events (both sides closing), got %d", len(pnl))
 	}
 
 	// Find client1's PnL (profit)
 	var client1PnL, client2PnL *RealizedPnLEvent
-	for i := range logger.realizedPnL {
-		if logger.realizedPnL[i].ClientID == 1 {
-			client1PnL = &logger.realizedPnL[i]
-		} else if logger.realizedPnL[i].ClientID == 2 {
-			client2PnL = &logger.realizedPnL[i]
+	for i := range pnl {
+		if pnl[i].ClientID == 1 {
+			client1PnL = &pnl[i]
+		} else if pnl[i].ClientID == 2 {
+			client2PnL = &pnl[i]
 		}
 	}
 
@@ -311,9 +338,9 @@ func TestPositionUpdateFlipLongToShort(t *testing.T) {
 
 	// Check position flipped from +100 to -50
 	var posUpdate *PositionUpdateEvent
-	for i := range logger.positionUpdates {
-		if logger.positionUpdates[i].ClientID == 1 {
-			posUpdate = &logger.positionUpdates[i]
+	for i := range pos {
+		if pos[i].ClientID == 1 {
+			posUpdate = &pos[i]
 			break
 		}
 	}
@@ -357,8 +384,7 @@ func TestPositionUpdateCompleteClose(t *testing.T) {
 	<-client.ResponseCh
 
 	time.Sleep(10 * time.Millisecond)
-	logger.positionUpdates = nil
-	logger.realizedPnL = nil
+	logger.reset()
 
 	// Close entire position @ $49k (loss)
 	req3 := &OrderRequest{RequestID: 3, Side: Buy, Type: LimitOrder, Price: 49000 * USD_PRECISION, Qty: 100 * BTC_PRECISION, Symbol: "BTC-PERP"}
@@ -371,19 +397,21 @@ func TestPositionUpdateCompleteClose(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
+	pos, pnl, _ := logger.snapshot()
+
 	// Should have 2 realized PnL events (both sides closing entire positions)
 	// Client1: long 100 → 0 (loss), Client2: short -100 → 0 (profit)
-	if len(logger.realizedPnL) != 2 {
-		t.Fatalf("Expected 2 realized PnL events (both sides closing), got %d", len(logger.realizedPnL))
+	if len(pnl) != 2 {
+		t.Fatalf("Expected 2 realized PnL events (both sides closing), got %d", len(pnl))
 	}
 
 	// Find client1's PnL (loss)
 	var client1PnL, client2PnL *RealizedPnLEvent
-	for i := range logger.realizedPnL {
-		if logger.realizedPnL[i].ClientID == 1 {
-			client1PnL = &logger.realizedPnL[i]
-		} else if logger.realizedPnL[i].ClientID == 2 {
-			client2PnL = &logger.realizedPnL[i]
+	for i := range pnl {
+		if pnl[i].ClientID == 1 {
+			client1PnL = &pnl[i]
+		} else if pnl[i].ClientID == 2 {
+			client2PnL = &pnl[i]
 		}
 	}
 
@@ -414,9 +442,9 @@ func TestPositionUpdateCompleteClose(t *testing.T) {
 
 	// Check position closed (NewSize = 0)
 	var posUpdate *PositionUpdateEvent
-	for i := range logger.positionUpdates {
-		if logger.positionUpdates[i].ClientID == 1 {
-			posUpdate = &logger.positionUpdates[i]
+	for i := range pos {
+		if pos[i].ClientID == 1 {
+			posUpdate = &pos[i]
 			break
 		}
 	}
@@ -487,13 +515,15 @@ func TestMarkPriceLogging(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	automation.Stop()
 
+	_, _, marks := logger.snapshot()
+
 	// Should have logged mark prices (at least 3 updates in 300ms with 50ms interval)
-	if len(logger.markPrices) < 3 {
-		t.Fatalf("Expected at least 3 mark price updates, got %d", len(logger.markPrices))
+	if len(marks) < 3 {
+		t.Fatalf("Expected at least 3 mark price updates, got %d", len(marks))
 	}
 
 	// Check mark price event structure
-	mp := logger.markPrices[0]
+	mp := marks[0]
 	if mp.Symbol != "BTC-PERP" {
 		t.Errorf("Expected symbol BTC-PERP, got %s", mp.Symbol)
 	}
@@ -537,9 +567,11 @@ func TestPositionUpdateZeroSizeTrade(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
+	pos, _, _ := logger.snapshot()
+
 	// Should have NO position updates (no fill)
-	if len(logger.positionUpdates) != 0 {
-		t.Errorf("Expected 0 position updates for unfilled IOC, got %d", len(logger.positionUpdates))
+	if len(pos) != 0 {
+		t.Errorf("Expected 0 position updates for unfilled IOC, got %d", len(pos))
 	}
 
 	ex.Shutdown()
@@ -572,16 +604,18 @@ func TestPositionUpdateMinimumSize(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
+	pos, _, _ := logger.snapshot()
+
 	// Should still log position updates
-	if len(logger.positionUpdates) != 2 {
-		t.Fatalf("Expected 2 position updates for 1 satoshi trade, got %d", len(logger.positionUpdates))
+	if len(pos) != 2 {
+		t.Fatalf("Expected 2 position updates for 1 satoshi trade, got %d", len(pos))
 	}
 
 	// Check trade qty
 	var takerUpdate *PositionUpdateEvent
-	for i := range logger.positionUpdates {
-		if logger.positionUpdates[i].ClientID == 2 {
-			takerUpdate = &logger.positionUpdates[i]
+	for i := range pos {
+		if pos[i].ClientID == 2 {
+			takerUpdate = &pos[i]
 			break
 		}
 	}

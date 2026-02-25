@@ -49,6 +49,4 @@ func (g *ClientGateway) Close() {
 		return
 	}
 	close(g.RequestCh)
-	close(g.ResponseCh)
-	close(g.MarketData)
 }
