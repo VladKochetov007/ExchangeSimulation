@@ -658,7 +658,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 				refPrice = book.Bids.Best.Price
 			}
 			if refPrice > 0 {
-				estMargin := (req.Qty * refPrice / precision) * perp.MarginRate / 10000
+				estMargin := calcMargin(req.Qty, refPrice, perp.MarginRate, precision)
 				if client.PerpAvailable(instrument.QuoteAsset()) < estMargin {
 					return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
 				}
@@ -678,7 +678,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	case LimitOrder:
 		if instrument.IsPerp() {
 			perp := instrument.(*PerpFutures)
-			initialMargin := (req.Qty * req.Price / precision) * perp.MarginRate / 10000
+			initialMargin := calcMargin(req.Qty, req.Price, perp.MarginRate, precision)
 			if !e.tryReserveOrBorrow(clientID, instrument.QuoteAsset(), initialMargin, client.ReservePerp, true) {
 				return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
 			}
@@ -882,111 +882,12 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 		maker := e.Clients[exec.MakerClientID]
 
 		takerFee := taker.FeePlan.CalculateFee(exec, takerOrder.Side, false, instrument.BaseAsset(), instrument.QuoteAsset(), basePrecision)
-		makerSide := exec.MakerSide
-		makerFee := maker.FeePlan.CalculateFee(exec, makerSide, true, instrument.BaseAsset(), instrument.QuoteAsset(), basePrecision)
+		makerFee := maker.FeePlan.CalculateFee(exec, exec.MakerSide, true, instrument.BaseAsset(), instrument.QuoteAsset(), basePrecision)
 
 		notional := (exec.Price * exec.Qty) / basePrecision
 
 		if instrument.IsPerp() {
-			perp := instrument.(*PerpFutures)
-			quote := instrument.QuoteAsset()
-
-			// Snapshot old positions before update for PnL calculation
-			takerDelta := e.Positions.UpdatePositionWithDelta(exec.TakerClientID, book.Symbol, exec.Qty, exec.Price, takerOrder.Side, e, "trade")
-			makerDelta := e.Positions.UpdatePositionWithDelta(exec.MakerClientID, book.Symbol, exec.Qty, exec.Price, makerSide, e, "trade")
-
-			// Calculate closed quantities
-			takerClosedQty := calculateClosedQty(takerDelta.OldSize, exec.Qty, takerOrder.Side)
-			makerClosedQty := calculateClosedQty(makerDelta.OldSize, exec.Qty, makerSide)
-
-			// Handle margin for taker
-			if takerOrder.Type == Market {
-				// Market orders: reserve margin for opened portion only
-				takerOpenedQty := exec.Qty - takerClosedQty
-				if takerOpenedQty > 0 {
-					marginToReserve := (takerOpenedQty * exec.Price / basePrecision) * perp.MarginRate / 10000
-					taker.ReservePerp(quote, marginToReserve)
-				}
-			} else {
-				// Limit orders: order margin was pre-reserved
-				// For closing portion, release order margin
-				if takerClosedQty > 0 {
-					orderMargin := (takerClosedQty * takerOrder.Price / basePrecision) * perp.MarginRate / 10000
-					taker.ReleasePerp(quote, orderMargin)
-				}
-				// For opening portion, margin stays reserved (transfers from order to position)
-			}
-
-			// Release position margin for closed portion (use entry price, not execution price)
-			if takerClosedQty > 0 && takerDelta.OldSize != 0 {
-				posMargin := (takerClosedQty * takerDelta.OldEntryPrice / basePrecision) * perp.MarginRate / 10000
-				taker.ReleasePerp(quote, posMargin)
-			}
-
-			// Handle margin for maker (always limit orders)
-			if makerClosedQty > 0 {
-				// Release order margin for closing portion
-				// Use exec.Price since order may have been removed from book after full fill
-				orderMargin := (makerClosedQty * exec.Price / basePrecision) * perp.MarginRate / 10000
-				maker.ReleasePerp(quote, orderMargin)
-
-				// Release position margin (use entry price, not execution price)
-				if makerDelta.OldSize != 0 {
-					posMargin := (makerClosedQty * makerDelta.OldEntryPrice / basePrecision) * perp.MarginRate / 10000
-					maker.ReleasePerp(quote, posMargin)
-				}
-			}
-			// For opening portion, margin stays reserved (transfers from order to position)
-
-			// Realize PnL for closing trades (basePrecision already defined above)
-			takerPnL := realizedPerpPnL(takerDelta.OldSize, takerDelta.OldEntryPrice, exec.Qty, exec.Price, takerOrder.Side, basePrecision)
-			makerPnL := realizedPerpPnL(makerDelta.OldSize, makerDelta.OldEntryPrice, exec.Qty, exec.Price, makerSide, basePrecision)
-
-			// Log realized PnL if position was closed/reduced
-			if takerPnL != 0 {
-				if log := e.getLogger("_global"); log != nil {
-					log.LogEvent(timestamp, exec.TakerClientID, "realized_pnl", RealizedPnLEvent{
-						Timestamp:  timestamp,
-						ClientID:   exec.TakerClientID,
-						Symbol:     book.Symbol,
-						TradeID:    book.SeqNum,
-						ClosedQty:  calculateClosedQty(takerDelta.OldSize, exec.Qty, takerOrder.Side),
-						EntryPrice: takerDelta.OldEntryPrice,
-						ExitPrice:  exec.Price,
-						PnL:        takerPnL,
-						Side:       takerOrder.Side.String(),
-					})
-				}
-			}
-			if makerPnL != 0 {
-				if log := e.getLogger("_global"); log != nil {
-					log.LogEvent(timestamp, exec.MakerClientID, "realized_pnl", RealizedPnLEvent{
-						Timestamp:  timestamp,
-						ClientID:   exec.MakerClientID,
-						Symbol:     book.Symbol,
-						TradeID:    book.SeqNum,
-						ClosedQty:  calculateClosedQty(makerDelta.OldSize, exec.Qty, makerSide),
-						EntryPrice: makerDelta.OldEntryPrice,
-						ExitPrice:  exec.Price,
-						PnL:        makerPnL,
-						Side:       makerSide.String(),
-					})
-				}
-			}
-
-			oldTakerBalance := taker.PerpBalances[quote]
-			oldMakerBalance := maker.PerpBalances[quote]
-			taker.PerpBalances[quote] += takerPnL - takerFee.Amount
-			maker.PerpBalances[quote] += makerPnL - makerFee.Amount
-
-			e.balanceTracker.LogBalanceChange(timestamp, exec.TakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
-				perpDelta(quote, oldTakerBalance, taker.PerpBalances[quote]),
-			})
-			e.balanceTracker.LogBalanceChange(timestamp, exec.MakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
-				perpDelta(quote, oldMakerBalance, maker.PerpBalances[quote]),
-			})
-
-			e.recordFeeRevenue(quote, takerFee, makerFee, book, timestamp)
+			e.processPerpExecution(book, exec, takerOrder, taker, maker, takerFee, makerFee, basePrecision, timestamp)
 			positionChanged = true
 		} else {
 			e.settleSpotExecution(book, exec, takerOrder, taker, maker, takerFee, makerFee, notional, timestamp)
@@ -1009,81 +910,16 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 		if log != nil {
 			log.LogEvent(timestamp, 0, "Trade", trade)
 		}
-
 		e.MDPublisher.PublishTrade(book.Symbol, trade, timestamp)
 
-		takerGw := e.Gateways[exec.TakerClientID]
-		if takerGw != nil {
-			takerFillIsFull := takerOrder.FilledQty >= takerOrder.Qty
-			takerGw.ResponseCh <- Response{
-				Success: true,
-				Data: &FillNotification{
-					OrderID:   exec.TakerOrderID,
-					ClientID:  exec.TakerClientID,
-					TradeID:   book.SeqNum - 1,
-					Qty:       exec.Qty,
-					Price:     exec.Price,
-					Side:      takerOrder.Side,
-					IsFull:    takerFillIsFull,
-					FeeAmount: takerFee.Amount,
-					FeeAsset:  takerFee.Asset,
-				},
-			}
-		}
+		tradeID := book.SeqNum - 1
+		sendFillNotification(e.Gateways[exec.TakerClientID], exec.TakerOrderID, exec.TakerClientID, tradeID, exec, takerOrder.Side, takerFee, takerOrder.FilledQty >= takerOrder.Qty)
+		logFill(log, timestamp, exec.TakerClientID, exec.TakerOrderID, exec, takerOrder.Side, takerOrder.FilledQty, takerOrder.Qty, tradeID, takerFee, "taker")
 
-		if log != nil {
-			takerFill := map[string]any{
-				"order_id":      exec.TakerOrderID,
-				"qty":           exec.Qty,
-				"price":         exec.Price,
-				"side":          takerOrder.Side.String(),
-				"filled_qty":    takerOrder.FilledQty,
-				"remaining_qty": takerOrder.Qty - takerOrder.FilledQty,
-				"is_full":       takerOrder.FilledQty >= takerOrder.Qty,
-				"trade_id":      book.SeqNum - 1,
-				"role":          "taker",
-				"fee_amount":    takerFee.Amount,
-				"fee_asset":     takerFee.Asset,
-			}
-			log.LogEvent(timestamp, exec.TakerClientID, "OrderFill", takerFill)
-		}
-
-		makerGw := e.Gateways[exec.MakerClientID]
-		if makerGw != nil {
-			makerOrder := findOrderInBook(book, exec.MakerOrderID)
-			makerFillIsFull := makerOrder != nil && makerOrder.FilledQty >= makerOrder.Qty
-			makerGw.ResponseCh <- Response{
-				Success: true,
-				Data: &FillNotification{
-					OrderID:   exec.MakerOrderID,
-					ClientID:  exec.MakerClientID,
-					TradeID:   book.SeqNum - 1,
-					Qty:       exec.Qty,
-					Price:     exec.Price,
-					Side:      makerSide,
-					IsFull:    makerFillIsFull,
-					FeeAmount: makerFee.Amount,
-					FeeAsset:  makerFee.Asset,
-				},
-			}
-		}
-
-		if log != nil {
-			makerFill := map[string]any{
-				"order_id":      exec.MakerOrderID,
-				"qty":           exec.Qty,
-				"price":         exec.Price,
-				"side":          exec.MakerSide.String(),
-				"filled_qty":    exec.MakerFilledQty,
-				"remaining_qty": exec.MakerTotalQty - exec.MakerFilledQty,
-				"is_full":       exec.MakerFilledQty >= exec.MakerTotalQty,
-				"trade_id":      book.SeqNum - 1,
-				"role":          "maker",
-				"fee_amount":    makerFee.Amount,
-				"fee_asset":     makerFee.Asset,
-			}
-			log.LogEvent(timestamp, exec.MakerClientID, "OrderFill", makerFill)
-		}
+		makerOrder := findOrderInBook(book, exec.MakerOrderID)
+		makerFull := makerOrder != nil && makerOrder.FilledQty >= makerOrder.Qty
+		sendFillNotification(e.Gateways[exec.MakerClientID], exec.MakerOrderID, exec.MakerClientID, tradeID, exec, exec.MakerSide, makerFee, makerFull)
+		logFill(log, timestamp, exec.MakerClientID, exec.MakerOrderID, exec, exec.MakerSide, exec.MakerFilledQty, exec.MakerTotalQty, tradeID, makerFee, "maker")
 	}
 
 	// Publish open interest if positions changed
@@ -1251,7 +1087,7 @@ func releaseOrderFunds(client *Client, instrument Instrument, side Side, qty, pr
 	precision := instrument.BasePrecision()
 	if instrument.IsPerp() {
 		perp := instrument.(*PerpFutures)
-		margin := (qty * price / precision) * perp.MarginRate / 10000
+		margin := calcMargin(qty, price, perp.MarginRate, precision)
 		client.ReleasePerp(instrument.QuoteAsset(), margin)
 	} else if side == Buy {
 		client.Release(instrument.QuoteAsset(), (qty*price)/precision)
@@ -1352,4 +1188,143 @@ func findOrderInBook(book *OrderBook, orderID uint64) *Order {
 		return o
 	}
 	return book.Asks.Orders[orderID]
+}
+
+func calcMargin(qty, price, rate, precision int64) int64 {
+	return (qty * price / precision) * rate / 10000
+}
+
+type perpSideCtx struct {
+	client     *Client
+	clientID   uint64
+	side       Side
+	delta      PositionDelta
+	closedQty  int64
+	fee        Fee
+	isMarket   bool
+	orderPrice int64
+}
+
+// adjustPerpMargin adjusts margin reserves for one perp trade participant.
+// For market takers: reserves margin for newly opened position.
+// For limit orders: releases pre-reserved order margin on closing portion.
+// Always releases position margin for any closed portion.
+func adjustPerpMargin(ctx perpSideCtx, execPrice, execQty int64, perp *PerpFutures, quote string, basePrecision int64) {
+	if ctx.isMarket {
+		openedQty := execQty - ctx.closedQty
+		if openedQty > 0 {
+			ctx.client.ReservePerp(quote, calcMargin(openedQty, execPrice, perp.MarginRate, basePrecision))
+		}
+	} else if ctx.closedQty > 0 {
+		ctx.client.ReleasePerp(quote, calcMargin(ctx.closedQty, ctx.orderPrice, perp.MarginRate, basePrecision))
+	}
+	if ctx.closedQty > 0 && ctx.delta.OldSize != 0 {
+		ctx.client.ReleasePerp(quote, calcMargin(ctx.closedQty, ctx.delta.OldEntryPrice, perp.MarginRate, basePrecision))
+	}
+}
+
+// settlePerpSide realizes PnL, logs it, and settles the perp balance for one participant.
+// Caller must hold e.mu.Lock().
+func (e *Exchange) settlePerpSide(ctx perpSideCtx, book *OrderBook, exec *Execution, quote string, basePrecision, timestamp int64) {
+	pnl := realizedPerpPnL(ctx.delta.OldSize, ctx.delta.OldEntryPrice, exec.Qty, exec.Price, ctx.side, basePrecision)
+	if pnl != 0 {
+		if globalLog := e.getLogger("_global"); globalLog != nil {
+			globalLog.LogEvent(timestamp, ctx.clientID, "realized_pnl", RealizedPnLEvent{
+				Timestamp:  timestamp,
+				ClientID:   ctx.clientID,
+				Symbol:     book.Symbol,
+				TradeID:    book.SeqNum,
+				ClosedQty:  ctx.closedQty,
+				EntryPrice: ctx.delta.OldEntryPrice,
+				ExitPrice:  exec.Price,
+				PnL:        pnl,
+				Side:       ctx.side.String(),
+			})
+		}
+	}
+	old := ctx.client.PerpBalances[quote]
+	ctx.client.PerpBalances[quote] += pnl - ctx.fee.Amount
+	e.balanceTracker.LogBalanceChange(timestamp, ctx.clientID, book.Symbol, "trade_settlement", []BalanceDelta{
+		perpDelta(quote, old, ctx.client.PerpBalances[quote]),
+	})
+}
+
+// processPerpExecution settles a single perp execution for both taker and maker.
+// Caller must hold e.mu.Lock().
+func (e *Exchange) processPerpExecution(
+	book *OrderBook, exec *Execution, takerOrder *Order,
+	taker, maker *Client, takerFee, makerFee Fee,
+	basePrecision, timestamp int64,
+) {
+	perp := book.Instrument.(*PerpFutures)
+	quote := book.Instrument.QuoteAsset()
+
+	takerDelta := e.Positions.UpdatePositionWithDelta(exec.TakerClientID, book.Symbol, exec.Qty, exec.Price, takerOrder.Side, e, "trade")
+	makerDelta := e.Positions.UpdatePositionWithDelta(exec.MakerClientID, book.Symbol, exec.Qty, exec.Price, exec.MakerSide, e, "trade")
+
+	takerCtx := perpSideCtx{
+		client:     taker,
+		clientID:   exec.TakerClientID,
+		side:       takerOrder.Side,
+		delta:      takerDelta,
+		closedQty:  calculateClosedQty(takerDelta.OldSize, exec.Qty, takerOrder.Side),
+		fee:        takerFee,
+		isMarket:   takerOrder.Type == Market,
+		orderPrice: takerOrder.Price,
+	}
+	makerCtx := perpSideCtx{
+		client:    maker,
+		clientID:  exec.MakerClientID,
+		side:      exec.MakerSide,
+		delta:     makerDelta,
+		closedQty: calculateClosedQty(makerDelta.OldSize, exec.Qty, exec.MakerSide),
+		fee:       makerFee,
+		// Use exec.Price since maker order may be removed from book after full fill
+		orderPrice: exec.Price,
+	}
+
+	adjustPerpMargin(takerCtx, exec.Price, exec.Qty, perp, quote, basePrecision)
+	adjustPerpMargin(makerCtx, exec.Price, exec.Qty, perp, quote, basePrecision)
+	e.settlePerpSide(takerCtx, book, exec, quote, basePrecision, timestamp)
+	e.settlePerpSide(makerCtx, book, exec, quote, basePrecision, timestamp)
+	e.recordFeeRevenue(quote, takerFee, makerFee, book, timestamp)
+}
+
+func logFill(log Logger, timestamp int64, clientID, orderID uint64, exec *Execution, side Side, filledQty, totalQty int64, tradeID uint64, fee Fee, role string) {
+	if log == nil {
+		return
+	}
+	log.LogEvent(timestamp, clientID, "OrderFill", map[string]any{
+		"order_id":      orderID,
+		"qty":           exec.Qty,
+		"price":         exec.Price,
+		"side":          side.String(),
+		"filled_qty":    filledQty,
+		"remaining_qty": totalQty - filledQty,
+		"is_full":       filledQty >= totalQty,
+		"trade_id":      tradeID,
+		"role":          role,
+		"fee_amount":    fee.Amount,
+		"fee_asset":     fee.Asset,
+	})
+}
+
+func sendFillNotification(gw *ClientGateway, orderID, clientID, tradeID uint64, exec *Execution, side Side, fee Fee, isFull bool) {
+	if gw == nil {
+		return
+	}
+	gw.ResponseCh <- Response{
+		Success: true,
+		Data: &FillNotification{
+			OrderID:   orderID,
+			ClientID:  clientID,
+			TradeID:   tradeID,
+			Qty:       exec.Qty,
+			Price:     exec.Price,
+			Side:      side,
+			IsFull:    isFull,
+			FeeAmount: fee.Amount,
+			FeeAsset:  fee.Asset,
+		},
+	}
 }
