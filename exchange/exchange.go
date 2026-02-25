@@ -3,7 +3,6 @@ package exchange
 import (
 	"errors"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -659,7 +658,8 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 		return resp
 	}
 
-	orderID := atomic.AddUint64(&e.NextOrderID, 1)
+	e.NextOrderID++
+	orderID := e.NextOrderID
 	order := getOrder()
 	order.ID = orderID
 	order.ClientID = clientID

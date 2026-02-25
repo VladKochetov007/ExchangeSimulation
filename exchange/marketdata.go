@@ -5,7 +5,7 @@ import "sync"
 type MDPublisher struct {
 	subscriptions map[string]map[uint64]*Subscription
 	gateways      map[uint64]*ClientGateway
-	mu            sync.RWMutex
+	mu            sync.Mutex
 	seqNum        uint64
 }
 
