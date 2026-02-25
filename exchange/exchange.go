@@ -465,7 +465,6 @@ func (e *Exchange) ConnectClient(clientID uint64, initialBalances map[string]int
 	}
 
 	gateway := NewClientGateway(clientID)
-	gateway.Running = true
 	e.Gateways[clientID] = gateway
 
 	go e.handleClientRequests(gateway)
@@ -575,14 +574,11 @@ func (e *Exchange) handleClientRequests(gateway *ClientGateway) {
 		// Discard order and subscribe requests for shut-down gateways.
 		// CancelOrder/Unsubscribe/QueryBalance are still processed so they
 		// can clean up state, but new orders and subscriptions must never be
-		// processed after gateway.Running is set to false. Blocking ReqSubscribe
+		// processed after gateway.IsRunning() returns false. Blocking ReqSubscribe
 		// closes the race where a queued subscribe arrives after Unsubscribe was
 		// called directly on MDPublisher during bootstrap shutdown.
 		if req.Type == ReqPlaceOrder || req.Type == ReqSubscribe {
-			gateway.Mu.Lock()
-			running := gateway.Running
-			gateway.Mu.Unlock()
-			if !running {
+			if !gateway.IsRunning() {
 				continue
 			}
 		}
@@ -602,14 +598,12 @@ func (e *Exchange) handleClientRequests(gateway *ClientGateway) {
 		}
 		
 		// Send response only if gateway is still running
-		gateway.Mu.Lock()
-		if gateway.Running {
+		if gateway.IsRunning() {
 			select {
 			case gateway.ResponseCh <- resp:
 			default:
 			}
 		}
-		gateway.Mu.Unlock()
 	}
 }
 
@@ -623,10 +617,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	// this check (while holding e.mu) is race-free: any placeOrder that arrives after
 	// CancelAllClientOrders completes will see Running=false and be silently discarded.
 	if gw := e.Gateways[clientID]; gw != nil {
-		gw.Mu.Lock()
-		running := gw.Running
-		gw.Mu.Unlock()
-		if !running {
+		if !gw.IsRunning() {
 			return Response{RequestID: req.RequestID, Success: false}
 		}
 	}

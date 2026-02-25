@@ -1,6 +1,6 @@
 package exchange
 
-import "sync"
+import "sync/atomic"
 
 const (
 	RequestChSize    = 10000
@@ -13,28 +13,29 @@ type ClientGateway struct {
 	RequestCh  chan Request
 	ResponseCh chan Response
 	MarketData chan *MarketDataMsg
-	Running    bool
-	Mu         sync.Mutex
+	running    atomic.Bool
 }
 
 func NewClientGateway(clientID uint64) *ClientGateway {
-	return &ClientGateway{
+	g := &ClientGateway{
 		ClientID:   clientID,
 		RequestCh:  make(chan Request, RequestChSize),
 		ResponseCh: make(chan Response, ResponseChSize),
 		MarketData: make(chan *MarketDataMsg, MarketDataChSize),
-		Running:    true,
 	}
+	g.running.Store(true)
+	return g
+}
+
+func (g *ClientGateway) IsRunning() bool {
+	return g.running.Load()
 }
 
 func (g *ClientGateway) Close() {
-	g.Mu.Lock()
-	defer g.Mu.Unlock()
-
-	if g.Running {
-		close(g.RequestCh)
-		close(g.ResponseCh)
-		close(g.MarketData)
-		g.Running = false
+	if !g.running.CompareAndSwap(true, false) {
+		return
 	}
+	close(g.RequestCh)
+	close(g.ResponseCh)
+	close(g.MarketData)
 }

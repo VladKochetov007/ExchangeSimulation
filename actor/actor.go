@@ -250,12 +250,9 @@ func (a *BaseActor) SubmitOrder(symbol string, side exchange.Side, orderType exc
 	if a.gateway == nil {
 		return reqID
 	}
-	a.gateway.Mu.Lock()
-	if !a.gateway.Running {
-		a.gateway.Mu.Unlock()
+	if !a.gateway.IsRunning() {
 		return reqID
 	}
-	a.gateway.Mu.Unlock()
 	select {
 	case a.gateway.RequestCh <- req:
 	default:
@@ -283,12 +280,9 @@ func (a *BaseActor) SubmitOrderFull(symbol string, side exchange.Side, orderType
 	if a.gateway == nil {
 		return
 	}
-	a.gateway.Mu.Lock()
-	if !a.gateway.Running {
-		a.gateway.Mu.Unlock()
+	if !a.gateway.IsRunning() {
 		return
 	}
-	a.gateway.Mu.Unlock()
 	select {
 	case a.gateway.RequestCh <- req:
 	default:
@@ -308,12 +302,9 @@ func (a *BaseActor) CancelOrder(orderID uint64) {
 	if a.gateway == nil {
 		return
 	}
-	a.gateway.Mu.Lock()
-	if !a.gateway.Running {
-		a.gateway.Mu.Unlock()
+	if !a.gateway.IsRunning() {
 		return
 	}
-	a.gateway.Mu.Unlock()
 	select {
 	case a.gateway.RequestCh <- req:
 	default:
@@ -333,12 +324,9 @@ func (a *BaseActor) QueryBalance() {
 	if a.gateway == nil {
 		return
 	}
-	a.gateway.Mu.Lock()
-	if !a.gateway.Running {
-		a.gateway.Mu.Unlock()
+	if !a.gateway.IsRunning() {
 		return
 	}
-	a.gateway.Mu.Unlock()
 	select {
 	case a.gateway.RequestCh <- req:
 	default:
@@ -358,12 +346,9 @@ func (a *BaseActor) Subscribe(symbol string) {
 	if a.gateway == nil {
 		return
 	}
-	a.gateway.Mu.Lock()
-	if !a.gateway.Running {
-		a.gateway.Mu.Unlock()
+	if !a.gateway.IsRunning() {
 		return
 	}
-	a.gateway.Mu.Unlock()
 	select {
 	case a.gateway.RequestCh <- req:
 	default:
@@ -383,12 +368,9 @@ func (a *BaseActor) Unsubscribe(symbol string) {
 	if a.gateway == nil {
 		return
 	}
-	a.gateway.Mu.Lock()
-	if !a.gateway.Running {
-		a.gateway.Mu.Unlock()
+	if !a.gateway.IsRunning() {
 		return
 	}
-	a.gateway.Mu.Unlock()
 	select {
 	case a.gateway.RequestCh <- req:
 	default:
