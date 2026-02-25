@@ -5,7 +5,6 @@ package exchange
 
 import (
 	ebook "exchange_sim/exchange/book"
-	ecircuit "exchange_sim/exchange/circuit_breaker"
 	emarketdata "exchange_sim/exchange/marketdata"
 	ematching "exchange_sim/exchange/matching"
 )
@@ -16,8 +15,6 @@ func unlinkOrder(o *Order)             { ebook.UnlinkOrder(o) }
 func visibleQty(limit *Limit) int64    { return ebook.VisibleQty(limit) }
 func putExecution(e *Execution)        { ematching.PutExecution(e) }
 func putMDMsg(m *MarketDataMsg)        { emarketdata.PutMDMsg(m) }
-
-const haltForever = ecircuit.HaltForever
 
 func getExecution() *Execution    { return ematching.GetExecution() }
 func getMDMsg() *MarketDataMsg    { return emarketdata.GetMDMsg() }
