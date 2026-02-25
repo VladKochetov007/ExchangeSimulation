@@ -24,7 +24,7 @@ func TestSimulationIntegration(t *testing.T) {
 	runner := NewRunner(config)
 	ex := runner.Exchange()
 
-	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex.AddInstrument(btcusd)
 
 	balances := map[string]int64{

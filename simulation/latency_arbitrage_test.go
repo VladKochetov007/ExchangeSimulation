@@ -15,13 +15,13 @@ func TestLatencyArbitrageActorCreation(t *testing.T) {
 	ex1 := exchange.NewExchange(10, &RealClock{})
 	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD",
 		exchange.BTC_PRECISION, exchange.USD_PRECISION,
-		exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+		exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex1.AddInstrument(instrument)
 
 	ex2 := exchange.NewExchange(10, &RealClock{})
 	instrument2 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD",
 		exchange.BTC_PRECISION, exchange.USD_PRECISION,
-		exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+		exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex2.AddInstrument(instrument2)
 
 	registry.Register("fast", ex1)
@@ -68,13 +68,13 @@ func TestLatencyArbitrageActorStart(t *testing.T) {
 	ex1 := exchange.NewExchange(10, &RealClock{})
 	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD",
 		exchange.BTC_PRECISION, exchange.USD_PRECISION,
-		exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+		exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex1.AddInstrument(instrument)
 
 	ex2 := exchange.NewExchange(10, &RealClock{})
 	instrument2 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD",
 		exchange.BTC_PRECISION, exchange.USD_PRECISION,
-		exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+		exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex2.AddInstrument(instrument2)
 
 	registry.Register("fast", ex1)
@@ -125,7 +125,7 @@ func TestLatencyArbitrageActorWithLiquidity(t *testing.T) {
 	fastEx := exchange.NewExchange(100, &RealClock{})
 	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD",
 		exchange.BTC_PRECISION, exchange.USD_PRECISION,
-		exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+		exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	fastEx.AddInstrument(instrument)
 	registry.Register("fast", fastEx)
 
@@ -133,13 +133,13 @@ func TestLatencyArbitrageActorWithLiquidity(t *testing.T) {
 	slowEx := exchange.NewExchange(100, &RealClock{})
 	instrument2 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD",
 		exchange.BTC_PRECISION, exchange.USD_PRECISION,
-		exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+		exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	slowEx.AddInstrument(instrument2)
 	registry.Register("slow", slowEx)
 
 	// Add market makers to both venues
 	lpBalances := map[string]int64{
-		"BTC": 100 * exchange.SATOSHI,            // 100 BTC
+		"BTC": 100 * exchange.BTC_PRECISION,            // 100 BTC
 		"USD": 10000000 * exchange.USD_PRECISION, // 10 million USD
 	}
 
@@ -176,8 +176,8 @@ func TestLatencyArbitrageActorWithLiquidity(t *testing.T) {
 
 	// Create multi-venue gateway for arbitrage actor
 	arbBalances := map[VenueID]map[string]int64{
-		"fast": {"BTC": 10 * exchange.SATOSHI, "USD": 1000000 * exchange.USD_PRECISION},
-		"slow": {"BTC": 10 * exchange.SATOSHI, "USD": 1000000 * exchange.USD_PRECISION},
+		"fast": {"BTC": 10 * exchange.BTC_PRECISION, "USD": 1000000 * exchange.USD_PRECISION},
+		"slow": {"BTC": 10 * exchange.BTC_PRECISION, "USD": 1000000 * exchange.USD_PRECISION},
 	}
 
 	feePlans := map[VenueID]exchange.FeeModel{
@@ -307,13 +307,13 @@ func TestLatencyArbitrageActorDoubleStart(t *testing.T) {
 	ex1 := exchange.NewExchange(10, &RealClock{})
 	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD",
 		exchange.BTC_PRECISION, exchange.USD_PRECISION,
-		exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+		exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex1.AddInstrument(instrument)
 
 	ex2 := exchange.NewExchange(10, &RealClock{})
 	instrument2 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD",
 		exchange.BTC_PRECISION, exchange.USD_PRECISION,
-		exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+		exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex2.AddInstrument(instrument2)
 
 	registry.Register("fast", ex1)
@@ -367,7 +367,7 @@ func TestLatencyArbitrageActorArbitrageDetection(t *testing.T) {
 	fastEx := exchange.NewExchange(100, &RealClock{})
 	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD",
 		exchange.BTC_PRECISION, exchange.USD_PRECISION,
-		exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+		exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	fastEx.AddInstrument(instrument)
 	registry.Register("fast", fastEx)
 
@@ -375,12 +375,12 @@ func TestLatencyArbitrageActorArbitrageDetection(t *testing.T) {
 	slowEx := exchange.NewExchange(100, &RealClock{})
 	instrument2 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD",
 		exchange.BTC_PRECISION, exchange.USD_PRECISION,
-		exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+		exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	slowEx.AddInstrument(instrument2)
 	registry.Register("slow", slowEx)
 
 	lpBalances := map[string]int64{
-		"BTC": 100 * exchange.SATOSHI,
+		"BTC": 100 * exchange.BTC_PRECISION,
 		"USD": 10000000 * exchange.USD_PRECISION, // 10 million USD
 	}
 
@@ -417,8 +417,8 @@ func TestLatencyArbitrageActorArbitrageDetection(t *testing.T) {
 
 	// Create multi-venue gateway for arbitrage actor
 	arbBalances := map[VenueID]map[string]int64{
-		"fast": {"BTC": 10 * exchange.SATOSHI, "USD": 1000000 * exchange.USD_PRECISION},
-		"slow": {"BTC": 10 * exchange.SATOSHI, "USD": 1000000 * exchange.USD_PRECISION},
+		"fast": {"BTC": 10 * exchange.BTC_PRECISION, "USD": 1000000 * exchange.USD_PRECISION},
+		"slow": {"BTC": 10 * exchange.BTC_PRECISION, "USD": 1000000 * exchange.USD_PRECISION},
 	}
 
 	feePlans := map[VenueID]exchange.FeeModel{

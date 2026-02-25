@@ -35,11 +35,11 @@ func TestMultiVenueGatewayCreation(t *testing.T) {
 	registry := NewVenueRegistry()
 
 	ex1 := exchange.NewExchange(10, &RealClock{})
-	instrument1 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	instrument1 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex1.AddInstrument(instrument1)
 
 	ex2 := exchange.NewExchange(10, &RealClock{})
-	instrument2 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	instrument2 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex2.AddInstrument(instrument2)
 
 	registry.Register("binance", ex1)
@@ -74,11 +74,11 @@ func TestMultiVenueGatewayOrderRouting(t *testing.T) {
 	registry := NewVenueRegistry()
 
 	ex1 := exchange.NewExchange(10, &RealClock{})
-	instrument1 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	instrument1 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex1.AddInstrument(instrument1)
 
 	ex2 := exchange.NewExchange(10, &RealClock{})
-	instrument2 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	instrument2 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex2.AddInstrument(instrument2)
 
 	registry.Register("binance", ex1)
@@ -147,11 +147,11 @@ func TestMultiVenueGatewayMarketData(t *testing.T) {
 	registry := NewVenueRegistry()
 
 	ex1 := exchange.NewExchange(10, &RealClock{})
-	instrument1 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	instrument1 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex1.AddInstrument(instrument1)
 
 	ex2 := exchange.NewExchange(10, &RealClock{})
-	instrument2 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	instrument2 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex2.AddInstrument(instrument2)
 
 	registry.Register("binance", ex1)
@@ -212,11 +212,11 @@ func TestMultiVenueGatewayArbitrage(t *testing.T) {
 	registry := NewVenueRegistry()
 
 	ex1 := exchange.NewExchange(10, &RealClock{})
-	instrument1 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	instrument1 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex1.AddInstrument(instrument1)
 
 	ex2 := exchange.NewExchange(10, &RealClock{})
-	instrument2 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	instrument2 := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex2.AddInstrument(instrument2)
 
 	registry.Register("binance", ex1)

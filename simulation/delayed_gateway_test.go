@@ -8,7 +8,7 @@ import (
 
 func TestDelayedGatewayNoLatency(t *testing.T) {
 	ex := exchange.NewExchange(10, &RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000000}
@@ -54,7 +54,7 @@ func TestDelayedGatewayNoLatency(t *testing.T) {
 
 func TestDelayedGatewayRequestLatency(t *testing.T) {
 	ex := exchange.NewExchange(10, &RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000000}
@@ -101,7 +101,7 @@ func TestDelayedGatewayRequestLatency(t *testing.T) {
 
 func TestDelayedGatewayResponseLatency(t *testing.T) {
 	ex := exchange.NewExchange(10, &RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000000}
@@ -148,7 +148,7 @@ func TestDelayedGatewayResponseLatency(t *testing.T) {
 
 func TestDelayedGatewayMarketDataLatency(t *testing.T) {
 	ex := exchange.NewExchange(10, &RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000000}
@@ -205,7 +205,7 @@ func TestDelayedGatewayMarketDataLatency(t *testing.T) {
 
 func TestDelayedGatewayAllLatencies(t *testing.T) {
 	ex := exchange.NewExchange(10, &RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000000}

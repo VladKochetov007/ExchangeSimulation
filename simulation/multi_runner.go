@@ -173,7 +173,7 @@ func (r *MultiExchangeRunner) createActorsForExchange(
 		SpreadBps:         r.config.LPSpreadBps,
 		BootstrapPrices:   bootstrapPrices,
 		LiquidityMultiple: 10,
-		MinExitSize:       50 * exchange.SATOSHI, // 0.5 BTC minimum position before considering exit
+		MinExitSize:       50 * exchange.BTC_PRECISION, // 0.5 BTC minimum position before considering exit
 		SkewFactor:        r.config.LPSkewFactor,
 	}
 	if r.config.SimSpeedup > 0 {

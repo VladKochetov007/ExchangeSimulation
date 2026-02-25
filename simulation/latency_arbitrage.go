@@ -229,12 +229,12 @@ func (a *LatencyArbitrageActor) executeArbitrage(slowAsk, fastBid, qty int64) {
 
 	// Track statistics
 	a.totalArbitrages.Add(1)
-	// Profit calculation: price diff (in exchange.SATOSHI per BTC) * qty (in satoshis) / (exchange.SATOSHI * 1000)
-	// This gives profit in USD precision units (exchange.SATOSHI/1000)
-	// For BTC/USD with quotePrecision = exchange.SATOSHI/1000:
-	// priceDiff is in "USD scaled by exchange.SATOSHI", qty is in satoshis
-	// Result: profit in USD (scaled by exchange.SATOSHI/1000)
-	profit := (fastBid - slowAsk) * qty / (exchange.SATOSHI * 1000)
+	// Profit calculation: price diff (in exchange.BTC_PRECISION per BTC) * qty (in satoshis) / (exchange.BTC_PRECISION * 1000)
+	// This gives profit in USD precision units (exchange.BTC_PRECISION/1000)
+	// For BTC/USD with quotePrecision = exchange.BTC_PRECISION/1000:
+	// priceDiff is in "USD scaled by exchange.BTC_PRECISION", qty is in satoshis
+	// Result: profit in USD (scaled by exchange.BTC_PRECISION/1000)
+	profit := (fastBid - slowAsk) * qty / (exchange.BTC_PRECISION * 1000)
 	a.totalProfit.Add(profit)
 }
 
@@ -268,8 +268,8 @@ func (a *LatencyArbitrageActor) executeReverseArbitrage(fastAsk, slowBid, qty in
 
 	// Track statistics
 	a.totalArbitrages.Add(1)
-	// Profit in USD precision units (exchange.SATOSHI/1000) - see executeArbitrage for explanation
-	profit := (slowBid - fastAsk) * qty / (exchange.SATOSHI * 1000)
+	// Profit in USD precision units (exchange.BTC_PRECISION/1000) - see executeArbitrage for explanation
+	profit := (slowBid - fastAsk) * qty / (exchange.BTC_PRECISION * 1000)
 	a.totalProfit.Add(profit)
 }
 

@@ -60,9 +60,9 @@ func DefaultMultiSimConfig() MultiSimConfig {
 		InitialBalances: map[string]int64{
 			"BTC":  100 * exchange.BTC_PRECISION,
 			"ETH":  1000 * exchange.ETH_PRECISION,
-			"SOL":  10000 * exchange.SATOSHI,
-			"XRP":  100000 * exchange.SATOSHI,
-			"DOGE": 1000000 * exchange.SATOSHI,
+			"SOL":  10000 * exchange.BTC_PRECISION,
+			"XRP":  100000 * exchange.BTC_PRECISION,
+			"DOGE": 1000000 * exchange.BTC_PRECISION,
 			"USD":  100000000 * exchange.USD_PRECISION,
 		},
 		Duration:     5 * time.Second,
@@ -130,7 +130,7 @@ func GenerateInstruments(assets []string, quoteAsset string, spotRatio float64) 
 			basePrecision = exchange.BTC_PRECISION
 			quotePrecision = exchange.USD_PRECISION
 			tickSize = exchange.DOLLAR_TICK
-			minSize = exchange.SATOSHI / 1000
+			minSize = exchange.BTC_PRECISION / 1000
 		case "ETH":
 			basePrecision = exchange.ETH_PRECISION
 			quotePrecision = exchange.USD_PRECISION
@@ -138,10 +138,10 @@ func GenerateInstruments(assets []string, quoteAsset string, spotRatio float64) 
 			minSize = exchange.ETH_PRECISION / 1000
 		default:
 			// Generic asset
-			basePrecision = exchange.SATOSHI
+			basePrecision = exchange.BTC_PRECISION
 			quotePrecision = exchange.USD_PRECISION
-			tickSize = exchange.SATOSHI
-			minSize = exchange.SATOSHI / 100
+			tickSize = exchange.BTC_PRECISION
+			minSize = exchange.BTC_PRECISION / 100
 		}
 
 		if i < spotCount {

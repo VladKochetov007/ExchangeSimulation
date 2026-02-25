@@ -37,11 +37,11 @@ func TestBaseActorStopBeforeStart(t *testing.T) {
 
 func TestBaseActorResponseHandling(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
-	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.SATOSHI/1000)
+	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex.AddInstrument(instrument)
 	defer ex.Shutdown()
 
-	balances := map[string]int64{"BTC": 10 * exchange.SATOSHI, "USD": 100000 * exchange.SATOSHI}
+	balances := map[string]int64{"BTC": 10 * exchange.BTC_PRECISION, "USD": 100000 * exchange.BTC_PRECISION}
 	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
 
 	actor := NewBaseActor(1, gateway)
@@ -64,7 +64,7 @@ func TestBaseActorResponseHandling(t *testing.T) {
 	actor.Start(ctx)
 	defer actor.Stop()
 
-	actor.SubmitOrder("BTC/USD", exchange.Buy, exchange.LimitOrder, -1, exchange.SATOSHI)
+	actor.SubmitOrder("BTC/USD", exchange.Buy, exchange.LimitOrder, -1, exchange.BTC_PRECISION)
 
 	select {
 	case received := <-eventReceived:
