@@ -119,6 +119,47 @@ func (b *Book) updateBest(limit *Limit) {
 	}
 }
 
+type OrderBook struct {
+	Symbol     string
+	Instrument Instrument
+	Bids       *Book
+	Asks       *Book
+	LastTrade  *Trade
+	SeqNum     uint64
+}
+
+func (ob *OrderBook) GetLastPrice() int64 {
+	if ob.LastTrade != nil {
+		return ob.LastTrade.Price
+	}
+	return 0
+}
+
+func (ob *OrderBook) GetBestBid() int64 {
+	if ob.Bids.Best != nil {
+		return ob.Bids.Best.Price
+	}
+	return 0
+}
+
+func (ob *OrderBook) GetBestAsk() int64 {
+	if ob.Asks.Best != nil {
+		return ob.Asks.Best.Price
+	}
+	return 0
+}
+
+// GetMidPrice returns the mid price between best bid and ask.
+// Falls back to last price if order book is empty.
+func (ob *OrderBook) GetMidPrice() int64 {
+	bestBid := ob.GetBestBid()
+	bestAsk := ob.GetBestAsk()
+	if bestBid > 0 && bestAsk > 0 {
+		return bestBid + (bestAsk-bestBid)/2
+	}
+	return ob.GetLastPrice()
+}
+
 func (ob *OrderBook) findOrder(orderID uint64) *Order {
 	if o := ob.Bids.Orders[orderID]; o != nil {
 		return o
