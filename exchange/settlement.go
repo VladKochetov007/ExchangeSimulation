@@ -240,10 +240,7 @@ func calculateClosedQty(oldSize, tradeQty int64, side Side) int64 {
 	if (oldSize > 0 && deltaSize >= 0) || (oldSize < 0 && deltaSize <= 0) {
 		return 0
 	}
-	closedQty := abs(deltaSize)
-	if closedQty > abs(oldSize) {
-		closedQty = abs(oldSize)
-	}
+	closedQty := min(abs(deltaSize), abs(oldSize))
 	return closedQty
 }
 
