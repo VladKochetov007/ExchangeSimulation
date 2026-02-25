@@ -485,11 +485,11 @@ type FeeRevenueEvent struct {
 	Asset     string `json:"asset"` // Fee asset (usually quote)
 }
 
-type MarginMode int
+type MarginMode uint8
 
 const (
-	CrossMargin    MarginMode = 0
-	IsolatedMargin MarginMode = 1
+	CrossMargin    MarginMode = iota
+	IsolatedMargin
 )
 
 func (m MarginMode) String() string {
