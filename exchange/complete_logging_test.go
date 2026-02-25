@@ -250,7 +250,7 @@ func TestFeeRevenueLoggingSpot(t *testing.T) {
 	logger := &completeLogger{}
 	ex.SetLogger("_global", logger)
 
-	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(spot)
 
 	// Client with fees

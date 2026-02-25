@@ -10,7 +10,7 @@ func TestExchangeCancelOrder(t *testing.T) {
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI, "USD": 100000 * USD_PRECISION}
+	balances := map[string]int64{"BTC": 10 * BTC_PRECISION, "USD": 100000 * USD_PRECISION}
 	gateway := ex.ConnectClient(1, balances, &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true})
 
 	req := &OrderRequest{
@@ -19,7 +19,7 @@ func TestExchangeCancelOrder(t *testing.T) {
 		Side:        Buy,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, DOLLAR_TICK),
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 
@@ -66,7 +66,7 @@ func TestCancelOrderUnknownClient(t *testing.T) {
 
 func TestCancelOrderNotFound(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	balances := map[string]int64{"BTC": 10 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * BTC_PRECISION}
 	ex.ConnectClient(1, balances, &FixedFee{})
 
 	cancelReq := &CancelRequest{RequestID: 1, OrderID: 999}
@@ -79,7 +79,7 @@ func TestCancelOrderNotFound(t *testing.T) {
 func TestQueryBalance(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	balances := map[string]int64{
-		"BTC": 5 * SATOSHI,
+		"BTC": 5 * BTC_PRECISION,
 		"USD": 10000 * USD_PRECISION,
 	}
 	ex.ConnectClient(1, balances, &FixedFee{})
@@ -139,7 +139,7 @@ func TestSubscribeUnsubscribe(t *testing.T) {
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/1000)
 	ex.AddInstrument(instrument)
 
-	balances := map[string]int64{"BTC": 10 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * BTC_PRECISION}
 	gateway := ex.ConnectClient(1, balances, &FixedFee{})
 
 	req := &QueryRequest{
@@ -173,7 +173,7 @@ func TestSubscribeUnsubscribe(t *testing.T) {
 
 func TestSubscribeUnknownInstrument(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	balances := map[string]int64{"BTC": 10 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * BTC_PRECISION}
 	gateway := ex.ConnectClient(1, balances, &FixedFee{})
 
 	req := &QueryRequest{
@@ -197,7 +197,7 @@ func TestHandleClientRequestsIntegration(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{
-		"BTC": 10 * SATOSHI,
+		"BTC": 10 * BTC_PRECISION,
 		"USD": 100000 * USD_PRECISION,
 	}
 	gateway := ex.ConnectClient(1, balances, &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true})
@@ -210,7 +210,7 @@ func TestHandleClientRequestsIntegration(t *testing.T) {
 		Side:        Buy,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, DOLLAR_TICK),
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 	gateway.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: orderReq}
@@ -272,7 +272,7 @@ func TestClientRemoveOrder(t *testing.T) {
 
 func TestShutdown(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	balances := map[string]int64{"BTC": 10 * SATOSHI}
+	balances := map[string]int64{"BTC": 10 * BTC_PRECISION}
 	gateway := ex.ConnectClient(1, balances, &FixedFee{})
 
 	go ex.handleClientRequests(gateway)

@@ -10,7 +10,7 @@ import (
 func TestInsertLimit_MiddleInsertion(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	ex.ConnectClient(1, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
 
 	// To get the "middle insertion" (l.Prev != nil), we need at least 3 levels
@@ -57,7 +57,7 @@ func TestRunBalanceSnapshotLoop_Ticks(t *testing.T) {
 		EstimatedClients:        2,
 		BalanceSnapshotInterval: 10 * time.Millisecond,
 	})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(1_000)}, &FixedFee{})
 	// Wait for at least 2 ticks then shut down
 	time.Sleep(30 * time.Millisecond)
@@ -228,7 +228,7 @@ func TestEnablePeriodicSnapshots_AlreadyHasInterval(t *testing.T) {
 		EstimatedClients: 2,
 		SnapshotInterval: 100 * time.Millisecond,
 	})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	ex.ConnectClient(1, map[string]int64{}, &FixedFee{}) // starts running=true
 
 	// snapshotInterval is already non-zero (100ms) → the `if e.snapshotInterval == 0` is false

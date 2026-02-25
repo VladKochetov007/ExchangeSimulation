@@ -18,7 +18,7 @@ func (l *nullLogger) Close() error                                              
 
 func TestPublishSnapshot_Directly(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	// publishSnapshot is package-private; call directly to cover it.
 	ex.publishSnapshot("BTC/USD", ex.Clock.NowUnixNano())
 	// No panic = pass. Unknown symbol must return early without panic.
@@ -29,7 +29,7 @@ func TestPublishSnapshot_Directly(t *testing.T) {
 
 func TestLogAllBalances_WithLogger(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(1_000), "BTC": BTCAmount(0.5)}, &FixedFee{})
 	ex.AddPerpBalance(1, "USD", USDAmount(500))
 	injectBorrowing(ex, 1, "USD", USDAmount(100))
@@ -43,7 +43,7 @@ func TestLogAllBalances_WithLogger(t *testing.T) {
 
 func TestEnablePeriodicSnapshots_WhileRunning(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	ex.ConnectClient(1, map[string]int64{}, &FixedFee{}) // starts e.running = true
 
 	// Calling EnablePeriodicSnapshots while running should not panic.
@@ -57,7 +57,7 @@ func TestEnablePeriodicSnapshots_WhileRunning(t *testing.T) {
 
 func TestSubscribe_WithLogger(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
 	ex.SetLogger("BTC/USD", &nullLogger{})
 
@@ -144,7 +144,7 @@ func TestNewExchangeWithConfig_CustomID(t *testing.T) {
 func TestWeightedMidPriceCalculator_ZeroBidQty(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	book := ex.Books["BTC/USD"]
 
 	// Add bid with qty=0 (isEmpty=true but Best set via addOrder — set TotalQty to 0 directly)
@@ -165,7 +165,7 @@ func TestWeightedMidPriceCalculator_ZeroBidQty(t *testing.T) {
 func TestWeightedMidPriceCalculator_ZeroAskQty(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	book := ex.Books["BTC/USD"]
 
 	bid := &Order{ID: 1, ClientID: 1, Price: PriceUSD(49_000, DOLLAR_TICK), Qty: BTCAmount(2), Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
@@ -184,7 +184,7 @@ func TestWeightedMidPriceCalculator_ZeroAskQty(t *testing.T) {
 func TestWeightedMidPriceCalculator_BothZeroQty(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	book := ex.Books["BTC/USD"]
 
 	bid := &Order{ID: 1, ClientID: 1, Price: PriceUSD(49_000, DOLLAR_TICK), Qty: BTCAmount(1), Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
@@ -252,7 +252,7 @@ func TestValidateCrossMarginCollateral_ZeroPriceForBorrowedAsset(t *testing.T) {
 
 func TestPlaceOrder_IOCSpotBuy_PartialFill(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(100_000)}, &FixedFee{})
 	ex.ConnectClient(2, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
 
@@ -283,7 +283,7 @@ func TestPlaceOrder_IOCSpotBuy_PartialFill(t *testing.T) {
 
 func TestPlaceOrder_IOCSpotSell_PartialFill(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	ex.ConnectClient(1, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
 	ex.ConnectClient(2, map[string]int64{"USD": USDAmount(100_000)}, &FixedFee{})
 
@@ -373,7 +373,7 @@ func (m *mockLiquidationHandler) OnInsuranceFund(e *InsuranceFundEvent) {
 // Using $100 entry price: 1e8 * 1e7 * 1000 = 1e18 < int64 max (~9.2e18).
 func setupPerpAutomation(handler LiquidationHandler) (*Exchange, *ExchangeAutomation, *PerpFutures) {
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(perp)
 	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
 	ex.ExchangeBalance.InsuranceFund["USD"] = USDAmount(1_000_000)
@@ -557,7 +557,7 @@ func TestCheckLiquidations_ZeroMarkPrice(t *testing.T) {
 
 func TestChargeCollateralInterest_WithLogger(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
 	ex.SetLogger("_global", &nullLogger{})
 

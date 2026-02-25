@@ -21,7 +21,7 @@ func TestHandleClientRequestsCancelOrder(t *testing.T) {
 		Side:        Buy,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, CENT_TICK),
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 	gateway.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: orderReq}
@@ -145,7 +145,7 @@ func TestPlaceOrderSellReservesBase(t *testing.T) {
 		Side:        Sell,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, CENT_TICK),
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 
@@ -156,8 +156,8 @@ func TestPlaceOrderSellReservesBase(t *testing.T) {
 
 	client := ex.Clients[1]
 	reserved := client.GetReserved("BTC")
-	if reserved != SATOSHI {
-		t.Errorf("Expected BTC reserved to be SATOSHI, got %d", reserved)
+	if reserved != BTC_PRECISION {
+		t.Errorf("Expected BTC reserved to be BTC_PRECISION, got %d", reserved)
 	}
 }
 
@@ -174,7 +174,7 @@ func TestPlaceOrderMarketSellNoAskBook(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Sell,
 		Type:        Market,
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: IOC,
 	}
 
@@ -198,8 +198,8 @@ func TestProcessExecutionsTakerSell(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        LimitOrder,
-		Price:       PriceUSD(50000, SATOSHI),
-		Qty:         SATOSHI,
+		Price:       PriceUSD(50000, BTC_PRECISION),
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 	ex.placeOrder(1, buyReq)
@@ -209,8 +209,8 @@ func TestProcessExecutionsTakerSell(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Sell,
 		Type:        LimitOrder,
-		Price:       PriceUSD(50000, SATOSHI),
-		Qty:         SATOSHI,
+		Price:       PriceUSD(50000, BTC_PRECISION),
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 
@@ -243,8 +243,8 @@ func TestCancelOrderSellSide(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Sell,
 		Type:        LimitOrder,
-		Price:       PriceUSD(50000, SATOSHI),
-		Qty:         SATOSHI,
+		Price:       PriceUSD(50000, BTC_PRECISION),
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 

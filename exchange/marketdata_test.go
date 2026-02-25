@@ -175,7 +175,7 @@ func TestMDPublisherPublishFunding(t *testing.T) {
 		Rate:        25,
 		NextFunding: time.Now().Unix() + 28800,
 		Interval:    28800,
-		MarkPrice:   50100 * SATOSHI,
+		MarkPrice:   50100 * BTC_PRECISION,
 		IndexPrice:  PriceUSD(50000, DOLLAR_TICK),
 	}
 

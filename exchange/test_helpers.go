@@ -4,13 +4,10 @@ import "time"
 
 const (
 	// Asset precisions (units per whole unit)
-	BTC_PRECISION  = 100_000_000 // 1 BTC = 100,000,000 satoshis
-	ETH_PRECISION  = 1_000_000   // 1 ETH = 1,000,000 micro-ETH (gwei would be 1B)
-	USD_PRECISION  = 100_000     // 1 USD = 100,000 units (0.001 USD minimum)
-	USDT_PRECISION = 100_000     // Same as USD
-
-	// Legacy constant (backward compatibility - do NOT use for non-BTC assets!)
-	SATOSHI = BTC_PRECISION
+	BTC_PRECISION  = 100_000_000
+	ETH_PRECISION  = 1_000_000
+	USD_PRECISION  = 100_000
+	USDT_PRECISION = 100_000
 
 	// Price tick sizes (for price alignment in BTC/USD pairs)
 	CENT_TICK    = USD_PRECISION / 100 // 0.01 USD tick = 1,000 units

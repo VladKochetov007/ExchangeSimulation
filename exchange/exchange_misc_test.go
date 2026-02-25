@@ -16,11 +16,11 @@ func TestGetBestLiquidity_UnknownSymbol(t *testing.T) {
 func TestGetBestLiquidity_WithOrders(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 
 	book := ex.Books["BTC/USD"]
-	bidQty := int64(2 * SATOSHI)
-	askQty := int64(3 * SATOSHI)
+	bidQty := int64(2 * BTC_PRECISION)
+	askQty := int64(3 * BTC_PRECISION)
 	book.Bids.addOrder(&Order{ID: 1, ClientID: 1, Price: PriceUSD(49_000, DOLLAR_TICK), Qty: bidQty, Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()})
 	book.Asks.addOrder(&Order{ID: 2, ClientID: 1, Price: PriceUSD(51_000, DOLLAR_TICK), Qty: askQty, Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano()})
 
@@ -35,7 +35,7 @@ func TestGetBestLiquidity_WithOrders(t *testing.T) {
 
 func TestEnablePeriodicSnapshots(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	// Just verifies EnablePeriodicSnapshots doesn't panic.
 	ex.EnablePeriodicSnapshots(100 * time.Millisecond)
 	time.Sleep(50 * time.Millisecond)
@@ -51,7 +51,7 @@ func TestRealClock_NowUnix(t *testing.T) {
 }
 
 func TestInstrumentType_Spot(t *testing.T) {
-	inst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	inst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	if inst.InstrumentType() != "SPOT" {
 		t.Errorf("expected \"SPOT\", got %q", inst.InstrumentType())
 	}
@@ -61,14 +61,14 @@ func TestInstrumentType_Spot(t *testing.T) {
 }
 
 func TestInstrumentType_Perp(t *testing.T) {
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	if perp.InstrumentType() != "PERP" {
 		t.Errorf("expected \"PERP\", got %q", perp.InstrumentType())
 	}
 }
 
 func TestSetFundingCalculator(t *testing.T) {
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	custom := &SimpleFundingCalc{BaseRate: 10, Damping: 1, MaxRate: 100}
 	perp.SetFundingCalculator(custom)
 	perp.UpdateFundingRate(PriceUSD(50_000, DOLLAR_TICK), PriceUSD(50_100, DOLLAR_TICK))
@@ -98,7 +98,7 @@ func TestEnableBorrowing_NilOracleReturnsError(t *testing.T) {
 func TestWeightedMidPriceCalculator_BothSides(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	book := ex.Books["BTC/USD"]
 
 	bid := &Order{ID: 1, ClientID: 1, Price: PriceUSD(49_000, DOLLAR_TICK), Qty: BTCAmount(2), Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
@@ -116,7 +116,7 @@ func TestWeightedMidPriceCalculator_BothSides(t *testing.T) {
 func TestWeightedMidPriceCalculator_OnlyBid(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	book := ex.Books["BTC/USD"]
 
 	bid := &Order{ID: 1, ClientID: 1, Price: PriceUSD(49_000, DOLLAR_TICK), Qty: BTCAmount(1), Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
@@ -132,7 +132,7 @@ func TestWeightedMidPriceCalculator_OnlyBid(t *testing.T) {
 
 func TestWeightedMidPriceCalculator_EmptyBook(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	book := ex.Books["BTC/USD"]
 
 	calc := NewWeightedMidPriceCalculator()
@@ -144,7 +144,7 @@ func TestWeightedMidPriceCalculator_EmptyBook(t *testing.T) {
 
 func TestPublishSnapshot_ViaSubscribe(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
 	gateway := ex.Gateways[1]
 

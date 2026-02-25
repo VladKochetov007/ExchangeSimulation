@@ -4,7 +4,7 @@ import "testing"
 
 func setupMarginModeExchange() (*Exchange, *MarginModeManager) {
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(perp)
 	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
 	ex.AddPerpBalance(1, "USD", USDAmount(50_000))

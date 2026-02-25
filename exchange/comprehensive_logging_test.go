@@ -13,7 +13,7 @@ func TestComprehensiveBorrowRepayLogging(t *testing.T) {
 	ex.SetLogger("_global", logger)
 
 	oracle := NewStaticPriceOracle(map[string]int64{
-		"USD": SATOSHI,              // 100,000,000 (value of 100M USD units = 1000 USD)
+		"USD": BTC_PRECISION,              // 100,000,000 (value of 100M USD units = 1000 USD)
 		"BTC": 50000 * USD_PRECISION, // 5,000,000,000 (value of 1 BTC in USD_PRECISION)
 		"ETH": 3000 * USD_PRECISION,  // 300,000,000 (value of 1 ETH in USD_PRECISION)
 	})
@@ -248,7 +248,7 @@ func TestComprehensiveFundingLogging(t *testing.T) {
 	ex.SetLogger("_global", logger)
 
 	// Create perp instrument
-	btcPerp := NewPerpFutures("BTC-PERP", "BTC", "USD", SATOSHI, USD_PRECISION/100, 100*BTC_PRECISION, 1*BTC_PRECISION)
+	btcPerp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION/100, 100*BTC_PRECISION, 1*BTC_PRECISION)
 	ex.Instruments["BTC-PERP"] = btcPerp
 
 	// Set up clients with positions
@@ -348,7 +348,7 @@ func TestMultiVenueBorrowingLogging(t *testing.T) {
 	ex2.SetLogger("_global", logger2)
 
 	oracle := NewStaticPriceOracle(map[string]int64{
-		"USD": SATOSHI,              // 100,000,000 (value of 100M USD units = 1000 USD)
+		"USD": BTC_PRECISION,              // 100,000,000 (value of 100M USD units = 1000 USD)
 		"BTC": 50000 * USD_PRECISION, // 5,000,000,000 (value of 1 BTC in USD_PRECISION)
 	})
 
@@ -437,7 +437,7 @@ func TestCollateralLogging(t *testing.T) {
 	ex.SetLogger("_global", logger)
 
 	oracle := NewStaticPriceOracle(map[string]int64{
-		"USD": SATOSHI,              // 100,000,000 (value of 100M USD units = 1000 USD)
+		"USD": BTC_PRECISION,              // 100,000,000 (value of 100M USD units = 1000 USD)
 		"BTC": 50000 * USD_PRECISION, // 5,000,000,000 (value of 1 BTC in USD_PRECISION)
 	})
 

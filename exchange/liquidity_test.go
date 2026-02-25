@@ -17,7 +17,7 @@ func TestInsufficientLiquidityLimitOrder(t *testing.T) {
 		Side:        Sell,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, CENT_TICK),
-		Qty:         SATOSHI / 2,
+		Qty:         BTC_PRECISION / 2,
 		TimeInForce: GTC,
 	}
 	ex.placeOrder(1, sellReq)
@@ -28,7 +28,7 @@ func TestInsufficientLiquidityLimitOrder(t *testing.T) {
 		Side:        Buy,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, CENT_TICK),
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 
@@ -45,8 +45,8 @@ func TestInsufficientLiquidityLimitOrder(t *testing.T) {
 		t.Fatalf("Partially filled limit order should remain on book")
 	}
 
-	if bidOrder.FilledQty != SATOSHI/2 {
-		t.Errorf("Expected FilledQty %d, got %d", SATOSHI/2, bidOrder.FilledQty)
+	if bidOrder.FilledQty != BTC_PRECISION/2 {
+		t.Errorf("Expected FilledQty %d, got %d", BTC_PRECISION/2, bidOrder.FilledQty)
 	}
 
 	if bidOrder.Status != PartialFill {
@@ -54,8 +54,8 @@ func TestInsufficientLiquidityLimitOrder(t *testing.T) {
 	}
 
 	remainingQty := bidOrder.Qty - bidOrder.FilledQty
-	if remainingQty != SATOSHI/2 {
-		t.Errorf("Expected remaining qty %d, got %d", SATOSHI/2, remainingQty)
+	if remainingQty != BTC_PRECISION/2 {
+		t.Errorf("Expected remaining qty %d, got %d", BTC_PRECISION/2, remainingQty)
 	}
 }
 
@@ -74,7 +74,7 @@ func TestInsufficientLiquidityMarketOrder(t *testing.T) {
 		Side:        Sell,
 		Type:        LimitOrder,
 		Price:       50000,
-		Qty:         SATOSHI / 2,
+		Qty:         BTC_PRECISION / 2,
 		TimeInForce: GTC,
 	}
 	ex.placeOrder(1, sellReq)
@@ -84,7 +84,7 @@ func TestInsufficientLiquidityMarketOrder(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        Market,
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: IOC,
 	}
 
@@ -102,7 +102,7 @@ func TestInsufficientLiquidityMarketOrder(t *testing.T) {
 	}
 
 	client := ex.Clients[2]
-	expectedBTC := int64(SATOSHI / 2)
+	expectedBTC := int64(BTC_PRECISION / 2)
 	actualBTC := client.GetBalance("BTC")
 
 	if actualBTC < expectedBTC {
@@ -125,7 +125,7 @@ func TestFOKOrderNotImplemented(t *testing.T) {
 		Side:        Sell,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, CENT_TICK),
-		Qty:         SATOSHI / 2,
+		Qty:         BTC_PRECISION / 2,
 		TimeInForce: GTC,
 	}
 	ex.placeOrder(1, sellReq)
@@ -135,7 +135,7 @@ func TestFOKOrderNotImplemented(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        Market,
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: FOK,
 	}
 
@@ -165,7 +165,7 @@ func TestFOKOrderFullyFilled(t *testing.T) {
 		Side:        Sell,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, CENT_TICK),
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 	ex.placeOrder(1, sellReq)
@@ -175,7 +175,7 @@ func TestFOKOrderFullyFilled(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        Market,
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: FOK,
 	}
 
@@ -200,7 +200,7 @@ func TestIOCOrderPartialFill(t *testing.T) {
 		Side:        Sell,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, CENT_TICK),
-		Qty:         SATOSHI / 2,
+		Qty:         BTC_PRECISION / 2,
 		TimeInForce: GTC,
 	}
 	ex.placeOrder(1, sellReq)
@@ -211,7 +211,7 @@ func TestIOCOrderPartialFill(t *testing.T) {
 		Side:        Buy,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, CENT_TICK),
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: IOC,
 	}
 
@@ -227,7 +227,7 @@ func TestIOCOrderPartialFill(t *testing.T) {
 
 	client2 := ex.Clients[2]
 	btcBalance := client2.Balances["BTC"]
-	if btcBalance != SATOSHI/2+BTCAmount(10) {
+	if btcBalance != BTC_PRECISION/2+BTCAmount(10) {
 		t.Fatalf("Expected client2 to receive 0.5 BTC from partial fill, got %d", btcBalance)
 	}
 }
@@ -246,7 +246,7 @@ func TestIOCOrderNoFill(t *testing.T) {
 		Side:        Buy,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, CENT_TICK),
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: IOC,
 	}
 
@@ -274,7 +274,7 @@ func TestEmptyBookMarketOrder(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        Market,
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: IOC,
 	}
 
@@ -305,7 +305,7 @@ func TestPartialFillReleasesCorrectAmount(t *testing.T) {
 		Side:        Sell,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, DOLLAR_TICK),
-		Qty:         SATOSHI / 2,
+		Qty:         BTC_PRECISION / 2,
 		TimeInForce: GTC,
 	}
 	ex.placeOrder(1, sellReq)
@@ -318,7 +318,7 @@ func TestPartialFillReleasesCorrectAmount(t *testing.T) {
 		Side:        Buy,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, DOLLAR_TICK),
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 
@@ -339,8 +339,8 @@ func TestPartialFillReleasesCorrectAmount(t *testing.T) {
 		t.Errorf("Available balance should not be negative, got %d", actualAvailable)
 	}
 
-	btcReceived := client.GetBalance("BTC") - (10 * SATOSHI)
-	if btcReceived != SATOSHI/2 {
-		t.Errorf("Expected to receive %d BTC from partial fill, got %d", SATOSHI/2, btcReceived)
+	btcReceived := client.GetBalance("BTC") - (10 * BTC_PRECISION)
+	if btcReceived != BTC_PRECISION/2 {
+		t.Errorf("Expected to receive %d BTC from partial fill, got %d", BTC_PRECISION/2, btcReceived)
 	}
 }

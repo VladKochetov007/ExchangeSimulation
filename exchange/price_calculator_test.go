@@ -14,14 +14,14 @@ func TestLastPriceCalculator(t *testing.T) {
 		Asks:   newBook(Sell),
 		LastTrade: &Trade{
 			TradeID: 1,
-			Price:   50000 * SATOSHI,
-			Qty:     SATOSHI,
+			Price:   50000 * BTC_PRECISION,
+			Qty:     BTC_PRECISION,
 		},
 	}
 
 	price := calc.Calculate(book)
-	if price != 50000*SATOSHI {
-		t.Errorf("Expected %d, got %d", 50000*SATOSHI, price)
+	if price != 50000*BTC_PRECISION {
+		t.Errorf("Expected %d, got %d", 50000*BTC_PRECISION, price)
 	}
 }
 
@@ -57,8 +57,8 @@ func TestMidPriceCalculator(t *testing.T) {
 	bidOrder := &Order{
 		ID:        1,
 		ClientID:  1,
-		Price:     49900 * SATOSHI,
-		Qty:       SATOSHI,
+		Price:     49900 * BTC_PRECISION,
+		Qty:       BTC_PRECISION,
 		Side:      Buy,
 		Type:      LimitOrder,
 		Timestamp: clock.NowUnixNano(),
@@ -67,8 +67,8 @@ func TestMidPriceCalculator(t *testing.T) {
 	askOrder := &Order{
 		ID:        2,
 		ClientID:  1,
-		Price:     50100 * SATOSHI,
-		Qty:       SATOSHI,
+		Price:     50100 * BTC_PRECISION,
+		Qty:       BTC_PRECISION,
 		Side:      Sell,
 		Type:      LimitOrder,
 		Timestamp: clock.NowUnixNano(),
@@ -79,7 +79,7 @@ func TestMidPriceCalculator(t *testing.T) {
 
 	// Mid price should be average
 	price := calc.Calculate(book)
-	expected := int64((49900*SATOSHI + 50100*SATOSHI) / 2)
+	expected := int64((49900*BTC_PRECISION + 50100*BTC_PRECISION) / 2)
 	if price != expected {
 		t.Errorf("Expected %d, got %d", expected, price)
 	}
@@ -94,14 +94,14 @@ func TestMidPriceCalculatorEmptyBook(t *testing.T) {
 		Bids:   newBook(Buy),
 		Asks:   newBook(Sell),
 		LastTrade: &Trade{
-			Price: 50000 * SATOSHI,
+			Price: 50000 * BTC_PRECISION,
 		},
 	}
 
 	// Should fallback to last trade
 	price := calc.Calculate(book)
-	if price != 50000*SATOSHI {
-		t.Errorf("Expected %d (fallback to last), got %d", 50000*SATOSHI, price)
+	if price != 50000*BTC_PRECISION {
+		t.Errorf("Expected %d (fallback to last), got %d", 50000*BTC_PRECISION, price)
 	}
 }
 
@@ -120,8 +120,8 @@ func TestWeightedMidPriceCalculator(t *testing.T) {
 	bidOrder := &Order{
 		ID:        1,
 		ClientID:  1,
-		Price:     49900 * SATOSHI,
-		Qty:       2 * SATOSHI, // More qty on bid
+		Price:     49900 * BTC_PRECISION,
+		Qty:       2 * BTC_PRECISION, // More qty on bid
 		Side:      Buy,
 		Type:      LimitOrder,
 		Timestamp: clock.NowUnixNano(),
@@ -130,8 +130,8 @@ func TestWeightedMidPriceCalculator(t *testing.T) {
 	askOrder := &Order{
 		ID:        2,
 		ClientID:  1,
-		Price:     50100 * SATOSHI,
-		Qty:       SATOSHI, // Less qty on ask
+		Price:     50100 * BTC_PRECISION,
+		Qty:       BTC_PRECISION, // Less qty on ask
 		Side:      Sell,
 		Type:      LimitOrder,
 		Timestamp: clock.NowUnixNano(),
@@ -143,10 +143,10 @@ func TestWeightedMidPriceCalculator(t *testing.T) {
 	// Weighted mid should favor bid side (more liquidity)
 	price := calc.Calculate(book)
 
-	bidQty := int64(2 * SATOSHI)
-	askQty := int64(1 * SATOSHI)
-	bidPrice := int64(49900 * SATOSHI)
-	askPrice := int64(50100 * SATOSHI)
+	bidQty := int64(2 * BTC_PRECISION)
+	askQty := int64(1 * BTC_PRECISION)
+	bidPrice := int64(49900 * BTC_PRECISION)
+	askPrice := int64(50100 * BTC_PRECISION)
 	expected := (bidPrice*askQty + askPrice*bidQty) / (bidQty + askQty)
 
 	if price != expected {
@@ -180,8 +180,8 @@ func TestOrderBookGetters(t *testing.T) {
 	bidOrder := &Order{
 		ID:        1,
 		ClientID:  1,
-		Price:     49900 * SATOSHI,
-		Qty:       SATOSHI,
+		Price:     49900 * BTC_PRECISION,
+		Qty:       BTC_PRECISION,
 		Side:      Buy,
 		Type:      LimitOrder,
 		Timestamp: clock.NowUnixNano(),
@@ -190,8 +190,8 @@ func TestOrderBookGetters(t *testing.T) {
 	askOrder := &Order{
 		ID:        2,
 		ClientID:  1,
-		Price:     50100 * SATOSHI,
-		Qty:       SATOSHI,
+		Price:     50100 * BTC_PRECISION,
+		Qty:       BTC_PRECISION,
 		Side:      Sell,
 		Type:      LimitOrder,
 		Timestamp: clock.NowUnixNano(),
@@ -201,24 +201,24 @@ func TestOrderBookGetters(t *testing.T) {
 	book.Asks.addOrder(askOrder)
 
 	// Check getters
-	if book.GetBestBid() != 49900*SATOSHI {
-		t.Errorf("Expected %d, got %d", 49900*SATOSHI, book.GetBestBid())
+	if book.GetBestBid() != 49900*BTC_PRECISION {
+		t.Errorf("Expected %d, got %d", 49900*BTC_PRECISION, book.GetBestBid())
 	}
-	if book.GetBestAsk() != 50100*SATOSHI {
-		t.Errorf("Expected %d, got %d", 50100*SATOSHI, book.GetBestAsk())
+	if book.GetBestAsk() != 50100*BTC_PRECISION {
+		t.Errorf("Expected %d, got %d", 50100*BTC_PRECISION, book.GetBestAsk())
 	}
 
-	expectedMid := int64((49900*SATOSHI + 50100*SATOSHI) / 2)
+	expectedMid := int64((49900*BTC_PRECISION + 50100*BTC_PRECISION) / 2)
 	if book.GetMidPrice() != expectedMid {
 		t.Errorf("Expected %d, got %d", expectedMid, book.GetMidPrice())
 	}
 
 	// Add last trade
 	book.LastTrade = &Trade{
-		Price: 50000 * SATOSHI,
+		Price: 50000 * BTC_PRECISION,
 	}
 
-	if book.GetLastPrice() != 50000*SATOSHI {
-		t.Errorf("Expected %d, got %d", 50000*SATOSHI, book.GetLastPrice())
+	if book.GetLastPrice() != 50000*BTC_PRECISION {
+		t.Errorf("Expected %d, got %d", 50000*BTC_PRECISION, book.GetLastPrice())
 	}
 }

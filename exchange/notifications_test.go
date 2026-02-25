@@ -21,7 +21,7 @@ func TestClientNotificationsOnPlaceOrder(t *testing.T) {
 		Side:        Buy,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, CENT_TICK),
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 	gateway.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: orderReq}
@@ -64,7 +64,7 @@ func TestClientNotificationsOnFill(t *testing.T) {
 		Side:        Sell,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, CENT_TICK),
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 	gateway1.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: sellReq}
@@ -84,7 +84,7 @@ func TestClientNotificationsOnFill(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        Market,
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: IOC,
 	}
 	gateway2.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: buyReq}
@@ -170,7 +170,7 @@ func TestClientNotificationsViaMarketData(t *testing.T) {
 		Side:        Sell,
 		Type:        LimitOrder,
 		Price:       50000,
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 	gateway1.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: sellReq}
@@ -181,7 +181,7 @@ func TestClientNotificationsViaMarketData(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        Market,
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: IOC,
 	}
 	gateway2.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: buyReq}
@@ -239,7 +239,7 @@ func TestClientNotificationsOnPartialFill(t *testing.T) {
 		Side:        Sell,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, DOLLAR_TICK),
-		Qty:         SATOSHI / 2,
+		Qty:         BTC_PRECISION / 2,
 		TimeInForce: GTC,
 	}
 	gateway1.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: sellReq}
@@ -251,7 +251,7 @@ func TestClientNotificationsOnPartialFill(t *testing.T) {
 		Side:        Buy,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, DOLLAR_TICK),
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 	gateway2.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: buyReq}
@@ -318,7 +318,7 @@ func TestClientNotificationsOnReject(t *testing.T) {
 		Side:        Buy,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, DOLLAR_TICK),
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 	gateway.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: orderReq}

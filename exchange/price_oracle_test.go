@@ -12,7 +12,7 @@ func TestMidPriceOracle_ReturnsZeroForUnmapped(t *testing.T) {
 
 func TestMidPriceOracle_ReturnsZeroForEmptyBook(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 	o := NewMidPriceOracle(ex)
 	o.MapSymbol("BTC", "BTC/USD")
 	if p := o.GetPrice("BTC"); p != 0 {
@@ -23,11 +23,11 @@ func TestMidPriceOracle_ReturnsZeroForEmptyBook(t *testing.T) {
 func TestMidPriceOracle_ReturnsMidPrice(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
 
 	book := ex.Books["BTC/USD"]
-	bid := &Order{ID: 1, ClientID: 1, Price: PriceUSD(49_000, DOLLAR_TICK), Qty: SATOSHI, Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
-	ask := &Order{ID: 2, ClientID: 1, Price: PriceUSD(51_000, DOLLAR_TICK), Qty: SATOSHI, Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
+	bid := &Order{ID: 1, ClientID: 1, Price: PriceUSD(49_000, DOLLAR_TICK), Qty: BTC_PRECISION, Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
+	ask := &Order{ID: 2, ClientID: 1, Price: PriceUSD(51_000, DOLLAR_TICK), Qty: BTC_PRECISION, Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano()}
 	book.Bids.addOrder(bid)
 	book.Asks.addOrder(ask)
 

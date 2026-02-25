@@ -6,7 +6,7 @@ import (
 
 func TestSpotLimitBuyLocksQuoteInSpotReserved(t *testing.T) {
 	ex := newPerpTestExchange()
-	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(spot)
 
 	gw := ex.ConnectClient(1, map[string]int64{"USD": USDAmount(100000)}, &FixedFee{})
@@ -15,7 +15,7 @@ func TestSpotLimitBuyLocksQuoteInSpotReserved(t *testing.T) {
 	price := PriceUSD(50000, DOLLAR_TICK)
 	req := Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
 		RequestID: 1, Symbol: "BTCUSD", Side: Buy, Type: LimitOrder,
-		Price: price, Qty: SATOSHI, TimeInForce: GTC, Visibility: Normal,
+		Price: price, Qty: BTC_PRECISION, TimeInForce: GTC, Visibility: Normal,
 	}}
 	gw.RequestCh <- req
 	resp := <-gw.ResponseCh
@@ -24,7 +24,7 @@ func TestSpotLimitBuyLocksQuoteInSpotReserved(t *testing.T) {
 	}
 
 	client := ex.Clients[1]
-	expectedReserved := (SATOSHI * price) / BTC_PRECISION
+	expectedReserved := (BTC_PRECISION * price) / BTC_PRECISION
 	if client.Reserved["USD"] != expectedReserved {
 		t.Errorf("SpotReserved USD = %d, want %d", client.Reserved["USD"], expectedReserved)
 	}
@@ -35,15 +35,15 @@ func TestSpotLimitBuyLocksQuoteInSpotReserved(t *testing.T) {
 
 func TestSpotLimitSellLocksBaseInSpotReserved(t *testing.T) {
 	ex := newPerpTestExchange()
-	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(spot)
 
-	gw := ex.ConnectClient(1, map[string]int64{"BTC": 2 * SATOSHI, "USD": USDAmount(10000)}, &FixedFee{})
+	gw := ex.ConnectClient(1, map[string]int64{"BTC": 2 * BTC_PRECISION, "USD": USDAmount(10000)}, &FixedFee{})
 	defer ex.Shutdown()
 
 	req := Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
 		RequestID: 1, Symbol: "BTCUSD", Side: Sell, Type: LimitOrder,
-		Price: PriceUSD(50000, DOLLAR_TICK), Qty: SATOSHI, TimeInForce: GTC, Visibility: Normal,
+		Price: PriceUSD(50000, DOLLAR_TICK), Qty: BTC_PRECISION, TimeInForce: GTC, Visibility: Normal,
 	}}
 	gw.RequestCh <- req
 	resp := <-gw.ResponseCh
@@ -52,8 +52,8 @@ func TestSpotLimitSellLocksBaseInSpotReserved(t *testing.T) {
 	}
 
 	client := ex.Clients[1]
-	if client.Reserved["BTC"] != SATOSHI {
-		t.Errorf("Reserved BTC = %d, want %d", client.Reserved["BTC"], SATOSHI)
+	if client.Reserved["BTC"] != BTC_PRECISION {
+		t.Errorf("Reserved BTC = %d, want %d", client.Reserved["BTC"], BTC_PRECISION)
 	}
 	if client.PerpReserved["USD"] != 0 {
 		t.Errorf("PerpReserved should be 0 for spot order")
@@ -62,7 +62,7 @@ func TestSpotLimitSellLocksBaseInSpotReserved(t *testing.T) {
 
 func TestPerpLimitOrderLocksInPerpReserved(t *testing.T) {
 	ex := newPerpTestExchange()
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(perp)
 
 	gw := ex.ConnectClient(1, nil, &FixedFee{})
@@ -70,11 +70,11 @@ func TestPerpLimitOrderLocksInPerpReserved(t *testing.T) {
 	defer ex.Shutdown()
 
 	price := PriceUSD(50000, DOLLAR_TICK)
-	initialMargin := (SATOSHI * price / BTC_PRECISION) * perp.MarginRate / 10000
+	initialMargin := (BTC_PRECISION * price / BTC_PRECISION) * perp.MarginRate / 10000
 
 	req := Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
 		RequestID: 1, Symbol: "BTC-PERP", Side: Buy, Type: LimitOrder,
-		Price: price, Qty: SATOSHI, TimeInForce: GTC, Visibility: Normal,
+		Price: price, Qty: BTC_PRECISION, TimeInForce: GTC, Visibility: Normal,
 	}}
 	gw.RequestCh <- req
 	resp := <-gw.ResponseCh
@@ -93,7 +93,7 @@ func TestPerpLimitOrderLocksInPerpReserved(t *testing.T) {
 
 func TestPerpCloseReleasesMarginAndSettlesPnL(t *testing.T) {
 	ex := newPerpTestExchange()
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(perp)
 
 	// Client 1: long BTC-PERP
@@ -110,14 +110,14 @@ func TestPerpCloseReleasesMarginAndSettlesPnL(t *testing.T) {
 	// Open: client 1 buys, client 2 sells (limit sell first as maker)
 	openSell := Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
 		RequestID: 1, Symbol: "BTC-PERP", Side: Sell, Type: LimitOrder,
-		Price: entryPrice, Qty: SATOSHI, TimeInForce: GTC, Visibility: Normal,
+		Price: entryPrice, Qty: BTC_PRECISION, TimeInForce: GTC, Visibility: Normal,
 	}}
 	gw2.RequestCh <- openSell
 	<-gw2.ResponseCh // accepted
 
 	openBuy := Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
 		RequestID: 2, Symbol: "BTC-PERP", Side: Buy, Type: LimitOrder,
-		Price: entryPrice, Qty: SATOSHI, TimeInForce: GTC, Visibility: Normal,
+		Price: entryPrice, Qty: BTC_PRECISION, TimeInForce: GTC, Visibility: Normal,
 	}}
 	gw1.RequestCh <- openBuy
 	<-gw1.ResponseCh // accepted
@@ -129,14 +129,14 @@ func TestPerpCloseReleasesMarginAndSettlesPnL(t *testing.T) {
 	// Now close: client 1 sells at higher price (profit)
 	closeSell := Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
 		RequestID: 3, Symbol: "BTC-PERP", Side: Sell, Type: LimitOrder,
-		Price: exitPrice, Qty: SATOSHI, TimeInForce: GTC, Visibility: Normal,
+		Price: exitPrice, Qty: BTC_PRECISION, TimeInForce: GTC, Visibility: Normal,
 	}}
 	gw1.RequestCh <- closeSell
 	<-gw1.ResponseCh // accepted
 
 	closeBuy := Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
 		RequestID: 4, Symbol: "BTC-PERP", Side: Buy, Type: LimitOrder,
-		Price: exitPrice, Qty: SATOSHI, TimeInForce: GTC, Visibility: Normal,
+		Price: exitPrice, Qty: BTC_PRECISION, TimeInForce: GTC, Visibility: Normal,
 	}}
 	gw2.RequestCh <- closeBuy
 	<-gw2.ResponseCh // accepted
@@ -144,7 +144,7 @@ func TestPerpCloseReleasesMarginAndSettlesPnL(t *testing.T) {
 	<-gw2.ResponseCh // fill for buy
 
 	// PnL for client 1 (long → closed): (exitPrice - entryPrice) * qty / precision
-	expectedPnL := (exitPrice - entryPrice) * SATOSHI / BTC_PRECISION
+	expectedPnL := (exitPrice - entryPrice) * BTC_PRECISION / BTC_PRECISION
 
 	client1 := ex.Clients[1]
 	startBalance := USDAmount(100000)
@@ -161,19 +161,19 @@ func TestPerpCloseReleasesMarginAndSettlesPnL(t *testing.T) {
 
 func TestCrossMarketIsolation(t *testing.T) {
 	ex := newPerpTestExchange()
-	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(spot)
 	ex.AddInstrument(perp)
 
-	gw := ex.ConnectClient(1, map[string]int64{"BTC": 2 * SATOSHI, "USD": USDAmount(200000)}, &FixedFee{})
+	gw := ex.ConnectClient(1, map[string]int64{"BTC": 2 * BTC_PRECISION, "USD": USDAmount(200000)}, &FixedFee{})
 	ex.AddPerpBalance(1, "USD", USDAmount(50000))
 	defer ex.Shutdown()
 
 	// Place spot order — should only affect spot wallet
 	spotReq := Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
 		RequestID: 1, Symbol: "BTCUSD", Side: Buy, Type: LimitOrder,
-		Price: PriceUSD(50000, DOLLAR_TICK), Qty: SATOSHI, TimeInForce: GTC, Visibility: Normal,
+		Price: PriceUSD(50000, DOLLAR_TICK), Qty: BTC_PRECISION, TimeInForce: GTC, Visibility: Normal,
 	}}
 	gw.RequestCh <- spotReq
 	resp := <-gw.ResponseCh
@@ -231,7 +231,7 @@ func TestTransferPerpToSpot(t *testing.T) {
 
 func TestPerpFundingUsesPerpWallet(t *testing.T) {
 	pm := NewPositionManager(&RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, SATOSHI, SATOSHI/100)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, BTC_PRECISION, BTC_PRECISION/100)
 
 	clients := map[uint64]*Client{
 		1: NewClient(1, &FixedFee{}),
@@ -239,8 +239,8 @@ func TestPerpFundingUsesPerpWallet(t *testing.T) {
 	clients[1].PerpBalances["USD"] = USDAmount(10000)
 	clients[1].Balances["USD"] = USDAmount(10000)
 
-	pm.UpdatePosition(1, "BTC-PERP", SATOSHI, PriceUSD(50000, SATOSHI), Buy)
-	perp.UpdateFundingRate(PriceUSD(50000, SATOSHI), PriceUSD(50100, SATOSHI))
+	pm.UpdatePosition(1, "BTC-PERP", BTC_PRECISION, PriceUSD(50000, BTC_PRECISION), Buy)
+	perp.UpdateFundingRate(PriceUSD(50000, BTC_PRECISION), PriceUSD(50100, BTC_PRECISION))
 
 	spotBefore := clients[1].Balances["USD"]
 	pm.SettleFunding(clients, perp, nil)
@@ -257,7 +257,7 @@ func TestPerpFundingUsesPerpWallet(t *testing.T) {
 
 func TestPerpOrderInsufficientPerpBalance(t *testing.T) {
 	ex := newPerpTestExchange()
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(perp)
 
 	// Give lots of SPOT balance but no PERP balance
@@ -266,7 +266,7 @@ func TestPerpOrderInsufficientPerpBalance(t *testing.T) {
 
 	req := Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
 		RequestID: 1, Symbol: "BTC-PERP", Side: Buy, Type: LimitOrder,
-		Price: PriceUSD(50000, DOLLAR_TICK), Qty: SATOSHI, TimeInForce: GTC, Visibility: Normal,
+		Price: PriceUSD(50000, DOLLAR_TICK), Qty: BTC_PRECISION, TimeInForce: GTC, Visibility: Normal,
 	}}
 	gw.RequestCh <- req
 	resp := <-gw.ResponseCh

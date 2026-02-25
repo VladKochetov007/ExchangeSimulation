@@ -35,7 +35,7 @@ func TestBalanceSnapshotEmpty(t *testing.T) {
 // TestBalanceSnapshotSpotOnly verifies snapshot with only spot balances
 func TestBalanceSnapshotSpotOnly(t *testing.T) {
 	client := NewClient(1, &FixedFee{})
-	client.Balances["BTC"] = 5 * SATOSHI
+	client.Balances["BTC"] = 5 * BTC_PRECISION
 	client.Balances["USD"] = 10000 * USD_PRECISION
 	client.Reserved["USD"] = 1000 * USD_PRECISION
 
@@ -58,16 +58,16 @@ func TestBalanceSnapshotSpotOnly(t *testing.T) {
 		t.Fatal("BTC balance not found")
 	}
 
-	if btcBalance.Total != 5*SATOSHI {
-		t.Errorf("Expected BTC total %d, got %d", 5*SATOSHI, btcBalance.Total)
+	if btcBalance.Total != 5*BTC_PRECISION {
+		t.Errorf("Expected BTC total %d, got %d", 5*BTC_PRECISION, btcBalance.Total)
 	}
 
 	if btcBalance.Reserved != 0 {
 		t.Errorf("Expected BTC reserved 0, got %d", btcBalance.Reserved)
 	}
 
-	if btcBalance.Available != 5*SATOSHI {
-		t.Errorf("Expected BTC available %d, got %d", 5*SATOSHI, btcBalance.Available)
+	if btcBalance.Available != 5*BTC_PRECISION {
+		t.Errorf("Expected BTC available %d, got %d", 5*BTC_PRECISION, btcBalance.Available)
 	}
 
 	// Find USD balance
@@ -143,9 +143,9 @@ func TestBalanceSnapshotMixed(t *testing.T) {
 	client := NewClient(1, &FixedFee{})
 
 	// Spot wallet
-	client.Balances["BTC"] = 10 * SATOSHI
-	client.Balances["ETH"] = 100 * SATOSHI
-	client.Reserved["BTC"] = 2 * SATOSHI
+	client.Balances["BTC"] = 10 * BTC_PRECISION
+	client.Balances["ETH"] = 100 * BTC_PRECISION
+	client.Reserved["BTC"] = 2 * BTC_PRECISION
 
 	// Perp wallet
 	client.PerpBalances["USD"] = 100000 * USD_PRECISION
@@ -154,7 +154,7 @@ func TestBalanceSnapshotMixed(t *testing.T) {
 
 	// Borrowed
 	client.Borrowed["USD"] = 5000 * USD_PRECISION
-	client.Borrowed["BTC"] = 1 * SATOSHI
+	client.Borrowed["BTC"] = 1 * BTC_PRECISION
 
 	snapshot := client.GetBalanceSnapshot(int64(4000000000))
 
@@ -177,8 +177,8 @@ func TestBalanceSnapshotMixed(t *testing.T) {
 		t.Errorf("Expected borrowed USD %d, got %d", 5000*USD_PRECISION, snapshot.Borrowed["USD"])
 	}
 
-	if snapshot.Borrowed["BTC"] != 1*SATOSHI {
-		t.Errorf("Expected borrowed BTC %d, got %d", 1*SATOSHI, snapshot.Borrowed["BTC"])
+	if snapshot.Borrowed["BTC"] != 1*BTC_PRECISION {
+		t.Errorf("Expected borrowed BTC %d, got %d", 1*BTC_PRECISION, snapshot.Borrowed["BTC"])
 	}
 }
 
@@ -191,9 +191,9 @@ func TestBalanceSnapshotAvailableCalculation(t *testing.T) {
 		total    int64
 		reserved int64
 	}{
-		{"BTC", 10 * SATOSHI, 3 * SATOSHI},
+		{"BTC", 10 * BTC_PRECISION, 3 * BTC_PRECISION},
 		{"USD", 100000 * USD_PRECISION, 25000 * USD_PRECISION},
-		{"ETH", 50 * SATOSHI, 0},
+		{"ETH", 50 * BTC_PRECISION, 0},
 		{"USDT", 75000 * USD_PRECISION, 75000 * USD_PRECISION}, // All reserved
 	}
 
@@ -237,7 +237,7 @@ func TestBalanceSnapshotBorrowedFiltering(t *testing.T) {
 
 	client.Borrowed["USD"] = 1000 * USD_PRECISION  // Should be included
 	client.Borrowed["BTC"] = 0                     // Should be filtered out
-	client.Borrowed["ETH"] = -100 * SATOSHI        // Should be filtered out (negative)
+	client.Borrowed["ETH"] = -100 * BTC_PRECISION        // Should be filtered out (negative)
 
 	snapshot := client.GetBalanceSnapshot(int64(6000000000))
 
@@ -295,15 +295,15 @@ func TestBalanceSnapshotClientID(t *testing.T) {
 // TestBalanceSnapshotImmutability verifies snapshot doesn't share state with client
 func TestBalanceSnapshotImmutability(t *testing.T) {
 	client := NewClient(1, &FixedFee{})
-	client.Balances["BTC"] = 10 * SATOSHI
+	client.Balances["BTC"] = 10 * BTC_PRECISION
 	client.Borrowed["USD"] = 1000 * USD_PRECISION
 
 	snapshot := client.GetBalanceSnapshot(int64(8000000000))
 
 	// Modify client balances after snapshot
-	client.Balances["BTC"] = 20 * SATOSHI
+	client.Balances["BTC"] = 20 * BTC_PRECISION
 	client.Borrowed["USD"] = 2000 * USD_PRECISION
-	client.Borrowed["ETH"] = 100 * SATOSHI
+	client.Borrowed["ETH"] = 100 * BTC_PRECISION
 
 	// Snapshot should be unchanged
 	var btcBal *AssetBalance
@@ -318,8 +318,8 @@ func TestBalanceSnapshotImmutability(t *testing.T) {
 		t.Fatal("BTC balance not found")
 	}
 
-	if btcBal.Total != 10*SATOSHI {
-		t.Errorf("Snapshot BTC modified: expected %d, got %d", 10*SATOSHI, btcBal.Total)
+	if btcBal.Total != 10*BTC_PRECISION {
+		t.Errorf("Snapshot BTC modified: expected %d, got %d", 10*BTC_PRECISION, btcBal.Total)
 	}
 
 	if snapshot.Borrowed["USD"] != 1000*USD_PRECISION {
@@ -335,7 +335,7 @@ func TestBalanceSnapshotImmutability(t *testing.T) {
 // TestBalanceSnapshotZeroReserved verifies zero reserved amounts are included
 func TestBalanceSnapshotZeroReserved(t *testing.T) {
 	client := NewClient(1, &FixedFee{})
-	client.Balances["BTC"] = 5 * SATOSHI
+	client.Balances["BTC"] = 5 * BTC_PRECISION
 	client.Reserved["BTC"] = 0 // Explicitly zero
 
 	snapshot := client.GetBalanceSnapshot(int64(9000000000))
@@ -360,7 +360,7 @@ func TestBalanceSnapshotLargePrecision(t *testing.T) {
 	client := NewClient(1, &FixedFee{})
 
 	// Large BTC amount (21 million BTC in satoshis)
-	maxBTC := int64(21_000_000) * SATOSHI
+	maxBTC := int64(21_000_000) * BTC_PRECISION
 	client.Balances["BTC"] = maxBTC
 
 	// Large USD amount (1 trillion USD in micro-USD)
@@ -408,9 +408,9 @@ func TestBalanceSnapshotMultipleAssets(t *testing.T) {
 
 	assets := []string{"BTC", "ETH", "SOL", "AVAX", "MATIC", "DOT", "ATOM", "NEAR"}
 	for i, asset := range assets {
-		client.Balances[asset] = int64(i+1) * SATOSHI
+		client.Balances[asset] = int64(i+1) * BTC_PRECISION
 		if i%2 == 0 {
-			client.Reserved[asset] = int64(i+1) * SATOSHI / 2
+			client.Reserved[asset] = int64(i+1) * BTC_PRECISION / 2
 		}
 	}
 

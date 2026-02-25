@@ -104,7 +104,7 @@ func TestMarginCalculationConsistency(t *testing.T) {
 
 func TestPerpPartialFillMarginAccounting(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(perp)
 
 	makerID := uint64(1)
@@ -165,7 +165,7 @@ func TestPerpPartialFillMarginAccounting(t *testing.T) {
 
 func TestPerpPositionFlipMarginAccounting(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(perp)
 
 	traderID := uint64(1)
@@ -254,7 +254,7 @@ func TestPerpPositionFlipMarginAccounting(t *testing.T) {
 func TestMultipleOrderCancellationsMarginAccounting(t *testing.T) {
 	t.Skip("Skipping due to channel close race condition - bounds checking verified in other tests")
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(perp)
 
 	clientID := uint64(1)
@@ -316,14 +316,14 @@ func TestEdgeCaseMarginCalculations(t *testing.T) {
 	}{
 		{"Min tick odd qty", PriceUSD(49999, DOLLAR_TICK) + DOLLAR_TICK, 33*BTC_PRECISION/100},
 		{"Prime number price", PriceUSD(49991, DOLLAR_TICK), 17*BTC_PRECISION/100},
-		{"Very small qty", PriceUSD(50000, DOLLAR_TICK), SATOSHI},
+		{"Very small qty", PriceUSD(50000, DOLLAR_TICK), BTC_PRECISION},
 		{"Large prime qty", PriceUSD(50000, DOLLAR_TICK), 137*BTC_PRECISION/100},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ex := NewExchange(10, &RealClock{})
-			perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+			perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 			ex.AddInstrument(perp)
 
 			makerID := uint64(1)

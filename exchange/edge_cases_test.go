@@ -70,7 +70,7 @@ func TestPlaceOrderInvalidPrice(t *testing.T) {
 		Side:        Buy,
 		Type:        LimitOrder,
 		Price:       50001,
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 
@@ -122,7 +122,7 @@ func TestPlaceOrderUnknownInstrument(t *testing.T) {
 		Side:        Buy,
 		Type:        LimitOrder,
 		Price:       50000,
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 
@@ -148,8 +148,8 @@ func TestPlaceOrderInsufficientBalanceBuy(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        LimitOrder,
-		Price:       PriceUSD(50000, SATOSHI),
-		Qty:         SATOSHI,
+		Price:       PriceUSD(50000, BTC_PRECISION),
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 
@@ -176,7 +176,7 @@ func TestPlaceOrderInsufficientBalanceSell(t *testing.T) {
 		Side:        Sell,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, CENT_TICK),
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 
@@ -203,8 +203,8 @@ func TestPlaceOrderMarketBuyInsufficientBalance(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Sell,
 		Type:        LimitOrder,
-		Price:       PriceUSD(50000, SATOSHI),
-		Qty:         SATOSHI,
+		Price:       PriceUSD(50000, BTC_PRECISION),
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 	ex.placeOrder(2, sellReq)
@@ -214,7 +214,7 @@ func TestPlaceOrderMarketBuyInsufficientBalance(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        Market,
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: IOC,
 	}
 
@@ -239,7 +239,7 @@ func TestCancelOrderDifferentClient(t *testing.T) {
 		Side:        Buy,
 		Type:        LimitOrder,
 		Price:       PriceUSD(50000, CENT_TICK),
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 	}
 
@@ -345,9 +345,9 @@ func TestSettleFundingWithMissingClient(t *testing.T) {
 
 	clients := make(map[uint64]*Client)
 
-	pm.UpdatePosition(1, "BTC-PERP", SATOSHI, 50000*SATOSHI, Buy)
+	pm.UpdatePosition(1, "BTC-PERP", BTC_PRECISION, 50000*BTC_PRECISION, Buy)
 
-	perp.UpdateFundingRate(50000*SATOSHI, 50100*SATOSHI)
+	perp.UpdateFundingRate(50000*BTC_PRECISION, 50100*BTC_PRECISION)
 
 	pm.SettleFunding(clients, perp, nil)
 }

@@ -11,7 +11,7 @@ func TestPercentageFeeInQuote(t *testing.T) {
 
 	exec := &Execution{
 		Price: PriceUSD(50000, DOLLAR_TICK),
-		Qty:   SATOSHI,
+		Qty:   BTC_PRECISION,
 	}
 
 	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD", BTC_PRECISION)
@@ -43,14 +43,14 @@ func TestPercentageFeeInBase(t *testing.T) {
 
 	exec := &Execution{
 		Price: PriceUSD(50000, DOLLAR_TICK),
-		Qty:   SATOSHI,
+		Qty:   BTC_PRECISION,
 	}
 
 	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD", USD_PRECISION)
 	if takerFee.Asset != "BTC" {
 		t.Errorf("Taker fee asset should be BTC, got %s", takerFee.Asset)
 	}
-	expectedTakerFee := int64((SATOSHI * 10) / BPS)
+	expectedTakerFee := int64((BTC_PRECISION * 10) / BPS)
 	if takerFee.Amount != expectedTakerFee {
 		t.Errorf("Taker fee should be %d, got %d", expectedTakerFee, takerFee.Amount)
 	}
@@ -64,7 +64,7 @@ func TestFixedFee(t *testing.T) {
 
 	exec := &Execution{
 		Price: PriceUSD(50000, DOLLAR_TICK),
-		Qty:   SATOSHI,
+		Qty:   BTC_PRECISION,
 	}
 
 	takerFee := fee.CalculateFee(exec, Buy, false, "BTC", "USD", USD_PRECISION)

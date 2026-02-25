@@ -4,7 +4,7 @@ import "testing"
 
 func setupBorrowingExchange() (*Exchange, *BorrowingManager) {
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(perp)
 
 	oracle := NewStaticPriceOracle(map[string]int64{

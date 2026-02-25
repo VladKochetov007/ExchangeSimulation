@@ -61,8 +61,8 @@ func TestPlaceOrderDirect(t *testing.T) {
 		Symbol:      "BTC/USD",
 		Side:        Buy,
 		Type:        LimitOrder,
-		Price:       PriceUSD(50000, SATOSHI),
-		Qty:         SATOSHI / 100, // 0.01 BTC
+		Price:       PriceUSD(50000, BTC_PRECISION),
+		Qty:         BTC_PRECISION / 100, // 0.01 BTC
 		TimeInForce: GTC,
 		Visibility:  Normal,
 	}
@@ -73,7 +73,7 @@ func TestPlaceOrderDirect(t *testing.T) {
 	}
 
 	client := ex.Clients[1]
-	notional := int64((orderReq.Qty * orderReq.Price) / SATOSHI)
+	notional := int64((orderReq.Qty * orderReq.Price) / BTC_PRECISION)
 	if client.Reserved["USD"] != notional {
 		t.Errorf("Should have reserved %d USD, got %d", notional, client.Reserved["USD"])
 	}
@@ -98,7 +98,7 @@ func TestMatchingAndSettlement(t *testing.T) {
 		Side:        Sell,
 		Type:        LimitOrder,
 		Price:       50000 * 100,
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 		Visibility:  Normal,
 	}
@@ -110,7 +110,7 @@ func TestMatchingAndSettlement(t *testing.T) {
 		Side:        Buy,
 		Type:        LimitOrder,
 		Price:       50000 * 100,
-		Qty:         SATOSHI,
+		Qty:         BTC_PRECISION,
 		TimeInForce: GTC,
 		Visibility:  Normal,
 	}
@@ -119,10 +119,10 @@ func TestMatchingAndSettlement(t *testing.T) {
 	client1 := ex.Clients[1]
 	client2 := ex.Clients[2]
 
-	if client1.Balances["BTC"] != SATOSHI {
+	if client1.Balances["BTC"] != BTC_PRECISION {
 		t.Errorf("Client 1 should have 1 BTC, got %d", client1.Balances["BTC"])
 	}
-	if client2.Balances["BTC"] != 9*SATOSHI {
+	if client2.Balances["BTC"] != 9*BTC_PRECISION {
 		t.Errorf("Client 2 should have 9 BTC, got %d", client2.Balances["BTC"])
 	}
 }

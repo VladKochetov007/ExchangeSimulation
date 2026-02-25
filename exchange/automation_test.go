@@ -9,7 +9,7 @@ import (
 // Both clients use zero-fee plans so arithmetic in tests is exact.
 func setupPerpExchange(client1PerpUSD, client2PerpUSD int64) (*Exchange, *PerpFutures) {
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(perp)
 
 	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
@@ -461,8 +461,8 @@ func TestCheckAndSettleFunding_SkipsWhenNotDue(t *testing.T) {
 // when the spot instrument exists but has no resting orders (no bid or ask).
 func TestMidPriceOracle_EmptyBookReturnsZero(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	spotInst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
-	perpInst := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	spotInst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perpInst := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(spotInst)
 	ex.AddInstrument(perpInst)
 
@@ -480,8 +480,8 @@ func TestMidPriceOracle_UpdatesWithNewOrders(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
 
-	spotInst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
-	perpInst := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
+	spotInst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perpInst := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
 	ex.AddInstrument(spotInst)
 	ex.AddInstrument(perpInst)
 
@@ -492,12 +492,12 @@ func TestMidPriceOracle_UpdatesWithNewOrders(t *testing.T) {
 
 	bid1 := &Order{
 		ID: 1, ClientID: 1,
-		Price: PriceUSD(49_000, DOLLAR_TICK), Qty: SATOSHI,
+		Price: PriceUSD(49_000, DOLLAR_TICK), Qty: BTC_PRECISION,
 		Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano(),
 	}
 	ask1 := &Order{
 		ID: 2, ClientID: 1,
-		Price: PriceUSD(51_000, DOLLAR_TICK), Qty: SATOSHI,
+		Price: PriceUSD(51_000, DOLLAR_TICK), Qty: BTC_PRECISION,
 		Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano(),
 	}
 	spotBook.Bids.addOrder(bid1)
@@ -514,12 +514,12 @@ func TestMidPriceOracle_UpdatesWithNewOrders(t *testing.T) {
 
 	bid2 := &Order{
 		ID: 3, ClientID: 1,
-		Price: PriceUSD(52_000, DOLLAR_TICK), Qty: SATOSHI,
+		Price: PriceUSD(52_000, DOLLAR_TICK), Qty: BTC_PRECISION,
 		Side: Buy, Type: LimitOrder, Timestamp: clock.NowUnixNano(),
 	}
 	ask2 := &Order{
 		ID: 4, ClientID: 1,
-		Price: PriceUSD(54_000, DOLLAR_TICK), Qty: SATOSHI,
+		Price: PriceUSD(54_000, DOLLAR_TICK), Qty: BTC_PRECISION,
 		Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano(),
 	}
 	spotBook.Bids.addOrder(bid2)
