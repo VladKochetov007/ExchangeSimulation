@@ -25,8 +25,9 @@ func TestSimulationSpeedup(t *testing.T) {
 	})
 
 	// Create automation
-	indexProvider := exchange.NewFixedIndexProvider()
-	indexProvider.SetPrice("BTC-PERP", exchange.PriceUSD(50000, exchange.CENT_TICK))
+	indexProvider := exchange.NewStaticPriceOracle(map[string]int64{
+		"BTC-PERP": exchange.PriceUSD(50000, exchange.CENT_TICK),
+	})
 
 	automation := exchange.NewExchangeAutomation(ex, exchange.AutomationConfig{
 		MarkPriceCalc:       exchange.NewMidPriceCalculator(),
