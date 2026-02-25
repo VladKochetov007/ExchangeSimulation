@@ -599,99 +599,16 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	// Close the TOCTOU window between handleClientRequests checking Running=true
-	// and CancelAllClientOrders running under e.mu. Since Running is set to false
-	// before CancelAllClientOrders is called (both operations are in ShutdownBootstrapActors),
-	// this check (while holding e.mu) is race-free: any placeOrder that arrives after
-	// CancelAllClientOrders completes will see Running=false and be silently discarded.
-	if gw := e.Gateways[clientID]; gw != nil {
-		if !gw.IsRunning() {
-			return Response{RequestID: req.RequestID, Success: false}
-		}
+	if reject := e.validatePlaceOrder(clientID, req); reject != nil {
+		return *reject
 	}
 
-	client := e.Clients[clientID]
-	if client == nil {
-		return rejectWithLog(req.RequestID, clientID, RejectUnknownClient, e.getLogger(req.Symbol), e.Clock)
-	}
-
-	book := e.Books[req.Symbol]
-	if book == nil {
-		return rejectWithLog(req.RequestID, clientID, RejectUnknownInstrument, e.getLogger(req.Symbol), e.Clock)
-	}
-
-	instrument := book.Instrument
-	precision := instrument.BasePrecision()
-	log := e.getLogger(req.Symbol)
-
-	if req.Type == LimitOrder && !instrument.ValidatePrice(req.Price) {
-		return rejectWithLog(req.RequestID, clientID, RejectInvalidPrice, log, e.Clock)
-	}
-	if !instrument.ValidateQty(req.Qty) {
-		return rejectWithLog(req.RequestID, clientID, RejectInvalidQty, log, e.Clock)
-	}
+	book, client, log := e.Books[req.Symbol], e.Clients[clientID], e.getLogger(req.Symbol)
 
 	e.NextOrderID++
-	orderID := e.NextOrderID
-	order := getOrder()
-	order.ID = orderID
-	order.ClientID = clientID
-	order.Side = req.Side
-	order.Type = req.Type
-	order.TimeInForce = req.TimeInForce
-	order.Price = req.Price
-	order.Qty = req.Qty
-	order.Visibility = req.Visibility
-	order.IcebergQty = req.IcebergQty
-	order.Status = Open
-	order.Timestamp = e.Clock.NowUnixNano()
-
-	switch req.Type {
-	case Market:
-		if instrument.IsPerp() {
-			perp := instrument.(*PerpFutures)
-			refPrice := book.GetMidPrice()
-			if refPrice == 0 && book.Asks.Best != nil {
-				refPrice = book.Asks.Best.Price
-			}
-			if refPrice == 0 && book.Bids.Best != nil {
-				refPrice = book.Bids.Best.Price
-			}
-			if refPrice > 0 {
-				estMargin := calcMargin(req.Qty, refPrice, perp.MarginRate, precision)
-				if client.PerpAvailable(instrument.QuoteAsset()) < estMargin {
-					return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
-				}
-			}
-		} else if req.Side == Buy {
-			if book.Asks.Best != nil {
-				maxCost := (req.Qty * book.Asks.Best.Price) / precision
-				if client.GetAvailable(instrument.QuoteAsset()) < maxCost {
-					return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
-				}
-			}
-		} else {
-			if client.GetAvailable(instrument.BaseAsset()) < req.Qty {
-				return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
-			}
-		}
-	case LimitOrder:
-		if instrument.IsPerp() {
-			perp := instrument.(*PerpFutures)
-			initialMargin := calcMargin(req.Qty, req.Price, perp.MarginRate, precision)
-			if !e.tryReserveOrBorrow(clientID, instrument.QuoteAsset(), initialMargin, client.ReservePerp, true) {
-				return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
-			}
-		} else if req.Side == Buy {
-			amount := (req.Qty * req.Price) / precision
-			if !e.tryReserveOrBorrow(clientID, instrument.QuoteAsset(), amount, client.Reserve, false) {
-				return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
-			}
-		} else {
-			if !e.tryReserveOrBorrow(clientID, instrument.BaseAsset(), req.Qty, client.Reserve, false) {
-				return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
-			}
-		}
+	order := newOrderFromRequest(clientID, e.NextOrderID, req, e.Clock.NowUnixNano())
+	if reject := e.reserveOrderFunds(client, book, order, req.RequestID, log); reject != nil {
+		return *reject
 	}
 
 	if log != nil {
@@ -699,55 +616,20 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	}
 
 	result := e.Matcher.Match(book.Bids, book.Asks, order)
-
 	if req.TimeInForce == FOK && !result.FullyFilled {
 		if req.Type == LimitOrder {
-			releaseOrderFunds(client, instrument, req.Side, req.Qty, req.Price)
+			releaseOrderFunds(client, book.Instrument, req.Side, req.Qty, req.Price)
 		}
 		return e.rejectOrder(order, req.RequestID, clientID, RejectFOKNotFilled, log)
 	}
 
-	affectedLevels := make(map[int64]Side)
-	for _, exec := range result.Executions {
-		if makerOrder := findOrderInBook(book, exec.MakerOrderID); makerOrder != nil {
-			affectedLevels[makerOrder.Price] = makerOrder.Side
-		}
-	}
-
+	levels := collectAffectedLevels(book, result.Executions)
 	e.processExecutions(book, result.Executions, order)
+	e.removeMakerOrders(book, result.Executions)
+	e.publishLevels(book, levels)
+	e.restOrReleaseOrder(client, book, order, req)
 
-	for _, exec := range result.Executions {
-		makerOrder := findOrderInBook(book, exec.MakerOrderID)
-		if makerOrder != nil && makerOrder.Status == Filled {
-			if makerOrder.Side == Buy {
-				book.Bids.cancelOrder(exec.MakerOrderID)
-			} else {
-				book.Asks.cancelOrder(exec.MakerOrderID)
-			}
-			e.Clients[exec.MakerClientID].RemoveOrder(exec.MakerOrderID)
-			putOrder(makerOrder)
-		}
-	}
-
-	for price, side := range affectedLevels {
-		e.publishBookUpdate(book, side, price)
-	}
-
-	if order.Status != Filled && req.Type == LimitOrder && req.TimeInForce == GTC {
-		if order.Side == Buy {
-			book.Bids.addOrder(order)
-			e.publishBookUpdate(book, Buy, order.Price)
-		} else {
-			book.Asks.addOrder(order)
-			e.publishBookUpdate(book, Sell, order.Price)
-		}
-		client.AddOrder(orderID)
-	} else {
-		releaseOrderFunds(client, instrument, order.Side, order.Qty-order.FilledQty, order.Price)
-		putOrder(order)
-	}
-
-	return Response{RequestID: req.RequestID, Success: true, Data: orderID}
+	return Response{RequestID: req.RequestID, Success: true, Data: e.NextOrderID}
 }
 
 func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
@@ -1146,39 +1028,11 @@ func (e *Exchange) settleSpotExecution(
 ) {
 	base, quote := book.Instrument.BaseAsset(), book.Instrument.QuoteAsset()
 	if takerOrder.Side == Buy {
-		taker.Release(quote, notional)
-		oldTQ, oldTB := taker.Balances[quote], taker.Balances[base]
-		taker.Balances[quote] -= notional + takerFee.Amount
-		taker.Balances[base] += exec.Qty
-		e.balanceTracker.LogBalanceChange(timestamp, exec.TakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
-			spotDelta(quote, oldTQ, taker.Balances[quote]),
-			spotDelta(base, oldTB, taker.Balances[base]),
-		})
-		maker.Release(base, exec.Qty)
-		oldMQ, oldMB := maker.Balances[quote], maker.Balances[base]
-		maker.Balances[quote] += notional - makerFee.Amount
-		maker.Balances[base] -= exec.Qty
-		e.balanceTracker.LogBalanceChange(timestamp, exec.MakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
-			spotDelta(quote, oldMQ, maker.Balances[quote]),
-			spotDelta(base, oldMB, maker.Balances[base]),
-		})
+		e.settleSpotBuyer(taker, exec.TakerClientID, book, base, quote, exec.Qty, notional, takerFee, timestamp)
+		e.settleSpotSeller(maker, exec.MakerClientID, book, base, quote, exec.Qty, notional, makerFee, timestamp)
 	} else {
-		taker.Release(base, exec.Qty)
-		oldTB, oldTQ := taker.Balances[base], taker.Balances[quote]
-		taker.Balances[base] -= exec.Qty
-		taker.Balances[quote] += notional - takerFee.Amount
-		e.balanceTracker.LogBalanceChange(timestamp, exec.TakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
-			spotDelta(base, oldTB, taker.Balances[base]),
-			spotDelta(quote, oldTQ, taker.Balances[quote]),
-		})
-		maker.Release(quote, notional)
-		oldMB, oldMQ := maker.Balances[base], maker.Balances[quote]
-		maker.Balances[base] += exec.Qty
-		maker.Balances[quote] -= notional + makerFee.Amount
-		e.balanceTracker.LogBalanceChange(timestamp, exec.MakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
-			spotDelta(base, oldMB, maker.Balances[base]),
-			spotDelta(quote, oldMQ, maker.Balances[quote]),
-		})
+		e.settleSpotSeller(taker, exec.TakerClientID, book, base, quote, exec.Qty, notional, takerFee, timestamp)
+		e.settleSpotBuyer(maker, exec.MakerClientID, book, base, quote, exec.Qty, notional, makerFee, timestamp)
 	}
 	e.recordFeeRevenue(quote, takerFee, makerFee, book, timestamp)
 }
@@ -1206,20 +1060,20 @@ type perpSideCtx struct {
 }
 
 // adjustPerpMargin adjusts margin reserves for one perp trade participant.
-// For market takers: reserves margin for newly opened position.
-// For limit orders: releases pre-reserved order margin on closing portion.
-// Always releases position margin for any closed portion.
+// Market takers reserve margin for the opened portion; limit orders release
+// pre-reserved order margin on the closing portion. Both release position
+// margin for any closed portion using the old entry price.
 func adjustPerpMargin(ctx perpSideCtx, execPrice, execQty int64, perp *PerpFutures, quote string, basePrecision int64) {
+	margin := func(qty, price int64) int64 { return calcMargin(qty, price, perp.MarginRate, basePrecision) }
 	if ctx.isMarket {
-		openedQty := execQty - ctx.closedQty
-		if openedQty > 0 {
-			ctx.client.ReservePerp(quote, calcMargin(openedQty, execPrice, perp.MarginRate, basePrecision))
+		if openedQty := execQty - ctx.closedQty; openedQty > 0 {
+			ctx.client.ReservePerp(quote, margin(openedQty, execPrice))
 		}
 	} else if ctx.closedQty > 0 {
-		ctx.client.ReleasePerp(quote, calcMargin(ctx.closedQty, ctx.orderPrice, perp.MarginRate, basePrecision))
+		ctx.client.ReleasePerp(quote, margin(ctx.closedQty, ctx.orderPrice))
 	}
 	if ctx.closedQty > 0 && ctx.delta.OldSize != 0 {
-		ctx.client.ReleasePerp(quote, calcMargin(ctx.closedQty, ctx.delta.OldEntryPrice, perp.MarginRate, basePrecision))
+		ctx.client.ReleasePerp(quote, margin(ctx.closedQty, ctx.delta.OldEntryPrice))
 	}
 }
 
@@ -1327,4 +1181,193 @@ func sendFillNotification(gw *ClientGateway, orderID, clientID, tradeID uint64, 
 			FeeAsset:  fee.Asset,
 		},
 	}
+}
+
+// validatePlaceOrder runs early guards for gateway, client, instrument, and price/qty.
+// Caller must hold e.mu.Lock().
+func (e *Exchange) validatePlaceOrder(clientID uint64, req *OrderRequest) *Response {
+	// Close the TOCTOU window: gateway IsRunning is checked here under e.mu to
+	// prevent races with CancelAllClientOrders during shutdown.
+	if gw := e.Gateways[clientID]; gw != nil && !gw.IsRunning() {
+		resp := Response{RequestID: req.RequestID, Success: false}
+		return &resp
+	}
+	log := e.getLogger(req.Symbol)
+	reject := func(reason RejectReason) *Response {
+		resp := rejectWithLog(req.RequestID, clientID, reason, log, e.Clock)
+		return &resp
+	}
+	if e.Clients[clientID] == nil {
+		return reject(RejectUnknownClient)
+	}
+	book := e.Books[req.Symbol]
+	if book == nil {
+		return reject(RejectUnknownInstrument)
+	}
+	if req.Type == LimitOrder && !book.Instrument.ValidatePrice(req.Price) {
+		return reject(RejectInvalidPrice)
+	}
+	if !book.Instrument.ValidateQty(req.Qty) {
+		return reject(RejectInvalidQty)
+	}
+	return nil
+}
+
+func newOrderFromRequest(clientID, orderID uint64, req *OrderRequest, timestamp int64) *Order {
+	order := getOrder()
+	order.ID = orderID
+	order.ClientID = clientID
+	order.Side = req.Side
+	order.Type = req.Type
+	order.TimeInForce = req.TimeInForce
+	order.Price = req.Price
+	order.Qty = req.Qty
+	order.Visibility = req.Visibility
+	order.IcebergQty = req.IcebergQty
+	order.Status = Open
+	order.Timestamp = timestamp
+	return order
+}
+
+// marketRefPrice returns the best available reference price for margin estimation,
+// falling back from mid to one-sided best bid/ask.
+func marketRefPrice(book *OrderBook) int64 {
+	if mid := book.GetMidPrice(); mid > 0 {
+		return mid
+	}
+	if book.Asks.Best != nil {
+		return book.Asks.Best.Price
+	}
+	if book.Bids.Best != nil {
+		return book.Bids.Best.Price
+	}
+	return 0
+}
+
+func checkMarketOrderFunds(client *Client, book *OrderBook, order *Order, precision int64) bool {
+	instrument := book.Instrument
+	if instrument.IsPerp() {
+		perp := instrument.(*PerpFutures)
+		refPrice := marketRefPrice(book)
+		return refPrice == 0 || client.PerpAvailable(instrument.QuoteAsset()) >= calcMargin(order.Qty, refPrice, perp.MarginRate, precision)
+	}
+	if order.Side == Buy {
+		if book.Asks.Best == nil {
+			return true
+		}
+		return client.GetAvailable(instrument.QuoteAsset()) >= (order.Qty*book.Asks.Best.Price)/precision
+	}
+	return client.GetAvailable(instrument.BaseAsset()) >= order.Qty
+}
+
+func (e *Exchange) reserveLimitOrderFunds(client *Client, instrument Instrument, order *Order, precision int64) bool {
+	if instrument.IsPerp() {
+		perp := instrument.(*PerpFutures)
+		margin := calcMargin(order.Qty, order.Price, perp.MarginRate, precision)
+		return e.tryReserveOrBorrow(order.ClientID, instrument.QuoteAsset(), margin, client.ReservePerp, true)
+	}
+	if order.Side == Buy {
+		amount := (order.Qty * order.Price) / precision
+		return e.tryReserveOrBorrow(order.ClientID, instrument.QuoteAsset(), amount, client.Reserve, false)
+	}
+	return e.tryReserveOrBorrow(order.ClientID, instrument.BaseAsset(), order.Qty, client.Reserve, false)
+}
+
+// reserveOrderFunds checks or reserves funds depending on order type.
+// Returns a rejection Response if funds are insufficient, nil otherwise.
+// Caller must hold e.mu.Lock().
+func (e *Exchange) reserveOrderFunds(client *Client, book *OrderBook, order *Order, requestID uint64, log Logger) *Response {
+	precision := book.Instrument.BasePrecision()
+	var ok bool
+	switch order.Type {
+	case Market:
+		ok = checkMarketOrderFunds(client, book, order, precision)
+	case LimitOrder:
+		ok = e.reserveLimitOrderFunds(client, book.Instrument, order, precision)
+	default:
+		return nil
+	}
+	if !ok {
+		resp := e.rejectOrder(order, requestID, order.ClientID, RejectInsufficientBalance, log)
+		return &resp
+	}
+	return nil
+}
+
+func collectAffectedLevels(book *OrderBook, executions []*Execution) map[int64]Side {
+	levels := make(map[int64]Side, len(executions))
+	for _, exec := range executions {
+		if makerOrder := findOrderInBook(book, exec.MakerOrderID); makerOrder != nil {
+			levels[makerOrder.Price] = makerOrder.Side
+		}
+	}
+	return levels
+}
+
+// removeMakerOrders removes fully filled maker orders from the book.
+// Caller must hold e.mu.Lock().
+func (e *Exchange) removeMakerOrders(book *OrderBook, executions []*Execution) {
+	for _, exec := range executions {
+		makerOrder := findOrderInBook(book, exec.MakerOrderID)
+		if makerOrder == nil || makerOrder.Status != Filled {
+			continue
+		}
+		if makerOrder.Side == Buy {
+			book.Bids.cancelOrder(exec.MakerOrderID)
+		} else {
+			book.Asks.cancelOrder(exec.MakerOrderID)
+		}
+		e.Clients[exec.MakerClientID].RemoveOrder(exec.MakerOrderID)
+		putOrder(makerOrder)
+	}
+}
+
+func (e *Exchange) publishLevels(book *OrderBook, levels map[int64]Side) {
+	for price, side := range levels {
+		e.publishBookUpdate(book, side, price)
+	}
+}
+
+// restOrReleaseOrder either rests the order as a GTC limit in the book or releases its funds.
+// Caller must hold e.mu.Lock().
+func (e *Exchange) restOrReleaseOrder(client *Client, book *OrderBook, order *Order, req *OrderRequest) {
+	if order.Status != Filled && req.Type == LimitOrder && req.TimeInForce == GTC {
+		if order.Side == Buy {
+			book.Bids.addOrder(order)
+			e.publishBookUpdate(book, Buy, order.Price)
+		} else {
+			book.Asks.addOrder(order)
+			e.publishBookUpdate(book, Sell, order.Price)
+		}
+		client.AddOrder(order.ID)
+	} else {
+		releaseOrderFunds(client, book.Instrument, order.Side, order.Qty-order.FilledQty, order.Price)
+		putOrder(order)
+	}
+}
+
+// settleSpotBuyer releases the buyer's quote reservation and settles balances.
+// Caller must hold e.mu.Lock().
+func (e *Exchange) settleSpotBuyer(client *Client, clientID uint64, book *OrderBook, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
+	oldBase, oldQuote := client.Balances[base], client.Balances[quote]
+	client.Release(quote, notional)
+	client.Balances[quote] -= notional + fee.Amount
+	client.Balances[base] += qty
+	e.balanceTracker.LogBalanceChange(timestamp, clientID, book.Symbol, "trade_settlement", []BalanceDelta{
+		spotDelta(base, oldBase, client.Balances[base]),
+		spotDelta(quote, oldQuote, client.Balances[quote]),
+	})
+}
+
+// settleSpotSeller releases the seller's base reservation and settles balances.
+// Caller must hold e.mu.Lock().
+func (e *Exchange) settleSpotSeller(client *Client, clientID uint64, book *OrderBook, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
+	oldBase, oldQuote := client.Balances[base], client.Balances[quote]
+	client.Release(base, qty)
+	client.Balances[base] -= qty
+	client.Balances[quote] += notional - fee.Amount
+	e.balanceTracker.LogBalanceChange(timestamp, clientID, book.Symbol, "trade_settlement", []BalanceDelta{
+		spotDelta(base, oldBase, client.Balances[base]),
+		spotDelta(quote, oldQuote, client.Balances[quote]),
+	})
 }
