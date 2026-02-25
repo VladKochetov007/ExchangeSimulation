@@ -4,8 +4,8 @@ package exchange
 // new homes in sub-packages after the package split.
 
 import (
-	ecircuit "exchange_sim/exchange/circuit"
 	ebook "exchange_sim/exchange/book"
+	ecircuit "exchange_sim/exchange/circuit_breaker"
 	emarketdata "exchange_sim/exchange/marketdata"
 	ematching "exchange_sim/exchange/matching"
 )
@@ -19,6 +19,6 @@ func putMDMsg(m *MarketDataMsg)        { emarketdata.PutMDMsg(m) }
 
 const haltForever = ecircuit.HaltForever
 
-func getExecution() *Execution   { return ematching.GetExecution() }
-func getMDMsg() *MarketDataMsg   { return emarketdata.GetMDMsg() }
+func getExecution() *Execution    { return ematching.GetExecution() }
+func getMDMsg() *MarketDataMsg    { return emarketdata.GetMDMsg() }
 func getLimit(price int64) *Limit { return ebook.GetLimit(price) }

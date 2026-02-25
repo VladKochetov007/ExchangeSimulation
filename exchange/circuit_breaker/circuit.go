@@ -1,4 +1,4 @@
-package circuit
+package circuit_breaker
 
 import (
 	"time"

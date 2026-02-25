@@ -1,9 +1,9 @@
 package exchange
 
 import (
-	ecircuit "exchange_sim/exchange/circuit"
-	eclock "exchange_sim/exchange/clock"
 	ebook "exchange_sim/exchange/book"
+	ecircuit "exchange_sim/exchange/circuit_breaker"
+	eclock "exchange_sim/exchange/clock"
 	efee "exchange_sim/exchange/fee"
 	einstrument "exchange_sim/exchange/instrument"
 	emarketdata "exchange_sim/exchange/marketdata"
