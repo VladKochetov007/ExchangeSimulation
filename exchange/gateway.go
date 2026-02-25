@@ -27,6 +27,19 @@ func NewClientGateway(clientID uint64) *ClientGateway {
 	return g
 }
 
+// NewClientGatewayFromChannels creates a ClientGateway backed by existing channels.
+// Used when wrapping channels (e.g. a delayed gateway) behind the ClientGateway interface.
+func NewClientGatewayFromChannels(clientID uint64, req chan Request, resp chan Response, md chan *MarketDataMsg) *ClientGateway {
+	g := &ClientGateway{
+		ClientID:   clientID,
+		RequestCh:  req,
+		ResponseCh: resp,
+		MarketData: md,
+	}
+	g.running.Store(true)
+	return g
+}
+
 func (g *ClientGateway) IsRunning() bool {
 	return g.running.Load()
 }
