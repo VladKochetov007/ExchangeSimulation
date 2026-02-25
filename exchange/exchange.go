@@ -217,16 +217,15 @@ func (e *Exchange) EnablePeriodicSnapshots(interval time.Duration) {
 	defer e.mu.Unlock()
 
 	if e.running {
-		// If already running, start the loop now
 		if e.snapshotInterval == 0 && interval > 0 {
-			go e.runSnapshotLoop(interval)
+			ticker := e.tickerFactory.NewTicker(interval)
+			go e.runSnapshotLoop(ticker)
 		}
 	}
 	e.snapshotInterval = interval
 }
 
-func (e *Exchange) runSnapshotLoop(interval time.Duration) {
-	ticker := e.tickerFactory.NewTicker(interval)
+func (e *Exchange) runSnapshotLoop(ticker Ticker) {
 	defer ticker.Stop()
 
 	for {
@@ -471,7 +470,8 @@ func (e *Exchange) ConnectClient(clientID uint64, initialBalances map[string]int
 	if !e.running {
 		e.running = true
 		if e.snapshotInterval > 0 {
-			go e.runSnapshotLoop(e.snapshotInterval)
+			ticker := e.tickerFactory.NewTicker(e.snapshotInterval)
+			go e.runSnapshotLoop(ticker)
 		}
 		if e.balanceSnapshotInterval > 0 {
 			e.balanceSnapshotStopCh = make(chan struct{})
