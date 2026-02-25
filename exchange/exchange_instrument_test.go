@@ -33,8 +33,8 @@ func TestListInstruments(t *testing.T) {
 	if len(ethBtc) != 1 {
 		t.Errorf("Expected 1 ETH/BTC instrument, got %d", len(ethBtc))
 	}
-	if ethBtc[0].Symbol != "ETHBTC" {
-		t.Errorf("Expected ETHBTC, got %s", ethBtc[0].Symbol)
+	if ethBtc[0].Symbol() != "ETHBTC" {
+		t.Errorf("Expected ETHBTC, got %s", ethBtc[0].Symbol())
 	}
 }
 

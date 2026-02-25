@@ -1137,15 +1137,6 @@ func (e *Exchange) publishBookUpdate(book *OrderBook, side Side, price int64) {
 	}
 }
 
-type InstrumentInfo struct {
-	Symbol     string
-	BaseAsset  string
-	QuoteAsset string
-	TickSize   int64
-	MinSize    int64
-	IsPerp     bool
-}
-
 // GetBestLiquidity returns best bid qty, best ask qty for a symbol, thread-safe.
 func (e *Exchange) GetBestLiquidity(symbol string) (bidQty, askQty int64) {
 	e.mu.RLock()
@@ -1164,11 +1155,11 @@ func (e *Exchange) GetBestLiquidity(symbol string) (bidQty, askQty int64) {
 	return bidQty, askQty
 }
 
-func (e *Exchange) ListInstruments(baseFilter, quoteFilter string) []InstrumentInfo {
+func (e *Exchange) ListInstruments(baseFilter, quoteFilter string) []Instrument {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	result := make([]InstrumentInfo, 0, len(e.Instruments))
+	result := make([]Instrument, 0, len(e.Instruments))
 	for _, inst := range e.Instruments {
 		if baseFilter != "" && inst.BaseAsset() != baseFilter {
 			continue
@@ -1176,14 +1167,7 @@ func (e *Exchange) ListInstruments(baseFilter, quoteFilter string) []InstrumentI
 		if quoteFilter != "" && inst.QuoteAsset() != quoteFilter {
 			continue
 		}
-		result = append(result, InstrumentInfo{
-			Symbol:     inst.Symbol(),
-			BaseAsset:  inst.BaseAsset(),
-			QuoteAsset: inst.QuoteAsset(),
-			TickSize:   inst.TickSize(),
-			MinSize:    inst.MinOrderSize(),
-			IsPerp:     inst.IsPerp(),
-		})
+		result = append(result, inst)
 	}
 	return result
 }
