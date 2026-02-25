@@ -206,7 +206,6 @@ func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpF
 
 // realizedPerpPnL calculates the realized PnL for a perp fill.
 // Only non-zero when the trade reduces or closes an existing position.
-// Returns PnL in quote asset satoshis (e.g., USD satoshis).
 // Prices must be in quote precision (e.g., USD_PRECISION), not base precision.
 func realizedPerpPnL(oldSize, oldEntryPrice, tradeQty, tradePrice int64, tradeSide Side, basePrecision int64) int64 {
 	if oldSize == 0 {
@@ -229,8 +228,8 @@ func realizedPerpPnL(oldSize, oldEntryPrice, tradeQty, tradePrice int64, tradeSi
 		sign = -1
 	}
 	// PnL formula: prices are in quotePrecision per full base asset
-	// closedQty is in base satoshis, priceDiff is in quote satoshis per full base
-	// Result is in quote satoshis
+	// closedQty is in base satoshis, priceDiff is in quote precision per full base
+	// Result is in quote precision
 	priceDiff := tradePrice - oldEntryPrice
 	return (closedQty * sign * priceDiff) / basePrecision
 }

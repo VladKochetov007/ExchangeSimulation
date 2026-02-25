@@ -13,7 +13,6 @@ type Client struct {
 	Borrowed          map[string]int64
 	OrderIDs          []uint64
 	FeePlan           FeeModel
-	VIPLevel          int
 	MakerVolume       int64
 	TakerVolume       int64
 	MarginMode        MarginMode
