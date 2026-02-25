@@ -66,11 +66,141 @@ When in doubt, **prefer designs that maximize user freedom and long-term extensi
 
 ## Code Quality
 
+### Naming
+
+Descriptive, domain-relevant names only.
+
+```go
+// bad
+x := 5
+f(a, b)
+closed := qty == 0
+
+// good
+basePrecision := instrument.BasePrecision()
+calculateMargin(orderQty, orderPrice)
+isPositionClosed := qty == 0
+```
+
+Types named by role, not implementation:
+
+```go
+// bad
+type Thing struct{}
+
+// good
+type OrderBook struct{}
+type ExecutionContext struct{}
+```
+
+### Function Size
+
+One function = one responsibility. Refactor hot loops and large conditionals into named helpers.
+
+```go
+// bad: 400+ line monolith
+func processExecutions(...) { ... }
+
+// good
+func processExecutions(...) {
+    for _, exec := range executions {
+        processPerpExecution(exec)
+        settleSpotExecution(exec)
+        logTrade(exec)
+    }
+}
+```
+
+Use context objects when the same parameters repeat across multiple calls. Avoid nesting deeper than 3 levels inside loops.
+
+### Repetition
+
+If the same expression appears twice, extract a function.
+
+```go
+// bad
+takerMargin := (qty * price / basePrecision) * rate / 10000
+makerMargin := (qty * price / basePrecision) * rate / 10000
+
+// good
+func calcMargin(qty, price, rate, basePrecision float64) float64 {
+    return (qty * price / basePrecision) * rate / 10000
+}
+takerMargin := calcMargin(qty, price, rate, basePrecision)
+makerMargin := calcMargin(qty, price, rate, basePrecision)
+```
+
+### Branching
+
+Delegate complex `if/else` chains to specialized functions.
+
+```go
+// bad: inline branching inside loop
+for _, exec := range executions {
+    if exec.IsPerp() {
+        // 50 lines...
+    } else {
+        // 50 more lines...
+    }
+}
+
+// good
+if instrument.IsPerp() {
+    processPerpExecution(exec)
+} else {
+    settleSpotExecution(exec)
+}
+```
+
+### Concurrency
+
+Keep critical sections short. Don't mix `atomic` and mutex locks on the same field.
+
+```go
+// bad: RWMutex with no actual read paths
+type MDPublisher struct { mu sync.RWMutex }
+
+// good
+type MDPublisher struct { mu sync.Mutex }
+```
+
+### Logging
+
+Logging belongs outside core computation logic. One generic helper per log event type — not duplicated per taker/maker/side.
+
+```go
+// bad: duplicated inline for each side
+log.LogEvent(ts, takerID, "OrderFill", takerFill)
+log.LogEvent(ts, makerID, "OrderFill", makerFill)
+
+// good
+func logOrderFill(log Logger, ts int64, clientID uint32, order *Order, exec *Execution, fee Fee) {
+    log.LogEvent(ts, clientID, "OrderFill", map[string]any{ ... })
+}
+```
+
+Side-effect functions must be explicit about the state they change.
+
+### Performance
+
+Avoid allocations in hot loops. Prefer pointers for large structs in performance-critical paths. Don't micro-optimize prematurely; YAGNI applies here too.
+
 ### Comments
+
 **Only write comments for**:
 - Complex algorithms that aren't immediately obvious
 - Non-obvious workarounds for known issues/bugs
-- Critical "why" explanations that code cannot express
+- Critical "why" explanations that code cannot express — not "what"
+
+```go
+// bad
+// calculate PnL for closed trades
+pnl := realizedPerpPnL(...)
+
+// good
+// Use old entry price to correctly account for PnL on position reduction
+pnl := realizedPerpPnL(...)
+```
 
 **99% of code should be self-explanatory through**:
 - Clear, descriptive naming
