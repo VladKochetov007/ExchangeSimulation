@@ -60,21 +60,18 @@ func (c *WeightedMidPriceCalculator) Calculate(book *ebook.OrderBook) int64 {
 // The index is an external spot reference that an attacker cannot move by
 // trading the perp book alone.
 
-// BinanceMarkPrice implements the Binance perpetuals mark price model.
-//
-//	mark = median(index, best_bid, best_ask)
-//
+// MedianMarkPrice marks at the median of index, best bid, and best ask.
 // Requires moving two of three inputs to manipulate.
-type BinanceMarkPrice struct {
+type MedianMarkPrice struct {
 	index  etypes.PriceOracle
 	symbol string
 }
 
-func NewBinanceMarkPrice(symbol string, index etypes.PriceOracle) *BinanceMarkPrice {
-	return &BinanceMarkPrice{symbol: symbol, index: index}
+func NewMedianMarkPrice(symbol string, index etypes.PriceOracle) *MedianMarkPrice {
+	return &MedianMarkPrice{symbol: symbol, index: index}
 }
 
-func (c *BinanceMarkPrice) Calculate(book *ebook.OrderBook) int64 {
+func (c *MedianMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 	indexPrice := c.index.GetPrice(c.symbol)
 
 	var bid, ask int64
@@ -95,31 +92,28 @@ func (c *BinanceMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 	return median3(bid, ask, indexPrice)
 }
 
-// BitMEXMarkPrice implements the BitMEX fair price mark model.
-//
-//	mark = index + EMA(perp_mid - index)
-//
+// EMAMarkPrice marks at index + EMA(perp_mid - index).
 // The EMA smooths transient basis noise. windowSamples is the effective EMA
 // window (e.g. 600 for 30 min at 3s sampling).
-type BitMEXMarkPrice struct {
+type EMAMarkPrice struct {
 	alpha    int64 // 2/(N+1) * 10000, fixed-point
 	emaBasis int64
 	index    etypes.PriceOracle
 	symbol   string
 }
 
-func NewBitMEXMarkPrice(symbol string, index etypes.PriceOracle, windowSamples int) *BitMEXMarkPrice {
+func NewEMAMarkPrice(symbol string, index etypes.PriceOracle, windowSamples int) *EMAMarkPrice {
 	if windowSamples < 1 {
 		windowSamples = 1
 	}
-	return &BitMEXMarkPrice{
+	return &EMAMarkPrice{
 		alpha:  20000 / int64(windowSamples+1),
 		index:  index,
 		symbol: symbol,
 	}
 }
 
-func (c *BitMEXMarkPrice) Calculate(book *ebook.OrderBook) int64 {
+func (c *EMAMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 	indexPrice := c.index.GetPrice(c.symbol)
 	if indexPrice == 0 {
 		return book.GetMidPrice()
@@ -140,13 +134,9 @@ func (c *BitMEXMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 	return indexPrice + c.emaBasis
 }
 
-// BybitMarkPrice implements the Bybit mark price model.
-//
-//	mark = index + clamp(EMA(perp_mid - index), -band, +band)
-//
-// Adds a hard clamp so the mark can never drift more than bandBps/2 away from
-// the index. bandBps is typically the initial margin rate in bps.
-type BybitMarkPrice struct {
+// ClampedEMAMarkPrice marks at index + clamp(EMA(perp_mid - index), -band, +band).
+// The hard clamp prevents the mark from drifting more than bandBps/2 from the index.
+type ClampedEMAMarkPrice struct {
 	alpha    int64
 	emaBasis int64
 	bandBps  int64 // half-band = bandBps/2 * index / 10000
@@ -154,11 +144,11 @@ type BybitMarkPrice struct {
 	symbol   string
 }
 
-func NewBybitMarkPrice(symbol string, index etypes.PriceOracle, windowSamples int, bandBps int64) *BybitMarkPrice {
+func NewClampedEMAMarkPrice(symbol string, index etypes.PriceOracle, windowSamples int, bandBps int64) *ClampedEMAMarkPrice {
 	if windowSamples < 1 {
 		windowSamples = 1
 	}
-	return &BybitMarkPrice{
+	return &ClampedEMAMarkPrice{
 		alpha:   20000 / int64(windowSamples+1),
 		bandBps: bandBps,
 		index:   index,
@@ -166,7 +156,7 @@ func NewBybitMarkPrice(symbol string, index etypes.PriceOracle, windowSamples in
 	}
 }
 
-func (c *BybitMarkPrice) Calculate(book *ebook.OrderBook) int64 {
+func (c *ClampedEMAMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 	indexPrice := c.index.GetPrice(c.symbol)
 	if indexPrice == 0 {
 		return book.GetMidPrice()
@@ -195,12 +185,9 @@ func (c *BybitMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 	return indexPrice + c.emaBasis
 }
 
-// DydxMarkPrice implements the dYdX oracle-anchored mark price model.
-//
-//	mark = index + clamp(TWAP(perp_mid - index, window), -band, +band)
-//
-// Uses a TWAP of the premium over a configurable window of samples.
-type DydxMarkPrice struct {
+// TWAPMarkPrice marks at index + clamp(TWAP(perp_mid - index, window), -band, +band).
+// Uses a rolling TWAP of the basis over a configurable sample window.
+type TWAPMarkPrice struct {
 	window  []int64 // rolling window of recent basis samples
 	pos     int
 	size    int
@@ -209,11 +196,11 @@ type DydxMarkPrice struct {
 	symbol  string
 }
 
-func NewDydxMarkPrice(symbol string, index etypes.PriceOracle, windowSamples int, bandBps int64) *DydxMarkPrice {
+func NewTWAPMarkPrice(symbol string, index etypes.PriceOracle, windowSamples int, bandBps int64) *TWAPMarkPrice {
 	if windowSamples < 1 {
 		windowSamples = 1
 	}
-	return &DydxMarkPrice{
+	return &TWAPMarkPrice{
 		window:  make([]int64, windowSamples),
 		bandBps: bandBps,
 		index:   index,
@@ -221,7 +208,7 @@ func NewDydxMarkPrice(symbol string, index etypes.PriceOracle, windowSamples int
 	}
 }
 
-func (c *DydxMarkPrice) Calculate(book *ebook.OrderBook) int64 {
+func (c *TWAPMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 	indexPrice := c.index.GetPrice(c.symbol)
 	if indexPrice == 0 {
 		return book.GetMidPrice()
