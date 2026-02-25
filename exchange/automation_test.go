@@ -457,27 +457,26 @@ func TestCheckAndSettleFunding_SkipsWhenNotDue(t *testing.T) {
 	}
 }
 
-// TestSpotIndexProvider_EmptyBookReturnsZero verifies that GetIndexPrice returns 0
+// TestMidPriceOracle_EmptyBookReturnsZero verifies that GetPrice returns 0
 // when the spot instrument exists but has no resting orders (no bid or ask).
-func TestSpotIndexProvider_EmptyBookReturnsZero(t *testing.T) {
+func TestMidPriceOracle_EmptyBookReturnsZero(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	spotInst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
 	perpInst := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI)
 	ex.AddInstrument(spotInst)
 	ex.AddInstrument(perpInst)
 
-	provider := NewSpotIndexProvider(ex)
-	provider.MapPerpToSpot("BTC-PERP", "BTC/USD")
+	oracle := NewMidPriceOracle(ex)
+	oracle.MapSymbol("BTC-PERP", "BTC/USD")
 
-	price := provider.GetIndexPrice("BTC-PERP", 0)
-	if price != 0 {
+	if price := oracle.GetPrice("BTC-PERP"); price != 0 {
 		t.Errorf("expected 0 from empty spot book, got %d", price)
 	}
 }
 
-// TestSpotIndexProvider_UpdatesWithNewOrders verifies that after a new best bid/ask
-// is posted, GetIndexPrice returns the updated mid-price reflecting the new market.
-func TestSpotIndexProvider_UpdatesWithNewOrders(t *testing.T) {
+// TestMidPriceOracle_UpdatesWithNewOrders verifies that after a new best bid/ask
+// is posted, GetPrice returns the updated mid-price reflecting the new market.
+func TestMidPriceOracle_UpdatesWithNewOrders(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
 
@@ -486,8 +485,8 @@ func TestSpotIndexProvider_UpdatesWithNewOrders(t *testing.T) {
 	ex.AddInstrument(spotInst)
 	ex.AddInstrument(perpInst)
 
-	provider := NewSpotIndexProvider(ex)
-	provider.MapPerpToSpot("BTC-PERP", "BTC/USD")
+	oracle := NewMidPriceOracle(ex)
+	oracle.MapSymbol("BTC-PERP", "BTC/USD")
 
 	spotBook := ex.Books["BTC/USD"]
 
@@ -504,13 +503,12 @@ func TestSpotIndexProvider_UpdatesWithNewOrders(t *testing.T) {
 	spotBook.Bids.addOrder(bid1)
 	spotBook.Asks.addOrder(ask1)
 
-	firstMid := provider.GetIndexPrice("BTC-PERP", clock.NowUnixNano())
+	firstMid := oracle.GetPrice("BTC-PERP")
 	expectedFirst := (PriceUSD(49_000, DOLLAR_TICK) + PriceUSD(51_000, DOLLAR_TICK)) / 2
 	if firstMid != expectedFirst {
 		t.Errorf("first mid-price: expected %d, got %d", expectedFirst, firstMid)
 	}
 
-	// Replace orders with a tighter spread at a higher price level.
 	spotBook.Bids.cancelOrder(1)
 	spotBook.Asks.cancelOrder(2)
 
@@ -527,7 +525,7 @@ func TestSpotIndexProvider_UpdatesWithNewOrders(t *testing.T) {
 	spotBook.Bids.addOrder(bid2)
 	spotBook.Asks.addOrder(ask2)
 
-	secondMid := provider.GetIndexPrice("BTC-PERP", clock.NowUnixNano())
+	secondMid := oracle.GetPrice("BTC-PERP")
 	expectedSecond := (PriceUSD(52_000, DOLLAR_TICK) + PriceUSD(54_000, DOLLAR_TICK)) / 2
 	if secondMid != expectedSecond {
 		t.Errorf("updated mid-price: expected %d, got %d", expectedSecond, secondMid)

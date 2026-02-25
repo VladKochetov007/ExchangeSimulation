@@ -143,11 +143,6 @@ func TestWeightedMidPriceCalculator(t *testing.T) {
 	// Weighted mid should favor bid side (more liquidity)
 	price := calc.Calculate(book)
 
-	// Formula: (bidPrice * askQty + askPrice * bidQty) / (bidQty + askQty)
-	// bidQty = 2 * SATOSHI, askQty = 1 * SATOSHI
-	// = (49900 * SATOSHI * 1 * SATOSHI + 50100 * SATOSHI * 2 * SATOSHI) / (3 * SATOSHI)
-	// = (49900 * SATOSHI^2 + 100200 * SATOSHI^2) / (3 * SATOSHI)
-	// = 150100 * SATOSHI / 3 = 50033.33... * SATOSHI
 	bidQty := int64(2 * SATOSHI)
 	askQty := int64(1 * SATOSHI)
 	bidPrice := int64(49900 * SATOSHI)

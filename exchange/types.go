@@ -513,11 +513,11 @@ type BorrowingConfig struct {
 	CollateralFactors map[string]float64
 	MaxBorrowPerAsset map[string]int64
 
-	PriceOracle CollateralPriceOracle
+	PriceOracle PriceOracle
 }
 
-type CollateralPriceOracle interface {
-	GetPrice(asset string) int64
+type PriceOracle interface {
+	GetPrice(symbol string) int64
 }
 
 type IsolatedPosition struct {

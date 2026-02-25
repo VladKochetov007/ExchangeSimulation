@@ -2,25 +2,25 @@ package exchange
 
 import "testing"
 
-func TestSimplePriceOracle_ReturnsZeroForUnmapped(t *testing.T) {
+func TestMidPriceOracle_ReturnsZeroForUnmapped(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	o := NewSimplePriceOracle(ex)
+	o := NewMidPriceOracle(ex)
 	if p := o.GetPrice("BTC"); p != 0 {
 		t.Errorf("expected 0 for unmapped asset, got %d", p)
 	}
 }
 
-func TestSimplePriceOracle_ReturnsZeroForEmptyBook(t *testing.T) {
+func TestMidPriceOracle_ReturnsZeroForEmptyBook(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
-	o := NewSimplePriceOracle(ex)
-	o.MapAssetToSymbol("BTC", "BTC/USD")
+	o := NewMidPriceOracle(ex)
+	o.MapSymbol("BTC", "BTC/USD")
 	if p := o.GetPrice("BTC"); p != 0 {
 		t.Errorf("expected 0 for empty book, got %d", p)
 	}
 }
 
-func TestSimplePriceOracle_ReturnsMidPrice(t *testing.T) {
+func TestMidPriceOracle_ReturnsMidPrice(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, SATOSHI))
@@ -31,12 +31,11 @@ func TestSimplePriceOracle_ReturnsMidPrice(t *testing.T) {
 	book.Bids.addOrder(bid)
 	book.Asks.addOrder(ask)
 
-	o := NewSimplePriceOracle(ex)
-	o.MapAssetToSymbol("BTC", "BTC/USD")
+	o := NewMidPriceOracle(ex)
+	o.MapSymbol("BTC", "BTC/USD")
 
-	mid := o.GetPrice("BTC")
 	expected := (PriceUSD(49_000, DOLLAR_TICK) + PriceUSD(51_000, DOLLAR_TICK)) / 2
-	if mid != expected {
+	if mid := o.GetPrice("BTC"); mid != expected {
 		t.Errorf("mid price: expected %d, got %d", expected, mid)
 	}
 }

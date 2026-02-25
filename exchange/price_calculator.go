@@ -58,7 +58,7 @@ func (c *WeightedMidPriceCalculator) Calculate(book *OrderBook) int64 {
 
 // --- Index-anchored mark price models ---
 //
-// All manipulation-resistant models below require an IndexPriceProvider.
+// All manipulation-resistant models below require an PriceOracle.
 // The index is an external spot reference (e.g. aggregated spot prices from
 // multiple venues) that an attacker cannot move by trading the perp book alone.
 // Manipulation then requires moving two independent inputs simultaneously.
@@ -71,16 +71,16 @@ func (c *WeightedMidPriceCalculator) Calculate(book *OrderBook) int64 {
 // so an attacker must control both sides of the perp book simultaneously.
 // Binance style.
 type BinanceMarkPrice struct {
-	index  IndexPriceProvider
+	index  PriceOracle
 	symbol string
 }
 
-func NewBinanceMarkPrice(symbol string, index IndexPriceProvider) *BinanceMarkPrice {
+func NewBinanceMarkPrice(symbol string, index PriceOracle) *BinanceMarkPrice {
 	return &BinanceMarkPrice{symbol: symbol, index: index}
 }
 
 func (c *BinanceMarkPrice) Calculate(book *OrderBook) int64 {
-	indexPrice := c.index.GetIndexPrice(c.symbol, 0)
+	indexPrice := c.index.GetPrice(c.symbol)
 
 	var bid, ask int64
 	if book.Bids.Best != nil {
@@ -111,11 +111,11 @@ func (c *BinanceMarkPrice) Calculate(book *OrderBook) int64 {
 type BitMEXMarkPrice struct {
 	alpha    int64 // 2/(N+1) * 10000, fixed-point
 	emaBasis int64
-	index    IndexPriceProvider
+	index    PriceOracle
 	symbol   string
 }
 
-func NewBitMEXMarkPrice(symbol string, index IndexPriceProvider, windowSamples int) *BitMEXMarkPrice {
+func NewBitMEXMarkPrice(symbol string, index PriceOracle, windowSamples int) *BitMEXMarkPrice {
 	if windowSamples < 1 {
 		windowSamples = 1
 	}
@@ -127,7 +127,7 @@ func NewBitMEXMarkPrice(symbol string, index IndexPriceProvider, windowSamples i
 }
 
 func (c *BitMEXMarkPrice) Calculate(book *OrderBook) int64 {
-	indexPrice := c.index.GetIndexPrice(c.symbol, 0)
+	indexPrice := c.index.GetPrice(c.symbol)
 	if indexPrice == 0 {
 		return book.GetMidPrice()
 	}
@@ -158,11 +158,11 @@ type BybitMarkPrice struct {
 	alpha    int64
 	emaBasis int64
 	bandBps  int64 // half-band = bandBps/2 * index / 10000
-	index    IndexPriceProvider
+	index    PriceOracle
 	symbol   string
 }
 
-func NewBybitMarkPrice(symbol string, index IndexPriceProvider, windowSamples int, bandBps int64) *BybitMarkPrice {
+func NewBybitMarkPrice(symbol string, index PriceOracle, windowSamples int, bandBps int64) *BybitMarkPrice {
 	if windowSamples < 1 {
 		windowSamples = 1
 	}
@@ -175,7 +175,7 @@ func NewBybitMarkPrice(symbol string, index IndexPriceProvider, windowSamples in
 }
 
 func (c *BybitMarkPrice) Calculate(book *OrderBook) int64 {
-	indexPrice := c.index.GetIndexPrice(c.symbol, 0)
+	indexPrice := c.index.GetPrice(c.symbol)
 	if indexPrice == 0 {
 		return book.GetMidPrice()
 	}
@@ -215,11 +215,11 @@ type DydxMarkPrice struct {
 	pos     int
 	size    int
 	bandBps int64
-	index   IndexPriceProvider
+	index   PriceOracle
 	symbol  string
 }
 
-func NewDydxMarkPrice(symbol string, index IndexPriceProvider, windowSamples int, bandBps int64) *DydxMarkPrice {
+func NewDydxMarkPrice(symbol string, index PriceOracle, windowSamples int, bandBps int64) *DydxMarkPrice {
 	if windowSamples < 1 {
 		windowSamples = 1
 	}
@@ -232,7 +232,7 @@ func NewDydxMarkPrice(symbol string, index IndexPriceProvider, windowSamples int
 }
 
 func (c *DydxMarkPrice) Calculate(book *OrderBook) int64 {
-	indexPrice := c.index.GetIndexPrice(c.symbol, 0)
+	indexPrice := c.index.GetPrice(c.symbol)
 	if indexPrice == 0 {
 		return book.GetMidPrice()
 	}

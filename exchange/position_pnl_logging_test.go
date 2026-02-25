@@ -475,7 +475,7 @@ func TestMarkPriceLogging(t *testing.T) {
 	// Start automation with mark price updates
 	automation := NewExchangeAutomation(ex, AutomationConfig{
 		MarkPriceCalc:       NewMidPriceCalculator(),
-		IndexProvider:       &FixedIndexProvider{prices: map[string]int64{"BTC-PERP": PriceUSD(50000, DOLLAR_TICK)}},
+		IndexProvider:       NewStaticPriceOracle(map[string]int64{"BTC-PERP": PriceUSD(50000, DOLLAR_TICK)}),
 		PriceUpdateInterval: 50 * time.Millisecond, // Faster for testing
 	})
 

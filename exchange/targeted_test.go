@@ -5,13 +5,13 @@ import (
 	"time"
 )
 
-// --- SimplePriceOracle: symbol mapped but no book ---
+// --- MidPriceOracle: symbol mapped but no book ---
 
-func TestSimplePriceOracle_MappedSymbolNoBook(t *testing.T) {
+func TestMidPriceOracle_MappedSymbolNoBook(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	// Do NOT add the instrument — no book for "BTC/USD"
-	o := NewSimplePriceOracle(ex)
-	o.MapAssetToSymbol("BTC", "BTC/USD")
+	o := NewMidPriceOracle(ex)
+	o.MapSymbol("BTC", "BTC/USD")
 	// symbol is set, but book doesn't exist → book == nil → return 0
 	price := o.GetPrice("BTC")
 	if price != 0 {

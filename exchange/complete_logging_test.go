@@ -68,7 +68,7 @@ func TestFundingRateLogging(t *testing.T) {
 	// Start automation with funding rate updates
 	automation := NewExchangeAutomation(ex, AutomationConfig{
 		MarkPriceCalc:       NewMidPriceCalculator(),
-		IndexProvider:       &FixedIndexProvider{prices: map[string]int64{"BTC-PERP": PriceUSD(50000, DOLLAR_TICK)}},
+		IndexProvider:       NewStaticPriceOracle(map[string]int64{"BTC-PERP": PriceUSD(50000, DOLLAR_TICK)}),
 		PriceUpdateInterval: 50 * time.Millisecond,
 	})
 
@@ -326,7 +326,7 @@ func TestCompleteLoggingIntegration(t *testing.T) {
 	// Start automation to get funding rates
 	automation := NewExchangeAutomation(ex, AutomationConfig{
 		MarkPriceCalc:       NewMidPriceCalculator(),
-		IndexProvider:       &FixedIndexProvider{prices: map[string]int64{"BTC-PERP": PriceUSD(50000, DOLLAR_TICK)}},
+		IndexProvider:       NewStaticPriceOracle(map[string]int64{"BTC-PERP": PriceUSD(50000, DOLLAR_TICK)}),
 		PriceUpdateInterval: 50 * time.Millisecond,
 	})
 
