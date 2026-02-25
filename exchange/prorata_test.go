@@ -2,15 +2,6 @@ package exchange
 
 import "testing"
 
-func TestProRata_Priority(t *testing.T) {
-	m := NewProRataMatcher()
-	p := m.Priority()
-	// Price is still the primary sort key; pro-rata is the within-level distribution method.
-	if p.Primary != PriorityPrice {
-		t.Errorf("expected PriorityPrice as primary, got %v", p.Primary)
-	}
-}
-
 func TestProRata_SingleRestingOrderFullFill(t *testing.T) {
 	m := NewProRataMatcher()
 	bids := newBook(Buy)

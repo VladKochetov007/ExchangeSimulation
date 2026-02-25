@@ -278,8 +278,6 @@ func (m *mockCBEngine) Match(bidBook, askBook *Book, order *Order) *MatchResult 
 	return m.result
 }
 
-func (m *mockCBEngine) Priority() Priority { return Priority{Primary: PriorityPrice} }
-
 func makeOrderBook(symbol string, lastPrice, bidPrice, askPrice int64) (*OrderBook, map[string]*OrderBook) {
 	ob := &OrderBook{
 		Symbol: symbol,
@@ -413,14 +411,6 @@ func TestCBMatcher_SellBlockedByFarBid(t *testing.T) {
 	}
 	if result.FullyFilled {
 		t.Error("blocked result must be empty")
-	}
-}
-
-func TestCBMatcher_PriorityDelegatesToInner(t *testing.T) {
-	inner := &mockCBEngine{}
-	m := NewCircuitBreakerMatcher(inner, &PercentBandCircuitBreaker{BandBps: 500}, nil, &RealClock{})
-	if m.Priority() != inner.Priority() {
-		t.Error("Priority must delegate to inner")
 	}
 }
 

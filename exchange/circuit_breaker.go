@@ -243,10 +243,6 @@ func (m *CircuitBreakerMatcher) ClearHalt(symbol string) {
 	delete(m.haltUntil, symbol)
 }
 
-func (m *CircuitBreakerMatcher) Priority() Priority {
-	return m.Inner.Priority()
-}
-
 func (m *CircuitBreakerMatcher) Match(bidBook, askBook *Book, order *Order) *MatchResult {
 	sym, known := m.symbolFor(bidBook)
 

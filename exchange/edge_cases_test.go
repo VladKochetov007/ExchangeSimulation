@@ -2,21 +2,6 @@ package exchange
 
 import "testing"
 
-func TestMatchingPriority(t *testing.T) {
-	matcher := NewDefaultMatcher()
-	priority := matcher.Priority()
-
-	if priority.Primary != PriorityPrice {
-		t.Errorf("Expected primary priority to be PriorityPrice, got %v", priority.Primary)
-	}
-	if priority.Secondary != PriorityVisibility {
-		t.Errorf("Expected secondary priority to be PriorityVisibility, got %v", priority.Secondary)
-	}
-	if priority.Tertiary != PriorityTime {
-		t.Errorf("Expected tertiary priority to be PriorityTime, got %v", priority.Tertiary)
-	}
-}
-
 func TestMinFunction(t *testing.T) {
 	if min(10, 20) != 10 {
 		t.Errorf("min(10, 20) should be 10")

@@ -526,18 +526,3 @@ type IsolatedPosition struct {
 	Borrowed   map[string]int64
 }
 
-type PriorityType uint8
-
-const (
-	PriorityPrice PriorityType = iota
-	PriorityTime
-	PrioritySize
-	PriorityVisibility
-	PriorityProRata
-)
-
-type Priority struct {
-	Primary   PriorityType
-	Secondary PriorityType
-	Tertiary  PriorityType
-}

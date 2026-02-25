@@ -7,27 +7,14 @@ type MatchResult struct {
 
 type MatchingEngine interface {
 	Match(bidBook, askBook *Book, incomingOrder *Order) *MatchResult
-	Priority() Priority
 }
 
 type DefaultMatcher struct {
-	priority Priority
-	clock    Clock
+	clock Clock
 }
 
 func NewDefaultMatcher() *DefaultMatcher {
-	return &DefaultMatcher{
-		priority: Priority{
-			Primary:   PriorityPrice,
-			Secondary: PriorityVisibility,
-			Tertiary:  PriorityTime,
-		},
-		clock: &RealClock{},
-	}
-}
-
-func (m *DefaultMatcher) Priority() Priority {
-	return m.priority
+	return &DefaultMatcher{clock: &RealClock{}}
 }
 
 func (m *DefaultMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) *MatchResult {
@@ -138,10 +125,6 @@ type ProRataMatcher struct {
 
 func NewProRataMatcher() *ProRataMatcher {
 	return &ProRataMatcher{clock: &RealClock{}}
-}
-
-func (m *ProRataMatcher) Priority() Priority {
-	return Priority{Primary: PriorityPrice}
 }
 
 func (m *ProRataMatcher) Match(bidBook, askBook *Book, incomingOrder *Order) *MatchResult {
