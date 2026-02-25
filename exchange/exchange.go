@@ -798,7 +798,7 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 		sendFillNotification(e.Gateways[exec.TakerClientID], exec.TakerOrderID, exec.TakerClientID, tradeID, exec, takerOrder.Side, takerFee, takerOrder.FilledQty >= takerOrder.Qty)
 		logFill(log, timestamp, exec.TakerClientID, exec.TakerOrderID, exec, takerOrder.Side, takerOrder.FilledQty, takerOrder.Qty, tradeID, takerFee, "taker")
 
-		makerOrder := findOrderInBook(book, exec.MakerOrderID)
+		makerOrder := book.findOrder(exec.MakerOrderID)
 		makerFull := makerOrder != nil && makerOrder.FilledQty >= makerOrder.Qty
 		sendFillNotification(e.Gateways[exec.MakerClientID], exec.MakerOrderID, exec.MakerClientID, tradeID, exec, exec.MakerSide, makerFee, makerFull)
 		logFill(log, timestamp, exec.MakerClientID, exec.MakerOrderID, exec, exec.MakerSide, exec.MakerFilledQty, exec.MakerTotalQty, tradeID, makerFee, "maker")
@@ -1037,12 +1037,6 @@ func (e *Exchange) settleSpotExecution(
 	e.recordFeeRevenue(quote, takerFee, makerFee, book, timestamp)
 }
 
-func findOrderInBook(book *OrderBook, orderID uint64) *Order {
-	if o := book.Bids.Orders[orderID]; o != nil {
-		return o
-	}
-	return book.Asks.Orders[orderID]
-}
 
 func calcMargin(qty, price, rate, precision int64) int64 {
 	return (qty * price / precision) * rate / 10000
@@ -1297,7 +1291,7 @@ func (e *Exchange) reserveOrderFunds(client *Client, book *OrderBook, order *Ord
 func collectAffectedLevels(book *OrderBook, executions []*Execution) map[int64]Side {
 	levels := make(map[int64]Side, len(executions))
 	for _, exec := range executions {
-		if makerOrder := findOrderInBook(book, exec.MakerOrderID); makerOrder != nil {
+		if makerOrder := book.findOrder(exec.MakerOrderID); makerOrder != nil {
 			levels[makerOrder.Price] = makerOrder.Side
 		}
 	}
@@ -1308,7 +1302,7 @@ func collectAffectedLevels(book *OrderBook, executions []*Execution) map[int64]S
 // Caller must hold e.mu.Lock().
 func (e *Exchange) removeMakerOrders(book *OrderBook, executions []*Execution) {
 	for _, exec := range executions {
-		makerOrder := findOrderInBook(book, exec.MakerOrderID)
+		makerOrder := book.findOrder(exec.MakerOrderID)
 		if makerOrder == nil || makerOrder.Status != Filled {
 			continue
 		}

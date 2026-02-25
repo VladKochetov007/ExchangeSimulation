@@ -119,6 +119,13 @@ func (b *Book) updateBest(limit *Limit) {
 	}
 }
 
+func (ob *OrderBook) findOrder(orderID uint64) *Order {
+	if o := ob.Bids.Orders[orderID]; o != nil {
+		return o
+	}
+	return ob.Asks.Orders[orderID]
+}
+
 func (b *Book) getSnapshot() []PriceLevel {
 	levels := make([]PriceLevel, 0, 20)
 	for l := b.ActiveHead; l != nil && len(levels) < 20; l = l.Next {
