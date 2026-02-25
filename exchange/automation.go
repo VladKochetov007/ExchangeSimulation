@@ -326,7 +326,7 @@ func (a *ExchangeAutomation) checkLiquidations(symbol string, perp *PerpFutures,
 		// Debug logging before liquidation
 		if marginRatio < perp.MaintenanceMarginRate {
 			if log := a.exchange.getLogger("_global"); log != nil {
-				log.LogEvent(timestamp, clientID, "liquidation_check", map[string]interface{}{
+				log.LogEvent(timestamp, clientID, "liquidation_check", map[string]any{
 					"timestamp":       timestamp,
 					"client_id":       clientID,
 					"symbol":          symbol,
