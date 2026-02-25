@@ -416,19 +416,8 @@ func (e *Exchange) CancelAllClientOrders(clientID uint64) int {
 	for _, t := range targets {
 		order := t.order
 		book := t.book
-		instrument := book.Instrument
-		precision := instrument.BasePrecision()
 		remainingQty := order.Qty - order.FilledQty
-
-		if instrument.IsPerp() {
-			perp := instrument.(*PerpFutures)
-			remainingMargin := (remainingQty * order.Price / precision) * perp.MarginRate / 10000
-			client.ReleasePerp(instrument.QuoteAsset(), remainingMargin)
-		} else if order.Side == Buy {
-			client.Release(instrument.QuoteAsset(), (remainingQty*order.Price)/precision)
-		} else {
-			client.Release(instrument.BaseAsset(), remainingQty)
-		}
+		releaseOrderFunds(client, book.Instrument, order.Side, remainingQty, order.Price)
 
 		if order.Side == Buy {
 			book.Bids.cancelOrder(order.ID)
@@ -623,20 +612,12 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 
 	client := e.Clients[clientID]
 	if client == nil {
-		resp := Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownClient}
-		if log := e.getLogger(req.Symbol); log != nil {
-			log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-		}
-		return resp
+		return rejectWithLog(req.RequestID, clientID, RejectUnknownClient, e.getLogger(req.Symbol), e.Clock)
 	}
 
 	book := e.Books[req.Symbol]
 	if book == nil {
-		resp := Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownInstrument}
-		if log := e.getLogger(req.Symbol); log != nil {
-			log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-		}
-		return resp
+		return rejectWithLog(req.RequestID, clientID, RejectUnknownInstrument, e.getLogger(req.Symbol), e.Clock)
 	}
 
 	instrument := book.Instrument
@@ -644,18 +625,10 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	log := e.getLogger(req.Symbol)
 
 	if req.Type == LimitOrder && !instrument.ValidatePrice(req.Price) {
-		resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInvalidPrice}
-		if log != nil {
-			log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-		}
-		return resp
+		return rejectWithLog(req.RequestID, clientID, RejectInvalidPrice, log, e.Clock)
 	}
 	if !instrument.ValidateQty(req.Qty) {
-		resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInvalidQty}
-		if log != nil {
-			log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-		}
-		return resp
+		return rejectWithLog(req.RequestID, clientID, RejectInvalidQty, log, e.Clock)
 	}
 
 	e.NextOrderID++
@@ -687,114 +660,36 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 			if refPrice > 0 {
 				estMargin := (req.Qty * refPrice / precision) * perp.MarginRate / 10000
 				if client.PerpAvailable(instrument.QuoteAsset()) < estMargin {
-					putOrder(order)
-					resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-					if log != nil {
-						log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-					}
-					return resp
+					return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
 				}
 			}
 		} else if req.Side == Buy {
 			if book.Asks.Best != nil {
 				maxCost := (req.Qty * book.Asks.Best.Price) / precision
 				if client.GetAvailable(instrument.QuoteAsset()) < maxCost {
-					putOrder(order)
-					resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-					if log != nil {
-						log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-					}
-					return resp
+					return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
 				}
 			}
 		} else {
 			if client.GetAvailable(instrument.BaseAsset()) < req.Qty {
-				putOrder(order)
-				resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-				if log != nil {
-					log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-				}
-				return resp
+				return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
 			}
 		}
 	case LimitOrder:
 		if instrument.IsPerp() {
 			perp := instrument.(*PerpFutures)
 			initialMargin := (req.Qty * req.Price / precision) * perp.MarginRate / 10000
-			if !client.ReservePerp(instrument.QuoteAsset(), initialMargin) {
-				if e.BorrowingMgr != nil {
-					e.mu.Unlock()
-					borrowed, _ := e.BorrowingMgr.AutoBorrowForPerpTrade(clientID, instrument.QuoteAsset(), initialMargin)
-					e.mu.Lock()
-					if borrowed && client.ReservePerp(instrument.QuoteAsset(), initialMargin) {
-						// Successfully borrowed and reserved
-					} else {
-						putOrder(order)
-						resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-						if log != nil {
-							log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-						}
-						return resp
-					}
-				} else {
-					putOrder(order)
-					resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-					if log != nil {
-						log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-					}
-					return resp
-				}
+			if !e.tryReserveOrBorrow(clientID, instrument.QuoteAsset(), initialMargin, client.ReservePerp, true) {
+				return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
 			}
 		} else if req.Side == Buy {
 			amount := (req.Qty * req.Price) / precision
-			if !client.Reserve(instrument.QuoteAsset(), amount) {
-				if e.BorrowingMgr != nil {
-					e.mu.Unlock()
-					borrowed, _ := e.BorrowingMgr.AutoBorrowForSpotTrade(clientID, instrument.QuoteAsset(), amount)
-					e.mu.Lock()
-					if borrowed && client.Reserve(instrument.QuoteAsset(), amount) {
-						// Successfully borrowed and reserved
-					} else {
-						putOrder(order)
-						resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-						if log != nil {
-							log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-						}
-						return resp
-					}
-				} else {
-					putOrder(order)
-					resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-					if log != nil {
-						log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-					}
-					return resp
-				}
+			if !e.tryReserveOrBorrow(clientID, instrument.QuoteAsset(), amount, client.Reserve, false) {
+				return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
 			}
 		} else {
-			if !client.Reserve(instrument.BaseAsset(), req.Qty) {
-				if e.BorrowingMgr != nil {
-					e.mu.Unlock()
-					borrowed, _ := e.BorrowingMgr.AutoBorrowForSpotTrade(clientID, instrument.BaseAsset(), req.Qty)
-					e.mu.Lock()
-					if borrowed && client.Reserve(instrument.BaseAsset(), req.Qty) {
-						// Successfully borrowed and reserved
-					} else {
-						putOrder(order)
-						resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-						if log != nil {
-							log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-						}
-						return resp
-					}
-				} else {
-					putOrder(order)
-					resp := Response{RequestID: req.RequestID, Success: false, Error: RejectInsufficientBalance}
-					if log != nil {
-						log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-					}
-					return resp
-				}
+			if !e.tryReserveOrBorrow(clientID, instrument.BaseAsset(), req.Qty, client.Reserve, false) {
+				return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
 			}
 		}
 	}
@@ -807,31 +702,14 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 
 	if req.TimeInForce == FOK && !result.FullyFilled {
 		if req.Type == LimitOrder {
-			if instrument.IsPerp() {
-				perp := instrument.(*PerpFutures)
-				initMargin := (req.Qty * req.Price / precision) * perp.MarginRate / 10000
-				client.ReleasePerp(instrument.QuoteAsset(), initMargin)
-			} else if req.Side == Buy {
-				client.Release(instrument.QuoteAsset(), (req.Qty*req.Price)/precision)
-			} else {
-				client.Release(instrument.BaseAsset(), req.Qty)
-			}
+			releaseOrderFunds(client, instrument, req.Side, req.Qty, req.Price)
 		}
-		putOrder(order)
-		resp := Response{RequestID: req.RequestID, Success: false, Error: RejectFOKNotFilled}
-		if log != nil {
-			log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
-		}
-		return resp
+		return e.rejectOrder(order, req.RequestID, clientID, RejectFOKNotFilled, log)
 	}
 
 	affectedLevels := make(map[int64]Side)
 	for _, exec := range result.Executions {
-		makerOrder := book.Bids.Orders[exec.MakerOrderID]
-		if makerOrder == nil {
-			makerOrder = book.Asks.Orders[exec.MakerOrderID]
-		}
-		if makerOrder != nil {
+		if makerOrder := findOrderInBook(book, exec.MakerOrderID); makerOrder != nil {
 			affectedLevels[makerOrder.Price] = makerOrder.Side
 		}
 	}
@@ -839,10 +717,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	e.processExecutions(book, result.Executions, order)
 
 	for _, exec := range result.Executions {
-		makerOrder := book.Bids.Orders[exec.MakerOrderID]
-		if makerOrder == nil {
-			makerOrder = book.Asks.Orders[exec.MakerOrderID]
-		}
+		makerOrder := findOrderInBook(book, exec.MakerOrderID)
 		if makerOrder != nil && makerOrder.Status == Filled {
 			if makerOrder.Side == Buy {
 				book.Bids.cancelOrder(exec.MakerOrderID)
@@ -868,19 +743,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 		}
 		client.AddOrder(orderID)
 	} else {
-		if order.FilledQty < order.Qty {
-			remaining := order.Qty - order.FilledQty
-			if instrument.IsPerp() {
-				perp := instrument.(*PerpFutures)
-				remainingMargin := (remaining * order.Price / precision) * perp.MarginRate / 10000
-				client.ReleasePerp(instrument.QuoteAsset(), remainingMargin)
-			} else if order.Side == Buy {
-				remainingNotional := (remaining * order.Price) / precision
-				client.Release(instrument.QuoteAsset(), remainingNotional)
-			} else {
-				client.Release(instrument.BaseAsset(), remaining)
-			}
-		}
+		releaseOrderFunds(client, instrument, order.Side, order.Qty-order.FilledQty, order.Price)
 		putOrder(order)
 	}
 
@@ -933,17 +796,8 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 	}
 
 	instrument := book.Instrument
-	precision := instrument.BasePrecision()
 	remainingQty := order.Qty - order.FilledQty
-	if instrument.IsPerp() {
-		perp := instrument.(*PerpFutures)
-		remainingMargin := (remainingQty * order.Price / precision) * perp.MarginRate / 10000
-		client.ReleasePerp(instrument.QuoteAsset(), remainingMargin)
-	} else if order.Side == Buy {
-		client.Release(instrument.QuoteAsset(), (remainingQty*order.Price)/precision)
-	} else {
-		client.Release(instrument.BaseAsset(), remainingQty)
-	}
+	releaseOrderFunds(client, instrument, order.Side, remainingQty, order.Price)
 	if order.Side == Buy {
 		book.Bids.cancelOrder(req.OrderID)
 		e.publishBookUpdate(book, Buy, order.Price)
@@ -1019,7 +873,7 @@ func (e *Exchange) unsubscribe(clientID uint64, req *QueryRequest) Response {
 func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order) {
 	instrument := book.Instrument
 	timestamp := e.Clock.NowUnixNano()
-	basePrecision := instrument.BasePrecision() // For fee/notional calculations
+	basePrecision := instrument.BasePrecision()
 	positionChanged := false
 	log := e.getLogger(book.Symbol)
 
@@ -1132,89 +986,10 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 				perpDelta(quote, oldMakerBalance, maker.PerpBalances[quote]),
 			})
 
-			e.ExchangeBalance.FeeRevenue[quote] += takerFee.Amount + makerFee.Amount
-
-			// Log fee revenue per trade (real exchanges track this)
-			if globalLog := e.getLogger("_global"); globalLog != nil {
-				globalLog.LogEvent(timestamp, 0, "fee_revenue", FeeRevenueEvent{
-					Timestamp: timestamp,
-					Symbol:    book.Symbol,
-					TradeID:   book.SeqNum,
-					TakerFee:  takerFee.Amount,
-					MakerFee:  makerFee.Amount,
-					Asset:     quote,
-				})
-			}
-
+			e.recordFeeRevenue(quote, takerFee, makerFee, book, timestamp)
 			positionChanged = true
-		} else if takerOrder.Side == Buy {
-			taker.Release(instrument.QuoteAsset(), notional)
-			oldTakerQuote := taker.Balances[instrument.QuoteAsset()]
-			oldTakerBase := taker.Balances[instrument.BaseAsset()]
-			taker.Balances[instrument.QuoteAsset()] -= notional + takerFee.Amount
-			taker.Balances[instrument.BaseAsset()] += exec.Qty
-			e.balanceTracker.LogBalanceChange(timestamp, exec.TakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
-				spotDelta(instrument.QuoteAsset(), oldTakerQuote, taker.Balances[instrument.QuoteAsset()]),
-				spotDelta(instrument.BaseAsset(), oldTakerBase, taker.Balances[instrument.BaseAsset()]),
-			})
-
-			maker.Release(instrument.BaseAsset(), exec.Qty)
-			oldMakerQuote := maker.Balances[instrument.QuoteAsset()]
-			oldMakerBase := maker.Balances[instrument.BaseAsset()]
-			maker.Balances[instrument.QuoteAsset()] += notional - makerFee.Amount
-			maker.Balances[instrument.BaseAsset()] -= exec.Qty
-			e.balanceTracker.LogBalanceChange(timestamp, exec.MakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
-				spotDelta(instrument.QuoteAsset(), oldMakerQuote, maker.Balances[instrument.QuoteAsset()]),
-				spotDelta(instrument.BaseAsset(), oldMakerBase, maker.Balances[instrument.BaseAsset()]),
-			})
-
-			e.ExchangeBalance.FeeRevenue[instrument.QuoteAsset()] += takerFee.Amount + makerFee.Amount
-
-			// Log fee revenue for spot buy trades
-			if globalLog := e.getLogger("_global"); globalLog != nil {
-				globalLog.LogEvent(timestamp, 0, "fee_revenue", FeeRevenueEvent{
-					Timestamp: timestamp,
-					Symbol:    book.Symbol,
-					TradeID:   book.SeqNum,
-					TakerFee:  takerFee.Amount,
-					MakerFee:  makerFee.Amount,
-					Asset:     instrument.QuoteAsset(),
-				})
-			}
 		} else {
-			taker.Release(instrument.BaseAsset(), exec.Qty)
-			oldTakerBase := taker.Balances[instrument.BaseAsset()]
-			oldTakerQuote := taker.Balances[instrument.QuoteAsset()]
-			taker.Balances[instrument.BaseAsset()] -= exec.Qty
-			taker.Balances[instrument.QuoteAsset()] += notional - takerFee.Amount
-			e.balanceTracker.LogBalanceChange(timestamp, exec.TakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
-				spotDelta(instrument.BaseAsset(), oldTakerBase, taker.Balances[instrument.BaseAsset()]),
-				spotDelta(instrument.QuoteAsset(), oldTakerQuote, taker.Balances[instrument.QuoteAsset()]),
-			})
-
-			maker.Release(instrument.QuoteAsset(), notional)
-			oldMakerBase := maker.Balances[instrument.BaseAsset()]
-			oldMakerQuote := maker.Balances[instrument.QuoteAsset()]
-			maker.Balances[instrument.BaseAsset()] += exec.Qty
-			maker.Balances[instrument.QuoteAsset()] -= notional + makerFee.Amount
-			e.balanceTracker.LogBalanceChange(timestamp, exec.MakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
-				spotDelta(instrument.BaseAsset(), oldMakerBase, maker.Balances[instrument.BaseAsset()]),
-				spotDelta(instrument.QuoteAsset(), oldMakerQuote, maker.Balances[instrument.QuoteAsset()]),
-			})
-
-			e.ExchangeBalance.FeeRevenue[instrument.QuoteAsset()] += takerFee.Amount + makerFee.Amount
-
-			// Log fee revenue for spot sell trades
-			if globalLog := e.getLogger("_global"); globalLog != nil {
-				globalLog.LogEvent(timestamp, 0, "fee_revenue", FeeRevenueEvent{
-					Timestamp: timestamp,
-					Symbol:    book.Symbol,
-					TradeID:   book.SeqNum,
-					TakerFee:  takerFee.Amount,
-					MakerFee:  makerFee.Amount,
-					Asset:     instrument.QuoteAsset(),
-				})
-			}
+			e.settleSpotExecution(book, exec, takerOrder, taker, maker, takerFee, makerFee, notional, timestamp)
 		}
 
 		taker.TakerVolume += notional
@@ -1275,10 +1050,7 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 
 		makerGw := e.Gateways[exec.MakerClientID]
 		if makerGw != nil {
-			makerOrder := book.Bids.Orders[exec.MakerOrderID]
-			if makerOrder == nil {
-				makerOrder = book.Asks.Orders[exec.MakerOrderID]
-			}
+			makerOrder := findOrderInBook(book, exec.MakerOrderID)
 			makerFillIsFull := makerOrder != nil && makerOrder.FilledQty >= makerOrder.Qty
 			makerGw.ResponseCh <- Response{
 				Success: true,
@@ -1465,4 +1237,135 @@ func calculateClosedQty(oldSize, tradeQty int64, side Side) int64 {
 		closedQty = abs(oldSize)
 	}
 	return closedQty
+}
+
+// rejectWithLog builds a failed Response and optionally logs it.
+func rejectWithLog(requestID uint64, clientID uint64, reason RejectReason, log Logger, clock Clock) Response {
+	resp := Response{RequestID: requestID, Success: false, Error: reason}
+	if log != nil {
+		log.LogEvent(clock.NowUnixNano(), clientID, "OrderRejected", resp)
+	}
+	return resp
+}
+
+// rejectOrder recycles the order and returns a logged rejection Response.
+// Caller must hold e.mu.Lock().
+func (e *Exchange) rejectOrder(order *Order, requestID uint64, clientID uint64, reason RejectReason, log Logger) Response {
+	putOrder(order)
+	resp := Response{RequestID: requestID, Success: false, Error: reason}
+	if log != nil {
+		log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+	}
+	return resp
+}
+
+// releaseOrderFunds releases the reserved balance for an order (or partial qty).
+func releaseOrderFunds(client *Client, instrument Instrument, side Side, qty, price int64) {
+	if qty <= 0 {
+		return
+	}
+	precision := instrument.BasePrecision()
+	if instrument.IsPerp() {
+		perp := instrument.(*PerpFutures)
+		margin := (qty * price / precision) * perp.MarginRate / 10000
+		client.ReleasePerp(instrument.QuoteAsset(), margin)
+	} else if side == Buy {
+		client.Release(instrument.QuoteAsset(), (qty*price)/precision)
+	} else {
+		client.Release(instrument.BaseAsset(), qty)
+	}
+}
+
+// tryReserveOrBorrow attempts reserveFn; on failure, if BorrowingMgr is configured it
+// temporarily releases e.mu, auto-borrows, reacquires, then retries the reservation.
+// Caller must hold e.mu.Lock().
+func (e *Exchange) tryReserveOrBorrow(
+	clientID uint64, asset string, amount int64,
+	reserveFn func(string, int64) bool,
+	isPerp bool,
+) bool {
+	if reserveFn(asset, amount) {
+		return true
+	}
+	if e.BorrowingMgr == nil {
+		return false
+	}
+	e.mu.Unlock()
+	var borrowed bool
+	if isPerp {
+		borrowed, _ = e.BorrowingMgr.AutoBorrowForPerpTrade(clientID, asset, amount)
+	} else {
+		borrowed, _ = e.BorrowingMgr.AutoBorrowForSpotTrade(clientID, asset, amount)
+	}
+	e.mu.Lock()
+	return borrowed && reserveFn(asset, amount)
+}
+
+// recordFeeRevenue updates exchange fee balance and logs the revenue event.
+// Caller must hold e.mu.Lock().
+func (e *Exchange) recordFeeRevenue(asset string, takerFee, makerFee Fee, book *OrderBook, timestamp int64) {
+	e.ExchangeBalance.FeeRevenue[asset] += takerFee.Amount + makerFee.Amount
+	if globalLog := e.getLogger("_global"); globalLog != nil {
+		globalLog.LogEvent(timestamp, 0, "fee_revenue", FeeRevenueEvent{
+			Timestamp: timestamp,
+			Symbol:    book.Symbol,
+			TradeID:   book.SeqNum,
+			TakerFee:  takerFee.Amount,
+			MakerFee:  makerFee.Amount,
+			Asset:     asset,
+		})
+	}
+}
+
+// settleSpotExecution settles balances for both taker and maker in a spot trade.
+// Caller must hold e.mu.Lock().
+func (e *Exchange) settleSpotExecution(
+	book *OrderBook, exec *Execution, takerOrder *Order,
+	taker, maker *Client, takerFee, makerFee Fee,
+	notional, timestamp int64,
+) {
+	base, quote := book.Instrument.BaseAsset(), book.Instrument.QuoteAsset()
+	if takerOrder.Side == Buy {
+		taker.Release(quote, notional)
+		oldTQ, oldTB := taker.Balances[quote], taker.Balances[base]
+		taker.Balances[quote] -= notional + takerFee.Amount
+		taker.Balances[base] += exec.Qty
+		e.balanceTracker.LogBalanceChange(timestamp, exec.TakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
+			spotDelta(quote, oldTQ, taker.Balances[quote]),
+			spotDelta(base, oldTB, taker.Balances[base]),
+		})
+		maker.Release(base, exec.Qty)
+		oldMQ, oldMB := maker.Balances[quote], maker.Balances[base]
+		maker.Balances[quote] += notional - makerFee.Amount
+		maker.Balances[base] -= exec.Qty
+		e.balanceTracker.LogBalanceChange(timestamp, exec.MakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
+			spotDelta(quote, oldMQ, maker.Balances[quote]),
+			spotDelta(base, oldMB, maker.Balances[base]),
+		})
+	} else {
+		taker.Release(base, exec.Qty)
+		oldTB, oldTQ := taker.Balances[base], taker.Balances[quote]
+		taker.Balances[base] -= exec.Qty
+		taker.Balances[quote] += notional - takerFee.Amount
+		e.balanceTracker.LogBalanceChange(timestamp, exec.TakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
+			spotDelta(base, oldTB, taker.Balances[base]),
+			spotDelta(quote, oldTQ, taker.Balances[quote]),
+		})
+		maker.Release(quote, notional)
+		oldMB, oldMQ := maker.Balances[base], maker.Balances[quote]
+		maker.Balances[base] += exec.Qty
+		maker.Balances[quote] -= notional + makerFee.Amount
+		e.balanceTracker.LogBalanceChange(timestamp, exec.MakerClientID, book.Symbol, "trade_settlement", []BalanceDelta{
+			spotDelta(base, oldMB, maker.Balances[base]),
+			spotDelta(quote, oldMQ, maker.Balances[quote]),
+		})
+	}
+	e.recordFeeRevenue(quote, takerFee, makerFee, book, timestamp)
+}
+
+func findOrderInBook(book *OrderBook, orderID uint64) *Order {
+	if o := book.Bids.Orders[orderID]; o != nil {
+		return o
+	}
+	return book.Asks.Orders[orderID]
 }
