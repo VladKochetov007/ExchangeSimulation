@@ -3,7 +3,6 @@ package exchange
 import (
 	ebook "exchange_sim/exchange/book"
 	eclock "exchange_sim/exchange/clock"
-	eexchange "exchange_sim/exchange/exchange"
 	efee "exchange_sim/exchange/fee"
 	einstrument "exchange_sim/exchange/instrument"
 	emarketdata "exchange_sim/exchange/marketdata"
@@ -12,7 +11,6 @@ import (
 	etypes "exchange_sim/exchange/types"
 )
 
-// Value types
 type Side = etypes.Side
 type OrderType = etypes.OrderType
 type TimeInForce = etypes.TimeInForce
@@ -63,7 +61,6 @@ type BorrowingConfig = etypes.BorrowingConfig
 type IsolatedPosition = etypes.IsolatedPosition
 type PositionDelta = etypes.PositionDelta
 
-// Enumerations — const blocks must be redeclared; type alias makes them compatible.
 const (
 	Buy  = etypes.Buy
 	Sell = etypes.Sell
@@ -136,7 +133,6 @@ const (
 	IsolatedMargin = etypes.IsolatedMargin
 )
 
-// Interfaces
 type Logger = etypes.Logger
 type FeeModel = etypes.FeeModel
 type Instrument = etypes.Instrument
@@ -145,14 +141,11 @@ type Clock = etypes.Clock
 type Ticker = etypes.Ticker
 type TickerFactory = etypes.TickerFactory
 type MatchingEngine = ematching.MatchingEngine
+type MatchResult = ematching.MatchResult
 type MarkPriceCalculator = eprice.MarkPriceCalculator
 type FundingCalculator = einstrument.FundingCalculator
-
-// Book types
 type Book = ebook.Book
 type OrderBook = ebook.OrderBook
-
-// Concrete types
 type RealClock = eclock.RealClock
 type RealTickerFactory = eclock.RealTickerFactory
 type SpotInstrument = einstrument.SpotInstrument
@@ -160,87 +153,18 @@ type PerpFutures = einstrument.PerpFutures
 type SimpleFundingCalc = einstrument.SimpleFundingCalc
 type PercentageFee = efee.PercentageFee
 type FixedFee = efee.FixedFee
-type MatchResult = ematching.MatchResult
 type DefaultMatcher = ematching.DefaultMatcher
 type ProRataMatcher = ematching.ProRataMatcher
 type MDPublisher = emarketdata.MDPublisher
 type LastPriceCalculator = eprice.LastPriceCalculator
 type MidPriceCalculator = eprice.MidPriceCalculator
 type WeightedMidPriceCalculator = eprice.WeightedMidPriceCalculator
-type MedianMarkPrice = eprice.MedianMarkPrice
-type EMAMarkPrice = eprice.EMAMarkPrice
-type ClampedEMAMarkPrice = eprice.ClampedEMAMarkPrice
-type TWAPMarkPrice = eprice.TWAPMarkPrice
-type StaticPriceOracle = eprice.StaticPriceOracle
-type DynamicPriceOracle = eprice.DynamicPriceOracle
-type MidPriceOracle = eprice.MidPriceOracle
-
-// Exchange types from exchange/exchange sub-package
-type Exchange = eexchange.Exchange
-type ExchangeBalance = eexchange.ExchangeBalance
-type ExchangeConfig = eexchange.ExchangeConfig
-type Client = eexchange.Client
-type ClientGateway = eexchange.ClientGateway
-type PositionManager = eexchange.PositionManager
-type BorrowingManager = eexchange.BorrowingManager
-type ExchangeAutomation = eexchange.ExchangeAutomation
-type AutomationConfig = eexchange.AutomationConfig
-type LiquidationHandler = eexchange.LiquidationHandler
-type TransferError = eexchange.TransferError
 
 const BPS = efee.BPS
 
-// Constructor functions
 var NewSpotInstrument = einstrument.NewSpotInstrument
 var NewPerpFutures = einstrument.NewPerpFutures
-var NewStaticPriceOracle = eprice.NewStaticPriceOracle
-var NewDynamicPriceOracle = eprice.NewDynamicPriceOracle
-var NewLastPriceCalculator = eprice.NewLastPriceCalculator
 var NewMidPriceCalculator = eprice.NewMidPriceCalculator
-var NewWeightedMidPriceCalculator = eprice.NewWeightedMidPriceCalculator
-var NewMedianMarkPrice = eprice.NewMedianMarkPrice
-var NewEMAMarkPrice = eprice.NewEMAMarkPrice
-var NewClampedEMAMarkPrice = eprice.NewClampedEMAMarkPrice
-var NewTWAPMarkPrice = eprice.NewTWAPMarkPrice
 
-// Exchange constructor functions
-var NewExchange = eexchange.NewExchange
-var NewExchangeWithConfig = eexchange.NewExchangeWithConfig
-var NewClient = eexchange.NewClient
-var NewClientGateway = eexchange.NewClientGateway
-var NewClientGatewayFromChannels = eexchange.NewClientGatewayFromChannels
-var NewExchangeAutomation = eexchange.NewExchangeAutomation
-var NewPositionManager = eexchange.NewPositionManager
-var NewBorrowingManager = eexchange.NewBorrowingManager
-
-func NewMDPublisher() *MDPublisher { return emarketdata.NewMDPublisher() }
-
-// NewDefaultMatcher injects a real-time clock; callers using simulation time
-// should call matching.NewDefaultMatcher(clock) directly.
-func NewDefaultMatcher() *DefaultMatcher {
-	return ematching.NewDefaultMatcher(&eclock.RealClock{})
-}
-
-func NewProRataMatcher() *ProRataMatcher {
-	return ematching.NewProRataMatcher(&eclock.RealClock{})
-}
-
-func NewMidPriceOracle(provider eprice.BookProvider) *MidPriceOracle {
-	return eprice.NewMidPriceOracle(provider)
-}
-
-// Pool and book helpers — exported so tests/ package can access them via dot import.
-var (
-	NewBook         = ebook.NewBook
-	GetLimit        = ebook.GetLimit
-	LinkOrder       = ebook.LinkOrder
-	UnlinkOrder     = ebook.UnlinkOrder
-	VisibleQty      = ebook.VisibleQty
-	GetOrder        = eexchange.GetOrder
-	PutOrder        = eexchange.PutOrder
-	GetExecution    = ematching.GetExecution
-	PutExecution    = ematching.PutExecution
-	GetMDMsg        = emarketdata.GetMDMsg
-	PutMDMsg        = emarketdata.PutMDMsg
-	ReservedSpotDelta = eexchange.ReservedSpotDelta
-)
+func NewMDPublisher() *MDPublisher                          { return emarketdata.NewMDPublisher() }
+func NewDefaultMatcher(clock Clock) *DefaultMatcher        { return ematching.NewDefaultMatcher(clock) }
