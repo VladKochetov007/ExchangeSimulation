@@ -2,7 +2,6 @@ package exchange
 
 import (
 	ebook "exchange_sim/exchange/book"
-	ecircuit "exchange_sim/exchange/circuit_breaker"
 	eclock "exchange_sim/exchange/clock"
 	efee "exchange_sim/exchange/fee"
 	einstrument "exchange_sim/exchange/instrument"
@@ -147,9 +146,6 @@ type TickerFactory = etypes.TickerFactory
 type MatchingEngine = ematching.MatchingEngine
 type MarkPriceCalculator = eprice.MarkPriceCalculator
 type FundingCalculator = einstrument.FundingCalculator
-type CircuitBreaker = ecircuit.CircuitBreaker
-type HaltEvaluator = ecircuit.HaltEvaluator
-
 // Book types
 type Book = ebook.Book
 type OrderBook = ebook.OrderBook
@@ -176,23 +172,8 @@ type TWAPMarkPrice = eprice.TWAPMarkPrice
 type StaticPriceOracle = eprice.StaticPriceOracle
 type DynamicPriceOracle = eprice.DynamicPriceOracle
 type MidPriceOracle = eprice.MidPriceOracle
-type CBAction = ecircuit.CBAction
-type CBResult = ecircuit.CBResult
-type BreakerTier = ecircuit.BreakerTier
-type PercentBandCircuitBreaker = ecircuit.PercentBandCircuitBreaker
-type AsymmetricBandCircuitBreaker = ecircuit.AsymmetricBandCircuitBreaker
-type TieredCircuitBreaker = ecircuit.TieredCircuitBreaker
-type TieredHaltEvaluator = ecircuit.TieredHaltEvaluator
-type CompositeCircuitBreaker = ecircuit.CompositeCircuitBreaker
-type CircuitBreakerMatcher = ecircuit.CircuitBreakerMatcher
 
 const BPS = efee.BPS
-
-const (
-	CBAllow  = ecircuit.CBAllow
-	CBReject = ecircuit.CBReject
-	CBHalt   = ecircuit.CBHalt
-)
 
 // Constructor functions
 var NewSpotInstrument = einstrument.NewSpotInstrument
@@ -206,9 +187,6 @@ var NewMedianMarkPrice = eprice.NewMedianMarkPrice
 var NewEMAMarkPrice = eprice.NewEMAMarkPrice
 var NewClampedEMAMarkPrice = eprice.NewClampedEMAMarkPrice
 var NewTWAPMarkPrice = eprice.NewTWAPMarkPrice
-var NewTieredCircuitBreaker = ecircuit.NewTieredCircuitBreaker
-var NewTieredHaltEvaluator = ecircuit.NewTieredHaltEvaluator
-
 func NewMDPublisher() *MDPublisher { return emarketdata.NewMDPublisher() }
 
 // NewDefaultMatcher injects a real-time clock; callers using simulation time
@@ -223,13 +201,4 @@ func NewProRataMatcher() *ProRataMatcher {
 
 func NewMidPriceOracle(provider eprice.BookProvider) *MidPriceOracle {
 	return eprice.NewMidPriceOracle(provider)
-}
-
-func NewCircuitBreakerMatcher(
-	inner ematching.MatchingEngine,
-	breaker ecircuit.CircuitBreaker,
-	books map[string]*ebook.OrderBook,
-	clock etypes.Clock,
-) *CircuitBreakerMatcher {
-	return ecircuit.NewCircuitBreakerMatcher(inner, breaker, books, clock)
 }
