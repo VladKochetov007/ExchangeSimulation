@@ -3,8 +3,8 @@ package price
 import (
 	"testing"
 
-	ebook "exchange_sim/exchange/book"
-	etypes "exchange_sim/exchange/types"
+	ebook "exchange_sim/book"
+	etypes "exchange_sim/types"
 )
 
 type mockBookProvider struct {

@@ -3,7 +3,7 @@ package clock
 import (
 	"time"
 
-	etypes "exchange_sim/exchange/types"
+	etypes "exchange_sim/types"
 )
 
 type RealClock struct{}

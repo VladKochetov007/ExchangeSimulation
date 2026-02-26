@@ -3,9 +3,9 @@ package matching
 import (
 	"testing"
 
-	ebook "exchange_sim/exchange/book"
-	eclock "exchange_sim/exchange/clock"
-	etypes "exchange_sim/exchange/types"
+	ebook "exchange_sim/book"
+	eclock "exchange_sim/clock"
+	etypes "exchange_sim/types"
 )
 
 func TestMatchBuyOrderFullFill(t *testing.T) {

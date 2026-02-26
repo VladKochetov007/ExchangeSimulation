@@ -3,7 +3,7 @@ package book
 import (
 	"sync"
 
-	etypes "exchange_sim/exchange/types"
+	etypes "exchange_sim/types"
 )
 
 // Limit pool — only used within this package.

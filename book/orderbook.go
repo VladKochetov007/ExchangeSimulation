@@ -1,6 +1,6 @@
 package book
 
-import etypes "exchange_sim/exchange/types"
+import etypes "exchange_sim/types"
 
 // OrderBook is the full two-sided order book for a symbol.
 type OrderBook struct {

@@ -3,7 +3,7 @@ package exchange
 import (
 	"sync"
 
-	ebook "exchange_sim/exchange/book"
+	ebook "exchange_sim/book"
 )
 
 var orderPool = sync.Pool{

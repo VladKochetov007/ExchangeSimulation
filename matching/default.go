@@ -1,9 +1,9 @@
 package matching
 
 import (
-	ebook "exchange_sim/exchange/book"
-	eclock "exchange_sim/exchange/clock"
-	etypes "exchange_sim/exchange/types"
+	ebook "exchange_sim/book"
+	eclock "exchange_sim/clock"
+	etypes "exchange_sim/types"
 )
 
 // DefaultMatcher implements price-time priority (FIFO) matching.

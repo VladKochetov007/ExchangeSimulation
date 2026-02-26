@@ -1,6 +1,6 @@
 package instrument
 
-import etypes "exchange_sim/exchange/types"
+import etypes "exchange_sim/types"
 
 type PerpFutures struct {
 	SpotInstrument

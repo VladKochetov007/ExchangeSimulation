@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	ematching "exchange_sim/exchange/matching"
+	ematching "exchange_sim/matching"
 )
 
 // ExchangeBalance tracks the exchange's own accumulated revenue and safety fund.

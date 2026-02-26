@@ -3,7 +3,7 @@ package fee
 import (
 	"testing"
 
-	etypes "exchange_sim/exchange/types"
+	etypes "exchange_sim/types"
 )
 
 const (

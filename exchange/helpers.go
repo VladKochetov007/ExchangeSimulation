@@ -1,6 +1,6 @@
 package exchange
 
-import ebook "exchange_sim/exchange/book"
+import ebook "exchange_sim/book"
 
 // btcPrecision is the number of satoshis per bitcoin.
 // Used in collateral calculations. TODO: use instrument.BasePrecision() instead.

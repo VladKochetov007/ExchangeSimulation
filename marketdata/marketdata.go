@@ -3,7 +3,7 @@ package marketdata
 import (
 	"sync"
 
-	etypes "exchange_sim/exchange/types"
+	etypes "exchange_sim/types"
 )
 
 // MDMsg pool — only used within this package.

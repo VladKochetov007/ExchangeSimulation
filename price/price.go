@@ -1,6 +1,6 @@
 package price
 
-import ebook "exchange_sim/exchange/book"
+import ebook "exchange_sim/book"
 
 // MarkPriceCalculator calculates the mark price from an order book.
 type MarkPriceCalculator interface {

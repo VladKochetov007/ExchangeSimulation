@@ -1,14 +1,14 @@
 package exchange
 
 import (
-	ebook "exchange_sim/exchange/book"
-	eclock "exchange_sim/exchange/clock"
-	efee "exchange_sim/exchange/fee"
-	einstrument "exchange_sim/exchange/instrument"
-	emarketdata "exchange_sim/exchange/marketdata"
-	ematching "exchange_sim/exchange/matching"
-	eprice "exchange_sim/exchange/price"
-	etypes "exchange_sim/exchange/types"
+	ebook "exchange_sim/book"
+	eclock "exchange_sim/clock"
+	efee "exchange_sim/fee"
+	einstrument "exchange_sim/instrument"
+	emarketdata "exchange_sim/marketdata"
+	ematching "exchange_sim/matching"
+	eprice "exchange_sim/price"
+	etypes "exchange_sim/types"
 )
 
 type Side = etypes.Side
@@ -165,6 +165,30 @@ const BPS = efee.BPS
 var NewSpotInstrument = einstrument.NewSpotInstrument
 var NewPerpFutures = einstrument.NewPerpFutures
 var NewMidPriceCalculator = eprice.NewMidPriceCalculator
+var NewStaticPriceOracle = eprice.NewStaticPriceOracle
+var NewDynamicPriceOracle = eprice.NewDynamicPriceOracle
+var NewMidPriceOracle = eprice.NewMidPriceOracle
+var NewLastPriceCalculator = eprice.NewLastPriceCalculator
+var NewWeightedMidPriceCalculator = eprice.NewWeightedMidPriceCalculator
 
-func NewMDPublisher() *MDPublisher                          { return emarketdata.NewMDPublisher() }
-func NewDefaultMatcher(clock Clock) *DefaultMatcher        { return ematching.NewDefaultMatcher(clock) }
+var NewBook = ebook.NewBook
+var GetLimit = ebook.GetLimit
+var LinkOrder = ebook.LinkOrder
+var UnlinkOrder = ebook.UnlinkOrder
+var VisibleQty = ebook.VisibleQty
+
+var GetExecution = ematching.GetExecution
+var PutExecution = ematching.PutExecution
+
+var GetMDMsg = emarketdata.GetMDMsg
+var PutMDMsg = emarketdata.PutMDMsg
+
+func NewMDPublisher() *MDPublisher { return emarketdata.NewMDPublisher() }
+
+// NewDefaultMatcher injects a real-time clock; callers using simulation time
+// should call matching.NewDefaultMatcher(clock) directly.
+func NewDefaultMatcher() *DefaultMatcher { return ematching.NewDefaultMatcher(&eclock.RealClock{}) }
+
+// NewProRataMatcher injects a real-time clock; callers using simulation time
+// should call matching.NewProRataMatcher(clock) directly.
+func NewProRataMatcher() *ProRataMatcher { return ematching.NewProRataMatcher(&eclock.RealClock{}) }

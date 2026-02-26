@@ -1,8 +1,8 @@
 package price
 
 import (
-	ebook "exchange_sim/exchange/book"
-	etypes "exchange_sim/exchange/types"
+	ebook "exchange_sim/book"
+	etypes "exchange_sim/types"
 )
 
 // LastPriceCalculator uses the last trade price as mark price.
