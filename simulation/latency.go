@@ -12,6 +12,13 @@ type LatencyProvider interface {
 	Delay() time.Duration
 }
 
+// LatencyConfig holds optional per-channel latency. nil field = no delay on that channel.
+type LatencyConfig struct {
+	Request    LatencyProvider
+	Response   LatencyProvider
+	MarketData LatencyProvider
+}
+
 type ConstantLatency struct {
 	delay time.Duration
 }

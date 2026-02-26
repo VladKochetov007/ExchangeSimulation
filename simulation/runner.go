@@ -2,47 +2,38 @@ package simulation
 
 import (
 	"context"
-	"os"
-	"os/signal"
-	"sync"
-	"syscall"
 	"time"
 
 	"exchange_sim/actor"
-	"exchange_sim/exchange"
 )
 
 type RunnerConfig struct {
-	UseSimulatedClock bool
-	Duration          time.Duration
-	Iterations        int
+	Duration   time.Duration // wall-clock limit (0 = ctx-only)
+	Iterations int           // simulated clock steps (0 = ctx-only)
+	Step       time.Duration // step size per iteration for SimulatedClock (default 1ms)
 }
 
 type Runner struct {
-	exchange *exchange.Exchange
-	actors   []actor.Actor
-	config   RunnerConfig
-	clock    Clock
+	clock  Clock
+	venues []*Venue
+	actors []actor.Actor
+	config RunnerConfig
 }
 
-func NewRunner(config RunnerConfig) *Runner {
-	var clock Clock
-	if config.UseSimulatedClock {
-		clock = NewSimulatedClock(time.Now().UnixNano())
-	} else {
-		clock = &RealClock{}
+func NewRunner(clock Clock, config RunnerConfig) *Runner {
+	if config.Step == 0 {
+		config.Step = time.Millisecond
 	}
-
 	return &Runner{
-		exchange: exchange.NewExchange(100, clock),
-		actors:   make([]actor.Actor, 0),
-		config:   config,
-		clock:    clock,
+		clock:  clock,
+		venues: make([]*Venue, 0),
+		actors: make([]actor.Actor, 0),
+		config: config,
 	}
 }
 
-func (r *Runner) Exchange() *exchange.Exchange {
-	return r.exchange
+func (r *Runner) AddVenue(v *Venue) {
+	r.venues = append(r.venues, v)
 }
 
 func (r *Runner) AddActor(a actor.Actor) {
@@ -53,20 +44,14 @@ func (r *Runner) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-
 	for _, a := range r.actors {
 		if err := a.Start(ctx); err != nil {
 			return err
 		}
 	}
 
-	var wg sync.WaitGroup
 	if r.config.Duration > 0 {
-		wg.Add(1)
 		go func() {
-			defer wg.Done()
 			timer := time.NewTimer(r.config.Duration)
 			defer timer.Stop()
 			select {
@@ -78,35 +63,30 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	if r.config.Iterations > 0 {
-		wg.Add(1)
 		go func() {
-			defer wg.Done()
 			if simClock, ok := r.clock.(*SimulatedClock); ok {
 				for i := 0; i < r.config.Iterations; i++ {
 					select {
 					case <-ctx.Done():
 						return
 					default:
-						simClock.Advance(time.Millisecond)
+						simClock.Advance(r.config.Step)
 						time.Sleep(time.Microsecond)
 					}
 				}
-				cancel()
 			}
+			cancel()
 		}()
 	}
 
-	select {
-	case <-sigCh:
-		cancel()
-	case <-ctx.Done():
-	}
+	<-ctx.Done()
 
 	for _, a := range r.actors {
 		a.Stop()
 	}
+	for _, v := range r.venues {
+		v.shutdown()
+	}
 
-	wg.Wait()
-	r.exchange.Shutdown()
 	return nil
 }

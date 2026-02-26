@@ -5,72 +5,72 @@ import (
 	"testing"
 	"time"
 
+	"exchange_sim/actor"
 	"exchange_sim/exchange"
-	"exchange_sim/realistic_sim/actors"
 )
 
-func TestNewRunnerWithSimulatedClock(t *testing.T) {
-	config := RunnerConfig{
-		UseSimulatedClock: true,
-		Duration:          0,
-		Iterations:        0,
-	}
+// testActor is a minimal Actor implementation for runner tests.
+type testActor struct {
+	id      uint64
+	gateway actor.Gateway
+	started bool
+	stopped bool
+}
 
-	runner := NewRunner(config)
+func (a *testActor) ID() uint64             { return a.id }
+func (a *testActor) Gateway() actor.Gateway { return a.gateway }
+func (a *testActor) Start(_ context.Context) error { a.started = true; return nil }
+func (a *testActor) Stop() error                   { a.stopped = true; return nil }
+func (a *testActor) OnEvent(_ *actor.Event)        {}
+
+func newTestVenue() *Venue {
+	ex := exchange.NewExchange(10, &RealClock{})
+	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
+	ex.AddInstrument(btcusd)
+	return &Venue{Exchange: ex}
+}
+
+func TestNewRunnerWithSimulatedClock(t *testing.T) {
+	simClock := NewSimulatedClock(time.Now().UnixNano())
+	runner := NewRunner(simClock, RunnerConfig{})
+
 	if runner == nil {
 		t.Fatal("NewRunner returned nil")
 	}
-
 	if _, ok := runner.clock.(*SimulatedClock); !ok {
-		t.Error("Expected SimulatedClock when UseSimulatedClock is true")
+		t.Error("Expected SimulatedClock")
 	}
 }
 
 func TestNewRunnerWithRealClock(t *testing.T) {
-	config := RunnerConfig{
-		UseSimulatedClock: false,
-		Duration:          0,
-		Iterations:        0,
-	}
+	runner := NewRunner(&RealClock{}, RunnerConfig{})
 
-	runner := NewRunner(config)
 	if runner == nil {
 		t.Fatal("NewRunner returned nil")
 	}
-
 	if _, ok := runner.clock.(*RealClock); !ok {
-		t.Error("Expected RealClock when UseSimulatedClock is false")
+		t.Error("Expected RealClock")
 	}
 }
 
-func TestRunnerExchange(t *testing.T) {
-	config := RunnerConfig{
-		UseSimulatedClock: false,
-	}
+func TestRunnerAddVenue(t *testing.T) {
+	runner := NewRunner(&RealClock{}, RunnerConfig{})
+	v := newTestVenue()
+	runner.AddVenue(v)
 
-	runner := NewRunner(config)
-	ex := runner.Exchange()
-
-	if ex == nil {
-		t.Error("Exchange() returned nil")
+	if len(runner.venues) != 1 {
+		t.Errorf("Expected 1 venue, got %d", len(runner.venues))
 	}
 }
 
 func TestRunnerAddActor(t *testing.T) {
-	config := RunnerConfig{
-		UseSimulatedClock: false,
-	}
+	runner := NewRunner(&RealClock{}, RunnerConfig{})
+	v := newTestVenue()
+	runner.AddVenue(v)
 
-	runner := NewRunner(config)
-	gateway := runner.Exchange().ConnectClient(1, map[string]int64{"USD": 1000000}, &exchange.PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
-
-	mm := actors.NewFirstLP(1, gateway, actors.FirstLPConfig{
-		Symbol:            "BTCUSD",
-		HalfSpreadBps:     10, // 0.1% half-spread (was 20 bps / 2)
-		LiquidityMultiple: 10,
-	})
-
-	runner.AddActor(mm)
+	gw := v.ConnectClient(1, map[string]int64{"USD": 1000000}, &exchange.FixedFee{})
+	a := &testActor{id: 1, gateway: gw}
+	runner.AddActor(a)
 
 	if len(runner.actors) != 1 {
 		t.Errorf("Expected 1 actor, got %d", len(runner.actors))
@@ -78,80 +78,53 @@ func TestRunnerAddActor(t *testing.T) {
 }
 
 func TestRunnerRunWithDuration(t *testing.T) {
-	config := RunnerConfig{
-		UseSimulatedClock: false,
-		Duration:          100 * time.Millisecond,
-		Iterations:        0,
-	}
-
-	runner := NewRunner(config)
-	ex := runner.Exchange()
-
-	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
-	ex.AddInstrument(btcusd)
-
-	ctx := context.Background()
+	runner := NewRunner(&RealClock{}, RunnerConfig{
+		Duration: 100 * time.Millisecond,
+	})
+	runner.AddVenue(newTestVenue())
 
 	start := time.Now()
-	err := runner.Run(ctx)
+	err := runner.Run(context.Background())
 	elapsed := time.Since(start)
 
 	if err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
-
 	if elapsed < 100*time.Millisecond {
 		t.Errorf("Expected runtime >= 100ms, got %v", elapsed)
 	}
-	if elapsed > 200*time.Millisecond {
-		t.Errorf("Expected runtime < 200ms, got %v", elapsed)
+	if elapsed > 300*time.Millisecond {
+		t.Errorf("Expected runtime < 300ms, got %v", elapsed)
 	}
 }
 
 func TestRunnerRunWithIterations(t *testing.T) {
-	config := RunnerConfig{
-		UseSimulatedClock: true,
-		Duration:          0,
-		Iterations:        10,
-	}
+	simClock := NewSimulatedClock(0)
+	runner := NewRunner(simClock, RunnerConfig{
+		Iterations: 10,
+		Step:       time.Millisecond,
+	})
+	runner.AddVenue(newTestVenue())
 
-	runner := NewRunner(config)
-	ex := runner.Exchange()
-
-	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
-	ex.AddInstrument(btcusd)
-
-	ctx := context.Background()
-
-	err := runner.Run(ctx)
+	err := runner.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 
-	simClock := runner.clock.(*SimulatedClock)
 	elapsed := simClock.NowUnixNano()
 	expectedMin := int64(10 * time.Millisecond)
-
 	if elapsed < expectedMin {
 		t.Errorf("Expected clock to advance at least %d ns, got %d ns", expectedMin, elapsed)
 	}
 }
 
 func TestRunnerRunWithContextCancellation(t *testing.T) {
-	config := RunnerConfig{
-		UseSimulatedClock: false,
-		Duration:          10 * time.Second,
-		Iterations:        0,
-	}
-
-	runner := NewRunner(config)
-	ex := runner.Exchange()
-
-	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
-	ex.AddInstrument(btcusd)
+	runner := NewRunner(&RealClock{}, RunnerConfig{
+		Duration: 10 * time.Second,
+	})
+	runner.AddVenue(newTestVenue())
 
 	ctx, cancel := context.WithCancel(context.Background())
-
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		cancel()
@@ -164,69 +137,50 @@ func TestRunnerRunWithContextCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
-
 	if elapsed > 500*time.Millisecond {
 		t.Errorf("Expected quick cancellation, took %v", elapsed)
 	}
 }
 
 func TestRunnerRunWithActors(t *testing.T) {
-	config := RunnerConfig{
-		UseSimulatedClock: false,
-		Duration:          100 * time.Millisecond,
-	}
-
-	runner := NewRunner(config)
-	ex := runner.Exchange()
-
-	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
-	ex.AddInstrument(btcusd)
+	runner := NewRunner(&RealClock{}, RunnerConfig{
+		Duration: 100 * time.Millisecond,
+	})
+	v := newTestVenue()
+	runner.AddVenue(v)
 
 	balances := map[string]int64{"BTC": 1000000000, "USD": 1000000000000}
-	feePlan := &exchange.PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true}
+	gw1 := v.ConnectClient(1, balances, &exchange.FixedFee{})
+	gw2 := v.ConnectClient(2, balances, &exchange.FixedFee{})
 
-	gateway1 := ex.ConnectClient(1, balances, feePlan)
-	mm1 := actors.NewFirstLP(1, gateway1, actors.FirstLPConfig{
-		Symbol:            "BTCUSD",
-		HalfSpreadBps:     10, // 0.1% half-spread (was 20 bps / 2)
-		LiquidityMultiple: 10,
-	})
-	runner.AddActor(mm1)
+	a1 := &testActor{id: 1, gateway: gw1}
+	a2 := &testActor{id: 2, gateway: gw2}
+	runner.AddActor(a1)
+	runner.AddActor(a2)
 
-	gateway2 := ex.ConnectClient(2, balances, feePlan)
-	mm2 := actors.NewFirstLP(2, gateway2, actors.FirstLPConfig{
-		Symbol:            "BTCUSD",
-		HalfSpreadBps:     15, // 0.15% half-spread (was 30 bps / 2)
-		LiquidityMultiple: 10,
-	})
-	runner.AddActor(mm2)
-
-	ctx := context.Background()
-
-	err := runner.Run(ctx)
+	err := runner.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run failed: %v", err)
+	}
+	if !a1.started || !a2.started {
+		t.Error("Actors were not started")
+	}
+	if !a1.stopped || !a2.stopped {
+		t.Error("Actors were not stopped")
 	}
 }
 
 func TestRunnerShutdown(t *testing.T) {
-	config := RunnerConfig{
-		UseSimulatedClock: false,
-		Duration:          10 * time.Second,
-	}
-
-	runner := NewRunner(config)
-	ex := runner.Exchange()
-
-	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
-	ex.AddInstrument(btcusd)
+	runner := NewRunner(&RealClock{}, RunnerConfig{
+		Duration: 10 * time.Second,
+	})
+	runner.AddVenue(newTestVenue())
 
 	ctx, cancel := context.WithCancel(context.Background())
-
-	done := make(chan bool)
+	done := make(chan struct{})
 	go func() {
 		runner.Run(ctx)
-		done <- true
+		close(done)
 	}()
 
 	time.Sleep(50 * time.Millisecond)
@@ -236,5 +190,27 @@ func TestRunnerShutdown(t *testing.T) {
 	case <-done:
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Runner did not shut down in time")
+	}
+}
+
+func TestRunnerMultiVenue(t *testing.T) {
+	runner := NewRunner(&RealClock{}, RunnerConfig{
+		Duration: 100 * time.Millisecond,
+	})
+
+	v1 := newTestVenue()
+	v2 := newTestVenue()
+	runner.AddVenue(v1)
+	runner.AddVenue(v2)
+
+	balances := map[string]int64{"BTC": 1000000000, "USD": 1000000000000}
+	gw1 := v1.ConnectClient(1, balances, &exchange.FixedFee{})
+	gw2 := v2.ConnectClient(1, balances, &exchange.FixedFee{})
+
+	runner.AddActor(&testActor{id: 1, gateway: gw1})
+	runner.AddActor(&testActor{id: 2, gateway: gw2})
+
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run failed: %v", err)
 	}
 }

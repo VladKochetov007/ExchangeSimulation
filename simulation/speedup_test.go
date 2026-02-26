@@ -14,7 +14,7 @@ func TestSimulationSpeedup(t *testing.T) {
 	simClock := NewSimulatedClock(0)
 	scheduler := NewEventScheduler(simClock)
 	simClock.SetScheduler(scheduler)
-	tickerFactory := NewSimTickerFactory(scheduler)
+	tickerFactory := NewSimTimerFactory(scheduler)
 
 	// Create exchange with simulation time
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
@@ -97,7 +97,7 @@ func TestSimulationDeterminism(t *testing.T) {
 		simClock := NewSimulatedClock(0)
 		scheduler := NewEventScheduler(simClock)
 		simClock.SetScheduler(scheduler)
-		tickerFactory := NewSimTickerFactory(scheduler)
+		tickerFactory := NewSimTimerFactory(scheduler)
 
 		ticker := tickerFactory.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()

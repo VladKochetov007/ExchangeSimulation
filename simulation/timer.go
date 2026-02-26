@@ -6,19 +6,19 @@ import (
 	"exchange_sim/exchange"
 )
 
-// SimTickerFactory creates simulation-time tickers backed by EventScheduler
-type SimTickerFactory struct {
+// SimTimerFactory creates simulation-time timers backed by EventScheduler
+type SimTimerFactory struct {
 	scheduler *EventScheduler
 }
 
-// NewSimTickerFactory creates a new simulation ticker factory
-func NewSimTickerFactory(scheduler *EventScheduler) *SimTickerFactory {
-	return &SimTickerFactory{scheduler: scheduler}
+// NewSimTimerFactory creates a new simulation timer factory
+func NewSimTimerFactory(scheduler *EventScheduler) *SimTimerFactory {
+	return &SimTimerFactory{scheduler: scheduler}
 }
 
 // NewTicker implements exchange.TickerFactory
-func (f *SimTickerFactory) NewTicker(d time.Duration) exchange.Ticker {
-	t := &simTicker{
+func (f *SimTimerFactory) NewTicker(d time.Duration) exchange.Ticker {
+	t := &simTimer{
 		scheduler: f.scheduler,
 		interval:  d.Nanoseconds(),
 		ch:        make(chan time.Time, 1), // Buffered to prevent blocking
@@ -27,7 +27,7 @@ func (f *SimTickerFactory) NewTicker(d time.Duration) exchange.Ticker {
 	return t
 }
 
-type simTicker struct {
+type simTimer struct {
 	scheduler *EventScheduler
 	interval  int64
 	ch        chan time.Time
@@ -35,9 +35,9 @@ type simTicker struct {
 	stopped   bool
 }
 
-func (t *simTicker) C() <-chan time.Time { return t.ch }
+func (t *simTimer) C() <-chan time.Time { return t.ch }
 
-func (t *simTicker) Stop() {
+func (t *simTimer) Stop() {
 	if !t.stopped && t.eventID != 0 {
 		t.scheduler.Cancel(t.eventID)
 		t.eventID = 0
@@ -46,7 +46,7 @@ func (t *simTicker) Stop() {
 	}
 }
 
-func (t *simTicker) start() {
+func (t *simTimer) start() {
 	t.eventID = t.scheduler.ScheduleRepeating(t.interval, func() {
 		if t.stopped {
 			return

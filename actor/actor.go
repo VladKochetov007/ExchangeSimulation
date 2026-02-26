@@ -8,17 +8,28 @@ import (
 	"exchange_sim/exchange"
 )
 
+// Gateway is the actor-facing contract for interacting with an exchange venue.
+// Both direct connections (*exchange.ClientGateway) and latency-simulated wrappers
+// (*simulation.DelayedGateway) satisfy this interface.
+type Gateway interface {
+	ID() uint64
+	Send(req exchange.Request) // non-blocking: drops if full/closed
+	Responses() <-chan exchange.Response
+	MarketDataCh() <-chan *exchange.MarketDataMsg
+	IsRunning() bool
+}
+
 type Actor interface {
 	OnEvent(event *Event)
 	Start(ctx context.Context) error
 	Stop() error
 	ID() uint64
-	Gateway() *exchange.ClientGateway
+	Gateway() Gateway
 }
 
 type BaseActor struct {
 	id            uint64
-	gateway       *exchange.ClientGateway
+	gateway       Gateway
 	eventCh       chan *Event
 	stopCh        chan struct{}
 	running       atomic.Bool
@@ -37,7 +48,7 @@ type OrderInfo struct {
 	TotalQty  int64
 }
 
-func NewBaseActor(id uint64, gateway *exchange.ClientGateway) *BaseActor {
+func NewBaseActor(id uint64, gateway Gateway) *BaseActor {
 	return &BaseActor{
 		id:            id,
 		gateway:       gateway,
@@ -51,7 +62,7 @@ func (a *BaseActor) ID() uint64 {
 	return a.id
 }
 
-func (a *BaseActor) Gateway() *exchange.ClientGateway {
+func (a *BaseActor) Gateway() Gateway {
 	return a.gateway
 }
 
@@ -80,9 +91,9 @@ func (a *BaseActor) run(ctx context.Context) {
 		case <-a.stopCh:
 			a.running.Store(false)
 			return
-		case resp := <-a.gateway.ResponseCh:
+		case resp := <-a.gateway.Responses():
 			a.handleResponse(resp)
-		case md := <-a.gateway.MarketData:
+		case md := <-a.gateway.MarketDataCh():
 			a.handleMarketData(md)
 		}
 	}
@@ -234,7 +245,7 @@ func (a *BaseActor) handleMarketData(md *exchange.MarketDataMsg) {
 
 func (a *BaseActor) SubmitOrder(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64) uint64 {
 	reqID := atomic.AddUint64(&a.requestSeq, 1)
-	req := exchange.Request{
+	a.gateway.Send(exchange.Request{
 		Type: exchange.ReqPlaceOrder,
 		OrderReq: &exchange.OrderRequest{
 			RequestID:   reqID,
@@ -246,24 +257,13 @@ func (a *BaseActor) SubmitOrder(symbol string, side exchange.Side, orderType exc
 			TimeInForce: exchange.GTC,
 			Visibility:  exchange.Normal,
 		},
-	}
-	if a.gateway == nil {
-		return reqID
-	}
-	if !a.gateway.IsRunning() {
-		return reqID
-	}
-	select {
-	case a.gateway.RequestCh <- req:
-	default:
-		// Gateway closed, silently drop request
-	}
+	})
 	return reqID
 }
 
 func (a *BaseActor) SubmitOrderFull(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64, visibility exchange.Visibility, icebergQty int64) {
 	reqID := atomic.AddUint64(&a.requestSeq, 1)
-	req := exchange.Request{
+	a.gateway.Send(exchange.Request{
 		Type: exchange.ReqPlaceOrder,
 		OrderReq: &exchange.OrderRequest{
 			RequestID:   reqID,
@@ -276,106 +276,51 @@ func (a *BaseActor) SubmitOrderFull(symbol string, side exchange.Side, orderType
 			Visibility:  visibility,
 			IcebergQty:  icebergQty,
 		},
-	}
-	if a.gateway == nil {
-		return
-	}
-	if !a.gateway.IsRunning() {
-		return
-	}
-	select {
-	case a.gateway.RequestCh <- req:
-	default:
-		// Gateway closed, silently drop request
-	}
+	})
 }
 
 func (a *BaseActor) CancelOrder(orderID uint64) {
 	reqID := atomic.AddUint64(&a.requestSeq, 1)
-	req := exchange.Request{
+	a.gateway.Send(exchange.Request{
 		Type: exchange.ReqCancelOrder,
 		CancelReq: &exchange.CancelRequest{
 			RequestID: reqID,
 			OrderID:   orderID,
 		},
-	}
-	if a.gateway == nil {
-		return
-	}
-	if !a.gateway.IsRunning() {
-		return
-	}
-	select {
-	case a.gateway.RequestCh <- req:
-	default:
-		// Gateway closed, silently drop request
-	}
+	})
 }
 
 func (a *BaseActor) QueryBalance() {
 	reqID := atomic.AddUint64(&a.requestSeq, 1)
-	req := exchange.Request{
+	a.gateway.Send(exchange.Request{
 		Type: exchange.ReqQueryBalance,
 		QueryReq: &exchange.QueryRequest{
 			RequestID: reqID,
 			QueryType: exchange.QueryBalance,
 		},
-	}
-	if a.gateway == nil {
-		return
-	}
-	if !a.gateway.IsRunning() {
-		return
-	}
-	select {
-	case a.gateway.RequestCh <- req:
-	default:
-		// Gateway closed, silently drop request
-	}
+	})
 }
 
 func (a *BaseActor) Subscribe(symbol string) {
 	reqID := atomic.AddUint64(&a.requestSeq, 1)
-	req := exchange.Request{
+	a.gateway.Send(exchange.Request{
 		Type: exchange.ReqSubscribe,
 		QueryReq: &exchange.QueryRequest{
 			RequestID: reqID,
 			Symbol:    symbol,
 		},
-	}
-	if a.gateway == nil {
-		return
-	}
-	if !a.gateway.IsRunning() {
-		return
-	}
-	select {
-	case a.gateway.RequestCh <- req:
-	default:
-		// Gateway closed, silently drop request
-	}
+	})
 }
 
 func (a *BaseActor) Unsubscribe(symbol string) {
 	reqID := atomic.AddUint64(&a.requestSeq, 1)
-	req := exchange.Request{
+	a.gateway.Send(exchange.Request{
 		Type: exchange.ReqUnsubscribe,
 		QueryReq: &exchange.QueryRequest{
 			RequestID: reqID,
 			Symbol:    symbol,
 		},
-	}
-	if a.gateway == nil {
-		return
-	}
-	if !a.gateway.IsRunning() {
-		return
-	}
-	select {
-	case a.gateway.RequestCh <- req:
-	default:
-		// Gateway closed, silently drop request
-	}
+	})
 }
 
 func (a *BaseActor) EventChannel() <-chan *Event {

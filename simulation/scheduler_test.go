@@ -1,6 +1,8 @@
 package simulation
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -88,7 +90,7 @@ func TestSimTickerBasicOperation(t *testing.T) {
 	clock := NewSimulatedClock(0)
 	scheduler := NewEventScheduler(clock)
 	clock.SetScheduler(scheduler)
-	factory := NewSimTickerFactory(scheduler)
+	factory := NewSimTimerFactory(scheduler)
 
 	ticker := factory.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -120,7 +122,7 @@ func TestSimTickerStop(t *testing.T) {
 	clock := NewSimulatedClock(0)
 	scheduler := NewEventScheduler(clock)
 	clock.SetScheduler(scheduler)
-	factory := NewSimTickerFactory(scheduler)
+	factory := NewSimTimerFactory(scheduler)
 
 	ticker := factory.NewTicker(100 * time.Millisecond)
 
@@ -160,33 +162,37 @@ func TestMultipleTickersIndependent(t *testing.T) {
 	clock := NewSimulatedClock(0)
 	scheduler := NewEventScheduler(clock)
 	clock.SetScheduler(scheduler)
-	factory := NewSimTickerFactory(scheduler)
+	factory := NewSimTimerFactory(scheduler)
 
 	ticker1 := factory.NewTicker(100 * time.Millisecond)
 	ticker2 := factory.NewTicker(250 * time.Millisecond)
 	defer ticker1.Stop()
 	defer ticker2.Stop()
 
-	ticks1 := 0
-	ticks2 := 0
+	var ticks1, ticks2 atomic.Int64
 	done := make(chan struct{})
+	var wg sync.WaitGroup
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			select {
 			case <-ticker1.C():
-				ticks1++
+				ticks1.Add(1)
 			case <-done:
 				return
 			}
 		}
 	}()
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			select {
 			case <-ticker2.C():
-				ticks2++
+				ticks2.Add(1)
 			case <-done:
 				return
 			}
@@ -199,13 +205,13 @@ func TestMultipleTickersIndependent(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	close(done)
-	time.Sleep(5 * time.Millisecond) // Final cleanup
+	wg.Wait()
 
-	if ticks1 != 5 {
-		t.Errorf("ticker1: expected 5 ticks, got %d", ticks1)
+	if got := ticks1.Load(); got != 5 {
+		t.Errorf("ticker1: expected 5 ticks, got %d", got)
 	}
-	if ticks2 != 2 {
-		t.Errorf("ticker2: expected 2 ticks, got %d", ticks2)
+	if got := ticks2.Load(); got != 2 {
+		t.Errorf("ticker2: expected 2 ticks, got %d", got)
 	}
 }
 
