@@ -381,56 +381,11 @@ func (a *ExchangeAutomation) liquidate(clientID uint64, client *Client, symbol s
 		return
 	}
 
-	// Force close: opposite side market order
 	closeSide := Sell
 	if pos.Size < 0 {
 		closeSide = Buy
 	}
-	closeQty := abs(pos.Size)
-
-	// Cancel all existing orders for this client on this symbol first
-	for _, orderID := range append([]uint64{}, client.OrderIDs...) {
-		var order *Order
-		if o := book.Bids.Orders[orderID]; o != nil {
-			order = o
-		} else if o := book.Asks.Orders[orderID]; o != nil {
-			order = o
-		}
-		if order == nil || order.ClientID != clientID {
-			continue
-		}
-		remainingQty := order.Qty - order.FilledQty
-		remainingMargin := (remainingQty * order.Price / perp.BasePrecision()) * perp.MarginRate / 10000
-		client.ReleasePerp(perp.QuoteAsset(), remainingMargin)
-		if order.Side == Buy {
-			book.Bids.CancelOrder(orderID)
-		} else {
-			book.Asks.CancelOrder(orderID)
-		}
-		client.RemoveOrder(orderID)
-	}
-
-	// Place forced market order (execute against best available)
-	orderID := a.exchange.NextOrderID
-	a.exchange.NextOrderID++
-	order := getOrder()
-	order.ID = orderID
-	order.ClientID = clientID
-	order.Side = closeSide
-	order.Type = Market
-	order.Qty = closeQty
-	order.Status = Open
-	order.Timestamp = timestamp
-
-	result := a.exchange.Matcher.Match(book.Bids, book.Asks, order)
-
-	fillPrice := int64(0)
-	if len(result.Executions) > 0 {
-		fillPrice = result.Executions[len(result.Executions)-1].Price
-	}
-
-	// processExecutions settles both sides: margins, PnL, positions, fees.
-	a.exchange.processExecutions(book, result.Executions, order)
+	fillPrice := a.exchange.forceClose(clientID, client, book, perp, closeSide, abs(pos.Size), timestamp)
 
 	// Repay borrowed amounts from liquidation proceeds
 	if a.exchange.BorrowingMgr != nil {
@@ -494,8 +449,6 @@ func (a *ExchangeAutomation) liquidate(clientID uint64, client *Client, symbol s
 		})
 	}
 
-	putOrder(order)
-
 	if a.liquidationHandler != nil {
 		a.liquidationHandler.OnLiquidation(&LiquidationEvent{
 			Timestamp:     timestamp,
@@ -535,8 +488,7 @@ func (a *ExchangeAutomation) CheckAndSettleFunding() {
 		// Check if it's time for settlement
 		if now >= fundingRate.NextFunding {
 			a.exchange.mu.Lock()
-			// Read Clients under the write lock so SettleFunding sees a consistent snapshot.
-			a.exchange.Positions.SettleFunding(a.exchange.Clients, perp, a.exchange)
+			settleFunding(a.exchange.Positions, a.exchange.Clients, perp, a.exchange.Clock, buildFundingSink(a.exchange))
 			a.exchange.mu.Unlock()
 
 			a.exchange.MDPublisher.PublishFunding(perp.Symbol(), perp.GetFundingRate(), now)

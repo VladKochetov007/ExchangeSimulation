@@ -20,20 +20,7 @@ func (e *Exchange) SetMarginMode(clientID uint64, mode MarginMode) error {
 }
 
 func (e *Exchange) hasOpenPositions(client *Client) bool {
-	e.Positions.mu.RLock()
-	defer e.Positions.mu.RUnlock()
-
-	positions := e.Positions.positions[client.ID]
-	if positions == nil {
-		return false
-	}
-
-	for _, pos := range positions {
-		if pos != nil && pos.Size != 0 {
-			return true
-		}
-	}
-	return false
+	return e.Positions.HasOpenPositions(client.ID)
 }
 
 func (e *Exchange) AllocateCollateralToPosition(

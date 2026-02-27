@@ -144,24 +144,17 @@ func TestOpenInterestLogging(t *testing.T) {
 	copy(oi, logger.openInterest)
 	logger.mu.Unlock()
 
-	// Should have 2 open interest events (one for each position update)
-	if len(oi) < 2 {
-		t.Fatalf("Expected at least 2 open interest events, got %d", len(oi))
+	// One OI event per execution (taker+maker positions logged together)
+	if len(oi) < 1 {
+		t.Fatalf("Expected at least 1 open interest event, got %d", len(oi))
 	}
 
-	// First OI should be for first position
 	oi1 := oi[0]
 	if oi1.Symbol != "BTC-PERP" {
 		t.Errorf("Expected symbol BTC-PERP, got %s", oi1.Symbol)
 	}
-	if oi1.OpenInterest != 10*BTC_PRECISION {
-		t.Errorf("Expected OI %d after first position, got %d", 10*BTC_PRECISION, oi1.OpenInterest)
-	}
-
-	// Second OI should be total of both positions
-	oi2 := oi[1]
-	if oi2.OpenInterest != 20*BTC_PRECISION {
-		t.Errorf("Expected OI %d after both positions, got %d", 20*BTC_PRECISION, oi2.OpenInterest)
+	if oi1.OpenInterest != 20*BTC_PRECISION {
+		t.Errorf("Expected OI %d (both sides open), got %d", 20*BTC_PRECISION, oi1.OpenInterest)
 	}
 
 	// Trade 2: Close partial positions
@@ -184,9 +177,9 @@ func TestOpenInterestLogging(t *testing.T) {
 	copy(oi3, logger.openInterest)
 	logger.mu.Unlock()
 
-	// OI should decrease as positions close
-	if len(oi3) < 2 {
-		t.Fatalf("Expected at least 2 OI events after partial close, got %d", len(oi3))
+	// One OI event per execution (partial close)
+	if len(oi3) < 1 {
+		t.Fatalf("Expected at least 1 OI event after partial close, got %d", len(oi3))
 	}
 
 	// After closing 5 BTC from each side, OI should be 10 BTC (5+5)
@@ -195,7 +188,6 @@ func TestOpenInterestLogging(t *testing.T) {
 		t.Errorf("Expected final OI %d, got %d", 10*BTC_PRECISION, finalOI.OpenInterest)
 	}
 
-	// Real exchange behavior: OI logged after every position change
 	t.Logf("Open interest tracked correctly: 0 -> 20 -> 10 BTC")
 
 	ex.Shutdown()
@@ -376,8 +368,8 @@ func TestCompleteLoggingIntegration(t *testing.T) {
 	logger.mu.Unlock()
 
 	// Verify all three types of events were logged
-	if nOI < 2 {
-		t.Errorf("Expected at least 2 open interest events, got %d", nOI)
+	if nOI < 1 {
+		t.Errorf("Expected at least 1 open interest event, got %d", nOI)
 	}
 	if nFee != 1 {
 		t.Errorf("Expected 1 fee revenue event, got %d", nFee)

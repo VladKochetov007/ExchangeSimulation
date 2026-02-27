@@ -27,11 +27,12 @@ func TestSetMarginMode_SuccessWithZeroSizePosition(t *testing.T) {
 
 	// Inject a zero-size position directly into the positions map (simulates a closed position
 	// that has not been removed from the map).
-	ex.Positions.Lock()
-	ex.Positions.InjectPosition(1, "BTC-PERP", &Position{
+	pm := ex.Positions.(*PositionManager)
+	pm.Lock()
+	pm.InjectPosition(1, "BTC-PERP", &Position{
 		ClientID: 1, Symbol: "BTC-PERP", Size: 0, EntryPrice: 0,
 	})
-	ex.Positions.Unlock()
+	pm.Unlock()
 
 	// hasOpenPositions iterates positions, finds Size==0, returns false → SetMarginMode succeeds
 	if err := ex.SetMarginMode(1, IsolatedMargin); err != nil {
@@ -179,8 +180,8 @@ func TestProcessExecutions_LoggerPnLBranch(t *testing.T) {
 // --- logAllBalances: borrowed loop with non-zero entry ---
 
 func TestLogAllBalances_WithBorrowedBalance(t *testing.T) {
-	ex, bm := setupBorrowingExchange()
-	_ = bm.BorrowMargin(1, "USD", USDAmount(1_000), "test")
+	ex := setupBorrowingExchange()
+	_ = ex.BorrowMargin(1, "USD", USDAmount(1_000), "test")
 
 	ex.SetLogger("_global", &nullLogger{})
 	ex.LogAllBalances() // exercises the borrowed map loop

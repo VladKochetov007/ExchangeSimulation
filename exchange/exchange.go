@@ -21,7 +21,7 @@ type Exchange struct {
 	Gateways                map[uint64]*ClientGateway
 	Books                   map[string]*OrderBook
 	Instruments             map[string]Instrument
-	Positions               *PositionManager
+	Positions               PositionStore
 	ExchangeBalance         *ExchangeBalance
 	NextOrderID             uint64
 	Matcher                 MatchingEngine
@@ -267,7 +267,7 @@ func (e *Exchange) EnableBorrowing(config BorrowingConfig) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	e.BorrowingMgr = NewBorrowingManager(e, config)
+	e.BorrowingMgr = NewBorrowingManager(config)
 	return nil
 }
 
@@ -648,4 +648,37 @@ func (e *Exchange) SetRunning(v bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.running = v
+}
+
+// SettleFunding manually triggers a funding settlement for the given perpetual.
+// Called automatically by ExchangeAutomation; exposed here for direct use in tests
+// and custom automation implementations.
+func (e *Exchange) SettleFunding(perp *PerpFutures) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	settleFunding(e.Positions, e.Clients, perp, e.Clock, buildFundingSink(e))
+}
+
+// BorrowMargin borrows amount of asset for clientID. Acquires exchange lock.
+func (e *Exchange) BorrowMargin(clientID uint64, asset string, amount int64, reason string) error {
+	if e.BorrowingMgr == nil {
+		return errors.New("borrowing not enabled")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	client := e.Clients[clientID]
+	ctx := buildBorrowContext(e, client, clientID)
+	return e.BorrowingMgr.BorrowMargin(ctx, asset, amount, reason)
+}
+
+// RepayMargin repays amount of asset for clientID. Acquires exchange lock.
+func (e *Exchange) RepayMargin(clientID uint64, asset string, amount int64) error {
+	if e.BorrowingMgr == nil {
+		return errors.New("borrowing not enabled")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	client := e.Clients[clientID]
+	ctx := buildBorrowContext(e, client, clientID)
+	return e.BorrowingMgr.RepayMargin(ctx, asset, amount)
 }

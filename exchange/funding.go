@@ -35,13 +35,13 @@ func (pm *PositionManager) GetPositionBySide(clientID uint64, symbol string, pos
 	if p == nil {
 		return nil
 	}
-	// Return copy to avoid races with callers using the value after lock release
 	copy := *p
 	return &copy
 }
 
-// UpdatePositionWithDelta updates the position and returns old and new state.
-func (pm *PositionManager) UpdatePositionWithDelta(clientID uint64, symbol string, qty, price int64, tradeSide Side, posSide PositionSide, exchange *Exchange, reason string) PositionDelta {
+// UpdatePosition applies a trade delta and returns old/new state.
+// Logging is the caller's responsibility.
+func (pm *PositionManager) UpdatePosition(clientID uint64, symbol string, qty, price int64, tradeSide Side, posSide PositionSide) PositionDelta {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -57,57 +57,52 @@ func (pm *PositionManager) UpdatePositionWithDelta(clientID uint64, symbol strin
 	}
 
 	delta := PositionDelta{OldSize: pos.Size, OldEntryPrice: pos.EntryPrice}
-
 	pm.applyPositionChange(pos, qty, price, tradeSide, posSide)
-
 	delta.NewSize = pos.Size
 	delta.NewEntryPrice = pos.EntryPrice
-
-	if exchange != nil {
-		timestamp := pm.clock.NowUnixNano()
-		if log := exchange.getLogger("_global"); log != nil {
-			log.LogEvent(timestamp, clientID, "position_update", PositionUpdateEvent{
-				Timestamp:     timestamp,
-				ClientID:      clientID,
-				Symbol:        symbol,
-				OldSize:       delta.OldSize,
-				OldEntryPrice: delta.OldEntryPrice,
-				NewSize:       delta.NewSize,
-				NewEntryPrice: delta.NewEntryPrice,
-				TradeQty:      qty,
-				TradePrice:    price,
-				TradeSide:     tradeSide.String(),
-				Reason:        reason,
-			})
-
-			openInterest := pm.calculateOpenInterestUnsafe(symbol)
-			log.LogEvent(timestamp, 0, "open_interest", OpenInterestEvent{
-				Timestamp:    timestamp,
-				Symbol:       symbol,
-				OpenInterest: openInterest,
-			})
-		}
-	}
-
 	return delta
 }
 
-func (pm *PositionManager) UpdatePosition(clientID uint64, symbol string, qty, price int64, side Side) {
-	pm.mu.Lock()
-	defer pm.mu.Unlock()
+func (pm *PositionManager) HasOpenPositions(clientID uint64) bool {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
 
-	if pm.positions[clientID] == nil {
-		pm.positions[clientID] = make(map[positionKey]*Position)
+	for _, pos := range pm.positions[clientID] {
+		if pos != nil && pos.Size != 0 {
+			return true
+		}
 	}
+	return false
+}
 
-	key := positionKey{symbol, PositionBoth}
-	pos := pm.positions[clientID][key]
-	if pos == nil {
-		pos = &Position{ClientID: clientID, Symbol: symbol, PositionSide: PositionBoth}
-		pm.positions[clientID][key] = pos
+func (pm *PositionManager) PositionsForFunding(symbol string, fn func(clientID uint64, pos Position)) {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	for clientID, clientPositions := range pm.positions {
+		pos := clientPositions[positionKey{symbol, PositionBoth}]
+		if pos == nil || pos.Size == 0 {
+			continue
+		}
+		fn(clientID, *pos)
 	}
+}
 
-	pm.applyPositionChange(pos, qty, price, side, PositionBoth)
+func (pm *PositionManager) GetAllPositions(clientID uint64) []Position {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	clientPositions := pm.positions[clientID]
+	if len(clientPositions) == 0 {
+		return nil
+	}
+	result := make([]Position, 0, len(clientPositions))
+	for _, pos := range clientPositions {
+		if pos.Size != 0 {
+			result = append(result, *pos)
+		}
+	}
+	return result
 }
 
 func (pm *PositionManager) applyPositionChange(pos *Position, qty, price int64, tradeSide Side, posSide PositionSide) {
@@ -208,31 +203,35 @@ func (pm *PositionManager) calculateOpenInterestUnsafe(symbol string) int64 {
 	return total
 }
 
-// SettleFunding applies funding payments from/to client PerpBalances.
-// Payments are zero-sum: the net flow between longs and shorts routes to/from
-// exchange.ExchangeBalance.FeeRevenue so money is conserved.
-func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpFutures, exchange *Exchange) {
+// fundingEventSink carries the two side-effects settleFunding needs from the exchange.
+// Defined here because it references exchange-internal types. Unexported.
+type fundingEventSink struct {
+	logBalance   func(timestamp int64, clientID uint64, symbol, reason string, changes []BalanceDelta)
+	recordRevenue func(asset string, amount int64)
+}
+
+// SettleFunding settles funding for perp without logging. Used in isolated unit tests.
+func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpFutures) {
+	settleFunding(pm, clients, perp, pm.clock, fundingEventSink{})
+}
+
+// settleFunding applies funding payments from/to client PerpBalances.
+// Payments are zero-sum: net flow between longs and shorts routes to/from exchange revenue.
+func settleFunding(store PositionStore, clients map[uint64]*Client, perp *PerpFutures, clock Clock, sink fundingEventSink) {
 	fundingRate := perp.GetFundingRate()
-	precision := perp.BasePrecision() // satoshis per whole base asset (not TickSize)
-	timestamp := pm.clock.NowUnixNano()
+	precision := perp.BasePrecision()
+	timestamp := clock.NowUnixNano()
 	quote := perp.QuoteAsset()
 
 	// netExchangeFlow > 0: exchange received more from longs than it paid to shorts.
 	// netExchangeFlow < 0: exchange paid out more to shorts than it received from longs.
 	netExchangeFlow := int64(0)
 
-	perpSymbol := perp.Symbol()
-	for clientID, clientPos := range pm.positions {
-		pos := clientPos[positionKey{perpSymbol, PositionBoth}]
-		if pos == nil || pos.Size == 0 {
-			continue
-		}
-
+	store.PositionsForFunding(perp.Symbol(), func(clientID uint64, pos Position) {
 		client := clients[clientID]
 		if client == nil {
-			continue
+			return
 		}
-
 		positionValue := abs(pos.Size) * pos.EntryPrice / precision
 		funding := positionValue * fundingRate.Rate / 10000
 
@@ -244,21 +243,20 @@ func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpF
 			client.PerpBalances[quote] += funding
 			netExchangeFlow -= funding
 		}
-
-		if exchange != nil {
-			logBalanceChange(exchange, timestamp, clientID, perp.Symbol(), "funding_settlement", []BalanceDelta{
+		if sink.logBalance != nil {
+			sink.logBalance(timestamp, clientID, perp.Symbol(), "funding_settlement", []BalanceDelta{
 				perpDelta(quote, oldBalance, client.PerpBalances[quote]),
 			})
 		}
-	}
+	})
 
 	// Route net imbalance to exchange fee revenue (or drain from it if negative).
 	// On real exchanges this goes to the insurance fund when the exchange is the residual payer.
-	if exchange != nil && netExchangeFlow != 0 {
-		exchange.ExchangeBalance.FeeRevenue[quote] += netExchangeFlow
+	if sink.recordRevenue != nil && netExchangeFlow != 0 {
+		sink.recordRevenue(quote, netExchangeFlow)
 	}
 
-	fundingRate.NextFunding = pm.clock.NowUnixNano() + (fundingRate.Interval * 1e9)
+	fundingRate.NextFunding = clock.NowUnixNano() + (fundingRate.Interval * 1e9)
 }
 
 // realizedPerpPnL calculates the realized PnL for a perp fill.

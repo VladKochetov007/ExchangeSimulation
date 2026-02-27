@@ -115,32 +115,25 @@ func (e *Exchange) queryAccount(clientID uint64, req *QueryRequest) Response {
 
 	timestamp := e.Clock.NowUnixNano()
 	snap := client.GetBalanceSnapshot(timestamp)
-	positions := e.buildPositionSnapshots(clientID, timestamp)
+	positions := e.buildPositionSnapshots(clientID)
 	return Response{RequestID: req.RequestID, Success: true, Data: &AccountSnapshot{BalanceSnapshot: *snap, Positions: positions}}
 }
 
-func (e *Exchange) buildPositionSnapshots(clientID uint64, timestamp int64) []PositionSnapshot {
-	e.Positions.mu.RLock()
-	defer e.Positions.mu.RUnlock()
-
-	clientPositions := e.Positions.positions[clientID]
-	if len(clientPositions) == 0 {
+func (e *Exchange) buildPositionSnapshots(clientID uint64) []PositionSnapshot {
+	positions := e.Positions.GetAllPositions(clientID)
+	if len(positions) == 0 {
 		return nil
 	}
-
-	snapshots := make([]PositionSnapshot, 0, len(clientPositions))
-	for key, pos := range clientPositions {
-		if pos.Size == 0 {
-			continue
-		}
-		book := e.Books[key.Symbol]
+	snapshots := make([]PositionSnapshot, 0, len(positions))
+	for _, pos := range positions {
+		book := e.Books[pos.Symbol]
 		var markPrice int64
 		if book != nil {
 			markPrice = marketRefPrice(book)
 		}
 		var unrealizedPnL int64
 		if markPrice > 0 && pos.EntryPrice > 0 {
-			instrument := e.Instruments[key.Symbol]
+			instrument := e.Instruments[pos.Symbol]
 			if instrument != nil {
 				precision := instrument.BasePrecision()
 				sign := int64(1)
@@ -151,8 +144,8 @@ func (e *Exchange) buildPositionSnapshots(clientID uint64, timestamp int64) []Po
 			}
 		}
 		snapshots = append(snapshots, PositionSnapshot{
-			Symbol:        key.Symbol,
-			PositionSide:  key.Side,
+			Symbol:        pos.Symbol,
+			PositionSide:  pos.PositionSide,
 			Size:          pos.Size,
 			EntryPrice:    pos.EntryPrice,
 			MarkPrice:     markPrice,
@@ -451,9 +444,9 @@ func releaseOrderFunds(client *Client, instrument Instrument, side Side, qty, pr
 	}
 }
 
-// tryReserveOrBorrow attempts reserveFn; on failure, if BorrowingMgr is configured it
-// temporarily releases e.mu, auto-borrows, reacquires, then retries the reservation.
-// Caller must hold e.mu.Lock().
+// tryReserveOrBorrow attempts reserveFn; on failure, if BorrowingMgr is configured
+// it borrows the shortfall inline and retries. Caller must hold e.mu.Lock().
+// No unlock/relock needed — BorrowingManager no longer acquires the exchange lock.
 func (e *Exchange) tryReserveOrBorrow(
 	clientID uint64, asset string, amount int64,
 	reserveFn func(string, int64) bool,
@@ -465,13 +458,33 @@ func (e *Exchange) tryReserveOrBorrow(
 	if e.BorrowingMgr == nil {
 		return false
 	}
-	e.mu.Unlock()
-	var borrowed bool
-	if isPerp {
-		borrowed, _ = e.BorrowingMgr.AutoBorrowForPerpTrade(clientID, asset, amount)
-	} else {
-		borrowed, _ = e.BorrowingMgr.AutoBorrowForSpotTrade(clientID, asset, amount)
+	cfg := e.BorrowingMgr.Config
+	if isPerp && !cfg.AutoBorrowPerp {
+		return false
 	}
-	e.mu.Lock()
-	return borrowed && reserveFn(asset, amount)
+	if !isPerp && !cfg.AutoBorrowSpot {
+		return false
+	}
+	client := e.Clients[clientID]
+	if client == nil {
+		return false
+	}
+	var available int64
+	if isPerp {
+		available = client.PerpAvailable(asset)
+	} else {
+		available = client.GetAvailable(asset)
+	}
+	if available >= amount {
+		return false
+	}
+	reason := "auto_spot"
+	if isPerp {
+		reason = "auto_perp"
+	}
+	ctx := buildBorrowContext(e, client, clientID)
+	if err := e.BorrowingMgr.BorrowMargin(ctx, asset, amount-available, reason); err != nil {
+		return false
+	}
+	return reserveFn(asset, amount)
 }

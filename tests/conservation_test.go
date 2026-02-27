@@ -237,7 +237,7 @@ func TestSettleFunding_CorrectMagnitudeAtBTCPrices(t *testing.T) {
 	longBefore := ex.Clients[1].PerpBalances["USD"]
 	shortBefore := ex.Clients[2].PerpBalances["USD"]
 
-	ex.Positions.SettleFunding(ex.Clients, perp, ex)
+	ex.SettleFunding(perp)
 
 	longAfter := ex.Clients[1].PerpBalances["USD"]
 	shortAfter := ex.Clients[2].PerpBalances["USD"]
@@ -283,7 +283,7 @@ func TestSettleFunding_AsymmetricOIRoutesToExchange(t *testing.T) {
 	initialTotal := totalMoney(ex, "USD")
 	feeRevenueBefore := ex.ExchangeBalance.FeeRevenue["USD"]
 
-	ex.Positions.SettleFunding(ex.Clients, perp, ex)
+	ex.SettleFunding(perp)
 
 	// Long pays: 1e8 * 5e9 / 1e8 * 10 / 10000 = 5_000_000 ($50)
 	// Short receives: 1e8 * 4e9 / 1e8 * 10 / 10000 = 4_000_000 ($40)

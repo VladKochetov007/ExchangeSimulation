@@ -42,7 +42,6 @@ func TestInsertLimit_MiddleInsertion(t *testing.T) {
 func TestBookCancelOrder_NotFound(t *testing.T) {
 	book := &OrderBook{
 		Bids: NewBook(Buy),
-		Asks: NewBook(Sell),
 	}
 	// Cancel non-existent orderID — should return nil without panic
 	result := book.Bids.CancelOrder(99999)
@@ -68,17 +67,13 @@ func TestRunBalanceSnapshotLoop_Ticks(t *testing.T) {
 // --- validateCrossMarginCollateral: nil oracle path ---
 
 func TestValidateCrossMarginCollateral_NilOracle(t *testing.T) {
-	ex := NewExchange(10, &RealClock{})
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
-	ex.AddPerpBalance(1, "USD", USDAmount(100_000))
+	client := NewClient(1, &FixedFee{})
+	client.PerpBalances["USD"] = USDAmount(100_000)
 
-	// Nil oracle — validateCrossMarginCollateral returns "price oracle not configured"
-	bm := NewBorrowingManager(ex, BorrowingConfig{
-		Enabled:     true,
-		PriceSource: nil,
-	})
+	bm := NewBorrowingManager(BorrowingConfig{Enabled: true, PriceSource: nil})
+	ctx := BorrowContext{Client: client, ClientID: 1}
 
-	err := bm.BorrowMargin(1, "USD", USDAmount(1_000), "test")
+	err := bm.BorrowMargin(ctx, "USD", USDAmount(1_000), "test")
 	if err == nil || err.Error() != "price oracle not configured" {
 		t.Errorf("expected 'price oracle not configured', got %v", err)
 	}
@@ -87,20 +82,19 @@ func TestValidateCrossMarginCollateral_NilOracle(t *testing.T) {
 // --- validateCrossMarginCollateral: borrow asset price unavailable ---
 
 func TestValidateCrossMarginCollateral_ZeroBorrowAssetPrice(t *testing.T) {
-	ex := NewExchange(10, &RealClock{})
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
-	ex.AddPerpBalance(1, "USD", USDAmount(100_000))
+	client := NewClient(1, &FixedFee{})
+	client.PerpBalances["USD"] = USDAmount(100_000)
 
-	// Oracle returns 0 for "USD" → "price unavailable"
 	oracle := NewStaticPriceOracle(map[string]int64{}) // no prices at all
-	bm := NewBorrowingManager(ex, BorrowingConfig{
+	bm := NewBorrowingManager(BorrowingConfig{
 		Enabled:           true,
 		BorrowRates:       map[string]int64{"USD": 500},
 		CollateralFactors: map[string]float64{"USD": 1.0},
 		PriceSource:       oracle,
 	})
+	ctx := BorrowContext{Client: client, ClientID: 1}
 
-	err := bm.BorrowMargin(1, "USD", USDAmount(1_000), "test")
+	err := bm.BorrowMargin(ctx, "USD", USDAmount(1_000), "test")
 	if err == nil || err.Error() != "price unavailable" {
 		t.Errorf("expected 'price unavailable', got %v", err)
 	}
@@ -109,35 +103,28 @@ func TestValidateCrossMarginCollateral_ZeroBorrowAssetPrice(t *testing.T) {
 // --- AutoBorrowForSpotTrade: borrow fails → returns (false, err) ---
 
 func TestAutoBorrowForSpotTrade_BorrowFails(t *testing.T) {
-	ex, bm := setupBorrowingExchange()
-	// Give client 2 just a tiny spot balance so AutoBorrow triggers but borrow fails
-	// due to insufficient collateral (no perp balance to satisfy validateCrossMarginCollateral).
+	ex := setupBorrowingExchange()
+	// Client 3: tiny spot balance, no perp collateral → collateral validation fails
 	ex.ConnectClient(3, map[string]int64{"USD": USDAmount(100)}, &FixedFee{})
-	// No perp balance → collateral value = 0 → borrow fails
 
-	borrowed, err := bm.AutoBorrowForSpotTrade(3, "USD", USDAmount(10_000))
+	// Direct borrow call with no collateral should fail with "insufficient collateral"
+	err := ex.BorrowMargin(3, "USD", USDAmount(10_000), "test")
 	if err == nil {
-		t.Error("expected error when auto-borrow collateral is insufficient")
-	}
-	if borrowed {
-		t.Error("expected borrowed=false when borrow fails")
+		t.Error("expected error when collateral is insufficient")
 	}
 }
 
 // --- AutoBorrowForPerpTrade: borrow fails → returns (false, err) ---
 
 func TestAutoBorrowForPerpTrade_BorrowFails(t *testing.T) {
-	ex, bm := setupBorrowingExchange()
+	ex := setupBorrowingExchange()
 	ex.ConnectClient(3, map[string]int64{}, &FixedFee{})
-	// Tiny perp balance, no collateral
-	ex.AddPerpBalance(3, "USD", USDAmount(10)) // $0.0001 — not enough to borrow $9,990
+	// Tiny perp balance, no collateral — borrow should fail
+	ex.AddPerpBalance(3, "USD", USDAmount(10))
 
-	borrowed, err := bm.AutoBorrowForPerpTrade(3, "USD", USDAmount(10_000))
+	err := ex.BorrowMargin(3, "USD", USDAmount(10_000), "test")
 	if err == nil {
-		t.Error("expected error when auto-borrow collateral is insufficient")
-	}
-	if borrowed {
-		t.Error("expected borrowed=false when borrow fails")
+		t.Error("expected error when collateral is insufficient")
 	}
 }
 
@@ -196,7 +183,7 @@ func TestCancelOrder_NotOwnedWithLogger(t *testing.T) {
 
 func TestCalculateCollateralUsed_ZeroFactor(t *testing.T) {
 	oracle := NewStaticPriceOracle(map[string]int64{"USD": USD_PRECISION})
-	bm := NewBorrowingManager(nil, BorrowingConfig{
+	bm := NewBorrowingManager(BorrowingConfig{
 		PriceSource:       oracle,
 		CollateralFactors: map[string]float64{"USD": 0.0, "default": 0.0},
 	})

@@ -240,11 +240,11 @@ func TestPerpFundingUsesPerpWallet(t *testing.T) {
 	clients[1].PerpBalances["USD"] = USDAmount(10000)
 	clients[1].Balances["USD"] = USDAmount(10000)
 
-	pm.UpdatePosition(1, "BTC-PERP", BTC_PRECISION, PriceUSD(50000, BTC_PRECISION), Buy)
+	pm.UpdatePosition(1, "BTC-PERP", BTC_PRECISION, PriceUSD(50000, BTC_PRECISION), Buy, PositionBoth)
 	perp.UpdateFundingRate(PriceUSD(50000, BTC_PRECISION), PriceUSD(50100, BTC_PRECISION))
 
 	spotBefore := clients[1].Balances["USD"]
-	pm.SettleFunding(clients, perp, nil)
+	pm.SettleFunding(clients, perp)
 
 	// Spot wallet must not change
 	if clients[1].Balances["USD"] != spotBefore {

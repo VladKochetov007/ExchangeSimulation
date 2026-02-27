@@ -61,6 +61,7 @@ type BorrowingConfig = etypes.BorrowingConfig
 type IsolatedPosition = etypes.IsolatedPosition
 type PositionDelta = etypes.PositionDelta
 type PositionSide = etypes.PositionSide
+type PositionStore = etypes.PositionStore
 type FillContext = etypes.FillContext
 type PositionSnapshot = etypes.PositionSnapshot
 type AccountSnapshot = etypes.AccountSnapshot

@@ -140,16 +140,16 @@ func TestPlaceOrder_AutoBorrow_SpotLimitBuySuccess(t *testing.T) {
 }
 
 func TestRepayMargin_InsufficientAvailableBalance(t *testing.T) {
-	ex, bm := setupBorrowingExchange()
+	ex := setupBorrowingExchange()
 	// Borrow $1k
-	_ = bm.BorrowMargin(1, "USD", USDAmount(1_000), "test")
+	_ = ex.BorrowMargin(1, "USD", USDAmount(1_000), "test")
 
 	// Reserve all perp balance so PerpAvailable → negative
 	ex.Lock()
 	ex.Clients[1].PerpReserved["USD"] = USDAmount(200_000) // more than PerpBalances
 	ex.Unlock()
 
-	err := bm.RepayMargin(1, "USD", USDAmount(500))
+	err := ex.RepayMargin(1, "USD", USDAmount(500))
 	if err == nil {
 		t.Error("expected error when perp available < repay amount")
 	}

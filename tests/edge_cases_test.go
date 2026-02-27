@@ -333,9 +333,9 @@ func TestSettleFundingWithMissingClient(t *testing.T) {
 
 	clients := make(map[uint64]*Client)
 
-	pm.UpdatePosition(1, "BTC-PERP", BTC_PRECISION, 50000*BTC_PRECISION, Buy)
+	pm.UpdatePosition(1, "BTC-PERP", BTC_PRECISION, 50000*BTC_PRECISION, Buy, PositionBoth)
 
 	perp.UpdateFundingRate(50000*BTC_PRECISION, 50100*BTC_PRECISION)
 
-	pm.SettleFunding(clients, perp, nil)
+	pm.SettleFunding(clients, perp)
 }

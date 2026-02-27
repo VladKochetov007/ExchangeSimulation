@@ -2,38 +2,34 @@ package exchange
 
 import "errors"
 
+// BorrowContext carries already-resolved, mutable client state for a single borrow/repay call.
+// The exchange holds its lock before constructing this; BorrowingManager must not acquire any lock.
+type BorrowContext struct {
+	Client    *Client
+	ClientID  uint64
+	Timestamp int64
+	LogBalance func(reason string, changes []BalanceDelta)
+	LogEvent   func(event string, data any)
+}
+
 type BorrowingManager struct {
-	exchange *Exchange
-	Config   BorrowingConfig
+	Config BorrowingConfig
 }
 
-func NewBorrowingManager(exchange *Exchange, config BorrowingConfig) *BorrowingManager {
-	return &BorrowingManager{
-		exchange: exchange,
-		Config:   config,
-	}
+func NewBorrowingManager(config BorrowingConfig) *BorrowingManager {
+	return &BorrowingManager{Config: config}
 }
 
-func (bm *BorrowingManager) BorrowMargin(
-	clientID uint64,
-	asset string,
-	amount int64,
-	reason string,
-) error {
+func (bm *BorrowingManager) BorrowMargin(ctx BorrowContext, asset string, amount int64, reason string) error {
 	if !bm.Config.Enabled {
 		return errors.New("borrowing disabled")
 	}
-
-	bm.exchange.mu.Lock()
-	defer bm.exchange.mu.Unlock()
-
-	client := bm.exchange.Clients[clientID]
-	if client == nil {
+	if ctx.Client == nil {
 		return errors.New("unknown client")
 	}
 
-	if client.MarginMode == CrossMargin {
-		if err := bm.validateCrossMarginCollateral(client, asset, amount); err != nil {
+	if ctx.Client.MarginMode == CrossMargin {
+		if err := bm.validateCrossMarginCollateral(ctx.Client, asset, amount); err != nil {
 			return err
 		}
 	} else {
@@ -41,34 +37,34 @@ func (bm *BorrowingManager) BorrowMargin(
 	}
 
 	if limit := bm.Config.MaxBorrowPerAsset[asset]; limit > 0 {
-		if client.Borrowed[asset]+amount > limit {
+		if ctx.Client.Borrowed[asset]+amount > limit {
 			return errors.New("exceeds max borrow limit")
 		}
 	}
 
-	oldBorrowed := client.Borrowed[asset]
-	client.Borrowed[asset] += amount
+	oldBorrowed := ctx.Client.Borrowed[asset]
+	ctx.Client.Borrowed[asset] += amount
 
-	oldPerp := client.PerpBalances[asset]
-	client.PerpBalances[asset] += amount
+	oldPerp := ctx.Client.PerpBalances[asset]
+	ctx.Client.PerpBalances[asset] += amount
 
-	timestamp := bm.exchange.Clock.NowUnixNano()
 	rate := bm.getRate(asset)
 	collateral := bm.CalculateCollateralUsed(asset, amount)
 
-	logBalanceChange(bm.exchange, timestamp, clientID, "", "borrow", []BalanceDelta{
-		perpDelta(asset, oldPerp, client.PerpBalances[asset]),
-		borrowedDelta(asset, oldBorrowed, client.Borrowed[asset]),
-	})
-
-	if log := bm.exchange.getLogger("_global"); log != nil {
-		log.LogEvent(timestamp, clientID, "borrow", BorrowEvent{
-			Timestamp:      timestamp,
-			ClientID:       clientID,
+	if ctx.LogBalance != nil {
+		ctx.LogBalance("borrow", []BalanceDelta{
+			perpDelta(asset, oldPerp, ctx.Client.PerpBalances[asset]),
+			borrowedDelta(asset, oldBorrowed, ctx.Client.Borrowed[asset]),
+		})
+	}
+	if ctx.LogEvent != nil {
+		ctx.LogEvent("borrow", BorrowEvent{
+			Timestamp:      ctx.Timestamp,
+			ClientID:       ctx.ClientID,
 			Asset:          asset,
 			Amount:         amount,
 			Reason:         reason,
-			MarginMode:     client.MarginMode.String(),
+			MarginMode:     ctx.Client.MarginMode.String(),
 			InterestRate:   rate,
 			CollateralUsed: collateral,
 		})
@@ -77,112 +73,45 @@ func (bm *BorrowingManager) BorrowMargin(
 	return nil
 }
 
-func (bm *BorrowingManager) RepayMargin(clientID uint64, asset string, amount int64) error {
-	bm.exchange.mu.Lock()
-	defer bm.exchange.mu.Unlock()
-
-	client := bm.exchange.Clients[clientID]
-	if client == nil {
-		return errors.New("unknown client")
-	}
-
-	borrowed := client.Borrowed[asset]
+func (bm *BorrowingManager) RepayMargin(ctx BorrowContext, asset string, amount int64) error {
+	borrowed := ctx.Client.Borrowed[asset]
 	if borrowed == 0 {
 		return errors.New("no outstanding debt")
 	}
-
 	if amount > borrowed {
 		amount = borrowed
 	}
-
-	if client.PerpAvailable(asset) < amount {
+	if ctx.Client.PerpAvailable(asset) < amount {
 		return errors.New("insufficient balance to repay")
 	}
 
-	oldPerp := client.PerpBalances[asset]
-	client.PerpBalances[asset] -= amount
+	oldPerp := ctx.Client.PerpBalances[asset]
+	ctx.Client.PerpBalances[asset] -= amount
 
-	oldBorrowed := client.Borrowed[asset]
-	client.Borrowed[asset] -= amount
+	oldBorrowed := ctx.Client.Borrowed[asset]
+	ctx.Client.Borrowed[asset] -= amount
 
-	timestamp := bm.exchange.Clock.NowUnixNano()
-
-	logBalanceChange(bm.exchange, timestamp, clientID, "", "repay", []BalanceDelta{
-		perpDelta(asset, oldPerp, client.PerpBalances[asset]),
-		borrowedDelta(asset, oldBorrowed, client.Borrowed[asset]),
-	})
-
-	if log := bm.exchange.getLogger("_global"); log != nil {
-		log.LogEvent(timestamp, clientID, "repay", RepayEvent{
-			Timestamp:     timestamp,
-			ClientID:      clientID,
+	if ctx.LogBalance != nil {
+		ctx.LogBalance("repay", []BalanceDelta{
+			perpDelta(asset, oldPerp, ctx.Client.PerpBalances[asset]),
+			borrowedDelta(asset, oldBorrowed, ctx.Client.Borrowed[asset]),
+		})
+	}
+	if ctx.LogEvent != nil {
+		ctx.LogEvent("repay", RepayEvent{
+			Timestamp:     ctx.Timestamp,
+			ClientID:      ctx.ClientID,
 			Asset:         asset,
 			Principal:     amount,
 			Interest:      0,
-			RemainingDebt: client.Borrowed[asset],
+			RemainingDebt: ctx.Client.Borrowed[asset],
 		})
 	}
 
 	return nil
 }
 
-func (bm *BorrowingManager) AutoBorrowForSpotTrade(
-	clientID uint64,
-	asset string,
-	required int64,
-) (bool, error) {
-	if !bm.Config.Enabled || !bm.Config.AutoBorrowSpot {
-		return false, nil
-	}
-
-	bm.exchange.mu.RLock()
-	client := bm.exchange.Clients[clientID]
-	available := client.GetAvailable(asset)
-	bm.exchange.mu.RUnlock()
-
-	if available >= required {
-		return false, nil
-	}
-
-	shortfall := required - available
-	if err := bm.BorrowMargin(clientID, asset, shortfall, "auto_spot"); err != nil {
-		return false, err
-	}
-
-	return true, nil
-}
-
-func (bm *BorrowingManager) AutoBorrowForPerpTrade(
-	clientID uint64,
-	asset string,
-	required int64,
-) (bool, error) {
-	if !bm.Config.Enabled || !bm.Config.AutoBorrowPerp {
-		return false, nil
-	}
-
-	bm.exchange.mu.RLock()
-	client := bm.exchange.Clients[clientID]
-	available := client.PerpAvailable(asset)
-	bm.exchange.mu.RUnlock()
-
-	if available >= required {
-		return false, nil
-	}
-
-	shortfall := required - available
-	if err := bm.BorrowMargin(clientID, asset, shortfall, "auto_perp"); err != nil {
-		return false, err
-	}
-
-	return true, nil
-}
-
-func (bm *BorrowingManager) validateCrossMarginCollateral(
-	client *Client,
-	borrowAsset string,
-	borrowAmount int64,
-) error {
+func (bm *BorrowingManager) validateCrossMarginCollateral(client *Client, borrowAsset string, borrowAmount int64) error {
 	if bm.Config.PriceSource == nil {
 		return errors.New("price oracle not configured")
 	}
@@ -192,9 +121,7 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(
 		if balance <= 0 {
 			continue
 		}
-		price := bm.Config.PriceSource.Price(asset)
-		if price > 0 {
-			// Avoid overflow
+		if price := bm.Config.PriceSource.Price(asset); price > 0 {
 			totalCollateralValue += (balance / btcPrecision) * price
 		}
 	}
@@ -204,9 +131,7 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(
 		if borrowed <= 0 {
 			continue
 		}
-		price := bm.Config.PriceSource.Price(asset)
-		if price > 0 {
-			// Avoid overflow
+		if price := bm.Config.PriceSource.Price(asset); price > 0 {
 			existingBorrowValue += (borrowed / btcPrecision) * price
 		}
 	}
@@ -215,16 +140,12 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(
 	if borrowPrice == 0 {
 		return errors.New("price unavailable")
 	}
-	// Avoid overflow
 	newBorrowValue := (borrowAmount / btcPrecision) * borrowPrice
+	maxBorrowValue := int64(float64(totalCollateralValue) * bm.getCollateralFactor(borrowAsset))
 
-	factor := bm.getCollateralFactor(borrowAsset)
-
-	maxBorrowValue := int64(float64(totalCollateralValue) * factor)
 	if existingBorrowValue+newBorrowValue > maxBorrowValue {
 		return errors.New("insufficient collateral")
 	}
-
 	return nil
 }
 
@@ -260,7 +181,5 @@ func (bm *BorrowingManager) CalculateCollateralUsed(asset string, amount int64) 
 	if factor == 0 {
 		return 0
 	}
-	// Avoid overflow
-	borrowValue := (amount / btcPrecision) * price
-	return int64(float64(borrowValue) / factor)
+	return int64(float64((amount/btcPrecision)*price) / factor)
 }

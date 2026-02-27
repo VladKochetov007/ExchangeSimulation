@@ -232,8 +232,13 @@ func (e *Exchange) processPerpExecution(
 		makerPosSide = makerOrder.PositionSide
 	}
 
-	takerDelta = e.Positions.UpdatePositionWithDelta(exec.TakerClientID, book.Symbol, exec.Qty, exec.Price, takerOrder.Side, takerOrder.PositionSide, e, "trade")
-	makerDelta = e.Positions.UpdatePositionWithDelta(exec.MakerClientID, book.Symbol, exec.Qty, exec.Price, exec.MakerSide, makerPosSide, e, "trade")
+	takerDelta = e.Positions.UpdatePosition(exec.TakerClientID, book.Symbol, exec.Qty, exec.Price, takerOrder.Side, takerOrder.PositionSide)
+	makerDelta = e.Positions.UpdatePosition(exec.MakerClientID, book.Symbol, exec.Qty, exec.Price, exec.MakerSide, makerPosSide)
+	if globalLog := e.getLogger("_global"); globalLog != nil {
+		logPositionUpdate(globalLog, timestamp, exec.TakerClientID, book.Symbol, exec.Qty, exec.Price, takerOrder.Side, takerDelta)
+		logPositionUpdate(globalLog, timestamp, exec.MakerClientID, book.Symbol, exec.Qty, exec.Price, exec.MakerSide, makerDelta)
+		logOpenInterest(globalLog, timestamp, book.Symbol, e.Positions.CalculateOpenInterest(book.Symbol))
+	}
 
 	takerCtx := perpSideCtx{
 		client:     taker,
@@ -350,4 +355,28 @@ func sendFillNotification(
 			NewEntryPrice: delta.NewEntryPrice,
 		},
 	}
+}
+
+func logPositionUpdate(log Logger, timestamp int64, clientID uint64, symbol string, qty, price int64, side Side, delta PositionDelta) {
+	log.LogEvent(timestamp, clientID, "position_update", PositionUpdateEvent{
+		Timestamp:     timestamp,
+		ClientID:      clientID,
+		Symbol:        symbol,
+		OldSize:       delta.OldSize,
+		OldEntryPrice: delta.OldEntryPrice,
+		NewSize:       delta.NewSize,
+		NewEntryPrice: delta.NewEntryPrice,
+		TradeQty:      qty,
+		TradePrice:    price,
+		TradeSide:     side.String(),
+		Reason:        "trade",
+	})
+}
+
+func logOpenInterest(log Logger, timestamp int64, symbol string, openInterest int64) {
+	log.LogEvent(timestamp, 0, "open_interest", OpenInterestEvent{
+		Timestamp:    timestamp,
+		Symbol:       symbol,
+		OpenInterest: openInterest,
+	})
 }

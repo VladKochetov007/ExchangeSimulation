@@ -52,7 +52,7 @@ func TestComprehensiveBorrowRepayLogging(t *testing.T) {
 
 		// Borrow USD
 		borrowAmount := int64(60000 * USD_PRECISION)
-		err := ex.BorrowingMgr.BorrowMargin(1, "USD", borrowAmount, "test_borrow")
+		err := ex.BorrowMargin(1, "USD", borrowAmount, "test_borrow")
 		if err != nil {
 			t.Fatalf("Borrow failed: %v", err)
 		}
@@ -115,7 +115,7 @@ func TestComprehensiveBorrowRepayLogging(t *testing.T) {
 
 		// Repay half
 		repayAmount := borrowAmount / 2
-		err = ex.BorrowingMgr.RepayMargin(1, "USD", repayAmount)
+		err = ex.RepayMargin(1, "USD", repayAmount)
 		if err != nil {
 			t.Fatalf("Repay failed: %v", err)
 		}
@@ -162,10 +162,10 @@ func TestComprehensiveBorrowRepayLogging(t *testing.T) {
 		ex.Clients[4] = client4
 
 		// Execute borrows
-		ex.BorrowingMgr.BorrowMargin(2, "USD", 100000*USD_PRECISION, "client2_usd")
-		ex.BorrowingMgr.BorrowMargin(3, "BTC", 2*BTC_PRECISION, "client3_btc")
-		ex.BorrowingMgr.BorrowMargin(4, "USD", 150000*USD_PRECISION, "client4_usd")
-		ex.BorrowingMgr.BorrowMargin(4, "BTC", 1*BTC_PRECISION, "client4_btc")
+		ex.BorrowMargin(2, "USD", 100000*USD_PRECISION, "client2_usd")
+		ex.BorrowMargin(3, "BTC", 2*BTC_PRECISION, "client3_btc")
+		ex.BorrowMargin(4, "USD", 150000*USD_PRECISION, "client4_usd")
+		ex.BorrowMargin(4, "BTC", 1*BTC_PRECISION, "client4_btc")
 
 		// Verify all borrow events logged with correct client IDs
 		if len(logger.borrows) != 4 {
@@ -196,8 +196,8 @@ func TestComprehensiveBorrowRepayLogging(t *testing.T) {
 		}
 
 		// Repay operations
-		ex.BorrowingMgr.RepayMargin(2, "USD", 50000*USD_PRECISION)
-		ex.BorrowingMgr.RepayMargin(4, "USD", 75000*USD_PRECISION)
+		ex.RepayMargin(2, "USD", 50000*USD_PRECISION)
+		ex.RepayMargin(4, "USD", 75000*USD_PRECISION)
 
 		// Verify repay events
 		if len(logger.repays) != 2 {
@@ -228,7 +228,7 @@ func TestComprehensiveBorrowRepayLogging(t *testing.T) {
 		ex.Clients[5] = client5
 
 		// Try to borrow way more than collateral allows
-		err := ex.BorrowingMgr.BorrowMargin(5, "BTC", 100*BTC_PRECISION, "should_fail")
+		err := ex.BorrowMargin(5, "BTC", 100*BTC_PRECISION, "should_fail")
 		if err == nil {
 			t.Error("Expected borrow to fail with insufficient collateral")
 		}
@@ -267,9 +267,9 @@ func TestComprehensiveFundingLogging(t *testing.T) {
 
 	// Positions
 	pm := NewPositionManager(clock)
-	pm.UpdatePosition(1, "BTC-PERP", 2*BTC_PRECISION, 50000*USD_PRECISION, Buy)   // Long 2 BTC
-	pm.UpdatePosition(2, "BTC-PERP", 1*BTC_PRECISION, 50000*USD_PRECISION, Buy)   // Long 1 BTC
-	pm.UpdatePosition(3, "BTC-PERP", -3*BTC_PRECISION, 50000*USD_PRECISION, Sell) // Short 3 BTC
+	pm.UpdatePosition(1, "BTC-PERP", 2*BTC_PRECISION, 50000*USD_PRECISION, Buy, PositionBoth)   // Long 2 BTC
+	pm.UpdatePosition(2, "BTC-PERP", 1*BTC_PRECISION, 50000*USD_PRECISION, Buy, PositionBoth)   // Long 1 BTC
+	pm.UpdatePosition(3, "BTC-PERP", -3*BTC_PRECISION, 50000*USD_PRECISION, Sell, PositionBoth) // Short 3 BTC
 
 	t.Run("FundingSettlementLogging", func(t *testing.T) {
 		logger.balanceChanges = nil
@@ -278,7 +278,7 @@ func TestComprehensiveFundingLogging(t *testing.T) {
 		btcPerp.UpdateFundingRate(50000*USD_PRECISION, 50500*USD_PRECISION)
 
 		// Settle funding
-		pm.SettleFunding(ex.Clients, btcPerp, ex)
+		pm.SettleFunding(ex.Clients, btcPerp)
 
 		// Verify balance changes were logged for all position holders
 		fundingEvents := make(map[uint64]BalanceChangeEvent)
@@ -321,7 +321,7 @@ func TestComprehensiveFundingLogging(t *testing.T) {
 		// Negative funding = shorts pay longs (perp trading at discount)
 		btcPerp.UpdateFundingRate(50000*USD_PRECISION, 49500*USD_PRECISION)
 
-		pm.SettleFunding(ex.Clients, btcPerp, ex)
+		pm.SettleFunding(ex.Clients, btcPerp)
 
 		// Count funding events
 		fundingCount := 0
@@ -378,10 +378,10 @@ func TestMultiVenueBorrowingLogging(t *testing.T) {
 	ex2.Clients[clientID] = client2
 
 	// Borrow on exchange 1
-	ex1.BorrowingMgr.BorrowMargin(clientID, "USD", 50000*USD_PRECISION, "venue1_borrow")
+	ex1.BorrowMargin(clientID, "USD", 50000*USD_PRECISION, "venue1_borrow")
 
 	// Borrow on exchange 2
-	ex2.BorrowingMgr.BorrowMargin(clientID, "USD", 60000*USD_PRECISION, "venue2_borrow")
+	ex2.BorrowMargin(clientID, "USD", 60000*USD_PRECISION, "venue2_borrow")
 
 	// Verify each exchange logged its own borrow
 	if len(logger1.borrows) != 1 {
@@ -462,7 +462,7 @@ func TestCollateralLogging(t *testing.T) {
 
 	// Borrow with collateral
 	borrowAmount := int64(100000 * USD_PRECISION)
-	err := ex.BorrowingMgr.BorrowMargin(1, "USD", borrowAmount, "with_collateral")
+	err := ex.BorrowMargin(1, "USD", borrowAmount, "with_collateral")
 	if err != nil {
 		t.Fatalf("Borrow failed: %v", err)
 	}

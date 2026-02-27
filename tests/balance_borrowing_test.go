@@ -77,7 +77,7 @@ func TestBorrowMarginBasic(t *testing.T) {
 	ex.Clients[1] = client
 
 	borrowAmount := int64(30000 * USD_PRECISION)
-	err := ex.BorrowingMgr.BorrowMargin(1, "USD", borrowAmount, "manual")
+	err := ex.BorrowMargin(1, "USD", borrowAmount, "manual")
 	if err != nil {
 		t.Fatalf("Borrow failed: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestBorrowMarginBasic(t *testing.T) {
 	}
 
 	repayAmount := int64(10000 * USD_PRECISION)
-	err = ex.BorrowingMgr.RepayMargin(1, "USD", repayAmount)
+	err = ex.RepayMargin(1, "USD", repayAmount)
 	if err != nil {
 		t.Fatalf("Repay failed: %v", err)
 	}

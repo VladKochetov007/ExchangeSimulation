@@ -161,7 +161,7 @@ func TestPositionManagerGetPosition(t *testing.T) {
 		t.Errorf("Expected nil for non-existent position")
 	}
 
-	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*BTC_PRECISION, Buy)
+	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*BTC_PRECISION, Buy, PositionBoth)
 
 	pos = pm.GetPosition(1, "BTC-PERP")
 	if pos == nil {
@@ -175,7 +175,7 @@ func TestPositionManagerGetPosition(t *testing.T) {
 func TestPositionManagerUpdatePositionNewLong(t *testing.T) {
 	pm := NewPositionManager(&RealClock{})
 
-	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*BTC_PRECISION, Buy)
+	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*BTC_PRECISION, Buy, PositionBoth)
 
 	pos := pm.GetPosition(1, "BTC-PERP")
 	if pos.Size != 100 {
@@ -189,7 +189,7 @@ func TestPositionManagerUpdatePositionNewLong(t *testing.T) {
 func TestPositionManagerUpdatePositionNewShort(t *testing.T) {
 	pm := NewPositionManager(&RealClock{})
 
-	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*BTC_PRECISION, Sell)
+	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*BTC_PRECISION, Sell, PositionBoth)
 
 	pos := pm.GetPosition(1, "BTC-PERP")
 	if pos.Size != -100 {
@@ -203,8 +203,8 @@ func TestPositionManagerUpdatePositionNewShort(t *testing.T) {
 func TestPositionManagerUpdatePositionIncreaseLong(t *testing.T) {
 	pm := NewPositionManager(&RealClock{})
 
-	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*BTC_PRECISION, Buy)
-	pm.UpdatePosition(1, "BTC-PERP", 100, 51000*BTC_PRECISION, Buy)
+	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*BTC_PRECISION, Buy, PositionBoth)
+	pm.UpdatePosition(1, "BTC-PERP", 100, 51000*BTC_PRECISION, Buy, PositionBoth)
 
 	pos := pm.GetPosition(1, "BTC-PERP")
 	if pos.Size != 200 {
@@ -220,8 +220,8 @@ func TestPositionManagerUpdatePositionIncreaseLong(t *testing.T) {
 func TestPositionManagerUpdatePositionClosePosition(t *testing.T) {
 	pm := NewPositionManager(&RealClock{})
 
-	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*BTC_PRECISION, Buy)
-	pm.UpdatePosition(1, "BTC-PERP", 100, 51000*BTC_PRECISION, Sell)
+	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*BTC_PRECISION, Buy, PositionBoth)
+	pm.UpdatePosition(1, "BTC-PERP", 100, 51000*BTC_PRECISION, Sell, PositionBoth)
 
 	pos := pm.GetPosition(1, "BTC-PERP")
 	if pos.Size != 0 {
@@ -235,8 +235,8 @@ func TestPositionManagerUpdatePositionClosePosition(t *testing.T) {
 func TestPositionManagerUpdatePositionFlipLongToShort(t *testing.T) {
 	pm := NewPositionManager(&RealClock{})
 
-	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*BTC_PRECISION, Buy)
-	pm.UpdatePosition(1, "BTC-PERP", 150, 51000*BTC_PRECISION, Sell)
+	pm.UpdatePosition(1, "BTC-PERP", 100, 50000*BTC_PRECISION, Buy, PositionBoth)
+	pm.UpdatePosition(1, "BTC-PERP", 150, 51000*BTC_PRECISION, Sell, PositionBoth)
 
 	pos := pm.GetPosition(1, "BTC-PERP")
 	if pos.Size != -50 {
@@ -256,13 +256,13 @@ func TestPositionManagerSettleFundingLongPosition(t *testing.T) {
 	clients[1] = NewClient(1, &FixedFee{})
 	clients[1].PerpBalances["USD"] = 10000 * USD_PRECISION
 
-	pm.UpdatePosition(1, "BTC-PERP", BTC_PRECISION, 50000*BTC_PRECISION, Buy)
+	pm.UpdatePosition(1, "BTC-PERP", BTC_PRECISION, 50000*BTC_PRECISION, Buy, PositionBoth)
 
 	perp.UpdateFundingRate(50000*BTC_PRECISION, 50100*BTC_PRECISION)
 
 	balanceBefore := clients[1].PerpBalances["USD"]
 
-	pm.SettleFunding(clients, perp, nil)
+	pm.SettleFunding(clients, perp)
 
 	balanceAfter := clients[1].PerpBalances["USD"]
 
@@ -280,13 +280,13 @@ func TestPositionManagerSettleFundingShortPosition(t *testing.T) {
 	clients[1] = NewClient(1, &FixedFee{})
 	clients[1].PerpBalances["USD"] = 10000 * USD_PRECISION
 
-	pm.UpdatePosition(1, "BTC-PERP", BTC_PRECISION, 50000*BTC_PRECISION, Sell)
+	pm.UpdatePosition(1, "BTC-PERP", BTC_PRECISION, 50000*BTC_PRECISION, Sell, PositionBoth)
 
 	perp.UpdateFundingRate(50000*BTC_PRECISION, 50100*BTC_PRECISION)
 
 	balanceBefore := clients[1].PerpBalances["USD"]
 
-	pm.SettleFunding(clients, perp, nil)
+	pm.SettleFunding(clients, perp)
 
 	balanceAfter := clients[1].PerpBalances["USD"]
 
@@ -306,7 +306,7 @@ func TestPositionManagerSettleFundingNoPosition(t *testing.T) {
 
 	balanceBefore := clients[1].PerpBalances["USD"]
 
-	pm.SettleFunding(clients, perp, nil)
+	pm.SettleFunding(clients, perp)
 
 	balanceAfter := clients[1].PerpBalances["USD"]
 
@@ -346,8 +346,8 @@ func TestInstrumentMinOrderSize(t *testing.T) {
 func TestCalculateOpenInterest(t *testing.T) {
 	pm := NewPositionManager(&RealClock{})
 
-	pm.UpdatePosition(1, "BTC-PERP", BTC_PRECISION, PriceUSD(50000, CENT_TICK), Buy)
-	pm.UpdatePosition(2, "BTC-PERP", -BTC_PRECISION/2, PriceUSD(50000, CENT_TICK), Sell)
+	pm.UpdatePosition(1, "BTC-PERP", BTC_PRECISION, PriceUSD(50000, CENT_TICK), Buy, PositionBoth)
+	pm.UpdatePosition(2, "BTC-PERP", -BTC_PRECISION/2, PriceUSD(50000, CENT_TICK), Sell, PositionBoth)
 
 	oi := pm.CalculateOpenInterest("BTC-PERP")
 	expected := int64(BTC_PRECISION + BTC_PRECISION/2)

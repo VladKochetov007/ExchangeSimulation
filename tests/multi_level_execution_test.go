@@ -164,8 +164,8 @@ func TestMultiLevelExecution(t *testing.T) {
 	}
 
 	t.Logf("Open interest updates: %d", len(oiEvents))
-	if len(oiEvents) != 6 {
-		t.Errorf("Expected 6 OI updates, got %d", len(oiEvents))
+	if len(oiEvents) != 3 {
+		t.Errorf("Expected 3 OI updates (one per execution), got %d", len(oiEvents))
 	}
 
 	finalOI := oiEvents[len(oiEvents)-1].OpenInterest

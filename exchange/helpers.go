@@ -52,3 +52,31 @@ func borrowedDelta(asset string, old, new int64) BalanceDelta {
 func ReservedSpotDelta(asset string, old, new int64) BalanceDelta {
 	return reservedSpotDelta(asset, old, new)
 }
+
+func buildBorrowContext(e *Exchange, client *Client, clientID uint64) BorrowContext {
+	timestamp := e.Clock.NowUnixNano()
+	return BorrowContext{
+		Client:    client,
+		ClientID:  clientID,
+		Timestamp: timestamp,
+		LogBalance: func(reason string, changes []BalanceDelta) {
+			logBalanceChange(e, timestamp, clientID, "", reason, changes)
+		},
+		LogEvent: func(event string, data any) {
+			if log := e.getLogger("_global"); log != nil {
+				log.LogEvent(timestamp, clientID, event, data)
+			}
+		},
+	}
+}
+
+func buildFundingSink(e *Exchange) fundingEventSink {
+	return fundingEventSink{
+		logBalance: func(timestamp int64, clientID uint64, symbol, reason string, changes []BalanceDelta) {
+			logBalanceChange(e, timestamp, clientID, symbol, reason, changes)
+		},
+		recordRevenue: func(asset string, amount int64) {
+			e.ExchangeBalance.FeeRevenue[asset] += amount
+		},
+	}
+}

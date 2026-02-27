@@ -206,7 +206,7 @@ func TestWeightedMidPriceCalculator_BothZeroQty(t *testing.T) {
 // --- calculateCollateralUsed: nil oracle and zero price ---
 
 func TestCalculateCollateralUsed_NilOracle(t *testing.T) {
-	bm := NewBorrowingManager(nil, BorrowingConfig{PriceSource: nil})
+	bm := NewBorrowingManager(BorrowingConfig{PriceSource: nil})
 	result := bm.CalculateCollateralUsed("USD", USDAmount(1_000))
 	if result != 0 {
 		t.Errorf("expected 0 for nil oracle, got %d", result)
@@ -215,7 +215,7 @@ func TestCalculateCollateralUsed_NilOracle(t *testing.T) {
 
 func TestCalculateCollateralUsed_ZeroPrice(t *testing.T) {
 	oracle := NewStaticPriceOracle(map[string]int64{}) // all prices are 0
-	bm := NewBorrowingManager(nil, BorrowingConfig{PriceSource: oracle})
+	bm := NewBorrowingManager(BorrowingConfig{PriceSource: oracle})
 	result := bm.CalculateCollateralUsed("USD", USDAmount(1_000))
 	if result != 0 {
 		t.Errorf("expected 0 when oracle returns 0, got %d", result)
@@ -236,7 +236,7 @@ func TestValidateCrossMarginCollateral_ZeroPriceForBorrowedAsset(t *testing.T) {
 		"USD": USD_PRECISION,
 		// ETH intentionally missing → price=0 for the borrow loop
 	})
-	bm := NewBorrowingManager(ex, BorrowingConfig{
+	ex.EnableBorrowing(BorrowingConfig{
 		Enabled:           true,
 		BorrowRates:       map[string]int64{"USD": 500},
 		CollateralFactors: map[string]float64{"USD": 1.0},
@@ -244,7 +244,7 @@ func TestValidateCrossMarginCollateral_ZeroPriceForBorrowedAsset(t *testing.T) {
 	})
 
 	// Should succeed — existing ETH borrow ignored (price=0, existingBorrowValue stays 0)
-	if err := bm.BorrowMargin(1, "USD", USDAmount(1_000), "test"); err != nil {
+	if err := ex.BorrowMargin(1, "USD", USDAmount(1_000), "test"); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -396,14 +396,15 @@ func perpInitMargin() int64 { return perpEntry * USD_PRECISION / 10 }
 
 // injectPerpPosition injects a synthetic position and overwrites perp balances directly.
 func injectPerpPosition(ex *Exchange, clientID uint64, symbol string, size, entryPrice, balance, reserved int64) {
-	ex.Positions.Lock()
-	ex.Positions.InjectPosition(clientID, symbol, &Position{
+	pm := ex.Positions.(*PositionManager)
+	pm.Lock()
+	pm.InjectPosition(clientID, symbol, &Position{
 		ClientID:   clientID,
 		Symbol:     symbol,
 		Size:       size,
 		EntryPrice: entryPrice,
 	})
-	ex.Positions.Unlock()
+	pm.Unlock()
 
 	ex.Lock()
 	client := ex.Clients[clientID]
