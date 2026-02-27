@@ -96,65 +96,35 @@ const (
 	Rejected
 )
 
-type RejectReason uint8
+// RejectReason describes why a request was refused.
+type RejectReason = string
 
 const (
-	RejectInsufficientBalance RejectReason = iota
-	RejectInvalidPrice
-	RejectInvalidQty
-	RejectUnknownClient
-	RejectUnknownInstrument
-	RejectSelfTrade
-	RejectDuplicateOrderID
-	RejectOrderNotFound
-	RejectOrderNotOwned
-	RejectOrderAlreadyFilled
-	RejectFOKNotFilled
+	RejectInsufficientBalance RejectReason = "INSUFFICIENT_BALANCE"
+	RejectInvalidPrice        RejectReason = "INVALID_PRICE"
+	RejectInvalidQty          RejectReason = "INVALID_QTY"
+	RejectUnknownClient       RejectReason = "UNKNOWN_CLIENT"
+	RejectUnknownInstrument   RejectReason = "UNKNOWN_INSTRUMENT"
+	RejectSelfTrade           RejectReason = "SELF_TRADE"
+	RejectDuplicateOrderID    RejectReason = "DUPLICATE_ORDER_ID"
+	RejectOrderNotFound       RejectReason = "ORDER_NOT_FOUND"
+	RejectOrderNotOwned       RejectReason = "ORDER_NOT_OWNED"
+	RejectOrderAlreadyFilled  RejectReason = "ORDER_ALREADY_FILLED"
+	RejectFOKNotFilled        RejectReason = "FOK_NOT_FILLED"
+	RejectUnknownRequest      RejectReason = "UNKNOWN_REQUEST"
 )
 
-func (rr RejectReason) String() string {
-	switch rr {
-	case RejectInsufficientBalance:
-		return "INSUFFICIENT_BALANCE"
-	case RejectInvalidPrice:
-		return "INVALID_PRICE"
-	case RejectInvalidQty:
-		return "INVALID_QTY"
-	case RejectUnknownClient:
-		return "UNKNOWN_CLIENT"
-	case RejectUnknownInstrument:
-		return "UNKNOWN_INSTRUMENT"
-	case RejectSelfTrade:
-		return "SELF_TRADE"
-	case RejectDuplicateOrderID:
-		return "DUPLICATE_ORDER_ID"
-	case RejectOrderNotFound:
-		return "ORDER_NOT_FOUND"
-	case RejectOrderNotOwned:
-		return "ORDER_NOT_OWNED"
-	case RejectOrderAlreadyFilled:
-		return "ORDER_ALREADY_FILLED"
-	case RejectFOKNotFilled:
-		return "FOK_NOT_FILLED"
-	default:
-		return "UNKNOWN"
-	}
-}
-
-func (rr RejectReason) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + rr.String() + `"`), nil
-}
-
-type RequestType uint8
+// RequestType identifies a request sent through a Gateway.
+type RequestType = string
 
 const (
-	ReqPlaceOrder RequestType = iota
-	ReqCancelOrder
-	ReqQueryBalance
-	ReqQueryOrders
-	ReqQueryAccount
-	ReqSubscribe
-	ReqUnsubscribe
+	ReqPlaceOrder   RequestType = "place_order"
+	ReqCancelOrder  RequestType = "cancel_order"
+	ReqQueryBalance RequestType = "query_balance"
+	ReqQueryOrders  RequestType = "query_orders"
+	ReqQueryAccount RequestType = "query_account"
+	ReqSubscribe    RequestType = "subscribe"
+	ReqUnsubscribe  RequestType = "unsubscribe"
 )
 
 type PositionSide uint8

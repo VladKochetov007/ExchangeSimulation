@@ -134,23 +134,20 @@ func TestAutoBorrow_SpotOrderTriggersWhenShortfall(t *testing.T) {
 	// Add perp collateral for collateral validation
 	ex.AddPerpBalance(2, "USD", USDAmount(10_000))
 
-	go ex.HandleClientRequests(gw1)
-	go ex.HandleClientRequests(gw2)
-
 	price := int64(50_000) * USD_PRECISION
 	qty := int64(1) * BTC_PRECISION
 
-	gw1.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
+	gw1.Send(Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
 		RequestID: 1, Symbol: "BTC/USD", Side: Sell, Type: LimitOrder,
 		Price: price, Qty: qty,
-	}}
-	<-gw1.ResponseCh
+	}})
+	<-gw1.Responses()
 
-	gw2.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
+	gw2.Send(Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
 		RequestID: 2, Symbol: "BTC/USD", Side: Buy, Type: LimitOrder,
 		Price: price, Qty: qty,
-	}}
-	resp := <-gw2.ResponseCh
+	}})
+	resp := <-gw2.Responses()
 	if !resp.Success {
 		t.Logf("order rejected (no auto-borrow or collateral insufficient): %+v", resp)
 	}
@@ -179,23 +176,20 @@ func TestAutoBorrow_PerpOrderTriggersWhenShortfall(t *testing.T) {
 	ex.AddPerpBalance(1, "USD", USDAmount(10_000))
 	ex.AddPerpBalance(2, "USD", USDAmount(100))
 
-	go ex.HandleClientRequests(gw1)
-	go ex.HandleClientRequests(gw2)
-
 	price := int64(50_000) * USD_PRECISION
 	qty := int64(1) * BTC_PRECISION
 
-	gw1.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
+	gw1.Send(Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
 		RequestID: 1, Symbol: "BTC-PERP", Side: Sell, Type: LimitOrder,
 		Price: price, Qty: qty,
-	}}
-	<-gw1.ResponseCh
+	}})
+	<-gw1.Responses()
 
-	gw2.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
+	gw2.Send(Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{
 		RequestID: 2, Symbol: "BTC-PERP", Side: Buy, Type: LimitOrder,
 		Price: price, Qty: qty,
-	}}
-	<-gw2.ResponseCh
+	}})
+	<-gw2.Responses()
 	// Test completes without panic — borrowing path exercised
 }
 

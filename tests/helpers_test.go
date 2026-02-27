@@ -7,7 +7,7 @@ import (
 )
 
 // InjectLimitOrder injects a limit order directly into the exchange for testing.
-// Returns the OrderID and RejectReason (0 if successful).
+// Returns the OrderID and RejectReason ("" if successful).
 func InjectLimitOrder(ex *exchange.Exchange, clientID uint64, symbol string, side exchange.Side, price, qty int64) (uint64, exchange.RejectReason) {
 	gateway := ex.Gateways[clientID]
 	if gateway == nil {
@@ -44,7 +44,7 @@ func InjectLimitOrder(ex *exchange.Exchange, clientID uint64, symbol string, sid
 				if !ok {
 					return 0, exchange.RejectUnknownInstrument
 				}
-				return orderID, 0
+				return orderID, ""
 			}
 		case <-timeout:
 			return 0, exchange.RejectUnknownInstrument
@@ -53,7 +53,7 @@ func InjectLimitOrder(ex *exchange.Exchange, clientID uint64, symbol string, sid
 }
 
 // InjectMarketOrder injects a market order directly into the exchange for testing.
-// Returns the OrderID and RejectReason (0 if successful).
+// Returns the OrderID and RejectReason ("" if successful).
 func InjectMarketOrder(ex *exchange.Exchange, clientID uint64, symbol string, side exchange.Side, qty int64) (uint64, exchange.RejectReason) {
 	gateway := ex.Gateways[clientID]
 	if gateway == nil {
@@ -85,9 +85,9 @@ func InjectMarketOrder(ex *exchange.Exchange, clientID uint64, symbol string, si
 			}
 			switch data := resp.Data.(type) {
 			case uint64:
-				return data, 0
+				return data, ""
 			case *exchange.FillNotification:
-				return data.OrderID, 0
+				return data.OrderID, ""
 			default:
 				continue
 			}

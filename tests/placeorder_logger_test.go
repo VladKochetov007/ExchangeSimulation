@@ -68,7 +68,7 @@ func TestPlaceOrder_LogsOrderAcceptedAndFill(t *testing.T) {
 	// Place and immediately fill — covers the OrderAccepted log path in placeOrder.
 	_, _ = InjectLimitOrder(ex, 2, "BTC/USD", Sell, PriceUSD(50_000, DOLLAR_TICK), BTCAmount(1))
 	_, reason := InjectMarketOrder(ex, 1, "BTC/USD", Buy, BTCAmount(1))
-	if reason != 0 {
+	if reason != "" {
 		t.Errorf("expected successful fill, got %v", reason)
 	}
 }

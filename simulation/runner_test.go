@@ -27,7 +27,7 @@ func newTestVenue() *Venue {
 	ex := exchange.NewExchange(10, &RealClock{})
 	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex.AddInstrument(btcusd)
-	return &Venue{Exchange: ex}
+	return NewExchangeVenue(ex, LatencyConfig{})
 }
 
 func TestNewRunnerWithSimulatedClock(t *testing.T) {

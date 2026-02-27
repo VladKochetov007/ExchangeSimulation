@@ -9,6 +9,9 @@ import (
 	ematching "exchange_sim/matching"
 )
 
+// Compile-time assertion: *Exchange must satisfy the Venue interface.
+var _ Venue = (*Exchange)(nil)
+
 // ExchangeBalance tracks the exchange's own accumulated revenue and safety fund.
 type ExchangeBalance struct {
 	FeeRevenue    map[string]int64 `json:"fee_revenue"`
@@ -342,7 +345,7 @@ func (e *Exchange) CancelAllClientOrders(clientID uint64) int {
 	return count
 }
 
-func (e *Exchange) ConnectClient(clientID uint64, initialBalances map[string]int64, feePlan FeeModel) *ClientGateway {
+func (e *Exchange) ConnectClient(clientID uint64, initialBalances map[string]int64, feePlan FeeModel) Gateway {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 

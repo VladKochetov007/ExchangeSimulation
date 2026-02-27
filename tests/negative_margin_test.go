@@ -111,8 +111,10 @@ func TestPerpPartialFillMarginAccounting(t *testing.T) {
 	makerID := uint64(1)
 	takerID := uint64(2)
 
-	makerGW := ex.ConnectClient(makerID, map[string]int64{}, &FixedFee{})
-	takerGW := ex.ConnectClient(takerID, map[string]int64{}, &FixedFee{})
+	ex.ConnectClient(makerID, map[string]int64{}, &FixedFee{})
+	makerGW := ex.Gateways[makerID]
+	ex.ConnectClient(takerID, map[string]int64{}, &FixedFee{})
+	takerGW := ex.Gateways[takerID]
 
 	ex.AddPerpBalance(makerID, "USD", 100_000*USD_PRECISION)
 	ex.AddPerpBalance(takerID, "USD", 100_000*USD_PRECISION)
@@ -172,8 +174,10 @@ func TestPerpPositionFlipMarginAccounting(t *testing.T) {
 	traderID := uint64(1)
 	mmID := uint64(2)
 
-	traderGW := ex.ConnectClient(traderID, map[string]int64{}, &FixedFee{})
-	mmGW := ex.ConnectClient(mmID, map[string]int64{}, &FixedFee{})
+	ex.ConnectClient(traderID, map[string]int64{}, &FixedFee{})
+	traderGW := ex.Gateways[traderID]
+	ex.ConnectClient(mmID, map[string]int64{}, &FixedFee{})
+	mmGW := ex.Gateways[mmID]
 
 	ex.AddPerpBalance(traderID, "USD", 1_000_000*USD_PRECISION)
 	ex.AddPerpBalance(mmID, "USD", 1_000_000*USD_PRECISION)
@@ -259,7 +263,8 @@ func TestMultipleOrderCancellationsMarginAccounting(t *testing.T) {
 	ex.AddInstrument(perp)
 
 	clientID := uint64(1)
-	gw := ex.ConnectClient(clientID, map[string]int64{}, &FixedFee{})
+	ex.ConnectClient(clientID, map[string]int64{}, &FixedFee{})
+	gw := ex.Gateways[clientID]
 
 	ex.AddPerpBalance(clientID, "USD", 100_000*USD_PRECISION)
 
@@ -333,8 +338,10 @@ func TestEdgeCaseMarginCalculations(t *testing.T) {
 			makerID := uint64(1)
 			takerID := uint64(2)
 
-			makerGW := ex.ConnectClient(makerID, map[string]int64{}, &FixedFee{})
-			takerGW := ex.ConnectClient(takerID, map[string]int64{}, &FixedFee{})
+			ex.ConnectClient(makerID, map[string]int64{}, &FixedFee{})
+			makerGW := ex.Gateways[makerID]
+			ex.ConnectClient(takerID, map[string]int64{}, &FixedFee{})
+			takerGW := ex.Gateways[takerID]
 
 			ex.AddPerpBalance(makerID, "USD", 1_000_000*USD_PRECISION)
 			ex.AddPerpBalance(takerID, "USD", 1_000_000*USD_PRECISION)

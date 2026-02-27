@@ -12,7 +12,8 @@ func TestClientNotificationsOnPlaceOrder(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	gateway := ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectClient(1, balances, &FixedFee{})
+	gateway := ex.Gateways[1]
 
 	go ex.HandleClientRequests(gateway)
 
@@ -53,8 +54,10 @@ func TestClientNotificationsOnFill(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	gateway1 := ex.ConnectClient(1, balances, &FixedFee{})
-	gateway2 := ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectClient(1, balances, &FixedFee{})
+	gateway1 := ex.Gateways[1]
+	ex.ConnectClient(2, balances, &FixedFee{})
+	gateway2 := ex.Gateways[2]
 
 	go ex.HandleClientRequests(gateway1)
 	go ex.HandleClientRequests(gateway2)
@@ -148,8 +151,10 @@ func TestClientNotificationsViaMarketData(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	gateway1 := ex.ConnectClient(1, balances, &FixedFee{})
-	gateway2 := ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectClient(1, balances, &FixedFee{})
+	gateway1 := ex.Gateways[1]
+	ex.ConnectClient(2, balances, &FixedFee{})
+	gateway2 := ex.Gateways[2]
 
 	go ex.HandleClientRequests(gateway1)
 	go ex.HandleClientRequests(gateway2)
@@ -228,8 +233,10 @@ func TestClientNotificationsOnPartialFill(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	gateway1 := ex.ConnectClient(1, balances, &FixedFee{})
-	gateway2 := ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectClient(1, balances, &FixedFee{})
+	gateway1 := ex.Gateways[1]
+	ex.ConnectClient(2, balances, &FixedFee{})
+	gateway2 := ex.Gateways[2]
 
 	go ex.HandleClientRequests(gateway1)
 	go ex.HandleClientRequests(gateway2)
@@ -309,7 +316,8 @@ func TestClientNotificationsOnReject(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"USD": 1000}
-	gateway := ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectClient(1, balances, &FixedFee{})
+	gateway := ex.Gateways[1]
 
 	go ex.HandleClientRequests(gateway)
 

@@ -35,7 +35,8 @@ func TestConnectClient(t *testing.T) {
 
 	feePlan := &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true}
 	balances := map[string]int64{"USD": USDAmount(100000)}
-	gateway := ex.ConnectClient(1, balances, feePlan)
+	ex.ConnectClient(1, balances, feePlan)
+	gateway := ex.Gateways[1]
 
 	if gateway == nil {
 		t.Fatal("Gateway should not be nil")

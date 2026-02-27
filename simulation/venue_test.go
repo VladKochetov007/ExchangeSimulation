@@ -12,7 +12,7 @@ func TestVenueConnectClientNoLatency(t *testing.T) {
 	inst := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex.AddInstrument(inst)
 
-	v := &Venue{Exchange: ex}
+	v := NewExchangeVenue(ex, LatencyConfig{})
 	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000000}
 	gw := v.ConnectClient(1, balances, &exchange.FixedFee{})
 
@@ -37,10 +37,7 @@ func TestVenueConnectClientWithLatency(t *testing.T) {
 	inst := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex.AddInstrument(inst)
 
-	v := &Venue{
-		Exchange: ex,
-		Latency:  LatencyConfig{Request: NewConstantLatency(30 * time.Millisecond)},
-	}
+	v := NewExchangeVenue(ex, LatencyConfig{Request: NewConstantLatency(30 * time.Millisecond)})
 	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000000}
 	gw := v.ConnectClient(1, balances, &exchange.FixedFee{})
 
@@ -87,10 +84,7 @@ func TestVenueConnectMultipleClients(t *testing.T) {
 	inst := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex.AddInstrument(inst)
 
-	v := &Venue{
-		Exchange: ex,
-		Latency:  LatencyConfig{Response: NewConstantLatency(5 * time.Millisecond)},
-	}
+	v := NewExchangeVenue(ex, LatencyConfig{Response: NewConstantLatency(5 * time.Millisecond)})
 	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000000}
 
 	gw1 := v.ConnectClient(1, balances, &exchange.FixedFee{})
@@ -112,17 +106,14 @@ func TestVenueShutdown(t *testing.T) {
 	inst := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex.AddInstrument(inst)
 
-	v := &Venue{
-		Exchange: ex,
-		Latency:  LatencyConfig{Request: NewConstantLatency(1 * time.Millisecond)},
-	}
+	v := NewExchangeVenue(ex, LatencyConfig{Request: NewConstantLatency(1 * time.Millisecond)})
 	v.ConnectClient(1, map[string]int64{"BTC": 1000000000, "USD": 100000000000000}, &exchange.FixedFee{})
 	v.shutdown() // Must not panic or block
 }
 
 func TestVenueConnectClientReturnsGatewayInterface(t *testing.T) {
 	ex := exchange.NewExchange(10, &RealClock{})
-	v := &Venue{Exchange: ex}
+	v := NewExchangeVenue(ex, LatencyConfig{})
 	gw := v.ConnectClient(1, map[string]int64{}, &exchange.FixedFee{})
 	var _ actor.Gateway = gw // compile-time interface check
 }

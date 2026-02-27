@@ -48,9 +48,11 @@ func TestFundingRateLogging(t *testing.T) {
 	ex.AddInstrument(perp)
 
 	// Setup clients with liquidity
-	client1 := ex.ConnectClient(1, map[string]int64{}, &PercentageFee{})
+	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{})
+	client1 := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 1000000*USD_PRECISION)
-	client2 := ex.ConnectClient(2, map[string]int64{}, &PercentageFee{})
+	ex.ConnectClient(2, map[string]int64{}, &PercentageFee{})
+	client2 := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 1000000*USD_PRECISION)
 
 	// Add book liquidity for mark price calculation
@@ -122,10 +124,12 @@ func TestOpenInterestLogging(t *testing.T) {
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(perp)
 
-	client1 := ex.ConnectClient(1, map[string]int64{}, &PercentageFee{})
+	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{})
+	client1 := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
 
-	client2 := ex.ConnectClient(2, map[string]int64{}, &PercentageFee{})
+	ex.ConnectClient(2, map[string]int64{}, &PercentageFee{})
+	client2 := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 100000*USD_PRECISION)
 
 	// Trade 1: Open positions (should log open interest twice: once for taker, once for maker)
@@ -205,10 +209,12 @@ func TestFeeRevenueLoggingPerp(t *testing.T) {
 	ex.AddInstrument(perp)
 
 	// Client with 10 bps maker, 20 bps taker fees
-	client1 := ex.ConnectClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	client1 := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
 
-	client2 := ex.ConnectClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	client2 := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 100000*USD_PRECISION)
 
 	// Trade: 1 BTC @ $50,000
@@ -273,8 +279,10 @@ func TestFeeRevenueLoggingSpot(t *testing.T) {
 	ex.AddInstrument(spot)
 
 	// Client with fees
-	client1 := ex.ConnectClient(1, map[string]int64{"BTC": 10 * BTC_PRECISION, "USD": 1000000 * USD_PRECISION}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
-	client2 := ex.ConnectClient(2, map[string]int64{"BTC": 10 * BTC_PRECISION, "USD": 1000000 * USD_PRECISION}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectClient(1, map[string]int64{"BTC": 10 * BTC_PRECISION, "USD": 1000000 * USD_PRECISION}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	client1 := ex.Gateways[1]
+	ex.ConnectClient(2, map[string]int64{"BTC": 10 * BTC_PRECISION, "USD": 1000000 * USD_PRECISION}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	client2 := ex.Gateways[2]
 
 	// Spot buy: 0.5 BTC @ $50,000
 	req1 := &OrderRequest{RequestID: 1, Side: Sell, Type: LimitOrder, Price: PriceUSD(50000, DOLLAR_TICK), Qty: BTC_PRECISION / 2, Symbol: "BTCUSD"}
@@ -330,10 +338,12 @@ func TestCompleteLoggingIntegration(t *testing.T) {
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(perp)
 
-	client1 := ex.ConnectClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	client1 := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
 
-	client2 := ex.ConnectClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	client2 := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 100000*USD_PRECISION)
 
 	// Execute a trade

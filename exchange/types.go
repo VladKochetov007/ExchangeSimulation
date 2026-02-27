@@ -108,6 +108,7 @@ const (
 	RejectOrderNotOwned       = etypes.RejectOrderNotOwned
 	RejectOrderAlreadyFilled  = etypes.RejectOrderAlreadyFilled
 	RejectFOKNotFilled        = etypes.RejectFOKNotFilled
+	RejectUnknownRequest      = etypes.RejectUnknownRequest
 )
 
 const (
@@ -152,6 +153,8 @@ type PriceSource = etypes.PriceSource
 type Clock = etypes.Clock
 type Ticker = etypes.Ticker
 type TickerFactory = etypes.TickerFactory
+type Gateway = etypes.Gateway
+type Venue = etypes.Venue
 type MatchingEngine = ematching.MatchingEngine
 type MatchResult = ematching.MatchResult
 type MarkPriceCalculator = eprice.MarkPriceCalculator

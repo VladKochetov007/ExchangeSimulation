@@ -36,7 +36,7 @@ func TestVisibility_String(t *testing.T) {
 	}
 }
 
-func TestRejectReason_String(t *testing.T) {
+func TestRejectReasonValues(t *testing.T) {
 	cases := []struct {
 		v    RejectReason
 		want string
@@ -52,11 +52,11 @@ func TestRejectReason_String(t *testing.T) {
 		{RejectOrderNotOwned, "ORDER_NOT_OWNED"},
 		{RejectOrderAlreadyFilled, "ORDER_ALREADY_FILLED"},
 		{RejectFOKNotFilled, "FOK_NOT_FILLED"},
-		{RejectReason(99), "UNKNOWN"},
+		{RejectUnknownRequest, "UNKNOWN_REQUEST"},
 	}
 	for _, c := range cases {
-		if got := c.v.String(); got != c.want {
-			t.Errorf("RejectReason(%d).String() = %q, want %q", c.v, got, c.want)
+		if c.v != c.want {
+			t.Errorf("RejectReason constant %q has wrong value, want %q", c.v, c.want)
 		}
 	}
 }

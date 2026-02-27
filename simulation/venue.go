@@ -5,22 +5,28 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/types"
 )
 
-// Venue pairs an exchange engine with optional per-channel latency configuration.
+// Venue pairs a trading venue with optional per-channel latency configuration.
 type Venue struct {
-	Exchange *exchange.Exchange
-	Latency  LatencyConfig
+	Market  types.Venue
+	Latency LatencyConfig
 
 	delayed []*DelayedGateway
 	mu      sync.Mutex
 }
 
-// ConnectClient registers clientID on the exchange and wraps the resulting gateway
+// NewExchangeVenue creates a Venue backed by an *exchange.Exchange.
+func NewExchangeVenue(ex *exchange.Exchange, latency LatencyConfig) *Venue {
+	return &Venue{Market: ex, Latency: latency}
+}
+
+// ConnectClient registers clientID on the venue and wraps the resulting gateway
 // with latency if any LatencyConfig field is non-nil. Returns the (possibly delayed)
 // gateway ready for use by actors.
 func (v *Venue) ConnectClient(clientID uint64, balances map[string]int64, fee exchange.FeeModel) actor.Gateway {
-	gw := v.Exchange.ConnectClient(clientID, balances, fee)
+	gw := v.Market.ConnectClient(clientID, balances, fee)
 	if v.Latency.Request == nil && v.Latency.Response == nil && v.Latency.MarketData == nil {
 		return gw
 	}
@@ -32,7 +38,7 @@ func (v *Venue) ConnectClient(clientID uint64, balances map[string]int64, fee ex
 	return d
 }
 
-// shutdown stops all delayed gateways and shuts down the exchange.
+// shutdown stops all delayed gateways and shuts down the venue.
 func (v *Venue) shutdown() {
 	v.mu.Lock()
 	delayed := v.delayed
@@ -41,5 +47,5 @@ func (v *Venue) shutdown() {
 	for _, d := range delayed {
 		d.Stop()
 	}
-	v.Exchange.Shutdown()
+	v.Market.Shutdown()
 }

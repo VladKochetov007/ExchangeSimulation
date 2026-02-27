@@ -12,7 +12,8 @@ func TestHandleClientRequestsCancelOrder(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	gateway := ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectClient(1, balances, &FixedFee{})
+	gateway := ex.Gateways[1]
 
 	go ex.HandleClientRequests(gateway)
 
@@ -62,7 +63,8 @@ func TestHandleClientRequestsSubscribeUnsubscribe(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10)}
-	gateway := ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectClient(1, balances, &FixedFee{})
+	gateway := ex.Gateways[1]
 
 	go ex.HandleClientRequests(gateway)
 

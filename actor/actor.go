@@ -6,18 +6,10 @@ import (
 	"sync/atomic"
 
 	"exchange_sim/exchange"
+	"exchange_sim/types"
 )
 
-// Gateway is the actor-facing contract for interacting with an exchange venue.
-// Both direct connections (*exchange.ClientGateway) and latency-simulated wrappers
-// (*simulation.DelayedGateway) satisfy this interface.
-type Gateway interface {
-	ID() uint64
-	Send(req exchange.Request) // non-blocking: drops if full/closed
-	Responses() <-chan exchange.Response
-	MarketDataCh() <-chan *exchange.MarketDataMsg
-	IsRunning() bool
-}
+type Gateway = types.Gateway
 
 type Actor interface {
 	OnEvent(event *Event)

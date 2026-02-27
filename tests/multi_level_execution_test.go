@@ -55,16 +55,20 @@ func TestMultiLevelExecution(t *testing.T) {
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
-	maker1 := ex.ConnectClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	maker1 := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 1000000*USD_PRECISION)
 
-	maker2 := ex.ConnectClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	maker2 := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 1000000*USD_PRECISION)
 
-	maker3 := ex.ConnectClient(3, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectClient(3, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	maker3 := ex.Gateways[3]
 	ex.AddPerpBalance(3, "USD", 1000000*USD_PRECISION)
 
-	taker := ex.ConnectClient(4, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectClient(4, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	taker := ex.Gateways[4]
 	ex.AddPerpBalance(4, "USD", 10000000*USD_PRECISION)
 
 	t.Logf("\n=== Building Order Book ===")

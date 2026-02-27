@@ -32,7 +32,7 @@ func TestSimulationIntegration(t *testing.T) {
 	defer logFile.Close()
 	ex.SetLogger("BTCUSD", logger.New(logFile))
 
-	v := &Venue{Exchange: ex}
+	v := NewExchangeVenue(ex, LatencyConfig{})
 	runner.AddVenue(v)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -63,13 +63,10 @@ func TestSimulationMultiVenueIntegration(t *testing.T) {
 		ex := exchange.NewExchange(10, &RealClock{})
 		inst := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 		ex.AddInstrument(inst)
-		return &Venue{
-			Exchange: ex,
-			Latency: LatencyConfig{
-				Request:  NewConstantLatency(time.Duration(latencyMs) * time.Millisecond),
-				Response: NewConstantLatency(time.Duration(latencyMs) * time.Millisecond),
-			},
-		}
+		return NewExchangeVenue(ex, LatencyConfig{
+			Request:  NewConstantLatency(time.Duration(latencyMs) * time.Millisecond),
+			Response: NewConstantLatency(time.Duration(latencyMs) * time.Millisecond),
+		})
 	}
 
 	venueFast := makeVenue(1)

@@ -2,6 +2,22 @@ package types
 
 import "time"
 
+// Gateway is the actor-facing contract for any trading venue.
+type Gateway interface {
+	ID() uint64
+	Send(req Request)
+	Responses() <-chan Response
+	MarketDataCh() <-chan *MarketDataMsg
+	IsRunning() bool
+}
+
+// Venue is the minimal contract any trading venue must satisfy.
+type Venue interface {
+	ConnectClient(clientID uint64, balances map[string]int64, feePlan FeeModel) Gateway
+	Shutdown()
+	IsRunning() bool
+}
+
 type PriceSource interface {
 	Price(symbol string) int64
 }

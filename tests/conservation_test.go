@@ -189,8 +189,10 @@ func TestMoneyConservation_FundingPayments(t *testing.T) {
 	ex.AddInstrument(perp)
 
 	fees := &PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
-	gw1 := ex.ConnectClient(1, map[string]int64{}, fees)
-	gw2 := ex.ConnectClient(2, map[string]int64{}, fees)
+	ex.ConnectClient(1, map[string]int64{}, fees)
+	gw1 := ex.Gateways[1]
+	ex.ConnectClient(2, map[string]int64{}, fees)
+	gw2 := ex.Gateways[2]
 
 	ex.AddPerpBalance(1, "USD", USDAmount(100_000))
 	ex.AddPerpBalance(2, "USD", USDAmount(100_000))

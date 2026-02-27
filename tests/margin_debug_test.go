@@ -12,10 +12,12 @@ func TestMarginReleaseDebug(t *testing.T) {
 	perp.MarginRate = 1000 // 10%
 	ex.AddInstrument(perp)
 
-	gw1 := ex.ConnectClient(1, nil, &FixedFee{})
+	ex.ConnectClient(1, nil, &FixedFee{})
+	gw1 := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
 
-	gw2 := ex.ConnectClient(2, nil, &FixedFee{})
+	ex.ConnectClient(2, nil, &FixedFee{})
+	gw2 := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 100000*USD_PRECISION)
 
 	// Open: buy 1 BTC @ $50,000
