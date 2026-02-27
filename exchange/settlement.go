@@ -36,8 +36,6 @@ func (e *Exchange) handleExecution(
 	} else {
 		e.settleSpotExecution(book, exec, takerOrder, taker, maker, takerFee, makerFee, notional, timestamp)
 	}
-	taker.TakerVolume += notional
-	maker.MakerVolume += notional
 	tradeID := e.createTrade(book, exec, takerOrder, timestamp, log)
 	e.notifyFill(exec, takerOrder, takerFee, makerFee, tradeID, book, log, timestamp, takerDelta, makerDelta, takerPnL, makerPnL)
 	return isPerp

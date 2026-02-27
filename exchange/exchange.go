@@ -195,12 +195,12 @@ func (e *Exchange) runBalanceSnapshotLoop(interval time.Duration) {
 		case <-e.shutdownCh:
 			return
 		case <-ticker.C:
-			e.logAllBalances()
+			e.LogAllBalances()
 		}
 	}
 }
 
-func (e *Exchange) logAllBalances() {
+func (e *Exchange) LogAllBalances() {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -361,7 +361,7 @@ func (e *Exchange) ConnectClient(clientID uint64, initialBalances map[string]int
 	gateway := NewClientGateway(clientID)
 	e.Gateways[clientID] = gateway
 
-	go e.handleClientRequests(gateway)
+	go e.HandleClientRequests(gateway)
 
 	if !e.running {
 		e.running = true
@@ -464,7 +464,7 @@ func (e *Exchange) DisconnectClient(clientID uint64) {
 	}
 }
 
-func (e *Exchange) handleClientRequests(gateway *ClientGateway) {
+func (e *Exchange) HandleClientRequests(gateway *ClientGateway) {
 	for req := range gateway.RequestCh {
 		// Discard order and subscribe requests for shut-down gateways.
 		// CancelOrder/Unsubscribe/QueryBalance are still processed so they
@@ -481,17 +481,17 @@ func (e *Exchange) handleClientRequests(gateway *ClientGateway) {
 		var resp Response
 		switch req.Type {
 		case ReqPlaceOrder:
-			resp = e.placeOrder(gateway.ClientID, req.OrderReq)
+			resp = e.PlaceOrder(gateway.ClientID, req.OrderReq)
 		case ReqCancelOrder:
-			resp = e.cancelOrder(gateway.ClientID, req.CancelReq)
+			resp = e.CancelOrder(gateway.ClientID, req.CancelReq)
 		case ReqQueryBalance:
-			resp = e.queryBalance(gateway.ClientID, req.QueryReq)
+			resp = e.QueryBalance(gateway.ClientID, req.QueryReq)
 		case ReqQueryAccount:
-			resp = e.queryAccount(gateway.ClientID, req.QueryReq)
+			resp = e.QueryAccount(gateway.ClientID, req.QueryReq)
 		case ReqSubscribe:
-			resp = e.subscribe(gateway.ClientID, req.QueryReq, gateway)
+			resp = e.Subscribe(gateway.ClientID, req.QueryReq, gateway)
 		case ReqUnsubscribe:
-			resp = e.unsubscribe(gateway.ClientID, req.QueryReq)
+			resp = e.Unsubscribe(gateway.ClientID, req.QueryReq)
 		}
 
 		if gateway.IsRunning() {
@@ -546,9 +546,9 @@ func (e *Exchange) ListInstruments(baseFilter, quoteFilter string) []Instrument 
 	return result
 }
 
-// publishSnapshot publishes a full order book snapshot to all subscribers.
+// PublishSnapshot publishes a full order book snapshot to all subscribers.
 // Caller must hold e.mu lock.
-func (e *Exchange) publishSnapshot(symbol string, timestamp int64) {
+func (e *Exchange) PublishSnapshot(symbol string, timestamp int64) {
 	book := e.Books[symbol]
 	if book == nil {
 		return
@@ -591,63 +591,11 @@ func (e *Exchange) RLock() { e.mu.RLock() }
 // RUnlock releases the exchange read lock.
 func (e *Exchange) RUnlock() { e.mu.RUnlock() }
 
-// PlaceOrder is the public test-accessible wrapper for placeOrder.
-func (e *Exchange) PlaceOrder(clientID uint64, req *OrderRequest) Response {
-	return e.placeOrder(clientID, req)
-}
-
-// CancelOrder is the public test-accessible wrapper for cancelOrder.
-func (e *Exchange) CancelOrder(clientID uint64, req *CancelRequest) Response {
-	return e.cancelOrder(clientID, req)
-}
-
-// QueryBalance is the public test-accessible wrapper for queryBalance.
-func (e *Exchange) QueryBalance(clientID uint64, req *QueryRequest) Response {
-	return e.queryBalance(clientID, req)
-}
-
-// QueryAccount is the public test-accessible wrapper for queryAccount.
-func (e *Exchange) QueryAccount(clientID uint64, req *QueryRequest) Response {
-	return e.queryAccount(clientID, req)
-}
-
-// Subscribe is the public test-accessible wrapper for subscribe.
-func (e *Exchange) Subscribe(clientID uint64, req *QueryRequest, gateway *ClientGateway) Response {
-	return e.subscribe(clientID, req, gateway)
-}
-
-// Unsubscribe is the public test-accessible wrapper for unsubscribe.
-func (e *Exchange) Unsubscribe(clientID uint64, req *QueryRequest) Response {
-	return e.unsubscribe(clientID, req)
-}
-
-// HandleClientRequests is the public test-accessible wrapper for handleClientRequests.
-func (e *Exchange) HandleClientRequests(gateway *ClientGateway) {
-	e.handleClientRequests(gateway)
-}
-
-// PublishSnapshot is the public test-accessible wrapper for publishSnapshot.
-func (e *Exchange) PublishSnapshot(symbol string, timestamp int64) {
-	e.publishSnapshot(symbol, timestamp)
-}
-
-// LogAllBalances is the public test-accessible wrapper for logAllBalances.
-func (e *Exchange) LogAllBalances() {
-	e.logAllBalances()
-}
-
 // IsRunning returns whether the exchange is currently running.
 func (e *Exchange) IsRunning() bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.running
-}
-
-// SetRunning directly sets the running state. Used by tests to simulate state.
-func (e *Exchange) SetRunning(v bool) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.running = v
 }
 
 // SettleFunding manually triggers a funding settlement for the given perpetual.

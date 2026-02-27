@@ -25,7 +25,7 @@ func totalMoney(ex *Exchange, asset string) int64 {
 // conserves the total money in the system: client balances + fee revenue = initial.
 func TestMoneyConservation_SpotTrades(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(inst)
 
 	makerBalances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(500_000)}
@@ -60,7 +60,7 @@ func TestMoneyConservation_SpotTrades(t *testing.T) {
 // TestMoneyConservation_MultipleTrades verifies conservation across many trades.
 func TestMoneyConservation_MultipleTrades(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(inst)
 
 	fees := &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true}
@@ -92,7 +92,7 @@ func TestMoneyConservation_MultipleTrades(t *testing.T) {
 // create or destroy money. The insurance fund must absorb the deficit.
 func TestMoneyConservation_Liquidation(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
 	fees := &PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
@@ -138,7 +138,7 @@ func TestMoneyConservation_Liquidation(t *testing.T) {
 // holds positions on two symbols simultaneously and one loses while the other wins.
 func TestMoneyConservation_CrossMarginMultiPosition(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	btcPerp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	btcPerp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ethPerp := NewPerpFutures("ETH-PERP", "ETH", "USD", ETH_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION/10)
 	ex.AddInstrument(btcPerp)
 	ex.AddInstrument(ethPerp)
@@ -185,7 +185,7 @@ func TestMoneyConservation_CrossMarginMultiPosition(t *testing.T) {
 // are zero-sum: what longs pay equals what shorts receive.
 func TestMoneyConservation_FundingPayments(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
 	fees := &PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
@@ -219,7 +219,7 @@ func TestMoneyConservation_FundingPayments(t *testing.T) {
 // Old bug:  the same position would pay $50,000.
 func TestSettleFunding_CorrectMagnitudeAtBTCPrices(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
 	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
@@ -264,7 +264,7 @@ func TestSettleFunding_CorrectMagnitudeAtBTCPrices(t *testing.T) {
 // routes to ExchangeBalance.FeeRevenue rather than creating/destroying money.
 func TestSettleFunding_AsymmetricOIRoutesToExchange(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
 	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})

@@ -10,7 +10,7 @@ import (
 // Both clients use zero-fee plans so arithmetic in tests is exact.
 func setupPerpExchange(client1PerpUSD, client2PerpUSD int64) (*Exchange, *PerpFutures) {
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
 	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
@@ -462,8 +462,8 @@ func TestCheckAndSettleFunding_SkipsWhenNotDue(t *testing.T) {
 // when the spot instrument exists but has no resting orders (no bid or ask).
 func TestMidPriceOracle_EmptyBookReturnsZero(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	spotInst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
-	perpInst := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	spotInst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
+	perpInst := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(spotInst)
 	ex.AddInstrument(perpInst)
 
@@ -481,8 +481,8 @@ func TestMidPriceOracle_UpdatesWithNewOrders(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
 
-	spotInst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
-	perpInst := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	spotInst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
+	perpInst := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(spotInst)
 	ex.AddInstrument(perpInst)
 

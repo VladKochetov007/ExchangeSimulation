@@ -57,7 +57,7 @@ func TestFullOrderLifecycleLogging(t *testing.T) {
 
 	btc := NewSpotInstrument("BTCUSD", "BTC", "USD",
 		BTC_PRECISION, USD_PRECISION,
-		DOLLAR_TICK, BTC_PRECISION)
+		DOLLAR_TICK, 1)
 
 	ex.AddInstrument(btc)
 
@@ -161,7 +161,7 @@ func TestMarketOrderLogging(t *testing.T) {
 
 	btc := NewSpotInstrument("BTCUSD", "BTC", "USD",
 		BTC_PRECISION, USD_PRECISION,
-		DOLLAR_TICK, BTC_PRECISION)
+		DOLLAR_TICK, 1)
 
 	ex.AddInstrument(btc)
 
@@ -225,7 +225,7 @@ func TestIcebergOrderLogging(t *testing.T) {
 
 	btc := NewSpotInstrument("BTCUSD", "BTC", "USD",
 		BTC_PRECISION, USD_PRECISION,
-		DOLLAR_TICK, BTC_PRECISION)
+		DOLLAR_TICK, 1)
 
 	ex.AddInstrument(btc)
 
@@ -276,7 +276,7 @@ func TestAllRejectReasonsLogged(t *testing.T) {
 
 	btc := NewSpotInstrument("BTCUSD", "BTC", "USD",
 		BTC_PRECISION, USD_PRECISION,
-		DOLLAR_TICK, BTC_PRECISION)
+		DOLLAR_TICK, 1)
 
 	ex.AddInstrument(btc)
 
@@ -351,7 +351,7 @@ func TestMultipleSymbolsLogging(t *testing.T) {
 
 	btc := NewSpotInstrument("BTCUSD", "BTC", "USD",
 		BTC_PRECISION, USD_PRECISION,
-		DOLLAR_TICK, BTC_PRECISION)
+		DOLLAR_TICK, 1)
 
 	eth := NewSpotInstrument("ETHUSD", "ETH", "USD",
 		ETH_PRECISION, USD_PRECISION,

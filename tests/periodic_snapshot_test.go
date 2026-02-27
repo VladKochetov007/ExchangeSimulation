@@ -122,7 +122,7 @@ func TestPeriodicSnapshots(t *testing.T) {
 	ex := NewExchange(10, clock)
 
 	// Add instrument
-	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(inst)
 
 	// Connect client with balances
@@ -207,7 +207,7 @@ func TestPeriodicSnapshotsWithSimulatedClock(t *testing.T) {
 		TickerFactory:    tickerFactory,
 	})
 
-	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(inst)
 
 	balances := map[string]int64{
@@ -267,7 +267,7 @@ func TestMultipleSubscribersReceiveSnapshots(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
 
-	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(inst)
 
 	balances := map[string]int64{
@@ -340,7 +340,7 @@ func TestDeltasInterleavedWithSnapshots(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
 
-	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(inst)
 
 	balances := map[string]int64{

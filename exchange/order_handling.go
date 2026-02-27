@@ -1,6 +1,6 @@
 package exchange
 
-func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
+func (e *Exchange) PlaceOrder(clientID uint64, req *OrderRequest) Response {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -37,7 +37,7 @@ func (e *Exchange) placeOrder(clientID uint64, req *OrderRequest) Response {
 	return Response{RequestID: req.RequestID, Success: true, Data: e.NextOrderID}
 }
 
-func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
+func (e *Exchange) CancelOrder(clientID uint64, req *CancelRequest) Response {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -104,7 +104,7 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 	return Response{RequestID: req.RequestID, Success: true, Data: remainingQty}
 }
 
-func (e *Exchange) queryAccount(clientID uint64, req *QueryRequest) Response {
+func (e *Exchange) QueryAccount(clientID uint64, req *QueryRequest) Response {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -156,7 +156,7 @@ func (e *Exchange) buildPositionSnapshots(clientID uint64) []PositionSnapshot {
 	return snapshots
 }
 
-func (e *Exchange) queryBalance(clientID uint64, req *QueryRequest) Response {
+func (e *Exchange) QueryBalance(clientID uint64, req *QueryRequest) Response {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -169,7 +169,7 @@ func (e *Exchange) queryBalance(clientID uint64, req *QueryRequest) Response {
 	return Response{RequestID: req.RequestID, Success: true, Data: snapshot}
 }
 
-func (e *Exchange) subscribe(clientID uint64, req *QueryRequest, gateway *ClientGateway) Response {
+func (e *Exchange) Subscribe(clientID uint64, req *QueryRequest, gateway *ClientGateway) Response {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -201,7 +201,7 @@ func (e *Exchange) subscribe(clientID uint64, req *QueryRequest, gateway *Client
 	return Response{RequestID: req.RequestID, Success: true}
 }
 
-func (e *Exchange) unsubscribe(clientID uint64, req *QueryRequest) Response {
+func (e *Exchange) Unsubscribe(clientID uint64, req *QueryRequest) Response {
 	e.MDPublisher.Unsubscribe(clientID, req.Symbol)
 	return Response{RequestID: req.RequestID, Success: true}
 }

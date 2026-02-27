@@ -317,7 +317,7 @@ func TestDisconnectClient(t *testing.T) {
 
 func TestShutdownStopsExchange(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.SetRunning(true)
+	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
 
 	ex.Shutdown()
 

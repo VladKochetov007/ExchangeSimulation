@@ -105,7 +105,7 @@ func TestMarginCalculationConsistency(t *testing.T) {
 
 func TestPerpPartialFillMarginAccounting(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
 	makerID := uint64(1)
@@ -166,7 +166,7 @@ func TestPerpPartialFillMarginAccounting(t *testing.T) {
 
 func TestPerpPositionFlipMarginAccounting(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
 	traderID := uint64(1)
@@ -255,7 +255,7 @@ func TestPerpPositionFlipMarginAccounting(t *testing.T) {
 func TestMultipleOrderCancellationsMarginAccounting(t *testing.T) {
 	t.Skip("Skipping due to channel close race condition - bounds checking verified in other tests")
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
 	clientID := uint64(1)
@@ -327,7 +327,7 @@ func TestEdgeCaseMarginCalculations(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ex := NewExchange(10, &RealClock{})
-			perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+			perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 			ex.AddInstrument(perp)
 
 			makerID := uint64(1)

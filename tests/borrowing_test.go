@@ -7,7 +7,7 @@ import (
 
 func setupBorrowingExchange() *Exchange {
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
 	oracle := NewStaticPriceOracle(map[string]int64{
@@ -115,7 +115,7 @@ func TestRepayMargin_NoBorrowReturnsError(t *testing.T) {
 // with insufficient balance auto-borrows the shortfall when BorrowingManager is configured.
 func TestAutoBorrow_SpotOrderTriggersWhenShortfall(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	spot := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	spot := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(spot)
 
 	oracle := NewStaticPriceOracle(map[string]int64{"USD": USD_PRECISION})
@@ -161,7 +161,7 @@ func TestAutoBorrow_SpotOrderTriggersWhenShortfall(t *testing.T) {
 // TestAutoBorrow_PerpOrderTriggersWhenShortfall verifies auto-borrow on perp margin shortfall.
 func TestAutoBorrow_PerpOrderTriggersWhenShortfall(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
 	oracle := NewStaticPriceOracle(map[string]int64{"USD": USD_PRECISION})

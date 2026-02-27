@@ -220,14 +220,15 @@ func TestProcessExecutionsTakerSell(t *testing.T) {
 		t.Fatalf("Sell order should match and succeed")
 	}
 
+	// After the fill: maker (client1) receives BTC, taker (client2) receives USD
 	client1 := ex.Clients[1]
-	if client1.MakerVolume == 0 {
-		t.Errorf("Client 1 should have maker volume recorded")
+	if client1.Balances["BTC"] <= BTCAmount(10) {
+		t.Errorf("Client 1 (maker) should have received BTC after fill")
 	}
 
 	client2 := ex.Clients[2]
-	if client2.TakerVolume == 0 {
-		t.Errorf("Client 2 should have taker volume recorded")
+	if client2.Balances["USD"] <= USDAmount(100000) {
+		t.Errorf("Client 2 (taker) should have received USD after fill")
 	}
 }
 

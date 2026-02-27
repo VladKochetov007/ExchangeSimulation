@@ -31,7 +31,7 @@ func TestPlaceOrder_LogsInvalidQty(t *testing.T) {
 
 func TestPlaceOrder_LogsInsufficientBalance(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
 	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(10)}, &FixedFee{})
 	ex.SetLogger("BTC/USD", &nullLogger{})
 
@@ -114,7 +114,7 @@ func TestPlaceOrder_AutoBorrow_PerpLimitSuccess(t *testing.T) {
 
 func TestPlaceOrder_AutoBorrow_SpotLimitBuySuccess(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
 	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(100_000)}, &FixedFee{}) // liquidity provider
 	ex.ConnectClient(2, map[string]int64{"USD": USDAmount(1_000)}, &FixedFee{})   // small balance
 
@@ -157,7 +157,7 @@ func TestRepayMargin_InsufficientAvailableBalance(t *testing.T) {
 
 func TestHasOpenPositions_NoPositionsForClient(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
+	ex.AddInstrument(NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
 	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
 
 	// Client has no positions at all (nil map in Positions) → should return false

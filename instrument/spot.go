@@ -37,5 +37,5 @@ func (i *SpotInstrument) ValidatePrice(price int64) bool {
 }
 
 func (i *SpotInstrument) ValidateQty(qty int64) bool {
-	return qty > 0
+	return qty >= i.minOrderSize
 }

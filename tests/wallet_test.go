@@ -7,7 +7,7 @@ import (
 
 func TestSpotLimitBuyLocksQuoteInSpotReserved(t *testing.T) {
 	ex := newPerpTestExchange()
-	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(spot)
 
 	gw := ex.ConnectClient(1, map[string]int64{"USD": USDAmount(100000)}, &FixedFee{})
@@ -36,7 +36,7 @@ func TestSpotLimitBuyLocksQuoteInSpotReserved(t *testing.T) {
 
 func TestSpotLimitSellLocksBaseInSpotReserved(t *testing.T) {
 	ex := newPerpTestExchange()
-	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(spot)
 
 	gw := ex.ConnectClient(1, map[string]int64{"BTC": 2 * BTC_PRECISION, "USD": USDAmount(10000)}, &FixedFee{})
@@ -63,7 +63,7 @@ func TestSpotLimitSellLocksBaseInSpotReserved(t *testing.T) {
 
 func TestPerpLimitOrderLocksInPerpReserved(t *testing.T) {
 	ex := newPerpTestExchange()
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
 	gw := ex.ConnectClient(1, nil, &FixedFee{})
@@ -94,7 +94,7 @@ func TestPerpLimitOrderLocksInPerpReserved(t *testing.T) {
 
 func TestPerpCloseReleasesMarginAndSettlesPnL(t *testing.T) {
 	ex := newPerpTestExchange()
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
 	// Client 1: long BTC-PERP
@@ -162,8 +162,8 @@ func TestPerpCloseReleasesMarginAndSettlesPnL(t *testing.T) {
 
 func TestCrossMarketIsolation(t *testing.T) {
 	ex := newPerpTestExchange()
-	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(spot)
 	ex.AddInstrument(perp)
 
@@ -258,7 +258,7 @@ func TestPerpFundingUsesPerpWallet(t *testing.T) {
 
 func TestPerpOrderInsufficientPerpBalance(t *testing.T) {
 	ex := newPerpTestExchange()
-	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION)
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
 	// Give lots of SPOT balance but no PERP balance

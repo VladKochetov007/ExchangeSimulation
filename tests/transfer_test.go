@@ -7,7 +7,7 @@ import (
 
 func setupTransferExchange() *Exchange {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
 	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(10_000), "BTC": BTCAmount(1)}, &FixedFee{})
 	ex.AddPerpBalance(1, "USD", USDAmount(5_000))
 	return ex

@@ -33,7 +33,7 @@ func TestExchangeLogging(t *testing.T) {
 
 	btc := NewSpotInstrument("BTCUSD", "BTC", "USD",
 		BTC_PRECISION, USD_PRECISION,
-		DOLLAR_TICK, BTC_PRECISION)
+		DOLLAR_TICK, 1)
 
 	ex.AddInstrument(btc)
 
@@ -144,7 +144,7 @@ func TestExchangeLoggingRejection(t *testing.T) {
 
 	btc := NewSpotInstrument("BTCUSD", "BTC", "USD",
 		BTC_PRECISION, USD_PRECISION,
-		DOLLAR_TICK, BTC_PRECISION)
+		DOLLAR_TICK, 1)
 
 	ex.AddInstrument(btc)
 
@@ -193,7 +193,7 @@ func TestExchangeLoggingCancel(t *testing.T) {
 
 	btc := NewSpotInstrument("BTCUSD", "BTC", "USD",
 		BTC_PRECISION, USD_PRECISION,
-		DOLLAR_TICK, BTC_PRECISION)
+		DOLLAR_TICK, 1)
 
 	ex.AddInstrument(btc)
 

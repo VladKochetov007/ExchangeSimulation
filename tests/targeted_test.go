@@ -45,7 +45,7 @@ func TestSetMarginMode_SuccessWithZeroSizePosition(t *testing.T) {
 func TestVisibleQty_IcebergOrder(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
 	ex.ConnectClient(1, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
 
 	const reqID = uint64(9001)
@@ -110,7 +110,7 @@ func TestConnectClient_WithBalanceSnapshotInterval(t *testing.T) {
 		EstimatedClients:        2,
 		BalanceSnapshotInterval: 50 * time.Millisecond,
 	})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
 	// ConnectClient with non-zero BalanceSnapshotInterval starts the balance snapshot goroutine
 	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(1_000)}, &FixedFee{})
 	time.Sleep(20 * time.Millisecond)
@@ -121,7 +121,7 @@ func TestConnectClient_WithBalanceSnapshotInterval(t *testing.T) {
 
 func TestPlaceOrder_SpotMarketBuy_NoAsks(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, BTC_PRECISION))
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
 	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(100_000)}, &FixedFee{})
 	ex.ConnectClient(2, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
 
