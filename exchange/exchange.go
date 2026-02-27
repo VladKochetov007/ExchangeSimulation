@@ -9,10 +9,6 @@ import (
 
 	ematching "exchange_sim/matching"
 )
-
-// Compile-time assertion: *DefaultExchange must satisfy the Venue interface.
-var _ Venue = (*DefaultExchange)(nil)
-
 // ExchangeBalance tracks the exchange's own accumulated revenue and safety fund.
 type ExchangeBalance struct {
 	FeeRevenue    map[string]int64 `json:"fee_revenue"`
@@ -967,10 +963,7 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 		if borrowed > 0 {
 			availableForRepay := client.PerpAvailable(perp.QuoteAsset())
 			if availableForRepay > 0 {
-				repayAmount := borrowed
-				if repayAmount > availableForRepay {
-					repayAmount = availableForRepay
-				}
+				repayAmount := min(borrowed, availableForRepay)
 
 				oldBorrowed := client.Borrowed[perp.QuoteAsset()]
 				oldPerp := client.PerpBalances[perp.QuoteAsset()]

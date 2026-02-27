@@ -28,10 +28,9 @@ flowchart LR
         FM["Funding"]
         BM["Borrowing"]
         MDP["Market Data Publisher"]
-        AUT["Automation</br>(prices · funding</br>liquidation)"]
         subgraph PS["Price Sources"]
-            MP["Mark Price</br>(mid · last · EMA · TWAP)"]
-            IP["Index Price</br>(book · static · dynamic)"]
+            MP["Mark Price</br>(mid · last · weighted)"]
+            IP["Index Price</br>(static · dynamic · GBM)"]
         end
     end
 
@@ -54,15 +53,15 @@ flowchart LR
     ME --> ST
     ST --> PM
     ST --> BM
+
+    IP -. index .-> FM
+    MP -. mark .-> FM
     MP -. mark .-> ST
-    MP -. mark .-> AUT
-    IP -. index .-> AUT
-    AUT --> FM
+    MP -. liquidation .-> ME
     FM --> ST
-    AUT --> MDP
-    AUT -. "LiquidationHandler</br>callback" .-> A1
-    AUT -. "LiquidationHandler</br>callback" .-> A2
-    AUT --> ME
+    ME --> MDP
+    ST --> MDP
+    FM --> MDP
 
     MDP -- "book · trades</br>funding · OI" --> CGW
 
@@ -73,11 +72,11 @@ flowchart LR
 
 **Request flow**: Actor sends `Request` → `DelayedGateway` (optional per-channel latency) → `ClientGateway` → `Exchange.HandleClientRequests` → order validation → matching engine → settlement → `Response` + `FillNotification` back through the same gateway stack. Market data (book snapshots/deltas, trades, funding, open interest) flows one-way from `MDPublisher` to all subscribed gateways filtered by `MDType`.
 
-**Automation**: `DefaultExchange` runs background goroutines — recalculates mark and index prices on a configurable interval, updates funding rates, publishes them via `MDPublisher`, settles periodic funding payments, and checks margin ratios after every price update. Liquidation force-closes positions through the `MatchingEngine`. Margin call warnings and liquidation events are delivered to the `LiquidationHandler` interface — a direct callback, not routed through the gateway. Start with `ex.ConfigureAutomation(cfg)` then `ex.StartAutomation(ctx)`.
+**Price and funding**: `IndexPrice` feeds the funding rate calculator (`Funding`). `MarkPrice` feeds both `Funding` (premium calculation) and `Settlement` (mark-to-market PnL, margin checks). When a margin check fails, `MarkPrice` triggers a force-close through `MatchingEngine` directly. Liquidation margin call and liquidation events are delivered to `LiquidationHandler` — a direct interface callback, not routed through the gateway.
 
 **Latency modeling**: `DelayedGateway` wraps any `ClientGateway` and introduces per-channel (request / response / market data) delay drawn from a pluggable `LatencyProvider`. Five implementations ship: constant, uniform random, normal, log-normal (heavy tail), and Hawkes (self-exciting, models exchange queue congestion). Multiple actors on the same exchange can have independent latency profiles.
 
-**Multi-venue**: `Venue` pairs an `Exchange` with a `LatencyConfig`. `Runner` orchestrates any number of venues and actors, advancing a shared `SimulatedClock` or running in wall-clock time. Gateway channel identity carries venue identity — no tagging needed.
+**Multi-venue**: `Venue` pairs an `Exchange` with a `LatencyConfig`. `Runner` orchestrates any number of venues and actors, advancing a shared `SimulatedClock` (via the `Advanceable` interface) or running in wall-clock time. Gateway channel identity carries venue identity — no tagging needed.
 
 ---
 
