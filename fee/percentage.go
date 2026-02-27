@@ -8,9 +8,9 @@ type PercentageFee struct {
 	InQuote  bool
 }
 
-func (f *PercentageFee) CalculateFee(exec *etypes.Execution, side etypes.Side, isMaker bool, baseAsset, quoteAsset string, precision int64) etypes.Fee {
+func (f *PercentageFee) CalculateFee(ctx etypes.FillContext) etypes.Fee {
 	bps := f.TakerBps
-	if isMaker {
+	if ctx.IsMaker {
 		bps = f.MakerBps
 	}
 
@@ -18,12 +18,12 @@ func (f *PercentageFee) CalculateFee(exec *etypes.Execution, side etypes.Side, i
 	var asset string
 
 	if f.InQuote {
-		tradeValue := (exec.Price * exec.Qty) / precision
+		tradeValue := (ctx.Exec.Price * ctx.Exec.Qty) / ctx.Precision
 		amount = (tradeValue * bps) / BPS
-		asset = quoteAsset
+		asset = ctx.QuoteAsset
 	} else {
-		amount = (exec.Qty * bps) / BPS
-		asset = baseAsset
+		amount = (ctx.Exec.Qty * bps) / BPS
+		asset = ctx.BaseAsset
 	}
 
 	return etypes.Fee{Asset: asset, Amount: amount}

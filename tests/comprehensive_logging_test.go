@@ -33,7 +33,7 @@ func TestComprehensiveBorrowRepayLogging(t *testing.T) {
 			"USD": 500,  // 5 bps
 			"BTC": 1000, // 10 bps
 		},
-		PriceOracle: oracle,
+		PriceSource: oracle,
 	}
 
 	if err := ex.EnableBorrowing(config); err != nil {
@@ -360,7 +360,7 @@ func TestMultiVenueBorrowingLogging(t *testing.T) {
 		DefaultMarginMode: CrossMargin,
 		CollateralFactors: map[string]float64{"USD": 0.75, "BTC": 0.70},
 		BorrowRates:       map[string]int64{"USD": 500},
-		PriceOracle:       oracle,
+		PriceSource:       oracle,
 	}
 
 	ex1.EnableBorrowing(config)
@@ -449,7 +449,7 @@ func TestCollateralLogging(t *testing.T) {
 		DefaultMarginMode: CrossMargin,
 		CollateralFactors: map[string]float64{"USD": 0.75, "BTC": 0.70},
 		BorrowRates:       map[string]int64{"USD": 500},
-		PriceOracle:       oracle,
+		PriceSource:       oracle,
 	}
 
 	ex.EnableBorrowing(config)

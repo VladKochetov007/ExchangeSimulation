@@ -301,14 +301,23 @@ func (a *BaseActor) QueryBalance() {
 	})
 }
 
-func (a *BaseActor) Subscribe(symbol string) {
+func (a *BaseActor) Subscribe(symbol string, types ...exchange.MDType) {
 	reqID := atomic.AddUint64(&a.requestSeq, 1)
 	a.gateway.Send(exchange.Request{
 		Type: exchange.ReqSubscribe,
 		QueryReq: &exchange.QueryRequest{
 			RequestID: reqID,
 			Symbol:    symbol,
+			Types:     types,
 		},
+	})
+}
+
+func (a *BaseActor) QueryAccount() {
+	reqID := atomic.AddUint64(&a.requestSeq, 1)
+	a.gateway.Send(exchange.Request{
+		Type:     exchange.ReqQueryAccount,
+		QueryReq: &exchange.QueryRequest{RequestID: reqID},
 	})
 }
 

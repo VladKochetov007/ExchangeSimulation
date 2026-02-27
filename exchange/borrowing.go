@@ -183,7 +183,7 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(
 	borrowAsset string,
 	borrowAmount int64,
 ) error {
-	if bm.Config.PriceOracle == nil {
+	if bm.Config.PriceSource == nil {
 		return errors.New("price oracle not configured")
 	}
 
@@ -192,7 +192,7 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(
 		if balance <= 0 {
 			continue
 		}
-		price := bm.Config.PriceOracle.GetPrice(asset)
+		price := bm.Config.PriceSource.Price(asset)
 		if price > 0 {
 			// Avoid overflow
 			totalCollateralValue += (balance / btcPrecision) * price
@@ -204,14 +204,14 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(
 		if borrowed <= 0 {
 			continue
 		}
-		price := bm.Config.PriceOracle.GetPrice(asset)
+		price := bm.Config.PriceSource.Price(asset)
 		if price > 0 {
 			// Avoid overflow
 			existingBorrowValue += (borrowed / btcPrecision) * price
 		}
 	}
 
-	borrowPrice := bm.Config.PriceOracle.GetPrice(borrowAsset)
+	borrowPrice := bm.Config.PriceSource.Price(borrowAsset)
 	if borrowPrice == 0 {
 		return errors.New("price unavailable")
 	}
@@ -249,10 +249,10 @@ func (bm *BorrowingManager) getCollateralFactor(asset string) float64 {
 }
 
 func (bm *BorrowingManager) CalculateCollateralUsed(asset string, amount int64) int64 {
-	if bm.Config.PriceOracle == nil {
+	if bm.Config.PriceSource == nil {
 		return 0
 	}
-	price := bm.Config.PriceOracle.GetPrice(asset)
+	price := bm.Config.PriceSource.Price(asset)
 	if price == 0 {
 		return 0
 	}

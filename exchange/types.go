@@ -60,6 +60,10 @@ type MarginMode = etypes.MarginMode
 type BorrowingConfig = etypes.BorrowingConfig
 type IsolatedPosition = etypes.IsolatedPosition
 type PositionDelta = etypes.PositionDelta
+type PositionSide = etypes.PositionSide
+type FillContext = etypes.FillContext
+type PositionSnapshot = etypes.PositionSnapshot
+type AccountSnapshot = etypes.AccountSnapshot
 
 const (
 	Buy  = etypes.Buy
@@ -110,8 +114,15 @@ const (
 	ReqCancelOrder  = etypes.ReqCancelOrder
 	ReqQueryBalance = etypes.ReqQueryBalance
 	ReqQueryOrders  = etypes.ReqQueryOrders
+	ReqQueryAccount = etypes.ReqQueryAccount
 	ReqSubscribe    = etypes.ReqSubscribe
 	ReqUnsubscribe  = etypes.ReqUnsubscribe
+)
+
+const (
+	PositionBoth  = etypes.PositionBoth
+	PositionLong  = etypes.PositionLong
+	PositionShort = etypes.PositionShort
 )
 
 const (
@@ -136,7 +147,7 @@ const (
 type Logger = etypes.Logger
 type FeeModel = etypes.FeeModel
 type Instrument = etypes.Instrument
-type PriceOracle = etypes.PriceOracle
+type PriceSource = etypes.PriceSource
 type Clock = etypes.Clock
 type Ticker = etypes.Ticker
 type TickerFactory = etypes.TickerFactory
@@ -153,7 +164,7 @@ type PerpFutures = einstrument.PerpFutures
 type SimpleFundingCalc = einstrument.SimpleFundingCalc
 type PercentageFee = efee.PercentageFee
 type FixedFee = efee.FixedFee
-type DefaultMatcher = ematching.DefaultMatcher
+type PriceTimeMatcher = ematching.PriceTimeMatcher
 type ProRataMatcher = ematching.ProRataMatcher
 type MDPublisher = emarketdata.MDPublisher
 type LastPriceCalculator = eprice.LastPriceCalculator
@@ -171,6 +182,7 @@ var NewMidPriceOracle = eprice.NewMidPriceOracle
 var NewLastPriceCalculator = eprice.NewLastPriceCalculator
 var NewWeightedMidPriceCalculator = eprice.NewWeightedMidPriceCalculator
 
+
 var NewBook = ebook.NewBook
 var GetLimit = ebook.GetLimit
 var LinkOrder = ebook.LinkOrder
@@ -185,9 +197,11 @@ var PutMDMsg = emarketdata.PutMDMsg
 
 func NewMDPublisher() *MDPublisher { return emarketdata.NewMDPublisher() }
 
-// NewDefaultMatcher injects a real-time clock; callers using simulation time
-// should call matching.NewDefaultMatcher(clock) directly.
-func NewDefaultMatcher() *DefaultMatcher { return ematching.NewDefaultMatcher(&eclock.RealClock{}) }
+// NewPriceTimeMatcher injects a real-time clock; callers using simulation time
+// should call matching.NewPriceTimeMatcher(clock) directly.
+func NewPriceTimeMatcher() *PriceTimeMatcher {
+	return ematching.NewPriceTimeMatcher(&eclock.RealClock{})
+}
 
 // NewProRataMatcher injects a real-time clock; callers using simulation time
 // should call matching.NewProRataMatcher(clock) directly.

@@ -95,7 +95,7 @@ func NewExchangeWithConfig(config ExchangeConfig) *Exchange {
 		config.SnapshotPollInterval = 1 * time.Millisecond
 	}
 
-	matcher := ematching.NewDefaultMatcher(config.Clock)
+	matcher := ematching.NewPriceTimeMatcher(config.Clock)
 	ex := &Exchange{
 		ID:          config.ID,
 		Clients:     make(map[uint64]*Client, config.EstimatedClients),
@@ -213,23 +213,25 @@ func (e *Exchange) logAllBalances() {
 	for clientID, client := range e.Clients {
 		spotBalances := make([]AssetBalance, 0, len(client.Balances))
 		for asset, total := range client.Balances {
-			reserved := client.Reserved[asset]
+			locked := client.Reserved[asset]
+			borrowed := client.Borrowed[asset]
 			spotBalances = append(spotBalances, AssetBalance{
-				Asset:     asset,
-				Total:     total,
-				Available: total - reserved,
-				Reserved:  reserved,
+				Asset:    asset,
+				Free:     total - locked,
+				Locked:   locked,
+				Borrowed: borrowed,
+				NetAsset: total - borrowed,
 			})
 		}
 
 		perpBalances := make([]AssetBalance, 0, len(client.PerpBalances))
 		for asset, total := range client.PerpBalances {
-			reserved := client.PerpReserved[asset]
+			locked := client.PerpReserved[asset]
 			perpBalances = append(perpBalances, AssetBalance{
-				Asset:     asset,
-				Total:     total,
-				Available: total - reserved,
-				Reserved:  reserved,
+				Asset:    asset,
+				Free:     total - locked,
+				Locked:   locked,
+				NetAsset: total,
 			})
 		}
 
@@ -258,8 +260,8 @@ func (e *Exchange) getLogger(symbol string) Logger {
 }
 
 func (e *Exchange) EnableBorrowing(config BorrowingConfig) error {
-	if config.Enabled && config.PriceOracle == nil {
-		return errors.New("price oracle required")
+	if config.Enabled && config.PriceSource == nil {
+		return errors.New("price source required")
 	}
 
 	e.mu.Lock()
@@ -484,6 +486,8 @@ func (e *Exchange) handleClientRequests(gateway *ClientGateway) {
 			resp = e.cancelOrder(gateway.ClientID, req.CancelReq)
 		case ReqQueryBalance:
 			resp = e.queryBalance(gateway.ClientID, req.QueryReq)
+		case ReqQueryAccount:
+			resp = e.queryAccount(gateway.ClientID, req.QueryReq)
 		case ReqSubscribe:
 			resp = e.subscribe(gateway.ClientID, req.QueryReq, gateway)
 		case ReqUnsubscribe:
@@ -600,6 +604,11 @@ func (e *Exchange) CancelOrder(clientID uint64, req *CancelRequest) Response {
 // QueryBalance is the public test-accessible wrapper for queryBalance.
 func (e *Exchange) QueryBalance(clientID uint64, req *QueryRequest) Response {
 	return e.queryBalance(clientID, req)
+}
+
+// QueryAccount is the public test-accessible wrapper for queryAccount.
+func (e *Exchange) QueryAccount(clientID uint64, req *QueryRequest) Response {
+	return e.queryAccount(clientID, req)
 }
 
 // Subscribe is the public test-accessible wrapper for subscribe.

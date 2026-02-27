@@ -90,7 +90,7 @@ func TestUSDTAmount(t *testing.T) {
 
 func TestEnableBorrowing_NilOracleReturnsError(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	err := ex.EnableBorrowing(BorrowingConfig{Enabled: true, PriceOracle: nil})
+	err := ex.EnableBorrowing(BorrowingConfig{Enabled: true, PriceSource: nil})
 	if err == nil {
 		t.Error("expected error when enabling borrowing without price oracle")
 	}

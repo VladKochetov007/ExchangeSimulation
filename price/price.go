@@ -2,13 +2,10 @@ package price
 
 import ebook "exchange_sim/book"
 
-// MarkPriceCalculator calculates the mark price from an order book.
 type MarkPriceCalculator interface {
 	Calculate(book *ebook.OrderBook) int64
 }
 
-// BookProvider provides read access to order books by symbol.
-// *exchange.Exchange satisfies this interface via GetBook.
 type BookProvider interface {
 	GetBook(symbol string) *ebook.OrderBook
 }

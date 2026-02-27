@@ -470,7 +470,7 @@ func TestMidPriceOracle_EmptyBookReturnsZero(t *testing.T) {
 	oracle := NewMidPriceOracle(ex)
 	oracle.MapSymbol("BTC-PERP", "BTC/USD")
 
-	if price := oracle.GetPrice("BTC-PERP"); price != 0 {
+	if price := oracle.Price("BTC-PERP"); price != 0 {
 		t.Errorf("expected 0 from empty spot book, got %d", price)
 	}
 }
@@ -504,7 +504,7 @@ func TestMidPriceOracle_UpdatesWithNewOrders(t *testing.T) {
 	spotBook.Bids.AddOrder(bid1)
 	spotBook.Asks.AddOrder(ask1)
 
-	firstMid := oracle.GetPrice("BTC-PERP")
+	firstMid := oracle.Price("BTC-PERP")
 	expectedFirst := (PriceUSD(49_000, DOLLAR_TICK) + PriceUSD(51_000, DOLLAR_TICK)) / 2
 	if firstMid != expectedFirst {
 		t.Errorf("first mid-price: expected %d, got %d", expectedFirst, firstMid)
@@ -526,7 +526,7 @@ func TestMidPriceOracle_UpdatesWithNewOrders(t *testing.T) {
 	spotBook.Bids.AddOrder(bid2)
 	spotBook.Asks.AddOrder(ask2)
 
-	secondMid := oracle.GetPrice("BTC-PERP")
+	secondMid := oracle.Price("BTC-PERP")
 	expectedSecond := (PriceUSD(52_000, DOLLAR_TICK) + PriceUSD(54_000, DOLLAR_TICK)) / 2
 	if secondMid != expectedSecond {
 		t.Errorf("updated mid-price: expected %d, got %d", expectedSecond, secondMid)

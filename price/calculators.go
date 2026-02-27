@@ -56,23 +56,21 @@ func (c *WeightedMidPriceCalculator) Calculate(book *ebook.OrderBook) int64 {
 	return (bidPrice*askQty + askPrice*bidQty) / totalWeight
 }
 
-// Index-anchored mark price models — all require a PriceOracle.
-// The index is an external spot reference that an attacker cannot move by
-// trading the perp book alone.
+// Index-anchored mark price models — all require a PriceSource for the external spot reference.
 
 // MedianMarkPrice marks at the median of index, best bid, and best ask.
 // Requires moving two of three inputs to manipulate.
 type MedianMarkPrice struct {
-	index  etypes.PriceOracle
+	index  etypes.PriceSource
 	symbol string
 }
 
-func NewMedianMarkPrice(symbol string, index etypes.PriceOracle) *MedianMarkPrice {
+func NewMedianMarkPrice(symbol string, index etypes.PriceSource) *MedianMarkPrice {
 	return &MedianMarkPrice{symbol: symbol, index: index}
 }
 
 func (c *MedianMarkPrice) Calculate(book *ebook.OrderBook) int64 {
-	indexPrice := c.index.GetPrice(c.symbol)
+	indexPrice := c.index.Price(c.symbol)
 
 	var bid, ask int64
 	if book.Bids.Best != nil {
@@ -98,11 +96,11 @@ func (c *MedianMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 type EMAMarkPrice struct {
 	alpha    int64 // 2/(N+1) * 10000, fixed-point
 	emaBasis int64
-	index    etypes.PriceOracle
+	index    etypes.PriceSource
 	symbol   string
 }
 
-func NewEMAMarkPrice(symbol string, index etypes.PriceOracle, windowSamples int) *EMAMarkPrice {
+func NewEMAMarkPrice(symbol string, index etypes.PriceSource, windowSamples int) *EMAMarkPrice {
 	if windowSamples < 1 {
 		windowSamples = 1
 	}
@@ -114,7 +112,7 @@ func NewEMAMarkPrice(symbol string, index etypes.PriceOracle, windowSamples int)
 }
 
 func (c *EMAMarkPrice) Calculate(book *ebook.OrderBook) int64 {
-	indexPrice := c.index.GetPrice(c.symbol)
+	indexPrice := c.index.Price(c.symbol)
 	if indexPrice == 0 {
 		return book.GetMidPrice()
 	}
@@ -140,11 +138,11 @@ type ClampedEMAMarkPrice struct {
 	alpha    int64
 	emaBasis int64
 	bandBps  int64 // half-band = bandBps/2 * index / 10000
-	index    etypes.PriceOracle
+	index    etypes.PriceSource
 	symbol   string
 }
 
-func NewClampedEMAMarkPrice(symbol string, index etypes.PriceOracle, windowSamples int, bandBps int64) *ClampedEMAMarkPrice {
+func NewClampedEMAMarkPrice(symbol string, index etypes.PriceSource, windowSamples int, bandBps int64) *ClampedEMAMarkPrice {
 	if windowSamples < 1 {
 		windowSamples = 1
 	}
@@ -157,7 +155,7 @@ func NewClampedEMAMarkPrice(symbol string, index etypes.PriceOracle, windowSampl
 }
 
 func (c *ClampedEMAMarkPrice) Calculate(book *ebook.OrderBook) int64 {
-	indexPrice := c.index.GetPrice(c.symbol)
+	indexPrice := c.index.Price(c.symbol)
 	if indexPrice == 0 {
 		return book.GetMidPrice()
 	}
@@ -192,11 +190,11 @@ type TWAPMarkPrice struct {
 	pos     int
 	size    int
 	bandBps int64
-	index   etypes.PriceOracle
+	index   etypes.PriceSource
 	symbol  string
 }
 
-func NewTWAPMarkPrice(symbol string, index etypes.PriceOracle, windowSamples int, bandBps int64) *TWAPMarkPrice {
+func NewTWAPMarkPrice(symbol string, index etypes.PriceSource, windowSamples int, bandBps int64) *TWAPMarkPrice {
 	if windowSamples < 1 {
 		windowSamples = 1
 	}
@@ -209,7 +207,7 @@ func NewTWAPMarkPrice(symbol string, index etypes.PriceOracle, windowSamples int
 }
 
 func (c *TWAPMarkPrice) Calculate(book *ebook.OrderBook) int64 {
-	indexPrice := c.index.GetPrice(c.symbol)
+	indexPrice := c.index.Price(c.symbol)
 	if indexPrice == 0 {
 		return book.GetMidPrice()
 	}

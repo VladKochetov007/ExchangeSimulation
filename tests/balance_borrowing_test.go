@@ -65,7 +65,7 @@ func TestBorrowMarginBasic(t *testing.T) {
 		BorrowRates: map[string]int64{
 			"USD": 500,
 		},
-		PriceOracle: oracle,
+		PriceSource: oracle,
 	}
 
 	if err := ex.EnableBorrowing(config); err != nil {

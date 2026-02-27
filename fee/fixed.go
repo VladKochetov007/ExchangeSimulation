@@ -7,8 +7,8 @@ type FixedFee struct {
 	TakerFee etypes.Fee
 }
 
-func (f *FixedFee) CalculateFee(exec *etypes.Execution, side etypes.Side, isMaker bool, baseAsset, quoteAsset string, precision int64) etypes.Fee {
-	if isMaker {
+func (f *FixedFee) CalculateFee(ctx etypes.FillContext) etypes.Fee {
+	if ctx.IsMaker {
 		return f.MakerFee
 	}
 	return f.TakerFee

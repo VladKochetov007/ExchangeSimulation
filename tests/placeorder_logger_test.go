@@ -86,7 +86,7 @@ func TestPlaceOrder_AutoBorrow_PerpLimitSuccess(t *testing.T) {
 		AutoBorrowPerp:    true,
 		BorrowRates:       map[string]int64{"USD": 500},
 		CollateralFactors: map[string]float64{"USD": 1.0},
-		PriceOracle:       oracle,
+		PriceSource:       oracle,
 	}); err != nil {
 		t.Fatalf("enable borrowing: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestPlaceOrder_AutoBorrow_SpotLimitBuySuccess(t *testing.T) {
 		BorrowRates:    map[string]int64{"USD": 500},
 		// factor: unlimited (1.0 means collateral covers borrow)
 		CollateralFactors: map[string]float64{"USD": 0.01}, // low factor so even small collateral passes
-		PriceOracle:       oracle,
+		PriceSource:       oracle,
 	}); err != nil {
 		t.Fatalf("enable borrowing: %v", err)
 	}

@@ -112,14 +112,14 @@ func TestQueryBalance(t *testing.T) {
 		t.Fatalf("USD balance not found")
 	}
 
-	if usdBalance.Total != 10000*USD_PRECISION {
-		t.Errorf("Expected total 10000 USD_PRECISION, got %d", usdBalance.Total)
+	if usdBalance.Free+usdBalance.Locked != 10000*USD_PRECISION {
+		t.Errorf("Expected total 10000 USD_PRECISION, got %d", usdBalance.Free+usdBalance.Locked)
 	}
-	if usdBalance.Reserved != 1000*USD_PRECISION {
-		t.Errorf("Expected reserved 1000 USD_PRECISION, got %d", usdBalance.Reserved)
+	if usdBalance.Locked != 1000*USD_PRECISION {
+		t.Errorf("Expected locked 1000 USD_PRECISION, got %d", usdBalance.Locked)
 	}
-	if usdBalance.Available != 9000*USD_PRECISION {
-		t.Errorf("Expected available 9000 USD_PRECISION, got %d", usdBalance.Available)
+	if usdBalance.Free != 9000*USD_PRECISION {
+		t.Errorf("Expected free 9000 USD_PRECISION, got %d", usdBalance.Free)
 	}
 }
 

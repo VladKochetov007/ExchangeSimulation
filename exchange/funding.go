@@ -2,27 +2,36 @@ package exchange
 
 import "sync"
 
+type positionKey struct {
+	Symbol string
+	Side   PositionSide
+}
+
 type PositionManager struct {
-	positions map[uint64]map[string]*Position
+	positions map[uint64]map[positionKey]*Position
 	clock     Clock
 	mu        sync.RWMutex
 }
 
 func NewPositionManager(clock Clock) *PositionManager {
 	return &PositionManager{
-		positions: make(map[uint64]map[string]*Position),
+		positions: make(map[uint64]map[positionKey]*Position),
 		clock:     clock,
 	}
 }
 
 func (pm *PositionManager) GetPosition(clientID uint64, symbol string) *Position {
+	return pm.GetPositionBySide(clientID, symbol, PositionBoth)
+}
+
+func (pm *PositionManager) GetPositionBySide(clientID uint64, symbol string, posSide PositionSide) *Position {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 
 	if pm.positions[clientID] == nil {
 		return nil
 	}
-	p := pm.positions[clientID][symbol]
+	p := pm.positions[clientID][positionKey{symbol, posSide}]
 	if p == nil {
 		return nil
 	}
@@ -32,23 +41,24 @@ func (pm *PositionManager) GetPosition(clientID uint64, symbol string) *Position
 }
 
 // UpdatePositionWithDelta updates the position and returns old and new state.
-func (pm *PositionManager) UpdatePositionWithDelta(clientID uint64, symbol string, qty int64, price int64, side Side, exchange *Exchange, reason string) PositionDelta {
+func (pm *PositionManager) UpdatePositionWithDelta(clientID uint64, symbol string, qty, price int64, tradeSide Side, posSide PositionSide, exchange *Exchange, reason string) PositionDelta {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
 	if pm.positions[clientID] == nil {
-		pm.positions[clientID] = make(map[string]*Position)
+		pm.positions[clientID] = make(map[positionKey]*Position)
 	}
 
-	pos := pm.positions[clientID][symbol]
+	key := positionKey{symbol, posSide}
+	pos := pm.positions[clientID][key]
 	if pos == nil {
-		pos = &Position{ClientID: clientID, Symbol: symbol}
-		pm.positions[clientID][symbol] = pos
+		pos = &Position{ClientID: clientID, Symbol: symbol, PositionSide: posSide}
+		pm.positions[clientID][key] = pos
 	}
 
 	delta := PositionDelta{OldSize: pos.Size, OldEntryPrice: pos.EntryPrice}
 
-	pm.applyPositionChange(pos, qty, price, side)
+	pm.applyPositionChange(pos, qty, price, tradeSide, posSide)
 
 	delta.NewSize = pos.Size
 	delta.NewEntryPrice = pos.EntryPrice
@@ -66,13 +76,10 @@ func (pm *PositionManager) UpdatePositionWithDelta(clientID uint64, symbol strin
 				NewEntryPrice: delta.NewEntryPrice,
 				TradeQty:      qty,
 				TradePrice:    price,
-				TradeSide:     side.String(),
+				TradeSide:     tradeSide.String(),
 				Reason:        reason,
 			})
 
-			// Log open interest after position change (real exchanges log this)
-			// Open interest = sum of all absolute position sizes
-			// Use unsafe version since we're already holding the lock
 			openInterest := pm.calculateOpenInterestUnsafe(symbol)
 			log.LogEvent(timestamp, 0, "open_interest", OpenInterestEvent{
 				Timestamp:    timestamp,
@@ -85,24 +92,33 @@ func (pm *PositionManager) UpdatePositionWithDelta(clientID uint64, symbol strin
 	return delta
 }
 
-func (pm *PositionManager) UpdatePosition(clientID uint64, symbol string, qty int64, price int64, side Side) {
+func (pm *PositionManager) UpdatePosition(clientID uint64, symbol string, qty, price int64, side Side) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
 	if pm.positions[clientID] == nil {
-		pm.positions[clientID] = make(map[string]*Position)
+		pm.positions[clientID] = make(map[positionKey]*Position)
 	}
 
-	pos := pm.positions[clientID][symbol]
+	key := positionKey{symbol, PositionBoth}
+	pos := pm.positions[clientID][key]
 	if pos == nil {
-		pos = &Position{ClientID: clientID, Symbol: symbol}
-		pm.positions[clientID][symbol] = pos
+		pos = &Position{ClientID: clientID, Symbol: symbol, PositionSide: PositionBoth}
+		pm.positions[clientID][key] = pos
 	}
 
-	pm.applyPositionChange(pos, qty, price, side)
+	pm.applyPositionChange(pos, qty, price, side, PositionBoth)
 }
 
-func (pm *PositionManager) applyPositionChange(pos *Position, qty int64, price int64, side Side) {
+func (pm *PositionManager) applyPositionChange(pos *Position, qty, price int64, tradeSide Side, posSide PositionSide) {
+	if posSide == PositionLong || posSide == PositionShort {
+		pm.applyHedgePositionChange(pos, qty, price, tradeSide)
+		return
+	}
+	pm.applyNettingPositionChange(pos, qty, price, tradeSide)
+}
+
+func (pm *PositionManager) applyNettingPositionChange(pos *Position, qty, price int64, side Side) {
 	deltaSize := qty
 	if side == Sell {
 		deltaSize = -qty
@@ -127,6 +143,52 @@ func (pm *PositionManager) applyPositionChange(pos *Position, qty int64, price i
 	}
 }
 
+// applyHedgePositionChange accumulates or reduces the hedge-side position independently.
+// PositionLong always holds positive size; PositionShort always holds negative size.
+func (pm *PositionManager) applyHedgePositionChange(pos *Position, qty, price int64, tradeSide Side) {
+	if tradeSide == Buy {
+		// Adding to long / reducing short
+		if pos.Size < 0 {
+			// Reducing: just move towards zero
+			pos.Size = min(0, pos.Size+qty)
+			if pos.Size == 0 {
+				pos.EntryPrice = 0
+			}
+		} else {
+			// Accumulating long
+			if pos.Size == 0 {
+				pos.EntryPrice = price
+			} else {
+				totalNotional := pos.Size*pos.EntryPrice + qty*price
+				pos.Size += qty
+				pos.EntryPrice = totalNotional / pos.Size
+				return
+			}
+			pos.Size += qty
+		}
+	} else {
+		// Adding to short / reducing long
+		if pos.Size > 0 {
+			// Reducing: just move towards zero
+			pos.Size = max(0, pos.Size-qty)
+			if pos.Size == 0 {
+				pos.EntryPrice = 0
+			}
+		} else {
+			// Accumulating short
+			if pos.Size == 0 {
+				pos.EntryPrice = price
+			} else {
+				totalNotional := (-pos.Size)*pos.EntryPrice + qty*price
+				pos.Size -= qty
+				pos.EntryPrice = totalNotional / (-pos.Size)
+				return
+			}
+			pos.Size -= qty
+		}
+	}
+}
+
 func (pm *PositionManager) CalculateOpenInterest(symbol string) int64 {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
@@ -137,8 +199,10 @@ func (pm *PositionManager) CalculateOpenInterest(symbol string) int64 {
 func (pm *PositionManager) calculateOpenInterestUnsafe(symbol string) int64 {
 	var total int64
 	for _, clientPositions := range pm.positions {
-		if pos := clientPositions[symbol]; pos != nil && pos.Size != 0 {
-			total += abs(pos.Size)
+		for key, pos := range clientPositions {
+			if key.Symbol == symbol && pos.Size != 0 {
+				total += abs(pos.Size)
+			}
 		}
 	}
 	return total
@@ -157,8 +221,9 @@ func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpF
 	// netExchangeFlow < 0: exchange paid out more to shorts than it received from longs.
 	netExchangeFlow := int64(0)
 
+	perpSymbol := perp.Symbol()
 	for clientID, clientPos := range pm.positions {
-		pos := clientPos[perp.Symbol()]
+		pos := clientPos[positionKey{perpSymbol, PositionBoth}]
 		if pos == nil || pos.Size == 0 {
 			continue
 		}
@@ -243,14 +308,14 @@ func (pm *PositionManager) Unlock() { pm.mu.Unlock() }
 // Caller must hold Lock().
 func (pm *PositionManager) InjectPosition(clientID uint64, symbol string, pos *Position) {
 	if pm.positions[clientID] == nil {
-		pm.positions[clientID] = make(map[string]*Position)
+		pm.positions[clientID] = make(map[positionKey]*Position)
 	}
-	pm.positions[clientID][symbol] = pos
+	pm.positions[clientID][positionKey{symbol, pos.PositionSide}] = pos
 }
 
-// GetPositions returns the raw positions map for testing/debugging.
+// GetPositions returns all positions for a client keyed by symbol+side, for testing/debugging.
 // Caller is responsible for concurrent safety.
-func (pm *PositionManager) GetPositions(clientID uint64) map[string]*Position {
+func (pm *PositionManager) GetPositions(clientID uint64) map[positionKey]*Position {
 	return pm.positions[clientID]
 }
 

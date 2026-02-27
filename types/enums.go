@@ -152,9 +152,29 @@ const (
 	ReqCancelOrder
 	ReqQueryBalance
 	ReqQueryOrders
+	ReqQueryAccount
 	ReqSubscribe
 	ReqUnsubscribe
 )
+
+type PositionSide uint8
+
+const (
+	PositionBoth  PositionSide = iota // one-way mode (netting)
+	PositionLong                       // hedge mode long
+	PositionShort                      // hedge mode short
+)
+
+func (ps PositionSide) String() string {
+	switch ps {
+	case PositionLong:
+		return "LONG"
+	case PositionShort:
+		return "SHORT"
+	default:
+		return "BOTH"
+	}
+}
 
 type QueryType uint8
 

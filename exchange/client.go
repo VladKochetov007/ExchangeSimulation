@@ -103,23 +103,25 @@ func (c *Client) RemoveOrder(orderID uint64) {
 func (c *Client) GetBalanceSnapshot(timestamp int64) *BalanceSnapshot {
 	spotBalances := make([]AssetBalance, 0, len(c.Balances))
 	for asset, total := range c.Balances {
-		reserved := c.Reserved[asset]
+		locked := c.Reserved[asset]
+		borrowed := c.Borrowed[asset]
 		spotBalances = append(spotBalances, AssetBalance{
-			Asset:     asset,
-			Total:     total,
-			Available: total - reserved,
-			Reserved:  reserved,
+			Asset:    asset,
+			Free:     total - locked,
+			Locked:   locked,
+			Borrowed: borrowed,
+			NetAsset: total - borrowed,
 		})
 	}
 
 	perpBalances := make([]AssetBalance, 0, len(c.PerpBalances))
 	for asset, total := range c.PerpBalances {
-		reserved := c.PerpReserved[asset]
+		locked := c.PerpReserved[asset]
 		perpBalances = append(perpBalances, AssetBalance{
-			Asset:     asset,
-			Total:     total,
-			Available: total - reserved,
-			Reserved:  reserved,
+			Asset:    asset,
+			Free:     total - locked,
+			Locked:   locked,
+			NetAsset: total,
 		})
 	}
 

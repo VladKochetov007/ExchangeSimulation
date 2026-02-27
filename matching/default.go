@@ -6,19 +6,19 @@ import (
 	etypes "exchange_sim/types"
 )
 
-// DefaultMatcher implements price-time priority (FIFO) matching.
-type DefaultMatcher struct {
+// PriceTimeMatcher implements price-time priority (FIFO) matching.
+type PriceTimeMatcher struct {
 	clock etypes.Clock
 }
 
-func NewDefaultMatcher(clock etypes.Clock) *DefaultMatcher {
+func NewPriceTimeMatcher(clock etypes.Clock) *PriceTimeMatcher {
 	if clock == nil {
 		clock = &eclock.RealClock{}
 	}
-	return &DefaultMatcher{clock: clock}
+	return &PriceTimeMatcher{clock: clock}
 }
 
-func (m *DefaultMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etypes.Order) *MatchResult {
+func (m *PriceTimeMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etypes.Order) *MatchResult {
 	executions := make([]*etypes.Execution, 0, 8)
 	var book *ebook.Book
 	if incomingOrder.Side == etypes.Buy {
@@ -73,7 +73,7 @@ func (m *DefaultMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etyp
 	}
 }
 
-func (m *DefaultMatcher) CanMatch(incoming *etypes.Order, limit *etypes.Limit) bool {
+func (m *PriceTimeMatcher) CanMatch(incoming *etypes.Order, limit *etypes.Limit) bool {
 	if incoming.Type == etypes.Market {
 		return true
 	}
@@ -83,11 +83,11 @@ func (m *DefaultMatcher) CanMatch(incoming *etypes.Order, limit *etypes.Limit) b
 	return incoming.Price <= limit.Price
 }
 
-func (m *DefaultMatcher) shouldMatch(incoming, resting *etypes.Order) bool {
+func (m *PriceTimeMatcher) shouldMatch(incoming, resting *etypes.Order) bool {
 	return incoming.ClientID != resting.ClientID
 }
 
-func (m *DefaultMatcher) execute(taker, maker *etypes.Order) *etypes.Execution {
+func (m *PriceTimeMatcher) execute(taker, maker *etypes.Order) *etypes.Execution {
 	execQty := min(taker.Qty-taker.FilledQty, maker.Qty-maker.FilledQty)
 	if execQty <= 0 {
 		panic("matching engine bug: attempted zero-quantity execution")

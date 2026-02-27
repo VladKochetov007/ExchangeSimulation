@@ -206,7 +206,7 @@ func TestWeightedMidPriceCalculator_BothZeroQty(t *testing.T) {
 // --- calculateCollateralUsed: nil oracle and zero price ---
 
 func TestCalculateCollateralUsed_NilOracle(t *testing.T) {
-	bm := NewBorrowingManager(nil, BorrowingConfig{PriceOracle: nil})
+	bm := NewBorrowingManager(nil, BorrowingConfig{PriceSource: nil})
 	result := bm.CalculateCollateralUsed("USD", USDAmount(1_000))
 	if result != 0 {
 		t.Errorf("expected 0 for nil oracle, got %d", result)
@@ -215,7 +215,7 @@ func TestCalculateCollateralUsed_NilOracle(t *testing.T) {
 
 func TestCalculateCollateralUsed_ZeroPrice(t *testing.T) {
 	oracle := NewStaticPriceOracle(map[string]int64{}) // all prices are 0
-	bm := NewBorrowingManager(nil, BorrowingConfig{PriceOracle: oracle})
+	bm := NewBorrowingManager(nil, BorrowingConfig{PriceSource: oracle})
 	result := bm.CalculateCollateralUsed("USD", USDAmount(1_000))
 	if result != 0 {
 		t.Errorf("expected 0 when oracle returns 0, got %d", result)
@@ -240,7 +240,7 @@ func TestValidateCrossMarginCollateral_ZeroPriceForBorrowedAsset(t *testing.T) {
 		Enabled:           true,
 		BorrowRates:       map[string]int64{"USD": 500},
 		CollateralFactors: map[string]float64{"USD": 1.0},
-		PriceOracle:       oracle,
+		PriceSource:       oracle,
 	})
 
 	// Should succeed — existing ETH borrow ignored (price=0, existingBorrowValue stays 0)

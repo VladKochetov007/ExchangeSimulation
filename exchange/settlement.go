@@ -24,19 +24,22 @@ func (e *Exchange) handleExecution(
 ) bool {
 	taker := e.Clients[exec.TakerClientID]
 	maker := e.Clients[exec.MakerClientID]
-	takerFee := taker.FeePlan.CalculateFee(exec, takerOrder.Side, false, instrument.BaseAsset(), instrument.QuoteAsset(), basePrecision)
-	makerFee := maker.FeePlan.CalculateFee(exec, exec.MakerSide, true, instrument.BaseAsset(), instrument.QuoteAsset(), basePrecision)
+	baseAsset, quoteAsset := instrument.BaseAsset(), instrument.QuoteAsset()
+	takerFee := taker.FeePlan.CalculateFee(FillContext{Exec: exec, IsMaker: false, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
+	makerFee := maker.FeePlan.CalculateFee(FillContext{Exec: exec, IsMaker: true, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
 	notional := (exec.Price * exec.Qty) / basePrecision
 	isPerp := instrument.IsPerp()
+	var takerDelta, makerDelta PositionDelta
+	var takerPnL, makerPnL int64
 	if isPerp {
-		e.processPerpExecution(book, exec, takerOrder, taker, maker, takerFee, makerFee, basePrecision, timestamp)
+		takerDelta, makerDelta, takerPnL, makerPnL = e.processPerpExecution(book, exec, takerOrder, taker, maker, takerFee, makerFee, basePrecision, timestamp)
 	} else {
 		e.settleSpotExecution(book, exec, takerOrder, taker, maker, takerFee, makerFee, notional, timestamp)
 	}
 	taker.TakerVolume += notional
 	maker.MakerVolume += notional
 	tradeID := e.createTrade(book, exec, takerOrder, timestamp, log)
-	e.notifyFill(exec, takerOrder, takerFee, makerFee, tradeID, book, log, timestamp)
+	e.notifyFill(exec, takerOrder, takerFee, makerFee, tradeID, book, log, timestamp, takerDelta, makerDelta, takerPnL, makerPnL)
 	return isPerp
 }
 
@@ -64,17 +67,26 @@ func (e *Exchange) createTrade(book *OrderBook, exec *Execution, takerOrder *Ord
 func (e *Exchange) notifyFill(
 	exec *Execution, takerOrder *Order, takerFee, makerFee Fee,
 	tradeID uint64, book *OrderBook, log Logger, timestamp int64,
+	takerDelta, makerDelta PositionDelta, takerPnL, makerPnL int64,
 ) {
 	sendFillNotification(e.Gateways[exec.TakerClientID], exec.TakerOrderID, exec.TakerClientID,
-		tradeID, exec, takerOrder.Side, takerFee, takerOrder.FilledQty >= takerOrder.Qty)
+		tradeID, exec, takerOrder.Side, takerOrder.PositionSide, takerFee,
+		takerOrder.FilledQty >= takerOrder.Qty, book.Symbol, takerDelta, takerPnL)
 	logFill(log, timestamp, exec.TakerClientID, exec.TakerOrderID, exec,
-		takerOrder.Side, takerOrder.FilledQty, takerOrder.Qty, tradeID, takerFee, "taker")
+		takerOrder.Side, takerOrder.PositionSide, takerOrder.FilledQty, takerOrder.Qty,
+		tradeID, takerFee, takerDelta, takerPnL, book.Symbol, "taker")
 
 	makerOrder := book.FindOrder(exec.MakerOrderID)
+	makerPosSide := PositionBoth
+	if makerOrder != nil {
+		makerPosSide = makerOrder.PositionSide
+	}
 	sendFillNotification(e.Gateways[exec.MakerClientID], exec.MakerOrderID, exec.MakerClientID,
-		tradeID, exec, exec.MakerSide, makerFee, makerOrder != nil && makerOrder.FilledQty >= makerOrder.Qty)
+		tradeID, exec, exec.MakerSide, makerPosSide, makerFee,
+		makerOrder != nil && makerOrder.FilledQty >= makerOrder.Qty, book.Symbol, makerDelta, makerPnL)
 	logFill(log, timestamp, exec.MakerClientID, exec.MakerOrderID, exec,
-		exec.MakerSide, exec.MakerFilledQty, exec.MakerTotalQty, tradeID, makerFee, "maker")
+		exec.MakerSide, makerPosSide, exec.MakerFilledQty, exec.MakerTotalQty,
+		tradeID, makerFee, makerDelta, makerPnL, book.Symbol, "maker")
 }
 
 func (e *Exchange) publishOpenInterest(book *OrderBook, timestamp int64) {
@@ -107,26 +119,38 @@ func (e *Exchange) settleSpotExecution(
 // Caller must hold e.mu.Lock().
 func (e *Exchange) settleSpotBuyer(client *Client, clientID uint64, book *OrderBook, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
 	oldBase, oldQuote := client.Balances[base], client.Balances[quote]
+	oldFeeAsset := client.Balances[fee.Asset]
 	client.Release(quote, notional)
-	client.Balances[quote] -= notional + fee.Amount
+	client.Balances[quote] -= notional
+	client.Balances[fee.Asset] -= fee.Amount
 	client.Balances[base] += qty
-	logBalanceChange(e, timestamp, clientID, book.Symbol, "trade_settlement", []BalanceDelta{
+	deltas := []BalanceDelta{
 		spotDelta(base, oldBase, client.Balances[base]),
 		spotDelta(quote, oldQuote, client.Balances[quote]),
-	})
+	}
+	if fee.Asset != quote && fee.Asset != base {
+		deltas = append(deltas, spotDelta(fee.Asset, oldFeeAsset, client.Balances[fee.Asset]))
+	}
+	logBalanceChange(e, timestamp, clientID, book.Symbol, "trade_settlement", deltas)
 }
 
 // settleSpotSeller releases the seller's base reservation and settles balances.
 // Caller must hold e.mu.Lock().
 func (e *Exchange) settleSpotSeller(client *Client, clientID uint64, book *OrderBook, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
 	oldBase, oldQuote := client.Balances[base], client.Balances[quote]
+	oldFeeAsset := client.Balances[fee.Asset]
 	client.Release(base, qty)
 	client.Balances[base] -= qty
-	client.Balances[quote] += notional - fee.Amount
-	logBalanceChange(e, timestamp, clientID, book.Symbol, "trade_settlement", []BalanceDelta{
+	client.Balances[quote] += notional
+	client.Balances[fee.Asset] -= fee.Amount
+	deltas := []BalanceDelta{
 		spotDelta(base, oldBase, client.Balances[base]),
 		spotDelta(quote, oldQuote, client.Balances[quote]),
-	})
+	}
+	if fee.Asset != quote && fee.Asset != base {
+		deltas = append(deltas, spotDelta(fee.Asset, oldFeeAsset, client.Balances[fee.Asset]))
+	}
+	logBalanceChange(e, timestamp, clientID, book.Symbol, "trade_settlement", deltas)
 }
 
 func calcMargin(qty, price, rate, precision int64) int64 {
@@ -163,8 +187,9 @@ func adjustPerpMargin(ctx perpSideCtx, execPrice, execQty int64, perp *PerpFutur
 }
 
 // settlePerpSide realizes PnL, logs it, and settles the perp balance for one participant.
+// Returns the realized PnL amount.
 // Caller must hold e.mu.Lock().
-func (e *Exchange) settlePerpSide(ctx perpSideCtx, book *OrderBook, exec *Execution, quote string, basePrecision, timestamp int64) {
+func (e *Exchange) settlePerpSide(ctx perpSideCtx, book *OrderBook, exec *Execution, quote string, basePrecision, timestamp int64) int64 {
 	pnl := realizedPerpPnL(ctx.delta.OldSize, ctx.delta.OldEntryPrice, exec.Qty, exec.Price, ctx.side, basePrecision)
 	if pnl != 0 {
 		if globalLog := e.getLogger("_global"); globalLog != nil {
@@ -182,24 +207,33 @@ func (e *Exchange) settlePerpSide(ctx perpSideCtx, book *OrderBook, exec *Execut
 		}
 	}
 	old := ctx.client.PerpBalances[quote]
-	ctx.client.PerpBalances[quote] += pnl - ctx.fee.Amount
+	ctx.client.PerpBalances[quote] += pnl
+	ctx.client.PerpBalances[ctx.fee.Asset] -= ctx.fee.Amount
 	logBalanceChange(e, timestamp, ctx.clientID, book.Symbol, "trade_settlement", []BalanceDelta{
 		perpDelta(quote, old, ctx.client.PerpBalances[quote]),
 	})
+	return pnl
 }
 
 // processPerpExecution settles a single perp execution for both taker and maker.
+// Returns taker/maker position deltas and realized PnL for each.
 // Caller must hold e.mu.Lock().
 func (e *Exchange) processPerpExecution(
 	book *OrderBook, exec *Execution, takerOrder *Order,
 	taker, maker *Client, takerFee, makerFee Fee,
 	basePrecision, timestamp int64,
-) {
+) (takerDelta, makerDelta PositionDelta, takerPnL, makerPnL int64) {
 	perp := book.Instrument.(*PerpFutures)
 	quote := book.Instrument.QuoteAsset()
 
-	takerDelta := e.Positions.UpdatePositionWithDelta(exec.TakerClientID, book.Symbol, exec.Qty, exec.Price, takerOrder.Side, e, "trade")
-	makerDelta := e.Positions.UpdatePositionWithDelta(exec.MakerClientID, book.Symbol, exec.Qty, exec.Price, exec.MakerSide, e, "trade")
+	makerOrder := book.FindOrder(exec.MakerOrderID)
+	makerPosSide := PositionBoth
+	if makerOrder != nil {
+		makerPosSide = makerOrder.PositionSide
+	}
+
+	takerDelta = e.Positions.UpdatePositionWithDelta(exec.TakerClientID, book.Symbol, exec.Qty, exec.Price, takerOrder.Side, takerOrder.PositionSide, e, "trade")
+	makerDelta = e.Positions.UpdatePositionWithDelta(exec.MakerClientID, book.Symbol, exec.Qty, exec.Price, exec.MakerSide, makerPosSide, e, "trade")
 
 	takerCtx := perpSideCtx{
 		client:     taker,
@@ -224,9 +258,10 @@ func (e *Exchange) processPerpExecution(
 
 	adjustPerpMargin(takerCtx, exec.Price, exec.Qty, perp, quote, basePrecision)
 	adjustPerpMargin(makerCtx, exec.Price, exec.Qty, perp, quote, basePrecision)
-	e.settlePerpSide(takerCtx, book, exec, quote, basePrecision, timestamp)
-	e.settlePerpSide(makerCtx, book, exec, quote, basePrecision, timestamp)
+	takerPnL = e.settlePerpSide(takerCtx, book, exec, quote, basePrecision, timestamp)
+	makerPnL = e.settlePerpSide(makerCtx, book, exec, quote, basePrecision, timestamp)
 	e.recordFeeRevenue(quote, takerFee, makerFee, book, timestamp)
+	return
 }
 
 func calculateClosedQty(oldSize, tradeQty int64, side Side) int64 {
@@ -260,41 +295,59 @@ func (e *Exchange) recordFeeRevenue(asset string, takerFee, makerFee Fee, book *
 	}
 }
 
-func logFill(log Logger, timestamp int64, clientID, orderID uint64, exec *Execution, side Side, filledQty, totalQty int64, tradeID uint64, fee Fee, role string) {
+func logFill(log Logger, timestamp int64, clientID, orderID uint64, exec *Execution,
+	side Side, posSide PositionSide, filledQty, totalQty int64,
+	tradeID uint64, fee Fee, delta PositionDelta, realizedPnL int64,
+	symbol, role string,
+) {
 	if log == nil {
 		return
 	}
 	log.LogEvent(timestamp, clientID, "OrderFill", map[string]any{
-		"order_id":      orderID,
-		"qty":           exec.Qty,
-		"price":         exec.Price,
-		"side":          side.String(),
-		"filled_qty":    filledQty,
-		"remaining_qty": totalQty - filledQty,
-		"is_full":       filledQty >= totalQty,
-		"trade_id":      tradeID,
-		"role":          role,
-		"fee_amount":    fee.Amount,
-		"fee_asset":     fee.Asset,
+		"order_id":        orderID,
+		"symbol":          symbol,
+		"qty":             exec.Qty,
+		"price":           exec.Price,
+		"side":            side.String(),
+		"position_side":   posSide.String(),
+		"filled_qty":      filledQty,
+		"remaining_qty":   totalQty - filledQty,
+		"is_full":         filledQty >= totalQty,
+		"trade_id":        tradeID,
+		"role":            role,
+		"fee_amount":      fee.Amount,
+		"fee_asset":       fee.Asset,
+		"realized_pnl":    realizedPnL,
+		"new_size":        delta.NewSize,
+		"new_entry_price": delta.NewEntryPrice,
 	})
 }
 
-func sendFillNotification(gw *ClientGateway, orderID, clientID, tradeID uint64, exec *Execution, side Side, fee Fee, isFull bool) {
+func sendFillNotification(
+	gw *ClientGateway, orderID, clientID, tradeID uint64,
+	exec *Execution, side Side, posSide PositionSide, fee Fee, isFull bool,
+	symbol string, delta PositionDelta, realizedPnL int64,
+) {
 	if gw == nil {
 		return
 	}
 	gw.ResponseCh <- Response{
 		Success: true,
 		Data: &FillNotification{
-			OrderID:   orderID,
-			ClientID:  clientID,
-			TradeID:   tradeID,
-			Qty:       exec.Qty,
-			Price:     exec.Price,
-			Side:      side,
-			IsFull:    isFull,
-			FeeAmount: fee.Amount,
-			FeeAsset:  fee.Asset,
+			OrderID:       orderID,
+			ClientID:      clientID,
+			TradeID:       tradeID,
+			Symbol:        symbol,
+			Qty:           exec.Qty,
+			Price:         exec.Price,
+			Side:          side,
+			PositionSide:  posSide,
+			IsFull:        isFull,
+			FeeAmount:     fee.Amount,
+			FeeAsset:      fee.Asset,
+			RealizedPnL:   realizedPnL,
+			NewSize:       delta.NewSize,
+			NewEntryPrice: delta.NewEntryPrice,
 		},
 	}
 }

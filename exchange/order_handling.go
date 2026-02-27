@@ -104,6 +104,65 @@ func (e *Exchange) cancelOrder(clientID uint64, req *CancelRequest) Response {
 	return Response{RequestID: req.RequestID, Success: true, Data: remainingQty}
 }
 
+func (e *Exchange) queryAccount(clientID uint64, req *QueryRequest) Response {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	client := e.Clients[clientID]
+	if client == nil {
+		return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownClient}
+	}
+
+	timestamp := e.Clock.NowUnixNano()
+	snap := client.GetBalanceSnapshot(timestamp)
+	positions := e.buildPositionSnapshots(clientID, timestamp)
+	return Response{RequestID: req.RequestID, Success: true, Data: &AccountSnapshot{BalanceSnapshot: *snap, Positions: positions}}
+}
+
+func (e *Exchange) buildPositionSnapshots(clientID uint64, timestamp int64) []PositionSnapshot {
+	e.Positions.mu.RLock()
+	defer e.Positions.mu.RUnlock()
+
+	clientPositions := e.Positions.positions[clientID]
+	if len(clientPositions) == 0 {
+		return nil
+	}
+
+	snapshots := make([]PositionSnapshot, 0, len(clientPositions))
+	for key, pos := range clientPositions {
+		if pos.Size == 0 {
+			continue
+		}
+		book := e.Books[key.Symbol]
+		var markPrice int64
+		if book != nil {
+			markPrice = marketRefPrice(book)
+		}
+		var unrealizedPnL int64
+		if markPrice > 0 && pos.EntryPrice > 0 {
+			instrument := e.Instruments[key.Symbol]
+			if instrument != nil {
+				precision := instrument.BasePrecision()
+				sign := int64(1)
+				if pos.Size < 0 {
+					sign = -1
+				}
+				unrealizedPnL = abs(pos.Size) * sign * (markPrice - pos.EntryPrice) / precision
+			}
+		}
+		snapshots = append(snapshots, PositionSnapshot{
+			Symbol:        key.Symbol,
+			PositionSide:  key.Side,
+			Size:          pos.Size,
+			EntryPrice:    pos.EntryPrice,
+			MarkPrice:     markPrice,
+			UnrealizedPnL: unrealizedPnL,
+			MarginType:    CrossMargin,
+		})
+	}
+	return snapshots
+}
+
 func (e *Exchange) queryBalance(clientID uint64, req *QueryRequest) Response {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -126,7 +185,10 @@ func (e *Exchange) subscribe(clientID uint64, req *QueryRequest, gateway *Client
 		return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownInstrument}
 	}
 
-	types := []MDType{MDSnapshot, MDDelta, MDTrade}
+	types := req.Types
+	if len(types) == 0 {
+		types = []MDType{MDSnapshot, MDDelta, MDTrade}
+	}
 	e.MDPublisher.Subscribe(clientID, req.Symbol, types, gateway)
 
 	snapshot := &BookSnapshot{
@@ -223,6 +285,7 @@ func newOrderFromRequest(clientID, orderID uint64, req *OrderRequest, timestamp 
 	order.ID = orderID
 	order.ClientID = clientID
 	order.Side = req.Side
+	order.PositionSide = req.PositionSide
 	order.Type = req.Type
 	order.TimeInForce = req.TimeInForce
 	order.Price = req.Price

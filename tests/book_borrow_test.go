@@ -75,7 +75,7 @@ func TestValidateCrossMarginCollateral_NilOracle(t *testing.T) {
 	// Nil oracle — validateCrossMarginCollateral returns "price oracle not configured"
 	bm := NewBorrowingManager(ex, BorrowingConfig{
 		Enabled:     true,
-		PriceOracle: nil,
+		PriceSource: nil,
 	})
 
 	err := bm.BorrowMargin(1, "USD", USDAmount(1_000), "test")
@@ -97,7 +97,7 @@ func TestValidateCrossMarginCollateral_ZeroBorrowAssetPrice(t *testing.T) {
 		Enabled:           true,
 		BorrowRates:       map[string]int64{"USD": 500},
 		CollateralFactors: map[string]float64{"USD": 1.0},
-		PriceOracle:       oracle,
+		PriceSource:       oracle,
 	})
 
 	err := bm.BorrowMargin(1, "USD", USDAmount(1_000), "test")
@@ -197,7 +197,7 @@ func TestCancelOrder_NotOwnedWithLogger(t *testing.T) {
 func TestCalculateCollateralUsed_ZeroFactor(t *testing.T) {
 	oracle := NewStaticPriceOracle(map[string]int64{"USD": USD_PRECISION})
 	bm := NewBorrowingManager(nil, BorrowingConfig{
-		PriceOracle:       oracle,
+		PriceSource:       oracle,
 		CollateralFactors: map[string]float64{"USD": 0.0, "default": 0.0},
 	})
 	result := bm.CalculateCollateralUsed("USD", USDAmount(1_000))

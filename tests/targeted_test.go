@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// --- MidPriceOracle: symbol mapped but no book ---
+// --- MidPriceSource: symbol mapped but no book ---
 
 func TestMidPriceOracle_MappedSymbolNoBook(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
@@ -14,7 +14,7 @@ func TestMidPriceOracle_MappedSymbolNoBook(t *testing.T) {
 	o := NewMidPriceOracle(ex)
 	o.MapSymbol("BTC", "BTC/USD")
 	// symbol is set, but book doesn't exist → book == nil → return 0
-	price := o.GetPrice("BTC")
+	price := o.Price("BTC")
 	if price != 0 {
 		t.Errorf("expected 0 for missing book, got %d", price)
 	}

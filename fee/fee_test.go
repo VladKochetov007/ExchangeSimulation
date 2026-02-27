@@ -24,7 +24,7 @@ func TestPercentageFeeInQuote(t *testing.T) {
 		Qty:   btcPrecision,
 	}
 
-	takerFee := fee.CalculateFee(exec, etypes.Buy, false, "BTC", "USD", btcPrecision)
+	takerFee := fee.CalculateFee(etypes.FillContext{Exec: exec, IsMaker: false, BaseAsset: "BTC", QuoteAsset: "USD", Precision: btcPrecision})
 	if takerFee.Asset != "USD" {
 		t.Errorf("taker fee asset: want USD, got %s", takerFee.Asset)
 	}
@@ -33,7 +33,7 @@ func TestPercentageFeeInQuote(t *testing.T) {
 		t.Errorf("taker fee: want %d, got %d", want, takerFee.Amount)
 	}
 
-	makerFee := fee.CalculateFee(exec, etypes.Sell, true, "BTC", "USD", btcPrecision)
+	makerFee := fee.CalculateFee(etypes.FillContext{Exec: exec, IsMaker: true, BaseAsset: "BTC", QuoteAsset: "USD", Precision: btcPrecision})
 	if makerFee.Asset != "USD" {
 		t.Errorf("maker fee asset: want USD, got %s", makerFee.Asset)
 	}
@@ -49,7 +49,7 @@ func TestPercentageFeeInBase(t *testing.T) {
 		Qty:   btcPrecision,
 	}
 
-	takerFee := fee.CalculateFee(exec, etypes.Buy, false, "BTC", "USD", usdPrecision)
+	takerFee := fee.CalculateFee(etypes.FillContext{Exec: exec, IsMaker: false, BaseAsset: "BTC", QuoteAsset: "USD", Precision: usdPrecision})
 	if takerFee.Asset != "BTC" {
 		t.Errorf("taker fee asset: want BTC, got %s", takerFee.Asset)
 	}
@@ -65,10 +65,10 @@ func TestFixedFee(t *testing.T) {
 	}
 	exec := &etypes.Execution{Price: priceUSD(50000), Qty: btcPrecision}
 
-	if got := fee.CalculateFee(exec, etypes.Buy, false, "BTC", "USD", usdPrecision).Amount; got != 200 {
+	if got := fee.CalculateFee(etypes.FillContext{Exec: exec, IsMaker: false, BaseAsset: "BTC", QuoteAsset: "USD", Precision: usdPrecision}).Amount; got != 200 {
 		t.Errorf("taker fee: want 200, got %d", got)
 	}
-	if got := fee.CalculateFee(exec, etypes.Sell, true, "BTC", "USD", usdPrecision).Amount; got != 100 {
+	if got := fee.CalculateFee(etypes.FillContext{Exec: exec, IsMaker: true, BaseAsset: "BTC", QuoteAsset: "USD", Precision: usdPrecision}).Amount; got != 100 {
 		t.Errorf("maker fee: want 100, got %d", got)
 	}
 }

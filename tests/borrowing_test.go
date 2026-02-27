@@ -21,7 +21,7 @@ func setupBorrowingExchange() (*Exchange, *BorrowingManager) {
 		BorrowRates:       map[string]int64{"USD": 500},
 		CollateralFactors: map[string]float64{"USD": 1.0, "BTC": 0.75},
 		MaxBorrowPerAsset: map[string]int64{},
-		PriceOracle:       oracle,
+		PriceSource:       oracle,
 	}
 	bm := NewBorrowingManager(ex, config)
 
@@ -202,7 +202,7 @@ func TestBorrowingRate_DefaultKey(t *testing.T) {
 		Enabled:           true,
 		BorrowRates:       map[string]int64{"default": 300},
 		CollateralFactors: map[string]float64{"default": 1.0},
-		PriceOracle:       oracle,
+		PriceSource:       oracle,
 	})
 
 	// BorrowMargin internally calls getRate("USD") → falls through to "default" key
@@ -222,7 +222,7 @@ func TestBorrowingRate_HardcodedDefault(t *testing.T) {
 		Enabled:           true,
 		BorrowRates:       map[string]int64{},
 		CollateralFactors: map[string]float64{},
-		PriceOracle:       oracle,
+		PriceSource:       oracle,
 	})
 
 	if err := bm.BorrowMargin(1, "USD", USDAmount(1_000), "test"); err != nil {

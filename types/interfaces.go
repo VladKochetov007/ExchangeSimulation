@@ -2,8 +2,8 @@ package types
 
 import "time"
 
-type PriceOracle interface {
-	GetPrice(symbol string) int64
+type PriceSource interface {
+	Price(symbol string) int64
 }
 
 // Logger is the event logging interface for the exchange.
@@ -11,9 +11,18 @@ type Logger interface {
 	LogEvent(simTime int64, clientID uint64, eventName string, event any)
 }
 
+// FillContext is passed to FeeModel.CalculateFee per execution.
+type FillContext struct {
+	Exec       *Execution
+	IsMaker    bool
+	BaseAsset  string
+	QuoteAsset string
+	Precision  int64
+}
+
 // FeeModel calculates trading fees for each execution.
 type FeeModel interface {
-	CalculateFee(exec *Execution, side Side, isMaker bool, baseAsset, quoteAsset string, precision int64) Fee
+	CalculateFee(ctx FillContext) Fee
 }
 
 // Instrument describes a tradeable asset pair.

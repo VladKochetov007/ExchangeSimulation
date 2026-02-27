@@ -75,6 +75,15 @@ func (p *MDPublisher) Unsubscribe(clientID uint64, symbol string) {
 	}
 }
 
+func containsMDType(types []etypes.MDType, target etypes.MDType) bool {
+	for _, t := range types {
+		if t == target {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, timestamp int64) {
 	p.mu.Lock()
 	subs := p.Subscriptions[symbol]
@@ -86,7 +95,10 @@ func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, tim
 	p.seqNum++
 	seqNum := p.seqNum
 
-	for clientID := range subs {
+	for clientID, sub := range subs {
+		if !containsMDType(sub.Types, mdType) {
+			continue
+		}
 		gateway := p.gateways[clientID]
 		if gateway != nil {
 			if !gateway.IsRunning() {

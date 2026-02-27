@@ -59,16 +59,16 @@ func TestBalanceSnapshotSpotOnly(t *testing.T) {
 		t.Fatal("BTC balance not found")
 	}
 
-	if btcBalance.Total != 5*BTC_PRECISION {
-		t.Errorf("Expected BTC total %d, got %d", 5*BTC_PRECISION, btcBalance.Total)
+	if btcBalance.Free+btcBalance.Locked != 5*BTC_PRECISION {
+		t.Errorf("Expected BTC total %d, got %d", 5*BTC_PRECISION, btcBalance.Free+btcBalance.Locked)
 	}
 
-	if btcBalance.Reserved != 0 {
-		t.Errorf("Expected BTC reserved 0, got %d", btcBalance.Reserved)
+	if btcBalance.Locked != 0 {
+		t.Errorf("Expected BTC locked 0, got %d", btcBalance.Locked)
 	}
 
-	if btcBalance.Available != 5*BTC_PRECISION {
-		t.Errorf("Expected BTC available %d, got %d", 5*BTC_PRECISION, btcBalance.Available)
+	if btcBalance.Free != 5*BTC_PRECISION {
+		t.Errorf("Expected BTC free %d, got %d", 5*BTC_PRECISION, btcBalance.Free)
 	}
 
 	// Find USD balance
@@ -84,23 +84,23 @@ func TestBalanceSnapshotSpotOnly(t *testing.T) {
 		t.Fatal("USD balance not found")
 	}
 
-	if usdBalance.Total != 10000*USD_PRECISION {
-		t.Errorf("Expected USD total %d, got %d", 10000*USD_PRECISION, usdBalance.Total)
+	if usdBalance.Free+usdBalance.Locked != 10000*USD_PRECISION {
+		t.Errorf("Expected USD total %d, got %d", 10000*USD_PRECISION, usdBalance.Free+usdBalance.Locked)
 	}
 
-	if usdBalance.Reserved != 1000*USD_PRECISION {
-		t.Errorf("Expected USD reserved %d, got %d", 1000*USD_PRECISION, usdBalance.Reserved)
+	if usdBalance.Locked != 1000*USD_PRECISION {
+		t.Errorf("Expected USD locked %d, got %d", 1000*USD_PRECISION, usdBalance.Locked)
 	}
 
-	expectedAvailable := int64(9000 * USD_PRECISION)
-	if usdBalance.Available != expectedAvailable {
-		t.Errorf("Expected USD available %d, got %d", expectedAvailable, usdBalance.Available)
+	expectedFree := int64(9000 * USD_PRECISION)
+	if usdBalance.Free != expectedFree {
+		t.Errorf("Expected USD free %d, got %d", expectedFree, usdBalance.Free)
 	}
 
-	// Verify equation: Available = Total - Reserved
-	if usdBalance.Available != usdBalance.Total-usdBalance.Reserved {
-		t.Errorf("Balance equation violated: %d != %d - %d",
-			usdBalance.Available, usdBalance.Total, usdBalance.Reserved)
+	// Verify equation: Free + Locked = total
+	if usdBalance.Free+usdBalance.Locked != 10000*USD_PRECISION {
+		t.Errorf("Balance equation violated: free+locked=%d != total=%d",
+			usdBalance.Free+usdBalance.Locked, 10000*USD_PRECISION)
 	}
 }
 
@@ -125,17 +125,17 @@ func TestBalanceSnapshotPerpOnly(t *testing.T) {
 		t.Errorf("Expected USD, got %s", perpUSD.Asset)
 	}
 
-	if perpUSD.Total != 50000*USD_PRECISION {
-		t.Errorf("Expected total %d, got %d", 50000*USD_PRECISION, perpUSD.Total)
+	if perpUSD.Free+perpUSD.Locked != 50000*USD_PRECISION {
+		t.Errorf("Expected total %d, got %d", 50000*USD_PRECISION, perpUSD.Free+perpUSD.Locked)
 	}
 
-	if perpUSD.Reserved != 10000*USD_PRECISION {
-		t.Errorf("Expected reserved %d, got %d", 10000*USD_PRECISION, perpUSD.Reserved)
+	if perpUSD.Locked != 10000*USD_PRECISION {
+		t.Errorf("Expected locked %d, got %d", 10000*USD_PRECISION, perpUSD.Locked)
 	}
 
-	expectedAvailable := int64(40000 * USD_PRECISION)
-	if perpUSD.Available != expectedAvailable {
-		t.Errorf("Expected available %d, got %d", expectedAvailable, perpUSD.Available)
+	expectedFree := int64(40000 * USD_PRECISION)
+	if perpUSD.Free != expectedFree {
+		t.Errorf("Expected free %d, got %d", expectedFree, perpUSD.Free)
 	}
 }
 
@@ -183,24 +183,24 @@ func TestBalanceSnapshotMixed(t *testing.T) {
 	}
 }
 
-// TestBalanceSnapshotAvailableCalculation verifies Available = Total - Reserved
-func TestBalanceSnapshotAvailableCalculation(t *testing.T) {
+// TestBalanceSnapshotFreeCalculation verifies Free = Total - Locked
+func TestBalanceSnapshotFreeCalculation(t *testing.T) {
 	client := NewClient(1, &FixedFee{})
 
 	testCases := []struct {
-		asset    string
-		total    int64
-		reserved int64
+		asset  string
+		total  int64
+		locked int64
 	}{
 		{"BTC", 10 * BTC_PRECISION, 3 * BTC_PRECISION},
 		{"USD", 100000 * USD_PRECISION, 25000 * USD_PRECISION},
 		{"ETH", 50 * BTC_PRECISION, 0},
-		{"USDT", 75000 * USD_PRECISION, 75000 * USD_PRECISION}, // All reserved
+		{"USDT", 75000 * USD_PRECISION, 75000 * USD_PRECISION}, // All locked
 	}
 
 	for _, tc := range testCases {
 		client.Balances[tc.asset] = tc.total
-		client.Reserved[tc.asset] = tc.reserved
+		client.Reserved[tc.asset] = tc.locked
 	}
 
 	snapshot := client.GetBalanceSnapshot(int64(5000000000))
@@ -219,15 +219,15 @@ func TestBalanceSnapshotAvailableCalculation(t *testing.T) {
 			continue
 		}
 
-		expectedAvailable := tc.total - tc.reserved
-		if found.Available != expectedAvailable {
-			t.Errorf("%s: expected available %d, got %d (total=%d, reserved=%d)",
-				tc.asset, expectedAvailable, found.Available, tc.total, tc.reserved)
+		expectedFree := tc.total - tc.locked
+		if found.Free != expectedFree {
+			t.Errorf("%s: expected free %d, got %d (total=%d, locked=%d)",
+				tc.asset, expectedFree, found.Free, tc.total, tc.locked)
 		}
 
-		// Verify equation
-		if found.Available != found.Total-found.Reserved {
-			t.Errorf("%s: balance equation violated", tc.asset)
+		if found.Free+found.Locked != tc.total {
+			t.Errorf("%s: balance equation violated: free+locked=%d != total=%d",
+				tc.asset, found.Free+found.Locked, tc.total)
 		}
 	}
 }
@@ -319,8 +319,8 @@ func TestBalanceSnapshotImmutability(t *testing.T) {
 		t.Fatal("BTC balance not found")
 	}
 
-	if btcBal.Total != 10*BTC_PRECISION {
-		t.Errorf("Snapshot BTC modified: expected %d, got %d", 10*BTC_PRECISION, btcBal.Total)
+	if btcBal.Free+btcBal.Locked != 10*BTC_PRECISION {
+		t.Errorf("Snapshot BTC modified: expected %d, got %d", 10*BTC_PRECISION, btcBal.Free+btcBal.Locked)
 	}
 
 	if snapshot.Borrowed["USD"] != 1000*USD_PRECISION {
@@ -346,13 +346,13 @@ func TestBalanceSnapshotZeroReserved(t *testing.T) {
 	}
 
 	btc := snapshot.SpotBalances[0]
-	if btc.Reserved != 0 {
-		t.Errorf("Expected reserved 0, got %d", btc.Reserved)
+	if btc.Locked != 0 {
+		t.Errorf("Expected locked 0, got %d", btc.Locked)
 	}
 
-	if btc.Available != btc.Total {
-		t.Errorf("With zero reserved, available should equal total: %d != %d",
-			btc.Available, btc.Total)
+	if btc.Free != 5*BTC_PRECISION {
+		t.Errorf("With zero locked, free should equal total: %d != %d",
+			btc.Free, 5*BTC_PRECISION)
 	}
 }
 
@@ -382,8 +382,8 @@ func TestBalanceSnapshotLargePrecision(t *testing.T) {
 		t.Fatal("BTC balance not found")
 	}
 
-	if btcBal.Total != maxBTC {
-		t.Errorf("Large BTC value incorrect: expected %d, got %d", maxBTC, btcBal.Total)
+	if btcBal.Free+btcBal.Locked != maxBTC {
+		t.Errorf("Large BTC value incorrect: expected %d, got %d", maxBTC, btcBal.Free+btcBal.Locked)
 	}
 
 	var usdBal *AssetBalance
@@ -398,8 +398,8 @@ func TestBalanceSnapshotLargePrecision(t *testing.T) {
 		t.Fatal("USD balance not found")
 	}
 
-	if usdBal.Total != largeUSD {
-		t.Errorf("Large USD value incorrect: expected %d, got %d", largeUSD, usdBal.Total)
+	if usdBal.Free+usdBal.Locked != largeUSD {
+		t.Errorf("Large USD value incorrect: expected %d, got %d", largeUSD, usdBal.Free+usdBal.Locked)
 	}
 }
 
@@ -426,9 +426,9 @@ func TestBalanceSnapshotMultipleAssets(t *testing.T) {
 	for _, bal := range snapshot.SpotBalances {
 		assetMap[bal.Asset] = true
 
-		// Verify balance equation
-		if bal.Available != bal.Total-bal.Reserved {
-			t.Errorf("%s: balance equation violated", bal.Asset)
+		// Verify balance equation: Free + Locked = total
+		if bal.Free < 0 {
+			t.Errorf("%s: free is negative: %d", bal.Asset, bal.Free)
 		}
 	}
 

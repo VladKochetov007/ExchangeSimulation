@@ -18,7 +18,7 @@ func TestMinFunction(t *testing.T) {
 }
 
 func TestCanMatchSellSide(t *testing.T) {
-	matcher := NewDefaultMatcher()
+	matcher := NewPriceTimeMatcher()
 
 	sellOrder := &Order{
 		Side:  Sell,

@@ -9,7 +9,7 @@ import (
 )
 
 func TestMatchBuyOrderFullFill(t *testing.T) {
-	matcher := NewDefaultMatcher(&eclock.RealClock{})
+	matcher := NewPriceTimeMatcher(&eclock.RealClock{})
 	bids := ebook.NewBook(etypes.Buy)
 	asks := ebook.NewBook(etypes.Sell)
 
@@ -31,7 +31,7 @@ func TestMatchBuyOrderFullFill(t *testing.T) {
 }
 
 func TestMatchPartialFill(t *testing.T) {
-	matcher := NewDefaultMatcher(&eclock.RealClock{})
+	matcher := NewPriceTimeMatcher(&eclock.RealClock{})
 	bids := ebook.NewBook(etypes.Buy)
 	asks := ebook.NewBook(etypes.Sell)
 
@@ -56,7 +56,7 @@ func TestMatchPartialFill(t *testing.T) {
 }
 
 func TestMatchRejectsSelfTrade(t *testing.T) {
-	matcher := NewDefaultMatcher(&eclock.RealClock{})
+	matcher := NewPriceTimeMatcher(&eclock.RealClock{})
 	bids := ebook.NewBook(etypes.Buy)
 	asks := ebook.NewBook(etypes.Sell)
 
@@ -72,7 +72,7 @@ func TestMatchRejectsSelfTrade(t *testing.T) {
 }
 
 func TestMatchMarketOrder(t *testing.T) {
-	matcher := NewDefaultMatcher(&eclock.RealClock{})
+	matcher := NewPriceTimeMatcher(&eclock.RealClock{})
 	bids := ebook.NewBook(etypes.Buy)
 	asks := ebook.NewBook(etypes.Sell)
 

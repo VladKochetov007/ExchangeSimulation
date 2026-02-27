@@ -15,7 +15,7 @@ import (
 type ExchangeAutomation struct {
 	exchange            *Exchange
 	markPriceCalc       MarkPriceCalculator
-	indexProvider       PriceOracle
+	indexProvider       PriceSource
 	priceUpdateInterval time.Duration
 	CollateralRate      int64 // annual rate in bps (e.g. 500 = 5%)
 	liquidationHandler  LiquidationHandler
@@ -40,7 +40,7 @@ type AutomationConfig struct {
 	MarkPriceCalc MarkPriceCalculator
 
 	// IndexProvider provides index prices for perpetuals (required)
-	IndexProvider PriceOracle
+	IndexProvider PriceSource
 
 	// PriceUpdateInterval is how often to update funding rates (default: 3s)
 	PriceUpdateInterval time.Duration
@@ -161,8 +161,8 @@ func (a *ExchangeAutomation) fundingSettlementLoop() {
 func (a *ExchangeAutomation) updateAllPerpPrices() {
 	timestamp := a.exchange.Clock.NowUnixNano()
 
-	// Collect mark prices under read lock. GetPrice must be called outside
-	// the lock because MidPriceOracle.GetPrice also acquires e.mu.RLock;
+	// Collect mark prices under read lock. Price() must be called outside
+	// the lock because MidPriceOracle.Price also acquires e.mu.RLock;
 	// calling it while already holding e.mu.RLock deadlocks when a writer waits.
 	type bookData struct {
 		symbol    string
@@ -187,7 +187,7 @@ func (a *ExchangeAutomation) updateAllPerpPrices() {
 	}
 	a.exchange.mu.RUnlock()
 
-	// Now call GetPrice without holding e.mu.
+	// Now call Price without holding e.mu.
 	type perpUpdate struct {
 		symbol     string
 		perp       *PerpFutures
@@ -196,7 +196,7 @@ func (a *ExchangeAutomation) updateAllPerpPrices() {
 	}
 	updates := make([]perpUpdate, 0, len(candidates))
 	for _, c := range candidates {
-		indexPrice := a.indexProvider.GetPrice(c.symbol)
+		indexPrice := a.indexProvider.Price(c.symbol)
 		if indexPrice == 0 {
 			continue
 		}
