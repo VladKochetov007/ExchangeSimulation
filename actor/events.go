@@ -16,6 +16,8 @@ const (
 	EventBookSnapshot
 	EventFundingUpdate
 	EventOpenInterest
+	EventBalanceUpdate
+	EventAccountUpdate
 )
 
 type Event struct {
@@ -86,4 +88,12 @@ type OpenInterestEvent struct {
 	Symbol       string
 	OpenInterest *exchange.OpenInterest
 	Timestamp    int64
+}
+
+type BalanceUpdateEvent struct {
+	Snapshot *exchange.BalanceSnapshot
+}
+
+type AccountUpdateEvent struct {
+	Snapshot *exchange.AccountSnapshot
 }

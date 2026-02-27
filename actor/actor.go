@@ -148,10 +148,7 @@ func (a *BaseActor) handleResponse(resp exchange.Response) {
 		}
 
 	case *exchange.FillNotification:
-		// Fill notification
 		isFull := data.IsFull
-
-		// Update order tracking
 		if val, ok := a.activeOrders.Load(data.OrderID); ok {
 			info := val.(*OrderInfo)
 			info.FilledQty += data.Qty
@@ -160,13 +157,10 @@ func (a *BaseActor) handleResponse(resp exchange.Response) {
 				a.requestToOrder.Delete(info.RequestID)
 			}
 		}
-
-		// Generate fill event
 		eventType := EventOrderPartialFill
 		if isFull {
 			eventType = EventOrderFilled
 		}
-
 		a.eventCh <- &Event{
 			Type: eventType,
 			Data: OrderFillEvent{
@@ -179,6 +173,18 @@ func (a *BaseActor) handleResponse(resp exchange.Response) {
 				FeeAmount: data.FeeAmount,
 				FeeAsset:  data.FeeAsset,
 			},
+		}
+
+	case *exchange.BalanceSnapshot:
+		a.eventCh <- &Event{
+			Type: EventBalanceUpdate,
+			Data: BalanceUpdateEvent{Snapshot: data},
+		}
+
+	case *exchange.AccountSnapshot:
+		a.eventCh <- &Event{
+			Type: EventAccountUpdate,
+			Data: AccountUpdateEvent{Snapshot: data},
 		}
 	}
 }

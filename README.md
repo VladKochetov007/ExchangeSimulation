@@ -42,13 +42,13 @@ flowchart LR
     end
 
     A1 -- Request --> DGW
-    A2 --> DGW
+    A2 -- Request --> DGW
     DGW --> CGW
     CGW --> EX
     EX -- "Response / Fill" --> CGW
     CGW --> DGW
     DGW -- "Response / Fill" --> A1
-    DGW --> A2
+    DGW -- "Response / Fill" --> A2
 
     OB --> ME
     ME --> ST
@@ -60,8 +60,8 @@ flowchart LR
     AUT --> FM
     FM --> ST
     AUT --> MDP
-    AUT -. "margin call</br>liquidation" .-> A1
-    AUT -. "margin call</br>liquidation" .-> A2
+    AUT -. "LiquidationHandler</br>callback" .-> A1
+    AUT -. "LiquidationHandler</br>callback" .-> A2
     AUT --> ME
 
     MDP -- "book · trades</br>funding · OI" --> CGW
@@ -289,6 +289,29 @@ slowGW := slowVenue.ConnectClient(1, balances, feePlan)
 runner.AddActor(mypackage.NewArbitrageActor(1, fastGW, slowGW))
 runner.Run(context.Background())
 ```
+
+**Gateway = venue identity.** An actor that trades on N venues owns N gateways and multiplexes them in a single `select` loop. Which channel delivers the message tells you which exchange it came from — no explicit tagging needed. This works identically for fills, balance queries, market data, and cancel confirmations:
+
+```go
+func (a *ArbitrageActor) run(ctx context.Context) {
+    for {
+        select {
+        case resp := <-a.fastGW.Responses():
+            a.onFastResponse(resp) // fills, balance snapshots, cancel confirms
+        case resp := <-a.slowGW.Responses():
+            a.onSlowResponse(resp)
+        case md := <-a.fastGW.MarketDataCh():
+            a.onFastMarketData(md) // book deltas, trades, funding, OI
+        case md := <-a.slowGW.MarketDataCh():
+            a.onSlowMarketData(md)
+        case <-ctx.Done():
+            return
+        }
+    }
+}
+```
+
+To query balances on a specific venue: `fastGW.Send(exchange.Request{Type: exchange.ReqQueryBalance, ...})` — the response arrives on `fastGW.Responses()`, so venue identity is preserved automatically.
 
 ---
 
