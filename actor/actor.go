@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"exchange_sim/exchange"
 	"exchange_sim/types"
@@ -11,12 +12,29 @@ import (
 
 type Gateway = types.Gateway
 
+// EventHandler receives decoded events inline from the actor's run loop.
+// Implement this and call SetHandler before Start to avoid a second goroutine.
+// When a handler is set, EventChannel is not written.
+type EventHandler interface {
+	HandleEvent(ctx context.Context, event *Event)
+}
+
+// Actor is the interface for any trading participant.
 type Actor interface {
-	OnEvent(event *Event)
 	Start(ctx context.Context) error
 	Stop() error
 	ID() uint64
 	Gateway() Gateway
+}
+
+type tickEntry struct {
+	interval time.Duration
+	fn       func(time.Time)
+}
+
+type tickCall struct {
+	fn func(time.Time)
+	t  time.Time
 }
 
 type BaseActor struct {
@@ -28,7 +46,9 @@ type BaseActor struct {
 	requestSeq    uint64
 	tickerFactory exchange.TickerFactory
 
-	// Order tracking for fill notifications
+	handler EventHandler
+	tickers []tickEntry
+
 	activeOrders   sync.Map // orderID -> *OrderInfo
 	requestToOrder sync.Map // requestID -> orderID
 }
@@ -46,16 +66,24 @@ func NewBaseActor(id uint64, gateway Gateway) *BaseActor {
 		gateway:       gateway,
 		eventCh:       make(chan *Event, 1000),
 		stopCh:        make(chan struct{}),
-		tickerFactory: &exchange.RealTickerFactory{}, // Default to real-time
+		tickerFactory: &exchange.RealTickerFactory{},
 	}
 }
 
-func (a *BaseActor) ID() uint64 {
-	return a.id
-}
+func (a *BaseActor) ID() uint64       { return a.id }
+func (a *BaseActor) Gateway() Gateway { return a.gateway }
 
-func (a *BaseActor) Gateway() Gateway {
-	return a.gateway
+// SetHandler registers an EventHandler called inline from the run loop.
+// Must be called before Start. Mutually exclusive with EventChannel — when
+// a handler is set the eventCh is not written.
+func (a *BaseActor) SetHandler(h EventHandler) { a.handler = h }
+
+// AddTicker registers a periodic callback driven by the actor's TickerFactory.
+// Must be called before Start. The callback fires inside the run goroutine, so
+// it shares the same concurrency domain as HandleEvent — no extra locking needed.
+// With a SimulatedClock TickerFactory the callback advances with simulation time.
+func (a *BaseActor) AddTicker(d time.Duration, fn func(time.Time)) {
+	a.tickers = append(a.tickers, tickEntry{d, fn})
 }
 
 func (a *BaseActor) Start(ctx context.Context) error {
@@ -75,62 +103,110 @@ func (a *BaseActor) Stop() error {
 }
 
 func (a *BaseActor) run(ctx context.Context) {
+	defer a.running.Store(false)
+
+	tickCh := a.startTickers(ctx)
+
 	for {
 		select {
 		case <-ctx.Done():
-			a.running.Store(false)
 			return
 		case <-a.stopCh:
-			a.running.Store(false)
 			return
 		case resp := <-a.gateway.Responses():
-			a.handleResponse(resp)
+			if evt := a.decodeResponse(resp); evt != nil {
+				a.dispatch(ctx, evt)
+			}
 		case md := <-a.gateway.MarketDataCh():
-			a.handleMarketData(md)
+			if evt := a.decodeMarketData(md); evt != nil {
+				a.dispatch(ctx, evt)
+			}
+		case tc := <-tickCh:
+			tc.fn(tc.t)
 		}
 	}
 }
 
-func (a *BaseActor) handleResponse(resp exchange.Response) {
+func (a *BaseActor) dispatch(ctx context.Context, evt *Event) {
+	if a.handler != nil {
+		a.handler.HandleEvent(ctx, evt)
+		return
+	}
+	select {
+	case a.eventCh <- evt:
+	default:
+	}
+}
+
+// startTickers creates one fan-in goroutine per registered ticker. Returns a
+// nil channel (never fires in select) when no tickers are registered.
+// Each goroutine exits on ctx cancellation or stopCh close, whichever comes first.
+func (a *BaseActor) startTickers(ctx context.Context) <-chan tickCall {
+	if len(a.tickers) == 0 {
+		return nil
+	}
+	ch := make(chan tickCall, len(a.tickers))
+	for _, entry := range a.tickers {
+		ticker := a.tickerFactory.NewTicker(entry.interval)
+		fn := entry.fn
+		stopCh := a.stopCh
+		go func() {
+			defer ticker.Stop()
+			for {
+				select {
+				case t := <-ticker.C():
+					select {
+					case ch <- tickCall{fn, t}:
+					case <-ctx.Done():
+						return
+					case <-stopCh:
+						return
+					}
+				case <-ctx.Done():
+					return
+				case <-stopCh:
+					return
+				}
+			}
+		}()
+	}
+	return ch
+}
+
+func (a *BaseActor) decodeResponse(resp exchange.Response) *Event {
 	if !resp.Success {
-		a.eventCh <- &Event{
+		return &Event{
 			Type: EventOrderRejected,
 			Data: OrderRejectedEvent{
 				RequestID: resp.RequestID,
 				Reason:    resp.Error,
 			},
 		}
-		return
 	}
 
 	switch data := resp.Data.(type) {
 	case uint64:
-		// Order accepted
-		a.eventCh <- &Event{
+		a.requestToOrder.Store(resp.RequestID, data)
+		a.activeOrders.Store(data, &OrderInfo{
+			OrderID:   data,
+			RequestID: resp.RequestID,
+		})
+		return &Event{
 			Type: EventOrderAccepted,
 			Data: OrderAcceptedEvent{
 				OrderID:   data,
 				RequestID: resp.RequestID,
 			},
 		}
-		// Track the order
-		a.requestToOrder.Store(resp.RequestID, data)
-		a.activeOrders.Store(data, &OrderInfo{
-			OrderID:   data,
-			RequestID: resp.RequestID,
-			FilledQty: 0,
-			TotalQty:  0, // We don't know TotalQty here, would need to track from request
-		})
 
 	case int64:
-		// Order cancelled
 		orderID := uint64(0)
 		if val, ok := a.requestToOrder.Load(resp.RequestID); ok {
 			orderID = val.(uint64)
 			a.activeOrders.Delete(orderID)
 			a.requestToOrder.Delete(resp.RequestID)
 		}
-		a.eventCh <- &Event{
+		return &Event{
 			Type: EventOrderCancelled,
 			Data: OrderCancelledEvent{
 				OrderID:      orderID,
@@ -153,7 +229,7 @@ func (a *BaseActor) handleResponse(resp exchange.Response) {
 		if isFull {
 			eventType = EventOrderFilled
 		}
-		a.eventCh <- &Event{
+		return &Event{
 			Type: eventType,
 			Data: OrderFillEvent{
 				OrderID:   data.OrderID,
@@ -168,77 +244,74 @@ func (a *BaseActor) handleResponse(resp exchange.Response) {
 		}
 
 	case *exchange.BalanceSnapshot:
-		a.eventCh <- &Event{
+		return &Event{
 			Type: EventBalanceUpdate,
 			Data: BalanceUpdateEvent{Snapshot: data},
 		}
 
 	case *exchange.AccountSnapshot:
-		a.eventCh <- &Event{
+		return &Event{
 			Type: EventAccountUpdate,
 			Data: AccountUpdateEvent{Snapshot: data},
 		}
 	}
+	return nil
 }
 
-func (a *BaseActor) handleMarketData(md *exchange.MarketDataMsg) {
+func (a *BaseActor) decodeMarketData(md *exchange.MarketDataMsg) *Event {
 	if md == nil {
-		return
+		return nil
 	}
 	switch md.Type {
 	case exchange.MDTrade:
-		trade := md.Data.(*exchange.Trade)
-		a.eventCh <- &Event{
+		return &Event{
 			Type: EventTrade,
 			Data: TradeEvent{
 				Symbol:    md.Symbol,
-				Trade:     trade,
+				Trade:     md.Data.(*exchange.Trade),
 				Timestamp: md.Timestamp,
 			},
 		}
 	case exchange.MDDelta:
-		delta := md.Data.(*exchange.BookDelta)
-		a.eventCh <- &Event{
+		return &Event{
 			Type: EventBookDelta,
 			Data: BookDeltaEvent{
 				Symbol:    md.Symbol,
-				Delta:     delta,
+				Delta:     md.Data.(*exchange.BookDelta),
 				Timestamp: md.Timestamp,
 				SeqNum:    md.SeqNum,
 			},
 		}
 	case exchange.MDSnapshot:
-		snapshot := md.Data.(*exchange.BookSnapshot)
-		a.eventCh <- &Event{
+		return &Event{
 			Type: EventBookSnapshot,
 			Data: BookSnapshotEvent{
 				Symbol:    md.Symbol,
-				Snapshot:  snapshot,
+				Snapshot:  md.Data.(*exchange.BookSnapshot),
 				Timestamp: md.Timestamp,
 				SeqNum:    md.SeqNum,
 			},
 		}
 	case exchange.MDFunding:
-		fundingRate := md.Data.(*exchange.FundingRate)
-		a.eventCh <- &Event{
+		return &Event{
 			Type: EventFundingUpdate,
 			Data: FundingUpdateEvent{
 				Symbol:      md.Symbol,
-				FundingRate: fundingRate,
+				FundingRate: md.Data.(*exchange.FundingRate),
 				Timestamp:   md.Timestamp,
 			},
 		}
 	case exchange.MDOpenInterest:
-		oi := md.Data.(*exchange.OpenInterest)
-		a.eventCh <- &Event{
+		return &Event{
 			Type: EventOpenInterest,
 			Data: OpenInterestEvent{
 				Symbol:       md.Symbol,
-				OpenInterest: oi,
+				OpenInterest: md.Data.(*exchange.OpenInterest),
 				Timestamp:    md.Timestamp,
 			},
 		}
 	}
+	return nil
 }
 
 func (a *BaseActor) SubmitOrder(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64) uint64 {
@@ -330,6 +403,9 @@ func (a *BaseActor) Unsubscribe(symbol string) {
 	})
 }
 
+// EventChannel returns the event channel for pull-based consumers.
+// Do not use together with SetHandler — when a handler is set, this channel
+// is not written.
 func (a *BaseActor) EventChannel() <-chan *Event {
 	return a.eventCh
 }
@@ -338,13 +414,10 @@ func (a *BaseActor) PeekNextRequestID() uint64 {
 	return atomic.LoadUint64(&a.requestSeq) + 1
 }
 
-// SetTickerFactory sets the ticker factory for this actor
-// Must be called before Start() if using simulation time
 func (a *BaseActor) SetTickerFactory(factory exchange.TickerFactory) {
 	a.tickerFactory = factory
 }
 
-// GetTickerFactory returns the ticker factory for this actor
 func (a *BaseActor) GetTickerFactory() exchange.TickerFactory {
 	return a.tickerFactory
 }

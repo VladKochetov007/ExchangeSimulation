@@ -17,11 +17,10 @@ type testActor struct {
 	stopped bool
 }
 
-func (a *testActor) ID() uint64             { return a.id }
-func (a *testActor) Gateway() actor.Gateway { return a.gateway }
+func (a *testActor) ID() uint64                    { return a.id }
+func (a *testActor) Gateway() actor.Gateway        { return a.gateway }
 func (a *testActor) Start(_ context.Context) error { a.started = true; return nil }
 func (a *testActor) Stop() error                   { a.stopped = true; return nil }
-func (a *testActor) OnEvent(_ *actor.Event)        {}
 
 func newTestVenue() *Venue {
 	ex := exchange.NewExchange(10, &RealClock{})

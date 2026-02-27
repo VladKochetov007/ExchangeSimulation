@@ -64,13 +64,13 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	if r.config.Iterations > 0 {
 		go func() {
-			if simClock, ok := r.clock.(*SimulatedClock); ok {
+			if advanceable, ok := r.clock.(Advanceable); ok {
 				for i := 0; i < r.config.Iterations; i++ {
 					select {
 					case <-ctx.Done():
 						return
 					default:
-						simClock.Advance(r.config.Step)
+						advanceable.Advance(r.config.Step)
 						time.Sleep(time.Microsecond)
 					}
 				}

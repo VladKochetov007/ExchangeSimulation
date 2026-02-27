@@ -10,6 +10,12 @@ type Clock interface {
 	NowUnix() int64
 }
 
+// Advanceable is implemented by clocks that support deterministic time advancement.
+// Runner uses this to drive iteration-based simulations without a type assertion.
+type Advanceable interface {
+	Advance(d time.Duration)
+}
+
 type RealClock struct{}
 
 func (c *RealClock) NowUnixNano() int64 {

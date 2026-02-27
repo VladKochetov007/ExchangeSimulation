@@ -112,7 +112,7 @@ flowchart LR
 
 **Simulation layer** — `SimulatedClock` with deterministic advancement; `Runner` manages venues and actors with wall-clock duration or iteration count limits; five `LatencyProvider` implementations for network/queue modeling. `SimulatedClock` + `TickerFactory` enables 100,000×+ speedup vs wall time.
 
-**Actor framework** — `BaseActor` handles channel routing, order tracking, and response dispatch. Embed it for submission helpers (`SubmitOrder`, `CancelOrder`, `Subscribe`, `QueryBalance`, `QueryAccount`). Multi-venue actors own multiple gateways and multiplex them in a single `select` loop.
+**Actor framework** — `BaseActor` handles channel routing, order tracking, and event dispatch. Embed it for submission helpers (`SubmitOrder`, `CancelOrder`, `Subscribe`, `QueryBalance`, `QueryAccount`). Call `SetHandler(self)` before `Start` to receive events inline via `HandleEvent(ctx, event)` — no second goroutine needed. Call `AddTicker(d, fn)` to register periodic callbacks (TWAP slicing, requoting) driven by the actor's `TickerFactory`, which is simulation-time-aware when using `SimulatedClock`. Multi-venue actors own multiple gateways and multiplex them in a single `select` loop.
 
 ---
 
@@ -350,31 +350,7 @@ Each instrument implements `Settleable` with its own logic. The exchange dispatc
 
 The same `IsPerp()` + type assertion pattern appears in margin reservation (`reserveLimitOrderFunds`, `checkMarketOrderFunds`), so a `Margined` interface would be needed there too.
 
-### 2. `BaseActor` has no slot for periodic timer strategies
 
-`BaseActor.run()` is a concrete goroutine that `select`s only on `gateway.Responses()` and `gateway.MarketDataCh()`. Go has no virtual methods, so embedding and overriding `run` is not possible — `Start()` always launches `BaseActor.run()`.
-
-Strategies that need periodic behavior (market maker requote, TWAP slicing, periodic hedging) cannot inject a ticker into the existing select loop. They must bypass `BaseActor.Start()` entirely and write their own goroutine, using `BaseActor` only for the submission helpers and reading events from `EventChannel()` manually. The `tickerFactory` field on `BaseActor` is currently unused.
-
-**Fix needed**: a registration mechanism such as:
-
-```go
-func (a *BaseActor) AddTicker(d time.Duration, fn func(time.Time))
-```
-
-The actor's run loop would also `select` on registered ticker channels, calling the provided function. Tickers created via `tickerFactory` would respect simulation time automatically.
-
-### 3. `Runner` type-asserts `Clock` for iteration mode
-
-In `Runner.Run`, the `Iterations` mode does:
-
-```go
-if simClock, ok := r.clock.(*SimulatedClock); ok {
-    simClock.Advance(r.config.Step)
-}
-```
-
-A custom `Clock` that wraps or decorates `SimulatedClock` silently skips clock advancement. `Clock` should expose `Advance` or the runner should accept a separate `Advanceable` interface.
 
 ---
 
