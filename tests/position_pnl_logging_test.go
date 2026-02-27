@@ -512,19 +512,19 @@ func TestMarkPriceLogging(t *testing.T) {
 	}
 
 	// Start automation with mark price updates
-	automation := NewExchangeAutomation(ex, AutomationConfig{
+	ex.ConfigureAutomation(AutomationConfig{
 		MarkPriceCalc:       NewMidPriceCalculator(),
 		IndexProvider:       NewStaticPriceOracle(map[string]int64{"BTC-PERP": PriceUSD(50000, DOLLAR_TICK)}),
-		PriceUpdateInterval: 50 * time.Millisecond, // Faster for testing
+		PriceUpdateInterval: 50 * time.Millisecond,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	automation.Start(ctx)
+	ex.StartAutomation(ctx)
 
 	// Wait long enough for several ticks (50ms interval, wait 300ms = 6 ticks)
 	time.Sleep(300 * time.Millisecond)
-	automation.Stop()
+	ex.StopAutomation()
 
 	_, _, marks := logger.snapshot()
 

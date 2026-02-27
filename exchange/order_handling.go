@@ -1,6 +1,6 @@
 package exchange
 
-func (e *Exchange) PlaceOrder(clientID uint64, req *OrderRequest) Response {
+func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Response {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -37,7 +37,7 @@ func (e *Exchange) PlaceOrder(clientID uint64, req *OrderRequest) Response {
 	return Response{RequestID: req.RequestID, Success: true, Data: e.NextOrderID}
 }
 
-func (e *Exchange) CancelOrder(clientID uint64, req *CancelRequest) Response {
+func (e *DefaultExchange) CancelOrder(clientID uint64, req *CancelRequest) Response {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -104,7 +104,7 @@ func (e *Exchange) CancelOrder(clientID uint64, req *CancelRequest) Response {
 	return Response{RequestID: req.RequestID, Success: true, Data: remainingQty}
 }
 
-func (e *Exchange) QueryAccount(clientID uint64, req *QueryRequest) Response {
+func (e *DefaultExchange) QueryAccount(clientID uint64, req *QueryRequest) Response {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -119,7 +119,7 @@ func (e *Exchange) QueryAccount(clientID uint64, req *QueryRequest) Response {
 	return Response{RequestID: req.RequestID, Success: true, Data: &AccountSnapshot{BalanceSnapshot: *snap, Positions: positions}}
 }
 
-func (e *Exchange) buildPositionSnapshots(clientID uint64) []PositionSnapshot {
+func (e *DefaultExchange) buildPositionSnapshots(clientID uint64) []PositionSnapshot {
 	positions := e.Positions.GetAllPositions(clientID)
 	if len(positions) == 0 {
 		return nil
@@ -156,7 +156,7 @@ func (e *Exchange) buildPositionSnapshots(clientID uint64) []PositionSnapshot {
 	return snapshots
 }
 
-func (e *Exchange) QueryBalance(clientID uint64, req *QueryRequest) Response {
+func (e *DefaultExchange) QueryBalance(clientID uint64, req *QueryRequest) Response {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -169,7 +169,7 @@ func (e *Exchange) QueryBalance(clientID uint64, req *QueryRequest) Response {
 	return Response{RequestID: req.RequestID, Success: true, Data: snapshot}
 }
 
-func (e *Exchange) Subscribe(clientID uint64, req *QueryRequest, gateway *ClientGateway) Response {
+func (e *DefaultExchange) Subscribe(clientID uint64, req *QueryRequest, gateway *ClientGateway) Response {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -201,14 +201,14 @@ func (e *Exchange) Subscribe(clientID uint64, req *QueryRequest, gateway *Client
 	return Response{RequestID: req.RequestID, Success: true}
 }
 
-func (e *Exchange) Unsubscribe(clientID uint64, req *QueryRequest) Response {
+func (e *DefaultExchange) Unsubscribe(clientID uint64, req *QueryRequest) Response {
 	e.MDPublisher.Unsubscribe(clientID, req.Symbol)
 	return Response{RequestID: req.RequestID, Success: true}
 }
 
 // publishBookUpdate publishes a delta update for a specific price level.
 // Caller must hold e.mu lock.
-func (e *Exchange) publishBookUpdate(book *OrderBook, side Side, price int64) {
+func (e *DefaultExchange) publishBookUpdate(book *OrderBook, side Side, price int64) {
 	var limit *Limit
 	if side == Buy {
 		limit = book.Bids.Limits[price]
@@ -245,7 +245,7 @@ func (e *Exchange) publishBookUpdate(book *OrderBook, side Side, price int64) {
 
 // validatePlaceOrder runs early guards for gateway, client, instrument, and price/qty.
 // Caller must hold e.mu.Lock().
-func (e *Exchange) validatePlaceOrder(clientID uint64, req *OrderRequest) *Response {
+func (e *DefaultExchange) validatePlaceOrder(clientID uint64, req *OrderRequest) *Response {
 	// Close the TOCTOU window: gateway IsRunning is checked here under e.mu to
 	// prevent races with CancelAllClientOrders during shutdown.
 	if gw := e.Gateways[clientID]; gw != nil && !gw.IsRunning() {
@@ -321,7 +321,7 @@ func checkMarketOrderFunds(client *Client, book *OrderBook, order *Order, precis
 	return client.GetAvailable(instrument.BaseAsset()) >= order.Qty
 }
 
-func (e *Exchange) reserveLimitOrderFunds(client *Client, instrument Instrument, order *Order, precision int64) bool {
+func (e *DefaultExchange) reserveLimitOrderFunds(client *Client, instrument Instrument, order *Order, precision int64) bool {
 	if instrument.IsPerp() {
 		perp := instrument.(*PerpFutures)
 		margin := calcMargin(order.Qty, order.Price, perp.MarginRate, precision)
@@ -337,7 +337,7 @@ func (e *Exchange) reserveLimitOrderFunds(client *Client, instrument Instrument,
 // reserveOrderFunds checks or reserves funds depending on order type.
 // Returns a rejection Response if funds are insufficient, nil otherwise.
 // Caller must hold e.mu.Lock().
-func (e *Exchange) reserveOrderFunds(client *Client, book *OrderBook, order *Order, requestID uint64, log Logger) *Response {
+func (e *DefaultExchange) reserveOrderFunds(client *Client, book *OrderBook, order *Order, requestID uint64, log Logger) *Response {
 	precision := book.Instrument.BasePrecision()
 	var ok bool
 	switch order.Type {
@@ -367,7 +367,7 @@ func collectAffectedLevels(book *OrderBook, executions []*Execution) map[int64]S
 
 // removeMakerOrders removes fully filled maker orders from the book.
 // Caller must hold e.mu.Lock().
-func (e *Exchange) removeMakerOrders(book *OrderBook, executions []*Execution) {
+func (e *DefaultExchange) removeMakerOrders(book *OrderBook, executions []*Execution) {
 	for _, exec := range executions {
 		makerOrder := book.FindOrder(exec.MakerOrderID)
 		if makerOrder == nil || makerOrder.Status != Filled {
@@ -383,7 +383,7 @@ func (e *Exchange) removeMakerOrders(book *OrderBook, executions []*Execution) {
 	}
 }
 
-func (e *Exchange) publishLevels(book *OrderBook, levels map[int64]Side) {
+func (e *DefaultExchange) publishLevels(book *OrderBook, levels map[int64]Side) {
 	for price, side := range levels {
 		e.publishBookUpdate(book, side, price)
 	}
@@ -391,7 +391,7 @@ func (e *Exchange) publishLevels(book *OrderBook, levels map[int64]Side) {
 
 // restOrReleaseOrder either rests the order as a GTC limit in the book or releases its funds.
 // Caller must hold e.mu.Lock().
-func (e *Exchange) restOrReleaseOrder(client *Client, book *OrderBook, order *Order, req *OrderRequest) {
+func (e *DefaultExchange) restOrReleaseOrder(client *Client, book *OrderBook, order *Order, req *OrderRequest) {
 	if order.Status != Filled && req.Type == LimitOrder && req.TimeInForce == GTC {
 		if order.Side == Buy {
 			book.Bids.AddOrder(order)
@@ -418,7 +418,7 @@ func rejectWithLog(requestID uint64, clientID uint64, reason RejectReason, log L
 
 // rejectOrder recycles the order and returns a logged rejection Response.
 // Caller must hold e.mu.Lock().
-func (e *Exchange) rejectOrder(order *Order, requestID uint64, clientID uint64, reason RejectReason, log Logger) Response {
+func (e *DefaultExchange) rejectOrder(order *Order, requestID uint64, clientID uint64, reason RejectReason, log Logger) Response {
 	putOrder(order)
 	resp := Response{RequestID: requestID, Success: false, Error: reason}
 	if log != nil {
@@ -447,7 +447,7 @@ func releaseOrderFunds(client *Client, instrument Instrument, side Side, qty, pr
 // tryReserveOrBorrow attempts reserveFn; on failure, if BorrowingMgr is configured
 // it borrows the shortfall inline and retries. Caller must hold e.mu.Lock().
 // No unlock/relock needed — BorrowingManager no longer acquires the exchange lock.
-func (e *Exchange) tryReserveOrBorrow(
+func (e *DefaultExchange) tryReserveOrBorrow(
 	clientID uint64, asset string, amount int64,
 	reserveFn func(string, int64) bool,
 	isPerp bool,

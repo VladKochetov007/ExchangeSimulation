@@ -80,6 +80,48 @@ type Instrument interface {
 	InstrumentType() string
 }
 
+// Instrumentable is implemented by venues that manage tradeable instruments.
+type Instrumentable interface {
+	AddInstrument(instrument Instrument)
+	ListInstruments(baseFilter, quoteFilter string) []Instrument
+}
+
+// ClientLifecycle covers client-side lifecycle management.
+type ClientLifecycle interface {
+	CancelAllClientOrders(clientID uint64) int
+	DisconnectClient(clientID uint64)
+	SetLogger(symbol string, log Logger)
+}
+
+// MarginLending adds collateral borrowing for leveraged trading.
+type MarginLending interface {
+	EnableBorrowing(config BorrowingConfig) error
+	BorrowMargin(clientID uint64, asset string, amount int64, reason string) error
+	RepayMargin(clientID uint64, asset string, amount int64) error
+}
+
+// PerpWallet manages the perp account and cross-wallet transfers.
+type PerpWallet interface {
+	AddPerpBalance(clientID uint64, asset string, amount int64)
+	Transfer(clientID uint64, fromWallet, toWallet, asset string, amount int64) error
+}
+
+// SpotExchange is the management API for a spot/margin trading venue.
+type SpotExchange interface {
+	Venue
+	Instrumentable
+	ClientLifecycle
+	MarginLending
+}
+
+// PerpExchange is the management API for a perpetual futures venue.
+type PerpExchange interface {
+	Venue
+	Instrumentable
+	ClientLifecycle
+	PerpWallet
+}
+
 // Clock is the time abstraction used throughout the exchange.
 type Clock interface {
 	NowUnixNano() int64

@@ -372,18 +372,15 @@ func (m *mockLiquidationHandler) OnInsuranceFund(e *InsuranceFundEvent) {
 // setupPerpAutomation builds an exchange with a low-priced perp instrument to avoid int64
 // overflow in the initMargin formula: abs(size)*entryPrice*marginRate must fit in int64.
 // Using $100 entry price: 1e8 * 1e7 * 1000 = 1e18 < int64 max (~9.2e18).
-func setupPerpAutomation(handler LiquidationHandler) (*Exchange, *ExchangeAutomation, *PerpFutures) {
+func setupPerpAutomation(handler LiquidationHandler) (*Exchange, *PerpFutures) {
 	ex := NewExchange(10, &RealClock{})
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
 	ex.ExchangeBalance.InsuranceFund["USD"] = USDAmount(1_000_000)
-
-	a := NewExchangeAutomation(ex, AutomationConfig{
-		LiquidationHandler: handler,
-		CollateralRate:     500,
-	})
-	return ex, a, perp
+	ex.LiquidationHandler = handler
+	ex.CollateralRate = 500
+	return ex, perp
 }
 
 // perpEntry is a safe entry price that avoids int64 overflow:
@@ -424,13 +421,13 @@ func markBelow() int64 { return (perpEntry - 10) * USD_PRECISION }
 
 func TestCheckLiquidations_TriggersLiquidation(t *testing.T) {
 	handler := &mockLiquidationHandler{}
-	ex, a, perp := setupPerpAutomation(handler)
+	ex, perp := setupPerpAutomation(handler)
 
 	// Long 1 BTC at $100. initMargin=$10. balance=0, reserved=$1 → PerpAvailable=-$1.
 	// equity = -$1 + (-$10 pnl at $90) = -$11 << maintenance → liquidation.
 	injectPerpPosition(ex, 1, "BTC-PERP", BTCAmount(1.0), entry100(), 0, USDAmount(1))
 
-	a.CheckLiquidations("BTC-PERP", perp, markBelow())
+	ex.CheckLiquidations("BTC-PERP", perp, markBelow())
 
 	if len(handler.liquidations) == 0 {
 		t.Error("expected OnLiquidation to be called")
@@ -439,12 +436,12 @@ func TestCheckLiquidations_TriggersLiquidation(t *testing.T) {
 
 func TestCheckLiquidations_InsuranceFundDeficit(t *testing.T) {
 	handler := &mockLiquidationHandler{}
-	ex, a, perp := setupPerpAutomation(handler)
+	ex, perp := setupPerpAutomation(handler)
 
 	// PerpAvailable = -$1 → after liquidation (no fills) → deficit path.
 	injectPerpPosition(ex, 1, "BTC-PERP", BTCAmount(1.0), entry100(), 0, USDAmount(1))
 
-	a.CheckLiquidations("BTC-PERP", perp, markBelow())
+	ex.CheckLiquidations("BTC-PERP", perp, markBelow())
 
 	if len(handler.insuranceCalls) == 0 {
 		t.Error("expected OnInsuranceFund to be called for deficit")
@@ -453,12 +450,12 @@ func TestCheckLiquidations_InsuranceFundDeficit(t *testing.T) {
 
 func TestCheckLiquidations_LiquidationWithLogger(t *testing.T) {
 	handler := &mockLiquidationHandler{}
-	ex, a, perp := setupPerpAutomation(handler)
+	ex, perp := setupPerpAutomation(handler)
 	ex.SetLogger("_global", &nullLogger{})
 
 	injectPerpPosition(ex, 1, "BTC-PERP", BTCAmount(1.0), entry100(), 0, USDAmount(1))
 
-	a.CheckLiquidations("BTC-PERP", perp, markBelow())
+	ex.CheckLiquidations("BTC-PERP", perp, markBelow())
 	if len(handler.liquidations) == 0 {
 		t.Error("expected OnLiquidation to be called with logger set")
 	}
@@ -468,13 +465,13 @@ func TestCheckLiquidations_LiquidationWithLogger(t *testing.T) {
 
 func TestCheckLiquidations_SurplusPath(t *testing.T) {
 	handler := &mockLiquidationHandler{}
-	ex, a, perp := setupPerpAutomation(handler)
+	ex, perp := setupPerpAutomation(handler)
 
 	// balance=$2, reserved=0 → PerpAvailable=$2 (surplus after liquidation).
 	// equity = $2 + (-$10 pnl at $90) = -$8 < maintenance → liquidation.
 	injectPerpPosition(ex, 1, "BTC-PERP", BTCAmount(1.0), entry100(), USDAmount(2), 0)
 
-	a.CheckLiquidations("BTC-PERP", perp, markBelow())
+	ex.CheckLiquidations("BTC-PERP", perp, markBelow())
 
 	if len(handler.liquidations) == 0 {
 		t.Error("expected OnLiquidation to be called")
@@ -485,7 +482,7 @@ func TestCheckLiquidations_SurplusPath(t *testing.T) {
 
 func TestCheckLiquidations_CancelsOpenOrders(t *testing.T) {
 	handler := &mockLiquidationHandler{}
-	ex, a, perp := setupPerpAutomation(handler)
+	ex, perp := setupPerpAutomation(handler)
 
 	// Give client 1 enough perp to place a Sell limit at $110 for 1 BTC.
 	// initialMargin = (1BTC * $110 / BTC_PREC) * 10% = $11 = 1_100_000
@@ -504,7 +501,7 @@ func TestCheckLiquidations_CancelsOpenOrders(t *testing.T) {
 	// Inject long 1 BTC at $100 with deficit state to trigger liquidation.
 	injectPerpPosition(ex, 1, "BTC-PERP", BTCAmount(1.0), entry100(), 0, USDAmount(1))
 
-	a.CheckLiquidations("BTC-PERP", perp, markBelow())
+	ex.CheckLiquidations("BTC-PERP", perp, markBelow())
 
 	if len(handler.liquidations) == 0 {
 		t.Error("expected liquidation to be triggered with open orders present")
@@ -518,7 +515,7 @@ func TestCheckLiquidations_CancelsOpenOrders(t *testing.T) {
 
 func TestCheckLiquidations_MarginCallWarning(t *testing.T) {
 	handler := &mockLiquidationHandler{}
-	ex, a, perp := setupPerpAutomation(handler)
+	ex, perp := setupPerpAutomation(handler)
 
 	initM := perpInitMargin() // = $10 = 1_000_000
 
@@ -531,7 +528,7 @@ func TestCheckLiquidations_MarginCallWarning(t *testing.T) {
 	)
 
 	// Use exact entry price → unrealizedPnL = 0 → equity = $0.60 → ratio = 600 bps.
-	a.CheckLiquidations("BTC-PERP", perp, entry100())
+	ex.CheckLiquidations("BTC-PERP", perp, entry100())
 
 	if len(handler.marginCalls) == 0 {
 		t.Error("expected OnMarginCall to be called")
@@ -545,8 +542,8 @@ func TestCheckLiquidations_MarginCallWarning(t *testing.T) {
 
 func TestCheckLiquidations_ZeroMarkPrice(t *testing.T) {
 	handler := &mockLiquidationHandler{}
-	_, a, perp := setupPerpAutomation(handler)
-	a.CheckLiquidations("BTC-PERP", perp, 0) // must return early, no panic
+	ex, perp := setupPerpAutomation(handler)
+	ex.CheckLiquidations("BTC-PERP", perp, 0) // must return early, no panic
 	if len(handler.liquidations) > 0 {
 		t.Error("zero mark price should not trigger liquidation")
 	}
@@ -564,18 +561,17 @@ func TestChargeCollateralInterest_WithLogger(t *testing.T) {
 	ex.Clients[1].PerpBalances["USD"] = USDAmount(10_000_000)
 	ex.Clients[1].Borrowed["USD"] = USDAmount(10_000_000)
 
-	a := NewExchangeAutomation(ex, AutomationConfig{CollateralRate: 500})
-	a.ChargeCollateralInterest() // logger branch fires when interest > 0
+	ex.CollateralRate = 500
+	ex.ChargeCollateralInterest() // logger branch fires when interest > 0
 }
 
-// --- Start() called twice: second call is no-op ---
+// --- StartAutomation() called twice: second call is no-op ---
 
 func TestExchangeAutomation_StartAlreadyRunning(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	a := NewExchangeAutomation(ex, AutomationConfig{})
 
-	// Two Start calls — second must be a no-op (hits `if a.ctx != nil { return }`).
-	a.Start(bgCtx())
-	a.Start(bgCtx())
-	a.Stop()
+	// Two StartAutomation calls — second must be a no-op (hits `if automCtx != nil { return }`).
+	ex.StartAutomation(bgCtx())
+	ex.StartAutomation(bgCtx())
+	ex.StopAutomation()
 }

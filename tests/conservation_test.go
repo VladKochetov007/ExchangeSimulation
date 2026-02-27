@@ -124,9 +124,7 @@ func TestMoneyConservation_Liquidation(t *testing.T) {
 	// Client 2 provides liquidity at crash price so liquidation can execute
 	_, _ = InjectLimitOrder(ex, 2, "BTC-PERP", Buy, crashPrice, qty)
 
-	// Trigger liquidation check directly (no Start() needed — just call the method)
-	automation := NewExchangeAutomation(ex, AutomationConfig{})
-	automation.CheckLiquidations("BTC-PERP", perp, crashPrice)
+	ex.CheckLiquidations("BTC-PERP", perp, crashPrice)
 
 	if got := totalMoney(ex, "USD"); got != initialUSD {
 		t.Errorf("USD conservation violated after liquidation: delta=%d (initial=%d, after=%d)",

@@ -2,7 +2,7 @@ package exchange
 
 import "errors"
 
-func (e *Exchange) SetMarginMode(clientID uint64, mode MarginMode) error {
+func (e *DefaultExchange) SetMarginMode(clientID uint64, mode MarginMode) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -19,11 +19,11 @@ func (e *Exchange) SetMarginMode(clientID uint64, mode MarginMode) error {
 	return nil
 }
 
-func (e *Exchange) hasOpenPositions(client *Client) bool {
+func (e *DefaultExchange) hasOpenPositions(client *Client) bool {
 	return e.Positions.HasOpenPositions(client.ID)
 }
 
-func (e *Exchange) AllocateCollateralToPosition(
+func (e *DefaultExchange) AllocateCollateralToPosition(
 	clientID uint64,
 	symbol string,
 	asset string,
@@ -65,7 +65,7 @@ func (e *Exchange) AllocateCollateralToPosition(
 	return nil
 }
 
-func (e *Exchange) ReleaseCollateralFromPosition(
+func (e *DefaultExchange) ReleaseCollateralFromPosition(
 	clientID uint64,
 	symbol string,
 	asset string,

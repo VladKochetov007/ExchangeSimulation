@@ -3,7 +3,7 @@ package exchange
 // forceClose cancels all open orders for clientID on the given book, then executes
 // a market order to close qty on the given side. Returns the fill price (0 if no fill).
 // Caller must hold e.mu.Lock().
-func (e *Exchange) forceClose(clientID uint64, client *Client, book *OrderBook, perp *PerpFutures, side Side, qty, timestamp int64) (fillPrice int64) {
+func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *OrderBook, perp *PerpFutures, side Side, qty, timestamp int64) (fillPrice int64) {
 	e.cancelClientOrdersOnBook(client, book, perp)
 
 	orderID := e.NextOrderID
@@ -29,7 +29,7 @@ func (e *Exchange) forceClose(clientID uint64, client *Client, book *OrderBook, 
 // cancelClientOrdersOnBook cancels all open orders for client on the given book,
 // releasing reserved perp margin for each cancelled order.
 // Caller must hold e.mu.Lock().
-func (e *Exchange) cancelClientOrdersOnBook(client *Client, book *OrderBook, perp *PerpFutures) {
+func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBook, perp *PerpFutures) {
 	for _, orderID := range append([]uint64{}, client.OrderIDs...) {
 		var order *Order
 		if o := book.Bids.Orders[orderID]; o != nil {

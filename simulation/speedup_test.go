@@ -29,18 +29,17 @@ func TestSimulationSpeedup(t *testing.T) {
 		"BTC-PERP": exchange.PriceUSD(50000, exchange.CENT_TICK),
 	})
 
-	automation := exchange.NewExchangeAutomation(ex, exchange.AutomationConfig{
+	ex.ConfigureAutomation(exchange.AutomationConfig{
 		MarkPriceCalc:       exchange.NewMidPriceCalculator(),
 		IndexProvider:       indexProvider,
 		PriceUpdateInterval: 1 * time.Second,
-		TickerFactory:       tickerFactory,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	automation.Start(ctx)
-	defer automation.Stop()
+	ex.StartAutomation(ctx)
+	defer ex.StopAutomation()
 
 	// Track events
 	snapshotCount := 0

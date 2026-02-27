@@ -20,7 +20,7 @@ flowchart LR
         CGW["ClientGateway"]
     end
 
-    subgraph EX["Exchange"]
+    subgraph EX["DefaultExchange"]
         OB["Order Book</br>(bids / asks)"]
         ME["Matching Engine</br>(PriceTime · ProRata)"]
         ST["Settlement</br>(PnL · fees · margin)"]
@@ -71,13 +71,13 @@ flowchart LR
     VENUE --> DGW
 ```
 
-**Request flow**: Actor sends `Request` → `Gateway` (optionally delayed) → `Exchange.HandleClientRequests` → order matching → `Response` + `FillNotification` back through the same gateway. Market data (book snapshots/deltas, trades, funding rate updates, open interest) flows one-way from `MDPublisher` to all subscribed gateways, filtered by the `MDType` set in the subscription.
+**Request flow**: Actor sends `Request` → `DelayedGateway` (optional per-channel latency) → `ClientGateway` → `Exchange.HandleClientRequests` → order validation → matching engine → settlement → `Response` + `FillNotification` back through the same gateway stack. Market data (book snapshots/deltas, trades, funding, open interest) flows one-way from `MDPublisher` to all subscribed gateways filtered by `MDType`.
 
-**Automation**: `ExchangeAutomation` runs in the background — recalculates mark and index prices, updates funding rates, publishes them via `MDPublisher`, settles periodic funding payments through `Settlement`, and checks margin ratios after every price update. Liquidation force-closes positions through the `MatchingEngine`. Margin call warnings and liquidation events are delivered via the `LiquidationHandler` interface — a direct callback, not routed through the gateway.
+**Automation**: `DefaultExchange` runs background goroutines — recalculates mark and index prices on a configurable interval, updates funding rates, publishes them via `MDPublisher`, settles periodic funding payments, and checks margin ratios after every price update. Liquidation force-closes positions through the `MatchingEngine`. Margin call warnings and liquidation events are delivered to the `LiquidationHandler` interface — a direct callback, not routed through the gateway. Start with `ex.ConfigureAutomation(cfg)` then `ex.StartAutomation(ctx)`.
 
-**Latency modeling**: `DelayedGateway` wraps any `ClientGateway` and introduces per-channel (request / response / market data) delay drawn from a pluggable `LatencyProvider`. Five implementations ship out of the box: constant, uniform random, normal, log-normal (heavy tail), and Hawkes (self-exciting, models exchange queue congestion). Multiple actors on the same exchange can have independent latency profiles.
+**Latency modeling**: `DelayedGateway` wraps any `ClientGateway` and introduces per-channel (request / response / market data) delay drawn from a pluggable `LatencyProvider`. Five implementations ship: constant, uniform random, normal, log-normal (heavy tail), and Hawkes (self-exciting, models exchange queue congestion). Multiple actors on the same exchange can have independent latency profiles.
 
-**Multi-venue**: `Venue` pairs an `Exchange` with a `LatencyConfig`. `Runner` orchestrates any number of venues and actors, advancing a shared `SimulatedClock` or running in wall-clock time.
+**Multi-venue**: `Venue` pairs an `Exchange` with a `LatencyConfig`. `Runner` orchestrates any number of venues and actors, advancing a shared `SimulatedClock` or running in wall-clock time. Gateway channel identity carries venue identity — no tagging needed.
 
 ---
 
@@ -85,9 +85,9 @@ flowchart LR
 
 | Package | Contents |
 |---------|----------|
-| `exchange/` | `Exchange`, `Client`, `ClientGateway`, `PositionManager`, settlement, funding, borrowing, order routing |
-| `types/` | Value types: `Order`, `Side`, `FillNotification`, `AssetBalance`, `PositionSnapshot`, `AccountSnapshot`, `FeeModel` interface, enums |
-| `book/` | `OrderBook` — price-time ordered bid/ask levels |
+| `exchange/` | `DefaultExchange` (`Exchange` alias), `Client`, `ClientGateway`, `PositionManager`, settlement, funding, borrowing, order routing, automation |
+| `types/` | Value types: `Order`, `Side`, `FillNotification`, `AssetBalance`, `PositionSnapshot`, `AccountSnapshot`, interfaces (`Venue`, `SpotExchange`, `PerpExchange`, `FeeModel`, `Instrument`, `PositionStore`, `Logger`, `Clock`, `TickerFactory`) |
+| `book/` | `OrderBook` — price-time ordered bid/ask levels with iceberg and hidden order support |
 | `matching/` | `PriceTimeMatcher` (FIFO), `ProRataMatcher` |
 | `price/` | Mark price calculators (last, mid, weighted-mid, Binance, BitMEX, Bybit) and index price providers (spot-derived, GBM, fixed) |
 | `instrument/` | `SpotInstrument`, `PerpFutures`, `FundingCalculator` |
@@ -95,8 +95,8 @@ flowchart LR
 | `clock/` | `RealClock`, `RealTickerFactory` |
 | `marketdata/` | `MDPublisher` — fan-out with per-subscription `MDType` filter |
 | `logger/` | NDJSON event logger |
-| `simulation/` | `Venue`, `Runner`, `DelayedGateway`, `SimulatedClock`, latency providers, `Scheduler` |
-| `actor/` | `Actor` interface, `BaseActor` (order tracking, event dispatch) |
+| `simulation/` | `Venue`, `Runner`, `DelayedGateway`, `SimulatedClock`, `Scheduler`, `EventScheduler`, latency providers |
+| `actor/` | `Actor` interface, `BaseActor` (order submission helpers, response/fill dispatch, order tracking) |
 
 ---
 
@@ -104,15 +104,51 @@ flowchart LR
 
 **Exchange core** — price-time FIFO and pro-rata matching engines; order book with iceberg and hidden order support; position manager with cross and isolated margin, one-way and hedge mode, PnL tracking and liquidation; perpetual funding settlement; margin borrowing and interest; NDJSON event logging.
 
-**Account model** — Binance-style balances: `Free / Locked / Borrowed / Interest / NetAsset` for spot and perp wallets. `ReqQueryBalance` returns `BalanceSnapshot`; `ReqQueryAccount` returns the full `AccountSnapshot` including open positions with mark price, unrealized PnL, leverage, and liquidation price.
+**Account model** — Binance-style balances: `Free / Locked / Borrowed / NetAsset` for spot and perp wallets. `ReqQueryBalance` returns `BalanceSnapshot`; `ReqQueryAccount` returns the full `AccountSnapshot` including open positions with mark price, unrealized PnL, leverage, and liquidation price.
 
 **Fee model** — `FeeModel.CalculateFee(FillContext)` receives the full execution context and returns `Fee{Amount, Asset}`. Fee asset is arbitrary — BNB-style fee-in-any-asset works out of the box.
 
 **Market data** — `MDPublisher` delivers `MDSnapshot`, `MDDelta`, `MDTrade`, `MDFunding`, `MDOpenInterest` to subscribed gateways. Each subscription carries a type filter; actors receive only the streams they asked for.
 
-**Simulation layer** — `SimulatedClock` with deterministic advancement; `Runner` manages venues and actors with wall-clock duration or iteration count limits; five `LatencyProvider` implementations for network/queue modeling.
+**Simulation layer** — `SimulatedClock` with deterministic advancement; `Runner` manages venues and actors with wall-clock duration or iteration count limits; five `LatencyProvider` implementations for network/queue modeling. `SimulatedClock` + `TickerFactory` enables 100,000×+ speedup vs wall time.
 
-**Actor framework** — `BaseActor` handles channel routing, order tracking, and event dispatch. Embed it to build any strategy.
+**Actor framework** — `BaseActor` handles channel routing, order tracking, and response dispatch. Embed it for submission helpers (`SubmitOrder`, `CancelOrder`, `Subscribe`, `QueryBalance`, `QueryAccount`). Multi-venue actors own multiple gateways and multiplex them in a single `select` loop.
+
+---
+
+## Extension points
+
+Every non-trivial behavior is injectable:
+
+| Interface | Implementations |
+|-----------|-----------------|
+| `MatchingEngine` | `PriceTimeMatcher` (FIFO), `ProRataMatcher`, custom |
+| `FeeModel` | `FixedFee`, `PercentageFee`, custom (any fee asset) |
+| `FundingCalculator` | Custom funding formula per instrument |
+| `MarkPriceCalculator` | Last, mid, weighted-mid, Binance, BitMEX, Bybit |
+| `PriceSource` | Spot-derived, GBM process, static, dynamic, custom |
+| `LiquidationHandler` | `OnMarginCall`, `OnLiquidation`, `OnInsuranceFund` callbacks |
+| `Clock` / `TickerFactory` | `RealClock`, `SimulatedClock`, historical replay |
+| `LatencyProvider` | Constant, uniform, normal, log-normal, Hawkes, load-scaled |
+| `Actor` | Any trading strategy — embed `BaseActor` |
+| `PositionStore` | `PositionManager` (default), custom (e.g. database-backed) |
+| `Instrument` | `SpotInstrument`, `PerpFutures`, custom |
+
+---
+
+## Capability interfaces
+
+`types/` defines composable capability interfaces that `DefaultExchange` satisfies, usable for dependency injection and testing:
+
+| Interface | Methods |
+|-----------|---------|
+| `Venue` | `ConnectClient`, `Shutdown`, `IsRunning` |
+| `Instrumentable` | `AddInstrument`, `ListInstruments` |
+| `ClientLifecycle` | `CancelAllClientOrders`, `DisconnectClient`, `SetLogger` |
+| `MarginLending` | `EnableBorrowing`, `BorrowMargin`, `RepayMargin` |
+| `PerpWallet` | `AddPerpBalance`, `Transfer` |
+| `SpotExchange` | `Venue` + `Instrumentable` + `ClientLifecycle` + `MarginLending` |
+| `PerpExchange` | `Venue` + `Instrumentable` + `ClientLifecycle` + `PerpWallet` |
 
 ---
 
@@ -122,7 +158,7 @@ The exchange uses NDJSON event logging. Each log line is a JSON object with `sim
 
 ### Logger keys
 
-There are two categories of logger: a single `_global` logger for exchange-wide events, and one logger per instrument symbol (`"BTC/USD"`, `"BTC-PERP"`, etc.) for trade and book events.
+Two categories: a single `_global` logger for exchange-wide events, and one logger per instrument symbol for trade and book events.
 
 ```
 exchange.SetLogger("_global", logger.New(globalFile))   // exchange-wide
@@ -186,24 +222,6 @@ ex.EnableBalanceSnapshots(5 * time.Second) // periodic balance_snapshot to _glob
 
 ---
 
-## Extension points
-
-Every non-trivial behavior is injectable:
-
-| Interface | Implementations |
-|-----------|-----------------|
-| `MatchingEngine` | `PriceTimeMatcher` (FIFO), `ProRataMatcher`, custom |
-| `FeeModel` | `FixedFee`, `PercentageFee`, custom (any fee asset) |
-| `FundingCalculator` | Custom funding formula |
-| `MarkPriceCalculator` | Last, mid, weighted-mid, Binance, BitMEX, Bybit |
-| `IndexPriceProvider` | Spot-derived, GBM process, fixed, custom |
-| `Clock` / `TickerFactory` | `RealClock`, `SimulatedClock`, historical replay |
-| `LatencyProvider` | Constant, uniform, normal, log-normal, Hawkes, load-scaled |
-| `Actor` | Any trading strategy — embed `BaseActor` |
-| `Instrument` | `SpotInstrument`, `PerpFutures`, custom |
-
----
-
 ## Minimal example
 
 ```go
@@ -239,47 +257,37 @@ perp := exchange.NewPerpFutures(
 )
 ex.AddInstrument(perp)
 
+ex.ConfigureAutomation(exchange.AutomationConfig{
+    MarkPriceCalc:       exchange.NewMidPriceCalculator(),
+    IndexProvider:       exchange.NewStaticPriceOracle(map[string]int64{"BTC-PERP": 50_000_000_000}),
+    PriceUpdateInterval: 3 * time.Second,
+    LiquidationHandler:  myRiskManager,
+})
+ex.StartAutomation(context.Background())
+defer ex.StopAutomation()
+
 gw := ex.ConnectClient(1, map[string]int64{
     "USD": 100_000 * exchange.USD_PRECISION,
 }, &fee.PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
-
-// Hedge mode: independent long and short positions
-req := &exchange.OrderRequest{
-    Symbol:       "BTC-PERP",
-    Side:         exchange.Buy,
-    Type:         exchange.LimitOrder,
-    Price:        exchange.PriceUSD(50000, exchange.DOLLAR_TICK),
-    Qty:          exchange.BTC_PRECISION,
-    TimeInForce:  exchange.GTC,
-    PositionSide: exchange.PositionLong, // hedge mode
-}
 ```
 
 ## Multi-venue with latency
 
 ```go
-fastEx := exchange.NewExchange(100, &clock.RealClock{})
-slowEx := exchange.NewExchange(100, &clock.RealClock{})
-// ... add instruments to each ...
+fastEx := exchange.NewExchange(100, simClock)
+slowEx := exchange.NewExchange(100, simClock)
+// ... add instruments ...
 
-fastVenue := &simulation.Venue{
-    Exchange: fastEx,
-    Latency: simulation.LatencyConfig{
-        Request:  simulation.NewConstantLatency(1 * time.Millisecond),
-        Response: simulation.NewConstantLatency(1 * time.Millisecond),
-    },
-}
-slowVenue := &simulation.Venue{
-    Exchange: slowEx,
-    Latency: simulation.LatencyConfig{
-        Request:  simulation.NewLogNormalLatency(5*time.Millisecond, 10*time.Millisecond, 0.5, 42),
-        Response: simulation.NewLogNormalLatency(5*time.Millisecond, 10*time.Millisecond, 0.5, 43),
-    },
-}
-
-runner := simulation.NewRunner(&clock.RealClock{}, simulation.RunnerConfig{
-    Duration: 30 * time.Second,
+fastVenue := simulation.NewVenue(fastEx, simulation.LatencyConfig{
+    Request:  simulation.NewConstantLatency(1 * time.Millisecond),
+    Response: simulation.NewConstantLatency(1 * time.Millisecond),
 })
+slowVenue := simulation.NewVenue(slowEx, simulation.LatencyConfig{
+    Request:  simulation.NewLogNormalLatency(5*time.Millisecond, 10*time.Millisecond, 0.5, 42),
+    Response: simulation.NewLogNormalLatency(5*time.Millisecond, 10*time.Millisecond, 0.5, 43),
+})
+
+runner := simulation.NewRunner(simClock, simulation.RunnerConfig{Duration: 30 * time.Second})
 runner.AddVenue(fastVenue)
 runner.AddVenue(slowVenue)
 
@@ -290,18 +298,18 @@ runner.AddActor(mypackage.NewArbitrageActor(1, fastGW, slowGW))
 runner.Run(context.Background())
 ```
 
-**Gateway = venue identity.** An actor that trades on N venues owns N gateways and multiplexes them in a single `select` loop. Which channel delivers the message tells you which exchange it came from — no explicit tagging needed. This works identically for fills, balance queries, market data, and cancel confirmations:
+**Gateway = venue identity.** An actor that trades on N venues owns N gateways and multiplexes them in a single `select` loop. Which channel delivers the message tells you which exchange it came from — no tagging needed:
 
 ```go
 func (a *ArbitrageActor) run(ctx context.Context) {
     for {
         select {
         case resp := <-a.fastGW.Responses():
-            a.onFastResponse(resp) // fills, balance snapshots, cancel confirms
+            a.onFastResponse(resp)
         case resp := <-a.slowGW.Responses():
             a.onSlowResponse(resp)
         case md := <-a.fastGW.MarketDataCh():
-            a.onFastMarketData(md) // book deltas, trades, funding, OI
+            a.onFastMarketData(md)
         case md := <-a.slowGW.MarketDataCh():
             a.onSlowMarketData(md)
         case <-ctx.Done():
@@ -311,7 +319,62 @@ func (a *ArbitrageActor) run(ctx context.Context) {
 }
 ```
 
-To query balances on a specific venue: `fastGW.Send(exchange.Request{Type: exchange.ReqQueryBalance, ...})` — the response arrives on `fastGW.Responses()`, so venue identity is preserved automatically.
+---
+
+## Blockers / known gaps
+
+### 1. Settlement dispatch is closed to new instrument types
+
+`exchange/settlement.go` and `exchange/order_handling.go` dispatch on `instrument.IsPerp()` with a type assertion to `*PerpFutures`:
+
+```go
+if instrument.IsPerp() {
+    perp := instrument.(*PerpFutures)   // hard type assertion
+    processPerpExecution(...)
+} else {
+    settleSpotExecution(...)
+}
+```
+
+Any new instrument type — options, prediction markets, linear futures with custom payoff — hits the `else` branch and gets spot settlement regardless of what the instrument is.
+
+**Fix needed**: extract settlement into an interface on `Instrument`:
+
+```go
+type Settleable interface {
+    Settle(exec *Execution, buyer, seller *Client, timestamp int64)
+}
+```
+
+Each instrument implements `Settleable` with its own logic. The exchange dispatches to `instrument.(Settleable).Settle(...)`. No library modification needed to add options or bets — implement the interface externally.
+
+The same `IsPerp()` + type assertion pattern appears in margin reservation (`reserveLimitOrderFunds`, `checkMarketOrderFunds`), so a `Margined` interface would be needed there too.
+
+### 2. `BaseActor` has no slot for periodic timer strategies
+
+`BaseActor.run()` is a concrete goroutine that `select`s only on `gateway.Responses()` and `gateway.MarketDataCh()`. Go has no virtual methods, so embedding and overriding `run` is not possible — `Start()` always launches `BaseActor.run()`.
+
+Strategies that need periodic behavior (market maker requote, TWAP slicing, periodic hedging) cannot inject a ticker into the existing select loop. They must bypass `BaseActor.Start()` entirely and write their own goroutine, using `BaseActor` only for the submission helpers and reading events from `EventChannel()` manually. The `tickerFactory` field on `BaseActor` is currently unused.
+
+**Fix needed**: a registration mechanism such as:
+
+```go
+func (a *BaseActor) AddTicker(d time.Duration, fn func(time.Time))
+```
+
+The actor's run loop would also `select` on registered ticker channels, calling the provided function. Tickers created via `tickerFactory` would respect simulation time automatically.
+
+### 3. `Runner` type-asserts `Clock` for iteration mode
+
+In `Runner.Run`, the `Iterations` mode does:
+
+```go
+if simClock, ok := r.clock.(*SimulatedClock); ok {
+    simClock.Advance(r.config.Step)
+}
+```
+
+A custom `Clock` that wraps or decorates `SimulatedClock` silently skips clock advancement. `Clock` should expose `Advance` or the runner should accept a separate `Advanceable` interface.
 
 ---
 

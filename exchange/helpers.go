@@ -10,7 +10,7 @@ func newBook(side Side) *Book { return ebook.NewBook(side) }
 
 func visibleQty(limit *Limit) int64 { return ebook.VisibleQty(limit) }
 
-func logBalanceChange(ex *Exchange, timestamp int64, clientID uint64, symbol, reason string, changes []BalanceDelta) {
+func logBalanceChange(ex *DefaultExchange, timestamp int64, clientID uint64, symbol, reason string, changes []BalanceDelta) {
 	logKey := "_global"
 	if symbol != "" {
 		logKey = symbol
@@ -53,7 +53,7 @@ func ReservedSpotDelta(asset string, old, new int64) BalanceDelta {
 	return reservedSpotDelta(asset, old, new)
 }
 
-func buildBorrowContext(e *Exchange, client *Client, clientID uint64) BorrowContext {
+func buildBorrowContext(e *DefaultExchange, client *Client, clientID uint64) BorrowContext {
 	timestamp := e.Clock.NowUnixNano()
 	return BorrowContext{
 		Client:    client,
@@ -70,7 +70,7 @@ func buildBorrowContext(e *Exchange, client *Client, clientID uint64) BorrowCont
 	}
 }
 
-func buildFundingSink(e *Exchange) fundingEventSink {
+func buildFundingSink(e *DefaultExchange) fundingEventSink {
 	return fundingEventSink{
 		logBalance: func(timestamp int64, clientID uint64, symbol, reason string, changes []BalanceDelta) {
 			logBalanceChange(e, timestamp, clientID, symbol, reason, changes)

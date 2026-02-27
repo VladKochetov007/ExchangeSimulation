@@ -1,6 +1,6 @@
 package exchange
 
-func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order) {
+func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order) {
 	instrument := book.Instrument
 	timestamp := e.Clock.NowUnixNano()
 	basePrecision := instrument.BasePrecision()
@@ -18,7 +18,7 @@ func (e *Exchange) processExecutions(book *OrderBook, executions []*Execution, t
 
 // handleExecution processes one matched pair: settle, update volumes, record trade, notify.
 // Returns true if a perp position changed (for OI tracking).
-func (e *Exchange) handleExecution(
+func (e *DefaultExchange) handleExecution(
 	book *OrderBook, exec *Execution, takerOrder *Order,
 	instrument Instrument, basePrecision, timestamp int64, log Logger,
 ) bool {
@@ -42,7 +42,7 @@ func (e *Exchange) handleExecution(
 }
 
 // createTrade records the trade, increments SeqNum, publishes to MD.
-func (e *Exchange) createTrade(book *OrderBook, exec *Execution, takerOrder *Order, timestamp int64, log Logger) uint64 {
+func (e *DefaultExchange) createTrade(book *OrderBook, exec *Execution, takerOrder *Order, timestamp int64, log Logger) uint64 {
 	tradeID := book.SeqNum
 	book.SeqNum++
 	trade := &Trade{
@@ -62,7 +62,7 @@ func (e *Exchange) createTrade(book *OrderBook, exec *Execution, takerOrder *Ord
 }
 
 // notifyFill sends gateway and log fill events to both taker and maker.
-func (e *Exchange) notifyFill(
+func (e *DefaultExchange) notifyFill(
 	exec *Execution, takerOrder *Order, takerFee, makerFee Fee,
 	tradeID uint64, book *OrderBook, log Logger, timestamp int64,
 	takerDelta, makerDelta PositionDelta, takerPnL, makerPnL int64,
@@ -87,7 +87,7 @@ func (e *Exchange) notifyFill(
 		tradeID, makerFee, makerDelta, makerPnL, book.Symbol, "maker")
 }
 
-func (e *Exchange) publishOpenInterest(book *OrderBook, timestamp int64) {
+func (e *DefaultExchange) publishOpenInterest(book *OrderBook, timestamp int64) {
 	e.MDPublisher.PublishOpenInterest(book.Symbol, &OpenInterest{
 		Symbol:         book.Symbol,
 		TotalContracts: e.Positions.CalculateOpenInterest(book.Symbol),
@@ -97,7 +97,7 @@ func (e *Exchange) publishOpenInterest(book *OrderBook, timestamp int64) {
 
 // settleSpotExecution settles balances for both taker and maker in a spot trade.
 // Caller must hold e.mu.Lock().
-func (e *Exchange) settleSpotExecution(
+func (e *DefaultExchange) settleSpotExecution(
 	book *OrderBook, exec *Execution, takerOrder *Order,
 	taker, maker *Client, takerFee, makerFee Fee,
 	notional, timestamp int64,
@@ -115,7 +115,7 @@ func (e *Exchange) settleSpotExecution(
 
 // settleSpotBuyer releases the buyer's quote reservation and settles balances.
 // Caller must hold e.mu.Lock().
-func (e *Exchange) settleSpotBuyer(client *Client, clientID uint64, book *OrderBook, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
+func (e *DefaultExchange) settleSpotBuyer(client *Client, clientID uint64, book *OrderBook, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
 	oldBase, oldQuote := client.Balances[base], client.Balances[quote]
 	oldFeeAsset := client.Balances[fee.Asset]
 	client.Release(quote, notional)
@@ -134,7 +134,7 @@ func (e *Exchange) settleSpotBuyer(client *Client, clientID uint64, book *OrderB
 
 // settleSpotSeller releases the seller's base reservation and settles balances.
 // Caller must hold e.mu.Lock().
-func (e *Exchange) settleSpotSeller(client *Client, clientID uint64, book *OrderBook, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
+func (e *DefaultExchange) settleSpotSeller(client *Client, clientID uint64, book *OrderBook, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
 	oldBase, oldQuote := client.Balances[base], client.Balances[quote]
 	oldFeeAsset := client.Balances[fee.Asset]
 	client.Release(base, qty)
@@ -187,7 +187,7 @@ func adjustPerpMargin(ctx perpSideCtx, execPrice, execQty int64, perp *PerpFutur
 // settlePerpSide realizes PnL, logs it, and settles the perp balance for one participant.
 // Returns the realized PnL amount.
 // Caller must hold e.mu.Lock().
-func (e *Exchange) settlePerpSide(ctx perpSideCtx, book *OrderBook, exec *Execution, quote string, basePrecision, timestamp int64) int64 {
+func (e *DefaultExchange) settlePerpSide(ctx perpSideCtx, book *OrderBook, exec *Execution, quote string, basePrecision, timestamp int64) int64 {
 	pnl := realizedPerpPnL(ctx.delta.OldSize, ctx.delta.OldEntryPrice, exec.Qty, exec.Price, ctx.side, basePrecision)
 	if pnl != 0 {
 		if globalLog := e.getLogger("_global"); globalLog != nil {
@@ -216,7 +216,7 @@ func (e *Exchange) settlePerpSide(ctx perpSideCtx, book *OrderBook, exec *Execut
 // processPerpExecution settles a single perp execution for both taker and maker.
 // Returns taker/maker position deltas and realized PnL for each.
 // Caller must hold e.mu.Lock().
-func (e *Exchange) processPerpExecution(
+func (e *DefaultExchange) processPerpExecution(
 	book *OrderBook, exec *Execution, takerOrder *Order,
 	taker, maker *Client, takerFee, makerFee Fee,
 	basePrecision, timestamp int64,
@@ -284,7 +284,7 @@ func calculateClosedQty(oldSize, tradeQty int64, side Side) int64 {
 
 // recordFeeRevenue updates exchange fee balance and logs the revenue event.
 // Caller must hold e.mu.Lock().
-func (e *Exchange) recordFeeRevenue(asset string, takerFee, makerFee Fee, book *OrderBook, timestamp int64) {
+func (e *DefaultExchange) recordFeeRevenue(asset string, takerFee, makerFee Fee, book *OrderBook, timestamp int64) {
 	e.ExchangeBalance.FeeRevenue[asset] += takerFee.Amount + makerFee.Amount
 	if globalLog := e.getLogger("_global"); globalLog != nil {
 		globalLog.LogEvent(timestamp, 0, "fee_revenue", FeeRevenueEvent{

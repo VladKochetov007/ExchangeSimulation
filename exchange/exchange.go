@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"context"
 	"errors"
 	"maps"
 	"sync"
@@ -9,8 +10,8 @@ import (
 	ematching "exchange_sim/matching"
 )
 
-// Compile-time assertion: *Exchange must satisfy the Venue interface.
-var _ Venue = (*Exchange)(nil)
+// Compile-time assertion: *DefaultExchange must satisfy the Venue interface.
+var _ Venue = (*DefaultExchange)(nil)
 
 // ExchangeBalance tracks the exchange's own accumulated revenue and safety fund.
 type ExchangeBalance struct {
@@ -18,7 +19,32 @@ type ExchangeBalance struct {
 	InsuranceFund map[string]int64 `json:"insurance_fund"`
 }
 
-type Exchange struct {
+// LiquidationHandler is called when a liquidation event occurs.
+type LiquidationHandler interface {
+	OnMarginCall(event *MarginCallEvent)
+	OnLiquidation(event *LiquidationEvent)
+	OnInsuranceFund(event *InsuranceFundEvent)
+}
+
+// AutomationConfig configures automatic exchange operations.
+type AutomationConfig struct {
+	// MarkPriceCalc calculates mark price from order book (default: MidPriceCalculator)
+	MarkPriceCalc MarkPriceCalculator
+
+	// IndexProvider provides index prices for perpetuals (required for price updates)
+	IndexProvider PriceSource
+
+	// PriceUpdateInterval is how often to update funding rates (default: 3s)
+	PriceUpdateInterval time.Duration
+
+	// CollateralRate is annual interest rate on borrowed amounts in bps (default: 500 = 5%)
+	CollateralRate int64
+
+	// LiquidationHandler receives liquidation events (optional)
+	LiquidationHandler LiquidationHandler
+}
+
+type DefaultExchange struct {
 	ID                      string
 	Clients                 map[uint64]*Client
 	Gateways                map[uint64]*ClientGateway
@@ -32,7 +58,16 @@ type Exchange struct {
 	Clock                   Clock
 	Loggers                 map[string]Logger
 	BorrowingMgr            *BorrowingManager
+	CollateralRate          int64
+	LiquidationHandler      LiquidationHandler
 	tickerFactory           TickerFactory
+	markPriceCalc           MarkPriceCalculator
+	indexProvider           PriceSource
+	priceUpdateInterval     time.Duration
+	automCtx                context.Context
+	automCancel             context.CancelFunc
+	automWg                 sync.WaitGroup
+	automMu                 sync.RWMutex
 	mu                      sync.RWMutex
 	running                 bool
 	shutdownCh              chan struct{}
@@ -70,7 +105,7 @@ type ExchangeConfig struct {
 }
 
 // NewExchange creates an exchange with default configuration
-func NewExchange(estimatedClients int, clock Clock) *Exchange {
+func NewExchange(estimatedClients int, clock Clock) *DefaultExchange {
 	return NewExchangeWithConfig(ExchangeConfig{
 		EstimatedClients: estimatedClients,
 		Clock:            clock,
@@ -78,7 +113,7 @@ func NewExchange(estimatedClients int, clock Clock) *Exchange {
 }
 
 // NewExchangeWithConfig creates an exchange with custom configuration
-func NewExchangeWithConfig(config ExchangeConfig) *Exchange {
+func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
 	if config.ID == "" {
 		config.ID = "exchange"
 	}
@@ -99,7 +134,7 @@ func NewExchangeWithConfig(config ExchangeConfig) *Exchange {
 	}
 
 	matcher := ematching.NewPriceTimeMatcher(config.Clock)
-	ex := &Exchange{
+	ex := &DefaultExchange{
 		ID:          config.ID,
 		Clients:     make(map[uint64]*Client, config.EstimatedClients),
 		Gateways:    make(map[uint64]*ClientGateway, config.EstimatedClients),
@@ -127,7 +162,7 @@ func NewExchangeWithConfig(config ExchangeConfig) *Exchange {
 	return ex
 }
 
-func (e *Exchange) EnablePeriodicSnapshots(interval time.Duration) {
+func (e *DefaultExchange) EnablePeriodicSnapshots(interval time.Duration) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -140,7 +175,7 @@ func (e *Exchange) EnablePeriodicSnapshots(interval time.Duration) {
 	e.snapshotInterval = interval
 }
 
-func (e *Exchange) runSnapshotLoop(ticker Ticker) {
+func (e *DefaultExchange) runSnapshotLoop(ticker Ticker) {
 	defer ticker.Stop()
 
 	for {
@@ -155,7 +190,7 @@ func (e *Exchange) runSnapshotLoop(ticker Ticker) {
 	}
 }
 
-func (e *Exchange) logSnapshots() {
+func (e *DefaultExchange) logSnapshots() {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -177,7 +212,7 @@ func (e *Exchange) logSnapshots() {
 	}
 }
 
-func (e *Exchange) EnableBalanceSnapshots(snapshotInterval time.Duration) {
+func (e *DefaultExchange) EnableBalanceSnapshots(snapshotInterval time.Duration) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.balanceSnapshotInterval = snapshotInterval
@@ -187,7 +222,7 @@ func (e *Exchange) EnableBalanceSnapshots(snapshotInterval time.Duration) {
 	}
 }
 
-func (e *Exchange) runBalanceSnapshotLoop(interval time.Duration) {
+func (e *DefaultExchange) runBalanceSnapshotLoop(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -203,7 +238,7 @@ func (e *Exchange) runBalanceSnapshotLoop(interval time.Duration) {
 	}
 }
 
-func (e *Exchange) LogAllBalances() {
+func (e *DefaultExchange) LogAllBalances() {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -252,17 +287,17 @@ func (e *Exchange) LogAllBalances() {
 	}
 }
 
-func (e *Exchange) SetLogger(symbol string, log Logger) {
+func (e *DefaultExchange) SetLogger(symbol string, log Logger) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.Loggers[symbol] = log
 }
 
-func (e *Exchange) getLogger(symbol string) Logger {
+func (e *DefaultExchange) getLogger(symbol string) Logger {
 	return e.Loggers[symbol]
 }
 
-func (e *Exchange) EnableBorrowing(config BorrowingConfig) error {
+func (e *DefaultExchange) EnableBorrowing(config BorrowingConfig) error {
 	if config.Enabled && config.PriceSource == nil {
 		return errors.New("price source required")
 	}
@@ -274,7 +309,7 @@ func (e *Exchange) EnableBorrowing(config BorrowingConfig) error {
 	return nil
 }
 
-func (e *Exchange) AddInstrument(instrument Instrument) {
+func (e *DefaultExchange) AddInstrument(instrument Instrument) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -295,7 +330,7 @@ func (e *Exchange) AddInstrument(instrument Instrument) {
 // be momentarily empty if the actor is mid-cycle (cancel+resubmit in-flight).
 // Releases reserved balances and publishes book updates. Safe to call concurrently.
 // Returns the number of orders cancelled.
-func (e *Exchange) CancelAllClientOrders(clientID uint64) int {
+func (e *DefaultExchange) CancelAllClientOrders(clientID uint64) int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -345,7 +380,7 @@ func (e *Exchange) CancelAllClientOrders(clientID uint64) int {
 	return count
 }
 
-func (e *Exchange) ConnectClient(clientID uint64, initialBalances map[string]int64, feePlan FeeModel) Gateway {
+func (e *DefaultExchange) ConnectClient(clientID uint64, initialBalances map[string]int64, feePlan FeeModel) Gateway {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -382,7 +417,7 @@ func (e *Exchange) ConnectClient(clientID uint64, initialBalances map[string]int
 }
 
 // AddPerpBalance adds initial perp wallet balance for a client.
-func (e *Exchange) AddPerpBalance(clientID uint64, asset string, amount int64) {
+func (e *DefaultExchange) AddPerpBalance(clientID uint64, asset string, amount int64) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -397,7 +432,7 @@ func (e *Exchange) AddPerpBalance(clientID uint64, asset string, amount int64) {
 }
 
 // Transfer moves funds between a client's spot and perp wallets.
-func (e *Exchange) Transfer(clientID uint64, fromWallet, toWallet, asset string, amount int64) error {
+func (e *DefaultExchange) Transfer(clientID uint64, fromWallet, toWallet, asset string, amount int64) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -457,7 +492,7 @@ type TransferError struct{ msg string }
 
 func (e *TransferError) Error() string { return e.msg }
 
-func (e *Exchange) DisconnectClient(clientID uint64) {
+func (e *DefaultExchange) DisconnectClient(clientID uint64) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -467,7 +502,7 @@ func (e *Exchange) DisconnectClient(clientID uint64) {
 	}
 }
 
-func (e *Exchange) HandleClientRequests(gateway *ClientGateway) {
+func (e *DefaultExchange) HandleClientRequests(gateway *ClientGateway) {
 	for req := range gateway.RequestCh {
 		// Discard order and subscribe requests for shut-down gateways.
 		// CancelOrder/Unsubscribe/QueryBalance are still processed so they
@@ -507,7 +542,7 @@ func (e *Exchange) HandleClientRequests(gateway *ClientGateway) {
 }
 
 // GetBestLiquidity returns best bid qty, best ask qty for a symbol, thread-safe.
-func (e *Exchange) GetBestLiquidity(symbol string) (bidQty, askQty int64) {
+func (e *DefaultExchange) GetBestLiquidity(symbol string) (bidQty, askQty int64) {
 	e.mu.RLock()
 	book := e.Books[symbol]
 	if book == nil {
@@ -526,13 +561,13 @@ func (e *Exchange) GetBestLiquidity(symbol string) (bidQty, askQty int64) {
 
 // GetBook returns the OrderBook for symbol, acquiring a read lock.
 // Implements price.BookProvider for MidPriceOracle.
-func (e *Exchange) GetBook(symbol string) *OrderBook {
+func (e *DefaultExchange) GetBook(symbol string) *OrderBook {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.Books[symbol]
 }
 
-func (e *Exchange) ListInstruments(baseFilter, quoteFilter string) []Instrument {
+func (e *DefaultExchange) ListInstruments(baseFilter, quoteFilter string) []Instrument {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -551,7 +586,7 @@ func (e *Exchange) ListInstruments(baseFilter, quoteFilter string) []Instrument 
 
 // PublishSnapshot publishes a full order book snapshot to all subscribers.
 // Caller must hold e.mu lock.
-func (e *Exchange) PublishSnapshot(symbol string, timestamp int64) {
+func (e *DefaultExchange) PublishSnapshot(symbol string, timestamp int64) {
 	book := e.Books[symbol]
 	if book == nil {
 		return
@@ -563,7 +598,7 @@ func (e *Exchange) PublishSnapshot(symbol string, timestamp int64) {
 	e.MDPublisher.Publish(symbol, MDSnapshot, snapshot, timestamp)
 }
 
-func (e *Exchange) Shutdown() {
+func (e *DefaultExchange) Shutdown() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -583,35 +618,454 @@ func (e *Exchange) Shutdown() {
 }
 
 // Lock acquires the exchange write lock. Required for tests that directly mutate exchange state.
-func (e *Exchange) Lock() { e.mu.Lock() }
+func (e *DefaultExchange) Lock() { e.mu.Lock() }
 
 // Unlock releases the exchange write lock.
-func (e *Exchange) Unlock() { e.mu.Unlock() }
+func (e *DefaultExchange) Unlock() { e.mu.Unlock() }
 
 // RLock acquires the exchange read lock.
-func (e *Exchange) RLock() { e.mu.RLock() }
+func (e *DefaultExchange) RLock() { e.mu.RLock() }
 
 // RUnlock releases the exchange read lock.
-func (e *Exchange) RUnlock() { e.mu.RUnlock() }
+func (e *DefaultExchange) RUnlock() { e.mu.RUnlock() }
 
 // IsRunning returns whether the exchange is currently running.
-func (e *Exchange) IsRunning() bool {
+func (e *DefaultExchange) IsRunning() bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.running
 }
 
 // SettleFunding manually triggers a funding settlement for the given perpetual.
-// Called automatically by ExchangeAutomation; exposed here for direct use in tests
-// and custom automation implementations.
-func (e *Exchange) SettleFunding(perp *PerpFutures) {
+func (e *DefaultExchange) SettleFunding(perp *PerpFutures) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	settleFunding(e.Positions, e.Clients, perp, e.Clock, buildFundingSink(e))
 }
 
+// ConfigureAutomation sets automation parameters. Must be called before StartAutomation.
+func (e *DefaultExchange) ConfigureAutomation(config AutomationConfig) {
+	if config.MarkPriceCalc == nil {
+		config.MarkPriceCalc = NewMidPriceCalculator()
+	}
+	if config.PriceUpdateInterval == 0 {
+		config.PriceUpdateInterval = 3 * time.Second
+	}
+	if config.CollateralRate == 0 {
+		config.CollateralRate = 500
+	}
+	e.markPriceCalc = config.MarkPriceCalc
+	e.indexProvider = config.IndexProvider
+	e.priceUpdateInterval = config.PriceUpdateInterval
+	e.CollateralRate = config.CollateralRate
+	e.LiquidationHandler = config.LiquidationHandler
+}
+
+// StartAutomation begins automatic price updates, funding settlements, and collateral charging.
+// Runs until ctx is cancelled or StopAutomation is called.
+func (e *DefaultExchange) StartAutomation(ctx context.Context) {
+	e.automMu.Lock()
+	defer e.automMu.Unlock()
+
+	if e.automCtx != nil {
+		return
+	}
+
+	if e.priceUpdateInterval == 0 {
+		e.priceUpdateInterval = 3 * time.Second
+	}
+	if e.markPriceCalc == nil {
+		e.markPriceCalc = NewMidPriceCalculator()
+	}
+
+	e.automCtx, e.automCancel = context.WithCancel(ctx)
+
+	e.automWg.Add(1)
+	go e.priceUpdateLoop()
+
+	e.automWg.Add(1)
+	go e.fundingSettlementLoop()
+
+	e.automWg.Add(1)
+	go e.collateralChargeLoop()
+}
+
+// StopAutomation stops all automatic operations and waits for completion.
+func (e *DefaultExchange) StopAutomation() {
+	e.automMu.Lock()
+	if e.automCancel != nil {
+		e.automCancel()
+	}
+	e.automMu.Unlock()
+
+	e.automWg.Wait()
+
+	e.automMu.Lock()
+	e.automCtx = nil
+	e.automCancel = nil
+	e.automMu.Unlock()
+}
+
+func (e *DefaultExchange) priceUpdateLoop() {
+	defer e.automWg.Done()
+
+	ticker := e.tickerFactory.NewTicker(e.priceUpdateInterval)
+	defer ticker.Stop()
+
+	e.updateAllPerpPrices()
+
+	for {
+		select {
+		case <-e.automCtx.Done():
+			return
+		case <-ticker.C():
+			e.updateAllPerpPrices()
+		}
+	}
+}
+
+func (e *DefaultExchange) fundingSettlementLoop() {
+	defer e.automWg.Done()
+
+	ticker := e.tickerFactory.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-e.automCtx.Done():
+			return
+		case <-ticker.C():
+			e.CheckAndSettleFunding()
+		}
+	}
+}
+
+func (e *DefaultExchange) collateralChargeLoop() {
+	defer e.automWg.Done()
+
+	ticker := e.tickerFactory.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-e.automCtx.Done():
+			return
+		case <-ticker.C():
+			e.ChargeCollateralInterest()
+		}
+	}
+}
+
+// updateAllPerpPrices updates funding rates for all perpetual instruments.
+func (e *DefaultExchange) updateAllPerpPrices() {
+	timestamp := e.Clock.NowUnixNano()
+
+	// Collect mark prices under read lock. Price() must be called outside
+	// the lock because MidPriceOracle.Price also acquires e.mu.RLock;
+	// calling it while already holding e.mu.RLock deadlocks when a writer waits.
+	type bookData struct {
+		symbol    string
+		perp      *PerpFutures
+		markPrice int64
+	}
+	e.mu.RLock()
+	candidates := make([]bookData, 0, len(e.Books))
+	for _, book := range e.Books {
+		if !book.Instrument.IsPerp() {
+			continue
+		}
+		markPrice := e.markPriceCalc.Calculate(book)
+		if markPrice == 0 {
+			continue
+		}
+		candidates = append(candidates, bookData{
+			symbol:    book.Symbol,
+			perp:      book.Instrument.(*PerpFutures),
+			markPrice: markPrice,
+		})
+	}
+	e.mu.RUnlock()
+
+	type perpUpdate struct {
+		symbol     string
+		perp       *PerpFutures
+		markPrice  int64
+		indexPrice int64
+	}
+	updates := make([]perpUpdate, 0, len(candidates))
+	for _, c := range candidates {
+		indexPrice := e.indexProvider.Price(c.symbol)
+		if indexPrice == 0 {
+			continue
+		}
+		updates = append(updates, perpUpdate{
+			symbol:     c.symbol,
+			perp:       c.perp,
+			markPrice:  c.markPrice,
+			indexPrice: indexPrice,
+		})
+	}
+
+	for _, u := range updates {
+		u.perp.UpdateFundingRate(u.indexPrice, u.markPrice)
+		e.MDPublisher.PublishFunding(u.symbol, u.perp.GetFundingRate(), timestamp)
+
+		if log := e.getLogger(u.symbol); log != nil {
+			log.LogEvent(timestamp, 0, "mark_price_update", MarkPriceUpdateEvent{
+				Timestamp:  timestamp,
+				Symbol:     u.symbol,
+				MarkPrice:  u.markPrice,
+				IndexPrice: u.indexPrice,
+			})
+
+			fundingRate := u.perp.GetFundingRate()
+			log.LogEvent(timestamp, 0, "funding_rate_update", FundingRateUpdateEvent{
+				Timestamp:   timestamp,
+				Symbol:      u.symbol,
+				Rate:        fundingRate.Rate,
+				NextFunding: fundingRate.NextFunding,
+			})
+		}
+
+		e.CheckLiquidations(u.symbol, u.perp, u.markPrice)
+	}
+}
+
+// ChargeCollateralInterest charges interest on borrowed amounts (one minute of time).
+func (e *DefaultExchange) ChargeCollateralInterest() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	const dtSeconds = 60
+	const secondsPerYear = 365 * 24 * 3600
+	timestamp := e.Clock.NowUnixNano()
+
+	for _, client := range e.Clients {
+		for asset, borrowed := range client.Borrowed {
+			if borrowed <= 0 {
+				continue
+			}
+			interest := borrowed * e.CollateralRate * dtSeconds / (int64(secondsPerYear) * 10000)
+			if interest > 0 {
+				oldBalance := client.PerpBalances[asset]
+				client.PerpBalances[asset] -= interest
+				e.ExchangeBalance.FeeRevenue[asset] += interest
+
+				logBalanceChange(e, timestamp, client.ID, "", "interest_charge", []BalanceDelta{
+					perpDelta(asset, oldBalance, client.PerpBalances[asset]),
+				})
+
+				if log := e.getLogger("_global"); log != nil {
+					log.LogEvent(timestamp, client.ID, "margin_interest", MarginInterestEvent{
+						Timestamp: timestamp,
+						ClientID:  client.ID,
+						Asset:     asset,
+						Amount:    interest,
+					})
+				}
+			}
+		}
+	}
+}
+
+// CheckLiquidations evaluates all positions for a symbol after a mark price update.
+func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, markPrice int64) {
+	if markPrice == 0 {
+		return
+	}
+	precision := perp.BasePrecision()
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	for clientID, client := range e.Clients {
+		pos := e.Positions.GetPosition(clientID, symbol)
+		if pos == nil || pos.Size == 0 {
+			continue
+		}
+
+		sign := int64(1)
+		if pos.Size < 0 {
+			sign = -1
+		}
+		unrealizedPnL := abs(pos.Size) * sign * (markPrice - pos.EntryPrice) / precision
+
+		// Divide by precision first to avoid int64 overflow at real BTC prices.
+		notional := abs(pos.Size) * pos.EntryPrice / precision
+		initMargin := notional * perp.MarginRate / 10000
+		if initMargin == 0 {
+			continue
+		}
+
+		equity := client.PerpAvailable(perp.QuoteAsset()) + unrealizedPnL
+		marginRatio := equity * 10000 / initMargin
+
+		timestamp := e.Clock.NowUnixNano()
+
+		if marginRatio < perp.MaintenanceMarginRate {
+			if log := e.getLogger("_global"); log != nil {
+				log.LogEvent(timestamp, clientID, "liquidation_check", map[string]any{
+					"timestamp":      timestamp,
+					"client_id":      clientID,
+					"symbol":         symbol,
+					"position_size":  pos.Size,
+					"entry_price":    pos.EntryPrice,
+					"mark_price":     markPrice,
+					"balance":        client.PerpBalances[perp.QuoteAsset()],
+					"reserved":       client.PerpReserved[perp.QuoteAsset()],
+					"available":      client.PerpAvailable(perp.QuoteAsset()),
+					"unrealized_pnl": unrealizedPnL,
+					"equity":         equity,
+					"init_margin":    initMargin,
+					"margin_ratio":   marginRatio,
+					"threshold":      perp.MaintenanceMarginRate,
+				})
+			}
+			e.liquidate(clientID, client, symbol, pos, perp, timestamp)
+		} else if marginRatio < perp.WarningMarginRate && e.LiquidationHandler != nil {
+			liqPrice := e.EstimateLiquidationPrice(pos, clientID, perp, precision)
+			e.LiquidationHandler.OnMarginCall(&MarginCallEvent{
+				Timestamp:        timestamp,
+				ClientID:         clientID,
+				Symbol:           symbol,
+				MarginRatioBps:   marginRatio,
+				LiquidationPrice: liqPrice,
+			})
+		}
+	}
+}
+
+// EstimateLiquidationPrice returns the price at which the position would be liquidated.
+func (e *DefaultExchange) EstimateLiquidationPrice(pos *Position, clientID uint64, perp *PerpFutures, precision int64) int64 {
+	client := e.Clients[clientID]
+	if client == nil || pos.Size == 0 {
+		return 0
+	}
+	available := client.PerpAvailable(perp.QuoteAsset())
+	if pos.Size > 0 {
+		return pos.EntryPrice - available*precision/pos.Size
+	}
+	return pos.EntryPrice + available*precision/(-pos.Size)
+}
+
+// liquidate forcibly closes a position via market order when maintenance margin is breached.
+// Caller must hold e.mu.Lock().
+func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol string, pos *Position, perp *PerpFutures, timestamp int64) {
+	book := e.Books[symbol]
+	if book == nil {
+		return
+	}
+
+	closeSide := Sell
+	if pos.Size < 0 {
+		closeSide = Buy
+	}
+	fillPrice := e.forceClose(clientID, client, book, perp, closeSide, abs(pos.Size), timestamp)
+
+	if e.BorrowingMgr != nil {
+		borrowed := client.Borrowed[perp.QuoteAsset()]
+		if borrowed > 0 {
+			availableForRepay := client.PerpAvailable(perp.QuoteAsset())
+			if availableForRepay > 0 {
+				repayAmount := borrowed
+				if repayAmount > availableForRepay {
+					repayAmount = availableForRepay
+				}
+
+				oldBorrowed := client.Borrowed[perp.QuoteAsset()]
+				oldPerp := client.PerpBalances[perp.QuoteAsset()]
+				client.Borrowed[perp.QuoteAsset()] -= repayAmount
+				client.PerpBalances[perp.QuoteAsset()] -= repayAmount
+
+				logBalanceChange(e, timestamp, clientID, symbol, "liquidation_repay", []BalanceDelta{
+					perpDelta(perp.QuoteAsset(), oldPerp, client.PerpBalances[perp.QuoteAsset()]),
+					borrowedDelta(perp.QuoteAsset(), oldBorrowed, client.Borrowed[perp.QuoteAsset()]),
+				})
+
+				if log := e.getLogger("_global"); log != nil {
+					log.LogEvent(timestamp, clientID, "repay", RepayEvent{
+						Timestamp:     timestamp,
+						ClientID:      clientID,
+						Asset:         perp.QuoteAsset(),
+						Principal:     repayAmount,
+						Interest:      0,
+						RemainingDebt: client.Borrowed[perp.QuoteAsset()],
+					})
+				}
+			}
+		}
+	}
+
+	remainingEquity := client.PerpAvailable(perp.QuoteAsset())
+	debt := int64(0)
+	if remainingEquity < 0 {
+		debt = -remainingEquity
+		oldBalance := client.PerpBalances[perp.QuoteAsset()]
+		oldReserved := client.PerpReserved[perp.QuoteAsset()]
+		client.PerpBalances[perp.QuoteAsset()] = 0
+		client.PerpReserved[perp.QuoteAsset()] = 0
+		e.ExchangeBalance.InsuranceFund[perp.QuoteAsset()] -= debt
+
+		logBalanceChange(e, timestamp, clientID, symbol, "liquidation_deficit", []BalanceDelta{
+			perpDelta(perp.QuoteAsset(), oldBalance, 0),
+			reservedPerpDelta(perp.QuoteAsset(), oldReserved, 0),
+		})
+	} else if remainingEquity > 0 {
+		oldReserved := client.PerpReserved[perp.QuoteAsset()]
+		client.PerpReserved[perp.QuoteAsset()] = 0
+
+		logBalanceChange(e, timestamp, clientID, symbol, "liquidation_surplus", []BalanceDelta{
+			reservedPerpDelta(perp.QuoteAsset(), oldReserved, 0),
+		})
+	}
+
+	if e.LiquidationHandler != nil {
+		e.LiquidationHandler.OnLiquidation(&LiquidationEvent{
+			Timestamp:     timestamp,
+			ClientID:      clientID,
+			Symbol:        symbol,
+			PositionSize:  pos.Size,
+			FillPrice:     fillPrice,
+			RemainingDebt: debt,
+		})
+		if debt > 0 || remainingEquity > 0 {
+			e.LiquidationHandler.OnInsuranceFund(&InsuranceFundEvent{
+				Timestamp: timestamp,
+				Symbol:    symbol,
+				Delta:     remainingEquity - debt,
+				Balance:   e.ExchangeBalance.InsuranceFund[perp.QuoteAsset()],
+			})
+		}
+	}
+}
+
+// CheckAndSettleFunding checks if any perpetuals need funding settlement.
+func (e *DefaultExchange) CheckAndSettleFunding() {
+	e.mu.RLock()
+	perps := make([]*PerpFutures, 0, len(e.Instruments))
+	for _, inst := range e.Instruments {
+		if inst.IsPerp() {
+			perps = append(perps, inst.(*PerpFutures))
+		}
+	}
+	e.mu.RUnlock()
+
+	now := e.Clock.NowUnixNano()
+
+	for _, perp := range perps {
+		fundingRate := perp.GetFundingRate()
+		if now >= fundingRate.NextFunding {
+			e.mu.Lock()
+			settleFunding(e.Positions, e.Clients, perp, e.Clock, buildFundingSink(e))
+			e.mu.Unlock()
+
+			e.MDPublisher.PublishFunding(perp.Symbol(), perp.GetFundingRate(), now)
+		}
+	}
+}
+
 // BorrowMargin borrows amount of asset for clientID. Acquires exchange lock.
-func (e *Exchange) BorrowMargin(clientID uint64, asset string, amount int64, reason string) error {
+func (e *DefaultExchange) BorrowMargin(clientID uint64, asset string, amount int64, reason string) error {
 	if e.BorrowingMgr == nil {
 		return errors.New("borrowing not enabled")
 	}
@@ -623,7 +1077,7 @@ func (e *Exchange) BorrowMargin(clientID uint64, asset string, amount int64, rea
 }
 
 // RepayMargin repays amount of asset for clientID. Acquires exchange lock.
-func (e *Exchange) RepayMargin(clientID uint64, asset string, amount int64) error {
+func (e *DefaultExchange) RepayMargin(clientID uint64, asset string, amount int64) error {
 	if e.BorrowingMgr == nil {
 		return errors.New("borrowing not enabled")
 	}

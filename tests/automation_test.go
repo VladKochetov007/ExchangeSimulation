@@ -50,8 +50,8 @@ func TestChargeCollateralInterest_DebitsPerpWallet(t *testing.T) {
 	perpBefore := ex.Clients[3].PerpBalances["USD"]
 	spotBefore := ex.Clients[3].Balances["USD"]
 
-	automation := NewExchangeAutomation(ex, AutomationConfig{CollateralRate: 500})
-	automation.ChargeCollateralInterest()
+	ex.CollateralRate = 500
+	ex.ChargeCollateralInterest()
 
 	perpAfter := ex.Clients[3].PerpBalances["USD"]
 	spotAfter := ex.Clients[3].Balances["USD"]
@@ -75,8 +75,8 @@ func TestChargeCollateralInterest_FeeRevenueReceivesInterest(t *testing.T) {
 	feeRevenueBefore := ex.ExchangeBalance.FeeRevenue["USD"]
 	perpBefore := ex.Clients[1].PerpBalances["USD"]
 
-	automation := NewExchangeAutomation(ex, AutomationConfig{CollateralRate: 500})
-	automation.ChargeCollateralInterest()
+	ex.CollateralRate = 500
+	ex.ChargeCollateralInterest()
 
 	perpAfter := ex.Clients[1].PerpBalances["USD"]
 	feeRevenueAfter := ex.ExchangeBalance.FeeRevenue["USD"]
@@ -102,8 +102,8 @@ func TestChargeCollateralInterest_Conservation(t *testing.T) {
 
 	totalBefore := totalMoney(ex, "USD")
 
-	automation := NewExchangeAutomation(ex, AutomationConfig{CollateralRate: 500})
-	automation.ChargeCollateralInterest()
+	ex.CollateralRate = 500
+	ex.ChargeCollateralInterest()
 
 	totalAfter := totalMoney(ex, "USD")
 
@@ -124,9 +124,8 @@ func TestChargeCollateralInterest_ZeroRateChargesNothing(t *testing.T) {
 	perpBefore := ex.Clients[1].PerpBalances["USD"]
 	feeBefore := ex.ExchangeBalance.FeeRevenue["USD"]
 
-	automation := NewExchangeAutomation(ex, AutomationConfig{CollateralRate: 1})
-	automation.CollateralRate = 0
-	automation.ChargeCollateralInterest()
+	ex.CollateralRate = 0
+	ex.ChargeCollateralInterest()
 
 	if ex.Clients[1].PerpBalances["USD"] != perpBefore {
 		t.Errorf("perp balance changed with zero rate: before=%d, after=%d",
@@ -150,11 +149,11 @@ func TestChargeCollateralInterest_ProportionalToBorrowed(t *testing.T) {
 	ex1.Clients[1].PerpBalances["USD"] = USDAmount(10_000)
 	ex2.Clients[1].PerpBalances["USD"] = USDAmount(20_000)
 
-	auto1 := NewExchangeAutomation(ex1, AutomationConfig{CollateralRate: 500})
-	auto2 := NewExchangeAutomation(ex2, AutomationConfig{CollateralRate: 500})
+	ex1.CollateralRate = 500
+	ex2.CollateralRate = 500
 
-	auto1.ChargeCollateralInterest()
-	auto2.ChargeCollateralInterest()
+	ex1.ChargeCollateralInterest()
+	ex2.ChargeCollateralInterest()
 
 	interest1 := ex1.ExchangeBalance.FeeRevenue["USD"]
 	interest2 := ex2.ExchangeBalance.FeeRevenue["USD"]
@@ -175,8 +174,8 @@ func TestChargeCollateralInterest_NoBorrowNoCharge(t *testing.T) {
 	perpBefore1 := ex.Clients[1].PerpBalances["USD"]
 	perpBefore2 := ex.Clients[2].PerpBalances["USD"]
 
-	automation := NewExchangeAutomation(ex, AutomationConfig{CollateralRate: 500})
-	automation.ChargeCollateralInterest()
+	ex.CollateralRate = 500
+	ex.ChargeCollateralInterest()
 
 	if ex.Clients[1].PerpBalances["USD"] != perpBefore1 {
 		t.Errorf("client 1 without borrow should not be charged: before=%d, after=%d",
@@ -213,8 +212,7 @@ func TestLiquidation_AtMaintenanceMarginBoundary(t *testing.T) {
 	crashPrice := PriceUSD(44_000, DOLLAR_TICK)
 	_, _ = InjectLimitOrder(ex, 2, "BTC-PERP", Buy, crashPrice, qty)
 
-	automation := NewExchangeAutomation(ex, AutomationConfig{})
-	automation.CheckLiquidations("BTC-PERP", perp, crashPrice)
+	ex.CheckLiquidations("BTC-PERP", perp, crashPrice)
 
 	pos := ex.Positions.GetPosition(1, "BTC-PERP")
 	positionSize := int64(0)
@@ -259,8 +257,7 @@ func TestLiquidation_InsuranceFundAbsorbsDeficit(t *testing.T) {
 	crashPrice := PriceUSD(35_000, DOLLAR_TICK)
 	_, _ = InjectLimitOrder(ex, 2, "BTC-PERP", Buy, crashPrice, qty)
 
-	automation := NewExchangeAutomation(ex, AutomationConfig{})
-	automation.CheckLiquidations("BTC-PERP", perp, crashPrice)
+	ex.CheckLiquidations("BTC-PERP", perp, crashPrice)
 
 	client1 := ex.Clients[1]
 	if client1.PerpBalances["USD"] != 0 {
@@ -308,8 +305,7 @@ func TestLiquidation_PartialFillConservation(t *testing.T) {
 	crashPrice := PriceUSD(44_000, DOLLAR_TICK)
 	_, _ = InjectLimitOrder(ex, 2, "BTC-PERP", Buy, crashPrice, partialLiquidityQty)
 
-	automation := NewExchangeAutomation(ex, AutomationConfig{})
-	automation.CheckLiquidations("BTC-PERP", perp, crashPrice)
+	ex.CheckLiquidations("BTC-PERP", perp, crashPrice)
 
 	afterTotal := totalMoney(ex, "USD")
 	if initialTotal != afterTotal {
@@ -330,19 +326,16 @@ func TestEstimateLiquidationPrice_Long(t *testing.T) {
 	_, _ = InjectLimitOrder(ex, 2, "BTC-PERP", Sell, entryPrice, qty)
 	_, _ = InjectMarketOrder(ex, 1, "BTC-PERP", Buy, qty)
 
-	auto := NewExchangeAutomation(ex, AutomationConfig{})
-
-	ex.RLock()
-	client := ex.Clients[1]
-	ex.RUnlock()
-
 	pos := ex.Positions.GetPosition(1, "BTC-PERP")
 	if pos == nil || pos.Size == 0 {
 		t.Fatal("position not opened")
 	}
 
-	liqPrice := auto.EstimateLiquidationPrice(pos, client, perp, BTC_PRECISION)
+	liqPrice := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION)
 
+	ex.RLock()
+	client := ex.Clients[1]
+	ex.RUnlock()
 	available := client.PerpAvailable("USD")
 	expected := pos.EntryPrice - available*BTC_PRECISION/pos.Size
 	if liqPrice != expected {
@@ -365,22 +358,19 @@ func TestEstimateLiquidationPrice_Short(t *testing.T) {
 	_, _ = InjectLimitOrder(ex, 2, "BTC-PERP", Buy, entryPrice, qty)
 	_, _ = InjectMarketOrder(ex, 1, "BTC-PERP", Sell, qty)
 
-	auto := NewExchangeAutomation(ex, AutomationConfig{})
-
-	ex.RLock()
-	client := ex.Clients[1]
-	ex.RUnlock()
-
 	pos := ex.Positions.GetPosition(1, "BTC-PERP")
 	if pos == nil || pos.Size == 0 {
 		t.Fatal("position not opened")
 	}
 
-	liqPrice := auto.EstimateLiquidationPrice(pos, client, perp, BTC_PRECISION)
+	liqPrice := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION)
 
 	if pos.Size >= 0 {
 		t.Fatalf("expected short (negative) position size, got %d", pos.Size)
 	}
+	ex.RLock()
+	client := ex.Clients[1]
+	ex.RUnlock()
 	available := client.PerpAvailable("USD")
 	expected := pos.EntryPrice + available*BTC_PRECISION/(-pos.Size)
 	if liqPrice != expected {
@@ -393,15 +383,10 @@ func TestEstimateLiquidationPrice_Short(t *testing.T) {
 
 // TestEstimateLiquidationPrice_ZeroSize verifies that a zero-size position returns 0.
 func TestEstimateLiquidationPrice_ZeroSize(t *testing.T) {
-	ex, perp := setupPerpExchange(USDAmount(10_000), 0)
-	auto := NewExchangeAutomation(ex, AutomationConfig{})
-
-	ex.RLock()
-	client := ex.Clients[1]
-	ex.RUnlock()
+	ex, _ := setupPerpExchange(USDAmount(10_000), 0)
 
 	pos := &Position{ClientID: 1, Symbol: "BTC-PERP", Size: 0, EntryPrice: PriceUSD(50_000, DOLLAR_TICK)}
-	liqPrice := auto.EstimateLiquidationPrice(pos, client, perp, BTC_PRECISION)
+	liqPrice := ex.EstimateLiquidationPrice(pos, 1, nil, BTC_PRECISION)
 	if liqPrice != 0 {
 		t.Errorf("expected 0 for zero-size position, got %d", liqPrice)
 	}
@@ -420,8 +405,7 @@ func TestCheckAndSettleFunding_TriggersWhenDue(t *testing.T) {
 
 	totalBefore := totalMoney(ex, "USD")
 
-	auto := NewExchangeAutomation(ex, AutomationConfig{})
-	auto.CheckAndSettleFunding()
+	ex.CheckAndSettleFunding()
 
 	totalAfter := totalMoney(ex, "USD")
 	if totalBefore != totalAfter {
@@ -449,8 +433,7 @@ func TestCheckAndSettleFunding_SkipsWhenNotDue(t *testing.T) {
 	_, _ = InjectLimitOrder(ex, 1, "BTC-PERP", Sell, entryPrice, qty)
 	_, _ = InjectMarketOrder(ex, 2, "BTC-PERP", Buy, qty)
 
-	auto := NewExchangeAutomation(ex, AutomationConfig{})
-	auto.CheckAndSettleFunding()
+	ex.CheckAndSettleFunding()
 
 	// NextFunding must be unchanged — settlement did not run.
 	if perp.GetFundingRate().NextFunding != int64(9e18) {

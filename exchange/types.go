@@ -177,6 +177,8 @@ type WeightedMidPriceCalculator = eprice.WeightedMidPriceCalculator
 
 const BPS = efee.BPS
 
+type Exchange = DefaultExchange
+
 var NewSpotInstrument = einstrument.NewSpotInstrument
 var NewPerpFutures = einstrument.NewPerpFutures
 var NewMidPriceCalculator = eprice.NewMidPriceCalculator

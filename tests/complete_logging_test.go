@@ -73,7 +73,7 @@ func TestFundingRateLogging(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Start automation with funding rate updates
-	automation := NewExchangeAutomation(ex, AutomationConfig{
+	ex.ConfigureAutomation(AutomationConfig{
 		MarkPriceCalc:       NewMidPriceCalculator(),
 		IndexProvider:       NewStaticPriceOracle(map[string]int64{"BTC-PERP": PriceUSD(50000, DOLLAR_TICK)}),
 		PriceUpdateInterval: 50 * time.Millisecond,
@@ -81,10 +81,10 @@ func TestFundingRateLogging(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	automation.Start(ctx)
+	ex.StartAutomation(ctx)
 
 	time.Sleep(250 * time.Millisecond)
-	automation.Stop()
+	ex.StopAutomation()
 
 	logger.mu.Lock()
 	fundingRates := make([]FundingRateUpdateEvent, len(logger.fundingRates))
@@ -358,7 +358,7 @@ func TestCompleteLoggingIntegration(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Start automation to get funding rates
-	automation := NewExchangeAutomation(ex, AutomationConfig{
+	ex.ConfigureAutomation(AutomationConfig{
 		MarkPriceCalc:       NewMidPriceCalculator(),
 		IndexProvider:       NewStaticPriceOracle(map[string]int64{"BTC-PERP": PriceUSD(50000, DOLLAR_TICK)}),
 		PriceUpdateInterval: 50 * time.Millisecond,
@@ -366,10 +366,10 @@ func TestCompleteLoggingIntegration(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
-	automation.Start(ctx)
+	ex.StartAutomation(ctx)
 
 	time.Sleep(120 * time.Millisecond)
-	automation.Stop()
+	ex.StopAutomation()
 
 	logger.mu.Lock()
 	nOI := len(logger.openInterest)
