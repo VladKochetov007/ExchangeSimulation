@@ -23,13 +23,13 @@ flowchart LR
         OB["OrderBook</br>(bids / asks)"]
         ME["MatchingEngine</br>(PriceTime · ProRata)"]
         ST["Settlement</br>(PnL · fees · margin)"]
-        PM["PositionManager</br>(one-way · hedge</br>cross · isolated)"]
+        PM["PositionManager</br>(netting · hedge</br>cross · isolated)"]
         FM["Funding"]
         BM["BorrowingManager"]
         MDP["MDPublisher"]
         subgraph PS["Price Sources"]
-            MP["MarkPrice</br>(mid · last · weighted)"]
-            IP["IndexPrice</br>(static · dynamic · GBM)"]
+            MP["MarkPrice</br>(mid · last ·  mid)"]
+            IP["IndexPrice</br>(static · median across sources)"]
         end
     end
 
@@ -85,7 +85,7 @@ flowchart LR
 | `types/` | Value types: `Order`, `Side`, `FillNotification`, `AssetBalance`, `PositionSnapshot`, `AccountSnapshot`, interfaces (`Venue`, `SpotExchange`, `PerpExchange`, `FeeModel`, `Instrument`, `PositionStore`, `Logger`, `Clock`, `TickerFactory`) |
 | `book/` | `OrderBook` — price-time ordered bid/ask levels with iceberg and hidden order support |
 | `matching/` | `PriceTimeMatcher` (FIFO), `ProRataMatcher` |
-| `price/` | Mark price calculators (last, mid, weighted-mid, Binance, BitMEX, Bybit) and index price providers (spot-derived, GBM, fixed) |
+| `price/` | Mark price calculators (last, mid, weighted-mid, Binance, BitMEX, Bybit) and index price providers (spot-derived, fixed) |
 | `instrument/` | `SpotInstrument`, `PerpFutures`, `FundingCalculator` |
 | `fee/` | `FixedFee`, `PercentageFee` (maker/taker bps, fee in any asset) |
 | `clock/` | `RealClock`, `RealTickerFactory` |
@@ -98,7 +98,7 @@ flowchart LR
 
 ## What the library provides
 
-**Exchange core** — price-time FIFO and pro-rata matching engines; order book with iceberg and hidden order support; position manager with cross and isolated margin, one-way and hedge mode, PnL tracking and liquidation; perpetual funding settlement; margin borrowing and interest; NDJSON event logging.
+**Exchange core** — price-time FIFO and pro-rata matching engines; order book with iceberg and hidden order support; position manager with cross and isolated margin, one-way(netting) and hedge mode, PnL tracking and liquidation; perpetual funding settlement; margin borrowing and interest; NDJSON event logging.
 
 **Account model** — Binance-style balances: `Free / Locked / Borrowed / NetAsset` for spot and perp wallets. `ReqQueryBalance` returns `BalanceSnapshot`; `ReqQueryAccount` returns the full `AccountSnapshot` including open positions with mark price, unrealized PnL, leverage, and liquidation price.
 
@@ -122,7 +122,7 @@ Every non-trivial behavior is injectable:
 | `FeeModel` | `FixedFee`, `PercentageFee`, custom (any fee asset) |
 | `FundingCalculator` | Custom funding formula per instrument |
 | `MarkPriceCalculator` | Last, mid, weighted-mid, Binance, BitMEX, Bybit |
-| `PriceSource` | Spot-derived, GBM process, static, dynamic, custom |
+| `PriceSource` | Spot-derived, static, custom |
 | `LiquidationHandler` | `OnMarginCall`, `OnLiquidation`, `OnInsuranceFund` callbacks |
 | `Clock` / `TickerFactory` | `RealClock`, `SimulatedClock`, historical replay |
 | `LatencyProvider` | Constant, uniform, normal, log-normal, Hawkes, load-scaled |
