@@ -187,7 +187,6 @@ var NewSpotInstrument = einstrument.NewSpotInstrument
 var NewPerpFutures = einstrument.NewPerpFutures
 var NewMidPriceCalculator = eprice.NewMidPriceCalculator
 var NewStaticPriceOracle = eprice.NewStaticPriceOracle
-var NewDynamicPriceOracle = eprice.NewDynamicPriceOracle
 var NewMidPriceOracle = eprice.NewMidPriceOracle
 var NewLastPriceCalculator = eprice.NewLastPriceCalculator
 var NewWeightedMidPriceCalculator = eprice.NewWeightedMidPriceCalculator

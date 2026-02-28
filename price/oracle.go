@@ -40,15 +40,3 @@ func NewStaticPriceOracle(prices map[string]int64) *StaticPriceOracle {
 func (o *StaticPriceOracle) Price(symbol string) int64 {
 	return o.prices[symbol]
 }
-
-type DynamicPriceOracle struct {
-	calculator func(symbol string) int64
-}
-
-func NewDynamicPriceOracle(calculator func(string) int64) *DynamicPriceOracle {
-	return &DynamicPriceOracle{calculator: calculator}
-}
-
-func (o *DynamicPriceOracle) Price(symbol string) int64 {
-	return o.calculator(symbol)
-}

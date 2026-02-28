@@ -57,19 +57,3 @@ func TestMidPriceOracle_MissingBook(t *testing.T) {
 		t.Errorf("expected 0 for missing book, got %d", p)
 	}
 }
-
-func TestDynamicPriceOracle(t *testing.T) {
-	oracle := NewDynamicPriceOracle(func(symbol string) int64 {
-		if symbol == "BTC-PERP" {
-			return 50000 * BTC_PRECISION
-		}
-		return 0
-	})
-
-	if p := oracle.Price("BTC-PERP"); p != 50000*BTC_PRECISION {
-		t.Errorf("expected %d, got %d", 50000*BTC_PRECISION, p)
-	}
-	if p := oracle.Price("ETH-PERP"); p != 0 {
-		t.Errorf("expected 0 for unknown symbol, got %d", p)
-	}
-}
