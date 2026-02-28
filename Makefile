@@ -15,9 +15,10 @@ GOMOD=$(GOCMD) mod
 BIN_DIR=bin
 
 # Binary names and paths
-BINARIES=multisim sim latency_arb simplesim microstructure_v1 liquidity_report abcusd
+BINARIES=multisim sim latency_arb simplesim microstructure_v1 liquidity_report abcusd randomwalk
 MULTISIM_BINARY=$(BIN_DIR)/multisim
 ABCUSD_BINARY=$(BIN_DIR)/abcusd
+RANDOMWALK_BINARY=$(BIN_DIR)/randomwalk
 SIM_BINARY=$(BIN_DIR)/sim
 LATENCY_ARB_BINARY=$(BIN_DIR)/latency_arb
 SIMPLESIM_BINARY=$(BIN_DIR)/simplesim
@@ -40,7 +41,7 @@ help:
 ##@ Building
 
 ## build: Build all binaries
-build: $(MULTISIM_BINARY) $(SIM_BINARY) $(LATENCY_ARB_BINARY) $(SIMPLESIM_BINARY) $(MICROSTRUCTURE_V1_BINARY) $(LIQUIDITY_REPORT_BINARY) $(ABCUSD_BINARY)
+build: $(MULTISIM_BINARY) $(SIM_BINARY) $(LATENCY_ARB_BINARY) $(SIMPLESIM_BINARY) $(MICROSTRUCTURE_V1_BINARY) $(LIQUIDITY_REPORT_BINARY) $(ABCUSD_BINARY) $(RANDOMWALK_BINARY)
 	@echo "✓ All binaries built successfully"
 
 $(BIN_DIR):
@@ -73,6 +74,10 @@ $(LIQUIDITY_REPORT_BINARY): $(BIN_DIR)
 $(ABCUSD_BINARY): $(BIN_DIR)
 	@echo "Building abcusd..."
 	@$(GOBUILD) -o $(ABCUSD_BINARY) ./cmd/abcusd
+
+$(RANDOMWALK_BINARY): $(BIN_DIR)
+	@echo "Building randomwalk..."
+	@$(GOBUILD) -o $(RANDOMWALK_BINARY) ./cmd/randomwalk
 
 ## rebuild: Clean and rebuild all binaries
 rebuild: clean build
@@ -199,6 +204,11 @@ run-microstructure-v1: $(MICROSTRUCTURE_V1_BINARY)
 ## run-abcusd: Run 25h ABC-USD/ABC-PERP bootstrap simulation
 run-abcusd: $(ABCUSD_BINARY)
 	@./$(ABCUSD_BINARY)
+
+## run-randomwalk: Run BTC-PERP random walk simulation and plot results
+run-randomwalk: $(RANDOMWALK_BINARY)
+	@./$(RANDOMWALK_BINARY)
+	@.venv/bin/python scripts/plot_randomwalk.py
 
 ## liquidity-report: Build and run liquidity_report, then generate plots
 liquidity-report: $(LIQUIDITY_REPORT_BINARY)

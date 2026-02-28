@@ -119,7 +119,7 @@ func (e *DefaultExchange) notifyFill(
 	}
 	sendFillNotification(e.Gateways[exec.MakerClientID], exec.MakerOrderID, exec.MakerClientID,
 		tradeID, exec, exec.MakerSide, makerPosSide, makerFee,
-		makerOrder != nil && makerOrder.FilledQty >= makerOrder.Qty, book.Symbol, makerDelta, makerPnL)
+		exec.MakerFilledQty >= exec.MakerTotalQty, book.Symbol, makerDelta, makerPnL)
 	logFill(log, timestamp, exec.MakerClientID, exec.MakerOrderID, exec,
 		exec.MakerSide, makerPosSide, exec.MakerFilledQty, exec.MakerTotalQty,
 		tradeID, makerFee, makerDelta, makerPnL, book.Symbol, "maker")

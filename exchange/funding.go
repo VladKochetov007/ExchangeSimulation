@@ -127,8 +127,8 @@ func (pm *PositionManager) applyNettingPositionChange(pos *Position, qty, price 
 		pos.Size = newSize
 		pos.EntryPrice = price
 	} else if (pos.Size > 0 && newSize > pos.Size) || (pos.Size < 0 && newSize < pos.Size) {
-		totalNotional := (pos.Size * pos.EntryPrice) + (deltaSize * price)
-		pos.EntryPrice = totalNotional / newSize
+		// Use float64 to avoid int64 overflow: size (satoshis) × price (raw USD) can exceed 9.2e18.
+		pos.EntryPrice = int64((float64(pos.Size)*float64(pos.EntryPrice) + float64(deltaSize)*float64(price)) / float64(newSize))
 		pos.Size = newSize
 	} else if (pos.Size > 0 && newSize < 0) || (pos.Size < 0 && newSize > 0) {
 		pos.EntryPrice = price
@@ -154,9 +154,9 @@ func (pm *PositionManager) applyHedgePositionChange(pos *Position, qty, price in
 			if pos.Size == 0 {
 				pos.EntryPrice = price
 			} else {
-				totalNotional := pos.Size*pos.EntryPrice + qty*price
-				pos.Size += qty
-				pos.EntryPrice = totalNotional / pos.Size
+				newSize := pos.Size + qty
+				pos.EntryPrice = int64((float64(pos.Size)*float64(pos.EntryPrice) + float64(qty)*float64(price)) / float64(newSize))
+				pos.Size = newSize
 				return
 			}
 			pos.Size += qty
@@ -174,9 +174,9 @@ func (pm *PositionManager) applyHedgePositionChange(pos *Position, qty, price in
 			if pos.Size == 0 {
 				pos.EntryPrice = price
 			} else {
-				totalNotional := (-pos.Size)*pos.EntryPrice + qty*price
-				pos.Size -= qty
-				pos.EntryPrice = totalNotional / (-pos.Size)
+				newSize := pos.Size - qty
+				pos.EntryPrice = int64((float64(-pos.Size)*float64(pos.EntryPrice) + float64(qty)*float64(price)) / float64(-newSize))
+				pos.Size = newSize
 				return
 			}
 			pos.Size -= qty

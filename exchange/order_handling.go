@@ -359,6 +359,10 @@ func collectAffectedLevels(book *OrderBook, executions []*Execution) map[int64]S
 	for _, exec := range executions {
 		if makerOrder := book.FindOrder(exec.MakerOrderID); makerOrder != nil {
 			levels[makerOrder.Price] = makerOrder.Side
+		} else {
+			// Fully filled order was removed from book.Orders by the matcher;
+			// exec carries the price and side directly.
+			levels[exec.Price] = exec.MakerSide
 		}
 	}
 	return levels
@@ -368,17 +372,20 @@ func collectAffectedLevels(book *OrderBook, executions []*Execution) map[int64]S
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) removeMakerOrders(book *OrderBook, executions []*Execution) {
 	for _, exec := range executions {
-		makerOrder := book.FindOrder(exec.MakerOrderID)
-		if makerOrder == nil || makerOrder.Status != Filled {
+		if exec.MakerFilledQty < exec.MakerTotalQty {
 			continue
 		}
-		if makerOrder.Side == Buy {
-			book.Bids.CancelOrder(exec.MakerOrderID)
-		} else {
-			book.Asks.CancelOrder(exec.MakerOrderID)
+		// The matcher already unlinked and removed fully filled orders from book.Orders;
+		// FindOrder returns nil. Clean up the client order list unconditionally.
+		if makerOrder := book.FindOrder(exec.MakerOrderID); makerOrder != nil {
+			if makerOrder.Side == Buy {
+				book.Bids.CancelOrder(exec.MakerOrderID)
+			} else {
+				book.Asks.CancelOrder(exec.MakerOrderID)
+			}
+			putOrder(makerOrder)
 		}
 		e.Clients[exec.MakerClientID].RemoveOrder(exec.MakerOrderID)
-		putOrder(makerOrder)
 	}
 }
 
