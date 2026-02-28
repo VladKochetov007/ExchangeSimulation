@@ -956,7 +956,7 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 	if pos.Size < 0 {
 		closeSide = Buy
 	}
-	fillPrice := e.forceClose(clientID, client, book, perp, closeSide, abs(pos.Size), timestamp)
+	fillPrice := e.forceClose(clientID, client, book, book.Instrument, closeSide, abs(pos.Size), timestamp)
 
 	if e.BorrowingMgr != nil {
 		borrowed := client.Borrowed[perp.QuoteAsset()]

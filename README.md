@@ -12,7 +12,6 @@ This is a **library**, not an application. You write actors and wire them to exc
 flowchart LR
     subgraph AL["Actors"]
         A1["Actor A"]
-        A2["Actor B"]
     end
 
     subgraph GL["Gateway Layer"]
@@ -21,16 +20,16 @@ flowchart LR
     end
 
     subgraph EX["DefaultExchange"]
-        OB["Order Book</br>(bids / asks)"]
-        ME["Matching Engine</br>(PriceTime · ProRata)"]
+        OB["OrderBook</br>(bids / asks)"]
+        ME["MatchingEngine</br>(PriceTime · ProRata)"]
         ST["Settlement</br>(PnL · fees · margin)"]
-        PM["Position Manager</br>(one-way · hedge</br>cross · isolated)"]
+        PM["PositionManager</br>(one-way · hedge</br>cross · isolated)"]
         FM["Funding"]
-        BM["Borrowing"]
-        MDP["Market Data Publisher"]
+        BM["BorrowingManager"]
+        MDP["MDPublisher"]
         subgraph PS["Price Sources"]
-            MP["Mark Price</br>(mid · last · weighted)"]
-            IP["Index Price</br>(static · dynamic · GBM)"]
+            MP["MarkPrice</br>(mid · last · weighted)"]
+            IP["IndexPrice</br>(static · dynamic · GBM)"]
         end
     end
 
@@ -41,13 +40,11 @@ flowchart LR
     end
 
     A1 -- Request --> DGW
-    A2 -- Request --> DGW
     DGW --> CGW
     CGW --> EX
     EX -- "Response / Fill" --> CGW
     CGW --> DGW
     DGW -- "Response / Fill" --> A1
-    DGW -- "Response / Fill" --> A2
 
     OB --> ME
     ME --> ST
@@ -320,36 +317,11 @@ func (a *ArbitrageActor) run(ctx context.Context) {
 
 ---
 
-## Blockers / known gaps
+## Known gaps
 
-### 1. Settlement dispatch is closed to new instrument types
+No open architectural blockers. Previously blocked items resolved:
 
-`exchange/settlement.go` and `exchange/order_handling.go` dispatch on `instrument.IsPerp()` with a type assertion to `*PerpFutures`:
-
-```go
-if instrument.IsPerp() {
-    perp := instrument.(*PerpFutures)   // hard type assertion
-    processPerpExecution(...)
-} else {
-    settleSpotExecution(...)
-}
-```
-
-Any new instrument type — options, prediction markets, linear futures with custom payoff — hits the `else` branch and gets spot settlement regardless of what the instrument is.
-
-**Fix needed**: extract settlement into an interface on `Instrument`:
-
-```go
-type Settleable interface {
-    Settle(exec *Execution, buyer, seller *Client, timestamp int64)
-}
-```
-
-Each instrument implements `Settleable` with its own logic. The exchange dispatches to `instrument.(Settleable).Settle(...)`. No library modification needed to add options or bets — implement the interface externally.
-
-The same `IsPerp()` + type assertion pattern appears in margin reservation (`reserveLimitOrderFunds`, `checkMarketOrderFunds`), so a `Margined` interface would be needed there too.
-
-
+- **Settlement dispatch** — `Settleable` and `Margined` interfaces in `types/`. `PerpFutures` implements both. Exchange dispatches via interface assertion; `IsPerp()+(*PerpFutures)` type assertions removed from `settlement.go`, `order_handling.go`, and `liquidation.go`. Custom instrument types implement `Settleable.Settle(SettlementContext)` externally — no library modification needed to add options, prediction markets, or custom payoffs.
 
 ---
 

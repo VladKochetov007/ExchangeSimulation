@@ -122,6 +122,56 @@ type PerpExchange interface {
 	PerpWallet
 }
 
+// Margined is implemented by instruments that use margin-based fund reservation.
+// The exchange calls these instead of the IsPerp()+type-assert path.
+type Margined interface {
+	MarginRequired(qty, price, precision int64) int64
+	MarginForMarket(qty, refPrice, precision int64) int64
+	MarginOnCancel(remainingQty, orderPrice, precision int64) int64
+}
+
+// SettlementContext carries all state an instrument needs to settle one execution.
+// Account mutation callbacks are closures that capture the exchange's internal client map,
+// so the instrument never needs to import the exchange package.
+type SettlementContext struct {
+	Exec         *Execution
+	TakerOrder   *Order       // nil on force-close (liquidation) path
+	MakerPosSide PositionSide // resolved by the exchange before calling Settle
+	TakerFee     Fee
+	MakerFee     Fee
+	Positions    PositionStore
+
+	// Account mutation callbacks.
+	PerpBalance      func(clientID uint64, asset string) int64
+	MutatePerpBalance func(clientID uint64, asset string, delta int64)
+	ReservePerp      func(clientID uint64, asset string, amount int64) bool
+	ReleasePerp      func(clientID uint64, asset string, amount int64)
+	RecordFeeRevenue func(asset string, takerAmt, makerAmt int64)
+	LogBalanceChange func(clientID uint64, symbol, reason string, deltas []BalanceDelta)
+
+	Log       Logger // symbol-scoped logger (may be nil)
+	GlobalLog Logger // _global logger (may be nil)
+
+	BasePrecision int64
+	Timestamp     int64
+	BookSymbol    string
+	BookSeqNum    uint64
+}
+
+// SettlementResult carries position deltas and realized PnL for fill notifications.
+type SettlementResult struct {
+	TakerDelta PositionDelta
+	MakerDelta PositionDelta
+	TakerPnL   int64
+	MakerPnL   int64
+}
+
+// Settleable is implemented by instruments with custom post-match settlement logic.
+// Instruments that do not implement Settleable receive default spot settlement.
+type Settleable interface {
+	Settle(ctx SettlementContext) SettlementResult
+}
+
 // Clock is the time abstraction used throughout the exchange.
 type Clock interface {
 	NowUnixNano() int64

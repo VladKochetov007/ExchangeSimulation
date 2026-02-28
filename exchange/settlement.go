@@ -17,7 +17,7 @@ func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execu
 }
 
 // handleExecution processes one matched pair: settle, update volumes, record trade, notify.
-// Returns true if a perp position changed (for OI tracking).
+// Returns true if a position changed (for OI tracking).
 func (e *DefaultExchange) handleExecution(
 	book *OrderBook, exec *Execution, takerOrder *Order,
 	instrument Instrument, basePrecision, timestamp int64, log Logger,
@@ -27,18 +27,56 @@ func (e *DefaultExchange) handleExecution(
 	baseAsset, quoteAsset := instrument.BaseAsset(), instrument.QuoteAsset()
 	takerFee := taker.FeePlan.CalculateFee(FillContext{Exec: exec, IsMaker: false, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
 	makerFee := maker.FeePlan.CalculateFee(FillContext{Exec: exec, IsMaker: true, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
-	notional := (exec.Price * exec.Qty) / basePrecision
-	isPerp := instrument.IsPerp()
-	var takerDelta, makerDelta PositionDelta
-	var takerPnL, makerPnL int64
-	if isPerp {
-		takerDelta, makerDelta, takerPnL, makerPnL = e.processPerpExecution(book, exec, takerOrder, taker, maker, takerFee, makerFee, basePrecision, timestamp)
+
+	var result SettlementResult
+	var positionChanged bool
+	if s, ok := instrument.(Settleable); ok {
+		makerOrder := book.FindOrder(exec.MakerOrderID)
+		makerPosSide := PositionBoth
+		if makerOrder != nil {
+			makerPosSide = makerOrder.PositionSide
+		}
+		result = s.Settle(e.buildSettlementContext(book, exec, takerOrder, makerPosSide, takerFee, makerFee, basePrecision, timestamp, log))
+		positionChanged = true
 	} else {
+		notional := (exec.Price * exec.Qty) / basePrecision
 		e.settleSpotExecution(book, exec, takerOrder, taker, maker, takerFee, makerFee, notional, timestamp)
 	}
 	tradeID := e.createTrade(book, exec, takerOrder, timestamp, log)
-	e.notifyFill(exec, takerOrder, takerFee, makerFee, tradeID, book, log, timestamp, takerDelta, makerDelta, takerPnL, makerPnL)
-	return isPerp
+	e.notifyFill(exec, takerOrder, takerFee, makerFee, tradeID, book, log, timestamp, result.TakerDelta, result.MakerDelta, result.TakerPnL, result.MakerPnL)
+	return positionChanged
+}
+
+func (e *DefaultExchange) buildSettlementContext(
+	book *OrderBook, exec *Execution, takerOrder *Order,
+	makerPosSide PositionSide, takerFee, makerFee Fee,
+	basePrecision, timestamp int64, log Logger,
+) SettlementContext {
+	clients := e.Clients
+	return SettlementContext{
+		Exec:         exec,
+		TakerOrder:   takerOrder,
+		MakerPosSide: makerPosSide,
+		TakerFee:     takerFee,
+		MakerFee:     makerFee,
+		Positions:    e.Positions,
+		PerpBalance:       func(clientID uint64, asset string) int64        { return clients[clientID].PerpBalance(asset) },
+		MutatePerpBalance: func(clientID uint64, asset string, delta int64) { clients[clientID].MutatePerpBalance(asset, delta) },
+		ReservePerp:       func(clientID uint64, asset string, amount int64) bool { return clients[clientID].ReservePerp(asset, amount) },
+		ReleasePerp:       func(clientID uint64, asset string, amount int64) { clients[clientID].ReleasePerp(asset, amount) },
+		RecordFeeRevenue: func(asset string, takerAmt, makerAmt int64) {
+			e.recordFeeRevenue(asset, Fee{Amount: takerAmt}, Fee{Amount: makerAmt}, book, timestamp)
+		},
+		LogBalanceChange: func(clientID uint64, symbol, reason string, deltas []BalanceDelta) {
+			logBalanceChange(e, timestamp, clientID, symbol, reason, deltas)
+		},
+		Log:           log,
+		GlobalLog:     e.getLogger("_global"),
+		BasePrecision: basePrecision,
+		Timestamp:     timestamp,
+		BookSymbol:    book.Symbol,
+		BookSeqNum:    book.SeqNum,
+	}
 }
 
 // createTrade records the trade, increments SeqNum, publishes to MD.

@@ -72,6 +72,14 @@ func (c *Client) PerpAvailable(asset string) int64 {
 	return c.PerpBalances[asset] - c.PerpReserved[asset]
 }
 
+func (c *Client) PerpBalance(asset string) int64 {
+	return c.PerpBalances[asset]
+}
+
+func (c *Client) MutatePerpBalance(asset string, delta int64) {
+	c.PerpBalances[asset] += delta
+}
+
 func (c *Client) ReservePerp(asset string, amount int64) bool {
 	if c.PerpAvailable(asset) < amount {
 		return false

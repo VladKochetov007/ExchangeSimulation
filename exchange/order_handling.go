@@ -307,10 +307,10 @@ func marketRefPrice(book *OrderBook) int64 {
 
 func checkMarketOrderFunds(client *Client, book *OrderBook, order *Order, precision int64) bool {
 	instrument := book.Instrument
-	if instrument.IsPerp() {
-		perp := instrument.(*PerpFutures)
+	if m, ok := instrument.(Margined); ok {
 		refPrice := marketRefPrice(book)
-		return refPrice == 0 || client.PerpAvailable(instrument.QuoteAsset()) >= calcMargin(order.Qty, refPrice, perp.MarginRate, precision)
+		required := m.MarginForMarket(order.Qty, refPrice, precision)
+		return required == 0 || client.PerpAvailable(instrument.QuoteAsset()) >= required
 	}
 	if order.Side == Buy {
 		if book.Asks.Best == nil {
@@ -322,9 +322,8 @@ func checkMarketOrderFunds(client *Client, book *OrderBook, order *Order, precis
 }
 
 func (e *DefaultExchange) reserveLimitOrderFunds(client *Client, instrument Instrument, order *Order, precision int64) bool {
-	if instrument.IsPerp() {
-		perp := instrument.(*PerpFutures)
-		margin := calcMargin(order.Qty, order.Price, perp.MarginRate, precision)
+	if m, ok := instrument.(Margined); ok {
+		margin := m.MarginRequired(order.Qty, order.Price, precision)
 		return e.tryReserveOrBorrow(order.ClientID, instrument.QuoteAsset(), margin, client.ReservePerp, true)
 	}
 	if order.Side == Buy {
@@ -433,10 +432,8 @@ func releaseOrderFunds(client *Client, instrument Instrument, side Side, qty, pr
 		return
 	}
 	precision := instrument.BasePrecision()
-	if instrument.IsPerp() {
-		perp := instrument.(*PerpFutures)
-		margin := calcMargin(qty, price, perp.MarginRate, precision)
-		client.ReleasePerp(instrument.QuoteAsset(), margin)
+	if m, ok := instrument.(Margined); ok {
+		client.ReleasePerp(instrument.QuoteAsset(), m.MarginOnCancel(qty, price, precision))
 	} else if side == Buy {
 		client.Release(instrument.QuoteAsset(), (qty*price)/precision)
 	} else {

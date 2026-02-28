@@ -3,8 +3,8 @@ package exchange
 // forceClose cancels all open orders for clientID on the given book, then executes
 // a market order to close qty on the given side. Returns the fill price (0 if no fill).
 // Caller must hold e.mu.Lock().
-func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *OrderBook, perp *PerpFutures, side Side, qty, timestamp int64) (fillPrice int64) {
-	e.cancelClientOrdersOnBook(client, book, perp)
+func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *OrderBook, instrument Instrument, side Side, qty, timestamp int64) (fillPrice int64) {
+	e.cancelClientOrdersOnBook(client, book, instrument)
 
 	orderID := e.NextOrderID
 	e.NextOrderID++
@@ -29,7 +29,9 @@ func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *Orde
 // cancelClientOrdersOnBook cancels all open orders for client on the given book,
 // releasing reserved perp margin for each cancelled order.
 // Caller must hold e.mu.Lock().
-func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBook, perp *PerpFutures) {
+func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBook, instrument Instrument) {
+	m, isMargined := instrument.(Margined)
+	precision := instrument.BasePrecision()
 	for _, orderID := range append([]uint64{}, client.OrderIDs...) {
 		var order *Order
 		if o := book.Bids.Orders[orderID]; o != nil {
@@ -40,9 +42,10 @@ func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBo
 		if order == nil || order.ClientID != client.ID {
 			continue
 		}
-		remainingQty := order.Qty - order.FilledQty
-		remainingMargin := (remainingQty * order.Price / perp.BasePrecision()) * perp.MarginRate / 10000
-		client.ReleasePerp(perp.QuoteAsset(), remainingMargin)
+		if isMargined {
+			remainingQty := order.Qty - order.FilledQty
+			client.ReleasePerp(instrument.QuoteAsset(), m.MarginOnCancel(remainingQty, order.Price, precision))
+		}
 		if order.Side == Buy {
 			book.Bids.CancelOrder(orderID)
 		} else {

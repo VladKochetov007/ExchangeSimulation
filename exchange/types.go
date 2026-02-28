@@ -149,6 +149,10 @@ const (
 type Logger = etypes.Logger
 type FeeModel = etypes.FeeModel
 type Instrument = etypes.Instrument
+type Margined = etypes.Margined
+type Settleable = etypes.Settleable
+type SettlementContext = etypes.SettlementContext
+type SettlementResult = etypes.SettlementResult
 type PriceSource = etypes.PriceSource
 type Clock = etypes.Clock
 type Ticker = etypes.Ticker
