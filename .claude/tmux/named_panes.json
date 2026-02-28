@@ -1,7 +1,0 @@
-{
-  "sim": {
-    "pane": "%1",
-    "command": "go run cmd/sim/main.go",
-    "started_at": "2026-02-03T00:48:12Z"
-  }
-}

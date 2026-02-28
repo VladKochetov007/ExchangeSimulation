@@ -285,3 +285,4 @@ good_plan.md
 
 # Go binaries
 bin/
+.claude/**
