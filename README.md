@@ -19,7 +19,9 @@ flowchart LR
         CGW["ClientGateway"]
     end
 
-    subgraph EX["DefaultExchange"]
+    subgraph EX["Exchange"]
+        DEX["DefaultExchange"]
+        BM2["BaseMarket</br>(custom venue base)"]
         OB["OrderBook</br>(bids / asks)"]
         ME["MatchingEngine</br>(PriceTime · ProRata)"]
         ST["Settlement</br>(PnL · fees · margin)"]
@@ -27,29 +29,29 @@ flowchart LR
         FM["Funding"]
         BM["BorrowingManager"]
         MDP["MDPublisher"]
+        LH["LiquidationHandler</br>(callback)"]
         subgraph PS["Price Sources"]
-            MP["MarkPrice</br>(mid · last ·  mid)"]
+            MP["MarkPrice</br>(mid · last · weighted-mid)"]
             IP["IndexPrice</br>(static · median across sources)"]
         end
     end
 
     subgraph SIM["Simulation"]
-        VENUE["Venue"]
+        VENUE["Venue</br>(types.Venue)"]
         RUNNER["Runner"]
         CLK["Clock</br>(Real · Simulated)"]
     end
 
     A1 -- Request --> DGW
     DGW --> CGW
-    CGW --> EX
-    EX -- "Response / Fill" --> CGW
+    CGW -. "exchange pulls" .-> DEX
+    DEX -- "Response / Fill" --> CGW
     CGW --> DGW
     DGW -- "Response / Fill" --> A1
 
     OB --> ME
     ME --> ST
     ST --> PM
-    ST --> BM
 
     IP -. index .-> FM
     MP -. mark .-> FM
@@ -59,11 +61,13 @@ flowchart LR
     ME --> MDP
     ST --> MDP
     FM --> MDP
+    ME -. liquidation .-> LH
 
     MDP -- "book · trades</br>funding · OI" --> CGW
 
-    CLK -.-> EX
+    CLK -.-> DEX
     RUNNER --> VENUE
+    RUNNER --> AL
     VENUE --> DGW
 ```
 

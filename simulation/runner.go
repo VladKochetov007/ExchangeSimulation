@@ -85,7 +85,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		a.Stop()
 	}
 	for _, v := range r.venues {
-		v.shutdown()
+		v.Shutdown()
 	}
 
 	return nil

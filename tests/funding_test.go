@@ -315,6 +315,30 @@ func TestPositionManagerSettleFundingNoPosition(t *testing.T) {
 	}
 }
 
+func TestPositionsForFundingHedgeModeReceivesFunding(t *testing.T) {
+	pm := NewPositionManager(&RealClock{})
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD",
+		BTC_PRECISION, USD_PRECISION, BTC_PRECISION, BTC_PRECISION/100)
+
+	clients := make(map[uint64]*Client)
+	clients[1] = NewClient(1, &FixedFee{})
+	clients[1].PerpBalances["USD"] = 10000 * USD_PRECISION
+
+	// Hedge-mode long position: uses PositionLong slot, not PositionBoth
+	pm.UpdatePosition(1, "BTC-PERP", BTC_PRECISION, 50000*BTC_PRECISION, Buy, PositionLong)
+
+	// mark > index → longs pay funding
+	perp.UpdateFundingRate(50000*BTC_PRECISION, 50100*BTC_PRECISION)
+
+	balanceBefore := clients[1].PerpBalances["USD"]
+	pm.SettleFunding(clients, perp)
+	balanceAfter := clients[1].PerpBalances["USD"]
+
+	if balanceAfter >= balanceBefore {
+		t.Errorf("hedge-mode long should pay funding when mark > index: before=%d after=%d", balanceBefore, balanceAfter)
+	}
+}
+
 func TestAbsFunction(t *testing.T) {
 	if abs(100) != 100 {
 		t.Errorf("abs(100) should be 100")

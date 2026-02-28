@@ -108,7 +108,7 @@ func TestVenueShutdown(t *testing.T) {
 
 	v := NewExchangeVenue(ex, LatencyConfig{Request: NewConstantLatency(1 * time.Millisecond)})
 	v.ConnectClient(1, map[string]int64{"BTC": 1000000000, "USD": 100000000000000}, &exchange.FixedFee{})
-	v.shutdown() // Must not panic or block
+	v.Shutdown() // Must not panic or block
 }
 
 func TestVenueConnectClientReturnsGatewayInterface(t *testing.T) {

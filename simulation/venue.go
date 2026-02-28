@@ -8,6 +8,9 @@ import (
 	"exchange_sim/types"
 )
 
+// Compile-time proof that *Venue satisfies the types.Venue contract.
+var _ types.Venue = (*Venue)(nil)
+
 // Venue pairs a trading venue with optional per-channel latency configuration.
 type Venue struct {
 	Market  types.Venue
@@ -38,8 +41,8 @@ func (v *Venue) ConnectClient(clientID uint64, balances map[string]int64, fee ex
 	return d
 }
 
-// shutdown stops all delayed gateways and shuts down the venue.
-func (v *Venue) shutdown() {
+// Shutdown stops all delayed gateways and shuts down the underlying venue.
+func (v *Venue) Shutdown() {
 	v.mu.Lock()
 	delayed := v.delayed
 	v.mu.Unlock()
@@ -48,4 +51,9 @@ func (v *Venue) shutdown() {
 		d.Stop()
 	}
 	v.Market.Shutdown()
+}
+
+// IsRunning delegates to the underlying venue.
+func (v *Venue) IsRunning() bool {
+	return v.Market.IsRunning()
 }

@@ -80,11 +80,13 @@ func (pm *PositionManager) PositionsForFunding(symbol string, fn func(clientID u
 	defer pm.mu.RUnlock()
 
 	for clientID, clientPositions := range pm.positions {
-		pos := clientPositions[positionKey{symbol, PositionBoth}]
-		if pos == nil || pos.Size == 0 {
-			continue
+		for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
+			pos := clientPositions[positionKey{symbol, side}]
+			if pos == nil || pos.Size == 0 {
+				continue
+			}
+			fn(clientID, *pos)
 		}
-		fn(clientID, *pos)
 	}
 }
 
