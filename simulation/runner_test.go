@@ -22,11 +22,11 @@ func (a *testActor) Gateway() actor.Gateway        { return a.gateway }
 func (a *testActor) Start(_ context.Context) error { a.started = true; return nil }
 func (a *testActor) Stop() error                   { a.stopped = true; return nil }
 
-func newTestVenue() *Venue {
+func newTestMount() *Mount {
 	ex := exchange.NewExchange(10, &RealClock{})
 	btcusd := exchange.NewSpotInstrument("BTCUSD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex.AddInstrument(btcusd)
-	return NewExchangeVenue(ex, LatencyConfig{})
+	return NewMount(ex, LatencyConfig{})
 }
 
 func TestNewRunnerWithSimulatedClock(t *testing.T) {
@@ -52,22 +52,22 @@ func TestNewRunnerWithRealClock(t *testing.T) {
 	}
 }
 
-func TestRunnerAddVenue(t *testing.T) {
+func TestRunnerAddMount(t *testing.T) {
 	runner := NewRunner(&RealClock{}, RunnerConfig{})
-	v := newTestVenue()
-	runner.AddVenue(v)
+	m := newTestMount()
+	runner.AddMount(m)
 
-	if len(runner.venues) != 1 {
-		t.Errorf("Expected 1 venue, got %d", len(runner.venues))
+	if len(runner.mounts) != 1 {
+		t.Errorf("Expected 1 mount, got %d", len(runner.mounts))
 	}
 }
 
 func TestRunnerAddActor(t *testing.T) {
 	runner := NewRunner(&RealClock{}, RunnerConfig{})
-	v := newTestVenue()
-	runner.AddVenue(v)
+	m := newTestMount()
+	runner.AddMount(m)
 
-	gw := v.ConnectClient(1, map[string]int64{"USD": 1000000}, &exchange.FixedFee{})
+	gw := m.ConnectNewClient(1, map[string]int64{"USD": 1000000}, &exchange.FixedFee{})
 	a := &testActor{id: 1, gateway: gw}
 	runner.AddActor(a)
 
@@ -80,7 +80,7 @@ func TestRunnerRunWithDuration(t *testing.T) {
 	runner := NewRunner(&RealClock{}, RunnerConfig{
 		Duration: 100 * time.Millisecond,
 	})
-	runner.AddVenue(newTestVenue())
+	runner.AddMount(newTestMount())
 
 	start := time.Now()
 	err := runner.Run(context.Background())
@@ -103,7 +103,7 @@ func TestRunnerRunWithIterations(t *testing.T) {
 		Iterations: 10,
 		Step:       time.Millisecond,
 	})
-	runner.AddVenue(newTestVenue())
+	runner.AddMount(newTestMount())
 
 	err := runner.Run(context.Background())
 	if err != nil {
@@ -121,7 +121,7 @@ func TestRunnerRunWithContextCancellation(t *testing.T) {
 	runner := NewRunner(&RealClock{}, RunnerConfig{
 		Duration: 10 * time.Second,
 	})
-	runner.AddVenue(newTestVenue())
+	runner.AddMount(newTestMount())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -145,12 +145,12 @@ func TestRunnerRunWithActors(t *testing.T) {
 	runner := NewRunner(&RealClock{}, RunnerConfig{
 		Duration: 100 * time.Millisecond,
 	})
-	v := newTestVenue()
-	runner.AddVenue(v)
+	m := newTestMount()
+	runner.AddMount(m)
 
 	balances := map[string]int64{"BTC": 1000000000, "USD": 1000000000000}
-	gw1 := v.ConnectClient(1, balances, &exchange.FixedFee{})
-	gw2 := v.ConnectClient(2, balances, &exchange.FixedFee{})
+	gw1 := m.ConnectNewClient(1, balances, &exchange.FixedFee{})
+	gw2 := m.ConnectNewClient(2, balances, &exchange.FixedFee{})
 
 	a1 := &testActor{id: 1, gateway: gw1}
 	a2 := &testActor{id: 2, gateway: gw2}
@@ -173,7 +173,7 @@ func TestRunnerShutdown(t *testing.T) {
 	runner := NewRunner(&RealClock{}, RunnerConfig{
 		Duration: 10 * time.Second,
 	})
-	runner.AddVenue(newTestVenue())
+	runner.AddMount(newTestMount())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -192,19 +192,19 @@ func TestRunnerShutdown(t *testing.T) {
 	}
 }
 
-func TestRunnerMultiVenue(t *testing.T) {
+func TestRunnerMultiMount(t *testing.T) {
 	runner := NewRunner(&RealClock{}, RunnerConfig{
 		Duration: 100 * time.Millisecond,
 	})
 
-	v1 := newTestVenue()
-	v2 := newTestVenue()
-	runner.AddVenue(v1)
-	runner.AddVenue(v2)
+	m1 := newTestMount()
+	m2 := newTestMount()
+	runner.AddMount(m1)
+	runner.AddMount(m2)
 
 	balances := map[string]int64{"BTC": 1000000000, "USD": 1000000000000}
-	gw1 := v1.ConnectClient(1, balances, &exchange.FixedFee{})
-	gw2 := v2.ConnectClient(1, balances, &exchange.FixedFee{})
+	gw1 := m1.ConnectNewClient(1, balances, &exchange.FixedFee{})
+	gw2 := m2.ConnectNewClient(1, balances, &exchange.FixedFee{})
 
 	runner.AddActor(&testActor{id: 1, gateway: gw1})
 	runner.AddActor(&testActor{id: 2, gateway: gw2})

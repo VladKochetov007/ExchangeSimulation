@@ -13,7 +13,7 @@ type RequestHandler interface {
 }
 
 // BaseMarket handles gateway lifecycle for custom venue implementations.
-// Embed it in a struct to get ConnectClient, Shutdown, and IsRunning for free,
+// Embed it in a struct to get ConnectNewClient, Shutdown, and IsRunning for free,
 // then implement HandleRequest and call SetHandler(self) in the constructor
 // to route requests to the embedding type.
 type BaseMarket struct {
@@ -36,7 +36,7 @@ func NewBaseMarket() *BaseMarket {
 //	m.BaseMarket.SetHandler(m)
 func (b *BaseMarket) SetHandler(h RequestHandler) { b.handler = h }
 
-func (b *BaseMarket) ConnectClient(id uint64, _ map[string]int64, _ FeeModel) Gateway {
+func (b *BaseMarket) ConnectNewClient(id uint64, _ map[string]int64, _ FeeModel) Gateway {
 	gw := NewClientGateway(id)
 	b.mu.Lock()
 	b.clients[id] = gw

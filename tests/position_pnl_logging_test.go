@@ -59,15 +59,16 @@ func TestPositionUpdateOpenPosition(t *testing.T) {
 	ex := NewExchange(16, clock)
 	logger := &positionPnLLogger{}
 	ex.SetLogger("_global", logger)
+	ex.SetLogger("BTC-PERP", logger)
 
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
-	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	maker := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
 
-	ex.ConnectClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	taker := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 100000*USD_PRECISION)
 
@@ -143,15 +144,16 @@ func TestPositionUpdatePartialClose(t *testing.T) {
 	ex := NewExchange(16, clock)
 	logger := &positionPnLLogger{}
 	ex.SetLogger("_global", logger)
+	ex.SetLogger("BTC-PERP", logger)
 
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
-	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
 
-	ex.ConnectClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client2 := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 100000*USD_PRECISION)
 
@@ -260,15 +262,16 @@ func TestPositionUpdateFlipLongToShort(t *testing.T) {
 	ex := NewExchange(16, clock)
 	logger := &positionPnLLogger{}
 	ex.SetLogger("_global", logger)
+	ex.SetLogger("BTC-PERP", logger)
 
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
-	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 200000*USD_PRECISION)
 
-	ex.ConnectClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client2 := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 200000*USD_PRECISION)
 
@@ -371,15 +374,16 @@ func TestPositionUpdateCompleteClose(t *testing.T) {
 	ex := NewExchange(16, clock)
 	logger := &positionPnLLogger{}
 	ex.SetLogger("_global", logger)
+	ex.SetLogger("BTC-PERP", logger)
 
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
-	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
 
-	ex.ConnectClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client2 := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 100000*USD_PRECISION)
 
@@ -475,15 +479,16 @@ func TestMarkPriceLogging(t *testing.T) {
 	logger := &positionPnLLogger{}
 	ex.SetLogger("_global", logger)
 	ex.SetLogger("BTC-PERP", logger)
+	ex.SetLogger("BTC-PERP", logger)
 
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
 	// Setup clients with liquidity
-	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{})
 	client1 := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 1000000*USD_PRECISION)
-	ex.ConnectClient(2, map[string]int64{}, &PercentageFee{})
+	ex.ConnectNewClient(2, map[string]int64{}, &PercentageFee{})
 	client2 := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 1000000*USD_PRECISION)
 
@@ -556,11 +561,12 @@ func TestPositionUpdateZeroSizeTrade(t *testing.T) {
 	ex := NewExchange(16, clock)
 	logger := &positionPnLLogger{}
 	ex.SetLogger("_global", logger)
+	ex.SetLogger("BTC-PERP", logger)
 
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
-	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{})
 	client := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
 
@@ -595,15 +601,16 @@ func TestPositionUpdateMinimumSize(t *testing.T) {
 	ex := NewExchange(16, clock)
 	logger := &positionPnLLogger{}
 	ex.SetLogger("_global", logger)
+	ex.SetLogger("BTC-PERP", logger)
 
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
-	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{})
 	maker := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
 
-	ex.ConnectClient(2, map[string]int64{}, &PercentageFee{})
+	ex.ConnectNewClient(2, map[string]int64{}, &PercentageFee{})
 	taker := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 100000*USD_PRECISION)
 

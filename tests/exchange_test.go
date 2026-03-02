@@ -28,14 +28,14 @@ func TestAddInstrument(t *testing.T) {
 	}
 }
 
-func TestConnectClient(t *testing.T) {
+func TestConnectNewClient(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, 100, 1000)
 	ex.AddInstrument(instrument)
 
 	feePlan := &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true}
 	balances := map[string]int64{"USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, feePlan)
+	ex.ConnectNewClient(1, balances, feePlan)
 	gateway := ex.Gateways[1]
 
 	if gateway == nil {
@@ -58,7 +58,7 @@ func TestPlaceOrderDirect(t *testing.T) {
 
 	feePlan := &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true}
 	balances := map[string]int64{"USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, feePlan)
+	ex.ConnectNewClient(1, balances, feePlan)
 
 	orderReq := &OrderRequest{
 		RequestID:   1,
@@ -91,10 +91,10 @@ func TestMatchingAndSettlement(t *testing.T) {
 	feePlan := &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true}
 
 	balances1 := map[string]int64{"USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances1, feePlan)
+	ex.ConnectNewClient(1, balances1, feePlan)
 
 	balances2 := map[string]int64{"BTC": BTCAmount(10)}
-	ex.ConnectClient(2, balances2, feePlan)
+	ex.ConnectNewClient(2, balances2, feePlan)
 
 	sellReq := &OrderRequest{
 		RequestID:   1,

@@ -13,8 +13,8 @@ func setupPerpExchange(client1PerpUSD, client2PerpUSD int64) (*Exchange, *PerpFu
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
-	ex.ConnectClient(2, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{}, &FixedFee{})
 
 	if client1PerpUSD > 0 {
 		ex.AddPerpBalance(1, "USD", client1PerpUSD)
@@ -42,7 +42,7 @@ func TestChargeCollateralInterest_DebitsPerpWallet(t *testing.T) {
 	ex, _ := setupPerpExchange(USDAmount(100_000), USDAmount(100_000))
 
 	spotDeposit := USDAmount(50_000)
-	ex.ConnectClient(3, map[string]int64{"USD": spotDeposit}, &FixedFee{})
+	ex.ConnectNewClient(3, map[string]int64{"USD": spotDeposit}, &FixedFee{})
 
 	borrowedAmount := USDAmount(10_000)
 	injectBorrowing(ex, 3, "USD", borrowedAmount)
@@ -311,6 +311,54 @@ func TestLiquidation_PartialFillConservation(t *testing.T) {
 	if initialTotal != afterTotal {
 		t.Errorf("money not conserved during partial liquidation: before=%d, after=%d, delta=%d",
 			initialTotal, afterTotal, afterTotal-initialTotal)
+	}
+}
+
+// TestLiquidation_EmptyBook_NoInsuranceFundDebit verifies that when the order book is
+// empty (no counterparty liquidity), the liquidation call does nothing: the insurance
+// fund stays unchanged, the position stays open, and the perp balances are untouched.
+func TestLiquidation_EmptyBook_NoInsuranceFundDebit(t *testing.T) {
+	ex, perp := setupPerpExchange(USDAmount(6_000), USDAmount(500_000))
+
+	entryPrice := PriceUSD(50_000, DOLLAR_TICK)
+	qty := BTCAmount(1.0)
+
+	_, _ = InjectLimitOrder(ex, 2, "BTC-PERP", Sell, entryPrice, qty)
+	_, _ = InjectMarketOrder(ex, 1, "BTC-PERP", Buy, qty)
+
+	pos := ex.Positions.GetPosition(1, "BTC-PERP")
+	if pos == nil || pos.Size == 0 {
+		t.Fatal("position not opened: setup error")
+	}
+
+	perpBalanceBefore := ex.Clients[1].PerpBalances["USD"]
+	perpReservedBefore := ex.Clients[1].PerpReserved["USD"]
+	insuranceBefore := ex.ExchangeBalance.InsuranceFund["USD"]
+
+	// Crash price below maintenance — but book is empty (no counterparty to fill).
+	crashPrice := PriceUSD(44_000, DOLLAR_TICK)
+	ex.CheckLiquidations("BTC-PERP", perp, crashPrice)
+
+	// Position must stay open (forceClose found no liquidity).
+	posAfter := ex.Positions.GetPosition(1, "BTC-PERP")
+	if posAfter == nil || posAfter.Size == 0 {
+		t.Error("position should remain open when book is empty")
+	}
+
+	// Insurance fund must not be touched.
+	if ex.ExchangeBalance.InsuranceFund["USD"] != insuranceBefore {
+		t.Errorf("insurance fund should be unchanged: before=%d, after=%d",
+			insuranceBefore, ex.ExchangeBalance.InsuranceFund["USD"])
+	}
+
+	// Perp balances must not be touched.
+	if ex.Clients[1].PerpBalances["USD"] != perpBalanceBefore {
+		t.Errorf("perp balance should be unchanged: before=%d, after=%d",
+			perpBalanceBefore, ex.Clients[1].PerpBalances["USD"])
+	}
+	if ex.Clients[1].PerpReserved["USD"] != perpReservedBefore {
+		t.Errorf("perp reserved should be unchanged: before=%d, after=%d",
+			perpReservedBefore, ex.Clients[1].PerpReserved["USD"])
 	}
 }
 

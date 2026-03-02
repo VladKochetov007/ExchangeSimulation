@@ -71,20 +71,20 @@ func (p *PerpFutures) Settle(ctx etypes.SettlementContext) etypes.SettlementResu
 	takerDelta := ctx.Positions.UpdatePosition(exec.TakerClientID, ctx.BookSymbol, exec.Qty, exec.Price, ctx.TakerOrder.Side, ctx.TakerOrder.PositionSide)
 	makerDelta := ctx.Positions.UpdatePosition(exec.MakerClientID, ctx.BookSymbol, exec.Qty, exec.Price, exec.MakerSide, ctx.MakerPosSide)
 
-	if ctx.GlobalLog != nil {
-		ctx.GlobalLog.LogEvent(ctx.Timestamp, exec.TakerClientID, "position_update", etypes.PositionUpdateEvent{
+	if ctx.Log != nil {
+		ctx.Log.LogEvent(ctx.Timestamp, exec.TakerClientID, "position_update", etypes.PositionUpdateEvent{
 			Timestamp: ctx.Timestamp, ClientID: exec.TakerClientID, Symbol: ctx.BookSymbol,
 			OldSize: takerDelta.OldSize, OldEntryPrice: takerDelta.OldEntryPrice,
 			NewSize: takerDelta.NewSize, NewEntryPrice: takerDelta.NewEntryPrice,
 			TradeQty: exec.Qty, TradePrice: exec.Price, TradeSide: ctx.TakerOrder.Side.String(), Reason: "trade",
 		})
-		ctx.GlobalLog.LogEvent(ctx.Timestamp, exec.MakerClientID, "position_update", etypes.PositionUpdateEvent{
+		ctx.Log.LogEvent(ctx.Timestamp, exec.MakerClientID, "position_update", etypes.PositionUpdateEvent{
 			Timestamp: ctx.Timestamp, ClientID: exec.MakerClientID, Symbol: ctx.BookSymbol,
 			OldSize: makerDelta.OldSize, OldEntryPrice: makerDelta.OldEntryPrice,
 			NewSize: makerDelta.NewSize, NewEntryPrice: makerDelta.NewEntryPrice,
 			TradeQty: exec.Qty, TradePrice: exec.Price, TradeSide: exec.MakerSide.String(), Reason: "trade",
 		})
-		ctx.GlobalLog.LogEvent(ctx.Timestamp, 0, "open_interest", etypes.OpenInterestEvent{
+		ctx.Log.LogEvent(ctx.Timestamp, 0, "open_interest", etypes.OpenInterestEvent{
 			Timestamp: ctx.Timestamp, Symbol: ctx.BookSymbol,
 			OpenInterest: ctx.Positions.CalculateOpenInterest(ctx.BookSymbol),
 		})
@@ -123,8 +123,8 @@ func (p *PerpFutures) Settle(ctx etypes.SettlementContext) etypes.SettlementResu
 
 func (p *PerpFutures) settleSide(ctx etypes.SettlementContext, clientID uint64, side etypes.Side, delta etypes.PositionDelta, closedQty int64, fee etypes.Fee, quote string) int64 {
 	pnl := calcPerpPnL(delta.OldSize, delta.OldEntryPrice, ctx.Exec.Qty, ctx.Exec.Price, side, ctx.BasePrecision)
-	if pnl != 0 && ctx.GlobalLog != nil {
-		ctx.GlobalLog.LogEvent(ctx.Timestamp, clientID, "realized_pnl", etypes.RealizedPnLEvent{
+	if pnl != 0 && ctx.Log != nil {
+		ctx.Log.LogEvent(ctx.Timestamp, clientID, "realized_pnl", etypes.RealizedPnLEvent{
 			Timestamp:  ctx.Timestamp,
 			ClientID:   clientID,
 			Symbol:     ctx.BookSymbol,

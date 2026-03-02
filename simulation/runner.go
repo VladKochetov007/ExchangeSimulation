@@ -15,7 +15,7 @@ type RunnerConfig struct {
 
 type Runner struct {
 	clock  Clock
-	venues []*Venue
+	mounts []*Mount
 	actors []actor.Actor
 	config RunnerConfig
 }
@@ -26,14 +26,14 @@ func NewRunner(clock Clock, config RunnerConfig) *Runner {
 	}
 	return &Runner{
 		clock:  clock,
-		venues: make([]*Venue, 0),
+		mounts: make([]*Mount, 0),
 		actors: make([]actor.Actor, 0),
 		config: config,
 	}
 }
 
-func (r *Runner) AddVenue(v *Venue) {
-	r.venues = append(r.venues, v)
+func (r *Runner) AddMount(m *Mount) {
+	r.mounts = append(r.mounts, m)
 }
 
 func (r *Runner) AddActor(a actor.Actor) {
@@ -84,8 +84,8 @@ func (r *Runner) Run(ctx context.Context) error {
 	for _, a := range r.actors {
 		a.Stop()
 	}
-	for _, v := range r.venues {
-		v.Shutdown()
+	for _, m := range r.mounts {
+		m.Shutdown()
 	}
 
 	return nil

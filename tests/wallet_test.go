@@ -10,7 +10,7 @@ func TestSpotLimitBuyLocksQuoteInSpotReserved(t *testing.T) {
 	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(spot)
 
-	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(100000)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(100000)}, &FixedFee{})
 	gw := ex.Gateways[1]
 	defer ex.Shutdown()
 
@@ -40,7 +40,7 @@ func TestSpotLimitSellLocksBaseInSpotReserved(t *testing.T) {
 	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(spot)
 
-	ex.ConnectClient(1, map[string]int64{"BTC": 2 * BTC_PRECISION, "USD": USDAmount(10000)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"BTC": 2 * BTC_PRECISION, "USD": USDAmount(10000)}, &FixedFee{})
 	gw := ex.Gateways[1]
 	defer ex.Shutdown()
 
@@ -68,7 +68,7 @@ func TestPerpLimitOrderLocksInPerpReserved(t *testing.T) {
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
-	ex.ConnectClient(1, nil, &FixedFee{})
+	ex.ConnectNewClient(1, nil, &FixedFee{})
 	gw := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", USDAmount(100000))
 	defer ex.Shutdown()
@@ -101,11 +101,11 @@ func TestPerpCloseReleasesMarginAndSettlesPnL(t *testing.T) {
 	ex.AddInstrument(perp)
 
 	// Client 1: long BTC-PERP
-	ex.ConnectClient(1, nil, &FixedFee{})
+	ex.ConnectNewClient(1, nil, &FixedFee{})
 	gw1 := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", USDAmount(100000))
 	// Client 2: short (maker providing liquidity for close)
-	ex.ConnectClient(2, nil, &FixedFee{})
+	ex.ConnectNewClient(2, nil, &FixedFee{})
 	gw2 := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", USDAmount(100000))
 	defer ex.Shutdown()
@@ -172,7 +172,7 @@ func TestCrossMarketIsolation(t *testing.T) {
 	ex.AddInstrument(spot)
 	ex.AddInstrument(perp)
 
-	ex.ConnectClient(1, map[string]int64{"BTC": 2 * BTC_PRECISION, "USD": USDAmount(200000)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"BTC": 2 * BTC_PRECISION, "USD": USDAmount(200000)}, &FixedFee{})
 	gw := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", USDAmount(50000))
 	defer ex.Shutdown()
@@ -199,7 +199,7 @@ func TestCrossMarketIsolation(t *testing.T) {
 
 func TestTransferSpotToPerp(t *testing.T) {
 	ex := newPerpTestExchange()
-	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(10000)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(10000)}, &FixedFee{})
 	gw := ex.Gateways[1]
 	_ = gw
 	defer ex.Shutdown()
@@ -219,7 +219,7 @@ func TestTransferSpotToPerp(t *testing.T) {
 
 func TestTransferPerpToSpot(t *testing.T) {
 	ex := newPerpTestExchange()
-	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(5000)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(5000)}, &FixedFee{})
 	gw := ex.Gateways[1]
 	_ = gw
 	ex.AddPerpBalance(1, "USD", USDAmount(8000))
@@ -270,7 +270,7 @@ func TestPerpOrderInsufficientPerpBalance(t *testing.T) {
 	ex.AddInstrument(perp)
 
 	// Give lots of SPOT balance but no PERP balance
-	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(1000000)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(1000000)}, &FixedFee{})
 	gw := ex.Gateways[1]
 	defer ex.Shutdown()
 

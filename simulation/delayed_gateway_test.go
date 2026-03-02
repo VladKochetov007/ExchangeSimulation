@@ -13,7 +13,7 @@ func newTestGateway() (*exchange.Exchange, actor.Gateway) {
 	inst := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 	ex.AddInstrument(inst)
 	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000000}
-	return ex, ex.ConnectClient(1, balances, &exchange.FixedFee{})
+	return ex, ex.ConnectNewClient(1, balances, &exchange.FixedFee{})
 }
 
 func placeOrder(gw actor.Gateway, reqID uint64) {

@@ -42,7 +42,7 @@ func TestBaseActorResponseHandling(t *testing.T) {
 	defer ex.Shutdown()
 
 	balances := map[string]int64{"BTC": 10 * exchange.BTC_PRECISION, "USD": 100000 * exchange.BTC_PRECISION}
-	gateway := ex.ConnectClient(1, balances, &exchange.FixedFee{})
+	gateway := ex.ConnectNewClient(1, balances, &exchange.FixedFee{})
 
 	actor := NewBaseActor(1, gateway)
 

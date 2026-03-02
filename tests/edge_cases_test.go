@@ -50,7 +50,7 @@ func TestPlaceOrderInvalidPrice(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 
 	req := &OrderRequest{
 		RequestID:   1,
@@ -78,7 +78,7 @@ func TestPlaceOrderInvalidQty(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 
 	req := &OrderRequest{
 		RequestID:   1,
@@ -102,7 +102,7 @@ func TestPlaceOrderInvalidQty(t *testing.T) {
 func TestPlaceOrderUnknownInstrument(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	balances := map[string]int64{"BTC": BTCAmount(10)}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 
 	req := &OrderRequest{
 		RequestID:   1,
@@ -129,7 +129,7 @@ func TestPlaceOrderInsufficientBalanceBuy(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"USD": 1000}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 
 	req := &OrderRequest{
 		RequestID:   1,
@@ -156,7 +156,7 @@ func TestPlaceOrderInsufficientBalanceSell(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": 100}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 
 	req := &OrderRequest{
 		RequestID:   1,
@@ -183,8 +183,8 @@ func TestPlaceOrderMarketBuyInsufficientBalance(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"USD": 1000, "BTC": BTCAmount(10)}
-	ex.ConnectClient(1, balances, &FixedFee{})
-	ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(2, balances, &FixedFee{})
 
 	sellReq := &OrderRequest{
 		RequestID:   1,
@@ -218,8 +218,8 @@ func TestCancelOrderDifferentClient(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
-	ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(2, balances, &FixedFee{})
 
 	req := &OrderRequest{
 		RequestID:   1,
@@ -302,7 +302,7 @@ func TestBookRemoveLimitUpdatesBest(t *testing.T) {
 func TestDisconnectClient(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	balances := map[string]int64{"BTC": BTCAmount(10)}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 
 	if ex.Gateways[1] == nil {
 		t.Fatalf("Gateway should exist")
@@ -317,7 +317,7 @@ func TestDisconnectClient(t *testing.T) {
 
 func TestShutdownStopsExchange(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
 
 	ex.Shutdown()
 

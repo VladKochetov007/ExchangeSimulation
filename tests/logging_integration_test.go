@@ -69,8 +69,8 @@ func TestFullOrderLifecycleLogging(t *testing.T) {
 		"USD": 1000000 * USD_PRECISION,
 	}
 
-	ex.ConnectClient(1, balances, &FixedFee{})
-	ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(2, balances, &FixedFee{})
 
 	gw1 := ex.Gateways[1]
 	gw2 := ex.Gateways[2]
@@ -173,8 +173,8 @@ func TestMarketOrderLogging(t *testing.T) {
 		"USD": 1000000 * USD_PRECISION,
 	}
 
-	ex.ConnectClient(1, balances, &FixedFee{})
-	ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(2, balances, &FixedFee{})
 
 	gw1 := ex.Gateways[1]
 	gw2 := ex.Gateways[2]
@@ -237,7 +237,7 @@ func TestIcebergOrderLogging(t *testing.T) {
 		"USD": 1000000 * USD_PRECISION,
 	}
 
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 	gw1 := ex.Gateways[1]
 
 	icebergReq := &OrderRequest{
@@ -288,7 +288,7 @@ func TestAllRejectReasonsLogged(t *testing.T) {
 		"USD": 0,
 	}
 
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 	gw1 := ex.Gateways[1]
 
 	insufficientReq := &OrderRequest{
@@ -372,7 +372,7 @@ func TestMultipleSymbolsLogging(t *testing.T) {
 		"USD": 1000000 * USD_PRECISION,
 	}
 
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 	gw1 := ex.Gateways[1]
 
 	btcReq := &OrderRequest{

@@ -8,11 +8,11 @@ import (
 	"exchange_sim/types"
 )
 
-// Compile-time proof that *Venue satisfies the types.Venue contract.
-var _ types.Venue = (*Venue)(nil)
+// Compile-time proof that *Mount satisfies the types.Venue contract.
+var _ types.Venue = (*Mount)(nil)
 
-// Venue pairs a trading venue with optional per-channel latency configuration.
-type Venue struct {
+// Mount pairs a trading venue with optional per-channel latency configuration.
+type Mount struct {
 	Market  types.Venue
 	Latency LatencyConfig
 
@@ -20,40 +20,40 @@ type Venue struct {
 	mu      sync.Mutex
 }
 
-// NewExchangeVenue creates a Venue backed by an *exchange.Exchange.
-func NewExchangeVenue(ex *exchange.Exchange, latency LatencyConfig) *Venue {
-	return &Venue{Market: ex, Latency: latency}
+// NewMount creates a Mount backed by an *exchange.Exchange.
+func NewMount(ex *exchange.Exchange, latency LatencyConfig) *Mount {
+	return &Mount{Market: ex, Latency: latency}
 }
 
-// ConnectClient registers clientID on the venue and wraps the resulting gateway
+// ConnectNewClient registers clientID on the venue and wraps the resulting gateway
 // with latency if any LatencyConfig field is non-nil. Returns the (possibly delayed)
 // gateway ready for use by actors.
-func (v *Venue) ConnectClient(clientID uint64, balances map[string]int64, fee exchange.FeeModel) actor.Gateway {
-	gw := v.Market.ConnectClient(clientID, balances, fee)
-	if v.Latency.Request == nil && v.Latency.Response == nil && v.Latency.MarketData == nil {
+func (m *Mount) ConnectNewClient(clientID uint64, balances map[string]int64, fee exchange.FeeModel) actor.Gateway {
+	gw := m.Market.ConnectNewClient(clientID, balances, fee)
+	if m.Latency.Request == nil && m.Latency.Response == nil && m.Latency.MarketData == nil {
 		return gw
 	}
-	d := NewDelayedGateway(gw, v.Latency.Request, v.Latency.Response, v.Latency.MarketData)
+	d := NewDelayedGateway(gw, m.Latency.Request, m.Latency.Response, m.Latency.MarketData)
 	d.Start()
-	v.mu.Lock()
-	v.delayed = append(v.delayed, d)
-	v.mu.Unlock()
+	m.mu.Lock()
+	m.delayed = append(m.delayed, d)
+	m.mu.Unlock()
 	return d
 }
 
 // Shutdown stops all delayed gateways and shuts down the underlying venue.
-func (v *Venue) Shutdown() {
-	v.mu.Lock()
-	delayed := v.delayed
-	v.mu.Unlock()
+func (m *Mount) Shutdown() {
+	m.mu.Lock()
+	delayed := m.delayed
+	m.mu.Unlock()
 
 	for _, d := range delayed {
 		d.Stop()
 	}
-	v.Market.Shutdown()
+	m.Market.Shutdown()
 }
 
 // IsRunning delegates to the underlying venue.
-func (v *Venue) IsRunning() bool {
-	return v.Market.IsRunning()
+func (m *Mount) IsRunning() bool {
+	return m.Market.IsRunning()
 }

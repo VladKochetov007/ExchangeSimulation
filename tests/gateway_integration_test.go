@@ -12,7 +12,7 @@ func TestHandleClientRequestsCancelOrder(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 	gateway := ex.Gateways[1]
 
 	go ex.HandleClientRequests(gateway)
@@ -63,7 +63,7 @@ func TestHandleClientRequestsSubscribeUnsubscribe(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10)}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 	gateway := ex.Gateways[1]
 
 	go ex.HandleClientRequests(gateway)
@@ -140,7 +140,7 @@ func TestPlaceOrderSellReservesBase(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(2), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 
 	req := &OrderRequest{
 		RequestID:   1,
@@ -170,7 +170,7 @@ func TestPlaceOrderMarketSellNoAskBook(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(2), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 
 	req := &OrderRequest{
 		RequestID:   1,
@@ -193,8 +193,8 @@ func TestProcessExecutionsTakerSell(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true})
-	ex.ConnectClient(2, balances, &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true})
+	ex.ConnectNewClient(1, balances, &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true})
+	ex.ConnectNewClient(2, balances, &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: true})
 
 	buyReq := &OrderRequest{
 		RequestID:   1,
@@ -240,7 +240,7 @@ func TestCancelOrderSellSide(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 
 	req := &OrderRequest{
 		RequestID:   1,

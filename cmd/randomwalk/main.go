@@ -15,12 +15,12 @@ func main() {
 	}
 	defer sim.Close()
 
-	log.Println("BTC-PERP random walk: 900 sim-seconds starting...")
+	log.Println("ABC-PERP random walk: 900 sim-seconds starting...")
 	if err := sim.Runner.Run(context.Background()); err != nil {
 		log.Fatal(err)
 	}
 
 	const usd = float64(exchange.USD_PRECISION)
-	log.Printf("BTC-PERP final mid: $%.2f", float64(sim.MM.Mid())/usd)
+	log.Printf("ABC-PERP final mid: $%.2f", float64(sim.MM.Mid())/usd)
 	log.Println("Logs written to logs/randomwalk/")
 }

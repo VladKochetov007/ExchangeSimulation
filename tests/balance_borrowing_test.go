@@ -120,7 +120,7 @@ func TestPeriodicBalanceSnapshots(t *testing.T) {
 	logger := &testBalanceLogger{}
 	ex.SetLogger("_global", logger)
 
-	ex.ConnectClient(1, map[string]int64{
+	ex.ConnectNewClient(1, map[string]int64{
 		"USD": 10000 * USD_PRECISION,
 	}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 

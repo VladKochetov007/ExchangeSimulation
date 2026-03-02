@@ -12,7 +12,7 @@ func TestClientNotificationsOnPlaceOrder(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 	gateway := ex.Gateways[1]
 
 	go ex.HandleClientRequests(gateway)
@@ -54,9 +54,9 @@ func TestClientNotificationsOnFill(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 	gateway1 := ex.Gateways[1]
-	ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectNewClient(2, balances, &FixedFee{})
 	gateway2 := ex.Gateways[2]
 
 	go ex.HandleClientRequests(gateway1)
@@ -151,9 +151,9 @@ func TestClientNotificationsViaMarketData(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 	gateway1 := ex.Gateways[1]
-	ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectNewClient(2, balances, &FixedFee{})
 	gateway2 := ex.Gateways[2]
 
 	go ex.HandleClientRequests(gateway1)
@@ -233,9 +233,9 @@ func TestClientNotificationsOnPartialFill(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 	gateway1 := ex.Gateways[1]
-	ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectNewClient(2, balances, &FixedFee{})
 	gateway2 := ex.Gateways[2]
 
 	go ex.HandleClientRequests(gateway1)
@@ -316,7 +316,7 @@ func TestClientNotificationsOnReject(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"USD": 1000}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 	gateway := ex.Gateways[1]
 
 	go ex.HandleClientRequests(gateway)

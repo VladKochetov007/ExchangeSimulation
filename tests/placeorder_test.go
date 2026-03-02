@@ -26,8 +26,8 @@ func sendRequest(gateway *ClientGateway, req Request, reqID uint64) Response {
 func setupSpotExchange() *Exchange {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
-	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(100_000), "BTC": BTCAmount(10)}, &FixedFee{})
-	ex.ConnectClient(2, map[string]int64{"USD": USDAmount(100_000), "BTC": BTCAmount(10)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(100_000), "BTC": BTCAmount(10)}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{"USD": USDAmount(100_000), "BTC": BTCAmount(10)}, &FixedFee{})
 	return ex
 }
 
@@ -62,8 +62,8 @@ func TestPlaceOrder_RejectsSpotMarketBuyInsufficientBalance(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
 	// Give only $1 spot — not enough to buy 1 BTC at $50k
-	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(1)}, &FixedFee{})
-	ex.ConnectClient(2, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(1)}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
 
 	// Seed the ask side so the check has a reference price
 	_, _ = InjectLimitOrder(ex, 2, "BTC/USD", Sell, PriceUSD(50_000, DOLLAR_TICK), BTCAmount(1))
@@ -78,8 +78,8 @@ func TestPlaceOrder_RejectsSpotMarketSellInsufficientBalance(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
 	// Give only 0.0001 BTC — not enough to sell 1 BTC
-	ex.ConnectClient(1, map[string]int64{"BTC": BTCAmount(0.0001)}, &FixedFee{})
-	ex.ConnectClient(2, map[string]int64{"USD": USDAmount(100_000)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"BTC": BTCAmount(0.0001)}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{"USD": USDAmount(100_000)}, &FixedFee{})
 
 	// Seed the bid side
 	_, _ = InjectLimitOrder(ex, 2, "BTC/USD", Buy, PriceUSD(50_000, DOLLAR_TICK), BTCAmount(1))
@@ -94,7 +94,7 @@ func TestPlaceOrder_RejectsSpotLimitBuyInsufficientBalance(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
 	// $10 — not enough to reserve for 1 BTC limit buy at $50k
-	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(10)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(10)}, &FixedFee{})
 
 	_, reason := InjectLimitOrder(ex, 1, "BTC/USD", Buy, PriceUSD(50_000, DOLLAR_TICK), BTCAmount(1))
 	if reason != RejectInsufficientBalance {
@@ -106,7 +106,7 @@ func TestPlaceOrder_RejectsSpotLimitSellInsufficientBalance(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
 	// 0.0001 BTC — not enough to reserve for a 1 BTC limit sell
-	ex.ConnectClient(1, map[string]int64{"BTC": BTCAmount(0.0001)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"BTC": BTCAmount(0.0001)}, &FixedFee{})
 
 	_, reason := InjectLimitOrder(ex, 1, "BTC/USD", Sell, PriceUSD(50_000, DOLLAR_TICK), BTCAmount(1))
 	if reason != RejectInsufficientBalance {

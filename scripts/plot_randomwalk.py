@@ -11,7 +11,7 @@ import matplotlib.ticker as mticker
 import numpy as np
 
 LOG_DIR = Path("logs/randomwalk")
-PERP_LOG = LOG_DIR / "perp" / "BTC-PERP.jsonl"
+PERP_LOG = LOG_DIR / "perp" / "ABC-PERP.jsonl"
 OUT_PNG = LOG_DIR / "price_evolution.png"
 
 USD_PRECISION = 100_000
@@ -109,13 +109,13 @@ def main():
     bootstrap_price = to_usd(50_000 * USD_PRECISION)
 
     fig, axes = plt.subplots(3, 2, figsize=(14, 12))
-    fig.suptitle("BTC-PERP Random Walk Simulation", fontsize=14, fontweight="bold")
+    fig.suptitle("ABC-PERP Random Walk Simulation", fontsize=14, fontweight="bold")
 
     # 1. Price evolution
     ax = axes[0, 0]
     ax.plot(trade_times, trade_prices, color="steelblue", linewidth=0.8)
     ax.axhline(bootstrap_price, color="red", linestyle="--", linewidth=1, label=f"Bootstrap (${bootstrap_price:,.0f})")
-    ax.set_title("BTC-PERP Price Evolution")
+    ax.set_title("ABC-PERP Price Evolution")
     ax.set_xlabel("Time (seconds)")
     ax.set_ylabel("Price (USD)")
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))

@@ -12,7 +12,7 @@ func TestInsertLimit_MiddleInsertion(t *testing.T) {
 	clock := &RealClock{}
 	ex := NewExchange(10, clock)
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
-	ex.ConnectClient(1, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
 
 	// To get the "middle insertion" (l.Prev != nil), we need at least 3 levels
 	// in the bid book. Place bids at $52k, $50k, then insert $51k between them.
@@ -58,7 +58,7 @@ func TestRunBalanceSnapshotLoop_Ticks(t *testing.T) {
 		BalanceSnapshotInterval: 10 * time.Millisecond,
 	})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
-	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(1_000)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(1_000)}, &FixedFee{})
 	// Wait for at least 2 ticks then shut down
 	time.Sleep(30 * time.Millisecond)
 	ex.Shutdown()
@@ -105,7 +105,7 @@ func TestValidateCrossMarginCollateral_ZeroBorrowAssetPrice(t *testing.T) {
 func TestAutoBorrowForSpotTrade_BorrowFails(t *testing.T) {
 	ex := setupBorrowingExchange()
 	// Client 3: tiny spot balance, no perp collateral → collateral validation fails
-	ex.ConnectClient(3, map[string]int64{"USD": USDAmount(100)}, &FixedFee{})
+	ex.ConnectNewClient(3, map[string]int64{"USD": USDAmount(100)}, &FixedFee{})
 
 	// Direct borrow call with no collateral should fail with "insufficient collateral"
 	err := ex.BorrowMargin(3, "USD", USDAmount(10_000), "test")
@@ -118,7 +118,7 @@ func TestAutoBorrowForSpotTrade_BorrowFails(t *testing.T) {
 
 func TestAutoBorrowForPerpTrade_BorrowFails(t *testing.T) {
 	ex := setupBorrowingExchange()
-	ex.ConnectClient(3, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(3, map[string]int64{}, &FixedFee{})
 	// Tiny perp balance, no collateral — borrow should fail
 	ex.AddPerpBalance(3, "USD", USDAmount(10))
 
@@ -217,7 +217,7 @@ func TestEnablePeriodicSnapshots_AlreadyHasInterval(t *testing.T) {
 		SnapshotInterval: 100 * time.Millisecond,
 	})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{}) // starts running=true
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{}) // starts running=true
 
 	// snapshotInterval is already non-zero (100ms) → the `if e.snapshotInterval == 0` is false
 	// → no new goroutine started, just updates interval

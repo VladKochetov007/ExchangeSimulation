@@ -47,7 +47,7 @@ func TestCancelOrderValidationNotFound(t *testing.T) {
 	ex.AddInstrument(btcusd)
 
 	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000}
-	ex.ConnectClient(1, balances, &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
+	ex.ConnectNewClient(1, balances, &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
 	gateway := ex.Gateways[1]
 
 	req := Request{
@@ -74,9 +74,9 @@ func TestCancelOrderValidationNotOwned(t *testing.T) {
 	ex.AddInstrument(btcusd)
 
 	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000}
-	ex.ConnectClient(1, balances, &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
+	ex.ConnectNewClient(1, balances, &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
 	gateway1 := ex.Gateways[1]
-	ex.ConnectClient(2, balances, &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
+	ex.ConnectNewClient(2, balances, &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
 	gateway2 := ex.Gateways[2]
 
 	orderReq := Request{
@@ -121,9 +121,9 @@ func TestCancelOrderValidationAfterPartialFill(t *testing.T) {
 	ex.AddInstrument(btcusd)
 
 	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000}
-	ex.ConnectClient(1, balances, &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
+	ex.ConnectNewClient(1, balances, &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
 	gateway1 := ex.Gateways[1]
-	ex.ConnectClient(2, balances, &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
+	ex.ConnectNewClient(2, balances, &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
 	gateway2 := ex.Gateways[2]
 
 	sellReq := Request{

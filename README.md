@@ -44,28 +44,29 @@ flowchart LR
 
     A1 -- Request --> DGW
     DGW --> CGW
-    CGW -. "exchange pulls" .-> DEX
+    CGW -- "exchange pulls" --> DEX
     DEX -- "Response / Fill" --> CGW
     CGW --> DGW
     DGW -- "Response / Fill" --> A1
 
     OB --> ME
-    ME --> ST
-    ST --> PM
+    ME .-> ST
+    ST .-> PM
+    ST .-> BM
 
-    IP -. index .-> FM
-    MP -. mark .-> FM
+    IP -- index --> FM
+    MP -- mark --> FM
     MP -. mark .-> ST
-    MP -. liquidation .-> ME
-    FM --> ST
+    MP -. liquidation .-> ST
+    FM .-> ST
     ME --> MDP
-    ST --> MDP
+    ST .-> MDP
     FM --> MDP
-    ME -. liquidation .-> LH
+    ME -- liquidation --> LH
 
     MDP -- "book · trades</br>funding · OI" --> CGW
 
-    CLK -.-> DEX
+    CLK ---> DEX
     RUNNER --> VENUE
     RUNNER --> AL
     VENUE --> DGW
@@ -142,7 +143,7 @@ Every non-trivial behavior is injectable:
 
 | Interface | Methods |
 |-----------|---------|
-| `Venue` | `ConnectClient`, `Shutdown`, `IsRunning` |
+| `Venue` | `ConnectNewClient`, `Shutdown`, `IsRunning` |
 | `Instrumentable` | `AddInstrument`, `ListInstruments` |
 | `ClientLifecycle` | `CancelAllClientOrders`, `DisconnectClient`, `SetLogger` |
 | `MarginLending` | `EnableBorrowing`, `BorrowMargin`, `RepayMargin` |
@@ -233,7 +234,7 @@ ex.AddInstrument(exchange.NewSpotInstrument(
     exchange.DOLLAR_TICK, exchange.USD_PRECISION/1000,
 ))
 
-gw := ex.ConnectClient(1, map[string]int64{
+gw := ex.ConnectNewClient(1, map[string]int64{
     "BTC": 10 * exchange.BTC_PRECISION,
     "USD": 100_000 * exchange.USD_PRECISION,
 }, &fee.PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
@@ -266,7 +267,7 @@ ex.ConfigureAutomation(exchange.AutomationConfig{
 ex.StartAutomation(context.Background())
 defer ex.StopAutomation()
 
-gw := ex.ConnectClient(1, map[string]int64{
+gw := ex.ConnectNewClient(1, map[string]int64{
     "USD": 100_000 * exchange.USD_PRECISION,
 }, &fee.PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
 ```
@@ -291,8 +292,8 @@ runner := simulation.NewRunner(simClock, simulation.RunnerConfig{Duration: 30 * 
 runner.AddVenue(fastVenue)
 runner.AddVenue(slowVenue)
 
-fastGW := fastVenue.ConnectClient(1, balances, feePlan)
-slowGW := slowVenue.ConnectClient(1, balances, feePlan)
+fastGW := fastVenue.ConnectNewClient(1, balances, feePlan)
+slowGW := slowVenue.ConnectNewClient(1, balances, feePlan)
 
 runner.AddActor(mypackage.NewArbitrageActor(1, fastGW, slowGW))
 runner.Run(context.Background())

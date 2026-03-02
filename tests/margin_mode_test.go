@@ -9,7 +9,7 @@ func setupMarginModeExchange() *Exchange {
 	ex := NewExchange(10, &RealClock{})
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
 	ex.AddPerpBalance(1, "USD", USDAmount(50_000))
 	return ex
 }
@@ -37,7 +37,7 @@ func TestSetMarginMode_UnknownClientReturnsError(t *testing.T) {
 func TestSetMarginMode_FailsWithOpenPositions(t *testing.T) {
 	ex := setupMarginModeExchange()
 
-	ex.ConnectClient(2, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{}, &FixedFee{})
 	ex.AddPerpBalance(2, "USD", USDAmount(500_000))
 
 	entryPrice := PriceUSD(50_000, DOLLAR_TICK)

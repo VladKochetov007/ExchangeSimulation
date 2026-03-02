@@ -48,10 +48,10 @@ func TestFundingRateLogging(t *testing.T) {
 	ex.AddInstrument(perp)
 
 	// Setup clients with liquidity
-	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{})
 	client1 := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 1000000*USD_PRECISION)
-	ex.ConnectClient(2, map[string]int64{}, &PercentageFee{})
+	ex.ConnectNewClient(2, map[string]int64{}, &PercentageFee{})
 	client2 := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 1000000*USD_PRECISION)
 
@@ -120,15 +120,16 @@ func TestOpenInterestLogging(t *testing.T) {
 	ex := NewExchange(16, clock)
 	logger := &completeLogger{}
 	ex.SetLogger("_global", logger)
+	ex.SetLogger("BTC-PERP", logger)
 
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(perp)
 
-	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{})
 	client1 := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
 
-	ex.ConnectClient(2, map[string]int64{}, &PercentageFee{})
+	ex.ConnectNewClient(2, map[string]int64{}, &PercentageFee{})
 	client2 := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 100000*USD_PRECISION)
 
@@ -204,16 +205,17 @@ func TestFeeRevenueLoggingPerp(t *testing.T) {
 	ex := NewExchange(16, clock)
 	logger := &completeLogger{}
 	ex.SetLogger("_global", logger)
+	ex.SetLogger("BTC-PERP", logger)
 
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(perp)
 
 	// Client with 10 bps maker, 20 bps taker fees
-	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client1 := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
 
-	ex.ConnectClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client2 := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 100000*USD_PRECISION)
 
@@ -274,14 +276,15 @@ func TestFeeRevenueLoggingSpot(t *testing.T) {
 	ex := NewExchange(16, clock)
 	logger := &completeLogger{}
 	ex.SetLogger("_global", logger)
+	ex.SetLogger("BTCUSD", logger)
 
 	spot := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(spot)
 
 	// Client with fees
-	ex.ConnectClient(1, map[string]int64{"BTC": 10 * BTC_PRECISION, "USD": 1000000 * USD_PRECISION}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(1, map[string]int64{"BTC": 10 * BTC_PRECISION, "USD": 1000000 * USD_PRECISION}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client1 := ex.Gateways[1]
-	ex.ConnectClient(2, map[string]int64{"BTC": 10 * BTC_PRECISION, "USD": 1000000 * USD_PRECISION}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(2, map[string]int64{"BTC": 10 * BTC_PRECISION, "USD": 1000000 * USD_PRECISION}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client2 := ex.Gateways[2]
 
 	// Spot buy: 0.5 BTC @ $50,000
@@ -338,11 +341,11 @@ func TestCompleteLoggingIntegration(t *testing.T) {
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/100)
 	ex.AddInstrument(perp)
 
-	ex.ConnectClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client1 := ex.Gateways[1]
 	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
 
-	ex.ConnectClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client2 := ex.Gateways[2]
 	ex.AddPerpBalance(2, "USD", 100000*USD_PRECISION)
 

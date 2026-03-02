@@ -17,9 +17,9 @@ func TestPerpMarginReleaseOnlyWhenClosing(t *testing.T) {
 	makerID := uint64(2)
 
 	initialBalance := int64(1000000 * USD_PRECISION)
-	ex.ConnectClient(takerID, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(takerID, map[string]int64{}, &FixedFee{})
 	takerGateway := ex.Gateways[takerID]
-	ex.ConnectClient(makerID, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(makerID, map[string]int64{}, &FixedFee{})
 	makerGateway := ex.Gateways[makerID]
 
 	ex.AddPerpBalance(takerID, "USD", initialBalance)
@@ -173,7 +173,7 @@ func TestPerpMarginMultipleTraders(t *testing.T) {
 	makers := make([]*ClientGateway, 5)
 	for i := 0; i < 5; i++ {
 		makerID := uint64(i + 1)
-		ex.ConnectClient(makerID, map[string]int64{}, &FixedFee{})
+		ex.ConnectNewClient(makerID, map[string]int64{}, &FixedFee{})
 		makers[i] = ex.Gateways[makerID]
 		ex.AddPerpBalance(makerID, "USD", initialBalance)
 
@@ -190,7 +190,7 @@ func TestPerpMarginMultipleTraders(t *testing.T) {
 	takers := make([]*ClientGateway, 3)
 	for i := 0; i < 3; i++ {
 		takerID := uint64(10 + i)
-		ex.ConnectClient(takerID, map[string]int64{}, &FixedFee{})
+		ex.ConnectNewClient(takerID, map[string]int64{}, &FixedFee{})
 		takers[i] = ex.Gateways[takerID]
 		ex.AddPerpBalance(takerID, "USD", initialBalance)
 	}

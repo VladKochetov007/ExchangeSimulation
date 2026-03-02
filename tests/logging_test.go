@@ -45,8 +45,8 @@ func TestExchangeLogging(t *testing.T) {
 		"USD": 1000000 * USD_PRECISION,
 	}
 
-	ex.ConnectClient(1, balances, &FixedFee{})
-	ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(2, balances, &FixedFee{})
 
 	gw1 := ex.Gateways[1]
 	gw2 := ex.Gateways[2]
@@ -156,7 +156,7 @@ func TestExchangeLoggingRejection(t *testing.T) {
 		"USD": 0,
 	}
 
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 	gw1 := ex.Gateways[1]
 
 	// Place order with insufficient balance
@@ -205,7 +205,7 @@ func TestExchangeLoggingCancel(t *testing.T) {
 		"USD": 1000000 * USD_PRECISION,
 	}
 
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 	gw1 := ex.Gateways[1]
 
 	// Place an order

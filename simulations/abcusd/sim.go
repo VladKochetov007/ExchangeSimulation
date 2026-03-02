@@ -86,10 +86,10 @@ func NewSim() (*Sim, error) {
 	takerFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 10, InQuote: true}
 	arbFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
 
-	venue := simulation.NewExchangeVenue(ex, simulation.LatencyConfig{})
-	mmGw := venue.ConnectClient(1, initSpot, zeroFee)
-	takerGw := venue.ConnectClient(2, initSpot, takerFee)
-	arbGw := venue.ConnectClient(3, initSpot, arbFee)
+	mount := simulation.NewMount(ex, simulation.LatencyConfig{})
+	mmGw := mount.ConnectNewClient(1, initSpot, zeroFee)
+	takerGw := mount.ConnectNewClient(2, initSpot, takerFee)
+	arbGw := mount.ConnectNewClient(3, initSpot, arbFee)
 	for _, id := range []uint64{1, 2, 3} {
 		ex.AddPerpBalance(id, "USD", 10_000_000*exchange.USD_PRECISION)
 	}
@@ -132,7 +132,7 @@ func NewSim() (*Sim, error) {
 		Iterations: 9_000_000,
 		Step:       10 * time.Millisecond,
 	})
-	runner.AddVenue(venue)
+	runner.AddMount(mount)
 	runner.AddActor(mm)
 	runner.AddActor(taker)
 	runner.AddActor(arb)

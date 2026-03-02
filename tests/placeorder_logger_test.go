@@ -32,7 +32,7 @@ func TestPlaceOrder_LogsInvalidQty(t *testing.T) {
 func TestPlaceOrder_LogsInsufficientBalance(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
-	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(10)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(10)}, &FixedFee{})
 	ex.SetLogger("BTC/USD", &nullLogger{})
 
 	_, reason := InjectLimitOrder(ex, 1, "BTC/USD", Buy, PriceUSD(50_000, DOLLAR_TICK), BTCAmount(1))
@@ -77,7 +77,7 @@ func TestPlaceOrder_AutoBorrow_PerpLimitSuccess(t *testing.T) {
 	ex, _ := setupPerpExchange(0, USDAmount(500_000))
 	// Client 1 starts with $0 perp but has enough collateral via spot for auto-borrow.
 	// Give client 1 some spot balance first (used as collateral in cross-margin).
-	ex.ConnectClient(3, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(3, map[string]int64{}, &FixedFee{})
 	ex.AddPerpBalance(3, "USD", USDAmount(50_000)) // enough collateral
 
 	oracle := NewStaticPriceOracle(map[string]int64{"USD": USD_PRECISION})
@@ -93,7 +93,7 @@ func TestPlaceOrder_AutoBorrow_PerpLimitSuccess(t *testing.T) {
 
 	// Client 3 has $50k perp, no borrow yet. Margin for 1 BTC at $50k = $5k.
 	// PerpAvailable = $50k ≥ $5k so no borrow needed. Give 0 perp instead:
-	ex.ConnectClient(4, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(4, map[string]int64{}, &FixedFee{})
 	// Inject $4k as perp — not enough for $5k margin, but collateral covers $1k borrow.
 	ex.AddPerpBalance(4, "USD", USDAmount(4_000))
 	// Need more collateral for the borrow validation:
@@ -115,8 +115,8 @@ func TestPlaceOrder_AutoBorrow_PerpLimitSuccess(t *testing.T) {
 func TestPlaceOrder_AutoBorrow_SpotLimitBuySuccess(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
-	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(100_000)}, &FixedFee{}) // liquidity provider
-	ex.ConnectClient(2, map[string]int64{"USD": USDAmount(1_000)}, &FixedFee{})   // small balance
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(100_000)}, &FixedFee{}) // liquidity provider
+	ex.ConnectNewClient(2, map[string]int64{"USD": USDAmount(1_000)}, &FixedFee{})   // small balance
 
 	oracle := NewStaticPriceOracle(map[string]int64{"USD": USD_PRECISION})
 	if err := ex.EnableBorrowing(BorrowingConfig{
@@ -158,7 +158,7 @@ func TestRepayMargin_InsufficientAvailableBalance(t *testing.T) {
 func TestHasOpenPositions_NoPositionsForClient(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
 
 	// Client has no positions at all (nil map in Positions) → should return false
 	if err := ex.SetMarginMode(1, IsolatedMargin); err != nil {

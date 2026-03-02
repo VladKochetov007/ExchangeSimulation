@@ -11,8 +11,8 @@ func TestInsufficientLiquidityLimitOrder(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
-	ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(2, balances, &FixedFee{})
 
 	sellReq := &OrderRequest{
 		RequestID:   1,
@@ -68,8 +68,8 @@ func TestInsufficientLiquidityMarketOrder(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
-	ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(2, balances, &FixedFee{})
 
 	sellReq := &OrderRequest{
 		RequestID:   1,
@@ -119,8 +119,8 @@ func TestFOKOrderNotImplemented(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
-	ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(2, balances, &FixedFee{})
 
 	sellReq := &OrderRequest{
 		RequestID:   1,
@@ -159,8 +159,8 @@ func TestFOKOrderFullyFilled(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
-	ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(2, balances, &FixedFee{})
 
 	sellReq := &OrderRequest{
 		RequestID:   1,
@@ -194,8 +194,8 @@ func TestIOCOrderPartialFill(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
-	ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(2, balances, &FixedFee{})
 
 	sellReq := &OrderRequest{
 		RequestID:   1,
@@ -241,7 +241,7 @@ func TestIOCOrderNoFill(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 
 	buyReq := &OrderRequest{
 		RequestID:   1,
@@ -270,7 +270,7 @@ func TestEmptyBookMarketOrder(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"USD": 100000 * USD_PRECISION}
-	ex.ConnectClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
 
 	buyReq := &OrderRequest{
 		RequestID:   1,
@@ -299,8 +299,8 @@ func TestPartialFillReleasesCorrectAmount(t *testing.T) {
 	ex.AddInstrument(instrument)
 
 	balances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(100000)}
-	ex.ConnectClient(1, balances, &FixedFee{})
-	ex.ConnectClient(2, balances, &FixedFee{})
+	ex.ConnectNewClient(1, balances, &FixedFee{})
+	ex.ConnectNewClient(2, balances, &FixedFee{})
 
 	sellReq := &OrderRequest{
 		RequestID:   1,

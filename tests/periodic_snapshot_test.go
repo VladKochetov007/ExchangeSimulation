@@ -130,7 +130,7 @@ func TestPeriodicSnapshots(t *testing.T) {
 		"BTC": 100 * BTC_PRECISION,
 		"USD": 1000000 * USD_PRECISION,
 	}
-	ex.ConnectClient(1, balances, &PercentageFee{})
+	ex.ConnectNewClient(1, balances, &PercentageFee{})
 	gw := ex.Gateways[1]
 
 	// Place a buy order to make the snapshot interesting
@@ -215,7 +215,7 @@ func TestPeriodicSnapshotsWithSimulatedClock(t *testing.T) {
 		"BTC": 100 * BTC_PRECISION,
 		"USD": 1000000 * USD_PRECISION,
 	}
-	ex.ConnectClient(1, balances, &PercentageFee{})
+	ex.ConnectNewClient(1, balances, &PercentageFee{})
 	gw := ex.Gateways[1]
 
 	// Subscribe
@@ -278,9 +278,9 @@ func TestMultipleSubscribersReceiveSnapshots(t *testing.T) {
 	}
 
 	// Connect two clients
-	ex.ConnectClient(1, balances, &PercentageFee{})
+	ex.ConnectNewClient(1, balances, &PercentageFee{})
 	gw1 := ex.Gateways[1]
-	ex.ConnectClient(2, balances, &PercentageFee{})
+	ex.ConnectNewClient(2, balances, &PercentageFee{})
 	gw2 := ex.Gateways[2]
 
 	// Both subscribe to same symbol
@@ -352,7 +352,7 @@ func TestDeltasInterleavedWithSnapshots(t *testing.T) {
 		"USD": 1000000 * USD_PRECISION,
 	}
 
-	ex.ConnectClient(1, balances, &PercentageFee{})
+	ex.ConnectNewClient(1, balances, &PercentageFee{})
 	gw := ex.Gateways[1]
 
 	// Subscribe

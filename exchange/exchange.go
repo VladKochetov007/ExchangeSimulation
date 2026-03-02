@@ -376,7 +376,7 @@ func (e *DefaultExchange) CancelAllClientOrders(clientID uint64) int {
 	return count
 }
 
-func (e *DefaultExchange) ConnectClient(clientID uint64, initialBalances map[string]int64, feePlan FeeModel) Gateway {
+func (e *DefaultExchange) ConnectNewClient(clientID uint64, initialBalances map[string]int64, feePlan FeeModel) Gateway {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -957,6 +957,10 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 		closeSide = Buy
 	}
 	fillPrice := e.forceClose(clientID, client, book, book.Instrument, closeSide, abs(pos.Size), timestamp)
+	if fillPrice == 0 {
+		// No liquidity in the book; position stays open for retry on next mark price update.
+		return
+	}
 
 	if e.BorrowingMgr != nil {
 		borrowed := client.Borrowed[perp.QuoteAsset()]

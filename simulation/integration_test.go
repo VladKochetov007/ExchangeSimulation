@@ -32,8 +32,8 @@ func TestSimulationIntegration(t *testing.T) {
 	defer logFile.Close()
 	ex.SetLogger("BTCUSD", logger.New(logFile))
 
-	v := NewExchangeVenue(ex, LatencyConfig{})
-	runner.AddVenue(v)
+	m := NewMount(ex, LatencyConfig{})
+	runner.AddMount(m)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -54,32 +54,32 @@ func TestSimulationIntegration(t *testing.T) {
 	}
 }
 
-func TestSimulationMultiVenueIntegration(t *testing.T) {
+func TestSimulationMultiMountIntegration(t *testing.T) {
 	runner := NewRunner(&RealClock{}, RunnerConfig{
 		Duration: 100 * time.Millisecond,
 	})
 
-	makeVenue := func(latencyMs int) *Venue {
+	makeMount := func(latencyMs int) *Mount {
 		ex := exchange.NewExchange(10, &RealClock{})
 		inst := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
 		ex.AddInstrument(inst)
-		return NewExchangeVenue(ex, LatencyConfig{
+		return NewMount(ex, LatencyConfig{
 			Request:  NewConstantLatency(time.Duration(latencyMs) * time.Millisecond),
 			Response: NewConstantLatency(time.Duration(latencyMs) * time.Millisecond),
 		})
 	}
 
-	venueFast := makeVenue(1)
-	venueSlow := makeVenue(5)
-	runner.AddVenue(venueFast)
-	runner.AddVenue(venueSlow)
+	mountFast := makeMount(1)
+	mountSlow := makeMount(5)
+	runner.AddMount(mountFast)
+	runner.AddMount(mountSlow)
 
 	balances := map[string]int64{"BTC": 1000000000, "USD": 1000000000000}
-	gwFast := venueFast.ConnectClient(1, balances, &exchange.FixedFee{})
-	gwSlow := venueSlow.ConnectClient(1, balances, &exchange.FixedFee{})
+	gwFast := mountFast.ConnectNewClient(1, balances, &exchange.FixedFee{})
+	gwSlow := mountSlow.ConnectNewClient(1, balances, &exchange.FixedFee{})
 
 	if gwFast == nil || gwSlow == nil {
-		t.Fatal("ConnectClient returned nil")
+		t.Fatal("ConnectNewClient returned nil")
 	}
 
 	if err := runner.Run(context.Background()); err != nil {

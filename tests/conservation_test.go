@@ -32,8 +32,8 @@ func TestMoneyConservation_SpotTrades(t *testing.T) {
 	takerBalances := map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(500_000)}
 
 	fees := &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true}
-	_ = ex.ConnectClient(1, makerBalances, fees)
-	_ = ex.ConnectClient(2, takerBalances, fees)
+	_ = ex.ConnectNewClient(1, makerBalances, fees)
+	_ = ex.ConnectNewClient(2, takerBalances, fees)
 
 	initialUSD := totalMoney(ex, "USD")
 	initialBTC := totalMoney(ex, "BTC")
@@ -64,8 +64,8 @@ func TestMoneyConservation_MultipleTrades(t *testing.T) {
 	ex.AddInstrument(inst)
 
 	fees := &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true}
-	_ = ex.ConnectClient(1, map[string]int64{"BTC": BTCAmount(100), "USD": USDAmount(5_000_000)}, fees)
-	_ = ex.ConnectClient(2, map[string]int64{"BTC": BTCAmount(100), "USD": USDAmount(5_000_000)}, fees)
+	_ = ex.ConnectNewClient(1, map[string]int64{"BTC": BTCAmount(100), "USD": USDAmount(5_000_000)}, fees)
+	_ = ex.ConnectNewClient(2, map[string]int64{"BTC": BTCAmount(100), "USD": USDAmount(5_000_000)}, fees)
 
 	initialUSD := totalMoney(ex, "USD")
 	initialBTC := totalMoney(ex, "BTC")
@@ -97,11 +97,11 @@ func TestMoneyConservation_Liquidation(t *testing.T) {
 
 	fees := &PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
 	// Client 1: thin margin, large position — will be liquidated
-	_ = ex.ConnectClient(1, map[string]int64{}, fees)
+	_ = ex.ConnectNewClient(1, map[string]int64{}, fees)
 	ex.AddPerpBalance(1, "USD", USDAmount(6_000)) // ~10% margin on 1 BTC at $50k
 
 	// Client 2: provides liquidity at entry and at crash price
-	_ = ex.ConnectClient(2, map[string]int64{}, fees)
+	_ = ex.ConnectNewClient(2, map[string]int64{}, fees)
 	ex.AddPerpBalance(2, "USD", USDAmount(500_000))
 
 	initialUSD := totalMoney(ex, "USD")
@@ -142,8 +142,8 @@ func TestMoneyConservation_CrossMarginMultiPosition(t *testing.T) {
 	ex.AddInstrument(ethPerp)
 
 	fees := &PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
-	_ = ex.ConnectClient(1, map[string]int64{}, fees) // cross-margin trader
-	_ = ex.ConnectClient(2, map[string]int64{}, fees) // liquidity provider
+	_ = ex.ConnectNewClient(1, map[string]int64{}, fees) // cross-margin trader
+	_ = ex.ConnectNewClient(2, map[string]int64{}, fees) // liquidity provider
 
 	ex.AddPerpBalance(1, "USD", USDAmount(100_000))
 	ex.AddPerpBalance(2, "USD", USDAmount(500_000))
@@ -187,9 +187,9 @@ func TestMoneyConservation_FundingPayments(t *testing.T) {
 	ex.AddInstrument(perp)
 
 	fees := &PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
-	ex.ConnectClient(1, map[string]int64{}, fees)
+	ex.ConnectNewClient(1, map[string]int64{}, fees)
 	gw1 := ex.Gateways[1]
-	ex.ConnectClient(2, map[string]int64{}, fees)
+	ex.ConnectNewClient(2, map[string]int64{}, fees)
 	gw2 := ex.Gateways[2]
 
 	ex.AddPerpBalance(1, "USD", USDAmount(100_000))
@@ -222,8 +222,8 @@ func TestSettleFunding_CorrectMagnitudeAtBTCPrices(t *testing.T) {
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
-	ex.ConnectClient(2, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{}, &FixedFee{})
 
 	entryUSD := PriceUSD(50_000, DOLLAR_TICK) // $50,000 in USD units = 5_000_000_000
 	qty := BTCAmount(1.0)                     // 1 BTC = 100_000_000 satoshis
@@ -267,8 +267,8 @@ func TestSettleFunding_AsymmetricOIRoutesToExchange(t *testing.T) {
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
 
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
-	ex.ConnectClient(2, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{}, &FixedFee{})
 
 	// Client 1: long 1 BTC entered at $50k → notional $50k
 	// Client 2: short 1 BTC entered at $40k → notional $40k

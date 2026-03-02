@@ -24,7 +24,7 @@ func setupBorrowingExchange() *Exchange {
 		PriceSource:       oracle,
 	})
 
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
 	ex.AddPerpBalance(1, "USD", USDAmount(100_000))
 
 	return ex
@@ -51,7 +51,7 @@ func TestBorrowMargin_IncreasesBalance(t *testing.T) {
 
 func TestBorrowMargin_DisabledReturnsError(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
 	ex.EnableBorrowing(BorrowingConfig{Enabled: false})
 
 	err := ex.BorrowMargin(1, "USD", USDAmount(1_000), "test")
@@ -128,9 +128,9 @@ func TestAutoBorrow_SpotOrderTriggersWhenShortfall(t *testing.T) {
 	})
 
 	// Maker: has BTC to sell
-	gw1 := ex.ConnectClient(1, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
+	gw1 := ex.ConnectNewClient(1, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
 	// Taker: has only $100 but wants to buy $5000 worth — shortfall $4900
-	gw2 := ex.ConnectClient(2, map[string]int64{"USD": USDAmount(100)}, &FixedFee{})
+	gw2 := ex.ConnectNewClient(2, map[string]int64{"USD": USDAmount(100)}, &FixedFee{})
 	// Add perp collateral for collateral validation
 	ex.AddPerpBalance(2, "USD", USDAmount(10_000))
 
@@ -170,8 +170,8 @@ func TestAutoBorrow_PerpOrderTriggersWhenShortfall(t *testing.T) {
 		PriceSource:    oracle,
 	})
 
-	gw1 := ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
-	gw2 := ex.ConnectClient(2, map[string]int64{}, &FixedFee{})
+	gw1 := ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
+	gw2 := ex.ConnectNewClient(2, map[string]int64{}, &FixedFee{})
 	// Client 2: enough collateral but insufficient perp margin for the trade
 	ex.AddPerpBalance(1, "USD", USDAmount(10_000))
 	ex.AddPerpBalance(2, "USD", USDAmount(100))
@@ -195,7 +195,7 @@ func TestAutoBorrow_PerpOrderTriggersWhenShortfall(t *testing.T) {
 
 func TestBorrowingRate_DefaultKey(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
 	ex.AddPerpBalance(1, "USD", USDAmount(100_000))
 
 	oracle := NewStaticPriceOracle(map[string]int64{"USD": USD_PRECISION})
@@ -213,7 +213,7 @@ func TestBorrowingRate_DefaultKey(t *testing.T) {
 
 func TestBorrowingRate_HardcodedDefault(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
 	ex.AddPerpBalance(1, "USD", USDAmount(100_000))
 
 	oracle := NewStaticPriceOracle(map[string]int64{"USD": USD_PRECISION})

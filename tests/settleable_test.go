@@ -46,8 +46,8 @@ func TestCustomSettleableInstrument(t *testing.T) {
 
 	balances1 := map[string]int64{"BASE": 10 * BTC_PRECISION, "QUOTE": 1_000_000 * USD_PRECISION}
 	balances2 := map[string]int64{"BASE": 10 * BTC_PRECISION, "QUOTE": 1_000_000 * USD_PRECISION}
-	ex.ConnectClient(1, balances1, &PercentageFee{MakerBps: 0, TakerBps: 0, InQuote: true})
-	ex.ConnectClient(2, balances2, &PercentageFee{MakerBps: 0, TakerBps: 0, InQuote: true})
+	ex.ConnectNewClient(1, balances1, &PercentageFee{MakerBps: 0, TakerBps: 0, InQuote: true})
+	ex.ConnectNewClient(2, balances2, &PercentageFee{MakerBps: 0, TakerBps: 0, InQuote: true})
 
 	go ex.HandleClientRequests(ex.Gateways[1])
 	go ex.HandleClientRequests(ex.Gateways[2])

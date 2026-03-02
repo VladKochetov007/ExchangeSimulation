@@ -146,7 +146,7 @@ func TestWeightedMidPriceCalculator_EmptyBook(t *testing.T) {
 func TestPublishSnapshot_ViaSubscribe(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
 	gateway := ex.Gateways[1]
 
 	ex.MDPublisher.Subscribe(1, "BTC/USD", []MDType{MDSnapshot}, gateway)

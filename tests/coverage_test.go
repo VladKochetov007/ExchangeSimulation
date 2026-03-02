@@ -31,7 +31,7 @@ func TestPublishSnapshot_Directly(t *testing.T) {
 func TestLogAllBalances_WithLogger(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
-	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(1_000), "BTC": BTCAmount(0.5)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(1_000), "BTC": BTCAmount(0.5)}, &FixedFee{})
 	ex.AddPerpBalance(1, "USD", USDAmount(500))
 	injectBorrowing(ex, 1, "USD", USDAmount(100))
 
@@ -45,7 +45,7 @@ func TestLogAllBalances_WithLogger(t *testing.T) {
 func TestEnablePeriodicSnapshots_WhileRunning(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{}) // starts e.running = true
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{}) // starts e.running = true
 
 	// Calling EnablePeriodicSnapshots while running should not panic.
 	// The branch `if e.running && e.snapshotInterval == 0 && interval > 0` is triggered.
@@ -59,7 +59,7 @@ func TestEnablePeriodicSnapshots_WhileRunning(t *testing.T) {
 func TestSubscribe_WithLogger(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
 	ex.SetLogger("BTC/USD", &nullLogger{})
 
 	const reqID = uint64(5555)
@@ -226,7 +226,7 @@ func TestCalculateCollateralUsed_ZeroPrice(t *testing.T) {
 
 func TestValidateCrossMarginCollateral_ZeroPriceForBorrowedAsset(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
 	ex.AddPerpBalance(1, "USD", USDAmount(100_000))
 
 	// Give client existing debt in ETH (no oracle price for ETH → price=0 → branch taken)
@@ -254,8 +254,8 @@ func TestValidateCrossMarginCollateral_ZeroPriceForBorrowedAsset(t *testing.T) {
 func TestPlaceOrder_IOCSpotBuy_PartialFill(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
-	ex.ConnectClient(1, map[string]int64{"USD": USDAmount(100_000)}, &FixedFee{})
-	ex.ConnectClient(2, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(100_000)}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
 
 	// Seed only 0.3 BTC of asks — IOC for 1 BTC will partially fill then cancel remainder
 	_, _ = InjectLimitOrder(ex, 2, "BTC/USD", Sell, PriceUSD(50_000, DOLLAR_TICK), BTCAmount(0.3))
@@ -285,8 +285,8 @@ func TestPlaceOrder_IOCSpotBuy_PartialFill(t *testing.T) {
 func TestPlaceOrder_IOCSpotSell_PartialFill(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
-	ex.ConnectClient(1, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
-	ex.ConnectClient(2, map[string]int64{"USD": USDAmount(100_000)}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{"USD": USDAmount(100_000)}, &FixedFee{})
 
 	// Seed only 0.3 BTC worth of bids
 	_, _ = InjectLimitOrder(ex, 2, "BTC/USD", Buy, PriceUSD(50_000, DOLLAR_TICK), BTCAmount(0.3))
@@ -376,7 +376,9 @@ func setupPerpAutomation(handler LiquidationHandler) (*Exchange, *PerpFutures) {
 	ex := NewExchange(10, &RealClock{})
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	ex.AddInstrument(perp)
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{}, &FixedFee{})
+	ex.AddPerpBalance(2, "USD", USDAmount(1_000_000))
 	ex.ExchangeBalance.InsuranceFund["USD"] = USDAmount(1_000_000)
 	ex.LiquidationHandler = handler
 	ex.CollateralRate = 500
@@ -426,6 +428,8 @@ func TestCheckLiquidations_TriggersLiquidation(t *testing.T) {
 	// Long 1 BTC at $100. initMargin=$10. balance=0, reserved=$1 → PerpAvailable=-$1.
 	// equity = -$1 + (-$10 pnl at $90) = -$11 << maintenance → liquidation.
 	injectPerpPosition(ex, 1, "BTC-PERP", BTCAmount(1.0), entry100(), 0, USDAmount(1))
+	// Counterparty provides liquidity so the liquidation market sell can fill.
+	InjectLimitOrder(ex, 2, "BTC-PERP", Buy, markBelow(), BTCAmount(1.0))
 
 	ex.CheckLiquidations("BTC-PERP", perp, markBelow())
 
@@ -438,8 +442,9 @@ func TestCheckLiquidations_InsuranceFundDeficit(t *testing.T) {
 	handler := &mockLiquidationHandler{}
 	ex, perp := setupPerpAutomation(handler)
 
-	// PerpAvailable = -$1 → after liquidation (no fills) → deficit path.
+	// balance=0, reserved=$1, long 1 BTC @ $100, mark=$90 → loss=$10 → deficit after fill.
 	injectPerpPosition(ex, 1, "BTC-PERP", BTCAmount(1.0), entry100(), 0, USDAmount(1))
+	InjectLimitOrder(ex, 2, "BTC-PERP", Buy, markBelow(), BTCAmount(1.0))
 
 	ex.CheckLiquidations("BTC-PERP", perp, markBelow())
 
@@ -454,6 +459,7 @@ func TestCheckLiquidations_LiquidationWithLogger(t *testing.T) {
 	ex.SetLogger("_global", &nullLogger{})
 
 	injectPerpPosition(ex, 1, "BTC-PERP", BTCAmount(1.0), entry100(), 0, USDAmount(1))
+	InjectLimitOrder(ex, 2, "BTC-PERP", Buy, markBelow(), BTCAmount(1.0))
 
 	ex.CheckLiquidations("BTC-PERP", perp, markBelow())
 	if len(handler.liquidations) == 0 {
@@ -467,9 +473,10 @@ func TestCheckLiquidations_SurplusPath(t *testing.T) {
 	handler := &mockLiquidationHandler{}
 	ex, perp := setupPerpAutomation(handler)
 
-	// balance=$2, reserved=0 → PerpAvailable=$2 (surplus after liquidation).
-	// equity = $2 + (-$10 pnl at $90) = -$8 < maintenance → liquidation.
-	injectPerpPosition(ex, 1, "BTC-PERP", BTCAmount(1.0), entry100(), USDAmount(2), 0)
+	// balance=$11, reserved=$1 → PerpAvailable=$10, unrealizedPnL=-$10 → equity=$0 < maintenance.
+	// After fill at $90: realized PnL=-$10, balance=$1, reserved=0 → PerpAvailable=$1 (surplus).
+	injectPerpPosition(ex, 1, "BTC-PERP", BTCAmount(1.0), entry100(), USDAmount(11), USDAmount(1))
+	InjectLimitOrder(ex, 2, "BTC-PERP", Buy, markBelow(), BTCAmount(1.0))
 
 	ex.CheckLiquidations("BTC-PERP", perp, markBelow())
 
@@ -500,6 +507,8 @@ func TestCheckLiquidations_CancelsOpenOrders(t *testing.T) {
 
 	// Inject long 1 BTC at $100 with deficit state to trigger liquidation.
 	injectPerpPosition(ex, 1, "BTC-PERP", BTCAmount(1.0), entry100(), 0, USDAmount(1))
+	// Counterparty buy so the liquidation market sell can fill (after client 1's Sell is cancelled).
+	InjectLimitOrder(ex, 2, "BTC-PERP", Buy, markBelow(), BTCAmount(1.0))
 
 	ex.CheckLiquidations("BTC-PERP", perp, markBelow())
 
@@ -554,7 +563,7 @@ func TestCheckLiquidations_ZeroMarkPrice(t *testing.T) {
 func TestChargeCollateralInterest_WithLogger(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	ex.AddInstrument(NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
-	ex.ConnectClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
 	ex.SetLogger("_global", &nullLogger{})
 
 	// Borrow a large amount so interest > 0 in one minute at 5% APR.

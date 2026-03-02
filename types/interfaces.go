@@ -13,7 +13,7 @@ type Gateway interface {
 
 // Venue is the minimal contract any trading venue must satisfy.
 type Venue interface {
-	ConnectClient(clientID uint64, balances map[string]int64, feePlan FeeModel) Gateway
+	ConnectNewClient(clientID uint64, balances map[string]int64, feePlan FeeModel) Gateway
 	Shutdown()
 	IsRunning() bool
 }
