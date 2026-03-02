@@ -36,10 +36,11 @@ func NewSim() (*Sim, error) {
 	timerFact := simulation.NewSimTimerFactory(scheduler)
 
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
-		EstimatedClients: 4,
-		Clock:            simClock,
-		TickerFactory:    timerFact,
-		SnapshotInterval: time.Second,
+		EstimatedClients:        4,
+		Clock:                   simClock,
+		TickerFactory:           timerFact,
+		SnapshotInterval:        time.Second,
+		BalanceSnapshotInterval: 10 * time.Second,
 	})
 
 	perp := exchange.NewPerpFutures("ABC-PERP", "ABC", "USD",

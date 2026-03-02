@@ -36,10 +36,11 @@ func NewSim() (*Sim, error) {
 	timerFact := simulation.NewSimTimerFactory(scheduler)
 
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
-		EstimatedClients: 10,
-		Clock:            simClock,
-		TickerFactory:    timerFact,
-		SnapshotInterval: 100 * time.Millisecond,
+		EstimatedClients:        10,
+		Clock:                   simClock,
+		TickerFactory:           timerFact,
+		SnapshotInterval:        100 * time.Millisecond,
+		BalanceSnapshotInterval: 60 * time.Second,
 	})
 
 	spotInst := exchange.NewSpotInstrument("ABC-USD", "ABC", "USD",

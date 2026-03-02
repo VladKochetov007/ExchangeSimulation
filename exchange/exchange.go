@@ -208,18 +208,18 @@ func (e *DefaultExchange) logSnapshots() {
 	}
 }
 
-func (e *DefaultExchange) EnableBalanceSnapshots(snapshotInterval time.Duration) {
+func (e *DefaultExchange) EnableBalanceSnapshots(interval time.Duration) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.balanceSnapshotInterval = snapshotInterval
-	if e.running && snapshotInterval > 0 {
+	e.balanceSnapshotInterval = interval
+	if e.running && interval > 0 {
 		e.balanceSnapshotStopCh = make(chan struct{})
-		go e.runBalanceSnapshotLoop(snapshotInterval)
+		go e.runBalanceSnapshotLoop(interval)
 	}
 }
 
 func (e *DefaultExchange) runBalanceSnapshotLoop(interval time.Duration) {
-	ticker := time.NewTicker(interval)
+	ticker := e.tickerFactory.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -228,7 +228,7 @@ func (e *DefaultExchange) runBalanceSnapshotLoop(interval time.Duration) {
 			return
 		case <-e.shutdownCh:
 			return
-		case <-ticker.C:
+		case <-ticker.C():
 			e.LogAllBalances()
 		}
 	}
