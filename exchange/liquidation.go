@@ -1,5 +1,13 @@
 package exchange
 
+// ForcedCancelNotification is sent to a client's gateway when the exchange
+// cancels an order on its behalf (e.g. during liquidation) without a client
+// cancel request. Actors decode this via decodeResponse to clean up state.
+type ForcedCancelNotification struct {
+	OrderID      uint64
+	RemainingQty int64
+}
+
 // forceClose cancels all open orders for clientID on the given book, then executes
 // a market order to close qty on the given side. Returns the fill price (0 if no fill).
 // Caller must hold e.mu.Lock().
@@ -27,11 +35,13 @@ func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *Orde
 }
 
 // cancelClientOrdersOnBook cancels all open orders for client on the given book,
-// releasing reserved perp margin for each cancelled order.
+// releasing reserved perp margin, publishing book deltas, and notifying the client
+// gateway so actors can clean up their local state.
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBook, instrument Instrument) {
 	m, isMargined := instrument.(Margined)
 	precision := instrument.BasePrecision()
+	gw := e.Gateways[client.ID]
 	for _, orderID := range append([]uint64{}, client.OrderIDs...) {
 		var order *Order
 		if o := book.Bids.Orders[orderID]; o != nil {
@@ -42,15 +52,23 @@ func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBo
 		if order == nil || order.ClientID != client.ID {
 			continue
 		}
+		remainingQty := order.Qty - order.FilledQty
 		if isMargined {
-			remainingQty := order.Qty - order.FilledQty
 			client.ReleasePerp(instrument.QuoteAsset(), m.MarginOnCancel(remainingQty, order.Price, precision))
 		}
 		if order.Side == Buy {
 			book.Bids.CancelOrder(orderID)
+			e.publishBookUpdate(book, Buy, order.Price)
 		} else {
 			book.Asks.CancelOrder(orderID)
+			e.publishBookUpdate(book, Sell, order.Price)
 		}
 		client.RemoveOrder(orderID)
+		if gw != nil && gw.IsRunning() {
+			select {
+			case gw.ResponseCh <- Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}}:
+			default:
+			}
+		}
 	}
 }

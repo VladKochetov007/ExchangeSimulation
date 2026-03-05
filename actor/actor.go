@@ -243,6 +243,19 @@ func (a *BaseActor) decodeResponse(resp exchange.Response) *Event {
 			},
 		}
 
+	case *exchange.ForcedCancelNotification:
+		if val, ok := a.activeOrders.LoadAndDelete(data.OrderID); ok {
+			info := val.(*OrderInfo)
+			a.requestToOrder.Delete(info.RequestID)
+		}
+		return &Event{
+			Type: EventOrderCancelled,
+			Data: OrderCancelledEvent{
+				OrderID:      data.OrderID,
+				RemainingQty: data.RemainingQty,
+			},
+		}
+
 	case *exchange.BalanceSnapshot:
 		return &Event{
 			Type: EventBalanceUpdate,

@@ -10,7 +10,7 @@ import (
 )
 
 type TakerConfig struct {
-	Symbol       string
+	Symbols      []string
 	OrderQty     int64
 	TakeInterval time.Duration
 	Seed         int64
@@ -36,9 +36,10 @@ func NewRandomTaker(id uint64, gw actor.Gateway, cfg TakerConfig) *RandomTaker {
 func (rt *RandomTaker) HandleEvent(_ context.Context, _ *actor.Event) {}
 
 func (rt *RandomTaker) onTick(_ time.Time) {
+	sym := rt.cfg.Symbols[rt.rng.Intn(len(rt.cfg.Symbols))]
 	side := exchange.Buy
 	if rt.rng.Intn(2) == 1 {
 		side = exchange.Sell
 	}
-	rt.SubmitOrder(rt.cfg.Symbol, side, exchange.Market, 0, rt.cfg.OrderQty)
+	rt.SubmitOrder(sym, side, exchange.Market, 0, rt.cfg.OrderQty)
 }
