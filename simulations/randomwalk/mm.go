@@ -47,7 +47,8 @@ func NewMarketMaker(id uint64, gw actor.Gateway, cfg MMConfig) *MarketMaker {
 	return mm
 }
 
-func (mm *MarketMaker) Mid(sym string) int64 { return mm.mids[sym] }
+func (mm *MarketMaker) Mid(sym string) int64         { return mm.mids[sym] }
+func (mm *MarketMaker) Symbols() []string             { return mm.cfg.Symbols }
 
 func (mm *MarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
 	switch evt.Type {

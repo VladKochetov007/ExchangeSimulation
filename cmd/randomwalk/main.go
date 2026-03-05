@@ -19,13 +19,16 @@ func main() {
 	sim.Exchange().StartAutomation(ctx)
 	defer sim.Exchange().StopAutomation()
 
-	log.Println("ABC random walk: 900 sim-seconds starting...")
+	log.Println("3-asset random walk: 900 sim-seconds starting...")
 	if err := sim.Runner.Run(ctx); err != nil {
 		log.Fatal(err)
 	}
 
 	const usd = float64(exchange.USD_PRECISION)
-	log.Printf("ABC-PERP final mid: $%.2f", float64(sim.MM.Mid("ABC-PERP"))/usd)
-	log.Printf("ABC-USD  final mid: $%.2f", float64(sim.MM.Mid("ABC-USD"))/usd)
+	for _, mm := range sim.MMs {
+		for _, sym := range []string{mm.Symbols()[0], mm.Symbols()[1]} {
+			log.Printf("%-12s final mid: $%.2f", sym, float64(mm.Mid(sym))/usd)
+		}
+	}
 	log.Println("Logs written to logs/randomwalk/")
 }

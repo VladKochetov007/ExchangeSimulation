@@ -8,16 +8,26 @@ import (
 	"exchange_sim/simulation"
 )
 
-const (
-	btcPrecision   = exchange.BTC_PRECISION
-	bootstrapPrice = 50_000 * exchange.DOLLAR_TICK
-)
+const btcPrecision = exchange.BTC_PRECISION
+
+type assetSpec struct {
+	name         string
+	price        int64
+	tickSize     int64
+	levelSpacing int64
+}
+
+var assets = []assetSpec{
+	{name: "ABC", price: 50_000 * exchange.DOLLAR_TICK, tickSize: exchange.DOLLAR_TICK, levelSpacing: 2},
+	{name: "DEF", price: 3_000 * exchange.DOLLAR_TICK, tickSize: exchange.DOLLAR_TICK, levelSpacing: 1},
+	{name: "GHI", price: 150 * exchange.DOLLAR_TICK, tickSize: exchange.DOLLAR_TICK, levelSpacing: 1},
+}
 
 type Sim struct {
 	Runner  *simulation.Runner
-	MM      *MarketMaker
+	MMs     []*MarketMaker
 	Taker   *RandomTaker
-	Arb     *BasisArbActor
+	Arbs    []*BasisArbActor
 	Loggers []*JSONLinesLogger
 	ex      *exchange.Exchange
 }
@@ -37,28 +47,11 @@ func NewSim() (*Sim, error) {
 	timerFact := simulation.NewSimTimerFactory(scheduler)
 
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
-		EstimatedClients:        6,
+		EstimatedClients:        10,
 		Clock:                   simClock,
 		TickerFactory:           timerFact,
 		SnapshotInterval:        time.Second,
 		BalanceSnapshotInterval: 10 * time.Second,
-	})
-
-	spotInst := exchange.NewSpotInstrument("ABC-USD", "ABC", "USD",
-		btcPrecision, exchange.USD_PRECISION, exchange.DOLLAR_TICK, btcPrecision/100)
-	ex.AddInstrument(spotInst)
-
-	perp := exchange.NewPerpFutures("ABC-PERP", "ABC", "USD",
-		btcPrecision, exchange.USD_PRECISION, exchange.DOLLAR_TICK, btcPrecision/100)
-	perp.GetFundingRate().Interval = 120 // 2-minute funding in 900s sim → ~7 settlements
-	ex.AddInstrument(perp)
-
-	indexOracle := exchange.NewMidPriceOracle(ex)
-	indexOracle.MapSymbol("ABC-PERP", "ABC-USD")
-	ex.ConfigureAutomation(exchange.AutomationConfig{
-		MarkPriceCalc:       exchange.NewWeightedMidPriceCalculator(),
-		IndexProvider:       indexOracle,
-		PriceUpdateInterval: 30 * time.Second,
 	})
 
 	if err := os.MkdirAll("logs/randomwalk/spot", 0755); err != nil {
@@ -67,24 +60,57 @@ func NewSim() (*Sim, error) {
 	if err := os.MkdirAll("logs/randomwalk/perp", 0755); err != nil {
 		return nil, err
 	}
+
 	logGlobal, err := NewJSONLinesLogger("logs/randomwalk/general.jsonl")
 	if err != nil {
 		return nil, err
 	}
-	logSpot, err := NewJSONLinesLogger("logs/randomwalk/spot/ABC-USD.jsonl")
-	if err != nil {
-		return nil, err
-	}
-	logPerp, err := NewJSONLinesLogger("logs/randomwalk/perp/ABC-PERP.jsonl")
-	if err != nil {
-		return nil, err
-	}
 	ex.SetLogger("_global", logGlobal)
-	ex.SetLogger("ABC-USD", logSpot)
-	ex.SetLogger("ABC-PERP", logPerp)
+
+	allLoggers := []*JSONLinesLogger{logGlobal}
+
+	// Register all instruments and loggers; build a single oracle for all perps.
+	indexOracle := exchange.NewMidPriceOracle(ex)
+	var allSymbols []string
+	for _, a := range assets {
+		spotSym := a.name + "-USD"
+		perpSym := a.name + "-PERP"
+
+		spotInst := exchange.NewSpotInstrument(spotSym, a.name, "USD",
+			btcPrecision, exchange.USD_PRECISION, a.tickSize, btcPrecision/100)
+		ex.AddInstrument(spotInst)
+
+		perp := exchange.NewPerpFutures(perpSym, a.name, "USD",
+			btcPrecision, exchange.USD_PRECISION, a.tickSize, btcPrecision/100)
+		perp.GetFundingRate().Interval = 120 // 2-min funding → ~7 settlements per 900s
+		ex.AddInstrument(perp)
+
+		indexOracle.MapSymbol(perpSym, spotSym)
+
+		logSpot, err := NewJSONLinesLogger("logs/randomwalk/spot/" + spotSym + ".jsonl")
+		if err != nil {
+			return nil, err
+		}
+		logPerp, err := NewJSONLinesLogger("logs/randomwalk/perp/" + perpSym + ".jsonl")
+		if err != nil {
+			return nil, err
+		}
+		ex.SetLogger(spotSym, logSpot)
+		ex.SetLogger(perpSym, logPerp)
+		allLoggers = append(allLoggers, logSpot, logPerp)
+		allSymbols = append(allSymbols, spotSym, perpSym)
+	}
+
+	ex.ConfigureAutomation(exchange.AutomationConfig{
+		MarkPriceCalc:       exchange.NewWeightedMidPriceCalculator(),
+		IndexProvider:       indexOracle,
+		PriceUpdateInterval: 30 * time.Second,
+	})
 
 	initBalances := map[string]int64{
 		"ABC": 1_000 * btcPrecision,
+		"DEF": 1_000 * btcPrecision,
+		"GHI": 1_000 * btcPrecision,
 		"USD": 100_000_000 * exchange.USD_PRECISION,
 	}
 	zeroFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 0, InQuote: true}
@@ -92,40 +118,53 @@ func NewSim() (*Sim, error) {
 	arbFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
 
 	mount := simulation.NewMount(ex, simulation.LatencyConfig{})
-	mmGw := mount.ConnectNewClient(1, initBalances, zeroFee)
-	takerGw := mount.ConnectNewClient(2, initBalances, takerFee)
-	arbGw := mount.ConnectNewClient(3, initBalances, arbFee)
-	for _, id := range []uint64{1, 2, 3} {
-		ex.AddPerpBalance(id, "USD", 10_000_000*exchange.USD_PRECISION)
+
+	// Clients 1-3: one MM per asset, quoting spot+perp.
+	var mms []*MarketMaker
+	for i, a := range assets {
+		clientID := uint64(i + 1)
+		mmGw := mount.ConnectNewClient(clientID, initBalances, zeroFee)
+		ex.AddPerpBalance(clientID, "USD", 10_000_000*exchange.USD_PRECISION)
+		mm := NewMarketMaker(clientID, mmGw, MMConfig{
+			Symbols:         []string{a.name + "-USD", a.name + "-PERP"},
+			BootstrapPrice:  a.price,
+			Levels:          5,
+			LevelSpacing:    a.levelSpacing,
+			LevelSize:       btcPrecision,
+			TickSize:        a.tickSize,
+			RefreshInterval: 100 * time.Millisecond,
+		})
+		mm.SetTickerFactory(timerFact)
+		mms = append(mms, mm)
 	}
 
-	mm := NewMarketMaker(1, mmGw, MMConfig{
-		Symbols:         []string{"ABC-USD", "ABC-PERP"},
-		BootstrapPrice:  bootstrapPrice,
-		Levels:          5,
-		LevelSpacing:    2,
-		LevelSize:       btcPrecision,
-		TickSize:        exchange.DOLLAR_TICK,
-		RefreshInterval: 100 * time.Millisecond,
-	})
-	mm.SetTickerFactory(timerFact)
-
-	taker := NewRandomTaker(2, takerGw, TakerConfig{
-		Symbols:      []string{"ABC-USD", "ABC-PERP"},
-		OrderQty:     btcPrecision * 2 / 5, // 0.4 ABC
+	// Client 4: one random taker across all 6 symbols.
+	takerGw := mount.ConnectNewClient(4, initBalances, takerFee)
+	ex.AddPerpBalance(4, "USD", 10_000_000*exchange.USD_PRECISION)
+	taker := NewRandomTaker(4, takerGw, TakerConfig{
+		Symbols:      allSymbols,
+		OrderQty:     btcPrecision * 2 / 5, // 0.4 units per order
 		TakeInterval: 100 * time.Millisecond,
 		Seed:         42,
 	})
 	taker.SetTickerFactory(timerFact)
 
-	arb := NewBasisArbActor(3, arbGw, BasisArbConfig{
-		SpotSymbol:  "ABC-USD",
-		PerpSymbol:  "ABC-PERP",
-		ThresholdBps: 1,            // 1 bps ≈ $5 at $50k
-		LotSize:     btcPrecision,  // 1 BTC per lot
-		MaxPosition: 30,            // 30 BTC max → up to $30 per-leg price impact
-	})
-	arb.SetTickerFactory(timerFact)
+	// Clients 5-7: one basis arb per asset pair.
+	var arbs []*BasisArbActor
+	for i, a := range assets {
+		clientID := uint64(5 + i)
+		arbGw := mount.ConnectNewClient(clientID, initBalances, arbFee)
+		ex.AddPerpBalance(clientID, "USD", 10_000_000*exchange.USD_PRECISION)
+		arb := NewBasisArbActor(clientID, arbGw, BasisArbConfig{
+			SpotSymbol:   a.name + "-USD",
+			PerpSymbol:   a.name + "-PERP",
+			ThresholdBps: 1,
+			LotSize:      btcPrecision,
+			MaxPosition:  30,
+		})
+		arb.SetTickerFactory(timerFact)
+		arbs = append(arbs, arb)
+	}
 
 	// 900 seconds sim-time @ 1ms/step = 900k iterations
 	runner := simulation.NewRunner(simClock, simulation.RunnerConfig{
@@ -133,16 +172,20 @@ func NewSim() (*Sim, error) {
 		Step:       time.Millisecond,
 	})
 	runner.AddMount(mount)
-	runner.AddActor(mm)
+	for _, mm := range mms {
+		runner.AddActor(mm)
+	}
 	runner.AddActor(taker)
-	runner.AddActor(arb)
+	for _, arb := range arbs {
+		runner.AddActor(arb)
+	}
 
 	return &Sim{
 		Runner:  runner,
-		MM:      mm,
+		MMs:     mms,
 		Taker:   taker,
-		Arb:     arb,
-		Loggers: []*JSONLinesLogger{logGlobal, logSpot, logPerp},
+		Arbs:    arbs,
+		Loggers: allLoggers,
 		ex:      ex,
 	}, nil
 }
