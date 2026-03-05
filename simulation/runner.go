@@ -8,9 +8,11 @@ import (
 )
 
 type RunnerConfig struct {
-	Duration   time.Duration // wall-clock limit (0 = ctx-only)
-	Iterations int           // simulated clock steps (0 = ctx-only)
-	Step       time.Duration // step size per iteration for SimulatedClock (default 1ms)
+	Duration       time.Duration     // wall-clock limit (0 = ctx-only)
+	Iterations     int               // simulated clock steps (0 = ctx-only)
+	Step           time.Duration     // step size per iteration for SimulatedClock (default 1ms)
+	ProgressEvery  int               // call OnProgress every N iterations (0 = disabled)
+	OnProgress     func(done, total int) // optional progress callback
 }
 
 type Runner struct {
@@ -38,6 +40,11 @@ func (r *Runner) AddMount(m *Mount) {
 
 func (r *Runner) AddActor(a actor.Actor) {
 	r.actors = append(r.actors, a)
+}
+
+func (r *Runner) SetProgressCallback(every int, fn func(done, total int)) {
+	r.config.ProgressEvery = every
+	r.config.OnProgress = fn
 }
 
 func (r *Runner) Run(ctx context.Context) error {
@@ -72,6 +79,9 @@ func (r *Runner) Run(ctx context.Context) error {
 					default:
 						advanceable.Advance(r.config.Step)
 						time.Sleep(time.Microsecond)
+					}
+					if r.config.OnProgress != nil && r.config.ProgressEvery > 0 && (i+1)%r.config.ProgressEvery == 0 {
+						r.config.OnProgress(i+1, r.config.Iterations)
 					}
 				}
 			}

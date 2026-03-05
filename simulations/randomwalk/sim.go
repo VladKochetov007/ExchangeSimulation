@@ -40,7 +40,7 @@ func (s *Sim) Close() {
 	}
 }
 
-func NewSim() (*Sim, error) {
+func NewSim(simTime time.Duration) (*Sim, error) {
 	simClock := simulation.NewSimulatedClock(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano())
 	scheduler := simulation.NewEventScheduler(simClock)
 	simClock.SetScheduler(scheduler)
@@ -82,7 +82,7 @@ func NewSim() (*Sim, error) {
 
 		perp := exchange.NewPerpFutures(perpSym, a.name, "USD",
 			btcPrecision, exchange.USD_PRECISION, a.tickSize, btcPrecision/100)
-		perp.GetFundingRate().Interval = 120 // 2-min funding → ~7 settlements per 900s
+		perp.GetFundingRate().Interval = 120 // 2-min funding → ~750 settlements per 25h
 		ex.AddInstrument(perp)
 
 		indexOracle.MapSymbol(perpSym, spotSym)
@@ -166,10 +166,10 @@ func NewSim() (*Sim, error) {
 		arbs = append(arbs, arb)
 	}
 
-	// 900 seconds sim-time @ 1ms/step = 900k iterations
+	const step = time.Millisecond
 	runner := simulation.NewRunner(simClock, simulation.RunnerConfig{
-		Iterations: 900_000,
-		Step:       time.Millisecond,
+		Iterations: int(simTime / step),
+		Step:       step,
 	})
 	runner.AddMount(mount)
 	for _, mm := range mms {
