@@ -11,7 +11,7 @@ import (
 	"exchange_sim/simulations/randomwalk"
 )
 
-const simDuration = time.Minute * 2
+const simDuration = time.Minute * 10
 
 func printProgress(done, total int, simTotal time.Duration, started time.Time) {
 	pct := float64(done) / float64(total)

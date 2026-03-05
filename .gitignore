@@ -279,6 +279,7 @@ uv.lock
 coverage.out
 **/*.csv
 **.png
+!static/**.png
 sim
 latency_arb
 good_plan.md
