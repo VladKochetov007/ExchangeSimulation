@@ -29,6 +29,8 @@ type Sim struct {
 	Taker       *RandomTaker
 	Arbs        []*BasisArbActor
 	FundingArbs []*FundingArbActor
+	CrossMM     *CrossPairMM
+	TriArbs     []*TriArbActor
 	Loggers     []*JSONLinesLogger
 	ex          *exchange.Exchange
 }
@@ -48,7 +50,7 @@ func NewSim(simTime time.Duration) (*Sim, error) {
 	timerFact := simulation.NewSimTimerFactory(scheduler)
 
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
-		EstimatedClients:        10,
+		EstimatedClients:        15,
 		Clock:                   simClock,
 		TickerFactory:           timerFact,
 		SnapshotInterval:        time.Second,
@@ -100,6 +102,29 @@ func NewSim(simTime time.Duration) (*Sim, error) {
 		ex.SetLogger(perpSym, logPerp)
 		allLoggers = append(allLoggers, logSpot, logPerp)
 		allSymbols = append(allSymbols, spotSym, perpSym)
+	}
+
+	// Register cross-asset spot instruments (DEF-ABC, GHI-ABC).
+	// Price = basePrice * btcPrecision / abcPrice; tick sizes chosen for ~0.02% granularity.
+	type crossSpec struct {
+		symbol   string
+		base     string
+		tickSize int64
+	}
+	crossSpecs := []crossSpec{
+		{"DEF-ABC", "DEF", 1_000},
+		{"GHI-ABC", "GHI", 100},
+	}
+	for _, cs := range crossSpecs {
+		inst := exchange.NewSpotInstrument(cs.symbol, cs.base, "ABC",
+			btcPrecision, btcPrecision, cs.tickSize, btcPrecision/100)
+		ex.AddInstrument(inst)
+		logCross, err := NewJSONLinesLogger("logs/randomwalk/spot/" + cs.symbol + ".jsonl")
+		if err != nil {
+			return nil, err
+		}
+		ex.SetLogger(cs.symbol, logCross)
+		allLoggers = append(allLoggers, logCross)
 	}
 
 	ex.ConfigureAutomation(exchange.AutomationConfig{
@@ -187,6 +212,47 @@ func NewSim(simTime time.Duration) (*Sim, error) {
 		fundingArbs = append(fundingArbs, arb)
 	}
 
+	// Client 11: cross-pair market maker, quotes DEF-ABC and GHI-ABC derived from USD mids.
+	crossMMGw := mount.ConnectNewClient(11, initBalances, zeroFee)
+	crossMM := NewCrossPairMM(11, crossMMGw, CrossPairMMConfig{
+		CrossSymbols:    []string{"DEF-ABC", "GHI-ABC"},
+		BaseUSDSymbols:  []string{"DEF-USD", "GHI-USD"},
+		QuoteUSDSymbol:  "ABC-USD",
+		QuotePrecision:  btcPrecision,
+		TickSizes:       map[string]int64{"DEF-ABC": 1_000, "GHI-ABC": 100},
+		LevelSizes:      map[string]int64{"DEF-ABC": 10 * btcPrecision, "GHI-ABC": 10 * btcPrecision},
+		Levels:          5,
+		LevelSpacing:    1,
+		RefreshInterval: 100 * time.Millisecond,
+	})
+	crossMM.SetTickerFactory(timerFact)
+
+	// Clients 12-13: triangular arb actors, one per cross pair.
+	type triSpec struct {
+		clientID   uint64
+		crossSym   string
+		baseUSDSym string
+	}
+	triArbSpecs := []triSpec{
+		{12, "DEF-ABC", "DEF-USD"},
+		{13, "GHI-ABC", "GHI-USD"},
+	}
+	var triArbs []*TriArbActor
+	for _, spec := range triArbSpecs {
+		triGw := mount.ConnectNewClient(spec.clientID, initBalances, arbFee)
+		arb := NewTriArbActor(spec.clientID, triGw, TriArbConfig{
+			CrossSymbol:    spec.crossSym,
+			BaseUSDSymbol:  spec.baseUSDSym,
+			QuoteUSDSymbol: "ABC-USD",
+			TargetNotional: 1_000 * exchange.USD_PRECISION,
+			MinProfitBps:   1,
+			BasePrecision:  btcPrecision,
+			CheckInterval:  100 * time.Millisecond,
+		})
+		arb.SetTickerFactory(timerFact)
+		triArbs = append(triArbs, arb)
+	}
+
 	const step = time.Millisecond
 	runner := simulation.NewRunner(simClock, simulation.RunnerConfig{
 		Iterations: int(simTime / step),
@@ -203,6 +269,10 @@ func NewSim(simTime time.Duration) (*Sim, error) {
 	for _, arb := range fundingArbs {
 		runner.AddActor(arb)
 	}
+	runner.AddActor(crossMM)
+	for _, arb := range triArbs {
+		runner.AddActor(arb)
+	}
 
 	return &Sim{
 		Runner:      runner,
@@ -210,6 +280,8 @@ func NewSim(simTime time.Duration) (*Sim, error) {
 		Taker:       taker,
 		Arbs:        arbs,
 		FundingArbs: fundingArbs,
+		CrossMM:     crossMM,
+		TriArbs:     triArbs,
 		Loggers:     allLoggers,
 		ex:          ex,
 	}, nil
