@@ -143,10 +143,11 @@ func NewSim(simTime time.Duration) (*Sim, error) {
 	takerGw := mount.ConnectNewClient(4, initBalances, takerFee)
 	ex.AddPerpBalance(4, "USD", 10_000_000*exchange.USD_PRECISION)
 	taker := NewRandomTaker(4, takerGw, TakerConfig{
-		Symbols:      allSymbols,
-		OrderQty:     btcPrecision * 2 / 5, // 0.4 units per order
-		TakeInterval: 100 * time.Millisecond,
-		Seed:         42,
+		Symbols:       allSymbols,
+		QuoteNotional: 1_200 * exchange.USD_PRECISION, // ~$1,200 per order
+		BasePrecision: btcPrecision,
+		TakeInterval:  100 * time.Millisecond,
+		Seed:          42,
 	})
 	taker.SetTickerFactory(timerFact)
 
