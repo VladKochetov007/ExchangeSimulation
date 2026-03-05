@@ -24,12 +24,13 @@ var assets = []assetSpec{
 }
 
 type Sim struct {
-	Runner  *simulation.Runner
-	MMs     []*MarketMaker
-	Taker   *RandomTaker
-	Arbs    []*BasisArbActor
-	Loggers []*JSONLinesLogger
-	ex      *exchange.Exchange
+	Runner      *simulation.Runner
+	MMs         []*MarketMaker
+	Taker       *RandomTaker
+	Arbs        []*BasisArbActor
+	FundingArbs []*FundingArbActor
+	Loggers     []*JSONLinesLogger
+	ex          *exchange.Exchange
 }
 
 func (s *Sim) Exchange() *exchange.Exchange { return s.ex }
@@ -160,10 +161,29 @@ func NewSim(simTime time.Duration) (*Sim, error) {
 			PerpSymbol:   a.name + "-PERP",
 			ThresholdBps: 1,
 			LotSize:      btcPrecision,
-			MaxPosition:  30,
+			MaxPosition:  500,
 		})
 		arb.SetTickerFactory(timerFact)
 		arbs = append(arbs, arb)
+	}
+
+	// Clients 8-10: one funding arb per asset pair.
+	var fundingArbs []*FundingArbActor
+	for i, a := range assets {
+		clientID := uint64(8 + i)
+		arbGw := mount.ConnectNewClient(clientID, initBalances, arbFee)
+		ex.AddPerpBalance(clientID, "USD", 10_000_000*exchange.USD_PRECISION)
+		arb := NewFundingArbActor(clientID, arbGw, FundingArbConfig{
+			SpotSymbol:        a.name + "-USD",
+			PerpSymbol:        a.name + "-PERP",
+			OpenThresholdBps:  1,
+			CloseThresholdBps: 0,
+			LotSize:           btcPrecision,
+			MaxPosition:       10,
+			EntryWindow:       60 * time.Second,
+		})
+		arb.SetTickerFactory(timerFact)
+		fundingArbs = append(fundingArbs, arb)
 	}
 
 	const step = time.Millisecond
@@ -179,13 +199,17 @@ func NewSim(simTime time.Duration) (*Sim, error) {
 	for _, arb := range arbs {
 		runner.AddActor(arb)
 	}
+	for _, arb := range fundingArbs {
+		runner.AddActor(arb)
+	}
 
 	return &Sim{
-		Runner:  runner,
-		MMs:     mms,
-		Taker:   taker,
-		Arbs:    arbs,
-		Loggers: allLoggers,
-		ex:      ex,
+		Runner:      runner,
+		MMs:         mms,
+		Taker:       taker,
+		Arbs:        arbs,
+		FundingArbs: fundingArbs,
+		Loggers:     allLoggers,
+		ex:          ex,
 	}, nil
 }
