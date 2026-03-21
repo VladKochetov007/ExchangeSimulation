@@ -330,6 +330,13 @@ No open architectural blockers. Previously blocked items resolved:
 
 ---
 
+## Documentation
+
+- **[User Guide](docs/USER_GUIDE.md)** — practical guide: building strategies, configuring exchanges, latency models, custom matching engines, JSONL event format, multi-venue setups
+- **[Debugging Postmortem](docs/howto.md)** — six bugs found and fixed in the randomwalk simulation, with root cause analysis
+
+---
+
 ## Build
 
 ```bash
