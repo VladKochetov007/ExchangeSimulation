@@ -1,8 +1,8 @@
 package exchange_test
 
 import (
-	. "exchange_sim/exchange"
 	"context"
+	. "exchange_sim/exchange"
 	"sync"
 	"testing"
 	"time"
@@ -66,11 +66,11 @@ func TestPositionUpdateOpenPosition(t *testing.T) {
 
 	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	maker := ex.Gateways[1]
-	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
+	ex.AddPerpBalance(1, "USD", 10_000_000*USD_PRECISION)
 
 	ex.ConnectNewClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	taker := ex.Gateways[2]
-	ex.AddPerpBalance(2, "USD", 100000*USD_PRECISION)
+	ex.AddPerpBalance(2, "USD", 10_000_000*USD_PRECISION)
 
 	// Maker posts sell order
 	req1 := &OrderRequest{
@@ -89,7 +89,7 @@ func TestPositionUpdateOpenPosition(t *testing.T) {
 		RequestID: 2,
 		Side:      Buy,
 		Type:      LimitOrder,
-		Price:     50000 * BTC_PRECISION,
+		Price:     50000 * USD_PRECISION,
 		Qty:       1 * BTC_PRECISION,
 		Symbol:    "BTC-PERP",
 	}
@@ -151,11 +151,11 @@ func TestPositionUpdatePartialClose(t *testing.T) {
 
 	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client := ex.Gateways[1]
-	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
+	ex.AddPerpBalance(1, "USD", 10_000_000*USD_PRECISION)
 
 	ex.ConnectNewClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client2 := ex.Gateways[2]
-	ex.AddPerpBalance(2, "USD", 100000*USD_PRECISION)
+	ex.AddPerpBalance(2, "USD", 10_000_000*USD_PRECISION)
 
 	// Open long 100 BTC @ $50k
 	req1 := &OrderRequest{RequestID: 1, Side: Sell, Type: LimitOrder, Price: 50000 * USD_PRECISION, Qty: 100 * BTC_PRECISION, Symbol: "BTC-PERP"}
@@ -269,11 +269,11 @@ func TestPositionUpdateFlipLongToShort(t *testing.T) {
 
 	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client := ex.Gateways[1]
-	ex.AddPerpBalance(1, "USD", 200000*USD_PRECISION)
+	ex.AddPerpBalance(1, "USD", 20_000_000*USD_PRECISION)
 
 	ex.ConnectNewClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client2 := ex.Gateways[2]
-	ex.AddPerpBalance(2, "USD", 200000*USD_PRECISION)
+	ex.AddPerpBalance(2, "USD", 20_000_000*USD_PRECISION)
 
 	// Open long 100 BTC @ $50k
 	req1 := &OrderRequest{RequestID: 1, Side: Sell, Type: LimitOrder, Price: 50000 * USD_PRECISION, Qty: 100 * BTC_PRECISION, Symbol: "BTC-PERP"}
@@ -381,11 +381,11 @@ func TestPositionUpdateCompleteClose(t *testing.T) {
 
 	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client := ex.Gateways[1]
-	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
+	ex.AddPerpBalance(1, "USD", 10_000_000*USD_PRECISION)
 
 	ex.ConnectNewClient(2, map[string]int64{}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client2 := ex.Gateways[2]
-	ex.AddPerpBalance(2, "USD", 100000*USD_PRECISION)
+	ex.AddPerpBalance(2, "USD", 10_000_000*USD_PRECISION)
 
 	// Open long 100 BTC @ $50k
 	req1 := &OrderRequest{RequestID: 1, Side: Sell, Type: LimitOrder, Price: 50000 * USD_PRECISION, Qty: 100 * BTC_PRECISION, Symbol: "BTC-PERP"}
@@ -568,14 +568,14 @@ func TestPositionUpdateZeroSizeTrade(t *testing.T) {
 
 	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{})
 	client := ex.Gateways[1]
-	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
+	ex.AddPerpBalance(1, "USD", 10_000_000*USD_PRECISION)
 
 	// IOC order with no matching orders (should not fill)
 	req := &OrderRequest{
 		RequestID:   1,
 		Side:        Buy,
 		Type:        LimitOrder,
-		Price:       50000 * BTC_PRECISION,
+		Price:       50000 * USD_PRECISION,
 		Qty:         1 * BTC_PRECISION,
 		Symbol:      "BTC-PERP",
 		TimeInForce: IOC,
@@ -608,11 +608,11 @@ func TestPositionUpdateMinimumSize(t *testing.T) {
 
 	ex.ConnectNewClient(1, map[string]int64{}, &PercentageFee{})
 	maker := ex.Gateways[1]
-	ex.AddPerpBalance(1, "USD", 100000*USD_PRECISION)
+	ex.AddPerpBalance(1, "USD", 10_000_000*USD_PRECISION)
 
 	ex.ConnectNewClient(2, map[string]int64{}, &PercentageFee{})
 	taker := ex.Gateways[2]
-	ex.AddPerpBalance(2, "USD", 100000*USD_PRECISION)
+	ex.AddPerpBalance(2, "USD", 10_000_000*USD_PRECISION)
 
 	// Trade 1 satoshi
 	req1 := &OrderRequest{RequestID: 1, Side: Sell, Type: LimitOrder, Price: 50000 * USD_PRECISION, Qty: 1, Symbol: "BTC-PERP"}

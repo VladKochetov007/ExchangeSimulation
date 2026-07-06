@@ -347,7 +347,14 @@ func (m *MyCustomMatcher) Match(bidBook, askBook *book.Book, incoming *types.Ord
     // Return MatchResult with all executions and whether the incoming order was fully filled.
     //
     // Important: update order.FilledQty for each execution.
-    // Important: remove fully filled orders from the book (book.UnlinkOrder + delete from book.Orders).
+    // Important: set exec.TakerFilledQty / MakerFilledQty / MakerSide / MakerPosSide per execution.
+    // Important: unlink fully filled makers from their price level (book.UnlinkOrder)
+    // but LEAVE them in book.Orders — the exchange settles against the order's
+    // reservation ledger and removes the index entry afterwards in removeMakerOrders.
+    // Matchers that delete from book.Orders still work, but settlement falls back
+    // to execution-price releases, which can leak price-improvement deltas.
+    // Important: skip resting orders with the same ClientID (self-trade prevention)
+    // and keep walking deeper levels past them.
     executions := make([]*types.Execution, 0)
     // ... matching logic ...
     return &matching.MatchResult{
@@ -514,10 +521,19 @@ mount := simulation.NewMount(ex, simulation.LatencyConfig{
     Request:    simulation.NewConstantLatency(1 * time.Millisecond),
     Response:   simulation.NewLogNormalLatency(500*time.Microsecond, 2*time.Millisecond, 0.5, 42),
     MarketData: simulation.NewConstantLatency(500 * time.Microsecond),
+    // REQUIRED under SimulatedClock: deliver at exact sim timestamps.
+    Scheduler: scheduler,
+    Clock:     simClock,
 })
 ```
 
 `nil` on any field means zero delay for that channel.
+
+**Simulated time**: without `Scheduler`+`Clock`, delays are wall-clock sleeps —
+meaningless under a `SimulatedClock` (a "1ms" delay lasts however much sim time
+passes while the goroutine sleeps, typically hundreds of steps). With the
+scheduler set, each message is delivered at `simNow + Delay()` and per-channel
+FIFO ordering is preserved, like a real network session.
 
 ### Built-in Latency Providers
 

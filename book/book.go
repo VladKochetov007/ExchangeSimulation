@@ -87,6 +87,7 @@ func ResetOrder(order *etypes.Order) {
 	order.IcebergQty = 0
 	order.Status = etypes.Open
 	order.Timestamp = 0
+	order.Reserved = 0
 	order.Prev = nil
 	order.Next = nil
 	order.Parent = nil
@@ -152,12 +153,24 @@ func (b *Book) CancelOrder(orderID uint64) *etypes.Order {
 		return nil
 	}
 	limit := order.Parent
+	if limit == nil {
+		// Fully filled and already unlinked by the matcher; only the ID index remains.
+		delete(b.Orders, orderID)
+		return order
+	}
 	UnlinkOrder(order)
 	delete(b.Orders, orderID)
 	if IsEmpty(limit) {
 		b.RemoveLimit(limit)
 	}
 	return order
+}
+
+// RemoveFilledOrder deletes a fully filled order from the ID index after
+// settlement. The matcher unlinks filled orders from their price level but
+// leaves them in Orders so settlement can read the reservation ledger.
+func (b *Book) RemoveFilledOrder(orderID uint64) *etypes.Order {
+	return b.CancelOrder(orderID)
 }
 
 func (b *Book) insertLimit(limit *etypes.Limit) {
@@ -236,7 +249,9 @@ func (b *Book) updateBest(limit *etypes.Limit) {
 	}
 }
 
-// GetSnapshot returns up to 20 price levels for market data publishing.
+// GetSnapshot returns up to 20 price levels including hidden depth.
+// This is the god view for loggers and internal tooling — public market data
+// must use GetPublicSnapshot so dark liquidity stays dark.
 func (b *Book) GetSnapshot() []etypes.PriceLevel {
 	levels := make([]etypes.PriceLevel, 0, 20)
 	for l := b.ActiveHead; l != nil && len(levels) < 20; l = l.Next {
@@ -253,3 +268,18 @@ func (b *Book) GetSnapshot() []etypes.PriceLevel {
 	return levels
 }
 
+// GetPublicSnapshot returns up to 20 displayed price levels. Hidden orders and
+// the reserve portion of icebergs are excluded, matching what a real venue
+// broadcasts to subscribers.
+func (b *Book) GetPublicSnapshot() []etypes.PriceLevel {
+	levels := make([]etypes.PriceLevel, 0, 20)
+	for l := b.ActiveHead; l != nil && len(levels) < 20; l = l.Next {
+		if visible := VisibleQty(l); visible > 0 {
+			levels = append(levels, etypes.PriceLevel{
+				Price:      l.Price,
+				VisibleQty: visible,
+			})
+		}
+	}
+	return levels
+}

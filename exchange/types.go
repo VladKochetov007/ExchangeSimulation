@@ -181,6 +181,9 @@ type WeightedMidPriceCalculator = eprice.WeightedMidPriceCalculator
 
 const BPS = efee.BPS
 
+// MulDiv computes (a*b)/c without intermediate int64 overflow.
+var MulDiv = etypes.MulDiv
+
 type Exchange = DefaultExchange
 
 var NewSpotInstrument = einstrument.NewSpotInstrument
@@ -190,7 +193,6 @@ var NewStaticPriceOracle = eprice.NewStaticPriceOracle
 var NewMidPriceOracle = eprice.NewMidPriceOracle
 var NewLastPriceCalculator = eprice.NewLastPriceCalculator
 var NewWeightedMidPriceCalculator = eprice.NewWeightedMidPriceCalculator
-
 
 var NewBook = ebook.NewBook
 var GetLimit = ebook.GetLimit

@@ -60,5 +60,10 @@ type BorrowingConfig struct {
 	CollateralFactors map[string]float64
 	MaxBorrowPerAsset map[string]int64
 
+	// AssetPrecisions maps asset → units per whole asset for collateral
+	// valuation (e.g. "USD" → 100_000). Assets absent from the map fall back
+	// to BTC precision (1e8).
+	AssetPrecisions map[string]int64
+
 	PriceSource PriceSource
 }

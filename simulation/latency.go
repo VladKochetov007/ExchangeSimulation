@@ -6,6 +6,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"exchange_sim/clock"
+	"exchange_sim/types"
 )
 
 type LatencyProvider interface {
@@ -13,10 +16,22 @@ type LatencyProvider interface {
 }
 
 // LatencyConfig holds optional per-channel latency. nil field = no delay on that channel.
+//
+// With only latency providers set, delays are applied as wall-clock sleeps —
+// correct for real-time runs but meaningless under a SimulatedClock (a "1ms"
+// delay becomes however much sim time passes while the goroutine sleeps).
+// Set Scheduler+Clock to deliver messages at exact simulation timestamps
+// with per-channel FIFO ordering preserved.
 type LatencyConfig struct {
 	Request    LatencyProvider
 	Response   LatencyProvider
 	MarketData LatencyProvider
+
+	// Scheduler delivers delayed messages at exact sim times (required for
+	// correct latency under SimulatedClock). Clock must be the same clock the
+	// scheduler is bound to.
+	Scheduler *EventScheduler
+	Clock     types.Clock
 }
 
 type ConstantLatency struct {
@@ -47,6 +62,9 @@ func NewUniformRandomLatency(min, max time.Duration, seed int64) *UniformRandomL
 
 func (u *UniformRandomLatency) Delay() time.Duration {
 	delta := u.max - u.min
+	if delta <= 0 {
+		return u.min
+	}
 	return u.min + time.Duration(u.rng.Int63n(int64(delta)))
 }
 
@@ -104,14 +122,16 @@ func (l *LoadScaledLatency) Delay() time.Duration {
 // producing impossible negative values.
 //
 // Constructed from the observable median rather than the log-space mean:
-//   mean   = min + exp(logMu + logSigma²/2)
-//   median = min + medianAboveMin
-//   p99    ≈ min + exp(logMu + 2.326·logSigma)
+//
+//	mean   = min + exp(logMu + logSigma²/2)
+//	median = min + medianAboveMin
+//	p99    ≈ min + exp(logMu + 2.326·logSigma)
 //
 // Calibrating logSigma by p99/median ratio (tail heaviness):
-//   0.3 → p99 ≈ 2×  median   tight, stable LAN link
-//   0.5 → p99 ≈ 3×  median   moderate, typical co-location
-//   1.0 → p99 ≈ 10× median   heavy tail, WAN / congested path
+//
+//	0.3 → p99 ≈ 2×  median   tight, stable LAN link
+//	0.5 → p99 ≈ 3×  median   moderate, typical co-location
+//	1.0 → p99 ≈ 10× median   heavy tail, WAN / congested path
 type LogNormalLatency struct {
 	min      time.Duration
 	logMu    float64
@@ -149,35 +169,49 @@ func (l *LogNormalLatency) Delay() time.Duration {
 //	E[R∞] = α·ρ/β   (geometric series; always finite since events are external)
 //
 // Calibrating decayPerSec from half-life: β = ln(2) / halfLife ≈ 0.693 / halfLife.Seconds()
-//   β=1   → half-life 693ms   slow drain, persistent congestion
-//   β=10  → half-life  69ms   moderate, burst clears in ~150ms
-//   β=100 → half-life   7ms   fast, typical co-located exchange queue
+//
+//	β=1   → half-life 693ms   slow drain, persistent congestion
+//	β=10  → half-life  69ms   moderate, burst clears in ~150ms
+//	β=100 → half-life   7ms   fast, typical co-located exchange queue
 //
 // Under steady load ρ orders/s, mean added latency ≈ jumpPerEvent × ρ / β.
 // Example: jump=10µs, ρ=1000/s, β=10 → +1ms above minLatency at saturation.
 //
 // RecordEvent must be called on every order submission. Delay is read-only.
+// Under a SimulatedClock, call SetClock so the decay follows simulation time
+// instead of wall time.
 type HawkesLatency struct {
 	minLatency  time.Duration
 	alpha       float64
 	beta        float64
 	excitation  float64
 	lastEventNs int64
+	clock       types.Clock
 	mu          sync.Mutex
 }
 
 func NewHawkesLatency(minLatency, jumpPerEvent time.Duration, decayPerSec float64) *HawkesLatency {
-	return &HawkesLatency{
-		minLatency:  minLatency,
-		alpha:       jumpPerEvent.Seconds(),
-		beta:        decayPerSec,
-		lastEventNs: time.Now().UnixNano(),
+	h := &HawkesLatency{
+		minLatency: minLatency,
+		alpha:      jumpPerEvent.Seconds(),
+		beta:       decayPerSec,
+		clock:      &clock.RealClock{},
 	}
+	h.lastEventNs = h.clock.NowUnixNano()
+	return h
+}
+
+// SetClock switches the decay time source (e.g. to a SimulatedClock).
+func (h *HawkesLatency) SetClock(c types.Clock) {
+	h.mu.Lock()
+	h.clock = c
+	h.lastEventNs = c.NowUnixNano()
+	h.mu.Unlock()
 }
 
 func (h *HawkesLatency) RecordEvent() {
-	now := time.Now().UnixNano()
 	h.mu.Lock()
+	now := h.clock.NowUnixNano()
 	dt := float64(now-h.lastEventNs) * 1e-9
 	h.excitation = h.excitation*math.Exp(-h.beta*dt) + h.alpha
 	h.lastEventNs = now
@@ -185,8 +219,8 @@ func (h *HawkesLatency) RecordEvent() {
 }
 
 func (h *HawkesLatency) Delay() time.Duration {
-	now := time.Now().UnixNano()
 	h.mu.Lock()
+	now := h.clock.NowUnixNano()
 	dt := float64(now-h.lastEventNs) * 1e-9
 	exc := h.excitation * math.Exp(-h.beta*dt)
 	h.mu.Unlock()

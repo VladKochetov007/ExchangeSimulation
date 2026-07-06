@@ -18,7 +18,7 @@ func (f *PercentageFee) CalculateFee(ctx etypes.FillContext) etypes.Fee {
 	var asset string
 
 	if f.InQuote {
-		tradeValue := (ctx.Exec.Price * ctx.Exec.Qty) / ctx.Precision
+		tradeValue := etypes.MulDiv(ctx.Exec.Qty, ctx.Exec.Price, ctx.Precision)
 		amount = (tradeValue * bps) / BPS
 		asset = ctx.QuoteAsset
 	} else {

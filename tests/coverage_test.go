@@ -1,8 +1,8 @@
 package exchange_test
 
 import (
-	. "exchange_sim/exchange"
 	"context"
+	. "exchange_sim/exchange"
 	"testing"
 	"time"
 )
@@ -13,7 +13,7 @@ func bgCtx() context.Context { return context.Background() }
 type nullLogger struct{}
 
 func (l *nullLogger) LogEvent(timestamp int64, clientID uint64, eventType string, data any) {}
-func (l *nullLogger) Close() error                                                           { return nil }
+func (l *nullLogger) Close() error                                                          { return nil }
 
 // --- publishSnapshot ---
 
@@ -518,25 +518,22 @@ func TestCheckLiquidations_CancelsOpenOrders(t *testing.T) {
 }
 
 // --- Margin call warning path ---
-// initMargin = 1BTC at $100 at 10% = $10 = 1_000_000 USD units.
-// Warning zone: 500 < ratio < 750 → $0.50 < equity < $0.75.
-// Set perpAvailable = $0.60 = 60_000 → ratio = 60_000*10000/1_000_000 = 600 bps.
+// Notional = 1 BTC at $100 mark = 10_000_000 USD units.
+// Maintenance = 5% of notional = $5; warning = 7.5% = $7.50.
+// Equity = balance + uPnL; set balance $6.50 with uPnL 0 → inside warning zone.
 
 func TestCheckLiquidations_MarginCallWarning(t *testing.T) {
 	handler := &mockLiquidationHandler{}
 	ex, perp := setupPerpAutomation(handler)
 
-	initM := perpInitMargin() // = $10 = 1_000_000
-
-	// balance = initMargin + $0.60, reserved = initMargin → PerpAvailable = $0.60 = 60_000.
 	injectPerpPosition(ex, 1, "BTC-PERP",
 		BTCAmount(1.0),
 		entry100(),
-		initM+60_000, // balance
-		initM,        // reserved
+		650_000, // balance $6.50: above maintenance $5, below warning $7.50
+		0,       // reserved (not part of equity)
 	)
 
-	// Use exact entry price → unrealizedPnL = 0 → equity = $0.60 → ratio = 600 bps.
+	// Use exact entry price → unrealizedPnL = 0 → equity = $6.50.
 	ex.CheckLiquidations("BTC-PERP", perp, entry100())
 
 	if len(handler.marginCalls) == 0 {

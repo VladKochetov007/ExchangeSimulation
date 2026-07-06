@@ -12,6 +12,13 @@ func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Respons
 
 	e.NextOrderID++
 	order := newOrderFromRequest(clientID, e.NextOrderID, req, e.Clock.NowUnixNano())
+
+	// FOK must be checked BEFORE matching: Match mutates the book, and
+	// abandoning its executions would strip maker quantity without settlement.
+	if req.TimeInForce == FOK && !canFillFully(book, order) {
+		return e.rejectOrder(order, req.RequestID, clientID, RejectFOKNotFilled, log)
+	}
+
 	if reject := e.reserveOrderFunds(client, book, order, req.RequestID, log); reject != nil {
 		return *reject
 	}
@@ -22,9 +29,9 @@ func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Respons
 
 	result := e.Matcher.Match(book.Bids, book.Asks, order)
 	if req.TimeInForce == FOK && !result.FullyFilled {
-		if req.Type == LimitOrder {
-			releaseOrderFunds(client, book.Instrument, req.Side, req.Qty, req.Price)
-		}
+		// Safety net for custom matchers whose fill rules diverge from the
+		// canFillFully probe. Executions already applied cannot be rolled back.
+		releaseReserved(client, book.Instrument, order)
 		return e.rejectOrder(order, req.RequestID, clientID, RejectFOKNotFilled, log)
 	}
 
@@ -77,9 +84,8 @@ func (e *DefaultExchange) CancelOrder(clientID uint64, req *CancelRequest) Respo
 		return resp
 	}
 
-	instrument := book.Instrument
 	remainingQty := order.Qty - order.FilledQty
-	releaseOrderFunds(client, instrument, order.Side, remainingQty, order.Price)
+	releaseReserved(client, book.Instrument, order)
 	if order.Side == Buy {
 		book.Bids.CancelOrder(req.OrderID)
 		e.publishBookUpdate(book, Buy, order.Price)
@@ -133,14 +139,8 @@ func (e *DefaultExchange) buildPositionSnapshots(clientID uint64) []PositionSnap
 		}
 		var unrealizedPnL int64
 		if markPrice > 0 && pos.EntryPrice > 0 {
-			instrument := e.Instruments[pos.Symbol]
-			if instrument != nil {
-				precision := instrument.BasePrecision()
-				sign := int64(1)
-				if pos.Size < 0 {
-					sign = -1
-				}
-				unrealizedPnL = abs(pos.Size) * sign * (markPrice - pos.EntryPrice) / precision
+			if instrument := e.Instruments[pos.Symbol]; instrument != nil {
+				unrealizedPnL = positionUPnL(&pos, markPrice, instrument.BasePrecision())
 			}
 		}
 		snapshots = append(snapshots, PositionSnapshot{
@@ -184,18 +184,16 @@ func (e *DefaultExchange) Subscribe(clientID uint64, req *QueryRequest, gateway 
 	}
 	e.MDPublisher.Subscribe(clientID, req.Symbol, types, gateway)
 
-	snapshot := &BookSnapshot{
-		Bids: book.Bids.GetSnapshot(),
-		Asks: book.Asks.GetSnapshot(),
-	}
-	e.MDPublisher.Publish(req.Symbol, MDSnapshot, snapshot, e.Clock.NowUnixNano())
+	e.MDPublisher.Publish(req.Symbol, MDSnapshot, &BookSnapshot{
+		Bids: book.Bids.GetPublicSnapshot(),
+		Asks: book.Asks.GetPublicSnapshot(),
+	}, e.Clock.NowUnixNano())
 
 	if log := e.Loggers[req.Symbol]; log != nil {
-		snapshotLog := map[string]any{
-			"bids": snapshot.Bids,
-			"asks": snapshot.Asks,
-		}
-		log.LogEvent(e.Clock.NowUnixNano(), clientID, "BookSnapshot", snapshotLog)
+		log.LogEvent(e.Clock.NowUnixNano(), clientID, "BookSnapshot", map[string]any{
+			"bids": book.Bids.GetSnapshot(),
+			"asks": book.Asks.GetSnapshot(),
+		})
 	}
 
 	return Response{RequestID: req.RequestID, Success: true}
@@ -223,11 +221,11 @@ func (e *DefaultExchange) publishBookUpdate(book *OrderBook, side Side, price in
 		hidden = totalQty - visible
 	}
 
+	// Public deltas carry displayed quantity only; hidden depth stays dark.
 	delta := &BookDelta{
 		Side:       side,
 		Price:      price,
 		VisibleQty: visible,
-		HiddenQty:  hidden,
 	}
 	e.MDPublisher.Publish(book.Symbol, MDDelta, delta, e.Clock.NowUnixNano())
 
@@ -305,6 +303,9 @@ func marketRefPrice(book *OrderBook) int64 {
 	return 0
 }
 
+// checkMarketOrderFunds verifies the client can afford the worst-case cost of
+// a market order by walking the opposing book (best-price × full qty would
+// understate the spend on a deep walk and allow overdrafts).
 func checkMarketOrderFunds(client *Client, book *OrderBook, order *Order, precision int64) bool {
 	instrument := book.Instrument
 	if m, ok := instrument.(Margined); ok {
@@ -313,24 +314,114 @@ func checkMarketOrderFunds(client *Client, book *OrderBook, order *Order, precis
 		return required == 0 || client.PerpAvailable(instrument.QuoteAsset()) >= required
 	}
 	if order.Side == Buy {
-		if book.Asks.Best == nil {
-			return true
-		}
-		return client.GetAvailable(instrument.QuoteAsset()) >= (order.Qty*book.Asks.Best.Price)/precision
+		cost := marketBuyCost(client.FeePlan, book, order, precision)
+		return client.GetAvailable(instrument.QuoteAsset()) >= cost
 	}
 	return client.GetAvailable(instrument.BaseAsset()) >= order.Qty
+}
+
+// marketBuyCost walks the ask book and sums the quote spend (plus quote fees)
+// for filling order.Qty, skipping the client's own resting orders.
+func marketBuyCost(feePlan FeeModel, book *OrderBook, order *Order, precision int64) int64 {
+	instrument := book.Instrument
+	remaining := order.Qty
+	cost := int64(0)
+	for limit := book.Asks.Best; limit != nil && remaining > 0; limit = limit.Next {
+		levelQty := int64(0)
+		for o := limit.Head; o != nil && levelQty < remaining; o = o.Next {
+			if o.ClientID == order.ClientID {
+				continue
+			}
+			levelQty += o.Qty - o.FilledQty
+		}
+		fillQty := min(levelQty, remaining)
+		if fillQty <= 0 {
+			continue
+		}
+		cost += spotOrderReservation(feePlan, instrument, Buy, fillQty, limit.Price, precision)
+		remaining -= fillQty
+	}
+	return cost
 }
 
 func (e *DefaultExchange) reserveLimitOrderFunds(client *Client, instrument Instrument, order *Order, precision int64) bool {
 	if m, ok := instrument.(Margined); ok {
 		margin := m.MarginRequired(order.Qty, order.Price, precision)
-		return e.tryReserveOrBorrow(order.ClientID, instrument.QuoteAsset(), margin, client.ReservePerp, true)
+		if !e.tryReserveOrBorrow(order.ClientID, instrument.QuoteAsset(), margin, client.ReservePerp, true) {
+			return false
+		}
+		order.Reserved = margin
+		return true
 	}
-	if order.Side == Buy {
-		amount := (order.Qty * order.Price) / precision
-		return e.tryReserveOrBorrow(order.ClientID, instrument.QuoteAsset(), amount, client.Reserve, false)
+	asset := reserveAsset(instrument, order.Side)
+	amount := spotOrderReservation(client.FeePlan, instrument, order.Side, order.Qty, order.Price, precision)
+	if !e.tryReserveOrBorrow(order.ClientID, asset, amount, client.Reserve, false) {
+		return false
 	}
-	return e.tryReserveOrBorrow(order.ClientID, instrument.BaseAsset(), order.Qty, client.Reserve, false)
+	order.Reserved = amount
+	return true
+}
+
+func reserveAsset(instrument Instrument, side Side) string {
+	if side == Buy {
+		return instrument.QuoteAsset()
+	}
+	return instrument.BaseAsset()
+}
+
+// spotOrderReservation returns the reserve-asset amount to lock for qty at
+// price: the notional (buy) or base qty (sell), plus worst-case taker fee
+// headroom when the fee is charged in the reserve asset. Without headroom,
+// fees debit past the reservation and drive balances negative.
+func spotOrderReservation(feePlan FeeModel, instrument Instrument, side Side, qty, price, precision int64) int64 {
+	var amount int64
+	if side == Buy {
+		amount = MulDiv(qty, price, precision)
+	} else {
+		amount = qty
+	}
+	if qty <= 0 || feePlan == nil {
+		return max(amount, 0)
+	}
+	probe := Execution{Price: price, Qty: qty}
+	fee := feePlan.CalculateFee(FillContext{
+		Exec:       &probe,
+		IsMaker:    false,
+		BaseAsset:  instrument.BaseAsset(),
+		QuoteAsset: instrument.QuoteAsset(),
+		Precision:  precision,
+	})
+	if fee.Asset == reserveAsset(instrument, side) {
+		amount += fee.Amount
+	}
+	return amount
+}
+
+// canFillFully reports whether the opposing book holds enough crossable
+// quantity from other clients to fill the order completely.
+func canFillFully(book *OrderBook, order *Order) bool {
+	side := book.Asks
+	if order.Side == Sell {
+		side = book.Bids
+	}
+	remaining := order.Qty
+	for limit := side.Best; limit != nil && remaining > 0; limit = limit.Next {
+		if order.Type == LimitOrder {
+			if order.Side == Buy && limit.Price > order.Price {
+				break
+			}
+			if order.Side == Sell && limit.Price < order.Price {
+				break
+			}
+		}
+		for o := limit.Head; o != nil && remaining > 0; o = o.Next {
+			if o.ClientID == order.ClientID {
+				continue
+			}
+			remaining -= o.Qty - o.FilledQty
+		}
+	}
+	return remaining <= 0
 }
 
 // reserveOrderFunds checks or reserves funds depending on order type.
@@ -368,21 +459,20 @@ func collectAffectedLevels(book *OrderBook, executions []*Execution) map[int64]S
 	return levels
 }
 
-// removeMakerOrders removes fully filled maker orders from the book.
+// removeMakerOrders removes fully filled maker orders from the book index.
+// The matcher unlinked them from their price level but left them in
+// book.Orders so settlement could read the reservation ledger.
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) removeMakerOrders(book *OrderBook, executions []*Execution) {
 	for _, exec := range executions {
 		if exec.MakerFilledQty < exec.MakerTotalQty {
 			continue
 		}
-		// The matcher already unlinked and removed fully filled orders from book.Orders;
-		// FindOrder returns nil. Clean up the client order list unconditionally.
-		if makerOrder := book.FindOrder(exec.MakerOrderID); makerOrder != nil {
-			if makerOrder.Side == Buy {
-				book.Bids.CancelOrder(exec.MakerOrderID)
-			} else {
-				book.Asks.CancelOrder(exec.MakerOrderID)
-			}
+		side := book.Asks
+		if exec.MakerSide == Buy {
+			side = book.Bids
+		}
+		if makerOrder := side.RemoveFilledOrder(exec.MakerOrderID); makerOrder != nil {
 			putOrder(makerOrder)
 		}
 		e.Clients[exec.MakerClientID].RemoveOrder(exec.MakerOrderID)
@@ -408,7 +498,7 @@ func (e *DefaultExchange) restOrReleaseOrder(client *Client, book *OrderBook, or
 		}
 		client.AddOrder(order.ID)
 	} else {
-		releaseOrderFunds(client, book.Instrument, order.Side, order.Qty-order.FilledQty, order.Price)
+		releaseReserved(client, book.Instrument, order)
 		putOrder(order)
 	}
 }
@@ -433,19 +523,19 @@ func (e *DefaultExchange) rejectOrder(order *Order, requestID uint64, clientID u
 	return resp
 }
 
-// releaseOrderFunds releases the reserved balance for an order (or partial qty).
-func releaseOrderFunds(client *Client, instrument Instrument, side Side, qty, price int64) {
-	if qty <= 0 {
+// releaseReserved returns an order's remaining reserved funds to the client
+// and zeroes the ledger. Exact by construction: it releases what was locked,
+// not a recomputed approximation.
+func releaseReserved(client *Client, instrument Instrument, order *Order) {
+	if order.Reserved <= 0 {
 		return
 	}
-	precision := instrument.BasePrecision()
-	if m, ok := instrument.(Margined); ok {
-		client.ReleasePerp(instrument.QuoteAsset(), m.MarginOnCancel(qty, price, precision))
-	} else if side == Buy {
-		client.Release(instrument.QuoteAsset(), (qty*price)/precision)
+	if _, ok := instrument.(Margined); ok {
+		client.ReleasePerp(instrument.QuoteAsset(), order.Reserved)
 	} else {
-		client.Release(instrument.BaseAsset(), qty)
+		client.Release(reserveAsset(instrument, order.Side), order.Reserved)
 	}
+	order.Reserved = 0
 }
 
 // tryReserveOrBorrow attempts reserveFn; on failure, if BorrowingMgr is configured
@@ -487,6 +577,7 @@ func (e *DefaultExchange) tryReserveOrBorrow(
 		reason = "auto_perp"
 	}
 	ctx := buildBorrowContext(e, client, clientID)
+	ctx.CreditSpot = !isPerp
 	if err := e.BorrowingMgr.BorrowMargin(ctx, asset, amount-available, reason); err != nil {
 		return false
 	}

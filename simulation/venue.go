@@ -34,6 +34,9 @@ func (m *Mount) ConnectNewClient(clientID uint64, balances map[string]int64, fee
 		return gw
 	}
 	d := NewDelayedGateway(gw, m.Latency.Request, m.Latency.Response, m.Latency.MarketData)
+	if m.Latency.Scheduler != nil && m.Latency.Clock != nil {
+		d.UseScheduler(m.Latency.Scheduler, m.Latency.Clock)
+	}
 	d.Start()
 	m.mu.Lock()
 	m.delayed = append(m.delayed, d)

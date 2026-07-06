@@ -9,6 +9,7 @@ import (
 
 	ematching "exchange_sim/matching"
 )
+
 // ExchangeBalance tracks the exchange's own accumulated revenue and safety fund.
 type ExchangeBalance struct {
 	FeeRevenue    map[string]int64 `json:"fee_revenue"`
@@ -26,6 +27,11 @@ type LiquidationHandler interface {
 type AutomationConfig struct {
 	// MarkPriceCalc calculates mark price from order book (default: MidPriceCalculator)
 	MarkPriceCalc MarkPriceCalculator
+
+	// MarkPriceCalcs overrides MarkPriceCalc per symbol. Stateful calculators
+	// (EMA, TWAP, Median) carry one symbol's state and must not be shared
+	// across perp books.
+	MarkPriceCalcs map[string]MarkPriceCalculator
 
 	// IndexProvider provides index prices for perpetuals (required for price updates)
 	IndexProvider PriceSource
@@ -58,6 +64,7 @@ type DefaultExchange struct {
 	LiquidationHandler      LiquidationHandler
 	tickerFactory           TickerFactory
 	markPriceCalc           MarkPriceCalculator
+	markPriceCalcs          map[string]MarkPriceCalculator
 	indexProvider           PriceSource
 	priceUpdateInterval     time.Duration
 	automCtx                context.Context
@@ -192,18 +199,17 @@ func (e *DefaultExchange) logSnapshots() {
 
 	timestamp := e.Clock.NowUnixNano()
 	for symbol, book := range e.Books {
-		snapshot := &BookSnapshot{
-			Bids: book.Bids.GetSnapshot(),
-			Asks: book.Asks.GetSnapshot(),
-		}
-		e.MDPublisher.Publish(symbol, MDSnapshot, snapshot, timestamp)
+		// Subscribers get the displayed book; loggers keep the god view.
+		e.MDPublisher.Publish(symbol, MDSnapshot, &BookSnapshot{
+			Bids: book.Bids.GetPublicSnapshot(),
+			Asks: book.Asks.GetPublicSnapshot(),
+		}, timestamp)
 
 		if log := e.Loggers[symbol]; log != nil {
-			snapshotLog := map[string]any{
-				"bids": snapshot.Bids,
-				"asks": snapshot.Asks,
-			}
-			log.LogEvent(timestamp, 0, "BookSnapshot", snapshotLog)
+			log.LogEvent(timestamp, 0, "BookSnapshot", map[string]any{
+				"bids": book.Bids.GetSnapshot(),
+				"asks": book.Asks.GetSnapshot(),
+			})
 		}
 	}
 }
@@ -357,8 +363,7 @@ func (e *DefaultExchange) CancelAllClientOrders(clientID uint64) int {
 	for _, t := range targets {
 		order := t.order
 		book := t.book
-		remainingQty := order.Qty - order.FilledQty
-		releaseOrderFunds(client, book.Instrument, order.Side, remainingQty, order.Price)
+		releaseReserved(client, book.Instrument, order)
 
 		if order.Side == Buy {
 			book.Bids.CancelOrder(order.ID)
@@ -580,7 +585,7 @@ func (e *DefaultExchange) ListInstruments(baseFilter, quoteFilter string) []Inst
 	return result
 }
 
-// PublishSnapshot publishes a full order book snapshot to all subscribers.
+// PublishSnapshot publishes the displayed order book to all subscribers.
 // Caller must hold e.mu lock.
 func (e *DefaultExchange) PublishSnapshot(symbol string, timestamp int64) {
 	book := e.Books[symbol]
@@ -588,8 +593,8 @@ func (e *DefaultExchange) PublishSnapshot(symbol string, timestamp int64) {
 		return
 	}
 	snapshot := &BookSnapshot{
-		Bids: book.Bids.GetSnapshot(),
-		Asks: book.Asks.GetSnapshot(),
+		Bids: book.Bids.GetPublicSnapshot(),
+		Asks: book.Asks.GetPublicSnapshot(),
 	}
 	e.MDPublisher.Publish(symbol, MDSnapshot, snapshot, timestamp)
 }
@@ -651,6 +656,7 @@ func (e *DefaultExchange) ConfigureAutomation(config AutomationConfig) {
 		config.CollateralRate = 500
 	}
 	e.markPriceCalc = config.MarkPriceCalc
+	e.markPriceCalcs = config.MarkPriceCalcs
 	e.indexProvider = config.IndexProvider
 	e.priceUpdateInterval = config.PriceUpdateInterval
 	e.CollateralRate = config.CollateralRate
@@ -770,7 +776,11 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		if !book.Instrument.IsPerp() {
 			continue
 		}
-		markPrice := e.markPriceCalc.Calculate(book)
+		calc := e.markPriceCalc
+		if perSymbol := e.markPriceCalcs[book.Symbol]; perSymbol != nil {
+			calc = perSymbol
+		}
+		markPrice := calc.Calculate(book)
 		if markPrice == 0 {
 			continue
 		}
@@ -864,62 +874,75 @@ func (e *DefaultExchange) ChargeCollateralInterest() {
 	}
 }
 
+// positionUPnL returns unrealized PnL for a position marked at markPrice.
+func positionUPnL(pos *Position, markPrice, precision int64) int64 {
+	if pos.Size >= 0 {
+		return MulDiv(pos.Size, markPrice-pos.EntryPrice, precision)
+	}
+	return MulDiv(-pos.Size, pos.EntryPrice-markPrice, precision)
+}
+
 // CheckLiquidations evaluates all positions for a symbol after a mark price update.
+// Cross-margin account model: equity = perp balance + unrealized PnL (order
+// margin is locked, not lost); liquidate when equity drops below the
+// maintenance requirement, MaintenanceMarginRate bps of position notional at
+// the mark price. Hedge-mode Long/Short positions are included.
 func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, markPrice int64) {
 	if markPrice == 0 {
 		return
 	}
 	precision := perp.BasePrecision()
+	quote := perp.QuoteAsset()
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	for clientID, client := range e.Clients {
-		pos := e.Positions.GetPosition(clientID, symbol)
-		if pos == nil || pos.Size == 0 {
+		var positions []*Position
+		var unrealizedPnL, notional int64
+		for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
+			pos := e.Positions.GetPositionBySide(clientID, symbol, side)
+			if pos == nil || pos.Size == 0 {
+				continue
+			}
+			positions = append(positions, pos)
+			unrealizedPnL += positionUPnL(pos, markPrice, precision)
+			notional += MulDiv(abs(pos.Size), markPrice, precision)
+		}
+		if len(positions) == 0 {
 			continue
 		}
 
-		sign := int64(1)
-		if pos.Size < 0 {
-			sign = -1
-		}
-		unrealizedPnL := abs(pos.Size) * sign * (markPrice - pos.EntryPrice) / precision
-
-		// Divide by precision first to avoid int64 overflow at real BTC prices.
-		notional := abs(pos.Size) * pos.EntryPrice / precision
-		initMargin := notional * perp.MarginRate / 10000
-		if initMargin == 0 {
-			continue
-		}
-
-		equity := client.PerpAvailable(perp.QuoteAsset()) + unrealizedPnL
-		marginRatio := equity * 10000 / initMargin
+		equity := client.PerpBalance(quote) + unrealizedPnL
+		maintenanceMargin := notional * perp.MaintenanceMarginRate / 10000
+		warningMargin := notional * perp.WarningMarginRate / 10000
 
 		timestamp := e.Clock.NowUnixNano()
 
-		if marginRatio < perp.MaintenanceMarginRate {
+		if equity < maintenanceMargin {
 			if log := e.getLogger("_global"); log != nil {
 				log.LogEvent(timestamp, clientID, "liquidation_check", map[string]any{
-					"timestamp":      timestamp,
-					"client_id":      clientID,
-					"symbol":         symbol,
-					"position_size":  pos.Size,
-					"entry_price":    pos.EntryPrice,
-					"mark_price":     markPrice,
-					"balance":        client.PerpBalances[perp.QuoteAsset()],
-					"reserved":       client.PerpReserved[perp.QuoteAsset()],
-					"available":      client.PerpAvailable(perp.QuoteAsset()),
-					"unrealized_pnl": unrealizedPnL,
-					"equity":         equity,
-					"init_margin":    initMargin,
-					"margin_ratio":   marginRatio,
-					"threshold":      perp.MaintenanceMarginRate,
+					"timestamp":          timestamp,
+					"client_id":          clientID,
+					"symbol":             symbol,
+					"mark_price":         markPrice,
+					"balance":            client.PerpBalances[quote],
+					"reserved":           client.PerpReserved[quote],
+					"unrealized_pnl":     unrealizedPnL,
+					"equity":             equity,
+					"notional":           notional,
+					"maintenance_margin": maintenanceMargin,
 				})
 			}
-			e.liquidate(clientID, client, symbol, pos, perp, timestamp)
-		} else if marginRatio < perp.WarningMarginRate && e.LiquidationHandler != nil {
-			liqPrice := e.EstimateLiquidationPrice(pos, clientID, perp, precision)
+			for _, pos := range positions {
+				e.liquidate(clientID, client, symbol, pos, perp, timestamp)
+			}
+		} else if equity < warningMargin && e.LiquidationHandler != nil {
+			marginRatio := int64(0)
+			if notional > 0 {
+				marginRatio = equity * 10000 / notional
+			}
+			liqPrice := e.EstimateLiquidationPrice(positions[0], clientID, perp, precision)
 			e.LiquidationHandler.OnMarginCall(&MarginCallEvent{
 				Timestamp:        timestamp,
 				ClientID:         clientID,
@@ -931,17 +954,18 @@ func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, ma
 	}
 }
 
-// EstimateLiquidationPrice returns the price at which the position would be liquidated.
+// EstimateLiquidationPrice returns the approximate mark price at which the
+// position's equity would hit zero (maintenance requirement ignored).
 func (e *DefaultExchange) EstimateLiquidationPrice(pos *Position, clientID uint64, perp *PerpFutures, precision int64) int64 {
 	client := e.Clients[clientID]
 	if client == nil || pos.Size == 0 {
 		return 0
 	}
-	available := client.PerpAvailable(perp.QuoteAsset())
+	balance := client.PerpBalance(perp.QuoteAsset())
 	if pos.Size > 0 {
-		return pos.EntryPrice - available*precision/pos.Size
+		return pos.EntryPrice - MulDiv(balance, precision, pos.Size)
 	}
-	return pos.EntryPrice + available*precision/(-pos.Size)
+	return pos.EntryPrice + MulDiv(balance, precision, -pos.Size)
 }
 
 // liquidate forcibly closes a position via market order when maintenance margin is breached.
@@ -956,7 +980,7 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 	if pos.Size < 0 {
 		closeSide = Buy
 	}
-	fillPrice := e.forceClose(clientID, client, book, book.Instrument, closeSide, abs(pos.Size), timestamp)
+	fillPrice := e.forceClose(clientID, client, book, book.Instrument, closeSide, pos.PositionSide, abs(pos.Size), timestamp)
 	if fillPrice == 0 {
 		// No liquidity in the book; position stays open for retry on next mark price update.
 		return
@@ -993,26 +1017,20 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 		}
 	}
 
-	remainingEquity := client.PerpAvailable(perp.QuoteAsset())
+	// Settlement already released this position's margin and the book's order
+	// margin was released by cancelClientOrdersOnBook. Remaining reservations
+	// back the client's orders and positions on OTHER symbols — never zero them.
+	// Bankruptcy is a negative cash balance after the close.
+	quote := perp.QuoteAsset()
+	balance := client.PerpBalances[quote]
 	debt := int64(0)
-	if remainingEquity < 0 {
-		debt = -remainingEquity
-		oldBalance := client.PerpBalances[perp.QuoteAsset()]
-		oldReserved := client.PerpReserved[perp.QuoteAsset()]
-		client.PerpBalances[perp.QuoteAsset()] = 0
-		client.PerpReserved[perp.QuoteAsset()] = 0
-		e.ExchangeBalance.InsuranceFund[perp.QuoteAsset()] -= debt
+	if balance < 0 {
+		debt = -balance
+		client.PerpBalances[quote] = 0
+		e.ExchangeBalance.InsuranceFund[quote] -= debt
 
 		logBalanceChange(e, timestamp, clientID, symbol, "liquidation_deficit", []BalanceDelta{
-			perpDelta(perp.QuoteAsset(), oldBalance, 0),
-			reservedPerpDelta(perp.QuoteAsset(), oldReserved, 0),
-		})
-	} else if remainingEquity > 0 {
-		oldReserved := client.PerpReserved[perp.QuoteAsset()]
-		client.PerpReserved[perp.QuoteAsset()] = 0
-
-		logBalanceChange(e, timestamp, clientID, symbol, "liquidation_surplus", []BalanceDelta{
-			reservedPerpDelta(perp.QuoteAsset(), oldReserved, 0),
+			perpDelta(quote, balance, 0),
 		})
 	}
 
@@ -1025,12 +1043,12 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 			FillPrice:     fillPrice,
 			RemainingDebt: debt,
 		})
-		if debt > 0 || remainingEquity > 0 {
+		if debt > 0 {
 			e.LiquidationHandler.OnInsuranceFund(&InsuranceFundEvent{
 				Timestamp: timestamp,
 				Symbol:    symbol,
-				Delta:     remainingEquity - debt,
-				Balance:   e.ExchangeBalance.InsuranceFund[perp.QuoteAsset()],
+				Delta:     -debt,
+				Balance:   e.ExchangeBalance.InsuranceFund[quote],
 			})
 		}
 	}
@@ -1051,6 +1069,12 @@ func (e *DefaultExchange) CheckAndSettleFunding() {
 
 	for _, perp := range perps {
 		fundingRate := perp.GetFundingRate()
+		if fundingRate.NextFunding == 0 {
+			// First tick after start: anchor the schedule instead of settling
+			// a full interval's funding at t=0.
+			fundingRate.NextFunding = now + fundingRate.Interval*1e9
+			continue
+		}
 		if now >= fundingRate.NextFunding {
 			e.mu.Lock()
 			settleFunding(e.Positions, e.Clients, perp, e.Clock, buildFundingSink(e))

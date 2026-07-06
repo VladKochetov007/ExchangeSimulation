@@ -8,6 +8,10 @@ type BorrowContext struct {
 	Client    *Client
 	ClientID  uint64
 	Timestamp int64
+	// CreditSpot routes the borrowed funds to the spot wallet. Spot auto-borrow
+	// must credit the wallet the reservation retry reads, or the loan is booked
+	// while the order still rejects.
+	CreditSpot bool
 	LogBalance func(reason string, changes []BalanceDelta)
 	LogEvent   func(event string, data any)
 }
@@ -45,15 +49,23 @@ func (bm *BorrowingManager) BorrowMargin(ctx BorrowContext, asset string, amount
 	oldBorrowed := ctx.Client.Borrowed[asset]
 	ctx.Client.Borrowed[asset] += amount
 
-	oldPerp := ctx.Client.PerpBalances[asset]
-	ctx.Client.PerpBalances[asset] += amount
+	var walletDelta BalanceDelta
+	if ctx.CreditSpot {
+		oldSpot := ctx.Client.Balances[asset]
+		ctx.Client.Balances[asset] += amount
+		walletDelta = spotDelta(asset, oldSpot, ctx.Client.Balances[asset])
+	} else {
+		oldPerp := ctx.Client.PerpBalances[asset]
+		ctx.Client.PerpBalances[asset] += amount
+		walletDelta = perpDelta(asset, oldPerp, ctx.Client.PerpBalances[asset])
+	}
 
 	rate := bm.getRate(asset)
 	collateral := bm.CalculateCollateralUsed(asset, amount)
 
 	if ctx.LogBalance != nil {
 		ctx.LogBalance("borrow", []BalanceDelta{
-			perpDelta(asset, oldPerp, ctx.Client.PerpBalances[asset]),
+			walletDelta,
 			borrowedDelta(asset, oldBorrowed, ctx.Client.Borrowed[asset]),
 		})
 	}
@@ -122,7 +134,15 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(client *Client, borrow
 			continue
 		}
 		if price := bm.Config.PriceSource.Price(asset); price > 0 {
-			totalCollateralValue += (balance / btcPrecision) * price
+			totalCollateralValue += MulDiv(balance, price, bm.assetPrecision(asset))
+		}
+	}
+	for asset, balance := range client.Balances {
+		if balance <= 0 {
+			continue
+		}
+		if price := bm.Config.PriceSource.Price(asset); price > 0 {
+			totalCollateralValue += MulDiv(balance, price, bm.assetPrecision(asset))
 		}
 	}
 
@@ -132,7 +152,7 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(client *Client, borrow
 			continue
 		}
 		if price := bm.Config.PriceSource.Price(asset); price > 0 {
-			existingBorrowValue += (borrowed / btcPrecision) * price
+			existingBorrowValue += MulDiv(borrowed, price, bm.assetPrecision(asset))
 		}
 	}
 
@@ -140,7 +160,7 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(client *Client, borrow
 	if borrowPrice == 0 {
 		return errors.New("price unavailable")
 	}
-	newBorrowValue := (borrowAmount / btcPrecision) * borrowPrice
+	newBorrowValue := MulDiv(borrowAmount, borrowPrice, bm.assetPrecision(borrowAsset))
 	maxBorrowValue := int64(float64(totalCollateralValue) * bm.getCollateralFactor(borrowAsset))
 
 	if existingBorrowValue+newBorrowValue > maxBorrowValue {
@@ -157,6 +177,15 @@ func (bm *BorrowingManager) getRate(asset string) int64 {
 		return rate
 	}
 	return 500
+}
+
+// assetPrecision returns units per whole asset for collateral valuation,
+// defaulting to BTC precision for unconfigured assets.
+func (bm *BorrowingManager) assetPrecision(asset string) int64 {
+	if p := bm.Config.AssetPrecisions[asset]; p > 0 {
+		return p
+	}
+	return btcPrecision
 }
 
 func (bm *BorrowingManager) getCollateralFactor(asset string) float64 {
@@ -181,5 +210,5 @@ func (bm *BorrowingManager) CalculateCollateralUsed(asset string, amount int64) 
 	if factor == 0 {
 		return 0
 	}
-	return int64(float64((amount/btcPrecision)*price) / factor)
+	return int64(float64(MulDiv(amount, price, bm.assetPrecision(asset))) / factor)
 }

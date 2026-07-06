@@ -27,25 +27,25 @@ func (m *PriceTimeMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *et
 		book = bidBook
 	}
 
-	for incomingOrder.FilledQty < incomingOrder.Qty && book.Best != nil {
-		if !m.CanMatch(incomingOrder, book.Best) {
+	limit := book.Best
+	for incomingOrder.FilledQty < incomingOrder.Qty && limit != nil {
+		if !m.CanMatch(incomingOrder, limit) {
 			break
 		}
-
-		limit := book.Best
-		matched := false
+		nextLimit := limit.Next
 		for order := limit.Head; order != nil && incomingOrder.FilledQty < incomingOrder.Qty; {
 			next := order.Next
 			if order.FilledQty < order.Qty && m.shouldMatch(incomingOrder, order) {
 				exec := m.execute(incomingOrder, order)
 				executions = append(executions, exec)
-				matched = true
 
 				if order.FilledQty >= order.Qty {
 					order.Status = etypes.Filled
-					// CRITICAL: Remove filled order from book so matching can continue to next level
+					// Unlink from the price level so matching continues, but keep
+					// the book.Orders index entry: the exchange settles against the
+					// order (reservation ledger, position side) and removes it in
+					// removeMakerOrders after settlement.
 					ebook.UnlinkOrder(order)
-					delete(book.Orders, order.ID)
 				} else {
 					order.Status = etypes.PartialFill
 				}
@@ -55,9 +55,10 @@ func (m *PriceTimeMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *et
 
 		if ebook.IsEmpty(limit) {
 			book.RemoveLimit(limit)
-		} else if !matched {
-			break
 		}
+		// Advance even when nothing matched here: a level holding only the
+		// incoming client's own orders must not blockade deeper liquidity.
+		limit = nextLimit
 	}
 
 	fullyFilled := incomingOrder.FilledQty >= incomingOrder.Qty
@@ -107,8 +108,10 @@ func (m *PriceTimeMatcher) execute(taker, maker *etypes.Order) *etypes.Execution
 	exec.Price = maker.Price
 	exec.Qty = execQty
 	exec.Timestamp = m.clock.NowUnixNano()
+	exec.TakerFilledQty = taker.FilledQty
 	exec.MakerFilledQty = maker.FilledQty
 	exec.MakerTotalQty = maker.Qty
 	exec.MakerSide = maker.Side
+	exec.MakerPosSide = maker.PositionSide
 	return exec
 }

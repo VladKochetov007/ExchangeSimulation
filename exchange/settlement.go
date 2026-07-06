@@ -28,42 +28,51 @@ func (e *DefaultExchange) handleExecution(
 	takerFee := taker.FeePlan.CalculateFee(FillContext{Exec: exec, IsMaker: false, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
 	makerFee := maker.FeePlan.CalculateFee(FillContext{Exec: exec, IsMaker: true, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
 
+	// Fully filled makers stay in book.Orders until removeMakerOrders, so this
+	// lookup normally succeeds; exec carries the fallbacks for custom matchers.
+	makerOrder := book.FindOrder(exec.MakerOrderID)
+	makerPosSide := exec.MakerPosSide
+	if makerOrder != nil {
+		makerPosSide = makerOrder.PositionSide
+	}
+
 	var result SettlementResult
 	var positionChanged bool
 	if s, ok := instrument.(Settleable); ok {
-		makerOrder := book.FindOrder(exec.MakerOrderID)
-		makerPosSide := PositionBoth
-		if makerOrder != nil {
-			makerPosSide = makerOrder.PositionSide
-		}
-		result = s.Settle(e.buildSettlementContext(book, exec, takerOrder, makerPosSide, takerFee, makerFee, basePrecision, timestamp, log))
+		result = s.Settle(e.buildSettlementContext(book, exec, takerOrder, makerOrder, makerPosSide, takerFee, makerFee, basePrecision, timestamp, log))
 		positionChanged = true
 	} else {
-		notional := (exec.Price * exec.Qty) / basePrecision
-		e.settleSpotExecution(book, exec, takerOrder, taker, maker, takerFee, makerFee, notional, timestamp)
+		notional := MulDiv(exec.Qty, exec.Price, basePrecision)
+		e.settleSpotExecution(book, exec, takerOrder, makerOrder, taker, maker, takerFee, makerFee, notional, timestamp)
 	}
 	tradeID := e.createTrade(book, exec, takerOrder, timestamp, log)
-	e.notifyFill(exec, takerOrder, takerFee, makerFee, tradeID, book, log, timestamp, result.TakerDelta, result.MakerDelta, result.TakerPnL, result.MakerPnL)
+	e.notifyFill(exec, takerOrder, makerPosSide, takerFee, makerFee, tradeID, book, log, timestamp, result.TakerDelta, result.MakerDelta, result.TakerPnL, result.MakerPnL)
 	return positionChanged
 }
 
 func (e *DefaultExchange) buildSettlementContext(
-	book *OrderBook, exec *Execution, takerOrder *Order,
+	book *OrderBook, exec *Execution, takerOrder, makerOrder *Order,
 	makerPosSide PositionSide, takerFee, makerFee Fee,
 	basePrecision, timestamp int64, log Logger,
 ) SettlementContext {
 	clients := e.Clients
 	return SettlementContext{
-		Exec:         exec,
-		TakerOrder:   takerOrder,
-		MakerPosSide: makerPosSide,
-		TakerFee:     takerFee,
-		MakerFee:     makerFee,
-		Positions:    e.Positions,
-		PerpBalance:       func(clientID uint64, asset string) int64        { return clients[clientID].PerpBalance(asset) },
+		Exec:              exec,
+		TakerOrder:        takerOrder,
+		MakerOrder:        makerOrder,
+		MakerPosSide:      makerPosSide,
+		TakerFee:          takerFee,
+		MakerFee:          makerFee,
+		Positions:         e.Positions,
+		PerpBalance:       func(clientID uint64, asset string) int64 { return clients[clientID].PerpBalance(asset) },
 		MutatePerpBalance: func(clientID uint64, asset string, delta int64) { clients[clientID].MutatePerpBalance(asset, delta) },
-		ReservePerp:       func(clientID uint64, asset string, amount int64) bool { return clients[clientID].ReservePerp(asset, amount) },
-		ReleasePerp:       func(clientID uint64, asset string, amount int64) { clients[clientID].ReleasePerp(asset, amount) },
+		// Post-trade margin is owed once the fill happened: force-reserve even
+		// past available so the shortfall is visible to the liquidation sweep.
+		ReservePerp: func(clientID uint64, asset string, amount int64) bool {
+			clients[clientID].ForceReservePerp(asset, amount)
+			return true
+		},
+		ReleasePerp: func(clientID uint64, asset string, amount int64) { clients[clientID].ReleasePerp(asset, amount) },
 		RecordFeeRevenue: func(asset string, takerAmt, makerAmt int64) {
 			e.recordFeeRevenue(asset, Fee{Amount: takerAmt}, Fee{Amount: makerAmt}, book, timestamp)
 		},
@@ -100,23 +109,20 @@ func (e *DefaultExchange) createTrade(book *OrderBook, exec *Execution, takerOrd
 }
 
 // notifyFill sends gateway and log fill events to both taker and maker.
+// Per-execution state comes from exec (TakerFilledQty/MakerFilledQty captured
+// at match time), not from the order's final post-match state.
 func (e *DefaultExchange) notifyFill(
-	exec *Execution, takerOrder *Order, takerFee, makerFee Fee,
+	exec *Execution, takerOrder *Order, makerPosSide PositionSide, takerFee, makerFee Fee,
 	tradeID uint64, book *OrderBook, log Logger, timestamp int64,
 	takerDelta, makerDelta PositionDelta, takerPnL, makerPnL int64,
 ) {
 	sendFillNotification(e.Gateways[exec.TakerClientID], exec.TakerOrderID, exec.TakerClientID,
 		tradeID, exec, takerOrder.Side, takerOrder.PositionSide, takerFee,
-		takerOrder.FilledQty >= takerOrder.Qty, book.Symbol, takerDelta, takerPnL)
+		exec.TakerFilledQty >= takerOrder.Qty, book.Symbol, takerDelta, takerPnL)
 	logFill(log, timestamp, exec.TakerClientID, exec.TakerOrderID, exec,
-		takerOrder.Side, takerOrder.PositionSide, takerOrder.FilledQty, takerOrder.Qty,
+		takerOrder.Side, takerOrder.PositionSide, exec.TakerFilledQty, takerOrder.Qty,
 		tradeID, takerFee, takerDelta, takerPnL, book.Symbol, "taker")
 
-	makerOrder := book.FindOrder(exec.MakerOrderID)
-	makerPosSide := PositionBoth
-	if makerOrder != nil {
-		makerPosSide = makerOrder.PositionSide
-	}
 	sendFillNotification(e.Gateways[exec.MakerClientID], exec.MakerOrderID, exec.MakerClientID,
 		tradeID, exec, exec.MakerSide, makerPosSide, makerFee,
 		exec.MakerFilledQty >= exec.MakerTotalQty, book.Symbol, makerDelta, makerPnL)
@@ -136,27 +142,56 @@ func (e *DefaultExchange) publishOpenInterest(book *OrderBook, timestamp int64) 
 // settleSpotExecution settles balances for both taker and maker in a spot trade.
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) settleSpotExecution(
-	book *OrderBook, exec *Execution, takerOrder *Order,
+	book *OrderBook, exec *Execution, takerOrder, makerOrder *Order,
 	taker, maker *Client, takerFee, makerFee Fee,
 	notional, timestamp int64,
 ) {
 	base, quote := book.Instrument.BaseAsset(), book.Instrument.QuoteAsset()
 	if takerOrder.Side == Buy {
-		e.settleSpotBuyer(taker, exec.TakerClientID, book, base, quote, exec.Qty, notional, takerFee, timestamp)
-		e.settleSpotSeller(maker, exec.MakerClientID, book, base, quote, exec.Qty, notional, makerFee, timestamp)
+		e.settleSpotBuyer(taker, exec.TakerClientID, book, takerOrder, exec, base, quote, exec.Qty, notional, takerFee, timestamp)
+		e.settleSpotSeller(maker, exec.MakerClientID, book, makerOrder, exec, base, quote, exec.Qty, notional, makerFee, timestamp)
 	} else {
-		e.settleSpotSeller(taker, exec.TakerClientID, book, base, quote, exec.Qty, notional, takerFee, timestamp)
-		e.settleSpotBuyer(maker, exec.MakerClientID, book, base, quote, exec.Qty, notional, makerFee, timestamp)
+		e.settleSpotSeller(taker, exec.TakerClientID, book, takerOrder, exec, base, quote, exec.Qty, notional, takerFee, timestamp)
+		e.settleSpotBuyer(maker, exec.MakerClientID, book, makerOrder, exec, base, quote, exec.Qty, notional, makerFee, timestamp)
 	}
 	e.recordFeeRevenue(quote, takerFee, makerFee, book, timestamp)
 }
 
+// spotFillRelease computes the reservation to unlock for this fill as a delta
+// against the order's ledger: previous reservation minus what the unfilled
+// remainder still requires at the order's limit price. This releases
+// price-improvement and fee headroom exactly instead of recomputing from the
+// execution price. Market orders reserve nothing and release nothing — the
+// old unconditional release silently consumed reservations backing the
+// client's OTHER resting orders (the classic "out of money" corruption).
+func spotFillRelease(client *Client, book *OrderBook, order *Order, exec *Execution, side Side, precision int64) int64 {
+	if order == nil {
+		// Custom matcher removed the order pre-settlement; release at the
+		// execution price (legacy behavior, may leak improvement delta).
+		if side == Buy {
+			return MulDiv(exec.Qty, exec.Price, precision)
+		}
+		return exec.Qty
+	}
+	if order.Type == Market {
+		return 0
+	}
+	instrument := book.Instrument
+	stillNeeded := spotOrderReservation(client.FeePlan, instrument, side, order.Qty-order.FilledQty, order.Price, precision)
+	release := order.Reserved - stillNeeded
+	if release <= 0 {
+		return 0
+	}
+	order.Reserved -= release
+	return release
+}
+
 // settleSpotBuyer releases the buyer's quote reservation and settles balances.
 // Caller must hold e.mu.Lock().
-func (e *DefaultExchange) settleSpotBuyer(client *Client, clientID uint64, book *OrderBook, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
+func (e *DefaultExchange) settleSpotBuyer(client *Client, clientID uint64, book *OrderBook, order *Order, exec *Execution, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
 	oldBase, oldQuote := client.Balances[base], client.Balances[quote]
 	oldFeeAsset := client.Balances[fee.Asset]
-	client.Release(quote, notional)
+	client.Release(quote, spotFillRelease(client, book, order, exec, Buy, book.Instrument.BasePrecision()))
 	client.Balances[quote] -= notional
 	client.Balances[fee.Asset] -= fee.Amount
 	client.Balances[base] += qty
@@ -172,10 +207,10 @@ func (e *DefaultExchange) settleSpotBuyer(client *Client, clientID uint64, book 
 
 // settleSpotSeller releases the seller's base reservation and settles balances.
 // Caller must hold e.mu.Lock().
-func (e *DefaultExchange) settleSpotSeller(client *Client, clientID uint64, book *OrderBook, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
+func (e *DefaultExchange) settleSpotSeller(client *Client, clientID uint64, book *OrderBook, order *Order, exec *Execution, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
 	oldBase, oldQuote := client.Balances[base], client.Balances[quote]
 	oldFeeAsset := client.Balances[fee.Asset]
-	client.Release(base, qty)
+	client.Release(base, spotFillRelease(client, book, order, exec, Sell, book.Instrument.BasePrecision()))
 	client.Balances[base] -= qty
 	client.Balances[quote] += notional
 	client.Balances[fee.Asset] -= fee.Amount
@@ -261,4 +296,3 @@ func sendFillNotification(
 		},
 	}
 }
-

@@ -88,6 +88,13 @@ func (c *Client) ReservePerp(asset string, amount int64) bool {
 	return true
 }
 
+// ForceReservePerp earmarks margin unconditionally. Used post-trade: the fill
+// already happened, so margin is owed even when it pushes available negative;
+// the liquidation sweep resolves the shortfall.
+func (c *Client) ForceReservePerp(asset string, amount int64) {
+	c.PerpReserved[asset] += amount
+}
+
 func (c *Client) ReleasePerp(asset string, amount int64) {
 	c.PerpReserved[asset] = max(0, c.PerpReserved[asset]-amount)
 }

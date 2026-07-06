@@ -78,8 +78,10 @@ func TestPlaceOrderDirect(t *testing.T) {
 
 	client := ex.Clients[1]
 	notional := int64((orderReq.Qty * orderReq.Price) / BTC_PRECISION)
-	if client.Reserved["USD"] != notional {
-		t.Errorf("Should have reserved %d USD, got %d", notional, client.Reserved["USD"])
+	// Reservation includes worst-case (taker, 10 bps) fee headroom in quote.
+	expected := notional + notional*10/10000
+	if client.Reserved["USD"] != expected {
+		t.Errorf("Should have reserved %d USD, got %d", expected, client.Reserved["USD"])
 	}
 }
 

@@ -14,6 +14,11 @@ type Order struct {
 	IcebergQty   int64        `json:"iceberg_qty"`
 	Status       OrderStatus  `json:"status"`
 	Timestamp    int64        `json:"timestamp"`
+	// Reserved is the remaining amount locked for this order (quote units for
+	// buys and margined orders, base units for spot sells). The exchange is the
+	// single writer; releases are computed as deltas against this ledger so
+	// price improvement and fee headroom never leak reserved funds.
+	Reserved int64 `json:"-"`
 
 	Prev   *Order `json:"-"`
 	Next   *Order `json:"-"`

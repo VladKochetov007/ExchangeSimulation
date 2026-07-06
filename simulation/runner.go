@@ -20,6 +20,7 @@ type Runner struct {
 	mounts []*Mount
 	actors []actor.Actor
 	config RunnerConfig
+	shutdownHook func()
 }
 
 func NewRunner(clock Clock, config RunnerConfig) *Runner {
@@ -45,6 +46,10 @@ func (r *Runner) AddActor(a actor.Actor) {
 func (r *Runner) SetProgressCallback(every int, fn func(done, total int)) {
 	r.config.ProgressEvery = every
 	r.config.OnProgress = fn
+}
+
+func (r *Runner) SetShutdownHook(fn func()) {
+	r.shutdownHook = fn
 }
 
 func (r *Runner) Run(ctx context.Context) error {
@@ -93,6 +98,9 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	for _, a := range r.actors {
 		a.Stop()
+	}
+	if r.shutdownHook != nil {
+		r.shutdownHook()
 	}
 	for _, m := range r.mounts {
 		m.Shutdown()

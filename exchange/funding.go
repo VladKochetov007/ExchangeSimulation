@@ -63,6 +63,46 @@ func (pm *PositionManager) UpdatePosition(clientID uint64, symbol string, qty, p
 	return delta
 }
 
+// AddPositionMargin increases the tracked margin ledger for a position.
+// Implements types.MarginLedger.
+func (pm *PositionManager) AddPositionMargin(clientID uint64, symbol string, side PositionSide, amount int64) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	if pm.positions[clientID] == nil {
+		return
+	}
+	if pos := pm.positions[clientID][positionKey{symbol, side}]; pos != nil {
+		pos.Margin += amount
+	}
+}
+
+// ReleasePositionMargin removes and returns the margin share for closing
+// closedQty out of a position previously sized oldSize. A full close returns
+// the entire remainder so no rounding dust survives the position lifecycle.
+// Implements types.MarginLedger.
+func (pm *PositionManager) ReleasePositionMargin(clientID uint64, symbol string, side PositionSide, closedQty, oldSize int64) int64 {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	if pm.positions[clientID] == nil {
+		return 0
+	}
+	pos := pm.positions[clientID][positionKey{symbol, side}]
+	if pos == nil || pos.Margin <= 0 {
+		return 0
+	}
+	absOld := abs(oldSize)
+	if closedQty >= absOld {
+		release := pos.Margin
+		pos.Margin = 0
+		return release
+	}
+	release := MulDiv(pos.Margin, closedQty, absOld)
+	pos.Margin -= release
+	return release
+}
+
 func (pm *PositionManager) HasOpenPositions(clientID uint64) bool {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
@@ -208,7 +248,7 @@ func (pm *PositionManager) calculateOpenInterestUnsafe(symbol string) int64 {
 // fundingEventSink carries the two side-effects settleFunding needs from the exchange.
 // Defined here because it references exchange-internal types. Unexported.
 type fundingEventSink struct {
-	logBalance   func(timestamp int64, clientID uint64, symbol, reason string, changes []BalanceDelta)
+	logBalance    func(timestamp int64, clientID uint64, symbol, reason string, changes []BalanceDelta)
 	recordRevenue func(asset string, amount int64)
 }
 
@@ -225,6 +265,11 @@ func settleFunding(store PositionStore, clients map[uint64]*Client, perp *PerpFu
 	timestamp := clock.NowUnixNano()
 	quote := perp.QuoteAsset()
 
+	// Funding accrues on position value at MARK price (universal perp
+	// convention): equal opposite positions pay/receive equal amounts
+	// regardless of their entry prices, keeping funding zero-sum.
+	markPrice := fundingRate.MarkPrice
+
 	// netExchangeFlow > 0: exchange received more from longs than it paid to shorts.
 	// netExchangeFlow < 0: exchange paid out more to shorts than it received from longs.
 	netExchangeFlow := int64(0)
@@ -234,7 +279,11 @@ func settleFunding(store PositionStore, clients map[uint64]*Client, perp *PerpFu
 		if client == nil {
 			return
 		}
-		positionValue := abs(pos.Size) * pos.EntryPrice / precision
+		price := markPrice
+		if price == 0 {
+			price = pos.EntryPrice
+		}
+		positionValue := MulDiv(abs(pos.Size), price, precision)
 		funding := positionValue * fundingRate.Rate / 10000
 
 		oldBalance := client.PerpBalances[quote]
@@ -287,8 +336,7 @@ func realizedPerpPnL(oldSize, oldEntryPrice, tradeQty, tradePrice int64, tradeSi
 	// PnL formula: prices are in quotePrecision per full base asset
 	// closedQty is in base satoshis, priceDiff is in quote precision per full base
 	// Result is in quote precision
-	priceDiff := tradePrice - oldEntryPrice
-	return (closedQty * sign * priceDiff) / basePrecision
+	return sign * MulDiv(closedQty, tradePrice-oldEntryPrice, basePrecision)
 }
 
 func abs(x int64) int64 {

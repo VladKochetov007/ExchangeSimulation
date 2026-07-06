@@ -106,9 +106,17 @@ func (es *EventScheduler) ProcessUntil(untilTime int64) {
 // eventHeap implements heap.Interface for priority queue of events
 type eventHeap []*ScheduledEvent
 
-func (h eventHeap) Len() int           { return len(h) }
-func (h eventHeap) Less(i, j int) bool { return h[i].Time < h[j].Time }
-func (h eventHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h eventHeap) Len() int { return len(h) }
+
+// Less orders by time, then by schedule sequence so equal-timestamp events
+// fire in FIFO order — heap sift order is not deterministic across runs.
+func (h eventHeap) Less(i, j int) bool {
+	if h[i].Time != h[j].Time {
+		return h[i].Time < h[j].Time
+	}
+	return h[i].id < h[j].id
+}
+func (h eventHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 
 func (h *eventHeap) Push(x any) {
 	*h = append(*h, x.(*ScheduledEvent))

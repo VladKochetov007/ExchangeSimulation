@@ -52,8 +52,10 @@ func (c *WeightedMidPriceCalculator) Calculate(book *ebook.OrderBook) int64 {
 		return bidPrice
 	}
 
+	// Weighted mid = bid + spread × bidQty/(bidQty+askQty); avoids the
+	// price×qty product, which overflows int64 at realistic sizes.
 	totalWeight := bidQty + askQty
-	return (bidPrice*askQty + askPrice*bidQty) / totalWeight
+	return bidPrice + etypes.MulDiv(askPrice-bidPrice, bidQty, totalWeight)
 }
 
 // Index-anchored mark price models — all require a PriceSource for the external spot reference.

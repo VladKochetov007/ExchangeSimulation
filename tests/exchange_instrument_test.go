@@ -46,7 +46,7 @@ func TestCancelOrderValidationNotFound(t *testing.T) {
 	btcusd := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/1000)
 	ex.AddInstrument(btcusd)
 
-	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000}
+	balances := map[string]int64{"BTC": 1000000000, "USD": 20000000000000}
 	ex.ConnectNewClient(1, balances, &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
 	gateway := ex.Gateways[1]
 
@@ -73,7 +73,7 @@ func TestCancelOrderValidationNotOwned(t *testing.T) {
 	btcusd := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/1000)
 	ex.AddInstrument(btcusd)
 
-	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000}
+	balances := map[string]int64{"BTC": 1000000000, "USD": 20000000000000}
 	ex.ConnectNewClient(1, balances, &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
 	gateway1 := ex.Gateways[1]
 	ex.ConnectNewClient(2, balances, &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
@@ -120,7 +120,7 @@ func TestCancelOrderValidationAfterPartialFill(t *testing.T) {
 	btcusd := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/1000)
 	ex.AddInstrument(btcusd)
 
-	balances := map[string]int64{"BTC": 1000000000, "USD": 100000000000}
+	balances := map[string]int64{"BTC": 1000000000, "USD": 20000000000000}
 	ex.ConnectNewClient(1, balances, &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})
 	gateway1 := ex.Gateways[1]
 	ex.ConnectNewClient(2, balances, &PercentageFee{MakerBps: 2, TakerBps: 5, InQuote: true})

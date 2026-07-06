@@ -384,8 +384,9 @@ func TestEstimateLiquidationPrice_Long(t *testing.T) {
 	ex.RLock()
 	client := ex.Clients[1]
 	ex.RUnlock()
-	available := client.PerpAvailable("USD")
-	expected := pos.EntryPrice - available*BTC_PRECISION/pos.Size
+	// Equity basis is the perp balance: locked order margin is not lost equity.
+	balance := client.PerpBalance("USD")
+	expected := pos.EntryPrice - balance*BTC_PRECISION/pos.Size
 	if liqPrice != expected {
 		t.Errorf("long liqPrice: expected %d, got %d", expected, liqPrice)
 	}
@@ -419,8 +420,9 @@ func TestEstimateLiquidationPrice_Short(t *testing.T) {
 	ex.RLock()
 	client := ex.Clients[1]
 	ex.RUnlock()
-	available := client.PerpAvailable("USD")
-	expected := pos.EntryPrice + available*BTC_PRECISION/(-pos.Size)
+	// Equity basis is the perp balance: locked order margin is not lost equity.
+	balance := client.PerpBalance("USD")
+	expected := pos.EntryPrice + balance*BTC_PRECISION/(-pos.Size)
 	if liqPrice != expected {
 		t.Errorf("short liqPrice: expected %d, got %d", expected, liqPrice)
 	}

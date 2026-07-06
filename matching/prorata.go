@@ -29,12 +29,12 @@ func (m *ProRataMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etyp
 		book = bidBook
 	}
 
-	for incomingOrder.FilledQty < incomingOrder.Qty && book.Best != nil {
-		if !m.CanMatch(incomingOrder, book.Best) {
+	limit := book.Best
+	for incomingOrder.FilledQty < incomingOrder.Qty && limit != nil {
+		if !m.CanMatch(incomingOrder, limit) {
 			break
 		}
-
-		limit := book.Best
+		nextLimit := limit.Next
 		remaining := incomingOrder.Qty - incomingOrder.FilledQty
 
 		// Collect eligible resting orders and total available qty at this level.
@@ -48,7 +48,10 @@ func (m *ProRataMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etyp
 			}
 		}
 		if totalQty == 0 {
-			break
+			// Level holds only the incoming client's own orders; skip past it
+			// instead of blockading deeper liquidity.
+			limit = nextLimit
+			continue
 		}
 
 		// Distribute fills proportionally. Each maker gets floor(remaining * share),
@@ -58,7 +61,7 @@ func (m *ProRataMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etyp
 		shares := make([]int64, len(candidates))
 		for i, c := range candidates {
 			available := c.order.Qty - c.order.FilledQty
-			shares[i] = min(remaining*available/totalQty, available)
+			shares[i] = min(etypes.MulDiv(remaining, available, totalQty), available)
 			filled += shares[i]
 		}
 		leftover := min(remaining-filled, totalQty)
@@ -93,15 +96,18 @@ func (m *ProRataMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etyp
 			exec.Price = limit.Price
 			exec.Qty = execQty
 			exec.Timestamp = now
+			exec.TakerFilledQty = incomingOrder.FilledQty
 			exec.MakerFilledQty = c.order.FilledQty
 			exec.MakerTotalQty = c.order.Qty
 			exec.MakerSide = c.order.Side
+			exec.MakerPosSide = c.order.PositionSide
 			executions = append(executions, exec)
 
 			if c.order.FilledQty >= c.order.Qty {
 				c.order.Status = etypes.Filled
+				// Keep the book.Orders index entry for settlement; the exchange
+				// removes it in removeMakerOrders.
 				ebook.UnlinkOrder(c.order)
-				delete(book.Orders, c.order.ID)
 			} else {
 				c.order.Status = etypes.PartialFill
 			}
@@ -110,6 +116,7 @@ func (m *ProRataMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etyp
 		if ebook.IsEmpty(limit) {
 			book.RemoveLimit(limit)
 		}
+		limit = nextLimit
 	}
 
 	fullyFilled := incomingOrder.FilledQty >= incomingOrder.Qty

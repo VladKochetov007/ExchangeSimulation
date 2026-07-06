@@ -187,10 +187,22 @@ func TestProRata_FilledRestingOrderRemovedFromBook(t *testing.T) {
 	asks.AddOrder(mkSell(1, 10, 100, 100))
 	m.Match(bids, asks, mkBuy(2, 20, etypes.LimitOrder, 100, 100))
 	if asks.Best != nil {
-		t.Error("fully-filled resting order must be removed from the book")
+		t.Error("fully-filled resting order must be unlinked from its price level")
+	}
+	// The filled order stays in the ID index for the exchange's settlement pass
+	// (reservation ledger, position side); removeMakerOrders deletes it after.
+	order, exists := asks.Orders[1]
+	if !exists {
+		t.Fatal("order index must retain the filled order until settlement")
+	}
+	if order.Status != etypes.Filled || order.Parent != nil {
+		t.Errorf("filled order must be Filled and unlinked, got status=%v parent=%v", order.Status, order.Parent)
+	}
+	if removed := asks.RemoveFilledOrder(1); removed == nil {
+		t.Error("RemoveFilledOrder must return the retained order")
 	}
 	if _, exists := asks.Orders[1]; exists {
-		t.Error("order map must not retain the filled order")
+		t.Error("order index must be empty after RemoveFilledOrder")
 	}
 }
 

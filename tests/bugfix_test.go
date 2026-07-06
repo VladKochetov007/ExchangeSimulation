@@ -21,8 +21,8 @@ func TestTotalQtyUpdatesOnPartialFill(t *testing.T) {
 	inst := NewSpotInstrument("BTCUSDT", "BTC", "USDT", 100000000, 1000000, DOLLAR_TICK, BTC_PRECISION/1000)
 	ex.AddInstrument(inst)
 
-	ex.ConnectNewClient(1, map[string]int64{"USDT": 100000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
-	ex.ConnectNewClient(2, map[string]int64{"BTC": 100000000, "USDT": 100000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(1, map[string]int64{"USDT": 20000000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(2, map[string]int64{"BTC": 100000000, "USDT": 20000000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 
 	makerResp := ex.PlaceOrder(1, &OrderRequest{
 		RequestID:   1,
@@ -99,8 +99,8 @@ func TestDeltasPublishedForMakerFills(t *testing.T) {
 	recorder := ex.Gateways[1]
 	ex.MDPublisher.Subscribe(1, "BTCUSDT", []MDType{MDSnapshot, MDDelta, MDTrade}, recorder)
 
-	ex.ConnectNewClient(2, map[string]int64{"USDT": 100000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
-	ex.ConnectNewClient(3, map[string]int64{"BTC": 100000000, "USDT": 100000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(2, map[string]int64{"USDT": 20000000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(3, map[string]int64{"BTC": 100000000, "USDT": 20000000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 
 	makerResp := ex.PlaceOrder(2, &OrderRequest{
 		RequestID:   1,
@@ -182,7 +182,7 @@ func TestSequenceNumbersInEvents(t *testing.T) {
 	inst := NewSpotInstrument("BTCUSDT", "BTC", "USDT", 100000000, 1000000, DOLLAR_TICK, BTC_PRECISION/1000)
 	ex.AddInstrument(inst)
 
-	ex.ConnectNewClient(1, map[string]int64{"USDT": 100000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(1, map[string]int64{"USDT": 20000000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 	client := ex.Gateways[1]
 
 	client.RequestCh <- Request{
@@ -247,8 +247,8 @@ func TestNoOrdersLeakedToPool(t *testing.T) {
 	inst := NewSpotInstrument("BTCUSDT", "BTC", "USDT", 100000000, 1000000, DOLLAR_TICK, BTC_PRECISION/1000)
 	ex.AddInstrument(inst)
 
-	ex.ConnectNewClient(1, map[string]int64{"USDT": 100000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
-	ex.ConnectNewClient(2, map[string]int64{"BTC": 100000000, "USDT": 100000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(1, map[string]int64{"USDT": 20000000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
+	ex.ConnectNewClient(2, map[string]int64{"BTC": 100000000, "USDT": 20000000000000}, &PercentageFee{MakerBps: 10, TakerBps: 20, InQuote: true})
 
 	makerResp := ex.PlaceOrder(1, &OrderRequest{
 		RequestID:   1,

@@ -44,22 +44,22 @@ func NewPerpFutures(symbol, base, quote string, basePrecision, quotePrecision, t
 	}
 }
 
-func (p *PerpFutures) IsPerp() bool          { return true }
+func (p *PerpFutures) IsPerp() bool           { return true }
 func (p *PerpFutures) InstrumentType() string { return "PERP" }
 
 func (p *PerpFutures) MarginRequired(qty, price, precision int64) int64 {
-	return (qty * price / precision) * p.MarginRate / 10000
+	return etypes.MulDiv(qty, price, precision) * p.MarginRate / 10000
 }
 
 func (p *PerpFutures) MarginForMarket(qty, refPrice, precision int64) int64 {
 	if refPrice == 0 {
 		return 0
 	}
-	return (qty * refPrice / precision) * p.MarginRate / 10000
+	return p.MarginRequired(qty, refPrice, precision)
 }
 
 func (p *PerpFutures) MarginOnCancel(remainingQty, orderPrice, precision int64) int64 {
-	return (remainingQty * orderPrice / precision) * p.MarginRate / 10000
+	return p.MarginRequired(remainingQty, orderPrice, precision)
 }
 
 var _ etypes.Margined = (*PerpFutures)(nil)
@@ -94,31 +94,59 @@ func (p *PerpFutures) Settle(ctx etypes.SettlementContext) etypes.SettlementResu
 	makerClosedQty := calcClosedQty(makerDelta.OldSize, exec.Qty, exec.MakerSide)
 	precision := ctx.BasePrecision
 
-	// Taker margin: market orders reserve opened qty; limit orders release closed qty.
-	if ctx.TakerOrder.Type == etypes.Market {
-		if openedQty := exec.Qty - takerClosedQty; openedQty > 0 {
-			ctx.ReservePerp(exec.TakerClientID, quote, p.MarginRequired(openedQty, exec.Price, precision))
-		}
-	} else if takerClosedQty > 0 {
-		ctx.ReleasePerp(exec.TakerClientID, quote, p.MarginRequired(takerClosedQty, ctx.TakerOrder.Price, precision))
-	}
-	if takerClosedQty > 0 && takerDelta.OldSize != 0 {
-		ctx.ReleasePerp(exec.TakerClientID, quote, p.MarginRequired(takerClosedQty, takerDelta.OldEntryPrice, precision))
-	}
+	// Order margin: convert the filled portion's reservation into position
+	// margin. Released as a delta against the order's ledger so the amount is
+	// exact regardless of price improvement or partial-fill rounding.
+	p.releaseOrderMargin(ctx, ctx.TakerOrder, exec.TakerClientID, quote, precision)
+	p.releaseOrderMargin(ctx, ctx.MakerOrder, exec.MakerClientID, quote, precision)
 
-	// Maker margin: always limit; use exec.Price since maker order may be gone after full fill.
-	if makerClosedQty > 0 {
-		ctx.ReleasePerp(exec.MakerClientID, quote, p.MarginRequired(makerClosedQty, exec.Price, precision))
-	}
-	if makerClosedQty > 0 && makerDelta.OldSize != 0 {
-		ctx.ReleasePerp(exec.MakerClientID, quote, p.MarginRequired(makerClosedQty, makerDelta.OldEntryPrice, precision))
-	}
+	// Position margin: release the closing share first (a flip both closes and
+	// opens), then reserve for the opened quantity at the fill price.
+	p.settlePositionMargin(ctx, exec.TakerClientID, ctx.TakerOrder.PositionSide, takerDelta, takerClosedQty, quote, precision)
+	p.settlePositionMargin(ctx, exec.MakerClientID, ctx.MakerPosSide, makerDelta, makerClosedQty, quote, precision)
 
 	takerPnL := p.settleSide(ctx, exec.TakerClientID, ctx.TakerOrder.Side, takerDelta, takerClosedQty, ctx.TakerFee, quote)
 	makerPnL := p.settleSide(ctx, exec.MakerClientID, exec.MakerSide, makerDelta, makerClosedQty, ctx.MakerFee, quote)
 	ctx.RecordFeeRevenue(quote, ctx.TakerFee.Amount, ctx.MakerFee.Amount)
 
 	return etypes.SettlementResult{TakerDelta: takerDelta, MakerDelta: makerDelta, TakerPnL: takerPnL, MakerPnL: makerPnL}
+}
+
+// releaseOrderMargin unlocks the difference between the order's reserved
+// margin and what its unfilled remainder still requires at the order price.
+// Market orders reserve no order margin and release nothing.
+func (p *PerpFutures) releaseOrderMargin(ctx etypes.SettlementContext, order *etypes.Order, clientID uint64, quote string, precision int64) {
+	if order == nil || order.Type == etypes.Market {
+		return
+	}
+	stillNeeded := p.MarginRequired(order.Qty-order.FilledQty, order.Price, precision)
+	if release := order.Reserved - stillNeeded; release > 0 {
+		ctx.ReleasePerp(clientID, quote, release)
+		order.Reserved = stillNeeded
+	}
+}
+
+// settlePositionMargin maintains position margin across the fill: the closed
+// share is released (exactly, via the store's MarginLedger when available)
+// and the opened quantity is margined at the fill price.
+func (p *PerpFutures) settlePositionMargin(ctx etypes.SettlementContext, clientID uint64, posSide etypes.PositionSide, delta etypes.PositionDelta, closedQty int64, quote string, precision int64) {
+	ledger, hasLedger := ctx.Positions.(etypes.MarginLedger)
+	if closedQty > 0 && delta.OldSize != 0 {
+		var release int64
+		if hasLedger {
+			release = ledger.ReleasePositionMargin(clientID, ctx.BookSymbol, posSide, closedQty, delta.OldSize)
+		} else {
+			release = p.MarginRequired(closedQty, delta.OldEntryPrice, precision)
+		}
+		ctx.ReleasePerp(clientID, quote, release)
+	}
+	if openedQty := ctx.Exec.Qty - closedQty; openedQty > 0 {
+		needed := p.MarginRequired(openedQty, ctx.Exec.Price, precision)
+		ctx.ReservePerp(clientID, quote, needed)
+		if hasLedger {
+			ledger.AddPositionMargin(clientID, ctx.BookSymbol, posSide, needed)
+		}
+	}
 }
 
 func (p *PerpFutures) settleSide(ctx etypes.SettlementContext, clientID uint64, side etypes.Side, delta etypes.PositionDelta, closedQty int64, fee etypes.Fee, quote string) int64 {
@@ -198,7 +226,7 @@ func calcPerpPnL(oldSize, oldEntryPrice, tradeQty, tradePrice int64, tradeSide e
 	if oldSize < 0 {
 		sign = -1
 	}
-	return (closedQty * sign * (tradePrice - oldEntryPrice)) / basePrecision
+	return sign * etypes.MulDiv(closedQty, tradePrice-oldEntryPrice, basePrecision)
 }
 
 var _ etypes.Settleable = (*PerpFutures)(nil)

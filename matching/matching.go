@@ -29,6 +29,11 @@ func PutExecution(e *etypes.Execution) {
 	e.Price = 0
 	e.Qty = 0
 	e.Timestamp = 0
+	e.TakerFilledQty = 0
+	e.MakerFilledQty = 0
+	e.MakerTotalQty = 0
+	e.MakerSide = etypes.Buy
+	e.MakerPosSide = etypes.PositionBoth
 	executionPool.Put(e)
 }
 

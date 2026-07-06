@@ -1,0 +1,348 @@
+package feesim
+
+import (
+	"os"
+	"strings"
+	"time"
+
+	"exchange_sim/actor"
+	"exchange_sim/exchange"
+	"exchange_sim/simulation"
+)
+
+const (
+	abcPrecision = exchange.BTC_PRECISION // 1e8
+	qPrecision   = exchange.ETH_PRECISION // 1e6
+	usdPrecision = exchange.USD_PRECISION // 1e5
+
+	abcBootstrapUSD = 50_000 * usdPrecision // $50,000
+	qBootstrapUSD   = 3_000 * usdPrecision  // $3,000
+)
+
+type SimConfig struct {
+	SpotTakerBps int64
+	PerpTakerBps int64
+	LogDir       string
+}
+
+func DefaultSimConfig() SimConfig {
+	return SimConfig{
+		SpotTakerBps: 8,
+		PerpTakerBps: 5,
+		LogDir:       "logs/feesim",
+	}
+}
+
+type Sim struct {
+	Runner      *simulation.Runner
+	MMs         []*MarketMaker
+	Taker       *RandomTaker
+	BasisArbs   []*FeeAwareBasisArb
+	FundingArbs []*FeeAwareFundingArb
+	TriArb      *FeeAwareTriArb
+	Loggers     []*JSONLinesLogger
+	ex          *exchange.Exchange
+}
+
+func (s *Sim) Exchange() *exchange.Exchange { return s.ex }
+
+func (s *Sim) Close() {
+	for _, l := range s.Loggers {
+		l.Close()
+	}
+}
+
+func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
+	spotTakerBps := cfg.SpotTakerBps
+	perpTakerBps := cfg.PerpTakerBps
+	logDir := cfg.LogDir
+	simClock := simulation.NewSimulatedClock(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano())
+	scheduler := simulation.NewEventScheduler(simClock)
+	simClock.SetScheduler(scheduler)
+	timerFact := simulation.NewSimTimerFactory(scheduler)
+
+	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
+		EstimatedClients:        15,
+		Clock:                   simClock,
+		TickerFactory:           timerFact,
+		SnapshotInterval:        time.Second,
+		BalanceSnapshotInterval: 10 * time.Second,
+	})
+
+	if err := os.MkdirAll(logDir+"/spot", 0755); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(logDir+"/perp", 0755); err != nil {
+		return nil, err
+	}
+
+	logGlobal, err := NewJSONLinesLogger(logDir + "/general.jsonl")
+	if err != nil {
+		return nil, err
+	}
+	ex.SetLogger("_global", logGlobal)
+	allLoggers := []*JSONLinesLogger{logGlobal}
+
+	// ---------- Instruments ----------
+
+	abcUSDTick := int64(10 * usdPrecision) // $10 tick — 0.02% of price
+	abcSpot := exchange.NewSpotInstrument("ABC/USD", "ABC", "USD",
+		abcPrecision, usdPrecision, abcUSDTick, abcPrecision/100)
+	ex.AddInstrument(abcSpot)
+
+	qUSDTick := int64(1 * usdPrecision) // $1 tick — 0.033% of price
+	qSpot := exchange.NewSpotInstrument("Q/USD", "Q", "USD",
+		qPrecision, usdPrecision, qUSDTick, qPrecision/100)
+	ex.AddInstrument(qSpot)
+
+	// ABC-PERP
+	abcPerp := exchange.NewPerpFutures("ABC-PERP", "ABC", "USD",
+		abcPrecision, usdPrecision, abcUSDTick, abcPrecision/100)
+	abcPerp.GetFundingRate().Interval = 120 // 2-min funding
+	ex.AddInstrument(abcPerp)
+
+	// Q-PERP
+	qPerp := exchange.NewPerpFutures("Q-PERP", "Q", "USD",
+		qPrecision, usdPrecision, qUSDTick, qPrecision/100)
+	qPerp.GetFundingRate().Interval = 120
+	ex.AddInstrument(qPerp)
+
+	// Q/ABC cross spot — price in ABC units
+	// Bootstrap: Q/ABC = Q_USD / ABC_USD = 3000/50000 = 0.06 ABC
+	// 0.06 ABC = 6_000_000 in BTC_PRECISION (1e8)
+	// Tick: 0.0001 ABC = 10_000 in BTC_PRECISION
+	qabcTick := int64(10_000)
+	qabcSpot := exchange.NewSpotInstrument("Q/ABC", "Q", "ABC",
+		qPrecision, abcPrecision, qabcTick, qPrecision/100)
+	ex.AddInstrument(qabcSpot)
+
+	// Bootstrap cross price from arb pricing theory.
+	qabcBootstrap := int64(qBootstrapUSD) * int64(abcPrecision) / int64(abcBootstrapUSD) // 6_000_000
+	// Align to tick.
+	qabcBootstrap = (qabcBootstrap / qabcTick) * qabcTick
+
+	// ---------- Loggers per symbol ----------
+
+	type logSpec struct {
+		sym string
+		dir string
+	}
+	logSpecs := []logSpec{
+		{"ABC/USD", "spot"}, {"Q/USD", "spot"}, {"Q/ABC", "spot"},
+		{"ABC-PERP", "perp"}, {"Q-PERP", "perp"},
+	}
+	for _, ls := range logSpecs {
+		safeName := strings.ReplaceAll(ls.sym, "/", "-")
+		lg, err := NewJSONLinesLogger(logDir + "/" + ls.dir + "/" + safeName + ".jsonl")
+		if err != nil {
+			return nil, err
+		}
+		ex.SetLogger(ls.sym, lg)
+		allLoggers = append(allLoggers, lg)
+	}
+
+	// ---------- Automation (mark price, index, funding) ----------
+
+	indexOracle := exchange.NewMidPriceOracle(ex)
+	indexOracle.MapSymbol("ABC-PERP", "ABC/USD")
+	indexOracle.MapSymbol("Q-PERP", "Q/USD")
+
+	ex.ConfigureAutomation(exchange.AutomationConfig{
+		MarkPriceCalc:       exchange.NewWeightedMidPriceCalculator(),
+		IndexProvider:       indexOracle,
+		PriceUpdateInterval: 30 * time.Second,
+	})
+
+	// ---------- Latency ----------
+
+	// MMs get zero latency (co-located). Takers/arbs get realistic latency.
+	mmMount := simulation.NewMount(ex, simulation.LatencyConfig{})
+
+	actorLatency := simulation.LatencyConfig{
+		Request:    simulation.NewLogNormalLatency(1*time.Millisecond, 3*time.Millisecond, 0.5, 42),
+		Response:   simulation.NewLogNormalLatency(1*time.Millisecond, 3*time.Millisecond, 0.5, 43),
+		MarketData: simulation.NewLogNormalLatency(1*time.Millisecond, 3*time.Millisecond, 0.5, 44),
+		// Deliver at exact sim timestamps; wall-clock sleeps are unrelated to
+		// simulation time and would distort latency by orders of magnitude.
+		Scheduler: scheduler,
+		Clock:     simClock,
+	}
+	actorMount := simulation.NewMount(ex, actorLatency)
+
+	// ---------- Fee plans ----------
+
+	spotMakerFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: spotTakerBps, InQuote: true}
+	mmFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 0, InQuote: true}
+
+	// ---------- Common balances ----------
+
+	initBalances := map[string]int64{
+		"ABC": 1_000 * abcPrecision,
+		"Q":   100_000 * qPrecision,
+		"USD": 100_000_000 * usdPrecision,
+	}
+
+	// ---------- Actors ----------
+
+	var mms []*MarketMaker
+
+	nextClient := uint64(0)
+	connectMM := func(fee exchange.FeeModel, addPerp bool) actor.Gateway {
+		nextClient++
+		gw := mmMount.ConnectNewClient(nextClient, initBalances, fee)
+		if addPerp {
+			ex.AddPerpBalance(nextClient, "USD", 10_000_000*usdPrecision)
+		}
+		return gw
+	}
+	connectActor := func(fee exchange.FeeModel, addPerp bool) actor.Gateway {
+		nextClient++
+		gw := actorMount.ConnectNewClient(nextClient, initBalances, fee)
+		if addPerp {
+			ex.AddPerpBalance(nextClient, "USD", 10_000_000*usdPrecision)
+		}
+		return gw
+	}
+
+	// Clients 1-5: one pure MM per instrument.
+	type mmSpec struct {
+		symbol    string
+		bootstrap int64
+		tickSize  int64
+		levelSize int64
+		isPerp    bool
+		spacing   int64
+	}
+	mmSpecs := []mmSpec{
+		{"ABC/USD", abcBootstrapUSD, abcUSDTick, abcPrecision / 10, false, 2},
+		{"Q/USD", qBootstrapUSD, qUSDTick, qPrecision, false, 2},
+		{"ABC-PERP", abcBootstrapUSD, abcUSDTick, abcPrecision / 10, true, 2},
+		{"Q-PERP", qBootstrapUSD, qUSDTick, qPrecision, true, 2},
+		{"Q/ABC", qabcBootstrap, qabcTick, qPrecision, false, 2},
+	}
+	for _, spec := range mmSpecs {
+		gw := connectMM(mmFee, spec.isPerp)
+		mm := NewMarketMaker(nextClient, gw, MMConfig{
+			Symbol:         spec.symbol,
+			BootstrapPrice: spec.bootstrap,
+			Levels:         5,
+			LevelSpacing:   spec.spacing,
+			LevelSize:      spec.levelSize,
+			TickSize:       spec.tickSize,
+			MidPriceMode:   MidFromWeightedMid,
+			BaseInterval:   10 * time.Millisecond,
+			MaxInterval:    100 * time.Millisecond,
+		})
+		mm.SetTickerFactory(timerFact)
+		mms = append(mms, mm)
+	}
+
+	// Client 6: random taker across all 5 symbols.
+	// Pre-computed target qtys: ~$2000 notional for USD pairs, smaller for cross.
+	takerGw := connectActor(spotMakerFee, true)
+	allSymbols := []string{"ABC/USD", "Q/USD", "ABC-PERP", "Q-PERP", "Q/ABC"}
+	targetQtys := map[string]int64{
+		"ABC/USD":  4_000_000, // 0.04 BTC ≈ $2000
+		"Q/USD":    700_000,   // 0.7 Q ≈ $2100
+		"ABC-PERP": 4_000_000, // 0.04 BTC ≈ $2000
+		"Q-PERP":   700_000,   // 0.7 Q ≈ $2100
+		"Q/ABC":    200_000,   // 0.2 Q (thinner cross market)
+	}
+	taker := NewRandomTaker(nextClient, takerGw, TakerConfig{
+		Symbols:      allSymbols,
+		TargetQtys:   targetQtys,
+		TakeInterval: 100 * time.Millisecond,
+		Seed:         42,
+	})
+	taker.SetTickerFactory(timerFact)
+
+	// Clients 7-8: fee-aware basis arbs.
+	type basisSpec struct {
+		spotSym     string
+		perpSym     string
+		lotSize     int64
+		maxPosition int64
+	}
+	basisSpecs := []basisSpec{
+		{"ABC/USD", "ABC-PERP", abcPrecision / 10, 5000},
+		{"Q/USD", "Q-PERP", qPrecision, 5000},
+	}
+	var basisArbs []*FeeAwareBasisArb
+	for _, spec := range basisSpecs {
+		gw := connectActor(spotMakerFee, true)
+		arb := NewFeeAwareBasisArb(nextClient, gw, BasisArbConfig{
+			SpotSymbol:    spec.spotSym,
+			PerpSymbol:    spec.perpSym,
+			SpotFeeBps:    spotTakerBps,
+			PerpFeeBps:    perpTakerBps,
+			LotSize:       spec.lotSize,
+			MaxPosition:   spec.maxPosition,
+			CheckInterval: 100 * time.Millisecond,
+		})
+		arb.SetTickerFactory(timerFact)
+		basisArbs = append(basisArbs, arb)
+	}
+
+	// Clients 9-10: fee-aware funding arbs.
+	var fundingArbs []*FeeAwareFundingArb
+	for _, spec := range basisSpecs {
+		gw := connectActor(spotMakerFee, true)
+		arb := NewFeeAwareFundingArb(nextClient, gw, FundingArbConfig{
+			SpotSymbol:  spec.spotSym,
+			PerpSymbol:  spec.perpSym,
+			SpotFeeBps:  spotTakerBps,
+			PerpFeeBps:  perpTakerBps,
+			LotSize:     spec.lotSize,
+			MaxPosition: 100,
+			EntryWindow: 60 * time.Second,
+		})
+		arb.SetTickerFactory(timerFact)
+		fundingArbs = append(fundingArbs, arb)
+	}
+
+	// Client 11: fee-aware triangle arb (Q/USD ↔ Q/ABC ↔ ABC/USD).
+	triGw := connectActor(spotMakerFee, false)
+	triArb := NewFeeAwareTriArb(nextClient, triGw, TriArbConfig{
+		QUSDSymbol:     "Q/USD",
+		ABCUSDSymbol:   "ABC/USD",
+		QABCSymbol:     "Q/ABC",
+		TakerFeeBps:    spotTakerBps,
+		TargetNotional: 500 * usdPrecision,
+		QPrecision:     qPrecision,
+		ABCPrecision:   abcPrecision,
+		CheckInterval:  100 * time.Millisecond,
+	})
+	triArb.SetTickerFactory(timerFact)
+
+	// ---------- Runner ----------
+
+	const step = time.Millisecond
+	runner := simulation.NewRunner(simClock, simulation.RunnerConfig{
+		Iterations: int(simTime / step),
+		Step:       step,
+	})
+	runner.AddMount(mmMount)
+	runner.AddMount(actorMount)
+	for _, mm := range mms {
+		runner.AddActor(mm)
+	}
+	runner.AddActor(taker)
+	for _, arb := range basisArbs {
+		runner.AddActor(arb)
+	}
+	for _, arb := range fundingArbs {
+		runner.AddActor(arb)
+	}
+	runner.AddActor(triArb)
+
+	return &Sim{
+		Runner:      runner,
+		MMs:         mms,
+		Taker:       taker,
+		BasisArbs:   basisArbs,
+		FundingArbs: fundingArbs,
+		TriArb:      triArb,
+		Loggers:     allLoggers,
+		ex:          ex,
+	}, nil
+}

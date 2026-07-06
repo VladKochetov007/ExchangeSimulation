@@ -46,6 +46,18 @@ type PositionStore interface {
 	GetAllPositions(clientID uint64) []Position
 }
 
+// MarginLedger is optionally implemented by PositionStore backends to track
+// position margin exactly. When absent, settlement falls back to recomputing
+// margin from entry price, which can leave rounding dust in reservations.
+type MarginLedger interface {
+	// AddPositionMargin increases the tracked margin for a position (on open).
+	AddPositionMargin(clientID uint64, symbol string, side PositionSide, amount int64)
+	// ReleasePositionMargin removes and returns the margin share for closing
+	// closedQty out of a position previously sized oldSize. A full close
+	// returns the entire remainder, so nothing accrues across the lifecycle.
+	ReleasePositionMargin(clientID uint64, symbol string, side PositionSide, closedQty, oldSize int64) int64
+}
+
 // Logger is the event logging interface for the exchange.
 type Logger interface {
 	LogEvent(simTime int64, clientID uint64, eventName string, event any)
@@ -135,15 +147,19 @@ type Margined interface {
 // so the instrument never needs to import the exchange package.
 type SettlementContext struct {
 	Exec         *Execution
-	TakerOrder   *Order       // nil on force-close (liquidation) path
+	TakerOrder   *Order
+	MakerOrder   *Order       // nil if the matcher removed the filled maker from the book index
 	MakerPosSide PositionSide // resolved by the exchange before calling Settle
 	TakerFee     Fee
 	MakerFee     Fee
 	Positions    PositionStore
 
 	// Account mutation callbacks.
-	PerpBalance      func(clientID uint64, asset string) int64
+	PerpBalance       func(clientID uint64, asset string) int64
 	MutatePerpBalance func(clientID uint64, asset string, delta int64)
+	// ReservePerp earmarks post-trade margin. The exchange-provided closure
+	// force-reserves: the fill already happened, so the margin is owed even if
+	// it pushes available below zero (the liquidation sweep resolves shortfalls).
 	ReservePerp      func(clientID uint64, asset string, amount int64) bool
 	ReleasePerp      func(clientID uint64, asset string, amount int64)
 	RecordFeeRevenue func(asset string, takerAmt, makerAmt int64)
