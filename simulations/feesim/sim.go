@@ -55,6 +55,8 @@ type SimConfig struct {
 	// MMSkewTicksPerLot enables Avellaneda-Stoikov style inventory skew in the
 	// market makers (mid shifts against inventory). 0 = off.
 	MMSkewTicksPerLot float64
+	// MMSkewCapTicks bounds the skew shift in ticks (0 = unbounded).
+	MMSkewCapTicks float64
 
 	// TakerImbalanceCoupling tilts taker side toward book imbalance (herding).
 	TakerImbalanceCoupling float64
@@ -352,6 +354,7 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 				BaseInterval:    mmBase + time.Duration(i)*time.Millisecond,
 				MaxInterval:     mmMax + time.Duration(i)*10*time.Millisecond,
 				SkewTicksPerLot: cfg.MMSkewTicksPerLot,
+				SkewCapTicks:    cfg.MMSkewCapTicks,
 			})
 			mm.SetTickerFactory(timerFact)
 			mms = append(mms, mm)

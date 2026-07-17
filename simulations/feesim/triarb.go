@@ -15,14 +15,14 @@ import (
 //	Direction A (buy Q cheap via ABC): buy ABC (ABC/USD) → buy Q (Q/ABC) → sell Q (Q/USD)
 //	Direction B (sell Q expensive via ABC): buy Q (Q/USD) → sell Q for ABC (Q/ABC) → sell ABC (ABC/USD)
 type TriArbConfig struct {
-	QUSDSymbol    string // "Q/USD"
-	ABCUSDSymbol  string // "ABC/USD"
-	QABCSymbol    string // "Q/ABC"
-	TakerFeeBps   int64  // taker fee per leg (spot)
-	TargetNotional int64 // target USD notional per arb
-	QPrecision    int64  // Q base precision (ETH_PRECISION)
-	ABCPrecision  int64  // ABC base precision (BTC_PRECISION)
-	CheckInterval time.Duration
+	QUSDSymbol     string // "Q/USD"
+	ABCUSDSymbol   string // "ABC/USD"
+	QABCSymbol     string // "Q/ABC"
+	TakerFeeBps    int64  // taker fee per leg (spot)
+	TargetNotional int64  // target USD notional per arb
+	QPrecision     int64  // Q base precision (ETH_PRECISION)
+	ABCPrecision   int64  // ABC base precision (BTC_PRECISION)
+	CheckInterval  time.Duration
 }
 
 type bookTop struct {

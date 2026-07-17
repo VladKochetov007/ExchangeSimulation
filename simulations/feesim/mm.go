@@ -38,6 +38,10 @@ type MMConfig struct {
 	// inventory/LevelSize × SkewTicksPerLot ticks when long, up when short,
 	// making the unwind side more aggressive. 0 = no inventory skew.
 	SkewTicksPerLot float64
+	// SkewCapTicks bounds the skew shift (0 = unbounded). An unbounded skew
+	// gives the mid a unit root: each inventory round-trip leaves a permanent
+	// displacement, which compounds into a random walk of the price level.
+	SkewCapTicks float64
 }
 
 func (c *MMConfig) isAdaptive() bool { return c.BaseInterval > 0 }
@@ -383,6 +387,13 @@ func (mm *MarketMaker) applyInventorySkew(mid int64) int64 {
 		return mid
 	}
 	skewTicks := mm.cfg.SkewTicksPerLot * float64(mm.inventory) / float64(mm.cfg.LevelSize)
+	if cap := mm.cfg.SkewCapTicks; cap > 0 {
+		if skewTicks > cap {
+			skewTicks = cap
+		} else if skewTicks < -cap {
+			skewTicks = -cap
+		}
+	}
 	return alignToTick(mid-int64(skewTicks*float64(mm.cfg.TickSize)), mm.cfg.TickSize)
 }
 
