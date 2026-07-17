@@ -66,6 +66,11 @@ type SimConfig struct {
 	// (0 = runner default 1µs, negative = no sleep). Larger values trade
 	// wall time for scheduling determinism.
 	StepSleepUs int64
+
+	// ValueTraderBandBps enables one value trader per USD spot market that
+	// mean-reverts price to the bootstrap fundamental when the mid deviates
+	// beyond this band. 0 = disabled.
+	ValueTraderBandBps int64
 }
 
 func DefaultSimConfig() SimConfig {
@@ -127,14 +132,15 @@ func (c *SimConfig) scaleTick(tick int64) int64 {
 }
 
 type Sim struct {
-	Runner      *simulation.Runner
-	MMs         []*MarketMaker
-	Taker       *RandomTaker
-	BasisArbs   []*FeeAwareBasisArb
-	FundingArbs []*FeeAwareFundingArb
-	TriArb      *FeeAwareTriArb
-	Loggers     []*JSONLinesLogger
-	ex          *exchange.Exchange
+	Runner       *simulation.Runner
+	MMs          []*MarketMaker
+	Taker        *RandomTaker
+	BasisArbs    []*FeeAwareBasisArb
+	FundingArbs  []*FeeAwareFundingArb
+	TriArb       *FeeAwareTriArb
+	ValueTraders []*ValueTrader
+	Loggers      []*JSONLinesLogger
+	ex           *exchange.Exchange
 }
 
 func (s *Sim) Exchange() *exchange.Exchange { return s.ex }
@@ -422,6 +428,33 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	})
 	triArb.SetTickerFactory(timerFact)
 
+	// Optional value traders: fundamental anchor for the price level.
+	var valueTraders []*ValueTrader
+	if cfg.ValueTraderBandBps > 0 {
+		type valueSpec struct {
+			symbol      string
+			fundamental int64
+			lotQty      int64
+		}
+		valueSpecs := []valueSpec{
+			{"ABC/USD", abcBootstrapUSD, targetQtys["ABC/USD"]},
+			{"Q/USD", qBootstrapUSD, targetQtys["Q/USD"]},
+		}
+		for _, spec := range valueSpecs {
+			gw := connectActor(spotMakerFee, false)
+			vt := NewValueTrader(nextClient, gw, ValueTraderConfig{
+				Symbol:      spec.symbol,
+				Fundamental: spec.fundamental,
+				BandBps:     cfg.ValueTraderBandBps,
+				LotQty:      spec.lotQty,
+				MaxPosition: 20 * spec.lotQty,
+				Interval:    200 * time.Millisecond,
+			})
+			vt.SetTickerFactory(timerFact)
+			valueTraders = append(valueTraders, vt)
+		}
+	}
+
 	// ---------- Runner ----------
 
 	const step = time.Millisecond
@@ -443,15 +476,19 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		runner.AddActor(arb)
 	}
 	runner.AddActor(triArb)
+	for _, vt := range valueTraders {
+		runner.AddActor(vt)
+	}
 
 	return &Sim{
-		Runner:      runner,
-		MMs:         mms,
-		Taker:       taker,
-		BasisArbs:   basisArbs,
-		FundingArbs: fundingArbs,
-		TriArb:      triArb,
-		Loggers:     allLoggers,
-		ex:          ex,
+		Runner:       runner,
+		MMs:          mms,
+		Taker:        taker,
+		BasisArbs:    basisArbs,
+		FundingArbs:  fundingArbs,
+		TriArb:       triArb,
+		ValueTraders: valueTraders,
+		Loggers:      allLoggers,
+		ex:           ex,
 	}, nil
 }
