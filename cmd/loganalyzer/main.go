@@ -67,7 +67,17 @@ type SymbolMetrics struct {
 	EmptySideSnap int64   `json:"empty_side_snapshots"`
 	MidStdBps     float64 `json:"mid_std_bps"`
 	TradeHash     string  `json:"trade_hash"`
-	midSeries     map[int64]float64
+
+	// Stylized-fact statistics on 1s mid log-returns (Cont 2001 checklist).
+	ReturnKurtosis float64 `json:"return_excess_kurtosis"`
+	ACFR1          float64 `json:"acf_r_lag1"`
+	ACFAbsR1       float64 `json:"acf_absr_lag1"`
+	ACFAbsR5       float64 `json:"acf_absr_lag5"`
+	ACFAbsR10      float64 `json:"acf_absr_lag10"`
+	TradeFano      float64 `json:"trade_count_fano"`
+
+	midSeries   map[int64]float64
+	tradeCounts map[int64]int64
 }
 
 // Report is the analyzer output for one experiment run.
@@ -95,7 +105,7 @@ func analyzeSymbolFile(path string) (*SymbolMetrics, error) {
 	}
 	defer f.Close()
 
-	m := &SymbolMetrics{midSeries: make(map[int64]float64)}
+	m := &SymbolMetrics{midSeries: make(map[int64]float64), tradeCounts: make(map[int64]int64)}
 	hasher := sha256.New()
 	var spreads, mids, depthB, depthA []float64
 	var notional float64
@@ -116,6 +126,7 @@ func analyzeSymbolFile(path string) (*SymbolMetrics, error) {
 			m.Trades++
 			m.VolumeQty += t.Qty
 			m.LastPrice = t.Price
+			m.tradeCounts[ln.SimTS/1e9]++
 			notional += float64(t.Price) * float64(t.Qty)
 			fmt.Fprintf(hasher, "%d|%d|%d|%d\n", ln.SimTS, t.TradeID, t.Price, t.Qty)
 		case "BookSnapshot":
@@ -185,7 +196,106 @@ func analyzeSymbolFile(path string) (*SymbolMetrics, error) {
 	m.MeanDepthBid = mean(depthB)
 	m.MeanDepthAsk = mean(depthA)
 	m.TradeHash = hex.EncodeToString(hasher.Sum(nil))[:16]
+	m.computeStylizedFacts()
 	return m, nil
+}
+
+// computeStylizedFacts fills return-distribution statistics from the 1s mid
+// series and the per-second trade counts.
+func (m *SymbolMetrics) computeStylizedFacts() {
+	secs := make([]int64, 0, len(m.midSeries))
+	for ts := range m.midSeries {
+		secs = append(secs, ts)
+	}
+	sort.Slice(secs, func(i, j int) bool { return secs[i] < secs[j] })
+
+	// Log returns over consecutive seconds only (gaps break the chain).
+	var rets []float64
+	for i := 1; i < len(secs); i++ {
+		if secs[i] != secs[i-1]+1 {
+			continue
+		}
+		prev, cur := m.midSeries[secs[i-1]], m.midSeries[secs[i]]
+		if prev > 0 && cur > 0 {
+			rets = append(rets, math.Log(cur/prev))
+		}
+	}
+	if len(rets) >= 30 {
+		m.ReturnKurtosis = excessKurtosis(rets)
+		m.ACFR1 = autocorr(rets, 1)
+		abs := make([]float64, len(rets))
+		for i, r := range rets {
+			abs[i] = math.Abs(r)
+		}
+		m.ACFAbsR1 = autocorr(abs, 1)
+		m.ACFAbsR5 = autocorr(abs, 5)
+		m.ACFAbsR10 = autocorr(abs, 10)
+	}
+
+	if len(m.tradeCounts) > 0 {
+		var minSec, maxSec int64 = math.MaxInt64, math.MinInt64
+		for ts := range m.tradeCounts {
+			if ts < minSec {
+				minSec = ts
+			}
+			if ts > maxSec {
+				maxSec = ts
+			}
+		}
+		n := float64(maxSec - minSec + 1)
+		var sum, sumSq float64
+		for _, c := range m.tradeCounts {
+			sum += float64(c)
+			sumSq += float64(c) * float64(c)
+		}
+		meanC := sum / n
+		if meanC > 0 {
+			m.TradeFano = (sumSq/n - meanC*meanC) / meanC
+		}
+	}
+}
+
+func excessKurtosis(xs []float64) float64 {
+	var mean float64
+	for _, x := range xs {
+		mean += x
+	}
+	mean /= float64(len(xs))
+	var m2, m4 float64
+	for _, x := range xs {
+		d := x - mean
+		m2 += d * d
+		m4 += d * d * d * d
+	}
+	m2 /= float64(len(xs))
+	m4 /= float64(len(xs))
+	if m2 == 0 {
+		return 0
+	}
+	return m4/(m2*m2) - 3
+}
+
+func autocorr(xs []float64, lag int) float64 {
+	if len(xs) <= lag {
+		return 0
+	}
+	var mean float64
+	for _, x := range xs {
+		mean += x
+	}
+	mean /= float64(len(xs))
+	var num, den float64
+	for i := 0; i < len(xs); i++ {
+		d := xs[i] - mean
+		den += d * d
+		if i+lag < len(xs) {
+			num += d * (xs[i+lag] - mean)
+		}
+	}
+	if den == 0 {
+		return 0
+	}
+	return num / den
 }
 
 // analyzeGeneral extracts client balance deltas and reject/liquidation counts.

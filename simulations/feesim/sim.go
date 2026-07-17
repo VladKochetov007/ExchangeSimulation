@@ -51,6 +51,16 @@ type SimConfig struct {
 
 	// ProRata switches the exchange-wide matcher to pro-rata allocation.
 	ProRata bool
+
+	// MMSkewTicksPerLot enables Avellaneda-Stoikov style inventory skew in the
+	// market makers (mid shifts against inventory). 0 = off.
+	MMSkewTicksPerLot float64
+
+	// TakerImbalanceCoupling tilts taker side toward book imbalance (herding).
+	TakerImbalanceCoupling float64
+	// TakerExciteAlpha / TakerExciteBetaPerSec: Hawkes-lite self-excited flow.
+	TakerExciteAlpha      float64
+	TakerExciteBetaPerSec float64
 }
 
 func DefaultSimConfig() SimConfig {
@@ -318,8 +328,9 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 				TickSize:       spec.tickSize,
 				MidPriceMode:   MidFromWeightedMid,
 				// Stagger refresh intervals so competing MMs do not move in lockstep.
-				BaseInterval: mmBase + time.Duration(i)*time.Millisecond,
-				MaxInterval:  mmMax + time.Duration(i)*10*time.Millisecond,
+				BaseInterval:    mmBase + time.Duration(i)*time.Millisecond,
+				MaxInterval:     mmMax + time.Duration(i)*10*time.Millisecond,
+				SkewTicksPerLot: cfg.MMSkewTicksPerLot,
 			})
 			mm.SetTickerFactory(timerFact)
 			mms = append(mms, mm)
@@ -338,10 +349,13 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		"Q/ABC":    200_000,   // 0.2 Q (thinner cross market)
 	}
 	taker := NewRandomTaker(nextClient, takerGw, TakerConfig{
-		Symbols:      allSymbols,
-		TargetQtys:   targetQtys,
-		TakeInterval: time.Duration(cfg.TakerIntervalMs) * time.Millisecond,
-		Seed:         cfg.Seed,
+		Symbols:           allSymbols,
+		TargetQtys:        targetQtys,
+		TakeInterval:      time.Duration(cfg.TakerIntervalMs) * time.Millisecond,
+		Seed:              cfg.Seed,
+		ImbalanceCoupling: cfg.TakerImbalanceCoupling,
+		ExciteAlpha:       cfg.TakerExciteAlpha,
+		ExciteBetaPerSec:  cfg.TakerExciteBetaPerSec,
 	})
 	taker.SetTickerFactory(timerFact)
 

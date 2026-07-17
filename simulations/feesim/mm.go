@@ -32,6 +32,12 @@ type MMConfig struct {
 	MidPriceMode MidPriceMode
 	BaseInterval time.Duration // fastest level refresh (near mid)
 	MaxInterval  time.Duration // slowest level refresh (outermost)
+
+	// SkewTicksPerLot shifts the quoted mid against inventory
+	// (Avellaneda-Stoikov style reservation price): the mid moves down by
+	// inventory/LevelSize × SkewTicksPerLot ticks when long, up when short,
+	// making the unwind side more aggressive. 0 = no inventory skew.
+	SkewTicksPerLot float64
 }
 
 func (c *MMConfig) isAdaptive() bool { return c.BaseInterval > 0 }
@@ -71,6 +77,7 @@ type MarketMaker struct {
 	bestAsk   int64
 	bidTopQty int64
 	askTopQty int64
+	inventory int64 // net base position from own fills (signed)
 
 	subscribed bool
 }
@@ -217,6 +224,11 @@ func (mm *MarketMaker) onAcceptedAdaptive(e actor.OrderAcceptedEvent) {
 }
 
 func (mm *MarketMaker) onFilledAdaptive(e actor.OrderFillEvent) {
+	if e.Side == exchange.Buy {
+		mm.inventory += e.Qty
+	} else {
+		mm.inventory -= e.Qty
+	}
 	if !e.IsFull {
 		return
 	}
@@ -287,7 +299,7 @@ func (mm *MarketMaker) onBaseTick(_ time.Time) {
 		mm.subscribed = true
 	}
 
-	mm.mid = mm.computeMid()
+	mm.mid = mm.applyInventorySkew(mm.computeMid())
 
 	for k := 0; k < mm.cfg.Levels; k++ {
 		lv := &mm.levels[k]
@@ -360,6 +372,18 @@ func (mm *MarketMaker) computeWeightedMid(tick int64) int64 {
 
 func alignToTick(price, tick int64) int64 {
 	return ((price + tick/2) / tick) * tick
+}
+
+// applyInventorySkew moves the reservation mid against current inventory.
+// In a single-MM book the shifted quotes become the next book mid, so
+// persistent inventory translates into price impact — economically the
+// inventory pressure moving price, bounded by inventory mean-reversion.
+func (mm *MarketMaker) applyInventorySkew(mid int64) int64 {
+	if mm.cfg.SkewTicksPerLot == 0 || mm.cfg.LevelSize == 0 || mm.inventory == 0 {
+		return mid
+	}
+	skewTicks := mm.cfg.SkewTicksPerLot * float64(mm.inventory) / float64(mm.cfg.LevelSize)
+	return alignToTick(mid-int64(skewTicks*float64(mm.cfg.TickSize)), mm.cfg.TickSize)
 }
 
 // --- Level management ---
