@@ -71,6 +71,10 @@ type SimConfig struct {
 	// mean-reverts price to the bootstrap fundamental when the mid deviates
 	// beyond this band. 0 = disabled.
 	ValueTraderBandBps int64
+	// ValueTraderMaxLots caps the value trader position in lots (default 20).
+	ValueTraderMaxLots int64
+	// ValueTraderIntervalMs is the decision cadence (default 200).
+	ValueTraderIntervalMs int64
 }
 
 func DefaultSimConfig() SimConfig {
@@ -119,6 +123,12 @@ func (c *SimConfig) normalize() {
 	}
 	if c.FundingIntervalSec == 0 {
 		c.FundingIntervalSec = 120
+	}
+	if c.ValueTraderMaxLots == 0 {
+		c.ValueTraderMaxLots = 20
+	}
+	if c.ValueTraderIntervalMs == 0 {
+		c.ValueTraderIntervalMs = 200
 	}
 }
 
@@ -447,8 +457,8 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 				Fundamental: spec.fundamental,
 				BandBps:     cfg.ValueTraderBandBps,
 				LotQty:      spec.lotQty,
-				MaxPosition: 20 * spec.lotQty,
-				Interval:    200 * time.Millisecond,
+				MaxPosition: cfg.ValueTraderMaxLots * spec.lotQty,
+				Interval:    time.Duration(cfg.ValueTraderIntervalMs) * time.Millisecond,
 			})
 			vt.SetTickerFactory(timerFact)
 			valueTraders = append(valueTraders, vt)
