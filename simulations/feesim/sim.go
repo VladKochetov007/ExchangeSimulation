@@ -7,6 +7,7 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/matching"
 	"exchange_sim/simulation"
 )
 
@@ -22,7 +23,34 @@ const (
 type SimConfig struct {
 	SpotTakerBps int64
 	PerpTakerBps int64
-	LogDir       string
+	// Maker fees for the taker/arb fee plan; negative = rebate.
+	SpotMakerBps int64
+	// Fees for the MM fee plan (default 0/0 = fee-exempt designated MM).
+	MMMakerBps int64
+	MMTakerBps int64
+	LogDir     string
+
+	// Tick sizes are multiplied by TickScaleNum/TickScaleDen (default 1/1).
+	TickScaleNum int64
+	TickScaleDen int64
+
+	TakerIntervalMs int64 // default 100
+	Seed            int64 // base RNG seed for taker and latency draws, default 42
+
+	MMCount          int   // MMs per symbol, default 1
+	MMLevels         int   // quote levels per MM, default 5
+	MMBaseIntervalMs int64 // default 10
+	MMMaxIntervalMs  int64 // default 100
+
+	// Actor (taker/arb) network latency: log-normal with hard floor.
+	LatencyMinUs    int64   // default 1000
+	LatencyMedianUs int64   // default 3000 (median above min)
+	LatencySigma    float64 // default 0.5
+
+	FundingIntervalSec int64 // default 120
+
+	// ProRata switches the exchange-wide matcher to pro-rata allocation.
+	ProRata bool
 }
 
 func DefaultSimConfig() SimConfig {
@@ -31,6 +59,56 @@ func DefaultSimConfig() SimConfig {
 		PerpTakerBps: 5,
 		LogDir:       "logs/feesim",
 	}
+}
+
+// normalize fills zero-valued fields with defaults so partial configs
+// (e.g. unmarshalled from experiment JSON) behave like DefaultSimConfig.
+func (c *SimConfig) normalize() {
+	if c.TickScaleNum == 0 {
+		c.TickScaleNum = 1
+	}
+	if c.TickScaleDen == 0 {
+		c.TickScaleDen = 1
+	}
+	if c.TakerIntervalMs == 0 {
+		c.TakerIntervalMs = 100
+	}
+	if c.Seed == 0 {
+		c.Seed = 42
+	}
+	if c.MMCount == 0 {
+		c.MMCount = 1
+	}
+	if c.MMLevels == 0 {
+		c.MMLevels = 5
+	}
+	if c.MMBaseIntervalMs == 0 {
+		c.MMBaseIntervalMs = 10
+	}
+	if c.MMMaxIntervalMs == 0 {
+		c.MMMaxIntervalMs = 100
+	}
+	if c.LatencyMinUs == 0 {
+		c.LatencyMinUs = 1000
+	}
+	if c.LatencyMedianUs == 0 {
+		c.LatencyMedianUs = 3000
+	}
+	if c.LatencySigma == 0 {
+		c.LatencySigma = 0.5
+	}
+	if c.FundingIntervalSec == 0 {
+		c.FundingIntervalSec = 120
+	}
+}
+
+// scaleTick applies the configured tick scale, clamping at 1.
+func (c *SimConfig) scaleTick(tick int64) int64 {
+	scaled := tick * c.TickScaleNum / c.TickScaleDen
+	if scaled < 1 {
+		return 1
+	}
+	return scaled
 }
 
 type Sim struct {
@@ -53,6 +131,7 @@ func (s *Sim) Close() {
 }
 
 func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
+	cfg.normalize()
 	spotTakerBps := cfg.SpotTakerBps
 	perpTakerBps := cfg.PerpTakerBps
 	logDir := cfg.LogDir
@@ -68,6 +147,9 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		SnapshotInterval:        time.Second,
 		BalanceSnapshotInterval: 10 * time.Second,
 	})
+	if cfg.ProRata {
+		ex.Matcher = matching.NewProRataMatcher(simClock)
+	}
 
 	if err := os.MkdirAll(logDir+"/spot", 0755); err != nil {
 		return nil, err
@@ -85,12 +167,12 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 
 	// ---------- Instruments ----------
 
-	abcUSDTick := int64(10 * usdPrecision) // $10 tick — 0.02% of price
+	abcUSDTick := cfg.scaleTick(10 * usdPrecision) // $10 tick — 0.02% of price
 	abcSpot := exchange.NewSpotInstrument("ABC/USD", "ABC", "USD",
 		abcPrecision, usdPrecision, abcUSDTick, abcPrecision/100)
 	ex.AddInstrument(abcSpot)
 
-	qUSDTick := int64(1 * usdPrecision) // $1 tick — 0.033% of price
+	qUSDTick := cfg.scaleTick(1 * usdPrecision) // $1 tick — 0.033% of price
 	qSpot := exchange.NewSpotInstrument("Q/USD", "Q", "USD",
 		qPrecision, usdPrecision, qUSDTick, qPrecision/100)
 	ex.AddInstrument(qSpot)
@@ -98,20 +180,20 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	// ABC-PERP
 	abcPerp := exchange.NewPerpFutures("ABC-PERP", "ABC", "USD",
 		abcPrecision, usdPrecision, abcUSDTick, abcPrecision/100)
-	abcPerp.GetFundingRate().Interval = 120 // 2-min funding
+	abcPerp.GetFundingRate().Interval = cfg.FundingIntervalSec
 	ex.AddInstrument(abcPerp)
 
 	// Q-PERP
 	qPerp := exchange.NewPerpFutures("Q-PERP", "Q", "USD",
 		qPrecision, usdPrecision, qUSDTick, qPrecision/100)
-	qPerp.GetFundingRate().Interval = 120
+	qPerp.GetFundingRate().Interval = cfg.FundingIntervalSec
 	ex.AddInstrument(qPerp)
 
 	// Q/ABC cross spot — price in ABC units
 	// Bootstrap: Q/ABC = Q_USD / ABC_USD = 3000/50000 = 0.06 ABC
 	// 0.06 ABC = 6_000_000 in BTC_PRECISION (1e8)
 	// Tick: 0.0001 ABC = 10_000 in BTC_PRECISION
-	qabcTick := int64(10_000)
+	qabcTick := cfg.scaleTick(10_000)
 	qabcSpot := exchange.NewSpotInstrument("Q/ABC", "Q", "ABC",
 		qPrecision, abcPrecision, qabcTick, qPrecision/100)
 	ex.AddInstrument(qabcSpot)
@@ -158,10 +240,12 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	// MMs get zero latency (co-located). Takers/arbs get realistic latency.
 	mmMount := simulation.NewMount(ex, simulation.LatencyConfig{})
 
+	latMin := time.Duration(cfg.LatencyMinUs) * time.Microsecond
+	latMedian := time.Duration(cfg.LatencyMedianUs) * time.Microsecond
 	actorLatency := simulation.LatencyConfig{
-		Request:    simulation.NewLogNormalLatency(1*time.Millisecond, 3*time.Millisecond, 0.5, 42),
-		Response:   simulation.NewLogNormalLatency(1*time.Millisecond, 3*time.Millisecond, 0.5, 43),
-		MarketData: simulation.NewLogNormalLatency(1*time.Millisecond, 3*time.Millisecond, 0.5, 44),
+		Request:    simulation.NewLogNormalLatency(latMin, latMedian, cfg.LatencySigma, cfg.Seed),
+		Response:   simulation.NewLogNormalLatency(latMin, latMedian, cfg.LatencySigma, cfg.Seed+1),
+		MarketData: simulation.NewLogNormalLatency(latMin, latMedian, cfg.LatencySigma, cfg.Seed+2),
 		// Deliver at exact sim timestamps; wall-clock sleeps are unrelated to
 		// simulation time and would distort latency by orders of magnitude.
 		Scheduler: scheduler,
@@ -171,8 +255,8 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 
 	// ---------- Fee plans ----------
 
-	spotMakerFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: spotTakerBps, InQuote: true}
-	mmFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 0, InQuote: true}
+	spotMakerFee := &exchange.PercentageFee{MakerBps: cfg.SpotMakerBps, TakerBps: spotTakerBps, InQuote: true}
+	mmFee := &exchange.PercentageFee{MakerBps: cfg.MMMakerBps, TakerBps: cfg.MMTakerBps, InQuote: true}
 
 	// ---------- Common balances ----------
 
@@ -220,21 +304,26 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		{"Q-PERP", qBootstrapUSD, qUSDTick, qPrecision, true, 2},
 		{"Q/ABC", qabcBootstrap, qabcTick, qPrecision, false, 2},
 	}
+	mmBase := time.Duration(cfg.MMBaseIntervalMs) * time.Millisecond
+	mmMax := time.Duration(cfg.MMMaxIntervalMs) * time.Millisecond
 	for _, spec := range mmSpecs {
-		gw := connectMM(mmFee, spec.isPerp)
-		mm := NewMarketMaker(nextClient, gw, MMConfig{
-			Symbol:         spec.symbol,
-			BootstrapPrice: spec.bootstrap,
-			Levels:         5,
-			LevelSpacing:   spec.spacing,
-			LevelSize:      spec.levelSize,
-			TickSize:       spec.tickSize,
-			MidPriceMode:   MidFromWeightedMid,
-			BaseInterval:   10 * time.Millisecond,
-			MaxInterval:    100 * time.Millisecond,
-		})
-		mm.SetTickerFactory(timerFact)
-		mms = append(mms, mm)
+		for i := 0; i < cfg.MMCount; i++ {
+			gw := connectMM(mmFee, spec.isPerp)
+			mm := NewMarketMaker(nextClient, gw, MMConfig{
+				Symbol:         spec.symbol,
+				BootstrapPrice: spec.bootstrap,
+				Levels:         cfg.MMLevels,
+				LevelSpacing:   spec.spacing,
+				LevelSize:      spec.levelSize,
+				TickSize:       spec.tickSize,
+				MidPriceMode:   MidFromWeightedMid,
+				// Stagger refresh intervals so competing MMs do not move in lockstep.
+				BaseInterval: mmBase + time.Duration(i)*time.Millisecond,
+				MaxInterval:  mmMax + time.Duration(i)*10*time.Millisecond,
+			})
+			mm.SetTickerFactory(timerFact)
+			mms = append(mms, mm)
+		}
 	}
 
 	// Client 6: random taker across all 5 symbols.
@@ -251,8 +340,8 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	taker := NewRandomTaker(nextClient, takerGw, TakerConfig{
 		Symbols:      allSymbols,
 		TargetQtys:   targetQtys,
-		TakeInterval: 100 * time.Millisecond,
-		Seed:         42,
+		TakeInterval: time.Duration(cfg.TakerIntervalMs) * time.Millisecond,
+		Seed:         cfg.Seed,
 	})
 	taker.SetTickerFactory(timerFact)
 
