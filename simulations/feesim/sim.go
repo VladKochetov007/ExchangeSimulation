@@ -61,6 +61,11 @@ type SimConfig struct {
 	// TakerExciteAlpha / TakerExciteBetaPerSec: Hawkes-lite self-excited flow.
 	TakerExciteAlpha      float64
 	TakerExciteBetaPerSec float64
+
+	// StepSleepUs is the runner's per-step goroutine drain pause in µs
+	// (0 = runner default 1µs, negative = no sleep). Larger values trade
+	// wall time for scheduling determinism.
+	StepSleepUs int64
 }
 
 func DefaultSimConfig() SimConfig {
@@ -423,6 +428,7 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	runner := simulation.NewRunner(simClock, simulation.RunnerConfig{
 		Iterations: int(simTime / step),
 		Step:       step,
+		StepSleep:  time.Duration(cfg.StepSleepUs) * time.Microsecond,
 	})
 	runner.AddMount(mmMount)
 	runner.AddMount(actorMount)

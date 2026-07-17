@@ -8,24 +8,33 @@ import (
 )
 
 type RunnerConfig struct {
-	Duration       time.Duration     // wall-clock limit (0 = ctx-only)
-	Iterations     int               // simulated clock steps (0 = ctx-only)
-	Step           time.Duration     // step size per iteration for SimulatedClock (default 1ms)
-	ProgressEvery  int               // call OnProgress every N iterations (0 = disabled)
-	OnProgress     func(done, total int) // optional progress callback
+	Duration      time.Duration         // wall-clock limit (0 = ctx-only)
+	Iterations    int                   // simulated clock steps (0 = ctx-only)
+	Step          time.Duration         // step size per iteration for SimulatedClock (default 1ms)
+	ProgressEvery int                   // call OnProgress every N iterations (0 = disabled)
+	OnProgress    func(done, total int) // optional progress callback
+
+	// StepSleep is the wall-clock pause after each clock advance, giving
+	// actor and exchange goroutines time to drain before the next step.
+	// Longer sleeps reduce scheduling nondeterminism at the cost of wall
+	// time. 0 = default 1µs; negative = no sleep.
+	StepSleep time.Duration
 }
 
 type Runner struct {
-	clock  Clock
-	mounts []*Mount
-	actors []actor.Actor
-	config RunnerConfig
+	clock        Clock
+	mounts       []*Mount
+	actors       []actor.Actor
+	config       RunnerConfig
 	shutdownHook func()
 }
 
 func NewRunner(clock Clock, config RunnerConfig) *Runner {
 	if config.Step == 0 {
 		config.Step = time.Millisecond
+	}
+	if config.StepSleep == 0 {
+		config.StepSleep = time.Microsecond
 	}
 	return &Runner{
 		clock:  clock,
@@ -83,7 +92,9 @@ func (r *Runner) Run(ctx context.Context) error {
 						return
 					default:
 						advanceable.Advance(r.config.Step)
-						time.Sleep(time.Microsecond)
+						if r.config.StepSleep > 0 {
+							time.Sleep(r.config.StepSleep)
+						}
 					}
 					if r.config.OnProgress != nil && r.config.ProgressEvery > 0 && (i+1)%r.config.ProgressEvery == 0 {
 						r.config.OnProgress(i+1, r.config.Iterations)
