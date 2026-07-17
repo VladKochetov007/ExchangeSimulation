@@ -77,6 +77,13 @@ type SimConfig struct {
 	ValueTraderMaxLots int64
 	// ValueTraderIntervalMs is the decision cadence (default 200).
 	ValueTraderIntervalMs int64
+
+	// RaceArbTiers adds one extra ABC basis arb per entry, each with actor
+	// latency scaled by the tier factor (1.0 = baseline latency, 0.1 = 10×
+	// faster). All race entrants watch the same spot/perp pair, so their
+	// relative fill shares measure the latency-race win concentration
+	// (Aquilina-Budish-O'Neill style). Empty = no race.
+	RaceArbTiers []float64
 }
 
 func DefaultSimConfig() SimConfig {
@@ -134,6 +141,15 @@ func (c *SimConfig) normalize() {
 	}
 }
 
+// scaleDur scales a duration by a float factor, clamping at 1ns.
+func scaleDur(d time.Duration, factor float64) time.Duration {
+	scaled := time.Duration(float64(d) * factor)
+	if scaled < 1 {
+		return 1
+	}
+	return scaled
+}
+
 // scaleTick applies the configured tick scale, clamping at 1.
 func (c *SimConfig) scaleTick(tick int64) int64 {
 	scaled := tick * c.TickScaleNum / c.TickScaleDen
@@ -150,6 +166,7 @@ type Sim struct {
 	BasisArbs    []*FeeAwareBasisArb
 	FundingArbs  []*FeeAwareFundingArb
 	TriArb       *FeeAwareTriArb
+	RaceArbs     []*FeeAwareBasisArb
 	ValueTraders []*ValueTrader
 	Loggers      []*JSONLinesLogger
 	ex           *exchange.Exchange
@@ -441,6 +458,35 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	})
 	triArb.SetTickerFactory(timerFact)
 
+	// Optional latency-race arbs: same signal, tiered speed.
+	var raceArbs []*FeeAwareBasisArb
+	var raceMounts []*simulation.Mount
+	for _, tier := range cfg.RaceArbTiers {
+		tierLatency := simulation.LatencyConfig{
+			Request:    simulation.NewLogNormalLatency(scaleDur(latMin, tier), scaleDur(latMedian, tier), cfg.LatencySigma, cfg.Seed+10),
+			Response:   simulation.NewLogNormalLatency(scaleDur(latMin, tier), scaleDur(latMedian, tier), cfg.LatencySigma, cfg.Seed+11),
+			MarketData: simulation.NewLogNormalLatency(scaleDur(latMin, tier), scaleDur(latMedian, tier), cfg.LatencySigma, cfg.Seed+12),
+			Scheduler:  scheduler,
+			Clock:      simClock,
+		}
+		tierMount := simulation.NewMount(ex, tierLatency)
+		raceMounts = append(raceMounts, tierMount)
+		nextClient++
+		gw := tierMount.ConnectNewClient(nextClient, initBalances, spotMakerFee)
+		ex.AddPerpBalance(nextClient, "USD", 10_000_000*usdPrecision)
+		arb := NewFeeAwareBasisArb(nextClient, gw, BasisArbConfig{
+			SpotSymbol:    "ABC/USD",
+			PerpSymbol:    "ABC-PERP",
+			SpotFeeBps:    spotTakerBps,
+			PerpFeeBps:    perpTakerBps,
+			LotSize:       abcPrecision / 10,
+			MaxPosition:   5000,
+			CheckInterval: 100 * time.Millisecond,
+		})
+		arb.SetTickerFactory(timerFact)
+		raceArbs = append(raceArbs, arb)
+	}
+
 	// Optional value traders: fundamental anchor for the price level.
 	var valueTraders []*ValueTrader
 	if cfg.ValueTraderBandBps > 0 {
@@ -478,6 +524,9 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	})
 	runner.AddMount(mmMount)
 	runner.AddMount(actorMount)
+	for _, m := range raceMounts {
+		runner.AddMount(m)
+	}
 	for _, mm := range mms {
 		runner.AddActor(mm)
 	}
@@ -489,6 +538,9 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		runner.AddActor(arb)
 	}
 	runner.AddActor(triArb)
+	for _, arb := range raceArbs {
+		runner.AddActor(arb)
+	}
 	for _, vt := range valueTraders {
 		runner.AddActor(vt)
 	}
@@ -500,6 +552,7 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		BasisArbs:    basisArbs,
 		FundingArbs:  fundingArbs,
 		TriArb:       triArb,
+		RaceArbs:     raceArbs,
 		ValueTraders: valueTraders,
 		Loggers:      allLoggers,
 		ex:           ex,
