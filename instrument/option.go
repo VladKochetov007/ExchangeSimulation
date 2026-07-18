@@ -32,8 +32,12 @@ type EuropeanOption struct {
 	// IV is the flat implied volatility used for the Black-76 mark premium.
 	IV     float64
 	Margin OptionMarginParams
-	// DeliveryFeeBps is charged on the exercise value at expiry.
-	DeliveryFeeBps int64
+	// DeliveryFeeBps is charged on the UNDERLYING settlement notional at
+	// expiry, capped at DeliveryFeeCapBps of the exercise value (venue
+	// pattern: Deribit charges 0.015% of underlying capped at 12.5% of the
+	// option value, so worthless options settle free). Cap defaults to 1250.
+	DeliveryFeeBps    int64
+	DeliveryFeeCapBps int64
 
 	expiryNano     int64
 	observer       settlementObserver
@@ -126,7 +130,15 @@ func (o *EuropeanOption) DeliveryFee(size, settlementPrice, basePrecision int64)
 	if size < 0 {
 		size = -size
 	}
-	return etypes.MulDiv(size, o.intrinsicValue(settlementPrice), basePrecision) * o.DeliveryFeeBps / 10000
+	fee := etypes.MulDiv(size, settlementPrice, basePrecision) * o.DeliveryFeeBps / 10000
+	capBps := o.DeliveryFeeCapBps
+	if capBps == 0 {
+		capBps = 1250
+	}
+	if cap := etypes.MulDiv(size, o.intrinsicValue(settlementPrice), basePrecision) * capBps / 10000; fee > cap {
+		fee = cap
+	}
+	return fee
 }
 
 var _ etypes.Expirable = (*EuropeanOption)(nil)
