@@ -2,6 +2,7 @@ package derivsim
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"exchange_sim/actor"
@@ -19,6 +20,11 @@ type CarryArbConfig struct {
 	LotQty        int64
 	MaxPosPerSym  int64
 	CheckInterval time.Duration
+	// TenorNano scales the edge with carry risk when set: effective edge =
+	// EdgeBps × sqrt(timeToExpiry/TenorNano). A rational carry desk demands
+	// less edge as settlement risk shrinks, which is what produces the
+	// square-root convergence envelope into expiry.
+	TenorNano int64
 }
 
 // BasisSample records one basis observation for post-run analysis.
@@ -130,6 +136,13 @@ func (a *CashCarryArb) onTick(t time.Time) {
 		})
 
 		edge := a.spotMid * a.cfg.EdgeBps / 10000
+		if a.cfg.TenorNano > 0 {
+			frac := float64(c.ExpiryNano-now) / float64(a.cfg.TenorNano)
+			if frac < 0 {
+				frac = 0
+			}
+			edge = int64(float64(edge) * math.Sqrt(frac))
+		}
 		switch {
 		case futMid-a.spotMid > edge && st.position > -a.cfg.MaxPosPerSym:
 			// Future rich: sell future, buy spot.

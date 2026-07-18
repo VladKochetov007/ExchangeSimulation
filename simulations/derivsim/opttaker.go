@@ -19,6 +19,9 @@ type OptionTakerConfig struct {
 	LotQty     int64
 	Interval   time.Duration
 	Seed       int64
+	// IncludeFutures adds dated futures to the taking universe, giving the
+	// futures books flow of their own (needed for untethered basis dynamics).
+	IncludeFutures bool
 }
 
 // OptionTaker lifts a random live option quote each interval.
@@ -52,16 +55,16 @@ func (t *OptionTaker) onTick(_ time.Time) {
 		t.subscribed = true
 		return
 	}
-	options := make([]string, 0, len(t.set.contracts))
+	universe := make([]string, 0, len(t.set.contracts))
 	for sym, c := range t.set.contracts {
-		if c.Type == "OPTION" {
-			options = append(options, sym)
+		if c.Type == "OPTION" || (t.cfg.IncludeFutures && c.Type == "FUTURE") {
+			universe = append(universe, sym)
 		}
 	}
-	if len(options) == 0 {
+	if len(universe) == 0 {
 		return
 	}
-	sym := options[t.rng.Intn(len(options))]
+	sym := universe[t.rng.Intn(len(universe))]
 	side := exchange.Sell
 	if t.rng.Float64() < t.cfg.PBuy {
 		side = exchange.Buy

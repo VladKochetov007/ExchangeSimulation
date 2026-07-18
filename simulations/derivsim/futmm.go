@@ -18,11 +18,17 @@ type FuturesMMConfig struct {
 	QuoteQty      int64
 	Tick          int64
 	QuoteInterval time.Duration
+	// SelfAnchored quotes each future around its own last trade (bootstrapped
+	// at spot on listing) instead of pegging to the spot mid. This lets the
+	// futures price wander on its own flow, so any basis convergence must
+	// come from arbitrage rather than from the quoting rule.
+	SelfAnchored bool
 }
 
 type futQuotes struct {
 	bidID, askID       uint64
 	bidPrice, askPrice int64
+	anchor             int64 // last trade (self-anchored mode)
 }
 
 // FuturesMarketMaker quotes every live dated future on its underlying.
@@ -45,6 +51,9 @@ func NewFuturesMarketMaker(id uint64, gw actor.Gateway, cfg FuturesMMConfig) *Fu
 	mm.set.onList = func(c *Contract) {
 		if c.Type == "FUTURE" {
 			mm.quotes[c.Symbol] = &futQuotes{}
+			if cfg.SelfAnchored {
+				mm.Subscribe(c.Symbol, exchange.MDTrade)
+			}
 		}
 	}
 	mm.set.onSettle = func(c *Contract, _ int64) { delete(mm.quotes, c.Symbol) }
@@ -63,10 +72,17 @@ func NewFuturesMarketMaker(id uint64, gw actor.Gateway, cfg FuturesMMConfig) *Fu
 }
 
 func (mm *FuturesMarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
-	if evt.Type == actor.EventBookSnapshot {
+	switch evt.Type {
+	case actor.EventBookSnapshot:
 		e := evt.Data.(actor.BookSnapshotEvent)
 		if e.Symbol == mm.cfg.Underlying && len(e.Snapshot.Bids) > 0 && len(e.Snapshot.Asks) > 0 {
 			mm.spotMid = (e.Snapshot.Bids[0].Price + e.Snapshot.Asks[0].Price) / 2
+		}
+		return
+	case actor.EventTrade:
+		e := evt.Data.(actor.TradeEvent)
+		if q, ok := mm.quotes[e.Symbol]; ok {
+			q.anchor = e.Trade.Price
 		}
 		return
 	}
@@ -89,8 +105,12 @@ func (mm *FuturesMarketMaker) onTick(_ time.Time) {
 		if q == nil {
 			continue
 		}
-		bid := alignDown(mm.spotMid-half, mm.cfg.Tick)
-		ask := alignUp(mm.spotMid+half, mm.cfg.Tick)
+		mid := mm.spotMid
+		if mm.cfg.SelfAnchored && q.anchor > 0 {
+			mid = q.anchor
+		}
+		bid := alignDown(mid-half, mm.cfg.Tick)
+		ask := alignUp(mid+half, mm.cfg.Tick)
 		if bid == q.bidPrice && ask == q.askPrice && q.bidID != 0 && q.askID != 0 {
 			continue
 		}
