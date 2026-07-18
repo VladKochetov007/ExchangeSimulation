@@ -48,10 +48,10 @@ func (f *ExpiringFutures) ObserveSettlement(price, tsNano int64) {
 }
 
 // SettlementPrice averages the observations inside the window; with no
-// observations it falls back to the last mark price known to the funding-rate
-// state (updated by the exchange price loop).
+// window samples it falls back to the last price ever observed. Reading the
+// funding-rate mark here would race with the exchange price loop.
 func (f *ExpiringFutures) SettlementPrice() int64 {
-	return f.observer.settlementPrice(f.GetFundingRate().MarkPrice)
+	return f.observer.settlementPrice(0)
 }
 
 // ExpiryCashFlow marks the position from entry to settlement: the standard

@@ -1,8 +1,8 @@
 package exchange_test
 
 import (
-	. "exchange_sim/exchange"
 	"context"
+	. "exchange_sim/exchange"
 	"sync"
 	"testing"
 	"time"

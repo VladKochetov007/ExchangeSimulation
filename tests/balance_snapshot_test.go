@@ -236,9 +236,9 @@ func TestBalanceSnapshotFreeCalculation(t *testing.T) {
 func TestBalanceSnapshotBorrowedFiltering(t *testing.T) {
 	client := NewClient(1, &FixedFee{})
 
-	client.Borrowed["USD"] = 1000 * USD_PRECISION  // Should be included
-	client.Borrowed["BTC"] = 0                     // Should be filtered out
-	client.Borrowed["ETH"] = -100 * BTC_PRECISION        // Should be filtered out (negative)
+	client.Borrowed["USD"] = 1000 * USD_PRECISION // Should be included
+	client.Borrowed["BTC"] = 0                    // Should be filtered out
+	client.Borrowed["ETH"] = -100 * BTC_PRECISION // Should be filtered out (negative)
 
 	snapshot := client.GetBalanceSnapshot(int64(6000000000))
 

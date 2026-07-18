@@ -5,10 +5,11 @@ import "sync"
 // settlementObserver accumulates underlying price samples inside a rolling
 // window and freezes their mean as the settlement price on first read.
 type settlementObserver struct {
-	windowNano int64
-	mu         sync.Mutex
-	obs        []settlementObs
-	settled    int64
+	windowNano   int64
+	mu           sync.Mutex
+	obs          []settlementObs
+	settled      int64
+	lastObserved int64
 }
 
 type settlementObs struct {
@@ -21,6 +22,7 @@ func (s *settlementObserver) observe(price, tsNano int64) {
 		return
 	}
 	s.mu.Lock()
+	s.lastObserved = price
 	s.obs = append(s.obs, settlementObs{price: price, ts: tsNano})
 	cutoff := tsNano - s.windowNano
 	trim := 0
@@ -41,7 +43,10 @@ func (s *settlementObserver) settlementPrice(fallback int64) int64 {
 	}
 	n := int64(len(s.obs))
 	if n == 0 {
-		s.settled = fallback
+		s.settled = s.lastObserved
+		if s.settled == 0 {
+			s.settled = fallback
+		}
 		return s.settled
 	}
 	// Sum quotient and remainder separately so the mean stays exact for

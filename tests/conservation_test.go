@@ -229,8 +229,8 @@ func TestSettleFunding_CorrectMagnitudeAtBTCPrices(t *testing.T) {
 	qty := BTCAmount(1.0)                     // 1 BTC = 100_000_000 satoshis
 	collateral := USDAmount(10_000)           // $10k each, well above initMargin
 
-	injectPerpPosition(ex, 1, "BTC-PERP", qty, entryUSD, collateral, 0)   // client 1: long
-	injectPerpPosition(ex, 2, "BTC-PERP", -qty, entryUSD, collateral, 0)  // client 2: short
+	injectPerpPosition(ex, 1, "BTC-PERP", qty, entryUSD, collateral, 0)  // client 1: long
+	injectPerpPosition(ex, 2, "BTC-PERP", -qty, entryUSD, collateral, 0) // client 2: short
 
 	perp.GetFundingRate().Rate = 10 // +10 bps: longs pay shorts
 

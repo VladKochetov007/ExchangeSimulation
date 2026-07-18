@@ -1,8 +1,8 @@
 package exchange_test
 
 import (
-	. "exchange_sim/exchange"
 	"encoding/json"
+	. "exchange_sim/exchange"
 	"testing"
 )
 

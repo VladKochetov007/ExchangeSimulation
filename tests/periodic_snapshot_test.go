@@ -1,8 +1,8 @@
 package exchange_test
 
 import (
-	. "exchange_sim/exchange"
 	"encoding/json"
+	. "exchange_sim/exchange"
 	"sync"
 	"testing"
 	"time"
@@ -74,10 +74,10 @@ type SimulatedTickerFactory struct {
 
 func (f *SimulatedTickerFactory) NewTicker(d time.Duration) Ticker {
 	t := &simTestTicker{
-		clock:      f.clock,
-		interval:   int64(d),
-		ch:         make(chan time.Time, 10), // Buffered
-		nextFire:   f.clock.NowUnixNano() + int64(d),
+		clock:    f.clock,
+		interval: int64(d),
+		ch:       make(chan time.Time, 10), // Buffered
+		nextFire: f.clock.NowUnixNano() + int64(d),
 	}
 	f.clock.registerTicker(t)
 	return t
