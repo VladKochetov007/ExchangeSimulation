@@ -173,6 +173,16 @@ func (e *DefaultExchange) Subscribe(clientID uint64, req *QueryRequest, gateway 
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
+	// The reference-data feed has no book: subscribe directly.
+	if req.Symbol == InstrumentFeedSymbol {
+		types := req.Types
+		if len(types) == 0 {
+			types = []MDType{MDInstrument}
+		}
+		e.MDPublisher.Subscribe(clientID, req.Symbol, types, gateway)
+		return Response{RequestID: req.RequestID, Success: true}
+	}
+
 	book := e.Books[req.Symbol]
 	if book == nil {
 		return Response{RequestID: req.RequestID, Success: false, Error: RejectUnknownInstrument}
@@ -308,6 +318,11 @@ func marketRefPrice(book *OrderBook) int64 {
 // understate the spend on a deep walk and allow overdrafts).
 func checkMarketOrderFunds(client *Client, book *OrderBook, order *Order, precision int64) bool {
 	instrument := book.Instrument
+	if om, ok := instrument.(OrderMarginer); ok {
+		refPrice := marketRefPrice(book)
+		required := om.MarginForMarketOrder(order.Side, order.Qty, refPrice, precision)
+		return required == 0 || client.PerpAvailable(instrument.QuoteAsset()) >= required
+	}
 	if m, ok := instrument.(Margined); ok {
 		refPrice := marketRefPrice(book)
 		required := m.MarginForMarket(order.Qty, refPrice, precision)
@@ -345,6 +360,14 @@ func marketBuyCost(feePlan FeeModel, book *OrderBook, order *Order, precision in
 }
 
 func (e *DefaultExchange) reserveLimitOrderFunds(client *Client, instrument Instrument, order *Order, precision int64) bool {
+	if om, ok := instrument.(OrderMarginer); ok {
+		margin := om.MarginForOrder(order.Side, order.Qty, order.Price, precision)
+		if !e.tryReserveOrBorrow(order.ClientID, instrument.QuoteAsset(), margin, client.ReservePerp, true) {
+			return false
+		}
+		order.Reserved = margin
+		return true
+	}
 	if m, ok := instrument.(Margined); ok {
 		margin := m.MarginRequired(order.Qty, order.Price, precision)
 		if !e.tryReserveOrBorrow(order.ClientID, instrument.QuoteAsset(), margin, client.ReservePerp, true) {
@@ -530,7 +553,9 @@ func releaseReserved(client *Client, instrument Instrument, order *Order) {
 	if order.Reserved <= 0 {
 		return
 	}
-	if _, ok := instrument.(Margined); ok {
+	_, margined := instrument.(Margined)
+	_, orderMargined := instrument.(OrderMarginer)
+	if margined || orderMargined {
 		client.ReleasePerp(instrument.QuoteAsset(), order.Reserved)
 	} else {
 		client.Release(reserveAsset(instrument, order.Side), order.Reserved)

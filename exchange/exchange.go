@@ -8,6 +8,7 @@ import (
 	"time"
 
 	ematching "exchange_sim/matching"
+	etypes "exchange_sim/types"
 )
 
 // ExchangeBalance tracks the exchange's own accumulated revenue and safety fund.
@@ -44,6 +45,11 @@ type AutomationConfig struct {
 
 	// LiquidationHandler receives liquidation events (optional)
 	LiquidationHandler LiquidationHandler
+
+	// ListingPolicies generate scheduled instrument listings (dated futures
+	// tenors, option chains). Polled every second by the expiry loop, which
+	// also observes settlement prices and settles expired instruments.
+	ListingPolicies []etypes.ListingPolicy
 }
 
 type DefaultExchange struct {
@@ -67,6 +73,7 @@ type DefaultExchange struct {
 	markPriceCalcs          map[string]MarkPriceCalculator
 	indexProvider           PriceSource
 	priceUpdateInterval     time.Duration
+	listingPolicies         []etypes.ListingPolicy
 	automCtx                context.Context
 	automCancel             context.CancelFunc
 	automWg                 sync.WaitGroup
@@ -527,6 +534,8 @@ func (e *DefaultExchange) HandleClientRequests(gateway *ClientGateway) {
 			resp = e.QueryBalance(gateway.ClientID, req.QueryReq)
 		case ReqQueryAccount:
 			resp = e.QueryAccount(gateway.ClientID, req.QueryReq)
+		case ReqQueryInstruments:
+			resp = e.QueryInstruments(gateway.ClientID, req.QueryReq)
 		case ReqSubscribe:
 			resp = e.Subscribe(gateway.ClientID, req.QueryReq, gateway)
 		case ReqUnsubscribe:
@@ -661,6 +670,7 @@ func (e *DefaultExchange) ConfigureAutomation(config AutomationConfig) {
 	e.priceUpdateInterval = config.PriceUpdateInterval
 	e.CollateralRate = config.CollateralRate
 	e.LiquidationHandler = config.LiquidationHandler
+	e.listingPolicies = config.ListingPolicies
 }
 
 // StartAutomation begins automatic price updates, funding settlements, and collateral charging.
@@ -690,6 +700,9 @@ func (e *DefaultExchange) StartAutomation(ctx context.Context) {
 
 	e.automWg.Add(1)
 	go e.collateralChargeLoop()
+
+	e.automWg.Add(1)
+	go e.expiryLoop()
 }
 
 // StopAutomation stops all automatic operations and waits for completion.
@@ -766,14 +779,24 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 	// the lock because MidPriceOracle.Price also acquires e.mu.RLock;
 	// calling it while already holding e.mu.RLock deadlocks when a writer waits.
 	type bookData struct {
-		symbol    string
-		perp      *PerpFutures
-		markPrice int64
+		symbol     string
+		perp       *PerpFutures
+		markPrice  int64
+		isPerp     bool
+		underlying string
 	}
 	e.mu.RLock()
 	candidates := make([]bookData, 0, len(e.Books))
 	for _, book := range e.Books {
-		if !book.Instrument.IsPerp() {
+		// Perpetuals and anything exposing the perp margin core (dated
+		// futures) get mark updates, margin calls, and liquidation sweeps.
+		var perp *PerpFutures
+		isPerp := book.Instrument.IsPerp()
+		if isPerp {
+			perp = book.Instrument.(*PerpFutures)
+		} else if pp, ok := book.Instrument.(interface{ Perp() *PerpFutures }); ok {
+			perp = pp.Perp()
+		} else {
 			continue
 		}
 		calc := e.markPriceCalc
@@ -785,9 +808,11 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 			continue
 		}
 		candidates = append(candidates, bookData{
-			symbol:    book.Symbol,
-			perp:      book.Instrument.(*PerpFutures),
-			markPrice: markPrice,
+			symbol:     book.Symbol,
+			perp:       perp,
+			markPrice:  markPrice,
+			isPerp:     isPerp,
+			underlying: underlyingOf(book.Instrument),
 		})
 	}
 	e.mu.RUnlock()
@@ -797,10 +822,17 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		perp       *PerpFutures
 		markPrice  int64
 		indexPrice int64
+		isPerp     bool
 	}
 	updates := make([]perpUpdate, 0, len(candidates))
 	for _, c := range candidates {
-		indexPrice := e.indexProvider.Price(c.symbol)
+		indexPrice := int64(0)
+		if c.underlying != "" {
+			indexPrice = e.bookMidPrice(c.underlying)
+		}
+		if indexPrice == 0 {
+			indexPrice = e.indexProvider.Price(c.symbol)
+		}
 		if indexPrice == 0 {
 			continue
 		}
@@ -809,12 +841,12 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 			perp:       c.perp,
 			markPrice:  c.markPrice,
 			indexPrice: indexPrice,
+			isPerp:     c.isPerp,
 		})
 	}
 
 	for _, u := range updates {
 		u.perp.UpdateFundingRate(u.indexPrice, u.markPrice)
-		e.MDPublisher.PublishFunding(u.symbol, u.perp.GetFundingRate(), timestamp)
 
 		if log := e.getLogger(u.symbol); log != nil {
 			log.LogEvent(timestamp, 0, "mark_price_update", MarkPriceUpdateEvent{
@@ -823,18 +855,33 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 				MarkPrice:  u.markPrice,
 				IndexPrice: u.indexPrice,
 			})
+		}
 
-			fundingRate := u.perp.GetFundingRate()
-			log.LogEvent(timestamp, 0, "funding_rate_update", FundingRateUpdateEvent{
-				Timestamp:   timestamp,
-				Symbol:      u.symbol,
-				Rate:        fundingRate.Rate,
-				NextFunding: fundingRate.NextFunding,
-			})
+		// Funding is a perpetual-only concept; dated futures reuse the rate
+		// struct purely as mark-price state.
+		if u.isPerp {
+			e.MDPublisher.PublishFunding(u.symbol, u.perp.GetFundingRate(), timestamp)
+			if log := e.getLogger(u.symbol); log != nil {
+				fundingRate := u.perp.GetFundingRate()
+				log.LogEvent(timestamp, 0, "funding_rate_update", FundingRateUpdateEvent{
+					Timestamp:   timestamp,
+					Symbol:      u.symbol,
+					Rate:        fundingRate.Rate,
+					NextFunding: fundingRate.NextFunding,
+				})
+			}
 		}
 
 		e.CheckLiquidations(u.symbol, u.perp, u.markPrice)
 	}
+}
+
+// underlyingOf returns the referenced spot symbol for derivatives, "" otherwise.
+func underlyingOf(inst Instrument) string {
+	if ref, ok := inst.(etypes.UnderlyingRef); ok {
+		return ref.UnderlyingSymbol()
+	}
+	return ""
 }
 
 // ChargeCollateralInterest charges interest on borrowed amounts (one minute of time).

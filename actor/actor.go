@@ -323,6 +323,14 @@ func (a *BaseActor) decodeMarketData(md *exchange.MarketDataMsg) *Event {
 				Timestamp:    md.Timestamp,
 			},
 		}
+	case exchange.MDInstrument:
+		return &Event{
+			Type: EventInstrument,
+			Data: InstrumentEvent{
+				Announcement: md.Data.(*exchange.InstrumentAnnouncement),
+				Timestamp:    md.Timestamp,
+			},
+		}
 	}
 	return nil
 }

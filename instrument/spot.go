@@ -22,7 +22,7 @@ func NewSpotInstrument(symbol, base, quote string, basePrecision, quotePrecision
 	}
 }
 
-func (i *SpotInstrument) Symbol() string        { return i.symbol }
+func (i *SpotInstrument) Symbol() string         { return i.symbol }
 func (i *SpotInstrument) BaseAsset() string      { return i.base }
 func (i *SpotInstrument) QuoteAsset() string     { return i.quote }
 func (i *SpotInstrument) BasePrecision() int64   { return i.basePrecision }

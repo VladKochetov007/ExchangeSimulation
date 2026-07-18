@@ -57,9 +57,9 @@ func (g *ClientGateway) Send(req Request) {
 	}
 }
 
-func (g *ClientGateway) Responses() <-chan Response             { return g.ResponseCh }
-func (g *ClientGateway) MarketDataCh() <-chan *MarketDataMsg    { return g.MarketData }
-func (g *ClientGateway) MarketDataChan() chan *MarketDataMsg     { return g.MarketData }
+func (g *ClientGateway) Responses() <-chan Response          { return g.ResponseCh }
+func (g *ClientGateway) MarketDataCh() <-chan *MarketDataMsg { return g.MarketData }
+func (g *ClientGateway) MarketDataChan() chan *MarketDataMsg { return g.MarketData }
 
 func (g *ClientGateway) Close() {
 	if !g.running.CompareAndSwap(true, false) {

@@ -75,4 +75,3 @@ func TestBaseActorResponseHandling(t *testing.T) {
 		t.Log("Rejection event not received (timing dependent)")
 	}
 }
-
