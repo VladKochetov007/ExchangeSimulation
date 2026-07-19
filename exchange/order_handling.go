@@ -281,6 +281,11 @@ func (e *DefaultExchange) validatePlaceOrder(clientID uint64, req *OrderRequest)
 	if !book.Instrument.ValidateQty(req.Qty) {
 		return reject(RejectInvalidQty)
 	}
+	// Venues enforce a positive display size on icebergs; IcebergQty ≤ 0
+	// would silently degrade the order to fully-hidden semantics.
+	if req.Visibility == Iceberg && req.IcebergQty <= 0 {
+		return reject(RejectInvalidQty)
+	}
 	if reason := e.hedgeReduceViolation(clientID, book, req); reason != "" {
 		return reject(reason)
 	}

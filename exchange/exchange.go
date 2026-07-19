@@ -400,16 +400,25 @@ func (e *DefaultExchange) ConnectNewClient(clientID uint64, initialBalances map[
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	client := NewClient(clientID, feePlan)
 	timestamp := e.Clock.NowUnixNano()
-	var changes []BalanceDelta
-	for asset, amount := range initialBalances {
-		client.AddBalance(asset, amount)
-		changes = append(changes, spotDelta(asset, 0, amount))
-	}
-	e.Clients[clientID] = client
-	if len(changes) > 0 {
-		logBalanceChange(e, timestamp, clientID, "", "initial_deposit", changes)
+	// Reconnect on a known ID reuses the existing account: overwriting it
+	// would zero the ledgers while the client's resting orders keep settling
+	// against them (silent conservation break). Deposits apply only on the
+	// first connect — a reconnect is a new session, not a new account.
+	client := e.Clients[clientID]
+	if client == nil {
+		client = NewClient(clientID, feePlan)
+		var changes []BalanceDelta
+		for asset, amount := range initialBalances {
+			client.AddBalance(asset, amount)
+			changes = append(changes, spotDelta(asset, 0, amount))
+		}
+		e.Clients[clientID] = client
+		if len(changes) > 0 {
+			logBalanceChange(e, timestamp, clientID, "", "initial_deposit", changes)
+		}
+	} else if old := e.Gateways[clientID]; old != nil {
+		old.Close()
 	}
 
 	gateway := NewClientGateway(clientID)

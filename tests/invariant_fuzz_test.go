@@ -375,6 +375,10 @@ func (h *fuzzHarness) checkInvariants(step int) {
 	for sym, book := range h.ex.Books {
 		h.checkBookSide(step, sym, book.Bids, true)
 		h.checkBookSide(step, sym, book.Asks, false)
+		// I6 the public book is never crossed or locked.
+		if book.Bids.Best != nil && book.Asks.Best != nil && book.Bids.Best.Price >= book.Asks.Best.Price {
+			h.fail(step, "I6 %s crossed book: bid %d >= ask %d", sym, book.Bids.Best.Price, book.Asks.Best.Price)
+		}
 	}
 }
 

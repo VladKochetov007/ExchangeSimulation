@@ -115,6 +115,73 @@ func TestIcebergReserveDoesNotJumpQueue(t *testing.T) {
 	}
 }
 
+// Reconnecting a known client ID must reuse the existing account. The old
+// behavior overwrote it with a zeroed ledger while the client's resting
+// orders kept settling against it — a silent conservation break hidden by
+// the release clamp.
+func TestReconnectPreservesAccount(t *testing.T) {
+	ex := newGapsExchange()
+	ex.ConnectNewClient(1, map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(1_000_000)}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(1_000_000)}, &FixedFee{})
+
+	initialUSD := totalMoney(ex, "USD")
+	initialBTC := totalMoney(ex, "BTC")
+
+	price := PriceUSD(50000, DOLLAR_TICK)
+	resp := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 1, Symbol: "BTC/USD", Side: Buy, Type: LimitOrder,
+		Price: price, Qty: BTCAmount(1), TimeInForce: GTC,
+	})
+	if !resp.Success {
+		t.Fatalf("resting bid rejected: %v", resp.Error)
+	}
+
+	ex.DisconnectClient(1)
+	// Reconnect with a fat deposit that must NOT be credited again.
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(9_000_000)}, &FixedFee{})
+
+	if got := totalMoney(ex, "USD"); got != initialUSD {
+		t.Fatalf("reconnect changed system USD: delta=%d", got-initialUSD)
+	}
+	if got := ex.Clients[1].GetReserved("USD"); got == 0 {
+		t.Fatal("reconnect wiped the reservation backing the resting bid")
+	}
+
+	// The resting order still settles against the preserved ledger.
+	if resp := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 2, Symbol: "BTC/USD", Side: Sell, Type: Market,
+		Qty: BTCAmount(1), TimeInForce: IOC,
+	}); !resp.Success {
+		t.Fatalf("counterparty fill rejected: %v", resp.Error)
+	}
+	if got := totalMoney(ex, "USD"); got != initialUSD {
+		t.Fatalf("USD conservation broken after post-reconnect fill: delta=%d", got-initialUSD)
+	}
+	if got := totalMoney(ex, "BTC"); got != initialBTC {
+		t.Fatalf("BTC conservation broken after post-reconnect fill: delta=%d", got-initialBTC)
+	}
+	if got := ex.Clients[1].GetBalance("BTC"); got != BTCAmount(11) {
+		t.Fatalf("buyer BTC after fill: want %d, got %d", BTCAmount(11), got)
+	}
+}
+
+// Icebergs must declare a positive display size; IcebergQty <= 0 silently
+// degrades to fully-hidden semantics on real venues it is rejected.
+func TestIcebergZeroDisplayRejected(t *testing.T) {
+	ex := newGapsExchange()
+	ex.ConnectNewClient(1, map[string]int64{"BTC": BTCAmount(10)}, &FixedFee{})
+
+	resp := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 1, Symbol: "BTC/USD", Side: Sell, Type: LimitOrder,
+		Price: PriceUSD(50000, DOLLAR_TICK), Qty: BTCAmount(1),
+		TimeInForce: GTC, Visibility: Iceberg, IcebergQty: 0,
+	})
+	if resp.Success || resp.Error != RejectInvalidQty {
+		t.Fatalf("iceberg with zero display must reject with %s, got success=%v err=%q",
+			RejectInvalidQty, resp.Success, resp.Error)
+	}
+}
+
 // Hidden orders must produce no public market data. Broadcasting a delta on
 // placement — even with VisibleQty 0 — reveals the exact price where dark
 // liquidity arrived.
