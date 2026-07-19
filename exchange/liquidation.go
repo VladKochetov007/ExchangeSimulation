@@ -66,11 +66,9 @@ func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBo
 			e.publishBookUpdate(book, Sell, order.Price)
 		}
 		client.RemoveOrder(orderID)
-		if gw != nil && gw.IsRunning() {
-			// Blocking send, same contract as fill notifications: a dropped
-			// forced cancel leaves the actor with a ghost pending order that
-			// blocks its quoting loop forever (randomwalk postmortem bug 3).
-			gw.ResponseCh <- Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}}
-		}
+		// At-least-once, same as fills: a dropped forced cancel leaves the
+		// actor with a ghost pending order that blocks its quoting loop
+		// forever (randomwalk postmortem bug 3).
+		sendResponse(gw, Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}})
 	}
 }

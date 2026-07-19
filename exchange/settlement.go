@@ -295,10 +295,7 @@ func sendFillNotification(
 	exec *Execution, side Side, posSide PositionSide, fee Fee, isFull bool,
 	symbol string, delta PositionDelta, realizedPnL int64,
 ) {
-	if gw == nil {
-		return
-	}
-	gw.ResponseCh <- Response{
+	sendResponse(gw, Response{
 		Success: true,
 		Data: &FillNotification{
 			OrderID:       orderID,
@@ -316,5 +313,5 @@ func sendFillNotification(
 			NewSize:       delta.NewSize,
 			NewEntryPrice: delta.NewEntryPrice,
 		},
-	}
+	})
 }

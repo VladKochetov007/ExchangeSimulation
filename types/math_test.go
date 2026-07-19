@@ -49,3 +49,16 @@ func TestMulDivOverflowPanics(t *testing.T) {
 	}()
 	MulDiv(math.MaxInt64, math.MaxInt64, 1)
 }
+
+func TestMulDivNonPositiveDivisorPanics(t *testing.T) {
+	for _, c := range []int64{0, -1, -100} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("expected panic for divisor %d", c)
+				}
+			}()
+			MulDiv(10, 10, c)
+		}()
+	}
+}

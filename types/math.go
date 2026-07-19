@@ -12,6 +12,11 @@ import (
 // quotient does not fit in int64 — an economically impossible input, not a
 // rounding concern.
 func MulDiv(a, b, c int64) int64 {
+	if c <= 0 {
+		// uint64(c) of a negative divisor would silently produce a huge
+		// unsigned divisor and a wrong quotient; fail loudly instead.
+		panic("MulDiv: divisor must be positive")
+	}
 	negative := (a < 0) != (b < 0)
 	hi, lo := bits.Mul64(unsignedAbs(a), unsignedAbs(b))
 	uc := uint64(c)

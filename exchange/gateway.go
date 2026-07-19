@@ -1,6 +1,9 @@
 package exchange
 
-import "sync/atomic"
+import (
+	"sync/atomic"
+	"time"
+)
 
 const (
 	RequestChSize    = 10000
@@ -66,4 +69,29 @@ func (g *ClientGateway) Close() {
 		return
 	}
 	close(g.RequestCh)
+}
+
+// sendResponse delivers resp with at-least-once semantics for live gateways:
+// the fast path is a direct send; on a full channel it retries while the
+// gateway is running (brief backoff so the consumer can drain) and gives up
+// only once the gateway closes. One delivery policy for every response type —
+// dropped accepts/cancels desynchronize actor order state permanently (the
+// ghost-order bug class), and unconditionally blocking sends hang forever on
+// gateways whose consumer stopped without closing.
+func sendResponse(g *ClientGateway, resp Response) {
+	if g == nil {
+		return
+	}
+	select {
+	case g.ResponseCh <- resp:
+		return
+	default:
+	}
+	for g.IsRunning() {
+		select {
+		case g.ResponseCh <- resp:
+			return
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }

@@ -390,9 +390,7 @@ func (e *DefaultExchange) CancelAllClientOrders(clientID uint64) int {
 
 		// Same contract as liquidation cancels: the actor must learn its
 		// order is gone or its pending state blocks forever.
-		if gw != nil && gw.IsRunning() {
-			gw.ResponseCh <- Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}}
-		}
+		sendResponse(gw, Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}})
 	}
 	return count
 }
@@ -551,12 +549,9 @@ func (e *DefaultExchange) HandleClientRequests(gateway *ClientGateway) {
 			resp = e.Unsubscribe(gateway.ClientID, req.QueryReq)
 		}
 
-		if gateway.IsRunning() {
-			select {
-			case gateway.ResponseCh <- resp:
-			default:
-			}
-		}
+		// At-least-once delivery: a dropped accept/reject leaves the actor's
+		// in-flight order state desynchronized forever.
+		sendResponse(gateway, resp)
 	}
 }
 
