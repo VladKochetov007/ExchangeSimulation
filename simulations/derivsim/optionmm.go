@@ -41,6 +41,17 @@ type optionQuotes struct {
 	bidID, askID       uint64
 	bidPrice, askPrice int64
 	inventory          int64 // signed contracts in base units
+	// pendingBid/pendingAsk gate requoting while a submit is in flight:
+	// re-submitting before the accept lands would orphan the unacked order
+	// as an uncancellable zombie quote.
+	pendingBid, pendingAsk bool
+}
+
+// quoteRef ties an in-flight quote request to its contract and book side so
+// the accept can be routed back into per-contract quote state.
+type quoteRef struct {
+	sym   string
+	isBid bool
 }
 
 // OptionMarketMaker opens and quotes every option listed on its underlying.
@@ -50,6 +61,7 @@ type OptionMarketMaker struct {
 
 	set        *contractSet
 	quotes     map[string]*optionQuotes
+	pending    map[uint64]quoteRef
 	spotMid    int64
 	hedgePos   int64 // underlying inventory from hedge fills
 	hedgeQty   int64 // cumulative |hedge| traded, for reporting
@@ -62,6 +74,7 @@ func NewOptionMarketMaker(id uint64, gw actor.Gateway, cfg OptionMMConfig) *Opti
 		cfg:       cfg,
 		set:       newContractSet(cfg.Underlying),
 		quotes:    make(map[string]*optionQuotes),
+		pending:   make(map[uint64]quoteRef),
 	}
 	mm.set.onList = func(c *Contract) {
 		if c.Type == "OPTION" {
@@ -70,6 +83,8 @@ func NewOptionMarketMaker(id uint64, gw actor.Gateway, cfg OptionMMConfig) *Opti
 	}
 	mm.set.onSettle = func(c *Contract, _ int64) { delete(mm.quotes, c.Symbol) }
 	mm.set.onFill = mm.onFill
+	mm.set.onAccept = mm.onQuoteAccepted
+	mm.set.onReject = mm.onQuoteRejected
 	mm.SetHandler(mm)
 	mm.AddTicker(cfg.QuoteInterval, mm.onQuoteTick)
 	if cfg.HedgeEnabled {
@@ -95,6 +110,44 @@ func (mm *OptionMarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
 		return
 	}
 	mm.set.handle(evt)
+}
+
+// onQuoteAccepted records the live order ID for a quote so it can be
+// cancelled on requote. An accept for a contract that settled in flight is
+// orphan-cancelled immediately.
+func (mm *OptionMarketMaker) onQuoteAccepted(_ string, reqID, orderID uint64) {
+	ref, ok := mm.pending[reqID]
+	if !ok {
+		return // hedge order, tracked by fills only
+	}
+	delete(mm.pending, reqID)
+	q := mm.quotes[ref.sym]
+	if q == nil {
+		mm.CancelOrder(orderID)
+		return
+	}
+	if ref.isBid {
+		q.bidID = orderID
+		q.pendingBid = false
+	} else {
+		q.askID = orderID
+		q.pendingAsk = false
+	}
+}
+
+func (mm *OptionMarketMaker) onQuoteRejected(reqID uint64) {
+	ref, ok := mm.pending[reqID]
+	if !ok {
+		return
+	}
+	delete(mm.pending, reqID)
+	if q := mm.quotes[ref.sym]; q != nil {
+		if ref.isBid {
+			q.pendingBid = false
+		} else {
+			q.pendingAsk = false
+		}
+	}
 }
 
 func (mm *OptionMarketMaker) onFill(sym string, e actor.OrderFillEvent) {
@@ -155,6 +208,9 @@ func (mm *OptionMarketMaker) requoteContract(sym string, c *Contract, q *optionQ
 	if ask <= 0 {
 		return
 	}
+	if q.pendingBid || q.pendingAsk {
+		return
+	}
 	if bid == q.bidPrice && ask == q.askPrice && q.bidID != 0 && q.askID != 0 {
 		return
 	}
@@ -169,10 +225,14 @@ func (mm *OptionMarketMaker) requoteContract(sym string, c *Contract, q *optionQ
 	if bid > 0 {
 		reqID := mm.SubmitOrder(sym, exchange.Buy, exchange.LimitOrder, bid, mm.cfg.QuoteQty)
 		mm.set.trackRequest(reqID, sym)
+		mm.pending[reqID] = quoteRef{sym: sym, isBid: true}
+		q.pendingBid = true
 		q.bidPrice = bid
 	}
 	reqID := mm.SubmitOrder(sym, exchange.Sell, exchange.LimitOrder, ask, mm.cfg.QuoteQty)
 	mm.set.trackRequest(reqID, sym)
+	mm.pending[reqID] = quoteRef{sym: sym, isBid: false}
+	q.pendingAsk = true
 	q.askPrice = ask
 }
 

@@ -29,6 +29,8 @@ type contractSet struct {
 	onList   func(c *Contract)
 	onSettle func(c *Contract, settlementPrice int64)
 	onFill   func(symbol string, e actor.OrderFillEvent)
+	onAccept func(symbol string, reqID, orderID uint64)
+	onReject func(reqID uint64)
 }
 
 func newContractSet(underlying string) *contractSet {
@@ -82,10 +84,24 @@ func (cs *contractSet) handle(evt *actor.Event) bool {
 		}
 		delete(cs.reqToSym, e.RequestID)
 		cs.orderSym[e.OrderID] = sym
+		if cs.onAccept != nil {
+			cs.onAccept(sym, e.RequestID, e.OrderID)
+		}
 		for _, fill := range cs.earlyFill[e.OrderID] {
 			cs.dispatchFill(sym, fill)
 		}
 		delete(cs.earlyFill, e.OrderID)
+		return true
+
+	case actor.EventOrderRejected:
+		e := evt.Data.(actor.OrderRejectedEvent)
+		if _, ok := cs.reqToSym[e.RequestID]; !ok {
+			return false
+		}
+		delete(cs.reqToSym, e.RequestID)
+		if cs.onReject != nil {
+			cs.onReject(e.RequestID)
+		}
 		return true
 
 	case actor.EventOrderPartialFill, actor.EventOrderFilled:

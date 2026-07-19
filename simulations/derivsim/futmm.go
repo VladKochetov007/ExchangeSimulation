@@ -29,6 +29,8 @@ type futQuotes struct {
 	bidID, askID       uint64
 	bidPrice, askPrice int64
 	anchor             int64 // last trade (self-anchored mode)
+	// pending gates requoting while submits are in flight (see optionQuotes).
+	pendingBid, pendingAsk bool
 }
 
 // FuturesMarketMaker quotes every live dated future on its underlying.
@@ -37,6 +39,7 @@ type FuturesMarketMaker struct {
 	cfg        FuturesMMConfig
 	set        *contractSet
 	quotes     map[string]*futQuotes
+	pending    map[uint64]quoteRef
 	spotMid    int64
 	subscribed bool
 }
@@ -47,6 +50,7 @@ func NewFuturesMarketMaker(id uint64, gw actor.Gateway, cfg FuturesMMConfig) *Fu
 		cfg:       cfg,
 		set:       newContractSet(cfg.Underlying),
 		quotes:    make(map[string]*futQuotes),
+		pending:   make(map[uint64]quoteRef),
 	}
 	mm.set.onList = func(c *Contract) {
 		if c.Type == "FUTURE" {
@@ -63,6 +67,39 @@ func NewFuturesMarketMaker(id uint64, gw actor.Gateway, cfg FuturesMMConfig) *Fu
 				q.bidID = 0
 			} else {
 				q.askID = 0
+			}
+		}
+	}
+	mm.set.onAccept = func(_ string, reqID, orderID uint64) {
+		ref, ok := mm.pending[reqID]
+		if !ok {
+			return
+		}
+		delete(mm.pending, reqID)
+		q := mm.quotes[ref.sym]
+		if q == nil {
+			mm.CancelOrder(orderID)
+			return
+		}
+		if ref.isBid {
+			q.bidID = orderID
+			q.pendingBid = false
+		} else {
+			q.askID = orderID
+			q.pendingAsk = false
+		}
+	}
+	mm.set.onReject = func(reqID uint64) {
+		ref, ok := mm.pending[reqID]
+		if !ok {
+			return
+		}
+		delete(mm.pending, reqID)
+		if q := mm.quotes[ref.sym]; q != nil {
+			if ref.isBid {
+				q.pendingBid = false
+			} else {
+				q.pendingAsk = false
 			}
 		}
 	}
@@ -111,6 +148,9 @@ func (mm *FuturesMarketMaker) onTick(_ time.Time) {
 		}
 		bid := alignDown(mid-half, mm.cfg.Tick)
 		ask := alignUp(mid+half, mm.cfg.Tick)
+		if q.pendingBid || q.pendingAsk {
+			continue
+		}
 		if bid == q.bidPrice && ask == q.askPrice && q.bidID != 0 && q.askID != 0 {
 			continue
 		}
@@ -125,10 +165,14 @@ func (mm *FuturesMarketMaker) onTick(_ time.Time) {
 		if bid > 0 {
 			reqID := mm.SubmitOrder(sym, exchange.Buy, exchange.LimitOrder, bid, mm.cfg.QuoteQty)
 			mm.set.trackRequest(reqID, sym)
+			mm.pending[reqID] = quoteRef{sym: sym, isBid: true}
+			q.pendingBid = true
 			q.bidPrice = bid
 		}
 		reqID := mm.SubmitOrder(sym, exchange.Sell, exchange.LimitOrder, ask, mm.cfg.QuoteQty)
 		mm.set.trackRequest(reqID, sym)
+		mm.pending[reqID] = quoteRef{sym: sym, isBid: false}
+		q.pendingAsk = true
 		q.askPrice = ask
 	}
 }
