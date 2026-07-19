@@ -278,7 +278,33 @@ func (e *DefaultExchange) validatePlaceOrder(clientID uint64, req *OrderRequest)
 	if !book.Instrument.ValidateQty(req.Qty) {
 		return reject(RejectInvalidQty)
 	}
+	if reason := hedgeReduceViolation(e.Positions, clientID, req); reason != "" {
+		return reject(reason)
+	}
 	return nil
+}
+
+// hedgeReduceViolation rejects hedge-mode reducing orders larger than the
+// position they reduce (venue reduce-only semantics): a Sell on PositionLong
+// or a Buy on PositionShort can only close, never flip, so overshoot quantity
+// would vanish at fill time while the counterparty's fill stands.
+func hedgeReduceViolation(store PositionStore, clientID uint64, req *OrderRequest) RejectReason {
+	if req.PositionSide != PositionLong && req.PositionSide != PositionShort {
+		return ""
+	}
+	reducing := (req.PositionSide == PositionLong && req.Side == Sell) ||
+		(req.PositionSide == PositionShort && req.Side == Buy)
+	if !reducing {
+		return ""
+	}
+	var size int64
+	if pos := store.GetPositionBySide(clientID, req.Symbol, req.PositionSide); pos != nil {
+		size = abs(pos.Size)
+	}
+	if req.Qty > size {
+		return RejectExceedsPosition
+	}
+	return ""
 }
 
 func newOrderFromRequest(clientID, orderID uint64, req *OrderRequest, timestamp int64) *Order {

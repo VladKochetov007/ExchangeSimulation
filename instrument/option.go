@@ -253,9 +253,10 @@ func (o *EuropeanOption) settleShortMargin(ctx etypes.SettlementContext, clientI
 		ctx.ReleasePerp(clientID, quote, release)
 	}
 
-	// Selling beyond any long inventory opens short quantity.
+	// Selling beyond any long inventory opens short quantity. Derived from the
+	// actual position delta so hedge-mode clamped overshoot is never margined.
 	if side == etypes.Sell {
-		if openedShort := ctx.Exec.Qty - closedQty; openedShort > 0 {
+		if openedShort := absInt(delta.NewSize) - absInt(delta.OldSize) + closedQty; openedShort > 0 {
 			needed := etypes.MulDiv(openedShort, o.sellerIMPerUnit(ctx.Exec.Price), precision)
 			ctx.ReservePerp(clientID, quote, needed)
 			if hasLedger {

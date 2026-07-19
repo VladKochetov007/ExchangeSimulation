@@ -112,6 +112,7 @@ const (
 	RejectOrderAlreadyFilled  RejectReason = "ORDER_ALREADY_FILLED"
 	RejectFOKNotFilled        RejectReason = "FOK_NOT_FILLED"
 	RejectUnknownRequest      RejectReason = "UNKNOWN_REQUEST"
+	RejectExceedsPosition     RejectReason = "EXCEEDS_POSITION"
 )
 
 // RequestType identifies a request sent through a Gateway.

@@ -140,7 +140,10 @@ func (p *PerpFutures) settlePositionMargin(ctx etypes.SettlementContext, clientI
 		}
 		ctx.ReleasePerp(clientID, quote, release)
 	}
-	if openedQty := ctx.Exec.Qty - closedQty; openedQty > 0 {
+	// Opened quantity comes from the actual position delta, not exec.Qty −
+	// closedQty: hedge-mode reduces clamp at zero and discard overshoot, so the
+	// naive difference would margin quantity that never opened.
+	if openedQty := absInt(delta.NewSize) - absInt(delta.OldSize) + closedQty; openedQty > 0 {
 		needed := p.MarginRequired(openedQty, ctx.Exec.Price, precision)
 		ctx.ReservePerp(clientID, quote, needed)
 		if hasLedger {
@@ -171,6 +174,13 @@ func (p *PerpFutures) settleSide(ctx etypes.SettlementContext, clientID uint64, 
 		{Asset: quote, Wallet: "perp", OldBalance: oldBal, NewBalance: oldBal + pnl, Delta: pnl},
 	})
 	return pnl
+}
+
+func absInt(x int64) int64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // calcClosedQty returns the portion of tradeQty that reduces an existing position.

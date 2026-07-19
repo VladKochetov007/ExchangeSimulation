@@ -14,8 +14,10 @@ type ForcedCancelNotification struct {
 func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *OrderBook, instrument Instrument, side Side, posSide PositionSide, qty, timestamp int64) (fillPrice int64) {
 	e.cancelClientOrdersOnBook(client, book, instrument)
 
-	orderID := e.NextOrderID
+	// Same allocation pattern as PlaceOrder (increment, then use): taking the
+	// value first would reuse the most recently placed order's ID.
 	e.NextOrderID++
+	orderID := e.NextOrderID
 	order := getOrder()
 	order.ID = orderID
 	order.ClientID = clientID
@@ -65,10 +67,10 @@ func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBo
 		}
 		client.RemoveOrder(orderID)
 		if gw != nil && gw.IsRunning() {
-			select {
-			case gw.ResponseCh <- Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}}:
-			default:
-			}
+			// Blocking send, same contract as fill notifications: a dropped
+			// forced cancel leaves the actor with a ghost pending order that
+			// blocks its quoting loop forever (randomwalk postmortem bug 3).
+			gw.ResponseCh <- Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}}
 		}
 	}
 }

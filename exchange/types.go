@@ -109,6 +109,7 @@ const (
 	RejectOrderAlreadyFilled  = etypes.RejectOrderAlreadyFilled
 	RejectFOKNotFilled        = etypes.RejectFOKNotFilled
 	RejectUnknownRequest      = etypes.RejectUnknownRequest
+	RejectExceedsPosition     = etypes.RejectExceedsPosition
 )
 
 const (

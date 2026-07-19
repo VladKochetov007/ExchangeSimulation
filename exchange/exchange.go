@@ -790,15 +790,11 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 	for _, book := range e.Books {
 		// Perpetuals and anything exposing the perp margin core (dated
 		// futures) get mark updates, margin calls, and liquidation sweeps.
-		var perp *PerpFutures
-		isPerp := book.Instrument.IsPerp()
-		if isPerp {
-			perp = book.Instrument.(*PerpFutures)
-		} else if pp, ok := book.Instrument.(interface{ Perp() *PerpFutures }); ok {
-			perp = pp.Perp()
-		} else {
+		perp := marginCore(book.Instrument)
+		if perp == nil {
 			continue
 		}
+		isPerp := book.Instrument.IsPerp()
 		calc := e.markPriceCalc
 		if perSymbol := e.markPriceCalcs[book.Symbol]; perSymbol != nil {
 			calc = perSymbol
@@ -884,6 +880,19 @@ func underlyingOf(inst Instrument) string {
 	return ""
 }
 
+// marginCore returns the perp margin engine behind an instrument: the
+// instrument itself for perpetuals, the embedded core for dated futures,
+// nil for everything else.
+func marginCore(inst Instrument) *PerpFutures {
+	if p, ok := inst.(*PerpFutures); ok {
+		return p
+	}
+	if pp, ok := inst.(interface{ Perp() *PerpFutures }); ok {
+		return pp.Perp()
+	}
+	return nil
+}
+
 // ChargeCollateralInterest charges interest on borrowed amounts (one minute of time).
 func (e *DefaultExchange) ChargeCollateralInterest() {
 	e.mu.Lock()
@@ -929,16 +938,64 @@ func positionUPnL(pos *Position, markPrice, precision int64) int64 {
 	return MulDiv(-pos.Size, pos.EntryPrice-markPrice, precision)
 }
 
+// accountMarginProfile aggregates a client's cross-margin exposure in the
+// quote asset across every margined book: unrealized PnL, notional, and the
+// maintenance/warning requirements. The triggering symbol is marked at
+// triggerMark; other books use their latest stored mark, falling back to the
+// book reference price, then the position entry (neutral) when no mark exists.
+// Caller must hold e.mu.
+type accountMarginProfile struct {
+	UnrealizedPnL int64
+	Notional      int64
+	Maintenance   int64
+	Warning       int64
+}
+
+func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, triggerSymbol string, triggerMark int64) accountMarginProfile {
+	var p accountMarginProfile
+	for symbol, book := range e.Books {
+		perp := marginCore(book.Instrument)
+		if perp == nil || perp.QuoteAsset() != quote {
+			continue
+		}
+		mark := triggerMark
+		if symbol != triggerSymbol {
+			mark = perp.GetFundingRate().MarkPrice
+			if mark == 0 {
+				mark = marketRefPrice(book)
+			}
+		}
+		precision := perp.BasePrecision()
+		for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
+			pos := e.Positions.GetPositionBySide(clientID, symbol, side)
+			if pos == nil || pos.Size == 0 {
+				continue
+			}
+			m := mark
+			if m == 0 {
+				m = pos.EntryPrice
+			}
+			p.UnrealizedPnL += positionUPnL(pos, m, precision)
+			notional := MulDiv(abs(pos.Size), m, precision)
+			p.Notional += notional
+			p.Maintenance += notional * perp.MaintenanceMarginRate / 10000
+			p.Warning += notional * perp.WarningMarginRate / 10000
+		}
+	}
+	return p
+}
+
 // CheckLiquidations evaluates all positions for a symbol after a mark price update.
-// Cross-margin account model: equity = perp balance + unrealized PnL (order
-// margin is locked, not lost); liquidate when equity drops below the
-// maintenance requirement, MaintenanceMarginRate bps of position notional at
-// the mark price. Hedge-mode Long/Short positions are included.
+// Cross-margin account model: equity = perp balance + unrealized PnL across
+// EVERY margined book in the same quote asset (order margin is locked, not
+// lost); the maintenance requirement likewise sums over all books, so the same
+// cash can never back two symbols at once. On breach the triggering symbol's
+// positions are closed; other symbols resolve on their own mark updates.
+// Hedge-mode Long/Short positions are included.
 func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, markPrice int64) {
 	if markPrice == 0 {
 		return
 	}
-	precision := perp.BasePrecision()
 	quote := perp.QuoteAsset()
 
 	e.mu.Lock()
@@ -946,23 +1003,22 @@ func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, ma
 
 	for clientID, client := range e.Clients {
 		var positions []*Position
-		var unrealizedPnL, notional int64
 		for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
 			pos := e.Positions.GetPositionBySide(clientID, symbol, side)
 			if pos == nil || pos.Size == 0 {
 				continue
 			}
 			positions = append(positions, pos)
-			unrealizedPnL += positionUPnL(pos, markPrice, precision)
-			notional += MulDiv(abs(pos.Size), markPrice, precision)
 		}
 		if len(positions) == 0 {
 			continue
 		}
 
+		profile := e.buildAccountMarginProfile(clientID, quote, symbol, markPrice)
+		unrealizedPnL, notional := profile.UnrealizedPnL, profile.Notional
 		equity := client.PerpBalance(quote) + unrealizedPnL
-		maintenanceMargin := notional * perp.MaintenanceMarginRate / 10000
-		warningMargin := notional * perp.WarningMarginRate / 10000
+		maintenanceMargin := profile.Maintenance
+		warningMargin := profile.Warning
 
 		timestamp := e.Clock.NowUnixNano()
 
@@ -989,7 +1045,7 @@ func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, ma
 			if notional > 0 {
 				marginRatio = equity * 10000 / notional
 			}
-			liqPrice := e.EstimateLiquidationPrice(positions[0], clientID, perp, precision)
+			liqPrice := e.EstimateLiquidationPrice(positions[0], clientID, perp, perp.BasePrecision())
 			e.LiquidationHandler.OnMarginCall(&MarginCallEvent{
 				Timestamp:        timestamp,
 				ClientID:         clientID,
