@@ -60,10 +60,11 @@ func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBo
 		releaseReserved(client, instrument, order)
 		if order.Side == Buy {
 			book.Bids.CancelOrder(orderID)
-			e.publishBookUpdate(book, Buy, order.Price)
 		} else {
 			book.Asks.CancelOrder(orderID)
-			e.publishBookUpdate(book, Sell, order.Price)
+		}
+		if order.Visibility != Hidden {
+			e.publishBookUpdate(book, order.Side, order.Price)
 		}
 		client.RemoveOrder(orderID)
 		// At-least-once, same as fills: a dropped forced cancel leaves the

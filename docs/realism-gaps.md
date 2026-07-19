@@ -44,28 +44,32 @@ Fixed in this pass (see `tests/bughunt_test.go` for regressions):
 
 ### Self-trade handling
 The matcher skips the incoming client's own resting orders and continues to
-deeper levels. Consequences: (a) no self-fill — correct; (b) a taker can trade
-*through* their own better-priced order, executing at worse prices while their
-own quote stays live — no real venue does this; production STP modes are
-cancel-taker, cancel-maker, or cancel-both (Binance STP, CME self-match
-prevention). Impact: actors quoting both sides pay a slightly wider effective
-spread; volume is not inflated. A sharper artifact: the skipped remainder can
-REST crossed with the client's own opposite quote, so the public book shows
-bid ≥ ask until a third party trades through it — this distorts every
-mid-based mark calculator while it lasts. **DOCUMENTED** — an STP-mode config
-on the matcher is the natural extension point if an experiment studies MM
-internalization.
+deeper levels — no self-fill, and a taker can still trade *through* their own
+better-priced quote (paying a wider effective spread). The crossed-book
+artifact is gone: a remainder whose price still crosses the client's own
+opposite quote now cancels that stale quote before resting (**cancel-maker
+STP**, one of the standard venue modes), with a `ForcedCancelNotification` to
+the gateway. The book can no longer display bid ≥ ask. **FIXED** (August-2026
+execution hunt; regression `TestSelfCrossingLimitDoesNotCrossBook`). Other STP
+modes (expire-taker, cancel-both) remain unimplemented — configuration hook if
+an experiment needs them.
 
 ### Iceberg orders
-Hidden quantity keeps full price-time priority and never "refreshes": real
-venues re-enter the displayed clip at the back of the queue on each refill
-(CME, Nasdaq) and often derank hidden volume behind displayed volume at the
-same price. Here an iceberg is simply an order whose display quantity is
-cosmetic for market data — the full hidden size fills in a single execution.
-FOK's `canFillFully` probe also counts hidden depth, so dark liquidity is
-fully knowable to FOK submitters. Impact: iceberg users get unrealistically
-good queue position; fill-probability studies involving icebergs are
-optimistic. **DOCUMENTED**
+Icebergs now carry venue refresh semantics: only the displayed tranche
+(`DisplayRemaining`) holds time priority; a taker consuming the display fills
+the next resting order first, and the exhausted iceberg re-queues at the back
+of its level with a fresh tranche (both matchers; aggressive orders rescan the
+level so a lone iceberg still fills to completion). **FIXED** (regression
+`TestIcebergReserveDoesNotJumpQueue`). Remaining gap: FOK's `canFillFully`
+probe still counts hidden depth, so dark liquidity is knowable to FOK
+submitters; hidden (fully dark) orders keep full time priority rather than
+deranking behind displayed volume. **DOCUMENTED**
+
+### Hidden order market data
+Placement and cancellation of `Hidden` orders no longer emit public book
+deltas (previously a delta with `VisibleQty: 0` broadcast the exact price
+where dark liquidity arrived). Trades against hidden liquidity still print,
+as on real venues. **FIXED** (regression `TestHiddenOrderEmitsNoPublicDelta`).
 
 ### Market order protection
 Market orders walk the entire opposing book with no protection points, price

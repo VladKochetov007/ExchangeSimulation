@@ -376,10 +376,11 @@ func (e *DefaultExchange) CancelAllClientOrders(clientID uint64) int {
 
 		if order.Side == Buy {
 			book.Bids.CancelOrder(order.ID)
-			e.publishBookUpdate(book, Buy, order.Price)
 		} else {
 			book.Asks.CancelOrder(order.ID)
-			e.publishBookUpdate(book, Sell, order.Price)
+		}
+		if order.Visibility != Hidden {
+			e.publishBookUpdate(book, order.Side, order.Price)
 		}
 
 		client.RemoveOrder(order.ID)

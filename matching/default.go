@@ -33,24 +33,39 @@ func (m *PriceTimeMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *et
 			break
 		}
 		nextLimit := limit.Next
-		for order := limit.Head; order != nil && incomingOrder.FilledQty < incomingOrder.Qty; {
-			next := order.Next
-			if order.FilledQty < order.Qty && m.shouldMatch(incomingOrder, order) {
-				exec := m.execute(incomingOrder, order)
-				executions = append(executions, exec)
+		// Rescan the level after iceberg refreshes: a refreshed tranche is new
+		// liquidity behind the queue, and an aggressive order keeps eating it.
+		// Terminates because every pass with a refresh strictly consumed qty.
+		for {
+			refreshed := false
+			for order := limit.Head; order != nil && incomingOrder.FilledQty < incomingOrder.Qty; {
+				next := order.Next
+				if order.FilledQty < order.Qty && m.shouldMatch(incomingOrder, order) {
+					exec := m.execute(incomingOrder, order)
+					executions = append(executions, exec)
 
-				if order.FilledQty >= order.Qty {
-					order.Status = etypes.Filled
-					// Unlink from the price level so matching continues, but keep
-					// the book.Orders index entry: the exchange settles against the
-					// order (reservation ledger, position side) and removes it in
-					// removeMakerOrders after settlement.
-					ebook.UnlinkOrder(order)
-				} else {
-					order.Status = etypes.PartialFill
+					if order.FilledQty >= order.Qty {
+						order.Status = etypes.Filled
+						// Unlink from the price level so matching continues, but keep
+						// the book.Orders index entry: the exchange settles against the
+						// order (reservation ledger, position side) and removes it in
+						// removeMakerOrders after settlement.
+						ebook.UnlinkOrder(order)
+					} else {
+						order.Status = etypes.PartialFill
+						if order.Visibility == etypes.Iceberg && order.DisplayRemaining == 0 {
+							// Exhausted tranche re-queues at the level tail with a
+							// fresh display, losing time priority (venue refresh).
+							refreshIcebergTranche(limit, order)
+							refreshed = true
+						}
+					}
 				}
+				order = next
 			}
-			order = next
+			if !refreshed || incomingOrder.FilledQty >= incomingOrder.Qty {
+				break
+			}
 		}
 
 		if ebook.IsEmpty(limit) {
@@ -89,13 +104,16 @@ func (m *PriceTimeMatcher) shouldMatch(incoming, resting *etypes.Order) bool {
 }
 
 func (m *PriceTimeMatcher) execute(taker, maker *etypes.Order) *etypes.Execution {
-	execQty := min(taker.Qty-taker.FilledQty, maker.Qty-maker.FilledQty)
+	execQty := min(taker.Qty-taker.FilledQty, makerAvailable(maker))
 	if execQty <= 0 {
 		panic("matching engine bug: attempted zero-quantity execution")
 	}
 
 	taker.FilledQty += execQty
 	maker.FilledQty += execQty
+	if maker.Visibility == etypes.Iceberg && maker.DisplayRemaining > 0 {
+		maker.DisplayRemaining -= execQty
+	}
 	if maker.Parent != nil {
 		maker.Parent.TotalQty -= execQty
 	}

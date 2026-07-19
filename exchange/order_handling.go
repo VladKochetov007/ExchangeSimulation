@@ -88,10 +88,13 @@ func (e *DefaultExchange) CancelOrder(clientID uint64, req *CancelRequest) Respo
 	releaseReserved(client, book.Instrument, order)
 	if order.Side == Buy {
 		book.Bids.CancelOrder(req.OrderID)
-		e.publishBookUpdate(book, Buy, order.Price)
 	} else {
 		book.Asks.CancelOrder(req.OrderID)
-		e.publishBookUpdate(book, Sell, order.Price)
+	}
+	// Hidden orders emit no public deltas: their placement was dark, so their
+	// cancellation must be too.
+	if order.Visibility != Hidden {
+		e.publishBookUpdate(book, order.Side, order.Price)
 	}
 
 	client.RemoveOrder(req.OrderID)
@@ -331,6 +334,9 @@ func newOrderFromRequest(clientID, orderID uint64, req *OrderRequest, timestamp 
 	order.Qty = req.Qty
 	order.Visibility = req.Visibility
 	order.IcebergQty = req.IcebergQty
+	if req.Visibility == Iceberg {
+		order.DisplayRemaining = min(req.IcebergQty, req.Qty)
+	}
 	order.Status = Open
 	order.Timestamp = timestamp
 	return order
@@ -553,17 +559,67 @@ func (e *DefaultExchange) publishLevels(book *OrderBook, levels map[int64]Side) 
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) restOrReleaseOrder(client *Client, book *OrderBook, order *Order, req *OrderRequest) {
 	if order.Status != Filled && req.Type == LimitOrder && req.TimeInForce == GTC {
+		e.cancelOwnCrossingQuotes(client, book, order)
 		if order.Side == Buy {
 			book.Bids.AddOrder(order)
-			e.publishBookUpdate(book, Buy, order.Price)
+			if order.Visibility != Hidden {
+				e.publishBookUpdate(book, Buy, order.Price)
+			}
 		} else {
 			book.Asks.AddOrder(order)
-			e.publishBookUpdate(book, Sell, order.Price)
+			if order.Visibility != Hidden {
+				e.publishBookUpdate(book, Sell, order.Price)
+			}
 		}
 		client.AddOrder(order.ID)
 	} else {
 		releaseReserved(client, book.Instrument, order)
 		putOrder(order)
+	}
+}
+
+// cancelOwnCrossingQuotes implements self-trade prevention with cancel-maker
+// semantics: the matcher consumed every crossable order from OTHER clients,
+// so any price still crossing the remainder belongs to this client. Resting
+// it as-is would display a crossed/locked book; cancelling the stale opposite
+// quote (the venue "cancel maker" STP mode) keeps the book valid while
+// letting the client flip direction through their own level.
+// Caller must hold e.mu.Lock().
+func (e *DefaultExchange) cancelOwnCrossingQuotes(client *Client, book *OrderBook, order *Order) {
+	opposite := book.Asks
+	if order.Side == Sell {
+		opposite = book.Bids
+	}
+	var targets []*Order
+	for _, o := range opposite.Orders {
+		// Parent == nil means fully filled and awaiting settlement cleanup.
+		if o.ClientID != client.ID || o.Parent == nil {
+			continue
+		}
+		if order.Side == Buy && o.Price > order.Price {
+			continue
+		}
+		if order.Side == Sell && o.Price < order.Price {
+			continue
+		}
+		targets = append(targets, o)
+	}
+	gw := e.Gateways[client.ID]
+	for _, o := range targets {
+		remainingQty := o.Qty - o.FilledQty
+		orderID := o.ID
+		visibility := o.Visibility
+		side, price := o.Side, o.Price
+		releaseReserved(client, book.Instrument, o)
+		opposite.CancelOrder(orderID)
+		if visibility != Hidden {
+			e.publishBookUpdate(book, side, price)
+		}
+		client.RemoveOrder(orderID)
+		putOrder(o)
+		if gw != nil && gw.IsRunning() {
+			sendResponse(gw, Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}})
+		}
 	}
 }
 
