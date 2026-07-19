@@ -134,6 +134,8 @@ func (mm *MarketMaker) handleLegacy(evt *actor.Event) {
 		mm.onFilled(evt.Data.(actor.OrderFillEvent))
 	case actor.EventOrderCancelled:
 		mm.onCancelled(evt.Data.(actor.OrderCancelledEvent))
+	case actor.EventOrderRejected:
+		delete(mm.reqToSym, evt.Data.(actor.OrderRejectedEvent).RequestID)
 	}
 }
 
@@ -205,10 +207,29 @@ func (mm *MarketMaker) handleAdaptive(evt *actor.Event) {
 		mm.onFilledAdaptive(evt.Data.(actor.OrderFillEvent))
 	case actor.EventOrderCancelled:
 		mm.onCancelledAdaptive(evt.Data.(actor.OrderCancelledEvent))
+	case actor.EventOrderRejected:
+		mm.onRejectedAdaptive(evt.Data.(actor.OrderRejectedEvent))
 	case actor.EventBookSnapshot:
 		mm.onBookSnapshot(evt.Data.(actor.BookSnapshotEvent))
 	case actor.EventTrade:
 		mm.onTradeEvent(evt.Data.(actor.TradeEvent))
+	}
+}
+
+// onRejectedAdaptive clears the in-flight marker for a rejected quote. Without
+// this the level's price stays set with no order ID, which the refresh guard
+// reads as "accept still in flight" — freezing the level forever.
+func (mm *MarketMaker) onRejectedAdaptive(e actor.OrderRejectedEvent) {
+	info, ok := mm.inflight[e.RequestID]
+	if !ok {
+		return
+	}
+	delete(mm.inflight, e.RequestID)
+	lv := &mm.levels[info.level]
+	if info.isBid {
+		lv.bidPrice = 0
+	} else {
+		lv.askPrice = 0
 	}
 }
 
