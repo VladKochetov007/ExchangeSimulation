@@ -831,8 +831,13 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		if c.underlying != "" {
 			indexPrice = e.bookMidPrice(c.underlying)
 		}
-		if indexPrice == 0 {
+		if indexPrice == 0 && e.indexProvider != nil {
 			indexPrice = e.indexProvider.Price(c.symbol)
+		}
+		// No underlying book and no index provider: the perp's own book is
+		// the only price there is (single-venue configuration).
+		if indexPrice == 0 {
+			indexPrice = c.markPrice
 		}
 		if indexPrice == 0 {
 			continue
