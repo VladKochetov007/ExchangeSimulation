@@ -163,6 +163,12 @@ func TestHedgeReduceOvershootRejected(t *testing.T) {
 		t.Fatalf("exact-size hedge reduce rejected: %s", reject)
 	}
 
+	// A second reduce combined with the resting one would overshoot at fill
+	// time (both could execute), so it must be rejected too.
+	if _, reject := placeHedgeOrder(ex, 1, "BTC-PERP", Sell, PositionLong, entry100(), BTCAmount(0.5)); reject != RejectExceedsPosition {
+		t.Fatalf("stacked reduce beyond position: want %s, got %q", RejectExceedsPosition, reject)
+	}
+
 	// Opening the short hedge side is unaffected.
 	if _, reject := placeHedgeOrder(ex, 1, "BTC-PERP", Sell, PositionShort, entry100(), BTCAmount(2.0)); reject != "" {
 		t.Fatalf("hedge short open rejected: %s", reject)
@@ -220,6 +226,145 @@ func TestCrossSymbolMaintenanceAggregation(t *testing.T) {
 	}
 	if pos := pm.GetPositionBySide(3, "BTC-PERP", PositionBoth); pos == nil || pos.Size != BTCAmount(1.0) {
 		t.Fatal("healthy single-symbol client 3 must not be liquidated")
+	}
+}
+
+// Fee revenue used to be booked under the quote asset regardless of Fee.Asset:
+// a base-denominated fee destroyed base units on the client side and minted
+// the same number into the quote revenue bucket.
+func TestBaseAssetFeeConservation(t *testing.T) {
+	ex := NewExchange(10, &RealClock{})
+	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
+	ex.AddInstrument(inst)
+
+	fees := &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: false}
+	ex.ConnectNewClient(1, map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(500_000)}, fees)
+	ex.ConnectNewClient(2, map[string]int64{"BTC": BTCAmount(10), "USD": USDAmount(500_000)}, fees)
+
+	initialBTC := totalMoney(ex, "BTC")
+	initialUSD := totalMoney(ex, "USD")
+
+	price := PriceUSD(50_000, DOLLAR_TICK)
+	if _, reject := InjectLimitOrder(ex, 1, "BTCUSD", Sell, price, BTCAmount(1.0)); reject != "" {
+		t.Fatalf("maker rejected: %s", reject)
+	}
+	if _, reject := InjectMarketOrder(ex, 2, "BTCUSD", Buy, BTCAmount(1.0)); reject != "" {
+		t.Fatalf("taker rejected: %s", reject)
+	}
+
+	if got := totalMoney(ex, "BTC"); got != initialBTC {
+		t.Errorf("BTC conservation violated with base-asset fee: delta=%d", got-initialBTC)
+	}
+	if got := totalMoney(ex, "USD"); got != initialUSD {
+		t.Errorf("USD conservation violated with base-asset fee: delta=%d", got-initialUSD)
+	}
+	if ex.ExchangeBalance.FeeRevenue["BTC"] == 0 {
+		t.Error("expected base-asset fee revenue to be booked under BTC")
+	}
+}
+
+// Borrow limits used to be checked against gross assets, so cash credited by
+// one borrow enlarged the collateral base for the next: iterated borrowing
+// converged to factor/(1−factor) × equity (3× at 0.75) instead of factor × equity.
+func TestBorrowLimitDoesNotCompound(t *testing.T) {
+	ex := NewExchange(16, &RealClock{})
+	oracle := NewStaticPriceOracle(map[string]int64{
+		"USD": BTC_PRECISION,
+		"BTC": 50000 * USD_PRECISION,
+	})
+	if err := ex.EnableBorrowing(BorrowingConfig{
+		Enabled:           true,
+		DefaultMarginMode: CrossMargin,
+		CollateralFactors: map[string]float64{"USD": 0.75, "BTC": 0.70},
+		PriceSource:       oracle,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	client := NewClient(1, &FixedFee{})
+	client.PerpBalances["BTC"] = 1 * BTC_PRECISION // equity ≈ $50k → USD cap $37.5k
+	ex.Clients[1] = client
+
+	if err := ex.BorrowMargin(1, "USD", 30_000*USD_PRECISION, "manual"); err != nil {
+		t.Fatalf("first borrow within limit failed: %v", err)
+	}
+	// Second 30k would only pass if the first borrow's cash counted as
+	// fresh collateral.
+	if err := ex.BorrowMargin(1, "USD", 30_000*USD_PRECISION, "manual"); err == nil {
+		t.Fatal("borrow beyond factor × net equity must fail")
+	}
+	if got, cap := client.Borrowed["USD"], int64(37_500*USD_PRECISION); got > cap {
+		t.Fatalf("borrowed %d exceeds net-equity cap %d", got, cap)
+	}
+}
+
+// A dated future whose underlying never traded used to settle at price 0,
+// debiting longs their full entry notional. It must close flat instead.
+func TestExpiryWithoutSettlementPriceClosesFlat(t *testing.T) {
+	ex := NewExchange(10, &RealClock{})
+	fut := einstrument.NewExpiringFutures("ABC-FUT-1", "ABC", "USD",
+		BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1, 1) // expired long ago
+	fut.Underlying = "ABC/USD"
+	ex.AddInstrument(fut)
+
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{}, &FixedFee{})
+	ex.AddPerpBalance(1, "USD", USDAmount(1_000))
+	ex.AddPerpBalance(2, "USD", USDAmount(1_000))
+
+	pm := ex.Positions.(*PositionManager)
+	pm.Lock()
+	pm.InjectPosition(1, "ABC-FUT-1", &Position{ClientID: 1, Symbol: "ABC-FUT-1", Size: BTCAmount(1.0), EntryPrice: entry100()})
+	pm.InjectPosition(2, "ABC-FUT-1", &Position{ClientID: 2, Symbol: "ABC-FUT-1", Size: -BTCAmount(1.0), EntryPrice: entry100()})
+	pm.Unlock()
+
+	ex.CheckExpiries()
+
+	for _, id := range []uint64{1, 2} {
+		if got := ex.Clients[id].PerpBalances["USD"]; got != USDAmount(1_000) {
+			t.Errorf("client %d balance changed on priceless settlement: %d", id, got)
+		}
+		if pos := pm.GetPositionBySide(id, "ABC-FUT-1", PositionBoth); pos != nil && pos.Size != 0 {
+			t.Errorf("client %d position not closed: %d", id, pos.Size)
+		}
+	}
+	if ex.GetBook("ABC-FUT-1") != nil {
+		t.Error("expired book must be delisted")
+	}
+}
+
+// The market-sell funds check used to compare available base against bare
+// qty, ignoring base-denominated fee headroom, so the fee debit pushed the
+// balance negative.
+func TestMarketSellChecksBaseFeeHeadroom(t *testing.T) {
+	ex := NewExchange(10, &RealClock{})
+	inst := NewSpotInstrument("BTCUSD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
+	ex.AddInstrument(inst)
+
+	fees := &PercentageFee{MakerBps: 5, TakerBps: 10, InQuote: false}
+	// Seller holds exactly 1 BTC — enough for the qty, not for qty + fee.
+	ex.ConnectNewClient(1, map[string]int64{"BTC": BTCAmount(1.0)}, fees)
+	ex.ConnectNewClient(2, map[string]int64{"USD": USDAmount(500_000)}, &FixedFee{})
+
+	price := PriceUSD(50_000, DOLLAR_TICK)
+	InjectLimitOrder(ex, 2, "BTCUSD", Buy, price, BTCAmount(1.0))
+
+	if _, reject := InjectMarketOrder(ex, 1, "BTCUSD", Sell, BTCAmount(1.0)); reject != RejectInsufficientBalance {
+		t.Fatalf("want %s, got %q", RejectInsufficientBalance, reject)
+	}
+	if got := ex.Clients[1].Balances["BTC"]; got != BTCAmount(1.0) {
+		t.Fatalf("seller balance must be untouched, got %d", got)
+	}
+
+	// With fee headroom available the same sell goes through.
+	ex.Lock()
+	ex.Clients[1].Balances["BTC"] += BTCAmount(0.01)
+	ex.Unlock()
+	if _, reject := InjectMarketOrder(ex, 1, "BTCUSD", Sell, BTCAmount(1.0)); reject != "" {
+		t.Fatalf("funded sell rejected: %s", reject)
+	}
+	if got := ex.Clients[1].Balances["BTC"]; got < 0 {
+		t.Fatalf("base balance went negative: %d", got)
 	}
 }
 

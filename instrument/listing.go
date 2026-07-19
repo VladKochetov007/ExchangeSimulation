@@ -128,7 +128,15 @@ func (l *OptionChainLister) appendOption(out []etypes.Instrument, strike, expiry
 	if isCall {
 		cp = "C"
 	}
-	symbol := fmt.Sprintf("%s-%d-%d-%s", l.Spec.Base, expiry/1e9, strike/l.Spec.QuotePrecision, cp)
+	// Whole-quote strikes keep the compact human-readable symbol; strikes off
+	// the quote-precision grid use raw units — integer division would collide
+	// distinct strikes (e.g. step < precision) into one symbol and silently
+	// skip listings.
+	strikeLabel := strike / l.Spec.QuotePrecision
+	if strike%l.Spec.QuotePrecision != 0 {
+		strikeLabel = strike
+	}
+	symbol := fmt.Sprintf("%s-%d-%d-%s", l.Spec.Base, expiry/1e9, strikeLabel, cp)
 	if l.listed[symbol] {
 		return out
 	}

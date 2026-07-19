@@ -211,7 +211,7 @@ func (o *EuropeanOption) Settle(ctx etypes.SettlementContext) etypes.SettlementR
 
 	takerPnL := o.settlePremium(ctx, exec.TakerClientID, ctx.TakerOrder.Side, takerDelta, takerClosed, ctx.TakerFee, quote, precision)
 	makerPnL := o.settlePremium(ctx, exec.MakerClientID, exec.MakerSide, makerDelta, makerClosed, ctx.MakerFee, quote, precision)
-	ctx.RecordFeeRevenue(quote, ctx.TakerFee.Amount, ctx.MakerFee.Amount)
+	recordSettlementFees(ctx, quote)
 
 	if ctx.Log != nil {
 		ctx.Log.LogEvent(ctx.Timestamp, 0, "open_interest", etypes.OpenInterestEvent{
@@ -287,10 +287,18 @@ func (o *EuropeanOption) settlePremium(ctx etypes.SettlementContext, clientID ui
 
 	oldBal := ctx.PerpBalance(clientID, quote)
 	ctx.MutatePerpBalance(clientID, quote, cash)
-	ctx.MutatePerpBalance(clientID, fee.Asset, -fee.Amount)
-	ctx.LogBalanceChange(clientID, ctx.BookSymbol, "option_premium", []etypes.BalanceDelta{
+	deltas := []etypes.BalanceDelta{
 		{Asset: quote, Wallet: "perp", OldBalance: oldBal, NewBalance: oldBal + cash, Delta: cash},
-	})
+	}
+	if fee.Amount != 0 {
+		oldFeeBal := ctx.PerpBalance(clientID, fee.Asset)
+		ctx.MutatePerpBalance(clientID, fee.Asset, -fee.Amount)
+		deltas = append(deltas, etypes.BalanceDelta{
+			Asset: fee.Asset, Wallet: "perp",
+			OldBalance: oldFeeBal, NewBalance: oldFeeBal - fee.Amount, Delta: -fee.Amount,
+		})
+	}
+	ctx.LogBalanceChange(clientID, ctx.BookSymbol, "option_premium", deltas)
 	return pnl
 }
 

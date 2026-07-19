@@ -128,21 +128,17 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(client *Client, borrow
 		return errors.New("price oracle not configured")
 	}
 
-	totalCollateralValue := int64(0)
+	// Gross asset value: negative balances subtract — skipping them would let
+	// a client deep underwater in one asset pledge the others at full value.
+	totalAssetValue := int64(0)
 	for asset, balance := range client.PerpBalances {
-		if balance <= 0 {
-			continue
-		}
 		if price := bm.Config.PriceSource.Price(asset); price > 0 {
-			totalCollateralValue += MulDiv(balance, price, bm.assetPrecision(asset))
+			totalAssetValue += MulDiv(balance, price, bm.assetPrecision(asset))
 		}
 	}
 	for asset, balance := range client.Balances {
-		if balance <= 0 {
-			continue
-		}
 		if price := bm.Config.PriceSource.Price(asset); price > 0 {
-			totalCollateralValue += MulDiv(balance, price, bm.assetPrecision(asset))
+			totalAssetValue += MulDiv(balance, price, bm.assetPrecision(asset))
 		}
 	}
 
@@ -161,7 +157,16 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(client *Client, borrow
 		return errors.New("price unavailable")
 	}
 	newBorrowValue := MulDiv(borrowAmount, borrowPrice, bm.assetPrecision(borrowAsset))
-	maxBorrowValue := int64(float64(totalCollateralValue) * bm.getCollateralFactor(borrowAsset))
+
+	// Limit against NET equity (assets minus debt): borrowed-in cash sits in
+	// the balances, so limiting against gross assets would let each borrow
+	// enlarge the base for the next one — factor/(1−factor) × equity instead
+	// of factor × equity.
+	equity := totalAssetValue - existingBorrowValue
+	if equity <= 0 {
+		return errors.New("insufficient collateral")
+	}
+	maxBorrowValue := int64(float64(equity) * bm.getCollateralFactor(borrowAsset))
 
 	if existingBorrowValue+newBorrowValue > maxBorrowValue {
 		return errors.New("insufficient collateral")

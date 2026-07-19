@@ -278,17 +278,19 @@ func (e *DefaultExchange) validatePlaceOrder(clientID uint64, req *OrderRequest)
 	if !book.Instrument.ValidateQty(req.Qty) {
 		return reject(RejectInvalidQty)
 	}
-	if reason := hedgeReduceViolation(e.Positions, clientID, req); reason != "" {
+	if reason := e.hedgeReduceViolation(clientID, book, req); reason != "" {
 		return reject(reason)
 	}
 	return nil
 }
 
-// hedgeReduceViolation rejects hedge-mode reducing orders larger than the
-// position they reduce (venue reduce-only semantics): a Sell on PositionLong
-// or a Buy on PositionShort can only close, never flip, so overshoot quantity
-// would vanish at fill time while the counterparty's fill stands.
-func hedgeReduceViolation(store PositionStore, clientID uint64, req *OrderRequest) RejectReason {
+// hedgeReduceViolation rejects hedge-mode reducing orders when the new
+// quantity plus the client's already-resting reduce quantity would exceed the
+// position (venue reduce-only semantics). Counting resting reduces preserves
+// the invariant "resting reduce qty ≤ position size" through every fill, so
+// a reduce can never overshoot at execution time and vanish quantity while
+// the counterparty's fill stands.
+func (e *DefaultExchange) hedgeReduceViolation(clientID uint64, book *OrderBook, req *OrderRequest) RejectReason {
 	if req.PositionSide != PositionLong && req.PositionSide != PositionShort {
 		return ""
 	}
@@ -298,10 +300,20 @@ func hedgeReduceViolation(store PositionStore, clientID uint64, req *OrderReques
 		return ""
 	}
 	var size int64
-	if pos := store.GetPositionBySide(clientID, req.Symbol, req.PositionSide); pos != nil {
+	if pos := e.Positions.GetPositionBySide(clientID, req.Symbol, req.PositionSide); pos != nil {
 		size = abs(pos.Size)
 	}
-	if req.Qty > size {
+	resting := int64(0)
+	side := book.Asks
+	if req.Side == Buy {
+		side = book.Bids
+	}
+	for _, order := range side.Orders {
+		if order.ClientID == clientID && order.PositionSide == req.PositionSide {
+			resting += order.Qty - order.FilledQty
+		}
+	}
+	if req.Qty+resting > size {
 		return RejectExceedsPosition
 	}
 	return ""
@@ -358,7 +370,10 @@ func checkMarketOrderFunds(client *Client, book *OrderBook, order *Order, precis
 		cost := marketBuyCost(client.FeePlan, book, order, precision)
 		return client.GetAvailable(instrument.QuoteAsset()) >= cost
 	}
-	return client.GetAvailable(instrument.BaseAsset()) >= order.Qty
+	// Sell must cover base-denominated fee headroom too, or the fee debit
+	// drives the base balance negative.
+	needed := spotOrderReservation(client.FeePlan, instrument, Sell, order.Qty, marketRefPrice(book), precision)
+	return client.GetAvailable(instrument.BaseAsset()) >= needed
 }
 
 // marketBuyCost walks the ask book and sums the quote spend (plus quote fees)

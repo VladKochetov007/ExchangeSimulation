@@ -212,8 +212,19 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 			client.ReleasePerp(quote, release)
 		}
 
-		cash := exp.ExpiryCashFlow(pos.Size, pos.EntryPrice, settlementPrice, precision)
-		fee := exp.DeliveryFee(pos.Size, settlementPrice, precision)
+		// A contract whose underlying never printed has no settlement price;
+		// closing flat (zero cash, zero fee) beats settling futures at 0 —
+		// which would debit longs their entire entry notional — or paying
+		// puts the full strike.
+		var cash, fee int64
+		if settlementPrice > 0 {
+			cash = exp.ExpiryCashFlow(pos.Size, pos.EntryPrice, settlementPrice, precision)
+			fee = exp.DeliveryFee(pos.Size, settlementPrice, precision)
+		} else if log != nil {
+			log.LogEvent(now, ep.clientID, "settlement_price_unavailable", map[string]any{
+				"symbol": symbol, "size": pos.Size, "entry_price": pos.EntryPrice,
+			})
+		}
 		oldBal := client.PerpBalances[quote]
 		client.PerpBalances[quote] += cash - fee
 		feeTotal += fee

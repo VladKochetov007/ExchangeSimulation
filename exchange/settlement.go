@@ -224,20 +224,42 @@ func (e *DefaultExchange) settleSpotSeller(client *Client, clientID uint64, book
 	logBalanceChange(e, timestamp, clientID, book.Symbol, "trade_settlement", deltas)
 }
 
-// recordFeeRevenue updates exchange fee balance and logs the revenue event.
+// recordFeeRevenue updates exchange fee balances and logs the revenue event.
+// Each fee is booked into ITS OWN asset — clients are debited in Fee.Asset, so
+// crediting revenue under any other asset would destroy one asset and mint
+// another. defaultAsset covers fees with an unset asset (zero-fee probes).
 // Caller must hold e.mu.Lock().
-func (e *DefaultExchange) recordFeeRevenue(asset string, takerFee, makerFee Fee, book *OrderBook, timestamp int64) {
-	e.ExchangeBalance.FeeRevenue[asset] += takerFee.Amount + makerFee.Amount
-	if log := e.getLogger(book.Symbol); log != nil {
+func (e *DefaultExchange) recordFeeRevenue(defaultAsset string, takerFee, makerFee Fee, book *OrderBook, timestamp int64) {
+	takerAsset, makerAsset := takerFee.Asset, makerFee.Asset
+	if takerAsset == "" {
+		takerAsset = defaultAsset
+	}
+	if makerAsset == "" {
+		makerAsset = defaultAsset
+	}
+	e.ExchangeBalance.FeeRevenue[takerAsset] += takerFee.Amount
+	e.ExchangeBalance.FeeRevenue[makerAsset] += makerFee.Amount
+
+	log := e.getLogger(book.Symbol)
+	if log == nil {
+		return
+	}
+	logRevenue := func(asset string, takerAmt, makerAmt int64) {
 		log.LogEvent(timestamp, 0, "fee_revenue", FeeRevenueEvent{
 			Timestamp: timestamp,
 			Symbol:    book.Symbol,
 			TradeID:   book.SeqNum,
-			TakerFee:  takerFee.Amount,
-			MakerFee:  makerFee.Amount,
+			TakerFee:  takerAmt,
+			MakerFee:  makerAmt,
 			Asset:     asset,
 		})
 	}
+	if takerAsset == makerAsset {
+		logRevenue(takerAsset, takerFee.Amount, makerFee.Amount)
+		return
+	}
+	logRevenue(takerAsset, takerFee.Amount, 0)
+	logRevenue(makerAsset, 0, makerFee.Amount)
 }
 
 func logFill(log Logger, timestamp int64, clientID, orderID uint64, exec *Execution,

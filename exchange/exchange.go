@@ -366,10 +366,12 @@ func (e *DefaultExchange) CancelAllClientOrders(clientID uint64) int {
 		}
 	}
 
+	gw := e.Gateways[clientID]
 	count := 0
 	for _, t := range targets {
 		order := t.order
 		book := t.book
+		remainingQty := order.Qty - order.FilledQty
 		releaseReserved(client, book.Instrument, order)
 
 		if order.Side == Buy {
@@ -381,9 +383,16 @@ func (e *DefaultExchange) CancelAllClientOrders(clientID uint64) int {
 		}
 
 		client.RemoveOrder(order.ID)
+		orderID := order.ID
 		order.Status = Cancelled
 		putOrder(order)
 		count++
+
+		// Same contract as liquidation cancels: the actor must learn its
+		// order is gone or its pending state blocks forever.
+		if gw != nil && gw.IsRunning() {
+			gw.ResponseCh <- Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}}
+		}
 	}
 	return count
 }
@@ -842,7 +851,13 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 	}
 
 	for _, u := range updates {
+		// FundingRate fields are mutated under e.mu only, and subscribers get
+		// a snapshot copy — publishing the live pointer would let actor
+		// goroutines read fields mid-update.
+		e.mu.Lock()
 		u.perp.UpdateFundingRate(u.indexPrice, u.markPrice)
+		fundingSnapshot := *u.perp.GetFundingRate()
+		e.mu.Unlock()
 
 		if log := e.getLogger(u.symbol); log != nil {
 			log.LogEvent(timestamp, 0, "mark_price_update", MarkPriceUpdateEvent{
@@ -856,14 +871,13 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		// Funding is a perpetual-only concept; dated futures reuse the rate
 		// struct purely as mark-price state.
 		if u.isPerp {
-			e.MDPublisher.PublishFunding(u.symbol, u.perp.GetFundingRate(), timestamp)
+			e.MDPublisher.PublishFunding(u.symbol, &fundingSnapshot, timestamp)
 			if log := e.getLogger(u.symbol); log != nil {
-				fundingRate := u.perp.GetFundingRate()
 				log.LogEvent(timestamp, 0, "funding_rate_update", FundingRateUpdateEvent{
 					Timestamp:   timestamp,
 					Symbol:      u.symbol,
-					Rate:        fundingRate.Rate,
-					NextFunding: fundingRate.NextFunding,
+					Rate:        fundingSnapshot.Rate,
+					NextFunding: fundingSnapshot.NextFunding,
 				})
 			}
 		}
@@ -1171,20 +1185,26 @@ func (e *DefaultExchange) CheckAndSettleFunding() {
 	now := e.Clock.NowUnixNano()
 
 	for _, perp := range perps {
+		// All FundingRate reads/writes stay under e.mu; subscribers receive a
+		// snapshot copy, never the live pointer.
+		e.mu.Lock()
 		fundingRate := perp.GetFundingRate()
 		if fundingRate.NextFunding == 0 {
 			// First tick after start: anchor the schedule instead of settling
 			// a full interval's funding at t=0.
 			fundingRate.NextFunding = now + fundingRate.Interval*1e9
+			e.mu.Unlock()
 			continue
 		}
-		if now >= fundingRate.NextFunding {
-			e.mu.Lock()
-			settleFunding(e.Positions, e.Clients, perp, e.Clock, buildFundingSink(e))
+		if now < fundingRate.NextFunding {
 			e.mu.Unlock()
-
-			e.MDPublisher.PublishFunding(perp.Symbol(), perp.GetFundingRate(), now)
+			continue
 		}
+		settleFunding(e.Positions, e.Clients, perp, e.Clock, buildFundingSink(e))
+		fundingSnapshot := *fundingRate
+		e.mu.Unlock()
+
+		e.MDPublisher.PublishFunding(perp.Symbol(), &fundingSnapshot, now)
 	}
 }
 

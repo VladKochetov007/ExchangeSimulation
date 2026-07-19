@@ -107,7 +107,7 @@ func (p *PerpFutures) Settle(ctx etypes.SettlementContext) etypes.SettlementResu
 
 	takerPnL := p.settleSide(ctx, exec.TakerClientID, ctx.TakerOrder.Side, takerDelta, takerClosedQty, ctx.TakerFee, quote)
 	makerPnL := p.settleSide(ctx, exec.MakerClientID, exec.MakerSide, makerDelta, makerClosedQty, ctx.MakerFee, quote)
-	ctx.RecordFeeRevenue(quote, ctx.TakerFee.Amount, ctx.MakerFee.Amount)
+	recordSettlementFees(ctx, quote)
 
 	return etypes.SettlementResult{TakerDelta: takerDelta, MakerDelta: makerDelta, TakerPnL: takerPnL, MakerPnL: makerPnL}
 }
@@ -169,11 +169,38 @@ func (p *PerpFutures) settleSide(ctx etypes.SettlementContext, clientID uint64, 
 	}
 	oldBal := ctx.PerpBalance(clientID, quote)
 	ctx.MutatePerpBalance(clientID, quote, pnl)
-	ctx.MutatePerpBalance(clientID, fee.Asset, -fee.Amount)
-	ctx.LogBalanceChange(clientID, ctx.BookSymbol, "trade_settlement", []etypes.BalanceDelta{
+	deltas := []etypes.BalanceDelta{
 		{Asset: quote, Wallet: "perp", OldBalance: oldBal, NewBalance: oldBal + pnl, Delta: pnl},
-	})
+	}
+	if fee.Amount != 0 {
+		oldFeeBal := ctx.PerpBalance(clientID, fee.Asset)
+		ctx.MutatePerpBalance(clientID, fee.Asset, -fee.Amount)
+		deltas = append(deltas, etypes.BalanceDelta{
+			Asset: fee.Asset, Wallet: "perp",
+			OldBalance: oldFeeBal, NewBalance: oldFeeBal - fee.Amount, Delta: -fee.Amount,
+		})
+	}
+	ctx.LogBalanceChange(clientID, ctx.BookSymbol, "trade_settlement", deltas)
 	return pnl
+}
+
+// recordSettlementFees routes each fee to its own asset bucket: clients are
+// debited in Fee.Asset, so revenue booked under any other asset breaks
+// per-asset conservation. Fees with an unset asset default to quote.
+func recordSettlementFees(ctx etypes.SettlementContext, quote string) {
+	takerAsset, makerAsset := ctx.TakerFee.Asset, ctx.MakerFee.Asset
+	if takerAsset == "" {
+		takerAsset = quote
+	}
+	if makerAsset == "" {
+		makerAsset = quote
+	}
+	if takerAsset == makerAsset {
+		ctx.RecordFeeRevenue(takerAsset, ctx.TakerFee.Amount, ctx.MakerFee.Amount)
+		return
+	}
+	ctx.RecordFeeRevenue(takerAsset, ctx.TakerFee.Amount, 0)
+	ctx.RecordFeeRevenue(makerAsset, 0, ctx.MakerFee.Amount)
 }
 
 func absInt(x int64) int64 {

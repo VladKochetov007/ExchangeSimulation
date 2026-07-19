@@ -35,7 +35,8 @@ type BasisSample struct {
 }
 
 type carryPos struct {
-	position int64 // signed futures position (spot hedge is the mirror)
+	position int64 // signed intent counter (submits), used to gate signals
+	filled   int64 // signed futures position from actual fills
 	bestBid  int64
 	bestAsk  int64
 }
@@ -65,9 +66,11 @@ func NewCashCarryArb(id uint64, gw actor.Gateway, cfg CarryArbConfig) *CashCarry
 		}
 	}
 	a.set.onSettle = func(c *Contract, _ int64) {
-		// Futures leg cash-settled by the exchange; unwind the spot hedge.
-		if st, ok := a.state[c.Symbol]; ok && st.position != 0 {
-			qty := st.position
+		// Futures leg cash-settled by the exchange; unwind the spot hedge
+		// sized by what actually FILLED, not by the intent counter — a
+		// rejected or partial leg must not leave residual spot exposure.
+		if st, ok := a.state[c.Symbol]; ok && st.filled != 0 {
+			qty := st.filled
 			side := exchange.Buy // long futures were hedged short spot: buy it back
 			if qty < 0 {
 				side = exchange.Sell
@@ -77,6 +80,11 @@ func NewCashCarryArb(id uint64, gw actor.Gateway, cfg CarryArbConfig) *CashCarry
 			a.set.trackRequest(reqID, a.cfg.Underlying)
 		}
 		delete(a.state, c.Symbol)
+	}
+	a.set.onFill = func(sym string, e actor.OrderFillEvent) {
+		if st, ok := a.state[sym]; ok {
+			st.filled += signedQty(e)
+		}
 	}
 	a.SetHandler(a)
 	a.AddTicker(cfg.CheckInterval, a.onTick)
