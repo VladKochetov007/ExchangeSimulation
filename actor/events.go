@@ -16,6 +16,9 @@ const (
 	EventBookSnapshot
 	EventFundingUpdate
 	EventOpenInterest
+	// EventInstrument carries listing/settlement announcements from the
+	// exchange's reference-data feed (subscribe to InstrumentFeedSymbol).
+	EventInstrument
 	EventBalanceUpdate
 	EventAccountUpdate
 )
@@ -87,6 +90,11 @@ type FundingUpdateEvent struct {
 type OpenInterestEvent struct {
 	Symbol       string
 	OpenInterest *exchange.OpenInterest
+	Timestamp    int64
+}
+
+type InstrumentEvent struct {
+	Announcement *exchange.InstrumentAnnouncement
 	Timestamp    int64
 }
 

@@ -35,81 +35,98 @@ func (m *ProRataMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etyp
 			break
 		}
 		nextLimit := limit.Next
-		remaining := incomingOrder.Qty - incomingOrder.FilledQty
-
-		// Collect eligible resting orders and total available qty at this level.
-		type candidate struct{ order *etypes.Order }
-		var candidates []candidate
-		totalQty := int64(0)
-		for o := limit.Head; o != nil; o = o.Next {
-			if o.FilledQty < o.Qty && o.ClientID != incomingOrder.ClientID {
-				candidates = append(candidates, candidate{o})
-				totalQty += o.Qty - o.FilledQty
-			}
-		}
-		if totalQty == 0 {
-			// Level holds only the incoming client's own orders; skip past it
-			// instead of blockading deeper liquidity.
-			limit = nextLimit
-			continue
-		}
-
-		// Distribute fills proportionally. Each maker gets floor(remaining * share),
-		// capped at available so remaining > totalQty never over-fills a maker.
-		// Leftovers are assigned in resting order (FIFO tiebreaker) until exhausted.
-		filled := int64(0)
-		shares := make([]int64, len(candidates))
-		for i, c := range candidates {
-			available := c.order.Qty - c.order.FilledQty
-			shares[i] = min(etypes.MulDiv(remaining, available, totalQty), available)
-			filled += shares[i]
-		}
-		leftover := min(remaining-filled, totalQty)
-		for i := range candidates {
-			if leftover == 0 {
+		// Rescan after iceberg refreshes: fresh tranches are new liquidity
+		// behind the queue. Terminates — each refresh pass consumed qty.
+		for {
+			remaining := incomingOrder.Qty - incomingOrder.FilledQty
+			if remaining == 0 {
 				break
 			}
-			available := candidates[i].order.Qty - candidates[i].order.FilledQty
-			extra := min(available-shares[i], leftover)
-			shares[i] += extra
-			leftover -= extra
-		}
 
-		// Emit one execution per maker with a non-zero share.
-		now := m.clock.NowUnixNano()
-		for i, c := range candidates {
-			if shares[i] == 0 {
-				continue
+			// Collect eligible resting orders and displayed qty at this level.
+			// Icebergs participate with their display tranche only.
+			type candidate struct{ order *etypes.Order }
+			var candidates []candidate
+			totalQty := int64(0)
+			for o := limit.Head; o != nil; o = o.Next {
+				if o.FilledQty < o.Qty && o.ClientID != incomingOrder.ClientID {
+					candidates = append(candidates, candidate{o})
+					totalQty += makerAvailable(o)
+				}
 			}
-			execQty := shares[i]
-			incomingOrder.FilledQty += execQty
-			c.order.FilledQty += execQty
-			if c.order.Parent != nil {
-				c.order.Parent.TotalQty -= execQty
+			if totalQty == 0 {
+				// Level holds only the incoming client's own orders; skip past it
+				// instead of blockading deeper liquidity.
+				break
 			}
 
-			exec := getExecution()
-			exec.TakerOrderID = incomingOrder.ID
-			exec.MakerOrderID = c.order.ID
-			exec.TakerClientID = incomingOrder.ClientID
-			exec.MakerClientID = c.order.ClientID
-			exec.Price = limit.Price
-			exec.Qty = execQty
-			exec.Timestamp = now
-			exec.TakerFilledQty = incomingOrder.FilledQty
-			exec.MakerFilledQty = c.order.FilledQty
-			exec.MakerTotalQty = c.order.Qty
-			exec.MakerSide = c.order.Side
-			exec.MakerPosSide = c.order.PositionSide
-			executions = append(executions, exec)
+			// Distribute fills proportionally. Each maker gets floor(remaining * share),
+			// capped at available so remaining > totalQty never over-fills a maker.
+			// Leftovers are assigned in resting order (FIFO tiebreaker) until exhausted.
+			filled := int64(0)
+			shares := make([]int64, len(candidates))
+			for i, c := range candidates {
+				available := makerAvailable(c.order)
+				shares[i] = min(etypes.MulDiv(remaining, available, totalQty), available)
+				filled += shares[i]
+			}
+			leftover := min(remaining-filled, totalQty)
+			for i := range candidates {
+				if leftover == 0 {
+					break
+				}
+				extra := min(makerAvailable(candidates[i].order)-shares[i], leftover)
+				shares[i] += extra
+				leftover -= extra
+			}
 
-			if c.order.FilledQty >= c.order.Qty {
-				c.order.Status = etypes.Filled
-				// Keep the book.Orders index entry for settlement; the exchange
-				// removes it in removeMakerOrders.
-				ebook.UnlinkOrder(c.order)
-			} else {
-				c.order.Status = etypes.PartialFill
+			// Emit one execution per maker with a non-zero share.
+			now := m.clock.NowUnixNano()
+			refreshed := false
+			for i, c := range candidates {
+				if shares[i] == 0 {
+					continue
+				}
+				execQty := shares[i]
+				incomingOrder.FilledQty += execQty
+				c.order.FilledQty += execQty
+				if c.order.Visibility == etypes.Iceberg && c.order.DisplayRemaining > 0 {
+					c.order.DisplayRemaining -= execQty
+				}
+				if c.order.Parent != nil {
+					c.order.Parent.TotalQty -= execQty
+				}
+
+				exec := getExecution()
+				exec.TakerOrderID = incomingOrder.ID
+				exec.MakerOrderID = c.order.ID
+				exec.TakerClientID = incomingOrder.ClientID
+				exec.MakerClientID = c.order.ClientID
+				exec.Price = limit.Price
+				exec.Qty = execQty
+				exec.Timestamp = now
+				exec.TakerFilledQty = incomingOrder.FilledQty
+				exec.MakerFilledQty = c.order.FilledQty
+				exec.MakerTotalQty = c.order.Qty
+				exec.MakerSide = c.order.Side
+				exec.MakerPosSide = c.order.PositionSide
+				executions = append(executions, exec)
+
+				if c.order.FilledQty >= c.order.Qty {
+					c.order.Status = etypes.Filled
+					// Keep the book.Orders index entry for settlement; the exchange
+					// removes it in removeMakerOrders.
+					ebook.UnlinkOrder(c.order)
+				} else {
+					c.order.Status = etypes.PartialFill
+					if c.order.Visibility == etypes.Iceberg && c.order.DisplayRemaining == 0 {
+						refreshIcebergTranche(limit, c.order)
+						refreshed = true
+					}
+				}
+			}
+			if !refreshed {
+				break
 			}
 		}
 

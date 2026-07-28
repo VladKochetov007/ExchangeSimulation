@@ -12,8 +12,12 @@ type Order struct {
 	FilledQty    int64        `json:"filled_qty"`
 	Visibility   Visibility   `json:"visibility"`
 	IcebergQty   int64        `json:"iceberg_qty"`
-	Status       OrderStatus  `json:"status"`
-	Timestamp    int64        `json:"timestamp"`
+	// DisplayRemaining is the unfilled portion of an iceberg's current display
+	// tranche. Matchers cap fills at this and re-queue the order at the back
+	// of its level when the tranche is exhausted (venue refresh semantics).
+	DisplayRemaining int64       `json:"-"`
+	Status           OrderStatus `json:"status"`
+	Timestamp        int64       `json:"timestamp"`
 	// Reserved is the remaining amount locked for this order (quote units for
 	// buys and margined orders, base units for spot sells). The exchange is the
 	// single writer; releases are computed as deltas against this ledger so

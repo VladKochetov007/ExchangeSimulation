@@ -48,10 +48,7 @@ func (b *BaseMarket) ConnectNewClient(id uint64, _ map[string]int64, _ FeeModel)
 func (b *BaseMarket) dispatchLoop(gw *ClientGateway) {
 	for req := range gw.RequestCh {
 		resp := b.handler.HandleRequest(gw.ClientID, req)
-		select {
-		case gw.ResponseCh <- resp:
-		default:
-		}
+		sendResponse(gw, resp)
 	}
 }
 

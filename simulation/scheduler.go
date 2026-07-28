@@ -19,14 +19,19 @@ type EventScheduler struct {
 	clock  *SimulatedClock
 	events eventHeap
 	nextID uint64
-	mu     sync.Mutex
+	// cancelled holds IDs whose Cancel raced with the event being popped for
+	// firing: the event is not in the heap at that moment, so the flag is what
+	// stops a repeating event from being re-pushed as an uncancellable zombie.
+	cancelled map[uint64]struct{}
+	mu        sync.Mutex
 }
 
 // NewEventScheduler creates a new event scheduler
 func NewEventScheduler(clock *SimulatedClock) *EventScheduler {
 	es := &EventScheduler{
-		clock:  clock,
-		events: make(eventHeap, 0),
+		clock:     clock,
+		events:    make(eventHeap, 0),
+		cancelled: make(map[uint64]struct{}),
 	}
 	heap.Init(&es.events)
 	return es
@@ -49,6 +54,11 @@ func (es *EventScheduler) Schedule(atTime int64, callback func()) uint64 {
 
 // ScheduleRepeating schedules a callback to be called every interval nanoseconds
 func (es *EventScheduler) ScheduleRepeating(interval int64, callback func()) uint64 {
+	// A non-positive interval never advances the event's due time, turning
+	// ProcessUntil into an infinite loop that hangs the whole simulation.
+	if interval < 1 {
+		interval = 1
+	}
 	es.mu.Lock()
 	defer es.mu.Unlock()
 
@@ -75,6 +85,9 @@ func (es *EventScheduler) Cancel(id uint64) {
 			return
 		}
 	}
+	// Not in the heap: the event is mid-fire in ProcessUntil (or already gone).
+	// Flag it so a repeating event is dropped instead of re-pushed.
+	es.cancelled[id] = struct{}{}
 }
 
 // ProcessUntil fires all events up to and including the given time
@@ -90,16 +103,28 @@ func (es *EventScheduler) ProcessUntil(untilTime int64) {
 		event := heap.Pop(&es.events).(*ScheduledEvent)
 		es.mu.Unlock()
 
+		// Advance the simulation clock to this event's scheduled time before
+		// firing, so the callback sees its own instant rather than the end of
+		// the enclosing Advance() jump. Events pop in non-decreasing time order,
+		// so the guard only ever moves the clock forward; a past-due event fires
+		// at the current time instead of rewinding it.
+		if es.clock != nil && event.Time > es.clock.NowUnixNano() {
+			es.clock.SetTime(event.Time)
+		}
+
 		// Fire callback (unlocked to prevent deadlock if callback schedules events)
 		event.Callback()
 
-		// Reschedule if repeating
-		if event.Repeating {
-			es.mu.Lock()
+		// Reschedule if repeating — unless a Cancel landed while the event was
+		// mid-fire (it was not in the heap, so Cancel could only flag it).
+		es.mu.Lock()
+		if _, wasCancelled := es.cancelled[event.id]; wasCancelled {
+			delete(es.cancelled, event.id)
+		} else if event.Repeating {
 			event.Time += event.Interval
 			heap.Push(&es.events, event)
-			es.mu.Unlock()
 		}
+		es.mu.Unlock()
 	}
 }
 

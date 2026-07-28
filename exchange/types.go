@@ -109,16 +109,18 @@ const (
 	RejectOrderAlreadyFilled  = etypes.RejectOrderAlreadyFilled
 	RejectFOKNotFilled        = etypes.RejectFOKNotFilled
 	RejectUnknownRequest      = etypes.RejectUnknownRequest
+	RejectExceedsPosition     = etypes.RejectExceedsPosition
 )
 
 const (
-	ReqPlaceOrder   = etypes.ReqPlaceOrder
-	ReqCancelOrder  = etypes.ReqCancelOrder
-	ReqQueryBalance = etypes.ReqQueryBalance
-	ReqQueryOrders  = etypes.ReqQueryOrders
-	ReqQueryAccount = etypes.ReqQueryAccount
-	ReqSubscribe    = etypes.ReqSubscribe
-	ReqUnsubscribe  = etypes.ReqUnsubscribe
+	ReqPlaceOrder       = etypes.ReqPlaceOrder
+	ReqCancelOrder      = etypes.ReqCancelOrder
+	ReqQueryBalance     = etypes.ReqQueryBalance
+	ReqQueryOrders      = etypes.ReqQueryOrders
+	ReqQueryAccount     = etypes.ReqQueryAccount
+	ReqQueryInstruments = etypes.ReqQueryInstruments
+	ReqSubscribe        = etypes.ReqSubscribe
+	ReqUnsubscribe      = etypes.ReqUnsubscribe
 )
 
 const (
@@ -139,7 +141,10 @@ const (
 	MDTrade        = etypes.MDTrade
 	MDFunding      = etypes.MDFunding
 	MDOpenInterest = etypes.MDOpenInterest
+	MDInstrument   = etypes.MDInstrument
 )
+
+const InstrumentFeedSymbol = etypes.InstrumentFeedSymbol
 
 const (
 	CrossMargin    = etypes.CrossMargin
@@ -150,6 +155,11 @@ type Logger = etypes.Logger
 type FeeModel = etypes.FeeModel
 type Instrument = etypes.Instrument
 type Margined = etypes.Margined
+type OrderMarginer = etypes.OrderMarginer
+type Expirable = etypes.Expirable
+type ListingPolicy = etypes.ListingPolicy
+type UnderlyingRef = etypes.UnderlyingRef
+type InstrumentAnnouncement = etypes.InstrumentAnnouncement
 type Settleable = etypes.Settleable
 type SettlementContext = etypes.SettlementContext
 type SettlementResult = etypes.SettlementResult
@@ -169,6 +179,11 @@ type RealClock = eclock.RealClock
 type RealTickerFactory = eclock.RealTickerFactory
 type SpotInstrument = einstrument.SpotInstrument
 type PerpFutures = einstrument.PerpFutures
+type ExpiringFutures = einstrument.ExpiringFutures
+type EuropeanOption = einstrument.EuropeanOption
+type OptionMarginParams = einstrument.OptionMarginParams
+type DatedFuturesLister = einstrument.DatedFuturesLister
+type OptionChainLister = einstrument.OptionChainLister
 type SimpleFundingCalc = einstrument.SimpleFundingCalc
 type PercentageFee = efee.PercentageFee
 type FixedFee = efee.FixedFee
@@ -188,6 +203,9 @@ type Exchange = DefaultExchange
 
 var NewSpotInstrument = einstrument.NewSpotInstrument
 var NewPerpFutures = einstrument.NewPerpFutures
+var NewExpiringFutures = einstrument.NewExpiringFutures
+var NewEuropeanOption = einstrument.NewEuropeanOption
+var Black76Premium = eprice.Black76Premium
 var NewMidPriceCalculator = eprice.NewMidPriceCalculator
 var NewStaticPriceOracle = eprice.NewStaticPriceOracle
 var NewMidPriceOracle = eprice.NewMidPriceOracle

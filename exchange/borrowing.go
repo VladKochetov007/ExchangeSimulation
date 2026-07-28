@@ -31,6 +31,12 @@ func (bm *BorrowingManager) BorrowMargin(ctx BorrowContext, asset string, amount
 	if ctx.Client == nil {
 		return errors.New("unknown client")
 	}
+	// A non-positive borrow would move the balance and debt the wrong way: a
+	// negative amount conjures negative debt (the exchange owing the client) and
+	// silently drains the wallet, slipping past every downstream limit check.
+	if amount <= 0 {
+		return errors.New("borrow amount must be positive")
+	}
 
 	if ctx.Client.MarginMode == CrossMargin {
 		if err := bm.validateCrossMarginCollateral(ctx.Client, asset, amount); err != nil {
@@ -53,6 +59,9 @@ func (bm *BorrowingManager) BorrowMargin(ctx BorrowContext, asset string, amount
 	if ctx.CreditSpot {
 		oldSpot := ctx.Client.Balances[asset]
 		ctx.Client.Balances[asset] += amount
+		// Record the attribution: equity, interest, and snapshots charge this
+		// liability to the wallet that actually received the cash.
+		ctx.Client.BorrowedSpot[asset] += amount
 		walletDelta = spotDelta(asset, oldSpot, ctx.Client.Balances[asset])
 	} else {
 		oldPerp := ctx.Client.PerpBalances[asset]
@@ -86,6 +95,14 @@ func (bm *BorrowingManager) BorrowMargin(ctx BorrowContext, asset string, amount
 }
 
 func (bm *BorrowingManager) RepayMargin(ctx BorrowContext, asset string, amount int64) error {
+	if ctx.Client == nil {
+		return errors.New("unknown client")
+	}
+	// A negative repayment subtracts a negative, inflating BOTH the wallet and
+	// the outstanding debt — free credit paired with more liability.
+	if amount <= 0 {
+		return errors.New("repay amount must be positive")
+	}
 	borrowed := ctx.Client.Borrowed[asset]
 	if borrowed == 0 {
 		return errors.New("no outstanding debt")
@@ -93,21 +110,42 @@ func (bm *BorrowingManager) RepayMargin(ctx BorrowContext, asset string, amount 
 	if amount > borrowed {
 		amount = borrowed
 	}
-	if ctx.Client.PerpAvailable(asset) < amount {
+
+	// A borrow credits either the perp wallet (margin borrow) or the spot wallet
+	// (auto-borrow for a spot order). Repay may split the debit across both —
+	// perp first, preserving the historical margin-repay path — so debt is never
+	// stuck while the account holds enough cash spread over two wallets. The
+	// check is atomic: nothing moves unless the combined available covers it.
+	perpDraw := min(amount, max(0, ctx.Client.PerpAvailable(asset)))
+	spotDraw := amount - perpDraw
+	if spotDraw > ctx.Client.GetAvailable(asset) {
 		return errors.New("insufficient balance to repay")
 	}
 
 	oldPerp := ctx.Client.PerpBalances[asset]
-	ctx.Client.PerpBalances[asset] -= amount
+	oldSpot := ctx.Client.Balances[asset]
+	ctx.Client.PerpBalances[asset] -= perpDraw
+	ctx.Client.Balances[asset] -= spotDraw
 
 	oldBorrowed := ctx.Client.Borrowed[asset]
 	ctx.Client.Borrowed[asset] -= amount
+	// Cash returned from the spot wallet retires spot-attributed debt first;
+	// clamp so the attribution never exceeds the remaining total.
+	ctx.Client.BorrowedSpot[asset] = min(
+		max(0, ctx.Client.BorrowedSpot[asset]-spotDraw),
+		ctx.Client.Borrowed[asset],
+	)
 
 	if ctx.LogBalance != nil {
-		ctx.LogBalance("repay", []BalanceDelta{
-			perpDelta(asset, oldPerp, ctx.Client.PerpBalances[asset]),
-			borrowedDelta(asset, oldBorrowed, ctx.Client.Borrowed[asset]),
-		})
+		changes := make([]BalanceDelta, 0, 3)
+		if perpDraw > 0 {
+			changes = append(changes, perpDelta(asset, oldPerp, ctx.Client.PerpBalances[asset]))
+		}
+		if spotDraw > 0 {
+			changes = append(changes, spotDelta(asset, oldSpot, ctx.Client.Balances[asset]))
+		}
+		changes = append(changes, borrowedDelta(asset, oldBorrowed, ctx.Client.Borrowed[asset]))
+		ctx.LogBalance("repay", changes)
 	}
 	if ctx.LogEvent != nil {
 		ctx.LogEvent("repay", RepayEvent{
@@ -128,21 +166,17 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(client *Client, borrow
 		return errors.New("price oracle not configured")
 	}
 
-	totalCollateralValue := int64(0)
+	// Gross asset value: negative balances subtract — skipping them would let
+	// a client deep underwater in one asset pledge the others at full value.
+	totalAssetValue := int64(0)
 	for asset, balance := range client.PerpBalances {
-		if balance <= 0 {
-			continue
-		}
 		if price := bm.Config.PriceSource.Price(asset); price > 0 {
-			totalCollateralValue += MulDiv(balance, price, bm.assetPrecision(asset))
+			totalAssetValue += MulDiv(balance, price, bm.assetPrecision(asset))
 		}
 	}
 	for asset, balance := range client.Balances {
-		if balance <= 0 {
-			continue
-		}
 		if price := bm.Config.PriceSource.Price(asset); price > 0 {
-			totalCollateralValue += MulDiv(balance, price, bm.assetPrecision(asset))
+			totalAssetValue += MulDiv(balance, price, bm.assetPrecision(asset))
 		}
 	}
 
@@ -161,7 +195,16 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(client *Client, borrow
 		return errors.New("price unavailable")
 	}
 	newBorrowValue := MulDiv(borrowAmount, borrowPrice, bm.assetPrecision(borrowAsset))
-	maxBorrowValue := int64(float64(totalCollateralValue) * bm.getCollateralFactor(borrowAsset))
+
+	// Limit against NET equity (assets minus debt): borrowed-in cash sits in
+	// the balances, so limiting against gross assets would let each borrow
+	// enlarge the base for the next one — factor/(1−factor) × equity instead
+	// of factor × equity.
+	equity := totalAssetValue - existingBorrowValue
+	if equity <= 0 {
+		return errors.New("insufficient collateral")
+	}
+	maxBorrowValue := int64(float64(equity) * bm.getCollateralFactor(borrowAsset))
 
 	if existingBorrowValue+newBorrowValue > maxBorrowValue {
 		return errors.New("insufficient collateral")

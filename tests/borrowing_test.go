@@ -163,11 +163,11 @@ func TestAutoBorrow_PerpOrderTriggersWhenShortfall(t *testing.T) {
 
 	oracle := NewStaticPriceOracle(map[string]int64{"USD": USD_PRECISION})
 	ex.EnableBorrowing(BorrowingConfig{
-		Enabled:        true,
-		AutoBorrowPerp: true,
-		BorrowRates:    map[string]int64{"USD": 500},
+		Enabled:           true,
+		AutoBorrowPerp:    true,
+		BorrowRates:       map[string]int64{"USD": 500},
 		CollateralFactors: map[string]float64{"USD": 1.0},
-		PriceSource:    oracle,
+		PriceSource:       oracle,
 	})
 
 	gw1 := ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})

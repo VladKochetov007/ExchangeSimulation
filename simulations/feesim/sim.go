@@ -7,6 +7,7 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/matching"
 	"exchange_sim/simulation"
 )
 
@@ -22,7 +23,67 @@ const (
 type SimConfig struct {
 	SpotTakerBps int64
 	PerpTakerBps int64
-	LogDir       string
+	// Maker fees for the taker/arb fee plan; negative = rebate.
+	SpotMakerBps int64
+	// Fees for the MM fee plan (default 0/0 = fee-exempt designated MM).
+	MMMakerBps int64
+	MMTakerBps int64
+	LogDir     string
+
+	// Tick sizes are multiplied by TickScaleNum/TickScaleDen (default 1/1).
+	TickScaleNum int64
+	TickScaleDen int64
+
+	TakerIntervalMs int64 // default 100
+	Seed            int64 // base RNG seed for taker and latency draws, default 42
+
+	MMCount          int   // MMs per symbol, default 1
+	MMLevels         int   // quote levels per MM, default 5
+	MMBaseIntervalMs int64 // default 10
+	MMMaxIntervalMs  int64 // default 100
+
+	// Actor (taker/arb) network latency: log-normal with hard floor.
+	LatencyMinUs    int64   // default 1000
+	LatencyMedianUs int64   // default 3000 (median above min)
+	LatencySigma    float64 // default 0.5
+
+	FundingIntervalSec int64 // default 120
+
+	// ProRata switches the exchange-wide matcher to pro-rata allocation.
+	ProRata bool
+
+	// MMSkewTicksPerLot enables Avellaneda-Stoikov style inventory skew in the
+	// market makers (mid shifts against inventory). 0 = off.
+	MMSkewTicksPerLot float64
+	// MMSkewCapTicks bounds the skew shift in ticks (0 = unbounded).
+	MMSkewCapTicks float64
+
+	// TakerImbalanceCoupling tilts taker side toward book imbalance (herding).
+	TakerImbalanceCoupling float64
+	// TakerExciteAlpha / TakerExciteBetaPerSec: Hawkes-lite self-excited flow.
+	TakerExciteAlpha      float64
+	TakerExciteBetaPerSec float64
+
+	// StepSleepUs is the runner's per-step goroutine drain pause in µs
+	// (0 = runner default 1µs, negative = no sleep). Larger values trade
+	// wall time for scheduling determinism.
+	StepSleepUs int64
+
+	// ValueTraderBandBps enables one value trader per USD spot market that
+	// mean-reverts price to the bootstrap fundamental when the mid deviates
+	// beyond this band. 0 = disabled.
+	ValueTraderBandBps int64
+	// ValueTraderMaxLots caps the value trader position in lots (default 20).
+	ValueTraderMaxLots int64
+	// ValueTraderIntervalMs is the decision cadence (default 200).
+	ValueTraderIntervalMs int64
+
+	// RaceArbTiers adds one extra ABC basis arb per entry, each with actor
+	// latency scaled by the tier factor (1.0 = baseline latency, 0.1 = 10×
+	// faster). All race entrants watch the same spot/perp pair, so their
+	// relative fill shares measure the latency-race win concentration
+	// (Aquilina-Budish-O'Neill style). Empty = no race.
+	RaceArbTiers []float64
 }
 
 func DefaultSimConfig() SimConfig {
@@ -33,15 +94,82 @@ func DefaultSimConfig() SimConfig {
 	}
 }
 
+// normalize fills zero-valued fields with defaults so partial configs
+// (e.g. unmarshalled from experiment JSON) behave like DefaultSimConfig.
+func (c *SimConfig) normalize() {
+	if c.TickScaleNum == 0 {
+		c.TickScaleNum = 1
+	}
+	if c.TickScaleDen == 0 {
+		c.TickScaleDen = 1
+	}
+	if c.TakerIntervalMs == 0 {
+		c.TakerIntervalMs = 100
+	}
+	if c.Seed == 0 {
+		c.Seed = 42
+	}
+	if c.MMCount == 0 {
+		c.MMCount = 1
+	}
+	if c.MMLevels == 0 {
+		c.MMLevels = 5
+	}
+	if c.MMBaseIntervalMs == 0 {
+		c.MMBaseIntervalMs = 10
+	}
+	if c.MMMaxIntervalMs == 0 {
+		c.MMMaxIntervalMs = 100
+	}
+	if c.LatencyMinUs == 0 {
+		c.LatencyMinUs = 1000
+	}
+	if c.LatencyMedianUs == 0 {
+		c.LatencyMedianUs = 3000
+	}
+	if c.LatencySigma == 0 {
+		c.LatencySigma = 0.5
+	}
+	if c.FundingIntervalSec == 0 {
+		c.FundingIntervalSec = 120
+	}
+	if c.ValueTraderMaxLots == 0 {
+		c.ValueTraderMaxLots = 20
+	}
+	if c.ValueTraderIntervalMs == 0 {
+		c.ValueTraderIntervalMs = 200
+	}
+}
+
+// scaleDur scales a duration by a float factor, clamping at 1ns.
+func scaleDur(d time.Duration, factor float64) time.Duration {
+	scaled := time.Duration(float64(d) * factor)
+	if scaled < 1 {
+		return 1
+	}
+	return scaled
+}
+
+// scaleTick applies the configured tick scale, clamping at 1.
+func (c *SimConfig) scaleTick(tick int64) int64 {
+	scaled := tick * c.TickScaleNum / c.TickScaleDen
+	if scaled < 1 {
+		return 1
+	}
+	return scaled
+}
+
 type Sim struct {
-	Runner      *simulation.Runner
-	MMs         []*MarketMaker
-	Taker       *RandomTaker
-	BasisArbs   []*FeeAwareBasisArb
-	FundingArbs []*FeeAwareFundingArb
-	TriArb      *FeeAwareTriArb
-	Loggers     []*JSONLinesLogger
-	ex          *exchange.Exchange
+	Runner       *simulation.Runner
+	MMs          []*MarketMaker
+	Taker        *RandomTaker
+	BasisArbs    []*FeeAwareBasisArb
+	FundingArbs  []*FeeAwareFundingArb
+	TriArb       *FeeAwareTriArb
+	RaceArbs     []*FeeAwareBasisArb
+	ValueTraders []*ValueTrader
+	Loggers      []*JSONLinesLogger
+	ex           *exchange.Exchange
 }
 
 func (s *Sim) Exchange() *exchange.Exchange { return s.ex }
@@ -53,6 +181,7 @@ func (s *Sim) Close() {
 }
 
 func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
+	cfg.normalize()
 	spotTakerBps := cfg.SpotTakerBps
 	perpTakerBps := cfg.PerpTakerBps
 	logDir := cfg.LogDir
@@ -68,6 +197,9 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		SnapshotInterval:        time.Second,
 		BalanceSnapshotInterval: 10 * time.Second,
 	})
+	if cfg.ProRata {
+		ex.Matcher = matching.NewProRataMatcher(simClock)
+	}
 
 	if err := os.MkdirAll(logDir+"/spot", 0755); err != nil {
 		return nil, err
@@ -85,12 +217,12 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 
 	// ---------- Instruments ----------
 
-	abcUSDTick := int64(10 * usdPrecision) // $10 tick — 0.02% of price
+	abcUSDTick := cfg.scaleTick(10 * usdPrecision) // $10 tick — 0.02% of price
 	abcSpot := exchange.NewSpotInstrument("ABC/USD", "ABC", "USD",
 		abcPrecision, usdPrecision, abcUSDTick, abcPrecision/100)
 	ex.AddInstrument(abcSpot)
 
-	qUSDTick := int64(1 * usdPrecision) // $1 tick — 0.033% of price
+	qUSDTick := cfg.scaleTick(1 * usdPrecision) // $1 tick — 0.033% of price
 	qSpot := exchange.NewSpotInstrument("Q/USD", "Q", "USD",
 		qPrecision, usdPrecision, qUSDTick, qPrecision/100)
 	ex.AddInstrument(qSpot)
@@ -98,20 +230,20 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	// ABC-PERP
 	abcPerp := exchange.NewPerpFutures("ABC-PERP", "ABC", "USD",
 		abcPrecision, usdPrecision, abcUSDTick, abcPrecision/100)
-	abcPerp.GetFundingRate().Interval = 120 // 2-min funding
+	abcPerp.GetFundingRate().Interval = cfg.FundingIntervalSec
 	ex.AddInstrument(abcPerp)
 
 	// Q-PERP
 	qPerp := exchange.NewPerpFutures("Q-PERP", "Q", "USD",
 		qPrecision, usdPrecision, qUSDTick, qPrecision/100)
-	qPerp.GetFundingRate().Interval = 120
+	qPerp.GetFundingRate().Interval = cfg.FundingIntervalSec
 	ex.AddInstrument(qPerp)
 
 	// Q/ABC cross spot — price in ABC units
 	// Bootstrap: Q/ABC = Q_USD / ABC_USD = 3000/50000 = 0.06 ABC
 	// 0.06 ABC = 6_000_000 in BTC_PRECISION (1e8)
 	// Tick: 0.0001 ABC = 10_000 in BTC_PRECISION
-	qabcTick := int64(10_000)
+	qabcTick := cfg.scaleTick(10_000)
 	qabcSpot := exchange.NewSpotInstrument("Q/ABC", "Q", "ABC",
 		qPrecision, abcPrecision, qabcTick, qPrecision/100)
 	ex.AddInstrument(qabcSpot)
@@ -158,10 +290,12 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	// MMs get zero latency (co-located). Takers/arbs get realistic latency.
 	mmMount := simulation.NewMount(ex, simulation.LatencyConfig{})
 
+	latMin := time.Duration(cfg.LatencyMinUs) * time.Microsecond
+	latMedian := time.Duration(cfg.LatencyMedianUs) * time.Microsecond
 	actorLatency := simulation.LatencyConfig{
-		Request:    simulation.NewLogNormalLatency(1*time.Millisecond, 3*time.Millisecond, 0.5, 42),
-		Response:   simulation.NewLogNormalLatency(1*time.Millisecond, 3*time.Millisecond, 0.5, 43),
-		MarketData: simulation.NewLogNormalLatency(1*time.Millisecond, 3*time.Millisecond, 0.5, 44),
+		Request:    simulation.NewLogNormalLatency(latMin, latMedian, cfg.LatencySigma, cfg.Seed),
+		Response:   simulation.NewLogNormalLatency(latMin, latMedian, cfg.LatencySigma, cfg.Seed+1),
+		MarketData: simulation.NewLogNormalLatency(latMin, latMedian, cfg.LatencySigma, cfg.Seed+2),
 		// Deliver at exact sim timestamps; wall-clock sleeps are unrelated to
 		// simulation time and would distort latency by orders of magnitude.
 		Scheduler: scheduler,
@@ -171,8 +305,8 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 
 	// ---------- Fee plans ----------
 
-	spotMakerFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: spotTakerBps, InQuote: true}
-	mmFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 0, InQuote: true}
+	spotMakerFee := &exchange.PercentageFee{MakerBps: cfg.SpotMakerBps, TakerBps: spotTakerBps, InQuote: true}
+	mmFee := &exchange.PercentageFee{MakerBps: cfg.MMMakerBps, TakerBps: cfg.MMTakerBps, InQuote: true}
 
 	// ---------- Common balances ----------
 
@@ -220,21 +354,28 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		{"Q-PERP", qBootstrapUSD, qUSDTick, qPrecision, true, 2},
 		{"Q/ABC", qabcBootstrap, qabcTick, qPrecision, false, 2},
 	}
+	mmBase := time.Duration(cfg.MMBaseIntervalMs) * time.Millisecond
+	mmMax := time.Duration(cfg.MMMaxIntervalMs) * time.Millisecond
 	for _, spec := range mmSpecs {
-		gw := connectMM(mmFee, spec.isPerp)
-		mm := NewMarketMaker(nextClient, gw, MMConfig{
-			Symbol:         spec.symbol,
-			BootstrapPrice: spec.bootstrap,
-			Levels:         5,
-			LevelSpacing:   spec.spacing,
-			LevelSize:      spec.levelSize,
-			TickSize:       spec.tickSize,
-			MidPriceMode:   MidFromWeightedMid,
-			BaseInterval:   10 * time.Millisecond,
-			MaxInterval:    100 * time.Millisecond,
-		})
-		mm.SetTickerFactory(timerFact)
-		mms = append(mms, mm)
+		for i := 0; i < cfg.MMCount; i++ {
+			gw := connectMM(mmFee, spec.isPerp)
+			mm := NewMarketMaker(nextClient, gw, MMConfig{
+				Symbol:         spec.symbol,
+				BootstrapPrice: spec.bootstrap,
+				Levels:         cfg.MMLevels,
+				LevelSpacing:   spec.spacing,
+				LevelSize:      spec.levelSize,
+				TickSize:       spec.tickSize,
+				MidPriceMode:   MidFromWeightedMid,
+				// Stagger refresh intervals so competing MMs do not move in lockstep.
+				BaseInterval:    mmBase + time.Duration(i)*time.Millisecond,
+				MaxInterval:     mmMax + time.Duration(i)*10*time.Millisecond,
+				SkewTicksPerLot: cfg.MMSkewTicksPerLot,
+				SkewCapTicks:    cfg.MMSkewCapTicks,
+			})
+			mm.SetTickerFactory(timerFact)
+			mms = append(mms, mm)
+		}
 	}
 
 	// Client 6: random taker across all 5 symbols.
@@ -249,10 +390,13 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		"Q/ABC":    200_000,   // 0.2 Q (thinner cross market)
 	}
 	taker := NewRandomTaker(nextClient, takerGw, TakerConfig{
-		Symbols:      allSymbols,
-		TargetQtys:   targetQtys,
-		TakeInterval: 100 * time.Millisecond,
-		Seed:         42,
+		Symbols:           allSymbols,
+		TargetQtys:        targetQtys,
+		TakeInterval:      time.Duration(cfg.TakerIntervalMs) * time.Millisecond,
+		Seed:              cfg.Seed,
+		ImbalanceCoupling: cfg.TakerImbalanceCoupling,
+		ExciteAlpha:       cfg.TakerExciteAlpha,
+		ExciteBetaPerSec:  cfg.TakerExciteBetaPerSec,
 	})
 	taker.SetTickerFactory(timerFact)
 
@@ -314,15 +458,75 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	})
 	triArb.SetTickerFactory(timerFact)
 
+	// Optional latency-race arbs: same signal, tiered speed.
+	var raceArbs []*FeeAwareBasisArb
+	var raceMounts []*simulation.Mount
+	for _, tier := range cfg.RaceArbTiers {
+		tierLatency := simulation.LatencyConfig{
+			Request:    simulation.NewLogNormalLatency(scaleDur(latMin, tier), scaleDur(latMedian, tier), cfg.LatencySigma, cfg.Seed+10),
+			Response:   simulation.NewLogNormalLatency(scaleDur(latMin, tier), scaleDur(latMedian, tier), cfg.LatencySigma, cfg.Seed+11),
+			MarketData: simulation.NewLogNormalLatency(scaleDur(latMin, tier), scaleDur(latMedian, tier), cfg.LatencySigma, cfg.Seed+12),
+			Scheduler:  scheduler,
+			Clock:      simClock,
+		}
+		tierMount := simulation.NewMount(ex, tierLatency)
+		raceMounts = append(raceMounts, tierMount)
+		nextClient++
+		gw := tierMount.ConnectNewClient(nextClient, initBalances, spotMakerFee)
+		ex.AddPerpBalance(nextClient, "USD", 10_000_000*usdPrecision)
+		arb := NewFeeAwareBasisArb(nextClient, gw, BasisArbConfig{
+			SpotSymbol:    "ABC/USD",
+			PerpSymbol:    "ABC-PERP",
+			SpotFeeBps:    spotTakerBps,
+			PerpFeeBps:    perpTakerBps,
+			LotSize:       abcPrecision / 10,
+			MaxPosition:   5000,
+			CheckInterval: 100 * time.Millisecond,
+		})
+		arb.SetTickerFactory(timerFact)
+		raceArbs = append(raceArbs, arb)
+	}
+
+	// Optional value traders: fundamental anchor for the price level.
+	var valueTraders []*ValueTrader
+	if cfg.ValueTraderBandBps > 0 {
+		type valueSpec struct {
+			symbol      string
+			fundamental int64
+			lotQty      int64
+		}
+		valueSpecs := []valueSpec{
+			{"ABC/USD", abcBootstrapUSD, targetQtys["ABC/USD"]},
+			{"Q/USD", qBootstrapUSD, targetQtys["Q/USD"]},
+		}
+		for _, spec := range valueSpecs {
+			gw := connectActor(spotMakerFee, false)
+			vt := NewValueTrader(nextClient, gw, ValueTraderConfig{
+				Symbol:      spec.symbol,
+				Fundamental: spec.fundamental,
+				BandBps:     cfg.ValueTraderBandBps,
+				LotQty:      spec.lotQty,
+				MaxPosition: cfg.ValueTraderMaxLots * spec.lotQty,
+				Interval:    time.Duration(cfg.ValueTraderIntervalMs) * time.Millisecond,
+			})
+			vt.SetTickerFactory(timerFact)
+			valueTraders = append(valueTraders, vt)
+		}
+	}
+
 	// ---------- Runner ----------
 
 	const step = time.Millisecond
 	runner := simulation.NewRunner(simClock, simulation.RunnerConfig{
 		Iterations: int(simTime / step),
 		Step:       step,
+		StepSleep:  time.Duration(cfg.StepSleepUs) * time.Microsecond,
 	})
 	runner.AddMount(mmMount)
 	runner.AddMount(actorMount)
+	for _, m := range raceMounts {
+		runner.AddMount(m)
+	}
 	for _, mm := range mms {
 		runner.AddActor(mm)
 	}
@@ -334,15 +538,23 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		runner.AddActor(arb)
 	}
 	runner.AddActor(triArb)
+	for _, arb := range raceArbs {
+		runner.AddActor(arb)
+	}
+	for _, vt := range valueTraders {
+		runner.AddActor(vt)
+	}
 
 	return &Sim{
-		Runner:      runner,
-		MMs:         mms,
-		Taker:       taker,
-		BasisArbs:   basisArbs,
-		FundingArbs: fundingArbs,
-		TriArb:      triArb,
-		Loggers:     allLoggers,
-		ex:          ex,
+		Runner:       runner,
+		MMs:          mms,
+		Taker:        taker,
+		BasisArbs:    basisArbs,
+		FundingArbs:  fundingArbs,
+		TriArb:       triArb,
+		RaceArbs:     raceArbs,
+		ValueTraders: valueTraders,
+		Loggers:      allLoggers,
+		ex:           ex,
 	}, nil
 }

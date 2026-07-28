@@ -1,13 +1,17 @@
 package exchange_test
 
 import (
-	. "exchange_sim/exchange"
 	"bytes"
 	"encoding/json"
+	. "exchange_sim/exchange"
+	"sync"
 	"testing"
 )
 
+// bufLogger locks for the same reason as testLogger: exchange snapshot
+// goroutines can log after the test body has moved on to reading.
 type bufLogger struct {
+	mu     sync.Mutex
 	buf    *bytes.Buffer
 	events []map[string]any
 }
@@ -35,15 +39,24 @@ func (l *bufLogger) LogEvent(simTime int64, clientID uint64, eventName string, e
 		}
 	}
 
+	l.mu.Lock()
 	l.events = append(l.events, entry)
 	line, _ := json.Marshal(entry)
 	l.buf.Write(line)
 	l.buf.Write([]byte("\n"))
+	l.mu.Unlock()
+}
+
+// Events returns a stable snapshot of everything logged so far.
+func (l *bufLogger) Events() []map[string]any {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]map[string]any(nil), l.events...)
 }
 
 func (l *bufLogger) getEventsByType(eventType string) []map[string]any {
 	result := make([]map[string]any, 0)
-	for _, evt := range l.events {
+	for _, evt := range l.Events() {
 		if evt["event"].(string) == eventType {
 			result = append(result, evt)
 		}
@@ -404,20 +417,20 @@ func TestMultipleSymbolsLogging(t *testing.T) {
 	<-gw1.ResponseCh
 
 	// Expect 2 events per order: OrderAccepted + BookDelta
-	if len(btcLogger.events) != 2 {
-		t.Errorf("expected 2 BTC events (OrderAccepted + BookDelta), got %d", len(btcLogger.events))
+	if len(btcLogger.Events()) != 2 {
+		t.Errorf("expected 2 BTC events (OrderAccepted + BookDelta), got %d", len(btcLogger.Events()))
 	}
 
-	if len(ethLogger.events) != 2 {
-		t.Errorf("expected 2 ETH events (OrderAccepted + BookDelta), got %d", len(ethLogger.events))
+	if len(ethLogger.Events()) != 2 {
+		t.Errorf("expected 2 ETH events (OrderAccepted + BookDelta), got %d", len(ethLogger.Events()))
 	}
 
 	// Check OrderAccepted event has correct symbol
-	if btcLogger.events[0]["symbol"] != nil && btcLogger.events[0]["symbol"].(string) != "BTCUSD" {
+	if btcLogger.Events()[0]["symbol"] != nil && btcLogger.Events()[0]["symbol"].(string) != "BTCUSD" {
 		t.Error("BTC logger got wrong symbol")
 	}
 
-	if ethLogger.events[0]["symbol"] != nil && ethLogger.events[0]["symbol"].(string) != "ETHUSD" {
+	if ethLogger.Events()[0]["symbol"] != nil && ethLogger.Events()[0]["symbol"].(string) != "ETHUSD" {
 		t.Error("ETH logger got wrong symbol")
 	}
 }

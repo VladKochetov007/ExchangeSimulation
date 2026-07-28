@@ -109,7 +109,6 @@ func TestVisibleQtyWithHidden(t *testing.T) {
 func TestMDPublisherSubscribeUnsubscribe(t *testing.T) {
 	mdp := NewMDPublisher()
 	gateway := NewClientGateway(1)
-	
 
 	types := []MDType{MDSnapshot, MDDelta, MDTrade}
 	mdp.Subscribe(1, "BTC/USD", types, gateway)
@@ -139,7 +138,6 @@ func TestMDPublisherSubscribeUnsubscribe(t *testing.T) {
 func TestMDPublisherPublishDelta(t *testing.T) {
 	mdp := NewMDPublisher()
 	gateway := NewClientGateway(1)
-	
 
 	types := []MDType{MDDelta}
 	mdp.Subscribe(1, "BTC/USD", types, gateway)
@@ -166,7 +164,6 @@ func TestMDPublisherPublishDelta(t *testing.T) {
 func TestMDPublisherPublishFunding(t *testing.T) {
 	mdp := NewMDPublisher()
 	gateway := NewClientGateway(1)
-	
 
 	types := []MDType{MDFunding}
 	mdp.Subscribe(1, "BTC-PERP", types, gateway)

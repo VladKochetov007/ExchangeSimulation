@@ -73,6 +73,15 @@ func (p *MDPublisher) Unsubscribe(clientID uint64, symbol string) {
 			delete(p.Subscriptions, symbol)
 		}
 	}
+	// Drop the gateway reference once the client has no subscription left on
+	// any symbol; otherwise a subscribe/unsubscribe cycle leaks the gateway
+	// (and whatever it keeps alive) forever.
+	for _, subs := range p.Subscriptions {
+		if _, stillSubscribed := subs[clientID]; stillSubscribed {
+			return
+		}
+	}
+	delete(p.gateways, clientID)
 }
 
 func containsMDType(types []etypes.MDType, target etypes.MDType) bool {
@@ -114,7 +123,10 @@ func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, tim
 			select {
 			case gateway.MarketDataChan() <- msgCopy:
 			default:
-				// Gateway closed, silently drop
+				// Buffer full (or gateway closed): the message is dropped but its
+				// seqNum was already consumed, so a lagging subscriber sees a gap.
+				// Known limitation — consumers should treat a seq gap as a signal
+				// to re-request a snapshot.
 			}
 		}
 	}

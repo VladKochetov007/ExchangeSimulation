@@ -16,7 +16,7 @@ func (c *SimpleFundingCalc) Calculate(indexPrice, markPrice int64) int64 {
 		return 0
 	}
 	premium := ((markPrice - indexPrice) * 10000) / indexPrice
-	rate := c.BaseRate + (premium*c.Damping/100)
+	rate := c.BaseRate + (premium * c.Damping / 100)
 	if rate > c.MaxRate {
 		return c.MaxRate
 	}

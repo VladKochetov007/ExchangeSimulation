@@ -88,8 +88,8 @@ func TestVisibleQty_IcebergPartialFill(t *testing.T) {
 	order := &Order{
 		Visibility: Iceberg,
 		Qty:        BTCAmount(2.0),
-		FilledQty:  BTCAmount(1.8),  // only 0.2 remaining
-		IcebergQty: BTCAmount(0.5),  // iceberg qty is larger than remaining
+		FilledQty:  BTCAmount(1.8), // only 0.2 remaining
+		IcebergQty: BTCAmount(0.5), // iceberg qty is larger than remaining
 		Parent:     lim,
 	}
 	order.Next = nil

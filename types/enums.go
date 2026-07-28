@@ -112,6 +112,7 @@ const (
 	RejectOrderAlreadyFilled  RejectReason = "ORDER_ALREADY_FILLED"
 	RejectFOKNotFilled        RejectReason = "FOK_NOT_FILLED"
 	RejectUnknownRequest      RejectReason = "UNKNOWN_REQUEST"
+	RejectExceedsPosition     RejectReason = "EXCEEDS_POSITION"
 )
 
 // RequestType identifies a request sent through a Gateway.
@@ -122,17 +123,19 @@ const (
 	ReqCancelOrder  RequestType = "cancel_order"
 	ReqQueryBalance RequestType = "query_balance"
 	ReqQueryOrders  RequestType = "query_orders"
-	ReqQueryAccount RequestType = "query_account"
-	ReqSubscribe    RequestType = "subscribe"
-	ReqUnsubscribe  RequestType = "unsubscribe"
+	// ReqQueryInstruments returns descriptors for all listed instruments.
+	ReqQueryInstruments RequestType = "query_instruments"
+	ReqQueryAccount     RequestType = "query_account"
+	ReqSubscribe        RequestType = "subscribe"
+	ReqUnsubscribe      RequestType = "unsubscribe"
 )
 
 type PositionSide uint8
 
 const (
 	PositionBoth  PositionSide = iota // one-way mode (netting)
-	PositionLong                       // hedge mode long
-	PositionShort                      // hedge mode short
+	PositionLong                      // hedge mode long
+	PositionShort                     // hedge mode short
 )
 
 func (ps PositionSide) String() string {
@@ -152,6 +155,7 @@ const (
 	QueryBalance QueryType = iota
 	QueryOrders
 	QueryOrder
+	QueryInstruments
 )
 
 type MDType uint8
@@ -162,12 +166,15 @@ const (
 	MDTrade
 	MDFunding
 	MDOpenInterest
+	// MDInstrument carries instrument lifecycle announcements (listing,
+	// settlement) on the reserved feed symbol InstrumentFeedSymbol.
+	MDInstrument
 )
 
 type MarginMode uint8
 
 const (
-	CrossMargin    MarginMode = iota
+	CrossMargin MarginMode = iota
 	IsolatedMargin
 )
 

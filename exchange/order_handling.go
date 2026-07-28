@@ -88,10 +88,13 @@ func (e *DefaultExchange) CancelOrder(clientID uint64, req *CancelRequest) Respo
 	releaseReserved(client, book.Instrument, order)
 	if order.Side == Buy {
 		book.Bids.CancelOrder(req.OrderID)
-		e.publishBookUpdate(book, Buy, order.Price)
 	} else {
 		book.Asks.CancelOrder(req.OrderID)
-		e.publishBookUpdate(book, Sell, order.Price)
+	}
+	// Hidden orders emit no public deltas: their placement was dark, so their
+	// cancellation must be too.
+	if order.Visibility != Hidden {
+		e.publishBookUpdate(book, order.Side, order.Price)
 	}
 
 	client.RemoveOrder(req.OrderID)
@@ -172,6 +175,16 @@ func (e *DefaultExchange) QueryBalance(clientID uint64, req *QueryRequest) Respo
 func (e *DefaultExchange) Subscribe(clientID uint64, req *QueryRequest, gateway *ClientGateway) Response {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+
+	// The reference-data feed has no book: subscribe directly.
+	if req.Symbol == InstrumentFeedSymbol {
+		types := req.Types
+		if len(types) == 0 {
+			types = []MDType{MDInstrument}
+		}
+		e.MDPublisher.Subscribe(clientID, req.Symbol, types, gateway)
+		return Response{RequestID: req.RequestID, Success: true}
+	}
 
 	book := e.Books[req.Symbol]
 	if book == nil {
@@ -268,7 +281,50 @@ func (e *DefaultExchange) validatePlaceOrder(clientID uint64, req *OrderRequest)
 	if !book.Instrument.ValidateQty(req.Qty) {
 		return reject(RejectInvalidQty)
 	}
+	// Venues enforce a positive display size on icebergs; IcebergQty ≤ 0
+	// would silently degrade the order to fully-hidden semantics.
+	if req.Visibility == Iceberg && req.IcebergQty <= 0 {
+		return reject(RejectInvalidQty)
+	}
+	if reason := e.hedgeReduceViolation(clientID, book, req); reason != "" {
+		return reject(reason)
+	}
 	return nil
+}
+
+// hedgeReduceViolation rejects hedge-mode reducing orders when the new
+// quantity plus the client's already-resting reduce quantity would exceed the
+// position (venue reduce-only semantics). Counting resting reduces preserves
+// the invariant "resting reduce qty ≤ position size" through every fill, so
+// a reduce can never overshoot at execution time and vanish quantity while
+// the counterparty's fill stands.
+func (e *DefaultExchange) hedgeReduceViolation(clientID uint64, book *OrderBook, req *OrderRequest) RejectReason {
+	if req.PositionSide != PositionLong && req.PositionSide != PositionShort {
+		return ""
+	}
+	reducing := (req.PositionSide == PositionLong && req.Side == Sell) ||
+		(req.PositionSide == PositionShort && req.Side == Buy)
+	if !reducing {
+		return ""
+	}
+	var size int64
+	if pos := e.Positions.GetPositionBySide(clientID, req.Symbol, req.PositionSide); pos != nil {
+		size = abs(pos.Size)
+	}
+	resting := int64(0)
+	side := book.Asks
+	if req.Side == Buy {
+		side = book.Bids
+	}
+	for _, order := range side.Orders {
+		if order.ClientID == clientID && order.PositionSide == req.PositionSide {
+			resting += order.Qty - order.FilledQty
+		}
+	}
+	if req.Qty+resting > size {
+		return RejectExceedsPosition
+	}
+	return ""
 }
 
 func newOrderFromRequest(clientID, orderID uint64, req *OrderRequest, timestamp int64) *Order {
@@ -283,6 +339,9 @@ func newOrderFromRequest(clientID, orderID uint64, req *OrderRequest, timestamp 
 	order.Qty = req.Qty
 	order.Visibility = req.Visibility
 	order.IcebergQty = req.IcebergQty
+	if req.Visibility == Iceberg {
+		order.DisplayRemaining = min(req.IcebergQty, req.Qty)
+	}
 	order.Status = Open
 	order.Timestamp = timestamp
 	return order
@@ -308,16 +367,27 @@ func marketRefPrice(book *OrderBook) int64 {
 // understate the spend on a deep walk and allow overdrafts).
 func checkMarketOrderFunds(client *Client, book *OrderBook, order *Order, precision int64) bool {
 	instrument := book.Instrument
+	base, quote := instrument.BaseAsset(), instrument.QuoteAsset()
+	if om, ok := instrument.(OrderMarginer); ok {
+		refPrice := marketRefPrice(book)
+		required := om.MarginForMarketOrder(order.Side, order.Qty, refPrice, precision)
+		required += quoteFeeHeadroom(client.FeePlan, base, quote, order.Qty, refPrice, precision)
+		return required == 0 || client.PerpAvailable(quote) >= required
+	}
 	if m, ok := instrument.(Margined); ok {
 		refPrice := marketRefPrice(book)
 		required := m.MarginForMarket(order.Qty, refPrice, precision)
-		return required == 0 || client.PerpAvailable(instrument.QuoteAsset()) >= required
+		required += quoteFeeHeadroom(client.FeePlan, base, quote, order.Qty, refPrice, precision)
+		return required == 0 || client.PerpAvailable(quote) >= required
 	}
 	if order.Side == Buy {
 		cost := marketBuyCost(client.FeePlan, book, order, precision)
 		return client.GetAvailable(instrument.QuoteAsset()) >= cost
 	}
-	return client.GetAvailable(instrument.BaseAsset()) >= order.Qty
+	// Sell must cover base-denominated fee headroom too, or the fee debit
+	// drives the base balance negative.
+	needed := spotOrderReservation(client.FeePlan, instrument, Sell, order.Qty, marketRefPrice(book), precision)
+	return client.GetAvailable(instrument.BaseAsset()) >= needed
 }
 
 // marketBuyCost walks the ask book and sums the quote spend (plus quote fees)
@@ -345,12 +415,27 @@ func marketBuyCost(feePlan FeeModel, book *OrderBook, order *Order, precision in
 }
 
 func (e *DefaultExchange) reserveLimitOrderFunds(client *Client, instrument Instrument, order *Order, precision int64) bool {
-	if m, ok := instrument.(Margined); ok {
-		margin := m.MarginRequired(order.Qty, order.Price, precision)
-		if !e.tryReserveOrBorrow(order.ClientID, instrument.QuoteAsset(), margin, client.ReservePerp, true) {
+	base, quote := instrument.BaseAsset(), instrument.QuoteAsset()
+	if om, ok := instrument.(OrderMarginer); ok {
+		// Reserve margin AND the worst-case fee: the fee is debited from the same
+		// quote wallet at settlement, so an order funded to the last cent of
+		// margin would go insolvent the instant it fills. Reserving both here
+		// lets the exchange reject the order up front instead.
+		margin := om.MarginForOrder(order.Side, order.Qty, order.Price, precision)
+		total := margin + quoteFeeHeadroom(client.FeePlan, base, quote, order.Qty, order.Price, precision)
+		if !e.tryReserveOrBorrow(order.ClientID, quote, total, client.ReservePerp, true) {
 			return false
 		}
-		order.Reserved = margin
+		order.Reserved = total
+		return true
+	}
+	if m, ok := instrument.(Margined); ok {
+		margin := m.MarginRequired(order.Qty, order.Price, precision)
+		total := margin + quoteFeeHeadroom(client.FeePlan, base, quote, order.Qty, order.Price, precision)
+		if !e.tryReserveOrBorrow(order.ClientID, quote, total, client.ReservePerp, true) {
+			return false
+		}
+		order.Reserved = total
 		return true
 	}
 	asset := reserveAsset(instrument, order.Side)
@@ -360,6 +445,76 @@ func (e *DefaultExchange) reserveLimitOrderFunds(client *Client, instrument Inst
 	}
 	order.Reserved = amount
 	return true
+}
+
+// checkForeignFeeFunds reports whether the client can cover the worst-case
+// (taker) fee when it is denominated in an asset the reservation does not
+// back. Quote fees are covered by the reservation's fee headroom; spot base
+// fees net against the base leg the client receives. Everything else is
+// unbacked — a third asset (a BNB fee on BTC/USD), or a base fee on a margined
+// instrument, whose fill exchanges no base leg at all — and must be
+// pre-checked here.
+//
+// This is a placement-time affordability check, not a lock: a client resting
+// several orders could in principle over-commit the same foreign balance. That
+// narrow case is left to the liquidation/settlement invariants; the common
+// single-order path (and any taker) is fully covered.
+func checkForeignFeeFunds(client *Client, book *OrderBook, order *Order, precision int64) bool {
+	if client.FeePlan == nil || order.Qty <= 0 {
+		return true
+	}
+	instrument := book.Instrument
+	base, quote := instrument.BaseAsset(), instrument.QuoteAsset()
+	price := order.Price
+	if order.Type == Market {
+		price = marketRefPrice(book)
+	}
+	probe := Execution{Price: price, Qty: order.Qty}
+	fee := client.FeePlan.CalculateFee(FillContext{
+		Exec:       &probe,
+		IsMaker:    false,
+		BaseAsset:  base,
+		QuoteAsset: quote,
+		Precision:  precision,
+	})
+	if fee.Amount <= 0 || fee.Asset == "" || fee.Asset == quote {
+		return true
+	}
+	_, isMargined := instrument.(Margined)
+	_, isOrderMargined := instrument.(OrderMarginer)
+	if isMargined || isOrderMargined {
+		// A margined fill exchanges no base leg: a base-denominated fee is just
+		// as unbacked as any third asset, so it gets the same pre-check.
+		return client.PerpAvailable(fee.Asset) >= fee.Amount
+	}
+	if fee.Asset == base {
+		return true
+	}
+	return client.GetAvailable(fee.Asset) >= fee.Amount
+}
+
+// quoteFeeHeadroom returns the worst-case (taker) fee, in the quote asset, that
+// a margined or premium order of qty at price would owe at settlement. Perp and
+// option fees are debited from the quote (perp) wallet, so reserving this
+// alongside margin is what lets the exchange reject an order the account cannot
+// fully afford instead of debiting the fee past a zero balance after the fill.
+// A fee in any other asset is caught separately by checkForeignFeeFunds.
+func quoteFeeHeadroom(feePlan FeeModel, base, quote string, qty, price, precision int64) int64 {
+	if feePlan == nil || qty <= 0 || price <= 0 {
+		return 0
+	}
+	probe := Execution{Price: price, Qty: qty}
+	fee := feePlan.CalculateFee(FillContext{
+		Exec:       &probe,
+		IsMaker:    false,
+		BaseAsset:  base,
+		QuoteAsset: quote,
+		Precision:  precision,
+	})
+	if fee.Asset != quote || fee.Amount <= 0 {
+		return 0
+	}
+	return fee.Amount
 }
 
 func reserveAsset(instrument Instrument, side Side) string {
@@ -429,6 +584,14 @@ func canFillFully(book *OrderBook, order *Order) bool {
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) reserveOrderFunds(client *Client, book *OrderBook, order *Order, requestID uint64, log Logger) *Response {
 	precision := book.Instrument.BasePrecision()
+	// A fee charged in a foreign asset (neither base nor quote) has nothing
+	// backing it: the reservation covers only the trade legs, and settlement
+	// would drive the foreign balance negative. Reject up front, before locking
+	// any funds, when the client cannot cover the worst-case fee.
+	if !checkForeignFeeFunds(client, book, order, precision) {
+		resp := e.rejectOrder(order, requestID, order.ClientID, RejectInsufficientBalance, log)
+		return &resp
+	}
 	var ok bool
 	switch order.Type {
 	case Market:
@@ -489,17 +652,67 @@ func (e *DefaultExchange) publishLevels(book *OrderBook, levels map[int64]Side) 
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) restOrReleaseOrder(client *Client, book *OrderBook, order *Order, req *OrderRequest) {
 	if order.Status != Filled && req.Type == LimitOrder && req.TimeInForce == GTC {
+		e.cancelOwnCrossingQuotes(client, book, order)
 		if order.Side == Buy {
 			book.Bids.AddOrder(order)
-			e.publishBookUpdate(book, Buy, order.Price)
+			if order.Visibility != Hidden {
+				e.publishBookUpdate(book, Buy, order.Price)
+			}
 		} else {
 			book.Asks.AddOrder(order)
-			e.publishBookUpdate(book, Sell, order.Price)
+			if order.Visibility != Hidden {
+				e.publishBookUpdate(book, Sell, order.Price)
+			}
 		}
 		client.AddOrder(order.ID)
 	} else {
 		releaseReserved(client, book.Instrument, order)
 		putOrder(order)
+	}
+}
+
+// cancelOwnCrossingQuotes implements self-trade prevention with cancel-maker
+// semantics: the matcher consumed every crossable order from OTHER clients,
+// so any price still crossing the remainder belongs to this client. Resting
+// it as-is would display a crossed/locked book; cancelling the stale opposite
+// quote (the venue "cancel maker" STP mode) keeps the book valid while
+// letting the client flip direction through their own level.
+// Caller must hold e.mu.Lock().
+func (e *DefaultExchange) cancelOwnCrossingQuotes(client *Client, book *OrderBook, order *Order) {
+	opposite := book.Asks
+	if order.Side == Sell {
+		opposite = book.Bids
+	}
+	var targets []*Order
+	for _, o := range opposite.Orders {
+		// Parent == nil means fully filled and awaiting settlement cleanup.
+		if o.ClientID != client.ID || o.Parent == nil {
+			continue
+		}
+		if order.Side == Buy && o.Price > order.Price {
+			continue
+		}
+		if order.Side == Sell && o.Price < order.Price {
+			continue
+		}
+		targets = append(targets, o)
+	}
+	gw := e.Gateways[client.ID]
+	for _, o := range targets {
+		remainingQty := o.Qty - o.FilledQty
+		orderID := o.ID
+		visibility := o.Visibility
+		side, price := o.Side, o.Price
+		releaseReserved(client, book.Instrument, o)
+		opposite.CancelOrder(orderID)
+		if visibility != Hidden {
+			e.publishBookUpdate(book, side, price)
+		}
+		client.RemoveOrder(orderID)
+		putOrder(o)
+		if gw != nil && gw.IsRunning() {
+			sendResponse(gw, Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}})
+		}
 	}
 }
 
@@ -530,7 +743,9 @@ func releaseReserved(client *Client, instrument Instrument, order *Order) {
 	if order.Reserved <= 0 {
 		return
 	}
-	if _, ok := instrument.(Margined); ok {
+	_, margined := instrument.(Margined)
+	_, orderMargined := instrument.(OrderMarginer)
+	if margined || orderMargined {
 		client.ReleasePerp(instrument.QuoteAsset(), order.Reserved)
 	} else {
 		client.Release(reserveAsset(instrument, order.Side), order.Reserved)

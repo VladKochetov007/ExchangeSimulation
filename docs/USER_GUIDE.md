@@ -1006,6 +1006,7 @@ mm.Subscribe("BTC/USD", exchange.MDSnapshot, exchange.MDDelta, exchange.MDTrade)
 | `MDTrade` | `EventTrade` | Executed trade (price, qty, taker side) |
 | `MDFunding` | `EventFundingUpdate` | Funding rate, next settlement time |
 | `MDOpenInterest` | `EventOpenInterest` | Total open interest |
+| `MDInstrument` | `EventInstrument` | Instrument listed/settled announcement |
 
 ### Handling Market Data in Actor
 
@@ -1026,6 +1027,107 @@ func (a *MyActor) HandleEvent(_ context.Context, evt *actor.Event) {
     }
 }
 ```
+
+### Instrument Lifecycle Feed (Derivatives)
+
+Dated futures and options are listed on a schedule and disappear at expiry,
+so actors discover them dynamically instead of hard-coding symbols. Subscribe
+once to the reserved feed symbol `exchange.InstrumentFeedSymbol`
+(`"_instruments"`):
+
+```go
+a.Subscribe(exchange.InstrumentFeedSymbol, exchange.MDInstrument)
+
+func (a *MyActor) HandleEvent(_ context.Context, evt *actor.Event) {
+    switch evt.Type {
+    case actor.EventInstrument:
+        e := evt.Data.(actor.InstrumentEvent)
+        ann := e.Announcement
+        // ann.Action: "listed" | "settled"
+        // ann.InstrumentType: "FUTURE" | "OPTION" | ...
+        // ann.Underlying, ann.Strike, ann.IsCall, ann.ExpiryNano
+        // on "settled": ann.SettlementPrice
+    }
+}
+```
+
+Late joiners recover the current board with `ReqQueryInstruments` (response
+`Data` is `[]*types.InstrumentAnnouncement`).
+
+---
+
+## 11b. Derivatives: Dated Futures and European Options
+
+Markets are just instrument types behind the same order API. Two derivative
+instruments ship with the library; both settle in the quote asset through the
+perp wallet.
+
+**`ExpiringFutures`** shares the perpetual margin model (initial margin,
+margin calls, liquidation) but pays no funding and cash-settles every open
+position at expiry against a TWAP of the underlying book mid (default 60s
+window, `SetObservationWindow` to change):
+
+```go
+fut := exchange.NewExpiringFutures("ABC-FUT-1700000600", "ABC", "USD",
+    BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1, expiryNano)
+fut.Underlying = "ABC/USD"   // settlement price source
+fut.DeliveryFeeBps = 5       // charged on settlement notional
+ex.AddInstrument(fut)
+```
+
+**`EuropeanOption`** quotes premium per base unit. Buyers pay the full
+premium (no further margin); sellers post Deribit-style initial margin
+`max(IMBase − OTM%, IMFloor) × underlying + mark premium` (defaults 15%/10%,
+`OptionMarginParams` to change). The mark premium is Black-76 on the
+underlying mid with the instrument's flat `IV`. At expiry each position
+auto-exercises: intrinsic value moves in cash, short margin is released.
+
+```go
+opt := exchange.NewEuropeanOption("ABC-1700000600-50000-C", "ABC", "USD",
+    "ABC/USD", BTC_PRECISION, USD_PRECISION, USD_PRECISION, 1,
+    strike, expiryNano, true /* call */)
+opt.IV = 0.8
+ex.AddInstrument(opt)
+```
+
+**Scheduled listing** — give the exchange listing policies and it maintains
+the board automatically (poll → list → announce → expire → settle → relist):
+
+```go
+ex.ConfigureAutomation(exchange.AutomationConfig{
+    IndexProvider: oracle,
+    ListingPolicies: []exchange.ListingPolicy{
+        &exchange.DatedFuturesLister{
+            Underlying: "ABC/USD", Spec: spec,
+            TenorsNano: []int64{int64(10 * time.Minute)},
+        },
+        &exchange.OptionChainLister{
+            Underlying: "ABC/USD", Spec: optSpec,
+            TenorsNano:     []int64{int64(10 * time.Minute)},
+            StrikeStep:     exchange.PriceUSD(1000, DOLLAR_TICK),
+            StrikesPerSide: 3, IV: 0.8,
+        },
+    },
+})
+```
+
+Custom listing calendars implement `types.ListingPolicy` (one method); custom
+derivatives implement `Expirable` (+ `OrderMarginer` for side-aware margin,
+`Settleable` for custom cash flows) — no library changes needed.
+
+**Option fees**: `fee.OptionFee` charges bps of *underlying* notional capped
+at a fraction of premium (the cap binds for cheap options, as on real
+venues).
+
+Edge cases handled by the engine: resting orders on an expiring book are
+force-cancelled with exact reservation releases (actors receive
+`ForcedCancelNotification`), settlement uses the observation TWAP rather
+than the (possibly empty) derivative book, and expired symbols reject new
+orders because the book is delisted.
+
+Not yet modeled: mark-to-market liquidation of short option positions between
+trade and expiry (initial margin is locked, but a deep adverse move only
+surfaces at settlement) and smile/term-structure IV (marks use flat vol).
 
 ---
 

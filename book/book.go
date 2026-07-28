@@ -78,6 +78,7 @@ func ResetOrder(order *etypes.Order) {
 	order.ID = 0
 	order.ClientID = 0
 	order.Side = etypes.Buy
+	order.PositionSide = etypes.PositionBoth
 	order.Type = etypes.Market
 	order.TimeInForce = etypes.GTC
 	order.Price = 0
@@ -85,6 +86,7 @@ func ResetOrder(order *etypes.Order) {
 	order.FilledQty = 0
 	order.Visibility = etypes.Normal
 	order.IcebergQty = 0
+	order.DisplayRemaining = 0
 	order.Status = etypes.Open
 	order.Timestamp = 0
 	order.Reserved = 0
@@ -98,7 +100,9 @@ func IsEmpty(limit *etypes.Limit) bool {
 	return limit.OrderCnt == 0
 }
 
-// VisibleQty returns the total visible quantity at a limit level.
+// VisibleQty returns the total visible quantity at a limit level. For
+// icebergs the live display tranche (DisplayRemaining) is authoritative;
+// orders injected without one fall back to min(remaining, IcebergQty).
 func VisibleQty(limit *etypes.Limit) int64 {
 	var qty int64
 	for o := limit.Head; o != nil; o = o.Next {
@@ -106,10 +110,14 @@ func VisibleQty(limit *etypes.Limit) int64 {
 		if o.Visibility == etypes.Normal {
 			qty += remaining
 		} else if o.Visibility == etypes.Iceberg {
-			if remaining < o.IcebergQty {
+			display := o.DisplayRemaining
+			if display == 0 {
+				display = o.IcebergQty
+			}
+			if remaining < display {
 				qty += remaining
 			} else {
-				qty += o.IcebergQty
+				qty += display
 			}
 		}
 	}

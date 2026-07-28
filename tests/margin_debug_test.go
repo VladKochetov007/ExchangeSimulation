@@ -64,7 +64,7 @@ func TestMarginReleaseDebug(t *testing.T) {
 	t.Logf("After close trade")
 	t.Logf("Client 1 PerpReserved: %d (%.2f USD) - SHOULD BE 0", ex.Clients[1].PerpReserved["USD"], float64(ex.Clients[1].PerpReserved["USD"])/float64(USD_PRECISION))
 	t.Logf("Client 1 Position: %+v", ex.Positions.GetAllPositions(1))
-	
+
 	if ex.Clients[1].PerpReserved["USD"] != 0 {
 		t.Errorf("Expected PerpReserved = 0, got %d", ex.Clients[1].PerpReserved["USD"])
 	}

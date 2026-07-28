@@ -1,12 +1,16 @@
 package exchange_test
 
 import (
-	. "exchange_sim/exchange"
 	"encoding/json"
+	. "exchange_sim/exchange"
+	"sync"
 	"testing"
 )
 
+// testLogger is written by exchange goroutines (snapshot loops keep running
+// after a test body returns) and read by test goroutines, so it must lock.
 type testLogger struct {
+	mu     sync.Mutex
 	events []map[string]any
 }
 
@@ -24,7 +28,16 @@ func (t *testLogger) LogEvent(simTime int64, clientID uint64, eventName string, 
 			entry[k] = v
 		}
 	}
+	t.mu.Lock()
 	t.events = append(t.events, entry)
+	t.mu.Unlock()
+}
+
+// Events returns a stable snapshot of everything logged so far.
+func (t *testLogger) Events() []map[string]any {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]map[string]any(nil), t.events...)
 }
 
 func TestExchangeLogging(t *testing.T) {
@@ -68,14 +81,14 @@ func TestExchangeLogging(t *testing.T) {
 	<-gw1.ResponseCh
 
 	// Verify OrderAccepted and BookDelta were logged
-	if len(logger.events) != 2 {
-		t.Fatalf("expected 2 events (OrderAccepted + BookDelta), got %d", len(logger.events))
+	if len(logger.Events()) != 2 {
+		t.Fatalf("expected 2 events (OrderAccepted + BookDelta), got %d", len(logger.Events()))
 	}
-	if logger.events[0]["event"] != "OrderAccepted" {
-		t.Errorf("expected OrderAccepted event, got %v", logger.events[0]["event"])
+	if logger.Events()[0]["event"] != "OrderAccepted" {
+		t.Errorf("expected OrderAccepted event, got %v", logger.Events()[0]["event"])
 	}
 	// Note: OrderAccepted logs the order object, not request details
-	if logger.events[0]["order_id"] == nil {
+	if logger.Events()[0]["order_id"] == nil {
 		t.Errorf("expected order_id in OrderAccepted event")
 	}
 
@@ -98,13 +111,13 @@ func TestExchangeLogging(t *testing.T) {
 	<-gw2.ResponseCh
 
 	// Should have: OrderAccepted (buy), OrderAccepted (sell), Trade, OrderFill (maker), OrderFill (taker)
-	if len(logger.events) < 4 {
-		t.Fatalf("expected at least 4 events, got %d", len(logger.events))
+	if len(logger.Events()) < 4 {
+		t.Fatalf("expected at least 4 events, got %d", len(logger.Events()))
 	}
 
 	// Find Trade event
 	var tradeEvent map[string]any
-	for _, evt := range logger.events {
+	for _, evt := range logger.Events() {
 		if evt["event"] == "Trade" {
 			tradeEvent = evt
 			break
@@ -124,7 +137,7 @@ func TestExchangeLogging(t *testing.T) {
 
 	// Find OrderFill events
 	fillCount := 0
-	for _, evt := range logger.events {
+	for _, evt := range logger.Events() {
 		if evt["event"] == "OrderFill" {
 			fillCount++
 			if evt["role"] == nil {
@@ -174,16 +187,16 @@ func TestExchangeLoggingRejection(t *testing.T) {
 	gw1.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: buyReq}
 	<-gw1.ResponseCh
 
-	if len(logger.events) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(logger.events))
+	if len(logger.Events()) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(logger.Events()))
 	}
 
-	if logger.events[0]["event"] != "OrderRejected" {
-		t.Errorf("expected OrderRejected event, got %v", logger.events[0]["event"])
+	if logger.Events()[0]["event"] != "OrderRejected" {
+		t.Errorf("expected OrderRejected event, got %v", logger.Events()[0]["event"])
 	}
 
-	if logger.events[0]["error"] != "INSUFFICIENT_BALANCE" {
-		t.Errorf("expected INSUFFICIENT_BALANCE error, got %v", logger.events[0]["error"])
+	if logger.Events()[0]["error"] != "INSUFFICIENT_BALANCE" {
+		t.Errorf("expected INSUFFICIENT_BALANCE error, got %v", logger.Events()[0]["error"])
 	}
 }
 
@@ -234,15 +247,15 @@ func TestExchangeLoggingCancel(t *testing.T) {
 	<-gw1.ResponseCh
 
 	// Should have: OrderAccepted, BookDelta (post), BookDelta (cancel), OrderCancelled
-	if len(logger.events) != 4 {
-		t.Fatalf("expected 4 events (OrderAccepted + BookDelta + BookDelta + OrderCancelled), got %d", len(logger.events))
+	if len(logger.Events()) != 4 {
+		t.Fatalf("expected 4 events (OrderAccepted + BookDelta + BookDelta + OrderCancelled), got %d", len(logger.Events()))
 	}
 
-	if logger.events[3]["event"] != "OrderCancelled" {
-		t.Errorf("expected OrderCancelled event, got %v", logger.events[3]["event"])
+	if logger.Events()[3]["event"] != "OrderCancelled" {
+		t.Errorf("expected OrderCancelled event, got %v", logger.Events()[3]["event"])
 	}
 
-	if logger.events[3]["order_id"] != float64(orderID) {
-		t.Errorf("expected order_id=%d, got %v", orderID, logger.events[3]["order_id"])
+	if logger.Events()[3]["order_id"] != float64(orderID) {
+		t.Errorf("expected order_id=%d, got %v", orderID, logger.Events()[3]["order_id"])
 	}
 }

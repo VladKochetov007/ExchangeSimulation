@@ -142,6 +142,49 @@ type Margined interface {
 	MarginOnCancel(remainingQty, orderPrice, precision int64) int64
 }
 
+// OrderMarginer is implemented by instruments whose order reservation depends
+// on the order side (e.g. options: buyers pay the premium in full, sellers
+// post a margin formula). Reservations are taken from the perp wallet in the
+// quote asset. Checked before Margined.
+type OrderMarginer interface {
+	MarginForOrder(side Side, qty, price, precision int64) int64
+	MarginForMarketOrder(side Side, qty, refPrice, precision int64) int64
+}
+
+// Expirable is implemented by instruments with a finite life (dated futures,
+// options). The exchange's automation observes settlement inputs while the
+// instrument trades and cash-settles all positions at expiry.
+type Expirable interface {
+	// ExpiryNano is the expiry timestamp in unix nanoseconds.
+	ExpiryNano() int64
+	// ObserveSettlement records an underlying index/mark sample used to build
+	// the settlement price (venues use a TWAP window before expiry).
+	ObserveSettlement(price, tsNano int64)
+	// SettlementPrice returns the final settlement price once expired.
+	SettlementPrice() int64
+	// ExpiryCashFlow returns the signed quote-asset cash delta credited to a
+	// position of size (signed, base units) entered at entryPrice when the
+	// instrument settles at settlementPrice.
+	ExpiryCashFlow(size, entryPrice, settlementPrice, basePrecision int64) int64
+	// DeliveryFee returns the quote-asset fee charged per position at expiry
+	// (0 for none). size is signed; fee must be non-negative.
+	DeliveryFee(size, settlementPrice, basePrecision int64) int64
+}
+
+// UnderlyingRef is implemented by derivatives that reference another listed
+// symbol (used by the exchange to source settlement observations and marks).
+type UnderlyingRef interface {
+	UnderlyingSymbol() string
+}
+
+// ListingPolicy generates new instruments on a schedule (an exchange listing
+// calendar: dated futures tenors, option chains around spot). The exchange
+// polls policies from its automation loop and lists whatever is returned.
+// Implementations must self-deduplicate (return each instrument once).
+type ListingPolicy interface {
+	PendingListings(nowNano int64, prices PriceSource) []Instrument
+}
+
 // SettlementContext carries all state an instrument needs to settle one execution.
 // Account mutation callbacks are closures that capture the exchange's internal client map,
 // so the instrument never needs to import the exchange package.
