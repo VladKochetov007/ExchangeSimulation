@@ -149,3 +149,85 @@ func TestRegressionClearanceFeeOnPartialLiquidationBillsFilledQty(t *testing.T) 
 		t.Fatalf("insurance fund = %d, want fee on filled qty %d", got, wantFee)
 	}
 }
+
+// An account whose ONLY exposure is a short option must still be liquidated:
+// option books never enter the perp mark loop (marginCore is nil), so without
+// the PositionMarginer sweep a pure short-vol account was unliquidatable no
+// matter how far underwater — the exact hole the gen-4 wiring claimed to
+// close but only closed for accounts that also held a perp position.
+func TestRegressionPureOptionsAccountGetsLiquidated(t *testing.T) {
+	ex := NewExchange(3, &RealClock{})
+	expiry := time.Now().Add(24 * time.Hour).UnixNano()
+	opt := NewEuropeanOption("BTC-1-48000-C", "BTC", "USD", "BTC/USD",
+		BTC_PRECISION, USD_PRECISION, USD_PRECISION, 1, PriceUSD(48_000, DOLLAR_TICK), expiry, true)
+	ex.AddInstrument(opt)
+	handler := &fundEventRecorder{}
+	ex.LiquidationHandler = handler
+
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{}) // short-vol, NO perp position
+	ex.ConnectNewClient(2, map[string]int64{}, &FixedFee{}) // option liquidity
+	ex.AddPerpBalance(1, "USD", USDAmount(5_000))
+	ex.AddPerpBalance(2, "USD", USDAmount(500_000))
+
+	pm := ex.Positions.(*PositionManager)
+	pm.Lock()
+	pm.InjectPosition(1, "BTC-1-48000-C", &Position{
+		ClientID: 1, Symbol: "BTC-1-48000-C", PositionSide: PositionBoth,
+		Size: -BTCAmount(1), EntryPrice: USDAmount(3_000),
+	})
+	pm.Unlock()
+
+	// Underlying rallied: maintenance = 7.5% x $50k + $3k premium = $6,750
+	// against $5,000 equity. Resting ask supplies the forced buy-back.
+	opt.SetMarks(USDAmount(50_000), USDAmount(3_000))
+	if _, reject := InjectLimitOrder(ex, 2, "BTC-1-48000-C", Sell, USDAmount(3_000), BTCAmount(1)); reject != "" {
+		t.Fatalf("liquidity ask rejected: %s", reject)
+	}
+
+	ex.CheckPositionMarginerLiquidations()
+
+	if handler.liquidations == 0 {
+		t.Fatal("pure-options short-vol account was never liquidated: option books invisible to the risk sweep")
+	}
+	pos := ex.Positions.GetPosition(1, "BTC-1-48000-C")
+	if pos != nil && pos.Size != 0 {
+		t.Fatalf("short option position not closed: size %d", pos.Size)
+	}
+}
+
+// Before the first mark tick an option has no marks; a short's maintenance
+// must floor at the buy-back cost at the marked-or-entry premium instead of
+// reporting zero exposure during the window.
+func TestRegressionUnmarkedShortOptionStillCarriesMaintenance(t *testing.T) {
+	ex := NewExchange(3, &RealClock{})
+	expiry := time.Now().Add(24 * time.Hour).UnixNano()
+	opt := NewEuropeanOption("BTC-1-48000-C", "BTC", "USD", "BTC/USD",
+		BTC_PRECISION, USD_PRECISION, USD_PRECISION, 1, PriceUSD(48_000, DOLLAR_TICK), expiry, true)
+	ex.AddInstrument(opt)
+	handler := &fundEventRecorder{}
+	ex.LiquidationHandler = handler
+
+	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{}, &FixedFee{})
+	ex.AddPerpBalance(1, "USD", USDAmount(2_000)) // below the $3k entry-premium floor
+	ex.AddPerpBalance(2, "USD", USDAmount(500_000))
+
+	pm := ex.Positions.(*PositionManager)
+	pm.Lock()
+	pm.InjectPosition(1, "BTC-1-48000-C", &Position{
+		ClientID: 1, Symbol: "BTC-1-48000-C", PositionSide: PositionBoth,
+		Size: -BTCAmount(1), EntryPrice: USDAmount(3_000),
+	})
+	pm.Unlock()
+
+	// NO SetMarks: the instrument has no underlying mark yet.
+	if _, reject := InjectLimitOrder(ex, 2, "BTC-1-48000-C", Sell, USDAmount(3_000), BTCAmount(1)); reject != "" {
+		t.Fatalf("liquidity ask rejected: %s", reject)
+	}
+
+	ex.CheckPositionMarginerLiquidations()
+
+	if handler.liquidations == 0 {
+		t.Fatal("unmarked short option reported zero maintenance: $2,000 equity vs $3,000 buy-back floor did not liquidate")
+	}
+}

@@ -59,6 +59,10 @@ func (e *DefaultExchange) expiryLoop() {
 		case <-ticker.C():
 			e.CheckListings()
 			e.UpdateDerivativeMarks()
+			// After marks refresh: option books never enter the perp mark
+			// loop, so this sweep is the only liquidation path for accounts
+			// whose exposure is options-only.
+			e.CheckPositionMarginerLiquidations()
 			e.CheckExpiries()
 		}
 	}

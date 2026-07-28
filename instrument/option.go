@@ -39,10 +39,25 @@ type EuropeanOption struct {
 	DeliveryFeeBps    int64
 	DeliveryFeeCapBps int64
 
-	expiryNano     int64
-	observer       settlementObserver
-	underlyingMark atomic.Int64
-	markPremium    atomic.Int64
+	expiryNano int64
+	observer   settlementObserver
+	// marks holds the underlying mark and premium as ONE atomic pair: two
+	// independent atomics could pair a new premium with an old underlying
+	// mid-update, producing a logically torn margin evaluation.
+	marks atomic.Pointer[optionMarks]
+}
+
+type optionMarks struct {
+	underlying int64
+	premium    int64
+}
+
+// loadMarks returns the current mark pair (zeros before the first SetMarks).
+func (o *EuropeanOption) loadMarks() optionMarks {
+	if m := o.marks.Load(); m != nil {
+		return *m
+	}
+	return optionMarks{}
 }
 
 func NewEuropeanOption(symbol, base, quote, underlying string, basePrecision, quotePrecision, tickSize, minOrderSize, strike, expiryNano int64, isCall bool) *EuropeanOption {
@@ -82,17 +97,16 @@ func (o *EuropeanOption) SetObservationWindow(windowNano int64) {
 // SetMarks caches the underlying mark and the option mark premium (both
 // updated by the exchange price loop) for the seller margin formula.
 func (o *EuropeanOption) SetMarks(underlyingMark, markPremium int64) {
-	o.underlyingMark.Store(underlyingMark)
-	o.markPremium.Store(markPremium)
+	o.marks.Store(&optionMarks{underlying: underlyingMark, premium: markPremium})
 }
 
-func (o *EuropeanOption) MarkPremium() int64 { return o.markPremium.Load() }
+func (o *EuropeanOption) MarkPremium() int64 { return o.loadMarks().premium }
 
 // --- PositionMarginer ---
 
 // PositionMark marks open positions at the current premium mark for
 // cross-margin mark-to-market.
-func (o *EuropeanOption) PositionMark() int64 { return o.markPremium.Load() }
+func (o *EuropeanOption) PositionMark() int64 { return o.loadMarks().premium }
 
 // MaintenanceForPosition returns the quote maintenance requirement for a
 // signed option position. Longs owe nothing (premium was fully paid at
@@ -104,8 +118,9 @@ func (o *EuropeanOption) MaintenanceForPosition(size, precision int64) int64 {
 		return 0
 	}
 	short := -size
-	mm := etypes.MulDiv(short, o.underlyingMark.Load(), precision) * o.Margin.MMBps / 10000
-	return mm + etypes.MulDiv(short, o.markPremium.Load(), precision)
+	m := o.loadMarks()
+	mm := etypes.MulDiv(short, m.underlying, precision) * o.Margin.MMBps / 10000
+	return mm + etypes.MulDiv(short, m.premium, precision)
 }
 
 // --- Expirable ---
@@ -118,7 +133,7 @@ func (o *EuropeanOption) ObserveSettlement(price, tsNano int64) {
 }
 
 func (o *EuropeanOption) SettlementPrice() int64 {
-	return o.observer.settlementPrice(o.underlyingMark.Load())
+	return o.observer.settlementPrice(o.loadMarks().underlying)
 }
 
 // intrinsicValue is the exercise value per base unit at the given underlying
@@ -169,8 +184,8 @@ var _ etypes.Expirable = (*EuropeanOption)(nil)
 // Before the first mark update (no underlying price cached) it falls back to
 // 2× the order premium, which over-margins rather than under-margins.
 func (o *EuropeanOption) sellerIMPerUnit(refPremium int64) int64 {
-	s := o.underlyingMark.Load()
-	mark := o.markPremium.Load()
+	pair := o.loadMarks()
+	s, mark := pair.underlying, pair.premium
 	if mark == 0 {
 		mark = refPremium
 	}
