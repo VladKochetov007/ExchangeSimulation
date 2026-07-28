@@ -1,9 +1,11 @@
 package exchange
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -373,6 +375,10 @@ func (e *DefaultExchange) CancelAllClientOrders(clientID uint64) int {
 		}
 	}
 
+	// Placement order via monotonic IDs: map iteration over books and orders
+	// would randomize the cancel/notification sequence run to run.
+	slices.SortFunc(targets, func(a, b cancelTarget) int { return cmp.Compare(a.order.ID, b.order.ID) })
+
 	gw := e.Gateways[clientID]
 	count := 0
 	for _, t := range targets {
@@ -398,7 +404,7 @@ func (e *DefaultExchange) CancelAllClientOrders(clientID uint64) int {
 
 		// Same contract as liquidation cancels: the actor must learn its
 		// order is gone or its pending state blocks forever.
-		sendResponse(gw, Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}})
+		gw.enqueueResponse(Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}})
 	}
 	return count
 }
@@ -574,8 +580,10 @@ func (e *DefaultExchange) HandleClientRequests(gateway *ClientGateway) {
 		}
 
 		// At-least-once delivery: a dropped accept/reject leaves the actor's
-		// in-flight order state desynchronized forever.
-		sendResponse(gateway, resp)
+		// in-flight order state desynchronized forever. Routed through the
+		// outbox so it shares one FIFO with the fills/cancels the request
+		// generated — a direct send here could overtake them.
+		gateway.enqueueResponse(resp)
 	}
 }
 

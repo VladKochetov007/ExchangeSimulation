@@ -70,6 +70,6 @@ func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBo
 		// At-least-once, same as fills: a dropped forced cancel leaves the
 		// actor with a ghost pending order that blocks its quoting loop
 		// forever (randomwalk postmortem bug 3).
-		sendResponse(gw, Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}})
+		gw.enqueueResponse(Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}})
 	}
 }

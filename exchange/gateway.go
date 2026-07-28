@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -17,6 +18,17 @@ type ClientGateway struct {
 	ResponseCh chan Response
 	MarketData chan *MarketDataMsg
 	running    atomic.Bool
+
+	// outbox decouples response delivery from the engine: sendResponse can
+	// block indefinitely on a slow consumer, and blocking inside the exchange
+	// write lock stalls every book and client (the LMAX rule: no external
+	// calls inside the business logic). enqueueResponse appends here and a
+	// single lazy deliverer goroutine drains in FIFO order, so per-gateway
+	// ordering (accept before its fills' successors, cancels in sequence) is
+	// exactly the enqueue order.
+	outMu      sync.Mutex
+	outbox     []Response
+	delivering bool
 }
 
 func NewClientGateway(clientID uint64) *ClientGateway {
@@ -57,6 +69,42 @@ func (g *ClientGateway) Send(req Request) {
 	select {
 	case g.RequestCh <- req:
 	default:
+	}
+}
+
+// enqueueResponse queues resp for asynchronous FIFO delivery, spawning the
+// deliverer if none is active. Safe to call while holding the exchange lock —
+// it never blocks on the consumer. Nil-safe like sendResponse.
+func (g *ClientGateway) enqueueResponse(resp Response) {
+	if g == nil {
+		return
+	}
+	g.outMu.Lock()
+	g.outbox = append(g.outbox, resp)
+	spawn := !g.delivering
+	if spawn {
+		g.delivering = true
+	}
+	g.outMu.Unlock()
+	if spawn {
+		go g.deliverOutbox()
+	}
+}
+
+func (g *ClientGateway) deliverOutbox() {
+	for {
+		g.outMu.Lock()
+		if len(g.outbox) == 0 {
+			g.delivering = false
+			g.outMu.Unlock()
+			return
+		}
+		batch := g.outbox
+		g.outbox = nil
+		g.outMu.Unlock()
+		for _, resp := range batch {
+			sendResponse(g, resp)
+		}
 	}
 }
 

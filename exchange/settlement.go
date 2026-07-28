@@ -342,7 +342,9 @@ func sendFillNotification(
 	exec *Execution, side Side, posSide PositionSide, fee Fee, isFull bool,
 	symbol string, delta PositionDelta, realizedPnL int64,
 ) {
-	sendResponse(gw, Response{
+	// Enqueued, not sent: fills are generated while the exchange lock is held,
+	// and a blocking send there stalls the whole engine on one slow consumer.
+	gw.enqueueResponse(Response{
 		Success: true,
 		Data: &FillNotification{
 			OrderID:       orderID,

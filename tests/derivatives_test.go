@@ -128,13 +128,14 @@ func TestDatedFuturesLifecycle(t *testing.T) {
 			t.Fatalf("client %d position not closed: %+v", id, pos)
 		}
 	}
-	// Forced cancel notification for the resting order.
+	// Forced cancel notification for the resting order. Delivery is
+	// asynchronous (gateway outbox), so wait rather than poll.
 	select {
 	case resp := <-gw1.ResponseCh:
 		if _, ok := resp.Data.(*ForcedCancelNotification); !ok {
 			t.Fatalf("expected forced cancel, got %#v", resp.Data)
 		}
-	default:
+	case <-time.After(2 * time.Second):
 		t.Fatal("no forced-cancel notification for resting order at expiry")
 	}
 }

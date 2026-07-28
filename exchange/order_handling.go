@@ -1,5 +1,10 @@
 package exchange
 
+import (
+	"cmp"
+	"slices"
+)
+
 func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Response {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -643,8 +648,16 @@ func (e *DefaultExchange) removeMakerOrders(book *OrderBook, executions []*Execu
 }
 
 func (e *DefaultExchange) publishLevels(book *OrderBook, levels map[int64]Side) {
-	for price, side := range levels {
-		e.publishBookUpdate(book, side, price)
+	// Sorted so the delta stream is deterministic: ranging the map directly
+	// would randomize the publish order of a multi-level sweep run to run,
+	// making fuzz failures irreproducible from their seed.
+	prices := make([]int64, 0, len(levels))
+	for price := range levels {
+		prices = append(prices, price)
+	}
+	slices.Sort(prices)
+	for _, price := range prices {
+		e.publishBookUpdate(book, levels[price], price)
 	}
 }
 
@@ -697,6 +710,9 @@ func (e *DefaultExchange) cancelOwnCrossingQuotes(client *Client, book *OrderBoo
 		}
 		targets = append(targets, o)
 	}
+	// Order IDs allocate monotonically, so this cancels in placement order —
+	// and deterministically, unlike the map iteration that collected targets.
+	slices.SortFunc(targets, func(a, b *Order) int { return cmp.Compare(a.ID, b.ID) })
 	gw := e.Gateways[client.ID]
 	for _, o := range targets {
 		remainingQty := o.Qty - o.FilledQty
@@ -711,7 +727,7 @@ func (e *DefaultExchange) cancelOwnCrossingQuotes(client *Client, book *OrderBoo
 		client.RemoveOrder(orderID)
 		putOrder(o)
 		if gw != nil && gw.IsRunning() {
-			sendResponse(gw, Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}})
+			gw.enqueueResponse(Response{Success: true, Data: &ForcedCancelNotification{OrderID: orderID, RemainingQty: remainingQty}})
 		}
 	}
 }
