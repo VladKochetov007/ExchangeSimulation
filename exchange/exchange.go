@@ -89,6 +89,7 @@ type DefaultExchange struct {
 	autoAnchorMarks         bool
 	markEMAWindow           int
 	markBandBps             int64
+	autoAnchoredSymbols     map[string]bool
 	LiquidationHandler      LiquidationHandler
 	tickerFactory           TickerFactory
 	markPriceCalc           MarkPriceCalculator
@@ -887,6 +888,9 @@ func (e *DefaultExchange) ensureAnchoredMarkCalcs() {
 	if band == 0 {
 		band = 600
 	}
+	if e.autoAnchoredSymbols == nil {
+		e.autoAnchoredSymbols = make(map[string]bool)
+	}
 	for symbol, book := range e.Books {
 		if marginCore(book.Instrument) == nil || e.markPriceCalcs[symbol] != nil {
 			continue
@@ -895,6 +899,7 @@ func (e *DefaultExchange) ensureAnchoredMarkCalcs() {
 			continue
 		}
 		e.markPriceCalcs[symbol] = NewClampedEMAMarkPrice(symbol, e.indexSourceLocked(), window, band)
+		e.autoAnchoredSymbols[symbol] = true
 	}
 }
 
@@ -948,6 +953,13 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		})
 	}
 	e.mu.RUnlock()
+
+	// Symbol order, not map order: buildAccountMarginProfile prices
+	// non-trigger symbols from their last STORED mark, so whether a
+	// cross-margined sibling sees this tick's fresh mark or the previous
+	// tick's stale one depends on processing order — and with it, whether a
+	// borderline liquidation fires. Same seed, same state, every run.
+	slices.SortFunc(candidates, func(a, b bookData) int { return cmp.Compare(a.symbol, b.symbol) })
 
 	type perpUpdate struct {
 		symbol     string
@@ -1054,8 +1066,23 @@ func (e *DefaultExchange) ChargeCollateralInterest() {
 	const secondsPerYear = 365 * 24 * 3600
 	timestamp := e.Clock.NowUnixNano()
 
-	for _, client := range e.Clients {
-		for asset, borrowed := range client.Borrowed {
+	// Client-ID and asset order: the debits are independent, but the emitted
+	// balance/interest event stream must be identical run to run.
+	clientIDs := make([]uint64, 0, len(e.Clients))
+	for clientID := range e.Clients {
+		clientIDs = append(clientIDs, clientID)
+	}
+	slices.Sort(clientIDs)
+
+	for _, clientID := range clientIDs {
+		client := e.Clients[clientID]
+		assets := make([]string, 0, len(client.Borrowed))
+		for asset := range client.Borrowed {
+			assets = append(assets, asset)
+		}
+		slices.Sort(assets)
+		for _, asset := range assets {
+			borrowed := client.Borrowed[asset]
 			if borrowed <= 0 {
 				continue
 			}
@@ -1162,6 +1189,64 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 	return p
 }
 
+// CheckPositionMarginerLiquidations sweeps accounts holding positions on
+// PositionMarginer instruments (options). These books never enter the perp
+// mark loop — marginCore is nil — so an account with option exposure but NO
+// perp position would otherwise never be evaluated for liquidation at all:
+// a pure short-vol account could sink arbitrarily far underwater untouched.
+// Runs on the derivative mark cadence, after marks refresh.
+func (e *DefaultExchange) CheckPositionMarginerLiquidations() {
+	timestamp := e.Clock.NowUnixNano()
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Deterministic sweep order: symbols, then client IDs.
+	symbols := make([]string, 0)
+	for symbol, book := range e.Books {
+		if _, ok := book.Instrument.(PositionMarginer); ok {
+			symbols = append(symbols, symbol)
+		}
+	}
+	slices.Sort(symbols)
+
+	clientIDs := make([]uint64, 0, len(e.Clients))
+	for clientID := range e.Clients {
+		clientIDs = append(clientIDs, clientID)
+	}
+	slices.Sort(clientIDs)
+
+	for _, symbol := range symbols {
+		book := e.Books[symbol]
+		inst := book.Instrument
+		quote := inst.QuoteAsset()
+		for _, clientID := range clientIDs {
+			client := e.Clients[clientID]
+			var positions []*Position
+			for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
+				pos := e.Positions.GetPositionBySide(clientID, symbol, side)
+				if pos == nil || pos.Size == 0 {
+					continue
+				}
+				positions = append(positions, pos)
+			}
+			if len(positions) == 0 {
+				continue
+			}
+
+			// No trigger symbol: every book contributes its stored mark.
+			profile := e.buildAccountMarginProfile(clientID, quote, "", 0)
+			equity := client.PerpBalance(quote) - client.BorrowedPerpPortion(quote) + profile.UnrealizedPnL
+			if equity >= profile.Maintenance {
+				continue
+			}
+			for _, pos := range positions {
+				e.liquidate(clientID, client, symbol, pos, inst, timestamp)
+			}
+		}
+	}
+}
+
 // addPositionMarginerExposure folds a PositionMarginer instrument's open
 // positions into the cross-margin profile: marked at the instrument's own
 // mark, maintenance per its own formula. Warning reuses maintenance — these
@@ -1181,6 +1266,13 @@ func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, c
 		p.UnrealizedPnL += positionUPnL(pos, m, precision)
 		p.Notional += MulDiv(abs(pos.Size), m, precision)
 		maintenance := pm.MaintenanceForPosition(pos.Size, precision)
+		// A short with zero maintenance means the instrument has no marks yet
+		// (the underlying hasn't printed): the exposure is unknown, not zero.
+		// Floor at the buy-back cost at the marked (or entry) premium so the
+		// window before the first mark tick cannot hide a short position.
+		if maintenance == 0 && pos.Size < 0 {
+			maintenance = MulDiv(-pos.Size, m, precision)
+		}
 		p.Maintenance += maintenance
 		p.Warning += maintenance
 	}
@@ -1202,7 +1294,17 @@ func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, ma
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	for clientID, client := range e.Clients {
+	// Client-ID order, not map order: when book liquidity covers only one of
+	// two simultaneous breaches, map iteration would pick the survivor
+	// randomly per run — the same seed must produce the same final state.
+	clientIDs := make([]uint64, 0, len(e.Clients))
+	for clientID := range e.Clients {
+		clientIDs = append(clientIDs, clientID)
+	}
+	slices.Sort(clientIDs)
+
+	for _, clientID := range clientIDs {
+		client := e.Clients[clientID]
 		var positions []*Position
 		for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
 			pos := e.Positions.GetPositionBySide(clientID, symbol, side)
@@ -1281,7 +1383,7 @@ func (e *DefaultExchange) EstimateLiquidationPrice(pos *Position, clientID uint6
 
 // liquidate forcibly closes a position via market order when maintenance margin is breached.
 // Caller must hold e.mu.Lock().
-func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol string, pos *Position, perp *PerpFutures, timestamp int64) {
+func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol string, pos *Position, inst Instrument, timestamp int64) {
 	book := e.Books[symbol]
 	if book == nil {
 		return
@@ -1291,39 +1393,42 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 	if pos.Size < 0 {
 		closeSide = Buy
 	}
-	fillPrice := e.forceClose(clientID, client, book, book.Instrument, closeSide, pos.PositionSide, abs(pos.Size), timestamp)
+	fillPrice, filledQty := e.forceClose(clientID, client, book, book.Instrument, closeSide, pos.PositionSide, abs(pos.Size), timestamp)
 	if fillPrice == 0 {
 		// No liquidity in the book; position stays open for retry on next mark price update.
 		return
 	}
 
-	e.chargeClearanceFee(clientID, client, symbol, perp, abs(pos.Size), fillPrice, timestamp)
+	// Fee on the quantity that actually closed: a thin book can absorb only
+	// part of the position, and billing the full attempted size would
+	// overcharge every partial liquidation.
+	e.chargeClearanceFee(clientID, client, symbol, inst, filledQty, fillPrice, timestamp)
 
 	if e.BorrowingMgr != nil {
-		borrowed := client.Borrowed[perp.QuoteAsset()]
+		borrowed := client.Borrowed[inst.QuoteAsset()]
 		if borrowed > 0 {
-			availableForRepay := client.PerpAvailable(perp.QuoteAsset())
+			availableForRepay := client.PerpAvailable(inst.QuoteAsset())
 			if availableForRepay > 0 {
 				repayAmount := min(borrowed, availableForRepay)
 
-				oldBorrowed := client.Borrowed[perp.QuoteAsset()]
-				oldPerp := client.PerpBalances[perp.QuoteAsset()]
-				client.Borrowed[perp.QuoteAsset()] -= repayAmount
-				client.PerpBalances[perp.QuoteAsset()] -= repayAmount
+				oldBorrowed := client.Borrowed[inst.QuoteAsset()]
+				oldPerp := client.PerpBalances[inst.QuoteAsset()]
+				client.Borrowed[inst.QuoteAsset()] -= repayAmount
+				client.PerpBalances[inst.QuoteAsset()] -= repayAmount
 
 				logBalanceChange(e, timestamp, clientID, symbol, "liquidation_repay", []BalanceDelta{
-					perpDelta(perp.QuoteAsset(), oldPerp, client.PerpBalances[perp.QuoteAsset()]),
-					borrowedDelta(perp.QuoteAsset(), oldBorrowed, client.Borrowed[perp.QuoteAsset()]),
+					perpDelta(inst.QuoteAsset(), oldPerp, client.PerpBalances[inst.QuoteAsset()]),
+					borrowedDelta(inst.QuoteAsset(), oldBorrowed, client.Borrowed[inst.QuoteAsset()]),
 				})
 
 				if log := e.getLogger("_global"); log != nil {
 					log.LogEvent(timestamp, clientID, "repay", RepayEvent{
 						Timestamp:     timestamp,
 						ClientID:      clientID,
-						Asset:         perp.QuoteAsset(),
+						Asset:         inst.QuoteAsset(),
 						Principal:     repayAmount,
 						Interest:      0,
-						RemainingDebt: client.Borrowed[perp.QuoteAsset()],
+						RemainingDebt: client.Borrowed[inst.QuoteAsset()],
 					})
 				}
 			}
@@ -1334,7 +1439,7 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 	// margin was released by cancelClientOrdersOnBook. Remaining reservations
 	// back the client's orders and positions on OTHER symbols — never zero them.
 	// Bankruptcy is a negative cash balance after the close.
-	quote := perp.QuoteAsset()
+	quote := inst.QuoteAsset()
 	balance := client.PerpBalances[quote]
 	debt := int64(0)
 	if balance < 0 {
@@ -1373,12 +1478,12 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 // fund grow in calm regimes and absorb deficits in cascades. Clamped to the
 // account's available balance: the fee must not create fresh debt or invade
 // reservations backing other books. Caller must hold e.mu.Lock().
-func (e *DefaultExchange) chargeClearanceFee(clientID uint64, client *Client, symbol string, perp *PerpFutures, closedSize, fillPrice, timestamp int64) {
+func (e *DefaultExchange) chargeClearanceFee(clientID uint64, client *Client, symbol string, inst Instrument, closedSize, fillPrice, timestamp int64) {
 	if e.LiquidationFeeBps <= 0 {
 		return
 	}
-	quote := perp.QuoteAsset()
-	fee := MulDiv(closedSize, fillPrice, perp.BasePrecision()) * e.LiquidationFeeBps / 10000
+	quote := inst.QuoteAsset()
+	fee := MulDiv(closedSize, fillPrice, inst.BasePrecision()) * e.LiquidationFeeBps / 10000
 	if available := client.PerpAvailable(quote); fee > available {
 		fee = available
 	}
@@ -1417,6 +1522,9 @@ func (e *DefaultExchange) CheckAndSettleFunding() {
 		}
 	}
 	e.mu.RUnlock()
+
+	// Deterministic settlement (and funding-event) order across runs.
+	slices.SortFunc(perps, func(a, b *PerpFutures) int { return cmp.Compare(a.Symbol(), b.Symbol()) })
 
 	now := e.Clock.NowUnixNano()
 

@@ -9,9 +9,12 @@ type ForcedCancelNotification struct {
 }
 
 // forceClose cancels all open orders for clientID on the given book, then executes
-// a market order to close qty on the given side. Returns the fill price (0 if no fill).
+// a market order to close qty on the given side. Returns the last fill price
+// (0 if no fill) and the quantity actually closed — a thin book can absorb
+// only part of the position, and downstream accounting (clearance fee) must
+// bill what executed, not what was attempted.
 // Caller must hold e.mu.Lock().
-func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *OrderBook, instrument Instrument, side Side, posSide PositionSide, qty, timestamp int64) (fillPrice int64) {
+func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *OrderBook, instrument Instrument, side Side, posSide PositionSide, qty, timestamp int64) (fillPrice, filledQty int64) {
 	e.cancelClientOrdersOnBook(client, book, instrument)
 
 	// Same allocation pattern as PlaceOrder (increment, then use): taking the
@@ -32,12 +35,13 @@ func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *Orde
 	if len(result.Executions) > 0 {
 		fillPrice = result.Executions[len(result.Executions)-1].Price
 	}
+	filledQty = order.FilledQty
 	levels := collectAffectedLevels(book, result.Executions)
 	e.processExecutions(book, result.Executions, order)
 	e.removeMakerOrders(book, result.Executions)
 	e.publishLevels(book, levels)
 	putOrder(order)
-	return fillPrice
+	return fillPrice, filledQty
 }
 
 // cancelClientOrdersOnBook cancels all open orders for client on the given book,

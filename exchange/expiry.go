@@ -59,6 +59,10 @@ func (e *DefaultExchange) expiryLoop() {
 		case <-ticker.C():
 			e.CheckListings()
 			e.UpdateDerivativeMarks()
+			// After marks refresh: option books never enter the perp mark
+			// loop, so this sweep is the only liquidation path for accounts
+			// whose exposure is options-only.
+			e.CheckPositionMarginerLiquidations()
 			e.CheckExpiries()
 		}
 	}
@@ -261,6 +265,15 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 
 	delete(e.Books, symbol)
 	delete(e.Instruments, symbol)
+	// The AUTO-anchored mark calculator dies with the instrument: the map is
+	// keyed by symbol, and a relisting under the same symbol must seed a
+	// FRESH basis EMA — inheriting the dead contract's seeded state marks
+	// the new book off a basis it never had. User-injected calculators stay:
+	// dropping explicit configuration on lifecycle events is not ours to do.
+	if e.autoAnchoredSymbols[symbol] {
+		delete(e.markPriceCalcs, symbol)
+		delete(e.autoAnchoredSymbols, symbol)
+	}
 	e.mu.Unlock()
 
 	ann := describeInstrument(inst, "settled", now)
