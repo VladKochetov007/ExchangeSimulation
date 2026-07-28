@@ -21,6 +21,13 @@ func (f priceSourceFunc) Price(symbol string) int64 { return f(symbol) }
 func (e *DefaultExchange) bookMidPrice(symbol string) int64 {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	return e.bookMidPriceLocked(symbol)
+}
+
+// bookMidPriceLocked is bookMidPrice for callers already holding e.mu (either
+// mode) — RWMutex read locks must not nest, a queued writer between them
+// deadlocks.
+func (e *DefaultExchange) bookMidPriceLocked(symbol string) int64 {
 	book := e.Books[symbol]
 	if book == nil {
 		return 0

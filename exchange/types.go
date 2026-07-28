@@ -211,6 +211,8 @@ var NewMidPriceCalculator = eprice.NewMidPriceCalculator
 var NewStaticPriceOracle = eprice.NewStaticPriceOracle
 var NewMidPriceOracle = eprice.NewMidPriceOracle
 var NewLastPriceCalculator = eprice.NewLastPriceCalculator
+var NewEMAMarkPrice = eprice.NewEMAMarkPrice
+var NewClampedEMAMarkPrice = eprice.NewClampedEMAMarkPrice
 var NewWeightedMidPriceCalculator = eprice.NewWeightedMidPriceCalculator
 
 var NewBook = ebook.NewBook
