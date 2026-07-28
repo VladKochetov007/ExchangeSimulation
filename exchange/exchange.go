@@ -323,6 +323,13 @@ func (e *DefaultExchange) AddInstrument(instrument Instrument) {
 	defer e.mu.Unlock()
 
 	symbol := instrument.Symbol()
+	// Re-registering an existing symbol must not swap in a fresh empty book:
+	// that strands every resting order — and the balance it has reserved — in
+	// the old book, where no cancel or match can ever reach it again. Keep the
+	// live book; listing a symbol is a one-time operation.
+	if _, exists := e.Books[symbol]; exists {
+		return
+	}
 	e.Instruments[symbol] = instrument
 	e.Books[symbol] = &OrderBook{
 		Symbol:     symbol,
@@ -460,6 +467,13 @@ func (e *DefaultExchange) AddPerpBalance(clientID uint64, asset string, amount i
 func (e *DefaultExchange) Transfer(clientID uint64, fromWallet, toWallet, asset string, amount int64) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	// A negative amount would reverse the transfer direction while the
+	// availability check still guards the declared source wallet — letting
+	// reserved margin be siphoned out of the undeclared one unchecked.
+	if amount <= 0 {
+		return &TransferError{"transfer amount must be positive"}
+	}
 
 	client := e.Clients[clientID]
 	if client == nil {
@@ -933,13 +947,29 @@ func (e *DefaultExchange) ChargeCollateralInterest() {
 			}
 			interest := borrowed * e.CollateralRate * dtSeconds / (int64(secondsPerYear) * 10000)
 			if interest > 0 {
-				oldBalance := client.PerpBalances[asset]
-				client.PerpBalances[asset] -= interest
+				// Charge each wallet its attributed share of the debt: billing a
+				// spot-credited loan's interest to the perp wallet drives a
+				// spot-only borrower's empty perp balance negative every sweep.
+				spotShare := int64(0)
+				if spotPortion := client.BorrowedSpotPortion(asset); spotPortion > 0 {
+					spotShare = interest * spotPortion / borrowed
+				}
+				perpShare := interest - spotShare
+
+				changes := make([]BalanceDelta, 0, 2)
+				if perpShare > 0 {
+					oldPerp := client.PerpBalances[asset]
+					client.PerpBalances[asset] -= perpShare
+					changes = append(changes, perpDelta(asset, oldPerp, client.PerpBalances[asset]))
+				}
+				if spotShare > 0 {
+					oldSpot := client.Balances[asset]
+					client.Balances[asset] -= spotShare
+					changes = append(changes, spotDelta(asset, oldSpot, client.Balances[asset]))
+				}
 				e.ExchangeBalance.FeeRevenue[asset] += interest
 
-				logBalanceChange(e, timestamp, client.ID, "", "interest_charge", []BalanceDelta{
-					perpDelta(asset, oldBalance, client.PerpBalances[asset]),
-				})
+				logBalanceChange(e, timestamp, client.ID, "", "interest_charge", changes)
 
 				if log := e.getLogger("_global"); log != nil {
 					log.LogEvent(timestamp, client.ID, "margin_interest", MarginInterestEvent{
@@ -1010,10 +1040,10 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 }
 
 // CheckLiquidations evaluates all positions for a symbol after a mark price update.
-// Cross-margin account model: equity = perp balance + unrealized PnL across
-// EVERY margined book in the same quote asset (order margin is locked, not
-// lost); the maintenance requirement likewise sums over all books, so the same
-// cash can never back two symbols at once. On breach the triggering symbol's
+// Cross-margin account model: equity = perp balance − borrowed quote debt +
+// unrealized PnL across EVERY margined book in the same quote asset (order
+// margin is locked, not lost); the maintenance requirement likewise sums over
+// all books, so the same cash can never back two symbols at once. On breach the triggering symbol's
 // positions are closed; other symbols resolve on their own mark updates.
 // Hedge-mode Long/Short positions are included.
 func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, markPrice int64) {
@@ -1040,7 +1070,12 @@ func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, ma
 
 		profile := e.buildAccountMarginProfile(clientID, quote, symbol, markPrice)
 		unrealizedPnL, notional := profile.UnrealizedPnL, profile.Notional
-		equity := client.PerpBalance(quote) + unrealizedPnL
+		// Borrowed quote is cash in the wallet but a matching liability: counting
+		// it as equity would let a loan mask an undercollateralized account and
+		// dodge liquidation. Net only the perp-attributed share — a spot-credited
+		// loan's cash never entered this wallet, so charging it here would
+		// liquidate a solvent account.
+		equity := client.PerpBalance(quote) - client.BorrowedPerpPortion(quote) + unrealizedPnL
 		maintenanceMargin := profile.Maintenance
 		warningMargin := profile.Warning
 
@@ -1088,7 +1123,9 @@ func (e *DefaultExchange) EstimateLiquidationPrice(pos *Position, clientID uint6
 	if client == nil || pos.Size == 0 {
 		return 0
 	}
-	balance := client.PerpBalance(perp.QuoteAsset())
+	// Net perp-attributed debt out of the collateral: the loan is a liability,
+	// so the price at which equity hits zero is reached sooner, not later.
+	balance := client.PerpBalance(perp.QuoteAsset()) - client.BorrowedPerpPortion(perp.QuoteAsset())
 	if pos.Size > 0 {
 		return pos.EntryPrice - MulDiv(balance, precision, pos.Size)
 	}
@@ -1186,8 +1223,11 @@ func (e *DefaultExchange) CheckAndSettleFunding() {
 	e.mu.RLock()
 	perps := make([]*PerpFutures, 0, len(e.Instruments))
 	for _, inst := range e.Instruments {
-		if inst.IsPerp() {
-			perps = append(perps, inst.(*PerpFutures))
+		// Comma-ok, not a bare assertion: a custom Instrument may report IsPerp()
+		// via an embedded *PerpFutures yet have a different concrete type, and a
+		// bare inst.(*PerpFutures) would panic the whole funding sweep on it.
+		if p, ok := inst.(*PerpFutures); ok {
+			perps = append(perps, p)
 		}
 	}
 	e.mu.RUnlock()

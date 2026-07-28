@@ -98,8 +98,12 @@ func (c *MedianMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 type EMAMarkPrice struct {
 	alpha    int64 // 2/(N+1) * 10000, fixed-point
 	emaBasis int64
-	index    etypes.PriceSource
-	symbol   string
+	// seeded distinguishes "no sample yet" from a basis that legitimately
+	// decayed to zero: reusing 0 as the sentinel would re-seed the EMA from one
+	// raw print, discarding all smoothing in a single step.
+	seeded bool
+	index  etypes.PriceSource
+	symbol string
 }
 
 func NewEMAMarkPrice(symbol string, index etypes.PriceSource, windowSamples int) *EMAMarkPrice {
@@ -107,10 +111,20 @@ func NewEMAMarkPrice(symbol string, index etypes.PriceSource, windowSamples int)
 		windowSamples = 1
 	}
 	return &EMAMarkPrice{
-		alpha:  20000 / int64(windowSamples+1),
+		alpha:  emaAlpha(windowSamples),
 		index:  index,
 		symbol: symbol,
 	}
+}
+
+// emaAlpha returns 2/(N+1) in fixed-point (×10000), floored at 1 so a very
+// large window cannot round the coefficient to zero and freeze the EMA at its
+// seed value forever.
+func emaAlpha(windowSamples int) int64 {
+	if a := 20000 / int64(windowSamples+1); a >= 1 {
+		return a
+	}
+	return 1
 }
 
 func (c *EMAMarkPrice) Calculate(book *ebook.OrderBook) int64 {
@@ -125,8 +139,9 @@ func (c *EMAMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 	}
 
 	basis := perpMid - indexPrice
-	if c.emaBasis == 0 {
+	if !c.seeded {
 		c.emaBasis = basis
+		c.seeded = true
 	} else {
 		c.emaBasis = (c.alpha*basis + (10000-c.alpha)*c.emaBasis) / 10000
 	}
@@ -139,6 +154,7 @@ func (c *EMAMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 type ClampedEMAMarkPrice struct {
 	alpha    int64
 	emaBasis int64
+	seeded   bool
 	bandBps  int64 // half-band = bandBps/2 * index / 10000
 	index    etypes.PriceSource
 	symbol   string
@@ -149,7 +165,7 @@ func NewClampedEMAMarkPrice(symbol string, index etypes.PriceSource, windowSampl
 		windowSamples = 1
 	}
 	return &ClampedEMAMarkPrice{
-		alpha:   20000 / int64(windowSamples+1),
+		alpha:   emaAlpha(windowSamples),
 		bandBps: bandBps,
 		index:   index,
 		symbol:  symbol,
@@ -168,8 +184,9 @@ func (c *ClampedEMAMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 	}
 
 	basis := perpMid - indexPrice
-	if c.emaBasis == 0 {
+	if !c.seeded {
 		c.emaBasis = basis
+		c.seeded = true
 	} else {
 		c.emaBasis = (c.alpha*basis + (10000-c.alpha)*c.emaBasis) / 10000
 	}

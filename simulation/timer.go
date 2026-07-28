@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"sync"
 	"time"
 
 	"exchange_sim/exchange"
@@ -18,6 +19,11 @@ func NewSimTimerFactory(scheduler *EventScheduler) *SimTimerFactory {
 
 // NewTicker implements exchange.TickerFactory
 func (f *SimTimerFactory) NewTicker(d time.Duration) exchange.Ticker {
+	// Mirror time.NewTicker: a non-positive interval is a programming error,
+	// and letting it through would hang ProcessUntil in an infinite loop.
+	if d <= 0 {
+		panic("simulation: non-positive interval for NewTicker")
+	}
 	t := &simTimer{
 		scheduler: f.scheduler,
 		interval:  d.Nanoseconds(),
@@ -31,26 +37,40 @@ type simTimer struct {
 	scheduler *EventScheduler
 	interval  int64
 	ch        chan time.Time
+	mu        sync.Mutex
 	eventID   uint64
 	stopped   bool
 }
 
 func (t *simTimer) C() <-chan time.Time { return t.ch }
 
+// Stop cancels the underlying scheduler event. Like time.Ticker.Stop it does
+// NOT close the channel: the tick callback may be mid-fire on another
+// goroutine, and a send on a closed channel panics the scheduler.
 func (t *simTimer) Stop() {
-	if !t.stopped && t.eventID != 0 {
-		t.scheduler.Cancel(t.eventID)
-		t.eventID = 0
-		t.stopped = true
-		close(t.ch)
+	t.mu.Lock()
+	if t.stopped {
+		t.mu.Unlock()
+		return
+	}
+	t.stopped = true
+	id := t.eventID
+	t.eventID = 0
+	t.mu.Unlock()
+
+	if id != 0 {
+		t.scheduler.Cancel(id)
 	}
 }
 
 func (t *simTimer) start() {
 	t.eventID = t.scheduler.ScheduleRepeating(t.interval, func() {
+		t.mu.Lock()
 		if t.stopped {
+			t.mu.Unlock()
 			return
 		}
+		t.mu.Unlock()
 		// Non-blocking send - if channel full, skip this tick
 		select {
 		case t.ch <- time.Unix(0, t.scheduler.clock.NowUnixNano()):

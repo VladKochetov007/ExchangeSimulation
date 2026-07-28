@@ -5,12 +5,17 @@ package exchange
 // Users cannot cause negative reserved balances through legitimate trading;
 // any such occurrence indicates an exchange-side accounting bug.
 type Client struct {
-	ID                uint64
-	Balances          map[string]int64
-	Reserved          map[string]int64
-	PerpBalances      map[string]int64
-	PerpReserved      map[string]int64
-	Borrowed          map[string]int64
+	ID           uint64
+	Balances     map[string]int64
+	Reserved     map[string]int64
+	PerpBalances map[string]int64
+	PerpReserved map[string]int64
+	Borrowed     map[string]int64
+	// BorrowedSpot is the portion of Borrowed whose cash was credited to the
+	// spot wallet (auto-borrow for a spot order). The split decides which wallet
+	// a liability is netted against: perp equity, liquidation estimates, and
+	// snapshots must not charge a spot-credited loan to the perp wallet.
+	BorrowedSpot      map[string]int64
 	OrderIDs          []uint64
 	FeePlan           FeeModel
 	MarginMode        MarginMode
@@ -25,6 +30,7 @@ func NewClient(id uint64, feePlan FeeModel) *Client {
 		PerpBalances:      make(map[string]int64, 4),
 		PerpReserved:      make(map[string]int64, 4),
 		Borrowed:          make(map[string]int64, 4),
+		BorrowedSpot:      make(map[string]int64, 4),
 		OrderIDs:          make([]uint64, 0, 16),
 		FeePlan:           feePlan,
 		MarginMode:        CrossMargin,
@@ -72,6 +78,21 @@ func (c *Client) PerpAvailable(asset string) int64 {
 	return c.PerpBalances[asset] - c.PerpReserved[asset]
 }
 
+// BorrowedPerpPortion returns the share of the asset's debt whose cash was
+// credited to the perp wallet; BorrowedSpotPortion the share credited to spot.
+// Clamped so the two never sum past the outstanding total even after partial
+// repayments shrank Borrowed below the recorded spot attribution.
+func (c *Client) BorrowedPerpPortion(asset string) int64 {
+	if d := c.Borrowed[asset] - c.BorrowedSpot[asset]; d > 0 {
+		return d
+	}
+	return 0
+}
+
+func (c *Client) BorrowedSpotPortion(asset string) int64 {
+	return min(c.BorrowedSpot[asset], c.Borrowed[asset])
+}
+
 func (c *Client) PerpBalance(asset string) int64 {
 	return c.PerpBalances[asset]
 }
@@ -114,10 +135,12 @@ func (c *Client) RemoveOrder(orderID uint64) {
 }
 
 func (c *Client) GetBalanceSnapshot(timestamp int64) *BalanceSnapshot {
+	// Each wallet nets only the debt attributed to it: the account-level
+	// liability must reduce net worth exactly once, not once per wallet row.
 	spotBalances := make([]AssetBalance, 0, len(c.Balances))
 	for asset, total := range c.Balances {
 		locked := c.Reserved[asset]
-		borrowed := c.Borrowed[asset]
+		borrowed := c.BorrowedSpotPortion(asset)
 		spotBalances = append(spotBalances, AssetBalance{
 			Asset:    asset,
 			Free:     total - locked,
@@ -130,11 +153,13 @@ func (c *Client) GetBalanceSnapshot(timestamp int64) *BalanceSnapshot {
 	perpBalances := make([]AssetBalance, 0, len(c.PerpBalances))
 	for asset, total := range c.PerpBalances {
 		locked := c.PerpReserved[asset]
+		borrowed := c.BorrowedPerpPortion(asset)
 		perpBalances = append(perpBalances, AssetBalance{
 			Asset:    asset,
 			Free:     total - locked,
 			Locked:   locked,
-			NetAsset: total,
+			Borrowed: borrowed,
+			NetAsset: total - borrowed,
 		})
 	}
 

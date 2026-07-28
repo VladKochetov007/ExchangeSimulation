@@ -27,7 +27,11 @@ func (c *RealClock) NowUnix() int64 {
 }
 
 type SimulatedClock struct {
-	current   int64
+	current int64
+	// goal accumulates Advance targets so concurrent Advance calls compose
+	// additively (each gets its own disjoint time window) instead of both
+	// computing a target from the same base and losing one delta.
+	goal      int64
 	mu        sync.RWMutex
 	scheduler *EventScheduler
 }
@@ -35,6 +39,7 @@ type SimulatedClock struct {
 func NewSimulatedClock(start int64) *SimulatedClock {
 	return &SimulatedClock{
 		current: start,
+		goal:    start,
 	}
 }
 
@@ -52,14 +57,28 @@ func (c *SimulatedClock) NowUnix() int64 {
 
 func (c *SimulatedClock) Advance(delta time.Duration) {
 	c.mu.Lock()
-	c.current += int64(delta)
-	newTime := c.current
+	if c.goal < c.current {
+		c.goal = c.current
+	}
+	c.goal += int64(delta)
+	target := c.goal
 	c.mu.Unlock()
 
-	// Process all events up to new time
+	// Walk simulation time forward event-by-event instead of jumping straight to
+	// the target: ProcessUntil advances the clock to each due event's timestamp
+	// before firing it, so a callback observes its own scheduled instant (and
+	// anything it schedules relative to "now" chains correctly) rather than the
+	// end of the whole jump.
 	if c.scheduler != nil {
-		c.scheduler.ProcessUntil(newTime)
+		c.scheduler.ProcessUntil(target)
 	}
+
+	// Rest at the requested time even when the last event fired earlier.
+	c.mu.Lock()
+	if c.current < target {
+		c.current = target
+	}
+	c.mu.Unlock()
 }
 
 func (c *SimulatedClock) SetTime(t int64) {

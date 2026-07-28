@@ -1,5 +1,45 @@
 package exchange
 
+// calcClientFee computes a client's fee for a fill, treating a nil client or nil
+// FeePlan as the zero-fee plan (matching the reservation path).
+func calcClientFee(client *Client, ctx FillContext) Fee {
+	if client == nil || client.FeePlan == nil {
+		return Fee{}
+	}
+	return client.FeePlan.CalculateFee(ctx)
+}
+
+// restoreFeeHeadroom re-reserves the worst-case quote fee for the unfilled
+// remainder of a margined limit order after a fill's margin release.
+func (e *DefaultExchange) restoreFeeHeadroom(book *OrderBook, order *Order, precision int64) {
+	if order == nil || order.Type == Market {
+		return
+	}
+	remaining := order.Qty - order.FilledQty
+	if remaining <= 0 {
+		return
+	}
+	instrument := book.Instrument
+	_, isOrderMargined := instrument.(OrderMarginer)
+	_, isMargined := instrument.(Margined)
+	if !isOrderMargined && !isMargined {
+		return
+	}
+	client := e.Clients[order.ClientID]
+	if client == nil {
+		return
+	}
+	headroom := quoteFeeHeadroom(client.FeePlan, instrument.BaseAsset(), instrument.QuoteAsset(), remaining, order.Price, precision)
+	if headroom <= 0 {
+		return
+	}
+	// Force-reserve: the fill's release just freed at least this much, so the
+	// cash is present; going through the checked path could spuriously fail
+	// when other orders hold the rest of the wallet.
+	client.ForceReservePerp(instrument.QuoteAsset(), headroom)
+	order.Reserved += headroom
+}
+
 func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order) {
 	instrument := book.Instrument
 	timestamp := e.Clock.NowUnixNano()
@@ -25,8 +65,11 @@ func (e *DefaultExchange) handleExecution(
 	taker := e.Clients[exec.TakerClientID]
 	maker := e.Clients[exec.MakerClientID]
 	baseAsset, quoteAsset := instrument.BaseAsset(), instrument.QuoteAsset()
-	takerFee := taker.FeePlan.CalculateFee(FillContext{Exec: exec, IsMaker: false, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
-	makerFee := maker.FeePlan.CalculateFee(FillContext{Exec: exec, IsMaker: true, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
+	// A nil FeePlan is the zero-fee plan — the reservation path already treats it
+	// that way, so settlement must not dereference it. Guarding here keeps the
+	// two paths consistent instead of panicking on the first fill.
+	takerFee := calcClientFee(taker, FillContext{Exec: exec, IsMaker: false, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
+	makerFee := calcClientFee(maker, FillContext{Exec: exec, IsMaker: true, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
 
 	// Fully filled makers stay in book.Orders until removeMakerOrders, so this
 	// lookup normally succeeds; exec carries the fallbacks for custom matchers.
@@ -41,6 +84,10 @@ func (e *DefaultExchange) handleExecution(
 	if s, ok := instrument.(Settleable); ok {
 		result = s.Settle(e.buildSettlementContext(book, exec, takerOrder, makerOrder, makerPosSide, takerFee, makerFee, basePrecision, timestamp, log))
 		positionChanged = true
+		// The instrument's margin-only release just freed the entire fee
+		// headroom, including the share backing the unfilled remainder.
+		e.restoreFeeHeadroom(book, takerOrder, basePrecision)
+		e.restoreFeeHeadroom(book, makerOrder, basePrecision)
 	} else {
 		notional := MulDiv(exec.Qty, exec.Price, basePrecision)
 		e.settleSpotExecution(book, exec, takerOrder, makerOrder, taker, maker, takerFee, makerFee, notional, timestamp)
