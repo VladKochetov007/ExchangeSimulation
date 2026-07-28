@@ -89,6 +89,7 @@ type DefaultExchange struct {
 	autoAnchorMarks         bool
 	markEMAWindow           int
 	markBandBps             int64
+	autoAnchoredSymbols     map[string]bool
 	LiquidationHandler      LiquidationHandler
 	tickerFactory           TickerFactory
 	markPriceCalc           MarkPriceCalculator
@@ -887,6 +888,9 @@ func (e *DefaultExchange) ensureAnchoredMarkCalcs() {
 	if band == 0 {
 		band = 600
 	}
+	if e.autoAnchoredSymbols == nil {
+		e.autoAnchoredSymbols = make(map[string]bool)
+	}
 	for symbol, book := range e.Books {
 		if marginCore(book.Instrument) == nil || e.markPriceCalcs[symbol] != nil {
 			continue
@@ -895,6 +899,7 @@ func (e *DefaultExchange) ensureAnchoredMarkCalcs() {
 			continue
 		}
 		e.markPriceCalcs[symbol] = NewClampedEMAMarkPrice(symbol, e.indexSourceLocked(), window, band)
+		e.autoAnchoredSymbols[symbol] = true
 	}
 }
 
@@ -948,6 +953,13 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		})
 	}
 	e.mu.RUnlock()
+
+	// Symbol order, not map order: buildAccountMarginProfile prices
+	// non-trigger symbols from their last STORED mark, so whether a
+	// cross-margined sibling sees this tick's fresh mark or the previous
+	// tick's stale one depends on processing order — and with it, whether a
+	// borderline liquidation fires. Same seed, same state, every run.
+	slices.SortFunc(candidates, func(a, b bookData) int { return cmp.Compare(a.symbol, b.symbol) })
 
 	type perpUpdate struct {
 		symbol     string
@@ -1054,8 +1066,23 @@ func (e *DefaultExchange) ChargeCollateralInterest() {
 	const secondsPerYear = 365 * 24 * 3600
 	timestamp := e.Clock.NowUnixNano()
 
-	for _, client := range e.Clients {
-		for asset, borrowed := range client.Borrowed {
+	// Client-ID and asset order: the debits are independent, but the emitted
+	// balance/interest event stream must be identical run to run.
+	clientIDs := make([]uint64, 0, len(e.Clients))
+	for clientID := range e.Clients {
+		clientIDs = append(clientIDs, clientID)
+	}
+	slices.Sort(clientIDs)
+
+	for _, clientID := range clientIDs {
+		client := e.Clients[clientID]
+		assets := make([]string, 0, len(client.Borrowed))
+		for asset := range client.Borrowed {
+			assets = append(assets, asset)
+		}
+		slices.Sort(assets)
+		for _, asset := range assets {
+			borrowed := client.Borrowed[asset]
 			if borrowed <= 0 {
 				continue
 			}
@@ -1202,7 +1229,17 @@ func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, ma
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	for clientID, client := range e.Clients {
+	// Client-ID order, not map order: when book liquidity covers only one of
+	// two simultaneous breaches, map iteration would pick the survivor
+	// randomly per run — the same seed must produce the same final state.
+	clientIDs := make([]uint64, 0, len(e.Clients))
+	for clientID := range e.Clients {
+		clientIDs = append(clientIDs, clientID)
+	}
+	slices.Sort(clientIDs)
+
+	for _, clientID := range clientIDs {
+		client := e.Clients[clientID]
 		var positions []*Position
 		for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
 			pos := e.Positions.GetPositionBySide(clientID, symbol, side)
@@ -1291,13 +1328,16 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 	if pos.Size < 0 {
 		closeSide = Buy
 	}
-	fillPrice := e.forceClose(clientID, client, book, book.Instrument, closeSide, pos.PositionSide, abs(pos.Size), timestamp)
+	fillPrice, filledQty := e.forceClose(clientID, client, book, book.Instrument, closeSide, pos.PositionSide, abs(pos.Size), timestamp)
 	if fillPrice == 0 {
 		// No liquidity in the book; position stays open for retry on next mark price update.
 		return
 	}
 
-	e.chargeClearanceFee(clientID, client, symbol, perp, abs(pos.Size), fillPrice, timestamp)
+	// Fee on the quantity that actually closed: a thin book can absorb only
+	// part of the position, and billing the full attempted size would
+	// overcharge every partial liquidation.
+	e.chargeClearanceFee(clientID, client, symbol, perp, filledQty, fillPrice, timestamp)
 
 	if e.BorrowingMgr != nil {
 		borrowed := client.Borrowed[perp.QuoteAsset()]
@@ -1417,6 +1457,9 @@ func (e *DefaultExchange) CheckAndSettleFunding() {
 		}
 	}
 	e.mu.RUnlock()
+
+	// Deterministic settlement (and funding-event) order across runs.
+	slices.SortFunc(perps, func(a, b *PerpFutures) int { return cmp.Compare(a.Symbol(), b.Symbol()) })
 
 	now := e.Clock.NowUnixNano()
 
