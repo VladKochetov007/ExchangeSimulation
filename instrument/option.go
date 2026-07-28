@@ -88,6 +88,26 @@ func (o *EuropeanOption) SetMarks(underlyingMark, markPremium int64) {
 
 func (o *EuropeanOption) MarkPremium() int64 { return o.markPremium.Load() }
 
+// --- PositionMarginer ---
+
+// PositionMark marks open positions at the current premium mark for
+// cross-margin mark-to-market.
+func (o *EuropeanOption) PositionMark() int64 { return o.markPremium.Load() }
+
+// MaintenanceForPosition returns the quote maintenance requirement for a
+// signed option position. Longs owe nothing (premium was fully paid at
+// entry); shorts owe MMBps of the underlying mark plus the current premium
+// per unit, Deribit-style — the premium term guarantees maintenance always
+// covers buying the position back at the mark.
+func (o *EuropeanOption) MaintenanceForPosition(size, precision int64) int64 {
+	if size >= 0 {
+		return 0
+	}
+	short := -size
+	mm := etypes.MulDiv(short, o.underlyingMark.Load(), precision) * o.Margin.MMBps / 10000
+	return mm + etypes.MulDiv(short, o.markPremium.Load(), precision)
+}
+
 // --- Expirable ---
 
 func (o *EuropeanOption) ExpiryNano() int64        { return o.expiryNano }
