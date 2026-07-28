@@ -82,6 +82,8 @@ func TestMarkCalculatorsConcurrentCalculate(t *testing.T) {
 		NewEMAMarkPrice("X", idx, 10),
 		NewClampedEMAMarkPrice("X", idx, 10, 600),
 		NewTWAPMarkPrice("X", idx, 10, 600),
+		NewShrunkBasisMarkPrice("X", idx, 10, 30, 3000, 7000),
+		NewBinanceMedianMarkPrice("X", idx, nil, nil, 10),
 	}
 	var wg sync.WaitGroup
 	for _, c := range calcs {
