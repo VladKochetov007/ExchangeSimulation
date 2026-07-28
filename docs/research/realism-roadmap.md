@@ -18,6 +18,16 @@ is shaped as an injectable interface per the library-first rule.
 
 ## Tier 0 — correctness holes (exchange logic, fix like bugs)
 
+Status July 28: items 1–4 shipped (PositionMarginer wiring; clearance-fee
+credit making the insurance fund two-directional, `LiquidationFeeBps`
+config, default 0; per-gateway outbox delivery; sorted publish/cancel
+ordering). Note on the researched "cancel-orders-first with recheck"
+liquidation step: in this engine's accounting it is vacuous — equity is
+balance − debt + uPnL, which order-margin release does not move, and
+`forceClose` already cancels the book's orders before closing. The recheck
+only becomes meaningful with initial-margin-ratio triggers, i.e. the
+Tier-2 LiquidationPolicy work.
+
 1. **Options are invisible to the risk engine.** `marginCore()` resolves nil
    for `*EuropeanOption`, so option maintenance margin is 0 and option
    mark-to-market is excluded from cross equity: a short-vol account is

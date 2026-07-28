@@ -45,6 +45,11 @@ type AutomationConfig struct {
 	// CollateralRate is annual interest rate on borrowed amounts in bps (default: 500 = 5%)
 	CollateralRate int64
 
+	// LiquidationFeeBps is the clearance fee charged on a liquidation's closed
+	// notional, credited to the insurance fund (venue pattern; e.g. 30 = 0.3%).
+	// Zero disables the fee and preserves pre-fee economics.
+	LiquidationFeeBps int64
+
 	// LiquidationHandler receives liquidation events (optional)
 	LiquidationHandler LiquidationHandler
 
@@ -69,6 +74,7 @@ type DefaultExchange struct {
 	Loggers                 map[string]Logger
 	BorrowingMgr            *BorrowingManager
 	CollateralRate          int64
+	LiquidationFeeBps       int64
 	LiquidationHandler      LiquidationHandler
 	tickerFactory           TickerFactory
 	markPriceCalc           MarkPriceCalculator
@@ -705,6 +711,7 @@ func (e *DefaultExchange) ConfigureAutomation(config AutomationConfig) {
 	e.indexProvider = config.IndexProvider
 	e.priceUpdateInterval = config.PriceUpdateInterval
 	e.CollateralRate = config.CollateralRate
+	e.LiquidationFeeBps = config.LiquidationFeeBps
 	e.LiquidationHandler = config.LiquidationHandler
 	e.listingPolicies = config.ListingPolicies
 }
@@ -1191,6 +1198,8 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 		return
 	}
 
+	e.chargeClearanceFee(clientID, client, symbol, perp, abs(pos.Size), fillPrice, timestamp)
+
 	if e.BorrowingMgr != nil {
 		borrowed := client.Borrowed[perp.QuoteAsset()]
 		if borrowed > 0 {
@@ -1254,8 +1263,45 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 				Symbol:    symbol,
 				Delta:     -debt,
 				Balance:   e.ExchangeBalance.InsuranceFund[quote],
+				Reason:    "liquidation_deficit",
 			})
 		}
+	}
+}
+
+// chargeClearanceFee debits the liquidated account a fee on the closed
+// notional and credits the insurance fund — the venue mechanism that lets the
+// fund grow in calm regimes and absorb deficits in cascades. Clamped to the
+// account's available balance: the fee must not create fresh debt or invade
+// reservations backing other books. Caller must hold e.mu.Lock().
+func (e *DefaultExchange) chargeClearanceFee(clientID uint64, client *Client, symbol string, perp *PerpFutures, closedSize, fillPrice, timestamp int64) {
+	if e.LiquidationFeeBps <= 0 {
+		return
+	}
+	quote := perp.QuoteAsset()
+	fee := MulDiv(closedSize, fillPrice, perp.BasePrecision()) * e.LiquidationFeeBps / 10000
+	if available := client.PerpAvailable(quote); fee > available {
+		fee = available
+	}
+	if fee <= 0 {
+		return
+	}
+
+	oldBalance := client.PerpBalances[quote]
+	client.PerpBalances[quote] -= fee
+	e.ExchangeBalance.InsuranceFund[quote] += fee
+
+	logBalanceChange(e, timestamp, clientID, symbol, "liquidation_clearance_fee", []BalanceDelta{
+		perpDelta(quote, oldBalance, client.PerpBalances[quote]),
+	})
+	if e.LiquidationHandler != nil {
+		e.LiquidationHandler.OnInsuranceFund(&InsuranceFundEvent{
+			Timestamp: timestamp,
+			Symbol:    symbol,
+			Delta:     fee,
+			Balance:   e.ExchangeBalance.InsuranceFund[quote],
+			Reason:    "clearance_fee",
+		})
 	}
 }
 

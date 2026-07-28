@@ -34,7 +34,10 @@ func NewPerpFutures(symbol, base, quote string, basePrecision, quotePrecision, t
 			IndexPrice:  0,
 		},
 		fundingCalc: &SimpleFundingCalc{
-			BaseRate: 10,
+			// 1 bp per interval matches the venue-standard interest-rate
+			// component (Binance/OKX/Bybit); the old 10 bp default overstated
+			// baseline carry 10x and distorted basis-arb economics.
+			BaseRate: 1,
 			Damping:  100,
 			MaxRate:  75,
 		},
