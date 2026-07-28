@@ -151,6 +151,20 @@ type OrderMarginer interface {
 	MarginForMarketOrder(side Side, qty, refPrice, precision int64) int64
 }
 
+// PositionMarginer is implemented by non-perp instruments whose OPEN POSITIONS
+// contribute mark-to-market and maintenance margin to the cross-margin account
+// profile (e.g. options: a short must post maintenance against the underlying,
+// and premium marks move account equity). Without it a position is invisible
+// to the risk engine and can never trigger liquidation.
+type PositionMarginer interface {
+	// PositionMark is the price positions are marked at for unrealized PnL
+	// (zero when no mark has been set yet — the position then marks neutral).
+	PositionMark() int64
+	// MaintenanceForPosition returns the quote-asset maintenance requirement
+	// for a signed position of the given size.
+	MaintenanceForPosition(size, precision int64) int64
+}
+
 // Expirable is implemented by instruments with a finite life (dated futures,
 // options). The exchange's automation observes settlement inputs while the
 // instrument trades and cash-settles all positions at expiry.

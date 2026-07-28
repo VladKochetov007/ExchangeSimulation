@@ -1009,7 +1009,16 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 	var p accountMarginProfile
 	for symbol, book := range e.Books {
 		perp := marginCore(book.Instrument)
-		if perp == nil || perp.QuoteAsset() != quote {
+		if perp == nil {
+			// Non-perp margined instruments (options) contribute their own
+			// mark-to-market and maintenance; skipping them makes a short-vol
+			// account invisible to the risk engine and unliquidatable.
+			if pm, ok := book.Instrument.(PositionMarginer); ok && book.Instrument.QuoteAsset() == quote {
+				e.addPositionMarginerExposure(&p, clientID, symbol, book.Instrument, pm)
+			}
+			continue
+		}
+		if perp.QuoteAsset() != quote {
 			continue
 		}
 		mark := triggerMark
@@ -1037,6 +1046,30 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 		}
 	}
 	return p
+}
+
+// addPositionMarginerExposure folds a PositionMarginer instrument's open
+// positions into the cross-margin profile: marked at the instrument's own
+// mark, maintenance per its own formula. Warning reuses maintenance — these
+// instruments carry no separate warning tier.
+func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, clientID uint64, symbol string, inst Instrument, pm PositionMarginer) {
+	precision := inst.BasePrecision()
+	mark := pm.PositionMark()
+	for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
+		pos := e.Positions.GetPositionBySide(clientID, symbol, side)
+		if pos == nil || pos.Size == 0 {
+			continue
+		}
+		m := mark
+		if m == 0 {
+			m = pos.EntryPrice
+		}
+		p.UnrealizedPnL += positionUPnL(pos, m, precision)
+		p.Notional += MulDiv(abs(pos.Size), m, precision)
+		maintenance := pm.MaintenanceForPosition(pos.Size, precision)
+		p.Maintenance += maintenance
+		p.Warning += maintenance
+	}
 }
 
 // CheckLiquidations evaluates all positions for a symbol after a mark price update.

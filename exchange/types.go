@@ -156,6 +156,7 @@ type FeeModel = etypes.FeeModel
 type Instrument = etypes.Instrument
 type Margined = etypes.Margined
 type OrderMarginer = etypes.OrderMarginer
+type PositionMarginer = etypes.PositionMarginer
 type Expirable = etypes.Expirable
 type ListingPolicy = etypes.ListingPolicy
 type UnderlyingRef = etypes.UnderlyingRef
