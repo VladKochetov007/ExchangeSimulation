@@ -16,6 +16,13 @@ type BasisArbConfig struct {
 	LotSize       int64
 	MaxPosition   int64
 	CheckInterval time.Duration
+	// Reactive re-evaluates the basis inside HandleEvent on every trade
+	// print and snapshot instead of only on the CheckInterval ticker. With
+	// polling, reaction time is dominated by ticker phase and a 20x network
+	// latency spread produces identical profits (the gen-6 negative result);
+	// reactive decisions make reaction time = delivery latency, which is
+	// what a latency race is.
+	Reactive bool
 }
 
 // FeeAwareBasisArb arbitrages spot/perp basis using book mid prices.
@@ -50,8 +57,41 @@ func NewFeeAwareBasisArb(id uint64, gw actor.Gateway, cfg BasisArbConfig) *FeeAw
 }
 
 func (a *FeeAwareBasisArb) HandleEvent(_ context.Context, evt *actor.Event) {
-	if evt.Type == actor.EventBookSnapshot {
+	switch evt.Type {
+	case actor.EventBookSnapshot:
 		a.onSnapshot(evt.Data.(actor.BookSnapshotEvent))
+		if a.cfg.Reactive {
+			a.checkBasis()
+		}
+	case actor.EventTrade:
+		if a.cfg.Reactive {
+			a.onTrade(evt.Data.(actor.TradeEvent))
+			a.checkBasis()
+		}
+	}
+}
+
+// onTrade folds a trade print into the quote state: the print becomes the
+// symbol's mid, spread width kept from the last snapshot. Between 100ms
+// snapshots the print is the freshest information there is — and the basis
+// dislocation it signals is exactly what the race is run over.
+func (a *FeeAwareBasisArb) onTrade(e actor.TradeEvent) {
+	price := e.Trade.Price
+	switch e.Symbol {
+	case a.cfg.SpotSymbol:
+		if a.spotBid == 0 || a.spotAsk == 0 {
+			return
+		}
+		half := (a.spotAsk - a.spotBid) / 2
+		a.spotBid, a.spotAsk = price-half, price+half
+		a.spotSeq++
+	case a.cfg.PerpSymbol:
+		if a.perpBid == 0 || a.perpAsk == 0 {
+			return
+		}
+		half := (a.perpAsk - a.perpBid) / 2
+		a.perpBid, a.perpAsk = price-half, price+half
+		a.perpSeq++
 	}
 }
 
@@ -75,8 +115,12 @@ func (a *FeeAwareBasisArb) onSnapshot(e actor.BookSnapshotEvent) {
 
 func (a *FeeAwareBasisArb) onTick(_ time.Time) {
 	if !a.subscribed {
-		a.Subscribe(a.cfg.SpotSymbol, exchange.MDSnapshot)
-		a.Subscribe(a.cfg.PerpSymbol, exchange.MDSnapshot)
+		types := []exchange.MDType{exchange.MDSnapshot}
+		if a.cfg.Reactive {
+			types = append(types, exchange.MDTrade)
+		}
+		a.Subscribe(a.cfg.SpotSymbol, types...)
+		a.Subscribe(a.cfg.PerpSymbol, types...)
 		a.subscribed = true
 	}
 	a.checkBasis()

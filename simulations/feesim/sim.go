@@ -84,6 +84,12 @@ type SimConfig struct {
 	// relative fill shares measure the latency-race win concentration
 	// (Aquilina-Budish-O'Neill style). Empty = no race.
 	RaceArbTiers []float64
+
+	// RaceArbReactive makes race entrants decide inside HandleEvent on every
+	// trade print instead of on the polling ticker. Polling entrants tie
+	// regardless of latency (a 100ms decision timer swamps any network
+	// spread — the gen-6 negative result); reactive entrants race for real.
+	RaceArbReactive bool
 }
 
 func DefaultSimConfig() SimConfig {
@@ -482,6 +488,7 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 			LotSize:       abcPrecision / 10,
 			MaxPosition:   5000,
 			CheckInterval: 100 * time.Millisecond,
+			Reactive:      cfg.RaceArbReactive,
 		})
 		arb.SetTickerFactory(timerFact)
 		raceArbs = append(raceArbs, arb)
