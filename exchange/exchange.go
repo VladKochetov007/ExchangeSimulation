@@ -53,7 +53,11 @@ type AutomationConfig struct {
 	// MarkPriceEMAWindow and MarkPriceBandBps parameterize the DEFAULT
 	// index-anchored mark calculator (ClampedEMA of the basis) that margined
 	// books get when an index exists and no explicit calculator was injected.
-	// Defaults: 600 samples (30 min at 3s) and 100 bps total band (±0.5%).
+	// The window is in SAMPLES of PriceUpdateInterval, not seconds: the
+	// default 10 at the 3s tick gives a ~30s basis average, matching venue
+	// practice (Binance 30s MA, Bybit 2.5min). The band default 600 bps
+	// (±3%) matches the only published venue cap; tighter values clip
+	// genuine contango and pin the mark at the band edge.
 	MarkPriceEMAWindow int
 	MarkPriceBandBps   int64
 
@@ -722,10 +726,10 @@ func (e *DefaultExchange) ConfigureAutomation(config AutomationConfig) {
 		config.CollateralRate = 500
 	}
 	if config.MarkPriceEMAWindow == 0 {
-		config.MarkPriceEMAWindow = 600
+		config.MarkPriceEMAWindow = 10
 	}
 	if config.MarkPriceBandBps == 0 {
-		config.MarkPriceBandBps = 100
+		config.MarkPriceBandBps = 600
 	}
 	e.markEMAWindow = config.MarkPriceEMAWindow
 	e.markBandBps = config.MarkPriceBandBps
@@ -878,10 +882,10 @@ func (e *DefaultExchange) ensureAnchoredMarkCalcs() {
 	}
 	window, band := e.markEMAWindow, e.markBandBps
 	if window == 0 {
-		window = 600
+		window = 10
 	}
 	if band == 0 {
-		band = 100
+		band = 600
 	}
 	for symbol, book := range e.Books {
 		if marginCore(book.Instrument) == nil || e.markPriceCalcs[symbol] != nil {
