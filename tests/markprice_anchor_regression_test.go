@@ -50,8 +50,8 @@ func TestRegressionDefaultMarkAnchorsToIndex(t *testing.T) {
 	ex.UpdatePerpPrices()
 
 	// First sample seeds the basis EMA with mid-index = 10,000, then the
-	// ±band/2 clamp caps it: 50,000 * 100bps/2 = 250.
-	wantMark := PriceUSD(50_250, DOLLAR_TICK)
+	// ±band/2 clamp caps it: 50,000 * 600bps/2 = 1,500.
+	wantMark := PriceUSD(51_500, DOLLAR_TICK)
 	if got := perp.GetFundingRate().MarkPrice; got != wantMark {
 		t.Fatalf("default mark = %d, want index-anchored %d (own-mid mark would be %d)",
 			got, wantMark, PriceUSD(60_000, DOLLAR_TICK))

@@ -1,6 +1,8 @@
 package price
 
 import (
+	"sync"
+
 	ebook "exchange_sim/book"
 	etypes "exchange_sim/types"
 )
@@ -102,6 +104,11 @@ type EMAMarkPrice struct {
 	// decayed to zero: reusing 0 as the sentinel would re-seed the EMA from one
 	// raw print, discarding all smoothing in a single step.
 	seeded bool
+	// mu guards the EMA state: Calculate may be driven concurrently by the
+	// automation price loop and a manual UpdatePerpPrices pass, and the
+	// exchange invokes calculators under a read lock, which permits
+	// concurrent holders.
+	mu     sync.Mutex
 	index  etypes.PriceSource
 	symbol string
 }
@@ -139,6 +146,8 @@ func (c *EMAMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 	}
 
 	basis := perpMid - indexPrice
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if !c.seeded {
 		c.emaBasis = basis
 		c.seeded = true
@@ -155,7 +164,8 @@ type ClampedEMAMarkPrice struct {
 	alpha    int64
 	emaBasis int64
 	seeded   bool
-	bandBps  int64 // half-band = bandBps/2 * index / 10000
+	mu       sync.Mutex // see EMAMarkPrice.mu
+	bandBps  int64      // half-band = bandBps/2 * index / 10000
 	index    etypes.PriceSource
 	symbol   string
 }
@@ -184,6 +194,8 @@ func (c *ClampedEMAMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 	}
 
 	basis := perpMid - indexPrice
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if !c.seeded {
 		c.emaBasis = basis
 		c.seeded = true
@@ -208,6 +220,7 @@ type TWAPMarkPrice struct {
 	window  []int64 // rolling window of recent basis samples
 	pos     int
 	size    int
+	mu      sync.Mutex // see EMAMarkPrice.mu
 	bandBps int64
 	index   etypes.PriceSource
 	symbol  string
@@ -237,6 +250,7 @@ func (c *TWAPMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 	}
 
 	// update circular TWAP buffer
+	c.mu.Lock()
 	c.window[c.pos] = perpMid - indexPrice
 	c.pos = (c.pos + 1) % len(c.window)
 	if c.size < len(c.window) {
@@ -248,6 +262,7 @@ func (c *TWAPMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 		twapBasis += c.window[i]
 	}
 	twapBasis /= int64(c.size)
+	c.mu.Unlock()
 
 	halfBand := indexPrice * c.bandBps / 2 / 10000
 	if twapBasis > halfBand {
