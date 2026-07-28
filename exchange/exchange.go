@@ -50,6 +50,13 @@ type AutomationConfig struct {
 	// Zero disables the fee and preserves pre-fee economics.
 	LiquidationFeeBps int64
 
+	// MarkPriceEMAWindow and MarkPriceBandBps parameterize the DEFAULT
+	// index-anchored mark calculator (ClampedEMA of the basis) that margined
+	// books get when an index exists and no explicit calculator was injected.
+	// Defaults: 600 samples (30 min at 3s) and 100 bps total band (±0.5%).
+	MarkPriceEMAWindow int
+	MarkPriceBandBps   int64
+
 	// LiquidationHandler receives liquidation events (optional)
 	LiquidationHandler LiquidationHandler
 
@@ -75,6 +82,9 @@ type DefaultExchange struct {
 	BorrowingMgr            *BorrowingManager
 	CollateralRate          int64
 	LiquidationFeeBps       int64
+	autoAnchorMarks         bool
+	markEMAWindow           int
+	markBandBps             int64
 	LiquidationHandler      LiquidationHandler
 	tickerFactory           TickerFactory
 	markPriceCalc           MarkPriceCalculator
@@ -697,6 +707,11 @@ func (e *DefaultExchange) SettleFunding(perp *PerpFutures) {
 
 // ConfigureAutomation sets automation parameters. Must be called before StartAutomation.
 func (e *DefaultExchange) ConfigureAutomation(config AutomationConfig) {
+	// Index-anchored marking is the default whenever no explicit calculator
+	// was injected: a margined book marked at its own mid lets liquidations
+	// trade into the very price that triggers them (self-feeding cascade).
+	// Books with no resolvable index (genuine single-venue) keep the mid.
+	e.autoAnchorMarks = config.MarkPriceCalc == nil
 	if config.MarkPriceCalc == nil {
 		config.MarkPriceCalc = NewMidPriceCalculator()
 	}
@@ -706,8 +721,19 @@ func (e *DefaultExchange) ConfigureAutomation(config AutomationConfig) {
 	if config.CollateralRate == 0 {
 		config.CollateralRate = 500
 	}
+	if config.MarkPriceEMAWindow == 0 {
+		config.MarkPriceEMAWindow = 600
+	}
+	if config.MarkPriceBandBps == 0 {
+		config.MarkPriceBandBps = 100
+	}
+	e.markEMAWindow = config.MarkPriceEMAWindow
+	e.markBandBps = config.MarkPriceBandBps
 	e.markPriceCalc = config.MarkPriceCalc
 	e.markPriceCalcs = config.MarkPriceCalcs
+	if e.markPriceCalcs == nil {
+		e.markPriceCalcs = make(map[string]MarkPriceCalculator)
+	}
 	e.indexProvider = config.IndexProvider
 	e.priceUpdateInterval = config.PriceUpdateInterval
 	e.CollateralRate = config.CollateralRate
@@ -731,6 +757,7 @@ func (e *DefaultExchange) StartAutomation(ctx context.Context) {
 	}
 	if e.markPriceCalc == nil {
 		e.markPriceCalc = NewMidPriceCalculator()
+		e.autoAnchorMarks = true
 	}
 
 	e.automCtx, e.automCancel = context.WithCancel(ctx)
@@ -815,7 +842,69 @@ func (e *DefaultExchange) collateralChargeLoop() {
 }
 
 // updateAllPerpPrices updates funding rates for all perpetual instruments.
+// indexSourceLocked resolves a margined book's index: the underlying book's
+// mid when listed, else the IndexProvider. Never the book's own price —
+// anchoring a mark to itself recreates the liquidation feedback loop. The
+// returned source must only be called with e.mu held (either mode); the
+// IndexProvider is called under that lock and must not call back into the
+// exchange.
+func (e *DefaultExchange) indexSourceLocked() PriceSource {
+	return priceSourceFunc(func(symbol string) int64 {
+		book := e.Books[symbol]
+		if book == nil {
+			return 0
+		}
+		if u := underlyingOf(book.Instrument); u != "" {
+			if mid := e.bookMidPriceLocked(u); mid != 0 {
+				return mid
+			}
+		}
+		if e.indexProvider != nil {
+			return e.indexProvider.Price(symbol)
+		}
+		return 0
+	})
+}
+
+// ensureAnchoredMarkCalcs gives every margined book with a resolvable index a
+// per-symbol ClampedEMA mark calculator, unless one was injected explicitly.
+// Runs every price tick so instruments listed later (listing policies) are
+// picked up; existing entries are never replaced, preserving EMA state.
+func (e *DefaultExchange) ensureAnchoredMarkCalcs() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.markPriceCalcs == nil {
+		e.markPriceCalcs = make(map[string]MarkPriceCalculator)
+	}
+	window, band := e.markEMAWindow, e.markBandBps
+	if window == 0 {
+		window = 600
+	}
+	if band == 0 {
+		band = 100
+	}
+	for symbol, book := range e.Books {
+		if marginCore(book.Instrument) == nil || e.markPriceCalcs[symbol] != nil {
+			continue
+		}
+		if underlyingOf(book.Instrument) == "" && e.indexProvider == nil {
+			continue
+		}
+		e.markPriceCalcs[symbol] = NewClampedEMAMarkPrice(symbol, e.indexSourceLocked(), window, band)
+	}
+}
+
+// UpdatePerpPrices runs one mark/index/funding update pass over every
+// margined book — the same pass the automation price loop runs on its
+// ticker. Exposed for deterministic simulations and tests.
+func (e *DefaultExchange) UpdatePerpPrices() {
+	e.updateAllPerpPrices()
+}
+
 func (e *DefaultExchange) updateAllPerpPrices() {
+	if e.autoAnchorMarks {
+		e.ensureAnchoredMarkCalcs()
+	}
 	timestamp := e.Clock.NowUnixNano()
 
 	// Collect mark prices under read lock. Price() must be called outside
@@ -872,9 +961,15 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		if indexPrice == 0 && e.indexProvider != nil {
 			indexPrice = e.indexProvider.Price(c.symbol)
 		}
-		// No underlying book and no index provider: the perp's own book is
-		// the only price there is (single-venue configuration).
 		if indexPrice == 0 {
+			// An index is supposed to exist but is unavailable or stale:
+			// skip this update rather than marking the perp against itself
+			// (mark-as-index makes basis identically zero and hides outages).
+			if c.underlying != "" || e.indexProvider != nil {
+				continue
+			}
+			// Genuine single-venue configuration: the perp's own book is the
+			// only price there is.
 			indexPrice = c.markPrice
 		}
 		if indexPrice == 0 {
