@@ -22,6 +22,9 @@ type InsuranceFundEvent struct {
 	Symbol    string `json:"symbol"`
 	Delta     int64  `json:"delta"`
 	Balance   int64  `json:"balance"`
+	// Reason distinguishes fund flows now that the fund is two-directional:
+	// "liquidation_deficit" (debit) or "clearance_fee" (credit).
+	Reason string `json:"reason,omitempty"`
 }
 
 type MarginInterestEvent struct {
