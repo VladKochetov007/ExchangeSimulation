@@ -634,6 +634,19 @@ func (e *DefaultExchange) GetBook(symbol string) *OrderBook {
 	return e.Books[symbol]
 }
 
+// MidPrice computes a book's mid under the exchange lock. Implements
+// price.MidPriceProvider: callers must not read a *OrderBook obtained from
+// GetBook after the lock is released, since order handling mutates it.
+func (e *DefaultExchange) MidPrice(symbol string) int64 {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	book := e.Books[symbol]
+	if book == nil {
+		return 0
+	}
+	return book.GetMidPrice()
+}
+
 func (e *DefaultExchange) ListInstruments(baseFilter, quoteFilter string) []Instrument {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

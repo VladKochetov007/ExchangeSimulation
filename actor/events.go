@@ -39,7 +39,12 @@ type OrderRejectedEvent struct {
 }
 
 type OrderFillEvent struct {
-	OrderID   uint64        `json:"order_id"`
+	OrderID uint64 `json:"order_id"`
+	// Symbol identifies the filled leg. Multi-leg strategies (basis, triangle,
+	// parity) cannot reconcile intent against reality without it: market
+	// orders fill before their accept response arrives, so an order-ID lookup
+	// is not yet populated when the first fill lands.
+	Symbol    string        `json:"symbol"`
 	Qty       int64         `json:"qty"`
 	Price     int64         `json:"price"`
 	Side      exchange.Side `json:"side"`

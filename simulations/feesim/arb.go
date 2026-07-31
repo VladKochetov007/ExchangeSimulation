@@ -29,8 +29,18 @@ type BasisArbConfig struct {
 // Uses asymmetric thresholds: eagerly unwinds position, reluctantly accumulates.
 type FeeAwareBasisArb struct {
 	*actor.BaseActor
-	cfg      BasisArbConfig
-	position int64 // net lots: +N = N×(short-perp/long-spot)
+	cfg BasisArbConfig
+	// position is net lots derived from ACTUAL perp-leg fills, not from
+	// submissions: a market order into a thin book fills partially (or not at
+	// all), so counting intents lets believed inventory drift arbitrarily far
+	// from reality and silently voids MaxPosition.
+	position int64
+	// perpFilled is the signed filled quantity on the perp leg in base units;
+	// position is this divided by LotSize.
+	perpFilled int64
+	// inFlight counts submitted-but-unfilled lots so a burst of reactive
+	// decisions cannot stack orders past MaxPosition before any fill lands.
+	inFlight int64
 
 	spotBid, spotAsk int64
 	perpBid, perpAsk int64
@@ -68,6 +78,28 @@ func (a *FeeAwareBasisArb) HandleEvent(_ context.Context, evt *actor.Event) {
 			a.onTrade(evt.Data.(actor.TradeEvent))
 			a.checkBasis()
 		}
+	case actor.EventOrderPartialFill, actor.EventOrderFilled:
+		a.onFill(evt.Data.(actor.OrderFillEvent))
+	}
+}
+
+// onFill reconciles believed position against what actually executed. Only
+// the perp leg is counted: it defines the sign convention, and counting both
+// legs would double-count one round trip.
+func (a *FeeAwareBasisArb) onFill(e actor.OrderFillEvent) {
+	if e.Symbol != a.cfg.PerpSymbol {
+		return
+	}
+	signed := e.Qty
+	if e.Side == exchange.Sell {
+		signed = -signed
+	}
+	// A short perp leg is a POSITIVE basis position (short perp / long spot).
+	a.perpFilled -= signed
+	a.position = a.perpFilled / a.cfg.LotSize
+
+	if a.inFlight > 0 {
+		a.inFlight--
 	}
 }
 
@@ -182,17 +214,21 @@ func (a *FeeAwareBasisArb) checkBasis() {
 		return
 	}
 
+	// Exposure the risk cap must respect: filled position plus everything
+	// already on the wire. Without the in-flight term a reactive actor can
+	// submit hundreds of lots in the latency window before the first fill
+	// reports back.
 	switch {
-	case basis > 0 && a.position < a.cfg.MaxPosition:
+	case basis > 0 && a.position+a.inFlight < a.cfg.MaxPosition:
 		a.SubmitOrder(a.cfg.PerpSymbol, exchange.Sell, exchange.Market, 0, a.cfg.LotSize)
 		a.SubmitOrder(a.cfg.SpotSymbol, exchange.Buy, exchange.Market, 0, a.cfg.LotSize)
-		a.position++
+		a.inFlight++
 		a.lastTradeSeq = currentSeq
 
-	case basis < 0 && a.position > -a.cfg.MaxPosition:
+	case basis < 0 && a.position-a.inFlight > -a.cfg.MaxPosition:
 		a.SubmitOrder(a.cfg.PerpSymbol, exchange.Buy, exchange.Market, 0, a.cfg.LotSize)
 		a.SubmitOrder(a.cfg.SpotSymbol, exchange.Sell, exchange.Market, 0, a.cfg.LotSize)
-		a.position--
+		a.inFlight++
 		a.lastTradeSeq = currentSeq
 	}
 }

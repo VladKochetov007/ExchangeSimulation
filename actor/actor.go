@@ -233,6 +233,7 @@ func (a *BaseActor) decodeResponse(resp exchange.Response) *Event {
 			Type: eventType,
 			Data: OrderFillEvent{
 				OrderID:   data.OrderID,
+				Symbol:    data.Symbol,
 				Qty:       data.Qty,
 				Price:     data.Price,
 				Side:      data.Side,

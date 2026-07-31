@@ -22,6 +22,11 @@ func (o *MidPriceOracle) Price(symbol string) int64 {
 	if mapped == "" {
 		return 0
 	}
+	// Prefer the lock-safe path: reading a live book returned by GetBook
+	// races every order that mutates it.
+	if mp, ok := o.provider.(MidPriceProvider); ok {
+		return mp.MidPrice(mapped)
+	}
 	book := o.provider.GetBook(mapped)
 	if book == nil {
 		return 0

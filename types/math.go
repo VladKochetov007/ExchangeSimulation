@@ -46,3 +46,34 @@ func unsignedAbs(x int64) uint64 {
 	}
 	return uint64(x)
 }
+
+// WeightedAverage returns (w1*v1 + w2*v2) / (w1 + w2) computed exactly in
+// 128-bit intermediate arithmetic. All arguments must be non-negative and the
+// weights must not both be zero.
+//
+// Position entry prices are the motivating case: size × price reaches ~5e17
+// at realistic precisions, well past float64's 53-bit mantissa, so averaging
+// in float64 quantizes the result to ~64 units. That error lands directly in
+// realized PnL — money the exchange invents or destroys — because each
+// account's basis drifts independently of its counterparties'.
+func WeightedAverage(w1, v1, w2, v2 int64) int64 {
+	if w1 < 0 || v1 < 0 || w2 < 0 || v2 < 0 {
+		panic("WeightedAverage: arguments must be non-negative")
+	}
+	total := uint64(w1) + uint64(w2)
+	if total == 0 {
+		panic("WeightedAverage: weights sum to zero")
+	}
+	hi1, lo1 := bits.Mul64(uint64(w1), uint64(v1))
+	hi2, lo2 := bits.Mul64(uint64(w2), uint64(v2))
+	lo, carry := bits.Add64(lo1, lo2, 0)
+	hi, _ := bits.Add64(hi1, hi2, carry)
+	if hi >= total {
+		panic("WeightedAverage: quotient overflows int64")
+	}
+	quo, _ := bits.Div64(hi, lo, total)
+	if quo > math.MaxInt64 {
+		panic("WeightedAverage: quotient overflows int64")
+	}
+	return int64(quo)
+}
