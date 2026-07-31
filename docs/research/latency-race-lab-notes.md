@@ -357,6 +357,38 @@ and forgoes the trade. Neither is a fix, because both are reacting *after*
 the signal — and after the signal, the only way to get filled quickly is to
 pay, which is what the crowd is doing simultaneously.
 
+## Result 9: queue position dominates patience
+
+Before concluding that reacting-after-the-signal is hopeless, two cheap knobs
+were worth testing: wait longer, or pay a tick for priority.
+
+| second leg | fill rate | mean naked delta |
+|---|---|---|
+| join touch, 200 ms | 13.5% | 6.90 ABC |
+| join touch, 1 s | 16.3% | 7.06 ABC |
+| join touch, 5 s | 46.1% | 11.68 ABC |
+| **improve 1 tick, 1 s** | **44.0%** | **5.75 ABC** |
+
+Patience does work, but it pays for fills with exposure: going from 200 ms to
+5 s more than triples the fill rate and nearly doubles the naked delta,
+because the position sits half-hedged for the whole wait.
+
+One tick of price improvement buys **the same fill rate as five seconds of
+waiting, at half the directional risk and five times faster**. It is better on
+both axes at once, which a pure tradeoff should not be.
+
+The reason is queue position. Joining the touch places the order behind
+whatever the resident market maker already has resting at that price, so it
+fills only once the MM's size is exhausted — and the MM refreshes faster than
+the arb waits. Improving by one tick steps in front of the entire queue.
+Against a resident market maker, **priority is worth more than time**, and
+the price of priority is one tick.
+
+That also sharpens what the earlier 12.4% number was measuring. It was never
+"posting does not work"; it was "posting *behind the market maker* does not
+work." The distinction matters, because the first reading suggests abandoning
+passive execution and the second suggests paying a tick for it.
+
 **Where this points, and it is a genuinely different strategy.** If a
 resting order is what avoids both the spread and the crowd, then the order
 has to be resting *before* the signal arrives, not posted in response to it.

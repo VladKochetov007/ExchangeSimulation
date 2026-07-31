@@ -61,6 +61,17 @@ delta-hedging option market makers should show the gamma-feedback channel
 amplified by exactly this mechanism, since short-gamma dealers all need the
 same side at the same time.
 
+**0b. Queue position beats patience against a resident market maker.**
+Measured. A passive order joining the touch fills 16% of the time in one
+second; the same order posted one tick inside fills 44% — the same rate that
+five seconds of waiting achieves, at half the directional exposure and five
+times faster. Better on both axes, because joining the touch queues behind
+the market maker's resting size while improving steps in front of it. The
+generalization worth testing: sweep the improvement in ticks and find where
+the marginal tick stops paying for itself, which is the empirical price of
+queue priority in this ecology and should scale with how much size the
+resident MM keeps at the touch.
+
 ## Cheap effects the current engine can already produce
 
 **4. Inventory-throttle saturation (in progress).** Already observed: capture

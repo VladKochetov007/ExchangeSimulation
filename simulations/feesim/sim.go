@@ -108,6 +108,9 @@ type SimConfig struct {
 	// not filled within RaceArbLegTimeoutMs (default: one decision interval).
 	RaceArbPostLeg      bool
 	RaceArbLegTimeoutMs int64
+	// RaceArbImproveTicks posts the second leg this many ticks inside the
+	// touch, buying queue priority ahead of the resident market maker.
+	RaceArbImproveTicks int64
 
 	// RaceArbSequential makes race entrants leg in sequentially: perp first,
 	// spot mirrored to the actual fill. Removes the mismatch between two
@@ -530,6 +533,8 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 			SequentialLegs:   cfg.RaceArbSequential,
 			PostSecondLeg:    cfg.RaceArbPostLeg,
 			SecondLegTimeout: time.Duration(cfg.RaceArbLegTimeoutMs) * time.Millisecond,
+			PostImproveTicks: cfg.RaceArbImproveTicks,
+			TickSize:         abcUSDTick,
 		})
 		arb.SetTickerFactory(timerFact)
 		raceArbs = append(raceArbs, arb)

@@ -46,6 +46,13 @@ type BasisArbConfig struct {
 	// directional residual into a bounded, decided cost.
 	PostSecondLeg    bool
 	SecondLegTimeout time.Duration
+	// PostImproveTicks posts the second leg this many ticks INSIDE the near
+	// touch. Joining the touch queues the order behind whatever the resident
+	// market maker already has resting there, so it only fills once that size
+	// is exhausted; improving the price buys queue priority at the cost of a
+	// tick of edge. TickSize must be set for this to apply.
+	PostImproveTicks int64
+	TickSize         int64
 }
 
 // FeeAwareBasisArb arbitrages spot/perp basis using book mid prices.
@@ -155,6 +162,13 @@ func (a *FeeAwareBasisArb) sendSecondLeg(side exchange.Side, qty int64) {
 	price := a.spotBid
 	if side == exchange.Sell {
 		price = a.spotAsk
+	}
+	if improve := a.cfg.PostImproveTicks * a.cfg.TickSize; improve > 0 && price > 0 {
+		if side == exchange.Buy {
+			price += improve
+		} else {
+			price -= improve
+		}
 	}
 	if price <= 0 {
 		a.SubmitOrder(a.cfg.SpotSymbol, side, exchange.Market, 0, qty)
