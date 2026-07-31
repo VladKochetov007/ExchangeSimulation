@@ -37,6 +37,15 @@ type BasisArbConfig struct {
 	// the race becomes about who completes both legs first — second-leg
 	// latency becomes part of the edge.
 	SequentialLegs bool
+	// PostSecondLeg rests the mirrored leg as a limit order at the near touch
+	// instead of crossing the spread for it. Crossing pays the spread AND
+	// arrives in the same instant as every competitor reacting to the same
+	// print, so the second legs crowd each other; a resting order is already
+	// in the queue before that signal. Unfilled legs are cancelled after
+	// SecondLegTimeout and the first leg is unwound, converting an open-ended
+	// directional residual into a bounded, decided cost.
+	PostSecondLeg    bool
+	SecondLegTimeout time.Duration
 }
 
 // FeeAwareBasisArb arbitrages spot/perp basis using book mid prices.
@@ -57,6 +66,10 @@ type FeeAwareBasisArb struct {
 	// inFlight counts submitted-but-unfilled lots so a burst of reactive
 	// decisions cannot stack orders past MaxPosition before any fill lands.
 	inFlight int64
+	// restingLegs tracks posted second legs awaiting fill or timeout, keyed by
+	// the request ID so the accept event can attach the exchange order ID.
+	restingLegs map[uint64]*restingLeg
+
 	// hedgePending is the signed perp quantity already sent to flatten the
 	// residual but not yet reported filled. Without it each fill re-measures
 	// a residual that is already being corrected and fires another hedge, so
@@ -71,16 +84,34 @@ type FeeAwareBasisArb struct {
 	lastTradeSeq uint64
 
 	subscribed bool
+	// lastTick is the most recent ticker timestamp, used as the actor's clock
+	// so deadlines follow simulation time rather than wall time.
+	lastTick int64
 }
+
+// now is the actor's view of time: the last tick it observed. Resolution is
+// one CheckInterval, which is the same granularity the deadlines use.
+func (a *FeeAwareBasisArb) now() int64 { return a.lastTick }
 
 func (a *FeeAwareBasisArb) Position() int64    { return a.position }
 func (a *FeeAwareBasisArb) Symbol() string     { return a.cfg.SpotSymbol }
 func (a *FeeAwareBasisArb) PerpSymbol() string { return a.cfg.PerpSymbol }
 
+// restingLeg is a posted second leg: its remaining quantity, the deadline
+// after which it is abandoned, and the order ID once the exchange assigns one.
+type restingLeg struct {
+	orderID   uint64
+	side      exchange.Side
+	remaining int64
+	deadline  int64
+	cancelled bool
+}
+
 func NewFeeAwareBasisArb(id uint64, gw actor.Gateway, cfg BasisArbConfig) *FeeAwareBasisArb {
 	a := &FeeAwareBasisArb{
-		BaseActor: actor.NewBaseActor(id, gw),
-		cfg:       cfg,
+		BaseActor:   actor.NewBaseActor(id, gw),
+		cfg:         cfg,
+		restingLegs: make(map[uint64]*restingLeg),
 	}
 	a.SetHandler(a)
 	a.AddTicker(cfg.CheckInterval, a.onTick)
@@ -101,6 +132,81 @@ func (a *FeeAwareBasisArb) HandleEvent(_ context.Context, evt *actor.Event) {
 		}
 	case actor.EventOrderPartialFill, actor.EventOrderFilled:
 		a.onFill(evt.Data.(actor.OrderFillEvent))
+	case actor.EventOrderAccepted:
+		e := evt.Data.(actor.OrderAcceptedEvent)
+		if leg := a.restingLegs[e.RequestID]; leg != nil {
+			leg.orderID = e.OrderID
+		}
+	case actor.EventOrderCancelled:
+		a.onSecondLegCancelled(evt.Data.(actor.OrderCancelledEvent))
+	}
+}
+
+// sendSecondLeg either crosses for the mirror leg or posts it at the near
+// touch, depending on configuration.
+func (a *FeeAwareBasisArb) sendSecondLeg(side exchange.Side, qty int64) {
+	if !a.cfg.PostSecondLeg {
+		a.SubmitOrder(a.cfg.SpotSymbol, side, exchange.Market, 0, qty)
+		return
+	}
+	// Join the near touch: buying rests at the bid, selling at the ask. The
+	// order earns the spread instead of paying it, at the cost of possibly
+	// not filling at all — which the timeout sweep then resolves.
+	price := a.spotBid
+	if side == exchange.Sell {
+		price = a.spotAsk
+	}
+	if price <= 0 {
+		a.SubmitOrder(a.cfg.SpotSymbol, side, exchange.Market, 0, qty)
+		return
+	}
+	reqID := a.SubmitOrder(a.cfg.SpotSymbol, side, exchange.LimitOrder, price, qty)
+	a.restingLegs[reqID] = &restingLeg{
+		side:      side,
+		remaining: qty,
+		deadline:  a.now() + int64(a.secondLegTimeout()),
+	}
+}
+
+func (a *FeeAwareBasisArb) secondLegTimeout() time.Duration {
+	if a.cfg.SecondLegTimeout > 0 {
+		return a.cfg.SecondLegTimeout
+	}
+	return a.cfg.CheckInterval
+}
+
+// onSecondLegCancelled unwinds the first leg for whatever the posted second
+// leg never filled: the strategy decided not to pay up, so the paired
+// exposure has to go rather than sit naked.
+func (a *FeeAwareBasisArb) onSecondLegCancelled(e actor.OrderCancelledEvent) {
+	for reqID, leg := range a.restingLegs {
+		if leg.orderID != e.OrderID {
+			continue
+		}
+		delete(a.restingLegs, reqID)
+		if e.RemainingQty <= 0 {
+			return
+		}
+		// Unwind the matching first-leg quantity on the perp book.
+		unwind := exchange.Sell
+		if leg.side == exchange.Sell {
+			unwind = exchange.Buy
+		}
+		a.SubmitOrder(a.cfg.PerpSymbol, unwind, exchange.Market, 0, e.RemainingQty)
+		return
+	}
+}
+
+// sweepSecondLegs abandons posted legs past their deadline. Cancelling drives
+// the unwind through onSecondLegCancelled, which knows the unfilled amount.
+func (a *FeeAwareBasisArb) sweepSecondLegs() {
+	now := a.now()
+	for _, leg := range a.restingLegs {
+		if leg.cancelled || leg.orderID == 0 || now < leg.deadline {
+			continue
+		}
+		leg.cancelled = true
+		a.CancelOrder(leg.orderID)
 	}
 }
 
@@ -128,10 +234,19 @@ func (a *FeeAwareBasisArb) onFill(e actor.OrderFillEvent) {
 			if e.Side == exchange.Buy {
 				mirror = exchange.Sell
 			}
-			a.SubmitOrder(a.cfg.SpotSymbol, mirror, exchange.Market, 0, e.Qty)
+			a.sendSecondLeg(mirror, e.Qty)
 		}
 	case a.cfg.SpotSymbol:
 		a.spotPos += signed
+		for reqID, leg := range a.restingLegs {
+			if leg.orderID != e.OrderID {
+				continue
+			}
+			if leg.remaining -= e.Qty; leg.remaining <= 0 || e.IsFull {
+				delete(a.restingLegs, reqID)
+			}
+			break
+		}
 	default:
 		return
 	}
@@ -245,7 +360,8 @@ func (a *FeeAwareBasisArb) onSnapshot(e actor.BookSnapshotEvent) {
 	}
 }
 
-func (a *FeeAwareBasisArb) onTick(_ time.Time) {
+func (a *FeeAwareBasisArb) onTick(t time.Time) {
+	a.lastTick = t.UnixNano()
 	if !a.subscribed {
 		types := []exchange.MDType{exchange.MDSnapshot}
 		if a.cfg.Reactive {
@@ -255,6 +371,7 @@ func (a *FeeAwareBasisArb) onTick(_ time.Time) {
 		a.Subscribe(a.cfg.PerpSymbol, types...)
 		a.subscribed = true
 	}
+	a.sweepSecondLegs()
 	a.checkBasis()
 }
 

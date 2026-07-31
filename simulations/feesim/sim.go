@@ -103,6 +103,12 @@ type SimConfig struct {
 	// first.
 	RaceArbLotSize int64
 
+	// RaceArbPostLeg rests the mirrored second leg at the near touch instead
+	// of crossing for it, cancelling and unwinding the first leg if it has
+	// not filled within RaceArbLegTimeoutMs (default: one decision interval).
+	RaceArbPostLeg      bool
+	RaceArbLegTimeoutMs int64
+
 	// RaceArbSequential makes race entrants leg in sequentially: perp first,
 	// spot mirrored to the actual fill. Removes the mismatch between two
 	// independent market orders, which is the dominant source of naked delta.
@@ -512,16 +518,18 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		gw := tierMount.ConnectNewClient(nextClient, initBalances, spotMakerFee)
 		ex.AddPerpBalance(nextClient, "USD", 10_000_000*usdPrecision)
 		arb := NewFeeAwareBasisArb(nextClient, gw, BasisArbConfig{
-			SpotSymbol:     "ABC/USD",
-			PerpSymbol:     "ABC-PERP",
-			SpotFeeBps:     spotTakerBps,
-			PerpFeeBps:     perpTakerBps,
-			LotSize:        abcPrecision / 10,
-			MaxPosition:    raceMaxPosition,
-			CheckInterval:  100 * time.Millisecond,
-			Reactive:       cfg.RaceArbReactive,
-			HedgeResidual:  cfg.RaceArbHedge,
-			SequentialLegs: cfg.RaceArbSequential,
+			SpotSymbol:       "ABC/USD",
+			PerpSymbol:       "ABC-PERP",
+			SpotFeeBps:       spotTakerBps,
+			PerpFeeBps:       perpTakerBps,
+			LotSize:          abcPrecision / 10,
+			MaxPosition:      raceMaxPosition,
+			CheckInterval:    100 * time.Millisecond,
+			Reactive:         cfg.RaceArbReactive,
+			HedgeResidual:    cfg.RaceArbHedge,
+			SequentialLegs:   cfg.RaceArbSequential,
+			PostSecondLeg:    cfg.RaceArbPostLeg,
+			SecondLegTimeout: time.Duration(cfg.RaceArbLegTimeoutMs) * time.Millisecond,
 		})
 		arb.SetTickerFactory(timerFact)
 		raceArbs = append(raceArbs, arb)

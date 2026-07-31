@@ -320,6 +320,53 @@ from the synchronized crowd, because a resting order is already in the queue
 before the common signal arrives rather than racing everyone else to consume
 the same depth after it.
 
+## Result 8: posting the second leg bounds the risk by not trading
+
+Implemented: the mirror leg rests at the near touch, and if it has not filled
+within 200 ms it is cancelled and the first leg is unwound — an explicit
+decision not to pay up, rather than an open-ended residual.
+
+It does bound the exposure. Mean naked delta per entrant falls from 22.4 ABC
+(crossing) to 14.3, and on the best seed to about 3.4. The unwind path works:
+perp volume stays high while net perp position ends near flat, which is
+exactly the intended "churn rather than carry" behaviour.
+
+The problem is the fill rate. **Of 7,748 posted second legs, 959 filled and
+7,118 were cancelled — 12.4%.** Resting at the near touch almost never
+executes inside 200 ms in this market, so the strategy takes a first leg,
+fails to complete the pair, unwinds, and repeats. It has stopped arbitraging
+and started churning.
+
+A note on the metric: residual as a share of gross reads 98% here, which
+looks catastrophic and is meaningless — gross position collapsed because the
+strategy rarely completes a pair, so the ratio is dividing by nearly nothing.
+Absolute delta and completion rate are the honest numbers for this arm, and
+they are the two quoted above.
+
+So the three execution styles trade off along one axis rather than one being
+better:
+
+| style | naked delta | completes pairs? |
+|---|---|---|
+| simultaneous + hedge | 3.0 ABC | yes |
+| sequential, crossing | 22.4 ABC | yes, at 27% naked |
+| sequential, posted | 14.3 ABC | 12% of the time |
+
+Crossing completes the trade and carries the risk; posting refuses the risk
+and forgoes the trade. Neither is a fix, because both are reacting *after*
+the signal — and after the signal, the only way to get filled quickly is to
+pay, which is what the crowd is doing simultaneously.
+
+**Where this points, and it is a genuinely different strategy.** If a
+resting order is what avoids both the spread and the crowd, then the order
+has to be resting *before* the signal arrives, not posted in response to it.
+That is not arbitrage with better execution; it is market making with an
+arbitrage-derived fair value — quote both books continuously, skew the
+quotes by the basis, and let the flow come. The reactive-arb design converges
+to it under its own logic, which is a satisfying result: the execution
+constraints push the strategy into the role that actually earns the spread
+instead of paying it.
+
 **The design this points at.** Real desks do not solve legging risk by
 crossing the second leg faster; they post it. The second leg should be a
 *limit* order at a price that still preserves the edge, with a deadline —
