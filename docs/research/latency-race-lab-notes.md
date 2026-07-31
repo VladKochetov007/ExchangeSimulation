@@ -247,6 +247,51 @@ becomes part of the edge. That is the next experiment, and it should be
 judged by whether the equity correlation converges toward the volume
 correlation as residual approaches zero.
 
+## Result 6: sequential legging made it worse, not better
+
+Implemented and measured, five seeds each:
+
+| execution style | mean abs net delta | residual as share of gross |
+|---|---|---|
+| simultaneous | 4.43 ABC | ~3% |
+| simultaneous + hedge | 3.00 ABC | ~3% |
+| sequential + hedge | 22.42 ABC | ~27% |
+
+The prediction was wrong by a factor of seven. The mirror leg does fire — the
+spot position moves in the right direction — but it systematically fills
+about a quarter short of the perp leg it is mirroring, and the spot-side
+hedges that are supposed to clean that up under-fill for the same reason.
+
+Cutting the lot size tenfold changed almost nothing (27% → 25%), which rules
+out per-order depth: with reactive decisions the strategy simply makes ten
+times as many decisions, so aggregate flow is set by the opportunity rather
+than by how it is sliced.
+
+So the honest reading is that sequential legging trades one risk for another.
+Firing both legs at once risks the two fills mismatching. Legging in
+sequentially risks the second leg *chasing* — it is a market order sent after
+a latency delay into a book that has already moved, and repeated one-sided
+pressure depletes the side it needs. Neither is delta-neutral; they fail
+differently.
+
+**A confound worth stating rather than explaining away.** The two arms ended
+up trading in opposite directions — the simultaneous arm was net short spot
+and long perp, the sequential arm the reverse. Changing the execution
+sequence changes the trade path, which changes prices, which lands the
+strategy in a different basis regime. So part of the difference between 3%
+and 27% may be a book-side asymmetry rather than the execution style, and the
+comparison is not as clean as the table makes it look. Controlling for
+direction is a prerequisite before treating this as a settled result.
+
+**The design this points at.** Real desks do not solve legging risk by
+crossing the second leg faster; they post it. The second leg should be a
+*limit* order at a price that still preserves the edge, with a deadline —
+and if it does not fill, the first leg gets unwound rather than paid up for.
+That converts an uncontrolled directional residual into a bounded, decided
+cost, and it makes the latency race sharper rather than softer: the fast
+entrant wins because its resting second leg is already in the queue when the
+opportunity appears.
+
 ## Result 3: reactive decisions produce a real race (5 seeds)
 
 With position tracking fixed, both arms rerun across five seeds. Capture is

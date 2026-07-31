@@ -30,6 +30,13 @@ type BasisArbConfig struct {
 	// the strategy is trying to capture. Production basis arbs hedge exactly
 	// this residual.
 	HedgeResidual bool
+	// SequentialLegs sends the perp leg first and mirrors the SECOND leg to
+	// whatever actually filled, instead of firing both blindly and hoping
+	// they match. Residual then arises only from the second leg's own partial
+	// fills rather than from the mismatch between two independent orders, and
+	// the race becomes about who completes both legs first — second-leg
+	// latency becomes part of the edge.
+	SequentialLegs bool
 }
 
 // FeeAwareBasisArb arbitrages spot/perp basis using book mid prices.
@@ -113,14 +120,26 @@ func (a *FeeAwareBasisArb) onFill(e actor.OrderFillEvent) {
 		if a.inFlight > 0 {
 			a.inFlight--
 		}
-		// Any perp fill retires pending hedge quantity: fills cannot be
-		// attributed to a specific order here, and treating the nearest fill
-		// as the hedge keeps the estimate from drifting permanently.
-		a.hedgePending = shrinkToward(a.hedgePending, e.Qty)
+		if a.cfg.SequentialLegs {
+			// Mirror the second leg to what actually executed. Hedges ride
+			// the spot leg in this mode, so a perp fill is always a first
+			// leg and mirroring it cannot feed back on itself.
+			mirror := exchange.Buy
+			if e.Side == exchange.Buy {
+				mirror = exchange.Sell
+			}
+			a.SubmitOrder(a.cfg.SpotSymbol, mirror, exchange.Market, 0, e.Qty)
+		}
 	case a.cfg.SpotSymbol:
 		a.spotPos += signed
 	default:
 		return
+	}
+	// Pending hedge quantity is retired by fills on whichever leg carries the
+	// hedges; fills cannot be attributed to a specific order here, so the
+	// nearest fill on that leg is treated as the hedge.
+	if e.Symbol == a.hedgeSymbol() {
+		a.hedgePending = shrinkToward(a.hedgePending, e.Qty)
 	}
 
 	a.hedgeResidual()
@@ -169,8 +188,19 @@ func (a *FeeAwareBasisArb) hedgeResidual() {
 		side = exchange.Buy
 		qty = -residual
 	}
-	a.SubmitOrder(a.cfg.PerpSymbol, side, exchange.Market, 0, qty)
+	a.SubmitOrder(a.hedgeSymbol(), side, exchange.Market, 0, qty)
 	a.hedgePending -= residual
+}
+
+// hedgeSymbol is the leg residual hedges are sent to. With simultaneous legs
+// the perp leg takes them, since it needs only margin. With sequential legs
+// the spot leg is the one that lags, and putting hedges on the perp leg there
+// would mirror each hedge into a fresh spot order and never converge.
+func (a *FeeAwareBasisArb) hedgeSymbol() string {
+	if a.cfg.SequentialLegs {
+		return a.cfg.SpotSymbol
+	}
+	return a.cfg.PerpSymbol
 }
 
 // onTrade folds a trade print into the quote state: the print becomes the
@@ -290,15 +320,22 @@ func (a *FeeAwareBasisArb) checkBasis() {
 	// reports back.
 	switch {
 	case basis > 0 && a.position+a.inFlight < a.cfg.MaxPosition:
-		a.SubmitOrder(a.cfg.PerpSymbol, exchange.Sell, exchange.Market, 0, a.cfg.LotSize)
-		a.SubmitOrder(a.cfg.SpotSymbol, exchange.Buy, exchange.Market, 0, a.cfg.LotSize)
-		a.inFlight++
+		a.openPair(exchange.Sell, exchange.Buy)
 		a.lastTradeSeq = currentSeq
 
 	case basis < 0 && a.position-a.inFlight > -a.cfg.MaxPosition:
-		a.SubmitOrder(a.cfg.PerpSymbol, exchange.Buy, exchange.Market, 0, a.cfg.LotSize)
-		a.SubmitOrder(a.cfg.SpotSymbol, exchange.Sell, exchange.Market, 0, a.cfg.LotSize)
-		a.inFlight++
+		a.openPair(exchange.Buy, exchange.Sell)
 		a.lastTradeSeq = currentSeq
 	}
+}
+
+// openPair sends the legs. Sequential mode sends only the perp leg and lets
+// the fill drive the spot leg; simultaneous mode fires both and accepts
+// whatever mismatch the two fills leave behind.
+func (a *FeeAwareBasisArb) openPair(perpSide, spotSide exchange.Side) {
+	a.SubmitOrder(a.cfg.PerpSymbol, perpSide, exchange.Market, 0, a.cfg.LotSize)
+	if !a.cfg.SequentialLegs {
+		a.SubmitOrder(a.cfg.SpotSymbol, spotSide, exchange.Market, 0, a.cfg.LotSize)
+	}
+	a.inFlight++
 }

@@ -97,6 +97,17 @@ type SimConfig struct {
 	// throttles itself — the suspected cause of speed advantage saturating.
 	RaceArbMaxPosition int64
 
+	// RaceArbLotSize overrides each race entrant's lot in base units
+	// (default abcPrecision/10). Sizing to available depth is the discipline
+	// that decides whether the second leg can actually keep up with the
+	// first.
+	RaceArbLotSize int64
+
+	// RaceArbSequential makes race entrants leg in sequentially: perp first,
+	// spot mirrored to the actual fill. Removes the mismatch between two
+	// independent market orders, which is the dominant source of naked delta.
+	RaceArbSequential bool
+
 	// RaceArbHedge makes race entrants flatten the residual delta between
 	// their two legs. Unhedged, partial fills leave naked exposure an order
 	// of magnitude larger than the basis edge, which buries any profit signal
@@ -481,6 +492,10 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	if raceMaxPosition == 0 {
 		raceMaxPosition = 5000
 	}
+	raceLotSize := cfg.RaceArbLotSize
+	if raceLotSize == 0 {
+		raceLotSize = abcPrecision / 10
+	}
 	var raceArbs []*FeeAwareBasisArb
 	var raceMounts []*simulation.Mount
 	for _, tier := range cfg.RaceArbTiers {
@@ -497,15 +512,16 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		gw := tierMount.ConnectNewClient(nextClient, initBalances, spotMakerFee)
 		ex.AddPerpBalance(nextClient, "USD", 10_000_000*usdPrecision)
 		arb := NewFeeAwareBasisArb(nextClient, gw, BasisArbConfig{
-			SpotSymbol:    "ABC/USD",
-			PerpSymbol:    "ABC-PERP",
-			SpotFeeBps:    spotTakerBps,
-			PerpFeeBps:    perpTakerBps,
-			LotSize:       abcPrecision / 10,
-			MaxPosition:   raceMaxPosition,
-			CheckInterval: 100 * time.Millisecond,
-			Reactive:      cfg.RaceArbReactive,
-			HedgeResidual: cfg.RaceArbHedge,
+			SpotSymbol:     "ABC/USD",
+			PerpSymbol:     "ABC-PERP",
+			SpotFeeBps:     spotTakerBps,
+			PerpFeeBps:     perpTakerBps,
+			LotSize:        abcPrecision / 10,
+			MaxPosition:    raceMaxPosition,
+			CheckInterval:  100 * time.Millisecond,
+			Reactive:       cfg.RaceArbReactive,
+			HedgeResidual:  cfg.RaceArbHedge,
+			SequentialLegs: cfg.RaceArbSequential,
 		})
 		arb.SetTickerFactory(timerFact)
 		raceArbs = append(raceArbs, arb)
