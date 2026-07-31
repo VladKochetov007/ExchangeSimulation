@@ -207,6 +207,46 @@ prerequisite, and it is a more valuable piece of work than the fee sweep —
 a `residual delta` hedge turns this into a strategy whose P&L is actually
 about basis rather than about direction.
 
+## Result 5: hedging the residual partly uncovers the profit signal
+
+`HedgeResidual` flattens leftover delta on the perp leg, which needs only
+margin rather than spot inventory. The first implementation barely helped,
+for a reason worth recording: it did not account for its own orders in
+flight, so every subsequent fill re-measured a residual that was already
+being corrected and fired another hedge. The strategy overshot and the
+exposure flipped sign rather than closing. Tracking pending hedge quantity
+and netting it into the residual fixed that.
+
+Even corrected, post-hoc hedging is only partly effective:
+
+| arm | mean abs net delta | volume corr | equity corr |
+|---|---|---|---|
+| unhedged | 4.43 ABC | +0.80 | +0.00 |
+| hedged | 3.00 ABC | +0.84 | +0.44 |
+
+A 32% reduction in naked exposure, and the speed-to-profit correlation moves
+from nothing to +0.44 while the volume correlation is unchanged. That is
+consistent with the leg-risk explanation — as the directional noise falls,
+the profit signal starts to show through — but it is five seeds with equity
+still ranging from −$2,500 to +$70,000 across them, so it is directional
+evidence rather than a result. Three ABC of residual is still about $150,000
+of naked delta, and a one percent move is still $1,500.
+
+**Why post-hoc hedging cannot finish the job.** The residual is regenerated
+continuously: every pair of market orders fills asymmetrically, and the hedge
+is itself a market order that also fills asymmetrically. It is chasing its
+own tail, which is why a third of the exposure is the best it manages.
+
+The structural fix is **sequential legging** — send one leg, wait for the
+actual fill, then send the second leg sized to exactly that fill. Residual
+then arises only from the second leg's own partial fills rather than from the
+mismatch between two independent ones. It is also how production arbs work,
+and it is more interesting for a latency race rather than less: the race
+becomes about who completes *both* legs first, and the second leg's latency
+becomes part of the edge. That is the next experiment, and it should be
+judged by whether the equity correlation converges toward the volume
+correlation as residual approaches zero.
+
 ## Result 3: reactive decisions produce a real race (5 seeds)
 
 With position tracking fixed, both arms rerun across five seeds. Capture is

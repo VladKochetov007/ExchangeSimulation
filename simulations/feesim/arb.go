@@ -23,6 +23,13 @@ type BasisArbConfig struct {
 	// reactive decisions make reaction time = delivery latency, which is
 	// what a latency race is.
 	Reactive bool
+	// HedgeResidual flattens the leftover delta between the two legs. The
+	// strategy fires two market orders and assumes both fill; into a thin book
+	// they fill by different amounts and nothing reconciles the difference, so
+	// unhedged directional exposure accumulates until it dwarfs the basis edge
+	// the strategy is trying to capture. Production basis arbs hedge exactly
+	// this residual.
+	HedgeResidual bool
 }
 
 // FeeAwareBasisArb arbitrages spot/perp basis using book mid prices.
@@ -35,12 +42,19 @@ type FeeAwareBasisArb struct {
 	// all), so counting intents lets believed inventory drift arbitrarily far
 	// from reality and silently voids MaxPosition.
 	position int64
-	// perpFilled is the signed filled quantity on the perp leg in base units;
-	// position is this divided by LotSize.
-	perpFilled int64
+	// perpPos and spotPos are signed filled quantities per leg in base units.
+	// Delta neutrality means they sum to zero; whatever they actually sum to
+	// is the naked directional exposure the strategy is carrying.
+	perpPos int64
+	spotPos int64
 	// inFlight counts submitted-but-unfilled lots so a burst of reactive
 	// decisions cannot stack orders past MaxPosition before any fill lands.
 	inFlight int64
+	// hedgePending is the signed perp quantity already sent to flatten the
+	// residual but not yet reported filled. Without it each fill re-measures
+	// a residual that is already being corrected and fires another hedge, so
+	// the strategy overshoots and the exposure flips sign instead of closing.
+	hedgePending int64
 
 	spotBid, spotAsk int64
 	perpBid, perpAsk int64
@@ -83,24 +97,80 @@ func (a *FeeAwareBasisArb) HandleEvent(_ context.Context, evt *actor.Event) {
 	}
 }
 
-// onFill reconciles believed position against what actually executed. Only
-// the perp leg is counted: it defines the sign convention, and counting both
-// legs would double-count one round trip.
+// onFill reconciles believed position against what actually executed. The
+// perp leg defines the sign convention (short perp is a positive basis
+// position); the spot leg is tracked only to measure the residual between
+// them.
 func (a *FeeAwareBasisArb) onFill(e actor.OrderFillEvent) {
-	if e.Symbol != a.cfg.PerpSymbol {
-		return
-	}
 	signed := e.Qty
 	if e.Side == exchange.Sell {
 		signed = -signed
 	}
-	// A short perp leg is a POSITIVE basis position (short perp / long spot).
-	a.perpFilled -= signed
-	a.position = a.perpFilled / a.cfg.LotSize
-
-	if a.inFlight > 0 {
-		a.inFlight--
+	switch e.Symbol {
+	case a.cfg.PerpSymbol:
+		a.perpPos += signed
+		a.position = -a.perpPos / a.cfg.LotSize
+		if a.inFlight > 0 {
+			a.inFlight--
+		}
+		// Any perp fill retires pending hedge quantity: fills cannot be
+		// attributed to a specific order here, and treating the nearest fill
+		// as the hedge keeps the estimate from drifting permanently.
+		a.hedgePending = shrinkToward(a.hedgePending, e.Qty)
+	case a.cfg.SpotSymbol:
+		a.spotPos += signed
+	default:
+		return
 	}
+
+	a.hedgeResidual()
+}
+
+// residual is the naked delta across both legs, net of hedges already on the
+// wire: zero when every pair filled symmetrically, non-zero by exactly the
+// amount one leg out-filled the other.
+func (a *FeeAwareBasisArb) residual() int64 {
+	return a.spotPos + a.perpPos + a.hedgePending
+}
+
+// shrinkToward moves v toward zero by up to mag.
+func shrinkToward(v, mag int64) int64 {
+	if v > 0 {
+		if v -= mag; v < 0 {
+			return 0
+		}
+		return v
+	}
+	if v < 0 {
+		if v += mag; v > 0 {
+			return 0
+		}
+		return v
+	}
+	return 0
+}
+
+// hedgeResidual flattens leftover delta on the perp leg, which needs only
+// margin rather than spot inventory. It waits for the in-flight pair to
+// settle so a half-reported round trip is not mistaken for a residual, and it
+// ignores anything below one lot so rounding does not cause perpetual
+// hedging.
+func (a *FeeAwareBasisArb) hedgeResidual() {
+	if !a.cfg.HedgeResidual || a.inFlight > 0 {
+		return
+	}
+	residual := a.residual()
+	if residual >= -a.cfg.LotSize && residual <= a.cfg.LotSize {
+		return
+	}
+	side := exchange.Sell
+	qty := residual
+	if residual < 0 {
+		side = exchange.Buy
+		qty = -residual
+	}
+	a.SubmitOrder(a.cfg.PerpSymbol, side, exchange.Market, 0, qty)
+	a.hedgePending -= residual
 }
 
 // onTrade folds a trade print into the quote state: the print becomes the

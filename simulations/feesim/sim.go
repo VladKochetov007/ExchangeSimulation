@@ -96,6 +96,12 @@ type SimConfig struct {
 	// this is also the knob that decides how quickly a winning entrant
 	// throttles itself — the suspected cause of speed advantage saturating.
 	RaceArbMaxPosition int64
+
+	// RaceArbHedge makes race entrants flatten the residual delta between
+	// their two legs. Unhedged, partial fills leave naked exposure an order
+	// of magnitude larger than the basis edge, which buries any profit signal
+	// under directional noise.
+	RaceArbHedge bool
 }
 
 func DefaultSimConfig() SimConfig {
@@ -499,6 +505,7 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 			MaxPosition:   raceMaxPosition,
 			CheckInterval: 100 * time.Millisecond,
 			Reactive:      cfg.RaceArbReactive,
+			HedgeResidual: cfg.RaceArbHedge,
 		})
 		arb.SetTickerFactory(timerFact)
 		raceArbs = append(raceArbs, arb)
