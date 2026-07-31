@@ -90,6 +90,12 @@ type SimConfig struct {
 	// regardless of latency (a 100ms decision timer swamps any network
 	// spread — the gen-6 negative result); reactive entrants race for real.
 	RaceArbReactive bool
+
+	// RaceArbMaxPosition caps each race entrant's inventory in lots (default
+	// 5000). The accumulate threshold scales with |position|/MaxPosition, so
+	// this is also the knob that decides how quickly a winning entrant
+	// throttles itself — the suspected cause of speed advantage saturating.
+	RaceArbMaxPosition int64
 }
 
 func DefaultSimConfig() SimConfig {
@@ -465,6 +471,10 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	triArb.SetTickerFactory(timerFact)
 
 	// Optional latency-race arbs: same signal, tiered speed.
+	raceMaxPosition := cfg.RaceArbMaxPosition
+	if raceMaxPosition == 0 {
+		raceMaxPosition = 5000
+	}
 	var raceArbs []*FeeAwareBasisArb
 	var raceMounts []*simulation.Mount
 	for _, tier := range cfg.RaceArbTiers {
@@ -486,7 +496,7 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 			SpotFeeBps:    spotTakerBps,
 			PerpFeeBps:    perpTakerBps,
 			LotSize:       abcPrecision / 10,
-			MaxPosition:   5000,
+			MaxPosition:   raceMaxPosition,
 			CheckInterval: 100 * time.Millisecond,
 			Reactive:      cfg.RaceArbReactive,
 		})

@@ -109,6 +109,51 @@ injection helpers now use unique IDs and match strictly. Any market-order
 test written between the async-outbox change and this fix should be treated
 as suspect.
 
+## Result 3: reactive decisions produce a real race (5 seeds)
+
+With position tracking fixed, both arms rerun across five seeds. Capture is
+each entrant's wealth change (cash plus inventory marked at its nominal
+level) relative to the slowest entrant; the headline statistic is the rank
+correlation between speed and capture, because strict monotonicity across
+four tiers is too brittle a test on five seeds.
+
+| arm | 1.0× | 0.5× | 0.2× | 0.05× | mean rank-corr |
+|---|---|---|---|---|---|
+| polling | 1.00 | 1.06 | 1.02 | 0.96 | **+0.12** |
+| reactive | 1.00 | 1.05 | 1.25 | 1.20 | **+0.72** |
+
+The per-seed correlations are what settle it. Polling: −0.80, −0.60, +0.80,
++0.80, +0.40 — the sign flips, which is what a coin looks like. Reactive:
++0.80, +0.80, +0.60, +0.60, +0.80 — positive in **five seeds out of five**.
+
+So the gen-6 conclusion holds and is now mechanistic rather than
+observational: the tie was caused by the decision cadence, not by anything in
+the latency model or the exchange. Move the decision into the event handler
+and the same latency spread, the same agents, and the same market produce a
+speed-ordered outcome.
+
+## Result 4: the advantage saturates, and that is the interesting part
+
+Capture does not keep rising with speed. Mean capture peaks at the 0.2× tier
+(1.25) and *falls back* at 0.05× (1.20), and the gap between 1.0× and 0.5× is
+almost nothing (1.05). The effect switches on somewhere between 0.5× and
+0.2× and then flattens — being twenty times faster is worth no more than
+being five times faster.
+
+Leading hypothesis: the winner throttles itself. The accumulate threshold
+scales with `|position|/MaxPosition`, so the entrant that wins the early
+races builds inventory, raises its own bar for the next trade, and hands the
+marginal opportunity back to slower entrants. If that is the mechanism, the
+saturation point is an inventory-risk artifact, not a latency one — and
+raising `MaxPosition` should let the fastest tier pull away.
+
+That is a cheap, decisive test (`RaceArbMaxPosition`, now configurable), and
+it is worth running before drawing any conclusion about diminishing returns
+to speed, because the alternative explanations — market-data granularity
+binding before the network does, or the opportunity being exhausted within
+one latency window regardless of who takes it — imply very different things
+about what a latency race in this simulator actually measures.
+
 ## Method note
 
 The trade-by-trade probe was the turning point. Asserting conservation at the
