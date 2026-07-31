@@ -274,14 +274,51 @@ a latency delay into a book that has already moved, and repeated one-sided
 pressure depletes the side it needs. Neither is delta-neutral; they fail
 differently.
 
-**A confound worth stating rather than explaining away.** The two arms ended
-up trading in opposite directions — the simultaneous arm was net short spot
-and long perp, the sequential arm the reverse. Changing the execution
-sequence changes the trade path, which changes prices, which lands the
-strategy in a different basis regime. So part of the difference between 3%
-and 27% may be a book-side asymmetry rather than the execution style, and the
-comparison is not as clean as the table makes it look. Controlling for
-direction is a prerequisite before treating this as a settled result.
+**The confound checked out clean.** The two arms ended up trading in opposite
+directions — the simultaneous arm net short spot and long perp, the
+sequential arm the reverse — which raised the possibility that a book-side
+asymmetry, not the execution style, produced the gap. Measuring depth
+directly rules it out: top-five depth is symmetric between bid and ask
+(ratios 0.97 to 1.15 across arms and seeds) and identical between the spot
+and perp books (1.0×, both about 0.93 ABC). Neither side nor leg is
+structurally thinner, so the difference is genuinely about how the strategy
+executes.
+
+## Result 7: the second leg's real cost is crowding, not delay
+
+If the second leg fails because it chases a moved book, a lone arbitrageur
+should suffer the same way. Running the sequential strategy with a single
+entrant instead of four separates the two effects:
+
+| configuration | residual / gross |
+|---|---|
+| simultaneous, 4 entrants | ~3% |
+| **sequential, 1 entrant** | **9.8%** |
+| sequential, 4 entrants | 26.7% |
+
+Delay alone costs about 10%: that is the intrinsic price of sending the
+second leg into a book that has moved since the first leg filled.
+Competition costs another 17 points on top, nearly tripling the exposure.
+
+The mechanism is that sequential legging **synchronizes** the competitors.
+Each entrant reacts to the same trade print, each takes perp liquidity, and
+each then turns to the spot book at the same moment — so the second legs
+arrive together and crowd each other, while in simultaneous mode the same
+total demand is spread across the instants the first legs were sent. The
+strategies do not have to coordinate; reacting to a common signal is enough
+to align their hedging demand.
+
+That is a real and somewhat under-appreciated cost: **correlated hedging
+demand among competitors is larger than the latency disadvantage it was
+supposed to avoid.** It is the same shape as a crowded exit — everyone
+needing the same side at the same instant — arrived at here from execution
+mechanics rather than from position similarity.
+
+It also sharpens the case for the design below. Posting the second leg rather
+than crossing it does not merely save the spread; it removes the strategy
+from the synchronized crowd, because a resting order is already in the queue
+before the common signal arrives rather than racing everyone else to consume
+the same depth after it.
 
 **The design this points at.** Real desks do not solve legging risk by
 crossing the second leg faster; they post it. The second leg should be a

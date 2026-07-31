@@ -48,6 +48,19 @@ advantage to roughly nothing while tightening quoted spread. *Falsified if*
 capture stays speed-ordered under batching, which would point at the sim
 leaking a timing edge the batch is supposed to erase.
 
+## Confirmed while testing the latency race
+
+**0. Correlated hedging demand (crowded second leg).** Measured, not
+proposed. When competing arbitrageurs leg into a trade sequentially, they all
+react to the same print, all take the first leg, and all turn to the second
+book at the same instant. Residual exposure runs 9.8% of gross for a lone
+arbitrageur and 26.7% with four — competition costs more than the delay it
+was supposed to avoid. No coordination is required; a shared signal is
+enough to align the demand. Worth generalizing: the same experiment with
+delta-hedging option market makers should show the gamma-feedback channel
+amplified by exactly this mechanism, since short-gamma dealers all need the
+same side at the same time.
+
 ## Cheap effects the current engine can already produce
 
 **4. Inventory-throttle saturation (in progress).** Already observed: capture
