@@ -109,6 +109,104 @@ injection helpers now use unique IDs and match strictly. Any market-order
 test written between the async-outbox change and this fix should be treated
 as suspect.
 
+## Correction: the capture metric was measuring the wrong thing
+
+Everything in Results 3 and 4 below was computed from end-of-run wallet
+wealth, and that measure is wrong for this strategy. A basis arb holds long
+spot against short perp. The spot leg is a *balance*; the perp leg is a
+*position*. A wallet-only view counts the first and not the second, so pure
+inventory accumulation reads as profit — and since faster entrants accumulate
+faster, the metric manufactured exactly the correlation it was supposed to
+test.
+
+Recomputing from per-client fill and position events, with the perp leg
+valued at its unrealized mark, gives three separate answers:
+
+| metric | what it asks | reactive, 5 seeds |
+|---|---|---|
+| volume (filled qty) | who won the races | **+0.80** |
+| net (realized − fees) | economics of closed round trips | **−0.68** |
+| equity (cash + spot + perp unrealized) | total economic P&L | **+0.00** |
+
+**The mechanism claim survives and is strengthened.** Fill capture orders by
+speed with rank correlation +0.80 across five seeds under reactive decisions,
+against noise under polling. Reaction time became delivery latency, and the
+fast entrants win more races. That is the result the experiment was built to
+test, and it holds on the metric that measures it directly.
+
+**The profit claim does not survive.** Total economic P&L has no relationship
+to speed at all — mean rank correlation 0.00, individual seeds scattered from
+−0.80 to +0.80. The "1.25× capture" in the table below is spot-leg inventory,
+which is volume wearing a dollar sign.
+
+**And the reason is economically interesting.** Realized P&L on completed
+round trips is small and negative (about −$400) while fees are one to two
+orders of magnitude larger (about $5,000–$10,000), and fees scale with
+volume. So the faster entrant wins more races, pays proportionally more in
+taker fees on both legs, and ends up no better off. Speed buys volume, not
+profit, at these fee levels.
+
+That reframes the saturation in Result 4 as well: there was never a
+saturation of profit to explain, because there was never profit ordered by
+speed. On volume there is a mild flattening between the 0.2× and 0.05× tiers;
+on equity there is no signal to saturate.
+
+The obvious follow-up, and a much better experiment than the inventory sweep:
+**sweep the fee level and find where speed starts paying.** If the marginal
+race won is break-even at 8bps spot plus 5bps perp, there is some fee level
+below which speed becomes profitable, and the shape of that boundary is
+exactly the market-design question — it connects directly to why real venues
+compete on fee schedules and why the Budish–Cramton–Shim argument is about
+rents rather than volumes.
+
+`scripts/race_capture.py` computes all three metrics; `race_summary.py` is
+kept only because it reproduces the flawed wealth view that the tables below
+were built on.
+
+### The fee sweep does not rescue it, and leg risk is why
+
+Sweeping the taker fee on both legs, three seeds each, equity metric:
+
+| fee (spot/perp) | speed → profit rank-corr |
+|---|---|
+| 0 bps | +0.20 |
+| 2 bps | +0.27 |
+| 8/5 bps (baseline) | +0.00 |
+
+No level shows a speed effect, and all three are within noise of each other.
+The reason is not fees at all. Measuring each entrant's actual net delta —
+spot inventory against perp position — shows the strategy is **not
+delta-neutral in practice**:
+
+```
+client 12: spotABC=  54.96   perpPos= -45.56   net_delta=   9.40   (lot=0.10)
+client 13: spotABC=  50.16   perpPos= -58.57   net_delta=  -8.41
+client 14: spotABC=  61.94   perpPos= -66.00   net_delta=  -4.06
+```
+
+Between 17 and 94 lots of unhedged directional exposure, roughly a tenth of
+gross position. At $50,000 an ABC that is on the order of half a million
+dollars of naked delta, so a one percent move swings P&L by about $4,700 —
+the same magnitude as the entire equity figure being measured. The arb edge
+is buried under leg risk an order of magnitude larger.
+
+The cause is structural, not a bug: the strategy fires two market orders and
+assumes both fill completely. Into a thin book they fill partially and by
+different amounts, and nothing ever reconciles the residual. That is a
+faithful reproduction of a real problem — leg risk is exactly why production
+basis arbs hedge the residual, cap size to available depth, or quote one leg
+rather than crossing both — but it means this strategy cannot answer a
+question about profit until the residual is managed.
+
+So the honest chain is: reactive decisions make speed win races (robust,
++0.80 on volume, five of five seeds); speed does not translate into profit
+here, because fees scale with the volume won and because leg-risk noise
+dominates what is left; and no profit claim of any kind is measurable from
+this strategy until it hedges its residual delta. That last item is the real
+prerequisite, and it is a more valuable piece of work than the fee sweep —
+a `residual delta` hedge turns this into a strategy whose P&L is actually
+about basis rather than about direction.
+
 ## Result 3: reactive decisions produce a real race (5 seeds)
 
 With position tracking fixed, both arms rerun across five seeds. Capture is
