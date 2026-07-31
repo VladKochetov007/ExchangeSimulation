@@ -57,6 +57,7 @@ func (e *DefaultExchange) expiryLoop() {
 		case <-e.automCtx.Done():
 			return
 		case <-ticker.C():
+			e.automInFlight.Add(1)
 			e.CheckListings()
 			e.UpdateDerivativeMarks()
 			// After marks refresh: option books never enter the perp mark
@@ -64,6 +65,7 @@ func (e *DefaultExchange) expiryLoop() {
 			// whose exposure is options-only.
 			e.CheckPositionMarginerLiquidations()
 			e.CheckExpiries()
+			e.automInFlight.Add(-1)
 		}
 	}
 }

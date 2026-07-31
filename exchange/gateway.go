@@ -119,6 +119,19 @@ func (g *ClientGateway) deliverOutbox() {
 	}
 }
 
+// Idle reports whether nothing is queued in either direction and the outbox
+// deliverer has drained. Used by deterministic runners to decide the system
+// has settled; scheduled-but-future deliveries are deliberately not counted,
+// since those only fire when simulated time advances.
+func (g *ClientGateway) Idle() bool {
+	if len(g.RequestCh) > 0 || len(g.ResponseCh) > 0 || len(g.MarketData) > 0 {
+		return false
+	}
+	g.outMu.Lock()
+	defer g.outMu.Unlock()
+	return len(g.outbox) == 0 && !g.delivering
+}
+
 func (g *ClientGateway) Responses() <-chan Response          { return g.ResponseCh }
 func (g *ClientGateway) MarketDataCh() <-chan *MarketDataMsg { return g.MarketData }
 func (g *ClientGateway) MarketDataChan() chan *MarketDataMsg { return g.MarketData }

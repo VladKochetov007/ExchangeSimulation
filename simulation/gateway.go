@@ -45,6 +45,20 @@ type DelayedGateway struct {
 	lastMDAt   int64
 }
 
+// Idle reports whether this wrapper and the gateway beneath it have nothing
+// queued. Messages already scheduled for a future simulated time are NOT
+// counted: they fire only when the clock advances, so waiting for them would
+// deadlock the very barrier that is trying to decide whether to advance.
+func (d *DelayedGateway) Idle() bool {
+	if len(d.requestCh) > 0 || len(d.responseCh) > 0 || len(d.marketDataCh) > 0 {
+		return false
+	}
+	if inner, ok := d.inner.(interface{ Idle() bool }); ok {
+		return inner.Idle()
+	}
+	return true
+}
+
 func NewDelayedGateway(inner actor.Gateway, reqLat, respLat, mdLat LatencyProvider) *DelayedGateway {
 	return &DelayedGateway{
 		RequestLatency:    reqLat,

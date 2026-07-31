@@ -554,3 +554,49 @@ invariant fails.
   go through per-client fill events.
 - Whether reactive entrants ordered by speed at all, and if so how
   concentrated the capture is (the Aquilina–Budish–O'Neill comparison).
+
+## Result 10: a quiescence barrier, and the limits of it
+
+The reproducibility failure above is the most important defect found in this
+whole sequence, so the next step was to try to remove it rather than work
+around it. `StepSleep` cannot: it bets a fixed wall-clock pause against
+however long a reaction chain happens to take, so the answer depends on the
+machine.
+
+The alternative is a barrier — advance simulated time only once the system
+has finished reacting. That requires every component to be able to say
+whether it has work outstanding, which is a stricter question than "is any
+queue non-empty": a message already dequeued and being handled is invisible
+to a queue-length check. Implemented as an opt-in `RunnerConfig.Quiesce`,
+with an `Idle()` contract covering, in the order they were discovered:
+
+- actors, including work in progress inside a handler, not just queued;
+- exchange client gateways, both directions plus the response outbox;
+- the exchange's own request loop, with the in-flight count released by
+  `defer` so an early return for a shut-down gateway cannot leak it;
+- the exchange's automation loops (mark price, funding, expiry, snapshots,
+  interest), which react to the same clock the runner advances;
+- the actor ticker fan-in, where a tick can sit between the timer firing and
+  the run loop receiving it;
+- undelivered ticks still buffered inside the simulated timers themselves.
+
+Deliveries already scheduled for a *future* simulated time are deliberately
+excluded — they fire only when the clock advances, so waiting on them would
+deadlock the barrier that decides whether to advance.
+
+**It is not enough.** Three runs of the same configuration still produce two
+identical results and one different, the same ratio as before the last two
+hand-offs were closed. Reproducibility looks better than the original zero
+out of three, but three runs is far too small a sample to claim that, and
+the honest reading is that at least one hand-off remains unaccounted for.
+
+Two things are nonetheless worth keeping. The `Idle()` contract is the right
+shape and each closure was verified by construction rather than by outcome,
+so the remaining gap is narrower even if it is not measured. And the failure
+is now diagnosable: any component that can hold work invisibly is a candidate,
+and the list above is the method for finding the next one.
+
+Until it is closed, **every experimental claim in these notes needs
+replication across repeated runs of the same configuration**, not merely
+across seeds. The dose-response results survive because their shape cannot be
+produced by scheduler noise; the pairwise contrasts do not.

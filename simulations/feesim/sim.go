@@ -64,6 +64,12 @@ type SimConfig struct {
 	TakerExciteAlpha      float64
 	TakerExciteBetaPerSec float64
 
+	// Deterministic advances simulated time only after every actor has
+	// finished reacting to the previous step, instead of guessing a drain
+	// pause with StepSleepUs. Repeated runs of the same config then agree,
+	// which is what makes comparisons between configurations meaningful.
+	Deterministic bool
+
 	// StepSleepUs is the runner's per-step goroutine drain pause in µs
 	// (0 = runner default 1µs, negative = no sleep). Larger values trade
 	// wall time for scheduling determinism.
@@ -574,7 +580,9 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		Iterations: int(simTime / step),
 		Step:       step,
 		StepSleep:  time.Duration(cfg.StepSleepUs) * time.Microsecond,
+		Quiesce:    cfg.Deterministic,
 	})
+	runner.AddIdler(timerFact)
 	runner.AddMount(mmMount)
 	runner.AddMount(actorMount)
 	for _, m := range raceMounts {

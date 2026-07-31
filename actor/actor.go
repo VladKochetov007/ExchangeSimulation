@@ -51,6 +51,27 @@ type BaseActor struct {
 
 	activeOrders   sync.Map // orderID -> *OrderInfo
 	requestToOrder sync.Map // requestID -> orderID
+
+	// processing is non-zero while the run loop is inside a handler. A
+	// deterministic runner needs to know the difference between "no work
+	// queued" and "work queued but not started", and a queue-length check
+	// alone cannot see the message already dequeued and being handled.
+	processing atomic.Int64
+	// pendingTicks counts ticks received by the fan-in goroutines but not yet
+	// executed by the run loop. A tick sitting in that hand-off is real
+	// pending work that no channel length reveals.
+	pendingTicks atomic.Int64
+}
+
+// Idle reports whether the actor has nothing queued and nothing in flight.
+// Used by the runner's quiescence barrier to decide that simulated time may
+// advance without cutting a reaction short.
+func (a *BaseActor) Idle() bool {
+	return a.processing.Load() == 0 &&
+		a.pendingTicks.Load() == 0 &&
+		len(a.eventCh) == 0 &&
+		len(a.gateway.Responses()) == 0 &&
+		len(a.gateway.MarketDataCh()) == 0
 }
 
 type OrderInfo struct {
@@ -114,15 +135,22 @@ func (a *BaseActor) run(ctx context.Context) {
 		case <-a.stopCh:
 			return
 		case resp := <-a.gateway.Responses():
+			a.processing.Add(1)
 			if evt := a.decodeResponse(resp); evt != nil {
 				a.dispatch(ctx, evt)
 			}
+			a.processing.Add(-1)
 		case md := <-a.gateway.MarketDataCh():
+			a.processing.Add(1)
 			if evt := a.decodeMarketData(md); evt != nil {
 				a.dispatch(ctx, evt)
 			}
+			a.processing.Add(-1)
 		case tc := <-tickCh:
+			a.processing.Add(1)
 			tc.fn(tc.t)
+			a.processing.Add(-1)
+			a.pendingTicks.Add(-1)
 		}
 	}
 }
@@ -155,11 +183,14 @@ func (a *BaseActor) startTickers(ctx context.Context) <-chan tickCall {
 			for {
 				select {
 				case t := <-ticker.C():
+					a.pendingTicks.Add(1)
 					select {
 					case ch <- tickCall{fn, t}:
 					case <-ctx.Done():
+						a.pendingTicks.Add(-1)
 						return
 					case <-stopCh:
+						a.pendingTicks.Add(-1)
 						return
 					}
 				case <-ctx.Done():

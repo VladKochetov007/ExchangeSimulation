@@ -44,6 +44,25 @@ func (m *Mount) ConnectNewClient(clientID uint64, balances map[string]int64, fee
 	return d
 }
 
+// Idle reports whether every delayed gateway on this mount has drained. A
+// mount with no latency wrapper holds nothing of its own in flight.
+func (m *Mount) Idle() bool {
+	m.mu.Lock()
+	delayed := m.delayed
+	m.mu.Unlock()
+	for _, d := range delayed {
+		if !d.Idle() {
+			return false
+		}
+	}
+	// The venue itself holds the request queues of every gateway handed out
+	// without a latency wrapper, which no delayed gateway can see.
+	if idler, ok := m.Market.(interface{ Idle() bool }); ok {
+		return idler.Idle()
+	}
+	return true
+}
+
 // Shutdown stops all delayed gateways and shuts down the underlying venue.
 func (m *Mount) Shutdown() {
 	m.mu.Lock()

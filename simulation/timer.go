@@ -10,7 +10,26 @@ import (
 // SimTimerFactory creates simulation-time timers backed by EventScheduler
 type SimTimerFactory struct {
 	scheduler *EventScheduler
+	mu        sync.Mutex
+	timers    []*simTimer
 }
+
+// PendingTicks counts ticks delivered into timer channels but not yet
+// consumed by their owners. A tick sitting in that buffer is pending work
+// that no actor or exchange counter can see, because the receiving goroutine
+// has not run yet.
+func (f *SimTimerFactory) PendingTicks() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, t := range f.timers {
+		n += len(t.ch)
+	}
+	return n
+}
+
+// Idle implements the runner's quiescence contract.
+func (f *SimTimerFactory) Idle() bool { return f.PendingTicks() == 0 }
 
 // NewSimTimerFactory creates a new simulation timer factory
 func NewSimTimerFactory(scheduler *EventScheduler) *SimTimerFactory {
@@ -30,6 +49,9 @@ func (f *SimTimerFactory) NewTicker(d time.Duration) exchange.Ticker {
 		ch:        make(chan time.Time, 1), // Buffered to prevent blocking
 	}
 	t.start()
+	f.mu.Lock()
+	f.timers = append(f.timers, t)
+	f.mu.Unlock()
 	return t
 }
 
