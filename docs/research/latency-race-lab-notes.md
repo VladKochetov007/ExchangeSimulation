@@ -154,6 +154,40 @@ binding before the network does, or the opportunity being exhausted within
 one latency window regardless of who takes it — imply very different things
 about what a latency race in this simulator actually measures.
 
+### The inventory hypothesis is not supported
+
+Ten times the inventory cap, seven seeds:
+
+| cap | 1.0× | 0.5× | 0.2× | 0.05× | mean rank-corr |
+|---|---|---|---|---|---|
+| 5 000 (baseline) | 1.00 | 1.05 | 1.25 | 1.20 | +0.72 (5/5 seeds positive) |
+| 50 000 (10×) | 1.00 | 0.92 | 1.03 | 1.06 | +0.40 (5/7 positive) |
+
+If self-throttling were the mechanism, relaxing the cap should have let the
+fastest entrant pull away. It did the opposite: the speed signal got *weaker*
+and much noisier, with two seeds going negative and one entrant landing at
+0.39 — a worse fit than the baseline in every respect except that the
+nominal peak moved to the fastest tier.
+
+An interim three-seed read of this same sweep looked like confirmation
+(peak on the fastest tier, two of three monotonic). It did not survive four
+more seeds. Recording that explicitly because the premature read is the
+error worth remembering: three seeds of a four-point ranking is not enough
+to distinguish a mechanism from a coin, and the sweep was cheap enough that
+there was no reason to read it early.
+
+The likely reason the high-cap arm is noisy also undermines it as a test: at
+ten times the cap, entrants carry far larger inventory, so the wealth measure
+stops being dominated by arb capture and starts being dominated by
+mark-to-market on a directional position. The 0.39 seed is an entrant sitting
+on a large losing position, not one that lost a race. Any rerun of this test
+needs capture measured from round-trip arb P&L rather than end-of-run wealth.
+
+So the saturation stands unexplained. The remaining candidates — market-data
+granularity binding before the network does, or the opportunity being fully
+consumed within one latency window regardless of who wins it — are both
+testable, and both need a cleaner capture metric first.
+
 ## Method note
 
 The trade-by-trade probe was the turning point. Asserting conservation at the
