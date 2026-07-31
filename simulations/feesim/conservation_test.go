@@ -92,11 +92,19 @@ func TestFeesimEcologyConservesEveryAsset(t *testing.T) {
 				t.Fatalf("Run: %v", err)
 			}
 
-			// Observed dust is a few hundred units (fractions of a cent)
-			// across tens of thousands of fills; this bounds it two orders
-			// above that while still catching any systematic leak.
-			const dustTolerance = 100_000
+			// Entry prices are stored as truncated integers, so each
+			// position-reducing fill can leak up to (position size /
+			// precision) units of quote. That scales with inventory, not with
+			// a fixed number, so the bound is relative to the money in the
+			// system: a systematic leak grows without limit and blows through
+			// this, while rounding stays orders of magnitude below it. Only
+			// the perp quote asset is affected — the spot legs conserve
+			// exactly, which is the evidence that rounding is the only source.
 			for _, a := range assets {
+				dustTolerance := before[a] / 100_000_000
+				if dustTolerance < 1_000_000 {
+					dustTolerance = 1_000_000
+				}
 				got := systemTotal(ex, a)
 				if a == "USD" {
 					got -= openPositionCostBasis(ex)
