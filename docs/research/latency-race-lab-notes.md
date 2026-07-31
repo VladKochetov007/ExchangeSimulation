@@ -357,25 +357,76 @@ and forgoes the trade. Neither is a fix, because both are reacting *after*
 the signal — and after the signal, the only way to get filled quickly is to
 pay, which is what the crowd is doing simultaneously.
 
+## Methodological correction: the simulation is not reproducible
+
+Running the *same config with the same seed* three times gives materially
+different outcomes:
+
+```
+run a:  -101  -122  -116  -133      (final positions, four entrants)
+run b:  -100   -93   -94   -89
+run c:    +6    +6    +5    +6
+```
+
+Run c is not a perturbation of runs a and b; it is a different outcome. The
+seed controls the random draws, but actors are goroutines draining channels
+concurrently and their interleaving is decided by the OS scheduler, which
+nothing seeds. `StepSleepUs` is the lever — raising it gives each simulated
+step time to drain the actor goroutines before time advances, and at 50 µs
+three runs agreed exactly, though on a sim short enough that all four
+entrants ended flat, so that agreement proves little on its own.
+
+**This matters for everything above.** Every "n = 5 seeds" comparison in these
+notes was one run per seed, so the samples mix the manipulated variable with
+scheduler noise, and the noise is of comparable size. Pairwise comparisons
+between two configs at three or five runs are underpowered — the 16.3% versus
+29.6% discrepancy that exposed this was the *same configuration* measured
+twice.
+
+What survives this, and why:
+
+- **Dose-response across many levels with large N.** A monotone trend over
+  four or five settings, each covering thousands of orders, cannot be
+  produced by scheduler noise unless the noise is itself monotone in the
+  manipulated variable. Result 9 below is of this shape and stands.
+- **Effects consistent in sign across every seed.** Reactive-versus-polling
+  speed capture was positive in five of five and sign-flipping in the
+  control; that is weaker evidence than originally claimed but still
+  evidence.
+- **Anything resting on one pairwise contrast at n ≤ 5 should be treated as
+  provisional**, including the crowding decomposition in Result 7.
+
+The methodological fix for future work is to replicate each config several
+times and compare distributions, or to raise `StepSleepUs` until repeated
+runs agree and pay the wall-clock cost.
+
 ## Result 9: queue position dominates patience
 
 Before concluding that reacting-after-the-signal is hopeless, two cheap knobs
 were worth testing: wait longer, or pay a tick for priority.
 
-| second leg | fill rate | mean naked delta |
+First a metric correction. The original "fill rate" divided fill *events* by
+accepted orders, but one order produces a fill event per price level it
+touches, so the figure exceeded 100% at aggressive settings and was never a
+rate. The corrected measure is the share of posted orders that received any
+fill, and it gives a clean dose-response:
+
+| improvement | posted legs that filled | posted orders |
 |---|---|---|
-| join touch, 200 ms | 13.5% | 6.90 ABC |
-| join touch, 1 s | 16.3% | 7.06 ABC |
-| join touch, 5 s | 46.1% | 11.68 ABC |
-| **improve 1 tick, 1 s** | **44.0%** | **5.75 ABC** |
+| +0 ticks (join touch) | 16.9% | 3,676 |
+| +1 tick | 32.0% | 1,826 |
+| +2 ticks | 57.2% | 1,770 |
+| +3 ticks | 73.3% | 3,673 |
+| +5 ticks | 88.4% | 6,447 |
 
-Patience does work, but it pays for fills with exposure: going from 200 ms to
-5 s more than triples the fill rate and nearly doubles the naked delta,
-because the position sits half-hedged for the whole wait.
+Patience moves the same quantity far less: stretching the deadline from
+200 ms to 5 s raises fills but nearly doubles naked delta, because the
+position sits half-hedged for the whole wait. Price improvement raises fills
+*and* lowers naked delta, since the pair completes sooner.
 
-One tick of price improvement buys **the same fill rate as five seconds of
-waiting, at half the directional risk and five times faster**. It is better on
-both axes at once, which a pure tradeoff should not be.
+This is the one result in these notes with the shape that survives the
+reproducibility problem described above — five levels, thousands of orders
+each, monotone throughout.
 
 The reason is queue position. Joining the touch places the order behind
 whatever the resident market maker already has resting at that price, so it

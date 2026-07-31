@@ -62,15 +62,18 @@ amplified by exactly this mechanism, since short-gamma dealers all need the
 same side at the same time.
 
 **0b. Queue position beats patience against a resident market maker.**
-Measured. A passive order joining the touch fills 16% of the time in one
-second; the same order posted one tick inside fills 44% — the same rate that
-five seconds of waiting achieves, at half the directional exposure and five
-times faster. Better on both axes, because joining the touch queues behind
-the market maker's resting size while improving steps in front of it. The
-generalization worth testing: sweep the improvement in ticks and find where
-the marginal tick stops paying for itself, which is the empirical price of
-queue priority in this ecology and should scale with how much size the
-resident MM keeps at the touch.
+Measured as a dose-response: the share of posted second legs that fill runs
+16.9%, 32.0%, 57.2%, 73.3%, 88.4% at zero through five ticks of price
+improvement, over thousands of orders per level. Joining the touch queues
+behind the market maker's resting size; improving steps in front of it.
+Waiting longer raises fills too but increases naked exposure, while
+improving raises fills and lowers it, because the pair completes sooner.
+
+Where the marginal tick stops paying is NOT established — the equity figures
+across the sweep are within the run-to-run noise described in the lab notes.
+Settling it needs replicated runs per level, and it is worth settling, since
+that crossover is the empirical price of queue priority in this ecology and
+should scale with the size the resident MM keeps at the touch.
 
 ## Cheap effects the current engine can already produce
 
