@@ -1,6 +1,7 @@
 package marketdata
 
 import (
+	"slices"
 	"sync"
 
 	etypes "exchange_sim/types"
@@ -104,7 +105,22 @@ func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, tim
 	p.seqNum++
 	seqNum := p.seqNum
 
-	for clientID, sub := range subs {
+	// Fan out in client-ID order. Ranging the map delivers in a different
+	// order every run, and the subscriber handed the message first is the one
+	// that gets to react first — which randomizes precisely the thing a
+	// latency experiment is trying to measure. Ordering does hand a fixed
+	// advantage to low client IDs when two subscribers are otherwise
+	// identical, but that only decides exact ties: subscribers with modelled
+	// latency are delivered through the scheduler at their own arrival times,
+	// so publish order does not move them.
+	clientIDs := make([]uint64, 0, len(subs))
+	for clientID := range subs {
+		clientIDs = append(clientIDs, clientID)
+	}
+	slices.Sort(clientIDs)
+
+	for _, clientID := range clientIDs {
+		sub := subs[clientID]
 		if !containsMDType(sub.Types, mdType) {
 			continue
 		}

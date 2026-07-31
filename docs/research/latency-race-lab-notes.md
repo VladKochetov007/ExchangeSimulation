@@ -600,3 +600,49 @@ Until it is closed, **every experimental claim in these notes needs
 replication across repeated runs of the same configuration**, not merely
 across seeds. The dose-response results survive because their shape cannot be
 produced by scheduler noise; the pairwise contrasts do not.
+
+## Result 11: how far the barrier got, and why the rest is architectural
+
+Continuing the hunt found a genuine defect that had nothing to do with
+quiescence. `MDPublisher.Publish` fanned out over a Go map:
+
+```go
+for clientID, sub := range subs {   // random order every run
+```
+
+The subscriber handed the message first is the one that gets to react first,
+so the market-data fan-out was randomising precisely the thing a latency
+experiment measures. Three more unordered client loops were in the same
+family: funding and expiry settlement (which decides the sequence of payments
+and where the rounding remainder lands), the expiry cancel sweep (each cancel
+republishes the book), and balance-snapshot logging (the logs are the
+measurement medium). All four now iterate in client-ID order.
+
+Ordering the fan-out does hand a fixed advantage to low client IDs when two
+subscribers are otherwise identical, but that only decides exact ties:
+subscribers with modelled latency are delivered through the scheduler at
+their own arrival times, so publish order does not move them.
+
+**The measurement trap this exposed.** Four runs then produced identical race
+arb positions — all zero. That looked like success and was not: the arbs
+simply never traded in those runs, so the metric could not distinguish
+determinism from inactivity. Trade counts over the same four runs were 3085,
+3085, 3084 and 3086. Still not deterministic. Any determinism check has to
+be made against a quantity that actually varies.
+
+So the honest state is a large reduction, not a fix. Divergence went from
+qualitative — runs ending at −100 versus +6 positions — to roughly 0.06% of
+trades. Everything the barrier and the ordering could reach has been reached.
+
+**What remains is structural.** Actors are independent goroutines. Even with
+time frozen between steps and every hand-off accounted for, two actors
+reacting to the same tick race each other to submit, and whichever
+`SubmitOrder` lands first takes the fill. No amount of counting fixes that,
+because the nondeterminism is in the concurrency model rather than in any
+missed queue. Removing it means serialising actor execution into a single
+deterministic order — the sequencer architecture the engine-internals
+research already recommends as R5, and the same design LMAX and ABIDES use.
+
+That is a real piece of work and it should be scoped as such rather than
+attempted as another patch. Until then the standing rule holds: replicate
+across repeated runs, and trust dose-response shapes over pairwise contrasts.

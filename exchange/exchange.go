@@ -72,31 +72,31 @@ type AutomationConfig struct {
 }
 
 type DefaultExchange struct {
-	ID                      string
-	Clients                 map[uint64]*Client
-	Gateways                map[uint64]*ClientGateway
-	Books                   map[string]*OrderBook
-	Instruments             map[string]Instrument
-	Positions               PositionStore
-	ExchangeBalance         *ExchangeBalance
-	NextOrderID             uint64
-	Matcher                 MatchingEngine
-	MDPublisher             *MDPublisher
-	Clock                   Clock
-	Loggers                 map[string]Logger
-	BorrowingMgr            *BorrowingManager
-	CollateralRate          int64
-	LiquidationFeeBps       int64
-	autoAnchorMarks         bool
-	markEMAWindow           int
-	markBandBps             int64
-	autoAnchoredSymbols     map[string]bool
-	requestsInFlight        atomic.Int64
+	ID                  string
+	Clients             map[uint64]*Client
+	Gateways            map[uint64]*ClientGateway
+	Books               map[string]*OrderBook
+	Instruments         map[string]Instrument
+	Positions           PositionStore
+	ExchangeBalance     *ExchangeBalance
+	NextOrderID         uint64
+	Matcher             MatchingEngine
+	MDPublisher         *MDPublisher
+	Clock               Clock
+	Loggers             map[string]Logger
+	BorrowingMgr        *BorrowingManager
+	CollateralRate      int64
+	LiquidationFeeBps   int64
+	autoAnchorMarks     bool
+	markEMAWindow       int
+	markBandBps         int64
+	autoAnchoredSymbols map[string]bool
+	requestsInFlight    atomic.Int64
 	// automInFlight counts automation-loop work (mark prices, funding,
 	// expiry) in progress. These loops react to the same clock the runner
 	// advances, so a barrier that ignored them would move time while the
 	// exchange was still repricing.
-	automInFlight atomic.Int64
+	automInFlight           atomic.Int64
 	LiquidationHandler      LiquidationHandler
 	tickerFactory           TickerFactory
 	markPriceCalc           MarkPriceCalculator
@@ -291,7 +291,16 @@ func (e *DefaultExchange) LogAllBalances() {
 		return
 	}
 
-	for clientID, client := range e.Clients {
+	// Client-ID order so the emitted snapshot stream is byte-comparable
+	// between runs; these logs are the measurement medium for experiments.
+	snapshotClientIDs := make([]uint64, 0, len(e.Clients))
+	for clientID := range e.Clients {
+		snapshotClientIDs = append(snapshotClientIDs, clientID)
+	}
+	slices.Sort(snapshotClientIDs)
+
+	for _, clientID := range snapshotClientIDs {
+		client := e.Clients[clientID]
 		spotBalances := make([]AssetBalance, 0, len(client.Balances))
 		for asset, total := range client.Balances {
 			locked := client.Reserved[asset]
