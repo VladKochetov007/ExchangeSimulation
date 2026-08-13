@@ -295,3 +295,6 @@ bin/
 /feesim
 /loganalyzer
 /randomwalk
+
+skills-lock.json
+.agents/
