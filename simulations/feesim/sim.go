@@ -64,6 +64,12 @@ type SimConfig struct {
 	TakerExciteAlpha      float64
 	TakerExciteBetaPerSec float64
 
+	// Deterministic advances simulated time only after every actor has
+	// finished reacting to the previous step, instead of guessing a drain
+	// pause with StepSleepUs. Repeated runs of the same config then agree,
+	// which is what makes comparisons between configurations meaningful.
+	Deterministic bool
+
 	// StepSleepUs is the runner's per-step goroutine drain pause in µs
 	// (0 = runner default 1µs, negative = no sleep). Larger values trade
 	// wall time for scheduling determinism.
@@ -84,6 +90,44 @@ type SimConfig struct {
 	// relative fill shares measure the latency-race win concentration
 	// (Aquilina-Budish-O'Neill style). Empty = no race.
 	RaceArbTiers []float64
+
+	// RaceArbReactive makes race entrants decide inside HandleEvent on every
+	// trade print instead of on the polling ticker. Polling entrants tie
+	// regardless of latency (a 100ms decision timer swamps any network
+	// spread — the gen-6 negative result); reactive entrants race for real.
+	RaceArbReactive bool
+
+	// RaceArbMaxPosition caps each race entrant's inventory in lots (default
+	// 5000). The accumulate threshold scales with |position|/MaxPosition, so
+	// this is also the knob that decides how quickly a winning entrant
+	// throttles itself — the suspected cause of speed advantage saturating.
+	RaceArbMaxPosition int64
+
+	// RaceArbLotSize overrides each race entrant's lot in base units
+	// (default abcPrecision/10). Sizing to available depth is the discipline
+	// that decides whether the second leg can actually keep up with the
+	// first.
+	RaceArbLotSize int64
+
+	// RaceArbPostLeg rests the mirrored second leg at the near touch instead
+	// of crossing for it, cancelling and unwinding the first leg if it has
+	// not filled within RaceArbLegTimeoutMs (default: one decision interval).
+	RaceArbPostLeg      bool
+	RaceArbLegTimeoutMs int64
+	// RaceArbImproveTicks posts the second leg this many ticks inside the
+	// touch, buying queue priority ahead of the resident market maker.
+	RaceArbImproveTicks int64
+
+	// RaceArbSequential makes race entrants leg in sequentially: perp first,
+	// spot mirrored to the actual fill. Removes the mismatch between two
+	// independent market orders, which is the dominant source of naked delta.
+	RaceArbSequential bool
+
+	// RaceArbHedge makes race entrants flatten the residual delta between
+	// their two legs. Unhedged, partial fills leave naked exposure an order
+	// of magnitude larger than the basis edge, which buries any profit signal
+	// under directional noise.
+	RaceArbHedge bool
 }
 
 func DefaultSimConfig() SimConfig {
@@ -459,6 +503,14 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	triArb.SetTickerFactory(timerFact)
 
 	// Optional latency-race arbs: same signal, tiered speed.
+	raceMaxPosition := cfg.RaceArbMaxPosition
+	if raceMaxPosition == 0 {
+		raceMaxPosition = 5000
+	}
+	raceLotSize := cfg.RaceArbLotSize
+	if raceLotSize == 0 {
+		raceLotSize = abcPrecision / 10
+	}
 	var raceArbs []*FeeAwareBasisArb
 	var raceMounts []*simulation.Mount
 	for _, tier := range cfg.RaceArbTiers {
@@ -475,13 +527,20 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		gw := tierMount.ConnectNewClient(nextClient, initBalances, spotMakerFee)
 		ex.AddPerpBalance(nextClient, "USD", 10_000_000*usdPrecision)
 		arb := NewFeeAwareBasisArb(nextClient, gw, BasisArbConfig{
-			SpotSymbol:    "ABC/USD",
-			PerpSymbol:    "ABC-PERP",
-			SpotFeeBps:    spotTakerBps,
-			PerpFeeBps:    perpTakerBps,
-			LotSize:       abcPrecision / 10,
-			MaxPosition:   5000,
-			CheckInterval: 100 * time.Millisecond,
+			SpotSymbol:       "ABC/USD",
+			PerpSymbol:       "ABC-PERP",
+			SpotFeeBps:       spotTakerBps,
+			PerpFeeBps:       perpTakerBps,
+			LotSize:          abcPrecision / 10,
+			MaxPosition:      raceMaxPosition,
+			CheckInterval:    100 * time.Millisecond,
+			Reactive:         cfg.RaceArbReactive,
+			HedgeResidual:    cfg.RaceArbHedge,
+			SequentialLegs:   cfg.RaceArbSequential,
+			PostSecondLeg:    cfg.RaceArbPostLeg,
+			SecondLegTimeout: time.Duration(cfg.RaceArbLegTimeoutMs) * time.Millisecond,
+			PostImproveTicks: cfg.RaceArbImproveTicks,
+			TickSize:         abcUSDTick,
 		})
 		arb.SetTickerFactory(timerFact)
 		raceArbs = append(raceArbs, arb)
@@ -521,7 +580,9 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		Iterations: int(simTime / step),
 		Step:       step,
 		StepSleep:  time.Duration(cfg.StepSleepUs) * time.Microsecond,
+		Quiesce:    cfg.Deterministic,
 	})
+	runner.AddIdler(timerFact)
 	runner.AddMount(mmMount)
 	runner.AddMount(actorMount)
 	for _, m := range raceMounts {

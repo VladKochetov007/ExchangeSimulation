@@ -49,4 +49,9 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("done: sim=%s wall=%s logs=%s", *duration, time.Since(started).Round(time.Second), cfg.LogDir)
+
+	for i, arb := range sim.RaceArbs {
+		log.Printf("race_arb client=%d tier=%.2f reactive=%v final_position=%d",
+			arb.ID(), cfg.RaceArbTiers[i], cfg.RaceArbReactive, arb.Position())
+	}
 }

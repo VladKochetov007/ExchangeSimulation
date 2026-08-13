@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"slices"
 	"time"
 
 	einstrument "exchange_sim/instrument"
@@ -57,6 +58,7 @@ func (e *DefaultExchange) expiryLoop() {
 		case <-e.automCtx.Done():
 			return
 		case <-ticker.C():
+			e.automInFlight.Add(1)
 			e.CheckListings()
 			e.UpdateDerivativeMarks()
 			// After marks refresh: option books never enter the perp mark
@@ -64,6 +66,7 @@ func (e *DefaultExchange) expiryLoop() {
 			// whose exposure is options-only.
 			e.CheckPositionMarginerLiquidations()
 			e.CheckExpiries()
+			e.automInFlight.Add(-1)
 		}
 	}
 }
@@ -182,8 +185,15 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 	quote := inst.QuoteAsset()
 	precision := inst.BasePrecision()
 
-	for _, client := range e.Clients {
-		e.cancelClientOrdersOnBook(client, book, inst)
+	// Cancel in client-ID order: each cancel republishes the book, so map
+	// order would produce a different delta sequence every run.
+	expiryClientIDs := make([]uint64, 0, len(e.Clients))
+	for clientID := range e.Clients {
+		expiryClientIDs = append(expiryClientIDs, clientID)
+	}
+	slices.Sort(expiryClientIDs)
+	for _, clientID := range expiryClientIDs {
+		e.cancelClientOrdersOnBook(e.Clients[clientID], book, inst)
 	}
 
 	type expiringPos struct {

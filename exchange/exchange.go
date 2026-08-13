@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	ematching "exchange_sim/matching"
@@ -71,25 +72,31 @@ type AutomationConfig struct {
 }
 
 type DefaultExchange struct {
-	ID                      string
-	Clients                 map[uint64]*Client
-	Gateways                map[uint64]*ClientGateway
-	Books                   map[string]*OrderBook
-	Instruments             map[string]Instrument
-	Positions               PositionStore
-	ExchangeBalance         *ExchangeBalance
-	NextOrderID             uint64
-	Matcher                 MatchingEngine
-	MDPublisher             *MDPublisher
-	Clock                   Clock
-	Loggers                 map[string]Logger
-	BorrowingMgr            *BorrowingManager
-	CollateralRate          int64
-	LiquidationFeeBps       int64
-	autoAnchorMarks         bool
-	markEMAWindow           int
-	markBandBps             int64
-	autoAnchoredSymbols     map[string]bool
+	ID                  string
+	Clients             map[uint64]*Client
+	Gateways            map[uint64]*ClientGateway
+	Books               map[string]*OrderBook
+	Instruments         map[string]Instrument
+	Positions           PositionStore
+	ExchangeBalance     *ExchangeBalance
+	NextOrderID         uint64
+	Matcher             MatchingEngine
+	MDPublisher         *MDPublisher
+	Clock               Clock
+	Loggers             map[string]Logger
+	BorrowingMgr        *BorrowingManager
+	CollateralRate      int64
+	LiquidationFeeBps   int64
+	autoAnchorMarks     bool
+	markEMAWindow       int
+	markBandBps         int64
+	autoAnchoredSymbols map[string]bool
+	requestsInFlight    atomic.Int64
+	// automInFlight counts automation-loop work (mark prices, funding,
+	// expiry) in progress. These loops react to the same clock the runner
+	// advances, so a barrier that ignored them would move time while the
+	// exchange was still repricing.
+	automInFlight           atomic.Int64
 	LiquidationHandler      LiquidationHandler
 	tickerFactory           TickerFactory
 	markPriceCalc           MarkPriceCalculator
@@ -214,7 +221,9 @@ func (e *DefaultExchange) runSnapshotLoop(ticker Ticker) {
 	for {
 		select {
 		case <-ticker.C():
+			e.automInFlight.Add(1)
 			e.logSnapshots()
+			e.automInFlight.Add(-1)
 		case <-e.snapshotStopCh:
 			return
 		case <-e.shutdownCh:
@@ -265,7 +274,9 @@ func (e *DefaultExchange) runBalanceSnapshotLoop(interval time.Duration) {
 		case <-e.shutdownCh:
 			return
 		case <-ticker.C():
+			e.automInFlight.Add(1)
 			e.LogAllBalances()
+			e.automInFlight.Add(-1)
 		}
 	}
 }
@@ -280,7 +291,16 @@ func (e *DefaultExchange) LogAllBalances() {
 		return
 	}
 
-	for clientID, client := range e.Clients {
+	// Client-ID order so the emitted snapshot stream is byte-comparable
+	// between runs; these logs are the measurement medium for experiments.
+	snapshotClientIDs := make([]uint64, 0, len(e.Clients))
+	for clientID := range e.Clients {
+		snapshotClientIDs = append(snapshotClientIDs, clientID)
+	}
+	slices.Sort(snapshotClientIDs)
+
+	for _, clientID := range snapshotClientIDs {
+		client := e.Clients[clientID]
 		spotBalances := make([]AssetBalance, 0, len(client.Balances))
 		for asset, total := range client.Balances {
 			locked := client.Reserved[asset]
@@ -568,44 +588,72 @@ func (e *DefaultExchange) DisconnectClient(clientID uint64) {
 	}
 }
 
+// Idle reports whether the exchange has no client request queued or being
+// processed and every gateway has drained. A deterministic runner uses this
+// to decide the exchange has finished reacting before simulated time moves.
+func (e *DefaultExchange) Idle() bool {
+	if e.requestsInFlight.Load() != 0 || e.automInFlight.Load() != 0 {
+		return false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, gw := range e.Gateways {
+		if !gw.Idle() {
+			return false
+		}
+	}
+	return true
+}
+
 func (e *DefaultExchange) HandleClientRequests(gateway *ClientGateway) {
 	for req := range gateway.RequestCh {
-		// Discard order and subscribe requests for shut-down gateways.
-		// CancelOrder/Unsubscribe/QueryBalance are still processed so they
-		// can clean up state, but new orders and subscriptions must never be
-		// processed after gateway.IsRunning() returns false. Blocking ReqSubscribe
-		// closes the race where a queued subscribe arrives after Unsubscribe was
-		// called directly on MDPublisher during bootstrap shutdown.
-		if req.Type == ReqPlaceOrder || req.Type == ReqSubscribe {
-			if !gateway.IsRunning() {
-				continue
-			}
-		}
-
-		var resp Response
-		switch req.Type {
-		case ReqPlaceOrder:
-			resp = e.PlaceOrder(gateway.ClientID, req.OrderReq)
-		case ReqCancelOrder:
-			resp = e.CancelOrder(gateway.ClientID, req.CancelReq)
-		case ReqQueryBalance:
-			resp = e.QueryBalance(gateway.ClientID, req.QueryReq)
-		case ReqQueryAccount:
-			resp = e.QueryAccount(gateway.ClientID, req.QueryReq)
-		case ReqQueryInstruments:
-			resp = e.QueryInstruments(gateway.ClientID, req.QueryReq)
-		case ReqSubscribe:
-			resp = e.Subscribe(gateway.ClientID, req.QueryReq, gateway)
-		case ReqUnsubscribe:
-			resp = e.Unsubscribe(gateway.ClientID, req.QueryReq)
-		}
-
-		// At-least-once delivery: a dropped accept/reject leaves the actor's
-		// in-flight order state desynchronized forever. Routed through the
-		// outbox so it shares one FIFO with the fills/cancels the request
-		// generated — a direct send here could overtake them.
-		gateway.enqueueResponse(resp)
+		e.handleClientRequest(gateway, req)
 	}
+}
+
+// handleClientRequest processes one request. Kept separate so the in-flight
+// count is released by defer: an early return for a shut-down gateway would
+// otherwise leak the count and leave a deterministic runner waiting forever
+// for a system that has already settled.
+func (e *DefaultExchange) handleClientRequest(gateway *ClientGateway, req Request) {
+	e.requestsInFlight.Add(1)
+	defer e.requestsInFlight.Add(-1)
+
+	// Discard order and subscribe requests for shut-down gateways.
+	// CancelOrder/Unsubscribe/QueryBalance are still processed so they
+	// can clean up state, but new orders and subscriptions must never be
+	// processed after gateway.IsRunning() returns false. Blocking ReqSubscribe
+	// closes the race where a queued subscribe arrives after Unsubscribe was
+	// called directly on MDPublisher during bootstrap shutdown.
+	if req.Type == ReqPlaceOrder || req.Type == ReqSubscribe {
+		if !gateway.IsRunning() {
+			return
+		}
+	}
+
+	var resp Response
+	switch req.Type {
+	case ReqPlaceOrder:
+		resp = e.PlaceOrder(gateway.ClientID, req.OrderReq)
+	case ReqCancelOrder:
+		resp = e.CancelOrder(gateway.ClientID, req.CancelReq)
+	case ReqQueryBalance:
+		resp = e.QueryBalance(gateway.ClientID, req.QueryReq)
+	case ReqQueryAccount:
+		resp = e.QueryAccount(gateway.ClientID, req.QueryReq)
+	case ReqQueryInstruments:
+		resp = e.QueryInstruments(gateway.ClientID, req.QueryReq)
+	case ReqSubscribe:
+		resp = e.Subscribe(gateway.ClientID, req.QueryReq, gateway)
+	case ReqUnsubscribe:
+		resp = e.Unsubscribe(gateway.ClientID, req.QueryReq)
+	}
+
+	// At-least-once delivery: a dropped accept/reject leaves the actor's
+	// in-flight order state desynchronized forever. Routed through the
+	// outbox so it shares one FIFO with the fills/cancels the request
+	// generated — a direct send here could overtake them.
+	gateway.enqueueResponse(resp)
 }
 
 // GetBestLiquidity returns best bid qty, best ask qty for a symbol, thread-safe.
@@ -632,6 +680,19 @@ func (e *DefaultExchange) GetBook(symbol string) *OrderBook {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.Books[symbol]
+}
+
+// MidPrice computes a book's mid under the exchange lock. Implements
+// price.MidPriceProvider: callers must not read a *OrderBook obtained from
+// GetBook after the lock is released, since order handling mutates it.
+func (e *DefaultExchange) MidPrice(symbol string) int64 {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	book := e.Books[symbol]
+	if book == nil {
+		return 0
+	}
+	return book.GetMidPrice()
 }
 
 func (e *DefaultExchange) ListInstruments(baseFilter, quoteFilter string) []Instrument {
@@ -809,7 +870,9 @@ func (e *DefaultExchange) priceUpdateLoop() {
 		case <-e.automCtx.Done():
 			return
 		case <-ticker.C():
+			e.automInFlight.Add(1)
 			e.updateAllPerpPrices()
+			e.automInFlight.Add(-1)
 		}
 	}
 }
@@ -825,7 +888,9 @@ func (e *DefaultExchange) fundingSettlementLoop() {
 		case <-e.automCtx.Done():
 			return
 		case <-ticker.C():
+			e.automInFlight.Add(1)
 			e.CheckAndSettleFunding()
+			e.automInFlight.Add(-1)
 		}
 	}
 }
@@ -841,7 +906,9 @@ func (e *DefaultExchange) collateralChargeLoop() {
 		case <-e.automCtx.Done():
 			return
 		case <-ticker.C():
+			e.automInFlight.Add(1)
 			e.ChargeCollateralInterest()
+			e.automInFlight.Add(-1)
 		}
 	}
 }

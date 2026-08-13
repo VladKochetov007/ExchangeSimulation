@@ -29,6 +29,12 @@ type ClientGateway struct {
 	outMu      sync.Mutex
 	outbox     []Response
 	delivering bool
+
+	// closeMu serializes Close against Send. Checking IsRunning and then
+	// sending is a time-of-check-to-time-of-use race: Close can retire the
+	// gateway and close RequestCh in the window between them, and a send on a
+	// closed channel panics rather than merely losing the request.
+	closeMu sync.RWMutex
 }
 
 func NewClientGateway(clientID uint64) *ClientGateway {
@@ -63,6 +69,11 @@ func (g *ClientGateway) ID() uint64 { return g.ClientID }
 
 // Send submits a request non-blocking. Drops silently if the gateway is closed or the channel is full.
 func (g *ClientGateway) Send(req Request) {
+	// Read lock: concurrent senders still proceed in parallel, but Close
+	// cannot run between the liveness check and the send. The send itself is
+	// non-blocking, so holding the lock cannot stall a shutdown.
+	g.closeMu.RLock()
+	defer g.closeMu.RUnlock()
 	if !g.IsRunning() {
 		return
 	}
@@ -108,11 +119,26 @@ func (g *ClientGateway) deliverOutbox() {
 	}
 }
 
+// Idle reports whether nothing is queued in either direction and the outbox
+// deliverer has drained. Used by deterministic runners to decide the system
+// has settled; scheduled-but-future deliveries are deliberately not counted,
+// since those only fire when simulated time advances.
+func (g *ClientGateway) Idle() bool {
+	if len(g.RequestCh) > 0 || len(g.ResponseCh) > 0 || len(g.MarketData) > 0 {
+		return false
+	}
+	g.outMu.Lock()
+	defer g.outMu.Unlock()
+	return len(g.outbox) == 0 && !g.delivering
+}
+
 func (g *ClientGateway) Responses() <-chan Response          { return g.ResponseCh }
 func (g *ClientGateway) MarketDataCh() <-chan *MarketDataMsg { return g.MarketData }
 func (g *ClientGateway) MarketDataChan() chan *MarketDataMsg { return g.MarketData }
 
 func (g *ClientGateway) Close() {
+	g.closeMu.Lock()
+	defer g.closeMu.Unlock()
 	if !g.running.CompareAndSwap(true, false) {
 		return
 	}

@@ -1,10 +1,20 @@
 package exchange_test
 
 import (
+	"sync/atomic"
 	"time"
 
 	"exchange_sim/exchange"
 )
+
+// nextTestRequestID hands out unique request IDs. Responses are delivered
+// asynchronously through the gateway outbox, so a helper that matched on
+// anything less specific than its own request ID could return on a previous
+// order's leftover message and read exchange state before its own order was
+// processed.
+var testRequestSeq atomic.Uint64
+
+func nextTestRequestID() uint64 { return 1_000_000 + testRequestSeq.Add(1) }
 
 // InjectLimitOrder injects a limit order directly into the exchange for testing.
 // Returns the OrderID and RejectReason ("" if successful).
@@ -14,7 +24,7 @@ func InjectLimitOrder(ex *exchange.Exchange, clientID uint64, symbol string, sid
 		return 0, exchange.RejectUnknownClient
 	}
 
-	reqID := uint64(1000000 + ex.Clock.NowUnixNano()%1000000)
+	reqID := nextTestRequestID()
 
 	req := exchange.Request{
 		Type: exchange.ReqPlaceOrder,
@@ -60,10 +70,11 @@ func InjectMarketOrder(ex *exchange.Exchange, clientID uint64, symbol string, si
 		return 0, exchange.RejectUnknownClient
 	}
 
+	reqID := nextTestRequestID()
 	req := exchange.Request{
 		Type: exchange.ReqPlaceOrder,
 		OrderReq: &exchange.OrderRequest{
-			RequestID:   1000000,
+			RequestID:   reqID,
 			Side:        side,
 			Type:        exchange.Market,
 			Price:       0,
@@ -76,21 +87,23 @@ func InjectMarketOrder(ex *exchange.Exchange, clientID uint64, symbol string, si
 
 	gateway.RequestCh <- req
 
-	timeout := time.After(200 * time.Millisecond)
+	// A market order's fills are delivered BEFORE its accept response, so
+	// match strictly on the request ID: anything else returns while the
+	// order is still being processed.
+	timeout := time.After(2 * time.Second)
 	for {
 		select {
 		case resp := <-gateway.ResponseCh:
+			if resp.RequestID != reqID {
+				continue
+			}
 			if !resp.Success {
 				return 0, resp.Error
 			}
-			switch data := resp.Data.(type) {
-			case uint64:
-				return data, ""
-			case *exchange.FillNotification:
-				return data.OrderID, ""
-			default:
-				continue
+			if orderID, ok := resp.Data.(uint64); ok {
+				return orderID, ""
 			}
+			return 0, exchange.RejectUnknownInstrument
 		case <-timeout:
 			panic("test timeout: InjectMarketOrder did not receive response - this indicates a real bug")
 		}

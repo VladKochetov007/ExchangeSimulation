@@ -241,3 +241,5 @@ func NewPriceTimeMatcher() *PriceTimeMatcher {
 // NewProRataMatcher injects a real-time clock; callers using simulation time
 // should call matching.NewProRataMatcher(clock) directly.
 func NewProRataMatcher() *ProRataMatcher { return ematching.NewProRataMatcher(&eclock.RealClock{}) }
+
+var WeightedAverage = etypes.WeightedAverage

@@ -1,6 +1,9 @@
 package exchange
 
-import "sync"
+import (
+	"slices"
+	"sync"
+)
 
 type positionKey struct {
 	Symbol string
@@ -119,7 +122,17 @@ func (pm *PositionManager) PositionsForFunding(symbol string, fn func(clientID u
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 
-	for clientID, clientPositions := range pm.positions {
+	// Client-ID order: funding and expiry both settle through this callback,
+	// and map order would make the sequence of payments — and the rounding
+	// remainder that routes to the exchange — differ between runs.
+	clientIDs := make([]uint64, 0, len(pm.positions))
+	for clientID := range pm.positions {
+		clientIDs = append(clientIDs, clientID)
+	}
+	slices.Sort(clientIDs)
+
+	for _, clientID := range clientIDs {
+		clientPositions := pm.positions[clientID]
 		for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
 			pos := clientPositions[positionKey{symbol, side}]
 			if pos == nil || pos.Size == 0 {
@@ -169,8 +182,9 @@ func (pm *PositionManager) applyNettingPositionChange(pos *Position, qty, price 
 		pos.Size = newSize
 		pos.EntryPrice = price
 	} else if (pos.Size > 0 && newSize > pos.Size) || (pos.Size < 0 && newSize < pos.Size) {
-		// Use float64 to avoid int64 overflow: size (satoshis) × price (raw USD) can exceed 9.2e18.
-		pos.EntryPrice = int64((float64(pos.Size)*float64(pos.EntryPrice) + float64(deltaSize)*float64(price)) / float64(newSize))
+		// Exact 128-bit weighted average: size × price overflows int64 and
+		// exceeds float64's mantissa, and any error here is money.
+		pos.EntryPrice = WeightedAverage(abs(pos.Size), pos.EntryPrice, abs(deltaSize), price)
 		pos.Size = newSize
 	} else if (pos.Size > 0 && newSize < 0) || (pos.Size < 0 && newSize > 0) {
 		pos.EntryPrice = price
@@ -197,7 +211,7 @@ func (pm *PositionManager) applyHedgePositionChange(pos *Position, qty, price in
 				pos.EntryPrice = price
 			} else {
 				newSize := pos.Size + qty
-				pos.EntryPrice = int64((float64(pos.Size)*float64(pos.EntryPrice) + float64(qty)*float64(price)) / float64(newSize))
+				pos.EntryPrice = WeightedAverage(pos.Size, pos.EntryPrice, qty, price)
 				pos.Size = newSize
 				return
 			}
@@ -217,7 +231,7 @@ func (pm *PositionManager) applyHedgePositionChange(pos *Position, qty, price in
 				pos.EntryPrice = price
 			} else {
 				newSize := pos.Size - qty
-				pos.EntryPrice = int64((float64(-pos.Size)*float64(pos.EntryPrice) + float64(qty)*float64(price)) / float64(-newSize))
+				pos.EntryPrice = WeightedAverage(-pos.Size, pos.EntryPrice, qty, price)
 				pos.Size = newSize
 				return
 			}

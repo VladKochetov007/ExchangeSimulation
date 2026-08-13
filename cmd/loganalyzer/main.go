@@ -37,6 +37,9 @@ type trade struct {
 	TradeID uint64 `json:"trade_id"`
 	Price   int64  `json:"price"`
 	Qty     int64  `json:"qty"`
+	// Side is the TAKER's side, which is what makes order flow signable:
+	// a buy-initiated trade is demand lifting the offer.
+	Side string `json:"side"`
 }
 
 type assetBalance struct {
@@ -76,8 +79,29 @@ type SymbolMetrics struct {
 	ACFAbsR10      float64 `json:"acf_absr_lag10"`
 	TradeFano      float64 `json:"trade_count_fano"`
 
+	// Order-flow imbalance against contemporaneous returns. Out-of-sample:
+	// no parameter in the ecology was tuned against it, so unlike kurtosis
+	// or the Fano factor it is evidence rather than a restated input. A
+	// healthy market gives a positive beta — net buying pressure moves price
+	// up — and a value near zero would say price formation is decoupled from
+	// flow, which for an order-driven market means something is wrong.
+	OFIBeta float64 `json:"ofi_return_beta_bps_per_unit"`
+	OFICorr float64 `json:"ofi_return_corr"`
+	OFIObs  int     `json:"ofi_observations"`
+
+	// Cumulative price response to order flow, index k = seconds after the
+	// flow. A contemporaneous correlation cannot tell informed flow from
+	// mechanical impact: both move price with the trade. They separate over
+	// time. Flow that carried information leaves the price where it put it,
+	// so the curve stays flat; flow that merely consumed resting liquidity
+	// is refilled by market makers and the curve decays back toward zero.
+	OFIResponseBps  []float64 `json:"ofi_cumulative_response_bps_per_unit"`
+	OFIResponseCorr []float64 `json:"ofi_cumulative_response_corr"`
+
 	midSeries   map[int64]float64
 	tradeCounts map[int64]int64
+	// signedFlow is taker-signed volume per second: buys positive.
+	signedFlow map[int64]int64
 }
 
 // Report is the analyzer output for one experiment run.
@@ -86,8 +110,15 @@ type Report struct {
 	ClientDeltas map[string]map[string]int64 `json:"client_deltas"`              // clientID -> asset -> Δ(total incl perp+locked-borrowed)
 	SpotResidual map[string]int64            `json:"spot_conservation_residual"` // asset -> Σclient Δ (spot only, ex fees)
 	BasisRmsBps  map[string]float64          `json:"basis_rms_bps"`              // perp symbol -> RMS mid basis vs spot
-	Rejects      int64                       `json:"order_rejects"`
-	Liquidations int64                       `json:"liquidation_checks_logged"`
+	// Epps: cross-asset return correlation at increasing sampling intervals.
+	// Measured correlation should RISE with the interval purely because
+	// trades arrive asynchronously, with no change in the underlying
+	// dependence. Out-of-sample — nothing in the ecology is tuned to it —
+	// so a rising profile is evidence the microstructure is behaving, and a
+	// flat one says the assets are either perfectly synchronous or unlinked.
+	EppsCorrByInterval map[string]float64 `json:"epps_corr_by_interval_sec"`
+	Rejects            int64              `json:"order_rejects"`
+	Liquidations       int64              `json:"liquidation_checks_logged"`
 }
 
 func percentile(sorted []float64, p float64) float64 {
@@ -105,7 +136,11 @@ func analyzeSymbolFile(path string) (*SymbolMetrics, error) {
 	}
 	defer f.Close()
 
-	m := &SymbolMetrics{midSeries: make(map[int64]float64), tradeCounts: make(map[int64]int64)}
+	m := &SymbolMetrics{
+		midSeries:   make(map[int64]float64),
+		tradeCounts: make(map[int64]int64),
+		signedFlow:  make(map[int64]int64),
+	}
 	hasher := sha256.New()
 	var spreads, mids, depthB, depthA []float64
 	var notional float64
@@ -127,6 +162,11 @@ func analyzeSymbolFile(path string) (*SymbolMetrics, error) {
 			m.VolumeQty += t.Qty
 			m.LastPrice = t.Price
 			m.tradeCounts[ln.SimTS/1e9]++
+			if t.Side == "SELL" {
+				m.signedFlow[ln.SimTS/1e9] -= t.Qty
+			} else {
+				m.signedFlow[ln.SimTS/1e9] += t.Qty
+			}
 			notional += float64(t.Price) * float64(t.Qty)
 			fmt.Fprintf(hasher, "%d|%d|%d|%d\n", ln.SimTS, t.TradeID, t.Price, t.Qty)
 		case "BookSnapshot":
@@ -220,6 +260,26 @@ func (m *SymbolMetrics) computeStylizedFacts() {
 			rets = append(rets, math.Log(cur/prev))
 		}
 	}
+	// Regress the same-second return on signed order flow. Both series are
+	// built from the consecutive-second pairs above so they stay aligned.
+	var flows, flowRets []float64
+	for i := 1; i < len(secs); i++ {
+		if secs[i] != secs[i-1]+1 {
+			continue
+		}
+		prev, cur := m.midSeries[secs[i-1]], m.midSeries[secs[i]]
+		if prev <= 0 || cur <= 0 {
+			continue
+		}
+		flows = append(flows, float64(m.signedFlow[secs[i]]))
+		flowRets = append(flowRets, math.Log(cur/prev)*10000)
+	}
+	if len(flows) >= 30 {
+		m.OFIBeta, m.OFICorr = linregress(flows, flowRets)
+		m.OFIObs = len(flows)
+	}
+	m.computeImpactResponse(secs)
+
 	if len(rets) >= 30 {
 		m.ReturnKurtosis = excessKurtosis(rets)
 		m.ACFR1 = autocorr(rets, 1)
@@ -253,6 +313,86 @@ func (m *SymbolMetrics) computeStylizedFacts() {
 			m.TradeFano = (sumSq/n - meanC*meanC) / meanC
 		}
 	}
+}
+
+// computeImpactResponse builds the cumulative price-response curve: for each
+// horizon k, regress the total return over the k seconds following a second's
+// order flow on that flow. Only windows whose seconds are all present are
+// used, so a logging gap cannot be read as a large move.
+func (m *SymbolMetrics) computeImpactResponse(secs []int64) {
+	const maxLag = 5
+	retAt := make(map[int64]float64, len(secs))
+	for i := 1; i < len(secs); i++ {
+		if secs[i] != secs[i-1]+1 {
+			continue
+		}
+		prev, cur := m.midSeries[secs[i-1]], m.midSeries[secs[i]]
+		if prev > 0 && cur > 0 {
+			retAt[secs[i]] = math.Log(cur/prev) * 10000
+		}
+	}
+
+	m.OFIResponseBps = make([]float64, 0, maxLag+1)
+	m.OFIResponseCorr = make([]float64, 0, maxLag+1)
+	for k := 0; k <= maxLag; k++ {
+		var xs, ys []float64
+		for _, t := range secs {
+			flow, ok := m.signedFlow[t]
+			if !ok {
+				continue
+			}
+			// Require every second of the window to be present.
+			cum, complete := 0.0, true
+			for j := 0; j <= k; j++ {
+				r, ok := retAt[t+int64(j)]
+				if !ok {
+					complete = false
+					break
+				}
+				cum += r
+			}
+			if !complete {
+				continue
+			}
+			xs = append(xs, float64(flow))
+			ys = append(ys, cum)
+		}
+		if len(xs) < 30 {
+			break
+		}
+		beta, corr := linregress(xs, ys)
+		m.OFIResponseBps = append(m.OFIResponseBps, beta)
+		m.OFIResponseCorr = append(m.OFIResponseCorr, corr)
+	}
+}
+
+// linregress returns the slope of ys on xs and their correlation. Slope
+// answers "how far does price move per unit of net flow"; correlation
+// answers "how reliably", and the two together are what distinguish a real
+// impact relationship from a coincidence of scale.
+func linregress(xs, ys []float64) (slope, corr float64) {
+	n := float64(len(xs))
+	if n < 2 {
+		return 0, 0
+	}
+	var mx, my float64
+	for i := range xs {
+		mx += xs[i]
+		my += ys[i]
+	}
+	mx /= n
+	my /= n
+	var sxy, sxx, syy float64
+	for i := range xs {
+		dx, dy := xs[i]-mx, ys[i]-my
+		sxy += dx * dy
+		sxx += dx * dx
+		syy += dy * dy
+	}
+	if sxx == 0 || syy == 0 {
+		return 0, 0
+	}
+	return sxy / sxx, sxy / math.Sqrt(sxx*syy)
 }
 
 func excessKurtosis(xs []float64) float64 {
@@ -389,6 +529,57 @@ func computeBasis(rep *Report, pairs map[string]string) {
 	}
 }
 
+// computeEpps fills EppsCorrByInterval for the first two symbols that have
+// mid series, sampling returns at 1, 2, 5, 10, 30 and 60 second intervals.
+func computeEpps(rep *Report, symA, symB string) {
+	a, aok := rep.Symbols[symA]
+	b, bok := rep.Symbols[symB]
+	if !aok || !bok {
+		return
+	}
+	rep.EppsCorrByInterval = make(map[string]float64)
+	for _, step := range []int64{1, 2, 5, 10, 30, 60} {
+		ra := sampledReturns(a.midSeries, step)
+		rb := sampledReturns(b.midSeries, step)
+		n := min(len(ra), len(rb))
+		if n < 30 {
+			continue
+		}
+		_, corr := linregress(ra[:n], rb[:n])
+		rep.EppsCorrByInterval[fmt.Sprintf("%d", step)] = corr
+	}
+}
+
+// sampledReturns builds log returns over a fixed sampling interval, skipping
+// windows where either endpoint is missing so a gap cannot masquerade as a
+// large move.
+func sampledReturns(series map[int64]float64, step int64) []float64 {
+	if len(series) == 0 {
+		return nil
+	}
+	var lo, hi int64
+	first := true
+	for ts := range series {
+		if first || ts < lo {
+			lo = ts
+		}
+		if first || ts > hi {
+			hi = ts
+		}
+		first = false
+	}
+	var out []float64
+	for t := lo; t+step <= hi; t += step {
+		p0, ok0 := series[t]
+		p1, ok1 := series[t+step]
+		if !ok0 || !ok1 || p0 <= 0 || p1 <= 0 {
+			continue
+		}
+		out = append(out, math.Log(p1/p0))
+	}
+	return out
+}
+
 func main() {
 	dir := flag.String("dir", "", "experiment log directory (contains spot/, perp/, general.jsonl)")
 	out := flag.String("out", "", "output metrics JSON path (default: <dir>/metrics.json)")
@@ -419,6 +610,9 @@ func main() {
 		log.Fatalf("general.jsonl: %v", err)
 	}
 	computeBasis(rep, map[string]string{"ABC-PERP": "ABC/USD", "Q-PERP": "Q/USD"})
+	// Two independently-traded USD spot books: the Epps profile is about the
+	// asynchrony between them, so a perp and its own spot would not test it.
+	computeEpps(rep, "ABC/USD", "Q/USD")
 
 	b, err := json.MarshalIndent(rep, "", "  ")
 	if err != nil {
