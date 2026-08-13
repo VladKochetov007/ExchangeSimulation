@@ -287,3 +287,11 @@ good_plan.md
 # Go binaries
 bin/
 .claude/**
+# Go binaries dropped in the repo root by `go build ./cmd/<name>`
+# (bin/ is already ignored above; this covers the bare-build case)
+/abcusd
+/derivsim
+/expsim
+/feesim
+/loganalyzer
+/randomwalk
