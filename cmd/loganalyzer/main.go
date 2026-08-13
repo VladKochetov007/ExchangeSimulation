@@ -89,6 +89,15 @@ type SymbolMetrics struct {
 	OFICorr float64 `json:"ofi_return_corr"`
 	OFIObs  int     `json:"ofi_observations"`
 
+	// Cumulative price response to order flow, index k = seconds after the
+	// flow. A contemporaneous correlation cannot tell informed flow from
+	// mechanical impact: both move price with the trade. They separate over
+	// time. Flow that carried information leaves the price where it put it,
+	// so the curve stays flat; flow that merely consumed resting liquidity
+	// is refilled by market makers and the curve decays back toward zero.
+	OFIResponseBps  []float64 `json:"ofi_cumulative_response_bps_per_unit"`
+	OFIResponseCorr []float64 `json:"ofi_cumulative_response_corr"`
+
 	midSeries   map[int64]float64
 	tradeCounts map[int64]int64
 	// signedFlow is taker-signed volume per second: buys positive.
@@ -108,8 +117,8 @@ type Report struct {
 	// so a rising profile is evidence the microstructure is behaving, and a
 	// flat one says the assets are either perfectly synchronous or unlinked.
 	EppsCorrByInterval map[string]float64 `json:"epps_corr_by_interval_sec"`
-	Rejects      int64                       `json:"order_rejects"`
-	Liquidations int64                       `json:"liquidation_checks_logged"`
+	Rejects            int64              `json:"order_rejects"`
+	Liquidations       int64              `json:"liquidation_checks_logged"`
 }
 
 func percentile(sorted []float64, p float64) float64 {
@@ -269,6 +278,7 @@ func (m *SymbolMetrics) computeStylizedFacts() {
 		m.OFIBeta, m.OFICorr = linregress(flows, flowRets)
 		m.OFIObs = len(flows)
 	}
+	m.computeImpactResponse(secs)
 
 	if len(rets) >= 30 {
 		m.ReturnKurtosis = excessKurtosis(rets)
@@ -302,6 +312,57 @@ func (m *SymbolMetrics) computeStylizedFacts() {
 		if meanC > 0 {
 			m.TradeFano = (sumSq/n - meanC*meanC) / meanC
 		}
+	}
+}
+
+// computeImpactResponse builds the cumulative price-response curve: for each
+// horizon k, regress the total return over the k seconds following a second's
+// order flow on that flow. Only windows whose seconds are all present are
+// used, so a logging gap cannot be read as a large move.
+func (m *SymbolMetrics) computeImpactResponse(secs []int64) {
+	const maxLag = 5
+	retAt := make(map[int64]float64, len(secs))
+	for i := 1; i < len(secs); i++ {
+		if secs[i] != secs[i-1]+1 {
+			continue
+		}
+		prev, cur := m.midSeries[secs[i-1]], m.midSeries[secs[i]]
+		if prev > 0 && cur > 0 {
+			retAt[secs[i]] = math.Log(cur/prev) * 10000
+		}
+	}
+
+	m.OFIResponseBps = make([]float64, 0, maxLag+1)
+	m.OFIResponseCorr = make([]float64, 0, maxLag+1)
+	for k := 0; k <= maxLag; k++ {
+		var xs, ys []float64
+		for _, t := range secs {
+			flow, ok := m.signedFlow[t]
+			if !ok {
+				continue
+			}
+			// Require every second of the window to be present.
+			cum, complete := 0.0, true
+			for j := 0; j <= k; j++ {
+				r, ok := retAt[t+int64(j)]
+				if !ok {
+					complete = false
+					break
+				}
+				cum += r
+			}
+			if !complete {
+				continue
+			}
+			xs = append(xs, float64(flow))
+			ys = append(ys, cum)
+		}
+		if len(xs) < 30 {
+			break
+		}
+		beta, corr := linregress(xs, ys)
+		m.OFIResponseBps = append(m.OFIResponseBps, beta)
+		m.OFIResponseCorr = append(m.OFIResponseCorr, corr)
 	}
 }
 
