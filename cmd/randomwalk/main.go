@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"strings"
@@ -11,7 +12,7 @@ import (
 	"exchange_sim/simulations/randomwalk"
 )
 
-const simDuration = time.Minute * 10
+const defaultSimDuration = time.Minute * 10
 
 func printProgress(done, total int, simTotal time.Duration, started time.Time) {
 	pct := float64(done) / float64(total)
@@ -45,7 +46,11 @@ func fmtDuration(d time.Duration) string {
 }
 
 func main() {
-	sim, err := randomwalk.NewSim(simDuration)
+	duration := flag.Duration("duration", defaultSimDuration, "simulated duration")
+	logDir := flag.String("logdir", "logs/randomwalk", "directory for JSONL logs")
+	flag.Parse()
+
+	sim, err := randomwalk.NewSimWithLogDir(*duration, *logDir)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -53,7 +58,7 @@ func main() {
 
 	started := time.Now()
 	sim.Runner.SetProgressCallback(100_000, func(done, total int) {
-		printProgress(done, total, simDuration, started)
+		printProgress(done, total, *duration, started)
 	})
 
 	ctx := context.Background()
@@ -72,5 +77,5 @@ func main() {
 			log.Printf("%-12s final mid: $%.2f", sym, float64(mm.Mid(sym))/usd)
 		}
 	}
-	log.Println("Logs written to logs/randomwalk/")
+	log.Printf("Logs written to %s/", *logDir)
 }

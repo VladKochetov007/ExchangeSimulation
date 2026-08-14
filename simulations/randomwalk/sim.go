@@ -2,6 +2,7 @@ package randomwalk
 
 import (
 	"os"
+	"path/filepath"
 	"time"
 
 	"exchange_sim/exchange"
@@ -44,6 +45,12 @@ func (s *Sim) Close() {
 }
 
 func NewSim(simTime time.Duration) (*Sim, error) {
+	return NewSimWithLogDir(simTime, "logs/randomwalk")
+}
+
+// NewSimWithLogDir constructs the standard random-walk ecology while keeping
+// each experiment's artifacts in its own directory.
+func NewSimWithLogDir(simTime time.Duration, logDir string) (*Sim, error) {
 	simClock := simulation.NewSimulatedClock(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano())
 	scheduler := simulation.NewEventScheduler(simClock)
 	simClock.SetScheduler(scheduler)
@@ -57,14 +64,14 @@ func NewSim(simTime time.Duration) (*Sim, error) {
 		BalanceSnapshotInterval: 10 * time.Second,
 	})
 
-	if err := os.MkdirAll("logs/randomwalk/spot", 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(logDir, "spot"), 0755); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll("logs/randomwalk/perp", 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(logDir, "perp"), 0755); err != nil {
 		return nil, err
 	}
 
-	logGlobal, err := NewJSONLinesLogger("logs/randomwalk/general.jsonl")
+	logGlobal, err := NewJSONLinesLogger(filepath.Join(logDir, "general.jsonl"))
 	if err != nil {
 		return nil, err
 	}
@@ -90,11 +97,11 @@ func NewSim(simTime time.Duration) (*Sim, error) {
 
 		indexOracle.MapSymbol(perpSym, spotSym)
 
-		logSpot, err := NewJSONLinesLogger("logs/randomwalk/spot/" + spotSym + ".jsonl")
+		logSpot, err := NewJSONLinesLogger(filepath.Join(logDir, "spot", spotSym+".jsonl"))
 		if err != nil {
 			return nil, err
 		}
-		logPerp, err := NewJSONLinesLogger("logs/randomwalk/perp/" + perpSym + ".jsonl")
+		logPerp, err := NewJSONLinesLogger(filepath.Join(logDir, "perp", perpSym+".jsonl"))
 		if err != nil {
 			return nil, err
 		}
@@ -119,7 +126,7 @@ func NewSim(simTime time.Duration) (*Sim, error) {
 		inst := exchange.NewSpotInstrument(cs.symbol, cs.base, "ABC",
 			btcPrecision, btcPrecision, cs.tickSize, btcPrecision/100)
 		ex.AddInstrument(inst)
-		logCross, err := NewJSONLinesLogger("logs/randomwalk/spot/" + cs.symbol + ".jsonl")
+		logCross, err := NewJSONLinesLogger(filepath.Join(logDir, "spot", cs.symbol+".jsonl"))
 		if err != nil {
 			return nil, err
 		}
