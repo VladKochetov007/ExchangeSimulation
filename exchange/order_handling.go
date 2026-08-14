@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"cmp"
+	"math"
 	"slices"
 
 	etypes "exchange_sim/types"
@@ -336,11 +337,11 @@ func (e *DefaultExchange) positionExposureViolation(clientID uint64, book *Order
 		}
 	}
 	if req.Side == Buy {
-		_, ok := etypes.TryAdd(size, req.Qty)
-		return !ok
+		result, ok := etypes.TryAdd(size, req.Qty)
+		return !ok || result == math.MinInt64
 	}
-	_, ok := etypes.TrySub(size, req.Qty)
-	return !ok
+	result, ok := etypes.TrySub(size, req.Qty)
+	return !ok || result == math.MinInt64
 }
 
 // hedgeReduceViolation rejects hedge-mode reducing orders when the new
