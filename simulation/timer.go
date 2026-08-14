@@ -2,6 +2,7 @@ package simulation
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"exchange_sim/exchange"
@@ -14,16 +15,16 @@ type SimTimerFactory struct {
 	timers    []*simTimer
 }
 
-// PendingTicks counts ticks delivered into timer channels but not yet
-// consumed by their owners. A tick sitting in that buffer is pending work
-// that no actor or exchange counter can see, because the receiving goroutine
-// has not run yet.
+// PendingTicks counts ticks delivered by the scheduler but not yet acknowledged
+// by their consumers. Counting only channel occupancy leaves a hand-off gap:
+// a consumer can remove a tick before its own pending-work counter is updated,
+// letting a quiescent runner advance simulated time past the tick.
 func (f *SimTimerFactory) PendingTicks() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	n := 0
 	for _, t := range f.timers {
-		n += len(t.ch)
+		n += int(t.pending.Load())
 	}
 	return n
 }
@@ -62,9 +63,15 @@ type simTimer struct {
 	mu        sync.Mutex
 	eventID   uint64
 	stopped   bool
+	pending   atomic.Int64
 }
 
 func (t *simTimer) C() <-chan time.Time { return t.ch }
+
+// Acknowledge marks one delivered tick as fully processed. It is deliberately
+// optional: production tickers keep the small Ticker interface unchanged, and
+// consumers only invoke it when the concrete ticker supports it.
+func (t *simTimer) Acknowledge() { t.pending.Add(-1) }
 
 // Stop cancels the underlying scheduler event. Like time.Ticker.Stop it does
 // NOT close the channel: the tick callback may be mid-fire on another
@@ -93,10 +100,15 @@ func (t *simTimer) start() {
 			return
 		}
 		t.mu.Unlock()
-		// Non-blocking send - if channel full, skip this tick
+		// Account before exposing the tick. A receiving goroutine may run as
+		// soon as the send completes, so incrementing afterward reintroduces
+		// the quiescence hand-off gap this counter is meant to close.
+		t.pending.Add(1)
+		// Non-blocking send - if channel full, skip this tick.
 		select {
 		case t.ch <- time.Unix(0, t.scheduler.clock.NowUnixNano()):
 		default:
+			t.pending.Add(-1)
 		}
 	})
 }

@@ -116,6 +116,34 @@ func TestRegressionTickerStopConcurrentWithAdvance(t *testing.T) {
 	}
 }
 
+func TestSimTimerFactoryWaitsForTickAcknowledgement(t *testing.T) {
+	clk := NewSimulatedClock(0)
+	sched := NewEventScheduler(clk)
+	clk.SetScheduler(sched)
+	factory := NewSimTimerFactory(sched)
+
+	ticker := factory.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+
+	clk.Advance(time.Millisecond)
+	if factory.Idle() {
+		t.Fatal("factory reported idle with a delivered tick")
+	}
+	<-ticker.C()
+	if factory.Idle() {
+		t.Fatal("factory reported idle after a tick was received but before processing completed")
+	}
+
+	acknowledger, ok := ticker.(interface{ Acknowledge() })
+	if !ok {
+		t.Fatal("simulation ticker does not expose acknowledgement")
+	}
+	acknowledger.Acknowledge()
+	if !factory.Idle() {
+		t.Fatal("factory remained non-idle after the delivered tick was acknowledged")
+	}
+}
+
 func TestRegressionNewTickerPanicsOnNonPositiveInterval(t *testing.T) {
 	clk := NewSimulatedClock(0)
 	sched := NewEventScheduler(clk)

@@ -232,6 +232,7 @@ func (e *DefaultExchange) runSnapshotLoop(ticker Ticker) {
 			e.automInFlight.Add(1)
 			e.logSnapshots()
 			e.automInFlight.Add(-1)
+			acknowledgeTicker(ticker)
 		case <-e.snapshotStopCh:
 			return
 		case <-e.shutdownCh:
@@ -291,6 +292,7 @@ func (e *DefaultExchange) runBalanceSnapshotLoop(interval time.Duration) {
 			e.automInFlight.Add(1)
 			e.LogAllBalances()
 			e.automInFlight.Add(-1)
+			acknowledgeTicker(ticker)
 		}
 	}
 }
@@ -992,6 +994,19 @@ func (e *DefaultExchange) StopAutomation() {
 	e.automMu.Unlock()
 }
 
+type tickerAcknowledger interface {
+	Acknowledge()
+}
+
+// acknowledgeTicker is a no-op for production tickers. Scheduler-backed
+// tickers use it to keep a deterministic runner from advancing during the
+// interval between channel receive and callback completion.
+func acknowledgeTicker(ticker Ticker) {
+	if acknowledger, ok := ticker.(tickerAcknowledger); ok {
+		acknowledger.Acknowledge()
+	}
+}
+
 func (e *DefaultExchange) priceUpdateLoop(ticker Ticker) {
 	defer e.automWg.Done()
 	defer ticker.Stop()
@@ -1006,6 +1021,7 @@ func (e *DefaultExchange) priceUpdateLoop(ticker Ticker) {
 			e.automInFlight.Add(1)
 			e.updateAllPerpPrices()
 			e.automInFlight.Add(-1)
+			acknowledgeTicker(ticker)
 		}
 	}
 }
@@ -1022,6 +1038,7 @@ func (e *DefaultExchange) fundingSettlementLoop(ticker Ticker) {
 			e.automInFlight.Add(1)
 			e.CheckAndSettleFunding()
 			e.automInFlight.Add(-1)
+			acknowledgeTicker(ticker)
 		}
 	}
 }
@@ -1038,6 +1055,7 @@ func (e *DefaultExchange) collateralChargeLoop(ticker Ticker) {
 			e.automInFlight.Add(1)
 			e.ChargeCollateralInterest()
 			e.automInFlight.Add(-1)
+			acknowledgeTicker(ticker)
 		}
 	}
 }

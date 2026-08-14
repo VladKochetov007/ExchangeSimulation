@@ -33,8 +33,19 @@ type tickEntry struct {
 }
 
 type tickCall struct {
-	fn func(time.Time)
-	t  time.Time
+	ticker exchange.Ticker
+	fn     func(time.Time)
+	t      time.Time
+}
+
+type tickAcknowledger interface {
+	Acknowledge()
+}
+
+func acknowledgeTick(ticker exchange.Ticker) {
+	if acknowledger, ok := ticker.(tickAcknowledger); ok {
+		acknowledger.Acknowledge()
+	}
 }
 
 type BaseActor struct {
@@ -159,6 +170,7 @@ func (a *BaseActor) run(ctx context.Context, tickCh <-chan tickCall) {
 			tc.fn(tc.t)
 			a.processing.Add(-1)
 			a.pendingTicks.Add(-1)
+			acknowledgeTick(tc.ticker)
 		}
 	}
 }
@@ -193,12 +205,14 @@ func (a *BaseActor) startTickers(ctx context.Context) <-chan tickCall {
 				case t := <-ticker.C():
 					a.pendingTicks.Add(1)
 					select {
-					case ch <- tickCall{fn, t}:
+					case ch <- tickCall{ticker: ticker, fn: fn, t: t}:
 					case <-ctx.Done():
 						a.pendingTicks.Add(-1)
+						acknowledgeTick(ticker)
 						return
 					case <-stopCh:
 						a.pendingTicks.Add(-1)
+						acknowledgeTick(ticker)
 						return
 					}
 				case <-ctx.Done():

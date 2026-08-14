@@ -68,6 +68,7 @@ func (e *DefaultExchange) expiryLoop(ticker Ticker) {
 			// whose exposure is options-only.
 			e.CheckPositionMarginerLiquidations()
 			e.automInFlight.Add(-1)
+			acknowledgeTicker(ticker)
 		}
 	}
 }
