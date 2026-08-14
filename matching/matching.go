@@ -43,11 +43,22 @@ func PutExecution(e *etypes.Execution) {
 // the order behind existing liquidity).
 func makerAvailable(order *etypes.Order) int64 {
 	remaining := order.Qty - order.FilledQty
-	if order.Visibility != etypes.Iceberg || order.DisplayRemaining <= 0 {
+	if order.Visibility != etypes.Iceberg {
 		return remaining
 	}
-	if order.DisplayRemaining < remaining {
-		return order.DisplayRemaining
+	display := order.DisplayRemaining
+	// DisplayRemaining is transient state. Orders restored or injected through
+	// the public book API may not carry it, so use the configured tranche just
+	// as book.VisibleQty does. A non-positive configured display has no
+	// executable liquidity rather than exposing the hidden reserve.
+	if display == 0 {
+		display = order.IcebergQty
+	}
+	if display <= 0 {
+		return 0
+	}
+	if display < remaining {
+		return display
 	}
 	return remaining
 }
