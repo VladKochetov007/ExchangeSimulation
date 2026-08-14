@@ -25,7 +25,7 @@ Verification tier A. External-validity gap: venue simplifications listed in `doc
 ## Contradictions and evaluator risks
 
 - Existing regressions are strong but do not exhaust custom instrument, fee model, and lifecycle composition.
-- `derivsim` fixed-seed runs still diverge after ordered strategy traversals, synchronous automation ticker allocation, and runner quiescence. The remaining source is concurrent actor select/event delivery and per-client exchange ingress. Do not treat single-run PnL or impact figures as reproducible evidence until an ordered simulation ingress exists.
+- `derivsim` fixed-seed runs still diverge after ordered strategy traversals, synchronous automation ticker allocation, runner quiescence, and opt-in client-ID round-robin exchange ingress. At `GOMAXPROCS=9` (60% of this host), the ingress control converged hedge turnover across three 15-second replicas but still produced 172/170/170 spot trades, distinct trade hashes, and 5.1594/5.2174/5.1014 bps basis means despite zero conservation residuals. The remaining source is concurrent actor response/market-data/ticker delivery and automation phase ordering. Do not treat single-run PnL or impact figures as reproducible evidence until those phases are ordered.
 
 ## Budget remaining
 
@@ -34,6 +34,6 @@ Verification tier A. External-validity gap: venue simplifications listed in `doc
 
 ## Next three decisions
 
-1. Design an opt-in ordered simulation ingress keyed by simulation time, client ID, and request sequence.
-2. Define actor same-time priority for timers, responses, and market data; add canonical fixed-seed outcome digest tests.
+1. Define actor same-time priority for timers, responses, and market data, then add canonical fixed-seed outcome digest tests.
+2. Decide whether a runner-owned phase executor is warranted after measuring a priority-drain actor prototype.
 3. Keep core fuzz/race/audit gates mandatory while widening cross-asset and options scenarios.

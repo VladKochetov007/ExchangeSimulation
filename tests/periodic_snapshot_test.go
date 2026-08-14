@@ -3,6 +3,7 @@ package exchange_test
 import (
 	"encoding/json"
 	. "exchange_sim/exchange"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -262,6 +263,47 @@ func TestPeriodicSnapshotsWithSimulatedClock(t *testing.T) {
 	// Should have received at least 2 snapshots (at t=100ms and t=200ms)
 	if len(snapshots) < 2 {
 		t.Errorf("expected at least 2 snapshots after 250ms sim time, got %d", len(snapshots))
+	}
+}
+
+func TestPeriodicSnapshotsPublishBooksInSymbolOrder(t *testing.T) {
+	clock := &SimulatedClock{time: 0}
+	ex := NewExchangeWithConfig(ExchangeConfig{
+		EstimatedClients: 10,
+		Clock:            clock,
+		TickerFactory:    &SimulatedTickerFactory{clock: clock},
+		SnapshotInterval: time.Millisecond,
+	})
+	ex.AddInstrument(NewSpotInstrument("ZED/USD", "ZED", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
+	ex.AddInstrument(NewSpotInstrument("ALP/USD", "ALP", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
+	ex.ConnectNewClient(1, map[string]int64{"USD": 1_000 * USD_PRECISION}, &PercentageFee{})
+	gw := ex.Gateways[1]
+
+	for _, symbol := range []string{"ZED/USD", "ALP/USD"} {
+		gw.RequestCh <- Request{Type: ReqSubscribe, QueryReq: &QueryRequest{RequestID: 1, Symbol: symbol}}
+		<-gw.ResponseCh
+		<-gw.MarketData // subscription's immediate snapshot
+	}
+
+	clock.Advance(time.Millisecond)
+
+	got := make([]string, 0, 2)
+	deadline := time.After(time.Second)
+	for len(got) < 2 {
+		select {
+		case msg := <-gw.MarketData:
+			if msg.Type == MDSnapshot {
+				got = append(got, msg.Symbol)
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for periodic snapshots, got %v", got)
+		}
+	}
+	ex.Shutdown()
+
+	want := []string{"ALP/USD", "ZED/USD"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("periodic snapshot symbols = %v, want %v", got, want)
 	}
 }
 

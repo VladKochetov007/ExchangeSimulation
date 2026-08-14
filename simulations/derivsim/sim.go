@@ -166,6 +166,7 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		EstimatedClients:        16,
 		Clock:                   simClock,
 		TickerFactory:           timerFact,
+		DeterministicIngress:    true,
 		SnapshotInterval:        200 * time.Millisecond,
 		BalanceSnapshotInterval: 10 * time.Second,
 	})

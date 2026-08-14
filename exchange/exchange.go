@@ -72,26 +72,27 @@ type AutomationConfig struct {
 }
 
 type DefaultExchange struct {
-	ID                  string
-	Clients             map[uint64]*Client
-	Gateways            map[uint64]*ClientGateway
-	Books               map[string]*OrderBook
-	Instruments         map[string]Instrument
-	Positions           PositionStore
-	ExchangeBalance     *ExchangeBalance
-	NextOrderID         uint64
-	Matcher             MatchingEngine
-	MDPublisher         *MDPublisher
-	Clock               Clock
-	Loggers             map[string]Logger
-	BorrowingMgr        *BorrowingManager
-	CollateralRate      int64
-	LiquidationFeeBps   int64
-	autoAnchorMarks     bool
-	markEMAWindow       int
-	markBandBps         int64
-	autoAnchoredSymbols map[string]bool
-	requestsInFlight    atomic.Int64
+	ID                   string
+	Clients              map[uint64]*Client
+	Gateways             map[uint64]*ClientGateway
+	Books                map[string]*OrderBook
+	Instruments          map[string]Instrument
+	Positions            PositionStore
+	ExchangeBalance      *ExchangeBalance
+	NextOrderID          uint64
+	Matcher              MatchingEngine
+	MDPublisher          *MDPublisher
+	Clock                Clock
+	Loggers              map[string]Logger
+	BorrowingMgr         *BorrowingManager
+	CollateralRate       int64
+	LiquidationFeeBps    int64
+	autoAnchorMarks      bool
+	deterministicIngress bool
+	markEMAWindow        int
+	markBandBps          int64
+	autoAnchoredSymbols  map[string]bool
+	requestsInFlight     atomic.Int64
 	// automInFlight counts automation-loop work (mark prices, funding,
 	// expiry) in progress. These loops react to the same clock the runner
 	// advances, so a barrier that ignored them would move time while the
@@ -123,6 +124,11 @@ type DefaultExchange struct {
 type ExchangeConfig struct {
 	// ID identifies the exchange for logging (default: "exchange")
 	ID string
+
+	// DeterministicIngress disables one request goroutine per client. Callers
+	// drive DrainIngress at model-defined boundaries, so equal-arrival request
+	// priority is not chosen by Go scheduling.
+	DeterministicIngress bool
 
 	// EstimatedClients pre-allocates capacity for client maps (default: 10)
 	EstimatedClients int
@@ -192,6 +198,7 @@ func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
 		Clock:                   config.Clock,
 		Loggers:                 make(map[string]Logger),
 		tickerFactory:           config.TickerFactory,
+		deterministicIngress:    config.DeterministicIngress,
 		running:                 false,
 		shutdownCh:              make(chan struct{}),
 		snapshotStopCh:          make(chan struct{}),
@@ -238,7 +245,13 @@ func (e *DefaultExchange) logSnapshots() {
 	defer e.mu.RUnlock()
 
 	timestamp := e.Clock.NowUnixNano()
-	for symbol, book := range e.Books {
+	symbols := make([]string, 0, len(e.Books))
+	for symbol := range e.Books {
+		symbols = append(symbols, symbol)
+	}
+	slices.Sort(symbols)
+	for _, symbol := range symbols {
+		book := e.Books[symbol]
 		// Subscribers get the displayed book; loggers keep the god view.
 		e.MDPublisher.Publish(symbol, MDSnapshot, &BookSnapshot{
 			Bids: book.Bids.GetPublicSnapshot(),
@@ -502,7 +515,9 @@ func (e *DefaultExchange) ConnectNewClient(clientID uint64, initialBalances map[
 	gateway := NewClientGateway(clientID)
 	e.Gateways[clientID] = gateway
 
-	go e.HandleClientRequests(gateway)
+	if !e.deterministicIngress {
+		go e.HandleClientRequests(gateway)
+	}
 
 	if !e.running {
 		e.running = true
@@ -630,8 +645,54 @@ func (e *DefaultExchange) Idle() bool {
 }
 
 func (e *DefaultExchange) HandleClientRequests(gateway *ClientGateway) {
+	if e.deterministicIngress {
+		return
+	}
 	for req := range gateway.RequestCh {
 		e.handleClientRequest(gateway, req)
+	}
+}
+
+// DrainIngress processes queued requests in deterministic client-ID
+// round-robin order. Within one client the gateway channel remains FIFO. It
+// is active only when ExchangeConfig.DeterministicIngress is set.
+func (e *DefaultExchange) DrainIngress() bool {
+	if !e.deterministicIngress {
+		return false
+	}
+
+	processed := false
+	for {
+		e.mu.RLock()
+		clientIDs := make([]uint64, 0, len(e.Gateways))
+		gateways := make(map[uint64]*ClientGateway, len(e.Gateways))
+		for clientID, gateway := range e.Gateways {
+			clientIDs = append(clientIDs, clientID)
+			gateways[clientID] = gateway
+		}
+		e.mu.RUnlock()
+		slices.Sort(clientIDs)
+
+		passProcessed := false
+		for _, clientID := range clientIDs {
+			gateway := gateways[clientID]
+			if gateway == nil {
+				continue
+			}
+			select {
+			case req, ok := <-gateway.RequestCh:
+				if !ok {
+					continue
+				}
+				e.handleClientRequest(gateway, req)
+				processed = true
+				passProcessed = true
+			default:
+			}
+		}
+		if !passProcessed {
+			return processed
+		}
 	}
 }
 

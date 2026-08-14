@@ -63,6 +63,15 @@ func (m *Mount) Idle() bool {
 	return true
 }
 
+// Drain advances opt-in deterministic venue ingress. Regular asynchronous
+// venues return false and preserve their production execution path.
+func (m *Mount) Drain() bool {
+	if drainer, ok := m.Market.(interface{ DrainIngress() bool }); ok {
+		return drainer.DrainIngress()
+	}
+	return false
+}
+
 // Shutdown stops all delayed gateways and shuts down the underlying venue.
 func (m *Mount) Shutdown() {
 	m.mu.Lock()

@@ -42,6 +42,10 @@ type Idler interface {
 	Idle() bool
 }
 
+type Drainer interface {
+	Drain() bool
+}
+
 type Runner struct {
 	clock        Clock
 	mounts       []*Mount
@@ -101,6 +105,11 @@ func (r *Runner) waitQuiescent() {
 	deadline := time.Now().Add(timeout)
 	settled := 0
 	for time.Now().Before(deadline) {
+		for _, m := range r.mounts {
+			if d, ok := any(m).(Drainer); ok {
+				d.Drain()
+			}
+		}
 		if r.systemIdle() {
 			if settled++; settled >= 2 {
 				return
