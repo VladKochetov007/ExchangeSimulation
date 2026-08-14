@@ -60,3 +60,30 @@ func TestRegressionRejectLocalDerivativeWithMismatchedSettlementDenomination(t *
 		t.Fatal("accepted derivative with a mismatched quote precision")
 	}
 }
+
+func TestRegressionPositionExposureOverflowRejectsBeforeMatching(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	defer ex.Shutdown()
+	perp := NewPerpFutures("ABC-PERP", "ABC", "USD", 1, 1, 1, 1)
+	perp.MarginRate = 0
+	ex.AddInstrument(perp)
+	ex.ConnectNewClient(1, nil, &FixedFee{})
+	ex.ConnectNewClient(2, nil, &FixedFee{})
+	ex.Positions.(*PositionManager).InjectPosition(1, "ABC-PERP", &Position{
+		ClientID: 1, Symbol: "ABC-PERP", Size: math.MaxInt64, EntryPrice: 1,
+	})
+
+	resp := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 1, Symbol: "ABC-PERP", Side: Buy, Type: LimitOrder,
+		Price: 1, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	if resp.Success || resp.Error != RejectExceedsPosition {
+		t.Fatalf("overflowing opening order = %#v, want RejectExceedsPosition", resp)
+	}
+	if pos := ex.Positions.GetPosition(1, "ABC-PERP"); pos == nil || pos.Size != math.MaxInt64 {
+		t.Fatalf("position mutated before matching: %#v", pos)
+	}
+	if len(ex.Books["ABC-PERP"].Bids.Orders) != 0 {
+		t.Fatal("rejected overflow order reached the book")
+	}
+}

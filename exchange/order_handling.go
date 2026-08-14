@@ -299,7 +299,48 @@ func (e *DefaultExchange) validatePlaceOrder(clientID uint64, req *OrderRequest)
 	if reason := e.hedgeReduceViolation(clientID, book, req); reason != "" {
 		return reject(reason)
 	}
+	if e.positionExposureViolation(clientID, book, req) {
+		return reject(RejectExceedsPosition)
+	}
 	return nil
+}
+
+// positionExposureViolation reserves signed position headroom for every
+// same-direction resting order, preventing a later valid match from wrapping
+// position size after the matcher has already mutated book state.
+func (e *DefaultExchange) positionExposureViolation(clientID uint64, book *OrderBook, req *OrderRequest) bool {
+	if req.PositionSide == PositionLong && req.Side == Sell || req.PositionSide == PositionShort && req.Side == Buy {
+		return false
+	}
+	var size int64
+	if pos := e.Positions.GetPositionBySide(clientID, req.Symbol, req.PositionSide); pos != nil {
+		size = pos.Size
+	}
+	orders := book.Bids.Orders
+	if req.Side == Sell {
+		orders = book.Asks.Orders
+	}
+	for _, order := range orders {
+		if order.ClientID != clientID || order.PositionSide != req.PositionSide {
+			continue
+		}
+		remaining := order.Qty - order.FilledQty
+		var ok bool
+		if req.Side == Buy {
+			size, ok = etypes.TryAdd(size, remaining)
+		} else {
+			size, ok = etypes.TrySub(size, remaining)
+		}
+		if !ok {
+			return true
+		}
+	}
+	if req.Side == Buy {
+		_, ok := etypes.TryAdd(size, req.Qty)
+		return !ok
+	}
+	_, ok := etypes.TrySub(size, req.Qty)
+	return !ok
 }
 
 // hedgeReduceViolation rejects hedge-mode reducing orders when the new

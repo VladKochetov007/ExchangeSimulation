@@ -5,6 +5,20 @@ import (
 	"math/bits"
 )
 
+func TryAdd(a, b int64) (int64, bool) {
+	if b > 0 && a > math.MaxInt64-b || b < 0 && a < math.MinInt64-b {
+		return 0, false
+	}
+	return a + b, true
+}
+
+func TrySub(a, b int64) (int64, bool) {
+	if b == math.MinInt64 {
+		return 0, false
+	}
+	return TryAdd(a, -b)
+}
+
 // MulDiv computes (a*b)/c exactly, truncating toward zero like native int64
 // division, using a 128-bit intermediate product so qty×price never overflows
 // regardless of the instrument's precision configuration. c must be positive
