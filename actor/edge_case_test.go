@@ -150,6 +150,74 @@ func TestBaseActorReplaysEarlyPartialFillAndCancelInOrder(t *testing.T) {
 	}
 }
 
+func TestBaseActorClosesStateForExchangeDiscardedMarketRemainder(t *testing.T) {
+	ex := exchange.NewExchange(2, &exchange.RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(exchange.NewSpotInstrument(
+		"BTC/USD", "BTC", "USD",
+		exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, 1,
+	))
+	ex.ConnectNewClient(1, map[string]int64{"USD": exchange.USDAmount(100_000)}, &exchange.FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{"BTC": exchange.BTCAmount(1)}, &exchange.FixedFee{})
+
+	if response := ex.PlaceOrder(2, &exchange.OrderRequest{
+		RequestID:   1,
+		Symbol:      "BTC/USD",
+		Side:        exchange.Sell,
+		Type:        exchange.LimitOrder,
+		Price:       exchange.PriceUSD(50_000, exchange.DOLLAR_TICK),
+		Qty:         exchange.BTC_PRECISION / 4,
+		TimeInForce: exchange.GTC,
+		Visibility:  exchange.Normal,
+	}); !response.Success {
+		t.Fatalf("seed ask rejected: %s", response.Error)
+	}
+
+	gateway := ex.Gateways[1]
+	trader := NewBaseActor(1, gateway)
+	const requestID = uint64(23)
+	gateway.RequestCh <- exchange.Request{Type: exchange.ReqPlaceOrder, OrderReq: &exchange.OrderRequest{
+		RequestID:   requestID,
+		Symbol:      "BTC/USD",
+		Side:        exchange.Buy,
+		Type:        exchange.Market,
+		Qty:         exchange.BTC_PRECISION,
+		TimeInForce: exchange.GTC,
+		Visibility:  exchange.Normal,
+	}}
+
+	var events []*Event
+	for range 3 { // partial fill, forced cancel, then placement acceptance
+		select {
+		case response := <-gateway.ResponseCh:
+			events = append(events, trader.decodeResponse(response)...)
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for market-order lifecycle response")
+		}
+	}
+
+	want := []EventType{EventOrderAccepted, EventOrderPartialFill, EventOrderCancelled}
+	if len(events) != len(want) {
+		t.Fatalf("events = %#v, want %d", events, len(want))
+	}
+	for index, event := range events {
+		if event.Type != want[index] {
+			t.Fatalf("event %d type = %v, want %v", index, event.Type, want[index])
+		}
+	}
+	accepted := events[0].Data.(OrderAcceptedEvent)
+	cancelled := events[2].Data.(OrderCancelledEvent)
+	if cancelled.OrderID != accepted.OrderID || cancelled.RemainingQty != 3*exchange.BTC_PRECISION/4 {
+		t.Fatalf("cancelled = %#v, want remainder for order %d", cancelled, accepted.OrderID)
+	}
+	if _, active := trader.activeOrders.Load(accepted.OrderID); active {
+		t.Fatal("discarded market remainder left an active order")
+	}
+	if _, pending := trader.requestToOrder.Load(requestID); pending {
+		t.Fatal("discarded market remainder left a request mapping")
+	}
+}
+
 type eventRecorder struct{ events chan *Event }
 
 func (r *eventRecorder) HandleEvent(_ context.Context, event *Event) {

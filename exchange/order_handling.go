@@ -851,6 +851,21 @@ func (e *DefaultExchange) restOrReleaseOrder(client *Client, book *OrderBook, or
 		}
 		client.AddOrder(order.ID)
 	} else {
+		// A market order and an IOC order never rest. Their discarded remainder
+		// is terminal state, not merely a released reservation: the actor has
+		// already received an acceptance for this order request and must be told
+		// to remove its active-order entry. Queue it after any fills and before
+		// the request success response, preserving the exchange response FIFO.
+		remainingQty := order.Qty - order.FilledQty
+		if remainingQty > 0 && order.Status != Filled && order.Status != Cancelled {
+			order.Status = Cancelled
+			if gateway := e.Gateways[order.ClientID]; gateway != nil && gateway.IsRunning() {
+				gateway.enqueueResponse(Response{Success: true, Data: &ForcedCancelNotification{
+					OrderID:      order.ID,
+					RemainingQty: remainingQty,
+				}})
+			}
+		}
 		releaseReserved(client, book.Instrument, order)
 		putOrder(order)
 	}
