@@ -39,6 +39,142 @@ func TestMarketSpotCostOverflowIsRejectedBeforeMatching(t *testing.T) {
 	}
 }
 
+func TestMarketForeignFeeAggregationOverflowIsRejectedBeforeMatching(t *testing.T) {
+	const orderQty = int64(5)
+	feeAmount := int64(math.MaxInt64 / 2)
+
+	ex := NewExchange(6, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 1, 1, 1, 1))
+	ex.ConnectNewClient(1, map[string]int64{"USD": orderQty, "BNB": math.MaxInt64}, &FixedFee{
+		TakerFee: Fee{Asset: "BNB", Amount: feeAmount},
+	})
+	for clientID := uint64(2); clientID < uint64(2+orderQty); clientID++ {
+		ex.ConnectNewClient(clientID, map[string]int64{"X": 1}, &FixedFee{})
+		response := ex.PlaceOrder(clientID, &OrderRequest{
+			RequestID: clientID, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+			Price: 1, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+		})
+		if !response.Success {
+			t.Fatalf("seed ask %d rejected: %s", clientID, response.Error)
+		}
+	}
+
+	response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 10, Symbol: "X/USD", Side: Buy, Type: Market,
+		Qty: orderQty, TimeInForce: GTC, Visibility: Normal,
+	})
+	if response.Success || response.Error != RejectInsufficientBalance {
+		t.Fatalf("overflowing foreign-fee sweep response = %+v, want insufficient-balance rejection", response)
+	}
+	if got := ex.Clients[1].Balances["BNB"]; got != math.MaxInt64 {
+		t.Fatalf("rejected sweep changed foreign-fee balance: got %d want %d", got, int64(math.MaxInt64))
+	}
+	if got := len(ex.Books["X/USD"].Asks.Orders); got != int(orderQty) {
+		t.Fatalf("rejected sweep consumed ask depth: got %d orders want %d", got, orderQty)
+	}
+}
+
+func TestMarketForeignFeeUsesConfiguredMatcherAllocations(t *testing.T) {
+	ex := NewExchange(4, &RealClock{})
+	defer ex.Shutdown()
+	ex.Matcher = NewProRataMatcher()
+	ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 1, 1, 1, 1))
+	ex.ConnectNewClient(1, map[string]int64{"USD": 3, "BNB": 2}, &FixedFee{
+		TakerFee: Fee{Asset: "BNB", Amount: 1},
+	})
+	for clientID := uint64(2); clientID <= 4; clientID++ {
+		ex.ConnectNewClient(clientID, map[string]int64{"X": 2}, &FixedFee{})
+		response := ex.PlaceOrder(clientID, &OrderRequest{
+			RequestID: clientID, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+			Price: 1, Qty: 2, TimeInForce: GTC, Visibility: Normal,
+		})
+		if !response.Success {
+			t.Fatalf("seed ask %d rejected: %s", clientID, response.Error)
+		}
+	}
+	probe := &Order{ClientID: 1, Side: Buy, Type: Market, Qty: 3}
+	executions, ok := ex.previewMarketExecutions(ex.Books["X/USD"], probe)
+	if !ok {
+		t.Fatal("pro-rata preview failed")
+	}
+	if got := len(executions); got != 3 {
+		releasePreviewExecutions(executions)
+		t.Fatalf("pro-rata preview execution count = %d, want 3", got)
+	}
+	releasePreviewExecutions(executions)
+
+	// Pro-rata splits this three-unit market order across three makers, so its
+	// fixed BNB fee is charged three times. A price-time fee walk would see two
+	// fills and allow the final settlement debit below zero.
+	response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 10, Symbol: "X/USD", Side: Buy, Type: Market,
+		Qty: 3, TimeInForce: GTC, Visibility: Normal,
+	})
+	if response.Success || response.Error != RejectInsufficientBalance {
+		t.Fatalf("pro-rata foreign-fee sweep response = %+v, want insufficient-balance rejection", response)
+	}
+	if got := ex.Clients[1].Balances["BNB"]; got != 2 {
+		t.Fatalf("rejected pro-rata sweep changed BNB balance: got %d want 2", got)
+	}
+	if got := len(ex.Books["X/USD"].Asks.Orders); got != 3 {
+		t.Fatalf("rejected pro-rata sweep consumed ask depth: got %d orders want 3", got)
+	}
+}
+
+func TestMarketFeeInReceivedSpotAssetReservesShortfall(t *testing.T) {
+	newExchange := func(t *testing.T, buyerBase int64) *DefaultExchange {
+		t.Helper()
+		ex := NewExchange(2, &RealClock{})
+		ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 1, 1, 1, 1))
+		ex.ConnectNewClient(1, map[string]int64{"USD": 1, "X": buyerBase}, &FixedFee{
+			TakerFee: Fee{Asset: "X", Amount: 2},
+		})
+		ex.ConnectNewClient(2, map[string]int64{"X": 1}, &FixedFee{})
+		response := ex.PlaceOrder(2, &OrderRequest{
+			RequestID: 1, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+			Price: 1, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+		})
+		if !response.Success {
+			t.Fatalf("seed ask rejected: %s", response.Error)
+		}
+		return ex
+	}
+
+	t.Run("unfunded shortfall is rejected", func(t *testing.T) {
+		ex := newExchange(t, 0)
+		defer ex.Shutdown()
+		response := ex.PlaceOrder(1, &OrderRequest{
+			RequestID: 2, Symbol: "X/USD", Side: Buy, Type: Market,
+			Price: 0, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+		})
+		if response.Success || response.Error != RejectInsufficientBalance {
+			t.Fatalf("received-asset fee response = %+v, want insufficient-balance rejection", response)
+		}
+		if got := ex.Clients[1].Balances["X"]; got != 0 {
+			t.Fatalf("rejected order changed base balance: got %d want 0", got)
+		}
+	})
+
+	t.Run("exact shortfall funding settles to zero", func(t *testing.T) {
+		ex := newExchange(t, 1)
+		defer ex.Shutdown()
+		response := ex.PlaceOrder(1, &OrderRequest{
+			RequestID: 2, Symbol: "X/USD", Side: Buy, Type: Market,
+			Price: 0, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+		})
+		if !response.Success {
+			t.Fatalf("exactly funded received-asset fee rejected: %s", response.Error)
+		}
+		if got := ex.Clients[1].Balances["X"]; got != 0 {
+			t.Fatalf("base balance after fill = %d, want 0", got)
+		}
+		if got := ex.Clients[1].Reserved["X"]; got != 0 {
+			t.Fatalf("base fee reservation after fill = %d, want 0", got)
+		}
+	})
+}
+
 func TestRestingSpotOrderReservesMaximumMakerFeeAndRestoresRemainder(t *testing.T) {
 	fees := &FixedFee{MakerFee: Fee{Asset: "USD", Amount: 2}}
 	ex := NewExchange(3, &RealClock{})

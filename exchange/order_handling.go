@@ -694,15 +694,17 @@ func (e *DefaultExchange) reserveLimitOrderFunds(client *Client, instrument Inst
 	return true
 }
 
-// checkForeignFeeFunds reports whether the client can cover the worst-case
-// (taker) fee when it is denominated in an asset the reservation does not
-// back. Quote fees are covered by the reservation's fee headroom; spot base
-// fees net against the base leg the client receives. Everything else is
-// unbacked — a third asset (a BNB fee on BTC/USD), or a base fee on a margined
-// instrument, whose fill exchanges no base leg at all — and must be
-// pre-checked here.
-func checkForeignFeeFunds(client *Client, book *OrderBook, order *Order, precision int64) bool {
-	for asset, amount := range foreignFeeReservations(client.FeePlan, book, order, precision) {
+// checkForeignFeeFunds reports whether the client can cover the fee portion
+// not backed by the order's supplied trade leg. On spot market orders it also
+// reserves the maximum running shortfall in the received asset: a fee can be
+// larger than the execution proceeds, so merely netting it against that leg
+// can otherwise settle the account below zero.
+func (e *DefaultExchange) checkForeignFeeFunds(client *Client, book *OrderBook, order *Order, precision int64) bool {
+	fees, ok := e.foreignFeeReservations(client.FeePlan, book, order, precision)
+	if !ok {
+		return false
+	}
+	for asset, amount := range fees {
 		if isMarginedInstrument(book.Instrument) {
 			if client.PerpAvailable(asset) < amount {
 				return false
@@ -722,20 +724,27 @@ func isMarginedInstrument(instrument Instrument) bool {
 	return ok
 }
 
-// foreignFeeReservations returns a per-asset worst-case reserve for fees not
-// backed by the trade legs. A resting order may fill as maker or taker, so both
-// schedules are considered and the larger requirement per asset is locked.
-func foreignFeeReservations(feePlan FeeModel, book *OrderBook, order *Order, precision int64) map[string]int64 {
+// foreignFeeReservations returns a per-asset reserve for fees not backed by
+// the order's supplied leg. A resting order may fill as maker or taker, so
+// both schedules are considered and the larger requirement per asset is
+// locked. A market order is based on a detached run of the configured matcher,
+// because its number and allocation of executions determine fixed fees.
+func (e *DefaultExchange) foreignFeeReservations(feePlan FeeModel, book *OrderBook, order *Order, precision int64) (map[string]int64, bool) {
 	if feePlan == nil || order.Qty <= 0 {
-		return nil
+		return nil, true
 	}
 	instrument := book.Instrument
 	if order.Type == Market {
-		return marketForeignFeeReservations(feePlan, book, order, precision)
+		executions, ok := e.previewMarketExecutions(book, order)
+		if !ok {
+			return nil, false
+		}
+		defer releasePreviewExecutions(executions)
+		return marketForeignFeeReservations(feePlan, instrument, order, executions, precision)
 	}
 	price := order.Price
 	if price <= 0 {
-		return nil
+		return nil, true
 	}
 	base, quote := instrument.BaseAsset(), instrument.QuoteAsset()
 	margined := isMarginedInstrument(instrument)
@@ -752,44 +761,83 @@ func foreignFeeReservations(feePlan FeeModel, book *OrderBook, order *Order, pre
 			reserved[fee.Asset] = fee.Amount
 		}
 	}
-	return reserved
+	return reserved, true
 }
 
-func marketForeignFeeReservations(feePlan FeeModel, book *OrderBook, order *Order, precision int64) map[string]int64 {
-	instrument := book.Instrument
+func marketForeignFeeReservations(feePlan FeeModel, instrument Instrument, order *Order, executions []*Execution, precision int64) (map[string]int64, bool) {
 	base, quote := instrument.BaseAsset(), instrument.QuoteAsset()
 	margined := isMarginedInstrument(instrument)
-	levels := book.Asks
-	if order.Side == Sell {
-		levels = book.Bids
-	}
-	reserved := make(map[string]int64)
-	remaining := order.Qty
-	for level := levels.Best; level != nil && remaining > 0; level = level.Next {
-		for maker := level.Head; maker != nil && remaining > 0; maker = maker.Next {
-			if maker.ClientID == order.ClientID {
-				continue
-			}
-			qty := min(remaining, maker.Qty-maker.FilledQty)
-			if qty <= 0 {
-				continue
-			}
-			fee := feePlan.CalculateFee(FillContext{
-				Exec: &Execution{Price: level.Price, Qty: qty}, IsMaker: false,
-				BaseAsset: base, QuoteAsset: quote, Precision: precision,
-			})
-			if fee.Amount > 0 && fee.Asset != "" && fee.Asset != quote && (margined || fee.Asset != base) {
-				reserved[fee.Asset] += fee.Amount
-			}
-			remaining -= qty
+	fundingAsset := reserveAsset(instrument, order.Side)
+	receivedAsset := ""
+	if !margined {
+		if order.Side == Buy {
+			receivedAsset = base
+		} else {
+			receivedAsset = quote
 		}
 	}
-	return reserved
+	reserved := make(map[string]int64)
+	var receivedNet int64
+	for _, exec := range executions {
+		if exec == nil || exec.Qty <= 0 || exec.Price <= 0 {
+			return nil, false
+		}
+		if receivedAsset != "" {
+			received := exec.Qty
+			var ok bool
+			if order.Side == Sell {
+				received, ok = etypes.TryMulDiv(exec.Qty, exec.Price, precision)
+				if !ok {
+					return nil, false
+				}
+			}
+			receivedNet, ok = etypes.TryAdd(receivedNet, received)
+			if !ok {
+				return nil, false
+			}
+		}
+
+		fee := executionFee(feePlan, instrument, exec, false, precision)
+		if fee.Amount <= 0 || fee.Asset == "" {
+			continue
+		}
+		if fee.Asset == receivedAsset {
+			var ok bool
+			receivedNet, ok = etypes.TrySub(receivedNet, fee.Amount)
+			if !ok {
+				return nil, false
+			}
+			if receivedNet < 0 {
+				shortfall, ok := etypes.TrySub(0, receivedNet)
+				if !ok {
+					return nil, false
+				}
+				if shortfall > reserved[fee.Asset] {
+					reserved[fee.Asset] = shortfall
+				}
+			}
+			continue
+		}
+		if fee.Asset == fundingAsset {
+			// checkMarketOrderFunds already includes positive fees charged in
+			// the asset the order must supply.
+			continue
+		}
+		amount, ok := etypes.TryAdd(reserved[fee.Asset], fee.Amount)
+		if !ok {
+			return nil, false
+		}
+		reserved[fee.Asset] = amount
+	}
+	return reserved, true
 }
 
-func reserveForeignFeeFunds(client *Client, book *OrderBook, order *Order, precision int64) bool {
+func (e *DefaultExchange) reserveForeignFeeFunds(client *Client, book *OrderBook, order *Order, precision int64) bool {
 	instrument := book.Instrument
-	fees := foreignFeeReservations(client.FeePlan, book, order, precision)
+	fees, ok := e.foreignFeeReservations(client.FeePlan, book, order, precision)
+	if !ok {
+		return false
+	}
 	if len(fees) == 0 {
 		return true
 	}
@@ -835,7 +883,7 @@ func (e *DefaultExchange) restoreForeignFeeReservation(book *OrderBook, order *O
 		return
 	}
 	releaseForeignFeeReservation(client, book.Instrument, order)
-	if order.FilledQty < order.Qty && !reserveForeignFeeFunds(client, book, order, precision) {
+	if order.FilledQty < order.Qty && !e.reserveForeignFeeFunds(client, book, order, precision) {
 		e.cancelUnfundedFeeRemainder(book, client, order)
 	}
 }
@@ -965,7 +1013,7 @@ func (e *DefaultExchange) reserveOrderFunds(client *Client, book *OrderBook, ord
 	// backing it: the reservation covers only the trade legs, and settlement
 	// would drive the foreign balance negative. Reject up front, before locking
 	// any funds, when the client cannot cover the worst-case fee.
-	if !checkForeignFeeFunds(client, book, order, precision) {
+	if !e.checkForeignFeeFunds(client, book, order, precision) {
 		resp := e.rejectOrder(order, requestID, order.ClientID, RejectInsufficientBalance, log)
 		return &resp
 	}
@@ -982,7 +1030,7 @@ func (e *DefaultExchange) reserveOrderFunds(client *Client, book *OrderBook, ord
 		resp := e.rejectOrder(order, requestID, order.ClientID, RejectInsufficientBalance, log)
 		return &resp
 	}
-	if !reserveForeignFeeFunds(client, book, order, precision) {
+	if !e.reserveForeignFeeFunds(client, book, order, precision) {
 		releaseReserved(client, book.Instrument, order)
 		resp := e.rejectOrder(order, requestID, order.ClientID, RejectInsufficientBalance, log)
 		return &resp
