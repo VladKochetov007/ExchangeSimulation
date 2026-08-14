@@ -303,7 +303,13 @@ func (e *DefaultExchange) LogAllBalances() {
 	for _, clientID := range snapshotClientIDs {
 		client := e.Clients[clientID]
 		spotBalances := make([]AssetBalance, 0, len(client.Balances))
-		for asset, total := range client.Balances {
+		spotAssets := make([]string, 0, len(client.Balances))
+		for asset := range client.Balances {
+			spotAssets = append(spotAssets, asset)
+		}
+		slices.Sort(spotAssets)
+		for _, asset := range spotAssets {
+			total := client.Balances[asset]
 			locked := client.Reserved[asset]
 			borrowed := client.Borrowed[asset]
 			spotBalances = append(spotBalances, AssetBalance{
@@ -316,7 +322,13 @@ func (e *DefaultExchange) LogAllBalances() {
 		}
 
 		perpBalances := make([]AssetBalance, 0, len(client.PerpBalances))
-		for asset, total := range client.PerpBalances {
+		perpAssets := make([]string, 0, len(client.PerpBalances))
+		for asset := range client.PerpBalances {
+			perpAssets = append(perpAssets, asset)
+		}
+		slices.Sort(perpAssets)
+		for _, asset := range perpAssets {
+			total := client.PerpBalances[asset]
 			locked := client.PerpReserved[asset]
 			perpBalances = append(perpBalances, AssetBalance{
 				Asset:    asset,
@@ -469,7 +481,13 @@ func (e *DefaultExchange) ConnectNewClient(clientID uint64, initialBalances map[
 	if client == nil {
 		client = NewClient(clientID, feePlan)
 		var changes []BalanceDelta
-		for asset, amount := range initialBalances {
+		assets := make([]string, 0, len(initialBalances))
+		for asset := range initialBalances {
+			assets = append(assets, asset)
+		}
+		slices.Sort(assets)
+		for _, asset := range assets {
+			amount := initialBalances[asset]
 			client.AddBalance(asset, amount)
 			changes = append(changes, spotDelta(asset, 0, amount))
 		}

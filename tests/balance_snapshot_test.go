@@ -438,3 +438,24 @@ func TestBalanceSnapshotMultipleAssets(t *testing.T) {
 		}
 	}
 }
+
+func TestBalanceSnapshotAssetsAreSorted(t *testing.T) {
+	client := NewClient(1, &FixedFee{})
+	client.Balances["USD"] = USDAmount(1)
+	client.Balances["BTC"] = BTCAmount(1)
+	client.Balances["ETH"] = ETHAmount(1)
+	client.PerpBalances["USD"] = USDAmount(1)
+	client.PerpBalances["BTC"] = BTCAmount(1)
+
+	snapshot := client.GetBalanceSnapshot(0)
+	for i, want := range []string{"BTC", "ETH", "USD"} {
+		if got := snapshot.SpotBalances[i].Asset; got != want {
+			t.Fatalf("spot asset %d = %q, want %q", i, got, want)
+		}
+	}
+	for i, want := range []string{"BTC", "USD"} {
+		if got := snapshot.PerpBalances[i].Asset; got != want {
+			t.Fatalf("perp asset %d = %q, want %q", i, got, want)
+		}
+	}
+}

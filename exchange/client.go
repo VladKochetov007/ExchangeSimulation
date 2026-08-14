@@ -1,5 +1,7 @@
 package exchange
 
+import "slices"
+
 // Client represents an exchange client's account state.
 // All balance and margin accounting is managed internally by the exchange.
 // Users cannot cause negative reserved balances through legitimate trading;
@@ -138,7 +140,13 @@ func (c *Client) GetBalanceSnapshot(timestamp int64) *BalanceSnapshot {
 	// Each wallet nets only the debt attributed to it: the account-level
 	// liability must reduce net worth exactly once, not once per wallet row.
 	spotBalances := make([]AssetBalance, 0, len(c.Balances))
-	for asset, total := range c.Balances {
+	spotAssets := make([]string, 0, len(c.Balances))
+	for asset := range c.Balances {
+		spotAssets = append(spotAssets, asset)
+	}
+	slices.Sort(spotAssets)
+	for _, asset := range spotAssets {
+		total := c.Balances[asset]
 		locked := c.Reserved[asset]
 		borrowed := c.BorrowedSpotPortion(asset)
 		spotBalances = append(spotBalances, AssetBalance{
@@ -151,7 +159,13 @@ func (c *Client) GetBalanceSnapshot(timestamp int64) *BalanceSnapshot {
 	}
 
 	perpBalances := make([]AssetBalance, 0, len(c.PerpBalances))
-	for asset, total := range c.PerpBalances {
+	perpAssets := make([]string, 0, len(c.PerpBalances))
+	for asset := range c.PerpBalances {
+		perpAssets = append(perpAssets, asset)
+	}
+	slices.Sort(perpAssets)
+	for _, asset := range perpAssets {
+		total := c.PerpBalances[asset]
 		locked := c.PerpReserved[asset]
 		borrowed := c.BorrowedPerpPortion(asset)
 		perpBalances = append(perpBalances, AssetBalance{
