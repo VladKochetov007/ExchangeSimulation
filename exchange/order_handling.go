@@ -309,7 +309,71 @@ func (e *DefaultExchange) validatePlaceOrder(clientID uint64, req *OrderRequest)
 	if e.positionExposureViolation(clientID, book, req) {
 		return reject(RejectExceedsPosition)
 	}
+	if e.restingLevelAggregateViolation(clientID, book, req) {
+		return reject(RejectInvalidQty)
+	}
 	return nil
+}
+
+// restingLevelAggregateViolation checks the exact residual that a GTC limit
+// order would leave after matching, before reservations or live-book mutation.
+// A level aggregate is part of the public book contract; allowing it to wrap
+// would corrupt depth, pro-rata allocation, and mark inputs.
+func (e *DefaultExchange) restingLevelAggregateViolation(clientID uint64, book *OrderBook, req *OrderRequest) bool {
+	if req.Type != LimitOrder || req.TimeInForce != GTC {
+		return false
+	}
+	side := book.Bids
+	if req.Side == Sell {
+		side = book.Asks
+	}
+	limit := side.Limits[req.Price]
+	if limit == nil {
+		return false
+	}
+	if limit.TotalQty < 0 || limit.OrderCnt < 0 || limit.OrderCnt == math.MaxInt32 {
+		return true
+	}
+	candidate := Order{
+		ClientID:     clientID,
+		Side:         req.Side,
+		PositionSide: req.PositionSide,
+		Type:         req.Type,
+		TimeInForce:  req.TimeInForce,
+		Price:        req.Price,
+		Qty:          req.Qty,
+		Visibility:   req.Visibility,
+		IcebergQty:   req.IcebergQty,
+	}
+	result, ok := e.previewMatch(book, &candidate)
+	if !ok {
+		return true
+	}
+	defer releasePreviewExecutions(result.Executions)
+	remaining, ok := previewRemainingQty(result.Executions, req.Qty)
+	if !ok {
+		return true
+	}
+	if remaining == 0 {
+		return false
+	}
+	_, ok = etypes.TryAdd(limit.TotalQty, remaining)
+	return !ok
+}
+
+func previewRemainingQty(executions []*Execution, totalQty int64) (int64, bool) {
+	var filled int64
+	for _, exec := range executions {
+		if exec == nil {
+			return 0, false
+		}
+		var ok bool
+		filled, ok = etypes.TryAdd(filled, exec.Qty)
+		if !ok || filled > totalQty {
+			return 0, false
+		}
+	}
+	return etypes.TrySub(totalQty, filled)
 }
 
 // positionExposureViolation reserves signed position headroom for every
@@ -539,7 +603,9 @@ func cloneBookForPreview(source *Book) (*Book, bool) {
 			copy.Next = nil
 			copy.Parent = nil
 			copy.FeeReserved = nil
-			clone.AddOrder(&copy)
+			if !clone.AddOrder(&copy) {
+				return nil, false
+			}
 		}
 	}
 	return clone, true
@@ -1091,16 +1157,29 @@ func (e *DefaultExchange) publishLevels(book *OrderBook, levels map[int64]Side) 
 func (e *DefaultExchange) restOrReleaseOrder(client *Client, book *OrderBook, order *Order, req *OrderRequest) {
 	if order.Status != Filled && order.Status != Cancelled && req.Type == LimitOrder && req.TimeInForce == GTC {
 		e.cancelOwnCrossingQuotes(client, book, order)
+		var rested bool
 		if order.Side == Buy {
-			book.Bids.AddOrder(order)
-			if order.Visibility != Hidden {
-				e.publishBookUpdate(book, Buy, order.Price)
-			}
+			rested = book.Bids.AddOrder(order)
 		} else {
-			book.Asks.AddOrder(order)
-			if order.Visibility != Hidden {
-				e.publishBookUpdate(book, Sell, order.Price)
+			rested = book.Asks.AddOrder(order)
+		}
+		if !rested {
+			// Admission preflight makes this unreachable for a valid deterministic
+			// matcher. Preserve ledger consistency if a custom matcher violates
+			// that contract rather than indexing an order the book rejected.
+			remainingQty := order.Qty - order.FilledQty
+			order.Status = Cancelled
+			if gateway := e.Gateways[order.ClientID]; gateway != nil && gateway.IsRunning() {
+				gateway.enqueueResponse(Response{Success: true, Data: &ForcedCancelNotification{
+					OrderID: order.ID, RemainingQty: remainingQty,
+				}})
 			}
+			releaseReserved(client, book.Instrument, order)
+			putOrder(order)
+			return
+		}
+		if order.Visibility != Hidden {
+			e.publishBookUpdate(book, order.Side, order.Price)
 		}
 		client.AddOrder(order.ID)
 	} else {

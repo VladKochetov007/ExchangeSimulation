@@ -39,6 +39,36 @@ func TestMarketSpotCostOverflowIsRejectedBeforeMatching(t *testing.T) {
 	}
 }
 
+func TestRestingLevelAggregateOverflowIsRejectedBeforeReservation(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 1, 1, 1, 1))
+	ex.ConnectNewClient(1, map[string]int64{"USD": math.MaxInt64}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{"USD": 1}, &FixedFee{})
+
+	first := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 1, Symbol: "X/USD", Side: Buy, Type: LimitOrder,
+		Price: 1, Qty: math.MaxInt64, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !first.Success {
+		t.Fatalf("max-size resting bid rejected: %s", first.Error)
+	}
+
+	second := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 2, Symbol: "X/USD", Side: Buy, Type: LimitOrder,
+		Price: 1, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	if second.Success || second.Error != RejectInvalidQty {
+		t.Fatalf("overflowing resting bid = %+v, want invalid-qty rejection", second)
+	}
+	if got := ex.Books["X/USD"].Bids.Best.TotalQty; got != math.MaxInt64 {
+		t.Fatalf("rejected bid changed level aggregate: got %d", got)
+	}
+	if got := ex.Clients[2].Reserved["USD"]; got != 0 {
+		t.Fatalf("rejected bid leaked reservation: got %d", got)
+	}
+}
+
 func TestMarketForeignFeeAggregationOverflowIsRejectedBeforeMatching(t *testing.T) {
 	const orderQty = int64(5)
 	feeAmount := int64(math.MaxInt64 / 2)
