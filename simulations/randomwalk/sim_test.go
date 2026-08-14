@@ -528,6 +528,59 @@ func TestCrossPairMMKeepsInsufficientSideWithdrawnUntilOppositeFill(t *testing.T
 	}
 }
 
+func TestCrossPairMMSellRestoresSharedQuoteInventoryAcrossSymbols(t *testing.T) {
+	gw := newRandomwalkStubGateway()
+	mm := NewCrossPairMM(1, gw, CrossPairMMConfig{
+		CrossSymbols:   []string{"DEF-ABC", "GHI-ABC"},
+		BaseUSDSymbols: []string{"DEF-USD", "GHI-USD"},
+		QuoteUSDSymbol: "ABC-USD", QuotePrecision: 1,
+		TickSizes:  map[string]int64{"DEF-ABC": 1, "GHI-ABC": 1},
+		LevelSizes: map[string]int64{"DEF-ABC": 1, "GHI-ABC": 1},
+		Levels:     1, LevelSpacing: 1, RefreshInterval: time.Hour,
+	})
+	mm.usdMids["ABC-USD"] = 100
+	mm.usdMids["DEF-USD"] = 200
+	mm.usdMids["GHI-USD"] = 300
+	mm.recomputeMids()
+	mm.quote("DEF-ABC")
+	mm.quote("GHI-ABC")
+
+	orders := gw.placedOrders()
+	var defAsk, ghiBid *etypes.OrderRequest
+	for _, order := range orders {
+		switch {
+		case order.Symbol == "DEF-ABC" && order.Side == exchange.Sell:
+			defAsk = order
+		case order.Symbol == "GHI-ABC" && order.Side == exchange.Buy:
+			ghiBid = order
+		}
+	}
+	if defAsk == nil || ghiBid == nil {
+		t.Fatalf("missing initial orders: DEF ask=%v GHI bid=%v", defAsk, ghiBid)
+	}
+
+	// The GHI bid was rejected because the shared ABC inventory was reserved
+	// elsewhere. A DEF sell later restores ABC and must re-open that GHI bid.
+	mm.onRejected(actor.OrderRejectedEvent{RequestID: ghiBid.RequestID, Reason: exchange.RejectInsufficientBalance})
+	ghiBidRef := quoteRef{symbol: "GHI-ABC", side: exchange.Buy}
+	if !mm.withdrawn[ghiBidRef] {
+		t.Fatal("GHI bid must be withdrawn after insufficient shared quote inventory")
+	}
+	mm.onAccepted(actor.OrderAcceptedEvent{OrderID: 11, RequestID: defAsk.RequestID})
+	mm.onFilled(actor.OrderFillEvent{OrderID: 11, IsFull: true})
+
+	if mm.withdrawn[ghiBidRef] {
+		t.Fatal("DEF sell did not restore shared ABC capacity for GHI bid")
+	}
+	orders = gw.placedOrders()
+	if got, want := len(orders), 7; got != want {
+		t.Fatalf("orders after DEF sell = %d, want %d (DEF re-quote plus GHI bid)", got, want)
+	}
+	if got := orders[len(orders)-1]; got.Symbol != "GHI-ABC" || got.Side != exchange.Buy {
+		t.Fatalf("restored quote = %+v, want GHI-ABC buy", got)
+	}
+}
+
 func TestCrossPairMMKeepsPartiallyFundedSideQuotedAfterReprice(t *testing.T) {
 	gw := newRandomwalkStubGateway()
 	mm := NewCrossPairMM(1, gw, CrossPairMMConfig{

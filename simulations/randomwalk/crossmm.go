@@ -99,12 +99,27 @@ func (mm *CrossPairMM) onFilled(e actor.OrderFillEvent) {
 	}
 	delete(mm.orderToQuote, e.OrderID)
 	delete(mm.pending[ref], e.OrderID)
-	delete(mm.withdrawn, quoteRef{symbol: ref.symbol, side: oppositeSide(ref.side)})
+	if ref.side == exchange.Sell {
+		// Every cross symbol is quoted against the configured shared quote
+		// asset. Selling any base asset restores that quote inventory, so a
+		// previously unfunded bid on another cross symbol is eligible again.
+		for _, sym := range mm.cfg.CrossSymbols {
+			delete(mm.withdrawn, quoteRef{symbol: sym, side: exchange.Buy})
+		}
+	} else {
+		// Buying restores only this symbol's base inventory.
+		delete(mm.withdrawn, quoteRef{symbol: ref.symbol, side: exchange.Sell})
+	}
 	if !e.IsFull {
 		mm.CancelOrder(e.OrderID)
 	}
 	mm.cancelAllForSym(ref.symbol)
 	mm.quote(ref.symbol)
+	if ref.side == exchange.Sell {
+		for _, sym := range mm.cfg.CrossSymbols {
+			mm.ensureQuoted(sym)
+		}
+	}
 }
 
 func (mm *CrossPairMM) onCancelled(e actor.OrderCancelledEvent) {
