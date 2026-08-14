@@ -40,6 +40,9 @@ func (e *DefaultExchange) AllocateCollateralToPosition(
 	if client.MarginMode != IsolatedMargin {
 		return errors.New("client not in isolated margin mode")
 	}
+	if amount <= 0 {
+		return errors.New("collateral amount must be positive")
+	}
 
 	if client.PerpAvailable(asset) < amount {
 		return errors.New("insufficient perp balance")

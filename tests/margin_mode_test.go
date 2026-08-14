@@ -90,6 +90,22 @@ func TestAllocateCollateralToPosition_InsufficientBalanceReturnsError(t *testing
 	}
 }
 
+func TestAllocateCollateralToPosition_RejectsNegativeAmount(t *testing.T) {
+	ex := setupMarginModeExchange()
+	client := ex.Clients[1]
+	client.PerpBalances["USD"] = 0
+	client.MarginMode = IsolatedMargin
+	if err := ex.AllocateCollateralToPosition(1, "BTC-PERP", "USD", -100); err == nil {
+		t.Fatal("negative collateral allocation succeeded")
+	}
+	if client.PerpBalances["USD"] != 0 {
+		t.Fatalf("negative allocation minted perp balance %d", client.PerpBalances["USD"])
+	}
+	if isolated := client.IsolatedPositions["BTC-PERP"]; isolated != nil {
+		t.Fatalf("negative allocation created isolated state: %#v", isolated)
+	}
+}
+
 func TestReleaseCollateralFromPosition_Success(t *testing.T) {
 	ex := setupMarginModeExchange()
 	_ = ex.SetMarginMode(1, IsolatedMargin)

@@ -89,25 +89,19 @@ drops do not occur at simulation volumes; assert on reject/timeout in actors.
 
 ## Margin and liquidation
 
-### Options have no maintenance sweep
-Short options post Deribit-style initial margin at fill time
-(`max(IMBase − OTM%, IMFloor) × S + mark`), but there is no mark-to-market
-re-margining and no option liquidation: `OptionMarginParams.MMBps` is reserved
-and unused. A short call whose underlying doubles stays margined at the stale
-IM until expiry; the deficit lands on the insurance fund at settlement.
-Deribit runs a continuous PM/MM sweep and liquidates option books. Impact: sim
-option sellers can run economically bankrupt positions to expiry — fine for
-flow experiments, wrong for solvency experiments. **TODO** (MM sweep +
-liquidation using the existing `Expirable` mark updates).
+### Option maintenance is single-quote cross-margin only
+Short options post Deribit-style initial margin at fill time and are included
+in the mark-refresh maintenance sweep through `OptionMarginParams.MMBps`.
+The sweep can liquidate an under-margined option position before expiry.
+It remains limited to the contract quote wallet: spot, other quote assets, and
+portfolio offsets are not collateral. **DOCUMENTED** — use this for isolated
+quote-wallet solvency experiments, not portfolio-margin realism.
 
-### No liquidation penalty / insurance-fund inflow
-Liquidations charge no fee; the insurance fund only ever pays (absorbing
-bankruptcy deficits) and can go unboundedly negative — there is no ADL and no
-socialized loss. Real venues charge the liquidated account a penalty (roughly
-the maintenance margin) into the fund and trigger ADL when the fund is
-exhausted. Impact: system-wide solvency metrics are one-sided; the fund
-balance is a loss counter, not a buffer model. **DOCUMENTED** (fund inflow is
-a small change if needed; ADL is a project).
+### No ADL or socialized loss
+Liquidations charge a configured clearance fee into the insurance fund, but
+there is no ADL or socialized loss when the fund is exhausted. Impact:
+system-wide solvency remains incomplete even though liquidation no longer has
+zero fund inflow. **DOCUMENTED**.
 
 ### Reduce-only orders still post initial margin
 A hedge-mode closing order reserves full order margin even though it only
