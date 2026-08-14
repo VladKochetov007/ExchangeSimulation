@@ -28,6 +28,10 @@ type ClientGateway struct {
 	outMu      sync.Mutex
 	outbox     []Response
 	delivering bool
+	// phaseEgress leaves outbox delivery to the deterministic simulation
+	// runner. It is configured before the gateway becomes visible to actors;
+	// the ordinary path retains its asynchronous delivery goroutine.
+	phaseEgress bool
 
 	// closeMu serializes Close against Send. Checking IsRunning and then
 	// sending is a time-of-check-to-time-of-use race: Close can retire the
@@ -82,6 +86,10 @@ func (g *ClientGateway) Send(req Request) {
 	}
 }
 
+func (g *ClientGateway) enableDeterministicPhaseEgress() {
+	g.phaseEgress = true
+}
+
 // enqueueResponse queues resp for asynchronous FIFO delivery, spawning the
 // deliverer if none is active. Safe to call while holding the exchange lock —
 // it never blocks on the consumer. Nil-safe like sendResponse.
@@ -97,8 +105,39 @@ func (g *ClientGateway) enqueueResponse(resp Response) {
 	}
 	g.outMu.Unlock()
 	if spawn {
+		if g.phaseEgress {
+			return
+		}
 		go g.deliverOutbox()
 	}
+}
+
+// DrainDeterministicEgress transfers queued exchange responses to the actor
+// inbox without a delivery goroutine. It preserves the exact enqueue FIFO and
+// never blocks while exchange state may be locked; a full actor inbox leaves
+// the remainder queued for the next deterministic phase.
+func (g *ClientGateway) DrainDeterministicEgress() bool {
+	if !g.phaseEgress {
+		return false
+	}
+
+	g.outMu.Lock()
+	defer g.outMu.Unlock()
+	processed := false
+	for len(g.outbox) > 0 {
+		select {
+		case g.ResponseCh <- g.outbox[0]:
+			g.outbox = g.outbox[1:]
+			processed = true
+		default:
+			return processed
+		}
+	}
+	// In phase mode `delivering` means the deterministic egress pump owns the
+	// outbox. Clear it once the FIFO is empty so Idle observes the settled
+	// gateway rather than a permanently active asynchronous deliverer.
+	g.delivering = false
+	return processed
 }
 
 func (g *ClientGateway) deliverOutbox() {

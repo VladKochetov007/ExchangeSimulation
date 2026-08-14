@@ -2,6 +2,12 @@ package randomwalk
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
 	"testing"
 	"time"
 
@@ -9,6 +15,92 @@ import (
 	"exchange_sim/exchange"
 	etypes "exchange_sim/types"
 )
+
+func digestRandomwalkLogs(t *testing.T, dir string) string {
+	t.Helper()
+	var files []string
+	if err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			files = append(files, path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("WalkDir(%q): %v", dir, err)
+	}
+	sort.Strings(files)
+	hash := sha256.New()
+	for _, path := range files {
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			t.Fatalf("Rel(%q): %v", path, err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", path, err)
+		}
+		fmt.Fprintf(hash, "%s\x00", rel)
+		hash.Write(data)
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil))
+}
+
+func digestRandomwalkState(sim *Sim) string {
+	ex := sim.Exchange()
+	ex.RLock()
+	defer ex.RUnlock()
+
+	hash := sha256.New()
+	fmt.Fprintf(hash, "next=%d\n", ex.NextOrderID)
+	symbols := make([]string, 0, len(ex.Books))
+	for symbol := range ex.Books {
+		symbols = append(symbols, symbol)
+	}
+	sort.Strings(symbols)
+	for _, symbol := range symbols {
+		book := ex.Books[symbol]
+		fmt.Fprintf(hash, "book %s bids=%v asks=%v\n", symbol, book.Bids.GetSnapshot(), book.Asks.GetSnapshot())
+	}
+
+	clientIDs := make([]uint64, 0, len(ex.Clients))
+	for clientID := range ex.Clients {
+		clientIDs = append(clientIDs, clientID)
+	}
+	sort.Slice(clientIDs, func(i, j int) bool { return clientIDs[i] < clientIDs[j] })
+	writeBalances := func(label string, balances map[string]int64) {
+		assets := make([]string, 0, len(balances))
+		for asset := range balances {
+			assets = append(assets, asset)
+		}
+		sort.Strings(assets)
+		for _, asset := range assets {
+			fmt.Fprintf(hash, "%s %s=%d\n", label, asset, balances[asset])
+		}
+	}
+	for _, clientID := range clientIDs {
+		client := ex.Clients[clientID]
+		fmt.Fprintf(hash, "client %d\n", clientID)
+		writeBalances("spot", client.Balances)
+		writeBalances("spot_reserved", client.Reserved)
+		writeBalances("perp", client.PerpBalances)
+		writeBalances("perp_reserved", client.PerpReserved)
+		writeBalances("borrowed", client.Borrowed)
+		writeBalances("borrowed_spot", client.BorrowedSpot)
+		positions := ex.Positions.GetAllPositions(clientID)
+		sort.Slice(positions, func(i, j int) bool {
+			if positions[i].Symbol != positions[j].Symbol {
+				return positions[i].Symbol < positions[j].Symbol
+			}
+			return positions[i].PositionSide < positions[j].PositionSide
+		})
+		for _, position := range positions {
+			fmt.Fprintf(hash, "position %+v\n", position)
+		}
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil))
+}
 
 type randomwalkStubGateway struct {
 	requests []etypes.Request
@@ -114,6 +206,42 @@ func TestRandomWalkMaintainsTwoSidedQuotes(t *testing.T) {
 				t.Errorf("%s has empty final book: bid=%d ask=%d pending=%d requests=%d", symbol, bidQty, askQty, pending, requests)
 			}
 		}
+	}
+}
+
+// The phase runtime is a stronger contract than ordinary quiescence: the full
+// simulated ecology must produce identical logs and terminal state regardless
+// of how many OS threads Go is allowed to schedule. This catches a goroutine
+// that accidentally re-enters the direct-mount model path.
+func TestRandomWalkDeterministicPhaseDigestAcrossGOMAXPROCS(t *testing.T) {
+	run := func(procs int) (stateDigest, logDigest string) {
+		t.Helper()
+		previous := runtime.GOMAXPROCS(procs)
+		defer runtime.GOMAXPROCS(previous)
+
+		logDir := t.TempDir()
+		sim, err := NewSimWithConfig(10*time.Second, SimConfig{LogDir: logDir, SnapshotOnly: true})
+		if err != nil {
+			t.Fatalf("NewSimWithConfig: %v", err)
+		}
+		ctx := context.Background()
+		sim.Exchange().StartAutomation(ctx)
+		defer sim.Exchange().StopAutomation()
+		if err := sim.Runner.Run(ctx); err != nil {
+			t.Fatalf("Runner.Run with GOMAXPROCS=%d: %v", procs, err)
+		}
+		stateDigest = digestRandomwalkState(sim)
+		sim.Close()
+		return stateDigest, digestRandomwalkLogs(t, logDir)
+	}
+
+	stateOne, logsOne := run(1)
+	stateMany, logsMany := run(14)
+	if stateOne != stateMany {
+		t.Fatalf("terminal state digest differs: GOMAXPROCS=1 %s, GOMAXPROCS=14 %s", stateOne, stateMany)
+	}
+	if logsOne != logsMany {
+		t.Fatalf("log digest differs: GOMAXPROCS=1 %s, GOMAXPROCS=14 %s", logsOne, logsMany)
 	}
 }
 
@@ -349,5 +477,156 @@ func TestCrossPairMMKeepsInsufficientSideWithdrawnUntilOppositeFill(t *testing.T
 	}
 	if got := orders[3].Side; got != exchange.Sell {
 		t.Fatalf("re-enabled side = %s, want sell", got)
+	}
+}
+
+func basisSnapshot(symbol string, timestamp, bid, ask int64) actor.BookSnapshotEvent {
+	return actor.BookSnapshotEvent{
+		Symbol:    symbol,
+		Timestamp: timestamp,
+		Snapshot: &exchange.BookSnapshot{
+			Bids: []exchange.PriceLevel{{Price: bid, VisibleQty: exchange.BTC_PRECISION}},
+			Asks: []exchange.PriceLevel{{Price: ask, VisibleQty: exchange.BTC_PRECISION}},
+		},
+	}
+}
+
+func updateBasisBooks(a *BasisArbActor, timestamp, spotBid, spotAsk, perpBid, perpAsk int64) {
+	a.onSnapshot(basisSnapshot(a.cfg.SpotSymbol, timestamp, spotBid, spotAsk))
+	a.onSnapshot(basisSnapshot(a.cfg.PerpSymbol, timestamp, perpBid, perpAsk))
+}
+
+func TestBasisArbUsesFreshExecutableFeeAwareBooks(t *testing.T) {
+	gw := newRandomwalkStubGateway()
+	arb := NewBasisArbActor(5, gw, BasisArbConfig{
+		SpotSymbol:      "ABC-USD",
+		PerpSymbol:      "ABC-PERP",
+		SpotTakerFeeBps: 5,
+		PerpTakerFeeBps: 5,
+		LotSize:         exchange.BTC_PRECISION,
+		MaxPosition:     2,
+	})
+
+	// A trade print alone is neither a current quote nor a two-sided execution
+	// opportunity. The old actor would have used these prices directly.
+	arb.HandleEvent(context.Background(), &actor.Event{Type: actor.EventTrade, Data: actor.TradeEvent{
+		Symbol: "ABC-PERP", Trade: &exchange.Trade{Price: 200 * exchange.USD_PRECISION},
+	}})
+	arb.checkBasis()
+	if got := len(gw.placedOrders()); got != 0 {
+		t.Fatalf("trade print without books submitted %d orders", got)
+	}
+
+	// The mid-price basis looks positive, but crossing the actual spread pays
+	// more in two 5 bps taker fees than the $0.08 gross difference earns.
+	updateBasisBooks(arb, 1,
+		100*exchange.USD_PRECISION, 100*exchange.USD_PRECISION,
+		100*exchange.USD_PRECISION+8*exchange.CENT_TICK, 100*exchange.USD_PRECISION+10*exchange.CENT_TICK)
+	arb.checkBasis()
+	if got := len(gw.placedOrders()); got != 0 {
+		t.Fatalf("fee-negative executable basis submitted %d orders", got)
+	}
+
+	// A fresh coherent snapshot with enough executable edge can open one pair.
+	updateBasisBooks(arb, 2,
+		100*exchange.USD_PRECISION, 100*exchange.USD_PRECISION,
+		100*exchange.USD_PRECISION+20*exchange.CENT_TICK, 100*exchange.USD_PRECISION+25*exchange.CENT_TICK)
+	arb.checkBasis()
+	orders := gw.placedOrders()
+	if len(orders) != 2 {
+		t.Fatalf("executable fee-positive basis submitted %d orders, want 2", len(orders))
+	}
+	if orders[0].Symbol != "ABC-PERP" || orders[0].Side != exchange.Sell {
+		t.Fatalf("perp opening leg = %+v, want sell ABC-PERP", orders[0])
+	}
+	if orders[1].Symbol != "ABC-USD" || orders[1].Side != exchange.Buy {
+		t.Fatalf("spot opening leg = %+v, want buy ABC-USD", orders[1])
+	}
+
+	arb.onAccepted(actor.OrderAcceptedEvent{RequestID: orders[0].RequestID, OrderID: 101})
+	arb.onAccepted(actor.OrderAcceptedEvent{RequestID: orders[1].RequestID, OrderID: 102})
+	arb.onFilled(actor.OrderFillEvent{OrderID: 101, Symbol: "ABC-PERP", Side: exchange.Sell, Qty: exchange.BTC_PRECISION, IsFull: true})
+	if arb.position != 0 || arb.pair == nil {
+		t.Fatalf("one completed leg committed position=%d pair=%v", arb.position, arb.pair)
+	}
+	arb.onFilled(actor.OrderFillEvent{OrderID: 102, Symbol: "ABC-USD", Side: exchange.Buy, Qty: exchange.BTC_PRECISION, IsFull: true})
+	if arb.position != 1 || arb.pair != nil {
+		t.Fatalf("matched pair state position=%d pair=%v, want 1/nil", arb.position, arb.pair)
+	}
+
+	// Settling quickly must not replay the same stale book snapshot.
+	arb.checkBasis()
+	if got := len(gw.placedOrders()); got != 2 {
+		t.Fatalf("stale snapshot submitted duplicate pair: got %d orders, want 2", got)
+	}
+}
+
+func TestBasisArbNeutralizesPartialRejectedPairBeforeReentry(t *testing.T) {
+	gw := newRandomwalkStubGateway()
+	arb := NewBasisArbActor(5, gw, BasisArbConfig{
+		SpotSymbol:  "ABC-USD",
+		PerpSymbol:  "ABC-PERP",
+		LotSize:     exchange.BTC_PRECISION,
+		MaxPosition: 2,
+	})
+	updateBasisBooks(arb, 1,
+		100*exchange.USD_PRECISION, 100*exchange.USD_PRECISION,
+		102*exchange.USD_PRECISION, 103*exchange.USD_PRECISION)
+	arb.checkBasis()
+	orders := gw.placedOrders()
+	if len(orders) != 2 {
+		t.Fatalf("opening orders = %d, want 2", len(orders))
+	}
+
+	perp, spot := orders[0], orders[1]
+	arb.onAccepted(actor.OrderAcceptedEvent{RequestID: perp.RequestID, OrderID: 201})
+	arb.onAccepted(actor.OrderAcceptedEvent{RequestID: spot.RequestID, OrderID: 202})
+	halfLot := int64(exchange.BTC_PRECISION / 2)
+	arb.onFilled(actor.OrderFillEvent{OrderID: 201, Symbol: "ABC-PERP", Side: exchange.Sell, Qty: halfLot})
+	arb.onRejected(actor.OrderRejectedEvent{RequestID: spot.RequestID, Reason: exchange.RejectInsufficientBalance})
+	arb.onCancelled(actor.OrderCancelledEvent{OrderID: 201, RemainingQty: halfLot})
+
+	orders = gw.placedOrders()
+	if len(orders) != 3 {
+		t.Fatalf("partial/rejected pair submitted %d orders, want one compensating order", len(orders))
+	}
+	hedge := orders[2]
+	if hedge.Symbol != "ABC-PERP" || hedge.Side != exchange.Buy || hedge.Qty != halfLot {
+		t.Fatalf("compensating order = %+v, want buy %d ABC-PERP", hedge, halfLot)
+	}
+	if arb.position != 0 || arb.pair == nil || !arb.pair.recovering {
+		t.Fatalf("partial pair was counted or forgotten: position=%d pair=%+v", arb.position, arb.pair)
+	}
+
+	// The active compensating order blocks re-entry, even on fresh market data.
+	updateBasisBooks(arb, 2,
+		100*exchange.USD_PRECISION, 100*exchange.USD_PRECISION,
+		102*exchange.USD_PRECISION, 103*exchange.USD_PRECISION)
+	arb.checkBasis()
+	if got := len(gw.placedOrders()); got != 3 {
+		t.Fatalf("unresolved pair permitted re-entry: got %d orders, want 3", got)
+	}
+
+	// A rejected compensating order preserves the residual and retries only
+	// after another coherent book update, rather than losing the exposure or
+	// sending an immediate retry storm.
+	arb.onRejected(actor.OrderRejectedEvent{RequestID: hedge.RequestID, Reason: exchange.RejectInsufficientBalance})
+	arb.checkBasis()
+	if got := len(gw.placedOrders()); got != 3 {
+		t.Fatalf("unchanged snapshot retried rejected hedge: got %d orders, want 3", got)
+	}
+	updateBasisBooks(arb, 3,
+		100*exchange.USD_PRECISION, 100*exchange.USD_PRECISION,
+		102*exchange.USD_PRECISION, 103*exchange.USD_PRECISION)
+	arb.checkBasis()
+	orders = gw.placedOrders()
+	if len(orders) != 4 {
+		t.Fatalf("fresh snapshot did not retry hedge: got %d orders, want 4", len(orders))
+	}
+	hedge = orders[3]
+	arb.onAccepted(actor.OrderAcceptedEvent{RequestID: hedge.RequestID, OrderID: 203})
+	arb.onFilled(actor.OrderFillEvent{OrderID: 203, Symbol: "ABC-PERP", Side: exchange.Buy, Qty: halfLot, IsFull: true})
+	if arb.position != 0 || arb.pair != nil {
+		t.Fatalf("completed compensation state position=%d pair=%v, want 0/nil", arb.position, arb.pair)
 	}
 }

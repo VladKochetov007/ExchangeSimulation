@@ -71,6 +71,20 @@ type AutomationConfig struct {
 	ListingPolicies []etypes.ListingPolicy
 }
 
+type phaseJobGroup uint8
+
+const (
+	phaseJobSnapshots phaseJobGroup = iota
+	phaseJobBalances
+	phaseJobAutomation
+)
+
+type phaseJob struct {
+	group  phaseJobGroup
+	ticker Ticker
+	fn     func()
+}
+
 type DefaultExchange struct {
 	ID                   string
 	Clients              map[uint64]*Client
@@ -89,6 +103,7 @@ type DefaultExchange struct {
 	LiquidationFeeBps    int64
 	autoAnchorMarks      bool
 	deterministicIngress bool
+	deterministicPhases  bool
 	markEMAWindow        int
 	markBandBps          int64
 	autoAnchoredSymbols  map[string]bool
@@ -109,6 +124,8 @@ type DefaultExchange struct {
 	automCancel             context.CancelFunc
 	automWg                 sync.WaitGroup
 	automMu                 sync.RWMutex
+	phaseMu                 sync.Mutex
+	phaseJobs               []phaseJob
 	mu                      sync.RWMutex
 	running                 bool
 	closed                  bool
@@ -129,6 +146,11 @@ type ExchangeConfig struct {
 	// drive DrainIngress at model-defined boundaries, so equal-arrival request
 	// priority is not chosen by Go scheduling.
 	DeterministicIngress bool
+
+	// DeterministicPhases replaces asynchronous exchange jobs and response
+	// delivery with an explicit simulation-runner pump. It requires
+	// DeterministicIngress and a direct (non-latency-wrapped) mount.
+	DeterministicPhases bool
 
 	// EstimatedClients pre-allocates capacity for client maps (default: 10)
 	EstimatedClients int
@@ -161,6 +183,12 @@ func NewExchange(estimatedClients int, clock Clock) *DefaultExchange {
 
 // NewExchangeWithConfig creates an exchange with custom configuration
 func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
+	if config.DeterministicPhases {
+		// A phase runner owns every state transition. Leaving the legacy
+		// request goroutine enabled would reintroduce scheduler-dependent
+		// matching even though phase mode was requested.
+		config.DeterministicIngress = true
+	}
 	if config.ID == "" {
 		config.ID = "exchange"
 	}
@@ -199,6 +227,7 @@ func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
 		Loggers:                 make(map[string]Logger),
 		tickerFactory:           config.TickerFactory,
 		deterministicIngress:    config.DeterministicIngress,
+		deterministicPhases:     config.DeterministicPhases,
 		running:                 false,
 		shutdownCh:              make(chan struct{}),
 		snapshotStopCh:          make(chan struct{}),
@@ -210,6 +239,71 @@ func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
 	return ex
 }
 
+// DeterministicPhasesEnabled reports whether this exchange was constructed
+// for the runner's explicit synchronous phase runtime.
+func (e *DefaultExchange) DeterministicPhasesEnabled() bool {
+	return e.deterministicPhases
+}
+
+func (e *DefaultExchange) addDeterministicPhaseJob(group phaseJobGroup, ticker Ticker, fn func()) {
+	e.phaseMu.Lock()
+	e.phaseJobs = append(e.phaseJobs, phaseJob{group: group, ticker: ticker, fn: fn})
+	e.phaseMu.Unlock()
+}
+
+func (e *DefaultExchange) stopDeterministicPhaseJobs(group *phaseJobGroup) {
+	e.phaseMu.Lock()
+	jobs := e.phaseJobs[:0]
+	var stopped []Ticker
+	for _, job := range e.phaseJobs {
+		if group == nil || job.group == *group {
+			stopped = append(stopped, job.ticker)
+			continue
+		}
+		jobs = append(jobs, job)
+	}
+	e.phaseJobs = jobs
+	e.phaseMu.Unlock()
+
+	for _, ticker := range stopped {
+		ticker.Stop()
+	}
+}
+
+// PumpDeterministicPhase runs due exchange-owned jobs in their registration
+// order. Snapshot/balance jobs register when the first client connects;
+// automation jobs register when StartAutomation is called. This is the only
+// phase-mode path that invokes those callbacks.
+func (e *DefaultExchange) PumpDeterministicPhase() bool {
+	if !e.deterministicPhases {
+		return false
+	}
+
+	processed := false
+	for {
+		e.phaseMu.Lock()
+		jobs := append([]phaseJob(nil), e.phaseJobs...)
+		e.phaseMu.Unlock()
+
+		progress := false
+		for _, job := range jobs {
+			select {
+			case <-job.ticker.C():
+				e.automInFlight.Add(1)
+				job.fn()
+				e.automInFlight.Add(-1)
+				acknowledgeTicker(job.ticker)
+				processed = true
+				progress = true
+			default:
+			}
+		}
+		if !progress {
+			return processed
+		}
+	}
+}
+
 func (e *DefaultExchange) EnablePeriodicSnapshots(interval time.Duration) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -217,7 +311,11 @@ func (e *DefaultExchange) EnablePeriodicSnapshots(interval time.Duration) {
 	if e.running {
 		if e.snapshotInterval == 0 && interval > 0 {
 			ticker := e.tickerFactory.NewTicker(interval)
-			go e.runSnapshotLoop(ticker)
+			if e.deterministicPhases {
+				e.addDeterministicPhaseJob(phaseJobSnapshots, ticker, e.logSnapshots)
+			} else {
+				go e.runSnapshotLoop(ticker)
+			}
 		}
 	}
 	e.snapshotInterval = interval
@@ -273,8 +371,14 @@ func (e *DefaultExchange) EnableBalanceSnapshots(interval time.Duration) {
 	defer e.mu.Unlock()
 	e.balanceSnapshotInterval = interval
 	if e.running && interval > 0 {
-		e.balanceSnapshotStopCh = make(chan struct{})
-		go e.runBalanceSnapshotLoop(interval)
+		if e.deterministicPhases {
+			group := phaseJobBalances
+			e.stopDeterministicPhaseJobs(&group)
+			e.addDeterministicPhaseJob(phaseJobBalances, e.tickerFactory.NewTicker(interval), e.LogAllBalances)
+		} else {
+			e.balanceSnapshotStopCh = make(chan struct{})
+			go e.runBalanceSnapshotLoop(interval)
+		}
 	}
 }
 
@@ -533,6 +637,9 @@ func (e *DefaultExchange) ConnectNewClient(clientID uint64, initialBalances map[
 	}
 
 	gateway := NewClientGateway(clientID)
+	if e.deterministicPhases {
+		gateway.enableDeterministicPhaseEgress()
+	}
 	e.Gateways[clientID] = gateway
 
 	if !e.deterministicIngress {
@@ -543,11 +650,19 @@ func (e *DefaultExchange) ConnectNewClient(clientID uint64, initialBalances map[
 		e.running = true
 		if e.snapshotInterval > 0 {
 			ticker := e.tickerFactory.NewTicker(e.snapshotInterval)
-			go e.runSnapshotLoop(ticker)
+			if e.deterministicPhases {
+				e.addDeterministicPhaseJob(phaseJobSnapshots, ticker, e.logSnapshots)
+			} else {
+				go e.runSnapshotLoop(ticker)
+			}
 		}
 		if e.balanceSnapshotInterval > 0 {
-			e.balanceSnapshotStopCh = make(chan struct{})
-			go e.runBalanceSnapshotLoop(e.balanceSnapshotInterval)
+			if e.deterministicPhases {
+				e.addDeterministicPhaseJob(phaseJobBalances, e.tickerFactory.NewTicker(e.balanceSnapshotInterval), e.LogAllBalances)
+			} else {
+				e.balanceSnapshotStopCh = make(chan struct{})
+				go e.runBalanceSnapshotLoop(e.balanceSnapshotInterval)
+			}
 		}
 	}
 
@@ -655,10 +770,20 @@ func (e *DefaultExchange) Idle() bool {
 		return false
 	}
 	e.mu.RLock()
-	defer e.mu.RUnlock()
 	for _, gw := range e.Gateways {
 		if !gw.Idle() {
+			e.mu.RUnlock()
 			return false
+		}
+	}
+	e.mu.RUnlock()
+	if e.deterministicPhases {
+		e.phaseMu.Lock()
+		defer e.phaseMu.Unlock()
+		for _, job := range e.phaseJobs {
+			if len(job.ticker.C()) > 0 {
+				return false
+			}
 		}
 	}
 	return true
@@ -714,6 +839,32 @@ func (e *DefaultExchange) DrainIngress() bool {
 			return processed
 		}
 	}
+}
+
+// DrainDeterministicEgress moves exchange response outboxes to gateway inboxes
+// in client-ID order. It is paired with PumpDeterministicPhase; normal
+// exchanges keep their asynchronous outbox deliverers.
+func (e *DefaultExchange) DrainDeterministicEgress() bool {
+	if !e.deterministicPhases {
+		return false
+	}
+	e.mu.RLock()
+	clientIDs := make([]uint64, 0, len(e.Gateways))
+	gateways := make(map[uint64]*ClientGateway, len(e.Gateways))
+	for clientID, gateway := range e.Gateways {
+		clientIDs = append(clientIDs, clientID)
+		gateways[clientID] = gateway
+	}
+	e.mu.RUnlock()
+	slices.Sort(clientIDs)
+
+	processed := false
+	for _, clientID := range clientIDs {
+		if gateways[clientID].DrainDeterministicEgress() {
+			processed = true
+		}
+	}
+	return processed
 }
 
 // handleClientRequest processes one request. Kept separate so the in-flight
@@ -853,6 +1004,9 @@ func (e *DefaultExchange) Shutdown() {
 		e.running = false
 	}
 	e.mu.Unlock()
+	if e.deterministicPhases {
+		e.stopDeterministicPhaseJobs(nil)
+	}
 
 	// Cancel before releasing automMu so StartAutomation cannot install a new
 	// context after terminal shutdown. Wait outside locks because loop work may
@@ -964,6 +1118,22 @@ func (e *DefaultExchange) StartAutomation(ctx context.Context) {
 	fundingTicker := e.tickerFactory.NewTicker(time.Second)
 	collateralTicker := e.tickerFactory.NewTicker(time.Minute)
 	expiryTicker := e.tickerFactory.NewTicker(time.Second)
+	if e.deterministicPhases {
+		// The initial mark pass is part of setup, before the runner begins
+		// processing actor work. Subsequent jobs are pumped in this exact
+		// registration order at their scheduled timestamps.
+		e.updateAllPerpPrices()
+		e.addDeterministicPhaseJob(phaseJobAutomation, priceTicker, e.updateAllPerpPrices)
+		e.addDeterministicPhaseJob(phaseJobAutomation, fundingTicker, e.CheckAndSettleFunding)
+		e.addDeterministicPhaseJob(phaseJobAutomation, collateralTicker, e.ChargeCollateralInterest)
+		e.addDeterministicPhaseJob(phaseJobAutomation, expiryTicker, func() {
+			e.CheckListings()
+			e.UpdateDerivativeMarks()
+			e.CheckExpiries()
+			e.CheckPositionMarginerLiquidations()
+		})
+		return
+	}
 
 	e.automWg.Add(1)
 	go e.priceUpdateLoop(priceTicker)
@@ -987,6 +1157,10 @@ func (e *DefaultExchange) StopAutomation() {
 	e.automMu.Unlock()
 
 	e.automWg.Wait()
+	if e.deterministicPhases {
+		group := phaseJobAutomation
+		e.stopDeterministicPhaseJobs(&group)
+	}
 
 	e.automMu.Lock()
 	e.automCtx = nil

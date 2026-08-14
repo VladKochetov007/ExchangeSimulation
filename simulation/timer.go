@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -10,9 +11,10 @@ import (
 
 // SimTimerFactory creates simulation-time timers backed by EventScheduler
 type SimTimerFactory struct {
-	scheduler *EventScheduler
-	mu        sync.Mutex
-	timers    []*simTimer
+	scheduler           *EventScheduler
+	mu                  sync.Mutex
+	timers              []*simTimer
+	deterministicPhases atomic.Bool
 }
 
 // PendingTicks counts ticks delivered by the scheduler but not yet acknowledged
@@ -32,6 +34,29 @@ func (f *SimTimerFactory) PendingTicks() int {
 // Idle implements the runner's quiescence contract.
 func (f *SimTimerFactory) Idle() bool { return f.PendingTicks() == 0 }
 
+// EnableDeterministicPhases turns otherwise tolerated ticker coalescing into
+// a hard runtime error. A phase run may not claim reproducibility after it
+// has skipped a model callback.
+func (f *SimTimerFactory) EnableDeterministicPhases() {
+	f.deterministicPhases.Store(true)
+}
+
+// DeterministicPhaseError reports whether any ticker tick was coalesced while
+// phase mode was active. The runner checks it at each model-time boundary.
+func (f *SimTimerFactory) DeterministicPhaseError() error {
+	if !f.deterministicPhases.Load() {
+		return nil
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, timer := range f.timers {
+		if dropped := timer.dropped.Load(); dropped != 0 {
+			return fmt.Errorf("simulation: deterministic phase ticker dropped %d tick(s)", dropped)
+		}
+	}
+	return nil
+}
+
 // NewSimTimerFactory creates a new simulation timer factory
 func NewSimTimerFactory(scheduler *EventScheduler) *SimTimerFactory {
 	return &SimTimerFactory{scheduler: scheduler}
@@ -45,9 +70,10 @@ func (f *SimTimerFactory) NewTicker(d time.Duration) exchange.Ticker {
 		panic("simulation: non-positive interval for NewTicker")
 	}
 	t := &simTimer{
-		scheduler: f.scheduler,
-		interval:  d.Nanoseconds(),
-		ch:        make(chan time.Time, 1), // Buffered to prevent blocking
+		scheduler:           f.scheduler,
+		interval:            d.Nanoseconds(),
+		ch:                  make(chan time.Time, 1), // Buffered to prevent blocking
+		deterministicPhases: &f.deterministicPhases,
 	}
 	t.start()
 	f.mu.Lock()
@@ -64,6 +90,9 @@ type simTimer struct {
 	eventID   uint64
 	stopped   bool
 	pending   atomic.Int64
+	dropped   atomic.Int64
+
+	deterministicPhases *atomic.Bool
 }
 
 func (t *simTimer) C() <-chan time.Time { return t.ch }
@@ -109,6 +138,9 @@ func (t *simTimer) start() {
 		case t.ch <- time.Unix(0, t.scheduler.clock.NowUnixNano()):
 		default:
 			t.pending.Add(-1)
+			if t.deterministicPhases != nil && t.deterministicPhases.Load() {
+				t.dropped.Add(1)
+			}
 		}
 	})
 }

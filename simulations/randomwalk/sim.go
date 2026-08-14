@@ -17,6 +17,7 @@ const (
 	// made the low-priced GHI book hundreds of times thinner than ABC.
 	marketMakerLevelNotional = 5_000 * exchange.USD_PRECISION
 	randomTakerNotional      = 1_200 * exchange.USD_PRECISION
+	basisArbTakerFeeBps      = 5
 )
 
 type assetSpec struct {
@@ -92,6 +93,7 @@ func NewSimWithConfig(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		Clock:                   simClock,
 		TickerFactory:           timerFact,
 		DeterministicIngress:    true,
+		DeterministicPhases:     true,
 		SnapshotInterval:        time.Second,
 		BalanceSnapshotInterval: 10 * time.Second,
 	})
@@ -188,7 +190,7 @@ func NewSimWithConfig(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	}
 	zeroFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 0, InQuote: true}
 	takerFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 10, InQuote: true}
-	arbFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
+	arbFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: basisArbTakerFeeBps, InQuote: true}
 
 	mount := simulation.NewMount(ex, simulation.LatencyConfig{})
 
@@ -230,11 +232,13 @@ func NewSimWithConfig(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		arbGw := mount.ConnectNewClient(clientID, initBalances, arbFee)
 		ex.AddPerpBalance(clientID, "USD", 10_000_000*exchange.USD_PRECISION)
 		arb := NewBasisArbActor(clientID, arbGw, BasisArbConfig{
-			SpotSymbol:   a.name + "-USD",
-			PerpSymbol:   a.name + "-PERP",
-			ThresholdBps: 1,
-			LotSize:      quantityForUSDNotional(randomTakerNotional, a.price),
-			MaxPosition:  500,
+			SpotSymbol:      a.name + "-USD",
+			PerpSymbol:      a.name + "-PERP",
+			SpotTakerFeeBps: basisArbTakerFeeBps,
+			PerpTakerFeeBps: basisArbTakerFeeBps,
+			ThresholdBps:    1,
+			LotSize:         quantityForUSDNotional(randomTakerNotional, a.price),
+			MaxPosition:     500,
 		})
 		arb.SetTickerFactory(timerFact)
 		arbs = append(arbs, arb)
@@ -304,9 +308,10 @@ func NewSimWithConfig(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	}
 
 	runner := simulation.NewRunner(simClock, simulation.RunnerConfig{
-		Iterations: int(simTime / time.Millisecond),
-		Step:       time.Millisecond,
-		Quiesce:    true,
+		Iterations:          int(simTime / time.Millisecond),
+		Step:                time.Millisecond,
+		Quiesce:             true,
+		DeterministicPhases: true,
 	})
 	runner.AddMount(mount)
 	runner.AddIdler(timerFact)

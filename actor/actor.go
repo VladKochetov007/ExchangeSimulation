@@ -38,6 +38,11 @@ type tickCall struct {
 	t      time.Time
 }
 
+type phaseTicker struct {
+	ticker exchange.Ticker
+	fn     func(time.Time)
+}
+
 type tickAcknowledger interface {
 	Acknowledge()
 }
@@ -60,6 +65,13 @@ type BaseActor struct {
 
 	handler EventHandler
 	tickers []tickEntry
+
+	// phaseMode is an opt-in single-threaded execution mode used by the
+	// simulation runner. It keeps the ordinary asynchronous actor path intact,
+	// but replaces its select/fan-in goroutines with an explicit inbox pump.
+	// It is configured before Start and never changed while running.
+	phaseMode    bool
+	phaseTickers []phaseTicker
 
 	activeOrders   sync.Map // orderID -> *OrderInfo
 	requestToOrder sync.Map // requestID -> orderID
@@ -84,11 +96,20 @@ type BaseActor struct {
 // Used by the runner's quiescence barrier to decide that simulated time may
 // advance without cutting a reaction short.
 func (a *BaseActor) Idle() bool {
-	return a.processing.Load() == 0 &&
+	idle := a.processing.Load() == 0 &&
 		a.pendingTicks.Load() == 0 &&
 		len(a.eventCh) == 0 &&
 		len(a.gateway.Responses()) == 0 &&
 		len(a.gateway.MarketDataCh()) == 0
+	if !idle {
+		return false
+	}
+	for _, ticker := range a.phaseTickers {
+		if len(ticker.ticker.C()) != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 type OrderInfo struct {
@@ -116,6 +137,15 @@ func (a *BaseActor) Gateway() Gateway { return a.gateway }
 // a handler is set the eventCh is not written.
 func (a *BaseActor) SetHandler(h EventHandler) { a.handler = h }
 
+// EnableDeterministicPhases switches this actor to the simulation runner's
+// explicit phase pump. It must be called before Start.
+func (a *BaseActor) EnableDeterministicPhases() { a.phaseMode = true }
+
+// SupportsDeterministicPhases reports whether the actor can be driven without
+// a goroutine. Pull-based EventChannel consumers are intentionally rejected:
+// the runner cannot observe or order work performed by an external consumer.
+func (a *BaseActor) SupportsDeterministicPhases() bool { return a.handler != nil }
+
 // AddTicker registers a periodic callback driven by the actor's TickerFactory.
 // Must be called before Start. The callback fires inside the run goroutine, so
 // it shares the same concurrency domain as HandleEvent — no extra locking needed.
@@ -126,6 +156,10 @@ func (a *BaseActor) AddTicker(d time.Duration, fn func(time.Time)) {
 
 func (a *BaseActor) Start(ctx context.Context) error {
 	if !a.running.CompareAndSwap(false, true) {
+		return nil
+	}
+	if a.phaseMode {
+		a.startPhaseTickers()
 		return nil
 	}
 	// Register simulation timers before returning. Runner starts actors in a
@@ -141,6 +175,12 @@ func (a *BaseActor) Stop() error {
 		return nil
 	}
 	a.stopOnce.Do(func() { close(a.stopCh) })
+	for _, ticker := range a.phaseTickers {
+		ticker.ticker.Stop()
+	}
+	if a.phaseMode {
+		a.running.Store(false)
+	}
 	return nil
 }
 
@@ -154,24 +194,79 @@ func (a *BaseActor) run(ctx context.Context, tickCh <-chan tickCall) {
 		case <-a.stopCh:
 			return
 		case resp := <-a.gateway.Responses():
-			a.processing.Add(1)
-			for _, evt := range a.decodeResponse(resp) {
-				a.dispatch(ctx, evt)
-			}
-			a.processing.Add(-1)
+			a.processResponse(ctx, resp)
 		case md := <-a.gateway.MarketDataCh():
-			a.processing.Add(1)
-			if evt := a.decodeMarketData(md); evt != nil {
-				a.dispatch(ctx, evt)
-			}
-			a.processing.Add(-1)
+			a.processMarketData(ctx, md)
 		case tc := <-tickCh:
-			a.processing.Add(1)
-			tc.fn(tc.t)
-			a.processing.Add(-1)
+			a.processTick(tc.fn, tc.t)
 			a.pendingTicks.Add(-1)
 			acknowledgeTick(tc.ticker)
 		}
+	}
+}
+
+func (a *BaseActor) processResponse(ctx context.Context, resp exchange.Response) {
+	a.processing.Add(1)
+	for _, evt := range a.decodeResponse(resp) {
+		a.dispatch(ctx, evt)
+	}
+	a.processing.Add(-1)
+}
+
+func (a *BaseActor) processMarketData(ctx context.Context, md *exchange.MarketDataMsg) {
+	a.processing.Add(1)
+	if evt := a.decodeMarketData(md); evt != nil {
+		a.dispatch(ctx, evt)
+	}
+	a.processing.Add(-1)
+}
+
+func (a *BaseActor) processTick(fn func(time.Time), t time.Time) {
+	a.processing.Add(1)
+	fn(t)
+	a.processing.Add(-1)
+}
+
+// PumpDeterministicPhase drains this actor's inbox under a fixed priority:
+// responses, market data, then tickers in registration order. Every callback
+// runs on the runner goroutine. The policy is deliberately explicit because
+// an ordinary select would let the Go scheduler choose economic causality.
+func (a *BaseActor) PumpDeterministicPhase(ctx context.Context) bool {
+	if !a.phaseMode || !a.running.Load() {
+		return false
+	}
+
+	processed := false
+	for {
+		select {
+		case resp := <-a.gateway.Responses():
+			a.processResponse(ctx, resp)
+			processed = true
+			continue
+		default:
+		}
+
+		select {
+		case md := <-a.gateway.MarketDataCh():
+			a.processMarketData(ctx, md)
+			processed = true
+			continue
+		default:
+		}
+
+		for _, ticker := range a.phaseTickers {
+			select {
+			case t := <-ticker.ticker.C():
+				a.processTick(ticker.fn, t)
+				acknowledgeTick(ticker.ticker)
+				processed = true
+				goto nextMessage
+			default:
+			}
+		}
+		return processed
+
+	nextMessage:
 	}
 }
 
@@ -224,6 +319,19 @@ func (a *BaseActor) startTickers(ctx context.Context) <-chan tickCall {
 		}()
 	}
 	return ch
+}
+
+func (a *BaseActor) startPhaseTickers() {
+	if len(a.tickers) == 0 {
+		return
+	}
+	a.phaseTickers = make([]phaseTicker, 0, len(a.tickers))
+	for _, entry := range a.tickers {
+		a.phaseTickers = append(a.phaseTickers, phaseTicker{
+			ticker: a.tickerFactory.NewTicker(entry.interval),
+			fn:     entry.fn,
+		})
+	}
 }
 
 func (a *BaseActor) decodeResponse(resp exchange.Response) []*Event {

@@ -2,7 +2,9 @@ package simulation
 
 import (
 	"context"
+	"fmt"
 	"runtime"
+	"strings"
 	"time"
 
 	"exchange_sim/actor"
@@ -33,6 +35,15 @@ type RunnerConfig struct {
 	// QuiesceTimeout bounds the wait for a settled system so a wedged actor
 	// cannot hang the run (default 2s).
 	QuiesceTimeout time.Duration
+
+	// DeterministicPhases uses a synchronous fixed-point runtime instead of
+	// goroutine scheduling. It is intentionally opt-in and currently supports
+	// direct exchange mounts only; latency-wrapped mounts are rejected.
+	DeterministicPhases bool
+
+	// PhaseMaxRounds bounds same-timestamp reaction chains. Zero defaults to
+	// 100,000. Reaching it is a model error, never a silently truncated run.
+	PhaseMaxRounds int
 }
 
 // Idler is implemented by components that can report having no work queued
@@ -44,6 +55,17 @@ type Idler interface {
 
 type Drainer interface {
 	Drain() bool
+}
+
+type phaseActor interface {
+	EnableDeterministicPhases()
+	SupportsDeterministicPhases() bool
+	PumpDeterministicPhase(context.Context) bool
+}
+
+type phaseTimerController interface {
+	EnableDeterministicPhases()
+	DeterministicPhaseError() error
 }
 
 type Runner struct {
@@ -140,14 +162,164 @@ func (r *Runner) systemIdle() bool {
 	return true
 }
 
+func (r *Runner) deterministicPhasePending() string {
+	pending := make([]string, 0)
+	for _, a := range r.actors {
+		if idler, ok := a.(Idler); ok && !idler.Idle() {
+			pending = append(pending, fmt.Sprintf("actor %d", a.ID()))
+		}
+	}
+	for i, m := range r.mounts {
+		if !m.Idle() {
+			pending = append(pending, fmt.Sprintf("mount %d", i))
+		}
+	}
+	for i, idler := range r.idlers {
+		if !idler.Idle() {
+			pending = append(pending, fmt.Sprintf("idler %d", i))
+		}
+	}
+	return strings.Join(pending, ", ")
+}
+
+func (r *Runner) prepareDeterministicPhases() error {
+	if r.config.Iterations <= 0 {
+		return fmt.Errorf("simulation: deterministic phases require a positive iteration count")
+	}
+	if _, ok := r.clock.(Advanceable); !ok {
+		return fmt.Errorf("simulation: deterministic phases require an advanceable clock")
+	}
+	for _, m := range r.mounts {
+		if err := m.ValidateDeterministicPhases(); err != nil {
+			return err
+		}
+	}
+	for _, idler := range r.idlers {
+		if controller, ok := idler.(phaseTimerController); ok {
+			controller.EnableDeterministicPhases()
+		}
+	}
+	for _, a := range r.actors {
+		phase, ok := a.(phaseActor)
+		if !ok || !phase.SupportsDeterministicPhases() {
+			return fmt.Errorf("simulation: actor %d does not support deterministic phases", a.ID())
+		}
+		phase.EnableDeterministicPhases()
+	}
+	return nil
+}
+
+func (r *Runner) deterministicPhaseError() error {
+	for _, idler := range r.idlers {
+		if controller, ok := idler.(phaseTimerController); ok {
+			if err := controller.DeterministicPhaseError(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// drainDeterministicPhases reaches a same-timestamp fixed point using a
+// documented global order. Venue-owned scheduled jobs run first, then venue
+// ingress, then FIFO egress, then actors in Runner.AddActor order. Every
+// callback happens on this goroutine, so neither select fairness nor OS
+// scheduling chooses who reacts first.
+func (r *Runner) drainDeterministicPhases(ctx context.Context) error {
+	limit := r.config.PhaseMaxRounds
+	if limit <= 0 {
+		limit = 100_000
+	}
+	for round := 0; round < limit; round++ {
+		if err := r.deterministicPhaseError(); err != nil {
+			return err
+		}
+
+		progressed := false
+		for _, m := range r.mounts {
+			if m.PumpDeterministicPhase() {
+				progressed = true
+			}
+		}
+		for _, m := range r.mounts {
+			if m.Drain() {
+				progressed = true
+			}
+		}
+		for _, m := range r.mounts {
+			if m.DrainDeterministicEgress() {
+				progressed = true
+			}
+		}
+		for _, a := range r.actors {
+			if a.(phaseActor).PumpDeterministicPhase(ctx) {
+				progressed = true
+			}
+		}
+
+		if err := r.deterministicPhaseError(); err != nil {
+			return err
+		}
+		if !progressed {
+			if !r.systemIdle() {
+				return fmt.Errorf("simulation: deterministic phase stalled with queued work: %s", r.deterministicPhasePending())
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("simulation: deterministic phase exceeded %d same-timestamp rounds", limit)
+}
+
+func (r *Runner) runDeterministicPhases(ctx context.Context) error {
+	advanceable := r.clock.(Advanceable)
+	if err := r.drainDeterministicPhases(ctx); err != nil {
+		return err
+	}
+	for i := 0; i < r.config.Iterations; i++ {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		advanceable.Advance(r.config.Step)
+		if err := r.drainDeterministicPhases(ctx); err != nil {
+			return err
+		}
+		if r.config.OnProgress != nil && r.config.ProgressEvery > 0 && (i+1)%r.config.ProgressEvery == 0 {
+			r.config.OnProgress(i+1, r.config.Iterations)
+		}
+	}
+	return nil
+}
+
 func (r *Runner) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	if r.config.DeterministicPhases {
+		if err := r.prepareDeterministicPhases(); err != nil {
+			return err
+		}
+	}
 
 	for _, a := range r.actors {
 		if err := a.Start(ctx); err != nil {
 			return err
 		}
+	}
+
+	if r.config.DeterministicPhases {
+		err := r.runDeterministicPhases(ctx)
+		for _, a := range r.actors {
+			a.Stop()
+		}
+		if r.shutdownHook != nil {
+			r.shutdownHook()
+		}
+		for _, m := range r.mounts {
+			m.Shutdown()
+		}
+		return err
 	}
 
 	if r.config.Duration > 0 {

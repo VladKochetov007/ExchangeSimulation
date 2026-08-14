@@ -1,0 +1,89 @@
+package simulation
+
+import (
+	"context"
+	"reflect"
+	"testing"
+	"time"
+
+	"exchange_sim/actor"
+	"exchange_sim/exchange"
+)
+
+type phaseOrderActor struct {
+	*actor.BaseActor
+	start  func()
+	events []actor.EventType
+}
+
+func newPhaseOrderActor(id uint64, gateway actor.Gateway, start func()) *phaseOrderActor {
+	a := &phaseOrderActor{
+		BaseActor: actor.NewBaseActor(id, gateway),
+		start:     start,
+	}
+	a.SetHandler(a)
+	return a
+}
+
+func (a *phaseOrderActor) Start(ctx context.Context) error {
+	a.start()
+	return a.BaseActor.Start(ctx)
+}
+
+func (a *phaseOrderActor) HandleEvent(_ context.Context, event *actor.Event) {
+	a.events = append(a.events, event.Type)
+}
+
+// This adversarial same-timestamp case exercises the entire phase path. The
+// taker fill is enqueued before its acceptance response, while the maker's
+// acceptance predates the fill; both actors must observe Accepted before
+// Filled after fixed ingress, egress, and actor-inbox ordering.
+func TestDeterministicPhasesPreserveOrderLifecycleAtSameTimestamp(t *testing.T) {
+	clock := NewSimulatedClock(0)
+	scheduler := NewEventScheduler(clock)
+	clock.SetScheduler(scheduler)
+	timers := NewSimTimerFactory(scheduler)
+
+	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
+		Clock:               clock,
+		TickerFactory:       timers,
+		DeterministicPhases: true,
+	})
+	ex.AddInstrument(exchange.NewSpotInstrument(
+		"ABC-USD", "ABC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION,
+		exchange.DOLLAR_TICK, exchange.BTC_PRECISION/100,
+	))
+	mount := NewMount(ex, LatencyConfig{})
+	makerGateway := mount.ConnectNewClient(1, map[string]int64{"ABC": exchange.BTC_PRECISION}, &exchange.PercentageFee{})
+	takerGateway := mount.ConnectNewClient(2, map[string]int64{"USD": 1_000 * exchange.USD_PRECISION}, &exchange.PercentageFee{})
+
+	var maker *phaseOrderActor
+	maker = newPhaseOrderActor(1, makerGateway, func() {
+		maker.SubmitOrder("ABC-USD", exchange.Sell, exchange.LimitOrder, 100*exchange.USD_PRECISION, exchange.BTC_PRECISION)
+	})
+	var taker *phaseOrderActor
+	taker = newPhaseOrderActor(2, takerGateway, func() {
+		taker.SubmitOrder("ABC-USD", exchange.Buy, exchange.Market, 0, exchange.BTC_PRECISION)
+	})
+
+	runner := NewRunner(clock, RunnerConfig{
+		Iterations:          1,
+		Step:                time.Millisecond,
+		DeterministicPhases: true,
+	})
+	runner.AddMount(mount)
+	runner.AddIdler(timers)
+	runner.AddActor(maker)
+	runner.AddActor(taker)
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	want := []actor.EventType{actor.EventOrderAccepted, actor.EventOrderFilled}
+	if !reflect.DeepEqual(maker.events, want) {
+		t.Fatalf("maker lifecycle = %v, want %v", maker.events, want)
+	}
+	if !reflect.DeepEqual(taker.events, want) {
+		t.Fatalf("taker lifecycle = %v, want %v", taker.events, want)
+	}
+}

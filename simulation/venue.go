@@ -1,12 +1,19 @@
 package simulation
 
 import (
+	"fmt"
 	"sync"
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
 	"exchange_sim/types"
 )
+
+type deterministicPhaseVenue interface {
+	DeterministicPhasesEnabled() bool
+	PumpDeterministicPhase() bool
+	DrainDeterministicEgress() bool
+}
 
 // Compile-time proof that *Mount satisfies the types.Venue contract.
 var _ types.Venue = (*Mount)(nil)
@@ -68,6 +75,45 @@ func (m *Mount) Idle() bool {
 func (m *Mount) Drain() bool {
 	if drainer, ok := m.Market.(interface{ DrainIngress() bool }); ok {
 		return drainer.DrainIngress()
+	}
+	return false
+}
+
+// ValidateDeterministicPhases rejects paths whose event ordering remains under
+// goroutine control. Latency wrappers are intentionally out of scope for this
+// first phase runtime: their scheduled forwarding goroutines need a separate
+// ordered delivery design rather than being silently treated as deterministic.
+func (m *Mount) ValidateDeterministicPhases() error {
+	if m.Latency.Request != nil || m.Latency.Response != nil || m.Latency.MarketData != nil {
+		return fmt.Errorf("simulation: deterministic phases require a direct mount (latency configured)")
+	}
+	m.mu.Lock()
+	delayed := len(m.delayed)
+	m.mu.Unlock()
+	if delayed != 0 {
+		return fmt.Errorf("simulation: deterministic phases require a direct mount (%d delayed gateways)", delayed)
+	}
+	venue, ok := m.Market.(deterministicPhaseVenue)
+	if !ok || !venue.DeterministicPhasesEnabled() {
+		return fmt.Errorf("simulation: venue does not opt in to deterministic phases")
+	}
+	return nil
+}
+
+// PumpDeterministicPhase runs due exchange-owned jobs, such as snapshots and
+// automation, in the venue's explicit phase order.
+func (m *Mount) PumpDeterministicPhase() bool {
+	if venue, ok := m.Market.(deterministicPhaseVenue); ok {
+		return venue.PumpDeterministicPhase()
+	}
+	return false
+}
+
+// DrainDeterministicEgress moves venue responses to actor inboxes in the
+// venue-defined deterministic order.
+func (m *Mount) DrainDeterministicEgress() bool {
+	if venue, ok := m.Market.(deterministicPhaseVenue); ok {
+		return venue.DrainDeterministicEgress()
 	}
 	return false
 }
