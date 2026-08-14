@@ -7,9 +7,17 @@ import (
 
 	"exchange_sim/exchange"
 	"exchange_sim/simulation"
+	etypes "exchange_sim/types"
 )
 
 const btcPrecision = exchange.BTC_PRECISION
+
+const (
+	// All flows below are quote-notional based. Using one base unit per level
+	// made the low-priced GHI book hundreds of times thinner than ABC.
+	marketMakerLevelNotional = 5_000 * exchange.USD_PRECISION
+	randomTakerNotional      = 1_200 * exchange.USD_PRECISION
+)
 
 type assetSpec struct {
 	name         string
@@ -20,8 +28,16 @@ type assetSpec struct {
 
 var assets = []assetSpec{
 	{name: "ABC", price: 50_000 * exchange.DOLLAR_TICK, tickSize: exchange.DOLLAR_TICK, levelSpacing: 2},
-	{name: "DEF", price: 3_000 * exchange.DOLLAR_TICK, tickSize: exchange.DOLLAR_TICK, levelSpacing: 1},
-	{name: "GHI", price: 150 * exchange.DOLLAR_TICK, tickSize: exchange.DOLLAR_TICK, levelSpacing: 1},
+	{name: "DEF", price: 3_000 * exchange.DOLLAR_TICK, tickSize: 50 * exchange.CENT_TICK, levelSpacing: 2},
+	{name: "GHI", price: 150 * exchange.DOLLAR_TICK, tickSize: 3 * exchange.CENT_TICK, levelSpacing: 2},
+}
+
+func quantityForUSDNotional(notional, price int64) int64 {
+	qty, ok := etypes.TryMulDiv(notional, btcPrecision, price)
+	if !ok || qty < btcPrecision/100 {
+		panic("randomwalk: invalid notional/price quantity")
+	}
+	return qty
 }
 
 type Sim struct {
@@ -38,7 +54,6 @@ type Sim struct {
 
 type SimConfig struct {
 	LogDir       string
-	Step         time.Duration
 	SnapshotOnly bool
 }
 
@@ -51,23 +66,20 @@ func (s *Sim) Close() {
 }
 
 func NewSim(simTime time.Duration) (*Sim, error) {
-	return NewSimWithConfig(simTime, SimConfig{LogDir: "logs/randomwalk", Step: time.Millisecond})
+	return NewSimWithConfig(simTime, SimConfig{LogDir: "logs/randomwalk"})
 }
 
 // NewSimWithLogDir constructs the standard random-walk ecology while keeping
 // each experiment's artifacts in its own directory.
 func NewSimWithLogDir(simTime time.Duration, logDir string) (*Sim, error) {
-	return NewSimWithConfig(simTime, SimConfig{LogDir: logDir, Step: time.Millisecond})
+	return NewSimWithConfig(simTime, SimConfig{LogDir: logDir})
 }
 
-// NewSimWithConfig exposes simulation-step and logging controls for long
-// visualization runs without changing the standard scenario defaults.
+// NewSimWithConfig exposes logging controls for long visualization runs while
+// preserving the model's fixed 1ms simulation-clock resolution.
 func NewSimWithConfig(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	if cfg.LogDir == "" {
 		cfg.LogDir = "logs/randomwalk"
-	}
-	if cfg.Step <= 0 {
-		cfg.Step = time.Millisecond
 	}
 	logDir := cfg.LogDir
 	simClock := simulation.NewSimulatedClock(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano())
@@ -79,6 +91,7 @@ func NewSimWithConfig(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		EstimatedClients:        15,
 		Clock:                   simClock,
 		TickerFactory:           timerFact,
+		DeterministicIngress:    true,
 		SnapshotInterval:        time.Second,
 		BalanceSnapshotInterval: 10 * time.Second,
 	})
@@ -190,7 +203,7 @@ func NewSimWithConfig(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 			BootstrapPrice:  a.price,
 			Levels:          5,
 			LevelSpacing:    a.levelSpacing,
-			LevelSize:       btcPrecision,
+			LevelSize:       quantityForUSDNotional(marketMakerLevelNotional, a.price),
 			TickSize:        a.tickSize,
 			RefreshInterval: 100 * time.Millisecond,
 		})
@@ -203,7 +216,7 @@ func NewSimWithConfig(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	ex.AddPerpBalance(4, "USD", 10_000_000*exchange.USD_PRECISION)
 	taker := NewRandomTaker(4, takerGw, TakerConfig{
 		Symbols:       allSymbols,
-		QuoteNotional: 1_200 * exchange.USD_PRECISION, // ~$1,200 per order
+		QuoteNotional: randomTakerNotional,
 		BasePrecision: btcPrecision,
 		TakeInterval:  100 * time.Millisecond,
 		Seed:          42,
@@ -220,7 +233,7 @@ func NewSimWithConfig(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 			SpotSymbol:   a.name + "-USD",
 			PerpSymbol:   a.name + "-PERP",
 			ThresholdBps: 1,
-			LotSize:      btcPrecision,
+			LotSize:      quantityForUSDNotional(randomTakerNotional, a.price),
 			MaxPosition:  500,
 		})
 		arb.SetTickerFactory(timerFact)
@@ -238,7 +251,7 @@ func NewSimWithConfig(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 			PerpSymbol:        a.name + "-PERP",
 			OpenThresholdBps:  1,
 			CloseThresholdBps: 0,
-			LotSize:           btcPrecision,
+			LotSize:           quantityForUSDNotional(randomTakerNotional, a.price),
 			MaxPosition:       10,
 			EntryWindow:       60 * time.Second,
 		})
@@ -249,12 +262,15 @@ func NewSimWithConfig(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	// Client 11: cross-pair market maker, quotes DEF-ABC and GHI-ABC derived from USD mids.
 	crossMMGw := mount.ConnectNewClient(11, initBalances, zeroFee)
 	crossMM := NewCrossPairMM(11, crossMMGw, CrossPairMMConfig{
-		CrossSymbols:    []string{"DEF-ABC", "GHI-ABC"},
-		BaseUSDSymbols:  []string{"DEF-USD", "GHI-USD"},
-		QuoteUSDSymbol:  "ABC-USD",
-		QuotePrecision:  btcPrecision,
-		TickSizes:       map[string]int64{"DEF-ABC": 1_000, "GHI-ABC": 100},
-		LevelSizes:      map[string]int64{"DEF-ABC": 10 * btcPrecision, "GHI-ABC": 10 * btcPrecision},
+		CrossSymbols:   []string{"DEF-ABC", "GHI-ABC"},
+		BaseUSDSymbols: []string{"DEF-USD", "GHI-USD"},
+		QuoteUSDSymbol: "ABC-USD",
+		QuotePrecision: btcPrecision,
+		TickSizes:      map[string]int64{"DEF-ABC": 1_000, "GHI-ABC": 100},
+		LevelSizes: map[string]int64{
+			"DEF-ABC": quantityForUSDNotional(marketMakerLevelNotional, assets[1].price),
+			"GHI-ABC": quantityForUSDNotional(marketMakerLevelNotional, assets[2].price),
+		},
 		Levels:          5,
 		LevelSpacing:    1,
 		RefreshInterval: 100 * time.Millisecond,
@@ -288,10 +304,12 @@ func NewSimWithConfig(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	}
 
 	runner := simulation.NewRunner(simClock, simulation.RunnerConfig{
-		Iterations: int(simTime / cfg.Step),
-		Step:       cfg.Step,
+		Iterations: int(simTime / time.Millisecond),
+		Step:       time.Millisecond,
+		Quiesce:    true,
 	})
 	runner.AddMount(mount)
+	runner.AddIdler(timerFact)
 	for _, mm := range mms {
 		runner.AddActor(mm)
 	}

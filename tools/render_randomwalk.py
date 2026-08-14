@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--logdir", type=Path, required=True, help="randomwalk JSONL directory")
     parser.add_argument("--out", type=Path, required=True, help="output .gif or .mp4 path")
     parser.add_argument("--frames", type=int, default=120, help="maximum rendered frames")
-    parser.add_argument("--fps", type=int, default=12, help="output frames per second")
+    parser.add_argument("--fps", type=float, default=12, help="output frames per second")
     return parser.parse_args()
 
 
@@ -35,17 +35,18 @@ def midpoint(snapshot: dict[str, Any]) -> float | None:
 
 
 def load_series(path: Path) -> tuple[list[int], list[float | None]]:
-    timestamps: list[int] = []
-    mids: list[float | None] = []
+    records: list[tuple[int, float | None]] = []
     with path.open(encoding="utf-8") as handle:
         for line in handle:
             record = json.loads(line)
             if record.get("event") != "BookSnapshot" or record.get("client_id") != 0:
                 continue
-            timestamps.append(record["sim_ts"])
-            mids.append(midpoint(record["data"]))
-    if not timestamps:
+            records.append((record["sim_ts"], midpoint(record["data"])))
+    if not records:
         raise ValueError(f"no exchange-owned book snapshots in {path}")
+    records.sort(key=lambda record: record[0])
+    timestamps = [timestamp for timestamp, _ in records]
+    mids = [mid for _, mid in records]
     return timestamps, mids
 
 
@@ -58,7 +59,12 @@ def sample_at(
 
 def main() -> None:
     args = parse_args()
-    series: dict[str, tuple[list[int], list[float]]] = {}
+    if args.frames < 2:
+        raise ValueError("--frames must be at least 2")
+    if args.fps <= 0:
+        raise ValueError("--fps must be positive")
+
+    series: dict[str, tuple[list[int], list[float | None]]] = {}
     for asset in ASSETS:
         series[f"{asset}-USD"] = load_series(args.logdir / "spot" / f"{asset}-USD.jsonl")
         series[f"{asset}-PERP"] = load_series(args.logdir / "perp" / f"{asset}-PERP.jsonl")
@@ -69,6 +75,11 @@ def main() -> None:
         raise ValueError("no common snapshot interval across symbols")
     available = min(args.frames, max(2, int((end - start) / 1_000_000_000) + 1))
     frame_times = [start + (end - start) * index // (available - 1) for index in range(available)]
+    seconds = [(timestamp - start) / 1_000_000_000 for timestamp in frame_times]
+    samples = {
+        name: [sample_at(timestamps, values, timestamp) for timestamp in frame_times]
+        for name, (timestamps, values) in series.items()
+    }
 
     figure, axes = plt.subplots(3, 1, figsize=(9, 9), constrained_layout=True)
     lines = []
@@ -76,8 +87,19 @@ def main() -> None:
         axis.set_title(f"{asset}: spot vs perpetual")
         axis.set_ylabel("USD")
         axis.grid(alpha=0.25)
-        spot_line, = axis.plot([], [], color="#166534", label="spot")
-        perp_line, = axis.plot([], [], color="#b45309", label="perp")
+        axis.ticklabel_format(axis="y", style="plain", useOffset=False)
+        axis.set_xlim(0, seconds[-1])
+        finite = [
+            value
+            for value in samples[f"{asset}-USD"] + samples[f"{asset}-PERP"]
+            if value is not None
+        ]
+        if not finite:
+            raise ValueError(f"no two-sided quotes for {asset}")
+        span = max(max(finite) - min(finite), 0.01)
+        axis.set_ylim(min(finite) - span * 0.15, max(finite) + span * 0.15)
+        spot_line, = axis.plot([], [], color="#166534", drawstyle="steps-post", label="spot")
+        perp_line, = axis.plot([], [], color="#b45309", drawstyle="steps-post", label="perp")
         axis.legend(loc="upper left")
         lines.append((spot_line, perp_line, asset))
     axes[-1].set_xlabel("simulated seconds")
@@ -85,20 +107,11 @@ def main() -> None:
 
     def update(frame: int) -> list[Any]:
         current = frame_times[frame]
-        seconds = [(timestamp - start) / 1_000_000_000 for timestamp in frame_times[: frame + 1]]
+        visible = frame + 1
         artists: list[Any] = [title]
         for axis, (spot_line, perp_line, asset) in zip(axes, lines, strict=True):
-            spot_ts, spot_values = series[f"{asset}-USD"]
-            perp_ts, perp_values = series[f"{asset}-PERP"]
-            spots = [sample_at(spot_ts, spot_values, timestamp) for timestamp in frame_times[: frame + 1]]
-            perps = [sample_at(perp_ts, perp_values, timestamp) for timestamp in frame_times[: frame + 1]]
-            spot_line.set_data(seconds, spots)
-            perp_line.set_data(seconds, perps)
-            finite = [value for value in spots + perps if value is not None]
-            axis.set_xlim(0, max(seconds[-1], 1.0))
-            if finite:
-                span = max(max(finite) - min(finite), 0.01)
-                axis.set_ylim(min(finite) - span * 0.15, max(finite) + span * 0.15)
+            spot_line.set_data(seconds[:visible], samples[f"{asset}-USD"][:visible])
+            perp_line.set_data(seconds[:visible], samples[f"{asset}-PERP"][:visible])
             artists.extend((spot_line, perp_line))
         title.set_text(f"Random-walk venue | simulated t={((current - start) / 1e9):.1f}s")
         return artists
@@ -109,7 +122,12 @@ def main() -> None:
         animation.save(args.out, writer=FFMpegWriter(fps=args.fps))
     else:
         animation.save(args.out, writer=PillowWriter(fps=args.fps))
-    print(f"wrote {args.out} ({len(frame_times)} frames)")
+    playback_seconds = len(frame_times) / args.fps
+    simulated_seconds = (end - start) / 1_000_000_000
+    print(
+        f"wrote {args.out} ({len(frame_times)} frames, {playback_seconds:.1f}s playback, "
+        f"{simulated_seconds / playback_seconds:.1f}x timelapse)"
+    )
 
 
 if __name__ == "__main__":

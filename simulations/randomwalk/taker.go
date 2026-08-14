@@ -7,6 +7,7 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	etypes "exchange_sim/types"
 )
 
 type TakerConfig struct {
@@ -61,8 +62,8 @@ func (rt *RandomTaker) onTick(_ time.Time) {
 	if mid == 0 {
 		return
 	}
-	qty := rt.cfg.QuoteNotional * rt.cfg.BasePrecision / mid
-	if qty == 0 {
+	qty, ok := etypes.TryMulDiv(rt.cfg.QuoteNotional, rt.cfg.BasePrecision, mid)
+	if !ok || qty == 0 {
 		return
 	}
 	side := exchange.Buy

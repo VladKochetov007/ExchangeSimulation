@@ -11,12 +11,12 @@ import (
 // CrossPairMMConfig configures a market maker that quotes cross-asset pairs.
 // It derives fair value from the ratio of two USD-denominated mid prices.
 type CrossPairMMConfig struct {
-	CrossSymbols    []string          // e.g. ["DEF-ABC", "GHI-ABC"]
-	BaseUSDSymbols  []string          // base USD pair per cross symbol, same index
-	QuoteUSDSymbol  string            // shared quote asset USD pair ("ABC-USD")
-	QuotePrecision  int64             // precision of the quote asset (BTC_PRECISION for ABC)
-	TickSizes       map[string]int64  // tick size per cross symbol
-	LevelSizes      map[string]int64  // lot size per level per cross symbol
+	CrossSymbols    []string         // e.g. ["DEF-ABC", "GHI-ABC"]
+	BaseUSDSymbols  []string         // base USD pair per cross symbol, same index
+	QuoteUSDSymbol  string           // shared quote asset USD pair ("ABC-USD")
+	QuotePrecision  int64            // precision of the quote asset (BTC_PRECISION for ABC)
+	TickSizes       map[string]int64 // tick size per cross symbol
+	LevelSizes      map[string]int64 // lot size per level per cross symbol
 	Levels          int
 	LevelSpacing    int64
 	RefreshInterval time.Duration
@@ -28,9 +28,9 @@ type CrossPairMMConfig struct {
 type CrossPairMM struct {
 	*actor.BaseActor
 	cfg        CrossPairMMConfig
-	usdMids    map[string]int64          // mid prices for all USD pairs we watch
-	mids       map[string]int64          // derived cross mids
-	quotedMids map[string]int64          // last cross mid we actually quoted at
+	usdMids    map[string]int64           // mid prices for all USD pairs we watch
+	mids       map[string]int64           // derived cross mids
+	quotedMids map[string]int64           // last cross mid we actually quoted at
 	pending    map[string]map[uint64]bool // live order IDs per cross symbol
 	reqToSym   map[uint64]string          // reqID → cross symbol
 	orderToSym map[uint64]string          // orderID → cross symbol
@@ -66,6 +66,8 @@ func (mm *CrossPairMM) HandleEvent(_ context.Context, evt *actor.Event) {
 		mm.onFilled(evt.Data.(actor.OrderFillEvent))
 	case actor.EventOrderCancelled:
 		mm.onCancelled(evt.Data.(actor.OrderCancelledEvent))
+	case actor.EventOrderRejected:
+		mm.onRejected(evt.Data.(actor.OrderRejectedEvent))
 	}
 }
 
@@ -97,6 +99,7 @@ func (mm *CrossPairMM) onFilled(e actor.OrderFillEvent) {
 		mm.CancelOrder(e.OrderID)
 	}
 	mm.cancelAllForSym(sym)
+	mm.quote(sym)
 }
 
 func (mm *CrossPairMM) onCancelled(e actor.OrderCancelledEvent) {
@@ -106,6 +109,14 @@ func (mm *CrossPairMM) onCancelled(e actor.OrderCancelledEvent) {
 	}
 	delete(mm.orderToSym, e.OrderID)
 	delete(mm.pending[sym], e.OrderID)
+	mm.ensureQuoted(sym)
+}
+
+func (mm *CrossPairMM) onRejected(e actor.OrderRejectedEvent) {
+	if _, ok := mm.reqToSym[e.RequestID]; !ok {
+		return
+	}
+	delete(mm.reqToSym, e.RequestID)
 }
 
 func (mm *CrossPairMM) onTick(_ time.Time) {
@@ -122,12 +133,30 @@ func (mm *CrossPairMM) onTick(_ time.Time) {
 		if newMid == 0 {
 			continue
 		}
-		if mm.quotedMids[cross] == newMid && len(mm.pending[cross]) > 0 {
+		if mm.quotedMids[cross] == newMid && mm.hasOutstanding(cross) {
 			continue
 		}
 		mm.cancelAllForSym(cross)
 		mm.quote(cross)
 	}
+}
+
+func (mm *CrossPairMM) ensureQuoted(sym string) {
+	if mm.mids[sym] != 0 && !mm.hasOutstanding(sym) {
+		mm.quote(sym)
+	}
+}
+
+func (mm *CrossPairMM) hasOutstanding(sym string) bool {
+	if len(mm.pending[sym]) > 0 {
+		return true
+	}
+	for _, requestSym := range mm.reqToSym {
+		if requestSym == sym {
+			return true
+		}
+	}
+	return false
 }
 
 // recomputeMids derives cross mids from USD pair mids and aligns to tick size.

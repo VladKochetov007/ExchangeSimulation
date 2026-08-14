@@ -47,8 +47,8 @@ func NewMarketMaker(id uint64, gw actor.Gateway, cfg MMConfig) *MarketMaker {
 	return mm
 }
 
-func (mm *MarketMaker) Mid(sym string) int64         { return mm.mids[sym] }
-func (mm *MarketMaker) Symbols() []string             { return mm.cfg.Symbols }
+func (mm *MarketMaker) Mid(sym string) int64 { return mm.mids[sym] }
+func (mm *MarketMaker) Symbols() []string    { return mm.cfg.Symbols }
 
 func (mm *MarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
 	switch evt.Type {
@@ -58,6 +58,8 @@ func (mm *MarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
 		mm.onFilled(evt.Data.(actor.OrderFillEvent))
 	case actor.EventOrderCancelled:
 		mm.onCancelled(evt.Data.(actor.OrderCancelledEvent))
+	case actor.EventOrderRejected:
+		mm.onRejected(evt.Data.(actor.OrderRejectedEvent))
 	}
 }
 
@@ -86,7 +88,10 @@ func (mm *MarketMaker) onFilled(e actor.OrderFillEvent) {
 		mm.CancelOrder(e.OrderID) // cancel remaining qty of partially-filled order
 	}
 	mm.cancelAllForSym(sym)
-	// Timer drives re-quoting; no immediate quote here.
+	// The cancellation requests precede the replacement orders in the gateway
+	// FIFO. Requote now so a same-timestamp taker/snapshot cannot observe an
+	// artificial zero-latency liquidity gap.
+	mm.quote(sym)
 }
 
 func (mm *MarketMaker) onCancelled(e actor.OrderCancelledEvent) {
@@ -96,6 +101,14 @@ func (mm *MarketMaker) onCancelled(e actor.OrderCancelledEvent) {
 	}
 	delete(mm.orderToSym, e.OrderID)
 	delete(mm.pending[sym], e.OrderID)
+	mm.ensureQuoted(sym)
+}
+
+func (mm *MarketMaker) onRejected(e actor.OrderRejectedEvent) {
+	if _, ok := mm.reqToSym[e.RequestID]; !ok {
+		return
+	}
+	delete(mm.reqToSym, e.RequestID)
 }
 
 func (mm *MarketMaker) onTick(_ time.Time) {
@@ -104,10 +117,26 @@ func (mm *MarketMaker) onTick(_ time.Time) {
 			mm.Subscribe(sym, exchange.MDSnapshot)
 			mm.subscribed[sym] = true
 		}
-		if len(mm.pending[sym]) == 0 {
-			mm.quote(sym)
+		mm.ensureQuoted(sym)
+	}
+}
+
+func (mm *MarketMaker) ensureQuoted(sym string) {
+	if !mm.hasOutstanding(sym) {
+		mm.quote(sym)
+	}
+}
+
+func (mm *MarketMaker) hasOutstanding(sym string) bool {
+	if len(mm.pending[sym]) > 0 {
+		return true
+	}
+	for _, requestSym := range mm.reqToSym {
+		if requestSym == sym {
+			return true
 		}
 	}
+	return false
 }
 
 func (mm *MarketMaker) cancelAllForSym(sym string) {
