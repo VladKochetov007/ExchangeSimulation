@@ -34,6 +34,6 @@ Verification tier A. External-validity gap: venue simplifications listed in `doc
 
 ## Next three decisions
 
-1. Run bounded fuzz/race stress and inspect failures.
-2. Trace public interface paths and map mutation sites to invariants.
-3. Fix only reproduced or code-proven defects; rerun full gates.
+1. Design an opt-in ordered simulation ingress keyed by simulation time, client ID, and request sequence.
+2. Define actor same-time priority for timers, responses, and market data; add canonical fixed-seed outcome digest tests.
+3. Keep core fuzz/race/audit gates mandatory while widening cross-asset and options scenarios.
