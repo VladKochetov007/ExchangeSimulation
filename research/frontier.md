@@ -10,6 +10,7 @@ Verification tier A. External-validity gap: venue simplifications listed in `doc
 - Foreign fee assets are reserved per open order rather than merely checked at placement.
 - Liquidation repayment preserves spot/perp loan attribution after repaying more than the perp-attributed share.
 - Terminal venue and actor lifecycles are idempotent; scheduled delayed outputs are dropped after stop.
+- Same-timestamp expiries settle in symbol order, before the option risk sweep.
 - `make audit FUZZ_COUNT=3` passes vet, static correctness analysis, complete/race test suites, and repeated invariant fuzzing.
 
 ## Live mechanism families

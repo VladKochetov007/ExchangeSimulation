@@ -61,11 +61,14 @@ func (e *DefaultExchange) expiryLoop() {
 			e.automInFlight.Add(1)
 			e.CheckListings()
 			e.UpdateDerivativeMarks()
+			// Expiry is contractual settlement, not a liquidation trigger. Settle
+			// and delist contracts first so an at-expiry option cannot be
+			// force-traded (and charged a clearance fee) just before cash exercise.
+			e.CheckExpiries()
 			// After marks refresh: option books never enter the perp mark
 			// loop, so this sweep is the only liquidation path for accounts
 			// whose exposure is options-only.
 			e.CheckPositionMarginerLiquidations()
-			e.CheckExpiries()
 			e.automInFlight.Add(-1)
 		}
 	}
@@ -151,6 +154,9 @@ func (e *DefaultExchange) CheckExpiries() {
 	}
 	e.mu.RUnlock()
 
+	// Settlement cancels orders and emits events, so map iteration here would
+	// make same-timestamp expiries observably nondeterministic.
+	slices.Sort(expired)
 	for _, symbol := range expired {
 		e.settleExpiredInstrument(symbol, now)
 	}

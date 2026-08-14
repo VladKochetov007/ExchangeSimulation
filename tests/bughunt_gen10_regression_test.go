@@ -1,6 +1,7 @@
 package exchange_test
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -104,6 +105,29 @@ func TestRegressionLiquidationOrderIsDeterministic(t *testing.T) {
 		if pos2 == nil || pos2.Size == 0 {
 			t.Fatalf("run %d: client 2 also closed; expected liquidity for only one", run)
 		}
+	}
+}
+
+func TestRegressionExpirySettlementOrderIsDeterministic(t *testing.T) {
+	clock := &derivClock{now: derivStart}
+	ex := NewExchange(1, clock)
+	log := &testLogger{}
+	ex.SetLogger("_global", log)
+	for _, symbol := range []string{"ZZZ-FUT-1", "AAA-FUT-1"} {
+		ex.AddInstrument(NewExpiringFutures(
+			symbol, "ABC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1, derivStart,
+		))
+	}
+
+	ex.CheckExpiries()
+	var settled []string
+	for _, event := range log.Events() {
+		if event["event"] == "instrument_settled" {
+			settled = append(settled, event["symbol"].(string))
+		}
+	}
+	if got, want := settled, []string{"AAA-FUT-1", "ZZZ-FUT-1"}; !slices.Equal(got, want) {
+		t.Fatalf("expiry settlement order = %v, want %v", got, want)
 	}
 }
 
