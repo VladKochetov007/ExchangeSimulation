@@ -47,10 +47,8 @@ func (e *DefaultExchange) bookMidPriceLocked(symbol string) int64 {
 }
 
 // expiryLoop drives listings, derivative mark updates, and expiry settlement.
-func (e *DefaultExchange) expiryLoop() {
+func (e *DefaultExchange) expiryLoop(ticker Ticker) {
 	defer e.automWg.Done()
-
-	ticker := e.tickerFactory.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {

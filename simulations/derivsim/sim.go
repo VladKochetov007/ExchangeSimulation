@@ -238,8 +238,10 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		Iterations: int(simTime / time.Millisecond),
 		Step:       time.Millisecond,
 		StepSleep:  time.Duration(cfg.StepSleepUs) * time.Microsecond,
+		Quiesce:    true,
 	})
 	runner.AddMount(mmMount)
+	runner.AddIdler(timerFact)
 
 	// --- Underlying ecology (reused feesim actors) ---
 	for i := 0; i < cfg.MMCount; i++ {

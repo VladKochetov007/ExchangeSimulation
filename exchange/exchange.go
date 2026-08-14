@@ -733,9 +733,11 @@ func (e *DefaultExchange) PublishSnapshot(symbol string, timestamp int64) {
 }
 
 func (e *DefaultExchange) Shutdown() {
+	e.automMu.Lock()
 	e.mu.Lock()
 	if e.closed {
 		e.mu.Unlock()
+		e.automMu.Unlock()
 		return
 	}
 	e.closed = true
@@ -753,9 +755,19 @@ func (e *DefaultExchange) Shutdown() {
 	}
 	e.mu.Unlock()
 
-	// Automation can take the exchange lock while applying marks. Stop it only
-	// after releasing that lock, otherwise shutdown can deadlock waiting for it.
-	e.StopAutomation()
+	// Cancel before releasing automMu so StartAutomation cannot install a new
+	// context after terminal shutdown. Wait outside locks because loop work may
+	// be waiting for e.mu.
+	if e.automCancel != nil {
+		e.automCancel()
+	}
+	e.automMu.Unlock()
+	e.automWg.Wait()
+
+	e.automMu.Lock()
+	e.automCtx = nil
+	e.automCancel = nil
+	e.automMu.Unlock()
 }
 
 // Lock acquires the exchange write lock. Required for tests that directly mutate exchange state.
@@ -824,13 +836,6 @@ func (e *DefaultExchange) ConfigureAutomation(config AutomationConfig) {
 // StartAutomation begins automatic price updates, funding settlements, and collateral charging.
 // Runs until ctx is cancelled or StopAutomation is called.
 func (e *DefaultExchange) StartAutomation(ctx context.Context) {
-	e.mu.RLock()
-	closed := e.closed
-	e.mu.RUnlock()
-	if closed {
-		return
-	}
-
 	e.automMu.Lock()
 	defer e.automMu.Unlock()
 
@@ -838,7 +843,7 @@ func (e *DefaultExchange) StartAutomation(ctx context.Context) {
 		return
 	}
 	e.mu.RLock()
-	closed = e.closed
+	closed := e.closed
 	e.mu.RUnlock()
 	if closed {
 		return
@@ -853,18 +858,25 @@ func (e *DefaultExchange) StartAutomation(ctx context.Context) {
 	}
 
 	e.automCtx, e.automCancel = context.WithCancel(ctx)
+	// Allocate scheduler-backed tickers before their goroutines start. Their
+	// event sequence is part of simulated time; lazy allocation inside each
+	// goroutine makes equal-time automation order depend on Go scheduling.
+	priceTicker := e.tickerFactory.NewTicker(e.priceUpdateInterval)
+	fundingTicker := e.tickerFactory.NewTicker(time.Second)
+	collateralTicker := e.tickerFactory.NewTicker(time.Minute)
+	expiryTicker := e.tickerFactory.NewTicker(time.Second)
 
 	e.automWg.Add(1)
-	go e.priceUpdateLoop()
+	go e.priceUpdateLoop(priceTicker)
 
 	e.automWg.Add(1)
-	go e.fundingSettlementLoop()
+	go e.fundingSettlementLoop(fundingTicker)
 
 	e.automWg.Add(1)
-	go e.collateralChargeLoop()
+	go e.collateralChargeLoop(collateralTicker)
 
 	e.automWg.Add(1)
-	go e.expiryLoop()
+	go e.expiryLoop(expiryTicker)
 }
 
 // StopAutomation stops all automatic operations and waits for completion.
@@ -883,10 +895,8 @@ func (e *DefaultExchange) StopAutomation() {
 	e.automMu.Unlock()
 }
 
-func (e *DefaultExchange) priceUpdateLoop() {
+func (e *DefaultExchange) priceUpdateLoop(ticker Ticker) {
 	defer e.automWg.Done()
-
-	ticker := e.tickerFactory.NewTicker(e.priceUpdateInterval)
 	defer ticker.Stop()
 
 	e.updateAllPerpPrices()
@@ -903,10 +913,8 @@ func (e *DefaultExchange) priceUpdateLoop() {
 	}
 }
 
-func (e *DefaultExchange) fundingSettlementLoop() {
+func (e *DefaultExchange) fundingSettlementLoop(ticker Ticker) {
 	defer e.automWg.Done()
-
-	ticker := e.tickerFactory.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -921,10 +929,8 @@ func (e *DefaultExchange) fundingSettlementLoop() {
 	}
 }
 
-func (e *DefaultExchange) collateralChargeLoop() {
+func (e *DefaultExchange) collateralChargeLoop(ticker Ticker) {
 	defer e.automWg.Done()
-
-	ticker := e.tickerFactory.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for {
