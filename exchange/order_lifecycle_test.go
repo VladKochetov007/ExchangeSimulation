@@ -55,6 +55,25 @@ func TestFOKMatcherMismatchRejectsBeforeLiveMutation(t *testing.T) {
 	}
 }
 
+func TestPlaceOrderRejectsUnknownVisibility(t *testing.T) {
+	ex := NewExchange(1, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
+	ex.ConnectNewClient(1, map[string]int64{"BTC": BTC_PRECISION}, &FixedFee{})
+
+	response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 1, Symbol: "BTC/USD", Side: Sell, Type: LimitOrder,
+		Price: PriceUSD(50_000, DOLLAR_TICK), Qty: BTC_PRECISION,
+		TimeInForce: GTC, Visibility: Visibility(99),
+	})
+	if response.Success || response.Error != RejectInvalidQty {
+		t.Fatalf("unknown-visibility response = %+v, want invalid-qty rejection", response)
+	}
+	if ex.Books["BTC/USD"].Asks.Best != nil {
+		t.Fatal("unknown visibility created executable hidden liquidity")
+	}
+}
+
 func TestDiscardedImmediateOrderRemainderIsCancelledBeforeAcceptance(t *testing.T) {
 	tests := []struct {
 		name        string

@@ -54,7 +54,15 @@ func LinkOrder(limit *etypes.Limit, order *etypes.Order) bool {
 	if _, ok := etypes.TryAdd(limit.TotalQty, remaining); !ok {
 		return false
 	}
+	initialDisplay := order.DisplayRemaining
+	if order.Visibility == etypes.Iceberg && initialDisplay == 0 {
+		if order.IcebergQty <= 0 {
+			return false
+		}
+		initialDisplay = min(order.IcebergQty, remaining)
+	}
 
+	order.DisplayRemaining = initialDisplay
 	order.Parent = limit
 	if limit.Head == nil {
 		limit.Head = order
@@ -121,8 +129,8 @@ func IsEmpty(limit *etypes.Limit) bool {
 }
 
 // VisibleQty returns the total visible quantity at a limit level. For
-// icebergs the live display tranche (DisplayRemaining) is authoritative;
-// orders injected without one fall back to min(remaining, IcebergQty).
+// icebergs the live display tranche (DisplayRemaining) is authoritative.
+// LinkOrder initializes that transient field exactly once on insertion.
 func VisibleQty(limit *etypes.Limit) int64 {
 	var qty int64
 	for o := limit.Head; o != nil; o = o.Next {
@@ -135,9 +143,6 @@ func VisibleQty(limit *etypes.Limit) int64 {
 			visible = remaining
 		} else if o.Visibility == etypes.Iceberg {
 			display := o.DisplayRemaining
-			if display == 0 {
-				display = o.IcebergQty
-			}
 			if display > 0 {
 				visible = min(remaining, display)
 			}

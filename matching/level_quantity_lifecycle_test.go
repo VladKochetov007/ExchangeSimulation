@@ -169,13 +169,13 @@ func TestIcebergRefreshPreservesLevelTotalsAndDepth(t *testing.T) {
 	}
 }
 
-func TestIcebergWithoutTransientDisplayDoesNotExposeReserve(t *testing.T) {
+func TestInsertedIcebergInitializesDisplayOnce(t *testing.T) {
 	for _, tc := range matcherCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			bids, asks := ebook.NewBook(etypes.Buy), ebook.NewBook(etypes.Sell)
 			// DisplayRemaining is deliberately unset, as it is for a restored or
-			// directly injected public Order. Public depth already falls back to
-			// IcebergQty; matching must use the same tranche.
+			// directly injected public Order. Book insertion must initialize one
+			// tranche, then leave the partially consumed tranche alone.
 			iceberg := &etypes.Order{
 				ID:         1,
 				ClientID:   1,
@@ -192,14 +192,27 @@ func TestIcebergWithoutTransientDisplayDoesNotExposeReserve(t *testing.T) {
 			if got := ebook.VisibleQty(asks.Best); got != 25 {
 				t.Fatalf("advertised iceberg display = %d, want 25", got)
 			}
+			if iceberg.DisplayRemaining != 25 {
+				t.Fatalf("inserted iceberg display = %d, want 25", iceberg.DisplayRemaining)
+			}
 
-			result := tc.new().Match(bids, asks, mkBuy(2, 2, etypes.LimitOrder, 100, 100))
+			partial := tc.new().Match(bids, asks, mkBuy(2, 2, etypes.LimitOrder, 100, 10))
+			if !partial.FullyFilled || iceberg.DisplayRemaining != 15 {
+				t.Fatalf("partial fill = %#v display %d, want full/15", partial, iceberg.DisplayRemaining)
+			}
+			snapshotLevel(t, asks, 100, 90, 15, 75)
+
+			result := tc.new().Match(bids, asks, mkBuy(3, 3, etypes.LimitOrder, 100, 90))
 			if !result.FullyFilled || len(result.Executions) != 4 {
 				t.Fatalf("restored iceberg executions = %d fullyFilled %v, want 4/true", len(result.Executions), result.FullyFilled)
 			}
 			for i, exec := range result.Executions {
-				if exec.Qty != 25 {
-					t.Fatalf("execution %d qty = %d, want display tranche 25", i, exec.Qty)
+				if i == 0 {
+					if exec.Qty != 15 {
+						t.Fatalf("execution %d qty = %d, want residual display 15", i, exec.Qty)
+					}
+				} else if exec.Qty != 25 {
+					t.Fatalf("execution %d qty = %d, want refreshed display tranche 25", i, exec.Qty)
 				}
 			}
 		})

@@ -298,6 +298,12 @@ func (e *DefaultExchange) validatePlaceOrder(clientID uint64, req *OrderRequest)
 	if _, ok := etypes.TryMulDiv(req.Qty, req.Price, book.Instrument.BasePrecision()); !ok {
 		return reject(RejectInvalidQty)
 	}
+	switch req.Visibility {
+	case Normal, Iceberg, Hidden:
+		// Valid visibility modes.
+	default:
+		return reject(RejectInvalidQty)
+	}
 	// Venues enforce a positive display size on icebergs; IcebergQty ≤ 0
 	// would silently degrade the order to fully-hidden semantics.
 	if req.Visibility == Iceberg && req.IcebergQty <= 0 {

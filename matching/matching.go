@@ -47,13 +47,6 @@ func makerAvailable(order *etypes.Order) int64 {
 		return remaining
 	}
 	display := order.DisplayRemaining
-	// DisplayRemaining is transient state. Orders restored or injected through
-	// the public book API may not carry it, so use the configured tranche just
-	// as book.VisibleQty does. A non-positive configured display has no
-	// executable liquidity rather than exposing the hidden reserve.
-	if display == 0 {
-		display = order.IcebergQty
-	}
 	if display <= 0 {
 		return 0
 	}
