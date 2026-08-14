@@ -127,10 +127,11 @@ func (a *CashCarryArb) onTick(t time.Time) {
 		return
 	}
 	now := t.UnixNano()
-	for sym, c := range a.set.contracts {
+	for _, c := range a.set.orderedContracts() {
 		if c.Type != "FUTURE" {
 			continue
 		}
+		sym := c.Symbol
 		st := a.state[sym]
 		if st == nil || st.bestBid == 0 || st.bestAsk == 0 {
 			continue

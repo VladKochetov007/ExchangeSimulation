@@ -1,7 +1,9 @@
 package derivsim
 
 import (
+	"cmp"
 	"context"
+	"slices"
 	"time"
 
 	"exchange_sim/actor"
@@ -108,7 +110,7 @@ func (a *ParityArb) onTick(t time.Time) {
 	now := t.UnixNano()
 
 	pairs := make(map[pairKey][2]*Contract) // [call, put]
-	for _, c := range a.set.contracts {
+	for _, c := range a.set.orderedContracts() {
 		if c.Type != "OPTION" {
 			continue
 		}
@@ -122,7 +124,18 @@ func (a *ParityArb) onTick(t time.Time) {
 		pairs[k] = pair
 	}
 
-	for k, pair := range pairs {
+	keys := make([]pairKey, 0, len(pairs))
+	for key := range pairs {
+		keys = append(keys, key)
+	}
+	slices.SortFunc(keys, func(a, b pairKey) int {
+		if byExpiry := cmp.Compare(a.expiry, b.expiry); byExpiry != 0 {
+			return byExpiry
+		}
+		return cmp.Compare(a.strike, b.strike)
+	})
+	for _, k := range keys {
+		pair := pairs[k]
 		call, put := pair[0], pair[1]
 		if call == nil || put == nil {
 			continue

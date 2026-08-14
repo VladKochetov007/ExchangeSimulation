@@ -24,6 +24,7 @@ Verification tier A. External-validity gap: venue simplifications listed in `doc
 ## Contradictions and evaluator risks
 
 - Existing regressions are strong but do not exhaust custom instrument, fee model, and lifecycle composition.
+- `derivsim` fixed-seed runs still diverge after ordered strategy traversals; do not treat single-run PnL or impact figures as reproducible evidence until timer/actor event ordering is made deterministic.
 
 ## Budget remaining
 

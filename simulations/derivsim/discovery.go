@@ -1,6 +1,9 @@
 package derivsim
 
 import (
+	"cmp"
+	"slices"
+
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
 )
@@ -45,6 +48,17 @@ func newContractSet(underlying string) *contractSet {
 
 func (cs *contractSet) trackRequest(reqID uint64, symbol string) {
 	cs.reqToSym[reqID] = symbol
+}
+
+func (cs *contractSet) orderedContracts() []*Contract {
+	contracts := make([]*Contract, 0, len(cs.contracts))
+	for _, contract := range cs.contracts {
+		contracts = append(contracts, contract)
+	}
+	slices.SortFunc(contracts, func(a, b *Contract) int {
+		return cmp.Compare(a.Symbol, b.Symbol)
+	})
+	return contracts
 }
 
 // handle processes discovery/lifecycle/fill events; returns true if consumed.

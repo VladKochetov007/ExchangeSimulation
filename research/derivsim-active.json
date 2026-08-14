@@ -1,0 +1,19 @@
+{
+  "Seed": 424242,
+  "MMCount": 3,
+  "TakerIntervalMs": 100,
+  "TenorSec": 300,
+  "FutTenorSec": 300,
+  "StrikesPerSide": 2,
+  "OptionFlow": true,
+  "OptionPBuy": 0.8,
+  "OptionIntervalMs": 400,
+  "DealerHedge": true,
+  "CarryArb": true,
+  "CarryEdgeBps": 10,
+  "CarryScaleEdge": true,
+  "ParityArb": true,
+  "ParityEdgeBps": 15,
+  "FuturesSelfAnchored": true,
+  "TakeFutures": true
+}

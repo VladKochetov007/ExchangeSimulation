@@ -137,7 +137,8 @@ func (mm *FuturesMarketMaker) onTick(_ time.Time) {
 		return
 	}
 	half := mm.spotMid * mm.cfg.SpreadBps / 10000
-	for sym := range mm.set.contracts {
+	for _, contract := range mm.set.orderedContracts() {
+		sym := contract.Symbol
 		q := mm.quotes[sym]
 		if q == nil {
 			continue

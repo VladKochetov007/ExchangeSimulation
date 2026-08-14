@@ -179,15 +179,15 @@ func (mm *OptionMarketMaker) onQuoteTick(t time.Time) {
 		return
 	}
 	now := t.UnixNano()
-	for sym, c := range mm.set.contracts {
+	for _, c := range mm.set.orderedContracts() {
 		if c.Type != "OPTION" {
 			continue
 		}
-		q := mm.quotes[sym]
+		q := mm.quotes[c.Symbol]
 		if q == nil {
 			continue
 		}
-		mm.requoteContract(sym, c, q, now)
+		mm.requoteContract(c.Symbol, c, q, now)
 	}
 }
 
@@ -243,11 +243,11 @@ func (mm *OptionMarketMaker) onHedgeTick(t time.Time) {
 	}
 	now := t.UnixNano()
 	var netDelta float64
-	for sym, c := range mm.set.contracts {
+	for _, c := range mm.set.orderedContracts() {
 		if c.Type != "OPTION" {
 			continue
 		}
-		q := mm.quotes[sym]
+		q := mm.quotes[c.Symbol]
 		if q == nil || q.inventory == 0 {
 			continue
 		}

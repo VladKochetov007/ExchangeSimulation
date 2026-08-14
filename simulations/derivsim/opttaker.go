@@ -56,9 +56,9 @@ func (t *OptionTaker) onTick(_ time.Time) {
 		return
 	}
 	universe := make([]string, 0, len(t.set.contracts))
-	for sym, c := range t.set.contracts {
+	for _, c := range t.set.orderedContracts() {
 		if c.Type == "OPTION" || (t.cfg.IncludeFutures && c.Type == "FUTURE") {
-			universe = append(universe, sym)
+			universe = append(universe, c.Symbol)
 		}
 	}
 	if len(universe) == 0 {
