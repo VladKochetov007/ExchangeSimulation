@@ -1,6 +1,7 @@
 package book
 
 import (
+	"math"
 	"sync"
 
 	etypes "exchange_sim/types"
@@ -35,8 +36,25 @@ func resetLimit(l *etypes.Limit) {
 	l.Next = nil
 }
 
-// LinkOrder appends order to the limit's queue.
-func LinkOrder(limit *etypes.Limit, order *etypes.Order) {
+// LinkOrder appends order to the limit's queue. It returns false without
+// changing either object if the remaining quantity cannot be represented in
+// the level aggregate. Callers must handle a false result as an order reject;
+// saturating TotalQty would make later cancels and fills corrupt the book.
+func LinkOrder(limit *etypes.Limit, order *etypes.Order) bool {
+	if limit == nil || order == nil || order.Parent != nil || order.Prev != nil || order.Next != nil {
+		return false
+	}
+	if (limit.Head == nil) != (limit.Tail == nil) || limit.TotalQty < 0 || limit.OrderCnt < 0 || limit.OrderCnt == math.MaxInt32 {
+		return false
+	}
+	remaining, ok := etypes.TrySub(order.Qty, order.FilledQty)
+	if !ok || remaining <= 0 {
+		return false
+	}
+	if _, ok := etypes.TryAdd(limit.TotalQty, remaining); !ok {
+		return false
+	}
+
 	order.Parent = limit
 	if limit.Head == nil {
 		limit.Head = order
@@ -49,8 +67,9 @@ func LinkOrder(limit *etypes.Limit, order *etypes.Order) {
 		order.Next = nil
 		limit.Tail = order
 	}
-	limit.TotalQty += order.Qty - order.FilledQty
+	limit.TotalQty += remaining
 	limit.OrderCnt++
+	return true
 }
 
 // UnlinkOrder removes order from its limit's queue without deleting it from the book.
@@ -107,19 +126,32 @@ func IsEmpty(limit *etypes.Limit) bool {
 func VisibleQty(limit *etypes.Limit) int64 {
 	var qty int64
 	for o := limit.Head; o != nil; o = o.Next {
-		remaining := o.Qty - o.FilledQty
+		remaining, ok := etypes.TrySub(o.Qty, o.FilledQty)
+		if !ok || remaining <= 0 {
+			continue
+		}
+		visible := int64(0)
 		if o.Visibility == etypes.Normal {
-			qty += remaining
+			visible = remaining
 		} else if o.Visibility == etypes.Iceberg {
 			display := o.DisplayRemaining
 			if display == 0 {
 				display = o.IcebergQty
 			}
-			if remaining < display {
-				qty += remaining
-			} else {
-				qty += display
+			if display > 0 {
+				visible = min(remaining, display)
 			}
+		}
+		if visible == 0 {
+			continue
+		}
+		var added bool
+		qty, added = etypes.TryAdd(qty, visible)
+		if !added {
+			// The exact public depth is no longer representable. Saturation is
+			// conservative and, unlike integer wraparound, cannot advertise
+			// negative liquidity to clients.
+			return math.MaxInt64
 		}
 	}
 	return qty
@@ -144,16 +176,28 @@ func NewBook(side etypes.Side) *Book {
 	}
 }
 
-func (b *Book) AddOrder(order *etypes.Order) {
+func (b *Book) AddOrder(order *etypes.Order) bool {
+	if b == nil || order == nil {
+		return false
+	}
+	if _, exists := b.Orders[order.ID]; exists {
+		return false
+	}
 	limit := b.Limits[order.Price]
 	if limit == nil {
 		limit = getLimit(order.Price)
+		if !LinkOrder(limit, order) {
+			putLimit(limit)
+			return false
+		}
 		b.Limits[order.Price] = limit
 		b.insertLimit(limit)
 		b.updateBest(limit)
+	} else if !LinkOrder(limit, order) {
+		return false
 	}
-	LinkOrder(limit, order)
 	b.Orders[order.ID] = order
+	return true
 }
 
 func (b *Book) CancelOrder(orderID uint64) *etypes.Order {
@@ -265,7 +309,10 @@ func (b *Book) GetSnapshot() []etypes.PriceLevel {
 	levels := make([]etypes.PriceLevel, 0, 20)
 	for l := b.ActiveHead; l != nil && len(levels) < 20; l = l.Next {
 		visible := VisibleQty(l)
-		hidden := l.TotalQty - visible
+		hidden, ok := etypes.TrySub(l.TotalQty, visible)
+		if !ok || hidden < 0 {
+			hidden = 0
+		}
 		if visible > 0 || hidden > 0 {
 			levels = append(levels, etypes.PriceLevel{
 				Price:      l.Price,

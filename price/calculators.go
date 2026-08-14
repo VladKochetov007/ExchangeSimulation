@@ -43,6 +43,9 @@ func (c *WeightedMidPriceCalculator) Calculate(book *ebook.OrderBook) int64 {
 	askQty := book.Asks.Best.TotalQty
 	bidPrice := book.Bids.Best.Price
 	askPrice := book.Asks.Best.Price
+	if bidQty < 0 || askQty < 0 {
+		return book.GetMidPrice()
+	}
 
 	if bidQty == 0 && askQty == 0 {
 		return bidPrice + (askPrice-bidPrice)/2
@@ -56,7 +59,13 @@ func (c *WeightedMidPriceCalculator) Calculate(book *ebook.OrderBook) int64 {
 
 	// Weighted mid = bid + spread × bidQty/(bidQty+askQty); avoids the
 	// price×qty product, which overflows int64 at realistic sizes.
-	totalWeight := bidQty + askQty
+	totalWeight, ok := etypes.TryAdd(bidQty, askQty)
+	if !ok || totalWeight <= 0 {
+		// Both sides can be individually valid while their combined depth
+		// exceeds int64. The ordinary midpoint stays well-defined and avoids
+		// allowing an aggregate overflow to move a mark price.
+		return book.GetMidPrice()
+	}
 	return bidPrice + etypes.MulDiv(askPrice-bidPrice, bidQty, totalWeight)
 }
 

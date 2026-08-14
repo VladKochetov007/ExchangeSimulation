@@ -70,7 +70,12 @@ func refreshIcebergTranche(limit *etypes.Limit, order *etypes.Order) {
 		tranche = remaining
 	}
 	order.DisplayRemaining = tranche
-	ebook.LinkOrder(limit, order)
+	// The order was just unlinked from this valid level, so re-linking its
+	// positive remaining tranche must be representable. If it is not, leave it
+	// unlinked rather than corrupting the level aggregate.
+	if !ebook.LinkOrder(limit, order) {
+		order.Status = etypes.Cancelled
+	}
 }
 
 // MatchResult holds the output of a single matching pass.

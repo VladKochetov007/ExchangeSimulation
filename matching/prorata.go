@@ -37,6 +37,7 @@ func (m *ProRataMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etyp
 		nextLimit := limit.Next
 		// Rescan after iceberg refreshes: fresh tranches are new liquidity
 		// behind the queue. Terminates — each refresh pass consumed qty.
+		blocked := false
 		for {
 			remaining := incomingOrder.Qty - incomingOrder.FilledQty
 			if remaining == 0 {
@@ -45,14 +46,31 @@ func (m *ProRataMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etyp
 
 			// Collect eligible resting orders and displayed qty at this level.
 			// Icebergs participate with their display tranche only.
-			type candidate struct{ order *etypes.Order }
+			type candidate struct {
+				order     *etypes.Order
+				available int64
+			}
 			var candidates []candidate
 			totalQty := int64(0)
 			for o := limit.Head; o != nil; o = o.Next {
 				if o.FilledQty < o.Qty && o.ClientID != incomingOrder.ClientID {
-					candidates = append(candidates, candidate{o})
-					totalQty += makerAvailable(o)
+					available := makerAvailable(o)
+					if available <= 0 {
+						continue
+					}
+					var ok bool
+					totalQty, ok = etypes.TryAdd(totalQty, available)
+					if !ok {
+						blocked = true
+						break
+					}
+					candidates = append(candidates, candidate{order: o, available: available})
 				}
+			}
+			if blocked {
+				// An unrepresentable level cannot receive a correct pro-rata
+				// allocation. Do not mutate it or bypass its price priority.
+				break
 			}
 			if totalQty == 0 {
 				// Level holds only the incoming client's own orders; skip past it
@@ -66,8 +84,7 @@ func (m *ProRataMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etyp
 			filled := int64(0)
 			shares := make([]int64, len(candidates))
 			for i, c := range candidates {
-				available := makerAvailable(c.order)
-				shares[i] = min(etypes.MulDiv(remaining, available, totalQty), available)
+				shares[i] = min(etypes.MulDiv(remaining, c.available, totalQty), c.available)
 				filled += shares[i]
 			}
 			leftover := min(remaining-filled, totalQty)
@@ -75,7 +92,7 @@ func (m *ProRataMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etyp
 				if leftover == 0 {
 					break
 				}
-				extra := min(makerAvailable(candidates[i].order)-shares[i], leftover)
+				extra := min(candidates[i].available-shares[i], leftover)
 				shares[i] += extra
 				leftover -= extra
 			}
@@ -128,6 +145,9 @@ func (m *ProRataMatcher) Match(bidBook, askBook *ebook.Book, incomingOrder *etyp
 			if !refreshed {
 				break
 			}
+		}
+		if blocked {
+			break
 		}
 
 		if ebook.IsEmpty(limit) {
