@@ -399,6 +399,22 @@ func (e *DefaultExchange) AddInstrument(instrument Instrument) {
 	if _, exists := e.Books[symbol]; exists {
 		return
 	}
+	if ref, ok := instrument.(etypes.UnderlyingRef); ok {
+		// Settlement observations are raw fixed-point prices. Without an FX
+		// conversion layer, accepting a derivative whose underlying has a
+		// different base, quote, or precision silently settles in the wrong
+		// denomination. Preserve existing externally-indexed instruments (no
+		// local underlying book) but reject incompatible local references.
+		if underlying := e.Books[ref.UnderlyingSymbol()]; underlying != nil {
+			u := underlying.Instrument
+			if instrument.BaseAsset() != u.BaseAsset() ||
+				instrument.QuoteAsset() != u.QuoteAsset() ||
+				instrument.BasePrecision() != u.BasePrecision() ||
+				instrument.QuotePrecision() != u.QuotePrecision() {
+				return
+			}
+		}
+	}
 	e.Instruments[symbol] = instrument
 	e.Books[symbol] = &OrderBook{
 		Symbol:     symbol,

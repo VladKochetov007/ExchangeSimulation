@@ -65,6 +65,9 @@ func (c *Client) SubBalance(asset string, amount int64) bool {
 }
 
 func (c *Client) Reserve(asset string, amount int64) bool {
+	if amount < 0 {
+		return false
+	}
 	if c.GetAvailable(asset) < amount {
 		return false
 	}
@@ -104,6 +107,9 @@ func (c *Client) MutatePerpBalance(asset string, delta int64) {
 }
 
 func (c *Client) ReservePerp(asset string, amount int64) bool {
+	if amount < 0 {
+		return false
+	}
 	if c.PerpAvailable(asset) < amount {
 		return false
 	}

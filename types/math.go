@@ -12,31 +12,39 @@ import (
 // quotient does not fit in int64 — an economically impossible input, not a
 // rounding concern.
 func MulDiv(a, b, c int64) int64 {
+	if result, ok := TryMulDiv(a, b, c); ok {
+		return result
+	}
+	panic("MulDiv: quotient overflows int64")
+}
+
+// TryMulDiv computes (a*b)/c like MulDiv but reports unrepresentable results
+// instead of panicking. Admission paths use it to reject hostile order sizes
+// and prices without letting a client crash the venue.
+func TryMulDiv(a, b, c int64) (int64, bool) {
 	if c <= 0 {
-		// uint64(c) of a negative divisor would silently produce a huge
-		// unsigned divisor and a wrong quotient; fail loudly instead.
-		panic("MulDiv: divisor must be positive")
+		return 0, false
 	}
 	negative := (a < 0) != (b < 0)
 	hi, lo := bits.Mul64(unsignedAbs(a), unsignedAbs(b))
 	uc := uint64(c)
 	if hi >= uc {
-		panic("MulDiv: quotient overflows int64")
+		return 0, false
 	}
 	quo, _ := bits.Div64(hi, lo, uc)
 	if negative {
 		if quo > 1<<63 {
-			panic("MulDiv: quotient overflows int64")
+			return 0, false
 		}
 		if quo == 1<<63 {
-			return math.MinInt64
+			return math.MinInt64, true
 		}
-		return -int64(quo)
+		return -int64(quo), true
 	}
 	if quo > math.MaxInt64 {
-		panic("MulDiv: quotient overflows int64")
+		return 0, false
 	}
-	return int64(quo)
+	return int64(quo), true
 }
 
 // unsignedAbs returns |x| as uint64, exact even for math.MinInt64.

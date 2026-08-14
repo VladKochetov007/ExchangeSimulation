@@ -14,6 +14,7 @@ Verification tier A. External-validity gap: venue simplifications listed in `doc
 - Same-timestamp expiries settle in symbol order, before the option risk sweep.
 - `make audit FUZZ_COUNT=3` passes vet, static correctness analysis, complete/race test suites, and repeated invariant fuzzing.
 - `cmd/reprocheck` preserves fixed-seed replicas and emits a canonical metrics-digest manifest; the current active derivative ecology correctly fails that reproducibility gate.
+- Derivative margin admission cannot create negative collateral on integer overflow, and local underlying references must share base, quote, and fixed-point precision until FX conversion is modeled explicitly.
 
 ## Live mechanism families
 

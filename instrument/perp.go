@@ -51,7 +51,18 @@ func (p *PerpFutures) IsPerp() bool           { return true }
 func (p *PerpFutures) InstrumentType() string { return "PERP" }
 
 func (p *PerpFutures) MarginRequired(qty, price, precision int64) int64 {
-	return etypes.MulDiv(qty, price, precision) * p.MarginRate / 10000
+	if qty < 0 || price < 0 || p.MarginRate < 0 {
+		return -1
+	}
+	notional, ok := etypes.TryMulDiv(qty, price, precision)
+	if !ok {
+		return -1
+	}
+	margin, ok := etypes.TryMulDiv(notional, p.MarginRate, 10000)
+	if !ok {
+		return -1
+	}
+	return margin
 }
 
 func (p *PerpFutures) MarginForMarket(qty, refPrice, precision int64) int64 {

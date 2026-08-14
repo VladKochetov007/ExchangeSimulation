@@ -3,6 +3,8 @@ package exchange
 import (
 	"cmp"
 	"slices"
+
+	etypes "exchange_sim/types"
 )
 
 func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Response {
@@ -284,6 +286,9 @@ func (e *DefaultExchange) validatePlaceOrder(clientID uint64, req *OrderRequest)
 		return reject(RejectInvalidPrice)
 	}
 	if !book.Instrument.ValidateQty(req.Qty) {
+		return reject(RejectInvalidQty)
+	}
+	if _, ok := etypes.TryMulDiv(req.Qty, req.Price, book.Instrument.BasePrecision()); !ok {
 		return reject(RejectInvalidQty)
 	}
 	// Venues enforce a positive display size on icebergs; IcebergQty ≤ 0
@@ -903,6 +908,9 @@ func (e *DefaultExchange) tryReserveOrBorrow(
 	reserveFn func(string, int64) bool,
 	isPerp bool,
 ) bool {
+	if amount < 0 {
+		return false
+	}
 	if reserveFn(asset, amount) {
 		return true
 	}
