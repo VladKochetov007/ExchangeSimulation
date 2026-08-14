@@ -52,7 +52,11 @@ type BaseActor struct {
 
 	activeOrders   sync.Map // orderID -> *OrderInfo
 	requestToOrder sync.Map // requestID -> orderID
-	terminalEarly  sync.Map // orderID -> struct{}; terminal event received before accept
+	cancelRequests sync.Map // cancel requestID -> orderID
+	// earlyOrderEvents buffers fills/cancels delivered before the placement
+	// response. The exchange may match an incoming order before acknowledging
+	// it, but strategies need Accepted before they can associate the order ID.
+	earlyOrderEvents sync.Map // orderID -> []*Event
 
 	// processing is non-zero while the run loop is inside a handler. A
 	// deterministic runner needs to know the difference between "no work
@@ -140,7 +144,7 @@ func (a *BaseActor) run(ctx context.Context, tickCh <-chan tickCall) {
 			return
 		case resp := <-a.gateway.Responses():
 			a.processing.Add(1)
-			if evt := a.decodeResponse(resp); evt != nil {
+			for _, evt := range a.decodeResponse(resp) {
 				a.dispatch(ctx, evt)
 			}
 			a.processing.Add(-1)
@@ -208,78 +212,70 @@ func (a *BaseActor) startTickers(ctx context.Context) <-chan tickCall {
 	return ch
 }
 
-func (a *BaseActor) decodeResponse(resp exchange.Response) *Event {
+func (a *BaseActor) decodeResponse(resp exchange.Response) []*Event {
 	if !resp.Success {
-		return &Event{
+		if orderID, ok := a.cancelRequests.LoadAndDelete(resp.RequestID); ok {
+			return []*Event{{
+				Type: EventOrderCancelRejected,
+				Data: OrderCancelRejectedEvent{
+					OrderID:   orderID.(uint64),
+					RequestID: resp.RequestID,
+					Reason:    resp.Error,
+				},
+			}}
+		}
+		return []*Event{{
 			Type: EventOrderRejected,
 			Data: OrderRejectedEvent{
 				RequestID: resp.RequestID,
 				Reason:    resp.Error,
 			},
-		}
+		}}
 	}
 
 	switch data := resp.Data.(type) {
 	case uint64:
 		a.requestToOrder.Store(resp.RequestID, data)
-		if _, terminal := a.terminalEarly.LoadAndDelete(data); terminal {
-			a.requestToOrder.Delete(resp.RequestID)
-			return &Event{
-				Type: EventOrderAccepted,
-				Data: OrderAcceptedEvent{
-					OrderID:   data,
-					RequestID: resp.RequestID,
-				},
-			}
-		}
 		a.activeOrders.Store(data, &OrderInfo{
 			OrderID:   data,
 			RequestID: resp.RequestID,
 		})
-		return &Event{
+		events := []*Event{{
 			Type: EventOrderAccepted,
 			Data: OrderAcceptedEvent{
 				OrderID:   data,
 				RequestID: resp.RequestID,
 			},
+		}}
+		if buffered, ok := a.earlyOrderEvents.LoadAndDelete(data); ok {
+			for _, event := range buffered.([]*Event) {
+				a.applyOrderEvent(event)
+				events = append(events, event)
+			}
 		}
+		return events
 
 	case int64:
 		orderID := uint64(0)
-		if val, ok := a.requestToOrder.Load(resp.RequestID); ok {
+		if val, ok := a.cancelRequests.LoadAndDelete(resp.RequestID); ok {
 			orderID = val.(uint64)
-			a.activeOrders.Delete(orderID)
-			a.requestToOrder.Delete(resp.RequestID)
+			a.applyOrderEvent(&Event{Type: EventOrderCancelled, Data: OrderCancelledEvent{OrderID: orderID}})
 		}
-		return &Event{
+		return []*Event{{
 			Type: EventOrderCancelled,
 			Data: OrderCancelledEvent{
 				OrderID:      orderID,
 				RequestID:    resp.RequestID,
 				RemainingQty: data,
 			},
-		}
+		}}
 
 	case *exchange.FillNotification:
-		isFull := data.IsFull
-		if val, ok := a.activeOrders.Load(data.OrderID); ok {
-			info := val.(*OrderInfo)
-			info.FilledQty += data.Qty
-			if isFull {
-				a.activeOrders.Delete(data.OrderID)
-				a.requestToOrder.Delete(info.RequestID)
-			}
-		} else if isFull {
-			// Matching may fill an incoming order before its request response is
-			// enqueued. Remember completion so the later acceptance cannot create
-			// a stale active order.
-			a.terminalEarly.Store(data.OrderID, struct{}{})
-		}
 		eventType := EventOrderPartialFill
-		if isFull {
+		if data.IsFull {
 			eventType = EventOrderFilled
 		}
-		return &Event{
+		event := &Event{
 			Type: eventType,
 			Data: OrderFillEvent{
 				OrderID:   data.OrderID,
@@ -287,43 +283,75 @@ func (a *BaseActor) decodeResponse(resp exchange.Response) *Event {
 				Qty:       data.Qty,
 				Price:     data.Price,
 				Side:      data.Side,
-				IsFull:    isFull,
+				IsFull:    data.IsFull,
 				TradeID:   data.TradeID,
 				FeeAmount: data.FeeAmount,
 				FeeAsset:  data.FeeAsset,
 			},
 		}
+		if _, ok := a.activeOrders.Load(data.OrderID); !ok {
+			a.bufferEarlyOrderEvent(data.OrderID, event)
+			return nil
+		}
+		a.applyOrderEvent(event)
+		return []*Event{event}
 
 	case *exchange.ForcedCancelNotification:
-		if val, ok := a.activeOrders.LoadAndDelete(data.OrderID); ok {
-			info := val.(*OrderInfo)
-			a.requestToOrder.Delete(info.RequestID)
-		} else {
-			// The exchange can force-cancel a partially filled incoming order
-			// before it emits that request's acceptance.
-			a.terminalEarly.Store(data.OrderID, struct{}{})
-		}
-		return &Event{
+		event := &Event{
 			Type: EventOrderCancelled,
 			Data: OrderCancelledEvent{
 				OrderID:      data.OrderID,
 				RemainingQty: data.RemainingQty,
 			},
 		}
+		if _, ok := a.activeOrders.Load(data.OrderID); !ok {
+			a.bufferEarlyOrderEvent(data.OrderID, event)
+			return nil
+		}
+		a.applyOrderEvent(event)
+		return []*Event{event}
 
 	case *exchange.BalanceSnapshot:
-		return &Event{
+		return []*Event{{
 			Type: EventBalanceUpdate,
 			Data: BalanceUpdateEvent{Snapshot: data},
-		}
+		}}
 
 	case *exchange.AccountSnapshot:
-		return &Event{
+		return []*Event{{
 			Type: EventAccountUpdate,
 			Data: AccountUpdateEvent{Snapshot: data},
-		}
+		}}
 	}
 	return nil
+}
+
+func (a *BaseActor) bufferEarlyOrderEvent(orderID uint64, event *Event) {
+	var events []*Event
+	if existing, ok := a.earlyOrderEvents.Load(orderID); ok {
+		events = existing.([]*Event)
+	}
+	a.earlyOrderEvents.Store(orderID, append(events, event))
+}
+
+func (a *BaseActor) applyOrderEvent(event *Event) {
+	switch data := event.Data.(type) {
+	case OrderFillEvent:
+		value, ok := a.activeOrders.Load(data.OrderID)
+		if !ok {
+			return
+		}
+		info := value.(*OrderInfo)
+		info.FilledQty += data.Qty
+		if data.IsFull {
+			a.activeOrders.Delete(data.OrderID)
+			a.requestToOrder.Delete(info.RequestID)
+		}
+	case OrderCancelledEvent:
+		if value, ok := a.activeOrders.LoadAndDelete(data.OrderID); ok {
+			a.requestToOrder.Delete(value.(*OrderInfo).RequestID)
+		}
+	}
 }
 
 func (a *BaseActor) decodeMarketData(md *exchange.MarketDataMsg) *Event {
@@ -428,6 +456,7 @@ func (a *BaseActor) SubmitOrderFull(symbol string, side exchange.Side, orderType
 
 func (a *BaseActor) CancelOrder(orderID uint64) {
 	reqID := atomic.AddUint64(&a.requestSeq, 1)
+	a.cancelRequests.Store(reqID, orderID)
 	a.gateway.Send(exchange.Request{
 		Type: exchange.ReqCancelOrder,
 		CancelReq: &exchange.CancelRequest{

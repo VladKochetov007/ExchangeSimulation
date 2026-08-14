@@ -84,10 +84,15 @@ func TestBaseActorFullFillBeforeAcceptLeavesNoGhostOrder(t *testing.T) {
 	trader := NewBaseActor(1, exchange.NewClientGateway(1))
 	const orderID, requestID = uint64(17), uint64(23)
 
-	trader.decodeResponse(exchange.Response{Success: true, Data: &exchange.FillNotification{
+	if events := trader.decodeResponse(exchange.Response{Success: true, Data: &exchange.FillNotification{
 		OrderID: orderID, IsFull: true,
-	}})
-	trader.decodeResponse(exchange.Response{RequestID: requestID, Success: true, Data: orderID})
+	}}); len(events) != 0 {
+		t.Fatalf("early full fill emitted %d events before accept", len(events))
+	}
+	events := trader.decodeResponse(exchange.Response{RequestID: requestID, Success: true, Data: orderID})
+	if len(events) != 2 || events[0].Type != EventOrderAccepted || events[1].Type != EventOrderFilled {
+		t.Fatalf("replayed events = %#v, want accepted then filled", events)
+	}
 
 	if _, active := trader.activeOrders.Load(orderID); active {
 		t.Fatal("full fill before accept left a ghost active order")
@@ -101,14 +106,134 @@ func TestBaseActorForcedCancelBeforeAcceptLeavesNoGhostOrder(t *testing.T) {
 	trader := NewBaseActor(1, exchange.NewClientGateway(1))
 	const orderID, requestID = uint64(19), uint64(29)
 
-	trader.decodeResponse(exchange.Response{Success: true, Data: &exchange.ForcedCancelNotification{OrderID: orderID}})
-	trader.decodeResponse(exchange.Response{RequestID: requestID, Success: true, Data: orderID})
+	if events := trader.decodeResponse(exchange.Response{Success: true, Data: &exchange.ForcedCancelNotification{OrderID: orderID}}); len(events) != 0 {
+		t.Fatalf("early cancel emitted %d events before accept", len(events))
+	}
+	events := trader.decodeResponse(exchange.Response{RequestID: requestID, Success: true, Data: orderID})
+	if len(events) != 2 || events[0].Type != EventOrderAccepted || events[1].Type != EventOrderCancelled {
+		t.Fatalf("replayed events = %#v, want accepted then cancelled", events)
+	}
 
 	if _, active := trader.activeOrders.Load(orderID); active {
 		t.Fatal("forced cancel before accept left a ghost active order")
 	}
 	if _, pending := trader.requestToOrder.Load(requestID); pending {
 		t.Fatal("forced cancel before accept left a ghost request mapping")
+	}
+}
+
+func TestBaseActorReplaysEarlyPartialFillAndCancelInOrder(t *testing.T) {
+	trader := NewBaseActor(1, exchange.NewClientGateway(1))
+	const orderID, requestID = uint64(31), uint64(37)
+
+	trader.decodeResponse(exchange.Response{Success: true, Data: &exchange.FillNotification{
+		OrderID: orderID, Qty: 4, IsFull: false,
+	}})
+	trader.decodeResponse(exchange.Response{Success: true, Data: &exchange.ForcedCancelNotification{
+		OrderID: orderID, RemainingQty: 6,
+	}})
+	events := trader.decodeResponse(exchange.Response{RequestID: requestID, Success: true, Data: orderID})
+	if len(events) != 3 {
+		t.Fatalf("replayed event count = %d, want 3", len(events))
+	}
+	want := []EventType{EventOrderAccepted, EventOrderPartialFill, EventOrderCancelled}
+	for i, event := range events {
+		if event.Type != want[i] {
+			t.Fatalf("event %d type = %v, want %v", i, event.Type, want[i])
+		}
+	}
+	if _, active := trader.activeOrders.Load(orderID); active {
+		t.Fatal("early partial fill plus cancel left an active order")
+	}
+	if _, pending := trader.requestToOrder.Load(requestID); pending {
+		t.Fatal("early partial fill plus cancel left a request mapping")
+	}
+}
+
+type eventRecorder struct{ events chan *Event }
+
+func (r *eventRecorder) HandleEvent(_ context.Context, event *Event) {
+	r.events <- event
+}
+
+func TestBaseActorRunLoopDeliversAcceptanceBeforeEarlyFill(t *testing.T) {
+	gateway := exchange.NewClientGateway(1)
+	trader := NewBaseActor(1, gateway)
+	recorder := &eventRecorder{events: make(chan *Event, 2)}
+	trader.SetHandler(recorder)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := trader.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer trader.Stop()
+
+	const orderID, requestID = uint64(39), uint64(41)
+	gateway.ResponseCh <- exchange.Response{Success: true, Data: &exchange.FillNotification{
+		OrderID: orderID, Qty: 5, IsFull: true,
+	}}
+	gateway.ResponseCh <- exchange.Response{RequestID: requestID, Success: true, Data: orderID}
+
+	for index, want := range []EventType{EventOrderAccepted, EventOrderFilled} {
+		select {
+		case event := <-recorder.events:
+			if event.Type != want {
+				t.Fatalf("event %d type = %v, want %v", index, event.Type, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for event %d", index)
+		}
+	}
+}
+
+func TestBaseActorCancelResponseTracksOriginalOrder(t *testing.T) {
+	gateway := exchange.NewClientGateway(1)
+	trader := NewBaseActor(1, gateway)
+	const orderID, placeRequestID = uint64(41), uint64(43)
+	trader.activeOrders.Store(orderID, &OrderInfo{OrderID: orderID, RequestID: placeRequestID})
+	trader.requestToOrder.Store(placeRequestID, orderID)
+
+	trader.CancelOrder(orderID)
+	request := <-gateway.RequestCh
+	events := trader.decodeResponse(exchange.Response{
+		RequestID: request.CancelReq.RequestID,
+		Success:   true,
+		Data:      int64(7),
+	})
+	if len(events) != 1 || events[0].Type != EventOrderCancelled {
+		t.Fatalf("cancel events = %#v, want one cancellation", events)
+	}
+	cancelled := events[0].Data.(OrderCancelledEvent)
+	if cancelled.OrderID != orderID || cancelled.RemainingQty != 7 {
+		t.Fatalf("cancelled = %#v, want order %d with qty 7", cancelled, orderID)
+	}
+	if _, active := trader.activeOrders.Load(orderID); active {
+		t.Fatal("successful cancel left an active order")
+	}
+	if _, pending := trader.requestToOrder.Load(placeRequestID); pending {
+		t.Fatal("successful cancel left the placement mapping")
+	}
+}
+
+func TestBaseActorCancelRejectionUsesCancelEvent(t *testing.T) {
+	gateway := exchange.NewClientGateway(1)
+	trader := NewBaseActor(1, gateway)
+	const orderID = uint64(47)
+
+	trader.CancelOrder(orderID)
+	request := <-gateway.RequestCh
+	events := trader.decodeResponse(exchange.Response{
+		RequestID: request.CancelReq.RequestID,
+		Success:   false,
+		Error:     exchange.RejectOrderNotFound,
+	})
+	if len(events) != 1 || events[0].Type != EventOrderCancelRejected {
+		t.Fatalf("cancel rejection events = %#v", events)
+	}
+	rejected := events[0].Data.(OrderCancelRejectedEvent)
+	if rejected.OrderID != orderID || rejected.Reason != exchange.RejectOrderNotFound {
+		t.Fatalf("cancel rejection = %#v", rejected)
 	}
 }
 
