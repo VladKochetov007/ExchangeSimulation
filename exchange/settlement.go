@@ -92,6 +92,8 @@ func (e *DefaultExchange) handleExecution(
 		notional := MulDiv(exec.Qty, exec.Price, basePrecision)
 		e.settleSpotExecution(book, exec, takerOrder, makerOrder, taker, maker, takerFee, makerFee, notional, timestamp)
 	}
+	e.restoreForeignFeeReservation(book, takerOrder, basePrecision)
+	e.restoreForeignFeeReservation(book, makerOrder, basePrecision)
 	tradeID := e.createTrade(book, exec, takerOrder, timestamp, log)
 	e.notifyFill(exec, takerOrder, makerPosSide, takerFee, makerFee, tradeID, book, log, timestamp, result.TakerDelta, result.MakerDelta, result.TakerPnL, result.MakerPnL)
 	return positionChanged

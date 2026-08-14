@@ -110,6 +110,7 @@ type DefaultExchange struct {
 	automMu                 sync.RWMutex
 	mu                      sync.RWMutex
 	running                 bool
+	closed                  bool
 	shutdownCh              chan struct{}
 	snapshotInterval        time.Duration
 	snapshotPollInterval    time.Duration
@@ -453,6 +454,11 @@ func (e *DefaultExchange) CancelAllClientOrders(clientID uint64) int {
 func (e *DefaultExchange) ConnectNewClient(clientID uint64, initialBalances map[string]int64, feePlan FeeModel) Gateway {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.closed {
+		gateway := NewClientGateway(clientID)
+		gateway.Close()
+		return gateway
+	}
 
 	timestamp := e.Clock.NowUnixNano()
 	// Reconnect on a known ID reuses the existing account: overwriting it
@@ -652,7 +658,7 @@ func (e *DefaultExchange) handleClientRequest(gateway *ClientGateway, req Reques
 	// At-least-once delivery: a dropped accept/reject leaves the actor's
 	// in-flight order state desynchronized forever. Routed through the
 	// outbox so it shares one FIFO with the fills/cancels the request
-	// generated — a direct send here could overtake them.
+	// generated.
 	gateway.enqueueResponse(resp)
 }
 
@@ -728,21 +734,28 @@ func (e *DefaultExchange) PublishSnapshot(symbol string, timestamp int64) {
 
 func (e *DefaultExchange) Shutdown() {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if !e.running {
+	if e.closed {
+		e.mu.Unlock()
 		return
 	}
+	e.closed = true
 
-	close(e.shutdownCh)
-	close(e.snapshotStopCh)
-	if e.balanceSnapshotStopCh != nil {
-		close(e.balanceSnapshotStopCh)
+	if e.running {
+		close(e.shutdownCh)
+		close(e.snapshotStopCh)
+		if e.balanceSnapshotStopCh != nil {
+			close(e.balanceSnapshotStopCh)
+		}
+		for _, gateway := range e.Gateways {
+			gateway.Close()
+		}
+		e.running = false
 	}
-	for _, gateway := range e.Gateways {
-		gateway.Close()
-	}
-	e.running = false
+	e.mu.Unlock()
+
+	// Automation can take the exchange lock while applying marks. Stop it only
+	// after releasing that lock, otherwise shutdown can deadlock waiting for it.
+	e.StopAutomation()
 }
 
 // Lock acquires the exchange write lock. Required for tests that directly mutate exchange state.
@@ -811,10 +824,23 @@ func (e *DefaultExchange) ConfigureAutomation(config AutomationConfig) {
 // StartAutomation begins automatic price updates, funding settlements, and collateral charging.
 // Runs until ctx is cancelled or StopAutomation is called.
 func (e *DefaultExchange) StartAutomation(ctx context.Context) {
+	e.mu.RLock()
+	closed := e.closed
+	e.mu.RUnlock()
+	if closed {
+		return
+	}
+
 	e.automMu.Lock()
 	defer e.automMu.Unlock()
 
 	if e.automCtx != nil {
+		return
+	}
+	e.mu.RLock()
+	closed = e.closed
+	e.mu.RUnlock()
+	if closed {
 		return
 	}
 
@@ -1481,6 +1507,10 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 				oldBorrowed := client.Borrowed[inst.QuoteAsset()]
 				oldPerp := client.PerpBalances[inst.QuoteAsset()]
 				client.Borrowed[inst.QuoteAsset()] -= repayAmount
+				client.BorrowedSpot[inst.QuoteAsset()] = min(
+					client.BorrowedSpot[inst.QuoteAsset()],
+					client.Borrowed[inst.QuoteAsset()],
+				)
 				client.PerpBalances[inst.QuoteAsset()] -= repayAmount
 
 				logBalanceChange(e, timestamp, clientID, symbol, "liquidation_repay", []BalanceDelta{

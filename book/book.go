@@ -90,6 +90,7 @@ func ResetOrder(order *etypes.Order) {
 	order.Status = etypes.Open
 	order.Timestamp = 0
 	order.Reserved = 0
+	order.FeeReserved = nil
 	order.Prev = nil
 	order.Next = nil
 	order.Parent = nil

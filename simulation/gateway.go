@@ -150,6 +150,9 @@ func (d *DelayedGateway) scheduleResponses() {
 			}
 			at := d.deliveryTime(&d.respMu, &d.lastRespAt, d.ResponseLatency)
 			d.scheduler.Schedule(at, func() {
+				if !d.running.Load() {
+					return
+				}
 				select {
 				case d.responseCh <- resp:
 				default:
@@ -170,6 +173,9 @@ func (d *DelayedGateway) scheduleMarketData() {
 			}
 			at := d.deliveryTime(&d.mdMu, &d.lastMDAt, d.MarketDataLatency)
 			d.scheduler.Schedule(at, func() {
+				if !d.running.Load() {
+					return
+				}
 				select {
 				case d.marketDataCh <- msg:
 				default:

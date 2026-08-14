@@ -1,0 +1,48 @@
+question: "Find, fix, and prevent correctness defects in the exchange simulator."
+target_claim: "Main preserves account, order-book, risk, and simulation-time invariants under supported public APIs."
+deliverable:
+  type: "committed Go fixes, deterministic regression tests, and research evidence"
+  schema: "go test ./...; go test -race ./...; retained regression and fuzz tests"
+baseline:
+  artifact: "main@29f45be"
+  metrics:
+    go_test: "pass"
+    go_test_race: "pass"
+    go_vet: "pass"
+verification:
+  tier: "A"
+  public_metrics:
+    - "go test ./..."
+    - "go test -race ./..."
+    - "go vet ./..."
+    - "targeted fuzz and deterministic regression tests"
+  private_metrics: []
+  invariants:
+    - "No negative free, locked, or fee-asset balances after accepted orders."
+    - "Loans do not create equity; liabilities appear exactly once in risk and snapshots."
+    - "Per-asset conservation holds after settlements, fees, interest, liquidation, and expiry."
+    - "Scheduled callbacks observe due time and preserve nested-event causality."
+    - "Public extension points do not panic for valid implementations."
+  falsifiers:
+    - "Executable regression reproduces violation on main."
+    - "Race detector reports a data race."
+    - "Invariant fuzz test finds a state violation."
+scope:
+  allowed_data: ["repository source, history, local test output"]
+  allowed_tools: ["Go compiler, tests, race detector, fuzzing, vet, benchmarks, git read/write/commit"]
+  mutable_paths: ["repository source, tests, docs/research, research"]
+  forbidden_actions: ["destructive reset, checkout, clean, deletion of existing tests, force push"]
+budgets:
+  wall_time_s: 36000
+  tokens: 0
+  cpu_hours: 9
+  gpu_hours: 8
+  money: 0
+stop:
+  success: ["All discovered supported defects fixed with retained regressions and full verification passes."]
+  plateau: "No new medium-or-higher defect after independent static, fuzz, and call-stack passes."
+  abort: ["Evaluator failure", "user interruption", "compute boundary"]
+human_gates: ["No irreversible repository action.", "No force push."]
+assumptions:
+  - "Repository tests specify intended behavior unless docs explicitly declare a simplification."
+  - "GPU has no material role for this Go correctness campaign."

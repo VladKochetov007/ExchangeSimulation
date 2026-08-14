@@ -288,6 +288,120 @@ func TestRegressionSpotForeignFeeWithFundsTradesAndDebits(t *testing.T) {
 	}
 }
 
+// Foreign fee checks must reserve, not merely inspect, the fee wallet. Two
+// resting orders with one BNB cannot both be accepted when each fill charges
+// one BNB: otherwise the second fill debits BNB below zero.
+func TestRegressionForeignFeeReservationsPreventOvercommit(t *testing.T) {
+	ex := NewExchange(3, &RealClock{})
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
+	fees := bughuntThirdAssetFee{}
+	ex.ConnectNewClient(1, map[string]int64{"BTC": BTCAmount(2), "BNB": 1}, fees)
+	ex.ConnectNewClient(2, map[string]int64{"USD": USDAmount(50_000)}, &FixedFee{})
+	ex.ConnectNewClient(3, map[string]int64{"USD": USDAmount(50_000)}, &FixedFee{})
+
+	price, qty := USDAmount(50_000), BTCAmount(1)
+	if response := bughuntLimit(ex, 1, 1, "BTC/USD", Sell, price, qty); !response.Success {
+		t.Fatalf("first order rejected: %s", response.Error)
+	}
+	if response := bughuntLimit(ex, 1, 2, "BTC/USD", Sell, price, qty); response.Success {
+		t.Fatal("second order accepted although its BNB fee was already committed")
+	}
+
+	if response := bughuntLimit(ex, 2, 3, "BTC/USD", Buy, price, qty); !response.Success {
+		t.Fatalf("funded buyer rejected: %s", response.Error)
+	}
+	if got := ex.Clients[1].Balances["BNB"]; got != 0 {
+		t.Fatalf("seller BNB after one fill = %d, want 0", got)
+	}
+	if got := ex.Clients[1].Reserved["BNB"]; got != 0 {
+		t.Fatalf("seller BNB reservation after fill = %d, want 0", got)
+	}
+}
+
+func TestRegressionMarketForeignFeeReservesEverySweepFill(t *testing.T) {
+	ex := NewExchange(4, &RealClock{})
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
+	fees := bughuntThirdAssetFee{}
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(100_000), "BNB": 1}, fees)
+	ex.ConnectNewClient(2, map[string]int64{"BTC": BTCAmount(1)}, &FixedFee{})
+	ex.ConnectNewClient(3, map[string]int64{"BTC": BTCAmount(1)}, &FixedFee{})
+
+	if response := bughuntLimit(ex, 2, 1, "BTC/USD", Sell, USDAmount(50_000), BTCAmount(1)); !response.Success {
+		t.Fatalf("first maker rejected: %s", response.Error)
+	}
+	if response := bughuntLimit(ex, 3, 2, "BTC/USD", Sell, USDAmount(50_001), BTCAmount(1)); !response.Success {
+		t.Fatalf("second maker rejected: %s", response.Error)
+	}
+	if response := bughuntMarket(ex, 1, 3, "BTC/USD", Buy, BTCAmount(2)); response.Success {
+		t.Fatal("market sweep accepted with one BNB despite two charged fills")
+	}
+	if got := ex.Clients[1].Balances["BNB"]; got != 1 {
+		t.Fatalf("rejected market order changed BNB balance to %d, want 1", got)
+	}
+}
+
+// Liquidation repayment comes from the perp wallet. Once it pays all
+// perp-attributed debt, any excess must retire spot-attributed debt too;
+// otherwise a later perp borrow is hidden from margin equity.
+func TestRegressionLiquidationRepayPreservesDebtAttribution(t *testing.T) {
+	ex, perp := setupPerpExchange(USDAmount(200), USDAmount(10_000))
+	if err := ex.EnableBorrowing(BorrowingConfig{
+		Enabled:           true,
+		CollateralFactors: map[string]float64{"USD": 1},
+		AssetPrecisions:   map[string]int64{"USD": USD_PRECISION},
+		PriceSource:       NewStaticPriceOracle(map[string]int64{"USD": USD_PRECISION}),
+	}); err != nil {
+		t.Fatalf("EnableBorrowing: %v", err)
+	}
+
+	ex.Lock()
+	client := ex.Clients[1]
+	client.Balances["USD"] = USDAmount(1_000)
+	client.Borrowed["USD"] = USDAmount(200)
+	client.BorrowedSpot["USD"] = USDAmount(100)
+	ex.Unlock()
+
+	pm := ex.Positions.(*PositionManager)
+	pm.Lock()
+	pm.InjectPosition(1, "BTC-PERP", &Position{
+		ClientID: 1, Symbol: "BTC-PERP", PositionSide: PositionBoth,
+		Size: BTCAmount(12), EntryPrice: USDAmount(100),
+	})
+	pm.Unlock()
+
+	if _, reject := InjectLimitOrder(ex, 2, "BTC-PERP", Buy, USDAmount(94), BTCAmount(12)); reject != "" {
+		t.Fatalf("liquidity order rejected: %s", reject)
+	}
+	ex.CheckLiquidations("BTC-PERP", perp, USDAmount(94))
+
+	if got, want := client.Borrowed["USD"], USDAmount(72); got != want {
+		t.Fatalf("debt after liquidation repayment = %d, want %d", got, want)
+	}
+	if got, want := client.BorrowedSpot["USD"], USDAmount(72); got != want {
+		t.Fatalf("spot-attributed debt after excess perp repayment = %d, want %d", got, want)
+	}
+	if err := ex.BorrowMargin(1, "USD", USDAmount(10), "regression reborrow"); err != nil {
+		t.Fatalf("perp reborrow: %v", err)
+	}
+	if got, want := client.BorrowedPerpPortion("USD"), USDAmount(10); got != want {
+		t.Fatalf("perp debt after reborrow = %d, want %d", got, want)
+	}
+}
+
+func TestRegressionExchangeShutdownIsTerminalAndIdempotent(t *testing.T) {
+	ex := NewExchange(1, &RealClock{})
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(1)}, &FixedFee{})
+	ex.Shutdown()
+	ex.Shutdown()
+
+	if ex.IsRunning() {
+		t.Fatal("exchange reports running after shutdown")
+	}
+	if gateway := ex.ConnectNewClient(2, map[string]int64{"USD": USDAmount(1)}, &FixedFee{}); gateway.IsRunning() {
+		t.Fatal("shutdown exchange accepted a new live gateway")
+	}
+}
+
 func TestRegressionBorrowMarginRejectsZeroAmount(t *testing.T) {
 	ex := bughuntBorrowExchange(t)
 	client := ex.Clients[1]

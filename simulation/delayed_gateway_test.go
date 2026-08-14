@@ -8,6 +8,21 @@ import (
 	"exchange_sim/exchange"
 )
 
+func waitForScheduledEvent(t *testing.T, scheduler *EventScheduler) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		scheduler.mu.Lock()
+		pending := len(scheduler.events)
+		scheduler.mu.Unlock()
+		if pending > 0 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("timed out waiting for delayed message to be scheduled")
+}
+
 func newTestGateway() (*exchange.Exchange, actor.Gateway) {
 	ex := exchange.NewExchange(10, &RealClock{})
 	inst := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", 100000000, 1000000, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)
@@ -32,7 +47,8 @@ func placeOrder(gw actor.Gateway, reqID uint64) {
 }
 
 func TestDelayedGatewayNoLatency(t *testing.T) {
-	_, gw := newTestGateway()
+	_, rawGateway := newTestGateway()
+	gw := rawGateway.(*exchange.ClientGateway)
 
 	// All nil — NewDelayedGateway still wraps but with zero delays.
 	// Test passthrough by just using the raw gateway (no latency, no wrapping needed).
@@ -114,7 +130,7 @@ func TestDelayedGatewayMarketDataLatency(t *testing.T) {
 
 	// Subscribe via the delayed gateway
 	d.Send(exchange.Request{
-		Type: exchange.ReqSubscribe,
+		Type:     exchange.ReqSubscribe,
 		QueryReq: &exchange.QueryRequest{RequestID: 1, Symbol: "BTC/USD"},
 	})
 	<-d.Responses()
@@ -183,5 +199,41 @@ func TestDelayedGatewayImplementsGatewayInterface(t *testing.T) {
 	var _ actor.Gateway = d
 	if d.ID() != gw.ID() {
 		t.Errorf("ID mismatch: got %d, want %d", d.ID(), gw.ID())
+	}
+}
+
+func TestScheduledDelayedGatewayStopDropsQueuedOutputs(t *testing.T) {
+	clock := NewSimulatedClock(0)
+	scheduler := NewEventScheduler(clock)
+	clock.SetScheduler(scheduler)
+	_, rawGateway := newTestGateway()
+	gw := rawGateway.(*exchange.ClientGateway)
+	d := NewDelayedGateway(gw, nil, NewConstantLatency(time.Second), NewConstantLatency(time.Second))
+	d.UseScheduler(scheduler, clock)
+	d.Start()
+
+	gw.ResponseCh <- exchange.Response{Success: true}
+	waitForScheduledEvent(t, scheduler)
+	d.Stop()
+	clock.Advance(time.Second)
+	select {
+	case response := <-d.Responses():
+		t.Fatalf("response delivered after delayed gateway stop: %+v", response)
+	default:
+	}
+
+	// Start a fresh wrapper because Stop is terminal, as is the venue gateway
+	// lifecycle it models.
+	d = NewDelayedGateway(gw, nil, nil, NewConstantLatency(time.Second))
+	d.UseScheduler(scheduler, clock)
+	d.Start()
+	gw.MarketData <- &exchange.MarketDataMsg{}
+	waitForScheduledEvent(t, scheduler)
+	d.Stop()
+	clock.Advance(time.Second)
+	select {
+	case message := <-d.MarketDataCh():
+		t.Fatalf("market data delivered after delayed gateway stop: %+v", message)
+	default:
 	}
 }

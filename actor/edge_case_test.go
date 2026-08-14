@@ -2,6 +2,7 @@ package actor
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,6 +33,41 @@ func TestBaseActorStopBeforeStart(t *testing.T) {
 
 	if err := actor.Stop(); err != nil {
 		t.Fatalf("Stop before start should not error: %v", err)
+	}
+}
+
+func TestBaseActorConcurrentStopIsIdempotent(t *testing.T) {
+	gateway := exchange.NewClientGateway(1)
+	trader := NewBaseActor(1, gateway)
+	if err := trader.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for range 2 {
+		go func() {
+			defer wg.Done()
+			_ = trader.Stop()
+		}()
+	}
+	wg.Wait()
+}
+
+func TestBaseActorFullFillBeforeAcceptLeavesNoGhostOrder(t *testing.T) {
+	trader := NewBaseActor(1, exchange.NewClientGateway(1))
+	const orderID, requestID = uint64(17), uint64(23)
+
+	trader.decodeResponse(exchange.Response{Success: true, Data: &exchange.FillNotification{
+		OrderID: orderID, IsFull: true,
+	}})
+	trader.decodeResponse(exchange.Response{RequestID: requestID, Success: true, Data: orderID})
+
+	if _, active := trader.activeOrders.Load(orderID); active {
+		t.Fatal("full fill before accept left a ghost active order")
+	}
+	if _, pending := trader.requestToOrder.Load(requestID); pending {
+		t.Fatal("full fill before accept left a ghost request mapping")
 	}
 }
 

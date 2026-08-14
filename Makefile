@@ -1,4 +1,4 @@
-.PHONY: help test test-verbose coverage coverage-html build clean all install-tools
+.PHONY: help test test-verbose test-race fuzz audit coverage coverage-html build clean all install-tools
 
 # Default target
 .DEFAULT_GOAL := help
@@ -28,6 +28,9 @@ LIQUIDITY_REPORT_BINARY=$(BIN_DIR)/liquidity_report
 # Coverage output
 COVERAGE_FILE=coverage.out
 COVERAGE_HTML=coverage.html
+FUZZ_COUNT?=20
+STATICCHECK=$(shell go env GOPATH)/bin/staticcheck
+STATICCHECK_FLAGS?=-checks=all,-U1000,-ST*
 
 ## help: Display this help message
 help:
@@ -87,7 +90,7 @@ rebuild: clean build
 ## test: Run all tests
 test:
 	@echo "Running tests..."
-	@$(GOTEST) -v ./... | grep -E "^(PASS|FAIL|ok|---|\s+[a-z_]+\.go)"
+	@$(GOTEST) ./...
 
 ## test-short: Run tests without long-running tests
 test-short:
@@ -103,6 +106,20 @@ test-verbose:
 test-race:
 	@echo "Running tests with race detector..."
 	@$(GOTEST) -race ./...
+
+## fuzz: Repeat stateful invariant fuzz tests (set FUZZ_COUNT to tune repetitions)
+fuzz:
+	@echo "Running invariant fuzz tests ($(FUZZ_COUNT)x)..."
+	@$(GOTEST) ./tests -run '^TestFuzz' -count=$(FUZZ_COUNT)
+
+## audit: Run static analysis, full tests, race tests, and invariant fuzzing
+audit:
+	@$(GOCMD) vet ./...
+	@test -x $(STATICCHECK) || (echo "staticcheck missing; run: go install honnef.co/go/tools/cmd/staticcheck@latest"; exit 1)
+	@$(STATICCHECK) $(STATICCHECK_FLAGS) ./...
+	@$(GOTEST) ./...
+	@$(GOTEST) -race ./...
+	@$(GOTEST) ./tests -run '^TestFuzz' -count=$(FUZZ_COUNT)
 
 ## bench: Run benchmarks
 bench:

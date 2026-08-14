@@ -39,6 +39,11 @@ func (b *BaseMarket) SetHandler(h RequestHandler) { b.handler = h }
 func (b *BaseMarket) ConnectNewClient(id uint64, _ map[string]int64, _ FeeModel) Gateway {
 	gw := NewClientGateway(id)
 	b.mu.Lock()
+	if !b.running.Load() {
+		b.mu.Unlock()
+		gw.Close()
+		return gw
+	}
 	b.clients[id] = gw
 	b.mu.Unlock()
 	go b.dispatchLoop(gw)
@@ -47,6 +52,9 @@ func (b *BaseMarket) ConnectNewClient(id uint64, _ map[string]int64, _ FeeModel)
 
 func (b *BaseMarket) dispatchLoop(gw *ClientGateway) {
 	for req := range gw.RequestCh {
+		if !b.running.Load() {
+			return
+		}
 		resp := b.handler.HandleRequest(gw.ClientID, req)
 		sendResponse(gw, resp)
 	}
@@ -65,5 +73,14 @@ func (b *BaseMarket) HandleRequest(_ uint64, req Request) Response {
 	return Response{RequestID: reqID, Success: false, Error: RejectUnknownRequest}
 }
 
-func (b *BaseMarket) Shutdown()       { b.running.Store(false) }
+func (b *BaseMarket) Shutdown() {
+	if !b.running.CompareAndSwap(true, false) {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, gw := range b.clients {
+		gw.Close()
+	}
+}
 func (b *BaseMarket) IsRunning() bool { return b.running.Load() }

@@ -42,6 +42,7 @@ type BaseActor struct {
 	gateway       Gateway
 	eventCh       chan *Event
 	stopCh        chan struct{}
+	stopOnce      sync.Once
 	running       atomic.Bool
 	requestSeq    uint64
 	tickerFactory exchange.TickerFactory
@@ -51,6 +52,7 @@ type BaseActor struct {
 
 	activeOrders   sync.Map // orderID -> *OrderInfo
 	requestToOrder sync.Map // requestID -> orderID
+	completedEarly sync.Map // orderID -> struct{}; full fill received before accept
 
 	// processing is non-zero while the run loop is inside a handler. A
 	// deterministic runner needs to know the difference between "no work
@@ -119,7 +121,7 @@ func (a *BaseActor) Stop() error {
 	if !a.running.Load() {
 		return nil
 	}
-	close(a.stopCh)
+	a.stopOnce.Do(func() { close(a.stopCh) })
 	return nil
 }
 
@@ -218,6 +220,16 @@ func (a *BaseActor) decodeResponse(resp exchange.Response) *Event {
 	switch data := resp.Data.(type) {
 	case uint64:
 		a.requestToOrder.Store(resp.RequestID, data)
+		if _, completed := a.completedEarly.LoadAndDelete(data); completed {
+			a.requestToOrder.Delete(resp.RequestID)
+			return &Event{
+				Type: EventOrderAccepted,
+				Data: OrderAcceptedEvent{
+					OrderID:   data,
+					RequestID: resp.RequestID,
+				},
+			}
+		}
 		a.activeOrders.Store(data, &OrderInfo{
 			OrderID:   data,
 			RequestID: resp.RequestID,
@@ -255,6 +267,11 @@ func (a *BaseActor) decodeResponse(resp exchange.Response) *Event {
 				a.activeOrders.Delete(data.OrderID)
 				a.requestToOrder.Delete(info.RequestID)
 			}
+		} else if isFull {
+			// Matching may fill an incoming order before its request response is
+			// enqueued. Remember completion so the later acceptance cannot create
+			// a stale active order.
+			a.completedEarly.Store(data.OrderID, struct{}{})
 		}
 		eventType := EventOrderPartialFill
 		if isFull {

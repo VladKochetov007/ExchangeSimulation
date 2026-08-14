@@ -24,8 +24,7 @@ type ClientGateway struct {
 	// write lock stalls every book and client (the LMAX rule: no external
 	// calls inside the business logic). enqueueResponse appends here and a
 	// single lazy deliverer goroutine drains in FIFO order, so per-gateway
-	// ordering (accept before its fills' successors, cancels in sequence) is
-	// exactly the enqueue order.
+	// delivery is exactly the enqueue order.
 	outMu      sync.Mutex
 	outbox     []Response
 	delivering bool

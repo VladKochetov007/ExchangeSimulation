@@ -23,6 +23,10 @@ type Order struct {
 	// single writer; releases are computed as deltas against this ledger so
 	// price improvement and fee headroom never leak reserved funds.
 	Reserved int64 `json:"-"`
+	// FeeReserved backs fees charged in assets outside the order's trade-leg
+	// reservation, keyed by asset. It is released or recomputed as fills reduce
+	// the order, preventing several resting orders from spending one fee balance.
+	FeeReserved map[string]int64 `json:"-"`
 
 	Prev   *Order `json:"-"`
 	Next   *Order `json:"-"`
