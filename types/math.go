@@ -47,6 +47,11 @@ func TryMulDiv(a, b, c int64) (int64, bool) {
 	return int64(quo), true
 }
 
+// TryMulBps computes value*bps/10000 without an intermediate int64 overflow.
+func TryMulBps(value, bps int64) (int64, bool) {
+	return TryMulDiv(value, bps, 10000)
+}
+
 // unsignedAbs returns |x| as uint64, exact even for math.MinInt64.
 func unsignedAbs(x int64) uint64 {
 	if x < 0 {

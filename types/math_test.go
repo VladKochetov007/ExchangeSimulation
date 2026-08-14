@@ -62,3 +62,15 @@ func TestMulDivNonPositiveDivisorPanics(t *testing.T) {
 		}()
 	}
 }
+
+func TestTryMulBps(t *testing.T) {
+	if got, ok := TryMulBps(math.MaxInt64, 10_000); !ok || got != math.MaxInt64 {
+		t.Fatalf("max exact bps = (%d, %t), want (%d, true)", got, ok, int64(math.MaxInt64))
+	}
+	if _, ok := TryMulBps(math.MaxInt64, 10_001); ok {
+		t.Fatal("overflowing bps calculation reported success")
+	}
+	if got, ok := TryMulBps(10_000, -25); !ok || got != -25 {
+		t.Fatalf("rebate bps = (%d, %t), want (-25, true)", got, ok)
+	}
+}

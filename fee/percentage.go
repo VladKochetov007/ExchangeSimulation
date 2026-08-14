@@ -1,6 +1,10 @@
 package fee
 
-import etypes "exchange_sim/types"
+import (
+	"math"
+
+	etypes "exchange_sim/types"
+)
 
 type PercentageFee struct {
 	MakerBps int64
@@ -19,10 +23,18 @@ func (f *PercentageFee) CalculateFee(ctx etypes.FillContext) etypes.Fee {
 
 	if f.InQuote {
 		tradeValue := etypes.MulDiv(ctx.Exec.Qty, ctx.Exec.Price, ctx.Precision)
-		amount = (tradeValue * bps) / BPS
+		var ok bool
+		amount, ok = etypes.TryMulBps(tradeValue, bps)
+		if !ok {
+			amount = math.MaxInt64
+		}
 		asset = ctx.QuoteAsset
 	} else {
-		amount = (ctx.Exec.Qty * bps) / BPS
+		var ok bool
+		amount, ok = etypes.TryMulBps(ctx.Exec.Qty, bps)
+		if !ok {
+			amount = math.MaxInt64
+		}
 		asset = ctx.BaseAsset
 	}
 
