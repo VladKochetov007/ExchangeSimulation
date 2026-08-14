@@ -324,7 +324,7 @@ func (e *DefaultExchange) LogAllBalances() {
 		for _, asset := range spotAssets {
 			total := client.Balances[asset]
 			locked := client.Reserved[asset]
-			borrowed := client.Borrowed[asset]
+			borrowed := client.BorrowedSpotPortion(asset)
 			spotBalances = append(spotBalances, AssetBalance{
 				Asset:    asset,
 				Free:     total - locked,
@@ -343,11 +343,13 @@ func (e *DefaultExchange) LogAllBalances() {
 		for _, asset := range perpAssets {
 			total := client.PerpBalances[asset]
 			locked := client.PerpReserved[asset]
+			borrowed := client.BorrowedPerpPortion(asset)
 			perpBalances = append(perpBalances, AssetBalance{
 				Asset:    asset,
 				Free:     total - locked,
 				Locked:   locked,
-				NetAsset: total,
+				Borrowed: borrowed,
+				NetAsset: total - borrowed,
 			})
 		}
 
