@@ -13,6 +13,7 @@ Verification tier A. External-validity gap: venue simplifications listed in `doc
 - Terminal venue and actor lifecycles are idempotent; scheduled delayed outputs are dropped after stop.
 - Same-timestamp expiries settle in symbol order, before the option risk sweep.
 - `make audit FUZZ_COUNT=3` passes vet, static correctness analysis, complete/race test suites, and repeated invariant fuzzing.
+- `cmd/reprocheck` preserves fixed-seed replicas and emits a canonical metrics-digest manifest; the current active derivative ecology correctly fails that reproducibility gate.
 
 ## Live mechanism families
 
