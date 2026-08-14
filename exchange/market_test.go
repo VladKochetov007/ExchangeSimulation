@@ -18,3 +18,16 @@ func TestBaseMarketShutdownClosesExistingAndNewGateways(t *testing.T) {
 		t.Fatal("shutdown market accepted a new live gateway")
 	}
 }
+
+func TestBaseMarketReconnectClosesPriorGateway(t *testing.T) {
+	market := NewBaseMarket()
+	old := market.ConnectNewClient(1, nil, nil)
+	current := market.ConnectNewClient(1, nil, nil)
+	if old.IsRunning() {
+		t.Fatal("prior session remains live after reconnect")
+	}
+	market.Shutdown()
+	if current.IsRunning() {
+		t.Fatal("current session remains live after shutdown")
+	}
+}

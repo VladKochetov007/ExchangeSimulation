@@ -44,6 +44,9 @@ func (b *BaseMarket) ConnectNewClient(id uint64, _ map[string]int64, _ FeeModel)
 		gw.Close()
 		return gw
 	}
+	if old := b.clients[id]; old != nil {
+		old.Close()
+	}
 	b.clients[id] = gw
 	b.mu.Unlock()
 	go b.dispatchLoop(gw)
