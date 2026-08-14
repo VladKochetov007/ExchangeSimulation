@@ -5,6 +5,56 @@ import (
 	"time"
 )
 
+// reportsPartialAfterMatching simulates a third-party matcher whose declared
+// FOK result disagrees with the liquidity it has already consumed. The
+// exchange must reject this during detached preflight, before it can affect
+// the live book or either account's reservation ledger.
+type reportsPartialAfterMatching struct{ MatchingEngine }
+
+func (m reportsPartialAfterMatching) Match(bids, asks *Book, order *Order) *MatchResult {
+	result := m.MatchingEngine.Match(bids, asks, order)
+	if result != nil {
+		result.FullyFilled = false
+	}
+	return result
+}
+
+func TestFOKMatcherMismatchRejectsBeforeLiveMutation(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
+	ex.ConnectNewClient(1, map[string]int64{"USD": USDAmount(100_000)}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{"BTC": BTCAmount(1)}, &FixedFee{})
+
+	price := PriceUSD(50_000, DOLLAR_TICK)
+	if response := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 1, Symbol: "BTC/USD", Side: Sell, Type: LimitOrder,
+		Price: price, Qty: BTC_PRECISION, TimeInForce: GTC, Visibility: Normal,
+	}); !response.Success {
+		t.Fatalf("seed ask rejected: %s", response.Error)
+	}
+	ex.Matcher = reportsPartialAfterMatching{MatchingEngine: ex.Matcher}
+
+	response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 2, Symbol: "BTC/USD", Side: Buy, Type: LimitOrder,
+		Price: price, Qty: BTC_PRECISION, TimeInForce: FOK, Visibility: Normal,
+	})
+	if response.Success || response.Error != RejectFOKNotFilled {
+		t.Fatalf("FOK response = %+v, want preflight rejection", response)
+	}
+
+	ask := ex.Books["BTC/USD"].Asks.Best
+	if ask == nil || ask.TotalQty != BTC_PRECISION {
+		t.Fatalf("FOK preflight mutated live ask: %#v", ask)
+	}
+	if got := ex.Clients[1].Balances["USD"]; got != USDAmount(100_000) {
+		t.Fatalf("FOK preflight changed buyer USD: got %d", got)
+	}
+	if got := ex.Clients[1].Reserved["USD"]; got != 0 {
+		t.Fatalf("FOK preflight leaked buyer reservation: got %d", got)
+	}
+}
+
 func TestDiscardedImmediateOrderRemainderIsCancelledBeforeAcceptance(t *testing.T) {
 	tests := []struct {
 		name        string

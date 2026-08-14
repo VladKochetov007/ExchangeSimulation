@@ -23,7 +23,10 @@ func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Respons
 
 	// FOK must be checked BEFORE matching: Match mutates the book, and
 	// abandoning its executions would strip maker quantity without settlement.
-	if req.TimeInForce == FOK && !canFillFully(book, order) {
+	// Use the configured matcher against a detached copy rather than a separate
+	// depth walk, so custom allocation, iceberg, and self-trade rules cannot
+	// disagree with the atomicity check.
+	if req.TimeInForce == FOK && !e.canPreviewFullyMatch(book, order) {
 		return e.rejectOrder(order, req.RequestID, clientID, RejectFOKNotFilled, log)
 	}
 
@@ -37,10 +40,13 @@ func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Respons
 
 	result := e.Matcher.Match(book.Bids, book.Asks, order)
 	if req.TimeInForce == FOK && !result.FullyFilled {
-		// Safety net for custom matchers whose fill rules diverge from the
-		// canFillFully probe. Executions already applied cannot be rolled back.
-		releaseReserved(client, book.Instrument, order)
-		return e.rejectOrder(order, req.RequestID, clientID, RejectFOKNotFilled, log)
+		// The matcher was just run against an identical detached book while the
+		// exchange lock was held. Reaching this branch means a stateful or
+		// nondeterministic matcher violated the matching-engine contract. We
+		// cannot honestly report a rejected FOK here: its live-book mutations
+		// have already happened. Fail loudly instead of returning a response that
+		// leaves liquidity and settlement ledgers inconsistent.
+		panic("matching engine violated FOK preflight")
 	}
 
 	levels := collectAffectedLevels(book, result.Executions)
@@ -447,10 +453,30 @@ func (e *DefaultExchange) checkMarketOrderFunds(client *Client, book *OrderBook,
 // semantics. The preview is only an affordability calculation; it never
 // touches order reservations or the live book.
 func (e *DefaultExchange) previewMarketExecutions(book *OrderBook, order *Order) (executions []*Execution, ok bool) {
+	result, ok := e.previewMatch(book, order)
+	if !ok {
+		return nil, false
+	}
+	executions = result.Executions
+	return executions, true
+}
+
+// canPreviewFullyMatch evaluates FOK against the exact matching engine on a
+// detached book. The executions are pooled by matchers, so every preview path
+// must return them before the live book is touched.
+func (e *DefaultExchange) canPreviewFullyMatch(book *OrderBook, order *Order) bool {
+	result, ok := e.previewMatch(book, order)
+	if !ok {
+		return false
+	}
+	defer releasePreviewExecutions(result.Executions)
+	return result.FullyFilled
+}
+
+func (e *DefaultExchange) previewMatch(book *OrderBook, order *Order) (*MatchResult, bool) {
 	if e.Matcher == nil || !marketDepthSane(book, order) {
 		return nil, false
 	}
-
 	bids, ok := cloneBookForPreview(book.Bids)
 	if !ok {
 		return nil, false
@@ -469,7 +495,7 @@ func (e *DefaultExchange) previewMarketExecutions(book *OrderBook, order *Order)
 	if result == nil {
 		return nil, false
 	}
-	executions = result.Executions
+	executions := result.Executions
 	var filled int64
 	for _, exec := range executions {
 		if exec == nil || exec.Qty <= 0 || exec.Price <= 0 || exec.TakerClientID != order.ClientID {
@@ -483,7 +509,11 @@ func (e *DefaultExchange) previewMarketExecutions(book *OrderBook, order *Order)
 			return nil, false
 		}
 	}
-	return executions, true
+	if result.FullyFilled != (filled == order.Qty) {
+		releasePreviewExecutions(executions)
+		return nil, false
+	}
+	return result, true
 }
 
 func releasePreviewExecutions(executions []*Execution) {
