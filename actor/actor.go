@@ -113,7 +113,11 @@ func (a *BaseActor) Start(ctx context.Context) error {
 	if !a.running.CompareAndSwap(false, true) {
 		return nil
 	}
-	go a.run(ctx)
+	// Register simulation timers before returning. Runner starts actors in a
+	// deterministic order; deferring registration to the run goroutine makes
+	// equal-time scheduler sequence IDs depend on Go scheduling.
+	tickCh := a.startTickers(ctx)
+	go a.run(ctx, tickCh)
 	return nil
 }
 
@@ -125,10 +129,8 @@ func (a *BaseActor) Stop() error {
 	return nil
 }
 
-func (a *BaseActor) run(ctx context.Context) {
+func (a *BaseActor) run(ctx context.Context, tickCh <-chan tickCall) {
 	defer a.running.Store(false)
-
-	tickCh := a.startTickers(ctx)
 
 	for {
 		select {

@@ -9,6 +9,18 @@ import (
 	"exchange_sim/exchange"
 )
 
+type countingTickerFactory struct{ created int }
+
+func (f *countingTickerFactory) NewTicker(time.Duration) exchange.Ticker {
+	f.created++
+	return &countingTicker{ch: make(chan time.Time)}
+}
+
+type countingTicker struct{ ch chan time.Time }
+
+func (t *countingTicker) C() <-chan time.Time { return t.ch }
+func (t *countingTicker) Stop()               {}
+
 func TestBaseActorDoubleStart(t *testing.T) {
 	gateway := exchange.NewClientGateway(1)
 	actor := NewBaseActor(1, gateway)
@@ -52,6 +64,20 @@ func TestBaseActorConcurrentStopIsIdempotent(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestBaseActorStartRegistersTickersSynchronously(t *testing.T) {
+	trader := NewBaseActor(1, exchange.NewClientGateway(1))
+	factory := &countingTickerFactory{}
+	trader.SetTickerFactory(factory)
+	trader.AddTicker(time.Second, func(time.Time) {})
+	if err := trader.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer trader.Stop()
+	if factory.created != 1 {
+		t.Fatalf("tickers registered by Start = %d, want 1", factory.created)
+	}
 }
 
 func TestBaseActorFullFillBeforeAcceptLeavesNoGhostOrder(t *testing.T) {
