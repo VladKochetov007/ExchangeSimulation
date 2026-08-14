@@ -226,7 +226,13 @@ func spotFillRelease(client *Client, book *OrderBook, order *Order, exec *Execut
 		return 0
 	}
 	instrument := book.Instrument
-	stillNeeded := spotOrderReservation(client.FeePlan, instrument, side, order.Qty-order.FilledQty, order.Price, precision)
+	stillNeeded, ok := spotOrderReservation(client.FeePlan, instrument, side, order.Qty-order.FilledQty, order.Price, precision)
+	if !ok {
+		// The original admission had already accepted a representable larger
+		// reservation. Retaining it is safer than releasing into an overflowed
+		// remainder calculation; the order will be released on cancellation.
+		return 0
+	}
 	release := order.Reserved - stillNeeded
 	if release <= 0 {
 		return 0

@@ -414,56 +414,204 @@ func marketRefPrice(book *OrderBook) int64 {
 	return 0
 }
 
-// checkMarketOrderFunds verifies the client can afford the worst-case cost of
-// a market order by walking the opposing book (best-price × full qty would
-// understate the spend on a deep walk and allow overdrafts).
-func checkMarketOrderFunds(client *Client, book *OrderBook, order *Order, precision int64) bool {
+// checkMarketOrderFunds prices the exact executions that the configured
+// matcher would produce against a cloned book. A top-of-book or midpoint
+// reference understates deep sweeps; unchecked aggregate arithmetic then
+// turns an unaffordable order into a balance underflow after matching.
+func (e *DefaultExchange) checkMarketOrderFunds(client *Client, book *OrderBook, order *Order, precision int64) bool {
+	executions, ok := e.previewMarketExecutions(book, order)
+	if !ok {
+		return false
+	}
+	defer releasePreviewExecutions(executions)
+
 	instrument := book.Instrument
-	base, quote := instrument.BaseAsset(), instrument.QuoteAsset()
+	quote := instrument.QuoteAsset()
 	if om, ok := instrument.(OrderMarginer); ok {
-		refPrice := marketRefPrice(book)
-		required := om.MarginForMarketOrder(order.Side, order.Qty, refPrice, precision)
-		required += quoteFeeHeadroom(client.FeePlan, base, quote, order.Qty, refPrice, precision)
-		return required == 0 || client.PerpAvailable(quote) >= required
+		required, ok := derivativeMarketRequirement(client.FeePlan, instrument, order.Side, executions, precision, om.MarginForMarketOrder)
+		return ok && client.PerpAvailable(quote) >= required
 	}
 	if m, ok := instrument.(Margined); ok {
-		refPrice := marketRefPrice(book)
-		required := m.MarginForMarket(order.Qty, refPrice, precision)
-		required += quoteFeeHeadroom(client.FeePlan, base, quote, order.Qty, refPrice, precision)
-		return required == 0 || client.PerpAvailable(quote) >= required
+		required, ok := derivativeMarketRequirement(client.FeePlan, instrument, order.Side, executions, precision,
+			func(_ Side, qty, price, precision int64) int64 { return m.MarginForMarket(qty, price, precision) })
+		return ok && client.PerpAvailable(quote) >= required
 	}
-	if order.Side == Buy {
-		cost := marketBuyCost(client.FeePlan, book, order, precision)
-		return client.GetAvailable(instrument.QuoteAsset()) >= cost
-	}
-	// Sell must cover base-denominated fee headroom too, or the fee debit
-	// drives the base balance negative.
-	needed := spotOrderReservation(client.FeePlan, instrument, Sell, order.Qty, marketRefPrice(book), precision)
-	return client.GetAvailable(instrument.BaseAsset()) >= needed
+
+	asset := reserveAsset(instrument, order.Side)
+	required, ok := spotMarketRequirement(client.FeePlan, instrument, order.Side, executions, precision)
+	return ok && client.GetAvailable(asset) >= required
 }
 
-// marketBuyCost walks the ask book and sums the quote spend (plus quote fees)
-// for filling order.Qty, skipping the client's own resting orders.
-func marketBuyCost(feePlan FeeModel, book *OrderBook, order *Order, precision int64) int64 {
-	instrument := book.Instrument
-	remaining := order.Qty
-	cost := int64(0)
-	for limit := book.Asks.Best; limit != nil && remaining > 0; limit = limit.Next {
-		levelQty := int64(0)
-		for o := limit.Head; o != nil && levelQty < remaining; o = o.Next {
-			if o.ClientID == order.ClientID {
+// previewMarketExecutions matches a copy of the book so admission and the
+// real match share exactly the same depth, self-trade, iceberg, and pro-rata
+// semantics. The preview is only an affordability calculation; it never
+// touches order reservations or the live book.
+func (e *DefaultExchange) previewMarketExecutions(book *OrderBook, order *Order) (executions []*Execution, ok bool) {
+	if e.Matcher == nil || !marketDepthSane(book, order) {
+		return nil, false
+	}
+
+	bids, ok := cloneBookForPreview(book.Bids)
+	if !ok {
+		return nil, false
+	}
+	asks, ok := cloneBookForPreview(book.Asks)
+	if !ok {
+		return nil, false
+	}
+	incoming := *order
+	incoming.Prev = nil
+	incoming.Next = nil
+	incoming.Parent = nil
+	incoming.FeeReserved = nil
+
+	result := e.Matcher.Match(bids, asks, &incoming)
+	if result == nil {
+		return nil, false
+	}
+	executions = result.Executions
+	var filled int64
+	for _, exec := range executions {
+		if exec == nil || exec.Qty <= 0 || exec.Price <= 0 || exec.TakerClientID != order.ClientID {
+			releasePreviewExecutions(executions)
+			return nil, false
+		}
+		var addOK bool
+		filled, addOK = etypes.TryAdd(filled, exec.Qty)
+		if !addOK || filled > order.Qty {
+			releasePreviewExecutions(executions)
+			return nil, false
+		}
+	}
+	return executions, true
+}
+
+func releasePreviewExecutions(executions []*Execution) {
+	for _, exec := range executions {
+		if exec != nil {
+			PutExecution(exec)
+		}
+	}
+}
+
+// cloneBookForPreview copies only live queue state. Parent/next links must be
+// rebuilt by AddOrder, otherwise a dry run could mutate the live queue.
+func cloneBookForPreview(source *Book) (*Book, bool) {
+	clone := NewBook(source.Side)
+	for limit := source.ActiveHead; limit != nil; limit = limit.Next {
+		for order := limit.Head; order != nil; order = order.Next {
+			remaining, ok := etypes.TrySub(order.Qty, order.FilledQty)
+			if !ok || remaining < 0 {
+				return nil, false
+			}
+			copy := *order
+			copy.Prev = nil
+			copy.Next = nil
+			copy.Parent = nil
+			copy.FeeReserved = nil
+			clone.AddOrder(&copy)
+		}
+	}
+	return clone, true
+}
+
+// marketDepthSane rejects a corrupt or unrepresentable aggregate before a
+// matcher can use wrapped depth. This is especially important for pro-rata,
+// whose allocation denominator is the sum at a price level.
+func marketDepthSane(book *OrderBook, order *Order) bool {
+	levels := book.Asks
+	if order.Side == Sell {
+		levels = book.Bids
+	}
+	for limit := levels.ActiveHead; limit != nil; limit = limit.Next {
+		var levelQty int64
+		for resting := limit.Head; resting != nil; resting = resting.Next {
+			if resting.ClientID == order.ClientID {
 				continue
 			}
-			levelQty += o.Qty - o.FilledQty
+			remaining, ok := etypes.TrySub(resting.Qty, resting.FilledQty)
+			if !ok || remaining < 0 {
+				return false
+			}
+			if levelQty, ok = etypes.TryAdd(levelQty, remaining); !ok {
+				return false
+			}
 		}
-		fillQty := min(levelQty, remaining)
-		if fillQty <= 0 {
-			continue
-		}
-		cost += spotOrderReservation(feePlan, instrument, Buy, fillQty, limit.Price, precision)
-		remaining -= fillQty
 	}
-	return cost
+	return true
+}
+
+// derivativeMarketRequirement sums margin and the actual taker quote fee for
+// every executable fill. It deliberately ignores later margin releases from
+// closing positions: admission must be conservative before a market sweep
+// mutates positions and cannot rely on a favourable execution path.
+func derivativeMarketRequirement(
+	feePlan FeeModel, instrument Instrument, side Side, executions []*Execution, precision int64,
+	margin func(side Side, qty, price, precision int64) int64,
+) (int64, bool) {
+	var required int64
+	for _, exec := range executions {
+		marginRequired := margin(side, exec.Qty, exec.Price, precision)
+		if marginRequired < 0 {
+			return 0, false
+		}
+		var ok bool
+		required, ok = etypes.TryAdd(required, marginRequired)
+		if !ok {
+			return 0, false
+		}
+		fee := executionFee(feePlan, instrument, exec, false, precision)
+		if fee.Asset == instrument.QuoteAsset() && fee.Amount > 0 {
+			required, ok = etypes.TryAdd(required, fee.Amount)
+			if !ok {
+				return 0, false
+			}
+		}
+	}
+	return required, true
+}
+
+// spotMarketRequirement sums principal plus only positive taker fees in the
+// asset that must be supplied by this order. Fees are computed per execution:
+// a fixed fee applies once per counterparty fill, not once per price level.
+func spotMarketRequirement(feePlan FeeModel, instrument Instrument, side Side, executions []*Execution, precision int64) (int64, bool) {
+	asset := reserveAsset(instrument, side)
+	var required int64
+	for _, exec := range executions {
+		principal := exec.Qty
+		var ok bool
+		if side == Buy {
+			principal, ok = etypes.TryMulDiv(exec.Qty, exec.Price, precision)
+			if !ok {
+				return 0, false
+			}
+		}
+		required, ok = etypes.TryAdd(required, principal)
+		if !ok {
+			return 0, false
+		}
+		fee := executionFee(feePlan, instrument, exec, false, precision)
+		if fee.Asset == asset && fee.Amount > 0 {
+			required, ok = etypes.TryAdd(required, fee.Amount)
+			if !ok {
+				return 0, false
+			}
+		}
+	}
+	return required, true
+}
+
+func executionFee(feePlan FeeModel, instrument Instrument, exec *Execution, isMaker bool, precision int64) Fee {
+	if feePlan == nil {
+		return Fee{}
+	}
+	return feePlan.CalculateFee(FillContext{
+		Exec:       exec,
+		IsMaker:    isMaker,
+		BaseAsset:  instrument.BaseAsset(),
+		QuoteAsset: instrument.QuoteAsset(),
+		Precision:  precision,
+	})
 }
 
 func (e *DefaultExchange) reserveLimitOrderFunds(client *Client, instrument Instrument, order *Order, precision int64) bool {
@@ -474,7 +622,14 @@ func (e *DefaultExchange) reserveLimitOrderFunds(client *Client, instrument Inst
 		// margin would go insolvent the instant it fills. Reserving both here
 		// lets the exchange reject the order up front instead.
 		margin := om.MarginForOrder(order.Side, order.Qty, order.Price, precision)
-		total := margin + quoteFeeHeadroom(client.FeePlan, base, quote, order.Qty, order.Price, precision)
+		fee := quoteFeeHeadroom(client.FeePlan, base, quote, order.Qty, order.Price, precision)
+		if margin < 0 {
+			return false
+		}
+		total, ok := etypes.TryAdd(margin, fee)
+		if !ok {
+			return false
+		}
 		if !e.tryReserveOrBorrow(order.ClientID, quote, total, client.ReservePerp, true) {
 			return false
 		}
@@ -483,7 +638,14 @@ func (e *DefaultExchange) reserveLimitOrderFunds(client *Client, instrument Inst
 	}
 	if m, ok := instrument.(Margined); ok {
 		margin := m.MarginRequired(order.Qty, order.Price, precision)
-		total := margin + quoteFeeHeadroom(client.FeePlan, base, quote, order.Qty, order.Price, precision)
+		fee := quoteFeeHeadroom(client.FeePlan, base, quote, order.Qty, order.Price, precision)
+		if margin < 0 {
+			return false
+		}
+		total, ok := etypes.TryAdd(margin, fee)
+		if !ok {
+			return false
+		}
 		if !e.tryReserveOrBorrow(order.ClientID, quote, total, client.ReservePerp, true) {
 			return false
 		}
@@ -491,7 +653,10 @@ func (e *DefaultExchange) reserveLimitOrderFunds(client *Client, instrument Inst
 		return true
 	}
 	asset := reserveAsset(instrument, order.Side)
-	amount := spotOrderReservation(client.FeePlan, instrument, order.Side, order.Qty, order.Price, precision)
+	amount, ok := spotOrderReservation(client.FeePlan, instrument, order.Side, order.Qty, order.Price, precision)
+	if !ok {
+		return false
+	}
 	if !e.tryReserveOrBorrow(order.ClientID, asset, amount, client.Reserve, false) {
 		return false
 	}
@@ -665,28 +830,29 @@ func (e *DefaultExchange) cancelUnfundedFeeRemainder(book *OrderBook, client *Cl
 	}
 }
 
-// quoteFeeHeadroom returns the worst-case (taker) fee, in the quote asset, that
-// a margined or premium order of qty at price would owe at settlement. Perp and
-// option fees are debited from the quote (perp) wallet, so reserving this
-// alongside margin is what lets the exchange reject an order the account cannot
-// fully afford instead of debiting the fee past a zero balance after the fill.
-// A fee in any other asset is caught separately by checkForeignFeeFunds.
+// quoteFeeHeadroom returns the largest non-negative quote fee an order that
+// may rest can owe. A crossing limit is taker today but its remainder can fill
+// as maker later, so reserving just the taker schedule lets a maker-heavy fee
+// plan debit the perp wallet below its available balance.
 func quoteFeeHeadroom(feePlan FeeModel, base, quote string, qty, price, precision int64) int64 {
 	if feePlan == nil || qty <= 0 || price <= 0 {
 		return 0
 	}
 	probe := Execution{Price: price, Qty: qty}
-	fee := feePlan.CalculateFee(FillContext{
-		Exec:       &probe,
-		IsMaker:    false,
-		BaseAsset:  base,
-		QuoteAsset: quote,
-		Precision:  precision,
-	})
-	if fee.Asset != quote || fee.Amount <= 0 {
-		return 0
+	var headroom int64
+	for _, isMaker := range []bool{false, true} {
+		fee := feePlan.CalculateFee(FillContext{
+			Exec:       &probe,
+			IsMaker:    isMaker,
+			BaseAsset:  base,
+			QuoteAsset: quote,
+			Precision:  precision,
+		})
+		if fee.Asset == quote && fee.Amount > headroom {
+			headroom = fee.Amount
+		}
 	}
-	return fee.Amount
+	return headroom
 }
 
 func reserveAsset(instrument Instrument, side Side) string {
@@ -696,32 +862,41 @@ func reserveAsset(instrument Instrument, side Side) string {
 	return instrument.BaseAsset()
 }
 
-// spotOrderReservation returns the reserve-asset amount to lock for qty at
-// price: the notional (buy) or base qty (sell), plus worst-case taker fee
-// headroom when the fee is charged in the reserve asset. Without headroom,
-// fees debit past the reservation and drive balances negative.
-func spotOrderReservation(feePlan FeeModel, instrument Instrument, side Side, qty, price, precision int64) int64 {
+// spotOrderReservation returns the reserve-asset amount to lock for a resting
+// order: the notional (buy) or base qty (sell), plus the largest non-negative
+// maker/taker fee in that same asset. The bool is false when the exact sum is
+// not representable, which admission must reject rather than wrap.
+func spotOrderReservation(feePlan FeeModel, instrument Instrument, side Side, qty, price, precision int64) (int64, bool) {
 	var amount int64
+	var ok bool
 	if side == Buy {
-		amount = MulDiv(qty, price, precision)
+		amount, ok = etypes.TryMulDiv(qty, price, precision)
+		if !ok {
+			return 0, false
+		}
 	} else {
 		amount = qty
 	}
 	if qty <= 0 || feePlan == nil {
-		return max(amount, 0)
+		return max(amount, 0), true
 	}
 	probe := Execution{Price: price, Qty: qty}
-	fee := feePlan.CalculateFee(FillContext{
-		Exec:       &probe,
-		IsMaker:    false,
-		BaseAsset:  instrument.BaseAsset(),
-		QuoteAsset: instrument.QuoteAsset(),
-		Precision:  precision,
-	})
-	if fee.Asset == reserveAsset(instrument, side) {
-		amount += fee.Amount
+	asset := reserveAsset(instrument, side)
+	var feeHeadroom int64
+	for _, isMaker := range []bool{false, true} {
+		fee := feePlan.CalculateFee(FillContext{
+			Exec:       &probe,
+			IsMaker:    isMaker,
+			BaseAsset:  instrument.BaseAsset(),
+			QuoteAsset: instrument.QuoteAsset(),
+			Precision:  precision,
+		})
+		if fee.Asset == asset && fee.Amount > feeHeadroom {
+			feeHeadroom = fee.Amount
+		}
 	}
-	return amount
+	amount, ok = etypes.TryAdd(amount, feeHeadroom)
+	return amount, ok
 }
 
 // canFillFully reports whether the opposing book holds enough crossable
@@ -767,7 +942,7 @@ func (e *DefaultExchange) reserveOrderFunds(client *Client, book *OrderBook, ord
 	var ok bool
 	switch order.Type {
 	case Market:
-		ok = checkMarketOrderFunds(client, book, order, precision)
+		ok = e.checkMarketOrderFunds(client, book, order, precision)
 	case LimitOrder:
 		ok = e.reserveLimitOrderFunds(client, book.Instrument, order, precision)
 	default:
