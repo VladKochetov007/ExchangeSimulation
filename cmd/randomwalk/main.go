@@ -48,9 +48,13 @@ func fmtDuration(d time.Duration) string {
 func main() {
 	duration := flag.Duration("duration", defaultSimDuration, "simulated duration")
 	logDir := flag.String("logdir", "logs/randomwalk", "directory for JSONL logs")
+	step := flag.Duration("step", time.Millisecond, "simulated clock advance per runner iteration")
+	snapshotOnly := flag.Bool("snapshot-only", false, "write only exchange-owned book snapshots")
 	flag.Parse()
 
-	sim, err := randomwalk.NewSimWithLogDir(*duration, *logDir)
+	sim, err := randomwalk.NewSimWithConfig(*duration, randomwalk.SimConfig{
+		LogDir: *logDir, Step: *step, SnapshotOnly: *snapshotOnly,
+	})
 	if err != nil {
 		log.Fatal(err)
 	}

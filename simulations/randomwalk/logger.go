@@ -8,9 +8,10 @@ import (
 )
 
 type JSONLinesLogger struct {
-	mu sync.Mutex
-	w  *bufio.Writer
-	f  *os.File
+	mu              sync.Mutex
+	w               *bufio.Writer
+	f               *os.File
+	filterSnapshots bool
 }
 
 func NewJSONLinesLogger(path string) (*JSONLinesLogger, error) {
@@ -22,6 +23,9 @@ func NewJSONLinesLogger(path string) (*JSONLinesLogger, error) {
 }
 
 func (l *JSONLinesLogger) LogEvent(simTime int64, clientID uint64, eventName string, event any) {
+	if l.filterSnapshots && eventName != "BookSnapshot" {
+		return
+	}
 	b, _ := json.Marshal(map[string]any{
 		"sim_ts":    simTime,
 		"client_id": clientID,

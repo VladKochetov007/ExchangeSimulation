@@ -34,24 +34,24 @@ def midpoint(snapshot: dict[str, Any]) -> float | None:
     return (bids[0]["price"] + asks[0]["price"]) / (2 * USD_PRECISION)
 
 
-def load_series(path: Path) -> tuple[list[int], list[float]]:
+def load_series(path: Path) -> tuple[list[int], list[float | None]]:
     timestamps: list[int] = []
-    mids: list[float] = []
+    mids: list[float | None] = []
     with path.open(encoding="utf-8") as handle:
         for line in handle:
             record = json.loads(line)
             if record.get("event") != "BookSnapshot" or record.get("client_id") != 0:
                 continue
-            mid = midpoint(record["data"])
-            if mid is not None:
-                timestamps.append(record["sim_ts"])
-                mids.append(mid)
+            timestamps.append(record["sim_ts"])
+            mids.append(midpoint(record["data"]))
     if not timestamps:
         raise ValueError(f"no exchange-owned book snapshots in {path}")
     return timestamps, mids
 
 
-def sample_at(timestamps: list[int], values: list[float], timestamp: int) -> float | None:
+def sample_at(
+    timestamps: list[int], values: list[float | None], timestamp: int
+) -> float | None:
     index = bisect_right(timestamps, timestamp) - 1
     return values[index] if index >= 0 else None
 

@@ -36,6 +36,12 @@ type Sim struct {
 	ex          *exchange.Exchange
 }
 
+type SimConfig struct {
+	LogDir       string
+	Step         time.Duration
+	SnapshotOnly bool
+}
+
 func (s *Sim) Exchange() *exchange.Exchange { return s.ex }
 
 func (s *Sim) Close() {
@@ -45,12 +51,25 @@ func (s *Sim) Close() {
 }
 
 func NewSim(simTime time.Duration) (*Sim, error) {
-	return NewSimWithLogDir(simTime, "logs/randomwalk")
+	return NewSimWithConfig(simTime, SimConfig{LogDir: "logs/randomwalk", Step: time.Millisecond})
 }
 
 // NewSimWithLogDir constructs the standard random-walk ecology while keeping
 // each experiment's artifacts in its own directory.
 func NewSimWithLogDir(simTime time.Duration, logDir string) (*Sim, error) {
+	return NewSimWithConfig(simTime, SimConfig{LogDir: logDir, Step: time.Millisecond})
+}
+
+// NewSimWithConfig exposes simulation-step and logging controls for long
+// visualization runs without changing the standard scenario defaults.
+func NewSimWithConfig(simTime time.Duration, cfg SimConfig) (*Sim, error) {
+	if cfg.LogDir == "" {
+		cfg.LogDir = "logs/randomwalk"
+	}
+	if cfg.Step <= 0 {
+		cfg.Step = time.Millisecond
+	}
+	logDir := cfg.LogDir
 	simClock := simulation.NewSimulatedClock(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano())
 	scheduler := simulation.NewEventScheduler(simClock)
 	simClock.SetScheduler(scheduler)
@@ -71,7 +90,15 @@ func NewSimWithLogDir(simTime time.Duration, logDir string) (*Sim, error) {
 		return nil, err
 	}
 
-	logGlobal, err := NewJSONLinesLogger(filepath.Join(logDir, "general.jsonl"))
+	newLogger := func(path string) (*JSONLinesLogger, error) {
+		logger, err := NewJSONLinesLogger(path)
+		if err != nil {
+			return logger, err
+		}
+		logger.filterSnapshots = cfg.SnapshotOnly
+		return logger, nil
+	}
+	logGlobal, err := newLogger(filepath.Join(logDir, "general.jsonl"))
 	if err != nil {
 		return nil, err
 	}
@@ -97,11 +124,11 @@ func NewSimWithLogDir(simTime time.Duration, logDir string) (*Sim, error) {
 
 		indexOracle.MapSymbol(perpSym, spotSym)
 
-		logSpot, err := NewJSONLinesLogger(filepath.Join(logDir, "spot", spotSym+".jsonl"))
+		logSpot, err := newLogger(filepath.Join(logDir, "spot", spotSym+".jsonl"))
 		if err != nil {
 			return nil, err
 		}
-		logPerp, err := NewJSONLinesLogger(filepath.Join(logDir, "perp", perpSym+".jsonl"))
+		logPerp, err := newLogger(filepath.Join(logDir, "perp", perpSym+".jsonl"))
 		if err != nil {
 			return nil, err
 		}
@@ -126,7 +153,7 @@ func NewSimWithLogDir(simTime time.Duration, logDir string) (*Sim, error) {
 		inst := exchange.NewSpotInstrument(cs.symbol, cs.base, "ABC",
 			btcPrecision, btcPrecision, cs.tickSize, btcPrecision/100)
 		ex.AddInstrument(inst)
-		logCross, err := NewJSONLinesLogger(filepath.Join(logDir, "spot", cs.symbol+".jsonl"))
+		logCross, err := newLogger(filepath.Join(logDir, "spot", cs.symbol+".jsonl"))
 		if err != nil {
 			return nil, err
 		}
@@ -260,10 +287,9 @@ func NewSimWithLogDir(simTime time.Duration, logDir string) (*Sim, error) {
 		triArbs = append(triArbs, arb)
 	}
 
-	const step = time.Millisecond
 	runner := simulation.NewRunner(simClock, simulation.RunnerConfig{
-		Iterations: int(simTime / step),
-		Step:       step,
+		Iterations: int(simTime / cfg.Step),
+		Step:       cfg.Step,
 	})
 	runner.AddMount(mount)
 	for _, mm := range mms {
