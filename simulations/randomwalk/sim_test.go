@@ -407,6 +407,54 @@ func TestMarketMakerKeepsInsufficientSideWithdrawnUntilOppositeFill(t *testing.T
 	}
 }
 
+func TestMarketMakerKeepsPartiallyFundedSideQuotedAfterReprice(t *testing.T) {
+	gw := newRandomwalkStubGateway()
+	mm := NewMarketMaker(1, gw, MMConfig{
+		Symbols: []string{"ABC-USD"}, BootstrapPrice: 100,
+		Levels: 5, LevelSpacing: 1, LevelSize: 1, TickSize: 1,
+		RefreshInterval: time.Hour,
+	})
+	const symbol = "ABC-USD"
+	mm.quote(symbol)
+	orders := gw.placedOrders()
+	if len(orders) != 10 {
+		t.Fatalf("initial orders = %d, want 10", len(orders))
+	}
+
+	// Four asks reserve successfully, then the fifth is rejected because the
+	// account has enough base inventory for only four quote levels.
+	for i, order := range orders {
+		if order.Side == exchange.Buy || i < 9 {
+			mm.onAccepted(actor.OrderAcceptedEvent{OrderID: uint64(100 + i), RequestID: order.RequestID})
+		}
+	}
+	lastAsk := orders[len(orders)-1]
+	if lastAsk.Side != exchange.Sell {
+		t.Fatalf("last order side = %s, want sell", lastAsk.Side)
+	}
+	mm.onRejected(actor.OrderRejectedEvent{RequestID: lastAsk.RequestID, Reason: exchange.RejectInsufficientBalance})
+
+	ref := quoteRef{symbol: symbol, side: exchange.Sell}
+	if mm.withdrawn[ref] {
+		t.Fatal("partial sell admission incorrectly withdrew the funded sell levels")
+	}
+	mm.cancelAllForSym(symbol)
+	mm.quote(symbol)
+
+	orders = gw.placedOrders()
+	if got := len(orders); got != 20 {
+		t.Fatalf("reprice orders = %d, want 20 with both sides retained", got)
+	}
+	for _, order := range orders[10:] {
+		if order.Side != exchange.Buy && order.Side != exchange.Sell {
+			t.Fatalf("unexpected reprice side %s", order.Side)
+		}
+	}
+	if got := orders[19].Side; got != exchange.Sell {
+		t.Fatalf("reprice omitted sell side; last order side = %s", got)
+	}
+}
+
 func TestCrossPairMMRequotesMissingSideWithoutReplacingLiveQuote(t *testing.T) {
 	gw := newRandomwalkStubGateway()
 	mm := NewCrossPairMM(1, gw, CrossPairMMConfig{
@@ -477,6 +525,53 @@ func TestCrossPairMMKeepsInsufficientSideWithdrawnUntilOppositeFill(t *testing.T
 	}
 	if got := orders[3].Side; got != exchange.Sell {
 		t.Fatalf("re-enabled side = %s, want sell", got)
+	}
+}
+
+func TestCrossPairMMKeepsPartiallyFundedSideQuotedAfterReprice(t *testing.T) {
+	gw := newRandomwalkStubGateway()
+	mm := NewCrossPairMM(1, gw, CrossPairMMConfig{
+		CrossSymbols:   []string{"DEF-ABC"},
+		BaseUSDSymbols: []string{"DEF-USD"},
+		QuoteUSDSymbol: "ABC-USD", QuotePrecision: 1,
+		TickSizes:  map[string]int64{"DEF-ABC": 1},
+		LevelSizes: map[string]int64{"DEF-ABC": 1},
+		Levels:     5, LevelSpacing: 1, RefreshInterval: time.Hour,
+	})
+	const symbol = "DEF-ABC"
+	mm.usdMids["ABC-USD"] = 100
+	mm.usdMids["DEF-USD"] = 1_000
+	mm.recomputeMids()
+	mm.quote(symbol)
+	orders := gw.placedOrders()
+	if len(orders) != 10 {
+		t.Fatalf("initial orders = %d, want 10", len(orders))
+	}
+
+	for i, order := range orders {
+		if order.Side == exchange.Buy || i < 9 {
+			mm.onAccepted(actor.OrderAcceptedEvent{OrderID: uint64(100 + i), RequestID: order.RequestID})
+		}
+	}
+	lastAsk := orders[len(orders)-1]
+	if lastAsk.Side != exchange.Sell {
+		t.Fatalf("last order side = %s, want sell", lastAsk.Side)
+	}
+	mm.onRejected(actor.OrderRejectedEvent{RequestID: lastAsk.RequestID, Reason: exchange.RejectInsufficientBalance})
+
+	ref := quoteRef{symbol: symbol, side: exchange.Sell}
+	if mm.withdrawn[ref] {
+		t.Fatal("partial cross sell admission incorrectly withdrew funded sell levels")
+	}
+	mm.cancelAllForSym(symbol)
+	mm.quote(symbol)
+
+	orders = gw.placedOrders()
+	if got := len(orders); got != 20 {
+		t.Fatalf("reprice orders = %d, want 20 with both sides retained", got)
+	}
+	if got := orders[19].Side; got != exchange.Sell {
+		t.Fatalf("reprice omitted cross sell side; last order side = %s", got)
 	}
 }
 

@@ -126,7 +126,10 @@ func (mm *MarketMaker) onRejected(e actor.OrderRejectedEvent) {
 		return
 	}
 	delete(mm.reqToQuote, e.RequestID)
-	if e.Reason == exchange.RejectInsufficientBalance {
+	// A level can be rejected after earlier levels on the same side were
+	// accepted and reserved. Withdrawing the whole side in that case turns a
+	// partially funded quote into an empty book at the next reprice.
+	if e.Reason == exchange.RejectInsufficientBalance && len(mm.pending[ref]) == 0 {
 		mm.withdrawn[ref] = true
 	}
 }
