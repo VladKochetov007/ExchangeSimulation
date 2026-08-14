@@ -8,6 +8,7 @@ Verification tier A. External-validity gap: venue simplifications listed in `doc
 ## Supported claims
 
 - Foreign fee assets are reserved per open order rather than merely checked at placement.
+- A partial fill that exhausts a foreign fixed-fee balance force-cancels the unbacked remainder.
 - Liquidation repayment preserves spot/perp loan attribution after repaying more than the perp-attributed share.
 - Terminal venue and actor lifecycles are idempotent; scheduled delayed outputs are dropped after stop.
 - Same-timestamp expiries settle in symbol order, before the option risk sweep.

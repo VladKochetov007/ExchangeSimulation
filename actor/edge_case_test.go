@@ -97,6 +97,21 @@ func TestBaseActorFullFillBeforeAcceptLeavesNoGhostOrder(t *testing.T) {
 	}
 }
 
+func TestBaseActorForcedCancelBeforeAcceptLeavesNoGhostOrder(t *testing.T) {
+	trader := NewBaseActor(1, exchange.NewClientGateway(1))
+	const orderID, requestID = uint64(19), uint64(29)
+
+	trader.decodeResponse(exchange.Response{Success: true, Data: &exchange.ForcedCancelNotification{OrderID: orderID}})
+	trader.decodeResponse(exchange.Response{RequestID: requestID, Success: true, Data: orderID})
+
+	if _, active := trader.activeOrders.Load(orderID); active {
+		t.Fatal("forced cancel before accept left a ghost active order")
+	}
+	if _, pending := trader.requestToOrder.Load(requestID); pending {
+		t.Fatal("forced cancel before accept left a ghost request mapping")
+	}
+}
+
 func TestBaseActorResponseHandling(t *testing.T) {
 	ex := exchange.NewExchange(10, &exchange.RealClock{})
 	instrument := exchange.NewSpotInstrument("BTC/USD", "BTC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION, exchange.DOLLAR_TICK, exchange.BTC_PRECISION/1000)

@@ -340,6 +340,35 @@ func TestRegressionMarketForeignFeeReservesEverySweepFill(t *testing.T) {
 	}
 }
 
+func TestRegressionPartialForeignFeeFillCancelsUnfundedRemainder(t *testing.T) {
+	ex := NewExchange(4, &RealClock{})
+	ex.AddInstrument(NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1))
+	fees := bughuntThirdAssetFee{}
+	ex.ConnectNewClient(1, map[string]int64{"BTC": BTCAmount(2), "BNB": 1}, fees)
+	ex.ConnectNewClient(2, map[string]int64{"USD": USDAmount(50_000)}, &FixedFee{})
+	ex.ConnectNewClient(3, map[string]int64{"USD": USDAmount(50_000)}, &FixedFee{})
+
+	price := USDAmount(50_000)
+	if response := bughuntLimit(ex, 1, 1, "BTC/USD", Sell, price, BTCAmount(2)); !response.Success {
+		t.Fatalf("seller order rejected: %s", response.Error)
+	}
+	if response := bughuntLimit(ex, 2, 2, "BTC/USD", Buy, price, BTCAmount(1)); !response.Success {
+		t.Fatalf("first buyer rejected: %s", response.Error)
+	}
+	if got := ex.Clients[1].Balances["BNB"]; got != 0 {
+		t.Fatalf("seller BNB after first fill = %d, want 0", got)
+	}
+	if got := len(ex.Clients[1].OrderIDs); got != 0 {
+		t.Fatalf("unfunded seller remainder still resting: %d open orders", got)
+	}
+	if response := bughuntLimit(ex, 3, 3, "BTC/USD", Buy, price, BTCAmount(1)); !response.Success {
+		t.Fatalf("second buyer rejected: %s", response.Error)
+	}
+	if got := ex.Clients[1].Balances["BNB"]; got < 0 {
+		t.Fatalf("second fill debited seller BNB negative: %d", got)
+	}
+}
+
 // Liquidation repayment comes from the perp wallet. Once it pays all
 // perp-attributed debt, any excess must retire spot-attributed debt too;
 // otherwise a later perp borrow is hidden from margin equity.

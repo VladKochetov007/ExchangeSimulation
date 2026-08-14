@@ -594,10 +594,27 @@ func (e *DefaultExchange) restoreForeignFeeReservation(book *OrderBook, order *O
 	}
 	releaseForeignFeeReservation(client, book.Instrument, order)
 	if order.FilledQty < order.Qty && !reserveForeignFeeFunds(client, book, order, precision) {
-		// The prior reservation covered this order's remaining worst-case fee, so
-		// this can only happen for a fee model whose quote changed mid-fill.
-		// Leave no stale lock; settlement has already completed.
-		return
+		e.cancelUnfundedFeeRemainder(book, client, order)
+	}
+}
+
+func (e *DefaultExchange) cancelUnfundedFeeRemainder(book *OrderBook, client *Client, order *Order) {
+	remaining := order.Qty - order.FilledQty
+	releaseReserved(client, book.Instrument, order)
+	if order.Parent != nil {
+		if order.Side == Buy {
+			book.Bids.CancelOrder(order.ID)
+		} else {
+			book.Asks.CancelOrder(order.ID)
+		}
+		if order.Visibility != Hidden {
+			e.publishBookUpdate(book, order.Side, order.Price)
+		}
+		client.RemoveOrder(order.ID)
+	}
+	order.Status = Cancelled
+	if gateway := e.Gateways[order.ClientID]; gateway != nil && gateway.IsRunning() {
+		gateway.enqueueResponse(Response{Success: true, Data: &ForcedCancelNotification{OrderID: order.ID, RemainingQty: remaining}})
 	}
 }
 
@@ -772,7 +789,7 @@ func (e *DefaultExchange) publishLevels(book *OrderBook, levels map[int64]Side) 
 // restOrReleaseOrder either rests the order as a GTC limit in the book or releases its funds.
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) restOrReleaseOrder(client *Client, book *OrderBook, order *Order, req *OrderRequest) {
-	if order.Status != Filled && req.Type == LimitOrder && req.TimeInForce == GTC {
+	if order.Status != Filled && order.Status != Cancelled && req.Type == LimitOrder && req.TimeInForce == GTC {
 		e.cancelOwnCrossingQuotes(client, book, order)
 		if order.Side == Buy {
 			book.Bids.AddOrder(order)
