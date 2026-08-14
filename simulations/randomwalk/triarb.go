@@ -11,21 +11,24 @@ import (
 // TriArbConfig configures a triangular arbitrage actor.
 //
 // Triangle: QuoteUSD ↔ Cross ↔ BaseUSD
-//   Direction A (buy cheap via quote asset): buy QuoteUSD → buy Cross → sell BaseUSD
-//   Direction B (sell expensive via quote asset): buy BaseUSD → sell Cross → sell QuoteUSD
+//
+//	Direction A (buy cheap via quote asset): buy QuoteUSD → buy Cross → sell BaseUSD
+//	Direction B (sell expensive via quote asset): buy BaseUSD → sell Cross → sell QuoteUSD
 type TriArbConfig struct {
 	CrossSymbol    string
 	BaseUSDSymbol  string
 	QuoteUSDSymbol string
-	TargetNotional int64         // target USD notional per arb execution
-	MinProfitBps   int64         // minimum bps profit to trigger (after spread)
-	BasePrecision  int64         // precision of base and quote assets (BTC_PRECISION)
+	TargetNotional int64 // target USD notional per arb execution
+	MinProfitBps   int64 // minimum bps profit to trigger (after spread)
+	BasePrecision  int64 // precision of base and quote assets (BTC_PRECISION)
 	CheckInterval  time.Duration
 }
 
 type bookTop struct {
-	bid int64
-	ask int64
+	bid       int64
+	ask       int64
+	timestamp int64
+	received  bool
 }
 
 // TriArbActor executes triangular arbitrage across three spot markets.
@@ -50,6 +53,12 @@ type TriArbActor struct {
 	pendingReqID   uint64
 	pendingOrderID uint64
 	bufferedFillID uint64 // orderID from fill that arrived before accepted
+
+	// A triangle must be priced from one coherent market-data instant. Without
+	// this guard, completing a cycle leaves the actor idle and lets later timer
+	// ticks submit identical cycles against the same cached snapshots.
+	lastCheckedSnapshotTimestamp int64
+	hasCheckedSnapshot           bool
 }
 
 func NewTriArbActor(id uint64, gw actor.Gateway, cfg TriArbConfig) *TriArbActor {
@@ -91,7 +100,12 @@ func (a *TriArbActor) onSnapshot(e actor.BookSnapshotEvent) {
 	if len(e.Snapshot.Asks) > 0 {
 		ask = e.Snapshot.Asks[0].Price
 	}
-	a.books[e.Symbol] = bookTop{bid: bid, ask: ask}
+	a.books[e.Symbol] = bookTop{
+		bid:       bid,
+		ask:       ask,
+		timestamp: e.Timestamp,
+		received:  true,
+	}
 }
 
 func (a *TriArbActor) onAccepted(e actor.OrderAcceptedEvent) {
@@ -170,6 +184,18 @@ func (a *TriArbActor) checkArb() {
 	cross := a.books[a.cfg.CrossSymbol]
 	base := a.books[a.cfg.BaseUSDSymbol]
 	quote := a.books[a.cfg.QuoteUSDSymbol]
+
+	if !cross.received || !base.received || !quote.received ||
+		cross.timestamp != base.timestamp || cross.timestamp != quote.timestamp {
+		return
+	}
+	if a.hasCheckedSnapshot && cross.timestamp <= a.lastCheckedSnapshotTimestamp {
+		return
+	}
+	// Consume this coherent snapshot before evaluating it. A completed or
+	// rejected cycle must wait for a newer view of every leg before retrying.
+	a.lastCheckedSnapshotTimestamp = cross.timestamp
+	a.hasCheckedSnapshot = true
 
 	if cross.bid == 0 || cross.ask == 0 || base.bid == 0 || base.ask == 0 || quote.bid == 0 || quote.ask == 0 {
 		return

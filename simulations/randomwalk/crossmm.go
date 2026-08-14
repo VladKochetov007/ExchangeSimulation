@@ -27,29 +27,33 @@ type CrossPairMMConfig struct {
 // It requotes whenever the derived mid changes by more than one tick.
 type CrossPairMM struct {
 	*actor.BaseActor
-	cfg        CrossPairMMConfig
-	usdMids    map[string]int64           // mid prices for all USD pairs we watch
-	mids       map[string]int64           // derived cross mids
-	quotedMids map[string]int64           // last cross mid we actually quoted at
-	pending    map[string]map[uint64]bool // live order IDs per cross symbol
-	reqToSym   map[uint64]string          // reqID → cross symbol
-	orderToSym map[uint64]string          // orderID → cross symbol
-	subscribed bool
+	cfg          CrossPairMMConfig
+	usdMids      map[string]int64             // mid prices for all USD pairs we watch
+	mids         map[string]int64             // derived cross mids
+	quotedMids   map[string]int64             // last cross mid we actually quoted at
+	pending      map[quoteRef]map[uint64]bool // live order IDs per cross symbol and side
+	reqToQuote   map[uint64]quoteRef          // reqID → quote side
+	orderToQuote map[uint64]quoteRef          // orderID → quote side
+	withdrawn    map[quoteRef]bool            // side has no inventory; wait for an opposite fill
+	subscribed   bool
 }
 
 func NewCrossPairMM(id uint64, gw actor.Gateway, cfg CrossPairMMConfig) *CrossPairMM {
 	mm := &CrossPairMM{
-		BaseActor:  actor.NewBaseActor(id, gw),
-		cfg:        cfg,
-		usdMids:    make(map[string]int64, len(cfg.BaseUSDSymbols)+1),
-		mids:       make(map[string]int64, len(cfg.CrossSymbols)),
-		quotedMids: make(map[string]int64, len(cfg.CrossSymbols)),
-		pending:    make(map[string]map[uint64]bool, len(cfg.CrossSymbols)),
-		reqToSym:   make(map[uint64]string),
-		orderToSym: make(map[uint64]string),
+		BaseActor:    actor.NewBaseActor(id, gw),
+		cfg:          cfg,
+		usdMids:      make(map[string]int64, len(cfg.BaseUSDSymbols)+1),
+		mids:         make(map[string]int64, len(cfg.CrossSymbols)),
+		quotedMids:   make(map[string]int64, len(cfg.CrossSymbols)),
+		pending:      make(map[quoteRef]map[uint64]bool, len(cfg.CrossSymbols)*len(quoteSides)),
+		reqToQuote:   make(map[uint64]quoteRef),
+		orderToQuote: make(map[uint64]quoteRef),
+		withdrawn:    make(map[quoteRef]bool),
 	}
 	for _, cross := range cfg.CrossSymbols {
-		mm.pending[cross] = make(map[uint64]bool)
+		for _, side := range quoteSides {
+			mm.pending[quoteRef{symbol: cross, side: side}] = make(map[uint64]bool)
+		}
 	}
 	mm.SetHandler(mm)
 	mm.AddTicker(cfg.RefreshInterval, mm.onTick)
@@ -78,45 +82,50 @@ func (mm *CrossPairMM) onSnapshot(e actor.BookSnapshotEvent) {
 }
 
 func (mm *CrossPairMM) onAccepted(e actor.OrderAcceptedEvent) {
-	sym, ok := mm.reqToSym[e.RequestID]
+	ref, ok := mm.reqToQuote[e.RequestID]
 	if !ok {
 		mm.CancelOrder(e.OrderID)
 		return
 	}
-	delete(mm.reqToSym, e.RequestID)
-	mm.pending[sym][e.OrderID] = true
-	mm.orderToSym[e.OrderID] = sym
+	delete(mm.reqToQuote, e.RequestID)
+	mm.pending[ref][e.OrderID] = true
+	mm.orderToQuote[e.OrderID] = ref
 }
 
 func (mm *CrossPairMM) onFilled(e actor.OrderFillEvent) {
-	sym, ok := mm.orderToSym[e.OrderID]
+	ref, ok := mm.orderToQuote[e.OrderID]
 	if !ok {
 		return
 	}
-	delete(mm.orderToSym, e.OrderID)
-	delete(mm.pending[sym], e.OrderID)
+	delete(mm.orderToQuote, e.OrderID)
+	delete(mm.pending[ref], e.OrderID)
+	delete(mm.withdrawn, quoteRef{symbol: ref.symbol, side: oppositeSide(ref.side)})
 	if !e.IsFull {
 		mm.CancelOrder(e.OrderID)
 	}
-	mm.cancelAllForSym(sym)
-	mm.quote(sym)
+	mm.cancelAllForSym(ref.symbol)
+	mm.quote(ref.symbol)
 }
 
 func (mm *CrossPairMM) onCancelled(e actor.OrderCancelledEvent) {
-	sym, ok := mm.orderToSym[e.OrderID]
+	ref, ok := mm.orderToQuote[e.OrderID]
 	if !ok {
 		return
 	}
-	delete(mm.orderToSym, e.OrderID)
-	delete(mm.pending[sym], e.OrderID)
-	mm.ensureQuoted(sym)
+	delete(mm.orderToQuote, e.OrderID)
+	delete(mm.pending[ref], e.OrderID)
+	mm.ensureQuoted(ref.symbol)
 }
 
 func (mm *CrossPairMM) onRejected(e actor.OrderRejectedEvent) {
-	if _, ok := mm.reqToSym[e.RequestID]; !ok {
+	ref, ok := mm.reqToQuote[e.RequestID]
+	if !ok {
 		return
 	}
-	delete(mm.reqToSym, e.RequestID)
+	delete(mm.reqToQuote, e.RequestID)
+	if e.Reason == exchange.RejectInsufficientBalance {
+		mm.withdrawn[ref] = true
+	}
 }
 
 func (mm *CrossPairMM) onTick(_ time.Time) {
@@ -133,7 +142,8 @@ func (mm *CrossPairMM) onTick(_ time.Time) {
 		if newMid == 0 {
 			continue
 		}
-		if mm.quotedMids[cross] == newMid && mm.hasOutstanding(cross) {
+		if mm.quotedMids[cross] == newMid {
+			mm.ensureQuoted(cross)
 			continue
 		}
 		mm.cancelAllForSym(cross)
@@ -142,17 +152,20 @@ func (mm *CrossPairMM) onTick(_ time.Time) {
 }
 
 func (mm *CrossPairMM) ensureQuoted(sym string) {
-	if mm.mids[sym] != 0 && !mm.hasOutstanding(sym) {
-		mm.quote(sym)
+	if mm.mids[sym] == 0 {
+		return
+	}
+	for _, side := range quoteSides {
+		mm.quoteSide(quoteRef{symbol: sym, side: side})
 	}
 }
 
-func (mm *CrossPairMM) hasOutstanding(sym string) bool {
-	if len(mm.pending[sym]) > 0 {
+func (mm *CrossPairMM) hasOutstanding(ref quoteRef) bool {
+	if len(mm.pending[ref]) > 0 {
 		return true
 	}
-	for _, requestSym := range mm.reqToSym {
-		if requestSym == sym {
+	for _, requestRef := range mm.reqToQuote {
+		if requestRef == ref {
 			return true
 		}
 	}
@@ -177,33 +190,49 @@ func (mm *CrossPairMM) recomputeMids() {
 }
 
 func (mm *CrossPairMM) quote(sym string) {
+	for _, side := range quoteSides {
+		mm.quoteSide(quoteRef{symbol: sym, side: side})
+	}
+	mm.quotedMids[sym] = mm.mids[sym]
+}
+
+func (mm *CrossPairMM) quoteSide(ref quoteRef) {
+	if mm.withdrawn[ref] || mm.hasOutstanding(ref) {
+		return
+	}
+
+	sym := ref.symbol
 	mid := mm.mids[sym]
 	tick := mm.cfg.TickSizes[sym]
 	levelSize := mm.cfg.LevelSizes[sym]
 	for k := int64(1); k <= int64(mm.cfg.Levels); k++ {
 		offset := (1 + (k-1)*mm.cfg.LevelSpacing) * tick
-		bidPrice := mid - offset
-		askPrice := mid + offset
-		if bidPrice <= 0 {
+		price := mid + offset
+		if ref.side == exchange.Buy {
+			price = mid - offset
+		}
+		if price <= 0 {
 			continue
 		}
-		bidReqID := mm.SubmitOrder(sym, exchange.Buy, exchange.LimitOrder, bidPrice, levelSize)
-		mm.reqToSym[bidReqID] = sym
-		askReqID := mm.SubmitOrder(sym, exchange.Sell, exchange.LimitOrder, askPrice, levelSize)
-		mm.reqToSym[askReqID] = sym
+		reqID := mm.SubmitOrder(sym, ref.side, exchange.LimitOrder, price, levelSize)
+		mm.reqToQuote[reqID] = ref
 	}
-	mm.quotedMids[sym] = mid
 }
 
 func (mm *CrossPairMM) cancelAllForSym(sym string) {
-	for orderID := range mm.pending[sym] {
-		mm.CancelOrder(orderID)
-		delete(mm.orderToSym, orderID)
-		delete(mm.pending[sym], orderID)
+	for ref, orderIDs := range mm.pending {
+		if ref.symbol != sym {
+			continue
+		}
+		for orderID := range orderIDs {
+			mm.CancelOrder(orderID)
+			delete(mm.orderToQuote, orderID)
+			delete(orderIDs, orderID)
+		}
 	}
-	for reqID, s := range mm.reqToSym {
-		if s == sym {
-			delete(mm.reqToSym, reqID)
+	for reqID, ref := range mm.reqToQuote {
+		if ref.symbol == sym {
+			delete(mm.reqToQuote, reqID)
 		}
 	}
 }

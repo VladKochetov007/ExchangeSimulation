@@ -18,29 +18,42 @@ type MMConfig struct {
 	RefreshInterval time.Duration
 }
 
+// quoteRef identifies one side of a symbol's quote. A live bid must not make
+// the maker treat a missing ask as quoted, or vice versa.
+type quoteRef struct {
+	symbol string
+	side   exchange.Side
+}
+
+var quoteSides = [...]exchange.Side{exchange.Buy, exchange.Sell}
+
 type MarketMaker struct {
 	*actor.BaseActor
-	cfg        MMConfig
-	mids       map[string]int64
-	pending    map[string]map[uint64]bool
-	reqToSym   map[uint64]string // reqID → symbol
-	orderToSym map[uint64]string // orderID → symbol
-	subscribed map[string]bool
+	cfg          MMConfig
+	mids         map[string]int64
+	pending      map[quoteRef]map[uint64]bool
+	reqToQuote   map[uint64]quoteRef // reqID → quote side
+	orderToQuote map[uint64]quoteRef // orderID → quote side
+	withdrawn    map[quoteRef]bool   // side has no inventory; wait for an opposite fill
+	subscribed   map[string]bool
 }
 
 func NewMarketMaker(id uint64, gw actor.Gateway, cfg MMConfig) *MarketMaker {
 	mm := &MarketMaker{
-		BaseActor:  actor.NewBaseActor(id, gw),
-		cfg:        cfg,
-		mids:       make(map[string]int64, len(cfg.Symbols)),
-		pending:    make(map[string]map[uint64]bool, len(cfg.Symbols)),
-		reqToSym:   make(map[uint64]string),
-		orderToSym: make(map[uint64]string),
-		subscribed: make(map[string]bool, len(cfg.Symbols)),
+		BaseActor:    actor.NewBaseActor(id, gw),
+		cfg:          cfg,
+		mids:         make(map[string]int64, len(cfg.Symbols)),
+		pending:      make(map[quoteRef]map[uint64]bool, len(cfg.Symbols)*len(quoteSides)),
+		reqToQuote:   make(map[uint64]quoteRef),
+		orderToQuote: make(map[uint64]quoteRef),
+		withdrawn:    make(map[quoteRef]bool),
+		subscribed:   make(map[string]bool, len(cfg.Symbols)),
 	}
 	for _, sym := range cfg.Symbols {
 		mm.mids[sym] = cfg.BootstrapPrice
-		mm.pending[sym] = make(map[uint64]bool)
+		for _, side := range quoteSides {
+			mm.pending[quoteRef{symbol: sym, side: side}] = make(map[uint64]bool)
+		}
 	}
 	mm.SetHandler(mm)
 	mm.AddTicker(cfg.RefreshInterval, mm.onTick)
@@ -64,51 +77,58 @@ func (mm *MarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
 }
 
 func (mm *MarketMaker) onAccepted(e actor.OrderAcceptedEvent) {
-	sym, ok := mm.reqToSym[e.RequestID]
+	ref, ok := mm.reqToQuote[e.RequestID]
 	if !ok {
 		// Request was cleared by cancelAllForSym before the accept arrived.
 		// The order is live in the book but untracked — cancel it immediately.
 		mm.CancelOrder(e.OrderID)
 		return
 	}
-	delete(mm.reqToSym, e.RequestID)
-	mm.pending[sym][e.OrderID] = true
-	mm.orderToSym[e.OrderID] = sym
+	delete(mm.reqToQuote, e.RequestID)
+	mm.pending[ref][e.OrderID] = true
+	mm.orderToQuote[e.OrderID] = ref
 }
 
 func (mm *MarketMaker) onFilled(e actor.OrderFillEvent) {
-	sym, ok := mm.orderToSym[e.OrderID]
+	ref, ok := mm.orderToQuote[e.OrderID]
 	if !ok {
 		return
 	}
-	delete(mm.orderToSym, e.OrderID)
-	delete(mm.pending[sym], e.OrderID)
-	mm.mids[sym] = e.Price
+	delete(mm.orderToQuote, e.OrderID)
+	delete(mm.pending[ref], e.OrderID)
+	mm.mids[ref.symbol] = e.Price
+	// A buy replenishes base inventory for sells; a sell replenishes quote
+	// inventory for buys. Keep a rejected side withdrawn until this happens.
+	delete(mm.withdrawn, quoteRef{symbol: ref.symbol, side: oppositeSide(ref.side)})
 	if !e.IsFull {
 		mm.CancelOrder(e.OrderID) // cancel remaining qty of partially-filled order
 	}
-	mm.cancelAllForSym(sym)
+	mm.cancelAllForSym(ref.symbol)
 	// The cancellation requests precede the replacement orders in the gateway
 	// FIFO. Requote now so a same-timestamp taker/snapshot cannot observe an
 	// artificial zero-latency liquidity gap.
-	mm.quote(sym)
+	mm.quote(ref.symbol)
 }
 
 func (mm *MarketMaker) onCancelled(e actor.OrderCancelledEvent) {
-	sym, ok := mm.orderToSym[e.OrderID]
+	ref, ok := mm.orderToQuote[e.OrderID]
 	if !ok {
 		return
 	}
-	delete(mm.orderToSym, e.OrderID)
-	delete(mm.pending[sym], e.OrderID)
-	mm.ensureQuoted(sym)
+	delete(mm.orderToQuote, e.OrderID)
+	delete(mm.pending[ref], e.OrderID)
+	mm.ensureQuoted(ref.symbol)
 }
 
 func (mm *MarketMaker) onRejected(e actor.OrderRejectedEvent) {
-	if _, ok := mm.reqToSym[e.RequestID]; !ok {
+	ref, ok := mm.reqToQuote[e.RequestID]
+	if !ok {
 		return
 	}
-	delete(mm.reqToSym, e.RequestID)
+	delete(mm.reqToQuote, e.RequestID)
+	if e.Reason == exchange.RejectInsufficientBalance {
+		mm.withdrawn[ref] = true
+	}
 }
 
 func (mm *MarketMaker) onTick(_ time.Time) {
@@ -122,17 +142,17 @@ func (mm *MarketMaker) onTick(_ time.Time) {
 }
 
 func (mm *MarketMaker) ensureQuoted(sym string) {
-	if !mm.hasOutstanding(sym) {
-		mm.quote(sym)
+	for _, side := range quoteSides {
+		mm.quoteSide(quoteRef{symbol: sym, side: side})
 	}
 }
 
-func (mm *MarketMaker) hasOutstanding(sym string) bool {
-	if len(mm.pending[sym]) > 0 {
+func (mm *MarketMaker) hasOutstanding(ref quoteRef) bool {
+	if len(mm.pending[ref]) > 0 {
 		return true
 	}
-	for _, requestSym := range mm.reqToSym {
-		if requestSym == sym {
+	for _, requestRef := range mm.reqToQuote {
+		if requestRef == ref {
 			return true
 		}
 	}
@@ -140,32 +160,55 @@ func (mm *MarketMaker) hasOutstanding(sym string) bool {
 }
 
 func (mm *MarketMaker) cancelAllForSym(sym string) {
-	for orderID := range mm.pending[sym] {
-		mm.CancelOrder(orderID)
-		delete(mm.orderToSym, orderID)
-		delete(mm.pending[sym], orderID)
+	for ref, orderIDs := range mm.pending {
+		if ref.symbol != sym {
+			continue
+		}
+		for orderID := range orderIDs {
+			mm.CancelOrder(orderID)
+			delete(mm.orderToQuote, orderID)
+			delete(orderIDs, orderID)
+		}
 	}
 	// Clear in-flight requests for this symbol so late accepts become orphans
-	// handled by onAccepted, preventing ghost entries in pending[sym].
-	for reqID, s := range mm.reqToSym {
-		if s == sym {
-			delete(mm.reqToSym, reqID)
+	// handled by onAccepted, preventing ghost entries in pending.
+	for reqID, ref := range mm.reqToQuote {
+		if ref.symbol == sym {
+			delete(mm.reqToQuote, reqID)
 		}
 	}
 }
 
 func (mm *MarketMaker) quote(sym string) {
+	for _, side := range quoteSides {
+		mm.quoteSide(quoteRef{symbol: sym, side: side})
+	}
+}
+
+func (mm *MarketMaker) quoteSide(ref quoteRef) {
+	if mm.withdrawn[ref] || mm.hasOutstanding(ref) {
+		return
+	}
+
+	sym := ref.symbol
 	mid := mm.mids[sym]
 	for k := int64(1); k <= int64(mm.cfg.Levels); k++ {
 		offset := (1 + (k-1)*mm.cfg.LevelSpacing) * mm.cfg.TickSize
-		bidPrice := mid - offset
-		askPrice := mid + offset
-		if bidPrice <= 0 {
+		price := mid + offset
+		if ref.side == exchange.Buy {
+			price = mid - offset
+		}
+		if price <= 0 {
 			continue
 		}
-		bidReqID := mm.SubmitOrder(sym, exchange.Buy, exchange.LimitOrder, bidPrice, mm.cfg.LevelSize)
-		mm.reqToSym[bidReqID] = sym
-		askReqID := mm.SubmitOrder(sym, exchange.Sell, exchange.LimitOrder, askPrice, mm.cfg.LevelSize)
-		mm.reqToSym[askReqID] = sym
+		reqID := mm.SubmitOrder(sym, ref.side, exchange.LimitOrder, price, mm.cfg.LevelSize)
+		mm.reqToQuote[reqID] = ref
 	}
+}
+
+func oppositeSide(side exchange.Side) exchange.Side {
+	if side == exchange.Buy {
+		return exchange.Sell
+	}
+	return exchange.Buy
 }
