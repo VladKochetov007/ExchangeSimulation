@@ -267,6 +267,25 @@ func (e *DefaultExchange) stopDeterministicPhaseJobs(group *phaseJobGroup) {
 
 	for _, ticker := range stopped {
 		ticker.Stop()
+		discardTickerTicks(ticker)
+	}
+}
+
+// discardTickerTicks consumes work that was delivered before a periodic job
+// was retired. Scheduler-backed tickers account for every delivery until it
+// is acknowledged; removing the job without this drain leaves the simulation
+// permanently non-idle.
+func discardTickerTicks(ticker Ticker) {
+	for {
+		select {
+		case _, ok := <-ticker.C():
+			if !ok {
+				return
+			}
+			acknowledgeTicker(ticker)
+		default:
+			return
+		}
 	}
 }
 

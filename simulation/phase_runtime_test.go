@@ -87,3 +87,46 @@ func TestDeterministicPhasesPreserveOrderLifecycleAtSameTimestamp(t *testing.T) 
 		t.Fatalf("taker lifecycle = %v, want %v", taker.events, want)
 	}
 }
+
+// A runtime reconfiguration can retire a scheduler-backed periodic job after
+// its tick has been delivered but before the phase pump receives it. Retiring
+// the job must consume that tick as well: otherwise SimTimerFactory retains a
+// pending acknowledgement forever and the next fixed-point drain stalls.
+func TestDeterministicPhaseRetiresPendingPeriodicJob(t *testing.T) {
+	clock := NewSimulatedClock(0)
+	scheduler := NewEventScheduler(clock)
+	clock.SetScheduler(scheduler)
+	timers := NewSimTimerFactory(scheduler)
+
+	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
+		Clock:                   clock,
+		TickerFactory:           timers,
+		DeterministicPhases:     true,
+		SnapshotInterval:        time.Hour,
+		BalanceSnapshotInterval: time.Millisecond,
+	})
+	mount := NewMount(ex, LatencyConfig{})
+	mount.ConnectNewClient(1, nil, &exchange.PercentageFee{})
+
+	// Deliver the old balance tick outside the runner, leaving it in the
+	// ticker channel exactly as a concurrent reconfiguration would.
+	clock.Advance(time.Millisecond)
+	if got := timers.PendingTicks(); got != 1 {
+		t.Fatalf("pending ticks before replacement = %d, want 1", got)
+	}
+	ex.EnableBalanceSnapshots(2 * time.Millisecond)
+
+	runner := NewRunner(clock, RunnerConfig{
+		Iterations:          1,
+		Step:                time.Millisecond,
+		DeterministicPhases: true,
+	})
+	runner.AddMount(mount)
+	runner.AddIdler(timers)
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run after periodic-job replacement: %v", err)
+	}
+	if got := timers.PendingTicks(); got != 0 {
+		t.Fatalf("pending ticks after replacement = %d, want 0", got)
+	}
+}
