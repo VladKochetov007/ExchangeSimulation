@@ -1,0 +1,97 @@
+question: >-
+  In a deterministic, fragmented, fully funded continuous-double-auction
+  ecology, which strategy populations persist, invade, or exhibit
+  non-transitive frequency-dependent advantage when every agent acts only on
+  its own delayed public market data and private execution reports?
+target_claim: >-
+  Produce a reproducible, model-scoped payoff and invasion matrix for a
+  heterogeneous multi-venue market ecology. A result may describe this model;
+  it is not a live-market profitability or equilibrium claim without external
+  calibration.
+deliverable:
+  type: "versioned FFA ecology package, immutable run artifacts, and a held-out invasion report"
+  schema:
+    - "scenario manifest with venue, instrument, agent, and latency identities"
+    - "canonical deterministic digest and conservation report for every accepted run"
+    - "participant-level marked-account, inventory, Greeks, fills, fees, funding, and liquidation rows"
+    - "directed invasion matrix with bootstrap intervals and held-out mixtures"
+baseline:
+  artifact: "research/multivenue-options-contract-2026-08-15.md; E-029, E-033, E-035, E-037"
+  metrics:
+    venues: 3
+    underlyings: 1
+    assets: "ABC and USD only"
+    matching: "one exchange-wide matcher per world, FIFO by default"
+    instruments: "spot, perpetual, rolling dated futures, European options"
+    agents: "A-S-style spot/perp makers, futures maker, option dealer, random spot/option takers, optional ABC/USD router"
+    accepted_results: "deterministic Greek, hedge, execution, and narrow latency controls"
+verification:
+  tier: "C"
+  model_to_reality_gap: >-
+    Determinism and ledger tests establish a property of the simulator, not a
+    calibrated property of financial markets. Generated flow, static IV,
+    zero-carry forward proxy, and policy agents remain structural assumptions.
+  public_metrics:
+    - "canonical digest equal across GOMAXPROCS=1 and 14, then across replicas"
+    - "per-asset and per-venue conservation, including fee, funding, borrow, expiry, and liquidation accounts"
+    - "complete marked-account valuation in an explicit USD numeraire, or an invalid result"
+    - "fill, reject, cancel, residual, fill-distance, markout, depth-coverage, and liquidation rates"
+    - "risk-adjusted marked-equity-share growth for each strategy in each population mixture"
+    - "directed leave-one-out invasion matrix with paired bootstrap intervals"
+  private_metrics:
+    - "frozen held-out seeds"
+    - "unseen population mixtures"
+    - "agent-label, client-ID, and registration-order permutation checks"
+  invariants:
+    - "An agent may read only its delayed public feed, its own submitted requests, and its own acknowledgements/fills/rejections."
+    - "No strategy receives an exchange midpoint, another account, a future event, global inventory, or a direct fair-value oracle."
+    - "Every venue owns its order book, matching rule, fee schedule, credit state, and market-data dissemination path."
+    - "Every derivative payoff and fee is represented in its contract currency and included exactly once in the reporting numeraire."
+    - "The scenario manifest names every cross listing, FX conversion, matching rule, tick/minimum, fee, latency, initial endowment, and agent seed."
+  falsifiers:
+    - "Digest mismatch under the same manifest or an accounting/valuation incompleteness invalidates the run."
+    - "Changing only strategy labels, client IDs, or actor registration changes a claimed effect."
+    - "A strategy's improvement disappears after fees, financing, residual positions, or terminal conversion are included."
+    - "A purported A-S benefit is explained solely by lower quote survival or liquidity withdrawal."
+    - "A purported rock-paper-scissors cycle lacks positive confidence-backed A-over-B, B-over-C, and C-over-A invasion advantages on held-out mixtures."
+scope:
+  allowed_data:
+    - "repository source and committed experiment artifacts"
+    - "public academic and venue-rule sources cited in research"
+    - "synthetic deterministic public flow generated from independently seeded processes"
+  allowed_tools:
+    - "Go compiler, tests, race detector, fuzzing, benchmarks, CPU simulation, Python analysis"
+  mutable_paths:
+    - "simulations/ffa"
+    - "cmd/ffasim"
+    - "research"
+    - "tests"
+    - "tools"
+  forbidden_actions:
+    - "delete or weaken existing tests"
+    - "treat a simulator result as a live-market claim"
+    - "expose engine-private state to agents"
+    - "force push, destructive reset, or unreviewed history rewrite"
+budgets:
+  phase_0_wall_time_s: 14400
+  phase_0_cpu_hours: 4
+  cpu_parallelism: 14
+  gpu_hours: 0
+  money: 0
+  storage_policy: "persistent artifacts under logs/research; never use system temporary directories"
+stop:
+  phase_0_success:
+    - "A minimal 3-venue, 3-asset FFA control world has a fixed manifest, deterministic digest, and complete marked-account output."
+    - "At least one FIFO-versus-pro-rata allocation test and one cross-listing/triangular-arbitrage null control are accepted."
+  phase_0_abort:
+    - "A required valuation, information-boundary, or derivative settlement invariant cannot be measured."
+    - "Memory/disk budget is exceeded without an aggregation/downsampling design that retains evidence."
+  long_run_success:
+    - "A held-out invasion matrix remains valid under seed, label, order, and mixture perturbations."
+human_gates:
+  - "Before claiming external validity, calibrate against named market-data targets and obtain human review of the calibration assumptions."
+  - "Before a capital-selection or mutation policy is called evolutionary, review the survival, bankruptcy, replenishment, and re-entry rules."
+assumptions:
+  - "The current deterministic phase runtime is the sole accepted simulation execution path."
+  - "GPU acceleration is not useful until a CPU profile identifies a pure numerical bottleneck after causality and measurement gates pass."
+  - "Gen-0 uses USD as reporting numeraire and rejects an incomplete FX/mark conversion rather than imputing a value."

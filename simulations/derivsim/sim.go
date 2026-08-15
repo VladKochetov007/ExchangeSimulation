@@ -53,10 +53,12 @@ type SimConfig struct {
 	FuturesSpreadBps int64 // default 4
 
 	// Option flow (gamma-sign control).
-	OptionFlow       bool
-	OptionPBuy       float64 // 0.8 = dealer short gamma; 0.2 = long gamma
-	OptionLotQty     int64   // default 0.1 BTC
-	OptionIntervalMs int64   // default 400
+	OptionFlow bool
+	// OptionPBuy is nil when omitted, in which case normalize applies the
+	// baseline balanced flow. A non-nil zero deliberately creates all-sell flow.
+	OptionPBuy       *float64 // 0.8 = dealer short gamma; 0.2 = long gamma
+	OptionLotQty     int64    // default 0.1 BTC
+	OptionIntervalMs int64    // default 400
 
 	// Arbitrage bots.
 	CarryArb       bool
@@ -117,8 +119,9 @@ func (c *SimConfig) normalize() {
 	if c.FuturesSpreadBps == 0 {
 		c.FuturesSpreadBps = 4
 	}
-	if c.OptionPBuy == 0 {
-		c.OptionPBuy = 0.5
+	if c.OptionPBuy == nil {
+		defaultOptionPBuy := 0.5
+		c.OptionPBuy = &defaultOptionPBuy
 	}
 	if c.OptionLotQty == 0 {
 		c.OptionLotQty = basePrecision / 10
@@ -338,7 +341,7 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		gw := connect(50_000_000 * usdPrecision)
 		ot := NewOptionTaker(nextClient, gw, OptionTakerConfig{
 			Underlying:     "ABC/USD",
-			PBuy:           cfg.OptionPBuy,
+			PBuy:           *cfg.OptionPBuy,
 			LotQty:         cfg.OptionLotQty,
 			Interval:       time.Duration(cfg.OptionIntervalMs) * time.Millisecond,
 			Seed:           cfg.Seed + 100,

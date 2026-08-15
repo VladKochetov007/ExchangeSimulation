@@ -3,6 +3,7 @@ package derivsim
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,23 @@ import (
 	"testing"
 	"time"
 )
+
+func TestOptionBuyProbabilityDistinguishesOmittedAndZero(t *testing.T) {
+	var allSell SimConfig
+	if err := json.Unmarshal([]byte(fmt.Sprintf(`{"LogDir":%q,"OptionPBuy":0}`, t.TempDir())), &allSell); err != nil {
+		t.Fatalf("Unmarshal all-sell config: %v", err)
+	}
+	allSell.normalize()
+	if allSell.OptionPBuy == nil || *allSell.OptionPBuy != 0 {
+		t.Fatalf("all-sell probability = %#v, want explicit zero", allSell.OptionPBuy)
+	}
+
+	defaulted := SimConfig{LogDir: t.TempDir()}
+	defaulted.normalize()
+	if defaulted.OptionPBuy == nil || *defaulted.OptionPBuy != 0.5 {
+		t.Fatalf("default probability = %#v, want 0.5", defaulted.OptionPBuy)
+	}
+}
 
 func digestDerivSimLogs(t *testing.T, dir string) string {
 	t.Helper()

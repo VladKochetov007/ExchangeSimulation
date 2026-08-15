@@ -28,6 +28,27 @@ func TestConfigAcceptsDocumentedSnakeCaseJSON(t *testing.T) {
 	}
 }
 
+func TestOptionBuyProbabilityDistinguishesOmittedAndZero(t *testing.T) {
+	var allSell Config
+	if err := json.Unmarshal([]byte(fmt.Sprintf(`{"log_dir":%q,"log_mode":"none","option_buy_probability":0}`, t.TempDir())), &allSell); err != nil {
+		t.Fatalf("Unmarshal all-sell config: %v", err)
+	}
+	if err := allSell.normalize(); err != nil {
+		t.Fatalf("normalize all-sell config: %v", err)
+	}
+	if allSell.OptionBuyProbability == nil || *allSell.OptionBuyProbability != 0 {
+		t.Fatalf("all-sell probability = %#v, want explicit zero", allSell.OptionBuyProbability)
+	}
+
+	defaulted := Config{LogDir: t.TempDir(), LogMode: "none"}
+	if err := defaulted.normalize(); err != nil {
+		t.Fatalf("normalize default config: %v", err)
+	}
+	if defaulted.OptionBuyProbability == nil || *defaulted.OptionBuyProbability != 0.65 {
+		t.Fatalf("default probability = %#v, want 0.65", defaulted.OptionBuyProbability)
+	}
+}
+
 func TestNoLogModeRetainsRiskTelemetry(t *testing.T) {
 	sim, err := NewSim(3*time.Second, Config{LogDir: t.TempDir(), LogMode: "none", Seed: 13})
 	if err != nil {

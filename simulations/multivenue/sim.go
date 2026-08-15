@@ -68,7 +68,9 @@ type Config struct {
 	StoikovInventoryHorizon   time.Duration `json:"stoikov_inventory_horizon"`
 	StoikovVolatilityHalfLife time.Duration `json:"stoikov_volatility_half_life"`
 
-	OptionBuyProbability float64 `json:"option_buy_probability"`
+	// OptionBuyProbability is nil when omitted, in which case normalize applies
+	// the baseline buy bias. A non-nil zero deliberately creates all-sell flow.
+	OptionBuyProbability *float64 `json:"option_buy_probability"`
 
 	// DealerHedgeMode selects the option dealer treatment arm: "on" uses the
 	// stateful spot hedge policy, "off" leaves filled-option delta unhedged.
@@ -179,8 +181,9 @@ func (c *Config) normalize() error {
 	if c.StoikovVolatilityHalfLife == 0 {
 		c.StoikovVolatilityHalfLife = 10 * time.Minute
 	}
-	if c.OptionBuyProbability == 0 {
-		c.OptionBuyProbability = 0.65
+	if c.OptionBuyProbability == nil {
+		defaultOptionBuyProbability := 0.65
+		c.OptionBuyProbability = &defaultOptionBuyProbability
 	}
 	if c.DealerHedgeMode == "" {
 		c.DealerHedgeMode = "on"
@@ -216,7 +219,7 @@ func (c *Config) normalize() error {
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
-		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || c.OptionBuyProbability < 0 || c.OptionBuyProbability > 1 {
+		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || *c.OptionBuyProbability < 0 || *c.OptionBuyProbability > 1 {
 		return errors.New("multivenue: invalid non-positive duration or model parameter")
 	}
 	if c.DealerHedgeMode != "on" && c.DealerHedgeMode != "off" {
@@ -588,7 +591,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	venue.NoiseTrader = venue.NoiseTraders[0]
 	for participant := 0; participant < s.Config.OptionFlowCount; participant++ {
 		flow := derivsim.NewOptionTaker(nextActor(), connect(noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), derivsim.OptionTakerConfig{
-			Underlying: "ABC/USD", PBuy: s.Config.OptionBuyProbability, LotQty: mvBasePrecision / 100,
+			Underlying: "ABC/USD", PBuy: *s.Config.OptionBuyProbability, LotQty: mvBasePrecision / 100,
 			Interval: s.Config.NoiseInterval, Seed: flowSeed(s.Config.Seed, venueIndex, participant, 2), IncludeFutures: true,
 		})
 		flow.SetTickerFactory(timers)
