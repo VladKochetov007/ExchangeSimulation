@@ -76,6 +76,15 @@ type Config struct {
 	// historical hedged baseline while a false-like zero value is not confused
 	// with an experiment arm.
 	DealerHedgeMode string `json:"dealer_hedge_mode"`
+
+	// CrossVenueArbTiers enables independently prefunded spot routers. Each
+	// router has one account per venue and uses non-atomic FOK legs; no asset
+	// transfer or shared wallet is implied. Empty keeps the venue-local
+	// baseline unchanged.
+	CrossVenueArbTiers       []float64     `json:"cross_venue_arb_tiers"`
+	CrossVenueBaseLatency    time.Duration `json:"cross_venue_base_latency"`
+	CrossVenueArbLotQty      int64         `json:"cross_venue_arb_lot_qty"`
+	CrossVenueArbMaxAttempts int           `json:"cross_venue_arb_max_attempts"`
 }
 
 func (c *Config) normalize() error {
@@ -176,10 +185,36 @@ func (c *Config) normalize() error {
 	if c.DealerHedgeMode == "" {
 		c.DealerHedgeMode = "on"
 	}
+	if len(c.CrossVenueArbTiers) > 0 {
+		if c.CrossVenueBaseLatency <= 0 {
+			return errors.New("multivenue: cross-venue base latency is required when routers are enabled")
+		}
+		if c.CrossVenueArbLotQty == 0 {
+			c.CrossVenueArbLotQty = mvBasePrecision / 100
+		}
+		if c.CrossVenueArbMaxAttempts == 0 {
+			c.CrossVenueArbMaxAttempts = 10
+		}
+		seenTiers := make(map[float64]struct{}, len(c.CrossVenueArbTiers))
+		for _, tier := range c.CrossVenueArbTiers {
+			if tier <= 0 {
+				return errors.New("multivenue: cross-venue latency tiers must be positive")
+			}
+			if _, exists := seenTiers[tier]; exists {
+				return fmt.Errorf("multivenue: duplicate cross-venue latency tier %g", tier)
+			}
+			seenTiers[tier] = struct{}{}
+			delay := time.Duration(float64(c.CrossVenueBaseLatency) * tier)
+			if delay <= 0 || c.Step > delay {
+				return fmt.Errorf("multivenue: step %s exceeds cross-venue tier %g latency %s", c.Step, tier, delay)
+			}
+		}
+	}
 	if c.Step <= 0 || c.SnapshotInterval <= 0 || c.AutomationInterval <= 0 || c.QuoteInterval <= 0 ||
 		c.NoiseInterval <= 0 || c.GreekInterval <= 0 || c.ShortOptionTenor <= 0 || c.LongOptionTenor <= 0 ||
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 ||
+		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || c.OptionBuyProbability < 0 || c.OptionBuyProbability > 1 {
 		return errors.New("multivenue: invalid non-positive duration or model parameter")
@@ -220,6 +255,7 @@ type Venue struct {
 	riskErr          error
 	riskLastNano     int64
 	optionListedNano map[string]int64
+	nextClient       uint64
 }
 
 // VenueRiskSnapshot combines exchange-owned marked equity with an
@@ -240,12 +276,13 @@ type Sim struct {
 	Config  Config
 	Runner  *simulation.Runner
 	Venues  []*Venue
+	Routers []*CrossVenueArb
 	loggers []*feesim.JSONLinesLogger
 }
 
 // Run starts all venue automation under one context and drives the common
-// runner. The direct mounts and deterministic phases deliberately exclude
-// latency wrappers until an ordered delayed-delivery runtime exists.
+// runner. Venue-local participants use direct mounts; optional cross-venue
+// routers use the phase-owned scheduled courier for modeled latency.
 func (s *Sim) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -324,14 +361,20 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	if err := os.MkdirAll(filepath.Join(cfg.LogDir, "venues"), 0755); err != nil {
 		return nil, err
 	}
+	routingNote := "No cross-venue routing, collateral transfer, or shared wallet is enabled."
+	latencyNote := "Venue-local participants use direct deterministic mounts; no latency experiment is enabled."
+	if len(cfg.CrossVenueArbTiers) > 0 {
+		routingNote = "Cross-venue spot routers use independent prefunded accounts and non-atomic FOK legs; no collateral transfer or shared wallet exists."
+		latencyNote = "Cross-venue router request, response, and market-data delay is delivered by the deterministic phase-owned courier."
+	}
 	manifestBytes, err := json.MarshalIndent(manifest{
 		SchemaVersion: 1,
 		VenueIDs:      slices.Clone(cfg.VenueIDs),
 		Config:        cfg,
 		Notes: []string{
 			"Each venue has independent prefunded accounts and local spot-margin borrowing.",
-			"Direct deterministic mounts are reproducible; latency is intentionally excluded.",
-			"No cross-venue routing or collateral transfer exists in schema version 1.",
+			latencyNote,
+			routingNote,
 			"Option dealer begins with zero ABC; spot hedge sells borrow ABC against USD collateral when required.",
 			"Noise and option-flow rosters are independently seeded per venue and participant index.",
 			"Raw venue-event logs are controlled by log_mode; greeks.json risk telemetry is always emitted by the command.",
@@ -385,6 +428,10 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 			runner.AddActor(flow)
 		}
 	}
+	if err := sim.addCrossVenueRouters(clock, scheduler, timers, &actorID); err != nil {
+		sim.Close()
+		return nil, err
+	}
 	return sim, nil
 }
 
@@ -403,7 +450,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	}
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
 		ID:                      id,
-		EstimatedClients:        5 + s.Config.NoiseTraderCount + s.Config.OptionFlowCount,
+		EstimatedClients:        5 + s.Config.NoiseTraderCount + s.Config.OptionFlowCount + len(s.Config.CrossVenueArbTiers),
 		Clock:                   clock,
 		TickerFactory:           timers,
 		DeterministicIngress:    true,
@@ -487,13 +534,8 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		return nil, err
 	}
 
-	nextClient := uint64(0)
 	connect := func(balances map[string]int64, perpUSD int64, fee exchange.FeeModel) actor.Gateway {
-		nextClient++
-		gw := mount.ConnectNewClient(nextClient, balances, fee)
-		if perpUSD > 0 {
-			ex.AddPerpBalance(nextClient, "USD", perpUSD)
-		}
+		_, gw := venue.connectParticipant(mount, balances, perpUSD, fee)
 		return gw
 	}
 	mmBalances := map[string]int64{"ABC": 10_000 * mvBasePrecision, "USD": 500_000_000 * mvQuotePrecision}
@@ -524,7 +566,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	})
 	venue.FuturesMaker.SetTickerFactory(timers)
 	dealerBalances := map[string]int64{"USD": 500_000_000 * mvQuotePrecision}
-	venue.OptionDealerClientID = nextClient + 1
+	venue.OptionDealerClientID = venue.nextClient + 1
 	venue.OptionDealer = derivsim.NewOptionMarketMaker(nextActor(), connect(dealerBalances, 150_000_000*mvQuotePrecision, zeroFee), derivsim.OptionMMConfig{
 		Underlying: "ABC/USD", IV: s.Config.OptionIV, SpreadBps: 30, SkewPerLotBps: 5,
 		QuoteQty: mvBasePrecision / 10, LotQty: mvBasePrecision / 20, PremiumTick: mvQuotePrecision,
@@ -554,6 +596,66 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	}
 	venue.OptionFlow = venue.OptionFlows[0]
 	return venue, nil
+}
+
+// connectParticipant allocates a venue-local account ID. Router legs call it
+// on a dedicated delayed mount, so every venue account remains explicit and
+// no collateral can pass between exchanges through shared Go state.
+func (v *Venue) connectParticipant(mount *simulation.Mount, balances map[string]int64, perpUSD int64, fee exchange.FeeModel) (uint64, actor.Gateway) {
+	v.nextClient++
+	clientID := v.nextClient
+	gw := mount.ConnectNewClient(clientID, balances, fee)
+	if perpUSD > 0 {
+		v.Exchange.AddPerpBalance(clientID, "USD", perpUSD)
+	}
+	return clientID, gw
+}
+
+func (s *Sim) addCrossVenueRouters(clock *simulation.SimulatedClock, scheduler *simulation.EventScheduler, timers *simulation.SimTimerFactory, actorID *uint64) error {
+	if len(s.Config.CrossVenueArbTiers) == 0 {
+		return nil
+	}
+	balances := map[string]int64{
+		"ABC": 1_000 * mvBasePrecision,
+		"USD": 100_000_000 * mvQuotePrecision,
+	}
+	fee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
+	for _, tier := range s.Config.CrossVenueArbTiers {
+		delay := time.Duration(float64(s.Config.CrossVenueBaseLatency) * tier)
+		legs := make([]CrossVenueArbLegConfig, 0, len(s.Venues))
+		mounts := make([]*simulation.Mount, 0, len(s.Venues))
+		for _, venue := range s.Venues {
+			mount := simulation.NewMount(venue.Exchange, simulation.LatencyConfig{
+				Request:    simulation.NewConstantLatency(delay),
+				Response:   simulation.NewConstantLatency(delay),
+				MarketData: simulation.NewConstantLatency(delay),
+				Scheduler:  scheduler,
+				Clock:      clock,
+			})
+			clientID, gw := venue.connectParticipant(mount, balances, 0, fee)
+			*actorID++
+			legs = append(legs, CrossVenueArbLegConfig{
+				VenueID: venue.ID, ClientID: clientID, ActorID: *actorID, Gateway: gw,
+			})
+			mounts = append(mounts, mount)
+		}
+		router, err := NewCrossVenueArb(tier, CrossVenueArbConfig{
+			Symbol: "ABC/USD", LotQty: s.Config.CrossVenueArbLotQty,
+			BasePrecision: mvBasePrecision, TakerFeeBps: 5, MaxAttempts: s.Config.CrossVenueArbMaxAttempts,
+		}, legs)
+		if err != nil {
+			return err
+		}
+		router.SetTickerFactory(timers)
+		s.Routers = append(s.Routers, router)
+		for _, mount := range mounts {
+			s.Runner.AddMount(mount)
+		}
+		for _, leg := range router.Actors() {
+			s.Runner.AddActor(leg)
+		}
+	}
+	return nil
 }
 
 // flowSeed creates a stable stream per flow class, venue, and participant.

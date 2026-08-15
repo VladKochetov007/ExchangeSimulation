@@ -105,10 +105,10 @@ type FeeAwareBasisArb struct {
 	// the strategy overshoots and the exposure flips sign instead of closing.
 	hedgePending int64
 
-	spotBid, spotAsk int64
-	perpBid, perpAsk int64
-	spotBook         quoteBook
-	perpBook         quoteBook
+	spotBid, spotBidQty, spotAsk, spotAskQty int64
+	perpBid, perpBidQty, perpAsk, perpAskQty int64
+	spotBook                                 quoteBook
+	perpBook                                 quoteBook
 
 	spotSeq      uint64
 	perpSeq      uint64
@@ -159,18 +159,18 @@ func (b *quoteBook) apply(delta *exchange.BookDelta) {
 	levels[delta.Price] = delta.VisibleQty
 }
 
-func (b *quoteBook) best() (bid, ask int64, ok bool) {
+func (b *quoteBook) best() (bid, bidQty, ask, askQty int64, ok bool) {
 	for price, qty := range b.bids {
 		if qty > 0 && price > bid {
-			bid = price
+			bid, bidQty = price, qty
 		}
 	}
 	for price, qty := range b.asks {
 		if qty > 0 && (ask == 0 || price < ask) {
-			ask = price
+			ask, askQty = price, qty
 		}
 	}
-	return bid, ask, bid > 0 && ask > 0
+	return bid, bidQty, ask, askQty, bid > 0 && ask > 0
 }
 
 // now is the actor's view of time: the last tick it observed. Resolution is
@@ -450,11 +450,11 @@ func (a *FeeAwareBasisArb) onSnapshot(e actor.BookSnapshotEvent) {
 	switch e.Symbol {
 	case a.cfg.SpotSymbol:
 		a.spotBook.reset(e.Snapshot)
-		a.spotBid, a.spotAsk, _ = a.spotBook.best()
+		a.spotBid, a.spotBidQty, a.spotAsk, a.spotAskQty, _ = a.spotBook.best()
 		a.spotSeq++
 	case a.cfg.PerpSymbol:
 		a.perpBook.reset(e.Snapshot)
-		a.perpBid, a.perpAsk, _ = a.perpBook.best()
+		a.perpBid, a.perpBidQty, a.perpAsk, a.perpAskQty, _ = a.perpBook.best()
 		a.perpSeq++
 	}
 }
@@ -463,11 +463,11 @@ func (a *FeeAwareBasisArb) onDelta(e actor.BookDeltaEvent) {
 	switch e.Symbol {
 	case a.cfg.SpotSymbol:
 		a.spotBook.apply(e.Delta)
-		a.spotBid, a.spotAsk, _ = a.spotBook.best()
+		a.spotBid, a.spotBidQty, a.spotAsk, a.spotAskQty, _ = a.spotBook.best()
 		a.spotSeq++
 	case a.cfg.PerpSymbol:
 		a.perpBook.apply(e.Delta)
-		a.perpBid, a.perpAsk, _ = a.perpBook.best()
+		a.perpBid, a.perpBidQty, a.perpAsk, a.perpAskQty, _ = a.perpBook.best()
 		a.perpSeq++
 	}
 }
@@ -492,11 +492,15 @@ func (a *FeeAwareBasisArb) onTick(t time.Time) {
 func (a *FeeAwareBasisArb) executableEdge(perpSide exchange.Side) (int64, bool) {
 	perpPrice := a.perpBid
 	spotPrice := a.spotAsk
+	perpQty := a.perpBidQty
+	spotQty := a.spotAskQty
 	if perpSide == exchange.Buy {
 		perpPrice = a.perpAsk
 		spotPrice = a.spotBid
+		perpQty = a.perpAskQty
+		spotQty = a.spotBidQty
 	}
-	if perpPrice <= 0 || spotPrice <= 0 {
+	if perpPrice <= 0 || spotPrice <= 0 || perpQty < a.cfg.LotSize || spotQty < a.cfg.LotSize {
 		return 0, false
 	}
 	perpNotional, ok := etypes.TryMulDiv(a.cfg.LotSize, perpPrice, a.cfg.BasePrecision)

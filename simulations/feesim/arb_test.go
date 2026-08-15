@@ -15,8 +15,8 @@ func TestBasisArbExecutableEdgeRejectsMidpointOnlySignal(t *testing.T) {
 	// Midpoints suggest the perp is $2 rich: 102.5 - 100.5. A rich-side
 	// capture must actually sell perp at 102 and buy spot at 101, then pay a
 	// $1 fee on each leg, so its realized one-lot cashflow is negative.
-	arb.spotBid, arb.spotAsk = 100, 101
-	arb.perpBid, arb.perpAsk = 102, 103
+	arb.spotBid, arb.spotBidQty, arb.spotAsk, arb.spotAskQty = 100, 1, 101, 1
+	arb.perpBid, arb.perpBidQty, arb.perpAsk, arb.perpAskQty = 102, 1, 103, 1
 
 	edge, ok := arb.executableEdge(exchange.Sell)
 	if !ok || edge >= 0 {
@@ -25,6 +25,19 @@ func TestBasisArbExecutableEdgeRejectsMidpointOnlySignal(t *testing.T) {
 	edge, ok = arb.executableEdge(exchange.Buy)
 	if !ok || edge >= 0 {
 		t.Fatalf("reverse edge = %d, ok=%v; want negative executable edge", edge, ok)
+	}
+}
+
+func TestBasisArbExecutableEdgeRequiresDisplayedLot(t *testing.T) {
+	arb := &FeeAwareBasisArb{cfg: BasisArbConfig{LotSize: 2, BasePrecision: 1}}
+	arb.spotBid, arb.spotBidQty, arb.spotAsk, arb.spotAskQty = 100, 1, 101, 1
+	arb.perpBid, arb.perpBidQty, arb.perpAsk, arb.perpAskQty = 105, 1, 106, 1
+	if edge, ok := arb.executableEdge(exchange.Sell); ok || edge != 0 {
+		t.Fatalf("under-depth executable edge = %d, ok=%v", edge, ok)
+	}
+	arb.spotAskQty, arb.perpBidQty = 2, 2
+	if edge, ok := arb.executableEdge(exchange.Sell); !ok || edge != 8 {
+		t.Fatalf("full-depth executable edge = %d, ok=%v", edge, ok)
 	}
 }
 

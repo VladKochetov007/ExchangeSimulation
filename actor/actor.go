@@ -542,6 +542,13 @@ func (a *BaseActor) decodeMarketData(md *exchange.MarketDataMsg) *Event {
 }
 
 func (a *BaseActor) SubmitOrder(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64) uint64 {
+	return a.SubmitOrderWithTimeInForce(symbol, side, orderType, price, qty, exchange.GTC)
+}
+
+// SubmitOrderWithTimeInForce submits one normal-visibility order and returns
+// its request ID. Multi-venue actors need FOK legs to make a venue-local fill
+// decision explicit rather than silently resting an unpaired cross-venue leg.
+func (a *BaseActor) SubmitOrderWithTimeInForce(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64, tif exchange.TimeInForce) uint64 {
 	reqID := atomic.AddUint64(&a.requestSeq, 1)
 	a.gateway.Send(exchange.Request{
 		Type: exchange.ReqPlaceOrder,
@@ -552,7 +559,7 @@ func (a *BaseActor) SubmitOrder(symbol string, side exchange.Side, orderType exc
 			Price:       price,
 			Qty:         qty,
 			Symbol:      symbol,
-			TimeInForce: exchange.GTC,
+			TimeInForce: tif,
 			Visibility:  exchange.Normal,
 		},
 	})

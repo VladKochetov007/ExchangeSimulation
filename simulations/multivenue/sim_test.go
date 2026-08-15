@@ -153,6 +153,117 @@ func TestThreeVenueScenarioDigestAcrossGOMAXPROCS(t *testing.T) {
 	}
 }
 
+func TestThreeVenueCrossVenueRoutersUsePhaseOrderedIndependentLegs(t *testing.T) {
+	sim, err := NewSim(6*time.Second, Config{
+		LogDir:                   t.TempDir(),
+		LogMode:                  "none",
+		Seed:                     57,
+		Step:                     time.Second,
+		SnapshotInterval:         time.Second,
+		AutomationInterval:       time.Second,
+		QuoteInterval:            time.Second,
+		NoiseInterval:            2 * time.Second,
+		GreekInterval:            time.Second,
+		ShortOptionTenor:         10 * time.Second,
+		LongOptionTenor:          20 * time.Second,
+		ShortFutureTenor:         12 * time.Second,
+		LongFutureTenor:          24 * time.Second,
+		CrossVenueArbTiers:       []float64{0.5, 1},
+		CrossVenueBaseLatency:    2 * time.Second,
+		CrossVenueArbLotQty:      mvBasePrecision / 100,
+		CrossVenueArbMaxAttempts: 1,
+	})
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	defer sim.Close()
+	if len(sim.Routers) != 2 {
+		t.Fatalf("routers = %d, want 2", len(sim.Routers))
+	}
+	for _, router := range sim.Routers {
+		if len(router.Actors()) != 3 {
+			t.Fatalf("router tier %g actors = %d, want 3", router.Tier(), len(router.Actors()))
+		}
+	}
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, router := range sim.Routers {
+		report := router.Report()
+		if report.RouterID == 0 || report.PendingGroups != 0 || report.SubmittedGroups > 1 || report.CompletedGroups+report.FailedGroups != report.SubmittedGroups {
+			t.Fatalf("router tier %g invalid report: %#v", router.Tier(), report)
+		}
+	}
+}
+
+func TestCrossVenueRouterTierOutcomesSurviveLabelSwapAndGOMAXPROCS(t *testing.T) {
+	run := func(procs int, tiers []float64) map[float64]CrossVenueArbReport {
+		t.Helper()
+		previous := runtime.GOMAXPROCS(procs)
+		defer runtime.GOMAXPROCS(previous)
+		sim, err := NewSim(10*time.Minute, crossVenueRaceConfig(t.TempDir(), tiers))
+		if err != nil {
+			t.Fatalf("NewSim: %v", err)
+		}
+		defer sim.Close()
+		if err := sim.Run(context.Background()); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		outcomes := make(map[float64]CrossVenueArbReport, len(sim.Routers))
+		for _, router := range sim.Routers {
+			report := normalizedCrossVenueReport(router.Report())
+			outcomes[report.Tier] = report
+		}
+		return outcomes
+	}
+
+	forwardOne := run(1, []float64{0.5, 1})
+	forwardMany := run(14, []float64{0.5, 1})
+	reversed := run(14, []float64{1, 0.5})
+	if !reflect.DeepEqual(forwardOne, forwardMany) {
+		t.Fatalf("cross-venue outcomes differ by GOMAXPROCS:\n1=%#v\n14=%#v", forwardOne, forwardMany)
+	}
+	if !reflect.DeepEqual(forwardMany, reversed) {
+		t.Fatalf("cross-venue outcomes differ after tier label swap:\nforward=%#v\nreversed=%#v", forwardMany, reversed)
+	}
+}
+
+func crossVenueRaceConfig(logDir string, tiers []float64) Config {
+	return Config{
+		LogDir:                   logDir,
+		LogMode:                  "none",
+		Seed:                     42,
+		Step:                     time.Second,
+		SnapshotInterval:         time.Second,
+		AutomationInterval:       time.Second,
+		QuoteInterval:            time.Second,
+		NoiseInterval:            2 * time.Second,
+		GreekInterval:            time.Minute,
+		ShortOptionTenor:         time.Hour,
+		LongOptionTenor:          24 * time.Hour,
+		ShortFutureTenor:         2 * time.Hour,
+		LongFutureTenor:          30 * time.Hour,
+		NoiseTraderCount:         4,
+		OptionFlowCount:          4,
+		DealerHedgeMode:          "off",
+		CrossVenueArbTiers:       tiers,
+		CrossVenueBaseLatency:    2 * time.Second,
+		CrossVenueArbLotQty:      40_000_000,
+		CrossVenueArbMaxAttempts: 1,
+	}
+}
+
+func normalizedCrossVenueReport(report CrossVenueArbReport) CrossVenueArbReport {
+	report.RouterID = 0
+	for index := range report.Groups {
+		report.Groups[index].Buy.ClientID = 0
+		report.Groups[index].Buy.OrderID = 0
+		report.Groups[index].Sell.ClientID = 0
+		report.Groups[index].Sell.OrderID = 0
+	}
+	return report
+}
+
 func TestThreeVenuePreExpiryAndTerminalRiskAreDeterministic(t *testing.T) {
 	run := func(procs int) []VenueRiskSnapshot {
 		t.Helper()

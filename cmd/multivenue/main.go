@@ -1,6 +1,6 @@
-// multivenue runs the deterministic three-venue options ecology. It does not
-// yet enable cross-venue routing: the output is the controlled fragmented
-// baseline against which a future per-leg execution state machine is tested.
+// multivenue runs the deterministic three-venue options ecology. By default
+// venues remain independent; an opt-in router configuration emits explicit
+// non-atomic, venue-qualified cross-venue leg telemetry.
 package main
 
 import (
@@ -21,6 +21,7 @@ type greekOutput struct {
 	RiskTimeline  map[string][]multivenue.VenueRiskSnapshot `json:"risk_timeline"`
 	PreExpiryRisk map[string][]multivenue.VenueRiskSnapshot `json:"pre_expiry_risk"`
 	TerminalRisk  map[string]multivenue.VenueRiskSnapshot   `json:"terminal_risk"`
+	RouterReports []multivenue.CrossVenueArbReport          `json:"router_reports,omitempty"`
 	Caveats       []string                                  `json:"caveats"`
 }
 
@@ -61,13 +62,13 @@ func main() {
 		log.Fatal(err)
 	}
 	output := greekOutput{
-		SchemaVersion: 3,
+		SchemaVersion: 4,
 		InitialRisk:   make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
 		RiskTimeline:  make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
 		PreExpiryRisk: make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
 		TerminalRisk:  make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
 		Caveats: []string{
-			"Venues are independently funded. No cross-venue routing, asset transfer, or atomic leg assumption is modeled.",
+			"Venues are independently funded. A configured cross-venue router has one local account per venue; it models neither asset transfer nor atomic legs.",
 			"Greek timeline rows are recomputed from exchange-owned option positions and the atomic underlying mark paired with each option premium. They are not actor-local quote-cache measurements.",
 			"The option model uses flat IV and its stored underlying-mark forward proxy; vega is local model sensitivity, not realized vega PnL.",
 			"Terminal marked equity includes wallet debt exactly once, futures-style entry-to-mark PnL, and signed option market value. It is captured after the final phase fixed point and before venue shutdown.",
@@ -82,6 +83,9 @@ func main() {
 		output.RiskTimeline[venue.ID] = append([]multivenue.VenueRiskSnapshot(nil), venue.RiskTimeline...)
 		output.PreExpiryRisk[venue.ID] = append([]multivenue.VenueRiskSnapshot(nil), venue.PreExpiryRisk...)
 		output.TerminalRisk[venue.ID] = *venue.TerminalRisk
+	}
+	for _, router := range sim.Routers {
+		output.RouterReports = append(output.RouterReports, router.Report())
 	}
 	b, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
