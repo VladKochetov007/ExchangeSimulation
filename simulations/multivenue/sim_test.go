@@ -125,9 +125,44 @@ func TestStrictPopulationAccountingCapturesEveryParticipant(t *testing.T) {
 	}
 }
 
+func TestCrossAssetSpotGraphListsAndValuesEveryPair(t *testing.T) {
+	sim, err := NewSim(3*time.Second, Config{
+		LogDir:                     t.TempDir(),
+		LogMode:                    "none",
+		Seed:                       73,
+		CrossAssetSpotGraph:        true,
+		StrictPopulationAccounting: true,
+	})
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	defer sim.Close()
+	for _, venue := range sim.Venues {
+		if len(venue.SpotMakers) != 6 {
+			t.Fatalf("venue %s spot makers = %d, want 6", venue.ID, len(venue.SpotMakers))
+		}
+		for _, symbol := range []string{"ABC/USD", "CDF/USD", "ABC/CDF"} {
+			if venue.Exchange.Books[symbol] == nil {
+				t.Fatalf("venue %s missing cross-asset spot book %s", venue.ID, symbol)
+			}
+		}
+	}
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(sim.InitialAccounts) == 0 || len(sim.InitialAccounts) != len(sim.TerminalAccounts) {
+		t.Fatalf("population account row counts initial=%d terminal=%d", len(sim.InitialAccounts), len(sim.TerminalAccounts))
+	}
+	for _, row := range sim.TerminalAccounts {
+		if row.MarkSource != "two_sided_ABC_USD_and_CDF_USD_mid" || row.Account.ReportAsset != "USD" {
+			t.Fatalf("invalid terminal cross-asset account: %#v", row)
+		}
+	}
+}
+
 func TestPopulationValuationRejectsMissingTerminalTwoSidedMark(t *testing.T) {
 	venue := &Venue{ID: "unpriced", Exchange: exchange.NewExchange(1, nil)}
-	if _, _, err := populationValuationSpec(venue, "terminal_post_mark"); err == nil {
+	if _, _, err := populationValuationSpec(venue, "terminal_post_mark", false); err == nil {
 		t.Fatal("terminal population valuation accepted a venue without a two-sided ABC/USD mark")
 	}
 }
@@ -163,6 +198,51 @@ func TestStrictPopulationAccountsDigestAcrossGOMAXPROCS(t *testing.T) {
 			Initial  []ParticipantAccountSnapshot
 			Terminal []ParticipantAccountSnapshot
 		}{initialMany, terminalMany})
+	}
+}
+
+func TestCrossAssetPopulationAccountsDigestAcrossGOMAXPROCS(t *testing.T) {
+	run := func(procs int) ([]ParticipantAccountSnapshot, []ParticipantAccountSnapshot) {
+		t.Helper()
+		previous := runtime.GOMAXPROCS(procs)
+		defer runtime.GOMAXPROCS(previous)
+		sim, err := NewSim(5*time.Minute, Config{
+			LogDir:                     t.TempDir(),
+			LogMode:                    "none",
+			Seed:                       83,
+			CrossAssetSpotGraph:        true,
+			StrictPopulationAccounting: true,
+			NoiseTraderCount:           2,
+			OptionFlowCount:            2,
+			VenueRules: map[string]VenueRule{
+				"north":   {MatchingRule: MatchingPriceTime},
+				"central": {MatchingRule: MatchingProRata},
+				"south":   {MatchingRule: MatchingProRata},
+			},
+		})
+		if err != nil {
+			t.Fatalf("NewSim: %v", err)
+		}
+		defer sim.Close()
+		if err := sim.Run(context.Background()); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		return append([]ParticipantAccountSnapshot(nil), sim.InitialAccounts...), append([]ParticipantAccountSnapshot(nil), sim.TerminalAccounts...)
+	}
+
+	initialOne, terminalOne := run(1)
+	initialMany, terminalMany := run(14)
+	if !reflect.DeepEqual(initialOne, initialMany) || !reflect.DeepEqual(terminalOne, terminalMany) {
+		t.Fatalf("cross-asset population accounts differ by GOMAXPROCS:\n1=%#v\n14=%#v", struct {
+			Initial  []ParticipantAccountSnapshot
+			Terminal []ParticipantAccountSnapshot
+		}{initialOne, terminalOne}, struct {
+			Initial  []ParticipantAccountSnapshot
+			Terminal []ParticipantAccountSnapshot
+		}{initialMany, terminalMany})
+	}
+	if len(terminalOne) != 39 {
+		t.Fatalf("cross-asset terminal account rows = %d, want 39", len(terminalOne))
 	}
 }
 

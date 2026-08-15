@@ -26,6 +26,7 @@ const (
 	mvBasePrecision  = exchange.BTC_PRECISION
 	mvQuotePrecision = exchange.USD_PRECISION
 	mvBootstrapPrice = 50_000 * mvQuotePrecision
+	mvCDFBootstrap   = 3_000 * mvQuotePrecision
 )
 
 const (
@@ -61,6 +62,10 @@ type Config struct {
 	// VenueRules selects the exact matching policy for each venue. Omitted
 	// entries preserve the established price-time control.
 	VenueRules map[string]VenueRule `json:"venue_rules"`
+	// CrossAssetSpotGraph adds the direct USD marks and cross pair required for
+	// the smallest FFA asset graph: ABC/USD, CDF/USD, and ABC/CDF. It is opt-in
+	// so retained one-underlying derivative controls remain unchanged.
+	CrossAssetSpotGraph bool `json:"cross_asset_spot_graph"`
 
 	Step               time.Duration `json:"step"`
 	SnapshotInterval   time.Duration `json:"snapshot_interval"`
@@ -441,7 +446,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	// persistent log directories.
 	manifestConfig.LogDir = ""
 	manifestBytes, err := json.MarshalIndent(manifest{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		VenueIDs:      slices.Clone(cfg.VenueIDs),
 		Config:        manifestConfig,
 		Notes: []string{
@@ -450,6 +455,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 			routingNote,
 			"Option dealer begins with zero ABC; spot hedge sells borrow ABC against USD collateral when required.",
 			"Noise and option-flow rosters are independently seeded per venue and participant index.",
+			"cross_asset_spot_graph adds ABC/USD, CDF/USD, and ABC/CDF spot books; it does not add a triangular-arbitrage actor.",
 			"Raw venue-event logs are controlled by log_mode; greeks.json risk telemetry is always emitted by the command.",
 		},
 	}, "", "  ")
@@ -528,9 +534,13 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		s.loggers = append(s.loggers, logger)
 		return venueLogger{venueID: id, inner: logger}, nil
 	}
+	estimatedClients := 5 + s.Config.NoiseTraderCount + s.Config.OptionFlowCount + len(s.Config.CrossVenueArbTiers)
+	if s.Config.CrossAssetSpotGraph {
+		estimatedClients += 4
+	}
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
 		ID:                      id,
-		EstimatedClients:        5 + s.Config.NoiseTraderCount + s.Config.OptionFlowCount + len(s.Config.CrossVenueArbTiers),
+		EstimatedClients:        estimatedClients,
 		Clock:                   clock,
 		TickerFactory:           timers,
 		DeterministicIngress:    true,
@@ -550,16 +560,22 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		if err != nil {
 			return nil, err
 		}
-		spotLog, err := newLogger(filepath.Join("spot", "ABC-USD.jsonl"))
-		if err != nil {
-			return nil, err
-		}
 		derivativeLog, err := newLogger("derivatives.jsonl")
 		if err != nil {
 			return nil, err
 		}
 		ex.SetLogger("_global", globalLog)
-		ex.SetLogger("ABC/USD", spotLog)
+		spotSymbols := []string{"ABC/USD"}
+		if s.Config.CrossAssetSpotGraph {
+			spotSymbols = append(spotSymbols, "CDF/USD", "ABC/CDF")
+		}
+		for _, symbol := range spotSymbols {
+			spotLog, err := newLogger(filepath.Join("spot", strings.ReplaceAll(symbol, "/", "-")+".jsonl"))
+			if err != nil {
+				return nil, err
+			}
+			ex.SetLogger(symbol, spotLog)
+		}
 		ex.SetInstrumentLoggerFallback(derivativeLog)
 	}
 
@@ -568,6 +584,12 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	perp := exchange.NewPerpFutures("ABC-PERP", "ABC", "USD", mvBasePrecision, mvQuotePrecision, tick, mvBasePrecision/1_000)
 	ex.AddInstrument(spot)
 	ex.AddInstrument(perp)
+	if s.Config.CrossAssetSpotGraph {
+		cdfTick := int64(mvQuotePrecision)
+		crossTick := int64(mvBasePrecision / 1_000)
+		ex.AddInstrument(exchange.NewSpotInstrument("CDF/USD", "CDF", "USD", mvBasePrecision, mvQuotePrecision, cdfTick, mvBasePrecision/1_000))
+		ex.AddInstrument(exchange.NewSpotInstrument("ABC/CDF", "ABC", "CDF", mvBasePrecision, mvBasePrecision, crossTick, mvBasePrecision/1_000))
+	}
 
 	index := exchange.NewMidPriceOracle(ex)
 	index.MapSymbol("ABC-PERP", "ABC/USD")
@@ -623,26 +645,42 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		return gw
 	}
 	mmBalances := map[string]int64{"ABC": 10_000 * mvBasePrecision, "USD": 500_000_000 * mvQuotePrecision}
+	if s.Config.CrossAssetSpotGraph {
+		mmBalances["CDF"] = 10_000 * mvBasePrecision
+	}
 	zeroFee := &exchange.FixedFee{}
 	nextActor := func() uint64 {
 		*actorID++
 		return *actorID
 	}
-	stoikovConfig := func(symbol, reference string) StoikovMMConfig {
+	stoikovConfig := func(symbol, reference string, bootstrapPrice int64, tickSize int64) StoikovMMConfig {
 		return StoikovMMConfig{
-			Symbol: symbol, ReferenceSymbol: reference, BootstrapPrice: mvBootstrapPrice,
-			BasePrecision: mvBasePrecision, QuotePrecision: mvQuotePrecision, TickSize: tick, QuoteQty: mvBasePrecision / 5,
+			Symbol: symbol, ReferenceSymbol: reference, BootstrapPrice: bootstrapPrice,
+			BasePrecision: mvBasePrecision, QuotePrecision: mvQuotePrecision, TickSize: tickSize, QuoteQty: mvBasePrecision / 5,
 			QuoteInterval: s.Config.QuoteInterval, VolatilityHalfLife: s.Config.StoikovVolatilityHalfLife,
 			InitialVariancePerSec: s.Config.StoikovVariancePerSecond, InventoryHorizon: s.Config.StoikovInventoryHorizon,
 			RiskAversion: s.Config.StoikovRiskAversion, FillDecay: s.Config.StoikovFillDecay, MinHalfSpreadTicks: 1,
 		}
 	}
 	for i := 0; i < 2; i++ {
-		maker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC/USD", "ABC/USD"))
+		maker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC/USD", "ABC/USD", mvBootstrapPrice, tick))
 		maker.SetTickerFactory(timers)
 		venue.SpotMakers = append(venue.SpotMakers, maker)
 	}
-	venue.PerpMaker = NewStoikovMarketMaker(nextActor(), connect("perp_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC-PERP", "ABC/USD"))
+	if s.Config.CrossAssetSpotGraph {
+		cdfTick := int64(mvQuotePrecision)
+		crossTick := int64(mvBasePrecision / 1_000)
+		crossBootstrap := etypes.MulDiv(mvBootstrapPrice, mvBasePrecision, mvCDFBootstrap)
+		for i := 0; i < 2; i++ {
+			cdfMaker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("cdf_spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("CDF/USD", "CDF/USD", mvCDFBootstrap, cdfTick))
+			cdfMaker.SetTickerFactory(timers)
+			venue.SpotMakers = append(venue.SpotMakers, cdfMaker)
+			crossMaker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("abc_cdf_spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC/CDF", "ABC/CDF", crossBootstrap, crossTick))
+			crossMaker.SetTickerFactory(timers)
+			venue.SpotMakers = append(venue.SpotMakers, crossMaker)
+		}
+	}
+	venue.PerpMaker = NewStoikovMarketMaker(nextActor(), connect("perp_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC-PERP", "ABC/USD", mvBootstrapPrice, tick))
 	venue.PerpMaker.SetTickerFactory(timers)
 
 	venue.FuturesMaker = derivsim.NewFuturesMarketMaker(nextActor(), connect("futures_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), derivsim.FuturesMMConfig{
@@ -661,10 +699,18 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	venue.OptionDealer.SetTickerFactory(timers)
 
 	noiseBalances := map[string]int64{"ABC": 100 * mvBasePrecision, "USD": 100 * mvQuotePrecision}
+	noiseSymbols := []string{"ABC/USD", "ABC-PERP"}
+	noiseTargetQtys := map[string]int64{"ABC/USD": mvBasePrecision / 100, "ABC-PERP": mvBasePrecision / 100}
+	if s.Config.CrossAssetSpotGraph {
+		noiseBalances["CDF"] = 100 * mvBasePrecision
+		noiseSymbols = append(noiseSymbols, "CDF/USD", "ABC/CDF")
+		noiseTargetQtys["CDF/USD"] = mvBasePrecision / 100
+		noiseTargetQtys["ABC/CDF"] = mvBasePrecision / 100
+	}
 	noiseFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
 	for participant := 0; participant < s.Config.NoiseTraderCount; participant++ {
 		noise := feesim.NewRandomTaker(nextActor(), connect(fmt.Sprintf("noise_flow_%d", participant+1), noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), feesim.TakerConfig{
-			Symbols: []string{"ABC/USD", "ABC-PERP"}, TargetQtys: map[string]int64{"ABC/USD": mvBasePrecision / 100, "ABC-PERP": mvBasePrecision / 100},
+			Symbols: noiseSymbols, TargetQtys: noiseTargetQtys,
 			TakeInterval: s.Config.NoiseInterval, Seed: flowSeed(s.Config.Seed, venueIndex, participant, 1),
 		})
 		noise.SetTickerFactory(timers)
@@ -769,7 +815,7 @@ func flowSeed(master int64, venueIndex, participant, flowClass int) int64 {
 func (s *Sim) capturePopulationAccounts(phase string) ([]ParticipantAccountSnapshot, error) {
 	rows := make([]ParticipantAccountSnapshot, 0)
 	for _, venue := range s.Venues {
-		spec, markSource, err := populationValuationSpec(venue, phase)
+		spec, markSource, err := populationValuationSpec(venue, phase, s.Config.CrossAssetSpotGraph)
 		if err != nil {
 			return nil, err
 		}
@@ -789,7 +835,7 @@ func (s *Sim) capturePopulationAccounts(phase string) ([]ParticipantAccountSnaps
 	return rows, nil
 }
 
-func populationValuationSpec(venue *Venue, phase string) (etypes.AccountValuationSpec, string, error) {
+func populationValuationSpec(venue *Venue, phase string, crossAssetSpotGraph bool) (etypes.AccountValuationSpec, string, error) {
 	if venue == nil || venue.Exchange == nil {
 		return etypes.AccountValuationSpec{}, "", errors.New("multivenue: missing venue for population valuation")
 	}
@@ -807,6 +853,18 @@ func populationValuationSpec(venue *Venue, phase string) (etypes.AccountValuatio
 		markSource = "two_sided_ABC_USD_mid"
 	}
 	marks["ABC"] = etypes.AssetValuationMark{Price: spotMark, Precision: mvBasePrecision}
+	if crossAssetSpotGraph {
+		cdfMark := int64(mvCDFBootstrap)
+		if phase != "initial" {
+			var ok bool
+			cdfMark, ok = venue.Exchange.TwoSidedMidPrice("CDF/USD")
+			if !ok || cdfMark <= 0 {
+				return etypes.AccountValuationSpec{}, "", fmt.Errorf("multivenue: %s participant valuation requires two-sided CDF/USD mark on venue %s", phase, venue.ID)
+			}
+			markSource = "two_sided_ABC_USD_and_CDF_USD_mid"
+		}
+		marks["CDF"] = etypes.AssetValuationMark{Price: cdfMark, Precision: mvBasePrecision}
+	}
 	return etypes.AccountValuationSpec{
 		ReportAsset: "USD", ReportPrecision: mvQuotePrecision, AssetMarks: marks,
 	}, markSource, nil
