@@ -83,12 +83,20 @@ type Config struct {
 	// multiple of its initial value.
 	StoikovMaxVarianceMultiple float64 `json:"stoikov_max_variance_multiple"`
 
+	// StoikovVolatilitySampleInterval is the minimum spacing between the trade
+	// prices a maker uses to estimate volatility.
+	StoikovVolatilitySampleInterval time.Duration `json:"stoikov_volatility_sample_interval"`
+
+	// MispricingBandBps is the deviation from fundamental value beyond which a
+	// sample counts as visibly mispriced in the run summary.
+	MispricingBandBps int64 `json:"mispricing_band_bps"`
+
 	// ValueTraderCount sets how many informed participants per venue trade the
 	// visible spot book against the exogenous fundamental value. They are the
 	// market's anchor: makers quote around their own inventory and noise flow
 	// picks sides at random, so without informed flow a drift in the quoted
 	// price feeds back into the makers' own volatility estimate and diverges.
-	ValueTraderCount int `json:"value_trader_count"`
+	ValueTraderCount *int `json:"value_trader_count"`
 	// ValueTraderEdgeBps is the deviation from fundamental value required
 	// before an informed participant crosses the spread.
 	ValueTraderEdgeBps int64 `json:"value_trader_edge_bps"`
@@ -199,8 +207,16 @@ func (c *Config) normalize() error {
 	if c.StoikovMaxVarianceMultiple == 0 {
 		c.StoikovMaxVarianceMultiple = 25
 	}
-	if c.ValueTraderCount == 0 {
-		c.ValueTraderCount = 2
+	if c.StoikovVolatilitySampleInterval == 0 {
+		c.StoikovVolatilitySampleInterval = 30 * time.Second
+	}
+	if c.MispricingBandBps == 0 {
+		c.MispricingBandBps = 100
+	}
+	if c.ValueTraderCount == nil {
+		// Zero is a valid arm: it is the no-informed-flow control.
+		count := 2
+		c.ValueTraderCount = &count
 	}
 	if c.ValueTraderEdgeBps == 0 {
 		c.ValueTraderEdgeBps = 10
@@ -233,7 +249,12 @@ func (c *Config) normalize() error {
 		c.OptionMaxStrikesPerExpiry = 2*c.StrikesPerSide + 1
 	}
 	if c.StoikovRiskAversion == 0 {
-		c.StoikovRiskAversion = 0.005
+		// The control depends on the product of risk aversion and inventory
+		// horizon: 0.005 with a 60s horizon and 0.0005 with a 600s horizon
+		// produce identical runs. A product near 0.3 keeps mean absolute
+		// mispricing at 0.0034 with no time beyond the 1% band, against 0.046
+		// and 69% of the run beyond that band at a product of 3.
+		c.StoikovRiskAversion = 0.0005
 	}
 	if c.StoikovFillDecay == 0 {
 		c.StoikovFillDecay = 0.5
@@ -282,8 +303,8 @@ func (c *Config) normalize() error {
 	if c.Step <= 0 || c.SnapshotInterval <= 0 || c.AutomationInterval <= 0 || c.QuoteInterval <= 0 ||
 		c.NoiseInterval <= 0 || c.GreekInterval <= 0 || c.ShortOptionTenor <= 0 || c.LongOptionTenor <= 0 ||
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
-		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 || c.ValueTraderCount < 0 ||
-		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 ||
+		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 || *c.ValueTraderCount < 0 ||
+		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || *c.OptionBuyProbability < 0 || *c.OptionBuyProbability > 1 {
@@ -320,6 +341,7 @@ type Venue struct {
 	NoiseTraders     []*feesim.RandomTaker
 	ValueTraders     []*ValueTrader
 	lastTwoSided     map[string]twoSidedMark
+	Mispricing       *MispricingStats
 	OptionFlow       *derivsim.OptionTaker
 	OptionFlows      []*derivsim.OptionTaker
 	InitialRisk      *VenueRiskSnapshot
@@ -418,6 +440,9 @@ func (s *Sim) Run(ctx context.Context) error {
 	})
 	if err := s.Runner.Run(ctx); err != nil {
 		return err
+	}
+	for _, venue := range s.Venues {
+		venue.Mispricing.finalize()
 	}
 	for _, venue := range s.Venues {
 		if venue.riskErr != nil {
@@ -640,7 +665,9 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	optionSpec := spec
 	optionSpec.TickSize = mvQuotePrecision // one USD premium tick
 	mount := simulation.NewMount(ex, simulation.LatencyConfig{})
-	venue := &Venue{ID: id, MatchingRule: matchingRule, Exchange: ex, Mount: mount, optionListedNano: make(map[string]int64)}
+	venue := &Venue{ID: id, MatchingRule: matchingRule, Exchange: ex, Mount: mount,
+		optionListedNano: make(map[string]int64),
+		Mispricing:       newMispricingStats(id, "ABC/USD", s.Config.MispricingBandBps)}
 	ex.ConfigureAutomation(exchange.AutomationConfig{
 		IndexProvider:       index,
 		PriceUpdateInterval: s.Config.AutomationInterval,
@@ -665,7 +692,10 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			venue.PreExpiryRisk = append(venue.PreExpiryRisk, *risk)
 		},
 		PostDerivativeMarkHook: func() {
-			venue.recordTwoSidedMarks(valuedSpotSymbols(s.Config.CrossAssetSpotGraph), venue.Exchange.Clock.NowUnixNano())
+			now := venue.Exchange.Clock.NowUnixNano()
+			venue.recordTwoSidedMarks(valuedSpotSymbols(s.Config.CrossAssetSpotGraph), now)
+			mark, _, _ := venue.valuationMark("ABC/USD", now, venueRiskMarkStaleness)
+			venue.Mispricing.observe(now, mark, s.Fundamental.Value(now))
 			captureScheduledVenueRisk(venue, s.Config.GreekInterval, s.Config.AutomationInterval)
 		},
 	})
@@ -709,6 +739,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			QuoteInterval: s.Config.QuoteInterval, VolatilityHalfLife: s.Config.StoikovVolatilityHalfLife,
 			InitialLogVariancePerSec: relativeLogVariance,
 			MaxLogVarianceMultiple:   s.Config.StoikovMaxVarianceMultiple,
+			VolatilitySampleInterval: s.Config.StoikovVolatilitySampleInterval,
 			InventoryHorizon:         s.Config.StoikovInventoryHorizon,
 			RelativeRiskAversion:     relativeRiskAversion,
 			RelativeFillDecay:        relativeFillDecay,
@@ -784,7 +815,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	if s.Config.CrossAssetSpotGraph {
 		valueBalances["CDF"] = 1_000 * mvBasePrecision
 	}
-	for participant := 0; participant < s.Config.ValueTraderCount; participant++ {
+	for participant := 0; participant < *s.Config.ValueTraderCount; participant++ {
 		trader := NewValueTrader(nextActor(), connect(fmt.Sprintf("value_trader_%d", participant+1), valueBalances, 10_000_000*mvQuotePrecision, noiseFee), s.Fundamental, ValueTraderConfig{
 			Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: tick,
 			EdgeBps: s.Config.ValueTraderEdgeBps, LotQty: mvBasePrecision / 10,

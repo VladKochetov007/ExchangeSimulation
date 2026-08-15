@@ -99,6 +99,14 @@ type StoikovMMConfig struct {
 	// estimate, so the cap bounds how far a feedback episode can travel before
 	// the estimate mean-reverts.
 	MaxLogVarianceMultiple float64
+	// VolatilitySampleInterval is the minimum spacing between the trade prices
+	// used for the variance estimate. Consecutive prints alternate between the
+	// bid and the ask, so sampling every print measures the maker's own spread
+	// rather than the volatility of the asset: in a 90-minute run, one-second
+	// sampling gave 1.57e-2 against 4.15e-3 for the midpoint, while the two
+	// agreed by 30-second sampling. Because a wider estimate widens the quote,
+	// that bias is another feedback path.
+	VolatilitySampleInterval time.Duration
 	InventoryHorizon         time.Duration
 	RelativeRiskAversion     float64
 	RelativeFillDecay        float64
@@ -186,6 +194,9 @@ func (mm *StoikovMarketMaker) onTrade(e actor.TradeEvent) {
 		return
 	}
 	price := e.Trade.Price
+	if minSpacing := int64(mm.cfg.VolatilitySampleInterval); minSpacing > 0 && e.Timestamp-mm.lastForwardTS < minSpacing {
+		return
+	}
 	if mm.lastForward > 0 && e.Timestamp > mm.lastForwardTS {
 		dt := float64(e.Timestamp-mm.lastForwardTS) / float64(time.Second)
 		logReturn := math.Log(float64(price) / float64(mm.lastForward))

@@ -173,6 +173,9 @@ def implied_vol(price: float, forward: float, strike: float, tau: float, kind: s
     upper_bound = forward if kind == "C" else strike
     if price <= intrinsic + 1e-9 or price >= upper_bound:
         return None
+    # 5.0 = 500% annualised. Values pinned at the ceiling mean the price is not
+    # explicable by Black-76 at any plausible vol, which is a finding rather
+    # than a measurement to plot.
     low, high = 1e-4, 5.0
     if black76(forward, strike, tau, high, kind) < price:
         return None
@@ -190,7 +193,10 @@ def plot_vol_surface(ax, venue: VenueData, cutoff: float | None) -> None:
     for trade in venue.option_trades:
         if cutoff is not None and trade.ts > cutoff:
             continue
-        forward = venue.perp_mark.at(trade.ts) or venue.spot.at(trade.ts)
+        # Use the spot midpoint, because the dealer prices its options from
+        # spot. Taking the perpetual mark instead mixes in the perpetual basis
+        # and distorts moneyness whenever the two markets disagree.
+        forward = venue.spot.at(trade.ts) or venue.perp_mark.at(trade.ts)
         if not forward:
             continue
         strike = trade.strike

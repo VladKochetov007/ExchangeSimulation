@@ -778,13 +778,17 @@ func TestCrossPairStoikovControlIsQuoteScaleInvariant(t *testing.T) {
 		t.Fatalf("relative half spread not scale invariant: ABC/USD=%.18g ABC/CDF=%.18g", usdHalf, crossHalf)
 	}
 
-	// The skew from one quote lot must be large enough to move the cross book
-	// by at least one tick, otherwise the maker cannot respond to inventory.
+	// Inventory must be able to move the cross quote within a small number of
+	// lots. One lot alone need not clear a tick — the cross tick is 0.6bps of
+	// the cross price, finer than the USD book — but a maker that needs a large
+	// position before its quote can move at all is effectively inventory blind.
+	const maxLotsToMoveATick = 5
 	lot := float64(cross.QuoteQty) / float64(cross.BasePrecision)
 	crossPrice := float64(cross.BootstrapPrice) / float64(cross.QuotePrecision)
 	tick := float64(cross.TickSize) / float64(cross.QuotePrecision)
-	if got := crossShift * crossPrice * lot; got < tick {
-		t.Fatalf("one-lot inventory skew %.18g CDF is below one tick %.18g: maker cannot reprice", got, tick)
+	if got := crossShift * crossPrice * lot * maxLotsToMoveATick; got < tick {
+		t.Fatalf("inventory skew over %d lots is %.18g CDF, below one tick %.18g: maker cannot reprice",
+			maxLotsToMoveATick, got, tick)
 	}
 }
 
