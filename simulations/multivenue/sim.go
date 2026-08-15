@@ -87,6 +87,12 @@ type Config struct {
 	// prices a maker uses to estimate volatility.
 	StoikovVolatilitySampleInterval time.Duration `json:"stoikov_volatility_sample_interval"`
 
+	// SpotTickQuoteUnits is the ABC/USD tick in quote-precision units. The
+	// spread cannot be finer than one tick, so a coarse tick pins it at the
+	// floor and makes it insensitive to volatility and to maker risk; that
+	// degeneracy is the large-tick regime.
+	SpotTickQuoteUnits int64 `json:"spot_tick_quote_units"`
+
 	// MispricingBandBps is the deviation from fundamental value beyond which a
 	// sample counts as visibly mispriced in the run summary.
 	MispricingBandBps int64 `json:"mispricing_band_bps"`
@@ -218,6 +224,9 @@ func (c *Config) normalize() error {
 	if c.StoikovVolatilitySampleInterval == 0 {
 		c.StoikovVolatilitySampleInterval = 30 * time.Second
 	}
+	if c.SpotTickQuoteUnits == 0 {
+		c.SpotTickQuoteUnits = 10 * mvQuotePrecision
+	}
 	if c.MispricingBandBps == 0 {
 		c.MispricingBandBps = 100
 	}
@@ -312,7 +321,7 @@ func (c *Config) normalize() error {
 		c.NoiseInterval <= 0 || c.GreekInterval <= 0 || c.ShortOptionTenor <= 0 || c.LongOptionTenor <= 0 ||
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 || *c.ValueTraderCount < 0 ||
-		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 ||
+		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || *c.OptionBuyProbability < 0 || *c.OptionBuyProbability > 1 {
@@ -350,6 +359,7 @@ type Venue struct {
 	ValueTraders     []*ValueTrader
 	lastTwoSided     map[string]twoSidedMark
 	Mispricing       *MispricingStats
+	Microstructure   *MicrostructureStats
 	OptionFlow       *derivsim.OptionTaker
 	OptionFlows      []*derivsim.OptionTaker
 	InitialRisk      *VenueRiskSnapshot
@@ -422,8 +432,8 @@ type ValueTraderTier struct {
 	// of 1ms with sigma 0.99 puts the 99th percentile near 10ms.
 	Latency         time.Duration `json:"latency"`
 	LatencyLogSigma float64       `json:"latency_log_sigma"`
-	EdgeBps int64         `json:"edge_bps"`
-	LotQty  int64         `json:"lot_qty"`
+	EdgeBps         int64         `json:"edge_bps"`
+	LotQty          int64         `json:"lot_qty"`
 	// MaxInventory bounds the signed base position.
 	MaxInventory int64 `json:"max_inventory"`
 }
@@ -477,6 +487,7 @@ func (s *Sim) Run(ctx context.Context) error {
 	}
 	for _, venue := range s.Venues {
 		venue.Mispricing.finalize()
+		venue.Microstructure.finalize()
 	}
 	for _, venue := range s.Venues {
 		if venue.riskErr != nil {
@@ -682,7 +693,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		ex.SetInstrumentLoggerFallback(derivativeLog)
 	}
 
-	tick := int64(10 * mvQuotePrecision)
+	tick := s.Config.SpotTickQuoteUnits
 	spot := exchange.NewSpotInstrument("ABC/USD", "ABC", "USD", mvBasePrecision, mvQuotePrecision, tick, mvBasePrecision/1_000)
 	perp := exchange.NewPerpFutures("ABC-PERP", "ABC", "USD", mvBasePrecision, mvQuotePrecision, tick, mvBasePrecision/1_000)
 	ex.AddInstrument(spot)
@@ -705,7 +716,8 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	mount := simulation.NewMount(ex, simulation.LatencyConfig{})
 	venue := &Venue{ID: id, MatchingRule: matchingRule, Exchange: ex, Mount: mount,
 		optionListedNano: make(map[string]int64),
-		Mispricing:       newMispricingStats(id, "ABC/USD", s.Config.MispricingBandBps)}
+		Mispricing:       newMispricingStats(id, "ABC/USD", s.Config.MispricingBandBps),
+		Microstructure:   newMicrostructureStats(id, "ABC/USD", tick, s.Config.AutomationInterval.Seconds())}
 	ex.ConfigureAutomation(exchange.AutomationConfig{
 		IndexProvider:       index,
 		PriceUpdateInterval: s.Config.AutomationInterval,
@@ -734,6 +746,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			venue.recordTwoSidedMarks(valuedSpotSymbols(s.Config.CrossAssetSpotGraph), now)
 			mark, _, _ := venue.valuationMark("ABC/USD", now, venueRiskMarkStaleness)
 			venue.Mispricing.observe(now, mark, s.Fundamental.Value(now))
+			venue.observeMicrostructure()
 			captureScheduledVenueRisk(venue, s.Config.GreekInterval, s.Config.AutomationInterval)
 		},
 	})
@@ -1045,6 +1058,27 @@ func (s *Sim) capturePopulationAccounts(phase string) ([]ParticipantAccountSnaps
 // dealer risk. It is generous relative to the automation cadence because this
 // snapshot is diagnostic, while population accounts use the stricter window.
 const venueRiskMarkStaleness = int64(60 * time.Second)
+
+// observeMicrostructure samples the spot book's top of book and cumulative
+// trade count. The book's sequence number advances once per trade, so it is
+// already the trade counter this measurement needs.
+func (v *Venue) observeMicrostructure() {
+	if v.Microstructure == nil {
+		return
+	}
+	book := v.Exchange.Books[v.Microstructure.Symbol]
+	if book == nil {
+		return
+	}
+	bestBid, bestAsk := int64(0), int64(0)
+	if levels := book.Bids.GetPublicSnapshot(); len(levels) > 0 {
+		bestBid = levels[0].Price
+	}
+	if levels := book.Asks.GetPublicSnapshot(); len(levels) > 0 {
+		bestAsk = levels[0].Price
+	}
+	v.Microstructure.observe(bestBid, bestAsk, int64(book.SeqNum))
+}
 
 // valuedSpotSymbols lists the books whose midpoints price participant wealth.
 func valuedSpotSymbols(crossAssetSpotGraph bool) []string {

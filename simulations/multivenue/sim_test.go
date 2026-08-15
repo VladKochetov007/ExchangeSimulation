@@ -981,3 +981,59 @@ func TestValueTraderTiersConnectWithConfiguredLatency(t *testing.T) {
 		}
 	}
 }
+
+// The tick size must be configurable and must actually reach the spot book:
+// the spread cannot be finer than one tick, so a coarse tick pins it at the
+// floor and makes every spread measurement insensitive to market conditions.
+func TestSpotTickSizeIsConfigurableAndReachesTheBook(t *testing.T) {
+	for _, tick := range []int64{mvQuotePrecision, 10 * mvQuotePrecision} {
+		sim, err := NewSim(time.Second, Config{
+			LogDir: t.TempDir(), LogMode: "none", Seed: 91,
+			SpotTickQuoteUnits: tick,
+		})
+		if err != nil {
+			t.Fatalf("NewSim(tick=%d): %v", tick, err)
+		}
+		for _, venue := range sim.Venues {
+			instrument := venue.Exchange.Books["ABC/USD"].Instrument
+			if got := instrument.TickSize(); got != tick {
+				sim.Close()
+				t.Fatalf("venue %s ABC/USD tick = %d, want %d", venue.ID, got, tick)
+			}
+		}
+		sim.Close()
+	}
+}
+
+// Microstructure sampling must report a two-sided spread, a trade count, and a
+// per-trade volatility, since those three are what the spread-volatility test
+// regresses.
+func TestMicrostructureStatsReportSpreadAndPerTradeVolatility(t *testing.T) {
+	stats := newMicrostructureStats("v", "ABC/USD", 100, 1)
+	// Two-sided samples with a moving midpoint and an advancing trade count.
+	stats.observe(9_900, 10_100, 0)
+	stats.observe(9_950, 10_150, 4)
+	stats.observe(9_900, 10_100, 8)
+	// A one-sided sample is skipped and breaks the return series.
+	stats.observe(0, 10_100, 10)
+	stats.observe(9_900, 10_100, 12)
+	stats.finalize()
+
+	if stats.Samples != 4 {
+		t.Fatalf("samples = %d, want 4 two-sided observations", stats.Samples)
+	}
+	if stats.Trades != 12 {
+		t.Fatalf("trades = %d, want 12", stats.Trades)
+	}
+	if stats.MeanSpreadTicks != 2 {
+		t.Fatalf("mean spread = %v ticks, want 2", stats.MeanSpreadTicks)
+	}
+	if stats.SigmaPerSample <= 0 {
+		t.Fatal("per-sample volatility must be positive when the midpoint moves")
+	}
+	// Three trades per sample must scale the per-trade figure down by sqrt(3).
+	want := stats.SigmaPerSample / math.Sqrt(3)
+	if math.Abs(stats.SigmaPerTrade-want) > 1e-12 {
+		t.Fatalf("per-trade volatility = %v, want %v", stats.SigmaPerTrade, want)
+	}
+}

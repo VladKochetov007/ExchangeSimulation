@@ -22,6 +22,7 @@ type greekOutput struct {
 	PreExpiryRisk    map[string][]multivenue.VenueRiskSnapshot `json:"pre_expiry_risk"`
 	TerminalRisk     map[string]multivenue.VenueRiskSnapshot   `json:"terminal_risk"`
 	Mispricing       []multivenue.MispricingStats              `json:"mispricing"`
+	Microstructure   []multivenue.MicrostructureStats          `json:"microstructure"`
 	RouterReports    []multivenue.CrossVenueArbReport          `json:"router_reports,omitempty"`
 	InitialAccounts  []multivenue.ParticipantAccountSnapshot   `json:"initial_accounts,omitempty"`
 	TerminalAccounts []multivenue.ParticipantAccountSnapshot   `json:"terminal_accounts,omitempty"`
@@ -65,12 +66,13 @@ func main() {
 		log.Fatal(err)
 	}
 	output := greekOutput{
-		SchemaVersion: 5,
-		InitialRisk:   make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
-		RiskTimeline:  make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
-		PreExpiryRisk: make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
-		TerminalRisk:  make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
-		Mispricing:    make([]multivenue.MispricingStats, 0, len(sim.Venues)),
+		SchemaVersion:  5,
+		InitialRisk:    make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
+		RiskTimeline:   make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
+		PreExpiryRisk:  make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
+		TerminalRisk:   make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
+		Mispricing:     make([]multivenue.MispricingStats, 0, len(sim.Venues)),
+		Microstructure: make([]multivenue.MicrostructureStats, 0, len(sim.Venues)),
 		Caveats: []string{
 			"Venues are independently funded. A configured cross-venue router has one local account per venue; it models neither asset transfer nor atomic legs.",
 			"Greek timeline rows are recomputed from exchange-owned option positions and the atomic underlying mark paired with each option premium. They are not actor-local quote-cache measurements.",
@@ -89,6 +91,9 @@ func main() {
 		output.TerminalRisk[venue.ID] = *venue.TerminalRisk
 		if venue.Mispricing != nil {
 			output.Mispricing = append(output.Mispricing, *venue.Mispricing)
+		}
+		if venue.Microstructure != nil {
+			output.Microstructure = append(output.Microstructure, *venue.Microstructure)
 		}
 	}
 	output.InitialAccounts = append([]multivenue.ParticipantAccountSnapshot(nil), sim.InitialAccounts...)
