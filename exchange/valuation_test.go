@@ -79,6 +79,33 @@ func TestMarkedAccountUsesOptionRiskMarkInsteadOfBookPrice(t *testing.T) {
 	}
 }
 
+func TestMarkedAccountAcceptsInitializedOutOfMoneyOptionAtZeroPremium(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	option := NewEuropeanOption(
+		"ABC-TEST-P", "ABC", "USD", "ABC/USD", valuationBasePrecision, valuationQuotePrecision,
+		valuationQuotePrecision, valuationBasePrecision/100, 100*valuationQuotePrecision,
+		time.Now().Add(time.Hour).UnixNano(), false,
+	)
+	// The nonzero underlying proves this is an initialized mark pair. A zero
+	// put premium is economically valid while the option is out of the money.
+	option.SetMarks(120*valuationQuotePrecision, 0)
+	ex.AddInstrument(option)
+	ex.ConnectNewClient(1, nil, &FixedFee{})
+	ex.AddPerpBalance(1, "USD", 100*valuationQuotePrecision)
+	ex.Positions.UpdatePosition(1, option.Symbol(), valuationBasePrecision, 10*valuationQuotePrecision, Buy, PositionBoth)
+
+	report, err := ex.MarkedAccount(1, usdValuationSpec(120*valuationQuotePrecision))
+	if err != nil {
+		t.Fatalf("MarkedAccount: %v", err)
+	}
+	if len(report.Positions) != 1 || report.Positions[0].MarkPrice != 0 {
+		t.Fatalf("zero-premium position mark = %#v", report.Positions)
+	}
+	if report.OptionMarketValue != 0 || report.Equity != 100*valuationQuotePrecision {
+		t.Fatalf("out-of-money option report = %#v", report)
+	}
+}
+
 func TestMarkedAccountOptionPremiumCashAndMarketValueConserveEquity(t *testing.T) {
 	ex := NewExchange(3, &RealClock{})
 	option := NewEuropeanOption(

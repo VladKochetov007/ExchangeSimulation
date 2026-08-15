@@ -224,6 +224,13 @@ func valueInReport(amount int64, asset string, spec etypes.AccountValuationSpec)
 // use their stored funding mark, falling back to a live reference only before
 // the first mark update. Unsupported derivative types fail closed.
 func riskMark(inst Instrument, book *OrderBook) (int64, bool) {
+	// An initialized out-of-the-money option can have a zero premium. Its
+	// atomic underlying mark distinguishes that valid zero from an option that
+	// has not yet received its first derivative mark update.
+	if option, ok := inst.(*EuropeanOption); ok {
+		mark := option.PositionMark()
+		return mark, option.UnderlyingMark() > 0 && mark >= 0
+	}
 	if pm, ok := inst.(PositionMarginer); ok {
 		mark := pm.PositionMark()
 		return mark, mark > 0
