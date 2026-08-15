@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"cmp"
+	"maps"
 	"math"
 	"slices"
 
@@ -30,8 +31,50 @@ func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Respons
 		return e.rejectOrder(order, req.RequestID, clientID, RejectFOKNotFilled, log)
 	}
 
+	borrowSnapshot := takeSpotBorrowSnapshot(client)
 	if reject := e.reserveOrderFunds(client, book, order, req.RequestID, log); reject != nil {
+		borrowSnapshot.restore(e, clientID, client)
 		return *reject
+	}
+
+	var spotPlan *spotExecutionPlan
+	if _, settlesOwnLedger := book.Instrument.(Settleable); !settlesOwnLedger {
+		excludedMakers := make(map[uint64]struct{})
+		for {
+			var failure *spotPlanFailure
+			spotPlan, failure = e.prepareSpotExecutionPlan(book, order, excludedMakers)
+			if failure == nil {
+				break
+			}
+			if failure.makerOrderID == 0 {
+				releaseReserved(client, book.Instrument, order)
+				borrowSnapshot.restore(e, clientID, client)
+				return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
+			}
+			excludedMakers[failure.makerOrderID] = struct{}{}
+		}
+		if req.TimeInForce == FOK && !spotPlan.fullyFilled {
+			releaseReserved(client, book.Instrument, order)
+			borrowSnapshot.restore(e, clientID, client)
+			return e.rejectOrder(order, req.RequestID, clientID, RejectFOKNotFilled, log)
+		}
+		if len(excludedMakers) > 0 {
+			makerIDs := make([]uint64, 0, len(excludedMakers))
+			for makerID := range excludedMakers {
+				makerIDs = append(makerIDs, makerID)
+			}
+			slices.Sort(makerIDs)
+			for _, makerID := range makerIDs {
+				if !e.cancelUnfundedSpotPlanMaker(book, makerID) {
+					panic("spot execution plan maker disappeared before commit")
+				}
+			}
+			var failure *spotPlanFailure
+			spotPlan, failure = e.prepareSpotExecutionPlan(book, order, nil)
+			if failure != nil {
+				panic("spot execution plan changed during commit")
+			}
+		}
 	}
 
 	if log != nil {
@@ -39,6 +82,13 @@ func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Respons
 	}
 
 	result := e.Matcher.Match(book.Bids, book.Asks, order)
+	if spotPlan != nil && !spotPlan.matches(result.Executions) {
+		// The matcher was just run against a detached copy while the exchange
+		// lock was held. Settling a different sequence would use unvalidated
+		// fees and can violate reservations, so fail loudly rather than minting
+		// a plausible but inconsistent ledger.
+		panic("matching engine violated spot execution plan")
+	}
 	if req.TimeInForce == FOK && !result.FullyFilled {
 		// The matcher was just run against an identical detached book while the
 		// exchange lock was held. Reaching this branch means a stateful or
@@ -50,12 +100,69 @@ func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Respons
 	}
 
 	levels := collectAffectedLevels(book, result.Executions)
-	e.processExecutions(book, result.Executions, order)
+	e.processExecutions(book, result.Executions, order, spotPlan)
 	e.removeMakerOrders(book, result.Executions)
 	e.publishLevels(book, levels)
 	e.restOrReleaseOrder(client, book, order, req)
 
 	return Response{RequestID: req.RequestID, Success: true, Data: e.NextOrderID}
+}
+
+// spotBorrowSnapshot makes order admission transactional when auto-borrow is
+// enabled. Fee-plan validation happens after the ordinary reservation path; a
+// rejected order must not leave cash and debt from a loan whose only purpose
+// was that rejected order.
+type spotBorrowSnapshot struct {
+	balances     map[string]int64
+	borrowed     map[string]int64
+	borrowedSpot map[string]int64
+}
+
+func takeSpotBorrowSnapshot(client *Client) spotBorrowSnapshot {
+	return spotBorrowSnapshot{
+		balances:     maps.Clone(client.Balances),
+		borrowed:     maps.Clone(client.Borrowed),
+		borrowedSpot: maps.Clone(client.BorrowedSpot),
+	}
+}
+
+func (s spotBorrowSnapshot) restore(e *DefaultExchange, clientID uint64, client *Client) {
+	if client == nil || (maps.Equal(s.balances, client.Balances) && maps.Equal(s.borrowed, client.Borrowed) && maps.Equal(s.borrowedSpot, client.BorrowedSpot)) {
+		return
+	}
+	changes := make([]BalanceDelta, 0, len(s.balances)+len(s.borrowed))
+	assets := make(map[string]struct{}, len(s.balances)+len(client.Balances)+len(s.borrowed)+len(client.Borrowed))
+	for asset := range s.balances {
+		assets[asset] = struct{}{}
+	}
+	for asset := range client.Balances {
+		assets[asset] = struct{}{}
+	}
+	for asset := range s.borrowed {
+		assets[asset] = struct{}{}
+	}
+	for asset := range client.Borrowed {
+		assets[asset] = struct{}{}
+	}
+	assetNames := make([]string, 0, len(assets))
+	for asset := range assets {
+		assetNames = append(assetNames, asset)
+	}
+	slices.Sort(assetNames)
+	for _, asset := range assetNames {
+		if old, next := client.Balances[asset], s.balances[asset]; old != next {
+			changes = append(changes, spotDelta(asset, old, next))
+		}
+		if old, next := client.Borrowed[asset], s.borrowed[asset]; old != next {
+			changes = append(changes, borrowedDelta(asset, old, next))
+		}
+	}
+	client.Balances = maps.Clone(s.balances)
+	client.Borrowed = maps.Clone(s.borrowed)
+	client.BorrowedSpot = maps.Clone(s.borrowedSpot)
+	if len(changes) > 0 {
+		logBalanceChange(e, e.Clock.NowUnixNano(), clientID, "", "auto_borrow_rollback", changes)
+	}
 }
 
 func (e *DefaultExchange) CancelOrder(clientID uint64, req *CancelRequest) Response {
@@ -544,14 +651,18 @@ func (e *DefaultExchange) canPreviewFullyMatch(book *OrderBook, order *Order) bo
 }
 
 func (e *DefaultExchange) previewMatch(book *OrderBook, order *Order) (*MatchResult, bool) {
-	if e.Matcher == nil || !marketDepthSane(book, order) {
+	return e.previewMatchExcluding(book, order, nil)
+}
+
+func (e *DefaultExchange) previewMatchExcluding(book *OrderBook, order *Order, excluded map[uint64]struct{}) (*MatchResult, bool) {
+	if e.Matcher == nil || !marketDepthSaneExcluding(book, order, excluded) {
 		return nil, false
 	}
-	bids, ok := cloneBookForPreview(book.Bids)
+	bids, ok := cloneBookForPreviewExcluding(book.Bids, excluded)
 	if !ok {
 		return nil, false
 	}
-	asks, ok := cloneBookForPreview(book.Asks)
+	asks, ok := cloneBookForPreviewExcluding(book.Asks, excluded)
 	if !ok {
 		return nil, false
 	}
@@ -597,9 +708,16 @@ func releasePreviewExecutions(executions []*Execution) {
 // cloneBookForPreview copies only live queue state. Parent/next links must be
 // rebuilt by AddOrder, otherwise a dry run could mutate the live queue.
 func cloneBookForPreview(source *Book) (*Book, bool) {
+	return cloneBookForPreviewExcluding(source, nil)
+}
+
+func cloneBookForPreviewExcluding(source *Book, excluded map[uint64]struct{}) (*Book, bool) {
 	clone := NewBook(source.Side)
 	for limit := source.ActiveHead; limit != nil; limit = limit.Next {
 		for order := limit.Head; order != nil; order = order.Next {
+			if _, skip := excluded[order.ID]; skip {
+				continue
+			}
 			remaining, ok := etypes.TrySub(order.Qty, order.FilledQty)
 			if !ok || remaining < 0 {
 				return nil, false
@@ -621,6 +739,10 @@ func cloneBookForPreview(source *Book) (*Book, bool) {
 // matcher can use wrapped depth. This is especially important for pro-rata,
 // whose allocation denominator is the sum at a price level.
 func marketDepthSane(book *OrderBook, order *Order) bool {
+	return marketDepthSaneExcluding(book, order, nil)
+}
+
+func marketDepthSaneExcluding(book *OrderBook, order *Order, excluded map[uint64]struct{}) bool {
 	levels := book.Asks
 	if order.Side == Sell {
 		levels = book.Bids
@@ -628,6 +750,9 @@ func marketDepthSane(book *OrderBook, order *Order) bool {
 	for limit := levels.ActiveHead; limit != nil; limit = limit.Next {
 		var levelQty int64
 		for resting := limit.Head; resting != nil; resting = resting.Next {
+			if _, skip := excluded[resting.ID]; skip {
+				continue
+			}
 			if resting.ClientID == order.ClientID {
 				continue
 			}
@@ -814,6 +939,10 @@ func (e *DefaultExchange) foreignFeeReservations(feePlan FeeModel, book *OrderBo
 		defer releasePreviewExecutions(executions)
 		return marketForeignFeeReservations(feePlan, instrument, order, executions, precision)
 	}
+	remaining, ok := etypes.TrySub(order.Qty, order.FilledQty)
+	if !ok || remaining <= 0 {
+		return nil, remaining == 0
+	}
 	price := order.Price
 	if price <= 0 {
 		return nil, true
@@ -822,7 +951,7 @@ func (e *DefaultExchange) foreignFeeReservations(feePlan FeeModel, book *OrderBo
 	margined := isMarginedInstrument(instrument)
 	reserved := make(map[string]int64)
 	for _, isMaker := range []bool{false, true} {
-		probe := Execution{Price: price, Qty: order.Qty}
+		probe := Execution{Price: price, Qty: remaining}
 		fee := feePlan.CalculateFee(FillContext{
 			Exec: &probe, IsMaker: isMaker, BaseAsset: base, QuoteAsset: quote, Precision: precision,
 		})
@@ -834,6 +963,41 @@ func (e *DefaultExchange) foreignFeeReservations(feePlan FeeModel, book *OrderBo
 		}
 	}
 	return reserved, true
+}
+
+// cancelUnfundedSpotPlanMaker removes a resting maker before any live match
+// when the exact next execution batch proves it cannot settle. It deliberately
+// happens before matcher mutation, unlike the older reactive fee cancellation
+// path that could leave already-built iceberg executions behind.
+func (e *DefaultExchange) cancelUnfundedSpotPlanMaker(book *OrderBook, orderID uint64) bool {
+	order := book.FindOrder(orderID)
+	if order == nil || order.Parent == nil {
+		return false
+	}
+	client := e.Clients[order.ClientID]
+	if client == nil {
+		return false
+	}
+	remaining, ok := etypes.TrySub(order.Qty, order.FilledQty)
+	if !ok || remaining < 0 {
+		return false
+	}
+	releaseReserved(client, book.Instrument, order)
+	if order.Side == Buy {
+		book.Bids.CancelOrder(order.ID)
+	} else {
+		book.Asks.CancelOrder(order.ID)
+	}
+	if order.Visibility != Hidden {
+		e.publishBookUpdate(book, order.Side, order.Price)
+	}
+	client.RemoveOrder(order.ID)
+	order.Status = Cancelled
+	if gateway := e.Gateways[order.ClientID]; gateway != nil && gateway.IsRunning() {
+		gateway.enqueueResponse(Response{Success: true, Data: &ForcedCancelNotification{OrderID: order.ID, RemainingQty: remaining}})
+	}
+	putOrder(order)
+	return true
 }
 
 func marketForeignFeeReservations(feePlan FeeModel, instrument Instrument, order *Order, executions []*Execution, precision int64) (map[string]int64, bool) {

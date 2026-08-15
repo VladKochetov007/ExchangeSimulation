@@ -166,15 +166,20 @@ per fill. Conservation holds (dust is simply never charged), but fee-revenue
 totals are a lower bound. `MulDiv` is now 128-bit exact for any precision
 configuration. **DOCUMENTED**
 
-### FixedFee on multi-fill orders
-`FixedFee` charges its amount per EXECUTION, but spot reservations add fee
-headroom for one execution per order: an order filling in N partial executions
-pays (N−1) extra fees beyond what the placement check reserved and can drive
-the balance negative. The reservation cannot know N in advance without
-absurd worst-case over-locking (N ≤ qty). Use `PercentageFee` for economic
-sims; treat `FixedFee` as a test fixture or keep amounts negligible.
-**DOCUMENTED** (same applies to `marketBuyCost`, which adds headroom once per
-price level while fees are charged per maker execution).
+### Per-execution fee fragmentation
+`FixedFee` charges per execution. Spot matching now clones the exact incoming
+match, validates all fee cash flows and residual reservations before mutating
+the live book, and virtually removes unfundable resting makers while planning.
+It commits those forced cancellations only after the incoming order has a
+solvent final plan, so a rejected order cannot change unrelated liquidity.
+This preserves spot balances for partial, pro-rata, and iceberg executions,
+but it deliberately rejects an otherwise solvent prefix when the complete
+batch would leave its maker or residual order underfunded.
+
+Margin instruments still reserve only one maker/taker fee headroom for a
+resting order, while their settlement/margin lifecycle needs a separate
+ledger-aware execution plan. Do not use `FixedFee` on perp/dated/option
+experiments until that path is hardened. **TODO**
 
 ### Interest accrual floor
 Collateral interest truncates to zero each per-minute charge for small debts

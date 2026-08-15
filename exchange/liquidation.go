@@ -37,7 +37,7 @@ func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *Orde
 	}
 	filledQty = order.FilledQty
 	levels := collectAffectedLevels(book, result.Executions)
-	e.processExecutions(book, result.Executions, order)
+	e.processExecutions(book, result.Executions, order, nil)
 	e.removeMakerOrders(book, result.Executions)
 	e.publishLevels(book, levels)
 	putOrder(order)

@@ -355,11 +355,17 @@ func TestRegressionPartialForeignFeeFillCancelsUnfundedRemainder(t *testing.T) {
 	if response := bughuntLimit(ex, 2, 2, "BTC/USD", Buy, price, BTCAmount(1)); !response.Success {
 		t.Fatalf("first buyer rejected: %s", response.Error)
 	}
-	if got := ex.Clients[1].Balances["BNB"]; got != 0 {
-		t.Fatalf("seller BNB after first fill = %d, want 0", got)
+	// The exact pre-match plan cancels an unfundable maker before its first
+	// execution. The old reactive path filled once, spent BNB, and only then
+	// discovered that the remaining order could not fund its next fill.
+	if got := ex.Clients[1].Balances["BNB"]; got != 1 {
+		t.Fatalf("pre-match cancellation changed seller BNB: got %d, want 1", got)
 	}
 	if got := len(ex.Clients[1].OrderIDs); got != 0 {
 		t.Fatalf("unfunded seller remainder still resting: %d open orders", got)
+	}
+	if got := ex.Clients[1].Balances["BTC"]; got != BTCAmount(2) {
+		t.Fatalf("pre-match cancellation consumed seller BTC: got %d", got)
 	}
 	if response := bughuntLimit(ex, 3, 3, "BTC/USD", Buy, price, BTCAmount(1)); !response.Success {
 		t.Fatalf("second buyer rejected: %s", response.Error)

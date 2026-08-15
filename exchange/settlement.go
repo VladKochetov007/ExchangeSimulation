@@ -40,14 +40,21 @@ func (e *DefaultExchange) restoreFeeHeadroom(book *OrderBook, order *Order, prec
 	order.Reserved += headroom
 }
 
-func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order) {
+func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order, plan *spotExecutionPlan) {
 	instrument := book.Instrument
 	timestamp := e.Clock.NowUnixNano()
 	basePrecision := instrument.BasePrecision()
 	log := e.getLogger(book.Symbol)
 	positionChanged := false
-	for _, exec := range executions {
-		if e.handleExecution(book, exec, takerOrder, instrument, basePrecision, timestamp, log) {
+	for i, exec := range executions {
+		var planned *plannedSpotExecution
+		if plan != nil {
+			if i >= len(plan.fills) || !plan.fills[i].fingerprint.matches(exec) {
+				panic("spot execution plan diverged during settlement")
+			}
+			planned = &plan.fills[i]
+		}
+		if e.handleExecution(book, exec, takerOrder, instrument, basePrecision, timestamp, log, planned) {
 			positionChanged = true
 		}
 	}
@@ -60,16 +67,23 @@ func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execu
 // Returns true if a position changed (for OI tracking).
 func (e *DefaultExchange) handleExecution(
 	book *OrderBook, exec *Execution, takerOrder *Order,
-	instrument Instrument, basePrecision, timestamp int64, log Logger,
+	instrument Instrument, basePrecision, timestamp int64, log Logger, planned *plannedSpotExecution,
 ) bool {
 	taker := e.Clients[exec.TakerClientID]
 	maker := e.Clients[exec.MakerClientID]
 	baseAsset, quoteAsset := instrument.BaseAsset(), instrument.QuoteAsset()
-	// A nil FeePlan is the zero-fee plan — the reservation path already treats it
-	// that way, so settlement must not dereference it. Guarding here keeps the
-	// two paths consistent instead of panicking on the first fill.
-	takerFee := calcClientFee(taker, FillContext{Exec: exec, IsMaker: false, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
-	makerFee := calcClientFee(maker, FillContext{Exec: exec, IsMaker: true, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
+	// A planned spot match has already quoted the exact per-execution fees on a
+	// detached book. Re-asking a stateful fee model here would charge a different
+	// schedule from the one that passed admission. Other settlement paths retain
+	// the nil-safe direct calculation.
+	var takerFee, makerFee Fee
+	if planned != nil {
+		takerFee = planned.takerFee
+		makerFee = planned.makerFee
+	} else {
+		takerFee = calcClientFee(taker, FillContext{Exec: exec, IsMaker: false, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
+		makerFee = calcClientFee(maker, FillContext{Exec: exec, IsMaker: true, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
+	}
 
 	// Fully filled makers stay in book.Orders until removeMakerOrders, so this
 	// lookup normally succeeds; exec carries the fallbacks for custom matchers.

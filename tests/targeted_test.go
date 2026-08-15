@@ -90,7 +90,11 @@ func TestVisibleQty_IcebergPartialFill(t *testing.T) {
 		Qty:        BTCAmount(2.0),
 		FilledQty:  BTCAmount(1.8), // only 0.2 remaining
 		IcebergQty: BTCAmount(0.5), // iceberg qty is larger than remaining
-		Parent:     lim,
+		// DisplayRemaining is initialized when an iceberg enters a book and
+		// decremented by matching. A zero value is an exhausted tranche, not an
+		// uninitialized fallback, so model this partially consumed tranche.
+		DisplayRemaining: BTCAmount(0.2),
+		Parent:           lim,
 	}
 	order.Next = nil
 	lim.Head = order

@@ -72,7 +72,9 @@ type FillContext struct {
 	Precision  int64
 }
 
-// FeeModel calculates trading fees for each execution.
+// FeeModel calculates trading fees for each execution. Implementations must be
+// pure and deterministic for an identical FillContext: the exchange may quote
+// a cloned execution before matching and settle using that frozen quote.
 type FeeModel interface {
 	CalculateFee(ctx FillContext) Fee
 }

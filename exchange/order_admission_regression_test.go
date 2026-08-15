@@ -384,3 +384,394 @@ func TestOptionMarketAdmissionUsesExecutableDepthAndFees(t *testing.T) {
 		}
 	})
 }
+
+func TestSpotPlanRejectsCrossingLimitWithPerFillReceivedFee(t *testing.T) {
+	ex := NewExchange(3, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 1, 1, 1, 1))
+	ex.ConnectNewClient(1, map[string]int64{"USD": 2, "X": 1}, &FixedFee{TakerFee: Fee{Asset: "X", Amount: 2}})
+	for _, clientID := range []uint64{2, 3} {
+		ex.ConnectNewClient(clientID, map[string]int64{"X": 1}, &FixedFee{})
+		response := ex.PlaceOrder(clientID, &OrderRequest{
+			RequestID: clientID, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+			Price: 1, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+		})
+		if !response.Success {
+			t.Fatalf("seed ask %d rejected: %s", clientID, response.Error)
+		}
+	}
+
+	response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 10, Symbol: "X/USD", Side: Buy, Type: LimitOrder,
+		Price: 1, Qty: 2, TimeInForce: GTC, Visibility: Normal,
+	})
+	if response.Success || response.Error != RejectInsufficientBalance {
+		t.Fatalf("crossing limit response = %+v, want insufficient-balance rejection", response)
+	}
+	if got := ex.Clients[1].Balances["X"]; got != 1 {
+		t.Fatalf("rejected crossing limit changed received asset: got %d want 1", got)
+	}
+	if got := len(ex.Books["X/USD"].Asks.Orders); got != 2 {
+		t.Fatalf("rejected crossing limit consumed asks: got %d want 2", got)
+	}
+}
+
+func TestSpotPlanCancelsUnfundedReceivedFeeMakerBeforeMatch(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 1, 1, 1, 1))
+	fees := &FixedFee{MakerFee: Fee{Asset: "X", Amount: 2}}
+	ex.ConnectNewClient(1, map[string]int64{"USD": 2}, fees)
+	ex.ConnectNewClient(2, map[string]int64{"X": 1}, &FixedFee{})
+
+	quote := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 1, Symbol: "X/USD", Side: Buy, Type: LimitOrder,
+		Price: 1, Qty: 2, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !quote.Success {
+		t.Fatalf("unfunded quote should rest until it faces a fill: %s", quote.Error)
+	}
+	response := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 2, Symbol: "X/USD", Side: Sell, Type: Market,
+		Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !response.Success {
+		t.Fatalf("market sell after stale-maker cancellation rejected: %s", response.Error)
+	}
+	if order := ex.Books["X/USD"].FindOrder(quote.Data.(uint64)); order != nil {
+		t.Fatalf("unfunded maker remained live: %#v", order)
+	}
+	if got := ex.Clients[1].Balances["X"]; got != 0 {
+		t.Fatalf("unfunded maker created base debt: got %d want 0", got)
+	}
+	if got := ex.Clients[2].Balances["X"]; got != 1 {
+		t.Fatalf("cancelled maker consumed taker inventory: got %d want 1", got)
+	}
+}
+
+func TestSpotPlanBlocksMultiTrancheIcebergFeeOverdraft(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 1, 1, 1, 1))
+	ex.ConnectNewClient(1, map[string]int64{"X": 3, "BNB": 2}, &FixedFee{MakerFee: Fee{Asset: "BNB", Amount: 1}})
+	ex.ConnectNewClient(2, map[string]int64{"USD": 3}, &FixedFee{})
+
+	quote := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 1, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+		Price: 1, Qty: 3, TimeInForce: GTC, Visibility: Iceberg, IcebergQty: 1,
+	})
+	if !quote.Success {
+		t.Fatalf("iceberg quote rejected: %s", quote.Error)
+	}
+	response := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 2, Symbol: "X/USD", Side: Buy, Type: Market,
+		Qty: 3, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !response.Success {
+		t.Fatalf("market order after stale-maker cancellation rejected: %s", response.Error)
+	}
+	if order := ex.Books["X/USD"].FindOrder(quote.Data.(uint64)); order != nil {
+		t.Fatalf("unfunded iceberg remained live: %#v", order)
+	}
+	if got := ex.Clients[1].Balances["BNB"]; got != 2 {
+		t.Fatalf("iceberg fee balance changed before match: got %d want 2", got)
+	}
+	if got := ex.Clients[1].Balances["X"]; got != 3 {
+		t.Fatalf("iceberg inventory changed before match: got %d want 3", got)
+	}
+	if got := ex.Clients[2].Balances["X"]; got != 0 {
+		t.Fatalf("buyer received inventory from unfunded iceberg: got %d want 0", got)
+	}
+}
+
+func TestSpotPlanAllowsExactlyFundedMultiTrancheIceberg(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 1, 1, 1, 1))
+	ex.ConnectNewClient(1, map[string]int64{"X": 3, "BNB": 3}, &FixedFee{MakerFee: Fee{Asset: "BNB", Amount: 1}})
+	ex.ConnectNewClient(2, map[string]int64{"USD": 3}, &FixedFee{})
+
+	quote := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 1, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+		Price: 1, Qty: 3, TimeInForce: GTC, Visibility: Iceberg, IcebergQty: 1,
+	})
+	if !quote.Success {
+		t.Fatalf("iceberg quote rejected: %s", quote.Error)
+	}
+	response := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 2, Symbol: "X/USD", Side: Buy, Type: Market,
+		Qty: 3, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !response.Success {
+		t.Fatalf("exactly funded iceberg sweep rejected: %s", response.Error)
+	}
+	if got := ex.Clients[1].Balances["BNB"]; got != 0 {
+		t.Fatalf("maker BNB after three fees = %d, want 0", got)
+	}
+	if got := ex.Clients[2].Balances["X"]; got != 3 {
+		t.Fatalf("buyer received X = %d, want 3", got)
+	}
+}
+
+func TestSpotPlanCancelsUnfundedMakerAndReplansDeeperLiquidity(t *testing.T) {
+	ex := NewExchange(3, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 1, 1, 1, 1))
+	ex.ConnectNewClient(1, map[string]int64{"X": 1}, &FixedFee{MakerFee: Fee{Asset: "USD", Amount: 2}})
+	ex.ConnectNewClient(2, map[string]int64{"X": 1}, &FixedFee{})
+	ex.ConnectNewClient(3, map[string]int64{"USD": 2}, &FixedFee{})
+
+	bad := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 1, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+		Price: 1, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !bad.Success {
+		t.Fatalf("unfunded maker should rest until it faces a fill: %s", bad.Error)
+	}
+	good := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 2, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+		Price: 2, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !good.Success {
+		t.Fatalf("deeper ask rejected: %s", good.Error)
+	}
+
+	response := ex.PlaceOrder(3, &OrderRequest{
+		RequestID: 3, Symbol: "X/USD", Side: Buy, Type: Market,
+		Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !response.Success {
+		t.Fatalf("market buyer rejected: %s", response.Error)
+	}
+	if order := ex.Books["X/USD"].FindOrder(bad.Data.(uint64)); order != nil {
+		t.Fatalf("unfunded best maker remained live: %#v", order)
+	}
+	if got := ex.Clients[3].Balances["USD"]; got != 0 {
+		t.Fatalf("buyer did not reach deeper liquidity: USD=%d want 0", got)
+	}
+	if got := ex.Clients[3].Balances["X"]; got != 1 {
+		t.Fatalf("buyer did not receive deeper liquidity: X=%d want 1", got)
+	}
+}
+
+func TestSpotPlanProtectsResidualMakerReservationAfterPartialFill(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 1, 1, 1, 1))
+	ex.ConnectNewClient(1, map[string]int64{"USD": 203}, &FixedFee{MakerFee: Fee{Asset: "USD", Amount: 2}})
+	ex.ConnectNewClient(2, map[string]int64{"X": 1}, &FixedFee{})
+
+	quote := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 1, Symbol: "X/USD", Side: Buy, Type: LimitOrder,
+		Price: 100, Qty: 2, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !quote.Success {
+		t.Fatalf("quote rejected: %s", quote.Error)
+	}
+	if got := ex.Clients[1].Reserved["USD"]; got != 202 {
+		t.Fatalf("initial reservation = %d, want 202", got)
+	}
+
+	response := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 2, Symbol: "X/USD", Side: Sell, Type: Market,
+		Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !response.Success {
+		t.Fatalf("market sell after stale-maker cancellation rejected: %s", response.Error)
+	}
+	if order := ex.Books["X/USD"].FindOrder(quote.Data.(uint64)); order != nil {
+		t.Fatalf("maker with unfundable remainder remained live: %#v", order)
+	}
+	if got := ex.Clients[1].Balances["USD"]; got != 203 {
+		t.Fatalf("cancelled maker changed cash: got %d want 203", got)
+	}
+	if got := ex.Clients[1].Reserved["USD"]; got != 0 {
+		t.Fatalf("cancelled maker leaked reservation: got %d", got)
+	}
+}
+
+func TestSpotPlanRejectsCreditedAssetOverflowBehindReservation(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 2, 1, 1, 1))
+	ex.ConnectNewClient(1, map[string]int64{"X": math.MaxInt64, "USD": 1}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{"X": 1}, &FixedFee{})
+
+	locked := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 1, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+		Price: 2, Qty: math.MaxInt64, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !locked.Success {
+		t.Fatalf("max inventory quote rejected: %s", locked.Error)
+	}
+	if got := ex.Clients[1].Reserved["X"]; got != math.MaxInt64 {
+		t.Fatalf("max inventory reservation = %d, want %d", got, int64(math.MaxInt64))
+	}
+	if response := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 2, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+		Price: 1, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	}); !response.Success {
+		t.Fatalf("counterparty ask rejected: %s", response.Error)
+	}
+
+	response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 3, Symbol: "X/USD", Side: Buy, Type: Market,
+		Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	if response.Success || response.Error != RejectInsufficientBalance {
+		t.Fatalf("overflowing received-base order = %+v, want insufficient-balance rejection", response)
+	}
+	if got := ex.Clients[1].Balances["X"]; got != math.MaxInt64 {
+		t.Fatalf("rejected overflow changed X balance: got %d want %d", got, int64(math.MaxInt64))
+	}
+	if got := ex.Clients[2].Balances["X"]; got != 1 {
+		t.Fatalf("rejected overflow consumed counterparty inventory: got %d want 1", got)
+	}
+}
+
+func TestSpotPlanRejectsFOKWithoutCancellingUnfundedMaker(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 1, 1, 1, 1))
+	ex.ConnectNewClient(1, map[string]int64{"X": 3}, &FixedFee{MakerFee: Fee{Asset: "X", Amount: 1}})
+	ex.ConnectNewClient(2, map[string]int64{"USD": 2}, &FixedFee{})
+
+	quote := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 1, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+		Price: 1, Qty: 2, TimeInForce: GTC, Visibility: Iceberg, IcebergQty: 1,
+	})
+	if !quote.Success {
+		t.Fatalf("iceberg quote rejected: %s", quote.Error)
+	}
+	response := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 2, Symbol: "X/USD", Side: Buy, Type: LimitOrder,
+		Price: 1, Qty: 2, TimeInForce: FOK, Visibility: Normal,
+	})
+	if response.Success || response.Error != RejectFOKNotFilled {
+		t.Fatalf("FOK after fee-plan pruning = %+v, want FOK rejection", response)
+	}
+	if order := ex.Books["X/USD"].FindOrder(quote.Data.(uint64)); order == nil {
+		t.Fatal("rejected FOK cancelled an unrelated resting iceberg")
+	}
+	if got := ex.Clients[2].Balances["USD"]; got != 2 {
+		t.Fatalf("FOK rejection changed buyer balance: got %d want 2", got)
+	}
+}
+
+func TestSpotPlanRejectDoesNotCancelMakerDuringVirtualReplan(t *testing.T) {
+	ex := NewExchange(3, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 1, 1, 1, 1))
+	ex.ConnectNewClient(1, map[string]int64{"X": 1}, &FixedFee{MakerFee: Fee{Asset: "USD", Amount: 2}})
+	ex.ConnectNewClient(2, map[string]int64{"X": 1}, &FixedFee{})
+	ex.ConnectNewClient(3, map[string]int64{"USD": 1}, &FixedFee{})
+
+	bad := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 1, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+		Price: 1, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	good := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 2, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+		Price: 2, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !bad.Success || !good.Success {
+		t.Fatalf("seed asks accepted = %v/%v", bad.Success, good.Success)
+	}
+
+	response := ex.PlaceOrder(3, &OrderRequest{
+		RequestID: 3, Symbol: "X/USD", Side: Buy, Type: Market,
+		Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	if response.Success || response.Error != RejectInsufficientBalance {
+		t.Fatalf("unfunded replan response = %+v, want insufficient balance", response)
+	}
+	if order := ex.Books["X/USD"].FindOrder(bad.Data.(uint64)); order == nil {
+		t.Fatal("rejected taker cancelled the unfunded maker")
+	}
+	if order := ex.Books["X/USD"].FindOrder(good.Data.(uint64)); order == nil {
+		t.Fatal("rejected taker changed deeper liquidity")
+	}
+	if got := ex.Clients[3].Balances["USD"]; got != 1 {
+		t.Fatalf("rejected taker changed balance: got %d want 1", got)
+	}
+}
+
+func TestSpotPlanDefersMarketFeeEscrowReleaseUntilTerminal(t *testing.T) {
+	ex := NewExchange(3, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 1, 1, 1, 1))
+	ex.ConnectNewClient(1, map[string]int64{"BNB": 2, "USD": 2}, &FixedFee{TakerFee: Fee{Asset: "BNB", Amount: 1}})
+	ex.ConnectNewClient(2, map[string]int64{"X": 1}, &FixedFee{})
+	ex.ConnectNewClient(3, map[string]int64{"X": 1}, &FixedFee{})
+	for clientID := uint64(2); clientID <= 3; clientID++ {
+		response := ex.PlaceOrder(clientID, &OrderRequest{
+			RequestID: clientID, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+			Price: 1, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+		})
+		if !response.Success {
+			t.Fatalf("seed ask %d rejected: %s", clientID, response.Error)
+		}
+	}
+
+	response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 4, Symbol: "X/USD", Side: Buy, Type: Market,
+		Qty: 2, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !response.Success {
+		t.Fatalf("market order with exact fee escrow rejected: %s", response.Error)
+	}
+	if got := ex.Clients[1].Balances["BNB"]; got != 0 {
+		t.Fatalf("buyer BNB after two fees = %d, want 0", got)
+	}
+	if got := ex.Clients[1].Reserved["BNB"]; got != 0 {
+		t.Fatalf("terminal market order retained BNB escrow: %d", got)
+	}
+	if got := ex.Clients[1].Balances["X"]; got != 2 {
+		t.Fatalf("buyer X after two fills = %d, want 2", got)
+	}
+}
+
+func TestSpotPlanRejectRollsBackAutoBorrow(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 1, 1, 1, 1))
+	if err := ex.EnableBorrowing(BorrowingConfig{
+		Enabled:           true,
+		AutoBorrowSpot:    true,
+		CollateralFactors: map[string]float64{"USD": 1},
+		AssetPrecisions:   map[string]int64{"USD": 1},
+		PriceSource:       NewStaticPriceOracle(map[string]int64{"USD": 1}),
+	}); err != nil {
+		t.Fatalf("EnableBorrowing: %v", err)
+	}
+	ex.ConnectNewClient(1, nil, &FixedFee{TakerFee: Fee{Asset: "X", Amount: 2}})
+	ex.AddPerpBalance(1, "USD", 10)
+	ex.ConnectNewClient(2, map[string]int64{"X": 1}, &FixedFee{})
+	if response := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 1, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+		Price: 1, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	}); !response.Success {
+		t.Fatalf("seed ask rejected: %s", response.Error)
+	}
+
+	response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 2, Symbol: "X/USD", Side: Buy, Type: LimitOrder,
+		Price: 1, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	if response.Success || response.Error != RejectInsufficientBalance {
+		t.Fatalf("received-fee order = %+v, want insufficient-balance rejection", response)
+	}
+	client := ex.Clients[1]
+	if got := client.Balances["USD"]; got != 0 {
+		t.Fatalf("rejected order retained borrowed spot cash: got %d", got)
+	}
+	if got := client.Borrowed["USD"]; got != 0 {
+		t.Fatalf("rejected order retained debt: got %d", got)
+	}
+	if got := client.BorrowedSpot["USD"]; got != 0 {
+		t.Fatalf("rejected order retained spot debt attribution: got %d", got)
+	}
+	if got := client.Reserved["USD"]; got != 0 {
+		t.Fatalf("rejected order retained spot reservation: got %d", got)
+	}
+}
