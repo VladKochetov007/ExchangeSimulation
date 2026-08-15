@@ -20,11 +20,30 @@ import (
 
 func TestConfigAcceptsDocumentedSnakeCaseJSON(t *testing.T) {
 	var cfg Config
-	if err := json.Unmarshal([]byte(`{"log_dir":"ignored","seed":99,"dealer_hedge_mode":"off","short_option_tenor":7200000000000}`), &cfg); err != nil {
+	if err := json.Unmarshal([]byte(`{"log_dir":"ignored","log_mode":"none","seed":99,"dealer_hedge_mode":"off","short_option_tenor":7200000000000}`), &cfg); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if cfg.Seed != 99 || cfg.DealerHedgeMode != "off" || cfg.ShortOptionTenor != 2*time.Hour {
+	if cfg.LogMode != "none" || cfg.Seed != 99 || cfg.DealerHedgeMode != "off" || cfg.ShortOptionTenor != 2*time.Hour {
 		t.Fatalf("snake-case config was not decoded: %+v", cfg)
+	}
+}
+
+func TestNoLogModeRetainsRiskTelemetry(t *testing.T) {
+	sim, err := NewSim(3*time.Second, Config{LogDir: t.TempDir(), LogMode: "none", Seed: 13})
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	defer sim.Close()
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, venue := range sim.Venues {
+		if venue.InitialRisk == nil || venue.TerminalRisk == nil || len(venue.RiskTimeline) == 0 {
+			t.Fatalf("venue %s lost risk telemetry in no-log mode: %#v", venue.ID, venue)
+		}
+		if _, err := os.Stat(filepath.Join(sim.Config.LogDir, "venues", venue.ID, "general.jsonl")); !os.IsNotExist(err) {
+			t.Fatalf("venue %s wrote raw logs in no-log mode: %v", venue.ID, err)
+		}
 	}
 }
 

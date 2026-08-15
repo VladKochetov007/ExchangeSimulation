@@ -33,7 +33,11 @@ const (
 // experiments feasible without changing their event semantics through tick
 // coalescing.
 type Config struct {
-	LogDir   string   `json:"log_dir"`
+	LogDir string `json:"log_dir"`
+	// LogMode controls raw venue-event persistence. "full" is the default
+	// evidence mode; "none" retains deterministic in-memory risk telemetry and
+	// greeks.json while avoiding large JSONL output for replicated treatments.
+	LogMode  string   `json:"log_mode"`
 	Seed     int64    `json:"seed"`
 	VenueIDs []string `json:"venue_ids"`
 
@@ -75,6 +79,12 @@ func (c *Config) normalize() error {
 	}
 	if c.Seed == 0 {
 		c.Seed = 42
+	}
+	if c.LogMode == "" {
+		c.LogMode = "full"
+	}
+	if c.LogMode != "full" && c.LogMode != "none" {
+		return fmt.Errorf("multivenue: log mode must be full or none, got %q", c.LogMode)
 	}
 	if len(c.VenueIDs) == 0 {
 		c.VenueIDs = []string{"north", "central", "south"}
@@ -308,6 +318,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 			"Direct deterministic mounts are reproducible; latency is intentionally excluded.",
 			"No cross-venue routing or collateral transfer exists in schema version 1.",
 			"Option dealer begins with zero ABC; spot hedge sells borrow ABC against USD collateral when required.",
+			"Raw venue-event logs are controlled by log_mode; greeks.json risk telemetry is always emitted by the command.",
 		},
 	}, "", "  ")
 	if err != nil {
@@ -359,7 +370,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 
 func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClock, timers *simulation.SimTimerFactory, actorID *uint64) (*Venue, error) {
 	logDir := filepath.Join(s.Config.LogDir, "venues", id)
-	if err := os.MkdirAll(filepath.Join(logDir, "spot"), 0755); err != nil {
+	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return nil, err
 	}
 	newLogger := func(name string) (venueLogger, error) {
@@ -370,19 +381,6 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		s.loggers = append(s.loggers, logger)
 		return venueLogger{venueID: id, inner: logger}, nil
 	}
-	globalLog, err := newLogger("general.jsonl")
-	if err != nil {
-		return nil, err
-	}
-	spotLog, err := newLogger(filepath.Join("spot", "ABC-USD.jsonl"))
-	if err != nil {
-		return nil, err
-	}
-	derivativeLog, err := newLogger("derivatives.jsonl")
-	if err != nil {
-		return nil, err
-	}
-
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
 		ID:                      id,
 		EstimatedClients:        16,
@@ -393,9 +391,26 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		SnapshotInterval:        s.Config.SnapshotInterval,
 		BalanceSnapshotInterval: time.Minute,
 	})
-	ex.SetLogger("_global", globalLog)
-	ex.SetLogger("ABC/USD", spotLog)
-	ex.SetInstrumentLoggerFallback(derivativeLog)
+	if s.Config.LogMode == "full" {
+		if err := os.MkdirAll(filepath.Join(logDir, "spot"), 0755); err != nil {
+			return nil, err
+		}
+		globalLog, err := newLogger("general.jsonl")
+		if err != nil {
+			return nil, err
+		}
+		spotLog, err := newLogger(filepath.Join("spot", "ABC-USD.jsonl"))
+		if err != nil {
+			return nil, err
+		}
+		derivativeLog, err := newLogger("derivatives.jsonl")
+		if err != nil {
+			return nil, err
+		}
+		ex.SetLogger("_global", globalLog)
+		ex.SetLogger("ABC/USD", spotLog)
+		ex.SetInstrumentLoggerFallback(derivativeLog)
+	}
 
 	tick := int64(10 * mvQuotePrecision)
 	spot := exchange.NewSpotInstrument("ABC/USD", "ABC", "USD", mvBasePrecision, mvQuotePrecision, tick, mvBasePrecision/1_000)
