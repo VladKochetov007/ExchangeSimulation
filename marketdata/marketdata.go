@@ -62,10 +62,24 @@ func (p *MDPublisher) Subscribe(clientID uint64, symbol string, types []etypes.M
 		p.Subscriptions[symbol] = make(map[uint64]*etypes.Subscription)
 		p.gateways[symbol] = make(map[uint64]Subscriber)
 	}
+	// Subscribing adds feeds rather than replacing them. Unsubscribe removes a
+	// whole symbol, not one type, so a replacing Subscribe gave no way to hold
+	// two feeds on one symbol: a strategy that wanted snapshots and trades
+	// silently kept only whichever it asked for last.
+	existing := p.Subscriptions[symbol][clientID]
+	merged := make([]etypes.MDType, 0, len(types)+2)
+	if existing != nil && sameSubscriber(p.gateways[symbol][clientID], gateway) {
+		merged = append(merged, existing.Types...)
+	}
+	for _, mdType := range types {
+		if !slices.Contains(merged, mdType) {
+			merged = append(merged, mdType)
+		}
+	}
 	p.Subscriptions[symbol][clientID] = &etypes.Subscription{
 		ClientID: clientID,
 		Symbol:   symbol,
-		Types:    slices.Clone(types),
+		Types:    merged,
 	}
 	p.gateways[symbol][clientID] = gateway
 }

@@ -1,0 +1,36 @@
+{
+  "log_mode": "none",
+  "seed": 91,
+  "step": 1000000000,
+  "snapshot_interval": 1000000000,
+  "automation_interval": 1000000000,
+  "quote_interval": 1000000000,
+  "noise_interval": 2000000000,
+  "greek_interval": 60000000000,
+  "noise_trader_count": 2,
+  "option_flow_count": 2,
+  "strict_population_accounting": true,
+  "cross_asset_spot_graph": true,
+  "venue_rules": {
+    "north": {
+      "matching_rule": "price_time"
+    },
+    "central": {
+      "matching_rule": "pro_rata"
+    },
+    "south": {
+      "matching_rule": "pro_rata"
+    }
+  },
+  "spot_tick_quote_units": 10000,
+  "metaorder_traders": {
+    "min_qty": 2000000,
+    "max_qty": 200000000,
+    "pareto_alpha": 1.5,
+    "child_interval": 1000000000,
+    "participation_rate": 0.05,
+    "min_child_qty": 500000,
+    "rest_interval": 60000000000,
+    "max_duration": 120000000000
+  }
+}

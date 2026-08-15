@@ -387,3 +387,32 @@ func TestMDMsgPoolCleanup(t *testing.T) {
 		t.Errorf("Data should be reset to nil")
 	}
 }
+
+// Regression: subscribing to a second feed on a symbol must not silently drop
+// the first. Unsubscribe removes a whole symbol rather than one type, so there
+// was otherwise no way for a strategy to hold both snapshots and trades: a
+// market maker that wanted snapshots for its forward and trades for its
+// volatility estimate kept only whichever it requested last.
+func TestSubscribeAddsFeedsRatherThanReplacingThem(t *testing.T) {
+	publisher := NewMDPublisher()
+	gateway := NewClientGateway(1)
+
+	publisher.Subscribe(1, "BTC/USD", []MDType{MDSnapshot}, gateway)
+	publisher.Subscribe(1, "BTC/USD", []MDType{MDTrade}, gateway)
+
+	publisher.PublishTrade("BTC/USD", &Trade{Price: 100, Qty: 1}, 1)
+	publisher.Publish("BTC/USD", MDSnapshot, &BookSnapshot{}, 2)
+
+	received := map[MDType]int{}
+	for len(received) < 2 {
+		select {
+		case msg := <-gateway.MarketData:
+			received[msg.Type]++
+		default:
+			t.Fatalf("expected both feeds, received %v", received)
+		}
+	}
+	if received[MDSnapshot] == 0 || received[MDTrade] == 0 {
+		t.Fatalf("expected both feeds, received %v", received)
+	}
+}

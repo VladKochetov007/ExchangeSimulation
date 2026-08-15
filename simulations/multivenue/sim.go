@@ -97,6 +97,12 @@ type Config struct {
 	// sample counts as visibly mispriced in the run summary.
 	MispricingBandBps int64 `json:"mispricing_band_bps"`
 
+	// MetaorderTraders configures execution agents that split large parent
+	// orders. Their signs are independent of the fundamental value, so what
+	// they measure is the mechanical impact of execution rather than a trading
+	// signal.
+	MetaorderTraders *MetaorderTraderConfig `json:"metaorder_traders"`
+
 	// ValueTraderTiers replaces the homogeneous informed population with named
 	// groups that differ in reaction time and transport latency. This is what
 	// separates a medium-frequency participant that re-evaluates every few
@@ -267,11 +273,13 @@ func (c *Config) normalize() error {
 	}
 	if c.StoikovRiskAversion == 0 {
 		// The control depends on the product of risk aversion and inventory
-		// horizon: 0.005 with a 60s horizon and 0.0005 with a 600s horizon
-		// produce identical runs. A product near 0.3 keeps mean absolute
-		// mispricing at 0.0034 with no time beyond the 1% band, against 0.046
-		// and 69% of the run beyond that band at a product of 3.
-		c.StoikovRiskAversion = 0.0005
+		// horizon, so only that product is meaningful. This value was chosen
+		// with a live forward feed: at 1e-4 the market diverges, and below
+		// about 2e-6 the spread reaches the tick floor and further reduction
+		// changes nothing. An earlier and much larger value was calibrated
+		// while the makers' snapshot feed was silently disabled, which froze
+		// their forward and made the market artificially stable.
+		c.StoikovRiskAversion = 0.000002
 	}
 	if c.StoikovFillDecay == 0 {
 		c.StoikovFillDecay = 0.5
@@ -357,6 +365,7 @@ type Venue struct {
 	NoiseTrader      *feesim.RandomTaker
 	NoiseTraders     []*feesim.RandomTaker
 	ValueTraders     []*ValueTrader
+	MetaorderTraders []*MetaorderTrader
 	lastTwoSided     map[string]twoSidedMark
 	Mispricing       *MispricingStats
 	Microstructure   *MicrostructureStats
@@ -616,6 +625,10 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		for _, trader := range venue.ValueTraders {
 			runner.AddActor(trader)
 		}
+	}
+	if err := sim.addMetaorderTraders(timers, &actorID); err != nil {
+		sim.Close()
+		return nil, err
 	}
 	if err := sim.addValueTraderTiers(clock, scheduler, timers, &actorID); err != nil {
 		sim.Close()
@@ -903,6 +916,36 @@ func (v *Venue) connectParticipant(mount *simulation.Mount, role string, balance
 // addValueTraderTiers connects the heterogeneous informed population. A tier
 // with latency gets its own scheduled courier mount per venue; a tier without
 // latency uses the venue's direct mount, exactly like the homogeneous case.
+// addMetaorderTraders connects one execution agent per venue on the venue's
+// direct mount.
+func (s *Sim) addMetaorderTraders(timers *simulation.SimTimerFactory, actorID *uint64) error {
+	cfg := s.Config.MetaorderTraders
+	if cfg == nil {
+		return nil
+	}
+	if err := cfg.validate(); err != nil {
+		return err
+	}
+	fee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
+	balances := map[string]int64{"ABC": 1_000 * mvBasePrecision, "USD": 50_000_000 * mvQuotePrecision}
+	if s.Config.CrossAssetSpotGraph {
+		balances["CDF"] = 1_000 * mvBasePrecision
+	}
+	for venueIndex, venue := range s.Venues {
+		local := *cfg
+		local.Symbol = "ABC/USD"
+		local.BasePrecision = mvBasePrecision
+		local.Seed = flowSeed(s.Config.Seed, venueIndex, 0, 9)
+		_, gw := venue.connectParticipant(venue.Mount, "metaorder_trader_1", balances, 0, fee)
+		*actorID++
+		trader := NewMetaorderTrader(*actorID, gw, venue.ID, local)
+		trader.SetTickerFactory(timers)
+		venue.MetaorderTraders = append(venue.MetaorderTraders, trader)
+		s.Runner.AddActor(trader)
+	}
+	return nil
+}
+
 func (s *Sim) addValueTraderTiers(clock *simulation.SimulatedClock, scheduler *simulation.EventScheduler, timers *simulation.SimTimerFactory, actorID *uint64) error {
 	if len(s.Config.ValueTraderTiers) == 0 {
 		return nil
