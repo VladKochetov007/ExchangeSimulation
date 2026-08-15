@@ -57,21 +57,30 @@
   left `CDF/USD` one-sided on south at the five-minute boundary. Strict
   population accounting rejected the run. This is expected behavior from the
   measurement contract, not a missing-value fallback and not a strategy result.
-- **Accepted control (E-040):** the committed symmetric population has two
+- **Superseded probe (E-040):** the committed symmetric population has two
   independently funded makers on each direct spot pair. Five simulated minutes
   produced 39 initial and 39 terminal USD accounts, all marked from both
-  two-sided `ABC/USD` and `CDF/USD` books. The complete report and manifest are
+  two-sided `ABC/USD` and `CDF/USD` books. The complete report and manifest were
   byte-identical at `GOMAXPROCS=1` and `14`.
-- **Evidence:** manifest
+- **Why it is not accepted cross-pair evidence:** `ABC/CDF` used the USD quote
+  precision (`1e5`) in its Stoikov configuration while the instrument uses CDF
+  precision (`1e8`). Its variance and inventory control were therefore in the
+  wrong units by 1,000x. The deterministic strict-account result remains an
+  archived reporting probe, but it cannot support a cross-pair liquidity,
+  triangle, profitability, or ecology conclusion.
+- **Archived evidence:** manifest
   `a4da2c343496c4aaa95494a449b54294d32cf22abab1303c2a5cde81ae258c4e`;
   report
   `c799c56bc413296026298ff15ece6f8e000ccf2949233c4af3251a365165d6b8`;
   persistent artifacts under
   `logs/research/ffa-ecology-control-e040-cross-asset-canonical-*`.
-- **Limit:** this validates graph construction, valuation completeness, and
-  deterministic mechanics. There is no triangle strategy, cross-venue
-  transfer, generic FX graph, payoff matrix, selection rule, or claim about
-  market profitability.
+- **Revalidation required:** the pending correction gives `ABC/CDF` CDF quote
+  precision and converts the frozen-CDF control variance from USD-squared to
+  CDF-squared units. Re-run this exact control as a new experiment before
+  promoting the three-asset graph.
+- **Limit:** there is still no accepted triangle strategy, cross-venue transfer,
+  generic FX graph, payoff matrix, selection rule, or claim about market
+  profitability.
 
 ## E-038: strict FFA control harness
 
@@ -105,8 +114,9 @@
 
 ## Next discriminating decision
 
-Build an executable, all-in triangular-arbitrage null harness over the accepted
-three-book graph. It must use its own delayed public book state, preserve a
-per-leg request/fill/fee/residual ledger, and reject a midpoint-only cycle. A
-generic strategy registry and fixed-mixture payoff matrix remain blocked until
-that information and accounting boundary is tested.
+First revalidate the corrected three-book graph. Then build an executable,
+all-in triangular-arbitrage null harness over it. It must use its own delayed
+public book state, preserve a per-leg request/fill/fee/residual ledger, and
+reject a midpoint-only cycle. A generic strategy registry and fixed-mixture
+payoff matrix remain blocked until that information and accounting boundary is
+tested.

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -144,6 +145,29 @@ func TestCrossAssetSpotGraphListsAndValuesEveryPair(t *testing.T) {
 		for _, symbol := range []string{"ABC/USD", "CDF/USD", "ABC/CDF"} {
 			if venue.Exchange.Books[symbol] == nil {
 				t.Fatalf("venue %s missing cross-asset spot book %s", venue.ID, symbol)
+			}
+		}
+		for _, maker := range venue.SpotMakers {
+			if maker.cfg.Symbol != "ABC/CDF" {
+				continue
+			}
+			if maker.cfg.QuotePrecision != mvBasePrecision {
+				t.Fatalf("venue %s ABC/CDF quote precision = %d, want %d", venue.ID, maker.cfg.QuotePrecision, mvBasePrecision)
+			}
+			wantVariance := sim.Config.StoikovVariancePerSecond / 9_000_000
+			if math.Abs(maker.cfg.InitialVariancePerSec-wantVariance) > 1e-15 {
+				t.Fatalf("venue %s ABC/CDF variance = %.18g, want %.18g", venue.ID, maker.cfg.InitialVariancePerSec, wantVariance)
+			}
+			quote, ok := CalculateStoikovQuote(StoikovInputs{
+				Forward:           float64(maker.cfg.BootstrapPrice) / float64(maker.cfg.QuotePrecision),
+				VariancePerSecond: maker.cfg.InitialVariancePerSec,
+				RiskAversion:      maker.cfg.RiskAversion,
+				FillDecay:         maker.cfg.FillDecay,
+				InventoryHorizon:  maker.cfg.InventoryHorizon,
+				MinHalfSpread:     float64(maker.cfg.TickSize) / float64(maker.cfg.QuotePrecision),
+			})
+			if !ok || quote.Bid <= 0 || quote.Ask <= quote.Bid {
+				t.Fatalf("venue %s ABC/CDF bootstrap quote invalid: %#v", venue.ID, quote)
 			}
 		}
 	}

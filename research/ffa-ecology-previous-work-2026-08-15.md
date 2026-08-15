@@ -37,8 +37,10 @@
 
 ## What is not yet present
 
-- Dozens of assets, a cross-quote graph such as `ABC/CDF`, `ABC/USD`, and
-  `CDF/USD`, and cross-listed derivatives are absent.
+- A minimal `ABC/CDF`, `ABC/USD`, and `CDF/USD` graph is implemented, but its
+  first strict control is superseded pending revalidation after an `ABC/CDF`
+  quote-precision/variance-unit correction. Dozens of assets and cross-listed
+  derivatives remain absent.
 - Per-venue matching-rule heterogeneity, venue-specific tick/minimum/fee
   regimes, auction mechanisms, self-match policy, and a clearing/transfer
   model are absent.
@@ -68,5 +70,9 @@
   rolling horizon. It is not a proof of optimal market making.
 - A cross-venue FOK router has non-atomic leg risk by design. It must retain
   incomplete groups and terminal exposure rather than discard failures.
+- Existing `feesim` and `randomwalk` triangle actors are not suitable for FFA
+  evidence: their cross-leg sizing, partial-fill handling, fee accounting, and
+  residual lifecycle are incomplete. Preserve them as historical prototypes;
+  do not extend or delete them while the replacement is specified and tested.
 - Lossless feed/backpressure and market-data recovery are still explicit
   simulator gaps at high event rates.

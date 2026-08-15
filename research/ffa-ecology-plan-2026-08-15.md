@@ -53,9 +53,12 @@ the documented default; otherwise no one-sided gamma/ecology arm may run.
 
 ## Promotion ladder
 
-1. **Mechanics:** the strict 3-asset spot graph and exact per-venue FIFO or
-   pro-rata selection are accepted in E-040. Next, add an all-in triangle null
-   harness; do not substitute midpoint parity or an intent-only ledger.
+1. **Mechanics:** exact per-venue FIFO or pro-rata selection is accepted. The
+   3-asset graph is pending revalidation: E-040's strict-account output was
+   reproducible, but its `ABC/CDF` maker used USD rather than CDF quote units.
+   After the quote-unit correction, rerun the graph as a new experiment, then
+   add an all-in triangle null harness. Do not substitute midpoint parity or an
+   intent-only ledger.
 2. **Measurement:** immutable manifest; account, risk, fill, and information
    boundary logs. Make incomplete valuation a run failure.
 3. **Null controls:** noise plus market makers, then no-arb and no-options

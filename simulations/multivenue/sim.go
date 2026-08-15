@@ -653,17 +653,17 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		*actorID++
 		return *actorID
 	}
-	stoikovConfig := func(symbol, reference string, bootstrapPrice int64, tickSize int64) StoikovMMConfig {
+	stoikovConfig := func(symbol, reference string, bootstrapPrice, quotePrecision, tickSize int64, variancePerSecond float64) StoikovMMConfig {
 		return StoikovMMConfig{
 			Symbol: symbol, ReferenceSymbol: reference, BootstrapPrice: bootstrapPrice,
-			BasePrecision: mvBasePrecision, QuotePrecision: mvQuotePrecision, TickSize: tickSize, QuoteQty: mvBasePrecision / 5,
+			BasePrecision: mvBasePrecision, QuotePrecision: quotePrecision, TickSize: tickSize, QuoteQty: mvBasePrecision / 5,
 			QuoteInterval: s.Config.QuoteInterval, VolatilityHalfLife: s.Config.StoikovVolatilityHalfLife,
-			InitialVariancePerSec: s.Config.StoikovVariancePerSecond, InventoryHorizon: s.Config.StoikovInventoryHorizon,
+			InitialVariancePerSec: variancePerSecond, InventoryHorizon: s.Config.StoikovInventoryHorizon,
 			RiskAversion: s.Config.StoikovRiskAversion, FillDecay: s.Config.StoikovFillDecay, MinHalfSpreadTicks: 1,
 		}
 	}
 	for i := 0; i < 2; i++ {
-		maker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC/USD", "ABC/USD", mvBootstrapPrice, tick))
+		maker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC/USD", "ABC/USD", mvBootstrapPrice, mvQuotePrecision, tick, s.Config.StoikovVariancePerSecond))
 		maker.SetTickerFactory(timers)
 		venue.SpotMakers = append(venue.SpotMakers, maker)
 	}
@@ -671,16 +671,21 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		cdfTick := int64(mvQuotePrecision)
 		crossTick := int64(mvBasePrecision / 1_000)
 		crossBootstrap := etypes.MulDiv(mvBootstrapPrice, mvBasePrecision, mvCDFBootstrap)
+		// The configured baseline variance is in USD^2 per second. Under the
+		// frozen-CDF control, ABC/CDF = ABC/USD / CDF/USD, so convert it to
+		// CDF^2 per second before using the cross-pair control law.
+		cdfUSD := float64(mvCDFBootstrap) / float64(mvQuotePrecision)
+		crossVariance := s.Config.StoikovVariancePerSecond / (cdfUSD * cdfUSD)
 		for i := 0; i < 2; i++ {
-			cdfMaker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("cdf_spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("CDF/USD", "CDF/USD", mvCDFBootstrap, cdfTick))
+			cdfMaker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("cdf_spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("CDF/USD", "CDF/USD", mvCDFBootstrap, mvQuotePrecision, cdfTick, s.Config.StoikovVariancePerSecond))
 			cdfMaker.SetTickerFactory(timers)
 			venue.SpotMakers = append(venue.SpotMakers, cdfMaker)
-			crossMaker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("abc_cdf_spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC/CDF", "ABC/CDF", crossBootstrap, crossTick))
+			crossMaker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("abc_cdf_spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC/CDF", "ABC/CDF", crossBootstrap, mvBasePrecision, crossTick, crossVariance))
 			crossMaker.SetTickerFactory(timers)
 			venue.SpotMakers = append(venue.SpotMakers, crossMaker)
 		}
 	}
-	venue.PerpMaker = NewStoikovMarketMaker(nextActor(), connect("perp_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC-PERP", "ABC/USD", mvBootstrapPrice, tick))
+	venue.PerpMaker = NewStoikovMarketMaker(nextActor(), connect("perp_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC-PERP", "ABC/USD", mvBootstrapPrice, mvQuotePrecision, tick, s.Config.StoikovVariancePerSecond))
 	venue.PerpMaker.SetTickerFactory(timers)
 
 	venue.FuturesMaker = derivsim.NewFuturesMarketMaker(nextActor(), connect("futures_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), derivsim.FuturesMMConfig{
