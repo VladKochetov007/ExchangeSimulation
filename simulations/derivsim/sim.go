@@ -48,6 +48,7 @@ type SimConfig struct {
 	DealerHedge      bool
 	DealerHedgeMs    int64 // default 500
 	DealerHedgeBand  int64 // base units (default lot/2)
+	GreekIntervalMs  int64 // default 1000; ordered dealer Greek snapshots
 	OptionQuoteQty   int64 // default 0.5 BTC
 	FuturesSpreadBps int64 // default 4
 
@@ -128,6 +129,9 @@ func (c *SimConfig) normalize() {
 	if c.DealerHedgeBand == 0 {
 		c.DealerHedgeBand = c.OptionLotQty / 2
 	}
+	if c.GreekIntervalMs == 0 {
+		c.GreekIntervalMs = 1_000
+	}
 	if c.CarryEdgeBps == 0 {
 		c.CarryEdgeBps = 10
 	}
@@ -185,7 +189,15 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		return nil, err
 	}
 	ex.SetLogger("ABC/USD", logSpot)
-	loggers := []*feesim.JSONLinesLogger{logGlobal, logSpot}
+	logDerivatives, err := feesim.NewJSONLinesLogger(cfg.LogDir + "/derivatives.jsonl")
+	if err != nil {
+		return nil, err
+	}
+	// Futures and options are listed after setup. Their book, trade, fill,
+	// mark, and expiry events must remain observable even though no static
+	// per-symbol file exists yet.
+	ex.SetInstrumentLoggerFallback(logDerivatives)
+	loggers := []*feesim.JSONLinesLogger{logGlobal, logSpot, logDerivatives}
 
 	tick := int64(10 * usdPrecision)
 	spot := exchange.NewSpotInstrument("ABC/USD", "ABC", "USD",
@@ -304,6 +316,7 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		HedgeEnabled:  cfg.DealerHedge,
 		HedgeInterval: time.Duration(cfg.DealerHedgeMs) * time.Millisecond,
 		HedgeBandQty:  cfg.DealerHedgeBand,
+		GreekInterval: time.Duration(cfg.GreekIntervalMs) * time.Millisecond,
 		BasePrecision: basePrecision,
 	})
 	sim.Dealer.SetTickerFactory(timerFact)

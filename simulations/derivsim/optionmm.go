@@ -11,10 +11,13 @@ import (
 
 // OptionMMConfig drives a market-opening option dealer: it discovers every
 // listed option on Underlying from the instrument feed, quotes around the
-// Black-76 theoretical value with an inventory premium skew (Stoikov-Saglam
-// style), and delta-hedges its aggregate option inventory in the underlying.
-// The hedger is the Frey-Stremme feedback channel: a net short-gamma book
-// buys rallies and sells dips, amplifying underlying moves.
+// Black-76 theoretical value with a simple linear inventory skew, and
+// delta-hedges its aggregate option inventory in the underlying.
+//
+// This is deliberately not labelled Avellaneda-Stoikov: it has no calibrated
+// fill-intensity curve, risk-aversion term, volatility estimate, or finite
+// horizon reservation price. It is the baseline against which that model will
+// be evaluated.
 type OptionMMConfig struct {
 	Underlying string
 	IV         float64
@@ -34,7 +37,33 @@ type OptionMMConfig struct {
 	// HedgeBandQty: rebalance only when |target − current| exceeds this.
 	HedgeBandQty int64
 
+	// GreekInterval samples the live option-book exposure after the actor has
+	// consumed the ordered exchange feed. Zero disables telemetry for callers
+	// that only need quoting behavior.
+	GreekInterval time.Duration
+
 	BasePrecision int64
+}
+
+// GreekProfile is the dealer's Black-76 sensitivity snapshot. ModelForward is
+// currently the spot-mid proxy used by the baseline simulator; ForwardSource
+// makes that approximation visible to downstream analysis. Delta is in
+// underlying base units, gamma in base units per quote-price unit, and vega in
+// quote units per one-unit annualized-volatility move. HedgeDelta is the spot
+// hedge inventory; NetDelta is option delta plus that hedge.
+type GreekProfile struct {
+	Timestamp         int64
+	Phase             string
+	SpotMid           int64
+	ModelForward      int64
+	ForwardSource     string
+	ImpliedVolatility float64
+	OptionDelta       float64
+	HedgeDelta        float64
+	NetDelta          float64
+	Gamma             float64
+	Vega              float64
+	Contracts         int
 }
 
 type optionQuotes struct {
@@ -65,6 +94,7 @@ type OptionMarketMaker struct {
 	spotMid    int64
 	hedgePos   int64 // underlying inventory from hedge fills
 	hedgeQty   int64 // cumulative |hedge| traded, for reporting
+	profiles   []GreekProfile
 	subscribed bool
 }
 
@@ -90,6 +120,9 @@ func NewOptionMarketMaker(id uint64, gw actor.Gateway, cfg OptionMMConfig) *Opti
 	if cfg.HedgeEnabled {
 		mm.AddTicker(cfg.HedgeInterval, mm.onHedgeTick)
 	}
+	if cfg.GreekInterval > 0 {
+		mm.AddTicker(cfg.GreekInterval, mm.onGreekTick)
+	}
 	return mm
 }
 
@@ -97,6 +130,12 @@ func NewOptionMarketMaker(id uint64, gw actor.Gateway, cfg OptionMMConfig) *Opti
 func (mm *OptionMarketMaker) HedgeTraded() int64 { return mm.hedgeQty }
 func (mm *OptionMarketMaker) HedgePosition() int64 {
 	return mm.hedgePos
+}
+
+// GreekProfiles returns a stable copy so post-run analysis cannot mutate
+// telemetry retained by the actor.
+func (mm *OptionMarketMaker) GreekProfiles() []GreekProfile {
+	return append([]GreekProfile(nil), mm.profiles...)
 }
 
 func (mm *OptionMarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
@@ -264,6 +303,56 @@ func (mm *OptionMarketMaker) onHedgeTick(t time.Time) {
 		reqID := mm.SubmitOrder(mm.cfg.Underlying, exchange.Sell, exchange.Market, 0, -gap)
 		mm.set.trackRequest(reqID, mm.cfg.Underlying)
 	}
+}
+
+func (mm *OptionMarketMaker) onGreekTick(t time.Time) {
+	profile := mm.GreekProfile(t)
+	if profile.SpotMid != 0 {
+		mm.profiles = append(mm.profiles, profile)
+	}
+}
+
+// GreekProfile computes a mark-time sensitivity snapshot from the dealer's
+// filled option inventory and underlying hedge. It intentionally does not
+// include resting orders: Greeks are exposures, not desired exposure.
+func (mm *OptionMarketMaker) GreekProfile(t time.Time) GreekProfile {
+	profile := GreekProfile{
+		Timestamp:         t.UnixNano(),
+		Phase:             "post_quote_pre_hedge_fill",
+		SpotMid:           mm.spotMid,
+		ModelForward:      mm.spotMid,
+		ForwardSource:     "spot_mid_proxy",
+		ImpliedVolatility: mm.cfg.IV,
+	}
+	if mm.spotMid <= 0 || mm.cfg.BasePrecision <= 0 {
+		return profile
+	}
+	now := t.UnixNano()
+	for _, c := range mm.set.orderedContracts() {
+		if c.Type != "OPTION" {
+			continue
+		}
+		q := mm.quotes[c.Symbol]
+		if q == nil || q.inventory == 0 {
+			continue
+		}
+		yearsLeft := float64(c.ExpiryNano-now) / float64(365*24*time.Hour)
+		if yearsLeft <= 0 {
+			continue
+		}
+		sensitivity, ok := eprice.Black76Sensitivities(mm.spotMid, c.Strike, mm.cfg.IV, yearsLeft, c.IsCall)
+		if !ok {
+			continue
+		}
+		contracts := float64(q.inventory) / float64(mm.cfg.BasePrecision)
+		profile.OptionDelta += contracts * sensitivity.Delta
+		profile.Gamma += contracts * sensitivity.Gamma
+		profile.Vega += contracts * sensitivity.Vega
+		profile.Contracts++
+	}
+	profile.HedgeDelta = float64(mm.hedgePos) / float64(mm.cfg.BasePrecision)
+	profile.NetDelta = profile.OptionDelta + profile.HedgeDelta
+	return profile
 }
 
 func alignDown(price, tick int64) int64 {

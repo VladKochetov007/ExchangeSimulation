@@ -85,29 +85,50 @@ type phaseJob struct {
 	fn     func()
 }
 
+// instrumentLogEvent preserves the symbol for a dynamically listed
+// instrument written to a shared fallback stream. Symbol-specific loggers keep
+// their established event schema; only the mixed fallback needs this envelope.
+type instrumentLogEvent struct {
+	Symbol  string `json:"symbol"`
+	Payload any    `json:"payload"`
+}
+
+type scopedInstrumentLogger struct {
+	symbol string
+	Logger
+}
+
+func (l scopedInstrumentLogger) LogEvent(simTime int64, clientID uint64, eventName string, event any) {
+	l.Logger.LogEvent(simTime, clientID, eventName, instrumentLogEvent{
+		Symbol:  l.symbol,
+		Payload: event,
+	})
+}
+
 type DefaultExchange struct {
-	ID                   string
-	Clients              map[uint64]*Client
-	Gateways             map[uint64]*ClientGateway
-	Books                map[string]*OrderBook
-	Instruments          map[string]Instrument
-	Positions            PositionStore
-	ExchangeBalance      *ExchangeBalance
-	NextOrderID          uint64
-	Matcher              MatchingEngine
-	MDPublisher          *MDPublisher
-	Clock                Clock
-	Loggers              map[string]Logger
-	BorrowingMgr         *BorrowingManager
-	CollateralRate       int64
-	LiquidationFeeBps    int64
-	autoAnchorMarks      bool
-	deterministicIngress bool
-	deterministicPhases  bool
-	markEMAWindow        int
-	markBandBps          int64
-	autoAnchoredSymbols  map[string]bool
-	requestsInFlight     atomic.Int64
+	ID                    string
+	Clients               map[uint64]*Client
+	Gateways              map[uint64]*ClientGateway
+	Books                 map[string]*OrderBook
+	Instruments           map[string]Instrument
+	Positions             PositionStore
+	ExchangeBalance       *ExchangeBalance
+	NextOrderID           uint64
+	Matcher               MatchingEngine
+	MDPublisher           *MDPublisher
+	Clock                 Clock
+	Loggers               map[string]Logger
+	instrumentLogFallback Logger
+	BorrowingMgr          *BorrowingManager
+	CollateralRate        int64
+	LiquidationFeeBps     int64
+	autoAnchorMarks       bool
+	deterministicIngress  bool
+	deterministicPhases   bool
+	markEMAWindow         int
+	markBandBps           int64
+	autoAnchoredSymbols   map[string]bool
+	requestsInFlight      atomic.Int64
 	// automInFlight counts automation-loop work (mark prices, funding,
 	// expiry) in progress. These loops react to the same clock the runner
 	// advances, so a barrier that ignored them would move time while the
@@ -376,7 +397,7 @@ func (e *DefaultExchange) logSnapshots() {
 			Asks: book.Asks.GetPublicSnapshot(),
 		}, timestamp)
 
-		if log := e.Loggers[symbol]; log != nil {
+		if log := e.getLogger(symbol); log != nil {
 			log.LogEvent(timestamp, 0, "BookSnapshot", map[string]any{
 				"bids": book.Bids.GetSnapshot(),
 				"asks": book.Asks.GetSnapshot(),
@@ -498,8 +519,25 @@ func (e *DefaultExchange) SetLogger(symbol string, log Logger) {
 	e.Loggers[symbol] = log
 }
 
+// SetInstrumentLoggerFallback records events for dynamically listed symbols
+// that do not have a dedicated logger. It deliberately does not replace the
+// _global logger: balance and lifecycle records must remain venue-scoped.
+func (e *DefaultExchange) SetInstrumentLoggerFallback(log Logger) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.instrumentLogFallback = log
+}
+
 func (e *DefaultExchange) getLogger(symbol string) Logger {
-	return e.Loggers[symbol]
+	if log := e.Loggers[symbol]; log != nil {
+		return log
+	}
+	if symbol != "_global" {
+		if log := e.instrumentLogFallback; log != nil {
+			return scopedInstrumentLogger{symbol: symbol, Logger: log}
+		}
+	}
+	return nil
 }
 
 func (e *DefaultExchange) EnableBorrowing(config BorrowingConfig) error {

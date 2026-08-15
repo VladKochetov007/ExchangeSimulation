@@ -23,6 +23,7 @@ type summary struct {
 	ParityTrades  int64                     `json:"parity_trades"`
 	BasisSamples  int                       `json:"basis_samples"`
 	ParitySamples int                       `json:"parity_samples"`
+	Greeks        derivsim.GreekSummary     `json:"dealer_greeks"`
 }
 
 func main() {
@@ -82,9 +83,21 @@ func main() {
 		}
 		out.ParityTrades = sim.ParityBot.Trades()
 	}
+	greekReport, err := derivsim.BuildGreekReport(sim.Dealer.GreekProfiles())
+	if err != nil {
+		log.Fatal(err)
+	}
+	out.Greeks = greekReport.Summary
 
 	b, _ := json.MarshalIndent(out, "", "  ")
 	if err := os.WriteFile(filepath.Join(*logDir, "summary.json"), b, 0644); err != nil {
+		log.Fatal(err)
+	}
+	greekBytes, err := json.MarshalIndent(greekReport, "", "  ")
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(*logDir, "greeks.json"), greekBytes, 0644); err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("done: sim=%s wall=%s logs=%s", *duration, time.Since(started).Round(time.Second), *logDir)

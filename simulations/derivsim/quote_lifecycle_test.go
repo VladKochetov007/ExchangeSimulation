@@ -2,11 +2,13 @@ package derivsim
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	eprice "exchange_sim/price"
 	etypes "exchange_sim/types"
 )
 
@@ -177,5 +179,40 @@ func TestFuturesMMRequoteLifecycle(t *testing.T) {
 	}
 	if got := len(gw.placedOrders()); got != 4 {
 		t.Fatalf("price move must requote, got %d orders", got)
+	}
+}
+
+func TestOptionMMGreekProfileUsesFilledInventoryAndHedge(t *testing.T) {
+	gw := newStubGateway()
+	mm := NewOptionMarketMaker(1, gw, OptionMMConfig{
+		Underlying: "ABC/USD", IV: 0.8,
+		QuoteInterval: time.Hour, BasePrecision: 1_000,
+	})
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	expiry := now.Add(24 * time.Hour).UnixNano()
+	listOption(mm, "ABC-C-100", 10_000, expiry)
+	mm.spotMid = 10_000
+	mm.quotes["ABC-C-100"].inventory = 2_000 // two contracts long
+	mm.hedgePos = -500                       // half a base unit short
+
+	got := mm.GreekProfile(now)
+	greeks, ok := eprice.Black76Sensitivities(10_000, 10_000, 0.8, 1.0/365.0, true)
+	if !ok {
+		t.Fatal("reference Black-76 calculation invalid")
+	}
+	if math.Abs(got.OptionDelta-2*greeks.Delta) > 1e-12 {
+		t.Fatalf("option delta = %.12f, want %.12f", got.OptionDelta, 2*greeks.Delta)
+	}
+	if math.Abs(got.Gamma-2*greeks.Gamma) > 1e-12 || math.Abs(got.Vega-2*greeks.Vega) > 1e-9 {
+		t.Fatalf("profile curvature mismatch: got=%+v reference=%+v", got, greeks)
+	}
+	if got.HedgeDelta != -0.5 || math.Abs(got.NetDelta-(got.OptionDelta-0.5)) > 1e-12 {
+		t.Fatalf("hedge aggregation wrong: %+v", got)
+	}
+	if got.ModelForward != mm.spotMid || got.ForwardSource != "spot_mid_proxy" {
+		t.Fatalf("forward provenance missing: %+v", got)
+	}
+	if got.Contracts != 1 {
+		t.Fatalf("active option contracts = %d, want 1", got.Contracts)
 	}
 }

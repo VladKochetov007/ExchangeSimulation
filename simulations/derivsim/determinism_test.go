@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -42,6 +44,37 @@ func digestDerivSimLogs(t *testing.T, dir string) string {
 		hash.Write(data)
 	}
 	return fmt.Sprintf("%x", hash.Sum(nil))
+}
+
+func TestDerivSimLogsDynamicallyListedDerivatives(t *testing.T) {
+	logDir := t.TempDir()
+	sim, err := NewSim(2*time.Second, SimConfig{LogDir: logDir})
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	sim.Exchange().StartAutomation(ctx)
+	sim.Runner.SetShutdownHook(func() {
+		cancel()
+		sim.Exchange().StopAutomation()
+	})
+	if err := sim.Runner.Run(ctx); err != nil {
+		t.Fatalf("Runner.Run: %v", err)
+	}
+	sim.Close()
+
+	data, err := os.ReadFile(filepath.Join(logDir, "derivatives.jsonl"))
+	if err != nil {
+		t.Fatalf("read derivatives log: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"event":"BookSnapshot"`) {
+		t.Fatalf("derivatives log has no book snapshots:\n%s", text)
+	}
+	optionSymbol := regexp.MustCompile(`"symbol":"ABC-[0-9]+-[0-9]+-(?:C|P)"`)
+	if !strings.Contains(text, "ABC-FUT-") || !optionSymbol.MatchString(text) {
+		t.Fatalf("derivatives log does not include futures and options:\n%s", text)
+	}
 }
 
 // Derivsim combines listings, expiry automation, and multiple actor classes.
