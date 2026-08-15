@@ -1,5 +1,11 @@
 # Three-Venue 48-Hour Greek Experiment - 2026-08-15
 
+> **Superseded for terminal-risk conclusions.** The raw lifecycle and
+> maturity observations remain useful history, but this report's periodic
+> Greeks were actor-owned and its final observation preceded terminal expiry.
+> Use [options-hedge-replicates-2026-08-15.md](options-hedge-replicates-2026-08-15.md)
+> for exchange-owned post-mark and strict terminal marked-account telemetry.
+
 ## Scope
 
 This experiment is a deterministic, direct-connect baseline. It creates three

@@ -1,5 +1,11 @@
 # Three-Venue Options Hedge Pilot, 2026-08-15
 
+> **Superseded for conclusions.** This early pilot used actor-local Greek
+> observations and had no strict terminal marked-equity report. Retained only
+> as implementation history. Use
+> [options-hedge-replicates-2026-08-15.md](options-hedge-replicates-2026-08-15.md)
+> for accepted 20-seed exchange-owned evidence.
+
 ## Question
 
 Does a stateful delta hedge reduce option dealer net-delta exposure in a
