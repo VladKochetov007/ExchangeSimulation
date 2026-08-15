@@ -164,9 +164,21 @@ func TestBalanceSnapshotMixed(t *testing.T) {
 		t.Errorf("Expected 2 spot balances, got %d", len(snapshot.SpotBalances))
 	}
 
-	// Check perp balances
-	if len(snapshot.PerpBalances) != 2 {
-		t.Errorf("Expected 2 perp balances, got %d", len(snapshot.PerpBalances))
+	// Debt is part of net worth even when its credited wallet balance was later
+	// spent. A debt-only BTC row must remain visible in the perp-attributed
+	// wallet instead of disappearing from snapshots.
+	if len(snapshot.PerpBalances) != 3 {
+		t.Errorf("Expected 3 perp balances including debt-only BTC, got %d", len(snapshot.PerpBalances))
+	}
+	var perpBTC *AssetBalance
+	for i := range snapshot.PerpBalances {
+		if snapshot.PerpBalances[i].Asset == "BTC" {
+			perpBTC = &snapshot.PerpBalances[i]
+			break
+		}
+	}
+	if perpBTC == nil || perpBTC.NetAsset != -BTC_PRECISION || perpBTC.Borrowed != BTC_PRECISION {
+		t.Errorf("Expected debt-only BTC perp row, got %#v", perpBTC)
 	}
 
 	// Check borrowed

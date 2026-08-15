@@ -44,6 +44,45 @@ type AccountSnapshot struct {
 	Positions []PositionSnapshot `json:"positions"`
 }
 
+// AssetValuationMark converts an asset's fixed-point balance into one
+// reporting asset. Price is reporting-asset units per whole Asset; Precision
+// is the number of fixed-point units in one whole Asset.
+//
+// Example: valuing ABC and USD in USD precision, an ABC/USD mid of 50,000 USD
+// is expressed as Price=5_000_000_000 and Precision=100_000_000 for ABC;
+// USD itself uses Price=100_000 and Precision=100_000.
+type AssetValuationMark struct {
+	Price     int64 `json:"price"`
+	Precision int64 `json:"precision"`
+}
+
+// AccountValuationSpec makes the numeraire and every asset conversion
+// explicit. Marked account reports fail rather than silently drop a non-zero
+// asset or derivative quote currency without a valid mark.
+type AccountValuationSpec struct {
+	ReportAsset     string                        `json:"report_asset"`
+	ReportPrecision int64                         `json:"report_precision"`
+	AssetMarks      map[string]AssetValuationMark `json:"asset_marks"`
+}
+
+// MarkedAccountSnapshot is a synchronous mark-to-market account report in the
+// requested reporting asset. Wallet balances include locked cash and subtract
+// attributed debt exactly once. Futures-style positions contribute entry-to-mark
+// PnL; cash-premium options contribute their signed current market value because
+// their entry premium was already transferred through the wallet at each fill.
+type MarkedAccountSnapshot struct {
+	AccountSnapshot
+	ReportAsset          string `json:"report_asset"`
+	ReportPrecision      int64  `json:"report_precision"`
+	SpotEquity           int64  `json:"spot_equity"`
+	PerpCashEquity       int64  `json:"perp_cash_equity"`
+	IsolatedEquity       int64  `json:"isolated_equity"`
+	DerivativeUnrealized int64  `json:"derivative_unrealized"`
+	OptionMarketValue    int64  `json:"option_market_value"`
+	Maintenance          int64  `json:"maintenance"`
+	Equity               int64  `json:"equity"`
+}
+
 type IsolatedPosition struct {
 	Symbol     string
 	Collateral map[string]int64

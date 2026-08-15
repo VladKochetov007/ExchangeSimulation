@@ -47,6 +47,10 @@ func injectOptionRiskPositions(ex *Exchange, perpSize, optionSize, optionEntry i
 		Size: optionSize, EntryPrice: optionEntry,
 	})
 	pm.Unlock()
+	// These test positions stand in for already-settled fills. Option premium is
+	// cash-settled at entry, so retain the premium transfer in the wallet before
+	// testing the current signed option market value.
+	ex.AddPerpBalance(1, "USD", -MulDiv(optionSize, optionEntry, BTC_PRECISION))
 }
 
 func TestRegressionShortOptionMaintenanceTriggersLiquidation(t *testing.T) {

@@ -200,6 +200,8 @@ func TestRegressionPureOptionsAccountGetsLiquidated(t *testing.T) {
 		Size: -BTCAmount(1), EntryPrice: USDAmount(3_000),
 	})
 	pm.Unlock()
+	// Model the premium received when the injected short was opened.
+	ex.AddPerpBalance(1, "USD", USDAmount(3_000))
 
 	// Underlying rallied: maintenance = 7.5% x $50k + $3k premium = $6,750
 	// against $5,000 equity. Resting ask supplies the forced buy-back.
@@ -243,6 +245,8 @@ func TestRegressionUnmarkedShortOptionStillCarriesMaintenance(t *testing.T) {
 		Size: -BTCAmount(1), EntryPrice: USDAmount(3_000),
 	})
 	pm.Unlock()
+	// Model the premium received when the injected short was opened.
+	ex.AddPerpBalance(1, "USD", USDAmount(3_000))
 
 	// NO SetMarks: the instrument has no underlying mark yet.
 	if _, reject := InjectLimitOrder(ex, 2, "BTC-1-48000-C", Sell, USDAmount(3_000), BTCAmount(1)); reject != "" {

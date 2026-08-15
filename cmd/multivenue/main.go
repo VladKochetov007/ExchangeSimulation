@@ -12,14 +12,16 @@ import (
 	"path/filepath"
 	"time"
 
-	"exchange_sim/simulations/derivsim"
 	"exchange_sim/simulations/multivenue"
 )
 
 type greekOutput struct {
-	SchemaVersion int                             `json:"schema_version"`
-	Venues        map[string]derivsim.GreekReport `json:"venues"`
-	Caveats       []string                        `json:"caveats"`
+	SchemaVersion int                                       `json:"schema_version"`
+	InitialRisk   map[string]multivenue.VenueRiskSnapshot   `json:"initial_risk"`
+	RiskTimeline  map[string][]multivenue.VenueRiskSnapshot `json:"risk_timeline"`
+	PreExpiryRisk map[string][]multivenue.VenueRiskSnapshot `json:"pre_expiry_risk"`
+	TerminalRisk  map[string]multivenue.VenueRiskSnapshot   `json:"terminal_risk"`
+	Caveats       []string                                  `json:"caveats"`
 }
 
 func main() {
@@ -59,20 +61,27 @@ func main() {
 		log.Fatal(err)
 	}
 	output := greekOutput{
-		SchemaVersion: 1,
-		Venues:        make(map[string]derivsim.GreekReport, len(sim.Venues)),
+		SchemaVersion: 3,
+		InitialRisk:   make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
+		RiskTimeline:  make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
+		PreExpiryRisk: make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
+		TerminalRisk:  make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
 		Caveats: []string{
 			"Venues are independently funded. No cross-venue routing, asset transfer, or atomic leg assumption is modeled.",
-			"Option reports use a flat IV and spot-mid forward proxy; they are local sensitivities, not realized vega PnL.",
-			"Final actor profiles precede expiry. An exchange-owned pre-expiry risk hook remains required for terminal gamma/theta attribution.",
+			"Greek timeline rows are recomputed from exchange-owned option positions and the atomic underlying mark paired with each option premium. They are not actor-local quote-cache measurements.",
+			"The option model uses flat IV and its stored underlying-mark forward proxy; vega is local model sensitivity, not realized vega PnL.",
+			"Terminal marked equity includes wallet debt exactly once, futures-style entry-to-mark PnL, and signed option market value. It is captured after the final phase fixed point and before venue shutdown.",
+			"Expiry-pre-settlement rows preserve marked account state. Use the final positive-time-to-expiry timeline row for expiring option gamma and vega because those Greeks are undefined at expiry.",
 		},
 	}
 	for _, venue := range sim.Venues {
-		report, err := derivsim.BuildGreekReportWithPositions(venue.OptionDealer.GreekProfiles(), venue.OptionDealer.GreekPositionProfiles())
-		if err != nil {
-			log.Fatalf("venue %s: %v", venue.ID, err)
+		if venue.InitialRisk == nil || venue.TerminalRisk == nil {
+			log.Fatalf("venue %s missing initial or terminal risk snapshot", venue.ID)
 		}
-		output.Venues[venue.ID] = report
+		output.InitialRisk[venue.ID] = *venue.InitialRisk
+		output.RiskTimeline[venue.ID] = append([]multivenue.VenueRiskSnapshot(nil), venue.RiskTimeline...)
+		output.PreExpiryRisk[venue.ID] = append([]multivenue.VenueRiskSnapshot(nil), venue.PreExpiryRisk...)
+		output.TerminalRisk[venue.ID] = *venue.TerminalRisk
 	}
 	b, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {

@@ -89,11 +89,12 @@ func (c *SimConfig) normalize() error {
 }
 
 type Sim struct {
-	Runner *simulation.Runner
-	Parent *executionAgent
-	clock  *simulation.SimulatedClock
-	mounts []*simulation.Mount
-	actors []actor.Actor
+	Runner   *simulation.Runner
+	Parent   *executionAgent
+	exchange *exchange.Exchange
+	clock    *simulation.SimulatedClock
+	mounts   []*simulation.Mount
+	actors   []actor.Actor
 }
 
 func newLatencyMount(ex *exchange.Exchange, scheduler *simulation.EventScheduler, clock *simulation.SimulatedClock, delay time.Duration) *simulation.Mount {
@@ -193,12 +194,19 @@ func NewSim(cfg SimConfig) (*Sim, error) {
 	for _, candidate := range actors {
 		runner.AddActor(candidate)
 	}
-	return &Sim{Runner: runner, Parent: parent, clock: clock, mounts: mounts, actors: actors}, nil
+	return &Sim{Runner: runner, Parent: parent, exchange: ex, clock: clock, mounts: mounts, actors: actors}, nil
 }
 
 func (s *Sim) Run(ctx context.Context) (ExecutionReport, error) {
+	var terminalMid int64
+	s.Runner.SetShutdownHook(func() {
+		// The runner invokes its shutdown hook after the final deterministic
+		// fixed point and before venue shutdown. The value is therefore a
+		// terminal exchange observation, not a delayed actor market-data view.
+		terminalMid, _ = s.exchange.TwoSidedMidPrice(s.Parent.cfg.Symbol)
+	})
 	if err := s.Runner.Run(ctx); err != nil {
 		return ExecutionReport{}, err
 	}
-	return s.Parent.Report(), nil
+	return s.Parent.reportWithTerminalMark(terminalMid, "two_sided_book_mid"), nil
 }

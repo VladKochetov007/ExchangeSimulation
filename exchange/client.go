@@ -145,9 +145,18 @@ func (c *Client) RemoveOrder(orderID uint64) {
 func (c *Client) GetBalanceSnapshot(timestamp int64) *BalanceSnapshot {
 	// Each wallet nets only the debt attributed to it: the account-level
 	// liability must reduce net worth exactly once, not once per wallet row.
-	spotBalances := make([]AssetBalance, 0, len(c.Balances))
-	spotAssets := make([]string, 0, len(c.Balances))
+	spotBalances := make([]AssetBalance, 0, len(c.Balances)+len(c.BorrowedSpot))
+	spotAssetSet := make(map[string]struct{}, len(c.Balances)+len(c.BorrowedSpot))
 	for asset := range c.Balances {
+		spotAssetSet[asset] = struct{}{}
+	}
+	for asset := range c.BorrowedSpot {
+		if c.BorrowedSpotPortion(asset) > 0 {
+			spotAssetSet[asset] = struct{}{}
+		}
+	}
+	spotAssets := make([]string, 0, len(spotAssetSet))
+	for asset := range spotAssetSet {
 		spotAssets = append(spotAssets, asset)
 	}
 	slices.Sort(spotAssets)
@@ -164,9 +173,18 @@ func (c *Client) GetBalanceSnapshot(timestamp int64) *BalanceSnapshot {
 		})
 	}
 
-	perpBalances := make([]AssetBalance, 0, len(c.PerpBalances))
-	perpAssets := make([]string, 0, len(c.PerpBalances))
+	perpBalances := make([]AssetBalance, 0, len(c.PerpBalances)+len(c.Borrowed))
+	perpAssetSet := make(map[string]struct{}, len(c.PerpBalances)+len(c.Borrowed))
 	for asset := range c.PerpBalances {
+		perpAssetSet[asset] = struct{}{}
+	}
+	for asset := range c.Borrowed {
+		if c.BorrowedPerpPortion(asset) > 0 {
+			perpAssetSet[asset] = struct{}{}
+		}
+	}
+	perpAssets := make([]string, 0, len(perpAssetSet))
+	for asset := range perpAssetSet {
 		perpAssets = append(perpAssets, asset)
 	}
 	slices.Sort(perpAssets)

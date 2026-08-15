@@ -69,6 +69,17 @@ type AutomationConfig struct {
 	// tenors, option chains). Polled every second by the expiry loop, which
 	// also observes settlement prices and settles expired instruments.
 	ListingPolicies []etypes.ListingPolicy
+
+	// PreExpiryHook runs synchronously after derivative marks refresh and before
+	// expired instruments are cash-settled and delisted. It is for read-only
+	// research/risk snapshots that must retain near-expiry state. The hook must
+	// not submit orders or otherwise mutate this exchange.
+	PreExpiryHook func()
+
+	// PostDerivativeMarkHook runs synchronously after every derivative mark
+	// refresh and before expiry settlement. It is read-only observability for
+	// ordered simulation telemetry; callers must not mutate this exchange.
+	PostDerivativeMarkHook func()
 }
 
 type phaseJobGroup uint8
@@ -141,6 +152,8 @@ type DefaultExchange struct {
 	indexProvider           PriceSource
 	priceUpdateInterval     time.Duration
 	listingPolicies         []etypes.ListingPolicy
+	preExpiryHook           func()
+	postDerivativeMarkHook  func()
 	automCtx                context.Context
 	automCancel             context.CancelFunc
 	automWg                 sync.WaitGroup
@@ -1015,6 +1028,24 @@ func (e *DefaultExchange) MidPrice(symbol string) int64 {
 	return book.GetMidPrice()
 }
 
+// TwoSidedMidPrice returns a contemporaneous executable-book midpoint. Unlike
+// MidPrice it never falls back to LastTrade when either side is absent, making
+// it suitable for terminal mark-to-complete research metrics.
+func (e *DefaultExchange) TwoSidedMidPrice(symbol string) (int64, bool) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	book := e.Books[symbol]
+	if book == nil || book.Bids.Best == nil || book.Asks.Best == nil {
+		return 0, false
+	}
+	bestBid := book.Bids.Best.Price
+	bestAsk := book.Asks.Best.Price
+	if bestBid <= 0 || bestAsk <= 0 {
+		return 0, false
+	}
+	return bestBid + (bestAsk-bestBid)/2, true
+}
+
 func (e *DefaultExchange) ListInstruments(baseFilter, quoteFilter string) []Instrument {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -1148,6 +1179,8 @@ func (e *DefaultExchange) ConfigureAutomation(config AutomationConfig) {
 	e.LiquidationFeeBps = config.LiquidationFeeBps
 	e.LiquidationHandler = config.LiquidationHandler
 	e.listingPolicies = config.ListingPolicies
+	e.preExpiryHook = config.PreExpiryHook
+	e.postDerivativeMarkHook = config.PostDerivativeMarkHook
 }
 
 // StartAutomation begins automatic price updates, funding settlements, and collateral charging.
@@ -1586,16 +1619,18 @@ func positionUPnL(pos *Position, markPrice, precision int64) int64 {
 }
 
 // accountMarginProfile aggregates a client's cross-margin exposure in the
-// quote asset across every margined book: unrealized PnL, notional, and the
-// maintenance/warning requirements. The triggering symbol is marked at
+// quote asset across every margined book: equity contribution, notional, and
+// maintenance/warning requirements. Futures-style positions contribute
+// entry-to-mark PnL; cash-premium options contribute signed marked value
+// because their entry premium already moved cash. The triggering symbol is marked at
 // triggerMark; other books use their latest stored mark, falling back to the
 // book reference price, then the position entry (neutral) when no mark exists.
 // Caller must hold e.mu.
 type accountMarginProfile struct {
-	UnrealizedPnL int64
-	Notional      int64
-	Maintenance   int64
-	Warning       int64
+	EquityContribution int64
+	Notional           int64
+	Maintenance        int64
+	Warning            int64
 }
 
 func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, triggerSymbol string, triggerMark int64) accountMarginProfile {
@@ -1631,7 +1666,7 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 			if m == 0 {
 				m = pos.EntryPrice
 			}
-			p.UnrealizedPnL += positionUPnL(pos, m, precision)
+			p.EquityContribution += positionUPnL(pos, m, precision)
 			notional := MulDiv(abs(pos.Size), m, precision)
 			p.Notional += notional
 			p.Maintenance += notional * perp.MaintenanceMarginRate / 10000
@@ -1703,7 +1738,7 @@ func (e *DefaultExchange) CheckPositionMarginerLiquidations() {
 				profile = e.buildAccountMarginProfile(clientID, quote, "", 0)
 				profiles[key] = profile
 			}
-			equity := client.PerpBalance(quote) - client.BorrowedPerpPortion(quote) + profile.UnrealizedPnL
+			equity := client.PerpBalance(quote) - client.BorrowedPerpPortion(quote) + profile.EquityContribution
 			if equity >= profile.Maintenance {
 				continue
 			}
@@ -1731,7 +1766,10 @@ func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, c
 		if m == 0 {
 			m = pos.EntryPrice
 		}
-		p.UnrealizedPnL += positionUPnL(pos, m, precision)
+		// Option premiums have already moved through the perp wallet at each
+		// fill. Their contribution to equity is therefore the signed current
+		// premium value, unlike futures-style entry-to-mark PnL.
+		p.EquityContribution += MulDiv(pos.Size, m, precision)
 		p.Notional += MulDiv(abs(pos.Size), m, precision)
 		maintenance := pm.MaintenanceForPosition(pos.Size, precision)
 		// A short with zero maintenance means the instrument has no marks yet
@@ -1748,7 +1786,7 @@ func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, c
 
 // CheckLiquidations evaluates all positions for a symbol after a mark price update.
 // Cross-margin account model: equity = perp balance − borrowed quote debt +
-// unrealized PnL across EVERY margined book in the same quote asset (order
+// equity contribution across EVERY margined book in the same quote asset (order
 // margin is locked, not lost); the maintenance requirement likewise sums over
 // all books, so the same cash can never back two symbols at once. On breach the triggering symbol's
 // positions are closed; other symbols resolve on their own mark updates.
@@ -1786,13 +1824,13 @@ func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, ma
 		}
 
 		profile := e.buildAccountMarginProfile(clientID, quote, symbol, markPrice)
-		unrealizedPnL, notional := profile.UnrealizedPnL, profile.Notional
+		equityContribution, notional := profile.EquityContribution, profile.Notional
 		// Borrowed quote is cash in the wallet but a matching liability: counting
 		// it as equity would let a loan mask an undercollateralized account and
 		// dodge liquidation. Net only the perp-attributed share — a spot-credited
 		// loan's cash never entered this wallet, so charging it here would
 		// liquidate a solvent account.
-		equity := client.PerpBalance(quote) - client.BorrowedPerpPortion(quote) + unrealizedPnL
+		equity := client.PerpBalance(quote) - client.BorrowedPerpPortion(quote) + equityContribution
 		maintenanceMargin := profile.Maintenance
 		warningMargin := profile.Warning
 
@@ -1801,16 +1839,16 @@ func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, ma
 		if equity < maintenanceMargin {
 			if log := e.getLogger("_global"); log != nil {
 				log.LogEvent(timestamp, clientID, "liquidation_check", map[string]any{
-					"timestamp":          timestamp,
-					"client_id":          clientID,
-					"symbol":             symbol,
-					"mark_price":         markPrice,
-					"balance":            client.PerpBalances[quote],
-					"reserved":           client.PerpReserved[quote],
-					"unrealized_pnl":     unrealizedPnL,
-					"equity":             equity,
-					"notional":           notional,
-					"maintenance_margin": maintenanceMargin,
+					"timestamp":                      timestamp,
+					"client_id":                      clientID,
+					"symbol":                         symbol,
+					"mark_price":                     markPrice,
+					"balance":                        client.PerpBalances[quote],
+					"reserved":                       client.PerpReserved[quote],
+					"derivative_equity_contribution": equityContribution,
+					"equity":                         equity,
+					"notional":                       notional,
+					"maintenance_margin":             maintenanceMargin,
 				})
 			}
 			for _, pos := range positions {

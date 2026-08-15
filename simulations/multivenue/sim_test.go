@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"exchange_sim/exchange"
 )
 
 func TestConfigAcceptsDocumentedSnakeCaseJSON(t *testing.T) {
@@ -62,6 +65,12 @@ func TestThreeVenueScenarioListsEveryDerivativeClass(t *testing.T) {
 		if venue.Exchange.BorrowingMgr == nil || !venue.Exchange.BorrowingMgr.Config.AutoBorrowSpot {
 			t.Fatalf("venue %s does not have local spot auto-borrow enabled", venue.ID)
 		}
+		if venue.OptionDealerClientID == 0 || venue.InitialRisk == nil || venue.TerminalRisk == nil {
+			t.Fatalf("venue %s has incomplete dealer risk telemetry: %#v", venue.ID, venue)
+		}
+		if venue.InitialRisk.Account.ReportAsset != "USD" || venue.TerminalRisk.Account.ReportAsset != "USD" || venue.TerminalRisk.Phase != "terminal_post_mark" {
+			t.Fatalf("venue %s risk telemetry has wrong numeraire/phase: initial=%#v terminal=%#v", venue.ID, venue.InitialRisk, venue.TerminalRisk)
+		}
 		data, err := os.ReadFile(filepath.Join(sim.Config.LogDir, "venues", venue.ID, "derivatives.jsonl"))
 		if err != nil {
 			t.Fatalf("read %s derivatives log: %v", venue.ID, err)
@@ -96,6 +105,94 @@ func TestThreeVenueScenarioDigestAcrossGOMAXPROCS(t *testing.T) {
 	if one != many {
 		t.Fatalf("three-venue digest differs: GOMAXPROCS=1 %s, GOMAXPROCS=14 %s", one, many)
 	}
+}
+
+func TestThreeVenuePreExpiryAndTerminalRiskAreDeterministic(t *testing.T) {
+	run := func(procs int) []VenueRiskSnapshot {
+		t.Helper()
+		previous := runtime.GOMAXPROCS(procs)
+		defer runtime.GOMAXPROCS(previous)
+		sim, err := NewSim(4*time.Second, Config{
+			LogDir:             t.TempDir(),
+			Seed:               37,
+			ShortOptionTenor:   2 * time.Second,
+			LongOptionTenor:    8 * time.Second,
+			ShortFutureTenor:   3 * time.Second,
+			LongFutureTenor:    9 * time.Second,
+			GreekInterval:      time.Second,
+			SnapshotInterval:   time.Second,
+			AutomationInterval: time.Second,
+			QuoteInterval:      time.Second,
+			NoiseInterval:      2 * time.Second,
+		})
+		if err != nil {
+			t.Fatalf("NewSim: %v", err)
+		}
+		if err := sim.Run(context.Background()); err != nil {
+			sim.Close()
+			t.Fatalf("Run: %v", err)
+		}
+		defer sim.Close()
+		result := make([]VenueRiskSnapshot, 0, len(sim.Venues)*4)
+		for _, venue := range sim.Venues {
+			if venue.InitialRisk == nil || venue.TerminalRisk == nil || len(venue.RiskTimeline) == 0 || len(venue.PreExpiryRisk) == 0 {
+				t.Fatalf("venue %s missing lifecycle risk rows: initial=%#v timeline=%#v pre=%#v terminal=%#v", venue.ID, venue.InitialRisk, venue.RiskTimeline, venue.PreExpiryRisk, venue.TerminalRisk)
+			}
+			result = append(result, *venue.InitialRisk)
+			result = append(result, venue.RiskTimeline...)
+			result = append(result, venue.PreExpiryRisk...)
+			result = append(result, *venue.TerminalRisk)
+		}
+		return result
+	}
+
+	one := run(1)
+	many := run(14)
+	if !reflect.DeepEqual(one, many) {
+		t.Fatalf("risk snapshots differ by GOMAXPROCS:\n1: %#v\n14: %#v", one, many)
+	}
+}
+
+func TestRiskTimelineRetainsPositiveHorizonExchangeGreeksBeforeExpiry(t *testing.T) {
+	sim, err := NewSim(3*time.Second, Config{
+		LogDir: t.TempDir(), Seed: 41,
+		ShortOptionTenor:   8 * time.Second,
+		LongOptionTenor:    12 * time.Second,
+		ShortFutureTenor:   9 * time.Second,
+		LongFutureTenor:    13 * time.Second,
+		GreekInterval:      time.Minute,
+		AutomationInterval: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	defer sim.Close()
+	venue := sim.Venues[0]
+	now := venue.Exchange.Clock.NowUnixNano()
+	option := exchange.NewEuropeanOption(
+		"ABC-MANUAL-2-C", "ABC", "USD", "ABC/USD", mvBasePrecision, mvQuotePrecision,
+		mvQuotePrecision, mvBasePrecision/100, mvBootstrapPrice, now+2*int64(time.Second), true,
+	)
+	option.IV = sim.Config.OptionIV
+	option.SetMarks(mvBootstrapPrice, 10*mvQuotePrecision)
+	venue.Exchange.AddInstrument(option)
+	venue.Exchange.Positions.UpdatePosition(venue.OptionDealerClientID, option.Symbol(), mvBasePrecision/10, 10*mvQuotePrecision, exchange.Buy, exchange.PositionBoth)
+	venue.Exchange.AddPerpBalance(venue.OptionDealerClientID, "USD", -mvQuotePrecision)
+
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, snapshot := range venue.RiskTimeline {
+		for _, position := range snapshot.GreekPositions {
+			if position.Symbol == option.Symbol() {
+				if position.TimeToExpiryNano <= 0 || position.ModelForward <= 0 || position.ForwardSource != "option_underlying_mark" {
+					t.Fatalf("invalid positive-horizon exchange Greeks: %#v", position)
+				}
+				return
+			}
+		}
+	}
+	t.Fatalf("risk timeline omitted positive-horizon Greek position for %s: %#v", option.Symbol(), venue.RiskTimeline)
 }
 
 func digestVenueLogs(t *testing.T, dir string) string {

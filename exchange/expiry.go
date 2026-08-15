@@ -138,6 +138,11 @@ func (e *DefaultExchange) UpdateDerivativeMarks() {
 			opt.SetMarks(underlyingPrice, mark)
 		}
 	}
+	if e.postDerivativeMarkHook != nil {
+		// The hook sees a complete fresh mark set and precedes any same-timestamp
+		// expiry. It must remain read-only because it runs outside e.mu.
+		e.postDerivativeMarkHook()
+	}
 }
 
 // CheckExpiries settles and delists every instrument past its expiry.
@@ -156,6 +161,13 @@ func (e *DefaultExchange) CheckExpiries() {
 	// Settlement cancels orders and emits events, so map iteration here would
 	// make same-timestamp expiries observably nondeterministic.
 	slices.Sort(expired)
+	if len(expired) > 0 && e.preExpiryHook != nil {
+		// This is deliberately outside e.mu: a strict account snapshot acquires
+		// the read lock and must observe the fully marked, still-listed board.
+		// The hook contract is read-only, so no exchange state changes between
+		// the expiry set being identified and contractual settlement below.
+		e.preExpiryHook()
+	}
 	for _, symbol := range expired {
 		e.settleExpiredInstrument(symbol, now)
 	}

@@ -8,11 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
 	"exchange_sim/instrument"
+	eprice "exchange_sim/price"
 	"exchange_sim/simulation"
 	"exchange_sim/simulations/derivsim"
 	"exchange_sim/simulations/feesim"
@@ -176,15 +178,36 @@ func (c *Config) normalize() error {
 // reporting. Accounts are intentionally distinct across venues: no collateral
 // transfer or synthetic shared wallet is implied by a common simulation clock.
 type Venue struct {
-	ID           string
-	Exchange     *exchange.Exchange
-	Mount        *simulation.Mount
-	SpotMakers   []*StoikovMarketMaker
-	PerpMaker    *StoikovMarketMaker
-	FuturesMaker *derivsim.FuturesMarketMaker
-	OptionDealer *derivsim.OptionMarketMaker
-	NoiseTrader  *feesim.RandomTaker
-	OptionFlow   *derivsim.OptionTaker
+	ID                   string
+	Exchange             *exchange.Exchange
+	Mount                *simulation.Mount
+	SpotMakers           []*StoikovMarketMaker
+	PerpMaker            *StoikovMarketMaker
+	FuturesMaker         *derivsim.FuturesMarketMaker
+	OptionDealer         *derivsim.OptionMarketMaker
+	OptionDealerClientID uint64
+	NoiseTrader          *feesim.RandomTaker
+	OptionFlow           *derivsim.OptionTaker
+	InitialRisk          *VenueRiskSnapshot
+	RiskTimeline         []VenueRiskSnapshot
+	PreExpiryRisk        []VenueRiskSnapshot
+	TerminalRisk         *VenueRiskSnapshot
+	riskErr              error
+	riskLastNano         int64
+	optionListedNano     map[string]int64
+}
+
+// VenueRiskSnapshot combines exchange-owned marked equity with an
+// exchange-owned sensitivity view at a documented lifecycle point. Account
+// values are the source of truth for wallet, debt, and PnL; Greeks remain model
+// diagnostics and are deliberately kept separate from cash accounting.
+type VenueRiskSnapshot struct {
+	VenueID        string                       `json:"venue_id"`
+	ClientID       uint64                       `json:"client_id"`
+	Phase          string                       `json:"phase"`
+	Account        etypes.MarkedAccountSnapshot `json:"account"`
+	GreekProfile   derivsim.GreekProfile        `json:"greek_profile"`
+	GreekPositions []derivsim.GreekPosition     `json:"greek_positions"`
 }
 
 // Sim owns the three venue ecology and every log file created for it.
@@ -204,13 +227,36 @@ func (s *Sim) Run(ctx context.Context) error {
 	for _, venue := range s.Venues {
 		venue.Exchange.StartAutomation(ctx)
 	}
+	var riskErr error
 	s.Runner.SetShutdownHook(func() {
+		// The deterministic runner reaches the final venue/actor fixed point
+		// before this hook and has not shut down any mount yet. Capture risk
+		// here rather than via an actor query, which would have no later phase
+		// to deliver its response.
+		for _, venue := range s.Venues {
+			if riskErr != nil {
+				break
+			}
+			if venue.riskErr != nil {
+				riskErr = venue.riskErr
+				break
+			}
+			venue.TerminalRisk, riskErr = captureVenueRisk(venue, "terminal_post_mark")
+		}
 		cancel()
 		for _, venue := range s.Venues {
 			venue.Exchange.StopAutomation()
 		}
 	})
-	return s.Runner.Run(ctx)
+	if err := s.Runner.Run(ctx); err != nil {
+		return err
+	}
+	for _, venue := range s.Venues {
+		if venue.riskErr != nil {
+			return venue.riskErr
+		}
+	}
+	return riskErr
 }
 
 func (s *Sim) Close() {
@@ -292,6 +338,11 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 			sim.Close()
 			return nil, err
 		}
+		venue.InitialRisk, err = captureVenueRisk(venue, "initial")
+		if err != nil {
+			sim.Close()
+			return nil, err
+		}
 		sim.Venues = append(sim.Venues, venue)
 		runner.AddMount(venue.Mount)
 		for _, maker := range venue.SpotMakers {
@@ -360,6 +411,8 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	}
 	optionSpec := spec
 	optionSpec.TickSize = mvQuotePrecision // one USD premium tick
+	mount := simulation.NewMount(ex, simulation.LatencyConfig{})
+	venue := &Venue{ID: id, Exchange: ex, Mount: mount, optionListedNano: make(map[string]int64)}
 	ex.ConfigureAutomation(exchange.AutomationConfig{
 		IndexProvider:       index,
 		PriceUpdateInterval: s.Config.AutomationInterval,
@@ -371,6 +424,20 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 				StrikeStep: s.Config.StrikeStepUSD * mvQuotePrecision, StrikesPerSide: s.Config.StrikesPerSide,
 				MaxStrikesPerExpiry: s.Config.OptionMaxStrikesPerExpiry, IV: s.Config.OptionIV,
 			},
+		},
+		PreExpiryHook: func() {
+			if venue.riskErr != nil {
+				return
+			}
+			risk, err := captureVenueRisk(venue, "pre_expiry")
+			if err != nil {
+				venue.riskErr = err
+				return
+			}
+			venue.PreExpiryRisk = append(venue.PreExpiryRisk, *risk)
+		},
+		PostDerivativeMarkHook: func() {
+			captureScheduledVenueRisk(venue, s.Config.GreekInterval, s.Config.AutomationInterval)
 		},
 	})
 	if err := ex.EnableBorrowing(exchange.BorrowingConfig{
@@ -385,7 +452,6 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		return nil, err
 	}
 
-	mount := simulation.NewMount(ex, simulation.LatencyConfig{})
 	nextClient := uint64(0)
 	connect := func(balances map[string]int64, perpUSD int64, fee exchange.FeeModel) actor.Gateway {
 		nextClient++
@@ -410,7 +476,6 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			RiskAversion: s.Config.StoikovRiskAversion, FillDecay: s.Config.StoikovFillDecay, MinHalfSpreadTicks: 1,
 		}
 	}
-	venue := &Venue{ID: id, Exchange: ex, Mount: mount}
 	for i := 0; i < 2; i++ {
 		maker := NewStoikovMarketMaker(nextActor(), connect(mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC/USD", "ABC/USD"))
 		maker.SetTickerFactory(timers)
@@ -424,6 +489,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	})
 	venue.FuturesMaker.SetTickerFactory(timers)
 	dealerBalances := map[string]int64{"USD": 500_000_000 * mvQuotePrecision}
+	venue.OptionDealerClientID = nextClient + 1
 	venue.OptionDealer = derivsim.NewOptionMarketMaker(nextActor(), connect(dealerBalances, 150_000_000*mvQuotePrecision, zeroFee), derivsim.OptionMMConfig{
 		Underlying: "ABC/USD", IV: s.Config.OptionIV, SpreadBps: 30, SkewPerLotBps: 5,
 		QuoteQty: mvBasePrecision / 10, LotQty: mvBasePrecision / 20, PremiumTick: mvQuotePrecision,
@@ -445,4 +511,140 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	})
 	venue.OptionFlow.SetTickerFactory(timers)
 	return venue, nil
+}
+
+func captureVenueRisk(venue *Venue, phase string) (*VenueRiskSnapshot, error) {
+	if venue == nil || venue.Exchange == nil || venue.OptionDealer == nil || venue.OptionDealerClientID == 0 {
+		return nil, errors.New("multivenue: incomplete venue risk capture")
+	}
+	spotMid, _ := venue.Exchange.TwoSidedMidPrice("ABC/USD")
+	marks := map[string]etypes.AssetValuationMark{
+		"USD": {Price: mvQuotePrecision, Precision: mvQuotePrecision},
+	}
+	if spotMid > 0 {
+		marks["ABC"] = etypes.AssetValuationMark{Price: spotMid, Precision: mvBasePrecision}
+	}
+	account, err := venue.Exchange.MarkedAccount(venue.OptionDealerClientID, etypes.AccountValuationSpec{
+		ReportAsset: "USD", ReportPrecision: mvQuotePrecision, AssetMarks: marks,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("multivenue: venue %s marked dealer account: %w", venue.ID, err)
+	}
+	profile, positions, err := exchangeGreekRisk(venue, account, phase)
+	if err != nil {
+		return nil, err
+	}
+	return &VenueRiskSnapshot{
+		VenueID:        venue.ID,
+		ClientID:       venue.OptionDealerClientID,
+		Phase:          phase,
+		Account:        account,
+		GreekProfile:   profile,
+		GreekPositions: positions,
+	}, nil
+}
+
+func captureScheduledVenueRisk(venue *Venue, interval, automationInterval time.Duration) {
+	if venue == nil || venue.Exchange == nil || venue.riskErr != nil {
+		return
+	}
+	now := venue.Exchange.Clock.NowUnixNano()
+	if now <= 0 || (venue.riskLastNano != 0 && now-venue.riskLastNano < interval.Nanoseconds() && !hasNearExpiryOption(venue, now, automationInterval)) {
+		return
+	}
+	risk, err := captureVenueRisk(venue, "post_derivative_mark")
+	if err != nil {
+		venue.riskErr = err
+		return
+	}
+	venue.riskLastNano = now
+	venue.RiskTimeline = append(venue.RiskTimeline, *risk)
+}
+
+func hasNearExpiryOption(venue *Venue, now int64, cadence time.Duration) bool {
+	for _, inst := range venue.Exchange.ListInstruments("", "") {
+		option, ok := inst.(*exchange.EuropeanOption)
+		if !ok {
+			continue
+		}
+		remaining := option.ExpiryNano() - now
+		if remaining > 0 && remaining <= cadence.Nanoseconds() {
+			return true
+		}
+	}
+	return false
+}
+
+// exchangeGreekRisk derives every sensitivity from the exchange-owned marked
+// option position and the option's atomically paired underlying mark. Actor
+// cache state is intentionally excluded: at an automation boundary it may not
+// yet have received same-timestamp market data.
+func exchangeGreekRisk(venue *Venue, account etypes.MarkedAccountSnapshot, phase string) (derivsim.GreekProfile, []derivsim.GreekPosition, error) {
+	profile := derivsim.GreekProfile{Timestamp: account.Timestamp, Phase: phase, ForwardSource: "option_underlying_mark"}
+	if venue.optionListedNano == nil {
+		venue.optionListedNano = make(map[string]int64)
+	}
+	instruments := venue.Exchange.ListInstruments("", "")
+	slices.SortFunc(instruments, func(a, b exchange.Instrument) int { return strings.Compare(a.Symbol(), b.Symbol()) })
+	options := make(map[string]*exchange.EuropeanOption)
+	for _, inst := range instruments {
+		option, ok := inst.(*exchange.EuropeanOption)
+		if !ok {
+			continue
+		}
+		options[option.Symbol()] = option
+		if _, listed := venue.optionListedNano[option.Symbol()]; !listed {
+			venue.optionListedNano[option.Symbol()] = account.Timestamp
+		}
+	}
+
+	for _, row := range account.SpotBalances {
+		if row.Asset == "ABC" {
+			profile.HedgeDelta = float64(row.NetAsset) / float64(mvBasePrecision)
+			break
+		}
+	}
+	positions := make([]derivsim.GreekPosition, 0)
+	for _, pos := range account.Positions {
+		if pos.Size == 0 {
+			continue
+		}
+		option := options[pos.Symbol]
+		if option == nil {
+			continue
+		}
+		timeToExpiry := option.ExpiryNano() - account.Timestamp
+		if timeToExpiry <= 0 {
+			// Gamma and vega have no valid finite Black-76 interpretation at
+			// expiry. The periodic timeline records the final positive-horizon
+			// state before this lifecycle point.
+			continue
+		}
+		forward := option.UnderlyingMark()
+		yearsLeft := float64(timeToExpiry) / float64(365*24*time.Hour)
+		sensitivity, ok := eprice.Black76Sensitivities(forward, option.Strike, option.IV, yearsLeft, option.IsCall)
+		if !ok {
+			return derivsim.GreekProfile{}, nil, fmt.Errorf("multivenue: venue %s option %s has invalid exchange Greek mark", venue.ID, option.Symbol())
+		}
+		contracts := float64(pos.Size) / float64(mvBasePrecision)
+		position := derivsim.GreekPosition{
+			Timestamp: account.Timestamp, Phase: phase, Symbol: option.Symbol(), Underlying: option.UnderlyingSymbol(),
+			ListedNano: venue.optionListedNano[option.Symbol()], ExpiryNano: option.ExpiryNano(), Strike: option.Strike,
+			IsCall: option.IsCall, Position: pos.Size, TimeToExpiryNano: timeToExpiry,
+			SpotMid: forward, ModelForward: forward, ForwardSource: "option_underlying_mark", ImpliedVolatility: option.IV,
+			Delta: contracts * sensitivity.Delta, Gamma: contracts * sensitivity.Gamma, Vega: contracts * sensitivity.Vega,
+		}
+		positions = append(positions, position)
+		profile.OptionDelta += position.Delta
+		profile.Gamma += position.Gamma
+		profile.Vega += position.Vega
+		profile.Contracts++
+		if profile.ModelForward == 0 {
+			profile.SpotMid = forward
+			profile.ModelForward = forward
+			profile.ImpliedVolatility = option.IV
+		}
+	}
+	profile.NetDelta = profile.OptionDelta + profile.HedgeDelta
+	return profile, positions, nil
 }

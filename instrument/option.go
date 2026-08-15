@@ -102,6 +102,12 @@ func (o *EuropeanOption) SetMarks(underlyingMark, markPremium int64) {
 
 func (o *EuropeanOption) MarkPremium() int64 { return o.loadMarks().premium }
 
+// UnderlyingMark returns the underlying input paired atomically with
+// MarkPremium. Risk telemetry uses this rather than an actor-local quote so its
+// Black-76 sensitivities use the exact forward proxy that produced the option
+// mark.
+func (o *EuropeanOption) UnderlyingMark() int64 { return o.loadMarks().underlying }
+
 // --- PositionMarginer ---
 
 // PositionMark marks open positions at the current premium mark for

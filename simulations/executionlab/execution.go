@@ -69,30 +69,42 @@ type ChildReport struct {
 	CancelRemaining int64
 }
 
-// ExecutionReport separates impact from completion. Shortfall is the signed
-// all-in cost of the quantity actually executed against the decision mid:
-// buy: paid - reference + fees; sell: reference - proceeds + fees. It must
-// never be read without UnfilledQty, because a cheap partial execution is not
-// a completed parent order.
+// ExecutionReport separates filled impact from target completion. Shortfall is
+// the signed all-in cost of the quantity actually executed against the
+// decision mid: buy: paid - reference + fees; sell: reference - proceeds +
+// fees. It must never be read without UnfilledQty, because a cheap partial
+// execution is not a completed parent order.
+//
+// TargetShortfall is a separately labelled hypothetical mark-to-complete
+// metric. It values UnfilledQty at a contemporaneous two-sided TerminalMid
+// without assuming it was filled or charging an invented terminal fee. It is
+// valid only when every observed fee was priced in the quote asset. It provides
+// an urgency-sensitive comparison when one parent exhausts the book, while
+// FilledQty and Shortfall retain the observed execution result.
 type ExecutionReport struct {
-	Policy            Policy
-	Side              exchange.Side
-	TargetQty         int64
-	DecisionAt        int64
-	DecisionMid       int64
-	FirstVenueFillAt  int64
-	LastVenueFillAt   int64
-	FilledQty         int64
-	UnfilledQty       int64
-	Notional          int64
-	QuoteFees         int64
-	UnpricedFeeCount  int
-	Shortfall         int64
-	ShortfallBps      float64
-	SubmittedChildren int
-	RejectedChildren  int
-	TerminalCancels   int
-	Children          []ChildReport
+	Policy               Policy
+	Side                 exchange.Side
+	TargetQty            int64
+	DecisionAt           int64
+	DecisionMid          int64
+	FirstVenueFillAt     int64
+	LastVenueFillAt      int64
+	FilledQty            int64
+	UnfilledQty          int64
+	Notional             int64
+	QuoteFees            int64
+	UnpricedFeeCount     int
+	Shortfall            int64
+	ShortfallBps         float64
+	TerminalMid          int64
+	TerminalMarkSource   string
+	TargetShortfall      int64
+	TargetShortfallBps   float64
+	TargetShortfallValid bool
+	SubmittedChildren    int
+	RejectedChildren     int
+	TerminalCancels      int
+	Children             []ChildReport
 }
 
 type executionAgent struct {
@@ -249,26 +261,64 @@ func (a *executionAgent) recordFill(fill actor.OrderFillEvent) {
 }
 
 func (a *executionAgent) Report() ExecutionReport {
+	return a.reportWithTerminalMid(0)
+}
+
+func (a *executionAgent) ReportWithTerminalMid(terminalMid int64) ExecutionReport {
+	return a.reportWithTerminalMark(terminalMid, "caller_supplied")
+}
+
+func (a *executionAgent) reportWithTerminalMid(terminalMid int64) ExecutionReport {
+	return a.reportWithTerminalMark(terminalMid, "")
+}
+
+func (a *executionAgent) reportWithTerminalMark(terminalMid int64, source string) ExecutionReport {
 	report := a.report
 	report.Children = append([]ChildReport(nil), a.report.Children...)
 	report.UnfilledQty = report.TargetQty - report.FilledQty
 	if report.UnfilledQty < 0 {
 		panic("executionlab: filled more than parent target")
 	}
-	if report.FilledQty == 0 || report.DecisionMid <= 0 {
+	if report.FilledQty != 0 && report.DecisionMid > 0 {
+		reference, ok := types.TryMulDiv(report.FilledQty, report.DecisionMid, a.cfg.BasePrecision)
+		if !ok {
+			panic("executionlab: representable report has unrepresentable filled reference notional")
+		}
+		if report.Side == exchange.Buy {
+			report.Shortfall = checkedAdd(checkedSub(report.Notional, reference, "buy price shortfall"), report.QuoteFees, "buy all-in shortfall")
+		} else {
+			report.Shortfall = checkedAdd(checkedSub(reference, report.Notional, "sell price shortfall"), report.QuoteFees, "sell all-in shortfall")
+		}
+		if reference != 0 {
+			report.ShortfallBps = float64(report.Shortfall) * 10_000 / float64(reference)
+		}
+	}
+
+	if terminalMid <= 0 || report.DecisionMid <= 0 || report.UnpricedFeeCount != 0 {
 		return report
 	}
-	reference, ok := types.TryMulDiv(report.FilledQty, report.DecisionMid, a.cfg.BasePrecision)
+	targetReference, ok := types.TryMulDiv(report.TargetQty, report.DecisionMid, a.cfg.BasePrecision)
 	if !ok {
-		panic("executionlab: representable report has unrepresentable reference notional")
+		panic("executionlab: representable report has unrepresentable target reference notional")
 	}
+	completionNotional := report.Notional
+	if report.UnfilledQty > 0 {
+		terminalNotional, ok := types.TryMulDiv(report.UnfilledQty, terminalMid, a.cfg.BasePrecision)
+		if !ok {
+			panic("executionlab: representable report has unrepresentable terminal completion notional")
+		}
+		completionNotional = checkedAdd(completionNotional, terminalNotional, "terminal completion notional")
+	}
+	report.TerminalMid = terminalMid
+	report.TerminalMarkSource = source
+	report.TargetShortfallValid = true
 	if report.Side == exchange.Buy {
-		report.Shortfall = checkedAdd(checkedSub(report.Notional, reference, "buy price shortfall"), report.QuoteFees, "buy all-in shortfall")
+		report.TargetShortfall = checkedAdd(checkedSub(completionNotional, targetReference, "buy target price shortfall"), report.QuoteFees, "buy target all-in shortfall")
 	} else {
-		report.Shortfall = checkedAdd(checkedSub(reference, report.Notional, "sell price shortfall"), report.QuoteFees, "sell all-in shortfall")
+		report.TargetShortfall = checkedAdd(checkedSub(targetReference, completionNotional, "sell target price shortfall"), report.QuoteFees, "sell target all-in shortfall")
 	}
-	if reference != 0 {
-		report.ShortfallBps = float64(report.Shortfall) * 10_000 / float64(reference)
+	if targetReference != 0 {
+		report.TargetShortfallBps = float64(report.TargetShortfall) * 10_000 / float64(targetReference)
 	}
 	return report
 }
