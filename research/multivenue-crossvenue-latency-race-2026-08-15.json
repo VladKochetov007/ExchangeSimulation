@@ -1,0 +1,59 @@
+{
+  "experiment_id": "E-037",
+  "hypothesis_id": "H-016",
+  "date": "2026-08-15",
+  "status": "supported-one-config-conditional",
+  "config": {
+    "duration": "10m",
+    "seeds": [42, 43, 44, 45, 46, 47, 48, 49, 50, 51],
+    "venues": ["north", "central", "south"],
+    "noise_traders_per_venue": 4,
+    "option_flow_per_venue": 4,
+    "dealer_hedge_mode": "off",
+    "router_symbol": "ABC/USD",
+    "router_lot_abc": 0.4,
+    "maker_displayed_level_abc": 0.2,
+    "taker_fee_bps": 5,
+    "base_latency": "2s",
+    "tiers": {"fast": 0.5, "slow": 1.0},
+    "tier_latency": {"fast": "1s", "slow": "2s"},
+    "max_attempts_per_tier": 1,
+    "leg_policy": "independent prefunded FOK; no transfer, shared wallet, or automatic residual hedge"
+  },
+  "admission": {
+    "price": "sell_bid * lot - sell_fee > buy_ask * lot + buy_fee",
+    "depth": "visible best bid and best ask quantities must each cover the complete lot",
+    "market_data": "public snapshot plus visible-depth deltas; no synthetic quote from trade prints"
+  },
+  "forward_order_rows": [
+    {"seed": 42, "fast": {"completed": 1, "failed": 0, "cashflow_usd": 6.109, "residual_abc": 0.0}, "slow": {"completed": 1, "failed": 0, "cashflow_usd": -11.888, "residual_abc": 0.0}},
+    {"seed": 43, "fast": {"completed": 1, "failed": 0, "cashflow_usd": 16.114, "residual_abc": 0.0}, "slow": {"completed": 1, "failed": 0, "cashflow_usd": -3.884, "residual_abc": 0.0}},
+    {"seed": 44, "fast": {"completed": 1, "failed": 0, "cashflow_usd": 32.074, "residual_abc": 0.0}, "slow": {"completed": 1, "failed": 0, "cashflow_usd": 8.078, "residual_abc": 0.0}},
+    {"seed": 45, "fast": {"completed": 1, "failed": 0, "cashflow_usd": 18.159, "residual_abc": 0.0}, "slow": {"completed": 1, "failed": 0, "cashflow_usd": -5.837, "residual_abc": 0.0}},
+    {"seed": 46, "fast": {"completed": 0, "failed": 1, "cashflow_usd": 0.0, "residual_abc": 0.4}, "slow": {"completed": 0, "failed": 1, "cashflow_usd": 0.0, "residual_abc": 0.4}},
+    {"seed": 47, "fast": {"completed": 1, "failed": 0, "cashflow_usd": 6.073, "residual_abc": 0.0}, "slow": {"completed": 1, "failed": 0, "cashflow_usd": -15.924, "residual_abc": 0.0}},
+    {"seed": 48, "fast": {"completed": 1, "failed": 0, "cashflow_usd": 2.239, "residual_abc": 0.0}, "slow": {"completed": 1, "failed": 0, "cashflow_usd": -13.757, "residual_abc": 0.0}},
+    {"seed": 49, "fast": {"completed": 0, "failed": 1, "cashflow_usd": 0.0, "residual_abc": -0.4}, "slow": {"completed": 1, "failed": 0, "cashflow_usd": -5.909, "residual_abc": 0.0}},
+    {"seed": 50, "fast": {"completed": 1, "failed": 0, "cashflow_usd": 2.057, "residual_abc": 0.0}, "slow": {"completed": 1, "failed": 0, "cashflow_usd": -19.940, "residual_abc": 0.0}},
+    {"seed": 51, "fast": {"completed": 0, "failed": 1, "cashflow_usd": 0.0, "residual_abc": 0.0}, "slow": {"completed": 0, "failed": 1, "cashflow_usd": 0.0, "residual_abc": 0.0}}
+  ],
+  "summary": {
+    "fast_completed": 7,
+    "slow_completed": 8,
+    "both_completed": 7,
+    "fast_positive_when_completed": 7,
+    "slow_negative_when_completed": 7,
+    "fast_completed_cashflow_usd": 82.825,
+    "slow_completed_cashflow_usd": -69.061,
+    "common_completed_fast_minus_slow_usd": [17.997, 19.998, 23.996, 23.996, 21.997, 15.996, 21.997],
+    "common_completed_mean_fast_minus_slow_usd": 20.853857142857144
+  },
+  "controls": {
+    "tier_label_swap": "All ten seed reports match by physical tier after masking only router/client/order IDs that necessarily follow the label.",
+    "thread_reproducibility": {
+      "seed": 42,
+      "sha256_gomaxprocs_1_and_14": "e5f5866608dc0139ec4b7f10bdfb373cccfda8867d66249d4ce956ff8863ab00"
+    }
+  },
+  "conclusion": "Earlier delivery improves completed-leg cashflow in this explicit routed treatment, but completion is not uniformly higher and failed non-atomic routes retain local inventory. This is not terminal PnL, transfer economics, or equilibrium evidence."
+}
