@@ -14,9 +14,10 @@ import (
 )
 
 type result struct {
-	Seed   int64                        `json:"seed"`
-	Policy executionlab.Policy          `json:"policy"`
-	Report executionlab.ExecutionReport `json:"report"`
+	Seed    int64                          `json:"seed"`
+	Policy  executionlab.Policy            `json:"policy"`
+	Report  executionlab.ExecutionReport   `json:"report"`
+	Reports []executionlab.ExecutionReport `json:"reports,omitempty"`
 }
 
 func main() {
@@ -25,11 +26,16 @@ func main() {
 	policy := flag.String("policy", "both", "immediate, twap, or both")
 	duration := flag.Duration("duration", 4*time.Second, "simulated duration per world")
 	targetQty := flag.Int64("target-qty", 0, "parent quantity in base fixed-point units (0 uses the scenario default)")
+	parentCount := flag.Int("parent-count", 1, "number of staggered parent-order clients per world")
+	parentInterval := flag.Duration("parent-interval", time.Second, "simulated interval between parent decisions")
 	slices := flag.Int("slices", 0, "TWAP child count (0 uses the scenario default)")
 	sliceInterval := flag.Duration("slice-interval", 0, "TWAP child interval (0 uses the scenario default)")
 	flag.Parse()
 	if *seeds <= 0 {
 		fatalf("-seeds must be positive")
+	}
+	if *parentCount <= 0 {
+		fatalf("-parent-count must be positive")
 	}
 	policies, err := parsePolicies(*policy)
 	if err != nil {
@@ -41,6 +47,8 @@ func main() {
 			cfg := executionlab.DefaultSimConfig(current)
 			cfg.Seed = *seed + int64(i)
 			cfg.Duration = *duration
+			cfg.ParentCount = *parentCount
+			cfg.ParentInterval = *parentInterval
 			if *targetQty != 0 {
 				cfg.Parent.TargetQty = *targetQty
 			}
@@ -54,11 +62,11 @@ func main() {
 			if newErr != nil {
 				fatalf("seed %d %s: %v", cfg.Seed, current, newErr)
 			}
-			report, runErr := sim.Run(context.Background())
+			reports, runErr := sim.RunMany(context.Background())
 			if runErr != nil {
 				fatalf("seed %d %s: %v", cfg.Seed, current, runErr)
 			}
-			if encodeErr := encoder.Encode(result{Seed: cfg.Seed, Policy: current, Report: report}); encodeErr != nil {
+			if encodeErr := encoder.Encode(result{Seed: cfg.Seed, Policy: current, Report: reports[0], Reports: reports}); encodeErr != nil {
 				fatalf("write result: %v", encodeErr)
 			}
 		}

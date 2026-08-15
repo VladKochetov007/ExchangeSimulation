@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"runtime"
 	"testing"
+	"time"
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
@@ -63,6 +64,51 @@ func TestTWAPReportDeterministicAcrossGOMAXPROCS(t *testing.T) {
 	many := run(14)
 	if !reflect.DeepEqual(one, many) {
 		t.Fatalf("TWAP reports differ by GOMAXPROCS:\n1:  %#v\n14: %#v", one, many)
+	}
+}
+
+func TestStaggeredParentReportsAreDeterministicAndAlternating(t *testing.T) {
+	config := DefaultSimConfig(TWAP)
+	config.ParentCount = 4
+	config.ParentInterval = time.Second
+	config.Duration = 7 * time.Second
+
+	run := func(procs int) []ExecutionReport {
+		previous := runtime.GOMAXPROCS(procs)
+		defer runtime.GOMAXPROCS(previous)
+		sim, err := NewSim(config)
+		if err != nil {
+			t.Fatalf("NewSim: %v", err)
+		}
+		reports, err := sim.RunMany(context.Background())
+		if err != nil {
+			t.Fatalf("RunMany: %v", err)
+		}
+		return reports
+	}
+
+	one := run(1)
+	many := run(14)
+	if !reflect.DeepEqual(one, many) {
+		t.Fatalf("staggered parent reports differ by GOMAXPROCS:\n1:  %#v\n14: %#v", one, many)
+	}
+	if len(one) != config.ParentCount {
+		t.Fatalf("report count = %d, want %d", len(one), config.ParentCount)
+	}
+	for i, report := range one {
+		if report.DecisionAt == 0 || report.DecisionMid <= 0 || !report.TargetShortfallValid {
+			t.Fatalf("parent %d lacks a valid decision/terminal report: %#v", i, report)
+		}
+		wantSide := exchange.Buy
+		if i%2 == 1 {
+			wantSide = exchange.Sell
+		}
+		if report.Side != wantSide {
+			t.Fatalf("parent %d side = %s, want %s", i, report.Side, wantSide)
+		}
+		if i > 0 && report.DecisionAt <= one[i-1].DecisionAt {
+			t.Fatalf("parent decisions not strictly staggered: %d then %d", one[i-1].DecisionAt, report.DecisionAt)
+		}
 	}
 }
 
