@@ -62,6 +62,8 @@ scope:
   allowed_tools:
     - "Go compiler, tests, race detector, fuzzing, benchmarks, CPU simulation, Python analysis"
   mutable_paths:
+    - "simulations/multivenue"
+    - "cmd/multivenue"
     - "simulations/ffa"
     - "cmd/ffasim"
     - "research"
@@ -95,3 +97,4 @@ assumptions:
   - "The current deterministic phase runtime is the sole accepted simulation execution path."
   - "GPU acceleration is not useful until a CPU profile identifies a pure numerical bottleneck after causality and measurement gates pass."
   - "Gen-0 uses USD as reporting numeraire and rejects an incomplete FX/mark conversion rather than imputing a value."
+  - "Gen-0 extends the deterministic multivenue harness; a separate simulations/ffa package is deferred until its declarative scenario boundary is defined."

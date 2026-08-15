@@ -53,8 +53,9 @@ the documented default; otherwise no one-sided gamma/ecology arm may run.
 
 ## Promotion ladder
 
-1. **Mechanics:** `VenueProfile`, 3-asset spot graph, and exact per-venue
-   matching. Write property tests before a scenario runs.
+1. **Mechanics:** the strict 3-asset spot graph and exact per-venue FIFO or
+   pro-rata selection are accepted in E-040. Next, add an all-in triangle null
+   harness; do not substitute midpoint parity or an intent-only ledger.
 2. **Measurement:** immutable manifest; account, risk, fill, and information
    boundary logs. Make incomplete valuation a run failure.
 3. **Null controls:** noise plus market makers, then no-arb and no-options

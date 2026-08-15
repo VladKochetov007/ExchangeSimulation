@@ -10,6 +10,7 @@
   "noise_trader_count": 2,
   "option_flow_count": 2,
   "strict_population_accounting": true,
+  "cross_asset_spot_graph": true,
   "venue_rules": {
     "north": {"matching_rule": "price_time"},
     "central": {"matching_rule": "pro_rata"},

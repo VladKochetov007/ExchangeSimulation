@@ -49,6 +49,30 @@
 - **Limit:** the current strict builder is USD/ABC-specific. It is a gate for
   the existing control world, not yet a cross-currency valuation graph.
 
+## FFA-02: minimal cross-asset graph
+
+- **Prediction:** `ABC/USD`, `CDF/USD`, and `ABC/CDF` can coexist on each
+  venue without silently dropping CDF exposure from USD terminal wealth.
+- **Rejected probe (E-039):** one liquidity provider per new conversion pair
+  left `CDF/USD` one-sided on south at the five-minute boundary. Strict
+  population accounting rejected the run. This is expected behavior from the
+  measurement contract, not a missing-value fallback and not a strategy result.
+- **Accepted control (E-040):** the committed symmetric population has two
+  independently funded makers on each direct spot pair. Five simulated minutes
+  produced 39 initial and 39 terminal USD accounts, all marked from both
+  two-sided `ABC/USD` and `CDF/USD` books. The complete report and manifest are
+  byte-identical at `GOMAXPROCS=1` and `14`.
+- **Evidence:** manifest
+  `a4da2c343496c4aaa95494a449b54294d32cf22abab1303c2a5cde81ae258c4e`;
+  report
+  `c799c56bc413296026298ff15ece6f8e000ccf2949233c4af3251a365165d6b8`;
+  persistent artifacts under
+  `logs/research/ffa-ecology-control-e040-cross-asset-canonical-*`.
+- **Limit:** this validates graph construction, valuation completeness, and
+  deterministic mechanics. There is no triangle strategy, cross-venue
+  transfer, generic FX graph, payoff matrix, selection rule, or claim about
+  market profitability.
+
 ## E-038: strict FFA control harness
 
 - The retained control manifest uses three venue-local policies
@@ -81,6 +105,8 @@
 
 ## Next discriminating decision
 
-Build the declarative scenario/venue profile and population-accounting
-interfaces together. Adding another strategy to the hard-coded `ABC` world
-before those contracts exist would create activity without an evaluable game.
+Build an executable, all-in triangular-arbitrage null harness over the accepted
+three-book graph. It must use its own delayed public book state, preserve a
+per-leg request/fill/fee/residual ledger, and reject a midpoint-only cycle. A
+generic strategy registry and fixed-mixture payoff matrix remain blocked until
+that information and accounting boundary is tested.
