@@ -703,3 +703,80 @@ func digestVenueLogs(t *testing.T, dir string) string {
 	}
 	return fmt.Sprintf("%x", hash.Sum(nil))
 }
+
+// Regression: every quote-denominated Avellaneda-Stoikov parameter must be
+// converted when a book is quoted in a different currency, not just variance.
+//
+// Risk aversion and fill decay have reciprocal quote-price units. Converting
+// variance alone left the ABC/CDF inventory term smaller than one tick, so the
+// cross-pair maker posted its bootstrap quote once and never repriced: in a
+// two-minute probe it accepted 2 orders and issued 0 cancels while the CDF/USD
+// makers on the same cadence cycled ~190 quotes. The control law must be scale
+// invariant: the same base inventory must produce the same *relative*
+// reservation shift and half spread on both books.
+func TestCrossPairStoikovControlIsQuoteScaleInvariant(t *testing.T) {
+	sim, err := NewSim(time.Second, Config{
+		LogDir:              t.TempDir(),
+		LogMode:             "none",
+		Seed:                73,
+		CrossAssetSpotGraph: true,
+	})
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	defer sim.Close()
+
+	relative := func(cfg StoikovMMConfig, inventory float64) (shift, half float64) {
+		forward := float64(cfg.BootstrapPrice) / float64(cfg.QuotePrecision)
+		quote, ok := CalculateStoikovQuote(StoikovInputs{
+			Forward:           forward,
+			Inventory:         inventory,
+			VariancePerSecond: cfg.InitialVariancePerSec,
+			RiskAversion:      cfg.RiskAversion,
+			FillDecay:         cfg.FillDecay,
+			InventoryHorizon:  cfg.InventoryHorizon,
+		})
+		if !ok {
+			t.Fatalf("quote invalid for %s", cfg.Symbol)
+		}
+		return (forward - quote.Reservation) / forward, quote.HalfSpread / forward
+	}
+
+	venue := sim.Venues[0]
+	var usd, cross *StoikovMMConfig
+	for _, maker := range venue.SpotMakers {
+		switch maker.cfg.Symbol {
+		case "ABC/USD":
+			cfg := maker.cfg
+			usd = &cfg
+		case "ABC/CDF":
+			cfg := maker.cfg
+			cross = &cfg
+		}
+	}
+	if usd == nil || cross == nil {
+		t.Fatal("expected both an ABC/USD and an ABC/CDF maker")
+	}
+
+	const inventory = 1.0
+	usdShift, usdHalf := relative(*usd, inventory)
+	crossShift, crossHalf := relative(*cross, inventory)
+	if usdShift <= 0 {
+		t.Fatalf("baseline inventory shift must be positive, got %.18g", usdShift)
+	}
+	if math.Abs(crossShift-usdShift) > 1e-12 {
+		t.Fatalf("relative inventory shift not scale invariant: ABC/USD=%.18g ABC/CDF=%.18g", usdShift, crossShift)
+	}
+	if math.Abs(crossHalf-usdHalf) > 1e-12 {
+		t.Fatalf("relative half spread not scale invariant: ABC/USD=%.18g ABC/CDF=%.18g", usdHalf, crossHalf)
+	}
+
+	// The skew from one quote lot must be large enough to move the cross book
+	// by at least one tick, otherwise the maker cannot respond to inventory.
+	lot := float64(cross.QuoteQty) / float64(cross.BasePrecision)
+	crossPrice := float64(cross.BootstrapPrice) / float64(cross.QuotePrecision)
+	tick := float64(cross.TickSize) / float64(cross.QuotePrecision)
+	if got := crossShift * crossPrice * lot; got < tick {
+		t.Fatalf("one-lot inventory skew %.18g CDF is below one tick %.18g: maker cannot reprice", got, tick)
+	}
+}
