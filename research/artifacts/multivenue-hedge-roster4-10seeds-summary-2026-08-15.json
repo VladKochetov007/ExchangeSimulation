@@ -1,0 +1,115 @@
+{
+  "comparison": "hedge_on_minus_hedge_off",
+  "data_quality": {
+    "min_positive_horizon_position_rows": 4142,
+    "venue_count_per_world": [
+      3
+    ]
+  },
+  "metrics": [
+    {
+      "bootstrap_95_ci_on_minus_off": [
+        -0.2702617977215498,
+        -0.11211130981055172
+      ],
+      "hedge_on_higher_count": 1,
+      "hedge_on_lower_count": 9,
+      "mean_hedge_off": 0.835043752852729,
+      "mean_hedge_on": 0.644067832299363,
+      "mean_on_minus_off": -0.19097592055336607,
+      "median_on_minus_off": -0.20895427328969787,
+      "metric": "mean_abs_net_delta",
+      "n_pairs": 10,
+      "two_sided_sign_test_p": 0.021484375
+    },
+    {
+      "bootstrap_95_ci_on_minus_off": [
+        -0.2111893804223314,
+        -0.04979719600005341
+      ],
+      "hedge_on_higher_count": 3,
+      "hedge_on_lower_count": 7,
+      "mean_hedge_off": 5.64535909587183,
+      "mean_hedge_on": 5.514737918971202,
+      "mean_on_minus_off": -0.1306211769006281,
+      "median_on_minus_off": -0.12113281334420734,
+      "metric": "mean_max_abs_net_delta",
+      "n_pairs": 10,
+      "two_sided_sign_test_p": 0.34375
+    },
+    {
+      "bootstrap_95_ci_on_minus_off": [
+        2.5257401047693147e-10,
+        5.349101307411932e-09
+      ],
+      "hedge_on_higher_count": 9,
+      "hedge_on_lower_count": 1,
+      "mean_hedge_off": 1.026228319969028e-07,
+      "mean_hedge_on": 1.0505142839739511e-07,
+      "mean_on_minus_off": 2.42859640049229e-09,
+      "median_on_minus_off": 7.330552401247002e-10,
+      "metric": "mean_abs_gamma",
+      "n_pairs": 10,
+      "two_sided_sign_test_p": 0.021484375
+    },
+    {
+      "bootstrap_95_ci_on_minus_off": [
+        460576.3137750638,
+        1739157.1571753384
+      ],
+      "hedge_on_higher_count": 9,
+      "hedge_on_lower_count": 1,
+      "mean_hedge_off": 2519192299.219658,
+      "mean_hedge_on": 2520275154.4015226,
+      "mean_on_minus_off": 1082855.181864643,
+      "median_on_minus_off": 1086235.1920201778,
+      "metric": "mean_abs_vega",
+      "n_pairs": 10,
+      "two_sided_sign_test_p": 0.021484375
+    },
+    {
+      "bootstrap_95_ci_on_minus_off": [
+        -45462883.44583244,
+        -22205815.833332825
+      ],
+      "hedge_on_higher_count": 0,
+      "hedge_on_lower_count": 10,
+      "mean_hedge_off": 23558667180.133335,
+      "mean_hedge_on": 23525010057.733334,
+      "mean_on_minus_off": -33657122.39999924,
+      "median_on_minus_off": -32239743.66666603,
+      "metric": "mean_equity_change",
+      "n_pairs": 10,
+      "two_sided_sign_test_p": 0.001953125
+    },
+    {
+      "bootstrap_95_ci_on_minus_off": [
+        4718456.833333206,
+        13522379.291666418
+      ],
+      "hedge_on_higher_count": 8,
+      "hedge_on_lower_count": 0,
+      "mean_hedge_off": 34411009332.36667,
+      "mean_hedge_on": 34419990346.53333,
+      "mean_on_minus_off": 8981014.166666795,
+      "median_on_minus_off": 9700810.166664124,
+      "metric": "mean_terminal_maintenance",
+      "n_pairs": 10,
+      "two_sided_sign_test_p": 0.0078125
+    }
+  ],
+  "negative_difference_interpretation": "hedge-on lower",
+  "schema_version": 1,
+  "seeds": [
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    50,
+    51,
+    52
+  ]
+}

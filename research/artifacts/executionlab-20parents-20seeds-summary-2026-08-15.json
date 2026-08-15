@@ -1,0 +1,44 @@
+{
+  "bootstrap_95_ci_twap_minus_immediate_bps": [
+    -2.3769848188750005,
+    -2.335104771312501
+  ],
+  "comparison": "twap_minus_immediate",
+  "data_quality": {
+    "maximum_total_unfilled_qty": 0,
+    "minimum_complete_parent_count": 20,
+    "parent_count_per_world": [
+      20
+    ]
+  },
+  "mean_immediate_target_shortfall_bps": 9.355976645,
+  "mean_twap_minus_immediate_bps": -2.35598022,
+  "mean_twap_target_shortfall_bps": 6.999996425000001,
+  "negative_difference_interpretation": "TWAP lower target shortfall",
+  "schema_version": 1,
+  "seeds": [
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57,
+    58,
+    59,
+    60,
+    61
+  ],
+  "twap_higher_count": 0,
+  "twap_lower_count": 20,
+  "two_sided_sign_test_p": 1.9073486328125e-06
+}

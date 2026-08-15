@@ -34,17 +34,22 @@
 ## Current Evidence Boundary
 
 - Controlled TWAP: neutral at low displayed-depth participation and lower
-  completion-adjusted target shortfall at tested 2 and 5 ABC sizes. The 1 Hz
-  and 5 Hz schedules tie in this fast-replenishing ecology. See
-  `executionlab-2026-08-15.md`.
+  completion-adjusted target shortfall at tested 2 and 5 ABC sizes. A later
+  20-parent, 32-participant sequence retains a 2.356 bp TWAP advantage with
+  no incomplete parents. The 1 Hz and 5 Hz schedules tie in this
+  fast-replenishing ecology. See `executionlab-2026-08-15.md` and
+  `executionlab-multiparent-2026-08-15.md`.
 - Low latency: a deterministic scarce-conversion lab now proves an earlier
   signal observer wins when latency labels are swapped and client/actor order
   are controlled. It is not yet an ecology-level profitability result. See
   `latencylab-2026-08-15.md`.
-- Hedged options: 20 seed-level three-venue pairs show lower mean and peak
-  absolute delta with hedging. Gamma differs endogenously and static-IV vega is
-  a local sensitivity, not realised PnL. See
-  `options-hedge-replicates-2026-08-15.md`.
+- Hedged options: the original 20 seed-level three-venue pairs show lower mean
+  and peak absolute delta with hedging. A denser 39-participant roster retains
+  lower mean delta in ten complete pairs but rejects one hedge-on terminal
+  world for a missing two-sided conversion mark. Gamma differs endogenously
+  and static-IV vega is a local sensitivity, not realised PnL. See
+  `options-hedge-replicates-2026-08-15.md` and
+  `options-hedge-roster4-2026-08-15.md`.
 - The linear market makers are Avellaneda-Stoikov-inspired controls, not a
   calibrated optimality claim. See `stoikov-control-audit-2026-08-15.md`.
 

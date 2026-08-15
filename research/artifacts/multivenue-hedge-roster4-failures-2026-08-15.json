@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "study": "three_venue_option_hedge_roster4",
+  "predeclared_seed_range": [42, 52],
+  "complete_pair_seeds": [42, 43, 44, 45, 46, 47, 48, 50, 51, 52],
+  "incomplete_worlds": [
+    {
+      "seed": 49,
+      "dealer_hedge_mode": "on",
+      "phase": "terminal_post_mark",
+      "error": "multivenue: venue south marked dealer account: exchange: marked spot wallet: missing valid ABC/USD conversion",
+      "interpretation": "The strict terminal valuer rejected a nonzero ABC wallet without a two-sided ABC/USD conversion mark. This is finite liquidity/inventory model behavior, not a zero or imputed terminal PnL."
+    }
+  ]
+}
