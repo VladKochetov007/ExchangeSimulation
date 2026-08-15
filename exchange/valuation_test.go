@@ -203,3 +203,40 @@ func TestBalanceSnapshotRetainsDebtOnlyWalletAssets(t *testing.T) {
 		t.Fatalf("perp debt-only balance omitted: %#v", snapshot.PerpBalances)
 	}
 }
+
+func TestZeroFeeSpotSettlementDoesNotCreateEmptyAssetLedger(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	spot := NewSpotInstrument(
+		"ABC/USD", "ABC", "USD", valuationBasePrecision, valuationQuotePrecision,
+		valuationQuotePrecision, valuationBasePrecision/100,
+	)
+	ex.AddInstrument(spot)
+	ex.ConnectNewClient(1, map[string]int64{"USD": 100 * valuationQuotePrecision}, &FixedFee{})
+	ex.ConnectNewClient(2, map[string]int64{"ABC": valuationBasePrecision}, &FixedFee{})
+
+	if response := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 1, Symbol: spot.Symbol(), Side: Sell, Type: LimitOrder,
+		Price: 100 * valuationQuotePrecision, Qty: valuationBasePrecision,
+		TimeInForce: GTC, Visibility: Normal,
+	}); !response.Success {
+		t.Fatalf("resting sell rejected: %s", response.Error)
+	}
+	if response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 2, Symbol: spot.Symbol(), Side: Buy, Type: LimitOrder,
+		Price: 100 * valuationQuotePrecision, Qty: valuationBasePrecision,
+		TimeInForce: GTC, Visibility: Normal,
+	}); !response.Success {
+		t.Fatalf("crossing buy rejected: %s", response.Error)
+	}
+	for clientID, client := range ex.Clients {
+		if _, exists := client.Balances[""]; exists {
+			t.Fatalf("client %d has empty spot balance asset: %#v", clientID, client.Balances)
+		}
+		if _, exists := client.Reserved[""]; exists {
+			t.Fatalf("client %d has empty spot reservation asset: %#v", clientID, client.Reserved)
+		}
+	}
+	if _, exists := ex.ExchangeBalance.FeeRevenue[""]; exists {
+		t.Fatalf("exchange has empty fee-revenue asset: %#v", ex.ExchangeBalance.FeeRevenue)
+	}
+}

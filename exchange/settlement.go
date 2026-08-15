@@ -84,6 +84,8 @@ func (e *DefaultExchange) handleExecution(
 		takerFee = calcClientFee(taker, FillContext{Exec: exec, IsMaker: false, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
 		makerFee = calcClientFee(maker, FillContext{Exec: exec, IsMaker: true, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
 	}
+	takerFee = normalizedExecutionFee(takerFee, quoteAsset)
+	makerFee = normalizedExecutionFee(makerFee, quoteAsset)
 
 	// Fully filled makers stay in book.Orders until removeMakerOrders, so this
 	// lookup normally succeeds; exec carries the fallbacks for custom matchers.
@@ -111,6 +113,19 @@ func (e *DefaultExchange) handleExecution(
 	tradeID := e.createTrade(book, exec, takerOrder, timestamp, log)
 	e.notifyFill(exec, takerOrder, makerPosSide, takerFee, makerFee, tradeID, book, log, timestamp, result.TakerDelta, result.MakerDelta, result.TakerPnL, result.MakerPnL)
 	return positionChanged
+}
+
+// normalizedExecutionFee makes an omitted fee asset mean the instrument quote
+// asset, matching fee-revenue accounting. A zero fee must not create a phantom
+// empty-string ledger asset merely because a zero-fee plan returned Fee{}.
+func normalizedExecutionFee(fee Fee, quoteAsset string) Fee {
+	if fee.Amount == 0 {
+		return Fee{}
+	}
+	if fee.Asset == "" {
+		fee.Asset = quoteAsset
+	}
+	return fee
 }
 
 func (e *DefaultExchange) buildSettlementContext(
@@ -259,16 +274,21 @@ func spotFillRelease(client *Client, book *OrderBook, order *Order, exec *Execut
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) settleSpotBuyer(client *Client, clientID uint64, book *OrderBook, order *Order, exec *Execution, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
 	oldBase, oldQuote := client.Balances[base], client.Balances[quote]
-	oldFeeAsset := client.Balances[fee.Asset]
+	oldFeeAsset := int64(0)
+	if fee.Amount != 0 {
+		oldFeeAsset = client.Balances[fee.Asset]
+	}
 	client.Release(quote, spotFillRelease(client, book, order, exec, Buy, book.Instrument.BasePrecision()))
 	client.Balances[quote] -= notional
-	client.Balances[fee.Asset] -= fee.Amount
+	if fee.Amount != 0 {
+		client.Balances[fee.Asset] -= fee.Amount
+	}
 	client.Balances[base] += qty
 	deltas := []BalanceDelta{
 		spotDelta(base, oldBase, client.Balances[base]),
 		spotDelta(quote, oldQuote, client.Balances[quote]),
 	}
-	if fee.Asset != quote && fee.Asset != base {
+	if fee.Amount != 0 && fee.Asset != quote && fee.Asset != base {
 		deltas = append(deltas, spotDelta(fee.Asset, oldFeeAsset, client.Balances[fee.Asset]))
 	}
 	logBalanceChange(e, timestamp, clientID, book.Symbol, "trade_settlement", deltas)
@@ -278,16 +298,21 @@ func (e *DefaultExchange) settleSpotBuyer(client *Client, clientID uint64, book 
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) settleSpotSeller(client *Client, clientID uint64, book *OrderBook, order *Order, exec *Execution, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
 	oldBase, oldQuote := client.Balances[base], client.Balances[quote]
-	oldFeeAsset := client.Balances[fee.Asset]
+	oldFeeAsset := int64(0)
+	if fee.Amount != 0 {
+		oldFeeAsset = client.Balances[fee.Asset]
+	}
 	client.Release(base, spotFillRelease(client, book, order, exec, Sell, book.Instrument.BasePrecision()))
 	client.Balances[base] -= qty
 	client.Balances[quote] += notional
-	client.Balances[fee.Asset] -= fee.Amount
+	if fee.Amount != 0 {
+		client.Balances[fee.Asset] -= fee.Amount
+	}
 	deltas := []BalanceDelta{
 		spotDelta(base, oldBase, client.Balances[base]),
 		spotDelta(quote, oldQuote, client.Balances[quote]),
 	}
-	if fee.Asset != quote && fee.Asset != base {
+	if fee.Amount != 0 && fee.Asset != quote && fee.Asset != base {
 		deltas = append(deltas, spotDelta(fee.Asset, oldFeeAsset, client.Balances[fee.Asset]))
 	}
 	logBalanceChange(e, timestamp, clientID, book.Symbol, "trade_settlement", deltas)
@@ -299,6 +324,9 @@ func (e *DefaultExchange) settleSpotSeller(client *Client, clientID uint64, book
 // another. defaultAsset covers fees with an unset asset (zero-fee probes).
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) recordFeeRevenue(defaultAsset string, takerFee, makerFee Fee, book *OrderBook, timestamp int64) {
+	if takerFee.Amount == 0 && makerFee.Amount == 0 {
+		return
+	}
 	takerAsset, makerAsset := takerFee.Asset, makerFee.Asset
 	if takerAsset == "" {
 		takerAsset = defaultAsset
