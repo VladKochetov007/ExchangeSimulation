@@ -47,6 +47,31 @@ func TestNoLogModeRetainsRiskTelemetry(t *testing.T) {
 	}
 }
 
+func TestConfigExpandsIndependentlySeededFlowRosters(t *testing.T) {
+	sim, err := NewSim(3*time.Second, Config{
+		LogDir:           t.TempDir(),
+		LogMode:          "none",
+		Seed:             91,
+		NoiseTraderCount: 3,
+		OptionFlowCount:  4,
+	})
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	defer sim.Close()
+	for _, venue := range sim.Venues {
+		if len(venue.NoiseTraders) != 3 || len(venue.OptionFlows) != 4 {
+			t.Fatalf("venue %s roster sizes = noise %d, option %d", venue.ID, len(venue.NoiseTraders), len(venue.OptionFlows))
+		}
+		if venue.NoiseTrader != venue.NoiseTraders[0] || venue.OptionFlow != venue.OptionFlows[0] {
+			t.Fatalf("venue %s legacy participants do not point at roster heads", venue.ID)
+		}
+	}
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
 func TestThreeVenueScenarioListsEveryDerivativeClass(t *testing.T) {
 	sim, err := NewSim(3*time.Second, Config{LogDir: t.TempDir(), Seed: 11})
 	if err != nil {
@@ -107,7 +132,9 @@ func TestThreeVenueScenarioDigestAcrossGOMAXPROCS(t *testing.T) {
 		previous := runtime.GOMAXPROCS(procs)
 		defer runtime.GOMAXPROCS(previous)
 
-		sim, err := NewSim(3*time.Second, Config{LogDir: t.TempDir(), Seed: 27})
+		sim, err := NewSim(3*time.Second, Config{
+			LogDir: t.TempDir(), Seed: 27, NoiseTraderCount: 2, OptionFlowCount: 2,
+		})
 		if err != nil {
 			t.Fatalf("NewSim: %v", err)
 		}

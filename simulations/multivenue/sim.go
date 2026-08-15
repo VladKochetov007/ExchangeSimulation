@@ -47,6 +47,11 @@ type Config struct {
 	QuoteInterval      time.Duration `json:"quote_interval"`
 	NoiseInterval      time.Duration `json:"noise_interval"`
 	GreekInterval      time.Duration `json:"greek_interval"`
+	// NoiseTraderCount and OptionFlowCount control independently funded,
+	// independently seeded flow participants on every venue. A zero value
+	// preserves the historical one-each baseline.
+	NoiseTraderCount int `json:"noise_trader_count"`
+	OptionFlowCount  int `json:"option_flow_count"`
 
 	ShortOptionTenor          time.Duration `json:"short_option_tenor"`
 	LongOptionTenor           time.Duration `json:"long_option_tenor"`
@@ -120,6 +125,12 @@ func (c *Config) normalize() error {
 	if c.GreekInterval == 0 {
 		c.GreekInterval = time.Minute
 	}
+	if c.NoiseTraderCount == 0 {
+		c.NoiseTraderCount = 1
+	}
+	if c.OptionFlowCount == 0 {
+		c.OptionFlowCount = 1
+	}
 	if c.ShortOptionTenor == 0 {
 		c.ShortOptionTenor = 6 * time.Hour
 	}
@@ -168,7 +179,7 @@ func (c *Config) normalize() error {
 	if c.Step <= 0 || c.SnapshotInterval <= 0 || c.AutomationInterval <= 0 || c.QuoteInterval <= 0 ||
 		c.NoiseInterval <= 0 || c.GreekInterval <= 0 || c.ShortOptionTenor <= 0 || c.LongOptionTenor <= 0 ||
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
-		c.OptionMaxStrikesPerExpiry <= 0 ||
+		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || c.OptionBuyProbability < 0 || c.OptionBuyProbability > 1 {
 		return errors.New("multivenue: invalid non-positive duration or model parameter")
@@ -196,15 +207,19 @@ type Venue struct {
 	FuturesMaker         *derivsim.FuturesMarketMaker
 	OptionDealer         *derivsim.OptionMarketMaker
 	OptionDealerClientID uint64
-	NoiseTrader          *feesim.RandomTaker
-	OptionFlow           *derivsim.OptionTaker
-	InitialRisk          *VenueRiskSnapshot
-	RiskTimeline         []VenueRiskSnapshot
-	PreExpiryRisk        []VenueRiskSnapshot
-	TerminalRisk         *VenueRiskSnapshot
-	riskErr              error
-	riskLastNano         int64
-	optionListedNano     map[string]int64
+	// Singular fields retain the baseline participant for callers written
+	// before configurable rosters. All actors live in the corresponding slice.
+	NoiseTrader      *feesim.RandomTaker
+	NoiseTraders     []*feesim.RandomTaker
+	OptionFlow       *derivsim.OptionTaker
+	OptionFlows      []*derivsim.OptionTaker
+	InitialRisk      *VenueRiskSnapshot
+	RiskTimeline     []VenueRiskSnapshot
+	PreExpiryRisk    []VenueRiskSnapshot
+	TerminalRisk     *VenueRiskSnapshot
+	riskErr          error
+	riskLastNano     int64
+	optionListedNano map[string]int64
 }
 
 // VenueRiskSnapshot combines exchange-owned marked equity with an
@@ -318,6 +333,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 			"Direct deterministic mounts are reproducible; latency is intentionally excluded.",
 			"No cross-venue routing or collateral transfer exists in schema version 1.",
 			"Option dealer begins with zero ABC; spot hedge sells borrow ABC against USD collateral when required.",
+			"Noise and option-flow rosters are independently seeded per venue and participant index.",
 			"Raw venue-event logs are controlled by log_mode; greeks.json risk telemetry is always emitted by the command.",
 		},
 	}, "", "  ")
@@ -362,8 +378,12 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		runner.AddActor(venue.PerpMaker)
 		runner.AddActor(venue.FuturesMaker)
 		runner.AddActor(venue.OptionDealer)
-		runner.AddActor(venue.NoiseTrader)
-		runner.AddActor(venue.OptionFlow)
+		for _, noise := range venue.NoiseTraders {
+			runner.AddActor(noise)
+		}
+		for _, flow := range venue.OptionFlows {
+			runner.AddActor(flow)
+		}
 	}
 	return sim, nil
 }
@@ -383,7 +403,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	}
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
 		ID:                      id,
-		EstimatedClients:        16,
+		EstimatedClients:        5 + s.Config.NoiseTraderCount + s.Config.OptionFlowCount,
 		Clock:                   clock,
 		TickerFactory:           timers,
 		DeterministicIngress:    true,
@@ -515,17 +535,41 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 
 	noiseBalances := map[string]int64{"ABC": 100 * mvBasePrecision, "USD": 100 * mvQuotePrecision}
 	noiseFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
-	venue.NoiseTrader = feesim.NewRandomTaker(nextActor(), connect(noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), feesim.TakerConfig{
-		Symbols: []string{"ABC/USD", "ABC-PERP"}, TargetQtys: map[string]int64{"ABC/USD": mvBasePrecision / 100, "ABC-PERP": mvBasePrecision / 100},
-		TakeInterval: s.Config.NoiseInterval, Seed: s.Config.Seed + int64(venueIndex)*1_000 + 1,
-	})
-	venue.NoiseTrader.SetTickerFactory(timers)
-	venue.OptionFlow = derivsim.NewOptionTaker(nextActor(), connect(noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), derivsim.OptionTakerConfig{
-		Underlying: "ABC/USD", PBuy: s.Config.OptionBuyProbability, LotQty: mvBasePrecision / 100,
-		Interval: s.Config.NoiseInterval, Seed: s.Config.Seed + int64(venueIndex)*1_000 + 2, IncludeFutures: true,
-	})
-	venue.OptionFlow.SetTickerFactory(timers)
+	for participant := 0; participant < s.Config.NoiseTraderCount; participant++ {
+		noise := feesim.NewRandomTaker(nextActor(), connect(noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), feesim.TakerConfig{
+			Symbols: []string{"ABC/USD", "ABC-PERP"}, TargetQtys: map[string]int64{"ABC/USD": mvBasePrecision / 100, "ABC-PERP": mvBasePrecision / 100},
+			TakeInterval: s.Config.NoiseInterval, Seed: flowSeed(s.Config.Seed, venueIndex, participant, 1),
+		})
+		noise.SetTickerFactory(timers)
+		venue.NoiseTraders = append(venue.NoiseTraders, noise)
+	}
+	venue.NoiseTrader = venue.NoiseTraders[0]
+	for participant := 0; participant < s.Config.OptionFlowCount; participant++ {
+		flow := derivsim.NewOptionTaker(nextActor(), connect(noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), derivsim.OptionTakerConfig{
+			Underlying: "ABC/USD", PBuy: s.Config.OptionBuyProbability, LotQty: mvBasePrecision / 100,
+			Interval: s.Config.NoiseInterval, Seed: flowSeed(s.Config.Seed, venueIndex, participant, 2), IncludeFutures: true,
+		})
+		flow.SetTickerFactory(timers)
+		venue.OptionFlows = append(venue.OptionFlows, flow)
+	}
+	venue.OptionFlow = venue.OptionFlows[0]
 	return venue, nil
+}
+
+// flowSeed creates a stable stream per flow class, venue, and participant.
+// It avoids mutable/shared random state, which would otherwise make adding a
+// participant change an existing actor's draws or host scheduling observable.
+func flowSeed(master int64, venueIndex, participant, flowClass int) int64 {
+	value := uint64(master) + 0x9e3779b97f4a7c15
+	value ^= uint64(venueIndex+1) * 0xbf58476d1ce4e5b9
+	value ^= uint64(participant+1) * 0x94d049bb133111eb
+	value ^= uint64(flowClass) * 0xd6e8feb86659fd93
+	value ^= value >> 30
+	value *= 0xbf58476d1ce4e5b9
+	value ^= value >> 27
+	value *= 0x94d049bb133111eb
+	value ^= value >> 31
+	return int64(value & ((uint64(1) << 63) - 1))
 }
 
 func captureVenueRisk(venue *Venue, phase string) (*VenueRiskSnapshot, error) {
