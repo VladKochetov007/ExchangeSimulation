@@ -91,6 +91,14 @@ type Config struct {
 	// sample counts as visibly mispriced in the run summary.
 	MispricingBandBps int64 `json:"mispricing_band_bps"`
 
+	// ValueTraderTiers replaces the homogeneous informed population with named
+	// groups that differ in reaction time and transport latency. This is what
+	// separates a medium-frequency participant that re-evaluates every few
+	// seconds from one whose orders reach the venue in milliseconds, and it
+	// also breaks the degenerate case where identical agents contend for the
+	// same opportunity and the fixed client-ID order decides who wins.
+	ValueTraderTiers []ValueTraderTier `json:"value_trader_tiers"`
+
 	// ValueTraderCount sets how many informed participants per venue trade the
 	// visible spot book against the exogenous fundamental value. They are the
 	// market's anchor: makers quote around their own inventory and noise flow
@@ -368,9 +376,14 @@ type Participant struct {
 // distinguishable from an executable terminal two-sided mark.
 type ParticipantAccountSnapshot struct {
 	Participant
-	Phase      string                       `json:"phase"`
-	MarkSource string                       `json:"mark_source"`
-	Account    etypes.MarkedAccountSnapshot `json:"account"`
+	Phase      string `json:"phase"`
+	MarkSource string `json:"mark_source"`
+	// Marks are the asset prices this row was valued at, in report-asset units
+	// per whole asset. Without them a reader cannot separate trading result
+	// from inventory revaluation: every participant here is net long the base
+	// asset, so a price rise lifts all of their marked equity at once.
+	Marks   map[string]int64             `json:"marks"`
+	Account etypes.MarkedAccountSnapshot `json:"account"`
 }
 
 func (c Config) matchingRule(venueID string) string {
@@ -394,6 +407,23 @@ type VenueRiskSnapshot struct {
 }
 
 // Sim owns the three venue ecology and every log file created for it.
+// ValueTraderTier describes one informed group.
+type ValueTraderTier struct {
+	Name string `json:"name"`
+	// Count is the number of participants of this tier on every venue.
+	Count int `json:"count"`
+	// ReactionInterval is how often the participant re-evaluates the book: its
+	// decision cadence, independent of how fast its orders travel.
+	ReactionInterval time.Duration `json:"reaction_interval"`
+	// Latency is applied to requests, responses, and market data alike, so a
+	// slow participant both sees the book late and reaches it late.
+	Latency time.Duration `json:"latency"`
+	EdgeBps int64         `json:"edge_bps"`
+	LotQty  int64         `json:"lot_qty"`
+	// MaxInventory bounds the signed base position.
+	MaxInventory int64 `json:"max_inventory"`
+}
+
 type Sim struct {
 	Config           Config
 	Runner           *simulation.Runner
@@ -571,6 +601,10 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		for _, trader := range venue.ValueTraders {
 			runner.AddActor(trader)
 		}
+	}
+	if err := sim.addValueTraderTiers(clock, scheduler, timers, &actorID); err != nil {
+		sim.Close()
+		return nil, err
 	}
 	if err := sim.addCrossVenueRouters(clock, scheduler, timers, &actorID); err != nil {
 		sim.Close()
@@ -815,7 +849,12 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	if s.Config.CrossAssetSpotGraph {
 		valueBalances["CDF"] = 1_000 * mvBasePrecision
 	}
-	for participant := 0; participant < *s.Config.ValueTraderCount; participant++ {
+	flatValueTraders := *s.Config.ValueTraderCount
+	if len(s.Config.ValueTraderTiers) > 0 {
+		// Named tiers fully describe the informed population.
+		flatValueTraders = 0
+	}
+	for participant := 0; participant < flatValueTraders; participant++ {
 		trader := NewValueTrader(nextActor(), connect(fmt.Sprintf("value_trader_%d", participant+1), valueBalances, 10_000_000*mvQuotePrecision, noiseFee), s.Fundamental, ValueTraderConfig{
 			Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: tick,
 			EdgeBps: s.Config.ValueTraderEdgeBps, LotQty: mvBasePrecision / 10,
@@ -842,6 +881,52 @@ func (v *Venue) connectParticipant(mount *simulation.Mount, role string, balance
 	}
 	v.Participants = append(v.Participants, Participant{VenueID: v.ID, ClientID: clientID, Role: role})
 	return clientID, gw
+}
+
+// addValueTraderTiers connects the heterogeneous informed population. A tier
+// with latency gets its own scheduled courier mount per venue; a tier without
+// latency uses the venue's direct mount, exactly like the homogeneous case.
+func (s *Sim) addValueTraderTiers(clock *simulation.SimulatedClock, scheduler *simulation.EventScheduler, timers *simulation.SimTimerFactory, actorID *uint64) error {
+	if len(s.Config.ValueTraderTiers) == 0 {
+		return nil
+	}
+	fee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
+	balances := map[string]int64{"ABC": 1_000 * mvBasePrecision, "USD": 50_000_000 * mvQuotePrecision}
+	if s.Config.CrossAssetSpotGraph {
+		balances["CDF"] = 1_000 * mvBasePrecision
+	}
+	for _, tier := range s.Config.ValueTraderTiers {
+		if tier.Count <= 0 {
+			continue
+		}
+		for _, venue := range s.Venues {
+			mount := venue.Mount
+			if tier.Latency > 0 {
+				mount = simulation.NewMount(venue.Exchange, simulation.LatencyConfig{
+					Request:    simulation.NewConstantLatency(tier.Latency),
+					Response:   simulation.NewConstantLatency(tier.Latency),
+					MarketData: simulation.NewConstantLatency(tier.Latency),
+					Scheduler:  scheduler,
+					Clock:      clock,
+				})
+				s.Runner.AddMount(mount)
+			}
+			for participant := 0; participant < tier.Count; participant++ {
+				role := fmt.Sprintf("value_trader_%s_%d", tier.Name, participant+1)
+				_, gw := venue.connectParticipant(mount, role, balances, 10_000_000*mvQuotePrecision, fee)
+				*actorID++
+				trader := NewValueTrader(*actorID, gw, s.Fundamental, ValueTraderConfig{
+					Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: int64(10 * mvQuotePrecision),
+					EdgeBps: tier.EdgeBps, LotQty: tier.LotQty, MaxInventory: tier.MaxInventory,
+					TradeInterval: tier.ReactionInterval,
+				})
+				trader.SetTickerFactory(timers)
+				venue.ValueTraders = append(venue.ValueTraders, trader)
+				s.Runner.AddActor(trader)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Sim) addCrossVenueRouters(clock *simulation.SimulatedClock, scheduler *simulation.EventScheduler, timers *simulation.SimTimerFactory, actorID *uint64) error {
@@ -922,6 +1007,10 @@ func (s *Sim) capturePopulationAccounts(phase string) ([]ParticipantAccountSnaps
 		if err != nil {
 			return nil, err
 		}
+		marks := make(map[string]int64, len(spec.AssetMarks))
+		for asset, mark := range spec.AssetMarks {
+			marks[asset] = mark.Price
+		}
 		for _, participant := range venue.Participants {
 			account, err := venue.Exchange.MarkedAccount(participant.ClientID, spec)
 			if err != nil {
@@ -931,6 +1020,7 @@ func (s *Sim) capturePopulationAccounts(phase string) ([]ParticipantAccountSnaps
 				Participant: participant,
 				Phase:       phase,
 				MarkSource:  markSource,
+				Marks:       marks,
 				Account:     account,
 			})
 		}

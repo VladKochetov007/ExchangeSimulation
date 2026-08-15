@@ -1,0 +1,46 @@
+{
+  "log_mode": "none",
+  "seed": 91,
+  "step": 10000000,
+  "snapshot_interval": 100000000,
+  "automation_interval": 1000000000,
+  "quote_interval": 1000000000,
+  "noise_interval": 2000000000,
+  "greek_interval": 60000000000,
+  "noise_trader_count": 2,
+  "option_flow_count": 2,
+  "strict_population_accounting": true,
+  "cross_asset_spot_graph": true,
+  "venue_rules": {
+    "north": {
+      "matching_rule": "price_time"
+    },
+    "central": {
+      "matching_rule": "pro_rata"
+    },
+    "south": {
+      "matching_rule": "pro_rata"
+    }
+  },
+  "value_trader_count": 0,
+  "value_trader_tiers": [
+    {
+      "name": "fast",
+      "count": 1,
+      "reaction_interval": 100000000,
+      "latency": 10000000,
+      "edge_bps": 10,
+      "lot_qty": 10000000,
+      "max_inventory": 20000000000
+    },
+    {
+      "name": "mft",
+      "count": 1,
+      "reaction_interval": 30000000000,
+      "latency": 1000000000,
+      "edge_bps": 10,
+      "lot_qty": 10000000,
+      "max_inventory": 20000000000
+    }
+  ]
+}

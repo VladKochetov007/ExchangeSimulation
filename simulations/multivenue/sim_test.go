@@ -933,3 +933,51 @@ func TestValueTraderTradesAgainstFundamentalWithinInventoryBound(t *testing.T) {
 		t.Fatalf("kept buying past the inventory bound: %+v", gw.requests[before:])
 	}
 }
+
+// A latency tier must actually receive its configured transport delay and its
+// own connected participants, otherwise a latency experiment silently compares
+// two identical populations.
+func TestValueTraderTiersConnectWithConfiguredLatency(t *testing.T) {
+	sim, err := NewSim(2*time.Second, Config{
+		LogDir:  t.TempDir(),
+		LogMode: "none",
+		Seed:    91,
+		Step:    10 * time.Millisecond,
+		ValueTraderTiers: []ValueTraderTier{
+			{Name: "fast", Count: 1, ReactionInterval: 100 * time.Millisecond, Latency: 10 * time.Millisecond,
+				EdgeBps: 10, LotQty: mvBasePrecision / 10, MaxInventory: 200 * mvBasePrecision},
+			{Name: "mft", Count: 2, ReactionInterval: 30 * time.Second, Latency: time.Second,
+				EdgeBps: 10, LotQty: mvBasePrecision / 10, MaxInventory: 200 * mvBasePrecision},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	defer sim.Close()
+
+	for _, venue := range sim.Venues {
+		if got := len(venue.ValueTraders); got != 3 {
+			t.Fatalf("venue %s value traders = %d, want 3 from the configured tiers", venue.ID, got)
+		}
+		roles := map[string]int{}
+		for _, participant := range venue.Participants {
+			if strings.HasPrefix(participant.Role, "value_trader_") {
+				roles[participant.Role]++
+			}
+		}
+		for _, want := range []string{"value_trader_fast_1", "value_trader_mft_1", "value_trader_mft_2"} {
+			if roles[want] != 1 {
+				t.Fatalf("venue %s missing tier participant %q, have %v", venue.ID, want, roles)
+			}
+		}
+	}
+
+	// Named tiers replace the homogeneous population rather than adding to it.
+	for _, venue := range sim.Venues {
+		for _, participant := range venue.Participants {
+			if participant.Role == "value_trader_1" {
+				t.Fatalf("venue %s kept a flat value trader alongside configured tiers", venue.ID)
+			}
+		}
+	}
+}
