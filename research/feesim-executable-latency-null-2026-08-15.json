@@ -1,0 +1,44 @@
+{
+  "experiment_id": "E-036",
+  "hypothesis_id": "H-015",
+  "date": "2026-08-15",
+  "status": "falsified-current-ecology",
+  "question": "Do lower-latency basis arbs obtain more completed, positive all-in spot/perp conversions in the configured fee ecology?",
+  "admission": {
+    "sell_perp_buy_spot": "perp_bid * lot - perp_taker_fee > spot_ask * lot + spot_taker_fee",
+    "buy_perp_sell_spot": "spot_bid * lot - spot_taker_fee > perp_ask * lot + perp_taker_fee",
+    "market_data": "public snapshot plus visible-depth delta reconstruction; trade prints do not synthesize a quote"
+  },
+  "configuration": {
+    "duration": "30s",
+    "seeds": [42, 43, 44, 45, 46, 47, 48, 49],
+    "noise_traders": 8,
+    "market_makers": 2,
+    "spot_taker_bps": 8,
+    "perp_taker_bps": 5,
+    "latency_tiers": [0.2, 1.0],
+    "tier_orders": [[0.2, 1.0], [1.0, 0.2]],
+    "deterministic_phase_runtime": true
+  },
+  "command_template": "go build -o /tmp/feesimrace ./cmd/feesimrace; GOMAXPROCS=7 /tmp/feesimrace -duration=30s -seed=<seed> -noise-traders=8 -tiers=<tier-order> -logdir=<output>",
+  "observations": {
+    "worlds": 16,
+    "tier_reports": 32,
+    "executable_signals": 0,
+    "submitted_pairs": 0,
+    "spot_fills": 0,
+    "perp_fills": 0,
+    "nonzero_residual_reports": 0,
+    "tier_order_effect": "none; both orders inactive for every seed"
+  },
+  "terminal_account_control": {
+    "raw_change_problem": "Common initial ABC/Q inventory moves with terminal marks even for an inactive arb.",
+    "correction": "strategy_equity_change_usd = marked terminal account equity - terminal value of the static starting ABC/Q/USD inventory",
+    "post_fix_check": {
+      "seed": 43,
+      "tier_order": [0.2, 1.0],
+      "inactive_strategy_equity_change_usd": [0, 0]
+    }
+  },
+  "conclusion": "The configured one-venue feesim ecology has no all-in executable spot/perp opportunity. It is invalid evidence for low-latency profitability; retain latencylab only as a mechanism proof."
+}
