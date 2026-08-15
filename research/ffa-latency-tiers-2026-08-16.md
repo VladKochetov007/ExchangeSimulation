@@ -75,3 +75,49 @@ the fast participant, and it is paid for out of the market makers' spread.
   competition from a race into a queueing problem.
 - Fees are the same for both tiers. Real venues price latency and volume tiers
   differently, which would change the break-even edge.
+
+## Decomposition: reaction cadence versus transport latency
+
+The first experiment varied reaction interval and transport latency together,
+so it could not say which axis mattered. Running a single informed participant
+alone, at a 1ms engine clock, over the two axes separately:
+
+| reaction interval | transport latency | informed PnL (USD) | net ABC traded | mean abs log mispricing |
+| --- | --- | ---: | ---: | ---: |
+| 100ms | 1ms | 41,557.03 | 249.31 | 0.00116 |
+| 100ms | 1s | **47,411.82** | 358.89 | 0.00167 |
+| 30s | 1ms | −293.87 | 2.86 | 0.00345 |
+| 30s | 1s | −292.06 | 2.81 | 0.00345 |
+
+**Reaction cadence decides everything; transport latency barely registers.** A
+participant that re-evaluates every 100ms is profitable whether its orders take
+1ms or a full second. A participant that re-evaluates every 30 seconds loses
+money either way, and the difference between its two latency arms is 1.81 USD
+out of a 292 USD loss. A thousand-fold change in transport latency is worth
+less than a percent; a three-hundred-fold change in evaluation cadence flips
+the sign of the result.
+
+This also explains why the medium-frequency participant was excluded even when
+the fast tier's latency was drawn from a lognormal with a 99th percentile near
+10ms: its handicap was never transport.
+
+**Slower transport was mildly *better* for a lone informed participant.** With
+1s latency it earned 14% more and traded 44% more. The market was also less
+efficient in that arm (0.00167 against 0.00116), which is the likely reason:
+a slower corrective participant leaves larger deviations standing, and it is
+the only participant collecting them. Latency is a handicap in a race against
+other informed traders, not against the market itself.
+
+## Methodological finding: the engine clock bounds latency resolution
+
+Configuring a lognormal latency with a 1ms median under a 10ms engine step
+produced results identical to the cent to the constant-latency arm. Latency
+below one step cannot be resolved: every draw lands in the same advance.
+Raising the tier's median to 50ms at the same step changed the outcome, and
+lowering the step to 1ms changed it again, confirming the wiring was correct
+and the coarseness was the cause.
+
+Any experiment quoting sub-millisecond or single-digit-millisecond latency must
+set the engine step below the latency it claims to measure, and should report
+both. This is recorded because a run that silently ignores its own treatment
+looks exactly like a null result.

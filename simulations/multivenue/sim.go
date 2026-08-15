@@ -416,8 +416,12 @@ type ValueTraderTier struct {
 	// decision cadence, independent of how fast its orders travel.
 	ReactionInterval time.Duration `json:"reaction_interval"`
 	// Latency is applied to requests, responses, and market data alike, so a
-	// slow participant both sees the book late and reaches it late.
-	Latency time.Duration `json:"latency"`
+	// slow participant both sees the book late and reaches it late. With
+	// LatencyLogSigma set it is the median of a lognormal draw rather than a
+	// constant, which is what a quoted percentile actually describes: a median
+	// of 1ms with sigma 0.99 puts the 99th percentile near 10ms.
+	Latency         time.Duration `json:"latency"`
+	LatencyLogSigma float64       `json:"latency_log_sigma"`
 	EdgeBps int64         `json:"edge_bps"`
 	LotQty  int64         `json:"lot_qty"`
 	// MaxInventory bounds the signed base position.
@@ -899,13 +903,22 @@ func (s *Sim) addValueTraderTiers(clock *simulation.SimulatedClock, scheduler *s
 		if tier.Count <= 0 {
 			continue
 		}
-		for _, venue := range s.Venues {
+		for venueIndex, venue := range s.Venues {
 			mount := venue.Mount
 			if tier.Latency > 0 {
+				// Each channel draws independently, but from streams seeded by
+				// tier and venue so a run stays reproducible.
+				latency := func(channel int) simulation.LatencyProvider {
+					if tier.LatencyLogSigma <= 0 {
+						return simulation.NewConstantLatency(tier.Latency)
+					}
+					seed := flowSeed(s.Config.Seed, venueIndex, channel, 7) ^ int64(len(tier.Name))
+					return simulation.NewLogNormalLatency(0, tier.Latency, tier.LatencyLogSigma, seed)
+				}
 				mount = simulation.NewMount(venue.Exchange, simulation.LatencyConfig{
-					Request:    simulation.NewConstantLatency(tier.Latency),
-					Response:   simulation.NewConstantLatency(tier.Latency),
-					MarketData: simulation.NewConstantLatency(tier.Latency),
+					Request:    latency(0),
+					Response:   latency(1),
+					MarketData: latency(2),
 					Scheduler:  scheduler,
 					Clock:      clock,
 				})
