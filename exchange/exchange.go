@@ -170,7 +170,8 @@ type ExchangeConfig struct {
 
 	// DeterministicPhases replaces asynchronous exchange jobs and response
 	// delivery with an explicit simulation-runner pump. It requires
-	// DeterministicIngress and a direct (non-latency-wrapped) mount.
+	// DeterministicIngress; scheduler-backed mounts must additionally opt into
+	// the simulation runner's deterministic latency courier.
 	DeterministicPhases bool
 
 	// EstimatedClients pre-allocates capacity for client maps (default: 10)

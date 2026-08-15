@@ -79,19 +79,32 @@ func (m *Mount) Drain() bool {
 	return false
 }
 
-// ValidateDeterministicPhases rejects paths whose event ordering remains under
-// goroutine control. Latency wrappers are intentionally out of scope for this
-// first phase runtime: their scheduled forwarding goroutines need a separate
-// ordered delivery design rather than being silently treated as deterministic.
-func (m *Mount) ValidateDeterministicPhases() error {
-	if m.Latency.Request != nil || m.Latency.Response != nil || m.Latency.MarketData != nil {
-		return fmt.Errorf("simulation: deterministic phases require a direct mount (latency configured)")
-	}
+// EnableDeterministicPhases switches every scheduler-backed wrapper to the
+// runner-owned latency courier. It is called before actors start, after all
+// clients have connected and their wrappers exist.
+func (m *Mount) EnableDeterministicPhases() error {
 	m.mu.Lock()
-	delayed := len(m.delayed)
+	delayed := append([]*DelayedGateway(nil), m.delayed...)
 	m.mu.Unlock()
-	if delayed != 0 {
-		return fmt.Errorf("simulation: deterministic phases require a direct mount (%d delayed gateways)", delayed)
+	for _, d := range delayed {
+		if err := d.EnableDeterministicPhases(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateDeterministicPhases rejects paths whose event ordering remains under
+// goroutine control. Scheduler-backed delayed gateways are valid only after
+// EnableDeterministicPhases has transferred their courier work to the runner.
+func (m *Mount) ValidateDeterministicPhases() error {
+	m.mu.Lock()
+	delayed := append([]*DelayedGateway(nil), m.delayed...)
+	m.mu.Unlock()
+	for _, d := range delayed {
+		if !d.deterministicPhasesEnabled() {
+			return fmt.Errorf("simulation: delayed gateway %d does not use deterministic phase delivery", d.ID())
+		}
 	}
 	venue, ok := m.Market.(deterministicPhaseVenue)
 	if !ok || !venue.DeterministicPhasesEnabled() {
@@ -103,19 +116,41 @@ func (m *Mount) ValidateDeterministicPhases() error {
 // PumpDeterministicPhase runs due exchange-owned jobs, such as snapshots and
 // automation, in the venue's explicit phase order.
 func (m *Mount) PumpDeterministicPhase() bool {
+	processed := false
 	if venue, ok := m.Market.(deterministicPhaseVenue); ok {
-		return venue.PumpDeterministicPhase()
+		processed = venue.PumpDeterministicPhase()
 	}
-	return false
+	m.mu.Lock()
+	delayed := append([]*DelayedGateway(nil), m.delayed...)
+	m.mu.Unlock()
+	for _, d := range delayed {
+		if d.PumpDeterministicPhase() {
+			processed = true
+		}
+	}
+	return processed
 }
 
 // DrainDeterministicEgress moves venue responses to actor inboxes in the
 // venue-defined deterministic order.
 func (m *Mount) DrainDeterministicEgress() bool {
+	processed := false
 	if venue, ok := m.Market.(deterministicPhaseVenue); ok {
-		return venue.DrainDeterministicEgress()
+		processed = venue.DrainDeterministicEgress()
 	}
-	return false
+	m.mu.Lock()
+	delayed := append([]*DelayedGateway(nil), m.delayed...)
+	m.mu.Unlock()
+	for _, d := range delayed {
+		// Exchange ingress in this phase may have generated fresh egress.
+		if d.PumpDeterministicPhase() {
+			processed = true
+		}
+		if d.DrainDeterministicPhaseEgress() {
+			processed = true
+		}
+	}
+	return processed
 }
 
 // Shutdown stops all delayed gateways and shuts down the underlying venue.

@@ -88,6 +88,67 @@ func TestDeterministicPhasesPreserveOrderLifecycleAtSameTimestamp(t *testing.T) 
 	}
 }
 
+// Scheduler-backed latency must use the same phase runtime rather than the
+// legacy forwarding goroutines. This covers a full order/fill lifecycle with
+// non-zero request, response, and market-data delay; the result is identical
+// to a direct mount apart from the modeled arrival timestamps.
+func TestDeterministicPhasesSupportScheduledLatency(t *testing.T) {
+	clock := NewSimulatedClock(0)
+	scheduler := NewEventScheduler(clock)
+	clock.SetScheduler(scheduler)
+	timers := NewSimTimerFactory(scheduler)
+
+	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
+		Clock:               clock,
+		TickerFactory:       timers,
+		DeterministicPhases: true,
+	})
+	ex.AddInstrument(exchange.NewSpotInstrument(
+		"ABC-USD", "ABC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION,
+		exchange.DOLLAR_TICK, exchange.BTC_PRECISION/100,
+	))
+	latency := LatencyConfig{
+		Request:    NewConstantLatency(time.Millisecond),
+		Response:   NewConstantLatency(time.Millisecond),
+		MarketData: NewConstantLatency(time.Millisecond),
+		Scheduler:  scheduler,
+		Clock:      clock,
+	}
+	mount := NewMount(ex, latency)
+	makerGateway := mount.ConnectNewClient(1, map[string]int64{"ABC": exchange.BTC_PRECISION}, &exchange.PercentageFee{})
+	takerGateway := mount.ConnectNewClient(2, map[string]int64{"USD": 1_000 * exchange.USD_PRECISION}, &exchange.PercentageFee{})
+
+	var maker *phaseOrderActor
+	maker = newPhaseOrderActor(1, makerGateway, func() {
+		maker.SubmitOrder("ABC-USD", exchange.Sell, exchange.LimitOrder, 100*exchange.USD_PRECISION, exchange.BTC_PRECISION)
+	})
+	var taker *phaseOrderActor
+	taker = newPhaseOrderActor(2, takerGateway, func() {
+		taker.SubmitOrder("ABC-USD", exchange.Buy, exchange.Market, 0, exchange.BTC_PRECISION)
+	})
+
+	runner := NewRunner(clock, RunnerConfig{
+		Iterations:          6,
+		Step:                time.Millisecond,
+		DeterministicPhases: true,
+	})
+	runner.AddMount(mount)
+	runner.AddIdler(timers)
+	runner.AddActor(maker)
+	runner.AddActor(taker)
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run with scheduled latency: %v", err)
+	}
+
+	want := []actor.EventType{actor.EventOrderAccepted, actor.EventOrderFilled}
+	if !reflect.DeepEqual(maker.events, want) {
+		t.Fatalf("maker lifecycle = %v, want %v", maker.events, want)
+	}
+	if !reflect.DeepEqual(taker.events, want) {
+		t.Fatalf("taker lifecycle = %v, want %v", taker.events, want)
+	}
+}
+
 // A runtime reconfiguration can retire a scheduler-backed periodic job after
 // its tick has been delivered but before the phase pump receives it. Retiring
 // the job must consume that tick as well: otherwise SimTimerFactory retains a

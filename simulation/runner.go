@@ -37,8 +37,8 @@ type RunnerConfig struct {
 	QuiesceTimeout time.Duration
 
 	// DeterministicPhases uses a synchronous fixed-point runtime instead of
-	// goroutine scheduling. It is intentionally opt-in and currently supports
-	// direct exchange mounts only; latency-wrapped mounts are rejected.
+	// goroutine scheduling. Scheduler-backed latency wrappers are supported
+	// only through the runner-owned deterministic courier.
 	DeterministicPhases bool
 
 	// PhaseMaxRounds bounds same-timestamp reaction chains. Zero defaults to
@@ -190,6 +190,9 @@ func (r *Runner) prepareDeterministicPhases() error {
 		return fmt.Errorf("simulation: deterministic phases require an advanceable clock")
 	}
 	for _, m := range r.mounts {
+		if err := m.EnableDeterministicPhases(); err != nil {
+			return err
+		}
 		if err := m.ValidateDeterministicPhases(); err != nil {
 			return err
 		}

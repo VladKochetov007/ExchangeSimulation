@@ -64,10 +64,9 @@ type SimConfig struct {
 	TakerExciteAlpha      float64
 	TakerExciteBetaPerSec float64
 
-	// Deterministic advances simulated time only after every actor has
-	// finished reacting to the previous step, instead of guessing a drain
-	// pause with StepSleepUs. Repeated runs of the same config then agree,
-	// which is what makes comparisons between configurations meaningful.
+	// Deterministic enables the runner-owned phase runtime. It defines request,
+	// response, market-data, timer, and configured-latency delivery order in
+	// simulation time; it is required for reproducible research runs.
 	Deterministic bool
 
 	// StepSleepUs is the runner's per-step goroutine drain pause in µs
@@ -194,6 +193,22 @@ func scaleDur(d time.Duration, factor float64) time.Duration {
 	return scaled
 }
 
+// latencySeed derives an independent, reproducible stream for one client and
+// channel. A shared mutable latency provider makes the draw sequence depend on
+// which actor the host happens to schedule first, defeating common-random-
+// number experiments.
+func latencySeed(master int64, clientID, channel uint64) int64 {
+	x := uint64(master) + 0x9e3779b97f4a7c15
+	x ^= clientID * 0xbf58476d1ce4e5b9
+	x ^= channel * 0x94d049bb133111eb
+	x ^= x >> 30
+	x *= 0xbf58476d1ce4e5b9
+	x ^= x >> 27
+	x *= 0x94d049bb133111eb
+	x ^= x >> 31
+	return int64(x & ((uint64(1) << 63) - 1))
+}
+
 // scaleTick applies the configured tick scale, clamping at 1.
 func (c *SimConfig) scaleTick(tick int64) int64 {
 	scaled := tick * c.TickScaleNum / c.TickScaleDen
@@ -240,6 +255,8 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		TickerFactory:           timerFact,
 		SnapshotInterval:        time.Second,
 		BalanceSnapshotInterval: 10 * time.Second,
+		DeterministicIngress:    cfg.Deterministic,
+		DeterministicPhases:     cfg.Deterministic,
 	})
 	if cfg.ProRata {
 		ex.Matcher = matching.NewProRataMatcher(simClock)
@@ -336,16 +353,17 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 
 	latMin := time.Duration(cfg.LatencyMinUs) * time.Microsecond
 	latMedian := time.Duration(cfg.LatencyMedianUs) * time.Microsecond
-	actorLatency := simulation.LatencyConfig{
-		Request:    simulation.NewLogNormalLatency(latMin, latMedian, cfg.LatencySigma, cfg.Seed),
-		Response:   simulation.NewLogNormalLatency(latMin, latMedian, cfg.LatencySigma, cfg.Seed+1),
-		MarketData: simulation.NewLogNormalLatency(latMin, latMedian, cfg.LatencySigma, cfg.Seed+2),
-		// Deliver at exact sim timestamps; wall-clock sleeps are unrelated to
-		// simulation time and would distort latency by orders of magnitude.
-		Scheduler: scheduler,
-		Clock:     simClock,
+	latencyFor := func(clientID uint64, factor float64) simulation.LatencyConfig {
+		return simulation.LatencyConfig{
+			Request:    simulation.NewLogNormalLatency(scaleDur(latMin, factor), scaleDur(latMedian, factor), cfg.LatencySigma, latencySeed(cfg.Seed, clientID, 1)),
+			Response:   simulation.NewLogNormalLatency(scaleDur(latMin, factor), scaleDur(latMedian, factor), cfg.LatencySigma, latencySeed(cfg.Seed, clientID, 2)),
+			MarketData: simulation.NewLogNormalLatency(scaleDur(latMin, factor), scaleDur(latMedian, factor), cfg.LatencySigma, latencySeed(cfg.Seed, clientID, 3)),
+			// Deliver at exact sim timestamps; wall-clock sleeps are unrelated to
+			// simulation time and would distort latency by orders of magnitude.
+			Scheduler: scheduler,
+			Clock:     simClock,
+		}
 	}
-	actorMount := simulation.NewMount(ex, actorLatency)
 
 	// ---------- Fee plans ----------
 
@@ -363,6 +381,7 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	// ---------- Actors ----------
 
 	var mms []*MarketMaker
+	var actorMounts []*simulation.Mount
 
 	nextClient := uint64(0)
 	connectMM := func(fee exchange.FeeModel, addPerp bool) actor.Gateway {
@@ -375,7 +394,9 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	}
 	connectActor := func(fee exchange.FeeModel, addPerp bool) actor.Gateway {
 		nextClient++
-		gw := actorMount.ConnectNewClient(nextClient, initBalances, fee)
+		mount := simulation.NewMount(ex, latencyFor(nextClient, 1))
+		actorMounts = append(actorMounts, mount)
+		gw := mount.ConnectNewClient(nextClient, initBalances, fee)
 		if addPerp {
 			ex.AddPerpBalance(nextClient, "USD", 10_000_000*usdPrecision)
 		}
@@ -514,16 +535,9 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	var raceArbs []*FeeAwareBasisArb
 	var raceMounts []*simulation.Mount
 	for _, tier := range cfg.RaceArbTiers {
-		tierLatency := simulation.LatencyConfig{
-			Request:    simulation.NewLogNormalLatency(scaleDur(latMin, tier), scaleDur(latMedian, tier), cfg.LatencySigma, cfg.Seed+10),
-			Response:   simulation.NewLogNormalLatency(scaleDur(latMin, tier), scaleDur(latMedian, tier), cfg.LatencySigma, cfg.Seed+11),
-			MarketData: simulation.NewLogNormalLatency(scaleDur(latMin, tier), scaleDur(latMedian, tier), cfg.LatencySigma, cfg.Seed+12),
-			Scheduler:  scheduler,
-			Clock:      simClock,
-		}
-		tierMount := simulation.NewMount(ex, tierLatency)
-		raceMounts = append(raceMounts, tierMount)
 		nextClient++
+		tierMount := simulation.NewMount(ex, latencyFor(nextClient, tier))
+		raceMounts = append(raceMounts, tierMount)
 		gw := tierMount.ConnectNewClient(nextClient, initBalances, spotMakerFee)
 		ex.AddPerpBalance(nextClient, "USD", 10_000_000*usdPrecision)
 		arb := NewFeeAwareBasisArb(nextClient, gw, BasisArbConfig{
@@ -531,7 +545,7 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 			PerpSymbol:       "ABC-PERP",
 			SpotFeeBps:       spotTakerBps,
 			PerpFeeBps:       perpTakerBps,
-			LotSize:          abcPrecision / 10,
+			LotSize:          raceLotSize,
 			MaxPosition:      raceMaxPosition,
 			CheckInterval:    100 * time.Millisecond,
 			Reactive:         cfg.RaceArbReactive,
@@ -577,14 +591,17 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 
 	const step = time.Millisecond
 	runner := simulation.NewRunner(simClock, simulation.RunnerConfig{
-		Iterations: int(simTime / step),
-		Step:       step,
-		StepSleep:  time.Duration(cfg.StepSleepUs) * time.Microsecond,
-		Quiesce:    cfg.Deterministic,
+		Iterations:          int(simTime / step),
+		Step:                step,
+		StepSleep:           time.Duration(cfg.StepSleepUs) * time.Microsecond,
+		Quiesce:             cfg.Deterministic,
+		DeterministicPhases: cfg.Deterministic,
 	})
 	runner.AddIdler(timerFact)
 	runner.AddMount(mmMount)
-	runner.AddMount(actorMount)
+	for _, m := range actorMounts {
+		runner.AddMount(m)
+	}
 	for _, m := range raceMounts {
 		runner.AddMount(m)
 	}
