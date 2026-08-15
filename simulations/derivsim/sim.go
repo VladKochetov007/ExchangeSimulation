@@ -167,6 +167,7 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		Clock:                   simClock,
 		TickerFactory:           timerFact,
 		DeterministicIngress:    true,
+		DeterministicPhases:     true,
 		SnapshotInterval:        200 * time.Millisecond,
 		BalanceSnapshotInterval: 10 * time.Second,
 	})
@@ -236,10 +237,11 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	}
 
 	runner := simulation.NewRunner(simClock, simulation.RunnerConfig{
-		Iterations: int(simTime / time.Millisecond),
-		Step:       time.Millisecond,
-		StepSleep:  time.Duration(cfg.StepSleepUs) * time.Microsecond,
-		Quiesce:    true,
+		Iterations:          int(simTime / time.Millisecond),
+		Step:                time.Millisecond,
+		StepSleep:           time.Duration(cfg.StepSleepUs) * time.Microsecond,
+		Quiesce:             true,
+		DeterministicPhases: true,
 	})
 	runner.AddMount(mmMount)
 	runner.AddIdler(timerFact)
