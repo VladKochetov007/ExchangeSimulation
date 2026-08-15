@@ -23,6 +23,7 @@ func phaseRunDigest(t *testing.T, procs int) [sha256.Size]byte {
 	cfg.LatencyMedianUs = 2_000
 	cfg.LatencySigma = 0.25
 	cfg.TakerIntervalMs = 20
+	cfg.NoiseTraderCount = 4
 	cfg.MMBaseIntervalMs = 10
 	cfg.MMMaxIntervalMs = 20
 
@@ -94,5 +95,49 @@ func TestFeesimRaceArbUsesConfiguredLotSize(t *testing.T) {
 	}
 	if got := sim.RaceArbs[0].cfg.LotSize; got != cfg.RaceArbLotSize {
 		t.Fatalf("race arb lot size = %d, want configured %d", got, cfg.RaceArbLotSize)
+	}
+}
+
+func TestFeesimRaceTerminalReportsUseStrictMarks(t *testing.T) {
+	cfg := DefaultSimConfig()
+	cfg.LogDir = t.TempDir()
+	cfg.Deterministic = true
+	cfg.NoiseTraderCount = 4
+	cfg.RaceArbTiers = []float64{1, 0.2}
+	cfg.RaceArbReactive = true
+
+	sim, err := NewSim(3*time.Second, cfg)
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	defer sim.Close()
+	if len(sim.Takers) != cfg.NoiseTraderCount || sim.Taker != sim.Takers[0] {
+		t.Fatalf("noise roster = %#v; baseline taker is not roster head", sim.Takers)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sim.Exchange().StartAutomation(ctx)
+	sim.Runner.SetShutdownHook(func() {
+		cancel()
+		sim.Exchange().StopAutomation()
+	})
+	if err := sim.Runner.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reports, err := sim.RaceArbTerminalReports()
+	if err != nil {
+		t.Fatalf("RaceArbTerminalReports: %v", err)
+	}
+	if len(reports) != 2 || reports[0].Tier != 1 || reports[1].Tier != 0.2 {
+		t.Fatalf("tier reports = %#v", reports)
+	}
+	for _, report := range reports {
+		if report.ClientID == 0 || report.InitialEquityUSD <= 0 || report.PassiveTerminalEquityUSD <= 0 || report.TerminalAccount.ReportAsset != "USD" {
+			t.Fatalf("invalid strict terminal report: %#v", report)
+		}
+		if report.Fills.SubmittedPairs == 0 && report.StrategyEquityChangeUSD != 0 {
+			t.Fatalf("inactive race tier has strategy PnL %d: %#v", report.StrategyEquityChangeUSD, report)
+		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	etypes "exchange_sim/types"
 )
 
 type BasisArbConfig struct {
@@ -14,14 +15,16 @@ type BasisArbConfig struct {
 	SpotFeeBps    int64 // taker fee on spot leg
 	PerpFeeBps    int64 // taker fee on perp leg
 	LotSize       int64
+	BasePrecision int64
 	MaxPosition   int64
 	CheckInterval time.Duration
-	// Reactive re-evaluates the basis inside HandleEvent on every trade
-	// print and snapshot instead of only on the CheckInterval ticker. With
+	// Reactive re-evaluates the basis inside HandleEvent on every book
+	// snapshot or delta instead of only on the CheckInterval ticker. With
 	// polling, reaction time is dominated by ticker phase and a 20x network
 	// latency spread produces identical profits (the gen-6 negative result);
-	// reactive decisions make reaction time = delivery latency, which is
-	// what a latency race is.
+	// reactive decisions make reaction time = delivery latency, while still
+	// using an executable displayed touch rather than inferring one from a
+	// trade print.
 	Reactive bool
 	// HedgeResidual flattens the leftover delta between the two legs. The
 	// strategy fires two market orders and assumes both fill; into a thin book
@@ -55,8 +58,27 @@ type BasisArbConfig struct {
 	TickSize         int64
 }
 
-// FeeAwareBasisArb arbitrages spot/perp basis using book mid prices.
-// Uses asymmetric thresholds: eagerly unwinds position, reluctantly accumulates.
+// BasisArbReport is a fill-based account of one strategy's actual activity.
+// It intentionally distinguishes execution from submitted orders: an ecology
+// result cannot treat a signal, request, or intended pair as a completed arb.
+type BasisArbReport struct {
+	ClientID             uint64 `json:"client_id"`
+	ExecutableSignals    int    `json:"executable_signals"`
+	SubmittedPairs       int    `json:"submitted_pairs"`
+	SpotBoughtQty        int64  `json:"spot_bought_qty"`
+	SpotSoldQty          int64  `json:"spot_sold_qty"`
+	PerpBoughtQty        int64  `json:"perp_bought_qty"`
+	PerpSoldQty          int64  `json:"perp_sold_qty"`
+	SpotNotional         int64  `json:"spot_notional"`
+	PerpNotional         int64  `json:"perp_notional"`
+	QuoteFees            int64  `json:"quote_fees"`
+	UnpricedFeeCount     int    `json:"unpriced_fee_count"`
+	ResidualBaseQty      int64  `json:"residual_base_qty"`
+	OpenPerpPositionLots int64  `json:"open_perp_position_lots"`
+}
+
+// FeeAwareBasisArb arbitrages a spot/perp basis only when the observed best
+// prices lock a positive all-in two-leg cashflow for one configured lot.
 type FeeAwareBasisArb struct {
 	*actor.BaseActor
 	cfg BasisArbConfig
@@ -85,6 +107,8 @@ type FeeAwareBasisArb struct {
 
 	spotBid, spotAsk int64
 	perpBid, perpAsk int64
+	spotBook         quoteBook
+	perpBook         quoteBook
 
 	spotSeq      uint64
 	perpSeq      uint64
@@ -94,6 +118,59 @@ type FeeAwareBasisArb struct {
 	// lastTick is the most recent ticker timestamp, used as the actor's clock
 	// so deadlines follow simulation time rather than wall time.
 	lastTick int64
+	report   BasisArbReport
+}
+
+// quoteBook is the actor's public displayed-depth view. A snapshot resets it;
+// each subsequent delta changes one price level. It deliberately ignores
+// hidden quantity because a taker cannot rely on it for an executable edge.
+type quoteBook struct {
+	bids map[int64]int64
+	asks map[int64]int64
+}
+
+func (b *quoteBook) reset(snapshot *exchange.BookSnapshot) {
+	b.bids = make(map[int64]int64, len(snapshot.Bids))
+	b.asks = make(map[int64]int64, len(snapshot.Asks))
+	for _, level := range snapshot.Bids {
+		if level.VisibleQty > 0 {
+			b.bids[level.Price] = level.VisibleQty
+		}
+	}
+	for _, level := range snapshot.Asks {
+		if level.VisibleQty > 0 {
+			b.asks[level.Price] = level.VisibleQty
+		}
+	}
+}
+
+func (b *quoteBook) apply(delta *exchange.BookDelta) {
+	levels := b.bids
+	if delta.Side == exchange.Sell {
+		levels = b.asks
+	}
+	if levels == nil {
+		return
+	}
+	if delta.VisibleQty <= 0 {
+		delete(levels, delta.Price)
+		return
+	}
+	levels[delta.Price] = delta.VisibleQty
+}
+
+func (b *quoteBook) best() (bid, ask int64, ok bool) {
+	for price, qty := range b.bids {
+		if qty > 0 && price > bid {
+			bid = price
+		}
+	}
+	for price, qty := range b.asks {
+		if qty > 0 && (ask == 0 || price < ask) {
+			ask = price
+		}
+	}
+	return bid, ask, bid > 0 && ask > 0
 }
 
 // now is the actor's view of time: the last tick it observed. Resolution is
@@ -103,6 +180,16 @@ func (a *FeeAwareBasisArb) now() int64 { return a.lastTick }
 func (a *FeeAwareBasisArb) Position() int64    { return a.position }
 func (a *FeeAwareBasisArb) Symbol() string     { return a.cfg.SpotSymbol }
 func (a *FeeAwareBasisArb) PerpSymbol() string { return a.cfg.PerpSymbol }
+
+// Report returns a point-in-time, fill-based strategy record. It does not
+// claim marked PnL because a caller must supply an explicit terminal mark and
+// numeraire for that separate accounting step.
+func (a *FeeAwareBasisArb) Report() BasisArbReport {
+	report := a.report
+	report.ResidualBaseQty = a.residual()
+	report.OpenPerpPositionLots = a.position
+	return report
+}
 
 // restingLeg is a posted second leg: its remaining quantity, the deadline
 // after which it is abandoned, and the order ID once the exchange assigns one.
@@ -115,10 +202,14 @@ type restingLeg struct {
 }
 
 func NewFeeAwareBasisArb(id uint64, gw actor.Gateway, cfg BasisArbConfig) *FeeAwareBasisArb {
+	if cfg.LotSize <= 0 || cfg.BasePrecision <= 0 || cfg.MaxPosition <= 0 || cfg.CheckInterval <= 0 {
+		panic("feesim: basis arb requires positive lot size, base precision, position cap, and check interval")
+	}
 	a := &FeeAwareBasisArb{
 		BaseActor:   actor.NewBaseActor(id, gw),
 		cfg:         cfg,
 		restingLegs: make(map[uint64]*restingLeg),
+		report:      BasisArbReport{ClientID: id},
 	}
 	a.SetHandler(a)
 	a.AddTicker(cfg.CheckInterval, a.onTick)
@@ -132,9 +223,9 @@ func (a *FeeAwareBasisArb) HandleEvent(_ context.Context, evt *actor.Event) {
 		if a.cfg.Reactive {
 			a.checkBasis()
 		}
-	case actor.EventTrade:
+	case actor.EventBookDelta:
+		a.onDelta(evt.Data.(actor.BookDeltaEvent))
 		if a.cfg.Reactive {
-			a.onTrade(evt.Data.(actor.TradeEvent))
 			a.checkBasis()
 		}
 	case actor.EventOrderPartialFill, actor.EventOrderFilled:
@@ -229,12 +320,29 @@ func (a *FeeAwareBasisArb) sweepSecondLegs() {
 // position); the spot leg is tracked only to measure the residual between
 // them.
 func (a *FeeAwareBasisArb) onFill(e actor.OrderFillEvent) {
+	notional, ok := etypes.TryMulDiv(e.Qty, e.Price, a.cfg.BasePrecision)
+	if !ok {
+		panic("feesim: basis arb fill notional overflows")
+	}
+	if e.FeeAmount != 0 {
+		if e.FeeAsset == "USD" {
+			a.report.QuoteFees = mustAdd(a.report.QuoteFees, e.FeeAmount, "basis quote fees")
+		} else {
+			a.report.UnpricedFeeCount++
+		}
+	}
 	signed := e.Qty
 	if e.Side == exchange.Sell {
 		signed = -signed
 	}
 	switch e.Symbol {
 	case a.cfg.PerpSymbol:
+		a.report.PerpNotional = mustAdd(a.report.PerpNotional, notional, "basis perp notional")
+		if e.Side == exchange.Buy {
+			a.report.PerpBoughtQty = mustAdd(a.report.PerpBoughtQty, e.Qty, "basis perp buy quantity")
+		} else {
+			a.report.PerpSoldQty = mustAdd(a.report.PerpSoldQty, e.Qty, "basis perp sell quantity")
+		}
 		a.perpPos += signed
 		a.position = -a.perpPos / a.cfg.LotSize
 		if a.inFlight > 0 {
@@ -251,6 +359,12 @@ func (a *FeeAwareBasisArb) onFill(e actor.OrderFillEvent) {
 			a.sendSecondLeg(mirror, e.Qty)
 		}
 	case a.cfg.SpotSymbol:
+		a.report.SpotNotional = mustAdd(a.report.SpotNotional, notional, "basis spot notional")
+		if e.Side == exchange.Buy {
+			a.report.SpotBoughtQty = mustAdd(a.report.SpotBoughtQty, e.Qty, "basis spot buy quantity")
+		} else {
+			a.report.SpotSoldQty = mustAdd(a.report.SpotSoldQty, e.Qty, "basis spot sell quantity")
+		}
 		a.spotPos += signed
 		for reqID, leg := range a.restingLegs {
 			if leg.orderID != e.OrderID {
@@ -332,44 +446,28 @@ func (a *FeeAwareBasisArb) hedgeSymbol() string {
 	return a.cfg.PerpSymbol
 }
 
-// onTrade folds a trade print into the quote state: the print becomes the
-// symbol's mid, spread width kept from the last snapshot. Between 100ms
-// snapshots the print is the freshest information there is — and the basis
-// dislocation it signals is exactly what the race is run over.
-func (a *FeeAwareBasisArb) onTrade(e actor.TradeEvent) {
-	price := e.Trade.Price
+func (a *FeeAwareBasisArb) onSnapshot(e actor.BookSnapshotEvent) {
 	switch e.Symbol {
 	case a.cfg.SpotSymbol:
-		if a.spotBid == 0 || a.spotAsk == 0 {
-			return
-		}
-		half := (a.spotAsk - a.spotBid) / 2
-		a.spotBid, a.spotAsk = price-half, price+half
+		a.spotBook.reset(e.Snapshot)
+		a.spotBid, a.spotAsk, _ = a.spotBook.best()
 		a.spotSeq++
 	case a.cfg.PerpSymbol:
-		if a.perpBid == 0 || a.perpAsk == 0 {
-			return
-		}
-		half := (a.perpAsk - a.perpBid) / 2
-		a.perpBid, a.perpAsk = price-half, price+half
+		a.perpBook.reset(e.Snapshot)
+		a.perpBid, a.perpAsk, _ = a.perpBook.best()
 		a.perpSeq++
 	}
 }
 
-func (a *FeeAwareBasisArb) onSnapshot(e actor.BookSnapshotEvent) {
-	if len(e.Snapshot.Bids) == 0 || len(e.Snapshot.Asks) == 0 {
-		return
-	}
-	bid := e.Snapshot.Bids[0].Price
-	ask := e.Snapshot.Asks[0].Price
+func (a *FeeAwareBasisArb) onDelta(e actor.BookDeltaEvent) {
 	switch e.Symbol {
 	case a.cfg.SpotSymbol:
-		a.spotBid = bid
-		a.spotAsk = ask
+		a.spotBook.apply(e.Delta)
+		a.spotBid, a.spotAsk, _ = a.spotBook.best()
 		a.spotSeq++
 	case a.cfg.PerpSymbol:
-		a.perpBid = bid
-		a.perpAsk = ask
+		a.perpBook.apply(e.Delta)
+		a.perpBid, a.perpAsk, _ = a.perpBook.best()
 		a.perpSeq++
 	}
 }
@@ -377,10 +475,7 @@ func (a *FeeAwareBasisArb) onSnapshot(e actor.BookSnapshotEvent) {
 func (a *FeeAwareBasisArb) onTick(t time.Time) {
 	a.lastTick = t.UnixNano()
 	if !a.subscribed {
-		types := []exchange.MDType{exchange.MDSnapshot}
-		if a.cfg.Reactive {
-			types = append(types, exchange.MDTrade)
-		}
+		types := []exchange.MDType{exchange.MDSnapshot, exchange.MDDelta}
 		a.Subscribe(a.cfg.SpotSymbol, types...)
 		a.Subscribe(a.cfg.PerpSymbol, types...)
 		a.subscribed = true
@@ -389,20 +484,57 @@ func (a *FeeAwareBasisArb) onTick(t time.Time) {
 	a.checkBasis()
 }
 
-func (a *FeeAwareBasisArb) effectiveCost(mid int64) int64 {
-	spotFee := a.cfg.SpotFeeBps * mid / 10000
-	perpFee := a.cfg.PerpFeeBps * mid / 10000
-	halfSpotSpread := (a.spotAsk - a.spotBid) / 2
-	halfPerpSpread := (a.perpAsk - a.perpBid) / 2
-	return spotFee + perpFee + halfSpotSpread + halfPerpSpread
-}
-
-// isUnwinding returns true if the proposed trade direction reduces |position|.
-func (a *FeeAwareBasisArb) isUnwinding(basis int64) bool {
-	// basis > 0 → wants position++ (short perp / long spot)
-	// basis < 0 → wants position-- (long perp / short spot)
-	// Unwinding: trade reduces |position|
-	return (basis > 0 && a.position < 0) || (basis < 0 && a.position > 0)
+// executableEdge returns all-in quote cashflow for one simultaneous pair.
+// A perp sell/spot buy is positive only when proceeds net of its fee exceed
+// the spot purchase plus its fee; the reverse applies to a perp buy/spot sell.
+// This avoids midpoint signals that are guaranteed losses once the spread is
+// crossed.
+func (a *FeeAwareBasisArb) executableEdge(perpSide exchange.Side) (int64, bool) {
+	perpPrice := a.perpBid
+	spotPrice := a.spotAsk
+	if perpSide == exchange.Buy {
+		perpPrice = a.perpAsk
+		spotPrice = a.spotBid
+	}
+	if perpPrice <= 0 || spotPrice <= 0 {
+		return 0, false
+	}
+	perpNotional, ok := etypes.TryMulDiv(a.cfg.LotSize, perpPrice, a.cfg.BasePrecision)
+	if !ok {
+		return 0, false
+	}
+	spotNotional, ok := etypes.TryMulDiv(a.cfg.LotSize, spotPrice, a.cfg.BasePrecision)
+	if !ok {
+		return 0, false
+	}
+	perpFee, ok := etypes.TryMulBps(perpNotional, a.cfg.PerpFeeBps)
+	if !ok {
+		return 0, false
+	}
+	spotFee, ok := etypes.TryMulBps(spotNotional, a.cfg.SpotFeeBps)
+	if !ok {
+		return 0, false
+	}
+	if perpSide == exchange.Sell {
+		proceeds, ok := etypes.TrySub(perpNotional, perpFee)
+		if !ok {
+			return 0, false
+		}
+		cost, ok := etypes.TryAdd(spotNotional, spotFee)
+		if !ok {
+			return 0, false
+		}
+		return etypes.TrySub(proceeds, cost)
+	}
+	proceeds, ok := etypes.TrySub(spotNotional, spotFee)
+	if !ok {
+		return 0, false
+	}
+	cost, ok := etypes.TryAdd(perpNotional, perpFee)
+	if !ok {
+		return 0, false
+	}
+	return etypes.TrySub(proceeds, cost)
 }
 
 func (a *FeeAwareBasisArb) checkBasis() {
@@ -415,46 +547,17 @@ func (a *FeeAwareBasisArb) checkBasis() {
 		return
 	}
 
-	spotMid := (a.spotBid + a.spotAsk) / 2
-	perpMid := (a.perpBid + a.perpAsk) / 2
-	basis := perpMid - spotMid
-	cost := a.effectiveCost(spotMid)
-	if cost == 0 {
-		return
-	}
-
-	absBasis := basis
-	if absBasis < 0 {
-		absBasis = -absBasis
-	}
-
-	// Asymmetric threshold: eager to unwind (cost/2), reluctant to accumulate
-	// (scales up with position: cost * (1 + |position|/MaxPosition)).
-	var threshold int64
-	if a.isUnwinding(basis) {
-		threshold = cost / 2
-	} else {
-		absPos := a.position
-		if absPos < 0 {
-			absPos = -absPos
-		}
-		threshold = cost + cost*absPos/a.cfg.MaxPosition
-	}
-
-	if absBasis <= threshold {
-		return
-	}
-
-	// Exposure the risk cap must respect: filled position plus everything
-	// already on the wire. Without the in-flight term a reactive actor can
-	// submit hundreds of lots in the latency window before the first fill
-	// reports back.
-	switch {
-	case basis > 0 && a.position+a.inFlight < a.cfg.MaxPosition:
+	// Exposure must include submitted-but-unfilled pairs. Unlike the old
+	// midpoint threshold, every entry below is positive at the observed best
+	// prices after the configured taker fees.
+	if richEdge, ok := a.executableEdge(exchange.Sell); ok && richEdge > 0 && a.position+a.inFlight < a.cfg.MaxPosition {
+		a.report.ExecutableSignals++
 		a.openPair(exchange.Sell, exchange.Buy)
 		a.lastTradeSeq = currentSeq
-
-	case basis < 0 && a.position-a.inFlight > -a.cfg.MaxPosition:
+		return
+	}
+	if cheapEdge, ok := a.executableEdge(exchange.Buy); ok && cheapEdge > 0 && a.position-a.inFlight > -a.cfg.MaxPosition {
+		a.report.ExecutableSignals++
 		a.openPair(exchange.Buy, exchange.Sell)
 		a.lastTradeSeq = currentSeq
 	}
@@ -469,4 +572,13 @@ func (a *FeeAwareBasisArb) openPair(perpSide, spotSide exchange.Side) {
 		a.SubmitOrder(a.cfg.SpotSymbol, spotSide, exchange.Market, 0, a.cfg.LotSize)
 	}
 	a.inFlight++
+	a.report.SubmittedPairs++
+}
+
+func mustAdd(left, right int64, field string) int64 {
+	value, ok := etypes.TryAdd(left, right)
+	if !ok {
+		panic("feesim: " + field + " overflows")
+	}
+	return value
 }

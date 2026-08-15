@@ -1,6 +1,7 @@
 package feesim
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"exchange_sim/exchange"
 	"exchange_sim/matching"
 	"exchange_sim/simulation"
+	etypes "exchange_sim/types"
 )
 
 const (
@@ -35,7 +37,10 @@ type SimConfig struct {
 	TickScaleDen int64
 
 	TakerIntervalMs int64 // default 100
-	Seed            int64 // base RNG seed for taker and latency draws, default 42
+	// NoiseTraderCount creates independently seeded random-flow actors across
+	// all books. Zero keeps the historical one-taker baseline.
+	NoiseTraderCount int
+	Seed             int64 // base RNG seed for taker and latency draws, default 42
 
 	MMCount          int   // MMs per symbol, default 1
 	MMLevels         int   // quote levels per MM, default 5
@@ -91,9 +96,10 @@ type SimConfig struct {
 	RaceArbTiers []float64
 
 	// RaceArbReactive makes race entrants decide inside HandleEvent on every
-	// trade print instead of on the polling ticker. Polling entrants tie
-	// regardless of latency (a 100ms decision timer swamps any network
-	// spread — the gen-6 negative result); reactive entrants race for real.
+	// public book update instead of on the polling ticker. Polling entrants
+	// tie regardless of latency (a 100ms decision timer swamps any network
+	// spread — the gen-6 negative result); reactive entrants race on actual
+	// executable displayed quotes.
 	RaceArbReactive bool
 
 	// RaceArbMaxPosition caps each race entrant's inventory in lots (default
@@ -139,7 +145,7 @@ func DefaultSimConfig() SimConfig {
 
 // normalize fills zero-valued fields with defaults so partial configs
 // (e.g. unmarshalled from experiment JSON) behave like DefaultSimConfig.
-func (c *SimConfig) normalize() {
+func (c *SimConfig) normalize() error {
 	if c.TickScaleNum == 0 {
 		c.TickScaleNum = 1
 	}
@@ -148,6 +154,12 @@ func (c *SimConfig) normalize() {
 	}
 	if c.TakerIntervalMs == 0 {
 		c.TakerIntervalMs = 100
+	}
+	if c.NoiseTraderCount == 0 {
+		c.NoiseTraderCount = 1
+	}
+	if c.NoiseTraderCount < 1 {
+		return fmt.Errorf("feesim: noise trader count must be positive")
 	}
 	if c.Seed == 0 {
 		c.Seed = 42
@@ -182,6 +194,7 @@ func (c *SimConfig) normalize() {
 	if c.ValueTraderIntervalMs == 0 {
 		c.ValueTraderIntervalMs = 200
 	}
+	return nil
 }
 
 // scaleDur scales a duration by a float factor, clamping at 1ns.
@@ -222,16 +235,81 @@ type Sim struct {
 	Runner       *simulation.Runner
 	MMs          []*MarketMaker
 	Taker        *RandomTaker
+	Takers       []*RandomTaker
 	BasisArbs    []*FeeAwareBasisArb
 	FundingArbs  []*FeeAwareFundingArb
 	TriArb       *FeeAwareTriArb
 	RaceArbs     []*FeeAwareBasisArb
+	RaceArbTiers []float64
+	RaceArbIDs   []uint64
 	ValueTraders []*ValueTrader
 	Loggers      []*JSONLinesLogger
 	ex           *exchange.Exchange
 }
 
 func (s *Sim) Exchange() *exchange.Exchange { return s.ex }
+
+// RaceArbTerminalReport joins an observed fill ledger to a strict,
+// exchange-owned terminal account valuation. A missing two-sided asset mark
+// returns an error rather than turning an unresolved position into zero PnL.
+type RaceArbTerminalReport struct {
+	Tier                     float64                      `json:"tier"`
+	ClientID                 uint64                       `json:"client_id"`
+	Fills                    BasisArbReport               `json:"fills"`
+	InitialEquityUSD         int64                        `json:"initial_equity_usd"`
+	PassiveTerminalEquityUSD int64                        `json:"passive_terminal_equity_usd"`
+	TerminalAccount          etypes.MarkedAccountSnapshot `json:"terminal_account"`
+	// StrategyEquityChangeUSD subtracts the value the actor's initial
+	// ABC/Q/USD inventory would have at the same terminal marks. It therefore
+	// isolates execution, fees, and derivative PnL from passive spot beta.
+	StrategyEquityChangeUSD int64 `json:"strategy_equity_change_usd"`
+}
+
+// RaceArbTerminalReports preserves configured-tier order and values every
+// race client in USD using strict two-sided ABC/USD and Q/USD terminal marks.
+func (s *Sim) RaceArbTerminalReports() ([]RaceArbTerminalReport, error) {
+	if len(s.RaceArbs) != len(s.RaceArbTiers) || len(s.RaceArbs) != len(s.RaceArbIDs) {
+		return nil, fmt.Errorf("feesim: inconsistent race-arb metadata")
+	}
+	abcMark, ok := s.ex.TwoSidedMidPrice("ABC/USD")
+	if !ok {
+		return nil, fmt.Errorf("feesim: missing terminal two-sided ABC/USD mark")
+	}
+	qMark, ok := s.ex.TwoSidedMidPrice("Q/USD")
+	if !ok {
+		return nil, fmt.Errorf("feesim: missing terminal two-sided Q/USD mark")
+	}
+	spec := etypes.AccountValuationSpec{
+		ReportAsset: "USD", ReportPrecision: usdPrecision,
+		AssetMarks: map[string]etypes.AssetValuationMark{
+			"USD": {Price: usdPrecision, Precision: usdPrecision},
+			"ABC": {Price: abcMark, Precision: abcPrecision},
+			"Q":   {Price: qMark, Precision: qPrecision},
+		},
+	}
+	initial := raceInitialEquityUSD()
+	passive, err := racePassiveTerminalEquityUSD(abcMark, qMark)
+	if err != nil {
+		return nil, err
+	}
+	reports := make([]RaceArbTerminalReport, 0, len(s.RaceArbs))
+	for index, arb := range s.RaceArbs {
+		account, err := s.ex.MarkedAccount(s.RaceArbIDs[index], spec)
+		if err != nil {
+			return nil, fmt.Errorf("feesim: mark race tier %g: %w", s.RaceArbTiers[index], err)
+		}
+		change, ok := etypes.TrySub(account.Equity, passive)
+		if !ok {
+			return nil, fmt.Errorf("feesim: race tier %g strategy equity delta overflows", s.RaceArbTiers[index])
+		}
+		reports = append(reports, RaceArbTerminalReport{
+			Tier: s.RaceArbTiers[index], ClientID: s.RaceArbIDs[index], Fills: arb.Report(),
+			InitialEquityUSD: initial, PassiveTerminalEquityUSD: passive,
+			TerminalAccount: account, StrategyEquityChangeUSD: change,
+		})
+	}
+	return reports, nil
+}
 
 func (s *Sim) Close() {
 	for _, l := range s.Loggers {
@@ -240,7 +318,9 @@ func (s *Sim) Close() {
 }
 
 func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
-	cfg.normalize()
+	if err := cfg.normalize(); err != nil {
+		return nil, err
+	}
 	spotTakerBps := cfg.SpotTakerBps
 	perpTakerBps := cfg.PerpTakerBps
 	logDir := cfg.LogDir
@@ -249,8 +329,12 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	simClock.SetScheduler(scheduler)
 	timerFact := simulation.NewSimTimerFactory(scheduler)
 
+	estimatedClients := 5*cfg.MMCount + cfg.NoiseTraderCount + 2 + 2 + 1 + len(cfg.RaceArbTiers)
+	if cfg.ValueTraderBandBps > 0 {
+		estimatedClients += 2
+	}
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
-		EstimatedClients:        15,
+		EstimatedClients:        estimatedClients,
 		Clock:                   simClock,
 		TickerFactory:           timerFact,
 		SnapshotInterval:        time.Second,
@@ -443,9 +527,10 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		}
 	}
 
-	// Client 6: random taker across all 5 symbols.
+	// Random takers across all five symbols. The first remains available
+	// through Sim.Taker for existing callers; every additional participant has
+	// a stable independent flow seed and latency stream.
 	// Pre-computed target qtys: ~$2000 notional for USD pairs, smaller for cross.
-	takerGw := connectActor(spotMakerFee, true)
 	allSymbols := []string{"ABC/USD", "Q/USD", "ABC-PERP", "Q-PERP", "Q/ABC"}
 	targetQtys := map[string]int64{
 		"ABC/USD":  4_000_000, // 0.04 BTC ≈ $2000
@@ -454,16 +539,25 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		"Q-PERP":   700_000,   // 0.7 Q ≈ $2100
 		"Q/ABC":    200_000,   // 0.2 Q (thinner cross market)
 	}
-	taker := NewRandomTaker(nextClient, takerGw, TakerConfig{
-		Symbols:           allSymbols,
-		TargetQtys:        targetQtys,
-		TakeInterval:      time.Duration(cfg.TakerIntervalMs) * time.Millisecond,
-		Seed:              cfg.Seed,
-		ImbalanceCoupling: cfg.TakerImbalanceCoupling,
-		ExciteAlpha:       cfg.TakerExciteAlpha,
-		ExciteBetaPerSec:  cfg.TakerExciteBetaPerSec,
-	})
-	taker.SetTickerFactory(timerFact)
+	takers := make([]*RandomTaker, 0, cfg.NoiseTraderCount)
+	for participant := 0; participant < cfg.NoiseTraderCount; participant++ {
+		takerGw := connectActor(spotMakerFee, true)
+		seed := cfg.Seed
+		if participant != 0 {
+			seed = flowSeed(cfg.Seed, uint64(participant), 1)
+		}
+		taker := NewRandomTaker(nextClient, takerGw, TakerConfig{
+			Symbols:           allSymbols,
+			TargetQtys:        targetQtys,
+			TakeInterval:      time.Duration(cfg.TakerIntervalMs) * time.Millisecond,
+			Seed:              seed,
+			ImbalanceCoupling: cfg.TakerImbalanceCoupling,
+			ExciteAlpha:       cfg.TakerExciteAlpha,
+			ExciteBetaPerSec:  cfg.TakerExciteBetaPerSec,
+		})
+		taker.SetTickerFactory(timerFact)
+		takers = append(takers, taker)
+	}
 
 	// Clients 7-8: fee-aware basis arbs.
 	type basisSpec struct {
@@ -485,6 +579,7 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 			SpotFeeBps:    spotTakerBps,
 			PerpFeeBps:    perpTakerBps,
 			LotSize:       spec.lotSize,
+			BasePrecision: instrumentBasePrecision(spec.spotSym),
 			MaxPosition:   spec.maxPosition,
 			CheckInterval: 100 * time.Millisecond,
 		})
@@ -533,6 +628,8 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		raceLotSize = abcPrecision / 10
 	}
 	var raceArbs []*FeeAwareBasisArb
+	var raceArbTiers []float64
+	var raceArbIDs []uint64
 	var raceMounts []*simulation.Mount
 	for _, tier := range cfg.RaceArbTiers {
 		nextClient++
@@ -546,6 +643,7 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 			SpotFeeBps:       spotTakerBps,
 			PerpFeeBps:       perpTakerBps,
 			LotSize:          raceLotSize,
+			BasePrecision:    abcPrecision,
 			MaxPosition:      raceMaxPosition,
 			CheckInterval:    100 * time.Millisecond,
 			Reactive:         cfg.RaceArbReactive,
@@ -558,6 +656,8 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		})
 		arb.SetTickerFactory(timerFact)
 		raceArbs = append(raceArbs, arb)
+		raceArbTiers = append(raceArbTiers, tier)
+		raceArbIDs = append(raceArbIDs, nextClient)
 	}
 
 	// Optional value traders: fundamental anchor for the price level.
@@ -608,7 +708,9 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	for _, mm := range mms {
 		runner.AddActor(mm)
 	}
-	runner.AddActor(taker)
+	for _, taker := range takers {
+		runner.AddActor(taker)
+	}
 	for _, arb := range basisArbs {
 		runner.AddActor(arb)
 	}
@@ -626,13 +728,79 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 	return &Sim{
 		Runner:       runner,
 		MMs:          mms,
-		Taker:        taker,
+		Taker:        takers[0],
+		Takers:       takers,
 		BasisArbs:    basisArbs,
 		FundingArbs:  fundingArbs,
 		TriArb:       triArb,
 		RaceArbs:     raceArbs,
+		RaceArbTiers: raceArbTiers,
+		RaceArbIDs:   raceArbIDs,
 		ValueTraders: valueTraders,
 		Loggers:      allLoggers,
 		ex:           ex,
 	}, nil
+}
+
+func flowSeed(master int64, participant, stream uint64) int64 {
+	value := uint64(master) + 0x9e3779b97f4a7c15
+	value ^= participant * 0xbf58476d1ce4e5b9
+	value ^= stream * 0x94d049bb133111eb
+	value ^= value >> 30
+	value *= 0xbf58476d1ce4e5b9
+	value ^= value >> 27
+	value *= 0x94d049bb133111eb
+	value ^= value >> 31
+	return int64(value & ((uint64(1) << 63) - 1))
+}
+
+func raceInitialEquityUSD() int64 {
+	abcValue := int64(1_000) * abcBootstrapUSD
+	qValue := int64(100_000) * qBootstrapUSD
+	spotUSD := int64(100_000_000) * usdPrecision
+	perpUSD := int64(10_000_000) * usdPrecision
+	value := mustAdd(abcValue, qValue, "race initial ABC/Q equity")
+	value = mustAdd(value, spotUSD, "race initial spot USD equity")
+	return mustAdd(value, perpUSD, "race initial perp USD equity")
+}
+
+// racePassiveTerminalEquityUSD values the static inventory granted to every
+// race participant at the supplied terminal marks. Race reports subtract it
+// so a common ABC/Q directional move is never labelled latency-arb PnL.
+func racePassiveTerminalEquityUSD(abcMark, qMark int64) (int64, error) {
+	if abcMark <= 0 || qMark <= 0 {
+		return 0, fmt.Errorf("feesim: passive race valuation requires positive ABC and Q marks")
+	}
+	abcValue, ok := etypes.TryMulDiv(int64(1_000)*abcPrecision, abcMark, abcPrecision)
+	if !ok {
+		return 0, fmt.Errorf("feesim: passive ABC valuation overflows")
+	}
+	qValue, ok := etypes.TryMulDiv(int64(100_000)*qPrecision, qMark, qPrecision)
+	if !ok {
+		return 0, fmt.Errorf("feesim: passive Q valuation overflows")
+	}
+	value, ok := etypes.TryAdd(abcValue, qValue)
+	if !ok {
+		return 0, fmt.Errorf("feesim: passive ABC/Q valuation overflows")
+	}
+	value, ok = etypes.TryAdd(value, int64(100_000_000)*usdPrecision)
+	if !ok {
+		return 0, fmt.Errorf("feesim: passive spot USD valuation overflows")
+	}
+	value, ok = etypes.TryAdd(value, int64(10_000_000)*usdPrecision)
+	if !ok {
+		return 0, fmt.Errorf("feesim: passive perp USD valuation overflows")
+	}
+	return value, nil
+}
+
+func instrumentBasePrecision(symbol string) int64 {
+	switch symbol {
+	case "ABC/USD":
+		return abcPrecision
+	case "Q/USD":
+		return qPrecision
+	default:
+		panic("feesim: missing basis-arb base precision for " + symbol)
+	}
 }
