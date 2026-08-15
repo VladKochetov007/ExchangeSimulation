@@ -26,7 +26,7 @@ number.
 | FFA-01 | venue allocation | passed | 0.5 CPU-h | per-venue exact FIFO/pro-rata selection, validation, and deterministic tie policy |
 | FFA-02 | graph execution | queued | 1.0 CPU-h | 3-asset valuation/conservation and triangle null control |
 | FFA-03 | information boundary | queued | 0.5 CPU-h | no direct exchange state from strategy code; sequence/resync test |
-| FFA-04 | population accounting | queued | 1.0 CPU-h | every participant has complete USD marked account or invalid run |
+| FFA-04 | population accounting | passed for USD/ABC | 1.0 CPU-h | strict initial/terminal account rows for every participant, or invalid run |
 | FFA-05 | ecology control | queued | 1.0 CPU-h | fixed-mixture two-strategy invasion control before selection |
 
 ## Abort and rollover

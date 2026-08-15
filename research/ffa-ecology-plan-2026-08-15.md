@@ -75,6 +75,9 @@ the documented default; otherwise no one-sided gamma/ecology arm may run.
   allocation rule. No fill may exceed displayed/resting quantity.
 - A full cross-currency marked account either resolves a declared FX path or
   is invalid. It never silently omits `ABC` or `CDF` exposure.
+- A scenario seeking population fitness enables `strict_population_accounting`.
+  It records every independently funded venue account at initial and terminal
+  lifecycle points and fails on a missing terminal conversion mark.
 - All agents pass an information-boundary test that fails if they query engine
   state rather than react to their gateway events.
 - Invasion matrix rows report means, paired bootstrap interval, completion,

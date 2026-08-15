@@ -1,0 +1,18 @@
+{
+  "log_mode": "none",
+  "seed": 91,
+  "step": 1000000000,
+  "snapshot_interval": 1000000000,
+  "automation_interval": 1000000000,
+  "quote_interval": 1000000000,
+  "noise_interval": 2000000000,
+  "greek_interval": 60000000000,
+  "noise_trader_count": 2,
+  "option_flow_count": 2,
+  "strict_population_accounting": true,
+  "venue_rules": {
+    "north": {"matching_rule": "price_time"},
+    "central": {"matching_rule": "pro_rata"},
+    "south": {"matching_rule": "pro_rata"}
+  }
+}

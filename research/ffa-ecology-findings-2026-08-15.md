@@ -37,6 +37,36 @@
   liquidity quality. It does not implement real venue hybrids, allocation
   minimums, top allocation, auctions, or per-venue fees.
 
+## FFA-04: population-accounting gate
+
+- **Prediction:** population fitness can be measured only when every
+  independently funded account has an explicit initial and terminal marked
+  value in the same numeraire.
+- **Result:** `strict_population_accounting` records venue ID, client ID, role,
+  initial bootstrap-account value, and terminal two-sided-mark account value
+  for every connected participant. A missing terminal `ABC/USD` two-sided
+  mark fails a strict run instead of silently selecting from partial wealth.
+- **Limit:** the current strict builder is USD/ABC-specific. It is a gate for
+  the existing control world, not yet a cross-currency valuation graph.
+
+## E-038: strict FFA control harness
+
+- The retained control manifest uses three venue-local policies
+  (north FIFO, central/south pro-rata), two spot-flow and two option-flow
+  agents per venue, and strict population accounting. Its purpose is to prove
+  the manifest-to-account-report pipeline before adding `CDF` or selection.
+- This is explicitly not a non-transitive result: it retains one underlying,
+  static policies, static IV, and no population update rule.
+- Output directories are excluded from the scenario manifest before hashing;
+  changing an artifact sink cannot change scenario identity.
+- **Accepted control:** five simulated minutes at `GOMAXPROCS=1` and `14`
+  produced the same manifest hash
+  `a1f81dfffdca0c249591cc23aa62941e546342006e746a37ed1a611a0951adc4`
+  and `greeks.json` hash
+  `bda88d8bdf9bc6f21ef545e36a7d75f757eec4855603278573471acb6bd58c27`.
+  Both reports contain 27 initial and 27 terminal account rows. Raw artifacts
+  are retained under `logs/research/ffa-ecology-control-e038-canonical-*`.
+
 ## Blocking contradictions
 
 - `multivenue` cannot compose cross-currency spots with derivatives and
