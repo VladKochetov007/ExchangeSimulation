@@ -639,17 +639,62 @@ func (e *DefaultExchange) checkMarketOrderFunds(client *Client, book *OrderBook,
 	quote := instrument.QuoteAsset()
 	if om, ok := instrument.(OrderMarginer); ok {
 		required, ok := derivativeMarketRequirement(client.FeePlan, instrument, order.Side, executions, precision, om.MarginForMarketOrder)
-		return ok && client.PerpAvailable(quote) >= required
+		return ok && e.fundMarketRequirement(order.ClientID, client, quote, required, true)
 	}
 	if m, ok := instrument.(Margined); ok {
 		required, ok := derivativeMarketRequirement(client.FeePlan, instrument, order.Side, executions, precision,
 			func(_ Side, qty, price, precision int64) int64 { return m.MarginForMarket(qty, price, precision) })
-		return ok && client.PerpAvailable(quote) >= required
+		return ok && e.fundMarketRequirement(order.ClientID, client, quote, required, true)
 	}
 
 	asset := reserveAsset(instrument, order.Side)
 	required, ok := spotMarketRequirement(client.FeePlan, instrument, order.Side, executions, precision)
-	return ok && client.GetAvailable(asset) >= required
+	return ok && e.fundMarketRequirement(order.ClientID, client, asset, required, false)
+}
+
+// fundMarketRequirement reports whether a market order's immediate settlement
+// requirement is covered, borrowing the shortfall when auto-borrow permits it.
+//
+// Market orders settle instead of reserving, so they never reach
+// tryReserveOrBorrow. Without this, an account with margin enabled could fund a
+// limit order but not the economically identical market order, which silently
+// disabled every market-order hedge for an account holding no inventory in the
+// sold asset. Admission is already wrapped in a spot borrow snapshot, so a loan
+// taken here is rolled back with the order if a later check rejects it.
+func (e *DefaultExchange) fundMarketRequirement(clientID uint64, client *Client, asset string, required int64, isPerp bool) bool {
+	available := func() int64 {
+		if isPerp {
+			return client.PerpAvailable(asset)
+		}
+		return client.GetAvailable(asset)
+	}
+	if available() >= required {
+		return true
+	}
+	if e.BorrowingMgr == nil {
+		return false
+	}
+	cfg := e.BorrowingMgr.Config
+	if isPerp && !cfg.AutoBorrowPerp {
+		return false
+	}
+	if !isPerp && !cfg.AutoBorrowSpot {
+		return false
+	}
+	shortfall, ok := etypes.TrySub(required, available())
+	if !ok || shortfall <= 0 {
+		return false
+	}
+	reason := "auto_spot"
+	if isPerp {
+		reason = "auto_perp"
+	}
+	ctx := buildBorrowContext(e, client, clientID)
+	ctx.CreditSpot = !isPerp
+	if err := e.BorrowingMgr.BorrowMargin(ctx, asset, shortfall, reason); err != nil {
+		return false
+	}
+	return available() >= required
 }
 
 // previewMarketExecutions matches a copy of the book so admission and the
