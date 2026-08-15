@@ -77,6 +77,10 @@ type RepayEvent struct {
 	Principal     int64  `json:"principal"`
 	Interest      int64  `json:"interest"`
 	RemainingDebt int64  `json:"remaining_debt"`
+	// Reason distinguishes a client repayment from an internal compensating
+	// repayment. It is omitted for historical events, so adding it is
+	// JSONL-schema compatible with existing log consumers.
+	Reason string `json:"reason,omitempty"`
 }
 
 type PositionUpdateEvent struct {

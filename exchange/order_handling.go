@@ -130,7 +130,9 @@ func (s spotBorrowSnapshot) restore(e *DefaultExchange, clientID uint64, client 
 	if client == nil || (maps.Equal(s.balances, client.Balances) && maps.Equal(s.borrowed, client.Borrowed) && maps.Equal(s.borrowedSpot, client.BorrowedSpot)) {
 		return
 	}
+	timestamp := e.Clock.NowUnixNano()
 	changes := make([]BalanceDelta, 0, len(s.balances)+len(s.borrowed))
+	rollbacks := make([]RepayEvent, 0, len(s.borrowed))
 	assets := make(map[string]struct{}, len(s.balances)+len(client.Balances)+len(s.borrowed)+len(client.Borrowed))
 	for asset := range s.balances {
 		assets[asset] = struct{}{}
@@ -155,13 +157,31 @@ func (s spotBorrowSnapshot) restore(e *DefaultExchange, clientID uint64, client 
 		}
 		if old, next := client.Borrowed[asset], s.borrowed[asset]; old != next {
 			changes = append(changes, borrowedDelta(asset, old, next))
+			// The only debt this spot-admission snapshot can add is an
+			// auto_spot borrow. Emit its inverse so an event replay reaches the
+			// same debt state as the restored live ledger.
+			if old > next {
+				rollbacks = append(rollbacks, RepayEvent{
+					Timestamp:     timestamp,
+					ClientID:      clientID,
+					Asset:         asset,
+					Principal:     old - next,
+					RemainingDebt: next,
+					Reason:        "order_admission_rollback",
+				})
+			}
 		}
 	}
 	client.Balances = maps.Clone(s.balances)
 	client.Borrowed = maps.Clone(s.borrowed)
 	client.BorrowedSpot = maps.Clone(s.borrowedSpot)
 	if len(changes) > 0 {
-		logBalanceChange(e, e.Clock.NowUnixNano(), clientID, "", "auto_borrow_rollback", changes)
+		logBalanceChange(e, timestamp, clientID, "", "auto_borrow_rollback", changes)
+	}
+	if log := e.getLogger("_global"); log != nil {
+		for _, rollback := range rollbacks {
+			log.LogEvent(timestamp, clientID, "repay", rollback)
+		}
 	}
 }
 
@@ -333,8 +353,15 @@ func (e *DefaultExchange) Subscribe(clientID uint64, req *QueryRequest, gateway 
 	return Response{RequestID: req.RequestID, Success: true}
 }
 
-func (e *DefaultExchange) Unsubscribe(clientID uint64, req *QueryRequest) Response {
-	e.MDPublisher.Unsubscribe(clientID, req.Symbol)
+// Unsubscribe removes a market-data subscription. Requests routed through a
+// gateway pass that session so a delayed request from a replaced connection
+// cannot unsubscribe the current connection.
+func (e *DefaultExchange) Unsubscribe(clientID uint64, req *QueryRequest, gateway ...*ClientGateway) Response {
+	if len(gateway) > 0 {
+		e.MDPublisher.Unsubscribe(clientID, req.Symbol, gateway[0])
+	} else {
+		e.MDPublisher.Unsubscribe(clientID, req.Symbol)
+	}
 	return Response{RequestID: req.RequestID, Success: true}
 }
 

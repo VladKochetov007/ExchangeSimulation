@@ -2,8 +2,35 @@ package exchange
 
 import (
 	"math"
+	"sync"
 	"testing"
 )
+
+type autoBorrowRollbackLogger struct {
+	mu               sync.Mutex
+	borrows          []BorrowEvent
+	repays           []RepayEvent
+	rollbackBalances []BalanceChangeEvent
+}
+
+func (l *autoBorrowRollbackLogger) LogEvent(_ int64, _ uint64, eventName string, event any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	switch eventName {
+	case "borrow":
+		if borrow, ok := event.(BorrowEvent); ok {
+			l.borrows = append(l.borrows, borrow)
+		}
+	case "repay":
+		if repay, ok := event.(RepayEvent); ok {
+			l.repays = append(l.repays, repay)
+		}
+	case "balance_change":
+		if change, ok := event.(BalanceChangeEvent); ok && change.Reason == "auto_borrow_rollback" {
+			l.rollbackBalances = append(l.rollbackBalances, change)
+		}
+	}
+}
 
 func TestMarketSpotCostOverflowIsRejectedBeforeMatching(t *testing.T) {
 	ex := NewExchange(3, &RealClock{})
@@ -773,5 +800,62 @@ func TestSpotPlanRejectRollsBackAutoBorrow(t *testing.T) {
 	}
 	if got := client.Reserved["USD"]; got != 0 {
 		t.Fatalf("rejected order retained spot reservation: got %d", got)
+	}
+}
+
+func TestSpotPlanRejectLogsCompensatingRepayForAutoBorrow(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("X/USD", "X", "USD", 1, 1, 1, 1))
+	log := &autoBorrowRollbackLogger{}
+	ex.SetLogger("_global", log)
+	if err := ex.EnableBorrowing(BorrowingConfig{
+		Enabled:           true,
+		AutoBorrowSpot:    true,
+		CollateralFactors: map[string]float64{"USD": 1},
+		AssetPrecisions:   map[string]int64{"USD": 1},
+		PriceSource:       NewStaticPriceOracle(map[string]int64{"USD": 1}),
+	}); err != nil {
+		t.Fatalf("EnableBorrowing: %v", err)
+	}
+	ex.ConnectNewClient(1, nil, &FixedFee{TakerFee: Fee{Asset: "X", Amount: 2}})
+	ex.AddPerpBalance(1, "USD", 10)
+	ex.ConnectNewClient(2, map[string]int64{"X": 1}, &FixedFee{})
+	if response := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 1, Symbol: "X/USD", Side: Sell, Type: LimitOrder,
+		Price: 1, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	}); !response.Success {
+		t.Fatalf("seed ask rejected: %s", response.Error)
+	}
+
+	response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 2, Symbol: "X/USD", Side: Buy, Type: LimitOrder,
+		Price: 1, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	if response.Success || response.Error != RejectInsufficientBalance {
+		t.Fatalf("received-fee order = %+v, want insufficient-balance rejection", response)
+	}
+
+	log.mu.Lock()
+	defer log.mu.Unlock()
+	if len(log.borrows) != 1 {
+		t.Fatalf("auto-borrow events = %d, want 1", len(log.borrows))
+	}
+	if log.borrows[0].Asset != "USD" || log.borrows[0].Amount != 1 || log.borrows[0].Reason != "auto_spot" {
+		t.Fatalf("auto-borrow event = %+v, want USD principal 1 auto_spot", log.borrows[0])
+	}
+	if len(log.repays) != 1 {
+		t.Fatalf("compensating repay events = %d, want 1", len(log.repays))
+	}
+	repay := log.repays[0]
+	if repay.Asset != "USD" || repay.Principal != log.borrows[0].Amount || repay.RemainingDebt != 0 || repay.Reason != "order_admission_rollback" {
+		t.Fatalf("compensating repay = %+v, want USD principal 1 debt 0 admission rollback", repay)
+	}
+	if len(log.rollbackBalances) != 1 {
+		t.Fatalf("rollback balance changes = %d, want 1", len(log.rollbackBalances))
+	}
+	changes := log.rollbackBalances[0].Changes
+	if len(changes) != 2 || changes[0] != spotDelta("USD", 1, 0) || changes[1] != borrowedDelta("USD", 1, 0) {
+		t.Fatalf("rollback changes = %+v, want spot and debt reversal", changes)
 	}
 }
