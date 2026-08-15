@@ -369,6 +369,7 @@ type Venue struct {
 	lastTwoSided     map[string]twoSidedMark
 	Mispricing       *MispricingStats
 	Microstructure   *MicrostructureStats
+	fundamentalLog   venueLogger
 	OptionFlow       *derivsim.OptionTaker
 	OptionFlows      []*derivsim.OptionTaker
 	InitialRisk      *VenueRiskSnapshot
@@ -675,6 +676,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		SnapshotInterval:        s.Config.SnapshotInterval,
 		BalanceSnapshotInterval: time.Minute,
 	})
+	var fundamentalLog venueLogger
 	matchingRule := s.Config.matchingRule(id)
 	if matchingRule == MatchingProRata {
 		ex.Matcher = matching.NewProRataMatcher(clock)
@@ -692,6 +694,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			return nil, err
 		}
 		ex.SetLogger("_global", globalLog)
+		fundamentalLog = globalLog
 		spotSymbols := []string{"ABC/USD"}
 		if s.Config.CrossAssetSpotGraph {
 			spotSymbols = append(spotSymbols, "CDF/USD", "ABC/CDF")
@@ -729,6 +732,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	mount := simulation.NewMount(ex, simulation.LatencyConfig{})
 	venue := &Venue{ID: id, MatchingRule: matchingRule, Exchange: ex, Mount: mount,
 		optionListedNano: make(map[string]int64),
+		fundamentalLog:   fundamentalLog,
 		Mispricing:       newMispricingStats(id, "ABC/USD", s.Config.MispricingBandBps),
 		Microstructure:   newMicrostructureStats(id, "ABC/USD", tick, s.Config.AutomationInterval.Seconds())}
 	ex.ConfigureAutomation(exchange.AutomationConfig{
@@ -758,7 +762,10 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			now := venue.Exchange.Clock.NowUnixNano()
 			venue.recordTwoSidedMarks(valuedSpotSymbols(s.Config.CrossAssetSpotGraph), now)
 			mark, _, _ := venue.valuationMark("ABC/USD", now, venueRiskMarkStaleness)
-			venue.Mispricing.observe(now, mark, s.Fundamental.Value(now))
+			fundamental := s.Fundamental.Value(now)
+			venue.Mispricing.observe(now, mark, fundamental)
+			venue.logFundamental(now, fundamental, mark)
+			venue.logMakerState(now)
 			venue.observeMicrostructure()
 			captureScheduledVenueRisk(venue, s.Config.GreekInterval, s.Config.AutomationInterval)
 		},
@@ -1101,6 +1108,40 @@ func (s *Sim) capturePopulationAccounts(phase string) ([]ParticipantAccountSnaps
 // dealer risk. It is generous relative to the automation cadence because this
 // snapshot is diagnostic, while population accounts use the stricter window.
 const venueRiskMarkStaleness = int64(60 * time.Second)
+
+// logFundamental records the exogenous value beside the quoted mark.
+func (v *Venue) logFundamental(timestamp, fundamental, mark int64) {
+	if v.fundamentalLog.inner == nil {
+		return
+	}
+	v.fundamentalLog.LogEvent(timestamp, 0, "fundamental_value", map[string]any{
+		"symbol":      "ABC/USD",
+		"fundamental": fundamental,
+		"mark":        mark,
+	})
+}
+
+// logMakerState records what each spot maker believes, which is the only way
+// to tell a price move driven by inventory from one driven by its volatility
+// estimate.
+func (v *Venue) logMakerState(timestamp int64) {
+	if v.fundamentalLog.inner == nil {
+		return
+	}
+	for index, maker := range v.SpotMakers {
+		if maker.cfg.Symbol != "ABC/USD" {
+			continue
+		}
+		v.fundamentalLog.LogEvent(timestamp, 0, "maker_state", map[string]any{
+			"maker":        index,
+			"forward":      maker.forward,
+			"inventory":    maker.inventory,
+			"log_variance": maker.logVariancePerSec,
+			"bid":          maker.bidPrice,
+			"ask":          maker.askPrice,
+		})
+	}
+}
 
 // observeMicrostructure samples the spot book's top of book and cumulative
 // trade count. The book's sequence number advances once per trade, so it is
