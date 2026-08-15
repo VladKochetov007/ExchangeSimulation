@@ -120,6 +120,8 @@ type MetaorderTrader struct {
 	startTS      int64
 	startMid     int64
 	startVolume  int64
+	childVolume  int64
+	ownVolume    int64
 	marketVolume int64
 	nextStartTS  int64
 	records      []MetaorderRecord
@@ -167,6 +169,7 @@ func (m *MetaorderTrader) HandleEvent(_ context.Context, evt *actor.Event) {
 			return
 		}
 		m.filledQty += e.Qty
+		m.ownVolume += e.Qty
 		m.notional += e.Qty * e.Price / m.cfg.BasePrecision
 		if e.IsFull {
 			m.pendingChild = false
@@ -213,7 +216,8 @@ func (m *MetaorderTrader) begin(timestamp int64) {
 	}
 	m.parentQty, m.filledQty, m.notional, m.childCount = quantity, 0, 0, 0
 	m.startTS, m.startMid = timestamp, (m.bestBid+m.bestAsk)/2
-	m.startVolume = m.marketVolume
+	m.startVolume, m.childVolume = m.marketVolume, m.externalVolume()
+	m.ownVolume = 0
 }
 
 func (m *MetaorderTrader) drawParentQty() int64 {
@@ -268,17 +272,28 @@ func (m *MetaorderTrader) executeChild(timestamp int64) {
 	if child <= 0 {
 		return
 	}
+	m.childVolume = m.marketVolume
+	m.childVolume = m.externalVolume()
 	m.SubmitOrderWithTimeInForce(m.cfg.Symbol, m.side, exchange.LimitOrder, price, child, exchange.IOC)
 	m.pendingChild = true
 	m.childCount++
 }
 
 // childQty tracks market activity rather than the clock: each child is a
-// configured fraction of the volume traded since the previous one.
+// configured fraction of the volume traded since the previous child.
+//
+// Measuring from the start of the parent instead would let the allowance grow
+// with the whole parent's history, so the realised participation rate ran far
+// above the configured one — 0.66 against a configured 0.02 — and the agent
+// became most of the market it was supposed to be measuring.
 func (m *MetaorderTrader) childQty(remaining int64) int64 {
 	child := m.cfg.MinChildQty
 	if m.cfg.ParticipationRate > 0 {
-		recent := m.marketVolume - m.startVolume
+		// Pace against volume traded by everyone else. The trade feed includes
+		// this agent's own fills, so pacing against total volume is
+		// self-feeding: each child enlarges the allowance for the next one and
+		// the realised participation runs to one regardless of the setting.
+		recent := m.externalVolume() - m.childVolume
 		if paced := int64(float64(recent) * m.cfg.ParticipationRate); paced > child {
 			child = paced
 		}
@@ -287,6 +302,14 @@ func (m *MetaorderTrader) childQty(remaining int64) int64 {
 		child = remaining
 	}
 	return child
+}
+
+// externalVolume is market volume excluding this agent's own executions.
+func (m *MetaorderTrader) externalVolume() int64 {
+	if external := m.marketVolume - m.ownVolume; external > 0 {
+		return external
+	}
+	return 0
 }
 
 func (m *MetaorderTrader) finish(timestamp int64, completed bool) {
@@ -312,8 +335,11 @@ func (m *MetaorderTrader) finish(timestamp int64, completed bool) {
 		}
 		record.SignedImpact = signed
 	}
-	if record.MarketVolume > 0 {
-		record.RealizedParticipation = float64(m.filledQty) / float64(record.MarketVolume)
+	// Participation is measured against volume traded by everyone else, so a
+	// dominant agent shows a rate above one instead of being flattered toward
+	// one by counting its own fills in the denominator.
+	if external := record.MarketVolume - m.filledQty; external > 0 {
+		record.RealizedParticipation = float64(m.filledQty) / float64(external)
 	}
 	m.records = append(m.records, record)
 	m.active = false

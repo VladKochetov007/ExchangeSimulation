@@ -1089,3 +1089,29 @@ func TestMetaorderConfigIsValidated(t *testing.T) {
 		t.Fatal("a zero child interval must be rejected")
 	}
 }
+
+// The participation rate must be measured against volume traded by everyone
+// else. The trade feed includes the agent's own fills, so pacing against total
+// volume is self-feeding: each child enlarges the allowance for the next, and
+// the realised rate runs away from the configured one.
+func TestMetaorderParticipationExcludesOwnVolume(t *testing.T) {
+	trader := &MetaorderTrader{cfg: MetaorderTraderConfig{
+		BasePrecision: mvBasePrecision, ParticipationRate: 0.10, MinChildQty: 1,
+	}}
+
+	// 1000 units traded in total, 900 of them by this agent: only 100 are
+	// external, so a 10% child is 10 units, not 100.
+	trader.marketVolume = 1000
+	trader.ownVolume = 900
+	trader.childVolume = 0
+	if got := trader.childQty(1_000_000); got != 10 {
+		t.Fatalf("child quantity = %d, want 10 from 100 units of external volume", got)
+	}
+
+	// With no external volume at all the child falls back to the floor rather
+	// than growing on the agent's own prints.
+	trader.marketVolume, trader.ownVolume, trader.childVolume = 500, 500, 0
+	if got := trader.childQty(1_000_000); got != 1 {
+		t.Fatalf("child quantity = %d, want the configured floor", got)
+	}
+}

@@ -27,7 +27,9 @@ from pathlib import Path
 # Each control is swept separately so their slopes can be compared.
 CONTROLS: dict[str, tuple[str, list]] = {
     "noise_intensity": ("noise_trader_count", [1, 2, 4, 8]),
-    "maker_risk_aversion": ("stoikov_risk_aversion", [0.0002, 0.0005, 0.001, 0.002]),
+    # Recalibrated after the market-data subscription fix: above ~1e-4 the
+    # market diverges, below ~2e-6 the spread is tick-floor bound.
+    "maker_risk_aversion": ("stoikov_risk_aversion", [1e-6, 2e-6, 5e-6, 1e-5]),
     "fundamental_vol": ("fundamental_log_vol_per_step", [0.00005, 0.0001, 0.0002, 0.0004]),
     "informed_count": ("value_trader_count", [0, 1, 2, 4]),
 }
