@@ -18,7 +18,7 @@ coverage or a reproducible command in `research/experiments.jsonl`.
 | ID | Hypothesis | Outcome | Why it held or failed |
 | --- | --- | --- | --- |
 | H-001 | Composed public operations can violate coupled ledger/order-book invariants. | Supported. | Individual reservation, fee, position, and book operations were locally plausible but did not constrain their composition. Confirmed examples included negative isolated collateral, overflowed level quantities/position boundaries, foreign-fee overcommit, and per-fill fixed-fee fragmentation. |
-| H-003/H-006 | Fixed seed plus race-free Go code is enough for reproducible simulation. | Falsified for the legacy runner; supported for the direct deterministic-phase runtime. | Quiescence drains work but does not order equal-time actor ticks, responses, market data, venue ingress, or automation. A phase executor defines that order explicitly. Direct mounts now reproduce; latency wrappers still do not. |
+| H-003/H-006 | Fixed seed plus race-free Go code is enough for reproducible simulation. | Falsified for the legacy runner; supported for the deterministic-phase runtime. | Quiescence drains work but does not order equal-time actor ticks, responses, market data, venue ingress, or automation. A phase executor defines that order explicitly. Direct and scheduler-backed delayed mounts reproduce when they opt into the ordered courier. |
 | H-004 | Aggregate debt can be right while spot/perp debt attribution is wrong. | Supported and fixed. | Repaying more than the perp-attributed part of a loan left `BorrowedSpot` larger than total debt, hiding a later perp borrow from risk. Repayment now retires attribution consistently and balance telemetry matches the client ledger. |
 | H-005 | Stop/reconnect and delayed delivery can outlive their logical session. | Supported and fixed in the covered direct paths. | Closed channels and old-session callbacks had no ownership boundary. Lifecycle guards, reconnect closure, early terminal-event replay, and session-scoped market-data ownership now cover the retained scenarios. |
 | H-007 | Rewriting the matching core in C++ or Rust is the best current performance improvement. | Rejected for this stage. | Profiling put most wall time in quiescence, ingress draining, map work, synchronization, and logging; price-time matching was about 0.7% of cumulative CPU. Replacing the matcher would not repair causality and would make verification harder. |
@@ -49,10 +49,12 @@ Evidence:
   20-second `cmd/reprocheck` replicas at fourteen threads produced
   `8f7693f7fbf07c339dacff7e0c2206ef9114c532b210843c8d775b1406bb30d5`.
 
-This result does **not** extend to `DelayedGateway`: its request/response/
-market-data couriers still use asynchronous scheduling and are deliberately
-rejected by deterministic-phase mode. Latency experiments are therefore not
-yet admissible as reproducible market-effect evidence.
+The deterministic phase runtime now also owns scheduler-backed delayed gateway
+delivery. It has a fixed request, response, and market-data courier order and
+is covered by the execution and fee-simulation digest tests. This establishes
+repeatability for configured latency experiments; it does not turn a
+midpoint-signalled or incompletely accounted strategy into profitability
+evidence.
 
 ### Spot accounting and matching admission
 
@@ -144,8 +146,9 @@ invalid fill after `Match` is too late to make an ordinary rejection truthful.
 
 ## Open blockers before strategy or volatility conclusions
 
-- Add a phase-ordered latency courier; until then, latency sensitivity and
-  queue-priority results are diagnostic only.
+- Replace the fee-aware basis race's midpoint signal with executable all-in
+  depth, an order/leg fill ledger, residual policy, and strict terminal marked
+  PnL before interpreting ecological latency advantage as profitability.
 - Add exchange-owned `post_mark`, `pre_expiry`, and `post_settlement` risk
   rows. Current actor-owned rows preserve observed positions but are not exact
   terminal settlement state. Add maturity-matched forwards and a dynamic IV
