@@ -23,7 +23,7 @@ number.
 | ID | Angle | Status | Cost ceiling | Gate |
 | --- | --- | --- | ---: | --- |
 | FFA-00 | configuration semantics | passed | 0.05 CPU-h | explicit zero option-flow probability remains zero; omission defaults |
-| FFA-01 | venue allocation | queued | 0.5 CPU-h | exact FIFO/pro-rata allocator tests and deterministic tie policy |
+| FFA-01 | venue allocation | passed | 0.5 CPU-h | per-venue exact FIFO/pro-rata selection, validation, and deterministic tie policy |
 | FFA-02 | graph execution | queued | 1.0 CPU-h | 3-asset valuation/conservation and triangle null control |
 | FFA-03 | information boundary | queued | 0.5 CPU-h | no direct exchange state from strategy code; sequence/resync test |
 | FFA-04 | population accounting | queued | 1.0 CPU-h | every participant has complete USD marked account or invalid run |

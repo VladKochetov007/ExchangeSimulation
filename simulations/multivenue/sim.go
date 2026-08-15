@@ -14,6 +14,7 @@ import (
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
 	"exchange_sim/instrument"
+	"exchange_sim/matching"
 	eprice "exchange_sim/price"
 	"exchange_sim/simulation"
 	"exchange_sim/simulations/derivsim"
@@ -26,6 +27,19 @@ const (
 	mvQuotePrecision = exchange.USD_PRECISION
 	mvBootstrapPrice = 50_000 * mvQuotePrecision
 )
+
+const (
+	MatchingPriceTime = "price_time"
+	MatchingProRata   = "pro_rata"
+)
+
+// VenueRule contains the venue-specific market mechanism settings that are
+// currently admissible in the multivenue control. The scenario uses a map
+// keyed by venue ID, but NewSim traverses VenueIDs so map iteration never
+// chooses a causal order.
+type VenueRule struct {
+	MatchingRule string `json:"matching_rule"`
+}
 
 // Config creates exactly three separately funded direct venues on one
 // deterministic simulated clock. The one-second default is intentional: all
@@ -40,6 +54,9 @@ type Config struct {
 	LogMode  string   `json:"log_mode"`
 	Seed     int64    `json:"seed"`
 	VenueIDs []string `json:"venue_ids"`
+	// VenueRules selects the exact matching policy for each venue. Omitted
+	// entries preserve the established price-time control.
+	VenueRules map[string]VenueRule `json:"venue_rules"`
 
 	Step               time.Duration `json:"step"`
 	SnapshotInterval   time.Duration `json:"snapshot_interval"`
@@ -117,6 +134,17 @@ func (c *Config) normalize() error {
 			return fmt.Errorf("multivenue: duplicate venue ID %q", id)
 		}
 		seen[id] = struct{}{}
+	}
+	for id, rule := range c.VenueRules {
+		if _, exists := seen[id]; !exists {
+			return fmt.Errorf("multivenue: venue rule references unknown venue %q", id)
+		}
+		if rule.MatchingRule == "" {
+			continue
+		}
+		if rule.MatchingRule != MatchingPriceTime && rule.MatchingRule != MatchingProRata {
+			return fmt.Errorf("multivenue: venue %q has unsupported matching rule %q", id, rule.MatchingRule)
+		}
 	}
 	if c.Step == 0 {
 		c.Step = time.Second
@@ -238,6 +266,7 @@ func (c *Config) normalize() error {
 // transfer or synthetic shared wallet is implied by a common simulation clock.
 type Venue struct {
 	ID                   string
+	MatchingRule         string
 	Exchange             *exchange.Exchange
 	Mount                *simulation.Mount
 	SpotMakers           []*StoikovMarketMaker
@@ -259,6 +288,13 @@ type Venue struct {
 	riskLastNano     int64
 	optionListedNano map[string]int64
 	nextClient       uint64
+}
+
+func (c Config) matchingRule(venueID string) string {
+	if rule, exists := c.VenueRules[venueID]; exists && rule.MatchingRule != "" {
+		return rule.MatchingRule
+	}
+	return MatchingPriceTime
 }
 
 // VenueRiskSnapshot combines exchange-owned marked equity with an
@@ -461,6 +497,10 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		SnapshotInterval:        s.Config.SnapshotInterval,
 		BalanceSnapshotInterval: time.Minute,
 	})
+	matchingRule := s.Config.matchingRule(id)
+	if matchingRule == MatchingProRata {
+		ex.Matcher = matching.NewProRataMatcher(clock)
+	}
 	if s.Config.LogMode == "full" {
 		if err := os.MkdirAll(filepath.Join(logDir, "spot"), 0755); err != nil {
 			return nil, err
@@ -497,7 +537,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	optionSpec := spec
 	optionSpec.TickSize = mvQuotePrecision // one USD premium tick
 	mount := simulation.NewMount(ex, simulation.LatencyConfig{})
-	venue := &Venue{ID: id, Exchange: ex, Mount: mount, optionListedNano: make(map[string]int64)}
+	venue := &Venue{ID: id, MatchingRule: matchingRule, Exchange: ex, Mount: mount, optionListedNano: make(map[string]int64)}
 	ex.ConfigureAutomation(exchange.AutomationConfig{
 		IndexProvider:       index,
 		PriceUpdateInterval: s.Config.AutomationInterval,

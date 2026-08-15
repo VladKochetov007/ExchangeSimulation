@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"exchange_sim/exchange"
+	"exchange_sim/matching"
 )
 
 func TestConfigAcceptsDocumentedSnakeCaseJSON(t *testing.T) {
@@ -25,6 +26,90 @@ func TestConfigAcceptsDocumentedSnakeCaseJSON(t *testing.T) {
 	}
 	if cfg.LogMode != "none" || cfg.Seed != 99 || cfg.DealerHedgeMode != "off" || cfg.ShortOptionTenor != 2*time.Hour {
 		t.Fatalf("snake-case config was not decoded: %+v", cfg)
+	}
+}
+
+func TestVenueRulesSelectIndependentMatchingPolicies(t *testing.T) {
+	sim, err := NewSim(time.Second, Config{
+		LogDir:  t.TempDir(),
+		LogMode: "none",
+		VenueRules: map[string]VenueRule{
+			"north":   {MatchingRule: MatchingPriceTime},
+			"central": {MatchingRule: MatchingProRata},
+			"south":   {MatchingRule: MatchingProRata},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	defer sim.Close()
+
+	for _, venue := range sim.Venues {
+		switch venue.ID {
+		case "north":
+			if venue.MatchingRule != MatchingPriceTime {
+				t.Fatalf("north matching rule = %q", venue.MatchingRule)
+			}
+			if _, ok := venue.Exchange.Matcher.(*matching.PriceTimeMatcher); !ok {
+				t.Fatalf("north matcher = %T, want price-time", venue.Exchange.Matcher)
+			}
+		case "central", "south":
+			if venue.MatchingRule != MatchingProRata {
+				t.Fatalf("%s matching rule = %q", venue.ID, venue.MatchingRule)
+			}
+			if _, ok := venue.Exchange.Matcher.(*matching.ProRataMatcher); !ok {
+				t.Fatalf("%s matcher = %T, want pro-rata", venue.ID, venue.Exchange.Matcher)
+			}
+		default:
+			t.Fatalf("unexpected venue %q", venue.ID)
+		}
+	}
+}
+
+func TestVenueRulesRejectUnknownVenueAndMatchingPolicy(t *testing.T) {
+	for name, rules := range map[string]map[string]VenueRule{
+		"unknown venue":  {"east": {MatchingRule: MatchingPriceTime}},
+		"unknown policy": {"north": {MatchingRule: "random"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewSim(time.Second, Config{LogDir: t.TempDir(), LogMode: "none", VenueRules: rules})
+			if err == nil {
+				t.Fatal("NewSim accepted invalid venue rule")
+			}
+		})
+	}
+}
+
+func TestMixedVenueMatchingRulesDigestAcrossGOMAXPROCS(t *testing.T) {
+	run := func(procs int) string {
+		t.Helper()
+		previous := runtime.GOMAXPROCS(procs)
+		defer runtime.GOMAXPROCS(previous)
+
+		sim, err := NewSim(3*time.Second, Config{
+			LogDir: t.TempDir(),
+			Seed:   63,
+			VenueRules: map[string]VenueRule{
+				"north":   {MatchingRule: MatchingPriceTime},
+				"central": {MatchingRule: MatchingProRata},
+				"south":   {MatchingRule: MatchingProRata},
+			},
+		})
+		if err != nil {
+			t.Fatalf("NewSim: %v", err)
+		}
+		if err := sim.Run(context.Background()); err != nil {
+			sim.Close()
+			t.Fatalf("Run: %v", err)
+		}
+		sim.Close()
+		return digestVenueLogs(t, sim.Config.LogDir)
+	}
+
+	one := run(1)
+	many := run(14)
+	if one != many {
+		t.Fatalf("mixed-matcher digest differs: GOMAXPROCS=1 %s, GOMAXPROCS=14 %s", one, many)
 	}
 }
 

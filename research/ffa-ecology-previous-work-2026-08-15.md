@@ -10,10 +10,10 @@
   seeded option takers. See [sim.go](../simulations/multivenue/sim.go).
 - The default world has one noise and one option-flow participant per venue;
   roster four is a denser control, not a broad participant ecology.
-- Each current `multivenue` world chooses one matcher for all its venues. FIFO
-  and basic pro-rata implementations exist, but no scenario assigns distinct
-  matching algorithms, allocation minimums, top allocation, or hybrid rules
-  per venue.
+- FFA-01 now selects existing price-time or exact pro-rata matching per venue
+  through `VenueRules`, while preserving a price-time default. Allocation
+  minimums, top allocation, split/leveling, auction rules, and hybrids remain
+  unimplemented and must not be implied by the `pro_rata` label.
 - `CrossVenueArb` is a non-atomic, pre-funded FOK router for one cross-listed
   symbol, `ABC/USD`. It accounts for per-venue legs and residuals, but it is
   not an FX graph, a clearing layer, or a multi-asset arbitrage population.

@@ -22,6 +22,21 @@
 - **Consequence:** directional option-flow arms are now expressible. This does
   not validate their Greeks, PnL, or ecology interpretation.
 
+## FFA-01: venue-local allocation selection
+
+- **Prediction:** matching allocation can be a declared venue characteristic
+  without reintroducing map-iteration or host-scheduling causality.
+- **Result:** supported for the two implemented mechanisms. `VenueRules`
+  selects existing `price_time` or exact `pro_rata` matcher by venue ID; the
+  simulator traverses the canonical `VenueIDs` list rather than ranging the
+  rule map. Unknown venue IDs and rules reject at normalization.
+- **Evidence:** the mixed north-FIFO/central-pro-rata/south-pro-rata world has
+  the same venue-log digest at `GOMAXPROCS=1` and `14`; the multivenue package
+  and its race suite pass, as do the full project test and vet gates.
+- **Limit:** this is a mechanism-selection boundary, not a result about
+  liquidity quality. It does not implement real venue hybrids, allocation
+  minimums, top allocation, auctions, or per-venue fees.
+
 ## Blocking contradictions
 
 - `multivenue` cannot compose cross-currency spots with derivatives and
