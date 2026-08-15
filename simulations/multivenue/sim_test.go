@@ -80,6 +80,117 @@ func TestVenueRulesRejectUnknownVenueAndMatchingPolicy(t *testing.T) {
 	}
 }
 
+func TestStrictPopulationAccountingCapturesEveryParticipant(t *testing.T) {
+	sim, err := NewSim(3*time.Second, Config{
+		LogDir:                     t.TempDir(),
+		LogMode:                    "none",
+		Seed:                       71,
+		NoiseTraderCount:           2,
+		OptionFlowCount:            3,
+		StrictPopulationAccounting: true,
+	})
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	defer sim.Close()
+
+	wantCount := 0
+	for _, venue := range sim.Venues {
+		wantCount += len(venue.Participants)
+	}
+	if len(sim.InitialAccounts) != wantCount {
+		t.Fatalf("initial account rows = %d, want %d", len(sim.InitialAccounts), wantCount)
+	}
+	seen := make(map[string]struct{}, wantCount)
+	for _, row := range sim.InitialAccounts {
+		if row.Phase != "initial" || row.MarkSource != "bootstrap_manifest" || row.Account.ReportAsset != "USD" {
+			t.Fatalf("invalid initial population row: %#v", row)
+		}
+		key := fmt.Sprintf("%s/%d", row.VenueID, row.ClientID)
+		if _, duplicate := seen[key]; duplicate {
+			t.Fatalf("duplicate participant row %s", key)
+		}
+		seen[key] = struct{}{}
+	}
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(sim.TerminalAccounts) != wantCount {
+		t.Fatalf("terminal account rows = %d, want %d", len(sim.TerminalAccounts), wantCount)
+	}
+	for _, row := range sim.TerminalAccounts {
+		if row.Phase != "terminal_post_mark" || row.MarkSource != "two_sided_ABC_USD_mid" || row.Account.ReportAsset != "USD" {
+			t.Fatalf("invalid terminal population row: %#v", row)
+		}
+	}
+}
+
+func TestPopulationValuationRejectsMissingTerminalTwoSidedMark(t *testing.T) {
+	venue := &Venue{ID: "unpriced", Exchange: exchange.NewExchange(1, nil)}
+	if _, _, err := populationValuationSpec(venue, "terminal_post_mark"); err == nil {
+		t.Fatal("terminal population valuation accepted a venue without a two-sided ABC/USD mark")
+	}
+}
+
+func TestStrictPopulationAccountsDigestAcrossGOMAXPROCS(t *testing.T) {
+	run := func(procs int) ([]ParticipantAccountSnapshot, []ParticipantAccountSnapshot) {
+		t.Helper()
+		previous := runtime.GOMAXPROCS(procs)
+		defer runtime.GOMAXPROCS(previous)
+		sim, err := NewSim(3*time.Second, Config{
+			LogDir:                     t.TempDir(),
+			LogMode:                    "none",
+			Seed:                       81,
+			StrictPopulationAccounting: true,
+		})
+		if err != nil {
+			t.Fatalf("NewSim: %v", err)
+		}
+		defer sim.Close()
+		if err := sim.Run(context.Background()); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		return append([]ParticipantAccountSnapshot(nil), sim.InitialAccounts...), append([]ParticipantAccountSnapshot(nil), sim.TerminalAccounts...)
+	}
+
+	initialOne, terminalOne := run(1)
+	initialMany, terminalMany := run(14)
+	if !reflect.DeepEqual(initialOne, initialMany) || !reflect.DeepEqual(terminalOne, terminalMany) {
+		t.Fatalf("strict population accounts differ by GOMAXPROCS:\n1=%#v\n14=%#v", struct {
+			Initial  []ParticipantAccountSnapshot
+			Terminal []ParticipantAccountSnapshot
+		}{initialOne, terminalOne}, struct {
+			Initial  []ParticipantAccountSnapshot
+			Terminal []ParticipantAccountSnapshot
+		}{initialMany, terminalMany})
+	}
+}
+
+func TestManifestExcludesArtifactDirectory(t *testing.T) {
+	build := func(logDir string) []byte {
+		t.Helper()
+		sim, err := NewSim(time.Second, Config{LogDir: logDir, LogMode: "none", Seed: 91})
+		if err != nil {
+			t.Fatalf("NewSim: %v", err)
+		}
+		defer sim.Close()
+		data, err := os.ReadFile(filepath.Join(logDir, "manifest.json"))
+		if err != nil {
+			t.Fatalf("read manifest: %v", err)
+		}
+		return data
+	}
+
+	first := build(t.TempDir())
+	second := build(t.TempDir())
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("manifest changes with artifact directory:\n%s\n%s", first, second)
+	}
+	if strings.Contains(string(first), "LogDir") || strings.Contains(string(first), "log_dir") {
+		t.Fatalf("manifest leaks artifact directory: %s", first)
+	}
+}
+
 func TestMixedVenueMatchingRulesDigestAcrossGOMAXPROCS(t *testing.T) {
 	run := func(procs int) string {
 		t.Helper()

@@ -47,13 +47,17 @@ type VenueRule struct {
 // experiments feasible without changing their event semantics through tick
 // coalescing.
 type Config struct {
-	LogDir string `json:"log_dir"`
+	LogDir string `json:"log_dir,omitempty"`
 	// LogMode controls raw venue-event persistence. "full" is the default
 	// evidence mode; "none" retains deterministic in-memory risk telemetry and
 	// greeks.json while avoiding large JSONL output for replicated treatments.
 	LogMode  string   `json:"log_mode"`
 	Seed     int64    `json:"seed"`
 	VenueIDs []string `json:"venue_ids"`
+	// StrictPopulationAccounting requires a complete initial and terminal USD
+	// marked account for every connected participant. It is the required mode
+	// for FFA fitness experiments; legacy mechanism controls may leave it off.
+	StrictPopulationAccounting bool `json:"strict_population_accounting"`
 	// VenueRules selects the exact matching policy for each venue. Omitted
 	// entries preserve the established price-time control.
 	VenueRules map[string]VenueRule `json:"venue_rules"`
@@ -269,6 +273,7 @@ type Venue struct {
 	MatchingRule         string
 	Exchange             *exchange.Exchange
 	Mount                *simulation.Mount
+	Participants         []Participant
 	SpotMakers           []*StoikovMarketMaker
 	PerpMaker            *StoikovMarketMaker
 	FuturesMaker         *derivsim.FuturesMarketMaker
@@ -288,6 +293,25 @@ type Venue struct {
 	riskLastNano     int64
 	optionListedNano map[string]int64
 	nextClient       uint64
+}
+
+// Participant identifies one independently funded account. It is recorded by
+// the simulation controller and is never exposed to an actor as opponent
+// state.
+type Participant struct {
+	VenueID  string `json:"venue_id"`
+	ClientID uint64 `json:"client_id"`
+	Role     string `json:"role"`
+}
+
+// ParticipantAccountSnapshot is a strict marked account for one participant
+// at a lifecycle boundary. MarkSource makes the initial bootstrap valuation
+// distinguishable from an executable terminal two-sided mark.
+type ParticipantAccountSnapshot struct {
+	Participant
+	Phase      string                       `json:"phase"`
+	MarkSource string                       `json:"mark_source"`
+	Account    etypes.MarkedAccountSnapshot `json:"account"`
 }
 
 func (c Config) matchingRule(venueID string) string {
@@ -312,11 +336,13 @@ type VenueRiskSnapshot struct {
 
 // Sim owns the three venue ecology and every log file created for it.
 type Sim struct {
-	Config  Config
-	Runner  *simulation.Runner
-	Venues  []*Venue
-	Routers []*CrossVenueArb
-	loggers []*feesim.JSONLinesLogger
+	Config           Config
+	Runner           *simulation.Runner
+	Venues           []*Venue
+	Routers          []*CrossVenueArb
+	InitialAccounts  []ParticipantAccountSnapshot
+	TerminalAccounts []ParticipantAccountSnapshot
+	loggers          []*feesim.JSONLinesLogger
 }
 
 // Run starts all venue automation under one context and drives the common
@@ -343,6 +369,9 @@ func (s *Sim) Run(ctx context.Context) error {
 				break
 			}
 			venue.TerminalRisk, riskErr = captureVenueRisk(venue, "terminal_post_mark")
+		}
+		if riskErr == nil && s.Config.StrictPopulationAccounting {
+			s.TerminalAccounts, riskErr = s.capturePopulationAccounts("terminal_post_mark")
 		}
 		cancel()
 		for _, venue := range s.Venues {
@@ -406,10 +435,15 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		routingNote = "Cross-venue spot routers use independent prefunded accounts and non-atomic FOK legs; no collateral transfer or shared wallet exists."
 		latencyNote = "Cross-venue router request, response, and market-data delay is delivered by the deterministic phase-owned courier."
 	}
+	manifestConfig := cfg
+	// Output location is an artifact sink, not a market mechanism. Excluding it
+	// makes a manifest hash identify the scenario across independently chosen
+	// persistent log directories.
+	manifestConfig.LogDir = ""
 	manifestBytes, err := json.MarshalIndent(manifest{
 		SchemaVersion: 1,
 		VenueIDs:      slices.Clone(cfg.VenueIDs),
-		Config:        cfg,
+		Config:        manifestConfig,
 		Notes: []string{
 			"Each venue has independent prefunded accounts and local spot-margin borrowing.",
 			latencyNote,
@@ -470,6 +504,13 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	if err := sim.addCrossVenueRouters(clock, scheduler, timers, &actorID); err != nil {
 		sim.Close()
 		return nil, err
+	}
+	if cfg.StrictPopulationAccounting {
+		sim.InitialAccounts, err = sim.capturePopulationAccounts("initial")
+		if err != nil {
+			sim.Close()
+			return nil, err
+		}
 	}
 	return sim, nil
 }
@@ -577,8 +618,8 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		return nil, err
 	}
 
-	connect := func(balances map[string]int64, perpUSD int64, fee exchange.FeeModel) actor.Gateway {
-		_, gw := venue.connectParticipant(mount, balances, perpUSD, fee)
+	connect := func(role string, balances map[string]int64, perpUSD int64, fee exchange.FeeModel) actor.Gateway {
+		_, gw := venue.connectParticipant(mount, role, balances, perpUSD, fee)
 		return gw
 	}
 	mmBalances := map[string]int64{"ABC": 10_000 * mvBasePrecision, "USD": 500_000_000 * mvQuotePrecision}
@@ -597,20 +638,21 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		}
 	}
 	for i := 0; i < 2; i++ {
-		maker := NewStoikovMarketMaker(nextActor(), connect(mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC/USD", "ABC/USD"))
+		maker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC/USD", "ABC/USD"))
 		maker.SetTickerFactory(timers)
 		venue.SpotMakers = append(venue.SpotMakers, maker)
 	}
-	venue.PerpMaker = NewStoikovMarketMaker(nextActor(), connect(mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC-PERP", "ABC/USD"))
+	venue.PerpMaker = NewStoikovMarketMaker(nextActor(), connect("perp_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC-PERP", "ABC/USD"))
 	venue.PerpMaker.SetTickerFactory(timers)
 
-	venue.FuturesMaker = derivsim.NewFuturesMarketMaker(nextActor(), connect(mmBalances, 100_000_000*mvQuotePrecision, zeroFee), derivsim.FuturesMMConfig{
+	venue.FuturesMaker = derivsim.NewFuturesMarketMaker(nextActor(), connect("futures_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), derivsim.FuturesMMConfig{
 		Underlying: "ABC/USD", SpreadBps: 6, QuoteQty: mvBasePrecision / 5, Tick: tick, QuoteInterval: s.Config.QuoteInterval,
 	})
 	venue.FuturesMaker.SetTickerFactory(timers)
 	dealerBalances := map[string]int64{"USD": 500_000_000 * mvQuotePrecision}
-	venue.OptionDealerClientID = venue.nextClient + 1
-	venue.OptionDealer = derivsim.NewOptionMarketMaker(nextActor(), connect(dealerBalances, 150_000_000*mvQuotePrecision, zeroFee), derivsim.OptionMMConfig{
+	dealerClientID, dealerGateway := venue.connectParticipant(mount, "option_dealer", dealerBalances, 150_000_000*mvQuotePrecision, zeroFee)
+	venue.OptionDealerClientID = dealerClientID
+	venue.OptionDealer = derivsim.NewOptionMarketMaker(nextActor(), dealerGateway, derivsim.OptionMMConfig{
 		Underlying: "ABC/USD", IV: s.Config.OptionIV, SpreadBps: 30, SkewPerLotBps: 5,
 		QuoteQty: mvBasePrecision / 10, LotQty: mvBasePrecision / 20, PremiumTick: mvQuotePrecision,
 		QuoteInterval: s.Config.QuoteInterval, HedgeEnabled: s.Config.DealerHedgeMode == "on", HedgeInterval: s.Config.QuoteInterval,
@@ -621,7 +663,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	noiseBalances := map[string]int64{"ABC": 100 * mvBasePrecision, "USD": 100 * mvQuotePrecision}
 	noiseFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
 	for participant := 0; participant < s.Config.NoiseTraderCount; participant++ {
-		noise := feesim.NewRandomTaker(nextActor(), connect(noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), feesim.TakerConfig{
+		noise := feesim.NewRandomTaker(nextActor(), connect(fmt.Sprintf("noise_flow_%d", participant+1), noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), feesim.TakerConfig{
 			Symbols: []string{"ABC/USD", "ABC-PERP"}, TargetQtys: map[string]int64{"ABC/USD": mvBasePrecision / 100, "ABC-PERP": mvBasePrecision / 100},
 			TakeInterval: s.Config.NoiseInterval, Seed: flowSeed(s.Config.Seed, venueIndex, participant, 1),
 		})
@@ -630,7 +672,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	}
 	venue.NoiseTrader = venue.NoiseTraders[0]
 	for participant := 0; participant < s.Config.OptionFlowCount; participant++ {
-		flow := derivsim.NewOptionTaker(nextActor(), connect(noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), derivsim.OptionTakerConfig{
+		flow := derivsim.NewOptionTaker(nextActor(), connect(fmt.Sprintf("option_flow_%d", participant+1), noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), derivsim.OptionTakerConfig{
 			Underlying: "ABC/USD", PBuy: *s.Config.OptionBuyProbability, LotQty: mvBasePrecision / 100,
 			Interval: s.Config.NoiseInterval, Seed: flowSeed(s.Config.Seed, venueIndex, participant, 2), IncludeFutures: true,
 		})
@@ -644,13 +686,17 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 // connectParticipant allocates a venue-local account ID. Router legs call it
 // on a dedicated delayed mount, so every venue account remains explicit and
 // no collateral can pass between exchanges through shared Go state.
-func (v *Venue) connectParticipant(mount *simulation.Mount, balances map[string]int64, perpUSD int64, fee exchange.FeeModel) (uint64, actor.Gateway) {
+func (v *Venue) connectParticipant(mount *simulation.Mount, role string, balances map[string]int64, perpUSD int64, fee exchange.FeeModel) (uint64, actor.Gateway) {
+	if role == "" {
+		panic("multivenue: participant role is required")
+	}
 	v.nextClient++
 	clientID := v.nextClient
 	gw := mount.ConnectNewClient(clientID, balances, fee)
 	if perpUSD > 0 {
 		v.Exchange.AddPerpBalance(clientID, "USD", perpUSD)
 	}
+	v.Participants = append(v.Participants, Participant{VenueID: v.ID, ClientID: clientID, Role: role})
 	return clientID, gw
 }
 
@@ -675,7 +721,7 @@ func (s *Sim) addCrossVenueRouters(clock *simulation.SimulatedClock, scheduler *
 				Scheduler:  scheduler,
 				Clock:      clock,
 			})
-			clientID, gw := venue.connectParticipant(mount, balances, 0, fee)
+			clientID, gw := venue.connectParticipant(mount, fmt.Sprintf("cross_venue_router_tier_%g", tier), balances, 0, fee)
 			*actorID++
 			legs = append(legs, CrossVenueArbLegConfig{
 				VenueID: venue.ID, ClientID: clientID, ActorID: *actorID, Gateway: gw,
@@ -715,6 +761,55 @@ func flowSeed(master int64, venueIndex, participant, flowClass int) int64 {
 	value *= 0x94d049bb133111eb
 	value ^= value >> 31
 	return int64(value & ((uint64(1) << 63) - 1))
+}
+
+// capturePopulationAccounts obtains controller-only valuation rows after all
+// participants have been connected (initial) or after the runner's final
+// fixed point (terminal). It never runs in an actor callback.
+func (s *Sim) capturePopulationAccounts(phase string) ([]ParticipantAccountSnapshot, error) {
+	rows := make([]ParticipantAccountSnapshot, 0)
+	for _, venue := range s.Venues {
+		spec, markSource, err := populationValuationSpec(venue, phase)
+		if err != nil {
+			return nil, err
+		}
+		for _, participant := range venue.Participants {
+			account, err := venue.Exchange.MarkedAccount(participant.ClientID, spec)
+			if err != nil {
+				return nil, fmt.Errorf("multivenue: %s participant %s/%d marked account: %w", phase, venue.ID, participant.ClientID, err)
+			}
+			rows = append(rows, ParticipantAccountSnapshot{
+				Participant: participant,
+				Phase:       phase,
+				MarkSource:  markSource,
+				Account:     account,
+			})
+		}
+	}
+	return rows, nil
+}
+
+func populationValuationSpec(venue *Venue, phase string) (etypes.AccountValuationSpec, string, error) {
+	if venue == nil || venue.Exchange == nil {
+		return etypes.AccountValuationSpec{}, "", errors.New("multivenue: missing venue for population valuation")
+	}
+	marks := map[string]etypes.AssetValuationMark{
+		"USD": {Price: mvQuotePrecision, Precision: mvQuotePrecision},
+	}
+	markSource := "bootstrap_manifest"
+	spotMark := int64(mvBootstrapPrice)
+	if phase != "initial" {
+		var ok bool
+		spotMark, ok = venue.Exchange.TwoSidedMidPrice("ABC/USD")
+		if !ok || spotMark <= 0 {
+			return etypes.AccountValuationSpec{}, "", fmt.Errorf("multivenue: %s participant valuation requires two-sided ABC/USD mark on venue %s", phase, venue.ID)
+		}
+		markSource = "two_sided_ABC_USD_mid"
+	}
+	marks["ABC"] = etypes.AssetValuationMark{Price: spotMark, Precision: mvBasePrecision}
+	return etypes.AccountValuationSpec{
+		ReportAsset: "USD", ReportPrecision: mvQuotePrecision, AssetMarks: marks,
+	}, markSource, nil
 }
 
 func captureVenueRisk(venue *Venue, phase string) (*VenueRiskSnapshot, error) {

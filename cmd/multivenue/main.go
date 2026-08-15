@@ -16,13 +16,15 @@ import (
 )
 
 type greekOutput struct {
-	SchemaVersion int                                       `json:"schema_version"`
-	InitialRisk   map[string]multivenue.VenueRiskSnapshot   `json:"initial_risk"`
-	RiskTimeline  map[string][]multivenue.VenueRiskSnapshot `json:"risk_timeline"`
-	PreExpiryRisk map[string][]multivenue.VenueRiskSnapshot `json:"pre_expiry_risk"`
-	TerminalRisk  map[string]multivenue.VenueRiskSnapshot   `json:"terminal_risk"`
-	RouterReports []multivenue.CrossVenueArbReport          `json:"router_reports,omitempty"`
-	Caveats       []string                                  `json:"caveats"`
+	SchemaVersion    int                                       `json:"schema_version"`
+	InitialRisk      map[string]multivenue.VenueRiskSnapshot   `json:"initial_risk"`
+	RiskTimeline     map[string][]multivenue.VenueRiskSnapshot `json:"risk_timeline"`
+	PreExpiryRisk    map[string][]multivenue.VenueRiskSnapshot `json:"pre_expiry_risk"`
+	TerminalRisk     map[string]multivenue.VenueRiskSnapshot   `json:"terminal_risk"`
+	RouterReports    []multivenue.CrossVenueArbReport          `json:"router_reports,omitempty"`
+	InitialAccounts  []multivenue.ParticipantAccountSnapshot   `json:"initial_accounts,omitempty"`
+	TerminalAccounts []multivenue.ParticipantAccountSnapshot   `json:"terminal_accounts,omitempty"`
+	Caveats          []string                                  `json:"caveats"`
 }
 
 func main() {
@@ -84,6 +86,8 @@ func main() {
 		output.PreExpiryRisk[venue.ID] = append([]multivenue.VenueRiskSnapshot(nil), venue.PreExpiryRisk...)
 		output.TerminalRisk[venue.ID] = *venue.TerminalRisk
 	}
+	output.InitialAccounts = append([]multivenue.ParticipantAccountSnapshot(nil), sim.InitialAccounts...)
+	output.TerminalAccounts = append([]multivenue.ParticipantAccountSnapshot(nil), sim.TerminalAccounts...)
 	for _, router := range sim.Routers {
 		output.RouterReports = append(output.RouterReports, router.Report())
 	}
