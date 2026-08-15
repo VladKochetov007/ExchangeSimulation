@@ -79,6 +79,23 @@ type Config struct {
 	NoiseTraderCount int `json:"noise_trader_count"`
 	OptionFlowCount  int `json:"option_flow_count"`
 
+	// StoikovMaxVarianceMultiple caps a maker's volatility estimate at this
+	// multiple of its initial value.
+	StoikovMaxVarianceMultiple float64 `json:"stoikov_max_variance_multiple"`
+
+	// ValueTraderCount sets how many informed participants per venue trade the
+	// visible spot book against the exogenous fundamental value. They are the
+	// market's anchor: makers quote around their own inventory and noise flow
+	// picks sides at random, so without informed flow a drift in the quoted
+	// price feeds back into the makers' own volatility estimate and diverges.
+	ValueTraderCount int `json:"value_trader_count"`
+	// ValueTraderEdgeBps is the deviation from fundamental value required
+	// before an informed participant crosses the spread.
+	ValueTraderEdgeBps int64 `json:"value_trader_edge_bps"`
+	// FundamentalLogVolPerStep is the standard deviation of one step of the
+	// fundamental value's log return; the step is AutomationInterval.
+	FundamentalLogVolPerStep float64 `json:"fundamental_log_vol_per_step"`
+
 	ShortOptionTenor          time.Duration `json:"short_option_tenor"`
 	LongOptionTenor           time.Duration `json:"long_option_tenor"`
 	ShortFutureTenor          time.Duration `json:"short_future_tenor"`
@@ -179,6 +196,18 @@ func (c *Config) normalize() error {
 	if c.OptionFlowCount == 0 {
 		c.OptionFlowCount = 1
 	}
+	if c.StoikovMaxVarianceMultiple == 0 {
+		c.StoikovMaxVarianceMultiple = 25
+	}
+	if c.ValueTraderCount == 0 {
+		c.ValueTraderCount = 2
+	}
+	if c.ValueTraderEdgeBps == 0 {
+		c.ValueTraderEdgeBps = 10
+	}
+	if c.FundamentalLogVolPerStep == 0 {
+		c.FundamentalLogVolPerStep = 0.0002
+	}
 	if c.ShortOptionTenor == 0 {
 		c.ShortOptionTenor = 6 * time.Hour
 	}
@@ -253,7 +282,8 @@ func (c *Config) normalize() error {
 	if c.Step <= 0 || c.SnapshotInterval <= 0 || c.AutomationInterval <= 0 || c.QuoteInterval <= 0 ||
 		c.NoiseInterval <= 0 || c.GreekInterval <= 0 || c.ShortOptionTenor <= 0 || c.LongOptionTenor <= 0 ||
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
-		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 ||
+		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 || c.ValueTraderCount < 0 ||
+		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || *c.OptionBuyProbability < 0 || *c.OptionBuyProbability > 1 {
@@ -288,6 +318,8 @@ type Venue struct {
 	// before configurable rosters. All actors live in the corresponding slice.
 	NoiseTrader      *feesim.RandomTaker
 	NoiseTraders     []*feesim.RandomTaker
+	ValueTraders     []*ValueTrader
+	lastTwoSided     map[string]twoSidedMark
 	OptionFlow       *derivsim.OptionTaker
 	OptionFlows      []*derivsim.OptionTaker
 	InitialRisk      *VenueRiskSnapshot
@@ -345,6 +377,7 @@ type Sim struct {
 	Runner           *simulation.Runner
 	Venues           []*Venue
 	Routers          []*CrossVenueArb
+	Fundamental      *FundamentalValue
 	InitialAccounts  []ParticipantAccountSnapshot
 	TerminalAccounts []ParticipantAccountSnapshot
 	loggers          []*feesim.JSONLinesLogger
@@ -479,7 +512,11 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	})
 	runner.AddIdler(timers)
 
-	sim := &Sim{Config: cfg, Runner: runner, Venues: make([]*Venue, 0, len(cfg.VenueIDs))}
+	// One fundamental value process is shared by every venue: the venues list
+	// the same asset, so they must trade against the same exogenous value.
+	fundamental := NewFundamentalValue(cfg.Seed, start, mvBootstrapPrice,
+		int64(cfg.AutomationInterval), mvQuotePrecision, cfg.FundamentalLogVolPerStep)
+	sim := &Sim{Config: cfg, Runner: runner, Fundamental: fundamental, Venues: make([]*Venue, 0, len(cfg.VenueIDs))}
 	actorID := uint64(0)
 	for venueIndex, id := range cfg.VenueIDs {
 		venue, err := sim.addVenue(id, venueIndex, clock, timers, &actorID)
@@ -505,6 +542,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		}
 		for _, flow := range venue.OptionFlows {
 			runner.AddActor(flow)
+		}
+		for _, trader := range venue.ValueTraders {
+			runner.AddActor(trader)
 		}
 	}
 	if err := sim.addCrossVenueRouters(clock, scheduler, timers, &actorID); err != nil {
@@ -625,6 +665,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			venue.PreExpiryRisk = append(venue.PreExpiryRisk, *risk)
 		},
 		PostDerivativeMarkHook: func() {
+			venue.recordTwoSidedMarks(valuedSpotSymbols(s.Config.CrossAssetSpotGraph), venue.Exchange.Clock.NowUnixNano())
 			captureScheduledVenueRisk(venue, s.Config.GreekInterval, s.Config.AutomationInterval)
 		},
 	})
@@ -667,6 +708,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			BasePrecision: mvBasePrecision, QuotePrecision: quotePrecision, TickSize: tickSize, QuoteQty: mvBasePrecision / 5,
 			QuoteInterval: s.Config.QuoteInterval, VolatilityHalfLife: s.Config.StoikovVolatilityHalfLife,
 			InitialLogVariancePerSec: relativeLogVariance,
+			MaxLogVarianceMultiple:   s.Config.StoikovMaxVarianceMultiple,
 			InventoryHorizon:         s.Config.StoikovInventoryHorizon,
 			RelativeRiskAversion:     relativeRiskAversion,
 			RelativeFillDecay:        relativeFillDecay,
@@ -737,6 +779,20 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		venue.OptionFlows = append(venue.OptionFlows, flow)
 	}
 	venue.OptionFlow = venue.OptionFlows[0]
+
+	valueBalances := map[string]int64{"ABC": 1_000 * mvBasePrecision, "USD": 50_000_000 * mvQuotePrecision}
+	if s.Config.CrossAssetSpotGraph {
+		valueBalances["CDF"] = 1_000 * mvBasePrecision
+	}
+	for participant := 0; participant < s.Config.ValueTraderCount; participant++ {
+		trader := NewValueTrader(nextActor(), connect(fmt.Sprintf("value_trader_%d", participant+1), valueBalances, 10_000_000*mvQuotePrecision, noiseFee), s.Fundamental, ValueTraderConfig{
+			Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: tick,
+			EdgeBps: s.Config.ValueTraderEdgeBps, LotQty: mvBasePrecision / 10,
+			MaxInventory: 200 * mvBasePrecision, TradeInterval: s.Config.NoiseInterval,
+		})
+		trader.SetTickerFactory(timers)
+		venue.ValueTraders = append(venue.ValueTraders, trader)
+	}
 	return venue, nil
 }
 
@@ -825,8 +881,13 @@ func flowSeed(master int64, venueIndex, participant, flowClass int) int64 {
 // fixed point (terminal). It never runs in an actor callback.
 func (s *Sim) capturePopulationAccounts(phase string) ([]ParticipantAccountSnapshot, error) {
 	rows := make([]ParticipantAccountSnapshot, 0)
+	// A momentary one-sided book must not invalidate a whole run, but a durably
+	// one-sided one still must. The window is a few automation ticks.
+	maxStaleness := int64(5 * s.Config.AutomationInterval)
 	for _, venue := range s.Venues {
-		spec, markSource, err := populationValuationSpec(venue, phase, s.Config.CrossAssetSpotGraph)
+		now := venue.Exchange.Clock.NowUnixNano()
+		venue.recordTwoSidedMarks(valuedSpotSymbols(s.Config.CrossAssetSpotGraph), now)
+		spec, markSource, err := populationValuationSpec(venue, phase, s.Config.CrossAssetSpotGraph, now, maxStaleness)
 		if err != nil {
 			return nil, err
 		}
@@ -846,7 +907,59 @@ func (s *Sim) capturePopulationAccounts(phase string) ([]ParticipantAccountSnaps
 	return rows, nil
 }
 
-func populationValuationSpec(venue *Venue, phase string, crossAssetSpotGraph bool) (etypes.AccountValuationSpec, string, error) {
+// venueRiskMarkStaleness bounds how old a cached midpoint may be when valuing
+// dealer risk. It is generous relative to the automation cadence because this
+// snapshot is diagnostic, while population accounts use the stricter window.
+const venueRiskMarkStaleness = int64(60 * time.Second)
+
+// valuedSpotSymbols lists the books whose midpoints price participant wealth.
+func valuedSpotSymbols(crossAssetSpotGraph bool) []string {
+	if crossAssetSpotGraph {
+		return []string{"ABC/USD", "CDF/USD"}
+	}
+	return []string{"ABC/USD"}
+}
+
+// twoSidedMark remembers the last midpoint observed while a book had both
+// sides, so a valuation that lands in the instant between a maker's cancel and
+// its replacement is not treated as an unpriceable market.
+type twoSidedMark struct {
+	price     int64
+	timestamp int64
+}
+
+// recordTwoSidedMarks caches the current midpoint of every valued book. It runs
+// on the venue's automation tick, which is also the cadence at which marks and
+// risk are refreshed.
+func (v *Venue) recordTwoSidedMarks(symbols []string, timestamp int64) {
+	if v.lastTwoSided == nil {
+		v.lastTwoSided = make(map[string]twoSidedMark, len(symbols))
+	}
+	for _, symbol := range symbols {
+		if mid, ok := v.Exchange.TwoSidedMidPrice(symbol); ok && mid > 0 {
+			v.lastTwoSided[symbol] = twoSidedMark{price: mid, timestamp: timestamp}
+		}
+	}
+}
+
+// valuationMark returns a two-sided midpoint, falling back to the most recent
+// one within maxStaleness. A book that is durably one-sided still fails: the
+// fallback covers a momentary gap in a live market, not a broken one.
+func (v *Venue) valuationMark(symbol string, now, maxStaleness int64) (int64, bool, bool) {
+	if mid, ok := v.Exchange.TwoSidedMidPrice(symbol); ok && mid > 0 {
+		return mid, true, false
+	}
+	cached, ok := v.lastTwoSided[symbol]
+	if !ok || cached.price <= 0 {
+		return 0, false, false
+	}
+	if maxStaleness > 0 && now-cached.timestamp > maxStaleness {
+		return 0, false, false
+	}
+	return cached.price, true, true
+}
+
+func populationValuationSpec(venue *Venue, phase string, crossAssetSpotGraph bool, now, maxStaleness int64) (etypes.AccountValuationSpec, string, error) {
 	if venue == nil || venue.Exchange == nil {
 		return etypes.AccountValuationSpec{}, "", errors.New("multivenue: missing venue for population valuation")
 	}
@@ -857,22 +970,30 @@ func populationValuationSpec(venue *Venue, phase string, crossAssetSpotGraph boo
 	spotMark := int64(mvBootstrapPrice)
 	if phase != "initial" {
 		var ok bool
-		spotMark, ok = venue.Exchange.TwoSidedMidPrice("ABC/USD")
+		var stale bool
+		spotMark, ok, stale = venue.valuationMark("ABC/USD", now, maxStaleness)
 		if !ok || spotMark <= 0 {
 			return etypes.AccountValuationSpec{}, "", fmt.Errorf("multivenue: %s participant valuation requires two-sided ABC/USD mark on venue %s", phase, venue.ID)
 		}
 		markSource = "two_sided_ABC_USD_mid"
+		if stale {
+			markSource = "recent_two_sided_ABC_USD_mid"
+		}
 	}
 	marks["ABC"] = etypes.AssetValuationMark{Price: spotMark, Precision: mvBasePrecision}
 	if crossAssetSpotGraph {
 		cdfMark := int64(mvCDFBootstrap)
 		if phase != "initial" {
 			var ok bool
-			cdfMark, ok = venue.Exchange.TwoSidedMidPrice("CDF/USD")
+			var cdfStale bool
+			cdfMark, ok, cdfStale = venue.valuationMark("CDF/USD", now, maxStaleness)
 			if !ok || cdfMark <= 0 {
 				return etypes.AccountValuationSpec{}, "", fmt.Errorf("multivenue: %s participant valuation requires two-sided CDF/USD mark on venue %s", phase, venue.ID)
 			}
 			markSource = "two_sided_ABC_USD_and_CDF_USD_mid"
+			if cdfStale || markSource == "recent_two_sided_ABC_USD_mid" {
+				markSource = "recent_two_sided_ABC_USD_and_CDF_USD_mid"
+			}
 		}
 		marks["CDF"] = etypes.AssetValuationMark{Price: cdfMark, Precision: mvBasePrecision}
 	}
@@ -885,12 +1006,25 @@ func captureVenueRisk(venue *Venue, phase string) (*VenueRiskSnapshot, error) {
 	if venue == nil || venue.Exchange == nil || venue.OptionDealer == nil || venue.OptionDealerClientID == 0 {
 		return nil, errors.New("multivenue: incomplete venue risk capture")
 	}
-	spotMid, _ := venue.Exchange.TwoSidedMidPrice("ABC/USD")
+	// Dealer risk is captured on the automation tick and at shutdown, so it can
+	// land in the instant between a maker's cancel and its replacement. Reuse
+	// the same bounded-staleness mark the population accounts use rather than
+	// silently valuing ABC at zero.
+	now := venue.Exchange.Clock.NowUnixNano()
+	spotMid, ok, _ := venue.valuationMark("ABC/USD", now, venueRiskMarkStaleness)
+	if !ok || spotMid <= 0 {
+		spotMid = 0
+	}
 	marks := map[string]etypes.AssetValuationMark{
 		"USD": {Price: mvQuotePrecision, Precision: mvQuotePrecision},
 	}
 	if spotMid > 0 {
 		marks["ABC"] = etypes.AssetValuationMark{Price: spotMid, Precision: mvBasePrecision}
+	}
+	if venue.lastTwoSided != nil {
+		if cdf, cdfOK, _ := venue.valuationMark("CDF/USD", now, venueRiskMarkStaleness); cdfOK && cdf > 0 {
+			marks["CDF"] = etypes.AssetValuationMark{Price: cdf, Precision: mvBasePrecision}
+		}
 	}
 	account, err := venue.Exchange.MarkedAccount(venue.OptionDealerClientID, etypes.AccountValuationSpec{
 		ReportAsset: "USD", ReportPrecision: mvQuotePrecision, AssetMarks: marks,

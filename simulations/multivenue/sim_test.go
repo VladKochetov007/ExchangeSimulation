@@ -16,7 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	etypes "exchange_sim/types"
 	"exchange_sim/matching"
 )
 
@@ -191,7 +193,7 @@ func TestCrossAssetSpotGraphListsAndValuesEveryPair(t *testing.T) {
 
 func TestPopulationValuationRejectsMissingTerminalTwoSidedMark(t *testing.T) {
 	venue := &Venue{ID: "unpriced", Exchange: exchange.NewExchange(1, nil)}
-	if _, _, err := populationValuationSpec(venue, "terminal_post_mark", false); err == nil {
+	if _, _, err := populationValuationSpec(venue, "terminal_post_mark", false, 0, 0); err == nil {
 		t.Fatal("terminal population valuation accepted a venue without a two-sided ABC/USD mark")
 	}
 }
@@ -270,8 +272,8 @@ func TestCrossAssetPopulationAccountsDigestAcrossGOMAXPROCS(t *testing.T) {
 			Terminal []ParticipantAccountSnapshot
 		}{initialMany, terminalMany})
 	}
-	if len(terminalOne) != 39 {
-		t.Fatalf("cross-asset terminal account rows = %d, want 39", len(terminalOne))
+	if len(terminalOne) != 45 {
+		t.Fatalf("cross-asset terminal account rows = %d, want 45", len(terminalOne))
 	}
 }
 
@@ -802,9 +804,12 @@ func TestSpotBookStaysAnchoredPastVarianceFeedbackHorizon(t *testing.T) {
 		t.Skip("long-horizon stability run")
 	}
 	sim, err := NewSim(20*time.Minute, Config{
-		LogDir:  t.TempDir(),
-		LogMode: "none",
-		Seed:    91,
+		LogDir:              t.TempDir(),
+		LogMode:             "none",
+		Seed:                91,
+		NoiseTraderCount:    2,
+		OptionFlowCount:     2,
+		CrossAssetSpotGraph: true,
 	})
 	if err != nil {
 		t.Fatalf("NewSim: %v", err)
@@ -826,5 +831,101 @@ func TestSpotBookStaysAnchoredPastVarianceFeedbackHorizon(t *testing.T) {
 		if price < bootstrap/2 || price > bootstrap*2 {
 			t.Fatalf("venue %s ABC/USD mid %.2f left the stability band around %.2f", venue.ID, price, bootstrap)
 		}
+	}
+}
+
+// The fundamental value is a function of simulated time alone, so every
+// participant that consults it at one timestamp sees the same value no matter
+// which of them asks first.
+func TestFundamentalValueIsPathDeterministic(t *testing.T) {
+	const step = int64(time.Second)
+	build := func() *FundamentalValue {
+		return NewFundamentalValue(7, 0, 50_000*mvQuotePrecision, step, mvQuotePrecision, 0.001)
+	}
+
+	forward := build()
+	var inOrder []int64
+	for i := range 200 {
+		inOrder = append(inOrder, forward.Value(int64(i)*step))
+	}
+
+	// Jumping straight to the end must extend the same path, not a new one.
+	skipped := build()
+	if got, want := skipped.Value(199*step), inOrder[199]; got != want {
+		t.Fatalf("value after a jump = %d, want %d", got, want)
+	}
+	// Re-reading an earlier timestamp must not redraw it.
+	if got, want := skipped.Value(50*step), inOrder[50]; got != want {
+		t.Fatalf("value after rewind = %d, want %d", got, want)
+	}
+	if inOrder[0] != 50_000*mvQuotePrecision {
+		t.Fatalf("path must start at the bootstrap price, got %d", inOrder[0])
+	}
+	moved := false
+	for _, v := range inOrder {
+		if v != inOrder[0] {
+			moved = true
+			break
+		}
+	}
+	if !moved {
+		t.Fatal("fundamental value never moved")
+	}
+}
+
+// A value trader must only cross when the visible price is beyond its edge from
+// fundamental value, and must respect its inventory bound.
+func TestValueTraderTradesAgainstFundamentalWithinInventoryBound(t *testing.T) {
+	value := NewFundamentalValue(1, 0, 50_000*mvQuotePrecision, int64(time.Second), mvQuotePrecision, 0)
+	gw := newStoikovStubGateway()
+	vt := NewValueTrader(1, gw, value, ValueTraderConfig{
+		Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: 10 * mvQuotePrecision,
+		EdgeBps: 10, LotQty: mvBasePrecision / 10, MaxInventory: mvBasePrecision / 10,
+		TradeInterval: time.Second,
+	})
+	now := time.Unix(0, 0)
+	vt.onTick(now) // subscribes
+
+	feed := func(bid, ask int64) {
+		vt.HandleEvent(context.Background(), &actor.Event{
+			Type: actor.EventBookSnapshot,
+			Data: actor.BookSnapshotEvent{
+				Symbol: "ABC/USD", Timestamp: now.UnixNano(),
+				Snapshot: &exchange.BookSnapshot{
+					Bids: []etypes.PriceLevel{{Price: bid, VisibleQty: mvBasePrecision}},
+					Asks: []etypes.PriceLevel{{Price: ask, VisibleQty: mvBasePrecision}},
+				},
+			},
+		})
+	}
+
+	// Inside the edge: no trade.
+	feed(49_995*mvQuotePrecision, 50_005*mvQuotePrecision)
+	before := len(gw.requests)
+	vt.onTick(now)
+	if len(gw.requests) != before {
+		t.Fatalf("traded inside the edge band: %+v", gw.requests[before:])
+	}
+
+	// Offer well below fundamental value: buy it.
+	feed(49_000*mvQuotePrecision, 49_100*mvQuotePrecision)
+	vt.onTick(now)
+	if len(gw.requests) != before+1 {
+		t.Fatalf("did not lift a cheap offer, requests=%d", len(gw.requests))
+	}
+	order := gw.requests[len(gw.requests)-1].OrderReq
+	if order.Side != exchange.Buy || order.TimeInForce != exchange.IOC || order.Price != 49_100*mvQuotePrecision {
+		t.Fatalf("unexpected order %+v", order)
+	}
+
+	// Once the fill takes it to its inventory bound it must stop buying.
+	vt.HandleEvent(context.Background(), &actor.Event{
+		Type: actor.EventOrderFilled,
+		Data: actor.OrderFillEvent{Symbol: "ABC/USD", Side: exchange.Buy, Qty: mvBasePrecision / 10, IsFull: true},
+	})
+	before = len(gw.requests)
+	vt.onTick(now)
+	if len(gw.requests) != before {
+		t.Fatalf("kept buying past the inventory bound: %+v", gw.requests[before:])
 	}
 }

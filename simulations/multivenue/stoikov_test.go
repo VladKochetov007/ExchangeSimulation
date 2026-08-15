@@ -100,8 +100,10 @@ func TestStoikovMarketMakerRequotesAfterInventoryFill(t *testing.T) {
 	})
 	now := time.Unix(10, 0)
 	mm.onTick(now) // subscribes first
-	if len(gw.requests) != 1 || gw.requests[0].Type != etypes.ReqSubscribe {
-		t.Fatalf("initial tick did not subscribe: %+v", gw.requests)
+	// The maker subscribes to snapshots for its forward and to trades for its
+	// volatility estimate.
+	if len(gw.requests) != 2 || gw.requests[0].Type != etypes.ReqSubscribe || gw.requests[1].Type != etypes.ReqSubscribe {
+		t.Fatalf("initial tick did not subscribe to snapshots and trades: %+v", gw.requests)
 	}
 	mm.HandleEvent(context.Background(), &actor.Event{
 		Type: actor.EventBookSnapshot,
@@ -114,10 +116,10 @@ func TestStoikovMarketMakerRequotesAfterInventoryFill(t *testing.T) {
 		},
 	})
 	mm.onTick(now)
-	if len(gw.requests) != 3 {
-		t.Fatalf("quote tick requests = %d, want subscribe + bid + ask", len(gw.requests))
+	if len(gw.requests) != 4 {
+		t.Fatalf("quote tick requests = %d, want two subscribes + bid + ask", len(gw.requests))
 	}
-	bidReq, askReq := gw.requests[1].OrderReq, gw.requests[2].OrderReq
+	bidReq, askReq := gw.requests[2].OrderReq, gw.requests[3].OrderReq
 	if bidReq.Side != exchange.Buy || askReq.Side != exchange.Sell || bidReq.Price >= askReq.Price {
 		t.Fatalf("invalid quote pair: bid=%+v ask=%+v", bidReq, askReq)
 	}
@@ -134,7 +136,7 @@ func TestStoikovMarketMakerRequotesAfterInventoryFill(t *testing.T) {
 		t.Fatalf("inventory = %d, want 100", mm.Inventory())
 	}
 	mm.onTick(now)
-	if len(gw.requests) != 6 || gw.requests[3].Type != etypes.ReqCancelOrder {
+	if len(gw.requests) != 7 || gw.requests[4].Type != etypes.ReqCancelOrder {
 		t.Fatalf("fill must cancel the stale opposite quote and replace pair: %+v", gw.requests)
 	}
 }

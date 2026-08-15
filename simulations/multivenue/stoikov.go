@@ -93,6 +93,12 @@ type StoikovMMConfig struct {
 	// superexponentially in long runs.
 	VolatilityHalfLife       time.Duration
 	InitialLogVariancePerSec float64
+	// MaxLogVarianceMultiple caps the estimate at this multiple of its initial
+	// value. The Avellaneda-Stoikov derivation treats volatility as exogenous;
+	// a maker measuring a book it dominates does not have an exogenous
+	// estimate, so the cap bounds how far a feedback episode can travel before
+	// the estimate mean-reverts.
+	MaxLogVarianceMultiple float64
 	InventoryHorizon         time.Duration
 	RelativeRiskAversion     float64
 	RelativeFillDecay        float64
@@ -144,6 +150,8 @@ func (mm *StoikovMarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
 	switch evt.Type {
 	case actor.EventBookSnapshot:
 		mm.onSnapshot(evt.Data.(actor.BookSnapshotEvent))
+	case actor.EventTrade:
+		mm.onTrade(evt.Data.(actor.TradeEvent))
 	case actor.EventOrderAccepted:
 		mm.onAccepted(evt.Data.(actor.OrderAcceptedEvent))
 	case actor.EventOrderRejected:
@@ -163,20 +171,42 @@ func (mm *StoikovMarketMaker) onSnapshot(e actor.BookSnapshotEvent) {
 	if mid <= 0 {
 		return
 	}
+	mm.forward = mid
+}
+
+// onTrade estimates volatility from executed prices rather than from the
+// maker's own quoted midpoint.
+//
+// A midpoint estimate is self-referential: widening the quote moves the mid,
+// which raises the estimate, which widens the quote again. Trade prints are
+// the prices at which flow actually crossed, so an untraded quote excursion
+// cannot inflate the estimate on its own.
+func (mm *StoikovMarketMaker) onTrade(e actor.TradeEvent) {
+	if e.Symbol != mm.cfg.ReferenceSymbol || e.Trade == nil || e.Trade.Price <= 0 {
+		return
+	}
+	price := e.Trade.Price
 	if mm.lastForward > 0 && e.Timestamp > mm.lastForwardTS {
 		dt := float64(e.Timestamp-mm.lastForwardTS) / float64(time.Second)
-		// Log returns keep the variance estimate scale free, so it measures how
-		// volatile the book is rather than how large its prices are.
-		logReturn := math.Log(float64(mid) / float64(mm.lastForward))
+		logReturn := math.Log(float64(price) / float64(mm.lastForward))
 		if dt > 0 && finite(logReturn) {
 			instantVariance := logReturn * logReturn / dt
 			alpha := ewmaAlpha(dt, mm.cfg.VolatilityHalfLife)
 			mm.logVariancePerSec = (1-alpha)*mm.logVariancePerSec + alpha*instantVariance
+			if cap := mm.maxLogVariance(); cap > 0 && mm.logVariancePerSec > cap {
+				mm.logVariancePerSec = cap
+			}
 		}
 	}
-	mm.forward = mid
-	mm.lastForward = mid
+	mm.lastForward = price
 	mm.lastForwardTS = e.Timestamp
+}
+
+func (mm *StoikovMarketMaker) maxLogVariance() float64 {
+	if mm.cfg.MaxLogVarianceMultiple <= 0 || mm.cfg.InitialLogVariancePerSec <= 0 {
+		return 0
+	}
+	return mm.cfg.InitialLogVariancePerSec * mm.cfg.MaxLogVarianceMultiple
 }
 
 func (mm *StoikovMarketMaker) onAccepted(e actor.OrderAcceptedEvent) {
@@ -238,6 +268,7 @@ func (mm *StoikovMarketMaker) onCancelled(e actor.OrderCancelledEvent) {
 func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 	if !mm.subscribed {
 		mm.Subscribe(mm.cfg.ReferenceSymbol, exchange.MDSnapshot)
+		mm.Subscribe(mm.cfg.ReferenceSymbol, exchange.MDTrade)
 		if mm.cfg.ReferenceSymbol != mm.cfg.Symbol {
 			mm.Subscribe(mm.cfg.Symbol, exchange.MDSnapshot)
 		}
