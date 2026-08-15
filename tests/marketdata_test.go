@@ -244,6 +244,104 @@ func TestMDPublisherMultipleSubscribers(t *testing.T) {
 	}
 }
 
+func TestMDPublisherClonesMutablePayloadPerSubscriber(t *testing.T) {
+	mdp := NewMDPublisher()
+	firstGateway := NewClientGateway(1)
+	secondGateway := NewClientGateway(2)
+	types := []MDType{MDSnapshot}
+	mdp.Subscribe(1, "BTC/USD", types, firstGateway)
+	mdp.Subscribe(2, "BTC/USD", types, secondGateway)
+
+	source := &BookSnapshot{
+		Bids: []PriceLevel{{Price: 50_000, VisibleQty: 10}},
+		Asks: []PriceLevel{{Price: 50_100, VisibleQty: 12}},
+	}
+	mdp.Publish("BTC/USD", MDSnapshot, source, 1)
+
+	first := (<-firstGateway.MarketData).Data.(*BookSnapshot)
+	second := (<-secondGateway.MarketData).Data.(*BookSnapshot)
+	if first == source || second == source || first == second {
+		t.Fatal("each subscriber must receive an independently owned snapshot")
+	}
+
+	first.Bids[0].Price = 1
+	first.Asks[0].VisibleQty = 1
+	if source.Bids[0].Price != 50_000 || source.Asks[0].VisibleQty != 12 {
+		t.Fatal("subscriber mutation must not modify the source snapshot")
+	}
+	if second.Bids[0].Price != 50_000 || second.Asks[0].VisibleQty != 12 {
+		t.Fatal("subscriber mutation must not modify another subscriber's snapshot")
+	}
+}
+
+func TestReconnectDoesNotInheritMarketDataSubscriptions(t *testing.T) {
+	ex := NewExchange(10, &RealClock{})
+	defer ex.Shutdown()
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/1000)
+	ex.AddInstrument(instrument)
+
+	first := ex.ConnectNewClient(1, map[string]int64{"BTC": BTC_PRECISION}, &FixedFee{}).(*ClientGateway)
+	request := &QueryRequest{RequestID: 1, Symbol: "BTC/USD", Types: []MDType{MDSnapshot}}
+	if response := ex.Subscribe(1, request, first); !response.Success {
+		t.Fatalf("first subscription failed: %v", response.Error)
+	}
+	<-first.MarketData // immediate snapshot
+
+	second := ex.ConnectNewClient(1, nil, &FixedFee{}).(*ClientGateway)
+	if first.IsRunning() {
+		t.Fatal("reconnect must retire the prior gateway")
+	}
+	if _, subscribed := ex.MDPublisher.Subscriptions["BTC/USD"]; subscribed {
+		t.Fatal("reconnect must clear the prior session's market-data subscriptions")
+	}
+
+	ex.PublishSnapshot("BTC/USD", 2)
+	select {
+	case message := <-second.MarketData:
+		t.Fatalf("reconnected gateway inherited stale subscription: %#v", message)
+	default:
+	}
+}
+
+func TestStaleGatewayUnsubscribeCannotRemoveReconnectedSubscription(t *testing.T) {
+	ex := NewExchange(10, &RealClock{})
+	defer ex.Shutdown()
+	instrument := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, USD_PRECISION/1000)
+	ex.AddInstrument(instrument)
+
+	first := ex.ConnectNewClient(1, map[string]int64{"BTC": BTC_PRECISION}, &FixedFee{}).(*ClientGateway)
+	request := &QueryRequest{RequestID: 1, Symbol: "BTC/USD", Types: []MDType{MDSnapshot}}
+	if response := ex.Subscribe(1, request, first); !response.Success {
+		t.Fatalf("first subscription failed: %v", response.Error)
+	}
+	<-first.MarketData // immediate snapshot
+
+	second := ex.ConnectNewClient(1, nil, &FixedFee{}).(*ClientGateway)
+	if response := ex.Subscribe(1, request, second); !response.Success {
+		t.Fatalf("reconnected subscription failed: %v", response.Error)
+	}
+	<-second.MarketData // immediate snapshot
+
+	// This models an unsubscribe that was dequeued by the old request loop
+	// before reconnect, but reaches the publisher after the new session wins.
+	ex.Unsubscribe(1, request, first)
+	if len(ex.MDPublisher.Subscriptions["BTC/USD"]) != 1 {
+		t.Fatal("stale gateway unsubscribed the active session")
+	}
+
+	ex.PublishSnapshot("BTC/USD", 2)
+	select {
+	case <-second.MarketData:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("active gateway stopped receiving after stale unsubscribe")
+	}
+
+	ex.Unsubscribe(1, request, second)
+	if _, subscribed := ex.MDPublisher.Subscriptions["BTC/USD"]; subscribed {
+		t.Fatal("active gateway unsubscribe did not remove its subscription")
+	}
+}
+
 func TestPoolCleanup(t *testing.T) {
 	exec := GetExecution()
 	exec.TakerOrderID = 123

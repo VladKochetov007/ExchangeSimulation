@@ -1,6 +1,7 @@
 package marketdata
 
 import (
+	"reflect"
 	"slices"
 	"sync"
 
@@ -37,7 +38,11 @@ type Subscriber interface {
 // MDPublisher fans out market data to subscribed gateways.
 type MDPublisher struct {
 	Subscriptions map[string]map[uint64]*etypes.Subscription
-	gateways      map[uint64]Subscriber
+	// gateways is keyed the same way as Subscriptions. A client can have
+	// different sessions subscribed to different symbols; a client-wide
+	// gateway mapping would redirect every existing symbol to the last
+	// subscriber gateway.
+	gateways map[string]map[uint64]Subscriber
 	mu            sync.Mutex
 	seqNum        uint64
 }
@@ -45,7 +50,7 @@ type MDPublisher struct {
 func NewMDPublisher() *MDPublisher {
 	return &MDPublisher{
 		Subscriptions: make(map[string]map[uint64]*etypes.Subscription),
-		gateways:      make(map[uint64]Subscriber),
+		gateways:      make(map[string]map[uint64]Subscriber),
 	}
 }
 
@@ -55,34 +60,69 @@ func (p *MDPublisher) Subscribe(clientID uint64, symbol string, types []etypes.M
 
 	if p.Subscriptions[symbol] == nil {
 		p.Subscriptions[symbol] = make(map[uint64]*etypes.Subscription)
+		p.gateways[symbol] = make(map[uint64]Subscriber)
 	}
 	p.Subscriptions[symbol][clientID] = &etypes.Subscription{
 		ClientID: clientID,
 		Symbol:   symbol,
-		Types:    types,
+		Types:    slices.Clone(types),
 	}
-	p.gateways[clientID] = gateway
+	p.gateways[symbol][clientID] = gateway
 }
 
-func (p *MDPublisher) Unsubscribe(clientID uint64, symbol string) {
+// Unsubscribe removes a subscription. When gateway is provided, it must be
+// the session that created the subscription; this prevents a delayed request
+// from a replaced gateway from removing a reconnect's subscription.
+//
+// The optional form preserves the direct administrative API, which has no
+// session identity to validate.
+func (p *MDPublisher) Unsubscribe(clientID uint64, symbol string, gateway ...Subscriber) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.Subscriptions[symbol] != nil {
-		delete(p.Subscriptions[symbol], clientID)
-		if len(p.Subscriptions[symbol]) == 0 {
+	subs := p.Subscriptions[symbol]
+	if subs == nil {
+		return
+	}
+	if len(gateway) > 0 && !sameSubscriber(p.gateways[symbol][clientID], gateway[0]) {
+		return
+	}
+
+	delete(subs, clientID)
+	delete(p.gateways[symbol], clientID)
+	if len(subs) == 0 {
+		delete(p.Subscriptions, symbol)
+		delete(p.gateways, symbol)
+	}
+}
+
+// UnsubscribeClient removes every session subscription for a client. Exchange
+// reconnect and disconnect paths use this before replacing or discarding the
+// gateway, so a new connection never inherits symbols from an old one.
+func (p *MDPublisher) UnsubscribeClient(clientID uint64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	for symbol, subs := range p.Subscriptions {
+		delete(subs, clientID)
+		delete(p.gateways[symbol], clientID)
+		if len(subs) == 0 {
 			delete(p.Subscriptions, symbol)
+			delete(p.gateways, symbol)
 		}
 	}
-	// Drop the gateway reference once the client has no subscription left on
-	// any symbol; otherwise a subscribe/unsubscribe cycle leaks the gateway
-	// (and whatever it keeps alive) forever.
-	for _, subs := range p.Subscriptions {
-		if _, stillSubscribed := subs[clientID]; stillSubscribed {
-			return
-		}
+}
+
+func sameSubscriber(left, right Subscriber) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
 	}
-	delete(p.gateways, clientID)
+	leftValue := reflect.ValueOf(left)
+	rightValue := reflect.ValueOf(right)
+	if leftValue.Type() != rightValue.Type() || !leftValue.Type().Comparable() {
+		return false
+	}
+	return leftValue.Interface() == rightValue.Interface()
 }
 
 func containsMDType(types []etypes.MDType, target etypes.MDType) bool {
@@ -124,7 +164,7 @@ func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, tim
 		if !containsMDType(sub.Types, mdType) {
 			continue
 		}
-		gateway := p.gateways[clientID]
+		gateway := p.gateways[symbol][clientID]
 		if gateway != nil {
 			if !gateway.IsRunning() {
 				continue
@@ -134,7 +174,7 @@ func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, tim
 				Symbol:    symbol,
 				SeqNum:    seqNum,
 				Timestamp: timestamp,
-				Data:      data,
+				Data:      cloneMarketDataData(data),
 			}
 			select {
 			case gateway.MarketDataChan() <- msgCopy:
@@ -147,6 +187,47 @@ func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, tim
 		}
 	}
 	p.mu.Unlock()
+}
+
+// cloneMarketDataData gives each subscriber independent ownership of mutable
+// payloads. In particular, snapshots contain mutable slices and trade payloads
+// must not alias OrderBook.LastTrade.
+func cloneMarketDataData(data any) any {
+	switch value := data.(type) {
+	case *etypes.BookSnapshot:
+		if value == nil {
+			return (*etypes.BookSnapshot)(nil)
+		}
+		return &etypes.BookSnapshot{
+			Bids: slices.Clone(value.Bids),
+			Asks: slices.Clone(value.Asks),
+		}
+	case etypes.BookSnapshot:
+		return etypes.BookSnapshot{
+			Bids: slices.Clone(value.Bids),
+			Asks: slices.Clone(value.Asks),
+		}
+	case *etypes.BookDelta:
+		return clonePointer(value)
+	case *etypes.Trade:
+		return clonePointer(value)
+	case *etypes.FundingRate:
+		return clonePointer(value)
+	case *etypes.OpenInterest:
+		return clonePointer(value)
+	case *etypes.InstrumentAnnouncement:
+		return clonePointer(value)
+	default:
+		return data
+	}
+}
+
+func clonePointer[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func (p *MDPublisher) PublishDelta(symbol string, side etypes.Side, price, visible, hidden int64, timestamp int64) {

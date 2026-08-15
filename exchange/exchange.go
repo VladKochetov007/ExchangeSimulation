@@ -654,6 +654,11 @@ func (e *DefaultExchange) ConnectNewClient(clientID uint64, initialBalances map[
 	} else if old := e.Gateways[clientID]; old != nil {
 		old.Close()
 	}
+	if client != nil {
+		// A reconnect starts a new market-data session. Keep account state, but
+		// never carry subscriptions or gateway references from the retired one.
+		e.MDPublisher.UnsubscribeClient(clientID)
+	}
 
 	gateway := NewClientGateway(clientID)
 	if e.deterministicPhases {
@@ -779,6 +784,7 @@ func (e *DefaultExchange) DisconnectClient(clientID uint64) {
 		gateway.Close()
 		delete(e.Gateways, clientID)
 	}
+	e.MDPublisher.UnsubscribeClient(clientID)
 }
 
 // Idle reports whether the exchange has no client request queued or being
@@ -921,7 +927,7 @@ func (e *DefaultExchange) handleClientRequest(gateway *ClientGateway, req Reques
 	case ReqSubscribe:
 		resp = e.Subscribe(gateway.ClientID, req.QueryReq, gateway)
 	case ReqUnsubscribe:
-		resp = e.Unsubscribe(gateway.ClientID, req.QueryReq)
+		resp = e.Unsubscribe(gateway.ClientID, req.QueryReq, gateway)
 	}
 
 	// At-least-once delivery: a dropped accept/reject leaves the actor's
