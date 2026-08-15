@@ -653,27 +653,25 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		*actorID++
 		return *actorID
 	}
-	// quoteScale converts the USD-denominated control parameters to a book
-	// quoted in another currency. Variance is quote-price^2, while risk
-	// aversion and fill decay are reciprocal quote-price, so a book whose
-	// prices are 1/k of the USD scale needs variance/k^2 and both reciprocal
-	// parameters multiplied by k. Converting variance alone leaves the
-	// inventory term k^2 too small, which pins the quote and turns the maker
-	// into a static quoter.
-	stoikovConfigScaled := func(symbol, reference string, bootstrapPrice, quotePrecision, tickSize int64, quoteScale float64) StoikovMMConfig {
+	// The configured Stoikov parameters are USD-denominated at the ABC/USD
+	// reference price. Convert them once into the scale-free form the control
+	// law uses, so every book — including one quoted in CDF — is described by
+	// the same relative parameters.
+	referencePrice := float64(mvBootstrapPrice) / float64(mvQuotePrecision)
+	relativeRiskAversion := s.Config.StoikovRiskAversion * referencePrice
+	relativeFillDecay := s.Config.StoikovFillDecay * referencePrice
+	relativeLogVariance := s.Config.StoikovVariancePerSecond / (referencePrice * referencePrice)
+	stoikovConfig := func(symbol, reference string, bootstrapPrice, quotePrecision, tickSize int64) StoikovMMConfig {
 		return StoikovMMConfig{
 			Symbol: symbol, ReferenceSymbol: reference, BootstrapPrice: bootstrapPrice,
 			BasePrecision: mvBasePrecision, QuotePrecision: quotePrecision, TickSize: tickSize, QuoteQty: mvBasePrecision / 5,
 			QuoteInterval: s.Config.QuoteInterval, VolatilityHalfLife: s.Config.StoikovVolatilityHalfLife,
-			InitialVariancePerSec: s.Config.StoikovVariancePerSecond / (quoteScale * quoteScale),
-			InventoryHorizon:      s.Config.StoikovInventoryHorizon,
-			RiskAversion:          s.Config.StoikovRiskAversion * quoteScale,
-			FillDecay:             s.Config.StoikovFillDecay * quoteScale,
-			MinHalfSpreadTicks:    1,
+			InitialLogVariancePerSec: relativeLogVariance,
+			InventoryHorizon:         s.Config.StoikovInventoryHorizon,
+			RelativeRiskAversion:     relativeRiskAversion,
+			RelativeFillDecay:        relativeFillDecay,
+			MinHalfSpreadTicks:       1,
 		}
-	}
-	stoikovConfig := func(symbol, reference string, bootstrapPrice, quotePrecision, tickSize int64) StoikovMMConfig {
-		return stoikovConfigScaled(symbol, reference, bootstrapPrice, quotePrecision, tickSize, 1)
 	}
 	for i := 0; i < 2; i++ {
 		maker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC/USD", "ABC/USD", mvBootstrapPrice, mvQuotePrecision, tick))
@@ -684,15 +682,11 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		cdfTick := int64(mvQuotePrecision)
 		crossTick := int64(mvBasePrecision / 1_000)
 		crossBootstrap := etypes.MulDiv(mvBootstrapPrice, mvBasePrecision, mvCDFBootstrap)
-		// Under the frozen-CDF control, ABC/CDF = ABC/USD / CDF/USD, so the
-		// cross book's prices are 1/cdfUSD of the USD scale. Every
-		// quote-denominated control parameter is converted with that factor.
-		cdfUSD := float64(mvCDFBootstrap) / float64(mvQuotePrecision)
 		for i := 0; i < 2; i++ {
 			cdfMaker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("cdf_spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("CDF/USD", "CDF/USD", mvCDFBootstrap, mvQuotePrecision, cdfTick))
 			cdfMaker.SetTickerFactory(timers)
 			venue.SpotMakers = append(venue.SpotMakers, cdfMaker)
-			crossMaker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("abc_cdf_spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfigScaled("ABC/CDF", "ABC/CDF", crossBootstrap, mvBasePrecision, crossTick, cdfUSD))
+			crossMaker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("abc_cdf_spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC/CDF", "ABC/CDF", crossBootstrap, mvBasePrecision, crossTick))
 			crossMaker.SetTickerFactory(timers)
 			venue.SpotMakers = append(venue.SpotMakers, crossMaker)
 		}

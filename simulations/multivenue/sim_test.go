@@ -154,15 +154,20 @@ func TestCrossAssetSpotGraphListsAndValuesEveryPair(t *testing.T) {
 			if maker.cfg.QuotePrecision != mvBasePrecision {
 				t.Fatalf("venue %s ABC/CDF quote precision = %d, want %d", venue.ID, maker.cfg.QuotePrecision, mvBasePrecision)
 			}
-			wantVariance := sim.Config.StoikovVariancePerSecond / 9_000_000
-			if math.Abs(maker.cfg.InitialVariancePerSec-wantVariance) > 1e-15 {
-				t.Fatalf("venue %s ABC/CDF variance = %.18g, want %.18g", venue.ID, maker.cfg.InitialVariancePerSec, wantVariance)
+			// The control parameters are scale free, so the cross book carries
+			// exactly the same relative variance and risk parameters as the
+			// USD books rather than a per-pair converted copy.
+			referencePrice := float64(mvBootstrapPrice) / float64(mvQuotePrecision)
+			wantVariance := sim.Config.StoikovVariancePerSecond / (referencePrice * referencePrice)
+			if math.Abs(maker.cfg.InitialLogVariancePerSec-wantVariance) > 1e-18 {
+				t.Fatalf("venue %s ABC/CDF log variance = %.18g, want %.18g", venue.ID, maker.cfg.InitialLogVariancePerSec, wantVariance)
 			}
+			forward := float64(maker.cfg.BootstrapPrice) / float64(maker.cfg.QuotePrecision)
 			quote, ok := CalculateStoikovQuote(StoikovInputs{
-				Forward:           float64(maker.cfg.BootstrapPrice) / float64(maker.cfg.QuotePrecision),
-				VariancePerSecond: maker.cfg.InitialVariancePerSec,
-				RiskAversion:      maker.cfg.RiskAversion,
-				FillDecay:         maker.cfg.FillDecay,
+				Forward:           forward,
+				VariancePerSecond: maker.cfg.InitialLogVariancePerSec * forward * forward,
+				RiskAversion:      maker.cfg.RelativeRiskAversion / forward,
+				FillDecay:         maker.cfg.RelativeFillDecay / forward,
 				InventoryHorizon:  maker.cfg.InventoryHorizon,
 				MinHalfSpread:     float64(maker.cfg.TickSize) / float64(maker.cfg.QuotePrecision),
 			})
@@ -731,9 +736,9 @@ func TestCrossPairStoikovControlIsQuoteScaleInvariant(t *testing.T) {
 		quote, ok := CalculateStoikovQuote(StoikovInputs{
 			Forward:           forward,
 			Inventory:         inventory,
-			VariancePerSecond: cfg.InitialVariancePerSec,
-			RiskAversion:      cfg.RiskAversion,
-			FillDecay:         cfg.FillDecay,
+			VariancePerSecond: cfg.InitialLogVariancePerSec * forward * forward,
+			RiskAversion:      cfg.RelativeRiskAversion / forward,
+			FillDecay:         cfg.RelativeFillDecay / forward,
 			InventoryHorizon:  cfg.InventoryHorizon,
 		})
 		if !ok {
@@ -778,5 +783,48 @@ func TestCrossPairStoikovControlIsQuoteScaleInvariant(t *testing.T) {
 	tick := float64(cross.TickSize) / float64(cross.QuotePrecision)
 	if got := crossShift * crossPrice * lot; got < tick {
 		t.Fatalf("one-lot inventory skew %.18g CDF is below one tick %.18g: maker cannot reprice", got, tick)
+	}
+}
+
+// Regression: the market-making control must not bootstrap its own volatility.
+//
+// The variance estimator originally measured absolute price changes of the
+// maker's own reference mid. Any move widened the quote, which produced a
+// larger move, which raised the variance again. In a 90-minute run the north
+// ABC/USD book held ~50,000 USD for 650 seconds and then went 52,060 ->
+// 41,000,000 USD in seven seconds, after which every bid was rejected for
+// insufficient balance and the book stayed one-sided for the rest of the run.
+//
+// Log-return variance with relative risk parameters is scale invariant, so a
+// price level cannot feed back into the width of the quote around it.
+func TestSpotBookStaysAnchoredPastVarianceFeedbackHorizon(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-horizon stability run")
+	}
+	sim, err := NewSim(20*time.Minute, Config{
+		LogDir:  t.TempDir(),
+		LogMode: "none",
+		Seed:    91,
+	})
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	defer sim.Close()
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	const bootstrap = float64(mvBootstrapPrice) / float64(mvQuotePrecision)
+	for _, venue := range sim.Venues {
+		mid, ok := venue.Exchange.TwoSidedMidPrice("ABC/USD")
+		if !ok {
+			t.Fatalf("venue %s ABC/USD is not two-sided after 20 simulated minutes", venue.ID)
+		}
+		price := float64(mid) / float64(mvQuotePrecision)
+		// A wide but finite band: this asserts the absence of runaway feedback,
+		// not a particular price path.
+		if price < bootstrap/2 || price > bootstrap*2 {
+			t.Fatalf("venue %s ABC/USD mid %.2f left the stability band around %.2f", venue.ID, price, bootstrap)
+		}
 	}
 }

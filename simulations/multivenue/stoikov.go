@@ -80,12 +80,23 @@ type StoikovMMConfig struct {
 	QuoteQty        int64
 	QuoteInterval   time.Duration
 
-	VolatilityHalfLife    time.Duration
-	InitialVariancePerSec float64
-	InventoryHorizon      time.Duration
-	RiskAversion          float64
-	FillDecay             float64
-	MinHalfSpreadTicks    int64
+	// The control parameters are relative (scale free): variance is of log
+	// returns, and risk aversion and fill decay are dimensionless. The maker
+	// converts them to the absolute quote units the Avellaneda-Stoikov formula
+	// expects using the current forward, so the same parameters describe the
+	// same behaviour on any book regardless of its price scale or quote
+	// currency.
+	//
+	// Absolute-price variance estimated from the maker's own reference mid is
+	// not usable here: a price move raises the variance estimate, which widens
+	// the quote, which produces a larger move. That loop diverged
+	// superexponentially in long runs.
+	VolatilityHalfLife       time.Duration
+	InitialLogVariancePerSec float64
+	InventoryHorizon         time.Duration
+	RelativeRiskAversion     float64
+	RelativeFillDecay        float64
+	MinHalfSpreadTicks       int64
 }
 
 type quoteSide bool
@@ -105,7 +116,7 @@ type StoikovMarketMaker struct {
 	forward            int64
 	lastForward        int64
 	lastForwardTS      int64
-	variancePerSec     float64
+	logVariancePerSec  float64
 	inventory          int64
 	bidID, askID       uint64
 	bidPrice, askPrice int64
@@ -118,7 +129,7 @@ func NewStoikovMarketMaker(id uint64, gw actor.Gateway, cfg StoikovMMConfig) *St
 		BaseActor:      actor.NewBaseActor(id, gw),
 		cfg:            cfg,
 		forward:        cfg.BootstrapPrice,
-		variancePerSec: cfg.InitialVariancePerSec,
+		logVariancePerSec: cfg.InitialLogVariancePerSec,
 		pending:        make(map[uint64]quoteSide),
 	}
 	mm.SetHandler(mm)
@@ -127,7 +138,7 @@ func NewStoikovMarketMaker(id uint64, gw actor.Gateway, cfg StoikovMMConfig) *St
 }
 
 func (mm *StoikovMarketMaker) Inventory() int64           { return mm.inventory }
-func (mm *StoikovMarketMaker) VariancePerSecond() float64 { return mm.variancePerSec }
+func (mm *StoikovMarketMaker) LogVariancePerSecond() float64 { return mm.logVariancePerSec }
 
 func (mm *StoikovMarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
 	switch evt.Type {
@@ -152,13 +163,15 @@ func (mm *StoikovMarketMaker) onSnapshot(e actor.BookSnapshotEvent) {
 	if mid <= 0 {
 		return
 	}
-	if mm.lastForward > 0 && e.Timestamp > mm.lastForwardTS && mm.cfg.QuotePrecision > 0 {
+	if mm.lastForward > 0 && e.Timestamp > mm.lastForwardTS {
 		dt := float64(e.Timestamp-mm.lastForwardTS) / float64(time.Second)
-		if dt > 0 {
-			change := float64(mid-mm.lastForward) / float64(mm.cfg.QuotePrecision)
-			instantVariance := change * change / dt
+		// Log returns keep the variance estimate scale free, so it measures how
+		// volatile the book is rather than how large its prices are.
+		logReturn := math.Log(float64(mid) / float64(mm.lastForward))
+		if dt > 0 && finite(logReturn) {
+			instantVariance := logReturn * logReturn / dt
 			alpha := ewmaAlpha(dt, mm.cfg.VolatilityHalfLife)
-			mm.variancePerSec = (1-alpha)*mm.variancePerSec + alpha*instantVariance
+			mm.logVariancePerSec = (1-alpha)*mm.logVariancePerSec + alpha*instantVariance
 		}
 	}
 	mm.forward = mid
@@ -238,12 +251,22 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 	if forward <= 0 {
 		forward = mm.cfg.BootstrapPrice
 	}
+	// Convert the relative parameters into the absolute quote units the
+	// formula expects. Variance is quote-price^2 and both risk aversion and
+	// fill decay are reciprocal quote-price, so with forward F:
+	//   sigma^2 = logVariance * F^2, gamma = gammaRel / F, kappa = kappaRel / F.
+	// Every price-scaled factor then cancels and the resulting quote is a fixed
+	// fraction of F for a given inventory fraction.
+	forwardPrice := float64(forward) / float64(mm.cfg.QuotePrecision)
+	if !finite(forwardPrice) || forwardPrice <= 0 {
+		return
+	}
 	quote, ok := CalculateStoikovQuote(StoikovInputs{
-		Forward:           float64(forward) / float64(mm.cfg.QuotePrecision),
+		Forward:           forwardPrice,
 		Inventory:         float64(mm.inventory) / float64(mm.cfg.BasePrecision),
-		VariancePerSecond: mm.variancePerSec,
-		RiskAversion:      mm.cfg.RiskAversion,
-		FillDecay:         mm.cfg.FillDecay,
+		VariancePerSecond: mm.logVariancePerSec * forwardPrice * forwardPrice,
+		RiskAversion:      mm.cfg.RelativeRiskAversion / forwardPrice,
+		FillDecay:         mm.cfg.RelativeFillDecay / forwardPrice,
 		InventoryHorizon:  mm.cfg.InventoryHorizon,
 		MinHalfSpread:     float64(mm.cfg.MinHalfSpreadTicks*mm.cfg.TickSize) / float64(mm.cfg.QuotePrecision),
 	})

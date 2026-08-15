@@ -95,8 +95,8 @@ func TestStoikovMarketMakerRequotesAfterInventoryFill(t *testing.T) {
 		Symbol: "ABC/USD", ReferenceSymbol: "ABC/USD", BootstrapPrice: 100_000,
 		BasePrecision: 1_000, QuotePrecision: 1_000, TickSize: 10, QuoteQty: 100,
 		QuoteInterval: time.Second, VolatilityHalfLife: time.Minute,
-		InitialVariancePerSec: 1, InventoryHorizon: time.Minute,
-		RiskAversion: 0.01, FillDecay: 2, MinHalfSpreadTicks: 1,
+		InitialLogVariancePerSec: 1.0 / (100.0 * 100.0), InventoryHorizon: time.Minute,
+		RelativeRiskAversion: 0.01 * 100, RelativeFillDecay: 2 * 100, MinHalfSpreadTicks: 1,
 	})
 	now := time.Unix(10, 0)
 	mm.onTick(now) // subscribes first
