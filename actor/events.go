@@ -19,6 +19,8 @@ const (
 	// EventInstrument carries listing/settlement announcements from the
 	// exchange's reference-data feed (subscribe to InstrumentFeedSymbol).
 	EventInstrument
+	// EventIndex carries the venue's published index price.
+	EventIndex
 	EventBalanceUpdate
 	EventAccountUpdate
 )
@@ -71,6 +73,13 @@ type OrderCancelRejectedEvent struct {
 type TradeEvent struct {
 	Symbol    string
 	Trade     *exchange.Trade
+	Timestamp int64
+}
+
+// IndexEvent is the venue's published reference price for a symbol.
+type IndexEvent struct {
+	Symbol    string
+	Price     int64
 	Timestamp int64
 }
 

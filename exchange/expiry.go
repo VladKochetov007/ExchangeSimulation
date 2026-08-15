@@ -138,10 +138,28 @@ func (e *DefaultExchange) UpdateDerivativeMarks() {
 			opt.SetMarks(underlyingPrice, mark)
 		}
 	}
+	e.publishIndexFeeds(now)
 	if e.postDerivativeMarkHook != nil {
 		// The hook sees a complete fresh mark set and precedes any same-timestamp
 		// expiry. It must remain read-only because it runs outside e.mu.
 		e.postDerivativeMarkHook()
+	}
+}
+
+// publishIndexFeeds publishes the venue's reference price for each configured
+// symbol. A venue publishing an index is not a convenience: it is the only
+// public reference a participant has that is not derived from the book it is
+// quoting into, so without it every price-setter can only observe itself.
+func (e *DefaultExchange) publishIndexFeeds(now int64) {
+	if e.indexFeedProvider == nil || len(e.indexFeedSymbols) == 0 {
+		return
+	}
+	for _, symbol := range e.indexFeedSymbols {
+		price := e.indexFeedProvider.Price(symbol)
+		if price <= 0 {
+			continue
+		}
+		e.MDPublisher.Publish(symbol, MDIndex, &IndexPrice{Symbol: symbol, Price: price, Timestamp: now}, now)
 	}
 }
 

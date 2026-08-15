@@ -93,6 +93,16 @@ type Config struct {
 	// degeneracy is the large-tick regime.
 	SpotTickQuoteUnits int64 `json:"spot_tick_quote_units"`
 
+	// MakerAnchor selects what the spot makers quote around: "own_mid" is the
+	// book midpoint they themselves set, "consensus" is the median of the
+	// venues' midpoints published as each venue's index, and "fundamental"
+	// publishes the exogenous value itself as the index. The last is not
+	// realistic — no venue knows value — but it bounds what any anchor could
+	// achieve.
+	MakerAnchor string `json:"maker_anchor"`
+	// MakerIndexWeight blends the index with the maker's own midpoint.
+	MakerIndexWeight float64 `json:"maker_index_weight"`
+
 	// MispricingBandBps is the deviation from fundamental value beyond which a
 	// sample counts as visibly mispriced in the run summary.
 	MispricingBandBps int64 `json:"mispricing_band_bps"`
@@ -170,6 +180,11 @@ func (c *Config) normalize() error {
 	if c.LogMode == "" {
 		c.LogMode = "full"
 	}
+	switch c.MakerAnchor {
+	case "", "own_mid", "consensus", "fundamental":
+	default:
+		return fmt.Errorf("multivenue: maker anchor must be own_mid, consensus or fundamental, got %q", c.MakerAnchor)
+	}
 	if c.LogMode != "full" && c.LogMode != "none" {
 		return fmt.Errorf("multivenue: log mode must be full or none, got %q", c.LogMode)
 	}
@@ -232,6 +247,12 @@ func (c *Config) normalize() error {
 	}
 	if c.SpotTickQuoteUnits == 0 {
 		c.SpotTickQuoteUnits = 10 * mvQuotePrecision
+	}
+	if c.MakerAnchor == "" {
+		c.MakerAnchor = "own_mid"
+	}
+	if c.MakerIndexWeight == 0 {
+		c.MakerIndexWeight = 1
 	}
 	if c.MispricingBandBps == 0 {
 		c.MispricingBandBps = 100
@@ -329,7 +350,7 @@ func (c *Config) normalize() error {
 		c.NoiseInterval <= 0 || c.GreekInterval <= 0 || c.ShortOptionTenor <= 0 || c.LongOptionTenor <= 0 ||
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 || *c.ValueTraderCount < 0 ||
-		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 ||
+		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || *c.OptionBuyProbability < 0 || *c.OptionBuyProbability > 1 {
@@ -454,6 +475,7 @@ type Sim struct {
 	Venues           []*Venue
 	Routers          []*CrossVenueArb
 	Fundamental      *FundamentalValue
+	SpotIndex        *spotIndexProvider
 	InitialAccounts  []ParticipantAccountSnapshot
 	TerminalAccounts []ParticipantAccountSnapshot
 	loggers          []*feesim.JSONLinesLogger
@@ -596,7 +618,8 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	// the same asset, so they must trade against the same exogenous value.
 	fundamental := NewFundamentalValue(cfg.Seed, start, mvBootstrapPrice,
 		int64(cfg.AutomationInterval), mvQuotePrecision, cfg.FundamentalLogVolPerStep)
-	sim := &Sim{Config: cfg, Runner: runner, Fundamental: fundamental, Venues: make([]*Venue, 0, len(cfg.VenueIDs))}
+	sim := &Sim{Config: cfg, Runner: runner, Fundamental: fundamental,
+		SpotIndex: newSpotIndexProvider(cfg.MakerAnchor, "ABC/USD"), Venues: make([]*Venue, 0, len(cfg.VenueIDs))}
 	actorID := uint64(0)
 	for venueIndex, id := range cfg.VenueIDs {
 		venue, err := sim.addVenue(id, venueIndex, clock, timers, &actorID)
@@ -735,8 +758,17 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		fundamentalLog:   fundamentalLog,
 		Mispricing:       newMispricingStats(id, "ABC/USD", s.Config.MispricingBandBps),
 		Microstructure:   newMicrostructureStats(id, "ABC/USD", tick, s.Config.AutomationInterval.Seconds())}
+	// The venue advertises the scenario's reference price while still marking
+	// its own derivatives from its own book. With own_mid anchoring there is
+	// nothing to advertise: the makers already observe the book directly.
+	indexFeedSymbols := []string(nil)
+	if s.Config.MakerAnchor != "own_mid" {
+		indexFeedSymbols = []string{"ABC/USD"}
+	}
 	ex.ConfigureAutomation(exchange.AutomationConfig{
 		IndexProvider:       index,
+		IndexFeedSymbols:    indexFeedSymbols,
+		IndexFeedProvider:   s.SpotIndex,
 		PriceUpdateInterval: s.Config.AutomationInterval,
 		ListingPolicies: []exchange.ListingPolicy{
 			&instrument.DatedFuturesLister{Underlying: "ABC/USD", Spec: spec, TenorsNano: []int64{s.Config.ShortFutureTenor.Nanoseconds(), s.Config.LongFutureTenor.Nanoseconds()}},
@@ -763,6 +795,10 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			venue.recordTwoSidedMarks(valuedSpotSymbols(s.Config.CrossAssetSpotGraph), now)
 			mark, _, _ := venue.valuationMark("ABC/USD", now, venueRiskMarkStaleness)
 			fundamental := s.Fundamental.Value(now)
+			s.SpotIndex.observeFundamental(fundamental)
+			if mid, ok := venue.Exchange.TwoSidedMidPrice("ABC/USD"); ok {
+				s.SpotIndex.observeVenueMid(venue.ID, mid)
+			}
 			venue.Mispricing.observe(now, mark, fundamental)
 			venue.logFundamental(now, fundamental, mark)
 			venue.logMakerState(now)
@@ -815,6 +851,8 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			RelativeRiskAversion:     relativeRiskAversion,
 			RelativeFillDecay:        relativeFillDecay,
 			MinHalfSpreadTicks:       1,
+			AnchorToIndex:            s.Config.MakerAnchor != "own_mid",
+			IndexWeight:              s.Config.MakerIndexWeight,
 		}
 	}
 	for i := 0; i < 2; i++ {

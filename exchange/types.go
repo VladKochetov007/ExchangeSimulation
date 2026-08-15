@@ -39,6 +39,7 @@ type Subscription = etypes.Subscription
 type Execution = etypes.Execution
 type Fee = etypes.Fee
 type FundingRate = etypes.FundingRate
+type IndexPrice = etypes.IndexPrice
 type OpenInterest = etypes.OpenInterest
 type Position = etypes.Position
 type MarginCallEvent = etypes.MarginCallEvent
@@ -137,6 +138,7 @@ const (
 
 const (
 	MDSnapshot     = etypes.MDSnapshot
+	MDIndex        = etypes.MDIndex
 	MDDelta        = etypes.MDDelta
 	MDTrade        = etypes.MDTrade
 	MDFunding      = etypes.MDFunding

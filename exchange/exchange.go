@@ -39,6 +39,13 @@ type AutomationConfig struct {
 
 	// IndexProvider provides index prices for perpetuals (required for price updates)
 	IndexProvider PriceSource
+	// IndexFeedSymbols are published on the public MDIndex feed at each price
+	// update, the way a venue publishes an index alongside its books.
+	IndexFeedSymbols []string
+	// IndexFeedProvider prices those symbols. It is separate from
+	// IndexProvider because the reference a venue advertises need not be the
+	// one it marks its own derivatives with. Defaults to IndexProvider.
+	IndexFeedProvider PriceSource
 
 	// PriceUpdateInterval is how often to update funding rates (default: 3s)
 	PriceUpdateInterval time.Duration
@@ -150,6 +157,8 @@ type DefaultExchange struct {
 	markPriceCalc           MarkPriceCalculator
 	markPriceCalcs          map[string]MarkPriceCalculator
 	indexProvider           PriceSource
+	indexFeedSymbols        []string
+	indexFeedProvider       PriceSource
 	priceUpdateInterval     time.Duration
 	listingPolicies         []etypes.ListingPolicy
 	preExpiryHook           func()
@@ -1174,6 +1183,11 @@ func (e *DefaultExchange) ConfigureAutomation(config AutomationConfig) {
 		e.markPriceCalcs = make(map[string]MarkPriceCalculator)
 	}
 	e.indexProvider = config.IndexProvider
+	e.indexFeedSymbols = slices.Clone(config.IndexFeedSymbols)
+	e.indexFeedProvider = config.IndexFeedProvider
+	if e.indexFeedProvider == nil {
+		e.indexFeedProvider = config.IndexProvider
+	}
 	e.priceUpdateInterval = config.PriceUpdateInterval
 	e.CollateralRate = config.CollateralRate
 	e.LiquidationFeeBps = config.LiquidationFeeBps

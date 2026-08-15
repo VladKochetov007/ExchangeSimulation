@@ -169,6 +169,10 @@ const (
 	// MDInstrument carries instrument lifecycle announcements (listing,
 	// settlement) on the reserved feed symbol InstrumentFeedSymbol.
 	MDInstrument
+	// MDIndex carries the venue's published index price for a symbol. Real
+	// venues publish one, and it is the only public reference a participant has
+	// that is not derived from the book it is quoting into.
+	MDIndex
 )
 
 type MarginMode uint8

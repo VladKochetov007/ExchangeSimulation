@@ -61,6 +61,13 @@ type Subscription struct {
 	Types    []MDType `json:"types"`
 }
 
+// IndexPrice is a venue's published reference price for a symbol.
+type IndexPrice struct {
+	Symbol    string `json:"symbol"`
+	Price     int64  `json:"price"`
+	Timestamp int64  `json:"timestamp"`
+}
+
 type FundingRate struct {
 	Symbol      string `json:"symbol"`
 	Rate        int64  `json:"rate"`

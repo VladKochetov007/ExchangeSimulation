@@ -529,6 +529,12 @@ func (a *BaseActor) decodeMarketData(md *exchange.MarketDataMsg) *Event {
 				Timestamp:    md.Timestamp,
 			},
 		}
+	case exchange.MDIndex:
+		index := md.Data.(*exchange.IndexPrice)
+		return &Event{
+			Type: EventIndex,
+			Data: IndexEvent{Symbol: index.Symbol, Price: index.Price, Timestamp: md.Timestamp},
+		}
 	case exchange.MDInstrument:
 		return &Event{
 			Type: EventInstrument,

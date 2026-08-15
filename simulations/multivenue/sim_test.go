@@ -1115,3 +1115,59 @@ func TestMetaorderParticipationExcludesOwnVolume(t *testing.T) {
 		t.Fatalf("child quantity = %d, want the configured floor", got)
 	}
 }
+
+// The maker anchor selects what the spot makers quote around. Anchoring to a
+// published index is what stops the book midpoint from reproducing itself.
+func TestMakerAnchorSelectsTheQuotedReference(t *testing.T) {
+	for _, testCase := range []struct {
+		anchor      string
+		wantIndex   bool
+		wantFeeds   int
+	}{
+		{anchor: "own_mid", wantIndex: false, wantFeeds: 0},
+		{anchor: "consensus", wantIndex: true, wantFeeds: 1},
+		{anchor: "fundamental", wantIndex: true, wantFeeds: 1},
+	} {
+		sim, err := NewSim(time.Second, Config{
+			LogDir: t.TempDir(), LogMode: "none", Seed: 91, MakerAnchor: testCase.anchor,
+		})
+		if err != nil {
+			t.Fatalf("NewSim(%s): %v", testCase.anchor, err)
+		}
+		for _, venue := range sim.Venues {
+			for _, maker := range venue.SpotMakers {
+				if maker.cfg.Symbol != "ABC/USD" {
+					continue
+				}
+				if maker.cfg.AnchorToIndex != testCase.wantIndex {
+					sim.Close()
+					t.Fatalf("%s: maker anchor to index = %v, want %v", testCase.anchor, maker.cfg.AnchorToIndex, testCase.wantIndex)
+				}
+			}
+		}
+		sim.Close()
+	}
+
+	if _, err := NewSim(time.Second, Config{LogDir: t.TempDir(), LogMode: "none", Seed: 91, MakerAnchor: "nonsense"}); err == nil {
+		t.Fatal("an unknown anchor must be rejected")
+	}
+}
+
+// The consensus index is a median of the venues' midpoints and must ignore a
+// single venue that has run away, which is the property that lets it hold a
+// market that cannot hold itself.
+func TestConsensusIndexIsRobustToOneRunawayVenue(t *testing.T) {
+	provider := newSpotIndexProvider("consensus", "ABC/USD")
+	if got := provider.Price("ABC/USD"); got != 0 {
+		t.Fatalf("index without observations = %d, want 0", got)
+	}
+	provider.observeVenueMid("north", 50_000)
+	provider.observeVenueMid("central", 50_100)
+	provider.observeVenueMid("south", 5_000_000)
+	if got := provider.Price("ABC/USD"); got != 50_100 {
+		t.Fatalf("consensus = %d, want the median 50100", got)
+	}
+	if got := provider.Price("OTHER/USD"); got != 0 {
+		t.Fatalf("index for an unpublished symbol = %d, want 0", got)
+	}
+}

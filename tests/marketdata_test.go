@@ -416,3 +416,27 @@ func TestSubscribeAddsFeedsRatherThanReplacingThem(t *testing.T) {
 		t.Fatalf("expected both feeds, received %v", received)
 	}
 }
+
+// A venue publishes an index so participants have a public reference that is
+// not derived from the book they quote into. Without it, price setters can
+// only observe themselves.
+func TestIndexFeedIsPublishedToSubscribers(t *testing.T) {
+	publisher := NewMDPublisher()
+	gateway := NewClientGateway(1)
+	publisher.Subscribe(1, "BTC/USD", []MDType{MDIndex}, gateway)
+
+	publisher.Publish("BTC/USD", MDIndex, &IndexPrice{Symbol: "BTC/USD", Price: 12_345, Timestamp: 7}, 7)
+
+	select {
+	case msg := <-gateway.MarketData:
+		if msg.Type != MDIndex {
+			t.Fatalf("unexpected feed type %v", msg.Type)
+		}
+		index, ok := msg.Data.(*IndexPrice)
+		if !ok || index.Price != 12_345 {
+			t.Fatalf("unexpected index payload %#v", msg.Data)
+		}
+	default:
+		t.Fatal("index subscriber received nothing")
+	}
+}

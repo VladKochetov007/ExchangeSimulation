@@ -111,6 +111,16 @@ type StoikovMMConfig struct {
 	RelativeRiskAversion     float64
 	RelativeFillDecay        float64
 	MinHalfSpreadTicks       int64
+	// AnchorToIndex quotes around the venue's published index instead of the
+	// maker's own book midpoint. Quoting around its own midpoint makes the
+	// midpoint reproduce itself: the price becomes a self-referential random
+	// walk with no restoring force, and it wanders arbitrarily far from value
+	// once informed participants reach their inventory bounds.
+	AnchorToIndex bool
+	// IndexWeight blends the index with the book midpoint, 1 meaning the index
+	// alone. A partial weight lets the book discover price while still being
+	// tethered.
+	IndexWeight float64
 }
 
 type quoteSide bool
@@ -128,6 +138,7 @@ type StoikovMarketMaker struct {
 	cfg StoikovMMConfig
 
 	forward            int64
+	indexPrice         int64
 	lastForward        int64
 	lastForwardTS      int64
 	logVariancePerSec  float64
@@ -160,6 +171,11 @@ func (mm *StoikovMarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
 		mm.onSnapshot(evt.Data.(actor.BookSnapshotEvent))
 	case actor.EventTrade:
 		mm.onTrade(evt.Data.(actor.TradeEvent))
+	case actor.EventIndex:
+		e := evt.Data.(actor.IndexEvent)
+		if e.Symbol == mm.cfg.ReferenceSymbol && e.Price > 0 {
+			mm.indexPrice = e.Price
+		}
 	case actor.EventOrderAccepted:
 		mm.onAccepted(evt.Data.(actor.OrderAcceptedEvent))
 	case actor.EventOrderRejected:
@@ -280,6 +296,9 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 	if !mm.subscribed {
 		mm.Subscribe(mm.cfg.ReferenceSymbol, exchange.MDSnapshot)
 		mm.Subscribe(mm.cfg.ReferenceSymbol, exchange.MDTrade)
+		if mm.cfg.AnchorToIndex {
+			mm.Subscribe(mm.cfg.ReferenceSymbol, exchange.MDIndex)
+		}
 		if mm.cfg.ReferenceSymbol != mm.cfg.Symbol {
 			mm.Subscribe(mm.cfg.Symbol, exchange.MDSnapshot)
 		}
@@ -289,10 +308,7 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 	if len(mm.pending) != 0 || mm.cfg.BasePrecision <= 0 || mm.cfg.QuotePrecision <= 0 || mm.cfg.TickSize <= 0 || mm.cfg.QuoteQty <= 0 {
 		return
 	}
-	forward := mm.forward
-	if forward <= 0 {
-		forward = mm.cfg.BootstrapPrice
-	}
+	forward := mm.referencePrice()
 	// Convert the relative parameters into the absolute quote units the
 	// formula expects. Variance is quote-price^2 and both risk aversion and
 	// fill decay are reciprocal quote-price, so with forward F:
@@ -336,6 +352,26 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 	mm.pending[bidRequest] = stoikovBid
 	askRequest := mm.SubmitOrder(mm.cfg.Symbol, exchange.Sell, exchange.LimitOrder, ask, mm.cfg.QuoteQty)
 	mm.pending[askRequest] = stoikovAsk
+}
+
+// referencePrice is what the maker quotes around.
+func (mm *StoikovMarketMaker) referencePrice() int64 {
+	book := mm.forward
+	if book <= 0 {
+		book = mm.cfg.BootstrapPrice
+	}
+	if !mm.cfg.AnchorToIndex || mm.indexPrice <= 0 {
+		return book
+	}
+	weight := mm.cfg.IndexWeight
+	if weight <= 0 || weight > 1 {
+		weight = 1
+	}
+	blended := weight*float64(mm.indexPrice) + (1-weight)*float64(book)
+	if !finite(blended) || blended <= 0 {
+		return book
+	}
+	return int64(blended)
 }
 
 func ewmaAlpha(dt float64, halfLife time.Duration) float64 {
