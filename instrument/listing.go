@@ -19,8 +19,9 @@ type ContractSpec struct {
 
 // DatedFuturesLister maintains a ladder of dated futures on one underlying:
 // whenever fewer than len(TenorsNano) unexpired contracts exist, it lists a
-// new contract at now+tenor for each missing tenor, aligned to TenorsNano[0]
-// boundaries so consecutive listings form a regular calendar.
+// new contract with exactly the configured tenor remaining. A fresh generation
+// is created only after the preceding one reaches expiry, so TenorsNano is a
+// contract lifetime rather than an epoch-dependent calendar approximation.
 type DatedFuturesLister struct {
 	Underlying string // spot symbol, e.g. "ABC/USD"
 	Spec       ContractSpec
@@ -31,21 +32,24 @@ type DatedFuturesLister struct {
 	// ObservationWindowNano overrides the settlement TWAP window when > 0.
 	ObservationWindowNano int64
 
-	listed map[int64]bool // expiry -> listed
+	listed     map[int64]bool // expiry -> listed
+	nextExpiry map[int64]int64
 }
 
 func (l *DatedFuturesLister) PendingListings(nowNano int64, _ etypes.PriceSource) []etypes.Instrument {
 	if l.listed == nil {
 		l.listed = make(map[int64]bool)
 	}
+	if l.nextExpiry == nil {
+		l.nextExpiry = make(map[int64]int64)
+	}
 	var out []etypes.Instrument
 	for _, tenor := range l.TenorsNano {
 		if tenor <= 0 {
 			continue
 		}
-		// Align expiry to the tenor grid so relisting is stable.
-		expiry := ((nowNano + tenor) / tenor) * tenor
-		if l.listed[expiry] || expiry <= nowNano {
+		expiry, ok := l.expiryForTenor(nowNano, tenor)
+		if !ok || l.listed[expiry] {
 			continue
 		}
 		l.listed[expiry] = true
@@ -85,12 +89,16 @@ type OptionChainLister struct {
 	// ObservationWindowNano overrides the settlement TWAP window when > 0.
 	ObservationWindowNano int64
 
-	listed map[string]bool
+	listed     map[string]bool
+	nextExpiry map[int64]int64
 }
 
 func (l *OptionChainLister) PendingListings(nowNano int64, prices etypes.PriceSource) []etypes.Instrument {
 	if l.listed == nil {
 		l.listed = make(map[string]bool)
+	}
+	if l.nextExpiry == nil {
+		l.nextExpiry = make(map[int64]int64)
 	}
 	if l.StrikeStep <= 0 || l.StrikesPerSide < 0 {
 		return nil
@@ -106,8 +114,8 @@ func (l *OptionChainLister) PendingListings(nowNano int64, prices etypes.PriceSo
 		if tenor <= 0 {
 			continue
 		}
-		expiry := ((nowNano + tenor) / tenor) * tenor
-		if expiry <= nowNano {
+		expiry, ok := l.expiryForTenor(nowNano, tenor)
+		if !ok {
 			continue
 		}
 		for i := -l.StrikesPerSide; i <= l.StrikesPerSide; i++ {
@@ -121,6 +129,42 @@ func (l *OptionChainLister) PendingListings(nowNano int64, prices etypes.PriceSo
 		}
 	}
 	return out
+}
+
+// expiryForTenor returns the current rolling expiry for one configured tenor.
+// It creates the successor only once the previous generation has expired. A
+// duration setting therefore remains the actual contract lifetime even when
+// the simulation starts at an arbitrary Unix timestamp.
+func (l *DatedFuturesLister) expiryForTenor(nowNano, tenor int64) (int64, bool) {
+	if expiry := l.nextExpiry[tenor]; expiry > nowNano {
+		return expiry, true
+	}
+	expiry, ok := addTenor(nowNano, tenor)
+	if ok {
+		l.nextExpiry[tenor] = expiry
+	}
+	return expiry, ok
+}
+
+func (l *OptionChainLister) expiryForTenor(nowNano, tenor int64) (int64, bool) {
+	if expiry := l.nextExpiry[tenor]; expiry > nowNano {
+		return expiry, true
+	}
+	expiry, ok := addTenor(nowNano, tenor)
+	if ok {
+		l.nextExpiry[tenor] = expiry
+	}
+	return expiry, ok
+}
+
+// addTenor rejects unrepresentable timestamps rather than wrapping a malformed
+// listing into the past.
+func addTenor(nowNano, tenor int64) (int64, bool) {
+	if tenor <= 0 {
+		return 0, false
+	}
+	expiry, ok := etypes.TryAdd(nowNano, tenor)
+	return expiry, ok && expiry > nowNano
 }
 
 func (l *OptionChainLister) appendOption(out []etypes.Instrument, strike, expiry int64, isCall bool) []etypes.Instrument {

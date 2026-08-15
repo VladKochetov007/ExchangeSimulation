@@ -52,18 +52,41 @@ type OptionMMConfig struct {
 // quote units per one-unit annualized-volatility move. HedgeDelta is the spot
 // hedge inventory; NetDelta is option delta plus that hedge.
 type GreekProfile struct {
-	Timestamp         int64
-	Phase             string
-	SpotMid           int64
-	ModelForward      int64
-	ForwardSource     string
-	ImpliedVolatility float64
-	OptionDelta       float64
-	HedgeDelta        float64
-	NetDelta          float64
-	Gamma             float64
-	Vega              float64
-	Contracts         int
+	Timestamp         int64   `json:"timestamp"`
+	Phase             string  `json:"phase"`
+	SpotMid           int64   `json:"spot_mid"`
+	ModelForward      int64   `json:"model_forward"`
+	ForwardSource     string  `json:"forward_source"`
+	ImpliedVolatility float64 `json:"implied_volatility"`
+	OptionDelta       float64 `json:"option_delta"`
+	HedgeDelta        float64 `json:"hedge_delta"`
+	NetDelta          float64 `json:"net_delta"`
+	Gamma             float64 `json:"gamma"`
+	Vega              float64 `json:"vega"`
+	Contracts         int     `json:"contracts"`
+}
+
+// GreekPosition is one non-zero option position at a sampling point. It keeps
+// contract identity and tenor intact so that a final aggregate containing long
+// options cannot be misread as the terminal state of a short-expiry board.
+type GreekPosition struct {
+	Timestamp         int64   `json:"timestamp"`
+	Phase             string  `json:"phase"`
+	Symbol            string  `json:"symbol"`
+	Underlying        string  `json:"underlying"`
+	ListedNano        int64   `json:"listed_nano"`
+	ExpiryNano        int64   `json:"expiry_nano"`
+	Strike            int64   `json:"strike"`
+	IsCall            bool    `json:"is_call"`
+	Position          int64   `json:"position"`
+	TimeToExpiryNano  int64   `json:"time_to_expiry_nano"`
+	SpotMid           int64   `json:"spot_mid"`
+	ModelForward      int64   `json:"model_forward"`
+	ForwardSource     string  `json:"forward_source"`
+	ImpliedVolatility float64 `json:"implied_volatility"`
+	Delta             float64 `json:"delta"`
+	Gamma             float64 `json:"gamma"`
+	Vega              float64 `json:"vega"`
 }
 
 type optionQuotes struct {
@@ -95,6 +118,7 @@ type OptionMarketMaker struct {
 	hedgePos   int64 // underlying inventory from hedge fills
 	hedgeQty   int64 // cumulative |hedge| traded, for reporting
 	profiles   []GreekProfile
+	positions  []GreekPosition
 	subscribed bool
 }
 
@@ -136,6 +160,13 @@ func (mm *OptionMarketMaker) HedgePosition() int64 {
 // telemetry retained by the actor.
 func (mm *OptionMarketMaker) GreekProfiles() []GreekProfile {
 	return append([]GreekProfile(nil), mm.profiles...)
+}
+
+// GreekPositionProfiles returns immutable per-contract rows for expiry/strike
+// attribution. It intentionally excludes resting orders, which are desired
+// exposure rather than executed portfolio risk.
+func (mm *OptionMarketMaker) GreekPositionProfiles() []GreekPosition {
+	return append([]GreekPosition(nil), mm.positions...)
 }
 
 func (mm *OptionMarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
@@ -306,9 +337,11 @@ func (mm *OptionMarketMaker) onHedgeTick(t time.Time) {
 }
 
 func (mm *OptionMarketMaker) onGreekTick(t time.Time) {
-	profile := mm.GreekProfile(t)
+	positions := mm.GreekPositions(t)
+	profile := mm.aggregateGreekProfile(t, positions)
 	if profile.SpotMid != 0 {
 		mm.profiles = append(mm.profiles, profile)
+		mm.positions = append(mm.positions, positions...)
 	}
 }
 
@@ -316,18 +349,19 @@ func (mm *OptionMarketMaker) onGreekTick(t time.Time) {
 // filled option inventory and underlying hedge. It intentionally does not
 // include resting orders: Greeks are exposures, not desired exposure.
 func (mm *OptionMarketMaker) GreekProfile(t time.Time) GreekProfile {
-	profile := GreekProfile{
-		Timestamp:         t.UnixNano(),
-		Phase:             "post_quote_pre_hedge_fill",
-		SpotMid:           mm.spotMid,
-		ModelForward:      mm.spotMid,
-		ForwardSource:     "spot_mid_proxy",
-		ImpliedVolatility: mm.cfg.IV,
-	}
+	return mm.aggregateGreekProfile(t, mm.GreekPositions(t))
+}
+
+// GreekPositions computes signed per-contract sensitivities from filled
+// inventory. The current forward is explicitly tagged as the spot-mid proxy;
+// a future maturity-matched forward provider can replace that input without
+// changing the report schema.
+func (mm *OptionMarketMaker) GreekPositions(t time.Time) []GreekPosition {
 	if mm.spotMid <= 0 || mm.cfg.BasePrecision <= 0 {
-		return profile
+		return nil
 	}
 	now := t.UnixNano()
+	positions := make([]GreekPosition, 0)
 	for _, c := range mm.set.orderedContracts() {
 		if c.Type != "OPTION" {
 			continue
@@ -336,7 +370,8 @@ func (mm *OptionMarketMaker) GreekProfile(t time.Time) GreekProfile {
 		if q == nil || q.inventory == 0 {
 			continue
 		}
-		yearsLeft := float64(c.ExpiryNano-now) / float64(365*24*time.Hour)
+		timeToExpiry := c.ExpiryNano - now
+		yearsLeft := float64(timeToExpiry) / float64(365*24*time.Hour)
 		if yearsLeft <= 0 {
 			continue
 		}
@@ -345,9 +380,42 @@ func (mm *OptionMarketMaker) GreekProfile(t time.Time) GreekProfile {
 			continue
 		}
 		contracts := float64(q.inventory) / float64(mm.cfg.BasePrecision)
-		profile.OptionDelta += contracts * sensitivity.Delta
-		profile.Gamma += contracts * sensitivity.Gamma
-		profile.Vega += contracts * sensitivity.Vega
+		positions = append(positions, GreekPosition{
+			Timestamp:         now,
+			Phase:             "post_quote_pre_hedge_fill",
+			Symbol:            c.Symbol,
+			Underlying:        mm.cfg.Underlying,
+			ListedNano:        c.ListedNano,
+			ExpiryNano:        c.ExpiryNano,
+			Strike:            c.Strike,
+			IsCall:            c.IsCall,
+			Position:          q.inventory,
+			TimeToExpiryNano:  timeToExpiry,
+			SpotMid:           mm.spotMid,
+			ModelForward:      mm.spotMid,
+			ForwardSource:     "spot_mid_proxy",
+			ImpliedVolatility: mm.cfg.IV,
+			Delta:             contracts * sensitivity.Delta,
+			Gamma:             contracts * sensitivity.Gamma,
+			Vega:              contracts * sensitivity.Vega,
+		})
+	}
+	return positions
+}
+
+func (mm *OptionMarketMaker) aggregateGreekProfile(t time.Time, positions []GreekPosition) GreekProfile {
+	profile := GreekProfile{
+		Timestamp:         t.UnixNano(),
+		Phase:             "post_quote_pre_hedge_fill",
+		SpotMid:           mm.spotMid,
+		ModelForward:      mm.spotMid,
+		ForwardSource:     "spot_mid_proxy",
+		ImpliedVolatility: mm.cfg.IV,
+	}
+	for _, position := range positions {
+		profile.OptionDelta += position.Delta
+		profile.Gamma += position.Gamma
+		profile.Vega += position.Vega
 		profile.Contracts++
 	}
 	profile.HedgeDelta = float64(mm.hedgePos) / float64(mm.cfg.BasePrecision)

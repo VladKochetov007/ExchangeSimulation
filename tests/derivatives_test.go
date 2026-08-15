@@ -1,6 +1,7 @@
 package exchange_test
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -331,15 +332,50 @@ func TestDatedFuturesListerSchedule(t *testing.T) {
 		t.Fatalf("first listing count = %d, want 1", len(first))
 	}
 	fut := first[0].(*einstrument.ExpiringFutures)
-	if fut.ExpiryNano()%tenor != 0 {
-		t.Fatal("expiry not aligned to tenor grid")
+	if got, want := fut.ExpiryNano(), derivStart+tenor; got != want {
+		t.Fatalf("expiry = %d, want exact tenor expiry %d", got, want)
 	}
 	if again := lister.PendingListings(derivStart, constPrice(0)); len(again) != 0 {
 		t.Fatalf("relisted same expiry: %d", len(again))
 	}
-	// Once the grid advances past the listed expiry a new contract appears.
-	if next := lister.PendingListings(fut.ExpiryNano()+1, constPrice(0)); len(next) != 1 {
+	// Once the contract expires a new exact-tenor generation appears.
+	if next := lister.PendingListings(fut.ExpiryNano(), constPrice(0)); len(next) != 1 {
 		t.Fatalf("next tenor not listed: %d", len(next))
+	} else if got, want := next[0].(*einstrument.ExpiringFutures).ExpiryNano(), fut.ExpiryNano()+tenor; got != want {
+		t.Fatalf("successor expiry = %d, want %d", got, want)
+	}
+}
+
+func TestListingTenorIsNeverShortenedByCalendarAlignment(t *testing.T) {
+	spec := einstrument.ContractSpec{
+		Base: "ABC", Quote: "USD",
+		BasePrecision: BTC_PRECISION, QuotePrecision: USD_PRECISION,
+		TickSize: DOLLAR_TICK, MinOrderSize: 1,
+	}
+	tenor := int64(10 * time.Minute)
+	now := derivStart + int64(123*time.Second)
+	deadline := now + tenor
+
+	futures := (&einstrument.DatedFuturesLister{Underlying: "ABC/USD", Spec: spec, TenorsNano: []int64{tenor}}).PendingListings(now, constPrice(0))
+	if len(futures) != 1 {
+		t.Fatalf("future listings = %d, want 1", len(futures))
+	}
+	if expiry := futures[0].(*einstrument.ExpiringFutures).ExpiryNano(); expiry != deadline {
+		t.Fatalf("future expiry = %d, want exact tenor expiry %d", expiry, deadline)
+	}
+
+	options := (&einstrument.OptionChainLister{
+		Underlying: "ABC/USD", Spec: spec, TenorsNano: []int64{tenor}, StrikeStep: PriceUSD(1000, DOLLAR_TICK),
+	}).PendingListings(now, constPrice(PriceUSD(50_000, DOLLAR_TICK)))
+	if len(options) == 0 {
+		t.Fatal("option chain was not listed")
+	}
+	if expiry := options[0].(*einstrument.EuropeanOption).ExpiryNano(); expiry != deadline {
+		t.Fatalf("option expiry = %d, want exact tenor expiry %d", expiry, deadline)
+	}
+
+	if got := (&einstrument.DatedFuturesLister{Underlying: "ABC/USD", Spec: spec, TenorsNano: []int64{tenor}}).PendingListings(math.MaxInt64-1, constPrice(0)); len(got) != 0 {
+		t.Fatalf("overflowing future listing = %d, want 0", len(got))
 	}
 }
 

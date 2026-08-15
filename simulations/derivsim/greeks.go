@@ -10,6 +10,7 @@ import (
 // are deliberately not used for tenor- or contract-level attribution.
 type GreekSummary struct {
 	HasSamples      bool         `json:"has_samples"`
+	HasExposure     bool         `json:"has_exposure"`
 	Samples         int          `json:"samples"`
 	FirstTimestamp  int64        `json:"first_timestamp,omitempty"`
 	LastTimestamp   int64        `json:"last_timestamp,omitempty"`
@@ -21,6 +22,7 @@ type GreekSummary struct {
 	MeanAbsVega     float64      `json:"mean_abs_vega"`
 	Initial         GreekProfile `json:"initial,omitempty"`
 	Final           GreekProfile `json:"final,omitempty"`
+	LastExposure    GreekProfile `json:"last_exposure,omitempty"`
 }
 
 // GreekReport is the portable output written after a derivative simulation.
@@ -28,23 +30,35 @@ type GreekSummary struct {
 // the measurements, rather than allowing a downstream plot to imply a richer
 // volatility surface or post-fill hedge state than the simulator produced.
 type GreekReport struct {
-	Model         string         `json:"model"`
-	ForwardSource string         `json:"forward_source"`
-	SamplingPhase string         `json:"sampling_phase"`
-	Caveats       []string       `json:"caveats"`
-	Summary       GreekSummary   `json:"summary"`
-	Profiles      []GreekProfile `json:"profiles"`
+	Model            string          `json:"model"`
+	ForwardSource    string          `json:"forward_source"`
+	SamplingPhase    string          `json:"sampling_phase"`
+	Caveats          []string        `json:"caveats"`
+	Summary          GreekSummary    `json:"summary"`
+	Profiles         []GreekProfile  `json:"profiles"`
+	PositionProfiles []GreekPosition `json:"position_profiles"`
 }
 
 // BuildGreekReport validates and copies the profile stream before deriving
 // summary metrics. Refusing NaN/Inf prevents JSON serialization from silently
 // dropping a corrupted risk observation.
 func BuildGreekReport(profiles []GreekProfile) (GreekReport, error) {
+	return BuildGreekReportWithPositions(profiles, nil)
+}
+
+// BuildGreekReportWithPositions additionally carries raw expiry/strike rows
+// for analysis of short- and long-tenor exposure.
+func BuildGreekReportWithPositions(profiles []GreekProfile, positions []GreekPosition) (GreekReport, error) {
 	for i, profile := range profiles {
 		if !finiteGreek(profile.OptionDelta) || !finiteGreek(profile.HedgeDelta) ||
 			!finiteGreek(profile.NetDelta) || !finiteGreek(profile.Gamma) || !finiteGreek(profile.Vega) ||
 			!finiteGreek(profile.ImpliedVolatility) {
 			return GreekReport{}, fmt.Errorf("non-finite Greek profile at index %d", i)
+		}
+	}
+	for i, position := range positions {
+		if !finiteGreek(position.Delta) || !finiteGreek(position.Gamma) || !finiteGreek(position.Vega) || !finiteGreek(position.ImpliedVolatility) {
+			return GreekReport{}, fmt.Errorf("non-finite position Greek profile at index %d", i)
 		}
 	}
 
@@ -58,7 +72,8 @@ func BuildGreekReport(profiles []GreekProfile) (GreekReport, error) {
 			"Snapshots are pre-hedge-fill; hedge orders submitted in the same phase may fill later.",
 			"The final periodic sample precedes expiry; this actor report does not replace an exchange-owned pre-expiry risk snapshot.",
 		},
-		Profiles: append([]GreekProfile(nil), profiles...),
+		Profiles:         append([]GreekProfile(nil), profiles...),
+		PositionProfiles: append([]GreekPosition(nil), positions...),
 	}
 	if len(profiles) == 0 {
 		return report, nil
@@ -82,6 +97,10 @@ func BuildGreekReport(profiles []GreekProfile) (GreekReport, error) {
 		summary.MaxAbsNetDelta = max(summary.MaxAbsNetDelta, absDelta)
 		summary.MaxAbsGamma = max(summary.MaxAbsGamma, absGamma)
 		summary.MaxAbsVega = max(summary.MaxAbsVega, absVega)
+		if profile.Contracts > 0 {
+			summary.HasExposure = true
+			summary.LastExposure = profile
+		}
 	}
 	n := float64(len(profiles))
 	summary.MeanAbsNetDelta /= n

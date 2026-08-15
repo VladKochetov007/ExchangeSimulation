@@ -83,7 +83,7 @@ func main() {
 		}
 		out.ParityTrades = sim.ParityBot.Trades()
 	}
-	greekReport, err := derivsim.BuildGreekReport(sim.Dealer.GreekProfiles())
+	greekReport, err := derivsim.BuildGreekReportWithPositions(sim.Dealer.GreekProfiles(), sim.Dealer.GreekPositionProfiles())
 	if err != nil {
 		log.Fatal(err)
 	}

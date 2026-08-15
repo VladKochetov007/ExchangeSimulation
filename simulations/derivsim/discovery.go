@@ -16,6 +16,10 @@ type Contract struct {
 	Strike     int64
 	IsCall     bool
 	ExpiryNano int64
+	// ListedNano is the timestamp on the live reference-data announcement.
+	// It is not reconstructed from ExpiryNano: rolling option chains can list
+	// several short-tenor generations during one simulation.
+	ListedNano int64
 }
 
 // contractSet tracks live contracts announced on the reference-data feed and
@@ -74,7 +78,7 @@ func (cs *contractSet) handle(evt *actor.Event) bool {
 		case "listed":
 			c := &Contract{
 				Symbol: ann.Symbol, Type: ann.InstrumentType, Underlying: ann.Underlying,
-				Strike: ann.Strike, IsCall: ann.IsCall, ExpiryNano: ann.ExpiryNano,
+				Strike: ann.Strike, IsCall: ann.IsCall, ExpiryNano: ann.ExpiryNano, ListedNano: e.Timestamp,
 			}
 			cs.contracts[ann.Symbol] = c
 			if cs.onList != nil {

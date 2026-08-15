@@ -1,0 +1,22 @@
+{
+  "Seed": 20260815,
+  "Step": 1000000000,
+  "SnapshotInterval": 60000000000,
+  "AutomationInterval": 1000000000,
+  "QuoteInterval": 30000000000,
+  "NoiseInterval": 30000000000,
+  "GreekInterval": 60000000000,
+  "ShortOptionTenor": 21600000000000,
+  "LongOptionTenor": 172800000000000,
+  "ShortFutureTenor": 28800000000000,
+  "LongFutureTenor": 259200000000000,
+  "OptionIV": 0.8,
+  "StrikesPerSide": 2,
+  "StrikeStepUSD": 1000,
+  "StoikovRiskAversion": 0.005,
+  "StoikovFillDecay": 0.5,
+  "StoikovVariancePerSecond": 25,
+  "StoikovInventoryHorizon": 600000000000,
+  "StoikovVolatilityHalfLife": 600000000000,
+  "OptionBuyProbability": 0.65
+}

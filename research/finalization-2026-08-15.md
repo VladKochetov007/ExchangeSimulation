@@ -23,6 +23,8 @@ coverage or a reproducible command in `research/experiments.jsonl`.
 | H-005 | Stop/reconnect and delayed delivery can outlive their logical session. | Supported and fixed in the covered direct paths. | Closed channels and old-session callbacks had no ownership boundary. Lifecycle guards, reconnect closure, early terminal-event replay, and session-scoped market-data ownership now cover the retained scenarios. |
 | H-007 | Rewriting the matching core in C++ or Rust is the best current performance improvement. | Rejected for this stage. | Profiling put most wall time in quiescence, ingress draining, map work, synchronization, and logging; price-time matching was about 0.7% of cumulative CPU. Replacing the matcher would not repair causality and would make verification harder. |
 | H-008 | Long-run cross-book liquidity loss was a renderer or nondeterminism artifact. | Partially falsified. | An initial all-side withdrawal was an implementation defect and was fixed. After deterministic phases, later GHI/ABC ask depletion is reproducible and caused by an unhedged market maker exhausting finite GHI inventory below its fixed quote lot. It is a model policy limitation, not a chart bug. |
+| H-009/H-010 | Dynamic derivatives are observable and option-buy flow creates a short-convexity dealer baseline. | Supported, model-conditioned. | Symbol-tagged derivative fallback logs and validated per-position Black-76 Greeks replace inference from submitted orders. Flat IV and the spot-mid forward proxy prevent realised-volatility claims. |
+| H-013 | Live short-dated exposure has higher gamma while day-scale exposure has higher vega. | Supported for one replicated static-IV arm. | A deterministic 48-hour, three-venue baseline has larger peak gamma for TTE <= 6h and larger peak vega for TTE >= 24h on every venue. It is a local-sensitivity observation, not PnL or equilibrium evidence. |
 
 ## Confirmed corrections
 
@@ -98,6 +100,22 @@ session's subscription. These are ownership fixes, not a lossless-feed or
 sequence-recovery design; bounded gateway channels still need an explicit
 backpressure/recovery policy for high-volume experiments.
 
+### Derivative observability and exact rolling tenors
+
+Dynamically listed futures and options now flow to a symbol-tagged derivative
+fallback logger. Greek telemetry has a validated Black-76 sensitivity API and
+retains immutable signed dealer positions with listing timestamp, expiry,
+strike, call/put, model forward, IV, delta, gamma, and vega. `cmd/greekreport`
+separates original rolling generations from live remaining-maturity buckets.
+
+Long-running option research exposed two listing defects before any result was
+accepted. Epoch-grid floor rounding shortened advertised maturities; an upward
+grid repair stretched them. Dated futures and options now retain a per-tenor
+rolling expiry and issue successor contracts at exactly listing time plus the
+configured tenor. E-029 verifies a full 48-hour three-venue output byte-for-
+byte across one and fourteen OS threads. The detailed outcome and caveats are
+in [multivenue-48h-greeks-2026-08-15.md](multivenue-48h-greeks-2026-08-15.md).
+
 ### Book, position, and lifecycle hardening
 
 Recent retained fixes also reject unrepresentable resting level quantity,
@@ -128,9 +146,10 @@ invalid fill after `Match` is too late to make an ordinary rejection truthful.
 
 - Add a phase-ordered latency courier; until then, latency sensitivity and
   queue-priority results are diagnostic only.
-- Add dynamic logs/manifests for listed futures and options. The current
-  derivsim logger primarily records spot, so derivative flow/basis/option
-  volatility claims cannot yet be measured from complete event data.
+- Add exchange-owned `post_mark`, `pre_expiry`, and `post_settlement` risk
+  rows. Current actor-owned rows preserve observed positions but are not exact
+  terminal settlement state. Add maturity-matched forwards and a dynamic IV
+  surface before attributing realised delta/gamma/vega/theta PnL.
 - Repair analyzer Epps alignment: independently dropped windows are currently
   paired by slice index rather than timestamp. Also add baseline and terminal
   balance checkpoints before conservation/PnL analysis.
@@ -156,6 +175,11 @@ GOMAXPROCS=14 go run ./cmd/randomwalk -duration=5m -snapshot-only -logdir="$(mkt
 GOMAXPROCS=14 go run ./cmd/reprocheck \
   -config=research/derivsim-active.json -duration=20s -runs=3 \
   -out="$(mktemp -u /tmp/derivsim-repro-XXXXXX)" -gomaxprocs=14
+
+# Three direct venues with exact rolling 6h/48h option tenors.
+GOMAXPROCS=14 go run ./cmd/multivenue \
+  -config=research/multivenue-expiry-48h.json -duration=48h \
+  -logdir="$(mktemp -d)"
 ```
 
 For a final 200-minute visualization, use the 1 ms engine clock and compress

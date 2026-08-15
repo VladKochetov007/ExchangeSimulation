@@ -215,4 +215,11 @@ func TestOptionMMGreekProfileUsesFilledInventoryAndHedge(t *testing.T) {
 	if got.Contracts != 1 {
 		t.Fatalf("active option contracts = %d, want 1", got.Contracts)
 	}
+	positions := mm.GreekPositions(now)
+	if len(positions) != 1 || positions[0].Symbol != "ABC-C-100" || positions[0].Position != 2_000 {
+		t.Fatalf("per-contract profile missing inventory: %+v", positions)
+	}
+	if math.Abs(positions[0].Delta-2*greeks.Delta) > 1e-12 || positions[0].TimeToExpiryNano != int64(24*time.Hour) {
+		t.Fatalf("per-contract Greek values wrong: %+v", positions[0])
+	}
 }

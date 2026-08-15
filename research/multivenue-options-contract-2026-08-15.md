@@ -49,6 +49,14 @@ The following observability work is now in the branch:
 3. `cmd/derivsim` writes a full `greeks.json` profile and compact summary.
    It tags the current forward as `spot_mid_proxy` and its sample phase as
    `post_quote_pre_hedge_fill`.
+4. The three-venue direct scenario now creates independent local spot/perp,
+   dated-future, and hour/day option boards with local auto-borrow spot margin,
+   deterministic A-S linear makers, option dealers, and seeded flow. Its logs
+   wrap every record with `venue_id`.
+5. Per-position Greek rows retain listing timestamp and expiry. The
+   `cmd/greekreport` utility reports both rolling generation and remaining
+   maturity buckets, avoiding a false short/long distinction when one ageing
+   option contract spans both regimes.
 
 This does **not** make the current option setup a volatility-surface study:
 IV is flat/static, the forward is a zero-carry spot proxy, and a periodic actor
@@ -62,7 +70,7 @@ sample is not an exchange-owned pre-expiry snapshot.
 | H-010 | With `OptionPBuy=0.8`, the baseline dealer becomes short gamma/vega and delta hedging reduces, but does not eliminate, reported delta. | Preliminary, model-conditioned. | Fixed-seed active 12-second run with profile output. | Sign or delta pattern fails under the same config/digest. |
 | H-011 | A genuine Avellaneda-Stoikov maker improves inventory-tail control relative to the current linear-skew baseline once both see the same order flow. | Pending. | Pure quote formula + one-book common-random-number run. | Lower inventory tail is obtained only by lower quote survival/fill without cost-adjusted benefit. |
 | H-012 | Three venue fragmentation changes option/linear risk only when routing has execution risk and venue-local collateral. | Pending. | Three direct venues, then an ordered-latency extension; record leg fills and residual delta. | Effect appears with no routed orders or disappears after correcting accounting. |
-| H-013 | Short tenors concentrate gamma/theta while longer tenors concentrate vega when ATM notional/flow are matched. | Pending. | Per-contract, time-weighted Greek rows for hour/day buckets. | Opposite pattern after precision and forward normalization. |
+| H-013 | Short tenors concentrate gamma/theta while longer tenors concentrate vega when ATM notional/flow are matched. | Supported, model-conditioned. | Deterministic 48h remaining-maturity Greek report. | Opposite pattern after precision and forward normalization. |
 
 ## Reproduced smoke evidence
 
@@ -89,10 +97,10 @@ expiry result because the 300-second listed tenor did not expire in 12 seconds.
 
 ## Implementation sequence and gates
 
-1. **Risk data contract.** Extend the current aggregate dealer profile into
-   immutable per-position rows keyed by venue, actor, client, symbol, expiry,
-   and position side. Add exchange-owned pre-expiry/post-settlement rows before
-   using short-tenor conclusions.
+1. **Risk data contract.** Immutable per-position rows now retain symbol,
+   listing timestamp, expiry, strike, signed position and model inputs. Add
+   venue/actor/client identity plus exchange-owned pre-expiry/post-settlement
+   rows before using exact terminal short-tenor conclusions.
 2. **Forward and surface boundary.** Add a cached phase-updated forward source
    keyed by underlying/expiry. Do not call a competing exchange under the
    venue lock. Add static, mean-reverting, jump, sticky-strike, and
@@ -103,9 +111,9 @@ expiry result because the 300-second listed tenor did not expire in 12 seconds.
    from a documented EWMA of normalised returns and fit/check fill distance
    rather than assuming Poisson intensity. Preserve the current linear skew as
    the control arm.
-4. **Three independent venues.** Use a shared deterministic clock but distinct
-   exchanges, mounts, IDs, logs, and prefunded accounts. Each gets spot, perp,
-   short/long dated futures, and hour/day option tenors. Enable local
+4. **Three independent venues.** Implemented with a shared deterministic clock
+   but distinct exchanges, mounts, IDs, logs, and prefunded accounts. Each has
+   spot, perp, rolling dated futures, hour/day option tenors, and local
    auto-borrow spot margin with explicit collateral factors and limits.
 5. **Participants.** Add spot/linear A-S makers, option dealers, noise flow,
    and value flow per venue. Cross-venue routing is a later actor that keys all
