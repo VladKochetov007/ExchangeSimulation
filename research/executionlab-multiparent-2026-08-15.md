@@ -60,9 +60,10 @@ strategy allocation.
 
 ```bash
 go test ./simulations/executionlab -count=1
+mkdir -p logs/research
 GOMAXPROCS=14 go run ./cmd/executionlab \
   -seeds=20 -seed=42 -duration=25s -parent-count=20 \
   -parent-interval=1s -slices=5 -slice-interval=200ms \
-  > /tmp/executionlab-20parents.jsonl
-python3 tools/analyze_executionlab.py /tmp/executionlab-20parents.jsonl
+  > logs/research/executionlab-20parents.jsonl
+python3 tools/analyze_executionlab.py logs/research/executionlab-20parents.jsonl
 ```

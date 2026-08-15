@@ -25,12 +25,14 @@ spot/perpetual makers.
 Configuration: [multivenue-expiry-48h.json](multivenue-expiry-48h.json).
 
 ```bash
+run_dir=logs/research/multivenue-expiry-48h-exact-tenor
+mkdir -p "$run_dir"
 GOMAXPROCS=14 go run ./cmd/multivenue \
   -config=research/multivenue-expiry-48h.json -duration=48h \
-  -logdir=/tmp/multivenue-expiry-48h-exact-tenor
+  -logdir="$run_dir"
 go run ./cmd/greekreport \
-  -input=/tmp/multivenue-expiry-48h-exact-tenor/greeks.json \
-  -output=/tmp/multivenue-expiry-48h-exact-tenor/greek-tenors.json
+  -input="$run_dir/greeks.json" \
+  -output="$run_dir/greek-tenors.json"
 ```
 
 The run took 1m35s wall-clock and produced 836 MB of venue-scoped logs. A

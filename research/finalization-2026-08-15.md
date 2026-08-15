@@ -172,17 +172,20 @@ GOMAXPROCS=14 go test -race ./actor ./exchange ./simulation ./simulations/random
 go vet ./...
 
 # Direct randomwalk repeatability: compare all JSONL hashes from two runs.
-GOMAXPROCS=14 go run ./cmd/randomwalk -duration=5m -snapshot-only -logdir="$(mktemp -d)"
+mkdir -p logs/research/randomwalk-repeat
+GOMAXPROCS=14 go run ./cmd/randomwalk -duration=5m -snapshot-only -logdir=logs/research/randomwalk-repeat
 
 # Derivative repeatability: preserves all replicas and writes a manifest.
+mkdir -p logs/research
 GOMAXPROCS=14 go run ./cmd/reprocheck \
   -config=research/derivsim-active.json -duration=20s -runs=3 \
-  -out="$(mktemp -u /tmp/derivsim-repro-XXXXXX)" -gomaxprocs=14
+  -out=logs/research/derivsim-repro -gomaxprocs=14
 
 # Three direct venues with exact rolling 6h/48h option tenors.
+mkdir -p logs/research/multivenue-expiry-48h
 GOMAXPROCS=14 go run ./cmd/multivenue \
   -config=research/multivenue-expiry-48h.json -duration=48h \
-  -logdir="$(mktemp -d)"
+  -logdir=logs/research/multivenue-expiry-48h
 ```
 
 For a final 200-minute visualization, use the 1 ms engine clock and compress

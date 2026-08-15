@@ -20,7 +20,7 @@
     "tier_orders": [[0.2, 1.0], [1.0, 0.2]],
     "deterministic_phase_runtime": true
   },
-  "command_template": "go build -o /tmp/feesimrace ./cmd/feesimrace; GOMAXPROCS=7 /tmp/feesimrace -duration=30s -seed=<seed> -noise-traders=8 -tiers=<tier-order> -logdir=<output>",
+  "command_template": "go build -o bin/feesimrace ./cmd/feesimrace; GOMAXPROCS=7 bin/feesimrace -duration=30s -seed=<seed> -noise-traders=8 -tiers=<tier-order> -logdir=logs/research/<output>",
   "observations": {
     "worlds": 16,
     "tier_reports": 32,

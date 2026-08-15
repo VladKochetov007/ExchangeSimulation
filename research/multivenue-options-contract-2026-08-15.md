@@ -77,9 +77,10 @@ sample is not an exchange-owned pre-expiry snapshot.
 Command:
 
 ```bash
+mkdir -p logs/research
 GOMAXPROCS=14 go run ./cmd/derivsim \
   -config=research/derivsim-active.json -duration=12s \
-  -logdir=/tmp/derivsim-greeks-smoke-hASNW8
+  -logdir=logs/research/derivsim-greeks-smoke
 ```
 
 The `greeks.json` SHA-256 was
