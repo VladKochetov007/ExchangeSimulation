@@ -409,6 +409,7 @@ func (a *BaseActor) decodeResponse(resp exchange.Response) []*Event {
 				TradeID:   data.TradeID,
 				FeeAmount: data.FeeAmount,
 				FeeAsset:  data.FeeAsset,
+				Timestamp: data.Timestamp,
 			},
 		}
 		if _, ok := a.activeOrders.Load(data.OrderID); !ok {

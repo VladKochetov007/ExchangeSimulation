@@ -80,6 +80,11 @@ type OptionChainLister struct {
 	StrikeStep int64
 	// StrikesPerSide counts strikes above and below the central strike.
 	StrikesPerSide int
+	// MaxStrikesPerExpiry bounds distinct strikes that can remain listed for
+	// one expiry. Zero preserves the open-ended listing policy; production
+	// long-run scenarios should set a finite cap to avoid unbounded book and
+	// risk-sweep growth as a drifting underlying crosses new strike grids.
+	MaxStrikesPerExpiry int
 	// IV seeds the flat mark volatility for margin/mark purposes.
 	IV float64
 	// Margin overrides DefaultOptionMarginParams when non-zero.
@@ -91,6 +96,7 @@ type OptionChainLister struct {
 
 	listed     map[string]bool
 	nextExpiry map[int64]int64
+	strikes    map[int64]map[int64]struct{}
 }
 
 func (l *OptionChainLister) PendingListings(nowNano int64, prices etypes.PriceSource) []etypes.Instrument {
@@ -99,6 +105,9 @@ func (l *OptionChainLister) PendingListings(nowNano int64, prices etypes.PriceSo
 	}
 	if l.nextExpiry == nil {
 		l.nextExpiry = make(map[int64]int64)
+	}
+	if l.strikes == nil {
+		l.strikes = make(map[int64]map[int64]struct{})
 	}
 	if l.StrikeStep <= 0 || l.StrikesPerSide < 0 {
 		return nil
@@ -120,7 +129,7 @@ func (l *OptionChainLister) PendingListings(nowNano int64, prices etypes.PriceSo
 		}
 		for i := -l.StrikesPerSide; i <= l.StrikesPerSide; i++ {
 			strike := center + int64(i)*l.StrikeStep
-			if strike <= 0 {
+			if strike <= 0 || !l.allowStrike(expiry, strike) {
 				continue
 			}
 			for _, isCall := range []bool{true, false} {
@@ -129,6 +138,25 @@ func (l *OptionChainLister) PendingListings(nowNano int64, prices etypes.PriceSo
 		}
 	}
 	return out
+}
+
+func (l *OptionChainLister) allowStrike(expiry, strike int64) bool {
+	if l.MaxStrikesPerExpiry <= 0 {
+		return true
+	}
+	byStrike := l.strikes[expiry]
+	if byStrike == nil {
+		byStrike = make(map[int64]struct{})
+		l.strikes[expiry] = byStrike
+	}
+	if _, exists := byStrike[strike]; exists {
+		return true
+	}
+	if len(byStrike) >= l.MaxStrikesPerExpiry {
+		return false
+	}
+	byStrike[strike] = struct{}{}
+	return true
 }
 
 // expiryForTenor returns the current rolling expiry for one configured tenor.

@@ -1667,6 +1667,16 @@ func (e *DefaultExchange) CheckPositionMarginerLiquidations() {
 		clientIDs = append(clientIDs, clientID)
 	}
 	slices.Sort(clientIDs)
+	type profileKey struct {
+		clientID uint64
+		quote    string
+	}
+	// Marks are fixed for this sweep. A solvent account's cross-book profile is
+	// therefore identical for every option symbol it holds; rebuilding it once
+	// per symbol turns an expanding option chain into quadratic work. A
+	// liquidation mutates balances/positions, so invalidate only that account
+	// and quote before the next symbol checks it.
+	profiles := make(map[profileKey]accountMarginProfile)
 
 	for _, symbol := range symbols {
 		book := e.Books[symbol]
@@ -1686,8 +1696,13 @@ func (e *DefaultExchange) CheckPositionMarginerLiquidations() {
 				continue
 			}
 
-			// No trigger symbol: every book contributes its stored mark.
-			profile := e.buildAccountMarginProfile(clientID, quote, "", 0)
+			key := profileKey{clientID: clientID, quote: quote}
+			profile, ok := profiles[key]
+			if !ok {
+				// No trigger symbol: every book contributes its stored mark.
+				profile = e.buildAccountMarginProfile(clientID, quote, "", 0)
+				profiles[key] = profile
+			}
 			equity := client.PerpBalance(quote) - client.BorrowedPerpPortion(quote) + profile.UnrealizedPnL
 			if equity >= profile.Maintenance {
 				continue
@@ -1695,6 +1710,7 @@ func (e *DefaultExchange) CheckPositionMarginerLiquidations() {
 			for _, pos := range positions {
 				e.liquidate(clientID, client, symbol, pos, inst, timestamp)
 			}
+			delete(profiles, key)
 		}
 	}
 }

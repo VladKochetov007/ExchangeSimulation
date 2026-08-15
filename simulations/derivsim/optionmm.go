@@ -111,24 +111,32 @@ type OptionMarketMaker struct {
 	*actor.BaseActor
 	cfg OptionMMConfig
 
-	set        *contractSet
-	quotes     map[string]*optionQuotes
-	pending    map[uint64]quoteRef
-	spotMid    int64
-	hedgePos   int64 // underlying inventory from hedge fills
-	hedgeQty   int64 // cumulative |hedge| traded, for reporting
-	profiles   []GreekProfile
-	positions  []GreekPosition
-	subscribed bool
+	set      *contractSet
+	quotes   map[string]*optionQuotes
+	pending  map[uint64]quoteRef
+	spotMid  int64
+	hedgePos int64 // underlying inventory from hedge fills
+	// hedgePending is signed submitted quantity not yet resolved by fills,
+	// cancellation, or rejection. Including it in the next target prevents a
+	// delayed hedge acknowledgement from causing repeated over-correction.
+	hedgePending  int64
+	hedgeRequests map[uint64]int64 // request ID -> signed requested quantity
+	hedgeOrders   map[uint64]int64 // order ID -> signed unresolved quantity
+	hedgeQty      int64            // cumulative |hedge| traded, for reporting
+	profiles      []GreekProfile
+	positions     []GreekPosition
+	subscribed    bool
 }
 
 func NewOptionMarketMaker(id uint64, gw actor.Gateway, cfg OptionMMConfig) *OptionMarketMaker {
 	mm := &OptionMarketMaker{
-		BaseActor: actor.NewBaseActor(id, gw),
-		cfg:       cfg,
-		set:       newContractSet(cfg.Underlying),
-		quotes:    make(map[string]*optionQuotes),
-		pending:   make(map[uint64]quoteRef),
+		BaseActor:     actor.NewBaseActor(id, gw),
+		cfg:           cfg,
+		set:           newContractSet(cfg.Underlying),
+		quotes:        make(map[string]*optionQuotes),
+		pending:       make(map[uint64]quoteRef),
+		hedgeRequests: make(map[uint64]int64),
+		hedgeOrders:   make(map[uint64]int64),
 	}
 	mm.set.onList = func(c *Contract) {
 		if c.Type == "OPTION" {
@@ -179,7 +187,60 @@ func (mm *OptionMarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
 		}
 		return
 	}
+	if mm.handleHedgeEvent(evt) {
+		return
+	}
 	mm.set.handle(evt)
+}
+
+func (mm *OptionMarketMaker) handleHedgeEvent(evt *actor.Event) bool {
+	switch evt.Type {
+	case actor.EventOrderAccepted:
+		e := evt.Data.(actor.OrderAcceptedEvent)
+		pending, ok := mm.hedgeRequests[e.RequestID]
+		if !ok {
+			return false
+		}
+		delete(mm.hedgeRequests, e.RequestID)
+		mm.hedgeOrders[e.OrderID] = pending
+		return true
+	case actor.EventOrderRejected:
+		e := evt.Data.(actor.OrderRejectedEvent)
+		pending, ok := mm.hedgeRequests[e.RequestID]
+		if !ok {
+			return false
+		}
+		delete(mm.hedgeRequests, e.RequestID)
+		mm.hedgePending -= pending
+		return true
+	case actor.EventOrderPartialFill, actor.EventOrderFilled:
+		e := evt.Data.(actor.OrderFillEvent)
+		if _, ok := mm.hedgeOrders[e.OrderID]; !ok {
+			return false
+		}
+		filled := signedQty(e)
+		mm.hedgePos += filled
+		mm.hedgePending -= filled
+		mm.hedgeQty += e.Qty
+		if e.IsFull {
+			delete(mm.hedgeOrders, e.OrderID)
+		}
+		return true
+	case actor.EventOrderCancelled:
+		e := evt.Data.(actor.OrderCancelledEvent)
+		pending, ok := mm.hedgeOrders[e.OrderID]
+		if !ok {
+			return false
+		}
+		if pending > 0 {
+			mm.hedgePending -= e.RemainingQty
+		} else {
+			mm.hedgePending += e.RemainingQty
+		}
+		delete(mm.hedgeOrders, e.OrderID)
+		return true
+	}
+	return false
 }
 
 // onQuoteAccepted records the live order ID for a quote so it can be
@@ -221,11 +282,6 @@ func (mm *OptionMarketMaker) onQuoteRejected(reqID uint64) {
 }
 
 func (mm *OptionMarketMaker) onFill(sym string, e actor.OrderFillEvent) {
-	if sym == mm.cfg.Underlying {
-		mm.hedgePos += signedQty(e)
-		mm.hedgeQty += e.Qty
-		return
-	}
 	if q, ok := mm.quotes[sym]; ok {
 		q.inventory += signedQty(e)
 		if e.IsFull {
@@ -326,13 +382,15 @@ func (mm *OptionMarketMaker) onHedgeTick(t time.Time) {
 		netDelta += delta * float64(q.inventory)
 	}
 	target := -int64(netDelta) // hold −Δ of underlying to neutralize
-	gap := target - mm.hedgePos
+	gap := target - (mm.hedgePos + mm.hedgePending)
 	if gap > mm.cfg.HedgeBandQty {
 		reqID := mm.SubmitOrder(mm.cfg.Underlying, exchange.Buy, exchange.Market, 0, gap)
-		mm.set.trackRequest(reqID, mm.cfg.Underlying)
+		mm.hedgeRequests[reqID] = gap
+		mm.hedgePending += gap
 	} else if gap < -mm.cfg.HedgeBandQty {
 		reqID := mm.SubmitOrder(mm.cfg.Underlying, exchange.Sell, exchange.Market, 0, -gap)
-		mm.set.trackRequest(reqID, mm.cfg.Underlying)
+		mm.hedgeRequests[reqID] = gap
+		mm.hedgePending += gap
 	}
 }
 

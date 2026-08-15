@@ -223,3 +223,32 @@ func TestOptionMMGreekProfileUsesFilledInventoryAndHedge(t *testing.T) {
 		t.Fatalf("per-contract Greek values wrong: %+v", positions[0])
 	}
 }
+
+func TestOptionMMHedgePendingPreventsRepeatedCorrection(t *testing.T) {
+	gw := newStubGateway()
+	mm := NewOptionMarketMaker(1, gw, OptionMMConfig{Underlying: "ABC/USD", QuoteInterval: time.Hour})
+	mm.hedgePending = 100
+	mm.hedgeRequests[7] = 100
+
+	mm.HandleEvent(context.Background(), &actor.Event{
+		Type: actor.EventOrderAccepted,
+		Data: actor.OrderAcceptedEvent{RequestID: 7, OrderID: 70},
+	})
+	if _, exists := mm.hedgeRequests[7]; exists || mm.hedgeOrders[70] != 100 {
+		t.Fatalf("accepted hedge was not moved into live state: requests=%v orders=%v", mm.hedgeRequests, mm.hedgeOrders)
+	}
+	mm.HandleEvent(context.Background(), &actor.Event{
+		Type: actor.EventOrderPartialFill,
+		Data: actor.OrderFillEvent{OrderID: 70, Symbol: "ABC/USD", Side: exchange.Buy, Qty: 40},
+	})
+	if mm.hedgePos != 40 || mm.hedgePending != 60 {
+		t.Fatalf("partial hedge state = position %d pending %d, want 40/60", mm.hedgePos, mm.hedgePending)
+	}
+	mm.HandleEvent(context.Background(), &actor.Event{
+		Type: actor.EventOrderCancelled,
+		Data: actor.OrderCancelledEvent{OrderID: 70, RemainingQty: 60},
+	})
+	if mm.hedgePending != 0 {
+		t.Fatalf("cancelled hedge left pending delta %d", mm.hedgePending)
+	}
+}

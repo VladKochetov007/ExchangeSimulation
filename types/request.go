@@ -29,6 +29,9 @@ type FillNotification struct {
 	RealizedPnL   int64        `json:"realized_pnl"`
 	NewSize       int64        `json:"new_size"`
 	NewEntryPrice int64        `json:"new_entry_price"`
+	// Timestamp is the exchange match time. It is intentionally distinct from
+	// client receipt time, which may include modeled response latency.
+	Timestamp int64 `json:"timestamp"`
 }
 
 type OrderRequest struct {

@@ -383,6 +383,7 @@ func sendFillNotification(
 			RealizedPnL:   realizedPnL,
 			NewSize:       delta.NewSize,
 			NewEntryPrice: delta.NewEntryPrice,
+			Timestamp:     exec.Timestamp,
 		},
 	})
 }

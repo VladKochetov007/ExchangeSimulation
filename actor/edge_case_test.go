@@ -102,6 +102,29 @@ func TestBaseActorFullFillBeforeAcceptLeavesNoGhostOrder(t *testing.T) {
 	}
 }
 
+func TestBaseActorFillEventPreservesExchangeTimestamp(t *testing.T) {
+	trader := NewBaseActor(1, exchange.NewClientGateway(1))
+	const orderID = uint64(17)
+	const matchTime = int64(1_735_689_600_123_000_000)
+	trader.activeOrders.Store(orderID, &OrderInfo{OrderID: orderID})
+
+	events := trader.decodeResponse(exchange.Response{Success: true, Data: &exchange.FillNotification{
+		OrderID:   orderID,
+		Qty:       1,
+		Timestamp: matchTime,
+	}})
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	fill, ok := events[0].Data.(OrderFillEvent)
+	if !ok {
+		t.Fatalf("event data = %T, want OrderFillEvent", events[0].Data)
+	}
+	if fill.Timestamp != matchTime {
+		t.Fatalf("fill timestamp = %d, want %d", fill.Timestamp, matchTime)
+	}
+}
+
 func TestBaseActorForcedCancelBeforeAcceptLeavesNoGhostOrder(t *testing.T) {
 	trader := NewBaseActor(1, exchange.NewClientGateway(1))
 	const orderID, requestID = uint64(19), uint64(29)

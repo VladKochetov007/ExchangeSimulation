@@ -31,32 +31,40 @@ const (
 // experiments feasible without changing their event semantics through tick
 // coalescing.
 type Config struct {
-	LogDir   string
-	Seed     int64
-	VenueIDs []string
+	LogDir   string   `json:"log_dir"`
+	Seed     int64    `json:"seed"`
+	VenueIDs []string `json:"venue_ids"`
 
-	Step               time.Duration
-	SnapshotInterval   time.Duration
-	AutomationInterval time.Duration
-	QuoteInterval      time.Duration
-	NoiseInterval      time.Duration
-	GreekInterval      time.Duration
+	Step               time.Duration `json:"step"`
+	SnapshotInterval   time.Duration `json:"snapshot_interval"`
+	AutomationInterval time.Duration `json:"automation_interval"`
+	QuoteInterval      time.Duration `json:"quote_interval"`
+	NoiseInterval      time.Duration `json:"noise_interval"`
+	GreekInterval      time.Duration `json:"greek_interval"`
 
-	ShortOptionTenor time.Duration
-	LongOptionTenor  time.Duration
-	ShortFutureTenor time.Duration
-	LongFutureTenor  time.Duration
-	OptionIV         float64
-	StrikesPerSide   int
-	StrikeStepUSD    int64
+	ShortOptionTenor          time.Duration `json:"short_option_tenor"`
+	LongOptionTenor           time.Duration `json:"long_option_tenor"`
+	ShortFutureTenor          time.Duration `json:"short_future_tenor"`
+	LongFutureTenor           time.Duration `json:"long_future_tenor"`
+	OptionIV                  float64       `json:"option_iv"`
+	StrikesPerSide            int           `json:"strikes_per_side"`
+	StrikeStepUSD             int64         `json:"strike_step_usd"`
+	OptionMaxStrikesPerExpiry int           `json:"option_max_strikes_per_expiry"`
 
-	StoikovRiskAversion       float64
-	StoikovFillDecay          float64
-	StoikovVariancePerSecond  float64
-	StoikovInventoryHorizon   time.Duration
-	StoikovVolatilityHalfLife time.Duration
+	StoikovRiskAversion       float64       `json:"stoikov_risk_aversion"`
+	StoikovFillDecay          float64       `json:"stoikov_fill_decay"`
+	StoikovVariancePerSecond  float64       `json:"stoikov_variance_per_second"`
+	StoikovInventoryHorizon   time.Duration `json:"stoikov_inventory_horizon"`
+	StoikovVolatilityHalfLife time.Duration `json:"stoikov_volatility_half_life"`
 
-	OptionBuyProbability float64
+	OptionBuyProbability float64 `json:"option_buy_probability"`
+
+	// DealerHedgeMode selects the option dealer treatment arm: "on" uses the
+	// stateful spot hedge policy, "off" leaves filled-option delta unhedged.
+	// It is explicit rather than a bool so an omitted JSON field keeps the
+	// historical hedged baseline while a false-like zero value is not confused
+	// with an experiment arm.
+	DealerHedgeMode string `json:"dealer_hedge_mode"`
 }
 
 func (c *Config) normalize() error {
@@ -121,6 +129,9 @@ func (c *Config) normalize() error {
 	if c.StrikeStepUSD == 0 {
 		c.StrikeStepUSD = 1_000
 	}
+	if c.OptionMaxStrikesPerExpiry == 0 {
+		c.OptionMaxStrikesPerExpiry = 2*c.StrikesPerSide + 1
+	}
 	if c.StoikovRiskAversion == 0 {
 		c.StoikovRiskAversion = 0.005
 	}
@@ -139,12 +150,19 @@ func (c *Config) normalize() error {
 	if c.OptionBuyProbability == 0 {
 		c.OptionBuyProbability = 0.65
 	}
+	if c.DealerHedgeMode == "" {
+		c.DealerHedgeMode = "on"
+	}
 	if c.Step <= 0 || c.SnapshotInterval <= 0 || c.AutomationInterval <= 0 || c.QuoteInterval <= 0 ||
 		c.NoiseInterval <= 0 || c.GreekInterval <= 0 || c.ShortOptionTenor <= 0 || c.LongOptionTenor <= 0 ||
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
+		c.OptionMaxStrikesPerExpiry <= 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || c.OptionBuyProbability < 0 || c.OptionBuyProbability > 1 {
 		return errors.New("multivenue: invalid non-positive duration or model parameter")
+	}
+	if c.DealerHedgeMode != "on" && c.DealerHedgeMode != "off" {
+		return fmt.Errorf("multivenue: dealer hedge mode must be on or off, got %q", c.DealerHedgeMode)
 	}
 	for _, cadence := range []time.Duration{c.SnapshotInterval, c.AutomationInterval, c.QuoteInterval, c.NoiseInterval, c.GreekInterval} {
 		if c.Step > cadence {
@@ -243,6 +261,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 			"Each venue has independent prefunded accounts and local spot-margin borrowing.",
 			"Direct deterministic mounts are reproducible; latency is intentionally excluded.",
 			"No cross-venue routing or collateral transfer exists in schema version 1.",
+			"Option dealer begins with zero ABC; spot hedge sells borrow ABC against USD collateral when required.",
 		},
 	}, "", "  ")
 	if err != nil {
@@ -349,7 +368,8 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			&instrument.OptionChainLister{
 				Underlying: "ABC/USD", Spec: optionSpec,
 				TenorsNano: []int64{s.Config.ShortOptionTenor.Nanoseconds(), s.Config.LongOptionTenor.Nanoseconds()},
-				StrikeStep: s.Config.StrikeStepUSD * mvQuotePrecision, StrikesPerSide: s.Config.StrikesPerSide, IV: s.Config.OptionIV,
+				StrikeStep: s.Config.StrikeStepUSD * mvQuotePrecision, StrikesPerSide: s.Config.StrikesPerSide,
+				MaxStrikesPerExpiry: s.Config.OptionMaxStrikesPerExpiry, IV: s.Config.OptionIV,
 			},
 		},
 	})
@@ -358,9 +378,9 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		AutoBorrowSpot:    true,
 		DefaultMarginMode: exchange.CrossMargin,
 		CollateralFactors: map[string]float64{"USD": 1},
-		MaxBorrowPerAsset: map[string]int64{"USD": 20_000_000 * mvQuotePrecision},
-		AssetPrecisions:   map[string]int64{"USD": mvQuotePrecision},
-		PriceSource:       exchange.NewStaticPriceOracle(map[string]int64{"USD": mvQuotePrecision}),
+		MaxBorrowPerAsset: map[string]int64{"USD": 20_000_000 * mvQuotePrecision, "ABC": 20_000 * mvBasePrecision},
+		AssetPrecisions:   map[string]int64{"USD": mvQuotePrecision, "ABC": mvBasePrecision},
+		PriceSource:       exchange.NewStaticPriceOracle(map[string]int64{"USD": mvQuotePrecision, "ABC": mvBootstrapPrice}),
 	}); err != nil {
 		return nil, err
 	}
@@ -403,10 +423,11 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		Underlying: "ABC/USD", SpreadBps: 6, QuoteQty: mvBasePrecision / 5, Tick: tick, QuoteInterval: s.Config.QuoteInterval,
 	})
 	venue.FuturesMaker.SetTickerFactory(timers)
-	venue.OptionDealer = derivsim.NewOptionMarketMaker(nextActor(), connect(mmBalances, 150_000_000*mvQuotePrecision, zeroFee), derivsim.OptionMMConfig{
+	dealerBalances := map[string]int64{"USD": 500_000_000 * mvQuotePrecision}
+	venue.OptionDealer = derivsim.NewOptionMarketMaker(nextActor(), connect(dealerBalances, 150_000_000*mvQuotePrecision, zeroFee), derivsim.OptionMMConfig{
 		Underlying: "ABC/USD", IV: s.Config.OptionIV, SpreadBps: 30, SkewPerLotBps: 5,
 		QuoteQty: mvBasePrecision / 10, LotQty: mvBasePrecision / 20, PremiumTick: mvQuotePrecision,
-		QuoteInterval: s.Config.QuoteInterval, HedgeEnabled: true, HedgeInterval: s.Config.QuoteInterval,
+		QuoteInterval: s.Config.QuoteInterval, HedgeEnabled: s.Config.DealerHedgeMode == "on", HedgeInterval: s.Config.QuoteInterval,
 		HedgeBandQty: mvBasePrecision / 100, GreekInterval: s.Config.GreekInterval, BasePrecision: mvBasePrecision,
 	})
 	venue.OptionDealer.SetTickerFactory(timers)

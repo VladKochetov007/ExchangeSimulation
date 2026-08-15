@@ -3,6 +3,7 @@ package multivenue
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,16 @@ import (
 	"testing"
 	"time"
 )
+
+func TestConfigAcceptsDocumentedSnakeCaseJSON(t *testing.T) {
+	var cfg Config
+	if err := json.Unmarshal([]byte(`{"log_dir":"ignored","seed":99,"dealer_hedge_mode":"off","short_option_tenor":7200000000000}`), &cfg); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if cfg.Seed != 99 || cfg.DealerHedgeMode != "off" || cfg.ShortOptionTenor != 2*time.Hour {
+		t.Fatalf("snake-case config was not decoded: %+v", cfg)
+	}
+}
 
 func TestThreeVenueScenarioListsEveryDerivativeClass(t *testing.T) {
 	sim, err := NewSim(3*time.Second, Config{LogDir: t.TempDir(), Seed: 11})

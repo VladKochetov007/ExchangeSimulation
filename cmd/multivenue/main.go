@@ -26,6 +26,8 @@ func main() {
 	configPath := flag.String("config", "", "path to multivenue Config JSON")
 	duration := flag.Duration("duration", 8*time.Hour, "simulated duration; must be a multiple of the configured step")
 	logDir := flag.String("logdir", "logs/multivenue", "output directory")
+	seed := flag.Int64("seed", 0, "override simulation seed (0 keeps config/default)")
+	hedgeMode := flag.String("dealer-hedge", "", "override dealer hedge mode: on or off")
 	flag.Parse()
 
 	cfg := multivenue.Config{}
@@ -39,6 +41,12 @@ func main() {
 		}
 	}
 	cfg.LogDir = *logDir
+	if *seed != 0 {
+		cfg.Seed = *seed
+	}
+	if *hedgeMode != "" {
+		cfg.DealerHedgeMode = *hedgeMode
+	}
 
 	sim, err := multivenue.NewSim(*duration, cfg)
 	if err != nil {

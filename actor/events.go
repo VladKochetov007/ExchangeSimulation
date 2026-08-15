@@ -52,6 +52,8 @@ type OrderFillEvent struct {
 	TradeID   uint64        `json:"trade_id"`
 	FeeAmount int64         `json:"fee_amount"`
 	FeeAsset  string        `json:"fee_asset"`
+	// Timestamp is the exchange-side execution time, not actor receipt time.
+	Timestamp int64 `json:"timestamp"`
 }
 
 type OrderCancelledEvent struct {
