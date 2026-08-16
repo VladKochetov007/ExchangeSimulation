@@ -1976,6 +1976,29 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 		})
 	}
 
+	// A liquidation and any insurance-fund movement it causes must be visible in
+	// the event log, not only to a handler the run may not have installed. The
+	// logs are the observational surface for market behaviour after the fact.
+	if log := e.getLogger(symbol); log != nil {
+		log.LogEvent(timestamp, clientID, "liquidation", map[string]any{
+			"symbol":         symbol,
+			"position_size":  pos.Size,
+			"fill_price":     fillPrice,
+			"remaining_debt": debt,
+		})
+	}
+	if debt > 0 {
+		if log := e.getLogger("_global"); log != nil {
+			log.LogEvent(timestamp, clientID, "insurance_fund", map[string]any{
+				"symbol":  symbol,
+				"asset":   quote,
+				"delta":   -debt,
+				"balance": e.ExchangeBalance.InsuranceFund[quote],
+				"reason":  "liquidation_deficit",
+			})
+		}
+	}
+
 	if e.LiquidationHandler != nil {
 		e.LiquidationHandler.OnLiquidation(&LiquidationEvent{
 			Timestamp:     timestamp,
