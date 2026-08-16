@@ -109,6 +109,20 @@ percentages.
 Expected effect: **leaves P and C unchanged**; matters for queue-position
 research, which we are not yet doing.
 
+## Prerequisite before Config A: a slippage policy on every crossing actor
+
+`RoundTripTrader.cross` submits an IOC limit at exactly the cached touch
+(roundtrip.go:148-149) with no allowance. It fills 4.2% of the time *in a fully
+repaired book with no latency at all*. The same pattern appears in
+valuetrader.go:122/128/149/158, supplier.go:136 and metaorder.go:306. Only the
+carry desks and the maker hedge cross with a bound.
+
+Adding latency to actors that price against a touch they can no longer reach will
+drive those classes to zero fills while makers appear to thrive — which reads as a
+maker-favourable ecology result and is not one. This is the same shape as FFA-28
+(1,218 silent off-tick rejects) and FFA-57 (accepted, never filled). Tracked as
+FFA-70 with its own falsifier.
+
 ## Proposed configurations
 
 Each is a 12h run at seed 91 with replicate seeds to follow, and each must satisfy
