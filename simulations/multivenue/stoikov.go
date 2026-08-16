@@ -155,6 +155,10 @@ type StoikovMMConfig struct {
 	// alone. A partial weight lets the book discover price while still being
 	// tethered.
 	IndexWeight float64
+	// SubmitBeforeCancel replaces quotes without ever leaving the book empty.
+	// The exchange cancels a client's own crossing quotes on rest, so the
+	// momentary overlap cannot self-trade.
+	SubmitBeforeCancel bool
 }
 
 type quoteSide bool
@@ -443,20 +447,32 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 	if bid == mm.bidPrice && ask == mm.askPrice && mm.bidID != 0 && mm.askID != 0 {
 		return
 	}
-	if mm.bidID != 0 {
-		mm.CancelOrder(mm.bidID)
-		mm.bidID = 0
+	previousBid, previousAsk := mm.bidID, mm.askID
+	if !mm.cfg.SubmitBeforeCancel {
+		mm.cancelResting(previousBid, previousAsk)
 	}
-	if mm.askID != 0 {
-		mm.CancelOrder(mm.askID)
-		mm.askID = 0
-	}
+	mm.bidID, mm.askID = 0, 0
 	mm.hedgeDelta()
 	mm.bidPrice, mm.askPrice = bid, ask
 	bidRequest := mm.SubmitOrder(mm.cfg.Symbol, exchange.Buy, exchange.LimitOrder, bid, mm.cfg.QuoteQty)
 	mm.pending[bidRequest] = stoikovBid
 	askRequest := mm.SubmitOrder(mm.cfg.Symbol, exchange.Sell, exchange.LimitOrder, ask, mm.cfg.QuoteQty)
 	mm.pending[askRequest] = stoikovAsk
+	if mm.cfg.SubmitBeforeCancel {
+		// Cancelling only after the replacements are submitted keeps depth
+		// resting continuously. Cancelling first empties the book for the rest
+		// of the phase, which every actor scheduled behind the maker then meets.
+		mm.cancelResting(previousBid, previousAsk)
+	}
+}
+
+func (mm *StoikovMarketMaker) cancelResting(bidID, askID uint64) {
+	if bidID != 0 {
+		mm.CancelOrder(bidID)
+	}
+	if askID != 0 {
+		mm.CancelOrder(askID)
+	}
 }
 
 // NetDelta is the maker's exposure after its hedge.

@@ -181,6 +181,11 @@ type Config struct {
 	// SpotMakerCount is how many market makers quote the main spot pair on each
 	// venue, so the carrying capacity of market making can be measured the same
 	// way as that of any other strategy.
+	// SpotMakerSubmitBeforeCancel makes the spot makers replace quotes without
+	// emptying the book. Cancel-then-replace leaves both sides empty for the
+	// rest of the phase in nearly every step.
+	SpotMakerSubmitBeforeCancel bool `json:"spot_maker_submit_before_cancel"`
+
 	SpotMakerCount int `json:"spot_maker_count"`
 
 	// MakerQuoteQty is the size each spot and perpetual maker displays at its
@@ -1075,6 +1080,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			MinHalfSpreadTicks:       1,
 			InventoryLimit:           s.Config.MakerInventoryLimit,
 			InventorySkewBps:         s.Config.MakerInventorySkewBps,
+			SubmitBeforeCancel:       s.Config.SpotMakerSubmitBeforeCancel,
 			HedgeSymbol:              hedgeSymbol(symbol, s.Config.MakerHedgeSymbol),
 			HedgeBandQty:             s.Config.MakerHedgeBandQty,
 			HedgeSlippageBps:         s.Config.MakerHedgeSlippageBps,
