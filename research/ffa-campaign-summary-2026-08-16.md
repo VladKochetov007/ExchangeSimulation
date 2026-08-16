@@ -51,6 +51,22 @@ midpoints, because pinning the price removes the excursions through which
 makers shed inventory (FFA-24). And hedging does not remove risk from a closed
 population; it concentrates it in whoever does not hedge (FFA-30).
 
+## A correction worth reading before the tables
+
+The cross-asset markets were unanchored for most of the campaign: the venue
+published an index only for the main pair and the perpetual, so the CDF and
+cross makers quoted around their own midpoint and drifted (FFA-51). Every
+cross-pair maker figure reported before that fix is void, including the
+140,431 US dollars per member that briefly made it the best strategy here; it
+was a drifting book, not an edge. After publishing an index per symbol the same
+class loses money on all three seeds.
+
+The headline results were re-run on the fixed engine and all of them hold:
+option dealers around 240,000 per member, carry arbitrage around 31,000, option
+flow around minus 105,000, spot makers around minus 50,000, and the horizon
+reversal unchanged at 9,318 against minus 5,035 at three hours and minus 44,687
+against 30,744 at twelve (E-113).
+
 ## Literature validation
 
 | regularity | result |
