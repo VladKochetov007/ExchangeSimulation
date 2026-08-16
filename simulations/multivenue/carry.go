@@ -2,6 +2,7 @@ package multivenue
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"exchange_sim/actor"
@@ -48,6 +49,9 @@ type CarryArbitrageur struct {
 	lastReject exchange.RejectReason
 	spotSeen   int
 	perpSeen   int
+	fills      int
+	filledQty  int64
+	entryBasis []float64
 	subscribed bool
 }
 
@@ -65,6 +69,33 @@ func NewCarryArbitrageur(id uint64, gw actor.Gateway, cfg CarryArbitrageurConfig
 	c.SetHandler(c)
 	c.AddTicker(cfg.Interval, c.onTick)
 	return c
+}
+
+// CarryActivity summarises what a carry participant actually did, which
+// separates a strategy starved of opportunities from one earning thinner
+// margins on the same activity.
+type CarryActivity struct {
+	VenueID          string  `json:"venue_id"`
+	Attempts         int     `json:"attempts"`
+	Rejects          int     `json:"rejects"`
+	Fills            int     `json:"fills"`
+	FilledQty        int64   `json:"filled_qty"`
+	Entries          int     `json:"entries"`
+	MedianEntryBasis float64 `json:"median_entry_basis_bps"`
+}
+
+// Activity reports this participant's execution record.
+func (c *CarryArbitrageur) Activity(venueID string) CarryActivity {
+	median := 0.0
+	if len(c.entryBasis) > 0 {
+		sorted := append([]float64(nil), c.entryBasis...)
+		sort.Float64s(sorted)
+		median = sorted[len(sorted)/2]
+	}
+	return CarryActivity{
+		VenueID: venueID, Attempts: c.attempts, Rejects: c.rejects, Fills: c.fills,
+		FilledQty: c.filledQty, Entries: len(c.entryBasis), MedianEntryBasis: median,
+	}
 }
 
 // SpotPosition and PerpPosition expose the two legs; their sum is the
@@ -103,6 +134,8 @@ func (c *CarryArbitrageur) HandleEvent(_ context.Context, evt *actor.Event) {
 		case c.cfg.PerpSymbol:
 			c.perpPos += signed
 		}
+		c.fills++
+		c.filledQty += e.Qty
 		if e.IsFull {
 			c.pending = false
 		}
@@ -159,6 +192,11 @@ func (c *CarryArbitrageur) onTick(time.Time) {
 		return
 	}
 	if gap := c.targetCarry() - c.spotPos; gap != 0 {
+		// Record the basis being entered on, so a fall in results can be
+		// attributed either to fewer opportunities or to thinner ones.
+		if spotMid, perpMid := c.spot.mid(), c.perp.mid(); spotMid > 0 && perpMid > 0 {
+			c.entryBasis = append(c.entryBasis, 1e4*float64(perpMid-spotMid)/float64(spotMid))
+		}
 		c.tradeSpot(gap)
 	}
 }

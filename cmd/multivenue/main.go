@@ -24,6 +24,7 @@ type greekOutput struct {
 	Mispricing       []multivenue.MispricingStats              `json:"mispricing"`
 	Microstructure   []multivenue.MicrostructureStats          `json:"microstructure"`
 	Metaorders       []multivenue.MetaorderRecord              `json:"metaorders,omitempty"`
+	CarryActivity    []multivenue.CarryActivity                `json:"carry_activity,omitempty"`
 	RouterReports    []multivenue.CrossVenueArbReport          `json:"router_reports,omitempty"`
 	InitialAccounts  []multivenue.ParticipantAccountSnapshot   `json:"initial_accounts,omitempty"`
 	TerminalAccounts []multivenue.ParticipantAccountSnapshot   `json:"terminal_accounts,omitempty"`
@@ -95,6 +96,9 @@ func main() {
 		}
 		if venue.Microstructure != nil {
 			output.Microstructure = append(output.Microstructure, *venue.Microstructure)
+		}
+		for _, arb := range venue.CarryArbs {
+			output.CarryActivity = append(output.CarryActivity, arb.Activity(venue.ID))
 		}
 		for _, trader := range venue.MetaorderTraders {
 			output.Metaorders = append(output.Metaorders, trader.Records()...)
