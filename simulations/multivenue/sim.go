@@ -117,6 +117,15 @@ type Config struct {
 	// target position falls for every percent the price rises.
 	ElasticSupplierUnitsPerPercent int64 `json:"elastic_supplier_units_per_percent"`
 
+	// CarryArbitrageurCount adds delta-neutral participants that hold offsetting
+	// spot and perpetual positions and earn the basis. They are the only
+	// participant here that can take the other side of directional flow without
+	// accumulating direction themselves.
+	CarryArbitrageurCount int   `json:"carry_arbitrageur_count"`
+	CarryEntryBps         int64 `json:"carry_entry_bps"`
+	CarryExitBps          int64 `json:"carry_exit_bps"`
+	CarryMaxPosition      int64 `json:"carry_max_position"`
+
 	// MakerHedgeSymbol, when set, is where the ABC/USD makers offset the
 	// inventory they take on. Real makers quote one instrument and move the
 	// delta to another rather than running flat by holding the asset.
@@ -295,6 +304,15 @@ func (c *Config) normalize() error {
 	if c.ElasticSupplierUnitsPerPercent == 0 {
 		c.ElasticSupplierUnitsPerPercent = 50 * mvBasePrecision
 	}
+	if c.CarryEntryBps == 0 {
+		c.CarryEntryBps = 20
+	}
+	if c.CarryExitBps == 0 {
+		c.CarryExitBps = 5
+	}
+	if c.CarryMaxPosition == 0 {
+		c.CarryMaxPosition = 500 * mvBasePrecision
+	}
 	if c.MakerHedgeSlippageBps == 0 {
 		c.MakerHedgeSlippageBps = 50
 	}
@@ -406,7 +424,8 @@ func (c *Config) normalize() error {
 		c.NoiseInterval <= 0 || c.GreekInterval <= 0 || c.ShortOptionTenor <= 0 || c.LongOptionTenor <= 0 ||
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 || *c.ValueTraderCount < 0 ||
-		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 || c.ElasticSupplierCount < 0 || c.ElasticSupplierUnitsPerPercent <= 0 ||
+		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 || c.ElasticSupplierCount < 0 || c.ElasticSupplierUnitsPerPercent <= 0 || c.CarryArbitrageurCount < 0 ||
+		c.CarryEntryBps <= 0 || c.CarryExitBps < 0 || c.CarryMaxPosition <= 0 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || *c.OptionBuyProbability < 0 || *c.OptionBuyProbability > 1 {
@@ -444,6 +463,7 @@ type Venue struct {
 	ValueTraders     []*ValueTrader
 	RoundTripTraders []*RoundTripTrader
 	Suppliers        []*ElasticSupplier
+	CarryArbs        []*CarryArbitrageur
 	MetaorderTraders []*MetaorderTrader
 	lastTwoSided     map[string]twoSidedMark
 	Mispricing       *MispricingStats
@@ -677,7 +697,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	fundamental := NewFundamentalValue(cfg.Seed, start, mvBootstrapPrice,
 		int64(cfg.AutomationInterval), mvQuotePrecision, cfg.FundamentalLogVolPerStep)
 	sim := &Sim{Config: cfg, Runner: runner, Fundamental: fundamental,
-		SpotIndex: newSpotIndexProvider(cfg.MakerAnchor, "ABC/USD"), Venues: make([]*Venue, 0, len(cfg.VenueIDs))}
+		SpotIndex: newSpotIndexProvider(cfg.MakerAnchor, "ABC/USD", "ABC-PERP"), Venues: make([]*Venue, 0, len(cfg.VenueIDs))}
 	actorID := uint64(0)
 	for venueIndex, id := range cfg.VenueIDs {
 		venue, err := sim.addVenue(id, venueIndex, clock, timers, &actorID)
@@ -712,6 +732,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		}
 		for _, supplier := range venue.Suppliers {
 			runner.AddActor(supplier)
+		}
+		for _, arb := range venue.CarryArbs {
+			runner.AddActor(arb)
 		}
 	}
 	if err := sim.addMetaorderTraders(timers, &actorID); err != nil {
@@ -827,7 +850,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	// nothing to advertise: the makers already observe the book directly.
 	indexFeedSymbols := []string(nil)
 	if s.Config.MakerAnchor != "own_mid" {
-		indexFeedSymbols = []string{"ABC/USD"}
+		indexFeedSymbols = []string{"ABC/USD", "ABC-PERP"}
 	}
 	ex.ConfigureAutomation(exchange.AutomationConfig{
 		IndexProvider:       index,
@@ -943,7 +966,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			venue.SpotMakers = append(venue.SpotMakers, crossMaker)
 		}
 	}
-	venue.PerpMaker = NewStoikovMarketMaker(nextActor(), connect("perp_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC-PERP", "ABC/USD", mvBootstrapPrice, mvQuotePrecision, tick))
+	venue.PerpMaker = NewStoikovMarketMaker(nextActor(), connect("perp_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC-PERP", "ABC-PERP", mvBootstrapPrice, mvQuotePrecision, tick))
 	venue.PerpMaker.SetTickerFactory(timers)
 
 	venue.FuturesMaker = derivsim.NewFuturesMarketMaker(nextActor(), connect("futures_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), derivsim.FuturesMMConfig{
@@ -989,6 +1012,21 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		venue.OptionFlows = append(venue.OptionFlows, flow)
 	}
 	venue.OptionFlow = venue.OptionFlows[0]
+
+	carryBalances := map[string]int64{"ABC": 2_000 * mvBasePrecision, "USD": 200_000_000 * mvQuotePrecision}
+	if s.Config.CrossAssetSpotGraph {
+		carryBalances["CDF"] = 1_000 * mvBasePrecision
+	}
+	for participant := 0; participant < s.Config.CarryArbitrageurCount; participant++ {
+		arb := NewCarryArbitrageur(nextActor(), connect(fmt.Sprintf("carry_arb_%d", participant+1), carryBalances, 100_000_000*mvQuotePrecision, noiseFee), CarryArbitrageurConfig{
+			SpotSymbol: "ABC/USD", PerpSymbol: "ABC-PERP", BasePrecision: mvBasePrecision,
+			Interval: s.Config.NoiseInterval, EntryBps: s.Config.CarryEntryBps, ExitBps: s.Config.CarryExitBps,
+			MaxPosition: s.Config.CarryMaxPosition, LotQty: mvBasePrecision / 5,
+			SpotTick: tick, PerpTick: tick,
+		})
+		arb.SetTickerFactory(timers)
+		venue.CarryArbs = append(venue.CarryArbs, arb)
+	}
 
 	supplierBalances := map[string]int64{"ABC": 20_000 * mvBasePrecision, "USD": 500_000_000 * mvQuotePrecision}
 	if s.Config.CrossAssetSpotGraph {
