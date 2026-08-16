@@ -158,10 +158,15 @@ type Config struct {
 	// the other side of the derivative dealers: cash-and-carry desks that trade
 	// dated futures against spot, and put-call parity desks. Without them the
 	// dated ladder is quoted but has no counterparty flow.
-	DatedCarryArbCount int   `json:"dated_carry_arb_count"`
-	ParityArbCount     int   `json:"parity_arb_count"`
-	DatedCarryEdgeBps  int64 `json:"dated_carry_edge_bps"`
-	ParityEdgeBps      int64 `json:"parity_edge_bps"`
+	DatedCarryArbCount    int   `json:"dated_carry_arb_count"`
+	ParityArbCount        int   `json:"parity_arb_count"`
+	DatedCarryEdgeBps     int64 `json:"dated_carry_edge_bps"`
+	DatedCarrySlippageBps int64 `json:"dated_carry_slippage_bps"`
+	// DatedCarryCheckInterval defaults to QuoteInterval. Sharing the makers'
+	// cadence phase-locks the desk to the instant the makers have cancelled and
+	// not yet replaced, so it repeatedly takes against an empty book.
+	DatedCarryCheckInterval time.Duration `json:"dated_carry_check_interval"`
+	ParityEdgeBps           int64         `json:"parity_edge_bps"`
 	// DatedCarryScaleEdge demands less edge as settlement risk shrinks into
 	// expiry, which is what produces a square-root convergence envelope.
 	DatedCarryScaleEdge bool `json:"dated_carry_scale_edge"`
@@ -387,6 +392,9 @@ func (c *Config) normalize() error {
 	}
 	if c.FundingMaxRateBps == 0 {
 		c.FundingMaxRateBps = 75
+	}
+	if c.DatedCarrySlippageBps == 0 {
+		c.DatedCarrySlippageBps = 15
 	}
 	if c.DatedCarryEdgeBps == 0 {
 		c.DatedCarryEdgeBps = 10
@@ -1155,6 +1163,10 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	}
 	venue.OptionFlow = venue.OptionFlows[0]
 
+	datedCarryInterval := s.Config.DatedCarryCheckInterval
+	if datedCarryInterval <= 0 {
+		datedCarryInterval = s.Config.QuoteInterval
+	}
 	derivArbBalances := map[string]int64{"ABC": 5_000 * mvBasePrecision, "USD": 500_000_000 * mvQuotePrecision}
 	carryTenor := int64(0)
 	if s.Config.DatedCarryScaleEdge {
@@ -1163,7 +1175,8 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	for participant := 0; participant < s.Config.DatedCarryArbCount; participant++ {
 		desk := derivsim.NewCashCarryArb(nextActor(), connect(fmt.Sprintf("dated_carry_arb_%d", participant+1), derivArbBalances, 100_000_000*mvQuotePrecision, zeroFee), derivsim.CarryArbConfig{
 			Underlying: "ABC/USD", EdgeBps: s.Config.DatedCarryEdgeBps, LotQty: mvBasePrecision / 10,
-			MaxPosPerSym: 5 * mvBasePrecision, CheckInterval: s.Config.QuoteInterval, TenorNano: carryTenor,
+			MaxPosPerSym: 5 * mvBasePrecision, CheckInterval: datedCarryInterval, TenorNano: carryTenor,
+			TickSize: tick, SlippageBps: s.Config.DatedCarrySlippageBps,
 		})
 		desk.SetTickerFactory(timers)
 		venue.DatedCarryArbs = append(venue.DatedCarryArbs, desk)
