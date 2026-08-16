@@ -148,6 +148,13 @@ type Config struct {
 	// persists indefinitely.
 	FundingMaxRateBps int64 `json:"funding_max_rate_bps"`
 
+	// OptionDealerCount and FuturesMakerCount set how many independent dealers
+	// compete on the option chain and the dated ladder. With one of each the
+	// derivative markets are one against many; competing dealers are what makes
+	// them many against many.
+	OptionDealerCount int `json:"option_dealer_count"`
+	FuturesMakerCount int `json:"futures_maker_count"`
+
 	// SpotMakerCount is how many market makers quote the main spot pair on each
 	// venue, so the carrying capacity of market making can be measured the same
 	// way as that of any other strategy.
@@ -363,6 +370,12 @@ func (c *Config) normalize() error {
 	if c.FundingMaxRateBps == 0 {
 		c.FundingMaxRateBps = 75
 	}
+	if c.OptionDealerCount == 0 {
+		c.OptionDealerCount = 1
+	}
+	if c.FuturesMakerCount == 0 {
+		c.FuturesMakerCount = 1
+	}
 	if c.SpotMakerCount == 0 {
 		c.SpotMakerCount = 2
 	}
@@ -484,7 +497,7 @@ func (c *Config) normalize() error {
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 || *c.ValueTraderCount < 0 ||
 		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 || c.ElasticSupplierCount < 0 || c.ElasticSupplierUnitsPerPercent <= 0 || c.CarryArbitrageurCount < 0 ||
-		c.CarryEntryBps <= 0 || c.CarryExitBps < 0 || c.CarryMaxPosition <= 0 || c.CarryLotQty <= 0 || c.MakerQuoteQty <= 0 || c.SpotMakerCount < 1 || c.FundingMaxRateBps <= 0 || c.FundingIntervalSeconds <= 0 || c.LatentLiquidityCount < 0 ||
+		c.CarryEntryBps <= 0 || c.CarryExitBps < 0 || c.CarryMaxPosition <= 0 || c.CarryLotQty <= 0 || c.MakerQuoteQty <= 0 || c.SpotMakerCount < 1 || c.OptionDealerCount < 1 || c.FuturesMakerCount < 1 || c.FundingMaxRateBps <= 0 || c.FundingIntervalSeconds <= 0 || c.LatentLiquidityCount < 0 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || *c.OptionBuyProbability < 0 || *c.OptionBuyProbability > 1 {
@@ -513,7 +526,9 @@ type Venue struct {
 	SpotMakers           []*StoikovMarketMaker
 	PerpMaker            *StoikovMarketMaker
 	FuturesMaker         *derivsim.FuturesMarketMaker
+	FuturesMakers        []*derivsim.FuturesMarketMaker
 	OptionDealer         *derivsim.OptionMarketMaker
+	OptionDealers        []*derivsim.OptionMarketMaker
 	OptionDealerClientID uint64
 	// Singular fields retain the baseline participant for callers written
 	// before configurable rosters. All actors live in the corresponding slice.
@@ -780,8 +795,12 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 			runner.AddActor(maker)
 		}
 		runner.AddActor(venue.PerpMaker)
-		runner.AddActor(venue.FuturesMaker)
-		runner.AddActor(venue.OptionDealer)
+		for _, maker := range venue.FuturesMakers {
+			runner.AddActor(maker)
+		}
+		for _, dealer := range venue.OptionDealers {
+			runner.AddActor(dealer)
+		}
 		for _, noise := range venue.NoiseTraders {
 			runner.AddActor(noise)
 		}
@@ -1049,20 +1068,30 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	venue.PerpMaker = NewStoikovMarketMaker(nextActor(), connect("perp_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), perpMakerConfig)
 	venue.PerpMaker.SetTickerFactory(timers)
 
-	venue.FuturesMaker = derivsim.NewFuturesMarketMaker(nextActor(), connect("futures_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), derivsim.FuturesMMConfig{
-		Underlying: "ABC/USD", SpreadBps: 6, QuoteQty: mvBasePrecision / 5, Tick: tick, QuoteInterval: s.Config.QuoteInterval,
-	})
-	venue.FuturesMaker.SetTickerFactory(timers)
+	for i := 0; i < s.Config.FuturesMakerCount; i++ {
+		futuresMaker := derivsim.NewFuturesMarketMaker(nextActor(), connect(fmt.Sprintf("futures_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), derivsim.FuturesMMConfig{
+			Underlying: "ABC/USD", SpreadBps: 6, QuoteQty: mvBasePrecision / 5, Tick: tick, QuoteInterval: s.Config.QuoteInterval,
+		})
+		futuresMaker.SetTickerFactory(timers)
+		venue.FuturesMakers = append(venue.FuturesMakers, futuresMaker)
+	}
+	venue.FuturesMaker = venue.FuturesMakers[0]
 	dealerBalances := map[string]int64{"USD": 500_000_000 * mvQuotePrecision}
-	dealerClientID, dealerGateway := venue.connectParticipant(mount, "option_dealer", dealerBalances, 150_000_000*mvQuotePrecision, zeroFee)
-	venue.OptionDealerClientID = dealerClientID
-	venue.OptionDealer = derivsim.NewOptionMarketMaker(nextActor(), dealerGateway, derivsim.OptionMMConfig{
-		Underlying: "ABC/USD", IV: s.Config.OptionIV, SpreadBps: 30, SkewPerLotBps: 5,
-		QuoteQty: mvBasePrecision / 10, LotQty: mvBasePrecision / 20, PremiumTick: mvQuotePrecision,
-		QuoteInterval: s.Config.QuoteInterval, HedgeEnabled: s.Config.DealerHedgeMode == "on", HedgeInterval: s.Config.QuoteInterval,
-		HedgeBandQty: mvBasePrecision / 100, GreekInterval: s.Config.GreekInterval, BasePrecision: mvBasePrecision,
-	})
-	venue.OptionDealer.SetTickerFactory(timers)
+	for i := 0; i < s.Config.OptionDealerCount; i++ {
+		dealerClientID, dealerGateway := venue.connectParticipant(mount, fmt.Sprintf("option_dealer_%d", i+1), dealerBalances, 150_000_000*mvQuotePrecision, zeroFee)
+		if i == 0 {
+			venue.OptionDealerClientID = dealerClientID
+		}
+		dealer := derivsim.NewOptionMarketMaker(nextActor(), dealerGateway, derivsim.OptionMMConfig{
+			Underlying: "ABC/USD", IV: s.Config.OptionIV, SpreadBps: 30, SkewPerLotBps: 5,
+			QuoteQty: mvBasePrecision / 10, LotQty: mvBasePrecision / 20, PremiumTick: mvQuotePrecision,
+			QuoteInterval: s.Config.QuoteInterval, HedgeEnabled: s.Config.DealerHedgeMode == "on", HedgeInterval: s.Config.QuoteInterval,
+			HedgeBandQty: mvBasePrecision / 100, GreekInterval: s.Config.GreekInterval, BasePrecision: mvBasePrecision,
+		})
+		dealer.SetTickerFactory(timers)
+		venue.OptionDealers = append(venue.OptionDealers, dealer)
+	}
+	venue.OptionDealer = venue.OptionDealers[0]
 
 	noiseBalances := map[string]int64{"ABC": 100 * mvBasePrecision, "USD": 100 * mvQuotePrecision}
 	noiseSymbols := []string{"ABC/USD", "ABC-PERP"}
