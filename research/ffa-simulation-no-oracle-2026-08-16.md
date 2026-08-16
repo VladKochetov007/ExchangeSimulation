@@ -172,3 +172,66 @@ Mechanical and accounting findings do not depend on who knew what:
   about relative information, and is testable by varying that directly.
 - Every ladder profitability figure from the oracle era, and every population
   payoff table from it.
+
+## What a purely order-driven market does (findings since the deletion)
+
+All of the following come from runs in which nothing in the runtime knows a price
+before the market does.
+
+### The market bounds itself
+
+Over 48 simulated hours the level stays within about 3 percent of where it
+started. The runaway to 8.9e8 seen earlier in the campaign does not reproduce.
+Removing the carry, dated-carry and parity desks does not unbind it either, so
+cross-market arbitrage is not what holds the level.
+
+### Price moves only because makers carry inventory
+
+Setting `maker_inventory_skew_bps` to zero and raising `maker_inventory_limit` a
+hundredfold freezes the price completely: 50.000 at every one of 2,880 samples,
+zero excursion, under both anchors. The market is not idle while this happens.
+Inventory redistributes, the option dealer earns 2,412,832 per member and the
+futures maker 416,655 per member.
+
+A maker with no inventory pressure is an infinitely deep wall at a fixed price.
+It absorbs flow and never reprices, so the market has volume and no price
+discovery. Inventory skew is therefore not a bound on price movement, it is the
+mechanism that produces price movement — and it supplies the bound at the same
+time, because a maker that is long quotes down to unload and is pulled back as it
+does.
+
+This is the honest replacement for the deleted volatility knob. Volatility is an
+output of the population, not a configured input.
+
+### Arbitrage supplies mean reversion, not the bound
+
+With the arbitrage desks present the price oscillates inside a band and ends
+slightly below where it began. Without them the consensus run never traded below
+its starting level across 2,880 samples, so its band low equals its start: a
+one-directional trend. One seed cannot separate a trend from a lucky walk, so
+this is an observation awaiting replicates rather than a result.
+
+### The consensus index is what couples venues
+
+With it, venue midpoints agree to within 0.002 to 0.004. Without it, and without
+arbitrage, venues drift about 4 percent apart. The index summarises what
+participants did; it does not tell them anything about value.
+
+### Own_mid anchoring admits an endogenous liquidity collapse
+
+Under `own_mid` with arbitrage desks present, all three seeds tried so far end
+with the primary book durably one-sided, and the run aborts because there is no
+two-sided mark to value accounts against. The same configuration without the
+arbitrage desks survives.
+
+Reading: arbitrage run against a self-referential book destroys it. Nothing ties
+a venue's makers to anywhere else, the carry desks take one side persistently,
+the makers follow their own book rather than resisting, and that side empties.
+This is a market-failure mode worth studying rather than a defect to patch.
+
+## What was invalidated by the deletion
+
+Every experiment that scaled the deleted volatility parameter is void, which
+includes the volatility carrying-capacity work in its entirety. Volatility now
+has to be produced by the population, and the first measurement of that is the
+inventory-skew sweep.

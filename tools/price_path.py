@@ -43,10 +43,23 @@ def main() -> None:
         low, high = min(mids), max(mids)
         # Largest move away from the starting level, in either direction.
         excursion = max(abs(low - start), abs(high - start))
+        # Realised volatility of the path itself. In a market where nobody knows
+        # a value, this is an output of the population rather than an input.
+        returns = [
+            (b - a) / a for a, b in zip(mids, mids[1:]) if a > 0
+        ]
+        mean = sum(returns) / len(returns) if returns else 0.0
+        variance = (
+            sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
+            if len(returns) > 1
+            else 0.0
+        )
+        realised = variance ** 0.5
         print(
             f"{run.name:28s} samples={len(mids):5d} start={start:8.3f} end={end:8.3f} "
             f"drift={100*(end-start)/start:+7.2f}% band=[{low:.3f},{high:.3f}] "
-            f"max excursion={100*excursion/start:6.2f}%"
+            f"max excursion={100*excursion/start:6.2f}% "
+            f"realised vol/sample={100*realised:7.4f}%"
         )
 
 
