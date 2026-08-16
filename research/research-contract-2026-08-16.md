@@ -44,6 +44,19 @@ price banding. Documented in `research/exchange-mechanics-reference-2026-08-16.m
   execution, not strategy.
 - A claim promoted from a single seed is provisional regardless of effect size.
 
+## Distinguishing a result from an accident
+
+A collapsed market and a terminated process both leave a log directory with no
+report. They mean opposite things. One arm in this campaign was killed by a tool
+timeout reaching its background children and was briefly indistinguishable from
+a market failure.
+
+Every arm must be classified with `tools/run_outcome.py`, which separates
+COMPLETED, COLLAPSED (the simulator reported no valid two-sided mark), FAILED,
+TRUNCATED and INCOMPLETE. Only COLLAPSED counts as evidence about the market.
+Long runs are launched with `setsid` so the tool-call window does not bound the
+experiment.
+
 ## Promotion rule
 
 A claim reaches `supported` only after it holds across at least three seeds and
