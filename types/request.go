@@ -45,6 +45,11 @@ type OrderRequest struct {
 	Visibility   Visibility   `json:"visibility"`
 	IcebergQty   int64        `json:"iceberg_qty"`
 	PositionSide PositionSide `json:"position_side"`
+	// ReduceOnly marks an order that may only shrink an existing position.
+	// Venues treat such an order as risk-reducing, which matters when the
+	// engine is saturated: refusing it would trap a client in a position it is
+	// trying to close.
+	ReduceOnly bool `json:"reduce_only"`
 }
 
 type CancelRequest struct {

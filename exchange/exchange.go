@@ -124,13 +124,16 @@ func (l scopedInstrumentLogger) LogEvent(simTime int64, clientID uint64, eventNa
 }
 
 type DefaultExchange struct {
-	ID                    string
-	Clients               map[uint64]*Client
-	Gateways              map[uint64]*ClientGateway
-	Books                 map[string]*OrderBook
-	Instruments           map[string]Instrument
-	Positions             PositionStore
-	ExchangeBalance       *ExchangeBalance
+	ID              string
+	Clients         map[uint64]*Client
+	Gateways        map[uint64]*ClientGateway
+	Books           map[string]*OrderBook
+	Instruments     map[string]Instrument
+	Positions       PositionStore
+	ExchangeBalance *ExchangeBalance
+	// RequestPolicy meters and admits incoming requests. Nil leaves the venue
+	// unmetered, which is what scenarios without a published budget expect.
+	RequestPolicy         RequestPolicy
 	NextOrderID           uint64
 	Matcher               MatchingEngine
 	MDPublisher           *MDPublisher
@@ -972,6 +975,13 @@ func (e *DefaultExchange) handleClientRequest(gateway *ClientGateway, req Reques
 			return
 		}
 	}
+
+	permit, rejection, admitted := e.admitRequest(gateway.ClientID, req)
+	if !admitted {
+		gateway.enqueueResponse(rejection)
+		return
+	}
+	defer e.releasePermit(permit)
 
 	var resp Response
 	switch req.Type {

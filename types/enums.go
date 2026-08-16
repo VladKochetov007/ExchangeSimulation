@@ -113,6 +113,12 @@ const (
 	RejectFOKNotFilled        RejectReason = "FOK_NOT_FILLED"
 	RejectUnknownRequest      RejectReason = "UNKNOWN_REQUEST"
 	RejectExceedsPosition     RejectReason = "EXCEEDS_POSITION"
+	// RejectRateLimited means the client exceeded a published request budget.
+	// Slowing down will fix it.
+	RejectRateLimited RejectReason = "RATE_LIMITED"
+	// RejectOverloaded means the venue's own queue is saturated. The client did
+	// nothing wrong and slowing down may not help.
+	RejectOverloaded RejectReason = "OVERLOADED"
 )
 
 // RequestType identifies a request sent through a Gateway.

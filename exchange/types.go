@@ -111,6 +111,8 @@ const (
 	RejectFOKNotFilled        = etypes.RejectFOKNotFilled
 	RejectUnknownRequest      = etypes.RejectUnknownRequest
 	RejectExceedsPosition     = etypes.RejectExceedsPosition
+	RejectRateLimited         = etypes.RejectRateLimited
+	RejectOverloaded          = etypes.RejectOverloaded
 )
 
 const (
