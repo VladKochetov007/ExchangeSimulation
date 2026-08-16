@@ -51,6 +51,8 @@ type CarryArbitrageur struct {
 	perpSeen   int
 	fills      int
 	filledQty  int64
+	feesPaid   int64
+	notional   int64
 	entryBasis []float64
 	subscribed bool
 }
@@ -82,6 +84,11 @@ type CarryActivity struct {
 	FilledQty        int64   `json:"filled_qty"`
 	Entries          int     `json:"entries"`
 	MedianEntryBasis float64 `json:"median_entry_basis_bps"`
+	FeesPaid         int64   `json:"fees_paid"`
+	Notional         int64   `json:"notional"`
+	// FeeCostBps is fees as a fraction of the notional traded, which is the
+	// cost the basis has to beat.
+	FeeCostBps float64 `json:"fee_cost_bps"`
 }
 
 // Activity reports this participant's execution record.
@@ -92,9 +99,14 @@ func (c *CarryArbitrageur) Activity(venueID string) CarryActivity {
 		sort.Float64s(sorted)
 		median = sorted[len(sorted)/2]
 	}
+	feeCost := 0.0
+	if c.notional > 0 {
+		feeCost = 1e4 * float64(c.feesPaid) / float64(c.notional)
+	}
 	return CarryActivity{
 		VenueID: venueID, Attempts: c.attempts, Rejects: c.rejects, Fills: c.fills,
 		FilledQty: c.filledQty, Entries: len(c.entryBasis), MedianEntryBasis: median,
+		FeesPaid: c.feesPaid, Notional: c.notional, FeeCostBps: feeCost,
 	}
 }
 
@@ -136,6 +148,9 @@ func (c *CarryArbitrageur) HandleEvent(_ context.Context, evt *actor.Event) {
 		}
 		c.fills++
 		c.filledQty += e.Qty
+		c.feesPaid += e.FeeAmount
+		// Notional in quote units, so fees and edge are comparable.
+		c.notional += e.Qty * e.Price / c.cfg.BasePrecision
 		if e.IsFull {
 			c.pending = false
 		}
