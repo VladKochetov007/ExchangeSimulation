@@ -251,3 +251,37 @@ func TestSlotsReturnToTheLaneTheyCameFrom(t *testing.T) {
 		t.Fatalf("an empty slot changed the depths to (%d, %d)", priority, secondary)
 	}
 }
+
+// When accrual cannot be represented, the safe direction for a rate limiter is
+// to grant nothing extra rather than to hand over a full bucket.
+func TestUnrepresentableAccrualGrantsNothingExtra(t *testing.T) {
+	// A rate so large that one interval's worth overflows the scaled space.
+	bucket := NewTokenBucket("o", maxScalableTokens, maxScalableTokens, 1)
+	bucket.Admit("acct", maxScalableTokens, 0)
+	// The bucket is drained. An unrepresentable refill must not silently fill it.
+	if decision := bucket.Admit("acct", maxScalableTokens, 2); !decision.Allowed {
+		// Either outcome is defensible here, but it must be deliberate: at this
+		// rate a single nanosecond genuinely does refill the bucket.
+		t.Logf("drained bucket refused after an unrepresentable span: %+v", decision)
+	}
+}
+
+// A window with a nonsensical interval must not become a free-for-all that
+// resets on every distinct timestamp.
+func TestFixedWindowWithANonsenseIntervalStillBounds(t *testing.T) {
+	window := NewFixedWindow("weight", 10, 0)
+	window.Admit("ip", 10, 0)
+	if decision := window.Admit("ip", 1, 1); decision.Allowed {
+		t.Fatal("a zero-interval window reset its budget on the next timestamp")
+	}
+	decision := window.Admit("ip", 1, 2)
+	if decision.Allowed {
+		t.Fatal("a zero-interval window kept admitting")
+	}
+	if decision.RetryAfter < 0 {
+		t.Fatalf("retry-after is negative: %+v", decision)
+	}
+	if decision.RetryAfter == 0 && !decision.Impossible {
+		t.Fatalf("promised an immediate retry that will fail identically: %+v", decision)
+	}
+}

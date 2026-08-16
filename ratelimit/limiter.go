@@ -48,6 +48,10 @@ type FixedWindow struct {
 	windowAt map[string]int64
 }
 
+// NewFixedWindow builds an interval quota. A non-positive interval is treated
+// as a window that never rolls over: the budget is spent once and never
+// refreshed. The alternative, computing a window boundary from a zero interval,
+// makes every distinct timestamp its own window and silently removes the limit.
 func NewFixedWindow(name string, budget, interval int64) *FixedWindow {
 	return &FixedWindow{
 		name: name, budget: budget, interval: interval,
@@ -66,7 +70,7 @@ func (w *FixedWindow) Admit(scope string, cost, now int64) Decision {
 	}
 	// Windows are anchored to the epoch so every scope rolls over together,
 	// which is what makes published reset times meaningful to a client.
-	current := now - modFloor(now, w.interval)
+	current := w.windowStart(now)
 	// Only a later window resets usage. A replayed or reordered timestamp from
 	// an earlier window must not clear what the current one has spent, or a
 	// client could reclaim its budget by sending an old timestamp.
@@ -77,6 +81,9 @@ func (w *FixedWindow) Admit(scope string, cost, now int64) Decision {
 		current = stored
 	}
 	if w.used[scope]+cost > w.budget {
+		if w.interval <= 0 {
+			return Decision{Limit: w.name, Impossible: true}
+		}
 		return Decision{Limit: w.name, RetryAfter: current + w.interval - now}
 	}
 	w.used[scope] += cost
@@ -86,7 +93,7 @@ func (w *FixedWindow) Admit(scope string, cost, now int64) Decision {
 // Used reports the charge accumulated in the current window, which is what a
 // venue publishes back to the client in a used-weight header.
 func (w *FixedWindow) Used(scope string, now int64) int64 {
-	if w.windowAt[scope] != now-modFloor(now, w.interval) {
+	if w.windowAt[scope] != w.windowStart(now) {
 		return 0
 	}
 	return w.used[scope]
@@ -182,6 +189,9 @@ func (b *TokenBucket) accrue(tokens, elapsed int64) int64 {
 
 	gained := int64(0)
 	if whole := elapsed / b.interval; whole > 0 {
+		// An unrepresentable product means the true gain exceeds anything the
+		// bucket can hold, since need is bounded by capacity. Returning a full
+		// bucket is the arithmetic answer here, not a lenient shortcut.
 		if perInterval > 0 && whole > math.MaxInt64/perInterval {
 			return capped
 		}
@@ -246,6 +256,16 @@ func (b *TokenBucket) timeToAccrue(shortfall int64) int64 {
 // identically forever, which would spin a caller obeying RetryAfter.
 func (b *TokenBucket) refillable() bool { return b.refill > 0 && b.interval > 0 }
 
+// windowStart is the boundary of the window containing now. A non-positive
+// interval has one window covering all time, so every timestamp maps to the
+// same start and the budget never refreshes.
+func (w *FixedWindow) windowStart(now int64) int64 {
+	if w.interval <= 0 {
+		return 0
+	}
+	return now - modFloor(now, w.interval)
+}
+
 // modFloor is a modulo that floors toward negative infinity, so window
 // boundaries stay aligned for timestamps before the epoch.
 func modFloor(value, step int64) int64 {
@@ -269,13 +289,16 @@ func (w *FixedWindow) Would(scope string, cost, now int64) Decision {
 	if cost > w.budget {
 		return Decision{Limit: w.name, Impossible: true}
 	}
-	current := now - modFloor(now, w.interval)
+	current := w.windowStart(now)
 	used := int64(0)
 	if stored, seen := w.windowAt[scope]; seen && current <= stored {
 		used = w.used[scope]
 		current = stored
 	}
 	if used+cost > w.budget {
+		if w.interval <= 0 {
+			return Decision{Limit: w.name, Impossible: true}
+		}
 		return Decision{Limit: w.name, RetryAfter: current + w.interval - now}
 	}
 	return Allow()
