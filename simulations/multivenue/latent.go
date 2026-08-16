@@ -40,6 +40,17 @@ type LatentLiquidityConfig struct {
 	// are placed around the current price.
 	SpreadBps float64 `json:"spread_bps"`
 
+	// ConversionsPerTick bounds how many crossed intentions become orders in
+	// one interval. Converting a single one throttles the population to a
+	// trickle: the supply the square-root derivation relies on is the whole
+	// crossed region reacting, not one participant per tick.
+	ConversionsPerTick int `json:"conversions_per_tick"`
+	// PostAsLimit makes a converted intention rest at its reservation price
+	// instead of crossing the spread. This is the distinction between latent
+	// demand and latent liquidity: a crossing intention consumes the book,
+	// whereas a resting one materialises as the supply a large order trades
+	// into, which is what the square-root derivation describes.
+	PostAsLimit   bool  `json:"post_as_limit"`
 	IntentionQty  int64 `json:"intention_qty"`
 	MaxIntentions int   `json:"max_intentions"`
 	Seed          int64 `json:"seed"`
@@ -153,15 +164,18 @@ func (l *LatentLiquidity) deposit(mid float64) {
 }
 
 // convert turns the intentions whose reservation price has crossed the market
-// into one marketable order per tick.
+// into marketable orders, up to the configured number per interval.
 func (l *LatentLiquidity) convert() {
-	if l.pending {
-		return
+	budget := l.cfg.ConversionsPerTick
+	if budget <= 0 {
+		budget = 1
 	}
-	for index, intention := range l.intentions {
+	kept := l.intentions[:0]
+	for _, intention := range l.intentions {
 		crossedBuy := intention.buy && intention.reservation >= float64(l.ask)
 		crossedSell := !intention.buy && intention.reservation <= float64(l.bid)
-		if !crossedBuy && !crossedSell {
+		if budget <= 0 || (!crossedBuy && !crossedSell) {
+			kept = append(kept, intention)
 			continue
 		}
 		side, price, available := exchange.Buy, l.ask, l.askQty
@@ -169,12 +183,19 @@ func (l *LatentLiquidity) convert() {
 			side, price, available = exchange.Sell, l.bid, l.bidQty
 		}
 		quantity := l.cfg.IntentionQty
+		if l.cfg.PostAsLimit {
+			// Rest at the reservation price rather than taking: the intention
+			// becomes visible supply instead of consuming it.
+			price = int64(intention.reservation)
+			available = 0
+		}
 		if available > 0 && quantity > available {
 			quantity = available
 		}
-		l.intentions = append(l.intentions[:index], l.intentions[index+1:]...)
 		if quantity <= 0 || price <= 0 {
-			return
+			// The intention is abandoned rather than retried: it wanted to
+			// trade and there was nothing to trade against.
+			continue
 		}
 		if tick := l.cfg.TickSize; tick > 0 {
 			if side == exchange.Buy {
@@ -183,9 +204,13 @@ func (l *LatentLiquidity) convert() {
 				price = price / tick * tick
 			}
 		}
-		l.SubmitOrderWithTimeInForce(l.cfg.Symbol, side, exchange.LimitOrder, price, quantity, exchange.IOC)
-		l.pending = true
+		timeInForce := exchange.IOC
+		if l.cfg.PostAsLimit {
+			timeInForce = exchange.GTC
+		}
+		l.SubmitOrderWithTimeInForce(l.cfg.Symbol, side, exchange.LimitOrder, price, quantity, timeInForce)
 		l.converted++
-		return
+		budget--
 	}
+	l.intentions = kept
 }
