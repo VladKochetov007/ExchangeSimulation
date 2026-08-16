@@ -195,14 +195,21 @@ type Config struct {
 	// SpotMakerCount is how many market makers quote the main spot pair on each
 	// venue, so the carrying capacity of market making can be measured the same
 	// way as that of any other strategy.
-	// DebugPerfectIndex permits publishing the exogenous fundamental with no lag
-	// and no observation noise. That is an oracle: any participant subscribing to
-	// the feed then knows true value instantly, and every comparative result
-	// about edge, adverse selection, presence and capacity becomes an artifact of
-	// who was handed the oracle. It is a module-validation scaffold only — use it
-	// to check that a quoting, risk or liquidation path behaves under perfect
-	// information, never to make a claim about strategy performance.
-	DebugPerfectIndex bool `json:"debug_perfect_index"`
+	// DebugOracleMode permits participants to receive information derived from
+	// the exogenous fundamental: publishing it as an index (whether or not the
+	// observation is degraded), and value traders, which read it directly.
+	//
+	// There are no price oracles in a market. Every participant must have equal
+	// rights and equal information, and any edge must be earned from speed,
+	// modelling, order-flow inference or inventory. A lagged, noisy fundamental
+	// is still a fundamental: it tells its subscriber which way the world will
+	// move, which no real participant is told. Exchanges may compute their own
+	// marks for liquidation — that is a venue function, not a participant edge.
+	//
+	// This flag exists so a quoting, risk or liquidation path can be validated
+	// under known-value conditions. It must never support a claim about strategy
+	// performance.
+	DebugOracleMode bool `json:"debug_oracle_mode"`
 
 	// DegradedIndex makes the published index an imperfect observation. Without
 	// it the feed is a zero-lag, noise-free channel to the exogenous
@@ -356,9 +363,13 @@ func (c *Config) normalize() error {
 	default:
 		return fmt.Errorf("multivenue: maker anchor must be own_mid, consensus or fundamental, got %q", c.MakerAnchor)
 	}
-	if c.MakerAnchor == "fundamental" && !c.DebugPerfectIndex && !c.DegradedIndex.observationIsImperfect() {
-		return errors.New("multivenue: anchoring the published index to the exogenous fundamental without degraded_index lag or noise hands every subscriber an oracle; " +
-			"set degraded_index (lag_samples or noise_bps above zero) for a scientific run, or debug_perfect_index for module validation only")
+	if c.MakerAnchor == "fundamental" && !c.DebugOracleMode {
+		return errors.New("multivenue: publishing the exogenous fundamental as an index gives its subscribers knowledge no participant can have, and degrading the observation only blurs the oracle; " +
+			"use maker_anchor own_mid or consensus for a scientific run, or debug_oracle_mode for module validation only")
+	}
+	if c.ValueTraderCount != nil && *c.ValueTraderCount > 0 && !c.DebugOracleMode {
+		return errors.New("multivenue: value traders read the exogenous fundamental directly, so they are an oracle participant; " +
+			"remove them from a scientific run, or set debug_oracle_mode for module validation only")
 	}
 	if c.LogMode != "full" && c.LogMode != "none" {
 		return fmt.Errorf("multivenue: log mode must be full or none, got %q", c.LogMode)

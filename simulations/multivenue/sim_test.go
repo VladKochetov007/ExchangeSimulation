@@ -1132,7 +1132,7 @@ func TestMakerAnchorSelectsTheQuotedReference(t *testing.T) {
 		// feed is the instrument under test.
 		sim, err := NewSim(time.Second, Config{
 			LogDir: t.TempDir(), LogMode: "none", Seed: 91, MakerAnchor: testCase.anchor,
-			DebugPerfectIndex: true,
+			DebugOracleMode: true,
 		})
 		if err != nil {
 			t.Fatalf("NewSim(%s): %v", testCase.anchor, err)
@@ -1526,7 +1526,7 @@ func TestEveryQuotedMarketReceivesAnIndex(t *testing.T) {
 		LogDir: t.TempDir(), LogMode: "none", Seed: 91,
 		// Module validation of index plumbing, not a strategy measurement, so the
 		// undegraded fundamental feed is the right instrument here.
-		MakerAnchor: "fundamental", CrossAssetSpotGraph: true, DebugPerfectIndex: true,
+		MakerAnchor: "fundamental", CrossAssetSpotGraph: true, DebugOracleMode: true,
 	})
 	if err != nil {
 		t.Fatalf("NewSim: %v", err)
@@ -1581,40 +1581,48 @@ func TestFundingIntervalIsConfigurableAndReachesThePerpetual(t *testing.T) {
 	}
 }
 
-// A run that publishes the exogenous fundamental with no lag and no noise hands
-// every subscriber an oracle, and every comparative result about edge, adverse
-// selection, presence or capacity then measures who received it. The scenario
-// builder must refuse that configuration unless it is explicitly marked as
-// module validation.
-func TestFundamentalAnchorRequiresDegradedObservationOrDebugOptIn(t *testing.T) {
+// There are no price oracles. A run may not give any participant information
+// derived from the exogenous fundamental — not as a published index, degraded or
+// not, and not through a value trader that reads it directly. Degrading the
+// observation only blurs the oracle; it still tells its subscriber which way the
+// world will move. Only an explicit module-validation opt-in may do so.
+func TestExogenousFundamentalReachesNoParticipantWithoutDebugOptIn(t *testing.T) {
 	base := func() Config {
-		return Config{LogDir: t.TempDir(), LogMode: "none", Seed: 91, MakerAnchor: "fundamental"}
+		return Config{LogDir: t.TempDir(), LogMode: "none", Seed: 91}
 	}
 
-	if _, err := NewSim(time.Second, base()); err == nil {
-		t.Fatal("an undegraded fundamental index was accepted for a scientific run")
+	oracleIndex := base()
+	oracleIndex.MakerAnchor = "fundamental"
+	if _, err := NewSim(time.Second, oracleIndex); err == nil {
+		t.Fatal("a fundamental-anchored index was accepted for a scientific run")
 	}
 
-	degraded := base()
-	degraded.DegradedIndex = ScientificIndexDefaults(91)
-	sim, err := NewSim(time.Second, degraded)
+	blurredOracle := oracleIndex
+	blurredOracle.DegradedIndex = ScientificIndexDefaults(91)
+	if _, err := NewSim(time.Second, blurredOracle); err == nil {
+		t.Fatal("degrading the observation was accepted as if it removed the oracle")
+	}
+
+	valueTraders := base()
+	count := 2
+	valueTraders.ValueTraderCount = &count
+	if _, err := NewSim(time.Second, valueTraders); err == nil {
+		t.Fatal("value traders, which read the fundamental directly, were accepted for a scientific run")
+	}
+
+	debug := oracleIndex
+	debug.DebugOracleMode = true
+	sim, err := NewSim(time.Second, debug)
 	if err != nil {
-		t.Fatalf("degraded observation rejected: %v", err)
+		t.Fatalf("explicit module-validation opt-in rejected: %v", err)
 	}
 	sim.Close()
 
-	debug := base()
-	debug.DebugPerfectIndex = true
-	sim, err = NewSim(time.Second, debug)
+	endogenous := base()
+	endogenous.MakerAnchor = "consensus"
+	sim, err = NewSim(time.Second, endogenous)
 	if err != nil {
-		t.Fatalf("explicit debug opt-in rejected: %v", err)
+		t.Fatalf("endogenous consensus anchor rejected: %v", err)
 	}
 	sim.Close()
-
-	// Zero-valued degradation is not degradation.
-	empty := base()
-	empty.DegradedIndex = &DegradedIndexConfig{}
-	if _, err := NewSim(time.Second, empty); err == nil {
-		t.Fatal("an all-zero degraded_index was accepted as if it degraded the observation")
-	}
 }

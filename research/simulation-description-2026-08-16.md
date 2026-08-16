@@ -1,3 +1,21 @@
+> **DEPRECATED — ORACLE-ERA DOCUMENT. DO NOT REASON FROM THE NUMBERS BELOW.**
+>
+> Every run described here published the exogenous fundamental to participants,
+> either as an index or through value traders that read it directly. That is an
+> oracle: it told its subscribers which way the world would move, which no real
+> participant is told. All comparative claims about edge, adverse selection,
+> presence and capacity in this document measure who received the oracle rather
+> than which policy was better.
+>
+> Mechanical and accounting findings here still stand (the intra-step liquidity
+> hole and its repair, the two execution failure modes, the conservation identity
+> including insurance-fund payout, and the volume-versus-count artifact in the
+> maker share). Every payoff figure does not.
+>
+> Current design and results: `research/ffa-simulation-no-oracle-2026-08-16.md`.
+> The rule itself is FFA-71; the first re-validation is E-144, which flipped the
+> sign of a headline conclusion.
+
 # What the simulation currently is
 
 Scenario package `simulations/multivenue`, driven by `cmd/multivenue` with a
