@@ -233,3 +233,40 @@ func TestHedgePriceIsAlignedToTheHedgeTick(t *testing.T) {
 		t.Fatalf("hedge price %d is above the bid %d, so it would not cross", sell.Price, mm.hedgeBid)
 	}
 }
+
+// A maker that skews its quote away from a reference it only partly anchors to
+// displaces the price by more than the skew, because its own midpoint feeds
+// back into the reference. Iterating the reference to its fixed point, the
+// displacement is the skew divided by the index weight.
+//
+// Measured in the simulator at four weights, with the perpetual maker's
+// inventory held at the same level: 25.0 basis points at weight 1.0, 35.6 at
+// 0.7, 49.7 at 0.5 and 83.4 at 0.3, against 25.0, 35.7, 50.0 and 83.3
+// predicted.
+func TestPartialAnchoringAmplifiesInventorySkew(t *testing.T) {
+	const index = int64(50_000) * mvQuotePrecision
+	const skewBps = 25.0
+
+	for _, weight := range []float64{1.0, 0.7, 0.5, 0.3} {
+		mm := &StoikovMarketMaker{cfg: StoikovMMConfig{
+			QuotePrecision: mvQuotePrecision, BootstrapPrice: index,
+			AnchorToIndex: true, IndexWeight: weight,
+		}}
+		mm.indexPrice = index
+
+		// Iterate: the maker quotes a fixed skew above its reference, and its
+		// midpoint becomes the book midpoint the reference blends in.
+		mm.forward = index
+		for range 500 {
+			reference := float64(mm.referencePrice())
+			mm.forward = int64(reference * (1 + skewBps/10_000))
+		}
+
+		displacement := 1e4 * float64(mm.forward-index) / float64(index)
+		predicted := skewBps / weight
+		if diff := displacement - predicted; diff > 0.5 || diff < -0.5 {
+			t.Fatalf("weight %.1f displaced the price by %.2f basis points, want about %.2f",
+				weight, displacement, predicted)
+		}
+	}
+}

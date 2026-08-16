@@ -1388,26 +1388,29 @@ func (v *Venue) logMakerState(timestamp int64) {
 	if v.fundamentalLog.inner == nil {
 		return
 	}
+	record := func(name string, maker *StoikovMarketMaker) {
+		v.fundamentalLog.LogEvent(timestamp, 0, "maker_state", map[string]any{
+			"maker":          name,
+			"forward":        maker.forward,
+			"index":          maker.indexPrice,
+			"inventory":      maker.inventory,
+			"net_delta":      maker.NetDelta(),
+			"log_variance":   maker.logVariancePerSec,
+			"bid":            maker.bidPrice,
+			"ask":            maker.askPrice,
+			"hedge_position": maker.hedgePosition,
+		})
+	}
 	for index, maker := range v.SpotMakers {
 		if maker.cfg.Symbol != "ABC/USD" {
 			continue
 		}
-		v.fundamentalLog.LogEvent(timestamp, 0, "maker_state", map[string]any{
-			"maker":                index,
-			"forward":              maker.forward,
-			"inventory":            maker.inventory,
-			"log_variance":         maker.logVariancePerSec,
-			"hedge_position":       maker.hedgePosition,
-			"net_delta":            maker.NetDelta(),
-			"hedge_attempts":       maker.hedgeAttempts,
-			"hedge_fills":          maker.hedgeFills,
-			"hedge_last_qty":       maker.hedgeLastQty,
-			"hedge_pending":        maker.hedgePending,
-			"hedge_book_seen":      maker.hedgeBookSeen,
-			"hedge_book_two_sided": maker.hedgeBookTwoSided,
-			"bid":                  maker.bidPrice,
-			"ask":                  maker.askPrice,
-		})
+		record(fmt.Sprintf("spot_%d", index), maker)
+	}
+	// The perpetual maker is the counterparty that absorbs one-sided
+	// derivative flow, so its position is what a premium would be paying for.
+	if v.PerpMaker != nil {
+		record("perp", v.PerpMaker)
 	}
 }
 
