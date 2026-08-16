@@ -243,11 +243,28 @@ func TestHedgePriceIsAlignedToTheHedgeTick(t *testing.T) {
 // inventory held at the same level: 25.0 basis points at weight 1.0, 35.6 at
 // 0.7, 49.7 at 0.5 and 83.4 at 0.3, against 25.0, 35.7, 50.0 and 83.3
 // predicted.
+//
+// The skew itself is proportional to inventory until it saturates at the risk
+// limit, so the full relation is (skew * min(|q|/limit, 1)) / weight. Raising
+// the limit fivefold, which drops the maker from saturation to 30% of its
+// budget, moved the premium from 83.4 to 24.1 basis points against 25.0
+// predicted.
 func TestPartialAnchoringAmplifiesInventorySkew(t *testing.T) {
 	const index = int64(50_000) * mvQuotePrecision
 	const skewBps = 25.0
 
-	for _, weight := range []float64{1.0, 0.7, 0.5, 0.3} {
+	for _, testCase := range []struct {
+		weight          float64
+		inventoryFactor float64
+	}{
+		{weight: 1.0, inventoryFactor: 1},
+		{weight: 0.7, inventoryFactor: 1},
+		{weight: 0.5, inventoryFactor: 1},
+		{weight: 0.3, inventoryFactor: 1},
+		// Below the risk limit the skew scales with the position.
+		{weight: 0.3, inventoryFactor: 0.3},
+	} {
+		weight := testCase.weight
 		mm := &StoikovMarketMaker{cfg: StoikovMMConfig{
 			QuotePrecision: mvQuotePrecision, BootstrapPrice: index,
 			AnchorToIndex: true, IndexWeight: weight,
@@ -259,14 +276,14 @@ func TestPartialAnchoringAmplifiesInventorySkew(t *testing.T) {
 		mm.forward = index
 		for range 500 {
 			reference := float64(mm.referencePrice())
-			mm.forward = int64(reference * (1 + skewBps/10_000))
+			mm.forward = int64(reference * (1 + testCase.inventoryFactor*skewBps/10_000))
 		}
 
 		displacement := 1e4 * float64(mm.forward-index) / float64(index)
-		predicted := skewBps / weight
+		predicted := testCase.inventoryFactor * skewBps / weight
 		if diff := displacement - predicted; diff > 0.5 || diff < -0.5 {
-			t.Fatalf("weight %.1f displaced the price by %.2f basis points, want about %.2f",
-				weight, displacement, predicted)
+			t.Fatalf("weight %.1f at %.0f%% of the risk budget displaced the price by %.2f basis points, want about %.2f",
+				weight, 100*testCase.inventoryFactor, displacement, predicted)
 		}
 	}
 }
