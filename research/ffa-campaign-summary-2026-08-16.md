@@ -102,11 +102,17 @@ financed by an execution loss.
 
 | regularity | result |
 | --- | --- |
-| long-memory order flow with diffusive prices | reproduced: sign autocorrelation 0.33 to 0.05 over three decades of lag, variance ratio within 5% of one (FFA-34) |
+| long-memory order flow with diffusive prices | statistic reproduced, mechanism refuted: persistence is highest with makers and independent noise alone, so it comes from asymmetric liquidity availability rather than order splitting (FFA-34) |
 | square-root impact | supply curve gives V(x) ~ x^2.04, implying an exponent of 0.48; metaorders at the right scale give 0.52 to 0.61 (FFA-40) |
 | spread proportional to volatility per trade | falsified, with an exact analytic account: the spread is the constant fill-decay term of the control law (FFA-16) |
 | latent liquidity as the source of the square root | falsified here: the exponent survives removing the latent population entirely, and its prefactor prediction fails (FFA-41, FFA-42, FFA-43) |
 | impact independent of participation rate | untestable at present power: the estimator's seed spread is an order of magnitude larger than the effect (FFA-44, FFA-45) |
+
+Two of these say the same thing. The exponent near one half and the long
+memory in order flow are both reproduced, and in both cases the mechanism
+usually credited with producing them is refuted by deleting the participant
+that supposedly supplies it. Matching a published number is weak evidence for
+the process behind it.
 
 The most important of these is the fourth. The exponent near one half is
 produced here by makers mean-reverting toward a reference, not by latent
