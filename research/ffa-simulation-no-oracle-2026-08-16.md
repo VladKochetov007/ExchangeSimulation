@@ -6,36 +6,33 @@ machinery under an oracle and whose payoff numbers must not be reasoned from.
 
 ## The law
 
-No participant may receive information derived from the exogenous fundamental.
-Equal rights and equal information for every participant of every market. Any
-edge must be earned from speed, modelling, order-flow inference or inventory
-management, never granted by the environment.
+No participant may receive information derived from any process that knows a
+price before the market does. Equal rights and equal information for every
+participant of every market. Any edge must be earned from speed, modelling,
+order-flow inference or inventory management.
 
-A lagged and noisy fundamental is still a fundamental: it tells its subscriber
-which way the world will move. Degrading the observation blurs the oracle, it
-does not remove it. Both are now refused.
+The exogenous value process has been deleted rather than gated. `FundamentalValue`,
+`ValueTrader`, the `fundamental` anchor mode, `observeFundamental`, the
+mispricing-against-fundamental statistic and every associated config field are
+gone from the codebase, the tests and the configuration surface. Gating was not
+sufficient: the concept invites the reasoning it enables, and the volatility knob
+it exposed silently did nothing once the gate was in place.
 
-The venue is a separate matter. An exchange may compute its own marks and index
-for margin and liquidation, exactly as real venues do, because that is a venue
-function rather than a participant edge. Prices that participants trade on must
-be produced by participants.
+The venue is a separate matter. An exchange derives its own marks from its own
+books for margin and liquidation, exactly as real venues do, because that is a
+venue function rather than a participant edge.
 
-### Enforcement
+### What remains
 
-`NewSim` rejects, unless `debug_oracle_mode` is set:
+Legal anchors are `own_mid`, where each maker quotes around its own book, and
+`consensus`, an average of venue midpoints published as each venue's index. Both
+are endogenous: they summarise what participants did rather than revealing what
+anything is worth. `degraded_index` still exists and now models transport and
+measurement error on that endogenous consensus, which is an honest feature of
+every real feed.
 
-- `maker_anchor: "fundamental"`, with or without `degraded_index`
-- any `value_trader_count` above zero, because `ValueTrader` reads the
-  fundamental directly (`valuetrader.go:14`)
-
-`debug_oracle_mode` exists so a quoting, risk or liquidation path can be
-validated under known-value conditions. It may never support a claim about
-strategy performance. Guarded by
-`TestExogenousFundamentalReachesNoParticipantWithoutDebugOptIn`.
-
-Legal anchors for a scientific run are `own_mid` (each maker quotes around its
-own book) and `consensus` (a cross-venue average of venue midpoints). Both are
-endogenous: they are computed from what participants did, not from what is true.
+A verification run emits no reference price in its configuration, its report or
+its logs.
 
 ## Venues, assets and markets
 
@@ -107,9 +104,9 @@ Every count is configurable; none is hardcoded. Counts below are per venue.
 - `elastic_supplier` — supplies size as a function of price movement.
 - `latent_liquidity` — reveals hidden intentions near the touch.
 
-**Removed from scientific runs by the law**
-- `value_trader` — it reads the exogenous fundamental and trades the book
-  against it. Available only under `debug_oracle_mode`.
+**Deleted**
+- `value_trader` — it read an exogenous value process and traded the book against
+  it. Both it and the process are gone.
 
 ## What the removal of the oracle changes, and what is now open
 

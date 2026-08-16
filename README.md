@@ -213,34 +213,39 @@ flowchart TB
 
 ### Information rules
 
-Participants see the exchange and nothing else. There is no price oracle.
+Participants see the exchange and nothing else. No process anywhere in the
+runtime knows a "true" price, because no such price exists.
 
 ```mermaid
 flowchart LR
-    FUND["Exogenous fundamental</br>(runtime only)"]
-    VENUE["Venue</br>mark · index · margin</br>liquidation"]
-    BOOKS2["Books, trades,</br>funding, open interest"]
+    ORD["Participants' orders"]
+    BOOK["Order books"]
+    VEN["Venue mechanics</br>matching · margin · funding</br>liquidation · listings"]
+    FEED["Public feeds</br>book · trades · funding</br>open interest · index"]
     PART["Every participant"]
-    DBG["debug_oracle_mode</br>module validation only"]
 
-    FUND -- "may drive" --> VENUE
-    VENUE --> BOOKS2
-    BOOKS2 --> PART
-    FUND -. "refused by NewSim" .-> PART
-    FUND -. "opt-in, never for</br>strategy claims" .-> DBG
+    ORD --> BOOK
+    BOOK --> VEN
+    VEN --> FEED
+    FEED --> PART
+    PART --> ORD
+    BOOK -- "midpoints" --> IDX["Consensus index</br>(endogenous)"]
+    IDX --> FEED
 ```
 
-A venue computes its own marks for margin and liquidation, as real venues do.
-Participants get books, trades, funding and an endogenous index, and every
-participant of every market gets the same rights and the same information. Edge
-has to come from speed, modelling, order-flow inference or inventory management.
-`NewSim` refuses a configuration that pipes the exogenous fundamental to a
-participant, whether as a published index or through a trader that reads it
-directly. Lagging and adding noise to that feed does not make it legal: a blurred
-fundamental still tells its subscriber which way the world will move. The one
-exception is `debug_oracle_mode`, which exists so a quoting, risk or liquidation
-path can be checked under known-value conditions, and which may never back a
-claim about strategy performance.
+Price is whatever the book says, and the book is whatever participants put in
+it. A venue derives its own marks from its own books for margin and liquidation,
+which is a venue function rather than a participant edge. The published index is
+a consensus of venue midpoints, so it summarises what participants did instead of
+revealing what anything is worth. Every participant of every market gets the same
+rights and the same information, and any edge has to be earned from speed,
+modelling, order-flow inference or inventory management.
+
+There is no exogenous value process, no oracle, and no "correct" strategy. The
+library previously carried a hidden reference price used for anchoring and for a
+mispricing statistic. It has been deleted rather than gated: a market whose level
+is pulled by invisible strings cannot answer questions about how prices actually
+form.
 
 ---
 
