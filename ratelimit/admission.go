@@ -1,5 +1,7 @@
 package ratelimit
 
+import "reflect"
+
 // RequestKind classifies what a client is asking the venue to do. Cost and
 // queue lane both follow from it, which is why it is one type rather than a
 // weight table and a separate priority flag that can disagree.
@@ -91,6 +93,8 @@ func (c StaticCost) Cost(kind RequestKind) int64 {
 // both, and silently reading a missing field as unlimited would disable the
 // overload modelling a run was built to study.
 type AdmissionConfig struct {
+	// An unlimited lane exerts no backpressure, so the caller must still return
+	// every slot it takes or the outstanding set grows without bound.
 	PriorityDepth  *int `json:"priority_depth"`
 	SecondaryDepth *int `json:"secondary_depth"`
 	// RiskReducing overrides which kinds take the priority lane. A caller with
@@ -108,14 +112,23 @@ type AdmissionQueue struct {
 	priority  int
 	secondary int
 	nextID    uint64
-	live      map[uint64]struct{}
+	// generation distinguishes this queue's receipts from another's. Without it
+	// ids are per-queue counters starting at one, so a receipt from one venue
+	// would release a slot in another.
+	generation uint64
+	live       map[uint64]struct{}
 }
+
+// queueGeneration hands each queue a distinct receipt namespace. It is process
+// wide rather than random so runs stay reproducible.
+var queueGeneration uint64
 
 func NewAdmissionQueue(cfg AdmissionConfig) *AdmissionQueue {
 	if cfg.RiskReducing == nil {
 		cfg.RiskReducing = RequestKind.RiskReducing
 	}
-	return &AdmissionQueue{cfg: cfg, live: make(map[uint64]struct{})}
+	queueGeneration++
+	return &AdmissionQueue{cfg: cfg, generation: queueGeneration, live: make(map[uint64]struct{})}
 }
 
 // Depth sizes a lane explicitly, including zero to close it.
@@ -133,6 +146,8 @@ func (q *AdmissionQueue) full(depth *int, occupied int) bool {
 type Slot struct {
 	priority bool
 	held     bool
+	// generation names the queue that issued this receipt.
+	generation uint64
 	// id makes a slot a receipt for one specific unit of work. Without it a
 	// caller could copy a slot and redeem it twice, manufacturing capacity that
 	// the underflow clamp would hide.
@@ -163,13 +178,16 @@ func (q *AdmissionQueue) Offer(kind RequestKind) (Decision, Slot) {
 func (q *AdmissionQueue) issue(priority bool) Slot {
 	q.nextID++
 	q.live[q.nextID] = struct{}{}
-	return Slot{priority: priority, held: true, id: q.nextID}
+	return Slot{priority: priority, held: true, id: q.nextID, generation: q.generation}
 }
 
 // Complete releases a slot once the engine has finished the work. A slot that
 // was never held, already redeemed, or issued by another queue does nothing.
 func (q *AdmissionQueue) Complete(slot Slot) {
 	if q == nil || !slot.held {
+		return
+	}
+	if slot.generation != q.generation {
 		return
 	}
 	if _, outstanding := q.live[slot.id]; !outstanding {
@@ -195,6 +213,26 @@ func (q *AdmissionQueue) Depth() (priority, secondary int) {
 	return q.priority, q.secondary
 }
 
+// sameLimiter reports whether two meters charge the same budget.
+//
+// Identity is the question, not the name: a venue may legitimately meter the
+// same weight per address and per account, and two budgets sharing a name must
+// both be charged. Comparing interfaces directly would panic on a limiter whose
+// dynamic type is uncomparable, such as a value holding a map, so the
+// comparison is guarded by the type's comparability. Two uncomparable values
+// are treated as distinct, which over-charges a caller that passes the same
+// uncomparable limiter twice but never silently leaves a budget unenforced.
+func sameLimiter(a, b Limiter) bool {
+	typeA, typeB := reflect.TypeOf(a), reflect.TypeOf(b)
+	if typeA != typeB || typeA == nil {
+		return false
+	}
+	if !typeA.Comparable() {
+		return false
+	}
+	return a == b
+}
+
 // Meter pairs a budget with the cost model that charges it. Budgets are
 // denominated in different currencies: a venue's weight budget and its order
 // count budget both see the same placement, and charge it 10 and 1. One cost
@@ -214,6 +252,8 @@ type Gate struct {
 // Backlog is the venue's own execution queue. It is an interface so a caller
 // can substitute a different shedding policy, a queue with service times, or a
 // synchronised wrapper, without editing this package.
+// Implementations must tolerate a nil receiver, because a typed nil stored in
+// this interface is not nil to the caller checking it.
 type Backlog interface {
 	Offer(RequestKind) (Decision, Slot)
 	Complete(Slot)
@@ -243,12 +283,9 @@ func (g *Gate) Admit(scope string, kind RequestKind, now int64) (Decision, Slot)
 	charges := make([]charge, 0, len(g.meters))
 	for _, meter := range g.meters {
 		cost := meter.Cost.Cost(kind)
-		// Deduped by name rather than by interface equality: a limiter may be a
-		// value type holding a map, which is legal, satisfies the interface,
-		// and would panic under ==.
 		existing := -1
 		for i := range charges {
-			if charges[i].limiter.Name() == meter.Limiter.Name() {
+			if sameLimiter(charges[i].limiter, meter.Limiter) {
 				existing = i
 				break
 			}
@@ -275,8 +312,10 @@ func (g *Gate) Admit(scope string, kind RequestKind, now int64) (Decision, Slot)
 	}
 	for _, c := range charges {
 		// A limiter whose Would disagreed with its Admit has broken the
-		// contract. Surface it rather than reporting success for a request a
-		// budget refused, and give back the slot it would otherwise strand.
+		// contract. The slot is returned, but budgets charged earlier in this
+		// loop stay charged: there is no rollback, and a partial charge is the
+		// price of a limiter that lies. Surfacing the refusal is still better
+		// than reporting success for a request a budget refused.
 		if decision := c.limiter.Admit(scope, c.cost, now); !decision.Allowed {
 			if g.queue != nil {
 				g.queue.Complete(slot)

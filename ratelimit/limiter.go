@@ -36,7 +36,9 @@ type Limiter interface {
 	// extra: a limiter that cannot answer without charging would be charged
 	// twice per request, once to ask and once to commit.
 	Would(scope string, cost int64, now int64) Decision
-	// Name identifies the budget in rejections and telemetry.
+	// Name identifies the budget in rejections and telemetry. It need not be
+	// unique: two budgets metering the same quantity at different scopes may
+	// share a name, and a Gate distinguishes them by identity rather than name.
 	Name() string
 }
 
@@ -285,7 +287,8 @@ func mulDiv(a, b, divisor int64) int64 {
 	return int64(quotient)
 }
 
-// mulDivCeil is mulDiv rounded up.
+// mulDivCeil is mulDiv rounded up, under the same precondition that the
+// quotient fits, which holds wherever a < divisor.
 func mulDivCeil(a, b, divisor int64) int64 {
 	if divisor <= 0 || a <= 0 || b <= 0 {
 		return 0
@@ -295,11 +298,12 @@ func mulDivCeil(a, b, divisor int64) int64 {
 		return math.MaxInt64
 	}
 	quotient, remainder := bits.Div64(hi, lo, uint64(divisor))
+	// Range-checked before rounding up, so the increment cannot wrap to zero.
+	if quotient >= math.MaxInt64 {
+		return math.MaxInt64
+	}
 	if remainder > 0 {
 		quotient++
-	}
-	if quotient > math.MaxInt64 {
-		return math.MaxInt64
 	}
 	return int64(quotient)
 }

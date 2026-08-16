@@ -186,3 +186,54 @@ func TestANilBacklogInsideAnInterfaceDoesNotPanic(t *testing.T) {
 		t.Fatalf("unmetered gate refused: %+v", decision)
 	}
 }
+
+// Two distinct budgets may legitimately share a name: a venue can meter the
+// same weight per address and per account. Deduping on the name would charge
+// one of them twice and leave the other silently unenforced.
+func TestDistinctLimitersSharingANameAreBothCharged(t *testing.T) {
+	perAddress := NewFixedWindow("weight", 100, minute)
+	perAccount := NewFixedWindow("weight", 100, minute)
+	gate := NewGate([]Meter{
+		{Limiter: perAddress, Cost: StaticCost{Default: 10}},
+		{Limiter: perAccount, Cost: StaticCost{Default: 10}},
+	}, nil)
+
+	if decision, _ := gate.Admit("acct", KindPlaceOrder, 0); !decision.Allowed {
+		t.Fatalf("request refused: %+v", decision)
+	}
+	if used := perAddress.Used("acct", 0); used != 10 {
+		t.Fatalf("per-address used = %d, want 10", used)
+	}
+	if used := perAccount.Used("acct", 0); used != 10 {
+		t.Fatalf("per-account used = %d, want 10: a distinct budget was left unenforced", used)
+	}
+}
+
+// The same limiter appearing twice must still be summed, which is what stops a
+// shared budget being overspent through independent probes.
+func TestTheSameLimiterAppearingTwiceIsStillSummed(t *testing.T) {
+	shared := NewFixedWindow("weight", 10, minute)
+	gate := NewGate([]Meter{
+		{Limiter: shared, Cost: StaticCost{Default: 6}},
+		{Limiter: shared, Cost: StaticCost{Default: 6}},
+	}, nil)
+	if decision, _ := gate.Admit("acct", KindPlaceOrder, 0); decision.Allowed {
+		t.Fatal("a shared budget was overspent")
+	}
+	if used := shared.Used("acct", 0); used != 0 {
+		t.Fatalf("used = %d, want 0", used)
+	}
+}
+
+// A receipt from one queue must not release a slot in another.
+func TestASlotFromAnotherQueueIsNotRedeemable(t *testing.T) {
+	first := NewAdmissionQueue(AdmissionConfig{SecondaryDepth: Depth(2)})
+	second := NewAdmissionQueue(AdmissionConfig{SecondaryDepth: Depth(2)})
+	_, foreign := first.Offer(KindPlaceOrder)
+	second.Offer(KindPlaceOrder)
+
+	second.Complete(foreign)
+	if _, secondary := second.Depth(); secondary != 1 {
+		t.Fatalf("secondary depth = %d after redeeming a foreign receipt, want 1", secondary)
+	}
+}
