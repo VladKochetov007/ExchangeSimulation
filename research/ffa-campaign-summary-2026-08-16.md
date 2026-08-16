@@ -71,6 +71,52 @@ flow around minus 105,000, spot makers around minus 50,000, and the horizon
 reversal unchanged at 9,318 against minus 5,035 at three hours and minus 44,687
 against 30,744 at twelve (E-113).
 
+## A second correction, larger than the first (2026-08-16, later)
+
+The campaign then found that the spot books were not continuously quoted at
+all. The Stoikov makers cancelled their quotes and resubmitted them inside the
+same simulation step, so 99.5 percent of steps contained an instant with both
+sides of the book empty. Because the runtime is phase-ordered, an actor whose
+turn falls in that instant meets it every step rather than occasionally.
+
+Measured consequences, per class, as the fraction of submitted orders that
+filled: round_trip 10 fills from 128,209 orders, carry arbitrage 3.4 percent,
+metaorder traders 4.1 percent, dated carry 11.2 percent, noise flow 44.9
+percent. Only the makers and option dealers, which rest limit orders, executed
+normally (E-128).
+
+Repairing it by submitting replacement quotes before cancelling the old ones
+takes every one of those classes to roughly 100 percent, and flips the sign of
+five classes' payoffs: perpetual makers from minus 68,864 to plus 490,289,
+elastic suppliers from plus 29,940 to minus 190,692, noise flow from plus
+10,123 to minus 9,570, metaorder traders from plus 3,613 to minus 5,615, and
+dated carry from minus 4,723 to plus 889 (E-129).
+
+The economics improve rather than degrade: noise traders were profitable only
+because they could not trade, and a random taker paying five basis points
+should lose.
+
+**Scope of the correction.** Derivative-subsystem results replicate unchanged,
+because option flow trades against dealer quotes on option books rather than
+through the spot makers. The three dealer-competition arms re-run under the fix
+give 229,848, 39,415 and 234,800 per dealer against 231,543, 39,494 and 236,175
+before (E-134). Spot-side taker payoffs are the ones that need re-running.
+
+**Two failure modes, not one.** A passive ladder that never reprices drives the
+empty-step fraction to zero and repairs market-order takers, while leaving
+IOC-limit takers broken. Market orders need depth to exist; IOC limits need
+depth at the price they targeted, which only continuous presence of the touch
+provides (E-133).
+
+**The maker volume share was mostly an artifact of size.** Pairing fills by
+trade identifier shows maker-versus-maker crossings are 9.5 percent of trades
+under cancel-first quoting and 19.8 percent under atomic replacement, against
+89.8 to 95.4 percent of volume, because makers quote five units while takers
+trade small lots. Stylized-fact results computed on volume-weighted tape,
+including the square-root impact law and order-flow sign autocorrelation, are
+therefore measured on a tape that is about nine tenths two makers crossing, and
+should be recomputed count-weighted (E-132).
+
 ## The transfer this market runs on
 
 The largest flows in the ecology are one chain, measured at every link:
