@@ -1209,3 +1209,89 @@ func TestRoundTripTraderReturnsToFlat(t *testing.T) {
 		t.Fatal("no round trips completed in thirty simulated minutes")
 	}
 }
+
+// The supplier's target position must fall as the price rises, which is what
+// makes it supply into a drift rather than chase it, and must stay inside its
+// position limit at any price.
+func TestElasticSupplierTargetSlopesDownAndIsBounded(t *testing.T) {
+	supplier := &ElasticSupplier{cfg: ElasticSupplierConfig{
+		ReferencePrice:       50_000 * mvQuotePrecision,
+		BaseHolding:          0,
+		ElasticityPerPercent: 50 * mvBasePrecision,
+		MaxPosition:          10_000 * mvBasePrecision,
+	}}
+
+	atReference := supplier.TargetPosition(50_000 * mvQuotePrecision)
+	if atReference != 0 {
+		t.Fatalf("target at the reference price = %d, want the base holding 0", atReference)
+	}
+	// One percent above the reference: short exactly the elasticity.
+	if got := supplier.TargetPosition(50_500 * mvQuotePrecision); got != -50*mvBasePrecision {
+		t.Fatalf("target one percent above reference = %d, want %d", got, -50*mvBasePrecision)
+	}
+	// One percent below: long the same amount.
+	if got := supplier.TargetPosition(49_500 * mvQuotePrecision); got != 50*mvBasePrecision {
+		t.Fatalf("target one percent below reference = %d, want %d", got, 50*mvBasePrecision)
+	}
+	// Far from the reference the target saturates rather than growing without
+	// bound.
+	if got := supplier.TargetPosition(500_000 * mvQuotePrecision); got != -10_000*mvBasePrecision {
+		t.Fatalf("target far above reference = %d, want the position limit", got)
+	}
+	// The long side needs no clamp: a price can only fall by one hundred
+	// percent, so the target tops out at a hundred times the elasticity.
+	if got := supplier.TargetPosition(1); got <= 4_999*mvBasePrecision || got > 5_000*mvBasePrecision {
+		t.Fatalf("target at a near-zero price = %d, want just under %d", got, 5_000*mvBasePrecision)
+	}
+}
+
+// With an exit band an informed trader unwinds once the price has returned to
+// value, instead of holding until the deviation flips sign.
+func TestValueTraderExitsTowardFlatWhenPriceReturnsToValue(t *testing.T) {
+	value := NewFundamentalValue(1, 0, 50_000*mvQuotePrecision, int64(time.Second), mvQuotePrecision, 0)
+	gw := newStoikovStubGateway()
+	vt := NewValueTrader(1, gw, value, ValueTraderConfig{
+		Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: 10 * mvQuotePrecision,
+		EdgeBps: 100, ExitBps: 5, LotQty: mvBasePrecision / 10,
+		MaxInventory: 200 * mvBasePrecision, TradeInterval: time.Second,
+	})
+	now := time.Unix(0, 0)
+	vt.onTick(now)
+	vt.inventory = 50 * mvBasePrecision // long from an earlier dislocation
+
+	// Price is back at value: inside the entry edge, so the only reason to
+	// trade is to unwind.
+	vt.HandleEvent(context.Background(), &actor.Event{
+		Type: actor.EventBookSnapshot,
+		Data: actor.BookSnapshotEvent{Symbol: "ABC/USD", Timestamp: now.UnixNano(),
+			Snapshot: &exchange.BookSnapshot{
+				Bids: []etypes.PriceLevel{{Price: 50_000 * mvQuotePrecision, VisibleQty: mvBasePrecision}},
+				Asks: []etypes.PriceLevel{{Price: 50_010 * mvQuotePrecision, VisibleQty: mvBasePrecision}},
+			}},
+	})
+	before := len(gw.requests)
+	vt.onTick(now)
+	if len(gw.requests) == before {
+		t.Fatal("did not unwind a long position after the price returned to value")
+	}
+	if order := gw.requests[len(gw.requests)-1].OrderReq; order.Side != exchange.Sell {
+		t.Fatalf("expected a sell to unwind, got %+v", order)
+	}
+
+	// Without an exit band the same state produces no trade at all.
+	holding := NewValueTrader(2, newStoikovStubGateway(), value, ValueTraderConfig{
+		Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: 10 * mvQuotePrecision,
+		EdgeBps: 100, LotQty: mvBasePrecision / 10, MaxInventory: 200 * mvBasePrecision,
+		TradeInterval: time.Second,
+	})
+	holding.onTick(now)
+	holding.inventory = 50 * mvBasePrecision
+	holding.bestBid, holding.bidQty = 50_000*mvQuotePrecision, mvBasePrecision
+	holding.bestAsk, holding.askQty = 50_010*mvQuotePrecision, mvBasePrecision
+	stub := holding.Gateway().(*stoikovStubGateway)
+	before = len(stub.requests)
+	holding.onTick(now)
+	if len(stub.requests) != before {
+		t.Fatal("a trader without an exit band must hold through a return to value")
+	}
+}

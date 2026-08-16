@@ -108,6 +108,15 @@ type Config struct {
 	RoundTripHold        time.Duration `json:"round_trip_hold"`
 	RoundTripLotQty      int64         `json:"round_trip_lot_qty"`
 
+	// ElasticSupplierCount adds participants with a downward-sloping demand
+	// curve, which is what absorbs a persistent drift: they sell as the price
+	// rises and buy back as it falls. Without one, market makers hold the
+	// mirror of the fundamental's cumulative drift.
+	ElasticSupplierCount int `json:"elastic_supplier_count"`
+	// ElasticSupplierUnitsPerPercent is how many base units each supplier's
+	// target position falls for every percent the price rises.
+	ElasticSupplierUnitsPerPercent int64 `json:"elastic_supplier_units_per_percent"`
+
 	// MakerInventoryLimit is the position a spot maker treats as its full risk
 	// budget, in base units.
 	MakerInventoryLimit int64 `json:"maker_inventory_limit"`
@@ -142,6 +151,10 @@ type Config struct {
 	// picks sides at random, so without informed flow a drift in the quoted
 	// price feeds back into the makers' own volatility estimate and diverges.
 	ValueTraderCount *int `json:"value_trader_count"`
+	// ValueTraderExitBps closes an informed position once the price is within
+	// this distance of fundamental value. Zero keeps the reverse-only
+	// behaviour, in which a position is held until the deviation flips sign.
+	ValueTraderExitBps int64 `json:"value_trader_exit_bps"`
 	// ValueTraderEdgeBps is the deviation from fundamental value required
 	// before an informed participant crosses the spread.
 	ValueTraderEdgeBps int64 `json:"value_trader_edge_bps"`
@@ -272,6 +285,9 @@ func (c *Config) normalize() error {
 	if c.RoundTripLotQty == 0 {
 		c.RoundTripLotQty = mvBasePrecision / 10
 	}
+	if c.ElasticSupplierUnitsPerPercent == 0 {
+		c.ElasticSupplierUnitsPerPercent = 50 * mvBasePrecision
+	}
 	if c.MakerInventoryLimit == 0 {
 		c.MakerInventoryLimit = 100 * mvBasePrecision
 	}
@@ -285,6 +301,9 @@ func (c *Config) normalize() error {
 		// Zero is a valid arm: it is the no-informed-flow control.
 		count := 2
 		c.ValueTraderCount = &count
+	}
+	if c.ValueTraderExitBps < 0 {
+		return fmt.Errorf("multivenue: value trader exit bps must not be negative")
 	}
 	if c.ValueTraderEdgeBps == 0 {
 		c.ValueTraderEdgeBps = 10
@@ -374,7 +393,7 @@ func (c *Config) normalize() error {
 		c.NoiseInterval <= 0 || c.GreekInterval <= 0 || c.ShortOptionTenor <= 0 || c.LongOptionTenor <= 0 ||
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 || *c.ValueTraderCount < 0 ||
-		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 ||
+		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 || c.ElasticSupplierCount < 0 || c.ElasticSupplierUnitsPerPercent <= 0 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || *c.OptionBuyProbability < 0 || *c.OptionBuyProbability > 1 {
@@ -411,6 +430,7 @@ type Venue struct {
 	NoiseTraders     []*feesim.RandomTaker
 	ValueTraders     []*ValueTrader
 	RoundTripTraders []*RoundTripTrader
+	Suppliers        []*ElasticSupplier
 	MetaorderTraders []*MetaorderTrader
 	lastTwoSided     map[string]twoSidedMark
 	Mispricing       *MispricingStats
@@ -676,6 +696,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		}
 		for _, trader := range venue.RoundTripTraders {
 			runner.AddActor(trader)
+		}
+		for _, supplier := range venue.Suppliers {
+			runner.AddActor(supplier)
 		}
 	}
 	if err := sim.addMetaorderTraders(timers, &actorID); err != nil {
@@ -950,6 +973,21 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	}
 	venue.OptionFlow = venue.OptionFlows[0]
 
+	supplierBalances := map[string]int64{"ABC": 20_000 * mvBasePrecision, "USD": 500_000_000 * mvQuotePrecision}
+	if s.Config.CrossAssetSpotGraph {
+		supplierBalances["CDF"] = 1_000 * mvBasePrecision
+	}
+	for participant := 0; participant < s.Config.ElasticSupplierCount; participant++ {
+		supplier := NewElasticSupplier(nextActor(), connect(fmt.Sprintf("elastic_supplier_%d", participant+1), supplierBalances, 0, noiseFee), ElasticSupplierConfig{
+			Symbol: "ABC/USD", BasePrecision: mvBasePrecision, Interval: s.Config.NoiseInterval,
+			ReferencePrice: mvBootstrapPrice, BaseHolding: 0,
+			ElasticityPerPercent: s.Config.ElasticSupplierUnitsPerPercent,
+			MaxPosition:          10_000 * mvBasePrecision, RebalanceLot: mvBasePrecision / 2,
+		})
+		supplier.SetTickerFactory(timers)
+		venue.Suppliers = append(venue.Suppliers, supplier)
+	}
+
 	for participant := 0; participant < s.Config.RoundTripTraderCount; participant++ {
 		trader := NewRoundTripTrader(nextActor(), connect(fmt.Sprintf("round_trip_%d", participant+1), noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), RoundTripTraderConfig{
 			Symbol: "ABC/USD", BasePrecision: mvBasePrecision, LotQty: s.Config.RoundTripLotQty,
@@ -973,7 +1011,8 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		trader := NewValueTrader(nextActor(), connect(fmt.Sprintf("value_trader_%d", participant+1), valueBalances, 10_000_000*mvQuotePrecision, noiseFee), s.Fundamental, ValueTraderConfig{
 			Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: tick,
 			EdgeBps: s.Config.ValueTraderEdgeBps, LotQty: mvBasePrecision / 10,
-			MaxInventory: 200 * mvBasePrecision, TradeInterval: s.Config.NoiseInterval,
+			MaxInventory: 200 * mvBasePrecision, ExitBps: s.Config.ValueTraderExitBps,
+			TradeInterval: s.Config.NoiseInterval,
 		})
 		trader.SetTickerFactory(timers)
 		venue.ValueTraders = append(venue.ValueTraders, trader)

@@ -27,6 +27,15 @@ type ValueTraderConfig struct {
 	// MaxInventory bounds the signed base position, so an informed trader
 	// cannot become an unbounded directional bet on its own signal.
 	MaxInventory int64
+	// ExitBps closes the position back toward flat once the price has come
+	// within this distance of fundamental value.
+	//
+	// Without it an informed trader only ever reverses: it buys below value and
+	// sells above, and holds everything in between. Under an anchor that keeps
+	// the price near value it therefore never unwinds, so its position ratchets
+	// with the fundamental's cumulative drift and market makers hold the
+	// mirror of it indefinitely.
+	ExitBps       int64
 	TradeInterval time.Duration
 }
 
@@ -102,6 +111,10 @@ func (vt *ValueTrader) onTick(now time.Time) {
 		return
 	}
 
+	if vt.exitTowardFlat(fair) {
+		return
+	}
+
 	// Only trade against liquidity that is actually displayed, and never take
 	// more than the visible size of the level being hit.
 	if vt.bestAsk > 0 && vt.bestAsk < fair-band && vt.inventory < vt.cfg.MaxInventory {
@@ -115,6 +128,37 @@ func (vt *ValueTrader) onTick(now time.Time) {
 			vt.SubmitOrderWithTimeInForce(vt.cfg.Symbol, exchange.Sell, exchange.LimitOrder, vt.bestBid, qty, exchange.IOC)
 		}
 	}
+}
+
+// exitTowardFlat unwinds an existing position once the price has returned to
+// within ExitBps of fundamental value. It reports whether it acted.
+func (vt *ValueTrader) exitTowardFlat(fair int64) bool {
+	if vt.cfg.ExitBps <= 0 || vt.inventory == 0 {
+		return false
+	}
+	band, ok := etypes.TryMulBps(fair, vt.cfg.ExitBps)
+	if !ok {
+		return false
+	}
+	if vt.inventory > 0 {
+		// Long: sell back into the bid, but only once it is no longer cheap.
+		if vt.bestBid <= 0 || vt.bestBid < fair-band {
+			return false
+		}
+		if qty := vt.sizeFor(vt.bidQty, vt.inventory); qty > 0 {
+			vt.SubmitOrderWithTimeInForce(vt.cfg.Symbol, exchange.Sell, exchange.LimitOrder, vt.bestBid, qty, exchange.IOC)
+			return true
+		}
+		return false
+	}
+	if vt.bestAsk <= 0 || vt.bestAsk > fair+band {
+		return false
+	}
+	if qty := vt.sizeFor(vt.askQty, -vt.inventory); qty > 0 {
+		vt.SubmitOrderWithTimeInForce(vt.cfg.Symbol, exchange.Buy, exchange.LimitOrder, vt.bestAsk, qty, exchange.IOC)
+		return true
+	}
+	return false
 }
 
 func (vt *ValueTrader) sizeFor(visible, headroom int64) int64 {
