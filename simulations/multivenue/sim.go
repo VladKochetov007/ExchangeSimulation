@@ -129,6 +129,13 @@ type Config struct {
 	// how fast it can deploy capital into a basis that mean-reverts.
 	CarryLotQty int64 `json:"carry_lot_qty"`
 
+	// PerpMakerInventoryLimit overrides the risk budget for the perpetual
+	// maker alone. The shared limit moves the spot and perpetual skews
+	// together, which changes the basis between the two books for reasons that
+	// have nothing to do with the perpetual; separating them isolates the
+	// premium.
+	PerpMakerInventoryLimit int64 `json:"perp_maker_inventory_limit"`
+
 	// FundingMaxRateBps caps the perpetual funding rate per interval. The cap
 	// matters because it bounds the basis funding can close: if the market's
 	// equilibrium premium exceeds it, funding saturates and the premium
@@ -1025,7 +1032,11 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			venue.SpotMakers = append(venue.SpotMakers, crossMaker)
 		}
 	}
-	venue.PerpMaker = NewStoikovMarketMaker(nextActor(), connect("perp_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC-PERP", "ABC-PERP", mvBootstrapPrice, mvQuotePrecision, tick))
+	perpMakerConfig := stoikovConfig("ABC-PERP", "ABC-PERP", mvBootstrapPrice, mvQuotePrecision, tick)
+	if s.Config.PerpMakerInventoryLimit > 0 {
+		perpMakerConfig.InventoryLimit = s.Config.PerpMakerInventoryLimit
+	}
+	venue.PerpMaker = NewStoikovMarketMaker(nextActor(), connect("perp_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), perpMakerConfig)
 	venue.PerpMaker.SetTickerFactory(timers)
 
 	venue.FuturesMaker = derivsim.NewFuturesMarketMaker(nextActor(), connect("futures_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), derivsim.FuturesMMConfig{
