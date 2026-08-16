@@ -920,6 +920,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			HedgeSymbol:              hedgeSymbol(symbol, s.Config.MakerHedgeSymbol),
 			HedgeBandQty:             s.Config.MakerHedgeBandQty,
 			HedgeSlippageBps:         s.Config.MakerHedgeSlippageBps,
+			HedgeTickSize:            tick,
 			AnchorToIndex:            s.Config.MakerAnchor != "own_mid",
 			IndexWeight:              s.Config.MakerIndexWeight,
 		}
@@ -1305,7 +1306,9 @@ func (v *Venue) observeMicrostructure() {
 	v.Microstructure.observe(bestBid, bestAsk, int64(book.SeqNum))
 	for _, maker := range v.SpotMakers {
 		if maker.cfg.Symbol == v.Microstructure.Symbol {
-			v.Microstructure.observeInventory(maker.inventory, mvBasePrecision)
+			// Record the risk the maker actually carries. With hedging on, the
+			// spot position is offset elsewhere and says nothing about exposure.
+			v.Microstructure.observeInventory(maker.NetDelta(), mvBasePrecision)
 		}
 	}
 }

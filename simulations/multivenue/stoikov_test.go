@@ -174,3 +174,62 @@ func TestInventoryFractionIsClampedToTheRiskBudget(t *testing.T) {
 		t.Fatalf("unbudgeted fraction = %v, want 0.5", got)
 	}
 }
+
+// A hedge price must land on the hedge instrument's tick grid. Pricing through
+// the touch is exactly what knocks it off: a fifty basis point bump on a
+// 50,000 price is 250, which is not a multiple of a 1,000 tick, and the venue
+// rejects the order outright.
+//
+// This was silent in the scenario for a long time. The maker made 1,218
+// attempts and zero fills, and because a rejection is not a fill the only
+// visible symptom was inventory that never came down.
+func TestHedgePriceIsAlignedToTheHedgeTick(t *testing.T) {
+	const tick = int64(1_000)
+	gw := newStoikovStubGateway()
+	mm := NewStoikovMarketMaker(1, gw, StoikovMMConfig{
+		Symbol: "ABC/USD", ReferenceSymbol: "ABC/USD", BootstrapPrice: 50_000_000,
+		BasePrecision: 1_000, QuotePrecision: 1_000, TickSize: tick, QuoteQty: 100,
+		QuoteInterval: time.Second, VolatilityHalfLife: time.Minute,
+		InitialLogVariancePerSec: 1e-8, InventoryHorizon: time.Minute,
+		RelativeRiskAversion: 0.1, RelativeFillDecay: 25_000, MinHalfSpreadTicks: 1,
+		HedgeSymbol: "ABC-PERP", HedgeBandQty: 10, HedgeSlippageBps: 50, HedgeTickSize: tick,
+	})
+
+	// Short, so the hedge is a buy that must round up to stay marketable.
+	mm.inventory = -500
+	mm.hedgeBid, mm.hedgeBidQty = 49_999_000, 1_000
+	mm.hedgeAsk, mm.hedgeAskQty = 50_000_000, 1_000
+	mm.hedgeDelta()
+
+	if len(gw.requests) == 0 {
+		t.Fatal("no hedge submitted")
+	}
+	order := gw.requests[len(gw.requests)-1].OrderReq
+	if order.Side != exchange.Buy {
+		t.Fatalf("hedge side = %v, want a buy against a short", order.Side)
+	}
+	if order.Price%tick != 0 {
+		t.Fatalf("hedge price %d is not a multiple of the %d tick", order.Price, tick)
+	}
+	if order.Price < mm.hedgeAsk {
+		t.Fatalf("hedge price %d is below the ask %d, so it would not cross", order.Price, mm.hedgeAsk)
+	}
+
+	// Long: the hedge is a sell and must round down, staying at or below the bid.
+	gw.requests = nil
+	mm.hedgePending, mm.hedgePosition, mm.inventory = false, 0, 500
+	mm.hedgeDelta()
+	if len(gw.requests) == 0 {
+		t.Fatal("no hedge submitted for a long position")
+	}
+	sell := gw.requests[len(gw.requests)-1].OrderReq
+	if sell.Side != exchange.Sell {
+		t.Fatalf("hedge side = %v, want a sell against a long", sell.Side)
+	}
+	if sell.Price%tick != 0 {
+		t.Fatalf("hedge price %d is not a multiple of the %d tick", sell.Price, tick)
+	}
+	if sell.Price > mm.hedgeBid {
+		t.Fatalf("hedge price %d is above the bid %d, so it would not cross", sell.Price, mm.hedgeBid)
+	}
+}

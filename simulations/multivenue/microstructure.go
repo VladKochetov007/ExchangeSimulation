@@ -32,8 +32,8 @@ type MicrostructureStats struct {
 	// consecutive samples; SigmaPerTrade rescales it by the trade rate.
 	SigmaPerSample float64 `json:"sigma_per_sample"`
 	SigmaPerTrade  float64 `json:"sigma_per_trade"`
-	// MeanAbsMakerInventory and MaxAbsMakerInventory summarise how much
-	// inventory the spot makers carry. A maker whose quotes do not respond to
+	// MeanAbsMakerInventory and MaxAbsMakerInventory summarise the net delta
+	// the spot makers carry, which is their position after any hedge. A maker whose quotes do not respond to
 	// inventory accumulates monotonically, so this is the observable that says
 	// whether the inventory term binds.
 	MeanAbsMakerInventory float64 `json:"mean_abs_maker_inventory"`

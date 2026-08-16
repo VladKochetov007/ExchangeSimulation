@@ -141,6 +141,10 @@ type StoikovMMConfig struct {
 	HedgeSymbol string
 	// HedgeBandQty is how far net delta may drift before it is offset.
 	HedgeBandQty int64
+	// HedgeTickSize is the hedge instrument's tick. A price that is not a
+	// multiple of it is rejected outright, and pricing through the touch is
+	// exactly what knocks a price off the grid.
+	HedgeTickSize int64
 	// HedgeSlippageBps prices the hedge through the touch the maker last saw.
 	// Quoting exactly at a remembered touch does not cross: the hedge venue
 	// requotes between the snapshot and the order's arrival, so the order rests
@@ -180,6 +184,8 @@ type StoikovMarketMaker struct {
 	hedgeRequest       uint64
 	hedgeAttempts      int
 	hedgeFills         int
+	hedgeRejects       int
+	hedgeLastReject    exchange.RejectReason
 	hedgeLastQty       int64
 	hedgeBid, hedgeAsk int64
 	hedgeBidQty        int64
@@ -318,6 +324,8 @@ func (mm *StoikovMarketMaker) onRejected(e actor.OrderRejectedEvent) {
 	if !ok {
 		// A rejected hedge must release the in-flight flag, otherwise one
 		// rejection stops the maker hedging for the rest of the run.
+		mm.hedgeRejects++
+		mm.hedgeLastReject = e.Reason
 		mm.hedgePending, mm.hedgeRequest = false, 0
 		return
 	}
@@ -484,6 +492,17 @@ func (mm *StoikovMarketMaker) hedgeDelta() {
 			} else {
 				price -= bumped
 			}
+		}
+		if price <= 0 {
+			return
+		}
+	}
+	if tick := mm.cfg.HedgeTickSize; tick > 0 {
+		// Round outward so the order stays marketable after alignment.
+		if side == exchange.Buy {
+			price = (price + tick - 1) / tick * tick
+		} else {
+			price = price / tick * tick
 		}
 		if price <= 0 {
 			return
