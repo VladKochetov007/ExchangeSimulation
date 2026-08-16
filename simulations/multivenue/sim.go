@@ -214,6 +214,11 @@ type Config struct {
 	BootstrapDepthCount int                   `json:"bootstrap_depth_count"`
 	BootstrapDepth      *BootstrapDepthConfig `json:"bootstrap_depth"`
 
+	// SpotMakerRequoteBps stops a maker replacing quotes until its target has
+	// moved this far, which desynchronises a population that otherwise requotes
+	// in lockstep every step.
+	SpotMakerRequoteBps int64 `json:"spot_maker_requote_bps"`
+
 	// SpotMakerSubmitBeforeCancel makes the spot makers replace quotes without
 	// emptying the book. Cancel-then-replace leaves both sides empty for the
 	// rest of the phase in nearly every step.
@@ -1060,6 +1065,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			InventoryLimit:           s.Config.MakerInventoryLimit,
 			InventorySkewBps:         s.Config.MakerInventorySkewBps,
 			SubmitBeforeCancel:       s.Config.SpotMakerSubmitBeforeCancel,
+			RequoteBps:               s.Config.SpotMakerRequoteBps,
 			HedgeSymbol:              hedgeSymbol(symbol, s.Config.MakerHedgeSymbol),
 			HedgeBandQty:             s.Config.MakerHedgeBandQty,
 			HedgeSlippageBps:         s.Config.MakerHedgeSlippageBps,

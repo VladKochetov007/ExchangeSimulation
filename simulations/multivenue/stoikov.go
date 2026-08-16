@@ -155,6 +155,14 @@ type StoikovMMConfig struct {
 	// alone. A partial weight lets the book discover price while still being
 	// tethered.
 	IndexWeight float64
+	// RequoteBps suppresses a replacement until the target has moved this far
+	// from what is already resting. Without it a maker replaces its quotes on
+	// essentially every step, which synchronises the whole population: measured
+	// at 97.6 percent of steps having every maker cancel at once. A threshold
+	// lets each maker's own inventory and volatility state decide when it moves,
+	// so the population desynchronises.
+	RequoteBps int64
+
 	// SubmitBeforeCancel replaces quotes without ever leaving the book empty.
 	// The exchange cancels a client's own crossing quotes on rest, so the
 	// momentary overlap cannot self-trade.
@@ -447,6 +455,12 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 	if bid == mm.bidPrice && ask == mm.askPrice && mm.bidID != 0 && mm.askID != 0 {
 		return
 	}
+	if mm.cfg.RequoteBps > 0 && mm.bidID != 0 && mm.askID != 0 {
+		moved := maxInt64(absInt64(bid-mm.bidPrice), absInt64(ask-mm.askPrice))
+		if reference := (mm.bidPrice + mm.askPrice) / 2; reference > 0 && moved*10000 < mm.cfg.RequoteBps*reference {
+			return
+		}
+	}
 	previousBid, previousAsk := mm.bidID, mm.askID
 	if !mm.cfg.SubmitBeforeCancel {
 		mm.cancelResting(previousBid, previousAsk)
@@ -606,4 +620,18 @@ func quoteToAskTicks(price float64, precision, tick int64) (int64, bool) {
 
 func finite(x float64) bool {
 	return !math.IsNaN(x) && !math.IsInf(x, 0)
+}
+
+func absInt64(v int64) int64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
