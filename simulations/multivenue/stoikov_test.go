@@ -140,3 +140,37 @@ func TestStoikovMarketMakerRequotesAfterInventoryFill(t *testing.T) {
 		t.Fatalf("fill must cancel the stale opposite quote and replace pair: %+v", gw.requests)
 	}
 }
+
+// Inventory enters the control as a fraction of the risk budget, clamped, so a
+// position beyond the budget cannot skew the quote without bound. Before the
+// clamp the skew was per unit of inventory, and a maker holding 178 units
+// multiplied a small per-unit shift into one large enough to move the price
+// it was quoting around.
+func TestInventoryFractionIsClampedToTheRiskBudget(t *testing.T) {
+	mm := &StoikovMarketMaker{cfg: StoikovMMConfig{
+		BasePrecision: 1_000, InventoryLimit: 10_000,
+	}}
+	for _, testCase := range []struct {
+		inventory int64
+		want      float64
+	}{
+		{inventory: 0, want: 0},
+		{inventory: 5_000, want: 0.5},
+		{inventory: 10_000, want: 1},
+		{inventory: 40_000, want: 1},
+		{inventory: -40_000, want: -1},
+	} {
+		mm.inventory = testCase.inventory
+		if got := mm.inventoryFraction(); got != testCase.want {
+			t.Fatalf("inventory %d gave fraction %v, want %v", testCase.inventory, got, testCase.want)
+		}
+	}
+
+	// With no budget configured the fraction falls back to whole base units
+	// rather than dividing by zero.
+	unbudgeted := &StoikovMarketMaker{cfg: StoikovMMConfig{BasePrecision: 1_000}}
+	unbudgeted.inventory = 500
+	if got := unbudgeted.inventoryFraction(); got != 0.5 {
+		t.Fatalf("unbudgeted fraction = %v, want 0.5", got)
+	}
+}

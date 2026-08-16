@@ -100,6 +100,13 @@ type Config struct {
 	// realistic — no venue knows value — but it bounds what any anchor could
 	// achieve.
 	MakerAnchor string `json:"maker_anchor"`
+	// MakerInventoryLimit is the position a spot maker treats as its full risk
+	// budget, in base units.
+	MakerInventoryLimit int64 `json:"maker_inventory_limit"`
+	// MakerInventorySkewBps sets the maker's reservation shift at its full
+	// inventory limit, in basis points. Zero keeps the textbook
+	// variance-derived skew.
+	MakerInventorySkewBps int64 `json:"maker_inventory_skew_bps"`
 	// MakerIndexWeight blends the index with the maker's own midpoint.
 	MakerIndexWeight float64 `json:"maker_index_weight"`
 
@@ -251,6 +258,9 @@ func (c *Config) normalize() error {
 	if c.MakerAnchor == "" {
 		c.MakerAnchor = "own_mid"
 	}
+	if c.MakerInventoryLimit == 0 {
+		c.MakerInventoryLimit = 100 * mvBasePrecision
+	}
 	if c.MakerIndexWeight == 0 {
 		c.MakerIndexWeight = 1
 	}
@@ -350,7 +360,7 @@ func (c *Config) normalize() error {
 		c.NoiseInterval <= 0 || c.GreekInterval <= 0 || c.ShortOptionTenor <= 0 || c.LongOptionTenor <= 0 ||
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 || *c.ValueTraderCount < 0 ||
-		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 ||
+		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || *c.OptionBuyProbability < 0 || *c.OptionBuyProbability > 1 {
@@ -851,6 +861,8 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			RelativeRiskAversion:     relativeRiskAversion,
 			RelativeFillDecay:        relativeFillDecay,
 			MinHalfSpreadTicks:       1,
+			InventoryLimit:           s.Config.MakerInventoryLimit,
+			InventorySkewBps:         s.Config.MakerInventorySkewBps,
 			AnchorToIndex:            s.Config.MakerAnchor != "own_mid",
 			IndexWeight:              s.Config.MakerIndexWeight,
 		}
@@ -1200,6 +1212,11 @@ func (v *Venue) observeMicrostructure() {
 		bestAsk = levels[0].Price
 	}
 	v.Microstructure.observe(bestBid, bestAsk, int64(book.SeqNum))
+	for _, maker := range v.SpotMakers {
+		if maker.cfg.Symbol == v.Microstructure.Symbol {
+			v.Microstructure.observeInventory(maker.inventory, mvBasePrecision)
+		}
+	}
 }
 
 // valuedSpotSymbols lists the books whose midpoints price participant wealth.

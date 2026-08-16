@@ -116,7 +116,24 @@ type StoikovMMConfig struct {
 	// midpoint reproduce itself: the price becomes a self-referential random
 	// walk with no restoring force, and it wanders arbitrarily far from value
 	// once informed participants reach their inventory bounds.
-	AnchorToIndex bool
+	// InventoryLimit is the position the maker treats as its full risk budget.
+	// Inventory enters the control as a fraction of it, clamped to one, so the
+	// skew is bounded and calibratable: risk aversion sets the shift at the
+	// limit rather than a shift per unit that an unbounded position multiplies
+	// into an arbitrary number.
+	InventoryLimit int64
+	// InventorySkewBps, when positive, sets the reservation-price shift at the
+	// full inventory limit directly, in basis points, instead of deriving it
+	// from risk aversion times variance times horizon.
+	//
+	// The textbook term couples the skew to the volatility estimate, and in
+	// this market that estimate moves by two and a half orders of magnitude
+	// between its floor and its cap. The skew is then either negligible — 0.6
+	// basis points at 100 units of inventory, so makers accumulate without
+	// limit — or large enough to move the price itself and diverge. Setting the
+	// shift at the limit makes the control calibratable and bounded.
+	InventorySkewBps int64
+	AnchorToIndex    bool
 	// IndexWeight blends the index with the book midpoint, 1 meaning the index
 	// alone. A partial weight lets the book discover price while still being
 	// tethered.
@@ -319,9 +336,10 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 	if !finite(forwardPrice) || forwardPrice <= 0 {
 		return
 	}
+	inventory := mm.inventoryFraction()
 	quote, ok := CalculateStoikovQuote(StoikovInputs{
 		Forward:           forwardPrice,
-		Inventory:         float64(mm.inventory) / float64(mm.cfg.BasePrecision),
+		Inventory:         inventory,
 		VariancePerSecond: mm.logVariancePerSec * forwardPrice * forwardPrice,
 		RiskAversion:      mm.cfg.RelativeRiskAversion / forwardPrice,
 		FillDecay:         mm.cfg.RelativeFillDecay / forwardPrice,
@@ -330,6 +348,17 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 	})
 	if !ok {
 		return
+	}
+	if mm.cfg.InventorySkewBps > 0 {
+		// Replace the variance-derived skew with the configured one, keeping
+		// the spread the control law produced.
+		shift := forwardPrice * float64(mm.cfg.InventorySkewBps) / 10_000 * inventory
+		quote.Reservation = forwardPrice - shift
+		quote.Bid = quote.Reservation - quote.HalfSpread
+		quote.Ask = quote.Reservation + quote.HalfSpread
+		if quote.Bid <= 0 || quote.Ask <= quote.Bid {
+			return
+		}
 	}
 	bid, okBid := quoteToBidTicks(quote.Bid, mm.cfg.QuotePrecision, mm.cfg.TickSize)
 	ask, okAsk := quoteToAskTicks(quote.Ask, mm.cfg.QuotePrecision, mm.cfg.TickSize)
@@ -352,6 +381,23 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 	mm.pending[bidRequest] = stoikovBid
 	askRequest := mm.SubmitOrder(mm.cfg.Symbol, exchange.Sell, exchange.LimitOrder, ask, mm.cfg.QuoteQty)
 	mm.pending[askRequest] = stoikovAsk
+}
+
+// inventoryFraction is the signed position as a fraction of the risk budget,
+// clamped so a position beyond the budget cannot skew the quote without bound.
+func (mm *StoikovMarketMaker) inventoryFraction() float64 {
+	scale := mm.cfg.InventoryLimit
+	if scale <= 0 {
+		scale = mm.cfg.BasePrecision
+	}
+	fraction := float64(mm.inventory) / float64(scale)
+	if fraction > 1 {
+		return 1
+	}
+	if fraction < -1 {
+		return -1
+	}
+	return fraction
 }
 
 // referencePrice is what the maker quotes around.

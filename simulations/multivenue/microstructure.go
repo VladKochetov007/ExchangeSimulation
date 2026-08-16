@@ -30,12 +30,19 @@ type MicrostructureStats struct {
 	MedianSpreadTicks  float64 `json:"median_spread_ticks"`
 	// SigmaPerSample is the standard deviation of midpoint log returns between
 	// consecutive samples; SigmaPerTrade rescales it by the trade rate.
-	SigmaPerSample     float64 `json:"sigma_per_sample"`
-	SigmaPerTrade      float64 `json:"sigma_per_trade"`
-	TradesPerSample    float64 `json:"trades_per_sample"`
-	SampleIntervalSecs float64 `json:"sample_interval_seconds"`
+	SigmaPerSample float64 `json:"sigma_per_sample"`
+	SigmaPerTrade  float64 `json:"sigma_per_trade"`
+	// MeanAbsMakerInventory and MaxAbsMakerInventory summarise how much
+	// inventory the spot makers carry. A maker whose quotes do not respond to
+	// inventory accumulates monotonically, so this is the observable that says
+	// whether the inventory term binds.
+	MeanAbsMakerInventory float64 `json:"mean_abs_maker_inventory"`
+	MaxAbsMakerInventory  float64 `json:"max_abs_maker_inventory"`
+	TradesPerSample       float64 `json:"trades_per_sample"`
+	SampleIntervalSecs    float64 `json:"sample_interval_seconds"`
 
 	tickSize    int64
+	inventories []float64
 	spreads     []float64
 	relSpreads  []float64
 	logReturns  []float64
@@ -83,10 +90,30 @@ func (m *MicrostructureStats) observe(bestBid, bestAsk, cumulativeTrades int64) 
 	m.lastMid = mid
 }
 
+// observeInventory records the absolute inventory of one maker, in base units
+// scaled to whole units.
+func (m *MicrostructureStats) observeInventory(inventory int64, basePrecision int64) {
+	if m == nil || basePrecision <= 0 {
+		return
+	}
+	value := float64(inventory) / float64(basePrecision)
+	if value < 0 {
+		value = -value
+	}
+	m.inventories = append(m.inventories, value)
+}
+
 func (m *MicrostructureStats) finalize() {
 	if m == nil || m.Samples == 0 {
 		return
 	}
+	m.MeanAbsMakerInventory = mean(m.inventories)
+	for _, value := range m.inventories {
+		if value > m.MaxAbsMakerInventory {
+			m.MaxAbsMakerInventory = value
+		}
+	}
+	m.inventories = nil
 	m.Trades = m.lastTrades - m.firstTrades
 	m.MeanSpreadTicks = mean(m.spreads)
 	m.MeanRelativeSpread = mean(m.relSpreads)
