@@ -156,6 +156,13 @@ type Config struct {
 	// sample counts as visibly mispriced in the run summary.
 	MispricingBandBps int64 `json:"mispricing_band_bps"`
 
+	// LatentLiquidityCount adds participants holding unexpressed intentions
+	// whose reservation prices diffuse and become orders on crossing. The
+	// square-root impact law is attributed to exactly this: latent liquidity
+	// that vanishes near the transaction price.
+	LatentLiquidityCount int                    `json:"latent_liquidity_count"`
+	LatentLiquidity      *LatentLiquidityConfig `json:"latent_liquidity"`
+
 	// MetaorderTraderCount is how many execution agents each venue runs.
 	// Impact is a statistical measurement over many parent orders, so a single
 	// agent per venue cannot produce a usable sample in a reasonable run.
@@ -444,7 +451,7 @@ func (c *Config) normalize() error {
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 || *c.ValueTraderCount < 0 ||
 		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 || c.ElasticSupplierCount < 0 || c.ElasticSupplierUnitsPerPercent <= 0 || c.CarryArbitrageurCount < 0 ||
-		c.CarryEntryBps <= 0 || c.CarryExitBps < 0 || c.CarryMaxPosition <= 0 || c.CarryLotQty <= 0 || c.MakerQuoteQty <= 0 ||
+		c.CarryEntryBps <= 0 || c.CarryExitBps < 0 || c.CarryMaxPosition <= 0 || c.CarryLotQty <= 0 || c.MakerQuoteQty <= 0 || c.LatentLiquidityCount < 0 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || *c.OptionBuyProbability < 0 || *c.OptionBuyProbability > 1 {
@@ -483,6 +490,7 @@ type Venue struct {
 	RoundTripTraders []*RoundTripTrader
 	Suppliers        []*ElasticSupplier
 	CarryArbs        []*CarryArbitrageur
+	LatentLiquidity  []*LatentLiquidity
 	MetaorderTraders []*MetaorderTrader
 	lastTwoSided     map[string]twoSidedMark
 	Mispricing       *MispricingStats
@@ -754,6 +762,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		}
 		for _, arb := range venue.CarryArbs {
 			runner.AddActor(arb)
+		}
+		for _, latent := range venue.LatentLiquidity {
+			runner.AddActor(latent)
 		}
 	}
 	if err := sim.addMetaorderTraders(timers, &actorID); err != nil {
@@ -1031,6 +1042,28 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		venue.OptionFlows = append(venue.OptionFlows, flow)
 	}
 	venue.OptionFlow = venue.OptionFlows[0]
+
+	latentBalances := map[string]int64{"ABC": 50_000 * mvBasePrecision, "USD": 5_000_000_000 * mvQuotePrecision}
+	if s.Config.CrossAssetSpotGraph {
+		latentBalances["CDF"] = 1_000 * mvBasePrecision
+	}
+	for participant := 0; participant < s.Config.LatentLiquidityCount; participant++ {
+		cfg := LatentLiquidityConfig{
+			Interval: s.Config.NoiseInterval, DepositsPerTick: 20, CancelProbability: 0.02,
+			DiffusionBps: 5, SpreadBps: 200, IntentionQty: mvBasePrecision / 10, MaxIntentions: 5_000,
+		}
+		if s.Config.LatentLiquidity != nil {
+			cfg = *s.Config.LatentLiquidity
+		}
+		cfg.Symbol, cfg.BasePrecision, cfg.TickSize = "ABC/USD", mvBasePrecision, tick
+		if cfg.Interval <= 0 {
+			cfg.Interval = s.Config.NoiseInterval
+		}
+		cfg.Seed = flowSeed(s.Config.Seed, venueIndex, participant, 13)
+		latent := NewLatentLiquidity(nextActor(), connect(fmt.Sprintf("latent_liquidity_%d", participant+1), latentBalances, 0, noiseFee), cfg)
+		latent.SetTickerFactory(timers)
+		venue.LatentLiquidity = append(venue.LatentLiquidity, latent)
+	}
 
 	carryBalances := map[string]int64{"ABC": 2_000 * mvBasePrecision, "USD": 200_000_000 * mvQuotePrecision}
 	if s.Config.CrossAssetSpotGraph {

@@ -1356,3 +1356,58 @@ func TestMetaorderTraderCountIsConfigurable(t *testing.T) {
 		}
 	}
 }
+
+// The latent population must behave the way the reaction-diffusion picture
+// describes: intentions accumulate, their reservation prices move, and one
+// becomes an order only when it crosses the market.
+func TestLatentLiquidityAccumulatesDiffusesAndConvertsOnCrossing(t *testing.T) {
+	gw := newStoikovStubGateway()
+	latent := NewLatentLiquidity(1, gw, LatentLiquidityConfig{
+		Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: 10 * mvQuotePrecision,
+		Interval: time.Second, DepositsPerTick: 10, CancelProbability: 0,
+		DiffusionBps: 0, SpreadBps: 100, IntentionQty: mvBasePrecision / 10, MaxIntentions: 100,
+		Seed: 7,
+	})
+	now := time.Unix(0, 0)
+	latent.onTick(now) // subscribes
+
+	feed := func(bid, ask int64) {
+		latent.HandleEvent(context.Background(), &actor.Event{
+			Type: actor.EventBookSnapshot,
+			Data: actor.BookSnapshotEvent{Symbol: "ABC/USD", Timestamp: now.UnixNano(),
+				Snapshot: &exchange.BookSnapshot{
+					Bids: []etypes.PriceLevel{{Price: bid, VisibleQty: mvBasePrecision}},
+					Asks: []etypes.PriceLevel{{Price: ask, VisibleQty: mvBasePrecision}},
+				}},
+		})
+	}
+
+	// With no diffusion, intentions deposited inside a band around the price
+	// never cross it, so they accumulate without trading.
+	feed(50_000*mvQuotePrecision, 50_010*mvQuotePrecision)
+	before := len(gw.requests)
+	for range 3 {
+		latent.onTick(now)
+	}
+	if latent.Intentions() == 0 {
+		t.Fatal("no intentions accumulated")
+	}
+	if len(gw.requests) != before {
+		t.Fatalf("intentions traded without crossing the market: %+v", gw.requests[before:])
+	}
+
+	// Move the market far below the resting buy intentions: they are now
+	// crossed and must convert, one order per tick.
+	feed(1*mvQuotePrecision, 2*mvQuotePrecision)
+	latent.onTick(now)
+	if latent.Converted() != 1 {
+		t.Fatalf("converted %d intentions, want exactly one per tick", latent.Converted())
+	}
+	order := gw.requests[len(gw.requests)-1].OrderReq
+	if order.Side != exchange.Buy || order.TimeInForce != exchange.IOC {
+		t.Fatalf("unexpected converted order: %+v", order)
+	}
+	if order.Price%(10*mvQuotePrecision) != 0 {
+		t.Fatalf("converted order price %d is off the tick grid", order.Price)
+	}
+}
