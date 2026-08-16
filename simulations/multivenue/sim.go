@@ -153,7 +153,25 @@ type Config struct {
 	// derivative markets are one against many; competing dealers are what makes
 	// them many against many.
 	OptionDealerCount int `json:"option_dealer_count"`
-	FuturesMakerCount int `json:"futures_maker_count"`
+
+	// DatedCarryArbCount and ParityArbCount populate the two classes that take
+	// the other side of the derivative dealers: cash-and-carry desks that trade
+	// dated futures against spot, and put-call parity desks. Without them the
+	// dated ladder is quoted but has no counterparty flow.
+	DatedCarryArbCount int   `json:"dated_carry_arb_count"`
+	ParityArbCount     int   `json:"parity_arb_count"`
+	DatedCarryEdgeBps  int64 `json:"dated_carry_edge_bps"`
+	ParityEdgeBps      int64 `json:"parity_edge_bps"`
+	// DatedCarryScaleEdge demands less edge as settlement risk shrinks into
+	// expiry, which is what produces a square-root convergence envelope.
+	DatedCarryScaleEdge bool `json:"dated_carry_scale_edge"`
+	FuturesMakerCount   int  `json:"futures_maker_count"`
+
+	// FuturesMakerSelfAnchored lets each dated book price itself from its own
+	// last trade instead of pinning its mid to the spot mid. Pinned to spot the
+	// basis is identically zero and there is no term structure for a carry desk
+	// to trade, so the dated ladder cannot be economically alive.
+	FuturesMakerSelfAnchored bool `json:"futures_maker_self_anchored"`
 
 	// SpotMakerCount is how many market makers quote the main spot pair on each
 	// venue, so the carrying capacity of market making can be measured the same
@@ -370,6 +388,12 @@ func (c *Config) normalize() error {
 	if c.FundingMaxRateBps == 0 {
 		c.FundingMaxRateBps = 75
 	}
+	if c.DatedCarryEdgeBps == 0 {
+		c.DatedCarryEdgeBps = 10
+	}
+	if c.ParityEdgeBps == 0 {
+		c.ParityEdgeBps = 20
+	}
 	if c.OptionDealerCount == 0 {
 		c.OptionDealerCount = 1
 	}
@@ -497,7 +521,7 @@ func (c *Config) normalize() error {
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 || *c.ValueTraderCount < 0 ||
 		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 || c.ElasticSupplierCount < 0 || c.ElasticSupplierUnitsPerPercent <= 0 || c.CarryArbitrageurCount < 0 ||
-		c.CarryEntryBps <= 0 || c.CarryExitBps < 0 || c.CarryMaxPosition <= 0 || c.CarryLotQty <= 0 || c.MakerQuoteQty <= 0 || c.SpotMakerCount < 1 || c.OptionDealerCount < 1 || c.FuturesMakerCount < 1 || c.FundingMaxRateBps <= 0 || c.FundingIntervalSeconds <= 0 || c.LatentLiquidityCount < 0 ||
+		c.CarryEntryBps <= 0 || c.CarryExitBps < 0 || c.CarryMaxPosition <= 0 || c.CarryLotQty <= 0 || c.MakerQuoteQty <= 0 || c.SpotMakerCount < 1 || c.OptionDealerCount < 1 || c.DatedCarryArbCount < 0 || c.ParityArbCount < 0 || c.FuturesMakerCount < 1 || c.FundingMaxRateBps <= 0 || c.FundingIntervalSeconds <= 0 || c.LatentLiquidityCount < 0 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || *c.OptionBuyProbability < 0 || *c.OptionBuyProbability > 1 {
@@ -529,6 +553,8 @@ type Venue struct {
 	FuturesMakers        []*derivsim.FuturesMarketMaker
 	OptionDealer         *derivsim.OptionMarketMaker
 	OptionDealers        []*derivsim.OptionMarketMaker
+	DatedCarryArbs       []*derivsim.CashCarryArb
+	ParityArbs           []*derivsim.ParityArb
 	OptionDealerClientID uint64
 	// Singular fields retain the baseline participant for callers written
 	// before configurable rosters. All actors live in the corresponding slice.
@@ -797,6 +823,12 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		runner.AddActor(venue.PerpMaker)
 		for _, maker := range venue.FuturesMakers {
 			runner.AddActor(maker)
+		}
+		for _, desk := range venue.DatedCarryArbs {
+			runner.AddActor(desk)
+		}
+		for _, desk := range venue.ParityArbs {
+			runner.AddActor(desk)
 		}
 		for _, dealer := range venue.OptionDealers {
 			runner.AddActor(dealer)
@@ -1071,6 +1103,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	for i := 0; i < s.Config.FuturesMakerCount; i++ {
 		futuresMaker := derivsim.NewFuturesMarketMaker(nextActor(), connect(fmt.Sprintf("futures_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), derivsim.FuturesMMConfig{
 			Underlying: "ABC/USD", SpreadBps: 6, QuoteQty: mvBasePrecision / 5, Tick: tick, QuoteInterval: s.Config.QuoteInterval,
+			SelfAnchored: s.Config.FuturesMakerSelfAnchored,
 		})
 		futuresMaker.SetTickerFactory(timers)
 		venue.FuturesMakers = append(venue.FuturesMakers, futuresMaker)
@@ -1121,6 +1154,28 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		venue.OptionFlows = append(venue.OptionFlows, flow)
 	}
 	venue.OptionFlow = venue.OptionFlows[0]
+
+	derivArbBalances := map[string]int64{"ABC": 5_000 * mvBasePrecision, "USD": 500_000_000 * mvQuotePrecision}
+	carryTenor := int64(0)
+	if s.Config.DatedCarryScaleEdge {
+		carryTenor = s.Config.ShortFutureTenor.Nanoseconds()
+	}
+	for participant := 0; participant < s.Config.DatedCarryArbCount; participant++ {
+		desk := derivsim.NewCashCarryArb(nextActor(), connect(fmt.Sprintf("dated_carry_arb_%d", participant+1), derivArbBalances, 100_000_000*mvQuotePrecision, zeroFee), derivsim.CarryArbConfig{
+			Underlying: "ABC/USD", EdgeBps: s.Config.DatedCarryEdgeBps, LotQty: mvBasePrecision / 10,
+			MaxPosPerSym: 5 * mvBasePrecision, CheckInterval: s.Config.QuoteInterval, TenorNano: carryTenor,
+		})
+		desk.SetTickerFactory(timers)
+		venue.DatedCarryArbs = append(venue.DatedCarryArbs, desk)
+	}
+	for participant := 0; participant < s.Config.ParityArbCount; participant++ {
+		desk := derivsim.NewParityArb(nextActor(), connect(fmt.Sprintf("parity_arb_%d", participant+1), derivArbBalances, 100_000_000*mvQuotePrecision, zeroFee), derivsim.ParityArbConfig{
+			Underlying: "ABC/USD", EdgeBps: s.Config.ParityEdgeBps, LotQty: mvBasePrecision / 20,
+			MaxTrades: 100_000, CheckInterval: s.Config.QuoteInterval,
+		})
+		desk.SetTickerFactory(timers)
+		venue.ParityArbs = append(venue.ParityArbs, desk)
+	}
 
 	latentBalances := map[string]int64{"ABC": 50_000 * mvBasePrecision, "USD": 5_000_000_000 * mvQuotePrecision}
 	if s.Config.CrossAssetSpotGraph {
