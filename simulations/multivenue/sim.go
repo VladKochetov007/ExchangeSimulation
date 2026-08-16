@@ -100,6 +100,14 @@ type Config struct {
 	// realistic — no venue knows value — but it bounds what any anchor could
 	// achieve.
 	MakerAnchor string `json:"maker_anchor"`
+	// RoundTripTraderCount adds participants whose demand mean-reverts in
+	// quantity: they open a position and unwind it after RoundTripHold. Pure
+	// random-side flow mean-reverts in price but not in quantity, which leaves
+	// market makers holding a position that never returns.
+	RoundTripTraderCount int           `json:"round_trip_trader_count"`
+	RoundTripHold        time.Duration `json:"round_trip_hold"`
+	RoundTripLotQty      int64         `json:"round_trip_lot_qty"`
+
 	// MakerInventoryLimit is the position a spot maker treats as its full risk
 	// budget, in base units.
 	MakerInventoryLimit int64 `json:"maker_inventory_limit"`
@@ -258,6 +266,12 @@ func (c *Config) normalize() error {
 	if c.MakerAnchor == "" {
 		c.MakerAnchor = "own_mid"
 	}
+	if c.RoundTripHold == 0 {
+		c.RoundTripHold = 5 * time.Minute
+	}
+	if c.RoundTripLotQty == 0 {
+		c.RoundTripLotQty = mvBasePrecision / 10
+	}
 	if c.MakerInventoryLimit == 0 {
 		c.MakerInventoryLimit = 100 * mvBasePrecision
 	}
@@ -360,7 +374,7 @@ func (c *Config) normalize() error {
 		c.NoiseInterval <= 0 || c.GreekInterval <= 0 || c.ShortOptionTenor <= 0 || c.LongOptionTenor <= 0 ||
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 || *c.ValueTraderCount < 0 ||
-		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 ||
+		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || *c.OptionBuyProbability < 0 || *c.OptionBuyProbability > 1 {
@@ -396,6 +410,7 @@ type Venue struct {
 	NoiseTrader      *feesim.RandomTaker
 	NoiseTraders     []*feesim.RandomTaker
 	ValueTraders     []*ValueTrader
+	RoundTripTraders []*RoundTripTrader
 	MetaorderTraders []*MetaorderTrader
 	lastTwoSided     map[string]twoSidedMark
 	Mispricing       *MispricingStats
@@ -657,6 +672,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 			runner.AddActor(flow)
 		}
 		for _, trader := range venue.ValueTraders {
+			runner.AddActor(trader)
+		}
+		for _, trader := range venue.RoundTripTraders {
 			runner.AddActor(trader)
 		}
 	}
@@ -931,6 +949,16 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		venue.OptionFlows = append(venue.OptionFlows, flow)
 	}
 	venue.OptionFlow = venue.OptionFlows[0]
+
+	for participant := 0; participant < s.Config.RoundTripTraderCount; participant++ {
+		trader := NewRoundTripTrader(nextActor(), connect(fmt.Sprintf("round_trip_%d", participant+1), noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), RoundTripTraderConfig{
+			Symbol: "ABC/USD", BasePrecision: mvBasePrecision, LotQty: s.Config.RoundTripLotQty,
+			Interval: s.Config.NoiseInterval, HoldDuration: s.Config.RoundTripHold,
+			OpenProbability: 0.5, Seed: flowSeed(s.Config.Seed, venueIndex, participant, 11),
+		})
+		trader.SetTickerFactory(timers)
+		venue.RoundTripTraders = append(venue.RoundTripTraders, trader)
+	}
 
 	valueBalances := map[string]int64{"ABC": 1_000 * mvBasePrecision, "USD": 50_000_000 * mvQuotePrecision}
 	if s.Config.CrossAssetSpotGraph {

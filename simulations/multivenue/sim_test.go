@@ -1171,3 +1171,41 @@ func TestConsensusIndexIsRobustToOneRunawayVenue(t *testing.T) {
 		t.Fatalf("index for an unpublished symbol = %d, want 0", got)
 	}
 }
+
+// A round-trip participant must return to flat, which is the property that
+// distinguishes it from random-side flow: a fresh coin flip each tick
+// mean-reverts in price but leaves the participant's net position a random
+// walk, and market-maker inventory is the mirror of that walk.
+func TestRoundTripTraderReturnsToFlat(t *testing.T) {
+	sim, err := NewSim(30*time.Minute, Config{
+		LogDir: t.TempDir(), LogMode: "none", Seed: 91,
+		RoundTripTraderCount: 4,
+		RoundTripHold:        time.Minute,
+		RoundTripLotQty:      mvBasePrecision / 10,
+	})
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	defer sim.Close()
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	completed := 0
+	for _, venue := range sim.Venues {
+		if len(venue.RoundTripTraders) != 4 {
+			t.Fatalf("venue %s round-trip traders = %d, want 4", venue.ID, len(venue.RoundTripTraders))
+		}
+		for _, trader := range venue.RoundTripTraders {
+			completed += trader.RoundTrips()
+			// A position may be open at the cutoff, but it must be at most one
+			// lot: anything larger means unwinding is not keeping up.
+			if position := trader.Position(); position > mvBasePrecision/10 || position < -mvBasePrecision/10 {
+				t.Fatalf("round-trip trader ended %d base units from flat", position)
+			}
+		}
+	}
+	if completed == 0 {
+		t.Fatal("no round trips completed in thirty simulated minutes")
+	}
+}
