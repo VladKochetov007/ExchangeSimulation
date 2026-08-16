@@ -198,6 +198,16 @@ type Config struct {
 	// consensus index, which every participant then observes equally.
 	DegradedIndex *DegradedIndexConfig `json:"degraded_index"`
 
+	// Naive strategy counts. These are the textbook strategies from public
+	// trading newsletters, present so they compete against the inventory
+	// managing makers rather than being assumed away.
+	FixedDistanceMakerCount int                       `json:"fixed_distance_maker_count"`
+	FixedDistanceMaker      *FixedDistanceMakerConfig `json:"fixed_distance_maker"`
+	ImbalanceMakerCount     int                       `json:"imbalance_maker_count"`
+	ImbalanceMaker          *ImbalanceMakerConfig     `json:"imbalance_maker"`
+	TriangleArbCount        int                       `json:"triangle_arb_count"`
+	TriangleArb             *TriangleArbConfig        `json:"triangle_arb"`
+
 	// BootstrapDepthCount rests passive ladders that never reprice, so a run can
 	// ask whether takers fail for lack of depth or for lack of depth at their
 	// scheduled instant. BootstrapDepth.Withdraw retires the scaffold mid-run.
@@ -556,6 +566,9 @@ type Venue struct {
 	FuturesMakers        []*derivsim.FuturesMarketMaker
 	OptionDealer         *derivsim.OptionMarketMaker
 	OptionDealers        []*derivsim.OptionMarketMaker
+	FixedDistanceMakers  []*FixedDistanceMaker
+	ImbalanceMakers      []*ImbalanceMaker
+	TriangleArbs         []*TriangleArbTaker
 	BootstrapDepths      []*BootstrapDepth
 	DatedCarryArbs       []*derivsim.CashCarryArb
 	ParityArbs           []*derivsim.ParityArb
@@ -798,6 +811,15 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		runner.AddActor(venue.PerpMaker)
 		for _, maker := range venue.FuturesMakers {
 			runner.AddActor(maker)
+		}
+		for _, maker := range venue.FixedDistanceMakers {
+			runner.AddActor(maker)
+		}
+		for _, maker := range venue.ImbalanceMakers {
+			runner.AddActor(maker)
+		}
+		for _, desk := range venue.TriangleArbs {
+			runner.AddActor(desk)
 		}
 		for _, ladder := range venue.BootstrapDepths {
 			runner.AddActor(ladder)
@@ -1125,6 +1147,52 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		venue.OptionFlows = append(venue.OptionFlows, flow)
 	}
 	venue.OptionFlow = venue.OptionFlows[0]
+
+	naiveBalances := map[string]int64{"ABC": 2_000 * mvBasePrecision, "USD": 200_000_000 * mvQuotePrecision}
+	if s.Config.CrossAssetSpotGraph {
+		naiveBalances["CDF"] = 20_000 * mvBasePrecision
+	}
+	for participant := 0; participant < s.Config.FixedDistanceMakerCount; participant++ {
+		cfg := FixedDistanceMakerConfig{SpreadBps: 8, RequoteBps: 4, QuoteQty: mvBasePrecision / 4, MaxInventory: 200 * mvBasePrecision}
+		if s.Config.FixedDistanceMaker != nil {
+			cfg = *s.Config.FixedDistanceMaker
+		}
+		cfg.Symbol, cfg.TickSize = "ABC/USD", tick
+		if cfg.QuoteInterval <= 0 {
+			cfg.QuoteInterval = s.Config.QuoteInterval
+		}
+		maker := NewFixedDistanceMaker(nextActor(), connect(fmt.Sprintf("fixed_distance_maker_%d", participant+1), naiveBalances, 10_000_000*mvQuotePrecision, zeroFee), cfg)
+		maker.SetTickerFactory(timers)
+		venue.FixedDistanceMakers = append(venue.FixedDistanceMakers, maker)
+	}
+	for participant := 0; participant < s.Config.ImbalanceMakerCount; participant++ {
+		cfg := ImbalanceMakerConfig{FixedDistanceMakerConfig: FixedDistanceMakerConfig{SpreadBps: 8, RequoteBps: 4, QuoteQty: mvBasePrecision / 4, MaxInventory: 200 * mvBasePrecision}, LeanBps: 4}
+		if s.Config.ImbalanceMaker != nil {
+			cfg = *s.Config.ImbalanceMaker
+		}
+		cfg.Symbol, cfg.TickSize = "ABC/USD", tick
+		if cfg.QuoteInterval <= 0 {
+			cfg.QuoteInterval = s.Config.QuoteInterval
+		}
+		maker := NewImbalanceMaker(nextActor(), connect(fmt.Sprintf("imbalance_maker_%d", participant+1), naiveBalances, 10_000_000*mvQuotePrecision, zeroFee), cfg)
+		maker.SetTickerFactory(timers)
+		venue.ImbalanceMakers = append(venue.ImbalanceMakers, maker)
+	}
+	if s.Config.CrossAssetSpotGraph {
+		for participant := 0; participant < s.Config.TriangleArbCount; participant++ {
+			cfg := TriangleArbConfig{EdgeBps: 20, LotQty: mvBasePrecision / 20}
+			if s.Config.TriangleArb != nil {
+				cfg = *s.Config.TriangleArb
+			}
+			cfg.BaseQuote, cfg.CrossQuote, cfg.BaseCross = "ABC/USD", "CDF/USD", "ABC/CDF"
+			if cfg.CheckInterval <= 0 {
+				cfg.CheckInterval = s.Config.QuoteInterval
+			}
+			desk := NewTriangleArbTaker(nextActor(), connect(fmt.Sprintf("triangle_arb_%d", participant+1), naiveBalances, 10_000_000*mvQuotePrecision, noiseFee), cfg)
+			desk.SetTickerFactory(timers)
+			venue.TriangleArbs = append(venue.TriangleArbs, desk)
+		}
+	}
 
 	depthBalances := map[string]int64{"ABC": 200_000 * mvBasePrecision, "USD": 20_000_000_000 * mvQuotePrecision}
 	for participant := 0; participant < s.Config.BootstrapDepthCount; participant++ {

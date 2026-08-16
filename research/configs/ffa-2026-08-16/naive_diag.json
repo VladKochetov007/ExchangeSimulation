@@ -1,0 +1,61 @@
+{
+  "log_mode": "full",
+  "seed": 91,
+  "step": 1000000000,
+  "snapshot_interval": 1000000000,
+  "automation_interval": 1000000000,
+  "quote_interval": 1000000000,
+  "noise_interval": 2000000000,
+  "greek_interval": 60000000000,
+  "noise_trader_count": 8,
+  "option_flow_count": 6,
+  "strict_population_accounting": true,
+  "cross_asset_spot_graph": true,
+  "venue_rules": {
+    "north": {
+      "matching_rule": "price_time"
+    },
+    "central": {
+      "matching_rule": "pro_rata"
+    },
+    "south": {
+      "matching_rule": "pro_rata"
+    }
+  },
+  "spot_tick_quote_units": 10000,
+  "maker_anchor": "consensus",
+  "maker_hedge_symbol": "ABC-PERP",
+  "carry_arbitrageur_count": 2,
+  "carry_entry_bps": 2,
+  "carry_exit_bps": 1,
+  "maker_inventory_skew_bps": 25,
+  "carry_lot_qty": 200000000,
+  "maker_quote_qty": 500000000,
+  "metaorder_traders": {
+    "min_qty": 10000000,
+    "max_qty": 500000000,
+    "pareto_alpha": 1.3,
+    "child_interval": 1000000000,
+    "participation_rate": 0.05,
+    "min_child_qty": 1000000,
+    "rest_interval": 60000000000,
+    "max_duration": 900000000000
+  },
+  "maker_index_weight": 0.3,
+  "round_trip_trader_count": 2,
+  "elastic_supplier_count": 2,
+  "metaorder_trader_count": 2,
+  "latent_liquidity_count": 0,
+  "option_dealer_count": 3,
+  "futures_maker_count": 3,
+  "dated_carry_arb_count": 2,
+  "parity_arb_count": 0,
+  "futures_maker_self_anchored": true,
+  "spot_maker_submit_before_cancel": true,
+  "experiment_id": "E-156",
+  "hypothesis_id": "FFA-80",
+  "description": "newsletter strategies competing: fixed-distance MM, imbalance MM, triangular arbitrage",
+  "fixed_distance_maker_count": 2,
+  "imbalance_maker_count": 2,
+  "triangle_arb_count": 2
+}
