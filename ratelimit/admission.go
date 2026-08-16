@@ -139,8 +139,13 @@ type Slot struct {
 	id uint64
 }
 
-// Offer asks for a slot in the lane the request belongs to.
+// Offer asks for a slot in the lane the request belongs to. A nil queue models
+// a venue with no backlog at all and admits everything: a typed nil inside a
+// Backlog interface would otherwise pass a caller's nil check and panic here.
 func (q *AdmissionQueue) Offer(kind RequestKind) (Decision, Slot) {
+	if q == nil {
+		return Allow(), Slot{}
+	}
 	if q.cfg.RiskReducing(kind) {
 		if q.full(q.cfg.PriorityDepth, q.priority) {
 			return Decision{Limit: "queue_priority", Overloaded: true}, Slot{}
@@ -164,7 +169,7 @@ func (q *AdmissionQueue) issue(priority bool) Slot {
 // Complete releases a slot once the engine has finished the work. A slot that
 // was never held, already redeemed, or issued by another queue does nothing.
 func (q *AdmissionQueue) Complete(slot Slot) {
-	if !slot.held {
+	if q == nil || !slot.held {
 		return
 	}
 	if _, outstanding := q.live[slot.id]; !outstanding {
@@ -184,6 +189,9 @@ func (q *AdmissionQueue) Complete(slot Slot) {
 
 // Depth reports the current backlog in each lane, for telemetry.
 func (q *AdmissionQueue) Depth() (priority, secondary int) {
+	if q == nil {
+		return 0, 0
+	}
 	return q.priority, q.secondary
 }
 

@@ -133,3 +133,56 @@ func TestAnUncomparableLimiterDoesNotPanic(t *testing.T) {
 		t.Fatalf("uncomparable limiter refused: %+v", decision)
 	}
 }
+
+// The queue tracks outstanding slot identities so a copy cannot be redeemed
+// twice. That bookkeeping must stay the size of the working set: one entry per
+// slot the engine is still holding, released when the work completes.
+func TestOutstandingSlotBookkeepingTracksTheBacklog(t *testing.T) {
+	queue := NewAdmissionQueue(AdmissionConfig{})
+	slots := make([]Slot, 0, 1000)
+	for i := 0; i < 1000; i++ {
+		_, slot := queue.Offer(KindPlaceOrder)
+		slots = append(slots, slot)
+	}
+	if outstanding := len(queue.live); outstanding != 1000 {
+		t.Fatalf("outstanding = %d, want 1000", outstanding)
+	}
+	_, secondary := queue.Depth()
+	if secondary != len(queue.live) {
+		t.Fatalf("depth %d disagrees with outstanding %d", secondary, len(queue.live))
+	}
+
+	for _, slot := range slots {
+		queue.Complete(slot)
+	}
+	if outstanding := len(queue.live); outstanding != 0 {
+		t.Fatalf("outstanding = %d after completing every slot, want 0", outstanding)
+	}
+	if _, secondary := queue.Depth(); secondary != 0 {
+		t.Fatalf("secondary depth = %d after completing every slot, want 0", secondary)
+	}
+	// Replaying them all must not drive the counters below zero or resurrect
+	// bookkeeping.
+	for _, slot := range slots {
+		queue.Complete(slot)
+	}
+	if outstanding := len(queue.live); outstanding != 0 {
+		t.Fatalf("replaying releases resurrected %d entries", outstanding)
+	}
+}
+
+// A Backlog held as a nil pointer inside a non-nil interface is a classic Go
+// trap: the interface is not nil, so a guard on the interface passes and the
+// call panics.
+func TestANilBacklogInsideAnInterfaceDoesNotPanic(t *testing.T) {
+	var queue *AdmissionQueue
+	gate := NewGate([]Meter{}, queue)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("a typed-nil backlog panicked: %v", recovered)
+		}
+	}()
+	if decision, _ := gate.Admit("acct", KindPlaceOrder, 0); !decision.Allowed {
+		t.Fatalf("unmetered gate refused: %+v", decision)
+	}
+}
