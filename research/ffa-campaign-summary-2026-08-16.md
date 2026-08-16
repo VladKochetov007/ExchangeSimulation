@@ -20,8 +20,10 @@ relation. The answer this simulator gives, at twelve simulated hours:
   twelve, in the same population with the same seed. The cause is the venue's
   eight-hourly funding settlement rather than any gradual convergence: with
   funding suppressed the reversal disappears and carry loses at every horizon
-  (FFA-47, corrected). No ranking in this campaign is meaningful without its
-  horizon, and this one is set by a venue parameter.
+  (FFA-47, corrected). Halving the funding interval halves the crossover, which
+  moves to between three and five hours (FFA-60), so which strategy looks
+  dominant is a choice the venue makes when it sets its settlement frequency.
+  No ranking in this campaign is meaningful without its horizon.
 - **The ecology is stabilised by congestion.** Per-participant carry returns
   fall roughly as the inverse of density, and total extraction is hump shaped:
   it peaks near 288 participants at about 341,000 US dollars per twelve hours

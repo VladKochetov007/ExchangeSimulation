@@ -1540,3 +1540,38 @@ func TestEveryQuotedMarketReceivesAnIndex(t *testing.T) {
 		t.Fatalf("cross index %d is not expressed in CDF against a base index of %d", cross, base)
 	}
 }
+
+// The funding interval decides the horizon at which carry arbitrage overtakes
+// market making, so it has to be configurable and has to reach the instrument.
+// At the default eight hours the ranking flips between seven and nine; at four
+// hours it flips between three and five.
+func TestFundingIntervalIsConfigurableAndReachesThePerpetual(t *testing.T) {
+	for _, want := range []int64{28800, 14400} {
+		sim, err := NewSim(time.Second, Config{
+			LogDir: t.TempDir(), LogMode: "none", Seed: 91,
+			FundingIntervalSeconds: want,
+		})
+		if err != nil {
+			t.Fatalf("NewSim(%d): %v", want, err)
+		}
+		for _, venue := range sim.Venues {
+			book := venue.Exchange.Books["ABC-PERP"]
+			if book == nil {
+				sim.Close()
+				t.Fatal("no perpetual book")
+			}
+			perp, ok := book.Instrument.(interface {
+				GetFundingRate() *etypes.FundingRate
+			})
+			if !ok {
+				sim.Close()
+				t.Fatal("perpetual does not expose its funding rate")
+			}
+			if got := perp.GetFundingRate().Interval; got != want {
+				sim.Close()
+				t.Fatalf("venue %s funding interval = %d, want %d", venue.ID, got, want)
+			}
+		}
+		sim.Close()
+	}
+}
