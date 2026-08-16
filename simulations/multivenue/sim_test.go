@@ -1295,3 +1295,32 @@ func TestValueTraderExitsTowardFlatWhenPriceReturnsToValue(t *testing.T) {
 		t.Fatal("a trader without an exit band must hold through a return to value")
 	}
 }
+
+// Displayed quote size is the constraint that bounds how fast risk can move
+// between participants, so it must be configurable and must reach the makers.
+// An immediate-or-cancel taker cannot lift more than is displayed, which is
+// why a delta-neutral absorber saturates at the book's size rather than at its
+// own capital.
+func TestMakerQuoteSizeIsConfigurableAndReachesTheMakers(t *testing.T) {
+	for _, want := range []int64{mvBasePrecision / 5, 5 * mvBasePrecision} {
+		sim, err := NewSim(time.Second, Config{
+			LogDir: t.TempDir(), LogMode: "none", Seed: 91, MakerQuoteQty: want,
+		})
+		if err != nil {
+			t.Fatalf("NewSim(%d): %v", want, err)
+		}
+		for _, venue := range sim.Venues {
+			for _, maker := range venue.SpotMakers {
+				if maker.cfg.QuoteQty != want {
+					sim.Close()
+					t.Fatalf("venue %s %s quote size = %d, want %d", venue.ID, maker.cfg.Symbol, maker.cfg.QuoteQty, want)
+				}
+			}
+			if venue.PerpMaker.cfg.QuoteQty != want {
+				sim.Close()
+				t.Fatalf("venue %s perpetual maker quote size = %d, want %d", venue.ID, venue.PerpMaker.cfg.QuoteQty, want)
+			}
+		}
+		sim.Close()
+	}
+}

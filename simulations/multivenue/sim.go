@@ -125,6 +125,15 @@ type Config struct {
 	CarryEntryBps         int64 `json:"carry_entry_bps"`
 	CarryExitBps          int64 `json:"carry_exit_bps"`
 	CarryMaxPosition      int64 `json:"carry_max_position"`
+	// CarryLotQty is how much a carry participant adds per tick, which bounds
+	// how fast it can deploy capital into a basis that mean-reverts.
+	CarryLotQty int64 `json:"carry_lot_qty"`
+
+	// MakerQuoteQty is the size each spot and perpetual maker displays at its
+	// quote. It bounds how fast any taker, including a delta-neutral absorber,
+	// can transfer risk: an immediate-or-cancel order cannot take more than is
+	// displayed.
+	MakerQuoteQty int64 `json:"maker_quote_qty"`
 
 	// MakerHedgeSymbol, when set, is where the ABC/USD makers offset the
 	// inventory they take on. Real makers quote one instrument and move the
@@ -313,6 +322,12 @@ func (c *Config) normalize() error {
 	if c.CarryMaxPosition == 0 {
 		c.CarryMaxPosition = 500 * mvBasePrecision
 	}
+	if c.MakerQuoteQty == 0 {
+		c.MakerQuoteQty = mvBasePrecision / 5
+	}
+	if c.CarryLotQty == 0 {
+		c.CarryLotQty = mvBasePrecision / 5
+	}
 	if c.MakerHedgeSlippageBps == 0 {
 		c.MakerHedgeSlippageBps = 50
 	}
@@ -425,7 +440,7 @@ func (c *Config) normalize() error {
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 || *c.ValueTraderCount < 0 ||
 		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 || c.ElasticSupplierCount < 0 || c.ElasticSupplierUnitsPerPercent <= 0 || c.CarryArbitrageurCount < 0 ||
-		c.CarryEntryBps <= 0 || c.CarryExitBps < 0 || c.CarryMaxPosition <= 0 ||
+		c.CarryEntryBps <= 0 || c.CarryExitBps < 0 || c.CarryMaxPosition <= 0 || c.CarryLotQty <= 0 || c.MakerQuoteQty <= 0 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || *c.OptionBuyProbability < 0 || *c.OptionBuyProbability > 1 {
@@ -929,7 +944,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	stoikovConfig := func(symbol, reference string, bootstrapPrice, quotePrecision, tickSize int64) StoikovMMConfig {
 		return StoikovMMConfig{
 			Symbol: symbol, ReferenceSymbol: reference, BootstrapPrice: bootstrapPrice,
-			BasePrecision: mvBasePrecision, QuotePrecision: quotePrecision, TickSize: tickSize, QuoteQty: mvBasePrecision / 5,
+			BasePrecision: mvBasePrecision, QuotePrecision: quotePrecision, TickSize: tickSize, QuoteQty: s.Config.MakerQuoteQty,
 			QuoteInterval: s.Config.QuoteInterval, VolatilityHalfLife: s.Config.StoikovVolatilityHalfLife,
 			InitialLogVariancePerSec: relativeLogVariance,
 			MaxLogVarianceMultiple:   s.Config.StoikovMaxVarianceMultiple,
@@ -1021,7 +1036,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		arb := NewCarryArbitrageur(nextActor(), connect(fmt.Sprintf("carry_arb_%d", participant+1), carryBalances, 100_000_000*mvQuotePrecision, noiseFee), CarryArbitrageurConfig{
 			SpotSymbol: "ABC/USD", PerpSymbol: "ABC-PERP", BasePrecision: mvBasePrecision,
 			Interval: s.Config.NoiseInterval, EntryBps: s.Config.CarryEntryBps, ExitBps: s.Config.CarryExitBps,
-			MaxPosition: s.Config.CarryMaxPosition, LotQty: mvBasePrecision / 5,
+			MaxPosition: s.Config.CarryMaxPosition, LotQty: s.Config.CarryLotQty,
 			SpotTick: tick, PerpTick: tick,
 		})
 		arb.SetTickerFactory(timers)
