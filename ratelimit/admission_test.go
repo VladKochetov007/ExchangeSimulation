@@ -21,14 +21,14 @@ func TestRiskReducingRequestsTakeThePriorityLane(t *testing.T) {
 // fills is the one carrying new risk, and the venue can refuse it honestly
 // while still accepting the requests that take risk off.
 func TestSecondaryLaneSaturatesWhilePriorityStillAccepts(t *testing.T) {
-	queue := NewAdmissionQueue(AdmissionConfig{PriorityDepth: 2, SecondaryDepth: 2})
+	queue := NewAdmissionQueue(AdmissionConfig{PriorityDepth: Depth(2), SecondaryDepth: Depth(2)})
 
 	for i := 0; i < 2; i++ {
-		if decision := queue.Offer(KindPlaceOrder); !decision.Allowed {
+		if decision, _ := queue.Offer(KindPlaceOrder); !decision.Allowed {
 			t.Fatalf("secondary lane rejected below its depth at %d: %+v", i, decision)
 		}
 	}
-	decision := queue.Offer(KindPlaceOrder)
+	decision, _ := queue.Offer(KindPlaceOrder)
 	if decision.Allowed {
 		t.Fatal("secondary lane accepted beyond its depth")
 	}
@@ -39,16 +39,16 @@ func TestSecondaryLaneSaturatesWhilePriorityStillAccepts(t *testing.T) {
 		t.Fatalf("overload rejection was not marked overloaded: %+v", decision)
 	}
 	// The whole purpose: cancels still get through.
-	if decision := queue.Offer(KindCancelOrder); !decision.Allowed {
+	if decision, _ := queue.Offer(KindCancelOrder); !decision.Allowed {
 		t.Fatalf("priority lane rejected a cancel while only the secondary lane was full: %+v", decision)
 	}
 }
 
 func TestPriorityLaneCanAlsoSaturate(t *testing.T) {
-	queue := NewAdmissionQueue(AdmissionConfig{PriorityDepth: 1, SecondaryDepth: 1})
+	queue := NewAdmissionQueue(AdmissionConfig{PriorityDepth: Depth(1), SecondaryDepth: Depth(1)})
 	queue.Offer(KindCancelOrder)
 
-	decision := queue.Offer(KindCancelOrder)
+	decision, _ := queue.Offer(KindCancelOrder)
 	if decision.Allowed {
 		t.Fatal("priority lane accepted beyond its depth")
 	}
@@ -58,21 +58,21 @@ func TestPriorityLaneCanAlsoSaturate(t *testing.T) {
 }
 
 func TestCompletingWorkFreesTheLaneItCameFrom(t *testing.T) {
-	queue := NewAdmissionQueue(AdmissionConfig{PriorityDepth: 1, SecondaryDepth: 1})
+	queue := NewAdmissionQueue(AdmissionConfig{PriorityDepth: Depth(1), SecondaryDepth: Depth(1)})
 	queue.Offer(KindPlaceOrder)
-	if decision := queue.Offer(KindPlaceOrder); decision.Allowed {
+	if decision, _ := queue.Offer(KindPlaceOrder); decision.Allowed {
 		t.Fatal("secondary lane accepted beyond its depth")
 	}
 
-	queue.Complete(KindPlaceOrder)
-	if decision := queue.Offer(KindPlaceOrder); !decision.Allowed {
+	queue.Complete(Slot{held: true})
+	if decision, _ := queue.Offer(KindPlaceOrder); !decision.Allowed {
 		t.Fatalf("completing work did not free the secondary lane: %+v", decision)
 	}
 	// Completing more than was offered must not create capacity.
-	queue.Complete(KindPlaceOrder)
-	queue.Complete(KindPlaceOrder)
+	queue.Complete(Slot{held: true})
+	queue.Complete(Slot{held: true})
 	queue.Offer(KindPlaceOrder)
-	if decision := queue.Offer(KindPlaceOrder); decision.Allowed {
+	if decision, _ := queue.Offer(KindPlaceOrder); decision.Allowed {
 		t.Fatal("over-completion manufactured queue capacity")
 	}
 }
@@ -80,7 +80,7 @@ func TestCompletingWorkFreesTheLaneItCameFrom(t *testing.T) {
 func TestZeroDepthMeansUnlimited(t *testing.T) {
 	queue := NewAdmissionQueue(AdmissionConfig{})
 	for i := 0; i < 1000; i++ {
-		if decision := queue.Offer(KindPlaceOrder); !decision.Allowed {
+		if decision, _ := queue.Offer(KindPlaceOrder); !decision.Allowed {
 			t.Fatalf("unconfigured queue rejected at %d: %+v", i, decision)
 		}
 	}
@@ -95,8 +95,8 @@ func TestGateChargesEveryLimiterAndReportsTheFirstRefusal(t *testing.T) {
 	weight := NewFixedWindow("weight", 100, minute)
 	orders := NewFixedWindow("orders", 2, second)
 	gate := NewGate([]Meter{
-		{Limiter: weight, Cost: StaticCost{KindPlaceOrder: 10}},
-		{Limiter: orders, Cost: StaticCost{KindPlaceOrder: 1, DefaultCost: 0}},
+		{Limiter: weight, Cost: StaticCost{Table: map[RequestKind]int64{KindPlaceOrder: 10}}},
+		{Limiter: orders, Cost: StaticCost{Table: map[RequestKind]int64{KindPlaceOrder: 1}}},
 	}, nil)
 
 	for i := 0; i < 2; i++ {
@@ -120,7 +120,7 @@ func TestGateChargesEveryLimiterAndReportsTheFirstRefusal(t *testing.T) {
 
 func TestGateWithoutACostForAKindChargesTheDefault(t *testing.T) {
 	weight := NewFixedWindow("weight", 10, minute)
-	gate := NewGate([]Meter{{Limiter: weight, Cost: StaticCost{DefaultCost: 4}}}, nil)
+	gate := NewGate([]Meter{{Limiter: weight, Cost: StaticCost{Default: 4}}}, nil)
 
 	gate.Admit("acct", KindQueryBalance, 0)
 	if used := weight.Used("acct", 0); used != 4 {

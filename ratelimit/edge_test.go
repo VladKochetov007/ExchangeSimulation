@@ -109,12 +109,12 @@ func TestWouldAgreesWithAdmit(t *testing.T) {
 // Completing a lane the caller never offered to must not manufacture capacity
 // in the other lane.
 func TestCompletingTheWrongLaneCannotCorruptCounts(t *testing.T) {
-	queue := NewAdmissionQueue(AdmissionConfig{PriorityDepth: 1, SecondaryDepth: 1})
+	queue := NewAdmissionQueue(AdmissionConfig{PriorityDepth: Depth(1), SecondaryDepth: Depth(1)})
 	queue.Offer(KindPlaceOrder) // fills the secondary lane
 
 	// A caller that mistakenly completes a cancel must not free the order slot.
-	queue.Complete(KindCancelOrder)
-	if decision := queue.Offer(KindPlaceOrder); decision.Allowed {
+	queue.Complete(Slot{held: true, priority: true})
+	if decision, _ := queue.Offer(KindPlaceOrder); decision.Allowed {
 		t.Fatal("completing the priority lane freed a secondary slot")
 	}
 	if priority, secondary := queue.Depth(); priority != 0 || secondary != 1 {
@@ -123,13 +123,13 @@ func TestCompletingTheWrongLaneCannotCorruptCounts(t *testing.T) {
 }
 
 func TestReduceOnlyPlacementKeepsThePriorityLaneEvenWhenOrdersAreRefused(t *testing.T) {
-	queue := NewAdmissionQueue(AdmissionConfig{PriorityDepth: 4, SecondaryDepth: 1})
+	queue := NewAdmissionQueue(AdmissionConfig{PriorityDepth: Depth(4), SecondaryDepth: Depth(1)})
 	queue.Offer(KindPlaceOrder)
-	if decision := queue.Offer(KindPlaceOrder); !decision.Overloaded {
+	if decision, _ := queue.Offer(KindPlaceOrder); !decision.Overloaded {
 		t.Fatalf("expected the secondary lane to be saturated: %+v", decision)
 	}
 	// Closing risk is a placement, and must still be accepted.
-	if decision := queue.Offer(KindPlaceReduceOnly); !decision.Allowed {
+	if decision, _ := queue.Offer(KindPlaceReduceOnly); !decision.Allowed {
 		t.Fatalf("a reduce-only placement was refused while only new risk was blocked: %+v", decision)
 	}
 }
@@ -139,8 +139,8 @@ func TestReduceOnlyPlacementKeepsThePriorityLaneEvenWhenOrdersAreRefused(t *test
 // weight: it never reached the engine, and the client did nothing wrong.
 func TestAnOverloadRejectionDoesNotSpendTheClientsBudget(t *testing.T) {
 	weight := NewFixedWindow("weight", 100, minute)
-	queue := NewAdmissionQueue(AdmissionConfig{SecondaryDepth: 1})
-	gate := NewGate([]Meter{{Limiter: weight, Cost: StaticCost{DefaultCost: 10}}}, queue)
+	queue := NewAdmissionQueue(AdmissionConfig{SecondaryDepth: Depth(1)})
+	gate := NewGate([]Meter{{Limiter: weight, Cost: StaticCost{Default: 10}}}, queue)
 
 	gate.Admit("acct", KindPlaceOrder, 0) // fills the only secondary slot
 	decision := gate.Admit("acct", KindPlaceOrder, 0)
@@ -158,8 +158,8 @@ func TestAnOverloadRejectionDoesNotSpendTheClientsBudget(t *testing.T) {
 func TestMetersSharingALimiterCannotOverspendIt(t *testing.T) {
 	shared := NewFixedWindow("weight", 10, minute)
 	gate := NewGate([]Meter{
-		{Limiter: shared, Cost: StaticCost{DefaultCost: 6}},
-		{Limiter: shared, Cost: StaticCost{DefaultCost: 6}},
+		{Limiter: shared, Cost: StaticCost{Default: 6}},
+		{Limiter: shared, Cost: StaticCost{Default: 6}},
 	}, nil)
 
 	if decision := gate.Admit("acct", KindPlaceOrder, 0); decision.Allowed {

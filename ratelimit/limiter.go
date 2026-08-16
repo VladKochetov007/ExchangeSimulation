@@ -27,6 +27,12 @@ func Allow() Decision { return Decision{Allowed: true} }
 type Limiter interface {
 	// Admit charges cost to scope when it fits, and reports what happened.
 	Admit(scope string, cost int64, now int64) Decision
+	// Would reports what Admit would decide, without charging. A gate composing
+	// several budgets needs this so a request refused by one budget does not
+	// consume another. It is part of the contract rather than an optional
+	// extra: a limiter that cannot answer without charging would be charged
+	// twice per request, once to ask and once to commit.
+	Would(scope string, cost int64, now int64) Decision
 	// Name identifies the budget in rejections and telemetry.
 	Name() string
 }
@@ -136,6 +142,9 @@ func (b *TokenBucket) Admit(scope string, cost, now int64) Decision {
 	b.fill(scope, now)
 	want := cost * tokenScale
 	if b.tokens[scope] < want {
+		if !b.refillable() {
+			return Decision{Limit: b.name, Impossible: true}
+		}
 		return Decision{Limit: b.name, RetryAfter: b.timeToAccrue(want - b.tokens[scope])}
 	}
 	b.tokens[scope] -= want
@@ -158,10 +167,11 @@ func (b *TokenBucket) fill(scope string, now int64) {
 	b.lastFillAt[scope] = now
 }
 
-// accrue adds the tokens earned over an elapsed span without overflowing and
-// without dividing by zero. Whole intervals are counted separately from the
-// remainder so a long idle span never has to be multiplied out in one piece,
-// and any product that would wrap is answered as a full bucket instead.
+// accrue adds the tokens earned over an elapsed span. Whole intervals and the
+// leftover fraction are counted separately so a long span never has to be
+// multiplied out in one piece, and every product is checked before it is taken
+// rather than approximated: rounding the span down to whole intervals would let
+// a bucket grant a full capacity it had not yet earned.
 func (b *TokenBucket) accrue(tokens, elapsed int64) int64 {
 	capped := b.capacity * tokenScale
 	if elapsed <= 0 || b.interval <= 0 || b.refill <= 0 || tokens >= capped {
@@ -170,19 +180,22 @@ func (b *TokenBucket) accrue(tokens, elapsed int64) int64 {
 	need := capped - tokens
 	perInterval := b.refill * tokenScale
 
-	whole := elapsed / b.interval
-	if whole > 0 && whole >= need/max64(perInterval, 1) {
-		return capped
-	}
-	gained := whole * perInterval
-
-	// The leftover fraction of an interval. rem is below interval, so the
-	// product is bounded, but guard it anyway rather than trust the bound.
-	if rem := elapsed % b.interval; rem > 0 {
-		if perInterval > math.MaxInt64/rem {
+	gained := int64(0)
+	if whole := elapsed / b.interval; whole > 0 {
+		if perInterval > 0 && whole > math.MaxInt64/perInterval {
 			return capped
 		}
-		gained += rem * perInterval / b.interval
+		gained = whole * perInterval
+	}
+	if rem := elapsed % b.interval; rem > 0 {
+		if perInterval > 0 && rem > math.MaxInt64/perInterval {
+			return capped
+		}
+		part := rem * perInterval / b.interval
+		if gained > math.MaxInt64-part {
+			return capped
+		}
+		gained += part
 	}
 	if gained >= need {
 		return capped
@@ -204,16 +217,34 @@ func max64(a, b int64) int64 {
 	return b
 }
 
+// timeToAccrue is the wait until a shortfall has been earned, rounded up so a
+// caller obeying it is not sent back a nanosecond early. Division precedes
+// multiplication so a large shortfall does not wrap.
 func (b *TokenBucket) timeToAccrue(shortfall int64) int64 {
-	if b.refill <= 0 {
+	if b.refill <= 0 || b.interval <= 0 {
 		return 0
 	}
-	// Round up: reporting the instant before the token exists would send the
-	// caller back a nanosecond early, to be rejected again.
-	numerator := shortfall * b.interval
 	denominator := b.refill * tokenScale
-	return (numerator + denominator - 1) / denominator
+	whole := shortfall / denominator
+	remainder := shortfall % denominator
+
+	if whole > 0 && whole > math.MaxInt64/b.interval {
+		return math.MaxInt64
+	}
+	wait := whole * b.interval
+	if remainder > 0 {
+		if remainder > math.MaxInt64/b.interval {
+			return math.MaxInt64
+		}
+		wait += (remainder*b.interval + denominator - 1) / denominator
+	}
+	return wait
 }
+
+// refillable reports whether the bucket can ever earn tokens back. One that
+// cannot must refuse with Impossible rather than promise a retry that will fail
+// identically forever, which would spin a caller obeying RetryAfter.
+func (b *TokenBucket) refillable() bool { return b.refill > 0 && b.interval > 0 }
 
 // modFloor is a modulo that floors toward negative infinity, so window
 // boundaries stay aligned for timestamps before the epoch.
@@ -266,6 +297,9 @@ func (b *TokenBucket) Would(scope string, cost, now int64) Decision {
 		}
 	}
 	if want := cost * tokenScale; available < want {
+		if !b.refillable() {
+			return Decision{Limit: b.name, Impossible: true}
+		}
 		return Decision{Limit: b.name, RetryAfter: b.timeToAccrue(want - available)}
 	}
 	return Allow()

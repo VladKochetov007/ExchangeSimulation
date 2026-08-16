@@ -14,24 +14,28 @@ import "time"
 // magnitude rather than a full endpoint table, which belongs to the caller.
 func BinanceSpotLike() []Meter {
 	weight := StaticCost{
-		KindPlaceOrder:      1,
-		KindPlaceReduceOnly: 1,
-		KindCancelOrder:     1,
-		KindCancelAll:       1,
-		KindQueryOrder:      4,
-		KindQueryBalance:    20,
-		KindQueryAccount:    20,
-		KindSubscribe:       2,
-		KindUnsubscribe:     2,
-		DefaultCost:         1,
+		Table: map[RequestKind]int64{
+			KindPlaceOrder:      1,
+			KindPlaceReduceOnly: 1,
+			KindCancelOrder:     1,
+			KindCancelAll:       1,
+			KindQueryOrder:      4,
+			KindQueryBalance:    20,
+			KindQueryAccount:    20,
+			KindSubscribe:       2,
+			KindUnsubscribe:     2,
+		},
+		Default: 1,
 	}
 	// Only placements count against the order budgets. Cancels deliberately do
 	// not, so a client throttled on new orders can still withdraw the ones it
 	// has: refusing that would trap a client in its own position.
 	placements := StaticCost{
-		KindPlaceOrder:      1,
-		KindPlaceReduceOnly: 1,
-		DefaultCost:         0,
+		Table: map[RequestKind]int64{
+			KindPlaceOrder:      1,
+			KindPlaceReduceOnly: 1,
+		},
+		Default: 0,
 	}
 	return []Meter{
 		{Limiter: NewFixedWindow("request_weight_1m", 6000, int64(time.Minute)), Cost: weight},

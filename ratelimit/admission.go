@@ -64,29 +64,40 @@ type CostModel interface {
 	Cost(RequestKind) int64
 }
 
-// StaticCost is a table with a fallback, which covers every published schedule
-// this package has needed so far.
-type StaticCost map[RequestKind]int64
-
-// DefaultCost is the key used for kinds absent from the table. It is outside
-// the RequestKind range so it can never collide with a real kind.
-const DefaultCost RequestKind = 255
-
-func (c StaticCost) Cost(kind RequestKind) int64 {
-	if cost, ok := c[kind]; ok {
-		return cost
-	}
-	if cost, ok := c[DefaultCost]; ok {
-		return cost
-	}
-	return 1
+// StaticCost is a table with an explicit fallback. The fallback is a field
+// rather than a reserved key, because RequestKind is a uint8 that callers
+// extend with their own constants: any sentinel value inside the map would sit
+// in the space they extend into and could collide silently.
+type StaticCost struct {
+	Table map[RequestKind]int64
+	// Default is charged for kinds absent from the table, including zero, which
+	// is how a venue expresses that a request costs nothing against a budget.
+	Default int64
 }
 
-// AdmissionConfig sizes the two lanes. A depth of zero means unlimited, so a
-// venue that never overloads needs no configuration.
+func (c StaticCost) Cost(kind RequestKind) int64 {
+	if cost, ok := c.Table[kind]; ok {
+		return cost
+	}
+	return c.Default
+}
+
+// AdmissionConfig sizes the two lanes and decides which requests are
+// risk-reducing.
+//
+// Depths are pointers so an absent field is distinguishable from a configured
+// zero. Nil means unlimited; a configured zero means the lane is closed, which
+// is what a venue shedding all new load would do. A plain int could not express
+// both, and silently reading a missing field as unlimited would disable the
+// overload modelling a run was built to study.
 type AdmissionConfig struct {
-	PriorityDepth  int `json:"priority_depth"`
-	SecondaryDepth int `json:"secondary_depth"`
+	PriorityDepth  *int `json:"priority_depth"`
+	SecondaryDepth *int `json:"secondary_depth"`
+	// RiskReducing overrides which kinds take the priority lane. A caller with
+	// its own request kinds needs this: the built-in classification cannot know
+	// about them, and requiring an edit here to add one would make the package
+	// closed to extension.
+	RiskReducing func(RequestKind) bool `json:"-"`
 }
 
 // AdmissionQueue models the venue's own execution backlog. Splitting it in two
@@ -99,28 +110,55 @@ type AdmissionQueue struct {
 }
 
 func NewAdmissionQueue(cfg AdmissionConfig) *AdmissionQueue {
+	if cfg.RiskReducing == nil {
+		cfg.RiskReducing = RequestKind.RiskReducing
+	}
 	return &AdmissionQueue{cfg: cfg}
 }
 
-// Offer asks for a slot in the lane the request belongs to.
-func (q *AdmissionQueue) Offer(kind RequestKind) Decision {
-	if kind.RiskReducing() {
-		if q.cfg.PriorityDepth > 0 && q.priority >= q.cfg.PriorityDepth {
-			return Decision{Limit: "queue_priority", Overloaded: true}
-		}
-		q.priority++
-		return Allow()
-	}
-	if q.cfg.SecondaryDepth > 0 && q.secondary >= q.cfg.SecondaryDepth {
-		return Decision{Limit: "queue_secondary", Overloaded: true}
-	}
-	q.secondary++
-	return Allow()
+// Unlimited is a convenience for a lane with no bound.
+func Unlimited() *int { return nil }
+
+// Depth sizes a lane explicitly, including zero to close it.
+func Depth(n int) *int { return &n }
+
+func (q *AdmissionQueue) full(depth *int, occupied int) bool {
+	return depth != nil && occupied >= *depth
 }
 
-// Complete releases a slot once the engine has finished the work.
-func (q *AdmissionQueue) Complete(kind RequestKind) {
-	if kind.RiskReducing() {
+// Slot is what Offer hands out and Complete takes back. It records the lane the
+// request actually entered, so a caller cannot return a slot to the wrong lane
+// by passing a different kind than it offered — a mismatch would permanently
+// lose a slot in one lane and manufacture one in the other, silently, for the
+// rest of the run.
+type Slot struct {
+	priority bool
+	held     bool
+}
+
+// Offer asks for a slot in the lane the request belongs to.
+func (q *AdmissionQueue) Offer(kind RequestKind) (Decision, Slot) {
+	if q.cfg.RiskReducing(kind) {
+		if q.full(q.cfg.PriorityDepth, q.priority) {
+			return Decision{Limit: "queue_priority", Overloaded: true}, Slot{}
+		}
+		q.priority++
+		return Allow(), Slot{priority: true, held: true}
+	}
+	if q.full(q.cfg.SecondaryDepth, q.secondary) {
+		return Decision{Limit: "queue_secondary", Overloaded: true}, Slot{}
+	}
+	q.secondary++
+	return Allow(), Slot{held: true}
+}
+
+// Complete releases a slot once the engine has finished the work. Releasing a
+// slot that was never held does nothing.
+func (q *AdmissionQueue) Complete(slot Slot) {
+	if !slot.held {
+		return
+	}
+	if slot.priority {
 		if q.priority > 0 {
 			q.priority--
 		}
@@ -148,9 +186,17 @@ type Meter struct {
 // Gate composes metered budgets and an optional queue into the single decision
 // a venue makes when a request arrives.
 type Gate struct {
-	meters []Meter
-	queue  *AdmissionQueue
+	meters   []Meter
+	queue    *AdmissionQueue
+	lastSlot Slot
 }
+
+// Queue exposes the backlog so a caller that admitted through the gate can
+// release the slot it took. Without this the slot would be unreachable.
+func (g *Gate) Queue() *AdmissionQueue { return g.queue }
+
+// LastSlot is the slot taken by the most recent successful Admit.
+func (g *Gate) LastSlot() Slot { return g.lastSlot }
 
 func NewGate(meters []Meter, queue *AdmissionQueue) *Gate {
 	return &Gate{meters: meters, queue: queue}
@@ -192,9 +238,11 @@ func (g *Gate) Admit(scope string, kind RequestKind, now int64) Decision {
 		}
 	}
 	if g.queue != nil {
-		if decision := g.queue.Offer(kind); !decision.Allowed {
+		decision, slot := g.queue.Offer(kind)
+		if !decision.Allowed {
 			return decision
 		}
+		g.lastSlot = slot
 	}
 	for _, c := range charges {
 		c.limiter.Admit(scope, c.cost, now)
