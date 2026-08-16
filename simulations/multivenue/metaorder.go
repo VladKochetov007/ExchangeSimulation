@@ -20,7 +20,7 @@ import (
 // controlled participation rate is what produces the square-root impact law
 // and, through splitting, the long memory of order-flow signs.
 //
-// The sign of each parent is drawn independently of the fundamental value
+// The sign of each parent is drawn independently of the price path
 // process on purpose. An informed metaorder would measure the trader's alpha
 // rather than the mechanical impact of its own execution, which is the single
 // most common way this measurement goes wrong.
@@ -211,7 +211,7 @@ func (m *MetaorderTrader) onTick(now time.Time) {
 }
 
 // begin starts a parent order. Size is Pareto and sign is a fair coin, both
-// independent of the fundamental value.
+// independent of the price path.
 func (m *MetaorderTrader) begin(timestamp int64) {
 	quantity := m.drawParentQty()
 	if quantity <= 0 {

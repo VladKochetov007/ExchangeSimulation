@@ -272,8 +272,8 @@ func TestCrossAssetPopulationAccountsDigestAcrossGOMAXPROCS(t *testing.T) {
 			Terminal []ParticipantAccountSnapshot
 		}{initialMany, terminalMany})
 	}
-	if len(terminalOne) != 45 {
-		t.Fatalf("cross-asset terminal account rows = %d, want 45", len(terminalOne))
+	if len(terminalOne) != 39 {
+		t.Fatalf("cross-asset terminal account rows = %d, want 39", len(terminalOne))
 	}
 }
 
@@ -836,150 +836,6 @@ func TestSpotBookStaysAnchoredPastVarianceFeedbackHorizon(t *testing.T) {
 	}
 }
 
-// The fundamental value is a function of simulated time alone, so every
-// participant that consults it at one timestamp sees the same value no matter
-// which of them asks first.
-func TestFundamentalValueIsPathDeterministic(t *testing.T) {
-	const step = int64(time.Second)
-	build := func() *FundamentalValue {
-		return NewFundamentalValue(7, 0, 50_000*mvQuotePrecision, step, mvQuotePrecision, 0.001)
-	}
-
-	forward := build()
-	var inOrder []int64
-	for i := range 200 {
-		inOrder = append(inOrder, forward.Value(int64(i)*step))
-	}
-
-	// Jumping straight to the end must extend the same path, not a new one.
-	skipped := build()
-	if got, want := skipped.Value(199*step), inOrder[199]; got != want {
-		t.Fatalf("value after a jump = %d, want %d", got, want)
-	}
-	// Re-reading an earlier timestamp must not redraw it.
-	if got, want := skipped.Value(50*step), inOrder[50]; got != want {
-		t.Fatalf("value after rewind = %d, want %d", got, want)
-	}
-	if inOrder[0] != 50_000*mvQuotePrecision {
-		t.Fatalf("path must start at the bootstrap price, got %d", inOrder[0])
-	}
-	moved := false
-	for _, v := range inOrder {
-		if v != inOrder[0] {
-			moved = true
-			break
-		}
-	}
-	if !moved {
-		t.Fatal("fundamental value never moved")
-	}
-}
-
-// A value trader must only cross when the visible price is beyond its edge from
-// fundamental value, and must respect its inventory bound.
-func TestValueTraderTradesAgainstFundamentalWithinInventoryBound(t *testing.T) {
-	value := NewFundamentalValue(1, 0, 50_000*mvQuotePrecision, int64(time.Second), mvQuotePrecision, 0)
-	gw := newStoikovStubGateway()
-	vt := NewValueTrader(1, gw, value, ValueTraderConfig{
-		Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: 10 * mvQuotePrecision,
-		EdgeBps: 10, LotQty: mvBasePrecision / 10, MaxInventory: mvBasePrecision / 10,
-		TradeInterval: time.Second,
-	})
-	now := time.Unix(0, 0)
-	vt.onTick(now) // subscribes
-
-	feed := func(bid, ask int64) {
-		vt.HandleEvent(context.Background(), &actor.Event{
-			Type: actor.EventBookSnapshot,
-			Data: actor.BookSnapshotEvent{
-				Symbol: "ABC/USD", Timestamp: now.UnixNano(),
-				Snapshot: &exchange.BookSnapshot{
-					Bids: []etypes.PriceLevel{{Price: bid, VisibleQty: mvBasePrecision}},
-					Asks: []etypes.PriceLevel{{Price: ask, VisibleQty: mvBasePrecision}},
-				},
-			},
-		})
-	}
-
-	// Inside the edge: no trade.
-	feed(49_995*mvQuotePrecision, 50_005*mvQuotePrecision)
-	before := len(gw.requests)
-	vt.onTick(now)
-	if len(gw.requests) != before {
-		t.Fatalf("traded inside the edge band: %+v", gw.requests[before:])
-	}
-
-	// Offer well below fundamental value: buy it.
-	feed(49_000*mvQuotePrecision, 49_100*mvQuotePrecision)
-	vt.onTick(now)
-	if len(gw.requests) != before+1 {
-		t.Fatalf("did not lift a cheap offer, requests=%d", len(gw.requests))
-	}
-	order := gw.requests[len(gw.requests)-1].OrderReq
-	if order.Side != exchange.Buy || order.TimeInForce != exchange.IOC || order.Price != 49_100*mvQuotePrecision {
-		t.Fatalf("unexpected order %+v", order)
-	}
-
-	// Once the fill takes it to its inventory bound it must stop buying.
-	vt.HandleEvent(context.Background(), &actor.Event{
-		Type: actor.EventOrderFilled,
-		Data: actor.OrderFillEvent{Symbol: "ABC/USD", Side: exchange.Buy, Qty: mvBasePrecision / 10, IsFull: true},
-	})
-	before = len(gw.requests)
-	vt.onTick(now)
-	if len(gw.requests) != before {
-		t.Fatalf("kept buying past the inventory bound: %+v", gw.requests[before:])
-	}
-}
-
-// A latency tier must actually receive its configured transport delay and its
-// own connected participants, otherwise a latency experiment silently compares
-// two identical populations.
-func TestValueTraderTiersConnectWithConfiguredLatency(t *testing.T) {
-	sim, err := NewSim(2*time.Second, Config{
-		LogDir:  t.TempDir(),
-		LogMode: "none",
-		Seed:    91,
-		Step:    10 * time.Millisecond,
-		ValueTraderTiers: []ValueTraderTier{
-			{Name: "fast", Count: 1, ReactionInterval: 100 * time.Millisecond, Latency: 10 * time.Millisecond,
-				EdgeBps: 10, LotQty: mvBasePrecision / 10, MaxInventory: 200 * mvBasePrecision},
-			{Name: "mft", Count: 2, ReactionInterval: 30 * time.Second, Latency: time.Second,
-				EdgeBps: 10, LotQty: mvBasePrecision / 10, MaxInventory: 200 * mvBasePrecision},
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewSim: %v", err)
-	}
-	defer sim.Close()
-
-	for _, venue := range sim.Venues {
-		if got := len(venue.ValueTraders); got != 3 {
-			t.Fatalf("venue %s value traders = %d, want 3 from the configured tiers", venue.ID, got)
-		}
-		roles := map[string]int{}
-		for _, participant := range venue.Participants {
-			if strings.HasPrefix(participant.Role, "value_trader_") {
-				roles[participant.Role]++
-			}
-		}
-		for _, want := range []string{"value_trader_fast_1", "value_trader_mft_1", "value_trader_mft_2"} {
-			if roles[want] != 1 {
-				t.Fatalf("venue %s missing tier participant %q, have %v", venue.ID, want, roles)
-			}
-		}
-	}
-
-	// Named tiers replace the homogeneous population rather than adding to it.
-	for _, venue := range sim.Venues {
-		for _, participant := range venue.Participants {
-			if participant.Role == "value_trader_1" {
-				t.Fatalf("venue %s kept a flat value trader alongside configured tiers", venue.ID)
-			}
-		}
-	}
-}
-
 // The tick size must be configurable and must actually reach the spot book:
 // the spread cannot be finer than one tick, so a coarse tick pins it at the
 // floor and makes every spread measurement insensitive to market conditions.
@@ -1126,13 +982,11 @@ func TestMakerAnchorSelectsTheQuotedReference(t *testing.T) {
 	}{
 		{anchor: "own_mid", wantIndex: false, wantFeeds: 0},
 		{anchor: "consensus", wantIndex: true, wantFeeds: 1},
-		{anchor: "fundamental", wantIndex: true, wantFeeds: 1},
 	} {
 		// Anchor plumbing check, not a strategy measurement, so the undegraded
 		// feed is the instrument under test.
 		sim, err := NewSim(time.Second, Config{
 			LogDir: t.TempDir(), LogMode: "none", Seed: 91, MakerAnchor: testCase.anchor,
-			DebugOracleMode: true,
 		})
 		if err != nil {
 			t.Fatalf("NewSim(%s): %v", testCase.anchor, err)
@@ -1245,57 +1099,6 @@ func TestElasticSupplierTargetSlopesDownAndIsBounded(t *testing.T) {
 	// percent, so the target tops out at a hundred times the elasticity.
 	if got := supplier.TargetPosition(1); got <= 4_999*mvBasePrecision || got > 5_000*mvBasePrecision {
 		t.Fatalf("target at a near-zero price = %d, want just under %d", got, 5_000*mvBasePrecision)
-	}
-}
-
-// With an exit band an informed trader unwinds once the price has returned to
-// value, instead of holding until the deviation flips sign.
-func TestValueTraderExitsTowardFlatWhenPriceReturnsToValue(t *testing.T) {
-	value := NewFundamentalValue(1, 0, 50_000*mvQuotePrecision, int64(time.Second), mvQuotePrecision, 0)
-	gw := newStoikovStubGateway()
-	vt := NewValueTrader(1, gw, value, ValueTraderConfig{
-		Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: 10 * mvQuotePrecision,
-		EdgeBps: 100, ExitBps: 5, LotQty: mvBasePrecision / 10,
-		MaxInventory: 200 * mvBasePrecision, TradeInterval: time.Second,
-	})
-	now := time.Unix(0, 0)
-	vt.onTick(now)
-	vt.inventory = 50 * mvBasePrecision // long from an earlier dislocation
-
-	// Price is back at value: inside the entry edge, so the only reason to
-	// trade is to unwind.
-	vt.HandleEvent(context.Background(), &actor.Event{
-		Type: actor.EventBookSnapshot,
-		Data: actor.BookSnapshotEvent{Symbol: "ABC/USD", Timestamp: now.UnixNano(),
-			Snapshot: &exchange.BookSnapshot{
-				Bids: []etypes.PriceLevel{{Price: 50_000 * mvQuotePrecision, VisibleQty: mvBasePrecision}},
-				Asks: []etypes.PriceLevel{{Price: 50_010 * mvQuotePrecision, VisibleQty: mvBasePrecision}},
-			}},
-	})
-	before := len(gw.requests)
-	vt.onTick(now)
-	if len(gw.requests) == before {
-		t.Fatal("did not unwind a long position after the price returned to value")
-	}
-	if order := gw.requests[len(gw.requests)-1].OrderReq; order.Side != exchange.Sell {
-		t.Fatalf("expected a sell to unwind, got %+v", order)
-	}
-
-	// Without an exit band the same state produces no trade at all.
-	holding := NewValueTrader(2, newStoikovStubGateway(), value, ValueTraderConfig{
-		Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: 10 * mvQuotePrecision,
-		EdgeBps: 100, LotQty: mvBasePrecision / 10, MaxInventory: 200 * mvBasePrecision,
-		TradeInterval: time.Second,
-	})
-	holding.onTick(now)
-	holding.inventory = 50 * mvBasePrecision
-	holding.bestBid, holding.bidQty = 50_000*mvQuotePrecision, mvBasePrecision
-	holding.bestAsk, holding.askQty = 50_010*mvQuotePrecision, mvBasePrecision
-	stub := holding.Gateway().(*stoikovStubGateway)
-	before = len(stub.requests)
-	holding.onTick(now)
-	if len(stub.requests) != before {
-		t.Fatal("a trader without an exit band must hold through a return to value")
 	}
 }
 
@@ -1521,35 +1324,47 @@ func TestMetaorderChildWalksBeyondTheTouchWhenSlippageIsAllowed(t *testing.T) {
 // diverges: with the cross-asset books unpublished, a twelve-hour run produced
 // participant results in the tens of billions on a starting capital of about
 // thirty billion.
-func TestEveryQuotedMarketReceivesAnIndex(t *testing.T) {
+func TestEveryQuotedMarketReceivesAnIndexOnceVenuesReportMidpoints(t *testing.T) {
 	sim, err := NewSim(time.Second, Config{
 		LogDir: t.TempDir(), LogMode: "none", Seed: 91,
-		// Module validation of index plumbing, not a strategy measurement, so the
-		// undegraded fundamental feed is the right instrument here.
-		MakerAnchor: "fundamental", CrossAssetSpotGraph: true, DebugOracleMode: true,
+		MakerAnchor: "consensus", CrossAssetSpotGraph: true,
 	})
 	if err != nil {
 		t.Fatalf("NewSim: %v", err)
 	}
 	defer sim.Close()
 
+	// The consensus index is endogenous: it exists only once venues have
+	// reported midpoints from real books. Before that there is nothing to
+	// publish, which is the correct behaviour rather than a gap.
 	for _, symbol := range []string{"ABC/USD", "ABC-PERP", "CDF/USD", "ABC/CDF"} {
-		if price := sim.SpotIndex.Price(symbol); price <= 0 {
-			t.Fatalf("no index published for %s, so its makers quote around their own midpoint", symbol)
+		if price := sim.SpotIndex.Price(symbol); price != 0 {
+			t.Fatalf("%s published an index of %d before any venue reported a midpoint", symbol, price)
 		}
 	}
-	// The cross rate must be the base value expressed in the quote currency,
-	// not the base value itself.
-	base, cross := sim.SpotIndex.Price("ABC/USD"), sim.SpotIndex.Price("ABC/CDF")
-	if cross >= base {
-		t.Fatalf("cross index %d is not expressed in CDF against a base index of %d", cross, base)
+
+	mids := map[string]int64{
+		"ABC/USD":  50 * mvQuotePrecision,
+		"ABC-PERP": 50 * mvQuotePrecision,
+		"CDF/USD":  3 * mvQuotePrecision,
+		"ABC/CDF":  16 * mvQuotePrecision,
+	}
+	for _, venue := range sim.Venues {
+		for symbol, mid := range mids {
+			sim.SpotIndex.observeVenueMid(symbol, venue.ID, mid)
+		}
+	}
+
+	for symbol, mid := range mids {
+		price := sim.SpotIndex.Price(symbol)
+		if price <= 0 {
+			t.Fatalf("no index published for %s after every venue reported a midpoint", symbol)
+		}
+		if price != mid {
+			t.Fatalf("index for %s is %d, want the consensus of the reported midpoints %d", symbol, price, mid)
+		}
 	}
 }
-
-// The funding interval decides the horizon at which carry arbitrage overtakes
-// market making, so it has to be configurable and has to reach the instrument.
-// At the default eight hours the ranking flips between seven and nine; at four
-// hours it flips between three and five.
 func TestFundingIntervalIsConfigurableAndReachesThePerpetual(t *testing.T) {
 	for _, want := range []int64{28800, 14400} {
 		sim, err := NewSim(time.Second, Config{
@@ -1579,50 +1394,4 @@ func TestFundingIntervalIsConfigurableAndReachesThePerpetual(t *testing.T) {
 		}
 		sim.Close()
 	}
-}
-
-// There are no price oracles. A run may not give any participant information
-// derived from the exogenous fundamental — not as a published index, degraded or
-// not, and not through a value trader that reads it directly. Degrading the
-// observation only blurs the oracle; it still tells its subscriber which way the
-// world will move. Only an explicit module-validation opt-in may do so.
-func TestExogenousFundamentalReachesNoParticipantWithoutDebugOptIn(t *testing.T) {
-	base := func() Config {
-		return Config{LogDir: t.TempDir(), LogMode: "none", Seed: 91}
-	}
-
-	oracleIndex := base()
-	oracleIndex.MakerAnchor = "fundamental"
-	if _, err := NewSim(time.Second, oracleIndex); err == nil {
-		t.Fatal("a fundamental-anchored index was accepted for a scientific run")
-	}
-
-	blurredOracle := oracleIndex
-	blurredOracle.DegradedIndex = ScientificIndexDefaults(91)
-	if _, err := NewSim(time.Second, blurredOracle); err == nil {
-		t.Fatal("degrading the observation was accepted as if it removed the oracle")
-	}
-
-	valueTraders := base()
-	count := 2
-	valueTraders.ValueTraderCount = &count
-	if _, err := NewSim(time.Second, valueTraders); err == nil {
-		t.Fatal("value traders, which read the fundamental directly, were accepted for a scientific run")
-	}
-
-	debug := oracleIndex
-	debug.DebugOracleMode = true
-	sim, err := NewSim(time.Second, debug)
-	if err != nil {
-		t.Fatalf("explicit module-validation opt-in rejected: %v", err)
-	}
-	sim.Close()
-
-	endogenous := base()
-	endogenous.MakerAnchor = "consensus"
-	sim, err = NewSim(time.Second, endogenous)
-	if err != nil {
-		t.Fatalf("endogenous consensus anchor rejected: %v", err)
-	}
-	sim.Close()
 }

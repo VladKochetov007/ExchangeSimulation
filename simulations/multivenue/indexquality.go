@@ -6,11 +6,10 @@ import (
 	"math/rand"
 )
 
-// DegradedIndexConfig makes the published index an imperfect observation of the
-// value it tracks. Published without degradation the feed is a zero-lag,
-// noise-free channel to the exogenous fundamental, so any actor quoting
-// directly on it holds perfect information. Lag and observation noise are what
-// separate an informed participant from an omniscient one.
+// DegradedIndexConfig makes a venue's published index an imperfect observation.
+// The index is built from venue midpoints, so it is already endogenous; lag and
+// observation noise model the transport and measurement error a participant
+// really faces rather than any hidden reference.
 type DegradedIndexConfig struct {
 	// LagSamples delays the published value by this many observations.
 	LagSamples int `json:"lag_samples"`
@@ -84,12 +83,10 @@ func symbolSeed(symbol string) int64 {
 	return int64(digest.Sum64() & math.MaxInt32)
 }
 
-// ScientificIndexDefaults returns an observation degradation suitable for a run
-// whose results are meant to be believed: the fundamental is seen late and
-// imprecisely by everyone, so any information advantage has to be earned from
-// speed, modelling, order-flow inference or inventory rather than granted by the
-// environment. Callers are free to choose their own values; these exist so that
-// "not an oracle" has a concrete starting point.
+// ScientificIndexDefaults returns a plausible observation degradation: the
+// published consensus is seen a few samples late and imprecisely, so an
+// information advantage has to be earned from speed, modelling, order-flow
+// inference or inventory rather than from a clean feed.
 func ScientificIndexDefaults(seed int64) *DegradedIndexConfig {
 	return &DegradedIndexConfig{LagSamples: 5, NoiseBps: 10, Seed: seed}
 }

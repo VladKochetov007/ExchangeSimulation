@@ -107,12 +107,10 @@ type Config struct {
 	// degeneracy is the large-tick regime.
 	SpotTickQuoteUnits int64 `json:"spot_tick_quote_units"`
 
-	// MakerAnchor selects what the spot makers quote around: "own_mid" is the
-	// book midpoint they themselves set, "consensus" is the median of the
-	// venues' midpoints published as each venue's index, and "fundamental"
-	// publishes the exogenous value itself as the index. The last is not
-	// realistic — no venue knows value — but it bounds what any anchor could
-	// achieve.
+	// MakerAnchor selects what the spot makers quote around: "own_mid" is each
+	// maker's own book midpoint, and "consensus" is the average of the venues'
+	// midpoints published as each venue's index. Both are endogenous: they are
+	// computed from what participants did.
 	MakerAnchor string `json:"maker_anchor"`
 	// RoundTripTraderCount adds participants whose demand mean-reverts in
 	// quantity: they open a position and unwind it after RoundTripHold. Pure
@@ -125,7 +123,7 @@ type Config struct {
 	// ElasticSupplierCount adds participants with a downward-sloping demand
 	// curve, which is what absorbs a persistent drift: they sell as the price
 	// rises and buy back as it falls. Without one, market makers hold the
-	// mirror of the fundamental's cumulative drift.
+	// mirror of the accumulated price drift.
 	ElasticSupplierCount int `json:"elastic_supplier_count"`
 	// ElasticSupplierUnitsPerPercent is how many base units each supplier's
 	// target position falls for every percent the price rises.
@@ -195,26 +193,9 @@ type Config struct {
 	// SpotMakerCount is how many market makers quote the main spot pair on each
 	// venue, so the carrying capacity of market making can be measured the same
 	// way as that of any other strategy.
-	// DebugOracleMode permits participants to receive information derived from
-	// the exogenous fundamental: publishing it as an index (whether or not the
-	// observation is degraded), and value traders, which read it directly.
-	//
-	// There are no price oracles in a market. Every participant must have equal
-	// rights and equal information, and any edge must be earned from speed,
-	// modelling, order-flow inference or inventory. A lagged, noisy fundamental
-	// is still a fundamental: it tells its subscriber which way the world will
-	// move, which no real participant is told. Exchanges may compute their own
-	// marks for liquidation — that is a venue function, not a participant edge.
-	//
-	// This flag exists so a quoting, risk or liquidation path can be validated
-	// under known-value conditions. It must never support a claim about strategy
-	// performance.
-	DebugOracleMode bool `json:"debug_oracle_mode"`
 
-	// DegradedIndex makes the published index an imperfect observation. Without
-	// it the feed is a zero-lag, noise-free channel to the exogenous
-	// fundamental, so any actor quoting on it directly holds perfect
-	// information.
+	// DegradedIndex models transport and measurement error on the published
+	// consensus index, which every participant then observes equally.
 	DegradedIndex *DegradedIndexConfig `json:"degraded_index"`
 
 	// BootstrapDepthCount rests passive ladders that never reprice, so a run can
@@ -253,10 +234,6 @@ type Config struct {
 	// MakerIndexWeight blends the index with the maker's own midpoint.
 	MakerIndexWeight float64 `json:"maker_index_weight"`
 
-	// MispricingBandBps is the deviation from fundamental value beyond which a
-	// sample counts as visibly mispriced in the run summary.
-	MispricingBandBps int64 `json:"mispricing_band_bps"`
-
 	// LatentLiquidityCount adds participants holding unexpressed intentions
 	// whose reservation prices diffuse and become orders on crossing. The
 	// square-root impact law is attributed to exactly this: latent liquidity
@@ -269,35 +246,10 @@ type Config struct {
 	// agent per venue cannot produce a usable sample in a reasonable run.
 	MetaorderTraderCount int `json:"metaorder_trader_count"`
 	// MetaorderTraders configures execution agents that split large parent
-	// orders. Their signs are independent of the fundamental value, so what
+	// orders. Their signs are independent of the price path, so what
 	// they measure is the mechanical impact of execution rather than a trading
 	// signal.
 	MetaorderTraders *MetaorderTraderConfig `json:"metaorder_traders"`
-
-	// ValueTraderTiers replaces the homogeneous informed population with named
-	// groups that differ in reaction time and transport latency. This is what
-	// separates a medium-frequency participant that re-evaluates every few
-	// seconds from one whose orders reach the venue in milliseconds, and it
-	// also breaks the degenerate case where identical agents contend for the
-	// same opportunity and the fixed client-ID order decides who wins.
-	ValueTraderTiers []ValueTraderTier `json:"value_trader_tiers"`
-
-	// ValueTraderCount sets how many informed participants per venue trade the
-	// visible spot book against the exogenous fundamental value. They are the
-	// market's anchor: makers quote around their own inventory and noise flow
-	// picks sides at random, so without informed flow a drift in the quoted
-	// price feeds back into the makers' own volatility estimate and diverges.
-	ValueTraderCount *int `json:"value_trader_count"`
-	// ValueTraderExitBps closes an informed position once the price is within
-	// this distance of fundamental value. Zero keeps the reverse-only
-	// behaviour, in which a position is held until the deviation flips sign.
-	ValueTraderExitBps int64 `json:"value_trader_exit_bps"`
-	// ValueTraderEdgeBps is the deviation from fundamental value required
-	// before an informed participant crosses the spread.
-	ValueTraderEdgeBps int64 `json:"value_trader_edge_bps"`
-	// FundamentalLogVolPerStep is the standard deviation of one step of the
-	// fundamental value's log return; the step is AutomationInterval.
-	FundamentalLogVolPerStep float64 `json:"fundamental_log_vol_per_step"`
 
 	ShortOptionTenor          time.Duration `json:"short_option_tenor"`
 	LongOptionTenor           time.Duration `json:"long_option_tenor"`
@@ -359,17 +311,9 @@ func (c *Config) normalize() error {
 		c.LogMode = "full"
 	}
 	switch c.MakerAnchor {
-	case "", "own_mid", "consensus", "fundamental":
+	case "", "own_mid", "consensus":
 	default:
-		return fmt.Errorf("multivenue: maker anchor must be own_mid, consensus or fundamental, got %q", c.MakerAnchor)
-	}
-	if c.MakerAnchor == "fundamental" && !c.DebugOracleMode {
-		return errors.New("multivenue: publishing the exogenous fundamental as an index gives its subscribers knowledge no participant can have, and degrading the observation only blurs the oracle; " +
-			"use maker_anchor own_mid or consensus for a scientific run, or debug_oracle_mode for module validation only")
-	}
-	if c.ValueTraderCount != nil && *c.ValueTraderCount > 0 && !c.DebugOracleMode {
-		return errors.New("multivenue: value traders read the exogenous fundamental directly, so they are an oracle participant; " +
-			"remove them from a scientific run, or set debug_oracle_mode for module validation only")
+		return fmt.Errorf("multivenue: maker anchor must be own_mid or consensus, got %q", c.MakerAnchor)
 	}
 	if c.LogMode != "full" && c.LogMode != "none" {
 		return fmt.Errorf("multivenue: log mode must be full or none, got %q", c.LogMode)
@@ -497,23 +441,6 @@ func (c *Config) normalize() error {
 	if c.MakerIndexWeight == 0 {
 		c.MakerIndexWeight = 1
 	}
-	if c.MispricingBandBps == 0 {
-		c.MispricingBandBps = 100
-	}
-	if c.ValueTraderCount == nil {
-		// Zero is a valid arm: it is the no-informed-flow control.
-		count := 2
-		c.ValueTraderCount = &count
-	}
-	if c.ValueTraderExitBps < 0 {
-		return fmt.Errorf("multivenue: value trader exit bps must not be negative")
-	}
-	if c.ValueTraderEdgeBps == 0 {
-		c.ValueTraderEdgeBps = 10
-	}
-	if c.FundamentalLogVolPerStep == 0 {
-		c.FundamentalLogVolPerStep = 0.0002
-	}
 	if c.ShortOptionTenor == 0 {
 		c.ShortOptionTenor = 6 * time.Hour
 	}
@@ -595,8 +522,8 @@ func (c *Config) normalize() error {
 	if c.Step <= 0 || c.SnapshotInterval <= 0 || c.AutomationInterval <= 0 || c.QuoteInterval <= 0 ||
 		c.NoiseInterval <= 0 || c.GreekInterval <= 0 || c.ShortOptionTenor <= 0 || c.LongOptionTenor <= 0 ||
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
-		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 || *c.ValueTraderCount < 0 ||
-		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 || c.ElasticSupplierCount < 0 || c.ElasticSupplierUnitsPerPercent <= 0 || c.CarryArbitrageurCount < 0 ||
+		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 ||
+		c.StoikovMaxVarianceMultiple <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 || c.ElasticSupplierCount < 0 || c.ElasticSupplierUnitsPerPercent <= 0 || c.CarryArbitrageurCount < 0 ||
 		c.CarryEntryBps <= 0 || c.CarryExitBps < 0 || c.CarryMaxPosition <= 0 || c.CarryLotQty <= 0 || c.MakerQuoteQty <= 0 || c.SpotMakerCount < 1 || c.OptionDealerCount < 1 || c.DatedCarryArbCount < 0 || c.ParityArbCount < 0 || c.FuturesMakerCount < 1 || c.FundingMaxRateBps <= 0 || c.FundingIntervalSeconds <= 0 || c.LatentLiquidityCount < 0 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
@@ -635,18 +562,16 @@ type Venue struct {
 	OptionDealerClientID uint64
 	// Singular fields retain the baseline participant for callers written
 	// before configurable rosters. All actors live in the corresponding slice.
+	makerStateLog    venueLogger
 	NoiseTrader      *feesim.RandomTaker
 	NoiseTraders     []*feesim.RandomTaker
-	ValueTraders     []*ValueTrader
 	RoundTripTraders []*RoundTripTrader
 	Suppliers        []*ElasticSupplier
 	CarryArbs        []*CarryArbitrageur
 	LatentLiquidity  []*LatentLiquidity
 	MetaorderTraders []*MetaorderTrader
 	lastTwoSided     map[string]twoSidedMark
-	Mispricing       *MispricingStats
 	Microstructure   *MicrostructureStats
-	fundamentalLog   venueLogger
 	OptionFlow       *derivsim.OptionTaker
 	OptionFlows      []*derivsim.OptionTaker
 	InitialRisk      *VenueRiskSnapshot
@@ -704,33 +629,12 @@ type VenueRiskSnapshot struct {
 }
 
 // Sim owns the three venue ecology and every log file created for it.
-// ValueTraderTier describes one informed group.
-type ValueTraderTier struct {
-	Name string `json:"name"`
-	// Count is the number of participants of this tier on every venue.
-	Count int `json:"count"`
-	// ReactionInterval is how often the participant re-evaluates the book: its
-	// decision cadence, independent of how fast its orders travel.
-	ReactionInterval time.Duration `json:"reaction_interval"`
-	// Latency is applied to requests, responses, and market data alike, so a
-	// slow participant both sees the book late and reaches it late. With
-	// LatencyLogSigma set it is the median of a lognormal draw rather than a
-	// constant, which is what a quoted percentile actually describes: a median
-	// of 1ms with sigma 0.99 puts the 99th percentile near 10ms.
-	Latency         time.Duration `json:"latency"`
-	LatencyLogSigma float64       `json:"latency_log_sigma"`
-	EdgeBps         int64         `json:"edge_bps"`
-	LotQty          int64         `json:"lot_qty"`
-	// MaxInventory bounds the signed base position.
-	MaxInventory int64 `json:"max_inventory"`
-}
 
 type Sim struct {
 	Config           Config
 	Runner           *simulation.Runner
 	Venues           []*Venue
 	Routers          []*CrossVenueArb
-	Fundamental      *FundamentalValue
 	SpotIndex        *spotIndexProvider
 	InitialAccounts  []ParticipantAccountSnapshot
 	TerminalAccounts []ParticipantAccountSnapshot
@@ -774,7 +678,6 @@ func (s *Sim) Run(ctx context.Context) error {
 		return err
 	}
 	for _, venue := range s.Venues {
-		venue.Mispricing.finalize()
 		venue.Microstructure.finalize()
 	}
 	for _, venue := range s.Venues {
@@ -870,16 +773,11 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	})
 	runner.AddIdler(timers)
 
-	// One fundamental value process is shared by every venue: the venues list
-	// the same asset, so they must trade against the same exogenous value.
-	fundamental := NewFundamentalValue(cfg.Seed, start, mvBootstrapPrice,
-		int64(cfg.AutomationInterval), mvQuotePrecision, cfg.FundamentalLogVolPerStep)
-	sim := &Sim{Config: cfg, Runner: runner, Fundamental: fundamental,
+	sim := &Sim{Config: cfg, Runner: runner,
 		SpotIndex: newSpotIndexProvider(cfg.MakerAnchor, "ABC/USD", "ABC-PERP", "CDF/USD", "ABC/CDF"), Venues: make([]*Venue, 0, len(cfg.VenueIDs))}
 	// Seed the reference before the first quote: until the first automation
 	// tick the index would otherwise be empty, leaving makers to fall back to
 	// their own midpoint exactly when the book is thinnest.
-	sim.SpotIndex.observeFundamental(fundamental.Value(start))
 	actorID := uint64(0)
 	for venueIndex, id := range cfg.VenueIDs {
 		venue, err := sim.addVenue(id, venueIndex, clock, timers, &actorID)
@@ -919,9 +817,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		for _, flow := range venue.OptionFlows {
 			runner.AddActor(flow)
 		}
-		for _, trader := range venue.ValueTraders {
-			runner.AddActor(trader)
-		}
+
 		for _, trader := range venue.RoundTripTraders {
 			runner.AddActor(trader)
 		}
@@ -936,10 +832,6 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		}
 	}
 	if err := sim.addMetaorderTraders(timers, &actorID); err != nil {
-		sim.Close()
-		return nil, err
-	}
-	if err := sim.addValueTraderTiers(clock, scheduler, timers, &actorID); err != nil {
 		sim.Close()
 		return nil, err
 	}
@@ -984,11 +876,11 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		SnapshotInterval:        s.Config.SnapshotInterval,
 		BalanceSnapshotInterval: time.Minute,
 	})
-	var fundamentalLog venueLogger
 	matchingRule := s.Config.matchingRule(id)
 	if matchingRule == MatchingProRata {
 		ex.Matcher = matching.NewProRataMatcher(clock)
 	}
+	var makerStateLog venueLogger
 	if s.Config.LogMode == "full" {
 		if err := os.MkdirAll(filepath.Join(logDir, "spot"), 0755); err != nil {
 			return nil, err
@@ -997,12 +889,12 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		if err != nil {
 			return nil, err
 		}
+		makerStateLog = venueLogger{inner: globalLog, venueID: id}
 		derivativeLog, err := newLogger("derivatives.jsonl")
 		if err != nil {
 			return nil, err
 		}
 		ex.SetLogger("_global", globalLog)
-		fundamentalLog = globalLog
 		spotSymbols := []string{"ABC/USD"}
 		if s.Config.CrossAssetSpotGraph {
 			spotSymbols = append(spotSymbols, "CDF/USD", "ABC/CDF")
@@ -1043,9 +935,8 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	optionSpec.TickSize = mvQuotePrecision // one USD premium tick
 	mount := simulation.NewMount(ex, simulation.LatencyConfig{})
 	venue := &Venue{ID: id, MatchingRule: matchingRule, Exchange: ex, Mount: mount,
+		makerStateLog:    makerStateLog,
 		optionListedNano: make(map[string]int64),
-		fundamentalLog:   fundamentalLog,
-		Mispricing:       newMispricingStats(id, "ABC/USD", s.Config.MispricingBandBps),
 		Microstructure:   newMicrostructureStats(id, "ABC/USD", tick, s.Config.AutomationInterval.Seconds())}
 	// The venue advertises the scenario's reference price while still marking
 	// its own derivatives from its own book. With own_mid anchoring there is
@@ -1089,16 +980,11 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		PostDerivativeMarkHook: func() {
 			now := venue.Exchange.Clock.NowUnixNano()
 			venue.recordTwoSidedMarks(valuedSpotSymbols(s.Config.CrossAssetSpotGraph), now)
-			mark, _, _ := venue.valuationMark("ABC/USD", now, venueRiskMarkStaleness)
-			fundamental := s.Fundamental.Value(now)
-			s.SpotIndex.observeFundamental(fundamental)
 			for _, symbol := range []string{"ABC/USD", "ABC-PERP", "CDF/USD", "ABC/CDF"} {
 				if mid, ok := venue.Exchange.TwoSidedMidPrice(symbol); ok {
 					s.SpotIndex.observeVenueMid(symbol, venue.ID, mid)
 				}
 			}
-			venue.Mispricing.observe(now, mark, fundamental)
-			venue.logFundamental(now, fundamental, mark)
 			venue.logMakerState(now)
 			venue.observeMicrostructure()
 			captureScheduledVenueRisk(venue, s.Config.GreekInterval, s.Config.AutomationInterval)
@@ -1351,21 +1237,6 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	if s.Config.CrossAssetSpotGraph {
 		valueBalances["CDF"] = 1_000 * mvBasePrecision
 	}
-	flatValueTraders := *s.Config.ValueTraderCount
-	if len(s.Config.ValueTraderTiers) > 0 {
-		// Named tiers fully describe the informed population.
-		flatValueTraders = 0
-	}
-	for participant := 0; participant < flatValueTraders; participant++ {
-		trader := NewValueTrader(nextActor(), connect(fmt.Sprintf("value_trader_%d", participant+1), valueBalances, 10_000_000*mvQuotePrecision, noiseFee), s.Fundamental, ValueTraderConfig{
-			Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: tick,
-			EdgeBps: s.Config.ValueTraderEdgeBps, LotQty: mvBasePrecision / 10,
-			MaxInventory: 200 * mvBasePrecision, ExitBps: s.Config.ValueTraderExitBps,
-			TradeInterval: s.Config.NoiseInterval,
-		})
-		trader.SetTickerFactory(timers)
-		venue.ValueTraders = append(venue.ValueTraders, trader)
-	}
 	return venue, nil
 }
 
@@ -1384,98 +1255,6 @@ func (v *Venue) connectParticipant(mount *simulation.Mount, role string, balance
 	}
 	v.Participants = append(v.Participants, Participant{VenueID: v.ID, ClientID: clientID, Role: role})
 	return clientID, gw
-}
-
-// addValueTraderTiers connects the heterogeneous informed population. A tier
-// with latency gets its own scheduled courier mount per venue; a tier without
-// latency uses the venue's direct mount, exactly like the homogeneous case.
-// addMetaorderTraders connects one execution agent per venue on the venue's
-// direct mount.
-func (s *Sim) addMetaorderTraders(timers *simulation.SimTimerFactory, actorID *uint64) error {
-	cfg := s.Config.MetaorderTraders
-	if cfg == nil {
-		return nil
-	}
-	if err := cfg.validate(); err != nil {
-		return err
-	}
-	fee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
-	balances := map[string]int64{"ABC": 1_000 * mvBasePrecision, "USD": 50_000_000 * mvQuotePrecision}
-	if s.Config.CrossAssetSpotGraph {
-		balances["CDF"] = 1_000 * mvBasePrecision
-	}
-	count := s.Config.MetaorderTraderCount
-	if count <= 0 {
-		count = 1
-	}
-	for venueIndex, venue := range s.Venues {
-		for participant := 0; participant < count; participant++ {
-			local := *cfg
-			local.Symbol = "ABC/USD"
-			local.BasePrecision = mvBasePrecision
-			local.TickSize = s.Config.SpotTickQuoteUnits
-			local.Seed = flowSeed(s.Config.Seed, venueIndex, participant, 9)
-			_, gw := venue.connectParticipant(venue.Mount, fmt.Sprintf("metaorder_trader_%d", participant+1), balances, 0, fee)
-			*actorID++
-			trader := NewMetaorderTrader(*actorID, gw, venue.ID, local)
-			trader.SetTickerFactory(timers)
-			venue.MetaorderTraders = append(venue.MetaorderTraders, trader)
-			s.Runner.AddActor(trader)
-		}
-	}
-	return nil
-}
-
-func (s *Sim) addValueTraderTiers(clock *simulation.SimulatedClock, scheduler *simulation.EventScheduler, timers *simulation.SimTimerFactory, actorID *uint64) error {
-	if len(s.Config.ValueTraderTiers) == 0 {
-		return nil
-	}
-	fee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
-	balances := map[string]int64{"ABC": 1_000 * mvBasePrecision, "USD": 50_000_000 * mvQuotePrecision}
-	if s.Config.CrossAssetSpotGraph {
-		balances["CDF"] = 1_000 * mvBasePrecision
-	}
-	for _, tier := range s.Config.ValueTraderTiers {
-		if tier.Count <= 0 {
-			continue
-		}
-		for venueIndex, venue := range s.Venues {
-			mount := venue.Mount
-			if tier.Latency > 0 {
-				// Each channel draws independently, but from streams seeded by
-				// tier and venue so a run stays reproducible.
-				latency := func(channel int) simulation.LatencyProvider {
-					if tier.LatencyLogSigma <= 0 {
-						return simulation.NewConstantLatency(tier.Latency)
-					}
-					seed := flowSeed(s.Config.Seed, venueIndex, channel, 7) ^ int64(len(tier.Name))
-					return simulation.NewLogNormalLatency(0, tier.Latency, tier.LatencyLogSigma, seed)
-				}
-				mount = simulation.NewMount(venue.Exchange, simulation.LatencyConfig{
-					Request:    latency(0),
-					Response:   latency(1),
-					MarketData: latency(2),
-					Scheduler:  scheduler,
-					Clock:      clock,
-				})
-				s.Runner.AddMount(mount)
-			}
-			for participant := 0; participant < tier.Count; participant++ {
-				role := fmt.Sprintf("value_trader_%s_%d", tier.Name, participant+1)
-				_, gw := venue.connectParticipant(mount, role, balances, 10_000_000*mvQuotePrecision, fee)
-				*actorID++
-				trader := NewValueTrader(*actorID, gw, s.Fundamental, ValueTraderConfig{
-					Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: int64(10 * mvQuotePrecision),
-					EdgeBps: tier.EdgeBps, LotQty: tier.LotQty, MaxInventory: tier.MaxInventory,
-					TradeInterval: tier.ReactionInterval,
-				})
-				trader.SetTickerFactory(timers)
-				venue.ValueTraders = append(venue.ValueTraders, trader)
-				s.Runner.AddActor(trader)
-			}
-		}
-	}
-	return nil
 }
 
 func (s *Sim) addCrossVenueRouters(clock *simulation.SimulatedClock, scheduler *simulation.EventScheduler, timers *simulation.SimTimerFactory, actorID *uint64) error {
@@ -1582,27 +1361,50 @@ func (s *Sim) capturePopulationAccounts(phase string) ([]ParticipantAccountSnaps
 // snapshot is diagnostic, while population accounts use the stricter window.
 const venueRiskMarkStaleness = int64(60 * time.Second)
 
-// logFundamental records the exogenous value beside the quoted mark.
-func (v *Venue) logFundamental(timestamp, fundamental, mark int64) {
-	if v.fundamentalLog.inner == nil {
-		return
-	}
-	v.fundamentalLog.LogEvent(timestamp, 0, "fundamental_value", map[string]any{
-		"symbol":      "ABC/USD",
-		"fundamental": fundamental,
-		"mark":        mark,
-	})
-}
-
 // logMakerState records what each spot maker believes, which is the only way
 // to tell a price move driven by inventory from one driven by its volatility
 // estimate.
+func (s *Sim) addMetaorderTraders(timers *simulation.SimTimerFactory, actorID *uint64) error {
+	cfg := s.Config.MetaorderTraders
+	if cfg == nil {
+		return nil
+	}
+	if err := cfg.validate(); err != nil {
+		return err
+	}
+	fee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
+	balances := map[string]int64{"ABC": 1_000 * mvBasePrecision, "USD": 50_000_000 * mvQuotePrecision}
+	if s.Config.CrossAssetSpotGraph {
+		balances["CDF"] = 1_000 * mvBasePrecision
+	}
+	count := s.Config.MetaorderTraderCount
+	if count <= 0 {
+		count = 1
+	}
+	for venueIndex, venue := range s.Venues {
+		for participant := 0; participant < count; participant++ {
+			local := *cfg
+			local.Symbol = "ABC/USD"
+			local.BasePrecision = mvBasePrecision
+			local.TickSize = s.Config.SpotTickQuoteUnits
+			local.Seed = flowSeed(s.Config.Seed, venueIndex, participant, 9)
+			_, gw := venue.connectParticipant(venue.Mount, fmt.Sprintf("metaorder_trader_%d", participant+1), balances, 0, fee)
+			*actorID++
+			trader := NewMetaorderTrader(*actorID, gw, venue.ID, local)
+			trader.SetTickerFactory(timers)
+			venue.MetaorderTraders = append(venue.MetaorderTraders, trader)
+			s.Runner.AddActor(trader)
+		}
+	}
+	return nil
+}
+
 func (v *Venue) logMakerState(timestamp int64) {
-	if v.fundamentalLog.inner == nil {
+	if v.makerStateLog.inner == nil {
 		return
 	}
 	record := func(name string, maker *StoikovMarketMaker) {
-		v.fundamentalLog.LogEvent(timestamp, 0, "maker_state", map[string]any{
+		v.makerStateLog.LogEvent(timestamp, 0, "maker_state", map[string]any{
 			"maker":          name,
 			"forward":        maker.forward,
 			"index":          maker.indexPrice,

@@ -3,8 +3,6 @@ package multivenue
 import (
 	"sort"
 	"sync"
-
-	etypes "exchange_sim/types"
 )
 
 // spotIndexProvider publishes the reference price a venue advertises on its
@@ -50,17 +48,6 @@ func (p *spotIndexProvider) observeVenueMid(symbol, venueID string, mid int64) {
 	p.mu.Unlock()
 }
 
-// observeFundamental records the exogenous value, used only by the idealized
-// fundamental anchor.
-func (p *spotIndexProvider) observeFundamental(value int64) {
-	if p == nil || value <= 0 {
-		return
-	}
-	p.mu.Lock()
-	p.value = value
-	p.mu.Unlock()
-}
-
 // Price returns the published index for a symbol, or zero when the venue should
 // publish nothing.
 func (p *spotIndexProvider) Price(symbol string) int64 {
@@ -73,8 +60,6 @@ func (p *spotIndexProvider) Price(symbol string) int64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	switch p.mode {
-	case "fundamental":
-		return p.fundamentalFor(symbol)
 	case "consensus":
 		mids := make([]int64, 0, len(p.venueMids[symbol]))
 		for _, mid := range p.venueMids[symbol] {
@@ -89,24 +74,6 @@ func (p *spotIndexProvider) Price(symbol string) int64 {
 		// the reference the others are quoting around.
 		sort.Slice(mids, func(i, j int) bool { return mids[i] < mids[j] })
 		return mids[len(mids)/2]
-	}
-	return 0
-}
-
-// fundamentalFor converts the exogenous value of the base asset into the units
-// of each published contract. The control freezes CDF against USD, so the
-// cross rate is the base value divided by that fixed rate.
-func (p *spotIndexProvider) fundamentalFor(symbol string) int64 {
-	switch symbol {
-	case "ABC/USD", "ABC-PERP":
-		return p.value
-	case "CDF/USD":
-		return mvCDFBootstrap
-	case "ABC/CDF":
-		if p.value <= 0 {
-			return 0
-		}
-		return etypes.MulDiv(p.value, mvBasePrecision, mvCDFBootstrap)
 	}
 	return 0
 }

@@ -21,7 +21,6 @@ type greekOutput struct {
 	RiskTimeline     map[string][]multivenue.VenueRiskSnapshot `json:"risk_timeline"`
 	PreExpiryRisk    map[string][]multivenue.VenueRiskSnapshot `json:"pre_expiry_risk"`
 	TerminalRisk     map[string]multivenue.VenueRiskSnapshot   `json:"terminal_risk"`
-	Mispricing       []multivenue.MispricingStats              `json:"mispricing"`
 	Microstructure   []multivenue.MicrostructureStats          `json:"microstructure"`
 	Metaorders       []multivenue.MetaorderRecord              `json:"metaorders,omitempty"`
 	CarryActivity    []multivenue.CarryActivity                `json:"carry_activity,omitempty"`
@@ -76,7 +75,6 @@ func main() {
 		RiskTimeline:   make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
 		PreExpiryRisk:  make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
 		TerminalRisk:   make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
-		Mispricing:     make([]multivenue.MispricingStats, 0, len(sim.Venues)),
 		Microstructure: make([]multivenue.MicrostructureStats, 0, len(sim.Venues)),
 		Caveats: []string{
 			"Venues are independently funded. A configured cross-venue router has one local account per venue; it models neither asset transfer nor atomic legs.",
@@ -94,9 +92,6 @@ func main() {
 		output.RiskTimeline[venue.ID] = append([]multivenue.VenueRiskSnapshot(nil), venue.RiskTimeline...)
 		output.PreExpiryRisk[venue.ID] = append([]multivenue.VenueRiskSnapshot(nil), venue.PreExpiryRisk...)
 		output.TerminalRisk[venue.ID] = *venue.TerminalRisk
-		if venue.Mispricing != nil {
-			output.Mispricing = append(output.Mispricing, *venue.Mispricing)
-		}
 		if venue.Microstructure != nil {
 			output.Microstructure = append(output.Microstructure, *venue.Microstructure)
 		}

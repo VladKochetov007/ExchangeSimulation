@@ -13,11 +13,11 @@ import (
 // curve: it holds the asset and wants to hold less of it as the price rises.
 //
 // Every other participant here is either flat in expectation or takes the side
-// of the fundamental's drift, which leaves market makers holding the mirror of
+// of the price drift, which leaves market makers holding the mirror of
 // the cumulative drift. A supply curve is what absorbs that: as the price
 // rises, this participant sells, and it buys back when the price falls. Its
 // target depends on the price level itself rather than on the deviation from
-// fundamental value, so it supplies into a drift instead of chasing it.
+// the prevailing price, so it supplies into a drift instead of chasing it.
 type ElasticSupplierConfig struct {
 	Symbol        string        `json:"symbol"`
 	BasePrecision int64         `json:"base_precision"`
