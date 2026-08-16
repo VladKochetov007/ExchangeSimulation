@@ -8,17 +8,17 @@ import (
 	"exchange_sim/exchange"
 )
 
-// ValueTraderConfig drives an ABIDES-style value agent: it believes in a
-// fundamental price and trades against deviations, supplying the
+// ValueTraderConfig drives an ABIDES-style value agent: it holds its own opinion
+// of what the asset is worth and trades against deviations from it, supplying the
 // mean-reversion force that pins the price level in an otherwise
 // random-flow ecology.
 type ValueTraderConfig struct {
-	Symbol      string
-	Fundamental int64         // believed fair price (static)
-	BandBps     int64         // act when |mid − fundamental| exceeds this
-	LotQty      int64         // market order size per action
-	MaxPosition int64         // absolute position cap in base units
-	Interval    time.Duration // decision cadence
+	Symbol        string
+	BelievedValue int64         // this agent's own opinion of fair value; nothing validates it
+	BandBps       int64         // act when |mid - believed value| exceeds this
+	LotQty        int64         // market order size per action
+	MaxPosition   int64         // absolute position cap in base units
+	Interval      time.Duration // decision cadence
 }
 
 type ValueTrader struct {
@@ -70,7 +70,7 @@ func (vt *ValueTrader) onTick(_ time.Time) {
 	if vt.mid == 0 {
 		return
 	}
-	deviationBps := (vt.mid - vt.cfg.Fundamental) * 10000 / vt.cfg.Fundamental
+	deviationBps := (vt.mid - vt.cfg.BelievedValue) * 10000 / vt.cfg.BelievedValue
 	switch {
 	case deviationBps < -vt.cfg.BandBps && vt.position < vt.cfg.MaxPosition:
 		vt.SubmitOrder(vt.cfg.Symbol, exchange.Buy, exchange.Market, 0, vt.cfg.LotQty)

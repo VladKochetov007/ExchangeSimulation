@@ -293,12 +293,12 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 
 	vtGw := connect(0)
 	vt := feesim.NewValueTrader(nextClient, vtGw, feesim.ValueTraderConfig{
-		Symbol:      "ABC/USD",
-		Fundamental: bootstrapUSD,
-		BandBps:     cfg.ValueTraderBand,
-		LotQty:      4_000_000,
-		MaxPosition: cfg.ValueTraderLots * 4_000_000,
-		Interval:    100 * time.Millisecond,
+		Symbol:        "ABC/USD",
+		BelievedValue: bootstrapUSD,
+		BandBps:       cfg.ValueTraderBand,
+		LotQty:        4_000_000,
+		MaxPosition:   cfg.ValueTraderLots * 4_000_000,
+		Interval:      100 * time.Millisecond,
 	})
 	vt.SetTickerFactory(timerFact)
 	runner.AddActor(vt)

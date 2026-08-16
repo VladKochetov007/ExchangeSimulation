@@ -80,7 +80,7 @@ type SimConfig struct {
 	StepSleepUs int64
 
 	// ValueTraderBandBps enables one value trader per USD spot market that
-	// mean-reverts price to the bootstrap fundamental when the mid deviates
+	// mean-reverts price toward its own opinion of value when the mid deviates
 	// beyond this band. 0 = disabled.
 	ValueTraderBandBps int64
 	// ValueTraderMaxLots caps the value trader position in lots (default 20).
@@ -660,13 +660,14 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		raceArbIDs = append(raceArbIDs, nextClient)
 	}
 
-	// Optional value traders: fundamental anchor for the price level.
+	// Optional value traders. Each holds its own opinion of value; nothing in the
+	// simulation validates that opinion, and only their trading moves the price.
 	var valueTraders []*ValueTrader
 	if cfg.ValueTraderBandBps > 0 {
 		type valueSpec struct {
-			symbol      string
-			fundamental int64
-			lotQty      int64
+			symbol        string
+			believedValue int64
+			lotQty        int64
 		}
 		valueSpecs := []valueSpec{
 			{"ABC/USD", abcBootstrapUSD, targetQtys["ABC/USD"]},
@@ -675,12 +676,12 @@ func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
 		for _, spec := range valueSpecs {
 			gw := connectActor(spotMakerFee, false)
 			vt := NewValueTrader(nextClient, gw, ValueTraderConfig{
-				Symbol:      spec.symbol,
-				Fundamental: spec.fundamental,
-				BandBps:     cfg.ValueTraderBandBps,
-				LotQty:      spec.lotQty,
-				MaxPosition: cfg.ValueTraderMaxLots * spec.lotQty,
-				Interval:    time.Duration(cfg.ValueTraderIntervalMs) * time.Millisecond,
+				Symbol:        spec.symbol,
+				BelievedValue: spec.believedValue,
+				BandBps:       cfg.ValueTraderBandBps,
+				LotQty:        spec.lotQty,
+				MaxPosition:   cfg.ValueTraderMaxLots * spec.lotQty,
+				Interval:      time.Duration(cfg.ValueTraderIntervalMs) * time.Millisecond,
 			})
 			vt.SetTickerFactory(timerFact)
 			valueTraders = append(valueTraders, vt)
