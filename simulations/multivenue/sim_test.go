@@ -1324,3 +1324,35 @@ func TestMakerQuoteSizeIsConfigurableAndReachesTheMakers(t *testing.T) {
 		sim.Close()
 	}
 }
+
+// Impact is a statistical measurement over many parent orders, so the number
+// of execution agents must be configurable: one per venue produced 29 usable
+// metaorders in six simulated hours, which is far too few to separate impact
+// from background volatility.
+func TestMetaorderTraderCountIsConfigurable(t *testing.T) {
+	sim, err := NewSim(2*time.Second, Config{
+		LogDir: t.TempDir(), LogMode: "none", Seed: 91,
+		MetaorderTraderCount: 4,
+		MetaorderTraders: &MetaorderTraderConfig{
+			MinQty: 2_000_000, MaxQty: 200_000_000, ParetoAlpha: 1.3,
+			ChildInterval: time.Second, ParticipationRate: 0.05,
+			MinChildQty: 500_000, RestInterval: 10 * time.Second, MaxDuration: time.Minute,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	defer sim.Close()
+	for _, venue := range sim.Venues {
+		if got := len(venue.MetaorderTraders); got != 4 {
+			t.Fatalf("venue %s execution agents = %d, want 4", venue.ID, got)
+		}
+		seeds := map[int64]struct{}{}
+		for _, trader := range venue.MetaorderTraders {
+			seeds[trader.cfg.Seed] = struct{}{}
+		}
+		if len(seeds) != 4 {
+			t.Fatalf("venue %s execution agents share seeds: %d distinct of 4", venue.ID, len(seeds))
+		}
+	}
+}

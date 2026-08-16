@@ -156,6 +156,10 @@ type Config struct {
 	// sample counts as visibly mispriced in the run summary.
 	MispricingBandBps int64 `json:"mispricing_band_bps"`
 
+	// MetaorderTraderCount is how many execution agents each venue runs.
+	// Impact is a statistical measurement over many parent orders, so a single
+	// agent per venue cannot produce a usable sample in a reasonable run.
+	MetaorderTraderCount int `json:"metaorder_trader_count"`
 	// MetaorderTraders configures execution agents that split large parent
 	// orders. Their signs are independent of the fundamental value, so what
 	// they measure is the mechanical impact of execution rather than a trading
@@ -1125,17 +1129,23 @@ func (s *Sim) addMetaorderTraders(timers *simulation.SimTimerFactory, actorID *u
 	if s.Config.CrossAssetSpotGraph {
 		balances["CDF"] = 1_000 * mvBasePrecision
 	}
+	count := s.Config.MetaorderTraderCount
+	if count <= 0 {
+		count = 1
+	}
 	for venueIndex, venue := range s.Venues {
-		local := *cfg
-		local.Symbol = "ABC/USD"
-		local.BasePrecision = mvBasePrecision
-		local.Seed = flowSeed(s.Config.Seed, venueIndex, 0, 9)
-		_, gw := venue.connectParticipant(venue.Mount, "metaorder_trader_1", balances, 0, fee)
-		*actorID++
-		trader := NewMetaorderTrader(*actorID, gw, venue.ID, local)
-		trader.SetTickerFactory(timers)
-		venue.MetaorderTraders = append(venue.MetaorderTraders, trader)
-		s.Runner.AddActor(trader)
+		for participant := 0; participant < count; participant++ {
+			local := *cfg
+			local.Symbol = "ABC/USD"
+			local.BasePrecision = mvBasePrecision
+			local.Seed = flowSeed(s.Config.Seed, venueIndex, participant, 9)
+			_, gw := venue.connectParticipant(venue.Mount, fmt.Sprintf("metaorder_trader_%d", participant+1), balances, 0, fee)
+			*actorID++
+			trader := NewMetaorderTrader(*actorID, gw, venue.ID, local)
+			trader.SetTickerFactory(timers)
+			venue.MetaorderTraders = append(venue.MetaorderTraders, trader)
+			s.Runner.AddActor(trader)
+		}
 	}
 	return nil
 }
