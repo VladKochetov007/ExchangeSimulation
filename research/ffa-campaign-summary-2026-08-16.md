@@ -16,10 +16,12 @@ relation. The answer this simulator gives, at twelve simulated hours:
   execution, which dominates informed trading, in every opponent mixture
   tested. No strategy's sign reverses against any opponent (FFA-48).
 - **But dominance does reverse in time.** Market makers beat carry
-  arbitrageurs at three and six hours and lose to them at twelve, in the same
-  population with the same seed, because the two book their result in opposite
-  order (FFA-47). No ranking in this campaign is meaningful without its
-  horizon.
+  arbitrageurs at three, six and seven hours and lose to them at nine and
+  twelve, in the same population with the same seed. The cause is the venue's
+  eight-hourly funding settlement rather than any gradual convergence: with
+  funding suppressed the reversal disappears and carry loses at every horizon
+  (FFA-47, corrected). No ranking in this campaign is meaningful without its
+  horizon, and this one is set by a venue parameter.
 - **The ecology is stabilised by congestion.** Per-participant carry returns
   fall roughly as the inverse of density, and total extraction is hump shaped:
   it peaks near 288 participants at about 341,000 US dollars per twelve hours
