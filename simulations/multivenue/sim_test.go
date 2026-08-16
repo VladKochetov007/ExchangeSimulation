@@ -1161,9 +1161,9 @@ func TestConsensusIndexIsRobustToOneRunawayVenue(t *testing.T) {
 	if got := provider.Price("ABC/USD"); got != 0 {
 		t.Fatalf("index without observations = %d, want 0", got)
 	}
-	provider.observeVenueMid("north", 50_000)
-	provider.observeVenueMid("central", 50_100)
-	provider.observeVenueMid("south", 5_000_000)
+	provider.observeVenueMid("ABC/USD", "north", 50_000)
+	provider.observeVenueMid("ABC/USD", "central", 50_100)
+	provider.observeVenueMid("ABC/USD", "south", 5_000_000)
 	if got := provider.Price("ABC/USD"); got != 50_100 {
 		t.Fatalf("consensus = %d, want the median 50100", got)
 	}
@@ -1510,5 +1510,33 @@ func TestMetaorderChildWalksBeyondTheTouchWhenSlippageIsAllowed(t *testing.T) {
 	}
 	if order.Price%(10*mvQuotePrecision) != 0 {
 		t.Fatalf("child price %d is off the tick grid", order.Price)
+	}
+}
+
+// Every quoted market needs a reference of its own. A market that receives no
+// index falls back to its own book midpoint, which reproduces itself and
+// diverges: with the cross-asset books unpublished, a twelve-hour run produced
+// participant results in the tens of billions on a starting capital of about
+// thirty billion.
+func TestEveryQuotedMarketReceivesAnIndex(t *testing.T) {
+	sim, err := NewSim(time.Second, Config{
+		LogDir: t.TempDir(), LogMode: "none", Seed: 91,
+		MakerAnchor: "fundamental", CrossAssetSpotGraph: true,
+	})
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	defer sim.Close()
+
+	for _, symbol := range []string{"ABC/USD", "ABC-PERP", "CDF/USD", "ABC/CDF"} {
+		if price := sim.SpotIndex.Price(symbol); price <= 0 {
+			t.Fatalf("no index published for %s, so its makers quote around their own midpoint", symbol)
+		}
+	}
+	// The cross rate must be the base value expressed in the quote currency,
+	// not the base value itself.
+	base, cross := sim.SpotIndex.Price("ABC/USD"), sim.SpotIndex.Price("ABC/CDF")
+	if cross >= base {
+		t.Fatalf("cross index %d is not expressed in CDF against a base index of %d", cross, base)
 	}
 }

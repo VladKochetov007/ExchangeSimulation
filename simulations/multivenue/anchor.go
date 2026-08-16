@@ -3,6 +3,8 @@ package multivenue
 import (
 	"sort"
 	"sync"
+
+	etypes "exchange_sim/types"
 )
 
 // spotIndexProvider publishes the reference price a venue advertises on its
@@ -19,8 +21,11 @@ type spotIndexProvider struct {
 	// its own it can only mirror spot, and a mirrored perpetual has no basis.
 	symbols map[string]struct{}
 
-	mu        sync.RWMutex
-	venueMids map[string]int64
+	mu sync.RWMutex
+	// venueMids is keyed by symbol and then venue, because every published
+	// symbol needs its own consensus: a market with no reference of its own
+	// falls back to its book midpoint and becomes self-referential.
+	venueMids map[string]map[string]int64
 	value     int64
 }
 
@@ -29,16 +34,19 @@ func newSpotIndexProvider(mode string, symbols ...string) *spotIndexProvider {
 	for _, symbol := range symbols {
 		set[symbol] = struct{}{}
 	}
-	return &spotIndexProvider{mode: mode, symbols: set, venueMids: make(map[string]int64)}
+	return &spotIndexProvider{mode: mode, symbols: set, venueMids: make(map[string]map[string]int64)}
 }
 
-// observeVenueMid records one venue's current midpoint.
-func (p *spotIndexProvider) observeVenueMid(venueID string, mid int64) {
+// observeVenueMid records one venue's current midpoint for a symbol.
+func (p *spotIndexProvider) observeVenueMid(symbol, venueID string, mid int64) {
 	if p == nil || mid <= 0 {
 		return
 	}
 	p.mu.Lock()
-	p.venueMids[venueID] = mid
+	if p.venueMids[symbol] == nil {
+		p.venueMids[symbol] = make(map[string]int64)
+	}
+	p.venueMids[symbol][venueID] = mid
 	p.mu.Unlock()
 }
 
@@ -66,10 +74,10 @@ func (p *spotIndexProvider) Price(symbol string) int64 {
 	defer p.mu.RUnlock()
 	switch p.mode {
 	case "fundamental":
-		return p.value
+		return p.fundamentalFor(symbol)
 	case "consensus":
-		mids := make([]int64, 0, len(p.venueMids))
-		for _, mid := range p.venueMids {
+		mids := make([]int64, 0, len(p.venueMids[symbol]))
+		for _, mid := range p.venueMids[symbol] {
 			if mid > 0 {
 				mids = append(mids, mid)
 			}
@@ -81,6 +89,24 @@ func (p *spotIndexProvider) Price(symbol string) int64 {
 		// the reference the others are quoting around.
 		sort.Slice(mids, func(i, j int) bool { return mids[i] < mids[j] })
 		return mids[len(mids)/2]
+	}
+	return 0
+}
+
+// fundamentalFor converts the exogenous value of the base asset into the units
+// of each published contract. The control freezes CDF against USD, so the
+// cross rate is the base value divided by that fixed rate.
+func (p *spotIndexProvider) fundamentalFor(symbol string) int64 {
+	switch symbol {
+	case "ABC/USD", "ABC-PERP":
+		return p.value
+	case "CDF/USD":
+		return mvCDFBootstrap
+	case "ABC/CDF":
+		if p.value <= 0 {
+			return 0
+		}
+		return etypes.MulDiv(p.value, mvBasePrecision, mvCDFBootstrap)
 	}
 	return 0
 }

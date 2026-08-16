@@ -129,6 +129,11 @@ type Config struct {
 	// how fast it can deploy capital into a basis that mean-reverts.
 	CarryLotQty int64 `json:"carry_lot_qty"`
 
+	// SpotMakerCount is how many market makers quote the main spot pair on each
+	// venue, so the carrying capacity of market making can be measured the same
+	// way as that of any other strategy.
+	SpotMakerCount int `json:"spot_maker_count"`
+
 	// MakerQuoteQty is the size each spot and perpetual maker displays at its
 	// quote. It bounds how fast any taker, including a delta-neutral absorber,
 	// can transfer risk: an immediate-or-cancel order cannot take more than is
@@ -333,6 +338,9 @@ func (c *Config) normalize() error {
 	if c.CarryMaxPosition == 0 {
 		c.CarryMaxPosition = 500 * mvBasePrecision
 	}
+	if c.SpotMakerCount == 0 {
+		c.SpotMakerCount = 2
+	}
 	if c.MakerQuoteQty == 0 {
 		c.MakerQuoteQty = mvBasePrecision / 5
 	}
@@ -451,7 +459,7 @@ func (c *Config) normalize() error {
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 || *c.ValueTraderCount < 0 ||
 		c.ValueTraderEdgeBps < 0 || c.FundamentalLogVolPerStep < 0 || c.StoikovMaxVarianceMultiple <= 0 || c.MispricingBandBps <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 || c.ElasticSupplierCount < 0 || c.ElasticSupplierUnitsPerPercent <= 0 || c.CarryArbitrageurCount < 0 ||
-		c.CarryEntryBps <= 0 || c.CarryExitBps < 0 || c.CarryMaxPosition <= 0 || c.CarryLotQty <= 0 || c.MakerQuoteQty <= 0 || c.LatentLiquidityCount < 0 ||
+		c.CarryEntryBps <= 0 || c.CarryExitBps < 0 || c.CarryMaxPosition <= 0 || c.CarryLotQty <= 0 || c.MakerQuoteQty <= 0 || c.SpotMakerCount < 1 || c.LatentLiquidityCount < 0 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
 		c.StoikovInventoryHorizon <= 0 || c.StoikovVolatilityHalfLife <= 0 || *c.OptionBuyProbability < 0 || *c.OptionBuyProbability > 1 {
@@ -724,7 +732,11 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	fundamental := NewFundamentalValue(cfg.Seed, start, mvBootstrapPrice,
 		int64(cfg.AutomationInterval), mvQuotePrecision, cfg.FundamentalLogVolPerStep)
 	sim := &Sim{Config: cfg, Runner: runner, Fundamental: fundamental,
-		SpotIndex: newSpotIndexProvider(cfg.MakerAnchor, "ABC/USD", "ABC-PERP"), Venues: make([]*Venue, 0, len(cfg.VenueIDs))}
+		SpotIndex: newSpotIndexProvider(cfg.MakerAnchor, "ABC/USD", "ABC-PERP", "CDF/USD", "ABC/CDF"), Venues: make([]*Venue, 0, len(cfg.VenueIDs))}
+	// Seed the reference before the first quote: until the first automation
+	// tick the index would otherwise be empty, leaving makers to fall back to
+	// their own midpoint exactly when the book is thinnest.
+	sim.SpotIndex.observeFundamental(fundamental.Value(start))
 	actorID := uint64(0)
 	for venueIndex, id := range cfg.VenueIDs {
 		venue, err := sim.addVenue(id, venueIndex, clock, timers, &actorID)
@@ -881,6 +893,9 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	indexFeedSymbols := []string(nil)
 	if s.Config.MakerAnchor != "own_mid" {
 		indexFeedSymbols = []string{"ABC/USD", "ABC-PERP"}
+		if s.Config.CrossAssetSpotGraph {
+			indexFeedSymbols = append(indexFeedSymbols, "CDF/USD", "ABC/CDF")
+		}
 	}
 	ex.ConfigureAutomation(exchange.AutomationConfig{
 		IndexProvider:       index,
@@ -913,8 +928,10 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			mark, _, _ := venue.valuationMark("ABC/USD", now, venueRiskMarkStaleness)
 			fundamental := s.Fundamental.Value(now)
 			s.SpotIndex.observeFundamental(fundamental)
-			if mid, ok := venue.Exchange.TwoSidedMidPrice("ABC/USD"); ok {
-				s.SpotIndex.observeVenueMid(venue.ID, mid)
+			for _, symbol := range []string{"ABC/USD", "ABC-PERP", "CDF/USD", "ABC/CDF"} {
+				if mid, ok := venue.Exchange.TwoSidedMidPrice(symbol); ok {
+					s.SpotIndex.observeVenueMid(symbol, venue.ID, mid)
+				}
 			}
 			venue.Mispricing.observe(now, mark, fundamental)
 			venue.logFundamental(now, fundamental, mark)
@@ -978,7 +995,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			IndexWeight:              s.Config.MakerIndexWeight,
 		}
 	}
-	for i := 0; i < 2; i++ {
+	for i := 0; i < s.Config.SpotMakerCount; i++ {
 		maker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC/USD", "ABC/USD", mvBootstrapPrice, mvQuotePrecision, tick))
 		maker.SetTickerFactory(timers)
 		venue.SpotMakers = append(venue.SpotMakers, maker)
