@@ -41,13 +41,15 @@ func main() {
 
 	cfg := multivenue.Config{}
 	if *configPath != "" {
-		raw, err := os.ReadFile(*configPath)
-		if err != nil {
-			log.Fatal(err)
+		raw, readErr := os.ReadFile(*configPath)
+		if readErr != nil {
+			log.Fatal(readErr)
 		}
-		if err := json.Unmarshal(raw, &cfg); err != nil {
-			log.Fatal(err)
+		decoded, decodeErr := multivenue.DecodeConfig(raw)
+		if decodeErr != nil {
+			log.Fatal(decodeErr)
 		}
+		cfg = decoded
 	}
 	cfg.LogDir = *logDir
 	if *seed != 0 {

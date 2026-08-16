@@ -1,6 +1,7 @@
 package multivenue
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -47,11 +48,24 @@ type VenueRule struct {
 // configured actor and venue timers are at least one second, making hour/day
 // experiments feasible without changing their event semantics through tick
 // coalescing.
+// Provenance carries campaign bookkeeping into a run so a log directory can be
+// traced back to the hypothesis it was testing. None of it affects behaviour;
+// it is declared so that strict decoding accepts annotated configurations.
+type Provenance struct {
+	ExperimentID string `json:"experiment_id"`
+	HypothesisID string `json:"hypothesis_id"`
+	Date         string `json:"date"`
+	Status       string `json:"status"`
+	Description  string `json:"description"`
+}
+
 type Config struct {
 	LogDir string `json:"log_dir,omitempty"`
 	// LogMode controls raw venue-event persistence. "full" is the default
 	// evidence mode; "none" retains deterministic in-memory risk telemetry and
 	// greeks.json while avoiding large JSONL output for replicated treatments.
+	Provenance
+
 	LogMode  string   `json:"log_mode"`
 	Seed     int64    `json:"seed"`
 	VenueIDs []string `json:"venue_ids"`
@@ -297,6 +311,19 @@ type Config struct {
 	CrossVenueBaseLatency    time.Duration `json:"cross_venue_base_latency"`
 	CrossVenueArbLotQty      int64         `json:"cross_venue_arb_lot_qty"`
 	CrossVenueArbMaxAttempts int           `json:"cross_venue_arb_max_attempts"`
+}
+
+// DecodeConfig reads a scenario configuration and rejects unknown fields. A
+// config written for a newer binary would otherwise run silently as the
+// default scenario, which is indistinguishable from a control arm.
+func DecodeConfig(raw []byte) (Config, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	cfg := Config{}
+	if err := decoder.Decode(&cfg); err != nil {
+		return Config{}, fmt.Errorf("decode multivenue config: %w", err)
+	}
+	return cfg, nil
 }
 
 func (c *Config) normalize() error {
