@@ -59,18 +59,18 @@ func TestPriorityLaneCanAlsoSaturate(t *testing.T) {
 
 func TestCompletingWorkFreesTheLaneItCameFrom(t *testing.T) {
 	queue := NewAdmissionQueue(AdmissionConfig{PriorityDepth: Depth(1), SecondaryDepth: Depth(1)})
-	queue.Offer(KindPlaceOrder)
+	_, slot := queue.Offer(KindPlaceOrder)
 	if decision, _ := queue.Offer(KindPlaceOrder); decision.Allowed {
 		t.Fatal("secondary lane accepted beyond its depth")
 	}
 
-	queue.Complete(Slot{held: true})
+	queue.Complete(slot)
 	if decision, _ := queue.Offer(KindPlaceOrder); !decision.Allowed {
 		t.Fatalf("completing work did not free the secondary lane: %+v", decision)
 	}
-	// Completing more than was offered must not create capacity.
-	queue.Complete(Slot{held: true})
-	queue.Complete(Slot{held: true})
+	// Redeeming a spent slot must not create capacity.
+	queue.Complete(slot)
+	queue.Complete(slot)
 	queue.Offer(KindPlaceOrder)
 	if decision, _ := queue.Offer(KindPlaceOrder); decision.Allowed {
 		t.Fatal("over-completion manufactured queue capacity")
@@ -100,11 +100,11 @@ func TestGateChargesEveryLimiterAndReportsTheFirstRefusal(t *testing.T) {
 	}, nil)
 
 	for i := 0; i < 2; i++ {
-		if decision := gate.Admit("acct", KindPlaceOrder, 0); !decision.Allowed {
+		if decision, _ := gate.Admit("acct", KindPlaceOrder, 0); !decision.Allowed {
 			t.Fatalf("request %d rejected unexpectedly: %+v", i, decision)
 		}
 	}
-	decision := gate.Admit("acct", KindPlaceOrder, 0)
+	decision, _ := gate.Admit("acct", KindPlaceOrder, 0)
 	if decision.Allowed {
 		t.Fatal("order-count budget did not bind")
 	}

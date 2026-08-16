@@ -1,6 +1,9 @@
 package ratelimit
 
-import "math"
+import (
+	"math"
+	"math/bits"
+)
 
 // Decision is the outcome of one admission check. A rejection carries enough to
 // answer the client honestly: which limit stopped it, and when it could succeed.
@@ -53,6 +56,9 @@ type FixedWindow struct {
 // refreshed. The alternative, computing a window boundary from a zero interval,
 // makes every distinct timestamp its own window and silently removes the limit.
 func NewFixedWindow(name string, budget, interval int64) *FixedWindow {
+	if budget < 0 {
+		budget = 0
+	}
 	return &FixedWindow{
 		name: name, budget: budget, interval: interval,
 		used: make(map[string]int64), windowAt: make(map[string]int64),
@@ -198,10 +204,11 @@ func (b *TokenBucket) accrue(tokens, elapsed int64) int64 {
 		gained = whole * perInterval
 	}
 	if rem := elapsed % b.interval; rem > 0 {
-		if perInterval > 0 && rem > math.MaxInt64/perInterval {
-			return capped
-		}
-		part := rem * perInterval / b.interval
+		// rem is below interval, so rem*perInterval/interval is below
+		// perInterval and always representable. The product alone may not be,
+		// so it is taken in two words: rounding this branch up to a full bucket
+		// would be the largest possible over-grant, not a safe approximation.
+		part := mulDiv(rem, perInterval, b.interval)
 		if gained > math.MaxInt64-part {
 			return capped
 		}
@@ -215,13 +222,6 @@ func (b *TokenBucket) accrue(tokens, elapsed int64) int64 {
 
 func min64(a, b int64) int64 {
 	if a < b {
-		return a
-	}
-	return b
-}
-
-func max64(a, b int64) int64 {
-	if a > b {
 		return a
 	}
 	return b
@@ -243,10 +243,10 @@ func (b *TokenBucket) timeToAccrue(shortfall int64) int64 {
 	}
 	wait := whole * b.interval
 	if remainder > 0 {
-		if remainder > math.MaxInt64/b.interval {
-			return math.MaxInt64
-		}
-		wait += (remainder*b.interval + denominator - 1) / denominator
+		// remainder is below denominator, so the quotient is below interval and
+		// representable even where remainder*interval is not. Rounded up so a
+		// caller obeying the wait is never sent back early.
+		wait += mulDivCeil(remainder, b.interval, denominator)
 	}
 	return wait
 }
@@ -264,6 +264,44 @@ func (w *FixedWindow) windowStart(now int64) int64 {
 		return 0
 	}
 	return now - modFloor(now, w.interval)
+}
+
+// mulDiv computes a*b/divisor exactly, using a double-width product so a
+// quotient that fits is never lost to an intermediate that does not. Callers
+// must know the quotient fits, which is true wherever a < divisor.
+func mulDiv(a, b, divisor int64) int64 {
+	if divisor <= 0 || a <= 0 || b <= 0 {
+		return 0
+	}
+	hi, lo := bits.Mul64(uint64(a), uint64(b))
+	if hi >= uint64(divisor) {
+		// The quotient would overflow; callers avoid this, but never wrap.
+		return math.MaxInt64
+	}
+	quotient, _ := bits.Div64(hi, lo, uint64(divisor))
+	if quotient > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(quotient)
+}
+
+// mulDivCeil is mulDiv rounded up.
+func mulDivCeil(a, b, divisor int64) int64 {
+	if divisor <= 0 || a <= 0 || b <= 0 {
+		return 0
+	}
+	hi, lo := bits.Mul64(uint64(a), uint64(b))
+	if hi >= uint64(divisor) {
+		return math.MaxInt64
+	}
+	quotient, remainder := bits.Div64(hi, lo, uint64(divisor))
+	if remainder > 0 {
+		quotient++
+	}
+	if quotient > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(quotient)
 }
 
 // modFloor is a modulo that floors toward negative infinity, so window

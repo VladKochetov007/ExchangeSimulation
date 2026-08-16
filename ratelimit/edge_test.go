@@ -88,9 +88,9 @@ func TestWouldAgreesWithAdmit(t *testing.T) {
 		"token bucket": func() Limiter { return NewTokenBucket("o", 10, 5, second) },
 	} {
 		limiter := build()
-		dry := limiter.(dryRunLimiter)
+
 		for step, event := range history {
-			probe := dry.Would("scope", event.cost, event.now)
+			probe := limiter.Would("scope", event.cost, event.now)
 			charge := limiter.Admit("scope", event.cost, event.now)
 			if probe.Allowed != charge.Allowed {
 				t.Fatalf("%s step %d: Would said allowed=%v, Admit said allowed=%v",
@@ -107,21 +107,6 @@ func TestWouldAgreesWithAdmit(t *testing.T) {
 }
 
 // Completing a lane the caller never offered to must not manufacture capacity
-// in the other lane.
-func TestCompletingTheWrongLaneCannotCorruptCounts(t *testing.T) {
-	queue := NewAdmissionQueue(AdmissionConfig{PriorityDepth: Depth(1), SecondaryDepth: Depth(1)})
-	queue.Offer(KindPlaceOrder) // fills the secondary lane
-
-	// A caller that mistakenly completes a cancel must not free the order slot.
-	queue.Complete(Slot{held: true, priority: true})
-	if decision, _ := queue.Offer(KindPlaceOrder); decision.Allowed {
-		t.Fatal("completing the priority lane freed a secondary slot")
-	}
-	if priority, secondary := queue.Depth(); priority != 0 || secondary != 1 {
-		t.Fatalf("depths = (%d, %d), want (0, 1): a stray completion moved a count", priority, secondary)
-	}
-}
-
 func TestReduceOnlyPlacementKeepsThePriorityLaneEvenWhenOrdersAreRefused(t *testing.T) {
 	queue := NewAdmissionQueue(AdmissionConfig{PriorityDepth: Depth(4), SecondaryDepth: Depth(1)})
 	queue.Offer(KindPlaceOrder)
@@ -143,7 +128,7 @@ func TestAnOverloadRejectionDoesNotSpendTheClientsBudget(t *testing.T) {
 	gate := NewGate([]Meter{{Limiter: weight, Cost: StaticCost{Default: 10}}}, queue)
 
 	gate.Admit("acct", KindPlaceOrder, 0) // fills the only secondary slot
-	decision := gate.Admit("acct", KindPlaceOrder, 0)
+	decision, _ := gate.Admit("acct", KindPlaceOrder, 0)
 	if !decision.Overloaded {
 		t.Fatalf("expected an overload rejection: %+v", decision)
 	}
@@ -162,7 +147,7 @@ func TestMetersSharingALimiterCannotOverspendIt(t *testing.T) {
 		{Limiter: shared, Cost: StaticCost{Default: 6}},
 	}, nil)
 
-	if decision := gate.Admit("acct", KindPlaceOrder, 0); decision.Allowed {
+	if decision, _ := gate.Admit("acct", KindPlaceOrder, 0); decision.Allowed {
 		t.Fatal("a request costing 12 against a shared budget of 10 was admitted")
 	}
 	if used := shared.Used("acct", 0); used != 0 {

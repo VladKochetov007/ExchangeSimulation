@@ -107,17 +107,16 @@ type AdmissionQueue struct {
 	cfg       AdmissionConfig
 	priority  int
 	secondary int
+	nextID    uint64
+	live      map[uint64]struct{}
 }
 
 func NewAdmissionQueue(cfg AdmissionConfig) *AdmissionQueue {
 	if cfg.RiskReducing == nil {
 		cfg.RiskReducing = RequestKind.RiskReducing
 	}
-	return &AdmissionQueue{cfg: cfg}
+	return &AdmissionQueue{cfg: cfg, live: make(map[uint64]struct{})}
 }
-
-// Unlimited is a convenience for a lane with no bound.
-func Unlimited() *int { return nil }
 
 // Depth sizes a lane explicitly, including zero to close it.
 func Depth(n int) *int { return &n }
@@ -134,6 +133,10 @@ func (q *AdmissionQueue) full(depth *int, occupied int) bool {
 type Slot struct {
 	priority bool
 	held     bool
+	// id makes a slot a receipt for one specific unit of work. Without it a
+	// caller could copy a slot and redeem it twice, manufacturing capacity that
+	// the underflow clamp would hide.
+	id uint64
 }
 
 // Offer asks for a slot in the lane the request belongs to.
@@ -143,21 +146,31 @@ func (q *AdmissionQueue) Offer(kind RequestKind) (Decision, Slot) {
 			return Decision{Limit: "queue_priority", Overloaded: true}, Slot{}
 		}
 		q.priority++
-		return Allow(), Slot{priority: true, held: true}
+		return Allow(), q.issue(true)
 	}
 	if q.full(q.cfg.SecondaryDepth, q.secondary) {
 		return Decision{Limit: "queue_secondary", Overloaded: true}, Slot{}
 	}
 	q.secondary++
-	return Allow(), Slot{held: true}
+	return Allow(), q.issue(false)
 }
 
-// Complete releases a slot once the engine has finished the work. Releasing a
-// slot that was never held does nothing.
+func (q *AdmissionQueue) issue(priority bool) Slot {
+	q.nextID++
+	q.live[q.nextID] = struct{}{}
+	return Slot{priority: priority, held: true, id: q.nextID}
+}
+
+// Complete releases a slot once the engine has finished the work. A slot that
+// was never held, already redeemed, or issued by another queue does nothing.
 func (q *AdmissionQueue) Complete(slot Slot) {
 	if !slot.held {
 		return
 	}
+	if _, outstanding := q.live[slot.id]; !outstanding {
+		return
+	}
+	delete(q.live, slot.id)
 	if slot.priority {
 		if q.priority > 0 {
 			q.priority--
@@ -186,19 +199,23 @@ type Meter struct {
 // Gate composes metered budgets and an optional queue into the single decision
 // a venue makes when a request arrives.
 type Gate struct {
-	meters   []Meter
-	queue    *AdmissionQueue
-	lastSlot Slot
+	meters []Meter
+	queue  Backlog
 }
 
-// Queue exposes the backlog so a caller that admitted through the gate can
-// release the slot it took. Without this the slot would be unreachable.
-func (g *Gate) Queue() *AdmissionQueue { return g.queue }
+// Backlog is the venue's own execution queue. It is an interface so a caller
+// can substitute a different shedding policy, a queue with service times, or a
+// synchronised wrapper, without editing this package.
+type Backlog interface {
+	Offer(RequestKind) (Decision, Slot)
+	Complete(Slot)
+	Depth() (priority, secondary int)
+}
 
-// LastSlot is the slot taken by the most recent successful Admit.
-func (g *Gate) LastSlot() Slot { return g.lastSlot }
+// Queue exposes the backlog so a caller can inspect its depth.
+func (g *Gate) Queue() Backlog { return g.queue }
 
-func NewGate(meters []Meter, queue *AdmissionQueue) *Gate {
+func NewGate(meters []Meter, queue Backlog) *Gate {
 	return &Gate{meters: meters, queue: queue}
 }
 
@@ -210,7 +227,7 @@ func NewGate(meters []Meter, queue *AdmissionQueue) *Gate {
 // neither exceeds alone. The venue's own queue is checked before any budget is
 // charged: an overloaded engine never saw the request, so the client should not
 // pay for it.
-func (g *Gate) Admit(scope string, kind RequestKind, now int64) Decision {
+func (g *Gate) Admit(scope string, kind RequestKind, now int64) (Decision, Slot) {
 	type charge struct {
 		limiter Limiter
 		cost    int64
@@ -218,9 +235,12 @@ func (g *Gate) Admit(scope string, kind RequestKind, now int64) Decision {
 	charges := make([]charge, 0, len(g.meters))
 	for _, meter := range g.meters {
 		cost := meter.Cost.Cost(kind)
+		// Deduped by name rather than by interface equality: a limiter may be a
+		// value type holding a map, which is legal, satisfies the interface,
+		// and would panic under ==.
 		existing := -1
 		for i := range charges {
-			if charges[i].limiter == meter.Limiter {
+			if charges[i].limiter.Name() == meter.Limiter.Name() {
 				existing = i
 				break
 			}
@@ -233,33 +253,28 @@ func (g *Gate) Admit(scope string, kind RequestKind, now int64) Decision {
 	}
 
 	for _, c := range charges {
-		if decision := g.probe(c.limiter, scope, c.cost, now); !decision.Allowed {
-			return decision
+		if decision := c.limiter.Would(scope, c.cost, now); !decision.Allowed {
+			return decision, Slot{}
 		}
 	}
+	slot := Slot{}
 	if g.queue != nil {
-		decision, slot := g.queue.Offer(kind)
+		decision, issued := g.queue.Offer(kind)
 		if !decision.Allowed {
-			return decision
+			return decision, Slot{}
 		}
-		g.lastSlot = slot
+		slot = issued
 	}
 	for _, c := range charges {
-		c.limiter.Admit(scope, c.cost, now)
+		// A limiter whose Would disagreed with its Admit has broken the
+		// contract. Surface it rather than reporting success for a request a
+		// budget refused, and give back the slot it would otherwise strand.
+		if decision := c.limiter.Admit(scope, c.cost, now); !decision.Allowed {
+			if g.queue != nil {
+				g.queue.Complete(slot)
+			}
+			return decision, Slot{}
+		}
 	}
-	return Allow()
-}
-
-// probe asks a limiter whether a cost would fit without charging it, so a
-// request refused by one budget does not consume another.
-func (g *Gate) probe(limiter Limiter, scope string, cost, now int64) Decision {
-	if dry, ok := limiter.(dryRunLimiter); ok {
-		return dry.Would(scope, cost, now)
-	}
-	return limiter.Admit(scope, cost, now)
-}
-
-// dryRunLimiter is implemented by limiters that can answer without charging.
-type dryRunLimiter interface {
-	Would(scope string, cost, now int64) Decision
+	return Allow(), slot
 }

@@ -86,7 +86,7 @@ func TestACustomLimiterIsChargedExactlyOnce(t *testing.T) {
 	limiter := &countingLimiter{name: "custom", budget: 100}
 	gate := NewGate([]Meter{{Limiter: limiter, Cost: StaticCost{Default: 10}}}, nil)
 
-	if decision := gate.Admit("acct", KindPlaceOrder, 0); !decision.Allowed {
+	if decision, _ := gate.Admit("acct", KindPlaceOrder, 0); !decision.Allowed {
 		t.Fatalf("custom limiter rejected a request inside its budget: %+v", decision)
 	}
 	if limiter.charges != 1 {
@@ -105,7 +105,7 @@ func TestGateWithAQueueRefusesOnOverloadWithoutCharging(t *testing.T) {
 	gate := NewGate([]Meter{{Limiter: weight, Cost: StaticCost{Default: 10}}}, queue)
 
 	gate.Admit("acct", KindPlaceOrder, 0)
-	decision := gate.Admit("acct", KindPlaceOrder, 0)
+	decision, _ := gate.Admit("acct", KindPlaceOrder, 0)
 	if !decision.Overloaded {
 		t.Fatalf("expected overload: %+v", decision)
 	}
@@ -113,7 +113,7 @@ func TestGateWithAQueueRefusesOnOverloadWithoutCharging(t *testing.T) {
 		t.Fatalf("weight used = %d, want 10", used)
 	}
 	// And a cancel still gets through while the order lane is saturated.
-	if decision := gate.Admit("acct", KindCancelOrder, 0); !decision.Allowed {
+	if decision, _ := gate.Admit("acct", KindCancelOrder, 0); !decision.Allowed {
 		t.Fatalf("cancel refused while only the order lane was full: %+v", decision)
 	}
 }
@@ -125,17 +125,17 @@ func TestPublishedSchemeLetsAThrottledClientStillCancel(t *testing.T) {
 	now := int64(0)
 	// Exhaust the ten-second order budget.
 	for i := 0; i < 100; i++ {
-		if decision := gate.Admit("acct", KindPlaceOrder, now); !decision.Allowed {
+		if decision, _ := gate.Admit("acct", KindPlaceOrder, now); !decision.Allowed {
 			t.Fatalf("placement %d refused before the budget was spent: %+v", i, decision)
 		}
 	}
-	if decision := gate.Admit("acct", KindPlaceOrder, now); decision.Allowed {
+	if decision, _ := gate.Admit("acct", KindPlaceOrder, now); decision.Allowed {
 		t.Fatal("order budget did not bind")
 	}
-	if decision := gate.Admit("acct", KindCancelOrder, now); !decision.Allowed {
+	if decision, _ := gate.Admit("acct", KindCancelOrder, now); !decision.Allowed {
 		t.Fatalf("a client throttled on new orders could not cancel: %+v", decision)
 	}
-	if decision := gate.Admit("acct", KindPlaceReduceOnly, now); decision.Allowed {
+	if decision, _ := gate.Admit("acct", KindPlaceReduceOnly, now); decision.Allowed {
 		t.Fatal("reduce-only placements should still count against the order budget")
 	}
 }
@@ -176,7 +176,7 @@ func TestImpossibleSurvivesTheGate(t *testing.T) {
 	gate := NewGate([]Meter{
 		{Limiter: NewFixedWindow("weight", 5, minute), Cost: StaticCost{Default: 50}},
 	}, nil)
-	decision := gate.Admit("acct", KindPlaceOrder, 0)
+	decision, _ := gate.Admit("acct", KindPlaceOrder, 0)
 	if decision.Allowed || !decision.Impossible {
 		t.Fatalf("a request larger than the budget did not surface as impossible: %+v", decision)
 	}
@@ -193,8 +193,8 @@ func TestDecisionsAreReproducible(t *testing.T) {
 	for step := 0; step < 500; step++ {
 		kind := kinds[step%len(kinds)]
 		now := int64(step) * int64(time.Millisecond)
-		a := first.Admit("acct", kind, now)
-		b := second.Admit("acct", kind, now)
+		a, _ := first.Admit("acct", kind, now)
+		b, _ := second.Admit("acct", kind, now)
 		if a != b {
 			t.Fatalf("step %d: %+v vs %+v", step, a, b)
 		}
