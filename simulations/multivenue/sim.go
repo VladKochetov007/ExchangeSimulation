@@ -195,6 +195,12 @@ type Config struct {
 	// SpotMakerCount is how many market makers quote the main spot pair on each
 	// venue, so the carrying capacity of market making can be measured the same
 	// way as that of any other strategy.
+	// DegradedIndex makes the published index an imperfect observation. Without
+	// it the feed is a zero-lag, noise-free channel to the exogenous
+	// fundamental, so any actor quoting on it directly holds perfect
+	// information.
+	DegradedIndex *DegradedIndexConfig `json:"degraded_index"`
+
 	// BootstrapDepthCount rests passive ladders that never reprice, so a run can
 	// ask whether takers fail for lack of depth or for lack of depth at their
 	// scheduled instant. BootstrapDepth.Withdraw retires the scaffold mid-run.
@@ -1020,6 +1026,10 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	// The venue advertises the scenario's reference price while still marking
 	// its own derivatives from its own book. With own_mid anchoring there is
 	// nothing to advertise: the makers already observe the book directly.
+	var indexFeed PriceSource = s.SpotIndex
+	if s.Config.DegradedIndex != nil {
+		indexFeed = newDegradedIndex(s.SpotIndex, *s.Config.DegradedIndex)
+	}
 	indexFeedSymbols := []string(nil)
 	if s.Config.MakerAnchor != "own_mid" {
 		indexFeedSymbols = []string{"ABC/USD", "ABC-PERP"}
@@ -1030,7 +1040,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	ex.ConfigureAutomation(exchange.AutomationConfig{
 		IndexProvider:       index,
 		IndexFeedSymbols:    indexFeedSymbols,
-		IndexFeedProvider:   s.SpotIndex,
+		IndexFeedProvider:   indexFeed,
 		PriceUpdateInterval: s.Config.AutomationInterval,
 		ListingPolicies: []exchange.ListingPolicy{
 			&instrument.DatedFuturesLister{Underlying: "ABC/USD", Spec: spec, TenorsNano: []int64{s.Config.ShortFutureTenor.Nanoseconds(), s.Config.LongFutureTenor.Nanoseconds()}},
