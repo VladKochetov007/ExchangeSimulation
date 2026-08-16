@@ -181,6 +181,12 @@ type Config struct {
 	// SpotMakerCount is how many market makers quote the main spot pair on each
 	// venue, so the carrying capacity of market making can be measured the same
 	// way as that of any other strategy.
+	// BootstrapDepthCount rests passive ladders that never reprice, so a run can
+	// ask whether takers fail for lack of depth or for lack of depth at their
+	// scheduled instant. BootstrapDepth.Withdraw retires the scaffold mid-run.
+	BootstrapDepthCount int                   `json:"bootstrap_depth_count"`
+	BootstrapDepth      *BootstrapDepthConfig `json:"bootstrap_depth"`
+
 	// SpotMakerSubmitBeforeCancel makes the spot makers replace quotes without
 	// emptying the book. Cancel-then-replace leaves both sides empty for the
 	// rest of the phase in nearly every step.
@@ -566,6 +572,7 @@ type Venue struct {
 	FuturesMakers        []*derivsim.FuturesMarketMaker
 	OptionDealer         *derivsim.OptionMarketMaker
 	OptionDealers        []*derivsim.OptionMarketMaker
+	BootstrapDepths      []*BootstrapDepth
 	DatedCarryArbs       []*derivsim.CashCarryArb
 	ParityArbs           []*derivsim.ParityArb
 	OptionDealerClientID uint64
@@ -836,6 +843,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		runner.AddActor(venue.PerpMaker)
 		for _, maker := range venue.FuturesMakers {
 			runner.AddActor(maker)
+		}
+		for _, ladder := range venue.BootstrapDepths {
+			runner.AddActor(ladder)
 		}
 		for _, desk := range venue.DatedCarryArbs {
 			runner.AddActor(desk)
@@ -1168,6 +1178,24 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		venue.OptionFlows = append(venue.OptionFlows, flow)
 	}
 	venue.OptionFlow = venue.OptionFlows[0]
+
+	depthBalances := map[string]int64{"ABC": 200_000 * mvBasePrecision, "USD": 20_000_000_000 * mvQuotePrecision}
+	for participant := 0; participant < s.Config.BootstrapDepthCount; participant++ {
+		cfg := BootstrapDepthConfig{Levels: 10, QtyPerLevel: mvBasePrecision, SpacingBps: 5}
+		if s.Config.BootstrapDepth != nil {
+			cfg = *s.Config.BootstrapDepth
+		}
+		if cfg.Symbol == "" {
+			cfg.Symbol = "ABC/USD"
+		}
+		if cfg.Interval <= 0 {
+			cfg.Interval = s.Config.QuoteInterval
+		}
+		cfg.TickSize = tick
+		ladder := NewBootstrapDepth(nextActor(), connect(fmt.Sprintf("bootstrap_depth_%d", participant+1), depthBalances, 0, zeroFee), cfg)
+		ladder.SetTickerFactory(timers)
+		venue.BootstrapDepths = append(venue.BootstrapDepths, ladder)
+	}
 
 	datedCarryInterval := s.Config.DatedCarryCheckInterval
 	if datedCarryInterval <= 0 {
