@@ -67,6 +67,33 @@ flow around minus 105,000, spot makers around minus 50,000, and the horizon
 reversal unchanged at 9,318 against minus 5,035 at three hours and minus 44,687
 against 30,744 at twelve (E-113).
 
+## The transfer this market runs on
+
+The largest flows in the ecology are one chain, measured at every link:
+
+**perpetual maker's inventory skew -> funding rate -> carry participants ->
+extraction from spot makers**
+
+- The perpetual maker is persistently short, because it absorbs one-sided
+  derivative flow, and prices that risk with a skew. The resulting premium is
+  `skew * min(|inventory|/limit, 1) / indexWeight`, verified at four anchor
+  weights within half a basis point and in both the saturated and proportional
+  inventory regimes (FFA-55).
+- That premium sets the funding rate. Carry participants collect it: 44,054 US
+  dollars per member over twelve hours at the default settings.
+- Their net result is that funding minus a persistent execution and mark loss.
+  Suppressing funding leaves them with exactly that loss, minus 12,746 per
+  member against minus 12,821 predicted, while trading the same basis and the
+  same number of fills (FFA-59).
+- The spot makers pay. They lose 61,805 per member while carry is profitable
+  and earn 27,251 when funding is suppressed, or 2,850 when only the perpetual
+  maker's risk budget is loosened (FFA-57).
+
+So "market making is unprofitable here" is not a property of market making. It
+is the other end of this transfer, and it reverses when the transfer is turned
+off. Carry arbitrage is likewise not an arbitrage: it is a funding carry
+financed by an execution loss.
+
 ## Literature validation
 
 | regularity | result |
