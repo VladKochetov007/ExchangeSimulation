@@ -1878,3 +1878,37 @@ func exchangeGreekRisk(venue *Venue, account etypes.MarkedAccountSnapshot, phase
 	profile.NetDelta = profile.OptionDelta + profile.HedgeDelta
 	return profile, positions, nil
 }
+
+// VenueLedger reports the exchange's own balances. Without it a report cannot
+// verify conservation: a bankrupt participant's negative balance is zeroed and
+// charged to the insurance fund, which writes off their debt and therefore
+// raises the population's summed result above the fees it paid.
+type VenueLedger struct {
+	VenueID       string           `json:"venue_id"`
+	FeeRevenue    map[string]int64 `json:"fee_revenue"`
+	InsuranceFund map[string]int64 `json:"insurance_fund"`
+}
+
+// CaptureVenueLedgers snapshots every venue's own balances.
+func (s *Sim) CaptureVenueLedgers() []VenueLedger {
+	ledgers := make([]VenueLedger, 0, len(s.Venues))
+	for _, venue := range s.Venues {
+		balance := venue.Exchange.ExchangeBalance
+		if balance == nil {
+			continue
+		}
+		ledger := VenueLedger{
+			VenueID:       venue.ID,
+			FeeRevenue:    make(map[string]int64, len(balance.FeeRevenue)),
+			InsuranceFund: make(map[string]int64, len(balance.InsuranceFund)),
+		}
+		for asset, amount := range balance.FeeRevenue {
+			ledger.FeeRevenue[asset] = amount
+		}
+		for asset, amount := range balance.InsuranceFund {
+			ledger.InsuranceFund[asset] = amount
+		}
+		ledgers = append(ledgers, ledger)
+	}
+	return ledgers
+}

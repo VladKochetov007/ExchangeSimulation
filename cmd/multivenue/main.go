@@ -28,6 +28,7 @@ type greekOutput struct {
 	RouterReports    []multivenue.CrossVenueArbReport          `json:"router_reports,omitempty"`
 	InitialAccounts  []multivenue.ParticipantAccountSnapshot   `json:"initial_accounts,omitempty"`
 	TerminalAccounts []multivenue.ParticipantAccountSnapshot   `json:"terminal_accounts,omitempty"`
+	VenueLedgers     []multivenue.VenueLedger                  `json:"venue_ledgers,omitempty"`
 	Caveats          []string                                  `json:"caveats"`
 }
 
@@ -108,6 +109,7 @@ func main() {
 	}
 	output.InitialAccounts = append([]multivenue.ParticipantAccountSnapshot(nil), sim.InitialAccounts...)
 	output.TerminalAccounts = append([]multivenue.ParticipantAccountSnapshot(nil), sim.TerminalAccounts...)
+	output.VenueLedgers = sim.CaptureVenueLedgers()
 	for _, router := range sim.Routers {
 		output.RouterReports = append(output.RouterReports, router.Report())
 	}

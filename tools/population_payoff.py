@@ -58,11 +58,33 @@ def main() -> None:
         members[group] += 1
 
     total = sum(active.values())
+
+    # A bankrupt participant's negative balance is zeroed and charged to the
+    # insurance fund, which writes off their debt. The population's summed
+    # result therefore equals the fees it paid only when no one goes bankrupt;
+    # otherwise it is raised by whatever the fund absorbed.
+    fund_absorbed = 0.0
+    fee_revenue = 0.0
+    for ledger in report.get("venue_ledgers") or []:
+        for asset, amount in (ledger.get("insurance_fund") or {}).items():
+            if asset in PRECISION:
+                # The fund goes negative as it absorbs bankrupt debt, so what it
+                # paid out is the negation of its balance.
+                fund_absorbed -= amount / PRECISION[asset]
+        for asset, amount in (ledger.get("fee_revenue") or {}).items():
+            if asset in PRECISION:
+                fee_revenue += amount / PRECISION[asset]
     print(f"{'participant class':<26}{'active result (USD)':>22}{'members':>9}{'per member':>14}")
     for group, value in sorted(active.items(), key=lambda item: -item[1]):
         print(f"{group:<26}{value:>22,.2f}{members[group]:>9}{value / members[group]:>14,.2f}")
     print(f"{'':<26}{'-' * 22:>22}")
-    print(f"{'sum (fees to the venue)':<26}{total:>22,.2f}")
+    print(f"{'population sum':<26}{total:>22,.2f}")
+    if report.get("venue_ledgers"):
+        print(f"{'venue fee revenue':<26}{fee_revenue:>22,.2f}")
+        print(f"{'insurance fund paid out':<26}{fund_absorbed:>22,.2f}")
+        print(f"{'residual (want ~0)':<26}{total + fee_revenue - fund_absorbed:>22,.2f}")
+    else:
+        print("  (no venue_ledgers in report; conservation cannot be checked)")
 
 
 if __name__ == "__main__":
