@@ -2,6 +2,7 @@ package multivenue
 
 import (
 	"context"
+	"math"
 	"math/rand"
 	"time"
 
@@ -45,6 +46,18 @@ type LatentLiquidityConfig struct {
 	// trickle: the supply the square-root derivation relies on is the whole
 	// crossed region reacting, not one participant per tick.
 	ConversionsPerTick int `json:"conversions_per_tick"`
+	// RevealBps is the distance from the midpoint within which an intention
+	// posts a resting order at its reservation price.
+	//
+	// This is the difference between latent demand and latent liquidity. An
+	// intention that waits until its reservation price has crossed the market
+	// arrives as demand and consumes the book. An intention revealed while it
+	// is still near but not through the price becomes the supply a large order
+	// trades into, which is the density the square-root derivation integrates
+	// over. Zero keeps the crossing behaviour.
+	RevealBps float64 `json:"reveal_bps"`
+	// RevealsPerTick bounds how many orders are posted or pulled per interval.
+	RevealsPerTick int `json:"reveals_per_tick"`
 	// PostAsLimit makes a converted intention rest at its reservation price
 	// instead of crossing the spread. This is the distinction between latent
 	// demand and latent liquidity: a crossing intention consumes the book,
@@ -59,6 +72,9 @@ type LatentLiquidityConfig struct {
 type latentIntention struct {
 	buy         bool
 	reservation float64
+	// orderID is non-zero once the intention is resting in the book.
+	orderID   uint64
+	requestID uint64
 }
 
 // LatentLiquidity converts diffusing reservation prices into marketable orders.
@@ -105,12 +121,40 @@ func (l *LatentLiquidity) HandleEvent(_ context.Context, evt *actor.Event) {
 		if len(e.Snapshot.Asks) > 0 {
 			l.ask, l.askQty = e.Snapshot.Asks[0].Price, e.Snapshot.Asks[0].VisibleQty
 		}
-	case actor.EventOrderPartialFill, actor.EventOrderFilled:
-		if evt.Data.(actor.OrderFillEvent).IsFull {
-			l.pending = false
+	case actor.EventOrderAccepted:
+		e := evt.Data.(actor.OrderAcceptedEvent)
+		for index := range l.intentions {
+			if l.intentions[index].requestID == e.RequestID {
+				l.intentions[index].orderID = e.OrderID
+				return
+			}
 		}
-	case actor.EventOrderCancelled, actor.EventOrderRejected:
+	case actor.EventOrderPartialFill, actor.EventOrderFilled:
+		e := evt.Data.(actor.OrderFillEvent)
+		if e.IsFull {
+			l.pending = false
+			// A filled intention has done what it wanted and leaves the
+			// population; the deposit process replaces it.
+			l.dropByOrderID(e.OrderID)
+		}
+	case actor.EventOrderCancelled:
 		l.pending = false
+		e := evt.Data.(actor.OrderCancelledEvent)
+		for index := range l.intentions {
+			if l.intentions[index].orderID == e.OrderID {
+				l.intentions[index].orderID, l.intentions[index].requestID = 0, 0
+				return
+			}
+		}
+	case actor.EventOrderRejected:
+		l.pending = false
+		e := evt.Data.(actor.OrderRejectedEvent)
+		for index := range l.intentions {
+			if l.intentions[index].requestID == e.RequestID {
+				l.intentions[index].requestID = 0
+				return
+			}
+		}
 	}
 }
 
@@ -126,7 +170,74 @@ func (l *LatentLiquidity) onTick(time.Time) {
 	mid := float64(l.bid+l.ask) / 2
 	l.evolve(mid)
 	l.deposit(mid)
+	if l.cfg.RevealBps > 0 {
+		l.reveal(mid)
+		return
+	}
 	l.convert()
+}
+
+// dropByOrderID removes an intention whose resting order has been filled.
+func (l *LatentLiquidity) dropByOrderID(orderID uint64) {
+	for index := range l.intentions {
+		if l.intentions[index].orderID == orderID {
+			l.intentions = append(l.intentions[:index], l.intentions[index+1:]...)
+			l.converted++
+			return
+		}
+	}
+}
+
+// reveal posts resting orders for intentions near the price and pulls them
+// when their reservation price drifts away, so the visible book tracks the
+// latent density around the midpoint.
+func (l *LatentLiquidity) reveal(mid float64) {
+	band := mid * l.cfg.RevealBps / 10_000
+	budget := l.cfg.RevealsPerTick
+	if budget <= 0 {
+		budget = 10
+	}
+	for index := range l.intentions {
+		if budget <= 0 {
+			return
+		}
+		intention := &l.intentions[index]
+		near := math.Abs(intention.reservation-mid) <= band
+		switch {
+		case near && intention.orderID == 0 && intention.requestID == 0:
+			if l.post(intention) {
+				budget--
+			}
+		case !near && intention.orderID != 0:
+			l.CancelOrder(intention.orderID)
+			intention.orderID, intention.requestID = 0, 0
+			budget--
+		}
+	}
+}
+
+// post rests one intention at its reservation price, on the side that does not
+// cross the market.
+func (l *LatentLiquidity) post(intention *latentIntention) bool {
+	price := int64(intention.reservation)
+	tick := l.cfg.TickSize
+	side := exchange.Buy
+	if !intention.buy {
+		side = exchange.Sell
+	}
+	if tick > 0 {
+		if side == exchange.Buy {
+			price = price / tick * tick
+		} else {
+			price = (price + tick - 1) / tick * tick
+		}
+	}
+	// Never cross: a revealed intention is liquidity, not demand.
+	if price <= 0 || (side == exchange.Buy && price >= l.ask) || (side == exchange.Sell && price <= l.bid) {
+		return false
+	}
+	intention.requestID = l.SubmitOrder(l.cfg.Symbol, side, exchange.LimitOrder, price, l.cfg.IntentionQty)
+	return true
 }
 
 // evolve diffuses every reservation price and abandons some intentions. The

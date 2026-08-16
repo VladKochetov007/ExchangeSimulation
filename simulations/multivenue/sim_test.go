@@ -1411,3 +1411,56 @@ func TestLatentLiquidityAccumulatesDiffusesAndConvertsOnCrossing(t *testing.T) {
 		t.Fatalf("converted order price %d is off the tick grid", order.Price)
 	}
 }
+
+// A revealed intention must rest as liquidity rather than cross, and must be
+// pulled when its reservation price drifts away from the market. That
+// distinction is the whole point of the reveal mode: an intention that crosses
+// is demand, one that rests is the supply a large order trades into.
+func TestLatentIntentionsRevealAsRestingLiquidity(t *testing.T) {
+	gw := newStoikovStubGateway()
+	latent := NewLatentLiquidity(1, gw, LatentLiquidityConfig{
+		Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: 10 * mvQuotePrecision,
+		Interval: time.Second, DepositsPerTick: 6, CancelProbability: 0,
+		DiffusionBps: 0, SpreadBps: 50, IntentionQty: mvBasePrecision / 10,
+		MaxIntentions: 50, RevealBps: 40, RevealsPerTick: 10, Seed: 3,
+	})
+	now := time.Unix(0, 0)
+	latent.onTick(now)
+
+	feed := func(bid, ask int64) {
+		latent.HandleEvent(context.Background(), &actor.Event{
+			Type: actor.EventBookSnapshot,
+			Data: actor.BookSnapshotEvent{Symbol: "ABC/USD", Timestamp: now.UnixNano(),
+				Snapshot: &exchange.BookSnapshot{
+					Bids: []etypes.PriceLevel{{Price: bid, VisibleQty: mvBasePrecision}},
+					Asks: []etypes.PriceLevel{{Price: ask, VisibleQty: mvBasePrecision}},
+				}},
+		})
+	}
+
+	feed(50_000*mvQuotePrecision, 50_010*mvQuotePrecision)
+	latent.onTick(now)
+	latent.onTick(now)
+
+	posted := 0
+	for _, request := range gw.requests {
+		order := request.OrderReq
+		if order == nil {
+			continue
+		}
+		posted++
+		if order.TimeInForce != exchange.GTC {
+			t.Fatalf("revealed intention did not rest: %+v", order)
+		}
+		// It must be on the passive side of the market, never marketable.
+		if order.Side == exchange.Buy && order.Price >= 50_010*mvQuotePrecision {
+			t.Fatalf("revealed buy crosses the ask: %+v", order)
+		}
+		if order.Side == exchange.Sell && order.Price <= 50_000*mvQuotePrecision {
+			t.Fatalf("revealed sell crosses the bid: %+v", order)
+		}
+	}
+	if posted == 0 {
+		t.Fatal("no intention was revealed near the price")
+	}
+}
