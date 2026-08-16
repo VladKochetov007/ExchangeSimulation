@@ -133,3 +133,39 @@ func TestReduceOnlyPlacementKeepsThePriorityLaneEvenWhenOrdersAreRefused(t *test
 		t.Fatalf("a reduce-only placement was refused while only new risk was blocked: %+v", decision)
 	}
 }
+
+// The queue is the venue's own backlog, not the client's budget. A request
+// refused because the engine is saturated must not also spend the client's
+// weight: it never reached the engine, and the client did nothing wrong.
+func TestAnOverloadRejectionDoesNotSpendTheClientsBudget(t *testing.T) {
+	weight := NewFixedWindow("weight", 100, minute)
+	queue := NewAdmissionQueue(AdmissionConfig{SecondaryDepth: 1})
+	gate := NewGate([]Meter{{Limiter: weight, Cost: StaticCost{DefaultCost: 10}}}, queue)
+
+	gate.Admit("acct", KindPlaceOrder, 0) // fills the only secondary slot
+	decision := gate.Admit("acct", KindPlaceOrder, 0)
+	if !decision.Overloaded {
+		t.Fatalf("expected an overload rejection: %+v", decision)
+	}
+	if used := weight.Used("acct", 0); used != 10 {
+		t.Fatalf("weight used = %d, want 10: the overloaded request was charged anyway", used)
+	}
+}
+
+// Two meters may share one limiter, which is a reasonable composition: a venue
+// can charge one weight budget different amounts for different request kinds.
+// Probing them independently would let the pair overspend the shared budget.
+func TestMetersSharingALimiterCannotOverspendIt(t *testing.T) {
+	shared := NewFixedWindow("weight", 10, minute)
+	gate := NewGate([]Meter{
+		{Limiter: shared, Cost: StaticCost{DefaultCost: 6}},
+		{Limiter: shared, Cost: StaticCost{DefaultCost: 6}},
+	}, nil)
+
+	if decision := gate.Admit("acct", KindPlaceOrder, 0); decision.Allowed {
+		t.Fatal("a request costing 12 against a shared budget of 10 was admitted")
+	}
+	if used := shared.Used("acct", 0); used != 0 {
+		t.Fatalf("weight used = %d, want 0: a refused request was charged", used)
+	}
+}

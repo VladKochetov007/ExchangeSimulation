@@ -157,29 +157,53 @@ func NewGate(meters []Meter, queue *AdmissionQueue) *Gate {
 }
 
 // Admit charges every budget and takes a queue slot, or reports the first
-// refusal. Budgets are checked before they are charged, so a request rejected
-// by a later budget does not consume an earlier one: a client refused for
-// exceeding its order count should not also lose the weight.
+// refusal without charging anything.
+//
+// Costs are summed per limiter before probing, because two meters may share one
+// limiter and probing them separately would let the pair overspend a budget
+// neither exceeds alone. The venue's own queue is checked before any budget is
+// charged: an overloaded engine never saw the request, so the client should not
+// pay for it.
 func (g *Gate) Admit(scope string, kind RequestKind, now int64) Decision {
+	type charge struct {
+		limiter Limiter
+		cost    int64
+	}
+	charges := make([]charge, 0, len(g.meters))
 	for _, meter := range g.meters {
-		if decision := g.probe(meter.Limiter, scope, meter.Cost.Cost(kind), now); !decision.Allowed {
+		cost := meter.Cost.Cost(kind)
+		existing := -1
+		for i := range charges {
+			if charges[i].limiter == meter.Limiter {
+				existing = i
+				break
+			}
+		}
+		if existing >= 0 {
+			charges[existing].cost += cost
+			continue
+		}
+		charges = append(charges, charge{limiter: meter.Limiter, cost: cost})
+	}
+
+	for _, c := range charges {
+		if decision := g.probe(c.limiter, scope, c.cost, now); !decision.Allowed {
 			return decision
 		}
-	}
-	for _, meter := range g.meters {
-		meter.Limiter.Admit(scope, meter.Cost.Cost(kind), now)
 	}
 	if g.queue != nil {
 		if decision := g.queue.Offer(kind); !decision.Allowed {
 			return decision
 		}
 	}
+	for _, c := range charges {
+		c.limiter.Admit(scope, c.cost, now)
+	}
 	return Allow()
 }
 
-// probe asks a limiter whether a cost would fit without charging it. Limiters
-// expose only Admit, so this is done by charging zero and comparing headroom
-// where the limiter supports it, and otherwise by a dry-run type assertion.
+// probe asks a limiter whether a cost would fit without charging it, so a
+// request refused by one budget does not consume another.
 func (g *Gate) probe(limiter Limiter, scope string, cost, now int64) Decision {
 	if dry, ok := limiter.(dryRunLimiter); ok {
 		return dry.Would(scope, cost, now)
