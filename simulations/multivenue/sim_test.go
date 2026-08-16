@@ -1464,3 +1464,51 @@ func TestLatentIntentionsRevealAsRestingLiquidity(t *testing.T) {
 		t.Fatal("no intention was revealed near the price")
 	}
 }
+
+// A child order priced through the touch must be able to take more than the
+// size displayed at the best price. Capping it at the touch made realised
+// participation a property of the makers' quote size rather than of the
+// configured rate, which stopped participation being a treatment at all.
+func TestMetaorderChildWalksBeyondTheTouchWhenSlippageIsAllowed(t *testing.T) {
+	build := func(slippageBps int64) *MetaorderTrader {
+		trader := &MetaorderTrader{cfg: MetaorderTraderConfig{
+			Symbol: "ABC/USD", BasePrecision: mvBasePrecision, TickSize: 10 * mvQuotePrecision,
+			MinChildQty: 5 * mvBasePrecision, MaxSlippageBps: slippageBps,
+		}}
+		trader.BaseActor = actor.NewBaseActor(1, newStoikovStubGateway())
+		trader.SetHandler(trader)
+		trader.active, trader.side = true, exchange.Buy
+		trader.parentQty = 100 * mvBasePrecision
+		// Only a fifth of a unit is displayed at the best price.
+		trader.bestAsk, trader.askQty = 50_000*mvQuotePrecision, mvBasePrecision/5
+		trader.bestBid, trader.bidQty = 49_990*mvQuotePrecision, mvBasePrecision/5
+		return trader
+	}
+
+	capped := build(0)
+	capped.executeChild(0)
+	cappedGw := capped.Gateway().(*stoikovStubGateway)
+	if len(cappedGw.requests) == 0 {
+		t.Fatal("no child submitted without slippage")
+	}
+	if got := cappedGw.requests[0].OrderReq.Qty; got != mvBasePrecision/5 {
+		t.Fatalf("without slippage the child took %d, want the displayed %d", got, mvBasePrecision/5)
+	}
+
+	walking := build(30)
+	walking.executeChild(0)
+	walkingGw := walking.Gateway().(*stoikovStubGateway)
+	if len(walkingGw.requests) == 0 {
+		t.Fatal("no child submitted with slippage")
+	}
+	order := walkingGw.requests[0].OrderReq
+	if order.Qty != 5*mvBasePrecision {
+		t.Fatalf("with slippage the child took %d, want the full %d", order.Qty, 5*mvBasePrecision)
+	}
+	if order.Price <= 50_000*mvQuotePrecision {
+		t.Fatalf("child price %d is not through the touch", order.Price)
+	}
+	if order.Price%(10*mvQuotePrecision) != 0 {
+		t.Fatalf("child price %d is off the tick grid", order.Price)
+	}
+}

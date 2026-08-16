@@ -1171,6 +1171,7 @@ func (s *Sim) addMetaorderTraders(timers *simulation.SimTimerFactory, actorID *u
 			local := *cfg
 			local.Symbol = "ABC/USD"
 			local.BasePrecision = mvBasePrecision
+			local.TickSize = s.Config.SpotTickQuoteUnits
 			local.Seed = flowSeed(s.Config.Seed, venueIndex, participant, 9)
 			_, gw := venue.connectParticipant(venue.Mount, fmt.Sprintf("metaorder_trader_%d", participant+1), balances, 0, fee)
 			*actorID++

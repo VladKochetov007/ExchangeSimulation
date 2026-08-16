@@ -9,6 +9,7 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	etypes "exchange_sim/types"
 )
 
 // MetaorderTraderConfig describes a participant that executes large parent
@@ -26,6 +27,7 @@ import (
 type MetaorderTraderConfig struct {
 	Symbol        string `json:"symbol"`
 	BasePrecision int64  `json:"base_precision"`
+	TickSize      int64  `json:"tick_size"`
 
 	// Parent sizes are drawn from a Pareto tail, which is what metaorder sizes
 	// empirically follow. The exponent matters: the splitting explanation of
@@ -44,11 +46,17 @@ type MetaorderTraderConfig struct {
 	// RestInterval separates one parent from the next, so impact measurements
 	// do not overlap.
 	RestInterval time.Duration `json:"rest_interval"`
+	// MaxSlippageBps prices each child through the touch so it can walk more
+	// than one level. Capping a child at the size displayed at the best price
+	// makes realised participation a property of the makers' quote size rather
+	// than of the configured rate, which stops participation being a treatment
+	// at all.
+	MaxSlippageBps int64 `json:"max_slippage_bps"`
 	// MaxDuration abandons a parent that cannot complete, recording what it did
 	// fill. Without a horizon a parent whose side of the book is empty waits
 	// forever, and the agent stops producing measurements entirely.
 	MaxDuration time.Duration `json:"max_duration"`
-	Seed         int64         `json:"seed"`
+	Seed        int64         `json:"seed"`
 }
 
 // validate rejects a configuration that cannot execute, rather than letting a
@@ -260,17 +268,38 @@ func (m *MetaorderTrader) executeChild(timestamp int64) {
 	if child <= 0 {
 		return
 	}
-	// Marketable limit at the touch: aggressive enough to trade now, bounded so
-	// a thin book cannot execute the child at an arbitrary price.
+	// Marketable limit priced through the touch: aggressive enough to trade
+	// now and to walk several levels, still bounded so a thin book cannot
+	// execute the child at an arbitrary price.
 	price, available := m.bestAsk, m.askQty
 	if m.side == exchange.Sell {
 		price, available = m.bestBid, m.bidQty
 	}
-	if available > 0 && child > available {
+	if price <= 0 {
+		return
+	}
+	if m.cfg.MaxSlippageBps > 0 {
+		if room, ok := etypes.TryMulBps(price, m.cfg.MaxSlippageBps); ok {
+			if m.side == exchange.Buy {
+				price += room
+			} else {
+				price -= room
+			}
+		}
+	} else if available > 0 && child > available {
+		// Without a slippage allowance the child can only take what is
+		// displayed at the best price.
 		child = available
 	}
-	if child <= 0 {
+	if price <= 0 || child <= 0 {
 		return
+	}
+	if tick := m.cfg.TickSize; tick > 0 {
+		if m.side == exchange.Buy {
+			price = (price + tick - 1) / tick * tick
+		} else {
+			price = price / tick * tick
+		}
 	}
 	m.childVolume = m.marketVolume
 	m.childVolume = m.externalVolume()
