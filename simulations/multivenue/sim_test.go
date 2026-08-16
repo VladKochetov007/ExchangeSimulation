@@ -18,8 +18,8 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
-	etypes "exchange_sim/types"
 	"exchange_sim/matching"
+	etypes "exchange_sim/types"
 )
 
 func TestConfigAcceptsDocumentedSnakeCaseJSON(t *testing.T) {
@@ -1120,16 +1120,19 @@ func TestMetaorderParticipationExcludesOwnVolume(t *testing.T) {
 // published index is what stops the book midpoint from reproducing itself.
 func TestMakerAnchorSelectsTheQuotedReference(t *testing.T) {
 	for _, testCase := range []struct {
-		anchor      string
-		wantIndex   bool
-		wantFeeds   int
+		anchor    string
+		wantIndex bool
+		wantFeeds int
 	}{
 		{anchor: "own_mid", wantIndex: false, wantFeeds: 0},
 		{anchor: "consensus", wantIndex: true, wantFeeds: 1},
 		{anchor: "fundamental", wantIndex: true, wantFeeds: 1},
 	} {
+		// Anchor plumbing check, not a strategy measurement, so the undegraded
+		// feed is the instrument under test.
 		sim, err := NewSim(time.Second, Config{
 			LogDir: t.TempDir(), LogMode: "none", Seed: 91, MakerAnchor: testCase.anchor,
+			DebugPerfectIndex: true,
 		})
 		if err != nil {
 			t.Fatalf("NewSim(%s): %v", testCase.anchor, err)
@@ -1521,7 +1524,9 @@ func TestMetaorderChildWalksBeyondTheTouchWhenSlippageIsAllowed(t *testing.T) {
 func TestEveryQuotedMarketReceivesAnIndex(t *testing.T) {
 	sim, err := NewSim(time.Second, Config{
 		LogDir: t.TempDir(), LogMode: "none", Seed: 91,
-		MakerAnchor: "fundamental", CrossAssetSpotGraph: true,
+		// Module validation of index plumbing, not a strategy measurement, so the
+		// undegraded fundamental feed is the right instrument here.
+		MakerAnchor: "fundamental", CrossAssetSpotGraph: true, DebugPerfectIndex: true,
 	})
 	if err != nil {
 		t.Fatalf("NewSim: %v", err)
@@ -1573,5 +1578,43 @@ func TestFundingIntervalIsConfigurableAndReachesThePerpetual(t *testing.T) {
 			}
 		}
 		sim.Close()
+	}
+}
+
+// A run that publishes the exogenous fundamental with no lag and no noise hands
+// every subscriber an oracle, and every comparative result about edge, adverse
+// selection, presence or capacity then measures who received it. The scenario
+// builder must refuse that configuration unless it is explicitly marked as
+// module validation.
+func TestFundamentalAnchorRequiresDegradedObservationOrDebugOptIn(t *testing.T) {
+	base := func() Config {
+		return Config{LogDir: t.TempDir(), LogMode: "none", Seed: 91, MakerAnchor: "fundamental"}
+	}
+
+	if _, err := NewSim(time.Second, base()); err == nil {
+		t.Fatal("an undegraded fundamental index was accepted for a scientific run")
+	}
+
+	degraded := base()
+	degraded.DegradedIndex = ScientificIndexDefaults(91)
+	sim, err := NewSim(time.Second, degraded)
+	if err != nil {
+		t.Fatalf("degraded observation rejected: %v", err)
+	}
+	sim.Close()
+
+	debug := base()
+	debug.DebugPerfectIndex = true
+	sim, err = NewSim(time.Second, debug)
+	if err != nil {
+		t.Fatalf("explicit debug opt-in rejected: %v", err)
+	}
+	sim.Close()
+
+	// Zero-valued degradation is not degradation.
+	empty := base()
+	empty.DegradedIndex = &DegradedIndexConfig{}
+	if _, err := NewSim(time.Second, empty); err == nil {
+		t.Fatal("an all-zero degraded_index was accepted as if it degraded the observation")
 	}
 }

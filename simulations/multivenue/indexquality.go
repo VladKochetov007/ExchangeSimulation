@@ -20,6 +20,12 @@ type DegradedIndexConfig struct {
 	Seed int64 `json:"seed"`
 }
 
+// observationIsImperfect reports whether the configuration actually degrades the
+// observation. A nil or all-zero config leaves the feed a perfect oracle.
+func (c *DegradedIndexConfig) observationIsImperfect() bool {
+	return c != nil && (c.LagSamples > 0 || c.NoiseBps > 0)
+}
+
 // degradedIndex wraps a price source, delaying and perturbing what it reports.
 // Each symbol keeps its own history and its own error stream so that degrading
 // one contract does not correlate with another.
@@ -76,4 +82,14 @@ func symbolSeed(symbol string) int64 {
 	digest := fnv.New64a()
 	_, _ = digest.Write([]byte(symbol))
 	return int64(digest.Sum64() & math.MaxInt32)
+}
+
+// ScientificIndexDefaults returns an observation degradation suitable for a run
+// whose results are meant to be believed: the fundamental is seen late and
+// imprecisely by everyone, so any information advantage has to be earned from
+// speed, modelling, order-flow inference or inventory rather than granted by the
+// environment. Callers are free to choose their own values; these exist so that
+// "not an oracle" has a concrete starting point.
+func ScientificIndexDefaults(seed int64) *DegradedIndexConfig {
+	return &DegradedIndexConfig{LagSamples: 5, NoiseBps: 10, Seed: seed}
 }

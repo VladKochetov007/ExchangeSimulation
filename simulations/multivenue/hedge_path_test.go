@@ -275,7 +275,10 @@ func TestHedgeReachesAQuoteThatRefreshesEveryTick(t *testing.T) {
 func TestPerpetualCurrentlyMirrorsSpot(t *testing.T) {
 	sim, err := NewSim(30*time.Minute, Config{
 		LogDir: t.TempDir(), LogMode: "none", Seed: 91,
-		MakerAnchor: "fundamental", CarryArbitrageurCount: 2, CarryEntryBps: 1, CarryExitBps: 1,
+		// Hedge-path plumbing check: the undegraded feed keeps the reference fixed
+		// so the assertion is about the hedge, not about observation error.
+		DebugPerfectIndex: true,
+		MakerAnchor:       "fundamental", CarryArbitrageurCount: 2, CarryEntryBps: 1, CarryExitBps: 1,
 	})
 	if err != nil {
 		t.Fatalf("NewSim: %v", err)
