@@ -120,8 +120,9 @@ type Config struct {
 	// MakerHedgeSymbol, when set, is where the ABC/USD makers offset the
 	// inventory they take on. Real makers quote one instrument and move the
 	// delta to another rather than running flat by holding the asset.
-	MakerHedgeSymbol  string `json:"maker_hedge_symbol"`
-	MakerHedgeBandQty int64  `json:"maker_hedge_band_qty"`
+	MakerHedgeSymbol      string `json:"maker_hedge_symbol"`
+	MakerHedgeBandQty     int64  `json:"maker_hedge_band_qty"`
+	MakerHedgeSlippageBps int64  `json:"maker_hedge_slippage_bps"`
 
 	// MakerInventoryLimit is the position a spot maker treats as its full risk
 	// budget, in base units.
@@ -293,6 +294,9 @@ func (c *Config) normalize() error {
 	}
 	if c.ElasticSupplierUnitsPerPercent == 0 {
 		c.ElasticSupplierUnitsPerPercent = 50 * mvBasePrecision
+	}
+	if c.MakerHedgeSlippageBps == 0 {
+		c.MakerHedgeSlippageBps = 50
 	}
 	if c.MakerHedgeBandQty == 0 {
 		c.MakerHedgeBandQty = mvBasePrecision
@@ -915,6 +919,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			InventorySkewBps:         s.Config.MakerInventorySkewBps,
 			HedgeSymbol:              hedgeSymbol(symbol, s.Config.MakerHedgeSymbol),
 			HedgeBandQty:             s.Config.MakerHedgeBandQty,
+			HedgeSlippageBps:         s.Config.MakerHedgeSlippageBps,
 			AnchorToIndex:            s.Config.MakerAnchor != "own_mid",
 			IndexWeight:              s.Config.MakerIndexWeight,
 		}
@@ -1261,14 +1266,20 @@ func (v *Venue) logMakerState(timestamp int64) {
 			continue
 		}
 		v.fundamentalLog.LogEvent(timestamp, 0, "maker_state", map[string]any{
-			"maker":          index,
-			"forward":        maker.forward,
-			"inventory":      maker.inventory,
-			"log_variance":   maker.logVariancePerSec,
-			"hedge_position": maker.hedgePosition,
-			"net_delta":      maker.NetDelta(),
-			"bid":            maker.bidPrice,
-			"ask":            maker.askPrice,
+			"maker":                index,
+			"forward":              maker.forward,
+			"inventory":            maker.inventory,
+			"log_variance":         maker.logVariancePerSec,
+			"hedge_position":       maker.hedgePosition,
+			"net_delta":            maker.NetDelta(),
+			"hedge_attempts":       maker.hedgeAttempts,
+			"hedge_fills":          maker.hedgeFills,
+			"hedge_last_qty":       maker.hedgeLastQty,
+			"hedge_pending":        maker.hedgePending,
+			"hedge_book_seen":      maker.hedgeBookSeen,
+			"hedge_book_two_sided": maker.hedgeBookTwoSided,
+			"bid":                  maker.bidPrice,
+			"ask":                  maker.askPrice,
 		})
 	}
 }

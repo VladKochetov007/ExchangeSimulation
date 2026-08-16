@@ -9,6 +9,7 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	etypes "exchange_sim/types"
 )
 
 // StoikovInputs are expressed in human units rather than fixed-point units.
@@ -139,8 +140,13 @@ type StoikovMMConfig struct {
 	// why its quoting is not limited by how much of the asset it owns.
 	HedgeSymbol string
 	// HedgeBandQty is how far net delta may drift before it is offset.
-	HedgeBandQty  int64
-	AnchorToIndex bool
+	HedgeBandQty int64
+	// HedgeSlippageBps prices the hedge through the touch the maker last saw.
+	// Quoting exactly at a remembered touch does not cross: the hedge venue
+	// requotes between the snapshot and the order's arrival, so the order rests
+	// behind the market and expires unfilled.
+	HedgeSlippageBps int64
+	AnchorToIndex    bool
 	// IndexWeight blends the index with the book midpoint, 1 meaning the index
 	// alone. A partial weight lets the book discover price while still being
 	// tethered.
@@ -172,6 +178,14 @@ type StoikovMarketMaker struct {
 	hedgePosition      int64
 	hedgePending       bool
 	hedgeRequest       uint64
+	hedgeAttempts      int
+	hedgeFills         int
+	hedgeLastQty       int64
+	hedgeBid, hedgeAsk int64
+	hedgeBidQty        int64
+	hedgeAskQty        int64
+	hedgeBookSeen      int
+	hedgeBookTwoSided  int
 	pending            map[uint64]quoteSide
 	subscribed         bool
 }
@@ -215,6 +229,22 @@ func (mm *StoikovMarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
 }
 
 func (mm *StoikovMarketMaker) onSnapshot(e actor.BookSnapshotEvent) {
+	if mm.cfg.HedgeSymbol != "" && e.Symbol == mm.cfg.HedgeSymbol {
+		mm.hedgeBid, mm.hedgeBidQty, mm.hedgeAsk, mm.hedgeAskQty = 0, 0, 0, 0
+		if e.Snapshot != nil {
+			if len(e.Snapshot.Bids) > 0 {
+				mm.hedgeBid, mm.hedgeBidQty = e.Snapshot.Bids[0].Price, e.Snapshot.Bids[0].VisibleQty
+			}
+			if len(e.Snapshot.Asks) > 0 {
+				mm.hedgeAsk, mm.hedgeAskQty = e.Snapshot.Asks[0].Price, e.Snapshot.Asks[0].VisibleQty
+			}
+		}
+		mm.hedgeBookSeen++
+		if mm.hedgeBid > 0 && mm.hedgeAsk > 0 {
+			mm.hedgeBookTwoSided++
+		}
+		return
+	}
 	if e.Symbol != mm.cfg.ReferenceSymbol || len(e.Snapshot.Bids) == 0 || len(e.Snapshot.Asks) == 0 {
 		return
 	}
@@ -306,6 +336,7 @@ func (mm *StoikovMarketMaker) onFill(e actor.OrderFillEvent) {
 		} else {
 			mm.hedgePosition -= e.Qty
 		}
+		mm.hedgeFills++
 		if e.IsFull {
 			mm.hedgePending = false
 		}
@@ -348,6 +379,9 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 		mm.Subscribe(mm.cfg.ReferenceSymbol, exchange.MDTrade)
 		if mm.cfg.AnchorToIndex {
 			mm.Subscribe(mm.cfg.ReferenceSymbol, exchange.MDIndex)
+		}
+		if mm.cfg.HedgeSymbol != "" {
+			mm.Subscribe(mm.cfg.HedgeSymbol, exchange.MDSnapshot)
 		}
 		if mm.cfg.ReferenceSymbol != mm.cfg.Symbol {
 			mm.Subscribe(mm.cfg.Symbol, exchange.MDSnapshot)
@@ -431,11 +465,39 @@ func (mm *StoikovMarketMaker) hedgeDelta() {
 	if delta > -mm.cfg.HedgeBandQty && delta < mm.cfg.HedgeBandQty {
 		return
 	}
+	// Hedge against liquidity the maker can actually see, at a bounded price.
+	// A blind market order is not a hedge: it can be sent into a book that has
+	// nothing on the other side and simply disappear.
 	side, quantity := exchange.Sell, delta
+	price, available := mm.hedgeBid, mm.hedgeBidQty
 	if delta < 0 {
 		side, quantity = exchange.Buy, -delta
+		price, available = mm.hedgeAsk, mm.hedgeAskQty
 	}
-	mm.hedgeRequest = mm.SubmitOrderWithTimeInForce(mm.cfg.HedgeSymbol, side, exchange.Market, 0, quantity, exchange.IOC)
+	if price <= 0 {
+		return
+	}
+	if mm.cfg.HedgeSlippageBps > 0 {
+		if bumped, ok := etypes.TryMulBps(price, mm.cfg.HedgeSlippageBps); ok {
+			if side == exchange.Buy {
+				price += bumped
+			} else {
+				price -= bumped
+			}
+		}
+		if price <= 0 {
+			return
+		}
+	}
+	if available > 0 && quantity > available {
+		quantity = available
+	}
+	if quantity <= 0 {
+		return
+	}
+	mm.hedgeAttempts++
+	mm.hedgeLastQty = quantity
+	mm.hedgeRequest = mm.SubmitOrderWithTimeInForce(mm.cfg.HedgeSymbol, side, exchange.LimitOrder, price, quantity, exchange.IOC)
 	mm.hedgePending = true
 }
 
