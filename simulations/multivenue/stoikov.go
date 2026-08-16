@@ -133,7 +133,14 @@ type StoikovMMConfig struct {
 	// limit — or large enough to move the price itself and diverge. Setting the
 	// shift at the limit makes the control calibratable and bounded.
 	InventorySkewBps int64
-	AnchorToIndex    bool
+	// HedgeSymbol, when set, is where the maker offsets the inventory it takes
+	// on in Symbol. A real market maker does not run flat by holding spot: it
+	// quotes one instrument and moves the resulting delta to another, which is
+	// why its quoting is not limited by how much of the asset it owns.
+	HedgeSymbol string
+	// HedgeBandQty is how far net delta may drift before it is offset.
+	HedgeBandQty  int64
+	AnchorToIndex bool
 	// IndexWeight blends the index with the book midpoint, 1 meaning the index
 	// alone. A partial weight lets the book discover price while still being
 	// tethered.
@@ -162,24 +169,27 @@ type StoikovMarketMaker struct {
 	inventory          int64
 	bidID, askID       uint64
 	bidPrice, askPrice int64
+	hedgePosition      int64
+	hedgePending       bool
+	hedgeRequest       uint64
 	pending            map[uint64]quoteSide
 	subscribed         bool
 }
 
 func NewStoikovMarketMaker(id uint64, gw actor.Gateway, cfg StoikovMMConfig) *StoikovMarketMaker {
 	mm := &StoikovMarketMaker{
-		BaseActor:      actor.NewBaseActor(id, gw),
-		cfg:            cfg,
-		forward:        cfg.BootstrapPrice,
+		BaseActor:         actor.NewBaseActor(id, gw),
+		cfg:               cfg,
+		forward:           cfg.BootstrapPrice,
 		logVariancePerSec: cfg.InitialLogVariancePerSec,
-		pending:        make(map[uint64]quoteSide),
+		pending:           make(map[uint64]quoteSide),
 	}
 	mm.SetHandler(mm)
 	mm.AddTicker(cfg.QuoteInterval, mm.onTick)
 	return mm
 }
 
-func (mm *StoikovMarketMaker) Inventory() int64           { return mm.inventory }
+func (mm *StoikovMarketMaker) Inventory() int64              { return mm.inventory }
 func (mm *StoikovMarketMaker) LogVariancePerSecond() float64 { return mm.logVariancePerSec }
 
 func (mm *StoikovMarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
@@ -254,6 +264,12 @@ func (mm *StoikovMarketMaker) maxLogVariance() float64 {
 }
 
 func (mm *StoikovMarketMaker) onAccepted(e actor.OrderAcceptedEvent) {
+	if mm.hedgeRequest != 0 && e.RequestID == mm.hedgeRequest {
+		// A hedge is not a quote. Cancelling every unknown acknowledgement
+		// would cancel the maker's own hedge before it could execute.
+		mm.hedgeRequest = 0
+		return
+	}
 	side, ok := mm.pending[e.RequestID]
 	if !ok {
 		mm.CancelOrder(e.OrderID)
@@ -270,6 +286,9 @@ func (mm *StoikovMarketMaker) onAccepted(e actor.OrderAcceptedEvent) {
 func (mm *StoikovMarketMaker) onRejected(e actor.OrderRejectedEvent) {
 	side, ok := mm.pending[e.RequestID]
 	if !ok {
+		// A rejected hedge must release the in-flight flag, otherwise one
+		// rejection stops the maker hedging for the rest of the run.
+		mm.hedgePending, mm.hedgeRequest = false, 0
 		return
 	}
 	delete(mm.pending, e.RequestID)
@@ -281,6 +300,17 @@ func (mm *StoikovMarketMaker) onRejected(e actor.OrderRejectedEvent) {
 }
 
 func (mm *StoikovMarketMaker) onFill(e actor.OrderFillEvent) {
+	if mm.cfg.HedgeSymbol != "" && e.Symbol == mm.cfg.HedgeSymbol {
+		if e.Side == exchange.Buy {
+			mm.hedgePosition += e.Qty
+		} else {
+			mm.hedgePosition -= e.Qty
+		}
+		if e.IsFull {
+			mm.hedgePending = false
+		}
+		return
+	}
 	if e.Symbol != mm.cfg.Symbol {
 		return
 	}
@@ -301,6 +331,9 @@ func (mm *StoikovMarketMaker) onFill(e actor.OrderFillEvent) {
 }
 
 func (mm *StoikovMarketMaker) onCancelled(e actor.OrderCancelledEvent) {
+	// An immediate-or-cancel hedge that partly filled is cancelled for its
+	// remainder; the flag must clear on that too.
+	mm.hedgePending = false
 	if e.OrderID == mm.bidID {
 		mm.bidID, mm.bidPrice = 0, 0
 	}
@@ -376,11 +409,34 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 		mm.CancelOrder(mm.askID)
 		mm.askID = 0
 	}
+	mm.hedgeDelta()
 	mm.bidPrice, mm.askPrice = bid, ask
 	bidRequest := mm.SubmitOrder(mm.cfg.Symbol, exchange.Buy, exchange.LimitOrder, bid, mm.cfg.QuoteQty)
 	mm.pending[bidRequest] = stoikovBid
 	askRequest := mm.SubmitOrder(mm.cfg.Symbol, exchange.Sell, exchange.LimitOrder, ask, mm.cfg.QuoteQty)
 	mm.pending[askRequest] = stoikovAsk
+}
+
+// NetDelta is the maker's exposure after its hedge.
+func (mm *StoikovMarketMaker) NetDelta() int64 { return mm.inventory + mm.hedgePosition }
+
+// hedgeDelta offsets accumulated inventory on the hedge instrument, so the
+// maker's risk is bounded by its hedging capacity rather than by how much of
+// the asset it holds.
+func (mm *StoikovMarketMaker) hedgeDelta() {
+	if mm.cfg.HedgeSymbol == "" || mm.hedgePending || mm.cfg.HedgeBandQty <= 0 {
+		return
+	}
+	delta := mm.NetDelta()
+	if delta > -mm.cfg.HedgeBandQty && delta < mm.cfg.HedgeBandQty {
+		return
+	}
+	side, quantity := exchange.Sell, delta
+	if delta < 0 {
+		side, quantity = exchange.Buy, -delta
+	}
+	mm.hedgeRequest = mm.SubmitOrderWithTimeInForce(mm.cfg.HedgeSymbol, side, exchange.Market, 0, quantity, exchange.IOC)
+	mm.hedgePending = true
 }
 
 // inventoryFraction is the signed position as a fraction of the risk budget,
@@ -390,7 +446,12 @@ func (mm *StoikovMarketMaker) inventoryFraction() float64 {
 	if scale <= 0 {
 		scale = mm.cfg.BasePrecision
 	}
-	fraction := float64(mm.inventory) / float64(scale)
+	position := mm.inventory
+	if mm.cfg.HedgeSymbol != "" {
+		// Skew against the risk actually carried, not the raw spot position.
+		position = mm.NetDelta()
+	}
+	fraction := float64(position) / float64(scale)
 	if fraction > 1 {
 		return 1
 	}
