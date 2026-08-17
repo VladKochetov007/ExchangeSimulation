@@ -54,7 +54,7 @@
   "spot_maker_submit_before_cancel": true,
   "experiment_id": "E-197",
   "hypothesis_id": "FFA-99",
-  "description": "metaorder dose sweep cap 3000, corrected population",
+  "description": "metaorder dose sweep cap 1500, corrected population",
   "spot_maker_requote_bps": 0,
   "spot_maker_count": 4,
   "triangle_arb_count": 2,
@@ -106,7 +106,7 @@
       "roles": [
         "metaorder_trader"
       ],
-      "orders_per_day": 3000
+      "orders_per_day": 1500
     }
   },
   "short_future_tenor": 7200000000000,
