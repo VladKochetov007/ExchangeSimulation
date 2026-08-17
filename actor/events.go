@@ -38,6 +38,11 @@ type OrderAcceptedEvent struct {
 type OrderRejectedEvent struct {
 	RequestID uint64                `json:"request_id"`
 	Reason    exchange.RejectReason `json:"reason"`
+	// RetryAfterNanos and Limit carry the venue's own advice when it refused a
+	// request for a budget or a backlog rather than for the order's contents.
+	// An actor that ignores them hammers a venue that already said no.
+	RetryAfterNanos int64  `json:"retry_after_nanos,omitempty"`
+	Limit           string `json:"limit,omitempty"`
 }
 
 type OrderFillEvent struct {

@@ -346,13 +346,12 @@ func (a *BaseActor) decodeResponse(resp exchange.Response) []*Event {
 				},
 			}}
 		}
-		return []*Event{{
-			Type: EventOrderRejected,
-			Data: OrderRejectedEvent{
-				RequestID: resp.RequestID,
-				Reason:    resp.Error,
-			},
-		}}
+		rejection := OrderRejectedEvent{RequestID: resp.RequestID, Reason: resp.Error}
+		if advice, carried := resp.Data.(exchange.RetryAdvice); carried {
+			rejection.RetryAfterNanos = advice.RetryAfterNanos
+			rejection.Limit = advice.Limit
+		}
+		return []*Event{{Type: EventOrderRejected, Data: rejection}}
 	}
 
 	switch data := resp.Data.(type) {
