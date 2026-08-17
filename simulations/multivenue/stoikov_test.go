@@ -287,3 +287,90 @@ func TestPartialAnchoringAmplifiesInventorySkew(t *testing.T) {
 		}
 	}
 }
+
+// Quoting and hedging are separate obligations. A maker whose quote is
+// unchanged has nothing to resubmit, but if it has been filled since its last
+// hedge it still carries risk that must be offset. In an eight-hour reference
+// run the spot market calmed after option expiry, the requote guard correctly
+// suppressed resubmission, and hedging stopped with it: the makers kept filling
+// 140 times a minute and never hedged again, which left the perpetual to noise
+// flow and the basis 230 basis points wide.
+func TestMakerHedgesEvenWhenItDoesNotRequote(t *testing.T) {
+	gw := newStoikovStubGateway()
+	mm := NewStoikovMarketMaker(1, gw, StoikovMMConfig{
+		Symbol: "ABC/USD", ReferenceSymbol: "ABC/USD", BootstrapPrice: 100_000,
+		BasePrecision: 1_000, QuotePrecision: 1_000, TickSize: 10, QuoteQty: 100,
+		QuoteInterval: time.Second, VolatilityHalfLife: time.Minute,
+		InitialLogVariancePerSec: 1.0 / (100.0 * 100.0), InventoryHorizon: time.Minute,
+		RelativeRiskAversion: 0.01 * 100, RelativeFillDecay: 2 * 100, MinHalfSpreadTicks: 1,
+		HedgeSymbol: "ABC-PERP", HedgeBandQty: 50, HedgeTickSize: 10, HedgeSlippageBps: 50,
+		// A requote threshold is what the reference population uses; three of
+		// its four makers run one. It suppresses resubmission when the quote
+		// has barely moved, which is exactly when hedging must still happen.
+		RequoteBps: 1_000,
+	})
+	now := time.Unix(10, 0)
+	mm.onTick(now)
+	book := func() {
+		mm.HandleEvent(context.Background(), &actor.Event{
+			Type: actor.EventBookSnapshot,
+			Data: actor.BookSnapshotEvent{
+				Symbol: "ABC/USD", Timestamp: now.UnixNano(),
+				Snapshot: &exchange.BookSnapshot{
+					Bids: []exchange.PriceLevel{{Price: 99_990, VisibleQty: 1_000}},
+					Asks: []exchange.PriceLevel{{Price: 100_010, VisibleQty: 1_000}},
+				},
+			},
+		})
+		mm.HandleEvent(context.Background(), &actor.Event{
+			Type: actor.EventBookSnapshot,
+			Data: actor.BookSnapshotEvent{
+				Symbol: "ABC-PERP", Timestamp: now.UnixNano(),
+				Snapshot: &exchange.BookSnapshot{
+					Bids: []exchange.PriceLevel{{Price: 99_990, VisibleQty: 10_000}},
+					Asks: []exchange.PriceLevel{{Price: 100_010, VisibleQty: 10_000}},
+				},
+			},
+		})
+	}
+	book()
+	mm.onTick(now)
+	var quotes []*etypes.OrderRequest
+	for _, req := range gw.requests {
+		if req.Type == etypes.ReqPlaceOrder && req.OrderReq.Symbol == "ABC/USD" {
+			quotes = append(quotes, req.OrderReq)
+		}
+	}
+	if len(quotes) != 2 {
+		t.Fatalf("expected a quote pair, got %d orders", len(quotes))
+	}
+	orderID := uint64(10)
+	for _, q := range quotes {
+		mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: q.RequestID, OrderID: orderID}})
+		orderID++
+	}
+
+	// Partially filled, so the quote pair still rests and the computed quote is
+	// unchanged: there is no reason to requote, but there is inventory to hedge.
+	mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderPartialFill, Data: actor.OrderFillEvent{
+		Symbol: "ABC/USD", OrderID: 10, Side: exchange.Buy, Qty: 100, IsFull: false,
+	}})
+	if mm.Inventory() != 100 {
+		t.Fatalf("inventory = %d, want 100", mm.Inventory())
+	}
+
+	before := len(gw.requests)
+	book()
+	mm.onTick(now)
+
+	var hedged bool
+	for _, req := range gw.requests[before:] {
+		if req.Type == etypes.ReqPlaceOrder && req.OrderReq.Symbol == "ABC-PERP" {
+			hedged = true
+		}
+	}
+	if !hedged {
+		t.Fatalf("maker did not hedge an inventory of %d while its quote was unchanged; requests after tick: %d",
+			mm.Inventory(), len(gw.requests)-before)
+	}
+}
