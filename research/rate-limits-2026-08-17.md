@@ -82,6 +82,20 @@ admission queue exists and why placements are metered while cancels are not.
   without which a payoff table cannot distinguish a class that declined to trade
   from one that was refused.
 
+## An unrelated result this line produced
+
+Enabling the cross-venue routers, while looking for a class whose intent
+expires, turned up the campaign's clearest emergent equilibrium. Venue
+dispersion settles at the round-trip transaction cost: the captured edge is
+10.12 basis points against a 10 bps cost and 4.34 against a 4 bps cost, across
+three seeds each. Doubling the number of arbitrageurs leaves it at 10.13.
+
+Nothing sets ten basis points in the configuration; it is two 5 bps taker fees,
+found by participants who are told no prices. A one-step latency advantage is
+worth 0.56 bps, which is exactly the margin between clearing that cost and not.
+
+Recorded as FFA-97 and detailed in E-184 to E-186.
+
 ## What remains open
 
 The magnitude of the fill loss, which spans a factor of two across seeds. A
