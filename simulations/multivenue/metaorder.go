@@ -94,7 +94,12 @@ func (c MetaorderTraderConfig) validate() error {
 
 // MetaorderRecord is one completed or abandoned parent order.
 type MetaorderRecord struct {
-	ID        int    `json:"id"`
+	ID int `json:"id"`
+	// TraderID identifies which desk produced the record. IDs restart at one
+	// per desk, so without it records from several desks on a venue cannot be
+	// told apart, and anything sequential — the gap between one parent ending
+	// and the next beginning — is meaningless when read from the merged list.
+	TraderID  uint64 `json:"trader_id"`
 	VenueID   string `json:"venue_id"`
 	Side      string `json:"side"`
 	ParentQty int64  `json:"parent_qty"`
@@ -362,7 +367,7 @@ func (m *MetaorderTrader) finish(timestamp int64, completed bool) {
 		endMid = (m.bestBid + m.bestAsk) / 2
 	}
 	record := MetaorderRecord{
-		ID: len(m.records) + 1, VenueID: m.venueID, Side: m.side.String(),
+		ID: len(m.records) + 1, TraderID: m.ID(), VenueID: m.venueID, Side: m.side.String(),
 		ParentQty: m.parentQty, FilledQty: m.filledQty,
 		StartTimestamp: m.startTS, EndTimestamp: timestamp,
 		StartMid: m.startMid, EndMid: endMid,

@@ -187,3 +187,45 @@ func TestRoundTripBalancesCoverALongOpen(t *testing.T) {
 		t.Fatalf("cross asset balance = %d, want %d", withCross["CDF"], 20*lotQty)
 	}
 }
+
+// Records from several desks are merged into one list in the run report. Without
+// a trader identity they cannot be separated, and any sequential measure taken
+// across the merged list — the gap between one parent ending and the next
+// starting — silently mixes desks and produces overlapping intervals.
+func TestMetaorderRecordsCarryTraderIdentity(t *testing.T) {
+	const symbol = "ABC/USD"
+	cfg := MetaorderTraderConfig{
+		Symbol: symbol, BasePrecision: 100_000_000, TickSize: 1,
+		MinQty: 1_000, MaxQty: 1_000, ParetoAlpha: 2,
+		ChildInterval: time.Millisecond, MinChildQty: 1_000, MinOrderSize: 500,
+		MaxSlippageBps: 10, MaxDuration: time.Hour, Seed: 1,
+	}
+	var records []MetaorderRecord
+	for _, id := range []uint64{7, 9} {
+		trader := NewMetaorderTrader(id, newMetaGateway(), "v1", cfg)
+		now := time.Unix(0, 0)
+		trader.onTick(now)
+		quoteBook(trader, symbol, 99, 101, 10_000)
+		now = now.Add(time.Millisecond)
+		trader.onTick(now)
+		now = now.Add(time.Millisecond)
+		trader.onTick(now)
+		fillChild(trader, symbol, 1_000, 101)
+		now = now.Add(time.Millisecond)
+		trader.onTick(now)
+		records = append(records, trader.Records()...)
+	}
+	if len(records) != 2 {
+		t.Fatalf("expected one record per desk, got %d", len(records))
+	}
+	if records[0].ID != records[1].ID {
+		t.Fatalf("precondition failed: record IDs %d and %d should collide across desks",
+			records[0].ID, records[1].ID)
+	}
+	if records[0].TraderID == records[1].TraderID {
+		t.Fatalf("records from different desks share trader ID %d", records[0].TraderID)
+	}
+	if records[0].TraderID != 7 || records[1].TraderID != 9 {
+		t.Fatalf("trader IDs = %d, %d; want 7, 9", records[0].TraderID, records[1].TraderID)
+	}
+}
