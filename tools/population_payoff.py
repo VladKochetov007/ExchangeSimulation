@@ -74,10 +74,10 @@ def main() -> None:
         for asset, amount in (ledger.get("fee_revenue") or {}).items():
             if asset in PRECISION:
                 fee_revenue += amount / PRECISION[asset]
-    print(f"{'participant class':<26}{'active result (USD)':>22}{'members':>9}{'per member':>14}")
+    print(f"{'participant class':<26}{'active result (USD)':>24}{'members':>9}{'per member':>20}")
     for group, value in sorted(active.items(), key=lambda item: -item[1]):
-        print(f"{group:<26}{value:>22,.2f}{members[group]:>9}{value / members[group]:>14,.2f}")
-    print(f"{'':<26}{'-' * 22:>22}")
+        print(f"{group:<26}{value:>24,.2f}{members[group]:>9}{value / members[group]:>20,.2f}")
+    print(f"{'':<26}{'-' * 24:>24}")
     print(f"{'population sum':<26}{total:>22,.2f}")
     if report.get("venue_ledgers"):
         print(f"{'venue fee revenue':<26}{fee_revenue:>22,.2f}")
