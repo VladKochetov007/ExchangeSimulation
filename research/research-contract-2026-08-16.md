@@ -71,6 +71,22 @@ which classes are comparable before designing a comparison on it. Seven of
 sixteen classes are inactive in the configuration used for E-170 to E-172, which
 the profile states in seconds and nine runs did not.
 
+## Mechanical checks, not warnings
+
+Two failure modes survived being written into this contract as warnings and
+recurred anyway, so both are now checked by tooling.
+
+A run's outcome is classified by `tools/run_outcome.py`, which separates a
+collapsed market from a terminated process, and which also compares the build
+stamp recorded in the manifest against the current HEAD. A run built from an
+older commit is reported as STALE. Three experiments were run against stale
+binaries before this existed.
+
+Any code choosing between configured alternatives iterates a sorted slice, and a
+test asserts the choice is stable across repeated construction. Tier assignment
+depended on Go's randomised map iteration order and invalidated an experiment
+after the library it wires had been audited for exactly that hazard.
+
 ## Promotion rule
 
 A claim reaches `supported` only after it holds across at least three seeds and
