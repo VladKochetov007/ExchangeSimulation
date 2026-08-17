@@ -120,6 +120,20 @@ type Config struct {
 	RoundTripTraderCount int           `json:"round_trip_trader_count"`
 	RoundTripHold        time.Duration `json:"round_trip_hold"`
 	RoundTripLotQty      int64         `json:"round_trip_lot_qty"`
+	// NoiseImbalanceCoupling tilts uninformed order side toward the visible book
+	// imbalance, and NoiseExciteAlpha with NoiseExciteBetaPerSec make the flow
+	// self-exciting: each observed trade raises an arrival rate that decays at
+	// the given rate.
+	//
+	// Both default to zero, which is flow arriving on a fixed clock with an
+	// independent side. That produces a market with no volatility clustering,
+	// no fat tails and no order-flow memory — measured on the reference
+	// population, excess kurtosis was -0.60 and the sign autocorrelation at lag
+	// 50 was 0.013, where traded markets show strong positive values for both.
+	NoiseImbalanceCoupling float64 `json:"noise_imbalance_coupling"`
+	NoiseExciteAlpha       float64 `json:"noise_excite_alpha"`
+	NoiseExciteBetaPerSec  float64 `json:"noise_excite_beta_per_sec"`
+
 	// RoundTripInventoryLots is how many lots of balance each round-trip desk
 	// is funded with on each side. Funding it below one lot of quote currency
 	// makes every long open fail, which turns symmetric flow into a persistent
@@ -1228,6 +1242,9 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		noise := feesim.NewRandomTaker(nextActor(), connect(fmt.Sprintf("noise_flow_%d", participant+1), noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), feesim.TakerConfig{
 			Symbols: noiseSymbols, TargetQtys: noiseTargetQtys,
 			TakeInterval: s.Config.NoiseInterval, Seed: flowSeed(s.Config.Seed, venueIndex, participant, 1),
+			ImbalanceCoupling: s.Config.NoiseImbalanceCoupling,
+			ExciteAlpha:       s.Config.NoiseExciteAlpha,
+			ExciteBetaPerSec:  s.Config.NoiseExciteBetaPerSec,
 		})
 		noise.SetTickerFactory(timers)
 		venue.NoiseTraders = append(venue.NoiseTraders, noise)

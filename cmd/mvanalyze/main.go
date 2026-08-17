@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -50,6 +50,19 @@ func main() {
 			emit(dir, stats, *asJSON, func() {
 				fmt.Printf("%-24s parents %5d filled %5d stalled %4d zero-fill %4d stall-horizon %5.1f%% sides %v\n",
 					dir, stats.Parents, stats.Filled, stats.Stalled, stats.ZeroFill, 100*stats.StallFraction(), stats.Sides)
+			})
+		case "stylized":
+			tape, err := run.Tape(*venue, *base)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			facts := tape.Facts(50)
+			emit(dir, facts, *asJSON, func() {
+				fmt.Printf("%-22s trades %7d  ret-acf1 %+6.3f  |ret|-acf1 %+6.3f  |ret|-acf10 %+6.3f  "+
+					"sign-acf1 %+6.3f  sign-acf50 %+6.3f  kurt %8.2f  tail %5.2f  sd %6.2f bps\n",
+					dir, facts.Trades, facts.ReturnACF1, facts.AbsReturnACF1, facts.AbsReturnACF10,
+					facts.SignACF1, facts.SignACF50, facts.ExcessKurtosis, facts.TailIndex, facts.ReturnStdBps)
 			})
 		case "triangular":
 			deviations, err := run.TriangularDeviation(analysis.TriangularConfig{

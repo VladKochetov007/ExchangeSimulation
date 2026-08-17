@@ -75,3 +75,26 @@ func TestTriangleRequiredEdgeIncludesEveryLegsFee(t *testing.T) {
 		})
 	}
 }
+
+// Uninformed flow arriving on a fixed clock with an independent side produces a
+// market with none of the regularities a traded market shows. The scenario must
+// pass the excitation and herding settings through, or the mechanism that
+// creates them cannot be reached from a configuration at all.
+func TestNoiseFlowExcitationReachesTheTaker(t *testing.T) {
+	cfg := Config{LogDir: t.TempDir()}
+	if err := cfg.normalize(); err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if cfg.NoiseExciteAlpha != 0 || cfg.NoiseImbalanceCoupling != 0 || cfg.NoiseExciteBetaPerSec != 0 {
+		t.Fatalf("defaults must leave flow unexcited: %+v", cfg)
+	}
+	cfg.NoiseExciteAlpha = 0.4
+	cfg.NoiseExciteBetaPerSec = 0.2
+	cfg.NoiseImbalanceCoupling = 0.5
+	if err := cfg.normalize(); err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if cfg.NoiseExciteAlpha != 0.4 || cfg.NoiseExciteBetaPerSec != 0.2 || cfg.NoiseImbalanceCoupling != 0.5 {
+		t.Fatalf("configured excitation overwritten: %+v", cfg)
+	}
+}

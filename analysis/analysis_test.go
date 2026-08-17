@@ -211,3 +211,132 @@ func itoa(value int64) string {
 	raw, _ := json.Marshal(value)
 	return string(raw)
 }
+
+// A random walk has unpredictable returns, no persistence in their magnitudes,
+// and near-Gaussian tails. The panel must report that, or it cannot be trusted
+// to report the opposite for a real tape.
+func TestFactsOnARandomWalkShowNoStructure(t *testing.T) {
+	const n = 20000
+	price := int64(50_000 * 100_000)
+	priceState, signState := uint64(12345), uint64(98765)
+	// Two independent streams: drawing the sign from a low bit of the same
+	// state that drives the price makes the two perfectly dependent, which is
+	// a property of the generator rather than of the market.
+	next := func(state *uint64) uint64 {
+		*state = *state*6364136223846793005 + 1442695040888963407
+		return *state >> 33
+	}
+	tape := &TradeTape{}
+	for i := 0; i < n; i++ {
+		// A sum of draws, so the step distribution is bell shaped rather than
+		// uniform: a uniform step has excess kurtosis of exactly -1.2, which
+		// would fail a near-Gaussian expectation for the right reason.
+		step := int64(next(&priceState)%101) + int64(next(&priceState)%101) +
+			int64(next(&priceState)%101) - 150
+		price += step * 1000
+		if price < 1 {
+			price = 1
+		}
+		sign := int8(1)
+		if next(&signState)%2 == 0 {
+			sign = -1
+		}
+		tape.Timestamps = append(tape.Timestamps, int64(i)*1e9)
+		tape.Prices = append(tape.Prices, price)
+		tape.Qtys = append(tape.Qtys, 1)
+		tape.Signs = append(tape.Signs, sign)
+	}
+	facts := tape.Facts(50)
+	if facts.Trades != n {
+		t.Fatalf("trades = %d, want %d", facts.Trades, n)
+	}
+	if math.Abs(facts.ReturnACF1) > 0.05 {
+		t.Errorf("random-walk return ACF(1) = %.3f, want near zero", facts.ReturnACF1)
+	}
+	if math.Abs(facts.AbsReturnACF10) > 0.05 {
+		t.Errorf("random-walk |return| ACF(10) = %.3f, want near zero", facts.AbsReturnACF10)
+	}
+	if math.Abs(facts.SignACF10) > 0.05 {
+		t.Errorf("coin-flip sign ACF(10) = %.3f, want near zero", facts.SignACF10)
+	}
+	if math.Abs(facts.ExcessKurtosis) > 0.5 {
+		t.Errorf("bell-shaped-step excess kurtosis = %.2f, want near zero", facts.ExcessKurtosis)
+	}
+}
+
+// Autocorrelation must find structure that is there: an alternating series is
+// perfectly anticorrelated at odd lags and correlated at even ones.
+func TestAutocorrelationDetectsAlternation(t *testing.T) {
+	series := make([]float64, 1000)
+	for i := range series {
+		if i%2 == 0 {
+			series[i] = 1
+		} else {
+			series[i] = -1
+		}
+	}
+	acf := Autocorrelation(series, 4)
+	if acf[0] > -0.9 {
+		t.Errorf("ACF(1) = %.3f, want about -1", acf[0])
+	}
+	if acf[1] < 0.9 {
+		t.Errorf("ACF(2) = %.3f, want about +1", acf[1])
+	}
+	if flat := Autocorrelation([]float64{2, 2, 2, 2}, 2); flat[0] != 0 {
+		t.Errorf("constant series ACF = %v, want zeros", flat)
+	}
+}
+
+// A persistent sign series is what order splitting produces, and it must show
+// long-lag correlation rather than dying immediately.
+func TestSignAutocorrelationSurvivesAtLongLags(t *testing.T) {
+	// Independently signed runs, which is what order splitting produces. A
+	// strictly alternating block pattern would instead be periodic, and its
+	// autocorrelation would go negative at a lag half a period away.
+	tape := &TradeTape{}
+	state := uint64(4242)
+	for block := 0; block < 400; block++ {
+		state = state*6364136223846793005 + 1442695040888963407
+		sign := int8(1)
+		if (state>>33)%2 == 0 {
+			sign = -1
+		}
+		for i := 0; i < 60; i++ {
+			tape.Signs = append(tape.Signs, sign)
+		}
+	}
+	acf := Autocorrelation(tape.SignSeries(), 50)
+	if acf[0] < 0.9 {
+		t.Errorf("sign ACF(1) = %.3f, want near one for blocked flow", acf[0])
+	}
+	if acf[49] < 0.1 {
+		t.Errorf("sign ACF(50) = %.3f, want still positive for blocked flow", acf[49])
+	}
+}
+
+func TestHillTailIndexIsLowerForFatterTails(t *testing.T) {
+	state := uint64(99)
+	uniform := func() float64 {
+		state = state*6364136223846793005 + 1442695040888963407
+		return float64(state>>11) / float64(1<<53)
+	}
+	pareto := func(alpha float64) []float64 {
+		out := make([]float64, 5000)
+		for i := range out {
+			u := uniform()
+			if u <= 0 {
+				u = 1e-9
+			}
+			out[i] = math.Pow(u, -1/alpha)
+		}
+		return out
+	}
+	fat := HillTailIndex(pareto(2), 0.05)
+	thin := HillTailIndex(pareto(5), 0.05)
+	if !(fat < thin) {
+		t.Fatalf("tail index did not order the samples: alpha 2 gave %.2f, alpha 5 gave %.2f", fat, thin)
+	}
+	if math.Abs(fat-2) > 0.8 {
+		t.Errorf("tail index for alpha 2 = %.2f, want about 2", fat)
+	}
+}
