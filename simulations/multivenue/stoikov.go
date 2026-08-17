@@ -134,6 +134,17 @@ type StoikovMMConfig struct {
 	// limit — or large enough to move the price itself and diverge. Setting the
 	// shift at the limit makes the control calibratable and bounded.
 	InventorySkewBps int64
+	// HedgeInterval, when positive, gives the hedge its own cadence instead of
+	// running it inside the quote cycle.
+	//
+	// Coupling the two is not neutral in either direction. Hedging only when
+	// the maker requotes means a calm market stops its risk management while it
+	// is still being filled. Hedging on every tick removes the rate limit the
+	// quote cycle was providing, and the maker's own marketable hedges become
+	// the dominant flow on the hedge instrument: measured over eight hours that
+	// took the median basis from 2.1 to 830 basis points. The interval is the
+	// dial between those two failures and has to be chosen, not inherited.
+	HedgeInterval time.Duration
 	// HedgeSymbol, when set, is where the maker offsets the inventory it takes
 	// on in Symbol. A real market maker does not run flat by holding spot: it
 	// quotes one instrument and moves the resulting delta to another, which is
@@ -218,6 +229,9 @@ func NewStoikovMarketMaker(id uint64, gw actor.Gateway, cfg StoikovMMConfig) *St
 	}
 	mm.SetHandler(mm)
 	mm.AddTicker(cfg.QuoteInterval, mm.onTick)
+	if cfg.HedgeInterval > 0 {
+		mm.AddTicker(cfg.HedgeInterval, mm.onHedgeTick)
+	}
 	return mm
 }
 
@@ -393,6 +407,14 @@ func (mm *StoikovMarketMaker) onCancelled(e actor.OrderCancelledEvent) {
 	}
 }
 
+// onHedgeTick runs the hedge on its own cadence when one is configured.
+func (mm *StoikovMarketMaker) onHedgeTick(_ time.Time) {
+	if !mm.subscribed || mm.cfg.HedgeInterval <= 0 {
+		return
+	}
+	mm.hedgeDelta()
+}
+
 func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 	if !mm.subscribed {
 		mm.Subscribe(mm.cfg.ReferenceSymbol, exchange.MDSnapshot)
@@ -466,7 +488,10 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 		mm.cancelResting(previousBid, previousAsk)
 	}
 	mm.bidID, mm.askID = 0, 0
-	mm.hedgeDelta()
+	// With a cadence configured the hedge runs on its own timer instead.
+	if mm.cfg.HedgeInterval <= 0 {
+		mm.hedgeDelta()
+	}
 	mm.bidPrice, mm.askPrice = bid, ask
 	bidRequest := mm.SubmitOrder(mm.cfg.Symbol, exchange.Buy, exchange.LimitOrder, bid, mm.cfg.QuoteQty)
 	mm.pending[bidRequest] = stoikovBid

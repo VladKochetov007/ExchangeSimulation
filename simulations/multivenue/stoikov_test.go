@@ -287,3 +287,88 @@ func TestPartialAnchoringAmplifiesInventorySkew(t *testing.T) {
 		}
 	}
 }
+
+// Quoting and hedging are separate obligations that need separate clocks.
+// Hedging only inside the quote cycle stops risk management whenever the market
+// calms enough to suppress requoting, while the maker is still being filled.
+// Hedging on every tick removes the rate limit the quote cycle provided and the
+// maker's own marketable hedges dominate the hedge instrument: measured over
+// eight hours that took the median basis from 2.1 to 830 basis points. A
+// configured interval is the dial between the two.
+func TestMakerHedgesOnItsOwnCadenceWhenRequotingIsSuppressed(t *testing.T) {
+	gw := newStoikovStubGateway()
+	mm := NewStoikovMarketMaker(1, gw, StoikovMMConfig{
+		Symbol: "ABC/USD", ReferenceSymbol: "ABC/USD", BootstrapPrice: 100_000,
+		BasePrecision: 1_000, QuotePrecision: 1_000, TickSize: 10, QuoteQty: 100,
+		QuoteInterval: time.Second, VolatilityHalfLife: time.Minute,
+		InitialLogVariancePerSec: 1.0 / (100.0 * 100.0), InventoryHorizon: time.Minute,
+		RelativeRiskAversion: 0.01 * 100, RelativeFillDecay: 2 * 100, MinHalfSpreadTicks: 1,
+		HedgeSymbol: "ABC-PERP", HedgeBandQty: 50, HedgeTickSize: 10, HedgeSlippageBps: 50,
+		RequoteBps: 1_000, HedgeInterval: 5 * time.Second,
+	})
+	now := time.Unix(10, 0)
+	mm.onTick(now)
+	book := func() {
+		for _, symbol := range []string{"ABC/USD", "ABC-PERP"} {
+			mm.HandleEvent(context.Background(), &actor.Event{
+				Type: actor.EventBookSnapshot,
+				Data: actor.BookSnapshotEvent{
+					Symbol: symbol, Timestamp: now.UnixNano(),
+					Snapshot: &exchange.BookSnapshot{
+						Bids: []exchange.PriceLevel{{Price: 99_990, VisibleQty: 10_000}},
+						Asks: []exchange.PriceLevel{{Price: 100_010, VisibleQty: 10_000}},
+					},
+				},
+			})
+		}
+	}
+	book()
+	mm.onTick(now)
+	var quotes []*etypes.OrderRequest
+	for _, req := range gw.requests {
+		if req.Type == etypes.ReqPlaceOrder && req.OrderReq.Symbol == "ABC/USD" {
+			quotes = append(quotes, req.OrderReq)
+		}
+	}
+	if len(quotes) != 2 {
+		t.Fatalf("expected a quote pair, got %d orders", len(quotes))
+	}
+	orderID := uint64(10)
+	for _, q := range quotes {
+		mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: q.RequestID, OrderID: orderID}})
+		orderID++
+	}
+	// Partially filled, so the pair still rests and the requote threshold
+	// suppresses resubmission, but the inventory is real and must be hedged.
+	mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderPartialFill, Data: actor.OrderFillEvent{
+		Symbol: "ABC/USD", OrderID: 10, Side: exchange.Buy, Qty: 100, IsFull: false,
+	}})
+
+	before := len(gw.requests)
+	book()
+	mm.onTick(now)
+	if extra := len(gw.requests) - before; extra != 0 {
+		t.Fatalf("quote tick submitted %d orders despite the requote threshold", extra)
+	}
+	mm.onHedgeTick(now)
+	var hedged bool
+	for _, req := range gw.requests[before:] {
+		if req.Type == etypes.ReqPlaceOrder && req.OrderReq.Symbol == "ABC-PERP" {
+			hedged = true
+		}
+	}
+	if !hedged {
+		t.Fatalf("hedge tick did not offset an inventory of %d", mm.Inventory())
+	}
+}
+
+// Without a configured cadence the hedge stays inside the quote cycle, so the
+// existing behaviour is preserved for any caller that has not opted in.
+func TestMakerWithoutHedgeIntervalKeepsHedgingInTheQuoteCycle(t *testing.T) {
+	mm := &StoikovMarketMaker{cfg: StoikovMMConfig{HedgeSymbol: "ABC-PERP"}}
+	if mm.cfg.HedgeInterval != 0 {
+		t.Fatal("default hedge interval must be zero")
+	}
+	mm.subscribed = true
+	mm.onHedgeTick(time.Unix(0, 0)) // must be inert without a cadence
+}

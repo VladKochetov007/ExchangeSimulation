@@ -271,6 +271,10 @@ type Config struct {
 	// construction and the makers trade with each other instead of resting
 	// depth for anyone else.
 	MakerMinHalfSpreadTicks int64 `json:"maker_min_half_spread_ticks"`
+	// MakerHedgeInterval gives the spot maker's hedge its own cadence. Zero
+	// leaves it inside the quote cycle, which stops hedging whenever the market
+	// calms enough to suppress requoting.
+	MakerHedgeInterval time.Duration `json:"maker_hedge_interval"`
 	// MakerInventorySkewBps sets the maker's reservation shift at its full
 	// inventory limit, in basis points. Zero keeps the textbook
 	// variance-derived skew.
@@ -1151,6 +1155,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			HedgeSymbol:              hedgeSymbol(symbol, s.Config.MakerHedgeSymbol),
 			HedgeBandQty:             s.Config.MakerHedgeBandQty,
 			HedgeSlippageBps:         s.Config.MakerHedgeSlippageBps,
+			HedgeInterval:            s.Config.MakerHedgeInterval,
 			HedgeTickSize:            tick,
 			AnchorToIndex:            s.Config.MakerAnchor != "own_mid",
 			IndexWeight:              s.Config.MakerIndexWeight,
