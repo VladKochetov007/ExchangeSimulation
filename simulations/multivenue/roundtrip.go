@@ -18,10 +18,13 @@ import (
 // so a population of pure random-side takers leaves makers holding a position
 // that never returns. A round trip returns it by construction.
 type RoundTripTraderConfig struct {
-	Symbol        string        `json:"symbol"`
-	BasePrecision int64         `json:"base_precision"`
-	LotQty        int64         `json:"lot_qty"`
-	Interval      time.Duration `json:"interval"`
+	Symbol        string `json:"symbol"`
+	BasePrecision int64  `json:"base_precision"`
+	LotQty        int64  `json:"lot_qty"`
+	// MinOrderSize is the venue minimum; a clamp to the visible touch size can
+	// fall below it and be rejected.
+	MinOrderSize int64         `json:"min_order_size"`
+	Interval     time.Duration `json:"interval"`
 	// HoldDuration is how long a position is carried before it is unwound.
 	HoldDuration time.Duration `json:"hold_duration"`
 	// OpenProbability is the chance of opening a position on an idle tick.
@@ -140,12 +143,11 @@ func (t *RoundTripTrader) cross(side exchange.Side, quantity int64) bool {
 	if side == exchange.Sell {
 		price, available = t.book.bid, t.book.bidQty
 	}
-	if available > 0 && quantity > available {
-		quantity = available
-	}
-	if quantity <= 0 {
+	sized, ok := venueSizedQty(quantity, available, t.cfg.MinOrderSize)
+	if !ok {
 		return false
 	}
+	quantity = sized
 	t.SubmitOrderWithTimeInForce(t.cfg.Symbol, side, exchange.LimitOrder, price, quantity, exchange.IOC)
 	t.pending = true
 	return true

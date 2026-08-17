@@ -31,8 +31,11 @@ type CarryArbitrageurConfig struct {
 	// MaxPosition bounds the carried size, and LotQty the size added per tick.
 	MaxPosition int64 `json:"max_position"`
 	LotQty      int64 `json:"lot_qty"`
-	SpotTick    int64 `json:"spot_tick"`
-	PerpTick    int64 `json:"perp_tick"`
+	// MinOrderSize is the venue minimum. Clamping to the visible touch size can
+	// land below it, and those orders are rejected rather than filled.
+	MinOrderSize int64 `json:"min_order_size"`
+	SpotTick     int64 `json:"spot_tick"`
+	PerpTick     int64 `json:"perp_tick"`
 }
 
 // CarryArbitrageur holds matched spot and perpetual positions.
@@ -239,12 +242,11 @@ func (c *CarryArbitrageur) submit(symbol string, side exchange.Side, price, quan
 	if quantity > c.cfg.LotQty {
 		quantity = c.cfg.LotQty
 	}
-	if available > 0 && quantity > available {
-		quantity = available
-	}
-	if quantity <= 0 {
+	sized, ok := venueSizedQty(quantity, available, c.cfg.MinOrderSize)
+	if !ok {
 		return
 	}
+	quantity = sized
 	// Prices must sit on the instrument's grid or the venue rejects them
 	// outright, which is silent because a rejection is not a fill.
 	if tick > 0 {

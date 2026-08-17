@@ -1351,6 +1351,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			Interval: s.Config.NoiseInterval, EntryBps: s.Config.CarryEntryBps, ExitBps: s.Config.CarryExitBps,
 			MaxPosition: s.Config.CarryMaxPosition, LotQty: s.Config.CarryLotQty,
 			SpotTick: tick, PerpTick: tick,
+			MinOrderSize: mvBasePrecision / 1_000,
 		})
 		arb.SetTickerFactory(timers)
 		venue.CarryArbs = append(venue.CarryArbs, arb)
@@ -1381,6 +1382,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			Symbol: "ABC/USD", BasePrecision: mvBasePrecision, LotQty: s.Config.RoundTripLotQty,
 			Interval: s.Config.NoiseInterval, HoldDuration: s.Config.RoundTripHold,
 			OpenProbability: 0.5, Seed: flowSeed(s.Config.Seed, venueIndex, participant, 11),
+			MinOrderSize: mvBasePrecision / 1_000,
 		})
 		trader.SetTickerFactory(timers)
 		venue.RoundTripTraders = append(venue.RoundTripTraders, trader)
