@@ -26,6 +26,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", required=True, type=Path)
     parser.add_argument("--symbol", default="ABC-USD")
+    parser.add_argument("--include-derivatives", action="store_true", default=True)
+    parser.add_argument("--spot-only", dest="include_derivatives", action="store_false")
     args = parser.parse_args()
 
     report = json.loads((args.run / "greeks.json").read_text())
@@ -37,8 +39,14 @@ def main() -> None:
     accepted: collections.Counter[str] = collections.Counter()
     filled: collections.Counter[str] = collections.Counter()
     volume: collections.Counter[str] = collections.Counter()
-    for book in sorted(args.run.glob(f"venues/*/spot/{args.symbol}.jsonl")):
-        venue = book.parts[-3]
+    # Derivative fills live in a separate log from the spot books. Reading only
+    # the spot book silently omits every option, perpetual and dated-future
+    # fill, which understates exactly the classes that trade them.
+    books = sorted(args.run.glob(f"venues/*/spot/{args.symbol}.jsonl"))
+    if args.include_derivatives:
+        books += sorted(args.run.glob("venues/*/derivatives.jsonl"))
+    for book in books:
+        venue = book.parts[-3] if book.parent.name == "spot" else book.parts[-2]
         for line in book.open():
             try:
                 event = json.loads(line)
@@ -52,6 +60,7 @@ def main() -> None:
             elif event["event"] == "OrderFill":
                 filled[role] += 1
                 payload = event["data"]["payload"]
+                payload = payload.get("payload") or payload
                 volume[role] += payload.get("qty") or payload.get("filled_qty") or 0
 
     total_volume = sum(volume.values()) or 1

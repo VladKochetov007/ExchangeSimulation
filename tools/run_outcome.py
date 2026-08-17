@@ -63,7 +63,20 @@ def build_warning(run: Path, head: str | None) -> str:
     # Staleness is checked first: a binary built from an older commit is the
     # failure that has actually cost runs, and a modified tree must not hide it.
     if head and revision != head:
-        return f"  [STALE: built at {revision[:8]}, current source is {head[:8]}]"
+        # Only a change to compiled source can make a binary behave differently.
+        # Flagging documentation commits as stale trains the reader to ignore
+        # the warning, which is how the original failure survived a contract
+        # entry telling me to watch for it.
+        changed = subprocess.run(
+            ["git", "diff", "--name-only", revision, head, "--", "*.go"],
+            capture_output=True, text=True,
+        )
+        if changed.returncode != 0:
+            return f"  [STALE: built at {revision[:8]}, current source is {head[:8]}]"
+        if changed.stdout.strip():
+            count = len(changed.stdout.strip().splitlines())
+            return f"  [STALE: built at {revision[:8]}, {count} Go file(s) changed since]"
+        return ""
     if build.get("modified"):
         return f"  [built at {revision[:8]} from a modified tree]"
     return ""
