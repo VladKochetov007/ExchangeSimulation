@@ -94,3 +94,29 @@ func TestWeightBudgetsBindAcrossRequestKinds(t *testing.T) {
 		t.Fatal("weight budget did not refresh")
 	}
 }
+
+// Makers that all requote on one threshold go stale together, which removes the
+// dislocations cross-market arbitrage trades. Heterogeneous thresholds are the
+// way to test whether that staleness is what the arbitrage lives on.
+func TestRequoteThresholdsAreAssignedPerMaker(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		tiers    []int64
+		fallback int64
+		want     []int64
+	}{
+		{"no tiers falls back to the single value", nil, 20, []int64{20, 20, 20}},
+		{"tiers cycle across makers", []int64{0, 10, 30}, 20, []int64{0, 10, 30}},
+		{"more makers than tiers cycles again", []int64{5, 15}, 0, []int64{5, 15, 5}},
+	} {
+		got := make([]int64, 3)
+		for index := range got {
+			got[index] = requoteThresholdFor(testCase.tiers, testCase.fallback, index)
+		}
+		for index, want := range testCase.want {
+			if got[index] != want {
+				t.Fatalf("%s: maker %d got %d, want %d", testCase.name, index, got[index], want)
+			}
+		}
+	}
+}

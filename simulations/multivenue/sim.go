@@ -224,6 +224,11 @@ type Config struct {
 	// moved this far, which desynchronises a population that otherwise requotes
 	// in lockstep every step.
 	SpotMakerRequoteBps int64 `json:"spot_maker_requote_bps"`
+	// SpotMakerRequoteBpsTiers gives makers different thresholds, cycled across
+	// them. One shared threshold makes every book go stale at the same instant,
+	// which removes the dislocations cross-market arbitrage trades; several
+	// leave the books drifting apart.
+	SpotMakerRequoteBpsTiers []int64 `json:"spot_maker_requote_bps_tiers"`
 
 	// SpotMakerSubmitBeforeCancel makes the spot makers replace quotes without
 	// emptying the book. Cancel-then-replace leaves both sides empty for the
@@ -1090,7 +1095,9 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		}
 	}
 	for i := 0; i < s.Config.SpotMakerCount; i++ {
-		maker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC/USD", "ABC/USD", mvBootstrapPrice, mvQuotePrecision, tick))
+		makerConfig := stoikovConfig("ABC/USD", "ABC/USD", mvBootstrapPrice, mvQuotePrecision, tick)
+		makerConfig.RequoteBps = requoteThresholdFor(s.Config.SpotMakerRequoteBpsTiers, s.Config.SpotMakerRequoteBps, i)
+		maker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), makerConfig)
 		maker.SetTickerFactory(timers)
 		venue.SpotMakers = append(venue.SpotMakers, maker)
 	}

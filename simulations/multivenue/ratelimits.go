@@ -168,3 +168,14 @@ func roleGroup(role string) string {
 	}
 	return role
 }
+
+// requoteThresholdFor picks a maker's requote threshold. A scenario giving one
+// value applies it to every maker, which makes the whole population requote in
+// lockstep; giving several cycles them across makers so books go stale at
+// different times.
+func requoteThresholdFor(tiers []int64, fallback int64, makerIndex int) int64 {
+	if len(tiers) == 0 {
+		return fallback
+	}
+	return tiers[makerIndex%len(tiers)]
+}
