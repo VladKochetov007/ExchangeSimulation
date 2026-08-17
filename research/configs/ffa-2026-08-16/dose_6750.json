@@ -54,7 +54,7 @@
   "spot_maker_submit_before_cancel": true,
   "experiment_id": "E-201",
   "hypothesis_id": "FFA-99",
-  "description": "step bracket + timing mechanism, cap 6500",
+  "description": "step bracket + timing mechanism, cap 6750",
   "spot_maker_requote_bps": 0,
   "spot_maker_count": 4,
   "triangle_arb_count": 2,
@@ -106,7 +106,7 @@
       "roles": [
         "metaorder_trader"
       ],
-      "orders_per_day": 6500
+      "orders_per_day": 6750
     }
   },
   "short_future_tenor": 7200000000000,
