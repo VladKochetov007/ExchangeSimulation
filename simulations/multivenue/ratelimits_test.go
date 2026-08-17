@@ -120,3 +120,39 @@ func TestRequoteThresholdsAreAssignedPerMaker(t *testing.T) {
 		}
 	}
 }
+
+// Tier assignment must not depend on Go's randomised map iteration order. A
+// participant matching two tiers has to get the same one on every run, or the
+// simulation is not reproducible and a budget appears to bind on some seeds and
+// not others for no reason at all.
+func TestTierAssignmentIsDeterministicWhenTiersOverlap(t *testing.T) {
+	participants := []Participant{{ClientID: 1, Role: "dated_carry_arb_1"}}
+	tiers := map[string]RateLimitTier{
+		"all":      {Roles: []string{"dated_carry_arb", "noise_flow", "spot_maker"}, OrdersPer10s: 100000},
+		"expiring": {Roles: []string{"dated_carry_arb"}, OrdersPer10s: 1},
+	}
+	// Build the policy repeatedly: a map-order dependence shows up as a
+	// different budget binding on different runs.
+	for attempt := 0; attempt < 25; attempt++ {
+		policy := buildRequestPolicy(tiers, participants)
+		policy.Admit(1, kindPlace(), 0)
+		_, _, admitted := policy.Admit(1, kindPlace(), 0)
+		if admitted {
+			t.Fatalf("attempt %d: the generous tier won, so the specific budget did not bind", attempt)
+		}
+	}
+}
+
+// The most specific match wins, which is the only rule that makes an overlap
+// meaningful: a scenario adds a narrow tier precisely to override a broad one.
+func TestTheMostSpecificRoleMatchWins(t *testing.T) {
+	tiers := map[string]RateLimitTier{
+		"broad":  {Roles: []string{"spot"}, OrdersPer10s: 100000},
+		"narrow": {Roles: []string{"spot_maker"}, OrdersPer10s: 1},
+	}
+	policy := buildRequestPolicy(tiers, []Participant{{ClientID: 1, Role: "spot_maker_1"}})
+	policy.Admit(1, kindPlace(), 0)
+	if _, _, admitted := policy.Admit(1, kindPlace(), 0); admitted {
+		t.Fatal("the broader tier won over the more specific one")
+	}
+}

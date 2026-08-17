@@ -53,16 +53,39 @@ func buildRequestPolicy(tiers map[string]RateLimitTier, participants []Participa
 		}
 	}
 
+	// Tier names are visited in sorted order and the longest matching role
+	// prefix wins. Ranging over the map directly would make assignment depend on
+	// Go's randomised iteration order, so a participant matching two tiers would
+	// get a different budget on different runs and a limit would appear to bind
+	// on some seeds and not others. Preferring the longest prefix is what makes
+	// a narrow tier able to override a broad one, which is why a scenario adds
+	// one.
+	names := make([]string, 0, len(tiers))
+	for name := range tiers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	return exchange.NewTieredRequestPolicy(specs, func(clientID uint64) string {
 		role := roleOf[clientID]
-		for name, tier := range tiers {
+		best, bestLen, bestBreadth := "", -1, 0
+		for _, name := range names {
+			tier := tiers[name]
 			for _, prefix := range tier.Roles {
-				if strings.HasPrefix(role, prefix) {
-					return name
+				if !strings.HasPrefix(role, prefix) {
+					continue
+				}
+				// A longer prefix is more specific. Where two tiers name the
+				// same role, the one covering fewer roles is the one written to
+				// single that participant out, so it wins.
+				better := len(prefix) > bestLen ||
+					(len(prefix) == bestLen && len(tier.Roles) < bestBreadth)
+				if best == "" || better {
+					best, bestLen, bestBreadth = name, len(prefix), len(tier.Roles)
 				}
 			}
 		}
-		return ""
+		return best
 	})
 }
 
