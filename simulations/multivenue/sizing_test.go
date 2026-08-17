@@ -27,3 +27,24 @@ func TestVenueSizedQtyRejectsBelowMinimum(t *testing.T) {
 		})
 	}
 }
+
+// The maker's minimum half-spread was hardcoded to one tick. It is the quantity
+// the inventory skew competes against — when skew separates two makers'
+// reservations by more than they quote, their quotes cross — so it has to be
+// configurable to be calibrated at all.
+func TestMakerMinHalfSpreadTicksIsConfigurable(t *testing.T) {
+	cfg := Config{LogDir: t.TempDir()}
+	if err := cfg.normalize(); err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if cfg.MakerMinHalfSpreadTicks != 1 {
+		t.Fatalf("default half-spread floor = %d, want 1", cfg.MakerMinHalfSpreadTicks)
+	}
+	cfg.MakerMinHalfSpreadTicks = 12
+	if err := cfg.normalize(); err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if cfg.MakerMinHalfSpreadTicks != 12 {
+		t.Fatalf("configured half-spread floor overwritten: got %d, want 12", cfg.MakerMinHalfSpreadTicks)
+	}
+}

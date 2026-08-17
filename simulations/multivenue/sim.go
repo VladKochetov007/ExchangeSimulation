@@ -264,6 +264,13 @@ type Config struct {
 	// MakerInventoryLimit is the position a spot maker treats as its full risk
 	// budget, in base units.
 	MakerInventoryLimit int64 `json:"maker_inventory_limit"`
+	// MakerMinHalfSpreadTicks is the floor a spot maker puts under its own
+	// half-spread. It has to be configurable because it is the quantity the
+	// inventory skew competes against: when the skew separating two makers'
+	// reservations exceeds their quoted spread, their quotes cross by
+	// construction and the makers trade with each other instead of resting
+	// depth for anyone else.
+	MakerMinHalfSpreadTicks int64 `json:"maker_min_half_spread_ticks"`
 	// MakerInventorySkewBps sets the maker's reservation shift at its full
 	// inventory limit, in basis points. Zero keeps the textbook
 	// variance-derived skew.
@@ -478,6 +485,9 @@ func (c *Config) normalize() error {
 	if c.MakerHedgeBandQty == 0 {
 		c.MakerHedgeBandQty = mvBasePrecision
 	}
+	if c.MakerMinHalfSpreadTicks == 0 {
+		c.MakerMinHalfSpreadTicks = 1
+	}
 	if c.MakerInventoryLimit == 0 {
 		c.MakerInventoryLimit = 100 * mvBasePrecision
 	}
@@ -566,7 +576,7 @@ func (c *Config) normalize() error {
 		c.NoiseInterval <= 0 || c.GreekInterval <= 0 || c.ShortOptionTenor <= 0 || c.LongOptionTenor <= 0 ||
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 ||
-		c.StoikovMaxVarianceMultiple <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 || c.RoundTripInventoryLots <= 0 || c.ElasticSupplierCount < 0 || c.ElasticSupplierUnitsPerPercent <= 0 || c.CarryArbitrageurCount < 0 ||
+		c.StoikovMaxVarianceMultiple <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.MakerMinHalfSpreadTicks <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 || c.RoundTripInventoryLots <= 0 || c.ElasticSupplierCount < 0 || c.ElasticSupplierUnitsPerPercent <= 0 || c.CarryArbitrageurCount < 0 ||
 		c.CarryEntryBps <= 0 || c.CarryExitBps < 0 || c.CarryMaxPosition <= 0 || c.CarryLotQty <= 0 || c.MakerQuoteQty <= 0 || c.SpotMakerCount < 1 || c.OptionDealerCount < 1 || c.DatedCarryArbCount < 0 || c.ParityArbCount < 0 || c.FuturesMakerCount < 1 || c.FundingMaxRateBps <= 0 || c.FundingIntervalSeconds <= 0 || c.LatentLiquidityCount < 0 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
@@ -1133,7 +1143,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			InventoryHorizon:         s.Config.StoikovInventoryHorizon,
 			RelativeRiskAversion:     relativeRiskAversion,
 			RelativeFillDecay:        relativeFillDecay,
-			MinHalfSpreadTicks:       1,
+			MinHalfSpreadTicks:       s.Config.MakerMinHalfSpreadTicks,
 			InventoryLimit:           s.Config.MakerInventoryLimit,
 			InventorySkewBps:         s.Config.MakerInventorySkewBps,
 			SubmitBeforeCancel:       s.Config.SpotMakerSubmitBeforeCancel,
