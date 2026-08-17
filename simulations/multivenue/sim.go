@@ -199,6 +199,11 @@ type Config struct {
 	// consensus index, which every participant then observes equally.
 	DegradedIndex *DegradedIndexConfig `json:"degraded_index"`
 
+	// TakerFeeBps is the fee a taker pays on each leg. It was hardcoded at five
+	// basis points, which made the round-trip cost that bounds cross-venue
+	// dispersion impossible to vary and therefore impossible to test.
+	TakerFeeBps int64 `json:"taker_fee_bps"`
+
 	// RateLimitTiers gives named classes of participant their own request
 	// budgets, as venues publish different allowances for different clients.
 	// An empty map leaves every participant unmetered, which is what every
@@ -431,6 +436,9 @@ func (c *Config) normalize() error {
 	}
 	if c.FundingMaxRateBps == 0 {
 		c.FundingMaxRateBps = 75
+	}
+	if c.TakerFeeBps == 0 {
+		c.TakerFeeBps = 5
 	}
 	if c.DatedCarrySlippageBps == 0 {
 		c.DatedCarrySlippageBps = 15
@@ -1192,7 +1200,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		noiseTargetQtys["CDF/USD"] = mvBasePrecision / 100
 		noiseTargetQtys["ABC/CDF"] = mvBasePrecision / 100
 	}
-	noiseFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
+	noiseFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: s.Config.TakerFeeBps, InQuote: true}
 	for participant := 0; participant < s.Config.NoiseTraderCount; participant++ {
 		noise := feesim.NewRandomTaker(nextActor(), connect(fmt.Sprintf("noise_flow_%d", participant+1), noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), feesim.TakerConfig{
 			Symbols: noiseSymbols, TargetQtys: noiseTargetQtys,
@@ -1397,7 +1405,7 @@ func (s *Sim) addCrossVenueRouters(clock *simulation.SimulatedClock, scheduler *
 		"ABC": 1_000 * mvBasePrecision,
 		"USD": 100_000_000 * mvQuotePrecision,
 	}
-	fee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
+	fee := &exchange.PercentageFee{MakerBps: 0, TakerBps: s.Config.TakerFeeBps, InQuote: true}
 	for _, tier := range s.Config.CrossVenueArbTiers {
 		delay := time.Duration(float64(s.Config.CrossVenueBaseLatency) * tier)
 		legs := make([]CrossVenueArbLegConfig, 0, len(s.Venues))
@@ -1419,7 +1427,7 @@ func (s *Sim) addCrossVenueRouters(clock *simulation.SimulatedClock, scheduler *
 		}
 		router, err := NewCrossVenueArb(tier, CrossVenueArbConfig{
 			Symbol: "ABC/USD", LotQty: s.Config.CrossVenueArbLotQty,
-			BasePrecision: mvBasePrecision, TakerFeeBps: 5, MaxAttempts: s.Config.CrossVenueArbMaxAttempts,
+			BasePrecision: mvBasePrecision, TakerFeeBps: s.Config.TakerFeeBps, MaxAttempts: s.Config.CrossVenueArbMaxAttempts,
 		}, legs)
 		if err != nil {
 			return err
@@ -1504,7 +1512,7 @@ func (s *Sim) addMetaorderTraders(timers *simulation.SimTimerFactory, actorID *u
 	if err := cfg.validate(); err != nil {
 		return err
 	}
-	fee := &exchange.PercentageFee{MakerBps: 0, TakerBps: 5, InQuote: true}
+	fee := &exchange.PercentageFee{MakerBps: 0, TakerBps: s.Config.TakerFeeBps, InQuote: true}
 	balances := map[string]int64{"ABC": 1_000 * mvBasePrecision, "USD": 50_000_000 * mvQuotePrecision}
 	if s.Config.CrossAssetSpotGraph {
 		balances["CDF"] = 1_000 * mvBasePrecision

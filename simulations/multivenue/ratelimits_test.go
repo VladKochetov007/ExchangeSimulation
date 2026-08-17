@@ -156,3 +156,22 @@ func TestTheMostSpecificRoleMatchWins(t *testing.T) {
 		t.Fatal("the broader tier won over the more specific one")
 	}
 }
+
+// The taker fee bounds cross-venue dispersion, so it has to be a configuration
+// value rather than a constant repeated through the scenario builder.
+func TestTakerFeeIsConfigurableAndDefaultsToFive(t *testing.T) {
+	cfg := Config{LogDir: t.TempDir()}
+	if err := cfg.normalize(); err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if cfg.TakerFeeBps != 5 {
+		t.Fatalf("default taker fee = %d, want 5", cfg.TakerFeeBps)
+	}
+	chosen := Config{LogDir: t.TempDir(), TakerFeeBps: 2}
+	if err := chosen.normalize(); err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if chosen.TakerFeeBps != 2 {
+		t.Fatalf("configured taker fee was overwritten with %d", chosen.TakerFeeBps)
+	}
+}
