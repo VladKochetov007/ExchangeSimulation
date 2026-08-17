@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"time"
@@ -747,10 +748,44 @@ func (l venueLogger) LogEvent(simTime int64, clientID uint64, eventName string, 
 }
 
 type manifest struct {
-	SchemaVersion int      `json:"schema_version"`
-	VenueIDs      []string `json:"venue_ids"`
-	Config        Config   `json:"config"`
-	Notes         []string `json:"notes"`
+	SchemaVersion int       `json:"schema_version"`
+	VenueIDs      []string  `json:"venue_ids"`
+	Config        Config    `json:"config"`
+	Build         BuildInfo `json:"build"`
+	Notes         []string  `json:"notes"`
+}
+
+// BuildInfo records which build produced a run. Three experiments in this
+// campaign were run against a binary compiled before the fix under test, and
+// each time the result was indistinguishable from a real null until something
+// else exposed it. A run that cannot say which source it came from cannot be
+// trusted after the fact.
+type BuildInfo struct {
+	Revision string `json:"revision"`
+	Time     string `json:"time"`
+	// Modified reports that the working tree had uncommitted changes when the
+	// binary was built, so the revision alone does not identify the source.
+	Modified bool `json:"modified"`
+}
+
+// currentBuild reads the version-control stamp Go embeds at build time.
+func currentBuild() BuildInfo {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return BuildInfo{Revision: "unknown"}
+	}
+	build := BuildInfo{Revision: "unknown"}
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			build.Revision = setting.Value
+		case "vcs.time":
+			build.Time = setting.Value
+		case "vcs.modified":
+			build.Modified = setting.Value == "true"
+		}
+	}
+	return build
 }
 
 // NewSim constructs three exchanges with one local spot/perp/dated-future/
@@ -781,6 +816,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		SchemaVersion: 2,
 		VenueIDs:      slices.Clone(cfg.VenueIDs),
 		Config:        manifestConfig,
+		Build:         currentBuild(),
 		Notes: []string{
 			"Each venue has independent prefunded accounts and local spot-margin borrowing.",
 			latencyNote,
