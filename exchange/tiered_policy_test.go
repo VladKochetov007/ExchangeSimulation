@@ -138,3 +138,40 @@ func TestLargeClientIdentifiersDoNotShareABudget(t *testing.T) {
 		t.Fatal("a distinct large client identifier shared the first client's budget")
 	}
 }
+
+// Without rejection counts a run cannot tell a participant that chose not to
+// trade from one the venue refused, which is the confound that made earlier
+// payoff comparisons unreadable.
+func TestPolicyCountsAdmissionsAndRefusalsPerClient(t *testing.T) {
+	policy := NewTieredRequestPolicy(map[string]RequestTier{
+		"taker": tierSpec(2, 1),
+	}, func(uint64) string { return "taker" })
+
+	permit, _, _ := policy.Admit(1, ratelimit.KindPlaceOrder, 0) // admitted, fills lane
+	policy.Admit(1, ratelimit.KindPlaceOrder, 0)                 // lane full: overloaded
+	policy.Release(permit)
+	policy.Admit(1, ratelimit.KindPlaceOrder, 0) // weight budget now exhausted
+	policy.Admit(1, ratelimit.KindPlaceOrder, 0) // rate limited
+
+	stats := policy.Stats(1)
+	if stats.Admitted != 2 {
+		t.Fatalf("admitted = %d, want 2", stats.Admitted)
+	}
+	if stats.Overloaded != 1 {
+		t.Fatalf("overloaded = %d, want 1", stats.Overloaded)
+	}
+	if stats.RateLimited != 1 {
+		t.Fatalf("rate limited = %d, want 1", stats.RateLimited)
+	}
+	if stats.ByKind[ratelimit.KindPlaceOrder] != 4 {
+		t.Fatalf("placements seen = %d, want 4", stats.ByKind[ratelimit.KindPlaceOrder])
+	}
+}
+
+func TestStatsForAnUnmeteredClientAreEmptyRatherThanMissing(t *testing.T) {
+	policy := NewTieredRequestPolicy(nil, func(uint64) string { return "none" })
+	policy.Admit(1, ratelimit.KindPlaceOrder, 0)
+	if stats := policy.Stats(1); stats.Admitted != 1 || stats.RateLimited != 0 {
+		t.Fatalf("unmetered client stats = %+v", stats)
+	}
+}

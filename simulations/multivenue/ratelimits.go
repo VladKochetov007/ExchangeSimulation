@@ -1,6 +1,7 @@
 package multivenue
 
 import (
+	"sort"
 	"strings"
 	"time"
 
@@ -105,4 +106,65 @@ func metersFor(tier RateLimitTier) []ratelimit.Meter {
 		})
 	}
 	return meters
+}
+
+// RequestBudgetReport is what a run publishes about its request gating: per
+// participant class, how many requests were admitted and how many refused, and
+// which budget did the refusing. Without it a payoff table cannot distinguish a
+// class that declined to trade from one the venue turned away.
+type RequestBudgetReport struct {
+	VenueID     string           `json:"venue_id"`
+	Role        string           `json:"role"`
+	Admitted    int64            `json:"admitted"`
+	RateLimited int64            `json:"rate_limited"`
+	Overloaded  int64            `json:"overloaded"`
+	ByLimit     map[string]int64 `json:"by_limit,omitempty"`
+}
+
+// CaptureRequestBudgets summarises request gating per participant class.
+func (s *Sim) CaptureRequestBudgets() []RequestBudgetReport {
+	rows := make([]RequestBudgetReport, 0)
+	for _, venue := range s.Venues {
+		if venue.RequestPolicy == nil {
+			continue
+		}
+		roleOf := make(map[uint64]string, len(venue.Participants))
+		for _, participant := range venue.Participants {
+			roleOf[participant.ClientID] = participant.Role
+		}
+		byClass := make(map[string]*RequestBudgetReport)
+		classes := make([]string, 0)
+		for _, clientID := range venue.RequestPolicy.Clients() {
+			class := roleGroup(roleOf[clientID])
+			row, seen := byClass[class]
+			if !seen {
+				row = &RequestBudgetReport{VenueID: venue.ID, Role: class, ByLimit: map[string]int64{}}
+				byClass[class] = row
+				classes = append(classes, class)
+			}
+			stats := venue.RequestPolicy.Stats(clientID)
+			row.Admitted += stats.Admitted
+			row.RateLimited += stats.RateLimited
+			row.Overloaded += stats.Overloaded
+			for limit, count := range stats.ByLimit {
+				row.ByLimit[limit] += count
+			}
+		}
+		sort.Strings(classes)
+		for _, class := range classes {
+			rows = append(rows, *byClass[class])
+		}
+	}
+	return rows
+}
+
+// roleGroup collapses numbered participants of one class, matching how payoff
+// reporting groups them so the two tables can be read side by side.
+func roleGroup(role string) string {
+	if index := strings.LastIndex(role, "_"); index > 0 {
+		if suffix := role[index+1:]; suffix != "" && strings.Trim(suffix, "0123456789") == "" {
+			return role[:index]
+		}
+	}
+	return role
 }

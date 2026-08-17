@@ -28,6 +28,7 @@ type greekOutput struct {
 	InitialAccounts  []multivenue.ParticipantAccountSnapshot   `json:"initial_accounts,omitempty"`
 	TerminalAccounts []multivenue.ParticipantAccountSnapshot   `json:"terminal_accounts,omitempty"`
 	VenueLedgers     []multivenue.VenueLedger                  `json:"venue_ledgers,omitempty"`
+	RequestBudgets   []multivenue.RequestBudgetReport          `json:"request_budgets,omitempty"`
 	Caveats          []string                                  `json:"caveats"`
 }
 
@@ -105,6 +106,7 @@ func main() {
 	output.InitialAccounts = append([]multivenue.ParticipantAccountSnapshot(nil), sim.InitialAccounts...)
 	output.TerminalAccounts = append([]multivenue.ParticipantAccountSnapshot(nil), sim.TerminalAccounts...)
 	output.VenueLedgers = sim.CaptureVenueLedgers()
+	output.RequestBudgets = sim.CaptureRequestBudgets()
 	for _, router := range sim.Routers {
 		output.RouterReports = append(output.RouterReports, router.Report())
 	}
