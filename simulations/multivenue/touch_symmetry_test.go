@@ -70,6 +70,10 @@ type requotingMaker struct {
 	pending      map[uint64]bool
 	step         int64
 	qty          int64
+	askFirst     bool
+	// offset shifts this maker's mid so two makers quote overlapping prices and
+	// cross each other, as the reference population's makers do.
+	offset int64
 }
 
 func (m *requotingMaker) HandleEvent(_ context.Context, evt *actor.Event) {
@@ -91,11 +95,22 @@ func (m *requotingMaker) onTick(time.Time) {
 	m.bidID, m.askID = 0, 0
 	// Walk the mid so the touch moves between steps, as it does in a live run.
 	m.step++
-	mid := m.mid + (m.step%5)*m.half/4
-	bidReq := m.SubmitOrder(m.symbol, exchange.Buy, exchange.LimitOrder, mid-m.half, m.qty)
-	m.pending[bidReq] = true
-	askReq := m.SubmitOrder(m.symbol, exchange.Sell, exchange.LimitOrder, mid+m.half, m.qty)
-	m.pending[askReq] = true
+	mid := m.mid + m.offset + (m.step%5)*m.half/4
+	submitBid := func() {
+		req := m.SubmitOrder(m.symbol, exchange.Buy, exchange.LimitOrder, mid-m.half, m.qty)
+		m.pending[req] = true
+	}
+	submitAsk := func() {
+		req := m.SubmitOrder(m.symbol, exchange.Sell, exchange.LimitOrder, mid+m.half, m.qty)
+		m.pending[req] = true
+	}
+	if m.askFirst {
+		submitAsk()
+		submitBid()
+	} else {
+		submitBid()
+		submitAsk()
+	}
 	if previousBid != 0 {
 		m.CancelOrder(previousBid)
 	}
@@ -254,4 +269,75 @@ func TestAtTouchBuysStarveWhenTheAskIsContested(t *testing.T) {
 	sellRate := 100 * float64(seller.fills) / float64(maxInt(seller.sent, 1))
 	t.Logf("contested: buy sent=%d fills=%d (%.1f%%); sell sent=%d fills=%d (%.1f%%); sweeper fills=%d",
 		buyer.sent, buyer.fills, buyRate, seller.sent, seller.fills, sellRate, sweeper.fills)
+}
+
+// Two makers quoting overlapping prices cross each other, which is 98.5% of the
+// traded volume in a reference run. If the side asymmetry an at-touch desk sees
+// is caused by the order in which a maker submits its two quotes — the fresh
+// second leg crossing a resting bid and never resting itself — then reversing
+// that order must reverse which side starves.
+func TestRequoteOrderDecidesWhichSideStarves(t *testing.T) {
+	run := func(askFirst bool) (buyRate, sellRate float64, makerAggressorSells, makerAggressorBuys int) {
+		start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano()
+		clock := simulation.NewSimulatedClock(start)
+		scheduler := simulation.NewEventScheduler(clock)
+		clock.SetScheduler(scheduler)
+		timers := simulation.NewSimTimerFactory(scheduler)
+		runner := simulation.NewRunner(clock, simulation.RunnerConfig{
+			Iterations: 200, Step: time.Second, Quiesce: true, DeterministicPhases: true,
+		})
+		runner.AddIdler(timers)
+		ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
+			ID: "probe", EstimatedClients: 8, Clock: clock, TickerFactory: timers,
+			DeterministicIngress: true, DeterministicPhases: true, SnapshotInterval: time.Second,
+		})
+		tick := int64(mvQuotePrecision)
+		ex.AddInstrument(exchange.NewSpotInstrument("ABC/USD", "ABC", "USD", mvBasePrecision, mvQuotePrecision, tick, mvBasePrecision/1_000))
+		mount := simulation.NewMount(ex, simulation.LatencyConfig{})
+		runner.AddMount(mount)
+		connect := func(id uint64) actor.Gateway {
+			return mount.ConnectNewClient(id, map[string]int64{
+				"ABC": 100_000 * mvBasePrecision, "USD": 10_000_000_000 * mvQuotePrecision,
+			}, &exchange.FixedFee{})
+		}
+		mid := int64(50_000) * mvQuotePrecision
+		// Offsets are half the spread apart, so each maker's new quote crosses
+		// the other's resting quote on the opposite side.
+		for i, offset := range []int64{0, 50 * tick} {
+			m := &requotingMaker{
+				symbol: "ABC/USD", mid: mid, half: 20 * tick, qty: mvBasePrecision,
+				pending: map[uint64]bool{}, askFirst: askFirst, offset: offset,
+			}
+			m.BaseActor = actor.NewBaseActor(uint64(i+1), connect(uint64(i+1)))
+			m.SetHandler(m)
+			m.AddTicker(time.Second, m.onTick)
+			m.SetTickerFactory(timers)
+			runner.AddActor(m)
+		}
+		buyer := &touchTaker{symbol: "ABC/USD", side: exchange.Buy, qty: mvBasePrecision / 100}
+		buyer.BaseActor = actor.NewBaseActor(3, connect(3))
+		buyer.SetHandler(buyer)
+		buyer.AddTicker(time.Second, buyer.onTick)
+		buyer.SetTickerFactory(timers)
+		runner.AddActor(buyer)
+		seller := &touchTaker{symbol: "ABC/USD", side: exchange.Sell, qty: mvBasePrecision / 100}
+		seller.BaseActor = actor.NewBaseActor(4, connect(4))
+		seller.SetHandler(seller)
+		seller.AddTicker(time.Second, seller.onTick)
+		seller.SetTickerFactory(timers)
+		runner.AddActor(seller)
+
+		if err := runner.Run(context.Background()); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		return 100 * float64(buyer.fills) / float64(maxInt(buyer.sent, 1)),
+			100 * float64(seller.fills) / float64(maxInt(seller.sent, 1)), 0, 0
+	}
+	bidFirstBuy, bidFirstSell, _, _ := run(false)
+	askFirstBuy, askFirstSell, _, _ := run(true)
+	t.Logf("bid submitted first: buy %.1f%% sell %.1f%%", bidFirstBuy, bidFirstSell)
+	t.Logf("ask submitted first: buy %.1f%% sell %.1f%%", askFirstBuy, askFirstSell)
+	if (bidFirstBuy < bidFirstSell) == (askFirstBuy < askFirstSell) {
+		t.Logf("submission order did not reverse which side starves")
+	}
 }
