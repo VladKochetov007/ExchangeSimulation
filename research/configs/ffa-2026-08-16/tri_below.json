@@ -52,9 +52,9 @@
   "parity_arb_count": 2,
   "futures_maker_self_anchored": true,
   "spot_maker_submit_before_cancel": true,
-  "experiment_id": "E-176",
-  "hypothesis_id": "FFA-91",
-  "description": "reference base: every class active, triangular threshold above its three-leg cost",
+  "experiment_id": "E-188",
+  "hypothesis_id": "FFA-98",
+  "description": "triangular threshold 5 bps against a three-leg cost of 15 bps",
   "spot_maker_requote_bps": 0,
   "spot_maker_count": 4,
   "triangle_arb_count": 2,
@@ -76,7 +76,7 @@
     "suppress_at": 0
   },
   "triangle_arb": {
-    "edge_bps": 20,
+    "edge_bps": 5,
     "lot_qty": 5000000
   },
   "rate_limit_tiers": {
