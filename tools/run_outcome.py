@@ -60,10 +60,12 @@ def build_warning(run: Path, head: str | None) -> str:
     revision = build.get("revision", "")
     if not revision or revision == "unknown":
         return "  [build unknown — cannot verify the source it ran]"
-    if build.get("modified"):
-        return f"  [built from a modified tree at {revision[:8]} — source not identified]"
+    # Staleness is checked first: a binary built from an older commit is the
+    # failure that has actually cost runs, and a modified tree must not hide it.
     if head and revision != head:
         return f"  [STALE: built at {revision[:8]}, current source is {head[:8]}]"
+    if build.get("modified"):
+        return f"  [built at {revision[:8]} from a modified tree]"
     return ""
 
 
