@@ -6,3 +6,9 @@
 /logs.tar.xz
 /.cache/
 /bin/
+
+# Working files for an in-progress analysis: backups taken before an edit,
+# one-off probes, smoke-run output. Kept in the repo rather than a system
+# temporary directory so a run and the notes about it stay together.
+/scratch/
+/loganalyzer
