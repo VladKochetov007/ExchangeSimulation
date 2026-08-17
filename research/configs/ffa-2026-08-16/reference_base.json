@@ -52,11 +52,11 @@
   "parity_arb_count": 2,
   "futures_maker_self_anchored": true,
   "spot_maker_submit_before_cancel": true,
-  "experiment_id": "E-174",
+  "experiment_id": "E-176",
   "hypothesis_id": "FFA-91",
-  "description": "reference base configuration, tenors short enough that dated contracts exist within the run",
+  "description": "reference base: every class active, thresholds heterogeneous, tenors inside the run",
   "spot_maker_requote_bps": 0,
-  "spot_maker_count": 2,
+  "spot_maker_count": 4,
   "triangle_arb_count": 2,
   "bootstrap_depth_count": 0,
   "fixed_distance_maker_count": 2,
@@ -106,5 +106,11 @@
   "short_future_tenor": 7200000000000,
   "long_future_tenor": 21600000000000,
   "short_option_tenor": 7200000000000,
-  "long_option_tenor": 21600000000000
+  "long_option_tenor": 21600000000000,
+  "spot_maker_requote_bps_tiers": [
+    0,
+    10,
+    25,
+    40
+  ]
 }
