@@ -57,6 +57,20 @@ TRUNCATED and INCOMPLETE. Only COLLAPSED counts as evidence about the market.
 Long runs are launched with `setsid` so the tool-call window does not bound the
 experiment.
 
+## Profile a configuration before comparing on it
+
+Four consecutive experiments were undermined by a property of the base
+configuration rather than by their hypothesis: a class that never traded, a
+class left unmetered by my own omission, budgets that collapsed the book, and a
+requote threshold that erased the arbitrage under study. Every one was found
+after the run, one failed arm at a time.
+
+`tools/characterize_run.py` reports requests, refusals and active result per
+class, and flags classes that never traded. Run it on a configuration and record
+which classes are comparable before designing a comparison on it. Seven of
+sixteen classes are inactive in the configuration used for E-170 to E-172, which
+the profile states in seconds and nine runs did not.
+
 ## Promotion rule
 
 A claim reaches `supported` only after it holds across at least three seeds and
