@@ -198,6 +198,12 @@ type Config struct {
 	// consensus index, which every participant then observes equally.
 	DegradedIndex *DegradedIndexConfig `json:"degraded_index"`
 
+	// RateLimitTiers gives named classes of participant their own request
+	// budgets, as venues publish different allowances for different clients.
+	// An empty map leaves every participant unmetered, which is what every
+	// scenario before request gating assumed.
+	RateLimitTiers map[string]RateLimitTier `json:"rate_limit_tiers"`
+
 	// Naive strategy counts. These are the textbook strategies from public
 	// trading newsletters, present so they compete against the inventory
 	// managing makers rather than being assumed away.
@@ -565,6 +571,7 @@ type Venue struct {
 	Exchange             *exchange.Exchange
 	Mount                *simulation.Mount
 	Participants         []Participant
+	RequestPolicy        *exchange.TieredRequestPolicy
 	SpotMakers           []*StoikovMarketMaker
 	PerpMaker            *StoikovMarketMaker
 	FuturesMaker         *derivsim.FuturesMarketMaker
@@ -665,6 +672,14 @@ type Sim struct {
 func (s *Sim) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	// Request budgets are attached once every participant is connected, since a
+	// tier is chosen from a participant's role.
+	for _, venue := range s.Venues {
+		if policy := buildRequestPolicy(s.Config.RateLimitTiers, venue.Participants); policy != nil {
+			venue.Exchange.RequestPolicy = policy
+			venue.RequestPolicy = policy
+		}
+	}
 	for _, venue := range s.Venues {
 		venue.Exchange.StartAutomation(ctx)
 	}
