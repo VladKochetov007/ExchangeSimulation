@@ -8,6 +8,9 @@ import "exchange_sim/ratelimit"
 type RequestPermit struct {
 	Held bool
 	Slot ratelimit.Slot
+	// ClientID names the queue the slot came from, so a policy holding one
+	// queue per participant returns the slot to the right one.
+	ClientID uint64
 }
 
 // RequestPolicy decides whether the venue will accept a request now. It is the
