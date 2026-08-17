@@ -90,9 +90,20 @@ dispersion settles at the round-trip transaction cost: the captured edge is
 10.12 basis points against a 10 bps cost and 4.34 against a 4 bps cost, across
 three seeds each. Doubling the number of arbitrageurs leaves it at 10.13.
 
-Nothing sets ten basis points in the configuration; it is two 5 bps taker fees,
-found by participants who are told no prices. A one-step latency advantage is
-worth 0.56 bps, which is exactly the margin between clearing that cost and not.
+The relation is quantitative and holds across a fivefold range of cost:
+
+| round-trip cost | captured edge | ratio |
+|---|---|---|
+| 4 bps | 4.34 | 1.09 |
+| 10 bps | 10.12 | 1.01 |
+| 20 bps | 21.32 | 1.07 |
+
+Three seeds at each level. Nothing sets these numbers in the configuration; they
+are the taker fee, found by participants who are told no prices. A one-step
+latency advantage is worth 0.56 bps, which is exactly the margin between
+clearing the cost and not. The ratio sitting a little above one is what
+selection implies: an arbitrageur fires only when a dislocation clears its cost,
+so it captures the cost plus the excess.
 
 Recorded as FFA-97 and detailed in E-184 to E-186.
 
