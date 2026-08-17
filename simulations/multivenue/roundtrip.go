@@ -150,3 +150,29 @@ func (t *RoundTripTrader) cross(side exchange.Side, quantity int64) bool {
 	t.pending = true
 	return true
 }
+
+// roundTripBalances sizes a round-trip desk's starting balances so it can open
+// on either side.
+//
+// Opening a long costs quote currency. A desk funded like a noise trader holds
+// far less quote than one lot is worth, so every buy is rejected for
+// INSUFFICIENT_BALANCE while every sell succeeds. The desk then stops being the
+// symmetric flow it exists to provide and becomes a persistent seller, which
+// biases the price path and leaves makers systematically long — the opposite of
+// the inventory mean reversion it was added for.
+//
+// Lots is how many lots of headroom to fund on each side, so the desk can carry
+// several positions at once without its holding period being cut short by its
+// own balance.
+func roundTripBalances(lotQty, price, basePrecision int64, lots int64, extraAssets []string) map[string]int64 {
+	if lots < 1 {
+		lots = 1
+	}
+	base := lotQty * lots
+	quote := lotQty * price / basePrecision * lots
+	balances := map[string]int64{"ABC": base, "USD": quote}
+	for _, asset := range extraAssets {
+		balances[asset] = base
+	}
+	return balances
+}

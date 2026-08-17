@@ -155,3 +155,35 @@ func TestMetaorderWithoutMinimumOrderSizeStillWorksTheResidual(t *testing.T) {
 }
 
 var _ = exchange.Buy
+
+// A round-trip desk funded like a noise trader can only ever sell: one lot of
+// quote currency costs far more than the noise balance holds, so every buy is
+// rejected and the desk becomes one-sided flow instead of the symmetric flow it
+// exists to provide.
+func TestRoundTripBalancesCoverALongOpen(t *testing.T) {
+	const (
+		basePrecision  int64 = 100_000_000
+		quotePrecision int64 = 1_000_000
+		price          int64 = 50_000 * quotePrecision
+		lotQty         int64 = basePrecision / 10
+	)
+	balances := roundTripBalances(lotQty, price, basePrecision, 20, nil)
+
+	oneLotCost := lotQty * price / basePrecision
+	if balances["USD"] < oneLotCost {
+		t.Fatalf("quote balance %d cannot fund one lot costing %d", balances["USD"], oneLotCost)
+	}
+	if balances["ABC"] < lotQty {
+		t.Fatalf("base balance %d cannot fund one lot of %d", balances["ABC"], lotQty)
+	}
+	if got, want := balances["USD"], 20*oneLotCost; got != want {
+		t.Fatalf("quote balance = %d, want %d lots of headroom", got, want)
+	}
+	if _, ok := balances["CDF"]; ok {
+		t.Fatal("cross asset funded when not requested")
+	}
+	withCross := roundTripBalances(lotQty, price, basePrecision, 20, []string{"CDF"})
+	if withCross["CDF"] != 20*lotQty {
+		t.Fatalf("cross asset balance = %d, want %d", withCross["CDF"], 20*lotQty)
+	}
+}

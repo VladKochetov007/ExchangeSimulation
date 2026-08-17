@@ -120,6 +120,11 @@ type Config struct {
 	RoundTripTraderCount int           `json:"round_trip_trader_count"`
 	RoundTripHold        time.Duration `json:"round_trip_hold"`
 	RoundTripLotQty      int64         `json:"round_trip_lot_qty"`
+	// RoundTripInventoryLots is how many lots of balance each round-trip desk
+	// is funded with on each side. Funding it below one lot of quote currency
+	// makes every long open fail, which turns symmetric flow into a persistent
+	// seller.
+	RoundTripInventoryLots int64 `json:"round_trip_inventory_lots"`
 
 	// ElasticSupplierCount adds participants with a downward-sloping demand
 	// curve, which is what absorbs a persistent drift: they sell as the price
@@ -416,6 +421,9 @@ func (c *Config) normalize() error {
 	if c.RoundTripHold == 0 {
 		c.RoundTripHold = 5 * time.Minute
 	}
+	if c.RoundTripInventoryLots == 0 {
+		c.RoundTripInventoryLots = 20
+	}
 	if c.RoundTripLotQty == 0 {
 		c.RoundTripLotQty = mvBasePrecision / 10
 	}
@@ -558,7 +566,7 @@ func (c *Config) normalize() error {
 		c.NoiseInterval <= 0 || c.GreekInterval <= 0 || c.ShortOptionTenor <= 0 || c.LongOptionTenor <= 0 ||
 		c.ShortFutureTenor <= 0 || c.LongFutureTenor <= 0 || c.StrikesPerSide < 0 || c.StrikeStepUSD <= 0 ||
 		c.OptionMaxStrikesPerExpiry <= 0 || c.NoiseTraderCount < 1 || c.OptionFlowCount < 1 ||
-		c.StoikovMaxVarianceMultiple <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 || c.ElasticSupplierCount < 0 || c.ElasticSupplierUnitsPerPercent <= 0 || c.CarryArbitrageurCount < 0 ||
+		c.StoikovMaxVarianceMultiple <= 0 || c.StoikovVolatilitySampleInterval < 0 || c.SpotTickQuoteUnits <= 0 || c.MakerIndexWeight <= 0 || c.MakerIndexWeight > 1 || c.MakerInventoryLimit <= 0 || c.RoundTripTraderCount < 0 || c.RoundTripHold <= 0 || c.RoundTripLotQty <= 0 || c.RoundTripInventoryLots <= 0 || c.ElasticSupplierCount < 0 || c.ElasticSupplierUnitsPerPercent <= 0 || c.CarryArbitrageurCount < 0 ||
 		c.CarryEntryBps <= 0 || c.CarryExitBps < 0 || c.CarryMaxPosition <= 0 || c.CarryLotQty <= 0 || c.MakerQuoteQty <= 0 || c.SpotMakerCount < 1 || c.OptionDealerCount < 1 || c.DatedCarryArbCount < 0 || c.ParityArbCount < 0 || c.FuturesMakerCount < 1 || c.FundingMaxRateBps <= 0 || c.FundingIntervalSeconds <= 0 || c.LatentLiquidityCount < 0 ||
 		c.CrossVenueArbLotQty < 0 || c.CrossVenueArbMaxAttempts < 0 ||
 		c.OptionIV <= 0 || c.StoikovRiskAversion <= 0 || c.StoikovFillDecay <= 0 || c.StoikovVariancePerSecond < 0 ||
@@ -1364,7 +1372,12 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	}
 
 	for participant := 0; participant < s.Config.RoundTripTraderCount; participant++ {
-		trader := NewRoundTripTrader(nextActor(), connect(fmt.Sprintf("round_trip_%d", participant+1), noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), RoundTripTraderConfig{
+		var crossAssets []string
+		if s.Config.CrossAssetSpotGraph {
+			crossAssets = []string{"CDF"}
+		}
+		roundTripFunding := roundTripBalances(s.Config.RoundTripLotQty, mvBootstrapPrice, mvBasePrecision, s.Config.RoundTripInventoryLots, crossAssets)
+		trader := NewRoundTripTrader(nextActor(), connect(fmt.Sprintf("round_trip_%d", participant+1), roundTripFunding, 10_000_000*mvQuotePrecision, noiseFee), RoundTripTraderConfig{
 			Symbol: "ABC/USD", BasePrecision: mvBasePrecision, LotQty: s.Config.RoundTripLotQty,
 			Interval: s.Config.NoiseInterval, HoldDuration: s.Config.RoundTripHold,
 			OpenProbability: 0.5, Seed: flowSeed(s.Config.Seed, venueIndex, participant, 11),
