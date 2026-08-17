@@ -42,6 +42,13 @@ type MetaorderTraderConfig struct {
 	ChildInterval     time.Duration `json:"child_interval"`
 	ParticipationRate float64       `json:"participation_rate"`
 	MinChildQty       int64         `json:"min_child_qty"`
+	// MinOrderSize is the venue's minimum order size. A parent whose residual
+	// falls below it can never be completed: the exchange rejects every such
+	// child for INVALID_QTY, and the agent would resubmit until its horizon
+	// expired, spending its whole request budget on orders that cannot fill.
+	// Zero leaves the residual to be worked, which is only correct on a venue
+	// that has no minimum.
+	MinOrderSize int64 `json:"min_order_size"`
 
 	// RestInterval separates one parent from the next, so impact measurements
 	// do not overlap.
@@ -77,6 +84,8 @@ func (c MetaorderTraderConfig) validate() error {
 		return errors.New("multivenue: metaorder participation_rate must not be negative")
 	case c.MaxDuration < 0:
 		return errors.New("multivenue: metaorder max_duration must not be negative")
+	case c.MinOrderSize < 0:
+		return errors.New("multivenue: metaorder min_order_size must not be negative")
 	case c.MinChildQty <= 0 && c.ParticipationRate <= 0:
 		return errors.New("multivenue: metaorder needs min_child_qty or participation_rate")
 	}
@@ -257,6 +266,13 @@ func (m *MetaorderTrader) executeChild(timestamp int64) {
 		m.finish(timestamp, true)
 		return
 	}
+	// The venue cannot accept a child this small, so no further child can
+	// reduce the residual. Retire the parent rather than resubmitting until
+	// the horizon expires.
+	if m.cfg.MinOrderSize > 0 && remaining < m.cfg.MinOrderSize {
+		m.finish(timestamp, true)
+		return
+	}
 	if m.cfg.MaxDuration > 0 && timestamp-m.startTS >= int64(m.cfg.MaxDuration) {
 		m.finish(timestamp, false)
 		return
@@ -301,7 +317,6 @@ func (m *MetaorderTrader) executeChild(timestamp int64) {
 			price = price / tick * tick
 		}
 	}
-	m.childVolume = m.marketVolume
 	m.childVolume = m.externalVolume()
 	m.SubmitOrderWithTimeInForce(m.cfg.Symbol, m.side, exchange.LimitOrder, price, child, exchange.IOC)
 	m.pendingChild = true
