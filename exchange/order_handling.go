@@ -103,7 +103,7 @@ func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Respons
 	e.processExecutions(book, result.Executions, order, spotPlan)
 	e.removeMakerOrders(book, result.Executions)
 	e.publishLevels(book, levels)
-	e.restOrReleaseOrder(client, book, order, req)
+	e.restOrReleaseOrder(client, book, order, req, log)
 
 	return Response{RequestID: req.RequestID, Success: true, Data: e.NextOrderID}
 }
@@ -1396,7 +1396,7 @@ func (e *DefaultExchange) publishLevels(book *OrderBook, levels map[int64]Side) 
 
 // restOrReleaseOrder either rests the order as a GTC limit in the book or releases its funds.
 // Caller must hold e.mu.Lock().
-func (e *DefaultExchange) restOrReleaseOrder(client *Client, book *OrderBook, order *Order, req *OrderRequest) {
+func (e *DefaultExchange) restOrReleaseOrder(client *Client, book *OrderBook, order *Order, req *OrderRequest, log Logger) {
 	if order.Status != Filled && order.Status != Cancelled && req.Type == LimitOrder && req.TimeInForce == GTC {
 		e.cancelOwnCrossingQuotes(client, book, order)
 		var rested bool
@@ -1439,10 +1439,31 @@ func (e *DefaultExchange) restOrReleaseOrder(client *Client, book *OrderBook, or
 					RemainingQty: remainingQty,
 				}})
 			}
+			// Without this the discarded remainder leaves no trace, and an
+			// order that repeatedly missed the touch is indistinguishable in
+			// the log from an agent that never traded.
+			if log != nil {
+				log.LogEvent(e.Clock.NowUnixNano(), order.ClientID, "OrderCancelled", map[string]any{
+					"order_id":      order.ID,
+					"request_id":    req.RequestID,
+					"remaining_qty": remainingQty,
+					"reason":        expiryReason(req.TimeInForce),
+				})
+			}
 		}
 		releaseReserved(client, book.Instrument, order)
 		putOrder(order)
 	}
+}
+
+// expiryReason names why a non-resting order discarded its remainder, so the
+// log distinguishes an immediate-or-cancel that missed from a market order that
+// exhausted the book.
+func expiryReason(tif TimeInForce) string {
+	if tif == IOC {
+		return "IOC_EXPIRED"
+	}
+	return "NO_LIQUIDITY"
 }
 
 // cancelOwnCrossingQuotes implements self-trade prevention with cancel-maker
