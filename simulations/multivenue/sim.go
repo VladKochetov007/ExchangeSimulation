@@ -1280,6 +1280,11 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 				cfg = *s.Config.TriangleArb
 			}
 			cfg.BaseQuote, cfg.CrossQuote, cfg.BaseCross = "ABC/USD", "CDF/USD", "ABC/CDF"
+			// The desk pays the venue's taker fee on every leg it crosses, so
+			// its entry test has to know what the venue charges.
+			if cfg.TakerFeeBps == 0 {
+				cfg.TakerFeeBps = s.Config.TakerFeeBps
+			}
 			if cfg.CheckInterval <= 0 {
 				cfg.CheckInterval = s.Config.QuoteInterval
 			}

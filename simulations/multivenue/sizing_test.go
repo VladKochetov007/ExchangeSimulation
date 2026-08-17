@@ -48,3 +48,30 @@ func TestMakerMinHalfSpreadTicksIsConfigurable(t *testing.T) {
 		t.Fatalf("configured half-spread floor overwritten: got %d, want 12", cfg.MakerMinHalfSpreadTicks)
 	}
 }
+
+// A triangular loop crosses three books, so its round trip costs three taker
+// fees. A desk that fires on a configured edge without adding that cost trades
+// the same way at any fee: measured over eight hours it earned 3527 USD at 2
+// bps, lost 59 at 5 and lost 6522 at 10, while the cross-rate deviation stayed
+// at a 17.5 bps maximum in every case.
+func TestTriangleRequiredEdgeIncludesEveryLegsFee(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edge int64
+		fee  int64
+		legs int64
+		want float64
+	}{
+		{"no fee leaves the configured edge", 5, 0, 0, 5},
+		{"three legs by default", 5, 10, 0, 35},
+		{"explicit leg count", 5, 10, 2, 25},
+		{"fee alone", 0, 4, 3, 12},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			desk := &TriangleArbTaker{cfg: TriangleArbConfig{EdgeBps: tc.edge, TakerFeeBps: tc.fee, Legs: tc.legs}}
+			if got := desk.requiredEdgeBps(); got != tc.want {
+				t.Fatalf("requiredEdgeBps() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

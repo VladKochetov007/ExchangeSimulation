@@ -301,7 +301,16 @@ type TriangleArbConfig struct {
 	BaseCross  string `json:"base_cross"`  // ABC/CDF
 	// EdgeBps is the round-trip profit required before firing, which must at
 	// least cover the taker fee on all three legs.
-	EdgeBps       int64         `json:"edge_bps"`
+	EdgeBps int64 `json:"edge_bps"`
+	// TakerFeeBps is what each leg of the loop pays. A triangular loop crosses
+	// three books, so the round trip costs three times this, and an edge below
+	// that cost is not an opportunity. Without it the desk fires on a
+	// configured trigger regardless of what trading costs: measured over eight
+	// hours it traded identically at 2, 5 and 10 bps of fee, earning 3527 USD,
+	// losing 59 and losing 6522, and the cross-rate bound never moved.
+	TakerFeeBps int64 `json:"taker_fee_bps"`
+	// Legs is how many books the loop crosses. Zero means three.
+	Legs          int64         `json:"legs"`
 	LotQty        int64         `json:"lot_qty"`
 	CheckInterval time.Duration `json:"check_interval"`
 	MaxFirings    int64         `json:"max_firings"`
@@ -368,7 +377,7 @@ func (t *TriangleArbTaker) onTick(time.Time) {
 	// quote. Profitable when the implied cross rate beats the direct one.
 	implied := float64(baseCross.bid) * float64(crossQuote.bid)
 	direct := float64(baseQuote.ask)
-	if gainBps(implied/float64(quoteUnit), direct) >= float64(t.cfg.EdgeBps) {
+	if gainBps(implied/float64(quoteUnit), direct) >= t.requiredEdgeBps() {
 		t.fire(t.cfg.BaseQuote, exchange.Buy)
 		t.fire(t.cfg.BaseCross, exchange.Sell)
 		t.fire(t.cfg.CrossQuote, exchange.Sell)
@@ -378,12 +387,22 @@ func (t *TriangleArbTaker) onTick(time.Time) {
 
 	// Reverse loop: buy cross with quote, buy base with cross, sell base for quote.
 	impliedReverse := float64(baseCross.ask) * float64(crossQuote.ask)
-	if gainBps(float64(baseQuote.bid), impliedReverse/float64(quoteUnit)) >= float64(t.cfg.EdgeBps) {
+	if gainBps(float64(baseQuote.bid), impliedReverse/float64(quoteUnit)) >= t.requiredEdgeBps() {
 		t.fire(t.cfg.CrossQuote, exchange.Buy)
 		t.fire(t.cfg.BaseCross, exchange.Buy)
 		t.fire(t.cfg.BaseQuote, exchange.Sell)
 		t.firings++
 	}
+}
+
+// requiredEdgeBps is the gain a loop must show before it is worth firing: the
+// configured edge plus the cost of crossing every leg.
+func (t *TriangleArbTaker) requiredEdgeBps() float64 {
+	legs := t.cfg.Legs
+	if legs <= 0 {
+		legs = 3
+	}
+	return float64(t.cfg.EdgeBps + legs*t.cfg.TakerFeeBps)
 }
 
 // quoteUnit converts the ABC/CDF price, which is quoted in CDF units, into the
