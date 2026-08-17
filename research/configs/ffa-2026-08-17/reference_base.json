@@ -28,7 +28,7 @@
   "carry_arbitrageur_count": 2,
   "carry_entry_bps": 2,
   "carry_exit_bps": 1,
-  "maker_inventory_skew_bps": 5,
+  "maker_inventory_skew_bps": 3,
   "carry_lot_qty": 200000000,
   "maker_quote_qty": 500000000,
   "metaorder_traders": {
@@ -52,7 +52,7 @@
   "parity_arb_count": 2,
   "futures_maker_self_anchored": true,
   "spot_maker_submit_before_cancel": true,
-  "description": "Reference population, generation 2026-08-17. Inventory skew 5 bps: at 25 bps makers cross each other and take 98.5% of volume; at 1 bps their inventory runs away. See E-214.",
+  "description": "Reference population, generation 2026-08-17. Inventory skew 3 bps. Above 8 bps makers cross each other and take most of the volume (E-214); at 5 bps and above they are adversely selected into insolvency while the carry desk profits (E-216); at 1 bps their inventory drifts to a -135 ABC median. 3 bps is the only setting tested where makers are solvent, churn is negligible and inventory stays bounded.",
   "spot_maker_requote_bps": 0,
   "spot_maker_count": 4,
   "triangle_arb_count": 2,
