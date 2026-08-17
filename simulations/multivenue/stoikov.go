@@ -412,14 +412,6 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 	if len(mm.pending) != 0 || mm.cfg.BasePrecision <= 0 || mm.cfg.QuotePrecision <= 0 || mm.cfg.TickSize <= 0 || mm.cfg.QuoteQty <= 0 {
 		return
 	}
-	// Hedging is not part of the quoting decision. A maker whose quote has not
-	// moved has nothing to resubmit, but it has still been filled since it last
-	// hedged and still carries that risk. Running the hedge only inside the
-	// requote path meant a calm market silently disabled risk management: in an
-	// eight-hour run the makers kept filling 140 times a minute after their
-	// quotes stopped moving, never hedged again, and left the perpetual to
-	// noise flow with the basis 230 basis points wide.
-	mm.hedgeDelta()
 	forward := mm.referencePrice()
 	// Convert the relative parameters into the absolute quote units the
 	// formula expects. Variance is quote-price^2 and both risk aversion and
@@ -474,6 +466,7 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 		mm.cancelResting(previousBid, previousAsk)
 	}
 	mm.bidID, mm.askID = 0, 0
+	mm.hedgeDelta()
 	mm.bidPrice, mm.askPrice = bid, ask
 	bidRequest := mm.SubmitOrder(mm.cfg.Symbol, exchange.Buy, exchange.LimitOrder, bid, mm.cfg.QuoteQty)
 	mm.pending[bidRequest] = stoikovBid
