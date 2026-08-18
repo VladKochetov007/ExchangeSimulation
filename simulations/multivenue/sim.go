@@ -130,6 +130,18 @@ type Config struct {
 	// no fat tails and no order-flow memory — measured on the reference
 	// population, excess kurtosis was -0.60 and the sign autocorrelation at lag
 	// 50 was 0.013, where traded markets show strong positive values for both.
+	// NoiseOrderQty is the size of one uninformed order. It has to be
+	// configurable and it has to be set against MakerQuoteQty: an order worth a
+	// fraction of the quoted depth is absorbed whole and never moves a price,
+	// so the return series collapses to the bid-ask bounce. The reference
+	// population quoted 5 ABC and traded 0.01, a ratio of five hundred to one.
+	NoiseOrderQty int64 `json:"noise_order_qty"`
+	// NoiseSizeParetoAlpha draws order size from a Pareto tail when positive,
+	// so that an occasional order walks the book instead of every order being
+	// absorbed at the touch.
+	NoiseSizeParetoAlpha float64 `json:"noise_size_pareto_alpha"`
+	NoiseSizeCapMultiple float64 `json:"noise_size_cap_multiple"`
+
 	NoiseImbalanceCoupling float64 `json:"noise_imbalance_coupling"`
 	NoiseExciteAlpha       float64 `json:"noise_excite_alpha"`
 	NoiseExciteBetaPerSec  float64 `json:"noise_excite_beta_per_sec"`
@@ -1230,18 +1242,24 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 
 	noiseBalances := map[string]int64{"ABC": 100 * mvBasePrecision, "USD": 100 * mvQuotePrecision}
 	noiseSymbols := []string{"ABC/USD", "ABC-PERP"}
-	noiseTargetQtys := map[string]int64{"ABC/USD": mvBasePrecision / 100, "ABC-PERP": mvBasePrecision / 100}
+	noiseQty := s.Config.NoiseOrderQty
+	if noiseQty <= 0 {
+		noiseQty = mvBasePrecision / 100
+	}
+	noiseTargetQtys := map[string]int64{"ABC/USD": noiseQty, "ABC-PERP": noiseQty}
 	if s.Config.CrossAssetSpotGraph {
 		noiseBalances["CDF"] = 100 * mvBasePrecision
 		noiseSymbols = append(noiseSymbols, "CDF/USD", "ABC/CDF")
-		noiseTargetQtys["CDF/USD"] = mvBasePrecision / 100
-		noiseTargetQtys["ABC/CDF"] = mvBasePrecision / 100
+		noiseTargetQtys["CDF/USD"] = noiseQty
+		noiseTargetQtys["ABC/CDF"] = noiseQty
 	}
 	noiseFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: s.Config.TakerFeeBps, InQuote: true}
 	for participant := 0; participant < s.Config.NoiseTraderCount; participant++ {
 		noise := feesim.NewRandomTaker(nextActor(), connect(fmt.Sprintf("noise_flow_%d", participant+1), noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), feesim.TakerConfig{
 			Symbols: noiseSymbols, TargetQtys: noiseTargetQtys,
 			TakeInterval: s.Config.NoiseInterval, Seed: flowSeed(s.Config.Seed, venueIndex, participant, 1),
+			SizeParetoAlpha:   s.Config.NoiseSizeParetoAlpha,
+			SizeCapMultiple:   s.Config.NoiseSizeCapMultiple,
 			ImbalanceCoupling: s.Config.NoiseImbalanceCoupling,
 			ExciteAlpha:       s.Config.NoiseExciteAlpha,
 			ExciteBetaPerSec:  s.Config.NoiseExciteBetaPerSec,

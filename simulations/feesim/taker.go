@@ -26,6 +26,21 @@ type TakerConfig struct {
 	// at ExciteBetaPerSec; each tick fires 1+floor(excitation) orders (cap 5).
 	ExciteAlpha      float64
 	ExciteBetaPerSec float64
+
+	// SizeParetoAlpha, when positive, draws order size from a Pareto tail
+	// around the target rather than uniformly within a band of it.
+	//
+	// Uniform sizes far below the quoted depth cannot move a price: an order
+	// worth a fraction of the touch is absorbed whole, so the price only ever
+	// changes when a maker reprices, and the return distribution collapses to
+	// the bid-ask bounce. Measured that way the reference market had an excess
+	// kurtosis of -0.60 and a Hill tail index of 39, where traded markets show
+	// fat tails and an index near three. A heavy size tail is what lets an
+	// occasional order walk the book.
+	SizeParetoAlpha float64
+	// SizeCapMultiple bounds a drawn size at this multiple of the target, so a
+	// tail draw cannot exhaust an account in one order. Zero means fifty.
+	SizeCapMultiple float64
 }
 
 type RandomTaker struct {
@@ -103,14 +118,47 @@ func (rt *RandomTaker) onTick(_ time.Time) {
 	}
 }
 
+// drawSize returns one order's quantity: uniform within half the target when no
+// tail is configured, and a Pareto draw around it when one is.
+func (rt *RandomTaker) drawSize(target int64) int64 {
+	if target <= 0 {
+		return 0
+	}
+	if rt.cfg.SizeParetoAlpha <= 0 {
+		return target/2 + rt.rng.Int63n(target)
+	}
+	cap := rt.cfg.SizeCapMultiple
+	if cap <= 0 {
+		cap = 50
+	}
+	uniform := rt.rng.Float64()
+	if uniform <= 0 {
+		uniform = 1e-12
+	}
+	scaled := float64(target) * math.Pow(uniform, -1/rt.cfg.SizeParetoAlpha)
+	if limit := float64(target) * cap; scaled > limit {
+		scaled = limit
+	}
+	if !finiteSize(scaled) {
+		return target
+	}
+	return int64(scaled)
+}
+
+func finiteSize(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 1
+}
+
 func (rt *RandomTaker) fireOrder() {
 	sym := rt.cfg.Symbols[rt.rng.Intn(len(rt.cfg.Symbols))]
 	baseQty := rt.cfg.TargetQtys[sym]
 	if baseQty == 0 {
 		return
 	}
-	// ±50% randomness around target qty
-	qty := baseQty/2 + rt.rng.Int63n(baseQty)
+	qty := rt.drawSize(baseQty)
+	if qty <= 0 {
+		return
+	}
 
 	pBuy := 0.5
 	if c := rt.cfg.ImbalanceCoupling; c != 0 {
