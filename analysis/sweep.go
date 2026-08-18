@@ -29,6 +29,11 @@ type Sweep struct {
 	// SweepTicksWhenMulti is the same span in ticks. A multi-price span below
 	// one tick would mean the measurement is broken, which basis points hide.
 	SweepTicksWhenMulti Distribution `json:"sweep_ticks_when_multi"`
+	// ElapsedSecondsWhenMulti is the time between a multi-price order's first
+	// and last fill. A genuine sweep is one crossing and takes no time; a large
+	// elapsed value means the identifier was reused across separate crossings,
+	// which would count a later repricing as if it were a walk down the book.
+	ElapsedSecondsWhenMulti Distribution `json:"elapsed_seconds_when_multi"`
 }
 
 // MeanSpanBps is the expected span across all orders, including the zeros.
@@ -42,12 +47,21 @@ func (s *Sweep) MeanSpanBps() float64 { return s.SweepBps.Mean }
 // MeasureSweep groups a book's executions by the order that crossed.
 func (r *Run) MeasureSweep(opts BookShapeOptions) (*Sweep, error) {
 	type orderFills struct {
-		best, worst int64
-		prices      map[int64]struct{}
-		fills       int
+		best, worst         int64
+		firstSeen, lastSeen int64
+		prices              map[int64]struct{}
+		fills               int
+	}
+	// Order identifiers are allocated per venue and every venue starts at one,
+	// so pooling books across venues would merge unrelated orders into
+	// fictitious sweeps. Keying on the venue costs nothing and removes a trap
+	// that a mistyped selection would otherwise spring silently.
+	type orderKey struct {
+		venue   string
+		orderID uint64
 	}
 	var mu sync.Mutex
-	byOrder := map[uint64]*orderFills{}
+	byOrder := map[orderKey]*orderFills{}
 
 	type payload struct {
 		Price        int64  `json:"price"`
@@ -60,10 +74,15 @@ func (r *Run) MeasureSweep(opts BookShapeOptions) (*Sweep, error) {
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		entry := byOrder[decoded.TakerOrderID]
+		key := orderKey{venue: event.VenueID, orderID: decoded.TakerOrderID}
+		entry := byOrder[key]
 		if entry == nil {
-			entry = &orderFills{best: decoded.Price, worst: decoded.Price, prices: map[int64]struct{}{}}
-			byOrder[decoded.TakerOrderID] = entry
+			entry = &orderFills{
+				best: decoded.Price, worst: decoded.Price,
+				firstSeen: event.SimTS, lastSeen: event.SimTS,
+				prices: map[int64]struct{}{},
+			}
+			byOrder[key] = entry
 		}
 		entry.prices[decoded.Price] = struct{}{}
 		entry.fills++
@@ -73,13 +92,19 @@ func (r *Run) MeasureSweep(opts BookShapeOptions) (*Sweep, error) {
 		if decoded.Price > entry.worst {
 			entry.worst = decoded.Price
 		}
+		if event.SimTS < entry.firstSeen {
+			entry.firstSeen = event.SimTS
+		}
+		if event.SimTS > entry.lastSeen {
+			entry.lastSeen = event.SimTS
+		}
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	sweep := &Sweep{Orders: len(byOrder)}
-	var pricesPer, spans, spansWhenMulti, ticksWhenMulti, fillsPer []float64
+	var pricesPer, spans, spansWhenMulti, ticksWhenMulti, elapsedWhenMulti, fillsPer []float64
 	for _, entry := range byOrder {
 		pricesPer = append(pricesPer, float64(len(entry.prices)))
 		fillsPer = append(fillsPer, float64(entry.fills))
@@ -96,6 +121,7 @@ func (r *Run) MeasureSweep(opts BookShapeOptions) (*Sweep, error) {
 			if opts.TickSize > 0 {
 				ticksWhenMulti = append(ticksWhenMulti, float64(entry.worst-entry.best)/float64(opts.TickSize))
 			}
+			elapsedWhenMulti = append(elapsedWhenMulti, float64(entry.lastSeen-entry.firstSeen)/1e9)
 		}
 	}
 	sweep.PricesPerOrder = Describe(pricesPer)
@@ -103,6 +129,7 @@ func (r *Run) MeasureSweep(opts BookShapeOptions) (*Sweep, error) {
 	sweep.SweepBpsWhenMulti = Describe(spansWhenMulti)
 	sweep.FillsPerOrder = Describe(fillsPer)
 	sweep.SweepTicksWhenMulti = Describe(ticksWhenMulti)
+	sweep.ElapsedSecondsWhenMulti = Describe(elapsedWhenMulti)
 	return sweep, nil
 }
 

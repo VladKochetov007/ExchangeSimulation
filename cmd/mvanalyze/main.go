@@ -194,12 +194,13 @@ func main() {
 				// when asking what sweeping contributes; the conditional
 				// median is not an estimator of anything.
 				fmt.Printf("%-20s orders %7d  multi-price %5.2f%%  fills/order mean %4.2f  "+
-					"mean-span %6.4f bps | when multi: med %5.2f mean %5.2f p90 %5.2f max %6.2f bps, med %4.1f ticks\n",
+					"mean-span %6.4f bps | when multi: med %5.2f mean %5.2f p90 %5.2f max %6.2f bps, med %4.1f ticks, elapsed med %5.2f p99 %6.2f s\n",
 					dir, sweep.Orders, 100*sweep.MultiPriceFraction(),
 					sweep.FillsPerOrder.Mean, sweep.MeanSpanBps(),
 					sweep.SweepBpsWhenMulti.Median, sweep.SweepBpsWhenMulti.Mean,
 					sweep.SweepBpsWhenMulti.P90, sweep.SweepBpsWhenMulti.Max,
-					sweep.SweepTicksWhenMulti.Median)
+					sweep.SweepTicksWhenMulti.Median,
+					sweep.ElapsedSecondsWhenMulti.Median, sweep.ElapsedSecondsWhenMulti.P99)
 			})
 		case "sweepimpact":
 			tape, err := run.Tape(*venue, *base)

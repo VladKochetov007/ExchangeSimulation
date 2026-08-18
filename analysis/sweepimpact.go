@@ -8,6 +8,10 @@ import (
 // SweptOrders identifies the aggressive orders whose fills spanned more than
 // one price, which is the observable signature of an order consuming depth
 // past the touch.
+//
+// A tape covers one venue's book, so the order identifier alone is a safe key
+// here; MeasureSweep, which is given a file list directly, keys on the venue
+// as well.
 func (t *TradeTape) SweptOrders() map[uint64]bool {
 	seen := map[uint64]map[int64]struct{}{}
 	for i, orderID := range t.TakerOrderIDs {
