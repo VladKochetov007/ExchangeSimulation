@@ -38,6 +38,9 @@ type ImpactOptions struct {
 	HorizonTrades int
 	// Buckets is how many size groups to form. Zero uses ten.
 	Buckets int
+	// Role, when set, keeps only trades whose aggressor belongs to that class.
+	// Pooling every participant measures the mix rather than the response.
+	Role string
 }
 
 // Impact measures the signed price response against trade size.
@@ -66,6 +69,9 @@ func (t *TradeTape) Impact(opts ImpactOptions) ImpactCurve {
 	// from the smallest trade to the largest and out to a thousand trades ahead.
 	for i := 1; i+horizon < len(t.Prices); i++ {
 		if t.Qtys[i] <= 0 {
+			continue
+		}
+		if opts.Role != "" && (i >= len(t.Roles) || t.Roles[i] != opts.Role) {
 			continue
 		}
 		reference := int64(0)

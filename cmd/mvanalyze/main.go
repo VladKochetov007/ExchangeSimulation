@@ -26,6 +26,7 @@ func main() {
 	desks := flag.Int("desks", 6, "execution desks, for the stall horizon denominator")
 	runSeconds := flag.Float64("run-seconds", 8*3600, "run length in seconds")
 	horizonTrades := flag.Int("horizon-trades", 10, "trades ahead over which impact is measured")
+	impactRole := flag.String("impact-role", "", "restrict impact to one participant class")
 	asJSON := flag.Bool("json", false, "emit JSON instead of a table")
 	flag.Parse()
 
@@ -83,7 +84,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "%s: no trades for %s at venue %s\n", dir, *base, *venue)
 				os.Exit(1)
 			}
-			curve := tape.Impact(analysis.ImpactOptions{HorizonTrades: *horizonTrades})
+			curve := tape.Impact(analysis.ImpactOptions{HorizonTrades: *horizonTrades, Role: *impactRole})
 			emit(dir, curve, *asJSON, func() {
 				// An exponent from a poor fit is a number without a meaning, so
 				// it is withheld rather than printed beside its own R2.

@@ -16,6 +16,15 @@ type TradeTape struct {
 	Qtys       []int64
 	// Signs are the aggressor's direction: +1 when a buy lifted the offer.
 	Signs []int8
+	// Roles are the participant class of each trade's aggressor, recovered by
+	// joining the taker order id to the client that placed it.
+	//
+	// Impact pooled over every participant measures who trades at each size
+	// rather than what a trade does: in one run the response rose to 0.32 bps
+	// by 0.05 ABC, turned negative between 0.22 and 0.55 where desks trading
+	// against the move concentrate, and rose again to 0.37 at 2.8 ABC. Only a
+	// single class gives a curve with one meaning.
+	Roles []string
 	// PreMid is the book midpoint last published before each trade, which is
 	// the only unbiased reference for measuring impact.
 	//
@@ -37,9 +46,32 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 		}
 	}
 	type payload struct {
-		Price int64  `json:"price"`
-		Qty   int64  `json:"qty"`
-		Side  string `json:"side"`
+		Price        int64  `json:"price"`
+		Qty          int64  `json:"qty"`
+		Side         string `json:"side"`
+		TakerOrderID uint64 `json:"taker_order_id"`
+	}
+	type acceptPayload struct {
+		OrderID uint64 `json:"order_id"`
+	}
+	// Order ownership has to be recovered before the trades are read, because a
+	// trade names only the order that crossed.
+	owner := map[uint64]string{}
+	var ownerMu sync.Mutex
+	if err := r.Scan(ScanOptions{Events: []string{"OrderAccepted"}, Files: files, FilesSelected: true}, func(event Event) {
+		var accepted acceptPayload
+		if event.Decode(&accepted) != nil || accepted.OrderID == 0 {
+			return
+		}
+		role := r.Role(event.VenueID, event.ClientID)
+		if role == "" {
+			return
+		}
+		ownerMu.Lock()
+		owner[accepted.OrderID] = role
+		ownerMu.Unlock()
+	}); err != nil {
+		return nil, err
 	}
 	type record struct {
 		ts    int64
@@ -47,6 +79,7 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 		qty   int64
 		sign  int8
 		mid   int64
+		role  string
 	}
 	var mu sync.Mutex
 	var records []record
@@ -116,7 +149,7 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 			sign = -1
 		}
 		mu.Lock()
-		records = append(records, record{event.SimTS, decoded.Price, decoded.Qty, sign, 0})
+		records = append(records, record{event.SimTS, decoded.Price, decoded.Qty, sign, 0, owner[decoded.TakerOrderID]})
 		mu.Unlock()
 	})
 	if err != nil {
@@ -136,6 +169,7 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 		tape.Qtys = append(tape.Qtys, rec.qty)
 		tape.Signs = append(tape.Signs, rec.sign)
 		tape.PreMid = append(tape.PreMid, lastMidAtOrBefore(rec.ts))
+		tape.Roles = append(tape.Roles, rec.role)
 	}
 	return tape, nil
 }

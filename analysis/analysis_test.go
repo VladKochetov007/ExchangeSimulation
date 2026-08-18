@@ -646,3 +646,57 @@ func TestImpactRecoversAKnownExponent(t *testing.T) {
 		t.Errorf("an empty tape produced a curve: %+v", empty)
 	}
 }
+
+// Impact pooled over every participant measures who trades at each size rather
+// than what a trade does. Conditioning on one class is what gives the curve a
+// single meaning.
+func TestImpactConditionsOnParticipantClass(t *testing.T) {
+	tape := &TradeTape{}
+	price := 1e9
+	for i := 0; i < 4000; i++ {
+		role := "noise_flow"
+		// One class pushes the price with its trades, the other trades against
+		// the move. Pooled they cancel; separated they are opposite.
+		sign := int8(1)
+		move := 1.0
+		if i%2 == 1 {
+			role = "arb"
+			move = -1.0
+		}
+		tape.Prices = append(tape.Prices, int64(price))
+		tape.PreMid = append(tape.PreMid, int64(price))
+		tape.Qtys = append(tape.Qtys, int64(1000+i%50))
+		tape.Signs = append(tape.Signs, sign)
+		tape.Roles = append(tape.Roles, role)
+		price *= math.Exp(move * 0.5 / 1e4)
+	}
+	// One trade ahead, so each observation spans exactly the move that trade
+	// made. A longer horizon here would span one push and one opposing move and
+	// net to zero for both classes.
+	pooled := tape.Impact(ImpactOptions{HorizonTrades: 1, Buckets: 4})
+	noise := tape.Impact(ImpactOptions{HorizonTrades: 1, Buckets: 4, Role: "noise_flow"})
+	arb := tape.Impact(ImpactOptions{HorizonTrades: 1, Buckets: 4, Role: "arb"})
+
+	if noise.N == 0 || arb.N == 0 {
+		t.Fatalf("conditioning found no trades: noise %d, arb %d", noise.N, arb.N)
+	}
+	if noise.N+arb.N != pooled.N {
+		t.Errorf("classes sum to %d against a pooled %d", noise.N+arb.N, pooled.N)
+	}
+	meanOf := func(curve ImpactCurve) float64 {
+		var total float64
+		for _, bucket := range curve.Buckets {
+			total += bucket.MeanResponse
+		}
+		return total / float64(len(curve.Buckets))
+	}
+	if meanOf(noise) <= 0 {
+		t.Errorf("the pushing class has a mean response of %.3f, want positive", meanOf(noise))
+	}
+	if meanOf(arb) >= 0 {
+		t.Errorf("the opposing class has a mean response of %.3f, want negative", meanOf(arb))
+	}
+	if unknown := tape.Impact(ImpactOptions{Role: "absent"}); unknown.N != 0 {
+		t.Errorf("an absent class produced %d observations", unknown.N)
+	}
+}
