@@ -1,10 +1,15 @@
 package feesim
 
 import (
+	"context"
 	"math"
 	"math/rand"
 	"sort"
 	"testing"
+	"time"
+
+	"exchange_sim/actor"
+	"exchange_sim/exchange"
 )
 
 // An order worth a fraction of the quoted depth is absorbed whole and cannot
@@ -64,5 +69,55 @@ func TestDrawSizeRejectsNonPositiveTarget(t *testing.T) {
 	taker := &RandomTaker{cfg: TakerConfig{SizeParetoAlpha: 1.5}, rng: rand.New(rand.NewSource(1))}
 	if got := taker.drawSize(0); got != 0 {
 		t.Fatalf("drawSize(0) = %d, want 0", got)
+	}
+}
+
+// An order larger than the book does not walk it: the engine fills what is
+// there and discards the rest with no liquidity. Because the side is drawn
+// before the book is consulted, that truncation lands on whichever side is
+// thinner, so executed flow becomes conditioned on book state even though the
+// drawn flow is not. Measured with a heavy size tail this produced 1557
+// evaporated orders against 11 with uniform sizes, and a 3.8% net selling
+// imbalance from a requested imbalance of 1.3%.
+func TestTakerBoundsOrdersByTheDepthFacingThem(t *testing.T) {
+	gw := newStubGateway()
+	taker := NewRandomTaker(1, gw, TakerConfig{
+		Symbols: []string{"ABC/USD"}, TargetQtys: map[string]int64{"ABC/USD": 1_000_000},
+		TakeInterval: time.Second, Seed: 3, SizeParetoAlpha: 1.2,
+	})
+	now := time.Unix(0, 0)
+	taker.onTick(now)
+	if len(gw.placed()) != 0 {
+		t.Fatal("the subscribing tick must not trade: no maker has quoted yet")
+	}
+	taker.HandleEvent(context.Background(), &actor.Event{
+		Type: actor.EventBookSnapshot,
+		Data: actor.BookSnapshotEvent{
+			Symbol: "ABC/USD",
+			Snapshot: &exchange.BookSnapshot{
+				Bids: []exchange.PriceLevel{{Price: 99, VisibleQty: 400_000}},
+				Asks: []exchange.PriceLevel{{Price: 101, VisibleQty: 250_000}},
+			},
+		},
+	})
+	for i := 0; i < 400; i++ {
+		now = now.Add(time.Second)
+		taker.onTick(now)
+	}
+	var buys, sells int
+	for _, order := range gw.placed() {
+		limit := int64(250_000)
+		if order.Side == exchange.Sell {
+			limit = 400_000
+			sells++
+		} else {
+			buys++
+		}
+		if order.Qty > limit {
+			t.Fatalf("%v order of %d exceeded the %d facing it", order.Side, order.Qty, limit)
+		}
+	}
+	if buys == 0 || sells == 0 {
+		t.Fatalf("expected both sides to trade, got %d buys and %d sells", buys, sells)
 	}
 }

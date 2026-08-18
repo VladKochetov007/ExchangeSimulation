@@ -45,9 +45,13 @@ type TakerConfig struct {
 
 type RandomTaker struct {
 	*actor.BaseActor
-	cfg        TakerConfig
-	rng        *rand.Rand
-	imbalance  map[string]float64
+	cfg       TakerConfig
+	rng       *rand.Rand
+	imbalance map[string]float64
+	// depth is the visible quantity on each side of each book, so an order can
+	// be bounded by liquidity that exists rather than evaporating against a
+	// book that cannot fill it.
+	depth      map[string]sideDepth
 	excitation float64
 	decay      float64
 	subscribed bool
@@ -59,6 +63,7 @@ func NewRandomTaker(id uint64, gw actor.Gateway, cfg TakerConfig) *RandomTaker {
 		cfg:       cfg,
 		rng:       rand.New(rand.NewSource(cfg.Seed)),
 		imbalance: make(map[string]float64),
+		depth:     make(map[string]sideDepth),
 		decay:     math.Exp(-cfg.ExciteBetaPerSec * cfg.TakeInterval.Seconds()),
 	}
 	t.SetHandler(t)
@@ -66,15 +71,27 @@ func NewRandomTaker(id uint64, gw actor.Gateway, cfg TakerConfig) *RandomTaker {
 	return t
 }
 
-func (rt *RandomTaker) stateDependent() bool {
-	return rt.cfg.ImbalanceCoupling != 0 || rt.cfg.ExciteAlpha > 0
-}
+// sideDepth is the visible quantity resting on each side of one book.
+type sideDepth struct{ bid, ask int64 }
+
+// stateDependent reports whether the taker needs market data.
+//
+// It always does now: an order has to be bounded by the depth facing it. A
+// market order larger than the book does not walk it, it evaporates with no
+// liquidity, and because the side is drawn before the book is consulted the
+// truncation falls on whichever side happens to be thinner. That turns
+// unconditionally symmetric flow into flow conditioned on book state: measured
+// with a heavy size tail it produced 1557 evaporated orders against 11 with
+// uniform sizes, and a 3.8% net selling imbalance out of a requested imbalance
+// of 1.3% that is not itself significant.
+func (rt *RandomTaker) stateDependent() bool { return true }
 
 func (rt *RandomTaker) HandleEvent(_ context.Context, evt *actor.Event) {
 	switch evt.Type {
 	case actor.EventBookSnapshot:
 		e := evt.Data.(actor.BookSnapshotEvent)
 		rt.imbalance[e.Symbol] = topImbalance(e.Snapshot)
+		rt.depth[e.Symbol] = visibleDepth(e.Snapshot)
 	case actor.EventTrade:
 		if rt.cfg.ExciteAlpha > 0 {
 			rt.excitation += rt.cfg.ExciteAlpha
@@ -83,6 +100,18 @@ func (rt *RandomTaker) HandleEvent(_ context.Context, evt *actor.Event) {
 			}
 		}
 	}
+}
+
+// visibleDepth totals the quantity resting on each side of the book.
+func visibleDepth(snap *exchange.BookSnapshot) sideDepth {
+	var out sideDepth
+	for _, level := range snap.Bids {
+		out.bid += level.VisibleQty
+	}
+	for _, level := range snap.Asks {
+		out.ask += level.VisibleQty
+	}
+	return out
 }
 
 // topImbalance returns (bidQty−askQty)/(bidQty+askQty) over visible book depth.
@@ -101,11 +130,15 @@ func topImbalance(snap *exchange.BookSnapshot) float64 {
 }
 
 func (rt *RandomTaker) onTick(_ time.Time) {
-	if rt.stateDependent() && !rt.subscribed {
+	if !rt.subscribed {
 		for _, sym := range rt.cfg.Symbols {
 			rt.Subscribe(sym, exchange.MDSnapshot, exchange.MDTrade)
 		}
 		rt.subscribed = true
+		// Return rather than trading on the subscribing tick. Firing here means
+		// trading a full tick before any maker has quoted, which seeded the
+		// first imbalance of the run before a price existed.
+		return
 	}
 
 	orders := 1
@@ -172,6 +205,19 @@ func (rt *RandomTaker) fireOrder() {
 	side := exchange.Buy
 	if rt.rng.Float64() >= pBuy {
 		side = exchange.Sell
+	}
+	// Bound the order by the depth facing it, as every other taker in this
+	// scenario does. Without this the executed size is min(drawn, depth), which
+	// is a book-conditioned quantity even though the drawn size is not.
+	facing := rt.depth[sym].ask
+	if side == exchange.Sell {
+		facing = rt.depth[sym].bid
+	}
+	if facing > 0 && qty > facing {
+		qty = facing
+	}
+	if qty <= 0 {
+		return
 	}
 	rt.SubmitOrder(sym, side, exchange.Market, 0, qty)
 }
