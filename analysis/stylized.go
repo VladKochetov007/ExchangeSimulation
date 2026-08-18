@@ -40,6 +40,28 @@ type TradeTape struct {
 	TakerOrderIDs []uint64
 }
 
+// SignACFSum is the sum of the trade-sign autocorrelation over lags 1..h-1.
+//
+// It is the multiplier that converts a per-trade price displacement into the
+// response measured over an h-trade horizon: the signed response accumulates
+// over the next h trades weighted by how often they share the first trade's
+// direction. Assuming the multiplier is h itself asserts that every subsequent
+// trade has the same sign, which no traded market does.
+func (t *TradeTape) SignACFSum(horizon int) float64 {
+	signs := make([]float64, len(t.Signs))
+	for i, sign := range t.Signs {
+		signs[i] = float64(sign)
+	}
+	if horizon < 2 {
+		return 0
+	}
+	total := 0.0
+	for _, value := range Autocorrelation(signs, horizon-1) {
+		total += value
+	}
+	return total
+}
+
 // Tape reads one book's executions.
 func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 	files := r.BookFiles(venueID, symbol)

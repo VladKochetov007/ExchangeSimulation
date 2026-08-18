@@ -49,9 +49,10 @@ func emitOrder(rows *tapeRows, orderID uint64, base, size, response int64, sweep
 	} else {
 		rows.add(orderID, base, base, size)
 	}
-	// A filler trade one step later carries the price the response is read
-	// from. It belongs to no order, so it is never itself an observation.
-	rows.add(0, base, base+response, 0)
+	// A filler trade one step later carries the mid the response is read from.
+	// It belongs to no order, so it is never itself an observation, and its
+	// PreMid is the moved mid because the response is now measured mid-to-mid.
+	rows.add(0, base+response, base+response, 0)
 }
 
 func TestSweptOrdersNeedsMoreThanOnePrice(t *testing.T) {
@@ -205,5 +206,49 @@ func TestSweepImpactRefusesATinySample(t *testing.T) {
 	result := tape.MeasureSweepImpact(ImpactOptions{HorizonTrades: 1, Buckets: 10})
 	if result.BucketsCompared != 0 || result.MeanGapBps != 0 {
 		t.Errorf("tiny sample produced %+v", result)
+	}
+}
+
+// The accumulation multiplier is the sum of the sign autocorrelation over the
+// horizon, not the horizon itself. Assuming the latter asserts that every
+// subsequent trade shares the first one's direction.
+func TestSignACFSumIsTheAccumulationMultiplier(t *testing.T) {
+	// Alternating signs: every odd lag is -1 and every even lag +1, so the sum
+	// over an even number of lags is close to zero rather than the lag count.
+	alternating := &TradeTape{}
+	for i := 0; i < 4000; i++ {
+		sign := int8(1)
+		if i%2 == 1 {
+			sign = -1
+		}
+		alternating.Signs = append(alternating.Signs, sign)
+	}
+	if got := alternating.SignACFSum(21); math.Abs(got) > 1 {
+		t.Errorf("alternating flow gave a multiplier of %.2f, want near zero", got)
+	}
+
+	// Persistent flow is the only case where the sum approaches the horizon,
+	// which is what the discarded arithmetic assumed throughout. A square wave
+	// of runs of fifty has a triangular autocorrelation, 1 - 2*lag/50 over the
+	// first twenty lags, so the sum is 20 - 2*210/50 = 11.6: large, and still
+	// well short of the horizon.
+	const runLength = 50
+	persistent := &TradeTape{}
+	for i := 0; i < 40000; i++ {
+		sign := int8(1)
+		if (i/runLength)%2 == 1 {
+			sign = -1
+		}
+		persistent.Signs = append(persistent.Signs, sign)
+	}
+	got := persistent.SignACFSum(21)
+	if math.Abs(got-11.6) > 0.5 {
+		t.Errorf("persistent flow gave a multiplier of %.2f, want 11.6", got)
+	}
+	if got >= 20 {
+		t.Error("the multiplier reached the horizon itself, which requires perfect persistence")
+	}
+	if got := persistent.SignACFSum(1); got != 0 {
+		t.Errorf("a horizon of one trade has no accumulation, got %.2f", got)
 	}
 }

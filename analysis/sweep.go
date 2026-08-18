@@ -23,9 +23,21 @@ type Sweep struct {
 	// that were not.
 	SweepBpsWhenMulti Distribution `json:"sweep_bps_when_multi"`
 	// FillsPerOrder counts executions, not prices: several fills at one price
-	// mean the order crossed several makers without moving.
+	// mean the order crossed several makers without moving. It is also the
+	// conversion between an order-based rate and a trade-based horizon.
 	FillsPerOrder Distribution `json:"fills_per_order"`
+	// SweepTicksWhenMulti is the same span in ticks. A multi-price span below
+	// one tick would mean the measurement is broken, which basis points hide.
+	SweepTicksWhenMulti Distribution `json:"sweep_ticks_when_multi"`
 }
+
+// MeanSpanBps is the expected span across all orders, including the zeros.
+//
+// This is the quantity to multiply when asking what sweeping contributes on
+// average. The product of the multi-price rate and the conditional MEDIAN is
+// not an estimator of anything: the conditional distribution is right-skewed,
+// so its median understates its mean severalfold.
+func (s *Sweep) MeanSpanBps() float64 { return s.SweepBps.Mean }
 
 // MeasureSweep groups a book's executions by the order that crossed.
 func (r *Run) MeasureSweep(opts BookShapeOptions) (*Sweep, error) {
@@ -67,7 +79,7 @@ func (r *Run) MeasureSweep(opts BookShapeOptions) (*Sweep, error) {
 	}
 
 	sweep := &Sweep{Orders: len(byOrder)}
-	var pricesPer, spans, spansWhenMulti, fillsPer []float64
+	var pricesPer, spans, spansWhenMulti, ticksWhenMulti, fillsPer []float64
 	for _, entry := range byOrder {
 		pricesPer = append(pricesPer, float64(len(entry.prices)))
 		fillsPer = append(fillsPer, float64(entry.fills))
@@ -81,12 +93,16 @@ func (r *Run) MeasureSweep(opts BookShapeOptions) (*Sweep, error) {
 		if len(entry.prices) > 1 {
 			sweep.MultiPrice++
 			spansWhenMulti = append(spansWhenMulti, span)
+			if opts.TickSize > 0 {
+				ticksWhenMulti = append(ticksWhenMulti, float64(entry.worst-entry.best)/float64(opts.TickSize))
+			}
 		}
 	}
 	sweep.PricesPerOrder = Describe(pricesPer)
 	sweep.SweepBps = Describe(spans)
 	sweep.SweepBpsWhenMulti = Describe(spansWhenMulti)
 	sweep.FillsPerOrder = Describe(fillsPer)
+	sweep.SweepTicksWhenMulti = Describe(ticksWhenMulti)
 	return sweep, nil
 }
 

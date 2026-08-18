@@ -163,12 +163,12 @@ func main() {
 			emit(dir, map[string]any{"shape": shape, "walkable": walkable}, *asJSON, func() {
 				emptyShare := 100 * float64(shape.OneSideEmpty+shape.BothSidesEmpty) / float64(shape.Snapshots)
 				fmt.Printf("%-20s snaps %6d  empty %5.1f%%  levels bid %4.1f ask %4.1f (p90 %4.1f/%4.1f)  "+
-					"touch-share med %5.3f p90 %5.3f  touch %8.2f  beyond %8.2f  spread %5.1f ticks  hidden %5.3f\n",
+					"touch-share med %5.3f p90 %5.3f  touch %8.2f  beyond %8.2f  spread %5.1f ticks  hidden %5.3f  trades/snap %5.2f\n",
 					dir, shape.Snapshots, emptyShare,
 					shape.BidLevels.Median, shape.AskLevels.Median, shape.BidLevels.P90, shape.AskLevels.P90,
 					shape.TouchShare.Median, shape.TouchShare.P90,
 					shape.TouchDepth.Median/1e8, shape.BeyondTouchDepth.Median/1e8,
-					shape.SpreadTicks.Median, shape.HiddenShare.Mean)
+					shape.SpreadTicks.Median, shape.HiddenShare.Mean, shape.TradesPerSnapshot)
 				for _, fraction := range walkable {
 					fmt.Printf("    size %8.2f  walks past touch %5.1f%%  exhausts book %5.1f%%\n",
 						float64(fraction.SizeBase)/1e8, 100*fraction.ExceedsTouch, 100*fraction.ExceedsBook)
@@ -180,7 +180,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "%s: no book log for %s at venue %s\n", dir, *base, *venue)
 				os.Exit(1)
 			}
-			sweep, err := run.MeasureSweep(analysis.BookShapeOptions{Files: files})
+			sweep, err := run.MeasureSweep(analysis.BookShapeOptions{Files: files, TickSize: *tickSize})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)
@@ -190,12 +190,16 @@ func main() {
 				os.Exit(1)
 			}
 			emit(dir, sweep, *asJSON, func() {
-				fmt.Printf("%-20s orders %7d  multi-price %5.2f%%  prices/order med %3.1f p99 %4.1f  "+
-					"fills/order med %3.1f p99 %4.1f  span-when-multi med %5.2f p90 %5.2f max %6.2f bps\n",
+				// The mean span over ALL orders is the quantity to multiply
+				// when asking what sweeping contributes; the conditional
+				// median is not an estimator of anything.
+				fmt.Printf("%-20s orders %7d  multi-price %5.2f%%  fills/order mean %4.2f  "+
+					"mean-span %6.4f bps | when multi: med %5.2f mean %5.2f p90 %5.2f max %6.2f bps, med %4.1f ticks\n",
 					dir, sweep.Orders, 100*sweep.MultiPriceFraction(),
-					sweep.PricesPerOrder.Median, sweep.PricesPerOrder.P99,
-					sweep.FillsPerOrder.Median, sweep.FillsPerOrder.P99,
-					sweep.SweepBpsWhenMulti.Median, sweep.SweepBpsWhenMulti.P90, sweep.SweepBpsWhenMulti.Max)
+					sweep.FillsPerOrder.Mean, sweep.MeanSpanBps(),
+					sweep.SweepBpsWhenMulti.Median, sweep.SweepBpsWhenMulti.Mean,
+					sweep.SweepBpsWhenMulti.P90, sweep.SweepBpsWhenMulti.Max,
+					sweep.SweepTicksWhenMulti.Median)
 			})
 		case "sweepimpact":
 			tape, err := run.Tape(*venue, *base)
@@ -208,9 +212,14 @@ func main() {
 				fmt.Fprintf(os.Stderr, "%s: no size bucket held both classes; sweeping is not separable from size here\n", dir)
 				os.Exit(1)
 			}
+			// The horizon multiplier is the sign-autocorrelation sum, not the
+			// horizon: it says how much of a per-trade displacement survives
+			// into the measured response.
+			multiplier := tape.SignACFSum(*horizonTrades)
 			emit(dir, result, *asJSON, func() {
-				fmt.Printf("%-20s swept %6d single %6d  buckets %2d/%2d favour swept  mean gap %+6.3f bps\n",
-					dir, result.SweptN, result.SingleN, result.BucketsFavouringSwept, result.BucketsCompared, result.MeanGapBps)
+				fmt.Printf("%-20s swept %6d single %6d  buckets %2d/%2d favour swept  mean gap %+6.3f bps  sign-acf-sum %5.2f (horizon %d)\n",
+					dir, result.SweptN, result.SingleN, result.BucketsFavouringSwept,
+					result.BucketsCompared, result.MeanGapBps, multiplier, *horizonTrades)
 				for _, bucket := range result.Buckets {
 					if bucket.SweptN == 0 || bucket.SingleN == 0 {
 						continue

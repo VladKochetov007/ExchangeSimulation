@@ -229,7 +229,11 @@ func (t *TradeTape) orderObservation(orderID uint64, first, last, horizon int, r
 	if reference <= 0 {
 		return zero, false
 	}
-	response := 1e4 * math.Log(float64(t.Prices[last+horizon])/float64(reference))
+	terminal := t.terminalMid(last + horizon)
+	if terminal <= 0 {
+		return zero, false
+	}
+	response := 1e4 * math.Log(float64(terminal)/float64(reference))
 	zero.size = float64(size)
 	zero.response = float64(t.Signs[first]) * response
 	zero.swept = len(prices) > 1

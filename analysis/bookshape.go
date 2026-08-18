@@ -43,7 +43,19 @@ type BookShape struct {
 	SpreadTicks Distribution `json:"spread_ticks"`
 	// HiddenShare is the fraction of total depth that is not displayed.
 	HiddenShare Distribution `json:"hidden_share"`
+	// TradesPerSnapshot is how many executions fall between consecutive book
+	// publications. Any metric referencing a trade to the last published mid
+	// is stale by this many trades, and those trades are same-signed on
+	// average, so the reference is biased toward the trade's own direction.
+	TradesPerSnapshot float64 `json:"trades_per_snapshot"`
 }
+
+// isPeriodicSnapshot keeps the exchange's own book publication and drops the
+// one sent to a client on subscription. The latter fires at whatever moment a
+// participant connects, which clusters at the start of a run when the book is
+// still degenerate, and describes one subscriber's view rather than the
+// standing book.
+func isPeriodicSnapshot(event Event) bool { return event.ClientID == 0 }
 
 type bookLevel struct {
 	Price      int64 `json:"price"`
@@ -77,25 +89,20 @@ func (e bookSnapshotEnvelope) levels() ([]bookLevel, []bookLevel) {
 // sideShape reduces one side of a snapshot to the quantities BookShape tracks.
 // Levels sharing a price are merged, since a side's depth is per price and not
 // per resting order.
-func sideShape(levels []bookLevel) (levelCount int, touch, total, hidden int64) {
+func sideShape(levels []bookLevel, best func([]bookLevel) int64) (levelCount int, touch, total, hidden int64) {
 	if len(levels) == 0 {
 		return 0, 0, 0, 0
 	}
 	byPrice := make(map[int64]int64, len(levels))
-	best := levels[0].Price
-	bestSet := false
 	for _, level := range levels {
-		byPrice[level.Price] += level.VisibleQty
-		total += level.VisibleQty
+		// Hidden quantity is depth a taker consumes at the same price, so it
+		// belongs in the level's size. Excluding it understates the touch and
+		// makes MeasureWalkable overstate how often an order must walk.
+		byPrice[level.Price] += level.VisibleQty + level.HiddenQty
+		total += level.VisibleQty + level.HiddenQty
 		hidden += level.HiddenQty
-		// The snapshot is ordered best-first, but do not rely on it: a side's
-		// best price is unambiguous only if derived from the prices themselves,
-		// and the two sides order oppositely.
-		if !bestSet {
-			best, bestSet = level.Price, true
-		}
 	}
-	touch = byPrice[best]
+	touch = byPrice[best(levels)]
 	return len(byPrice), touch, total, hidden
 }
 
@@ -106,14 +113,17 @@ func (r *Run) MeasureBookShape(opts BookShapeOptions) (*BookShape, error) {
 	var bidLevels, askLevels, touchShare, touchDepth, beyondDepth, spreadTicks, hiddenShare []float64
 
 	err := r.Scan(ScanOptions{Events: []string{"BookSnapshot"}, Files: opts.Files, FilesSelected: true}, func(event Event) {
+		if !isPeriodicSnapshot(event) {
+			return
+		}
 		var envelope bookSnapshotEnvelope
 		if event.Decode(&envelope) != nil {
 			return
 		}
 		bids, asks := envelope.levels()
 
-		bidCount, bidTouch, bidTotal, bidHidden := sideShape(bids)
-		askCount, askTouch, askTotal, askHidden := sideShape(asks)
+		bidCount, bidTouch, bidTotal, bidHidden := sideShape(bids, bestBid)
+		askCount, askTouch, askTotal, askHidden := sideShape(asks, bestAsk)
 
 		mu.Lock()
 		defer mu.Unlock()
@@ -126,23 +136,22 @@ func (r *Run) MeasureBookShape(opts BookShapeOptions) (*BookShape, error) {
 			shape.OneSideEmpty++
 		}
 
-		record := func(count int, touch, total, hidden int64) {
+		record := func(touch, total, hidden int64) {
 			if total <= 0 {
 				return
 			}
 			touchShare = append(touchShare, float64(touch)/float64(total))
 			touchDepth = append(touchDepth, float64(touch))
 			beyondDepth = append(beyondDepth, float64(total-touch))
-			hiddenShare = append(hiddenShare, float64(hidden)/float64(total+hidden))
-			_ = count
+			hiddenShare = append(hiddenShare, float64(hidden)/float64(total))
 		}
 		if bidCount > 0 {
 			bidLevels = append(bidLevels, float64(bidCount))
-			record(bidCount, bidTouch, bidTotal, bidHidden)
+			record(bidTouch, bidTotal, bidHidden)
 		}
 		if askCount > 0 {
 			askLevels = append(askLevels, float64(askCount))
-			record(askCount, askTouch, askTotal, askHidden)
+			record(askTouch, askTotal, askHidden)
 		}
 		if bidCount > 0 && askCount > 0 && opts.TickSize > 0 {
 			spread := bestAsk(asks) - bestBid(bids)
@@ -153,6 +162,18 @@ func (r *Run) MeasureBookShape(opts BookShapeOptions) (*BookShape, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	trades := 0
+	if err := r.Scan(ScanOptions{Events: []string{"Trade"}, Files: opts.Files, FilesSelected: true}, func(Event) {
+		mu.Lock()
+		trades++
+		mu.Unlock()
+	}); err != nil {
+		return nil, err
+	}
+	if shape.Snapshots > 0 {
+		shape.TradesPerSnapshot = float64(trades) / float64(shape.Snapshots)
 	}
 
 	shape.BidLevels = Describe(bidLevels)
@@ -208,6 +229,9 @@ func (r *Run) MeasureWalkable(opts BookShapeOptions, sizes []int64) ([]WalkableF
 	var touches, totals []int64
 
 	err := r.Scan(ScanOptions{Events: []string{"BookSnapshot"}, Files: opts.Files, FilesSelected: true}, func(event Event) {
+		if !isPeriodicSnapshot(event) {
+			return
+		}
 		var envelope bookSnapshotEnvelope
 		if event.Decode(&envelope) != nil {
 			return
@@ -215,8 +239,11 @@ func (r *Run) MeasureWalkable(opts BookShapeOptions, sizes []int64) ([]WalkableF
 		bids, asks := envelope.levels()
 		mu.Lock()
 		defer mu.Unlock()
-		for _, side := range [][]bookLevel{bids, asks} {
-			if _, touch, total, _ := sideShape(side); total > 0 {
+		for _, side := range []struct {
+			levels []bookLevel
+			best   func([]bookLevel) int64
+		}{{bids, bestBid}, {asks, bestAsk}} {
+			if _, touch, total, _ := sideShape(side.levels, side.best); total > 0 {
 				touches = append(touches, touch)
 				totals = append(totals, total)
 			}

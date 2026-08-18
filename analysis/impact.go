@@ -84,7 +84,11 @@ func (t *TradeTape) Impact(opts ImpactOptions) ImpactCurve {
 		if reference <= 0 {
 			continue
 		}
-		response := 1e4 * math.Log(float64(t.Prices[i+horizon])/float64(reference))
+		terminal := t.terminalMid(i + horizon)
+		if terminal <= 0 {
+			continue
+		}
+		response := 1e4 * math.Log(float64(terminal)/float64(reference))
 		observations = append(observations, observation{
 			size:     float64(t.Qtys[i]),
 			response: float64(t.Signs[i]) * response,
@@ -127,6 +131,25 @@ func (t *TradeTape) Impact(opts ImpactOptions) ImpactCurve {
 	}
 	curve.Exponent, curve.R2 = fitLine(logSizes, logResponses)
 	return curve
+}
+
+// terminalMid is the book midpoint at the end of the measurement horizon.
+//
+// The terminal must be a mid, not a trade price. A trade at the horizon
+// executes at whichever side its own aggressor crossed, so measuring to it
+// adds a half spread signed by that trade's direction. Signed flow is
+// autocorrelated, so the expectation of that term is the sign correlation at
+// the horizon times the half spread — a bias that does not decay with horizon
+// and, at the spreads in this campaign, is the same size as the effect being
+// measured. It also scales with the spread, which several experiments varied.
+func (t *TradeTape) terminalMid(index int) int64 {
+	if index < 0 || index >= len(t.Prices) {
+		return 0
+	}
+	if index < len(t.PreMid) && t.PreMid[index] > 0 {
+		return t.PreMid[index]
+	}
+	return 0
 }
 
 func fitLine(x, y []float64) (slope, r2 float64) {

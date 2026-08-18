@@ -626,6 +626,9 @@ func TestImpactRecoversAKnownExponent(t *testing.T) {
 			// The constructed response is the move from before this trade to
 			// after it, which is what the estimator must recover.
 			tape.Prices = append(tape.Prices, int64(price))
+			// The constructed series is a mid series: the response is now
+			// measured mid-to-mid, so the terminal must be a mid too.
+			tape.PreMid = append(tape.PreMid, int64(price))
 			tape.Qtys = append(tape.Qtys, int64(size))
 			tape.Signs = append(tape.Signs, sign)
 			price *= math.Exp(float64(sign) * response / 1e4)

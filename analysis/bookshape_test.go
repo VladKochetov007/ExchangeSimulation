@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -123,9 +124,10 @@ func TestBookShapeMergesOrdersSharingAPrice(t *testing.T) {
 	}
 }
 
-// The best price is the highest bid and the lowest ask. A metric that trusted
-// the array order would read the touch off whichever level happened to be
-// first, so the levels are given out of order deliberately.
+// The best price is the highest bid and the lowest ask, and the two sides
+// order oppositely. A metric that trusted the array order would read the touch
+// off whichever level came first, so the levels are given out of order and the
+// touch is asserted, not only the spread.
 func TestBookShapeFindsTheBestPriceRegardlessOfOrder(t *testing.T) {
 	run := openShapeRun(t, []string{
 		snapshotLine(1,
@@ -138,6 +140,43 @@ func TestBookShapeFindsTheBestPriceRegardlessOfOrder(t *testing.T) {
 	}
 	if shape.SpreadTicks.Median != 2 {
 		t.Errorf("spread = %v, want 2 (best bid 100, best ask 102)", shape.SpreadTicks.Median)
+	}
+	// Both sides hold 40 at the best price and 20 behind it. Reading the first
+	// array element instead would give 10 and a touch share of 1/6.
+	if shape.TouchDepth.Median != 40 {
+		t.Errorf("touch depth = %v, want 40; the best price was read off array order",
+			shape.TouchDepth.Median)
+	}
+	if got := shape.TouchShare.Median; math.Abs(got-40.0/60.0) > 1e-9 {
+		t.Errorf("touch share = %v, want %v", got, 40.0/60.0)
+	}
+}
+
+// A snapshot sent to a subscribing client is one participant's view at the
+// moment it connected, which clusters at the start of a run when the book is
+// still degenerate. Only the exchange's own periodic publication describes the
+// standing book.
+func TestBookShapeIgnoresSubscribeTimeSnapshots(t *testing.T) {
+	subscriber := func(line string) string {
+		return strings.Replace(line, `"client_id":0`, `"client_id":7`, 1)
+	}
+	run := openShapeRun(t, []string{
+		// A degenerate one-sided book, delivered to one subscriber.
+		subscriber(snapshotLine(1, [][3]int64{{100, 1, 0}}, nil)),
+		snapshotLine(2, [][3]int64{{100, 25, 0}, {99, 75, 0}}, [][3]int64{{102, 25, 0}, {103, 75, 0}}),
+	})
+	shape, err := run.MeasureBookShape(BookShapeOptions{Files: shapeFiles(t, run), TickSize: 1})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if shape.Snapshots != 1 {
+		t.Errorf("snapshots = %d, want 1; the subscriber snapshot was counted", shape.Snapshots)
+	}
+	if shape.OneSideEmpty != 0 {
+		t.Errorf("subscriber snapshot contributed %d one-sided books", shape.OneSideEmpty)
+	}
+	if got := shape.TouchShare.Median; math.Abs(got-0.25) > 1e-9 {
+		t.Errorf("touch share = %v, want 0.25", got)
 	}
 }
 
@@ -171,9 +210,11 @@ func TestBookShapeSeparatesEmptySidesFromShallowOnes(t *testing.T) {
 	}
 }
 
-// Hidden quantity is depth a taker can consume but cannot see. It belongs in
-// its own share rather than in the visible totals.
-func TestBookShapeKeepsHiddenDepthOutOfTheVisibleTotals(t *testing.T) {
+// An iceberg's reserve is consumed at the same price as its displayed part, so
+// it is depth for the purpose of asking whether an order must walk. Counting
+// only the visible part would understate the touch and make every walkable
+// fraction too large.
+func TestBookShapeCountsHiddenDepthAtTheTouch(t *testing.T) {
 	run := openShapeRun(t, []string{
 		snapshotLine(1, [][3]int64{{100, 25, 75}}, [][3]int64{{102, 100, 0}}),
 	})
@@ -182,10 +223,20 @@ func TestBookShapeKeepsHiddenDepthOutOfTheVisibleTotals(t *testing.T) {
 		t.Fatalf("measure: %v", err)
 	}
 	if shape.TouchDepth.Median != 100 {
-		t.Errorf("touch depth median = %v; hidden quantity leaked into visible", shape.TouchDepth.Median)
+		t.Errorf("touch depth = %v, want 100 on both sides", shape.TouchDepth.Median)
 	}
 	if shape.HiddenShare.Max != 0.75 {
 		t.Errorf("hidden share max = %v, want 0.75", shape.HiddenShare.Max)
+	}
+
+	// The walkable fraction must see the reserve too: 80 fits inside a touch of
+	// 100 even though only 25 is displayed.
+	fractions, err := run.MeasureWalkable(BookShapeOptions{Files: shapeFiles(t, run)}, []int64{80})
+	if err != nil {
+		t.Fatalf("walkable: %v", err)
+	}
+	if fractions[0].ExceedsTouch != 0 {
+		t.Errorf("an order inside the iceberg reserve was counted as walking the book: %+v", fractions[0])
 	}
 }
 
