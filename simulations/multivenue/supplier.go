@@ -22,10 +22,28 @@ type ElasticSupplierConfig struct {
 	Symbol        string        `json:"symbol"`
 	BasePrecision int64         `json:"base_precision"`
 	Interval      time.Duration `json:"interval"`
-	// ReferencePrice is the price at which the participant wants to hold
-	// exactly BaseHolding.
+	// ReferencePrice seeds the level at which the participant wants to hold
+	// exactly BaseHolding. It is a starting belief, not a standing one: with
+	// ReferenceHalfLife set, the participant revises it toward what it observes
+	// trading.
+	//
+	// A fixed reference is an exogenous fundamental. It says the correct price
+	// is known in advance and never changes, and a participant trading against
+	// deviations from it is a peg rather than a demand curve: measured over six
+	// runs the terminal price was minus excess supply over aggregate elasticity
+	// to three significant figures, which is that actor's configuration read
+	// back out rather than a market outcome.
 	ReferencePrice int64 `json:"reference_price"`
-	BaseHolding    int64 `json:"base_holding"`
+	// ReferenceHalfLife is how quickly the participant's reference follows the
+	// price it observes. Zero holds the seed forever, which is the exogenous
+	// anchor described above and is kept only so existing callers are unchanged.
+	//
+	// A long half-life is a slow-moving private belief: the participant still
+	// supplies into a move, but it accepts over time that the market disagrees
+	// with it. That is a preference formed from observation rather than
+	// privileged knowledge of a correct price.
+	ReferenceHalfLife time.Duration `json:"reference_half_life"`
+	BaseHolding       int64         `json:"base_holding"`
 	// ElasticityPerPercent is how many base units the target position falls for
 	// each percent the price rises above the reference.
 	ElasticityPerPercent int64 `json:"elasticity_per_percent"`
@@ -45,13 +63,17 @@ type ElasticSupplier struct {
 	bidQty   int64
 	askQty   int64
 	position int64
+	// reference is the participant's current belief, seeded from config and
+	// revised toward observed prices when a half-life is configured.
+	reference int64
+	lastTick  int64
 
 	pending    bool
 	subscribed bool
 }
 
 func NewElasticSupplier(id uint64, gw actor.Gateway, cfg ElasticSupplierConfig) *ElasticSupplier {
-	s := &ElasticSupplier{BaseActor: actor.NewBaseActor(id, gw), cfg: cfg}
+	s := &ElasticSupplier{BaseActor: actor.NewBaseActor(id, gw), cfg: cfg, reference: cfg.ReferencePrice}
 	s.SetHandler(s)
 	s.AddTicker(cfg.Interval, s.onTick)
 	return s
@@ -62,10 +84,14 @@ func (s *ElasticSupplier) Position() int64 { return s.position }
 
 // TargetPosition is the holding the participant wants at a given price.
 func (s *ElasticSupplier) TargetPosition(price int64) int64 {
-	if price <= 0 || s.cfg.ReferencePrice <= 0 {
+	reference := s.reference
+	if reference <= 0 {
+		reference = s.cfg.ReferencePrice
+	}
+	if price <= 0 || reference <= 0 {
 		return s.cfg.BaseHolding
 	}
-	percentAbove := (float64(price)/float64(s.cfg.ReferencePrice) - 1) * 100
+	percentAbove := (float64(price)/float64(reference) - 1) * 100
 	target := float64(s.cfg.BaseHolding) - percentAbove*float64(s.cfg.ElasticityPerPercent)
 	if !finite(target) {
 		return s.cfg.BaseHolding
@@ -106,7 +132,31 @@ func (s *ElasticSupplier) HandleEvent(_ context.Context, evt *actor.Event) {
 	}
 }
 
-func (s *ElasticSupplier) onTick(time.Time) {
+// reviseReference moves the participant's belief toward what it observes, at
+// the configured half-life. Without one the belief never moves, which is an
+// exogenous anchor rather than a preference.
+func (s *ElasticSupplier) reviseReference(mid int64, now time.Time) {
+	if s.cfg.ReferenceHalfLife <= 0 || mid <= 0 {
+		return
+	}
+	if s.reference <= 0 {
+		s.reference = mid
+		s.lastTick = now.UnixNano()
+		return
+	}
+	elapsed := float64(now.UnixNano()-s.lastTick) / 1e9
+	s.lastTick = now.UnixNano()
+	if elapsed <= 0 {
+		return
+	}
+	alpha := 1 - math.Exp(-math.Ln2*elapsed/s.cfg.ReferenceHalfLife.Seconds())
+	revised := float64(s.reference) + alpha*(float64(mid)-float64(s.reference))
+	if finite(revised) && revised > 0 {
+		s.reference = int64(revised)
+	}
+}
+
+func (s *ElasticSupplier) onTick(now time.Time) {
 	if !s.subscribed {
 		s.Subscribe(s.cfg.Symbol, exchange.MDSnapshot)
 		s.subscribed = true
@@ -116,6 +166,7 @@ func (s *ElasticSupplier) onTick(time.Time) {
 		return
 	}
 	mid := (s.bestBid + s.bestAsk) / 2
+	s.reviseReference(mid, now)
 	gap := s.TargetPosition(mid) - s.position
 	if gap == 0 {
 		return

@@ -141,6 +141,11 @@ type Config struct {
 	MakerQuoteSizeVolElasticity float64 `json:"maker_quote_size_vol_elasticity"`
 	MakerMinQuoteSizeFraction   float64 `json:"maker_min_quote_size_fraction"`
 
+	// ElasticSupplierReferenceHalfLife is how quickly the price-elastic
+	// participant revises its reference toward observed prices. Zero holds its
+	// seed forever, which is an exogenous anchor.
+	ElasticSupplierReferenceHalfLife time.Duration `json:"elastic_supplier_reference_half_life"`
+
 	NoiseOrderQty int64 `json:"noise_order_qty"`
 	// NoiseFundingLots is how many orders' worth of each asset an uninformed
 	// trader starts with. Underfunding it makes the flow directional rather
@@ -1475,7 +1480,11 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	for participant := 0; participant < s.Config.ElasticSupplierCount; participant++ {
 		supplier := NewElasticSupplier(nextActor(), connect(fmt.Sprintf("elastic_supplier_%d", participant+1), supplierBalances, 0, noiseFee), ElasticSupplierConfig{
 			Symbol: "ABC/USD", BasePrecision: mvBasePrecision, Interval: s.Config.NoiseInterval,
+			// Seeded at the opening price and revised toward what it observes,
+			// so the participant holds a private belief rather than a standing
+			// instruction about the correct level.
 			ReferencePrice: mvBootstrapPrice, BaseHolding: 0,
+			ReferenceHalfLife:    s.Config.ElasticSupplierReferenceHalfLife,
 			ElasticityPerPercent: s.Config.ElasticSupplierUnitsPerPercent,
 			MaxPosition:          10_000 * mvBasePrecision, RebalanceLot: mvBasePrecision / 2,
 		})

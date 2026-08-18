@@ -138,3 +138,49 @@ func TestMakerSizeIsDenominatedInValueAcrossBooks(t *testing.T) {
 		t.Errorf("ABC/CDF quote is %d against ABC/USD %d; its base is also ABC so it should match", cross, abc)
 	}
 }
+
+// A participant whose reference price never moves is not expressing a demand
+// curve, it is defending a price it was told in advance. Measured that way the
+// terminal price came out as minus excess supply over aggregate elasticity to
+// three significant figures in six runs of six: the actor's own configuration
+// read back out. A belief that follows what the market trades is a preference;
+// a fixed one is an oracle.
+func TestElasticSupplierRevisesItsReferenceTowardObservedPrices(t *testing.T) {
+	cfg := ElasticSupplierConfig{
+		Symbol: "ABC/USD", BasePrecision: 100_000_000, Interval: time.Second,
+		ReferencePrice: 1000, BaseHolding: 0, ElasticityPerPercent: 10,
+		MaxPosition: 1_000_000, RebalanceLot: 100, ReferenceHalfLife: 10 * time.Second,
+	}
+	supplier := &ElasticSupplier{cfg: cfg, reference: cfg.ReferencePrice}
+
+	// Below its reference the participant wants to hold more, which is the
+	// demand curve working.
+	if target := supplier.TargetPosition(900); target <= 0 {
+		t.Fatalf("below the reference the target is %d, want a positive holding", target)
+	}
+	start := time.Unix(0, 0)
+	supplier.lastTick = start.UnixNano()
+	// The market trades persistently at 900. After several half-lives the
+	// participant should have largely accepted that level.
+	for i := 1; i <= 60; i++ {
+		supplier.reviseReference(900, start.Add(time.Duration(i)*time.Second))
+	}
+	if supplier.reference > 920 {
+		t.Errorf("reference is %d after a minute at 900, want it revised close to the observed price", supplier.reference)
+	}
+	if target := supplier.TargetPosition(900); target > cfg.ElasticityPerPercent {
+		t.Errorf("after accepting the level the target is %d, want it near the base holding", target)
+	}
+
+	// Without a half-life the belief is fixed, which preserves the previous
+	// behaviour for any caller that has not opted in.
+	fixed := &ElasticSupplier{cfg: ElasticSupplierConfig{
+		ReferencePrice: 1000, ElasticityPerPercent: 10, MaxPosition: 1_000_000,
+	}, reference: 1000}
+	for i := 1; i <= 60; i++ {
+		fixed.reviseReference(900, start.Add(time.Duration(i)*time.Second))
+	}
+	if fixed.reference != 1000 {
+		t.Errorf("without a half-life the reference moved to %d, want it unchanged at 1000", fixed.reference)
+	}
+}
