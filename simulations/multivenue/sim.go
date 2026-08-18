@@ -1172,10 +1172,41 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	relativeRiskAversion := s.Config.StoikovRiskAversion * referencePrice
 	relativeFillDecay := s.Config.StoikovFillDecay * referencePrice
 	relativeLogVariance := s.Config.StoikovVariancePerSecond / (referencePrice * referencePrice)
+	// baseValueScale converts a quantity expressed in ABC into the quantity of
+	// another book's base asset carrying the same value.
+	//
+	// The risk parameters below are already scale free, but quote size and the
+	// inventory limit were passed through as raw base units to every book. The
+	// base assets differ in price by a factor of sixteen, so the same number
+	// quoted a book with a twenty-eight times thinner book in value terms:
+	// measured median depth was 848,935 on ABC/USD against 29,840 on CDF/USD.
+	// The thin book is the one that dislocated, peaking 763% above its opening
+	// price while ABC/USD fell 18%.
+	baseValueScale := func(baseUSDPrice int64) int64 {
+		if baseUSDPrice <= 0 {
+			return 1
+		}
+		return baseUSDPrice
+	}
+	scaleQty := func(qty, baseUSDPrice int64) int64 {
+		scaled := etypes.MulDiv(qty, int64(mvBootstrapPrice), baseValueScale(baseUSDPrice))
+		if scaled <= 0 {
+			return qty
+		}
+		return scaled
+	}
 	stoikovConfig := func(symbol, reference string, bootstrapPrice, quotePrecision, tickSize int64) StoikovMMConfig {
+		// The base asset's USD price, which is what quote size and inventory
+		// have to be denominated against. ABC/CDF is quoted in CDF but its base
+		// is still ABC, so it scales like the ABC books.
+		baseUSD := int64(mvBootstrapPrice)
+		if symbol == "CDF/USD" {
+			baseUSD = int64(mvCDFBootstrap)
+		}
 		return StoikovMMConfig{
 			Symbol: symbol, ReferenceSymbol: reference, BootstrapPrice: bootstrapPrice,
-			BasePrecision: mvBasePrecision, QuotePrecision: quotePrecision, TickSize: tickSize, QuoteQty: s.Config.MakerQuoteQty,
+			BasePrecision: mvBasePrecision, QuotePrecision: quotePrecision, TickSize: tickSize,
+			QuoteQty:      scaleQty(s.Config.MakerQuoteQty, baseUSD),
 			QuoteInterval: s.Config.QuoteInterval, VolatilityHalfLife: s.Config.StoikovVolatilityHalfLife,
 			InitialLogVariancePerSec: relativeLogVariance,
 			MaxLogVarianceMultiple:   s.Config.StoikovMaxVarianceMultiple,
@@ -1186,7 +1217,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			MinHalfSpreadTicks:       s.Config.MakerMinHalfSpreadTicks,
 			QuoteSizeVolElasticity:   s.Config.MakerQuoteSizeVolElasticity,
 			MinQuoteSizeFraction:     s.Config.MakerMinQuoteSizeFraction,
-			InventoryLimit:           s.Config.MakerInventoryLimit,
+			InventoryLimit:           scaleQty(s.Config.MakerInventoryLimit, baseUSD),
 			InventorySkewBps:         s.Config.MakerInventorySkewBps,
 			SubmitBeforeCancel:       s.Config.SpotMakerSubmitBeforeCancel,
 			RequoteBps:               s.Config.SpotMakerRequoteBps,

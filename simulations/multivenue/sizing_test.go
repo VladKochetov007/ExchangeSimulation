@@ -1,6 +1,9 @@
 package multivenue
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestVenueSizedQtyRejectsBelowMinimum(t *testing.T) {
 	for _, tc := range []struct {
@@ -96,5 +99,42 @@ func TestNoiseFlowExcitationReachesTheTaker(t *testing.T) {
 	}
 	if cfg.NoiseExciteAlpha != 0.4 || cfg.NoiseExciteBetaPerSec != 0.2 || cfg.NoiseImbalanceCoupling != 0.5 {
 		t.Fatalf("configured excitation overwritten: %+v", cfg)
+	}
+}
+
+// Quote size and the inventory limit are risk quantities, so they have to be
+// denominated in value rather than in base units. Passed through raw they gave
+// each book the same number of units of base assets whose prices differ by a
+// factor of sixteen: measured median depth was 848,935 on ABC/USD against
+// 29,840 on CDF/USD, and the thin book peaked 763% above its opening price
+// while ABC/USD fell 18%.
+func TestMakerSizeIsDenominatedInValueAcrossBooks(t *testing.T) {
+	cfg := Config{LogDir: t.TempDir(), CrossAssetSpotGraph: true}
+	if err := cfg.normalize(); err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	sim, err := NewSim(time.Minute, cfg)
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	byBook := map[string]int64{}
+	for _, venue := range sim.Venues {
+		for _, maker := range venue.SpotMakers {
+			byBook[maker.cfg.Symbol] = maker.cfg.QuoteQty
+		}
+	}
+	abc, okABC := byBook["ABC/USD"]
+	cdf, okCDF := byBook["CDF/USD"]
+	if !okABC || !okCDF {
+		t.Fatalf("expected both books to have makers, got %v", byBook)
+	}
+	// CDF trades near 3000 USD and ABC near 50000, so an equal-value quote is
+	// about sixteen times more CDF units.
+	ratio := float64(cdf) / float64(abc)
+	if ratio < 12 || ratio > 22 {
+		t.Fatalf("CDF quote is %d against ABC %d, a ratio of %.1f; want about 16.7 for equal value", cdf, abc, ratio)
+	}
+	if cross, ok := byBook["ABC/CDF"]; ok && cross != abc {
+		t.Errorf("ABC/CDF quote is %d against ABC/USD %d; its base is also ABC so it should match", cross, abc)
 	}
 }
