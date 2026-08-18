@@ -16,7 +16,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -52,6 +52,30 @@ func main() {
 				fmt.Printf("%-24s parents %5d filled %5d stalled %4d zero-fill %4d stall-horizon %5.1f%% sides %v\n",
 					dir, stats.Parents, stats.Filled, stats.Stalled, stats.ZeroFill, 100*stats.StallFraction(), stats.Sides)
 			})
+		case "flow":
+			table, residual, err := run.NetFlowByRole(*venue, *base)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			// The residual must be zero: every trade has two sides. A non-zero
+			// value means the sum is wrong and the per-class numbers below it
+			// should be discarded rather than interpreted.
+			if residual != 0 {
+				fmt.Fprintf(os.Stderr, "%s: signed flow residual is %d, not zero; per-class figures are unusable\n", dir, residual)
+				os.Exit(1)
+			}
+			names := make([]string, 0, len(table))
+			for name := range table {
+				names = append(names, name)
+			}
+			sort.Slice(names, func(i, j int) bool { return table[names[i]].Net() < table[names[j]].Net() })
+			fmt.Printf("%s\n", dir)
+			for _, name := range names {
+				flow := table[name]
+				fmt.Printf("  %-22s net %+12.0f  gross %12.0f  imbalance %+6.1f%%\n",
+					name, float64(flow.Net())/1e8, float64(flow.Gross())/1e8, 100*flow.Imbalance())
+			}
 		case "stylized":
 			tape, err := run.Tape(*venue, *base)
 			if err != nil {

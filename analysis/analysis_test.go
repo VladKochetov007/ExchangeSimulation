@@ -522,3 +522,47 @@ func TestTapeForAnUnknownVenueIsEmpty(t *testing.T) {
 		t.Fatalf("correct selection produced %d trades, want 1", len(tape.Prices))
 	}
 }
+
+// An OrderFill carries the execution's quantity and the order's cumulative
+// filled quantity. Summing the second across partial fills counts early fills
+// repeatedly, which inflates whichever class trades most, breaks the identity
+// that signed flow sums to zero, and reads as an engine defect. The residual is
+// the guard against that.
+func TestNetFlowByRoleSumsToZeroAndUsesExecutionQuantity(t *testing.T) {
+	// One order filled in two parts against one counterparty. Cumulative
+	// filled_qty is 30 then 100, while the executions are 30 and 70.
+	dir := writeRun(t, Report{TerminalAccounts: []AccountRow{
+		{VenueID: "north", ClientID: 1, Role: "noise_flow_1"},
+		{VenueID: "north", ClientID: 2, Role: "spot_maker_1"},
+	}}, map[string][]string{
+		"north/spot/ABC-USD.jsonl": {
+			`{"sim_ts":1,"client_id":1,"data":{"venue_id":"north","payload":{"qty":30,"filled_qty":30,"side":"BUY","role":"taker"}},"event":"OrderFill"}`,
+			`{"sim_ts":1,"client_id":2,"data":{"venue_id":"north","payload":{"qty":30,"filled_qty":30,"side":"SELL","role":"maker"}},"event":"OrderFill"}`,
+			`{"sim_ts":2,"client_id":1,"data":{"venue_id":"north","payload":{"qty":70,"filled_qty":100,"side":"BUY","role":"taker"}},"event":"OrderFill"}`,
+			`{"sim_ts":2,"client_id":2,"data":{"venue_id":"north","payload":{"qty":70,"filled_qty":70,"side":"SELL","role":"maker"}},"event":"OrderFill"}`,
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	table, residual, err := run.NetFlowByRole("north", "ABC-USD")
+	if err != nil {
+		t.Fatalf("NetFlowByRole: %v", err)
+	}
+	if residual != 0 {
+		t.Fatalf("residual = %d, want zero: the sum is not counting each trade once per side", residual)
+	}
+	if got := table["noise_flow"].Net(); got != 100 {
+		t.Errorf("taker net = %d, want 100 from executions of 30 and 70 (170 would be the cumulative-field error)", got)
+	}
+	if got := table["spot_maker"].Net(); got != -100 {
+		t.Errorf("maker net = %d, want -100", got)
+	}
+	if got := table["noise_flow"].Imbalance(); got != 1 {
+		t.Errorf("one-sided taker imbalance = %f, want 1", got)
+	}
+	if empty := (NetFlow{}); empty.Imbalance() != 0 {
+		t.Error("an empty flow must report zero imbalance rather than dividing by zero")
+	}
+}
