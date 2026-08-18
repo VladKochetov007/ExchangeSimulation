@@ -46,6 +46,13 @@ func snapshotEventLine(ts int64, clientID uint64, bids, asks [][2]int64) string 
 	})
 }
 
+func acceptLine(ts int64, clientID uint64, side string, price, qty int64) string {
+	return logLine(ts, clientID, "OrderAccepted", map[string]any{
+		"order_id": ts*1000 + int64(clientID), "client_id": clientID,
+		"side": side, "price": price, "qty": qty, "type": "LIMIT",
+	})
+}
+
 func writeLog(t *testing.T, lines []string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ABC-USD.jsonl")

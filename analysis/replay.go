@@ -163,6 +163,19 @@ type tradePayload struct {
 // ReplayVisitor is called for each trade, with the book as it stood before it.
 type ReplayVisitor func(ts int64, trade tradePayload, book *ReplayedBook)
 
+// AcceptVisitor is called for each accepted order, with the book as it stood
+// when the order arrived, which is what its price must be measured against.
+type AcceptVisitor func(ts int64, accepted acceptedPayload, book *ReplayedBook)
+
+type acceptedPayload struct {
+	OrderID  uint64 `json:"order_id"`
+	ClientID uint64 `json:"client_id"`
+	Side     string `json:"side"`
+	Price    int64  `json:"price"`
+	Qty      int64  `json:"qty"`
+	Type     string `json:"type"`
+}
+
 // ReplayDrift counts how often the reconstructed book disagreed with a
 // published snapshot, which is the check that the replay is faithful.
 type ReplayDrift struct {
@@ -176,6 +189,11 @@ type ReplayDrift struct {
 // The file is read sequentially and never concurrently: the whole method
 // depends on event order, and the log's order is the matcher's order.
 func ReplayFile(path string, visit ReplayVisitor) (*ReplayDrift, error) {
+	return ReplayFileWith(path, visit, nil)
+}
+
+// ReplayFileWith is ReplayFile with an additional visitor for accepted orders.
+func ReplayFileWith(path string, visit ReplayVisitor, onAccept AcceptVisitor) (*ReplayDrift, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -211,6 +229,14 @@ func ReplayFile(path string, visit ReplayVisitor) (*ReplayDrift, error) {
 			var trade tradePayload
 			if json.Unmarshal(event.Data.Payload, &trade) == nil && visit != nil {
 				visit(event.SimTS, trade, book)
+			}
+		case "OrderAccepted":
+			if onAccept == nil {
+				continue
+			}
+			var accepted acceptedPayload
+			if json.Unmarshal(event.Data.Payload, &accepted) == nil {
+				onAccept(event.SimTS, accepted, book)
 			}
 		case "BookSnapshot":
 			if event.ClientID != 0 {

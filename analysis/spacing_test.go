@@ -118,3 +118,82 @@ func TestLevelSpacingSamplingPreservesTheDistribution(t *testing.T) {
 			tenth.AllGapsTicks.Median, every.AllGapsTicks.Median)
 	}
 }
+
+// Distance is measured away from the midpoint on the order's own side, so a
+// bid below the mid and an ask above it by the same amount read the same. A
+// signed convention that did not flip for bids would report them as negative
+// and they would be discarded as marketable.
+func TestRestingPlacementMeasuresBothSidesAwayFromMid(t *testing.T) {
+	lines := []string{
+		deltaLine(1, "BUY", 100_000, 100),
+		deltaLine(1, "SELL", 100_200, 100),
+		// Mid is 100100. A bid 10 ticks below and an ask 10 ticks above.
+		acceptLine(2, 1, "BUY", 100_000, 50),
+		acceptLine(2, 2, "SELL", 100_200, 50),
+	}
+	result, err := MeasureRestingPlacement(writeLog(t, lines), RestingOptions{
+		TickSize: 10,
+		Role:     func(clientID uint64) string { return "maker" },
+	})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	stats := result.ByRole["maker"]
+	if stats == nil || stats.Orders != 2 {
+		t.Fatalf("both sides not attributed: %+v", result)
+	}
+	if stats.DistanceTicks.Median != 10 || stats.DistanceTicks.Max != 10 {
+		t.Errorf("distances = %+v, want both at 10 ticks", stats.DistanceTicks)
+	}
+}
+
+// An order priced through the mid is taking liquidity, not resting it, and
+// counting it as depth at a negative distance would corrupt the distribution.
+func TestRestingPlacementExcludesMarketableOrders(t *testing.T) {
+	lines := []string{
+		deltaLine(1, "BUY", 100_000, 100),
+		deltaLine(1, "SELL", 100_200, 100),
+		acceptLine(2, 1, "BUY", 100_500, 50), // through the ask
+		acceptLine(2, 2, "BUY", 100_000, 50), // resting
+	}
+	result, err := MeasureRestingPlacement(writeLog(t, lines), RestingOptions{
+		TickSize: 10,
+		Role:     func(clientID uint64) string { return "maker" },
+	})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.Marketable != 1 {
+		t.Errorf("marketable orders = %d, want 1", result.Marketable)
+	}
+	if stats := result.ByRole["maker"]; stats == nil || stats.Orders != 1 {
+		t.Errorf("resting orders = %+v, want 1", stats)
+	}
+}
+
+// The classes furthest from the touch are the ones that set the book's width,
+// so they must be listed first.
+func TestRestingPlacementRanksByDistance(t *testing.T) {
+	lines := []string{
+		deltaLine(1, "BUY", 100_000, 100),
+		deltaLine(1, "SELL", 100_200, 100),
+		acceptLine(2, 1, "BUY", 100_090, 50), // 1 tick out
+		acceptLine(2, 2, "BUY", 99_100, 50),  // 100 ticks out
+	}
+	result, err := MeasureRestingPlacement(writeLog(t, lines), RestingOptions{
+		TickSize: 10,
+		Role: func(clientID uint64) string {
+			if clientID == 1 {
+				return "near"
+			}
+			return "far"
+		},
+	})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	ranked := result.RolesByDistance()
+	if len(ranked) != 2 || ranked[0] != "far" {
+		t.Errorf("ranking = %v, want the distant class first", ranked)
+	}
+}

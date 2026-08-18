@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -298,6 +298,30 @@ func main() {
 					result.FirstGapTicks.Median, result.FirstGapTicks.Mean,
 					result.AllGapsTicks.Median, result.AllGapsTicks.Mean, result.AllGapsTicks.P90,
 					result.SpreadTicks.Median, result.SingleTickGapShare)
+			})
+		case "resting":
+			files := run.BookFiles(*venue, *base)
+			if len(files) != 1 {
+				fmt.Fprintf(os.Stderr, "%s: %s at venue %s resolves to %d files, want exactly one\n",
+					dir, *base, *venue, len(files))
+				os.Exit(1)
+			}
+			result, err := analysis.MeasureRestingPlacement(files[0], analysis.RestingOptions{
+				TickSize: *tickSize,
+				Role:     func(clientID uint64) string { return analysis.RoleGroup(run.Role(*venue, clientID)) },
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%s  marketable %d  unattributed %d\n", dir, result.Marketable, result.Unattributed)
+				for _, role := range result.RolesByDistance() {
+					stats := result.ByRole[role]
+					fmt.Printf("    %-22s orders %7d  distance med %7.1f p75 %7.1f p90 %8.1f ticks  qty med %8.2f\n",
+						role, stats.Orders, stats.DistanceTicks.Median, stats.DistanceTicks.P75,
+						stats.DistanceTicks.P90, stats.Qty.Median/1e8)
+				}
 			})
 		case "triangular":
 			deviations, err := run.TriangularDeviation(analysis.TriangularConfig{
