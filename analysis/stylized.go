@@ -56,7 +56,12 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 		return nil, err
 	}
 	// Files are scanned concurrently, so restore time order before differencing.
-	sort.Slice(records, func(i, j int) bool { return records[i].ts < records[j].ts })
+	//
+	// Stable, because the clock granularity is coarser than the trade rate:
+	// dozens of trades share one timestamp, and an unstable sort permutes them
+	// arbitrarily. The series being differenced would then not be the sequence
+	// the matcher produced, and the first-lag bounce is measured on it.
+	sort.SliceStable(records, func(i, j int) bool { return records[i].ts < records[j].ts })
 	tape := &TradeTape{}
 	for _, rec := range records {
 		tape.Timestamps = append(tape.Timestamps, rec.ts)
@@ -78,6 +83,41 @@ func (t *TradeTape) LogReturns() []float64 {
 			continue
 		}
 		out = append(out, 1e4*math.Log(float64(t.Prices[i])/float64(t.Prices[i-1])))
+	}
+	return out
+}
+
+// TimeSampledLogReturns takes the last trade in each bucket of the given width
+// and differences those, in basis points.
+//
+// This is the clock the empirical values a panel is scored against are measured
+// in, and it is not interchangeable with trade time. In trade time the absolute
+// return is the pinned half-spread and is memoryless by construction, so a
+// panel built on it reports no volatility clustering whatever the price process
+// does. The same reference tape gives |return| autocorrelation of -0.008 in
+// trade time and +0.441 at one second.
+func (t *TradeTape) TimeSampledLogReturns(bucketNanos int64) []float64 {
+	if bucketNanos <= 0 || len(t.Prices) < 2 {
+		return nil
+	}
+	var prices []int64
+	lastBucket := int64(-1)
+	for i, ts := range t.Timestamps {
+		bucket := ts / bucketNanos
+		if bucket != lastBucket && lastBucket >= 0 {
+			prices = append(prices, t.Prices[i-1])
+		}
+		lastBucket = bucket
+	}
+	if len(t.Prices) > 0 {
+		prices = append(prices, t.Prices[len(t.Prices)-1])
+	}
+	out := make([]float64, 0, len(prices))
+	for i := 1; i < len(prices); i++ {
+		if prices[i-1] <= 0 || prices[i] <= 0 {
+			continue
+		}
+		out = append(out, 1e4*math.Log(float64(prices[i])/float64(prices[i-1])))
 	}
 	return out
 }
@@ -275,6 +315,14 @@ type StylizedFacts struct {
 	Stride100ReturnACF1 float64
 	Stride100Kurtosis   float64
 
+	// Time-sampled facts are the ones comparable to published empirical values.
+	Sec1ReturnACF1     float64
+	Sec1AbsReturnACF1  float64
+	Sec1AbsReturnACF10 float64
+	Sec1Kurtosis       float64
+	Sec60ReturnACF1    float64
+	Sec60AbsReturnACF1 float64
+
 	ReturnStdBps float64
 }
 
@@ -314,6 +362,16 @@ func (t *TradeTape) Facts(maxLag int) StylizedFacts {
 	facts.ExcessKurtosis = Kurtosis(returns)
 	facts.TailIndex, facts.TailSpread = HillStability(returns)
 
+	if oneSecond := t.TimeSampledLogReturns(1e9); len(oneSecond) > 50 {
+		facts.Sec1ReturnACF1 = Autocorrelation(oneSecond, 1)[0]
+		absOne := Autocorrelation(Abs(oneSecond), 10)
+		facts.Sec1AbsReturnACF1, facts.Sec1AbsReturnACF10 = absOne[0], absOne[9]
+		facts.Sec1Kurtosis = Kurtosis(oneSecond)
+	}
+	if oneMinute := t.TimeSampledLogReturns(60e9); len(oneMinute) > 50 {
+		facts.Sec60ReturnACF1 = Autocorrelation(oneMinute, 1)[0]
+		facts.Sec60AbsReturnACF1 = Autocorrelation(Abs(oneMinute), 1)[0]
+	}
 	for _, stride := range []int{20, 100} {
 		strided := t.StridedLogReturns(stride)
 		if len(strided) < 50 {

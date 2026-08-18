@@ -412,3 +412,88 @@ func TestStridedReturnsRemoveTheBounce(t *testing.T) {
 		t.Error("invalid strides must return no samples")
 	}
 }
+
+// Trade time and calendar time are different clocks and a panel scored against
+// published empirical values must use the second. In trade time the absolute
+// return is the pinned half-spread and is memoryless whatever the price process
+// does, so a clustering measurement taken there reports zero by construction.
+func TestTimeSampledReturnsSeeClusteringThatTradeTimeCannot(t *testing.T) {
+	// A tape whose trade RATE clusters while each print is a fixed one-tick
+	// hop: bursts of many trades, then quiet. Trade time cannot distinguish
+	// the two regimes; calendar time must.
+	tape := &TradeTape{}
+	price := int64(50_000_00000)
+	state := uint64(7)
+	now := int64(0)
+	busy := true
+	for burst := 0; burst < 600; burst++ {
+		state = state*6364136223846793005 + 1442695040888963407
+		// A persistent regime rather than an alternating one: busy seconds
+		// follow busy seconds. Strict alternation would give a negative lag-one
+		// autocorrelation, which is periodicity, not clustering.
+		if (state>>33)%100 < 8 {
+			busy = !busy
+		}
+		trades := 2
+		if busy {
+			trades = 60
+		}
+		for i := 0; i < trades; i++ {
+			state = state*6364136223846793005 + 1442695040888963407
+			// Print sizes vary, so absolute return has real variance, but the
+			// variation is independent from print to print: in trade time there
+			// is no structure to find. The structure is in the arrival rate.
+			ticks := int64((state>>33)%4 + 1)
+			if (state>>40)%2 == 0 {
+				price += 1000 * ticks
+			} else {
+				price -= 1000 * ticks
+			}
+			tape.Prices = append(tape.Prices, price)
+			tape.Timestamps = append(tape.Timestamps, now)
+			tape.Signs = append(tape.Signs, 1)
+		}
+		now += int64(1e9)
+	}
+	tradeAbs := Autocorrelation(Abs(tape.LogReturns()), 1)
+	timeAbs := Autocorrelation(Abs(tape.TimeSampledLogReturns(1e9)), 1)
+	if math.Abs(tradeAbs[0]) > 0.1 {
+		t.Fatalf("trade-time |return| ACF(1) = %.3f, expected near zero by construction", tradeAbs[0])
+	}
+	if timeAbs[0] <= tradeAbs[0]+0.05 {
+		t.Errorf("time sampling did not reveal the rate clustering: trade %.3f, one second %.3f",
+			tradeAbs[0], timeAbs[0])
+	}
+	if len(tape.TimeSampledLogReturns(0)) != 0 {
+		t.Error("a non-positive bucket must yield no samples")
+	}
+}
+
+// Dozens of trades share one timestamp at this clock granularity, so the sort
+// restoring time order has to be stable: an unstable one permutes within-second
+// batches and the differenced series is no longer the sequence the matcher
+// produced.
+func TestTapeOrderingIsStableWithinATimestamp(t *testing.T) {
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/spot/ABC-USD.jsonl": {
+			`{"sim_ts":1000000000,"data":{"venue_id":"north","payload":{"price":100,"qty":1,"side":"BUY"}},"event":"Trade"}`,
+			`{"sim_ts":1000000000,"data":{"venue_id":"north","payload":{"price":200,"qty":1,"side":"BUY"}},"event":"Trade"}`,
+			`{"sim_ts":1000000000,"data":{"venue_id":"north","payload":{"price":300,"qty":1,"side":"BUY"}},"event":"Trade"}`,
+			`{"sim_ts":1000000000,"data":{"venue_id":"north","payload":{"price":400,"qty":1,"side":"BUY"}},"event":"Trade"}`,
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	tape, err := run.Tape("north", "ABC-USD")
+	if err != nil {
+		t.Fatalf("Tape: %v", err)
+	}
+	want := []int64{100, 200, 300, 400}
+	for i, price := range want {
+		if tape.Prices[i] != price {
+			t.Fatalf("tape order = %v, want file order %v", tape.Prices, want)
+		}
+	}
+}

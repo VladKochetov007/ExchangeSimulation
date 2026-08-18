@@ -73,11 +73,15 @@ func main() {
 				if facts.TailSpread > 1 || math.IsNaN(facts.TailIndex) {
 					tail = "  n/a"
 				}
-				fmt.Printf("%-18s trades %7d  ret-acf1 %+6.3f  |ret|-acf1 %+6.3f  sign-acf1 %+6.3f  sign-acf50 %+6.3f  "+
-					"kurt %8.2f  tail %s (spread %5.2f)  s20-acf1 %+6.3f  s100-acf1 %+6.3f  s100-kurt %7.2f\n",
-					dir, facts.Trades, facts.ReturnACF1, facts.AbsReturnACF1,
-					facts.SignACF1, facts.SignACF50, facts.ExcessKurtosis, tail, facts.TailSpread,
-					facts.Stride20ReturnACF1, facts.Stride100ReturnACF1, facts.Stride100Kurtosis)
+				// Trade-time and calendar-time numbers are reported side by
+				// side because only the second is comparable to published
+				// empirical values, and reporting only the first is how this
+				// campaign concluded the market had no volatility clustering.
+				fmt.Printf("%-16s n %6d | trade: ret %+6.3f |ret| %+6.3f sign1 %+6.3f sign50 %+6.3f | "+
+					"1s: ret %+6.3f |ret| %+6.3f |ret|10 %+6.3f kurt %7.2f | 60s: ret %+6.3f |ret| %+6.3f | tail %s\n",
+					dir, facts.Trades, facts.ReturnACF1, facts.AbsReturnACF1, facts.SignACF1, facts.SignACF50,
+					facts.Sec1ReturnACF1, facts.Sec1AbsReturnACF1, facts.Sec1AbsReturnACF10, facts.Sec1Kurtosis,
+					facts.Sec60ReturnACF1, facts.Sec60AbsReturnACF1, tail)
 			})
 		case "triangular":
 			deviations, err := run.TriangularDeviation(analysis.TriangularConfig{
