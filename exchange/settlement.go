@@ -1,5 +1,14 @@
 package exchange
 
+import "fmt"
+
+// Settling one execution is an orchestration: fees are quoted, balances and
+// positions move, a trade is recorded, and both sides are told what happened.
+// Those are four different concerns and this file keeps them apart —
+// executionContext carries the identity of the matched pair, settleExecution
+// moves the money, and settlementOutcome is the record everything downstream is
+// built from. handleExecution only sequences them.
+
 // calcClientFee computes a client's fee for a fill, treating a nil client or nil
 // FeePlan as the zero-fee plan (matching the reservation path).
 func calcClientFee(client *Client, ctx FillContext) Fee {
@@ -7,6 +16,226 @@ func calcClientFee(client *Client, ctx FillContext) Fee {
 		return Fee{}
 	}
 	return client.FeePlan.CalculateFee(ctx)
+}
+
+// normalizedExecutionFee makes an omitted fee asset mean the instrument quote
+// asset, matching fee-revenue accounting. A zero fee must not create a phantom
+// empty-string ledger asset merely because a zero-fee plan returned Fee{}.
+func normalizedExecutionFee(fee Fee, quoteAsset string) Fee {
+	if fee.Amount == 0 {
+		return Fee{}
+	}
+	if fee.Asset == "" {
+		fee.Asset = quoteAsset
+	}
+	return fee
+}
+
+// executionContext is one matched pair and everything settling it needs.
+//
+// It exists so the settlement, trade-recording and reporting steps take one
+// argument rather than a dozen positional ones, which is what let an earlier
+// version pass thirteen values to a single notification call.
+//
+// The caller must hold e.mu.Lock() for the whole lifetime of a context: it
+// holds live pointers into the book and the client ledger.
+type executionContext struct {
+	book       *OrderBook
+	exec       *Execution
+	instrument Instrument
+
+	takerOrder *Order
+	makerOrder *Order
+	taker      *Client
+	maker      *Client
+	// makerPosSide comes from the resting order when it is still in the book,
+	// and from the execution otherwise, which is what a custom matcher leaves.
+	makerPosSide PositionSide
+
+	takerFee Fee
+	makerFee Fee
+
+	baseAsset     string
+	quoteAsset    string
+	basePrecision int64
+	timestamp     int64
+	log           Logger
+}
+
+// requireParties asserts the invariant every settlement path relies on: both
+// sides of a match are registered clients.
+//
+// Clients are never removed from the registry — only gateways are, on
+// disconnect — and an order cannot reach the book without one, so a missing
+// party means the book outlived its owner. That is corruption, and settling
+// half a trade against it would silently mint or destroy assets. Failing here,
+// where both parties are resolved once, beats a nil dereference inside an
+// instrument's Settle closure with no indication of which side was missing.
+func (c executionContext) requireParties() {
+	if c.taker == nil {
+		panic(fmt.Sprintf("settlement: taker %d of order %d on %s is not a registered client",
+			c.exec.TakerClientID, c.exec.TakerOrderID, c.book.Symbol))
+	}
+	if c.maker == nil {
+		panic(fmt.Sprintf("settlement: maker %d of order %d on %s is not a registered client",
+			c.exec.MakerClientID, c.exec.MakerOrderID, c.book.Symbol))
+	}
+}
+
+// notional is the quote-currency value of the execution.
+func (c executionContext) notional() int64 {
+	return MulDiv(c.exec.Qty, c.exec.Price, c.basePrecision)
+}
+
+// newExecutionContext resolves the parties and quotes the fees for one match.
+//
+// A planned spot match has already quoted the exact per-execution fees on a
+// detached book. Re-asking a stateful fee model here would charge a different
+// schedule from the one that passed admission, so the plan's fees win. Other
+// settlement paths retain the nil-safe direct calculation.
+func (e *DefaultExchange) newExecutionContext(
+	book *OrderBook, exec *Execution, takerOrder *Order,
+	instrument Instrument, basePrecision, timestamp int64, log Logger,
+	planned *plannedSpotExecution,
+) executionContext {
+	baseAsset, quoteAsset := instrument.BaseAsset(), instrument.QuoteAsset()
+	// Fully filled makers stay in book.Orders until removeMakerOrders, so this
+	// lookup normally succeeds; exec carries the fallbacks for custom matchers.
+	makerOrder := book.FindOrder(exec.MakerOrderID)
+	makerPosSide := exec.MakerPosSide
+	if makerOrder != nil {
+		makerPosSide = makerOrder.PositionSide
+	}
+
+	ctx := executionContext{
+		book:          book,
+		exec:          exec,
+		instrument:    instrument,
+		takerOrder:    takerOrder,
+		makerOrder:    makerOrder,
+		taker:         e.Clients[exec.TakerClientID],
+		maker:         e.Clients[exec.MakerClientID],
+		makerPosSide:  makerPosSide,
+		baseAsset:     baseAsset,
+		quoteAsset:    quoteAsset,
+		basePrecision: basePrecision,
+		timestamp:     timestamp,
+		log:           log,
+	}
+	ctx.requireParties()
+	if planned != nil {
+		ctx.takerFee, ctx.makerFee = planned.takerFee, planned.makerFee
+	} else {
+		ctx.takerFee = calcClientFee(ctx.taker, FillContext{Exec: exec, IsMaker: false, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
+		ctx.makerFee = calcClientFee(ctx.maker, FillContext{Exec: exec, IsMaker: true, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
+	}
+	ctx.takerFee = normalizedExecutionFee(ctx.takerFee, quoteAsset)
+	ctx.makerFee = normalizedExecutionFee(ctx.makerFee, quoteAsset)
+	return ctx
+}
+
+// fillSide is one party's view of a settled execution, in the form both the log
+// and the gateway notification need. Building it once means the two reports
+// cannot disagree about what happened.
+type fillSide struct {
+	clientID    uint64
+	orderID     uint64
+	side        Side
+	posSide     PositionSide
+	fee         Fee
+	filledQty   int64
+	totalQty    int64
+	delta       PositionDelta
+	realizedPnL int64
+	role        string
+}
+
+func (f fillSide) isFull() bool { return f.filledQty >= f.totalQty }
+
+// settlementOutcome is what settling an execution produced. Everything reported
+// downstream is derived from it rather than recomputed.
+type settlementOutcome struct {
+	taker fillSide
+	maker fillSide
+	// positionChanged is true when the instrument keeps positions, which is what
+	// makes open interest worth republishing.
+	positionChanged bool
+	tradeID         uint64
+}
+
+func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order, plan *spotExecutionPlan) {
+	instrument := book.Instrument
+	timestamp := e.Clock.NowUnixNano()
+	basePrecision := instrument.BasePrecision()
+	log := e.getLogger(book.Symbol)
+	positionChanged := false
+	for i, exec := range executions {
+		var planned *plannedSpotExecution
+		if plan != nil {
+			if i >= len(plan.fills) || !plan.fills[i].fingerprint.matches(exec) {
+				panic("spot execution plan diverged during settlement")
+			}
+			planned = &plan.fills[i]
+		}
+		if e.handleExecution(book, exec, takerOrder, instrument, basePrecision, timestamp, log, planned) {
+			positionChanged = true
+		}
+	}
+	if positionChanged {
+		e.publishOpenInterest(book, timestamp)
+	}
+}
+
+// handleExecution sequences the settlement of one matched pair and returns
+// whether a position changed, which is what open-interest tracking needs.
+//
+// Caller must hold e.mu.Lock().
+func (e *DefaultExchange) handleExecution(
+	book *OrderBook, exec *Execution, takerOrder *Order,
+	instrument Instrument, basePrecision, timestamp int64, log Logger, planned *plannedSpotExecution,
+) bool {
+	ctx := e.newExecutionContext(book, exec, takerOrder, instrument, basePrecision, timestamp, log, planned)
+	outcome := e.settleExecution(ctx)
+	outcome.tradeID = e.createTrade(ctx)
+	e.reportFill(ctx, outcome)
+	return outcome.positionChanged
+}
+
+// settleExecution moves money and positions for one execution and returns what
+// each side ended up with. It does not record or report anything.
+func (e *DefaultExchange) settleExecution(ctx executionContext) settlementOutcome {
+	var result SettlementResult
+	positionChanged := false
+	if settleable, ok := ctx.instrument.(Settleable); ok {
+		result = settleable.Settle(e.buildSettlementContext(ctx))
+		positionChanged = true
+		// The instrument's margin-only release just freed the entire fee
+		// headroom, including the share backing the unfilled remainder.
+		e.restoreFeeHeadroom(ctx.book, ctx.takerOrder, ctx.basePrecision)
+		e.restoreFeeHeadroom(ctx.book, ctx.makerOrder, ctx.basePrecision)
+	} else {
+		e.settleSpotExecution(ctx)
+	}
+	e.restoreForeignFeeReservation(ctx.book, ctx.takerOrder, ctx.basePrecision)
+	e.restoreForeignFeeReservation(ctx.book, ctx.makerOrder, ctx.basePrecision)
+
+	// Per-execution state comes from exec (TakerFilledQty/MakerFilledQty
+	// captured at match time), not from the order's final post-match state.
+	return settlementOutcome{
+		taker: fillSide{
+			clientID: ctx.exec.TakerClientID, orderID: ctx.exec.TakerOrderID,
+			side: ctx.takerOrder.Side, posSide: ctx.takerOrder.PositionSide, fee: ctx.takerFee,
+			filledQty: ctx.exec.TakerFilledQty, totalQty: ctx.takerOrder.Qty,
+			delta: result.TakerDelta, realizedPnL: result.TakerPnL, role: "taker",
+		},
+		maker: fillSide{
+			clientID: ctx.exec.MakerClientID, orderID: ctx.exec.MakerOrderID,
+			side: ctx.exec.MakerSide, posSide: ctx.makerPosSide, fee: ctx.makerFee,
+			filledQty: ctx.exec.MakerFilledQty, totalQty: ctx.exec.MakerTotalQty,
+			delta: result.MakerDelta, realizedPnL: result.MakerPnL, role: "maker",
+		},
+		positionChanged: positionChanged,
+	}
 }
 
 // restoreFeeHeadroom re-reserves the worst-case quote fee for the unfilled
@@ -40,107 +269,16 @@ func (e *DefaultExchange) restoreFeeHeadroom(book *OrderBook, order *Order, prec
 	order.Reserved += headroom
 }
 
-func (e *DefaultExchange) processExecutions(book *OrderBook, executions []*Execution, takerOrder *Order, plan *spotExecutionPlan) {
-	instrument := book.Instrument
-	timestamp := e.Clock.NowUnixNano()
-	basePrecision := instrument.BasePrecision()
-	log := e.getLogger(book.Symbol)
-	positionChanged := false
-	for i, exec := range executions {
-		var planned *plannedSpotExecution
-		if plan != nil {
-			if i >= len(plan.fills) || !plan.fills[i].fingerprint.matches(exec) {
-				panic("spot execution plan diverged during settlement")
-			}
-			planned = &plan.fills[i]
-		}
-		if e.handleExecution(book, exec, takerOrder, instrument, basePrecision, timestamp, log, planned) {
-			positionChanged = true
-		}
-	}
-	if positionChanged {
-		e.publishOpenInterest(book, timestamp)
-	}
-}
-
-// handleExecution processes one matched pair: settle, update volumes, record trade, notify.
-// Returns true if a position changed (for OI tracking).
-func (e *DefaultExchange) handleExecution(
-	book *OrderBook, exec *Execution, takerOrder *Order,
-	instrument Instrument, basePrecision, timestamp int64, log Logger, planned *plannedSpotExecution,
-) bool {
-	taker := e.Clients[exec.TakerClientID]
-	maker := e.Clients[exec.MakerClientID]
-	baseAsset, quoteAsset := instrument.BaseAsset(), instrument.QuoteAsset()
-	// A planned spot match has already quoted the exact per-execution fees on a
-	// detached book. Re-asking a stateful fee model here would charge a different
-	// schedule from the one that passed admission. Other settlement paths retain
-	// the nil-safe direct calculation.
-	var takerFee, makerFee Fee
-	if planned != nil {
-		takerFee = planned.takerFee
-		makerFee = planned.makerFee
-	} else {
-		takerFee = calcClientFee(taker, FillContext{Exec: exec, IsMaker: false, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
-		makerFee = calcClientFee(maker, FillContext{Exec: exec, IsMaker: true, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
-	}
-	takerFee = normalizedExecutionFee(takerFee, quoteAsset)
-	makerFee = normalizedExecutionFee(makerFee, quoteAsset)
-
-	// Fully filled makers stay in book.Orders until removeMakerOrders, so this
-	// lookup normally succeeds; exec carries the fallbacks for custom matchers.
-	makerOrder := book.FindOrder(exec.MakerOrderID)
-	makerPosSide := exec.MakerPosSide
-	if makerOrder != nil {
-		makerPosSide = makerOrder.PositionSide
-	}
-
-	var result SettlementResult
-	var positionChanged bool
-	if s, ok := instrument.(Settleable); ok {
-		result = s.Settle(e.buildSettlementContext(book, exec, takerOrder, makerOrder, makerPosSide, takerFee, makerFee, basePrecision, timestamp, log))
-		positionChanged = true
-		// The instrument's margin-only release just freed the entire fee
-		// headroom, including the share backing the unfilled remainder.
-		e.restoreFeeHeadroom(book, takerOrder, basePrecision)
-		e.restoreFeeHeadroom(book, makerOrder, basePrecision)
-	} else {
-		notional := MulDiv(exec.Qty, exec.Price, basePrecision)
-		e.settleSpotExecution(book, exec, takerOrder, makerOrder, taker, maker, takerFee, makerFee, notional, timestamp)
-	}
-	e.restoreForeignFeeReservation(book, takerOrder, basePrecision)
-	e.restoreForeignFeeReservation(book, makerOrder, basePrecision)
-	tradeID := e.createTrade(book, exec, takerOrder, timestamp, log)
-	e.notifyFill(exec, takerOrder, makerPosSide, takerFee, makerFee, tradeID, book, log, timestamp, result.TakerDelta, result.MakerDelta, result.TakerPnL, result.MakerPnL)
-	return positionChanged
-}
-
-// normalizedExecutionFee makes an omitted fee asset mean the instrument quote
-// asset, matching fee-revenue accounting. A zero fee must not create a phantom
-// empty-string ledger asset merely because a zero-fee plan returned Fee{}.
-func normalizedExecutionFee(fee Fee, quoteAsset string) Fee {
-	if fee.Amount == 0 {
-		return Fee{}
-	}
-	if fee.Asset == "" {
-		fee.Asset = quoteAsset
-	}
-	return fee
-}
-
-func (e *DefaultExchange) buildSettlementContext(
-	book *OrderBook, exec *Execution, takerOrder, makerOrder *Order,
-	makerPosSide PositionSide, takerFee, makerFee Fee,
-	basePrecision, timestamp int64, log Logger,
-) SettlementContext {
+func (e *DefaultExchange) buildSettlementContext(ctx executionContext) SettlementContext {
 	clients := e.Clients
+	book, timestamp := ctx.book, ctx.timestamp
 	return SettlementContext{
-		Exec:              exec,
-		TakerOrder:        takerOrder,
-		MakerOrder:        makerOrder,
-		MakerPosSide:      makerPosSide,
-		TakerFee:          takerFee,
-		MakerFee:          makerFee,
+		Exec:              ctx.exec,
+		TakerOrder:        ctx.takerOrder,
+		MakerOrder:        ctx.makerOrder,
+		MakerPosSide:      ctx.makerPosSide,
+		TakerFee:          ctx.takerFee,
+		MakerFee:          ctx.makerFee,
 		Positions:         e.Positions,
 		PerpBalance:       func(clientID uint64, asset string) int64 { return clients[clientID].PerpBalance(asset) },
 		MutatePerpBalance: func(clientID uint64, asset string, delta int64) { clients[clientID].MutatePerpBalance(asset, delta) },
@@ -157,82 +295,100 @@ func (e *DefaultExchange) buildSettlementContext(
 		LogBalanceChange: func(clientID uint64, symbol, reason string, deltas []BalanceDelta) {
 			logBalanceChange(e, timestamp, clientID, symbol, reason, deltas)
 		},
-		Log:           log,
+		Log:           ctx.log,
 		GlobalLog:     e.getLogger("_global"),
-		BasePrecision: basePrecision,
+		BasePrecision: ctx.basePrecision,
 		Timestamp:     timestamp,
 		BookSymbol:    book.Symbol,
 		BookSeqNum:    book.SeqNum,
 	}
 }
 
-// createTrade records the trade, increments SeqNum, publishes to MD.
-func (e *DefaultExchange) createTrade(book *OrderBook, exec *Execution, takerOrder *Order, timestamp int64, log Logger) uint64 {
-	tradeID := book.SeqNum
-	book.SeqNum++
-	trade := &Trade{
-		TradeID:      tradeID,
-		Price:        exec.Price,
-		Qty:          exec.Qty,
-		Side:         takerOrder.Side,
-		TakerOrderID: exec.TakerOrderID,
-		MakerOrderID: exec.MakerOrderID,
+// spotLeg is one party to a spot settlement. Buyer and seller differ only in
+// which asset they give up, so they share one settlement path: keeping two
+// near-identical ones is how a fix reaches one side and not the other.
+type spotLeg struct {
+	client   *Client
+	clientID uint64
+	order    *Order
+	side     Side
+	fee      Fee
+}
+
+// oppositeSide is the other side of a match.
+//
+// The settling maker's side is derived from the taker's rather than read from
+// the execution, which is what the two-branch version it replaced did. The
+// execution's own MakerSide is still what gets reported, so a custom matcher
+// that disagrees with itself keeps whatever behaviour it had.
+func oppositeSide(side Side) Side {
+	if side == Buy {
+		return Sell
 	}
-	book.LastTrade = trade
-	if log != nil {
-		log.LogEvent(timestamp, 0, "Trade", trade)
-	}
-	e.MDPublisher.PublishTrade(book.Symbol, trade, timestamp)
-	return tradeID
+	return Buy
 }
 
-// notifyFill sends gateway and log fill events to both taker and maker.
-// Per-execution state comes from exec (TakerFilledQty/MakerFilledQty captured
-// at match time), not from the order's final post-match state.
-func (e *DefaultExchange) notifyFill(
-	exec *Execution, takerOrder *Order, makerPosSide PositionSide, takerFee, makerFee Fee,
-	tradeID uint64, book *OrderBook, log Logger, timestamp int64,
-	takerDelta, makerDelta PositionDelta, takerPnL, makerPnL int64,
-) {
-	sendFillNotification(e.Gateways[exec.TakerClientID], exec.TakerOrderID, exec.TakerClientID,
-		tradeID, exec, takerOrder.Side, takerOrder.PositionSide, takerFee,
-		exec.TakerFilledQty >= takerOrder.Qty, book.Symbol, takerDelta, takerPnL)
-	logFill(log, timestamp, exec.TakerClientID, exec.TakerOrderID, exec,
-		takerOrder.Side, takerOrder.PositionSide, exec.TakerFilledQty, takerOrder.Qty,
-		tradeID, takerFee, takerDelta, takerPnL, book.Symbol, "taker")
-
-	sendFillNotification(e.Gateways[exec.MakerClientID], exec.MakerOrderID, exec.MakerClientID,
-		tradeID, exec, exec.MakerSide, makerPosSide, makerFee,
-		exec.MakerFilledQty >= exec.MakerTotalQty, book.Symbol, makerDelta, makerPnL)
-	logFill(log, timestamp, exec.MakerClientID, exec.MakerOrderID, exec,
-		exec.MakerSide, makerPosSide, exec.MakerFilledQty, exec.MakerTotalQty,
-		tradeID, makerFee, makerDelta, makerPnL, book.Symbol, "maker")
-}
-
-func (e *DefaultExchange) publishOpenInterest(book *OrderBook, timestamp int64) {
-	e.MDPublisher.PublishOpenInterest(book.Symbol, &OpenInterest{
-		Symbol:         book.Symbol,
-		TotalContracts: e.Positions.CalculateOpenInterest(book.Symbol),
-		Timestamp:      timestamp,
-	}, timestamp)
-}
-
-// settleSpotExecution settles balances for both taker and maker in a spot trade.
+// settleSpotExecution settles balances for both parties to a spot trade.
 // Caller must hold e.mu.Lock().
-func (e *DefaultExchange) settleSpotExecution(
-	book *OrderBook, exec *Execution, takerOrder, makerOrder *Order,
-	taker, maker *Client, takerFee, makerFee Fee,
-	notional, timestamp int64,
-) {
-	base, quote := book.Instrument.BaseAsset(), book.Instrument.QuoteAsset()
-	if takerOrder.Side == Buy {
-		e.settleSpotBuyer(taker, exec.TakerClientID, book, takerOrder, exec, base, quote, exec.Qty, notional, takerFee, timestamp)
-		e.settleSpotSeller(maker, exec.MakerClientID, book, makerOrder, exec, base, quote, exec.Qty, notional, makerFee, timestamp)
-	} else {
-		e.settleSpotSeller(taker, exec.TakerClientID, book, takerOrder, exec, base, quote, exec.Qty, notional, takerFee, timestamp)
-		e.settleSpotBuyer(maker, exec.MakerClientID, book, makerOrder, exec, base, quote, exec.Qty, notional, makerFee, timestamp)
+func (e *DefaultExchange) settleSpotExecution(ctx executionContext) {
+	takerLeg := spotLeg{client: ctx.taker, clientID: ctx.exec.TakerClientID, order: ctx.takerOrder, side: ctx.takerOrder.Side, fee: ctx.takerFee}
+	makerLeg := spotLeg{client: ctx.maker, clientID: ctx.exec.MakerClientID, order: ctx.makerOrder, side: oppositeSide(ctx.takerOrder.Side), fee: ctx.makerFee}
+	e.settleSpotLeg(ctx, takerLeg)
+	e.settleSpotLeg(ctx, makerLeg)
+	e.recordFeeRevenue(ctx.quoteAsset, ctx.takerFee, ctx.makerFee, ctx.book, ctx.timestamp)
+}
+
+// settleSpotLeg releases one party's reservation and moves its balances.
+//
+// A buyer gives up quote and receives base; a seller does the reverse. The
+// reservation released is always in the asset given up.
+//
+// Caller must hold e.mu.Lock().
+func (e *DefaultExchange) settleSpotLeg(ctx executionContext, leg spotLeg) {
+	notional := ctx.notional()
+	give, receive := ctx.quoteAsset, ctx.baseAsset
+	giveAmount, receiveAmount := notional, ctx.exec.Qty
+	if leg.side == Sell {
+		give, receive = ctx.baseAsset, ctx.quoteAsset
+		giveAmount, receiveAmount = ctx.exec.Qty, notional
 	}
-	e.recordFeeRevenue(quote, takerFee, makerFee, book, timestamp)
+
+	client := leg.client
+	oldGive, oldReceive := client.Balances[give], client.Balances[receive]
+	oldFeeAsset := int64(0)
+	if leg.fee.Amount != 0 {
+		oldFeeAsset = client.Balances[leg.fee.Asset]
+	}
+
+	client.Release(give, spotFillRelease(client, ctx.book, leg.order, ctx.exec, leg.side, ctx.basePrecision))
+	client.Balances[give] -= giveAmount
+	client.Balances[receive] += receiveAmount
+	if leg.fee.Amount != 0 {
+		client.Balances[leg.fee.Asset] -= leg.fee.Amount
+	}
+
+	deltas := []BalanceDelta{
+		spotDelta(ctx.baseAsset, oldBalanceOf(ctx.baseAsset, give, receive, oldGive, oldReceive), client.Balances[ctx.baseAsset]),
+		spotDelta(ctx.quoteAsset, oldBalanceOf(ctx.quoteAsset, give, receive, oldGive, oldReceive), client.Balances[ctx.quoteAsset]),
+	}
+	// A fee paid in a third asset is its own ledger line; one paid in base or
+	// quote is already inside the deltas above.
+	if leg.fee.Amount != 0 && leg.fee.Asset != ctx.quoteAsset && leg.fee.Asset != ctx.baseAsset {
+		deltas = append(deltas, spotDelta(leg.fee.Asset, oldFeeAsset, client.Balances[leg.fee.Asset]))
+	}
+	logBalanceChange(e, ctx.timestamp, leg.clientID, ctx.book.Symbol, "trade_settlement", deltas)
+}
+
+// oldBalanceOf picks which captured balance belongs to an asset, so the deltas
+// are reported base-first and quote-second whichever side the leg is.
+func oldBalanceOf(asset, give, receive string, oldGive, oldReceive int64) int64 {
+	if asset == give {
+		return oldGive
+	}
+	if asset == receive {
+		return oldReceive
+	}
+	return 0
 }
 
 // spotFillRelease computes the reservation to unlock for this fill as a delta
@@ -270,52 +426,41 @@ func spotFillRelease(client *Client, book *OrderBook, order *Order, exec *Execut
 	return release
 }
 
-// settleSpotBuyer releases the buyer's quote reservation and settles balances.
-// Caller must hold e.mu.Lock().
-func (e *DefaultExchange) settleSpotBuyer(client *Client, clientID uint64, book *OrderBook, order *Order, exec *Execution, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
-	oldBase, oldQuote := client.Balances[base], client.Balances[quote]
-	oldFeeAsset := int64(0)
-	if fee.Amount != 0 {
-		oldFeeAsset = client.Balances[fee.Asset]
+// createTrade records the trade, increments SeqNum, publishes to MD.
+func (e *DefaultExchange) createTrade(ctx executionContext) uint64 {
+	book := ctx.book
+	tradeID := book.SeqNum
+	book.SeqNum++
+	trade := &Trade{
+		TradeID:      tradeID,
+		Price:        ctx.exec.Price,
+		Qty:          ctx.exec.Qty,
+		Side:         ctx.takerOrder.Side,
+		TakerOrderID: ctx.exec.TakerOrderID,
+		MakerOrderID: ctx.exec.MakerOrderID,
 	}
-	client.Release(quote, spotFillRelease(client, book, order, exec, Buy, book.Instrument.BasePrecision()))
-	client.Balances[quote] -= notional
-	if fee.Amount != 0 {
-		client.Balances[fee.Asset] -= fee.Amount
+	book.LastTrade = trade
+	if ctx.log != nil {
+		ctx.log.LogEvent(ctx.timestamp, 0, "Trade", trade)
 	}
-	client.Balances[base] += qty
-	deltas := []BalanceDelta{
-		spotDelta(base, oldBase, client.Balances[base]),
-		spotDelta(quote, oldQuote, client.Balances[quote]),
-	}
-	if fee.Amount != 0 && fee.Asset != quote && fee.Asset != base {
-		deltas = append(deltas, spotDelta(fee.Asset, oldFeeAsset, client.Balances[fee.Asset]))
-	}
-	logBalanceChange(e, timestamp, clientID, book.Symbol, "trade_settlement", deltas)
+	e.MDPublisher.PublishTrade(book.Symbol, trade, ctx.timestamp)
+	return tradeID
 }
 
-// settleSpotSeller releases the seller's base reservation and settles balances.
-// Caller must hold e.mu.Lock().
-func (e *DefaultExchange) settleSpotSeller(client *Client, clientID uint64, book *OrderBook, order *Order, exec *Execution, base, quote string, qty, notional int64, fee Fee, timestamp int64) {
-	oldBase, oldQuote := client.Balances[base], client.Balances[quote]
-	oldFeeAsset := int64(0)
-	if fee.Amount != 0 {
-		oldFeeAsset = client.Balances[fee.Asset]
+// reportFill tells both parties what happened, through the gateway and the log.
+func (e *DefaultExchange) reportFill(ctx executionContext, outcome settlementOutcome) {
+	for _, side := range []fillSide{outcome.taker, outcome.maker} {
+		sendFillNotification(e.Gateways[side.clientID], ctx, outcome.tradeID, side)
+		logFill(ctx, outcome.tradeID, side)
 	}
-	client.Release(base, spotFillRelease(client, book, order, exec, Sell, book.Instrument.BasePrecision()))
-	client.Balances[base] -= qty
-	client.Balances[quote] += notional
-	if fee.Amount != 0 {
-		client.Balances[fee.Asset] -= fee.Amount
-	}
-	deltas := []BalanceDelta{
-		spotDelta(base, oldBase, client.Balances[base]),
-		spotDelta(quote, oldQuote, client.Balances[quote]),
-	}
-	if fee.Amount != 0 && fee.Asset != quote && fee.Asset != base {
-		deltas = append(deltas, spotDelta(fee.Asset, oldFeeAsset, client.Balances[fee.Asset]))
-	}
-	logBalanceChange(e, timestamp, clientID, book.Symbol, "trade_settlement", deltas)
+}
+
+func (e *DefaultExchange) publishOpenInterest(book *OrderBook, timestamp int64) {
+	e.MDPublisher.PublishOpenInterest(book.Symbol, &OpenInterest{
+		Symbol:         book.Symbol,
+		TotalContracts: e.Positions.CalculateOpenInterest(book.Symbol),
+		Timestamp:      timestamp,
+	}, timestamp)
 }
 
 // recordFeeRevenue updates exchange fee balances and logs the revenue event.
@@ -359,59 +504,56 @@ func (e *DefaultExchange) recordFeeRevenue(defaultAsset string, takerFee, makerF
 	logRevenue(makerAsset, 0, makerFee.Amount)
 }
 
-func logFill(log Logger, timestamp int64, clientID, orderID uint64, exec *Execution,
-	side Side, posSide PositionSide, filledQty, totalQty int64,
-	tradeID uint64, fee Fee, delta PositionDelta, realizedPnL int64,
-	symbol, role string,
-) {
-	if log == nil {
+func logFill(ctx executionContext, tradeID uint64, side fillSide) {
+	if ctx.log == nil {
 		return
 	}
-	log.LogEvent(timestamp, clientID, "OrderFill", map[string]any{
-		"order_id":        orderID,
-		"symbol":          symbol,
-		"qty":             exec.Qty,
-		"price":           exec.Price,
-		"side":            side.String(),
-		"position_side":   posSide.String(),
-		"filled_qty":      filledQty,
-		"remaining_qty":   totalQty - filledQty,
-		"is_full":         filledQty >= totalQty,
+	ctx.log.LogEvent(ctx.timestamp, side.clientID, "OrderFill", map[string]any{
+		"order_id":        side.orderID,
+		"symbol":          ctx.book.Symbol,
+		"qty":             ctx.exec.Qty,
+		"price":           ctx.exec.Price,
+		"side":            side.side.String(),
+		"position_side":   side.posSide.String(),
+		"filled_qty":      side.filledQty,
+		"remaining_qty":   side.totalQty - side.filledQty,
+		"is_full":         side.isFull(),
 		"trade_id":        tradeID,
-		"role":            role,
-		"fee_amount":      fee.Amount,
-		"fee_asset":       fee.Asset,
-		"realized_pnl":    realizedPnL,
-		"new_size":        delta.NewSize,
-		"new_entry_price": delta.NewEntryPrice,
+		"role":            side.role,
+		"fee_amount":      side.fee.Amount,
+		"fee_asset":       side.fee.Asset,
+		"realized_pnl":    side.realizedPnL,
+		"new_size":        side.delta.NewSize,
+		"new_entry_price": side.delta.NewEntryPrice,
 	})
 }
 
-func sendFillNotification(
-	gw *ClientGateway, orderID, clientID, tradeID uint64,
-	exec *Execution, side Side, posSide PositionSide, fee Fee, isFull bool,
-	symbol string, delta PositionDelta, realizedPnL int64,
-) {
+func sendFillNotification(gw *ClientGateway, ctx executionContext, tradeID uint64, side fillSide) {
 	// Enqueued, not sent: fills are generated while the exchange lock is held,
 	// and a blocking send there stalls the whole engine on one slow consumer.
+	//
+	// gw may be nil: unlike clients, gateways are dropped on disconnect while
+	// the client's resting orders stay in the book and keep filling.
+	// enqueueResponse is nil-safe, so those fills settle and are logged with
+	// nobody listening, which is the intended behaviour.
 	gw.enqueueResponse(Response{
 		Success: true,
 		Data: &FillNotification{
-			OrderID:       orderID,
-			ClientID:      clientID,
+			OrderID:       side.orderID,
+			ClientID:      side.clientID,
 			TradeID:       tradeID,
-			Symbol:        symbol,
-			Qty:           exec.Qty,
-			Price:         exec.Price,
-			Side:          side,
-			PositionSide:  posSide,
-			IsFull:        isFull,
-			FeeAmount:     fee.Amount,
-			FeeAsset:      fee.Asset,
-			RealizedPnL:   realizedPnL,
-			NewSize:       delta.NewSize,
-			NewEntryPrice: delta.NewEntryPrice,
-			Timestamp:     exec.Timestamp,
+			Symbol:        ctx.book.Symbol,
+			Qty:           ctx.exec.Qty,
+			Price:         ctx.exec.Price,
+			Side:          side.side,
+			PositionSide:  side.posSide,
+			IsFull:        side.isFull(),
+			FeeAmount:     side.fee.Amount,
+			FeeAsset:      side.fee.Asset,
+			RealizedPnL:   side.realizedPnL,
+			NewSize:       side.delta.NewSize,
+			NewEntryPrice: side.delta.NewEntryPrice,
+			Timestamp:     ctx.exec.Timestamp,
 		},
 	})
 }
