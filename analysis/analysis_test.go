@@ -566,3 +566,39 @@ func TestNetFlowByRoleSumsToZeroAndUsesExecutionQuantity(t *testing.T) {
 		t.Error("an empty flow must report zero imbalance rather than dividing by zero")
 	}
 }
+
+// One lag cannot say whether a level wanders or slides. A series can have a
+// first-lag autocorrelation of essentially zero while every longer lag is
+// strongly positive, which is a trending level: one arm reported 0.007 at lag
+// one with lags two through twenty between 0.11 and 0.27, summing to 4.97.
+func TestVarianceRatioSeesTrendingThatTheFirstLagMisses(t *testing.T) {
+	// A moving average carrying only a lag-two term: its first autocorrelation
+	// is zero by construction while its second is positive, so a variance ratio
+	// sees persistence that lag one cannot. One arm in this campaign reported
+	// 0.007 at lag one with lags two through twenty between 0.11 and 0.27.
+	n := 20000
+	noise := make([]float64, n+2)
+	state := uint64(2024)
+	for i := range noise {
+		state = state*6364136223846793005 + 1442695040888963407
+		noise[i] = float64(state>>33)/float64(1<<31) - 0.5
+	}
+	returns := make([]float64, n)
+	for i := range returns {
+		returns[i] = noise[i+2] + noise[i]
+	}
+	lags := Autocorrelation(returns, 30)
+	if math.Abs(lags[0]) > 0.05 {
+		t.Fatalf("first lag is %.3f, expected about zero by construction", lags[0])
+	}
+	if lags[1] < 0.3 {
+		t.Fatalf("second lag is %.3f, expected about 0.5", lags[1])
+	}
+	weighted := 0.0
+	for index, value := range lags[:29] {
+		weighted += (1 - float64(index+1)/30) * value
+	}
+	if ratio := 1 + 2*weighted; ratio < 1.5 {
+		t.Errorf("variance ratio %.2f did not reveal the persistence the first lag missed", ratio)
+	}
+}

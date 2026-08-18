@@ -322,6 +322,16 @@ type StylizedFacts struct {
 	Sec1Kurtosis       float64
 	Sec60ReturnACF1    float64
 	Sec60AbsReturnACF1 float64
+	// Sec60ReturnACFSum is the sum of the first lags of the sixty-second return
+	// autocorrelation, and Sec60VarianceRatio is the Bartlett-weighted form a
+	// random walk sets to one.
+	//
+	// A single lag cannot say whether a level wanders or slides: one arm here
+	// reported 0.007 at lag one while lags two through twenty ran between 0.11
+	// and 0.27, summing to 4.97 and implying a ratio near seven. Reading lag one
+	// alone called a strongly trending series stable.
+	Sec60ReturnACFSum  float64
+	Sec60VarianceRatio float64
 
 	ReturnStdBps float64
 }
@@ -369,8 +379,20 @@ func (t *TradeTape) Facts(maxLag int) StylizedFacts {
 		facts.Sec1Kurtosis = Kurtosis(oneSecond)
 	}
 	if oneMinute := t.TimeSampledLogReturns(60e9); len(oneMinute) > 50 {
-		facts.Sec60ReturnACF1 = Autocorrelation(oneMinute, 1)[0]
+		lags := Autocorrelation(oneMinute, 30)
+		facts.Sec60ReturnACF1 = lags[0]
 		facts.Sec60AbsReturnACF1 = Autocorrelation(Abs(oneMinute), 1)[0]
+		for _, value := range lags[:29] {
+			facts.Sec60ReturnACFSum += value
+		}
+		// The Bartlett-weighted sum is the variance ratio a random walk sets to
+		// one, so a value far above it is a trending series however small the
+		// first lag happens to be.
+		weighted := 0.0
+		for index, value := range lags[:29] {
+			weighted += (1 - float64(index+1)/30) * value
+		}
+		facts.Sec60VarianceRatio = 1 + 2*weighted
 	}
 	for _, stride := range []int{20, 100} {
 		strided := t.StridedLogReturns(stride)
