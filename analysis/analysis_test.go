@@ -602,3 +602,47 @@ func TestVarianceRatioSeesTrendingThatTheFirstLagMisses(t *testing.T) {
 		t.Errorf("variance ratio %.2f did not reveal the persistence the first lag missed", ratio)
 	}
 }
+
+// The exponent of the price response to trade size distinguishes a book whose
+// depth is displayed and fixed, where impact is proportional to size, from one
+// where much of the liquidity is latent and impact grows as roughly the square
+// root. The distinction matters because proportional impact makes a large
+// return and a moved level the same event.
+func TestImpactRecoversAKnownExponent(t *testing.T) {
+	for _, want := range []float64{0.5, 1.0} {
+		tape := &TradeTape{}
+		price := 1e9
+		state := uint64(11)
+		for i := 0; i < 20000; i++ {
+			state = state*6364136223846793005 + 1442695040888963407
+			size := float64(state>>40) + 1
+			// Construct the response to follow the target exponent exactly, so
+			// the estimator is measured against a known answer.
+			response := 0.001 * math.Pow(size, want)
+			sign := int8(1)
+			if (state>>20)%2 == 0 {
+				sign = -1
+			}
+			// The constructed response is the move from before this trade to
+			// after it, which is what the estimator must recover.
+			tape.Prices = append(tape.Prices, int64(price))
+			tape.Qtys = append(tape.Qtys, int64(size))
+			tape.Signs = append(tape.Signs, sign)
+			price *= math.Exp(float64(sign) * response / 1e4)
+		}
+		// One trade ahead, so the response measured is the one constructed.
+		// Horizon zero would compare the pre-trade price with itself, so one
+		// trade ahead spans exactly the constructed move.
+		curve := tape.Impact(ImpactOptions{HorizonTrades: 1, Buckets: 10})
+		if curve.R2 < 0.9 {
+			t.Errorf("exponent %.1f: fit R2 = %.2f, too low to quote", want, curve.R2)
+		}
+		if math.Abs(curve.Exponent-want) > 0.15 {
+			t.Errorf("recovered exponent %.3f, want %.1f (R2 %.2f)", curve.Exponent, want, curve.R2)
+		}
+	}
+	// Too little data must yield no curve rather than a fitted number.
+	if empty := (&TradeTape{}).Impact(ImpactOptions{}); empty.Exponent != 0 || len(empty.Buckets) != 0 {
+		t.Errorf("an empty tape produced a curve: %+v", empty)
+	}
+}

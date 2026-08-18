@@ -16,6 +16,16 @@ type TradeTape struct {
 	Qtys       []int64
 	// Signs are the aggressor's direction: +1 when a buy lifted the offer.
 	Signs []int8
+	// PreMid is the book midpoint last published before each trade, which is
+	// the only unbiased reference for measuring impact.
+	//
+	// A trade price sits on one side of the spread, and the side is correlated
+	// with the aggressor, so referencing a trade against its own price or
+	// against the previous trade subtracts a half spread from every buy. Both
+	// were tried: the first left every size bucket reading the half spread and
+	// nothing else, the second left a smaller bias that survived because signed
+	// order flow is autocorrelated.
+	PreMid []int64
 }
 
 // Tape reads one book's executions.
@@ -36,9 +46,66 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 		price int64
 		qty   int64
 		sign  int8
+		mid   int64
 	}
 	var mu sync.Mutex
 	var records []record
+	// Snapshots are collected first so each trade can be referenced against the
+	// midpoint that preceded it.
+	type levels struct {
+		Bids []struct {
+			Price int64 `json:"price"`
+		} `json:"bids"`
+		Asks []struct {
+			Price int64 `json:"price"`
+		} `json:"asks"`
+	}
+	type snapshotPayload struct {
+		Snapshot *levels `json:"snapshot"`
+		Bids     []struct {
+			Price int64 `json:"price"`
+		} `json:"bids"`
+		Asks []struct {
+			Price int64 `json:"price"`
+		} `json:"asks"`
+	}
+	midAt := map[int64]int64{}
+	var midMu sync.Mutex
+	if err := r.Scan(ScanOptions{Events: []string{"BookSnapshot"}, Files: files, FilesSelected: true}, func(event Event) {
+		var decoded snapshotPayload
+		if event.Decode(&decoded) != nil {
+			return
+		}
+		bids, asks := decoded.Bids, decoded.Asks
+		if decoded.Snapshot != nil {
+			bids, asks = decoded.Snapshot.Bids, decoded.Snapshot.Asks
+		}
+		if len(bids) == 0 || len(asks) == 0 {
+			return
+		}
+		mid := (bids[0].Price + asks[0].Price) / 2
+		if mid <= 0 {
+			return
+		}
+		midMu.Lock()
+		midAt[event.SimTS] = mid
+		midMu.Unlock()
+	}); err != nil {
+		return nil, err
+	}
+	midKeys := make([]int64, 0, len(midAt))
+	for key := range midAt {
+		midKeys = append(midKeys, key)
+	}
+	sort.Slice(midKeys, func(i, j int) bool { return midKeys[i] < midKeys[j] })
+	lastMidAtOrBefore := func(ts int64) int64 {
+		index := sort.Search(len(midKeys), func(i int) bool { return midKeys[i] > ts }) - 1
+		if index < 0 {
+			return 0
+		}
+		return midAt[midKeys[index]]
+	}
+
 	err := r.Scan(ScanOptions{Events: []string{"Trade"}, Files: files, FilesSelected: true}, func(event Event) {
 		var decoded payload
 		if event.Decode(&decoded) != nil || decoded.Price <= 0 {
@@ -49,7 +116,7 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 			sign = -1
 		}
 		mu.Lock()
-		records = append(records, record{event.SimTS, decoded.Price, decoded.Qty, sign})
+		records = append(records, record{event.SimTS, decoded.Price, decoded.Qty, sign, 0})
 		mu.Unlock()
 	})
 	if err != nil {
@@ -68,6 +135,7 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 		tape.Prices = append(tape.Prices, rec.price)
 		tape.Qtys = append(tape.Qtys, rec.qty)
 		tape.Signs = append(tape.Signs, rec.sign)
+		tape.PreMid = append(tape.PreMid, lastMidAtOrBefore(rec.ts))
 	}
 	return tape, nil
 }

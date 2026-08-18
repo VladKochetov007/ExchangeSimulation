@@ -16,7 +16,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -25,6 +25,7 @@ func main() {
 	horizon := flag.Float64("horizon", 900, "parent abandon horizon in seconds")
 	desks := flag.Int("desks", 6, "execution desks, for the stall horizon denominator")
 	runSeconds := flag.Float64("run-seconds", 8*3600, "run length in seconds")
+	horizonTrades := flag.Int("horizon-trades", 10, "trades ahead over which impact is measured")
 	asJSON := flag.Bool("json", false, "emit JSON instead of a table")
 	flag.Parse()
 
@@ -76,6 +77,25 @@ func main() {
 				fmt.Printf("  %-22s net %+12.0f  gross %12.0f  imbalance %+6.1f%%\n",
 					name, float64(flow.Net())/1e8, float64(flow.Gross())/1e8, 100*flow.Imbalance())
 			}
+		case "impact":
+			tape, err := run.Tape(*venue, *base)
+			if err != nil || len(tape.Prices) == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no trades for %s at venue %s\n", dir, *base, *venue)
+				os.Exit(1)
+			}
+			curve := tape.Impact(analysis.ImpactOptions{HorizonTrades: *horizonTrades})
+			emit(dir, curve, *asJSON, func() {
+				// An exponent from a poor fit is a number without a meaning, so
+				// it is withheld rather than printed beside its own R2.
+				exponent := fmt.Sprintf("%5.2f", curve.Exponent)
+				if curve.R2 < 0.7 {
+					exponent = "  n/a"
+				}
+				fmt.Printf("%-18s n %7d  exponent %s (R2 %4.2f)  smallest %8.1f -> %+6.2f bps  largest %8.1f -> %+6.2f bps\n",
+					dir, curve.N, exponent, curve.R2,
+					curve.Buckets[0].MeanSize/1e8, curve.Buckets[0].MeanResponse,
+					curve.Buckets[len(curve.Buckets)-1].MeanSize/1e8, curve.Buckets[len(curve.Buckets)-1].MeanResponse)
+			})
 		case "stylized":
 			tape, err := run.Tape(*venue, *base)
 			if err != nil {
