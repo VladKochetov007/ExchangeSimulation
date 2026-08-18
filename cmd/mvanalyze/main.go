@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -272,6 +272,32 @@ func main() {
 					result.MeanAbsMechanicalBps, result.MeanAbsRevisionBps, result.AbsMechanicalShare,
 					result.ZeroSubsampleMeanAbsBps, result.Slope, result.WalkAgreement,
 					result.Drift.Mismatches, result.Drift.Checks)
+			})
+		case "spacing":
+			files := run.BookFiles(*venue, *base)
+			if len(files) != 1 {
+				fmt.Fprintf(os.Stderr, "%s: %s at venue %s resolves to %d files, want exactly one\n",
+					dir, *base, *venue, len(files))
+				os.Exit(1)
+			}
+			result, err := analysis.MeasureLevelSpacing(files[0], analysis.SpacingOptions{TickSize: *tickSize, SampleEvery: 10})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			if result.Drift.Mismatches > 0 {
+				fmt.Fprintf(os.Stderr, "%s: replayed book diverged from %d of %d snapshots\n",
+					dir, result.Drift.Mismatches, result.Drift.Checks)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-14s obs %6d  levels/side med %3.1f p90 %3.1f  first-gap med %5.1f mean %6.2f  "+
+					"all-gaps med %5.1f mean %6.2f p90 %6.1f  spread med %5.1f  one-tick-gaps %5.3f\n",
+					dir, result.Observations,
+					result.LevelsPerSide.Median, result.LevelsPerSide.P90,
+					result.FirstGapTicks.Median, result.FirstGapTicks.Mean,
+					result.AllGapsTicks.Median, result.AllGapsTicks.Mean, result.AllGapsTicks.P90,
+					result.SpreadTicks.Median, result.SingleTickGapShare)
 			})
 		case "triangular":
 			deviations, err := run.TriangularDeviation(analysis.TriangularConfig{
