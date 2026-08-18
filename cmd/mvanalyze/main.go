@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -29,6 +29,7 @@ func main() {
 	runSeconds := flag.Float64("run-seconds", 8*3600, "run length in seconds")
 	horizonTrades := flag.Int("horizon-trades", 10, "trades ahead over which impact is measured")
 	impactRole := flag.String("impact-role", "", "restrict impact to one participant class")
+	horizonSeconds := flag.Float64("horizon-seconds", 0, "mechanical horizon in simulated seconds; overrides -horizon-trades")
 	tickSize := flag.Int64("tick", 10_000, "book tick size, for the spread in ticks")
 	walkSizes := flag.String("walk-sizes", "", "comma-separated order sizes in base units, for the walkable fraction")
 	asJSON := flag.Bool("json", false, "emit JSON instead of a table")
@@ -229,6 +230,48 @@ func main() {
 						bucket.MeanSize/1e8, bucket.SweptResponse, bucket.SweptN,
 						bucket.SingleResp, bucket.SingleN, bucket.GapBps)
 				}
+			})
+		case "mechanical":
+			files := run.BookFiles(*venue, *base)
+			if len(files) != 1 {
+				// The replay depends on event order, which holds within a file
+				// and not across concurrently written ones.
+				fmt.Fprintf(os.Stderr, "%s: %s at venue %s resolves to %d files, want exactly one\n",
+					dir, *base, *venue, len(files))
+				os.Exit(1)
+			}
+			opts := analysis.MechanicalOptions{HorizonTrades: *horizonTrades}
+			if *horizonSeconds > 0 {
+				opts = analysis.MechanicalOptions{HorizonNanos: int64(*horizonSeconds * 1e9)}
+			}
+			result, err := analysis.MeasureMechanicalImpact(files[0], opts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			// A reconstruction that disagrees with the engine's own snapshots
+			// is not a measurement, so it is refused rather than reported.
+			if result.Drift.Mismatches > 0 {
+				fmt.Fprintf(os.Stderr, "%s: replayed book diverged from %d of %d snapshots; the decomposition is unusable\n",
+					dir, result.Drift.Mismatches, result.Drift.Checks)
+				os.Exit(1)
+			}
+			horizonLabel := fmt.Sprintf("%dtr", *horizonTrades)
+			if *horizonSeconds > 0 {
+				horizonLabel = fmt.Sprintf("%.2fs", *horizonSeconds)
+			}
+			emit(dir, result, *asJSON, func() {
+				// The absolute share is the headline, not a squared statistic:
+				// most orders have a mechanical move of exactly zero, so any
+				// R2 reports the size of that mass rather than a market fact.
+				fmt.Printf("%-14s h %7s  orders %6d (zero %6d moved %5d unmeas %4d)  "+
+					"|mech| %7.5f |rev| %7.5f share %5.3f  |  zero-subsample |actual| %7.5f  "+
+					"slope %+6.3f  walk-agree %5.3f  drift %d/%d\n",
+					dir, horizonLabel, result.Orders, result.ZeroMechanical, result.MovedOrders,
+					result.UnmeasurableOrders,
+					result.MeanAbsMechanicalBps, result.MeanAbsRevisionBps, result.AbsMechanicalShare,
+					result.ZeroSubsampleMeanAbsBps, result.Slope, result.WalkAgreement,
+					result.Drift.Mismatches, result.Drift.Checks)
 			})
 		case "triangular":
 			deviations, err := run.TriangularDeviation(analysis.TriangularConfig{

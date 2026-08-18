@@ -3,6 +3,7 @@ package analysis
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"sort"
 )
@@ -131,9 +132,25 @@ type replayEvent struct {
 }
 
 type deltaPayload struct {
-	Price    int64  `json:"price"`
-	Side     string `json:"side"`
-	TotalQty int64  `json:"total_qty"`
+	Price      int64  `json:"price"`
+	Side       string `json:"side"`
+	TotalQty   int64  `json:"total_qty"`
+	VisibleQty int64  `json:"visible_qty"`
+	HiddenQty  int64  `json:"hidden_qty"`
+}
+
+// bestOf is the best price on one side of a published snapshot.
+func bestOf(levels []bookLevel, highest bool) int64 {
+	best := int64(0)
+	for _, level := range levels {
+		if level.VisibleQty+level.HiddenQty <= 0 {
+			continue
+		}
+		if best == 0 || (highest && level.Price > best) || (!highest && level.Price < best) {
+			best = level.Price
+		}
+	}
+	return best
 }
 
 type tradePayload struct {
@@ -177,9 +194,19 @@ func ReplayFile(path string, visit ReplayVisitor) (*ReplayDrift, error) {
 		switch event.Event {
 		case "BookDelta":
 			var delta deltaPayload
-			if json.Unmarshal(event.Data.Payload, &delta) == nil {
-				book.Apply(delta.Side, delta.Price, delta.TotalQty)
+			if json.Unmarshal(event.Data.Payload, &delta) != nil {
+				continue
 			}
+			// A hidden order changes a level without publishing a delta, so a
+			// book containing any would drift silently. No actor in this
+			// simulation places one; the replay refuses to guess rather than
+			// relying on that staying true.
+			if delta.HiddenQty != 0 || (delta.TotalQty != 0 && delta.VisibleQty != delta.TotalQty) {
+				return nil, fmt.Errorf("replay %s: hidden depth at price %d (total %d, visible %d); "+
+					"book mutations from hidden orders are not published and the reconstruction would drift",
+					path, delta.Price, delta.TotalQty, delta.VisibleQty)
+			}
+			book.Apply(delta.Side, delta.Price, delta.TotalQty)
 		case "Trade":
 			var trade tradePayload
 			if json.Unmarshal(event.Data.Payload, &trade) == nil && visit != nil {
@@ -197,10 +224,12 @@ func ReplayFile(path string, visit ReplayVisitor) (*ReplayDrift, error) {
 			// touch against it is the only way to learn that some book mutation
 			// does not emit a delta, which would let the reconstruction drift
 			// silently for the rest of the run.
+			// Compare, never resynchronise. Resetting from the snapshot would
+			// repair any divergence before the next check could see it, so the
+			// check would pass however broken the replay was; it would also
+			// truncate the book to the snapshot's depth limit permanently.
 			drift.Checks++
-			replayedBid, replayedAsk := book.BestBid(), book.BestAsk()
-			book.Reset(snapshot.Bids, snapshot.Asks)
-			if replayedBid != book.BestBid() || replayedAsk != book.BestAsk() {
+			if book.BestBid() != bestOf(snapshot.Bids, true) || book.BestAsk() != bestOf(snapshot.Asks, false) {
 				drift.Mismatches++
 			}
 		}

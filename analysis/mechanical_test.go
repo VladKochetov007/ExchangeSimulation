@@ -21,7 +21,10 @@ func logLine(ts int64, clientID uint64, event string, payload map[string]any) st
 }
 
 func deltaLine(ts int64, side string, price, totalQty int64) string {
-	return logLine(ts, 0, "BookDelta", map[string]any{"price": price, "side": side, "total_qty": totalQty})
+	return logLine(ts, 0, "BookDelta", map[string]any{
+		"price": price, "side": side, "total_qty": totalQty,
+		"visible_qty": totalQty, "hidden_qty": 0,
+	})
 }
 
 func tradeEventLine(ts int64, orderID uint64, side string, price, qty int64) string {
@@ -165,6 +168,43 @@ func TestReplayIgnoresSubscriberSnapshots(t *testing.T) {
 	}
 }
 
+// A hidden order changes a level without publishing a delta, so a book
+// containing one would drift silently for the rest of the run. The replay must
+// refuse rather than produce a plausible number.
+func TestReplayRefusesHiddenDepth(t *testing.T) {
+	path := writeLog(t, []string{
+		logLine(1, 0, "BookDelta", map[string]any{
+			"price": 100, "side": "BUY", "total_qty": 100, "visible_qty": 40, "hidden_qty": 60,
+		}),
+	})
+	if _, err := ReplayFile(path, nil); err == nil {
+		t.Fatal("a delta carrying hidden depth was accepted")
+	}
+}
+
+// The drift check must never resynchronise the replay from the snapshot it is
+// checking against: that would repair a divergence before the next check could
+// see it, so the check would pass however broken the replay was.
+func TestReplayDoesNotResynchroniseFromSnapshots(t *testing.T) {
+	path := writeLog(t, []string{
+		deltaLine(1, "BUY", 100, 50),
+		deltaLine(1, "SELL", 102, 50),
+		// Two snapshots disagreeing with the replay in the same way. If the
+		// first one resynchronised the book, the second would agree and only
+		// one mismatch would be counted.
+		snapshotEventLine(2, 0, [][2]int64{{101, 50}}, [][2]int64{{102, 50}}),
+		snapshotEventLine(3, 0, [][2]int64{{101, 50}}, [][2]int64{{102, 50}}),
+	})
+	drift, err := ReplayFile(path, nil)
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if drift.Mismatches != 2 {
+		t.Errorf("mismatches = %d of %d checks, want 2; the snapshot resynchronised the replay",
+			drift.Mismatches, drift.Checks)
+	}
+}
+
 // The whole decomposition, on a book where the answer is computable by hand.
 //
 // The book is bid 100 x 40, ask 102 x 40 with 103 x 60 behind it, so the mid
@@ -292,5 +332,128 @@ func TestMechanicalImpactExcludesAnExhaustedSide(t *testing.T) {
 	}
 	if result.MovedMeanMechanicalBps < 0 {
 		t.Error("an exhausted side produced a move toward price zero")
+	}
+}
+
+// The revision term must be the realised response minus the mechanical one,
+// computed per order. Defining it as a regression residual would hand the
+// whole shared covariance to the mechanical term, which is exactly the
+// quantity the measurement exists to estimate.
+func TestRevisionIsTheExactRemainderNotAResidual(t *testing.T) {
+	const bid, ask, behind = int64(10_000), int64(10_200), int64(10_400)
+	lines := []string{
+		deltaLine(1, "BUY", bid, 1000),
+		deltaLine(1, "SELL", ask, 40),
+		deltaLine(1, "SELL", behind, 1000),
+		tradeEventLine(2, 1, "BUY", ask, 60),
+		// The consumed level is restored in full before the horizon elapses,
+		// so the realised move is zero while the mechanical one is not.
+		deltaLine(2, "SELL", ask, 40),
+	}
+	for i := int64(0); i < 5; i++ {
+		lines = append(lines, tradeEventLine(3+i, uint64(10+i), "BUY", behind, 1))
+	}
+	result, err := MeasureMechanicalImpact(writeLog(t, lines), MechanicalOptions{HorizonTrades: 1})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.MovedOrders != 1 {
+		t.Fatalf("moved orders = %d, want 1: %+v", result.MovedOrders, result)
+	}
+	// preMid 10100, counterfactual mid 10200, realised mid back at 10100.
+	wantMechanical := 1e4 * math.Log(10200.0/10100.0)
+	if math.Abs(result.MovedMeanMechanicalBps-wantMechanical) > 1e-6 {
+		t.Errorf("mechanical = %.6f, want %.6f", result.MovedMeanMechanicalBps, wantMechanical)
+	}
+	if math.Abs(result.MovedMeanActualBps) > 1e-9 {
+		t.Errorf("full replenishment left a realised move of %.6f, want 0", result.MovedMeanActualBps)
+	}
+	// For the order that moved, revision must be exactly minus the mechanical
+	// move, since the level came back in full. A residual from a fitted line
+	// could not produce this.
+	revision := result.MovedMeanActualBps - result.MovedMeanMechanicalBps
+	if math.Abs(revision+wantMechanical) > 1e-6 {
+		t.Errorf("revision = %.6f, want %.6f (the mechanical move undone)", revision, -wantMechanical)
+	}
+	// And the whole-sample absolute revision must be non-zero: it is that one
+	// order's undoing, averaged over the sample rather than dropped.
+	if result.MeanAbsRevisionBps <= 0 {
+		t.Error("full replenishment produced no revision component at all")
+	}
+}
+
+// The variance identity must hold exactly, which it cannot if any term drops
+// observations the others keep.
+func TestVarianceIdentityHolds(t *testing.T) {
+	const bid, ask, behind = int64(10_000), int64(10_200), int64(10_400)
+	lines := []string{
+		deltaLine(1, "BUY", bid, 100_000),
+		deltaLine(1, "SELL", ask, 100_000),
+		deltaLine(1, "SELL", behind, 100_000),
+	}
+	// A mixture: most orders stay inside the touch, some clear it.
+	state := uint64(7)
+	next := func() uint64 { state = state*6364136223846793005 + 1442695040888963407; return state >> 33 }
+	askSize := int64(100_000)
+	for i := int64(0); i < 400; i++ {
+		size := int64(1 + next()%50)
+		lines = append(lines, tradeEventLine(2+i, uint64(i+1), "BUY", ask, size))
+		askSize -= size
+		if askSize < 100 {
+			askSize = 100_000
+		}
+		lines = append(lines, deltaLine(2+i, "SELL", ask, askSize))
+	}
+	result, err := MeasureMechanicalImpact(writeLog(t, lines), MechanicalOptions{HorizonTrades: 5})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	identity := result.VarMechanical + result.VarRevision + 2*result.Covariance
+	if math.Abs(identity-result.VarActual) > 1e-9*math.Max(1, math.Abs(result.VarActual)) {
+		t.Errorf("variance identity broken: mech %.9f + rev %.9f + 2cov %.9f = %.9f, actual %.9f",
+			result.VarMechanical, result.VarRevision, 2*result.Covariance, identity, result.VarActual)
+	}
+}
+
+// A horizon in simulated time must span that much time, which is what makes
+// the measurement comparable against the makers' requote interval.
+func TestHorizonInSimulatedTimeSpansThatTime(t *testing.T) {
+	const bid, ask, behind = int64(10_000), int64(10_200), int64(10_400)
+	second := int64(1_000_000_000)
+	lines := []string{
+		deltaLine(0, "BUY", bid, 1000),
+		deltaLine(0, "SELL", ask, 40),
+		deltaLine(0, "SELL", behind, 1000),
+		tradeEventLine(second, 1, "BUY", ask, 60),
+		deltaLine(second, "SELL", ask, 0),
+	}
+	// Later trades at one-second spacing, with the price moving only after
+	// three seconds have passed.
+	for i := int64(1); i <= 5; i++ {
+		price := behind
+		if i >= 3 {
+			price = behind + 200
+			lines = append(lines, deltaLine(second*(1+i), "SELL", behind, 0))
+			lines = append(lines, deltaLine(second*(1+i), "SELL", price, 1000))
+		}
+		lines = append(lines, tradeEventLine(second*(1+i), uint64(10+i), "BUY", price, 1))
+	}
+	path := writeLog(t, lines)
+
+	early, err := MeasureMechanicalImpact(path, MechanicalOptions{HorizonNanos: second})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	late, err := MeasureMechanicalImpact(path, MechanicalOptions{HorizonNanos: 4 * second})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if early.MovedOrders != 1 || late.MovedOrders != 1 {
+		t.Fatalf("the clearing order was not measured at both horizons: %d, %d",
+			early.MovedOrders, late.MovedOrders)
+	}
+	if late.MovedMeanActualBps <= early.MovedMeanActualBps {
+		t.Errorf("a move happening after three seconds was not picked up by the longer horizon: "+
+			"1s gave %.4f, 4s gave %.4f", early.MovedMeanActualBps, late.MovedMeanActualBps)
 	}
 }
