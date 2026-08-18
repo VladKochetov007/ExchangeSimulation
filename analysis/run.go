@@ -141,6 +141,21 @@ func Open(dir string) (*Run, error) {
 // Files returns the indexed event logs, sorted so a scan is deterministic.
 func (r *Run) Files() []string { return append([]string(nil), r.files...) }
 
+// BookFiles selects the log files belonging to one venue's book.
+//
+// Every metric that reads a single book needs this selection, and an empty
+// result means the venue or symbol does not exist rather than "measure
+// everything" — which is why callers pass FilesSelected alongside it.
+func (r *Run) BookFiles(venueID, symbol string) []string {
+	var files []string
+	for _, path := range r.files {
+		if pathHasSymbol(path, venueID, symbol) {
+			files = append(files, path)
+		}
+	}
+	return files
+}
+
 // Role returns the participant class that owns a client at a venue.
 func (r *Run) Role(venueID string, clientID uint64) string {
 	return r.roles[Participant{venueID, clientID}]

@@ -43,12 +43,7 @@ type fillPayload struct {
 // A non-zero residual means the sum is not counting each trade once per side,
 // and every figure derived from it should be discarded rather than explained.
 func (r *Run) NetFlowByRole(venueID, symbol string) (map[string]*NetFlow, int64, error) {
-	var files []string
-	for _, path := range r.files {
-		if pathHasSymbol(path, venueID, symbol) {
-			files = append(files, path)
-		}
-	}
+	files := r.BookFiles(venueID, symbol)
 	var mu sync.Mutex
 	table := map[string]*NetFlow{}
 	var residual int64

@@ -11,12 +11,14 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strconv"
+	"strings"
 
 	"exchange_sim/analysis"
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -27,6 +29,8 @@ func main() {
 	runSeconds := flag.Float64("run-seconds", 8*3600, "run length in seconds")
 	horizonTrades := flag.Int("horizon-trades", 10, "trades ahead over which impact is measured")
 	impactRole := flag.String("impact-role", "", "restrict impact to one participant class")
+	tickSize := flag.Int64("tick", 10_000, "book tick size, for the spread in ticks")
+	walkSizes := flag.String("walk-sizes", "", "comma-separated order sizes in base units, for the walkable fraction")
 	asJSON := flag.Bool("json", false, "emit JSON instead of a table")
 	flag.Parse()
 
@@ -128,6 +132,94 @@ func main() {
 					facts.Sec1ReturnACF1, facts.Sec1AbsReturnACF1, facts.Sec1AbsReturnACF10, facts.Sec1Kurtosis,
 					facts.Sec60ReturnACF1, facts.Sec60AbsReturnACF1, facts.Sec60VarianceRatio, tail)
 			})
+		case "bookshape":
+			files := run.BookFiles(*venue, *base)
+			if len(files) == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no book log for %s at venue %s\n", dir, *base, *venue)
+				os.Exit(1)
+			}
+			opts := analysis.BookShapeOptions{Files: files, TickSize: *tickSize}
+			shape, err := run.MeasureBookShape(opts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			if shape.Snapshots == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no book snapshots for %s at venue %s\n", dir, *base, *venue)
+				os.Exit(1)
+			}
+			var walkable []analysis.WalkableFraction
+			if *walkSizes != "" {
+				sizes, parseErr := parseSizes(*walkSizes)
+				if parseErr != nil {
+					fmt.Fprintf(os.Stderr, "%s: %v\n", dir, parseErr)
+					os.Exit(2)
+				}
+				if walkable, err = run.MeasureWalkable(opts, sizes); err != nil {
+					fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+					os.Exit(1)
+				}
+			}
+			emit(dir, map[string]any{"shape": shape, "walkable": walkable}, *asJSON, func() {
+				emptyShare := 100 * float64(shape.OneSideEmpty+shape.BothSidesEmpty) / float64(shape.Snapshots)
+				fmt.Printf("%-20s snaps %6d  empty %5.1f%%  levels bid %4.1f ask %4.1f (p90 %4.1f/%4.1f)  "+
+					"touch-share med %5.3f p90 %5.3f  touch %8.2f  beyond %8.2f  spread %5.1f ticks  hidden %5.3f\n",
+					dir, shape.Snapshots, emptyShare,
+					shape.BidLevels.Median, shape.AskLevels.Median, shape.BidLevels.P90, shape.AskLevels.P90,
+					shape.TouchShare.Median, shape.TouchShare.P90,
+					shape.TouchDepth.Median/1e8, shape.BeyondTouchDepth.Median/1e8,
+					shape.SpreadTicks.Median, shape.HiddenShare.Mean)
+				for _, fraction := range walkable {
+					fmt.Printf("    size %8.2f  walks past touch %5.1f%%  exhausts book %5.1f%%\n",
+						float64(fraction.SizeBase)/1e8, 100*fraction.ExceedsTouch, 100*fraction.ExceedsBook)
+				}
+			})
+		case "sweep":
+			files := run.BookFiles(*venue, *base)
+			if len(files) == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no book log for %s at venue %s\n", dir, *base, *venue)
+				os.Exit(1)
+			}
+			sweep, err := run.MeasureSweep(analysis.BookShapeOptions{Files: files})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			if sweep.Orders == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no taker orders for %s at venue %s\n", dir, *base, *venue)
+				os.Exit(1)
+			}
+			emit(dir, sweep, *asJSON, func() {
+				fmt.Printf("%-20s orders %7d  multi-price %5.2f%%  prices/order med %3.1f p99 %4.1f  "+
+					"fills/order med %3.1f p99 %4.1f  span-when-multi med %5.2f p90 %5.2f max %6.2f bps\n",
+					dir, sweep.Orders, 100*sweep.MultiPriceFraction(),
+					sweep.PricesPerOrder.Median, sweep.PricesPerOrder.P99,
+					sweep.FillsPerOrder.Median, sweep.FillsPerOrder.P99,
+					sweep.SweepBpsWhenMulti.Median, sweep.SweepBpsWhenMulti.P90, sweep.SweepBpsWhenMulti.Max)
+			})
+		case "sweepimpact":
+			tape, err := run.Tape(*venue, *base)
+			if err != nil || len(tape.Prices) == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no trades for %s at venue %s\n", dir, *base, *venue)
+				os.Exit(1)
+			}
+			result := tape.MeasureSweepImpact(analysis.ImpactOptions{HorizonTrades: *horizonTrades, Role: *impactRole})
+			if result.BucketsCompared == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no size bucket held both classes; sweeping is not separable from size here\n", dir)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-20s swept %6d single %6d  buckets %2d/%2d favour swept  mean gap %+6.3f bps\n",
+					dir, result.SweptN, result.SingleN, result.BucketsFavouringSwept, result.BucketsCompared, result.MeanGapBps)
+				for _, bucket := range result.Buckets {
+					if bucket.SweptN == 0 || bucket.SingleN == 0 {
+						continue
+					}
+					fmt.Printf("    size %8.3f  swept %+6.3f (%5d)  single %+6.3f (%5d)  gap %+6.3f\n",
+						bucket.MeanSize/1e8, bucket.SweptResponse, bucket.SweptN,
+						bucket.SingleResp, bucket.SingleN, bucket.GapBps)
+				}
+			})
 		case "triangular":
 			deviations, err := run.TriangularDeviation(analysis.TriangularConfig{
 				VenueID: *venue, BaseSymbol: *base, QuotePair: *quote, CrossPair: *cross,
@@ -147,6 +239,29 @@ func main() {
 			os.Exit(2)
 		}
 	}
+}
+
+// parseSizes reads the walkable-fraction sizes, in base units.
+func parseSizes(spec string) ([]int64, error) {
+	var sizes []int64
+	for _, field := range strings.Split(spec, ",") {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		size, err := strconv.ParseInt(field, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("walk size %q: %w", field, err)
+		}
+		if size <= 0 {
+			return nil, fmt.Errorf("walk size %q is not positive", field)
+		}
+		sizes = append(sizes, size)
+	}
+	if len(sizes) == 0 {
+		return nil, fmt.Errorf("no walk sizes in %q", spec)
+	}
+	return sizes, nil
 }
 
 func emit(dir string, value any, asJSON bool, table func()) {

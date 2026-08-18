@@ -35,16 +35,14 @@ type TradeTape struct {
 	// nothing else, the second left a smaller bias that survived because signed
 	// order flow is autocorrelated.
 	PreMid []int64
+	// TakerOrderIDs identifies the order that crossed, so trades belonging to
+	// one aggressive order can be recognised as a single sweep.
+	TakerOrderIDs []uint64
 }
 
 // Tape reads one book's executions.
 func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
-	var files []string
-	for _, path := range r.files {
-		if pathHasSymbol(path, venueID, symbol) {
-			files = append(files, path)
-		}
-	}
+	files := r.BookFiles(venueID, symbol)
 	type payload struct {
 		Price        int64  `json:"price"`
 		Qty          int64  `json:"qty"`
@@ -74,12 +72,13 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 		return nil, err
 	}
 	type record struct {
-		ts    int64
-		price int64
-		qty   int64
-		sign  int8
-		mid   int64
-		role  string
+		ts      int64
+		price   int64
+		qty     int64
+		sign    int8
+		mid     int64
+		role    string
+		orderID uint64
 	}
 	var mu sync.Mutex
 	var records []record
@@ -149,7 +148,7 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 			sign = -1
 		}
 		mu.Lock()
-		records = append(records, record{event.SimTS, decoded.Price, decoded.Qty, sign, 0, owner[decoded.TakerOrderID]})
+		records = append(records, record{event.SimTS, decoded.Price, decoded.Qty, sign, 0, owner[decoded.TakerOrderID], decoded.TakerOrderID})
 		mu.Unlock()
 	})
 	if err != nil {
@@ -170,6 +169,7 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 		tape.Signs = append(tape.Signs, rec.sign)
 		tape.PreMid = append(tape.PreMid, lastMidAtOrBefore(rec.ts))
 		tape.Roles = append(tape.Roles, rec.role)
+		tape.TakerOrderIDs = append(tape.TakerOrderIDs, rec.orderID)
 	}
 	return tape, nil
 }
