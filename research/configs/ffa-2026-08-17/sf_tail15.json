@@ -1,5 +1,5 @@
 {
-  "log_mode": "none",
+  "log_mode": "full",
   "seed": 91,
   "step": 1000000000,
   "snapshot_interval": 1000000000,
@@ -52,7 +52,7 @@
   "parity_arb_count": 2,
   "futures_maker_self_anchored": true,
   "spot_maker_submit_before_cancel": true,
-  "description": "Reference population, generation 2026-08-17. Inventory skew 3 bps. Above 8 bps makers cross each other and take most of the volume (E-214); at 5 bps and above they are adversely selected into insolvency while the carry desk profits (E-216); at 1 bps their inventory drifts to a -135 ABC median. 3 bps is the only setting tested where makers are solvent, churn is negligible and inventory stays bounded. Hedge runs on a 60s cadence: inside the quote cycle it stops whenever a calm market suppresses requoting, and on every tick the maker's own hedges dominate the perpetual. See E-231. Triangular threshold 5 bps: at the previous 20 the desk recorded zero fills on one seed and 297 on another over eight hours, so it was absent from the population (E-238). Uninformed orders are 0.5 ABC with a 1.5 Pareto tail against a 5 ABC quote: at the previous 0.01 ABC every order was absorbed at the touch, the price moved only when a maker repriced, and the tape had an excess kurtosis of -0.60 with a tail index of 39 (E-243).",
+  "description": "stylized facts under tail15",
   "spot_maker_requote_bps": 0,
   "spot_maker_count": 4,
   "triangle_arb_count": 2,
@@ -74,7 +74,7 @@
     "suppress_at": 0
   },
   "triangle_arb": {
-    "edge_bps": 5,
+    "edge_bps": 20,
     "lot_qty": 5000000
   },
   "rate_limit_tiers": {
@@ -113,6 +113,8 @@
   ],
   "maker_min_half_spread_ticks": 1,
   "maker_hedge_interval": 60000000000,
+  "experiment_id": "E-243",
+  "hypothesis_id": "FFA-105",
   "noise_order_qty": 50000000,
   "noise_size_pareto_alpha": 1.5
 }
