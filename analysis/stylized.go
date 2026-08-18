@@ -82,6 +82,22 @@ func (t *TradeTape) LogReturns() []float64 {
 	return out
 }
 
+// StridedLogReturns samples the price every stride trades before differencing,
+// which removes most of the bid-ask bounce from the first lag.
+func (t *TradeTape) StridedLogReturns(stride int) []float64 {
+	if stride < 1 || len(t.Prices) <= stride {
+		return nil
+	}
+	out := make([]float64, 0, len(t.Prices)/stride)
+	for i := stride; i < len(t.Prices); i += stride {
+		if t.Prices[i-stride] <= 0 || t.Prices[i] <= 0 {
+			continue
+		}
+		out = append(out, 1e4*math.Log(float64(t.Prices[i])/float64(t.Prices[i-stride])))
+	}
+	return out
+}
+
 // Autocorrelation returns the sample autocorrelation of a series at each lag
 // from one to maxLag.
 func Autocorrelation(series []float64, maxLag int) []float64 {
@@ -150,8 +166,49 @@ func Kurtosis(sample []float64) float64 {
 	return m4/(m2*m2) - 3
 }
 
+// HillPlot returns the Hill estimate at a range of tail sizes.
+//
+// A Hill estimate is only meaningful where it is stable in k. Reading it at one
+// arbitrary k reports a number for any sample at all, including samples with no
+// tail: on a bounded lattice-valued series this estimator returned 297.9, 39.5
+// and 16.9 at tail fractions of 0.005, 0.05 and 0.2 of the same data, and on a
+// Pareto-tailed series the choice of fraction reversed which of two arms looked
+// better calibrated. Callers should look at the plot, not at a point.
+func HillPlot(sample []float64, fractions []float64) map[float64]float64 {
+	out := make(map[float64]float64, len(fractions))
+	for _, fraction := range fractions {
+		out[fraction] = HillTailIndex(sample, fraction)
+	}
+	return out
+}
+
+// HillStability reports the spread of Hill estimates across tail fractions,
+// relative to their median. A power-law sample gives a plateau and a small
+// spread; a sample with no tail gives a large one.
+func HillStability(sample []float64) (median float64, spread float64) {
+	fractions := []float64{0.01, 0.02, 0.05, 0.10, 0.20}
+	estimates := make([]float64, 0, len(fractions))
+	for _, fraction := range fractions {
+		if value := HillTailIndex(sample, fraction); !math.IsNaN(value) {
+			estimates = append(estimates, value)
+		}
+	}
+	if len(estimates) < 3 {
+		return math.NaN(), math.NaN()
+	}
+	sort.Float64s(estimates)
+	median = estimates[len(estimates)/2]
+	if median <= 0 {
+		return median, math.NaN()
+	}
+	return median, (estimates[len(estimates)-1] - estimates[0]) / median
+}
+
 // HillTailIndex estimates the tail exponent of |returns| from the largest
-// observations. Equity and crypto return tails sit near three.
+// observations.
+//
+// Valid only where the estimate is stable in k; use HillStability to check
+// before reporting it. Equity and crypto return tails sit near three.
 func HillTailIndex(sample []float64, tailFraction float64) float64 {
 	magnitudes := make([]float64, 0, len(sample))
 	for _, value := range sample {
@@ -204,6 +261,19 @@ type StylizedFacts struct {
 
 	ExcessKurtosis float64
 	TailIndex      float64
+	// TailSpread is the relative spread of Hill estimates across tail sizes.
+	// Above roughly one the tail index is not estimable and TailIndex should
+	// not be reported as a measurement.
+	TailSpread float64
+
+	// Strided facts resample the tape every N trades. The empirical values a
+	// panel is scored against are measured on time-sampled returns, where the
+	// bid-ask bounce no longer dominates the first lag, so a trade-indexed
+	// number is not comparable to them.
+	Stride20ReturnACF1  float64
+	Stride20Kurtosis    float64
+	Stride100ReturnACF1 float64
+	Stride100Kurtosis   float64
 
 	ReturnStdBps float64
 }
@@ -242,7 +312,21 @@ func (t *TradeTape) Facts(maxLag int) StylizedFacts {
 	facts.SignACF10 = at(signACF, 10)
 	facts.SignACF50 = at(signACF, 50)
 	facts.ExcessKurtosis = Kurtosis(returns)
-	facts.TailIndex = HillTailIndex(returns, 0.05)
+	facts.TailIndex, facts.TailSpread = HillStability(returns)
+
+	for _, stride := range []int{20, 100} {
+		strided := t.StridedLogReturns(stride)
+		if len(strided) < 50 {
+			continue
+		}
+		acf := Autocorrelation(strided, 1)
+		kurt := Kurtosis(strided)
+		if stride == 20 {
+			facts.Stride20ReturnACF1, facts.Stride20Kurtosis = acf[0], kurt
+		} else {
+			facts.Stride100ReturnACF1, facts.Stride100Kurtosis = acf[0], kurt
+		}
+	}
 
 	var mean, variance float64
 	for _, value := range returns {

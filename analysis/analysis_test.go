@@ -340,3 +340,75 @@ func TestHillTailIndexIsLowerForFatterTails(t *testing.T) {
 		t.Errorf("tail index for alpha 2 = %.2f, want about 2", fat)
 	}
 }
+
+// A Hill estimate is only meaningful where it is stable in the number of tail
+// observations used. On a bounded lattice-valued sample the estimator still
+// returns a number — it returned 39.5 on a reference tape whose returns lived
+// in a 7% wide band — so stability has to be checked before the value is
+// reported as a measurement.
+func TestHillStabilitySeparatesRealTailsFromNone(t *testing.T) {
+	state := uint64(31337)
+	uniform := func() float64 {
+		state = state*6364136223846793005 + 1442695040888963407
+		return float64(state>>11) / float64(1<<53)
+	}
+	pareto := make([]float64, 40000)
+	for i := range pareto {
+		u := uniform()
+		if u <= 0 {
+			u = 1e-9
+		}
+		pareto[i] = math.Pow(u, -1/3.0)
+	}
+	median, spread := HillStability(pareto)
+	if math.Abs(median-3) > 0.7 {
+		t.Errorf("Pareto(3) median estimate = %.2f, want about 3", median)
+	}
+	if spread > 0.5 {
+		t.Errorf("Pareto sample spread = %.2f, want a plateau below 0.5", spread)
+	}
+
+	// A bounded sample on a coarse lattice, which is what a tick-constrained
+	// price series produces when no order ever walks the book.
+	lattice := make([]float64, 40000)
+	for i := range lattice {
+		lattice[i] = 0.5 + float64(int(uniform()*4))*0.1
+	}
+	latticeMedian, latticeSpread := HillStability(lattice)
+	if latticeSpread <= spread {
+		t.Errorf("lattice sample spread %.2f did not exceed the Pareto plateau %.2f", latticeSpread, spread)
+	}
+	if latticeSpread < 1.0 {
+		t.Errorf("lattice spread = %.2f (median %.2f), want a clearly unstable estimate", latticeSpread, latticeMedian)
+	}
+}
+
+// Trade-indexed returns are dominated by the bid-ask bounce at lag one, so they
+// cannot be compared against empirical values measured on time-sampled returns.
+func TestStridedReturnsRemoveTheBounce(t *testing.T) {
+	tape := &TradeTape{}
+	price := int64(50_000_00000)
+	for i := 0; i < 5000; i++ {
+		// A drifting mid with a one-tick bounce on alternate trades, which is
+		// the structure a quoted market produces.
+		price += 1000
+		observed := price
+		if i%2 == 1 {
+			observed = price + 40000
+		}
+		tape.Prices = append(tape.Prices, observed)
+		tape.Timestamps = append(tape.Timestamps, int64(i)*1e9)
+		tape.Signs = append(tape.Signs, 1)
+	}
+	trade := Autocorrelation(tape.LogReturns(), 1)
+	strided := Autocorrelation(tape.StridedLogReturns(20), 1)
+	if trade[0] > -0.5 {
+		t.Fatalf("trade-indexed ACF(1) = %.3f, expected a strong negative bounce", trade[0])
+	}
+	if strided[0] < trade[0] {
+		t.Errorf("striding did not reduce the bounce: trade %.3f, strided %.3f", trade[0], strided[0])
+	}
+	if len(tape.StridedLogReturns(0)) != 0 || len(tape.StridedLogReturns(999999)) != 0 {
+		t.Error("invalid strides must return no samples")
+	}
+}

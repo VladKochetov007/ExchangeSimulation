@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 
@@ -58,11 +59,25 @@ func main() {
 				os.Exit(1)
 			}
 			facts := tape.Facts(50)
+			// A tape the run does not contain is an error, not a panel of
+			// zeroes: a mistyped venue or a pruned log directory would
+			// otherwise print a plausible-looking row straight into a record.
+			if facts.Trades == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no trades for %s at venue %s\n", dir, *base, *venue)
+				os.Exit(1)
+			}
 			emit(dir, facts, *asJSON, func() {
-				fmt.Printf("%-22s trades %7d  ret-acf1 %+6.3f  |ret|-acf1 %+6.3f  |ret|-acf10 %+6.3f  "+
-					"sign-acf1 %+6.3f  sign-acf50 %+6.3f  kurt %8.2f  tail %5.2f  sd %6.2f bps\n",
-					dir, facts.Trades, facts.ReturnACF1, facts.AbsReturnACF1, facts.AbsReturnACF10,
-					facts.SignACF1, facts.SignACF50, facts.ExcessKurtosis, facts.TailIndex, facts.ReturnStdBps)
+				tail := fmt.Sprintf("%5.2f", facts.TailIndex)
+				// Above roughly one the Hill estimate has no plateau and is not
+				// a measurement of anything.
+				if facts.TailSpread > 1 || math.IsNaN(facts.TailIndex) {
+					tail = "  n/a"
+				}
+				fmt.Printf("%-18s trades %7d  ret-acf1 %+6.3f  |ret|-acf1 %+6.3f  sign-acf1 %+6.3f  sign-acf50 %+6.3f  "+
+					"kurt %8.2f  tail %s (spread %5.2f)  s20-acf1 %+6.3f  s100-acf1 %+6.3f  s100-kurt %7.2f\n",
+					dir, facts.Trades, facts.ReturnACF1, facts.AbsReturnACF1,
+					facts.SignACF1, facts.SignACF50, facts.ExcessKurtosis, tail, facts.TailSpread,
+					facts.Stride20ReturnACF1, facts.Stride100ReturnACF1, facts.Stride100Kurtosis)
 			})
 		case "triangular":
 			deviations, err := run.TriangularDeviation(analysis.TriangularConfig{
