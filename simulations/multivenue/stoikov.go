@@ -79,7 +79,20 @@ type StoikovMMConfig struct {
 	QuotePrecision  int64
 	TickSize        int64
 	QuoteQty        int64
-	QuoteInterval   time.Duration
+	// QuoteSizeVolElasticity shrinks quoted size as the maker's own volatility
+	// estimate rises above the level it started from. Zero quotes a constant
+	// size in every state, which is what the reference population did.
+	//
+	// Constant depth denies the market the feedback that produces volatility
+	// clustering: a burst of trading meets the same depth as a quiet period, so
+	// a large move cannot make the next one more likely. Withdrawing size under
+	// stress lets an order walk further exactly when the estimate is already
+	// high, which is the loop real books have.
+	QuoteSizeVolElasticity float64
+	// MinQuoteSizeFraction floors the withdrawal, so a volatility spike thins
+	// the book rather than emptying it. Zero means a tenth.
+	MinQuoteSizeFraction float64
+	QuoteInterval        time.Duration
 
 	// The control parameters are relative (scale free): variance is of log
 	// returns, and risk aversion and fill decay are dimensionless. The maker
@@ -493,9 +506,10 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 		mm.hedgeDelta()
 	}
 	mm.bidPrice, mm.askPrice = bid, ask
-	bidRequest := mm.SubmitOrder(mm.cfg.Symbol, exchange.Buy, exchange.LimitOrder, bid, mm.cfg.QuoteQty)
+	size := mm.quoteSize()
+	bidRequest := mm.SubmitOrder(mm.cfg.Symbol, exchange.Buy, exchange.LimitOrder, bid, size)
 	mm.pending[bidRequest] = stoikovBid
-	askRequest := mm.SubmitOrder(mm.cfg.Symbol, exchange.Sell, exchange.LimitOrder, ask, mm.cfg.QuoteQty)
+	askRequest := mm.SubmitOrder(mm.cfg.Symbol, exchange.Sell, exchange.LimitOrder, ask, size)
 	mm.pending[askRequest] = stoikovAsk
 	if mm.cfg.SubmitBeforeCancel {
 		// Cancelling only after the replacements are submitted keeps depth
@@ -520,6 +534,29 @@ func (mm *StoikovMarketMaker) NetDelta() int64 { return mm.inventory + mm.hedgeP
 // hedgeDelta offsets accumulated inventory on the hedge instrument, so the
 // maker's risk is bounded by its hedging capacity rather than by how much of
 // the asset it holds.
+// quoteSize is the depth the maker shows, after any volatility withdrawal.
+func (mm *StoikovMarketMaker) quoteSize() int64 {
+	if mm.cfg.QuoteSizeVolElasticity <= 0 || mm.cfg.InitialLogVariancePerSec <= 0 {
+		return mm.cfg.QuoteQty
+	}
+	floor := mm.cfg.MinQuoteSizeFraction
+	if floor <= 0 {
+		floor = 0.1
+	}
+	ratio := mm.cfg.InitialLogVariancePerSec / mm.logVariancePerSec
+	if !finite(ratio) || ratio <= 0 {
+		return int64(float64(mm.cfg.QuoteQty) * floor)
+	}
+	scale := math.Pow(ratio, mm.cfg.QuoteSizeVolElasticity)
+	if scale > 1 {
+		scale = 1
+	}
+	if scale < floor {
+		scale = floor
+	}
+	return int64(float64(mm.cfg.QuoteQty) * scale)
+}
+
 func (mm *StoikovMarketMaker) hedgeDelta() {
 	if mm.cfg.HedgeSymbol == "" || mm.hedgePending || mm.cfg.HedgeBandQty <= 0 {
 		return

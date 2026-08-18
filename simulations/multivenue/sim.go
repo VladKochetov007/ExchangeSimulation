@@ -135,6 +135,12 @@ type Config struct {
 	// fraction of the quoted depth is absorbed whole and never moves a price,
 	// so the return series collapses to the bid-ask bounce. The reference
 	// population quoted 5 ABC and traded 0.01, a ratio of five hundred to one.
+	// MakerQuoteSizeVolElasticity withdraws maker depth as its volatility
+	// estimate rises, and MinQuoteSizeFraction floors that withdrawal. Constant
+	// depth is what denies this market volatility clustering.
+	MakerQuoteSizeVolElasticity float64 `json:"maker_quote_size_vol_elasticity"`
+	MakerMinQuoteSizeFraction   float64 `json:"maker_min_quote_size_fraction"`
+
 	NoiseOrderQty int64 `json:"noise_order_qty"`
 	// NoiseSizeParetoAlpha draws order size from a Pareto tail when positive,
 	// so that an occasional order walks the book instead of every order being
@@ -1174,6 +1180,8 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			RelativeRiskAversion:     relativeRiskAversion,
 			RelativeFillDecay:        relativeFillDecay,
 			MinHalfSpreadTicks:       s.Config.MakerMinHalfSpreadTicks,
+			QuoteSizeVolElasticity:   s.Config.MakerQuoteSizeVolElasticity,
+			MinQuoteSizeFraction:     s.Config.MakerMinQuoteSizeFraction,
 			InventoryLimit:           s.Config.MakerInventoryLimit,
 			InventorySkewBps:         s.Config.MakerInventorySkewBps,
 			SubmitBeforeCancel:       s.Config.SpotMakerSubmitBeforeCancel,

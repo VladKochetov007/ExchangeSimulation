@@ -372,3 +372,46 @@ func TestMakerWithoutHedgeIntervalKeepsHedgingInTheQuoteCycle(t *testing.T) {
 	mm.subscribed = true
 	mm.onHedgeTick(time.Unix(0, 0)) // must be inert without a cadence
 }
+
+// A maker that quotes the same size in every state gives the market no way to
+// produce volatility clustering: a burst of trading meets exactly the depth a
+// quiet period does, so a large move cannot make the next move more likely.
+// Measured on the reference population, the autocorrelation of absolute
+// returns was -0.008 at lag one where traded markets show 0.2 to 0.4.
+func TestQuoteSizeWithdrawsAsVolatilityRises(t *testing.T) {
+	base := StoikovMMConfig{
+		QuoteQty:                 1_000_000,
+		InitialLogVariancePerSec: 1e-8,
+		QuoteSizeVolElasticity:   1.0,
+		MinQuoteSizeFraction:     0.1,
+	}
+	calm := &StoikovMarketMaker{cfg: base, logVariancePerSec: 1e-8}
+	if got := calm.quoteSize(); got != base.QuoteQty {
+		t.Errorf("at its reference volatility the maker quoted %d, want the full %d", got, base.QuoteQty)
+	}
+
+	stressed := &StoikovMarketMaker{cfg: base, logVariancePerSec: 4e-8}
+	stressedSize := stressed.quoteSize()
+	if stressedSize >= base.QuoteQty {
+		t.Errorf("at four times the variance the maker quoted %d, want less than %d", stressedSize, base.QuoteQty)
+	}
+	if stressedSize < base.QuoteQty/10 {
+		t.Errorf("quoted size %d fell below the configured floor of %d", stressedSize, base.QuoteQty/10)
+	}
+
+	// The floor has to hold however extreme the estimate becomes, or a
+	// volatility spike removes the book entirely.
+	extreme := &StoikovMarketMaker{cfg: base, logVariancePerSec: 1e-2}
+	if got := extreme.quoteSize(); got != base.QuoteQty/10 {
+		t.Errorf("under an extreme estimate the maker quoted %d, want the floor %d", got, base.QuoteQty/10)
+	}
+
+	// Zero elasticity is the previous behaviour and must be exactly preserved.
+	fixed := &StoikovMarketMaker{
+		cfg:               StoikovMMConfig{QuoteQty: 1_000_000, InitialLogVariancePerSec: 1e-8},
+		logVariancePerSec: 1e-2,
+	}
+	if got := fixed.quoteSize(); got != 1_000_000 {
+		t.Errorf("without elasticity the maker quoted %d, want a constant 1000000", got)
+	}
+}
