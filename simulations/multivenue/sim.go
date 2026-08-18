@@ -138,6 +138,10 @@ type Config struct {
 	// MakerQuoteSizeVolElasticity withdraws maker depth as its volatility
 	// estimate rises, and MinQuoteSizeFraction floors that withdrawal. Constant
 	// depth is what denies this market volatility clustering.
+	// MakerForwardHalfLife smooths the maker's view of its reference book. Zero
+	// takes the instantaneous midpoint, which makes price impact permanent.
+	MakerForwardHalfLife time.Duration `json:"maker_forward_half_life"`
+
 	MakerQuoteSizeVolElasticity float64 `json:"maker_quote_size_vol_elasticity"`
 	MakerMinQuoteSizeFraction   float64 `json:"maker_min_quote_size_fraction"`
 
@@ -1220,6 +1224,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			RelativeRiskAversion:     relativeRiskAversion,
 			RelativeFillDecay:        relativeFillDecay,
 			MinHalfSpreadTicks:       s.Config.MakerMinHalfSpreadTicks,
+			ForwardHalfLife:          s.Config.MakerForwardHalfLife,
 			QuoteSizeVolElasticity:   s.Config.MakerQuoteSizeVolElasticity,
 			MinQuoteSizeFraction:     s.Config.MakerMinQuoteSizeFraction,
 			InventoryLimit:           scaleQty(s.Config.MakerInventoryLimit, baseUSD),

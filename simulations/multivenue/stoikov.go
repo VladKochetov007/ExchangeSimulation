@@ -88,6 +88,18 @@ type StoikovMMConfig struct {
 	// a large move cannot make the next one more likely. Withdrawing size under
 	// stress lets an order walk further exactly when the estimate is already
 	// high, which is the loop real books have.
+	// ForwardHalfLife smooths the maker's view of the reference book instead of
+	// taking its instantaneous midpoint.
+	//
+	// Zero means the maker's forward is whatever the book last printed, so a
+	// sweep moves its view permanently and it requotes around the new level.
+	// Impact is then permanent by construction, which is why every parameter
+	// that widens the return tails also makes the level slide: the only way to
+	// make a return large is to move the level for good. A maker that forms its
+	// view over time quotes back toward where it believed the price was, so a
+	// sweep decays as it replenishes.
+	ForwardHalfLife time.Duration
+
 	QuoteSizeVolElasticity float64
 	// MinQuoteSizeFraction floors the withdrawal, so a volatility spike thins
 	// the book rather than emptying it. Zero means a tenth.
@@ -209,6 +221,7 @@ type StoikovMarketMaker struct {
 
 	forward            int64
 	indexPrice         int64
+	forwardAt          int64
 	lastForward        int64
 	lastForwardTS      int64
 	logVariancePerSec  float64
@@ -297,7 +310,27 @@ func (mm *StoikovMarketMaker) onSnapshot(e actor.BookSnapshotEvent) {
 	if mid <= 0 {
 		return
 	}
-	mm.forward = mid
+	mm.forward = mm.blendForward(mid, e.Timestamp)
+}
+
+// blendForward moves the maker's view toward the observed midpoint at the
+// configured half-life, leaving it unchanged when none is set.
+func (mm *StoikovMarketMaker) blendForward(mid, timestamp int64) int64 {
+	if mm.cfg.ForwardHalfLife <= 0 || mm.forward <= 0 {
+		mm.forwardAt = timestamp
+		return mid
+	}
+	elapsed := float64(timestamp-mm.forwardAt) / 1e9
+	mm.forwardAt = timestamp
+	if elapsed <= 0 {
+		return mm.forward
+	}
+	alpha := 1 - math.Exp(-math.Ln2*elapsed/mm.cfg.ForwardHalfLife.Seconds())
+	blended := float64(mm.forward) + alpha*(float64(mid)-float64(mm.forward))
+	if !finite(blended) || blended <= 0 {
+		return mid
+	}
+	return int64(blended)
 }
 
 // onTrade estimates volatility from executed prices rather than from the

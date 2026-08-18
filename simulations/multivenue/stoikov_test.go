@@ -415,3 +415,57 @@ func TestQuoteSizeWithdrawsAsVolatilityRises(t *testing.T) {
 		t.Errorf("without elasticity the maker quoted %d, want a constant 1000000", got)
 	}
 }
+
+// A maker whose forward is the last printed midpoint treats every sweep as
+// news: it requotes around the new level and the move never decays. Impact is
+// then permanent by construction, which is why every parameter that widened the
+// return tails also made the level slide. A maker that forms its view over time
+// quotes back toward where it believed the price was.
+func TestForwardHalfLifeMakesImpactDecay(t *testing.T) {
+	newMaker := func(halfLife time.Duration) *StoikovMarketMaker {
+		return &StoikovMarketMaker{cfg: StoikovMMConfig{
+			ReferenceSymbol: "ABC/USD", ForwardHalfLife: halfLife,
+		}}
+	}
+	second := int64(1e9)
+
+	instant := newMaker(0)
+	instant.forward = 1000
+	if got := instant.blendForward(1200, second); got != 1200 {
+		t.Fatalf("without a half-life the forward is %d, want the observed 1200", got)
+	}
+
+	// A sweep moves the book to 1200 and it stays there. A maker with a
+	// ten-second view should still be well below it after one second, and
+	// should converge only as the level persists.
+	smoothed := newMaker(10 * time.Second)
+	smoothed.forward = 1000
+	smoothed.forwardAt = 0
+	afterOne := smoothed.blendForward(1200, second)
+	smoothed.forward = afterOne
+	if afterOne >= 1150 {
+		t.Errorf("after one second the forward is %d, want it still near its prior belief of 1000", afterOne)
+	}
+	if afterOne <= 1000 {
+		t.Errorf("after one second the forward is %d, want it to have moved toward 1200", afterOne)
+	}
+	for i := int64(2); i <= 60; i++ {
+		smoothed.forward = smoothed.blendForward(1200, i*second)
+	}
+	// Six half-lives leave about 1.6% of the gap, so the belief should have
+	// closed the great majority of it without needing to arrive exactly.
+	if smoothed.forward < 1180 {
+		t.Errorf("after a minute at 1200 the forward is %d, want most of the gap closed", smoothed.forward)
+	}
+
+	// A transient sweep that reverts should leave the belief nearly untouched,
+	// which is what makes the impact decay rather than persist.
+	transient := newMaker(10 * time.Second)
+	transient.forward = 1000
+	transient.forwardAt = 0
+	transient.forward = transient.blendForward(1200, second/10)
+	transient.forward = transient.blendForward(1000, 2*second/10)
+	if transient.forward > 1030 {
+		t.Errorf("a tenth-of-a-second spike moved the belief to %d, want it barely changed", transient.forward)
+	}
+}
