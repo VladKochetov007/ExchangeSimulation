@@ -1,5 +1,5 @@
 {
-  "log_mode": "none",
+  "log_mode": "full",
   "seed": 91,
   "step": 1000000000,
   "snapshot_interval": 1000000000,
@@ -28,7 +28,7 @@
   "carry_arbitrageur_count": 2,
   "carry_entry_bps": 2,
   "carry_exit_bps": 1,
-  "maker_inventory_skew_bps": 3,
+  "maker_inventory_skew_bps": 1,
   "carry_lot_qty": 200000000,
   "maker_quote_qty": 500000000,
   "metaorder_traders": {
@@ -52,7 +52,7 @@
   "parity_arb_count": 2,
   "futures_maker_self_anchored": true,
   "spot_maker_submit_before_cancel": true,
-  "description": "Reference population, generation 2026-08-17, revised after the 2026-08-18 audit.\nmaker_inventory_limit is set explicitly at 5000 ABC. It defaults to 100, and at that value the population collapses: over eight hours ABC/USD falls 17.9%, CDF/USD peaks at +763% and ends +196%, and the ABC/CDF cross loses 90%. At 5000 all three books are stable within a few percent. A parameter that swings the outcome by twenty times must not be an unstated default (E-257, E-259).\ntaker_fee_bps is now explicit at its default of 5, because it silently redefines the triangular threshold: the desk requires its configured edge plus one fee per leg, so edge_bps 5 with a 5 bps fee means 20 bps, which is the value E-238 rejected as leaving the desk inert.\nmaker_inventory_skew_bps 3 and maker_hedge_interval 60s are carried forward, but note that the experiments choosing them (E-214, E-216, E-231) ran in a population that no longer exists, and the 3-versus-5 ordering sits inside the seed spread (E-232).\nnoise_order_qty 5e7 with a 1.5 Pareto tail gives a mean order of 1.5 ABC against a 5 ABC quote, not the 0.5 ABC an earlier description claimed. Only the directional finding survives: order size relative to quoted depth governs price formation. The specific pair is not calibrated (E-243 corrected, E-247, E-255).",
+  "description": "skew 1 bps at fixed inventory limit",
   "spot_maker_requote_bps": 0,
   "spot_maker_count": 4,
   "triangle_arb_count": 2,
@@ -74,7 +74,7 @@
     "suppress_at": 0
   },
   "triangle_arb": {
-    "edge_bps": 5,
+    "edge_bps": 20,
     "lot_qty": 5000000
   },
   "rate_limit_tiers": {
@@ -113,8 +113,9 @@
   ],
   "maker_min_half_spread_ticks": 1,
   "maker_hedge_interval": 60000000000,
+  "experiment_id": "E-258",
+  "hypothesis_id": "FFA-111",
   "noise_order_qty": 50000000,
   "noise_size_pareto_alpha": 1.5,
-  "maker_inventory_limit": 500000000000,
-  "taker_fee_bps": 5
+  "noise_funding_lots": 20000
 }
