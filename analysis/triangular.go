@@ -54,7 +54,7 @@ func (r *Run) TriangularDeviation(cfg TriangularConfig) ([]float64, error) {
 		Price int64 `json:"price"`
 	}
 	var mu sync.Mutex
-	err := r.Scan(ScanOptions{Events: []string{"Trade"}, Files: files}, func(event Event) {
+	err := r.Scan(ScanOptions{Events: []string{"Trade"}, Files: files, FilesSelected: true}, func(event Event) {
 		var trade tradePayload
 		if event.Decode(&trade) != nil || trade.Price <= 0 {
 			return

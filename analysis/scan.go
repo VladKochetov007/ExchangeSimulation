@@ -52,6 +52,9 @@ type ScanOptions struct {
 	Events []string
 	// Files, when non-nil, replaces the run's full file list.
 	Files []string
+	// FilesSelected marks that the caller performed a selection, so an empty
+	// Files means "no matches" rather than "not specified".
+	FilesSelected bool
 	// Workers overrides the degree of parallelism. Zero uses GOMAXPROCS.
 	Workers int
 }
@@ -62,8 +65,12 @@ type ScanOptions struct {
 // must be safe for concurrent use. Callers that need ordering should collect
 // per-file and merge, or restrict Files to one file.
 func (r *Run) Scan(opts ScanOptions, visit func(Event)) error {
+	// A caller that selected files and matched none must scan nothing. Treating
+	// an empty selection as "everything" turns a mistyped venue or symbol into
+	// a blend of every book in the run, which reports a full-looking tape and
+	// passes any emptiness check downstream.
 	files := opts.Files
-	if files == nil {
+	if files == nil && !opts.FilesSelected {
 		files = r.files
 	}
 	keep := make(map[string]bool, len(opts.Events))

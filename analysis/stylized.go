@@ -39,7 +39,7 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 	}
 	var mu sync.Mutex
 	var records []record
-	err := r.Scan(ScanOptions{Events: []string{"Trade"}, Files: files}, func(event Event) {
+	err := r.Scan(ScanOptions{Events: []string{"Trade"}, Files: files, FilesSelected: true}, func(event Event) {
 		var decoded payload
 		if event.Decode(&decoded) != nil || decoded.Price <= 0 {
 			return

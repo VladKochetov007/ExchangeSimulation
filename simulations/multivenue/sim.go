@@ -142,6 +142,10 @@ type Config struct {
 	MakerMinQuoteSizeFraction   float64 `json:"maker_min_quote_size_fraction"`
 
 	NoiseOrderQty int64 `json:"noise_order_qty"`
+	// NoiseFundingLots is how many orders' worth of each asset an uninformed
+	// trader starts with. Underfunding it makes the flow directional rather
+	// than random, because only one side gets rejected.
+	NoiseFundingLots int64 `json:"noise_funding_lots"`
 	// NoiseSizeParetoAlpha draws order size from a Pareto tail when positive,
 	// so that an occasional order walks the book instead of every order being
 	// absorbed at the touch.
@@ -1248,15 +1252,28 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	}
 	venue.OptionDealer = venue.OptionDealers[0]
 
-	noiseBalances := map[string]int64{"ABC": 100 * mvBasePrecision, "USD": 100 * mvQuotePrecision}
-	noiseSymbols := []string{"ABC/USD", "ABC-PERP"}
 	noiseQty := s.Config.NoiseOrderQty
 	if noiseQty <= 0 {
 		noiseQty = mvBasePrecision / 100
 	}
+	// Uninformed flow has to be funded for the size it trades, or it stops being
+	// uninformed: a taker that cannot afford to buy is rejected on its buys and
+	// filled on its sells, and the population's "random" flow acquires a
+	// direction. Measured at 0.5 ABC orders against the previous 100 USD
+	// balance, noise flow ran 5.2% net short at 43 standard deviations with
+	// 12,671 insufficient-balance rejections, and the makers absorbing that
+	// one-sided flow drove a 17% price decline.
+	noiseFunding := s.Config.NoiseFundingLots
+	if noiseFunding <= 0 {
+		noiseFunding = 200
+	}
+	noiseBase := noiseQty * noiseFunding
+	noiseQuote := noiseQty * mvBootstrapPrice / mvBasePrecision * noiseFunding
+	noiseBalances := map[string]int64{"ABC": noiseBase, "USD": noiseQuote}
+	noiseSymbols := []string{"ABC/USD", "ABC-PERP"}
 	noiseTargetQtys := map[string]int64{"ABC/USD": noiseQty, "ABC-PERP": noiseQty}
 	if s.Config.CrossAssetSpotGraph {
-		noiseBalances["CDF"] = 100 * mvBasePrecision
+		noiseBalances["CDF"] = noiseBase
 		noiseSymbols = append(noiseSymbols, "CDF/USD", "ABC/CDF")
 		noiseTargetQtys["CDF/USD"] = noiseQty
 		noiseTargetQtys["ABC/CDF"] = noiseQty

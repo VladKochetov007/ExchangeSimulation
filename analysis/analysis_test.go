@@ -497,3 +497,28 @@ func TestTapeOrderingIsStableWithinATimestamp(t *testing.T) {
 		}
 	}
 }
+
+// A selection that matches no file must scan nothing. Treating an empty
+// selection as the whole run turns a mistyped venue into a blend of every book,
+// which produced a full-looking tape of 1.79 million trades for a venue that
+// does not exist.
+func TestTapeForAnUnknownVenueIsEmpty(t *testing.T) {
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/spot/ABC-USD.jsonl": {`{"sim_ts":1000000000,"data":{"venue_id":"north","payload":{"price":100,"qty":1,"side":"BUY"}},"event":"Trade"}`},
+		"north/spot/CDF-USD.jsonl": {`{"sim_ts":1000000000,"data":{"venue_id":"north","payload":{"price":7,"qty":1,"side":"BUY"}},"event":"Trade"}`},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if tape, err := run.Tape("nrth", "ABC-USD"); err != nil || len(tape.Prices) != 0 {
+		t.Fatalf("unknown venue produced %d trades, want none", len(tape.Prices))
+	}
+	if tape, err := run.Tape("north", "ABC/USD"); err != nil || len(tape.Prices) != 0 {
+		t.Fatalf("wrong symbol form produced %d trades, want none", len(tape.Prices))
+	}
+	tape, err := run.Tape("north", "ABC-USD")
+	if err != nil || len(tape.Prices) != 1 {
+		t.Fatalf("correct selection produced %d trades, want 1", len(tape.Prices))
+	}
+}
