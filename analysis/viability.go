@@ -50,6 +50,10 @@ type MarketWindow struct {
 	Symbol  string
 	Start   int64 `json:"start"`
 	End     int64 `json:"end"`
+	// Index counts windows from the run's first, so that a cycle can be named
+	// by its number. The raw quotient is an epoch offset and means nothing to
+	// a reader.
+	Index int `json:"index"`
 
 	Trades int   `json:"trades"`
 	Volume int64 `json:"volume"`
@@ -90,6 +94,26 @@ type Viability struct {
 	BreachesByRule map[string]int `json:"breaches_by_rule"`
 	// DeadBooks lists the books that breached in every window they appeared in.
 	DeadBooks []string `json:"dead_books,omitempty"`
+	// Books rolled up one row each, which is how a ten-cycle run is read: not
+	// as sixteen hundred windows but as "which markets were alive, and from
+	// which cycle did each stop being".
+	BookSummaries []BookViability `json:"book_summaries"`
+}
+
+// BookViability is one book's record across the run.
+type BookViability struct {
+	VenueID string `json:"venue_id"`
+	Symbol  string `json:"symbol"`
+	Windows int    `json:"windows"`
+	Viable  int    `json:"viable"`
+	// FirstBreachWindow is the index of the earliest window this book failed,
+	// or minus one if it never did. A market that dies in cycle seven and one
+	// that was never alive are different failures.
+	FirstBreachWindow int `json:"first_breach_window"`
+	// LastViableWindow is the latest window it passed, or minus one.
+	LastViableWindow int            `json:"last_viable_window"`
+	Trades           int            `json:"trades"`
+	Breaches         map[string]int `json:"breaches,omitempty"`
 }
 
 type windowKey struct {
@@ -265,6 +289,13 @@ func summariseViability(windows map[windowKey]*windowAccumulator, opts Viability
 		return keys[i].index < keys[j].index
 	})
 	result.Books = len(books)
+	// Windows are numbered from the run's first, not from the epoch.
+	originIndex := int64(0)
+	for i, key := range keys {
+		if i == 0 || key.index < originIndex {
+			originIndex = key.index
+		}
+	}
 
 	breachedBooks := make(map[string]int)
 	windowsPerBook := make(map[string]int)
@@ -275,6 +306,7 @@ func summariseViability(windows map[windowKey]*windowAccumulator, opts Viability
 			Symbol:     key.symbol,
 			Start:      key.index * opts.WindowNanos,
 			End:        (key.index + 1) * opts.WindowNanos,
+			Index:      int(key.index - originIndex),
 			Trades:     accumulator.trades,
 			Volume:     accumulator.volume,
 			TakerRoles: len(accumulator.takerRoleVolume),
@@ -310,6 +342,41 @@ func summariseViability(windows map[windowKey]*windowAccumulator, opts Viability
 		}
 		result.Windows = append(result.Windows, window)
 	}
+	summaries := make(map[string]*BookViability)
+	order := make([]string, 0, len(windowsPerBook))
+	// keys and result.Windows were built in the same order, so the index is
+	// shared between them.
+	for index, key := range keys {
+		book := key.venue + " " + key.symbol
+		summary, exists := summaries[book]
+		if !exists {
+			summary = &BookViability{
+				VenueID: key.venue, Symbol: key.symbol,
+				FirstBreachWindow: -1, LastViableWindow: -1,
+				Breaches: make(map[string]int),
+			}
+			summaries[book] = summary
+			order = append(order, book)
+		}
+		window := result.Windows[index]
+		summary.Windows++
+		summary.Trades += window.Trades
+		if window.Viable() {
+			summary.Viable++
+			summary.LastViableWindow = window.Index
+			continue
+		}
+		if summary.FirstBreachWindow < 0 {
+			summary.FirstBreachWindow = window.Index
+		}
+		for _, breach := range window.Breaches {
+			summary.Breaches[breach]++
+		}
+	}
+	for _, book := range order {
+		result.BookSummaries = append(result.BookSummaries, *summaries[book])
+	}
+
 	for book, breached := range breachedBooks {
 		if breached == windowsPerBook[book] {
 			result.DeadBooks = append(result.DeadBooks, book)

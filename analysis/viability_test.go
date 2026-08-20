@@ -159,3 +159,55 @@ func TestViabilityRecoversTheSpotBookFromItsFile(t *testing.T) {
 		t.Error("the recovered book has no measured spread")
 	}
 }
+
+// A ten-cycle run is read one row per book, not sixteen hundred windows. A
+// market that died in a late cycle and one that was never alive are different
+// failures and the rollup has to tell them apart.
+func TestViabilityRollsUpEachBookAndDatesItsFirstBreach(t *testing.T) {
+	run := viabilityRun(t)
+	result, err := run.MeasureViability(ViabilityOptions{
+		WindowNanos: 5_000_000_000,
+		Rules:       []ViabilityRule{{Name: "single_taker_class", Breached: func(w MarketWindow) bool { return w.TakerRoles < 2 }}},
+	})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if len(result.BookSummaries) != 1 {
+		t.Fatalf("summaries = %d, want 1", len(result.BookSummaries))
+	}
+	summary := result.BookSummaries[0]
+	if summary.Windows != 2 || summary.Viable != 1 {
+		t.Errorf("summary = %d windows %d viable, want 2 and 1", summary.Windows, summary.Viable)
+	}
+	// The second window's events land at ten seconds, which is window two of a
+	// five-second grid counted from the run's first window.
+	if summary.FirstBreachWindow != 2 {
+		t.Errorf("first breach = window %d, want 2", summary.FirstBreachWindow)
+	}
+	if summary.LastViableWindow != 0 {
+		t.Errorf("last viable = window %d, want 0", summary.LastViableWindow)
+	}
+	if summary.Trades != 3 {
+		t.Errorf("trades = %d, want 3", summary.Trades)
+	}
+	if summary.Breaches["single_taker_class"] != 1 {
+		t.Errorf("breaches = %v, want one single_taker_class", summary.Breaches)
+	}
+}
+
+// A book that never passed must be distinguishable from one that passed and
+// then stopped: its first breach is its first window and it was never viable.
+func TestViabilityMarksABookThatWasNeverAlive(t *testing.T) {
+	run := viabilityRun(t)
+	result, err := run.MeasureViability(ViabilityOptions{
+		WindowNanos: 5_000_000_000,
+		Rules:       []ViabilityRule{{Name: "always", Breached: func(MarketWindow) bool { return true }}},
+	})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	summary := result.BookSummaries[0]
+	if summary.Viable != 0 || summary.FirstBreachWindow != 0 || summary.LastViableWindow != -1 {
+		t.Errorf("summary = %+v, want never viable with a first breach at window 0", summary)
+	}
+}

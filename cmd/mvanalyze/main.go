@@ -344,8 +344,25 @@ func main() {
 				for _, rule := range sortedRuleNames(result.BreachesByRule) {
 					fmt.Printf("    %-20s %4d windows\n", rule, result.BreachesByRule[rule])
 				}
-				for _, book := range result.DeadBooks {
-					fmt.Printf("    dead book: %s\n", book)
+				alive, died, neverAlive := 0, 0, 0
+				for _, book := range result.BookSummaries {
+					switch {
+					case book.Viable == book.Windows:
+						alive++
+					case book.Viable == 0:
+						neverAlive++
+					default:
+						died++
+					}
+				}
+				fmt.Printf("    books viable throughout %3d  partly viable %3d  never viable %3d\n",
+					alive, died, neverAlive)
+				for _, book := range result.BookSummaries {
+					if book.Viable == book.Windows || book.Viable == 0 {
+						continue
+					}
+					fmt.Printf("    %-10s %-28s viable %2d/%2d  last viable window %2d  trades %8d\n",
+						book.VenueID, book.Symbol, book.Viable, book.Windows, book.LastViableWindow, book.Trades)
 				}
 			})
 		case "spacing":
