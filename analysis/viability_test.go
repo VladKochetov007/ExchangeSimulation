@@ -211,3 +211,24 @@ func TestViabilityMarksABookThatWasNeverAlive(t *testing.T) {
 		t.Errorf("summary = %+v, want never viable with a first breach at window 0", summary)
 	}
 }
+
+// A contract that listed part way through a window, or settled part way
+// through one, cannot show a window's worth of volume. Those windows have to
+// be identifiable, or every expiry reads as a market that died.
+func TestViabilityMarksTheWindowsAtEachEndOfABooksLife(t *testing.T) {
+	run := viabilityRun(t)
+	result, err := run.MeasureViability(ViabilityOptions{WindowNanos: 5_000_000_000})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if len(result.Windows) != 2 {
+		t.Fatalf("windows = %d, want 2", len(result.Windows))
+	}
+	first, last := result.Windows[0], result.Windows[1]
+	if !first.FirstForBook || first.LastForBook {
+		t.Errorf("first window marked %+v, want first only", first)
+	}
+	if last.FirstForBook || !last.LastForBook {
+		t.Errorf("last window marked %+v, want last only", last)
+	}
+}

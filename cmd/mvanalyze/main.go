@@ -39,6 +39,7 @@ func main() {
 	maxSpreadTicks := flag.Float64("viability-max-spread-ticks", 0, "widest median spread in ticks a viable window may show; zero disables")
 	maxEmptySideShare := flag.Float64("viability-max-empty-side-share", 0.02, "largest share of publications a viable window may have with a side missing")
 	viabilityThresholds := flag.String("viability-thresholds", "", "path to a JSON list of per-book viability thresholds, matched by symbol glob in order")
+	judgeLifeEdges := flag.Bool("viability-judge-life-edges", false, "judge the windows a book lists and settles in, which are partial by construction")
 	minTouchDepth := flag.Float64("viability-min-touch-depth", 0, "smallest median touch depth in base units a viable window may show; zero disables")
 	tickSize := flag.Int64("tick", 10_000, "book tick size, for the spread in ticks")
 	walkSizes := flag.String("walk-sizes", "", "comma-separated order sizes in base units, for the walkable fraction")
@@ -318,6 +319,18 @@ func main() {
 			// as a living market is the caller's judgement and not a property
 			// of the measurement. The library measures; the thresholds are
 			// configuration.
+			// A rule is only asked about a window that covers a whole slice of
+			// the book's life. The listing and settlement windows are partial,
+			// and judging them reports every expiry as a market that died.
+			judged := func(rule analysis.ViabilityRule) analysis.ViabilityRule {
+				inner := rule.Breached
+				return analysis.ViabilityRule{Name: rule.Name, Breached: func(w analysis.MarketWindow) bool {
+					if !*judgeLifeEdges && (w.FirstForBook || w.LastForBook) {
+						return false
+					}
+					return inner(w)
+				}}
+			}
 			rules := []analysis.ViabilityRule{
 				{Name: "thin_volume", Breached: func(w analysis.MarketWindow) bool {
 					return w.Trades < thresholdsFor(w.Symbol).MinTrades
@@ -348,6 +361,9 @@ func main() {
 					floor := thresholdsFor(w.Symbol).MinTouchDepth
 					return floor > 0 && w.TouchDepth.N > 0 && w.TouchDepth.Median < floor
 				}},
+			}
+			for i, rule := range rules {
+				rules[i] = judged(rule)
 			}
 			result, err := run.MeasureViability(analysis.ViabilityOptions{
 				WindowNanos: int64(*viabilityWindow * 1e9),

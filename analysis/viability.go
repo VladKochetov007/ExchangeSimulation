@@ -74,6 +74,13 @@ type MarketWindow struct {
 	SpreadTicks        Distribution `json:"spread_ticks"`
 	TouchDepth         Distribution `json:"touch_depth"`
 
+	// FirstForBook and LastForBook mark the window a book appears in first and
+	// last. A contract that listed part way through a window, or settled part
+	// way through one, cannot show a window's worth of volume, so a caller
+	// measuring a lifecycle usually judges only the windows in between.
+	FirstForBook bool `json:"first_for_book,omitempty"`
+	LastForBook  bool `json:"last_for_book,omitempty"`
+
 	// Breaches names the rules this window failed, in the order supplied.
 	Breaches []string `json:"breaches,omitempty"`
 }
@@ -299,6 +306,19 @@ func summariseViability(windows map[windowKey]*windowAccumulator, opts Viability
 
 	breachedBooks := make(map[string]int)
 	windowsPerBook := make(map[string]int)
+	// A book's own first and last windows are its listing and settlement
+	// windows, which are partial by construction.
+	firstIndex := make(map[string]int64)
+	lastIndex := make(map[string]int64)
+	for _, key := range keys {
+		book := key.venue + " " + key.symbol
+		if existing, seen := firstIndex[book]; !seen || key.index < existing {
+			firstIndex[book] = key.index
+		}
+		if existing, seen := lastIndex[book]; !seen || key.index > existing {
+			lastIndex[book] = key.index
+		}
+	}
 	for _, key := range keys {
 		accumulator := windows[key]
 		window := MarketWindow{
@@ -326,6 +346,8 @@ func summariseViability(windows map[windowKey]*windowAccumulator, opts Viability
 			}
 			window.TopRoleVolumeShare = float64(top) / float64(accumulator.volume)
 		}
+		window.FirstForBook = firstIndex[key.venue+" "+key.symbol] == key.index
+		window.LastForBook = lastIndex[key.venue+" "+key.symbol] == key.index
 		for _, rule := range opts.Rules {
 			if rule.Breached != nil && rule.Breached(window) {
 				window.Breaches = append(window.Breaches, rule.Name)
