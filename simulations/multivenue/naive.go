@@ -138,10 +138,22 @@ func (m *FixedDistanceMaker) onTick(time.Time) {
 		return
 	}
 	mid := (m.bestBid + m.bestAsk) / 2
-	if m.quotedMid > 0 && abs64(mid-m.quotedMid)*10000 < m.cfg.RequoteBps*m.quotedMid {
+	// A maker that has been filled has no quote on that side, and waiting for
+	// the mid to move before replacing it leaves the book one-sided for as
+	// long as the market is calm — which is exactly when nothing will move the
+	// mid. Requote whenever a side it intends to quote is missing.
+	if m.quotesIntact(mid) && m.quotedMid > 0 && abs64(mid-m.quotedMid)*10000 < m.cfg.RequoteBps*m.quotedMid {
 		return
 	}
 	m.replace(mid, m.bidTarget(mid), m.askTarget(mid))
+}
+
+// quotesIntact reports whether every side this maker wants to show is live.
+func (m *FixedDistanceMaker) quotesIntact(mid int64) bool {
+	if m.bidTarget(mid) > 0 && m.quotes.bidID == 0 {
+		return false
+	}
+	return !(m.askTarget(mid) > 0 && m.quotes.askID == 0)
 }
 
 func (m *FixedDistanceMaker) bidTarget(mid int64) int64 {
@@ -263,7 +275,7 @@ func (m *ImbalanceMaker) onImbalanceTick(time.Time) {
 		return
 	}
 	mid := (m.bestBid + m.bestAsk) / 2
-	if m.quotedMid > 0 && abs64(mid-m.quotedMid)*10000 < m.cfg.RequoteBps*m.quotedMid {
+	if m.quotesIntact(mid) && m.quotedMid > 0 && abs64(mid-m.quotedMid)*10000 < m.cfg.RequoteBps*m.quotedMid {
 		return
 	}
 	// Lean the whole quote pair toward the side the imbalance favours.

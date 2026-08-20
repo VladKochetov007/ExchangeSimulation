@@ -1,0 +1,81 @@
+package multivenue
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"exchange_sim/actor"
+	"exchange_sim/exchange"
+	etypes "exchange_sim/types"
+)
+
+func makerSnapshot(symbol string, bid, ask int64) *actor.Event {
+	return &actor.Event{
+		Type: actor.EventBookSnapshot,
+		Data: actor.BookSnapshotEvent{Symbol: symbol, Snapshot: &etypes.BookSnapshot{
+			Bids: []etypes.PriceLevel{{Price: bid, VisibleQty: 1}},
+			Asks: []etypes.PriceLevel{{Price: ask, VisibleQty: 1}},
+		}},
+	}
+}
+
+// A maker that has been filled holds no quote on that side. Waiting for the
+// mid to move before replacing it leaves the book one-sided for as long as the
+// market is calm, which is exactly when nothing will move the mid — measured
+// on the second spot pair, two makers quoted twice in half an hour and then
+// stopped.
+func TestFixedDistanceMakerReplacesAFilledSideWithoutWaitingForAMove(t *testing.T) {
+	gw := newMetaGateway()
+	maker := NewFixedDistanceMaker(1, gw, FixedDistanceMakerConfig{
+		Symbol: "CDF/USD", SpreadBps: 8, RequoteBps: 400, QuoteQty: 100, MaxInventory: 10_000,
+		TickSize: 100, QuoteInterval: time.Second,
+	})
+	ctx := context.Background()
+	maker.onTick(time.Unix(0, 0))
+	maker.HandleEvent(ctx, makerSnapshot("CDF/USD", 299_900, 300_100))
+	maker.onTick(time.Unix(0, int64(time.Second)))
+	first := len(gw.orders())
+	if first == 0 {
+		t.Fatal("the maker never quoted")
+	}
+
+	// Acknowledge both quotes, then fill the bid completely.
+	var bidOrderID uint64 = 10
+	for i, req := range gw.orders() {
+		maker.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderAccepted,
+			Data: actor.OrderAcceptedEvent{OrderID: bidOrderID + uint64(i), RequestID: req.RequestID}})
+	}
+	maker.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderFilled,
+		Data: actor.OrderFillEvent{OrderID: bidOrderID, Symbol: "CDF/USD", Side: exchange.Buy, Qty: 100, IsFull: true}})
+
+	// The mid has not moved, so the requote gate alone would hold forever.
+	maker.HandleEvent(ctx, makerSnapshot("CDF/USD", 299_900, 300_100))
+	maker.onTick(time.Unix(0, int64(2*time.Second)))
+	if len(gw.orders()) <= first {
+		t.Error("the maker left the side it had been filled on empty while the mid was calm")
+	}
+}
+
+// With both quotes live and the mid unchanged, the maker must not churn.
+func TestFixedDistanceMakerStillHoldsWhenBothQuotesAreLive(t *testing.T) {
+	gw := newMetaGateway()
+	maker := NewFixedDistanceMaker(1, gw, FixedDistanceMakerConfig{
+		Symbol: "CDF/USD", SpreadBps: 8, RequoteBps: 400, QuoteQty: 100, MaxInventory: 10_000,
+		TickSize: 100, QuoteInterval: time.Second,
+	})
+	ctx := context.Background()
+	maker.onTick(time.Unix(0, 0))
+	maker.HandleEvent(ctx, makerSnapshot("CDF/USD", 299_900, 300_100))
+	maker.onTick(time.Unix(0, int64(time.Second)))
+	for i, req := range gw.orders() {
+		maker.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderAccepted,
+			Data: actor.OrderAcceptedEvent{OrderID: 10 + uint64(i), RequestID: req.RequestID}})
+	}
+	quoted := len(gw.orders())
+	maker.HandleEvent(ctx, makerSnapshot("CDF/USD", 299_900, 300_100))
+	maker.onTick(time.Unix(0, int64(2*time.Second)))
+	if len(gw.orders()) != quoted {
+		t.Errorf("the maker requoted a live pair against an unchanged mid: %d then %d", quoted, len(gw.orders()))
+	}
+}
