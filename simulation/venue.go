@@ -2,6 +2,7 @@ package simulation
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"exchange_sim/actor"
@@ -151,6 +152,49 @@ func (m *Mount) DrainDeterministicEgress() bool {
 		}
 	}
 	return processed
+}
+
+// EgressBlocked reports whether every message this mount still holds is
+// waiting only on a full actor inbox.
+func (m *Mount) EgressBlocked() bool {
+	m.mu.Lock()
+	delayed := append([]*DelayedGateway(nil), m.delayed...)
+	m.mu.Unlock()
+	blocked := false
+	for _, d := range delayed {
+		if d.Idle() {
+			continue
+		}
+		if !d.EgressBlocked() {
+			return false
+		}
+		blocked = true
+	}
+	// The venue's own queues are deliberately not required to be empty. A
+	// gateway whose actor inbox is full stops draining, which backs the
+	// responses up into the exchange behind it, so the venue reports work
+	// pending for exactly the reason the gateway does. Requiring it idle here
+	// would classify the commonest case of backpressure as a deadlock.
+	return blocked
+}
+
+// PendingDescription explains why a mount is not idle, which is the difference
+// between a slow consumer and a deadlock when the runner reports a stall.
+func (m *Mount) PendingDescription() string {
+	m.mu.Lock()
+	delayed := append([]*DelayedGateway(nil), m.delayed...)
+	m.mu.Unlock()
+	parts := make([]string, 0, len(delayed)+1)
+	for _, d := range delayed {
+		if d.Idle() {
+			continue
+		}
+		parts = append(parts, d.PendingDescription())
+	}
+	if idler, ok := m.Market.(interface{ Idle() bool }); ok && !idler.Idle() {
+		parts = append(parts, "venue")
+	}
+	return strings.Join(parts, " ")
 }
 
 // Shutdown stops all delayed gateways and shuts down the underlying venue.

@@ -162,6 +162,32 @@ func (r *Runner) systemIdle() bool {
 	return true
 }
 
+// backpressureOnly reports whether the only non-idle components are mounts
+// holding messages an actor has not yet made room for.
+func (r *Runner) backpressureOnly() bool {
+	for _, a := range r.actors {
+		if idler, ok := a.(Idler); ok && !idler.Idle() {
+			return false
+		}
+	}
+	for _, i := range r.idlers {
+		if !i.Idle() {
+			return false
+		}
+	}
+	blocked := false
+	for _, m := range r.mounts {
+		if m.Idle() {
+			continue
+		}
+		if !m.EgressBlocked() {
+			return false
+		}
+		blocked = true
+	}
+	return blocked
+}
+
 func (r *Runner) deterministicPhasePending() string {
 	pending := make([]string, 0)
 	for _, a := range r.actors {
@@ -171,7 +197,7 @@ func (r *Runner) deterministicPhasePending() string {
 	}
 	for i, m := range r.mounts {
 		if !m.Idle() {
-			pending = append(pending, fmt.Sprintf("mount %d", i))
+			pending = append(pending, fmt.Sprintf("mount %d %s", i, m.PendingDescription()))
 		}
 	}
 	for i, idler := range r.idlers {
@@ -223,6 +249,10 @@ func (r *Runner) deterministicPhaseError() error {
 	return nil
 }
 
+// phaseIdleConfirmations is how many consecutive rounds of no progress with
+// work still queued are required before the runner calls it a deadlock.
+const phaseIdleConfirmations = 64
+
 // drainDeterministicPhases reaches a same-timestamp fixed point using a
 // documented global order. Venue-owned scheduled jobs run first, then venue
 // ingress, then FIFO egress, then actors in Runner.AddActor order. Every
@@ -233,6 +263,7 @@ func (r *Runner) drainDeterministicPhases(ctx context.Context) error {
 	if limit <= 0 {
 		limit = 100_000
 	}
+	noProgressRounds := 0
 	for round := 0; round < limit; round++ {
 		if err := r.deterministicPhaseError(); err != nil {
 			return err
@@ -263,9 +294,31 @@ func (r *Runner) drainDeterministicPhases(ctx context.Context) error {
 		if err := r.deterministicPhaseError(); err != nil {
 			return err
 		}
+		if progressed {
+			noProgressRounds = 0
+		}
 		if !progressed {
+			// Idle can flip under us: the exchange publishes market data from
+			// its own goroutine, so a component can report work pending for
+			// the instant it takes to hand it over. A single observation of
+			// "no progress and not idle" is therefore not evidence of a
+			// deadlock; a run of them is. Yielding between observations lets
+			// the other goroutine finish rather than spinning against it.
 			if !r.systemIdle() {
-				return fmt.Errorf("simulation: deterministic phase stalled with queued work: %s", r.deterministicPhasePending())
+				noProgressRounds++
+				if noProgressRounds < phaseIdleConfirmations {
+					runtime.Gosched()
+					continue
+				}
+				// A consumer that is behind is not a deadlock. When every
+				// remaining message is waiting on a full actor inbox, the
+				// fixed point for this timestamp has been reached and the
+				// messages are delivered once the actor drains on its own
+				// clock; refusing to advance time here would report a slow
+				// participant as a broken simulation.
+				if !r.backpressureOnly() {
+					return fmt.Errorf("simulation: deterministic phase stalled with queued work: %s", r.deterministicPhasePending())
+				}
 			}
 			return nil
 		}

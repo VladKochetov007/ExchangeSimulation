@@ -324,6 +324,35 @@ func (d *DelayedGateway) schedulePhaseMarketData(msg *exchange.MarketDataMsg) {
 	})
 }
 
+// EgressBlocked reports that the gateway holds messages whose delivery time
+// has arrived and cannot hand them over because the actor's inbox is full.
+//
+// This is backpressure, not a stall: the actor consumes on its own clock and
+// the messages are delivered as soon as it does. The distinction matters to
+// the runner, which would otherwise read a slow consumer as a deadlocked
+// simulation and refuse to advance time.
+func (d *DelayedGateway) EgressBlocked() bool {
+	if !d.deterministicPhasesEnabled() || !d.running.Load() {
+		return false
+	}
+	d.phaseMu.Lock()
+	defer d.phaseMu.Unlock()
+	if len(d.phaseResp) > 0 && len(d.responseCh) == cap(d.responseCh) {
+		return true
+	}
+	return len(d.phaseMD) > 0 && len(d.marketDataCh) == cap(d.marketDataCh)
+}
+
+// PendingDescription reports what this gateway is holding and where.
+func (d *DelayedGateway) PendingDescription() string {
+	d.phaseMu.Lock()
+	resp, md := len(d.phaseResp), len(d.phaseMD)
+	d.phaseMu.Unlock()
+	return fmt.Sprintf("gw%d[req %d/%d resp %d/%d md %d/%d phaseResp %d phaseMD %d]",
+		d.ID(), len(d.requestCh), cap(d.requestCh), len(d.responseCh), cap(d.responseCh),
+		len(d.marketDataCh), cap(d.marketDataCh), resp, md)
+}
+
 // DrainDeterministicPhaseEgress moves ready delayed messages into the actor
 // inbox. A full inbox retains the message instead of silently dropping an
 // acknowledgement or fill; the runner will retry it at the same timestamp.
