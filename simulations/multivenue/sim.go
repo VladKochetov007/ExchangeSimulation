@@ -673,8 +673,9 @@ func (c *Config) normalize() error {
 	for _, symbols := range [][]string{c.FixedDistanceMakerSymbols, c.ImbalanceMakerSymbols} {
 		for _, symbol := range symbols {
 			switch symbol {
-			case "ABC/USD", "CDF/USD", "ABC/CDF":
-				if symbol != "ABC/USD" && !c.CrossAssetSpotGraph {
+			case "ABC/USD", "ABC-PERP":
+			case "CDF/USD", "ABC/CDF":
+				if !c.CrossAssetSpotGraph {
 					return fmt.Errorf("multivenue: maker symbol %q requires the cross-asset spot graph", symbol)
 				}
 			default:
@@ -1057,6 +1058,7 @@ func tickFor(symbol string, spotTick int64) int64 {
 	case "ABC/CDF":
 		return int64(mvBasePrecision / 1_000)
 	default:
+		// The perpetual is listed at the spot tick.
 		return spotTick
 	}
 }
@@ -2557,7 +2559,18 @@ func exchangeGreekRisk(venue *Venue, account etypes.MarkedAccountSnapshot, phase
 		}
 		forward := option.UnderlyingMark()
 		yearsLeft := float64(timeToExpiry) / float64(365*24*time.Hour)
-		sensitivity, ok := eprice.Black76Sensitivities(forward, option.Strike, option.IV, yearsLeft, option.IsCall)
+		// The exchange marks with the instrument's own volatility, not with
+		// the dealer's. Once dealers hold their own models the two views
+		// diverge, and reporting the dealer's book at the venue's mark while
+		// labelling it the dealer's implied volatility invites reading a
+		// dealer's opinion off a number it had no part in.
+		markVol := option.IV
+		if venue.OptionDealer != nil {
+			if dealerVol := venue.OptionDealer.PricingVolatility(option.Strike, yearsLeft, option.IsCall); dealerVol > 0 {
+				markVol = dealerVol
+			}
+		}
+		sensitivity, ok := eprice.Black76Sensitivities(forward, option.Strike, markVol, yearsLeft, option.IsCall)
 		if !ok {
 			return derivsim.GreekProfile{}, nil, fmt.Errorf("multivenue: venue %s option %s has invalid exchange Greek mark", venue.ID, option.Symbol())
 		}
@@ -2566,7 +2579,7 @@ func exchangeGreekRisk(venue *Venue, account etypes.MarkedAccountSnapshot, phase
 			Timestamp: account.Timestamp, Phase: phase, Symbol: option.Symbol(), Underlying: option.UnderlyingSymbol(),
 			ListedNano: venue.optionListedNano[option.Symbol()], ExpiryNano: option.ExpiryNano(), Strike: option.Strike,
 			IsCall: option.IsCall, Position: pos.Size, TimeToExpiryNano: timeToExpiry,
-			SpotMid: forward, ModelForward: forward, ForwardSource: "option_underlying_mark", ImpliedVolatility: option.IV,
+			SpotMid: forward, ModelForward: forward, ForwardSource: "option_underlying_mark", ImpliedVolatility: markVol,
 			Delta: contracts * sensitivity.Delta, Gamma: contracts * sensitivity.Gamma, Vega: contracts * sensitivity.Vega,
 		}
 		positions = append(positions, position)
@@ -2577,7 +2590,7 @@ func exchangeGreekRisk(venue *Venue, account etypes.MarkedAccountSnapshot, phase
 		if profile.ModelForward == 0 {
 			profile.SpotMid = forward
 			profile.ModelForward = forward
-			profile.ImpliedVolatility = option.IV
+			profile.ImpliedVolatility = markVol
 		}
 	}
 	profile.NetDelta = profile.OptionDelta + profile.HedgeDelta

@@ -435,6 +435,13 @@ func (mm *OptionMarketMaker) Exposures() []ContractExposure {
 	return exposures
 }
 
+// PricingVolatility exposes the volatility this dealer would price a contract
+// at, so a report about the dealer's book can be marked with the dealer's own
+// view rather than the venue's.
+func (mm *OptionMarketMaker) PricingVolatility(strike int64, yearsLeft float64, isCall bool) float64 {
+	return mm.volatility(strike, yearsLeft, isCall)
+}
+
 // OptionInventory reports the dealer's signed position in one contract, in
 // base units. It is what an inventory-sensitive volatility model reads.
 func (mm *OptionMarketMaker) OptionInventory(symbol string) int64 {

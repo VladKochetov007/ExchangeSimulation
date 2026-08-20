@@ -1549,6 +1549,10 @@ func TestConfigRefusesMakersOnBooksThatDoNotExist(t *testing.T) {
 	if err := cfg.normalize(); err != nil {
 		t.Errorf("a listed book was refused: %v", err)
 	}
+	cfg.ImbalanceMakerSymbols = []string{"ABC-PERP"}
+	if err := cfg.normalize(); err != nil {
+		t.Errorf("the perpetual was refused as a maker book: %v", err)
+	}
 	cfg.ImbalanceMakerSymbols = []string{"XYZ/USD"}
 	if err := cfg.normalize(); err == nil {
 		t.Error("a maker was placed on a book that does not exist")
