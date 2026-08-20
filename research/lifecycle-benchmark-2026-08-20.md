@@ -84,6 +84,15 @@ rounds per venue at the two-hour tenor. Both readings use the same tooling.
 | L-005 seed 101 | 1056 / 1056 | 375 / 375 | 896 / 1056 |
 | L-005 seed 102 | 1056 / 1056 | 375 / 375 | 889 / 1056 |
 | L-005 seed 103 | 1056 / 1056 | 375 / 375 | 884 / 1056 |
+| L-006 (dated-ladder flow) | 1056 / 1056 | 375 / 375 | 912 / 1056 |
+
+Over twenty-four hours, which contains eleven completed expiry rounds per venue
+for both options and dated futures:
+
+| run | goal criterion | books alive throughout | strict corridor |
+|---|---|---|---|
+| L-008 (L-005 population) | 1212 / 1212 | 408 / 408 | 996 / 1212 |
+| L-009 (makers on the perpetual) | 1212 / 1212 | 408 / 408 | 1042 / 1212 |
 
 The lifecycle census of the same run, from `mvanalyze -metric lifecycle`:
 
