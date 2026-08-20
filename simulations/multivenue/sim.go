@@ -371,6 +371,15 @@ type Config struct {
 	// the baseline buy bias. A non-nil zero deliberately creates all-sell flow.
 	OptionBuyProbability *float64 `json:"option_buy_probability"`
 
+	// FixedDistanceMakerSymbols and ImbalanceMakerSymbols place those maker
+	// classes on books other than ABC/USD, assigning participants entries in
+	// order and cycling. Empty keeps every one of them on ABC/USD, which is
+	// how the population came to have three maker classes on one book and one
+	// on every other: a book quoted by a single class has a single point of
+	// failure whatever its volume.
+	FixedDistanceMakerSymbols []string `json:"fixed_distance_maker_symbols"`
+	ImbalanceMakerSymbols     []string `json:"imbalance_maker_symbols"`
+
 	// OptionDealerVol configures what each option dealer prices with. Dealers
 	// are given consecutive entries from HalfLives and Premiums, cycling if
 	// there are more dealers than entries, so that a population's dealers
@@ -569,6 +578,18 @@ func (c *Config) normalize() error {
 		}
 		if c.OptionValueTakerEdgeBps <= 0 {
 			return errors.New("multivenue: option value takers need a positive edge requirement, or they cross every spread")
+		}
+	}
+	for _, symbols := range [][]string{c.FixedDistanceMakerSymbols, c.ImbalanceMakerSymbols} {
+		for _, symbol := range symbols {
+			switch symbol {
+			case "ABC/USD", "CDF/USD", "ABC/CDF":
+				if symbol != "ABC/USD" && !c.CrossAssetSpotGraph {
+					return fmt.Errorf("multivenue: maker symbol %q requires the cross-asset spot graph", symbol)
+				}
+			default:
+				return fmt.Errorf("multivenue: unsupported maker symbol %q", symbol)
+			}
 		}
 	}
 	for _, policy := range c.OptionDealerHedgePolicies {
@@ -796,6 +817,28 @@ func (c Config) matchingRule(venueID string) string {
 		return rule.MatchingRule
 	}
 	return MatchingPriceTime
+}
+
+// makerSymbol picks the book the maker at index i quotes, cycling the roster.
+func makerSymbol(symbols []string, i int) string {
+	if len(symbols) == 0 {
+		return "ABC/USD"
+	}
+	return symbols[i%len(symbols)]
+}
+
+// tickFor is the tick of one of the population's spot books. Every book a
+// maker can be placed on has to resolve, or the maker quotes prices the
+// exchange rejects.
+func tickFor(symbol string, spotTick int64) int64 {
+	switch symbol {
+	case "CDF/USD":
+		return int64(mvQuotePrecision)
+	case "ABC/CDF":
+		return int64(mvBasePrecision / 1_000)
+	default:
+		return spotTick
+	}
 }
 
 // hedgePolicyFor selects the hedge the dealer at index i runs. Nil keeps the
@@ -1543,7 +1586,8 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		if s.Config.FixedDistanceMaker != nil {
 			cfg = *s.Config.FixedDistanceMaker
 		}
-		cfg.Symbol, cfg.TickSize = "ABC/USD", tick
+		cfg.Symbol = makerSymbol(s.Config.FixedDistanceMakerSymbols, participant)
+		cfg.TickSize = tickFor(cfg.Symbol, tick)
 		if cfg.QuoteInterval <= 0 {
 			cfg.QuoteInterval = s.Config.QuoteInterval
 		}
@@ -1556,7 +1600,8 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		if s.Config.ImbalanceMaker != nil {
 			cfg = *s.Config.ImbalanceMaker
 		}
-		cfg.Symbol, cfg.TickSize = "ABC/USD", tick
+		cfg.Symbol = makerSymbol(s.Config.ImbalanceMakerSymbols, participant)
+		cfg.TickSize = tickFor(cfg.Symbol, tick)
 		if cfg.QuoteInterval <= 0 {
 			cfg.QuoteInterval = s.Config.QuoteInterval
 		}

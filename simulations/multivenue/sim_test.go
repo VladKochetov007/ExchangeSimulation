@@ -1506,3 +1506,51 @@ func TestHedgePolicyRosterSelectsPerDealer(t *testing.T) {
 		t.Error("an empty roster changed the dealer's hedge")
 	}
 }
+
+// A book quoted by one maker class has a single point of failure whatever its
+// volume, so the maker rosters have to be placeable on the other books.
+func TestMakerSymbolRosterCyclesAndDefaultsToTheMainBook(t *testing.T) {
+	if got := makerSymbol(nil, 3); got != "ABC/USD" {
+		t.Errorf("symbol = %q, want the default ABC/USD", got)
+	}
+	roster := []string{"ABC/USD", "CDF/USD"}
+	if got := makerSymbol(roster, 1); got != "CDF/USD" {
+		t.Errorf("symbol = %q, want CDF/USD", got)
+	}
+	if got := makerSymbol(roster, 2); got != "ABC/USD" {
+		t.Errorf("roster did not cycle: %q", got)
+	}
+}
+
+// A maker quoting a book at the wrong tick has every order rejected, so each
+// placeable book must resolve to its own tick.
+func TestTickForResolvesEachSpotBook(t *testing.T) {
+	spotTick := int64(10_000)
+	if got := tickFor("ABC/USD", spotTick); got != spotTick {
+		t.Errorf("ABC/USD tick = %d, want the configured %d", got, spotTick)
+	}
+	if got := tickFor("CDF/USD", spotTick); got != int64(mvQuotePrecision) {
+		t.Errorf("CDF/USD tick = %d, want %d", got, mvQuotePrecision)
+	}
+	if got := tickFor("ABC/CDF", spotTick); got != int64(mvBasePrecision/1_000) {
+		t.Errorf("ABC/CDF tick = %d, want %d", got, mvBasePrecision/1_000)
+	}
+}
+
+// Placing a maker on a book the population did not list is a configuration
+// error, not a silently idle participant.
+func TestConfigRefusesMakersOnBooksThatDoNotExist(t *testing.T) {
+	cfg := Config{LogDir: "x", VenueIDs: []string{"north", "central", "south"}}
+	cfg.FixedDistanceMakerSymbols = []string{"CDF/USD"}
+	if err := cfg.normalize(); err == nil {
+		t.Error("a maker was placed on the cross-asset book with the graph switched off")
+	}
+	cfg.CrossAssetSpotGraph = true
+	if err := cfg.normalize(); err != nil {
+		t.Errorf("a listed book was refused: %v", err)
+	}
+	cfg.ImbalanceMakerSymbols = []string{"XYZ/USD"}
+	if err := cfg.normalize(); err == nil {
+		t.Error("a maker was placed on a book that does not exist")
+	}
+}

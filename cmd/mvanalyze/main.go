@@ -37,6 +37,7 @@ func main() {
 	minMakerClasses := flag.Int("viability-min-maker-classes", 1, "fewest distinct maker classes a viable window needs")
 	maxRoleShare := flag.Float64("viability-max-role-share", 0.9, "largest share of a window's volume one taker class may hold")
 	maxSpreadTicks := flag.Float64("viability-max-spread-ticks", 0, "widest median spread in ticks a viable window may show; zero disables")
+	maxEmptySideShare := flag.Float64("viability-max-empty-side-share", 0.02, "largest share of publications a viable window may have with a side missing")
 	minTouchDepth := flag.Float64("viability-min-touch-depth", 0, "smallest median touch depth in base units a viable window may show; zero disables")
 	tickSize := flag.Int64("tick", 10_000, "book tick size, for the spread in ticks")
 	walkSizes := flag.String("walk-sizes", "", "comma-separated order sizes in base units, for the walkable fraction")
@@ -305,8 +306,14 @@ func main() {
 				{Name: "few_maker_classes", Breached: func(w analysis.MarketWindow) bool {
 					return w.MakerRoles < *minMakerClasses
 				}},
+				// A single one-sided publication is a book between requotes,
+				// not a dead market. What matters is the share of the window a
+				// taker had nothing to trade against.
 				{Name: "one_sided_book", Breached: func(w analysis.MarketWindow) bool {
-					return w.EmptySideSnapshots > 0
+					if w.Snapshots == 0 {
+						return false
+					}
+					return float64(w.EmptySideSnapshots)/float64(w.Snapshots) > *maxEmptySideShare
 				}},
 				{Name: "concentrated_flow", Breached: func(w analysis.MarketWindow) bool {
 					return w.TopRoleVolumeShare > *maxRoleShare
