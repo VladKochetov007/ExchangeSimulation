@@ -75,8 +75,34 @@ Built and wired, each configurable and defaulting to the previous behaviour:
 Recorded in `research/ffa-ecology-experiments-2026-08-15.jsonl` under L-001
 onward. Configurations are in `research/configs/lifecycle-2026-08-20/`.
 
+Measured over twenty simulated hours, which contains nine completed expiry
+rounds per venue at the two-hour tenor. Both readings use the same tooling.
+
+| run | goal criterion | books alive throughout | strict corridor |
+|---|---|---|---|
+| L-001 reference population | 795 / 1056 | 131 / 375 | 110 / 1056 |
+| L-005 seed 101 | 1056 / 1056 | 375 / 375 | 896 / 1056 |
+| L-005 seed 102 | 1056 / 1056 | 375 / 375 | 889 / 1056 |
+| L-005 seed 103 | 1056 / 1056 | 375 / 375 | 884 / 1056 |
+
+The lifecycle census of the same run, from `mvanalyze -metric lifecycle`:
+
+- 330 option listings and 33 dated listings across the three venues;
+- nine option expiry rounds and nine dated expiry rounds per venue;
+- funding settled 19 times at central (hourly), 9 at south (two-hourly) and
+  twice at north (eight-hourly), with two venues coinciding at seven instants
+  and all three at two.
+
+What still fails the strict corridor is flow concentration on the spot books
+and the perpetual, where uninformed flow holds more than eighty percent of the
+volume, and the perpetual's single maker class. Between 308 and 317 of the 375
+books pass it throughout, and no book fails it in every window.
+
 ## Known measurement caveats
 
+- Twenty hours contains nine expiry rounds, not ten: the first generation
+  expires two hours in and the tenth would land on the closing boundary.
+  Twenty-four-hour runs are what certify ten completed cycles.
 - A book is only measured in windows where it produced events, so a contract is
   not judged before it lists or after it settles. A window in which it lists or
   expires part-way through is judged as a whole one.
