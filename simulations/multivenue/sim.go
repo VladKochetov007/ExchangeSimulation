@@ -371,6 +371,26 @@ type Config struct {
 	// the baseline buy bias. A non-nil zero deliberately creates all-sell flow.
 	OptionBuyProbability *float64 `json:"option_buy_probability"`
 
+	// VannaVolgaDeskCount adds desks that take the option dealers' second-order
+	// risk off them by trading options: vega, vanna and volga cannot be hedged
+	// in the underlying at any size, so a population with only delta hedgers
+	// has nowhere for that risk to go and it accumulates on the dealers until
+	// they stop quoting.
+	VannaVolgaDeskCount int `json:"vanna_volga_desk_count"`
+	// VannaVolgaTolerances are the exposures a desk carries before it trades,
+	// and VannaVolgaLotQty and VannaVolgaMaxContracts bound each hedge and the
+	// position it may build.
+	VannaVolgaVegaTolerance  float64       `json:"vanna_volga_vega_tolerance"`
+	VannaVolgaVannaTolerance float64       `json:"vanna_volga_vanna_tolerance"`
+	VannaVolgaVolgaTolerance float64       `json:"vanna_volga_volga_tolerance"`
+	VannaVolgaLotQty         int64         `json:"vanna_volga_lot_qty"`
+	VannaVolgaMaxContracts   int64         `json:"vanna_volga_max_contracts"`
+	VannaVolgaInterval       time.Duration `json:"vanna_volga_interval"`
+	// VannaVolgaVol is the desk's own view, configured like the dealers'. A
+	// desk hedging with the dealer's volatility would price the risk it is
+	// buying at exactly what the dealer thinks it is worth.
+	VannaVolgaVol OptionDealerVolConfig `json:"vanna_volga_vol"`
+
 	// LatencyProfiles gives participant classes different links to the venue,
 	// keyed by the role prefix a participant is connected under
 	// ("spot_maker", "noise_flow", "carry_arb", and so on). A market where
@@ -576,6 +596,23 @@ func (c *Config) normalize() error {
 	}
 	if c.OptionDealerCount == 0 {
 		c.OptionDealerCount = 1
+	}
+	if c.VannaVolgaDeskCount > 0 {
+		if c.VannaVolgaLotQty <= 0 {
+			c.VannaVolgaLotQty = mvBasePrecision / 20
+		}
+		if c.VannaVolgaMaxContracts <= 0 {
+			c.VannaVolgaMaxContracts = 5 * mvBasePrecision
+		}
+		if c.VannaVolgaInterval <= 0 {
+			c.VannaVolgaInterval = c.QuoteInterval
+		}
+		if c.VannaVolgaVegaTolerance <= 0 || c.VannaVolgaVannaTolerance <= 0 || c.VannaVolgaVolgaTolerance <= 0 {
+			return errors.New("multivenue: vanna-volga desks need positive vega, vanna and volga tolerances, or they trade on every tick")
+		}
+		if err := c.VannaVolgaVol.validate("vanna_volga_vol"); err != nil {
+			return err
+		}
 	}
 	if c.OptionValueTakerCount > 0 {
 		if c.OptionValueTakerLotQty <= 0 {
@@ -799,6 +836,7 @@ type Venue struct {
 	OptionFlow        *derivsim.OptionTaker
 	OptionFlows       []*derivsim.OptionTaker
 	OptionValueTakers []*derivsim.OptionValueTaker
+	VannaVolgaDesks   []*derivsim.VannaVolgaHedger
 	InitialRisk       *VenueRiskSnapshot
 	RiskTimeline      []VenueRiskSnapshot
 	PreExpiryRisk     []VenueRiskSnapshot
@@ -1329,6 +1367,12 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		for _, dealer := range venue.OptionDealers {
 			runner.AddActor(dealer)
 		}
+		for _, desk := range venue.VannaVolgaDesks {
+			runner.AddActor(desk)
+		}
+		for _, taker := range venue.OptionValueTakers {
+			runner.AddActor(taker)
+		}
 		for _, noise := range venue.NoiseTraders {
 			runner.AddActor(noise)
 		}
@@ -1659,6 +1703,28 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		venue.OptionDealers = append(venue.OptionDealers, dealer)
 	}
 	venue.OptionDealer = venue.OptionDealers[0]
+
+	for participant := 0; participant < s.Config.VannaVolgaDeskCount; participant++ {
+		// Each desk takes one dealer's book, cycling if there are more desks
+		// than dealers, so the risk being laid off belongs to somebody.
+		dealer := venue.OptionDealers[participant%len(venue.OptionDealers)]
+		desk := derivsim.NewVannaVolgaHedger(nextActor(),
+			connect(fmt.Sprintf("vanna_volga_desk_%d", participant+1), dealerBalances, 100_000_000*mvQuotePrecision, zeroFee),
+			derivsim.VannaVolgaHedgerConfig{
+				Underlying:     "ABC/USD",
+				VolModel:       s.Config.VannaVolgaVol.modelFor(participant, s.Config.OptionIV),
+				VegaTolerance:  s.Config.VannaVolgaVegaTolerance,
+				VannaTolerance: s.Config.VannaVolgaVannaTolerance,
+				VolgaTolerance: s.Config.VannaVolgaVolgaTolerance,
+				LotQty:         s.Config.VannaVolgaLotQty,
+				MaxContracts:   s.Config.VannaVolgaMaxContracts,
+				Interval:       s.Config.VannaVolgaInterval,
+				BasePrecision:  mvBasePrecision,
+				Exposure:       dealer.Exposures,
+			})
+		desk.SetTickerFactory(timers)
+		venue.VannaVolgaDesks = append(venue.VannaVolgaDesks, desk)
+	}
 
 	noiseQty := s.Config.NoiseOrderQty
 	if noiseQty <= 0 {

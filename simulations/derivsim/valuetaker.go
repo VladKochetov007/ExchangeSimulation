@@ -24,9 +24,13 @@ type OptionValueTakerConfig struct {
 	// VolModel is this taker's own view of volatility. Disagreement with the
 	// dealer's model is the entire source of its trades.
 	VolModel eprice.VolatilityModel
-	// EdgeBps is the premium mispricing required before it trades, in basis
-	// points of the underlying. Below it the taker holds: crossing the spread
-	// for less than the spread is how a participant funds everyone else.
+	// EdgeBps is the mispricing required before it trades, in basis points of
+	// the contract's own value rather than of the underlying. An option worth
+	// a thousandth of the underlying is quoted with a spread of the same
+	// order, so an edge measured against the underlying is either never met on
+	// the cheap wings or always met at the money. Below the edge the taker
+	// holds: crossing a spread for less than the spread is how a participant
+	// funds everyone else.
 	EdgeBps int64
 	// LotQty is the size of one trade and MaxPosition caps net contracts per
 	// contract symbol, so the taker cannot accumulate without bound on a view
@@ -129,8 +133,9 @@ func (t *OptionValueTaker) onTick(tick time.Time) {
 		return
 	}
 	now := tick.UnixNano()
-	threshold := t.cfg.EdgeBps * t.spotMid / 10_000
-	bestSymbol, bestSide, bestEdge := "", exchange.Buy, threshold
+	// The threshold is per contract, since it is a share of that contract's
+	// value. bestEdge tracks the largest excess over it seen so far.
+	bestSymbol, bestSide, bestEdge := "", exchange.Buy, 0.0
 	for _, c := range t.set.orderedContracts() {
 		if c.Type != "OPTION" {
 			continue
@@ -151,15 +156,23 @@ func (t *OptionValueTaker) onTick(tick time.Time) {
 			continue
 		}
 		fair := eprice.Black76Premium(t.spotMid, c.Strike, vol, yearsLeft, c.IsCall)
+		if fair <= 0 {
+			continue
+		}
+		threshold := float64(t.cfg.EdgeBps) * float64(fair) / 10_000
 		position := t.positions[c.Symbol]
 		// An offer below the taker's value is cheap, and a bid above it is
 		// rich. Both are only tradable if the resulting position stays inside
 		// the cap, which is checked here rather than after the order is sent.
-		if touch.ask > 0 && fair-touch.ask > bestEdge && position+t.cfg.LotQty <= t.cfg.MaxPosition {
-			bestSymbol, bestSide, bestEdge = c.Symbol, exchange.Buy, fair-touch.ask
+		if touch.ask > 0 && position+t.cfg.LotQty <= t.cfg.MaxPosition {
+			if excess := float64(fair-touch.ask) - threshold; excess > bestEdge {
+				bestSymbol, bestSide, bestEdge = c.Symbol, exchange.Buy, excess
+			}
 		}
-		if touch.bid > 0 && touch.bid-fair > bestEdge && position-t.cfg.LotQty >= -t.cfg.MaxPosition {
-			bestSymbol, bestSide, bestEdge = c.Symbol, exchange.Sell, touch.bid-fair
+		if touch.bid > 0 && position-t.cfg.LotQty >= -t.cfg.MaxPosition {
+			if excess := float64(touch.bid-fair) - threshold; excess > bestEdge {
+				bestSymbol, bestSide, bestEdge = c.Symbol, exchange.Sell, excess
+			}
 		}
 	}
 	if bestSymbol == "" {

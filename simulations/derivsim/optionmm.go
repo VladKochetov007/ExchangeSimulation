@@ -413,6 +413,28 @@ func (mm *OptionMarketMaker) volatility(strike int64, yearsLeft float64, isCall 
 	return mm.cfg.IV
 }
 
+// Exposures reports every non-zero option position the dealer holds, in the
+// form a hedging desk consumes. A desk that lays off a dealer's wings needs
+// the positions themselves, not their aggregate greeks, because it prices them
+// with its own volatility rather than the dealer's.
+func (mm *OptionMarketMaker) Exposures() []ContractExposure {
+	var exposures []ContractExposure
+	for _, c := range mm.set.orderedContracts() {
+		if c.Type != "OPTION" {
+			continue
+		}
+		q := mm.quotes[c.Symbol]
+		if q == nil || q.inventory == 0 {
+			continue
+		}
+		exposures = append(exposures, ContractExposure{
+			Symbol: c.Symbol, Strike: c.Strike, IsCall: c.IsCall,
+			ExpiryNano: c.ExpiryNano, Position: q.inventory,
+		})
+	}
+	return exposures
+}
+
 // OptionInventory reports the dealer's signed position in one contract, in
 // base units. It is what an inventory-sensitive volatility model reads.
 func (mm *OptionMarketMaker) OptionInventory(symbol string) int64 {
