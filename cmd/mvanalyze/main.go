@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -292,6 +292,23 @@ func main() {
 					result.MeanAbsMechanicalBps, result.MeanAbsRevisionBps, result.AbsMechanicalShare,
 					result.ZeroSubsampleMeanAbsBps, result.Slope, result.WalkAgreement,
 					result.Drift.Mismatches, result.Drift.Checks)
+			})
+		case "hedging":
+			result, err := run.MeasureHedging(analysis.HedgingOptions{
+				Symbol: *base,
+				Roles:  []string{"option_dealer", "vanna_volga_desk"},
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s hedging in %s\n", dir, *base)
+				for _, profile := range result.Profiles {
+					fmt.Printf("    %-8s %-18s trades %6d  qty %14d  gap %7.1fs (spread %7.1fs)  buys %4.2f\n",
+						profile.VenueID, profile.Role, profile.Trades, profile.Qty,
+						profile.MedianGapSeconds, profile.GapSpreadSeconds, profile.BuyShare)
+				}
 			})
 		case "lifecycle":
 			result, err := run.MeasureLifecycle(analysis.LifecycleOptions{})
