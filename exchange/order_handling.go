@@ -317,13 +317,21 @@ func (e *DefaultExchange) Subscribe(clientID uint64, req *QueryRequest, gateway 
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	// The reference-data feed has no book: subscribe directly.
+	// The reference-data feed has no book: subscribe directly, then replay what
+	// is already listed.
+	//
+	// Without the replay a participant only ever learns about contracts listed
+	// after it connected, and never about the ones that were there when it
+	// arrived. That is invisible in a short run and fatal in a long one: an
+	// actor whose first tick lands a second after the opening chain was listed
+	// spends the entire simulation unaware that the chain exists.
 	if req.Symbol == InstrumentFeedSymbol {
 		types := req.Types
 		if len(types) == 0 {
 			types = []MDType{MDInstrument}
 		}
 		e.MDPublisher.Subscribe(clientID, req.Symbol, types, gateway)
+		e.replayListedInstruments(clientID, gateway)
 		return Response{RequestID: req.RequestID, Success: true}
 	}
 

@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"slices"
+	"sort"
 	"time"
 
 	einstrument "exchange_sim/instrument"
@@ -330,6 +331,50 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 }
 
 // describeInstrument builds the lifecycle announcement / descriptor.
+// replayListedInstruments sends one "listed" announcement per live derivative
+// to a single new subscriber.
+//
+// It is addressed to that subscriber rather than published, because every
+// other participant already knows: a broadcast would tell the whole population
+// that the entire chain had just been listed again, which a maker reacts to by
+// requoting everything.
+func (e *DefaultExchange) replayListedInstruments(clientID uint64, gateway *ClientGateway) {
+	if gateway == nil {
+		return
+	}
+	now := e.Clock.NowUnixNano()
+	symbols := make([]string, 0, len(e.Instruments))
+	for symbol := range e.Instruments {
+		symbols = append(symbols, symbol)
+	}
+	// Map order is randomised per process, and a participant that learns about
+	// contracts in a different order every run is a different participant.
+	sort.Strings(symbols)
+	for _, symbol := range symbols {
+		instrument := e.Instruments[symbol]
+		if _, dated := instrument.(etypes.Expirable); !dated {
+			continue
+		}
+		if !gateway.IsRunning() {
+			return
+		}
+		message := &etypes.MarketDataMsg{
+			Type:      MDInstrument,
+			Symbol:    etypes.InstrumentFeedSymbol,
+			Timestamp: now,
+			Data:      describeInstrument(instrument, "listed", now),
+		}
+		select {
+		case gateway.MarketDataChan() <- message:
+		default:
+			// The subscriber's inbox is full at the instant it subscribed. It
+			// will learn about later listings; there is nothing useful to do
+			// here beyond not blocking the caller, which holds the book lock.
+			return
+		}
+	}
+}
+
 func describeInstrument(inst Instrument, action string, now int64) *etypes.InstrumentAnnouncement {
 	ann := &etypes.InstrumentAnnouncement{
 		Action:         action,
