@@ -1464,7 +1464,7 @@ func TestConfigRefusesAnUnbuildableVolatilityRoster(t *testing.T) {
 		return Config{LogDir: "x", VenueIDs: []string{"north", "central", "south"}}
 	}
 	cfg := base()
-	cfg.OptionDealerVol = OptionDealerVolConfig{Model: "sabr"}
+	cfg.OptionDealerVol = OptionDealerVolConfig{Model: "heston"}
 	if err := cfg.normalize(); err == nil {
 		t.Error("an unknown volatility model was accepted")
 	}
@@ -1631,5 +1631,38 @@ func TestZeroLatencyProfileConnectsDirectly(t *testing.T) {
 	}
 	if (LatencyProfile{Model: "constant", Delay: time.Millisecond}).zero() {
 		t.Error("a profile with a delay reported itself as direct")
+	}
+}
+
+// A dealer on the harder model has to be buildable from configuration and its
+// parameters checked, since an impossible correlation prices nothing and would
+// otherwise leave the dealer silently quoting its fallback.
+func TestOptionDealerVolBuildsTheSABRModel(t *testing.T) {
+	cfg := OptionDealerVolConfig{
+		Model: "sabr", SABRAlphas: []float64{0.4, 0.7}, SABRBeta: 1, SABRRho: -0.3, SABRNu: 0.6,
+	}
+	first, ok := cfg.modelFor(0, 0.8).(eprice.SABRVolatility)
+	if !ok {
+		t.Fatalf("model = %T, want a SABR model", cfg.modelFor(0, 0.8))
+	}
+	second := cfg.modelFor(1, 0.8).(eprice.SABRVolatility)
+	if first.Alpha != 0.4 || second.Alpha != 0.7 {
+		t.Errorf("alphas = %v and %v, want 0.4 and 0.7", first.Alpha, second.Alpha)
+	}
+	if cfg.modelFor(2, 0.8).(eprice.SABRVolatility).Alpha != 0.4 {
+		t.Error("the alpha roster did not cycle")
+	}
+	if err := cfg.validate("test"); err != nil {
+		t.Errorf("a buildable model was refused: %v", err)
+	}
+	for _, bad := range []OptionDealerVolConfig{
+		{Model: "sabr", SABRRho: -1},
+		{Model: "sabr", SABRBeta: 2},
+		{Model: "sabr", SABRNu: -0.1},
+		{Model: "sabr", SABRAlphas: []float64{0}},
+	} {
+		if err := bad.validate("test"); err == nil {
+			t.Errorf("%+v was accepted", bad)
+		}
 	}
 }

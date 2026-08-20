@@ -801,7 +801,11 @@ type Venue struct {
 	// latencyMounts holds one mount per participant class, so that a class
 	// with its own link reaches the same exchange through a delayed gateway
 	// while the rest connect directly.
-	latencyMounts        map[string]*simulation.Mount
+	latencyMounts map[string]*simulation.Mount
+	// latencyMountOrder keeps the mounts in creation order. Draining them in
+	// map order would make a run's event interleaving depend on Go's map
+	// iteration, which is randomised per process and would destroy replay.
+	latencyMountOrder    []*simulation.Mount
 	latencyConfig        Config
 	latencySeed          int64
 	scheduler            *simulation.EventScheduler
@@ -1052,8 +1056,21 @@ func (c Config) hedgePolicyFor(i int) derivsim.HedgePolicy {
 // forget at different rates and demand different premiums over what they
 // measure.
 type OptionDealerVolConfig struct {
-	// Model is "flat" or "realized". Empty keeps the single configured level.
+	// Model is "flat", "realized" or "sabr". Empty keeps the single configured
+	// level.
+	//
+	// A participant on "sabr" quotes a smile because its model has one. That
+	// makes it useful as a counterparty that disagrees with a flat-volatility
+	// dealer in a structured way, and useless as evidence that a population
+	// produces a smile: any smile measured while it is enabled is an
+	// assumption travelling through the book.
 	Model string `json:"model"`
+	// SABR carries the model's parameters when Model is "sabr". Alphas are
+	// assigned to participants in order and cycled, like the half-lives.
+	SABRAlphas []float64 `json:"sabr_alphas"`
+	SABRBeta   float64   `json:"sabr_beta"`
+	SABRRho    float64   `json:"sabr_rho"`
+	SABRNu     float64   `json:"sabr_nu"`
 	// HalfLifeSeconds and Premiums are assigned to participants in order and
 	// cycled. A single entry gives every participant the same opinion, which
 	// is the degenerate case worth being able to configure deliberately.
@@ -1075,8 +1092,23 @@ type OptionDealerVolConfig struct {
 func (c OptionDealerVolConfig) validate(field string) error {
 	switch c.Model {
 	case "", "flat", "realized":
+	case "sabr":
+		if c.SABRBeta < 0 || c.SABRBeta > 1 {
+			return fmt.Errorf("multivenue: %s beta must lie in [0,1], got %v", field, c.SABRBeta)
+		}
+		if c.SABRRho <= -1 || c.SABRRho >= 1 {
+			return fmt.Errorf("multivenue: %s rho must lie strictly inside (-1,1), got %v", field, c.SABRRho)
+		}
+		if c.SABRNu < 0 {
+			return fmt.Errorf("multivenue: %s vol-of-vol must not be negative, got %v", field, c.SABRNu)
+		}
+		for _, alpha := range c.SABRAlphas {
+			if alpha <= 0 {
+				return fmt.Errorf("multivenue: %s alphas must be positive, got %v", field, alpha)
+			}
+		}
 	default:
-		return fmt.Errorf("multivenue: %s model must be flat or realized, got %q", field, c.Model)
+		return fmt.Errorf("multivenue: %s model must be flat, realized or sabr, got %q", field, c.Model)
 	}
 	for _, halfLife := range c.HalfLifeSeconds {
 		if halfLife <= 0 {
@@ -1106,6 +1138,11 @@ func (c OptionDealerVolConfig) modelFor(i int, fallbackIV float64) eprice.Volati
 		halfLife := pickFloat(c.HalfLifeSeconds, i, 600)
 		premium := pickFloat(c.Premiums, i, 1)
 		return eprice.NewRealizedVolatility(fallbackIV, halfLife, premium, c.Floor, c.Ceiling)
+	case "sabr":
+		return eprice.SABRVolatility{
+			Alpha: pickFloat(c.SABRAlphas, i, fallbackIV),
+			Beta:  c.SABRBeta, Rho: c.SABRRho, Nu: c.SABRNu,
+		}
 	}
 	return nil
 }
@@ -1339,6 +1376,12 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		}
 		sim.Venues = append(sim.Venues, venue)
 		runner.AddMount(venue.Mount)
+		// Every class with its own link reaches the exchange through a mount of
+		// its own, and a mount the runner does not know about never has its
+		// egress drained: the deterministic phase then stalls with work queued.
+		for _, mount := range venue.latencyMountOrder {
+			runner.AddMount(mount)
+		}
 		for _, maker := range venue.SpotMakers {
 			runner.AddActor(maker)
 		}
@@ -2025,6 +2068,7 @@ func (v *Venue) mountForRole(role string) *simulation.Mount {
 		Clock:      v.clock,
 	})
 	v.latencyMounts[class] = mount
+	v.latencyMountOrder = append(v.latencyMountOrder, mount)
 	return mount
 }
 
