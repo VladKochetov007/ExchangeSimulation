@@ -22,6 +22,15 @@ type OptionTakerConfig struct {
 	// IncludeFutures adds dated futures to the taking universe, giving the
 	// futures books flow of their own (needed for untethered basis dynamics).
 	IncludeFutures bool
+	// ContractTypes restricts the universe to these instrument types, which is
+	// how a participant can be dedicated to one kind of contract. Empty keeps
+	// options, plus futures when IncludeFutures is set.
+	//
+	// It matters because a taker drawing uniformly from a mixed universe gives
+	// each book flow in proportion to how many contracts of its kind are
+	// listed: with thirty option strikes beside two dated futures, the futures
+	// see a twentieth of the flow and trade about once an hour.
+	ContractTypes []string
 }
 
 // OptionTaker lifts a random live option quote each interval.
@@ -49,6 +58,19 @@ func (t *OptionTaker) HandleEvent(_ context.Context, evt *actor.Event) {
 	t.set.handle(evt)
 }
 
+// tradesType reports whether a contract kind is in this taker's universe.
+func (t *OptionTaker) tradesType(contractType string) bool {
+	if len(t.cfg.ContractTypes) > 0 {
+		for _, allowed := range t.cfg.ContractTypes {
+			if allowed == contractType {
+				return true
+			}
+		}
+		return false
+	}
+	return contractType == "OPTION" || (t.cfg.IncludeFutures && contractType == "FUTURE")
+}
+
 func (t *OptionTaker) onTick(_ time.Time) {
 	if !t.subscribed {
 		t.Subscribe(exchange.InstrumentFeedSymbol, exchange.MDInstrument)
@@ -57,7 +79,7 @@ func (t *OptionTaker) onTick(_ time.Time) {
 	}
 	universe := make([]string, 0, len(t.set.contracts))
 	for _, c := range t.set.orderedContracts() {
-		if c.Type == "OPTION" || (t.cfg.IncludeFutures && c.Type == "FUTURE") {
+		if t.tradesType(c.Type) {
 			universe = append(universe, c.Symbol)
 		}
 	}

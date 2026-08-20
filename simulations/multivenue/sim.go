@@ -378,6 +378,17 @@ type Config struct {
 	// the baseline buy bias. A non-nil zero deliberately creates all-sell flow.
 	OptionBuyProbability *float64 `json:"option_buy_probability"`
 
+	// FutureFlowCount adds participants that take only dated futures. The
+	// mixed option-and-futures flow draws uniformly from what is listed, so
+	// beside a thirty-strike chain the two dated books receive a twentieth of
+	// it and trade about once an hour; a book with one maker class and almost
+	// no demand is dead however long the run is.
+	FutureFlowCount int `json:"future_flow_count"`
+	// FutureFlowLotQty and FutureFlowInterval size that flow. Zero uses the
+	// option flow's lot and the uninformed flow's cadence.
+	FutureFlowLotQty   int64         `json:"future_flow_lot_qty"`
+	FutureFlowInterval time.Duration `json:"future_flow_interval"`
+
 	// VannaVolgaDeskCount adds desks that take the option dealers' second-order
 	// risk off them by trading options: vega, vanna and volga cannot be hedged
 	// in the underlying at any size, so a population with only delta hedgers
@@ -861,6 +872,7 @@ type Venue struct {
 	OptionFlow        *derivsim.OptionTaker
 	OptionFlows       []*derivsim.OptionTaker
 	OptionValueTakers []*derivsim.OptionValueTaker
+	FutureFlows       []*derivsim.OptionTaker
 	VannaVolgaDesks   []*derivsim.VannaVolgaHedger
 	InitialRisk       *VenueRiskSnapshot
 	RiskTimeline      []VenueRiskSnapshot
@@ -1437,6 +1449,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		for _, taker := range venue.OptionValueTakers {
 			runner.AddActor(taker)
 		}
+		for _, flow := range venue.FutureFlows {
+			runner.AddActor(flow)
+		}
 		for _, noise := range venue.NoiseTraders {
 			runner.AddActor(noise)
 		}
@@ -1845,6 +1860,26 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		venue.OptionFlows = append(venue.OptionFlows, flow)
 	}
 	venue.OptionFlow = venue.OptionFlows[0]
+
+	futureLot := s.Config.FutureFlowLotQty
+	if futureLot <= 0 {
+		futureLot = mvBasePrecision / 100
+	}
+	futureInterval := s.Config.FutureFlowInterval
+	if futureInterval <= 0 {
+		futureInterval = s.Config.NoiseInterval
+	}
+	for participant := 0; participant < s.Config.FutureFlowCount; participant++ {
+		flow := derivsim.NewOptionTaker(nextActor(),
+			connect(fmt.Sprintf("future_flow_%d", participant+1), noiseBalances, 10_000_000*mvQuotePrecision, noiseFee),
+			derivsim.OptionTakerConfig{
+				Underlying: "ABC/USD", PBuy: *s.Config.OptionBuyProbability, LotQty: futureLot,
+				Interval: futureInterval, Seed: flowSeed(s.Config.Seed, venueIndex, participant, 5),
+				ContractTypes: []string{"FUTURE"},
+			})
+		flow.SetTickerFactory(timers)
+		venue.FutureFlows = append(venue.FutureFlows, flow)
+	}
 
 	for participant := 0; participant < s.Config.OptionValueTakerCount; participant++ {
 		taker := derivsim.NewOptionValueTaker(nextActor(),
