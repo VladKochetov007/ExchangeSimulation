@@ -371,6 +371,17 @@ type Config struct {
 	// the baseline buy bias. A non-nil zero deliberately creates all-sell flow.
 	OptionBuyProbability *float64 `json:"option_buy_probability"`
 
+	// LatencyProfiles gives participant classes different links to the venue,
+	// keyed by the role prefix a participant is connected under
+	// ("spot_maker", "noise_flow", "carry_arb", and so on). A market where
+	// everyone reaches the matching engine in the same time has no reason for
+	// anyone to be picked off, which removes the cost that makes speed worth
+	// paying for. The empty map connects every participant directly, which is
+	// what the population did before.
+	LatencyProfiles map[string]LatencyProfile `json:"latency_profiles"`
+	// DefaultLatencyProfile applies to roles LatencyProfiles does not name.
+	DefaultLatencyProfile *LatencyProfile `json:"default_latency_profile"`
+
 	// FixedDistanceMakerSymbols and ImbalanceMakerSymbols place those maker
 	// classes on books other than ABC/USD, assigning participants entries in
 	// order and cycling. Empty keeps every one of them on ABC/USD, which is
@@ -580,6 +591,16 @@ func (c *Config) normalize() error {
 			return errors.New("multivenue: option value takers need a positive edge requirement, or they cross every spread")
 		}
 	}
+	for role, profile := range c.LatencyProfiles {
+		if err := profile.validate(role); err != nil {
+			return err
+		}
+	}
+	if c.DefaultLatencyProfile != nil {
+		if err := c.DefaultLatencyProfile.validate("default"); err != nil {
+			return err
+		}
+	}
 	for _, symbols := range [][]string{c.FixedDistanceMakerSymbols, c.ImbalanceMakerSymbols} {
 		for _, symbol := range symbols {
 			switch symbol {
@@ -736,10 +757,18 @@ func (c *Config) normalize() error {
 // reporting. Accounts are intentionally distinct across venues: no collateral
 // transfer or synthetic shared wallet is implied by a common simulation clock.
 type Venue struct {
-	ID                   string
-	MatchingRule         string
-	Exchange             *exchange.Exchange
-	Mount                *simulation.Mount
+	ID           string
+	MatchingRule string
+	Exchange     *exchange.Exchange
+	Mount        *simulation.Mount
+	// latencyMounts holds one mount per participant class, so that a class
+	// with its own link reaches the same exchange through a delayed gateway
+	// while the rest connect directly.
+	latencyMounts        map[string]*simulation.Mount
+	latencyConfig        Config
+	latencySeed          int64
+	scheduler            *simulation.EventScheduler
+	clock                *simulation.SimulatedClock
 	Participants         []Participant
 	RequestPolicy        *exchange.TieredRequestPolicy
 	SpotMakers           []*StoikovMarketMaker
@@ -817,6 +846,122 @@ func (c Config) matchingRule(venueID string) string {
 		return rule.MatchingRule
 	}
 	return MatchingPriceTime
+}
+
+// LatencyProfile describes one participant class's link to a venue.
+//
+// The model matters beyond its mean. A normal draw has no tail, so a
+// participant modelled with one is never badly late; a lognormal link is late
+// exactly as often as a measured one, and a spiky link is fast until it
+// stalls. Those three populations behave differently under the same average.
+type LatencyProfile struct {
+	// Model is "constant", "uniform", "normal", "lognormal" or "spiky".
+	Model string `json:"model"`
+	// Delay is the constant delay, the median for lognormal, or the mean for
+	// normal. Min and Max bound a uniform draw.
+	Delay time.Duration `json:"delay"`
+	Min   time.Duration `json:"min"`
+	Max   time.Duration `json:"max"`
+	// StdDev is the normal spread; Sigma is the lognormal one, which sets how
+	// heavy the tail is rather than how wide the body is.
+	StdDev time.Duration `json:"std_dev"`
+	Sigma  float64       `json:"sigma"`
+	// Cap truncates a lognormal tail, modelling a client that gives up rather
+	// than waiting.
+	Cap time.Duration `json:"cap"`
+	// SpikeDelay and SpikeProbability describe a fast link that occasionally
+	// stalls. A maker on one is picked off during exactly those stalls.
+	SpikeDelay       time.Duration `json:"spike_delay"`
+	SpikeProbability float64       `json:"spike_probability"`
+	// ResponseDelay and MarketDataDelay scale the outbound path relative to
+	// the inbound one. Zero uses the same provider for all three channels,
+	// since a link is usually symmetric.
+	ResponseScale   float64 `json:"response_scale"`
+	MarketDataScale float64 `json:"market_data_scale"`
+}
+
+// zero reports whether the profile asks for no delay at all, in which case the
+// participant is connected directly rather than through a delayed gateway.
+func (p LatencyProfile) zero() bool {
+	return p.Delay <= 0 && p.Min <= 0 && p.Max <= 0 && p.SpikeDelay <= 0
+}
+
+// provider builds one channel's latency source. Seed keeps runs reproducible
+// across roles and venues.
+func (p LatencyProfile) provider(seed int64, scale float64) simulation.LatencyProvider {
+	if scale <= 0 {
+		scale = 1
+	}
+	scaled := func(d time.Duration) time.Duration { return time.Duration(float64(d) * scale) }
+	switch p.Model {
+	case "", "constant":
+		return simulation.NewConstantLatency(scaled(p.Delay))
+	case "uniform":
+		return simulation.NewUniformRandomLatency(scaled(p.Min), scaled(p.Max), seed)
+	case "normal":
+		return simulation.NewNormalLatency(scaled(p.Delay), scaled(p.StdDev), seed)
+	case "lognormal":
+		return simulation.NewLognormalLatency(scaled(p.Delay), p.Sigma, scaled(p.Cap), seed)
+	case "spiky":
+		return simulation.NewSpikyLatency(
+			simulation.NewConstantLatency(scaled(p.Delay)),
+			simulation.NewConstantLatency(scaled(p.SpikeDelay)),
+			p.SpikeProbability, seed)
+	}
+	return nil
+}
+
+// validate refuses a profile that cannot be built.
+func (p LatencyProfile) validate(role string) error {
+	switch p.Model {
+	case "", "constant", "normal", "lognormal", "spiky":
+	case "uniform":
+		if p.Max < p.Min {
+			return fmt.Errorf("multivenue: latency profile %q has max below min", role)
+		}
+	default:
+		return fmt.Errorf("multivenue: latency profile %q has unsupported model %q", role, p.Model)
+	}
+	if p.Delay < 0 || p.Min < 0 || p.Max < 0 || p.StdDev < 0 || p.Cap < 0 || p.SpikeDelay < 0 {
+		return fmt.Errorf("multivenue: latency profile %q has a negative duration", role)
+	}
+	if p.SpikeProbability < 0 || p.SpikeProbability > 1 {
+		return fmt.Errorf("multivenue: latency profile %q has spike probability %v outside [0,1]", role, p.SpikeProbability)
+	}
+	return nil
+}
+
+// latencyProfileFor resolves the profile a role connects under. Roles are
+// suffixed with a participant number, so the lookup is on the prefix.
+func (c Config) latencyProfileFor(role string) (LatencyProfile, bool) {
+	if profile, exists := c.LatencyProfiles[roleClass(role)]; exists {
+		return profile, true
+	}
+	if profile, exists := c.LatencyProfiles[role]; exists {
+		return profile, true
+	}
+	if c.DefaultLatencyProfile != nil {
+		return *c.DefaultLatencyProfile, true
+	}
+	return LatencyProfile{}, false
+}
+
+// roleClass strips the participant number a role is connected under.
+func roleClass(role string) string {
+	index := strings.LastIndex(role, "_")
+	if index <= 0 {
+		return role
+	}
+	suffix := role[index+1:]
+	for _, digit := range suffix {
+		if digit < '0' || digit > '9' {
+			return role
+		}
+	}
+	if suffix == "" {
+		return role
+	}
+	return role[:index]
 }
 
 // makerSymbol picks the book the maker at index i quotes, cycling the roster.
@@ -1144,7 +1289,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	// their own midpoint exactly when the book is thinnest.
 	actorID := uint64(0)
 	for venueIndex, id := range cfg.VenueIDs {
-		venue, err := sim.addVenue(id, venueIndex, clock, timers, &actorID)
+		venue, err := sim.addVenue(id, venueIndex, clock, scheduler, timers, &actorID)
 		if err != nil {
 			sim.Close()
 			return nil, err
@@ -1222,7 +1367,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	return sim, nil
 }
 
-func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClock, timers *simulation.SimTimerFactory, actorID *uint64) (*Venue, error) {
+func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClock, scheduler *simulation.EventScheduler, timers *simulation.SimTimerFactory, actorID *uint64) (*Venue, error) {
 	logDir := filepath.Join(s.Config.LogDir, "venues", id)
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return nil, err
@@ -1308,6 +1453,11 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	optionSpec.TickSize = mvQuotePrecision // one USD premium tick
 	mount := simulation.NewMount(ex, simulation.LatencyConfig{})
 	venue := &Venue{ID: id, MatchingRule: matchingRule, Exchange: ex, Mount: mount,
+		latencyMounts:    make(map[string]*simulation.Mount),
+		latencyConfig:    s.Config,
+		latencySeed:      s.Config.Seed + int64(venueIndex+1)*1_000,
+		scheduler:        scheduler,
+		clock:            clock,
 		makerStateLog:    makerStateLog,
 		optionListedNano: make(map[string]int64),
 		Microstructure:   newMicrostructureStats(id, "ABC/USD", tick, s.Config.AutomationInterval.Seconds())}
@@ -1764,12 +1914,52 @@ func (v *Venue) connectParticipant(mount *simulation.Mount, role string, balance
 	}
 	v.nextClient++
 	clientID := v.nextClient
+	// A caller that supplied its own mount has already chosen a link — the
+	// cross-venue routers are defined by theirs — so only the venue's own
+	// mount is replaced by the role's.
+	if mount == v.Mount {
+		mount = v.mountForRole(role)
+	}
 	gw := mount.ConnectNewClient(clientID, balances, fee)
 	if perpUSD > 0 {
 		v.Exchange.AddPerpBalance(clientID, "USD", perpUSD)
 	}
 	v.Participants = append(v.Participants, Participant{VenueID: v.ID, ClientID: clientID, Role: role})
 	return clientID, gw
+}
+
+// mountForRole returns the venue mount carrying the link a role connects
+// through, building it once per role class.
+func (v *Venue) mountForRole(role string) *simulation.Mount {
+	if v.latencyMounts == nil {
+		return v.Mount
+	}
+	class := roleClass(role)
+	if mount, exists := v.latencyMounts[class]; exists {
+		return mount
+	}
+	profile, configured := v.latencyConfig.latencyProfileFor(role)
+	if !configured || profile.zero() {
+		v.latencyMounts[class] = v.Mount
+		return v.Mount
+	}
+	// The seed mixes the venue and the role class so two classes on one venue
+	// draw independently while a run stays reproducible.
+	seed := v.latencySeed + int64(len(class)) + int64(class[0])<<8
+	request := profile.provider(seed, 1)
+	if request == nil {
+		v.latencyMounts[class] = v.Mount
+		return v.Mount
+	}
+	mount := simulation.NewMount(v.Exchange, simulation.LatencyConfig{
+		Request:    request,
+		Response:   profile.provider(seed+1, profile.ResponseScale),
+		MarketData: profile.provider(seed+2, profile.MarketDataScale),
+		Scheduler:  v.scheduler,
+		Clock:      v.clock,
+	})
+	v.latencyMounts[class] = mount
+	return mount
 }
 
 func (s *Sim) addCrossVenueRouters(clock *simulation.SimulatedClock, scheduler *simulation.EventScheduler, timers *simulation.SimTimerFactory, actorID *uint64) error {

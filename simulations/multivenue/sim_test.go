@@ -1554,3 +1554,82 @@ func TestConfigRefusesMakersOnBooksThatDoNotExist(t *testing.T) {
 		t.Error("a maker was placed on a book that does not exist")
 	}
 }
+
+// A role is connected under a numbered name, so the profile lookup has to
+// resolve the class and leave names that merely end in a word alone.
+func TestRoleClassStripsTheParticipantNumber(t *testing.T) {
+	for input, want := range map[string]string{
+		"spot_maker_1":          "spot_maker",
+		"spot_maker":            "spot_maker",
+		"option_value_taker_12": "option_value_taker",
+		"cross_venue_router":    "cross_venue_router",
+		"abc_cdf_maker":         "abc_cdf_maker",
+	} {
+		if got := roleClass(input); got != want {
+			t.Errorf("roleClass(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+// A population where everyone reaches the engine in the same time gives nobody
+// a reason to pay for speed, so profiles must resolve per class with a default
+// for the rest.
+func TestLatencyProfileResolutionPrefersTheNamedClass(t *testing.T) {
+	fallback := LatencyProfile{Model: "constant", Delay: 5 * time.Millisecond}
+	cfg := Config{
+		LatencyProfiles:       map[string]LatencyProfile{"spot_maker": {Model: "constant", Delay: time.Millisecond}},
+		DefaultLatencyProfile: &fallback,
+	}
+	maker, ok := cfg.latencyProfileFor("spot_maker_3")
+	if !ok || maker.Delay != time.Millisecond {
+		t.Errorf("spot maker profile = %+v, want the named 1ms one", maker)
+	}
+	other, ok := cfg.latencyProfileFor("noise_flow_1")
+	if !ok || other.Delay != 5*time.Millisecond {
+		t.Errorf("unnamed class = %+v, want the 5ms default", other)
+	}
+	if _, ok := (Config{}).latencyProfileFor("spot_maker_1"); ok {
+		t.Error("a population with no profiles reported one")
+	}
+}
+
+// Each model has to build, and an unbuildable one has to be refused rather
+// than silently connecting the class directly at full speed.
+func TestLatencyProfileBuildsEveryModelAndRefusesTheRest(t *testing.T) {
+	profiles := []LatencyProfile{
+		{Model: "constant", Delay: time.Millisecond},
+		{Model: "uniform", Min: time.Millisecond, Max: 2 * time.Millisecond},
+		{Model: "normal", Delay: time.Millisecond, StdDev: time.Millisecond / 4},
+		{Model: "lognormal", Delay: time.Millisecond, Sigma: 0.5},
+		{Model: "spiky", Delay: time.Millisecond, SpikeDelay: 50 * time.Millisecond, SpikeProbability: 0.01},
+	}
+	for _, profile := range profiles {
+		if err := profile.validate("test"); err != nil {
+			t.Errorf("%s refused: %v", profile.Model, err)
+		}
+		if provider := profile.provider(1, 1); provider == nil || provider.Delay() < 0 {
+			t.Errorf("%s built no usable provider", profile.Model)
+		}
+	}
+	for _, bad := range []LatencyProfile{
+		{Model: "poisson"},
+		{Model: "uniform", Min: 2 * time.Millisecond, Max: time.Millisecond},
+		{Model: "constant", Delay: -time.Millisecond},
+		{Model: "spiky", Delay: time.Millisecond, SpikeProbability: 2},
+	} {
+		if err := bad.validate("test"); err == nil {
+			t.Errorf("%+v was accepted", bad)
+		}
+	}
+}
+
+// A profile asking for no delay must leave the participant on the direct
+// mount, so that switching the mechanism on changes nothing until it is used.
+func TestZeroLatencyProfileConnectsDirectly(t *testing.T) {
+	if !(LatencyProfile{Model: "constant"}).zero() {
+		t.Error("a profile with no delay did not report itself as direct")
+	}
+	if (LatencyProfile{Model: "constant", Delay: time.Millisecond}).zero() {
+		t.Error("a profile with a delay reported itself as direct")
+	}
+}

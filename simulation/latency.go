@@ -226,3 +226,76 @@ func (h *HawkesLatency) Delay() time.Duration {
 	h.mu.Unlock()
 	return h.minLatency + time.Duration(exc*1e9)
 }
+
+// LognormalLatency draws delays from a lognormal distribution, which is what
+// measured network and matching-engine round trips look like: a tight mode
+// with a long right tail rather than a symmetric spread.
+//
+// A normal draw understates how often a participant is late, because the
+// distribution it assumes has no tail. The difference matters for any
+// participant whose edge disappears when it is late, since the losses come
+// entirely from that tail rather than from the median.
+type LognormalLatency struct {
+	median time.Duration
+	sigma  float64
+	cap    time.Duration
+	rng    *rand.Rand
+}
+
+// NewLognormalLatency builds a lognormal provider. Sigma is the standard
+// deviation of the underlying normal, so it sets how heavy the tail is: 0.25
+// is a well-behaved link, 1.0 is one where the slowest percent of messages
+// arrive many times later than the median. A positive cap truncates the tail,
+// which models a client that gives up and retries rather than waiting.
+func NewLognormalLatency(median time.Duration, sigma float64, cap time.Duration, seed int64) *LognormalLatency {
+	return &LognormalLatency{median: median, sigma: sigma, cap: cap, rng: rand.New(rand.NewSource(seed))}
+}
+
+// Delay implements LatencyProvider.
+func (l *LognormalLatency) Delay() time.Duration {
+	if l.median <= 0 {
+		return 0
+	}
+	if l.sigma <= 0 {
+		return l.median
+	}
+	delay := time.Duration(float64(l.median) * math.Exp(l.rng.NormFloat64()*l.sigma))
+	if delay < 0 {
+		return 0
+	}
+	if l.cap > 0 && delay > l.cap {
+		return l.cap
+	}
+	return delay
+}
+
+// SpikyLatency is a fast link that occasionally stalls: it returns Base almost
+// always and Spike with probability SpikeProbability.
+//
+// It exists because a participant's behaviour under a rare stall is not the
+// same as its behaviour under a slightly wider average. A market maker with a
+// fast link that stalls once a minute is picked off during exactly those
+// stalls, and no mean latency reproduces that.
+type SpikyLatency struct {
+	base             LatencyProvider
+	spike            LatencyProvider
+	spikeProbability float64
+	rng              *rand.Rand
+}
+
+// NewSpikyLatency composes two providers. Probability outside (0,1) makes the
+// provider degenerate to base, which is the harmless reading of "never spikes".
+func NewSpikyLatency(base, spike LatencyProvider, probability float64, seed int64) *SpikyLatency {
+	return &SpikyLatency{base: base, spike: spike, spikeProbability: probability, rng: rand.New(rand.NewSource(seed))}
+}
+
+// Delay implements LatencyProvider.
+func (s *SpikyLatency) Delay() time.Duration {
+	if s.base == nil {
+		return 0
+	}
+	if s.spike != nil && s.spikeProbability > 0 && s.rng.Float64() < s.spikeProbability {
+		return s.spike.Delay()
+	}
+	return s.base.Delay()
+}
