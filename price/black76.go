@@ -146,3 +146,41 @@ func normPDF(x float64) float64 {
 func finite(x float64) bool {
 	return !math.IsNaN(x) && !math.IsInf(x, 0)
 }
+
+// Black76Vanna is d vega / d forward, equivalently d delta / d volatility.
+// It is what a dealer's delta hedge misses when volatility moves with the
+// underlying, which is the whole reason a vanna-volga desk hedges in options
+// rather than only in the underlying.
+func Black76Vanna(forward, strike int64, vol, timeToExpiry float64) float64 {
+	if forward <= 0 || strike <= 0 || vol <= 0 || timeToExpiry <= 0 || !finite(vol) || !finite(timeToExpiry) {
+		return 0
+	}
+	f, k := float64(forward), float64(strike)
+	sqrtT := math.Sqrt(timeToExpiry)
+	d1 := (math.Log(f/k) + 0.5*vol*vol*timeToExpiry) / (vol * sqrtT)
+	d2 := d1 - vol*sqrtT
+	vanna := -normPDF(d1) * d2 / vol
+	if !finite(vanna) {
+		return 0
+	}
+	return vanna
+}
+
+// Black76Volga is d vega / d volatility: the convexity of the premium in
+// volatility. It is zero at the money and largest in the wings, which is why a
+// desk that is short wings is short volatility of volatility however flat its
+// vega looks.
+func Black76Volga(forward, strike int64, vol, timeToExpiry float64) float64 {
+	if forward <= 0 || strike <= 0 || vol <= 0 || timeToExpiry <= 0 || !finite(vol) || !finite(timeToExpiry) {
+		return 0
+	}
+	f, k := float64(forward), float64(strike)
+	sqrtT := math.Sqrt(timeToExpiry)
+	d1 := (math.Log(f/k) + 0.5*vol*vol*timeToExpiry) / (vol * sqrtT)
+	d2 := d1 - vol*sqrtT
+	volga := f * normPDF(d1) * sqrtT * d1 * d2 / vol
+	if !finite(volga) {
+		return 0
+	}
+	return volga
+}
