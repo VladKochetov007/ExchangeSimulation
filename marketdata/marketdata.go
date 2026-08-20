@@ -43,8 +43,8 @@ type MDPublisher struct {
 	// gateway mapping would redirect every existing symbol to the last
 	// subscriber gateway.
 	gateways map[string]map[uint64]Subscriber
-	mu            sync.Mutex
-	seqNum        uint64
+	mu       sync.Mutex
+	seqNum   uint64
 }
 
 func NewMDPublisher() *MDPublisher {
