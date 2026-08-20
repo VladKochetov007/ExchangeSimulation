@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -292,6 +292,28 @@ func main() {
 					result.MeanAbsMechanicalBps, result.MeanAbsRevisionBps, result.AbsMechanicalShare,
 					result.ZeroSubsampleMeanAbsBps, result.Slope, result.WalkAgreement,
 					result.Drift.Mismatches, result.Drift.Checks)
+			})
+		case "lifecycle":
+			result, err := run.MeasureLifecycle(analysis.LifecycleOptions{})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s listings %v  settlements %v\n", dir, result.Listings, result.Settlements)
+				for _, venue := range sortedRuleNames(result.SettlementRoundsByVenue) {
+					fmt.Printf("    %-9s %2d listing rounds, %2d settlement rounds\n",
+						venue, result.ListingRoundsByVenue[venue], result.SettlementRoundsByVenue[venue])
+				}
+				for _, schedule := range result.Funding {
+					fmt.Printf("    funding %-9s %3d settlements, period %6.0fs\n",
+						schedule.VenueID, schedule.Settlements, schedule.PeriodSeconds)
+				}
+				for venues := len(result.Funding); venues >= 2; venues-- {
+					if instants := result.FundingIntersections[venues]; instants > 0 {
+						fmt.Printf("    %d venues settled together at %d instants\n", venues, instants)
+					}
+				}
 			})
 		case "viability":
 			classes, err := loadViabilityClasses(*viabilityThresholds)
