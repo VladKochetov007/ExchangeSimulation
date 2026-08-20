@@ -1666,3 +1666,28 @@ func TestOptionDealerVolBuildsTheSABRModel(t *testing.T) {
 		}
 	}
 }
+
+// One order size across every book sizes the flow for the main pair and leaves
+// the rest to whichever arbitrageur trades them in size, so the size has to be
+// settable per book — and a book that does not exist has to be refused rather
+// than silently ignored.
+func TestNoiseTargetQuantityIsPerBookAndValidated(t *testing.T) {
+	cfg := Config{LogDir: "x", VenueIDs: []string{"north", "central", "south"}, CrossAssetSpotGraph: true}
+	cfg.NoiseTargetQtyBySymbol = map[string]int64{"CDF/USD": 5 * mvBasePrecision}
+	if err := cfg.normalize(); err != nil {
+		t.Fatalf("a listed book was refused: %v", err)
+	}
+	cfg.NoiseTargetQtyBySymbol = map[string]int64{"XYZ/USD": 1}
+	if err := cfg.normalize(); err == nil {
+		t.Error("a size was accepted for a book that does not exist")
+	}
+	cfg.NoiseTargetQtyBySymbol = map[string]int64{"ABC/USD": 0}
+	if err := cfg.normalize(); err == nil {
+		t.Error("a zero size was accepted")
+	}
+	cfg = Config{LogDir: "x", VenueIDs: []string{"north", "central", "south"}}
+	cfg.NoiseTargetQtyBySymbol = map[string]int64{"CDF/USD": 1}
+	if err := cfg.normalize(); err == nil {
+		t.Error("a cross-asset book was accepted with the graph switched off")
+	}
+}

@@ -159,6 +159,13 @@ type Config struct {
 	ElasticSupplierReferenceHalfLife time.Duration `json:"elastic_supplier_reference_half_life"`
 
 	NoiseOrderQty int64 `json:"noise_order_qty"`
+	// NoiseTargetQtyBySymbol overrides the uninformed order size per book.
+	// One size across every book means the flow is sized for the main pair and
+	// negligible everywhere else, which leaves the other books to whichever
+	// arbitrageur trades them in size — measured on the second spot pair, one
+	// class held ninety-six percent of the volume in every window.
+	NoiseTargetQtyBySymbol map[string]int64 `json:"noise_target_qty_by_symbol"`
+
 	// NoiseFundingLots is how many orders' worth of each asset an uninformed
 	// trader starts with. Underfunding it makes the flow directional rather
 	// than random, because only one side gets rejected.
@@ -626,6 +633,20 @@ func (c *Config) normalize() error {
 		}
 		if c.OptionValueTakerEdgeBps <= 0 {
 			return errors.New("multivenue: option value takers need a positive edge requirement, or they cross every spread")
+		}
+	}
+	for symbol, qty := range c.NoiseTargetQtyBySymbol {
+		if qty <= 0 {
+			return fmt.Errorf("multivenue: noise target quantity for %q must be positive, got %d", symbol, qty)
+		}
+		switch symbol {
+		case "ABC/USD", "ABC-PERP":
+		case "CDF/USD", "ABC/CDF":
+			if !c.CrossAssetSpotGraph {
+				return fmt.Errorf("multivenue: noise target quantity for %q requires the cross-asset spot graph", symbol)
+			}
+		default:
+			return fmt.Errorf("multivenue: no book named %q for a noise target quantity", symbol)
 		}
 	}
 	for role, profile := range c.LatencyProfiles {
@@ -1794,6 +1815,11 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		noiseSymbols = append(noiseSymbols, "CDF/USD", "ABC/CDF")
 		noiseTargetQtys["CDF/USD"] = noiseQty
 		noiseTargetQtys["ABC/CDF"] = noiseQty
+	}
+	for symbol, qty := range s.Config.NoiseTargetQtyBySymbol {
+		if _, quoted := noiseTargetQtys[symbol]; quoted && qty > 0 {
+			noiseTargetQtys[symbol] = qty
+		}
 	}
 	noiseFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: s.Config.TakerFeeBps, InQuote: true}
 	for participant := 0; participant < s.Config.NoiseTraderCount; participant++ {
