@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -301,7 +300,7 @@ func main() {
 			}
 			thresholdsFor := func(symbol string) viabilityClass {
 				for _, class := range classes {
-					if matched, _ := filepath.Match(class.Pattern, symbol); matched {
+					if matchSymbol(class.Pattern, symbol) {
 						return class
 					}
 				}
@@ -552,9 +551,37 @@ func loadViabilityClasses(path string) ([]viabilityClass, error) {
 		if class.Pattern == "" {
 			return nil, fmt.Errorf("viability thresholds: every entry needs a symbol pattern")
 		}
-		if _, err := filepath.Match(class.Pattern, "probe"); err != nil {
-			return nil, fmt.Errorf("viability thresholds: pattern %q is not a valid glob: %w", class.Pattern, err)
+		if strings.Count(class.Pattern, "*") > 8 {
+			return nil, fmt.Errorf("viability thresholds: pattern %q has too many wildcards to match cheaply", class.Pattern)
 		}
 	}
 	return classes, nil
+}
+
+// matchSymbol matches a book pattern against a symbol.
+//
+// It is written out rather than delegating to filepath.Match because a symbol
+// is not a path: "ABC/USD" contains a separator, and filepath's "*" refuses to
+// cross one, so the catch-all pattern silently failed to match every spot book
+// and those books were judged against whatever the flags happened to say.
+func matchSymbol(pattern, symbol string) bool {
+	if pattern == "*" {
+		return true
+	}
+	parts := strings.Split(pattern, "*")
+	if len(parts) == 1 {
+		return pattern == symbol
+	}
+	if !strings.HasPrefix(symbol, parts[0]) {
+		return false
+	}
+	rest := symbol[len(parts[0]):]
+	for i := 1; i < len(parts)-1; i++ {
+		index := strings.Index(rest, parts[i])
+		if index < 0 {
+			return false
+		}
+		rest = rest[index+len(parts[i]):]
+	}
+	return strings.HasSuffix(rest, parts[len(parts)-1])
 }
