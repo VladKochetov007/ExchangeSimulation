@@ -21,6 +21,10 @@ import (
 type OptionMMConfig struct {
 	Underlying string
 	IV         float64
+	// VolModel supplies the volatility this dealer prices and hedges with.
+	// Nil prices every contract at IV, which is what the population did before
+	// dealers were allowed to disagree.
+	VolModel eprice.VolatilityModel
 	// SpreadBps is the half-spread around theo, in bps of the underlying price.
 	SpreadBps int64
 	// SkewPerLotBps shifts both quotes against inventory, in bps of the
@@ -36,6 +40,12 @@ type OptionMMConfig struct {
 	HedgeInterval time.Duration
 	// HedgeBandQty: rebalance only when |target − current| exceeds this.
 	HedgeBandQty int64
+	// HedgePolicy decides the hedge a dealer holds against its option book.
+	// Nil keeps the running delta hedge, which is what HedgeEnabled turned on
+	// before the policy was separable. The two differ in what they leave
+	// exposed: a hedge set once at the trade carries the whole gamma, and a
+	// hedge rebalanced on a band pays the spread repeatedly to shed it.
+	HedgePolicy HedgePolicy
 
 	// GreekInterval samples the live option-book exposure after the actor has
 	// consumed the ordered exchange feed. Zero disables telemetry for callers
@@ -123,6 +133,10 @@ type OptionMarketMaker struct {
 	hedgeRequests map[uint64]int64 // request ID -> signed requested quantity
 	hedgeOrders   map[uint64]int64 // order ID -> signed unresolved quantity
 	hedgeQty      int64            // cumulative |hedge| traded, for reporting
+	// unhedgedDelta is option delta taken on since the last hedge, which is
+	// what a per-trade hedge covers. lastHedgeNano is when that hedge went out.
+	unhedgedDelta float64
+	lastHedgeNano int64
 	profiles      []GreekProfile
 	positions     []GreekPosition
 	subscribed    bool
@@ -183,6 +197,7 @@ func (mm *OptionMarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
 		if e.Symbol == mm.cfg.Underlying {
 			if len(e.Snapshot.Bids) > 0 && len(e.Snapshot.Asks) > 0 {
 				mm.spotMid = (e.Snapshot.Bids[0].Price + e.Snapshot.Asks[0].Price) / 2
+				mm.observeUnderlying(e.Timestamp)
 			}
 		}
 		return
@@ -283,7 +298,9 @@ func (mm *OptionMarketMaker) onQuoteRejected(reqID uint64) {
 
 func (mm *OptionMarketMaker) onFill(sym string, e actor.OrderFillEvent) {
 	if q, ok := mm.quotes[sym]; ok {
-		q.inventory += signedQty(e)
+		filled := signedQty(e)
+		q.inventory += filled
+		mm.unhedgedDelta += mm.contractDelta(sym, e.Timestamp) * float64(filled)
 		if e.IsFull {
 			if e.Side == exchange.Buy {
 				q.bidID = 0
@@ -292,6 +309,20 @@ func (mm *OptionMarketMaker) onFill(sym string, e actor.OrderFillEvent) {
 			}
 		}
 	}
+}
+
+// contractDelta is the delta of one unit of a contract at the moment of a
+// trade, which is what a per-trade hedge is sized from.
+func (mm *OptionMarketMaker) contractDelta(symbol string, nano int64) float64 {
+	c := mm.set.contracts[symbol]
+	if c == nil || c.Type != "OPTION" || mm.spotMid <= 0 {
+		return 0
+	}
+	yearsLeft := float64(c.ExpiryNano-nano) / float64(365*24*time.Hour)
+	if yearsLeft <= 0 {
+		return 0
+	}
+	return eprice.Black76Delta(mm.spotMid, c.Strike, mm.volatility(c.Strike, yearsLeft, c.IsCall), yearsLeft, c.IsCall)
 }
 
 func (mm *OptionMarketMaker) onQuoteTick(t time.Time) {
@@ -322,7 +353,7 @@ func (mm *OptionMarketMaker) requoteContract(sym string, c *Contract, q *optionQ
 	if yearsLeft <= 0 {
 		return
 	}
-	theo := eprice.Black76Premium(mm.spotMid, c.Strike, mm.cfg.IV, yearsLeft, c.IsCall)
+	theo := eprice.Black76Premium(mm.spotMid, c.Strike, mm.volatility(c.Strike, yearsLeft, c.IsCall), yearsLeft, c.IsCall)
 	half := mm.spotMid * mm.cfg.SpreadBps / 10000
 	skew := int64(0)
 	if mm.cfg.LotQty > 0 {
@@ -362,6 +393,35 @@ func (mm *OptionMarketMaker) requoteContract(sym string, c *Contract, q *optionQ
 	q.askPrice = ask
 }
 
+// observeUnderlying feeds the dealer's volatility model the price path it
+// estimates from. A model that does not estimate ignores it.
+func (mm *OptionMarketMaker) observeUnderlying(nano int64) {
+	if observer, ok := mm.cfg.VolModel.(eprice.PriceObserver); ok {
+		observer.Observe(mm.spotMid, nano)
+	}
+}
+
+// volatility is the volatility this dealer prices one contract at. A model
+// that declines to price falls back to the configured level, so a dealer whose
+// estimator has not warmed up still quotes rather than leaving the book empty.
+func (mm *OptionMarketMaker) volatility(strike int64, yearsLeft float64, isCall bool) float64 {
+	if mm.cfg.VolModel != nil {
+		if vol := mm.cfg.VolModel.Volatility(mm.spotMid, strike, yearsLeft, isCall); vol > 0 {
+			return vol
+		}
+	}
+	return mm.cfg.IV
+}
+
+// OptionInventory reports the dealer's signed position in one contract, in
+// base units. It is what an inventory-sensitive volatility model reads.
+func (mm *OptionMarketMaker) OptionInventory(symbol string) int64 {
+	if q := mm.quotes[symbol]; q != nil {
+		return q.inventory
+	}
+	return 0
+}
+
 // onHedgeTick trades the underlying toward delta neutrality of the whole book.
 func (mm *OptionMarketMaker) onHedgeTick(t time.Time) {
 	if mm.spotMid == 0 {
@@ -378,20 +438,39 @@ func (mm *OptionMarketMaker) onHedgeTick(t time.Time) {
 			continue
 		}
 		yearsLeft := float64(c.ExpiryNano-now) / float64(365*24*time.Hour)
-		delta := eprice.Black76Delta(mm.spotMid, c.Strike, mm.cfg.IV, yearsLeft, c.IsCall)
+		delta := eprice.Black76Delta(mm.spotMid, c.Strike, mm.volatility(c.Strike, yearsLeft, c.IsCall), yearsLeft, c.IsCall)
 		netDelta += delta * float64(q.inventory)
 	}
-	target := -int64(netDelta) // hold −Δ of underlying to neutralize
-	gap := target - (mm.hedgePos + mm.hedgePending)
-	if gap > mm.cfg.HedgeBandQty {
-		reqID := mm.SubmitOrder(mm.cfg.Underlying, exchange.Buy, exchange.Market, 0, gap)
-		mm.hedgeRequests[reqID] = gap
-		mm.hedgePending += gap
-	} else if gap < -mm.cfg.HedgeBandQty {
-		reqID := mm.SubmitOrder(mm.cfg.Underlying, exchange.Sell, exchange.Market, 0, -gap)
-		mm.hedgeRequests[reqID] = gap
-		mm.hedgePending += gap
+	policy := mm.cfg.HedgePolicy
+	if policy == nil {
+		policy = BandedDeltaHedge{}
 	}
+	gap := policy.Hedge(HedgeState{
+		NetDelta:      netDelta,
+		HedgePosition: mm.hedgePos,
+		HedgePending:  mm.hedgePending,
+		TradedDelta:   mm.unhedgedDelta,
+		SpotMid:       mm.spotMid,
+		Nano:          now,
+		BandQty:       mm.cfg.HedgeBandQty,
+		LastNano:      mm.lastHedgeNano,
+	})
+	if gap == 0 {
+		return
+	}
+	side := exchange.Buy
+	qty := gap
+	if gap < 0 {
+		side, qty = exchange.Sell, -gap
+	}
+	reqID := mm.SubmitOrder(mm.cfg.Underlying, side, exchange.Market, 0, qty)
+	mm.hedgeRequests[reqID] = gap
+	mm.hedgePending += gap
+	mm.lastHedgeNano = now
+	// A policy that hedges each trade once has now covered everything it took
+	// on; one that targets the whole book never accumulates this in the first
+	// place, since it reads NetDelta.
+	mm.unhedgedDelta = 0
 }
 
 func (mm *OptionMarketMaker) onGreekTick(t time.Time) {
@@ -433,7 +512,8 @@ func (mm *OptionMarketMaker) GreekPositions(t time.Time) []GreekPosition {
 		if yearsLeft <= 0 {
 			continue
 		}
-		sensitivity, ok := eprice.Black76Sensitivities(mm.spotMid, c.Strike, mm.cfg.IV, yearsLeft, c.IsCall)
+		contractVol := mm.volatility(c.Strike, yearsLeft, c.IsCall)
+		sensitivity, ok := eprice.Black76Sensitivities(mm.spotMid, c.Strike, contractVol, yearsLeft, c.IsCall)
 		if !ok {
 			continue
 		}
@@ -452,7 +532,7 @@ func (mm *OptionMarketMaker) GreekPositions(t time.Time) []GreekPosition {
 			SpotMid:           mm.spotMid,
 			ModelForward:      mm.spotMid,
 			ForwardSource:     "spot_mid_proxy",
-			ImpliedVolatility: mm.cfg.IV,
+			ImpliedVolatility: contractVol,
 			Delta:             contracts * sensitivity.Delta,
 			Gamma:             contracts * sensitivity.Gamma,
 			Vega:              contracts * sensitivity.Vega,
@@ -468,7 +548,7 @@ func (mm *OptionMarketMaker) aggregateGreekProfile(t time.Time, positions []Gree
 		SpotMid:           mm.spotMid,
 		ModelForward:      mm.spotMid,
 		ForwardSource:     "spot_mid_proxy",
-		ImpliedVolatility: mm.cfg.IV,
+		ImpliedVolatility: mm.volatility(0, 0, true),
 	}
 	for _, position := range positions {
 		profile.OptionDelta += position.Delta

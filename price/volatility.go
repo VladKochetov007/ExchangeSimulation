@@ -20,6 +20,14 @@ type VolatilityModel interface {
 	Volatility(forward, strike int64, yearsToExpiry float64, isCall bool) float64
 }
 
+// PriceObserver is a volatility model that learns from the underlying's price
+// path. A participant feeds every observation it sees to any model that
+// implements it and ignores the rest, so an estimator can be swapped in for a
+// constant without the participant knowing which it holds.
+type PriceObserver interface {
+	Observe(price, nano int64)
+}
+
 // FlatVolatility prices every contract at one number, which is the baseline
 // this package's option pricing started from.
 type FlatVolatility float64
