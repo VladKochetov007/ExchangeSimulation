@@ -1395,3 +1395,30 @@ func TestFundingIntervalIsConfigurableAndReachesThePerpetual(t *testing.T) {
 		sim.Close()
 	}
 }
+
+// Perpetual funding settles on a different clock at every real venue, so a desk
+// holding the same exposure on two of them faces two payment schedules that
+// only sometimes coincide. A single shared period removes that entirely.
+func TestVenueRuleOverridesTheFundingPeriodPerVenue(t *testing.T) {
+	cfg := Config{
+		LogDir:                 t.TempDir(),
+		VenueIDs:               []string{"north", "central", "south"},
+		FundingIntervalSeconds: 28800,
+		VenueRules: map[string]VenueRule{
+			"central": {FundingIntervalSeconds: 3600},
+		},
+	}
+	if got := cfg.fundingInterval("north"); got != 28800 {
+		t.Errorf("north funding interval = %d, want the population default 28800", got)
+	}
+	if got := cfg.fundingInterval("central"); got != 3600 {
+		t.Errorf("central funding interval = %d, want the override 3600", got)
+	}
+	if err := cfg.normalize(); err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	cfg.VenueRules["central"] = VenueRule{FundingIntervalSeconds: -1}
+	if err := cfg.normalize(); err == nil {
+		t.Error("a negative funding interval was accepted")
+	}
+}

@@ -69,6 +69,9 @@ type bookSnapshot struct {
 }
 
 type bookSnapshotEnvelope struct {
+	// Symbol is present on a spot record, where the name is written inside the
+	// payload rather than beside it.
+	Symbol   string        `json:"symbol"`
 	Payload  *bookSnapshot `json:"payload"`
 	Snapshot *bookSnapshot `json:"snapshot"`
 	Bids     []bookLevel   `json:"bids"`

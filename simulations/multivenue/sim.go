@@ -42,6 +42,14 @@ const (
 // chooses a causal order.
 type VenueRule struct {
 	MatchingRule string `json:"matching_rule"`
+	// FundingIntervalSeconds overrides the population's funding period for this
+	// venue alone. Real venues settle perpetual funding on different clocks,
+	// and a carry desk that holds the same exposure on two of them faces a
+	// different payment schedule on each: some intervals coincide and most do
+	// not. A single shared period makes every venue pay at the same instant,
+	// which is the one schedule under which cross-venue funding arbitrage has
+	// nothing to trade. Zero keeps the population default.
+	FundingIntervalSeconds int64 `json:"funding_interval_seconds"`
 }
 
 // Config creates exactly three separately funded direct venues on one
@@ -431,6 +439,9 @@ func (c *Config) normalize() error {
 		if _, exists := seen[id]; !exists {
 			return fmt.Errorf("multivenue: venue rule references unknown venue %q", id)
 		}
+		if rule.FundingIntervalSeconds < 0 {
+			return fmt.Errorf("multivenue: venue %q has negative funding interval %d", id, rule.FundingIntervalSeconds)
+		}
 		if rule.MatchingRule == "" {
 			continue
 		}
@@ -712,6 +723,14 @@ type ParticipantAccountSnapshot struct {
 	// asset, so a price rise lifts all of their marked equity at once.
 	Marks   map[string]int64             `json:"marks"`
 	Account etypes.MarkedAccountSnapshot `json:"account"`
+}
+
+// fundingInterval reports the funding period a venue settles on, in seconds.
+func (c Config) fundingInterval(venueID string) int64 {
+	if rule, exists := c.VenueRules[venueID]; exists && rule.FundingIntervalSeconds > 0 {
+		return rule.FundingIntervalSeconds
+	}
+	return c.FundingIntervalSeconds
 }
 
 func (c Config) matchingRule(venueID string) string {
@@ -1070,7 +1089,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	tick := s.Config.SpotTickQuoteUnits
 	spot := exchange.NewSpotInstrument("ABC/USD", "ABC", "USD", mvBasePrecision, mvQuotePrecision, tick, mvBasePrecision/1_000)
 	perp := exchange.NewPerpFutures("ABC-PERP", "ABC", "USD", mvBasePrecision, mvQuotePrecision, tick, mvBasePrecision/1_000)
-	perp.GetFundingRate().Interval = s.Config.FundingIntervalSeconds
+	perp.GetFundingRate().Interval = s.Config.fundingInterval(id)
 	perp.SetFundingCalculator(&instrument.SimpleFundingCalc{
 		BaseRate: 1, Damping: 100, MaxRate: s.Config.FundingMaxRateBps,
 	})

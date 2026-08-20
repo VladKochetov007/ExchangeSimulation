@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -31,6 +31,13 @@ func main() {
 	impactRole := flag.String("impact-role", "", "restrict impact to one participant class")
 	horizonSeconds := flag.Float64("horizon-seconds", 0, "mechanical horizon in simulated seconds; overrides -horizon-trades")
 	exhausted := flag.String("exhausted", "drop", "how orders that clear the whole visible side are priced: drop or deepest")
+	viabilityWindow := flag.Float64("viability-window", 900, "viability window length in simulated seconds")
+	minTradesPerWindow := flag.Int("viability-min-trades", 1, "fewest taker trades a window may have and stay viable")
+	minTakerClasses := flag.Int("viability-min-taker-classes", 2, "fewest distinct taker classes a viable window needs")
+	minMakerClasses := flag.Int("viability-min-maker-classes", 1, "fewest distinct maker classes a viable window needs")
+	maxRoleShare := flag.Float64("viability-max-role-share", 0.9, "largest share of a window's volume one taker class may hold")
+	maxSpreadTicks := flag.Float64("viability-max-spread-ticks", 0, "widest median spread in ticks a viable window may show; zero disables")
+	minTouchDepth := flag.Float64("viability-min-touch-depth", 0, "smallest median touch depth in base units a viable window may show; zero disables")
 	tickSize := flag.Int64("tick", 10_000, "book tick size, for the spread in ticks")
 	walkSizes := flag.String("walk-sizes", "", "comma-separated order sizes in base units, for the walkable fraction")
 	asJSON := flag.Bool("json", false, "emit JSON instead of a table")
@@ -283,6 +290,57 @@ func main() {
 					result.ZeroSubsampleMeanAbsBps, result.Slope, result.WalkAgreement,
 					result.Drift.Mismatches, result.Drift.Checks)
 			})
+		case "viability":
+			// The rules are assembled here, in the adapter, because what counts
+			// as a living market is the caller's judgement and not a property
+			// of the measurement. The library measures; the thresholds are
+			// configuration.
+			rules := []analysis.ViabilityRule{
+				{Name: "thin_volume", Breached: func(w analysis.MarketWindow) bool {
+					return w.Trades < *minTradesPerWindow
+				}},
+				{Name: "few_taker_classes", Breached: func(w analysis.MarketWindow) bool {
+					return w.TakerRoles < *minTakerClasses
+				}},
+				{Name: "few_maker_classes", Breached: func(w analysis.MarketWindow) bool {
+					return w.MakerRoles < *minMakerClasses
+				}},
+				{Name: "one_sided_book", Breached: func(w analysis.MarketWindow) bool {
+					return w.EmptySideSnapshots > 0
+				}},
+				{Name: "concentrated_flow", Breached: func(w analysis.MarketWindow) bool {
+					return w.TopRoleVolumeShare > *maxRoleShare
+				}},
+			}
+			if *maxSpreadTicks > 0 {
+				rules = append(rules, analysis.ViabilityRule{Name: "wide_spread", Breached: func(w analysis.MarketWindow) bool {
+					return w.SpreadTicks.N > 0 && w.SpreadTicks.Median > *maxSpreadTicks
+				}})
+			}
+			if *minTouchDepth > 0 {
+				rules = append(rules, analysis.ViabilityRule{Name: "thin_depth", Breached: func(w analysis.MarketWindow) bool {
+					return w.TouchDepth.N > 0 && w.TouchDepth.Median < *minTouchDepth
+				}})
+			}
+			result, err := run.MeasureViability(analysis.ViabilityOptions{
+				WindowNanos: int64(*viabilityWindow * 1e9),
+				TickSize:    *tickSize,
+				Rules:       rules,
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-14s books %2d  windows %4d viable %4d breached %4d\n",
+					dir, result.Books, len(result.Windows), result.ViableWindows, result.BreachedWindows)
+				for _, rule := range sortedRuleNames(result.BreachesByRule) {
+					fmt.Printf("    %-20s %4d windows\n", rule, result.BreachesByRule[rule])
+				}
+				for _, book := range result.DeadBooks {
+					fmt.Printf("    dead book: %s\n", book)
+				}
+			})
 		case "spacing":
 			files := run.BookFiles(*venue, *base)
 			if len(files) != 1 {
@@ -404,4 +462,14 @@ func emitRoles(dir string, table map[string]*analysis.RoleStats, asJSON bool) {
 		fmt.Printf("  %-22s %10d %9d %7.1f%% %10d %9d\n",
 			name, stats.Accepted, stats.Fills, 100*stats.Conversion(), stats.IOCExpired, stats.Rejected)
 	}
+}
+
+// sortedRuleNames orders a breach tally so the report is deterministic.
+func sortedRuleNames(breaches map[string]int) []string {
+	names := make([]string, 0, len(breaches))
+	for name := range breaches {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
