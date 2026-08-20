@@ -1,7 +1,9 @@
 package analysis
 
 import (
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -139,6 +141,12 @@ func (r *Run) MeasureViability(opts ViabilityOptions) (*Viability, error) {
 		if symbol == "" {
 			symbol = payloadSymbol
 		}
+		if symbol == "" {
+			// A spot book publication names neither level, so the only record
+			// of which book it is comes from the file it was written to. A
+			// spot file holds exactly one book, which is what makes this safe.
+			symbol = symbolFromSpotFile(event.File)
+		}
 		return windowKey{venue: event.VenueID, symbol: symbol, index: index}
 	}
 
@@ -206,6 +214,18 @@ func (r *Run) MeasureViability(opts ViabilityOptions) (*Viability, error) {
 	}
 
 	return summariseViability(windows, opts), nil
+}
+
+// symbolFromSpotFile recovers a book name from a per-book spot log path, so
+// that publications carrying no symbol are not pooled into one nameless book.
+// It returns empty for any other file, since those hold several books and
+// guessing from their name would attribute events to the wrong one.
+func symbolFromSpotFile(path string) string {
+	directory, file := filepath.Split(path)
+	if filepath.Base(filepath.Clean(directory)) != "spot" {
+		return ""
+	}
+	return strings.ReplaceAll(strings.TrimSuffix(file, ".jsonl"), "-", "/")
 }
 
 // bestWithDepth returns the best price on a side and the depth resting at it.

@@ -133,3 +133,29 @@ func TestViabilityNamesBooksThatBreachedEverywhere(t *testing.T) {
 		t.Errorf("books = %d, want 1", result.Books)
 	}
 }
+
+// A spot book publishes without naming itself at either level, so the only
+// record of which book it is comes from the file. Pooling those into one
+// nameless bucket leaves every spot book with no measured spread at all.
+func TestViabilityRecoversTheSpotBookFromItsFile(t *testing.T) {
+	report := Report{TerminalAccounts: []AccountRow{{VenueID: "north", ClientID: 1, Role: "spot_maker_1"}}}
+	unnamed := `{"sim_ts":0,"client_id":0,"event":"BookSnapshot","data":{"venue_id":"north","payload":{"bids":[{"price":9900,"visible_qty":5,"hidden_qty":0}],"asks":[{"price":10100,"visible_qty":5,"hidden_qty":0}]}}}`
+	dir := writeRun(t, report, map[string][]string{"north/spot/ABC-USD.jsonl": {unnamed}})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureViability(ViabilityOptions{WindowNanos: 1_000_000_000, TickSize: 100})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if len(result.Windows) != 1 {
+		t.Fatalf("windows = %d, want 1", len(result.Windows))
+	}
+	if got := result.Windows[0].Symbol; got != "ABC/USD" {
+		t.Errorf("symbol = %q, want ABC/USD recovered from the file name", got)
+	}
+	if result.Windows[0].SpreadTicks.N != 1 {
+		t.Error("the recovered book has no measured spread")
+	}
+}
