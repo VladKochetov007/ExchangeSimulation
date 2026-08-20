@@ -1,0 +1,10 @@
+[
+  {
+    "pattern": "*",
+    "min_trades": 1,
+    "min_taker_classes": 1,
+    "min_maker_classes": 1,
+    "max_role_share": 1.0,
+    "max_empty_side_share": 0.5
+  }
+]
