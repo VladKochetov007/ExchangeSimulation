@@ -122,6 +122,23 @@ Funding, from `mvanalyze -metric lifecycle`: central settled 19 times at an
 hourly period, south 9 times at two-hourly, north twice at eight-hourly, with
 two venues coinciding at seven instants and all three at two.
 
+## What the strict corridor still rejects, and why
+
+Two things, and only one of them is a market defect.
+
+The spot books and the perpetual fail on flow concentration: uninformed flow
+holds more than eighty percent of the volume on each. That is a population
+choice — the reference roster funds twelve uninformed traders against two of
+each other demand class — and it is what L-009 varies.
+
+The option strikes that fail do so differently. Thirty-nine of 330 books breach
+concentration in some window and none in every window, spread across strikes
+with no pattern in moneyness. A strike trades tens of times in a two-hour
+window, and at that count one class holding ninety-five percent of the volume
+happens by sampling alone. A concentration threshold applied to a thin book
+measures its thinness, not its health, which is an argument for reading the
+option chain at a longer window rather than for adding participants to it.
+
 ## Known measurement caveats
 
 - Twenty hours contains nine expiry rounds, not ten: the first generation
