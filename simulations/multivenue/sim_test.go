@@ -19,6 +19,8 @@ import (
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
 	"exchange_sim/matching"
+	eprice "exchange_sim/price"
+	"exchange_sim/simulations/derivsim"
 	etypes "exchange_sim/types"
 )
 
@@ -1420,5 +1422,87 @@ func TestVenueRuleOverridesTheFundingPeriodPerVenue(t *testing.T) {
 	cfg.VenueRules["central"] = VenueRule{FundingIntervalSeconds: -1}
 	if err := cfg.normalize(); err == nil {
 		t.Error("a negative funding interval was accepted")
+	}
+}
+
+// A population whose dealers all price from one number quotes one price. The
+// roster has to hand consecutive participants different opinions and cycle
+// when there are more participants than opinions.
+func TestOptionDealerVolRosterCyclesDistinctOpinions(t *testing.T) {
+	cfg := OptionDealerVolConfig{
+		Model:           "realized",
+		HalfLifeSeconds: []float64{60, 3600},
+		Premiums:        []float64{1.0, 1.4},
+	}
+	first, second, third := cfg.modelFor(0, 0.8), cfg.modelFor(1, 0.8), cfg.modelFor(2, 0.8)
+	firstEstimator, ok := first.(*eprice.RealizedVolatility)
+	if !ok {
+		t.Fatalf("model = %T, want a realized estimator", first)
+	}
+	secondEstimator := second.(*eprice.RealizedVolatility)
+	thirdEstimator := third.(*eprice.RealizedVolatility)
+	if firstEstimator.HalfLifeSeconds == secondEstimator.HalfLifeSeconds {
+		t.Error("consecutive dealers were given the same half-life")
+	}
+	if thirdEstimator.HalfLifeSeconds != firstEstimator.HalfLifeSeconds {
+		t.Error("the roster did not cycle back to its first opinion")
+	}
+	if firstEstimator.Premium != 1.0 || secondEstimator.Premium != 1.4 {
+		t.Errorf("premiums = %v and %v, want 1.0 and 1.4", firstEstimator.Premium, secondEstimator.Premium)
+	}
+}
+
+// An empty roster must leave the population exactly as it was.
+func TestOptionDealerVolDefaultsToTheConfiguredLevel(t *testing.T) {
+	if model := (OptionDealerVolConfig{}).modelFor(0, 0.8); model != nil {
+		t.Errorf("model = %v, want nil so the dealer prices at its configured IV", model)
+	}
+}
+
+func TestConfigRefusesAnUnbuildableVolatilityRoster(t *testing.T) {
+	base := func() Config {
+		return Config{LogDir: "x", VenueIDs: []string{"north", "central", "south"}}
+	}
+	cfg := base()
+	cfg.OptionDealerVol = OptionDealerVolConfig{Model: "sabr"}
+	if err := cfg.normalize(); err == nil {
+		t.Error("an unknown volatility model was accepted")
+	}
+	cfg = base()
+	cfg.OptionValueTakerVol = OptionDealerVolConfig{Model: "realized", HalfLifeSeconds: []float64{-1}}
+	if err := cfg.normalize(); err == nil {
+		t.Error("a negative half-life was accepted")
+	}
+	cfg = base()
+	cfg.OptionDealerHedgePolicies = []string{"vanna"}
+	if err := cfg.normalize(); err == nil {
+		t.Error("an unknown hedge policy was accepted")
+	}
+	cfg = base()
+	cfg.OptionValueTakerCount = 2
+	if err := cfg.normalize(); err == nil {
+		t.Error("value takers with no edge requirement were accepted, so they cross every spread")
+	}
+}
+
+// The hedge roster selects per dealer and cycles, and an empty roster leaves
+// every dealer on the policy the population already ran.
+func TestHedgePolicyRosterSelectsPerDealer(t *testing.T) {
+	cfg := Config{OptionDealerHedgePolicies: []string{"static", "timed"}, OptionDealerHedgeIntervalSeconds: 30}
+	if _, ok := cfg.hedgePolicyFor(0).(derivsim.StaticDeltaHedge); !ok {
+		t.Errorf("dealer 0 = %T, want a static hedge", cfg.hedgePolicyFor(0))
+	}
+	timed, ok := cfg.hedgePolicyFor(1).(derivsim.TimedDeltaHedge)
+	if !ok {
+		t.Fatalf("dealer 1 = %T, want a timed hedge", cfg.hedgePolicyFor(1))
+	}
+	if timed.IntervalNanos != int64(30*time.Second) {
+		t.Errorf("timed interval = %d, want 30 seconds", timed.IntervalNanos)
+	}
+	if _, ok := cfg.hedgePolicyFor(2).(derivsim.StaticDeltaHedge); !ok {
+		t.Error("the hedge roster did not cycle")
+	}
+	if (Config{}).hedgePolicyFor(0) != nil {
+		t.Error("an empty roster changed the dealer's hedge")
 	}
 }

@@ -371,6 +371,36 @@ type Config struct {
 	// the baseline buy bias. A non-nil zero deliberately creates all-sell flow.
 	OptionBuyProbability *float64 `json:"option_buy_probability"`
 
+	// OptionDealerVol configures what each option dealer prices with. Dealers
+	// are given consecutive entries from HalfLives and Premiums, cycling if
+	// there are more dealers than entries, so that a population's dealers
+	// disagree without any of them being told to quote differently. Leaving it
+	// empty prices every dealer at OptionIV, which is one opinion held by
+	// everybody.
+	OptionDealerVol OptionDealerVolConfig `json:"option_dealer_vol"`
+
+	// OptionDealerHedgePolicies names the hedge each dealer runs, taken in
+	// order and cycled: "banded", "static", "timed", or "none". Empty leaves
+	// every dealer on the banded hedge that DealerHedgeMode switches.
+	OptionDealerHedgePolicies []string `json:"option_dealer_hedge_policies"`
+	// OptionDealerHedgeIntervalSeconds is the rebalancing period for dealers
+	// assigned the timed policy.
+	OptionDealerHedgeIntervalSeconds int64 `json:"option_dealer_hedge_interval_seconds"`
+
+	// OptionValueTakerCount adds participants that value every listed option
+	// with their own volatility model and trade only where a dealer's quote
+	// disagrees with them by more than OptionValueTakerEdgeBps. They are what
+	// makes a badly quoted strike likelier to trade than a well quoted one.
+	OptionValueTakerCount       int           `json:"option_value_taker_count"`
+	OptionValueTakerEdgeBps     int64         `json:"option_value_taker_edge_bps"`
+	OptionValueTakerLotQty      int64         `json:"option_value_taker_lot_qty"`
+	OptionValueTakerMaxPosition int64         `json:"option_value_taker_max_position"`
+	OptionValueTakerInterval    time.Duration `json:"option_value_taker_interval"`
+	// OptionValueTakerVol configures their views the same way the dealers'
+	// are configured. Takers and dealers drawing from different premiums is
+	// what gives the two sides a reason to trade with each other.
+	OptionValueTakerVol OptionDealerVolConfig `json:"option_value_taker_vol"`
+
 	// DealerHedgeMode selects the option dealer treatment arm: "on" uses the
 	// stateful spot hedge policy, "off" leaves filled-option delta unhedged.
 	// It is explicit rather than a bool so an omitted JSON field keeps the
@@ -527,6 +557,33 @@ func (c *Config) normalize() error {
 	if c.OptionDealerCount == 0 {
 		c.OptionDealerCount = 1
 	}
+	if c.OptionValueTakerCount > 0 {
+		if c.OptionValueTakerLotQty <= 0 {
+			c.OptionValueTakerLotQty = mvBasePrecision / 100
+		}
+		if c.OptionValueTakerMaxPosition <= 0 {
+			c.OptionValueTakerMaxPosition = mvBasePrecision
+		}
+		if c.OptionValueTakerInterval <= 0 {
+			c.OptionValueTakerInterval = c.NoiseInterval
+		}
+		if c.OptionValueTakerEdgeBps <= 0 {
+			return errors.New("multivenue: option value takers need a positive edge requirement, or they cross every spread")
+		}
+	}
+	for _, policy := range c.OptionDealerHedgePolicies {
+		switch policy {
+		case "banded", "static", "timed", "none":
+		default:
+			return fmt.Errorf("multivenue: unsupported dealer hedge policy %q", policy)
+		}
+	}
+	if err := c.OptionDealerVol.validate("option_dealer_vol"); err != nil {
+		return err
+	}
+	if err := c.OptionValueTakerVol.validate("option_value_taker_vol"); err != nil {
+		return err
+	}
 	if c.FuturesMakerCount == 0 {
 		c.FuturesMakerCount = 1
 	}
@@ -679,26 +736,27 @@ type Venue struct {
 	OptionDealerClientID uint64
 	// Singular fields retain the baseline participant for callers written
 	// before configurable rosters. All actors live in the corresponding slice.
-	makerStateLog    venueLogger
-	NoiseTrader      *feesim.RandomTaker
-	NoiseTraders     []*feesim.RandomTaker
-	RoundTripTraders []*RoundTripTrader
-	Suppliers        []*ElasticSupplier
-	CarryArbs        []*CarryArbitrageur
-	LatentLiquidity  []*LatentLiquidity
-	MetaorderTraders []*MetaorderTrader
-	lastTwoSided     map[string]twoSidedMark
-	Microstructure   *MicrostructureStats
-	OptionFlow       *derivsim.OptionTaker
-	OptionFlows      []*derivsim.OptionTaker
-	InitialRisk      *VenueRiskSnapshot
-	RiskTimeline     []VenueRiskSnapshot
-	PreExpiryRisk    []VenueRiskSnapshot
-	TerminalRisk     *VenueRiskSnapshot
-	riskErr          error
-	riskLastNano     int64
-	optionListedNano map[string]int64
-	nextClient       uint64
+	makerStateLog     venueLogger
+	NoiseTrader       *feesim.RandomTaker
+	NoiseTraders      []*feesim.RandomTaker
+	RoundTripTraders  []*RoundTripTrader
+	Suppliers         []*ElasticSupplier
+	CarryArbs         []*CarryArbitrageur
+	LatentLiquidity   []*LatentLiquidity
+	MetaorderTraders  []*MetaorderTrader
+	lastTwoSided      map[string]twoSidedMark
+	Microstructure    *MicrostructureStats
+	OptionFlow        *derivsim.OptionTaker
+	OptionFlows       []*derivsim.OptionTaker
+	OptionValueTakers []*derivsim.OptionValueTaker
+	InitialRisk       *VenueRiskSnapshot
+	RiskTimeline      []VenueRiskSnapshot
+	PreExpiryRisk     []VenueRiskSnapshot
+	TerminalRisk      *VenueRiskSnapshot
+	riskErr           error
+	riskLastNano      int64
+	optionListedNano  map[string]int64
+	nextClient        uint64
 }
 
 // Participant identifies one independently funded account. It is recorded by
@@ -738,6 +796,101 @@ func (c Config) matchingRule(venueID string) string {
 		return rule.MatchingRule
 	}
 	return MatchingPriceTime
+}
+
+// hedgePolicyFor selects the hedge the dealer at index i runs. Nil keeps the
+// banded hedge the population ran before hedging was a strategy.
+func (c Config) hedgePolicyFor(i int) derivsim.HedgePolicy {
+	if len(c.OptionDealerHedgePolicies) == 0 {
+		return nil
+	}
+	switch c.OptionDealerHedgePolicies[i%len(c.OptionDealerHedgePolicies)] {
+	case "static":
+		return derivsim.StaticDeltaHedge{}
+	case "timed":
+		return derivsim.TimedDeltaHedge{IntervalNanos: c.OptionDealerHedgeIntervalSeconds * int64(time.Second)}
+	case "none":
+		return derivsim.NoHedge{}
+	case "banded":
+		return derivsim.BandedDeltaHedge{}
+	}
+	return nil
+}
+
+// OptionDealerVolConfig describes a roster of volatility opinions.
+//
+// A population needs its option pricers to differ, and the honest way to
+// differ is in what they estimate and what they charge for carrying the risk,
+// not in a spread handed to each of them. Every participant built from this
+// runs the same estimator on the same price path; they disagree because they
+// forget at different rates and demand different premiums over what they
+// measure.
+type OptionDealerVolConfig struct {
+	// Model is "flat" or "realized". Empty keeps the single configured level.
+	Model string `json:"model"`
+	// HalfLifeSeconds and Premiums are assigned to participants in order and
+	// cycled. A single entry gives every participant the same opinion, which
+	// is the degenerate case worth being able to configure deliberately.
+	HalfLifeSeconds []float64 `json:"half_life_seconds"`
+	Premiums        []float64 `json:"premiums"`
+	// Floor and Ceiling bound every estimate, so no participant quotes a zero
+	// premium in a quiet stretch or an unbounded one after a jump.
+	Floor   float64 `json:"floor"`
+	Ceiling float64 `json:"ceiling"`
+	// InventoryVegaAversion raises the volatility a participant quotes on the
+	// strikes it is short, which is how a smile can arise from where the flow
+	// went rather than from a parameter. Zero leaves the estimate alone.
+	InventoryVegaAversion  float64 `json:"inventory_vega_aversion"`
+	InventoryMaxAdjustment float64 `json:"inventory_max_adjustment"`
+}
+
+// validate refuses a volatility roster that cannot be built, rather than
+// silently handing every participant the fallback.
+func (c OptionDealerVolConfig) validate(field string) error {
+	switch c.Model {
+	case "", "flat", "realized":
+	default:
+		return fmt.Errorf("multivenue: %s model must be flat or realized, got %q", field, c.Model)
+	}
+	for _, halfLife := range c.HalfLifeSeconds {
+		if halfLife <= 0 {
+			return fmt.Errorf("multivenue: %s half-lives must be positive, got %v", field, halfLife)
+		}
+	}
+	for _, premium := range c.Premiums {
+		if premium <= 0 {
+			return fmt.Errorf("multivenue: %s premiums must be positive, got %v", field, premium)
+		}
+	}
+	if c.Floor < 0 || c.Ceiling < 0 || (c.Ceiling > 0 && c.Floor > c.Ceiling) {
+		return fmt.Errorf("multivenue: %s bounds are inconsistent: floor %v ceiling %v", field, c.Floor, c.Ceiling)
+	}
+	return nil
+}
+
+// modelFor builds the volatility model for the participant at index i.
+func (c OptionDealerVolConfig) modelFor(i int, fallbackIV float64) eprice.VolatilityModel {
+	switch c.Model {
+	case "", "flat":
+		if c.Model == "" {
+			return nil
+		}
+		return eprice.FlatVolatility(fallbackIV)
+	case "realized":
+		halfLife := pickFloat(c.HalfLifeSeconds, i, 600)
+		premium := pickFloat(c.Premiums, i, 1)
+		return eprice.NewRealizedVolatility(fallbackIV, halfLife, premium, c.Floor, c.Ceiling)
+	}
+	return nil
+}
+
+// pickFloat cycles a roster, so a population with more participants than
+// entries repeats opinions instead of failing to build.
+func pickFloat(values []float64, i int, fallback float64) float64 {
+	if len(values) == 0 {
+		return fallback
+	}
+	return values[i%len(values)]
 }
 
 // VenueRiskSnapshot combines exchange-owned marked equity with an
@@ -1303,8 +1456,10 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		}
 		dealer := derivsim.NewOptionMarketMaker(nextActor(), dealerGateway, derivsim.OptionMMConfig{
 			Underlying: "ABC/USD", IV: s.Config.OptionIV, SpreadBps: 30, SkewPerLotBps: 5,
+			VolModel: s.Config.OptionDealerVol.modelFor(i, s.Config.OptionIV),
 			QuoteQty: mvBasePrecision / 10, LotQty: mvBasePrecision / 20, PremiumTick: mvQuotePrecision,
 			QuoteInterval: s.Config.QuoteInterval, HedgeEnabled: s.Config.DealerHedgeMode == "on", HedgeInterval: s.Config.QuoteInterval,
+			HedgePolicy:  s.Config.hedgePolicyFor(i),
 			HedgeBandQty: mvBasePrecision / 100, GreekInterval: s.Config.GreekInterval, BasePrecision: mvBasePrecision,
 		})
 		dealer.SetTickerFactory(timers)
@@ -1362,6 +1517,22 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		venue.OptionFlows = append(venue.OptionFlows, flow)
 	}
 	venue.OptionFlow = venue.OptionFlows[0]
+
+	for participant := 0; participant < s.Config.OptionValueTakerCount; participant++ {
+		taker := derivsim.NewOptionValueTaker(nextActor(),
+			connect(fmt.Sprintf("option_value_taker_%d", participant+1), noiseBalances, 20_000_000*mvQuotePrecision, noiseFee),
+			derivsim.OptionValueTakerConfig{
+				Underlying:    "ABC/USD",
+				VolModel:      s.Config.OptionValueTakerVol.modelFor(participant, s.Config.OptionIV),
+				EdgeBps:       s.Config.OptionValueTakerEdgeBps,
+				LotQty:        s.Config.OptionValueTakerLotQty,
+				MaxPosition:   s.Config.OptionValueTakerMaxPosition,
+				Interval:      s.Config.OptionValueTakerInterval,
+				BasePrecision: mvBasePrecision,
+			})
+		taker.SetTickerFactory(timers)
+		venue.OptionValueTakers = append(venue.OptionValueTakers, taker)
+	}
 
 	naiveBalances := map[string]int64{"ABC": 2_000 * mvBasePrecision, "USD": 200_000_000 * mvQuotePrecision}
 	if s.Config.CrossAssetSpotGraph {
