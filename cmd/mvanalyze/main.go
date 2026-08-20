@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,6 +39,7 @@ func main() {
 	maxRoleShare := flag.Float64("viability-max-role-share", 0.9, "largest share of a window's volume one taker class may hold")
 	maxSpreadTicks := flag.Float64("viability-max-spread-ticks", 0, "widest median spread in ticks a viable window may show; zero disables")
 	maxEmptySideShare := flag.Float64("viability-max-empty-side-share", 0.02, "largest share of publications a viable window may have with a side missing")
+	viabilityThresholds := flag.String("viability-thresholds", "", "path to a JSON list of per-book viability thresholds, matched by symbol glob in order")
 	minTouchDepth := flag.Float64("viability-min-touch-depth", 0, "smallest median touch depth in base units a viable window may show; zero disables")
 	tickSize := flag.Int64("tick", 10_000, "book tick size, for the spread in ticks")
 	walkSizes := flag.String("walk-sizes", "", "comma-separated order sizes in base units, for the walkable fraction")
@@ -292,19 +294,40 @@ func main() {
 					result.Drift.Mismatches, result.Drift.Checks)
 			})
 		case "viability":
+			classes, err := loadViabilityClasses(*viabilityThresholds)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
+				os.Exit(2)
+			}
+			thresholdsFor := func(symbol string) viabilityClass {
+				for _, class := range classes {
+					if matched, _ := filepath.Match(class.Pattern, symbol); matched {
+						return class
+					}
+				}
+				return viabilityClass{
+					MinTrades:         *minTradesPerWindow,
+					MinTakerClasses:   *minTakerClasses,
+					MinMakerClasses:   *minMakerClasses,
+					MaxRoleShare:      *maxRoleShare,
+					MaxEmptySideShare: *maxEmptySideShare,
+					MaxSpreadTicks:    *maxSpreadTicks,
+					MinTouchDepth:     *minTouchDepth,
+				}
+			}
 			// The rules are assembled here, in the adapter, because what counts
 			// as a living market is the caller's judgement and not a property
 			// of the measurement. The library measures; the thresholds are
 			// configuration.
 			rules := []analysis.ViabilityRule{
 				{Name: "thin_volume", Breached: func(w analysis.MarketWindow) bool {
-					return w.Trades < *minTradesPerWindow
+					return w.Trades < thresholdsFor(w.Symbol).MinTrades
 				}},
 				{Name: "few_taker_classes", Breached: func(w analysis.MarketWindow) bool {
-					return w.TakerRoles < *minTakerClasses
+					return w.TakerRoles < thresholdsFor(w.Symbol).MinTakerClasses
 				}},
 				{Name: "few_maker_classes", Breached: func(w analysis.MarketWindow) bool {
-					return w.MakerRoles < *minMakerClasses
+					return w.MakerRoles < thresholdsFor(w.Symbol).MinMakerClasses
 				}},
 				// A single one-sided publication is a book between requotes,
 				// not a dead market. What matters is the share of the window a
@@ -313,21 +336,19 @@ func main() {
 					if w.Snapshots == 0 {
 						return false
 					}
-					return float64(w.EmptySideSnapshots)/float64(w.Snapshots) > *maxEmptySideShare
+					return float64(w.EmptySideSnapshots)/float64(w.Snapshots) > thresholdsFor(w.Symbol).MaxEmptySideShare
 				}},
 				{Name: "concentrated_flow", Breached: func(w analysis.MarketWindow) bool {
-					return w.TopRoleVolumeShare > *maxRoleShare
+					return w.TopRoleVolumeShare > thresholdsFor(w.Symbol).MaxRoleShare
 				}},
-			}
-			if *maxSpreadTicks > 0 {
-				rules = append(rules, analysis.ViabilityRule{Name: "wide_spread", Breached: func(w analysis.MarketWindow) bool {
-					return w.SpreadTicks.N > 0 && w.SpreadTicks.Median > *maxSpreadTicks
-				}})
-			}
-			if *minTouchDepth > 0 {
-				rules = append(rules, analysis.ViabilityRule{Name: "thin_depth", Breached: func(w analysis.MarketWindow) bool {
-					return w.TouchDepth.N > 0 && w.TouchDepth.Median < *minTouchDepth
-				}})
+				{Name: "wide_spread", Breached: func(w analysis.MarketWindow) bool {
+					limit := thresholdsFor(w.Symbol).MaxSpreadTicks
+					return limit > 0 && w.SpreadTicks.N > 0 && w.SpreadTicks.Median > limit
+				}},
+				{Name: "thin_depth", Breached: func(w analysis.MarketWindow) bool {
+					floor := thresholdsFor(w.Symbol).MinTouchDepth
+					return floor > 0 && w.TouchDepth.N > 0 && w.TouchDepth.Median < floor
+				}},
 			}
 			result, err := run.MeasureViability(analysis.ViabilityOptions{
 				WindowNanos: int64(*viabilityWindow * 1e9),
@@ -496,4 +517,44 @@ func sortedRuleNames(breaches map[string]int) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// viabilityClass is one book pattern's corridor. A chain that trades once an
+// hour is healthy and a spot book that does is dead, so a single set of
+// thresholds across every instrument answers the wrong question for most of
+// them.
+type viabilityClass struct {
+	Pattern           string  `json:"pattern"`
+	MinTrades         int     `json:"min_trades"`
+	MinTakerClasses   int     `json:"min_taker_classes"`
+	MinMakerClasses   int     `json:"min_maker_classes"`
+	MaxRoleShare      float64 `json:"max_role_share"`
+	MaxEmptySideShare float64 `json:"max_empty_side_share"`
+	MaxSpreadTicks    float64 `json:"max_spread_ticks"`
+	MinTouchDepth     float64 `json:"min_touch_depth"`
+}
+
+// loadViabilityClasses reads the per-book thresholds, which are matched in
+// file order so a specific pattern can precede a general one.
+func loadViabilityClasses(path string) ([]viabilityClass, error) {
+	if path == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read viability thresholds: %w", err)
+	}
+	var classes []viabilityClass
+	if err := json.Unmarshal(raw, &classes); err != nil {
+		return nil, fmt.Errorf("decode viability thresholds: %w", err)
+	}
+	for _, class := range classes {
+		if class.Pattern == "" {
+			return nil, fmt.Errorf("viability thresholds: every entry needs a symbol pattern")
+		}
+		if _, err := filepath.Match(class.Pattern, "probe"); err != nil {
+			return nil, fmt.Errorf("viability thresholds: pattern %q is not a valid glob: %w", class.Pattern, err)
+		}
+	}
+	return classes, nil
 }

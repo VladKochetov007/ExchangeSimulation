@@ -1,0 +1,42 @@
+[
+  {
+    "pattern": "*-C",
+    "min_trades": 20,
+    "min_taker_classes": 2,
+    "min_maker_classes": 1,
+    "max_role_share": 0.95,
+    "max_empty_side_share": 0.2
+  },
+  {
+    "pattern": "*-P",
+    "min_trades": 20,
+    "min_taker_classes": 2,
+    "min_maker_classes": 1,
+    "max_role_share": 0.95,
+    "max_empty_side_share": 0.2
+  },
+  {
+    "pattern": "ABC-FUT-*",
+    "min_trades": 20,
+    "min_taker_classes": 2,
+    "min_maker_classes": 1,
+    "max_role_share": 0.95,
+    "max_empty_side_share": 0.1
+  },
+  {
+    "pattern": "ABC-PERP",
+    "min_trades": 500,
+    "min_taker_classes": 2,
+    "min_maker_classes": 1,
+    "max_role_share": 0.9,
+    "max_empty_side_share": 0.05
+  },
+  {
+    "pattern": "*",
+    "min_trades": 1000,
+    "min_taker_classes": 3,
+    "min_maker_classes": 2,
+    "max_role_share": 0.8,
+    "max_empty_side_share": 0.02
+  }
+]

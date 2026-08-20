@@ -46,10 +46,10 @@ type ViabilityRule struct {
 
 // MarketWindow is what one book did over one window of simulated time.
 type MarketWindow struct {
-	VenueID string
-	Symbol  string
-	Start   int64 `json:"start"`
-	End     int64 `json:"end"`
+	VenueID string `json:"venue_id"`
+	Symbol  string `json:"symbol"`
+	Start   int64  `json:"start"`
+	End     int64  `json:"end"`
 	// Index counts windows from the run's first, so that a cycle can be named
 	// by its number. The raw quotient is an epoch offset and means nothing to
 	// a reader.
