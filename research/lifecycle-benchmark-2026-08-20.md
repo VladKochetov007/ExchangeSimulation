@@ -98,6 +98,30 @@ and the perpetual, where uninformed flow holds more than eighty percent of the
 volume, and the perpetual's single maker class. Between 308 and 317 of the 375
 books pass it throughout, and no book fails it in every window.
 
+## Evidence that the population ran what it was configured with
+
+A configuration records what a participant was told to do. These are
+measurements of what it did, on the twenty-hour run.
+
+Hedging in the underlying, from `mvanalyze -metric hedging` (one row per dealer,
+north venue):
+
+| policy | hedges | median gap | gap spread | buy share |
+|---|---|---|---|---|
+| banded | 14,516 | 4s | 4s | 0.35 |
+| static, per trade | 19,741 | 2s | 2s | 0.45 |
+| timed, 60s | 180 | 60s | **0s** | 0.02 |
+
+The timed desk's signature is the spread: it rebalances on its schedule and
+nothing else, so the spacing between its hedges has no variance at all, while
+the banded desk's spacing is whatever the market gave it. The vanna-volga desks
+do not appear because they hedge in options rather than in the underlying;
+they traded 4,580, 4,703 and 4,768 option fills at that venue.
+
+Funding, from `mvanalyze -metric lifecycle`: central settled 19 times at an
+hourly period, south 9 times at two-hourly, north twice at eight-hourly, with
+two venues coinciding at seven instants and all three at two.
+
 ## Known measurement caveats
 
 - Twenty hours contains nine expiry rounds, not ten: the first generation
