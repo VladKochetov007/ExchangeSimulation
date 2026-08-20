@@ -30,6 +30,7 @@ func main() {
 	horizonTrades := flag.Int("horizon-trades", 10, "trades ahead over which impact is measured")
 	impactRole := flag.String("impact-role", "", "restrict impact to one participant class")
 	horizonSeconds := flag.Float64("horizon-seconds", 0, "mechanical horizon in simulated seconds; overrides -horizon-trades")
+	exhausted := flag.String("exhausted", "drop", "how orders that clear the whole visible side are priced: drop or deepest")
 	tickSize := flag.Int64("tick", 10_000, "book tick size, for the spread in ticks")
 	walkSizes := flag.String("walk-sizes", "", "comma-separated order sizes in base units, for the walkable fraction")
 	asJSON := flag.Bool("json", false, "emit JSON instead of a table")
@@ -241,8 +242,17 @@ func main() {
 				os.Exit(1)
 			}
 			opts := analysis.MechanicalOptions{HorizonTrades: *horizonTrades}
+			switch *exhausted {
+			case "drop":
+			case "deepest":
+				opts.ExhaustedPrice = analysis.ExhaustedAtDeepestVisible
+			default:
+				fmt.Fprintf(os.Stderr, "unknown -exhausted %q: want drop or deepest\n", *exhausted)
+				os.Exit(2)
+			}
 			if *horizonSeconds > 0 {
-				opts = analysis.MechanicalOptions{HorizonNanos: int64(*horizonSeconds * 1e9)}
+				opts.HorizonTrades = 0
+				opts.HorizonNanos = int64(*horizonSeconds * 1e9)
 			}
 			result, err := analysis.MeasureMechanicalImpact(files[0], opts)
 			if err != nil {

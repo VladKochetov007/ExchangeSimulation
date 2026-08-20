@@ -121,6 +121,18 @@ func (b *ReplayedBook) ConsumeCounterfactual(takerBuys bool, qty int64) int64 {
 	return 0
 }
 
+// DeepestVisible reports the furthest price on the side a taker would consume,
+// or zero when that side is empty. It is the price a walk reaches when the
+// order exhausts the visible book, and so bounds the mechanical move for the
+// orders ConsumeCounterfactual refuses.
+func (b *ReplayedBook) DeepestVisible(takerBuys bool) int64 {
+	prices := b.sortedLevels(!takerBuys)
+	if len(prices) == 0 {
+		return 0
+	}
+	return prices[len(prices)-1]
+}
+
 // replayEvent is the subset of a log record the replay needs, decoded once.
 type replayEvent struct {
 	SimTS int64  `json:"sim_ts"`

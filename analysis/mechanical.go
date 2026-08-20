@@ -74,6 +74,12 @@ type MechanicalImpact struct {
 	// empty, or the order exhausted the visible side so the counterfactual has
 	// no price. Reported rather than silently excluded.
 	UnmeasurableOrders int `json:"unmeasurable_orders"`
+	// ExhaustedOrders counts orders that would consume the whole visible side.
+	// ExhaustedPriced counts how many of those an ExhaustedPolicy priced rather
+	// than dropped; the gap between a dropping run and a pricing run is the
+	// interval the censoring leaves open.
+	ExhaustedOrders int `json:"exhausted_orders"`
+	ExhaustedPriced int `json:"exhausted_priced"`
 }
 
 // minRegressionSample is the smallest number of touch-moving orders from which
@@ -94,6 +100,26 @@ type MechanicalOptions struct {
 	// from one horizon reads out that choice rather than a property of the
 	// market. Sweep this across the quote interval instead.
 	HorizonNanos int64
+	// ExhaustedPrice supplies a counterfactual price for orders that would
+	// consume the whole visible side, which ConsumeCounterfactual refuses.
+	//
+	// Dropping those orders censors the mechanical distribution from above,
+	// and how often it happens is itself an outcome of whatever the arm
+	// manipulated, so a comparison across arms compares different samples.
+	// Supply a policy to bound the estimate instead: nil drops them as before,
+	// ExhaustedAtDeepestVisible walks them to the far end of the book. The two
+	// give the endpoints of the interval the data actually supports.
+	ExhaustedPrice ExhaustedPolicy
+}
+
+// ExhaustedPolicy prices an order that would exhaust the side it consumes.
+// Returning zero leaves the order unmeasurable.
+type ExhaustedPolicy func(book *ReplayedBook, takerBuys bool, qty int64) int64
+
+// ExhaustedAtDeepestVisible prices an exhausting order at the far end of the
+// book it clears: the largest mechanical move the visible depth can justify.
+func ExhaustedAtDeepestVisible(book *ReplayedBook, takerBuys bool, qty int64) int64 {
+	return book.DeepestVisible(takerBuys)
 }
 
 // orderReplay accumulates one aggressive order during the walk.
@@ -171,10 +197,15 @@ func MeasureMechanicalImpact(path string, opts MechanicalOptions) (*MechanicalIm
 		}
 		counterfactualBest := order.bookAtStart.ConsumeCounterfactual(order.buys, order.qty)
 		if counterfactualBest <= 0 {
-			// The order would have exhausted the visible side, so there is no
-			// counterfactual price. Excluded rather than clamped.
-			result.UnmeasurableOrders++
-			continue
+			result.ExhaustedOrders++
+			if opts.ExhaustedPrice != nil {
+				counterfactualBest = opts.ExhaustedPrice(order.bookAtStart, order.buys, order.qty)
+			}
+			if counterfactualBest <= 0 {
+				result.UnmeasurableOrders++
+				continue
+			}
+			result.ExhaustedPriced++
 		}
 		counterfactualMid := counterfactualMidpoint(order, counterfactualBest)
 		if counterfactualMid <= 0 {

@@ -342,6 +342,60 @@ func TestMechanicalImpactExcludesAnExhaustedSide(t *testing.T) {
 	}
 }
 
+// Dropping the orders that clear the whole visible side censors the mechanical
+// distribution from above, and how often that happens is an outcome of whatever
+// an experiment manipulated. A policy must be able to price them instead, so a
+// comparison across arms can be bounded rather than silently resampled.
+func TestExhaustedOrdersCanBePricedInsteadOfDropped(t *testing.T) {
+	lines := []string{
+		deltaLine(1, "BUY", 10_000, 1000),
+		deltaLine(1, "SELL", 10_200, 10),
+		deltaLine(1, "SELL", 10_600, 10),
+		tradeEventLine(2, 1, "BUY", 10_600, 20),
+		deltaLine(2, "SELL", 10_200, 0),
+		deltaLine(2, "SELL", 10_600, 0),
+		deltaLine(2, "SELL", 10_800, 1000),
+	}
+	for i := int64(0); i < 5; i++ {
+		lines = append(lines, tradeEventLine(3+i, uint64(10+i), "BUY", 10_800, 1))
+	}
+	path := writeLog(t, lines)
+
+	dropped, err := MeasureMechanicalImpact(path, MechanicalOptions{HorizonTrades: 1})
+	if err != nil {
+		t.Fatalf("measure dropped: %v", err)
+	}
+	if dropped.ExhaustedOrders != 1 || dropped.ExhaustedPriced != 0 {
+		t.Fatalf("exhausted accounting = %d priced %d, want 1 and 0: %+v",
+			dropped.ExhaustedOrders, dropped.ExhaustedPriced, dropped)
+	}
+	if dropped.MovedOrders != 0 {
+		t.Fatalf("the exhausting order was measured anyway: %+v", dropped)
+	}
+
+	priced, err := MeasureMechanicalImpact(path, MechanicalOptions{
+		HorizonTrades:  1,
+		ExhaustedPrice: ExhaustedAtDeepestVisible,
+	})
+	if err != nil {
+		t.Fatalf("measure priced: %v", err)
+	}
+	if priced.ExhaustedPriced != 1 || priced.MovedOrders != 1 {
+		t.Fatalf("priced = %d moved = %d, want 1 and 1: %+v",
+			priced.ExhaustedPriced, priced.MovedOrders, priced)
+	}
+	// preMid 10100; the walk reaches the deepest visible ask at 10600, so the
+	// counterfactual mid is 10300.
+	wantMechanical := 1e4 * math.Log(10300.0/10100.0)
+	if math.Abs(priced.MovedMeanMechanicalBps-wantMechanical) > 1e-6 {
+		t.Errorf("mechanical = %.6f, want %.6f", priced.MovedMeanMechanicalBps, wantMechanical)
+	}
+	if priced.UnmeasurableOrders >= dropped.UnmeasurableOrders {
+		t.Errorf("pricing the exhausted order did not reduce the dropped count: %d vs %d",
+			priced.UnmeasurableOrders, dropped.UnmeasurableOrders)
+	}
+}
+
 // The revision term must be the realised response minus the mechanical one,
 // computed per order. Defining it as a regression residual would hand the
 // whole shared covariance to the mechanical term, which is exactly the
