@@ -1,0 +1,104 @@
+{
+  "frozen_baseline": {
+    "commit": "01c9ceb11aa1",
+    "config": "research/configs/frozen-baseline-2026-08-21.json",
+    "run_length_hours": 24,
+    "seeds": [101, 102, 103],
+    "reproducibility_mode": "GOMAXPROCS=1",
+    "note": "Runs recorded before 2026-08-21 were produced multi-core and are reproducible only to within the noise recorded under measurement_noise."
+  },
+  "measurement_noise": {
+    "method": "four repeats of the frozen baseline, 2 simulated hours, multi-core",
+    "cdf_usd_terminal_over_opening": [1.0010, 1.0013, 1.0010, 1.0010],
+    "total_marked_equity": [
+      27555620495945592,
+      27551540930939199,
+      27555620495945592,
+      27555620495945592
+    ],
+    "spread_primary_metric_pct": 0.03,
+    "spread_total_equity_pct": 0.015,
+    "implication": "Effects below about a tenth of a percent require the pinned mode; larger effects survive."
+  },
+  "accounting": {
+    "identity": "InternalNet + ExchangeTake + OpenLinearValue = 0, per asset",
+    "residuals_24h": {"ABC": 0, "CDF": 0, "USD": 7594763},
+    "residual_relative_to_external_float": 4.6e-10,
+    "residual_relative_to_gross_turnover": 7e-7,
+    "rounding_test": {
+      "pre_registered": true,
+      "primary_metric": "residual per derivative balance-change record",
+      "kill_criterion": 10,
+      "observed": {"6h": -1.39, "12h": -1.12},
+      "verdict": "passed; residual attributed to integer truncation"
+    },
+    "spot_books": {"base_asset_net": 0, "quote_asset_net": "equals logged fee revenue exactly"},
+    "zero_net_supply": "holds exactly for every contract, from position updates alone",
+    "position_reconstruction_gap": 0,
+    "movements_vs_reported_holdings": {"accounts": 735, "mismatched": 0},
+    "balance_delta_self_consistency": {"checked": 14991128, "mismatched": 0, "decode_failures": 0},
+    "venue_take_vs_movement_stream": "exact for all three assets after the venue ledger was introduced",
+    "in_engine_conservation_check": {"runs": "3 venues, 20 simulated minutes", "violations": 0}
+  },
+  "lifecycle_semantics": {
+    "dated_settlements_checked": 15,
+    "dated_payout_mismatches": 0,
+    "dated_unpaid_holders": 0,
+    "fills_after_expiry": 0,
+    "funding_instants_checked": 17,
+    "funding_instants_outside_truncation_bound": 0,
+    "funding_direction_inconsistent": 0,
+    "option_expiries_checked": 150,
+    "option_expiries_in_the_money": 75,
+    "option_holder_payouts_checked": "approximately 2100",
+    "option_holders_mispaid": 0,
+    "worthless_options_paid": 0
+  },
+  "no_arbitrage": {
+    "cross_venue_same_asset": {"profitable_instants": 0, "mean_edge_bps": [-4.2, -5.1], "verdict": "passes, but see V-004"},
+    "triangular": {"profitable_share": [0.8614, 0.8865], "mean_edge_bps": 284, "longest_positive_run_seconds": [1484, 1582], "verdict": "fails"},
+    "perpetual_carry": {"profitable_share": [0.1508, 0.6294], "mean_all_bps": [-2.87, -0.63], "max_edge_bps": 5.14, "verdict": "passes"},
+    "put_call_parity": {"profitable_instants": 0, "mean_all_bps": [-43.18, -41.29], "verdict": "passes"},
+    "not_searched": ["calendar spreads", "settlement boundary", "tick rounding"]
+  },
+  "findings": {
+    "V-001": {"severity": "critical", "title": "persistent compounding triangular arbitrage", "status": "explained by V-002"},
+    "V-002": {"severity": "critical", "title": "CDF/USD maker takes its own book up forty-fold", "status": "causally resolved"},
+    "V-003": {"severity": "process", "title": "freeze named a commit that did not build the runs", "status": "resolved"},
+    "V-004": {"severity": "interpretive", "title": "cross-venue prices held together by a shared index, not arbitrage", "status": "open"},
+    "V-005": {"severity": "coverage", "title": "liquidation never fires, so it is unvalidated", "status": "open"},
+    "V-006": {"severity": "moderate", "title": "venue took revenue with no event recording it", "status": "fixed"},
+    "V-007": {"severity": "moderate", "title": "borrowed-wallet deltas counted as holdings, doubling every borrow", "status": "fixed"},
+    "V-008": {"severity": "critical", "title": "runs with latency profiles not reproducible on multi-core", "status": "mitigated by pinning; root cause not isolated"}
+  },
+  "causal_ablations": {
+    "V-002": {
+      "primary_metric": "CDF/USD terminal price over opening price",
+      "control": {"seed_101": 49.41, "seed_103": 45.00},
+      "arm_A_elastic_supplier_on_cdf": {"seed_101": 2.07, "seed_103": 1.05},
+      "arm_B_maker_skew_off": {"seed_101": 1.00, "seed_103": 1.00},
+      "prediction": "either/or between the two mechanisms",
+      "outcome": "prediction falsified; both arms suppress it, so skew amplifies and elastic demand damps",
+      "side_effect": {"abc_cdf_terminal_over_opening": {"control": [0.15, 0.17], "arm_B": [0.80, 0.80]}}
+    },
+    "not_run": ["cross-venue arbitrage off", "basis arbitrage off", "funding off", "option delta hedging off", "vanna-volga off", "put-call parity off", "cross-venue latency x10", "liquidation off"]
+  },
+  "audit_tool_defects_found_and_fixed": [
+    "int64 overflow in settlement payout arithmetic, which falsely accused the engine",
+    "positions read at or after expiry instead of before it",
+    "arbitrage cycles priced against quotes from later in the run inside a concurrent scan",
+    "settlement instants wrongly required to net to zero",
+    "option positions read from a stream that never carries them, making the exercise audit vacuous",
+    "exercise checked only on the summed payout, blind to compensating errors",
+    "residuals compared against zero rather than the per-account truncation bound",
+    "borrowed-wallet deltas summed as holdings",
+    "venue take read from the report it was auditing",
+    "chain check written twice wrongly before the report-anchored form worked"
+  ],
+  "mechanisms_that_never_ran": [
+    "liquidation, margin call, insurance fund, bankruptcy",
+    "cross-venue arbitrage, since the population contains no such participant",
+    "isolated-margin collateral, which logs one leg of two and is inert under cross margin",
+    "borrow repayment: 1229 borrows and zero repayments in 24 hours"
+  ]
+}
