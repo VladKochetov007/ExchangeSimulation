@@ -63,3 +63,30 @@ Recorded here only after an attempt to falsify them has been made and failed.
 ## Unresolved
 
 Recorded here when an attempt is inconclusive rather than negative.
+
+## Pre-registered test: is the USD residual truncation or leakage?
+
+**Observation.** The closed-system identity holds exactly for ABC and CDF
+(residual 0) and leaves a residual in USD: 4,248 units over 30 simulated
+minutes and 7,594,763 units over 24 hours, against an external float of
+1.65e16 units (relative 4.6e-10). Spot books conserve exactly — base assets net
+to zero and quote debits equal the venues' logged fee revenue to the unit — and
+the venues' own fee ledger agrees with the fee-revenue event stream exactly.
+The residual is therefore in the derivative cash path.
+
+**Hypothesis.** Every realised profit, funding charge and settlement is an
+integer `MulDiv`, which truncates toward zero, so each such operation can lose
+up to one unit. If that is the whole story, the residual is bounded by the
+number of truncating operations.
+
+**Primary metric.** Residual in USD units divided by the number of derivative
+balance-change records in the same run.
+
+**Prediction.** If truncation explains it, that ratio stays below about ten and
+does not grow with run length.
+
+**Kill criterion.** If the ratio exceeds ten, or grows with run length, the
+residual is not truncation and a mechanism is leaking value.
+
+**Design.** The frozen baseline, seed 101, at 2, 6, 12 and 24 simulated hours.
+Stated before the runs were measured.
