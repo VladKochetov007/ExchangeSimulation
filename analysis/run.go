@@ -91,6 +91,16 @@ type Report struct {
 	TerminalAccounts []AccountRow    `json:"terminal_accounts"`
 	Metaorders       []Metaorder     `json:"metaorders"`
 	RequestBudgets   []RequestBudget `json:"request_budgets"`
+	VenueLedgers     []VenueLedger   `json:"venue_ledgers"`
+}
+
+// VenueLedger is what an exchange itself holds: the fees it took and whatever
+// its insurance fund absorbed. A conservation identity that ignores it reports
+// every fee as value destroyed.
+type VenueLedger struct {
+	VenueID       string           `json:"venue_id"`
+	FeeRevenue    map[string]int64 `json:"fee_revenue"`
+	InsuranceFund map[string]int64 `json:"insurance_fund"`
 }
 
 // Run is one simulation output directory.

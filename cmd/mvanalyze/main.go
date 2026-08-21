@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -308,6 +308,43 @@ func main() {
 					fmt.Printf("    %-8s %-18s trades %6d  qty %14d  gap %7.1fs (spread %7.1fs)  buys %4.2f\n",
 						profile.VenueID, profile.Role, profile.Trades, profile.Qty,
 						profile.MedianGapSeconds, profile.GapSpreadSeconds, profile.BuyShare)
+				}
+			})
+		case "conservation":
+			result, err := run.MeasureConservation(analysis.ConservationOptions{})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s balance deltas checked %d, self-inconsistent %d (worst gap %d)\n",
+					dir, result.Deltas.Checked, result.Deltas.Mismatched, result.Deltas.WorstGap)
+				for _, flow := range result.Flows {
+					fmt.Printf("    %-20s %-5s credits %18d  debits %18d  net %14d  (%d records)\n",
+						flow.Reason, flow.Asset, flow.Credits, flow.Debits, flow.Net, flow.Records)
+				}
+				if worst, ok := analysis.WorstResidual(result.FundingInstants); ok {
+					fmt.Printf("    funding: %d instants, worst residual %d at %s %d\n",
+						len(result.FundingInstants), worst.Net, worst.VenueID, worst.Timestamp)
+				}
+				if worst, ok := analysis.WorstResidual(result.ExpiryInstants); ok {
+					// Not an error: a settlement pays each holder against its
+					// own entry price, so the instant nets to zero only if
+					// every holder entered at the same price.
+					fmt.Printf("    expiry:  %d instants, largest net %d at %s %d (not required to be zero)\n",
+						len(result.ExpiryInstants), worst.Net, worst.VenueID, worst.Timestamp)
+				}
+				for _, identity := range result.VenueIdentities {
+					if identity.Residual == 0 {
+						continue
+					}
+					fmt.Printf("    venue %-8s %-4s residual %14d  reasons %v\n",
+						identity.VenueID, identity.Asset, identity.Residual, identity.ByReason)
+				}
+				for _, identity := range result.Identities {
+					fmt.Printf("    identity %-4s external %20d  internal %18d  exchange %14d  open %16d  residual %12d (%.2e)\n",
+						identity.Asset, identity.ExternalIn, identity.InternalNet, identity.ExchangeTake,
+						identity.OpenLinearValue, identity.Residual, identity.ResidualRelative)
 				}
 			})
 		case "lifecycle":
