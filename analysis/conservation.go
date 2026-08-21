@@ -97,6 +97,10 @@ type Conservation struct {
 	// value creation is a mistake this comment exists to prevent; the identity
 	// that does bind is Identities below.
 	ExpiryInstants []InstantResidual `json:"expiry_instants"`
+	// OptionExpiryInstants are held to the stricter standard: an option pays
+	// intrinsic value times position, which is independent of what the holder
+	// paid, so each instant must net to zero up to one unit per account.
+	OptionExpiryInstants []InstantResidual `json:"option_expiry_instants"`
 
 	// FeesLogged is what the venues recorded taking, per asset, from the
 	// fee-revenue stream rather than from the account report. It is the
@@ -185,6 +189,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	perVenue := make(map[string]map[string]int64)
 	funding := make(map[instantKey]*InstantResidual)
 	expiry := make(map[instantKey]*InstantResidual)
+	optionExpiry := make(map[instantKey]*InstantResidual)
 	deltas := DeltaConsistency{}
 	// The balance chain is per wallet and has to be walked in time order,
 	// which a concurrent scan does not give, so the records are collected and
@@ -304,10 +309,17 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			venueFlow.Records++
 
 			var bucket map[instantKey]*InstantResidual
-			switch record.Reason {
-			case "funding_settlement":
+			switch {
+			case record.Reason == "funding_settlement":
 				bucket = funding
-			case "expiry_settlement":
+			case record.Reason == "expiry_settlement" && isOptionSymbol(record.Symbol):
+				// An option's payoff is its intrinsic value times the
+				// position, which does not depend on what the holder paid, so
+				// with every contract at zero net supply each option's expiry
+				// instant must net to zero exactly. A dated future's payoff is
+				// measured against each holder's own entry price and must not.
+				bucket = optionExpiry
+			case record.Reason == "expiry_settlement":
 				bucket = expiry
 			default:
 				continue
@@ -379,6 +391,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	})
 	result.FundingInstants = sortedResiduals(funding)
 	result.ExpiryInstants = sortedResiduals(expiry)
+	result.OptionExpiryInstants = sortedResiduals(optionExpiry)
 	return result, nil
 }
 

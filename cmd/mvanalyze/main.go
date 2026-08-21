@@ -471,6 +471,10 @@ func main() {
 						identity.VenueID, identity.Asset, identity.Residual, identity.ByReason)
 				}
 				fmt.Printf("    fees on the event stream: %v\n", result.FeesLogged)
+				if worst, ok := analysis.WorstResidual(result.OptionExpiryInstants); ok {
+					fmt.Printf("    option expiry: %d instants, worst net %d at %s %d (must be zero: payoff does not depend on entry price)\n",
+						len(result.OptionExpiryInstants), worst.Net, worst.VenueID, worst.Timestamp)
+				}
 				for _, identity := range result.Identities {
 					streamed := result.FeesLogged[identity.Asset]
 					if gap := identity.ExchangeTake - streamed; gap != 0 {
