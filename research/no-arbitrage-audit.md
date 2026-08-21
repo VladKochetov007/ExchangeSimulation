@@ -12,7 +12,9 @@ anybody; an edge it finds is a bug only if nothing ever closes it.
 |---|---|
 | cross-venue, same asset (ABC/USD across three venues) | no profitable instant in any pair; mean edge −4.2 to −4.8 bps, i.e. inside the two-leg fee |
 | spot triangular (ABC/USD, CDF/USD, ABC/CDF at one venue) | **profitable in 86-89% of instants** at every venue, mean +284 bps over 30 minutes, positive without interruption for 1,484-1,582 of the 1,797 measured seconds |
-| perpetual carry, calendar, put-call parity, settlement-boundary, tick-rounding | not yet searched |
+| perpetual carry (spot against the perpetual, both sides after fees) | passes: positive in 15–63% of instants depending on venue, mean over all instants negative everywhere (−0.6 to −2.9 bps), largest single edge +5.1 bps, longest positive stretch 130–722 s. Reported as a basis rather than an arbitrage: it is closed by funding, not by a trade |
+| put-call parity (synthetic forward against the underlying) | passes: **no profitable instant at any venue**, mean −41 to −43 bps, which is the width of the option market rather than a mispricing |
+| calendar spreads, settlement-boundary, tick-rounding | not yet searched |
 
 ## V-001 — the cross book is unanchored and its dislocation compounds
 
