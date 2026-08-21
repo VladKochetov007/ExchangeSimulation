@@ -438,8 +438,10 @@ func main() {
 				os.Exit(1)
 			}
 			emit(dir, result, *asJSON, func() {
-				fmt.Printf("%-22s balance deltas checked %d, self-inconsistent %d (worst gap %d)\n",
-					dir, result.Deltas.Checked, result.Deltas.Mismatched, result.Deltas.WorstGap)
+				fmt.Printf("%-22s balance deltas checked %d, self-inconsistent %d (worst %d); chain links %d, broken %d (worst %d); decode failures %d\n",
+					dir, result.Deltas.Checked, result.Deltas.Mismatched, result.Deltas.WorstGap,
+					result.Deltas.ChainChecked, result.Deltas.ChainBroken, result.Deltas.WorstChain,
+					result.Deltas.DecodeFailures)
 				for _, flow := range result.Flows {
 					fmt.Printf("    %-20s %-5s credits %18d  debits %18d  net %14d  (%d records)\n",
 						flow.Reason, flow.Asset, flow.Credits, flow.Debits, flow.Net, flow.Records)
@@ -468,7 +470,14 @@ func main() {
 					fmt.Printf("    venue %-8s %-4s residual %14d  reasons %v\n",
 						identity.VenueID, identity.Asset, identity.Residual, identity.ByReason)
 				}
-				fmt.Printf("    fees logged by the venues: %v\n", result.FeesLogged)
+				fmt.Printf("    fees on the event stream: %v\n", result.FeesLogged)
+				for _, identity := range result.Identities {
+					streamed := result.FeesLogged[identity.Asset]
+					if gap := identity.ExchangeTake - streamed; gap != 0 {
+						fmt.Printf("    venue take for %-4s exceeds the fee stream by %14d — revenue taken without a fee event\n",
+							identity.Asset, gap)
+					}
+				}
 				for _, class := range sortedRuleNames(map[string]int{"spot": 0, "perp": 0, "dated": 0, "option": 0, "none": 0}) {
 					if net := result.ClassNet[class]; net != nil {
 						fmt.Printf("    class %-7s net %v  (%d records)\n", class, net, result.ClassRecords[class])

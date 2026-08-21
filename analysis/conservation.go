@@ -54,6 +54,19 @@ type DeltaConsistency struct {
 	Checked    int   `json:"checked"`
 	Mismatched int   `json:"mismatched"`
 	WorstGap   int64 `json:"worst_gap"`
+	// ChainChecked and ChainBroken verify the other half: that each
+	// participant's reported final holding equals its reported initial holding
+	// plus every movement logged for it. Within-record consistency cannot see
+	// a balance changed without a log; this closes that loop, and it is the
+	// only check here covering the class the identity is blind to.
+	ChainChecked int   `json:"chain_checked"`
+	ChainBroken  int   `json:"chain_broken"`
+	WorstChain   int64 `json:"worst_chain_gap"`
+	// DecodeFailures counts records that could not be read. A scan that reads
+	// nothing produces a residual of zero for every asset, which is
+	// indistinguishable from a pass, so silence is counted rather than
+	// trusted.
+	DecodeFailures int `json:"decode_failures"`
 }
 
 // Conservation is the audit of a run's logged balance movements.
@@ -173,6 +186,22 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	funding := make(map[instantKey]*InstantResidual)
 	expiry := make(map[instantKey]*InstantResidual)
 	deltas := DeltaConsistency{}
+	// The balance chain is per wallet and has to be walked in time order,
+	// which a concurrent scan does not give, so the records are collected and
+	// ordered afterwards.
+	type chainPoint struct {
+		at            int64
+		before, after int64
+		delta         int64
+	}
+	type walletKey struct {
+		venue    string
+		clientID uint64
+		asset    string
+		wallet   string
+	}
+	_ = walletKey{}
+	chain := make(map[walletKey][]chainPoint)
 
 	venueFlows := make(map[string]map[flowKey]*AssetFlow)
 	fees := make(map[string]int64)
@@ -197,6 +226,9 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		}
 		var record balanceChangeRecord
 		if event.Decode(&record) != nil || len(record.Changes) == 0 {
+			mu.Lock()
+			deltas.DecodeFailures++
+			mu.Unlock()
 			return
 		}
 		class := contractClass(record.Symbol)
@@ -218,6 +250,22 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 					deltas.WorstGap = gap
 				}
 			}
+			chainKey := walletKey{event.VenueID, record.ClientID, change.Asset, change.Wallet}
+			chain[chainKey] = append(chain[chainKey], chainPoint{
+				at: instant, before: change.OldBalance, after: change.NewBalance, delta: change.Delta,
+			})
+
+			// A borrowed-wallet entry is a liability, not a holding. A borrow
+			// logs the cash it credits and the debt it creates as two positive
+			// deltas, so counting both doubles the money borrowed and makes a
+			// repayment subtract twice what it returns. Nothing in the audited
+			// runs ever repays, which is why this went unnoticed. The flip
+			// happens after the within-record check, which is about the
+			// record's own arithmetic and not about what the wallet means.
+			if change.Wallet == borrowedWallet {
+				change.Delta = -change.Delta
+			}
+
 			key := flowKey{record.Reason, change.Asset}
 			flow := flows[key]
 			if flow == nil {
@@ -277,6 +325,46 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		return nil, err
 	}
 
+	// The movements are checked against the account report rather than against
+	// their own first and last record. Many records share a timestamp and the
+	// log carries no sequence number, so which record opens and which closes a
+	// wallet is not recoverable, and an endpoint check taken from the stream
+	// reports false breaks on exactly the busiest accounts.
+	//
+	// Anchoring on the report closes the loop the identity cannot see: every
+	// participant's reported final holding must equal its reported initial
+	// holding plus every movement logged for it. A balance changed without a
+	// logged record breaks this and nothing else in the audit would notice.
+	moved := make(map[participantAsset]int64)
+	for key, points := range chain {
+		sign := int64(1)
+		if key.wallet == borrowedWallet {
+			sign = -1
+		}
+		for _, point := range points {
+			moved[participantAsset{key.venue, key.clientID, key.asset}] += sign * point.delta
+		}
+	}
+	// Anchored at zero rather than at the reported opening balance: the
+	// deposits that create an opening balance are themselves logged
+	// movements, so adding them to a reported opening double-counts every
+	// account's entire endowment.
+	terminal := reportedBalances(r.Report.TerminalAccounts)
+	for key, closing := range terminal {
+		deltas.ChainChecked++
+		gap := closing - moved[key]
+		if gap == 0 {
+			continue
+		}
+		deltas.ChainBroken++
+		if gap < 0 {
+			gap = -gap
+		}
+		if gap > deltas.WorstChain {
+			deltas.WorstChain = gap
+		}
+	}
+
 	result := &Conservation{PerVenueNet: perVenue, Deltas: deltas, FeesLogged: fees, ClassNet: classNet, ClassRecords: classRecords}
 	result.Identities = r.conservationIdentities(flows)
 	result.VenueIdentities = r.venueIdentities(venueFlows)
@@ -331,6 +419,9 @@ func WorstResidual(residuals []InstantResidual) (InstantResidual, bool) {
 	}
 	return worst, found
 }
+
+// borrowedWallet holds a participant's debt rather than its money.
+const borrowedWallet = "borrowed"
 
 // externalReasons are the movements that legitimately create a participant's
 // holdings out of nothing, because they come from outside the market.
@@ -508,4 +599,27 @@ func contractClass(symbol string) string {
 	default:
 		return "spot"
 	}
+}
+
+// participantAsset identifies one participant's holding of one asset, across
+// every wallet it keeps that asset in.
+type participantAsset struct {
+	venue    string
+	clientID uint64
+	asset    string
+}
+
+// reportedBalances flattens an account report into net holdings per asset,
+// counting debt as negative.
+func reportedBalances(rows []AccountRow) map[participantAsset]int64 {
+	out := make(map[participantAsset]int64, len(rows)*2)
+	for _, row := range rows {
+		for _, balance := range row.Account.SpotBalances {
+			out[participantAsset{row.VenueID, row.ClientID, balance.Asset}] += balance.NetAsset
+		}
+		for _, balance := range row.Account.PerpBalances {
+			out[participantAsset{row.VenueID, row.ClientID, balance.Asset}] += balance.NetAsset
+		}
+	}
+	return out
 }
