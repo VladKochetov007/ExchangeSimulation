@@ -90,6 +90,10 @@ type Conservation struct {
 	// independent check on ExchangeTake: two records of the same money that
 	// disagree mean one of them is wrong.
 	FeesLogged map[string]int64 `json:"fees_logged"`
+	// ClassRecords counts the balance changes each class produced, which is
+	// the denominator a rounding argument needs: a residual is only rounding
+	// if it is small against the number of operations that can round.
+	ClassRecords map[string]int `json:"class_records"`
 	// ClassNet splits the internal movements by contract class, since the
 	// classes conserve differently: a spot book's cash legs cancel against its
 	// fees exactly, while a perpetual's do not until every position closes.
@@ -173,6 +177,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	venueFlows := make(map[string]map[flowKey]*AssetFlow)
 	fees := make(map[string]int64)
 	classNet := make(map[string]map[string]int64)
+	classRecords := make(map[string]int)
 	scan := ScanOptions{Events: []string{"balance_change", "fee_revenue"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
 	type feePayload struct {
 		Asset    string `json:"asset"`
@@ -201,6 +206,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		}
 		mu.Lock()
 		defer mu.Unlock()
+		classRecords[class]++
 		for _, change := range record.Changes {
 			deltas.Checked++
 			if gap := change.NewBalance - change.OldBalance - change.Delta; gap != 0 {
@@ -271,7 +277,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		return nil, err
 	}
 
-	result := &Conservation{PerVenueNet: perVenue, Deltas: deltas, FeesLogged: fees, ClassNet: classNet}
+	result := &Conservation{PerVenueNet: perVenue, Deltas: deltas, FeesLogged: fees, ClassNet: classNet, ClassRecords: classRecords}
 	result.Identities = r.conservationIdentities(flows)
 	result.VenueIdentities = r.venueIdentities(venueFlows)
 	for _, flow := range flows {

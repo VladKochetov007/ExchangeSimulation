@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, settlements")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -312,6 +312,24 @@ func main() {
 						profile.MedianGapSeconds, profile.GapSpreadSeconds, profile.BuyShare)
 				}
 			})
+		case "settlements":
+			result, err := run.MeasureSettlements(analysis.SettlementAuditOptions{BasePrecision: *basePrecision})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s settlements %3d  payout mismatches %d  holder/payee mismatches %d  fills after expiry %d\n",
+					dir, len(result.Checks), result.Mismatched, result.Unpaid, result.TotalTradesAfterExpiry)
+				for _, check := range result.Checks {
+					if check.Residual == 0 && check.PaidAccounts == check.Holders && check.TradesAfterExpiry == 0 {
+						continue
+					}
+					fmt.Printf("    %-8s %-26s settle %10d  holders %3d/%3d  net %12d  expected %14d paid %14d residual %12d  after-expiry fills %d\n",
+						check.VenueID, check.Symbol, check.SettlementPrice, check.PaidAccounts, check.Holders,
+						check.NetSize, check.ExpectedPayout, check.PaidOut, check.Residual, check.TradesAfterExpiry)
+				}
+			})
 		case "positions":
 			result, err := run.MeasurePositions(analysis.PositionOptions{BasePrecision: *basePrecision})
 			if err != nil {
@@ -378,7 +396,7 @@ func main() {
 				fmt.Printf("    fees logged by the venues: %v\n", result.FeesLogged)
 				for _, class := range sortedRuleNames(map[string]int{"spot": 0, "perp": 0, "dated": 0, "option": 0, "none": 0}) {
 					if net := result.ClassNet[class]; net != nil {
-						fmt.Printf("    class %-7s net %v\n", class, net)
+						fmt.Printf("    class %-7s net %v  (%d records)\n", class, net, result.ClassRecords[class])
 					}
 				}
 				for _, identity := range result.Identities {
