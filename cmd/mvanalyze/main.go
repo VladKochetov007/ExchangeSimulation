@@ -321,9 +321,9 @@ func main() {
 				os.Exit(1)
 			}
 			emit(dir, result, *asJSON, func() {
-				fmt.Printf("%-22s funding instants %3d (residual non-zero %d, direction inconsistent %d)   option expiries %4d (payout mismatch %d, worthless paid %d)\n",
+				fmt.Printf("%-22s funding instants %3d (residual non-zero %d, direction inconsistent %d)   option expiries %4d (payout mismatch %d, worthless paid %d, holders mispaid %d)\n",
 					dir, len(result.Funding), result.FundingBroken, result.FundingSignWrong,
-					len(result.Exercises), result.ExerciseBroken, result.WorthlessPaid)
+					len(result.Exercises), result.ExerciseBroken, result.WorthlessPaid, result.HoldersMispaid)
 				for _, check := range result.Funding {
 					if check.Residual == 0 && check.SignConsistent {
 						continue

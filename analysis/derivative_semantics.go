@@ -27,9 +27,10 @@ type FundingInstantCheck struct {
 	Receivers int   `json:"receivers"`
 	Paid      int64 `json:"paid"`
 	Received  int64 `json:"received"`
-	// Residual is Paid plus Received, which must be zero: funding is a
-	// transfer between the two sides of one contract, not a payment by the
-	// venue.
+	// Residual is Paid plus Received. Funding is a transfer between the two
+	// sides of one contract, so it must be zero up to the truncation of each
+	// account's integer share: a settlement across n accounts may lose up to n
+	// units and no more.
 	Residual int64 `json:"residual"`
 	// LongsPaid records the direction: with a positive funding rate the longs
 	// pay, so a run in which the sign is reversed is a sign error in the
@@ -58,6 +59,12 @@ type ExerciseCheck struct {
 	ExpectedPayout int64 `json:"expected_payout"`
 	PaidOut        int64 `json:"paid_out"`
 	Residual       int64 `json:"residual"`
+	// HoldersMispaid counts holders whose own payout does not match their own
+	// position. The summed residual cannot see a compensating pair — one
+	// holder overpaid and another underpaid by the same amount nets to zero —
+	// which is precisely the error a settlement bug produces.
+	HoldersMispaid int   `json:"holders_mispaid"`
+	WorstHolderGap int64 `json:"worst_holder_gap"`
 	// OutOfMoneyPaid flags an option that paid something while worthless.
 	OutOfMoneyPaid bool `json:"out_of_money_paid"`
 }
@@ -69,7 +76,10 @@ type DerivativeSemantics struct {
 	FundingBroken    int                   `json:"funding_broken"`
 	FundingSignWrong int                   `json:"funding_sign_wrong"`
 	ExerciseBroken   int                   `json:"exercise_broken"`
-	WorthlessPaid    int                   `json:"worthless_paid"`
+	// HoldersMispaid is the count across every contract of holders whose own
+	// payout did not match their own position.
+	HoldersMispaid int `json:"holders_mispaid"`
+	WorthlessPaid  int `json:"worthless_paid"`
 }
 
 // MeasureDerivativeSemantics audits perpetual funding and option exercise.
@@ -108,6 +118,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		amount   int64
 		accounts int
 	})
+	optionPaidPerHolder := make(map[positionKey]int64)
 	type positionState struct {
 		size, at int64
 	}
@@ -129,8 +140,17 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		return nil, err
 	}
 
+	// Option positions are not published as position updates — only linear
+	// contracts are — so an option holding has to be rebuilt from the fills
+	// themselves. That is the more independent reconstruction anyway: it uses
+	// the trades rather than the venue's own bookkeeping of them.
+	type optionFill struct {
+		Symbol string `json:"symbol"`
+		Qty    int64  `json:"qty"`
+		Side   string `json:"side"`
+	}
 	scan := ScanOptions{
-		Events:        []string{"funding_rate_update", "balance_change", "position_update"},
+		Events:        []string{"funding_rate_update", "balance_change", "position_update", "OrderFill"},
 		Files:         opts.Files,
 		FilesSelected: opts.FilesSelected,
 	}
@@ -156,14 +176,8 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			key := positionKey{event.VenueID, payload.ClientID, payload.Symbol}
 			mu.Lock()
 			if isOptionSymbol(payload.Symbol) {
-				if expiry, known := expiries[markKey{event.VenueID, payload.Symbol}]; known && at > expiry {
-					mu.Unlock()
-					return
-				}
-				state := optionPositions[key]
-				if state == nil || at >= state.at {
-					optionPositions[key] = &positionState{size: payload.NewSize, at: at}
-				}
+				// Options are rebuilt from fills above; a position update for
+				// one would be the venue's own bookkeeping and is not used.
 				mu.Unlock()
 				return
 			}
@@ -171,6 +185,36 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			if state == nil || at >= state.at {
 				perpPositions[key] = &positionState{size: payload.NewSize, at: at}
 			}
+			mu.Unlock()
+		case "OrderFill":
+			var fill optionFill
+			if event.Decode(&fill) != nil || fill.Qty <= 0 {
+				return
+			}
+			symbol := event.Symbol
+			if symbol == "" {
+				symbol = fill.Symbol
+			}
+			if !isOptionSymbol(symbol) {
+				return
+			}
+			signed := fill.Qty
+			if fill.Side == "SELL" {
+				signed = -fill.Qty
+			}
+			mu.Lock()
+			if expiry, known := expiries[markKey{event.VenueID, symbol}]; known && event.SimTS >= expiry {
+				mu.Unlock()
+				return
+			}
+			key := positionKey{event.VenueID, event.ClientID, symbol}
+			state := optionPositions[key]
+			if state == nil {
+				state = &positionState{}
+				optionPositions[key] = state
+			}
+			state.size += signed
+			state.at = event.SimTS
 			mu.Unlock()
 		case "balance_change":
 			var record balanceChangeRecord
@@ -195,7 +239,13 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 					bucket = &fundingBucket{}
 					funding[key] = bucket
 				}
-				if total >= 0 {
+				// An account charged nothing is not a payer or a receiver. It
+				// is a holder of no position at the settlement instant, and
+				// counting it makes a zero-rate settlement look misdirected.
+				if total == 0 {
+					return
+				}
+				if total > 0 {
 					bucket.receivers++
 					bucket.received += total
 					return
@@ -208,6 +258,11 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				entry.amount += total
 				entry.accounts++
 				optionPaid[key] = entry
+				holder := record.ClientID
+				if holder == 0 {
+					holder = event.ClientID
+				}
+				optionPaidPerHolder[positionKey{event.VenueID, holder, record.Symbol}] += total
 			}
 		}
 	}); err != nil {
@@ -229,12 +284,17 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		}
 		check.Rate = rateAt(rates[key.venue], key.timestamp)
 		check.LongsPaid = bucket.paid < 0
-		// With a positive rate the longs pay, so somebody must have been
-		// charged; a zero rate should charge nobody.
-		check.SignConsistent = (check.Rate > 0 && bucket.payers > 0) ||
-			(check.Rate < 0 && bucket.receivers > 0) ||
+		// With a non-zero rate somebody must be charged and somebody credited;
+		// with a zero rate nobody moves. The direction of the transfer against
+		// the sign of the rate cannot be checked from the ledger alone,
+		// because the ledger does not record which side each account was on.
+		check.SignConsistent = (check.Rate != 0 && bucket.payers > 0 && bucket.receivers > 0) ||
 			(check.Rate == 0 && bucket.payers == 0 && bucket.receivers == 0)
-		if check.Residual != 0 {
+		// Each account's share is an integer division, so a settlement across
+		// n accounts can lose up to n units to truncation. Anything beyond
+		// that is not rounding.
+		bound := int64(bucket.payers + bucket.receivers)
+		if check.Residual > bound || check.Residual < -bound {
 			result.FundingBroken++
 		}
 		if !check.SignConsistent {
@@ -261,17 +321,36 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			}
 			check.Holders++
 			check.NetSize += state.size
-			check.ExpectedPayout += mulDiv(check.Intrinsic, state.size, precision)
+			expected := mulDiv(check.Intrinsic, state.size, precision)
+			check.ExpectedPayout += expected
+			gap := optionPaidPerHolder[holderKey] - expected
+			if gap > 1 || gap < -1 {
+				check.HoldersMispaid++
+				if absInt64(gap) > absInt64(check.WorstHolderGap) {
+					check.WorstHolderGap = gap
+				}
+			}
 		}
 		entry := optionPaid[key]
 		check.PaidOut = entry.amount
 		check.Residual = check.PaidOut - check.ExpectedPayout
-		check.OutOfMoneyPaid = check.Intrinsic == 0 && entry.amount != 0
-		if check.Residual != 0 {
+		// A worthless option may still show a unit or two of rounding dust, so
+		// the test is against the number of accounts paid rather than zero.
+		check.OutOfMoneyPaid = check.Intrinsic == 0 && absInt64(entry.amount) > int64(entry.accounts)
+		// Each holder's payout is an integer division, so a contract with n
+		// holders may lose up to n units to truncation.
+		bound := int64(check.Holders)
+		if entry.accounts > check.Holders {
+			bound = int64(entry.accounts)
+		}
+		if check.Residual > bound || check.Residual < -bound {
 			result.ExerciseBroken++
 		}
 		if check.OutOfMoneyPaid {
 			result.WorthlessPaid++
+		}
+		if check.HoldersMispaid > 0 {
+			result.HoldersMispaid += check.HoldersMispaid
 		}
 		result.Exercises = append(result.Exercises, check)
 	}
@@ -308,4 +387,12 @@ func rateAt(published []ratePayload, at int64) int64 {
 		}
 	}
 	return best
+}
+
+// absInt64 is the magnitude of a signed amount.
+func absInt64(value int64) int64 {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
