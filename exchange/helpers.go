@@ -15,6 +15,12 @@ func logBalanceChange(ex *DefaultExchange, timestamp int64, clientID uint64, sym
 	if symbol != "" {
 		logKey = symbol
 	}
+	// Recorded before the log is consulted: a movement that happens while no
+	// logger is attached is still a movement, and leaving it out of the
+	// running total would make the verification depend on the logging
+	// configuration.
+	ex.conservation.record(changes)
+
 	log := ex.getLogger(logKey)
 	if log == nil {
 		return

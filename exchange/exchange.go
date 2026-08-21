@@ -131,6 +131,10 @@ type DefaultExchange struct {
 	Instruments     map[string]Instrument
 	Positions       PositionStore
 	ExchangeBalance *ExchangeBalance
+	// conservation accumulates every recorded movement so that a balance
+	// changed without one can be detected, which no audit of the log itself
+	// could do: the log would be self-consistent and merely incomplete.
+	conservation *conservationTracker
 	// RequestPolicy meters and admits incoming requests. Nil leaves the venue
 	// unmetered, which is what scenarios without a published budget expect.
 	RequestPolicy         RequestPolicy
@@ -267,6 +271,7 @@ func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
 			FeeRevenue:    make(map[string]int64),
 			InsuranceFund: make(map[string]int64),
 		},
+		conservation:            newConservationTracker(),
 		NextOrderID:             1,
 		Matcher:                 matcher,
 		MDPublisher:             NewMDPublisher(),

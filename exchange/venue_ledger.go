@@ -53,6 +53,7 @@ func (e *DefaultExchange) moveVenueBalance(bucket VenueBucket, asset string, del
 	old := balances[asset]
 	updated := etypes.AddAmount(old, delta)
 	balances[asset] = updated
+	e.conservation.recordVenue(asset, delta)
 
 	log := e.getLogger(symbol)
 	if log == nil {
