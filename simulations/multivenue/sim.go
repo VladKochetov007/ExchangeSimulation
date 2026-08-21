@@ -844,7 +844,14 @@ type Venue struct {
 	// latencyMountOrder keeps the mounts in creation order. Draining them in
 	// map order would make a run's event interleaving depend on Go's map
 	// iteration, which is randomised per process and would destroy replay.
-	latencyMountOrder    []*simulation.Mount
+	latencyMountOrder []*simulation.Mount
+	// registerMount hands a newly created latency mount to the runner at the
+	// moment it exists. Registering them in a sweep after the venue was built
+	// missed every mount created later — the execution desks and the routers
+	// connect after that point — and a mount the runner does not know about
+	// never has deterministic phases enabled, so its courier goroutines keep
+	// running and the run stops being reproducible.
+	registerMount        func(*simulation.Mount)
 	latencyConfig        Config
 	latencySeed          int64
 	scheduler            *simulation.EventScheduler
@@ -1419,10 +1426,14 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		runner.AddMount(venue.Mount)
 		// Every class with its own link reaches the exchange through a mount of
 		// its own, and a mount the runner does not know about never has its
-		// egress drained: the deterministic phase then stalls with work queued.
+		// egress drained nor its deterministic phases enabled. The mounts
+		// created while this venue was being built are registered here; the
+		// ones created later, when the execution desks and routers connect,
+		// register themselves through the hook set below.
 		for _, mount := range venue.latencyMountOrder {
 			runner.AddMount(mount)
 		}
+		venue.registerMount = runner.AddMount
 		for _, maker := range venue.SpotMakers {
 			runner.AddActor(maker)
 		}
@@ -2144,6 +2155,9 @@ func (v *Venue) mountForRole(role string) *simulation.Mount {
 	})
 	v.latencyMounts[class] = mount
 	v.latencyMountOrder = append(v.latencyMountOrder, mount)
+	if v.registerMount != nil {
+		v.registerMount(mount)
+	}
 	return mount
 }
 
