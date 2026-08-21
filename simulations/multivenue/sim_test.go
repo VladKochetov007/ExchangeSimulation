@@ -1695,3 +1695,27 @@ func TestNoiseTargetQuantityIsPerBookAndValidated(t *testing.T) {
 		t.Error("a cross-asset book was accepted with the graph switched off")
 	}
 }
+
+// The price-elastic participants were pinned to ABC/USD, which is why the
+// second spot book had nobody who cared about its level. Placing them
+// elsewhere is what the ablation needs, and a supplier on CDF/USD has to be
+// seeded at CDF's opening price rather than ABC's.
+func TestElasticSupplierSymbolRosterIsValidatedLikeTheMakers(t *testing.T) {
+	cfg := Config{LogDir: "x", VenueIDs: []string{"north", "central", "south"}, CrossAssetSpotGraph: true}
+	cfg.ElasticSupplierSymbols = []string{"ABC/USD", "CDF/USD"}
+	if err := cfg.normalize(); err != nil {
+		t.Fatalf("a listed book was refused: %v", err)
+	}
+	if got := makerSymbol(cfg.ElasticSupplierSymbols, 1); got != "CDF/USD" {
+		t.Errorf("second supplier on %q, want CDF/USD", got)
+	}
+	cfg.ElasticSupplierSymbols = []string{"XYZ/USD"}
+	if err := cfg.normalize(); err == nil {
+		t.Error("a supplier was placed on a book that does not exist")
+	}
+	cfg = Config{LogDir: "x", VenueIDs: []string{"north", "central", "south"}}
+	cfg.ElasticSupplierSymbols = []string{"CDF/USD"}
+	if err := cfg.normalize(); err == nil {
+		t.Error("a cross-asset book was accepted with the graph switched off")
+	}
+}

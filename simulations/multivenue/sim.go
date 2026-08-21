@@ -420,6 +420,12 @@ type Config struct {
 	// DefaultLatencyProfile applies to roles LatencyProfiles does not name.
 	DefaultLatencyProfile *LatencyProfile `json:"default_latency_profile"`
 
+	// ElasticSupplierSymbols places the price-elastic participants on books
+	// other than ABC/USD, assigned in order and cycled. Empty keeps them all
+	// on ABC/USD, which is where they were when the second spot book turned
+	// out to have nobody who cared about its level.
+	ElasticSupplierSymbols []string `json:"elastic_supplier_symbols"`
+
 	// FixedDistanceMakerSymbols and ImbalanceMakerSymbols place those maker
 	// classes on books other than ABC/USD, assigning participants entries in
 	// order and cycling. Empty keeps every one of them on ABC/USD, which is
@@ -670,7 +676,7 @@ func (c *Config) normalize() error {
 			return err
 		}
 	}
-	for _, symbols := range [][]string{c.FixedDistanceMakerSymbols, c.ImbalanceMakerSymbols} {
+	for _, symbols := range [][]string{c.FixedDistanceMakerSymbols, c.ImbalanceMakerSymbols, c.ElasticSupplierSymbols} {
 		for _, symbol := range symbols {
 			switch symbol {
 			case "ABC/USD", "ABC-PERP":
@@ -2040,12 +2046,17 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		supplierBalances["CDF"] = 1_000 * mvBasePrecision
 	}
 	for participant := 0; participant < s.Config.ElasticSupplierCount; participant++ {
+		symbol := makerSymbol(s.Config.ElasticSupplierSymbols, participant)
+		reference := int64(mvBootstrapPrice)
+		if symbol == "CDF/USD" {
+			reference = int64(mvCDFBootstrap)
+		}
 		supplier := NewElasticSupplier(nextActor(), connect(fmt.Sprintf("elastic_supplier_%d", participant+1), supplierBalances, 0, noiseFee), ElasticSupplierConfig{
-			Symbol: "ABC/USD", BasePrecision: mvBasePrecision, Interval: s.Config.NoiseInterval,
+			Symbol: symbol, BasePrecision: mvBasePrecision, Interval: s.Config.NoiseInterval,
 			// Seeded at the opening price and revised toward what it observes,
 			// so the participant holds a private belief rather than a standing
 			// instruction about the correct level.
-			ReferencePrice: mvBootstrapPrice, BaseHolding: 0,
+			ReferencePrice: reference, BaseHolding: 0,
 			ReferenceHalfLife:    s.Config.ElasticSupplierReferenceHalfLife,
 			ElasticityPerPercent: s.Config.ElasticSupplierUnitsPerPercent,
 			MaxPosition:          10_000 * mvBasePrecision, RebalanceLot: mvBasePrecision / 2,
