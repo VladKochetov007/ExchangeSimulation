@@ -2280,6 +2280,21 @@ func (s *Sim) addMetaorderTraders(timers *simulation.SimTimerFactory, actorID *u
 	return nil
 }
 
+// makerStateName labels a maker by the book it quotes, so the state log can be
+// read without knowing the construction order of the roster.
+func makerStateName(symbol string) string {
+	switch symbol {
+	case "ABC/USD":
+		return "spot"
+	case "CDF/USD":
+		return "cdf"
+	case "ABC/CDF":
+		return "cross"
+	default:
+		return symbol
+	}
+}
+
 func (v *Venue) logMakerState(timestamp int64) {
 	if v.makerStateLog.inner == nil {
 		return
@@ -2297,11 +2312,11 @@ func (v *Venue) logMakerState(timestamp int64) {
 			"hedge_position": maker.hedgePosition,
 		})
 	}
+	// Every spot maker is recorded, not only the ones on the main book. The
+	// makers that were omitted are the ones whose books later turned out to
+	// misbehave, and a state that is not logged cannot be audited.
 	for index, maker := range v.SpotMakers {
-		if maker.cfg.Symbol != "ABC/USD" {
-			continue
-		}
-		record(fmt.Sprintf("spot_%d", index), maker)
+		record(fmt.Sprintf("%s_%d", makerStateName(maker.cfg.Symbol), index), maker)
 	}
 	// The perpetual maker is the counterparty that absorbs one-sided
 	// derivative flow, so its position is what a premium would be paying for.
