@@ -540,6 +540,15 @@ const settlementAsset = "USD"
 // end of the run, separating the linear instruments, whose unrealised profit
 // is somebody else's unpaid cash, from options, whose reported figure is a
 // model mark.
+//
+// This term is taken from the run's own report, which makes the closing
+// identity dependent on the venue's bookkeeping rather than fully independent
+// of it: a venue that mis-valued its open positions would still balance here.
+// That dependency is not assumed, it is checked -- MeasurePositions rebuilds
+// the same quantity from the position and mark streams alone, and on the
+// frozen baseline the two agree to the unit over twenty-four hours. Any run
+// where they disagree invalidates this identity, which is why the positions
+// audit reports the gap rather than hiding it.
 func (r *Run) openPositionValue() (int64, int64) {
 	linear, options := int64(0), int64(0)
 	for _, row := range r.Report.TerminalAccounts {

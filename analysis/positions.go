@@ -61,6 +61,11 @@ type PositionReconstruction struct {
 	// it, and Disagreement the difference.
 	ReportedLinearValue int64 `json:"reported_linear_value"`
 	Disagreement        int64 `json:"disagreement"`
+	// SettledContractsExcluded counts positions the stream still shows as open
+	// in a contract that has already settled. They are closed by definition,
+	// and counting them was overstating the open value by the settled amount.
+	SettledContractsExcluded int   `json:"settled_contracts_excluded"`
+	SettledSizeExcluded      int64 `json:"settled_size_excluded"`
 }
 
 type positionKey struct {
@@ -101,6 +106,30 @@ func (r *Run) MeasurePositions(opts PositionOptions) (*PositionReconstruction, e
 		at    int64
 	}
 	marks := make(map[markKey]*markState)
+
+	// A contract that settled is closed by definition, whatever the position
+	// stream last said about it. Without this the reconstruction carries every
+	// expired dated future forward at its last mark, and the open value it
+	// reports is overstated by exactly the amount that was settled in cash.
+	settled := make(map[markKey]bool)
+	settledScan := ScanOptions{
+		Events:        []string{"instrument_settled"},
+		Files:         opts.Files,
+		FilesSelected: opts.FilesSelected,
+	}
+	if err := r.Scan(settledScan, func(event Event) {
+		var payload struct {
+			Symbol string `json:"symbol"`
+		}
+		if event.Decode(&payload) != nil || payload.Symbol == "" {
+			return
+		}
+		mu.Lock()
+		settled[markKey{event.VenueID, payload.Symbol}] = true
+		mu.Unlock()
+	}); err != nil {
+		return nil, err
+	}
 
 	scan := ScanOptions{
 		Events:        []string{"position_update", "mark_price_update"},
@@ -164,6 +193,11 @@ func (r *Run) MeasurePositions(opts PositionOptions) (*PositionReconstruction, e
 			continue
 		}
 		contractKey := markKey{key.venue, key.symbol}
+		if settled[contractKey] {
+			result.SettledContractsExcluded++
+			result.SettledSizeExcluded += state.size
+			continue
+		}
 		contract := contracts[contractKey]
 		if contract == nil {
 			contract = &ContractBalance{VenueID: key.venue, Symbol: key.symbol}

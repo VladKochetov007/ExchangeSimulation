@@ -293,3 +293,61 @@ across the stress run. A liquidation that balances the books wrongly would show
 up as a residual beyond the rounding bound.
 
 Stated before the arm was run.
+
+## V-009 — the positions audit counted settled contracts as open
+
+Found on the deterministic baseline `det_101`, not by reasoning about the code.
+The positions metric reported an open linear value of −7,390,602,459,770
+against the run's own −7,215,838,778,160, a disagreement of −174,763,681,610.
+That number is the expiry settlement flow for the same run, −174,763,681,576,
+to within 34 units, which is not a coincidence a leak would produce.
+
+**Cause.** The reconstruction kept every `(client, symbol)` whose last
+published size was non-zero. A dated future that expired mid-run — twelve of
+them do, `ABC-FUT-1735711201` and its siblings — was carried forward at its
+last mark, so its value was counted as open at the same time as its cash had
+already been settled. 363 such positions were being carried on this run.
+
+**Fix.** A contract that has settled is closed by definition. The audit now
+learns the settled symbols from `instrument_settled` and excludes them,
+reporting how many it dropped rather than dropping them silently.
+
+**Result.** The disagreement is now exactly **0**: an independent
+reconstruction from the position and mark streams reproduces the venue's
+reported linear value to the unit across twenty-four hours, and the 363
+excluded positions net to zero size, so the flattening at expiry was itself
+consistent.
+
+**Why this matters beyond the metric.** The closing conservation identity takes
+its open-position term from the run's own report. That is a dependency on the
+venue's bookkeeping: a venue that mis-valued open positions would still
+balance. It is now a *checked* dependency rather than an assumed one, because
+the independent reconstruction agrees with it exactly. A run where the two
+disagree invalidates the identity, and the positions audit reports the gap.
+
+## V-010 — the USD closing residual is small but not zero
+
+On `det_101`, ABC and CDF close exactly: residual 0. USD closes at 19,255,041
+minor units, a relative residual of 1.16e-9 against 1.65e16 of external
+deposits — about 193 dollars against 165 billion.
+
+This is **not** reported as zero. The bound it sits under is truncation: the
+run logged 30,066,246 balance movements, every one of which can lose up to one
+minor unit to integer division, so a residual under 30,066,246 units is
+consistent with rounding and anything above it is not. 19,255,041 is under that
+bound, and the per-venue residuals (7,365,140 / 2,175,591 / the third similar)
+scale with each venue's record count rather than with its volume, which is what
+truncation looks like and not what a leak looks like.
+
+What would settle it is a run with the same volume and fewer divisions, or an
+accumulator that tracks discarded remainders directly. Neither has been done,
+so the honest statement is: bounded by truncation, consistent with truncation,
+not proven to be truncation.
+
+Supporting figures from the same run, all clean: 30,066,246 balance deltas
+checked with 0 mismatched and worst gap 0; 735 account chains checked with 0
+broken; 36 funding instants netting to at most 4 units across 17 accounts; 33
+option expiry instants netting to at most 12 units across up to 140 accounts;
+0 settlement mismatches, 0 unpaid, 0 trades after expiry; and under the
+rebuilt direction check, 0 of the funding account-instants misdirected and 0
+undirected.
