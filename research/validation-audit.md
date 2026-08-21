@@ -201,3 +201,30 @@ so it is not a clean intervention on the hypothesis; it is the closest lever
 that exists without adding one. Its result is read as suggestive, not decisive.
 
 Stated before the arms were run.
+
+## Pre-registered stress test: can anybody be forced out (V-005)
+
+**Question.** The liquidation, margin-call, insurance-fund and bankruptcy paths
+never execute in the baseline. Do they work, and does the population contain
+anyone who can be made insolvent?
+
+**Arm.** `v005-stress-perp.json`: uninformed flow on the perpetual sized at 10
+ABC per order against the baseline's 0.2, and execution desks sized ten times
+larger. 24 hours, seeds 101 and 103.
+
+**Primary metric.** Count of `liquidation` events and of `liquidation_deficit`
+balance changes.
+
+**Prediction.** If the perpetual can be moved far enough by flow of this size,
+some margined participant is liquidated and the conservation identity still
+closes across the event, with the insurance fund carrying any deficit.
+
+**Kill criterion.** If no liquidation occurs even here, the finding becomes
+stronger, not weaker: the population cannot be stressed by its own flow, and
+the liquidation machinery is unreachable rather than merely unused.
+
+**Second check, whatever the count.** The closed-system identity is measured
+across the stress run. A liquidation that balances the books wrongly would show
+up as a residual beyond the rounding bound.
+
+Stated before the arm was run.
