@@ -73,6 +73,34 @@ none of those things, and what survives that attempt.
 
 Recorded here only after an attempt to falsify them has been made and failed.
 
+## Audit-tool defects found by auditing the audit tools
+
+The plan's first instruction is to attack the analysis layer before trusting
+any market result. Four defects were found in tools written during this audit,
+three of them by the tools' own tests and one by comparison against hand
+arithmetic on a single contract.
+
+| defect | consequence had it stood |
+|---|---|
+| Settlement payout computed in int64: `(price − entry) × size` overflows at 1e19 against a 9.2e18 ceiling | reported three of fifteen settlements as wrong by 3.7e11 units; the engine is exact |
+| Settlement audit kept each holder's latest position update rather than its latest before expiry | dropped every holder whose close-out was logged after expiry, which is all of them |
+| Arbitrage cycles evaluated inside a concurrent scan | priced instants against quotes from later in the run; reported 99.4% profitable and +705 bps where a time-ordered pass reports 86–89% and +284 bps |
+| Conservation audit required settlement instants to net to zero | they are not required to: a settlement pays each holder against its own entry price |
+
+Every number in this document was produced after those fixes.
+
+## Mechanical results that survive
+
+| statement | evidence |
+|---|---|
+| Spot settlement conserves exactly | base assets net to 0 and quote debits equal logged fee revenue to the unit, per book |
+| The venues' fee ledger agrees with the fee-revenue event stream | exactly, per asset, on the 24-hour run |
+| Contracts are zero net supply | every contract's reconstructed net size is 0, from position updates alone |
+| Independent position reconstruction agrees with the report | unrealised value gap of exactly 0 |
+| Dated-future settlement is exact | 15 of 15 settlements: payout residual 0, every holder paid, no fill after expiry |
+| The closed-system identity holds for ABC and CDF | residual exactly 0 |
+| The USD residual is rounding, not leakage | pre-registered test passed: −1.39 units per derivative record at 6h, −1.12 at 12h, against a kill criterion of 10 and a prediction of no growth with run length |
+
 ## Unresolved
 
 Recorded here when an attempt is inconclusive rather than negative.
