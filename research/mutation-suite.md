@@ -46,6 +46,8 @@ an ecology run.
 | Swap the call and put payoff | 9 fixtures / 18 holders | payout equals intrinsic value at the settlement price | all exact | 8 assertions fail: ITM call pays 0, OTM call pays 500,000,000 | yes |
 | Settle against a strike 1% away | 9 fixtures / 18 holders | payout is computed from the contract's own strike | all exact | 8 assertions fail: ITM call pays 450,000,000 for 500,000,000; ATM put pays 55,000,000 while worthless | yes |
 | Ignore the contract multiplier | 9 fixtures / 18 holders | payout scales by size divided by the multiplier | all exact | 7 assertions fail, payouts out by 10^8 | yes |
+| Serve each price level from the tail (LIFO) | 5 priority cases | at one price the earlier arrival fills first | expected sequence | 3 of 5 fail, and the price-only case still passes | yes |
+| Skip the best price level | 5 priority cases | the best price is taken first, and never through the taker limit | expected sequence | 3 of 5 fail, and the time-only case still passes | yes |
 
 ### What the funding mutation exposed about the audit
 
@@ -92,7 +94,6 @@ listing after expiry.
 | Charge funding twice | each instant nets to zero within one unit per account | `-metric derivatives`, funding residual |
 | Duplicate one fill | movements reconstruct the reported holdings; contract net size stays zero | `-metric conservation` chain check; `-metric positions` |
 | Delete one fill | the same two | as above |
-| Violate price-time priority | no accounting invariant catches this — **the audit is currently blind.** It needs a queue-order check over the book delta stream | none yet; this row is the strongest argument for building one |
 | Omit one settlement | payout residual per contract; holders paid against holders present | `-metric settlements` |
 | Wrong sign on the Black-76 delta | dealer net delta grows without bound instead of being hedged back | `-metric hedging`, buy share and net delta drift |
 | Execute an order after expiry | no fill may be recorded after the expiry instant | `-metric settlements`, `TradesAfterExpiry` |
@@ -105,17 +106,27 @@ listing after expiry.
 
 ## What the table already says about the audit
 
-Three classes of defect have **no detector at all**: matching-priority
-violations, dropped cancellations, and injected look-ahead. Two more are
-blocked behind mechanisms that never execute. So the audit as it stands covers
+Matching priority now has a detector, stated as an observable fill sequence
+rather than an accounting identity -- no accounting invariant is violated by
+filling the wrong resting order, since the money still moves and still
+balances. It discriminates: a LIFO queue fails the time cases and passes the
+price-only one, and skipping the best level fails the price cases and passes
+the time-only one. It is a matcher-level detector, though; a run-level
+queue-order check over the logged book deltas still does not exist, so a
+priority defect introduced in the wiring around the matcher rather than in the
+matcher would still go unseen.
+
+Two classes of defect have **no detector at all**: dropped cancellations and
+injected look-ahead. Two more are blocked behind mechanisms that never
+execute. So the audit as it stands covers
 money and lifecycle thoroughly, covers derivative semantics well now that the
 funding direction check has been rebuilt and the exercise fixtures exist, and
 covers matching, order handling and information flow barely.
 
-Two of the six executed mutations were initially **missed** -- the unrecorded
+Two of the eight executed mutations were initially **missed** -- the unrecorded
 venue movement and the reversed funding sign -- and in both cases the fix was
 to strengthen the detector rather than to accept the pass. That ratio is the
-most useful number in this file: a third of the mutations run so far found a
+most useful number in this file: a quarter of the mutations run so far found a
 hole in the audit rather than confirming it.
 
 That is a statement about the audit rather than about the simulator, and it
