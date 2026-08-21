@@ -160,3 +160,33 @@ residual is not truncation and a mechanism is leaking value.
 
 **Design.** The frozen baseline, seed 101, at 2, 6, 12 and 24 simulated hours.
 Stated before the runs were measured.
+
+## Pre-registered ablation: what makes CDF/USD run away (V-002)
+
+**Question.** Is the runaway caused by the absence of a participant who cares
+about the book's level, or by the maker's own inventory-skew rule?
+
+**Arms**, all at 24 simulated hours on seeds 101, 102 and 103, against the
+frozen baseline as control:
+
+| arm | change | config |
+|---|---|---|
+| control | none | `frozen-baseline-2026-08-21.json` |
+| A | price-elastic participants split between ABC/USD and CDF/USD | `v002-arm-elastic-cdf.json` |
+| B | maker inventory skew switched off for every Stoikov quoter | `v002-arm-no-skew.json` |
+
+**Primary metric.** CDF/USD terminal trade price divided by its opening price,
+per seed.
+
+**Prediction.** If the missing level-caring participant is the cause, arm A
+stays inside 2× on every seed and arm B still runs away on the seeds where the
+control does. If the quoting rule is the cause, the reverse.
+
+**Kill criterion.** If both arms run away, or neither does, the stated mechanism
+is wrong and the finding reverts to "unexplained instability".
+
+**Note on arm B.** Switching the skew off changes every book, not only CDF/USD,
+so it is not a clean intervention on the hypothesis; it is the closest lever
+that exists without adding one. Its result is read as suggestive, not decisive.
+
+Stated before the arms were run.
