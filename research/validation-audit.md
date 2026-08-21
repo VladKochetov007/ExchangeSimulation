@@ -41,9 +41,9 @@ none of those things, and what survives that attempt.
 | 0. Freeze | done |
 | 1. Audit the audit tools | in progress |
 | 2. Independent accounting reconstruction | done for balances, positions and settlements; residuals below |
-| 3. Lifecycle semantics | not started |
+| 3. Lifecycle semantics | dated settlement, funding and option exercise audited and passing; timestamp-collision ordering not yet tested |
 | 4. Free-money loops | triangular and cross-venue searched; V-001 raised |
-| 5. Agent-role proof | not started |
+| 5. Agent-role proof | tool built and first results taken; to be redone on the frozen runs |
 | 6. Information boundaries | not started |
 | 7. Endogenous vs hand-fed liveness | not started |
 | 8. Population survival | not started |
@@ -105,6 +105,9 @@ three of them by the tools' own tests and one by comparison against hand
 arithmetic on a single contract.
 
 | defect | consequence had it stood |
+| Option positions read from position updates, which are never published for options | the exercise audit found no holders and passed all 150 expiries without testing anything |
+| Exercise checked on the summed payout only | a holder overpaid against another underpaid nets to zero and would have passed |
+| Funding and exercise residuals compared against zero rather than against the per-account truncation bound | 13 of 17 funding instants and 61 of 150 expiries reported as broken when off by one or two units |
 |---|---|
 | Settlement payout computed in int64: `(price − entry) × size` overflows at 1e19 against a 9.2e18 ceiling | reported three of fifteen settlements as wrong by 3.7e11 units; the engine is exact |
 | Settlement audit kept each holder's latest position update rather than its latest before expiry | dropped every holder whose close-out was logged after expiry, which is all of them |
@@ -122,6 +125,8 @@ Every number in this document was produced after those fixes.
 | Contracts are zero net supply | every contract's reconstructed net size is 0, from position updates alone |
 | Independent position reconstruction agrees with the report | unrealised value gap of exactly 0 |
 | Dated-future settlement is exact | 15 of 15 settlements: payout residual 0, every holder paid, no fill after expiry |
+| Perpetual funding is a transfer, not a payment by the venue | 17 of 17 instants net to zero within the truncation bound of one unit per account; every instant has payers and receivers when the rate is non-zero and neither when it is zero |
+| Option exercise pays intrinsic value | 150 expiries, 13 to 16 holders each, 75 in the money: no contract off by more than its rounding bound, no worthless option paid, and no holder mispaid — checked per holder, since a summed check cannot see one holder overpaid against another underpaid |
 | The closed-system identity holds for ABC and CDF | residual exactly 0 |
 | The USD residual is rounding, not leakage | pre-registered test passed: −1.39 units per derivative record at 6h, −1.12 at 12h, against a kill criterion of 10 and a prediction of no growth with run length |
 
