@@ -180,7 +180,7 @@ func (r *Run) MeasurePositions(opts PositionOptions) (*PositionReconstruction, e
 		contract.GrossSize += gross
 		contract.Holders++
 		if contract.MarkPrice > 0 {
-			contract.OpenValue += (contract.MarkPrice - state.entry) / 1 * state.size / precision
+			contract.OpenValue += mulDiv(contract.MarkPrice-state.entry, state.size, precision)
 		}
 	}
 

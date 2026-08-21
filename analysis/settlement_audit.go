@@ -56,6 +56,13 @@ type SettlementAudit struct {
 // what at expiry, the reference-data announcement that says what the contract
 // settled at, and the balance changes that say who was paid. A venue could
 // satisfy any two of those and fail the third.
+//
+// Two passes are needed rather than one. A holder's position is settled and
+// zeroed after expiry, so the position that faced settlement is its last
+// update at or before the expiry instant — and the expiry instant is only
+// known once the settlement announcement has been read. A single streaming
+// pass that keeps the latest update overall silently drops every holder whose
+// close-out was logged after expiry, which is all of them.
 func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit, error) {
 	type instrumentPayload struct {
 		Action          string `json:"action"`
@@ -98,11 +105,27 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 		size, entry, at int64
 	}
 	holdings := make(map[positionKey]*holding)
+	expiries := make(map[markKey]int64)
 	paid := make(map[markKey]struct {
 		amount   int64
 		accounts int
 	})
 	fillTimes := make(map[markKey][]int64)
+
+	// First pass: learn every contract's expiry instant, so the second pass can
+	// tell a pre-settlement position from a post-settlement close-out.
+	expiryScan := ScanOptions{Events: []string{"instrument_settled"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
+	if err := r.Scan(expiryScan, func(event Event) {
+		var payload instrumentPayload
+		if event.Decode(&payload) != nil || payload.InstrumentType != "FUTURE" || !interesting(payload.Symbol) {
+			return
+		}
+		mu.Lock()
+		expiries[markKey{event.VenueID, payload.Symbol}] = payload.ExpiryNano
+		mu.Unlock()
+	}); err != nil {
+		return nil, err
+	}
 
 	scan := ScanOptions{
 		Events:        []string{"instrument_settled", "position_update", "balance_change", "OrderFill"},
@@ -129,6 +152,13 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 				at = event.SimTS
 			}
 			mu.Lock()
+			// Only updates at or before the contract's expiry describe the
+			// position that faced settlement.
+			expiry, known := expiries[markKey{event.VenueID, payload.Symbol}]
+			if known && at > expiry {
+				mu.Unlock()
+				return
+			}
 			key := positionKey{event.VenueID, payload.ClientID, payload.Symbol}
 			state := holdings[key]
 			if state == nil || at >= state.at {
@@ -186,14 +216,9 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 			if holderKey.venue != key.venue || holderKey.symbol != key.symbol || state.size == 0 {
 				continue
 			}
-			// A position update after expiry is the settlement's own close-out,
-			// so the holding that matters is the last one before it.
-			if state.at > contract.expiry {
-				continue
-			}
 			check.Holders++
 			check.NetSize += state.size
-			check.ExpectedPayout += (contract.price - state.entry) * state.size / precision
+			check.ExpectedPayout += mulDiv(contract.price-state.entry, state.size, precision)
 		}
 		entry := paid[key]
 		check.PaidOut = entry.amount

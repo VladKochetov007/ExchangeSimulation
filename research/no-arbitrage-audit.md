@@ -11,13 +11,20 @@ anybody; an edge it finds is a bug only if nothing ever closes it.
 | cycle | result |
 |---|---|
 | cross-venue, same asset (ABC/USD across three venues) | no profitable instant in any pair; mean edge −4.2 to −4.8 bps, i.e. inside the two-leg fee |
-| spot triangular (ABC/USD, CDF/USD, ABC/CDF at one venue) | **profitable in 99.4% of instants**, mean +705 bps over 30 minutes and growing without bound |
+| spot triangular (ABC/USD, CDF/USD, ABC/CDF at one venue) | **profitable in 86-89% of instants** at every venue, mean +284 bps over 30 minutes, positive without interruption for 1,484-1,582 of the 1,797 measured seconds |
 | perpetual carry, calendar, put-call parity, settlement-boundary, tick-rounding | not yet searched |
 
 ## V-001 — the cross book is unanchored and its dislocation compounds
 
 **What was measured.** The traded ABC/CDF price against the rate implied by
 ABC/USD and CDF/USD at the same venue, bucketed and compared over a run.
+
+The first version of this audit reported 99.4 percent of instants and +705 bps.
+Those figures were wrong: the auditor evaluated cycles inside a concurrent
+scan, so it priced some instants against quotes from later in the run, and
+counted an instant once per publishing book. Rewritten to collect each book's
+quote series and evaluate them in one time-ordered pass, it reports the numbers
+above. The conclusion is unchanged and the numbers are not.
 
 | elapsed | deviation |
 |---|---|

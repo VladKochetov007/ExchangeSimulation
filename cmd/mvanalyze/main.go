@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, settlements")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, settlements, arbitrage")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -31,6 +31,8 @@ func main() {
 	impactRole := flag.String("impact-role", "", "restrict impact to one participant class")
 	horizonSeconds := flag.Float64("horizon-seconds", 0, "mechanical horizon in simulated seconds; overrides -horizon-trades")
 	exhausted := flag.String("exhausted", "drop", "how orders that clear the whole visible side are priced: drop or deepest")
+	arbFeeBps := flag.Float64("arb-fee-bps", 2, "taker fee charged on every leg of an arbitrage cycle")
+	arbStaleness := flag.Float64("arb-staleness", 2, "how many seconds old a quote may be and still count as executable")
 	conservationBook := flag.String("conservation-book", "", "restrict the conservation audit to one book, e.g. ABC/USD")
 	basePrecision := flag.Int64("base-precision", 100_000_000, "base-asset precision, for converting position sizes into contracts")
 	viabilityWindow := flag.Float64("viability-window", 900, "viability window length in simulated seconds")
@@ -310,6 +312,30 @@ func main() {
 					fmt.Printf("    %-8s %-18s trades %6d  qty %14d  gap %7.1fs (spread %7.1fs)  buys %4.2f\n",
 						profile.VenueID, profile.Role, profile.Trades, profile.Qty,
 						profile.MedianGapSeconds, profile.GapSpreadSeconds, profile.BuyShare)
+				}
+			})
+		case "arbitrage":
+			result, err := run.MeasureArbitrage(analysis.ArbitrageOptions{
+				TakerFeeBps:      *arbFeeBps,
+				StalenessNanos:   int64(*arbStaleness * 1e9),
+				BaseSymbol:       *base,
+				QuoteSymbol:      *quote,
+				CrossSymbol:      *cross,
+				CrossPrecision:   *crossPrecision,
+				CrossVenueSymbol: *base,
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s arbitrage at %.1f bps taker fee, %.1fs staleness\n",
+					dir, result.FeeBps, float64(result.StalenessNanos)/1e9)
+				for _, cycle := range result.Cycles {
+					fmt.Printf("    %-24s obs %7d  profitable %6d (%5.2f%%)  mean %+7.2f bps  max %+8.2f bps  mean-all %+7.2f bps  longest run %6.1fs\n",
+						cycle.Cycle, cycle.Observations, cycle.Profitable, 100*cycle.ProfitableShare,
+						cycle.MeanEdgeBps, cycle.MaxEdgeBps, cycle.MeanAllBps,
+						float64(cycle.LongestRunNanos)/1e9)
 				}
 			})
 		case "settlements":
