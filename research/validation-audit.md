@@ -40,9 +40,9 @@ none of those things, and what survives that attempt.
 |---|---|
 | 0. Freeze | done |
 | 1. Audit the audit tools | in progress |
-| 2. Independent accounting reconstruction | in progress |
+| 2. Independent accounting reconstruction | done for balances, positions and settlements; residuals below |
 | 3. Lifecycle semantics | not started |
-| 4. Free-money loops | not started |
+| 4. Free-money loops | triangular and cross-venue searched; V-001 raised |
 | 5. Agent-role proof | not started |
 | 6. Information boundaries | not started |
 | 7. Endogenous vs hand-fed liveness | not started |
@@ -54,7 +54,20 @@ none of those things, and what survives that attempt.
 
 ## Withdrawn claims
 
-Recorded here as they are found, with the measurement that killed them.
+| claim | killed by |
+|---|---|
+| The three spot books form an economically coherent triangle | V-001: the triangular loop is profitable in 99.4% of instants and the dislocation compounds without bound |
+| The triangular arbitrageur links the spot books | V-001: it fires the correct direction 2,584 times in thirty minutes at a fixed 0.05 ABC and loses the race by two orders of magnitude |
+| Any CDF-denominated price or statistic in the frozen baseline | V-002: CDF/USD rises forty-fold in twenty-four hours, driven by its own market maker |
+| That liveness implies a working market | V-002: CDF/USD was two-sided and trading in every window of its life while its price rose forty-fold |
+
+## Findings
+
+- **V-001** (`research/no-arbitrage-audit.md`): persistent, compounding triangular
+  arbitrage. Cross-venue same-asset pricing passes.
+- **V-002**: the CDF/USD maker becomes the dominant net taker buyer of its own
+  book from hour thirteen and takes the price up forty-fold. Stable at six
+  hours, 2.27x at twelve, 40.26x at twenty-four. V-001 is downstream of it.
 
 ## Surviving claims
 
