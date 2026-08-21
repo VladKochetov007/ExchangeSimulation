@@ -4,11 +4,11 @@
 
 | | |
 |---|---|
-| Frozen commit | `6bab42af38a7` |
+| Frozen commit | `01c9ceb11aa1` (re-frozen; see V-003) |
 | Frozen config | `research/configs/frozen-baseline-2026-08-21.json` |
 | Derived from | L-010 (`tencycle_v8_24h.json`), the arm with demand spread across classes |
 | Run length | 24 simulated hours, eleven completed expiry rounds per venue |
-| Seeds | 101, 102, 103 (`logs/cycle11_v8_10{1,2,3}`) |
+| Seeds | 101, 102, 103 (`logs/frozen_10{1,2,3}`) |
 | Go | 1.26.5 |
 | Analysis | the `analysis` package at the frozen commit |
 
@@ -72,6 +72,30 @@ none of those things, and what survives that attempt.
 ## Surviving claims
 
 Recorded here only after an attempt to falsify them has been made and failed.
+
+## V-003 — the first freeze did not describe the runs it froze
+
+The freeze recorded commit `6bab42af38a7`. The runs it pointed at carry a build
+stamp of `cf213e68`, thirteen commits earlier, with 111 lines of difference in
+the simulation packages between the two — including the change that lets maker
+classes quote the perpetual, which the frozen config uses. The build stamp also
+reports a modified tree, though that flag is raised by untracked files as well
+as by edited ones, so it does not by itself establish what was edited.
+
+The consequence is that no measurement taken before this point can be
+attributed to a named version of the simulator. That includes every number in
+the liveness campaign and the first pass of this audit.
+
+The freeze is therefore re-declared at `01c9ceb11aa1`, and the baseline is
+being re-run from a binary built at that commit. Findings V-001 and V-002 are
+carried over as provisional and marked for reproduction under the new freeze:
+they are gross effects, a forty-fold price move and an unbounded arbitrage, and
+are unlikely to be artefacts of a thirteen-commit difference, but "unlikely" is
+not the standard this audit is held to.
+
+What caught it was the run manifest recording its own build revision. That is
+the provenance mechanism working; it went unread until now, which is the part
+that failed.
 
 ## Audit-tool defects found by auditing the audit tools
 
