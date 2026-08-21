@@ -5,6 +5,39 @@ import (
 	"sync"
 )
 
+// posPoint is one published perpetual position size and the instant it held from.
+type posPoint struct{ at, size int64 }
+
+// perpSideAt returns the position size an account held in any perpetual on a
+// venue at a given instant, and whether any position of theirs was published
+// at or before it. An account holding several perpetuals on one venue is
+// summed, because funding for the venue settles them together in the ledger.
+func perpSideAt(history map[positionKey][]posPoint, venue string, client uint64, at int64) (int64, bool) {
+	total := int64(0)
+	known := false
+	for key, points := range history {
+		if key.venue != venue || key.clientID != client {
+			continue
+		}
+		size, ok := sizeAt(points, at)
+		if !ok {
+			continue
+		}
+		known = true
+		total += size
+	}
+	return total, known
+}
+
+// sizeAt is the last size published at or before an instant.
+func sizeAt(points []posPoint, at int64) (int64, bool) {
+	index := sort.Search(len(points), func(i int) bool { return points[i].at > at })
+	if index == 0 {
+		return 0, false
+	}
+	return points[index-1].size, true
+}
+
 // ratePayload is a published funding rate.
 type ratePayload struct {
 	Timestamp int64 `json:"timestamp"`
@@ -32,12 +65,23 @@ type FundingInstantCheck struct {
 	// account's integer share: a settlement across n accounts may lose up to n
 	// units and no more.
 	Residual int64 `json:"residual"`
-	// LongsPaid records the direction: with a positive funding rate the longs
-	// pay, so a run in which the sign is reversed is a sign error in the
-	// mechanism rather than a market outcome.
-	Rate      int64 `json:"rate"`
-	LongsPaid bool  `json:"longs_paid"`
-	// SignConsistent is false when the direction contradicts the rate.
+	Rate int64 `json:"rate"`
+	// Directed counts the accounts whose perpetual side at this instant is
+	// known from the position stream, and Misdirected those among them charged
+	// the wrong way for the published rate: with a positive rate a long must
+	// be debited and a short credited, and with a negative rate the reverse.
+	// Counting only accounts whose side is known keeps the check honest --
+	// an account whose position was never published is not evidence either
+	// way and is reported separately as Undirected.
+	Directed    int `json:"directed"`
+	Misdirected int `json:"misdirected"`
+	Undirected  int `json:"undirected"`
+	// LongsPaid is true when the accounts that were long at this instant were
+	// the ones debited. It is derived from the reconstructed sides, not from
+	// the sign of the total, which carries no direction information.
+	LongsPaid bool `json:"longs_paid"`
+	// SignConsistent is false when any directed account was charged against
+	// the published rate.
 	SignConsistent bool `json:"sign_consistent"`
 }
 
@@ -75,6 +119,13 @@ type DerivativeSemantics struct {
 	Exercises        []ExerciseCheck       `json:"exercises"`
 	FundingBroken    int                   `json:"funding_broken"`
 	FundingSignWrong int                   `json:"funding_sign_wrong"`
+	// FundingMisdirected is the total number of account-instants charged
+	// against the published rate, and FundingUndirected the number whose side
+	// could not be established from the position stream. A large undirected
+	// count means the direction check is weak on that run and must be said so
+	// rather than read as a pass.
+	FundingMisdirected int `json:"funding_misdirected"`
+	FundingUndirected  int `json:"funding_undirected"`
 	ExerciseBroken   int                   `json:"exercise_broken"`
 	// HoldersMispaid is the count across every contract of holders whose own
 	// payout did not match their own position.
@@ -114,6 +165,15 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		paid, received    int64
 	}
 	funding := make(map[instantKey]*fundingBucket)
+	// Per-account funding movements, so the direction of the transfer can be
+	// checked against each account's own side rather than against the sign of
+	// the total, which is the same under any sign convention.
+	fundingDeltas := make(map[instantKey]map[uint64]int64)
+	// Every published perpetual position, kept as a time series per account so
+	// the side held at a funding instant can be read off it. Positions arrive
+	// out of order because the scan is concurrent, so they are sorted after
+	// the pass rather than assumed ordered during it.
+	perpHistory := make(map[positionKey][]posPoint)
 	optionPaid := make(map[markKey]struct {
 		amount   int64
 		accounts int
@@ -122,7 +182,6 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 	type positionState struct {
 		size, at int64
 	}
-	perpPositions := make(map[positionKey]*positionState)
 	optionPositions := make(map[positionKey]*positionState)
 	expiries := make(map[markKey]int64)
 
@@ -181,10 +240,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				mu.Unlock()
 				return
 			}
-			state := perpPositions[key]
-			if state == nil || at >= state.at {
-				perpPositions[key] = &positionState{size: payload.NewSize, at: at}
-			}
+			perpHistory[key] = append(perpHistory[key], posPoint{at: at, size: payload.NewSize})
 			mu.Unlock()
 		case "OrderFill":
 			var fill optionFill
@@ -245,6 +301,16 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				if total == 0 {
 					return
 				}
+				holder := record.ClientID
+				if holder == 0 {
+					holder = event.ClientID
+				}
+				perAccount := fundingDeltas[key]
+				if perAccount == nil {
+					perAccount = make(map[uint64]int64)
+					fundingDeltas[key] = perAccount
+				}
+				perAccount[holder] += total
 				if total > 0 {
 					bucket.receivers++
 					bucket.received += total
@@ -269,6 +335,12 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		return nil, err
 	}
 
+	for key := range perpHistory {
+		points := perpHistory[key]
+		sort.Slice(points, func(i, j int) bool { return points[i].at < points[j].at })
+		perpHistory[key] = points
+	}
+
 	precision := opts.BasePrecision
 	if precision <= 0 {
 		precision = 1
@@ -283,13 +355,47 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			Residual: bucket.paid + bucket.received,
 		}
 		check.Rate = rateAt(rates[key.venue], key.timestamp)
-		check.LongsPaid = bucket.paid < 0
-		// With a non-zero rate somebody must be charged and somebody credited;
-		// with a zero rate nobody moves. The direction of the transfer against
-		// the sign of the rate cannot be checked from the ledger alone,
-		// because the ledger does not record which side each account was on.
-		check.SignConsistent = (check.Rate != 0 && bucket.payers > 0 && bucket.receivers > 0) ||
+		longsDebited, longsCredited := 0, 0
+		for holder, delta := range fundingDeltas[key] {
+			if delta == 0 {
+				continue
+			}
+			size, known := perpSideAt(perpHistory, key.venue, holder, key.timestamp)
+			if !known || size == 0 {
+				check.Undirected++
+				continue
+			}
+			check.Directed++
+			// A positive rate charges the long side. Expected sign of the
+			// account's movement is therefore -sign(rate)*sign(size).
+			expectDebit := (check.Rate > 0) == (size > 0)
+			if check.Rate == 0 {
+				// Nothing should move at a zero rate; a movement is itself
+				// the defect, and its direction is not meaningful.
+				check.Misdirected++
+				continue
+			}
+			if (delta < 0) != expectDebit {
+				check.Misdirected++
+			}
+			if size > 0 {
+				if delta < 0 {
+					longsDebited++
+				} else {
+					longsCredited++
+				}
+			}
+		}
+		check.LongsPaid = longsDebited > longsCredited
+		// Two independent conditions. The structural one holds without any
+		// position information: a non-zero rate has to move money between two
+		// sides, and a zero rate must move none. The directional one needs the
+		// reconstructed sides and is the check that a reversed sign fails.
+		structural := (check.Rate != 0 && bucket.payers > 0 && bucket.receivers > 0) ||
 			(check.Rate == 0 && bucket.payers == 0 && bucket.receivers == 0)
+		check.SignConsistent = structural && check.Misdirected == 0
+		result.FundingMisdirected += check.Misdirected
+		result.FundingUndirected += check.Undirected
 		// Each account's share is an integer division, so a settlement across
 		// n accounts can lose up to n units to truncation. Anything beyond
 		// that is not rounding.

@@ -123,3 +123,87 @@ func TestExerciseAuditRecomputesIntrinsicValueAndCatchesWorthlessPayouts(t *test
 		t.Errorf("an out-of-the-money option paid out and was accepted: %+v", result.Exercises)
 	}
 }
+
+// The direction of a funding transfer cannot be read off the sign of the
+// total: reversing which side pays leaves the total unchanged. It can only be
+// checked against each account's own side, so this is the test that a
+// sign-reversed mechanism fails.
+func TestFundingAuditCatchesAReversedSignAgainstReconstructedSides(t *testing.T) {
+	const instant = int64(1_000_000_000)
+	// Client 1 is long, client 2 is short, and the rate is positive, so the
+	// long must be debited and the short credited.
+	correct := []string{
+		positionLine(instant-10, "north", 1, "ABC-PERP", auditPrecision, 0),
+		positionLine(instant-10, "north", 2, "ABC-PERP", -auditPrecision, 0),
+		fundingRateLine(instant-1, "north", 5),
+		fundingPayLine(instant, "north", 1, -400),
+		fundingPayLine(instant, "north", 2, 400),
+	}
+	dir := writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": correct})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{BasePrecision: auditPrecision})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.FundingSignWrong != 0 || result.FundingMisdirected != 0 {
+		t.Fatalf("a correctly directed settlement was rejected: %+v", result.Funding)
+	}
+	if result.FundingUndirected != 0 {
+		t.Fatalf("both sides were published, so neither is undirected: %+v", result.Funding)
+	}
+	if !result.Funding[0].LongsPaid {
+		t.Errorf("the long was debited, so LongsPaid must be true: %+v", result.Funding)
+	}
+
+	// Same totals, same accounts, sides reversed: the ledger nets to zero and
+	// the structural check still passes, which is exactly why it is not
+	// enough.
+	reversed := []string{
+		positionLine(instant-10, "north", 1, "ABC-PERP", auditPrecision, 0),
+		positionLine(instant-10, "north", 2, "ABC-PERP", -auditPrecision, 0),
+		fundingRateLine(instant-1, "north", 5),
+		fundingPayLine(instant, "north", 1, 400),
+		fundingPayLine(instant, "north", 2, -400),
+	}
+	dir = writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": reversed})
+	run, err = Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err = run.MeasureDerivativeSemantics(DerivativeAuditOptions{BasePrecision: auditPrecision})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.FundingMisdirected != 2 {
+		t.Errorf("both accounts were charged against the rate: %+v", result.Funding)
+	}
+	if result.FundingSignWrong != 1 {
+		t.Errorf("the instant must be reported as misdirected: %+v", result.Funding)
+	}
+	if result.FundingBroken != 0 {
+		t.Errorf("the reversed settlement still nets to zero, so it is not unbalanced: %+v", result.Funding)
+	}
+
+	// An account whose position was never published is not evidence either
+	// way, and must be counted as undirected rather than silently passing.
+	unknown := []string{
+		fundingRateLine(instant-1, "north", 5),
+		fundingPayLine(instant, "north", 3, -400),
+		fundingPayLine(instant, "north", 4, 400),
+	}
+	dir = writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": unknown})
+	run, err = Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err = run.MeasureDerivativeSemantics(DerivativeAuditOptions{BasePrecision: auditPrecision})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.FundingUndirected != 2 || result.FundingMisdirected != 0 {
+		t.Errorf("unpublished sides must be undirected, not passes: %+v", result.Funding)
+	}
+}
