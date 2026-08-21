@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, settlements, arbitrage")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, settlements, arbitrage, roleaudit")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -312,6 +312,21 @@ func main() {
 					fmt.Printf("    %-8s %-18s trades %6d  qty %14d  gap %7.1fs (spread %7.1fs)  buys %4.2f\n",
 						profile.VenueID, profile.Role, profile.Trades, profile.Qty,
 						profile.MedianGapSeconds, profile.GapSpreadSeconds, profile.BuyShare)
+				}
+			})
+		case "roleaudit":
+			result, err := run.MeasureRoles(analysis.RoleAuditOptions{})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s %-22s %6s %9s %9s %7s %5s %8s %8s %9s\n",
+					dir, "role", "n", "makerfil", "takerfil", "taker%", "books", "top-book", "signed%", "rejected")
+				for _, row := range result.Roles {
+					fmt.Printf("%-22s %-22s %6d %9d %9d %6.1f%% %5d %7.2f %8.3f %9d\n",
+						"", row.Role, row.Participants, row.MakerFills, row.TakerFills,
+						100*row.TakerShare, row.Symbols, row.TopSymbolShare, row.SignedShare, row.Rejected)
 				}
 			})
 		case "arbitrage":
