@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -31,6 +31,8 @@ func main() {
 	impactRole := flag.String("impact-role", "", "restrict impact to one participant class")
 	horizonSeconds := flag.Float64("horizon-seconds", 0, "mechanical horizon in simulated seconds; overrides -horizon-trades")
 	exhausted := flag.String("exhausted", "drop", "how orders that clear the whole visible side are priced: drop or deepest")
+	conservationBook := flag.String("conservation-book", "", "restrict the conservation audit to one book, e.g. ABC/USD")
+	basePrecision := flag.Int64("base-precision", 100_000_000, "base-asset precision, for converting position sizes into contracts")
 	viabilityWindow := flag.Float64("viability-window", 900, "viability window length in simulated seconds")
 	minTradesPerWindow := flag.Int("viability-min-trades", 1, "fewest taker trades a window may have and stay viable")
 	minTakerClasses := flag.Int("viability-min-taker-classes", 2, "fewest distinct taker classes a viable window needs")
@@ -310,8 +312,34 @@ func main() {
 						profile.MedianGapSeconds, profile.GapSpreadSeconds, profile.BuyShare)
 				}
 			})
+		case "positions":
+			result, err := run.MeasurePositions(analysis.PositionOptions{BasePrecision: *basePrecision})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s contracts %4d  net-non-zero %d  open linear value %16d (reported %16d, gap %12d)\n",
+					dir, len(result.Contracts), result.NonZeroNetContracts,
+					result.OpenLinearValue, result.ReportedLinearValue, result.Disagreement)
+				for _, contract := range result.Contracts {
+					if contract.NetSize == 0 {
+						continue
+					}
+					fmt.Printf("    %-8s %-28s net %14d gross %14d holders %d\n",
+						contract.VenueID, contract.Symbol, contract.NetSize, contract.GrossSize, contract.Holders)
+				}
+			})
 		case "conservation":
-			result, err := run.MeasureConservation(analysis.ConservationOptions{})
+			// Restricting to one book localises a residual to the mechanism
+			// that produced it: a spot book's cash legs must cancel against
+			// its fees exactly, while a derivative book's need not.
+			opts := analysis.ConservationOptions{}
+			if *conservationBook != "" {
+				opts.Files = run.BookFiles(*venue, *conservationBook)
+				opts.FilesSelected = true
+			}
+			result, err := run.MeasureConservation(opts)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)
@@ -334,12 +362,24 @@ func main() {
 					fmt.Printf("    expiry:  %d instants, largest net %d at %s %d (not required to be zero)\n",
 						len(result.ExpiryInstants), worst.Net, worst.VenueID, worst.Timestamp)
 				}
+				// A book-restricted audit sees only that book's movements,
+				// while the exchange take and open positions are the whole
+				// run's, so the identity is not closable and is not printed.
+				if *conservationBook != "" {
+					return
+				}
 				for _, identity := range result.VenueIdentities {
 					if identity.Residual == 0 {
 						continue
 					}
 					fmt.Printf("    venue %-8s %-4s residual %14d  reasons %v\n",
 						identity.VenueID, identity.Asset, identity.Residual, identity.ByReason)
+				}
+				fmt.Printf("    fees logged by the venues: %v\n", result.FeesLogged)
+				for _, class := range sortedRuleNames(map[string]int{"spot": 0, "perp": 0, "dated": 0, "option": 0, "none": 0}) {
+					if net := result.ClassNet[class]; net != nil {
+						fmt.Printf("    class %-7s net %v\n", class, net)
+					}
 				}
 				for _, identity := range result.Identities {
 					fmt.Printf("    identity %-4s external %20d  internal %18d  exchange %14d  open %16d  residual %12d (%.2e)\n",

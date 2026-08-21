@@ -85,6 +85,16 @@ type Conservation struct {
 	// that does bind is Identities below.
 	ExpiryInstants []InstantResidual `json:"expiry_instants"`
 
+	// FeesLogged is what the venues recorded taking, per asset, from the
+	// fee-revenue stream rather than from the account report. It is the
+	// independent check on ExchangeTake: two records of the same money that
+	// disagree mean one of them is wrong.
+	FeesLogged map[string]int64 `json:"fees_logged"`
+	// ClassNet splits the internal movements by contract class, since the
+	// classes conserve differently: a spot book's cash legs cancel against its
+	// fees exactly, while a perpetual's do not until every position closes.
+	ClassNet map[string]map[string]int64 `json:"class_net"`
+
 	// Identities is the audit that actually binds, per asset.
 	Identities []ConservationIdentity `json:"identities"`
 	// VenueIdentities is the same audit per venue, which is what localises a
@@ -161,12 +171,30 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	deltas := DeltaConsistency{}
 
 	venueFlows := make(map[string]map[flowKey]*AssetFlow)
-	scan := ScanOptions{Events: []string{"balance_change"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
+	fees := make(map[string]int64)
+	classNet := make(map[string]map[string]int64)
+	scan := ScanOptions{Events: []string{"balance_change", "fee_revenue"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
+	type feePayload struct {
+		Asset    string `json:"asset"`
+		TakerFee int64  `json:"taker_fee"`
+		MakerFee int64  `json:"maker_fee"`
+	}
 	if err := r.Scan(scan, func(event Event) {
+		if event.Name == "fee_revenue" {
+			var payload feePayload
+			if event.Decode(&payload) != nil || payload.Asset == "" {
+				return
+			}
+			mu.Lock()
+			fees[payload.Asset] += payload.TakerFee + payload.MakerFee
+			mu.Unlock()
+			return
+		}
 		var record balanceChangeRecord
 		if event.Decode(&record) != nil || len(record.Changes) == 0 {
 			return
 		}
+		class := contractClass(record.Symbol)
 		instant := record.Timestamp
 		if instant == 0 {
 			instant = event.SimTS
@@ -197,6 +225,13 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 				flow.Debits += change.Delta
 			}
 			flow.Net += change.Delta
+
+			if !externalReasons[record.Reason] {
+				if classNet[class] == nil {
+					classNet[class] = make(map[string]int64)
+				}
+				classNet[class][change.Asset] += change.Delta
+			}
 
 			if perVenue[event.VenueID] == nil {
 				perVenue[event.VenueID] = make(map[string]int64)
@@ -236,7 +271,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		return nil, err
 	}
 
-	result := &Conservation{PerVenueNet: perVenue, Deltas: deltas}
+	result := &Conservation{PerVenueNet: perVenue, Deltas: deltas, FeesLogged: fees, ClassNet: classNet}
 	result.Identities = r.conservationIdentities(flows)
 	result.VenueIdentities = r.venueIdentities(venueFlows)
 	for _, flow := range flows {
@@ -451,4 +486,20 @@ func (r *Run) venueIdentities(venueFlows map[string]map[flowKey]*AssetFlow) []Ve
 		}
 	}
 	return out
+}
+
+// contractClass groups a symbol by how its cash conserves.
+func contractClass(symbol string) string {
+	switch {
+	case symbol == "":
+		return "none"
+	case isOptionSymbol(symbol):
+		return "option"
+	case strings.Contains(symbol, "-PERP"):
+		return "perp"
+	case strings.Contains(symbol, "-FUT-"):
+		return "dated"
+	default:
+		return "spot"
+	}
 }
