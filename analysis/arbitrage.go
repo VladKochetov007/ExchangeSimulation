@@ -30,6 +30,15 @@ type ArbitrageOptions struct {
 	CrossPrecision int64
 	// CrossVenueSymbol is the book compared across venues for the same asset.
 	CrossVenueSymbol string
+	// PerpSymbol and SpotSymbol name the perpetual and its underlying, for the
+	// carry cycle: buy the cheaper of the two and sell the dearer, holding the
+	// pair until they converge. Unlike the spot cycles this one is not
+	// instantaneous — it is closed by funding rather than by a trade — so its
+	// edge is reported as a basis and not as a guaranteed profit.
+	PerpSymbol string
+	SpotSymbol string
+	// ParityUnderlying enables the put-call parity cycle on option books.
+	ParityUnderlying string
 }
 
 // CycleResult is one arbitrage cycle's audit.
@@ -168,7 +177,13 @@ func (r *Run) MeasureArbitrage(opts ArbitrageOptions) (*ArbitrageAudit, error) {
 		if bestBid <= 0 || bestAsk <= 0 {
 			return
 		}
-		key := markKey{event.VenueID, symbolFromPath(event.File)}
+		// A derivative record names its book beside the payload; a spot record
+		// names it nowhere and only the file it was written to identifies it.
+		symbol := event.Symbol
+		if symbol == "" {
+			symbol = symbolFromPath(event.File)
+		}
+		key := markKey{event.VenueID, symbol}
 		mu.Lock()
 		series[key] = append(series[key], quote{bid: bestBid, ask: bestAsk, at: event.SimTS})
 		mu.Unlock()
@@ -254,6 +269,51 @@ func (r *Run) MeasureArbitrage(opts ArbitrageOptions) (*ArbitrageAudit, error) {
 		}
 	}
 
+	parity := make(map[string]*cycleAccumulator)
+	if opts.ParityUnderlying != "" {
+		terms, err := r.optionTerms(opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, at := range ordered {
+			for _, venue := range venueNames {
+				for _, pair := range terms[venue] {
+					call, callOK := quoteAt(markKey{venue, pair.call}, at)
+					put, putOK := quoteAt(markKey{venue, pair.put}, at)
+					forward, forwardOK := quoteAt(markKey{venue, opts.ParityUnderlying}, at)
+					if !callOK || !putOK || !forwardOK {
+						continue
+					}
+					if parity[venue] == nil {
+						parity[venue] = newCycleAccumulator()
+					}
+					parity[venue].observe(at, parityEdgeBps(call, put, forward, pair.strike, feeFactor))
+				}
+			}
+		}
+	}
+
+	basis := make(map[string]*cycleAccumulator)
+	if opts.PerpSymbol != "" && opts.SpotSymbol != "" {
+		for _, at := range ordered {
+			for _, venue := range venueNames {
+				perp, perpOK := quoteAt(markKey{venue, opts.PerpSymbol}, at)
+				spot, spotOK := quoteAt(markKey{venue, opts.SpotSymbol}, at)
+				if !perpOK || !spotOK {
+					continue
+				}
+				if basis[venue] == nil {
+					basis[venue] = newCycleAccumulator()
+				}
+				// The edge of buying spot and selling the perpetual, after
+				// paying both spreads and both fees. It is a carry, not an
+				// arbitrage: holding it costs or earns funding.
+				edge := float64(perp.bid)*feeFactor/(float64(spot.ask)/feeFactor) - 1
+				basis[venue].observe(at, 1e4*edge)
+			}
+		}
+	}
+
 	audit := &ArbitrageAudit{FeeBps: opts.TakerFeeBps, StalenessNanos: staleness}
 	names := make([]string, 0, len(triangles))
 	for venue := range triangles {
@@ -262,6 +322,22 @@ func (r *Run) MeasureArbitrage(opts ArbitrageOptions) (*ArbitrageAudit, error) {
 	sort.Strings(names)
 	for _, venue := range names {
 		audit.Cycles = append(audit.Cycles, triangles[venue].result("triangular "+venue))
+	}
+	names = names[:0]
+	for venue := range parity {
+		names = append(names, venue)
+	}
+	sort.Strings(names)
+	for _, venue := range names {
+		audit.Cycles = append(audit.Cycles, parity[venue].result("put_call_parity "+venue))
+	}
+	names = names[:0]
+	for venue := range basis {
+		names = append(names, venue)
+	}
+	sort.Strings(names)
+	for _, venue := range names {
+		audit.Cycles = append(audit.Cycles, basis[venue].result("perp_carry "+venue))
 	}
 	names = names[:0]
 	for name := range crossVenue {
@@ -287,4 +363,88 @@ func triangleEdgeBps(base, quotePair, cross *quote, crossPrecision int64, feeFac
 	// Reverse: buy the cross quote for USD, buy the base with it, sell for USD.
 	reverse := (1 / (float64(quotePair.ask) / feeFactor)) * (scale / (float64(cross.ask) / feeFactor)) * (float64(base.bid) * feeFactor)
 	return 1e4 * (math.Max(forward, reverse) - 1)
+}
+
+// optionPair is a call and a put on the same strike and expiry.
+type optionPair struct {
+	call, put string
+	strike    int64
+}
+
+// optionTerms finds every call and put sharing a strike and expiry, from the
+// listings the venues announced.
+func (r *Run) optionTerms(opts ArbitrageOptions) (map[string][]optionPair, error) {
+	type listing struct {
+		Symbol     string `json:"symbol"`
+		Type       string `json:"instrument_type"`
+		Strike     int64  `json:"strike"`
+		IsCall     bool   `json:"is_call"`
+		ExpiryNano int64  `json:"expiry_nano"`
+	}
+	type termKey struct {
+		venue  string
+		strike int64
+		expiry int64
+	}
+	var mu sync.Mutex
+	calls := make(map[termKey]string)
+	puts := make(map[termKey]string)
+	scan := ScanOptions{Events: []string{"instrument_listed"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
+	if err := r.Scan(scan, func(event Event) {
+		var payload listing
+		if event.Decode(&payload) != nil || payload.Type != "OPTION" || payload.Strike <= 0 {
+			return
+		}
+		key := termKey{event.VenueID, payload.Strike, payload.ExpiryNano}
+		mu.Lock()
+		if payload.IsCall {
+			calls[key] = payload.Symbol
+		} else {
+			puts[key] = payload.Symbol
+		}
+		mu.Unlock()
+	}); err != nil {
+		return nil, err
+	}
+	pairs := make(map[string][]optionPair)
+	for key, call := range calls {
+		put, ok := puts[key]
+		if !ok {
+			continue
+		}
+		pairs[key.venue] = append(pairs[key.venue], optionPair{call: call, put: put, strike: key.strike})
+	}
+	for venue := range pairs {
+		sort.Slice(pairs[venue], func(i, j int) bool { return pairs[venue][i].call < pairs[venue][j].call })
+	}
+	return pairs, nil
+}
+
+// parityEdgeBps prices both directions of the put-call parity trade.
+//
+// A call less a put with the same strike and expiry is a forward at that
+// strike. Buying the synthetic and selling the underlying, or the reverse,
+// must not pay after fees. The underlying's spot is used as the forward, which
+// ignores the cost of carrying the position to expiry, so a small persistent
+// edge here is a financing cost rather than an arbitrage; a large one is not.
+func parityEdgeBps(call, put, forward quote, strike int64, feeFactor float64) float64 {
+	// Buy the synthetic long: pay the call's offer, receive the put's bid.
+	syntheticCost := float64(call.ask)/feeFactor - float64(put.bid)*feeFactor + float64(strike)
+	// Sell the underlying at its bid.
+	sellUnderlying := float64(forward.bid) * feeFactor
+	buySynthetic := sellUnderlying - syntheticCost
+
+	// The reverse: sell the synthetic, buy the underlying.
+	syntheticProceeds := float64(call.bid)*feeFactor - float64(put.ask)/feeFactor + float64(strike)
+	buyUnderlying := float64(forward.ask) / feeFactor
+	sellSynthetic := syntheticProceeds - buyUnderlying
+
+	best := buySynthetic
+	if sellSynthetic > best {
+		best = sellSynthetic
+	}
+	if forward.ask <= 0 {
+		return 0
+	}
+	return 1e4 * best / float64(forward.ask)
 }

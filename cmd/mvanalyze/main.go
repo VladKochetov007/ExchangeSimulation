@@ -369,6 +369,9 @@ func main() {
 				CrossSymbol:      *cross,
 				CrossPrecision:   *crossPrecision,
 				CrossVenueSymbol: *base,
+				PerpSymbol:       "ABC-PERP",
+				SpotSymbol:       *base,
+				ParityUnderlying: *base,
 			})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
