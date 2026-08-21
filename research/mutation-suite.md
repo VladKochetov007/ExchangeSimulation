@@ -48,6 +48,26 @@ an ecology run.
 | Ignore the contract multiplier | 9 fixtures / 18 holders | payout scales by size divided by the multiplier | all exact | 7 assertions fail, payouts out by 10^8 | yes |
 | Serve each price level from the tail (LIFO) | 5 priority cases | at one price the earlier arrival fills first | expected sequence | 3 of 5 fail, and the price-only case still passes | yes |
 | Skip the best price level | 5 priority cases | the best price is taken first, and never through the taker limit | expected sequence | 3 of 5 fail, and the time-only case still passes | yes |
+| Swap the call and put payoff, **ecology run** | 60 settlements over 5h | per-holder payout against the contract terms | 0 mispaid | **766 holders mispaid** | yes |
+| Settle against a strike 1% away, **ecology run** | 60 settlements over 5h | the same | 0 mispaid | **386 holders mispaid** | yes |
+
+### Horizon, and why 5h rather than 2h
+
+The two exercise mutations were first run for two hours and settled nothing at
+all, because the short option tenor is exactly two hours. Re-run for five they
+settle sixty contracts each, and the per-holder check finds them. The mutation
+harness takes the horizon as an argument for this reason: each mutation has to
+declare the shortest run that reaches the code it breaks, and a mutation
+measured over a horizon that never executes it is NOT TESTED.
+
+Note what stays clean in both ecology runs: `exercise_broken` is 0. That is the
+summed residual per contract, and both mutations are symmetric between the long
+and the short, so the sum is right while every individual payout is wrong. The
+same result the fixtures gave, reproduced end to end.
+
+Artifacts for these runs are kept in `research/artifacts/mutations/` with
+checksums; the raw event logs, some 27GB of them, were deleted once the
+detector outputs were extracted and recorded.
 
 ### What the funding mutation exposed about the audit
 

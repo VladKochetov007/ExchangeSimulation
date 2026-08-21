@@ -1,0 +1,6 @@
+mut_callput_swap5.derivatives.json             40066b63d73c
+mut_callput_swap.derivatives.json              9965b65d6d6c
+mut_control5.derivatives.json                  b995fae127c9
+mut_control.derivatives.json                   c856d90176c8
+mut_funding_sign.derivatives.json              3f57a991b6b0
+mut_wrong_strike5.derivatives.json             6e1a57c62754
