@@ -476,9 +476,19 @@ func main() {
 						len(result.OptionExpiryInstants), worst.Net, worst.VenueID, worst.Timestamp)
 				}
 				for _, identity := range result.Identities {
-					streamed := result.FeesLogged[identity.Asset]
-					if gap := identity.ExchangeTake - streamed; gap != 0 {
-						fmt.Printf("    venue take for %-4s exceeds the fee stream by %14d — revenue taken without a fee event\n",
+					recorded, hasStream := result.VenueRecorded[identity.Asset]
+					if hasStream {
+						if gap := identity.ExchangeTake - recorded; gap != 0 {
+							fmt.Printf("    venue take for %-4s disagrees with its own movement stream by %14d\n",
+								identity.Asset, gap)
+						} else {
+							fmt.Printf("    venue take for %-4s reconstructs exactly from its movement stream (%d)\n",
+								identity.Asset, recorded)
+						}
+						continue
+					}
+					if gap := identity.ExchangeTake - result.FeesLogged[identity.Asset]; gap != 0 {
+						fmt.Printf("    venue take for %-4s exceeds the fee stream by %14d — revenue taken without an event (no movement stream in this run)\n",
 							identity.Asset, gap)
 					}
 				}

@@ -1639,6 +1639,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 					s.SpotIndex.observeVenueMid(symbol, venue.ID, mid)
 				}
 			}
+			venue.verifyConservation(now)
 			venue.logMakerState(now)
 			venue.observeMicrostructure()
 			captureScheduledVenueRisk(venue, s.Config.GreekInterval, s.Config.AutomationInterval)
@@ -2289,6 +2290,28 @@ func (s *Sim) addMetaorderTraders(timers *simulation.SimTimerFactory, actorID *u
 		}
 	}
 	return nil
+}
+
+// verifyConservation checks, once per automation tick, that every unit of
+// every asset the venue holds is explained by a recorded movement.
+//
+// A balance changed without a logged movement is invisible to any audit of the
+// log, so the check has to run inside the exchange while it still has both the
+// record and the reality. A violation is logged rather than fatal: the run
+// continues so that the rest of the evidence is preserved, and the event is
+// what a reader has to notice.
+func (v *Venue) verifyConservation(now int64) {
+	violations := v.Exchange.VerifyConservation()
+	if len(violations) == 0 {
+		return
+	}
+	log := v.makerStateLog
+	if log.inner == nil {
+		return
+	}
+	for _, violation := range violations {
+		log.LogEvent(now, 0, "conservation_violation", violation)
+	}
 }
 
 // makerStateName labels a maker by the book it quotes, so the state log can be

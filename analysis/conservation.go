@@ -102,6 +102,10 @@ type Conservation struct {
 	// paid, so each instant must net to zero up to one unit per account.
 	OptionExpiryInstants []InstantResidual `json:"option_expiry_instants"`
 
+	// VenueRecorded is the venue's own balance rebuilt from its movement
+	// stream, which is what makes the exchange side of the identity
+	// independently checkable rather than read from the report it is auditing.
+	VenueRecorded map[string]int64 `json:"venue_recorded"`
 	// FeesLogged is what the venues recorded taking, per asset, from the
 	// fee-revenue stream rather than from the account report. It is the
 	// independent check on ExchangeTake: two records of the same money that
@@ -210,15 +214,30 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 
 	venueFlows := make(map[string]map[flowKey]*AssetFlow)
 	fees := make(map[string]int64)
+	venueRecorded := make(map[string]int64)
 	classNet := make(map[string]map[string]int64)
 	classRecords := make(map[string]int)
-	scan := ScanOptions{Events: []string{"balance_change", "fee_revenue"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
+	scan := ScanOptions{Events: []string{"balance_change", "fee_revenue", "venue_balance_change"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
 	type feePayload struct {
 		Asset    string `json:"asset"`
 		TakerFee int64  `json:"taker_fee"`
 		MakerFee int64  `json:"maker_fee"`
 	}
+	type venueMovement struct {
+		Asset string `json:"asset"`
+		Delta int64  `json:"delta"`
+	}
 	if err := r.Scan(scan, func(event Event) {
+		if event.Name == "venue_balance_change" {
+			var movement venueMovement
+			if event.Decode(&movement) != nil || movement.Asset == "" {
+				return
+			}
+			mu.Lock()
+			venueRecorded[movement.Asset] += movement.Delta
+			mu.Unlock()
+			return
+		}
 		if event.Name == "fee_revenue" {
 			var payload feePayload
 			if event.Decode(&payload) != nil || payload.Asset == "" {
@@ -377,7 +396,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		}
 	}
 
-	result := &Conservation{PerVenueNet: perVenue, Deltas: deltas, FeesLogged: fees, ClassNet: classNet, ClassRecords: classRecords}
+	result := &Conservation{PerVenueNet: perVenue, Deltas: deltas, FeesLogged: fees, VenueRecorded: venueRecorded, ClassNet: classNet, ClassRecords: classRecords}
 	result.Identities = r.conservationIdentities(flows)
 	result.VenueIdentities = r.venueIdentities(venueFlows)
 	for _, flow := range flows {
@@ -440,6 +459,25 @@ const borrowedWallet = "borrowed"
 // holdings out of nothing, because they come from outside the market.
 var externalReasons = map[string]bool{"initial_deposit": true, "borrow": true}
 
+// venueTake is what the exchange itself holds, read from its report.
+//
+// The movement stream is the independent source and is compared against this
+// rather than replacing it: a run whose venue movements were never recorded
+// still has to be auditable, and a disagreement between the two is itself the
+// finding.
+func (r *Run) venueTake() map[string]int64 {
+	take := make(map[string]int64)
+	for _, ledger := range r.Report.VenueLedgers {
+		for asset, amount := range ledger.FeeRevenue {
+			take[asset] += amount
+		}
+		for asset, amount := range ledger.InsuranceFund {
+			take[asset] += amount
+		}
+	}
+	return take
+}
+
 // conservationIdentities closes the books per asset.
 func (r *Run) conservationIdentities(flows map[flowKey]*AssetFlow) []ConservationIdentity {
 	external := make(map[string]int64)
@@ -451,15 +489,7 @@ func (r *Run) conservationIdentities(flows map[flowKey]*AssetFlow) []Conservatio
 		}
 		internal[key.asset] += flow.Net
 	}
-	take := make(map[string]int64)
-	for _, ledger := range r.Report.VenueLedgers {
-		for asset, amount := range ledger.FeeRevenue {
-			take[asset] += amount
-		}
-		for asset, amount := range ledger.InsuranceFund {
-			take[asset] += amount
-		}
-	}
+	take := r.venueTake()
 	linear, optionMark := r.openPositionValue()
 
 	assets := make(map[string]struct{})
