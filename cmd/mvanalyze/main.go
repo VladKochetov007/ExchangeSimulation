@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, settlements, arbitrage, roleaudit")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, settlements, arbitrage, roleaudit, derivatives")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -312,6 +312,37 @@ func main() {
 					fmt.Printf("    %-8s %-18s trades %6d  qty %14d  gap %7.1fs (spread %7.1fs)  buys %4.2f\n",
 						profile.VenueID, profile.Role, profile.Trades, profile.Qty,
 						profile.MedianGapSeconds, profile.GapSpreadSeconds, profile.BuyShare)
+				}
+			})
+		case "derivatives":
+			result, err := run.MeasureDerivativeSemantics(analysis.DerivativeAuditOptions{BasePrecision: *basePrecision})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s funding instants %3d (residual non-zero %d, direction inconsistent %d)   option expiries %4d (payout mismatch %d, worthless paid %d)\n",
+					dir, len(result.Funding), result.FundingBroken, result.FundingSignWrong,
+					len(result.Exercises), result.ExerciseBroken, result.WorthlessPaid)
+				for _, check := range result.Funding {
+					if check.Residual == 0 && check.SignConsistent {
+						continue
+					}
+					fmt.Printf("    funding %-8s %d  rate %4d  payers %3d receivers %3d  paid %14d received %14d  residual %10d\n",
+						check.VenueID, check.Timestamp, check.Rate, check.Payers, check.Receivers,
+						check.Paid, check.Received, check.Residual)
+				}
+				shown := 0
+				for _, check := range result.Exercises {
+					if check.Residual == 0 && !check.OutOfMoneyPaid {
+						continue
+					}
+					if shown++; shown > 10 {
+						break
+					}
+					fmt.Printf("    option  %-8s %-26s strike %10d settle %10d intrinsic %10d  holders %3d net %12d  expected %14d paid %14d residual %12d\n",
+						check.VenueID, check.Symbol, check.Strike, check.SettlementPrice, check.Intrinsic,
+						check.Holders, check.NetSize, check.ExpectedPayout, check.PaidOut, check.Residual)
 				}
 			})
 		case "roleaudit":
