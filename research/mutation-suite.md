@@ -13,38 +13,88 @@ detector so that executing them is mechanical.
 Each mutation is a one-line edit to the engine, built to a scratch binary,
 never committed:
 
-    cp exchange/<file>.go /tmp/orig.go
-    # apply the edit
-    go build -o /tmp/mv_mutant ./cmd/multivenue
-    cp /tmp/orig.go exchange/<file>.go     # revert before anything else
-    GOMAXPROCS=1 /tmp/mv_mutant -config research/configs/frozen-baseline-2026-08-21.json \
-      -seed 101 -duration 2h -logdir /tmp/mut_<name>
-    ./bin/mvanalyze -metric <detector> /tmp/mut_<name>
+    bash scratch/mutate.sh <name> <file> scratch/muts/<name>.py <duration>
+
+which copies the file aside, applies the edit, builds a mutant binary into
+`scratch/`, **reverts the source before running anything**, and then runs the
+mutant for the stated horizon into `logs/mut_<name>`. The duration is an
+argument rather than a constant because each mutation has to declare the
+shortest horizon that reaches the code it breaks: a two-hour run never settles
+an option, so an exercise mutation measured over one is NOT TESTED and not a
+pass.
+
+For semantics rather than integration, the detector is a fixture rather than a
+run:
+
+    bash scratch/mutate_test.sh <name> <file> scratch/muts/<name>.py <TestSelector>
 
 Revert immediately after building. A mutant binary must never be produced from
 a tree that stays mutated, and no mutation may be committed.
 
-## Run
+## Coverage ledger
 
-| mutation | detector | result |
-|---|---|---|
-| Credit 1000 extra units on ~0.1% of spot settlements | closed-system identity, per asset | **caught.** ABC and CDF residuals moved from exactly 0 to 41,726,000 and 24,702,000; USD from 4,248 to 31,624,727 |
-| Move venue revenue without recording it (the pre-fix state of the engine) | venue take against its own movement stream | **caught after the fix.** Before it, the audit read the take from the report and could not see the 562,254 ABC and 17,232,038 USD that no event accounted for |
+A mutation that no test ever executed is **NOT TESTED**, not a pass. The
+trigger count below is the number of times the mutated code actually ran under
+its detector: fixture subtests for a semantic detector, settlement instants for
+an ecology run.
+
+| mutation | trigger count | intended invariant | control | mutant | caught for the intended reason |
+|---|---|---|---|---|---|
+| Credit 1000 extra units on ~0.1% of spot settlements | whole run | closed-system identity, per asset | residuals exactly 0 | ABC 41,726,000; CDF 24,702,000; USD 31,624,727 | yes |
+| Move venue revenue without recording it | whole run | venue take reconstructs from its own movement stream | take reconstructs | 562,254 ABC and 17,232,038 USD unaccounted | yes, after the ledger fix |
+| Reverse the funding sign | 17 account-instants | each account charged the way the published rate says | 0 of 17 misdirected | **17 of 17 misdirected**, `sign_consistent=false` | yes -- and only after the detector was rebuilt, see below |
+| Swap the call and put payoff | 9 fixtures / 18 holders | payout equals intrinsic value at the settlement price | all exact | 8 assertions fail: ITM call pays 0, OTM call pays 500,000,000 | yes |
+| Settle against a strike 1% away | 9 fixtures / 18 holders | payout is computed from the contract's own strike | all exact | 8 assertions fail: ITM call pays 450,000,000 for 500,000,000; ATM put pays 55,000,000 while worthless | yes |
+| Ignore the contract multiplier | 9 fixtures / 18 holders | payout scales by size divided by the multiplier | all exact | 7 assertions fail, payouts out by 10^8 | yes |
+
+### What the funding mutation exposed about the audit
+
+The first run of the reversed-sign mutant **passed**. The direction check
+asserted only that a non-zero rate moved money between at least one payer and
+one receiver -- true under any sign convention -- and reported `longs_paid` as
+`paid < 0`, which is true whenever anybody paid at all. The check has been
+rebuilt to reconstruct each account's perpetual side from the position stream
+and compare each account's own movement against the published rate, counting
+accounts whose side was never published as undirected rather than as passes.
+The mutant now fails it 17 out of 17.
+
+### What the exercise mutations exposed about conservation
+
+All three exercise mutations **still conserve cash**: every one of them is
+symmetric between the long and the short, so the settlement nets to zero and
+the closed-system identity is satisfied while the payouts are wrong. A
+conservation audit alone cannot detect a mispriced settlement. Only the
+per-holder comparison against the contract's own terms can, which is why the
+fixtures check each holder and each writer individually rather than the sum.
+
+### Why the exercise detectors are fixtures rather than runs
+
+A two-hour ecology run at the frozen configuration settles **zero** options --
+the short tenor is exactly two hours -- so the exercise audit over it reported
+`exercises=0` and `exercise_broken=0` for the control and for the mutant
+alike. That is NOT TESTED. The fixtures force the settlement path with known
+positions, a pinned settlement price and a closed set of holders, so every
+branch of the payoff is definitely executed. The longer ecology runs are still
+worth doing, but they test lifecycle wiring, not payoff semantics.
+
+The fixture matrix covers: ITM call, OTM call, ITM put, OTM put, both ATM
+boundaries, a non-unit multiplier with fractional and multi-contract holdings,
+a strike far from the settlement price, and five holders of asymmetric size on
+both sides. Each is checked for the holder's own payout, the writer's own
+payout, oddness of the payoff in position size, zero payout when worthless,
+conservation across the closed set, and the absence of any position, order or
+listing after expiry.
 
 ## Specified, not yet run
 
 | mutation | invariant that must fail | detector |
 |---|---|---|
-| Reverse the funding sign | the side that pays must be the side the published rate says pays | `-metric derivatives`, funding direction consistency |
 | Charge funding twice | each instant nets to zero within one unit per account | `-metric derivatives`, funding residual |
 | Duplicate one fill | movements reconstruct the reported holdings; contract net size stays zero | `-metric conservation` chain check; `-metric positions` |
 | Delete one fill | the same two | as above |
 | Violate price-time priority | no accounting invariant catches this — **the audit is currently blind.** It needs a queue-order check over the book delta stream | none yet; this row is the strongest argument for building one |
 | Omit one settlement | payout residual per contract; holders paid against holders present | `-metric settlements` |
-| Settle an option at the wrong strike | payout equals intrinsic value at the published settlement price | `-metric derivatives`, exercise residual |
-| Swap call and put payoffs | the same, and out-of-the-money contracts paying nothing | `-metric derivatives`, `worthless_paid` |
 | Wrong sign on the Black-76 delta | dealer net delta grows without bound instead of being hedged back | `-metric hedging`, buy share and net delta drift |
-| Ignore the option multiplier | payout equals intrinsic times position | `-metric derivatives`, exercise residual |
 | Execute an order after expiry | no fill may be recorded after the expiry instant | `-metric settlements`, `TradesAfterExpiry` |
 | Fail to cancel expired resting orders | the same, plus the book still quoting a delisted contract | `-metric settlements`; needs a delisting check that does not exist yet |
 | Double-count a fee | venue take against the fee stream; closed-system identity | `-metric conservation` |
@@ -58,8 +108,15 @@ a tree that stays mutated, and no mutation may be committed.
 Three classes of defect have **no detector at all**: matching-priority
 violations, dropped cancellations, and injected look-ahead. Two more are
 blocked behind mechanisms that never execute. So the audit as it stands covers
-money and lifecycle thoroughly and covers matching, order handling and
-information flow barely.
+money and lifecycle thoroughly, covers derivative semantics well now that the
+funding direction check has been rebuilt and the exercise fixtures exist, and
+covers matching, order handling and information flow barely.
+
+Two of the six executed mutations were initially **missed** -- the unrecorded
+venue movement and the reversed funding sign -- and in both cases the fix was
+to strengthen the detector rather than to accept the pass. That ratio is the
+most useful number in this file: a third of the mutations run so far found a
+hole in the audit rather than confirming it.
 
 That is a statement about the audit rather than about the simulator, and it
 belongs in the same document as the passes: an invariant suite is only as

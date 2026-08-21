@@ -37,8 +37,8 @@ one core. Poll with `tail -1 scratch/det_10*.log` until all three say `done`.
 Then confirm reproducibility actually holds now:
 
     for i in 1 2; do GOMAXPROCS=1 ./bin/multivenue -config research/configs/frozen-baseline-2026-08-21.json \
-      -seed 101 -duration 30m -logdir /tmp/rep_$i >/dev/null 2>&1; done
-    md5sum /tmp/rep_1/greeks.json /tmp/rep_2/greeks.json
+      -seed 101 -duration 30m -logdir scratch/rep_$i >/dev/null 2>&1; done
+    md5sum scratch/rep_1/greeks.json scratch/rep_2/greeks.json
 
 Identical hashes are the precondition for every paired comparison below.
 
