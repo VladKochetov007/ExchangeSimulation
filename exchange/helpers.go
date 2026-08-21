@@ -76,7 +76,7 @@ func buildFundingSink(e *DefaultExchange) fundingEventSink {
 			logBalanceChange(e, timestamp, clientID, symbol, reason, changes)
 		},
 		recordRevenue: func(asset string, amount int64) {
-			e.ExchangeBalance.FeeRevenue[asset] += amount
+			e.moveVenueBalance(VenueFeeRevenue, asset, amount, e.Clock.NowUnixNano(), "", "funding_remainder")
 		},
 	}
 }

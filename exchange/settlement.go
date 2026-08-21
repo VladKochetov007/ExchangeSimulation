@@ -479,8 +479,8 @@ func (e *DefaultExchange) recordFeeRevenue(defaultAsset string, takerFee, makerF
 	if makerAsset == "" {
 		makerAsset = defaultAsset
 	}
-	e.ExchangeBalance.FeeRevenue[takerAsset] += takerFee.Amount
-	e.ExchangeBalance.FeeRevenue[makerAsset] += makerFee.Amount
+	e.moveVenueBalance(VenueFeeRevenue, takerAsset, takerFee.Amount, timestamp, book.Symbol, "taker_fee")
+	e.moveVenueBalance(VenueFeeRevenue, makerAsset, makerFee.Amount, timestamp, book.Symbol, "maker_fee")
 
 	log := e.getLogger(book.Symbol)
 	if log == nil {

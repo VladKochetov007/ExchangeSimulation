@@ -104,3 +104,18 @@ func WeightedAverage(w1, v1, w2, v2 int64) int64 {
 	}
 	return int64(quo)
 }
+
+// AddAmount adds two amounts and panics if the result is not representable.
+//
+// Money is held in int64 minor units and Go wraps silently on overflow: a
+// balance one unit past the ceiling becomes a large negative number, which
+// reads as a debt rather than as an error. Paths where a wrap is a broken
+// invariant rather than a hostile input use this, so the failure surfaces
+// where it happens instead of as a sign flip in a later audit.
+func AddAmount(a, b int64) int64 {
+	sum, ok := TryAdd(a, b)
+	if !ok {
+		panic("AddAmount: sum overflows int64")
+	}
+	return sum
+}

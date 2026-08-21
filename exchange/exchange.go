@@ -1617,7 +1617,7 @@ func (e *DefaultExchange) ChargeCollateralInterest() {
 					client.Balances[asset] -= spotShare
 					changes = append(changes, spotDelta(asset, oldSpot, client.Balances[asset]))
 				}
-				e.ExchangeBalance.FeeRevenue[asset] += interest
+				e.moveVenueBalance(VenueFeeRevenue, asset, interest, timestamp, "", "margin_interest")
 
 				logBalanceChange(e, timestamp, client.ID, "", "interest_charge", changes)
 
@@ -1979,7 +1979,7 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 	if balance < 0 {
 		debt = -balance
 		client.PerpBalances[quote] = 0
-		e.ExchangeBalance.InsuranceFund[quote] -= debt
+		e.moveVenueBalance(VenueInsuranceFund, quote, -debt, timestamp, symbol, "liquidation_deficit")
 
 		logBalanceChange(e, timestamp, clientID, symbol, "liquidation_deficit", []BalanceDelta{
 			perpDelta(quote, balance, 0),
@@ -2050,7 +2050,7 @@ func (e *DefaultExchange) chargeClearanceFee(clientID uint64, client *Client, sy
 
 	oldBalance := client.PerpBalances[quote]
 	client.PerpBalances[quote] -= fee
-	e.ExchangeBalance.InsuranceFund[quote] += fee
+	e.moveVenueBalance(VenueInsuranceFund, quote, fee, timestamp, symbol, "liquidation_clearance_fee")
 
 	logBalanceChange(e, timestamp, clientID, symbol, "liquidation_clearance_fee", []BalanceDelta{
 		perpDelta(quote, oldBalance, client.PerpBalances[quote]),
