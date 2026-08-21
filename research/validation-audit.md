@@ -130,6 +130,17 @@ Every number in this document was produced after those fixes.
 | The closed-system identity holds for ABC and CDF | residual exactly 0 |
 | The USD residual is rounding, not leakage | pre-registered test passed: −1.39 units per derivative record at 6h, −1.12 at 12h, against a kill criterion of 10 and a prediction of no growth with run length |
 
+## Coverage gaps — mechanisms that exist and never ran
+
+| mechanism | evidence |
+|---|---|
+| Liquidation, margin call, insurance fund, bankruptcy | zero liquidation events and zero deficits across three venues over 24 hours, in a run where one book rose forty-fold; the insurance fund is empty everywhere (V-005) |
+| Cross-venue arbitrage | the population contains no such participant at all; the cross-venue no-arbitrage result is produced by a shared index instead (V-004) |
+| Option position telemetry | options are never published as position updates, so any audit reading that stream sees no option holders |
+
+A mechanism that never runs cannot be validated, and its correctness cannot be
+claimed from the fact that the run finished.
+
 ## Unresolved
 
 Recorded here when an attempt is inconclusive rather than negative.
