@@ -153,8 +153,17 @@ func (h *VannaVolgaHedger) MeasureRisk(nano int64) BookRisk {
 			add(exposure.Strike, exposure.IsCall, exposure.ExpiryNano, exposure.Position)
 		}
 	}
-	for symbol, position := range h.positions {
-		if c := h.set.contracts[symbol]; c != nil && c.Type == "OPTION" {
+	// Symbol order, not map order. Vega, vanna and volga accumulate in
+	// float64, and floating-point addition is not associative: summing the
+	// same positions in a different order gives a slightly different risk,
+	// which changes which contract this desk decides to trade. That is a
+	// nondeterministic input to the model, and it grows with the size of the
+	// chain -- runs of one seed agreed for hours and then diverged here.
+	for _, c := range h.set.orderedContracts() {
+		if c.Type != "OPTION" {
+			continue
+		}
+		if position, held := h.positions[c.Symbol]; held {
 			add(c.Strike, c.IsCall, c.ExpiryNano, position)
 		}
 	}

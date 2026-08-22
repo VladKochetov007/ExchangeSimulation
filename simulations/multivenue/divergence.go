@@ -1,0 +1,213 @@
+package multivenue
+
+import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sync"
+)
+
+// Divergence locator.
+//
+// Comparing two runs by their terminal digest says only that they differ. It
+// does not say where, and a 24h run is a hundred million events, so bisecting
+// by re-running whole horizons is guesswork that costs half an hour a guess.
+//
+// This sink sits on the path every venue event already takes and keeps a
+// rolling hash in execution order. At each simulated-time boundary it writes
+// one line: the instant, how many events have been seen, and the hash of all of
+// them. Two runs are then compared by their checkpoint files, which are a few
+// kilobytes rather than thirty gigabytes, and the last identical checkpoint
+// brackets the divergence to one interval.
+//
+// Once the interval is known, the same sink can dump a compact per-event trace
+// for that window alone -- enough to identify the first event that differs,
+// without keeping the run's logs.
+//
+// The hash is order-sensitive on purpose. The terminal digest used elsewhere is
+// deliberately order-independent, because log writers interleave; this one runs
+// on the event path itself, where arrival order is execution order, and the
+// question being asked is precisely whether execution order changed.
+
+// checkpointSink records a rolling digest and, optionally, a narrow trace.
+type checkpointSink struct {
+	mu sync.Mutex
+
+	intervalNano int64
+	checkpoints  io.WriteCloser
+
+	traceFrom int64
+	traceTo   int64
+	trace     io.WriteCloser
+
+	rolling    [32]byte
+	events     int64
+	nextBound  int64
+	firstEvent bool
+}
+
+// checkpointRecord is one line of the checkpoint file.
+type checkpointRecord struct {
+	SimTime    int64  `json:"sim_time"`
+	EventCount int64  `json:"event_count"`
+	Rolling    string `json:"rolling_hash"`
+}
+
+// traceRecord is one line of the narrow trace. Sequence is the sink's own
+// counter, which is the order events actually reached the log and therefore
+// the order the simulation produced them.
+type traceRecord struct {
+	SimTime     int64  `json:"sim_time"`
+	Sequence    int64  `json:"sequence"`
+	Event       string `json:"event"`
+	VenueID     string `json:"venue_id"`
+	ClientID    uint64 `json:"client_id"`
+	Symbol      string `json:"symbol,omitempty"`
+	OrderID     uint64 `json:"order_id,omitempty"`
+	PayloadHash string `json:"payload_hash"`
+}
+
+// newCheckpointSink opens the sink's outputs inside the run directory. A zero
+// interval disables checkpoints; an empty window disables the trace.
+func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64) (*checkpointSink, error) {
+	if intervalSeconds <= 0 && traceFrom >= traceTo {
+		return nil, nil
+	}
+	sink := &checkpointSink{
+		intervalNano: int64(intervalSeconds) * 1e9,
+		traceFrom:    traceFrom,
+		traceTo:      traceTo,
+		firstEvent:   true,
+	}
+	if intervalSeconds > 0 {
+		file, err := os.Create(filepath.Join(dir, "checkpoints.jsonl"))
+		if err != nil {
+			return nil, fmt.Errorf("multivenue: checkpoint file: %w", err)
+		}
+		sink.checkpoints = file
+	}
+	if traceFrom < traceTo {
+		file, err := os.Create(filepath.Join(dir, "trace.jsonl"))
+		if err != nil {
+			return nil, fmt.Errorf("multivenue: trace file: %w", err)
+		}
+		sink.trace = file
+	}
+	return sink, nil
+}
+
+// observe folds one event into the rolling digest and writes a checkpoint
+// whenever simulated time crosses the next boundary.
+func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venueID string, payload any) {
+	if s == nil {
+		return
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		encoded = []byte(`"unencodable"`)
+	}
+	payloadDigest := sha256.Sum256(encoded)
+
+	hasher := sha256.New()
+	var scratch [8]byte
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.firstEvent && s.intervalNano > 0 {
+		s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
+		s.firstEvent = false
+	}
+	// Chain: the digest after n events depends on all n and on their order.
+	hasher.Write(s.rolling[:])
+	binary.BigEndian.PutUint64(scratch[:], uint64(simTime))
+	hasher.Write(scratch[:])
+	binary.BigEndian.PutUint64(scratch[:], clientID)
+	hasher.Write(scratch[:])
+	hasher.Write([]byte(eventName))
+	hasher.Write([]byte(venueID))
+	hasher.Write(payloadDigest[:])
+	copy(s.rolling[:], hasher.Sum(nil))
+	s.events++
+
+	if s.trace != nil && simTime >= s.traceFrom && simTime < s.traceTo {
+		record := traceRecord{
+			SimTime: simTime, Sequence: s.events, Event: eventName,
+			VenueID: venueID, ClientID: clientID,
+			PayloadHash: hex.EncodeToString(payloadDigest[:8]),
+		}
+		record.Symbol, record.OrderID = identifyPayload(encoded)
+		if line, err := json.Marshal(record); err == nil {
+			s.trace.Write(line)
+			s.trace.Write([]byte("\n"))
+		}
+	}
+
+	if s.intervalNano > 0 && simTime >= s.nextBound {
+		s.writeCheckpointLocked(s.nextBound)
+		s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
+	}
+}
+
+func (s *checkpointSink) writeCheckpointLocked(at int64) {
+	record := checkpointRecord{
+		SimTime: at, EventCount: s.events, Rolling: hex.EncodeToString(s.rolling[:]),
+	}
+	if line, err := json.Marshal(record); err == nil {
+		s.checkpoints.Write(line)
+		s.checkpoints.Write([]byte("\n"))
+	}
+}
+
+// close flushes a final checkpoint so a run that ends between boundaries is
+// still comparable.
+func (s *checkpointSink) close() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.checkpoints != nil {
+		s.writeCheckpointLocked(s.nextBound)
+		s.checkpoints.Close()
+		s.checkpoints = nil
+	}
+	if s.trace != nil {
+		s.trace.Close()
+		s.trace = nil
+	}
+}
+
+// identifyPayload pulls the two fields that make a trace line readable without
+// storing the payload itself.
+func identifyPayload(encoded []byte) (symbol string, orderID uint64) {
+	var outer struct {
+		Symbol  string          `json:"symbol"`
+		OrderID uint64          `json:"order_id"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if json.Unmarshal(encoded, &outer) != nil {
+		return "", 0
+	}
+	symbol, orderID = outer.Symbol, outer.OrderID
+	if len(outer.Payload) > 0 && (symbol == "" || orderID == 0) {
+		var inner struct {
+			Symbol  string `json:"symbol"`
+			OrderID uint64 `json:"order_id"`
+		}
+		if json.Unmarshal(outer.Payload, &inner) == nil {
+			if symbol == "" {
+				symbol = inner.Symbol
+			}
+			if orderID == 0 {
+				orderID = inner.OrderID
+			}
+		}
+	}
+	return symbol, orderID
+}

@@ -75,7 +75,17 @@ type Config struct {
 	// greeks.json while avoiding large JSONL output for replicated treatments.
 	Provenance
 
-	LogMode  string   `json:"log_mode"`
+	LogMode string `json:"log_mode"`
+	// CheckpointIntervalSeconds writes a rolling digest of the event stream at
+	// each simulated-time boundary, so two runs of one seed can be compared
+	// without retaining their logs. Zero disables it.
+	CheckpointIntervalSeconds int `json:"checkpoint_interval_seconds,omitempty"`
+	// TraceFromNano and TraceToNano dump a compact per-event trace for one
+	// window only, which is how the first divergent event is identified once
+	// the checkpoints have bracketed it. An empty window disables the trace.
+	TraceFromNano int64 `json:"trace_from_nano,omitempty"`
+	TraceToNano   int64 `json:"trace_to_nano,omitempty"`
+
 	Seed     int64    `json:"seed"`
 	VenueIDs []string `json:"venue_ids"`
 	// StrictPopulationAccounting requires a complete initial and terminal USD
@@ -1228,6 +1238,7 @@ type Sim struct {
 	InitialAccounts  []ParticipantAccountSnapshot
 	TerminalAccounts []ParticipantAccountSnapshot
 	loggers          []*feesim.JSONLinesLogger
+	checkpoints      *checkpointSink
 }
 
 // Run starts all venue automation under one context and drives the common
@@ -1286,6 +1297,7 @@ func (s *Sim) Run(ctx context.Context) error {
 }
 
 func (s *Sim) Close() {
+	s.checkpoints.close()
 	for _, logger := range s.loggers {
 		logger.Close()
 	}
@@ -1299,9 +1311,17 @@ type venueLogEvent struct {
 type venueLogger struct {
 	venueID string
 	inner   etypes.Logger
+	// sink observes every event for the divergence locator. It runs whatever
+	// the log mode is, because a run with logging off still has to be
+	// comparable against another run of the same seed.
+	sink *checkpointSink
 }
 
 func (l venueLogger) LogEvent(simTime int64, clientID uint64, eventName string, event any) {
+	l.sink.observe(simTime, clientID, eventName, l.venueID, event)
+	if l.inner == nil {
+		return
+	}
 	l.inner.LogEvent(simTime, clientID, eventName, venueLogEvent{VenueID: l.venueID, Payload: event})
 }
 
@@ -1407,6 +1427,12 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 
 	sim := &Sim{Config: cfg, Runner: runner,
 		SpotIndex: newSpotIndexProvider(cfg.MakerAnchor, "ABC/USD", "ABC-PERP", "CDF/USD", "ABC/CDF"), Venues: make([]*Venue, 0, len(cfg.VenueIDs))}
+	// Built before any venue, because every venue logger carries it.
+	sink, err := newCheckpointSink(cfg.LogDir, cfg.CheckpointIntervalSeconds, cfg.TraceFromNano, cfg.TraceToNano)
+	if err != nil {
+		return nil, err
+	}
+	sim.checkpoints = sink
 	// Seed the reference before the first quote: until the first automation
 	// tick the index would otherwise be empty, leaving makers to fall back to
 	// their own midpoint exactly when the book is thinnest.
@@ -1514,13 +1540,20 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return nil, err
 	}
+	// With raw persistence off the wrapper is still installed, carrying only
+	// the divergence sink: a run that writes no logs must still be comparable
+	// against another run of the same seed, and that comparison is the whole
+	// point of running with logs off.
 	newLogger := func(name string) (venueLogger, error) {
+		if s.Config.LogMode != "full" {
+			return venueLogger{venueID: id, sink: s.checkpoints}, nil
+		}
 		logger, err := feesim.NewJSONLinesLogger(filepath.Join(logDir, name))
 		if err != nil {
 			return venueLogger{}, err
 		}
 		s.loggers = append(s.loggers, logger)
-		return venueLogger{venueID: id, inner: logger}, nil
+		return venueLogger{venueID: id, inner: logger, sink: s.checkpoints}, nil
 	}
 	estimatedClients := 5 + s.Config.NoiseTraderCount + s.Config.OptionFlowCount + len(s.Config.CrossVenueArbTiers)
 	if s.Config.CrossAssetSpotGraph {
@@ -1541,15 +1574,17 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		ex.Matcher = matching.NewProRataMatcher(clock)
 	}
 	var makerStateLog venueLogger
-	if s.Config.LogMode == "full" {
-		if err := os.MkdirAll(filepath.Join(logDir, "spot"), 0755); err != nil {
-			return nil, err
+	if s.Config.LogMode == "full" || s.checkpoints != nil {
+		if s.Config.LogMode == "full" {
+			if err := os.MkdirAll(filepath.Join(logDir, "spot"), 0755); err != nil {
+				return nil, err
+			}
 		}
 		globalLog, err := newLogger("general.jsonl")
 		if err != nil {
 			return nil, err
 		}
-		makerStateLog = venueLogger{inner: globalLog, venueID: id}
+		makerStateLog = venueLogger{inner: globalLog, venueID: id, sink: s.checkpoints}
 		derivativeLog, err := newLogger("derivatives.jsonl")
 		if err != nil {
 			return nil, err
