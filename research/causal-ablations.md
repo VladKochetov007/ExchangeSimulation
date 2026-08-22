@@ -39,7 +39,9 @@ shifts, and when the shift exceeds the half-spread its own requote crosses the
 standing book, printing a new midpoint that moves the next reservation price
 further in the same direction. The price-elastic participant is the damper: it
 sells into a rise and buys into a fall, so the loop cannot run away while it is
-present. Remove either the amplifier or the damper and the instability stops.
+present. Adding the missing damper stops the instability, and so does removing
+the amplifier -- which is what the two arms actually did. The baseline has the
+amplifier and lacks the damper; neither arm removed a damper from anything.
 
 ABC/USD is unaffected in every arm (0.96× to 1.00×), which is what a book that
 already has a damper should look like.
@@ -191,3 +193,112 @@ because liquidation never fires in the baseline (V-005): switching off a
 mechanism that never executes is guaranteed to change nothing. The stress arm
 in `research/validation-audit.md` has to fire it first, and only then does an
 ablation of it mean anything.
+
+---
+
+# Verdicts
+
+Scored against the preregistration text above, which is unchanged. Two seeds
+per arm, paired seed-to-seed against the deterministic baseline (`det_101`,
+`det_103`). Two treatment seeds cannot establish robustness, so **SUPPORTED
+here means screening-stage causal evidence only.**
+
+## A measurement limitation that shapes three verdicts
+
+The ablation runs' raw event logs were deleted after seven metrics were
+extracted from each, to keep the campaign inside the disk budget. That decision
+was made before this scoring pass was planned in detail, and it was wrong:
+dealer greeks, implied-volatility structure, the frozen mean-reversion
+estimator, hedge-tagged flow correlation and realized latency are **not
+recoverable** from what survives. Three arms are therefore NOT IDENTIFIED for
+want of measurement rather than for want of an effect, and one more is scored
+on a proxy. The baseline's raw logs were retained; the arms' were not, which is
+exactly the wrong way round for paired comparison.
+
+Nothing below substitutes a metric that happened to be available for one that
+was preregistered. Where the preregistered quantity is missing, the verdict is
+NOT IDENTIFIED and the available numbers are labelled as diagnostics.
+
+## Mechanism manipulation checks
+
+Rule: an arm that did not manipulate its mechanism cannot falsify anything.
+
+| arm | check | control 101 / 103 | arm 101 / 103 | manipulated? |
+|---|---|---|---|---|
+| own-mid-anchor | `maker_anchor` config | consensus | own_mid | yes (config) |
+| basis-off | carry + dated-carry desk fills | 11,669 + 11,127 / 7,837 + 13,003 | absent / absent | yes |
+| parity-off | parity desk fills | 79,311 / 95,498 | absent / absent | yes |
+| triangle-off | triangular desk fills | 2,823,252 / 2,841,033 | absent / absent | yes |
+| delta-hedge-off | dealer **taker** fills (the hedges) | 170,310 / 175,215 | **0 / 0** | yes, exactly; dealer quoting continues (maker fills 1,166,347 / 1,197,759) |
+| vanna-volga-off | VV desk fills | 90,273 / 96,677 | absent / absent | yes |
+| option-value-takers-off | value-taker fills | 173,865 / 179,702 | absent / absent | yes; chain still trades (dealer 1,133,663 / 1,152,858, option flow 901,379 / 919,780) |
+| funding-off | funding settlement instants | 36 / 36 | **0 / 0** | yes — more completely than intended; the rate cap left no funding at all, and the interval was not stretched as the preregistration described |
+| latency-x10 | configured delays | 5ms default, 1ms carry | 50ms default, 10ms carry | yes at configuration (**realized** latency not measured) |
+
+## Scored arms
+
+| arm | manipulated | preregistered primary metric | control 101 | arm 101 | Δ101 | control 103 | arm 103 | Δ103 | components | verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| own-mid-anchor | yes | cross-venue ABC/USD dispersion (max cycle edge, bps) | 5.48 | 325.13 | +319.7 (×59.4) | 0.99 | 332.95 | +332.0 (×336.9) | dispersion >10×: **yes, both** | **SUPPORTED (screening)** |
+| own-mid-anchor | | profitable cross-venue instants | 10,506 | 192,728 | ×18.3 | 714 | 220,793 | ×309.2 | appear: **yes, both** (premise "none today" was wrong) | |
+| basis-off | yes | perp basis magnitude (mean carry deviation, bps) | −5,467 | −7,441 | ×1.36 | −5,906 | −7,518 | ×1.27 | basis widens: **yes, both** | **MIXED** |
+| basis-off | | mean reversion (frozen estimator) | — | — | not extracted | — | — | not extracted | slows: **not measurable** | |
+| basis-off | | dated basis convergence | — | — | no dated cycle extracted | — | — | — | weakens: **not measurable** | |
+| parity-off | yes | raw parity residual (mean cycle edge, bps, pre-cost) | 28.05 | 122.15 | +94.1 (×4.35) | −4.74 | 179.38 | +184.1 | residual grows: **yes, both** | **MIXED** |
+| parity-off | | residual persistence (longest run, s) | 43,305 | 43,199 | ×1.00 | 20,149 | 43,816 | ×2.17 | stays open longer: **seeds disagree** | |
+| triangle-off | yes | triangular dislocation (mean cycle edge, bps) | 25,590 | 65,734 | ×2.57 | 19,205 | 56,680 | ×2.95 | "little changes": **no, both** | **FALSIFIED** |
+| triangle-off | | (secondary) profitable parity instants | 131,270 | 224 | ×0.002 | 91,421 | 429 | ×0.005 | collapse, unpredicted | |
+| funding-off | yes | perp premium (mean carry deviation, bps) | −5,467 | −5,359 | ×0.98 | −5,906 | −6,092 | ×1.03 | premium widens/drifts: **no, both** | **FALSIFIED** |
+| funding-off | | exploitable-premium frequency | 0.1381 | 0.1369 | ×0.99 | 0.1490 | 0.1399 | ×0.94 | unchanged | |
+| latency-x10 | config only | cross-venue dispersion (max cycle edge, bps) | 5.48 | 0.00 | −5.48 | 0.99 | 0.00 | −0.99 | widens: **no — opposite, both** | **MIXED** |
+| latency-x10 | | arbitrage lifetime (longest carry run, s) | 5,016 | 19,300 | ×3.85 | 10,174 | 20,848 | ×2.05 | lasts longer: **yes, both** | |
+| latency-x10 | | maker adverse selection | — | — | not extracted | — | — | not extracted | **not measurable** | |
+| delta-hedge-off | yes | option→underlying volume correlation | — | — | not extracted | — | — | not extracted | **not measurable** | **NOT IDENTIFIED** |
+| delta-hedge-off | | dealer net delta growth | — | — | greeks not retained | — | — | greeks not retained | **not measurable** | |
+| vanna-volga-off | yes | dealer vega / vanna / volga | — | — | greeks not retained | — | — | greeks not retained | **not measurable** | **NOT IDENTIFIED** |
+| vanna-volga-off | | cross-strike surface structure | — | — | no IV extraction | — | — | — | **not measurable** | |
+| option-value-takers-off | yes | market-implied ATM level, skew, curvature, term structure | — | — | no IV extraction | — | — | — | **not measurable** | **NOT IDENTIFIED** |
+
+### Diagnostics, clearly secondary
+
+These did not enter any verdict.
+
+- **delta-hedge-off:** dealer gross quantity −18% (1.201e12 → 9.838e11 on 101);
+  spot-maker fills −7%; exploitable carry frequency +51% (0.138 → 0.209).
+  Consistent with hedging flow having been a real component of underlying
+  volume, but the preregistered transmission test was not run.
+- **vanna-volga-off:** parity-desk activity −93% (79,311 → 5,774 and
+  95,498 → 5,816); dealer gross quantity −46%. Removing the second-order desk
+  changes first-order option pricing enough to starve the parity desk. Large,
+  unpredicted, and unexplained by anything measured here.
+- **option-value-takers-off:** viable windows −31% / −30% (3,873 → 2,664 and
+  3,912 → 2,744) while the chain keeps trading. Book quality falls materially
+  without the SABR-view participants even though volume survives.
+
+## Summary
+
+- **SUPPORTED (screening): 1** — own-mid-anchor
+- **MIXED: 3** — basis-off, parity-off, latency-x10
+- **FALSIFIED: 2** — triangle-off, funding-off
+- **NOT IDENTIFIED: 3** — delta-hedge-off, vanna-volga-off, option-value-takers-off
+
+Note the seed dispersion in the controls themselves: profitable cross-venue
+instants differ by 15× between seed 101 and 103 (10,506 against 714), and the
+parity residual changes sign (+28.05 against −4.74). Any arm whose effect is
+smaller than that is not measurable with two seeds, which is part of why
+funding-off and basis-off are hard to read.
+
+## Claim status after scoring
+
+| previous claim | new status | reason |
+|---|---|---|
+| Cross-venue price agreement is held together by the shared index (V-004, IB-2) | **RETAIN, strengthened** | The only arm whose preregistered primary passed literally: dispersion ×59 and ×337 against a >10× threshold set in advance, on both seeds, with the mechanism verified at configuration. |
+| The cross-venue arbitrage cycle is never profitable in the baseline | **WITHDRAW** | False on the deterministic baseline: 10,506 profitable instants on seed 101 and 714 on seed 103. The preregistration was written against the earlier freeze and its premise did not survive re-freezing. |
+| Carry desks are what closes the perpetual and dated basis | **WEAKEN** | Removing them widens the mean deviation by 27–36% on both seeds, so they do compress it, but the preregistered mean-reversion and dated-convergence components are unmeasurable from what survives. Convergence itself was never tested. |
+| Put-call parity is enforced by the parity desks | **RETAIN, qualified** | The raw residual grows on both seeds (×4.35, and from −4.7 to +179 bps) with the desk removed. Persistence disagrees between seeds, so "residuals stay open longer" is not established. |
+| The triangular desk fires constantly without restraining the dislocation (V-001) | **WITHDRAW** | Falsified. Removing it widens the dislocation ×2.57 and ×2.95 and collapses profitable parity instants by three orders of magnitude. The desk was doing substantially more than the V-001 measurement credited it with; V-001's account of that desk must be rewritten. |
+| Funding is what anchors the perpetual to spot | **WITHDRAW** | Falsified against its own kill criterion. Funding was removed completely — zero settlement instants against 36 — and the perpetual premium moved by 2–3%, inside seed noise, on both seeds. Whatever anchors the perpetual here, it is not funding. The shared index remains the leading candidate and is untested for this. |
+| Option hedging transmits option flow into the underlying | **UNRESOLVED** | The intervention was surgical — dealer taking went to exactly zero while quoting continued — but neither preregistered measurement survives. Diagnostics point the predicted way and prove nothing. |
+| Vanna-volga desks impose structure on the cross-strike surface | **UNRESOLVED** | Same reason. The unpredicted collapse of parity-desk activity to 7% of control says the desk matters to option pricing, but says nothing about the surface claim as written. |
+| The option smile is emergent rather than inherited from SABR priors (§10) | **UNRESOLVED** | The decisive arm ran, the chain stayed active, and the measurement that would have settled it was never taken. This remains the single largest open question in the campaign. |
+| Configured latency is economically meaningful | **RETAIN, qualified** | Arbitrage opportunities last 2.1–3.9× longer and are ~1.6× more frequent on both seeds, so latency is not decorative. But cross-venue dispersion moved the *opposite* way to the prediction, and at 50ms the delay is still well inside the 1-second quote and automation interval, so this regime may simply be latency-insensitive where it was predicted to be most sensitive. |
