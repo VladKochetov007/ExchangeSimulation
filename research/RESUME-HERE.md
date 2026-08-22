@@ -149,11 +149,9 @@ the campaign can be reconstructed even if `scratch/` is lost.
 - V-015 made the shared analyzer scanner fail closed on malformed relevant
   evidence. Rescan each baseline's full normalized evidence stream before
   certifying its already-extracted metrics.
-- Baseline 101/102/103 extraction is complete, but the updated control
-  manifest intentionally remains `MEASUREMENT_INCOMPLETE` until all three
-  compact latency sidecars are attached.
-- Two no-log 24h compact controls are currently running:
-  `logs/f2_latency_control_101` and `_103`, command uses frozen config, seed,
-  `-log-mode none`, and 60-second checkpoints. At the last observation both
-  were about 10.5 simulated hours in. Do not launch Phase 2 until they finish,
-  are inspected, and seed 102 receives the same control sidecar.
+- V-016 binds prune-gate verdicts to the exact simulator freeze, so the old
+  diagnostic ablation verdicts cannot certify any ae13f9a treatment.
+- Baseline 101/102/103 extraction and their compact latency sidecars are
+  complete. The stricter V-015 full-evidence revalidation scan is the final
+  gate before Phase 2; raw logs remain retained even though prunegate now
+  reports the control contract safe.

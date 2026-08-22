@@ -629,6 +629,13 @@ is explicitly reported rather than silently discarded. These sidecars are now
 the paired 101/103 latency controls; seed 102 is being generated under the
 identical frozen configuration so the full baseline contract remains uniform.
 
+Seed 102 subsequently completed with 193,376,039 scheduled messages,
+193,374,477 delivered, and 1,562 terminally undelivered (the row-level
+identity holds exactly). Its weighted mean sampled delay was 11.92ms and
+weighted mean actual delivery delay was 41.20ms. All three baseline controls
+therefore now have the required compact courier evidence; the persisted raw
+logs were not rerun or replaced.
+
 ## V-015 — analyzer scanner could silently skip malformed evidence
 
 `analysis.Run.Scan` previously continued on a JSON parse failure or an invalid
@@ -645,3 +652,19 @@ malformed record and malformed data-envelope cases. The full normalized
 evidence scan for each preserved baseline will serve as the revalidation of
 the physical logs; only a clean pass permits the existing metric artifacts to
 remain valid.
+
+## V-016 — prune gate did not bind verdicts to a simulator freeze
+
+The initial `prunegate` implementation treated an arm name found in any
+`ablation-verdicts.json` as a score for the current run. The repository's
+existing verdict artifact describes the invalidated pre-ae13f9a campaign, so a
+newly extracted ae13f9a treatment could otherwise have been marked safe to
+prune before it was scored. No treatment raw logs exist yet and nothing was
+deleted.
+
+The verdict artifact must now declare `simulator_freeze`, and prunegate accepts
+arms only when it equals its explicit `-simulator-freeze` value (defaulting to
+the ae13f9a full revision). A regression test rejects a historical verdict
+with an otherwise matching arm name. Controls remain retained by campaign
+policy despite their complete measurement contracts. This is a provenance-gate
+fix only; it does not affect the simulator or its evidence.

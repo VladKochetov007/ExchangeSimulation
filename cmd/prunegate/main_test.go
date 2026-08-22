@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -12,6 +14,22 @@ func TestArmForRecognizesFrozenPhase2BaselinesAsControls(t *testing.T) {
 		if got := armFor(run, manifest); got != "control" {
 			t.Errorf("armFor(%q) = %q, want control", run, got)
 		}
+	}
+}
+
+func TestReadVerdictArmsRequiresMatchingSimulatorFreeze(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "verdicts.json")
+	if err := os.WriteFile(path, []byte(`{"simulator_freeze":"old","arms":{"abl-basis-off":{}}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readVerdictArms(path, "ae13"); len(got) != 0 {
+		t.Fatalf("historical verdict was accepted for a new freeze: %v", got)
+	}
+	if err := os.WriteFile(path, []byte(`{"simulator_freeze":"ae13","arms":{"abl-basis-off":{}}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readVerdictArms(path, "ae13"); !got["abl-basis-off"] {
+		t.Fatalf("matching-freeze verdict was not accepted: %v", got)
 	}
 }
 

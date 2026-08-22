@@ -75,6 +75,7 @@ func main() {
 	scoreboard := flag.String("scoreboard", "research/artifacts/scoreboard", "directory holding extracted measurements per run")
 	logs := flag.String("logs", "logs", "directory holding raw run logs")
 	verdicts := flag.String("verdicts", "research/artifacts/ablation-verdicts.json", "verdict artifact; an arm absent from it is not SCORED")
+	requiredFreeze := flag.String("simulator-freeze", "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107", "simulator freeze required in the verdict artifact before an arm may be pruned")
 	prune := flag.Bool("prune", false, "delete raw logs for runs that reach SAFE_TO_PRUNE")
 	asJSON := flag.Bool("json", false, "emit JSON instead of a table")
 	flag.Parse()
@@ -84,7 +85,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	scored := readVerdictArms(*verdicts)
+	scored := readVerdictArms(*verdicts, *requiredFreeze)
 
 	names, err := runNames(*scoreboard, *logs)
 	if err != nil {
@@ -150,16 +151,20 @@ func readManifest(path string) (*Manifest, error) {
 
 // readVerdictArms lists the arms that already carry a recorded verdict. A run
 // whose arm is not there has not been scored, whatever it has measured.
-func readVerdictArms(path string) map[string]bool {
+func readVerdictArms(path, requiredFreeze string) map[string]bool {
 	scored := map[string]bool{}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return scored
 	}
 	var payload struct {
-		Arms map[string]json.RawMessage `json:"arms"`
+		SimulatorFreeze string                     `json:"simulator_freeze"`
+		Arms            map[string]json.RawMessage `json:"arms"`
 	}
 	if json.Unmarshal(raw, &payload) != nil {
+		return scored
+	}
+	if payload.SimulatorFreeze != requiredFreeze {
 		return scored
 	}
 	for arm := range payload.Arms {
