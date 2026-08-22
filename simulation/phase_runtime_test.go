@@ -107,12 +107,15 @@ func TestDeterministicPhasesSupportScheduledLatency(t *testing.T) {
 		"ABC-USD", "ABC", "USD", exchange.BTC_PRECISION, exchange.USD_PRECISION,
 		exchange.DOLLAR_TICK, exchange.BTC_PRECISION/100,
 	))
+	stats := NewLatencyStats()
 	latency := LatencyConfig{
-		Request:    NewConstantLatency(time.Millisecond),
-		Response:   NewConstantLatency(time.Millisecond),
-		MarketData: NewConstantLatency(time.Millisecond),
-		Scheduler:  scheduler,
-		Clock:      clock,
+		Request:        NewConstantLatency(time.Millisecond),
+		Response:       NewConstantLatency(time.Millisecond),
+		MarketData:     NewConstantLatency(time.Millisecond),
+		Scheduler:      scheduler,
+		Clock:          clock,
+		Telemetry:      stats,
+		TelemetryLabel: "test/latency",
 	}
 	mount := NewMount(ex, latency)
 	makerGateway := mount.ConnectNewClient(1, map[string]int64{"ABC": exchange.BTC_PRECISION}, &exchange.PercentageFee{})
@@ -146,6 +149,20 @@ func TestDeterministicPhasesSupportScheduledLatency(t *testing.T) {
 	}
 	if !reflect.DeepEqual(taker.events, want) {
 		t.Fatalf("taker lifecycle = %v, want %v", taker.events, want)
+	}
+	summary := stats.Summary()
+	seen := map[string]bool{}
+	for _, row := range summary.Rows {
+		seen[row.Channel] = true
+		if row.Scheduled == 0 || row.Delivered == 0 {
+			t.Fatalf("unobserved %s latency row: %+v", row.Channel, row)
+		}
+		if row.MeanDrawnNanoseconds != float64(time.Millisecond) || row.MeanDeliveryNanoseconds < float64(time.Millisecond) {
+			t.Fatalf("wrong %s latency accounting: %+v", row.Channel, row)
+		}
+	}
+	if !seen[string(LatencyRequest)] || !seen[string(LatencyResponse)] {
+		t.Fatalf("missing scheduled request/response telemetry: %+v", summary.Rows)
 	}
 }
 

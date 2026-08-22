@@ -48,13 +48,15 @@ type DelayedGateway struct {
 	// phaseMode replaces scheduler-mode forwarding goroutines with runner
 	// pumps. It is enabled before actors start, so latency arrival ordering is
 	// model-defined rather than chosen by host goroutine scheduling.
-	phaseMode   atomic.Bool
-	phaseStopCh chan struct{}
-	phaseWG     sync.WaitGroup
-	phaseLifeMu sync.Mutex
-	phaseMu     sync.Mutex
-	phaseResp   []exchange.Response
-	phaseMD     []*exchange.MarketDataMsg
+	phaseMode    atomic.Bool
+	phaseStopCh  chan struct{}
+	phaseWG      sync.WaitGroup
+	phaseLifeMu  sync.Mutex
+	phaseMu      sync.Mutex
+	phaseResp    []exchange.Response
+	phaseMD      []*exchange.MarketDataMsg
+	latencyStats *LatencyStats
+	latencyLabel string
 }
 
 // Idle reports whether this wrapper and the gateway beneath it have nothing
@@ -89,6 +91,13 @@ func NewDelayedGateway(inner actor.Gateway, reqLat, respLat, mdLat LatencyProvid
 		stopCh:            make(chan struct{}),
 		phaseStopCh:       make(chan struct{}),
 	}
+}
+
+// SetLatencyTelemetry installs an observation-only compact delivery sink.
+// Call before actors begin producing traffic.
+func (d *DelayedGateway) SetLatencyTelemetry(stats *LatencyStats, label string) {
+	d.latencyStats = stats
+	d.latencyLabel = label
 }
 
 // UseScheduler switches to scheduled delivery at exact simulation times.
@@ -162,14 +171,16 @@ func (d *DelayedGateway) Send(req exchange.Request) {
 		return
 	}
 	if d.scheduler != nil {
-		at := d.deliveryTime(&d.reqMu, &d.lastReqAt, d.RequestLatency)
+		at, ticket := d.deliveryTime(&d.reqMu, &d.lastReqAt, d.RequestLatency, LatencyRequest)
 		if d.phaseMode.Load() && at <= d.clock.NowUnixNano() {
 			d.inner.Send(req)
+			d.delivered(ticket)
 			return
 		}
 		d.scheduler.Schedule(at, func() {
 			if d.running.Load() {
 				d.inner.Send(req)
+				d.delivered(ticket)
 			}
 		})
 		return
@@ -182,19 +193,25 @@ func (d *DelayedGateway) Send(req exchange.Request) {
 
 // deliveryTime draws the channel's latency and returns a monotonically
 // non-decreasing delivery timestamp (FIFO within the channel).
-func (d *DelayedGateway) deliveryTime(mu *sync.Mutex, lastAt *int64, lat LatencyProvider) int64 {
+func (d *DelayedGateway) deliveryTime(mu *sync.Mutex, lastAt *int64, lat LatencyProvider, channel LatencyChannel) (int64, latencyTicket) {
 	var delay time.Duration
 	if lat != nil {
 		delay = lat.Delay()
 	}
-	at := d.clock.NowUnixNano() + delay.Nanoseconds()
+	sourceAt := d.clock.NowUnixNano()
+	drawnAt := sourceAt + delay.Nanoseconds()
+	at := drawnAt
 	mu.Lock()
 	if at < *lastAt {
 		at = *lastAt
 	}
 	*lastAt = at
 	mu.Unlock()
-	return at
+	return at, d.latencyStats.scheduled(d.latencyLabel, channel, sourceAt, drawnAt, at)
+}
+
+func (d *DelayedGateway) delivered(ticket latencyTicket) {
+	d.latencyStats.delivered(ticket, d.clock.NowUnixNano())
 }
 
 func (d *DelayedGateway) scheduleResponses() {
@@ -209,13 +226,14 @@ func (d *DelayedGateway) scheduleResponses() {
 			if !ok {
 				return
 			}
-			at := d.deliveryTime(&d.respMu, &d.lastRespAt, d.ResponseLatency)
+			at, ticket := d.deliveryTime(&d.respMu, &d.lastRespAt, d.ResponseLatency, LatencyResponse)
 			d.scheduler.Schedule(at, func() {
 				if !d.running.Load() {
 					return
 				}
 				select {
 				case d.responseCh <- resp:
+					d.delivered(ticket)
 				default:
 				}
 			})
@@ -235,13 +253,14 @@ func (d *DelayedGateway) scheduleMarketData() {
 			if !ok {
 				return
 			}
-			at := d.deliveryTime(&d.mdMu, &d.lastMDAt, d.MarketDataLatency)
+			at, ticket := d.deliveryTime(&d.mdMu, &d.lastMDAt, d.MarketDataLatency, LatencyMarketData)
 			d.scheduler.Schedule(at, func() {
 				if !d.running.Load() {
 					return
 				}
 				select {
 				case d.marketDataCh <- msg:
+					d.delivered(ticket)
 				default:
 				}
 			})
@@ -289,11 +308,12 @@ marketData:
 }
 
 func (d *DelayedGateway) schedulePhaseResponse(resp exchange.Response) {
-	at := d.deliveryTime(&d.respMu, &d.lastRespAt, d.ResponseLatency)
+	at, ticket := d.deliveryTime(&d.respMu, &d.lastRespAt, d.ResponseLatency, LatencyResponse)
 	if at <= d.clock.NowUnixNano() {
 		d.phaseMu.Lock()
 		d.phaseResp = append(d.phaseResp, resp)
 		d.phaseMu.Unlock()
+		d.delivered(ticket)
 		return
 	}
 	d.scheduler.Schedule(at, func() {
@@ -303,15 +323,17 @@ func (d *DelayedGateway) schedulePhaseResponse(resp exchange.Response) {
 		d.phaseMu.Lock()
 		d.phaseResp = append(d.phaseResp, resp)
 		d.phaseMu.Unlock()
+		d.delivered(ticket)
 	})
 }
 
 func (d *DelayedGateway) schedulePhaseMarketData(msg *exchange.MarketDataMsg) {
-	at := d.deliveryTime(&d.mdMu, &d.lastMDAt, d.MarketDataLatency)
+	at, ticket := d.deliveryTime(&d.mdMu, &d.lastMDAt, d.MarketDataLatency, LatencyMarketData)
 	if at <= d.clock.NowUnixNano() {
 		d.phaseMu.Lock()
 		d.phaseMD = append(d.phaseMD, msg)
 		d.phaseMu.Unlock()
+		d.delivered(ticket)
 		return
 	}
 	d.scheduler.Schedule(at, func() {
@@ -321,6 +343,7 @@ func (d *DelayedGateway) schedulePhaseMarketData(msg *exchange.MarketDataMsg) {
 		d.phaseMu.Lock()
 		d.phaseMD = append(d.phaseMD, msg)
 		d.phaseMu.Unlock()
+		d.delivered(ticket)
 	})
 }
 

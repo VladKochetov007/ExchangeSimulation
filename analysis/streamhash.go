@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-// Canonical event-stream hash.
+// Evidence multiset hash.
 //
 // Two runs of the same commit, config and seed must produce the same events.
 // Comparing log files directly cannot show that, because the files are written
@@ -16,7 +16,9 @@ import (
 // is part of the model is the multiset of events: which events happened, at
 // which simulated instants, carrying which payloads.
 //
-// So the digest is order-independent by construction. Each event line is
+// This is deliberately not an execution-stream hash: the persisted evidence
+// is partitioned across concurrently written files and has no global causal
+// order. The digest is order-independent by construction. Each event line is
 // hashed, and the digests are summed as 256-bit integers with wraparound. Two
 // runs agree exactly when they emitted the same events the same number of
 // times, whatever order the writers happened to run in. A difference in any
@@ -44,8 +46,12 @@ type EventDigest struct {
 
 // StreamHash is the whole digest.
 type StreamHash struct {
+	// Domain and Ordering make the evidence/execution distinction explicit in
+	// machine-readable artifacts.
+	Domain string `json:"domain"`
+	Ordering string `json:"ordering"`
 	Events int64 `json:"events"`
-	// Digest is the canonical hash of the entire stream.
+	// Digest identifies the persisted evidence multiset.
 	Digest string `json:"digest"`
 	// ByEvent is present when PerEvent was requested, sorted by event name.
 	ByEvent []EventDigest `json:"by_event,omitempty"`
@@ -130,7 +136,7 @@ func (r *Run) MeasureStreamHash(opts StreamHashOptions) (*StreamHash, error) {
 		return nil, err
 	}
 
-	result := &StreamHash{Events: total.count, Digest: total.hex()}
+	result := &StreamHash{Domain: "persisted_evidence", Ordering: "unordered_multiset", Events: total.count, Digest: total.hex()}
 	if opts.PerEvent {
 		result.ByEvent = digestRows(byEvent)
 		result.ByVenue = digestRows(byVenue)

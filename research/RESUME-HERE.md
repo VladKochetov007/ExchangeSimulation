@@ -130,3 +130,30 @@ the campaign can be reconstructed even if `scratch/` is lost.
 - The divergence locator is `checkpoint_interval_seconds` plus
   `trace_from_nano`/`trace_to_nano` in any config; compare `checkpoints.jsonl`
   between runs to bracket a divergence, then trace that window alone.
+
+## 2026-08-22 continuation — provenance and latency measurement
+
+- V-012 was resolved as duplicate checkpoint telemetry only: seed 101's
+  2,570,397 excess observations were 2,332,800 `maker_state` and 237,597
+  `conservation_violation` observations. Raw evidence is complete.
+- Execution checkpoints, normalized evidence multiset, and exact persisted
+  JSON-record multiset are now distinct contracts with regression coverage.
+- New checkpoints explicitly identify the ordered `execution_observations`
+  domain and carry `execution_stream_hash`; legacy `rolling_hash` remains only
+  as a compatibility alias for the preserved baseline checkpoint files.
+- V-013 made prunegate evaluate its declared manifest predicates rather than
+  accept any unrelated nonzero field. No raw logs have been pruned.
+- V-014 found that reaction lag is not realized network latency. Compact
+  courier `latency.json` instrumentation was added and shown not to perturb a
+  5-minute frozen observable stream.
+- V-015 made the shared analyzer scanner fail closed on malformed relevant
+  evidence. Rescan each baseline's full normalized evidence stream before
+  certifying its already-extracted metrics.
+- Baseline 101/102/103 extraction is complete, but the updated control
+  manifest intentionally remains `MEASUREMENT_INCOMPLETE` until all three
+  compact latency sidecars are attached.
+- Two no-log 24h compact controls are currently running:
+  `logs/f2_latency_control_101` and `_103`, command uses frozen config, seed,
+  `-log-mode none`, and 60-second checkpoints. At the last observation both
+  were about 10.5 simulated hours in. Do not launch Phase 2 until they finish,
+  are inspected, and seed 102 receives the same control sidecar.

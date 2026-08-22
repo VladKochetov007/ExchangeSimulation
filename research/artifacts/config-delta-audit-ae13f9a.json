@@ -1,0 +1,74 @@
+{
+  "freeze": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
+  "baseline": {
+    "path": "research/configs/frozen-baseline-2026-08-22.json",
+    "sha256": "ca933bf2244eec8e104d4313456bed386809703bb7a1179125b8d9255f1b1036"
+  },
+  "common_provenance_or_instrumentation_deltas": [
+    "experiment_id",
+    "hypothesis_id",
+    "description",
+    "checkpoint_interval_seconds: 300 (execution attestation only)"
+  ],
+  "arms": {
+    "abl-basis-off": {
+      "sha256": "b02b78ec5411d19d55c205f51fbe445581d1ba545628c8ea6609434c55e3e912",
+      "economic_deltas": {
+        "carry_arbitrageur_count": [2, 0],
+        "dated_carry_arb_count": [2, 0]
+      }
+    },
+    "abl-delta-hedge-off": {
+      "sha256": "b9e6d05ba23e243a2985ed2cdf0933a2c735e0dcf20ec3ef55a860f4825c664d",
+      "economic_deltas": {
+        "dealer_hedge_mode": ["on", "off"],
+        "option_dealer_hedge_policies": [["banded", "static", "timed"], ["none"]]
+      }
+    },
+    "abl-funding-off": {
+      "sha256": "520b6b87200939734ed71ac36d107e3cbbf905a07b9d0d59f4977234164682a9",
+      "economic_deltas": {
+        "funding_max_rate_bps": [75, 1],
+        "venue_rules.*.funding_interval_seconds": [[3600, 28800, 7200], [86400, 86400, 86400]]
+      }
+    },
+    "abl-latency-x10": {
+      "sha256": "91d3cf550d7a92d93dd14fcea6a6ec5bb117568062061bf1ce8b15dc74dcb9de",
+      "economic_deltas": {
+        "default_latency_profile.delay": [5000000, 50000000],
+        "latency_profiles.*.(delay|min|max|std_dev|cap|spike_delay)": "every present duration parameter multiplied by 10"
+      }
+    },
+    "abl-option-value-takers-off": {
+      "sha256": "7cbbfd88ee77e60ac0386f57a804482ee5174de72d3901c6c749dd5581ae8244",
+      "economic_deltas": {
+        "option_value_taker_count": [4, 0]
+      }
+    },
+    "abl-own-mid-anchor": {
+      "sha256": "1cc268079c0e106e26996652e5b1de3ef28b4633c2eb35424ef856dada8fe061",
+      "economic_deltas": {
+        "maker_anchor": ["consensus", "own_mid"]
+      }
+    },
+    "abl-parity-off": {
+      "sha256": "030245a4088c908ba9efd4d2dde78a53e478b5d1d6d179329cfdc949452dd835",
+      "economic_deltas": {
+        "parity_arb_count": [2, 0]
+      }
+    },
+    "abl-triangle-off": {
+      "sha256": "027e425655f6f822ceb7ecc7e8e5040aaafa816af96dc765a681fc71a9f35bb4",
+      "economic_deltas": {
+        "triangle_arb_count": [2, 0]
+      }
+    },
+    "abl-vanna-volga-off": {
+      "sha256": "b13005e456bd19def9b0fcf84577b94ea4c89f329461011d6137ea10d4a61f08",
+      "economic_deltas": {
+        "vanna_volga_desk_count": [3, 0]
+      }
+    }
+  },
+  "verification": "2026-08-23 jq -S structural diff after excluding the common provenance/instrumentation fields found no other differences."
+}

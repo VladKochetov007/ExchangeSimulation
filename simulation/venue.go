@@ -51,6 +51,7 @@ func (m *Mount) ConnectNewClient(clientID uint64, balances map[string]int64, fee
 		return gw
 	}
 	d := NewDelayedGateway(gw, request, response, marketData)
+	d.SetLatencyTelemetry(m.Latency.Telemetry, m.Latency.TelemetryLabel)
 	if m.Latency.Scheduler != nil && m.Latency.Clock != nil {
 		d.UseScheduler(m.Latency.Scheduler, m.Latency.Clock)
 	}

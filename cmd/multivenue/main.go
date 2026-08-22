@@ -38,6 +38,8 @@ func main() {
 	logDir := flag.String("logdir", "logs/multivenue", "output directory")
 	seed := flag.Int64("seed", 0, "override simulation seed (0 keeps config/default)")
 	hedgeMode := flag.String("dealer-hedge", "", "override dealer hedge mode: on or off")
+	logMode := flag.String("log-mode", "", "override raw log mode: full or none")
+	checkpointInterval := flag.Int("checkpoint-interval-seconds", -1, "override ordered execution checkpoint interval; negative keeps config")
 	flag.Parse()
 
 	cfg := multivenue.Config{}
@@ -58,6 +60,12 @@ func main() {
 	}
 	if *hedgeMode != "" {
 		cfg.DealerHedgeMode = *hedgeMode
+	}
+	if *logMode != "" {
+		cfg.LogMode = *logMode
+	}
+	if *checkpointInterval >= 0 {
+		cfg.CheckpointIntervalSeconds = *checkpointInterval
 	}
 
 	sim, err := multivenue.NewSim(*duration, cfg)

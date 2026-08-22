@@ -3,6 +3,7 @@ package analysis
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"runtime"
 	"sync"
@@ -88,7 +89,14 @@ func (r *Run) Scan(opts ScanOptions, visit func(Event)) error {
 	if workers <= 0 {
 		workers = runtime.GOMAXPROCS(0)
 	}
-	jobs := make(chan string)
+	// Queue paths before workers start. A worker intentionally stops at the
+	// first malformed evidence record; a buffered, closed queue prevents that
+	// failure from stranding the producer on an unbuffered send.
+	jobs := make(chan string, len(files))
+	for _, path := range files {
+		jobs <- path
+	}
+	close(jobs)
 	var wg sync.WaitGroup
 	var once sync.Once
 	var failure error
@@ -105,10 +113,6 @@ func (r *Run) Scan(opts ScanOptions, visit func(Event)) error {
 			}
 		}()
 	}
-	for _, path := range files {
-		jobs <- path
-	}
-	close(jobs)
 	wg.Wait()
 	return failure
 }
@@ -130,14 +134,14 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 		}
 		var env envelope
 		if err := json.Unmarshal(line, &env); err != nil {
-			continue
+			return fmt.Errorf("analysis: parse evidence record in %s: %w", path, err)
 		}
 		if len(keep) > 0 && !keep[env.Event] {
 			continue
 		}
 		var outer dataLayer
 		if err := json.Unmarshal(env.Data, &outer); err != nil {
-			continue
+			return fmt.Errorf("analysis: parse evidence data layer in %s: %w", path, err)
 		}
 		event := Event{
 			SimTS: env.SimTS, ClientID: env.ClientID, Name: env.Event,

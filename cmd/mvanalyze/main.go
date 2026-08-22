@@ -315,20 +315,29 @@ func main() {
 						profile.MedianGapSeconds, profile.GapSpreadSeconds, profile.BuyShare)
 				}
 			})
-		case "streamhash":
+		case "streamhash", "evidencehash":
 			result, err := run.MeasureStreamHash(analysis.StreamHashOptions{PerEvent: true})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)
 			}
 			emit(dir, result, *asJSON, func() {
-				fmt.Printf("%-22s events %d  digest %s\n", dir, result.Events, result.Digest)
+				fmt.Printf("%-22s evidence events %d  unordered digest %s\n", dir, result.Events, result.Digest)
 				for _, row := range result.ByVenue {
 					fmt.Printf("    venue %-10s %10d  %s\n", row.Event, row.Count, row.Digest)
 				}
 				for _, row := range result.ByEvent {
 					fmt.Printf("    %-22s %10d  %s\n", row.Event, row.Count, row.Digest)
 				}
+			})
+		case "evidenceartifacthash":
+			result, err := run.MeasureEvidenceArtifactHash()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s evidence artifact records %d  unordered digest %s\n", dir, result.Events, result.Digest)
 			})
 		case "basis":
 			result, err := run.MeasureBasis(analysis.BasisOptions{})

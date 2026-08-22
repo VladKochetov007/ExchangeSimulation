@@ -198,7 +198,7 @@ func runNames(scoreboard, logs string) ([]string, error) {
 // unrecognised run as generic is exactly the mistake this tool exists to stop.
 func armFor(run string, manifest *Manifest) string {
 	trimmed := strings.TrimPrefix(run, "r2_")
-	if strings.HasPrefix(trimmed, "det") || strings.HasPrefix(trimmed, "control") {
+	if strings.HasPrefix(trimmed, "det") || strings.HasPrefix(trimmed, "control") || strings.HasPrefix(trimmed, "f2_baseline_") {
 		return "control"
 	}
 	best := ""
@@ -242,10 +242,10 @@ func evaluate(run string, manifest *Manifest, scoreboard, logs string, scored ma
 	}
 
 	for _, artifact := range manifest.AlwaysRequired {
-		checkFile(&report, filepath.Join(extracted, artifact.Artifact), artifact.Artifact)
+		checkFile(&report, filepath.Join(extracted, artifact.Artifact), artifact.Artifact, artifact.Check)
 	}
 	for _, measurement := range contract.Measurements {
-		checkFile(&report, filepath.Join(extracted, measurement.Metric+".json"), measurement.Metric)
+		checkFile(&report, filepath.Join(extracted, measurement.Metric+".json"), measurement.Metric, measurement.Check)
 	}
 
 	if len(report.Missing) > 0 || len(report.Empty) > 0 {
@@ -268,7 +268,7 @@ func evaluate(run string, manifest *Manifest, scoreboard, logs string, scored ma
 // checkFile records a required measurement as missing, unparseable or empty.
 // "Empty" means the file parses but carries nothing to measure, which is the
 // case a generic presence check would wave through.
-func checkFile(report *Report, path, label string) {
+func checkFile(report *Report, path, label, requirement string) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		report.Missing = append(report.Missing, label)
@@ -283,43 +283,72 @@ func checkFile(report *Report, path, label string) {
 		report.Missing = append(report.Missing, label+" (unparseable)")
 		return
 	}
-	result, ok := payload["result"]
-	if !ok {
-		// manifest.json and greeks.json are copied whole rather than produced
-		// by the analyzer, so they carry no result envelope.
-		if len(payload) == 0 {
-			report.Empty = append(report.Empty, label)
-		}
-		return
-	}
-	if !hasObservations(result) {
-		report.Empty = append(report.Empty, label)
+	if err := checkRequirement(payload, requirement); err != nil {
+		report.Empty = append(report.Empty, label+" ("+err.Error()+")")
 	}
 }
 
-// hasObservations reports whether a measurement carries anything at all: a
-// non-empty collection, or a non-zero number somewhere in it. A result of all
-// zeros and empty lists is a metric that ran and saw nothing, which is not a
-// measurement.
-func hasObservations(value any) bool {
+// checkRequirement evaluates the small, deliberately explicit expression
+// vocabulary used in measurement-manifest.json. The old generic recursive
+// nonzero scan could certify a required primary field solely because an
+// unrelated diagnostic happened to be nonzero.
+func checkRequirement(payload map[string]any, expression string) error {
+	for _, clause := range strings.Split(expression, " && ") {
+		clause = strings.TrimSpace(clause)
+		switch {
+		case strings.HasSuffix(clause, " > 0"):
+			path := strings.TrimSuffix(clause, " > 0")
+			value, found := lookupPath(payload, path)
+			number, numeric := value.(float64)
+			if !found || !numeric || number <= 0 {
+				return fmt.Errorf("requires %s", clause)
+			}
+		case strings.HasSuffix(clause, " present"):
+			path := strings.TrimSuffix(clause, " present")
+			if _, found := lookupPath(payload, path); !found {
+				return fmt.Errorf("requires %s", clause)
+			}
+		case strings.HasSuffix(clause, " non-empty"):
+			path := strings.TrimSuffix(clause, " non-empty")
+			value, found := lookupPath(payload, path)
+			if !found || !nonEmpty(value) {
+				return fmt.Errorf("requires %s", clause)
+			}
+		default:
+			return fmt.Errorf("unknown manifest check %q", clause)
+		}
+	}
+	return nil
+}
+
+func lookupPath(payload map[string]any, path string) (any, bool) {
+	var current any = payload
+	for _, component := range strings.Split(path, ".") {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		current, ok = object[component]
+		if !ok {
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+func nonEmpty(value any) bool {
 	switch typed := value.(type) {
 	case map[string]any:
-		for _, nested := range typed {
-			if hasObservations(nested) {
-				return true
-			}
-		}
-		return false
+		return len(typed) > 0
 	case []any:
 		return len(typed) > 0
-	case float64:
-		return typed != 0
 	case string:
 		return typed != ""
+	case float64:
+		return typed != 0
 	case bool:
 		return typed
-	case nil:
-		return false
+	default:
+		return value != nil
 	}
-	return false
 }

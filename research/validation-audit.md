@@ -435,3 +435,213 @@ constant-latency digest is identical to the full random-latency digest, so at a
 one-second decision interval the configured latencies are non-binding. The
 latency-x10 arm's null result on cross-venue dispersion is a property of that
 regime rather than of the latency implementation.
+
+## V-011 — prune-gate control classification (audit tooling)
+
+During the ae13f9a Phase 1 resume, `bin/prunegate` classified the new
+`f2_baseline_<seed>` directories as `unknown`, although they are the paired
+control arm. The gate therefore refused to evaluate their control measurement
+contract. This was an analyzer-only path-classification defect: it did not
+read or alter simulator state, event ordering, RNG, or any raw log. The gate
+now maps `f2_baseline_*` to `control`, with a regression test covering all
+three frozen baseline seeds. Existing raw logs remain preserved and must still
+pass the full control contract before any prune action.
+
+## V-012 — execution and evidence hashes had different accidental counts
+
+The seed-101 checkpoint sink recorded 108,220,950 observations while the
+preserved JSON evidence contains 105,650,553 records. The 2,570,397 difference
+is exact: `maker_state` was double-observed 2,332,800 times and
+`conservation_violation` 237,597 times. `makerStateLog` wrapped `globalLog`;
+both wrappers carried the same checkpoint sink, so those telemetry events
+reached the sink twice but the JSON writer once. This was instrumentation only,
+not evidence loss or a simulation-state change. The nested wrapper was removed
+and a regression test asserts one sink observation per telemetry event.
+
+Terminology is now separated: checkpoints are the ordered
+`execution_stream_hash` for deterministic execution; offline `streamhash`
+(alias `evidencehash`) is an unordered `persisted_evidence` multiset digest.
+It cannot reconstruct execution order because venue files are concurrent.
+Exposure and reaction use persisted fills/book events, not this duplicated
+telemetry, and remain valid. Existing ae13f9a checkpoint values are retained as
+legacy provenance; future instrumentation runs use the corrected definition.
+
+**Log-mode retest.** The first split-domain regression exposed a second
+instrumentation defect: with `log_mode: none`, `maker_state` and
+`conservation_violation` were not emitted at all because their functions tested
+for a JSON writer rather than for either writer or checkpoint sink. A narrow
+trace found the first difference at the first one-second `maker_state` record.
+Those records now always reach the checkpoint sink and reach JSON only in full
+mode. Four fresh 5-minute processes (full logs at GOMAXPROCS 1 twice and 4,
+plus no logs at 4) now share the exact final ordered execution checkpoint;
+the three full-log runs also share the exact offline evidence multiset digest.
+
+**Persisted-artifact attestation.** A normalized event digest is useful for
+scientific comparison, but it is not a proof that the files themselves were
+preserved byte-for-byte: parsing and normalizing could conceal a record-level
+loss. Full-log runs now write `evidence-artifact-hash.json` after every JSONL
+writer closes. It records an unordered multiset digest of the exact JSON
+records and their count. `mvanalyze -metric evidenceartifacthash` independently
+scans those records and must reproduce it. This is intentionally not called a
+stream hash because concurrent venue files have no persisted global order.
+The fresh-process regression checks runtime/offline equality as well as
+cross-process equality. Historical ae13f9a raw logs predate this sidecar, so
+they retain the normalized offline evidence digest only; their event evidence
+is still complete and remains unmodified.
+
+**Contract after V-012.** `execution_stream_hash` means the ordered checkpoint
+chain over deterministic simulator observations. `evidence_multiset_hash`
+means the normalized, unordered observable-event multiset produced by
+`streamhash`/`evidencehash`. `evidence_artifact_multiset_hash` means the
+unordered multiset of exact persisted JSON records. None of these names claims
+that an offline reader can recover an order which the concurrent persistence
+layer never wrote. The added accumulation and sidecar are instrumentation-only:
+they run after serialization or on the existing event observation path, and do
+not schedule events, consume RNG, mutate actors, or affect matching/lifecycle
+state.
+
+New checkpoint records make that domain machine-readable as
+`domain: execution_observations`, `ordering: ordered_stream`, and
+`execution_stream_hash`; the retained `rolling_hash` is the identical legacy
+alias needed to read the pre-V-012 baseline files. This avoids retroactively
+rewriting their provenance while making a new run's hash domain explicit.
+
+**Freeze-preservation check.** To test that assertion against the frozen code
+rather than merely reason about it, a fresh 5-minute full-log seed-101 world
+was run from an archive of `ae13f9a` and from the corrected instrumentation
+tree, both at `GOMAXPROCS=4`. Their normalized persisted-evidence domains were
+identical: 315,427 events and digest
+`2139d5ded3fae160df06247202757c7831ca4b8b0f0a0e1ccc13b561ba525a57`.
+The corrected run's runtime JSON-record attestation also exactly matched the
+independent offline scan: 315,427 records and
+`8f54de499647ac9e51185795fcc82b96125cab15f448f4e7b8478b029d31f394`.
+The historical checkpoint count is intentionally not compared because V-012
+removed its duplicate telemetry observations. This is evidence that the change
+preserves the frozen observable world; it does not replace the original 24h
+determinism acceptance.
+
+**Seed-101 domain decomposition (legacy checkpoint versus persisted evidence).**
+The checkpoint sink and JSON logger receive the same venue-event classes. For
+every class except the two nested-wrapper telemetry paths, the legacy
+checkpoint count equals the persisted count; the table therefore also records
+the exact evidence contract rather than only the discrepancy.
+
+| event class | persisted evidence | legacy checkpoint | difference | evidence classification |
+|---|---:|---:|---:|---|
+| BookDelta | 17,300,806 | 17,300,806 | 0 | public-book state |
+| BookSnapshot | 5,791,374 | 5,791,374 | 0 | public-book state |
+| OrderAccepted | 11,762,654 | 11,762,654 | 0 | order lifecycle |
+| OrderCancelled | 6,522,302 | 6,522,302 | 0 | order lifecycle |
+| OrderFill | 16,292,736 | 16,292,736 | 0 | execution/account state |
+| OrderRejected | 23,580 | 23,580 | 0 | order lifecycle |
+| Trade | 8,146,368 | 8,146,368 | 0 | public trade tape |
+| balance_change | 16,312,896 | 16,312,896 | 0 | account state |
+| balance_snapshot | 371,520 | 371,520 | 0 | account state |
+| borrow | 1,352 | 1,352 | 0 | margin state |
+| conservation_violation | 237,597 | 475,194 | +237,597 | audit telemetry |
+| expiry_settlement | 4,608 | 4,608 | 0 | lifecycle/accounting |
+| fee_revenue | 7,688,681 | 7,688,681 | 0 | accounting |
+| funding_rate_update | 259,191 | 259,191 | 0 | derivative lifecycle |
+| instrument_listed | 396 | 396 | 0 | lifecycle |
+| instrument_settled | 363 | 363 | 0 | lifecycle/accounting |
+| maker_state | 2,332,800 | 4,665,600 | +2,332,800 | scientific telemetry |
+| margin_interest | 13,132 | 13,132 | 0 | margin/accounting |
+| mark_price_update | 691,176 | 691,176 | 0 | derivative state |
+| open_interest | 1,759,769 | 1,759,769 | 0 | derivative state |
+| position_update | 1,139,566 | 1,139,566 | 0 | account state |
+| realized_pnl | 1,295,849 | 1,295,849 | 0 | account state |
+| venue_balance_change | 7,701,837 | 7,701,837 | 0 | venue accounting |
+| **total** | **105,650,553** | **108,220,950** | **+2,570,397** | |
+
+Internal scheduler callbacks, actor wakeups, and latency-courier scheduling
+events were never venue-log events and were absent from both of these domains;
+they are implementation events, not order-book evidence. The V-014 compact
+courier sidecar now supplies the economically relevant latency aggregate that
+those historical raw logs could not reconstruct. No logger filter drops a
+venue event: a full-mode `venueLogger` first observes it for execution and
+then writes exactly one JSON record through its delegate. Empty/no-op book
+snapshots are retained (for example at startup), and no metadata-only record
+is included in either digest.
+
+## V-013 — prune gate ignored the manifest's stated metric conditions
+
+While validating the resumed baseline controls, the prune gate was found to
+parse each required artifact but then accept it whenever *any* nested value was
+nonzero. It did not evaluate the check stored in
+`measurement-manifest.json`. For example, a required `risk_samples > 0` could
+have been certified by an unrelated nonzero book count, and a compound primary
+metric could have been masked in the same way. No evidence was deleted and no
+arm was certified by this defect.
+
+The gate now evaluates the manifest's explicit, deliberately small condition
+language: nested field presence, non-empty collections, positive numeric
+counts, and conjunction. It rejects unknown expressions. Regression tests show
+that unrelated nonzero diagnostics cannot satisfy a zero primary metric, that
+each side of a conjunction is required, and that a present zero-valued
+accounting field (for example zero mismatches) remains a valid observation.
+This is analyzer-only and does not alter simulator state. Baseline and every
+treatment must be re-gated under this stricter implementation before pruning.
+
+## V-014 — reaction lag was not realized link latency
+
+The preregistered latency-x10 arm requires delivered market-data/request
+latency. `analysis/reaction.go` was labelled too generously in early campaign
+notes: it measures the elapsed time from a `BookDelta` to a later
+`OrderAccepted`, which includes decision cadence and, at equal timestamps,
+often collapses to zero. On the seed-102 baseline it reported 17,404,580
+observations with a zero median and a 2.99-microsecond mean despite the
+configured link delays being 0.5–20 milliseconds (and stochastic tails). It
+remains a useful behavioural reaction/adverse-selection diagnostic, but it is
+not a realized-latency estimator and cannot activate the latency intervention.
+
+The simulator now emits a compact `latency.json` sidecar from the deterministic
+courier. For every venue/role/channel it records scheduled, delivered, and
+end-of-run-undelivered messages plus mean sampled delay, FIFO queue delay, and
+actual delivery delay. A 1-minute seed-101 smoke world produced 189 such rows;
+for example the `central/abc_cdf_spot_maker` market-data link scheduled 513,
+delivered 509, and measured a 5ms mean draw and delivery. A deterministic
+phase integration test exercises request/response accounting without changing
+message semantics, and the fresh-process reproducibility test compares the
+compact sidecar across full/no-log and host-parallelism variants.
+
+Historical full raw logs cannot reconstruct this missing scheduler-side
+quantity. Therefore existing reaction and exposure metrics remain valid for
+their stated observables, but the latency-x10 causal component is
+**MEASUREMENT_INCOMPLETE** until compact paired seed-101/103 baseline courier
+controls are generated with the frozen configuration and treatment runs carry
+the same sidecar. This is an instrumentation/evidence correction, not an
+economic redesign.
+
+As a freeze-preservation check for the additional collector, the corrected
+pre-telemetry and courier-telemetry 5-minute full-log seed-101 worlds were
+also compared. Both contain 315,427 normalized persisted events with digest
+`2139d5ded3fae160df06247202757c7831ca4b8b0f0a0e1ccc13b561ba525a57`.
+Thus the collector did not perturb the observable frozen trajectory in this
+targeted diagnostic.
+
+The completed 24h compact controls confirm that the latency subsystem is active
+but has a material FIFO component: seed 101 recorded 185,803,519 scheduled
+courier messages, 185,802,095 delivered, and 1,424 terminally undelivered;
+its mean sampled delay was 11.52ms while mean actual delivery delay was
+37.99ms. Seed 103 recorded 185,628,105 / 185,626,871 / 1,234 respectively,
+with 11.50ms sampled and 37.76ms delivered. The terminally undelivered count
+is explicitly reported rather than silently discarded. These sidecars are now
+the paired 101/103 latency controls; seed 102 is being generated under the
+identical frozen configuration so the full baseline contract remains uniform.
+
+## V-015 — analyzer scanner could silently skip malformed evidence
+
+`analysis.Run.Scan` previously continued on a JSON parse failure or an invalid
+outer `data` envelope. Any metric using that scanner could therefore report a
+plausible statistic over an unannounced subset of a corrupted preserved log.
+This is a validator defect, not a simulator or evidence-loss finding: the
+historical raw files remain present and must be rescanned under the corrected
+reader before their measurements are certified.
+
+The scanner now fails closed on a malformed selected evidence record or data
+layer. Its dispatcher also queues paths before workers begin, so an early
+parse failure cannot deadlock a multi-file scan. Regression tests inject both
+malformed record and malformed data-envelope cases. The full normalized
+evidence scan for each preserved baseline will serve as the revalidation of
+the physical logs; only a clean pass permits the existing metric artifacts to
+remain valid.

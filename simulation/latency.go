@@ -1,8 +1,11 @@
 package simulation
 
 import (
+	"encoding/json"
 	"math"
 	"math/rand"
+	"os"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,6 +47,141 @@ type LatencyConfig struct {
 	// scheduler is bound to.
 	Scheduler *EventScheduler
 	Clock     types.Clock
+
+	// Telemetry records compact delivery accounting for this link. It is an
+	// observation-only sink: it never feeds back into delay sampling, event
+	// scheduling, or gateway decisions.
+	Telemetry      *LatencyStats
+	TelemetryLabel string
+}
+
+// LatencyChannel identifies the three independently delayed link paths.
+type LatencyChannel string
+
+const (
+	LatencyRequest    LatencyChannel = "request"
+	LatencyResponse   LatencyChannel = "response"
+	LatencyMarketData LatencyChannel = "market_data"
+)
+
+// LatencyStats is a compact accounting sink for actual courier delivery. The
+// latency arm cannot infer this quantity from a book's later behavioural
+// reaction, which also includes an actor's decision clock.
+type LatencyStats struct {
+	mu   sync.Mutex
+	rows map[latencyStatsKey]*latencyStatsRow
+}
+
+type latencyStatsKey struct {
+	Label   string
+	Channel LatencyChannel
+}
+
+type latencyStatsRow struct {
+	Scheduled   int64
+	Delivered   int64
+	DrawnNS     int64
+	QueueNS     int64
+	DeliveredNS int64
+}
+
+// LatencySummary is the persisted compact evidence product. Durations are in
+// nanoseconds so no precision is discarded before analysis.
+type LatencySummary struct {
+	Domain string              `json:"domain"`
+	Rows   []LatencySummaryRow `json:"rows"`
+}
+
+type LatencySummaryRow struct {
+	Link                    string  `json:"link"`
+	Channel                 string  `json:"channel"`
+	Scheduled               int64   `json:"scheduled"`
+	Delivered               int64   `json:"delivered"`
+	Undelivered             int64   `json:"undelivered"`
+	MeanDrawnNanoseconds    float64 `json:"mean_drawn_nanoseconds"`
+	MeanQueueNanoseconds    float64 `json:"mean_fifo_queue_nanoseconds"`
+	MeanDeliveryNanoseconds float64 `json:"mean_delivery_nanoseconds"`
+}
+
+func NewLatencyStats() *LatencyStats {
+	return &LatencyStats{rows: make(map[latencyStatsKey]*latencyStatsRow)}
+}
+
+type latencyTicket struct {
+	stats     *LatencyStats
+	key       latencyStatsKey
+	sourceAt  int64
+	scheduled int64
+}
+
+func (s *LatencyStats) scheduled(label string, channel LatencyChannel, sourceAt, drawnAt, scheduledAt int64) latencyTicket {
+	if s == nil {
+		return latencyTicket{}
+	}
+	key := latencyStatsKey{Label: label, Channel: channel}
+	s.mu.Lock()
+	row := s.rows[key]
+	if row == nil {
+		row = &latencyStatsRow{}
+		s.rows[key] = row
+	}
+	row.Scheduled++
+	row.DrawnNS += drawnAt - sourceAt
+	row.QueueNS += scheduledAt - drawnAt
+	s.mu.Unlock()
+	return latencyTicket{stats: s, key: key, sourceAt: sourceAt, scheduled: scheduledAt}
+}
+
+func (s *LatencyStats) delivered(ticket latencyTicket, deliveredAt int64) {
+	if s == nil || ticket.stats != s {
+		return
+	}
+	s.mu.Lock()
+	if row := s.rows[ticket.key]; row != nil {
+		row.Delivered++
+		row.DeliveredNS += deliveredAt - ticket.sourceAt
+	}
+	s.mu.Unlock()
+}
+
+func (s *LatencyStats) Summary() LatencySummary {
+	if s == nil {
+		return LatencySummary{Domain: "courier_delivery"}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := LatencySummary{Domain: "courier_delivery", Rows: make([]LatencySummaryRow, 0, len(s.rows))}
+	for key, row := range s.rows {
+		item := LatencySummaryRow{
+			Link: key.Label, Channel: string(key.Channel), Scheduled: row.Scheduled,
+			Delivered: row.Delivered, Undelivered: row.Scheduled - row.Delivered,
+		}
+		if row.Scheduled > 0 {
+			item.MeanDrawnNanoseconds = float64(row.DrawnNS) / float64(row.Scheduled)
+			item.MeanQueueNanoseconds = float64(row.QueueNS) / float64(row.Scheduled)
+		}
+		if row.Delivered > 0 {
+			item.MeanDeliveryNanoseconds = float64(row.DeliveredNS) / float64(row.Delivered)
+		}
+		result.Rows = append(result.Rows, item)
+	}
+	sort.Slice(result.Rows, func(i, j int) bool {
+		if result.Rows[i].Link != result.Rows[j].Link {
+			return result.Rows[i].Link < result.Rows[j].Link
+		}
+		return result.Rows[i].Channel < result.Rows[j].Channel
+	})
+	return result
+}
+
+// WriteJSON persists the compact latency evidence after all scheduled courier
+// work has drained.
+func (s *LatencyStats) WriteJSON(path string) error {
+	raw, err := json.MarshalIndent(s.Summary(), "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(raw, '\n'), 0644)
 }
 
 type ConstantLatency struct {

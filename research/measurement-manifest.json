@@ -48,7 +48,8 @@
         {"metric": "basis", "predicts": "perp premium and dated convergence baseline", "check": "result.perp_pooled.observations > 0"},
         {"metric": "optionsurface", "predicts": "baseline smile for the SABR comparison", "check": "result.fitted_expiries > 0"},
         {"metric": "exposure", "predicts": "baseline dealer risk and transmission", "check": "result.risk_samples > 0"},
-        {"metric": "reaction", "predicts": "baseline reaction lag and markouts", "check": "result.observations > 0"}
+        {"metric": "reaction", "predicts": "baseline reaction lag and markouts", "check": "result.observations > 0"},
+        {"metric": "latency", "predicts": "actual scheduled and delivered courier latency", "check": "rows non-empty"}
       ]
     },
     "abl-basis-off": {
@@ -90,6 +91,7 @@
       "preregistration": "cross-venue dispersion widens; arbitrage opportunities last longer; maker adverse selection rises",
       "measurements": [
         {"metric": "reaction", "predicts": "delivered latency and maker markouts", "check": "result.observations > 0 && result.adverse_selection non-empty"},
+        {"metric": "latency", "predicts": "actual scheduled and delivered market-data/request latency", "check": "rows non-empty"},
         {"metric": "arbitrage", "predicts": "dispersion and opportunity lifetime", "check": "result.cycles non-empty"},
         {"metric": "roleaudit", "predicts": "the population still trades", "check": "result.roles non-empty"},
         {"metric": "viability", "predicts": "the population stayed alive", "check": "result.books > 0"}

@@ -864,6 +864,7 @@ type Venue struct {
 	registerMount        func(*simulation.Mount)
 	latencyConfig        Config
 	latencySeed          int64
+	latencyTelemetry     *simulation.LatencyStats
 	scheduler            *simulation.EventScheduler
 	clock                *simulation.SimulatedClock
 	Participants         []Participant
@@ -1239,6 +1240,7 @@ type Sim struct {
 	TerminalAccounts []ParticipantAccountSnapshot
 	loggers          []*feesim.JSONLinesLogger
 	checkpoints      *checkpointSink
+	latencyTelemetry *simulation.LatencyStats
 }
 
 // Run starts all venue automation under one context and drives the common
@@ -1298,9 +1300,39 @@ func (s *Sim) Run(ctx context.Context) error {
 
 func (s *Sim) Close() {
 	s.checkpoints.close()
+	var evidence feesim.EvidenceDigest
 	for _, logger := range s.loggers {
 		logger.Close()
+		evidence.Add(logger.EvidenceDigest())
 	}
+	// The evidence files are written by several independent loggers and do not
+	// preserve one global causal order. This artifact attests exactly the
+	// persisted JSON-record multiset; the ordered execution hash remains the
+	// checkpoint sink's separate contract.
+	if s.Config.LogMode == "full" {
+		artifact := evidenceArtifactRecord{
+			Domain:   "persisted_json_records",
+			Ordering: "unordered_multiset",
+			Events:   evidence.Events,
+			Digest:   evidence.Hex(),
+		}
+		if raw, err := json.MarshalIndent(artifact, "", "  "); err == nil {
+			_ = os.WriteFile(filepath.Join(s.Config.LogDir, "evidence-artifact-hash.json"), append(raw, '\n'), 0644)
+		}
+	}
+	if s.latencyTelemetry != nil {
+		_ = s.latencyTelemetry.WriteJSON(filepath.Join(s.Config.LogDir, "latency.json"))
+	}
+}
+
+// evidenceArtifactRecord is written after all JSONL writers close. Its input
+// is the exact persisted-record domain and can be recomputed offline without
+// access to simulator-only observations.
+type evidenceArtifactRecord struct {
+	Domain   string `json:"domain"`
+	Ordering string `json:"ordering"`
+	Events   int64  `json:"events"`
+	Digest   string `json:"digest"`
 }
 
 type venueLogEvent struct {
@@ -1426,7 +1458,8 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	runner.AddIdler(timers)
 
 	sim := &Sim{Config: cfg, Runner: runner,
-		SpotIndex: newSpotIndexProvider(cfg.MakerAnchor, "ABC/USD", "ABC-PERP", "CDF/USD", "ABC/CDF"), Venues: make([]*Venue, 0, len(cfg.VenueIDs))}
+		SpotIndex: newSpotIndexProvider(cfg.MakerAnchor, "ABC/USD", "ABC-PERP", "CDF/USD", "ABC/CDF"),
+		Venues:    make([]*Venue, 0, len(cfg.VenueIDs)), latencyTelemetry: simulation.NewLatencyStats()}
 	// Built before any venue, because every venue logger carries it.
 	sink, err := newCheckpointSink(cfg.LogDir, cfg.CheckpointIntervalSeconds, cfg.TraceFromNano, cfg.TraceToNano)
 	if err != nil {
@@ -1584,7 +1617,10 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		if err != nil {
 			return nil, err
 		}
-		makerStateLog = venueLogger{inner: globalLog, venueID: id, sink: s.checkpoints}
+		// globalLog already carries the checkpoint sink. Wrapping it in another
+		// venueLogger would observe maker telemetry twice in the execution hash
+		// while persisting it once.
+		makerStateLog = globalLog
 		derivativeLog, err := newLogger("derivatives.jsonl")
 		if err != nil {
 			return nil, err
@@ -1633,6 +1669,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		latencyMounts:    make(map[string]*simulation.Mount),
 		latencyConfig:    s.Config,
 		latencySeed:      s.Config.Seed + int64(venueIndex+1)*1_000,
+		latencyTelemetry: s.latencyTelemetry,
 		scheduler:        scheduler,
 		clock:            clock,
 		makerStateLog:    makerStateLog,
@@ -2196,8 +2233,10 @@ func (v *Venue) mountForRole(role string) *simulation.Mount {
 				profile.provider(clientSeed+1, profile.ResponseScale),
 				profile.provider(clientSeed+2, profile.MarketDataScale)
 		},
-		Scheduler: v.scheduler,
-		Clock:     v.clock,
+		Scheduler:      v.scheduler,
+		Clock:          v.clock,
+		Telemetry:      v.latencyTelemetry,
+		TelemetryLabel: v.ID + "/" + class,
 	})
 	v.latencyMounts[class] = mount
 	v.latencyMountOrder = append(v.latencyMountOrder, mount)
@@ -2222,11 +2261,13 @@ func (s *Sim) addCrossVenueRouters(clock *simulation.SimulatedClock, scheduler *
 		mounts := make([]*simulation.Mount, 0, len(s.Venues))
 		for _, venue := range s.Venues {
 			mount := simulation.NewMount(venue.Exchange, simulation.LatencyConfig{
-				Request:    simulation.NewConstantLatency(delay),
-				Response:   simulation.NewConstantLatency(delay),
-				MarketData: simulation.NewConstantLatency(delay),
-				Scheduler:  scheduler,
-				Clock:      clock,
+				Request:        simulation.NewConstantLatency(delay),
+				Response:       simulation.NewConstantLatency(delay),
+				MarketData:     simulation.NewConstantLatency(delay),
+				Scheduler:      scheduler,
+				Clock:          clock,
+				Telemetry:      s.latencyTelemetry,
+				TelemetryLabel: venue.ID + "/cross_venue_arb",
 			})
 			clientID, gw := venue.connectParticipant(mount, fmt.Sprintf("cross_venue_router_tier_%g", tier), balances, 0, fee)
 			*actorID++
@@ -2366,7 +2407,7 @@ func (v *Venue) verifyConservation(now int64) {
 		return
 	}
 	log := v.makerStateLog
-	if log.inner == nil {
+	if log.sink == nil && log.inner == nil {
 		return
 	}
 	for _, violation := range violations {
@@ -2390,7 +2431,7 @@ func makerStateName(symbol string) string {
 }
 
 func (v *Venue) logMakerState(timestamp int64) {
-	if v.makerStateLog.inner == nil {
+	if v.makerStateLog.sink == nil && v.makerStateLog.inner == nil {
 		return
 	}
 	record := func(name string, maker *StoikovMarketMaker) {

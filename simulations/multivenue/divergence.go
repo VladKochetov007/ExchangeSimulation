@@ -53,9 +53,16 @@ type checkpointSink struct {
 
 // checkpointRecord is one line of the checkpoint file.
 type checkpointRecord struct {
-	SimTime    int64  `json:"sim_time"`
-	EventCount int64  `json:"event_count"`
-	Rolling    string `json:"rolling_hash"`
+	// Domain and Ordering distinguish this execution-attestation record from
+	// the unordered persisted-evidence digests. The old rolling_hash field is
+	// deliberately retained so the locator can still read the ae13f9a baseline
+	// files written before V-012 clarified the contract.
+	Domain              string `json:"domain"`
+	Ordering            string `json:"ordering"`
+	SimTime             int64  `json:"sim_time"`
+	EventCount          int64  `json:"event_count"`
+	ExecutionStreamHash string `json:"execution_stream_hash"`
+	Rolling             string `json:"rolling_hash"`
 }
 
 // traceRecord is one line of the narrow trace. Sequence is the sink's own
@@ -156,7 +163,12 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 
 func (s *checkpointSink) writeCheckpointLocked(at int64) {
 	record := checkpointRecord{
-		SimTime: at, EventCount: s.events, Rolling: hex.EncodeToString(s.rolling[:]),
+		Domain:              "execution_observations",
+		Ordering:            "ordered_stream",
+		SimTime:             at,
+		EventCount:          s.events,
+		ExecutionStreamHash: hex.EncodeToString(s.rolling[:]),
+		Rolling:             hex.EncodeToString(s.rolling[:]),
 	}
 	if line, err := json.Marshal(record); err == nil {
 		s.checkpoints.Write(line)
