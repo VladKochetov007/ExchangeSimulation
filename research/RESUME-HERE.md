@@ -153,6 +153,66 @@ the campaign can be reconstructed even if `scratch/` is lost.
   diagnostic ablation verdicts cannot certify any ae13f9a treatment.
 - V-017 makes the independently reconstructed exact JSON-record digest a
   mandatory prune-gate artifact for every run.
+- V-018 replaced the reaper's sandbox-incompatible process-name test with
+  final-only `greeks.json` + `latency.json` completion sentinels. Wave 1's
+  temporary partial derived artifacts were discarded. The interrupted raw
+  treatment logs were then discarded too because no run reached final state;
+  restart every Wave 1 arm from scratch.
+
+## 2026-08-23 clean stop — restart here
+
+The ae13f9a baseline control evidence remains intact. The last completed
+checks were the V-015 strict full-evidence scans:
+
+| seed | normalized persisted evidence events | digest |
+|---:|---:|---|
+| 101 | 105,650,553 | `91de88d54532c004572670511cfe3b7da76c0cc597c55adccf67bf47fb2f7c69` |
+| 102 | 111,048,322 | `cfaf7c52df4ea95ae795ae06c6cd85e8645afd136d05f5be6f4047757963b95a` |
+| 103 | 105,192,595 | `42d14cd85a3cefb4c0832a5c891fd5643c25ef8b36394b540c159502f06d5fb3` |
+
+All three compact latency controls are attached to their baseline scoreboard
+directories. Seed 102's final compact control was:
+
+```text
+event_count=111,048,322
+checkpoint=9a0265579fff9e8a1477aaf2e606782889f7842bc512fccd9096ac7a17a6fb05
+scheduled=193,376,039 delivered=193,374,477 undelivered=1,562
+mean sampled=11.92ms; mean actual delivery=41.20ms
+```
+
+Three instrumentation/analyzer-only commits were made after `472004a`:
+
+- `beaacf3 fix(audit): separate execution and evidence provenance`
+- `c609b1b fix(audit): bind prune verdicts to simulator freeze`
+- `5d3c49a fix(audit): gate exact persisted evidence digest`
+
+The prerequisite regression suite passed, including the fresh-process
+`MULTIVENUE_DETERMINISM=1` test across full/no-log and GOMAXPROCS variants.
+
+**Wave 1 was deliberately stopped, not completed.** Nine treatment processes
+were interrupted at about 9.5 simulated hours; none emitted final
+`greeks.json`, and all nine partial raw directories and their accidentally
+created partial scoreboard directories were deleted. They are not evidence.
+No treatment or stress result exists at ae13f9a.
+
+Before restarting Wave 1:
+
+1. Rebuild `bin/multivenue`, `bin/mvanalyze`, and `bin/prunegate`.
+2. Finish V-017 for all three baselines: calculate and retain
+   `evidenceartifacthash.json` from the preserved raw logs. Historic baselines
+   predate runtime artifact sidecars, so record their independently scanned
+   exact-record digest without pretending it can be compared to a missing
+   runtime sidecar.
+3. Confirm `./bin/prunegate -json` leaves controls measurement-incomplete only
+   for that new required artifact; do not prune the baseline logs.
+4. Start `research/artifacts/jobs_f2_w1.txt` again from scratch.
+5. Start `scratch/reap.sh` only after the jobs have begun. Its repaired
+   completion rule requires both final-only `greeks.json` and `latency.json`,
+   and its metric list now includes `evidenceartifacthash`. Never use host
+   process-name detection again.
+
+The disk is clean at roughly 395 GB free. The frozen baseline raw logs remain
+on disk; no evidence authorized for retention was removed.
 - Baseline 101/102/103 extraction and their compact latency sidecars are
   complete. The stricter V-015 full-evidence revalidation scan is the final
   gate before Phase 2; raw logs remain retained even though prunegate now

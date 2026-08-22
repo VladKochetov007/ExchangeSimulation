@@ -682,3 +682,18 @@ must independently scan it for every run; new full-log runs additionally
 retain the runtime `evidence-artifact-hash.json` sidecar for equality checking.
 The historical baselines predate that runtime sidecar, so their offline exact
 digests will be preserved as the available artifact rather than fabricated.
+
+## V-018 — reaper used an unsound host-process completion detector
+
+When Wave 1 began, `scratch/reap.sh` tried to discover active simulations by
+their host process name. The sandbox wrapper hid those children, so the reaper
+created derived metric files from live, partial treatment logs. The raw
+treatment directories continued normally; the nine partial scoreboard
+directories were deleted before any result was read, scored, or allowed to
+block a future extractor.
+
+Completion is now determined solely by the simulator's final-only
+`greeks.json` and `latency.json` sidecars. A run without both is never scanned.
+This is a campaign-orchestration defect, not a model or raw-evidence defect.
+The reaper will be restarted under the new sentinel rule only after the live
+Wave 1 processes finish.
