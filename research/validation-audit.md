@@ -668,3 +668,17 @@ the ae13f9a full revision). A regression test rejects a historical verdict
 with an otherwise matching arm name. Controls remain retained by campaign
 policy despite their complete measurement contracts. This is a provenance-gate
 fix only; it does not affect the simulator or its evidence.
+
+## V-017 — exact persisted-record digest was not a prune-gate requirement
+
+V-012 added a runtime attestation for the exact JSON records and an
+independent offline reader, but the measurement manifest still required only
+the normalized evidence-event multiset. That left a path to pruning a run
+without retaining proof that the physical records, rather than merely their
+normalized interpretation, were complete. No new treatment has completed.
+
+`evidenceartifacthash.json` is now an always-required artifact. The reaper
+must independently scan it for every run; new full-log runs additionally
+retain the runtime `evidence-artifact-hash.json` sidecar for equality checking.
+The historical baselines predate that runtime sidecar, so their offline exact
+digests will be preserved as the available artifact rather than fabricated.

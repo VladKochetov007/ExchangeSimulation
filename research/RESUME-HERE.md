@@ -151,6 +151,8 @@ the campaign can be reconstructed even if `scratch/` is lost.
   certifying its already-extracted metrics.
 - V-016 binds prune-gate verdicts to the exact simulator freeze, so the old
   diagnostic ablation verdicts cannot certify any ae13f9a treatment.
+- V-017 makes the independently reconstructed exact JSON-record digest a
+  mandatory prune-gate artifact for every run.
 - Baseline 101/102/103 extraction and their compact latency sidecars are
   complete. The stricter V-015 full-evidence revalidation scan is the final
   gate before Phase 2; raw logs remain retained even though prunegate now

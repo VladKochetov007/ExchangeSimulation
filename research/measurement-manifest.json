@@ -30,6 +30,11 @@
       "artifact": "streamhash.json",
       "command": "mvanalyze -metric streamhash -json <run>",
       "check": "result.events > 0"
+    },
+    {
+      "artifact": "evidenceartifacthash.json",
+      "command": "mvanalyze -metric evidenceartifacthash -json <run>",
+      "check": "result.events > 0"
     }
   ],
   "arms": {
