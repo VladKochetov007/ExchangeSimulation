@@ -351,3 +351,61 @@ option expiry instants netting to at most 12 units across up to 140 accounts;
 0 settlement mismatches, 0 unpaid, 0 trades after expiry; and under the
 rebuilt direction check, 0 of the funding account-instants misdirected and 0
 undirected.
+
+## V-008 — resolved: one seed now produces one event stream
+
+**What was believed.** That single-core execution restored determinism, and
+that multi-core divergence was a host-parallelism artefact.
+
+**What was true.** Three runs of the same commit, config and seed at
+`GOMAXPROCS=1` produced two different event streams; over thirty simulated
+minutes, three. Pinning made disagreement rarer, not absent. Every paired
+comparison in the campaign was therefore taken against a control that was one
+draw from a distribution rather than a fixed reference.
+
+**How it was found.** A canonical event digest (`-metric streamhash`): each
+event hashed over the fields that belong to the model — instant, client, venue,
+symbol, payload — and summed as 256-bit integers, so it is independent of the
+order log writers happened to run in but sensitive to any difference in what
+happened. Divergence was then bisected in simulated time and localised to the
+first differing instant.
+
+**Two causes, both ordering decisions taken outside the model.**
+
+1. **A random latency source shared by every participant on a link.** Each
+   client's delays depended on how many messages its neighbours had drawn
+   first, so any difference anywhere changed every delay afterwards. The
+   decisive evidence: a constant-latency configuration was deterministic over
+   the same horizons while the random one was not, and every random profile in
+   isolation was deterministic — only the combination diverged. Fixed by giving
+   each client its own sample path from the link's distribution.
+
+2. **The triangular desk subscribed to its three books by ranging a map.** Each
+   subscription delivers that book's first snapshot, so map order decided which
+   leg the desk saw first and what it did with its first tick. Found by tracing
+   every latency draw with its goroutine id, establishing that all draws were on
+   one goroutine — which proved the interleaving difference was an effect and
+   sent the search upstream.
+
+Three further hardening changes, none of them the cause here: the instrument
+list callers use to discover new contracts, and the book sweep that publishes
+marks and can call margin and liquidation, are both sorted; and two mutation
+loops in the spot execution plan applied per-asset deltas in map order with an
+early exit, so whether an order was admitted could depend on iteration order.
+That last one is a correctness bug independent of determinism.
+
+**Acceptance.** Identical digests across three fresh processes at 5m, 30m and
+1h, at `GOMAXPROCS` 1, 4 and 8 — simulated time no longer depends on host
+parallelism. A regression test (`MULTIVENUE_DETERMINISM=1`) runs four processes
+and compares digests.
+
+**Consequence for the campaign.** Every result measured before this commit was
+produced by a simulator whose event ordering was not reproducible. The existing
+runs stay as diagnostic data; they are not causal evidence. The ablation arms
+have to be re-run on the fixed simulator before any verdict rests on them.
+
+**Side finding, recorded in `research/future-calibration.md`.** The
+constant-latency digest is identical to the full random-latency digest, so at a
+one-second decision interval the configured latencies are non-binding. The
+latency-x10 arm's null result on cross-venue dispersion is a property of that
+regime rather than of the latency implementation.
