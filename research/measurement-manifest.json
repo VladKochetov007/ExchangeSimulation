@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "purpose": "Raw event logs may be deleted only when every measurement the arm's preregistration depends on has been extracted, parses, and contains observations. A generic set of metrics is not sufficient: the requirement is per arm, driven by what that arm predicted.",
+  "statuses": [
+    "NOT_RUN",
+    "RUN_COMPLETE",
+    "MEASUREMENT_INCOMPLETE",
+    "SCORED",
+    "SAFE_TO_PRUNE"
+  ],
+  "status_rules": {
+    "NOT_RUN": "no run directory, or the run produced no report",
+    "RUN_COMPLETE": "the run finished and its report is present",
+    "MEASUREMENT_INCOMPLETE": "at least one required measurement is missing, unparseable, or empty",
+    "SCORED": "every required measurement is present and non-empty, and the arm appears in the verdict artifact",
+    "SAFE_TO_PRUNE": "SCORED, and the extracted artifacts have been recorded; only this status permits deleting raw logs"
+  },
+  "always_required": [
+    {
+      "artifact": "manifest.json",
+      "source": "copied from the run directory",
+      "check": "config.seed present"
+    },
+    {
+      "artifact": "greeks.json",
+      "source": "copied from the run directory",
+      "check": "risk_timeline non-empty"
+    },
+    {
+      "artifact": "streamhash.json",
+      "command": "mvanalyze -metric streamhash -json <run>",
+      "check": "result.events > 0"
+    }
+  ],
+  "arms": {
+    "control": {
+      "preregistration": "baseline for every paired comparison",
+      "measurements": [
+        {"metric": "conservation", "predicts": "closing identity per asset", "check": "result.identities non-empty"},
+        {"metric": "positions", "predicts": "reconstruction agrees with the report", "check": "result.disagreement present"},
+        {"metric": "settlements", "predicts": "no mismatched or unpaid settlement", "check": "result.mismatched present"},
+        {"metric": "derivatives", "predicts": "funding direction and exercise semantics", "check": "result.funding non-empty"},
+        {"metric": "arbitrage", "predicts": "cycle edges for every arm's comparison", "check": "result.cycles non-empty"},
+        {"metric": "roleaudit", "predicts": "mechanism manipulation checks", "check": "result.roles non-empty"},
+        {"metric": "lifecycle", "predicts": "listing and settlement rounds", "check": "result.settlement_rounds > 0"},
+        {"metric": "viability", "predicts": "books alive", "check": "result.books > 0"},
+        {"metric": "stylized", "predicts": "stylized-fact scoreboard", "check": "result.Trades > 0"},
+        {"metric": "basis", "predicts": "perp premium and dated convergence baseline", "check": "result.perp_pooled.observations > 0"},
+        {"metric": "optionsurface", "predicts": "baseline smile for the SABR comparison", "check": "result.fitted_expiries > 0"},
+        {"metric": "exposure", "predicts": "baseline dealer risk and transmission", "check": "result.risk_samples > 0"},
+        {"metric": "reaction", "predicts": "baseline reaction lag and markouts", "check": "result.observations > 0"}
+      ]
+    },
+    "abl-basis-off": {
+      "preregistration": "perp basis widens; mean reversion slows; dated basis stops converging into expiry",
+      "measurements": [
+        {"metric": "basis", "predicts": "all three components", "check": "result.perp_pooled.observations > 0 && result.convergence_observations > 0"},
+        {"metric": "roleaudit", "predicts": "carry and dated-carry desks are gone", "check": "result.roles non-empty"},
+        {"metric": "arbitrage", "predicts": "carry cycle edge", "check": "result.cycles non-empty"},
+        {"metric": "viability", "predicts": "the population stayed alive", "check": "result.books > 0"}
+      ]
+    },
+    "abl-delta-hedge-off": {
+      "preregistration": "option-to-underlying transmission weakens; dealer delta grows without bound",
+      "measurements": [
+        {"metric": "exposure", "predicts": "both components, plus hedge-tagged flow as a secondary diagnostic", "check": "result.risk_samples > 0 && result.transmission non-empty"},
+        {"metric": "roleaudit", "predicts": "dealer hedging stopped while quoting continued", "check": "result.roles non-empty"},
+        {"metric": "viability", "predicts": "the chain stayed alive", "check": "result.books > 0"}
+      ]
+    },
+    "abl-vanna-volga-off": {
+      "preregistration": "dealer second-order exposures grow; cross-strike relative pricing loses structure",
+      "measurements": [
+        {"metric": "exposure", "predicts": "dealer vega and delta distributions", "check": "result.risk_samples > 0"},
+        {"metric": "optionsurface", "predicts": "cross-strike structure from traded prices, never from the desk's own model", "check": "result.fitted_expiries > 0"},
+        {"metric": "roleaudit", "predicts": "the desk is gone", "check": "result.roles non-empty"},
+        {"metric": "viability", "predicts": "the chain stayed alive", "check": "result.books > 0"}
+      ]
+    },
+    "abl-option-value-takers-off": {
+      "preregistration": "decisive for section 10: if the smile is inherited from SABR priors it flattens materially; inconclusive if the chain stops trading",
+      "measurements": [
+        {"metric": "optionsurface", "predicts": "ATM level, skew, curvature, term structure, cross-strike dispersion", "check": "result.fitted_expiries > 0 && result.priced > 0"},
+        {"metric": "viability", "predicts": "chain activity, which decides whether the arm is interpretable at all", "check": "result.books > 0"},
+        {"metric": "roleaudit", "predicts": "value takers gone, chain still trading", "check": "result.roles non-empty"},
+        {"metric": "exposure", "predicts": "dealer inventory as the alternative source of structure", "check": "result.risk_samples > 0"}
+      ]
+    },
+    "abl-latency-x10": {
+      "preregistration": "cross-venue dispersion widens; arbitrage opportunities last longer; maker adverse selection rises",
+      "measurements": [
+        {"metric": "reaction", "predicts": "delivered latency and maker markouts", "check": "result.observations > 0 && result.adverse_selection non-empty"},
+        {"metric": "arbitrage", "predicts": "dispersion and opportunity lifetime", "check": "result.cycles non-empty"},
+        {"metric": "roleaudit", "predicts": "the population still trades", "check": "result.roles non-empty"},
+        {"metric": "viability", "predicts": "the population stayed alive", "check": "result.books > 0"}
+      ]
+    },
+    "abl-own-mid-anchor": {
+      "preregistration": "cross-venue dispersion widens by more than an order of magnitude",
+      "measurements": [
+        {"metric": "arbitrage", "predicts": "cross-venue cycle dispersion", "check": "result.cycles non-empty"},
+        {"metric": "roleaudit", "predicts": "the population is otherwise unchanged", "check": "result.roles non-empty"},
+        {"metric": "viability", "predicts": "the population stayed alive", "check": "result.books > 0"}
+      ]
+    },
+    "abl-parity-off": {
+      "preregistration": "raw parity residuals grow and stay open longer",
+      "measurements": [
+        {"metric": "arbitrage", "predicts": "parity residual size and persistence", "check": "result.cycles non-empty"},
+        {"metric": "roleaudit", "predicts": "the parity desks are gone", "check": "result.roles non-empty"},
+        {"metric": "viability", "predicts": "the chain stayed alive", "check": "result.books > 0"}
+      ]
+    },
+    "abl-triangle-off": {
+      "preregistration": "null control: little changes",
+      "measurements": [
+        {"metric": "arbitrage", "predicts": "triangular dislocation size", "check": "result.cycles non-empty"},
+        {"metric": "roleaudit", "predicts": "the triangular desks are gone", "check": "result.roles non-empty"},
+        {"metric": "viability", "predicts": "the population stayed alive", "check": "result.books > 0"}
+      ]
+    },
+    "abl-funding-off": {
+      "preregistration": "the perpetual's anchoring to spot weakens; its premium distribution widens and drifts",
+      "measurements": [
+        {"metric": "basis", "predicts": "perp premium distribution and persistence", "check": "result.perp_pooled.observations > 0"},
+        {"metric": "derivatives", "predicts": "funding really was removed", "check": "result.funding present"},
+        {"metric": "arbitrage", "predicts": "carry cycle edge", "check": "result.cycles non-empty"},
+        {"metric": "viability", "predicts": "the population stayed alive", "check": "result.books > 0"}
+      ]
+    }
+  }
+}
