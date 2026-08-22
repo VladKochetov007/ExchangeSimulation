@@ -51,8 +51,14 @@ freeze.
     nohup bash scratch/reap.sh > scratch/reap.out 2>&1 &
 
 It skips any artifact that is already non-empty, so it picks up exactly where
-it stopped. Watch with `tail -f scratch/reap.log`. Expect roughly an hour: the
-heavy metrics are `reaction` (scans every book delta), `optionsurface` and
+it stopped, and it now marks a run complete only once every metric has
+produced output. If a run was interrupted while extracting, delete its
+`.done` marker before starting:
+
+    find research/artifacts/scoreboard/f2_* -name .done -delete
+
+Watch with `tail -f scratch/reap.log`. Expect roughly an hour: the heavy
+metrics are `reaction` (it scans every book delta), `optionsurface` and
 `streamhash`.
 
 Then confirm nothing is missing:
@@ -105,6 +111,13 @@ and 4 are extracted.
   seek reproduction of the old conclusions.
 - The economic interpretations in `future-calibration.md` stand and are not to
   be implemented during the audit.
+
+## Note on `scratch/`
+
+`scratch/` is gitignored by project rule, so the run scripts, job lists and the
+reaper live on disk rather than in the repository. They survive a restart. The
+job lists are also copied into `research/artifacts/` where they are tracked, so
+the campaign can be reconstructed even if `scratch/` is lost.
 
 ## Useful facts
 
