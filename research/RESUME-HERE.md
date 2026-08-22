@@ -213,6 +213,15 @@ Before restarting Wave 1:
 
 The disk is clean at roughly 395 GB free. The frozen baseline raw logs remain
 on disk; no evidence authorized for retention was removed.
+
+### Post-restart update
+
+V-017 is now complete for all three baselines. Exact persisted-record digests
+are in each scoreboard directory as `evidenceartifacthash.json`; see V-017 in
+`validation-audit.md` for values. Baseline gates pass but their raw logs remain
+retained. Wave 1 was restarted from scratch with the completion-sentinel
+reaper; no interim treatment metric is evidence until its paired full runs
+finish and their contracts pass.
 - Baseline 101/102/103 extraction and their compact latency sidecars are
   complete. The stricter V-015 full-evidence revalidation scan is the final
   gate before Phase 2; raw logs remain retained even though prunegate now

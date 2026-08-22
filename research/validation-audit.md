@@ -683,6 +683,18 @@ retain the runtime `evidence-artifact-hash.json` sidecar for equality checking.
 The historical baselines predate that runtime sidecar, so their offline exact
 digests will be preserved as the available artifact rather than fabricated.
 
+The retained ae13f9a baseline files passed this independent exact-record scan:
+
+| seed | records | evidence artifact multiset digest |
+|---:|---:|---|
+| 101 | 105,650,553 | `74cf5e479b8b6ae31b54eeeefda4f6aeb2fc09e04601e65f456fdfb3b57f16c8` |
+| 102 | 111,048,322 | `d128250ef46d3254b015a1e63aee05259105101debce3c4114d2e9bdd6a676a3` |
+| 103 | 105,192,595 | `ab530d435a6c53043642759a06630052d0f3248caff4b35d62e8a96a0d6178cb` |
+
+These are the available evidence-artifact identities for the historic runs.
+They are not retroactively claimed to match a runtime sidecar that those
+already-finished runs did not produce.
+
 ## V-018 — reaper used an unsound host-process completion detector
 
 When Wave 1 began, `scratch/reap.sh` tried to discover active simulations by
