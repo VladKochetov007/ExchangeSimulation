@@ -26,6 +26,11 @@ type Mount struct {
 
 	delayed []*DelayedGateway
 	mu      sync.Mutex
+	// phaseMode records that the runner has taken courier work away from
+	// goroutines. A client that connects after that point must be created in
+	// the same mode, or its messages arrive when the host scheduler happens to
+	// run its couriers rather than when simulated time says they should.
+	phaseMode bool
 }
 
 // NewMount creates a Mount backed by an *exchange.Exchange.
@@ -38,12 +43,30 @@ func NewMount(ex *exchange.Exchange, latency LatencyConfig) *Mount {
 // gateway ready for use by actors.
 func (m *Mount) ConnectNewClient(clientID uint64, balances map[string]int64, fee exchange.FeeModel) actor.Gateway {
 	gw := m.Market.ConnectNewClient(clientID, balances, fee)
-	if m.Latency.Request == nil && m.Latency.Response == nil && m.Latency.MarketData == nil {
+	request, response, marketData := m.Latency.Request, m.Latency.Response, m.Latency.MarketData
+	if m.Latency.PerClient != nil {
+		request, response, marketData = m.Latency.PerClient(clientID)
+	}
+	if request == nil && response == nil && marketData == nil {
 		return gw
 	}
-	d := NewDelayedGateway(gw, m.Latency.Request, m.Latency.Response, m.Latency.MarketData)
+	d := NewDelayedGateway(gw, request, response, marketData)
 	if m.Latency.Scheduler != nil && m.Latency.Clock != nil {
 		d.UseScheduler(m.Latency.Scheduler, m.Latency.Clock)
+	}
+	// A scheduler and a simulated clock mean simulated time is authoritative,
+	// and a courier that sleeps in real time before delivering is measuring
+	// the host rather than the model: the same message is then stamped with
+	// whatever simulated instant the process happened to reach, so two runs of
+	// one seed disagree. Whenever the link can deliver through the scheduler,
+	// it must, from the moment the gateway exists rather than from whenever
+	// the runner gets around to switching it over.
+	if m.Latency.Scheduler != nil && m.Latency.Clock != nil {
+		// Before Start, so the goroutine couriers are never launched at all
+		// rather than launched and then stopped.
+		if err := d.EnableDeterministicPhases(); err != nil {
+			panic(fmt.Sprintf("simulation: client %d cannot join deterministic phases: %v", clientID, err))
+		}
 	}
 	d.Start()
 	m.mu.Lock()
@@ -85,6 +108,7 @@ func (m *Mount) Drain() bool {
 // clients have connected and their wrappers exist.
 func (m *Mount) EnableDeterministicPhases() error {
 	m.mu.Lock()
+	m.phaseMode = true
 	delayed := append([]*DelayedGateway(nil), m.delayed...)
 	m.mu.Unlock()
 	for _, d := range delayed {

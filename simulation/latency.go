@@ -27,6 +27,18 @@ type LatencyConfig struct {
 	Response   LatencyProvider
 	MarketData LatencyProvider
 
+	// PerClient, when set, builds a private latency source for each client
+	// instead of sharing one across every participant on the link.
+	//
+	// Sharing one random source makes each client's delays depend on how many
+	// messages every other client on the same link happened to draw first,
+	// which couples participants through the random stream rather than through
+	// the market. Two runs that differ anywhere then differ in every delay
+	// afterwards. A private stream per client removes that coupling; the link
+	// still has one latency distribution, each participant just draws its own
+	// sample path from it.
+	PerClient func(clientID uint64) (request, response, marketData LatencyProvider)
+
 	// Scheduler delivers delayed messages at exact sim times (required for
 	// correct latency under SimulatedClock). Clock must be the same clock the
 	// scheduler is bound to.

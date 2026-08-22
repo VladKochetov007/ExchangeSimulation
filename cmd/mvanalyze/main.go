@@ -35,6 +35,7 @@ func main() {
 	arbStaleness := flag.Float64("arb-staleness", 2, "how many seconds old a quote may be and still count as executable")
 	conservationBook := flag.String("conservation-book", "", "restrict the conservation audit to one book, e.g. ABC/USD")
 	basePrecision := flag.Int64("base-precision", 100_000_000, "base-asset precision, for converting position sizes into contracts")
+	quotePrecision := flag.Int64("quote-precision", 100_000, "quote-asset precision, for converting logged prices into currency units")
 	viabilityWindow := flag.Float64("viability-window", 900, "viability window length in simulated seconds")
 	minTradesPerWindow := flag.Int("viability-min-trades", 1, "fewest taker trades a window may have and stay viable")
 	minTakerClasses := flag.Int("viability-min-taker-classes", 2, "fewest distinct taker classes a viable window needs")
@@ -312,6 +313,87 @@ func main() {
 					fmt.Printf("    %-8s %-18s trades %6d  qty %14d  gap %7.1fs (spread %7.1fs)  buys %4.2f\n",
 						profile.VenueID, profile.Role, profile.Trades, profile.Qty,
 						profile.MedianGapSeconds, profile.GapSpreadSeconds, profile.BuyShare)
+				}
+			})
+		case "streamhash":
+			result, err := run.MeasureStreamHash(analysis.StreamHashOptions{PerEvent: true})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s events %d  digest %s\n", dir, result.Events, result.Digest)
+				for _, row := range result.ByVenue {
+					fmt.Printf("    venue %-10s %10d  %s\n", row.Event, row.Count, row.Digest)
+				}
+				for _, row := range result.ByEvent {
+					fmt.Printf("    %-22s %10d  %s\n", row.Event, row.Count, row.Digest)
+				}
+			})
+		case "basis":
+			result, err := run.MeasureBasis(analysis.BasisOptions{})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s perp basis pooled: mean %.2f bps, |mean| %.2f, sd %.2f, AR1 %.4f, half-life %.1fs (defined %t)\n",
+					dir, result.PerpPooled.MeanBps, result.PerpPooled.MeanAbsBps, result.PerpPooled.StdDevBps,
+					result.PerpPooled.AR1, result.PerpPooled.HalfLifeSeconds, result.PerpPooled.HalfLifeDefined)
+				fmt.Printf("    dated pooled: |mean| %.2f bps, convergence slope %.4f bps/hour over %d observations\n",
+					result.DatedPooled.MeanAbsBps, result.ConvergenceSlopeBpsPerHour, result.ConvergenceObservations)
+				for _, bucket := range result.Convergence {
+					fmt.Printf("      tte %8.0f-%8.0fs  n %7d  |basis| %8.2f bps\n",
+						bucket.LowerSeconds, bucket.UpperSeconds, bucket.Observations, bucket.MeanAbsBps)
+				}
+			})
+		case "optionsurface":
+			result, err := run.MeasureOptionSurface(analysis.SurfaceOptions{QuotePrecision: *quotePrecision})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s option trades %d, priced %d, unpriceable %d, fitted expiries %d\n",
+					dir, result.Trades, result.Priced, result.Skipped, result.FittedExpiries)
+				fmt.Printf("    pooled ATM %.4f  slope %.4f  curvature %.4f  dispersion %.4f\n",
+					result.PooledATMVol, result.PooledSlope, result.PooledCurvature, result.PooledDispersion)
+				for _, term := range result.TermStructure {
+					fmt.Printf("      tte %.6f yr  expiries %3d  trades %7d  ATM %.4f\n",
+						term.MeanTTEYears, term.Expiries, term.Trades, term.ATMVol)
+				}
+			})
+		case "exposure":
+			result, err := run.MeasureExposure(analysis.ExposureOptions{
+				Roles: []string{"option_dealer"},
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s dealer risk samples %d; mean |net delta| %.4f, max %.4f, hedge ratio %.4f, drift %.6f/hour\n",
+					dir, result.RiskSamples, result.PooledMeanAbsNetDelta, result.PooledMaxAbsNetDelta,
+					result.PooledHedgeRatio, result.PooledNetDeltaDrift)
+				fmt.Printf("    option-underlying volume correlation %.4f\n", result.PooledCorrelation)
+				for _, flow := range result.HedgeFlows {
+					fmt.Printf("      %-8s %-16s taker fills %7d (qty %14d)  option fills %7d\n",
+						flow.VenueID, flow.Role, flow.TakerFills, flow.TakerVolume, flow.OptionFills)
+				}
+			})
+		case "reaction":
+			result, err := run.MeasureReaction(analysis.ReactionOptions{})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s reaction lag: n %d, mean %.4fs, p50 %.4fs, min %.4fs\n",
+					dir, result.Observations, result.PooledMeanSeconds, result.PooledP50Seconds, result.PooledMinSeconds)
+				fmt.Printf("    maker markout pooled %.3f bps\n", result.PooledMarkoutBps)
+				for _, row := range result.Adverse {
+					fmt.Printf("      %-8s %-20s fills %8d  markout %8.3f bps  picked off %.3f\n",
+						row.VenueID, row.Role, row.Fills, row.MeanMarkoutBps, row.PickedOffShare)
 				}
 			})
 		case "derivatives":

@@ -75,6 +75,9 @@ type Runner struct {
 	idlers       []Idler
 	config       RunnerConfig
 	shutdownHook func()
+	// phasesPrepared marks that deterministic phases are live, so anything
+	// registered afterwards is brought into them immediately.
+	phasesPrepared bool
 }
 
 func NewRunner(clock Clock, config RunnerConfig) *Runner {
@@ -94,10 +97,34 @@ func NewRunner(clock Clock, config RunnerConfig) *Runner {
 
 func (r *Runner) AddMount(m *Mount) {
 	r.mounts = append(r.mounts, m)
+	// A venue created lazily, after the run has already switched to
+	// deterministic phases, would otherwise keep its couriers on goroutines
+	// and deliver by wall clock while every other venue delivers by simulated
+	// time. Registering late is legitimate; escaping the phase discipline is
+	// not.
+	if r.phasesPrepared {
+		if err := m.EnableDeterministicPhases(); err != nil {
+			panic(fmt.Sprintf("simulation: late mount cannot join deterministic phases: %v", err))
+		}
+		if err := m.ValidateDeterministicPhases(); err != nil {
+			panic(fmt.Sprintf("simulation: late mount failed phase validation: %v", err))
+		}
+	}
 }
 
 func (r *Runner) AddActor(a actor.Actor) {
 	r.actors = append(r.actors, a)
+	// An actor created after the run switched to deterministic phases would
+	// otherwise keep its own goroutine loop, whose select over responses,
+	// market data and ticks is randomised by the runtime whenever more than
+	// one of them is ready. That is a coin flip inside the model.
+	if r.phasesPrepared {
+		phase, ok := a.(phaseActor)
+		if !ok || !phase.SupportsDeterministicPhases() {
+			panic(fmt.Sprintf("simulation: late actor %d does not support deterministic phases", a.ID()))
+		}
+		phase.EnableDeterministicPhases()
+	}
 }
 
 // AddIdler registers an extra component whose quiescence the runner must
@@ -235,6 +262,7 @@ func (r *Runner) prepareDeterministicPhases() error {
 		}
 		phase.EnableDeterministicPhases()
 	}
+	r.phasesPrepared = true
 	return nil
 }
 

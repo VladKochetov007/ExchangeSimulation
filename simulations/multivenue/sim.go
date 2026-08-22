@@ -2150,8 +2150,19 @@ func (v *Venue) mountForRole(role string) *simulation.Mount {
 		Request:    request,
 		Response:   profile.provider(seed+1, profile.ResponseScale),
 		MarketData: profile.provider(seed+2, profile.MarketDataScale),
-		Scheduler:  v.scheduler,
-		Clock:      v.clock,
+		// Each participant draws its own sample path from the link's
+		// distribution. Sharing one stream made a client's delays depend on
+		// how many messages its neighbours had drawn first, which is a
+		// coupling through the random number generator rather than through
+		// the market, and it made runs of the same seed diverge.
+		PerClient: func(clientID uint64) (simulation.LatencyProvider, simulation.LatencyProvider, simulation.LatencyProvider) {
+			clientSeed := seed + int64(clientID)*0x9E3779B1
+			return profile.provider(clientSeed, 1),
+				profile.provider(clientSeed+1, profile.ResponseScale),
+				profile.provider(clientSeed+2, profile.MarketDataScale)
+		},
+		Scheduler: v.scheduler,
+		Clock:     v.clock,
 	})
 	v.latencyMounts[class] = mount
 	v.latencyMountOrder = append(v.latencyMountOrder, mount)

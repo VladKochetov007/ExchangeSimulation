@@ -1074,8 +1074,18 @@ func (e *DefaultExchange) ListInstruments(baseFilter, quoteFilter string) []Inst
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
+	// Symbol order: callers discover contracts through this list and act on
+	// them in the order it returns, so ranging the map would let a participant
+	// quote a newly listed chain in a different order every run.
+	symbols := make([]string, 0, len(e.Instruments))
+	for symbol := range e.Instruments {
+		symbols = append(symbols, symbol)
+	}
+	slices.Sort(symbols)
+
 	result := make([]Instrument, 0, len(e.Instruments))
-	for _, inst := range e.Instruments {
+	for _, symbol := range symbols {
+		inst := e.Instruments[symbol]
 		if baseFilter != "" && inst.BaseAsset() != baseFilter {
 			continue
 		}
@@ -1441,8 +1451,17 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		underlying string
 	}
 	e.mu.RLock()
+	// Symbol order: this sweep publishes marks and can call margin and
+	// liquidation, so the order books are visited in decides the order those
+	// effects land in.
+	markSymbols := make([]string, 0, len(e.Books))
+	for symbol := range e.Books {
+		markSymbols = append(markSymbols, symbol)
+	}
+	slices.Sort(markSymbols)
 	candidates := make([]bookData, 0, len(e.Books))
-	for _, book := range e.Books {
+	for _, symbol := range markSymbols {
+		book := e.Books[symbol]
 		// Perpetuals and anything exposing the perp margin core (dated
 		// futures) get mark updates, margin calls, and liquidation sweeps.
 		perp := marginCore(book.Instrument)

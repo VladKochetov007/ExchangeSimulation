@@ -1,6 +1,23 @@
 package exchange
 
-import etypes "exchange_sim/types"
+import (
+	"slices"
+
+	etypes "exchange_sim/types"
+)
+
+// sortedAssetNames orders a per-asset map so that applying its entries has the
+// same effect every run. Several of the loops below mutate balances and stop at
+// the first failure, so the iteration order decides both what state is left
+// behind and whether the plan is admitted at all.
+func sortedAssetNames[V any](table map[string]V) []string {
+	names := make([]string, 0, len(table))
+	for asset := range table {
+		names = append(names, asset)
+	}
+	slices.Sort(names)
+	return names
+}
 
 // spotExecutionPlan freezes the fee quotes for a cloned match. Matching engines
 // mutate before settlement, so validating fees after Match is too late to stop
@@ -339,13 +356,13 @@ func (s *spotPlanState) finishOrder(adjustment *spotPlanOrder) bool {
 		adjustment.finished = true
 		return true
 	}
-	for asset, amount := range order.FeeReserved {
-		if !s.release(order.ClientID, asset, amount) {
+	for _, asset := range sortedAssetNames(order.FeeReserved) {
+		if !s.release(order.ClientID, asset, order.FeeReserved[asset]) {
 			return false
 		}
 	}
-	for asset, amount := range adjustment.foreignReserve {
-		if !s.reserve(order.ClientID, asset, amount) {
+	for _, asset := range sortedAssetNames(adjustment.foreignReserve) {
+		if !s.reserve(order.ClientID, asset, adjustment.foreignReserve[asset]) {
 			return false
 		}
 	}
@@ -360,8 +377,8 @@ func (s *spotPlanState) finishTerminalOrder(adjustment *spotPlanOrder) bool {
 	if adjustment == nil || adjustment.order == nil || adjustment.order.Type != Market {
 		return false
 	}
-	for asset, amount := range adjustment.order.FeeReserved {
-		if !s.release(adjustment.order.ClientID, asset, amount) {
+	for _, asset := range sortedAssetNames(adjustment.order.FeeReserved) {
+		if !s.release(adjustment.order.ClientID, asset, adjustment.order.FeeReserved[asset]) {
 			return false
 		}
 	}
@@ -403,8 +420,8 @@ func (s *spotPlanState) applyExecution(instrument Instrument, clientID uint64, s
 			return false
 		}
 	}
-	for asset, delta := range deltas {
-		if !s.addBalance(clientID, asset, delta) {
+	for _, asset := range sortedAssetNames(deltas) {
+		if !s.addBalance(clientID, asset, deltas[asset]) {
 			return false
 		}
 	}

@@ -2,6 +2,7 @@ package multivenue
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"exchange_sim/actor"
@@ -371,7 +372,15 @@ func (t *TriangleArbTaker) HandleEvent(_ context.Context, evt *actor.Event) {
 
 func (t *TriangleArbTaker) onTick(time.Time) {
 	if !t.subscribed {
+		// Symbol order: each Subscribe puts the book's first snapshot into this
+		// desk's inbox, so subscribing in map order decides which leg it sees
+		// first and therefore what it does with its first tick.
+		symbols := make([]string, 0, len(t.books))
 		for symbol := range t.books {
+			symbols = append(symbols, symbol)
+		}
+		sort.Strings(symbols)
+		for _, symbol := range symbols {
 			t.Subscribe(symbol, exchange.MDSnapshot)
 		}
 		t.subscribed = true
