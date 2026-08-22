@@ -352,7 +352,7 @@ option expiry instants netting to at most 12 units across up to 140 accounts;
 rebuilt direction check, 0 of the funding account-instants misdirected and 0
 undirected.
 
-## V-008 — resolved: one seed now produces one event stream
+## V-008 — resolved at the 24h horizon (this section was corrected twice)
 
 **What was believed.** That single-core execution restored determinism, and
 that multi-core divergence was a host-parallelism artefact.
@@ -394,13 +394,39 @@ loops in the spot execution plan applied per-asset deltas in map order with an
 early exit, so whether an order was admitted could depend on iteration order.
 That last one is a correctness bug independent of determinism.
 
-**Acceptance.** Identical digests across three fresh processes at 5m, 30m and
-1h, at `GOMAXPROCS` 1, 4 and 8 — simulated time no longer depends on host
-parallelism. A regression test (`MULTIVENUE_DETERMINISM=1`) runs four processes
-and compares digests.
+**A third cause, and a correction.** This section previously claimed resolution
+on the strength of 5m, 30m and 1h agreement. That was wrong: 1h is before the
+first option expiry and well before the chain grows, and runs still diverged at
+8h and 24h. The claim was withdrawn and the search resumed with a proper
+locator.
 
-**Consequence for the campaign.** Every result measured before this commit was
-produced by a simulator whose event ordering was not reproducible. The existing
+3. **The vanna-volga desk summed its book in map order.** Vega, vanna and volga
+   accumulate in `float64`, and floating-point addition is not associative, so
+   the same positions summed in a different order give a slightly different
+   risk and the desk trades a different contract. Nothing about the market
+   differed; the input to the decision did. It stayed hidden because the error
+   only matters once two candidate contracts are close in measured risk, which
+   needs a large chain: runs agreed exactly for four hours fifty-one minutes,
+   then diverged on one order.
+
+**How the third cause was found.** Not by re-running horizons. A divergence
+locator writes a rolling digest of the event stream in execution order at
+simulated-time boundaries, so two runs are compared by a few kilobytes of
+checkpoints rather than by their logs; it bracketed the divergence to a single
+sixty-second window. A per-event trace of that window alone then named the
+first differing event — the same instant, one run serving client 18 next and
+the other client 17. Instrumenting the delay draws showed identical values per
+gateway but a different order, which proved the random streams were correct and
+sent the search into the actor that acted differently.
+
+**Acceptance, at the experiment horizon.** Five fresh 24h processes of seed 101
+agree on all 1441 checkpoints and on 108,220,950 events with one canonical
+hash, at `GOMAXPROCS` 1 and 4; seed 103 agrees over 3h. Host parallelism is not
+a model parameter. A regression test (`MULTIVENUE_DETERMINISM=1`) runs four
+processes and compares digests.
+
+**Consequence for the campaign.** Every result measured before the 2026-08-22
+freeze was produced by a simulator whose event ordering was not reproducible. The existing
 runs stay as diagnostic data; they are not causal evidence. The ablation arms
 have to be re-run on the fixed simulator before any verdict rests on them.
 
