@@ -240,10 +240,10 @@ Rule: an arm that did not manipulate its mechanism cannot falsify anything.
 | arm | manipulated | preregistered primary metric | control 101 | arm 101 | Δ101 | control 103 | arm 103 | Δ103 | components | verdict |
 |---|---|---|---|---|---|---|---|---|---|---|
 | own-mid-anchor | yes | cross-venue ABC/USD dispersion (max cycle edge, bps) | 5.48 | 325.13 | +319.7 (×59.4) | 0.99 | 332.95 | +332.0 (×336.9) | dispersion >10×: **yes, both** | **SUPPORTED (screening)** |
-| own-mid-anchor | | profitable cross-venue instants | 10,506 | 192,728 | ×18.3 | 714 | 220,793 | ×309.2 | appear: **yes, both** (premise "none today" was wrong) | |
-| basis-off | yes | perp basis magnitude (mean carry deviation, bps) | −5,467 | −7,441 | ×1.36 | −5,906 | −7,518 | ×1.27 | basis widens: **yes, both** | **MIXED** |
-| basis-off | | mean reversion (frozen estimator) | — | — | not extracted | — | — | not extracted | slows: **not measurable** | |
-| basis-off | | dated basis convergence | — | — | no dated cycle extracted | — | — | — | weakens: **not measurable** | |
+| own-mid-anchor | | profitable cross-venue instants | 10,506 | 192,728 | ×18.3 | 714 | 220,793 | ×309.2 | **INVALID BASELINE ASSUMPTION** — see below | |
+| basis-off | yes | perp basis magnitude (mean carry deviation, bps) | −5,467 | −7,441 | ×1.36 | −5,906 | −7,518 | ×1.27 | basis widens: **yes, both** | **SUPPORTED (screening)** |
+| basis-off | | mean reversion (frozen estimator) | — | — | not extracted | — | — | not extracted | slows | **NOT IDENTIFIED / NOT MEASURED** |
+| basis-off | | dated basis convergence | — | — | no dated cycle extracted | — | — | — | weakens | **NOT IDENTIFIED / NOT MEASURED** |
 | parity-off | yes | raw parity residual (mean cycle edge, bps, pre-cost) | 28.05 | 122.15 | +94.1 (×4.35) | −4.74 | 179.38 | +184.1 | residual grows: **yes, both** | **MIXED** |
 | parity-off | | residual persistence (longest run, s) | 43,305 | 43,199 | ×1.00 | 20,149 | 43,816 | ×2.17 | stays open longer: **seeds disagree** | |
 | triangle-off | yes | triangular dislocation (mean cycle edge, bps) | 25,590 | 65,734 | ×2.57 | 19,205 | 56,680 | ×2.95 | "little changes": **no, both** | **FALSIFIED** |
@@ -258,6 +258,24 @@ Rule: an arm that did not manipulate its mechanism cannot falsify anything.
 | vanna-volga-off | yes | dealer vega / vanna / volga | — | — | greeks not retained | — | — | greeks not retained | **not measurable** | **NOT IDENTIFIED** |
 | vanna-volga-off | | cross-strike surface structure | — | — | no IV extraction | — | — | — | **not measurable** | |
 | option-value-takers-off | yes | market-implied ATM level, skew, curvature, term structure | — | — | no IV extraction | — | — | — | **not measurable** | **NOT IDENTIFIED** |
+
+### Two scoring corrections
+
+**own-mid-anchor, profitable-cycle subprediction.** This subcomponent is
+withdrawn from the evidence rather than counted as confirmed. Its
+preregistered form was "the cycle starts showing profitable instants where it
+currently shows none", and the premise is false: the deterministic baseline
+shows 10,506 profitable instants on seed 101 and 714 on seed 103. A prediction
+whose baseline assumption does not hold cannot pass or fail; it is an
+**invalid baseline assumption**. The arm's SUPPORTED (screening) verdict rests
+on the dispersion component alone, which had a numeric threshold set in
+advance and cleared it by a wide margin on both seeds.
+
+**basis-off, component scoring.** MIXED was the wrong label for an arm whose
+components were never measured. Scored separately: basis widening is
+**SUPPORTED (screening)**; mean reversion and dated convergence are **NOT
+IDENTIFIED / NOT MEASURED**. The arm as a whole carries no single verdict --
+its components do.
 
 ### Diagnostics, clearly secondary
 
@@ -277,10 +295,17 @@ These did not enter any verdict.
 
 ## Summary
 
-- **SUPPORTED (screening): 1** — own-mid-anchor
-- **MIXED: 3** — basis-off, parity-off, latency-x10
+Counted by arm, with basis-off scored by component:
+
+- **SUPPORTED (screening): 1 arm + 1 component** — own-mid-anchor (dispersion);
+  basis-off (basis widening)
+- **MIXED: 2** — parity-off, latency-x10
 - **FALSIFIED: 2** — triangle-off, funding-off
-- **NOT IDENTIFIED: 3** — delta-hedge-off, vanna-volga-off, option-value-takers-off
+- **NOT IDENTIFIED / NOT MEASURED: 3 arms + 2 components** — delta-hedge-off,
+  vanna-volga-off, option-value-takers-off; basis-off (mean reversion, dated
+  convergence)
+- **Invalid baseline assumption: 1 subcomponent** — own-mid-anchor
+  (profitable-cycle subprediction)
 
 Note the seed dispersion in the controls themselves: profitable cross-venue
 instants differ by 15× between seed 101 and 103 (10,506 against 714), and the

@@ -12,3 +12,7 @@
 # temporary directory so a run and the notes about it stay together.
 /scratch/
 /loganalyzer
+
+# Risk timelines are ~100MB per run. They are kept on disk beside the other
+# extracted artifacts, and are reproducible from the frozen commit and seed.
+research/artifacts/scoreboard/**/greeks.json

@@ -1,0 +1,2 @@
+research/configs/v005-stress-perp-2026-08-22.json 101 24h logs/f2_stress_101
+research/configs/v005-stress-perp-2026-08-22.json 103 24h logs/f2_stress_103

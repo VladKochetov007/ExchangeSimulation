@@ -1,104 +1,119 @@
-# Resume the validation campaign
+# Resume the frozen audit
 
-The session that wrote this lost its shell — every command, including `true`,
-returned exit 1 — so the measurement half of the suite is specified but not
-executed. Nothing here needs re-deriving; it needs running.
+Paused mid-campaign for a laptop restart. Nothing here needs re-deriving; it
+needs running. Everything below refers to the **2026-08-22 freeze**
+(`research/FREEZE.md`, commit `ae13f9a`).
 
-Start by confirming the shell works and the tree is clean:
+## Where things stand
+
+**Determinism is settled.** Three causes were found and fixed; the acceptance
+evidence is in `FREEZE.md`. Independent confirmation arrived afterwards: the
+Phase 1 baseline run with **full logging** produced the identical canonical
+hash to the logs-off verification run —
+`5e9c827e3953faa0bf48973b398d61cc…`, 108,220,950 events. Logging does not
+perturb the model.
+
+**Phase 1 is complete as far as the runs go.**
+
+| run | status | events | 24h hash (prefix) |
+|---|---|---|---|
+| `logs/f2_baseline_101` | complete, raw logs on disk | 108,220,950 | `5e9c827e3953faa0bf48973b398d61cc` |
+| `logs/f2_baseline_102` | complete, raw logs on disk | 113,618,719 | `79b7d3f6a00e2f2da606d43123e994a2` |
+| `logs/f2_baseline_103` | complete, raw logs on disk | 107,762,992 | `6b8b1571be3c1e648a0fd627fb54b3b6` |
+
+**Metric extraction is partial** and must be finished before anything else:
+
+- `f2_baseline_101`: 14 of 15 metrics extracted (`streamhash` outstanding)
+- `f2_baseline_103`: 2 of 15
+- `f2_baseline_102`: not started
+
+Interrupted analyzers left empty files; those were deleted, and the stale
+`.done` markers were removed, so the reaper resumes cleanly and re-extracts
+only what is missing.
+
+**Phase 2 has not produced anything.** Nine arm runs were launched and killed
+part-way through their 24 simulated hours; their directories were deleted
+because a partial run is not a run. No arm has been re-measured against this
+freeze.
+
+## Restart in this order
+
+### 1. Rebuild and confirm the tree
 
     cd /home/vlad/development/exchange_simulation
     git log --oneline -3
-    git status --porcelain
+    go build -o bin/multivenue ./cmd/multivenue
+    go build -o bin/mvanalyze ./cmd/mvanalyze
+    go build -o bin/prunegate ./cmd/prunegate
 
-If `research/` and `scratch/` show uncommitted files, commit them first:
+### 2. Finish extracting the baselines
 
-    git add -A research scratch
-    git commit -m "docs(research): ecology audit, frozen stylized-fact list, ablation pre-registrations and machine-readable summary"
+    nohup bash scratch/reap.sh > scratch/reap.out 2>&1 &
 
-## Rules that must not be broken
+It skips any artifact that is already non-empty, so it picks up exactly where
+it stopped. Watch with `tail -f scratch/reap.log`. Expect roughly an hour: the
+heavy metrics are `reaction` (scans every book delta), `optionsurface` and
+`streamhash`.
 
-- **Never edit `research/configs/frozen-baseline-2026-08-21.json`.** Every arm
-  is a copy with one named delta. Editing the baseline in response to a
-  measurement turns validation into calibration.
-- **Every run is pinned to one core.** `scratch/parallel_runs.sh` sets
-  `GOMAXPROCS=1`; multi-core runs of this configuration diverge (V-008).
-- **The script refuses to launch a stale binary.** If it does, rebuild:
-  `go build -o bin/multivenue ./cmd/multivenue && go build -o bin/mvanalyze ./cmd/mvanalyze`.
-- **Pre-registration is already written.** Do not revise a prediction or a kill
-  criterion after seeing a result; record the outcome against what was written.
+Then confirm nothing is missing:
 
-## 1. Deterministic baseline (blocks everything else)
+    ./bin/prunegate | grep -A3 f2_baseline
 
-    nohup bash scratch/parallel_runs.sh scratch/jobs_det.txt 3 80 > scratch/jobs_det.out 2>&1 &
+### 3. Phase 2 — all nine arms, both seeds
 
-Three seeds, 24 simulated hours each, roughly 40–60 minutes apiece pinned to
-one core. Poll with `tail -1 scratch/det_10*.log` until all three say `done`.
+Configs are already generated from the new freeze
+(`python3 scratch/build_ablation_arms.py` regenerates them if needed). Two
+waves, because eighteen 24h runs at ~31GB each will not fit at once:
 
-Then confirm reproducibility actually holds now:
+    nohup bash scratch/parallel_runs.sh scratch/jobs_f2_w1.txt 9 80 > scratch/f2_w1.out 2>&1 &
+    # after wave 1 is reaped and pruned:
+    nohup bash scratch/parallel_runs.sh scratch/jobs_f2_w2.txt 9 80 > scratch/f2_w2.out 2>&1 &
 
-    for i in 1 2; do GOMAXPROCS=1 ./bin/multivenue -config research/configs/frozen-baseline-2026-08-21.json \
-      -seed 101 -duration 30m -logdir scratch/rep_$i >/dev/null 2>&1; done
-    md5sum scratch/rep_1/greeks.json scratch/rep_2/greeks.json
+Keep the reaper running throughout. A run takes ~30 minutes wall for 24
+simulated hours when nine share the machine.
 
-Identical hashes are the precondition for every paired comparison below.
+**Prune only through the gate**, never by hand:
 
-## 2. Repeat the audits on the deterministic runs
+    ./bin/prunegate --prune
 
-    for m in conservation positions settlements derivatives arbitrage roleaudit lifecycle hedging; do
-      ./bin/mvanalyze -metric $m -json logs/det_101 > research/artifacts/scoreboard/det_101/$m.json
-    done
+It refuses any run that is not SAFE_TO_PRUNE, which requires every measurement
+that arm's own preregistration depends on to exist, parse and be non-empty.
 
-Compare against the numbers in `research/artifacts/validation-summary.json`.
-Anything that moves by more than the noise recorded there (0.03% on the primary
-metric) is a finding about the re-freeze, not about the market.
+### 4. Phase 4 — stress, on the new freeze
 
-Then rewrite the tables in `research/economic-ecology-audit.md` from
-`roleaudit` on these runs; the ones there now are from pre-re-freeze runs and
-are marked provisional.
+    nohup bash scratch/parallel_runs.sh scratch/jobs_f2_stress.txt 2 80 > scratch/f2_stress.out 2>&1 &
 
-## 3. The nine pre-registered ablations
+`research/configs/v005-stress-perp-2026-08-22.json` carries exactly the
+preregistered delta from the old stress arm — fifty-times uninformed perp flow
+and the larger metaorder sizes — and nothing else.
 
-    python3 scratch/build_ablation_arms.py
-    nohup bash scratch/parallel_runs.sh scratch/jobs_ablations.txt 4 80 > scratch/jobs_ablations.out 2>&1 &
+### 5. Phases 3 and 5
 
-Eighteen runs (nine arms, two seeds). Predictions and kill criteria are in
-`research/causal-ablations.md`; record each outcome against what is written
-there, including the arms that change nothing — the triangular-arbitrage arm is
-a deliberate null control and a large effect there would falsify V-001's
-account of that desk.
+Rescore all nine arms from scratch against the new freeze, component by
+component, then the provenance table (old diagnostic verdict against new).
+Then the frozen stylized-fact scoreboard. Neither needs new runs once Phases 2
+and 4 are extracted.
 
-The two that matter most:
+## Rules that still hold
 
-- `abl-own-mid-anchor` decides V-004: whether cross-venue agreement comes from
-  the shared index or from anything else.
-- `abl-option-value-takers-off` decides section 10: whether the option smile is
-  inherited from SABR priors or produced by dealer inventory and hedging.
+- Never edit either frozen configuration; an arm is a copy with one named
+  delta.
+- The old freeze's measurements, the eleven earlier reruns and every verdict
+  currently in `causal-ablations.md` are **diagnostic artifacts only**.
+- Do not revise a preregistered prediction or threshold after seeing a result.
+- A result that changes after the determinism fix is itself a finding; do not
+  seek reproduction of the old conclusions.
+- The economic interpretations in `future-calibration.md` stand and are not to
+  be implemented during the audit.
 
-## 4. Stress, and only then the liquidation ablation
+## Useful facts
 
-    GOMAXPROCS=1 ./bin/multivenue -config research/configs/v005-stress-perp.json -seed 101 -duration 24h -logdir logs/stress_101
-
-Count `liquidation` and `liquidation_deficit` events. If any fire, audit the
-ledger across them (`-metric conservation`) and check the insurance fund
-carries the deficit. If none fire even here, V-005 strengthens: the population
-cannot be stressed by its own flow.
-
-## 5. Stylized facts
-
-Only after 1–4. The list is frozen in `research/stylized-facts-baseline.md`,
-along with five facts already known to be uninterpretable. Measure, record, and
-do not adjust the population in response.
-
-## 6. Still open
-
-- **V-008 root cause.** Pinning to one core is a workaround. What is known: not
-  a data race (detector clean), not a scheduler tie-break (orders by time then
-  insertion sequence), not concurrent goroutines (a dump during a run shows one
-  simulation goroutine), and it disappears when latency profiles are removed.
-  The next step is to log every `Schedule` call's time, id and caller for the
-  first few thousand events across two runs and diff them.
-- **Clock-artifact sweep** (section 13), untouched.
-- **Broader mutation suite** (section 15): reversed funding sign, duplicated
-  fill, violated price-time priority, wrong Black-76 delta sign, swapped
-  call/put payoff. Each needs a named invariant that should fail; if it passes,
-  the audit is too weak and must be strengthened.
+- 24 simulated hours costs ~31 minutes wall on an idle machine, ~30GB of logs;
+  logging is 29% of runtime, the rest is simulation.
+- `GOMAXPROCS` no longer affects results, so runs can use whatever the
+  scheduler gives them.
+- `scratch/dethash_par.sh <label> <duration> <n> [procs]` re-checks determinism
+  at any horizon.
+- The divergence locator is `checkpoint_interval_seconds` plus
+  `trace_from_nano`/`trace_to_nano` in any config; compare `checkpoints.jsonl`
+  between runs to bracket a divergence, then trace that window alone.
