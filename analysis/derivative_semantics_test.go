@@ -207,3 +207,33 @@ func TestFundingAuditCatchesAReversedSignAgainstReconstructedSides(t *testing.T)
 		t.Errorf("unpublished sides must be undirected, not passes: %+v", result.Funding)
 	}
 }
+
+// Funding and a fill can share a simulator timestamp at an expiry boundary.
+// The funded side is the side before the funding record, not the side after a
+// later fill in the same persisted derivative log.
+func TestFundingAuditUsesPreFundingSameTimestampPosition(t *testing.T) {
+	const instant = int64(1_000_000_000)
+	lines := []string{
+		// Negative funding charges the short and credits the long.
+		positionLine(instant-1, "north", 1, "ABC-PERP", -auditPrecision, 0),
+		positionLine(instant-1, "north", 2, "ABC-PERP", auditPrecision, 0),
+		fundingRateLine(instant-1, "north", -5),
+		fundingPayLine(instant, "north", 1, -400),
+		fundingPayLine(instant, "north", 2, 400),
+		// This trade is later in the same file and flips client 1 long. It must
+		// not retroactively reverse the direction of the preceding funding.
+		positionLine(instant, "north", 1, "ABC-PERP", auditPrecision, 0),
+	}
+	dir := writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{BasePrecision: auditPrecision})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.FundingMisdirected != 0 || result.FundingSignWrong != 0 {
+		t.Fatalf("post-funding same-timestamp fill rewrote settlement side: %+v", result.Funding)
+	}
+}

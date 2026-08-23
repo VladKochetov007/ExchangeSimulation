@@ -5,21 +5,27 @@ import (
 	"sync"
 )
 
-// posPoint is one published perpetual position size and the instant it held from.
-type posPoint struct{ at, size int64 }
+// posPoint is one published perpetual position size and the physical evidence
+// position at which it became effective. Funding can share a timestamp with a
+// later fill, so SimTS alone is not enough to recover its contemporaneous side.
+type posPoint struct {
+	at, size int64
+	file     string
+	ordinal  int64
+}
 
 // perpSideAt returns the position size an account held in any perpetual on a
 // venue at a given instant, and whether any position of theirs was published
 // at or before it. An account holding several perpetuals on one venue is
 // summed, because funding for the venue settles them together in the ledger.
-func perpSideAt(history map[positionKey][]posPoint, venue string, client uint64, at int64) (int64, bool) {
+func perpSideAt(history map[positionKey][]posPoint, venue string, client uint64, at int64, file string, ordinal int64) (int64, bool) {
 	total := int64(0)
 	known := false
 	for key, points := range history {
 		if key.venue != venue || key.clientID != client {
 			continue
 		}
-		size, ok := sizeAt(points, at)
+		size, ok := sizeAt(points, at, file, ordinal)
 		if !ok {
 			continue
 		}
@@ -29,13 +35,30 @@ func perpSideAt(history map[positionKey][]posPoint, venue string, client uint64,
 	return total, known
 }
 
-// sizeAt is the last size published at or before an instant.
-func sizeAt(points []posPoint, at int64) (int64, bool) {
-	index := sort.Search(len(points), func(i int) bool { return points[i].at > at })
-	if index == 0 {
-		return 0, false
+// sizeAt is the last position published before an evidence record. Same-file
+// same-timestamp points before the record are eligible; points after it, and
+// same-timestamp points from a physically separate file without a global order,
+// are deliberately excluded.
+func sizeAt(points []posPoint, at int64, file string, ordinal int64) (int64, bool) {
+	firstAt := sort.Search(len(points), func(i int) bool { return points[i].at >= at })
+	var size int64
+	known := false
+	if firstAt > 0 {
+		size = points[firstAt-1].size
+		known = true
 	}
-	return points[index-1].size, true
+	lastAt := sort.Search(len(points), func(i int) bool { return points[i].at > at })
+	latestOrdinal := int64(-1)
+	for i := firstAt; i < lastAt; i++ {
+		point := points[i]
+		if point.file != file || point.ordinal >= ordinal || point.ordinal <= latestOrdinal {
+			continue
+		}
+		size = point.size
+		known = true
+		latestOrdinal = point.ordinal
+	}
+	return size, known
 }
 
 // ratePayload is a published funding rate.
@@ -65,7 +88,7 @@ type FundingInstantCheck struct {
 	// account's integer share: a settlement across n accounts may lose up to n
 	// units and no more.
 	Residual int64 `json:"residual"`
-	Rate int64 `json:"rate"`
+	Rate     int64 `json:"rate"`
 	// Directed counts the accounts whose perpetual side at this instant is
 	// known from the position stream, and Misdirected those among them charged
 	// the wrong way for the published rate: with a positive rate a long must
@@ -126,7 +149,7 @@ type DerivativeSemantics struct {
 	// rather than read as a pass.
 	FundingMisdirected int `json:"funding_misdirected"`
 	FundingUndirected  int `json:"funding_undirected"`
-	ExerciseBroken   int                   `json:"exercise_broken"`
+	ExerciseBroken     int `json:"exercise_broken"`
 	// HoldersMispaid is the count across every contract of holders whose own
 	// payout did not match their own position.
 	HoldersMispaid int `json:"holders_mispaid"`
@@ -169,6 +192,15 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 	// checked against each account's own side rather than against the sign of
 	// the total, which is the same under any sign convention.
 	fundingDeltas := make(map[instantKey]map[uint64]int64)
+	type fundingCursor struct {
+		file    string
+		ordinal int64
+	}
+	// The first balance record at a funding instant marks the event boundary.
+	// All affected accounts are settled by that operation before later records
+	// at the same timestamp. Keeping its physical position avoids attributing a
+	// post-funding trade to the funded side.
+	fundingCursors := make(map[instantKey]fundingCursor)
 	// Every published perpetual position, kept as a time series per account so
 	// the side held at a funding instant can be read off it. Positions arrive
 	// out of order because the scan is concurrent, so they are sorted after
@@ -240,7 +272,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				mu.Unlock()
 				return
 			}
-			perpHistory[key] = append(perpHistory[key], posPoint{at: at, size: payload.NewSize})
+			perpHistory[key] = append(perpHistory[key], posPoint{at: at, size: payload.NewSize, file: event.File, ordinal: event.Ordinal})
 			mu.Unlock()
 		case "OrderFill":
 			var fill optionFill
@@ -290,6 +322,10 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			switch {
 			case record.Reason == "funding_settlement":
 				key := instantKey{event.VenueID, instant, "USD"}
+				cursor, seen := fundingCursors[key]
+				if !seen || (cursor.file == event.File && event.Ordinal < cursor.ordinal) {
+					fundingCursors[key] = fundingCursor{file: event.File, ordinal: event.Ordinal}
+				}
 				bucket := funding[key]
 				if bucket == nil {
 					bucket = &fundingBucket{}
@@ -360,7 +396,12 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			if delta == 0 {
 				continue
 			}
-			size, known := perpSideAt(perpHistory, key.venue, holder, key.timestamp)
+			cursor, cursorKnown := fundingCursors[key]
+			if !cursorKnown {
+				check.Undirected++
+				continue
+			}
+			size, known := perpSideAt(perpHistory, key.venue, holder, key.timestamp, cursor.file, cursor.ordinal)
 			if !known || size == 0 {
 				check.Undirected++
 				continue

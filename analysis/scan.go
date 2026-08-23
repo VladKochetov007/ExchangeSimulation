@@ -23,6 +23,10 @@ type Event struct {
 	VenueID  string
 	Symbol   string
 	File     string
+	// Ordinal is the one-based physical record position in File. It permits
+	// analyzers to distinguish causal order among same-timestamp records in one
+	// persisted log; SimTS alone is not sufficient at lifecycle boundaries.
+	Ordinal int64
 
 	payload json.RawMessage
 }
@@ -127,7 +131,9 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 	reader := bufio.NewReaderSize(file, 1<<20)
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 1<<20), 1<<24)
+	var ordinal int64
 	for scanner.Scan() {
+		ordinal++
 		line := scanner.Bytes()
 		if len(needles) > 0 && !containsAny(line, needles) {
 			continue
@@ -145,7 +151,7 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 		}
 		event := Event{
 			SimTS: env.SimTS, ClientID: env.ClientID, Name: env.Event,
-			VenueID: outer.VenueID, Symbol: outer.Symbol, File: path,
+			VenueID: outer.VenueID, Symbol: outer.Symbol, File: path, Ordinal: ordinal,
 			payload: outer.Payload,
 		}
 		// Unwrap the derivative nesting: an inner payload means the fields sit
