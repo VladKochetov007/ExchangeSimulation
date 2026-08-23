@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "title": "Frozen ae13f9a adversarial autopsy",
+  "status": "COMPLETE_WITH_EXPLICIT_LIMITS",
+  "generated": "2026-08-23",
+  "verification": {
+    "internal_tier": "A: deterministic program plus executable audits",
+    "external_validity": "C: ecology realism remains a model-to-reality claim",
+    "interpretation": "Mechanical correctness and causal effects are not sufficient for a realism claim."
+  },
+  "freeze": {
+    "simulator_commit": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
+    "config": "research/configs/frozen-baseline-2026-08-22.json",
+    "config_sha256": "ca933bf2244eec8e104d4313456bed386809703bb7a1179125b8d9255f1b1036",
+    "horizon_seconds": 86400,
+    "execution_hash_domain": "ordered simulation observations",
+    "evidence_hash_domain": "unordered multiset of persisted JSON records"
+  },
+  "baselines": {
+    "101": {"execution_events": 108220950, "execution_hash": "5e9c827e3953faa0bf48973b398d61cc8dcd22c46062721bea775e847581cf56", "evidence_events": 105650553, "evidence_digest": "74cf5e479b8b6ae31b54eeeefda4f6aeb2fc09e04601e65f456fdfb3b57f16c8"},
+    "102": {"execution_events": 113618719, "execution_hash": "79b7d3f6a00e2f2da606d43123e994a257a4ad710165bbd875a3fbea9388edbe", "evidence_events": 111048322, "evidence_digest": "d128250ef46d3254b015a1e63aee05259105101debce3c4114d2e9bdd6a676a3"},
+    "103": {"execution_events": 107762992, "execution_hash": "6b8b1571be3c1e648a0fd627fb54b3b6964068ede5085ee71f14b2e05283334e", "evidence_events": 105192595, "evidence_digest": "ab530d435a6c53043642759a06630052d0f3248caff4b35d62e8a96a0d6178cb"}
+  },
+  "measurement_gate": {
+    "manifest": "research/measurement-manifest.json",
+    "manifest_sha256": "276e1106cac860529b6f3037f39c00e649e3e5b6b07b164848d2bc3523b04249",
+    "f2_runs_safe_to_prune": 21,
+    "raw_evidence_retained": true,
+    "note": "SAFE_TO_PRUNE certifies contract completion; no raw logs were deleted."
+  },
+  "causal_screen": {
+    "seeds": [101, 103],
+    "inference": "screening only; not robustness evidence",
+    "verdict_artifact": "research/artifacts/ablation-verdicts.json",
+    "verdict_artifact_sha256": "b6695422fb63a34d26b1476e6a7b3bdbfcf20d43465d1d4d6246957e512ff07b",
+    "verdicts": {
+      "own_mid_anchor": "SUPPORTED (screening)",
+      "basis_off": "MIXED: perp components supported; dated convergence falsified",
+      "parity_off": "SUPPORTED (screening)",
+      "triangle_off": "FALSIFIED",
+      "funding_off": "FALSIFIED for marginal anchoring in this ecology",
+      "delta_hedge_off": "MIXED",
+      "vanna_volga_off": "FALSIFIED",
+      "option_value_takers_off": "SUPPORTED (screening)",
+      "latency_x10": "MIXED"
+    }
+  },
+  "liquidation_stress": {
+    "artifact": "research/artifacts/v005-stress-ae13f9a.json",
+    "artifact_sha256": "6a7e4b5f0d056b190b46e48ad134329b049d8adf5d268d578b839b0666438436",
+    "forced_close_reachability": "EXERCISED",
+    "seed_101_events": 7054,
+    "seed_103_events": 7177,
+    "deficit_bankruptcy_insurance": "NOT_EXERCISED",
+    "trigger_replay_scope": "no-debt ABC-PERP noise_flow accounts only"
+  },
+  "stylized_scoreboard": {
+    "raw_return_acf": "FAIL",
+    "volatility_clustering": "INCONCLUSIVE",
+    "heavy_tails": "FAIL",
+    "trade_sign_memory": "PASS (descriptive)",
+    "lob_continuity_depth": "INCONCLUSIVE",
+    "impact_concavity": "FAIL",
+    "triangular_cross_instrument_coherence": "FAIL",
+    "perpetual_basis": "FAIL",
+    "dated_future_convergence": "FAIL",
+    "market_price_option_surface": "INCONCLUSIVE",
+    "dealer_hedge_mechanics": "PASS (mechanical)",
+    "ecology": "FAIL"
+  },
+  "clock_assessment": {
+    "verdict": "CLOCK_SENSITIVE: coupled cadence-lattice interaction; individual cause unresolved",
+    "artifact": "research/artifacts/clock-factor-ae13f9a.json",
+    "artifact_sha256": "b0bfe4f493a16f29e5c57b321424a034ade00a18b9b66784749509c64a292fee"
+  },
+  "mutation_coverage": {
+    "caught": ["extra fee", "unrecorded venue movement", "funding sign", "duplicate funding", "option payoff/strike/multiplier/call-put", "price-time priority fixtures", "immediate cancellation log loss", "duplicate/omitted linear settlement", "linear fill log loss", "future information delivery", "zero latency", "delayed expiry and expired quotes", "stale liquidation mark"],
+    "not_tested_or_not_reconstructible": ["per-fill option position paths", "GTC cancel request/state", "run-level queue-priority wiring", "cross-margin option/FX/borrowed collateral", "deficit/bankruptcy/insurance", "historical actor inbox/decision trace"]
+  },
+  "information_limits": ["maker index is a common zero-latency cross-venue aggregate", "Vanna-Volga desk reads dealer inventory by direct function call", "raw evidence lacks one global event ordering and per-observation actor-inbox timestamps"],
+  "next_phase": "Create v2 design ledger; do not tune ae13f9a.",
+  "source_artifacts": [
+    "research/FREEZE.md",
+    "research/validation-audit.md",
+    "research/causal-ablations.md",
+    "research/stylized-facts-baseline.md",
+    "research/clock-artifacts-ae13f9a.md",
+    "research/mutation-suite.md",
+    "research/information-boundary-audit.md",
+    "research/artifacts/ablation-verdicts.json",
+    "research/artifacts/v005-stress-ae13f9a.json",
+    "research/artifacts/clock-factor-ae13f9a.json",
+    "research/artifacts/mutations/zero-north-spot-maker-latency.json",
+    "research/artifacts/mutations/delay-expiry-settlement.json"
+  ]
+}

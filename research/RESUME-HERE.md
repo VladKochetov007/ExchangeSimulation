@@ -424,3 +424,19 @@ finish and their contracts pass.
   GTC cancel-request path. The analyzer change is freeze-preserving. Next:
   synthesize the frozen autopsy from retained artifacts; do not begin v2 until
   that gate is reviewed.
+
+### 2026-08-23 frozen-autopsy gate
+
+- The ae13f9a frozen autopsy is complete with explicit limits:
+  `research/frozen-autopsy-ae13f9a.md` and
+  `research/artifacts/frozen-autopsy-ae13f9a.json` distinguish deterministic
+  execution/evidence provenance, mechanical support, nine paired causal
+  verdicts, V-005 reachability, the stylized scoreboard, cadence sensitivity,
+  mutation coverage, and unresolved evidence domains.
+- `bin/prunegate -json` classifies the 21 actual `f2_*` baseline/treatment
+  directories `SAFE_TO_PRUNE` under the ae13f9a manifest and verdict artifact;
+  logs are intentionally still retained. Earlier non-`f2` rows are historical
+  directories and must not be mistaken for the frozen campaign.
+- It is now legitimate to start the separate v2 design ledger. Do not tune or
+  alter the ae13f9a simulator, and preserve all frozen artifacts as the v1
+  comparator.
