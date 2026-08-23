@@ -286,3 +286,18 @@ finish and their contracts pass.
   and information-boundary coverage; V-005 makes liquidation reachable, but
   an independent contemporaneous mark/equity reconstruction must exist before
   a stale-collateral mutation can be claimed.
+
+### 2026-08-23 fill-to-position mutation update
+
+- V-023 added the analyzer-only `mvanalyze -metric fillpositions`. The
+  five-hour control has 248,898 linear (perp/dated-future) fills paired
+  one-to-one with 248,898 persisted trade position updates. A scratch mutant
+  that settled exactly one north `ABC-PERP` match twice while emitting only
+  the original fill produced 248,900 updates; the audit caught the two extras.
+  Conservation, terminal linear positions, and order lifecycle all passed,
+  demonstrating why the relation is necessary. Artifact:
+  `artifacts/mutations/double-perp-settlement-once.json`; raw logs retained.
+- Crucial limitation: frozen raw logs lack per-fill option position-update
+  evidence. The new audit therefore covers only linear instruments; option
+  fill-to-position paths are NOT TESTED. This is a V-023 evidence/audit gap,
+  not a simulator defect. Do not claim it covered in the frozen autopsy.

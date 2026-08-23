@@ -883,3 +883,44 @@ were replayed from raw logs. Every normal world has zero `funding_broken`,
 `funding_duplicate_payments`. The previous funding-mechanics conclusion is
 therefore retained with a strictly stronger detector; this does not change the
 separate funding-off causal verdict.
+
+## V-023 — balance and terminal-position audits did not link fills to position changes
+
+The existing conservation audit checks each logged balance transition and the
+closed-system identity. The position audit reconstructs the terminal linear
+book and compares it with the terminal account report. Neither establishes
+that each *reported fill* caused exactly one position transition. A duplicated
+linear settlement can therefore debit and credit both parties consistently,
+leave contract net size zero, and leave the final report consistent with its
+own duplicated path.
+
+`analysis/fill_position.go` now adds `mvanalyze -metric fillpositions`. It
+restricts itself to linear instruments with the evidence actually required for
+the test: perpetuals and listed dated futures. Within each persisted
+`derivatives.jsonl` file, it multiset-pairs an `OrderFill` to a trade
+`position_update` on venue, timestamp, client, symbol, side, quantity, and
+post-trade size; it also checks physical old-size/new-size continuity. The
+five-hour seed-101 clock control has 248,898 linear fills, 248,898 matching
+position updates, and zero missing, extra, or chain-failed transitions.
+
+The `double_perp_settlement_once` mutant applied the first north `ABC-PERP`
+settlement twice but emitted only the original trade and fill records. The new
+audit found exactly two unexpected position updates (one for each party), with
+all 248,898 reported linear fills otherwise unchanged. As expected,
+conservation still had zero balance-delta mismatches and a bounded USD
+residual (−101,823, relative −6.16e−12), terminal linear net positions were
+zero with no report disagreement, and the order-lifecycle audit reported no
+error. Thus the new detector, not an existing identity, caught the intended
+defect. Full evidence is retained in
+`research/artifacts/mutations/double-perp-settlement-once.json`.
+
+This work also exposed an evidence-contract limitation: European-option
+settlement updates the position store but emits no per-fill `position_update`
+record. Consequently the new audit deliberately does **not** claim option
+coverage, and the historic ae13f9a raw logs cannot retroactively supply that
+independent path. The exchange-owned periodic dealer Greek snapshots remain
+useful for the dealer's aggregate risk, but they do not reconstruct every
+participant's option fill path. Any claim requiring such an option path stays
+unresolved until the evidence layer is extended and a consistently instrumented
+campaign is run. This is a scientific-evidence/audit gap, not evidence that
+the option position engine is wrong.

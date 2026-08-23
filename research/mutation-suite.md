@@ -54,6 +54,7 @@ an ecology run.
 | Drop immediate-order cancellation **records**, ecology run | 169,935 immediate cancellation records | every accepted non-resting order has a persisted fill-or-cancel terminal record | 0 missing terminals | **169,935 missing terminals** | yes, through `-metric orderlifecycle` |
 | Credit spot fee revenue twice, ecology run | 6,048,990 balance deltas | closed-system identity includes every venue fee credit | bounded truncation residual only | **CDF 126,548,770,107; USD 235,583,218,129 residual** | yes, through `-metric conservation` |
 | Negate Black-76 delta in live option-dealer hedge decisions, ecology run | 903 exchange-owned risk snapshots / all three hedge policies | actual underlying hedge offsets independently marked option delta | mean \|net delta\| 0.0170; max 0.1650; drift 0.00038/h | **mean \|net delta\| 1.9264; max 10.8592; drift 1.1844/h** | yes, through exchange-owned `-metric exposure` |
+| Settle first ABC-PERP match twice but emit one fill, ecology run | 1 match / 2 participant position paths | each logged linear fill has exactly one matching position transition | 248,898 linear fills and updates; 0 extras | **248,898 fills, 248,900 updates; 2 extras** | yes, through `-metric fillpositions` |
 
 ### Delta-sign ecology mutation
 
@@ -168,13 +169,34 @@ money and lifecycle thoroughly, covers derivative semantics well now that the
 funding direction check has been rebuilt and the exercise fixtures exist, and
 covers matching, order handling and information flow barely.
 
-Two of the eight executed mutations were initially **missed** -- the unrecorded
-venue movement and the reversed funding sign -- and in both cases the fix was
-to strengthen the detector rather than to accept the pass. That ratio is the
-most useful number in this file: a quarter of the mutations run so far found a
-hole in the audit rather than confirming it.
+Two early mutation runs were initially **missed** -- the unrecorded venue
+movement and the reversed funding sign -- and in both cases the fix was to
+strengthen the detector rather than to accept the pass. Those misses remain
+evidence about the audit, not historical footnotes to erase.
 
 That is a statement about the audit rather than about the simulator, and it
 belongs in the same document as the passes: an invariant suite is only as
 strong as the mutations it can catch, and this one has not yet been shown to
 catch the ones that matter most to a matching engine.
+
+### Linear fill-to-position mutation
+
+The `double_perp_settlement_once` mutant applies the settlement side effects
+of exactly one north `ABC-PERP` match twice, but deliberately creates only the
+original trade and `OrderFill` records. The normal five-hour control has
+248,898 linear (perpetual/dated-future) fills and exactly 248,898 matching
+trade position updates. The mutant has the same 248,898 fills but 248,900
+updates, so the new `-metric fillpositions` catches two unmatched updates.
+
+This is a necessary detector rather than a redundant presentation of an old
+one: the mutant's balance-delta chains, closed-system conservation, terminal
+linear contract net size, terminal report comparison, and order lifecycle all
+remain clean. The duplicate economic settlement was visible only in the
+one-to-one fill/position relation. Full artifact:
+`research/artifacts/mutations/double-perp-settlement-once.json`.
+
+The audit is deliberately limited to linear instruments. The frozen logger
+does not persist an option `position_update` for each option fill, so option
+fill-to-position equality is **NOT TESTED**, not a pass. This is now recorded
+as V-023 in `validation-audit.md`; it constrains the claims the ae13f9a
+autopsy may make about option-path evidence.

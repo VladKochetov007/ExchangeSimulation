@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "mutation": "double_perp_settlement_once",
+  "status": "CAUGHT",
+  "scope": "After the first ABC-PERP match is normally settled, apply that match's settlement side effects once more without a second trade or OrderFill record.",
+  "simulator_freeze": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
+  "config": "research/configs/frozen-baseline-2026-08-21.json",
+  "config_sha256": "83bcaa542d88fbe87620dfb7682ea2a1c000c10f162adf9123a801dbc3b9dc9b",
+  "seed": 101,
+  "duration_seconds": 18000,
+  "mutant_binary_sha256": "61f673ef371e94009f7354af9906543d2b46a71120f792a82aecda29bb205e98",
+  "analysis_binary_sha256": "befc187caa168bd1495c42632e21dc3878b4a46a9bb8cad4bf725d04cc174c64",
+  "trigger": {
+    "duplicated_matches": 1,
+    "duplicated_position_updates": 2,
+    "venue": "north",
+    "symbol": "ABC-PERP"
+  },
+  "control": {
+    "linear_fills": 248898,
+    "trade_position_updates": 248898,
+    "missing_position_update": 0,
+    "unexpected_position_update": 0,
+    "position_chain_failures": 0
+  },
+  "mutant": {
+    "linear_fills": 248898,
+    "trade_position_updates": 248900,
+    "missing_position_update": 0,
+    "unexpected_position_update": 2,
+    "position_chain_failures": 0,
+    "order_lifecycle_errors": 0,
+    "non_zero_net_contracts": 0,
+    "position_report_disagreement": 0,
+    "balance_delta_mismatched": 0,
+    "balance_chain_broken": 0,
+    "usd_conservation_residual": -101823,
+    "usd_conservation_residual_relative": -6.157209201073942e-12
+  },
+  "detector": "mvanalyze -metric fillpositions, which pairs each persisted linear fill with a same-file, same-timestamp, same-client, symbol, side, quantity, and post-trade-size position update.",
+  "evidence": {
+    "events": 21345572,
+    "digest": "be166321bdbd28551c694b7fff1a283039f166f95c80df6951e05036e5b803fa",
+    "domain": "persisted_json_records",
+    "ordering": "unordered_multiset",
+    "raw_logs_retained": true
+  },
+  "interpretation": "The new audit catches both extra position updates. Conservation, terminal linear-position reconstruction, and order lifecycle all remain clean, so none would have detected this duplicated economic settlement. Option fills are not covered by this detector because frozen raw logs omit their per-fill position updates."
+}

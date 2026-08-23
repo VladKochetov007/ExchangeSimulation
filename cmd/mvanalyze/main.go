@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, settlements, orderlifecycle, arbitrage, roleaudit, ecology, liquidations, derivatives")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, orderlifecycle, arbitrage, roleaudit, ecology, liquidations, derivatives")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -314,6 +314,18 @@ func main() {
 						profile.VenueID, profile.Role, profile.Trades, profile.Qty,
 						profile.MedianGapSeconds, profile.GapSpreadSeconds, profile.BuyShare)
 				}
+			})
+		case "fillpositions":
+			result, err := run.MeasureFillPositions()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s linear fills %d, position updates %d, matched %d, missing %d, unexpected %d, chain failures %d/%d\n",
+					dir, result.LinearFills, result.TradePositionUpdates, result.Matched,
+					result.MissingPositionUpdate, result.UnexpectedPositionUpdate,
+					result.PositionChainFailures, result.PositionChainChecks)
 			})
 		case "streamhash", "evidencehash":
 			result, err := run.MeasureStreamHash(analysis.StreamHashOptions{PerEvent: true})
