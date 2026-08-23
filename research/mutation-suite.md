@@ -60,6 +60,7 @@ an ecology run.
 | Delay contractual expiry/delisting five minutes, ecology run | 66 expired contracts (6 futures, 60 options) | no persisted fill after listed contract ExpiryNano | 206,360 expired-contract fill records; 0 late | **212,584 records; 7,326 late across all 66 contracts** | yes, through `-metric expiryfills` |
 | Use previous stored perpetual mark for liquidation sweep, ecology run | 39 observed ABC-PERP checks / 35 forced closes | reported liquidation trigger uses the contemporaneous mark and its derived PnL, equity, notional, and maintenance | all 39 fields exact | **14 stale-mark field mismatches** (mark, PnL, equity, notional, maintenance) | yes, through independent `-metric marginchecks` |
 | Drop every persisted ABC-PERP fill after real settlement, ecology run | 111,398 suppressed participant fill records | every persisted linear position transition has an observed economic fill; immediate orders retain a terminal evidence record | 248,898 fill/position paths; no lifecycle errors | **111,398 unmatched position paths; 47,268 missing immediate terminals; 28,309 quantity mismatches** | yes, through `-metric fillpositions` and `-metric orderlifecycle` |
+| Make north spot-maker courier links instantaneous while the manifest remains nonzero, ecology run | 1,040,345 delivered north spot-maker messages | persisted courier telemetry reports the actual nonzero delay promised by the manifest | 0.566 ms mean drawn delay on all three channels | **0 ns drawn and delivered delay on all three channels** | yes, through persisted `latency.json`; price-edge proxy rejected |
 
 ### Delta-sign ecology mutation
 
@@ -139,19 +140,13 @@ payout, oddness of the payoff in position size, zero payout when worthless,
 conservation across the closed set, and the absence of any position, order or
 listing after expiry.
 
-## Specified, not yet run
+## Remaining NOT TESTED / evidence-limited classes
 
 | mutation | invariant that must fail | detector |
 |---|---|---|
-| Duplicate one fill | movements reconstruct the reported holdings; contract net size stays zero | `-metric conservation` chain check; `-metric positions` |
-| Delete one fill | the same two | as above |
-| Omit one settlement | payout residual per contract; holders paid against holders present | `-metric settlements` |
-| Execute an order after expiry | no fill may be recorded after the listed contractual expiry | `-metric expiryfills` (all futures/options); dated-future settlement audit is supplementary |
 | Fail to cancel expired resting orders | the same, plus the book still quoting a delisted contract | `-metric settlements`; needs a delisting check that does not exist yet |
 | Drop a GTC cancellation request or state transition | resting order can remain executable after a requested cancel; request evidence is not persisted | none yet |
-| Give one venue zero latency accidentally | cross-venue edge appears where none did | `-metric arbitrage`, cross-venue cycle |
 | Use stale collateral for liquidation beyond one-perpetual/no-debt scope | full cross-margin trigger must use contemporaneous collateral and all risk marks | `marginchecks` covers only ABC-PERP, USD cash, and no-debt accounts; options, FX collateral, isolated margin, and borrowing remain untestable from retained evidence |
-| Inject future information into one actor | scheduler-backed market data cannot arrive before publication plus modeled delay | `simulation.TestMarketDataCannotArriveBeforePublicationPlusLatency`; direct inventory bypasses remain separately qualified |
 
 ## What the table already says about the audit
 
@@ -247,3 +242,26 @@ terminal positions and order lifecycle again remain clean; `fillpositions`
 catches the two missing transitions. The detector therefore rejects both a
 duplicated and an omitted economic settlement. Full artifact:
 `research/artifacts/mutations/drop-perp-settlement-once.json`.
+
+### Accidental zero-latency mutation
+
+`zero_north_spot_maker_latency` leaves the configuration manifest unchanged
+but replaces the north `spot_maker` per-client request, response, and
+market-data providers with zero-delay providers. It deliberately retains the
+scheduled delayed gateway rather than connecting it directly, so the compact
+delivery sidecar has to expose the zero instead of merely losing a row.
+
+The paired five-hour seed-101 control reports 0.566 ms mean drawn delay on
+each north spot-maker channel. The mutant reports exactly zero drawn and
+delivered nanoseconds for all 1,040,345 scheduled/delivered north messages,
+while south's corresponding channels remain about 0.567 ms. The unit test
+`TestScheduledZeroLatencyProducesZeroTelemetry` independently verifies the
+same courier/sidecar contract. This is therefore **CAUGHT**.
+
+The originally suggested cross-venue-arbitrage proxy did not behave in its
+assumed direction: the control has a 6.20% profitable north-to-central share
+(maximum 1.53 bps), while the mutant has only a 0.25% central-to-north share
+(maximum 0.12 bps). That price result is retained as diagnostic evidence, not
+used as a latency detector. Full compact provenance is
+`research/artifacts/mutations/zero-north-spot-maker-latency.json`; raw logs
+remain retained.

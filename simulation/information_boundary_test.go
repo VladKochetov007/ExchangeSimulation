@@ -83,3 +83,44 @@ func TestMarketDataCannotArriveBeforePublicationPlusLatency(t *testing.T) {
 		t.Fatalf("latency evidence does not support the boundary: %+v", rows)
 	}
 }
+
+// Zero delay is still an explicit modeled courier path when a link is
+// configured with a latency provider. The telemetry must retain that observed
+// zero rather than silently dropping the link and making an accidental direct
+// connection indistinguishable from missing evidence.
+func TestScheduledZeroLatencyProducesZeroTelemetry(t *testing.T) {
+	clock := NewSimulatedClock(int64(time.Second))
+	scheduler := NewEventScheduler(clock)
+	clock.SetScheduler(scheduler)
+	stats := NewLatencyStats()
+	inner := &boundaryGateway{
+		id: 8, resp: make(chan exchange.Response, 1), md: make(chan *exchange.MarketDataMsg, 1),
+	}
+	delayed := NewDelayedGateway(inner, nil, nil, NewConstantLatency(0))
+	delayed.UseScheduler(scheduler, clock)
+	delayed.SetLatencyTelemetry(stats, "zero-boundary-test")
+	if err := delayed.EnableDeterministicPhases(); err != nil {
+		t.Fatal(err)
+	}
+	delayed.Start()
+	defer delayed.Stop()
+
+	inner.md <- &exchange.MarketDataMsg{Symbol: "ABC-USD", Timestamp: clock.NowUnixNano()}
+	if !delayed.PumpDeterministicPhase() {
+		t.Fatal("zero-delay market data was not scheduled")
+	}
+	if !delayed.DrainDeterministicPhaseEgress() {
+		t.Fatal("zero-delay market data was not delivered at publication")
+	}
+	select {
+	case <-delayed.MarketDataCh():
+	default:
+		t.Fatal("actor inbox missing zero-delay market data")
+	}
+
+	rows := stats.Summary().Rows
+	if len(rows) != 1 || rows[0].Scheduled != 1 || rows[0].Delivered != 1 ||
+		rows[0].MeanDrawnNanoseconds != 0 || rows[0].MeanDeliveryNanoseconds != 0 {
+		t.Fatalf("zero-delay telemetry is incomplete or nonzero: %+v", rows)
+	}
+}

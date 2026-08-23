@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "mutation": "zero_north_spot_maker_latency",
+  "classification": "CAUGHT",
+  "simulator_freeze": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
+  "scope": "scratch mutant only; north spot_maker request, response, and market-data courier providers return zero while retaining the delayed gateway and telemetry",
+  "design": {
+    "seed": 101,
+    "horizon": "5h",
+    "config": "research/configs/frozen-baseline-2026-08-21.json",
+    "config_equal_between_control_and_mutant": true,
+    "completion_sentinel": "both greeks.json and latency.json"
+  },
+  "binaries": {
+    "control_multivenue_sha256": "f7e8bc7af67b390cbf0df70a7381710a6cbea8253122bb23713e4954d3bbdb4c",
+    "mutant_multivenue_sha256": "b3838275685e26cf1e5aa243917e7efafc8f3519d9c789d5e6a68e43419c6137",
+    "analysis_sha256": "61f2b5e522a4f7fc2e0694991ad7e64a8fff67d149035144132dd4b0b0440a69"
+  },
+  "evidence": {
+    "control": {
+      "runtime_offline_evidence_equal": true,
+      "events": 21345555,
+      "digest": "0326ab9f965867583e2268f62f10b4d114be87e5437558239c5ea957aae18dc7",
+      "greeks_sha256": "8f48be69b72b3c4923406ebca5d35835468a69c4a6edebd733dc3091d859ef54",
+      "latency_sha256": "05dd5f2e6bca474d6ebe02f61b59f1913398cfa388bce0fe6eb36dadbbbd4e4c"
+    },
+    "mutant": {
+      "runtime_offline_evidence_equal": true,
+      "events": 21005069,
+      "digest": "d5ccf90c17b2f1ab37938b057799cfd3ac3fb6f47420dbd378bdf52bdbc6ccdc",
+      "greeks_sha256": "5883cb24594961ecd8d72572cf003afda7f977c6ca384a8205345753a4ed9f8d",
+      "latency_sha256": "0d5f7de4b2617c22d1e77e59445517262e1bbcae91ba381a5378dcb3e5ca24a0"
+    }
+  },
+  "latency_contract": {
+    "manifest_declares_nonzero_north_spot_maker_profile": true,
+    "control_north_spot_maker": {
+      "market_data": {"scheduled": 859636, "delivered": 859612, "mean_drawn_ns": 565917.3921718029, "mean_delivery_ns": 1008413.2227691098},
+      "request": {"scheduled": 39280, "delivered": 39272, "mean_drawn_ns": 566335.5871945011, "mean_delivery_ns": 737312.4338205337},
+      "response": {"scheduled": 201975, "delivered": 201972, "mean_drawn_ns": 566446.0349449189, "mean_delivery_ns": 847408.8767948032}
+    },
+    "mutant_north_spot_maker": {
+      "market_data": {"scheduled": 812684, "delivered": 812684, "mean_drawn_ns": 0, "mean_delivery_ns": 0},
+      "request": {"scheduled": 38470, "delivered": 38470, "mean_drawn_ns": 0, "mean_delivery_ns": 0},
+      "response": {"scheduled": 189191, "delivered": 189191, "mean_drawn_ns": 0, "mean_delivery_ns": 0}
+    },
+    "control_south_spot_maker_mean_drawn_ns": [566817.155738591, 568114.0613948408, 567371.2496954635],
+    "mutant_south_spot_maker_mean_drawn_ns": [566685.3391779758, 568121.5036242313, 567593.8154140548],
+    "verdict": "CAUGHT: the persisted delivery sidecar distinguishes a declared nonzero link from an accidental zero-delay implementation."
+  },
+  "mechanical_controls": {
+    "order_lifecycle_failures_control": 0,
+    "order_lifecycle_failures_mutant": 0,
+    "conservation_control": "bounded integer residual only",
+    "conservation_mutant": "bounded integer residual only"
+  },
+  "rejected_behavioral_proxy": {
+    "claim": "zero latency should create a cross-venue arbitrage edge",
+    "control_north_to_central_profitable_share": 0.06201033505584264,
+    "control_north_to_central_max_edge_bps": 1.530512018672603,
+    "mutant_central_to_north_profitable_share": 0.002500416736122687,
+    "mutant_central_to_north_max_edge_bps": 0.11706965769464617,
+    "interpretation": "The directional price-edge premise is false in this world; it is not used to validate latency telemetry."
+  },
+  "source_artifacts": [
+    "research/artifacts/mutations/zero-north-spot-maker-latency/mut_zero_north_spot_maker_latency_control-evidenceartifacthash.json",
+    "research/artifacts/mutations/zero-north-spot-maker-latency/mut_zero_north_spot_maker_latency-evidenceartifacthash.json",
+    "research/artifacts/mutations/zero-north-spot-maker-latency/mut_zero_north_spot_maker_latency_control-arbitrage.json",
+    "research/artifacts/mutations/zero-north-spot-maker-latency/mut_zero_north_spot_maker_latency-arbitrage.json"
+  ]
+}

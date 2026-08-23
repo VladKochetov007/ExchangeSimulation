@@ -1132,3 +1132,36 @@ time economic effect. All ten worlds have complete evidence attestations and
 clean lifecycle contracts. Detailed data and limitations are in
 `research/clock-artifacts-ae13f9a.md` and
 `research/artifacts/clock-factor-ae13f9a.json`.
+
+## V-030 — realized-latency evidence lacked a zero-delay falsifier
+
+The latency sidecar was required for the latency-x10 causal arm, but its
+ability to report an accidental instantaneous link had not itself been
+attacked. A market-level proxy is insufficient: a price dislocation may rise,
+fall, or reverse direction under a speed change for economic reasons unrelated
+to whether the link was actually delayed.
+
+The scratch `zero_north_spot_maker_latency` binary keeps the north
+`spot_maker` delayed gateway and telemetry sink but replaces its three
+per-client providers with zero-delay providers. The full configuration
+manifests are byte-identical between paired five-hour seed-101 control and
+mutant worlds. In the control, north spot-maker market-data/request/response
+mean drawn delay is 565,917 / 566,336 / 566,446 ns. In the mutant, all three
+are exactly zero, with 812,684 / 38,470 / 189,191 scheduled and delivered
+events. South spot-maker delivery remains nonzero in both worlds. Both
+runtime/offline evidence-artifact digests match, and order lifecycle and
+conservation remain clean.
+
+The direct telemetry contract therefore catches this error. The expected
+cross-venue-edge direction was false in this particular ecology: the control
+has a 6.20% profitable north-to-central share with maximum 1.53 bps, while
+the mutant has only a 0.25% central-to-north share with maximum 0.12 bps.
+That behavioral result is diagnostic, not a substitute detector. A new
+`simulation.TestScheduledZeroLatencyProducesZeroTelemetry` regression test
+also ensures that a zero provider remains observable rather than becoming an
+unlogged direct connection.
+
+This is an instrumentation/audit result only; the mutant source was restored
+before either world ran. It does not change simulator semantics or freeze
+`ae13f9a`. Compact provenance is
+`research/artifacts/mutations/zero-north-spot-maker-latency.json`.

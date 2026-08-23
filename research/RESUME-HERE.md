@@ -392,3 +392,22 @@ finish and their contracts pass.
   `clock-artifacts-ae13f9a.md`, `clock-factorial-plan-ae13f9a.md`, and
   `artifacts/clock-factor-ae13f9a.json`. Do not promote any frozen economic
   effect to timing-robust.
+
+### 2026-08-23 V-030 zero-latency mutation update
+
+- A paired five-hour seed-101 scratch mutation makes only the north
+  `spot_maker` courier instantaneous while retaining the delayed gateway,
+  telemetry, and an unchanged manifest. It is **CAUGHT** directly: control
+  north mean drawn delay is about 0.566 ms in all three channels; mutant
+  north has exactly zero drawn/delivered ns across 1,040,345 messages, while
+  south remains delayed. Runtime and offline persisted-evidence digests match
+  within each world; lifecycle and conservation controls remain clean.
+- The suggested behavioral proxy is falsified: zero north maker latency
+  reduces rather than creates the measured cross-venue edge. Do not infer
+  latency correctness from a price-edge direction. The sidecar is the valid
+  evidence product, guarded by `TestScheduledZeroLatencyProducesZeroTelemetry`.
+  Compact artifact: `artifacts/mutations/zero-north-spot-maker-latency.json`;
+  raw logs remain. Remaining frozen mutation gaps are GTC cancellation request
+  evidence, expired resting-order delisting evidence, and cross-margin/option/
+  FX/borrowed-collateral liquidation coverage. Next: synthesize the frozen
+  autopsy from retained artifacts; do not begin v2 until that gate is reviewed.
