@@ -902,6 +902,9 @@ the test: perpetuals and listed dated futures. Within each persisted
 post-trade size; it also checks physical old-size/new-size continuity. The
 five-hour seed-101 clock control has 248,898 linear fills, 248,898 matching
 position updates, and zero missing, extra, or chain-failed transitions.
+It was then replayed over the three retained 24-hour ae13f9a baselines: seed
+101 has 1,139,566 pairs, seed 102 has 1,153,404, and seed 103 has 1,134,326;
+every replay has zero missing, unexpected, or chain-failed transitions.
 
 The `double_perp_settlement_once` mutant applied the first north `ABC-PERP`
 settlement twice but emitted only the original trade and fill records. The new

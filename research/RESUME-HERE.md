@@ -301,3 +301,7 @@ finish and their contracts pass.
   evidence. The new audit therefore covers only linear instruments; option
   fill-to-position paths are NOT TESTED. This is a V-023 evidence/audit gap,
   not a simulator defect. Do not claim it covered in the frozen autopsy.
+- Full baseline replay is now complete: seeds 101/102/103 have respectively
+  1,139,566 / 1,153,404 / 1,134,326 one-to-one linear fill/position pairs,
+  each with zero missing, unexpected, or chain-failed transitions. The JSON
+  outputs are retained beside their baseline scoreboard artifacts.
