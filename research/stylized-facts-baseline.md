@@ -64,6 +64,36 @@ dealer Greek exposure and underlying volatility.
 Not yet taken. The measurement pass is blocked on the deterministic re-runs of
 the frozen baseline, which are queued.
 
+### ae13f9a frozen measurement — first complete baseline scoreboard
+
+The preceding “not yet taken” status is historical. The untouched frozen
+simulator is `ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107`, config
+`research/configs/frozen-baseline-2026-08-22.json`, 24 simulated hours, seeds
+101/102/103. Raw logs remain retained. The exact persisted-evidence artifacts
+and all raw metric JSON are under `research/artifacts/scoreboard/f2_baseline_*`
+and `research/artifacts/stylized-ae13f9a/`; this table is a score, not a
+calibration target.
+
+| family | result across seeds | verdict | interpretation |
+|---|---|---|---|
+| Raw 1-second returns | ACF(1) −0.584 to −0.598 on every venue | FAIL | Strong bid–ask/quote-clock reversal; not the near-zero raw-return ACF required of a credible liquid market. |
+| Volatility dependence | 1-second absolute-return ACF(1) 0.296–0.374, but ACF(10) only 0.024–0.067 | INCONCLUSIVE | Short-lived dependence exists, but a 24h panel does not establish realistic long-memory clustering. |
+| Heavy tails | Excess kurtosis −0.47 to 0.51; Hill tail index 33.5–52.8 | FAIL | The sampled return distribution is close to bounded/light-tailed, not convincingly heavy-tailed. |
+| Trade-sign memory | ACF(1) 0.339–0.512; central/south ACF(50) 0.055–0.084 | PASS (descriptive) | Persistent signed flow is present; causal origin remains the programmed participant mix. |
+| LOB continuity/depth | 86,400 snapshots per venue/day; median 5 levels/side, 34–36 tick spread, touch depth about 0.39–0.42bn base units | INCONCLUSIVE | Books are normally two-sided and multi-level, but fixed quote schedules and activity generators prevent a claim of emergent liquidity ecology. |
+| Impact concavity | Pooled exponents vary from −0.77 to 0.70 and R² from 0.002 to 0.98; role-conditioned curves frequently reverse sign | FAIL | No stable concave impact law survives role conditioning; pooled apparent concavity is composition-sensitive. |
+| Triangular/cross-venue dislocation | Raw executable triangular edge is profitable at ~99.7–99.8% of observations, mean 18,590–48,123 bps | FAIL | This is persistent severe incoherence, not transient arbitrage; shared maker reference does not repair the cross-instrument loop. |
+| Perpetual basis | Mean absolute perp basis 250–282 bps, half-life thousands of seconds | FAIL | The perp remains materially displaced and highly persistent; the funding-off causal null is not evidence of healthy anchoring. |
+| Dated futures convergence | Basis/convergence data exist, but frozen slope is not consistently economically convergent | FAIL | No basis-to-expiry convergence claim is supported. |
+| Market-implied option surface | 36 fitted expiries and ~0.82–0.84m independently priced observations/seed; curvature 1,494–1,595 and dispersion 0.52–0.56 | INCONCLUSIVE | A surface exists in transaction prices, but the option-value-taker ablation shows its curvature materially inherits SABR beliefs. |
+| Dealer hedge mechanics | Persisted Greek reconstruction finds option and hedge deltas nearly offset in baseline | PASS (mechanical) | This supports the implemented hedge path, not a claim that hedging feedback is realistic. |
+| Ecology | 258 accounts persist, but terminal wealth/HHI and role returns vary sharply with the runaway regime | FAIL | Continuous activity is not a stable, economically credible ecology. |
+
+The next audit steps are deliberately not parameter changes: clock perturbation,
+remaining mutation tests, and a complete frozen-autopsy synthesis. In
+particular, the cross-venue and option rows must be read with the predeclared
+information and SABR-prior caveats rather than promoted to emergence.
+
 ## Facts already known to be compromised before measurement
 
 Recorded here so that they are not presented later as findings.
