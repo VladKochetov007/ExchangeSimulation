@@ -10,6 +10,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/pprof"
+	"runtime/trace"
+	"strings"
 	"time"
 
 	"exchange_sim/simulations/multivenue"
@@ -32,6 +36,99 @@ type greekOutput struct {
 	Caveats          []string                                  `json:"caveats"`
 }
 
+type runProfiles struct {
+	cpu   *os.File
+	alloc *os.File
+	mutex *os.File
+	block *os.File
+	trace *os.File
+}
+
+// startRunProfiles instruments only the command process around Sim.Run. It
+// does not enter the simulator configuration, scheduler, RNG, or actor state.
+// Profiled runs are performance observations, never execution evidence.
+func startRunProfiles(cpuPath, allocPath, mutexPath, blockPath, tracePath string) (*runProfiles, error) {
+	profiles := &runProfiles{}
+	var err error
+	if cpuPath != "" {
+		if profiles.cpu, err = os.Create(cpuPath); err != nil {
+			return nil, err
+		}
+		if err := pprof.StartCPUProfile(profiles.cpu); err != nil {
+			_ = profiles.cpu.Close()
+			return nil, err
+		}
+	}
+	if allocPath != "" {
+		if profiles.alloc, err = os.Create(allocPath); err != nil {
+			profiles.Stop()
+			return nil, err
+		}
+		// Keep Go's normal sampling rate: allocation profiles should describe
+		// production-like execution rather than turn every allocation into a
+		// profiling intervention.
+		runtime.MemProfileRate = 512 * 1024
+	}
+	if mutexPath != "" {
+		if profiles.mutex, err = os.Create(mutexPath); err != nil {
+			profiles.Stop()
+			return nil, err
+		}
+		runtime.SetMutexProfileFraction(1)
+	}
+	if blockPath != "" {
+		if profiles.block, err = os.Create(blockPath); err != nil {
+			profiles.Stop()
+			return nil, err
+		}
+		runtime.SetBlockProfileRate(1)
+	}
+	if tracePath != "" {
+		if profiles.trace, err = os.Create(tracePath); err != nil {
+			profiles.Stop()
+			return nil, err
+		}
+		if err := trace.Start(profiles.trace); err != nil {
+			profiles.Stop()
+			return nil, err
+		}
+	}
+	return profiles, nil
+}
+
+func (p *runProfiles) Stop() {
+	if p == nil {
+		return
+	}
+	if p.trace != nil {
+		trace.Stop()
+		_ = p.trace.Close()
+		p.trace = nil
+	}
+	if p.cpu != nil {
+		pprof.StopCPUProfile()
+		_ = p.cpu.Close()
+		p.cpu = nil
+	}
+	if p.alloc != nil {
+		_ = pprof.Lookup("allocs").WriteTo(p.alloc, 0)
+		_ = p.alloc.Close()
+		p.alloc = nil
+	}
+	if p.mutex != nil {
+		_ = pprof.Lookup("mutex").WriteTo(p.mutex, 0)
+		_ = p.mutex.Close()
+		p.mutex = nil
+		runtime.SetMutexProfileFraction(0)
+	}
+	if p.block != nil {
+		_ = pprof.Lookup("block").WriteTo(p.block, 0)
+		_ = p.block.Close()
+		p.block = nil
+		runtime.SetBlockProfileRate(0)
+	}
+}
+
 func main() {
 	configPath := flag.String("config", "", "path to multivenue Config JSON")
 	duration := flag.Duration("duration", 8*time.Hour, "simulated duration; must be a multiple of the configured step")
@@ -40,6 +137,13 @@ func main() {
 	hedgeMode := flag.String("dealer-hedge", "", "override dealer hedge mode: on or off")
 	logMode := flag.String("log-mode", "", "override raw log mode: full or none")
 	checkpointInterval := flag.Int("checkpoint-interval-seconds", -1, "override ordered execution checkpoint interval; negative keeps config")
+	cpuProfile := flag.String("cpuprofile", "", "write CPU profile for Sim.Run only")
+	allocProfile := flag.String("allocprofile", "", "write sampled allocation profile after Sim.Run")
+	mutexProfile := flag.String("mutexprofile", "", "write mutex profile after Sim.Run")
+	blockProfile := flag.String("blockprofile", "", "write block profile after Sim.Run")
+	traceProfile := flag.String("traceprofile", "", "write Go execution trace for Sim.Run only")
+	recordReceipts := flag.Bool("record-market-data-receipts", false, "emit V2 participant-information evidence sidecars")
+	receiptRoles := flag.String("market-data-receipt-roles", "", "comma-separated audited role classes; required with -record-market-data-receipts")
 	flag.Parse()
 
 	cfg := multivenue.Config{}
@@ -67,16 +171,28 @@ func main() {
 	if *checkpointInterval >= 0 {
 		cfg.CheckpointIntervalSeconds = *checkpointInterval
 	}
+	if *recordReceipts {
+		cfg.RecordMarketDataReceipts = true
+		if *receiptRoles != "" {
+			cfg.MarketDataReceiptRoles = strings.Split(*receiptRoles, ",")
+		}
+	}
 
 	sim, err := multivenue.NewSim(*duration, cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer sim.Close()
+	profiles, err := startRunProfiles(*cpuProfile, *allocProfile, *mutexProfile, *blockProfile, *traceProfile)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	started := time.Now()
-	if err := sim.Run(context.Background()); err != nil {
-		log.Fatal(err)
+	runErr := sim.Run(context.Background())
+	profiles.Stop()
+	if runErr != nil {
+		log.Fatal(runErr)
 	}
 	output := greekOutput{
 		SchemaVersion:  5,
