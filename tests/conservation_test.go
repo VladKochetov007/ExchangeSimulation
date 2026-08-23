@@ -232,7 +232,9 @@ func TestSettleFunding_CorrectMagnitudeAtBTCPrices(t *testing.T) {
 	injectPerpPosition(ex, 1, "BTC-PERP", qty, entryUSD, collateral, 0)  // client 1: long
 	injectPerpPosition(ex, 2, "BTC-PERP", -qty, entryUSD, collateral, 0) // client 2: short
 
-	perp.GetFundingRate().Rate = 10 // +10 bps: longs pay shorts
+	// Funding must use an explicit shared mark, never each account's entry.
+	perp.UpdateFundingRate(entryUSD, entryUSD)
+	perp.GetFundingRate().Rate = 10
 
 	longBefore := ex.Clients[1].PerpBalances["USD"]
 	shortBefore := ex.Clients[2].PerpBalances["USD"]
@@ -260,8 +262,9 @@ func TestSettleFunding_CorrectMagnitudeAtBTCPrices(t *testing.T) {
 }
 
 // TestSettleFunding_AsymmetricOIRoutesToExchange verifies Bug 3 fix:
-// when long and short notionals differ (different entry prices), the imbalance
-// routes to ExchangeBalance.FeeRevenue rather than creating/destroying money.
+// when long and short open interest differs, the imbalance routes to
+// ExchangeBalance.FeeRevenue rather than creating/destroying money. Funding is
+// computed from one explicit shared mark, not individual entry prices.
 func TestSettleFunding_AsymmetricOIRoutesToExchange(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
@@ -270,14 +273,14 @@ func TestSettleFunding_AsymmetricOIRoutesToExchange(t *testing.T) {
 	ex.ConnectNewClient(1, map[string]int64{}, &FixedFee{})
 	ex.ConnectNewClient(2, map[string]int64{}, &FixedFee{})
 
-	// Client 1: long 1 BTC entered at $50k → notional $50k
-	// Client 2: short 1 BTC entered at $40k → notional $40k
-	// Different entry prices → asymmetric notionals even though qty is equal.
+	// Client 1: long 2 BTC; client 2: short 1 BTC. At a shared $50k mark,
+	// long funding is $100 and short funding receipt is $50.
 	qty := BTCAmount(1.0)
 	collateral := USDAmount(20_000)
-	injectPerpPosition(ex, 1, "BTC-PERP", qty, PriceUSD(50_000, DOLLAR_TICK), collateral, 0)
+	injectPerpPosition(ex, 1, "BTC-PERP", 2*qty, PriceUSD(50_000, DOLLAR_TICK), collateral, 0)
 	injectPerpPosition(ex, 2, "BTC-PERP", -qty, PriceUSD(40_000, DOLLAR_TICK), collateral, 0)
 
+	perp.UpdateFundingRate(PriceUSD(50_000, DOLLAR_TICK), PriceUSD(50_000, DOLLAR_TICK))
 	perp.GetFundingRate().Rate = 10 // +10 bps: longs pay
 
 	initialTotal := totalMoney(ex, "USD")
@@ -285,10 +288,10 @@ func TestSettleFunding_AsymmetricOIRoutesToExchange(t *testing.T) {
 
 	ex.SettleFunding(perp)
 
-	// Long pays: 1e8 * 5e9 / 1e8 * 10 / 10000 = 5_000_000 ($50)
-	// Short receives: 1e8 * 4e9 / 1e8 * 10 / 10000 = 4_000_000 ($40)
-	// Exchange absorbs: 5_000_000 - 4_000_000 = 1_000_000 ($10)
-	wantExchangeDelta := int64(1_000_000)
+	// Long pays: 2e8 * 5e9 / 1e8 * 10 / 10000 = 10_000_000 ($100)
+	// Short receives: 1e8 * 5e9 / 1e8 * 10 / 10000 = 5_000_000 ($50)
+	// Exchange absorbs: 10_000_000 - 5_000_000 = 5_000_000 ($50)
+	wantExchangeDelta := int64(5_000_000)
 	gotExchangeDelta := ex.ExchangeBalance.FeeRevenue["USD"] - feeRevenueBefore
 
 	if gotExchangeDelta != wantExchangeDelta {

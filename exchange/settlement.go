@@ -11,9 +11,9 @@ import "fmt"
 
 // calcClientFee computes a client's fee for a fill, treating a nil client or nil
 // FeePlan as the zero-fee plan (matching the reservation path).
-func calcClientFee(client *Client, ctx FillContext) Fee {
+func calcClientFee(client *Client, ctx FillContext) (Fee, error) {
 	if client == nil || client.FeePlan == nil {
-		return Fee{}
+		return Fee{}, nil
 	}
 	return client.FeePlan.CalculateFee(ctx)
 }
@@ -87,12 +87,14 @@ func (c executionContext) notional() int64 {
 	return MulDiv(c.exec.Qty, c.exec.Price, c.basePrecision)
 }
 
-// newExecutionContext resolves the parties and quotes the fees for one match.
+// newExecutionContext resolves the parties and attaches the preflighted fees
+// for one match.
 //
 // A planned spot match has already quoted the exact per-execution fees on a
 // detached book. Re-asking a stateful fee model here would charge a different
-// schedule from the one that passed admission, so the plan's fees win. Other
-// settlement paths retain the nil-safe direct calculation.
+// schedule from the one that passed admission, so settlement never consults a
+// fee model after Match. Every live matching path must therefore supply its
+// corresponding detached execution plan.
 func (e *DefaultExchange) newExecutionContext(
 	book *OrderBook, exec *Execution, takerOrder *Order,
 	instrument Instrument, basePrecision, timestamp int64, log Logger,
@@ -123,12 +125,10 @@ func (e *DefaultExchange) newExecutionContext(
 		log:           log,
 	}
 	ctx.requireParties()
-	if planned != nil {
-		ctx.takerFee, ctx.makerFee = planned.takerFee, planned.makerFee
-	} else {
-		ctx.takerFee = calcClientFee(ctx.taker, FillContext{Exec: exec, IsMaker: false, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
-		ctx.makerFee = calcClientFee(ctx.maker, FillContext{Exec: exec, IsMaker: true, BaseAsset: baseAsset, QuoteAsset: quoteAsset, Precision: basePrecision})
+	if planned == nil || !planned.fingerprint.matches(exec) {
+		panic("settlement received execution without matching fee preflight")
 	}
+	ctx.takerFee, ctx.makerFee = planned.takerFee, planned.makerFee
 	ctx.takerFee = normalizedExecutionFee(ctx.takerFee, quoteAsset)
 	ctx.makerFee = normalizedExecutionFee(ctx.makerFee, quoteAsset)
 	return ctx
@@ -258,7 +258,12 @@ func (e *DefaultExchange) restoreFeeHeadroom(book *OrderBook, order *Order, prec
 	if client == nil {
 		return
 	}
-	headroom := quoteFeeHeadroom(client.FeePlan, instrument.BaseAsset(), instrument.QuoteAsset(), remaining, order.Price, precision)
+	headroom, err := quoteFeeHeadroom(client.FeePlan, instrument.BaseAsset(), instrument.QuoteAsset(), remaining, order.Price, precision)
+	if err != nil {
+		e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "fee_headroom_refresh", err)
+		e.cancelUnfundedFeeRemainder(book, client, order)
+		return
+	}
 	if headroom <= 0 {
 		return
 	}
@@ -360,7 +365,7 @@ func (e *DefaultExchange) settleSpotLeg(ctx executionContext, leg spotLeg) {
 		oldFeeAsset = client.Balances[leg.fee.Asset]
 	}
 
-	client.Release(give, spotFillRelease(client, ctx.book, leg.order, ctx.exec, leg.side, ctx.basePrecision))
+	client.Release(give, e.spotFillRelease(client, ctx.book, leg.order, ctx.exec, leg.side, ctx.basePrecision))
 	client.Balances[give] -= giveAmount
 	client.Balances[receive] += receiveAmount
 	if leg.fee.Amount != 0 {
@@ -398,7 +403,7 @@ func oldBalanceOf(asset, give, receive string, oldGive, oldReceive int64) int64 
 // execution price. Market orders reserve nothing and release nothing — the
 // old unconditional release silently consumed reservations backing the
 // client's OTHER resting orders (the classic "out of money" corruption).
-func spotFillRelease(client *Client, book *OrderBook, order *Order, exec *Execution, side Side, precision int64) int64 {
+func (e *DefaultExchange) spotFillRelease(client *Client, book *OrderBook, order *Order, exec *Execution, side Side, precision int64) int64 {
 	if order == nil {
 		// Custom matcher removed the order pre-settlement; release at the
 		// execution price (legacy behavior, may leak improvement delta).
@@ -411,7 +416,12 @@ func spotFillRelease(client *Client, book *OrderBook, order *Order, exec *Execut
 		return 0
 	}
 	instrument := book.Instrument
-	stillNeeded, ok := spotOrderReservation(client.FeePlan, instrument, side, order.Qty-order.FilledQty, order.Price, precision)
+	stillNeeded, ok, err := spotOrderReservation(client.FeePlan, instrument, side, order.Qty-order.FilledQty, order.Price, precision)
+	if err != nil {
+		e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "spot_fee_release", err)
+		e.cancelUnfundedFeeRemainder(book, client, order)
+		return 0
+	}
 	if !ok {
 		// The original admission had already accepted a representable larger
 		// reservation. Retaining it is safer than releasing into an overflowed

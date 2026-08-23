@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"fmt"
 	"slices"
 	"sync"
 )
@@ -266,15 +267,29 @@ type fundingEventSink struct {
 	recordRevenue func(asset string, amount int64)
 }
 
-// SettleFunding settles funding for perp without logging. Used in isolated unit tests.
-func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpFutures) {
-	settleFunding(pm, clients, perp, pm.clock, fundingEventSink{})
+// SettleFunding settles funding for perp without logging. A missing shared
+// mark is observable to the caller; it is never replaced with an entry-price
+// or zero-price estimate. Used in isolated unit tests.
+func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpFutures) error {
+	if perp == nil {
+		return fmt.Errorf("funding settlement: %w", ErrNoBookPrice)
+	}
+	if !settleFunding(pm, clients, perp, pm.clock, fundingEventSink{}) {
+		return fmt.Errorf("funding settlement for %s: %w", perp.Symbol(), ErrNoBookPrice)
+	}
+	return nil
 }
 
 // settleFunding applies funding payments from/to client PerpBalances.
 // Payments are zero-sum: net flow between longs and shorts routes to/from exchange revenue.
-func settleFunding(store PositionStore, clients map[uint64]*Client, perp *PerpFutures, clock Clock, sink fundingEventSink) {
+func settleFunding(store PositionStore, clients map[uint64]*Client, perp *PerpFutures, clock Clock, sink fundingEventSink) bool {
 	fundingRate := perp.GetFundingRate()
+	if !fundingRate.MarkAvailable || fundingRate.MarkPrice <= 0 {
+		// A missing mark is not permission to value funding at each position's
+		// entry price. That would turn price absence into a hidden per-account
+		// fallback and break the shared-mark funding contract.
+		return false
+	}
 	precision := perp.BasePrecision()
 	timestamp := clock.NowUnixNano()
 	quote := perp.QuoteAsset()
@@ -293,11 +308,7 @@ func settleFunding(store PositionStore, clients map[uint64]*Client, perp *PerpFu
 		if client == nil {
 			return
 		}
-		price := markPrice
-		if price == 0 {
-			price = pos.EntryPrice
-		}
-		positionValue := MulDiv(abs(pos.Size), price, precision)
+		positionValue := MulDiv(abs(pos.Size), markPrice, precision)
 		funding := positionValue * fundingRate.Rate / 10000
 
 		oldBalance := client.PerpBalances[quote]
@@ -322,6 +333,7 @@ func settleFunding(store PositionStore, clients map[uint64]*Client, perp *PerpFu
 	}
 
 	fundingRate.NextFunding = clock.NowUnixNano() + (fundingRate.Interval * 1e9)
+	return true
 }
 
 // realizedPerpPnL calculates the realized PnL for a perp fill.

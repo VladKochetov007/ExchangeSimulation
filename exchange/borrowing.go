@@ -1,6 +1,9 @@
 package exchange
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // BorrowContext carries already-resolved, mutable client state for a single borrow/repay call.
 // The exchange holds its lock before constructing this; BorrowingManager must not acquire any lock.
@@ -45,6 +48,10 @@ func (bm *BorrowingManager) BorrowMargin(ctx BorrowContext, asset string, amount
 	} else {
 		return errors.New("isolated margin borrow requires position context")
 	}
+	collateral, err := bm.CalculateCollateralUsed(asset, amount)
+	if err != nil {
+		return fmt.Errorf("borrow collateral %s: %w", asset, err)
+	}
 
 	if limit := bm.Config.MaxBorrowPerAsset[asset]; limit > 0 {
 		if ctx.Client.Borrowed[asset]+amount > limit {
@@ -70,8 +77,6 @@ func (bm *BorrowingManager) BorrowMargin(ctx BorrowContext, asset string, amount
 	}
 
 	rate := bm.getRate(asset)
-	collateral := bm.CalculateCollateralUsed(asset, amount)
-
 	if ctx.LogBalance != nil {
 		ctx.LogBalance("borrow", []BalanceDelta{
 			walletDelta,
@@ -166,33 +171,59 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(client *Client, borrow
 		return errors.New("price oracle not configured")
 	}
 
+	priceFor := func(asset string) (int64, error) {
+		price, err := bm.Config.PriceSource.Price(asset)
+		if err != nil {
+			return 0, fmt.Errorf("collateral price for %s: %w", asset, err)
+		}
+		if price <= 0 {
+			return 0, fmt.Errorf("collateral price for %s: %w", asset, ErrNoBookPrice)
+		}
+		return price, nil
+	}
+
 	// Gross asset value: negative balances subtract — skipping them would let
 	// a client deep underwater in one asset pledge the others at full value.
 	totalAssetValue := int64(0)
-	for asset, balance := range client.PerpBalances {
-		if price := bm.Config.PriceSource.Price(asset); price > 0 {
-			totalAssetValue += MulDiv(balance, price, bm.assetPrecision(asset))
+	for _, asset := range sortedAssetNames(client.PerpBalances) {
+		balance := client.PerpBalances[asset]
+		if balance == 0 {
+			continue
 		}
+		price, err := priceFor(asset)
+		if err != nil {
+			return err
+		}
+		totalAssetValue += MulDiv(balance, price, bm.assetPrecision(asset))
 	}
-	for asset, balance := range client.Balances {
-		if price := bm.Config.PriceSource.Price(asset); price > 0 {
-			totalAssetValue += MulDiv(balance, price, bm.assetPrecision(asset))
+	for _, asset := range sortedAssetNames(client.Balances) {
+		balance := client.Balances[asset]
+		if balance == 0 {
+			continue
 		}
+		price, err := priceFor(asset)
+		if err != nil {
+			return err
+		}
+		totalAssetValue += MulDiv(balance, price, bm.assetPrecision(asset))
 	}
 
 	existingBorrowValue := int64(0)
-	for asset, borrowed := range client.Borrowed {
+	for _, asset := range sortedAssetNames(client.Borrowed) {
+		borrowed := client.Borrowed[asset]
 		if borrowed <= 0 {
 			continue
 		}
-		if price := bm.Config.PriceSource.Price(asset); price > 0 {
-			existingBorrowValue += MulDiv(borrowed, price, bm.assetPrecision(asset))
+		price, err := priceFor(asset)
+		if err != nil {
+			return err
 		}
+		existingBorrowValue += MulDiv(borrowed, price, bm.assetPrecision(asset))
 	}
 
-	borrowPrice := bm.Config.PriceSource.Price(borrowAsset)
-	if borrowPrice == 0 {
-		return errors.New("price unavailable")
+	borrowPrice, err := priceFor(borrowAsset)
+	if err != nil {
+		return fmt.Errorf("borrow asset %s: %w", borrowAsset, err)
 	}
 	newBorrowValue := MulDiv(borrowAmount, borrowPrice, bm.assetPrecision(borrowAsset))
 
@@ -241,17 +272,20 @@ func (bm *BorrowingManager) getCollateralFactor(asset string) float64 {
 	return 0.75
 }
 
-func (bm *BorrowingManager) CalculateCollateralUsed(asset string, amount int64) int64 {
+func (bm *BorrowingManager) CalculateCollateralUsed(asset string, amount int64) (int64, error) {
 	if bm.Config.PriceSource == nil {
-		return 0
+		return 0, errors.New("price oracle not configured")
 	}
-	price := bm.Config.PriceSource.Price(asset)
-	if price == 0 {
-		return 0
+	price, err := bm.Config.PriceSource.Price(asset)
+	if err != nil {
+		return 0, fmt.Errorf("collateral price for %s: %w", asset, err)
+	}
+	if price <= 0 {
+		return 0, fmt.Errorf("collateral price for %s: %w", asset, ErrNoBookPrice)
 	}
 	factor := bm.getCollateralFactor(asset)
 	if factor == 0 {
-		return 0
+		return 0, errors.New("collateral factor unavailable")
 	}
-	return int64(float64(MulDiv(amount, price, bm.assetPrecision(asset))) / factor)
+	return int64(float64(MulDiv(amount, price, bm.assetPrecision(asset))) / factor), nil
 }

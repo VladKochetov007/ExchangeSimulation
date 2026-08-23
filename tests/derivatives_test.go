@@ -1,6 +1,7 @@
 package exchange_test
 
 import (
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -18,11 +19,21 @@ func (c *derivClock) NowUnix() int64     { return c.now / 1e9 }
 
 type constPrice int64
 
-func (p constPrice) Price(string) int64 { return int64(p) }
+func (p constPrice) Price(symbol string) (int64, error) {
+	if p <= 0 {
+		return 0, fmt.Errorf("const price for %s unavailable", symbol)
+	}
+	return int64(p), nil
+}
 
 type listingPrice int64
 
-func (p listingPrice) Price(string) (int64, error) { return int64(p), nil }
+func (p listingPrice) Price(symbol string) (int64, error) {
+	if p <= 0 {
+		return 0, fmt.Errorf("listing price for %s unavailable", symbol)
+	}
+	return int64(p), nil
+}
 
 func pendingListings(t *testing.T, policy etypes.ListingPolicy, now int64, value int64) []etypes.Instrument {
 	t.Helper()
@@ -462,12 +473,12 @@ func TestSettlementObserverTWAP(t *testing.T) {
 	fut.ObserveSettlement(PriceUSD(52_000, DOLLAR_TICK), expiry)
 
 	want := PriceUSD(51_000, DOLLAR_TICK)
-	if got := fut.SettlementPrice(); got != want {
-		t.Fatalf("settlement TWAP = %d, want %d", got, want)
+	if got, err := fut.SettlementPrice(); err != nil || got != want {
+		t.Fatalf("settlement TWAP = (%d, %v), want (%d, nil)", got, err, want)
 	}
 	// Frozen after first read.
 	fut.ObserveSettlement(PriceUSD(90_000, DOLLAR_TICK), expiry)
-	if got := fut.SettlementPrice(); got != want {
-		t.Fatalf("settlement price not frozen: %d", got)
+	if got, err := fut.SettlementPrice(); err != nil || got != want {
+		t.Fatalf("settlement price not frozen: (%d, %v)", got, err)
 	}
 }

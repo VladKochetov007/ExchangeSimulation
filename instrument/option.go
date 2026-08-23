@@ -138,8 +138,11 @@ func (o *EuropeanOption) ObserveSettlement(price, tsNano int64) {
 	o.observer.observe(price, tsNano)
 }
 
-func (o *EuropeanOption) SettlementPrice() int64 {
-	return o.observer.settlementPrice(o.loadMarks().underlying)
+func (o *EuropeanOption) SettlementPrice() (int64, error) {
+	// Settlement is based only on observations received through the declared
+	// underlying-reference path. A cached option mark is not an implicit final
+	// fallback: if no observation was ever delivered, expiry remains pending.
+	return o.observer.settlementPrice()
 }
 
 // intrinsicValue is the exercise value per base unit at the given underlying

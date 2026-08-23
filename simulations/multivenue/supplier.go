@@ -162,24 +162,27 @@ func (s *ElasticSupplier) onTick(now time.Time) {
 		s.subscribed = true
 		return
 	}
-	if s.pending || s.bestBid <= 0 || s.bestAsk <= 0 || s.cfg.RebalanceLot <= 0 {
+	if s.pending || s.cfg.RebalanceLot <= 0 {
 		return
 	}
-	mid := (s.bestBid + s.bestAsk) / 2
+	mid, available := twoSidedMidpoint(s.bestBid, s.bestAsk)
+	if !available {
+		return
+	}
 	s.reviseReference(mid, now)
 	gap := s.TargetPosition(mid) - s.position
 	if gap == 0 {
 		return
 	}
-	side, quantity, price, available := exchange.Buy, gap, s.bestAsk, s.askQty
+	side, quantity, price, displayedQty := exchange.Buy, gap, s.bestAsk, s.askQty
 	if gap < 0 {
-		side, quantity, price, available = exchange.Sell, -gap, s.bestBid, s.bidQty
+		side, quantity, price, displayedQty = exchange.Sell, -gap, s.bestBid, s.bidQty
 	}
 	if quantity > s.cfg.RebalanceLot {
 		quantity = s.cfg.RebalanceLot
 	}
-	if available > 0 && quantity > available {
-		quantity = available
+	if displayedQty > 0 && quantity > displayedQty {
+		quantity = displayedQty
 	}
 	if quantity <= 0 {
 		return

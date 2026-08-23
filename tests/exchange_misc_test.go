@@ -108,9 +108,9 @@ func TestWeightedMidPriceCalculator_BothSides(t *testing.T) {
 	book.Asks.AddOrder(ask)
 
 	calc := NewWeightedMidPriceCalculator()
-	mid := calc.Calculate(book)
-	if mid <= 0 {
-		t.Errorf("expected positive weighted mid, got %d", mid)
+	mid, err := calc.Calculate(book)
+	if err != nil || mid <= 0 {
+		t.Errorf("expected positive weighted mid, got (%d, %v)", mid, err)
 	}
 }
 
@@ -124,10 +124,10 @@ func TestWeightedMidPriceCalculator_OnlyBid(t *testing.T) {
 	book.Bids.AddOrder(bid)
 
 	calc := NewWeightedMidPriceCalculator()
-	// No ask — falls back to last trade price (0 here since no trades occurred)
-	mid := calc.Calculate(book)
-	if mid < 0 {
-		t.Errorf("unexpected negative mid: %d", mid)
+	// Weighted midpoint requires both sides; a one-sided book is unavailable.
+	mid, err := calc.Calculate(book)
+	if err == nil || mid != 0 {
+		t.Errorf("one-sided weighted midpoint = (%d, %v), want unavailable", mid, err)
 	}
 }
 
@@ -137,9 +137,9 @@ func TestWeightedMidPriceCalculator_EmptyBook(t *testing.T) {
 	book := ex.Books["BTC/USD"]
 
 	calc := NewWeightedMidPriceCalculator()
-	mid := calc.Calculate(book)
-	if mid != 0 {
-		t.Errorf("empty book: expected 0, got %d", mid)
+	mid, err := calc.Calculate(book)
+	if err == nil || mid != 0 {
+		t.Errorf("empty weighted midpoint = (%d, %v), want unavailable", mid, err)
 	}
 }
 

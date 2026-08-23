@@ -26,12 +26,12 @@ func NewPerpFutures(symbol, base, quote string, basePrecision, quotePrecision, t
 			minOrderSize:   minOrderSize,
 		},
 		fundingRate: &etypes.FundingRate{
-			Symbol:      symbol,
-			Rate:        0,
-			NextFunding: 0,
-			Interval:    28800,
-			MarkPrice:   0,
-			IndexPrice:  0,
+			Symbol:         symbol,
+			Rate:           0,
+			NextFunding:    0,
+			Interval:       28800,
+			MarkAvailable:  false,
+			IndexAvailable: false,
 		},
 		fundingCalc: &SimpleFundingCalc{
 			// 1 bp per interval matches the venue-standard interest-rate
@@ -289,7 +289,16 @@ func (p *PerpFutures) SetFundingCalculator(calc FundingCalculator) {
 }
 
 func (p *PerpFutures) UpdateFundingRate(indexPrice int64, markPrice int64) {
+	if indexPrice <= 0 || markPrice <= 0 {
+		p.fundingRate.IndexPrice = 0
+		p.fundingRate.MarkPrice = 0
+		p.fundingRate.IndexAvailable = false
+		p.fundingRate.MarkAvailable = false
+		return
+	}
 	p.fundingRate.IndexPrice = indexPrice
 	p.fundingRate.MarkPrice = markPrice
+	p.fundingRate.IndexAvailable = true
+	p.fundingRate.MarkAvailable = true
 	p.fundingRate.Rate = p.fundingCalc.Calculate(indexPrice, markPrice)
 }

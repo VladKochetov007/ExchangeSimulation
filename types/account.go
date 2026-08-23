@@ -27,16 +27,23 @@ type Position struct {
 }
 
 type PositionSnapshot struct {
-	Symbol           string       `json:"symbol"`
-	PositionSide     PositionSide `json:"position_side"`
-	Size             int64        `json:"size"`
-	EntryPrice       int64        `json:"entry_price"`
-	MarkPrice        int64        `json:"mark_price"`
-	UnrealizedPnL    int64        `json:"unrealized_pnl"`
-	MarginType       MarginMode   `json:"margin_type"`
-	IsolatedMargin   int64        `json:"isolated_margin"`
-	Leverage         int64        `json:"leverage"`
-	LiquidationPrice int64        `json:"liquidation_price"`
+	Symbol       string       `json:"symbol"`
+	PositionSide PositionSide `json:"position_side"`
+	Size         int64        `json:"size"`
+	EntryPrice   int64        `json:"entry_price"`
+	// MarkPrice is nil when the display reference is unavailable. A zero
+	// premium can be a valid option mark, so a pointer carries absence without
+	// turning it into the numeric price zero.
+	MarkPrice             *int64     `json:"mark_price,omitempty"`
+	MarkUnavailableReason string     `json:"mark_unavailable_reason,omitempty"`
+	UnrealizedPnL         int64      `json:"unrealized_pnl"`
+	MarginType            MarginMode `json:"margin_type"`
+	IsolatedMargin        int64      `json:"isolated_margin"`
+	Leverage              int64      `json:"leverage"`
+	// LiquidationPrice is nil when no estimate has been calculated for this
+	// display snapshot. A computed zero can be a legitimate estimate for a
+	// sufficiently collateralized long, so absence cannot be encoded as 0.
+	LiquidationPrice *int64 `json:"liquidation_price,omitempty"`
 }
 
 type AccountSnapshot struct {

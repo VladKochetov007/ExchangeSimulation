@@ -17,7 +17,7 @@ func TestWeightedMidFallsBackWhenBestLevelWeightsOverflow(t *testing.T) {
 		t.Fatal("ask was rejected")
 	}
 
-	if got := NewWeightedMidPriceCalculator().Calculate(book); got != 150 {
+	if got := mustPrice(t)(NewWeightedMidPriceCalculator().Calculate(book)); got != 150 {
 		t.Fatalf("weighted midpoint = %d, want ordinary midpoint 150 on aggregate overflow", got)
 	}
 }

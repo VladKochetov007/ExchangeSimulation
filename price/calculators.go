@@ -13,7 +13,7 @@ type LastPriceCalculator struct{}
 
 func NewLastPriceCalculator() *LastPriceCalculator { return &LastPriceCalculator{} }
 
-func (c *LastPriceCalculator) Calculate(book *ebook.OrderBook) int64 {
+func (c *LastPriceCalculator) Calculate(book *ebook.OrderBook) (int64, error) {
 	return book.GetLastPrice()
 }
 
@@ -22,7 +22,7 @@ type MidPriceCalculator struct{}
 
 func NewMidPriceCalculator() *MidPriceCalculator { return &MidPriceCalculator{} }
 
-func (c *MidPriceCalculator) Calculate(book *ebook.OrderBook) int64 {
+func (c *MidPriceCalculator) Calculate(book *ebook.OrderBook) (int64, error) {
 	return book.GetMidPrice()
 }
 
@@ -34,27 +34,32 @@ func NewWeightedMidPriceCalculator() *WeightedMidPriceCalculator {
 	return &WeightedMidPriceCalculator{}
 }
 
-func (c *WeightedMidPriceCalculator) Calculate(book *ebook.OrderBook) int64 {
-	if book.Bids.Best == nil || book.Asks.Best == nil {
-		return book.GetLastPrice()
+func (c *WeightedMidPriceCalculator) Calculate(book *ebook.OrderBook) (int64, error) {
+	bidPrice, err := book.GetBestBid()
+	if err != nil {
+		return 0, err
 	}
-
+	askPrice, err := book.GetBestAsk()
+	if err != nil {
+		return 0, err
+	}
+	if bidPrice > askPrice {
+		return 0, etypes.ErrNoPrice
+	}
 	bidQty := book.Bids.Best.TotalQty
 	askQty := book.Asks.Best.TotalQty
-	bidPrice := book.Bids.Best.Price
-	askPrice := book.Asks.Best.Price
 	if bidQty < 0 || askQty < 0 {
-		return book.GetMidPrice()
+		return 0, etypes.ErrNoPrice
 	}
 
 	if bidQty == 0 && askQty == 0 {
-		return bidPrice + (askPrice-bidPrice)/2
+		return bidPrice + (askPrice-bidPrice)/2, nil
 	}
 	if bidQty == 0 {
-		return askPrice
+		return askPrice, nil
 	}
 	if askQty == 0 {
-		return bidPrice
+		return bidPrice, nil
 	}
 
 	// Weighted mid = bid + spread × bidQty/(bidQty+askQty); avoids the
@@ -64,9 +69,9 @@ func (c *WeightedMidPriceCalculator) Calculate(book *ebook.OrderBook) int64 {
 		// Both sides can be individually valid while their combined depth
 		// exceeds int64. The ordinary midpoint stays well-defined and avoids
 		// allowing an aggregate overflow to move a mark price.
-		return book.GetMidPrice()
+		return bidPrice + (askPrice-bidPrice)/2, nil
 	}
-	return bidPrice + etypes.MulDiv(askPrice-bidPrice, bidQty, totalWeight)
+	return bidPrice + etypes.MulDiv(askPrice-bidPrice, bidQty, totalWeight), nil
 }
 
 // Index-anchored mark price models — all require a PriceSource for the external spot reference.
@@ -82,8 +87,11 @@ func NewMedianMarkPrice(symbol string, index etypes.PriceSource) *MedianMarkPric
 	return &MedianMarkPrice{symbol: symbol, index: index}
 }
 
-func (c *MedianMarkPrice) Calculate(book *ebook.OrderBook) int64 {
-	indexPrice := c.index.Price(c.symbol)
+func (c *MedianMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
+	indexPrice, err := sourcePrice(c.index, c.symbol)
+	if err != nil {
+		return 0, err
+	}
 
 	var bid, ask int64
 	if book.Bids.Best != nil {
@@ -93,14 +101,11 @@ func (c *MedianMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 		ask = book.Asks.Best.Price
 	}
 
-	if bid == 0 || ask == 0 || indexPrice == 0 {
-		if indexPrice != 0 {
-			return indexPrice
-		}
-		return book.GetMidPrice()
+	if bid <= 0 || ask <= 0 || bid > ask {
+		return indexPrice, nil
 	}
 
-	return median3(bid, ask, indexPrice)
+	return median3(bid, ask, indexPrice), nil
 }
 
 // EMAMarkPrice marks at index + EMA(perp_mid - index).
@@ -143,15 +148,15 @@ func emaAlpha(windowSamples int) int64 {
 	return 1
 }
 
-func (c *EMAMarkPrice) Calculate(book *ebook.OrderBook) int64 {
-	indexPrice := c.index.Price(c.symbol)
-	if indexPrice == 0 {
-		return book.GetMidPrice()
+func (c *EMAMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
+	indexPrice, err := sourcePrice(c.index, c.symbol)
+	if err != nil {
+		return 0, err
 	}
 
-	perpMid := book.GetMidPrice()
-	if perpMid == 0 {
-		return indexPrice
+	perpMid, err := book.GetMidPrice()
+	if err != nil {
+		return indexPrice, nil
 	}
 
 	basis := perpMid - indexPrice
@@ -164,7 +169,7 @@ func (c *EMAMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 		c.emaBasis = (c.alpha*basis + (10000-c.alpha)*c.emaBasis) / 10000
 	}
 
-	return indexPrice + c.emaBasis
+	return indexPrice + c.emaBasis, nil
 }
 
 // ClampedEMAMarkPrice marks at index + clamp(EMA(perp_mid - index), -band, +band).
@@ -191,15 +196,15 @@ func NewClampedEMAMarkPrice(symbol string, index etypes.PriceSource, windowSampl
 	}
 }
 
-func (c *ClampedEMAMarkPrice) Calculate(book *ebook.OrderBook) int64 {
-	indexPrice := c.index.Price(c.symbol)
-	if indexPrice == 0 {
-		return book.GetMidPrice()
+func (c *ClampedEMAMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
+	indexPrice, err := sourcePrice(c.index, c.symbol)
+	if err != nil {
+		return 0, err
 	}
 
-	perpMid := book.GetMidPrice()
-	if perpMid == 0 {
-		return indexPrice
+	perpMid, err := book.GetMidPrice()
+	if err != nil {
+		return indexPrice, nil
 	}
 
 	basis := perpMid - indexPrice
@@ -220,7 +225,7 @@ func (c *ClampedEMAMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 		c.emaBasis = -halfBand
 	}
 
-	return indexPrice + c.emaBasis
+	return indexPrice + c.emaBasis, nil
 }
 
 // TWAPMarkPrice marks at index + clamp(TWAP(perp_mid - index, window), -band, +band).
@@ -247,15 +252,15 @@ func NewTWAPMarkPrice(symbol string, index etypes.PriceSource, windowSamples int
 	}
 }
 
-func (c *TWAPMarkPrice) Calculate(book *ebook.OrderBook) int64 {
-	indexPrice := c.index.Price(c.symbol)
-	if indexPrice == 0 {
-		return book.GetMidPrice()
+func (c *TWAPMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
+	indexPrice, err := sourcePrice(c.index, c.symbol)
+	if err != nil {
+		return 0, err
 	}
 
-	perpMid := book.GetMidPrice()
-	if perpMid == 0 {
-		return indexPrice
+	perpMid, err := book.GetMidPrice()
+	if err != nil {
+		return indexPrice, nil
 	}
 
 	// update circular TWAP buffer
@@ -280,5 +285,5 @@ func (c *TWAPMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 		twapBasis = -halfBand
 	}
 
-	return indexPrice + twapBasis
+	return indexPrice + twapBasis, nil
 }

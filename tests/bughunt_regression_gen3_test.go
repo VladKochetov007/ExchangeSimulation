@@ -87,7 +87,10 @@ func TestRegressionSpotLoanDoesNotSkewPerpLiquidation(t *testing.T) {
 	if pos == nil || pos.Size == 0 {
 		t.Fatal("position not opened")
 	}
-	base := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION)
+	base, err := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION)
+	if err != nil {
+		t.Fatalf("EstimateLiquidationPrice: %v", err)
+	}
 
 	ex.Lock()
 	client := ex.Clients[1]
@@ -96,7 +99,7 @@ func TestRegressionSpotLoanDoesNotSkewPerpLiquidation(t *testing.T) {
 	client.BorrowedSpot["USD"] += USDAmount(5_000)
 	ex.Unlock()
 
-	if got := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION); got != base {
+	if got, err := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION); err != nil || got != base {
 		t.Fatalf("spot-credited loan moved perp liquidation price %d -> %d", base, got)
 	}
 
@@ -104,7 +107,7 @@ func TestRegressionSpotLoanDoesNotSkewPerpLiquidation(t *testing.T) {
 	client.Borrowed["USD"] += USDAmount(2_000)
 	ex.Unlock()
 
-	if got := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION); got <= base {
+	if got, err := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION); err != nil || got <= base {
 		t.Fatalf("perp-attributed debt without cash did not raise liquidation price: %d -> %d", base, got)
 	}
 }

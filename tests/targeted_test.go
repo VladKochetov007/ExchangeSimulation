@@ -13,10 +13,10 @@ func TestMidPriceOracle_MappedSymbolNoBook(t *testing.T) {
 	// Do NOT add the instrument — no book for "BTC/USD"
 	o := NewMidPriceOracle(ex)
 	o.MapSymbol("BTC", "BTC/USD")
-	// symbol is set, but book doesn't exist → book == nil → return 0
-	price := o.Price("BTC")
-	if price != 0 {
-		t.Errorf("expected 0 for missing book, got %d", price)
+	// Symbol is set but the book does not exist: availability is explicit.
+	price, err := o.Price("BTC")
+	if err == nil || price != 0 {
+		t.Errorf("missing book = (%d, %v), want unavailable", price, err)
 	}
 }
 

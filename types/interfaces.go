@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // Gateway is the actor-facing contract for any trading venue.
 type Gateway interface {
@@ -18,8 +21,16 @@ type Venue interface {
 	IsRunning() bool
 }
 
+// ErrNoPrice means that a requested price is unavailable. It is never
+// represented by a numeric zero: zero can be a legitimate computed option
+// premium, while unavailable is a distinct state.
+var ErrNoPrice = errors.New("no usable price")
+
+// PriceSource provides a configured or externally observed reference price.
+// Implementations must return a positive price on success and wrap ErrNoPrice
+// when the source, symbol, or required observation is unavailable.
 type PriceSource interface {
-	Price(symbol string) int64
+	Price(symbol string) (int64, error)
 }
 
 // ListingPriceSource supplies a reference price for scheduled listings. Unlike
@@ -80,10 +91,12 @@ type FillContext struct {
 }
 
 // FeeModel calculates trading fees for each execution. Implementations must be
-// pure and deterministic for an identical FillContext: the exchange may quote
-// a cloned execution before matching and settle using that frozen quote.
+// pure and deterministic for an identical FillContext: the exchange quotes a
+// cloned execution before matching and settles using that frozen quote. An
+// error rejects/defer the proposed action before matching; a fee model must
+// never encode an unavailable reference as a zero fee.
 type FeeModel interface {
-	CalculateFee(ctx FillContext) Fee
+	CalculateFee(ctx FillContext) (Fee, error)
 }
 
 // Instrument describes a tradeable asset pair.
@@ -183,8 +196,9 @@ type Expirable interface {
 	// ObserveSettlement records an underlying index/mark sample used to build
 	// the settlement price (venues use a TWAP window before expiry).
 	ObserveSettlement(price, tsNano int64)
-	// SettlementPrice returns the final settlement price once expired.
-	SettlementPrice() int64
+	// SettlementPrice returns the final settlement price once expired. It
+	// returns an error rather than encoding an absent observation as zero.
+	SettlementPrice() (int64, error)
 	// ExpiryCashFlow returns the signed quote-asset cash delta credited to a
 	// position of size (signed, base units) entered at entryPrice when the
 	// instrument settles at settlementPrice.

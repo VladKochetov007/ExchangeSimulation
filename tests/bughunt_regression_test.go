@@ -137,8 +137,8 @@ func TestRegressionPerpFeesCannotExceedAvailableMargin(t *testing.T) {
 
 type bughuntThirdAssetFee struct{}
 
-func (bughuntThirdAssetFee) CalculateFee(FillContext) Fee {
-	return Fee{Asset: "BNB", Amount: 1}
+func (bughuntThirdAssetFee) CalculateFee(FillContext) (Fee, error) {
+	return Fee{Asset: "BNB", Amount: 1}, nil
 }
 
 func TestRegressionThirdAssetFeeRequiresFunds(t *testing.T) {

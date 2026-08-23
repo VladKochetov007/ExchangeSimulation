@@ -14,6 +14,9 @@ func TestPreExpiryHookObservesPositionBeforeSettlement(t *testing.T) {
 		time.Now().Add(-time.Second).UnixNano(), true,
 	)
 	option.SetMarks(100*valuationQuotePrecision, 10*valuationQuotePrecision)
+	// Settlement consumes a delivered declared-reference observation, not the
+	// cached mark pair alone.
+	option.ObserveSettlement(100*valuationQuotePrecision, clock.NowUnixNano())
 	ex.AddInstrument(option)
 	ex.ConnectNewClient(1, nil, &FixedFee{})
 	ex.AddPerpBalance(1, "USD", 100*valuationQuotePrecision)
@@ -32,7 +35,7 @@ func TestPreExpiryHookObservesPositionBeforeSettlement(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MarkedAccount in pre-expiry hook: %v", err)
 		}
-		if len(report.Positions) != 1 || report.Positions[0].MarkPrice != 10*valuationQuotePrecision {
+		if len(report.Positions) != 1 || report.Positions[0].MarkPrice == nil || *report.Positions[0].MarkPrice != 10*valuationQuotePrecision {
 			t.Fatalf("pre-expiry report = %#v", report)
 		}
 	}})

@@ -379,7 +379,10 @@ func TestEstimateLiquidationPrice_Long(t *testing.T) {
 		t.Fatal("position not opened")
 	}
 
-	liqPrice := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION)
+	liqPrice, err := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION)
+	if err != nil {
+		t.Fatalf("EstimateLiquidationPrice: %v", err)
+	}
 
 	ex.RLock()
 	client := ex.Clients[1]
@@ -412,7 +415,10 @@ func TestEstimateLiquidationPrice_Short(t *testing.T) {
 		t.Fatal("position not opened")
 	}
 
-	liqPrice := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION)
+	liqPrice, err := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION)
+	if err != nil {
+		t.Fatalf("EstimateLiquidationPrice: %v", err)
+	}
 
 	if pos.Size >= 0 {
 		t.Fatalf("expected short (negative) position size, got %d", pos.Size)
@@ -431,14 +437,15 @@ func TestEstimateLiquidationPrice_Short(t *testing.T) {
 	}
 }
 
-// TestEstimateLiquidationPrice_ZeroSize verifies that a zero-size position returns 0.
+// TestEstimateLiquidationPrice_ZeroSize verifies that absence is explicit rather
+// than encoded as a zero-valued price estimate.
 func TestEstimateLiquidationPrice_ZeroSize(t *testing.T) {
 	ex, _ := setupPerpExchange(USDAmount(10_000), 0)
 
 	pos := &Position{ClientID: 1, Symbol: "BTC-PERP", Size: 0, EntryPrice: PriceUSD(50_000, DOLLAR_TICK)}
-	liqPrice := ex.EstimateLiquidationPrice(pos, 1, nil, BTC_PRECISION)
-	if liqPrice != 0 {
-		t.Errorf("expected 0 for zero-size position, got %d", liqPrice)
+	liqPrice, err := ex.EstimateLiquidationPrice(pos, 1, nil, BTC_PRECISION)
+	if err == nil || liqPrice != 0 {
+		t.Errorf("zero-size liquidation estimate = (%d, %v), want unavailable error", liqPrice, err)
 	}
 }
 
@@ -491,9 +498,9 @@ func TestCheckAndSettleFunding_SkipsWhenNotDue(t *testing.T) {
 	}
 }
 
-// TestMidPriceOracle_EmptyBookReturnsZero verifies that GetPrice returns 0
-// when the spot instrument exists but has no resting orders (no bid or ask).
-func TestMidPriceOracle_EmptyBookReturnsZero(t *testing.T) {
+// TestMidPriceOracle_EmptyBookReturnsUnavailable verifies that an empty book
+// is explicitly unavailable rather than a price of zero.
+func TestMidPriceOracle_EmptyBookReturnsUnavailable(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	spotInst := NewSpotInstrument("BTC/USD", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
 	perpInst := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1)
@@ -503,8 +510,8 @@ func TestMidPriceOracle_EmptyBookReturnsZero(t *testing.T) {
 	oracle := NewMidPriceOracle(ex)
 	oracle.MapSymbol("BTC-PERP", "BTC/USD")
 
-	if price := oracle.Price("BTC-PERP"); price != 0 {
-		t.Errorf("expected 0 from empty spot book, got %d", price)
+	if price, err := oracle.Price("BTC-PERP"); err == nil || price != 0 {
+		t.Errorf("empty spot book = (%d, %v), want unavailable", price, err)
 	}
 }
 
@@ -537,7 +544,10 @@ func TestMidPriceOracle_UpdatesWithNewOrders(t *testing.T) {
 	spotBook.Bids.AddOrder(bid1)
 	spotBook.Asks.AddOrder(ask1)
 
-	firstMid := oracle.Price("BTC-PERP")
+	firstMid, err := oracle.Price("BTC-PERP")
+	if err != nil {
+		t.Fatalf("first midpoint: %v", err)
+	}
 	expectedFirst := (PriceUSD(49_000, DOLLAR_TICK) + PriceUSD(51_000, DOLLAR_TICK)) / 2
 	if firstMid != expectedFirst {
 		t.Errorf("first mid-price: expected %d, got %d", expectedFirst, firstMid)
@@ -559,7 +569,10 @@ func TestMidPriceOracle_UpdatesWithNewOrders(t *testing.T) {
 	spotBook.Bids.AddOrder(bid2)
 	spotBook.Asks.AddOrder(ask2)
 
-	secondMid := oracle.Price("BTC-PERP")
+	secondMid, err := oracle.Price("BTC-PERP")
+	if err != nil {
+		t.Fatalf("second midpoint: %v", err)
+	}
 	expectedSecond := (PriceUSD(52_000, DOLLAR_TICK) + PriceUSD(54_000, DOLLAR_TICK)) / 2
 	if secondMid != expectedSecond {
 		t.Errorf("updated mid-price: expected %d, got %d", expectedSecond, secondMid)

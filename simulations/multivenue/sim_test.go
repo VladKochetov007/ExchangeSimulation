@@ -1248,17 +1248,17 @@ func TestHeterogeneousRemoteMakerRosterRejectsDecorativePolicyFields(t *testing.
 // market that cannot hold itself.
 func TestConsensusIndexIsRobustToOneRunawayVenue(t *testing.T) {
 	provider := newSpotIndexProvider("consensus", "ABC/USD")
-	if got := provider.Price("ABC/USD"); got != 0 {
-		t.Fatalf("index without observations = %d, want 0", got)
+	if got, err := provider.Price("ABC/USD"); err == nil || got != 0 {
+		t.Fatalf("index without observations = (%d, %v), want unavailable", got, err)
 	}
 	provider.observeVenueMid("ABC/USD", "north", 50_000)
 	provider.observeVenueMid("ABC/USD", "central", 50_100)
 	provider.observeVenueMid("ABC/USD", "south", 5_000_000)
-	if got := provider.Price("ABC/USD"); got != 50_100 {
-		t.Fatalf("consensus = %d, want the median 50100", got)
+	if got, err := provider.Price("ABC/USD"); err != nil || got != 50_100 {
+		t.Fatalf("consensus = (%d, %v), want (50100, nil)", got, err)
 	}
-	if got := provider.Price("OTHER/USD"); got != 0 {
-		t.Fatalf("index for an unpublished symbol = %d, want 0", got)
+	if got, err := provider.Price("OTHER/USD"); err == nil || got != 0 {
+		t.Fatalf("index for an unpublished symbol = (%d, %v), want unavailable", got, err)
 	}
 }
 
@@ -1571,8 +1571,8 @@ func TestEveryQuotedMarketReceivesAnIndexOnceVenuesReportMidpoints(t *testing.T)
 	// reported midpoints from real books. Before that there is nothing to
 	// publish, which is the correct behaviour rather than a gap.
 	for _, symbol := range []string{"ABC/USD", "ABC-PERP", "CDF/USD", "ABC/CDF"} {
-		if price := sim.SpotIndex.Price(symbol); price != 0 {
-			t.Fatalf("%s published an index of %d before any venue reported a midpoint", symbol, price)
+		if price, err := sim.SpotIndex.Price(symbol); err == nil || price != 0 {
+			t.Fatalf("%s index before observations = (%d, %v), want unavailable", symbol, price, err)
 		}
 	}
 
@@ -1589,9 +1589,9 @@ func TestEveryQuotedMarketReceivesAnIndexOnceVenuesReportMidpoints(t *testing.T)
 	}
 
 	for symbol, mid := range mids {
-		price := sim.SpotIndex.Price(symbol)
-		if price <= 0 {
-			t.Fatalf("no index published for %s after every venue reported a midpoint", symbol)
+		price, err := sim.SpotIndex.Price(symbol)
+		if err != nil || price <= 0 {
+			t.Fatalf("no index published for %s after every venue reported a midpoint: (%d, %v)", symbol, price, err)
 		}
 		if price != mid {
 			t.Fatalf("index for %s is %d, want the consensus of the reported midpoints %d", symbol, price, mid)

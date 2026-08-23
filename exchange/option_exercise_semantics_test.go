@@ -73,9 +73,10 @@ func settleFixture(t *testing.T, f exerciseFixture) (map[uint64]int64, int) {
 	// No delivery fee: the fixtures check the exercise payoff, and a fee would
 	// mix a second mechanism into the same number. Fees are audited separately.
 	option.DeliveryFeeBps = 0
-	// With no observations recorded the settlement price is the underlying
-	// mark, so this pins it exactly.
+	// Settlement consumes a delivered declared-reference observation. The mark
+	// is retained only for pre-expiry risk, never as an implicit expiry fallback.
 	option.SetMarks(f.settlement, 0)
+	option.ObserveSettlement(f.settlement, clock.NowUnixNano())
 	ex.AddInstrument(option)
 
 	const endowment = int64(1_000_000_000_000)

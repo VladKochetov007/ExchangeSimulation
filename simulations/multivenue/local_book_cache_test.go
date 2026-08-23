@@ -1,11 +1,36 @@
 package multivenue
 
 import (
+	"math"
 	"testing"
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
 )
+
+func TestTwoSidedMidpointIsOverflowSafeAndExplicit(t *testing.T) {
+	tests := []struct {
+		name     string
+		bid, ask int64
+		want     int64
+		ok       bool
+	}{
+		{name: "ordinary", bid: 100, ask: 104, want: 102, ok: true},
+		{name: "odd spread floors", bid: 100, ask: 101, want: 100, ok: true},
+		{name: "equal", bid: 101, ask: 101, want: 101, ok: true},
+		{name: "near max int64", bid: math.MaxInt64 - 2, ask: math.MaxInt64, want: math.MaxInt64 - 1, ok: true},
+		{name: "missing bid", ask: 100},
+		{name: "crossed", bid: 101, ask: 100},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, ok := twoSidedMidpoint(test.bid, test.ask)
+			if got != test.want || ok != test.ok {
+				t.Fatalf("twoSidedMidpoint(%d, %d) = (%d, %t), want (%d, %t)", test.bid, test.ask, got, ok, test.want, test.ok)
+			}
+		})
+	}
+}
 
 func localCacheSnapshot(symbol string, sequence uint64, timestamp, bid, ask int64) actor.BookSnapshotEvent {
 	return actor.BookSnapshotEvent{

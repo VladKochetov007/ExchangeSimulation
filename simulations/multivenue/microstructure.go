@@ -47,6 +47,7 @@ type MicrostructureStats struct {
 	relSpreads  []float64
 	logReturns  []float64
 	lastMid     int64
+	hasLastMid  bool
 	firstTrades int64
 	lastTrades  int64
 	started     bool
@@ -71,23 +72,24 @@ func (m *MicrostructureStats) observe(bestBid, bestAsk, cumulativeTrades int64) 
 		m.firstTrades, m.started = cumulativeTrades, true
 	}
 	m.lastTrades = cumulativeTrades
-	if bestBid <= 0 || bestAsk <= 0 || bestAsk <= bestBid {
-		m.lastMid = 0
+	mid, available := twoSidedMidpoint(bestBid, bestAsk)
+	if !available || bestAsk == bestBid {
+		m.hasLastMid = false
 		return
 	}
-	mid := (bestBid + bestAsk) / 2
 	spread := bestAsk - bestBid
 	m.Samples++
 	if m.tickSize > 0 {
 		m.spreads = append(m.spreads, float64(spread)/float64(m.tickSize))
 	}
 	m.relSpreads = append(m.relSpreads, float64(spread)/float64(mid))
-	if m.lastMid > 0 {
+	if m.hasLastMid {
 		if r := math.Log(float64(mid) / float64(m.lastMid)); finite(r) {
 			m.logReturns = append(m.logReturns, r)
 		}
 	}
 	m.lastMid = mid
+	m.hasLastMid = true
 }
 
 // observeInventory records the absolute inventory of one maker, in base units

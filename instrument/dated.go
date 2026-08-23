@@ -47,11 +47,11 @@ func (f *ExpiringFutures) ObserveSettlement(price, tsNano int64) {
 	f.observer.observe(price, tsNano)
 }
 
-// SettlementPrice averages the observations inside the window; with no
-// window samples it falls back to the last price ever observed. Reading the
-// funding-rate mark here would race with the exchange price loop.
-func (f *ExpiringFutures) SettlementPrice() int64 {
-	return f.observer.settlementPrice(0)
+// SettlementPrice averages the observations inside the window; with no window
+// samples it uses the last declared underlying observation. It never samples a
+// funding mark, last trade, or numeric zero at settlement time.
+func (f *ExpiringFutures) SettlementPrice() (int64, error) {
+	return f.observer.settlementPrice()
 }
 
 // ExpiryCashFlow marks the position from entry to settlement: the standard

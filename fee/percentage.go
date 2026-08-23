@@ -12,7 +12,7 @@ type PercentageFee struct {
 	InQuote  bool
 }
 
-func (f *PercentageFee) CalculateFee(ctx etypes.FillContext) etypes.Fee {
+func (f *PercentageFee) CalculateFee(ctx etypes.FillContext) (etypes.Fee, error) {
 	bps := f.TakerBps
 	if ctx.IsMaker {
 		bps = f.MakerBps
@@ -38,5 +38,5 @@ func (f *PercentageFee) CalculateFee(ctx etypes.FillContext) etypes.Fee {
 		asset = ctx.BaseAsset
 	}
 
-	return etypes.Fee{Asset: asset, Amount: amount}
+	return etypes.Fee{Asset: asset, Amount: amount}, nil
 }

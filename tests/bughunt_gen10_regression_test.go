@@ -33,6 +33,9 @@ func TestRegressionRelistedSymbolGetsFreshMarkCalculator(t *testing.T) {
 	}
 
 	clock.now = expiry + 1
+	// The new lifecycle contract requires a declared settlement observation;
+	// this test is about calculator lifecycle, not an absent settlement source.
+	ex.UpdateDerivativeMarks()
 	ex.CheckExpiries() // settles and delists ABC-FUT-1
 	// Drain the two forced-cancel notifications from expiry so the next
 	// placeLimit reads its own accept, not a stale notification.
@@ -114,9 +117,11 @@ func TestRegressionExpirySettlementOrderIsDeterministic(t *testing.T) {
 	log := &testLogger{}
 	ex.SetLogger("_global", log)
 	for _, symbol := range []string{"ZZZ-FUT-1", "AAA-FUT-1"} {
-		ex.AddInstrument(NewExpiringFutures(
+		fut := NewExpiringFutures(
 			symbol, "ABC", "USD", BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1, derivStart,
-		))
+		)
+		fut.ObserveSettlement(PriceUSD(50_000, DOLLAR_TICK), derivStart)
+		ex.AddInstrument(fut)
 	}
 
 	ex.CheckExpiries()
@@ -221,10 +226,10 @@ func TestRegressionPureOptionsAccountGetsLiquidated(t *testing.T) {
 	}
 }
 
-// Before the first mark tick an option has no marks; a short's maintenance
-// must floor at the buy-back cost at the marked-or-entry premium instead of
-// reporting zero exposure during the window.
-func TestRegressionUnmarkedShortOptionStillCarriesMaintenance(t *testing.T) {
+// Before the first mark tick an option has no risk mark. The risk engine must
+// explicitly defer rather than treating that state as a zero-valued mark or
+// silently substituting entry price.
+func TestRegressionUnmarkedShortOptionDefersLiquidation(t *testing.T) {
 	ex := NewExchange(3, &RealClock{})
 	expiry := time.Now().Add(24 * time.Hour).UnixNano()
 	opt := NewEuropeanOption("BTC-1-48000-C", "BTC", "USD", "BTC/USD",
@@ -255,7 +260,7 @@ func TestRegressionUnmarkedShortOptionStillCarriesMaintenance(t *testing.T) {
 
 	ex.CheckPositionMarginerLiquidations()
 
-	if handler.liquidations == 0 {
-		t.Fatal("unmarked short option reported zero maintenance: $2,000 equity vs $3,000 buy-back floor did not liquidate")
+	if handler.liquidations != 0 {
+		t.Fatal("unmarked short option must defer liquidation until a risk mark exists")
 	}
 }

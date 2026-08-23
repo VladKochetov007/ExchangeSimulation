@@ -512,7 +512,10 @@ func TestMarkPriceLogging(t *testing.T) {
 
 	// Verify book has orders before starting automation
 	book := ex.Books["BTC-PERP"]
-	if book.GetBestBid() == 0 || book.GetBestAsk() == 0 {
+	if _, err := book.GetBestBid(); err != nil {
+		t.Fatal("Book should have bid before starting automation")
+	}
+	if _, err := book.GetBestAsk(); err != nil {
 		t.Fatal("Book should have bid/ask before starting automation")
 	}
 

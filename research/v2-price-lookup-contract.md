@@ -1,66 +1,57 @@
 # V2 price-lookup contract
 
-## Scope
+This contract applies only to the in-progress V2 branch. It does not amend
+frozen `ae13f9a` results.
 
-This V2 change removes the `0`-means-no-book convention from the exchange's
-private `bookMidPrice` path. It does not modify frozen `ae13f9a`; it changes
-the in-progress V2 branch before its next freeze.
+## Price categories
 
-## Contract
+| Need | API/policy | Absence |
+| --- | --- | --- |
+| True midpoint | `OrderBook.GetMidPrice`, `DefaultExchange.MidPrice`, `bookMidPrice`, `MidPriceOracle` | error unless positive, uncrossed bid and ask exist |
+| One-sided reference | `bookReferencePrice`, `liveBookReferencePrice` | true midpoint first; otherwise sole ask then sole bid; error if neither |
+| Last trade | `OrderBook.GetLastPrice`, `LastPriceCalculator`, named Binance protected-mark policy | error unless a positive prior trade exists |
+| Configured external/index | `PriceSource.Price`, `configuredIndexPrice`, basket/index providers | error unless the named source yields a positive price |
+| Executable price | best bid/ask or detached-match executions | reject/defer when no displayed executable liquidity exists |
+| Settlement source | delivered `ObserveSettlement` observations | lifecycle becomes `SETTLEMENT_PENDING`; no generic mark/last-trade/zero fallback |
 
-`DefaultExchange.bookMidPrice{,Locked}` now returns `(int64, error)` and
-returns `ErrNoBookPrice` for a missing, empty, one-sided, crossed, or invalid
-book. A successful result is the positive two-sided midpoint, computed as:
+No helper called “mid” may hide a one-sided or last-trade source. No caller may
+turn an error into numeric zero.
 
-```
+## Arithmetic and domain
+
+True midpoint is intentionally:
+
+```text
 bid + (ask - bid) / 2
 ```
 
-Integer division deliberately floors an odd one-tick spread. Live admitted
-limit prices are positive `int64`s and an uncrossed book has `bid <= ask`, so
-the subexpression `ask - bid` is in `[0, MaxInt64-1]`; it cannot overflow.
-Boundary tests cover those invariants and a near-`MaxInt64` pair.
+not `bid + (bid - ask)/2`. Exchange-admitted prices are positive `int64`s and
+an uncrossed book satisfies `bid <= ask`; therefore `ask-bid` cannot overflow.
+Integer division floors an odd one-tick spread. The same form is used in local
+participant cache arithmetic.
 
-## Consumer decisions
+## Lifecycle rule
 
-| Consumer | Required price | Absence behavior |
-| --- | --- | --- |
-| Option-chain listing | true midpoint | defer listing; do not center strikes at zero or a one-sided quote |
-| Dated/option settlement marks | declared underlying reference | defer sample/mark when no reference exists |
-| Perp/future index, funding, margin, liquidation update | declared underlying reference | defer the complete mark/funding/margin update |
-| Pre-existing configured index provider | explicit fallback | accept only positive provider values |
+Expiry immediately disables new trading. If the declared settlement source is
+unavailable, the contract is permanently halted in `SETTLEMENT_PENDING` under
+the explicit `RETRY_FOREVER` policy. Retried settlement is idempotent and
+settles exactly once when the declared reference becomes available. Funding,
+mark updates, liquidation, and post-expiry fills do not continue during this
+state. A source that never becomes available leaves the contract pending; any
+future terminal fallback requires an explicit new policy.
 
-The historical derivative/index contract intentionally accepts a sole best bid
-or ask. It is now represented by separately named
-`bookReferencePrice{,Locked}`: true midpoint if two-sided, otherwise the sole
-displayed best quote. An adversarial lifecycle fuzzer showed why this matters:
-making settlement strictly two-sided caused sparse sampled futures to retain a
-zero settlement price and then fail conservation. The named policy preserves
-that existing economic behavior while making it auditable; it is not called a
-midpoint.
+## Client and autonomous behavior
 
-## Deliberate semantic change
+- Price-dependent client fee/collateral/borrowing preflight rejects before any
+  account, order-ID, reserve, loan, or book mutation.
+- Strict account valuation returns a wrapped error. Ordinary account display
+  uses nil marks plus an explanatory reason.
+- Automatic listing, marks, funding, and actors defer only with a structured
+  `price_unavailable` diagnostic; they never silently continue at zero.
+- A fallback is named at its policy boundary. Generic midpoints do not select
+  last trade, and configured fee sources do not quietly select a different fee
+  schedule.
 
-Automatic option listings now wait for both sides, where the old path could
-center a strike grid from a one-sided pseudo-midpoint. This is a V2 economic
-semantic change and needs activation/causal validation before the V2 freeze.
-Missing or empty derivative references now explicitly defer rather than cross
-a legacy `PriceSource` boundary as `0`.
-
-## Adjacent legacy APIs, not silently changed
-
-`OrderBook.GetMidPrice`, `DefaultExchange.MidPrice`, and the legacy
-`PriceSource` calculators retain their documented mid-or-last-trade/zero
-contract. `marketRefPrice` separately and explicitly permits a one-sided
-valuation fallback for current order-margin and account-display paths. They
-are outside the `bookMidPriceLocked` call graph and require a separate,
-repository-wide error-aware price-source migration; this change neither
-asserts that their zero sentinels are valid nor conflates them with a true
-midpoint.
-
-## Regression coverage
-
-Tests cover midpoint arithmetic, admitted-price bounds, absent/one-sided/
-crossed books, explicit one-sided references, option-listing deferral,
-derivative-mark deferral, and index/mark propagation. The implementation has
-no scheduler, RNG, actor-state, or concurrency changes.
+For the completed caller inventory, tests, V2 behavior changes, and remaining
+legitimate zero quantities, see
+[v2-price-api-audit.md](v2-price-api-audit.md).

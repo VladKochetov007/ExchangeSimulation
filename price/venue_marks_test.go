@@ -13,7 +13,7 @@ func TestShrunkBasisNoHistoryCarriesFloor(t *testing.T) {
 	idx := &fixedSource{1_000_000}
 	c := NewShrunkBasisMarkPrice("X", idx, 30, 300, 3000, 7000)
 
-	mark := c.Calculate(newRegressionBookWithMid(1_010_000)) // basis +10,000
+	mark := mustPrice(t)(c.Calculate(newRegressionBookWithMid(1_010_000))) // basis +10,000
 	if want := int64(1_000_000 + 3000); mark != want {
 		t.Fatalf("first-sample mark = %d, want floor-shrunk %d", mark, want)
 	}
@@ -28,7 +28,7 @@ func TestShrunkBasisSteadyBasisCapsAtCMax(t *testing.T) {
 	book := newRegressionBookWithMid(1_010_000)
 	var mark int64
 	for range 40 {
-		mark = c.Calculate(book)
+		mark = mustPrice(t)(c.Calculate(book))
 	}
 	if want := int64(1_000_000 + 7000); mark != want {
 		t.Fatalf("steady-basis mark = %d, want CMax-shrunk %d (full basis would be 1,010,000)", mark, want)
@@ -43,10 +43,10 @@ func TestShrunkBasisCollapsedBasisShrinksToFloor(t *testing.T) {
 
 	wide := newRegressionBookWithMid(1_010_000) // |dP| = 10,000 history
 	for range 5 {
-		c.Calculate(wide)
+		_, _ = c.Calculate(wide)
 	}
 	narrow := newRegressionBookWithMid(1_000_100) // |dP| = 100, ratio 1% -> floor
-	mark := c.Calculate(narrow)
+	mark := mustPrice(t)(c.Calculate(narrow))
 
 	// MA window 2: (10,000 + 100)/2 = 5,050 smoothed basis, floor share 30%.
 	if want := int64(1_000_000 + 5050*3000/10000); mark != want {
@@ -61,7 +61,7 @@ func TestShrunkBasisNegativeBasisSymmetric(t *testing.T) {
 	book := newRegressionBookWithMid(990_000) // basis -10,000
 	var mark int64
 	for range 40 {
-		mark = c.Calculate(book)
+		mark = mustPrice(t)(c.Calculate(book))
 	}
 	if want := int64(1_000_000 - 7000); mark != want {
 		t.Fatalf("negative steady basis mark = %d, want %d", mark, want)
@@ -87,7 +87,7 @@ func TestBinanceMedianPicksMiddleTerm(t *testing.T) {
 	book := newRegressionBookWithMid(1_001_000) // P2 seeds to 1,001,000
 	book.LastTrade = &etypes.Trade{Price: 1_020_000}
 
-	mark := c.Calculate(book)
+	mark := mustPrice(t)(c.Calculate(book))
 	if want := int64(1_005_000); mark != want {
 		t.Fatalf("median mark = %d, want P1 %d (P2=1,001,000 lastTrade=1,020,000)", mark, want)
 	}
@@ -105,7 +105,7 @@ func TestBinanceMedianNoLastTradeCollapsesToP2(t *testing.T) {
 	book := newRegressionBookWithMid(1_001_000)
 	book.LastTrade = nil
 
-	if mark := c.Calculate(book); mark != 1_001_000 {
+	if mark := mustPrice(t)(c.Calculate(book)); mark != 1_001_000 {
 		t.Fatalf("no-trade mark = %d, want P2 1,001,000 (P1 would be 1,050,000)", mark)
 	}
 }
@@ -118,7 +118,7 @@ func TestBinanceMedianNoIndexUsesLastPrice(t *testing.T) {
 	book := newRegressionBookWithMid(1_001_000)
 	book.LastTrade = &etypes.Trade{Price: 999_000}
 
-	if mark := c.Calculate(book); mark != 999_000 {
+	if mark := mustPrice(t)(c.Calculate(book)); mark != 999_000 {
 		t.Fatalf("no-index mark = %d, want last trade 999,000", mark)
 	}
 }
@@ -131,7 +131,7 @@ func TestBinanceMedianNilFundingDegeneratesToP2vsLast(t *testing.T) {
 	book.LastTrade = &etypes.Trade{Price: 990_000}
 
 	// P1 == P2 = 1,001,000; median(1,001,000, 1,001,000, 990,000) = P2.
-	if mark := c.Calculate(book); mark != 1_001_000 {
+	if mark := mustPrice(t)(c.Calculate(book)); mark != 1_001_000 {
 		t.Fatalf("nil-funding mark = %d, want 1,001,000", mark)
 	}
 }

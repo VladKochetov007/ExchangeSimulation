@@ -9,7 +9,12 @@ import (
 
 type regressionIndex struct{ p int64 }
 
-func (r *regressionIndex) Price(string) int64 { return r.p }
+func (r *regressionIndex) Price(string) (int64, error) {
+	if r == nil || r.p <= 0 {
+		return 0, etypes.ErrNoPrice
+	}
+	return r.p, nil
+}
 
 func newRegressionBookWithMid(mid int64) *ebook.OrderBook {
 	ob := &ebook.OrderBook{
@@ -29,15 +34,15 @@ func TestRegressionEMADoesNotReseedAfterDecayToZero(t *testing.T) {
 	idx := &regressionIndex{p: 1_000_000}
 	c := NewEMAMarkPrice("X", idx, 600) // alpha = 33
 
-	c.Calculate(newRegressionBookWithMid(1_000_100)) // seed basis +100
+	_, _ = c.Calculate(newRegressionBookWithMid(1_000_100)) // seed basis +100
 
 	flat := newRegressionBookWithMid(1_000_000)
 	for range 3000 {
-		c.Calculate(flat) // decay basis to exactly 0
+		_, _ = c.Calculate(flat) // decay basis to exactly 0
 	}
-	markAtZero := c.Calculate(flat)
+	markAtZero := mustPrice(t)(c.Calculate(flat))
 
-	markAfterSpike := c.Calculate(newRegressionBookWithMid(1_050_000))
+	markAfterSpike := mustPrice(t)(c.Calculate(newRegressionBookWithMid(1_050_000)))
 
 	// Smoothed step for a 50000 spike at alpha=33 is ~165; a re-seed jumps 50000.
 	if jump := markAfterSpike - markAtZero; jump > 1000 {
@@ -51,13 +56,13 @@ func TestRegressionEMAAlphaFloorKeepsLargeWindowMoving(t *testing.T) {
 	idx := &regressionIndex{p: 1_000_000}
 	c := NewEMAMarkPrice("X", idx, 100_000)
 
-	c.Calculate(newRegressionBookWithMid(1_000_100)) // seed basis +100
+	_, _ = c.Calculate(newRegressionBookWithMid(1_000_100)) // seed basis +100
 
 	// Basis gap must exceed 10000/alpha for the integer EMA step to be >= 1.
 	wide := newRegressionBookWithMid(1_020_000) // basis +20000
 	var mark int64
 	for range 200 {
-		mark = c.Calculate(wide)
+		mark = mustPrice(t)(c.Calculate(wide))
 	}
 
 	if mark-idx.p <= 100 {

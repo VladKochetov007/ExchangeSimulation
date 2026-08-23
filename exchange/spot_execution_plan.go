@@ -90,15 +90,21 @@ type spotPlanFailure struct {
 	// A zero value means the incoming taker or an invariant failed, so the
 	// incoming order must be rejected without touching the live book.
 	makerOrderID uint64
+	// err is reserved for an action that could not be preflighted because an
+	// explicitly configured price-dependent fee source was unavailable. It is
+	// not an insufficiency result: the caller must surface it as such before
+	// allowing the matcher to mutate the live book.
+	err error
 }
 
-// prepareSpotExecutionPlan runs the configured matcher on a detached book,
-// quotes every fee exactly once, and simulates the real reservation releases
-// and settlement cash flows. The simulation starts from available balances,
-// then only unlocks reservations owned by an order when that order's first
-// planned execution reaches settlement. This prevents one order from spending
-// funds locked by another order belonging to the same client.
-func (e *DefaultExchange) prepareSpotExecutionPlan(book *OrderBook, takerOrder *Order, excluded map[uint64]struct{}) (*spotExecutionPlan, *spotPlanFailure) {
+// prepareFeeExecutionPlan freezes the exact fee quote for every execution in
+// a detached match. It deliberately contains no spot-ledger assumptions, so
+// margined and settleable instruments use the same pre-match fee boundary.
+//
+// Every live execution must have a member of this plan. In particular, a
+// configured OptionFee source is consulted before Match, never after a fill
+// has already changed balances or positions.
+func (e *DefaultExchange) prepareFeeExecutionPlan(book *OrderBook, takerOrder *Order, excluded map[uint64]struct{}) (*spotExecutionPlan, *spotPlanFailure) {
 	result, ok := e.previewMatchExcluding(book, takerOrder, excluded)
 	if !ok {
 		return nil, &spotPlanFailure{}
@@ -109,10 +115,61 @@ func (e *DefaultExchange) prepareSpotExecutionPlan(book *OrderBook, takerOrder *
 		fills:       make([]plannedSpotExecution, 0, len(result.Executions)),
 		fullyFilled: result.FullyFilled,
 	}
+	for _, exec := range result.Executions {
+		if exec == nil || exec.TakerOrderID != takerOrder.ID {
+			return nil, &spotPlanFailure{}
+		}
+		makerOrder := book.FindOrder(exec.MakerOrderID)
+		if makerOrder == nil || makerOrder.ClientID != exec.MakerClientID || makerOrder.Side != exec.MakerSide || makerOrder.PositionSide != exec.MakerPosSide || exec.MakerTotalQty != makerOrder.Qty {
+			return nil, &spotPlanFailure{}
+		}
+		takerFee, err := calcClientFee(e.Clients[exec.TakerClientID], FillContext{
+			Exec: exec, IsMaker: false, BaseAsset: book.Instrument.BaseAsset(), QuoteAsset: book.Instrument.QuoteAsset(), Precision: book.Instrument.BasePrecision(),
+		})
+		if err != nil {
+			return nil, &spotPlanFailure{err: err}
+		}
+		makerFee, err := calcClientFee(e.Clients[exec.MakerClientID], FillContext{
+			Exec: exec, IsMaker: true, BaseAsset: book.Instrument.BaseAsset(), QuoteAsset: book.Instrument.QuoteAsset(), Precision: book.Instrument.BasePrecision(),
+		})
+		if err != nil {
+			return nil, &spotPlanFailure{err: err}
+		}
+		plan.fills = append(plan.fills, plannedSpotExecution{
+			fingerprint: newExecutionFingerprint(exec),
+			takerFee:    takerFee,
+			makerFee:    makerFee,
+		})
+	}
+	return plan, nil
+}
+
+// prepareSpotExecutionPlan runs the configured matcher on a detached book,
+// quotes every fee exactly once, and simulates the real reservation releases
+// and settlement cash flows. The simulation starts from available balances,
+// then only unlocks reservations owned by an order when that order's first
+// planned execution reaches settlement. This prevents one order from spending
+// funds locked by another order belonging to the same client.
+func (e *DefaultExchange) prepareSpotExecutionPlan(book *OrderBook, takerOrder *Order, excluded map[uint64]struct{}, plan *spotExecutionPlan) (*spotExecutionPlan, *spotPlanFailure) {
+	if plan == nil {
+		var failure *spotPlanFailure
+		plan, failure = e.prepareFeeExecutionPlan(book, takerOrder, excluded)
+		if failure != nil {
+			return nil, failure
+		}
+	}
+	result, ok := e.previewMatchExcluding(book, takerOrder, excluded)
+	if !ok {
+		return nil, &spotPlanFailure{}
+	}
+	defer releasePreviewExecutions(result.Executions)
+	if !plan.matches(result.Executions) || plan.fullyFilled != result.FullyFilled {
+		return nil, &spotPlanFailure{}
+	}
 	orders := map[uint64]*Order{takerOrder.ID: takerOrder}
 	finalFilled := map[uint64]int64{takerOrder.ID: takerOrder.FilledQty}
 	makerFilled := make(map[uint64]int64)
-	for _, exec := range result.Executions {
+	for i, exec := range result.Executions {
 		if exec == nil || exec.TakerOrderID != takerOrder.ID {
 			return nil, &spotPlanFailure{}
 		}
@@ -136,15 +193,12 @@ func (e *DefaultExchange) prepareSpotExecutionPlan(book *OrderBook, takerOrder *
 		finalFilled[takerOrder.ID] = nextTakerFilled
 		finalFilled[makerOrder.ID] = nextMakerFilled
 		makerFilled[makerOrder.ID] = nextMakerFilled
-		plan.fills = append(plan.fills, plannedSpotExecution{
-			fingerprint: newExecutionFingerprint(exec),
-			takerFee: calcClientFee(e.Clients[exec.TakerClientID], FillContext{
-				Exec: exec, IsMaker: false, BaseAsset: book.Instrument.BaseAsset(), QuoteAsset: book.Instrument.QuoteAsset(), Precision: book.Instrument.BasePrecision(),
-			}),
-			makerFee: calcClientFee(e.Clients[exec.MakerClientID], FillContext{
-				Exec: exec, IsMaker: true, BaseAsset: book.Instrument.BaseAsset(), QuoteAsset: book.Instrument.QuoteAsset(), Precision: book.Instrument.BasePrecision(),
-			}),
-		})
+		if !plan.fills[i].fingerprint.matches(exec) {
+			// The first detached match supplied the fee plan. A second detached
+			// match while the exchange lock is held must be identical; accepting a
+			// changed sequence would make the price-dependent fee quote stale.
+			return nil, &spotPlanFailure{}
+		}
 	}
 
 	state := newSpotPlanState(e.Clients)
@@ -153,7 +207,10 @@ func (e *DefaultExchange) prepareSpotExecutionPlan(book *OrderBook, takerOrder *
 		if adjustment := initialized[order.ID]; adjustment != nil {
 			return adjustment, nil
 		}
-		adjustment, ok := state.beginOrder(book, order, finalFilled[order.ID])
+		adjustment, ok, err := state.beginOrder(book, order, finalFilled[order.ID])
+		if err != nil {
+			return nil, &spotPlanFailure{err: err}
+		}
 		if !ok {
 			if maker {
 				return nil, &spotPlanFailure{makerOrderID: order.ID}
@@ -305,43 +362,50 @@ type spotPlanOrder struct {
 	finished       bool
 }
 
-func (s *spotPlanState) beginOrder(book *OrderBook, order *Order, finalFilled int64) (*spotPlanOrder, bool) {
+func (s *spotPlanState) beginOrder(book *OrderBook, order *Order, finalFilled int64) (*spotPlanOrder, bool, error) {
 	if order == nil || order.ClientID == 0 || finalFilled < order.FilledQty || finalFilled > order.Qty {
-		return nil, false
+		return nil, false, nil
 	}
 	remaining, ok := etypes.TrySub(order.Qty, finalFilled)
 	if !ok || remaining < 0 {
-		return nil, false
+		return nil, false, nil
 	}
 
 	tradeReserve := int64(0)
 	foreignReserve := map[string]int64(nil)
+	var err error
 	if order.Type == LimitOrder && order.TimeInForce == GTC && remaining > 0 {
 		client := s.clients[order.ClientID]
 		if client == nil {
-			return nil, false
+			return nil, false, nil
 		}
 		future := *order
 		future.Qty = remaining
 		future.FilledQty = 0
-		tradeReserve, ok = spotOrderReservation(client.FeePlan, book.Instrument, order.Side, remaining, order.Price, book.Instrument.BasePrecision())
-		if !ok {
-			return nil, false
+		tradeReserve, ok, err = spotOrderReservation(client.FeePlan, book.Instrument, order.Side, remaining, order.Price, book.Instrument.BasePrecision())
+		if err != nil {
+			return nil, false, err
 		}
-		foreignReserve, ok = eForeignFeeReservations(client.FeePlan, book, &future, book.Instrument.BasePrecision())
 		if !ok {
-			return nil, false
+			return nil, false, nil
+		}
+		foreignReserve, ok, err = eForeignFeeReservations(client.FeePlan, book, &future, book.Instrument.BasePrecision())
+		if err != nil {
+			return nil, false, err
+		}
+		if !ok {
+			return nil, false, nil
 		}
 	}
 
 	if order.Reserved < 0 || tradeReserve > order.Reserved {
-		return nil, false
+		return nil, false, nil
 	}
 	tradeRelease, ok := etypes.TrySub(order.Reserved, tradeReserve)
 	if !ok || !s.release(order.ClientID, reserveAsset(book.Instrument, order.Side), tradeRelease) {
-		return nil, false
+		return nil, false, nil
 	}
-	return &spotPlanOrder{order: order, foreignReserve: foreignReserve}, true
+	return &spotPlanOrder{order: order, foreignReserve: foreignReserve}, true, nil
 }
 
 func (s *spotPlanState) finishOrder(adjustment *spotPlanOrder) bool {
@@ -431,15 +495,18 @@ func (s *spotPlanState) applyExecution(instrument Instrument, clientID uint64, s
 // eForeignFeeReservations is the non-method form used by the dry-run state.
 // It keeps the future-resting-order reservation formula identical to the live
 // path without giving the state helper access to the exchange.
-func eForeignFeeReservations(feePlan FeeModel, book *OrderBook, order *Order, precision int64) (map[string]int64, bool) {
+func eForeignFeeReservations(feePlan FeeModel, book *OrderBook, order *Order, precision int64) (map[string]int64, bool, error) {
 	if feePlan == nil || order.Qty <= 0 {
-		return nil, true
+		return nil, true, nil
 	}
 	base, quote := book.Instrument.BaseAsset(), book.Instrument.QuoteAsset()
 	reserved := make(map[string]int64)
 	for _, isMaker := range []bool{false, true} {
 		probe := Execution{Price: order.Price, Qty: order.Qty}
-		fee := feePlan.CalculateFee(FillContext{Exec: &probe, IsMaker: isMaker, BaseAsset: base, QuoteAsset: quote, Precision: precision})
+		fee, err := feePlan.CalculateFee(FillContext{Exec: &probe, IsMaker: isMaker, BaseAsset: base, QuoteAsset: quote, Precision: precision})
+		if err != nil {
+			return nil, false, err
+		}
 		if fee.Amount <= 0 || fee.Asset == "" || fee.Asset == quote || fee.Asset == base {
 			continue
 		}
@@ -447,5 +514,5 @@ func eForeignFeeReservations(feePlan FeeModel, book *OrderBook, order *Order, pr
 			reserved[fee.Asset] = fee.Amount
 		}
 	}
-	return reserved, true
+	return reserved, true, nil
 }

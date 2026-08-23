@@ -1,6 +1,11 @@
 package instrument
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+
+	etypes "exchange_sim/types"
+)
 
 // settlementObserver accumulates underlying price samples inside a rolling
 // window and freezes their mean as the settlement price on first read.
@@ -8,8 +13,13 @@ type settlementObserver struct {
 	windowNano   int64
 	mu           sync.Mutex
 	obs          []settlementObs
-	settled      int64
-	lastObserved int64
+	settled      bool
+	settledPrice int64
+	// lastDeclaredReference is a prior positive observation supplied through
+	// ObserveSettlement by the contract's declared underlying-reference path;
+	// it is never a trade, book-mid, or numeric-zero fallback.
+	lastDeclaredReference    int64
+	hasLastDeclaredReference bool
 }
 
 type settlementObs struct {
@@ -22,7 +32,8 @@ func (s *settlementObserver) observe(price, tsNano int64) {
 		return
 	}
 	s.mu.Lock()
-	s.lastObserved = price
+	s.lastDeclaredReference = price
+	s.hasLastDeclaredReference = true
 	s.obs = append(s.obs, settlementObs{price: price, ts: tsNano})
 	cutoff := tsNano - s.windowNano
 	trim := 0
@@ -33,21 +44,24 @@ func (s *settlementObserver) observe(price, tsNano int64) {
 	s.mu.Unlock()
 }
 
-// settlementPrice freezes and returns the window mean; fallback is used when
-// no samples were recorded (e.g. the instrument never traded a full window).
-func (s *settlementObserver) settlementPrice(fallback int64) int64 {
+// settlementPrice freezes and returns the window mean. When the configured
+// window has rolled out, its only declared fallback is the last observation
+// received through ObserveSettlement from that same underlying-reference
+// contract. No observation is an unavailable settlement, not a zero price.
+func (s *settlementObserver) settlementPrice() (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.settled != 0 {
-		return s.settled
+	if s.settled {
+		return s.settledPrice, nil
 	}
 	n := int64(len(s.obs))
 	if n == 0 {
-		s.settled = s.lastObserved
-		if s.settled == 0 {
-			s.settled = fallback
+		if !s.hasLastDeclaredReference || s.lastDeclaredReference <= 0 {
+			return 0, fmt.Errorf("settlement observation: %w", etypes.ErrNoPrice)
 		}
-		return s.settled
+		s.settledPrice = s.lastDeclaredReference
+		s.settled = true
+		return s.settledPrice, nil
 	}
 	// Sum quotient and remainder separately so the mean stays exact for
 	// prices near the int64 range.
@@ -56,6 +70,10 @@ func (s *settlementObserver) settlementPrice(fallback int64) int64 {
 		sum += o.price / n
 		rem += o.price % n
 	}
-	s.settled = sum + rem/n
-	return s.settled
+	s.settledPrice = sum + rem/n
+	if s.settledPrice <= 0 {
+		return 0, fmt.Errorf("settlement observation: %w", etypes.ErrNoPrice)
+	}
+	s.settled = true
+	return s.settledPrice, nil
 }

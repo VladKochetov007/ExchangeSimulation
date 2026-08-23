@@ -15,8 +15,6 @@ type ForcedCancelNotification struct {
 // bill what executed, not what was attempted.
 // Caller must hold e.mu.Lock().
 func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *OrderBook, instrument Instrument, side Side, posSide PositionSide, qty, timestamp int64) (fillPrice, filledQty int64) {
-	e.cancelClientOrdersOnBook(client, book, instrument)
-
 	// Same allocation pattern as PlaceOrder (increment, then use): taking the
 	// value first would reuse the most recently placed order's ID.
 	e.NextOrderID++
@@ -31,13 +29,36 @@ func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *Orde
 	order.Status = Open
 	order.Timestamp = timestamp
 
+	// Quote price-dependent fees against precisely the book that remains after
+	// the liquidated client's resting orders are removed, but do so before
+	// removing them. A missing configured fee reference must defer the close
+	// without mutating the book or client reservations.
+	excluded := make(map[uint64]struct{}, len(client.OrderIDs))
+	for _, orderID := range client.OrderIDs {
+		if book.FindOrder(orderID) != nil {
+			excluded[orderID] = struct{}{}
+		}
+	}
+	plan, failure := e.prepareFeeExecutionPlan(book, order, excluded)
+	if failure != nil {
+		if failure.err != nil {
+			e.reportPriceUnavailable(timestamp, book.Symbol, "liquidation_fee_preflight", failure.err)
+			putOrder(order)
+			return 0, 0
+		}
+		panic("matching engine could not produce liquidation fee preflight")
+	}
+	e.cancelClientOrdersOnBook(client, book, instrument)
 	result := e.Matcher.Match(book.Bids, book.Asks, order)
+	if !plan.matches(result.Executions) {
+		panic("matching engine violated liquidation fee preflight")
+	}
 	if len(result.Executions) > 0 {
 		fillPrice = result.Executions[len(result.Executions)-1].Price
 	}
 	filledQty = order.FilledQty
 	levels := collectAffectedLevels(book, result.Executions)
-	e.processExecutions(book, result.Executions, order, nil)
+	e.processExecutions(book, result.Executions, order, plan)
 	e.removeMakerOrders(book, result.Executions)
 	e.publishLevels(book, levels)
 	putOrder(order)
@@ -71,6 +92,10 @@ func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBo
 			e.publishBookUpdate(book, order.Side, order.Price)
 		}
 		client.RemoveOrder(orderID)
+		// The order left the live book due to an exchange-side lifecycle action
+		// (liquidation or pending expiry), not a fill. Retaining Open here would
+		// let an actor or audit treat a permanently halted order as executable.
+		order.Status = Cancelled
 		// At-least-once, same as fills: a dropped forced cancel leaves the
 		// actor with a ghost pending order that blocks its quoting loop
 		// forever (randomwalk postmortem bug 3).

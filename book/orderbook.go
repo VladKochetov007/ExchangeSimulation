@@ -12,36 +12,43 @@ type OrderBook struct {
 	SeqNum     uint64
 }
 
-func (ob *OrderBook) GetLastPrice() int64 {
-	if ob.LastTrade != nil {
-		return ob.LastTrade.Price
+func (ob *OrderBook) GetLastPrice() (int64, error) {
+	if ob != nil && ob.LastTrade != nil && ob.LastTrade.Price > 0 {
+		return ob.LastTrade.Price, nil
 	}
-	return 0
+	return 0, etypes.ErrNoPrice
 }
 
-func (ob *OrderBook) GetBestBid() int64 {
-	if ob.Bids.Best != nil {
-		return ob.Bids.Best.Price
+func (ob *OrderBook) GetBestBid() (int64, error) {
+	if ob != nil && ob.Bids != nil && ob.Bids.Best != nil && ob.Bids.Best.Price > 0 {
+		return ob.Bids.Best.Price, nil
 	}
-	return 0
+	return 0, etypes.ErrNoPrice
 }
 
-func (ob *OrderBook) GetBestAsk() int64 {
-	if ob.Asks.Best != nil {
-		return ob.Asks.Best.Price
+func (ob *OrderBook) GetBestAsk() (int64, error) {
+	if ob != nil && ob.Asks != nil && ob.Asks.Best != nil && ob.Asks.Best.Price > 0 {
+		return ob.Asks.Best.Price, nil
 	}
-	return 0
+	return 0, etypes.ErrNoPrice
 }
 
-// GetMidPrice returns the mid price between best bid and ask,
-// falling back to last price if the book is empty.
-func (ob *OrderBook) GetMidPrice() int64 {
-	bestBid := ob.GetBestBid()
-	bestAsk := ob.GetBestAsk()
-	if bestBid > 0 && bestAsk > 0 {
-		return bestBid + (bestAsk-bestBid)/2
+// GetMidPrice returns the true midpoint between the current executable best
+// bid and ask. It deliberately does not fall back to a last trade or a
+// one-sided quote: callers requiring either must select that policy by name.
+func (ob *OrderBook) GetMidPrice() (int64, error) {
+	bestBid, err := ob.GetBestBid()
+	if err != nil {
+		return 0, err
 	}
-	return ob.GetLastPrice()
+	bestAsk, err := ob.GetBestAsk()
+	if err != nil {
+		return 0, err
+	}
+	if bestBid > bestAsk {
+		return 0, etypes.ErrNoPrice
+	}
+	return bestBid + (bestAsk-bestBid)/2, nil
 }
 
 // FindOrder searches both sides for an order by ID.

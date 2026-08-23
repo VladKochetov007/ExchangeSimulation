@@ -71,7 +71,7 @@ func TestMarkedAccountUsesOptionRiskMarkInsteadOfBookPrice(t *testing.T) {
 		t.Fatalf("positions = %#v", report.Positions)
 	}
 	position := report.Positions[0]
-	if position.MarkPrice != 12*valuationQuotePrecision || position.UnrealizedPnL != 2*valuationQuotePrecision {
+	if position.MarkPrice == nil || *position.MarkPrice != 12*valuationQuotePrecision || position.UnrealizedPnL != 2*valuationQuotePrecision {
 		t.Fatalf("option position did not use PositionMark: %#v", position)
 	}
 	if report.DerivativeUnrealized != 0 || report.OptionMarketValue != 12*valuationQuotePrecision || report.Equity != 112*valuationQuotePrecision {
@@ -98,7 +98,7 @@ func TestMarkedAccountAcceptsInitializedOutOfMoneyOptionAtZeroPremium(t *testing
 	if err != nil {
 		t.Fatalf("MarkedAccount: %v", err)
 	}
-	if len(report.Positions) != 1 || report.Positions[0].MarkPrice != 0 {
+	if len(report.Positions) != 1 || report.Positions[0].MarkPrice == nil || *report.Positions[0].MarkPrice != 0 {
 		t.Fatalf("zero-premium position mark = %#v", report.Positions)
 	}
 	if report.OptionMarketValue != 0 || report.Equity != 100*valuationQuotePrecision {

@@ -69,12 +69,14 @@ type IndexPrice struct {
 }
 
 type FundingRate struct {
-	Symbol      string `json:"symbol"`
-	Rate        int64  `json:"rate"`
-	NextFunding int64  `json:"next_funding"`
-	Interval    int64  `json:"interval"`
-	MarkPrice   int64  `json:"mark_price"`
-	IndexPrice  int64  `json:"index_price"`
+	Symbol         string `json:"symbol"`
+	Rate           int64  `json:"rate"`
+	NextFunding    int64  `json:"next_funding"`
+	Interval       int64  `json:"interval"`
+	MarkPrice      int64  `json:"mark_price"`
+	MarkAvailable  bool   `json:"mark_available"`
+	IndexPrice     int64  `json:"index_price"`
+	IndexAvailable bool   `json:"index_available"`
 }
 
 type OpenInterest struct {

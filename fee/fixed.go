@@ -7,9 +7,9 @@ type FixedFee struct {
 	TakerFee etypes.Fee
 }
 
-func (f *FixedFee) CalculateFee(ctx etypes.FillContext) etypes.Fee {
+func (f *FixedFee) CalculateFee(ctx etypes.FillContext) (etypes.Fee, error) {
 	if ctx.IsMaker {
-		return f.MakerFee
+		return f.MakerFee, nil
 	}
-	return f.TakerFee
+	return f.TakerFee, nil
 }

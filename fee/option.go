@@ -1,6 +1,8 @@
 package fee
 
 import (
+	"fmt"
+
 	etypes "exchange_sim/types"
 )
 
@@ -23,7 +25,7 @@ type OptionFee struct {
 	SymbolMap func(baseAsset, quoteAsset string) string
 }
 
-func (f *OptionFee) CalculateFee(ctx etypes.FillContext) etypes.Fee {
+func (f *OptionFee) CalculateFee(ctx etypes.FillContext) (etypes.Fee, error) {
 	bps := f.TakerUnderlyingBps
 	if ctx.IsMaker {
 		bps = f.MakerUnderlyingBps
@@ -32,11 +34,21 @@ func (f *OptionFee) CalculateFee(ctx etypes.FillContext) etypes.Fee {
 
 	var amount int64
 	if f.Source != nil && f.SymbolMap != nil {
-		if underlying := f.Source.Price(f.SymbolMap(ctx.BaseAsset, ctx.QuoteAsset)); underlying > 0 {
-			amount = etypes.MulDiv(ctx.Exec.Qty, underlying, ctx.Precision) * bps / 10000
+		underlyingSymbol := f.SymbolMap(ctx.BaseAsset, ctx.QuoteAsset)
+		underlying, err := f.Source.Price(underlyingSymbol)
+		if err != nil {
+			// A configured underlying-notional fee cannot silently switch to a
+			// premium fee because its price source disappeared. The exchange
+			// preflights this error before matching and returns it to the action
+			// boundary instead of inventing a zero fee.
+			return etypes.Fee{}, fmt.Errorf("option fee underlying %s: %w", underlyingSymbol, err)
 		}
-	}
-	if amount == 0 {
+		amount = etypes.MulDiv(ctx.Exec.Qty, underlying, ctx.Precision) * bps / 10000
+	} else {
+		// This is the declared premium-notional schedule when no underlying
+		// source policy was configured. Do not use amount==0 as a proxy for an
+		// absent reference: zero is a legitimate rounded fee under the selected
+		// underlying-notional schedule.
 		amount = premiumNotional * bps / 10000
 	}
 	if f.CapPremiumBps > 0 {
@@ -44,7 +56,7 @@ func (f *OptionFee) CalculateFee(ctx etypes.FillContext) etypes.Fee {
 			amount = cap
 		}
 	}
-	return etypes.Fee{Amount: amount, Asset: ctx.QuoteAsset}
+	return etypes.Fee{Amount: amount, Asset: ctx.QuoteAsset}, nil
 }
 
 var _ etypes.FeeModel = (*OptionFee)(nil)

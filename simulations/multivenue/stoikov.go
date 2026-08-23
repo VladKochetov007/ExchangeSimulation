@@ -364,10 +364,13 @@ func (mm *StoikovMarketMaker) onSnapshot(e actor.BookSnapshotEvent) {
 		}
 		return
 	}
-	if e.Symbol != mm.cfg.ReferenceSymbol || len(e.Snapshot.Bids) == 0 || len(e.Snapshot.Asks) == 0 {
+	if e.Symbol != mm.cfg.ReferenceSymbol || e.Snapshot == nil || len(e.Snapshot.Bids) == 0 || len(e.Snapshot.Asks) == 0 {
 		return
 	}
-	mid := (e.Snapshot.Bids[0].Price + e.Snapshot.Asks[0].Price) / 2
+	mid, available := twoSidedMidpoint(e.Snapshot.Bids[0].Price, e.Snapshot.Asks[0].Price)
+	if !available {
+		return
+	}
 	if mm.localReference != nil {
 		mm.localReference.ObserveSnapshot(e)
 		var ok bool
@@ -375,9 +378,6 @@ func (mm *StoikovMarketMaker) onSnapshot(e actor.BookSnapshotEvent) {
 		if !ok {
 			return
 		}
-	}
-	if mid <= 0 {
-		return
 	}
 	mm.forward = mm.blendForward(mid, e.Timestamp)
 }
@@ -549,7 +549,12 @@ func (mm *StoikovMarketMaker) onTick(now time.Time) {
 	if len(mm.pending) != 0 || mm.cfg.BasePrecision <= 0 || mm.cfg.QuotePrecision <= 0 || mm.cfg.TickSize <= 0 || mm.cfg.QuoteQty <= 0 {
 		return
 	}
-	forward := mm.referencePriceAt(now)
+	forward, available := mm.referencePriceAt(now)
+	if !available {
+		// The maker's declared information frontier has no usable reference.
+		// This is an explicit local-policy deferral, not a quote around 0.
+		return
+	}
 	// Convert the relative parameters into the absolute quote units the
 	// formula expects. Variance is quote-price^2 and both risk aversion and
 	// fill decay are reciprocal quote-price, so with forward F:
@@ -594,7 +599,7 @@ func (mm *StoikovMarketMaker) onTick(now time.Time) {
 	}
 	if mm.cfg.RequoteBps > 0 && mm.bidID != 0 && mm.askID != 0 {
 		moved := maxInt64(absInt64(bid-mm.bidPrice), absInt64(ask-mm.askPrice))
-		if reference := (mm.bidPrice + mm.askPrice) / 2; reference > 0 && moved*10000 < mm.cfg.RequoteBps*reference {
+		if reference, available := twoSidedMidpoint(mm.bidPrice, mm.askPrice); available && moved*10000 < mm.cfg.RequoteBps*reference {
 			return
 		}
 	}
@@ -736,38 +741,46 @@ func (mm *StoikovMarketMaker) inventoryFraction() float64 {
 	return fraction
 }
 
-// referencePrice is what the maker quotes around.
-func (mm *StoikovMarketMaker) referencePrice() int64 {
+// referencePrice is what the maker quotes around. The boolean distinguishes
+// a valid price from a missing/stale local observation; callers must defer
+// instead of treating an int64 zero as a quoteable reference.
+func (mm *StoikovMarketMaker) referencePrice() (int64, bool) {
 	return mm.referencePriceAt(time.Time{})
 }
 
-func (mm *StoikovMarketMaker) referencePriceAt(now time.Time) int64 {
+func (mm *StoikovMarketMaker) referencePriceAt(now time.Time) (int64, bool) {
 	book := mm.forward
 	if book <= 0 {
 		book = mm.cfg.BootstrapPrice
+	}
+	if book <= 0 {
+		return 0, false
 	}
 	if !mm.cfg.AnchorToIndex || mm.indexPrice <= 0 {
 		if mm.remoteReference != nil {
 			localView, localOK := mm.localReference.View()
 			remoteView, remoteOK := mm.remoteReference.View()
 			if !localOK || !remoteOK {
-				return 0
+				return 0, false
 			}
 			if mm.remoteMaxAge > 0 && !now.IsZero() {
 				if now.UnixNano()-localView.PublishedAt > mm.remoteMaxAge.Nanoseconds() || now.UnixNano()-remoteView.PublishedAt > mm.remoteMaxAge.Nanoseconds() {
-					return 0
+					return 0, false
 				}
 			}
-			local := localView.Bid + (localView.Ask-localView.Bid)/2
-			remote := remoteView.Bid + (remoteView.Ask-remoteView.Bid)/2
+			local, localOK := mm.localReference.Mid()
+			remote, remoteOK := mm.remoteReference.Mid()
+			if !localOK || !remoteOK {
+				return 0, false
+			}
 			weight := mm.remoteWeight * mm.remoteConfidence
 			composite := (1-weight)*float64(local) + weight*float64(remote)
 			if !finite(composite) || composite <= 0 {
-				return 0
+				return 0, false
 			}
-			return int64(composite)
+			return int64(composite), true
 		}
-		return book
+		return book, true
 	}
 	weight := mm.cfg.IndexWeight
 	if weight <= 0 || weight > 1 {
@@ -775,9 +788,9 @@ func (mm *StoikovMarketMaker) referencePriceAt(now time.Time) int64 {
 	}
 	blended := weight*float64(mm.indexPrice) + (1-weight)*float64(book)
 	if !finite(blended) || blended <= 0 {
-		return book
+		return book, true
 	}
-	return int64(blended)
+	return int64(blended), true
 }
 
 func ewmaAlpha(dt float64, halfLife time.Duration) float64 {

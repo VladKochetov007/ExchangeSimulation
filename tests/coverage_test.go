@@ -2,7 +2,9 @@ package exchange_test
 
 import (
 	"context"
+	"errors"
 	. "exchange_sim/exchange"
+	etypes "exchange_sim/types"
 	"testing"
 	"time"
 )
@@ -157,9 +159,9 @@ func TestWeightedMidPriceCalculator_ZeroBidQty(t *testing.T) {
 	book.Bids.Best.TotalQty = 0
 
 	calc := NewWeightedMidPriceCalculator()
-	mid := calc.Calculate(book)
-	if mid != PriceUSD(51_000, DOLLAR_TICK) {
-		t.Errorf("expected askPrice when bidQty=0, got %d", mid)
+	mid, err := calc.Calculate(book)
+	if err != nil || mid != PriceUSD(51_000, DOLLAR_TICK) {
+		t.Errorf("expected askPrice when bidQty=0, got (%d, %v)", mid, err)
 	}
 }
 
@@ -176,9 +178,9 @@ func TestWeightedMidPriceCalculator_ZeroAskQty(t *testing.T) {
 	book.Asks.Best.TotalQty = 0
 
 	calc := NewWeightedMidPriceCalculator()
-	mid := calc.Calculate(book)
-	if mid != PriceUSD(49_000, DOLLAR_TICK) {
-		t.Errorf("expected bidPrice when askQty=0, got %d", mid)
+	mid, err := calc.Calculate(book)
+	if err != nil || mid != PriceUSD(49_000, DOLLAR_TICK) {
+		t.Errorf("expected bidPrice when askQty=0, got (%d, %v)", mid, err)
 	}
 }
 
@@ -196,10 +198,10 @@ func TestWeightedMidPriceCalculator_BothZeroQty(t *testing.T) {
 	book.Asks.Best.TotalQty = 0
 
 	calc := NewWeightedMidPriceCalculator()
-	mid := calc.Calculate(book)
+	mid, err := calc.Calculate(book)
 	expected := PriceUSD(49_000, DOLLAR_TICK) + (PriceUSD(51_000, DOLLAR_TICK)-PriceUSD(49_000, DOLLAR_TICK))/2
-	if mid != expected {
-		t.Errorf("expected mid of zero-qty spread: got %d want %d", mid, expected)
+	if err != nil || mid != expected {
+		t.Errorf("expected mid of zero-qty spread: got (%d, %v) want %d", mid, err, expected)
 	}
 }
 
@@ -207,18 +209,18 @@ func TestWeightedMidPriceCalculator_BothZeroQty(t *testing.T) {
 
 func TestCalculateCollateralUsed_NilOracle(t *testing.T) {
 	bm := NewBorrowingManager(BorrowingConfig{PriceSource: nil})
-	result := bm.CalculateCollateralUsed("USD", USDAmount(1_000))
-	if result != 0 {
-		t.Errorf("expected 0 for nil oracle, got %d", result)
+	result, err := bm.CalculateCollateralUsed("USD", USDAmount(1_000))
+	if err == nil || result != 0 {
+		t.Errorf("nil oracle = (%d, %v), want error", result, err)
 	}
 }
 
 func TestCalculateCollateralUsed_ZeroPrice(t *testing.T) {
 	oracle := NewStaticPriceOracle(map[string]int64{}) // all prices are 0
 	bm := NewBorrowingManager(BorrowingConfig{PriceSource: oracle})
-	result := bm.CalculateCollateralUsed("USD", USDAmount(1_000))
-	if result != 0 {
-		t.Errorf("expected 0 when oracle returns 0, got %d", result)
+	result, err := bm.CalculateCollateralUsed("USD", USDAmount(1_000))
+	if err == nil || result != 0 {
+		t.Errorf("unavailable oracle price = (%d, %v), want error", result, err)
 	}
 }
 
@@ -243,9 +245,10 @@ func TestValidateCrossMarginCollateral_ZeroPriceForBorrowedAsset(t *testing.T) {
 		PriceSource:       oracle,
 	})
 
-	// Should succeed — existing ETH borrow ignored (price=0, existingBorrowValue stays 0)
-	if err := ex.BorrowMargin(1, "USD", USDAmount(1_000), "test"); err != nil {
-		t.Errorf("unexpected error: %v", err)
+	// An existing non-zero ETH debt cannot be ignored merely because its
+	// valuation source is unavailable.
+	if err := ex.BorrowMargin(1, "USD", USDAmount(1_000), "test"); !errors.Is(err, etypes.ErrNoPrice) {
+		t.Errorf("expected ErrNoPrice for existing unpriced ETH debt, got %v", err)
 	}
 }
 

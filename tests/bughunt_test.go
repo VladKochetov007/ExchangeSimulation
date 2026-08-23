@@ -298,9 +298,10 @@ func TestBorrowLimitDoesNotCompound(t *testing.T) {
 	}
 }
 
-// A dated future whose underlying never traded used to settle at price 0,
-// debiting longs their full entry notional. It must close flat instead.
-func TestExpiryWithoutSettlementPriceClosesFlat(t *testing.T) {
+// A dated future whose underlying never traded used to settle at price 0.
+// V2 keeps its positions intact and halts the expired contract pending a
+// declared settlement source; an unavailable price is never a flat close.
+func TestExpiryWithoutSettlementPriceDefers(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	fut := einstrument.NewExpiringFutures("ABC-FUT-1", "ABC", "USD",
 		BTC_PRECISION, USD_PRECISION, DOLLAR_TICK, 1, 1) // expired long ago
@@ -324,12 +325,12 @@ func TestExpiryWithoutSettlementPriceClosesFlat(t *testing.T) {
 		if got := ex.Clients[id].PerpBalances["USD"]; got != USDAmount(1_000) {
 			t.Errorf("client %d balance changed on priceless settlement: %d", id, got)
 		}
-		if pos := pm.GetPositionBySide(id, "ABC-FUT-1", PositionBoth); pos != nil && pos.Size != 0 {
-			t.Errorf("client %d position not closed: %d", id, pos.Size)
+		if pos := pm.GetPositionBySide(id, "ABC-FUT-1", PositionBoth); pos == nil || pos.Size == 0 {
+			t.Errorf("client %d position was closed despite unavailable settlement", id)
 		}
 	}
-	if ex.GetBook("ABC-FUT-1") != nil {
-		t.Error("expired book must be delisted")
+	if ex.GetBook("ABC-FUT-1") == nil {
+		t.Error("expired book must remain pending until settlement becomes available")
 	}
 }
 

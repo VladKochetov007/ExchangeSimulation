@@ -358,6 +358,14 @@ func TestCompleteLoggingIntegration(t *testing.T) {
 	client1.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: req2}
 	<-client1.ResponseCh
 
+	// The execution removes both crossing orders. Funding needs a true
+	// contemporaneous midpoint, so replenish a two-sided book explicitly;
+	// it must not use the previous trade as an unnamed mark fallback.
+	client1.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{RequestID: 3, Side: Buy, Type: LimitOrder, Price: PriceUSD(49900, DOLLAR_TICK), Qty: BTC_PRECISION, Symbol: "BTC-PERP"}}
+	<-client1.ResponseCh
+	client2.RequestCh <- Request{Type: ReqPlaceOrder, OrderReq: &OrderRequest{RequestID: 4, Side: Sell, Type: LimitOrder, Price: PriceUSD(50100, DOLLAR_TICK), Qty: BTC_PRECISION, Symbol: "BTC-PERP"}}
+	<-client2.ResponseCh
+
 	time.Sleep(10 * time.Millisecond)
 
 	// Start automation to get funding rates

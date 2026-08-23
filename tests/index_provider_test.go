@@ -11,14 +11,14 @@ func TestStaticPriceOracle(t *testing.T) {
 		"ETH-PERP": 3000 * BTC_PRECISION,
 	})
 
-	if p := oracle.Price("BTC-PERP"); p != 50000*BTC_PRECISION {
+	if p, err := oracle.Price("BTC-PERP"); err != nil || p != 50000*BTC_PRECISION {
 		t.Errorf("expected %d, got %d", 50000*BTC_PRECISION, p)
 	}
-	if p := oracle.Price("ETH-PERP"); p != 3000*BTC_PRECISION {
+	if p, err := oracle.Price("ETH-PERP"); err != nil || p != 3000*BTC_PRECISION {
 		t.Errorf("expected %d, got %d", 3000*BTC_PRECISION, p)
 	}
-	if p := oracle.Price("DOGE-PERP"); p != 0 {
-		t.Errorf("expected 0 for unknown symbol, got %d", p)
+	if p, err := oracle.Price("DOGE-PERP"); err == nil || p != 0 {
+		t.Errorf("unknown symbol = (%d, %v), want unavailable", p, err)
 	}
 }
 
@@ -36,7 +36,7 @@ func TestMidPriceOracle_PerpToSpot(t *testing.T) {
 	spotBook.Asks.AddOrder(&Order{ID: 2, ClientID: 1, Price: 50100 * BTC_PRECISION, Qty: BTC_PRECISION, Side: Sell, Type: LimitOrder, Timestamp: clock.NowUnixNano()})
 
 	expected := int64((49900*BTC_PRECISION + 50100*BTC_PRECISION) / 2)
-	if p := oracle.Price("BTC-PERP"); p != expected {
+	if p, err := oracle.Price("BTC-PERP"); err != nil || p != expected {
 		t.Errorf("expected %d, got %d", expected, p)
 	}
 }
@@ -44,8 +44,8 @@ func TestMidPriceOracle_PerpToSpot(t *testing.T) {
 func TestMidPriceOracle_UnmappedSymbol(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	oracle := NewMidPriceOracle(ex)
-	if p := oracle.Price("BTC-PERP"); p != 0 {
-		t.Errorf("expected 0 for unmapped symbol, got %d", p)
+	if p, err := oracle.Price("BTC-PERP"); err == nil || p != 0 {
+		t.Errorf("unmapped symbol = (%d, %v), want unavailable", p, err)
 	}
 }
 
@@ -53,7 +53,7 @@ func TestMidPriceOracle_MissingBook(t *testing.T) {
 	ex := NewExchange(10, &RealClock{})
 	oracle := NewMidPriceOracle(ex)
 	oracle.MapSymbol("BTC-PERP", "BTC/USD")
-	if p := oracle.Price("BTC-PERP"); p != 0 {
-		t.Errorf("expected 0 for missing book, got %d", p)
+	if p, err := oracle.Price("BTC-PERP"); err == nil || p != 0 {
+		t.Errorf("missing book = (%d, %v), want unavailable", p, err)
 	}
 }

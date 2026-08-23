@@ -1,7 +1,9 @@
 package exchange_test
 
 import (
+	"errors"
 	. "exchange_sim/exchange"
+	etypes "exchange_sim/types"
 	"testing"
 	"time"
 )
@@ -95,8 +97,8 @@ func TestValidateCrossMarginCollateral_ZeroBorrowAssetPrice(t *testing.T) {
 	ctx := BorrowContext{Client: client, ClientID: 1}
 
 	err := bm.BorrowMargin(ctx, "USD", USDAmount(1_000), "test")
-	if err == nil || err.Error() != "price unavailable" {
-		t.Errorf("expected 'price unavailable', got %v", err)
+	if !errors.Is(err, etypes.ErrNoPrice) {
+		t.Errorf("expected ErrNoPrice, got %v", err)
 	}
 }
 
@@ -187,9 +189,9 @@ func TestCalculateCollateralUsed_ZeroFactor(t *testing.T) {
 		PriceSource:       oracle,
 		CollateralFactors: map[string]float64{"USD": 0.0, "default": 0.0},
 	})
-	result := bm.CalculateCollateralUsed("USD", USDAmount(1_000))
-	if result != 0 {
-		t.Errorf("expected 0 for zero factor, got %d", result)
+	result, err := bm.CalculateCollateralUsed("USD", USDAmount(1_000))
+	if err == nil || result != 0 {
+		t.Errorf("zero collateral factor = (%d, %v), want error", result, err)
 	}
 }
 

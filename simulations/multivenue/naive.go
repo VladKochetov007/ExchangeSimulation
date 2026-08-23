@@ -135,10 +135,13 @@ func (m *FixedDistanceMaker) onTick(time.Time) {
 		m.subscribed = true
 		return
 	}
-	if m.bestBid <= 0 || m.bestAsk <= 0 || len(m.pending) != 0 {
+	if len(m.pending) != 0 {
 		return
 	}
-	mid := (m.bestBid + m.bestAsk) / 2
+	mid, available := twoSidedMidpoint(m.bestBid, m.bestAsk)
+	if !available || m.bestAsk == m.bestBid {
+		return
+	}
 	// A maker that has been filled has no quote on that side, and waiting for
 	// the mid to move before replacing it leaves the book one-sided for as
 	// long as the market is calm — which is exactly when nothing will move the
@@ -272,10 +275,13 @@ func (m *ImbalanceMaker) onImbalanceTick(time.Time) {
 		m.subscribed = true
 		return
 	}
-	if m.bestBid <= 0 || m.bestAsk <= 0 || len(m.pending) != 0 {
+	if len(m.pending) != 0 {
 		return
 	}
-	mid := (m.bestBid + m.bestAsk) / 2
+	mid, available := twoSidedMidpoint(m.bestBid, m.bestAsk)
+	if !available || m.bestAsk == m.bestBid {
+		return
+	}
 	if m.quotesIntact(mid) && m.quotedMid > 0 && abs64(mid-m.quotedMid)*10000 < m.cfg.RequoteBps*m.quotedMid {
 		return
 	}

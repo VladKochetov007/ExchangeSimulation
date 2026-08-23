@@ -60,9 +60,15 @@ func TestRegressionEstimateLiquidationPriceNetsBorrowedDebt(t *testing.T) {
 		t.Fatal("position not opened")
 	}
 
-	liqWithoutLoan := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION)
+	liqWithoutLoan, err := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION)
+	if err != nil {
+		t.Fatalf("EstimateLiquidationPrice: %v", err)
+	}
 	injectBorrowing(ex, 1, "USD", USDAmount(2_000))
-	liqWithLoan := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION)
+	liqWithLoan, err := ex.EstimateLiquidationPrice(pos, 1, perp, BTC_PRECISION)
+	if err != nil {
+		t.Fatalf("EstimateLiquidationPrice after loan: %v", err)
+	}
 
 	if liqWithLoan != liqWithoutLoan {
 		t.Fatalf("equity-neutral loan moved liquidation price %d -> %d: borrowed cash counted as collateral",

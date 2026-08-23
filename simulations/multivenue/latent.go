@@ -167,7 +167,9 @@ func (l *LatentLiquidity) onTick(time.Time) {
 	if l.bid <= 0 || l.ask <= 0 {
 		return
 	}
-	mid := float64(l.bid+l.ask) / 2
+	// Convert before adding so an otherwise valid high int64 quote pair cannot
+	// overflow in integer arithmetic while forming this actor's local mid.
+	mid := (float64(l.bid) + float64(l.ask)) / 2
 	l.evolve(mid)
 	l.deposit(mid)
 	if l.cfg.RevealBps > 0 {

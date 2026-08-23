@@ -56,14 +56,14 @@ func NewShrunkBasisMarkPrice(symbol string, index etypes.PriceSource, maSamples,
 	}
 }
 
-func (c *ShrunkBasisMarkPrice) Calculate(book *ebook.OrderBook) int64 {
-	indexPrice := c.index.Price(c.symbol)
-	if indexPrice == 0 {
-		return book.GetMidPrice()
+func (c *ShrunkBasisMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
+	indexPrice, err := sourcePrice(c.index, c.symbol)
+	if err != nil {
+		return 0, err
 	}
-	perpMid := book.GetMidPrice()
-	if perpMid == 0 {
-		return indexPrice
+	perpMid, err := book.GetMidPrice()
+	if err != nil {
+		return indexPrice, nil
 	}
 	basis := perpMid - indexPrice
 
@@ -112,7 +112,7 @@ func (c *ShrunkBasisMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 		}
 	}
 
-	return indexPrice + maBasis*shrink/10000
+	return indexPrice + maBasis*shrink/10000, nil
 }
 
 // BinanceMedianMarkPrice is Binance's documented mark:
@@ -154,19 +154,20 @@ func NewBinanceMedianMarkPrice(symbol string, index etypes.PriceSource, clock et
 	}
 }
 
-func (c *BinanceMedianMarkPrice) Calculate(book *ebook.OrderBook) int64 {
-	indexPrice := c.index.Price(c.symbol)
-	if indexPrice == 0 {
+func (c *BinanceMedianMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
+	indexPrice, indexErr := sourcePrice(c.index, c.symbol)
+	if indexErr != nil {
 		// Last Price Protected: no stable index reference, fall back to the
-		// contract's own trace.
-		if last := book.GetLastPrice(); last != 0 {
-			return last
+		// contract's own last trade only.
+		last, lastErr := book.GetLastPrice()
+		if lastErr == nil {
+			return last, nil
 		}
-		return book.GetMidPrice()
+		return 0, indexErr
 	}
 
 	c.mu.Lock()
-	if perpMid := book.GetMidPrice(); perpMid != 0 {
+	if perpMid, err := book.GetMidPrice(); err == nil {
 		c.basisWindow[c.pos] = perpMid - indexPrice
 		c.pos = (c.pos + 1) % len(c.basisWindow)
 		if c.size < len(c.basisWindow) {
@@ -197,11 +198,11 @@ func (c *BinanceMedianMarkPrice) Calculate(book *ebook.OrderBook) int64 {
 		}
 	}
 
-	lastTrade := book.GetLastPrice()
-	if lastTrade == 0 {
+	lastTrade, err := book.GetLastPrice()
+	if err != nil {
 		// Documented fallback: median collapses to P2 when the contract has
 		// no trade print, not to min/max of the remaining pair.
-		return price2
+		return price2, nil
 	}
-	return median3(price1, price2, lastTrade)
+	return median3(price1, price2, lastTrade), nil
 }

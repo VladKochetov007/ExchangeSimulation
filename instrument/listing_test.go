@@ -2,12 +2,19 @@ package instrument
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
 type listingPriceSource map[string]int64
 
-func (p listingPriceSource) Price(symbol string) (int64, error) { return p[symbol], nil }
+func (p listingPriceSource) Price(symbol string) (int64, error) {
+	price, ok := p[symbol]
+	if !ok || price <= 0 {
+		return 0, fmt.Errorf("listing price for %s unavailable", symbol)
+	}
+	return price, nil
+}
 
 func TestOptionChainListerCapsDistinctStrikesPerExpiry(t *testing.T) {
 	lister := &OptionChainLister{

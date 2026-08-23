@@ -105,6 +105,8 @@ const (
 	RejectInvalidQty          RejectReason = "INVALID_QTY"
 	RejectUnknownClient       RejectReason = "UNKNOWN_CLIENT"
 	RejectUnknownInstrument   RejectReason = "UNKNOWN_INSTRUMENT"
+	RejectInstrumentExpired   RejectReason = "INSTRUMENT_EXPIRED"
+	RejectPriceUnavailable    RejectReason = "PRICE_UNAVAILABLE"
 	RejectSelfTrade           RejectReason = "SELF_TRADE"
 	RejectDuplicateOrderID    RejectReason = "DUPLICATE_ORDER_ID"
 	RejectOrderNotFound       RejectReason = "ORDER_NOT_FOUND"

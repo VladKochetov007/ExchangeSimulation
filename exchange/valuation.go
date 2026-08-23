@@ -53,9 +53,9 @@ func (e *DefaultExchange) MarkedAccount(clientID uint64, spec etypes.AccountValu
 		if book == nil {
 			return etypes.MarkedAccountSnapshot{}, fmt.Errorf("exchange: marked position %s has no live book", pos.Symbol)
 		}
-		mark, ok := riskMark(book.Instrument, book)
-		if !ok {
-			return etypes.MarkedAccountSnapshot{}, fmt.Errorf("exchange: marked position %s has no valid risk mark", pos.Symbol)
+		mark, err := riskMark(book.Instrument, book)
+		if err != nil {
+			return etypes.MarkedAccountSnapshot{}, fmt.Errorf("exchange: marked position %s: %w", pos.Symbol, err)
 		}
 		unrealized, ok := tryPositionUPnL(&pos, mark, book.Instrument.BasePrecision())
 		if !ok {
@@ -101,7 +101,7 @@ func (e *DefaultExchange) MarkedAccount(clientID uint64, spec etypes.AccountValu
 			PositionSide:   pos.PositionSide,
 			Size:           pos.Size,
 			EntryPrice:     pos.EntryPrice,
-			MarkPrice:      mark,
+			MarkPrice:      &mark,
 			UnrealizedPnL:  unrealized,
 			MarginType:     client.MarginMode,
 			IsolatedMargin: pos.Margin,
@@ -223,26 +223,37 @@ func valueInReport(amount int64, asset string, spec etypes.AccountValuationSpec)
 // marginer (currently options) has its own risk mark; perps and dated futures
 // use their stored funding mark, falling back to a live reference only before
 // the first mark update. Unsupported derivative types fail closed.
-func riskMark(inst Instrument, book *OrderBook) (int64, bool) {
+func riskMark(inst Instrument, book *OrderBook) (int64, error) {
 	// An initialized out-of-the-money option can have a zero premium. Its
 	// atomic underlying mark distinguishes that valid zero from an option that
 	// has not yet received its first derivative mark update.
 	if option, ok := inst.(*EuropeanOption); ok {
 		mark := option.PositionMark()
-		return mark, option.UnderlyingMark() > 0 && mark >= 0
+		if option.UnderlyingMark() <= 0 || mark < 0 {
+			return 0, fmt.Errorf("option risk mark: %w", ErrNoBookPrice)
+		}
+		return mark, nil
 	}
 	if pm, ok := inst.(PositionMarginer); ok {
 		mark := pm.PositionMark()
-		return mark, mark > 0
+		if mark <= 0 {
+			return 0, fmt.Errorf("position risk mark: %w", ErrNoBookPrice)
+		}
+		return mark, nil
 	}
 	if perp := marginCore(inst); perp != nil {
-		mark := perp.GetFundingRate().MarkPrice
-		if mark == 0 {
-			mark = marketRefPrice(book)
+		fundingRate := perp.GetFundingRate()
+		mark := fundingRate.MarkPrice
+		if fundingRate.MarkAvailable && mark > 0 {
+			return mark, nil
 		}
-		return mark, mark > 0
+		mark, err := liveBookReferencePrice(book)
+		if err != nil {
+			return 0, fmt.Errorf("perp risk mark: %w", err)
+		}
+		return mark, nil
 	}
-	return 0, false
+	return 0, fmt.Errorf("risk mark for %s: %w", inst.Symbol(), ErrNoBookPrice)
 }
 
 func positionMaintenanceAtMark(inst Instrument, size, mark int64) (int64, bool) {

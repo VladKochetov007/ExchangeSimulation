@@ -116,6 +116,30 @@ type MarkPriceUpdateEvent struct {
 	IndexPrice int64  `json:"index_price"`
 }
 
+// PriceUnavailableEvent records an explicitly deferred internal operation.
+// It is deliberately separate from a numeric price event: a missing reference
+// must not look like a price of zero in scientific evidence or in an actor's
+// reconstruction of venue state.
+type PriceUnavailableEvent struct {
+	Timestamp int64  `json:"timestamp"`
+	Symbol    string `json:"symbol"`
+	Operation string `json:"operation"`
+	Reason    string `json:"reason"`
+}
+
+// ExpirySettlementPendingEvent records a contract that reached expiry but is
+// still waiting on its declared reference price. It has no settlement-price
+// field by design: price absence is a lifecycle state, never numeric zero.
+type ExpirySettlementPendingEvent struct {
+	Timestamp       int64  `json:"timestamp"`
+	Symbol          string `json:"symbol"`
+	State           string `json:"state"`
+	Policy          string `json:"policy"`
+	Attempts        uint64 `json:"attempts"`
+	ExpiryReachedAt int64  `json:"expiry_reached_at"`
+	Reason          string `json:"reason"`
+}
+
 // FundingRateUpdateEvent logs funding rate changes for perpetual futures
 type FundingRateUpdateEvent struct {
 	Timestamp   int64  `json:"timestamp"`

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	einstrument "exchange_sim/instrument"
@@ -14,11 +15,10 @@ import (
 
 // Expirable and related aliases live in exchange/types.go.
 
-// priceSourceFunc adapts a closure to the PriceSource interface for
-// ListingPolicy calls.
-type priceSourceFunc func(symbol string) int64
+// priceSourceFunc adapts a closure to the error-aware PriceSource interface.
+type priceSourceFunc func(symbol string) (int64, error)
 
-func (f priceSourceFunc) Price(symbol string) int64 { return f(symbol) }
+func (f priceSourceFunc) Price(symbol string) (int64, error) { return f(symbol) }
 
 type listingPriceSourceFunc func(symbol string) (int64, error)
 
@@ -27,7 +27,63 @@ func (f listingPriceSourceFunc) Price(symbol string) (int64, error) { return f(s
 // ErrNoBookPrice means no contemporaneous, two-sided executable midpoint is
 // available. It deliberately includes unknown, empty, one-sided, and crossed
 // books: none establishes a usable midpoint.
-var ErrNoBookPrice = errors.New("no usable book price")
+var ErrNoBookPrice = etypes.ErrNoPrice
+
+// expiryLifecycleState names the contractual lifecycle rather than deriving it
+// from whether a price happened to be available on one particular automation
+// tick. ACTIVE is a live instrument before expiry; EXPIRY_REACHED immediately
+// disables trading; SETTLEMENT_PENDING is a permanently halted contract with
+// no declared settlement price; SETTLED is emitted as the terminal lifecycle
+// announcement when the instrument is delisted.
+//
+// The default terminal-unavailable policy is intentionally RETRY_FOREVER:
+// leave collateral and positions intact, keep trading/funding/marks stopped,
+// and retry only the declared source at ordinary expiry checks. There is no
+// automatic last-trade or zero-price fallback. A future terminal fallback
+// would need its own explicit instrument policy rather than changing this
+// state machine implicitly.
+type expiryLifecycleState string
+
+const (
+	expiryStateActive             expiryLifecycleState = "ACTIVE"
+	expiryStateExpiryReached      expiryLifecycleState = "EXPIRY_REACHED"
+	expiryStateSettlementPending  expiryLifecycleState = "SETTLEMENT_PENDING"
+	expiryStateSettled            expiryLifecycleState = "SETTLED"
+	expiryUnavailableRetryForever                      = "RETRY_FOREVER"
+)
+
+// expirySettlementPending is retained under DefaultExchange.mu for as long
+// as an expired contract lacks a declared reference. Attempts is evidence of
+// retry behavior, not an economic counter: no settlement ledger work happens
+// until SettlementPrice succeeds.
+type expirySettlementPending struct {
+	State           expiryLifecycleState
+	ExpiryReachedAt int64
+	Attempts        uint64
+	LastReason      string
+	Policy          string
+}
+
+// reportPriceUnavailable makes an intentional periodic deferral observable.
+// It only serializes already-computed state: no scheduler work, actor-visible
+// state, or random draw is introduced by this diagnostic.
+func (e *DefaultExchange) reportPriceUnavailable(now int64, symbol, operation string, err error) {
+	if err == nil {
+		return
+	}
+	log := e.getLogger(symbol)
+	if log == nil && symbol != "_global" {
+		log = e.getLogger("_global")
+	}
+	if log != nil {
+		log.LogEvent(now, 0, "price_unavailable", PriceUnavailableEvent{
+			Timestamp: now,
+			Symbol:    symbol,
+			Operation: operation,
+			Reason:    err.Error(),
+		})
+	}
+}
 
 // bookMidPrice returns a contemporaneous midpoint of both executable sides.
 // The error makes absence explicit; callers must defer, reject, or use an
@@ -87,14 +143,46 @@ func (e *DefaultExchange) bookReferencePriceLocked(symbol string) (int64, error)
 }
 
 // configuredIndexPrice uses the declared external reference only when it
-// supplies a positive price. The PriceSource interface predates explicit
-// absence errors, so adapt it once at this boundary rather than propagate its
-// zero sentinel into a mark or settlement calculation.
+// supplies a positive price.
 func (e *DefaultExchange) configuredIndexPrice(symbol string) (int64, error) {
 	if e.indexProvider == nil {
 		return 0, fmt.Errorf("%w: no configured index for %s", ErrNoBookPrice, symbol)
 	}
-	price := e.indexProvider.Price(symbol)
+	price, err := e.indexProvider.Price(symbol)
+	if err != nil {
+		return 0, fmt.Errorf("configured index for %s: %w", symbol, err)
+	}
+	if price <= 0 {
+		return 0, fmt.Errorf("%w: configured index unavailable for %s", ErrNoBookPrice, symbol)
+	}
+	return price, nil
+}
+
+// configuredIndexPriceLocked is configuredIndexPrice for indexPriceLocked.
+// MidPriceOracle normally takes the provider's read lock, which is correct for
+// public callers but re-enters e.mu here. Once a writer queues, nested RLock
+// would deadlock; its explicit lock-held path instead reads the already-locked
+// book. Other providers retain their normal Price contract.
+func (e *DefaultExchange) configuredIndexPriceLocked(symbol string) (int64, error) {
+	if e.indexProvider == nil {
+		return 0, fmt.Errorf("%w: no configured index for %s", ErrNoBookPrice, symbol)
+	}
+	type lockedPriceSource interface {
+		PriceWithProviderLockHeld(symbol string) (int64, error)
+	}
+	source := e.indexProvider
+	var (
+		price int64
+		err   error
+	)
+	if locked, ok := source.(lockedPriceSource); ok {
+		price, err = locked.PriceWithProviderLockHeld(symbol)
+	} else {
+		price, err = source.Price(symbol)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("configured index for %s: %w", symbol, err)
+	}
 	if price <= 0 {
 		return 0, fmt.Errorf("%w: configured index unavailable for %s", ErrNoBookPrice, symbol)
 	}
@@ -163,6 +251,7 @@ func (e *DefaultExchange) CheckListings() {
 		if err != nil {
 			if errors.Is(err, ErrNoBookPrice) {
 				// No valid underlying midpoint: defer this automatic listing.
+				e.reportPriceUnavailable(now, etypes.InstrumentFeedSymbol, "listing", err)
 				continue
 			}
 			panic(fmt.Sprintf("exchange: listing policy: %v", err))
@@ -191,23 +280,39 @@ func (e *DefaultExchange) CheckListings() {
 func (e *DefaultExchange) UpdateDerivativeMarks() {
 	now := e.Clock.NowUnixNano()
 
+	type expirableData struct {
+		inst    Instrument
+		pending bool
+	}
 	e.mu.RLock()
-	expirables := make([]Instrument, 0)
-	for _, inst := range e.Instruments {
+	expirables := make([]expirableData, 0)
+	for symbol, inst := range e.Instruments {
 		if _, ok := inst.(Expirable); ok {
-			expirables = append(expirables, inst)
+			_, pending := e.settlementPending[symbol]
+			expirables = append(expirables, expirableData{inst: inst, pending: pending})
 		}
 	}
 	e.mu.RUnlock()
+	slices.SortFunc(expirables, func(a, b expirableData) int {
+		return strings.Compare(a.inst.Symbol(), b.inst.Symbol())
+	})
 
-	for _, inst := range expirables {
+	for _, data := range expirables {
+		inst := data.inst
 		underlyingPrice, err := e.derivativeUnderlyingPrice(inst)
 		if err != nil {
 			// No valid underlying reference: defer settlement sampling and option
 			// marks rather than inventing a zero price.
+			e.reportPriceUnavailable(now, inst.Symbol(), "derivative_mark", err)
 			continue
 		}
 		inst.(Expirable).ObserveSettlement(underlyingPrice, now)
+		if data.pending {
+			// A pending contract must keep sampling its declared settlement
+			// source so that a later recovery can settle it. It is nevertheless
+			// permanently halted: no post-expiry option mark is published.
+			continue
+		}
 
 		if opt, ok := inst.(*einstrument.EuropeanOption); ok {
 			yearsLeft := float64(opt.ExpiryNano()-now) / float64(365*24*time.Hour)
@@ -232,8 +337,9 @@ func (e *DefaultExchange) publishIndexFeeds(now int64) {
 		return
 	}
 	for _, symbol := range e.indexFeedSymbols {
-		price := e.indexFeedProvider.Price(symbol)
-		if price <= 0 {
+		price, err := e.indexFeedProvider.Price(symbol)
+		if err != nil {
+			e.reportPriceUnavailable(now, symbol, "index_feed", fmt.Errorf("index feed: %w", err))
 			continue
 		}
 		e.MDPublisher.Publish(symbol, MDIndex, &IndexPrice{Symbol: symbol, Price: price, Timestamp: now}, now)
@@ -246,9 +352,13 @@ func (e *DefaultExchange) CheckExpiries() {
 
 	e.mu.RLock()
 	var expired []string
+	var firstExpiry []string
 	for symbol, inst := range e.Instruments {
 		if exp, ok := inst.(Expirable); ok && now >= exp.ExpiryNano() {
 			expired = append(expired, symbol)
+			if _, pending := e.settlementPending[symbol]; !pending {
+				firstExpiry = append(firstExpiry, symbol)
+			}
 		}
 	}
 	e.mu.RUnlock()
@@ -256,7 +366,7 @@ func (e *DefaultExchange) CheckExpiries() {
 	// Settlement cancels orders and emits events, so map iteration here would
 	// make same-timestamp expiries observably nondeterministic.
 	slices.Sort(expired)
-	if len(expired) > 0 && e.preExpiryHook != nil {
+	if len(firstExpiry) > 0 && e.preExpiryHook != nil {
 		// This is deliberately outside e.mu: a strict account snapshot acquires
 		// the read lock and must observe the fully marked, still-listed board.
 		// The hook contract is read-only, so no exchange state changes between
@@ -293,7 +403,43 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 	}
 	inst := book.Instrument
 	exp := inst.(Expirable)
-	settlementPrice := exp.SettlementPrice()
+	settlementPrice, err := exp.SettlementPrice()
+	if err != nil {
+		// Contractual expiry blocks new risk immediately. Cancel any resting
+		// orders once and retain positions until a declared settlement source
+		// becomes available; allowing a post-expiry fill would be worse than a
+		// visible lifecycle deferral.
+		pending, alreadyPending := e.settlementPending[symbol]
+		if !alreadyPending {
+			pending = expirySettlementPending{
+				State:           expiryStateSettlementPending,
+				ExpiryReachedAt: now,
+				Policy:          expiryUnavailableRetryForever,
+			}
+			clientIDs := make([]uint64, 0, len(e.Clients))
+			for clientID := range e.Clients {
+				clientIDs = append(clientIDs, clientID)
+			}
+			slices.Sort(clientIDs)
+			for _, clientID := range clientIDs {
+				e.cancelClientOrdersOnBook(e.Clients[clientID], book, inst)
+			}
+		}
+		pending.Attempts++
+		pending.LastReason = err.Error()
+		e.settlementPending[symbol] = pending
+		log := e.getLogger(symbol)
+		e.mu.Unlock()
+		e.reportPriceUnavailable(now, symbol, "expiry_settlement", fmt.Errorf("expiry settlement: %w", err))
+		if log != nil {
+			log.LogEvent(now, 0, "expiry_settlement_pending", ExpirySettlementPendingEvent{
+				Timestamp: now, Symbol: symbol, State: string(expiryStateSettlementPending),
+				Policy: pending.Policy, Attempts: pending.Attempts,
+				ExpiryReachedAt: pending.ExpiryReachedAt, Reason: pending.LastReason,
+			})
+		}
+		return
+	}
 	quote := inst.QuoteAsset()
 	precision := inst.BasePrecision()
 
@@ -345,19 +491,8 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 			client.ReleasePerp(quote, release)
 		}
 
-		// A contract whose underlying never printed has no settlement price;
-		// closing flat (zero cash, zero fee) beats settling futures at 0 —
-		// which would debit longs their entire entry notional — or paying
-		// puts the full strike.
-		var cash, fee int64
-		if settlementPrice > 0 {
-			cash = exp.ExpiryCashFlow(pos.Size, pos.EntryPrice, settlementPrice, precision)
-			fee = exp.DeliveryFee(pos.Size, settlementPrice, precision)
-		} else if log != nil {
-			log.LogEvent(now, ep.clientID, "settlement_price_unavailable", map[string]any{
-				"symbol": symbol, "size": pos.Size, "entry_price": pos.EntryPrice,
-			})
-		}
+		cash := exp.ExpiryCashFlow(pos.Size, pos.EntryPrice, settlementPrice, precision)
+		fee := exp.DeliveryFee(pos.Size, settlementPrice, precision)
 		oldBal := client.PerpBalances[quote]
 		client.PerpBalances[quote] += cash - fee
 		feeTotal += fee
@@ -387,6 +522,7 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 
 	delete(e.Books, symbol)
 	delete(e.Instruments, symbol)
+	delete(e.settlementPending, symbol)
 	// The AUTO-anchored mark calculator dies with the instrument: the map is
 	// keyed by symbol, and a relisting under the same symbol must seed a
 	// FRESH basis EMA — inheriting the dead contract's seeded state marks

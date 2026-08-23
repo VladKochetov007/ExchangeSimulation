@@ -1,8 +1,11 @@
 package multivenue
 
 import (
+	"fmt"
 	"sort"
 	"sync"
+
+	etypes "exchange_sim/types"
 )
 
 // spotIndexProvider publishes the reference price a venue advertises on its
@@ -48,14 +51,14 @@ func (p *spotIndexProvider) observeVenueMid(symbol, venueID string, mid int64) {
 	p.mu.Unlock()
 }
 
-// Price returns the published index for a symbol, or zero when the venue should
-// publish nothing.
-func (p *spotIndexProvider) Price(symbol string) int64 {
+// Price returns the published index for a symbol. Unpublished symbols and a
+// consensus with no observations are explicitly unavailable.
+func (p *spotIndexProvider) Price(symbol string) (int64, error) {
 	if p == nil {
-		return 0
+		return 0, fmt.Errorf("spot index provider is nil: %w", etypes.ErrNoPrice)
 	}
 	if _, published := p.symbols[symbol]; !published {
-		return 0
+		return 0, fmt.Errorf("spot index does not publish %s: %w", symbol, etypes.ErrNoPrice)
 	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -68,12 +71,12 @@ func (p *spotIndexProvider) Price(symbol string) int64 {
 			}
 		}
 		if len(mids) == 0 {
-			return 0
+			return 0, fmt.Errorf("spot index has no observations for %s: %w", symbol, etypes.ErrNoPrice)
 		}
 		// Median rather than mean: one venue that has run away should not drag
 		// the reference the others are quoting around.
 		sort.Slice(mids, func(i, j int) bool { return mids[i] < mids[j] })
-		return mids[len(mids)/2]
+		return mids[len(mids)/2], nil
 	}
-	return 0
+	return 0, fmt.Errorf("unknown spot-index mode %q: %w", p.mode, etypes.ErrNoPrice)
 }

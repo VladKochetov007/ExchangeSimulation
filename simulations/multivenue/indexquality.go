@@ -1,9 +1,12 @@
 package multivenue
 
 import (
+	"fmt"
 	"hash/fnv"
 	"math"
 	"math/rand"
+
+	etypes "exchange_sim/types"
 )
 
 // DegradedIndexConfig makes a venue's published index an imperfect observation.
@@ -37,7 +40,7 @@ type degradedIndex struct {
 
 // PriceSource is the venue-side reference-price interface this file decorates.
 type PriceSource interface {
-	Price(symbol string) int64
+	Price(symbol string) (int64, error)
 }
 
 func newDegradedIndex(source PriceSource, cfg DegradedIndexConfig) *degradedIndex {
@@ -49,10 +52,16 @@ func newDegradedIndex(source PriceSource, cfg DegradedIndexConfig) *degradedInde
 	}
 }
 
-func (d *degradedIndex) Price(symbol string) int64 {
-	value := d.source.Price(symbol)
+func (d *degradedIndex) Price(symbol string) (int64, error) {
+	if d == nil || d.source == nil {
+		return 0, fmt.Errorf("degraded index source for %s: %w", symbol, etypes.ErrNoPrice)
+	}
+	value, err := d.source.Price(symbol)
+	if err != nil {
+		return 0, fmt.Errorf("degraded index source for %s: %w", symbol, err)
+	}
 	if value <= 0 {
-		return value
+		return 0, fmt.Errorf("degraded index source for %s returned non-positive price: %w", symbol, etypes.ErrNoPrice)
 	}
 	if d.cfg.LagSamples > 0 {
 		history := append(d.history[symbol], value)
@@ -74,7 +83,7 @@ func (d *degradedIndex) Price(symbol string) int64 {
 		}
 		value = int64(math.Round(perturbed))
 	}
-	return value
+	return value, nil
 }
 
 func symbolSeed(symbol string) int64 {

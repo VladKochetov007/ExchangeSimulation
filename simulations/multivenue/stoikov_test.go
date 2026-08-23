@@ -165,11 +165,11 @@ func TestRemoteReferenceExpiresByPublicationAge(t *testing.T) {
 		localReference: local, remoteReference: remote,
 		remoteWeight: 0.5, remoteConfidence: 0.8, remoteMaxAge: time.Second,
 	}
-	if got := mm.referencePriceAt(published.Add(time.Second)); got != 140 {
+	if got, ok := mm.referencePriceAt(published.Add(time.Second)); !ok || got != 140 {
 		t.Fatalf("fresh weighted remote composite = %d, want 140", got)
 	}
-	if got := mm.referencePriceAt(published.Add(time.Second + time.Nanosecond)); got != 0 {
-		t.Fatalf("expired remote composite = %d, want no usable reference", got)
+	if got, ok := mm.referencePriceAt(published.Add(time.Second + time.Nanosecond)); ok || got != 0 {
+		t.Fatalf("expired remote composite = (%d, %v), want unavailable", got, ok)
 	}
 }
 
@@ -307,7 +307,11 @@ func TestPartialAnchoringAmplifiesInventorySkew(t *testing.T) {
 		// midpoint becomes the book midpoint the reference blends in.
 		mm.forward = index
 		for range 500 {
-			reference := float64(mm.referencePrice())
+			referencePrice, ok := mm.referencePrice()
+			if !ok {
+				t.Fatal("maker lost its configured reference")
+			}
+			reference := float64(referencePrice)
 			mm.forward = int64(reference * (1 + testCase.inventoryFactor*skewBps/10_000))
 		}
 

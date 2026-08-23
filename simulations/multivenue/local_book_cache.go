@@ -37,6 +37,18 @@ type LocalBookView struct {
 	Updates     uint64
 }
 
+// twoSidedMidpoint is the only midpoint arithmetic used by participant-side
+// book views. Valid exchange prices are positive and uncrossed, so ask-bid is
+// non-negative and bounded by MaxInt64-1; this avoids the overflow possible
+// in (bid+ask)/2. Its boolean is the availability boundary: callers must not
+// interpret the zero result when it is false as a market price.
+func twoSidedMidpoint(bid, ask int64) (int64, bool) {
+	if bid <= 0 || ask <= 0 || bid > ask {
+		return 0, false
+	}
+	return bid + (ask-bid)/2, true
+}
+
 func NewLocalBookCache(sourceVenue, symbol string) *LocalBookCache {
 	return &LocalBookCache{sourceVenue: sourceVenue, symbol: symbol}
 }
@@ -99,7 +111,7 @@ func (c *LocalBookCache) Mid() (int64, bool) {
 	if !ok {
 		return 0, false
 	}
-	return view.Bid + (view.Ask-view.Bid)/2, true
+	return twoSidedMidpoint(view.Bid, view.Ask)
 }
 
 func (c *LocalBookCache) RejectedStale() uint64 {

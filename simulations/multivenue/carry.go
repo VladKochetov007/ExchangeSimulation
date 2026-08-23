@@ -62,12 +62,7 @@ type CarryArbitrageur struct {
 
 type bookTouch struct{ bid, ask, bidQty, askQty int64 }
 
-func (b bookTouch) mid() int64 {
-	if b.bid <= 0 || b.ask <= 0 {
-		return 0
-	}
-	return (b.bid + b.ask) / 2
-}
+func (b bookTouch) mid() (int64, bool) { return twoSidedMidpoint(b.bid, b.ask) }
 
 func NewCarryArbitrageur(id uint64, gw actor.Gateway, cfg CarryArbitrageurConfig) *CarryArbitrageur {
 	c := &CarryArbitrageur{BaseActor: actor.NewBaseActor(id, gw), cfg: cfg}
@@ -169,8 +164,9 @@ func (c *CarryArbitrageur) HandleEvent(_ context.Context, evt *actor.Event) {
 // targetCarry is the spot leg the participant wants. A positive value means
 // long spot and short perpetual, which is the trade when the perpetual is rich.
 func (c *CarryArbitrageur) targetCarry() int64 {
-	spotMid, perpMid := c.spot.mid(), c.perp.mid()
-	if spotMid <= 0 || perpMid <= 0 {
+	spotMid, spotAvailable := c.spot.mid()
+	perpMid, perpAvailable := c.perp.mid()
+	if !spotAvailable || !perpAvailable {
 		return c.spotPos
 	}
 	entry, entryOK := etypes.TryMulBps(spotMid, c.cfg.EntryBps)
@@ -212,8 +208,10 @@ func (c *CarryArbitrageur) onTick(time.Time) {
 	if gap := c.targetCarry() - c.spotPos; gap != 0 {
 		// Record the basis being entered on, so a fall in results can be
 		// attributed either to fewer opportunities or to thinner ones.
-		if spotMid, perpMid := c.spot.mid(), c.perp.mid(); spotMid > 0 && perpMid > 0 {
-			c.entryBasis = append(c.entryBasis, 1e4*float64(perpMid-spotMid)/float64(spotMid))
+		if spotMid, spotAvailable := c.spot.mid(); spotAvailable {
+			if perpMid, perpAvailable := c.perp.mid(); perpAvailable {
+				c.entryBasis = append(c.entryBasis, 1e4*float64(perpMid-spotMid)/float64(spotMid))
+			}
 		}
 		c.tradeSpot(gap)
 	}

@@ -289,7 +289,11 @@ func TestPerpetualCurrentlyMirrorsSpot(t *testing.T) {
 	for _, venue := range sim.Venues {
 		for _, arb := range venue.CarryArbs {
 			attempts += arb.attempts
-			spot, perp := arb.spot.mid(), arb.perp.mid()
+			spot, spotAvailable := arb.spot.mid()
+			perp, perpAvailable := arb.perp.mid()
+			if !spotAvailable || !perpAvailable {
+				continue
+			}
 			if spot <= 0 || perp <= 0 {
 				continue
 			}

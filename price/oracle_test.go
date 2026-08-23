@@ -13,19 +13,19 @@ type mockBookProvider struct {
 
 func (m *mockBookProvider) GetBook(symbol string) *ebook.OrderBook { return m.books[symbol] }
 
-func TestMidPriceOracle_ReturnsZeroForUnmapped(t *testing.T) {
+func TestMidPriceOracle_ReturnsUnavailableForUnmapped(t *testing.T) {
 	o := NewMidPriceOracle(&mockBookProvider{books: map[string]*ebook.OrderBook{}})
-	if p := o.Price("BTC"); p != 0 {
-		t.Errorf("unmapped symbol: want 0, got %d", p)
+	if _, err := o.Price("BTC"); err == nil {
+		t.Error("unmapped symbol returned a price")
 	}
 }
 
-func TestMidPriceOracle_ReturnsZeroForEmptyBook(t *testing.T) {
+func TestMidPriceOracle_ReturnsUnavailableForEmptyBook(t *testing.T) {
 	ob := &ebook.OrderBook{Bids: ebook.NewBook(etypes.Buy), Asks: ebook.NewBook(etypes.Sell)}
 	o := NewMidPriceOracle(&mockBookProvider{books: map[string]*ebook.OrderBook{"BTC/USD": ob}})
 	o.MapSymbol("BTC", "BTC/USD")
-	if p := o.Price("BTC"); p != 0 {
-		t.Errorf("empty book: want 0, got %d", p)
+	if _, err := o.Price("BTC"); err == nil {
+		t.Error("empty book returned a price")
 	}
 }
 
@@ -35,7 +35,7 @@ func TestMidPriceOracle_ReturnsMidPrice(t *testing.T) {
 	ob.Asks.AddOrder(&etypes.Order{ID: 2, ClientID: 1, Price: 51000, Qty: 100, Side: etypes.Sell, Type: etypes.LimitOrder})
 	o := NewMidPriceOracle(&mockBookProvider{books: map[string]*ebook.OrderBook{"BTC/USD": ob}})
 	o.MapSymbol("BTC", "BTC/USD")
-	if mid := o.Price("BTC"); mid != (49000+51000)/2 {
+	if mid := mustPrice(t)(o.Price("BTC")); mid != (49000+51000)/2 {
 		t.Errorf("mid price: want %d, got %d", (49000+51000)/2, mid)
 	}
 }

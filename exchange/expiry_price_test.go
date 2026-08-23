@@ -161,14 +161,14 @@ func TestDerivativeMarksDeferEmptyBookAndUseDeclaredReferencePolicy(t *testing.T
 	ex.AddInstrument(future)
 
 	ex.UpdateDerivativeMarks()
-	if got := future.SettlementPrice(); got != 0 {
-		t.Fatalf("empty underlying produced settlement sample %d", got)
+	if got, err := future.SettlementPrice(); !errors.Is(err, ErrNoBookPrice) || got != 0 {
+		t.Fatalf("empty underlying settlement = (%d, %v), want ErrNoBookPrice", got, err)
 	}
 
 	addBookPriceQuote(t, ex, Buy, 100)
 	ex.UpdateDerivativeMarks()
-	if got := future.SettlementPrice(); got != 100 {
-		t.Fatalf("one-sided declared reference was not observed: got %d, want 100", got)
+	if got, err := future.SettlementPrice(); err != nil || got != 100 {
+		t.Fatalf("one-sided declared reference settlement = (%d, %v), want (100, nil)", got, err)
 	}
 }
 
@@ -196,14 +196,135 @@ func TestUpdatePerpPricesDefersUnavailableIndexThenUsesDeclaredReference(t *test
 	ex.ConfigureAutomation(AutomationConfig{})
 
 	ex.UpdatePerpPrices()
-	if got := future.GetFundingRate().MarkPrice; got != 0 {
-		t.Fatalf("unavailable underlying produced mark %d", got)
+	if funding := future.GetFundingRate(); funding.MarkAvailable || funding.IndexAvailable || funding.MarkPrice != 0 || funding.IndexPrice != 0 {
+		t.Fatalf("unavailable underlying funding state = %#v, want unavailable", funding)
 	}
 
 	addBookPriceQuote(t, ex, Buy, 100)
 	ex.UpdatePerpPrices()
 	funding := future.GetFundingRate()
-	if funding.IndexPrice != 100 || funding.MarkPrice != 100 {
+	if !funding.IndexAvailable || !funding.MarkAvailable || funding.IndexPrice != 100 || funding.MarkPrice != 100 {
 		t.Fatalf("one-sided declared reference update = index %d mark %d, want 100/100", funding.IndexPrice, funding.MarkPrice)
+	}
+}
+
+type expiryManualClock struct{ now int64 }
+
+func (c *expiryManualClock) NowUnixNano() int64 { return c.now }
+func (c *expiryManualClock) NowUnix() int64     { return c.now / int64(time.Second) }
+
+func (c *expiryManualClock) Advance(d time.Duration) { c.now += int64(d) }
+
+func TestExpirySettlementPendingRetriesThenSettlesExactlyOnce(t *testing.T) {
+	clock := &expiryManualClock{now: 100}
+	ex := NewExchange(4, clock)
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("ABC/USD", "ABC", "USD", 1, 1, 1, 1))
+	future := NewExpiringFutures("ABC-FUT", "ABC", "USD", 1, 1, 1, 1, clock.now)
+	future.Underlying = "ABC/USD"
+	ex.AddInstrument(future)
+
+	log := &recordingLogger{}
+	global := &recordingLogger{}
+	ex.SetLogger(future.Symbol(), log)
+	ex.SetLogger("_global", global)
+	for _, id := range []uint64{1, 2} {
+		ex.ConnectNewClient(id, nil, &FixedFee{})
+		ex.AddPerpBalance(id, "USD", 1_000)
+	}
+	ex.Positions.UpdatePosition(1, future.Symbol(), 10, 90, Buy, PositionBoth)
+	ex.Positions.UpdatePosition(2, future.Symbol(), 10, 90, Sell, PositionBoth)
+	openingTotal := ex.Clients[1].PerpBalance("USD") + ex.Clients[2].PerpBalance("USD")
+	// Make a visible resting order to prove first expiry halts and cancels the
+	// book even though cash settlement has to wait.
+	resting := &Order{ID: 99, ClientID: 1, Side: Buy, Type: LimitOrder, Price: 90, Qty: 1, Status: Open, Visibility: Normal}
+	if !ex.Books[future.Symbol()].Bids.AddOrder(resting) {
+		t.Fatal("could not seed resting pre-expiry order")
+	}
+	ex.Clients[1].AddOrder(resting.ID)
+
+	ex.CheckExpiries()
+	pending, ok := ex.settlementPending[future.Symbol()]
+	if !ok || pending.State != expiryStateSettlementPending || pending.Attempts != 1 || pending.Policy != expiryUnavailableRetryForever {
+		t.Fatalf("first unavailable expiry state = %#v", pending)
+	}
+	if ex.Instruments[future.Symbol()] == nil || ex.Books[future.Symbol()] == nil {
+		t.Fatal("unavailable settlement delisted the contract")
+	}
+	if ex.Books[future.Symbol()].FindOrder(resting.ID) != nil || resting.Status != Cancelled {
+		t.Fatalf("expiry-pending contract retained resting order: %#v", resting)
+	}
+	if response := ex.PlaceOrder(1, &OrderRequest{RequestID: 1, Symbol: future.Symbol(), Side: Buy, Type: LimitOrder, Price: 90, Qty: 1, TimeInForce: GTC, Visibility: Normal}); response.Success || response.Error != RejectInstrumentExpired {
+		t.Fatalf("post-expiry order = %#v, want instrument-expired rejection", response)
+	}
+	for _, id := range []uint64{1, 2} {
+		if pos := ex.Positions.GetPosition(id, future.Symbol()); pos == nil || pos.Size == 0 {
+			t.Fatalf("client %d position closed while settlement unavailable: %#v", id, pos)
+		}
+	}
+
+	// Multiple deterministic retry intervals do not release collateral,
+	// positions, or the old book; they only make the pending reason/attempt
+	// observable. A dated future has no funding, but its mark state must also
+	// not be refreshed after expiry merely because it awaits settlement.
+	future.GetFundingRate().MarkPrice = 77
+	future.GetFundingRate().MarkAvailable = true
+	for i := 0; i < 2; i++ {
+		clock.Advance(time.Second)
+		ex.UpdatePerpPrices()
+		ex.CheckExpiries()
+	}
+	pending = ex.settlementPending[future.Symbol()]
+	if pending.Attempts != 3 || future.GetFundingRate().MarkPrice != 77 {
+		t.Fatalf("pending retries = %#v mark=%d, want attempts=3 unchanged mark", pending, future.GetFundingRate().MarkPrice)
+	}
+	if total := ex.Clients[1].PerpBalance("USD") + ex.Clients[2].PerpBalance("USD"); total != openingTotal {
+		t.Fatalf("pending settlement changed conservation total: got %d want %d", total, openingTotal)
+	}
+
+	// The declared one-sided derivative reference is permitted. Recovery is
+	// sampled, then the next expiry retry settles exactly once.
+	addBookPriceQuote(t, ex, Buy, 120)
+	ex.UpdateDerivativeMarks()
+	ex.CheckExpiries()
+	if ex.Instruments[future.Symbol()] != nil || ex.Books[future.Symbol()] != nil {
+		t.Fatal("recovered settlement did not delist contract")
+	}
+	for _, id := range []uint64{1, 2} {
+		if pos := ex.Positions.GetPosition(id, future.Symbol()); pos == nil || pos.Size != 0 {
+			t.Fatalf("client %d position after recovery = %#v, want closed", id, pos)
+		}
+	}
+	if total := ex.Clients[1].PerpBalance("USD") + ex.Clients[2].PerpBalance("USD"); total != openingTotal {
+		t.Fatalf("settlement broke conservation total: got %d want %d", total, openingTotal)
+	}
+
+	// A later expiry check cannot settle or release again: the terminal book is
+	// gone and exactly one lifecycle announcement was emitted.
+	clock.Advance(time.Second)
+	ex.CheckExpiries()
+	settled := 0
+	for _, record := range global.records {
+		if record.event == "instrument_settled" {
+			settled++
+		}
+	}
+	if settled != 1 {
+		t.Fatalf("instrument_settled count = %d, want exactly one", settled)
+	}
+	pendingEvents, unavailableEvents := 0, 0
+	for _, record := range log.records {
+		switch record.event {
+		case "expiry_settlement_pending":
+			pendingEvents++
+			if event, ok := record.data.(ExpirySettlementPendingEvent); !ok || event.State != string(expiryStateSettlementPending) || event.Policy != expiryUnavailableRetryForever || event.Reason == "" {
+				t.Fatalf("pending evidence = %#v", record.data)
+			}
+		case "price_unavailable":
+			unavailableEvents++
+		}
+	}
+	if pendingEvents != 3 || unavailableEvents != 3 {
+		t.Fatalf("pending evidence count = pending %d unavailable %d, want 3/3", pendingEvents, unavailableEvents)
 	}
 }

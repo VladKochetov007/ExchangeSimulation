@@ -236,3 +236,8 @@ The interim V2 price contract is recorded in
 true midpoint used for automatic option listing from the explicitly named
 one-sided derivative/index reference policy, and records the residual legacy
 `PriceSource` migration as an unresolved follow-up.
+
+The completed repository-wide ledger is
+[v2-price-api-audit.md](v2-price-api-audit.md). It records the finished
+migration, explicit lifecycle/fee/funding behavior changes, and the remaining
+zero-valued fields that are legitimate quantities rather than sentinels.

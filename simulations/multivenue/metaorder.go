@@ -215,7 +215,10 @@ func (m *MetaorderTrader) onTick(now time.Time) {
 	}
 	timestamp := now.UnixNano()
 	if !m.active {
-		if timestamp < m.nextStartTS || m.bestBid <= 0 || m.bestAsk <= 0 {
+		if timestamp < m.nextStartTS {
+			return
+		}
+		if _, available := twoSidedMidpoint(m.bestBid, m.bestAsk); !available {
 			return
 		}
 		m.begin(timestamp)
@@ -227,6 +230,10 @@ func (m *MetaorderTrader) onTick(now time.Time) {
 // begin starts a parent order. Size is Pareto and sign is a fair coin, both
 // independent of the price path.
 func (m *MetaorderTrader) begin(timestamp int64) {
+	mid, available := twoSidedMidpoint(m.bestBid, m.bestAsk)
+	if !available {
+		return
+	}
 	quantity := m.drawParentQty()
 	if quantity <= 0 {
 		return
@@ -237,7 +244,7 @@ func (m *MetaorderTrader) begin(timestamp int64) {
 		m.side = exchange.Sell
 	}
 	m.parentQty, m.filledQty, m.notional, m.childCount = quantity, 0, 0, 0
-	m.startTS, m.startMid = timestamp, (m.bestBid+m.bestAsk)/2
+	m.startTS, m.startMid = timestamp, mid
 	m.startVolume, m.childVolume = m.marketVolume, m.externalVolume()
 	m.ownVolume = 0
 }
@@ -363,8 +370,8 @@ func (m *MetaorderTrader) externalVolume() int64 {
 
 func (m *MetaorderTrader) finish(timestamp int64, completed bool) {
 	endMid := m.startMid
-	if m.bestBid > 0 && m.bestAsk > 0 {
-		endMid = (m.bestBid + m.bestAsk) / 2
+	if current, available := twoSidedMidpoint(m.bestBid, m.bestAsk); available {
+		endMid = current
 	}
 	record := MetaorderRecord{
 		ID: len(m.records) + 1, TraderID: m.ID(), VenueID: m.venueID, Side: m.side.String(),

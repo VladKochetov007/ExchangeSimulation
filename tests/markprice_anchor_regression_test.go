@@ -1,6 +1,7 @@
 package exchange_test
 
 import (
+	"fmt"
 	"testing"
 
 	. "exchange_sim/exchange"
@@ -8,7 +9,12 @@ import (
 
 type settableOracle struct{ price int64 }
 
-func (o *settableOracle) Price(string) int64 { return o.price }
+func (o *settableOracle) Price(symbol string) (int64, error) {
+	if o.price <= 0 {
+		return 0, fmt.Errorf("%s index unavailable", symbol)
+	}
+	return o.price, nil
+}
 
 func anchorTestExchange(t *testing.T, oracle *settableOracle, explicitCalc MarkPriceCalculator) (*Exchange, *PerpFutures) {
 	t.Helper()
@@ -62,21 +68,23 @@ func TestRegressionDefaultMarkAnchorsToIndex(t *testing.T) {
 	}
 }
 
-// When a configured index goes stale (returns 0), the update must be SKIPPED
-// — not silently replaced with the perp's own price, which made basis
-// identically zero and hid the outage.
+// When a configured index goes stale, the mark must become explicitly
+// unavailable — not retain a stale value and not be silently replaced with the
+// perp's own price, which made basis identically zero and hid the outage.
 func TestRegressionStaleIndexSkipsMarkUpdate(t *testing.T) {
 	oracle := &settableOracle{price: PriceUSD(50_000, DOLLAR_TICK)}
 	ex, perp := anchorTestExchange(t, oracle, nil)
 
 	ex.UpdatePerpPrices()
-	markBefore := perp.GetFundingRate().MarkPrice
+	if funding := perp.GetFundingRate(); !funding.MarkAvailable || funding.MarkPrice <= 0 {
+		t.Fatalf("initial mark unavailable: %#v", funding)
+	}
 
 	oracle.price = 0
 	ex.UpdatePerpPrices()
 
-	if got := perp.GetFundingRate().MarkPrice; got != markBefore {
-		t.Fatalf("stale index still updated mark: %d -> %d", markBefore, got)
+	if funding := perp.GetFundingRate(); funding.MarkAvailable || funding.IndexAvailable || funding.MarkPrice != 0 || funding.IndexPrice != 0 {
+		t.Fatalf("stale index preserved an apparent usable mark: %#v", funding)
 	}
 }
 

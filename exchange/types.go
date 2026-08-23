@@ -54,6 +54,8 @@ type RepayEvent = etypes.RepayEvent
 type PositionUpdateEvent = etypes.PositionUpdateEvent
 type RealizedPnLEvent = etypes.RealizedPnLEvent
 type MarkPriceUpdateEvent = etypes.MarkPriceUpdateEvent
+type PriceUnavailableEvent = etypes.PriceUnavailableEvent
+type ExpirySettlementPendingEvent = etypes.ExpirySettlementPendingEvent
 type FundingRateUpdateEvent = etypes.FundingRateUpdateEvent
 type OpenInterestEvent = etypes.OpenInterestEvent
 type FeeRevenueEvent = etypes.FeeRevenueEvent
@@ -103,6 +105,8 @@ const (
 	RejectInvalidQty          = etypes.RejectInvalidQty
 	RejectUnknownClient       = etypes.RejectUnknownClient
 	RejectUnknownInstrument   = etypes.RejectUnknownInstrument
+	RejectInstrumentExpired   = etypes.RejectInstrumentExpired
+	RejectPriceUnavailable    = etypes.RejectPriceUnavailable
 	RejectSelfTrade           = etypes.RejectSelfTrade
 	RejectDuplicateOrderID    = etypes.RejectDuplicateOrderID
 	RejectOrderNotFound       = etypes.RejectOrderNotFound
