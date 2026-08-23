@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, roleaudit, ecology, liquidations, derivatives")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, roleaudit, ecology, liquidations, marginchecks, derivatives")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -484,6 +484,18 @@ func main() {
 				fmt.Printf("%-18s liquidations %d accounts %d checks %d deficit %d insurance residual %d balance residual %d\n",
 					dir, result.Liquidations, result.AffectedAccounts, result.LiquidationChecks,
 					result.TotalDeficit, result.DeficitInsuranceResidual, result.DeficitBalanceResidual)
+			})
+		case "marginchecks":
+			result, err := run.MeasureMarginChecks(analysis.DefaultMarginCheckOptions())
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-18s eligible %d/%d marks %d active %d expected %d observed %d missing %d unexpected %d fields %d/%d exclusions %d\n",
+					dir, result.EligibleCandidates, result.Candidates, result.MarkUpdates, result.ActiveMarkChecks,
+					result.ExpectedBreaches, result.ObservedChecks, result.MissingChecks, result.UnexpectedChecks,
+					result.FieldMismatches, result.FieldChecks, result.ExcludedCandidates)
 			})
 		case "arbitrage":
 			result, err := run.MeasureArbitrage(analysis.ArbitrageOptions{

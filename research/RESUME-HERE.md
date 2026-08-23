@@ -330,3 +330,31 @@ finish and their contracts pass.
   expired-and-settled contracts, with zero late fill records,
   expired-unsettled contracts, or listing/settlement metadata defects. Their
   inspected fill-record counts are 2,444,064 / 2,448,558 / 2,418,586.
+
+### 2026-08-23 V-026 liquidation-trigger update
+
+- V-026 adds the analyzer-only, coverage-qualified `mvanalyze -metric
+  marginchecks` replay for `noise_flow` accounts carrying only ABC-PERP and
+  unborrowed USD collateral.  It independently uses persisted initial state,
+  ordered derivative positions/balances, and `math/big` arithmetic to compare
+  fresh mark, cash, PnL contribution, equity, notional, and maintenance at
+  every logged trigger.  V-005 seed 101 matches 8,942/8,942 expected/observed
+  breaches across 1,382,076 active mark evaluations; seed 103 matches
+  7,533/7,533 across 1,382,128.  All six field mismatch counts are zero.
+- A five-hour seed-101 scratch `stale_liquidation_mark` mutation keeps the
+  public mark update current but sends the prior stored mark to the liquidation
+  sweep.  It leaves the 35 forced-close count unchanged, yet the independent
+  replay catches 14 of 39 checks on mark, PnL, equity, notional, and
+  maintenance.  This validates the detector, not the unobserved cross-margin
+  path; options, FX collateral, isolated margin, and borrowed balances remain
+  excluded/unresolved.  Compact evidence:
+  `research/artifacts/mutations/stale-liquidation-mark.json`; raw logs remain.
+- V-027 records that a finite-horizon run's terminal quiescence tail is not
+  equivalent to the same prefix of a longer live run.  The 5h V-026 control
+  exactly matches the 24h V-005 control through 5:00 (22,408,046 observations,
+  digest `33005d…a5e6f9`), then correctly diverges after the requested horizon.
+  Include horizon in every provenance ID and compare only common active
+  prefixes.
+- Next: commit V-026, then isolate cadence classes behind the existing
+  CLOCK-SENSITIVE screen and finish the remaining mutation gaps before frozen
+  autopsy synthesis. Do not begin v2 design or prune raw logs.

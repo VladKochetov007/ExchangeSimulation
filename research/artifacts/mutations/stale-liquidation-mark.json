@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "mutation": "stale_liquidation_mark",
+  "status": "CAUGHT",
+  "scope": "At each perpetual funding-mark update, retain the public current mark but pass the immediately preceding stored mark to the liquidation sweep. This is a temporary scratch-binary mutation; the source tree was restored before either control or mutant execution.",
+  "simulator_freeze": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
+  "config": "research/configs/v005-stress-perp-2026-08-22.json",
+  "config_sha256": "fd094c55d9e92d1ac0c1db882b72a03693eb14dab17ded63c1507df7ac7f6ca1",
+  "seed": 101,
+  "duration_seconds": 18000,
+  "control_binary_sha256": "a668bbdfbdb273caba78da5985f15095b3dd0f0e091382a6a3c614ee632ce150",
+  "mutant_binary_sha256": "2b7969a1e7a8a544055990472b6f50ab557e2772fc78883ea41dd4dbee45f41c",
+  "analysis_binary_sha256": "b184535c0f16339960ac85498c4bc7ca9c3a66d471cb79dfa8b900ff7ff9202f",
+  "detector": "mvanalyze -metric marginchecks; a coverage-qualified replay from persisted initial accounts, derivative position/balance evidence, and fresh ABC-PERP mark updates. It independently uses math/big for PnL, notional, and maintenance, then compares every predicted breach's mark, cash, PnL contribution, equity, notional, and maintenance against the logged liquidation_check.",
+  "active_horizon_provenance": {
+    "matched_reference_run": "logs/f2_stress_101",
+    "through_sim_ts": 1735707600000000000,
+    "execution_observations": 22408046,
+    "execution_digest": "33005d6634d85ec472e51eefc701e3a4d14bd82d85e96a6f2f229b6733a5e6f9",
+    "note": "The short control equals the retained 24h stress control through its requested active 5h horizon. Its post-horizon terminal quiescence tail is intentionally not compared with the continuing 24h world."
+  },
+  "trigger": {
+    "control_expected_and_observed_checks": 39,
+    "control_forced_closes": 35,
+    "control_eligible_candidates": 18,
+    "control_active_mark_evaluations": 323636,
+    "same_timestamp_mark_collisions": 0
+  },
+  "control": {
+    "margin_field_mismatches": 0,
+    "mark_mismatches": 0,
+    "balance_mismatches": 0,
+    "contribution_mismatches": 0,
+    "equity_mismatches": 0,
+    "notional_mismatches": 0,
+    "maintenance_mismatches": 0,
+    "liquidations": 35,
+    "evidence": {
+      "events": 22408928,
+      "digest": "fd806aa5d602e5610e4125e45c386cd0829b4052291c77be22ad53577694ad52"
+    }
+  },
+  "mutant": {
+    "margin_field_mismatches": 14,
+    "mark_mismatches": 14,
+    "balance_mismatches": 0,
+    "contribution_mismatches": 14,
+    "equity_mismatches": 14,
+    "notional_mismatches": 14,
+    "maintenance_mismatches": 14,
+    "liquidations": 35,
+    "evidence": {
+      "events": 22408928,
+      "digest": "2ad486e48371d6f90c0bf9435861842cf52e65151fa20659e06d99157933e4c2"
+    }
+  },
+  "evidence_contract": {
+    "domain": "persisted_json_records",
+    "ordering": "unordered_multiset",
+    "offline_digest_equals_runtime_attestation": true,
+    "raw_logs_retained": true,
+    "control_marginchecks": "research/artifacts/mutations/stale-liquidation-mark/control-marginchecks-v026-final.json",
+    "mutant_marginchecks": "research/artifacts/mutations/stale-liquidation-mark/mutant-marginchecks-v026-final.json"
+  },
+  "interpretation": "A stale liquidation mark can leave the count and mechanics of forced closes unchanged. The independent field-level replay nevertheless detects 14 stale trigger calculations. This validates fresh trigger arithmetic only for the observable one-perpetual, unborrowed-USD cohort; it is not a validation of cross-margin, options, FX collateral, isolated margin, or borrowing."
+}

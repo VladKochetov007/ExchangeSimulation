@@ -39,6 +39,7 @@ type Account struct {
 // Balance is one asset's net holding.
 type Balance struct {
 	Asset    string `json:"asset"`
+	Borrowed int64  `json:"borrowed"`
 	NetAsset int64  `json:"net_asset"`
 }
 

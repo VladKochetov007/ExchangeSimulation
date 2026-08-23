@@ -93,7 +93,11 @@ deduced from later trading behavior. Its compact record is
   The tested delivery path makes this structurally true for scheduler-backed
   market data, but the historic raw logs do not contain each actor's inbox
   receipt. IB-1 also bypasses the path entirely.
-- **Liquidation and reference pricing** remain unaudited for their information
-  sources. The V-005 stress does exercise forced closes, but no independent
-  contemporaneous mark/collateral reconstruction has yet established whether a
-  trigger used a fresh or stale cross-margin input.
+- **Liquidation and reference pricing remain coverage-qualified.** V-026 now
+  independently reconstructs the contemporaneous stored mark, USD cash,
+  ABC-PERP PnL, notional, and maintenance threshold for the observable,
+  no-debt, one-perpetual `noise_flow` cohort. Its stale-mark mutation is
+  caught. It deliberately excludes cross-margin, options, FX collateral,
+  isolated margin, and borrowed balances because the retained evidence cannot
+  establish their cross-file ordering or valuation input. It therefore does
+  not establish fresh inputs for the full liquidation portfolio model.

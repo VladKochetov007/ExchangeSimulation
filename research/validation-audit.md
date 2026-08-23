@@ -999,3 +999,75 @@ zero. The corresponding persisted participant fill-record counts are
 2,444,064 (seed 101), 2,448,558 (seed 102), and 2,418,586 (seed 103). These
 control artifacts are retained as
 `research/artifacts/scoreboard/f2_baseline_{101,102,103}/expiryfills-v024-listing-anchored.json`.
+
+## V-026 — the liquidation audit did not independently reconstruct the trigger
+
+V-005 had already established that a reported forced close reduced the stated
+linear position, that the per-close contract residual was zero, and that no
+deficit or insurance transfer occurred.  It did **not** establish that the
+margin condition leading to each `liquidation_check` used the contemporaneous
+mark, cash balance, unrealised PnL, notional, and maintenance margin.  A stale
+mark can produce the same later forced-close shape, so the old mechanical
+result was insufficient for a freshness claim.
+
+`mvanalyze -metric marginchecks` is a deliberately limited independent replay.
+It starts from the persisted initial account snapshot, replays only the
+persisted `ABC-PERP` position and perp-balance path, and computes
+
+`equity = perp USD cash + signed quantity * (mark - entry) / 1e8`
+
+and `maintenance = abs(quantity) * mark / 1e8 * 500 / 10000` using
+`math/big`, rather than the engine's integer helper or the logged equity.  It
+then compares the predicted breach and all six logged trigger fields at each
+mark.  An account is excluded rather than approximated if it has another
+derivative, option activity, borrowed USD, a later quote/borrow movement in
+the separately persisted general log, broken position/balance continuity, or
+multiple ABC-PERP marks at one venue/timestamp.  The last guard is required
+because the two physical log files have no shared same-timestamp ordinal.
+
+| seed | candidates / eligible | active mark evaluations | expected / observed breaches | missing / unexpected / duplicate | mark / cash / PnL / equity / notional / maintenance mismatches | exclusions |
+|---:|---:|---:|---:|---:|---:|---|
+| 101 | 18 / 16 | 1,382,076 | 8,942 / 8,942 | 0 / 0 / 0 | 0 / 0 / 0 / 0 / 0 / 0 | central:19, south:18 (borrow movement) |
+| 103 | 18 / 16 | 1,382,128 | 7,533 / 7,533 | 0 / 0 / 0 | 0 / 0 / 0 / 0 / 0 / 0 | north:19, north:22 (borrow movement) |
+
+Both stress logs have zero repeated ABC-PERP mark timestamps in every venue.
+The full replay outputs are retained as
+`research/artifacts/scoreboard/f2_stress_{101,103}/marginchecks-v026-fields-final.json`.
+
+The detector itself was falsified with a five-hour, seed-101 scratch mutation:
+the exchange still publishes the fresh mark, but calls `CheckLiquidations`
+with the immediately preceding stored perpetual mark.  The exact paired
+control has 39 expected and observed checks with no mismatch.  The mutant has
+the same 39 checks and the same 35 forced closes, yet 14 checks disagree on
+the mark, derivative contribution, equity, notional, and maintenance margin
+(cash remains correct).  Thus a count of liquidations alone would have passed
+the stale-mark fault; the independent field-level replay catches it.  Compact
+provenance is in
+`research/artifacts/mutations/stale-liquidation-mark.json`; the raw control
+and mutant evidence remain retained.
+
+This strengthens V-005 to: fresh trigger arithmetic is mechanically supported
+for the observable homogeneous, no-debt, one-perpetual subset.  It is **not** a
+cross-margin, option-mark, FX-collateral, isolated-margin, or borrowed-balance
+validation.  Those states are excluded rather than silently counted as passes.
+The committed analyzer change is instrumentation-only; it does not enter the
+simulator scheduler, matching, RNG, actor, or risk code and therefore does not
+change freeze `ae13f9a`. The deliberately altered risk call exists only in the
+scratch mutant binary documented above.
+
+## V-027 — terminal horizon tails are not a common execution prefix
+
+The five-hour V-026 paired control was compared against the preserved 24-hour
+seed-101 V-005 control as a provenance check.  Their checkpoint stream is
+exactly identical through the configured active 5-hour horizon: at
+`1735707600000000000`, both contain 22,408,046 observations and digest
+`33005d6634d85ec472e51eefc701e3a4d14bd82d85e96a6f2f229b6733a5e6f9`.
+After that boundary, the short run performs terminal quiescence while the
+24-hour world continues to schedule active work, so their 5:05 checkpoints
+properly differ.  Neither short control nor mutant has a `liquidation_check`
+after 5:00.
+
+This is not simulator nondeterminism and does not reopen V-008.  It is a
+provenance rule: every execution/evidence identifier must include its requested
+horizon, and checkpoint comparisons between differently bounded worlds are
+valid only on their common active prefix, not on a terminal tail.

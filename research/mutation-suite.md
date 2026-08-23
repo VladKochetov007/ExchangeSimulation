@@ -58,6 +58,7 @@ an ecology run.
 | Omit settlement side effects for first ABC-PERP match but emit its fills, ecology run | 1 match / 2 participant position paths | each logged linear fill has exactly one matching position transition | 248,898 linear fills and updates; 0 missing | **248,898 fills, 248,896 updates; 2 missing** | yes, through `-metric fillpositions` |
 | Inject negative-latency market data through deterministic courier | 1 actor-bound message | source timestamp plus configured delay is the earliest actor-inbox delivery | no pre-due delivery; delivered at 1.010 s | **delivered at 1.000 s** | yes, through direct courier-boundary test |
 | Delay contractual expiry/delisting five minutes, ecology run | 66 expired contracts (6 futures, 60 options) | no persisted fill after listed contract ExpiryNano | 206,360 expired-contract fill records; 0 late | **212,584 records; 7,326 late across all 66 contracts** | yes, through `-metric expiryfills` |
+| Use previous stored perpetual mark for liquidation sweep, ecology run | 39 observed ABC-PERP checks / 35 forced closes | reported liquidation trigger uses the contemporaneous mark and its derived PnL, equity, notional, and maintenance | all 39 fields exact | **14 stale-mark field mismatches** (mark, PnL, equity, notional, maintenance) | yes, through independent `-metric marginchecks` |
 
 ### Delta-sign ecology mutation
 
@@ -148,7 +149,7 @@ listing after expiry.
 | Fail to cancel expired resting orders | the same, plus the book still quoting a delisted contract | `-metric settlements`; needs a delisting check that does not exist yet |
 | Drop a GTC cancellation request or state transition | resting order can remain executable after a requested cancel; request evidence is not persisted | none yet |
 | Give one venue zero latency accidentally | cross-venue edge appears where none did | `-metric arbitrage`, cross-venue cycle |
-| Use stale collateral for liquidation | a contemporaneous independently reconstructed mark/equity breach must not be hidden by an older mark | V-005 now exercises liquidations, but no independent mark/equity reconstruction exists yet |
+| Use stale collateral for liquidation beyond one-perpetual/no-debt scope | full cross-margin trigger must use contemporaneous collateral and all risk marks | `marginchecks` covers only ABC-PERP, USD cash, and no-debt accounts; options, FX collateral, isolated margin, and borrowing remain untestable from retained evidence |
 | Inject future information into one actor | scheduler-backed market data cannot arrive before publication plus modeled delay | `simulation.TestMarketDataCannotArriveBeforePublicationPlusLatency`; direct inventory bypasses remain separately qualified |
 
 ## What the table already says about the audit
