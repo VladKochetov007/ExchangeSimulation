@@ -709,3 +709,27 @@ Completion is now determined solely by the simulator's final-only
 This is a campaign-orchestration defect, not a model or raw-evidence defect.
 The reaper will be restarted under the new sentinel rule only after the live
 Wave 1 processes finish.
+
+## V-019 — dealer exposure omitted persisted second-order Greeks
+
+The `exposure` analyzer reconstructed dealer delta and vega from the preserved
+exchange-owned Greek-position snapshots, but silently omitted vanna and volga.
+That made the `abl-vanna-volga-off` primary exposure component only partially
+measured even though the raw `greeks.json` sidecars contain the contract
+positions, maturity, forward, strike, and market-implied volatility needed for
+an independent reconstruction. This is an analyzer defect, not a simulator or
+evidence-loss defect.
+
+The analyzer now reconstructs vanna and volga using Black-76 sensitivities from
+those persisted values. It fails closed if a nonempty snapshot lacks the
+position field required for reconstruction, while an explicitly empty position
+set remains a valid zero-exposure observation. Unit and race tests cover both
+the numerical reconstruction and the fail-closed evidence contract.
+
+The correction was committed separately as `995aede` and does not enter the
+simulator, scheduler, actor, matching, lifecycle, RNG, or logging paths. To
+preserve provenance, pre-correction exposure artifacts will be retained as
+historical analyzer output and all retained ae13f9a baseline and treatment
+exposure artifacts will be regenerated with the same corrected binary before
+causal scoring. No vanna-volga verdict is valid until that recomputation and
+the measurement gate complete.
