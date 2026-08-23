@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "simulator_freeze": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
+  "simulator_binary_sha256": "61248df48d32e5f0fe63b220d82b4ce0dda97cab43f528a953e1908c1b4833b7",
+  "analysis_binary_sha256": "48ee26a8752cfbf8a8813bd14a73cab5614670b234bb803bbedce12e54c8bc8a",
+  "duration_seconds": 18000,
+  "reference": {
+    "step_100ms_abs_basis_bps": {"101": 201.01481021830296, "103": 188.77761136824384},
+    "all_destagger_abs_basis_bps": {"101": 2.8037630960674056, "103": 2.372769316056454},
+    "half_compression_threshold_bps": {"101": 101.90928665718518, "103": 95.57519034215015}
+  },
+  "decision": {
+    "verdict": "CLOCK_SENSITIVE_INTERACTION_UNRESOLVED",
+    "stage_one_rule": "An arm passes only if each paired seed's basis is at or below the midpoint of retained 100ms-step and all-destagger values.",
+    "stage_one": "publication, maker-flow, and risk-options-carry packages pass in both seeds.",
+    "stage_two": "quote-only and dated-carry-only each pass only one seed, so neither is individually identified.",
+    "limitation": "Interval changes confound cadence frequency with phase relation. No initial-phase offset exists in frozen config, so an LCM-only claim is unresolved."
+  },
+  "conditions": [
+    {"name":"publication","seed":101,"config":"research/configs/clock-factor-publication-5h-101.json","config_sha256":"99d94c8dbb948c99fea7a91a56373110d3354a9212f5eb3caaf7870acdde33fb","evidence_events":24796378,"evidence_digest":"5a8ab98f3013bb25f9bd58623f24d4550514012169534dfb4d2ed0ef346b632f","perp_abs_basis_bps":71.32559472341762,"perp_half_life_seconds":1112.8299323848032,"triangular_mean_edge_bps":5880.8736625696265,"sec1_return_acf1":-0.5498634760575029,"sec1_abs_return_acf1":0.27586268081873594,"accepted_orders":3004021,"lifecycle_failures":0},
+    {"name":"publication","seed":103,"config":"research/configs/clock-factor-publication-5h-103.json","config_sha256":"2d54be14561c84f0c4f2fffa7a643998350e8951133d06ed581143365718ed73","evidence_events":25160546,"evidence_digest":"b67339d487211c747016e6f0ba00a93dd6a1830f7d54f03baa307a70a1215dbb","perp_abs_basis_bps":4.111961321754684,"perp_half_life_seconds":3.724952027578575,"triangular_mean_edge_bps":5973.233582446121,"sec1_return_acf1":-0.5507912430892815,"sec1_abs_return_acf1":0.2850093983558604,"accepted_orders":3142903,"lifecycle_failures":0},
+    {"name":"maker_flow","seed":101,"config":"research/configs/clock-factor-maker-flow-5h-101.json","config_sha256":"5bd573db411d6090f2596a2c9636a4521f61943a0446ddb2fa0fee392022137f","evidence_events":22667928,"evidence_digest":"08e4b71a22a59ff7e72abe82d7c98c554028c59694b56fa5b0254f384d487d4b","perp_abs_basis_bps":2.3595952964161735,"perp_half_life_seconds":3.438163136259976,"triangular_mean_edge_bps":5694.825697011461,"sec1_return_acf1":-0.5220195215943958,"sec1_abs_return_acf1":0.13051256736710984,"accepted_orders":2725460,"lifecycle_failures":0},
+    {"name":"maker_flow","seed":103,"config":"research/configs/clock-factor-maker-flow-5h-103.json","config_sha256":"d88b375c4ce4152d4f9ed718f1e5e3a2ea3de762643904f38394676ce75b1629","evidence_events":22740753,"evidence_digest":"161b6ba07dbc1474daffeb89e8cd5334f26bff697cb547b949bf0088b3c177bf","perp_abs_basis_bps":2.4830654705438246,"perp_half_life_seconds":3.5530901700938338,"triangular_mean_edge_bps":6115.676905783878,"sec1_return_acf1":-0.5186119641547771,"sec1_abs_return_acf1":0.12623907394841496,"accepted_orders":2715276,"lifecycle_failures":0},
+    {"name":"risk_options_carry","seed":101,"config":"research/configs/clock-factor-risk-options-carry-5h-101.json","config_sha256":"def096709b137842afd6c38ba7c02a4c82231aa6a5f77e0c5fbd3cb2610a44ec","evidence_events":24806023,"evidence_digest":"fef818a8360fa7fa73c65fdee559cd90b52b60e2b3a407fea175b20b36488517","perp_abs_basis_bps":34.14226964687088,"perp_half_life_seconds":223.61335066451173,"triangular_mean_edge_bps":5413.035879103181,"sec1_return_acf1":-0.529851439458387,"sec1_abs_return_acf1":0.242262420416398,"accepted_orders":3052918,"lifecycle_failures":0},
+    {"name":"risk_options_carry","seed":103,"config":"research/configs/clock-factor-risk-options-carry-5h-103.json","config_sha256":"9e17221f4ff58bcd365bcee2993e00f05d7a4d68b424e526c701abf1edc6ffc9","evidence_events":25021328,"evidence_digest":"dd35a50e05880a1d95df2e14fbc338ed4b889c4653658520e9b52ed66a04b857","perp_abs_basis_bps":21.089704468595414,"perp_half_life_seconds":57.04044170815655,"triangular_mean_edge_bps":5494.467756308921,"sec1_return_acf1":-0.5316055777632046,"sec1_abs_return_acf1":0.2373886677664636,"accepted_orders":3085577,"lifecycle_failures":0},
+    {"name":"quote_only","seed":101,"config":"research/configs/clock-factor-quote-only-5h-101.json","config_sha256":"e910d00050b4f1dec66c8fa83f09495976f36a6699b422a8005af2687b674266","evidence_events":24354136,"evidence_digest":"7cd0790db3cba2299a2850ea09dfca4bef04b873eda4ec6539688741dd78ab44","perp_abs_basis_bps":90.98621610189394,"perp_half_life_seconds":495.6970343325929,"triangular_mean_edge_bps":5927.098992664746,"sec1_return_acf1":-0.4679896265772632,"sec1_abs_return_acf1":0.15703010746720003,"accepted_orders":2853405,"lifecycle_failures":0},
+    {"name":"quote_only","seed":103,"config":"research/configs/clock-factor-quote-only-5h-103.json","config_sha256":"fa65f91eca3296506185eb5dcf9840978f31cddeca15c222a9108d919211c614","evidence_events":24561254,"evidence_digest":"4752d0464a5b4b90493b82679af50e7b5e011e7a5db3e02dc99cc49196bc8f89","perp_abs_basis_bps":185.00344314980737,"perp_half_life_seconds":629.2974625950275,"triangular_mean_edge_bps":4654.059930822561,"sec1_return_acf1":-0.4475232345624057,"sec1_abs_return_acf1":0.15866940194901674,"accepted_orders":2886953,"lifecycle_failures":0},
+    {"name":"dated_carry_only","seed":101,"config":"research/configs/clock-factor-dated-carry-only-5h-101.json","config_sha256":"b244eef72e6f564f18da906d30f291f7b125271f8952330f4888db8db5f3c252","evidence_events":24798881,"evidence_digest":"acbdf95e367ff651710092578e5d7d80fbc06f1718fcb032f86459248fa053a1","perp_abs_basis_bps":116.26563113951683,"perp_half_life_seconds":330.1161893291553,"triangular_mean_edge_bps":5406.200136073088,"sec1_return_acf1":-0.5424368572137417,"sec1_abs_return_acf1":0.29167878960364335,"accepted_orders":3048549,"lifecycle_failures":0},
+    {"name":"dated_carry_only","seed":103,"config":"research/configs/clock-factor-dated-carry-only-5h-103.json","config_sha256":"b1051a857070f3c95b1195b93238475a26613f55656a4d9a279bbcffbdd61e20","evidence_events":24594433,"evidence_digest":"d502091ff2a461f2f11a23ef46d9905afa93523ec1b3e42fc8d06272f419d650","perp_abs_basis_bps":76.27722644965415,"perp_half_life_seconds":249.7115250647551,"triangular_mean_edge_bps":5521.982218882055,"sec1_return_acf1":-0.5407072316743604,"sec1_abs_return_acf1":0.2811857669580097,"accepted_orders":2975759,"lifecycle_failures":0}
+  ],
+  "evidence_contract": {
+    "runtime_offline_evidence_digests_match": true,
+    "all_order_lifecycle_checks_clean": true,
+    "raw_logs_retained": true,
+    "evidence_digest_domain": "persisted_json_records",
+    "evidence_digest_ordering": "unordered_multiset"
+  }
+}

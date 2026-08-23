@@ -1106,3 +1106,29 @@ raw evidence is retained.
 Thus the full-run evidence contract is adversarially validated for persisted
 linear fill omissions.  It does not remove V-023's separate option-path gap:
 frozen raw logs still have no per-fill option position transition to pair.
+
+## V-029 — frozen economic measurements are cadence-lattice sensitive
+
+The first clock screen had established that the all-clock de-stagger package
+could nearly eliminate five-hour pooled perpetual basis. Its configuration
+changed several intervals, so it could not distinguish one mechanism from a
+timing interaction. The follow-up holds the 100ms runner step fixed, verifies
+the resolved manifest delta for every arm, and applies the preregistered
+two-seed midpoint rule against the existing 100ms-step and all-package worlds.
+
+The publication-only, maker/flow, and risk/options/carry packages each meet
+the primary rule in both seeds. Yet the high-value one-field follow-ups fail
+the same two-seed rule in opposite ways: quote-only passes seed 101 (90.99 bps)
+and fails seed 103 (185.00 bps), whereas dated-carry-only fails seed 101
+(116.27 bps) and passes seed 103 (76.28 bps). This falsifies the convenient
+attribution to either one individual clock. It supports only the weaker but
+important finding that the frozen ecology's basis, opportunities, and return
+metrics depend strongly on a coupled cadence lattice.
+
+The experiments alter interval frequency as well as relative timing; there is
+no phase-offset control in the frozen configuration. Therefore they do not
+establish an LCM mechanism and must not be used to claim a robust continuous-
+time economic effect. All ten worlds have complete evidence attestations and
+clean lifecycle contracts. Detailed data and limitations are in
+`research/clock-artifacts-ae13f9a.md` and
+`research/artifacts/clock-factor-ae13f9a.json`.

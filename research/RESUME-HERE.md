@@ -374,3 +374,21 @@ finish and their contracts pass.
 - The dropped-fill mutation validates the linear evidence contract, not option
   fill-to-position coverage. That V-023 option-path limitation remains a
   frozen-evidence gap.
+
+### 2026-08-23 V-029 clock-factor update
+
+- Ten paired five-hour clock worlds are retained with full logs, runtime/offline
+  evidence attestations, and clean order-lifecycle audits. Stage one confirms
+  broad cadence sensitivity: publication-only, maker/flow, and
+  risk/options/carry packages each compress ABC-PERP basis below the registered
+  step-to-destagger midpoint in both seeds. The narrow follow-ups refute a
+  one-clock story: quote-only passes only seed 101 (90.99 / 185.00 bps for
+  101/103), while dated-carry-only passes only seed 103 (116.27 / 76.28 bps).
+- The frozen autopsy must report a coupled cadence-lattice artifact as
+  **CLOCK-SENSITIVE**, with individual clock/LCM attribution unresolved. The
+  interval tests also change action rate; no phase-offset control is available
+  without a new simulator timing feature/freeze. No cadence variant restores
+  near-zero raw-return ACF or small triangular dislocations. See
+  `clock-artifacts-ae13f9a.md`, `clock-factorial-plan-ae13f9a.md`, and
+  `artifacts/clock-factor-ae13f9a.json`. Do not promote any frozen economic
+  effect to timing-robust.
