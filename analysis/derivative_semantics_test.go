@@ -237,3 +237,31 @@ func TestFundingAuditUsesPreFundingSameTimestampPosition(t *testing.T) {
 		t.Fatalf("post-funding same-timestamp fill rewrote settlement side: %+v", result.Funding)
 	}
 }
+
+// A second identical settlement keeps the funding pool balanced and directed,
+// so a net-zero/sign-only check accepts it. The audit must also require one
+// nonzero posting per funded account at each contract/instant.
+func TestFundingAuditCatchesDuplicateAccountPayment(t *testing.T) {
+	const instant = int64(1_000_000_000)
+	lines := []string{
+		positionLine(instant-10, "north", 1, "ABC-PERP", auditPrecision, 0),
+		positionLine(instant-10, "north", 2, "ABC-PERP", -auditPrecision, 0),
+		fundingRateLine(instant-1, "north", 5),
+		fundingPayLine(instant, "north", 1, -400),
+		fundingPayLine(instant, "north", 2, 400),
+		fundingPayLine(instant, "north", 1, -400),
+		fundingPayLine(instant, "north", 2, 400),
+	}
+	dir := writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{BasePrecision: auditPrecision})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.FundingBroken != 1 || result.FundingDuplicatePayments != 2 || result.Funding[0].DuplicatePayments != 2 {
+		t.Fatalf("duplicate funding accepted: %+v", result)
+	}
+}

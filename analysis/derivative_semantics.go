@@ -14,25 +14,13 @@ type posPoint struct {
 	ordinal  int64
 }
 
-// perpSideAt returns the position size an account held in any perpetual on a
-// venue at a given instant, and whether any position of theirs was published
-// at or before it. An account holding several perpetuals on one venue is
-// summed, because funding for the venue settles them together in the ledger.
-func perpSideAt(history map[positionKey][]posPoint, venue string, client uint64, at int64, file string, ordinal int64) (int64, bool) {
-	total := int64(0)
-	known := false
-	for key, points := range history {
-		if key.venue != venue || key.clientID != client {
-			continue
-		}
-		size, ok := sizeAt(points, at, file, ordinal)
-		if !ok {
-			continue
-		}
-		known = true
-		total += size
-	}
-	return total, known
+// perpSideAt returns the position size an account held in the particular
+// funded perpetual at a given instant. Funding is contract-specific; summing
+// dated-future or another perpetual exposure on the venue would make a valid
+// payment look correctly directed for the wrong reason.
+func perpSideAt(history map[positionKey][]posPoint, venue string, client uint64, symbol string, at int64, file string, ordinal int64) (int64, bool) {
+	points := history[positionKey{venue: venue, clientID: client, symbol: symbol}]
+	return sizeAt(points, at, file, ordinal)
 }
 
 // sizeAt is the last position published before an evidence record. Same-file
@@ -63,8 +51,9 @@ func sizeAt(points []posPoint, at int64, file string, ordinal int64) (int64, boo
 
 // ratePayload is a published funding rate.
 type ratePayload struct {
-	Timestamp int64 `json:"timestamp"`
-	Rate      int64 `json:"rate"`
+	Timestamp int64  `json:"timestamp"`
+	Symbol    string `json:"symbol"`
+	Rate      int64  `json:"rate"`
 }
 
 // DerivativeAuditOptions configures the funding and exercise audits.
@@ -77,6 +66,7 @@ type DerivativeAuditOptions struct {
 // FundingInstantCheck is one venue's funding settlement, recomputed.
 type FundingInstantCheck struct {
 	VenueID   string `json:"venue_id"`
+	Symbol    string `json:"symbol"`
 	Timestamp int64  `json:"timestamp"`
 	// Payers and Receivers are account counts, and Paid the total charged.
 	Payers    int   `json:"payers"`
@@ -106,6 +96,11 @@ type FundingInstantCheck struct {
 	// SignConsistent is false when any directed account was charged against
 	// the published rate.
 	SignConsistent bool `json:"sign_consistent"`
+	// DuplicatePayments is the number of nonzero settlement postings in excess
+	// of one per funded account at this contract and instant. It detects a
+	// repeated funding operation even when repeated debits and credits still
+	// net globally and point in the right direction.
+	DuplicatePayments int `json:"duplicate_payments"`
 }
 
 // ExerciseCheck is one option's settlement, recomputed from its own terms.
@@ -147,9 +142,10 @@ type DerivativeSemantics struct {
 	// could not be established from the position stream. A large undirected
 	// count means the direction check is weak on that run and must be said so
 	// rather than read as a pass.
-	FundingMisdirected int `json:"funding_misdirected"`
-	FundingUndirected  int `json:"funding_undirected"`
-	ExerciseBroken     int `json:"exercise_broken"`
+	FundingMisdirected       int `json:"funding_misdirected"`
+	FundingUndirected        int `json:"funding_undirected"`
+	FundingDuplicatePayments int `json:"funding_duplicate_payments"`
+	ExerciseBroken           int `json:"exercise_broken"`
 	// HoldersMispaid is the count across every contract of holders whose own
 	// payout did not match their own position.
 	HoldersMispaid int `json:"holders_mispaid"`
@@ -182,10 +178,10 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 
 	var mu sync.Mutex
 	options := make(map[markKey]instrumentPayload)
-	rates := make(map[string][]ratePayload)
+	rates := make(map[markKey][]ratePayload)
 	type fundingBucket struct {
-		payers, receivers int
-		paid, received    int64
+		payers, receivers, movements int
+		paid, received               int64
 	}
 	funding := make(map[instantKey]*fundingBucket)
 	// Per-account funding movements, so the direction of the transfer can be
@@ -252,8 +248,14 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			if event.Decode(&payload) != nil {
 				return
 			}
+			if payload.Symbol == "" {
+				payload.Symbol = event.Symbol
+			}
+			if payload.Symbol == "" {
+				return
+			}
 			mu.Lock()
-			rates[event.VenueID] = append(rates[event.VenueID], payload)
+			rates[markKey{event.VenueID, payload.Symbol}] = append(rates[markKey{event.VenueID, payload.Symbol}], payload)
 			mu.Unlock()
 		case "position_update":
 			var payload positionPayload
@@ -321,7 +323,10 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			defer mu.Unlock()
 			switch {
 			case record.Reason == "funding_settlement":
-				key := instantKey{event.VenueID, instant, "USD"}
+				if record.Symbol == "" {
+					return
+				}
+				key := instantKey{event.VenueID, instant, record.Symbol}
 				cursor, seen := fundingCursors[key]
 				if !seen || (cursor.file == event.File && event.Ordinal < cursor.ordinal) {
 					fundingCursors[key] = fundingCursor{file: event.File, ordinal: event.Ordinal}
@@ -337,6 +342,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				if total == 0 {
 					return
 				}
+				bucket.movements++
 				holder := record.ClientID
 				if holder == 0 {
 					holder = event.ClientID
@@ -393,12 +399,13 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 
 	for key, bucket := range funding {
 		check := FundingInstantCheck{
-			VenueID: key.venue, Timestamp: key.timestamp,
+			VenueID: key.venue, Symbol: key.asset, Timestamp: key.timestamp,
 			Payers: bucket.payers, Receivers: bucket.receivers,
 			Paid: bucket.paid, Received: bucket.received,
 			Residual: bucket.paid + bucket.received,
 		}
-		check.Rate = rateAt(rates[key.venue], key.timestamp)
+		check.Rate = rateAt(rates[markKey{key.venue, key.asset}], key.timestamp)
+		check.DuplicatePayments = bucket.movements - len(fundingDeltas[key])
 		longsDebited, longsCredited := 0, 0
 		for holder, delta := range fundingDeltas[key] {
 			if delta == 0 {
@@ -409,7 +416,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				check.Undirected++
 				continue
 			}
-			size, known := perpSideAt(perpHistory, key.venue, holder, key.timestamp, cursor.file, cursor.ordinal)
+			size, known := perpSideAt(perpHistory, key.venue, holder, key.asset, key.timestamp, cursor.file, cursor.ordinal)
 			if !known || size == 0 {
 				check.Undirected++
 				continue
@@ -445,11 +452,12 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		check.SignConsistent = structural && check.Misdirected == 0
 		result.FundingMisdirected += check.Misdirected
 		result.FundingUndirected += check.Undirected
+		result.FundingDuplicatePayments += check.DuplicatePayments
 		// Each account's share is an integer division, so a settlement across
 		// n accounts can lose up to n units to truncation. Anything beyond
 		// that is not rounding.
 		bound := int64(bucket.payers + bucket.receivers)
-		if check.Residual > bound || check.Residual < -bound {
+		if check.Residual > bound || check.Residual < -bound || check.DuplicatePayments != 0 {
 			result.FundingBroken++
 		}
 		if !check.SignConsistent {
@@ -460,6 +468,9 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 	sort.Slice(result.Funding, func(i, j int) bool {
 		if result.Funding[i].VenueID != result.Funding[j].VenueID {
 			return result.Funding[i].VenueID < result.Funding[j].VenueID
+		}
+		if result.Funding[i].Symbol != result.Funding[j].Symbol {
+			return result.Funding[i].Symbol < result.Funding[j].Symbol
 		}
 		return result.Funding[i].Timestamp < result.Funding[j].Timestamp
 	})
