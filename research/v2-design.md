@@ -64,6 +64,12 @@ cache/composite; then a heterogeneous roster; only then delete the old shared
 index from the V2 scenario. Preserve an ae13 compatibility mode only for
 historical comparison, never as a hidden V2 fallback.
 
+Progress ledger: the single-source, single-maker-cache prerequisite is now
+implemented as [V2-1a](v2-1-single-feed-cache.md). It intentionally uses a
+local delayed feed first. A remote source remains blocked on a decision
+frontier-vector artifact; one scalar V2-0 frontier cannot prove a multi-feed
+information set.
+
 ## V2-2 — executable cross-venue arbitrage
 
 | field | design |

@@ -136,6 +136,11 @@ type Config struct {
 	// midpoints published as each venue's index. Both are endogenous: they are
 	// computed from what participants did.
 	MakerAnchor string `json:"maker_anchor"`
+	// SpotMakerLocalReferenceCache switches spot makers to a per-maker copied
+	// local public-book cache. It is intentionally restricted to own_mid while
+	// the first V2-1 smoke slice has only one feed; pairing it with consensus
+	// would retain the prohibited shared instantaneous index path.
+	SpotMakerLocalReferenceCache bool `json:"spot_maker_local_reference_cache"`
 	// RoundTripTraderCount adds participants whose demand mean-reverts in
 	// quantity: they open a position and unwind it after RoundTripHold. Pure
 	// random-side flow mean-reverts in price but not in quantity, which leaves
@@ -524,6 +529,15 @@ func (c *Config) normalize() error {
 	case "", "own_mid", "consensus":
 	default:
 		return fmt.Errorf("multivenue: maker anchor must be own_mid or consensus, got %q", c.MakerAnchor)
+	}
+	if c.SpotMakerLocalReferenceCache && c.MakerAnchor != "own_mid" {
+		return errors.New("multivenue: spot maker local reference cache requires maker_anchor own_mid in the single-feed V2-1 slice")
+	}
+	if c.SpotMakerLocalReferenceCache {
+		profile, configured := c.latencyProfileFor("spot_maker")
+		if !configured || profile.zero() {
+			return errors.New("multivenue: spot maker local reference cache requires an explicit nonzero spot_maker feed delay")
+		}
 	}
 	if c.LogMode != "full" && c.LogMode != "none" {
 		return fmt.Errorf("multivenue: log mode must be full or none, got %q", c.LogMode)
@@ -1891,27 +1905,29 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			BasePrecision: mvBasePrecision, QuotePrecision: quotePrecision, TickSize: tickSize,
 			QuoteQty:      scaleQty(s.Config.MakerQuoteQty, baseUSD),
 			QuoteInterval: s.Config.QuoteInterval, VolatilityHalfLife: s.Config.StoikovVolatilityHalfLife,
-			InitialLogVariancePerSec: relativeLogVariance,
-			MaxLogVarianceMultiple:   s.Config.StoikovMaxVarianceMultiple,
-			VolatilitySampleInterval: s.Config.StoikovVolatilitySampleInterval,
-			InventoryHorizon:         s.Config.StoikovInventoryHorizon,
-			RelativeRiskAversion:     relativeRiskAversion,
-			RelativeFillDecay:        relativeFillDecay,
-			MinHalfSpreadTicks:       s.Config.MakerMinHalfSpreadTicks,
-			ForwardHalfLife:          s.Config.MakerForwardHalfLife,
-			QuoteSizeVolElasticity:   s.Config.MakerQuoteSizeVolElasticity,
-			MinQuoteSizeFraction:     s.Config.MakerMinQuoteSizeFraction,
-			InventoryLimit:           scaleQty(s.Config.MakerInventoryLimit, baseUSD),
-			InventorySkewBps:         s.Config.MakerInventorySkewBps,
-			SubmitBeforeCancel:       s.Config.SpotMakerSubmitBeforeCancel,
-			RequoteBps:               s.Config.SpotMakerRequoteBps,
-			HedgeSymbol:              hedgeSymbol(symbol, s.Config.MakerHedgeSymbol),
-			HedgeBandQty:             s.Config.MakerHedgeBandQty,
-			HedgeSlippageBps:         s.Config.MakerHedgeSlippageBps,
-			HedgeInterval:            s.Config.MakerHedgeInterval,
-			HedgeTickSize:            tick,
-			AnchorToIndex:            s.Config.MakerAnchor != "own_mid",
-			IndexWeight:              s.Config.MakerIndexWeight,
+			InitialLogVariancePerSec:  relativeLogVariance,
+			MaxLogVarianceMultiple:    s.Config.StoikovMaxVarianceMultiple,
+			VolatilitySampleInterval:  s.Config.StoikovVolatilitySampleInterval,
+			InventoryHorizon:          s.Config.StoikovInventoryHorizon,
+			RelativeRiskAversion:      relativeRiskAversion,
+			RelativeFillDecay:         relativeFillDecay,
+			MinHalfSpreadTicks:        s.Config.MakerMinHalfSpreadTicks,
+			ForwardHalfLife:           s.Config.MakerForwardHalfLife,
+			QuoteSizeVolElasticity:    s.Config.MakerQuoteSizeVolElasticity,
+			MinQuoteSizeFraction:      s.Config.MakerMinQuoteSizeFraction,
+			InventoryLimit:            scaleQty(s.Config.MakerInventoryLimit, baseUSD),
+			InventorySkewBps:          s.Config.MakerInventorySkewBps,
+			SubmitBeforeCancel:        s.Config.SpotMakerSubmitBeforeCancel,
+			RequoteBps:                s.Config.SpotMakerRequoteBps,
+			HedgeSymbol:               hedgeSymbol(symbol, s.Config.MakerHedgeSymbol),
+			HedgeBandQty:              s.Config.MakerHedgeBandQty,
+			HedgeSlippageBps:          s.Config.MakerHedgeSlippageBps,
+			HedgeInterval:             s.Config.MakerHedgeInterval,
+			HedgeTickSize:             tick,
+			AnchorToIndex:             s.Config.MakerAnchor != "own_mid",
+			IndexWeight:               s.Config.MakerIndexWeight,
+			UseLocalReferenceCache:    s.Config.SpotMakerLocalReferenceCache && symbol == "ABC/USD",
+			LocalReferenceSourceVenue: id,
 		}
 	}
 	for i := 0; i < s.Config.SpotMakerCount; i++ {

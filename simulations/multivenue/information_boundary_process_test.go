@@ -47,6 +47,13 @@ func TestV20EvidenceHelper(t *testing.T) {
 	cfg.LogMode = "none"
 	cfg.Seed = 101
 	cfg.CheckpointIntervalSeconds = 60
+	if os.Getenv("V21_LOCAL_CACHE") == "1" {
+		cfg.MakerAnchor = "own_mid"
+		cfg.SpotMakerLocalReferenceCache = true
+		cfg.LatencyProfiles = map[string]LatencyProfile{
+			"spot_maker": {Model: "constant", Delay: 10 * time.Millisecond},
+		}
+	}
 	cfg.RecordMarketDataReceipts = os.Getenv("V20_EVIDENCE_ON") == "1"
 	if cfg.RecordMarketDataReceipts {
 		cfg.MarketDataReceiptRoles = []string{"spot_maker"}
@@ -127,6 +134,35 @@ func TestV20EvidenceDoesNotChangeExecutionAcrossFreshProcesses(t *testing.T) {
 	}
 }
 
+// V2-1a reuses the V2-0 delayed gateway but changes a maker's input path.
+// Therefore its own ON/OFF and GOMAXPROCS check is separate from the V2-0
+// instrumentation proof: evidence must remain observational in this new
+// cache-using world as well.
+func TestV21SingleFeedCacheIsFreshProcessDeterministic(t *testing.T) {
+	results := make(map[string]v20HelperResult)
+	for _, gomax := range []string{"1", "4"} {
+		for _, evidence := range []bool{false, true} {
+			key := "g" + gomax + "/off"
+			if evidence {
+				key = "g" + gomax + "/on"
+			}
+			results[key] = runEvidenceHelper(t, gomax, evidence, true)
+		}
+	}
+	want := results["g1/off"].ExecutionHash
+	for key, result := range results {
+		if result.ExecutionHash == "" || result.ExecutionHash != want {
+			t.Fatalf("V2-1 cache changes execution with evidence/process setting: want %s, %s=%s", want, key, result.ExecutionHash)
+		}
+	}
+	left, right := results["g1/on"], results["g4/on"]
+	if left.Schedules == 0 || left.Receipts == 0 || left.Decisions == 0 ||
+		left.Schedules != right.Schedules || left.Receipts != right.Receipts || left.Decisions != right.Decisions ||
+		left.ScheduleDigest != right.ScheduleDigest || left.ReceiptDigest != right.ReceiptDigest || left.DecisionDigest != right.DecisionDigest {
+		t.Fatalf("V2-1 local cache evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
+	}
+}
+
 func TestV20EvidenceRejectsCustomMountCoverageGap(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "research", "configs", "frozen-baseline-2026-08-22.json"))
 	if err != nil {
@@ -149,12 +185,19 @@ func TestV20EvidenceRejectsCustomMountCoverageGap(t *testing.T) {
 }
 
 func runV20Helper(t *testing.T, gomax string, evidence bool) v20HelperResult {
+	return runEvidenceHelper(t, gomax, evidence, false)
+}
+
+func runEvidenceHelper(t *testing.T, gomax string, evidence, localCache bool) v20HelperResult {
 	t.Helper()
 	output := filepath.Join(t.TempDir(), "run")
 	cmd := exec.Command(os.Args[0], "-test.run=TestV20EvidenceHelper", "--")
 	cmd.Env = append(os.Environ(), "V20_EVIDENCE_HELPER=1", "V20_EVIDENCE_OUTPUT="+output, "GOMAXPROCS="+gomax)
 	if evidence {
 		cmd.Env = append(cmd.Env, "V20_EVIDENCE_ON=1")
+	}
+	if localCache {
+		cmd.Env = append(cmd.Env, "V21_LOCAL_CACHE=1")
 	}
 	raw, err := cmd.CombinedOutput()
 	if err != nil {

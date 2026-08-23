@@ -191,6 +191,12 @@ type StoikovMMConfig struct {
 	// alone. A partial weight lets the book discover price while still being
 	// tethered.
 	IndexWeight float64
+	// UseLocalReferenceCache makes this maker quote from its own copied public
+	// book observation. It is the first V2-1 single-feed slice; it never reads
+	// an exchange book or a shared composite. Cross-venue composites require a
+	// later explicit multi-frontier evidence extension.
+	UseLocalReferenceCache    bool
+	LocalReferenceSourceVenue string
 	// RequoteBps suppresses a replacement until the target has moved this far
 	// from what is already resting. Without it a maker replaces its quotes on
 	// essentially every step, which synchronises the whole population: measured
@@ -221,6 +227,7 @@ type StoikovMarketMaker struct {
 
 	forward            int64
 	indexPrice         int64
+	localReference     *LocalBookCache
 	forwardAt          int64
 	lastForward        int64
 	lastForwardTS      int64
@@ -253,6 +260,9 @@ func NewStoikovMarketMaker(id uint64, gw actor.Gateway, cfg StoikovMMConfig) *St
 		logVariancePerSec: cfg.InitialLogVariancePerSec,
 		pending:           make(map[uint64]quoteSide),
 	}
+	if cfg.UseLocalReferenceCache {
+		mm.localReference = NewLocalBookCache(cfg.LocalReferenceSourceVenue, cfg.ReferenceSymbol)
+	}
 	mm.SetHandler(mm)
 	mm.AddTicker(cfg.QuoteInterval, mm.onTick)
 	if cfg.HedgeInterval > 0 {
@@ -263,6 +273,15 @@ func NewStoikovMarketMaker(id uint64, gw actor.Gateway, cfg StoikovMMConfig) *St
 
 func (mm *StoikovMarketMaker) Inventory() int64              { return mm.inventory }
 func (mm *StoikovMarketMaker) LogVariancePerSecond() float64 { return mm.logVariancePerSec }
+
+// LocalReferenceView exposes a value copy for scenario activation checks. It
+// never returns a mutable exchange/book object to the controller or actor.
+func (mm *StoikovMarketMaker) LocalReferenceView() (LocalBookView, bool) {
+	if mm == nil {
+		return LocalBookView{}, false
+	}
+	return mm.localReference.View()
+}
 
 func (mm *StoikovMarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
 	switch evt.Type {
@@ -307,6 +326,14 @@ func (mm *StoikovMarketMaker) onSnapshot(e actor.BookSnapshotEvent) {
 		return
 	}
 	mid := (e.Snapshot.Bids[0].Price + e.Snapshot.Asks[0].Price) / 2
+	if mm.localReference != nil {
+		mm.localReference.ObserveSnapshot(e)
+		var ok bool
+		mid, ok = mm.localReference.Mid()
+		if !ok {
+			return
+		}
+	}
 	if mid <= 0 {
 		return
 	}

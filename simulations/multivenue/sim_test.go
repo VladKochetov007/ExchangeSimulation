@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"exchange_sim/actor"
+	"exchange_sim/analysis"
 	"exchange_sim/exchange"
 	"exchange_sim/matching"
 	eprice "exchange_sim/price"
@@ -1009,6 +1010,58 @@ func TestMakerAnchorSelectsTheQuotedReference(t *testing.T) {
 
 	if _, err := NewSim(time.Second, Config{LogDir: t.TempDir(), LogMode: "none", Seed: 91, MakerAnchor: "nonsense"}); err == nil {
 		t.Fatal("an unknown anchor must be rejected")
+	}
+}
+
+// The first V2-1 smoke mechanism is deliberately modest: each spot maker
+// copies only snapshots delivered through its own delayed public link. The
+// independent V2-0 auditor must then show every resulting order cites that
+// link's delivered frontier. This is not yet a cross-venue composite claim.
+func TestSpotMakerLocalReferenceCacheHasAuditableDelayedDecisionFrontier(t *testing.T) {
+	dir := t.TempDir()
+	sim, err := NewSim(20*time.Second, Config{
+		LogDir: dir, LogMode: "none", Seed: 101,
+		MakerAnchor:                  "own_mid",
+		SpotMakerLocalReferenceCache: true,
+		RecordMarketDataReceipts:     true,
+		MarketDataReceiptRoles:       []string{"spot_maker"},
+		LatencyProfiles: map[string]LatencyProfile{
+			"spot_maker": {Model: "constant", Delay: 10 * time.Millisecond},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sim.Close()
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, venue := range sim.Venues {
+		for _, maker := range venue.SpotMakers {
+			if maker.cfg.Symbol != "ABC/USD" {
+				continue
+			}
+			view, ok := maker.LocalReferenceView()
+			if !ok || view.SourceVenue != venue.ID || view.Symbol != "ABC/USD" || view.Updates == 0 {
+				t.Fatalf("%s maker cache did not activate from its declared feed: %+v, %t", venue.ID, view, ok)
+			}
+		}
+	}
+	audit, err := analysis.AuditMarketDataReceipts(dir)
+	if err != nil || !audit.Valid || audit.Receipts == 0 || audit.Decisions == 0 {
+		t.Fatalf("local-cache evidence is not independently auditable: audit=%+v err=%v", audit, err)
+	}
+}
+
+func TestSpotMakerLocalReferenceCacheRejectsGlobalOrUndelayedPath(t *testing.T) {
+	for _, config := range []Config{
+		{LogDir: t.TempDir(), LogMode: "none", MakerAnchor: "consensus", SpotMakerLocalReferenceCache: true,
+			LatencyProfiles: map[string]LatencyProfile{"spot_maker": {Model: "constant", Delay: time.Millisecond}}},
+		{LogDir: t.TempDir(), LogMode: "none", MakerAnchor: "own_mid", SpotMakerLocalReferenceCache: true},
+	} {
+		if _, err := NewSim(time.Second, config); err == nil {
+			t.Fatalf("local reference cache accepted prohibited input path: %+v", config)
+		}
 	}
 }
 
