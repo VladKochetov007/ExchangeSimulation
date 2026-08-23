@@ -2,26 +2,33 @@ package analysis
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
-	"sync"
 )
 
 // LiquidationAudit independently reconciles the observable liquidation,
 // account-deficit, and insurance-fund streams. It does not infer that a
 // liquidation was economically correct merely because an event was emitted.
 type LiquidationAudit struct {
-	Liquidations             int                `json:"liquidations"`
-	LiquidationChecks        int                `json:"liquidation_checks"`
-	AffectedAccounts         int                `json:"affected_accounts"`
-	LiquidationsWithDeficit  int                `json:"liquidations_with_deficit"`
-	TotalDeficit             int64              `json:"total_deficit"`
-	InsuranceDeficit         int64              `json:"insurance_deficit"`
-	BalanceDeficitCredit     int64              `json:"balance_deficit_credit"`
-	DeficitInsuranceResidual int64              `json:"deficit_insurance_residual"`
-	DeficitBalanceResidual   int64              `json:"deficit_balance_residual"`
-	DeficitMismatchInstants  int                `json:"deficit_mismatch_instants"`
-	InvalidLiquidations      int                `json:"invalid_liquidations"`
-	ByVenue                  []LiquidationVenue `json:"by_venue"`
+	Liquidations             int   `json:"liquidations"`
+	LiquidationChecks        int   `json:"liquidation_checks"`
+	AffectedAccounts         int   `json:"affected_accounts"`
+	LiquidationsWithDeficit  int   `json:"liquidations_with_deficit"`
+	TotalDeficit             int64 `json:"total_deficit"`
+	InsuranceDeficit         int64 `json:"insurance_deficit"`
+	BalanceDeficitCredit     int64 `json:"balance_deficit_credit"`
+	DeficitInsuranceResidual int64 `json:"deficit_insurance_residual"`
+	DeficitBalanceResidual   int64 `json:"deficit_balance_residual"`
+	DeficitMismatchInstants  int   `json:"deficit_mismatch_instants"`
+	InvalidLiquidations      int   `json:"invalid_liquidations"`
+	// PositionPathRecords are liquidations for which the same-file, same-time
+	// position-update batch provides both the pre-close and post-close state.
+	// The liquidation event records the pre-close size because liquidate holds a
+	// defensive position copy; the batch is the independent execution evidence.
+	PositionPathRecords  int                `json:"position_path_records"`
+	PositionPathMissing  int                `json:"position_path_missing"`
+	PositionPathFailures int                `json:"position_path_failures"`
+	ByVenue              []LiquidationVenue `json:"by_venue"`
 }
 
 // LiquidationVenue is one venue's independently reconciled liquidation path.
@@ -45,6 +52,18 @@ type liquidationInstant struct {
 type liquidationAccountInstant struct {
 	liquidationInstant
 	clientID uint64
+}
+
+type liquidationPositionKey struct {
+	venue, file, symbol string
+	clientID            uint64
+}
+
+type liquidationPositionBatch struct {
+	timestamp         int64
+	firstOld, lastNew int64
+	lastOrdinal       int64
+	continuous        bool
 }
 
 // MeasureLiquidations reconciles every logged liquidation deficit against two
@@ -73,8 +92,14 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 		Delta     int64  `json:"delta"`
 		Reason    string `json:"reason"`
 	}
+	type positionUpdate struct {
+		Timestamp int64  `json:"timestamp"`
+		ClientID  uint64 `json:"client_id"`
+		Symbol    string `json:"symbol"`
+		OldSize   int64  `json:"old_size"`
+		NewSize   int64  `json:"new_size"`
+	}
 
-	var mu sync.Mutex
 	result := &LiquidationAudit{}
 	accounts := make(map[Participant]struct{})
 	venueAccounts := make(map[string]map[Participant]struct{})
@@ -82,6 +107,7 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 	debtByInstant := make(map[liquidationInstant]int64)
 	insuranceByInstant := make(map[liquidationInstant]int64)
 	balanceByInstant := make(map[liquidationInstant]int64)
+	positionBatches := make(map[liquidationPositionKey]liquidationPositionBatch)
 	row := func(venue string) *LiquidationVenue {
 		out := venueRows[venue]
 		if out == nil {
@@ -90,12 +116,52 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 		}
 		return out
 	}
-	if err := r.Scan(ScanOptions{Events: []string{"liquidation", "liquidation_check", "balance_change", "insurance_fund"}}, func(event Event) {
+	// Every event in this contract is emitted either by a derivative book or a
+	// venue-global logger. Restricting the scan also avoids spending most of a
+	// long audit reading unrelated spot-book evidence.
+	files := make([]string, 0, len(r.files))
+	for _, file := range r.files {
+		name := filepath.Base(file)
+		if name == "derivatives.jsonl" || name == "general.jsonl" {
+			files = append(files, file)
+		}
+	}
+	// Position evidence is meaningful only in physical file order. A single
+	// worker preserves that order while still allowing independent runs to be
+	// processed in parallel by the campaign.
+	if err := r.Scan(ScanOptions{Workers: 1, Files: files, FilesSelected: true, Events: []string{"liquidation", "liquidation_check", "balance_change", "insurance_fund", "position_update"}}, func(event Event) {
 		switch event.Name {
 		case "liquidation_check":
-			mu.Lock()
 			result.LiquidationChecks++
-			mu.Unlock()
+		case "position_update":
+			var payload positionUpdate
+			if event.Decode(&payload) != nil {
+				return
+			}
+			symbol := payload.Symbol
+			if symbol == "" {
+				symbol = event.Symbol
+			}
+			clientID := payload.ClientID
+			if clientID == 0 {
+				clientID = event.ClientID
+			}
+			if symbol == "" || clientID == 0 {
+				return
+			}
+			key := liquidationPositionKey{venue: event.VenueID, file: event.File, clientID: clientID, symbol: symbol}
+			batch, exists := positionBatches[key]
+			if !exists || batch.timestamp != event.SimTS {
+				positionBatches[key] = liquidationPositionBatch{
+					timestamp: event.SimTS, firstOld: payload.OldSize, lastNew: payload.NewSize,
+					lastOrdinal: event.Ordinal, continuous: true,
+				}
+				return
+			}
+			batch.continuous = batch.continuous && payload.OldSize == batch.lastNew
+			batch.lastNew = payload.NewSize
+			batch.lastOrdinal = event.Ordinal
+			positionBatches[key] = batch
 		case "liquidation":
 			var payload liquidationPayload
 			if event.Decode(&payload) != nil {
@@ -105,7 +171,6 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 			if symbol == "" {
 				symbol = event.Symbol
 			}
-			mu.Lock()
 			result.Liquidations++
 			state := row(event.VenueID)
 			state.Liquidations++
@@ -118,6 +183,20 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 			if symbol == "" || payload.FillPrice <= 0 || payload.PositionSize == 0 || payload.RemainingDebt < 0 {
 				result.InvalidLiquidations++
 			}
+			positionKey := liquidationPositionKey{venue: event.VenueID, file: event.File, clientID: event.ClientID, symbol: symbol}
+			batch, found := positionBatches[positionKey]
+			if !found || batch.timestamp != event.SimTS || batch.lastOrdinal >= event.Ordinal {
+				result.PositionPathMissing++
+			} else {
+				result.PositionPathRecords++
+				if !batch.continuous || batch.firstOld != payload.PositionSize || !reducedSameSide(batch.firstOld, batch.lastNew) {
+					result.PositionPathFailures++
+				}
+			}
+			// A second same-timestamp liquidation for this key cannot be
+			// disambiguated without a position-side field, so classify it as
+			// missing rather than reusing evidence from the first close.
+			delete(positionBatches, positionKey)
 			if payload.RemainingDebt > 0 {
 				key := liquidationInstant{venue: event.VenueID, symbol: symbol, timestamp: event.SimTS}
 				debtByInstant[key] += payload.RemainingDebt
@@ -126,7 +205,6 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 				state.LiquidationsWithDeficit++
 				state.TotalDeficit += payload.RemainingDebt
 			}
-			mu.Unlock()
 		case "balance_change":
 			var payload balanceChange
 			if event.Decode(&payload) != nil || payload.Reason != "liquidation_deficit" {
@@ -144,11 +222,9 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 			for _, change := range payload.Changes {
 				credit += change.Delta
 			}
-			mu.Lock()
 			balanceByInstant[liquidationInstant{venue: event.VenueID, symbol: symbol, timestamp: timestamp}] += credit
 			result.BalanceDeficitCredit += credit
 			row(event.VenueID).BalanceDeficitCredit += credit
-			mu.Unlock()
 		case "insurance_fund":
 			var payload insuranceFund
 			if event.Decode(&payload) != nil || payload.Reason != "liquidation_deficit" {
@@ -162,11 +238,9 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 			if symbol == "" {
 				symbol = event.Symbol
 			}
-			mu.Lock()
 			insuranceByInstant[liquidationInstant{venue: event.VenueID, symbol: symbol, timestamp: timestamp}] -= payload.Delta
 			result.InsuranceDeficit -= payload.Delta
 			row(event.VenueID).InsuranceDeficit -= payload.Delta
-			mu.Unlock()
 		}
 	}); err != nil {
 		return nil, fmt.Errorf("liquidation audit: scan: %w", err)
@@ -204,4 +278,20 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 	}
 	sort.Slice(result.ByVenue, func(i, j int) bool { return result.ByVenue[i].VenueID < result.ByVenue[j].VenueID })
 	return result, nil
+}
+
+func reducedSameSide(before, after int64) bool {
+	if before == 0 || absLiquidationSize(after) >= absLiquidationSize(before) {
+		return false
+	}
+	return after == 0 || (before < 0) == (after < 0)
+}
+
+func absLiquidationSize(value int64) uint64 {
+	if value >= 0 {
+		return uint64(value)
+	}
+	// Negating MinInt64 overflows, whereas unsigned subtraction retains its
+	// magnitude and keeps this validator total for malformed evidence too.
+	return uint64(-(value + 1)) + 1
 }
