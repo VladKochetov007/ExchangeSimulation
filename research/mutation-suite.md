@@ -53,6 +53,29 @@ an ecology run.
 | Settle funding twice, **ecology run** | 5 funding instants / 85 duplicate account postings | one funding posting per funded account, contract, and instant | 0 duplicates | **85 duplicates; 5 broken instants** | yes, after V-022 rebuilt the detector |
 | Drop immediate-order cancellation **records**, ecology run | 169,935 immediate cancellation records | every accepted non-resting order has a persisted fill-or-cancel terminal record | 0 missing terminals | **169,935 missing terminals** | yes, through `-metric orderlifecycle` |
 | Credit spot fee revenue twice, ecology run | 6,048,990 balance deltas | closed-system identity includes every venue fee credit | bounded truncation residual only | **CDF 126,548,770,107; USD 235,583,218,129 residual** | yes, through `-metric conservation` |
+| Negate Black-76 delta in live option-dealer hedge decisions, ecology run | 903 exchange-owned risk snapshots / all three hedge policies | actual underlying hedge offsets independently marked option delta | mean \|net delta\| 0.0170; max 0.1650; drift 0.00038/h | **mean \|net delta\| 1.9264; max 10.8592; drift 1.1844/h** | yes, through exchange-owned `-metric exposure` |
+
+### Delta-sign ecology mutation
+
+The delta-sign mutation is intentionally stronger than a unit test of the
+analytic formula. It negates `Black76Delta` only where the option dealer
+chooses its live hedge; the exchange's periodic risk snapshot instead obtains
+the dealer's filled option positions and actual ABC balance, then marks those
+positions with `Black76Sensitivities`. Thus the outcome is not a comparison of
+one actor cache against itself. Over the five-hour seed-101 control and mutant
+worlds, all three configured policies (`banded`, `static`, and `timed`) were
+active and 903 exchange-owned snapshots were retained.
+
+The correct control had pooled mean absolute net delta 0.0170, maximum 0.1650,
+and drift 0.000378 contracts/hour. The sign mutant had 1.9264, 10.8592, and
+1.1844 respectively: 113.1x, 65.8x, and more than three orders of magnitude
+larger. The detector therefore catches the intended error. In contrast, the
+absolute hedge ratio remained about one in both worlds (1.0011 control versus
+1.0007 mutant). A check that only counted hedge activity, volume, or an
+absolute hedge ratio would have falsely passed exactly the sign failure it was
+supposed to detect. Full provenance and evidence digest are in
+`research/artifacts/mutations/delta-sign.json`; raw logs remain at
+`logs/mut_delta_sign`.
 
 ### Horizon, and why 5h rather than 2h
 
@@ -117,12 +140,11 @@ listing after expiry.
 | Duplicate one fill | movements reconstruct the reported holdings; contract net size stays zero | `-metric conservation` chain check; `-metric positions` |
 | Delete one fill | the same two | as above |
 | Omit one settlement | payout residual per contract; holders paid against holders present | `-metric settlements` |
-| Wrong sign on the Black-76 delta | dealer net delta grows without bound instead of being hedged back | `-metric hedging`, buy share and net delta drift |
 | Execute an order after expiry | no fill may be recorded after the expiry instant | `-metric settlements`, `TradesAfterExpiry` |
 | Fail to cancel expired resting orders | the same, plus the book still quoting a delisted contract | `-metric settlements`; needs a delisting check that does not exist yet |
 | Drop a GTC cancellation request or state transition | resting order can remain executable after a requested cancel; request evidence is not persisted | none yet |
 | Give one venue zero latency accidentally | cross-venue edge appears where none did | `-metric arbitrage`, cross-venue cycle |
-| Use stale collateral for liquidation | cannot be tested: liquidation never fires (V-005) | blocked on the stress arm |
+| Use stale collateral for liquidation | a contemporaneous independently reconstructed mark/equity breach must not be hidden by an older mark | V-005 now exercises liquidations, but no independent mark/equity reconstruction exists yet |
 | Inject future information into one actor | no detector exists; the delivery path makes look-ahead structurally impossible but nothing instruments it (see `research/information-boundary-audit.md`) | none yet |
 
 ## What the table already says about the audit

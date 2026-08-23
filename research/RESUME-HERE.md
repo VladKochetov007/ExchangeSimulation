@@ -268,3 +268,21 @@ finish and their contracts pass.
 - Next: continue high-value mutations (especially fill, expiry, collateral,
   and information-boundary paths), then synthesize the frozen autopsy. Do not
   enter v2 design yet and do not prune raw evidence.
+
+### 2026-08-23 delta-sign mutation update
+
+- A five-hour seed-101 `delta_sign` scratch mutant negated `Black76Delta`
+  only in the live option-dealer hedge path. It was caught by the
+  exchange-owned risk timeline: pooled mean absolute net delta rose from
+  0.0170 in the exact-clock control to 1.9264 (113.1x), maximum net delta from
+  0.1650 to 10.8592, and drift from 0.000378 to 1.1844 contracts/hour. The
+  absolute hedge ratio stayed about one in both worlds, proving that flow or
+  absolute-ratio telemetry alone would have missed the reversed sign. The
+  mutant source was restored before execution, raw logs remain at
+  `logs/mut_delta_sign`, and the artifact is
+  `artifacts/mutations/delta-sign.json`.
+- Current source regression passed: `go test ./price ./analysis
+  ./simulations/multivenue -count=1`. Next remains fill, expiry, collateral,
+  and information-boundary coverage; V-005 makes liquidation reachable, but
+  an independent contemporaneous mark/equity reconstruction must exist before
+  a stale-collateral mutation can be claimed.

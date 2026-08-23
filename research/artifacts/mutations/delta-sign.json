@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "mutation": "delta_sign",
+  "status": "CAUGHT",
+  "scope": "Negate Black76Delta only in the live option-dealer hedge decision. The exchange-owned risk snapshot continues to use Black76Sensitivities over exchange positions and the dealer's actual underlying balance.",
+  "simulator_freeze": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
+  "mutant_config": "research/configs/frozen-baseline-2026-08-21.json",
+  "mutant_config_sha256": "83bcaa542d88fbe87620dfb7682ea2a1c000c10f162adf9123a801dbc3b9dc9b",
+  "control_run": "logs/clock_control_101",
+  "control_config": "research/configs/clock-control-5h-101.json",
+  "control_config_sha256": "203df782e85bce48a06f2335e24dd6be2fb8faf8bcab38a808228e1f9a72f756",
+  "seed": 101,
+  "duration_seconds": 18000,
+  "trigger": {
+    "exchange_owned_risk_snapshots": 903,
+    "hedge_policy_roster": ["banded", "static", "timed"]
+  },
+  "mutant_binary_sha256": "68eface273f638a6a61f346c33c11c6ded6d03609fbbfb82c8013f225088586d",
+  "detector": "mvanalyze -metric exposure, whose marked option delta and hedge balance are recomputed at the exchange boundary rather than read from the dealer's hedge decision.",
+  "control": {
+    "mean_abs_net_delta": 0.017034977038492966,
+    "max_abs_net_delta": 0.16497148342273427,
+    "hedge_ratio": 1.0011145635597265,
+    "net_delta_drift_per_hour": 0.00037807260011927157
+  },
+  "mutant": {
+    "mean_abs_net_delta": 1.926350698835029,
+    "max_abs_net_delta": 10.859231907737284,
+    "hedge_ratio": 1.0007059757545818,
+    "net_delta_drift_per_hour": 1.1843831829639893
+  },
+  "evidence": {
+    "events": 21446407,
+    "digest": "38e8e17ca5772d2cf2db8c67d8efbbf9f779481c2decddfa2b7d340d4f4cff35",
+    "domain": "persisted_json_records",
+    "ordering": "unordered_multiset",
+    "raw_logs_retained": true
+  },
+  "interpretation": "The exchange-owned risk detector catches the reversed hedge: mean absolute net delta rises 113.1x, peak net delta 65.8x, and net-delta drift rises from near zero to 1.184 contracts/hour. The absolute hedge ratio remains about one in both worlds, demonstrating that volume or absolute-ratio telemetry alone would have falsely passed this sign error."
+}
