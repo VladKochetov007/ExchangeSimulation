@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "mutation": "drop_abc_perp_fill_log",
+  "status": "CAUGHT",
+  "scope": "Return from logFill only for ABC-PERP after normal settlement and client fill notification. The temporary source edit was restored before either world executed, so this is an evidence omission, not a market-semantic mutation.",
+  "simulator_freeze": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
+  "config": "research/configs/frozen-baseline-2026-08-21.json",
+  "config_sha256": "83bcaa542d88fbe87620dfb7682ea2a1c000c10f162adf9123a801dbc3b9dc9b",
+  "seed": 101,
+  "duration_seconds": 18000,
+  "control_binary_sha256": "61248df48d32e5f0fe63b220d82b4ce0dda97cab43f528a953e1908c1b4833b7",
+  "mutant_binary_sha256": "de6234cd2f720c562e1e2dc237c0ea01700ae837c6f8b17fb017c3398c29143d",
+  "analysis_binary_sha256": "48ee26a8752cfbf8a8813bd14a73cab5614670b234bb803bbedce12e54c8bc8a",
+  "control": {
+    "linear_fills": 248898,
+    "position_updates": 248898,
+    "paired_paths": 248898,
+    "unexpected_position_updates": 0,
+    "missing_immediate_terminal": 0,
+    "fill_quantity_mismatches": 0,
+    "terminal_greeks_sha256": "8f48be69b72b3c4923406ebca5d35835468a69c4a6edebd733dc3091d859ef54",
+    "latency_sidecar_sha256": "05dd5f2e6bca474d6ebe02f61b59f1913398cfa388bce0fe6eb36dadbbbd4e4c",
+    "evidence": {
+      "events": 21345555,
+      "digest": "0326ab9f965867583e2268f62f10b4d114be87e5437558239c5ea957aae18dc7"
+    }
+  },
+  "mutant": {
+    "linear_fills": 137500,
+    "position_updates": 248898,
+    "paired_paths": 137500,
+    "unexpected_position_updates": 111398,
+    "missing_immediate_terminal": 47268,
+    "fill_quantity_mismatches": 28309,
+    "terminal_greeks_sha256": "8f48be69b72b3c4923406ebca5d35835468a69c4a6edebd733dc3091d859ef54",
+    "latency_sidecar_sha256": "05dd5f2e6bca474d6ebe02f61b59f1913398cfa388bce0fe6eb36dadbbbd4e4c",
+    "evidence": {
+      "events": 21234157,
+      "digest": "46a9ec614089abc8b610ae3809bef97e561cbb1b3ec22becf549c92275e937b8"
+    }
+  },
+  "detectors": [
+    "mvanalyze -metric fillpositions",
+    "mvanalyze -metric orderlifecycle"
+  ],
+  "evidence_contract": {
+    "domain": "persisted_json_records",
+    "ordering": "unordered_multiset",
+    "offline_digest_equals_runtime_attestation": true,
+    "raw_logs_retained": true
+  },
+  "interpretation": "A self-consistent evidence digest does not prove completeness. The independent fill-to-position and immediate-terminal relations reject a logger that hides real linear fills while preserving terminal economic state. Option fill-to-position evidence remains out of scope because the frozen logs do not contain per-fill option position updates."
+}

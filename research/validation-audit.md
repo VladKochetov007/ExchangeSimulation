@@ -1071,3 +1071,38 @@ This is not simulator nondeterminism and does not reopen V-008.  It is a
 provenance rule: every execution/evidence identifier must include its requested
 horizon, and checkpoint comparisons between differently bounded worlds are
 valid only on their common active prefix, not on a terminal tail.
+
+## V-028 — evidence completeness had no full-run dropped-fill falsifier
+
+The V-023 fill-to-position audit could catch a settlement that failed to apply
+or applied twice, but had not been shown to reject a logger that silently
+omitted a real fill.  A raw artifact can preserve terminal accounts and every
+delivery-latency aggregate while losing precisely the economic evidence an
+independent reconstruction needs.
+
+The scratch `drop_abc_perp_fill_log` binary returns from `logFill` only for
+`ABC-PERP`, after the actual settlement and client fill notification have
+already happened.  The unmutated source was restored before control or mutant
+execution.  In the paired five-hour seed-101 worlds, terminal `greeks.json`
+and `latency.json` are byte-identical, but the mutant persisted 21,234,157
+records rather than the control's 21,345,555: exactly 111,398 ABC-PERP
+participant fill records are absent.
+
+| detector | control | mutant |
+|---|---:|---:|
+| linear fill records | 248,898 | 137,500 |
+| paired fill/position paths | 248,898 | 137,500 |
+| unexpected persisted position transitions | 0 | 111,398 |
+| missing immediate terminals | 0 | 47,268 |
+| terminal-quantity mismatches | 0 | 28,309 |
+
+The runtime and offline evidence-artifact digests agree within each world,
+which is correct: both identify what was actually preserved, not whether the
+logger preserved a scientifically sufficient domain.  The independent
+fill-position and lifecycle relations catch the omission.  Compact provenance
+is retained in `research/artifacts/mutations/drop-abc-perp-fill-log.json`; the
+raw evidence is retained.
+
+Thus the full-run evidence contract is adversarially validated for persisted
+linear fill omissions.  It does not remove V-023's separate option-path gap:
+frozen raw logs still have no per-fill option position transition to pair.

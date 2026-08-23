@@ -59,6 +59,7 @@ an ecology run.
 | Inject negative-latency market data through deterministic courier | 1 actor-bound message | source timestamp plus configured delay is the earliest actor-inbox delivery | no pre-due delivery; delivered at 1.010 s | **delivered at 1.000 s** | yes, through direct courier-boundary test |
 | Delay contractual expiry/delisting five minutes, ecology run | 66 expired contracts (6 futures, 60 options) | no persisted fill after listed contract ExpiryNano | 206,360 expired-contract fill records; 0 late | **212,584 records; 7,326 late across all 66 contracts** | yes, through `-metric expiryfills` |
 | Use previous stored perpetual mark for liquidation sweep, ecology run | 39 observed ABC-PERP checks / 35 forced closes | reported liquidation trigger uses the contemporaneous mark and its derived PnL, equity, notional, and maintenance | all 39 fields exact | **14 stale-mark field mismatches** (mark, PnL, equity, notional, maintenance) | yes, through independent `-metric marginchecks` |
+| Drop every persisted ABC-PERP fill after real settlement, ecology run | 111,398 suppressed participant fill records | every persisted linear position transition has an observed economic fill; immediate orders retain a terminal evidence record | 248,898 fill/position paths; no lifecycle errors | **111,398 unmatched position paths; 47,268 missing immediate terminals; 28,309 quantity mismatches** | yes, through `-metric fillpositions` and `-metric orderlifecycle` |
 
 ### Delta-sign ecology mutation
 

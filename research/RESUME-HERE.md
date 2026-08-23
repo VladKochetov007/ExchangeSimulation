@@ -358,3 +358,19 @@ finish and their contracts pass.
 - Next: commit V-026, then isolate cadence classes behind the existing
   CLOCK-SENSITIVE screen and finish the remaining mutation gaps before frozen
   autopsy synthesis. Do not begin v2 design or prune raw logs.
+
+### 2026-08-23 V-028 evidence-omission mutation update
+
+- A five-hour seed-101 scratch `drop_abc_perp_fill_log` binary suppresses only
+  persisted ABC-PERP `OrderFill` records after the actual settlement and
+  client notification. The control and mutant have byte-identical terminal
+  Greeks and courier-latency sidecars, but the mutant loses 111,398 persisted
+  fill records. `fillpositions` catches exactly 111,398 unmatched linear
+  position transitions; `orderlifecycle` additionally reports 47,268 missing
+  immediate terminals and 28,309 quantity mismatches. Both worlds' runtime and
+  offline evidence digests agree with their own preserved records, as they
+  should. Artifact: `artifacts/mutations/drop-abc-perp-fill-log.json`; raw
+  evidence remains retained.
+- The dropped-fill mutation validates the linear evidence contract, not option
+  fill-to-position coverage. That V-023 option-path limitation remains a
+  frozen-evidence gap.
