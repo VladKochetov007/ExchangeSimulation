@@ -65,6 +65,21 @@ func TestBaseActorSubmitOrder(t *testing.T) {
 	<-done
 }
 
+func TestBaseActorSubmitPostOnlyOrder(t *testing.T) {
+	gateway := exchange.NewClientGateway(1)
+	base := NewBaseActor(1, gateway)
+
+	base.SubmitPostOnlyOrder("BTCUSD", exchange.Buy, 5_000_000_000_000, 100_000_000)
+	select {
+	case request := <-gateway.RequestCh:
+		if request.OrderReq == nil || !request.OrderReq.PostOnly || request.OrderReq.Type != exchange.LimitOrder || request.OrderReq.TimeInForce != exchange.GTC {
+			t.Fatalf("post-only request = %+v, want limit GTC post-only", request.OrderReq)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for post-only request")
+	}
+}
+
 func TestBaseActorOrderDecisionObserverRunsBeforeGatewaySend(t *testing.T) {
 	gateway := exchange.NewClientGateway(1)
 	actor := NewBaseActor(1, gateway)

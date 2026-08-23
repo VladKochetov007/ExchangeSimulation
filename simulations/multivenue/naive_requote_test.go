@@ -79,3 +79,23 @@ func TestFixedDistanceMakerStillHoldsWhenBothQuotesAreLive(t *testing.T) {
 		t.Errorf("the maker requoted a live pair against an unchanged mid: %d then %d", quoted, len(gw.orders()))
 	}
 }
+
+func TestFixedDistanceMakerUsesExplicitPostOnlyQuotes(t *testing.T) {
+	gw := newMetaGateway()
+	maker := NewFixedDistanceMaker(1, gw, FixedDistanceMakerConfig{
+		Symbol: "CDF/USD", SpreadBps: 8, RequoteBps: 4, QuoteQty: 100, MaxInventory: 10_000,
+		TickSize: 100, QuoteInterval: time.Second, PostOnly: true,
+	})
+	maker.onTick(time.Unix(0, 0))
+	maker.HandleEvent(context.Background(), makerSnapshot("CDF/USD", 299_900, 300_100))
+	maker.onTick(time.Unix(0, int64(time.Second)))
+	orders := gw.orders()
+	if len(orders) != 2 {
+		t.Fatalf("post-only maker requests = %d, want 2", len(orders))
+	}
+	for _, request := range orders {
+		if !request.PostOnly || request.Type != exchange.LimitOrder || request.TimeInForce != exchange.GTC {
+			t.Fatalf("quote is not explicit post-only: %+v", request)
+		}
+	}
+}

@@ -45,6 +45,10 @@ type OrderRequest struct {
 	Visibility   Visibility   `json:"visibility"`
 	IcebergQty   int64        `json:"iceberg_qty"`
 	PositionSide PositionSide `json:"position_side"`
+	// PostOnly permits a limit GTC order to rest but never to take liquidity at
+	// venue arrival. The exchange rejects a crossing request before admission
+	// mutates any client, book, or matching state.
+	PostOnly bool `json:"post_only"`
 	// ReduceOnly marks an order that may only shrink an existing position.
 	// Venues treat such an order as risk-reducing, which matters when the
 	// engine is saturated: refusing it would trap a client in a position it is

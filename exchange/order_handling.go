@@ -488,6 +488,9 @@ func (e *DefaultExchange) validatePlaceOrder(clientID uint64, req *OrderRequest)
 	if exp, ok := book.Instrument.(Expirable); ok && e.Clock.NowUnixNano() >= exp.ExpiryNano() {
 		return reject(RejectInstrumentExpired)
 	}
+	if req.PostOnly && (req.Type != LimitOrder || req.TimeInForce != GTC) {
+		return reject(RejectPostOnlyInvalid)
+	}
 	if req.Type == LimitOrder && !book.Instrument.ValidatePrice(req.Price) {
 		return reject(RejectInvalidPrice)
 	}
@@ -517,7 +520,24 @@ func (e *DefaultExchange) validatePlaceOrder(clientID uint64, req *OrderRequest)
 	if e.restingLevelAggregateViolation(clientID, book, req) {
 		return reject(RejectInvalidQty)
 	}
+	// A post-only contract is evaluated against the actual book under the
+	// venue lock, after request latency has elapsed, before an order ID,
+	// reservation, auto-borrow, or matching mutation exists. A client-side
+	// snapshot cannot make this decision: it can be stale by arrival.
+	if req.PostOnly && postOnlyWouldTake(book, req) {
+		return reject(RejectPostOnlyWouldTake)
+	}
 	return nil
+}
+
+func postOnlyWouldTake(book *OrderBook, req *OrderRequest) bool {
+	if book == nil || req == nil {
+		return false
+	}
+	if req.Side == Buy {
+		return book.Asks != nil && book.Asks.Best != nil && req.Price >= book.Asks.Best.Price
+	}
+	return book.Bids != nil && book.Bids.Best != nil && req.Price <= book.Bids.Best.Price
 }
 
 // restingLevelAggregateViolation checks the exact residual that a GTC limit
@@ -545,6 +565,7 @@ func (e *DefaultExchange) restingLevelAggregateViolation(clientID uint64, book *
 		PositionSide: req.PositionSide,
 		Type:         req.Type,
 		TimeInForce:  req.TimeInForce,
+		PostOnly:     req.PostOnly,
 		Price:        req.Price,
 		Qty:          req.Qty,
 		Visibility:   req.Visibility,
@@ -662,6 +683,7 @@ func newOrderFromRequest(clientID, orderID uint64, req *OrderRequest, timestamp 
 	order.PositionSide = req.PositionSide
 	order.Type = req.Type
 	order.TimeInForce = req.TimeInForce
+	order.PostOnly = req.PostOnly
 	order.Price = req.Price
 	order.Qty = req.Qty
 	order.Visibility = req.Visibility

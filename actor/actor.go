@@ -635,10 +635,21 @@ func (a *BaseActor) SubmitOrder(symbol string, side exchange.Side, orderType exc
 	return a.SubmitOrderWithTimeInForce(symbol, side, orderType, price, qty, exchange.GTC)
 }
 
+// SubmitPostOnlyOrder sends a limit GTC quote that the venue must either rest
+// or reject at arrival. It is deliberately separate from SubmitOrder so an
+// actor's passive and aggressive policies are auditable at the call site.
+func (a *BaseActor) SubmitPostOnlyOrder(symbol string, side exchange.Side, price, qty int64) uint64 {
+	return a.submitOrder(symbol, side, exchange.LimitOrder, price, qty, exchange.GTC, true)
+}
+
 // SubmitOrderWithTimeInForce submits one normal-visibility order and returns
 // its request ID. Multi-venue actors need FOK legs to make a venue-local fill
 // decision explicit rather than silently resting an unpaired cross-venue leg.
 func (a *BaseActor) SubmitOrderWithTimeInForce(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64, tif exchange.TimeInForce) uint64 {
+	return a.submitOrder(symbol, side, orderType, price, qty, tif, false)
+}
+
+func (a *BaseActor) submitOrder(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64, tif exchange.TimeInForce, postOnly bool) uint64 {
 	reqID := atomic.AddUint64(&a.requestSeq, 1)
 	request := exchange.Request{
 		Type: exchange.ReqPlaceOrder,
@@ -651,6 +662,7 @@ func (a *BaseActor) SubmitOrderWithTimeInForce(symbol string, side exchange.Side
 			Symbol:      symbol,
 			TimeInForce: tif,
 			Visibility:  exchange.Normal,
+			PostOnly:    postOnly,
 		},
 	}
 	a.sendOrderDecision(request)

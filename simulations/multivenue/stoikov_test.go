@@ -141,6 +141,45 @@ func TestStoikovMarketMakerRequotesAfterInventoryFill(t *testing.T) {
 	}
 }
 
+func TestStoikovPostOnlyQuotesCancelBeforeReplacement(t *testing.T) {
+	gw := newStoikovStubGateway()
+	mm := NewStoikovMarketMaker(1, gw, StoikovMMConfig{
+		Symbol: "ABC/USD", ReferenceSymbol: "ABC/USD", BootstrapPrice: 100_000,
+		BasePrecision: 1_000, QuotePrecision: 1_000, TickSize: 10, QuoteQty: 100,
+		QuoteInterval: time.Second, VolatilityHalfLife: time.Minute,
+		InitialLogVariancePerSec: 1.0 / (100.0 * 100.0), InventoryHorizon: time.Minute,
+		RelativeRiskAversion: 0.01 * 100, RelativeFillDecay: 2 * 100, MinHalfSpreadTicks: 1,
+		SubmitBeforeCancel: true, PostOnly: true,
+	})
+	now := time.Unix(10, 0)
+	mm.onTick(now) // subscribes
+	mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventBookSnapshot, Data: actor.BookSnapshotEvent{
+		Symbol: "ABC/USD", Timestamp: now.UnixNano(), Snapshot: &exchange.BookSnapshot{
+			Bids: []exchange.PriceLevel{{Price: 99_990, VisibleQty: 1_000}},
+			Asks: []exchange.PriceLevel{{Price: 100_010, VisibleQty: 1_000}},
+		},
+	}})
+	mm.onTick(now)
+	if len(gw.requests) != 4 || !gw.requests[2].OrderReq.PostOnly || !gw.requests[3].OrderReq.PostOnly {
+		t.Fatalf("initial post-only quotes = %+v", gw.requests)
+	}
+	mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: gw.requests[2].OrderReq.RequestID, OrderID: 10}})
+	mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: gw.requests[3].OrderReq.RequestID, OrderID: 11}})
+
+	// Force a target change without changing the economic control. The purpose
+	// is the replacement protocol: post-only overrides submit-before-cancel.
+	mm.bidPrice, mm.askPrice = 1, 2
+	mm.onTick(now)
+	if len(gw.requests) != 8 || gw.requests[4].Type != exchange.ReqCancelOrder || gw.requests[5].Type != exchange.ReqCancelOrder {
+		t.Fatalf("post-only replacement did not cancel first: %+v", gw.requests)
+	}
+	for _, request := range gw.requests[6:8] {
+		if request.OrderReq == nil || !request.OrderReq.PostOnly {
+			t.Fatalf("replacement quote lost post-only flag: %+v", request)
+		}
+	}
+}
+
 // Remote source age is an information constraint, not a cosmetic telemetry
 // field. A stale cache must suppress its composite before it can move a quote.
 func TestRemoteReferenceExpiresByPublicationAge(t *testing.T) {

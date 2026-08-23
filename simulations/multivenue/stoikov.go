@@ -210,6 +210,9 @@ type StoikovMMConfig struct {
 	// The exchange cancels a client's own crossing quotes on rest, so the
 	// momentary overlap cannot self-trade.
 	SubmitBeforeCancel bool
+	// PostOnly requires every quote refresh to rest. It is distinct from hedge
+	// and rebalance policies, which remain explicit aggressive actions.
+	PostOnly bool
 }
 
 type quoteSide bool
@@ -604,7 +607,10 @@ func (mm *StoikovMarketMaker) onTick(now time.Time) {
 		}
 	}
 	previousBid, previousAsk := mm.bidID, mm.askID
-	if !mm.cfg.SubmitBeforeCancel {
+	// A post-only replacement cannot rely on the old cancel-maker self-trade
+	// behavior. Cancel first; the venue still evaluates the replacement against
+	// the arrival-time book after modeled request latency.
+	if mm.cfg.PostOnly || !mm.cfg.SubmitBeforeCancel {
 		mm.cancelResting(previousBid, previousAsk)
 	}
 	mm.bidID, mm.askID = 0, 0
@@ -614,16 +620,23 @@ func (mm *StoikovMarketMaker) onTick(now time.Time) {
 	}
 	mm.bidPrice, mm.askPrice = bid, ask
 	size := mm.quoteSize()
-	bidRequest := mm.SubmitOrder(mm.cfg.Symbol, exchange.Buy, exchange.LimitOrder, bid, size)
+	bidRequest := mm.submitQuote(exchange.Buy, bid, size)
 	mm.pending[bidRequest] = stoikovBid
-	askRequest := mm.SubmitOrder(mm.cfg.Symbol, exchange.Sell, exchange.LimitOrder, ask, size)
+	askRequest := mm.submitQuote(exchange.Sell, ask, size)
 	mm.pending[askRequest] = stoikovAsk
-	if mm.cfg.SubmitBeforeCancel {
+	if !mm.cfg.PostOnly && mm.cfg.SubmitBeforeCancel {
 		// Cancelling only after the replacements are submitted keeps depth
 		// resting continuously. Cancelling first empties the book for the rest
 		// of the phase, which every actor scheduled behind the maker then meets.
 		mm.cancelResting(previousBid, previousAsk)
 	}
+}
+
+func (mm *StoikovMarketMaker) submitQuote(side exchange.Side, price, qty int64) uint64 {
+	if mm.cfg.PostOnly {
+		return mm.SubmitPostOnlyOrder(mm.cfg.Symbol, side, price, qty)
+	}
+	return mm.SubmitOrder(mm.cfg.Symbol, side, exchange.LimitOrder, price, qty)
 }
 
 func (mm *StoikovMarketMaker) cancelResting(bidID, askID uint64) {

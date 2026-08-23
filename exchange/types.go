@@ -107,6 +107,8 @@ const (
 	RejectUnknownInstrument   = etypes.RejectUnknownInstrument
 	RejectInstrumentExpired   = etypes.RejectInstrumentExpired
 	RejectPriceUnavailable    = etypes.RejectPriceUnavailable
+	RejectPostOnlyInvalid     = etypes.RejectPostOnlyInvalid
+	RejectPostOnlyWouldTake   = etypes.RejectPostOnlyWouldTake
 	RejectSelfTrade           = etypes.RejectSelfTrade
 	RejectDuplicateOrderID    = etypes.RejectDuplicateOrderID
 	RejectOrderNotFound       = etypes.RejectOrderNotFound

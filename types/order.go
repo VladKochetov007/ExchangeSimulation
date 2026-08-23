@@ -7,11 +7,15 @@ type Order struct {
 	PositionSide PositionSide `json:"position_side"`
 	Type         OrderType    `json:"type"`
 	TimeInForce  TimeInForce  `json:"time_in_force"`
-	Price        int64        `json:"price"`
-	Qty          int64        `json:"qty"`
-	FilledQty    int64        `json:"filled_qty"`
-	Visibility   Visibility   `json:"visibility"`
-	IcebergQty   int64        `json:"iceberg_qty"`
+	// PostOnly records the accepted request's passive-execution contract. It is
+	// retained in order evidence so a passive quote cannot be mistaken for an
+	// aggressive inventory action during audit.
+	PostOnly   bool       `json:"post_only"`
+	Price      int64      `json:"price"`
+	Qty        int64      `json:"qty"`
+	FilledQty  int64      `json:"filled_qty"`
+	Visibility Visibility `json:"visibility"`
+	IcebergQty int64      `json:"iceberg_qty"`
 	// DisplayRemaining is the unfilled portion of an iceberg's current display
 	// tranche. Matchers cap fills at this and re-queue the order at the back
 	// of its level when the tranche is exhausted (venue refresh semantics).

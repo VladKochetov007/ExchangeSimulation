@@ -30,6 +30,8 @@ type FixedDistanceMakerConfig struct {
 	MaxInventory  int64         `json:"max_inventory"`
 	QuoteInterval time.Duration `json:"quote_interval"`
 	TickSize      int64         `json:"-"`
+	// PostOnly makes every refreshed quote a named passive venue request.
+	PostOnly bool `json:"post_only"`
 }
 
 type quoteState struct {
@@ -181,12 +183,12 @@ func (m *FixedDistanceMaker) replace(mid, bid, ask int64) {
 	m.quotes.bidID, m.quotes.askID = 0, 0
 	m.quotedMid = mid
 	if bid > 0 {
-		reqID := m.SubmitOrder(m.cfg.Symbol, exchange.Buy, exchange.LimitOrder, bid, m.cfg.QuoteQty)
+		reqID := m.submitQuote(exchange.Buy, bid)
 		m.pending[reqID] = true
 		m.quotes.pendingBid, m.quotes.bidPrice = true, bid
 	}
 	if ask > bid && ask > 0 {
-		reqID := m.SubmitOrder(m.cfg.Symbol, exchange.Sell, exchange.LimitOrder, ask, m.cfg.QuoteQty)
+		reqID := m.submitQuote(exchange.Sell, ask)
 		m.pending[reqID] = false
 		m.quotes.pendingAsk, m.quotes.askPrice = true, ask
 	}
@@ -196,6 +198,13 @@ func (m *FixedDistanceMaker) replace(mid, bid, ask int64) {
 	if previousAsk != 0 {
 		m.CancelOrder(previousAsk)
 	}
+}
+
+func (m *FixedDistanceMaker) submitQuote(side exchange.Side, price int64) uint64 {
+	if m.cfg.PostOnly {
+		return m.SubmitPostOnlyOrder(m.cfg.Symbol, side, price, m.cfg.QuoteQty)
+	}
+	return m.SubmitOrder(m.cfg.Symbol, side, exchange.LimitOrder, price, m.cfg.QuoteQty)
 }
 
 func abs64(v int64) int64 {

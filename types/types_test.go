@@ -46,6 +46,8 @@ func TestRejectReasonValues(t *testing.T) {
 		{RejectInvalidQty, "INVALID_QTY"},
 		{RejectUnknownClient, "UNKNOWN_CLIENT"},
 		{RejectUnknownInstrument, "UNKNOWN_INSTRUMENT"},
+		{RejectPostOnlyInvalid, "POST_ONLY_INVALID"},
+		{RejectPostOnlyWouldTake, "POST_ONLY_WOULD_TAKE"},
 		{RejectSelfTrade, "SELF_TRADE"},
 		{RejectDuplicateOrderID, "DUPLICATE_ORDER_ID"},
 		{RejectOrderNotFound, "ORDER_NOT_FOUND"},

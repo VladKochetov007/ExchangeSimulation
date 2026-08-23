@@ -108,6 +108,7 @@ func ResetOrder(order *etypes.Order) {
 	order.PositionSide = etypes.PositionBoth
 	order.Type = etypes.Market
 	order.TimeInForce = etypes.GTC
+	order.PostOnly = false
 	order.Price = 0
 	order.Qty = 0
 	order.FilledQty = 0

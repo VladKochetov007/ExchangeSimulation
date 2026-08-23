@@ -357,6 +357,10 @@ type Config struct {
 	// emptying the book. Cancel-then-replace leaves both sides empty for the
 	// rest of the phase in nearly every step.
 	SpotMakerSubmitBeforeCancel bool `json:"spot_maker_submit_before_cancel"`
+	// SpotPassiveMakerPostOnly applies the explicit passive-at-arrival contract
+	// to Stoikov, fixed-distance, and imbalance spot makers. Derivative dealers,
+	// bootstrap ladders, and explicit hedges remain separate policies.
+	SpotPassiveMakerPostOnly bool `json:"spot_passive_maker_post_only"`
 
 	SpotMakerCount int `json:"spot_maker_count"`
 
@@ -2086,6 +2090,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			InventoryLimit:            scaleQty(s.Config.MakerInventoryLimit, baseUSD),
 			InventorySkewBps:          s.Config.MakerInventorySkewBps,
 			SubmitBeforeCancel:        s.Config.SpotMakerSubmitBeforeCancel,
+			PostOnly:                  s.Config.SpotPassiveMakerPostOnly,
 			RequoteBps:                s.Config.SpotMakerRequoteBps,
 			HedgeSymbol:               hedgeSymbol(symbol, s.Config.MakerHedgeSymbol),
 			HedgeBandQty:              s.Config.MakerHedgeBandQty,
@@ -2277,6 +2282,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			cfg = *s.Config.FixedDistanceMaker
 		}
 		cfg.Symbol = makerSymbol(s.Config.FixedDistanceMakerSymbols, participant)
+		cfg.PostOnly = s.Config.SpotPassiveMakerPostOnly
 		cfg.TickSize = tickFor(cfg.Symbol, tick)
 		if cfg.QuoteInterval <= 0 {
 			cfg.QuoteInterval = s.Config.QuoteInterval
@@ -2291,6 +2297,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			cfg = *s.Config.ImbalanceMaker
 		}
 		cfg.Symbol = makerSymbol(s.Config.ImbalanceMakerSymbols, participant)
+		cfg.PostOnly = s.Config.SpotPassiveMakerPostOnly
 		cfg.TickSize = tickFor(cfg.Symbol, tick)
 		if cfg.QuoteInterval <= 0 {
 			cfg.QuoteInterval = s.Config.QuoteInterval

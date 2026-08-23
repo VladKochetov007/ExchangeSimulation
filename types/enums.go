@@ -107,6 +107,8 @@ const (
 	RejectUnknownInstrument   RejectReason = "UNKNOWN_INSTRUMENT"
 	RejectInstrumentExpired   RejectReason = "INSTRUMENT_EXPIRED"
 	RejectPriceUnavailable    RejectReason = "PRICE_UNAVAILABLE"
+	RejectPostOnlyInvalid     RejectReason = "POST_ONLY_INVALID"
+	RejectPostOnlyWouldTake   RejectReason = "POST_ONLY_WOULD_TAKE"
 	RejectSelfTrade           RejectReason = "SELF_TRADE"
 	RejectDuplicateOrderID    RejectReason = "DUPLICATE_ORDER_ID"
 	RejectOrderNotFound       RejectReason = "ORDER_NOT_FOUND"
