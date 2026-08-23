@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "mutation": "double_spot_fee",
+  "status": "CAUGHT",
+  "scope": "Credit and log spot fee revenue twice after one spot settlement, without a second client debit.",
+  "simulator_freeze": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
+  "config": "research/configs/frozen-baseline-2026-08-21.json",
+  "config_sha256": "83bcaa542d88fbe87620dfb7682ea2a1c000c10f162adf9123a801dbc3b9dc9b",
+  "seed": 101,
+  "duration_seconds": 18000,
+  "mutant_binary_sha256": "af16ffba14dda4386d0e2f8dff331ae268e6171aba04bc99ec838fc066631fa2",
+  "conservation": {
+    "balance_delta_checked": 6048990,
+    "balance_delta_mismatched": 0,
+    "balance_chain_broken": 0,
+    "cdf_residual": 126548770107,
+    "usd_residual": 235583218129,
+    "cdf_residual_relative": 0.0007531588946043422,
+    "usd_residual_relative": 0.000014245653322751132
+  },
+  "evidence": {
+    "events": 23825513,
+    "digest": "97efc0f1ba8f159f2a75e839467fff657ab0feaff1b3059a64761eaa67cc2269",
+    "domain": "persisted_json_records",
+    "ordering": "unordered_multiset",
+    "raw_logs_retained": true
+  },
+  "interpretation": "The local balance records remain self-consistent, but the independently reconstructed closed-system identity catches the unearned venue credits."
+}
