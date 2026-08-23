@@ -1,0 +1,807 @@
+{
+  "schema_version": 1,
+  "experiment": "V2-3-P0-R1",
+  "comparison_contract": {
+    "b_minus_a": "exchange-level arrival-time post-only admission",
+    "c_minus_b": "actor requested cancel-before-replace order",
+    "scope": "passive spot population only; CDF/USD viability primary"
+  },
+  "rows": [
+    {
+      "arm": "A",
+      "seed": 101,
+      "provenance": {
+        "config_sha256": "550f0561f9debc924908e260bf1f2e00569c07b68b6739e5efb823e987075251",
+        "binary_sha256": "5d7bec090afc0cd7c842a102110c8a9925bff6ed90cb7171d0dade79862b3a04",
+        "git_revision": "f4d4c0c8d36e35b8ee0bd3c5c323af53fb41c29a",
+        "gomaxprocs": "2",
+        "evidence": {
+          "events": 315518,
+          "digest": "0a3defbfb52a272adb277d17a31bb6f07321c2f049d6d1f202d19662efdc9161"
+        }
+      },
+      "information_boundary": {
+        "valid": true,
+        "receipt_roles": [
+          {
+            "role": "fixed_distance_maker",
+            "schedules": 7872,
+            "receipts": 7848,
+            "decisions": 1214
+          },
+          {
+            "role": "imbalance_maker",
+            "schedules": 7824,
+            "receipts": 7800,
+            "decisions": 832
+          },
+          {
+            "role": "spot_maker",
+            "schedules": 55828,
+            "receipts": 55768,
+            "decisions": 923
+          }
+        ]
+      },
+      "cdf_pooled": {
+        "events": 3622,
+        "accepted": 1118,
+        "accepted_post_only": 0,
+        "accepted_regular": 1118,
+        "rejected_would_take": 0,
+        "rejected_invalid": 0,
+        "post_only_fills": 0,
+        "post_only_filled_qty": 0,
+        "unmatched_fill_orders": 0
+      },
+      "spot_policy": {
+        "events": 20094,
+        "accepted": 4534,
+        "accepted_post_only": 0,
+        "accepted_regular": 4534,
+        "rejected_would_take": 0,
+        "rejected_invalid": 0,
+        "post_only_fills": 0,
+        "post_only_filled_qty": 0,
+        "unmatched_fill_orders": 0
+      },
+      "cdf_maker_activity": {
+        "cdf_spot_maker": {
+          "events": 1490,
+          "accepted": 366,
+          "accepted_post_only": 0,
+          "accepted_regular": 366,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 0,
+          "post_only_filled_qty": 0,
+          "unmatched_fill_orders": 0
+        },
+        "fixed_distance_maker": {
+          "events": 1360,
+          "accepted": 572,
+          "accepted_post_only": 0,
+          "accepted_regular": 572,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 0,
+          "post_only_filled_qty": 0,
+          "unmatched_fill_orders": 0
+        },
+        "imbalance_maker": {
+          "events": 772,
+          "accepted": 180,
+          "accepted_post_only": 0,
+          "accepted_regular": 180,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 0,
+          "post_only_filled_qty": 0,
+          "unmatched_fill_orders": 0
+        }
+      },
+      "derivative_scope": {
+        "events": 1823,
+        "accepted": 984,
+        "accepted_post_only": 0,
+        "accepted_regular": 984,
+        "rejected_would_take": 0,
+        "rejected_invalid": 0,
+        "post_only_fills": 0,
+        "post_only_filled_qty": 0,
+        "unmatched_fill_orders": 0
+      },
+      "cdf_viability": {
+        "venues": [
+          "central",
+          "north",
+          "south"
+        ],
+        "snapshots": 900,
+        "empty_side_snapshots": 18,
+        "two_sided_share": 0.98,
+        "trades": 2504,
+        "volume": 851466222541
+      },
+      "gates": {
+        "information_boundary_valid": true,
+        "receipt_roles_active": true,
+        "cdf_makers_active": true,
+        "derivative_scope_clean": true,
+        "cdf_all_venues_present": true,
+        "cdf_two_sided_available": true,
+        "cdf_trading_active": true
+      }
+    },
+    {
+      "arm": "A",
+      "seed": 103,
+      "provenance": {
+        "config_sha256": "ee7454b8677e55a4f1e46f82dbad841e4b8c70f2f75e1b68277d05b7a79398dc",
+        "binary_sha256": "5d7bec090afc0cd7c842a102110c8a9925bff6ed90cb7171d0dade79862b3a04",
+        "git_revision": "f4d4c0c8d36e35b8ee0bd3c5c323af53fb41c29a",
+        "gomaxprocs": "2",
+        "evidence": {
+          "events": 313924,
+          "digest": "c4925c896ec6e8c0eac74aafba7a8b1d7bf60716981df2ef0e1d3629b470ffdf"
+        }
+      },
+      "information_boundary": {
+        "valid": true,
+        "receipt_roles": [
+          {
+            "role": "fixed_distance_maker",
+            "schedules": 7872,
+            "receipts": 7848,
+            "decisions": 1290
+          },
+          {
+            "role": "imbalance_maker",
+            "schedules": 7824,
+            "receipts": 7800,
+            "decisions": 830
+          },
+          {
+            "role": "spot_maker",
+            "schedules": 55560,
+            "receipts": 55512,
+            "decisions": 968
+          }
+        ]
+      },
+      "cdf_pooled": {
+        "events": 4058,
+        "accepted": 1264,
+        "accepted_post_only": 0,
+        "accepted_regular": 1264,
+        "rejected_would_take": 0,
+        "rejected_invalid": 0,
+        "post_only_fills": 0,
+        "post_only_filled_qty": 0,
+        "unmatched_fill_orders": 0
+      },
+      "spot_policy": {
+        "events": 20504,
+        "accepted": 4777,
+        "accepted_post_only": 0,
+        "accepted_regular": 4777,
+        "rejected_would_take": 0,
+        "rejected_invalid": 0,
+        "post_only_fills": 0,
+        "post_only_filled_qty": 0,
+        "unmatched_fill_orders": 0
+      },
+      "cdf_maker_activity": {
+        "cdf_spot_maker": {
+          "events": 1520,
+          "accepted": 356,
+          "accepted_post_only": 0,
+          "accepted_regular": 356,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 0,
+          "post_only_filled_qty": 0,
+          "unmatched_fill_orders": 0
+        },
+        "fixed_distance_maker": {
+          "events": 1484,
+          "accepted": 684,
+          "accepted_post_only": 0,
+          "accepted_regular": 684,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 0,
+          "post_only_filled_qty": 0,
+          "unmatched_fill_orders": 0
+        },
+        "imbalance_maker": {
+          "events": 1054,
+          "accepted": 224,
+          "accepted_post_only": 0,
+          "accepted_regular": 224,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 0,
+          "post_only_filled_qty": 0,
+          "unmatched_fill_orders": 0
+        }
+      },
+      "derivative_scope": {
+        "events": 1736,
+        "accepted": 972,
+        "accepted_post_only": 0,
+        "accepted_regular": 972,
+        "rejected_would_take": 0,
+        "rejected_invalid": 0,
+        "post_only_fills": 0,
+        "post_only_filled_qty": 0,
+        "unmatched_fill_orders": 0
+      },
+      "cdf_viability": {
+        "venues": [
+          "central",
+          "north",
+          "south"
+        ],
+        "snapshots": 900,
+        "empty_side_snapshots": 36,
+        "two_sided_share": 0.96,
+        "trades": 2794,
+        "volume": 879125360556
+      },
+      "gates": {
+        "information_boundary_valid": true,
+        "receipt_roles_active": true,
+        "cdf_makers_active": true,
+        "derivative_scope_clean": true,
+        "cdf_all_venues_present": true,
+        "cdf_two_sided_available": true,
+        "cdf_trading_active": true
+      }
+    },
+    {
+      "arm": "B",
+      "seed": 101,
+      "provenance": {
+        "config_sha256": "e70e56306d4eda9f417f922468c6d4fb16090a6051bab2eadadb25b03e2b8926",
+        "binary_sha256": "5d7bec090afc0cd7c842a102110c8a9925bff6ed90cb7171d0dade79862b3a04",
+        "git_revision": "f4d4c0c8d36e35b8ee0bd3c5c323af53fb41c29a",
+        "gomaxprocs": "2",
+        "evidence": {
+          "events": 315864,
+          "digest": "9aec092f6b735449cefad36e0328a6c87916d2d9faf97def14708c23f3584421"
+        }
+      },
+      "information_boundary": {
+        "valid": true,
+        "receipt_roles": [
+          {
+            "role": "fixed_distance_maker",
+            "schedules": 7872,
+            "receipts": 7848,
+            "decisions": 1236
+          },
+          {
+            "role": "imbalance_maker",
+            "schedules": 7824,
+            "receipts": 7800,
+            "decisions": 840
+          },
+          {
+            "role": "spot_maker",
+            "schedules": 55828,
+            "receipts": 55768,
+            "decisions": 923
+          }
+        ]
+      },
+      "cdf_pooled": {
+        "events": 3622,
+        "accepted": 1118,
+        "accepted_post_only": 1118,
+        "accepted_regular": 0,
+        "rejected_would_take": 0,
+        "rejected_invalid": 0,
+        "post_only_fills": 2504,
+        "post_only_filled_qty": 3244212229057,
+        "unmatched_fill_orders": 0
+      },
+      "spot_policy": {
+        "events": 20163,
+        "accepted": 4575,
+        "accepted_post_only": 4405,
+        "accepted_regular": 170,
+        "rejected_would_take": 13,
+        "rejected_invalid": 0,
+        "post_only_fills": 15448,
+        "post_only_filled_qty": 5924650927227,
+        "unmatched_fill_orders": 0
+      },
+      "cdf_maker_activity": {
+        "cdf_spot_maker": {
+          "events": 1490,
+          "accepted": 366,
+          "accepted_post_only": 366,
+          "accepted_regular": 0,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 1124,
+          "post_only_filled_qty": 3226028671643,
+          "unmatched_fill_orders": 0
+        },
+        "fixed_distance_maker": {
+          "events": 1360,
+          "accepted": 572,
+          "accepted_post_only": 572,
+          "accepted_regular": 0,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 788,
+          "post_only_filled_qty": 10419288920,
+          "unmatched_fill_orders": 0
+        },
+        "imbalance_maker": {
+          "events": 772,
+          "accepted": 180,
+          "accepted_post_only": 180,
+          "accepted_regular": 0,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 592,
+          "post_only_filled_qty": 7764268494,
+          "unmatched_fill_orders": 0
+        }
+      },
+      "derivative_scope": {
+        "events": 1823,
+        "accepted": 984,
+        "accepted_post_only": 0,
+        "accepted_regular": 984,
+        "rejected_would_take": 0,
+        "rejected_invalid": 0,
+        "post_only_fills": 0,
+        "post_only_filled_qty": 0,
+        "unmatched_fill_orders": 0
+      },
+      "cdf_viability": {
+        "venues": [
+          "central",
+          "north",
+          "south"
+        ],
+        "snapshots": 900,
+        "empty_side_snapshots": 18,
+        "two_sided_share": 0.98,
+        "trades": 2504,
+        "volume": 851466222541
+      },
+      "gates": {
+        "information_boundary_valid": true,
+        "receipt_roles_active": true,
+        "cdf_makers_active": true,
+        "derivative_scope_clean": true,
+        "cdf_all_venues_present": true,
+        "cdf_two_sided_available": true,
+        "cdf_trading_active": true
+      }
+    },
+    {
+      "arm": "B",
+      "seed": 103,
+      "provenance": {
+        "config_sha256": "4512a5fce4fe9d0b01f64d9129567f36baec775f4e5ad5683507c8e2a7a09c94",
+        "binary_sha256": "5d7bec090afc0cd7c842a102110c8a9925bff6ed90cb7171d0dade79862b3a04",
+        "git_revision": "f4d4c0c8d36e35b8ee0bd3c5c323af53fb41c29a",
+        "gomaxprocs": "2",
+        "evidence": {
+          "events": 317529,
+          "digest": "0704d6d8de124eecfe6dca076ad0a5e1a72e0f9737eebede9e0ebb960900a0a8"
+        }
+      },
+      "information_boundary": {
+        "valid": true,
+        "receipt_roles": [
+          {
+            "role": "fixed_distance_maker",
+            "schedules": 7872,
+            "receipts": 7848,
+            "decisions": 1332
+          },
+          {
+            "role": "imbalance_maker",
+            "schedules": 7824,
+            "receipts": 7800,
+            "decisions": 880
+          },
+          {
+            "role": "spot_maker",
+            "schedules": 55888,
+            "receipts": 55796,
+            "decisions": 970
+          }
+        ]
+      },
+      "cdf_pooled": {
+        "events": 4293,
+        "accepted": 1266,
+        "accepted_post_only": 1266,
+        "accepted_regular": 0,
+        "rejected_would_take": 0,
+        "rejected_invalid": 0,
+        "post_only_fills": 3027,
+        "post_only_filled_qty": 3844163220482,
+        "unmatched_fill_orders": 0
+      },
+      "spot_policy": {
+        "events": 21032,
+        "accepted": 4882,
+        "accepted_post_only": 4733,
+        "accepted_regular": 149,
+        "rejected_would_take": 39,
+        "rejected_invalid": 0,
+        "post_only_fills": 15987,
+        "post_only_filled_qty": 6445891082472,
+        "unmatched_fill_orders": 0
+      },
+      "cdf_maker_activity": {
+        "cdf_spot_maker": {
+          "events": 1594,
+          "accepted": 356,
+          "accepted_post_only": 356,
+          "accepted_regular": 0,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 1238,
+          "post_only_filled_qty": 3821212201077,
+          "unmatched_fill_orders": 0
+        },
+        "fixed_distance_maker": {
+          "events": 1575,
+          "accepted": 686,
+          "accepted_post_only": 686,
+          "accepted_regular": 0,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 889,
+          "post_only_filled_qty": 12405981260,
+          "unmatched_fill_orders": 0
+        },
+        "imbalance_maker": {
+          "events": 1124,
+          "accepted": 224,
+          "accepted_post_only": 224,
+          "accepted_regular": 0,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 900,
+          "post_only_filled_qty": 10545038145,
+          "unmatched_fill_orders": 0
+        }
+      },
+      "derivative_scope": {
+        "events": 1736,
+        "accepted": 972,
+        "accepted_post_only": 0,
+        "accepted_regular": 972,
+        "rejected_would_take": 0,
+        "rejected_invalid": 0,
+        "post_only_fills": 0,
+        "post_only_filled_qty": 0,
+        "unmatched_fill_orders": 0
+      },
+      "cdf_viability": {
+        "venues": [
+          "central",
+          "north",
+          "south"
+        ],
+        "snapshots": 900,
+        "empty_side_snapshots": 36,
+        "two_sided_share": 0.96,
+        "trades": 3027,
+        "volume": 879405360556
+      },
+      "gates": {
+        "information_boundary_valid": true,
+        "receipt_roles_active": true,
+        "cdf_makers_active": true,
+        "derivative_scope_clean": true,
+        "cdf_all_venues_present": true,
+        "cdf_two_sided_available": true,
+        "cdf_trading_active": true
+      }
+    },
+    {
+      "arm": "C",
+      "seed": 101,
+      "provenance": {
+        "config_sha256": "a3d0758f4b80e90d9c8c917e318b936dc9799a6dac70f93967af850be0e1e277",
+        "binary_sha256": "5d7bec090afc0cd7c842a102110c8a9925bff6ed90cb7171d0dade79862b3a04",
+        "git_revision": "f4d4c0c8d36e35b8ee0bd3c5c323af53fb41c29a",
+        "gomaxprocs": "2",
+        "evidence": {
+          "events": 351946,
+          "digest": "1926215c26a79a9b67cd600ed83d18ad4323046f2f3255995ae2a5f671d1d98b"
+        }
+      },
+      "information_boundary": {
+        "valid": true,
+        "receipt_roles": [
+          {
+            "role": "fixed_distance_maker",
+            "schedules": 7872,
+            "receipts": 7848,
+            "decisions": 1724
+          },
+          {
+            "role": "imbalance_maker",
+            "schedules": 7824,
+            "receipts": 7800,
+            "decisions": 1294
+          },
+          {
+            "role": "spot_maker",
+            "schedules": 56932,
+            "receipts": 56876,
+            "decisions": 935
+          }
+        ]
+      },
+      "cdf_pooled": {
+        "events": 6588,
+        "accepted": 1138,
+        "accepted_post_only": 1138,
+        "accepted_regular": 0,
+        "rejected_would_take": 0,
+        "rejected_invalid": 0,
+        "post_only_fills": 5450,
+        "post_only_filled_qty": 7738903107982,
+        "unmatched_fill_orders": 0
+      },
+      "spot_policy": {
+        "events": 25600,
+        "accepted": 5729,
+        "accepted_post_only": 5585,
+        "accepted_regular": 144,
+        "rejected_would_take": 69,
+        "rejected_invalid": 0,
+        "post_only_fills": 19679,
+        "post_only_filled_qty": 10391875559397,
+        "unmatched_fill_orders": 0
+      },
+      "cdf_maker_activity": {
+        "cdf_spot_maker": {
+          "events": 2508,
+          "accepted": 294,
+          "accepted_post_only": 294,
+          "accepted_regular": 0,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 2214,
+          "post_only_filled_qty": 7706310460604,
+          "unmatched_fill_orders": 0
+        },
+        "fixed_distance_maker": {
+          "events": 2286,
+          "accepted": 636,
+          "accepted_post_only": 636,
+          "accepted_regular": 0,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 1650,
+          "post_only_filled_qty": 13755087315,
+          "unmatched_fill_orders": 0
+        },
+        "imbalance_maker": {
+          "events": 1794,
+          "accepted": 208,
+          "accepted_post_only": 208,
+          "accepted_regular": 0,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 1586,
+          "post_only_filled_qty": 18837560063,
+          "unmatched_fill_orders": 0
+        }
+      },
+      "derivative_scope": {
+        "events": 1778,
+        "accepted": 974,
+        "accepted_post_only": 0,
+        "accepted_regular": 974,
+        "rejected_would_take": 0,
+        "rejected_invalid": 0,
+        "post_only_fills": 0,
+        "post_only_filled_qty": 0,
+        "unmatched_fill_orders": 0
+      },
+      "cdf_viability": {
+        "venues": [
+          "central",
+          "north",
+          "south"
+        ],
+        "snapshots": 900,
+        "empty_side_snapshots": 29,
+        "two_sided_share": 0.9677777777777777,
+        "trades": 5450,
+        "volume": 792121832188
+      },
+      "gates": {
+        "information_boundary_valid": true,
+        "receipt_roles_active": true,
+        "cdf_makers_active": true,
+        "derivative_scope_clean": true,
+        "cdf_all_venues_present": true,
+        "cdf_two_sided_available": true,
+        "cdf_trading_active": true
+      }
+    },
+    {
+      "arm": "C",
+      "seed": 103,
+      "provenance": {
+        "config_sha256": "6adc26570df6203c48f5dc0fadacaaeea9c7124506ed24ce05d72b1481e1141d",
+        "binary_sha256": "5d7bec090afc0cd7c842a102110c8a9925bff6ed90cb7171d0dade79862b3a04",
+        "git_revision": "f4d4c0c8d36e35b8ee0bd3c5c323af53fb41c29a",
+        "gomaxprocs": "2",
+        "evidence": {
+          "events": 355776,
+          "digest": "5486c6e0f0ea53df6705b9370a6d3e3af167f3f0dc7130ebd8c9a5346efa708a"
+        }
+      },
+      "information_boundary": {
+        "valid": true,
+        "receipt_roles": [
+          {
+            "role": "fixed_distance_maker",
+            "schedules": 7872,
+            "receipts": 7848,
+            "decisions": 1710
+          },
+          {
+            "role": "imbalance_maker",
+            "schedules": 7824,
+            "receipts": 7800,
+            "decisions": 1226
+          },
+          {
+            "role": "spot_maker",
+            "schedules": 61840,
+            "receipts": 61768,
+            "decisions": 1002
+          }
+        ]
+      },
+      "cdf_pooled": {
+        "events": 5834,
+        "accepted": 1192,
+        "accepted_post_only": 1192,
+        "accepted_regular": 0,
+        "rejected_would_take": 0,
+        "rejected_invalid": 0,
+        "post_only_fills": 4642,
+        "post_only_filled_qty": 5758256334584,
+        "unmatched_fill_orders": 0
+      },
+      "spot_policy": {
+        "events": 25991,
+        "accepted": 5698,
+        "accepted_post_only": 5524,
+        "accepted_regular": 174,
+        "rejected_would_take": 96,
+        "rejected_invalid": 0,
+        "post_only_fills": 20071,
+        "post_only_filled_qty": 8535819835525,
+        "unmatched_fill_orders": 0
+      },
+      "cdf_maker_activity": {
+        "cdf_spot_maker": {
+          "events": 2191,
+          "accepted": 286,
+          "accepted_post_only": 286,
+          "accepted_regular": 0,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 1905,
+          "post_only_filled_qty": 5726188945468,
+          "unmatched_fill_orders": 0
+        },
+        "fixed_distance_maker": {
+          "events": 2166,
+          "accepted": 692,
+          "accepted_post_only": 692,
+          "accepted_regular": 0,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 1474,
+          "post_only_filled_qty": 15807575714,
+          "unmatched_fill_orders": 0
+        },
+        "imbalance_maker": {
+          "events": 1477,
+          "accepted": 214,
+          "accepted_post_only": 214,
+          "accepted_regular": 0,
+          "rejected_would_take": 0,
+          "rejected_invalid": 0,
+          "post_only_fills": 1263,
+          "post_only_filled_qty": 16259813402,
+          "unmatched_fill_orders": 0
+        }
+      },
+      "derivative_scope": {
+        "events": 1779,
+        "accepted": 1002,
+        "accepted_post_only": 0,
+        "accepted_regular": 1002,
+        "rejected_would_take": 0,
+        "rejected_invalid": 0,
+        "post_only_fills": 0,
+        "post_only_filled_qty": 0,
+        "unmatched_fill_orders": 0
+      },
+      "cdf_viability": {
+        "venues": [
+          "central",
+          "north",
+          "south"
+        ],
+        "snapshots": 900,
+        "empty_side_snapshots": 32,
+        "two_sided_share": 0.9644444444444444,
+        "trades": 4642,
+        "volume": 838327632005
+      },
+      "gates": {
+        "information_boundary_valid": true,
+        "receipt_roles_active": true,
+        "cdf_makers_active": true,
+        "derivative_scope_clean": true,
+        "cdf_all_venues_present": true,
+        "cdf_two_sided_available": true,
+        "cdf_trading_active": true
+      }
+    }
+  ],
+  "paired_deltas": [
+    {
+      "seed": 101,
+      "b_minus_a": {
+        "cdf_accepted": 0,
+        "cdf_post_only_rejections": 0,
+        "policy_post_only_rejections": 13,
+        "cdf_two_sided_share": 0,
+        "cdf_trades": 0,
+        "cdf_volume": 0
+      },
+      "c_minus_b": {
+        "cdf_accepted": 20,
+        "cdf_post_only_rejections": 0,
+        "policy_post_only_rejections": 56,
+        "cdf_two_sided_share": -0.012222222222222245,
+        "cdf_trades": 2946,
+        "cdf_volume": -59344390353
+      }
+    },
+    {
+      "seed": 103,
+      "b_minus_a": {
+        "cdf_accepted": 2,
+        "cdf_post_only_rejections": 0,
+        "policy_post_only_rejections": 39,
+        "cdf_two_sided_share": 0,
+        "cdf_trades": 233,
+        "cdf_volume": 280000000
+      },
+      "c_minus_b": {
+        "cdf_accepted": -74,
+        "cdf_post_only_rejections": 0,
+        "policy_post_only_rejections": 57,
+        "cdf_two_sided_share": 0.004444444444444473,
+        "cdf_trades": 1615,
+        "cdf_volume": -41077728551
+      }
+    }
+  ]
+}
