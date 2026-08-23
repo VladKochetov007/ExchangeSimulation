@@ -18,7 +18,9 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, postonly, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, observationreceipts, frontiervectors")
+	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
+	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -83,6 +85,25 @@ func main() {
 				os.Exit(1)
 			}
 			emitRoles(dir, table, *asJSON)
+		case "postonly":
+			result, err := run.MeasurePostOnlyActivity(analysis.PostOnlyActivityOptions{
+				Roles:   strings.Split(*postOnlyRoles, ","),
+				Symbols: strings.Split(*postOnlySymbols, ","),
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			if result.Events == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no selected post-only evidence events\n", dir)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s events %6d accepted post/regular %6d/%6d fills %6d qty %10d rejects take/invalid %5d/%5d unmatched-fills %d\n",
+					dir, result.Events, result.AcceptedPostOnly, result.AcceptedRegular,
+					result.PostOnlyFills, result.PostOnlyFilledQty, result.RejectedWouldTake,
+					result.RejectedInvalid, result.UnmatchedFillOrders)
+			})
 		case "stalls":
 			stats := run.Stalls(analysis.StallOptions{HorizonSeconds: *horizon, Desks: *desks, RunSeconds: *runSeconds})
 			emit(dir, stats, *asJSON, func() {
