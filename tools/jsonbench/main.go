@@ -51,6 +51,7 @@ func main() {
 	root := flag.String("root", "", "run directory containing venues JSONL evidence")
 	maxRecords := flag.Int64("max-records", 0, "maximum records per pass; zero means all")
 	rounds := flag.Int("rounds", 3, "timed cached passes per decoder")
+	filterBenchmark := flag.Bool("filter-benchmark", false, "benchmark current and bytes.Contains event prefilters")
 	flag.Parse()
 	if *root == "" || *rounds <= 0 || *maxRecords < 0 {
 		fmt.Fprintln(os.Stderr, "usage: jsonbench -root <run-dir> [-max-records N] [-rounds N]")
@@ -59,6 +60,24 @@ func main() {
 	files, err := evidenceFiles(*root)
 	if err != nil {
 		fatal(err)
+	}
+	if *filterBenchmark {
+		for _, candidate := range []struct {
+			name  string
+			match func([]byte, []byte) bool
+		}{
+			{name: "analysis-bytesContains", match: bytesContains},
+			{name: "bytes.Contains", match: bytes.Contains},
+		} {
+			measured, err := measureFilter(candidate.name, candidate.match, files, *maxRecords, *rounds)
+			if err != nil {
+				fatal(err)
+			}
+			fmt.Printf("%s\trecords=%d\tmatches=%d\tMiB=%.1f\twall=%s\tMiB/s=%.1f\n",
+				measured.name, measured.records, measured.matches, float64(measured.bytes)/(1024*1024),
+				measured.elapsed.Round(time.Millisecond), float64(measured.bytes)/(1024*1024)/measured.elapsed.Seconds())
+		}
+		return
 	}
 	decoders := []decoder{
 		{name: "encoding/json", unmarshal: stdjson.Unmarshal},
@@ -204,6 +223,61 @@ func evidenceFiles(root string) ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+type filterResult struct {
+	name    string
+	records int64
+	matches int64
+	bytes   int64
+	elapsed time.Duration
+}
+
+func measureFilter(name string, match func([]byte, []byte) bool, files []string, maxRecords int64, rounds int) (filterResult, error) {
+	result := filterResult{name: name}
+	needle := []byte(`"BookSnapshot"`)
+	for range rounds {
+		started := time.Now()
+		err := eachRecord(files, maxRecords, func(_ string, _ int64, line []byte) error {
+			result.records++
+			result.bytes += int64(len(line)) + 1
+			if match(line, needle) {
+				result.matches++
+			}
+			return nil
+		})
+		if err != nil {
+			return result, err
+		}
+		result.elapsed += time.Since(started)
+	}
+	return result, nil
+}
+
+// bytesContains mirrors analysis.bytesContains exactly so the tool measures
+// the existing structural filter without importing an unexported helper.
+func bytesContains(haystack, needle []byte) bool {
+	if len(needle) == 0 || len(needle) > len(haystack) {
+		return false
+	}
+	first := needle[0]
+	limit := len(haystack) - len(needle)
+	for i := 0; i <= limit; i++ {
+		if haystack[i] != first {
+			continue
+		}
+		match := true
+		for j := 1; j < len(needle); j++ {
+			if haystack[i+j] != needle[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 
 func eachRecord(files []string, maxRecords int64, visit func(path string, ordinal int64, line []byte) error) error {
