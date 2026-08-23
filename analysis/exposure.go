@@ -2,12 +2,16 @@ package analysis
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"time"
+
+	"exchange_sim/price"
 )
 
 // Dealer exposure and option-to-underlying transmission.
@@ -45,7 +49,21 @@ type riskRow struct {
 		Vega        float64 `json:"vega"`
 		Contracts   int64   `json:"contracts"`
 	} `json:"greek_profile"`
+	GreekPositions *[]riskGreekPosition `json:"greek_positions"`
 }
+
+// riskGreekPosition is the exchange-owned per-contract position snapshot used
+// to reconstruct second-order risks. It deliberately does not consume an
+// actor's own vanna-volga model or exposure cache.
+type riskGreekPosition struct {
+	Position          int64   `json:"position"`
+	TimeToExpiryNano  int64   `json:"time_to_expiry_nano"`
+	ModelForward      int64   `json:"model_forward"`
+	Strike            int64   `json:"strike"`
+	ImpliedVolatility float64 `json:"implied_volatility"`
+}
+
+const multivenueContractPrecision = 100_000_000
 
 // ExposureSeries summarises one participant's risk through the run.
 type ExposureSeries struct {
@@ -71,6 +89,18 @@ type ExposureSeries struct {
 	MaxAbsVega      float64 `json:"max_abs_vega"`
 	FinalVega       float64 `json:"final_vega"`
 	VegaDriftPerHer float64 `json:"vega_drift_per_hour"`
+	// Vanna and Volga are reconstructed independently from the persisted
+	// exchange-owned position rows. The original timeline recorded only
+	// aggregate delta, gamma, and vega, which was insufficient to score the
+	// vanna-volga intervention on its stated mechanism.
+	MeanAbsVanna      float64 `json:"mean_abs_vanna"`
+	MaxAbsVanna       float64 `json:"max_abs_vanna"`
+	FinalVanna        float64 `json:"final_vanna"`
+	VannaDriftPerHour float64 `json:"vanna_drift_per_hour"`
+	MeanAbsVolga      float64 `json:"mean_abs_volga"`
+	MaxAbsVolga       float64 `json:"max_abs_volga"`
+	FinalVolga        float64 `json:"final_volga"`
+	VolgaDriftPerHour float64 `json:"volga_drift_per_hour"`
 }
 
 // TransmissionStats is the correlation between option and underlying activity.
@@ -110,11 +140,48 @@ type Exposure struct {
 	PooledMaxAbsNetDelta  float64             `json:"pooled_max_abs_net_delta"`
 	PooledHedgeRatio      float64             `json:"pooled_hedge_ratio"`
 	PooledMeanAbsVega     float64             `json:"pooled_mean_abs_vega"`
+	PooledMeanAbsVanna    float64             `json:"pooled_mean_abs_vanna"`
+	PooledMeanAbsVolga    float64             `json:"pooled_mean_abs_volga"`
 	PooledNetDeltaDrift   float64             `json:"pooled_net_delta_drift_per_hour"`
 	Transmission          []TransmissionStats `json:"transmission"`
 	PooledCorrelation     float64             `json:"pooled_correlation"`
 	HedgeFlows            []HedgeFlow         `json:"hedge_flows"`
 	RiskSamples           int                 `json:"risk_samples"`
+	// SecondOrderSamples is the number of selected risk snapshots for which
+	// vanna and volga were reconstructed. It must equal RiskSamples whenever
+	// the current Greek-position evidence contract is present.
+	SecondOrderSamples int `json:"second_order_samples"`
+}
+
+// secondOrderExposure reconstructs a snapshot's aggregate vanna and volga
+// from the persisted marked contract positions. The multivenue simulator's
+// contract unit is fixed at 1e8 base units; this is the same public quantity
+// used by the position and settlement analyzers. A missing position field is
+// refused rather than silently treated as zero exposure.
+func secondOrderExposure(positions *[]riskGreekPosition) (float64, float64, error) {
+	if positions == nil {
+		return 0, 0, fmt.Errorf("analysis: Greek position evidence missing")
+	}
+	var vanna, volga float64
+	for _, position := range *positions {
+		if position.Position == 0 {
+			continue
+		}
+		if position.TimeToExpiryNano <= 0 {
+			return 0, 0, fmt.Errorf("analysis: non-positive option horizon in Greek position evidence")
+		}
+		years := float64(position.TimeToExpiryNano) / float64(365*24*time.Hour)
+		if _, ok := price.Black76Sensitivities(position.ModelForward, position.Strike, position.ImpliedVolatility, years, true); !ok {
+			return 0, 0, fmt.Errorf("analysis: invalid Black-76 inputs in Greek position evidence")
+		}
+		contracts := float64(position.Position) / multivenueContractPrecision
+		vanna += contracts * price.Black76Vanna(position.ModelForward, position.Strike, position.ImpliedVolatility, years)
+		volga += contracts * price.Black76Volga(position.ModelForward, position.Strike, position.ImpliedVolatility, years)
+	}
+	if math.IsNaN(vanna) || math.IsInf(vanna, 0) || math.IsNaN(volga) || math.IsInf(volga, 0) {
+		return 0, 0, fmt.Errorf("analysis: non-finite reconstructed second-order exposure")
+	}
+	return vanna, volga, nil
 }
 
 // isOptionSymbolName reports whether a symbol names an option contract.
@@ -161,9 +228,13 @@ func (r *Run) MeasureExposure(opts ExposureOptions) (*Exposure, error) {
 		sumOption, sumHedge, sumNet     float64
 		maxNet, finalNet                float64
 		sumVega, maxVega, finalVega     float64
+		sumVanna, maxVanna, finalVanna  float64
+		sumVolga, maxVolga, finalVolga  float64
 		firstAt, lastAt                 int64
 		sumT, sumTT, sumTNet, sumNetRaw float64
 		sumTVega, sumVegaRaw            float64
+		sumTVanna, sumVannaRaw          float64
+		sumTVolga, sumVolgaRaw          float64
 	}
 	accumulators := make(map[seriesKey]*accumulator)
 	for venue, rows := range envelope.RiskTimeline {
@@ -172,7 +243,12 @@ func (r *Run) MeasureExposure(opts ExposureOptions) (*Exposure, error) {
 			if !wanted[role] {
 				continue
 			}
+			vanna, volga, err := secondOrderExposure(row.GreekPositions)
+			if err != nil {
+				return nil, fmt.Errorf("analysis: reconstruct second-order exposure for %s client %d at %d: %w", venue, row.ClientID, row.Profile.Timestamp, err)
+			}
 			result.RiskSamples++
+			result.SecondOrderSamples++
 			key := seriesKey{venue, row.ClientID}
 			acc := accumulators[key]
 			if acc == nil {
@@ -187,10 +263,16 @@ func (r *Run) MeasureExposure(opts ExposureOptions) (*Exposure, error) {
 			acc.maxNet = math.Max(acc.maxNet, math.Abs(profile.NetDelta))
 			acc.sumVega += math.Abs(profile.Vega)
 			acc.maxVega = math.Max(acc.maxVega, math.Abs(profile.Vega))
+			acc.sumVanna += math.Abs(vanna)
+			acc.maxVanna = math.Max(acc.maxVanna, math.Abs(vanna))
+			acc.sumVolga += math.Abs(volga)
+			acc.maxVolga = math.Max(acc.maxVolga, math.Abs(volga))
 			if profile.Timestamp >= acc.lastAt {
 				acc.lastAt = profile.Timestamp
 				acc.finalNet = profile.NetDelta
 				acc.finalVega = profile.Vega
+				acc.finalVanna = vanna
+				acc.finalVolga = volga
 			}
 			if profile.Timestamp < acc.firstAt || acc.firstAt == 0 {
 				acc.firstAt = profile.Timestamp
@@ -202,6 +284,10 @@ func (r *Run) MeasureExposure(opts ExposureOptions) (*Exposure, error) {
 			acc.sumNetRaw += profile.NetDelta
 			acc.sumTVega += hours * profile.Vega
 			acc.sumVegaRaw += profile.Vega
+			acc.sumTVanna += hours * vanna
+			acc.sumVannaRaw += vanna
+			acc.sumTVolga += hours * volga
+			acc.sumVolgaRaw += volga
 		}
 	}
 
@@ -216,7 +302,7 @@ func (r *Run) MeasureExposure(opts ExposureOptions) (*Exposure, error) {
 		return keys[i].client < keys[j].client
 	})
 
-	var poolNet, poolMaxNet, poolOption, poolHedge, poolVega, poolDrift, poolWeight float64
+	var poolNet, poolMaxNet, poolOption, poolHedge, poolVega, poolVanna, poolVolga, poolDrift, poolWeight float64
 	for _, key := range keys {
 		acc := accumulators[key]
 		n := float64(acc.samples)
@@ -231,6 +317,12 @@ func (r *Run) MeasureExposure(opts ExposureOptions) (*Exposure, error) {
 			MeanAbsVega:        acc.sumVega / n,
 			MaxAbsVega:         acc.maxVega,
 			FinalVega:          acc.finalVega,
+			MeanAbsVanna:       acc.sumVanna / n,
+			MaxAbsVanna:        acc.maxVanna,
+			FinalVanna:         acc.finalVanna,
+			MeanAbsVolga:       acc.sumVolga / n,
+			MaxAbsVolga:        acc.maxVolga,
+			FinalVolga:         acc.finalVolga,
 		}
 		if series.MeanAbsOptionDelta > 0 {
 			series.HedgeRatio = series.MeanAbsHedgeDelta / series.MeanAbsOptionDelta
@@ -240,6 +332,8 @@ func (r *Run) MeasureExposure(opts ExposureOptions) (*Exposure, error) {
 			if denominator != 0 {
 				series.NetDeltaDriftPerHour = (n*acc.sumTNet - acc.sumT*acc.sumNetRaw) / denominator
 				series.VegaDriftPerHer = (n*acc.sumTVega - acc.sumT*acc.sumVegaRaw) / denominator
+				series.VannaDriftPerHour = (n*acc.sumTVanna - acc.sumT*acc.sumVannaRaw) / denominator
+				series.VolgaDriftPerHour = (n*acc.sumTVolga - acc.sumT*acc.sumVolgaRaw) / denominator
 			}
 		}
 		result.Series = append(result.Series, series)
@@ -248,12 +342,16 @@ func (r *Run) MeasureExposure(opts ExposureOptions) (*Exposure, error) {
 		poolOption += series.MeanAbsOptionDelta * n
 		poolHedge += series.MeanAbsHedgeDelta * n
 		poolVega += series.MeanAbsVega * n
+		poolVanna += series.MeanAbsVanna * n
+		poolVolga += series.MeanAbsVolga * n
 		poolDrift += series.NetDeltaDriftPerHour * n
 		poolMaxNet = math.Max(poolMaxNet, series.MaxAbsNetDelta)
 	}
 	if poolWeight > 0 {
 		result.PooledMeanAbsNetDelta = poolNet / poolWeight
 		result.PooledMeanAbsVega = poolVega / poolWeight
+		result.PooledMeanAbsVanna = poolVanna / poolWeight
+		result.PooledMeanAbsVolga = poolVolga / poolWeight
 		result.PooledNetDeltaDrift = poolDrift / poolWeight
 		if poolOption > 0 {
 			result.PooledHedgeRatio = poolHedge / poolOption
