@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"path/filepath"
 	"sort"
 	"sync"
 )
@@ -175,6 +176,16 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		Symbol    string `json:"symbol"`
 		NewSize   int64  `json:"new_size"`
 	}
+	files := opts.Files
+	filesSelected := opts.FilesSelected
+	if !filesSelected && files == nil {
+		filesSelected = true
+		for _, file := range r.files {
+			if filepath.Base(file) == "derivatives.jsonl" {
+				files = append(files, file)
+			}
+		}
+	}
 
 	var mu sync.Mutex
 	options := make(map[markKey]instrumentPayload)
@@ -214,7 +225,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 	expiries := make(map[markKey]int64)
 
 	// First pass: contract terms and expiry instants.
-	if err := r.Scan(ScanOptions{Events: []string{"instrument_settled"}, Files: opts.Files, FilesSelected: opts.FilesSelected}, func(event Event) {
+	if err := r.Scan(ScanOptions{Events: []string{"instrument_settled"}, Files: files, FilesSelected: filesSelected}, func(event Event) {
 		var payload instrumentPayload
 		if event.Decode(&payload) != nil || payload.InstrumentType != "OPTION" {
 			return
@@ -238,8 +249,8 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 	}
 	scan := ScanOptions{
 		Events:        []string{"funding_rate_update", "balance_change", "position_update", "OrderFill"},
-		Files:         opts.Files,
-		FilesSelected: opts.FilesSelected,
+		Files:         files,
+		FilesSelected: filesSelected,
 	}
 	if err := r.Scan(scan, func(event Event) {
 		switch event.Name {
