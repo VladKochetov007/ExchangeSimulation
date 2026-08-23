@@ -28,3 +28,28 @@ func TestMeasurePostOnlyActivityUsesPersistedAcceptanceAndRejectionEvidence(t *t
 		t.Fatalf("post-only activity = %+v", result)
 	}
 }
+
+func TestMeasurePostOnlyActivityRecoversSpotBookSymbolFromPath(t *testing.T) {
+	dir := writeRun(t, Report{TerminalAccounts: []AccountRow{
+		{VenueID: "north", ClientID: 1, Role: "cdf_spot_maker_1"},
+	}}, map[string][]string{
+		"north/spot/CDF-USD.jsonl": {
+			`{"sim_ts":1,"client_id":1,"event":"OrderAccepted","data":{"venue_id":"north","payload":{"order_id":11,"post_only":true}}}`,
+			`{"sim_ts":2,"client_id":1,"event":"OrderRejected","data":{"venue_id":"north","payload":{"error":"POST_ONLY_WOULD_TAKE"}}}`,
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasurePostOnlyActivity(PostOnlyActivityOptions{
+		Roles:   []string{"cdf_spot_maker"},
+		Symbols: []string{"CDF/USD"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Events != 2 || result.AcceptedPostOnly != 1 || result.RejectedWouldTake != 1 {
+		t.Fatalf("post-only activity = %+v, want path-recovered CDF/USD evidence", result)
+	}
+}

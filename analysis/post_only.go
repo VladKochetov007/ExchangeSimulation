@@ -54,7 +54,15 @@ func (r *Run) MeasurePostOnlyActivity(options PostOnlyActivityOptions) (PostOnly
 		Workers: 1,
 	}, func(event Event) {
 		role := r.Role(event.VenueID, event.ClientID)
-		if !selected(role, roles) || !selected(event.Symbol, symbols) {
+		// Spot book logger records the book identity in its path rather than
+		// redundantly in every event envelope. Do not turn an absent envelope
+		// symbol into an unselected event: recover only the explicitly named
+		// spot-book identity, never guess for multi-instrument logs.
+		symbol := event.Symbol
+		if symbol == "" {
+			symbol = symbolFromSpotFile(event.File)
+		}
+		if !selected(role, roles) || !selected(symbol, symbols) {
 			return
 		}
 		var payload postOnlyPayload

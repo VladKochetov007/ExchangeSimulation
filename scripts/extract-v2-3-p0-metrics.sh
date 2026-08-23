@@ -7,7 +7,7 @@ set -euo pipefail
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 artifact_dir="$root_dir/research/artifacts/v2-3-p0"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
-roles='spot_maker,fixed_distance_maker,imbalance_maker'
+roles='cdf_spot_maker,fixed_distance_maker,imbalance_maker'
 
 if [[ ! -x "$analyzer" ]]; then
 	echo "missing executable analyzer: $analyzer" >&2
@@ -42,7 +42,7 @@ for arm in A B C; do
 		# cannot establish that every maker family actually participated.
 		write_metric "$cell/postonly-cdf.json" "$analyzer" -metric postonly -json \
 			-post-only-roles "$roles" -post-only-symbols CDF/USD "$cell"
-		for role in spot_maker fixed_distance_maker imbalance_maker; do
+		for role in cdf_spot_maker fixed_distance_maker imbalance_maker; do
 			write_metric "$cell/postonly-cdf-${role}.json" "$analyzer" -metric postonly -json \
 				-post-only-roles "$role" -post-only-symbols CDF/USD "$cell"
 		done
@@ -70,7 +70,7 @@ for arm in A B C; do
 			  completion_sentinels: ["greeks.json", "latency.json"],
 			  required_artifacts: [
 			    "observationreceipts.json", "evidenceartifacthash.json",
-			    "postonly-cdf.json", "postonly-cdf-spot_maker.json",
+			    "postonly-cdf.json", "postonly-cdf-cdf_spot_maker.json",
 			    "postonly-cdf-fixed_distance_maker.json", "postonly-cdf-imbalance_maker.json",
 			    "viability.json", "cdf-viability.json"
 			  ]
