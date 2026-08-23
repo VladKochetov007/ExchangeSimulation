@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, settlements, arbitrage, roleaudit, ecology, liquidations, derivatives")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, settlements, orderlifecycle, arbitrage, roleaudit, ecology, liquidations, derivatives")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -517,6 +517,17 @@ func main() {
 						check.VenueID, check.Symbol, check.SettlementPrice, check.PaidAccounts, check.Holders,
 						check.NetSize, check.ExpectedPayout, check.PaidOut, check.Residual, check.TradesAfterExpiry)
 				}
+			})
+		case "orderlifecycle":
+			result, err := run.MeasureOrderLifecycle()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s accepted %d immediate-required %d missing-terminal %d fills-after-terminal %d quantity-mismatches %d/%d\n",
+					dir, result.Accepted, result.RequiredImmediateTerminal, result.MissingImmediateTerminal,
+					result.FillsAfterTerminal, result.FillQuantityMismatches, result.CancelQuantityMismatches)
 			})
 		case "positions":
 			result, err := run.MeasurePositions(analysis.PositionOptions{BasePrecision: *basePrecision})
