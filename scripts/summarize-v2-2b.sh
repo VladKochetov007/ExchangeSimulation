@@ -5,7 +5,10 @@ set -euo pipefail
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 artifact_dir="$root_dir/research/artifacts/v2-2b"
-rows=$(mktemp "${TMPDIR:-/tmp}/v2-2b-rows-XXXXXX")
+# Keep this short-lived assembly file beside the artifacts it summarizes. A
+# system-wide temporary path is neither repository-portable nor accepted by the
+# provenance path guard.
+rows=$(mktemp "$artifact_dir/.v2-2b-rows-XXXXXX")
 trap 'rm -f "$rows"' EXIT
 
 for arm in I0R0 I1R0 I0R1 I1R1; do
