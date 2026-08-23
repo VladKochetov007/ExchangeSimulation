@@ -2,12 +2,70 @@ package feesim
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"testing"
 )
+
+func TestPersistedEventPreservesLegacyCanonicalBytes(t *testing.T) {
+	tests := []struct {
+		name   string
+		time   int64
+		client uint64
+		event  string
+		data   any
+		want   string
+	}{
+		{
+			name: "map payload", time: 1, client: 7, event: "one", data: map[string]int{"n": 1},
+			want: `{"client_id":7,"data":{"n":1},"event":"one","sim_ts":1}`,
+		},
+		{
+			name: "struct payload", time: -2, client: 9, event: "fill", data: struct {
+				Price int64 `json:"price"`
+				Qty   int64 `json:"qty"`
+			}{Price: 50_000, Qty: 3},
+			want: `{"client_id":9,"data":{"price":50000,"qty":3},"event":"fill","sim_ts":-2}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := json.Marshal(persistedEvent{ClientID: test.client, Data: test.data, Event: test.event, SimTS: test.time})
+			if err != nil {
+				t.Fatal(err)
+			}
+			legacy, err := json.Marshal(map[string]any{"sim_ts": test.time, "client_id": test.client, "event": test.event, "data": test.data})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, legacy) || string(got) != test.want {
+				t.Fatalf("persisted bytes changed: got %s legacy %s want %s", got, legacy, test.want)
+			}
+		})
+	}
+}
+
+func BenchmarkPersistedEventEnvelope(b *testing.B) {
+	payload := map[string]any{"price": int64(50_000), "qty": int64(3), "side": "BUY"}
+	b.Run("legacy_map", func(b *testing.B) {
+		for range b.N {
+			if _, err := json.Marshal(map[string]any{"sim_ts": int64(1), "client_id": uint64(7), "event": "fill", "data": payload}); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("struct_envelope", func(b *testing.B) {
+		for range b.N {
+			if _, err := json.Marshal(persistedEvent{ClientID: 7, Data: payload, Event: "fill", SimTS: 1}); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
 
 func TestJSONLinesLoggerEvidenceDigestCountsPersistedRecordsOnce(t *testing.T) {
 	path := t.TempDir() + "/evidence.jsonl"

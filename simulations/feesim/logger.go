@@ -80,6 +80,17 @@ type JSONLinesLogger struct {
 	evidence EvidenceDigest
 }
 
+// persistedEvent preserves the exact key order produced by encoding/json for
+// the former map[string]any envelope (lexicographic: client_id, data, event,
+// sim_ts) without allocating and sorting a four-entry map per log record.
+// Its literal byte stream is part of the evidence-artifact contract.
+type persistedEvent struct {
+	ClientID uint64 `json:"client_id"`
+	Data     any    `json:"data"`
+	Event    string `json:"event"`
+	SimTS    int64  `json:"sim_ts"`
+}
+
 func NewJSONLinesLogger(path string) (*JSONLinesLogger, error) {
 	f, err := os.Create(path)
 	if err != nil {
@@ -89,12 +100,7 @@ func NewJSONLinesLogger(path string) (*JSONLinesLogger, error) {
 }
 
 func (l *JSONLinesLogger) LogEvent(simTime int64, clientID uint64, eventName string, event any) {
-	b, err := json.Marshal(map[string]any{
-		"sim_ts":    simTime,
-		"client_id": clientID,
-		"event":     eventName,
-		"data":      event,
-	})
+	b, err := json.Marshal(persistedEvent{ClientID: clientID, Data: event, Event: eventName, SimTS: simTime})
 	if err != nil {
 		panic(fmt.Sprintf("feesim: marshal persisted event %q: %v", eventName, err))
 	}
