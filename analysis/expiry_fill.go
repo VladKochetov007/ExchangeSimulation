@@ -19,6 +19,11 @@ type ExpiryFillCheck struct {
 	Settled          bool   `json:"settled"`
 	FillRecords      int    `json:"fill_records"`
 	FillsAfterExpiry int    `json:"fills_after_expiry"`
+	// SnapshotRecordsAfterExpiry counts persisted book publications after the
+	// contractual boundary. NonEmptySnapshotsAfterExpiry is the stronger
+	// observable: a deleted instrument must not retain quoted depth.
+	SnapshotRecordsAfterExpiry   int `json:"snapshot_records_after_expiry"`
+	NonEmptySnapshotsAfterExpiry int `json:"nonempty_snapshots_after_expiry"`
 }
 
 // ExpiryFillAudit verifies the contractual lifetime boundary for every
@@ -31,18 +36,20 @@ type ExpiryFillCheck struct {
 // usually contributes two records.  The invariant is the zero count of those
 // records after the independently announced contractual expiry.
 type ExpiryFillAudit struct {
-	Contracts                 int               `json:"contracts"`
-	Futures                   int               `json:"futures"`
-	Options                   int               `json:"options"`
-	ExpiredContracts          int               `json:"expired_contracts"`
-	SettledContracts          int               `json:"settled_contracts"`
-	ExpiredUnsettledContracts int               `json:"expired_unsettled_contracts"`
-	SettlementWithoutListing  int               `json:"settlement_without_listing"`
-	MetadataMismatches        int               `json:"metadata_mismatches"`
-	MissingExpiryMetadata     int               `json:"missing_expiry_metadata"`
-	FillRecords               int               `json:"fill_records"`
-	FillsAfterExpiry          int               `json:"fills_after_expiry"`
-	Checks                    []ExpiryFillCheck `json:"checks"`
+	Contracts                    int               `json:"contracts"`
+	Futures                      int               `json:"futures"`
+	Options                      int               `json:"options"`
+	ExpiredContracts             int               `json:"expired_contracts"`
+	SettledContracts             int               `json:"settled_contracts"`
+	ExpiredUnsettledContracts    int               `json:"expired_unsettled_contracts"`
+	SettlementWithoutListing     int               `json:"settlement_without_listing"`
+	MetadataMismatches           int               `json:"metadata_mismatches"`
+	MissingExpiryMetadata        int               `json:"missing_expiry_metadata"`
+	FillRecords                  int               `json:"fill_records"`
+	FillsAfterExpiry             int               `json:"fills_after_expiry"`
+	SnapshotRecordsAfterExpiry   int               `json:"snapshot_records_after_expiry"`
+	NonEmptySnapshotsAfterExpiry int               `json:"nonempty_snapshots_after_expiry"`
+	Checks                       []ExpiryFillCheck `json:"checks"`
 }
 
 type expiryFillKey struct {
@@ -117,7 +124,9 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 		return nil, err
 	}
 
-	type counts struct{ fills, after int }
+	type counts struct {
+		fills, after, snapshotsAfter, nonEmptySnapshotsAfter int
+	}
 	fillCounts := make(map[expiryFillKey]counts)
 	if err := r.Scan(ScanOptions{Events: []string{"OrderFill"}}, func(event Event) {
 		var payload fillPayload
@@ -141,6 +150,54 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 			row.after++
 		}
 		fillCounts[key] = row
+	}); err != nil {
+		return nil, err
+	}
+
+	// A fill-free expired book is still a lifecycle defect if it continues to
+	// publish executable depth. This uses the listing contract already read
+	// above, not a later settlement announcement, for the expiry boundary.
+	type snapshotPayload struct {
+		Bids []struct {
+			VisibleQty int64 `json:"visible_qty"`
+		} `json:"bids"`
+		Asks []struct {
+			VisibleQty int64 `json:"visible_qty"`
+		} `json:"asks"`
+	}
+	if err := r.Scan(ScanOptions{Events: []string{"BookSnapshot"}}, func(event Event) {
+		key := expiryFillKey{event.VenueID, event.Symbol}
+		contract, exists := contracts[key]
+		if !exists || event.SimTS <= contract.expiry {
+			return
+		}
+		var payload snapshotPayload
+		if event.Decode(&payload) != nil {
+			return
+		}
+		nonEmpty := false
+		for _, level := range payload.Bids {
+			if level.VisibleQty > 0 {
+				nonEmpty = true
+				break
+			}
+		}
+		if !nonEmpty {
+			for _, level := range payload.Asks {
+				if level.VisibleQty > 0 {
+					nonEmpty = true
+					break
+				}
+			}
+		}
+		mu.Lock()
+		row := fillCounts[key]
+		row.snapshotsAfter++
+		if nonEmpty {
+			row.nonEmptySnapshotsAfter++
+		}
+		fillCounts[key] = row
+		mu.Unlock()
 	}); err != nil {
 		return nil, err
 	}
@@ -181,11 +238,15 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 		}
 		result.FillRecords += counts.fills
 		result.FillsAfterExpiry += counts.after
+		result.SnapshotRecordsAfterExpiry += counts.snapshotsAfter
+		result.NonEmptySnapshotsAfterExpiry += counts.nonEmptySnapshotsAfter
 		result.Checks = append(result.Checks, ExpiryFillCheck{
 			VenueID: key.venue, Symbol: contract.symbol, InstrumentType: contract.kind,
 			ExpiryNano: contract.expiry, ListedNano: contract.listing,
 			SettlementNano: contract.settlement, Settled: contract.settled,
 			FillRecords: counts.fills, FillsAfterExpiry: counts.after,
+			SnapshotRecordsAfterExpiry:   counts.snapshotsAfter,
+			NonEmptySnapshotsAfterExpiry: counts.nonEmptySnapshotsAfter,
 		})
 	}
 	sort.Slice(result.Checks, func(i, j int) bool {

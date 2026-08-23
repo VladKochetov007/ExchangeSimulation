@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "mutation": "delay_expiry_settlement",
   "status": "CAUGHT",
   "scope": "Delay CheckExpiries by five simulated minutes while preserving each listed contract's immutable ExpiryNano.",
@@ -12,7 +12,7 @@
   "seed": 101,
   "duration_seconds": 18000,
   "mutant_binary_sha256": "4733ce48671a62351792b30a0acd203fb78a6fe7b2c312621ccf3903fd961173",
-  "analysis_binary_sha256": "adf6a659918f9c66045f808c0dd1b92e6cc7e381b046b627009a8b89f9b697ca",
+  "analysis_binary_sha256": "11cb12517eaa71e473282287505bb5b75d1ca81139a082a999fe47030119c950",
   "trigger": {
     "grace_nanoseconds": 300000000000,
     "contractually_expired_contracts": 66,
@@ -27,7 +27,9 @@
     "expired_unsettled_contracts": 0,
     "missing_expiry_metadata": 0,
     "fill_records_on_expired_contracts": 206360,
-    "fills_after_expiry": 0
+    "fills_after_expiry": 0,
+    "snapshot_records_after_expiry": 0,
+    "nonempty_snapshots_after_expiry": 0
   },
   "mutant": {
     "listed_contracts": 99,
@@ -37,6 +39,8 @@
     "missing_expiry_metadata": 0,
     "fill_records_on_expired_contracts": 212584,
     "fills_after_expiry": 7326,
+    "snapshot_records_after_expiry": 19800,
+    "nonempty_snapshots_after_expiry": 19800,
     "settlement_audit_future_only_fills_after_expiry": 1918,
     "settlement_audit_future_only_mismatches": 6,
     "order_lifecycle_errors": 0,
@@ -45,7 +49,7 @@
     "usd_conservation_residual": 75925,
     "usd_conservation_residual_relative": 4.591164163219892e-12
   },
-  "detector": "mvanalyze -metric expiryfills, anchored to instrument_listed ExpiryNano and terminal run time; settlement events are only corroboration.",
+  "detector": "mvanalyze -metric expiryfills, anchored to instrument_listed ExpiryNano and terminal run time; settlement events are only corroboration. The replay separately counts any post-expiry BookSnapshot and the stronger nonempty quoted-depth subset.",
   "evidence": {
     "events": 21300789,
     "digest": "120372c307a0d5e1d81c75cdf223c9191708b6224811f00ebcd35a57229dc7d6",
@@ -53,5 +57,5 @@
     "ordering": "unordered_multiset",
     "raw_logs_retained": true
   },
-  "interpretation": "The listing-anchored audit catches every exercised future and option contract trading after its contractual expiry. Order lifecycle and conservation remain clean, so neither validates contractual lifetime. A fixture additionally proves that an expired contract with no settlement announcement is reported as expired_unsettled rather than disappearing from the audit."
+  "interpretation": "The listing-anchored audit catches every exercised future and option contract trading or still quoting after its contractual expiry. The mutant has 19,800 nonempty post-expiry snapshots; its matched control and all three 24-hour baselines have zero. Order lifecycle and conservation remain clean, so neither validates contractual lifetime. A fixture additionally proves that an expired contract with no settlement announcement is reported as expired_unsettled rather than disappearing from the audit."
 }

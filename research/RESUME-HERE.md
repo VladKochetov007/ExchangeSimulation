@@ -408,6 +408,19 @@ finish and their contracts pass.
   evidence product, guarded by `TestScheduledZeroLatencyProducesZeroTelemetry`.
   Compact artifact: `artifacts/mutations/zero-north-spot-maker-latency.json`;
   raw logs remain. Remaining frozen mutation gaps are GTC cancellation request
-  evidence, expired resting-order delisting evidence, and cross-margin/option/
-  FX/borrowed-collateral liquidation coverage. Next: synthesize the frozen
-  autopsy from retained artifacts; do not begin v2 until that gate is reviewed.
+  evidence and cross-margin/option/FX/borrowed-collateral liquidation coverage.
+
+### 2026-08-23 V-031 expired-book quote update
+
+- `expiryfills` now joins `BookSnapshot` records to immutable listing expiry
+  terms and separately counts post-expiry snapshots with nonempty depth. The
+  pre-existing five-hour delayed-expiry mutant is **CAUGHT** with 19,800
+  nonempty post-expiry snapshots across 66 contracts (alongside 7,326 late
+  fills); the paired control has zero.
+- The extended replay over baseline seeds 101/102/103 is clean: each has 396
+  listed and 363 expired-and-settled contracts, with zero late fills, snapshot
+  records, or nonempty quotes after contractual expiry. This closes expired
+  book/delisting evidence for observable futures/options, but not the absent
+  GTC cancel-request path. The analyzer change is freeze-preserving. Next:
+  synthesize the frozen autopsy from retained artifacts; do not begin v2 until
+  that gate is reviewed.

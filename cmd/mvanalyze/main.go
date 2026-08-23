@@ -549,9 +549,10 @@ func main() {
 				os.Exit(1)
 			}
 			emit(dir, result, *asJSON, func() {
-				fmt.Printf("%-22s contracts %d (expired %d, settled %d, futures %d options %d), after-expiry fills %d, expired-unsettled %d, metadata defects %d\n",
+				fmt.Printf("%-22s contracts %d (expired %d, settled %d, futures %d options %d), after-expiry fills %d, post-expiry snapshots %d (nonempty %d), expired-unsettled %d, metadata defects %d\n",
 					dir, result.Contracts, result.ExpiredContracts, result.SettledContracts,
 					result.Futures, result.Options, result.FillsAfterExpiry,
+					result.SnapshotRecordsAfterExpiry, result.NonEmptySnapshotsAfterExpiry,
 					result.ExpiredUnsettledContracts, result.MissingExpiryMetadata+result.SettlementWithoutListing+result.MetadataMismatches)
 			})
 		case "orderlifecycle":

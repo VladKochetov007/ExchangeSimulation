@@ -1165,3 +1165,28 @@ This is an instrumentation/audit result only; the mutant source was restored
 before either world ran. It does not change simulator semantics or freeze
 `ae13f9a`. Compact provenance is
 `research/artifacts/mutations/zero-north-spot-maker-latency.json`.
+
+## V-031 — expiry audit did not reject an expired book that kept quoting
+
+V-025 proved that a listed future or option could not persist a fill after its
+contractual `ExpiryNano`, but a broken delisting path can leave resting depth
+on an expired book without another trade. The prior audit would have passed
+that case.
+
+`mvanalyze -metric expiryfills` now joins the immutable listing contract to
+persisted derivative `BookSnapshot` records. It separately counts all
+post-expiry snapshots and the stricter subset containing nonzero bid or ask
+depth. The pre-existing five-hour `delay_expiry_settlement` scratch mutant is
+therefore a direct falsifier: it emits 19,800 nonempty snapshots after expiry
+across 66 contracts, as well as its known 7,326 late fills. Its matched
+control has zero in both fields.
+
+The extended replay over the retained 24-hour ae13f9a baseline evidence is
+clean in all seeds: each has 396 listed contracts and 363 expired-and-settled
+contracts, with zero late fills, post-expiry snapshot records, or nonempty
+post-expiry quotes. This supports the observable future/option delisting
+boundary. It does not make a general GTC cancellation-request claim: those
+requests are not persisted, so their individual state transitions remain
+unobservable. The analyzer-only change does not alter the freeze. Compact
+provenance remains in
+`research/artifacts/mutations/delay-expiry-settlement.json`.

@@ -19,6 +19,11 @@ func expiryFillLine(timestamp int64, venue, symbol string) string {
 		timestamp, venue, symbol, symbol)
 }
 
+func expirySnapshotLine(timestamp int64, venue, symbol string, bid, ask int64) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":0,"event":"BookSnapshot","data":{"venue_id":%q,"payload":{"symbol":%q,"payload":{"bids":[{"visible_qty":%d}],"asks":[{"visible_qty":%d}]}}}}`,
+		timestamp, venue, symbol, bid, ask)
+}
+
 func TestExpiryFillAuditUsesContractualExpiryForFuturesAndOptions(t *testing.T) {
 	lines := []string{
 		expirySettledLine(100, 100, "north", "ABC-FUT-1", "FUTURE"),
@@ -45,6 +50,7 @@ func TestExpiryFillAuditCatchesExpiredContractWithoutSettlement(t *testing.T) {
 	lines := []string{
 		expiryInstrumentLine("instrument_listed", 1, 100, "north", "ABC-FUT-1", "FUTURE"),
 		expiryFillLine(101, "north", "ABC-FUT-1"),
+		expirySnapshotLine(101, "north", "ABC-FUT-1", 1, 1),
 	}
 	report := Report{TerminalAccounts: []AccountRow{{Account: Account{Timestamp: 101}}}}
 	run, err := Open(writeRun(t, report, map[string][]string{"north/general.jsonl": lines}))
@@ -55,7 +61,10 @@ func TestExpiryFillAuditCatchesExpiredContractWithoutSettlement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ExpiredContracts != 1 || result.ExpiredUnsettledContracts != 1 || result.FillsAfterExpiry != 1 || len(result.Checks) != 1 || result.Checks[0].Settled {
+	if result.ExpiredContracts != 1 || result.ExpiredUnsettledContracts != 1 ||
+		result.FillsAfterExpiry != 1 || result.SnapshotRecordsAfterExpiry != 1 ||
+		result.NonEmptySnapshotsAfterExpiry != 1 || len(result.Checks) != 1 ||
+		result.Checks[0].Settled {
 		t.Fatalf("expired unsettled contract survived: %+v", result)
 	}
 }

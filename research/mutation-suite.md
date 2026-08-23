@@ -57,7 +57,7 @@ an ecology run.
 | Settle first ABC-PERP match twice but emit one fill, ecology run | 1 match / 2 participant position paths | each logged linear fill has exactly one matching position transition | 248,898 linear fills and updates; 0 extras | **248,898 fills, 248,900 updates; 2 extras** | yes, through `-metric fillpositions` |
 | Omit settlement side effects for first ABC-PERP match but emit its fills, ecology run | 1 match / 2 participant position paths | each logged linear fill has exactly one matching position transition | 248,898 linear fills and updates; 0 missing | **248,898 fills, 248,896 updates; 2 missing** | yes, through `-metric fillpositions` |
 | Inject negative-latency market data through deterministic courier | 1 actor-bound message | source timestamp plus configured delay is the earliest actor-inbox delivery | no pre-due delivery; delivered at 1.010 s | **delivered at 1.000 s** | yes, through direct courier-boundary test |
-| Delay contractual expiry/delisting five minutes, ecology run | 66 expired contracts (6 futures, 60 options) | no persisted fill after listed contract ExpiryNano | 206,360 expired-contract fill records; 0 late | **212,584 records; 7,326 late across all 66 contracts** | yes, through `-metric expiryfills` |
+| Delay contractual expiry/delisting five minutes, ecology run | 66 expired contracts (6 futures, 60 options) | no persisted fill or nonempty quote after listed contract ExpiryNano | 206,360 expired-contract fill records; 0 late / 0 snapshots | **212,584 records; 7,326 late and 19,800 nonempty snapshots across all 66 contracts** | yes, through `-metric expiryfills` |
 | Use previous stored perpetual mark for liquidation sweep, ecology run | 39 observed ABC-PERP checks / 35 forced closes | reported liquidation trigger uses the contemporaneous mark and its derived PnL, equity, notional, and maintenance | all 39 fields exact | **14 stale-mark field mismatches** (mark, PnL, equity, notional, maintenance) | yes, through independent `-metric marginchecks` |
 | Drop every persisted ABC-PERP fill after real settlement, ecology run | 111,398 suppressed participant fill records | every persisted linear position transition has an observed economic fill; immediate orders retain a terminal evidence record | 248,898 fill/position paths; no lifecycle errors | **111,398 unmatched position paths; 47,268 missing immediate terminals; 28,309 quantity mismatches** | yes, through `-metric fillpositions` and `-metric orderlifecycle` |
 | Make north spot-maker courier links instantaneous while the manifest remains nonzero, ecology run | 1,040,345 delivered north spot-maker messages | persisted courier telemetry reports the actual nonzero delay promised by the manifest | 0.566 ms mean drawn delay on all three channels | **0 ns drawn and delivered delay on all three channels** | yes, through persisted `latency.json`; price-edge proxy rejected |
@@ -144,7 +144,6 @@ listing after expiry.
 
 | mutation | invariant that must fail | detector |
 |---|---|---|
-| Fail to cancel expired resting orders | the same, plus the book still quoting a delisted contract | `-metric settlements`; needs a delisting check that does not exist yet |
 | Drop a GTC cancellation request or state transition | resting order can remain executable after a requested cancel; request evidence is not persisted | none yet |
 | Use stale collateral for liquidation beyond one-perpetual/no-debt scope | full cross-margin trigger must use contemporaneous collateral and all risk marks | `marginchecks` covers only ABC-PERP, USD cash, and no-debt accounts; options, FX collateral, isolated margin, and borrowing remain untestable from retained evidence |
 
@@ -206,6 +205,17 @@ failure and also unit-tests the complementary no-settlement case as
 `expired_unsettled`. Order lifecycle and conservation remain clean, so they
 cannot substitute for a contractual-lifetime audit. Full artifact:
 `research/artifacts/mutations/delay-expiry-settlement.json`.
+
+V-031 extends that same listing-anchored replay beyond fills. Derivative
+`BookSnapshot` records retain their contract symbol, allowing the audit to
+count a post-expiry publication and, separately, a publication with nonempty
+bid or ask depth. The delayed-expiry mutant produces **19,800 nonempty
+post-expiry snapshots** across the same 66 exercised contracts; the matched
+five-hour control produces zero. All three retained 24-hour baselines also
+have zero post-expiry snapshot records and zero nonempty post-expiry snapshots
+across their 363 expired contracts. This directly catches the previously
+uncovered case where an expired resting book keeps quoting even if no further
+fill happens.
 
 The same non-circular audit was replayed over all three preserved 24-hour
 controls. Each has 396 listed contracts, 363 expired-and-settled contracts,
