@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run exactly one V2-3 P0 cell. A previous directory is evidence (or a failed
-# attempt) and is never overwritten in place.
+# Run exactly one V2-3 P0 replacement cell. Attempt 0 is retained separately
+# as invalidated evidence and is never overwritten in place.
 set -euo pipefail
 
 if [[ $# -lt 2 || $# -gt 3 ]]; then
@@ -14,8 +14,8 @@ case "$arm" in A|B|C) ;; *) echo "unknown P0 arm: $arm" >&2; exit 2;; esac
 case "$seed" in 101|103) ;; *) echo "unregistered P0 seed: $seed" >&2; exit 2;; esac
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-config="$root_dir/research/configs/v2-3-p0/$arm-$seed.json"
-output="$root_dir/research/artifacts/v2-3-p0/$arm/seed-$seed"
+config="$root_dir/research/configs/v2-3-p0-r1/$arm-$seed.json"
+output="$root_dir/research/artifacts/v2-3-p0-r1/$arm/seed-$seed"
 binary=${3:-"$root_dir/bin/multivenue"}
 
 if [[ ! -f "$config" ]]; then
@@ -43,7 +43,7 @@ jq -n \
 	--arg gomaxprocs "${GOMAXPROCS:-default}" \
 	--arg output_dir "$output" \
 	'{
-	  experiment_id: ("v2-3-p0-" + $arm + "-seed-" + ($seed|tostring)),
+	  experiment_id: ("v2-3-p0-r1-" + $arm + "-seed-" + ($seed|tostring)),
 	  arm: $arm,
 	  seed: $seed,
 	  simulated_horizon: "5m0s",
@@ -54,7 +54,7 @@ jq -n \
 	  gomaxprocs: $gomaxprocs,
 	  output_dir: $output_dir,
 	  command: ["multivenue", "-config", "run-config.json", "-duration", "5m", "-log-mode", "full"],
-	  raw_log_policy: "retain until every P0 activation and viability artifact passes review"
+		  raw_log_policy: "retain until every P0-r1 activation and viability artifact passes review"
 	}' >"$output/run-metadata.json"
 
 exec "$binary" -config "$config" -duration 5m -logdir "$output" -log-mode full

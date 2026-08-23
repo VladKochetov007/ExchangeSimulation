@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Render immutable V2-3 P0 passive-refresh inputs from the retained frozen
-# population. Only the declared A/B/C policy fields, provenance labels, and
-# V2 information-boundary evidence switches differ from the source config.
+# Render immutable V2-3 P0 replacement inputs after the attempt-0 scope
+# defect. Only the declared A/B/C policy fields, provenance labels, and V2
+# information-boundary evidence switches differ from the source config.
 set -euo pipefail
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 base_config="$root_dir/research/configs/frozen-baseline-2026-08-22.json"
-output_dir="$root_dir/research/configs/v2-3-p0"
+output_dir="$root_dir/research/configs/v2-3-p0-r1"
 
 if ! command -v jq >/dev/null; then
 	echo "jq is required to render V2-3 P0 configs" >&2
@@ -27,11 +27,11 @@ render() {
 		--argjson cancel_before_replace "$cancel_before_replace" \
 		--argjson seed "$seed" \
 		'
-		.experiment_id = ("v2-3-p0-" + $arm + "-seed-" + ($seed|tostring)) |
-		.hypothesis_id = "V2-3-P0" |
+		.experiment_id = ("v2-3-p0-r1-" + $arm + "-seed-" + ($seed|tostring)) |
+		.hypothesis_id = "V2-3-P0-R1" |
 		.date = "2026-08-24" |
-		.status = "preregistered" |
-		.description = "Five-minute passive refresh A/B/C mechanism screen; no price-stability claim." |
+		.status = "preregistered_replacement" |
+		.description = "Five-minute passive refresh A/B/C replacement screen after attempt-0 derivative scope defect; no price-stability claim." |
 		.seed = $seed |
 		.log_mode = "full" |
 		.record_market_data_receipts = true |
@@ -40,6 +40,16 @@ render() {
 		.spot_passive_maker_post_only = $post_only |
 		.spot_passive_maker_cancel_before_replace = $cancel_before_replace
 		' "$base_config" >"$output_dir/$arm-$seed.json"
+
+	# The replacement must not smuggle a post-result parameter change into an
+	# A/B/C cell. JSON structural equality after the declared provenance and
+	# instrumentation fields is the immutable-config gate.
+	if ! diff -u \
+		<(jq -S 'del(.experiment_id, .hypothesis_id, .date, .status, .description, .seed, .log_mode, .record_market_data_receipts, .record_decision_frontier_vectors, .market_data_receipt_roles, .spot_passive_maker_post_only, .spot_passive_maker_cancel_before_replace)' "$base_config") \
+		<(jq -S 'del(.experiment_id, .hypothesis_id, .date, .status, .description, .seed, .log_mode, .record_market_data_receipts, .record_decision_frontier_vectors, .market_data_receipt_roles, .spot_passive_maker_post_only, .spot_passive_maker_cancel_before_replace)' "$output_dir/$arm-$seed.json"); then
+		echo "P0 replacement config contains an undeclared change: $output_dir/$arm-$seed.json" >&2
+		exit 1
+	fi
 }
 
 for seed in 101 103; do
