@@ -305,3 +305,9 @@ finish and their contracts pass.
   1,139,566 / 1,153,404 / 1,134,326 one-to-one linear fill/position pairs,
   each with zero missing, unexpected, or chain-failed transitions. The JSON
   outputs are retained beside their baseline scoreboard artifacts.
+- The complementary scratch `drop_perp_settlement_once` mutant preserved the
+  first north `ABC-PERP` fill but suppressed its two settlement paths. It had
+  248,898 fills and 248,896 position updates; `fillpositions` caught the two
+  missing transitions while conservation, terminal positions, and order
+  lifecycle all remained clean. Artifact:
+  `artifacts/mutations/drop-perp-settlement-once.json`; raw evidence retained.

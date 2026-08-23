@@ -55,6 +55,7 @@ an ecology run.
 | Credit spot fee revenue twice, ecology run | 6,048,990 balance deltas | closed-system identity includes every venue fee credit | bounded truncation residual only | **CDF 126,548,770,107; USD 235,583,218,129 residual** | yes, through `-metric conservation` |
 | Negate Black-76 delta in live option-dealer hedge decisions, ecology run | 903 exchange-owned risk snapshots / all three hedge policies | actual underlying hedge offsets independently marked option delta | mean \|net delta\| 0.0170; max 0.1650; drift 0.00038/h | **mean \|net delta\| 1.9264; max 10.8592; drift 1.1844/h** | yes, through exchange-owned `-metric exposure` |
 | Settle first ABC-PERP match twice but emit one fill, ecology run | 1 match / 2 participant position paths | each logged linear fill has exactly one matching position transition | 248,898 linear fills and updates; 0 extras | **248,898 fills, 248,900 updates; 2 extras** | yes, through `-metric fillpositions` |
+| Omit settlement side effects for first ABC-PERP match but emit its fills, ecology run | 1 match / 2 participant position paths | each logged linear fill has exactly one matching position transition | 248,898 linear fills and updates; 0 missing | **248,898 fills, 248,896 updates; 2 missing** | yes, through `-metric fillpositions` |
 
 ### Delta-sign ecology mutation
 
@@ -200,3 +201,11 @@ does not persist an option `position_update` for each option fill, so option
 fill-to-position equality is **NOT TESTED**, not a pass. This is now recorded
 as V-023 in `validation-audit.md`; it constrains the claims the ae13f9a
 autopsy may make about option-path evidence.
+
+The complementary `drop_perp_settlement_once` mutant preserves a single
+reported north `ABC-PERP` fill pair while suppressing both settlement paths.
+It produces two missing, rather than two extra, position updates. Conservation,
+terminal positions and order lifecycle again remain clean; `fillpositions`
+catches the two missing transitions. The detector therefore rejects both a
+duplicated and an omitted economic settlement. Full artifact:
+`research/artifacts/mutations/drop-perp-settlement-once.json`.

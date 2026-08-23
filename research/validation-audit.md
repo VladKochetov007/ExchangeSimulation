@@ -917,6 +917,17 @@ error. Thus the new detector, not an existing identity, caught the intended
 defect. Full evidence is retained in
 `research/artifacts/mutations/double-perp-settlement-once.json`.
 
+The complementary `drop_perp_settlement_once` mutant suppressed the settlement
+side effects of exactly one north `ABC-PERP` match while leaving both ordinary
+`OrderFill` records intact. It retained all 248,898 linear fills but had only
+248,896 trade position updates: exactly two missing paths, one per party. As
+with the duplicate mutation, the balance-delta chain, closed-system identity
+(USD residual −108,199, relative −6.54e−12), terminal linear positions, and
+order-lifecycle audit remained clean. The same one-to-one relation therefore
+catches both directions of the failure rather than merely treating duplicate
+updates as suspicious. Full evidence is retained in
+`research/artifacts/mutations/drop-perp-settlement-once.json`.
+
 This work also exposed an evidence-contract limitation: European-option
 settlement updates the position store but emits no per-fill `position_update`
 record. Consequently the new audit deliberately does **not** claim option

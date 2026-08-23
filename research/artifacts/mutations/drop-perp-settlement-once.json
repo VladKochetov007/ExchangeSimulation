@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "mutation": "drop_perp_settlement_once",
+  "status": "CAUGHT",
+  "scope": "Suppress the settlement side effects of the first ABC-PERP match while leaving its ordinary OrderFill records intact.",
+  "simulator_freeze": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
+  "config": "research/configs/frozen-baseline-2026-08-21.json",
+  "config_sha256": "83bcaa542d88fbe87620dfb7682ea2a1c000c10f162adf9123a801dbc3b9dc9b",
+  "seed": 101,
+  "duration_seconds": 18000,
+  "mutant_binary_sha256": "8bdf2d1bb53fdc1b725a9700dca4fb67cdcf58e8d1fd6e79f358fd896a3bc972",
+  "analysis_binary_sha256": "befc187caa168bd1495c42632e21dc3878b4a46a9bb8cad4bf725d04cc174c64",
+  "trigger": {
+    "suppressed_matches": 1,
+    "missing_position_updates": 2,
+    "venue": "north",
+    "symbol": "ABC-PERP"
+  },
+  "control": {
+    "linear_fills": 248898,
+    "trade_position_updates": 248898,
+    "missing_position_update": 0,
+    "unexpected_position_update": 0,
+    "position_chain_failures": 0
+  },
+  "mutant": {
+    "linear_fills": 248898,
+    "trade_position_updates": 248896,
+    "missing_position_update": 2,
+    "unexpected_position_update": 0,
+    "position_chain_failures": 0,
+    "order_lifecycle_errors": 0,
+    "non_zero_net_contracts": 0,
+    "position_report_disagreement": 0,
+    "balance_delta_mismatched": 0,
+    "balance_chain_broken": 0,
+    "usd_conservation_residual": -108199,
+    "usd_conservation_residual_relative": -6.542764192245362e-12
+  },
+  "detector": "mvanalyze -metric fillpositions, which pairs each persisted linear fill with a same-file, same-timestamp, same-client, symbol, side, quantity, and post-trade-size position update.",
+  "evidence": {
+    "events": 21345550,
+    "digest": "9e820cc6deafad2fdb905b517ce5beb634811d711cbe3f54184d700e1ee64c8e",
+    "domain": "persisted_json_records",
+    "ordering": "unordered_multiset",
+    "raw_logs_retained": true
+  },
+  "interpretation": "The audit catches both missing position transitions. Conservation, terminal linear-position reconstruction, and order lifecycle all remain clean, so none would have detected this missing economic settlement. Option fills are not covered because frozen raw logs omit their per-fill position updates."
+}
