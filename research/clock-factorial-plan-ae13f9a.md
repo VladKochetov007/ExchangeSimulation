@@ -62,3 +62,23 @@ analysis binary SHA-256, run horizon, runtime/offline evidence digest, latency
 sidecar, `orderlifecycle`, and the metrics named above. Any absent final
 sidecar, digest mismatch, malformed log, or lifecycle failure invalidates that
 world rather than being treated as a result.
+
+## Adaptive second-stage isolation
+
+The first-stage outcomes are recorded separately below; they are not used to
+rewrite its decision rule. All three families crossed the specified primary
+threshold, so the next question is not whether the package matters but whether
+the two narrowest, code-motivated cadences can each account for it. This is a
+new discovery follow-up with its own declared tests.
+
+| arm | changed field relative to the 100ms-step control | hypothesis | primary prediction | falsifier |
+|---|---|---|---|---|
+| `quote-only` | `quote_interval: 1.0s -> 1.1s` only | maker refresh phase relative to deliveries/flow is sufficient for the maker-flow family | paired basis is at or below `(B_s + D_s) / 2` in both seeds | either seed remains above its midpoint |
+| `dated-carry-only` | `dated_carry_check_interval: default QuoteInterval (1.0s) -> 1.9s` only | the documented dated-carry/quote phase lock is sufficient for much of the risk/options/carry family | paired basis is at or below `(B_s + D_s) / 2` in both seeds | either seed remains above its midpoint |
+
+Both arms retain the same five-hour horizon, full evidence, paired seeds, 100ms
+step, and acceptance gates as stage one. The differing interval changes rate
+as well as phase, so even a pass establishes *cadence sensitivity* rather than
+an LCM-only mechanism. A pure initial-phase experiment is not exposed by the
+frozen configuration; adding one would be a simulator-semantic feature and is
+out of scope for this ae13f9a autopsy.
