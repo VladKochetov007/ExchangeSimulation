@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, roleaudit, ecology, liquidations, marginchecks, derivatives, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, observationreceipts, frontiervectors")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -33,6 +33,8 @@ func main() {
 	exhausted := flag.String("exhausted", "drop", "how orders that clear the whole visible side are priced: drop or deepest")
 	arbFeeBps := flag.Float64("arb-fee-bps", 2, "taker fee charged on every leg of an arbitrage cycle")
 	arbStaleness := flag.Float64("arb-staleness", 2, "how many seconds old a quote may be and still count as executable")
+	crossVenueSymbol := flag.String("cross-venue-symbol", "ABC-USD", "same asset book to compare across venues")
+	crossVenueMin := flag.Int("cross-venue-min-venues", 3, "fewest fresh two-sided venues required for a midpoint-dispersion observation")
 	conservationBook := flag.String("conservation-book", "", "restrict the conservation audit to one book, e.g. ABC/USD")
 	basePrecision := flag.Int64("base-precision", 100_000_000, "base-asset precision, for converting position sizes into contracts")
 	quotePrecision := flag.Int64("quote-precision", 100_000, "quote-asset precision, for converting logged prices into currency units")
@@ -534,6 +536,24 @@ func main() {
 						cycle.MeanEdgeBps, cycle.MaxEdgeBps, cycle.MeanAllBps,
 						float64(cycle.LongestRunNanos)/1e9)
 				}
+			})
+		case "crossvenue":
+			result, err := run.MeasureCrossVenueDispersion(analysis.CrossVenueDispersionOptions{
+				Symbol: *crossVenueSymbol, StalenessNanos: int64(*arbStaleness * 1e9), MinVenues: *crossVenueMin,
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			if result.Evaluated == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no fresh %d-venue two-sided observations for %s\n", dir, *crossVenueMin, *crossVenueSymbol)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-20s observations %6d  range bps mean %7.3f med %7.3f p90 %7.3f max %7.3f  longest-positive %6.2fs\n",
+					dir, result.Evaluated, result.MidpointRangeBps.Mean, result.MidpointRangeBps.Median,
+					result.MidpointRangeBps.P90, result.MidpointRangeBps.Max,
+					float64(result.LongestPositiveRunNanos)/1e9)
 			})
 		case "settlements":
 			result, err := run.MeasureSettlements(analysis.SettlementAuditOptions{BasePrecision: *basePrecision})
