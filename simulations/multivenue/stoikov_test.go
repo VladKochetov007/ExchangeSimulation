@@ -141,6 +141,38 @@ func TestStoikovMarketMakerRequotesAfterInventoryFill(t *testing.T) {
 	}
 }
 
+// Remote source age is an information constraint, not a cosmetic telemetry
+// field. A stale cache must suppress its composite before it can move a quote.
+func TestRemoteReferenceExpiresByPublicationAge(t *testing.T) {
+	published := time.Unix(10, 0)
+	observe := func(cache *LocalBookCache, sequence uint64, bid, ask int64) {
+		if !cache.ObserveSnapshot(actor.BookSnapshotEvent{
+			Symbol: "ABC/USD", Timestamp: published.UnixNano(), SeqNum: sequence,
+			Snapshot: &exchange.BookSnapshot{
+				Bids: []exchange.PriceLevel{{Price: bid, VisibleQty: 1}},
+				Asks: []exchange.PriceLevel{{Price: ask, VisibleQty: 1}},
+			},
+		}) {
+			t.Fatal("cache observation was rejected")
+		}
+	}
+	local := NewLocalBookCache("north", "ABC/USD")
+	remote := NewLocalBookCache("south", "ABC/USD")
+	observe(local, 1, 99, 101)
+	observe(remote, 1, 199, 201)
+	mm := &StoikovMarketMaker{
+		cfg:            StoikovMMConfig{BootstrapPrice: 100, AnchorToIndex: false},
+		localReference: local, remoteReference: remote,
+		remoteWeight: 0.5, remoteConfidence: 0.8, remoteMaxAge: time.Second,
+	}
+	if got := mm.referencePriceAt(published.Add(time.Second)); got != 140 {
+		t.Fatalf("fresh weighted remote composite = %d, want 140", got)
+	}
+	if got := mm.referencePriceAt(published.Add(time.Second + time.Nanosecond)); got != 0 {
+		t.Fatalf("expired remote composite = %d, want no usable reference", got)
+	}
+}
+
 // Inventory enters the control as a fraction of the risk budget, clamped, so a
 // position beyond the budget cannot skew the quote without bound. Before the
 // clamp the skew was per unit of inventory, and a maker holding 178 units

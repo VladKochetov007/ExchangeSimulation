@@ -1154,6 +1154,95 @@ func TestRemoteMakerFeedRejectsIncompleteEvidenceContract(t *testing.T) {
 	}
 }
 
+// V2-1d uses three distinct feed policies but remains a construction smoke:
+// it proves heterogeneous local information, not a price-discovery outcome.
+func TestHeterogeneousRemoteMakerRosterHasAuditableLocalFrontiers(t *testing.T) {
+	dir := t.TempDir()
+	feeds := []RemoteMakerFeedConfig{
+		{TargetVenue: "north", TargetMaker: 1, SourceVenue: "south", Symbol: "ABC/USD", Weight: 0.50, Confidence: 0.80, MaxObservationAge: 2 * time.Second, Latency: LatencyProfile{Model: "constant", Delay: 10 * time.Millisecond}},
+		{TargetVenue: "central", TargetMaker: 1, SourceVenue: "north", Symbol: "ABC/USD", Weight: 0.35, Confidence: 0.90, MaxObservationAge: 4 * time.Second, Latency: LatencyProfile{Model: "constant", Delay: 20 * time.Millisecond}},
+		{TargetVenue: "south", TargetMaker: 1, SourceVenue: "central", Symbol: "ABC/USD", Weight: 0.45, Confidence: 0.60, MaxObservationAge: 6 * time.Second, Latency: LatencyProfile{Model: "constant", Delay: 30 * time.Millisecond}},
+	}
+	sim, err := NewSim(20*time.Second, Config{
+		LogDir: dir, LogMode: "none", Seed: 101, SpotMakerCount: 2,
+		MakerAnchor:                   "own_mid",
+		SpotMakerLocalReferenceCache:  true,
+		RecordMarketDataReceipts:      true,
+		RecordDecisionFrontierVectors: true,
+		MarketDataReceiptRoles:        []string{"spot_maker", "v2_remote_feed"},
+		LatencyProfiles: map[string]LatencyProfile{
+			"spot_maker": {Model: "constant", Delay: 10 * time.Millisecond},
+		},
+		RemoteMakerFeeds: feeds,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sim.Close()
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	wantSource := map[string]string{"north": "south", "central": "north", "south": "central"}
+	feedSessions := 0
+	for _, venue := range sim.Venues {
+		feedSessions += len(venue.FeedSessions)
+		var abcMakers []*StoikovMarketMaker
+		for _, maker := range venue.SpotMakers {
+			if maker.cfg.Symbol == "ABC/USD" {
+				abcMakers = append(abcMakers, maker)
+			}
+		}
+		if len(abcMakers) != 2 {
+			t.Fatalf("%s ABC/USD makers = %d, want 2", venue.ID, len(abcMakers))
+		}
+		remote, active := abcMakers[0].RemoteReferenceView()
+		if !active || remote.SourceVenue != wantSource[venue.ID] || remote.Updates == 0 || abcMakers[0].bidPrice == 0 || abcMakers[0].askPrice == 0 {
+			t.Fatalf("%s informed maker did not activate/quote: remote=%+v active=%t bid/ask=%d/%d", venue.ID, remote, active, abcMakers[0].bidPrice, abcMakers[0].askPrice)
+		}
+		if _, active := abcMakers[1].RemoteReferenceView(); active {
+			t.Fatalf("%s local-only maker unexpectedly received a remote feed", venue.ID)
+		}
+	}
+	if feedSessions != len(feeds) {
+		t.Fatalf("remote feed sessions = %d, want %d", feedSessions, len(feeds))
+	}
+	scalar, err := analysis.AuditMarketDataReceipts(dir)
+	if err != nil || !scalar.Valid || scalar.Decisions == 0 {
+		t.Fatalf("roster scalar evidence invalid: audit=%+v err=%v", scalar, err)
+	}
+	vectors, err := analysis.AuditDecisionFrontierVectors(dir)
+	if err != nil || !vectors.Valid || vectors.Decisions == 0 || vectors.Components != 2*vectors.Decisions {
+		t.Fatalf("roster vector evidence invalid: audit=%+v err=%v", vectors, err)
+	}
+}
+
+func TestHeterogeneousRemoteMakerRosterRejectsDecorativePolicyFields(t *testing.T) {
+	config := Config{
+		LogDir: t.TempDir(), LogMode: "none", Seed: 101, SpotMakerCount: 2,
+		MakerAnchor:                   "own_mid",
+		SpotMakerLocalReferenceCache:  true,
+		RecordMarketDataReceipts:      true,
+		RecordDecisionFrontierVectors: true,
+		MarketDataReceiptRoles:        []string{"spot_maker", "v2_remote_feed"},
+		LatencyProfiles: map[string]LatencyProfile{
+			"spot_maker": {Model: "constant", Delay: time.Millisecond},
+		},
+		RemoteMakerFeeds: []RemoteMakerFeedConfig{{
+			TargetVenue: "north", TargetMaker: 1, SourceVenue: "south", Symbol: "ABC/USD", Weight: 0.5,
+			Latency: LatencyProfile{Model: "constant", Delay: time.Millisecond},
+		}},
+	}
+	if _, err := NewSim(time.Second, config); err == nil || !strings.Contains(err.Error(), "confidence") {
+		t.Fatalf("roster accepted omitted confidence/horizon policy: %v", err)
+	}
+	config.RemoteMakerFeeds[0].Confidence = 0.8
+	config.RemoteMakerFeeds[0].MaxObservationAge = time.Second
+	config.RemoteMakerFeeds = append(config.RemoteMakerFeeds, config.RemoteMakerFeeds[0])
+	if _, err := NewSim(time.Second, config); err == nil || !strings.Contains(err.Error(), "duplicate remote maker feed target") {
+		t.Fatalf("roster accepted duplicate target maker: %v", err)
+	}
+}
+
 // The consensus index is a median of the venues' midpoints and must ignore a
 // single venue that has run away, which is the property that lets it hold a
 // market that cannot hold itself.

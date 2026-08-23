@@ -52,7 +52,8 @@ func TestV20EvidenceHelper(t *testing.T) {
 	cfg.Seed = 101
 	cfg.CheckpointIntervalSeconds = 60
 	remoteFeed := os.Getenv("V21_REMOTE_FEED") == "1"
-	if os.Getenv("V21_LOCAL_CACHE") == "1" || remoteFeed {
+	remoteRoster := os.Getenv("V21_REMOTE_ROSTER") == "1"
+	if os.Getenv("V21_LOCAL_CACHE") == "1" || remoteFeed || remoteRoster {
 		cfg.MakerAnchor = "own_mid"
 		cfg.SpotMakerLocalReferenceCache = true
 		cfg.LatencyProfiles = map[string]LatencyProfile{
@@ -62,7 +63,7 @@ func TestV20EvidenceHelper(t *testing.T) {
 	cfg.RecordMarketDataReceipts = os.Getenv("V20_EVIDENCE_ON") == "1"
 	if cfg.RecordMarketDataReceipts {
 		cfg.MarketDataReceiptRoles = []string{"spot_maker"}
-		if remoteFeed {
+		if remoteFeed || remoteRoster {
 			cfg.MarketDataReceiptRoles = append(cfg.MarketDataReceiptRoles, "v2_remote_feed")
 			cfg.RecordDecisionFrontierVectors = true
 		}
@@ -71,6 +72,14 @@ func TestV20EvidenceHelper(t *testing.T) {
 		cfg.RemoteMakerFeed = &RemoteMakerFeedConfig{
 			TargetVenue: "north", SourceVenue: "south", Symbol: "ABC/USD", Weight: 0.5,
 			Latency: LatencyProfile{Model: "constant", Delay: 20 * time.Millisecond},
+		}
+	}
+	if remoteRoster {
+		cfg.SpotMakerCount = 2
+		cfg.RemoteMakerFeeds = []RemoteMakerFeedConfig{
+			{TargetVenue: "north", TargetMaker: 1, SourceVenue: "south", Symbol: "ABC/USD", Weight: 0.50, Confidence: 0.80, MaxObservationAge: 2 * time.Second, Latency: LatencyProfile{Model: "constant", Delay: 10 * time.Millisecond}},
+			{TargetVenue: "central", TargetMaker: 1, SourceVenue: "north", Symbol: "ABC/USD", Weight: 0.35, Confidence: 0.90, MaxObservationAge: 4 * time.Second, Latency: LatencyProfile{Model: "constant", Delay: 20 * time.Millisecond}},
+			{TargetVenue: "south", TargetMaker: 1, SourceVenue: "central", Symbol: "ABC/USD", Weight: 0.45, Confidence: 0.60, MaxObservationAge: 6 * time.Second, Latency: LatencyProfile{Model: "constant", Delay: 30 * time.Millisecond}},
 		}
 	}
 	sim, err := NewSim(2*time.Minute, cfg)
@@ -209,7 +218,7 @@ func TestV21RemoteFeedIsFreshProcessDeterministicAndEvidenceNeutral(t *testing.T
 			if evidence {
 				key = "g" + gomax + "/on"
 			}
-			results[key] = runV2EvidenceHelper(t, gomax, evidence, true, true)
+			results[key] = runV2EvidenceHelper(t, gomax, evidence, true, true, false)
 		}
 	}
 	want := results["g1/off"].ExecutionHash
@@ -225,6 +234,33 @@ func TestV21RemoteFeedIsFreshProcessDeterministicAndEvidenceNeutral(t *testing.T
 		left.FrontierVectorDecisions != right.FrontierVectorDecisions || left.FrontierVectorComponents != right.FrontierVectorComponents ||
 		left.FrontierVectorDigest != right.FrontierVectorDigest || left.FrontierComponentDigest != right.FrontierComponentDigest {
 		t.Fatalf("V2-1 remote feed evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
+	}
+}
+
+func TestV21HeterogeneousRosterIsFreshProcessDeterministicAndEvidenceNeutral(t *testing.T) {
+	results := make(map[string]v20HelperResult)
+	for _, gomax := range []string{"1", "4"} {
+		for _, evidence := range []bool{false, true} {
+			key := "g" + gomax + "/off"
+			if evidence {
+				key = "g" + gomax + "/on"
+			}
+			results[key] = runV2EvidenceHelper(t, gomax, evidence, true, false, true)
+		}
+	}
+	want := results["g1/off"].ExecutionHash
+	for key, result := range results {
+		if result.ExecutionHash == "" || result.ExecutionHash != want {
+			t.Fatalf("V2-1 heterogeneous roster changes execution with evidence/process setting: want %s, %s=%s", want, key, result.ExecutionHash)
+		}
+	}
+	left, right := results["g1/on"], results["g4/on"]
+	if left.Schedules == 0 || left.Receipts == 0 || left.Decisions == 0 || left.FrontierVectorDecisions == 0 ||
+		left.Schedules != right.Schedules || left.Receipts != right.Receipts || left.Decisions != right.Decisions ||
+		left.ScheduleDigest != right.ScheduleDigest || left.ReceiptDigest != right.ReceiptDigest || left.DecisionDigest != right.DecisionDigest ||
+		left.FrontierVectorDecisions != right.FrontierVectorDecisions || left.FrontierVectorComponents != right.FrontierVectorComponents ||
+		left.FrontierVectorDigest != right.FrontierVectorDigest || left.FrontierComponentDigest != right.FrontierComponentDigest {
+		t.Fatalf("V2-1 heterogeneous roster evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
 	}
 }
 
@@ -250,14 +286,14 @@ func TestV20EvidenceRejectsCustomMountCoverageGap(t *testing.T) {
 }
 
 func runV20Helper(t *testing.T, gomax string, evidence bool) v20HelperResult {
-	return runV2EvidenceHelper(t, gomax, evidence, false, false)
+	return runV2EvidenceHelper(t, gomax, evidence, false, false, false)
 }
 
 func runEvidenceHelper(t *testing.T, gomax string, evidence, localCache bool) v20HelperResult {
-	return runV2EvidenceHelper(t, gomax, evidence, localCache, false)
+	return runV2EvidenceHelper(t, gomax, evidence, localCache, false, false)
 }
 
-func runV2EvidenceHelper(t *testing.T, gomax string, evidence, localCache, remoteFeed bool) v20HelperResult {
+func runV2EvidenceHelper(t *testing.T, gomax string, evidence, localCache, remoteFeed, remoteRoster bool) v20HelperResult {
 	t.Helper()
 	output := filepath.Join(t.TempDir(), "run")
 	cmd := exec.Command(os.Args[0], "-test.run=TestV20EvidenceHelper", "--")
@@ -270,6 +306,9 @@ func runV2EvidenceHelper(t *testing.T, gomax string, evidence, localCache, remot
 	}
 	if remoteFeed {
 		cmd.Env = append(cmd.Env, "V21_REMOTE_FEED=1")
+	}
+	if remoteRoster {
+		cmd.Env = append(cmd.Env, "V21_REMOTE_ROSTER=1")
 	}
 	raw, err := cmd.CombinedOutput()
 	if err != nil {

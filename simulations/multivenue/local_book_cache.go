@@ -10,9 +10,9 @@ import (
 // exchange or book pointer: a cache may advance only when its owner receives a
 // public-feed event through its own gateway.
 //
-// This first V2-1 slice is single-source. A future composite must retain one
-// cache per source and record a vector frontier before it may be used for a
-// cross-venue information claim.
+// Each cache represents one source. Any composite must retain one cache per
+// source and record a vector frontier before it may support a cross-venue
+// information claim.
 type LocalBookCache struct {
 	sourceVenue string
 	symbol      string

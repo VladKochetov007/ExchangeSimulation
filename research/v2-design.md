@@ -69,8 +69,11 @@ Progress ledger: the local delayed cache prerequisite is
 [frontier-vector artifact](v2-1-frontier-vectors.md) now catches future,
 dropped-component, and dropped-decision mutations. Its first live remote,
 one-maker proof is [V2-1c](v2-1-remote-feed-smoke.md). It has no economic
-claim. A heterogeneous roster remains blocked until its distinct information
-sets have equivalent evidence and activation tests.
+claim. The predeclared three-policy roster in
+[V2-1d](v2-1d-roster-preregistration.md) now passes those distinct
+information-set, activation, and fresh-process evidence tests. It has no
+price-discovery claim. The next gate is explicit arbitrage, not a larger maker
+parameter sweep.
 
 ## V2-2 — executable cross-venue arbitrage
 

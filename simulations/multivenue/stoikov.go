@@ -231,6 +231,8 @@ type StoikovMarketMaker struct {
 	localReference     *LocalBookCache
 	remoteReference    *LocalBookCache
 	remoteWeight       float64
+	remoteConfidence   float64
+	remoteMaxAge       time.Duration
 	forwardAt          int64
 	lastForward        int64
 	lastForwardTS      int64
@@ -296,11 +298,12 @@ func (mm *StoikovMarketMaker) RemoteReferenceView() (LocalBookView, bool) {
 }
 
 // AttachRemoteReferenceFeed attaches one feed-only delayed public session to
-// this maker. It must be called before the deterministic runner starts. The
-// maker's reference is withheld until both its local and remote caches have a
-// delivered two-sided observation; there is no global-index fallback.
-func (mm *StoikovMarketMaker) AttachRemoteReferenceFeed(feed actor.Gateway, sourceVenue string, weight float64) error {
-	if mm == nil || feed == nil || sourceVenue == "" || weight <= 0 || weight > 1 {
+// this maker. Weight and confidence form the remote composite component;
+// maxAge bounds it by source publication time when positive. The reference is
+// withheld until both actor-owned caches have usable observations; there is no
+// global-index fallback.
+func (mm *StoikovMarketMaker) AttachRemoteReferenceFeed(feed actor.Gateway, sourceVenue string, weight, confidence float64, maxAge time.Duration) error {
+	if mm == nil || feed == nil || sourceVenue == "" || weight <= 0 || weight > 1 || confidence <= 0 || confidence > 1 || maxAge < 0 || weight*confidence > 1 {
 		return fmt.Errorf("multivenue: invalid remote reference feed")
 	}
 	if mm.localReference == nil {
@@ -318,7 +321,7 @@ func (mm *StoikovMarketMaker) AttachRemoteReferenceFeed(feed actor.Gateway, sour
 	if err := mm.SubscribeMarketDataFeed(feed, mm.cfg.ReferenceSymbol, exchange.MDSnapshot); err != nil {
 		return err
 	}
-	mm.remoteReference, mm.remoteWeight = cache, weight
+	mm.remoteReference, mm.remoteWeight, mm.remoteConfidence, mm.remoteMaxAge = cache, weight, confidence, maxAge
 	return nil
 }
 
@@ -527,7 +530,7 @@ func (mm *StoikovMarketMaker) onHedgeTick(_ time.Time) {
 	mm.hedgeDelta()
 }
 
-func (mm *StoikovMarketMaker) onTick(_ time.Time) {
+func (mm *StoikovMarketMaker) onTick(now time.Time) {
 	if !mm.subscribed {
 		mm.Subscribe(mm.cfg.ReferenceSymbol, exchange.MDSnapshot)
 		mm.Subscribe(mm.cfg.ReferenceSymbol, exchange.MDTrade)
@@ -546,7 +549,7 @@ func (mm *StoikovMarketMaker) onTick(_ time.Time) {
 	if len(mm.pending) != 0 || mm.cfg.BasePrecision <= 0 || mm.cfg.QuotePrecision <= 0 || mm.cfg.TickSize <= 0 || mm.cfg.QuoteQty <= 0 {
 		return
 	}
-	forward := mm.referencePrice()
+	forward := mm.referencePriceAt(now)
 	// Convert the relative parameters into the absolute quote units the
 	// formula expects. Variance is quote-price^2 and both risk aversion and
 	// fill decay are reciprocal quote-price, so with forward F:
@@ -735,18 +738,29 @@ func (mm *StoikovMarketMaker) inventoryFraction() float64 {
 
 // referencePrice is what the maker quotes around.
 func (mm *StoikovMarketMaker) referencePrice() int64 {
+	return mm.referencePriceAt(time.Time{})
+}
+
+func (mm *StoikovMarketMaker) referencePriceAt(now time.Time) int64 {
 	book := mm.forward
 	if book <= 0 {
 		book = mm.cfg.BootstrapPrice
 	}
 	if !mm.cfg.AnchorToIndex || mm.indexPrice <= 0 {
 		if mm.remoteReference != nil {
-			local, localOK := mm.localReference.Mid()
-			remote, remoteOK := mm.remoteReference.Mid()
+			localView, localOK := mm.localReference.View()
+			remoteView, remoteOK := mm.remoteReference.View()
 			if !localOK || !remoteOK {
 				return 0
 			}
-			weight := mm.remoteWeight
+			if mm.remoteMaxAge > 0 && !now.IsZero() {
+				if now.UnixNano()-localView.PublishedAt > mm.remoteMaxAge.Nanoseconds() || now.UnixNano()-remoteView.PublishedAt > mm.remoteMaxAge.Nanoseconds() {
+					return 0
+				}
+			}
+			local := localView.Bid + (localView.Ask-localView.Bid)/2
+			remote := remoteView.Bid + (remoteView.Ask-remoteView.Bid)/2
+			weight := mm.remoteWeight * mm.remoteConfidence
 			composite := (1-weight)*float64(local) + weight*float64(remote)
 			if !finite(composite) || composite <= 0 {
 				return 0

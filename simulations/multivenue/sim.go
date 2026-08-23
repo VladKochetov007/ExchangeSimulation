@@ -57,11 +57,21 @@ type VenueRule struct {
 // TargetVenue. It is deliberately not a roster language: heterogeneous source
 // selection waits for this single remote cache to pass its evidence gate.
 type RemoteMakerFeedConfig struct {
-	TargetVenue string         `json:"target_venue"`
-	SourceVenue string         `json:"source_venue"`
-	Symbol      string         `json:"symbol"`
-	Weight      float64        `json:"weight"`
-	Latency     LatencyProfile `json:"latency"`
+	TargetVenue string `json:"target_venue"`
+	// TargetMaker is a one-based ordinal among TargetVenue's ABC/USD spot
+	// makers. Zero retains the original one-maker smoke default of one.
+	TargetMaker int     `json:"target_maker,omitempty"`
+	SourceVenue string  `json:"source_venue"`
+	Symbol      string  `json:"symbol"`
+	Weight      float64 `json:"weight"`
+	// Confidence discounts Weight when a maker forms its local composite.
+	// Zero retains the one-maker smoke default of one; roster entries must set
+	// it explicitly so different policy inputs cannot be hidden by defaults.
+	Confidence float64 `json:"confidence,omitempty"`
+	// MaxObservationAge bounds source staleness by publication time. Zero is
+	// retained only for the original one-maker smoke compatibility path.
+	MaxObservationAge time.Duration  `json:"max_observation_age,omitempty"`
+	Latency           LatencyProfile `json:"latency"`
 }
 
 // Config creates exactly three separately funded direct venues on one
@@ -159,6 +169,10 @@ type Config struct {
 	// RemoteMakerFeed is the one-source V2-1 smoke configuration. It is never
 	// a fallback for the historical shared consensus index.
 	RemoteMakerFeed *RemoteMakerFeedConfig `json:"remote_maker_feed,omitempty"`
+	// RemoteMakerFeeds is the next V2-1 roster slice. Each entry attaches one
+	// declared delayed remote public feed to one explicitly numbered local
+	// maker; a maker may have one remote source in this isolated slice.
+	RemoteMakerFeeds []RemoteMakerFeedConfig `json:"remote_maker_feeds,omitempty"`
 	// RoundTripTraderCount adds participants whose demand mean-reverts in
 	// quantity: they open a position and unwind it after RoundTripHold. Pure
 	// random-side flow mean-reverts in price but not in quantity, which leaves
@@ -533,6 +547,17 @@ func DecodeConfig(raw []byte) (Config, error) {
 	return cfg, nil
 }
 
+// remoteMakerFeeds normalizes the legacy one-maker smoke field and the
+// explicitly heterogeneous roster into one deterministic configuration order.
+// normalize rejects use of both fields, so this helper never merges two
+// competing declarations.
+func (c Config) remoteMakerFeeds() []RemoteMakerFeedConfig {
+	if c.RemoteMakerFeed != nil {
+		return []RemoteMakerFeedConfig{*c.RemoteMakerFeed}
+	}
+	return c.RemoteMakerFeeds
+}
+
 func (c *Config) normalize() error {
 	if c.LogDir == "" {
 		return errors.New("multivenue: LogDir is required")
@@ -593,10 +618,14 @@ func (c *Config) normalize() error {
 			return fmt.Errorf("multivenue: venue %q has unsupported matching rule %q", id, rule.MatchingRule)
 		}
 	}
-	if c.RemoteMakerFeed != nil {
-		remote := c.RemoteMakerFeed
+	if c.RemoteMakerFeed != nil && len(c.RemoteMakerFeeds) != 0 {
+		return errors.New("multivenue: use remote_maker_feed or remote_maker_feeds, not both")
+	}
+	remoteFeeds := c.remoteMakerFeeds()
+	if len(remoteFeeds) != 0 {
+		roster := len(c.RemoteMakerFeeds) != 0
 		if !c.SpotMakerLocalReferenceCache || c.MakerAnchor != "own_mid" {
-			return errors.New("multivenue: remote maker feed requires the local-cache own_mid V2-1 path")
+			return errors.New("multivenue: remote maker feeds require the local-cache own_mid V2-1 path")
 		}
 		// A scientific remote-feed run must retain both scalar receipts and
 		// vector frontiers. The instrumentation-off variant remains valid only
@@ -604,29 +633,55 @@ func (c *Config) normalize() error {
 		// path with neither recorder, so no result from it is evidence.
 		if c.RecordMarketDataReceipts {
 			if !c.RecordDecisionFrontierVectors {
-				return errors.New("multivenue: instrumented remote maker feed requires decision frontier vectors")
+				return errors.New("multivenue: instrumented remote maker feeds require decision frontier vectors")
 			}
 			if !slices.Contains(c.MarketDataReceiptRoles, "spot_maker") || !slices.Contains(c.MarketDataReceiptRoles, "v2_remote_feed") {
-				return errors.New("multivenue: instrumented remote maker feed requires spot_maker and v2_remote_feed receipt roles")
+				return errors.New("multivenue: instrumented remote maker feeds require spot_maker and v2_remote_feed receipt roles")
 			}
 		}
-		if remote.TargetVenue == "" || remote.SourceVenue == "" || remote.TargetVenue == remote.SourceVenue {
-			return errors.New("multivenue: remote maker feed needs distinct source and target venues")
+		makerCount := c.SpotMakerCount
+		if makerCount == 0 {
+			makerCount = 2
 		}
-		if _, exists := seen[remote.TargetVenue]; !exists {
-			return fmt.Errorf("multivenue: remote maker feed target venue %q is unknown", remote.TargetVenue)
-		}
-		if _, exists := seen[remote.SourceVenue]; !exists {
-			return fmt.Errorf("multivenue: remote maker feed source venue %q is unknown", remote.SourceVenue)
-		}
-		if remote.Symbol != "ABC/USD" || remote.Weight <= 0 || remote.Weight > 1 {
-			return errors.New("multivenue: remote maker feed requires ABC/USD and a weight in (0,1]")
-		}
-		if err := remote.Latency.validate("remote_maker_feed"); err != nil {
-			return err
-		}
-		if remote.Latency.zero() {
-			return errors.New("multivenue: remote maker feed needs a nonzero delayed link")
+		seenTargets := make(map[string]struct{}, len(remoteFeeds))
+		for index, remote := range remoteFeeds {
+			ordinal := remote.TargetMaker
+			if ordinal == 0 && !roster {
+				ordinal = 1
+			}
+			if remote.TargetVenue == "" || remote.SourceVenue == "" || remote.TargetVenue == remote.SourceVenue {
+				return fmt.Errorf("multivenue: remote maker feed %d needs distinct source and target venues", index+1)
+			}
+			if _, exists := seen[remote.TargetVenue]; !exists {
+				return fmt.Errorf("multivenue: remote maker feed %d target venue %q is unknown", index+1, remote.TargetVenue)
+			}
+			if _, exists := seen[remote.SourceVenue]; !exists {
+				return fmt.Errorf("multivenue: remote maker feed %d source venue %q is unknown", index+1, remote.SourceVenue)
+			}
+			if ordinal < 1 || ordinal > makerCount || remote.Symbol != "ABC/USD" || remote.Weight <= 0 || remote.Weight > 1 {
+				return fmt.Errorf("multivenue: remote maker feed %d needs ABC/USD, a target maker ordinal, and weight in (0,1]", index+1)
+			}
+			if roster && (remote.Confidence <= 0 || remote.Confidence > 1 || remote.MaxObservationAge <= 0) {
+				return fmt.Errorf("multivenue: remote maker roster feed %d needs confidence in (0,1] and positive max_observation_age", index+1)
+			}
+			confidence := remote.Confidence
+			if confidence == 0 {
+				confidence = 1
+			}
+			if remote.Weight*confidence <= 0 || remote.Weight*confidence > 1 {
+				return fmt.Errorf("multivenue: remote maker feed %d has invalid effective weight", index+1)
+			}
+			if err := remote.Latency.validate(fmt.Sprintf("remote_maker_feed_%d", index+1)); err != nil {
+				return err
+			}
+			if remote.Latency.zero() {
+				return fmt.Errorf("multivenue: remote maker feed %d needs a nonzero delayed link", index+1)
+			}
+			targetKey := fmt.Sprintf("%s/%d/%s", remote.TargetVenue, ordinal, remote.Symbol)
+			if _, duplicate := seenTargets[targetKey]; duplicate {
+				return fmt.Errorf("multivenue: duplicate remote maker feed target %s", targetKey)
+			}
+			seenTargets[targetKey] = struct{}{}
 		}
 	}
 	if c.Step == 0 {
@@ -775,7 +830,7 @@ func (c *Config) normalize() error {
 				return fmt.Errorf("multivenue: duplicate market-data receipt role %q", role)
 			}
 			seenReceiptRoles[role] = struct{}{}
-			if role == "v2_remote_feed" && c.RemoteMakerFeed != nil {
+			if role == "v2_remote_feed" && len(c.remoteMakerFeeds()) != 0 {
 				continue
 			}
 			profile, configured := c.latencyProfileFor(role)
@@ -1709,7 +1764,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 			runner.AddActor(latent)
 		}
 	}
-	if err := sim.addRemoteMakerFeed(); err != nil {
+	if err := sim.addRemoteMakerFeeds(); err != nil {
 		sim.Close()
 		return nil, err
 	}
@@ -1790,8 +1845,10 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		return venueLogger{venueID: id, inner: logger, sink: s.checkpoints}, nil
 	}
 	estimatedClients := 5 + s.Config.NoiseTraderCount + s.Config.OptionFlowCount + len(s.Config.CrossVenueArbTiers)
-	if remote := s.Config.RemoteMakerFeed; remote != nil && remote.SourceVenue == id {
-		estimatedClients++
+	for _, remote := range s.Config.remoteMakerFeeds() {
+		if remote.SourceVenue == id {
+			estimatedClients++
+		}
 	}
 	if s.Config.CrossAssetSpotGraph {
 		estimatedClients += 4
@@ -2483,27 +2540,41 @@ func (s *Sim) venueByID(id string) *Venue {
 	return nil
 }
 
-// addRemoteMakerFeed wires exactly one V2-1 remote public feed. The target
-// maker has already been registered with the runner but has not started, so
-// adding its auxiliary inbox here changes only the opt-in V2 scenario.
-func (s *Sim) addRemoteMakerFeed() error {
-	if s.Config.RemoteMakerFeed == nil {
-		return nil
+// addRemoteMakerFeeds wires the declared V2-1 remote public-feed roster in
+// its config order. Targets already exist but have not started, so these
+// auxiliary inboxes remain opt-in V2 state only.
+func (s *Sim) addRemoteMakerFeeds() error {
+	for index, cfg := range s.Config.remoteMakerFeeds() {
+		if err := s.addRemoteMakerFeed(cfg, index); err != nil {
+			return err
+		}
 	}
-	cfg := s.Config.RemoteMakerFeed
+	return nil
+}
+
+func (s *Sim) addRemoteMakerFeed(cfg RemoteMakerFeedConfig, rosterIndex int) error {
 	target, source := s.venueByID(cfg.TargetVenue), s.venueByID(cfg.SourceVenue)
 	if target == nil || source == nil || len(target.SpotMakers) == 0 {
 		return errors.New("multivenue: remote maker feed venues or target maker are unavailable")
 	}
+	targetOrdinal := cfg.TargetMaker
+	if targetOrdinal == 0 {
+		targetOrdinal = 1
+	}
 	var maker *StoikovMarketMaker
+	ordinal := 0
 	for _, candidate := range target.SpotMakers {
-		if candidate.cfg.Symbol == cfg.Symbol {
+		if candidate.cfg.Symbol != cfg.Symbol {
+			continue
+		}
+		ordinal++
+		if ordinal == targetOrdinal {
 			maker = candidate
 			break
 		}
 	}
 	if maker == nil {
-		return fmt.Errorf("multivenue: remote maker feed found no target maker for %s", cfg.Symbol)
+		return fmt.Errorf("multivenue: remote maker feed found no target maker %s/%d", cfg.TargetVenue, targetOrdinal)
 	}
 	local, ok := maker.Gateway().(*simulation.DelayedGateway)
 	if !ok {
@@ -2514,7 +2585,8 @@ func (s *Sim) addRemoteMakerFeed() error {
 			return fmt.Errorf("multivenue: require remote-maker decision-vector coverage: %w", err)
 		}
 	}
-	seed := source.latencySeed + 71_003
+	seed := source.latencySeed + 71_003 + int64(rosterIndex)*0x9E3779B1
+	linkName := fmt.Sprintf("%s/v2_remote_feed/%s/maker_%d", source.ID, target.ID, targetOrdinal)
 	mount := simulation.NewMount(source.Exchange, simulation.LatencyConfig{
 		Request:            cfg.Latency.provider(seed, 1),
 		Response:           cfg.Latency.provider(seed+1, cfg.Latency.ResponseScale),
@@ -2522,10 +2594,10 @@ func (s *Sim) addRemoteMakerFeed() error {
 		Scheduler:          source.scheduler,
 		Clock:              source.clock,
 		Telemetry:          s.latencyTelemetry,
-		TelemetryLabel:     source.ID + "/v2_remote_feed/" + target.ID,
+		TelemetryLabel:     linkName,
 		MarketDataReceipts: s.marketDataReceipts,
 		ReceiptSourceVenue: source.ID,
-		ReceiptLink:        source.ID + "/v2_remote_feed/" + target.ID,
+		ReceiptLink:        linkName,
 		ReceiptRole:        "v2_remote_feed",
 	})
 	_, feedGateway := source.connectMarketDataFeed(mount, "v2_remote_feed")
@@ -2533,7 +2605,11 @@ func (s *Sim) addRemoteMakerFeed() error {
 	if !ok {
 		return errors.New("multivenue: remote maker feed lost feed-only gateway")
 	}
-	if err := maker.AttachRemoteReferenceFeed(feed, source.ID, cfg.Weight); err != nil {
+	confidence := cfg.Confidence
+	if confidence == 0 {
+		confidence = 1
+	}
+	if err := maker.AttachRemoteReferenceFeed(feed, source.ID, cfg.Weight, confidence, cfg.MaxObservationAge); err != nil {
 		return err
 	}
 	if s.frontierVectors != nil {
