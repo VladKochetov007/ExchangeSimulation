@@ -1190,3 +1190,40 @@ requests are not persisted, so their individual state transitions remain
 unobservable. The analyzer-only change does not alter the freeze. Compact
 provenance remains in
 `research/artifacts/mutations/delay-expiry-settlement.json`.
+
+## V-032 — participant information could not be reconstructed at decision time
+
+The ae13f9a latency sidecar records aggregate courier delivery, but it cannot
+answer the V2 question “which public observations had this participant actually
+received before this quote or order?” A quote timestamp alone is insufficient:
+the source message, delayed arrival, inbox insertion, and request emission are
+distinct events. Treating an aggregate mean latency as a participant information
+set would be a validation tautology.
+
+V2-0 adds an opt-in compact evidence boundary without changing market state:
+per audited delayed participant link it writes a courier-admission ledger, an
+actual actor-inbox receipt ledger, and a pre-request order-decision frontier.
+Each record has source venue, participant-unique link, role, symbol, source
+sequence, payload fingerprint, publication/schedule/delivery time, per-link
+ordinal, and global evidence ordinal. A decision cites its delivered prefix by
+ordinal, delivery time, and rolling digest. The independent analyzer replays
+cross-file ordering and rejects future delivery, missing due receipt, duplicate
+source identity, reordered courier state, or a frontier not equal to receipts
+available before the decision. Declared audited roles with a custom
+uninstrumented mount are rejected at construction.
+
+Mutation fixtures recompute sidecar checksums after future injection, drop,
+delay, duplicate, and reorder changes; each fails on a semantic relation, not
+on checksum mismatch. Fresh subprocess controls at GOMAXPROCS 1 and 4, with
+evidence off/on, produce one exact execution hash. Evidence-on artifacts are
+nonempty, valid, and byte-identical across processor settings. A 30-minute
+seed-101 smoke additionally has matching evidence-off/on execution hashes and
+293,480 schedules, 293,408 receipts, and 6,218 decisions. Its 72 terminally
+undelivered schedules are scheduled beyond the requested horizon, not silently
+lost evidence.
+
+This does not backfill ae13f9a and does not change its freeze: it is V2-only
+instrumentation, disabled by default. It presently audits emitted orders and
+quotes on one delayed feed link, not no-op strategy ticks or a future
+multi-source composite; those limits are explicit in
+`research/v2-0-information-boundary.md` and gate the next local-cache design.
