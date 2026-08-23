@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Extract the P0 contract before any raw evidence can be considered prunable.
+# Extract the P0 replacement contract before any raw evidence can be considered
+# prunable. Attempt 0 remains preserved in its distinct artifact directory.
 # Final greeks.json plus latency.json are completion sentinels; process names
 # and partial directories are deliberately not evidence of a completed world.
 set -euo pipefail
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-artifact_dir="$root_dir/research/artifacts/v2-3-p0"
+artifact_dir="$root_dir/research/artifacts/v2-3-p0-r1"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 roles='cdf_spot_maker,fixed_distance_maker,imbalance_maker'
 
@@ -46,6 +47,10 @@ for arm in A B C; do
 			write_metric "$cell/postonly-cdf-${role}.json" "$analyzer" -metric postonly -json \
 				-post-only-roles "$role" -post-only-symbols CDF/USD "$cell"
 		done
+		# Scope is part of the intervention contract: spot-only policy must not
+		# silently reach the perp maker or naïve makers configured on ABC-PERP.
+		write_metric "$cell/postonly-derivative-scope.json" "$analyzer" -metric postonly -json \
+			-post-only-roles 'perp_maker,fixed_distance_maker,imbalance_maker' -post-only-symbols ABC-PERP "$cell"
 		write_metric "$cell/viability.json" "$analyzer" -metric viability -json -viability-window 60 "$cell"
 
 		# P0 uses direct, raw measures for viability; it does not post-hoc turn a
@@ -72,6 +77,7 @@ for arm in A B C; do
 			    "observationreceipts.json", "evidenceartifacthash.json",
 			    "postonly-cdf.json", "postonly-cdf-cdf_spot_maker.json",
 			    "postonly-cdf-fixed_distance_maker.json", "postonly-cdf-imbalance_maker.json",
+			    "postonly-derivative-scope.json",
 			    "viability.json", "cdf-viability.json"
 			  ]
 			}' >"$cell/analysis-metadata.json"
