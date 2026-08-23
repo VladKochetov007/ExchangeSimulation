@@ -226,3 +226,20 @@ finish and their contracts pass.
   complete. The stricter V-015 full-evidence revalidation scan is the final
   gate before Phase 2; raw logs remain retained even though prunegate now
   reports the control contract safe.
+
+### 2026-08-23 continuing audit update
+
+- V-005 preregistered stress is complete. It exercised 7,054 forced closes in
+  seed 101 and 7,177 in seed 103. Every observed close has an independently
+  reconstructed pre-to-post position reduction and zero per-close contract
+  residual. No bankruptcy, deficit, or insurance-fund absorption occurred, so
+  those paths remain NOT EXERCISED. See `v005-stress-ae13f9a.json`.
+- V-022 caught a validator blind spot: a scratch `funding_twice` mutant passed
+  the former net/sign audit. The new symbol-scoped, per-account detector caught
+  85 duplicate payments over five exercised instants. All 23 retained current
+  baseline/treatment/stress derivative artifacts were replayed and are clean;
+  pre-fix artifacts are preserved under `historical/v022-pre-duplicate-funding-derivatives/`.
+- The ae13f9a baseline scoreboard is appended to
+  `research/stylized-facts-baseline.md`. Next: clock-artifact experiments and
+  remaining high-value mutations, then frozen-autopsy synthesis. Do not enter
+  v2 design yet.
