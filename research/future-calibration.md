@@ -5,6 +5,21 @@ must stay unchanged until the audit is finished. This is the record of what the
 audit implies for the *next* model, written down now so the reasoning is not
 lost and so it cannot quietly leak into the frozen baseline.
 
+## Autopsy handoff
+
+The frozen ae13f9a audit is closed as
+[`frozen-autopsy-ae13f9a.md`](frozen-autopsy-ae13f9a.md), with machine-readable
+provenance in
+[`artifacts/frozen-autopsy-ae13f9a.json`](artifacts/frozen-autopsy-ae13f9a.json).
+It supports deterministic execution and a complete persisted-evidence contract,
+but it does **not** establish a realistic or economically complete ecology.
+
+The implementable successor is deliberately staged in
+[`v2-design.md`](v2-design.md). That design begins with missing evidence
+contracts, then local-information price discovery, before attempting
+stabilization, funding, options, or liquidation redesign. Nothing in this
+handoff alters ae13f9a or reclassifies its findings.
+
 ## Cross-venue informed makers are legitimate
 
 The own-mid-anchor arm is the strongest causal result in the campaign:
