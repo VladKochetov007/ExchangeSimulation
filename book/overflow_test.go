@@ -45,6 +45,26 @@ func TestAddOrderRejectsOverflowWithoutCreatingOrIndexingOrder(t *testing.T) {
 	}
 }
 
+func TestNewBookWithCapacityPreservesBookSemantics(t *testing.T) {
+	book := NewBookWithCapacity(etypes.Buy, 0, 0)
+	orders := []*etypes.Order{
+		{ID: 1, Price: 100, Qty: 3},
+		{ID: 2, Price: 101, Qty: 2},
+		{ID: 3, Price: 100, Qty: 4},
+	}
+	for _, order := range orders {
+		if !book.AddOrder(order) {
+			t.Fatalf("AddOrder(%d) failed", order.ID)
+		}
+	}
+	if book.Best == nil || book.Best.Price != 101 || len(book.Orders) != 3 || len(book.Limits) != 2 {
+		t.Fatalf("capacity-hinted book state = %#v", book)
+	}
+	if got := book.CancelOrder(2); got != orders[1] || book.Best == nil || book.Best.Price != 100 {
+		t.Fatalf("capacity-hinted cancellation = %#v, best=%#v", got, book.Best)
+	}
+}
+
 func TestVisibleQtySaturatesUnrepresentableManualLevel(t *testing.T) {
 	first := &etypes.Order{ID: 1, Qty: math.MaxInt64, Visibility: etypes.Normal}
 	second := &etypes.Order{ID: 2, Qty: 1, Visibility: etypes.Normal, Prev: first}

@@ -792,7 +792,10 @@ func cloneBookForPreview(source *Book) (*Book, bool) {
 }
 
 func cloneBookForPreviewExcluding(source *Book, excluded map[uint64]struct{}) (*Book, bool) {
-	clone := NewBook(source.Side)
+	// A preview has no lifetime beyond this admission check. Give its indexes
+	// only the live source cardinality rather than the long-lived venue-book
+	// defaults; capacity does not enter matching or queue semantics.
+	clone := newBookWithCapacity(source.Side, len(source.Orders), len(source.Limits))
 	for limit := source.ActiveHead; limit != nil; limit = limit.Next {
 		for order := limit.Head; order != nil; order = order.Next {
 			if _, skip := excluded[order.ID]; skip {

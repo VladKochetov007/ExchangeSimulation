@@ -8,6 +8,10 @@ const btcPrecision = 100_000_000
 
 func newBook(side Side) *Book { return ebook.NewBook(side) }
 
+func newBookWithCapacity(side Side, orderCapacity, limitCapacity int) *Book {
+	return ebook.NewBookWithCapacity(side, orderCapacity, limitCapacity)
+}
+
 func visibleQty(limit *Limit) int64 { return ebook.VisibleQty(limit) }
 
 func logBalanceChange(ex *DefaultExchange, timestamp int64, clientID uint64, symbol, reason string, changes []BalanceDelta) {

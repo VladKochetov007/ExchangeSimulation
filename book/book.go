@@ -174,10 +174,22 @@ type Book struct {
 
 // NewBook creates an empty one-sided book.
 func NewBook(side etypes.Side) *Book {
+	return NewBookWithCapacity(side, 1024, 256)
+}
+
+// NewBookWithCapacity creates an empty one-sided book with capacity hints for
+// its order and price-level indexes. The hints affect allocation only: queue
+// ordering, matching, and all public book state are identical to NewBook.
+//
+// Preview books use the live book's current sizes instead of the deliberately
+// generous capacities used for long-lived venue books. A preview is detached
+// and short-lived, so reserving 1,024 order and 256 level slots for every
+// preflight clone otherwise dominates allocation and GC work.
+func NewBookWithCapacity(side etypes.Side, orderCapacity, limitCapacity int) *Book {
 	return &Book{
 		Side:   side,
-		Orders: make(map[uint64]*etypes.Order, 1024),
-		Limits: make(map[int64]*etypes.Limit, 256),
+		Orders: make(map[uint64]*etypes.Order, orderCapacity),
+		Limits: make(map[int64]*etypes.Limit, limitCapacity),
 	}
 }
 
