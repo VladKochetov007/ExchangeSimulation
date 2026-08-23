@@ -1,11 +1,11 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "simulator_freeze": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
   "config": "research/configs/v005-stress-perp-2026-08-22.json",
   "config_sha256": "fd094c55d9e92d1ac0c1db882b72a03693eb14dab17ded63c1507df7ac7f6ca1",
   "run_horizon": "24h",
-  "analysis_commit": "6b94439702a9553a2d887bffd5ab92c105c9508d",
-  "analysis_binary_sha256": "76cd2886af255c587139a6e491cc2104487cce2f554ee2b849ab9d9ccd31a5f0",
+  "analysis_commit": "b34dc25041927c6b9ccf66b182fc6515dfb0514b",
+  "analysis_binary_sha256": "fce48ac467c06e0d8a8f3efd29a22be3c2e9c83f36d2d2cf714b64468e2fd235",
   "seeds": {
     "101": {
       "persisted_evidence": {
@@ -24,6 +24,13 @@
         "insurance_residual": 0,
         "balance_residual": 0,
         "invalid_events": 0,
+        "position_path_records": 7054,
+        "position_path_missing": 0,
+        "position_path_failures": 0,
+        "position_conservation_records": 7054,
+        "position_conservation_missing": 0,
+        "position_conservation_failures": 0,
+        "position_conservation_residual": 0,
         "by_venue": {"central": 2545, "north": 1987, "south": 2522}
       },
       "global_usd_residual": 9669314,
@@ -46,6 +53,13 @@
         "insurance_residual": 0,
         "balance_residual": 0,
         "invalid_events": 0,
+        "position_path_records": 7177,
+        "position_path_missing": 0,
+        "position_path_failures": 0,
+        "position_conservation_records": 7177,
+        "position_conservation_missing": 0,
+        "position_conservation_failures": 0,
+        "position_conservation_residual": 0,
         "by_venue": {"central": 1909, "north": 2741, "south": 2527}
       },
       "global_usd_residual": 22047409,
@@ -55,8 +69,10 @@
   "verdict": {
     "liquidation_reachability": "EXERCISED",
     "bankruptcy_and_insurance_reachability": "NOT_EXERCISED",
-    "forced_close_accounting": "PARTIALLY_VALIDATED",
-    "remaining_requirement": "reconstruct pre-close position and per-event size reduction before claiming full liquidation-path correctness"
+    "forced_close_accounting": "VALIDATED_FOR_OBSERVED_FORCED_CLOSES",
+    "event_level_contract_conservation": "VALIDATED",
+    "cash_conservation_scope": "global closed-system identity only; realised-PnL cash need not be zero per close while the counterparty remains open",
+    "remaining_requirement": "bankruptcy, liquidation_deficit, and insurance-fund absorption remain unexercised"
   },
   "source_artifacts": [
     "research/artifacts/scoreboard/f2_stress_101/liquidations.json",
