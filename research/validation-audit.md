@@ -853,3 +853,33 @@ writing `.done` for any new full-log run. Historic baselines without a runtime
 sidecar remain retained rather than being retroactively certified. A known
 treatment attestation is a regression check. This is campaign orchestration
 only; it leaves simulation and analyzer behavior unchanged.
+
+## V-022 — funding audit could not detect a repeated settlement
+
+The deliberately mutated `funding_twice` binary invoked `settleFunding` twice
+at every due instant. The old derivative audit passed it: all payments still
+netted, and every account was charged on the direction implied by the published
+rate. This was a validator failure, not evidence that repeated funding is
+acceptable.
+
+The corrected analyzer keys funding evidence by venue, **contract symbol**, and
+timestamp; its former venue-wide position reconstruction could also have mixed
+unrelated linear-contract exposure into a perp direction check. It now counts
+nonzero funding postings against unique funded accounts. More than one posting
+for an account at one contract/instant is `duplicate_payments`, and makes the
+instant broken even if the aggregate residual is zero. The `funding_twice`
+mutant is now caught at five exercised instants with 85 duplicate postings.
+Fixtures cover a balanced directed payment, reversed sign, same-timestamp
+post-funding fill, and duplicate account payment. Unit, race, and complete Go
+test suites passed.
+
+This is analyzer-only (`05177a0`, with derivative-log scan restriction
+`d4d3404`); it cannot affect simulator state or the ae13f9a freeze. The
+pre-correction artifacts are retained in
+`research/artifacts/historical/v022-pre-duplicate-funding-derivatives/`.
+All 23 retained ae13f9a baseline, treatment, and stress derivative artifacts
+were replayed from raw logs. Every normal world has zero `funding_broken`,
+`funding_misdirected`, `funding_undirected`, and
+`funding_duplicate_payments`. The previous funding-mechanics conclusion is
+therefore retained with a strictly stronger detector; this does not change the
+separate funding-off causal verdict.

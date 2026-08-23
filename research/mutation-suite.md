@@ -50,6 +50,7 @@ an ecology run.
 | Skip the best price level | 5 priority cases | the best price is taken first, and never through the taker limit | expected sequence | 3 of 5 fail, and the time-only case still passes | yes |
 | Swap the call and put payoff, **ecology run** | 60 settlements over 5h | per-holder payout against the contract terms | 0 mispaid | **766 holders mispaid** | yes |
 | Settle against a strike 1% away, **ecology run** | 60 settlements over 5h | the same | 0 mispaid | **386 holders mispaid** | yes |
+| Settle funding twice, **ecology run** | 5 funding instants / 85 duplicate account postings | one funding posting per funded account, contract, and instant | 0 duplicates | **85 duplicates; 5 broken instants** | yes, after V-022 rebuilt the detector |
 
 ### Horizon, and why 5h rather than 2h
 
@@ -111,7 +112,6 @@ listing after expiry.
 
 | mutation | invariant that must fail | detector |
 |---|---|---|
-| Charge funding twice | each instant nets to zero within one unit per account | `-metric derivatives`, funding residual |
 | Duplicate one fill | movements reconstruct the reported holdings; contract net size stays zero | `-metric conservation` chain check; `-metric positions` |
 | Delete one fill | the same two | as above |
 | Omit one settlement | payout residual per contract; holders paid against holders present | `-metric settlements` |
