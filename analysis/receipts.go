@@ -51,7 +51,25 @@ type MarketDataReceiptAudit struct {
 	BadDecisionFrontier    int64 `json:"bad_decision_frontier"`
 	FutureDecisionUse      int64 `json:"future_decision_use"`
 
+	// LinkActivity makes the declared feed topology testable as activity rather
+	// than as configuration alone. A catalog entry with zero receipts is an
+	// unactivated information path, not proof that a cache received data.
+	LinkActivity []MarketDataLinkActivity `json:"link_activity"`
+
 	Valid bool `json:"valid"`
+}
+
+// MarketDataLinkActivity is independent evidence for one declared public-feed
+// link. It intentionally counts scalar decisions separately: a feed-only
+// remote link should receive observations but never originate an order.
+type MarketDataLinkActivity struct {
+	LinkID      uint32 `json:"link_id"`
+	SourceVenue string `json:"source_venue"`
+	Link        string `json:"link"`
+	Role        string `json:"role"`
+	Schedules   int64  `json:"schedules"`
+	Receipts    int64  `json:"receipts"`
+	Decisions   int64  `json:"decisions"`
 }
 
 type marketDataEvidenceManifest struct {
@@ -202,16 +220,28 @@ func AuditMarketDataReceipts(dir string) (*MarketDataReceiptAudit, error) {
 		ReceiptDigestMatches:  receiptsDigest,
 		DecisionDigestMatches: decisionsDigest,
 	}
+	linkActivity := make(map[uint32]*MarketDataLinkActivity, len(manifest.Links))
+	for _, row := range manifest.Links {
+		linkActivity[row.ID] = &MarketDataLinkActivity{
+			LinkID: row.ID, SourceVenue: row.SourceVenue, Link: row.Link, Role: row.Role,
+		}
+	}
 
 	events := make([]informationEvent, 0, result.Schedules+result.Receipts+result.Decisions)
 	for offset := 0; offset < len(schedulesRaw); offset += marketDataScheduleRecordBytes {
 		record := decodeObservation(schedulesRaw[offset : offset+marketDataScheduleRecordBytes])
 		validateObservation(result, record, links, symbols, false)
+		if activity := linkActivity[record.linkID]; activity != nil {
+			activity.Schedules++
+		}
 		events = append(events, informationEvent{ordinal: record.eventOrdinal, kind: eventSchedule, observation: record})
 	}
 	for offset := 0; offset < len(receiptsRaw); offset += marketDataReceiptRecordBytes {
 		record := decodeObservation(receiptsRaw[offset : offset+marketDataReceiptRecordBytes])
 		validateObservation(result, record, links, symbols, true)
+		if activity := linkActivity[record.linkID]; activity != nil {
+			activity.Receipts++
+		}
 		events = append(events, informationEvent{ordinal: record.eventOrdinal, kind: eventReceipt, observation: record})
 	}
 	for offset := 0; offset < len(decisionsRaw); offset += marketDataDecisionRecordBytes {
@@ -224,6 +254,9 @@ func AuditMarketDataReceipts(dir string) (*MarketDataReceiptAudit, error) {
 		}
 		if record.side > 1 || record.orderType > 1 || record.tif > 2 {
 			result.BadDecisionFrontier++
+		}
+		if activity := linkActivity[record.linkID]; activity != nil {
+			activity.Decisions++
 		}
 		for _, value := range decisionsRaw[offset+19 : offset+24] {
 			if value != 0 {
@@ -303,6 +336,13 @@ func AuditMarketDataReceipts(dir string) (*MarketDataReceiptAudit, error) {
 			result.MissingDueReceipt++
 		}
 	}
+	result.LinkActivity = make([]MarketDataLinkActivity, 0, len(linkActivity))
+	for _, activity := range linkActivity {
+		result.LinkActivity = append(result.LinkActivity, *activity)
+	}
+	sort.Slice(result.LinkActivity, func(i, j int) bool {
+		return result.LinkActivity[i].LinkID < result.LinkActivity[j].LinkID
+	})
 	result.Valid = result.ScheduleDigestMatches && result.ReceiptDigestMatches && result.DecisionDigestMatches &&
 		result.UnknownLinkID == 0 && result.UnknownSymbolID == 0 && result.UnknownType == 0 && result.NonzeroReserved == 0 &&
 		result.ScheduledBeforePub == 0 && result.DeliveredBeforePlan == 0 && result.BadScheduleOrdinal == 0 &&

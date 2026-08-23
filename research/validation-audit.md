@@ -1316,3 +1316,26 @@ The corrected five-minute router diagnostic reproduces 72 submitted / 71
 completed groups and positive parent VWAPs. No route-selection, request,
 matching, scheduler, latency, RNG, or account behavior changed. The first,
 overflowed report is not used as quantitative economic evidence.
+
+## V-037 — information-boundary audit could prove a declared feed but not its activation
+
+The V2-0 evidence manifest names every audited link and the receipt audit
+validated aggregate schedule, receipt, and decision totals. That was enough to
+prove the boundary's ordering rules, but not enough to establish the V2-2b
+informed-maker activation criterion: a declared `v2_remote_feed` could have
+zero receipts while unrelated local-maker traffic kept the aggregate positive.
+Configuration presence is not cache activation.
+
+The independent offline audit now reports a sorted activity row for every
+declared link: immutable source venue/link/role identity plus schedules,
+receipts, and scalar decisions. A synthetic valid fixture has one active link
+and one declared-but-inactive remote link; the latter remains present with all
+three counts zero. Existing adversarial future, drop, delay, duplicate, and
+reorder fixtures still fail semantic relations after their digests are
+rewritten. This output extension reads only persisted sidecars; it changes no
+simulator behavior, event ordering, RNG, scheduler, actor cache, or V2 market
+outcome.
+
+The retained V2-2b cells must be re-audited with this report before their
+informed-maker activation criterion is scored. No world needs regeneration:
+the per-link data were already present in the immutable raw sidecars.

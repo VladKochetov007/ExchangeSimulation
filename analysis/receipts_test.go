@@ -36,6 +36,14 @@ func TestAuditMarketDataEvidenceAcceptsIndependentValidFixture(t *testing.T) {
 	if !audit.Valid || audit.Schedules != 2 || audit.Receipts != 2 || audit.Decisions != 2 {
 		t.Fatalf("valid V2-0 evidence rejected: %+v", audit)
 	}
+	if len(audit.LinkActivity) != 2 || audit.LinkActivity[0] != (MarketDataLinkActivity{
+		LinkID: 1, SourceVenue: "north", Link: "north/spot_maker/client/1", Role: "spot_maker",
+		Schedules: 2, Receipts: 2, Decisions: 2,
+	}) || audit.LinkActivity[1] != (MarketDataLinkActivity{
+		LinkID: 2, SourceVenue: "south", Link: "south/v2_remote_feed/north/maker_1/client/2", Role: "v2_remote_feed",
+	}) {
+		t.Fatalf("link activity = %+v, want active and visibly inactive links", audit.LinkActivity)
+	}
 }
 
 // Each mutation rewrites every file digest. The auditor must detect broken
@@ -130,8 +138,11 @@ func writeEvidenceFixture(t *testing.T, mutate func(schedules, receipts, decisio
 		Schedules: fixtureArtifact("market-data-schedules-v2.bin", schedules, 88),
 		Receipts:  fixtureArtifact("market-data-receipts-v2.bin", receipts, 88),
 		Decisions: fixtureArtifact("market-data-decisions-v2.bin", decisions, 96),
-		Links:     []map[string]any{{"id": 1, "source_venue": "north", "link": "north/spot_maker/client/1", "role": "spot_maker"}},
-		Symbols:   []map[string]any{{"id": 1, "symbol": "ABC/USD"}},
+		Links: []map[string]any{
+			{"id": 1, "source_venue": "north", "link": "north/spot_maker/client/1", "role": "spot_maker"},
+			{"id": 2, "source_venue": "south", "link": "south/v2_remote_feed/north/maker_1/client/2", "role": "v2_remote_feed"},
+		},
+		Symbols: []map[string]any{{"id": 1, "symbol": "ABC/USD"}},
 	}
 	raw, err := json.Marshal(manifest)
 	if err != nil {
