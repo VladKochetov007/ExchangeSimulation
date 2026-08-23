@@ -243,3 +243,28 @@ finish and their contracts pass.
   `research/stylized-facts-baseline.md`. Next: clock-artifact experiments and
   remaining high-value mutations, then frozen-autopsy synthesis. Do not enter
   v2 design yet.
+
+### 2026-08-23 clock and mutation update
+
+- The clock screen is complete and recorded in `clock-artifacts-ae13f9a.md`
+  and `artifacts/clock-ae13f9a.json`. It is a screening-level
+  CLOCK-SENSITIVE result: 100ms step alone widened the pooled perp basis to
+  201.0/188.8 bps (seeds 101/103), while the de-staggered timing package
+  compressed it to 2.80/2.37 bps. The driver is an interaction with the clock
+  lattice, not a generic benefit of finer resolution; individual clocks remain
+  unidentified. All six clock worlds retain raw logs, evidence digests, and
+  clean order-lifecycle audits.
+- `434eb56` added `mvanalyze -metric orderlifecycle`, which independently
+  reconstructs accepted/fill/cancel evidence. All retained 24h baselines pass:
+  11.75–11.79M accepted orders per seed and zero missing immediate terminals,
+  post-terminal fills, or quantity mismatches. This is analyzer-only and does
+  not alter ae13f9a simulator semantics.
+- Two new five-hour scratch mutants were caught with raw logs retained:
+  `drop_ioc_cancel_log` produced 169,935 missing immediate terminal records
+  (`a1decd2`); `double_spot_fee` produced CDF/USD conservation residuals of
+  126,548,770,107 and 235,583,218,129 (`870dae4`). The remaining untested
+  GTC-cancel-request and future-information paths still lack sufficient
+  persisted evidence; do not call them covered.
+- Next: continue high-value mutations (especially fill, expiry, collateral,
+  and information-boundary paths), then synthesize the frozen autopsy. Do not
+  enter v2 design yet and do not prune raw evidence.
