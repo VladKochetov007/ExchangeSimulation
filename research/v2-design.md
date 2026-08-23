@@ -79,6 +79,15 @@ three-venue frontiers only, not a price-discovery effect. The next gate is an
 economically motivated router activation smoke followed by the factorial, not
 a larger maker parameter sweep.
 
+That fixed five-minute V2-2b smoke is now complete in
+[its result record](v2-2b-price-discovery-smoke-results.md). Delayed remote
+maker feeds have a two-seed screening reduction in fresh midpoint dispersion
+and after-fee scanner edges; the small non-atomic router executes only when
+those feeds are off and does not reduce the registered snapshot-level edge
+metric. Therefore trade-mediated convergence remains unmeasured, not absent:
+the next router experiment must preregister meaningful capacity/action-clock
+identification rather than tune this smoke result.
+
 ## V2-2 — executable cross-venue arbitrage
 
 | field | design |
