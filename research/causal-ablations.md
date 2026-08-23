@@ -327,3 +327,76 @@ funding-off and basis-off are hard to read.
 | Vanna-volga desks impose structure on the cross-strike surface | **UNRESOLVED** | Same reason. The unpredicted collapse of parity-desk activity to 7% of control says the desk matters to option pricing, but says nothing about the surface claim as written. |
 | The option smile is emergent rather than inherited from SABR priors (§10) | **UNRESOLVED** | The decisive arm ran, the chain stayed active, and the measurement that would have settled it was never taken. This remains the single largest open question in the campaign. |
 | Configured latency is economically meaningful | **RETAIN, qualified** | Arbitrage opportunities last 2.1–3.9× longer and are ~1.6× more frequent on both seeds, so latency is not decorative. But cross-venue dispersion moved the *opposite* way to the prediction, and at 50ms the delay is still well inside the 1-second quote and automation interval, so this regime may simply be latency-insensitive where it was predicted to be most sensitive. |
+
+---
+
+# ae13f9a re-run — frozen causal screen
+
+This section supersedes the preceding scored results for causal inference. The
+preceding text is retained as pre-ae13f9a diagnostic history. The simulator
+freeze is `ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107`; every control/treatment
+pair is a 24-hour world with the same seed (101 or 103). Each treatment has a
+complete measurement contract, retained raw evidence, and an exact persisted
+evidence-artifact digest. The final analyzer revision is `c1a8357`, including
+V-019 second-order exposure reconstruction and V-020 funding-boundary
+ordering. Two seeds are screening evidence only, not a robustness claim.
+
+## Intervention checks
+
+| arm | evidence that the intended manipulation occurred |
+|---|---|
+| own-mid-anchor | exact run manifests: `maker_anchor` `consensus` → `own_mid`; frozen constructor test binds that setting to makers' quoted reference |
+| basis-off | carry/dated-carry roles: 13,040/11,194 and 7,983/12,846 control taker fills; both roles absent in both treatments |
+| parity-off | parity role: 91,645 / 85,785 control taker fills; absent in both treatments |
+| triangle-off | triangle role: 2,961,239 / 2,978,943 control taker fills; absent in both treatments |
+| funding-off | 36 settlement instants per control; zero in either treatment; corrected funding audit counters all zero |
+| delta-hedge-off | dealer underlying taker hedge fills: 171,097 / 175,929 → 0 / 0; option maker fills remain 1,172,759 / 1,189,963 |
+| vanna-volga-off | VV role: 93,991 / 92,114 control taker fills; absent in both treatments; option dealer maker fills remain 1,036,844 / 1,032,167 |
+| option-value-takers-off | value-taker role: 179,037 / 177,743 control taker fills; absent; option dealer maker fills remain 1,001,701 / 978,907 |
+| latency-x10 | weighted delivered courier delay: 37.995 → 485.294ms (101) and 37.762 → 454.846ms (103), not merely a config-field change |
+
+## Paired component scores
+
+`→` is control to treatment. Values are intentionally shown per seed rather
+than pooled; no post-hoc significance threshold was introduced.
+
+| arm | preregistered components, seed 101 / 103 | verdict |
+|---|---|---|
+| own-mid-anchor | executable cross-venue maximum edge, bps: 1.531→192.457 (125.75×) / 4.275→247.577 (57.92×); both clear the preregistered >10× threshold | **SUPPORTED (screening)** |
+| basis-off | perp absolute basis, bps: 250.533→291.956 / 256.945→295.219; half-life, s: 1,292.5→4,489.8 / 1,632.6→3,358.3; dated convergence slope, bps/h: −5.861→−3.797 / −6.314→−3.926. Perp widening and slower reversion support the mechanism; the dated series was already anti-convergent and moves *toward* zero when desks are removed. | **MIXED** — perp components **SUPPORTED (screening)**; dated-convergence component **FALSIFIED** |
+| parity-off | maximum raw pre-cost residual, bps: 219.840→607.668 / 132.911→485.276; longest residual run, s: 43,363→64,799 / 22,016→23,276 | **SUPPORTED (screening)** |
+| triangle-off | mean triangular dislocation, bps: 24,160→71,853 / 18,625→65,840; the preregistered null prediction was decisively false | **FALSIFIED** |
+| funding-off | every pooled perp-basis field is bit-identical: mean absolute 250.533 / 256.945 bps, AR(1) 0.999464 / 0.999576, and half-life 1,292.5 / 1,632.6s in control and treatment | **FALSIFIED** for marginal funding anchoring in this ecology |
+| delta-hedge-off | option-to-underlying correlation: 0.05089→−0.01025 / 0.01545→0.04760; mean absolute dealer delta: 0.01993→0.99273 / 0.16041→1.23198; max delta: 0.16497→8.23199 / 6.34677→5.89132 | **MIXED** — average delta accumulation rises both seeds, but transmission and maximum delta disagree |
+| vanna-volga-off | mean absolute vega: 39.486m→27.275m / 50.829m→30.321m; vanna: 2.617→1.006 / 2.031→1.040; volga: 273.784m→84.129m / 176.647m→80.345m. Curvature: 1493.872→1352.434 / 1594.796→1377.239; dispersion: 0.5173→0.5030 / 0.5578→0.5067. | **FALSIFIED** — all measured second-order exposures shrink, opposite to the prediction; surface changes but does not lose its structure |
+| option-value-takers-off | chain survives (1,001,701 / 978,907 option trades; 36 fitted expiries each). Curvature: 1493.872→295.696 / 1594.796→208.092; dispersion: 0.5173→0.3031 / 0.5578→0.2729; ATM IV rises 1.559→2.887 / 1.520→2.931 | **SUPPORTED (screening)** — the surface weakens materially but does not disappear |
+| latency-x10 | max cross-venue edge, bps: 1.531→1.888 / 4.275→6.367; longest executable opportunity, s: 1,030→1,503 / 3,709→2,989; picked-off maker share: 0.4576→0.4741 / 0.4409→0.4688 | **MIXED** — realized latency, dispersion, and adverse selection rise both seeds; lifetime disagrees |
+
+## Interpretation ledger
+
+- The shared maker reference is a strong quote-mediated convergence channel in
+  this frozen ecology. That does not make cross-venue-informed market making
+  intrinsically illegitimate; it identifies the strength of its privileged,
+  common-reference implementation here.
+- Carry desks compress the perp basis, but the frozen dated futures do not
+  exhibit the predicted maturity-convergence mechanism even in control.
+- Parity desk removal widens and prolongs raw residuals. The independent
+  market-price observable therefore supports causal enforcement, not merely
+  an after-fee profitability proxy.
+- The triangle null control fails: the desk materially restrains triangular
+  dislocation, so the older V-001 attribution was incomplete.
+- Funding transfers are mechanically correct after V-020, yet removing them
+  has no marginal basis effect in this ecology. This is evidence of masking by
+  another channel, not evidence that funding is generally unimportant.
+- Removing SABR-value takers removes most curvature and cross-strike
+  dispersion while substantial trading and a non-flat residual surface remain.
+  Thus the frozen smile is materially imposed by explicit priors, but cannot
+  be called entirely imposed or entirely emergent.
+- The VV result is an adverse causal result: removal lowers dealer risk along
+  with option activity. The desk cannot be credited with flattening dealer
+  second-order exposure under this population without a redesigned,
+  volume-controlled experiment.
+
+The matching machine-readable record is
+`research/artifacts/ablation-verdicts.json` and replaces its archive-only
+pre-ae13f9a predecessor.

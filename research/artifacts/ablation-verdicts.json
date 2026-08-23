@@ -1,481 +1,54 @@
 {
-  "generated": "2026-08-22T07:51:47.628901+00:00",
-  "baseline": {
-    "config": "research/configs/frozen-baseline-2026-08-21.json",
-    "seeds": [
-      101,
-      103
-    ],
-    "duration": "24h",
-    "gomaxprocs": 1
+  "schema_version": 2,
+  "generated": "2026-08-23",
+  "simulator_freeze": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
+  "analysis": {
+    "mvanalyze_binary_sha256": "9611184cd653b994e7b96138410b9b881425537a646c1a8ebfa41d122c47d37e",
+    "git_revisions": ["995aede", "c8a8221", "c1a8357"],
+    "notes": "V-019 reconstructs persisted vanna/volga; V-020 orders funding against physical same-file evidence."
   },
-  "scoring_rules": {
-    "paired": "treatment seed i compared to control seed i; no averaging across seeds",
-    "thresholds": "only thresholds present in the preregistration are applied; no post-hoc thresholds",
-    "manipulation_required": "an arm that did not manipulate its mechanism cannot falsify anything",
-    "robustness": "two treatment seeds; SUPPORTED means screening-stage evidence only"
-  },
-  "measurement_limitation": "Ablation raw event logs were deleted after seven metrics were extracted, so dealer greeks, implied-volatility structure, the frozen mean-reversion estimator, hedge-tagged flow correlation and realized latency are unrecoverable. Three arms are NOT IDENTIFIED for want of measurement rather than for want of an effect.",
+  "design": {"horizon_seconds": 86400, "paired_seeds": [101, 103], "inference": "two paired seeds are screening evidence only; no post-hoc thresholds"},
+  "evidence": {"raw_logs_retained": true, "scoreboard_root": "research/artifacts/scoreboard", "runtime_and_offline_evidence_artifact_digests_match_for_all_treatments": true, "pre_ae13f9a_verdict_archive": "research/artifacts/historical/ablation-verdicts-pre-ae13f9a.json"},
   "arms": {
     "abl-own-mid-anchor": {
-      "verdict": "SUPPORTED_SCREENING",
-      "manipulated": true,
-      "manipulation_evidence": {
-        "maker_anchor": {
-          "control": "consensus",
-          "arm": "own_mid"
-        }
-      },
-      "primary": {
-        "cross_venue_max_edge_bps": {
-          "101": {
-            "control": 5.477864854603887,
-            "arm": 325.1323286951813,
-            "delta": 319.6544638405774,
-            "ratio": 59.353842660415935
-          },
-          "103": {
-            "control": 0.988293681551955,
-            "arm": 332.94978800557874,
-            "delta": 331.9614943240268,
-            "ratio": 336.89357143590667
-          }
-        },
-        "cross_venue_profitable_instants": {
-          "101": {
-            "control": 10506,
-            "arm": 192728,
-            "delta": 182222,
-            "ratio": 18.34456501047021
-          },
-          "103": {
-            "control": 714,
-            "arm": 220793,
-            "delta": 220079,
-            "ratio": 309.23389355742296
-          }
-        }
-      },
-      "preregistered_threshold": "dispersion widens by more than an order of magnitude",
-      "components": {
-        "dispersion_gt_10x": "yes_both_seeds",
-        "profitable_instants_appear": "yes_both_seeds"
-      },
-      "caveat": "preregistration premise that the control shows no profitable cross-venue instants is false (10506 and 714)"
+      "verdict": "SUPPORTED (screening)", "manipulated": true, "activation": "manifest maker_anchor consensus -> own_mid",
+      "primary": {"cross_venue_max_executable_edge_bps": {"101": {"control": 1.530512018672603, "treatment": 192.45714280228475, "delta": 190.92663078361215, "ratio": 125.74581846228032}, "103": {"control": 4.2745014967815465, "treatment": 247.57745451535973, "delta": 243.30295301857818, "ratio": 57.92153908508614}}, "threshold": ">10x both seeds", "result": "passed both seeds"}
     },
     "abl-basis-off": {
-      "verdict": "MIXED",
-      "manipulated": true,
-      "manipulation_evidence": {
-        "carry_arb_fills": {
-          "control_101": 11669,
-          "arm_101": null
-        },
-        "dated_carry_arb_fills": {
-          "control_101": 11127,
-          "arm_101": null
-        }
-      },
-      "primary": {
-        "perp_basis_mean_deviation_bps": {
-          "101": {
-            "control": -5467.483292821631,
-            "arm": -7441.368393690079,
-            "delta": -1973.8851008684478,
-            "ratio": 1.3610226122611113
-          },
-          "103": {
-            "control": -5905.745633975345,
-            "arm": -7517.610863883349,
-            "delta": -1611.865229908004,
-            "ratio": 1.2729317058010516
-          }
-        },
-        "exploitable_frequency": {
-          "101": {
-            "control": 0.13813578613124886,
-            "arm": 0.028612104586964827,
-            "delta": -0.10952368154428403,
-            "ratio": 0.2071302838192792
-          },
-          "103": {
-            "control": 0.14900980358114285,
-            "arm": 0.01268176749964312,
-            "delta": -0.13632803608149974,
-            "ratio": 0.08510693387188649
-          }
-        },
-        "longest_run_nanos": {
-          "101": {
-            "control": 5016000000000,
-            "arm": 2479000000000,
-            "delta": -2537000000000,
-            "ratio": 0.49421850079744817
-          },
-          "103": {
-            "control": 10174000000000,
-            "arm": 1108000000000,
-            "delta": -9066000000000,
-            "ratio": 0.10890505209357185
-          }
-        }
-      },
+      "verdict": "MIXED", "manipulated": true, "activation": "carry_arb and dated_carry_arb roles absent",
       "components": {
-        "basis_widens": "yes_both_seeds",
-        "mean_reversion_slows": "not_measurable",
-        "dated_convergence_weakens": "not_measurable"
+        "perp_width_bps": {"101": [250.5331719624902, 291.95594504731326], "103": [256.9454305120625, 295.2185480784543], "verdict": "SUPPORTED (screening)"},
+        "perp_half_life_seconds": {"101": [1292.5490358255365, 4489.811845663876], "103": [1632.5927324941301, 3358.273771105969], "verdict": "SUPPORTED (screening)"},
+        "dated_convergence_slope_bps_per_hour": {"101": [-5.861405096889577, -3.7966343534524705], "103": [-6.3138806988846605, -3.9260649213237797], "verdict": "FALSIFIED", "note": "control is already anti-convergent; removal moves slope toward zero"}
       }
     },
     "abl-parity-off": {
-      "verdict": "MIXED",
-      "manipulated": true,
-      "manipulation_evidence": {
-        "parity_arb_fills": {
-          "control_101": 79311,
-          "arm_101": null
-        }
-      },
-      "primary": {
-        "raw_parity_residual_bps": {
-          "101": {
-            "control": 28.05493984902429,
-            "arm": 122.15168007991477,
-            "delta": 94.09674023089048,
-            "ratio": 4.354016823321153
-          },
-          "103": {
-            "control": -4.738074536672346,
-            "arm": 179.3763592054767,
-            "delta": 184.11443374214903,
-            "ratio": -37.85849247771789
-          }
-        },
-        "persistence_longest_run_nanos": {
-          "101": {
-            "control": 43305000000000,
-            "arm": 43199000000000,
-            "delta": -106000000000,
-            "ratio": 0.9975522456991109
-          },
-          "103": {
-            "control": 20149000000000,
-            "arm": 43816000000000,
-            "delta": 23667000000000,
-            "ratio": 2.174599235694079
-          }
-        },
-        "exploitable_share": {
-          "101": {
-            "control": 0.5101945634177245,
-            "arm": 0.8570397139940299,
-            "delta": 0.3468451505763054,
-            "ratio": 1.6798291778196077
-          },
-          "103": {
-            "control": 0.35505645032875954,
-            "arm": 0.9275102040816326,
-            "delta": 0.5724537537528731,
-            "ratio": 2.612289407002232
-          }
-        }
-      },
-      "components": {
-        "residual_grows": "yes_both_seeds",
-        "stays_open_longer": "seeds_disagree"
-      }
+      "verdict": "SUPPORTED (screening)", "manipulated": true, "activation": "parity_arb role absent",
+      "primary": {"max_raw_parity_residual_bps": {"101": [219.83966115491563, 607.6683079392797], "103": [132.9113452243055, 485.27629722535585]}, "longest_residual_run_seconds": {"101": [43363, 64799], "103": [22016, 23276]}}
     },
     "abl-triangle-off": {
-      "verdict": "FALSIFIED",
-      "manipulated": true,
-      "manipulation_evidence": {
-        "triangle_arb_fills": {
-          "control_101": 2823252,
-          "arm_101": null
-        }
-      },
-      "primary": {
-        "triangular_dislocation_bps": {
-          "101": {
-            "control": 25590.212854403824,
-            "arm": 65733.92369670686,
-            "delta": 40143.71084230303,
-            "ratio": 2.5687134402008187
-          },
-          "103": {
-            "control": 19205.4605559807,
-            "arm": 56679.84496884962,
-            "delta": 37474.38441286892,
-            "ratio": 2.9512359156208396
-          }
-        }
-      },
-      "secondary": {
-        "profitable_parity_instants": {
-          "101": {
-            "control": 131270,
-            "arm": 224,
-            "delta": -131046,
-            "ratio": 0.001706406642797288
-          },
-          "103": {
-            "control": 91421,
-            "arm": 429,
-            "delta": -90992,
-            "ratio": 0.0046925761039586095
-          }
-        }
-      },
-      "components": {
-        "little_changes": "no_both_seeds"
-      },
-      "kill_criterion": "a large change would mean the desk did more than V-001 credited; met"
+      "verdict": "FALSIFIED", "manipulated": true, "activation": "triangle_arb role absent",
+      "primary": {"mean_triangular_dislocation_bps": {"101": [24160.058113819727, 71853.22707943986], "103": [18625.12327910505, 65840.1000927799]}, "note": "the preregistered null prediction of little change fails strongly"}
     },
     "abl-funding-off": {
-      "verdict": "FALSIFIED",
-      "manipulated": true,
-      "manipulation_evidence": {
-        "funding_instants": {
-          "control_101": 36,
-          "arm_101": 0,
-          "control_103": 36,
-          "arm_103": 0
-        },
-        "note": "rate cap removed funding entirely; the interval was not stretched as the preregistration described"
-      },
-      "primary": {
-        "perp_premium_mean_deviation_bps": {
-          "101": {
-            "control": -5467.483292821631,
-            "arm": -5359.138924220612,
-            "delta": 108.34436860101869,
-            "ratio": 0.9801838683726265
-          },
-          "103": {
-            "control": -5905.745633975345,
-            "arm": -6092.441246125232,
-            "delta": -186.69561214988698,
-            "ratio": 1.0316125386565653
-          }
-        },
-        "exploitable_frequency": {
-          "101": {
-            "control": 0.13813578613124886,
-            "arm": 0.1369204473989822,
-            "delta": -0.0012153387322666465,
-            "ratio": 0.9912018545931907
-          },
-          "103": {
-            "control": 0.14900980358114285,
-            "arm": 0.13993541442411195,
-            "delta": -0.009074389157030904,
-            "ratio": 0.9391020661798976
-          }
-        }
-      },
-      "components": {
-        "premium_widens_or_drifts": "no_both_seeds"
-      },
-      "kill_criterion": "premium unchanged would mean anchoring is not funding; met"
-    },
-    "abl-latency-x10": {
-      "verdict": "MIXED",
-      "manipulated": "configuration_only",
-      "manipulation_evidence": {
-        "default_latency_delay_nanos": {
-          "control": 5000000,
-          "arm": 50000000
-        },
-        "carry_arb_delay_nanos": {
-          "control": 1000000,
-          "arm": 10000000
-        },
-        "realized_latency": "not measured"
-      },
-      "primary": {
-        "cross_venue_max_edge_bps": {
-          "101": {
-            "control": 5.477864854603887,
-            "arm": 0.0,
-            "delta": -5.477864854603887,
-            "ratio": 0.0
-          },
-          "103": {
-            "control": 0.988293681551955,
-            "arm": 0.0,
-            "delta": -0.988293681551955,
-            "ratio": 0.0
-          }
-        },
-        "arbitrage_lifetime_longest_run_nanos": {
-          "101": {
-            "control": 5016000000000,
-            "arm": 19300000000000,
-            "delta": 14284000000000,
-            "ratio": 3.8476874003189794
-          },
-          "103": {
-            "control": 10174000000000,
-            "arm": 20848000000000,
-            "delta": 10674000000000,
-            "ratio": 2.0491448791035975
-          }
-        },
-        "exploitable_frequency": {
-          "101": {
-            "control": 0.13813578613124886,
-            "arm": 0.2230530316183421,
-            "delta": 0.08491724548709326,
-            "ratio": 1.614737483061845
-          },
-          "103": {
-            "control": 0.14900980358114285,
-            "arm": 0.2408367671342809,
-            "delta": 0.09182696355313805,
-            "ratio": 1.6162477994485371
-          }
-        },
-        "triangular_dislocation_bps": {
-          "101": {
-            "control": 25590.212854403824,
-            "arm": 41823.3795183042,
-            "delta": 16233.166663900378,
-            "ratio": 1.6343505916210779
-          },
-          "103": {
-            "control": 19205.4605559807,
-            "arm": 21871.2475845423,
-            "delta": 2665.787028561601,
-            "ratio": 1.1388035981116558
-          }
-        }
-      },
-      "components": {
-        "dispersion_widens": "no_opposite_both_seeds",
-        "opportunities_last_longer": "yes_both_seeds",
-        "adverse_selection_rises": "not_measurable"
-      },
-      "caveat": "50ms remains well inside the 1s quote and automation interval, so this regime may be latency-insensitive where the prediction expected most sensitivity"
+      "verdict": "FALSIFIED", "manipulated": true, "activation": "funding settlement instants 36 -> 0 in both seeds; corrected funding audit counters all zero",
+      "primary": {"perp_abs_basis_bps": {"101": [250.5331719624902, 250.5331719624902], "103": [256.9454305120625, 256.9454305120625]}, "perp_half_life_seconds": {"101": [1292.5490358255365, 1292.5490358255365], "103": [1632.5927324941301, 1632.5927324941301]}, "note": "basis fields are exactly identical, so funding is not the marginal anchor in this ecology"}
     },
     "abl-delta-hedge-off": {
-      "verdict": "NOT_IDENTIFIED",
-      "manipulated": true,
-      "manipulation_evidence": {
-        "dealer_taker_fills": {
-          "control_101": 170310,
-          "arm_101": 0,
-          "control_103": 175215,
-          "arm_103": 0
-        },
-        "dealer_maker_fills": {
-          "control_101": 1159062,
-          "arm_101": 1166347
-        },
-        "note": "hedging removed exactly; option quoting continues"
-      },
-      "primary": {
-        "option_to_underlying_correlation": "not_extracted",
-        "dealer_net_delta": "greeks_not_retained"
-      },
-      "diagnostics_secondary": {
-        "dealer_gross_qty": {
-          "control_101": 1200775717620,
-          "arm_101": 983766583330
-        },
-        "spot_maker_fills": {
-          "control_101": 2771407,
-          "arm_101": 2584160
-        },
-        "carry_exploitable_share": {
-          "101": {
-            "control": 0.13813578613124886,
-            "arm": 0.20852126071137828,
-            "delta": 0.07038547458012942,
-            "ratio": 1.5095383068457953
-          },
-          "103": {
-            "control": 0.14900980358114285,
-            "arm": 0.15447681439556157,
-            "delta": 0.005467010814418721,
-            "ratio": 1.0366889337683187
-          }
-        }
-      },
-      "reason": "both preregistered primaries unmeasurable from surviving artifacts"
+      "verdict": "MIXED", "manipulated": true, "activation": "option-dealer underlying taker hedge fills 171097/175929 -> 0/0 while option maker fills survive",
+      "primary": {"option_underlying_correlation": {"101": [0.05088865617092256, -0.010247030284222565], "103": [0.015451768828989241, 0.04759980836142085]}, "mean_abs_dealer_delta": {"101": [0.019929167498206498, 0.9927283381858261], "103": [0.16040727451188447, 1.2319788535895002]}, "max_abs_dealer_delta": {"101": [0.16497148342273427, 8.23198569625828], "103": [6.346773913973171, 5.89132174539575]}}
     },
     "abl-vanna-volga-off": {
-      "verdict": "NOT_IDENTIFIED",
-      "manipulated": true,
-      "manipulation_evidence": {
-        "vv_desk_fills": {
-          "control_101": 90273,
-          "arm_101": null
-        }
-      },
-      "primary": {
-        "dealer_vega_vanna_volga": "greeks_not_retained",
-        "cross_strike_surface": "no_iv_extraction"
-      },
-      "diagnostics_secondary": {
-        "parity_arb_fills": {
-          "control_101": 79311,
-          "arm_101": 5774,
-          "control_103": 95498,
-          "arm_103": 5816
-        },
-        "dealer_gross_qty": {
-          "control_101": 1200775717620,
-          "arm_101": 642941356334
-        }
-      },
-      "reason": "preregistered quantities unmeasurable; the unpredicted 93% collapse of parity-desk activity is a diagnostic only"
+      "verdict": "FALSIFIED", "manipulated": true, "activation": "vanna_volga_desk role absent; option dealer maker fills remain nonzero",
+      "primary": {"mean_abs_vega": {"101": [39485729.401336096, 27274549.327457655], "103": [50829295.540525936, 30320795.365170524]}, "mean_abs_vanna": {"101": [2.6165621472106273, 1.0064532892664584], "103": [2.030611455010889, 1.0403562353271143]}, "mean_abs_volga": {"101": [273784397.4763453, 84128564.94886784], "103": [176646908.94149107, 80345403.33924074]}, "surface_curvature": {"101": [1493.871801517895, 1352.4336953854424], "103": [1594.7960079833717, 1377.2391310771197]}, "note": "all second-order exposures shrink, opposite to prediction"}
     },
     "abl-option-value-takers-off": {
-      "verdict": "NOT_IDENTIFIED",
-      "manipulated": true,
-      "manipulation_evidence": {
-        "value_taker_fills": {
-          "control_101": 173865,
-          "arm_101": null
-        },
-        "chain_still_active": {
-          "dealer_fills_101": 1133663,
-          "option_flow_fills_101": 901379
-        }
-      },
-      "primary": {
-        "atm_iv": "no_iv_extraction",
-        "skew": "no_iv_extraction",
-        "curvature": "no_iv_extraction",
-        "term_structure": "no_iv_extraction",
-        "cross_strike_dispersion": "no_iv_extraction"
-      },
-      "diagnostics_secondary": {
-        "viable_windows": {
-          "control_101": 3873,
-          "arm_101": 2664,
-          "control_103": 3912,
-          "arm_103": 2744
-        }
-      },
-      "reason": "the chain remained active, so the preregistered inconclusive branch does not apply; the decisive SABR-inheritance test was simply not measured"
+      "verdict": "SUPPORTED (screening)", "manipulated": true, "activation": "option_value_taker role absent; 1001701/978907 option trades and 36 fitted expiries remain",
+      "primary": {"atm_iv": {"101": [1.5590140744488807, 2.8871473957049107], "103": [1.5202887860087686, 2.931382433201897]}, "surface_curvature": {"101": [1493.871801517895, 295.69563894855077], "103": [1594.7960079833717, 208.0924690670225]}, "cross_strike_dispersion": {"101": [0.517309038211844, 0.3030528972267162], "103": [0.557791980790602, 0.272893476930779]}, "interpretation": "surface weakens materially but survives"}
+    },
+    "abl-latency-x10": {
+      "verdict": "MIXED", "manipulated": true, "activation": "weighted delivered courier delay ms 37.995->485.294 and 37.762->454.846",
+      "primary": {"cross_venue_max_edge_bps": {"101": [1.530512018672603, 1.8882435522549201], "103": [4.2745014967815465, 6.367319122559945]}, "longest_opportunity_seconds": {"101": [1030, 1503], "103": [3709, 2989]}, "picked_off_share": {"101": [0.4575935251723383, 0.474146262304655], "103": [0.44094753639225676, 0.468841569958179]}}
     }
-  },
-  "summary": {
-    "SUPPORTED_SCREENING": 1,
-    "MIXED": 3,
-    "FALSIFIED": 2,
-    "NOT_IDENTIFIED": 3
-  },
-  "claim_status": {
-    "shared_index_cross_venue_agreement": "RETAIN_STRENGTHENED",
-    "cross_venue_cycle_never_profitable_in_baseline": "WITHDRAW",
-    "carry_desks_close_the_basis": "WEAKEN",
-    "parity_desks_enforce_put_call_parity": "RETAIN_QUALIFIED",
-    "triangular_desk_fires_without_restraining_dislocation_V001": "WITHDRAW",
-    "funding_anchors_the_perpetual": "WITHDRAW",
-    "option_hedging_transmits_flow_to_underlying": "UNRESOLVED",
-    "vanna_volga_desks_shape_the_surface": "UNRESOLVED",
-    "smile_is_emergent_not_sabr_inherited": "UNRESOLVED",
-    "configured_latency_is_economically_meaningful": "RETAIN_QUALIFIED"
   }
 }
