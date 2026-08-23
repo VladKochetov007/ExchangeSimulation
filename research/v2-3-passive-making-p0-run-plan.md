@@ -30,8 +30,10 @@ can be interpreted:
 1. `observationreceipts.json` — independently valid V2-0 receipt/decision
    audit for `spot_maker`, `fixed_distance_maker`, and `imbalance_maker`;
 2. `evidenceartifacthash.json` — exact persisted-evidence artifact identity;
-3. `postonly-cdf.json` — accepted/rejected/fill-qualified CDF/USD activity of
-   precisely those maker classes;
+3. `postonly-cdf.json` plus the three `postonly-cdf-<role>.json` artifacts —
+   pooled and per-maker-class accepted/rejected/fill-qualified CDF/USD
+   activity. The per-role files make the activation condition testable rather
+   than inferring it from a nonzero pooled count;
 4. `viability.json` and `cdf-viability.json` — raw 60-second CDF/USD venue
    windows, including snapshots, one-sided count, two-sided share, trades,
    volume, and maker/taker-class counts;

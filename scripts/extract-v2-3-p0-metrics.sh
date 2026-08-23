@@ -37,8 +37,15 @@ for arm in A B C; do
 
 		write_metric "$cell/observationreceipts.json" "$analyzer" -metric observationreceipts -json "$cell"
 		write_metric "$cell/evidenceartifacthash.json" "$analyzer" -metric evidenceartifacthash -json "$cell"
+		# Preserve the pooled count for the A/B/C comparison, and per-role
+		# evidence for the preregistered activation gate. A pooled nonzero count
+		# cannot establish that every maker family actually participated.
 		write_metric "$cell/postonly-cdf.json" "$analyzer" -metric postonly -json \
 			-post-only-roles "$roles" -post-only-symbols CDF/USD "$cell"
+		for role in spot_maker fixed_distance_maker imbalance_maker; do
+			write_metric "$cell/postonly-cdf-${role}.json" "$analyzer" -metric postonly -json \
+				-post-only-roles "$role" -post-only-symbols CDF/USD "$cell"
+		done
 		write_metric "$cell/viability.json" "$analyzer" -metric viability -json -viability-window 60 "$cell"
 
 		# P0 uses direct, raw measures for viability; it does not post-hoc turn a
@@ -61,7 +68,12 @@ for arm in A B C; do
 			  analysis_revision: $analysis_revision,
 			  analyzer_sha256: $analyzer_sha256,
 			  completion_sentinels: ["greeks.json", "latency.json"],
-			  required_artifacts: ["observationreceipts.json", "evidenceartifacthash.json", "postonly-cdf.json", "viability.json", "cdf-viability.json"]
+			  required_artifacts: [
+			    "observationreceipts.json", "evidenceartifacthash.json",
+			    "postonly-cdf.json", "postonly-cdf-spot_maker.json",
+			    "postonly-cdf-fixed_distance_maker.json", "postonly-cdf-imbalance_maker.json",
+			    "viability.json", "cdf-viability.json"
+			  ]
 			}' >"$cell/analysis-metadata.json"
 		echo "extracted P0 $arm/$seed"
 	done
