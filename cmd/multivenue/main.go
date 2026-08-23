@@ -195,7 +195,7 @@ func main() {
 		log.Fatal(runErr)
 	}
 	output := greekOutput{
-		SchemaVersion:  5,
+		SchemaVersion:  6,
 		InitialRisk:    make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
 		RiskTimeline:   make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
 		PreExpiryRisk:  make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),

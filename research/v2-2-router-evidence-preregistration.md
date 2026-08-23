@@ -131,3 +131,28 @@ was generated before those corrections.
 The promoted claim is limited to auditable router information provenance. The
 2x2 informed-maker × router price-discovery factorial remains blocked on an
 economically motivated dislocation source and event-level channel attribution.
+
+### Activation probe follow-up
+
+The unmodified, short `own_mid` population has no post-fee router signal in
+five simulated minutes; changing the configured taker fee to numeric zero did
+not isolate fees because the scenario's legacy normalizer interprets zero as
+the omitted-value default. This is a configuration ambiguity, not evidence
+that fees were the cause.
+
+An existing execution-mandate population provides the first legitimate local
+shock source without imposing a price path: one independently seeded
+metaorder desk per venue, 100 ABC parent quantity, 5 ABC child quantity, and a
+bounded 50-bps limit-through-touch. With the remaining `own_mid` population,
+the five-minute seed-101 diagnostic produces 72 router submissions, 71
+completed groups, no failed group, and positive completed quote cashflow
+after the configured 5-bps taker fee. The three completed parent orders have
+opposite venue-local signs and small signed impacts (about 2 bps); nothing
+forces a route or target price.
+
+The first such probe exposed V-036: its terminal VWAP aggregation overflowed
+and printed negative prices. The source record is invalid for execution-price
+measurement and is retained only as the detector trace. The corrected V2
+report now uses an exact 128-bit quantity-price accumulator and nullable VWAP;
+the exact same configuration reproduces the router counts and produces positive
+VWAPs. This is a diagnostic activation result, not the factorial outcome.

@@ -127,6 +127,9 @@ These are quantities, not availability sentinels:
 - an order request for a `Market` order legitimately has protocol
   `Price == 0`; order type distinguishes it from an unavailable market or
   reference price, and limit requests remain strictly positive;
+- a metaorder report has `VWAP == nil` when no child filled; a positive pointer
+  is an exact weighted execution price, so an unavailable VWAP is never
+  serialized as numeric zero;
 - `SettlementPrice`/`PriceSource`/book helpers may return numeric zero only
   together with a non-nil error, and `(0,false)` cache helpers only as explicit
   availability tuples.

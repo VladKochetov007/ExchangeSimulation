@@ -72,7 +72,7 @@ type Metaorder struct {
 	EndTimestamp   int64   `json:"end_timestamp"`
 	StartMid       int64   `json:"start_mid"`
 	EndMid         int64   `json:"end_mid"`
-	VWAP           int64   `json:"vwap"`
+	VWAP           *int64  `json:"vwap,omitempty"`
 	ChildCount     int     `json:"child_count"`
 	Completed      bool    `json:"completed"`
 	Participation  float64 `json:"realized_participation"`

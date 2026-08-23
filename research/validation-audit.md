@@ -1292,3 +1292,27 @@ This is V2-only telemetry/provenance repair. It changes neither ae13f9a nor
 matching, actor decision rules, scheduler events, latency, RNG consumption, or
 economic state. It blocks any router causal claim made before this contract;
 no such claim has been promoted.
+
+## V-036 — metaorder execution VWAP could overflow after valid fills
+
+A V2 router activation diagnostic used three independently funded, bounded
+execution-mandate desks. Their child fills and order state were valid, but the
+parent report calculated `VWAP` as accumulated quote notional times base
+precision divided by accumulated quantity. The individual fills were valid;
+the final multiplication overflowed `int64` and serialized a negative VWAP.
+That is a measurement failure, not a negative execution price or an economic
+effect.
+
+The report path now accumulates the exact nonnegative 128-bit sum of
+`fill_qty * fill_price` with `math/bits`, then divides it once by total filled
+quantity. A no-fill parent has a nullable `vwap` field rather than a numeric
+zero sentinel. The JSON report schema increments to 6, and the analysis reader
+preserves the same availability distinction. A boundary test uses four fills
+whose previously valid accumulated notional would overflow on the old final
+multiplication; it yields the correct positive price. A report-decode test
+separately proves a missing VWAP remains unavailable.
+
+The corrected five-minute router diagnostic reproduces 72 submitted / 71
+completed groups and positive parent VWAPs. No route-selection, request,
+matching, scheduler, latency, RNG, or account behavior changed. The first,
+overflowed report is not used as quantitative economic evidence.

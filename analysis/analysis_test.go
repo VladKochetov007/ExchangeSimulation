@@ -52,6 +52,24 @@ func TestRoleGroupCollapsesNumberedParticipants(t *testing.T) {
 	}
 }
 
+func TestMetaorderVWAPAvailabilitySurvivesReportDecode(t *testing.T) {
+	price := int64(5_000_000_000)
+	dir := writeRun(t, Report{Metaorders: []Metaorder{
+		{ID: 1, FilledQty: 1, VWAP: &price},
+		{ID: 2, FilledQty: 0},
+	}}, nil)
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if got := run.Report.Metaorders[0].VWAP; got == nil || *got != price {
+		t.Fatalf("filled metaorder VWAP = %v, want %d", got, price)
+	}
+	if got := run.Report.Metaorders[1].VWAP; got != nil {
+		t.Fatalf("unfilled metaorder VWAP = %d, want unavailable", *got)
+	}
+}
+
 // A derivative record nests its fields one level deeper than a spot record and
 // carries the symbol beside them. Reading only the outer level yields zero for
 // every derivative field, which is how an entire class of fills once went

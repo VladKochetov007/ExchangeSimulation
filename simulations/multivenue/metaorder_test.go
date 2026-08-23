@@ -229,3 +229,37 @@ func TestMetaorderRecordsCarryTraderIdentity(t *testing.T) {
 		t.Fatalf("trader IDs = %d, %d; want 7, 9", records[0].TraderID, records[1].TraderID)
 	}
 }
+
+// A legitimate parent can accumulate a quote notional whose multiplication by
+// base precision would overflow int64 even though its weighted execution price
+// is ordinary. VWAP must remain a usable positive price rather than wrapping
+// negative, and no-fill parents must make absence explicit.
+func TestMetaorderVWAPUsesExactWideAccumulator(t *testing.T) {
+	const (
+		symbol        = "ABC/USD"
+		basePrecision = int64(100_000_000)
+		price         = int64(5_000_000_000)
+		childQty      = int64(500_000_000)
+	)
+	trader := NewMetaorderTrader(1, newMetaGateway(), "v1", MetaorderTraderConfig{
+		Symbol: symbol, BasePrecision: basePrecision, TickSize: 1,
+		MinQty: 4 * childQty, MaxQty: 4 * childQty, ParetoAlpha: 2,
+		ChildInterval: time.Millisecond, MinChildQty: childQty, MaxDuration: time.Hour,
+	})
+	trader.parentQty, trader.startMid = 4*childQty, price
+	for range 4 {
+		fillChild(trader, symbol, childQty, price)
+	}
+	trader.finish(time.Unix(1, 0).UnixNano(), true)
+	records := trader.Records()
+	if len(records) != 1 || records[0].VWAP == nil || *records[0].VWAP != price {
+		t.Fatalf("wide VWAP record = %#v, want price %d", records, price)
+	}
+
+	noFill := NewMetaorderTrader(2, newMetaGateway(), "v1", trader.cfg)
+	noFill.parentQty, noFill.startMid = childQty, price
+	noFill.finish(time.Unix(1, 0).UnixNano(), false)
+	if record := noFill.Records()[0]; record.VWAP != nil {
+		t.Fatalf("no-fill VWAP = %d, want unavailable", *record.VWAP)
+	}
+}

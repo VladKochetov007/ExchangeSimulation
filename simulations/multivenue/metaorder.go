@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"math/bits"
 	"math/rand"
 	"time"
 
@@ -109,7 +110,9 @@ type MetaorderRecord struct {
 	EndTimestamp   int64 `json:"end_timestamp"`
 	StartMid       int64 `json:"start_mid"`
 	EndMid         int64 `json:"end_mid"`
-	VWAP           int64 `json:"vwap"`
+	// VWAP is nil when no child filled. A numeric zero is never used to mean
+	// that this execution price is unavailable.
+	VWAP *int64 `json:"vwap,omitempty"`
 
 	ChildCount   int   `json:"child_count"`
 	MarketVolume int64 `json:"market_volume_during_execution"`
@@ -133,22 +136,27 @@ type MetaorderTrader struct {
 	bestBid, bestAsk int64
 	askQty, bidQty   int64
 
-	active       bool
-	side         exchange.Side
-	parentQty    int64
-	filledQty    int64
-	notional     int64
-	childCount   int
-	startTS      int64
-	startMid     int64
-	startVolume  int64
-	childVolume  int64
-	ownVolume    int64
-	marketVolume int64
-	nextStartTS  int64
-	records      []MetaorderRecord
-	subscribed   bool
-	pendingChild bool
+	active    bool
+	side      exchange.Side
+	parentQty int64
+	filledQty int64
+	// vwapHi/vwapLo hold the exact positive 128-bit sum of fill quantity times
+	// price. A parent quantity and one price are each bounded by int64, so the
+	// whole numerator remains below 2^126 while filledQty remains valid. This
+	// avoids multiplying a perfectly valid accumulated quote notional by the
+	// base precision at report time.
+	vwapHi, vwapLo uint64
+	childCount     int
+	startTS        int64
+	startMid       int64
+	startVolume    int64
+	childVolume    int64
+	ownVolume      int64
+	marketVolume   int64
+	nextStartTS    int64
+	records        []MetaorderRecord
+	subscribed     bool
+	pendingChild   bool
 }
 
 func NewMetaorderTrader(id uint64, gw actor.Gateway, venueID string, cfg MetaorderTraderConfig) *MetaorderTrader {
@@ -190,9 +198,17 @@ func (m *MetaorderTrader) HandleEvent(_ context.Context, evt *actor.Event) {
 		if e.Symbol != m.cfg.Symbol {
 			return
 		}
-		m.filledQty += e.Qty
+		m.filledQty = etypes.AddAmount(m.filledQty, e.Qty)
 		m.ownVolume += e.Qty
-		m.notional += e.Qty * e.Price / m.cfg.BasePrecision
+		if e.Qty > 0 && e.Price > 0 {
+			hi, lo := bits.Mul64(uint64(e.Qty), uint64(e.Price))
+			lo, carry := bits.Add64(m.vwapLo, lo, 0)
+			hi, overflow := bits.Add64(m.vwapHi, hi, carry)
+			if overflow != 0 {
+				panic("multivenue: metaorder VWAP numerator overflow")
+			}
+			m.vwapHi, m.vwapLo = hi, lo
+		}
 		if e.IsFull {
 			m.pendingChild = false
 		}
@@ -243,7 +259,7 @@ func (m *MetaorderTrader) begin(timestamp int64) {
 	if m.rng.Intn(2) == 0 {
 		m.side = exchange.Sell
 	}
-	m.parentQty, m.filledQty, m.notional, m.childCount = quantity, 0, 0, 0
+	m.parentQty, m.filledQty, m.vwapHi, m.vwapLo, m.childCount = quantity, 0, 0, 0, 0
 	m.startTS, m.startMid = timestamp, mid
 	m.startVolume, m.childVolume = m.marketVolume, m.externalVolume()
 	m.ownVolume = 0
@@ -381,8 +397,12 @@ func (m *MetaorderTrader) finish(timestamp int64, completed bool) {
 		ChildCount: m.childCount, MarketVolume: m.marketVolume - m.startVolume,
 		Completed: completed,
 	}
-	if m.filledQty > 0 {
-		record.VWAP = m.notional * m.cfg.BasePrecision / m.filledQty
+	if m.filledQty > 0 && m.vwapHi < uint64(m.filledQty) {
+		vwap, _ := bits.Div64(m.vwapHi, m.vwapLo, uint64(m.filledQty))
+		if vwap <= math.MaxInt64 {
+			price := int64(vwap)
+			record.VWAP = &price
+		}
 	}
 	if m.startMid > 0 {
 		signed := float64(endMid-m.startMid) / float64(m.startMid)
