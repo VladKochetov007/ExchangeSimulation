@@ -5,9 +5,13 @@ import (
 	"testing"
 )
 
+func expiryInstrumentLine(event string, timestamp, expiry int64, venue, symbol, kind string) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":0,"event":%q,"data":{"venue_id":%q,"payload":{"symbol":%q,"instrument_type":%q,"expiry_nano":%d}}}`,
+		timestamp, event, venue, symbol, kind, expiry)
+}
+
 func expirySettledLine(settled, expiry int64, venue, symbol, kind string) string {
-	return fmt.Sprintf(`{"sim_ts":%d,"client_id":0,"event":"instrument_settled","data":{"venue_id":%q,"payload":{"symbol":%q,"instrument_type":%q,"expiry_nano":%d}}}`,
-		settled, venue, symbol, kind, expiry)
+	return expiryInstrumentLine("instrument_settled", settled, expiry, venue, symbol, kind)
 }
 
 func expiryFillLine(timestamp int64, venue, symbol string) string {
@@ -32,8 +36,27 @@ func TestExpiryFillAuditUsesContractualExpiryForFuturesAndOptions(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Contracts != 2 || result.Futures != 1 || result.Options != 1 || result.FillRecords != 3 || result.FillsAfterExpiry != 2 || result.MissingExpiryMetadata != 0 {
+	if result.Contracts != 2 || result.Futures != 1 || result.Options != 1 || result.SettledContracts != 2 || result.FillRecords != 3 || result.FillsAfterExpiry != 2 || result.MissingExpiryMetadata != 0 {
 		t.Fatalf("expiry fill audit = %+v", result)
+	}
+}
+
+func TestExpiryFillAuditCatchesExpiredContractWithoutSettlement(t *testing.T) {
+	lines := []string{
+		expiryInstrumentLine("instrument_listed", 1, 100, "north", "ABC-FUT-1", "FUTURE"),
+		expiryFillLine(101, "north", "ABC-FUT-1"),
+	}
+	report := Report{TerminalAccounts: []AccountRow{{Account: Account{Timestamp: 101}}}}
+	run, err := Open(writeRun(t, report, map[string][]string{"north/general.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureExpiryFills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExpiredContracts != 1 || result.ExpiredUnsettledContracts != 1 || result.FillsAfterExpiry != 1 || len(result.Checks) != 1 || result.Checks[0].Settled {
+		t.Fatalf("expired unsettled contract survived: %+v", result)
 	}
 }
 

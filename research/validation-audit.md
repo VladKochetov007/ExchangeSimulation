@@ -938,3 +938,64 @@ participant's option fill path. Any claim requiring such an option path stays
 unresolved until the evidence layer is extended and a consistently instrumented
 campaign is run. This is a scientific-evidence/audit gap, not evidence that
 the option position engine is wrong.
+
+## V-024 — look-ahead boundary lacked an executable falsification test
+
+The information-boundary review had established by code inspection that the
+scheduler-backed delayed gateway should not deliver an observation before its
+source timestamp plus its modeled latency. It had no mutation that would fail
+if that arithmetic were reversed, so the conclusion was structural rather than
+adversarially tested.
+
+`simulation.TestMarketDataCannotArriveBeforePublicationPlusLatency` now sends
+one market-data message through the actual deterministic courier at 1.000 s
+with a 10 ms latency. It proves the actor inbox is empty before 1.010 s and
+then receives the message at that boundary. A scratch mutation changing
+`source + delay` to `source - delay` fails the test immediately; the temporary
+source is restored by the harness. The result is recorded in
+`research/artifacts/mutations/future-information-delivery.json`.
+
+The scope is intentionally limited. It validates the scheduler-backed courier,
+not the known Vanna-Volga direct dealer-inventory function call (IB-1), and
+historical raw logs still do not retain every participant inbox receipt. Thus it
+strengthens the no-look-ahead claim for message delivery without converting the
+whole information-boundary review into an independently replayed evidence
+trace.
+
+## V-025 — post-expiry audit was dated-future-only and settlement-anchored
+
+The existing settlement audit reconstructed dated-future payout mechanics and
+counted its `OrderFill` records after `instrument_settled.ExpiryNano`. It did
+not cover European options, and a complete failure to emit settlement could
+make a contract invisible to that audit. Thus a passing dated-future settlement
+table was not sufficient evidence that no instrument traded past its contract
+term.
+
+`analysis/expiry_fill.go` now provides `mvanalyze -metric expiryfills`. It
+first derives the contract and expiry from `instrument_listed`, uses terminal
+account timestamps to identify contracts that should already have expired, and
+then joins every persisted `OrderFill`. It reports late fills for both futures
+and options, expired-but-unsettled contracts, missing expiry metadata,
+settlements without listings, and listing/settlement metadata mismatches. Its
+fixture suite includes a contract that expires but never announces settlement,
+so the detector does not require the very event whose omission it must catch.
+
+The scratch `delay_expiry_settlement` mutation deferred `CheckExpiries` by five
+minutes in a five-hour seed-101 world while retaining every listed
+`ExpiryNano`. The control exercised 66 contracts and had zero late fills. The
+mutant generated 7,326 late participant fill records across all 66 (six dated
+futures and sixty options). The old dated-future audit saw only 1,918; the new
+audit caught the full domain. Order lifecycle and conservation passed, showing
+that neither proves expiry correctness. Full compact evidence is
+`research/artifacts/mutations/delay-expiry-settlement.json`; raw evidence is
+retained.
+
+The strengthened listing-anchored audit was then replayed over each retained
+24-hour ae13f9a baseline. Each seed has 396 listed contracts (36 futures and
+360 options), of which 363 were contractually expired and settled by the
+terminal timestamp. The late-fill, expired-unsettled, missing-metadata,
+settlement-without-listing, and listing/settlement-mismatch counts are all
+zero. The corresponding persisted participant fill-record counts are
+2,444,064 (seed 101), 2,448,558 (seed 102), and 2,418,586 (seed 103). These
+control artifacts are retained as
+`research/artifacts/scoreboard/f2_baseline_{101,102,103}/expiryfills-v024-listing-anchored.json`.

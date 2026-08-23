@@ -29,6 +29,7 @@ type Participant struct {
 
 // Account is the subset of a logged account this package reads.
 type Account struct {
+	Timestamp    int64      `json:"timestamp"`
 	SpotBalances []Balance  `json:"spot_balances"`
 	PerpBalances []Balance  `json:"perp_balances"`
 	Positions    []Position `json:"positions"`

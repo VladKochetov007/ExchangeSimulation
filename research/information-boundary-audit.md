@@ -67,15 +67,33 @@ order the hooks run in. The order is fixed by the venue list, so it is
 deterministic, but it is not stated anywhere as a modelling decision, and it
 means "the index" is not the same object at all three venues within a tick.
 
+## Mutation evidence: scheduler-backed future information is caught
+
+V-024 adds `simulation.TestMarketDataCannotArriveBeforePublicationPlusLatency`.
+It injects one market-data message at simulated 1.000 s through the real
+deterministic delayed gateway, with a 10 ms configured delivery latency. The
+actor inbox is required to be empty at publication and at 1.009999999 s, then
+to contain the message at 1.010 s. The compact courier telemetry must also
+report one scheduled and one delivered market-data message with at least the
+configured delivery latency.
+
+The scratch `future_information_delivery` mutation changes the scheduler time
+from `source + delay` to `source - delay`. The test fails immediately because
+the message becomes available at its publication instant. The control passes;
+the source is restored by the mutation harness before the result is recorded.
+This is a direct semantic test of the courier boundary rather than a claim
+deduced from later trading behavior. Its compact record is
+`research/artifacts/mutations/future-information-delivery.json`.
+
 ## What is not established here
 
-- **No mutation test has been run.** The plan asks for future information to be
-  injected into one actor deliberately, to prove the audit would catch it. That
-  requires execution and has not been done, so this document says what the code
-  permits and not what a detector would find.
-- **No per-observation timestamp check.** The plan asks that every observation
+- **No per-observation timestamp trace in preserved ae13f9a raw evidence.**
+  The plan asks that every observation
   used in a decision satisfy `information_timestamp <= decision_timestamp`.
-  The delivery path makes this structurally true for market data, but nothing
-  instruments it, and IB-1 bypasses the path entirely.
-- **Liquidation and reference pricing** were not audited for their information
-  sources, because neither ever runs in the frozen baseline (V-005).
+  The tested delivery path makes this structurally true for scheduler-backed
+  market data, but the historic raw logs do not contain each actor's inbox
+  receipt. IB-1 also bypasses the path entirely.
+- **Liquidation and reference pricing** remain unaudited for their information
+  sources. The V-005 stress does exercise forced closes, but no independent
+  contemporaneous mark/collateral reconstruction has yet established whether a
+  trigger used a fresh or stale cross-margin input.

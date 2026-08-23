@@ -56,6 +56,8 @@ an ecology run.
 | Negate Black-76 delta in live option-dealer hedge decisions, ecology run | 903 exchange-owned risk snapshots / all three hedge policies | actual underlying hedge offsets independently marked option delta | mean \|net delta\| 0.0170; max 0.1650; drift 0.00038/h | **mean \|net delta\| 1.9264; max 10.8592; drift 1.1844/h** | yes, through exchange-owned `-metric exposure` |
 | Settle first ABC-PERP match twice but emit one fill, ecology run | 1 match / 2 participant position paths | each logged linear fill has exactly one matching position transition | 248,898 linear fills and updates; 0 extras | **248,898 fills, 248,900 updates; 2 extras** | yes, through `-metric fillpositions` |
 | Omit settlement side effects for first ABC-PERP match but emit its fills, ecology run | 1 match / 2 participant position paths | each logged linear fill has exactly one matching position transition | 248,898 linear fills and updates; 0 missing | **248,898 fills, 248,896 updates; 2 missing** | yes, through `-metric fillpositions` |
+| Inject negative-latency market data through deterministic courier | 1 actor-bound message | source timestamp plus configured delay is the earliest actor-inbox delivery | no pre-due delivery; delivered at 1.010 s | **delivered at 1.000 s** | yes, through direct courier-boundary test |
+| Delay contractual expiry/delisting five minutes, ecology run | 66 expired contracts (6 futures, 60 options) | no persisted fill after listed contract ExpiryNano | 206,360 expired-contract fill records; 0 late | **212,584 records; 7,326 late across all 66 contracts** | yes, through `-metric expiryfills` |
 
 ### Delta-sign ecology mutation
 
@@ -142,12 +144,12 @@ listing after expiry.
 | Duplicate one fill | movements reconstruct the reported holdings; contract net size stays zero | `-metric conservation` chain check; `-metric positions` |
 | Delete one fill | the same two | as above |
 | Omit one settlement | payout residual per contract; holders paid against holders present | `-metric settlements` |
-| Execute an order after expiry | no fill may be recorded after the expiry instant | `-metric settlements`, `TradesAfterExpiry` |
+| Execute an order after expiry | no fill may be recorded after the listed contractual expiry | `-metric expiryfills` (all futures/options); dated-future settlement audit is supplementary |
 | Fail to cancel expired resting orders | the same, plus the book still quoting a delisted contract | `-metric settlements`; needs a delisting check that does not exist yet |
 | Drop a GTC cancellation request or state transition | resting order can remain executable after a requested cancel; request evidence is not persisted | none yet |
 | Give one venue zero latency accidentally | cross-venue edge appears where none did | `-metric arbitrage`, cross-venue cycle |
 | Use stale collateral for liquidation | a contemporaneous independently reconstructed mark/equity breach must not be hidden by an older mark | V-005 now exercises liquidations, but no independent mark/equity reconstruction exists yet |
-| Inject future information into one actor | no detector exists; the delivery path makes look-ahead structurally impossible but nothing instruments it (see `research/information-boundary-audit.md`) | none yet |
+| Inject future information into one actor | scheduler-backed market data cannot arrive before publication plus modeled delay | `simulation.TestMarketDataCannotArriveBeforePublicationPlusLatency`; direct inventory bypasses remain separately qualified |
 
 ## What the table already says about the audit
 
@@ -161,11 +163,14 @@ queue-order check over the logged book deltas still does not exist, so a
 priority defect introduced in the wiring around the matcher rather than in the
 matcher would still go unseen.
 
-Injected look-ahead still has **no detector at all**. The immediate-order
-cancellation *record* is now covered, but an unlogged GTC cancellation request
-or state transition remains untestable from the retained evidence. Two more
-classes are blocked behind mechanisms that never execute. So the audit as it
-stands covers
+The scheduler-backed delivery path now rejects an explicit negative-latency
+mutation: one message published at 1.000 s with 10 ms latency is absent until
+1.010 s, while the scratch source mutation is caught at publication. This is
+not a per-observation trace of the historical logs, and it does not cover
+IB-1's direct dealer-inventory read. The immediate-order cancellation *record*
+is now covered, but an unlogged GTC cancellation request or state transition
+remains untestable from the retained evidence. Two more classes are blocked
+behind mechanisms that never execute. So the audit as it stands covers
 money and lifecycle thoroughly, covers derivative semantics well now that the
 funding direction check has been rebuilt and the exercise fixtures exist, and
 covers matching, order handling and information flow barely.
@@ -179,6 +184,37 @@ That is a statement about the audit rather than about the simulator, and it
 belongs in the same document as the passes: an invariant suite is only as
 strong as the mutations it can catch, and this one has not yet been shown to
 catch the ones that matter most to a matching engine.
+
+### Future-information courier mutation
+
+`future_information_delivery` mutates the deterministic courier's scheduled
+arrival from `source + delay` to `source - delay`. The direct test injects one
+market-data message into the real gateway and asserts that the actor inbox is
+empty before the due timestamp. The control passes, while the mutant fails at
+the publication instant. This is a CAUGHT fixture-level semantic mutation,
+not a claim that the historic raw event logs independently recorded every
+participant observation. Full compact record:
+`research/artifacts/mutations/future-information-delivery.json`.
+
+### Contractual-expiry mutation
+
+`delay_expiry_settlement` holds each expired book open for five simulated
+minutes while leaving its published `ExpiryNano` unchanged. The control has 99
+listed contracts, 66 contractually expired, and zero late fill records. The
+mutant has 7,326 after-expiry `OrderFill` records across all 66 exercised
+contracts: six dated futures and sixty options. The former settlement audit
+only reports the 1,918 dated-future fill records, which exposed its missing
+option scope. The new listing-anchored `expiryfills` audit reports the entire
+failure and also unit-tests the complementary no-settlement case as
+`expired_unsettled`. Order lifecycle and conservation remain clean, so they
+cannot substitute for a contractual-lifetime audit. Full artifact:
+`research/artifacts/mutations/delay-expiry-settlement.json`.
+
+The same non-circular audit was replayed over all three preserved 24-hour
+controls. Each has 396 listed contracts, 363 expired-and-settled contracts,
+and zero late fills, expired-unsettled contracts, or listing/settlement
+metadata defects. This is control evidence for the contractual-boundary claim,
+not merely a passing fixture.
 
 ### Linear fill-to-position mutation
 

@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "mutation": "delay_expiry_settlement",
+  "status": "CAUGHT",
+  "scope": "Delay CheckExpiries by five simulated minutes while preserving each listed contract's immutable ExpiryNano.",
+  "simulator_freeze": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
+  "mutant_config": "research/configs/frozen-baseline-2026-08-21.json",
+  "mutant_config_sha256": "83bcaa542d88fbe87620dfb7682ea2a1c000c10f162adf9123a801dbc3b9dc9b",
+  "control_run": "logs/clock_control_101",
+  "control_config": "research/configs/clock-control-5h-101.json",
+  "control_config_sha256": "203df782e85bce48a06f2335e24dd6be2fb8faf8bcab38a808228e1f9a72f756",
+  "seed": 101,
+  "duration_seconds": 18000,
+  "mutant_binary_sha256": "4733ce48671a62351792b30a0acd203fb78a6fe7b2c312621ccf3903fd961173",
+  "analysis_binary_sha256": "adf6a659918f9c66045f808c0dd1b92e6cc7e381b046b627009a8b89f9b697ca",
+  "trigger": {
+    "grace_nanoseconds": 300000000000,
+    "contractually_expired_contracts": 66,
+    "affected_futures": 6,
+    "affected_options": 60,
+    "settlement_delay_nanoseconds": 300000000000
+  },
+  "control": {
+    "listed_contracts": 99,
+    "expired_contracts": 66,
+    "settled_contracts": 66,
+    "expired_unsettled_contracts": 0,
+    "missing_expiry_metadata": 0,
+    "fill_records_on_expired_contracts": 206360,
+    "fills_after_expiry": 0
+  },
+  "mutant": {
+    "listed_contracts": 99,
+    "expired_contracts": 66,
+    "settled_contracts": 66,
+    "expired_unsettled_contracts": 0,
+    "missing_expiry_metadata": 0,
+    "fill_records_on_expired_contracts": 212584,
+    "fills_after_expiry": 7326,
+    "settlement_audit_future_only_fills_after_expiry": 1918,
+    "settlement_audit_future_only_mismatches": 6,
+    "order_lifecycle_errors": 0,
+    "balance_delta_mismatched": 0,
+    "balance_chain_broken": 0,
+    "usd_conservation_residual": 75925,
+    "usd_conservation_residual_relative": 4.591164163219892e-12
+  },
+  "detector": "mvanalyze -metric expiryfills, anchored to instrument_listed ExpiryNano and terminal run time; settlement events are only corroboration.",
+  "evidence": {
+    "events": 21300789,
+    "digest": "120372c307a0d5e1d81c75cdf223c9191708b6224811f00ebcd35a57229dc7d6",
+    "domain": "persisted_json_records",
+    "ordering": "unordered_multiset",
+    "raw_logs_retained": true
+  },
+  "interpretation": "The listing-anchored audit catches every exercised future and option contract trading after its contractual expiry. Order lifecycle and conservation remain clean, so neither validates contractual lifetime. A fixture additionally proves that an expired contract with no settlement announcement is reported as expired_unsettled rather than disappearing from the audit."
+}

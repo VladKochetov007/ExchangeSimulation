@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "mutation": "future_information_delivery",
+  "status": "CAUGHT",
+  "scope": "Replace the scheduler-backed courier's source timestamp plus market-data delay with source timestamp minus delay.",
+  "simulator_freeze": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
+  "detector": "simulation.TestMarketDataCannotArriveBeforePublicationPlusLatency",
+  "trigger": {
+    "market_data_messages": 1,
+    "publication_nanoseconds": 1000000000,
+    "configured_market_data_delay_nanoseconds": 10000000
+  },
+  "control": {
+    "test_exit": 0,
+    "actor_inbox_before_due": false,
+    "delivery_nanoseconds": 1010000000,
+    "latency_telemetry_delivered": 1
+  },
+  "mutant": {
+    "test_exit": 1,
+    "failure": "market data reached the actor at its publication instant"
+  },
+  "method": "Fixture-level semantic mutation; scratch source is restored before the result is recorded.",
+  "interpretation": "The deterministic courier rejects an injected negative-latency look-ahead. This proves only the scheduler-backed message path; it does not make the known direct vanna-volga dealer-inventory read an ordinary delayed market-data observation."
+}

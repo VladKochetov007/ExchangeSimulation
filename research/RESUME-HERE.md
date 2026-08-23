@@ -311,3 +311,22 @@ finish and their contracts pass.
   missing transitions while conservation, terminal positions, and order
   lifecycle all remained clean. Artifact:
   `artifacts/mutations/drop-perp-settlement-once.json`; raw evidence retained.
+- V-024 now gives the scheduler-backed courier an executable look-ahead test.
+  A 10 ms market-data message is unavailable before its due simulated time;
+  negating the courier delay makes the actor inbox receive it at publication
+  and fails the test. This validates the message path only: the known direct
+  Vanna-Volga dealer-inventory read and historical per-observation evidence
+  remain explicit information-boundary limitations. Artifact:
+  `artifacts/mutations/future-information-delivery.json`.
+- V-025 adds `mvanalyze -metric expiryfills`, anchored to `instrument_listed`
+  contract terms rather than to a later settlement event. Its five-minute
+  delayed-expiry mutant was caught with 7,326 late fills across 66 exercised
+  contracts (six futures, sixty options); the older dated-future-only audit
+  saw 1,918. The unit fixture also catches a contract that expires without a
+  settlement announcement. Artifact:
+  `artifacts/mutations/delay-expiry-settlement.json`; raw logs retained.
+- The listing-anchored expiry audit was replayed over the full 24-hour
+  baseline logs. Seeds 101/102/103 each have 396 listed contracts and 363
+  expired-and-settled contracts, with zero late fill records,
+  expired-unsettled contracts, or listing/settlement metadata defects. Their
+  inspected fill-record counts are 2,444,064 / 2,448,558 / 2,418,586.
