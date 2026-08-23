@@ -10,12 +10,89 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"runtime"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
 
 	"exchange_sim/analysis"
 )
+
+// analyzerProfiles bounds process profiling to offline analysis. It does not
+// participate in evidence decoding or alter any metric result.
+type analyzerProfiles struct {
+	cpu   *os.File
+	alloc *os.File
+	mutex *os.File
+	block *os.File
+}
+
+func startAnalyzerProfiles(cpuPath, allocPath, mutexPath, blockPath string) (*analyzerProfiles, error) {
+	profiles := &analyzerProfiles{}
+	var err error
+	if cpuPath != "" {
+		if profiles.cpu, err = os.Create(cpuPath); err != nil {
+			return nil, err
+		}
+		if err := pprof.StartCPUProfile(profiles.cpu); err != nil {
+			_ = profiles.cpu.Close()
+			return nil, err
+		}
+	}
+	if allocPath != "" {
+		if profiles.alloc, err = os.Create(allocPath); err != nil {
+			profiles.Stop()
+			return nil, err
+		}
+		// Sample allocations at Go's production-like default rate. Recording
+		// every allocation would make a replay profile describe the profiler.
+		runtime.MemProfileRate = 512 * 1024
+	}
+	if mutexPath != "" {
+		if profiles.mutex, err = os.Create(mutexPath); err != nil {
+			profiles.Stop()
+			return nil, err
+		}
+		runtime.SetMutexProfileFraction(1)
+	}
+	if blockPath != "" {
+		if profiles.block, err = os.Create(blockPath); err != nil {
+			profiles.Stop()
+			return nil, err
+		}
+		runtime.SetBlockProfileRate(1)
+	}
+	return profiles, nil
+}
+
+func (p *analyzerProfiles) Stop() {
+	if p == nil {
+		return
+	}
+	if p.cpu != nil {
+		pprof.StopCPUProfile()
+		_ = p.cpu.Close()
+		p.cpu = nil
+	}
+	if p.alloc != nil {
+		_ = pprof.Lookup("allocs").WriteTo(p.alloc, 0)
+		_ = p.alloc.Close()
+		p.alloc = nil
+	}
+	if p.mutex != nil {
+		_ = pprof.Lookup("mutex").WriteTo(p.mutex, 0)
+		_ = p.mutex.Close()
+		p.mutex = nil
+		runtime.SetMutexProfileFraction(0)
+	}
+	if p.block != nil {
+		_ = pprof.Lookup("block").WriteTo(p.block, 0)
+		_ = p.block.Close()
+		p.block = nil
+		runtime.SetBlockProfileRate(0)
+	}
+}
 
 func main() {
 	metric := flag.String("metric", "roles", "roles, postonly, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, observationreceipts, frontiervectors")
@@ -54,12 +131,22 @@ func main() {
 	tickSize := flag.Int64("tick", 10_000, "book tick size, for the spread in ticks")
 	walkSizes := flag.String("walk-sizes", "", "comma-separated order sizes in base units, for the walkable fraction")
 	asJSON := flag.Bool("json", false, "emit JSON instead of a table")
+	cpuProfile := flag.String("cpuprofile", "", "write CPU profile for offline analysis")
+	allocProfile := flag.String("allocprofile", "", "write sampled allocation profile after offline analysis")
+	mutexProfile := flag.String("mutexprofile", "", "write mutex profile after offline analysis")
+	blockProfile := flag.String("blockprofile", "", "write block profile after offline analysis")
 	flag.Parse()
 
 	if flag.NArg() == 0 {
 		fmt.Fprintln(os.Stderr, "usage: mvanalyze [flags] <run dir>...")
 		os.Exit(2)
 	}
+	profiles, err := startAnalyzerProfiles(*cpuProfile, *allocProfile, *mutexProfile, *blockProfile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "start analysis profiles: %v\n", err)
+		os.Exit(1)
+	}
+	defer profiles.Stop()
 	for _, dir := range flag.Args() {
 		// These compact V2 evidence artifacts are intentionally analyzable
 		// without raw JSON logs, Greek reports, or a Run wrapper. Opening a Run
