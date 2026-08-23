@@ -55,6 +55,7 @@ func TestLiquidationAuditReconstructsForcedClosePositionPath(t *testing.T) {
 	const instant = int64(1_000_000_000)
 	lines := []string{
 		liquidationPositionLine(instant, "north", 7, -100, -40),
+		liquidationPositionLine(instant, "north", 8, 40, -20),
 		liquidationLine(instant, "north", 7, 0),
 	}
 	dir := writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines})
@@ -66,18 +67,30 @@ func TestLiquidationAuditReconstructsForcedClosePositionPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("measure: %v", err)
 	}
-	if result.PositionPathRecords != 1 || result.PositionPathMissing != 0 || result.PositionPathFailures != 0 {
+	if result.PositionPathRecords != 1 || result.PositionPathMissing != 0 || result.PositionPathFailures != 0 || result.PositionConservationRecords != 1 || result.PositionConservationMissing != 0 || result.PositionConservationFailures != 0 || result.PositionConservationResidual != 0 {
 		t.Fatalf("valid forced-close path = %+v", result)
 	}
 
-	lines[0] = liquidationPositionLine(instant, "north", 7, -100, -120)
+	lines[1] = liquidationPositionLine(instant, "north", 8, 40, 20)
 	dir = writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines})
 	run, _ = Open(dir)
 	result, err = run.MeasureLiquidations()
 	if err != nil {
 		t.Fatalf("measure invalid path: %v", err)
 	}
-	if result.PositionPathRecords != 1 || result.PositionPathFailures != 1 {
-		t.Fatalf("position increase accepted: %+v", result)
+	if result.PositionPathRecords != 1 || result.PositionConservationFailures != 1 || result.PositionConservationResidual != 40 {
+		t.Fatalf("position conservation failure accepted: %+v", result)
+	}
+
+	lines[0] = liquidationPositionLine(instant, "north", 7, -100, -120)
+	lines[1] = liquidationPositionLine(instant, "north", 8, 40, 60)
+	dir = writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines})
+	run, _ = Open(dir)
+	result, err = run.MeasureLiquidations()
+	if err != nil {
+		t.Fatalf("measure nonreducing path: %v", err)
+	}
+	if result.PositionPathFailures != 1 || result.PositionConservationFailures != 0 {
+		t.Fatalf("nonreducing close accepted: %+v", result)
 	}
 }

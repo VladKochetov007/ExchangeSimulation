@@ -25,10 +25,17 @@ type LiquidationAudit struct {
 	// position-update batch provides both the pre-close and post-close state.
 	// The liquidation event records the pre-close size because liquidate holds a
 	// defensive position copy; the batch is the independent execution evidence.
-	PositionPathRecords  int                `json:"position_path_records"`
-	PositionPathMissing  int                `json:"position_path_missing"`
-	PositionPathFailures int                `json:"position_path_failures"`
-	ByVenue              []LiquidationVenue `json:"by_venue"`
+	PositionPathRecords  int `json:"position_path_records"`
+	PositionPathMissing  int `json:"position_path_missing"`
+	PositionPathFailures int `json:"position_path_failures"`
+	// PositionConservation checks that all participant position deltas in the
+	// forced-close batch net to zero. It is a per-close contract residual, not
+	// a claim that realised-PnL cash postings are individually zero-sum.
+	PositionConservationRecords  int                `json:"position_conservation_records"`
+	PositionConservationMissing  int                `json:"position_conservation_missing"`
+	PositionConservationFailures int                `json:"position_conservation_failures"`
+	PositionConservationResidual int64              `json:"position_conservation_residual"`
+	ByVenue                      []LiquidationVenue `json:"by_venue"`
 }
 
 // LiquidationVenue is one venue's independently reconciled liquidation path.
@@ -62,8 +69,20 @@ type liquidationPositionKey struct {
 type liquidationPositionBatch struct {
 	timestamp         int64
 	firstOld, lastNew int64
+	firstOrdinal      int64
 	lastOrdinal       int64
 	continuous        bool
+}
+
+type liquidationPositionWindow struct {
+	file      string
+	timestamp int64
+	updates   []liquidationPositionDelta
+}
+
+type liquidationPositionDelta struct {
+	ordinal int64
+	delta   int64
 }
 
 // MeasureLiquidations reconciles every logged liquidation deficit against two
@@ -108,6 +127,7 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 	insuranceByInstant := make(map[liquidationInstant]int64)
 	balanceByInstant := make(map[liquidationInstant]int64)
 	positionBatches := make(map[liquidationPositionKey]liquidationPositionBatch)
+	var positionWindow liquidationPositionWindow
 	row := func(venue string) *LiquidationVenue {
 		out := venueRows[venue]
 		if out == nil {
@@ -149,12 +169,19 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 			if symbol == "" || clientID == 0 {
 				return
 			}
+			if positionWindow.file != event.File || positionWindow.timestamp != event.SimTS {
+				positionWindow = liquidationPositionWindow{file: event.File, timestamp: event.SimTS}
+			}
+			positionWindow.updates = append(positionWindow.updates, liquidationPositionDelta{
+				ordinal: event.Ordinal,
+				delta:   payload.NewSize - payload.OldSize,
+			})
 			key := liquidationPositionKey{venue: event.VenueID, file: event.File, clientID: clientID, symbol: symbol}
 			batch, exists := positionBatches[key]
 			if !exists || batch.timestamp != event.SimTS {
 				positionBatches[key] = liquidationPositionBatch{
 					timestamp: event.SimTS, firstOld: payload.OldSize, lastNew: payload.NewSize,
-					lastOrdinal: event.Ordinal, continuous: true,
+					firstOrdinal: event.Ordinal, lastOrdinal: event.Ordinal, continuous: true,
 				}
 				return
 			}
@@ -191,6 +218,21 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 				result.PositionPathRecords++
 				if !batch.continuous || batch.firstOld != payload.PositionSize || !reducedSameSide(batch.firstOld, batch.lastNew) {
 					result.PositionPathFailures++
+				}
+				if positionWindow.file != event.File || positionWindow.timestamp != event.SimTS {
+					result.PositionConservationMissing++
+				} else {
+					result.PositionConservationRecords++
+					var residual int64
+					for _, update := range positionWindow.updates {
+						if update.ordinal >= batch.firstOrdinal && update.ordinal < event.Ordinal {
+							residual += update.delta
+						}
+					}
+					result.PositionConservationResidual += residual
+					if residual != 0 {
+						result.PositionConservationFailures++
+					}
 				}
 			}
 			// A second same-timestamp liquidation for this key cannot be
