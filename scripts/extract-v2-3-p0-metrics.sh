@@ -9,6 +9,7 @@ root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 artifact_dir="$root_dir/research/artifacts/v2-3-p0-r1"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 roles='cdf_spot_maker,fixed_distance_maker,imbalance_maker'
+policy_roles='spot_maker,cdf_spot_maker,abc_cdf_spot_maker,fixed_distance_maker,imbalance_maker'
 
 if [[ ! -x "$analyzer" ]]; then
 	echo "missing executable analyzer: $analyzer" >&2
@@ -43,6 +44,12 @@ for arm in A B C; do
 		# cannot establish that every maker family actually participated.
 		write_metric "$cell/postonly-cdf.json" "$analyzer" -metric postonly -json \
 			-post-only-roles "$roles" -post-only-symbols CDF/USD "$cell"
+		# CDF/USD is the primary viability book, but the declared P0 policy covers
+		# the complete passive spot population. Keep its aggregate arrival-time
+		# rejection count so a real post-only activation on another spot book is
+		# not falsely reported as inactive.
+		write_metric "$cell/postonly-spot-policy.json" "$analyzer" -metric postonly -json \
+			-post-only-roles "$policy_roles" "$cell"
 		for role in cdf_spot_maker fixed_distance_maker imbalance_maker; do
 			write_metric "$cell/postonly-cdf-${role}.json" "$analyzer" -metric postonly -json \
 				-post-only-roles "$role" -post-only-symbols CDF/USD "$cell"
@@ -75,7 +82,7 @@ for arm in A B C; do
 			  completion_sentinels: ["greeks.json", "latency.json"],
 			  required_artifacts: [
 			    "observationreceipts.json", "evidenceartifacthash.json",
-			    "postonly-cdf.json", "postonly-cdf-cdf_spot_maker.json",
+			    "postonly-cdf.json", "postonly-spot-policy.json", "postonly-cdf-cdf_spot_maker.json",
 			    "postonly-cdf-fixed_distance_maker.json", "postonly-cdf-imbalance_maker.json",
 			    "postonly-derivative-scope.json",
 			    "viability.json", "cdf-viability.json"
