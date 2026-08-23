@@ -740,3 +740,32 @@ frozen preregistration nor its threshold: it makes explicit the evidence
 quantity that the stated second-order prediction already required. The generic
 `risk_samples` check remains sufficient for arms whose primary observable is
 only delta, vega, or transmission.
+
+## V-020 — funding-direction audit used a post-settlement same-timestamp side
+
+The derivative analyzer initially reported one funding-sign failure in each of
+baseline seeds 101 and 103. The raw evidence showed the apparent failures were
+at timestamps that also contain an expiry and later perpetual trades. For
+example, at `1735711201000000000` in baseline seed 101, clients 46 and 50 are
+charged funding while short, then each flips long in a later
+`position_update` record at the same simulation timestamp. The old query used
+the last position *at or before* the timestamp, incorrectly treating that
+post-funding trade as the funded position.
+
+The scanner now gives every persisted record a stable per-file ordinal. The
+funding validator uses the position immediately before the first funding
+balance record in that file; a same-timestamp record after that boundary is
+excluded, and a same-timestamp record from a physically separate file is not
+silently ordered. A regression test constructs exactly this funding-then-flip
+case; it fails under the former timestamp-only rule and passes with the
+ordinal boundary. The existing reversed-sign mutation remains caught.
+
+This is an analyzer-only ordering correction (`c8a8221`), not a simulator
+semantic change. Pre-correction derivative artifacts are retained under
+`research/artifacts/historical/v020-pre-funding-boundary-derivatives/`.
+All 21 retained ae13f9a baseline/treatment derivative artifacts were replayed
+with the corrected analyzer. Every one reports zero `funding_broken`,
+`funding_sign_wrong`, `funding_misdirected`, and `funding_undirected` counts.
+The corrected result therefore supports funding transfer mechanics; it does
+not affect the separate causal question of whether funding marginally anchors
+the perpetual basis.
