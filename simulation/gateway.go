@@ -1,6 +1,8 @@
 package simulation
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -44,19 +46,28 @@ type DelayedGateway struct {
 	lastRespAt int64
 	mdMu       sync.Mutex
 	lastMDAt   int64
+	// nextMDReceiptOrdinal is per delayed gateway and is assigned when an
+	// ingress message is scheduled. It documents the FIFO order the courier
+	// promised independently of how other links interleave at equal times.
+	nextMDReceiptOrdinal uint64
 
 	// phaseMode replaces scheduler-mode forwarding goroutines with runner
 	// pumps. It is enabled before actors start, so latency arrival ordering is
 	// model-defined rather than chosen by host goroutine scheduling.
-	phaseMode    atomic.Bool
-	phaseStopCh  chan struct{}
-	phaseWG      sync.WaitGroup
-	phaseLifeMu  sync.Mutex
-	phaseMu      sync.Mutex
-	phaseResp    []exchange.Response
-	phaseMD      []*exchange.MarketDataMsg
-	latencyStats *LatencyStats
-	latencyLabel string
+	phaseMode     atomic.Bool
+	phaseStopCh   chan struct{}
+	phaseWG       sync.WaitGroup
+	phaseLifeMu   sync.Mutex
+	phaseMu       sync.Mutex
+	phaseResp     []exchange.Response
+	phaseMD       []phaseMarketData
+	latencyStats  *LatencyStats
+	latencyLabel  string
+	receiptSink   *MarketDataReceiptRecorder
+	receiptSource string
+	receiptLink   string
+	receiptMu     sync.Mutex
+	frontier      MarketDataFrontier
 }
 
 // Idle reports whether this wrapper and the gateway beneath it have nothing
@@ -98,6 +109,19 @@ func NewDelayedGateway(inner actor.Gateway, reqLat, respLat, mdLat LatencyProvid
 func (d *DelayedGateway) SetLatencyTelemetry(stats *LatencyStats, label string) {
 	d.latencyStats = stats
 	d.latencyLabel = label
+}
+
+// SetMarketDataReceiptRecorder installs the optional individual public-feed
+// arrival recorder. It must be configured before traffic starts. The sink is
+// observational: it is called only after the courier has delivered a message
+// to its actor-facing inbox path.
+func (d *DelayedGateway) SetMarketDataReceiptRecorder(sink *MarketDataReceiptRecorder, sourceVenue, link, role string) {
+	d.receiptSink = sink
+	d.receiptSource = sourceVenue
+	d.receiptLink = link
+	if sink != nil {
+		sink.RegisterLink(sourceVenue, link, role)
+	}
 }
 
 // UseScheduler switches to scheduled delivery at exact simulation times.
@@ -170,6 +194,7 @@ func (d *DelayedGateway) Send(req exchange.Request) {
 	if !d.running.Load() {
 		return
 	}
+	d.recordMarketDataDecision(req)
 	if d.scheduler != nil {
 		at, ticket := d.deliveryTime(&d.reqMu, &d.lastReqAt, d.RequestLatency, LatencyRequest)
 		if d.phaseMode.Load() && at <= d.clock.NowUnixNano() {
@@ -254,6 +279,7 @@ func (d *DelayedGateway) scheduleMarketData() {
 				return
 			}
 			at, ticket := d.deliveryTime(&d.mdMu, &d.lastMDAt, d.MarketDataLatency, LatencyMarketData)
+			receipt := d.scheduleMarketDataReceipt(msg, at)
 			d.scheduler.Schedule(at, func() {
 				if !d.running.Load() {
 					return
@@ -261,6 +287,7 @@ func (d *DelayedGateway) scheduleMarketData() {
 				select {
 				case d.marketDataCh <- msg:
 					d.delivered(ticket)
+					d.recordMarketDataReceipt(receipt)
 				default:
 				}
 			})
@@ -329,9 +356,10 @@ func (d *DelayedGateway) schedulePhaseResponse(resp exchange.Response) {
 
 func (d *DelayedGateway) schedulePhaseMarketData(msg *exchange.MarketDataMsg) {
 	at, ticket := d.deliveryTime(&d.mdMu, &d.lastMDAt, d.MarketDataLatency, LatencyMarketData)
+	receipt := d.scheduleMarketDataReceipt(msg, at)
 	if at <= d.clock.NowUnixNano() {
 		d.phaseMu.Lock()
-		d.phaseMD = append(d.phaseMD, msg)
+		d.phaseMD = append(d.phaseMD, phaseMarketData{message: msg, receipt: receipt})
 		d.phaseMu.Unlock()
 		d.delivered(ticket)
 		return
@@ -341,10 +369,104 @@ func (d *DelayedGateway) schedulePhaseMarketData(msg *exchange.MarketDataMsg) {
 			return
 		}
 		d.phaseMu.Lock()
-		d.phaseMD = append(d.phaseMD, msg)
+		d.phaseMD = append(d.phaseMD, phaseMarketData{message: msg, receipt: receipt})
 		d.phaseMu.Unlock()
 		d.delivered(ticket)
 	})
+}
+
+type phaseMarketData struct {
+	message *exchange.MarketDataMsg
+	receipt scheduledMarketDataReceipt
+}
+
+type scheduledMarketDataReceipt struct {
+	message  *exchange.MarketDataMsg
+	schedule MarketDataSchedule
+}
+
+func (d *DelayedGateway) scheduleMarketDataReceipt(msg *exchange.MarketDataMsg, scheduledAt int64) scheduledMarketDataReceipt {
+	if d.receiptSink == nil || msg == nil {
+		return scheduledMarketDataReceipt{}
+	}
+	fingerprint, err := marketDataFingerprint(msg)
+	if err != nil {
+		d.receiptSink.Fail(fmt.Errorf("fingerprint market-data message: %w", err))
+		return scheduledMarketDataReceipt{}
+	}
+	d.mdMu.Lock()
+	d.nextMDReceiptOrdinal++
+	ordinal := d.nextMDReceiptOrdinal
+	d.mdMu.Unlock()
+	schedule := MarketDataSchedule{
+		ClientID:    d.ID(),
+		SourceVenue: d.receiptSource,
+		Link:        d.receiptLink,
+		Symbol:      msg.Symbol,
+		Type:        msg.Type,
+		Sequence:    msg.SeqNum,
+		Fingerprint: fingerprint,
+		PublishedAt: msg.Timestamp,
+		ScheduledAt: scheduledAt,
+		LinkOrdinal: ordinal,
+	}
+	d.receiptSink.RecordSchedule(schedule)
+	return scheduledMarketDataReceipt{message: msg, schedule: schedule}
+}
+
+func (d *DelayedGateway) recordMarketDataReceipt(ticket scheduledMarketDataReceipt) {
+	if d.receiptSink == nil || ticket.message == nil || ticket.schedule.LinkOrdinal == 0 {
+		return
+	}
+	frontier := d.receiptSink.RecordReceipt(MarketDataReceipt{MarketDataSchedule: ticket.schedule, DeliveredAt: d.clock.NowUnixNano()})
+	if frontier.LinkID == 0 {
+		return
+	}
+	d.receiptMu.Lock()
+	d.frontier = frontier
+	d.receiptMu.Unlock()
+}
+
+func (d *DelayedGateway) recordMarketDataDecision(req exchange.Request) {
+	if d.receiptSink == nil || d.clock == nil || req.Type != exchange.ReqPlaceOrder || req.OrderReq == nil {
+		return
+	}
+	d.receiptMu.Lock()
+	frontier := d.frontier
+	d.receiptMu.Unlock()
+	d.receiptSink.RecordDecision(MarketDataDecision{
+		ClientID:    d.ID(),
+		SourceVenue: d.receiptSource,
+		Link:        d.receiptLink,
+		Symbol:      req.OrderReq.Symbol,
+		RequestID:   req.OrderReq.RequestID,
+		Side:        req.OrderReq.Side,
+		OrderType:   req.OrderReq.Type,
+		TimeInForce: req.OrderReq.TimeInForce,
+		Price:       req.OrderReq.Price,
+		Qty:         req.OrderReq.Qty,
+		DecisionAt:  d.clock.NowUnixNano(),
+		Frontier:    frontier,
+	})
+}
+
+func marketDataFingerprint(msg *exchange.MarketDataMsg) ([16]byte, error) {
+	// Include every actor-visible field. SeqNum alone is not sufficient for
+	// directed lifecycle replay, which historically carries zero.
+	raw, err := json.Marshal(struct {
+		Type      types.MDType `json:"type"`
+		Symbol    string       `json:"symbol"`
+		Sequence  uint64       `json:"sequence"`
+		Timestamp int64        `json:"timestamp"`
+		Data      any          `json:"data"`
+	}{msg.Type, msg.Symbol, msg.SeqNum, msg.Timestamp, msg.Data})
+	if err != nil {
+		return [16]byte{}, err
+	}
+	digest := sha256.Sum256(raw)
+	var fingerprint [16]byte
+	copy(fingerprint[:], digest[:])
+	return fingerprint, nil
 }
 
 // EgressBlocked reports that the gateway holds messages whose delivery time
@@ -384,25 +506,35 @@ func (d *DelayedGateway) DrainDeterministicPhaseEgress() bool {
 		return false
 	}
 	d.phaseMu.Lock()
-	defer d.phaseMu.Unlock()
 	processed := false
+	received := make([]scheduledMarketDataReceipt, 0)
 	for len(d.phaseResp) > 0 {
 		select {
 		case d.responseCh <- d.phaseResp[0]:
 			d.phaseResp = d.phaseResp[1:]
 			processed = true
 		default:
+			d.phaseMu.Unlock()
 			return processed
 		}
 	}
 	for len(d.phaseMD) > 0 {
 		select {
-		case d.marketDataCh <- d.phaseMD[0]:
+		case d.marketDataCh <- d.phaseMD[0].message:
+			received = append(received, d.phaseMD[0].receipt)
 			d.phaseMD = d.phaseMD[1:]
 			processed = true
 		default:
+			d.phaseMu.Unlock()
+			for _, ticket := range received {
+				d.recordMarketDataReceipt(ticket)
+			}
 			return processed
 		}
+	}
+	d.phaseMu.Unlock()
+	for _, ticket := range received {
+		d.recordMarketDataReceipt(ticket)
 	}
 	return processed
 }

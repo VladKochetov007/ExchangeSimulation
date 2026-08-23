@@ -53,6 +53,15 @@ type LatencyConfig struct {
 	// scheduling, or gateway decisions.
 	Telemetry      *LatencyStats
 	TelemetryLabel string
+
+	// MarketDataReceipts records individual public-feed arrivals at a delayed
+	// participant inbox. It is optional because an individual receipt sidecar
+	// is much larger than aggregate latency telemetry. The recorder is
+	// observation-only and must never influence courier delivery.
+	MarketDataReceipts *MarketDataReceiptRecorder
+	ReceiptSourceVenue string
+	ReceiptLink        string
+	ReceiptRole        string
 }
 
 // LatencyChannel identifies the three independently delayed link paths.

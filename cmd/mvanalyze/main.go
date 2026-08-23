@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, roleaudit, ecology, liquidations, marginchecks, derivatives")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, roleaudit, ecology, liquidations, marginchecks, derivatives, observationreceipts")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -350,6 +350,18 @@ func main() {
 			}
 			emit(dir, result, *asJSON, func() {
 				fmt.Printf("%-22s evidence artifact records %d  unordered digest %s\n", dir, result.Events, result.Digest)
+			})
+		case "observationreceipts":
+			result, err := analysis.AuditMarketDataReceipts(dir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s schedules/receipts/decisions %d/%d/%d digests %t/%t/%t valid %t future %d/%d missing %d frontier %d\n",
+					dir, result.Schedules, result.Receipts, result.Decisions,
+					result.ScheduleDigestMatches, result.ReceiptDigestMatches, result.DecisionDigestMatches, result.Valid,
+					result.ScheduledBeforePub, result.FutureDecisionUse, result.MissingDueReceipt, result.BadDecisionFrontier)
 			})
 		case "basis":
 			result, err := run.MeasureBasis(analysis.BasisOptions{})

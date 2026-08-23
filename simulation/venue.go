@@ -52,6 +52,13 @@ func (m *Mount) ConnectNewClient(clientID uint64, balances map[string]int64, fee
 	}
 	d := NewDelayedGateway(gw, request, response, marketData)
 	d.SetLatencyTelemetry(m.Latency.Telemetry, m.Latency.TelemetryLabel)
+	// A link is a participant session, never a role class: a per-link ordinal
+	// must not silently combine observations from two makers on one venue.
+	receiptLink := m.Latency.ReceiptLink
+	if receiptLink != "" {
+		receiptLink = fmt.Sprintf("%s/client/%d", receiptLink, clientID)
+	}
+	d.SetMarketDataReceiptRecorder(m.Latency.MarketDataReceipts, m.Latency.ReceiptSourceVenue, receiptLink, m.Latency.ReceiptRole)
 	if m.Latency.Scheduler != nil && m.Latency.Clock != nil {
 		d.UseScheduler(m.Latency.Scheduler, m.Latency.Clock)
 	}

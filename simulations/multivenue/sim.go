@@ -76,6 +76,11 @@ type Config struct {
 	Provenance
 
 	LogMode string `json:"log_mode"`
+	// RecordMarketDataReceipts enables the V2 compact per-message public-feed
+	// receipt sidecar. Roles must be declared explicitly so an unwrapped direct
+	// link cannot silently look like fully observed participant information.
+	RecordMarketDataReceipts bool     `json:"record_market_data_receipts"`
+	MarketDataReceiptRoles   []string `json:"market_data_receipt_roles,omitempty"`
 	// CheckpointIntervalSeconds writes a rolling digest of the event stream at
 	// each simulated-time boundary, so two runs of one seed can be compared
 	// without retaining their logs. Zero disables it.
@@ -686,6 +691,25 @@ func (c *Config) normalize() error {
 			return err
 		}
 	}
+	if c.RecordMarketDataReceipts {
+		if len(c.MarketDataReceiptRoles) == 0 {
+			return errors.New("multivenue: market-data receipt roles must be explicit")
+		}
+		seenReceiptRoles := make(map[string]struct{}, len(c.MarketDataReceiptRoles))
+		for _, role := range c.MarketDataReceiptRoles {
+			if role == "" || role != roleClass(role) {
+				return fmt.Errorf("multivenue: market-data receipt role %q must be an unnumbered role class", role)
+			}
+			if _, exists := seenReceiptRoles[role]; exists {
+				return fmt.Errorf("multivenue: duplicate market-data receipt role %q", role)
+			}
+			seenReceiptRoles[role] = struct{}{}
+			profile, configured := c.latencyProfileFor(role)
+			if !configured || profile.zero() {
+				return fmt.Errorf("multivenue: market-data receipt role %q needs an explicit nonzero delayed link", role)
+			}
+		}
+	}
 	for _, symbols := range [][]string{c.FixedDistanceMakerSymbols, c.ImbalanceMakerSymbols, c.ElasticSupplierSymbols} {
 		for _, symbol := range symbols {
 			switch symbol {
@@ -865,6 +889,7 @@ type Venue struct {
 	latencyConfig        Config
 	latencySeed          int64
 	latencyTelemetry     *simulation.LatencyStats
+	marketDataReceipts   *simulation.MarketDataReceiptRecorder
 	scheduler            *simulation.EventScheduler
 	clock                *simulation.SimulatedClock
 	Participants         []Participant
@@ -1064,6 +1089,16 @@ func roleClass(role string) string {
 	return role[:index]
 }
 
+// recordsMarketDataReceipts reports whether this role's delayed public feed
+// is in the explicitly declared V2 evidence contract. The configuration
+// validator requires every declared class to have a nonzero delayed link.
+func (c Config) recordsMarketDataReceipts(role string) bool {
+	if !c.RecordMarketDataReceipts {
+		return false
+	}
+	return slices.Contains(c.MarketDataReceiptRoles, roleClass(role))
+}
+
 // makerSymbol picks the book the maker at index i quotes, cycling the roster.
 func makerSymbol(symbols []string, i int) string {
 	if len(symbols) == 0 {
@@ -1231,16 +1266,17 @@ type VenueRiskSnapshot struct {
 // Sim owns the three venue ecology and every log file created for it.
 
 type Sim struct {
-	Config           Config
-	Runner           *simulation.Runner
-	Venues           []*Venue
-	Routers          []*CrossVenueArb
-	SpotIndex        *spotIndexProvider
-	InitialAccounts  []ParticipantAccountSnapshot
-	TerminalAccounts []ParticipantAccountSnapshot
-	loggers          []*feesim.JSONLinesLogger
-	checkpoints      *checkpointSink
-	latencyTelemetry *simulation.LatencyStats
+	Config             Config
+	Runner             *simulation.Runner
+	Venues             []*Venue
+	Routers            []*CrossVenueArb
+	SpotIndex          *spotIndexProvider
+	InitialAccounts    []ParticipantAccountSnapshot
+	TerminalAccounts   []ParticipantAccountSnapshot
+	loggers            []*feesim.JSONLinesLogger
+	checkpoints        *checkpointSink
+	latencyTelemetry   *simulation.LatencyStats
+	marketDataReceipts *simulation.MarketDataReceiptRecorder
 }
 
 // Run starts all venue automation under one context and drives the common
@@ -1284,8 +1320,13 @@ func (s *Sim) Run(ctx context.Context) error {
 			venue.Exchange.StopAutomation()
 		}
 	})
-	if err := s.Runner.Run(ctx); err != nil {
-		return err
+	runErr := s.Runner.Run(ctx)
+	receiptErr := s.finalizeMarketDataReceipts()
+	if runErr != nil {
+		return runErr
+	}
+	if receiptErr != nil {
+		return receiptErr
 	}
 	for _, venue := range s.Venues {
 		venue.Microstructure.finalize()
@@ -1300,6 +1341,7 @@ func (s *Sim) Run(ctx context.Context) error {
 
 func (s *Sim) Close() {
 	s.checkpoints.close()
+	_ = s.finalizeMarketDataReceipts()
 	var evidence feesim.EvidenceDigest
 	for _, logger := range s.loggers {
 		logger.Close()
@@ -1323,6 +1365,17 @@ func (s *Sim) Close() {
 	if s.latencyTelemetry != nil {
 		_ = s.latencyTelemetry.WriteJSON(filepath.Join(s.Config.LogDir, "latency.json"))
 	}
+}
+
+func (s *Sim) finalizeMarketDataReceipts() error {
+	if s.marketDataReceipts == nil {
+		return nil
+	}
+	terminalAt := int64(0)
+	if len(s.Venues) > 0 && s.Venues[0].Exchange != nil && s.Venues[0].Exchange.Clock != nil {
+		terminalAt = s.Venues[0].Exchange.Clock.NowUnixNano()
+	}
+	return s.marketDataReceipts.Finalize(terminalAt)
 }
 
 // evidenceArtifactRecord is written after all JSONL writers close. Its input
@@ -1466,6 +1519,14 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		return nil, err
 	}
 	sim.checkpoints = sink
+	if cfg.RecordMarketDataReceipts {
+		recorder, err := simulation.NewMarketDataReceiptRecorder(cfg.LogDir)
+		if err != nil {
+			sim.Close()
+			return nil, err
+		}
+		sim.marketDataReceipts = recorder
+	}
 	// Seed the reference before the first quote: until the first automation
 	// tick the index would otherwise be empty, leaving makers to fall back to
 	// their own midpoint exactly when the book is thinnest.
@@ -1558,6 +1619,10 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		sim.Close()
 		return nil, err
 	}
+	if err := sim.validateMarketDataReceiptCoverage(); err != nil {
+		sim.Close()
+		return nil, err
+	}
 	if cfg.StrictPopulationAccounting {
 		sim.InitialAccounts, err = sim.capturePopulationAccounts("initial")
 		if err != nil {
@@ -1566,6 +1631,34 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		}
 	}
 	return sim, nil
+}
+
+// validateMarketDataReceiptCoverage rejects a configuration that declares an
+// audited role but constructs any of its participants through an uninstrumented
+// custom mount. Evidence that silently covers only a subset of a role is worse
+// than no claim of an information boundary at all.
+func (s *Sim) validateMarketDataReceiptCoverage() error {
+	if !s.Config.RecordMarketDataReceipts {
+		return nil
+	}
+	expected := make(map[string]int, len(s.Config.MarketDataReceiptRoles))
+	for _, venue := range s.Venues {
+		for _, participant := range venue.Participants {
+			class := roleClass(participant.Role)
+			if s.Config.recordsMarketDataReceipts(class) {
+				expected[class]++
+			}
+		}
+	}
+	for _, class := range s.Config.MarketDataReceiptRoles {
+		if expected[class] == 0 {
+			return fmt.Errorf("multivenue: audited market-data role %q has no participants", class)
+		}
+		if got := s.marketDataReceipts.RegisteredRoleCount(class); got != expected[class] {
+			return fmt.Errorf("multivenue: audited market-data role %q has %d participants but %d instrumented links", class, expected[class], got)
+		}
+	}
+	return nil
 }
 
 func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClock, scheduler *simulation.EventScheduler, timers *simulation.SimTimerFactory, actorID *uint64) (*Venue, error) {
@@ -1666,15 +1759,16 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	optionSpec.TickSize = mvQuotePrecision // one USD premium tick
 	mount := simulation.NewMount(ex, simulation.LatencyConfig{})
 	venue := &Venue{ID: id, MatchingRule: matchingRule, Exchange: ex, Mount: mount,
-		latencyMounts:    make(map[string]*simulation.Mount),
-		latencyConfig:    s.Config,
-		latencySeed:      s.Config.Seed + int64(venueIndex+1)*1_000,
-		latencyTelemetry: s.latencyTelemetry,
-		scheduler:        scheduler,
-		clock:            clock,
-		makerStateLog:    makerStateLog,
-		optionListedNano: make(map[string]int64),
-		Microstructure:   newMicrostructureStats(id, "ABC/USD", tick, s.Config.AutomationInterval.Seconds())}
+		latencyMounts:      make(map[string]*simulation.Mount),
+		latencyConfig:      s.Config,
+		latencySeed:        s.Config.Seed + int64(venueIndex+1)*1_000,
+		latencyTelemetry:   s.latencyTelemetry,
+		marketDataReceipts: s.marketDataReceipts,
+		scheduler:          scheduler,
+		clock:              clock,
+		makerStateLog:      makerStateLog,
+		optionListedNano:   make(map[string]int64),
+		Microstructure:     newMicrostructureStats(id, "ABC/USD", tick, s.Config.AutomationInterval.Seconds())}
 	// The venue advertises the scenario's reference price while still marking
 	// its own derivatives from its own book. With own_mid anchoring there is
 	// nothing to advertise: the makers already observe the book directly.
@@ -2218,6 +2312,10 @@ func (v *Venue) mountForRole(role string) *simulation.Mount {
 		v.latencyMounts[class] = v.Mount
 		return v.Mount
 	}
+	var receiptSink *simulation.MarketDataReceiptRecorder
+	if v.latencyConfig.recordsMarketDataReceipts(role) {
+		receiptSink = v.marketDataReceipts
+	}
 	mount := simulation.NewMount(v.Exchange, simulation.LatencyConfig{
 		Request:    request,
 		Response:   profile.provider(seed+1, profile.ResponseScale),
@@ -2233,10 +2331,14 @@ func (v *Venue) mountForRole(role string) *simulation.Mount {
 				profile.provider(clientSeed+1, profile.ResponseScale),
 				profile.provider(clientSeed+2, profile.MarketDataScale)
 		},
-		Scheduler:      v.scheduler,
-		Clock:          v.clock,
-		Telemetry:      v.latencyTelemetry,
-		TelemetryLabel: v.ID + "/" + class,
+		Scheduler:          v.scheduler,
+		Clock:              v.clock,
+		Telemetry:          v.latencyTelemetry,
+		TelemetryLabel:     v.ID + "/" + class,
+		MarketDataReceipts: receiptSink,
+		ReceiptSourceVenue: v.ID,
+		ReceiptLink:        v.ID + "/" + class,
+		ReceiptRole:        class,
 	})
 	v.latencyMounts[class] = mount
 	v.latencyMountOrder = append(v.latencyMountOrder, mount)

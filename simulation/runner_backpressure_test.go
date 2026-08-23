@@ -48,7 +48,7 @@ func TestEgressBlockedDistinguishesAFullInboxFromAStall(t *testing.T) {
 // carries is book publications, not responses.
 func TestEgressBlockedCountsMarketData(t *testing.T) {
 	gateway := blockedGateway(t)
-	gateway.phaseMD = append(gateway.phaseMD, &exchange.MarketDataMsg{})
+	gateway.phaseMD = append(gateway.phaseMD, phaseMarketData{message: &exchange.MarketDataMsg{}})
 	gateway.marketDataCh <- &exchange.MarketDataMsg{}
 	if !gateway.EgressBlocked() {
 		t.Error("a full market-data inbox did not report backpressure")
