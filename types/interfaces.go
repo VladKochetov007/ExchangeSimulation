@@ -22,6 +22,13 @@ type PriceSource interface {
 	Price(symbol string) int64
 }
 
+// ListingPriceSource supplies a reference price for scheduled listings. Unlike
+// the legacy PriceSource, absence is explicit: an option chain must defer
+// rather than center new strikes at a sentinel price.
+type ListingPriceSource interface {
+	Price(symbol string) (int64, error)
+}
+
 // PositionStore is the minimal interface for position tracking.
 // Implement this to substitute custom position persistence (e.g. database-backed).
 type PositionStore interface {
@@ -198,7 +205,7 @@ type UnderlyingRef interface {
 // polls policies from its automation loop and lists whatever is returned.
 // Implementations must self-deduplicate (return each instrument once).
 type ListingPolicy interface {
-	PendingListings(nowNano int64, prices PriceSource) []Instrument
+	PendingListings(nowNano int64, prices ListingPriceSource) ([]Instrument, error)
 }
 
 // SettlementContext carries all state an instrument needs to settle one execution.

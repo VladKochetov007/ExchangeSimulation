@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"sync"
@@ -1379,20 +1380,42 @@ func (e *DefaultExchange) collateralChargeLoop(ticker Ticker) {
 // exchange.
 func (e *DefaultExchange) indexSourceLocked() PriceSource {
 	return priceSourceFunc(func(symbol string) int64 {
-		book := e.Books[symbol]
-		if book == nil {
-			return 0
+		price, err := e.indexPriceLocked(symbol)
+		if err != nil {
+			// updateAllPerpPrices resolves this same source before calling a
+			// calculator. Reaching here would turn an unavailable index into a
+			// silent zero at the legacy PriceSource boundary, so fail loudly.
+			panic(fmt.Sprintf("exchange: index source %s: %v", symbol, err))
 		}
-		if u := underlyingOf(book.Instrument); u != "" {
-			if mid := e.bookMidPriceLocked(u); mid != 0 {
-				return mid
-			}
-		}
-		if e.indexProvider != nil {
-			return e.indexProvider.Price(symbol)
-		}
-		return 0
+		return price
 	})
+}
+
+// indexPriceLocked resolves a margined book's declared external reference.
+// Caller must hold e.mu. It uses the explicit top-of-book reference policy
+// (midpoint when two-sided, best quote when one-sided), preserving the prior
+// index/mark contract without misnaming a one-sided quote as a midpoint.
+func (e *DefaultExchange) indexPriceLocked(symbol string) (int64, error) {
+	book := e.Books[symbol]
+	if book == nil {
+		return 0, fmt.Errorf("index for %s: %w", symbol, ErrNoBookPrice)
+	}
+	if underlying := underlyingOf(book.Instrument); underlying != "" {
+		price, err := e.bookReferencePriceLocked(underlying)
+		if err == nil {
+			return price, nil
+		}
+		fallback, fallbackErr := e.configuredIndexPrice(symbol)
+		if fallbackErr == nil {
+			return fallback, nil
+		}
+		return 0, fmt.Errorf("index for %s from underlying %s: %w", symbol, underlying, err)
+	}
+	price, err := e.configuredIndexPrice(symbol)
+	if err != nil {
+		return 0, fmt.Errorf("index for %s: %w", symbol, err)
+	}
+	return price, nil
 }
 
 // ensureAnchoredMarkCalcs gives every margined book with a resolvable index a
@@ -1447,8 +1470,8 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		symbol     string
 		perp       *PerpFutures
 		markPrice  int64
+		indexPrice int64
 		isPerp     bool
-		underlying string
 	}
 	e.mu.RLock()
 	// Symbol order: this sweep publishes marks and can call margin and
@@ -1473,6 +1496,17 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		if perSymbol := e.markPriceCalcs[book.Symbol]; perSymbol != nil {
 			calc = perSymbol
 		}
+		indexPrice := int64(0)
+		if underlyingOf(book.Instrument) != "" || e.indexProvider != nil {
+			var err error
+			indexPrice, err = e.indexPriceLocked(book.Symbol)
+			if err != nil {
+				// No declared underlying reference or configured external index:
+				// defer this mark/funding/margin update rather than manufacture a
+				// zero index.
+				continue
+			}
+		}
 		markPrice := calc.Calculate(book)
 		if markPrice == 0 {
 			continue
@@ -1481,8 +1515,8 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 			symbol:     book.Symbol,
 			perp:       perp,
 			markPrice:  markPrice,
+			indexPrice: indexPrice,
 			isPerp:     isPerp,
-			underlying: underlyingOf(book.Instrument),
 		})
 	}
 	e.mu.RUnlock()
@@ -1503,20 +1537,8 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 	}
 	updates := make([]perpUpdate, 0, len(candidates))
 	for _, c := range candidates {
-		indexPrice := int64(0)
-		if c.underlying != "" {
-			indexPrice = e.bookMidPrice(c.underlying)
-		}
-		if indexPrice == 0 && e.indexProvider != nil {
-			indexPrice = e.indexProvider.Price(c.symbol)
-		}
+		indexPrice := c.indexPrice
 		if indexPrice == 0 {
-			// An index is supposed to exist but is unavailable or stale:
-			// skip this update rather than marking the perp against itself
-			// (mark-as-index makes basis identically zero and hides outages).
-			if c.underlying != "" || e.indexProvider != nil {
-				continue
-			}
 			// Genuine single-venue configuration: the perp's own book is the
 			// only price there is.
 			indexPrice = c.markPrice

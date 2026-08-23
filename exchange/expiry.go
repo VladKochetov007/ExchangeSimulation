@@ -1,6 +1,8 @@
 package exchange
 
 import (
+	"errors"
+	"fmt"
 	"slices"
 	"sort"
 	"time"
@@ -18,9 +20,19 @@ type priceSourceFunc func(symbol string) int64
 
 func (f priceSourceFunc) Price(symbol string) int64 { return f(symbol) }
 
-// bookMidPrice returns the mid of a book's best bid/ask (one-sided best when
-// only one side is quoted, 0 when the book is empty or unknown).
-func (e *DefaultExchange) bookMidPrice(symbol string) int64 {
+type listingPriceSourceFunc func(symbol string) (int64, error)
+
+func (f listingPriceSourceFunc) Price(symbol string) (int64, error) { return f(symbol) }
+
+// ErrNoBookPrice means no contemporaneous, two-sided executable midpoint is
+// available. It deliberately includes unknown, empty, one-sided, and crossed
+// books: none establishes a usable midpoint.
+var ErrNoBookPrice = errors.New("no usable book price")
+
+// bookMidPrice returns a contemporaneous midpoint of both executable sides.
+// The error makes absence explicit; callers must defer, reject, or use an
+// already-declared independent source rather than treat zero as a price.
+func (e *DefaultExchange) bookMidPrice(symbol string) (int64, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.bookMidPriceLocked(symbol)
@@ -29,22 +41,86 @@ func (e *DefaultExchange) bookMidPrice(symbol string) int64 {
 // bookMidPriceLocked is bookMidPrice for callers already holding e.mu (either
 // mode) — RWMutex read locks must not nest, a queued writer between them
 // deadlocks.
-func (e *DefaultExchange) bookMidPriceLocked(symbol string) int64 {
+func (e *DefaultExchange) bookMidPriceLocked(symbol string) (int64, error) {
 	book := e.Books[symbol]
 	if book == nil {
-		return 0
+		return 0, fmt.Errorf("%w: %s book missing", ErrNoBookPrice, symbol)
 	}
-	hasBid := book.Bids.Best != nil
-	hasAsk := book.Asks.Best != nil
-	switch {
-	case hasBid && hasAsk:
-		return (book.Bids.Best.Price + book.Asks.Best.Price) / 2
-	case hasBid:
-		return book.Bids.Best.Price
-	case hasAsk:
-		return book.Asks.Best.Price
+	if book.Bids.Best == nil || book.Asks.Best == nil {
+		return 0, fmt.Errorf("%w: %s book is one-sided or empty", ErrNoBookPrice, symbol)
 	}
-	return 0
+	bid, ask := book.Bids.Best.Price, book.Asks.Best.Price
+	if bid <= 0 || ask <= 0 || bid > ask {
+		return 0, fmt.Errorf("%w: %s has invalid best prices bid=%d ask=%d", ErrNoBookPrice, symbol, bid, ask)
+	}
+	// Resting limit prices are positive and an uncrossed live book has
+	// bid <= ask, so ask-bid is in [0, MaxInt64-1] and cannot overflow.
+	// This form avoids the otherwise possible overflow in bid+ask.
+	return bid + (ask-bid)/2, nil
+}
+
+// bookReferencePrice returns the declared derivative/index reference policy:
+// a true midpoint when both sides exist, otherwise the sole displayed best
+// price. It is intentionally distinct from bookMidPrice so consumers cannot
+// mistake a one-sided reference for a mathematical midpoint.
+func (e *DefaultExchange) bookReferencePrice(symbol string) (int64, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.bookReferencePriceLocked(symbol)
+}
+
+func (e *DefaultExchange) bookReferencePriceLocked(symbol string) (int64, error) {
+	book := e.Books[symbol]
+	if book == nil {
+		return 0, fmt.Errorf("%w: %s book missing", ErrNoBookPrice, symbol)
+	}
+	if book.Bids.Best != nil && book.Asks.Best != nil {
+		return e.bookMidPriceLocked(symbol)
+	}
+	if book.Bids.Best != nil && book.Bids.Best.Price > 0 {
+		return book.Bids.Best.Price, nil
+	}
+	if book.Asks.Best != nil && book.Asks.Best.Price > 0 {
+		return book.Asks.Best.Price, nil
+	}
+	return 0, fmt.Errorf("%w: %s book is empty or has an invalid best price", ErrNoBookPrice, symbol)
+}
+
+// configuredIndexPrice uses the declared external reference only when it
+// supplies a positive price. The PriceSource interface predates explicit
+// absence errors, so adapt it once at this boundary rather than propagate its
+// zero sentinel into a mark or settlement calculation.
+func (e *DefaultExchange) configuredIndexPrice(symbol string) (int64, error) {
+	if e.indexProvider == nil {
+		return 0, fmt.Errorf("%w: no configured index for %s", ErrNoBookPrice, symbol)
+	}
+	price := e.indexProvider.Price(symbol)
+	if price <= 0 {
+		return 0, fmt.Errorf("%w: configured index unavailable for %s", ErrNoBookPrice, symbol)
+	}
+	return price, nil
+}
+
+// derivativeUnderlyingPrice resolves a derivative's declared underlying from
+// its explicit top-of-book reference policy, then from its pre-existing
+// configured index fallback.
+func (e *DefaultExchange) derivativeUnderlyingPrice(inst Instrument) (int64, error) {
+	if ref, ok := inst.(etypes.UnderlyingRef); ok && ref.UnderlyingSymbol() != "" {
+		price, err := e.bookReferencePrice(ref.UnderlyingSymbol())
+		if err == nil {
+			return price, nil
+		}
+		fallback, fallbackErr := e.configuredIndexPrice(inst.Symbol())
+		if fallbackErr == nil {
+			return fallback, nil
+		}
+		return 0, fmt.Errorf("derivative %s underlying %s: %w", inst.Symbol(), ref.UnderlyingSymbol(), err)
+	}
+	price, err := e.configuredIndexPrice(inst.Symbol())
+	if err != nil {
+		return 0, fmt.Errorf("derivative %s: %w", inst.Symbol(), err)
+	}
+	return price, nil
 }
 
 // expiryLoop drives listings, derivative mark updates, and expiry settlement.
@@ -81,9 +157,17 @@ func (e *DefaultExchange) CheckListings() {
 		return
 	}
 	now := e.Clock.NowUnixNano()
-	prices := priceSourceFunc(e.bookMidPrice)
+	prices := listingPriceSourceFunc(e.bookMidPrice)
 	for _, policy := range e.listingPolicies {
-		for _, inst := range policy.PendingListings(now, prices) {
+		pending, err := policy.PendingListings(now, prices)
+		if err != nil {
+			if errors.Is(err, ErrNoBookPrice) {
+				// No valid underlying midpoint: defer this automatic listing.
+				continue
+			}
+			panic(fmt.Sprintf("exchange: listing policy: %v", err))
+		}
+		for _, inst := range pending {
 			symbol := inst.Symbol()
 			e.mu.RLock()
 			_, exists := e.Instruments[symbol]
@@ -117,18 +201,10 @@ func (e *DefaultExchange) UpdateDerivativeMarks() {
 	e.mu.RUnlock()
 
 	for _, inst := range expirables {
-		underlying := ""
-		if ref, ok := inst.(etypes.UnderlyingRef); ok {
-			underlying = ref.UnderlyingSymbol()
-		}
-		underlyingPrice := int64(0)
-		if underlying != "" {
-			underlyingPrice = e.bookMidPrice(underlying)
-		}
-		if underlyingPrice == 0 && e.indexProvider != nil {
-			underlyingPrice = e.indexProvider.Price(inst.Symbol())
-		}
-		if underlyingPrice == 0 {
+		underlyingPrice, err := e.derivativeUnderlyingPrice(inst)
+		if err != nil {
+			// No valid underlying reference: defer settlement sampling and option
+			// marks rather than inventing a zero price.
 			continue
 		}
 		inst.(Expirable).ObserveSettlement(underlyingPrice, now)

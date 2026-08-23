@@ -20,6 +20,19 @@ type constPrice int64
 
 func (p constPrice) Price(string) int64 { return int64(p) }
 
+type listingPrice int64
+
+func (p listingPrice) Price(string) (int64, error) { return int64(p), nil }
+
+func pendingListings(t *testing.T, policy etypes.ListingPolicy, now int64, value int64) []etypes.Instrument {
+	t.Helper()
+	listed, err := policy.PendingListings(now, listingPrice(value))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return listed
+}
+
 const derivStart = int64(1_700_000_000_000_000_000)
 
 // newDerivExchange builds an exchange with a spot ABC/USD book quoted around
@@ -290,9 +303,7 @@ func TestOptionChainListerAndDedup(t *testing.T) {
 		StrikesPerSide: 2,
 		IV:             0.9,
 	}
-	spot := constPrice(PriceUSD(50_000, DOLLAR_TICK))
-
-	listed := lister.PendingListings(derivStart, spot)
+	listed := pendingListings(t, lister, derivStart, PriceUSD(50_000, DOLLAR_TICK))
 	if len(listed) != 10 { // 5 strikes x C/P
 		t.Fatalf("chain size = %d, want 10", len(listed))
 	}
@@ -312,7 +323,7 @@ func TestOptionChainListerAndDedup(t *testing.T) {
 	if calls != 5 {
 		t.Fatalf("calls = %d, want 5", calls)
 	}
-	if again := lister.PendingListings(derivStart, spot); len(again) != 0 {
+	if again := pendingListings(t, lister, derivStart, PriceUSD(50_000, DOLLAR_TICK)); len(again) != 0 {
 		t.Fatalf("dedup failed: %d relisted", len(again))
 	}
 }
@@ -327,7 +338,7 @@ func TestDatedFuturesListerSchedule(t *testing.T) {
 	lister := &einstrument.DatedFuturesLister{
 		Underlying: "ABC/USD", Spec: spec, TenorsNano: []int64{tenor},
 	}
-	first := lister.PendingListings(derivStart, constPrice(0))
+	first := pendingListings(t, lister, derivStart, 0)
 	if len(first) != 1 {
 		t.Fatalf("first listing count = %d, want 1", len(first))
 	}
@@ -335,11 +346,11 @@ func TestDatedFuturesListerSchedule(t *testing.T) {
 	if got, want := fut.ExpiryNano(), derivStart+tenor; got != want {
 		t.Fatalf("expiry = %d, want exact tenor expiry %d", got, want)
 	}
-	if again := lister.PendingListings(derivStart, constPrice(0)); len(again) != 0 {
+	if again := pendingListings(t, lister, derivStart, 0); len(again) != 0 {
 		t.Fatalf("relisted same expiry: %d", len(again))
 	}
 	// Once the contract expires a new exact-tenor generation appears.
-	if next := lister.PendingListings(fut.ExpiryNano(), constPrice(0)); len(next) != 1 {
+	if next := pendingListings(t, lister, fut.ExpiryNano(), 0); len(next) != 1 {
 		t.Fatalf("next tenor not listed: %d", len(next))
 	} else if got, want := next[0].(*einstrument.ExpiringFutures).ExpiryNano(), fut.ExpiryNano()+tenor; got != want {
 		t.Fatalf("successor expiry = %d, want %d", got, want)
@@ -356,7 +367,7 @@ func TestListingTenorIsNeverShortenedByCalendarAlignment(t *testing.T) {
 	now := derivStart + int64(123*time.Second)
 	deadline := now + tenor
 
-	futures := (&einstrument.DatedFuturesLister{Underlying: "ABC/USD", Spec: spec, TenorsNano: []int64{tenor}}).PendingListings(now, constPrice(0))
+	futures := pendingListings(t, &einstrument.DatedFuturesLister{Underlying: "ABC/USD", Spec: spec, TenorsNano: []int64{tenor}}, now, 0)
 	if len(futures) != 1 {
 		t.Fatalf("future listings = %d, want 1", len(futures))
 	}
@@ -364,9 +375,9 @@ func TestListingTenorIsNeverShortenedByCalendarAlignment(t *testing.T) {
 		t.Fatalf("future expiry = %d, want exact tenor expiry %d", expiry, deadline)
 	}
 
-	options := (&einstrument.OptionChainLister{
+	options := pendingListings(t, &einstrument.OptionChainLister{
 		Underlying: "ABC/USD", Spec: spec, TenorsNano: []int64{tenor}, StrikeStep: PriceUSD(1000, DOLLAR_TICK),
-	}).PendingListings(now, constPrice(PriceUSD(50_000, DOLLAR_TICK)))
+	}, now, PriceUSD(50_000, DOLLAR_TICK))
 	if len(options) == 0 {
 		t.Fatal("option chain was not listed")
 	}
@@ -374,7 +385,7 @@ func TestListingTenorIsNeverShortenedByCalendarAlignment(t *testing.T) {
 		t.Fatalf("option expiry = %d, want exact tenor expiry %d", expiry, deadline)
 	}
 
-	if got := (&einstrument.DatedFuturesLister{Underlying: "ABC/USD", Spec: spec, TenorsNano: []int64{tenor}}).PendingListings(math.MaxInt64-1, constPrice(0)); len(got) != 0 {
+	if got := pendingListings(t, &einstrument.DatedFuturesLister{Underlying: "ABC/USD", Spec: spec, TenorsNano: []int64{tenor}}, math.MaxInt64-1, 0); len(got) != 0 {
 		t.Fatalf("overflowing future listing = %d, want 0", len(got))
 	}
 }

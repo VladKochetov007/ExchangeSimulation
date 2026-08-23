@@ -228,3 +228,11 @@ receipt for one existing public feed, without changing consumer behavior. It
 must pass a deterministic logging-on/off smoke comparison and an injected
 future-receipt mutation before expanding to local maker composites. Failure at
 that point blocks V2-1; it does not justify implementing an unobservable cache.
+
+## V2 price-reference boundary
+
+The interim V2 price contract is recorded in
+[v2-price-lookup-contract.md](v2-price-lookup-contract.md). It separates a
+true midpoint used for automatic option listing from the explicitly named
+one-sided derivative/index reference policy, and records the residual legacy
+`PriceSource` migration as an unresolved follow-up.

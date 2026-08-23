@@ -36,7 +36,7 @@ type DatedFuturesLister struct {
 	nextExpiry map[int64]int64
 }
 
-func (l *DatedFuturesLister) PendingListings(nowNano int64, _ etypes.PriceSource) []etypes.Instrument {
+func (l *DatedFuturesLister) PendingListings(nowNano int64, _ etypes.ListingPriceSource) ([]etypes.Instrument, error) {
 	if l.listed == nil {
 		l.listed = make(map[int64]bool)
 	}
@@ -63,7 +63,7 @@ func (l *DatedFuturesLister) PendingListings(nowNano int64, _ etypes.PriceSource
 		}
 		out = append(out, f)
 	}
-	return out
+	return out, nil
 }
 
 var _ etypes.ListingPolicy = (*DatedFuturesLister)(nil)
@@ -99,7 +99,7 @@ type OptionChainLister struct {
 	strikes    map[int64]map[int64]struct{}
 }
 
-func (l *OptionChainLister) PendingListings(nowNano int64, prices etypes.PriceSource) []etypes.Instrument {
+func (l *OptionChainLister) PendingListings(nowNano int64, prices etypes.ListingPriceSource) ([]etypes.Instrument, error) {
 	if l.listed == nil {
 		l.listed = make(map[string]bool)
 	}
@@ -110,11 +110,14 @@ func (l *OptionChainLister) PendingListings(nowNano int64, prices etypes.PriceSo
 		l.strikes = make(map[int64]map[int64]struct{})
 	}
 	if l.StrikeStep <= 0 || l.StrikesPerSide < 0 {
-		return nil
+		return nil, nil
 	}
-	spot := prices.Price(l.Underlying)
+	spot, err := prices.Price(l.Underlying)
+	if err != nil {
+		return nil, fmt.Errorf("option-chain listing underlying %s: %w", l.Underlying, err)
+	}
 	if spot <= 0 {
-		return nil
+		return nil, fmt.Errorf("option-chain listing underlying %s: non-positive price", l.Underlying)
 	}
 	center := ((spot + l.StrikeStep/2) / l.StrikeStep) * l.StrikeStep
 
@@ -137,7 +140,7 @@ func (l *OptionChainLister) PendingListings(nowNano int64, prices etypes.PriceSo
 			}
 		}
 	}
-	return out
+	return out, nil
 }
 
 func (l *OptionChainLister) allowStrike(expiry, strike int64) bool {

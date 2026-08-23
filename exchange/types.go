@@ -163,6 +163,7 @@ type OrderMarginer = etypes.OrderMarginer
 type PositionMarginer = etypes.PositionMarginer
 type Expirable = etypes.Expirable
 type ListingPolicy = etypes.ListingPolicy
+type ListingPriceSource = etypes.ListingPriceSource
 type UnderlyingRef = etypes.UnderlyingRef
 type InstrumentAnnouncement = etypes.InstrumentAnnouncement
 type Settleable = etypes.Settleable
