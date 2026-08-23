@@ -48,7 +48,7 @@ freeze.
 
 ### 2. Finish extracting the baselines
 
-    nohup bash scratch/reap.sh > scratch/reap.out 2>&1 &
+    setsid nohup bash scratch/reap.sh > scratch/reap.out 2>&1 < /dev/null &
 
 It skips any artifact that is already non-empty, so it picks up exactly where
 it stopped, and it now marks a run complete only once every metric has
@@ -71,9 +71,9 @@ Configs are already generated from the new freeze
 (`python3 scratch/build_ablation_arms.py` regenerates them if needed). Two
 waves, because eighteen 24h runs at ~31GB each will not fit at once:
 
-    nohup bash scratch/parallel_runs.sh scratch/jobs_f2_w1.txt 9 80 > scratch/f2_w1.out 2>&1 &
+    setsid nohup bash scratch/parallel_runs.sh scratch/jobs_f2_w1.txt 9 80 > scratch/f2_w1.out 2>&1 < /dev/null &
     # after wave 1 is reaped and pruned:
-    nohup bash scratch/parallel_runs.sh scratch/jobs_f2_w2.txt 9 80 > scratch/f2_w2.out 2>&1 &
+    setsid nohup bash scratch/parallel_runs.sh scratch/jobs_f2_w2.txt 9 80 > scratch/f2_w2.out 2>&1 < /dev/null &
 
 Keep the reaper running throughout. A run takes ~30 minutes wall for 24
 simulated hours when nine share the machine.
@@ -87,7 +87,7 @@ that arm's own preregistration depends on to exist, parse and be non-empty.
 
 ### 4. Phase 4 — stress, on the new freeze
 
-    nohup bash scratch/parallel_runs.sh scratch/jobs_f2_stress.txt 2 80 > scratch/f2_stress.out 2>&1 &
+    setsid nohup bash scratch/parallel_runs.sh scratch/jobs_f2_stress.txt 2 80 > scratch/f2_stress.out 2>&1 < /dev/null &
 
 `research/configs/v005-stress-perp-2026-08-22.json` carries exactly the
 preregistered delta from the old stress arm — fifty-times uninformed perp flow
