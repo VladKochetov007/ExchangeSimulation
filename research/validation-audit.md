@@ -733,3 +733,10 @@ historical analyzer output and all retained ae13f9a baseline and treatment
 exposure artifacts will be regenerated with the same corrected binary before
 causal scoring. No vanna-volga verdict is valid until that recomputation and
 the measurement gate complete.
+
+The V-019 measurement-contract correction additionally requires positive
+`second_order_samples` for the vanna-volga arm. This changes neither the
+frozen preregistration nor its threshold: it makes explicit the evidence
+quantity that the stated second-order prediction already required. The generic
+`risk_samples` check remains sufficient for arms whose primary observable is
+only delta, vega, or transmission.

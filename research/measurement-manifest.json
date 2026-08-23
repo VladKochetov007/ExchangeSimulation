@@ -77,7 +77,7 @@
     "abl-vanna-volga-off": {
       "preregistration": "dealer second-order exposures grow; cross-strike relative pricing loses structure",
       "measurements": [
-        {"metric": "exposure", "predicts": "dealer vega and delta distributions", "check": "result.risk_samples > 0"},
+        {"metric": "exposure", "predicts": "dealer vega, vanna and volga distributions", "check": "result.risk_samples > 0 && result.second_order_samples > 0"},
         {"metric": "optionsurface", "predicts": "cross-strike structure from traded prices, never from the desk's own model", "check": "result.fitted_expiries > 0"},
         {"metric": "roleaudit", "predicts": "the desk is gone", "check": "result.roles non-empty"},
         {"metric": "viability", "predicts": "the chain stayed alive", "check": "result.books > 0"}
