@@ -118,3 +118,14 @@ go test -race ./analysis ./cmd/mvanalyze -run 'Test(CrossVenue|Arbitrage)' -coun
 
 This is only an analyzer gate. It does not establish that a population-wide
 dislocation will activate in any factorial cell.
+
+## Immutable cell inputs
+
+The eight exact inputs are
+`research/configs/v2-2b/{I0R0,I1R0,I0R1,I1R1}-{101,103}.json`, rendered by
+`scripts/render-v2-2b-configs.sh` from the retained frozen baseline plus only
+the deltas declared above. `scripts/run-v2-2b-cell.sh` refuses an existing
+cell directory, saves `run-config.json` and a pre-run metadata record, and
+runs the five-minute horizon. `greeks.json` plus `latency.json` are the only
+completion sentinels; a process name or a partial directory is never treated
+as a completed world.
