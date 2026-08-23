@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "simulator_freeze": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
+  "config": "research/configs/v005-stress-perp-2026-08-22.json",
+  "config_sha256": "fd094c55d9e92d1ac0c1db882b72a03693eb14dab17ded63c1507df7ac7f6ca1",
+  "run_horizon": "24h",
+  "analysis_commit": "6b94439702a9553a2d887bffd5ab92c105c9508d",
+  "analysis_binary_sha256": "76cd2886af255c587139a6e491cc2104487cce2f554ee2b849ab9d9ccd31a5f0",
+  "seeds": {
+    "101": {
+      "persisted_evidence": {
+        "events": 110443234,
+        "digest": "053b7116e4bb366025032f3f13eaaf3762d57399a2661bd4be6e6af466c3ccfe",
+        "runtime_offline_equal": true
+      },
+      "liquidations": {
+        "checks": 9664,
+        "events": 7054,
+        "affected_accounts": 15,
+        "with_deficit": 0,
+        "total_deficit": 0,
+        "insurance_deficit": 0,
+        "balance_deficit_credit": 0,
+        "insurance_residual": 0,
+        "balance_residual": 0,
+        "invalid_events": 0,
+        "by_venue": {"central": 2545, "north": 1987, "south": 2522}
+      },
+      "global_usd_residual": 9669314,
+      "global_usd_residual_relative": 5.847007957816317e-10
+    },
+    "103": {
+      "persisted_evidence": {
+        "events": 111388208,
+        "digest": "66a9b11d6506857c9dcee480da71b68d878647c282fbe1323ad7be43427f59b2",
+        "runtime_offline_equal": true
+      },
+      "liquidations": {
+        "checks": 9629,
+        "events": 7177,
+        "affected_accounts": 16,
+        "with_deficit": 0,
+        "total_deficit": 0,
+        "insurance_deficit": 0,
+        "balance_deficit_credit": 0,
+        "insurance_residual": 0,
+        "balance_residual": 0,
+        "invalid_events": 0,
+        "by_venue": {"central": 1909, "north": 2741, "south": 2527}
+      },
+      "global_usd_residual": 22047409,
+      "global_usd_residual_relative": 1.3332008441574149e-9
+    }
+  },
+  "verdict": {
+    "liquidation_reachability": "EXERCISED",
+    "bankruptcy_and_insurance_reachability": "NOT_EXERCISED",
+    "forced_close_accounting": "PARTIALLY_VALIDATED",
+    "remaining_requirement": "reconstruct pre-close position and per-event size reduction before claiming full liquidation-path correctness"
+  },
+  "source_artifacts": [
+    "research/artifacts/scoreboard/f2_stress_101/liquidations.json",
+    "research/artifacts/scoreboard/f2_stress_103/liquidations.json",
+    "research/artifacts/scoreboard/f2_stress_101/conservation.json",
+    "research/artifacts/scoreboard/f2_stress_103/conservation.json"
+  ]
+}

@@ -294,6 +294,54 @@ up as a residual beyond the rounding bound.
 
 Stated before the arm was run.
 
+### ae13f9a re-run result — liquidation is reachable; deficit/insurance is not exercised
+
+**Provenance.** Frozen simulator `ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107`,
+config `research/configs/v005-stress-perp-2026-08-22.json` (SHA-256
+`fd094c55d9e92d1ac0c1db882b72a03693eb14dab17ded63c1507df7ac7f6ca1`),
+24 simulated hours, pinned `GOMAXPROCS=1`, seeds 101 and 103. The raw logs
+remain retained. The generic measurement gate and the runtime/offline persisted
+evidence attestations both pass:
+
+| seed | persisted records | evidence multiset digest |
+|---:|---:|---|
+| 101 | 110,443,234 | `053b7116e4bb366025032f3f13eaaf3762d57399a2661bd4be6e6af466c3ccfe` |
+| 103 | 111,388,208 | `66a9b11d6506857c9dcee480da71b68d878647c282fbe1323ad7be43427f59b2` |
+
+The new independent `liquidations` analyzer reads three different persisted
+surfaces: the forced-close event, account `liquidation_deficit` balance
+changes, and the venue `insurance_fund` movement. It rejects an invalid close
+(no symbol, non-positive fill price, zero reported position, or negative debt)
+and reconciles every deficit in both directions. Its fixture deliberately
+changes the insurance debit by one unit and fails as intended.
+
+| seed | liquidation checks | actual liquidations | affected accounts | central / north / south | deficits | insurance moves | invalid closes |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 101 | 9,664 | 7,054 | 15 | 2,545 / 1,987 / 2,522 | 0 | 0 | 0 |
+| 103 | 9,629 | 7,177 | 16 | 1,909 / 2,741 / 2,527 | 0 | 0 | 0 |
+
+So the registered stress **does** make liquidation economically reachable;
+the older frozen-baseline statement that no participant can be forced out is
+falsified for this population under the registered stronger perpetual flow.
+It does **not** exercise bankruptcy or insurance-fund absorption: all 14,231
+observed forced closes have zero remaining debt. Therefore the deficit and
+insurance semantics remain **NOT EXERCISED**, rather than being promoted to
+mechanically validated.
+
+Independent global checks remain clean in both stress worlds: funding
+direction/transfer, option exercise, final derivative net positions, and
+post-expiry fills all pass. The USD closed-system residual is 9,669,314 units
+(5.85e-10 of external inflow) for seed 101 and 22,047,409 (1.33e-9) for seed
+103, within the logged integer-truncation bound; ABC and CDF close exactly.
+
+**Remaining V-005 evidence gap.** The current liquidation event is emitted
+after `forceClose` and reports the remaining position. The log does not itself
+name the pre-close position, so the next audit step must reconstruct the
+immediately-preceding position update and show the forced close reduced the
+breached position without overshooting. Until that event-level path audit is
+complete, this section establishes reachability and aggregate accounting, not
+complete liquidation-path correctness.
+
 ## V-009 — the positions audit counted settled contracts as open
 
 Found on the deterministic baseline `det_101`, not by reasoning about the code.
