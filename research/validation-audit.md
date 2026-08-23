@@ -777,3 +777,19 @@ all 21 current artifacts were replayed a second time under that rule. The
 intermediate first-replay files are retained under
 `research/artifacts/historical/v020-pre-stable-tie-derivatives/`; the final
 all-zero result is unchanged.
+
+## V-021 — reaper copied but did not compare the runtime evidence attestation
+
+The phase reaper copied a run's `evidence-artifact-hash.json` sidecar next to
+the offline `evidenceartifacthash.json`, but its `.done` condition did not
+compare them. A partial or mismatched exact-evidence attestation could
+therefore have been present but unexamined when a later gate read the
+scoreboard. Existing ae13f9a treatment pairs were independently compared by
+the campaign before scoring, so no result or deletion relied on this gap.
+
+The reaper now requires equality of `[events,digest]` between the runtime
+sidecar and the independently reconstructed persisted-record multiset before
+writing `.done` for any new full-log run. Historic baselines without a runtime
+sidecar remain retained rather than being retroactively certified. A known
+treatment attestation is a regression check. This is campaign orchestration
+only; it leaves simulation and analyzer behavior unchanged.
