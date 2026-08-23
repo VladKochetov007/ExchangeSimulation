@@ -2084,35 +2084,50 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			BasePrecision: mvBasePrecision, QuotePrecision: quotePrecision, TickSize: tickSize,
 			QuoteQty:      scaleQty(s.Config.MakerQuoteQty, baseUSD),
 			QuoteInterval: s.Config.QuoteInterval, VolatilityHalfLife: s.Config.StoikovVolatilityHalfLife,
-			InitialLogVariancePerSec:    relativeLogVariance,
-			MaxLogVarianceMultiple:      s.Config.StoikovMaxVarianceMultiple,
-			VolatilitySampleInterval:    s.Config.StoikovVolatilitySampleInterval,
-			InventoryHorizon:            s.Config.StoikovInventoryHorizon,
-			RelativeRiskAversion:        relativeRiskAversion,
-			RelativeFillDecay:           relativeFillDecay,
-			MinHalfSpreadTicks:          s.Config.MakerMinHalfSpreadTicks,
-			ForwardHalfLife:             s.Config.MakerForwardHalfLife,
-			QuoteSizeVolElasticity:      s.Config.MakerQuoteSizeVolElasticity,
-			MinQuoteSizeFraction:        s.Config.MakerMinQuoteSizeFraction,
-			InventoryLimit:              scaleQty(s.Config.MakerInventoryLimit, baseUSD),
-			InventorySkewBps:            s.Config.MakerInventorySkewBps,
-			SubmitBeforeCancel:          s.Config.SpotMakerSubmitBeforeCancel,
-			PostOnly:                    s.Config.SpotPassiveMakerPostOnly,
-			PostOnlyCancelBeforeReplace: s.Config.SpotPassiveMakerCancelBeforeReplace,
-			RequoteBps:                  s.Config.SpotMakerRequoteBps,
-			HedgeSymbol:                 hedgeSymbol(symbol, s.Config.MakerHedgeSymbol),
-			HedgeBandQty:                s.Config.MakerHedgeBandQty,
-			HedgeSlippageBps:            s.Config.MakerHedgeSlippageBps,
-			HedgeInterval:               s.Config.MakerHedgeInterval,
-			HedgeTickSize:               tick,
-			AnchorToIndex:               s.Config.MakerAnchor != "own_mid",
-			IndexWeight:                 s.Config.MakerIndexWeight,
-			UseLocalReferenceCache:      s.Config.SpotMakerLocalReferenceCache && symbol == "ABC/USD",
-			LocalReferenceSourceVenue:   id,
+			InitialLogVariancePerSec:  relativeLogVariance,
+			MaxLogVarianceMultiple:    s.Config.StoikovMaxVarianceMultiple,
+			VolatilitySampleInterval:  s.Config.StoikovVolatilitySampleInterval,
+			InventoryHorizon:          s.Config.StoikovInventoryHorizon,
+			RelativeRiskAversion:      relativeRiskAversion,
+			RelativeFillDecay:         relativeFillDecay,
+			MinHalfSpreadTicks:        s.Config.MakerMinHalfSpreadTicks,
+			ForwardHalfLife:           s.Config.MakerForwardHalfLife,
+			QuoteSizeVolElasticity:    s.Config.MakerQuoteSizeVolElasticity,
+			MinQuoteSizeFraction:      s.Config.MakerMinQuoteSizeFraction,
+			InventoryLimit:            scaleQty(s.Config.MakerInventoryLimit, baseUSD),
+			InventorySkewBps:          s.Config.MakerInventorySkewBps,
+			SubmitBeforeCancel:        s.Config.SpotMakerSubmitBeforeCancel,
+			RequoteBps:                s.Config.SpotMakerRequoteBps,
+			HedgeSymbol:               hedgeSymbol(symbol, s.Config.MakerHedgeSymbol),
+			HedgeBandQty:              s.Config.MakerHedgeBandQty,
+			HedgeSlippageBps:          s.Config.MakerHedgeSlippageBps,
+			HedgeInterval:             s.Config.MakerHedgeInterval,
+			HedgeTickSize:             tick,
+			AnchorToIndex:             s.Config.MakerAnchor != "own_mid",
+			IndexWeight:               s.Config.MakerIndexWeight,
+			UseLocalReferenceCache:    s.Config.SpotMakerLocalReferenceCache && symbol == "ABC/USD",
+			LocalReferenceSourceVenue: id,
 		}
+	}
+	// The P0 policy is deliberately limited to instruments that are actually
+	// spot. Stoikov is also used for the perp maker, and fixed/imbalance maker
+	// populations can be configured on derivative symbols; applying a field
+	// named SpotPassiveMaker* there would bundle an unregistered derivative
+	// intervention into the screen.
+	applySpotPassivePolicy := func(symbol string, postOnly *bool, cancelBeforeReplace *bool) {
+		book := venue.Exchange.Books[symbol]
+		if book == nil {
+			return
+		}
+		if _, ok := book.Instrument.(*exchange.SpotInstrument); !ok {
+			return
+		}
+		*postOnly = s.Config.SpotPassiveMakerPostOnly
+		*cancelBeforeReplace = s.Config.SpotPassiveMakerCancelBeforeReplace
 	}
 	for i := 0; i < s.Config.SpotMakerCount; i++ {
 		makerConfig := stoikovConfig("ABC/USD", "ABC/USD", mvBootstrapPrice, mvQuotePrecision, tick)
+		applySpotPassivePolicy(makerConfig.Symbol, &makerConfig.PostOnly, &makerConfig.PostOnlyCancelBeforeReplace)
 		makerConfig.RequoteBps = requoteThresholdFor(s.Config.SpotMakerRequoteBpsTiers, s.Config.SpotMakerRequoteBps, i)
 		maker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), makerConfig)
 		maker.SetTickerFactory(timers)
@@ -2123,10 +2138,14 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		crossTick := int64(mvBasePrecision / 1_000)
 		crossBootstrap := etypes.MulDiv(mvBootstrapPrice, mvBasePrecision, mvCDFBootstrap)
 		for i := 0; i < 2; i++ {
-			cdfMaker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("cdf_spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("CDF/USD", "CDF/USD", mvCDFBootstrap, mvQuotePrecision, cdfTick))
+			cdfConfig := stoikovConfig("CDF/USD", "CDF/USD", mvCDFBootstrap, mvQuotePrecision, cdfTick)
+			applySpotPassivePolicy(cdfConfig.Symbol, &cdfConfig.PostOnly, &cdfConfig.PostOnlyCancelBeforeReplace)
+			cdfMaker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("cdf_spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), cdfConfig)
 			cdfMaker.SetTickerFactory(timers)
 			venue.SpotMakers = append(venue.SpotMakers, cdfMaker)
-			crossMaker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("abc_cdf_spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), stoikovConfig("ABC/CDF", "ABC/CDF", crossBootstrap, mvBasePrecision, crossTick))
+			crossConfig := stoikovConfig("ABC/CDF", "ABC/CDF", crossBootstrap, mvBasePrecision, crossTick)
+			applySpotPassivePolicy(crossConfig.Symbol, &crossConfig.PostOnly, &crossConfig.PostOnlyCancelBeforeReplace)
+			crossMaker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("abc_cdf_spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), crossConfig)
 			crossMaker.SetTickerFactory(timers)
 			venue.SpotMakers = append(venue.SpotMakers, crossMaker)
 		}
@@ -2290,8 +2309,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			cfg = *s.Config.FixedDistanceMaker
 		}
 		cfg.Symbol = makerSymbol(s.Config.FixedDistanceMakerSymbols, participant)
-		cfg.PostOnly = s.Config.SpotPassiveMakerPostOnly
-		cfg.PostOnlyCancelBeforeReplace = s.Config.SpotPassiveMakerCancelBeforeReplace
+		applySpotPassivePolicy(cfg.Symbol, &cfg.PostOnly, &cfg.PostOnlyCancelBeforeReplace)
 		cfg.TickSize = tickFor(cfg.Symbol, tick)
 		if cfg.QuoteInterval <= 0 {
 			cfg.QuoteInterval = s.Config.QuoteInterval
@@ -2306,8 +2324,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			cfg = *s.Config.ImbalanceMaker
 		}
 		cfg.Symbol = makerSymbol(s.Config.ImbalanceMakerSymbols, participant)
-		cfg.PostOnly = s.Config.SpotPassiveMakerPostOnly
-		cfg.PostOnlyCancelBeforeReplace = s.Config.SpotPassiveMakerCancelBeforeReplace
+		applySpotPassivePolicy(cfg.Symbol, &cfg.PostOnly, &cfg.PostOnlyCancelBeforeReplace)
 		cfg.TickSize = tickFor(cfg.Symbol, tick)
 		if cfg.QuoteInterval <= 0 {
 			cfg.QuoteInterval = s.Config.QuoteInterval

@@ -208,10 +208,10 @@ func TestSpotPassiveMakerPostOnlySelectsAllCDFRefreshFamilies(t *testing.T) {
 		LogDir: t.TempDir(), LogMode: "none", CrossAssetSpotGraph: true,
 		SpotPassiveMakerPostOnly:            true,
 		SpotPassiveMakerCancelBeforeReplace: true,
-		FixedDistanceMakerCount:             1,
-		FixedDistanceMakerSymbols:           []string{"CDF/USD"},
-		ImbalanceMakerCount:                 1,
-		ImbalanceMakerSymbols:               []string{"CDF/USD"},
+		FixedDistanceMakerCount:             2,
+		FixedDistanceMakerSymbols:           []string{"CDF/USD", "ABC-PERP"},
+		ImbalanceMakerCount:                 2,
+		ImbalanceMakerSymbols:               []string{"CDF/USD", "ABC-PERP"},
 	})
 	if err != nil {
 		t.Fatalf("NewSim: %v", err)
@@ -224,14 +224,23 @@ func TestSpotPassiveMakerPostOnlySelectsAllCDFRefreshFamilies(t *testing.T) {
 			}
 		}
 		for _, maker := range venue.FixedDistanceMakers {
-			if !maker.cfg.PostOnly || !maker.cfg.PostOnlyCancelBeforeReplace || maker.cfg.Symbol != "CDF/USD" {
+			if maker.cfg.Symbol == "CDF/USD" && (!maker.cfg.PostOnly || !maker.cfg.PostOnlyCancelBeforeReplace) {
 				t.Fatalf("venue %s fixed-distance config = %+v", venue.ID, maker.cfg)
+			}
+			if maker.cfg.Symbol == "ABC-PERP" && (maker.cfg.PostOnly || maker.cfg.PostOnlyCancelBeforeReplace) {
+				t.Fatalf("venue %s derivative fixed-distance maker received spot-only policy: %+v", venue.ID, maker.cfg)
 			}
 		}
 		for _, maker := range venue.ImbalanceMakers {
-			if !maker.cfg.PostOnly || !maker.cfg.PostOnlyCancelBeforeReplace || maker.cfg.Symbol != "CDF/USD" {
+			if maker.cfg.Symbol == "CDF/USD" && (!maker.cfg.PostOnly || !maker.cfg.PostOnlyCancelBeforeReplace) {
 				t.Fatalf("venue %s imbalance config = %+v", venue.ID, maker.cfg)
 			}
+			if maker.cfg.Symbol == "ABC-PERP" && (maker.cfg.PostOnly || maker.cfg.PostOnlyCancelBeforeReplace) {
+				t.Fatalf("venue %s derivative imbalance maker received spot-only policy: %+v", venue.ID, maker.cfg)
+			}
+		}
+		if venue.PerpMaker.cfg.PostOnly || venue.PerpMaker.cfg.PostOnlyCancelBeforeReplace {
+			t.Fatalf("venue %s perp Stoikov maker received spot-only policy: %+v", venue.ID, venue.PerpMaker.cfg)
 		}
 	}
 }
