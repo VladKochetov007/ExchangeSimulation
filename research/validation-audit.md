@@ -1264,3 +1264,31 @@ raw-log loader. A sidecar-only fixture with no `greeks.json` passes the receipt
 audit, and the real remote V2-1c smoke passes both command-line audits. Raw-log
 metrics retain their existing `analysis.Run` prerequisite. This is analyzer
 only and does not alter simulation execution or ae13f9a provenance.
+
+## V-035 — multi-venue router evidence had an ambiguous order identity and market-order price encoding
+
+The first V2-2 router evidence integration correctly added one scalar receipt
+link per venue-local router account, but the vector sidecar had two invalid
+assumptions. First, its generic validity rule required every request price to
+be positive. A market request intentionally serializes `price=0` because it
+has no limit price; that protocol field is not the unavailable market-price
+sentinel eliminated by the V2 price migration. Second, the router initially
+matched a decision component by client ID only. Client IDs are local to a venue
+and may legitimately repeat across the three router accounts, so that join
+could bind a router leg to the wrong scalar feed record.
+
+The V3 writer and independent decoder now validate price jointly with order
+type: market requests require zero and limit requests require a positive
+limit. Router component matching and the required scalar-link contract use
+`(client_id, link_id)`. A unit fixture deliberately assigns the same client ID
+to all three venues and verifies buy/sell legs join their distinct links. The
+targeted delayed-feed activation fixture independently catches future
+components, deletion of one of three venue components, and deletion of the
+decision vector after rewriting counts and hashes. Fresh GOMAXPROCS 1/4
+evidence ON/OFF controls retain one ordered execution hash and equal
+evidence-on artifact digests.
+
+This is V2-only telemetry/provenance repair. It changes neither ae13f9a nor
+matching, actor decision rules, scheduler events, latency, RNG consumption, or
+economic state. It blocks any router causal claim made before this contract;
+no such claim has been promoted.

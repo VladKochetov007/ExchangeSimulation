@@ -2,6 +2,9 @@ package multivenue
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,7 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"exchange_sim/actor"
 	"exchange_sim/analysis"
+	"exchange_sim/exchange"
+	"exchange_sim/simulation"
 )
 
 type v20HelperResult struct {
@@ -53,6 +59,7 @@ func TestV20EvidenceHelper(t *testing.T) {
 	cfg.CheckpointIntervalSeconds = 60
 	remoteFeed := os.Getenv("V21_REMOTE_FEED") == "1"
 	remoteRoster := os.Getenv("V21_REMOTE_ROSTER") == "1"
+	routerEvidence := os.Getenv("V22_ROUTER") == "1"
 	if os.Getenv("V21_LOCAL_CACHE") == "1" || remoteFeed || remoteRoster {
 		cfg.MakerAnchor = "own_mid"
 		cfg.SpotMakerLocalReferenceCache = true
@@ -62,7 +69,12 @@ func TestV20EvidenceHelper(t *testing.T) {
 	}
 	cfg.RecordMarketDataReceipts = os.Getenv("V20_EVIDENCE_ON") == "1"
 	if cfg.RecordMarketDataReceipts {
-		cfg.MarketDataReceiptRoles = []string{"spot_maker"}
+		if routerEvidence {
+			cfg.MarketDataReceiptRoles = []string{"cross_venue_router_tier"}
+			cfg.RecordDecisionFrontierVectors = true
+		} else {
+			cfg.MarketDataReceiptRoles = []string{"spot_maker"}
+		}
 		if remoteFeed || remoteRoster {
 			cfg.MarketDataReceiptRoles = append(cfg.MarketDataReceiptRoles, "v2_remote_feed")
 			cfg.RecordDecisionFrontierVectors = true
@@ -82,9 +94,18 @@ func TestV20EvidenceHelper(t *testing.T) {
 			{TargetVenue: "south", TargetMaker: 1, SourceVenue: "central", Symbol: "ABC/USD", Weight: 0.45, Confidence: 0.60, MaxObservationAge: 6 * time.Second, Latency: LatencyProfile{Model: "constant", Delay: 30 * time.Millisecond}},
 		}
 	}
+	if routerEvidence {
+		cfg.CrossVenueArbTiers = []float64{1}
+		cfg.CrossVenueBaseLatency = time.Second
+		cfg.CrossVenueArbLotQty = mvBasePrecision / 100
+		cfg.CrossVenueArbMaxAttempts = 1
+	}
 	sim, err := NewSim(2*time.Minute, cfg)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if routerEvidence {
+		seedV22RouterActivationBooks(t, sim)
 	}
 	if err := sim.Run(context.Background()); err != nil {
 		sim.Close()
@@ -127,7 +148,11 @@ func TestV20EvidenceHelper(t *testing.T) {
 		result.ScheduleDigest, result.ReceiptDigest, result.DecisionDigest = manifest.Schedules.Digest, manifest.Receipts.Digest, manifest.Decisions.Digest
 		if cfg.RecordDecisionFrontierVectors {
 			vectors, err := analysis.AuditDecisionFrontierVectors(output)
-			if err != nil || !vectors.Valid || vectors.Decisions == 0 || vectors.Components != 2*vectors.Decisions {
+			componentsPerDecision := int64(2)
+			if routerEvidence {
+				componentsPerDecision = 3
+			}
+			if err != nil || !vectors.Valid || vectors.Decisions == 0 || vectors.Components != componentsPerDecision*vectors.Decisions {
 				t.Fatalf("invalid V2-1 vector evidence: audit=%+v err=%v", vectors, err)
 			}
 			var vectorManifest struct {
@@ -218,7 +243,7 @@ func TestV21RemoteFeedIsFreshProcessDeterministicAndEvidenceNeutral(t *testing.T
 			if evidence {
 				key = "g" + gomax + "/on"
 			}
-			results[key] = runV2EvidenceHelper(t, gomax, evidence, true, true, false)
+			results[key] = runV2EvidenceHelper(t, gomax, evidence, true, true, false, false)
 		}
 	}
 	want := results["g1/off"].ExecutionHash
@@ -245,7 +270,7 @@ func TestV21HeterogeneousRosterIsFreshProcessDeterministicAndEvidenceNeutral(t *
 			if evidence {
 				key = "g" + gomax + "/on"
 			}
-			results[key] = runV2EvidenceHelper(t, gomax, evidence, true, false, true)
+			results[key] = runV2EvidenceHelper(t, gomax, evidence, true, false, true, false)
 		}
 	}
 	want := results["g1/off"].ExecutionHash
@@ -264,7 +289,35 @@ func TestV21HeterogeneousRosterIsFreshProcessDeterministicAndEvidenceNeutral(t *
 	}
 }
 
-func TestV20EvidenceRejectsCustomMountCoverageGap(t *testing.T) {
+func TestV22RouterIsFreshProcessDeterministicAndEvidenceNeutral(t *testing.T) {
+	results := make(map[string]v20HelperResult)
+	for _, gomax := range []string{"1", "4"} {
+		for _, evidence := range []bool{false, true} {
+			key := "g" + gomax + "/off"
+			if evidence {
+				key = "g" + gomax + "/on"
+			}
+			results[key] = runV22RouterEvidenceHelper(t, gomax, evidence)
+		}
+	}
+	want := results["g1/off"].ExecutionHash
+	for key, result := range results {
+		if result.ExecutionHash == "" || result.ExecutionHash != want {
+			t.Fatalf("V2-2 router changes execution with evidence/process setting: want %s, %s=%s", want, key, result.ExecutionHash)
+		}
+	}
+	left, right := results["g1/on"], results["g4/on"]
+	if left.Schedules == 0 || left.Receipts == 0 || left.Decisions == 0 || left.FrontierVectorDecisions == 0 ||
+		left.Schedules != right.Schedules || left.Receipts != right.Receipts || left.Decisions != right.Decisions ||
+		left.ScheduleDigest != right.ScheduleDigest || left.ReceiptDigest != right.ReceiptDigest || left.DecisionDigest != right.DecisionDigest ||
+		left.FrontierVectorDecisions != right.FrontierVectorDecisions || left.FrontierVectorComponents != right.FrontierVectorComponents ||
+		left.FrontierVectorComponents != 3*left.FrontierVectorDecisions ||
+		left.FrontierVectorDigest != right.FrontierVectorDigest || left.FrontierComponentDigest != right.FrontierComponentDigest {
+		t.Fatalf("V2-2 router evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
+	}
+}
+
+func TestV22InstrumentedRouterRegistersEveryCustomLeg(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "research", "configs", "frozen-baseline-2026-08-22.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -277,23 +330,195 @@ func TestV20EvidenceRejectsCustomMountCoverageGap(t *testing.T) {
 	cfg.LogMode = "none"
 	cfg.RecordMarketDataReceipts = true
 	cfg.MarketDataReceiptRoles = []string{"cross_venue_router_tier"}
+	cfg.RecordDecisionFrontierVectors = true
 	cfg.CrossVenueArbTiers = []float64{1}
 	cfg.CrossVenueBaseLatency = time.Second
-	_, err = NewSim(time.Minute, cfg)
-	if err == nil || !strings.Contains(err.Error(), "instrumented links") {
-		t.Fatalf("custom uninstrumented router mount passed V2-0 evidence coverage: %v", err)
+	cfg.CrossVenueArbLotQty = mvBasePrecision / 100
+	cfg.CrossVenueArbMaxAttempts = 1
+	sim, err := NewSim(10*time.Second, cfg)
+	if err != nil {
+		t.Fatalf("instrumented router failed V2-0 coverage: %v", err)
+	}
+	defer sim.Close()
+	seedV22RouterActivationBooks(t, sim)
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatalf("run instrumented router: %v", err)
+	}
+	audit, err := analysis.AuditMarketDataReceipts(cfg.LogDir)
+	if err != nil || !audit.Valid || audit.Decisions == 0 {
+		t.Fatalf("instrumented router scalar evidence = %#v, %v", audit, err)
+	}
+	vectors, err := analysis.AuditDecisionFrontierVectors(cfg.LogDir)
+	if err != nil || !vectors.Valid || vectors.Decisions == 0 || vectors.Components != 3*vectors.Decisions {
+		t.Fatalf("instrumented router vector evidence = %#v, %v", vectors, err)
+	}
+	if len(sim.Routers) != 1 || sim.Routers[0].Report().SubmittedGroups == 0 {
+		t.Fatalf("targeted router activation did not submit a qualified group: %#v", sim.Routers)
+	}
+
+	// V2-0's generic mutation suite already attacks a receipt ledger. These
+	// router-specific mutations prove that a three-venue route cannot lose one
+	// frontier, one vector, or advance a component into the future while still
+	// passing the independent V3 join.
+	decisionsRaw, err := os.ReadFile(filepath.Join(cfg.LogDir, "market-data-decision-vectors-v1.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	componentsRaw, err := os.ReadFile(filepath.Join(cfg.LogDir, "market-data-frontier-components-v1.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestRaw, err := os.ReadFile(filepath.Join(cfg.LogDir, "market-data-frontier-vectors-v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore := func() {
+		if err := os.WriteFile(filepath.Join(cfg.LogDir, "market-data-decision-vectors-v1.bin"), decisionsRaw, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(cfg.LogDir, "market-data-frontier-components-v1.bin"), componentsRaw, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(cfg.LogDir, "market-data-frontier-vectors-v1.json"), manifestRaw, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer restore()
+
+	future := append([]byte(nil), componentsRaw...)
+	decisionAt := binary.BigEndian.Uint64(decisionsRaw[48:56])
+	binary.BigEndian.PutUint64(future[32:40], decisionAt+1)
+	rewriteV22VectorArtifact(t, cfg.LogDir, decisionsRaw, future)
+	mutated, err := analysis.AuditDecisionFrontierVectors(cfg.LogDir)
+	if err != nil || mutated.Valid || mutated.FutureComponentUse == 0 {
+		t.Fatalf("future router frontier component survived: audit=%#v err=%v", mutated, err)
+	}
+	restore()
+
+	rewriteV22VectorArtifact(t, cfg.LogDir, decisionsRaw, componentsRaw[:len(componentsRaw)-56])
+	mutated, err = analysis.AuditDecisionFrontierVectors(cfg.LogDir)
+	if err != nil || mutated.Valid || mutated.MissingDecisionComponents == 0 {
+		t.Fatalf("dropped router venue frontier survived: audit=%#v err=%v", mutated, err)
+	}
+	restore()
+
+	rewriteV22VectorArtifact(t, cfg.LogDir, nil, nil)
+	mutated, err = analysis.AuditDecisionFrontierVectors(cfg.LogDir)
+	if err != nil || mutated.Valid || mutated.MissingVectorDecision == 0 {
+		t.Fatalf("dropped router decision vectors survived: audit=%#v err=%v", mutated, err)
+	}
+}
+
+func rewriteV22VectorArtifact(t *testing.T, dir string, decisions, components []byte) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "market-data-decision-vectors-v1.bin"), decisions, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "market-data-frontier-components-v1.bin"), components, 0644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dir, "market-data-frontier-vectors-v1.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for _, artifact := range []struct {
+		name string
+		raw  []byte
+		rows int
+	}{
+		{name: "decisions", raw: decisions, rows: len(decisions) / simulation.DecisionFrontierVectorRecordBytes},
+		{name: "components", raw: components, rows: len(components) / simulation.DecisionFrontierComponentRecordBytes},
+	} {
+		digest := sha256.Sum256(artifact.raw)
+		row, ok := manifest[artifact.name].(map[string]any)
+		if !ok {
+			t.Fatalf("missing %s artifact row", artifact.name)
+		}
+		row["records"] = artifact.rows
+		row["digest"] = hex.EncodeToString(digest[:])
+	}
+	encoded, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, append(encoded, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// seedV22RouterActivationBooks creates legal, non-crossed resting liquidity
+// before runner start. It is a targeted router-path fixture, not a population
+// calibration or an outcome experiment: north offers ABC at 101 while central
+// bids at 105, so a router that has received all three public snapshots has
+// one all-in FOK comparison to make.
+func seedV22RouterActivationBooks(t *testing.T, sim *Sim) {
+	t.Helper()
+	quotes := []struct{ bid, ask int64 }{
+		{bid: 100, ask: 101},
+		{bid: 105, ask: 106},
+		{bid: 99, ask: 110},
+	}
+	qty := int64(mvBasePrecision) / 10
+	for index, venue := range sim.Venues {
+		buyerID, sellerID := uint64(90_001), uint64(90_002)
+		buyer := venue.Exchange.ConnectNewClient(buyerID, map[string]int64{"USD": 1_000_000 * mvQuotePrecision}, &exchange.FixedFee{})
+		seller := venue.Exchange.ConnectNewClient(sellerID, map[string]int64{"ABC": 10 * mvBasePrecision}, &exchange.FixedFee{})
+		for _, quote := range []struct {
+			clientID uint64
+			side     exchange.Side
+			price    int64
+		}{
+			{clientID: buyerID, side: exchange.Buy, price: quotes[index].bid * mvQuotePrecision},
+			{clientID: sellerID, side: exchange.Sell, price: quotes[index].ask * mvQuotePrecision},
+		} {
+			response := venue.Exchange.PlaceOrder(quote.clientID, &exchange.OrderRequest{
+				RequestID: uint64(index + 1), Symbol: "ABC/USD", Side: quote.side, Type: exchange.LimitOrder,
+				Price: quote.price, Qty: qty, TimeInForce: exchange.GTC, Visibility: exchange.Normal,
+			})
+			if !response.Success {
+				t.Fatalf("seed %s %s liquidity failed: %#v", venue.ID, quote.side, response)
+			}
+		}
+		drainFixtureGateway(buyer)
+		drainFixtureGateway(seller)
+		// The fixture accounts are passive resting-liquidity providers, not
+		// actors. Disconnect their unused response sessions before runner start
+		// so deterministic egress cannot wait for a nonexistent consumer; their
+		// legal GTC orders remain on the book.
+		venue.Exchange.DisconnectClient(buyerID)
+		venue.Exchange.DisconnectClient(sellerID)
+	}
+}
+
+func drainFixtureGateway(gateway actor.Gateway) {
+	for {
+		select {
+		case <-gateway.Responses():
+		case <-gateway.MarketDataCh():
+		default:
+			return
+		}
 	}
 }
 
 func runV20Helper(t *testing.T, gomax string, evidence bool) v20HelperResult {
-	return runV2EvidenceHelper(t, gomax, evidence, false, false, false)
+	return runV2EvidenceHelper(t, gomax, evidence, false, false, false, false)
 }
 
 func runEvidenceHelper(t *testing.T, gomax string, evidence, localCache bool) v20HelperResult {
-	return runV2EvidenceHelper(t, gomax, evidence, localCache, false, false)
+	return runV2EvidenceHelper(t, gomax, evidence, localCache, false, false, false)
 }
 
-func runV2EvidenceHelper(t *testing.T, gomax string, evidence, localCache, remoteFeed, remoteRoster bool) v20HelperResult {
+func runV22RouterEvidenceHelper(t *testing.T, gomax string, evidence bool) v20HelperResult {
+	return runV2EvidenceHelper(t, gomax, evidence, false, false, false, true)
+}
+
+func runV2EvidenceHelper(t *testing.T, gomax string, evidence, localCache, remoteFeed, remoteRoster, routerEvidence bool) v20HelperResult {
 	t.Helper()
 	output := filepath.Join(t.TempDir(), "run")
 	cmd := exec.Command(os.Args[0], "-test.run=TestV20EvidenceHelper", "--")
@@ -309,6 +534,9 @@ func runV2EvidenceHelper(t *testing.T, gomax string, evidence, localCache, remot
 	}
 	if remoteRoster {
 		cmd.Env = append(cmd.Env, "V21_REMOTE_ROSTER=1")
+	}
+	if routerEvidence {
+		cmd.Env = append(cmd.Env, "V22_ROUTER=1")
 	}
 	raw, err := cmd.CombinedOutput()
 	if err != nil {

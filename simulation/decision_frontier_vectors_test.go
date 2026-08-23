@@ -16,6 +16,10 @@ import (
 )
 
 func writeDecisionVectorFixture(t *testing.T, dir string) MarketDataFrontier {
+	return writeDecisionVectorFixtureOrder(t, dir, exchange.LimitOrder, 99)
+}
+
+func writeDecisionVectorFixtureOrder(t *testing.T, dir string, orderType exchange.OrderType, price int64) MarketDataFrontier {
 	t.Helper()
 	receipts, err := NewMarketDataReceiptRecorder(dir)
 	if err != nil {
@@ -38,7 +42,7 @@ func writeDecisionVectorFixture(t *testing.T, dir string) MarketDataFrontier {
 	}
 	receipts.RecordDecision(MarketDataDecision{
 		ClientID: 11, SourceVenue: "north", Link: "north/spot_maker/client/11", Symbol: "ABC/USD", RequestID: 31,
-		Side: exchange.Buy, OrderType: exchange.LimitOrder, TimeInForce: exchange.GTC, Price: 99, Qty: 3, DecisionAt: 120, Frontier: frontier,
+		Side: exchange.Buy, OrderType: orderType, TimeInForce: exchange.GTC, Price: price, Qty: 3, DecisionAt: 120, Frontier: frontier,
 	})
 	if err := receipts.Finalize(120); err != nil {
 		t.Fatal(err)
@@ -52,7 +56,7 @@ func writeDecisionVectorFixture(t *testing.T, dir string) MarketDataFrontier {
 	}
 	vectors.Record(DecisionFrontierVector{
 		ActorID: 99, ClientID: 11, TradingLinkID: frontier.LinkID, Symbol: "ABC/USD", RequestID: 31,
-		Side: exchange.Buy, OrderType: exchange.LimitOrder, TimeInForce: exchange.GTC, Price: 99, Qty: 3, DecisionAt: 120,
+		Side: exchange.Buy, OrderType: orderType, TimeInForce: exchange.GTC, Price: price, Qty: 3, DecisionAt: 120,
 		Components: []DecisionFrontierComponent{{ClientID: 11, Frontier: frontier}},
 	})
 	if err := vectors.Finalize(filepath.Join(dir, "market-data-evidence-v2.json")); err != nil {
@@ -67,6 +71,15 @@ func TestDecisionFrontierVectorsAuditMultiFeedDecisionContract(t *testing.T) {
 	audit, err := analysis.AuditDecisionFrontierVectors(dir)
 	if err != nil || !audit.Valid || audit.Decisions != 1 || audit.Components != 1 {
 		t.Fatalf("valid decision frontier vector rejected: audit=%+v err=%v", audit, err)
+	}
+}
+
+func TestDecisionFrontierVectorAcceptsMarketProtocolPriceZero(t *testing.T) {
+	dir := t.TempDir()
+	writeDecisionVectorFixtureOrder(t, dir, exchange.Market, 0)
+	audit, err := analysis.AuditDecisionFrontierVectors(dir)
+	if err != nil || !audit.Valid || audit.BadDecisionFields != 0 {
+		t.Fatalf("market protocol price zero rejected as unavailable: audit=%+v err=%v", audit, err)
 	}
 }
 

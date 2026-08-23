@@ -1,6 +1,7 @@
 package multivenue
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -8,6 +9,7 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/simulation"
 	etypes "exchange_sim/types"
 )
 
@@ -15,11 +17,24 @@ import (
 // It never shares collateral between venues and each market leg is FOK, so a
 // failed counterpart remains visible as residual venue-local inventory.
 type CrossVenueArbConfig struct {
-	Symbol        string
-	LotQty        int64
-	BasePrecision int64
-	TakerFeeBps   int64
-	MaxAttempts   int
+	Symbol                      string
+	LotQty                      int64
+	BasePrecision               int64
+	TakerFeeBps                 int64
+	MaxAttempts                 int
+	RequireCompleteFeedFrontier bool
+	DecisionObserver            func(CrossVenueArbDecision)
+}
+
+// CrossVenueArbDecision is the observation-only evidence boundary for one
+// submitted router leg. Components are the complete three-venue local public
+// feed frontier that made the route eligible; they are not an actor input.
+type CrossVenueArbDecision struct {
+	ActorID       uint64
+	ClientID      uint64
+	TradingLinkID uint32
+	Request       exchange.Request
+	Components    []simulation.DecisionFrontierComponent
 }
 
 // CrossVenueArbLegConfig binds one router endpoint to one independently
@@ -107,6 +122,7 @@ type crossVenueArbGroup struct {
 	quotedEdge int64
 	buy        *crossVenueArbOrder
 	sell       *crossVenueArbOrder
+	frontiers  []simulation.DecisionFrontierComponent
 	complete   bool
 	failed     bool
 }
@@ -126,6 +142,7 @@ type crossVenueArbLeg struct {
 	venueID  string
 	clientID uint64
 	book     crossVenueQuoteBook
+	frontier func() simulation.MarketDataFrontier
 }
 
 // NewCrossVenueArb creates one three-endpoint router. Each leg has one
@@ -152,7 +169,19 @@ func NewCrossVenueArb(tier float64, cfg CrossVenueArbConfig, legs []CrossVenueAr
 			BaseActor: actor.NewBaseActor(spec.ActorID, spec.Gateway),
 			owner:     router, venueID: spec.VenueID, clientID: spec.ClientID,
 		}
+		if source, ok := spec.Gateway.(interface {
+			MarketDataFrontier() simulation.MarketDataFrontier
+		}); ok {
+			leg.frontier = source.MarketDataFrontier
+		}
+		if cfg.RequireCompleteFeedFrontier && leg.frontier == nil {
+			return nil, fmt.Errorf("multivenue: cross-venue router leg %s lacks an auditable delayed feed frontier", spec.VenueID)
+		}
 		leg.SetHandler(leg)
+		boundLeg := leg
+		leg.SetOrderDecisionObserver(func(request exchange.Request) {
+			router.observeDecision(boundLeg, request)
+		})
 		router.legs = append(router.legs, leg)
 	}
 	router.report.RouterID = router.legs[0].ID()
@@ -249,6 +278,9 @@ func (r *CrossVenueArb) onQuote(_ *crossVenueArbLeg) {
 	if r.inFlight != nil || len(r.groups) >= r.cfg.MaxAttempts || r.quoteGeneration == r.lastAttemptGeneration {
 		return
 	}
+	if _, ok := r.completeFeedFrontier(); !ok {
+		return
+	}
 	buy, sell, edge, ok := r.bestOpportunity()
 	if !ok {
 		return
@@ -318,16 +350,78 @@ func (r *CrossVenueArb) executableEdge(sellBid, buyAsk int64) (int64, bool) {
 }
 
 func (r *CrossVenueArb) openGroup(buy, sell *crossVenueArbLeg, edge int64) {
+	frontiers, ok := r.completeFeedFrontier()
+	if !ok {
+		return
+	}
 	group := &crossVenueArbGroup{
 		id: uint64(len(r.groups) + 1), quotedEdge: edge,
-		buy:  &crossVenueArbOrder{leg: buy, CrossVenueLegReport: CrossVenueLegReport{VenueID: buy.venueID, ClientID: buy.clientID, Side: exchange.Buy}},
-		sell: &crossVenueArbOrder{leg: sell, CrossVenueLegReport: CrossVenueLegReport{VenueID: sell.venueID, ClientID: sell.clientID, Side: exchange.Sell}},
+		buy:       &crossVenueArbOrder{leg: buy, CrossVenueLegReport: CrossVenueLegReport{VenueID: buy.venueID, ClientID: buy.clientID, Side: exchange.Buy}},
+		sell:      &crossVenueArbOrder{leg: sell, CrossVenueLegReport: CrossVenueLegReport{VenueID: sell.venueID, ClientID: sell.clientID, Side: exchange.Sell}},
+		frontiers: frontiers,
 	}
-	group.buy.RequestID = buy.SubmitOrderWithTimeInForce(r.cfg.Symbol, exchange.Buy, exchange.Market, 0, r.cfg.LotQty, exchange.FOK)
-	group.sell.RequestID = sell.SubmitOrderWithTimeInForce(r.cfg.Symbol, exchange.Sell, exchange.Market, 0, r.cfg.LotQty, exchange.FOK)
+	// Install the in-flight group before either gateway sees a request: the
+	// decision observer runs immediately before Send and must bind each leg to
+	// the same comparison frontier. No actor receives this metadata.
 	r.groups = append(r.groups, group)
 	r.inFlight = group
+	group.buy.RequestID = buy.SubmitOrderWithTimeInForce(r.cfg.Symbol, exchange.Buy, exchange.Market, 0, r.cfg.LotQty, exchange.FOK)
+	group.sell.RequestID = sell.SubmitOrderWithTimeInForce(r.cfg.Symbol, exchange.Sell, exchange.Market, 0, r.cfg.LotQty, exchange.FOK)
 	r.report.SubmittedGroups++
+}
+
+// completeFeedFrontier returns the exact frontiers used by the fixed
+// three-venue comparison. In ordinary compatibility mode it has no effect on
+// routing. An instrumented V2 router requires a nonempty prefix from every
+// declared venue before it may turn quote state into a pair of order requests.
+func (r *CrossVenueArb) completeFeedFrontier() ([]simulation.DecisionFrontierComponent, bool) {
+	if !r.cfg.RequireCompleteFeedFrontier {
+		return nil, true
+	}
+	components := make([]simulation.DecisionFrontierComponent, 0, len(r.legs))
+	for _, leg := range r.legs {
+		if leg.frontier == nil {
+			return nil, false
+		}
+		frontier := leg.frontier()
+		if frontier.LinkID == 0 || frontier.Ordinal == 0 || frontier.DeliveredAt == 0 || frontier.Digest == ([16]byte{}) {
+			return nil, false
+		}
+		components = append(components, simulation.DecisionFrontierComponent{ClientID: leg.clientID, Frontier: frontier})
+	}
+	slices.SortFunc(components, func(left, right simulation.DecisionFrontierComponent) int {
+		if left.ClientID != right.ClientID {
+			return cmp.Compare(left.ClientID, right.ClientID)
+		}
+		return cmp.Compare(left.Frontier.LinkID, right.Frontier.LinkID)
+	})
+	return components, true
+}
+
+func (r *CrossVenueArb) observeDecision(leg *crossVenueArbLeg, request exchange.Request) {
+	if r.cfg.DecisionObserver == nil || request.Type != exchange.ReqPlaceOrder || request.OrderReq == nil || r.inFlight == nil {
+		return
+	}
+	if leg.frontier == nil {
+		panic("multivenue: instrumented cross-venue route lacks trading-link frontier")
+	}
+	tradingFrontier := leg.frontier()
+	for _, component := range r.inFlight.frontiers {
+		// Client IDs are venue-local, so the same number can legitimately
+		// identify all three router accounts. Match both account and link; a
+		// client-only match would bind a sell decision to another venue's
+		// scalar gateway record.
+		if component.ClientID != leg.clientID || component.Frontier.LinkID != tradingFrontier.LinkID {
+			continue
+		}
+		decision := CrossVenueArbDecision{
+			ActorID: leg.ID(), ClientID: leg.clientID, TradingLinkID: component.Frontier.LinkID,
+			Request: request, Components: append([]simulation.DecisionFrontierComponent(nil), r.inFlight.frontiers...),
+		}
+		r.cfg.DecisionObserver(decision)
+		return
+	}
+	panic("multivenue: instrumented cross-venue route missing trading-link frontier")
 }
 
 func (r *CrossVenueArb) findOrder(leg *crossVenueArbLeg, requestID, orderID uint64) *crossVenueArbOrder {

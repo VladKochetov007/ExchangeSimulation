@@ -124,6 +124,9 @@ These are quantities, not availability sentinels:
   no consumer may infer availability from those numeric fields;
 - a computed liquidation estimate may equal zero; invalid inputs now return an
   error and account snapshots use a nil pointer when no estimate exists;
+- an order request for a `Market` order legitimately has protocol
+  `Price == 0`; order type distinguishes it from an unavailable market or
+  reference price, and limit requests remain strictly positive;
 - `SettlementPrice`/`PriceSource`/book helpers may return numeric zero only
   together with a non-nil error, and `(0,false)` cache helpers only as explicit
   availability tuples.

@@ -585,6 +585,14 @@ func (c *Config) normalize() error {
 	if c.RecordDecisionFrontierVectors && !c.RecordMarketDataReceipts {
 		return errors.New("multivenue: decision frontier vectors require market-data receipt evidence")
 	}
+	if len(c.CrossVenueArbTiers) != 0 && c.RecordMarketDataReceipts {
+		if !c.RecordDecisionFrontierVectors {
+			return errors.New("multivenue: instrumented cross-venue routers require decision frontier vectors")
+		}
+		if !slices.Contains(c.MarketDataReceiptRoles, "cross_venue_router_tier") {
+			return errors.New("multivenue: instrumented cross-venue routers require cross_venue_router_tier receipt coverage")
+		}
+	}
 	if c.LogMode != "full" && c.LogMode != "none" {
 		return fmt.Errorf("multivenue: log mode must be full or none, got %q", c.LogMode)
 	}
@@ -831,6 +839,12 @@ func (c *Config) normalize() error {
 			}
 			seenReceiptRoles[role] = struct{}{}
 			if role == "v2_remote_feed" && len(c.remoteMakerFeeds()) != 0 {
+				continue
+			}
+			if role == "cross_venue_router_tier" && len(c.CrossVenueArbTiers) != 0 {
+				if c.CrossVenueBaseLatency <= 0 {
+					return errors.New("multivenue: instrumented cross-venue routers need positive base latency")
+				}
 				continue
 			}
 			profile, configured := c.latencyProfileFor(role)
@@ -1597,8 +1611,8 @@ func currentBuild() BuildInfo {
 }
 
 // NewSim constructs three exchanges with one local spot/perp/dated-future/
-// option board each. It intentionally does not add cross-venue arbitrage yet:
-// that actor must have a venue-qualified order ledger and explicit leg risk.
+// option board each. Cross-venue routing is optional and, when configured,
+// remains venue-qualified with independent accounts and explicit leg risk.
 func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	if err := cfg.normalize(); err != nil {
 		return nil, err
@@ -2646,19 +2660,37 @@ func (s *Sim) addCrossVenueRouters(clock *simulation.SimulatedClock, scheduler *
 	fee := &exchange.PercentageFee{MakerBps: 0, TakerBps: s.Config.TakerFeeBps, InQuote: true}
 	for _, tier := range s.Config.CrossVenueArbTiers {
 		delay := time.Duration(float64(s.Config.CrossVenueBaseLatency) * tier)
+		role := fmt.Sprintf("cross_venue_router_tier_%g", tier)
+		instrumented := s.Config.recordsMarketDataReceipts(role)
+		if instrumented && s.frontierVectors == nil {
+			return errors.New("multivenue: instrumented cross-venue router is missing decision frontier recorder")
+		}
 		legs := make([]CrossVenueArbLegConfig, 0, len(s.Venues))
 		mounts := make([]*simulation.Mount, 0, len(s.Venues))
 		for _, venue := range s.Venues {
+			var receiptSink *simulation.MarketDataReceiptRecorder
+			if instrumented {
+				receiptSink = s.marketDataReceipts
+			}
 			mount := simulation.NewMount(venue.Exchange, simulation.LatencyConfig{
-				Request:        simulation.NewConstantLatency(delay),
-				Response:       simulation.NewConstantLatency(delay),
-				MarketData:     simulation.NewConstantLatency(delay),
-				Scheduler:      scheduler,
-				Clock:          clock,
-				Telemetry:      s.latencyTelemetry,
-				TelemetryLabel: venue.ID + "/cross_venue_arb",
+				Request:            simulation.NewConstantLatency(delay),
+				Response:           simulation.NewConstantLatency(delay),
+				MarketData:         simulation.NewConstantLatency(delay),
+				Scheduler:          scheduler,
+				Clock:              clock,
+				Telemetry:          s.latencyTelemetry,
+				TelemetryLabel:     venue.ID + "/cross_venue_arb",
+				MarketDataReceipts: receiptSink,
+				ReceiptSourceVenue: venue.ID,
+				ReceiptLink:        venue.ID + "/" + role,
+				ReceiptRole:        roleClass(role),
 			})
-			clientID, gw := venue.connectParticipant(mount, fmt.Sprintf("cross_venue_router_tier_%g", tier), balances, 0, fee)
+			clientID, gw := venue.connectParticipant(mount, role, balances, 0, fee)
+			if instrumented {
+				if _, ok := gw.(*simulation.DelayedGateway); !ok {
+					return fmt.Errorf("multivenue: instrumented cross-venue router %s/%s lacks delayed gateway", venue.ID, role)
+				}
+			}
 			*actorID++
 			legs = append(legs, CrossVenueArbLegConfig{
 				VenueID: venue.ID, ClientID: clientID, ActorID: *actorID, Gateway: gw,
@@ -2668,9 +2700,30 @@ func (s *Sim) addCrossVenueRouters(clock *simulation.SimulatedClock, scheduler *
 		router, err := NewCrossVenueArb(tier, CrossVenueArbConfig{
 			Symbol: "ABC/USD", LotQty: s.Config.CrossVenueArbLotQty,
 			BasePrecision: mvBasePrecision, TakerFeeBps: s.Config.TakerFeeBps, MaxAttempts: s.Config.CrossVenueArbMaxAttempts,
+			RequireCompleteFeedFrontier: instrumented,
 		}, legs)
 		if err != nil {
 			return err
+		}
+		if instrumented {
+			for _, leg := range router.legs {
+				frontier := leg.frontier()
+				if err := s.frontierVectors.RequireScalarDecisionLink(leg.clientID, frontier.LinkID); err != nil {
+					return fmt.Errorf("multivenue: require cross-venue router decision-vector coverage: %w", err)
+				}
+			}
+			router.cfg.DecisionObserver = func(decision CrossVenueArbDecision) {
+				request := decision.Request.OrderReq
+				if request == nil {
+					return
+				}
+				s.frontierVectors.Record(simulation.DecisionFrontierVector{
+					ActorID: decision.ActorID, ClientID: decision.ClientID, TradingLinkID: decision.TradingLinkID,
+					Symbol: request.Symbol, RequestID: request.RequestID, Side: request.Side,
+					OrderType: request.Type, TimeInForce: request.TimeInForce, Price: request.Price,
+					Qty: request.Qty, DecisionAt: clock.NowUnixNano(), Components: decision.Components,
+				})
+			}
 		}
 		router.SetTickerFactory(timers)
 		s.Routers = append(s.Routers, router)

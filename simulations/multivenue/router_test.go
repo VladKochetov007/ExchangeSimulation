@@ -5,6 +5,7 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/simulation"
 )
 
 func TestCrossVenueRouterRequiresAllInExecutableEdge(t *testing.T) {
@@ -71,6 +72,71 @@ func TestCrossVenueRouterRequiresDisplayedLotAtEachTouch(t *testing.T) {
 	if buy, sell, edge, ok := router.bestOpportunity(); !ok || buy.venueID != "alpha" || sell.venueID != "bravo" || edge != 8 {
 		t.Fatalf("full-depth opportunity = buy=%v sell=%v edge=%d ok=%v", venueID(buy), venueID(sell), edge, ok)
 	}
+}
+
+// The router may compare three delayed venue feeds only after every declared
+// venue has delivered a real prefix. This distinguishes an absent third feed
+// from a knowingly observed third market with no opportunity, and gives the
+// V2 frontier recorder an exact full information set for both legs.
+func TestInstrumentedCrossVenueRouterRequiresFullDeliveredFrontier(t *testing.T) {
+	var decisions []CrossVenueArbDecision
+	frontiers := []simulation.MarketDataFrontier{
+		{LinkID: 11, Ordinal: 1, DeliveredAt: 100, Digest: [16]byte{1}},
+		{LinkID: 12, Ordinal: 1, DeliveredAt: 100, Digest: [16]byte{2}},
+		{},
+	}
+	legs := make([]CrossVenueArbLegConfig, 0, 3)
+	for index, venueID := range []string{"alpha", "bravo", "charlie"} {
+		gateway := &routerFrontierGateway{ClientGateway: exchange.NewClientGateway(1), frontier: &frontiers[index]}
+		legs = append(legs, CrossVenueArbLegConfig{VenueID: venueID, ClientID: 1, ActorID: uint64(index + 1), Gateway: gateway})
+	}
+	router, err := NewCrossVenueArb(1, CrossVenueArbConfig{
+		Symbol: "ABC/USD", LotQty: 1, BasePrecision: 1, MaxAttempts: 1,
+		RequireCompleteFeedFrontier: true,
+		DecisionObserver:            func(decision CrossVenueArbDecision) { decisions = append(decisions, decision) },
+	}, legs)
+	if err != nil {
+		t.Fatalf("NewCrossVenueArb: %v", err)
+	}
+	setRouterBook(router.legs[0], 100, 101)
+	setRouterBook(router.legs[1], 105, 106)
+	setRouterBook(router.legs[2], 99, 110)
+
+	router.onQuote(router.legs[1])
+	if len(router.groups) != 0 || len(decisions) != 0 {
+		t.Fatalf("router traded before all declared feeds delivered: groups=%d decisions=%d", len(router.groups), len(decisions))
+	}
+	frontiers[2] = simulation.MarketDataFrontier{LinkID: 13, Ordinal: 1, DeliveredAt: 100, Digest: [16]byte{3}}
+	router.onQuote(router.legs[1])
+	if len(router.groups) != 1 || len(decisions) != 2 {
+		t.Fatalf("router after full frontier = groups=%d decisions=%d, want 1/2", len(router.groups), len(decisions))
+	}
+	for _, decision := range decisions {
+		if decision.TradingLinkID == 0 || len(decision.Components) != 3 {
+			t.Fatalf("incomplete router decision frontier: %#v", decision)
+		}
+		for _, component := range decision.Components {
+			if component.Frontier.Ordinal == 0 || component.Frontier.DeliveredAt > 100 || component.Frontier.Digest == ([16]byte{}) {
+				t.Fatalf("invalid delayed router component: %#v", component)
+			}
+		}
+		wantLink := uint32(12)
+		if decision.Request.OrderReq.Side == exchange.Buy {
+			wantLink = 11
+		}
+		if decision.TradingLinkID != wantLink {
+			t.Fatalf("router side %s bound to link %d, want %d", decision.Request.OrderReq.Side, decision.TradingLinkID, wantLink)
+		}
+	}
+}
+
+type routerFrontierGateway struct {
+	*exchange.ClientGateway
+	frontier *simulation.MarketDataFrontier
+}
+
+func (g *routerFrontierGateway) MarketDataFrontier() simulation.MarketDataFrontier {
+	return *g.frontier
 }
 
 func testCrossVenueRouter(t *testing.T, feeBps int64) *CrossVenueArb {

@@ -138,7 +138,7 @@ func (r *DecisionFrontierVectorRecorder) Record(decision DecisionFrontierVector)
 		return
 	}
 	if decision.ActorID == 0 || decision.ClientID == 0 || decision.TradingLinkID == 0 || decision.Symbol == "" ||
-		decision.RequestID == 0 || decision.DecisionAt == 0 || decision.Price <= 0 || decision.Qty <= 0 || len(decision.Components) == 0 {
+		decision.RequestID == 0 || decision.DecisionAt == 0 || !validDecisionOrderPrice(decision.OrderType, decision.Price) || decision.Qty <= 0 || len(decision.Components) == 0 {
 		r.writeErr = fmt.Errorf("invalid decision frontier vector")
 		return
 	}
@@ -194,6 +194,21 @@ func (r *DecisionFrontierVectorRecorder) Record(decision DecisionFrontierVector)
 			r.writeErr = fmt.Errorf("write decision frontier component: %w", err)
 			return
 		}
+	}
+}
+
+// validDecisionOrderPrice distinguishes a market request's protocol price of
+// zero from an unavailable market reference. Limit decisions need a positive
+// limit; Market requests deliberately carry zero because their price is
+// determined by later executable book levels, not this request field.
+func validDecisionOrderPrice(orderType types.OrderType, price int64) bool {
+	switch orderType {
+	case types.Market:
+		return price == 0
+	case types.LimitOrder:
+		return price > 0
+	default:
+		return false
 	}
 }
 

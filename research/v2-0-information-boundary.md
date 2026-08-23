@@ -2,10 +2,11 @@
 
 ## Status
 
-Implementation candidate. It is telemetry only and is disabled by default.
-It does not alter the ae13f9a frozen configuration or its simulator semantics.
-V2-1 is blocked until the checks below remain green after review and the
-separate V2-0 commit is made.
+Completed V2 instrumentation foundation. It is telemetry only and is disabled
+by default. It does not alter the ae13f9a frozen configuration or its
+simulator semantics. The independently tested V2-1 cache, remote-feed, and
+heterogeneous-roster construction controls build on this contract; their
+separate economics gates remain open.
 
 ## Claim and scope
 
@@ -51,6 +52,13 @@ A decision row contains client/link/symbol, order details, decision time, and
 the linked feed's frontier: receipt ordinal, delivered time, and a 128-bit
 rolling receipt-prefix digest. Its evidence event ordinal permits independent
 cross-file ordering reconstruction at equal simulated timestamps.
+
+For order requests, the persisted `price` field follows the exchange request
+protocol rather than the market-reference contract: a `Market` order must
+carry `price=0` because it has no limit price, while a `LimitOrder` must carry
+a positive price. This structural request zero is not a missing observation,
+mark, or reference price; the independent vector decoder validates it from the
+order type.
 
 The sidecars are only invoked after courier admission or successful inbox
 delivery. They create no scheduler events, use no RNG, expose no state to

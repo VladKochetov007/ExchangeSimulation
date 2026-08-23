@@ -72,8 +72,12 @@ one-maker proof is [V2-1c](v2-1-remote-feed-smoke.md). It has no economic
 claim. The predeclared three-policy roster in
 [V2-1d](v2-1d-roster-preregistration.md) now passes those distinct
 information-set, activation, and fresh-process evidence tests. It has no
-price-discovery claim. The next gate is explicit arbitrage, not a larger maker
-parameter sweep.
+price-discovery claim. The router's corresponding V2-2a evidence/activation
+gate is recorded in
+[V2-2a](v2-2-router-evidence-preregistration.md): it establishes auditable
+three-venue frontiers only, not a price-discovery effect. The next gate is an
+economically motivated router activation smoke followed by the factorial, not
+a larger maker parameter sweep.
 
 ## V2-2 — executable cross-venue arbitrage
 

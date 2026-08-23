@@ -233,7 +233,7 @@ func AuditDecisionFrontierVectors(dir string) (*DecisionFrontierVectorAudit, err
 		}
 		symbol, symbolOK := vectorSymbols[record.symbolID]
 		if record.actorID == 0 || record.clientID == 0 || record.requestID == 0 || record.tradingLinkID == 0 || record.componentCount == 0 || !symbolOK ||
-			record.side > 1 || record.orderType > 1 || record.tif > 2 || record.decisionAt == 0 || record.price <= 0 || record.qty <= 0 {
+			record.side > 1 || !validVectorOrderPrice(record.orderType, record.price) || record.tif > 2 || record.decisionAt == 0 || record.qty <= 0 {
 			result.BadDecisionFields++
 		}
 		key := scalarDecisionKey{clientID: record.clientID, linkID: record.tradingLinkID, requestID: record.requestID}
@@ -271,6 +271,21 @@ func AuditDecisionFrontierVectors(dir string) (*DecisionFrontierVectorAudit, err
 		result.BadComponentOrdinal == 0 && result.DuplicateComponent == 0 && result.BadComponentFrontier == 0 && result.FutureComponentUse == 0 &&
 		result.MissingDecisionComponents == 0 && result.ExtraDecisionComponents == 0 && result.NonzeroReserved == 0
 	return result, nil
+}
+
+// validVectorOrderPrice mirrors the persisted request protocol without
+// importing simulator code: market requests intentionally encode their
+// unspecified limit as zero, while a limit request must carry a positive
+// price. This field is not an availability sentinel.
+func validVectorOrderPrice(orderType uint8, price int64) bool {
+	switch orderType {
+	case 0: // types.Market
+		return price == 0
+	case 1: // types.LimitOrder
+		return price > 0
+	default:
+		return false
+	}
 }
 
 func reconstructReceiptHistory(raw []byte) map[vectorFrontierKey]auditedFrontier {
