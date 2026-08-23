@@ -769,3 +769,11 @@ with the corrected analyzer. Every one reports zero `funding_broken`,
 The corrected result therefore supports funding transfer mechanics; it does
 not affect the separate causal question of whether funding marginally anchors
 the perpetual basis.
+
+A final review found that same-timestamp position points had been collected by
+concurrent file scans and sorted by timestamp alone. The final comparator
+orders them by timestamp, file, and physical record ordinal (`c1a8357`), and
+all 21 current artifacts were replayed a second time under that rule. The
+intermediate first-replay files are retained under
+`research/artifacts/historical/v020-pre-stable-tie-derivatives/`; the final
+all-zero result is unchanged.
