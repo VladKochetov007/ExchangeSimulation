@@ -1339,3 +1339,20 @@ outcome.
 The retained V2-2b cells must be re-audited with this report before their
 informed-maker activation criterion is scored. No world needs regeneration:
 the per-link data were already present in the immutable raw sidecars.
+
+## V-038 — aggregate dispersion could not establish parent-window activation
+
+V2-2b preregistered a nonzero fresh cross-venue dispersion observation during
+at least one execution parent. The initial offline metric reported a valid
+distribution and longest sampled positive run, but not the sampled timestamps.
+An aggregate positive range over five minutes cannot prove overlap with an
+independently recorded parent start/end interval.
+
+`crossvenue` therefore has an opt-in `positive_observation_times_nanos` field.
+It records only sampled periodic-publication instants with positive fresh
+two-sided dispersion; it does not interpolate positivity between snapshots.
+The known-gap fixture checks its exact timestamp alongside the existing stale,
+one-sided, and same-timestamp-order tests. This is an analyzer-only extension
+to an already retained raw stream, not a new outcome metric or a changed
+preregistration threshold. V2-2b cells must be re-extracted with the flag
+before the local-execution activation condition is scored.

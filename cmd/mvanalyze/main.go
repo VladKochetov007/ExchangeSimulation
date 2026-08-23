@@ -35,6 +35,7 @@ func main() {
 	arbStaleness := flag.Float64("arb-staleness", 2, "how many seconds old a quote may be and still count as executable")
 	crossVenueSymbol := flag.String("cross-venue-symbol", "ABC-USD", "same asset book to compare across venues")
 	crossVenueMin := flag.Int("cross-venue-min-venues", 3, "fewest fresh two-sided venues required for a midpoint-dispersion observation")
+	crossVenuePositiveTimes := flag.Bool("cross-venue-positive-times", false, "include positive sampled cross-venue dispersion times for activation-window joins")
 	conservationBook := flag.String("conservation-book", "", "restrict the conservation audit to one book, e.g. ABC/USD")
 	basePrecision := flag.Int64("base-precision", 100_000_000, "base-asset precision, for converting position sizes into contracts")
 	quotePrecision := flag.Int64("quote-precision", 100_000, "quote-asset precision, for converting logged prices into currency units")
@@ -540,6 +541,7 @@ func main() {
 		case "crossvenue":
 			result, err := run.MeasureCrossVenueDispersion(analysis.CrossVenueDispersionOptions{
 				Symbol: *crossVenueSymbol, StalenessNanos: int64(*arbStaleness * 1e9), MinVenues: *crossVenueMin,
+				CapturePositiveObservationTimes: *crossVenuePositiveTimes,
 			})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)

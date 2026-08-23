@@ -23,13 +23,18 @@ func TestCrossVenueDispersionMeasuresFreshKnownGap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := run.MeasureCrossVenueDispersion(CrossVenueDispersionOptions{Symbol: "ABC-USD", StalenessNanos: int64(2e9), MinVenues: 3})
+	result, err := run.MeasureCrossVenueDispersion(CrossVenueDispersionOptions{
+		Symbol: "ABC-USD", StalenessNanos: int64(2e9), MinVenues: 3, CapturePositiveObservationTimes: true,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := 1e4 * 4.0 / 101.0
 	if result.Evaluated != 1 || result.QuoteUpdates != 3 || math.Abs(result.MidpointRangeBps.Mean-want) > 1e-9 {
 		t.Fatalf("dispersion = %#v, want one %.12f-bps observation", result, want)
+	}
+	if got := result.PositiveObservationTimes; len(got) != 1 || got[0] != int64(1e9) {
+		t.Fatalf("positive sampled times = %v, want [1000000000]", got)
 	}
 }
 

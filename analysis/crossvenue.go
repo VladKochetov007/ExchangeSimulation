@@ -9,11 +9,12 @@ import (
 // staleness-bounded midpoint comparison. This observer is omniscient and is
 // never a participant information set or a router decision rule.
 type CrossVenueDispersionOptions struct {
-	Files          []string
-	FilesSelected  bool
-	Symbol         string
-	StalenessNanos int64
-	MinVenues      int
+	Files                           []string
+	FilesSelected                   bool
+	Symbol                          string
+	StalenessNanos                  int64
+	MinVenues                       int
+	CapturePositiveObservationTimes bool
 }
 
 // CrossVenueDispersion describes the contemporaneous range of fresh,
@@ -28,6 +29,10 @@ type CrossVenueDispersion struct {
 	SkippedInsufficientFresh int          `json:"skipped_insufficient_fresh"`
 	MidpointRangeBps         Distribution `json:"midpoint_range_bps"`
 	LongestPositiveRunNanos  int64        `json:"longest_positive_run_nanos"`
+	// PositiveObservationTimes is opt-in because a long raw run can contain
+	// many periodic snapshots. Each entry is a sampled instant, not a claim
+	// that dispersion remained positive between publications.
+	PositiveObservationTimes []int64 `json:"positive_observation_times_nanos,omitempty"`
 }
 
 type dispersionQuote struct {
@@ -157,6 +162,9 @@ func (r *Run) MeasureCrossVenueDispersion(opts CrossVenueDispersionOptions) (*Cr
 		if bps <= 0 {
 			inPositiveRun = false
 			continue
+		}
+		if opts.CapturePositiveObservationTimes {
+			result.PositiveObservationTimes = append(result.PositiveObservationTimes, at)
 		}
 		if !inPositiveRun {
 			positiveRunStart, inPositiveRun = at, true
