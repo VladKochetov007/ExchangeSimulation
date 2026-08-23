@@ -51,6 +51,7 @@ an ecology run.
 | Swap the call and put payoff, **ecology run** | 60 settlements over 5h | per-holder payout against the contract terms | 0 mispaid | **766 holders mispaid** | yes |
 | Settle against a strike 1% away, **ecology run** | 60 settlements over 5h | the same | 0 mispaid | **386 holders mispaid** | yes |
 | Settle funding twice, **ecology run** | 5 funding instants / 85 duplicate account postings | one funding posting per funded account, contract, and instant | 0 duplicates | **85 duplicates; 5 broken instants** | yes, after V-022 rebuilt the detector |
+| Drop immediate-order cancellation **records**, ecology run | 169,935 immediate cancellation records | every accepted non-resting order has a persisted fill-or-cancel terminal record | 0 missing terminals | **169,935 missing terminals** | yes, through `-metric orderlifecycle` |
 
 ### Horizon, and why 5h rather than 2h
 
@@ -119,7 +120,7 @@ listing after expiry.
 | Execute an order after expiry | no fill may be recorded after the expiry instant | `-metric settlements`, `TradesAfterExpiry` |
 | Fail to cancel expired resting orders | the same, plus the book still quoting a delisted contract | `-metric settlements`; needs a delisting check that does not exist yet |
 | Double-count a fee | venue take against the fee stream; closed-system identity | `-metric conservation` |
-| Drop a cancellation | resting order count grows without bound; no current detector | none yet |
+| Drop a GTC cancellation request or state transition | resting order can remain executable after a requested cancel; request evidence is not persisted | none yet |
 | Give one venue zero latency accidentally | cross-venue edge appears where none did | `-metric arbitrage`, cross-venue cycle |
 | Use stale collateral for liquidation | cannot be tested: liquidation never fires (V-005) | blocked on the stress arm |
 | Inject future information into one actor | no detector exists; the delivery path makes look-ahead structurally impossible but nothing instruments it (see `research/information-boundary-audit.md`) | none yet |
@@ -136,9 +137,11 @@ queue-order check over the logged book deltas still does not exist, so a
 priority defect introduced in the wiring around the matcher rather than in the
 matcher would still go unseen.
 
-Two classes of defect have **no detector at all**: dropped cancellations and
-injected look-ahead. Two more are blocked behind mechanisms that never
-execute. So the audit as it stands covers
+Injected look-ahead still has **no detector at all**. The immediate-order
+cancellation *record* is now covered, but an unlogged GTC cancellation request
+or state transition remains untestable from the retained evidence. Two more
+classes are blocked behind mechanisms that never execute. So the audit as it
+stands covers
 money and lifecycle thoroughly, covers derivative semantics well now that the
 funding direction check has been rebuilt and the exercise fixtures exist, and
 covers matching, order handling and information flow barely.

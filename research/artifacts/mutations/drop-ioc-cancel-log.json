@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "mutation": "drop_ioc_cancel_log",
+  "status": "CAUGHT",
+  "scope": "Persisted evidence only: suppress the OrderCancelled log record for non-resting order remainders. Matching, settlement, and actor notification are otherwise unchanged.",
+  "simulator_freeze": "ae13f9aa6e5fd23539637a8c4a3d2d4f4c3ad107",
+  "config": "research/configs/frozen-baseline-2026-08-21.json",
+  "config_sha256": "83bcaa542d88fbe87620dfb7682ea2a1c000c10f162adf9123a801dbc3b9dc9b",
+  "seed": 101,
+  "duration_seconds": 18000,
+  "mutant_binary_sha256": "4fa84e82335355408882086299bbb418a20482e7a51fd28d0789b328d17d201f",
+  "control": {
+    "accepted": 2477567,
+    "cancelled": 1384208,
+    "required_immediate_terminal": 1113727,
+    "missing_immediate_terminal": 0
+  },
+  "mutant": {
+    "accepted": 2477567,
+    "cancelled": 1214273,
+    "required_immediate_terminal": 1113727,
+    "missing_immediate_terminal": 169935,
+    "order_lifecycle_checks": 169935,
+    "balance_delta_checked": 6048990,
+    "balance_delta_mismatched": 0,
+    "balance_chain_broken": 0
+  },
+  "evidence": {
+    "events": 21175620,
+    "digest": "551ad6eebfb2d6fb9c908e5740b79d1d0fb9d53ee052daadb95b0acafb34da46",
+    "domain": "persisted_json_records",
+    "ordering": "unordered_multiset",
+    "raw_logs_retained": true
+  },
+  "interpretation": "The lifecycle evidence audit catches a missing terminal record that conservation cannot see. This does not test an unlogged GTC cancellation request being honored; that remains unresolved."
+}
