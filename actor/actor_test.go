@@ -60,6 +60,30 @@ func TestBaseActorSubmitOrder(t *testing.T) {
 	<-done
 }
 
+func TestBaseActorOrderDecisionObserverRunsBeforeGatewaySend(t *testing.T) {
+	gateway := exchange.NewClientGateway(1)
+	actor := NewBaseActor(1, gateway)
+	seen := false
+	actor.SetOrderDecisionObserver(func(request exchange.Request) {
+		seen = true
+		if request.OrderReq == nil || request.OrderReq.Symbol != "BTCUSD" {
+			t.Fatalf("observer received wrong request: %+v", request)
+		}
+		if len(gateway.RequestCh) != 0 {
+			t.Fatal("gateway received order before decision observer")
+		}
+	})
+	actor.SubmitOrder("BTCUSD", exchange.Buy, exchange.LimitOrder, 5000000000000, 100000000)
+	if !seen {
+		t.Fatal("order decision observer was not called")
+	}
+	select {
+	case <-gateway.RequestCh:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("observer prevented order from reaching gateway")
+	}
+}
+
 func TestBaseActorCancelOrder(t *testing.T) {
 	gateway := exchange.NewClientGateway(1)
 	actor := NewBaseActor(1, gateway)

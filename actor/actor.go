@@ -65,6 +65,12 @@ type BaseActor struct {
 
 	handler EventHandler
 	tickers []tickEntry
+	// orderDecisionObserver is an optional write-only instrumentation hook.
+	// It runs immediately before an order enters its gateway, so an external
+	// evidence recorder can bind the decision to the actor's local feed
+	// frontier. It must be installed before Start and must never feed a value
+	// back to the actor; nil is the normal, zero-cost path.
+	orderDecisionObserver func(exchange.Request)
 
 	// phaseMode is an opt-in single-threaded execution mode used by the
 	// simulation runner. It keeps the ordinary asynchronous actor path intact,
@@ -136,6 +142,13 @@ func (a *BaseActor) Gateway() Gateway { return a.gateway }
 // Must be called before Start. Mutually exclusive with EventChannel — when
 // a handler is set the eventCh is not written.
 func (a *BaseActor) SetHandler(h EventHandler) { a.handler = h }
+
+// SetOrderDecisionObserver installs observation-only decision instrumentation.
+// It receives an already constructed request and cannot affect strategy state,
+// scheduling, or the request sent to the venue.
+func (a *BaseActor) SetOrderDecisionObserver(observer func(exchange.Request)) {
+	a.orderDecisionObserver = observer
+}
 
 // EnableDeterministicPhases switches this actor to the simulation runner's
 // explicit phase pump. It must be called before Start.
@@ -555,7 +568,7 @@ func (a *BaseActor) SubmitOrder(symbol string, side exchange.Side, orderType exc
 // decision explicit rather than silently resting an unpaired cross-venue leg.
 func (a *BaseActor) SubmitOrderWithTimeInForce(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64, tif exchange.TimeInForce) uint64 {
 	reqID := atomic.AddUint64(&a.requestSeq, 1)
-	a.gateway.Send(exchange.Request{
+	request := exchange.Request{
 		Type: exchange.ReqPlaceOrder,
 		OrderReq: &exchange.OrderRequest{
 			RequestID:   reqID,
@@ -567,13 +580,14 @@ func (a *BaseActor) SubmitOrderWithTimeInForce(symbol string, side exchange.Side
 			TimeInForce: tif,
 			Visibility:  exchange.Normal,
 		},
-	})
+	}
+	a.sendOrderDecision(request)
 	return reqID
 }
 
 func (a *BaseActor) SubmitOrderFull(symbol string, side exchange.Side, orderType exchange.OrderType, price, qty int64, visibility exchange.Visibility, icebergQty int64) {
 	reqID := atomic.AddUint64(&a.requestSeq, 1)
-	a.gateway.Send(exchange.Request{
+	request := exchange.Request{
 		Type: exchange.ReqPlaceOrder,
 		OrderReq: &exchange.OrderRequest{
 			RequestID:   reqID,
@@ -586,7 +600,15 @@ func (a *BaseActor) SubmitOrderFull(symbol string, side exchange.Side, orderType
 			Visibility:  visibility,
 			IcebergQty:  icebergQty,
 		},
-	})
+	}
+	a.sendOrderDecision(request)
+}
+
+func (a *BaseActor) sendOrderDecision(request exchange.Request) {
+	if a.orderDecisionObserver != nil {
+		a.orderDecisionObserver(request)
+	}
+	a.gateway.Send(request)
 }
 
 func (a *BaseActor) CancelOrder(orderID uint64) {

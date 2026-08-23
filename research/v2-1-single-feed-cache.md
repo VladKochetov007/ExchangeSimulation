@@ -66,15 +66,13 @@ discovery, or economic realism.
 
 One trade gateway plus one source has one V2-0 frontier. A remote-feed maker
 will necessarily have at least a local trading frontier and a remote feed
-frontier. The current V2-0 decision record has one frontier, so the next
-instrumentation prerequisite is an independently audited *frontier vector*.
-Do not attach a remote feed to a maker until that vector is recorded and
-mutated. Otherwise the apparent cross-venue cache would be unprovable.
+frontier. The scalar limitation is now addressed by the separately documented
+[V2-1b frontier-vector contract](v2-1-frontier-vectors.md). Do not attach a
+remote feed until that vector is activated in a live maker scenario; otherwise
+the apparent cross-venue cache would still be unprovable.
 
 ## Next experiment
 
-Design a compact, ordered decision-frontier-vector sidecar that links one
-order decision to every locally received feed component. Mutate omitted,
-duplicated, delayed, reordered, and future-injected components. Only then add
-one remote public-feed cache to one maker and prove it cannot read the shared
-consensus index.
+Add one remote public-feed cache to one maker, prove the live vector binds it
+to its trading link before every quote, and prove the maker cannot read the
+shared consensus index. Only then add heterogeneous sources/weights/latencies.

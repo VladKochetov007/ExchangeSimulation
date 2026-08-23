@@ -66,6 +66,7 @@ type DelayedGateway struct {
 	receiptSink   *MarketDataReceiptRecorder
 	receiptSource string
 	receiptLink   string
+	receiptLinkID uint32
 	receiptMu     sync.Mutex
 	frontier      MarketDataFrontier
 }
@@ -120,8 +121,22 @@ func (d *DelayedGateway) SetMarketDataReceiptRecorder(sink *MarketDataReceiptRec
 	d.receiptSource = sourceVenue
 	d.receiptLink = link
 	if sink != nil {
-		sink.RegisterLink(sourceVenue, link, role)
+		d.receiptLinkID = sink.RegisterLink(sourceVenue, link, role)
 	}
+}
+
+// MarketDataFrontier returns the exact receipt prefix currently available at
+// this actor-facing gateway. It is evidence metadata only; callers must not
+// use it to drive strategy behavior. LinkID is retained even before a first
+// receipt so a multi-feed decision can explicitly attest an empty component.
+func (d *DelayedGateway) MarketDataFrontier() MarketDataFrontier {
+	d.receiptMu.Lock()
+	frontier := d.frontier
+	d.receiptMu.Unlock()
+	if frontier.LinkID == 0 {
+		frontier.LinkID = d.receiptLinkID
+	}
+	return frontier
 }
 
 // UseScheduler switches to scheduled delivery at exact simulation times.

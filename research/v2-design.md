@@ -66,9 +66,10 @@ historical comparison, never as a hidden V2 fallback.
 
 Progress ledger: the single-source, single-maker-cache prerequisite is now
 implemented as [V2-1a](v2-1-single-feed-cache.md). It intentionally uses a
-local delayed feed first. A remote source remains blocked on a decision
-frontier-vector artifact; one scalar V2-0 frontier cannot prove a multi-feed
-information set.
+local delayed feed first. The required
+[frontier-vector artifact](v2-1-frontier-vectors.md) now exists and has caught
+future and dropped-component mutations. A remote source remains blocked until
+that artifact is activated in a live one-maker smoke world.
 
 ## V2-2 — executable cross-venue arbitrage
 

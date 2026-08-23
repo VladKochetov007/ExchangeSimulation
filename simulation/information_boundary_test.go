@@ -40,6 +40,9 @@ func TestMarketDataReceiptAttestsInboxArrival(t *testing.T) {
 	delayed := NewDelayedGateway(inner, nil, nil, NewConstantLatency(delay))
 	delayed.UseScheduler(scheduler, clock)
 	delayed.SetMarketDataReceiptRecorder(recorder, "north", "north/spot_maker", "spot_maker")
+	if frontier := delayed.MarketDataFrontier(); frontier.LinkID != 1 || frontier.Ordinal != 0 {
+		t.Fatalf("unreceived feed did not retain its registered link identity: %+v", frontier)
+	}
 	if err := delayed.EnableDeterministicPhases(); err != nil {
 		t.Fatal(err)
 	}

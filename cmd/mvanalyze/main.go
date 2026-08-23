@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, roleaudit, ecology, liquidations, marginchecks, derivatives, observationreceipts")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, roleaudit, ecology, liquidations, marginchecks, derivatives, observationreceipts, frontiervectors")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -362,6 +362,17 @@ func main() {
 					dir, result.Schedules, result.Receipts, result.Decisions,
 					result.ScheduleDigestMatches, result.ReceiptDigestMatches, result.DecisionDigestMatches, result.Valid,
 					result.ScheduledBeforePub, result.FutureDecisionUse, result.MissingDueReceipt, result.BadDecisionFrontier)
+			})
+		case "frontiervectors":
+			result, err := analysis.AuditDecisionFrontierVectors(dir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s vector decisions/components %d/%d base %t valid %t future %d missing %d\n",
+					dir, result.Decisions, result.Components, result.BaseEvidenceValid, result.Valid,
+					result.FutureComponentUse, result.MissingDecisionComponents)
 			})
 		case "basis":
 			result, err := run.MeasureBasis(analysis.BasisOptions{})
