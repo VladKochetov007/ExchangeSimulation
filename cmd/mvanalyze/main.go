@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, settlements, arbitrage, roleaudit, derivatives")
+	metric := flag.String("metric", "roles", "roles, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, settlements, arbitrage, roleaudit, ecology, derivatives")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
@@ -450,6 +450,17 @@ func main() {
 						"", row.Role, row.Participants, row.MakerFills, row.TakerFills,
 						100*row.TakerShare, row.Symbols, row.TopSymbolShare, row.SignedShare, row.Rejected)
 				}
+			})
+		case "ecology":
+			result, err := run.MeasureEcology()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-18s initial %d terminal %d HHI %.4f -> %.4f classes %d\n",
+					dir, result.InitialEquity, result.TerminalEquity,
+					result.InitialConcentrationHHI, result.TerminalConcentrationHHI, len(result.Roles))
 			})
 		case "arbitrage":
 			result, err := run.MeasureArbitrage(analysis.ArbitrageOptions{
