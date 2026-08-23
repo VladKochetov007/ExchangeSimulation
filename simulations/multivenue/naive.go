@@ -32,6 +32,9 @@ type FixedDistanceMakerConfig struct {
 	TickSize      int64         `json:"-"`
 	// PostOnly makes every refreshed quote a named passive venue request.
 	PostOnly bool `json:"post_only"`
+	// PostOnlyCancelBeforeReplace selects cancellation-before-replacement for
+	// the P0 ordering treatment. False preserves the legacy send order.
+	PostOnlyCancelBeforeReplace bool `json:"post_only_cancel_before_replace"`
 }
 
 type quoteState struct {
@@ -176,10 +179,18 @@ func (m *FixedDistanceMaker) askTarget(mid int64) int64 {
 	return alignTo(mid+mid*m.cfg.SpreadBps/10000, m.cfg.TickSize, true)
 }
 
-// replace submits the new quotes before cancelling the old ones so the book is
-// never left empty by this actor's own requoting.
+// replace keeps the legacy submit-before-cancel order unless the explicit P0
+// cancel-before-replace arm is selected for a post-only maker.
 func (m *FixedDistanceMaker) replace(mid, bid, ask int64) {
 	previousBid, previousAsk := m.quotes.bidID, m.quotes.askID
+	if m.cfg.PostOnly && m.cfg.PostOnlyCancelBeforeReplace {
+		if previousBid != 0 {
+			m.CancelOrder(previousBid)
+		}
+		if previousAsk != 0 {
+			m.CancelOrder(previousAsk)
+		}
+	}
 	m.quotes.bidID, m.quotes.askID = 0, 0
 	m.quotedMid = mid
 	if bid > 0 {
@@ -192,10 +203,10 @@ func (m *FixedDistanceMaker) replace(mid, bid, ask int64) {
 		m.pending[reqID] = false
 		m.quotes.pendingAsk, m.quotes.askPrice = true, ask
 	}
-	if previousBid != 0 {
+	if !(m.cfg.PostOnly && m.cfg.PostOnlyCancelBeforeReplace) && previousBid != 0 {
 		m.CancelOrder(previousBid)
 	}
-	if previousAsk != 0 {
+	if !(m.cfg.PostOnly && m.cfg.PostOnlyCancelBeforeReplace) && previousAsk != 0 {
 		m.CancelOrder(previousAsk)
 	}
 }

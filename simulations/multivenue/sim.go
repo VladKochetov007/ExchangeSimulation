@@ -361,6 +361,10 @@ type Config struct {
 	// to Stoikov, fixed-distance, and imbalance spot makers. Derivative dealers,
 	// bootstrap ladders, and explicit hedges remain separate policies.
 	SpotPassiveMakerPostOnly bool `json:"spot_passive_maker_post_only"`
+	// SpotPassiveMakerCancelBeforeReplace is separately switchable from
+	// post-only admission, so P0 can identify legacy replacement ordering from
+	// an explicit cancel-before-replace policy.
+	SpotPassiveMakerCancelBeforeReplace bool `json:"spot_passive_maker_cancel_before_replace"`
 
 	SpotMakerCount int `json:"spot_maker_count"`
 
@@ -576,6 +580,9 @@ func (c *Config) normalize() error {
 	case "", "own_mid", "consensus":
 	default:
 		return fmt.Errorf("multivenue: maker anchor must be own_mid or consensus, got %q", c.MakerAnchor)
+	}
+	if c.SpotPassiveMakerCancelBeforeReplace && !c.SpotPassiveMakerPostOnly {
+		return errors.New("multivenue: spot maker cancel-before-replace requires spot passive maker post-only")
 	}
 	if c.SpotMakerLocalReferenceCache && c.MakerAnchor != "own_mid" {
 		return errors.New("multivenue: spot maker local reference cache requires maker_anchor own_mid in the single-feed V2-1 slice")
@@ -2077,30 +2084,31 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			BasePrecision: mvBasePrecision, QuotePrecision: quotePrecision, TickSize: tickSize,
 			QuoteQty:      scaleQty(s.Config.MakerQuoteQty, baseUSD),
 			QuoteInterval: s.Config.QuoteInterval, VolatilityHalfLife: s.Config.StoikovVolatilityHalfLife,
-			InitialLogVariancePerSec:  relativeLogVariance,
-			MaxLogVarianceMultiple:    s.Config.StoikovMaxVarianceMultiple,
-			VolatilitySampleInterval:  s.Config.StoikovVolatilitySampleInterval,
-			InventoryHorizon:          s.Config.StoikovInventoryHorizon,
-			RelativeRiskAversion:      relativeRiskAversion,
-			RelativeFillDecay:         relativeFillDecay,
-			MinHalfSpreadTicks:        s.Config.MakerMinHalfSpreadTicks,
-			ForwardHalfLife:           s.Config.MakerForwardHalfLife,
-			QuoteSizeVolElasticity:    s.Config.MakerQuoteSizeVolElasticity,
-			MinQuoteSizeFraction:      s.Config.MakerMinQuoteSizeFraction,
-			InventoryLimit:            scaleQty(s.Config.MakerInventoryLimit, baseUSD),
-			InventorySkewBps:          s.Config.MakerInventorySkewBps,
-			SubmitBeforeCancel:        s.Config.SpotMakerSubmitBeforeCancel,
-			PostOnly:                  s.Config.SpotPassiveMakerPostOnly,
-			RequoteBps:                s.Config.SpotMakerRequoteBps,
-			HedgeSymbol:               hedgeSymbol(symbol, s.Config.MakerHedgeSymbol),
-			HedgeBandQty:              s.Config.MakerHedgeBandQty,
-			HedgeSlippageBps:          s.Config.MakerHedgeSlippageBps,
-			HedgeInterval:             s.Config.MakerHedgeInterval,
-			HedgeTickSize:             tick,
-			AnchorToIndex:             s.Config.MakerAnchor != "own_mid",
-			IndexWeight:               s.Config.MakerIndexWeight,
-			UseLocalReferenceCache:    s.Config.SpotMakerLocalReferenceCache && symbol == "ABC/USD",
-			LocalReferenceSourceVenue: id,
+			InitialLogVariancePerSec:    relativeLogVariance,
+			MaxLogVarianceMultiple:      s.Config.StoikovMaxVarianceMultiple,
+			VolatilitySampleInterval:    s.Config.StoikovVolatilitySampleInterval,
+			InventoryHorizon:            s.Config.StoikovInventoryHorizon,
+			RelativeRiskAversion:        relativeRiskAversion,
+			RelativeFillDecay:           relativeFillDecay,
+			MinHalfSpreadTicks:          s.Config.MakerMinHalfSpreadTicks,
+			ForwardHalfLife:             s.Config.MakerForwardHalfLife,
+			QuoteSizeVolElasticity:      s.Config.MakerQuoteSizeVolElasticity,
+			MinQuoteSizeFraction:        s.Config.MakerMinQuoteSizeFraction,
+			InventoryLimit:              scaleQty(s.Config.MakerInventoryLimit, baseUSD),
+			InventorySkewBps:            s.Config.MakerInventorySkewBps,
+			SubmitBeforeCancel:          s.Config.SpotMakerSubmitBeforeCancel,
+			PostOnly:                    s.Config.SpotPassiveMakerPostOnly,
+			PostOnlyCancelBeforeReplace: s.Config.SpotPassiveMakerCancelBeforeReplace,
+			RequoteBps:                  s.Config.SpotMakerRequoteBps,
+			HedgeSymbol:                 hedgeSymbol(symbol, s.Config.MakerHedgeSymbol),
+			HedgeBandQty:                s.Config.MakerHedgeBandQty,
+			HedgeSlippageBps:            s.Config.MakerHedgeSlippageBps,
+			HedgeInterval:               s.Config.MakerHedgeInterval,
+			HedgeTickSize:               tick,
+			AnchorToIndex:               s.Config.MakerAnchor != "own_mid",
+			IndexWeight:                 s.Config.MakerIndexWeight,
+			UseLocalReferenceCache:      s.Config.SpotMakerLocalReferenceCache && symbol == "ABC/USD",
+			LocalReferenceSourceVenue:   id,
 		}
 	}
 	for i := 0; i < s.Config.SpotMakerCount; i++ {
@@ -2283,6 +2291,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		}
 		cfg.Symbol = makerSymbol(s.Config.FixedDistanceMakerSymbols, participant)
 		cfg.PostOnly = s.Config.SpotPassiveMakerPostOnly
+		cfg.PostOnlyCancelBeforeReplace = s.Config.SpotPassiveMakerCancelBeforeReplace
 		cfg.TickSize = tickFor(cfg.Symbol, tick)
 		if cfg.QuoteInterval <= 0 {
 			cfg.QuoteInterval = s.Config.QuoteInterval
@@ -2298,6 +2307,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		}
 		cfg.Symbol = makerSymbol(s.Config.ImbalanceMakerSymbols, participant)
 		cfg.PostOnly = s.Config.SpotPassiveMakerPostOnly
+		cfg.PostOnlyCancelBeforeReplace = s.Config.SpotPassiveMakerCancelBeforeReplace
 		cfg.TickSize = tickFor(cfg.Symbol, tick)
 		if cfg.QuoteInterval <= 0 {
 			cfg.QuoteInterval = s.Config.QuoteInterval

@@ -99,3 +99,37 @@ func TestFixedDistanceMakerUsesExplicitPostOnlyQuotes(t *testing.T) {
 		}
 	}
 }
+
+func TestFixedDistancePostOnlyCanCancelBeforeReplacement(t *testing.T) {
+	gw := newMetaGateway()
+	maker := NewFixedDistanceMaker(1, gw, FixedDistanceMakerConfig{
+		Symbol: "CDF/USD", SpreadBps: 8, RequoteBps: 1, QuoteQty: 100, MaxInventory: 10_000,
+		TickSize: 100, QuoteInterval: time.Second, PostOnly: true, PostOnlyCancelBeforeReplace: true,
+	})
+	ctx := context.Background()
+	now := time.Unix(0, 0)
+	maker.onTick(now) // subscribes
+	maker.HandleEvent(ctx, makerSnapshot("CDF/USD", 299_900, 300_100))
+	now = now.Add(time.Second)
+	maker.onTick(now)
+	orders := gw.orders()
+	if len(orders) != 2 {
+		t.Fatalf("initial orders = %d, want 2", len(orders))
+	}
+	for i, request := range orders {
+		maker.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderAccepted,
+			Data: actor.OrderAcceptedEvent{OrderID: 10 + uint64(i), RequestID: request.RequestID}})
+	}
+
+	maker.HandleEvent(ctx, makerSnapshot("CDF/USD", 300_900, 301_100))
+	now = now.Add(time.Second)
+	maker.onTick(now)
+	if len(gw.requests) != 7 || gw.requests[3].Type != etypes.ReqCancelOrder || gw.requests[4].Type != etypes.ReqCancelOrder || gw.requests[5].Type != etypes.ReqPlaceOrder || gw.requests[6].Type != etypes.ReqPlaceOrder {
+		t.Fatalf("cancel-before-replace requests = %+v", gw.requests)
+	}
+	for _, request := range gw.requests[5:7] {
+		if request.OrderReq == nil || !request.OrderReq.PostOnly {
+			t.Fatalf("cancel-before-replace quote lost post-only admission: %+v", request)
+		}
+	}
+}

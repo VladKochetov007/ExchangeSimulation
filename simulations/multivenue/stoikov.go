@@ -213,6 +213,11 @@ type StoikovMMConfig struct {
 	// PostOnly requires every quote refresh to rest. It is distinct from hedge
 	// and rebalance policies, which remain explicit aggressive actions.
 	PostOnly bool
+	// PostOnlyCancelBeforeReplace separates the replacement-ordering treatment
+	// from the post-only admission treatment. With false, the legacy actor sends
+	// replacements before cancellation; with true, it sends cancellations first.
+	// In both cases the venue checks post-only at actual arrival.
+	PostOnlyCancelBeforeReplace bool
 }
 
 type quoteSide bool
@@ -607,10 +612,7 @@ func (mm *StoikovMarketMaker) onTick(now time.Time) {
 		}
 	}
 	previousBid, previousAsk := mm.bidID, mm.askID
-	// A post-only replacement cannot rely on the old cancel-maker self-trade
-	// behavior. Cancel first; the venue still evaluates the replacement against
-	// the arrival-time book after modeled request latency.
-	if mm.cfg.PostOnly || !mm.cfg.SubmitBeforeCancel {
+	if !mm.cfg.SubmitBeforeCancel || (mm.cfg.PostOnly && mm.cfg.PostOnlyCancelBeforeReplace) {
 		mm.cancelResting(previousBid, previousAsk)
 	}
 	mm.bidID, mm.askID = 0, 0
@@ -624,7 +626,7 @@ func (mm *StoikovMarketMaker) onTick(now time.Time) {
 	mm.pending[bidRequest] = stoikovBid
 	askRequest := mm.submitQuote(exchange.Sell, ask, size)
 	mm.pending[askRequest] = stoikovAsk
-	if !mm.cfg.PostOnly && mm.cfg.SubmitBeforeCancel {
+	if mm.cfg.SubmitBeforeCancel && !(mm.cfg.PostOnly && mm.cfg.PostOnlyCancelBeforeReplace) {
 		// Cancelling only after the replacements are submitted keeps depth
 		// resting continuously. Cancelling first empties the book for the rest
 		// of the phase, which every actor scheduled behind the maker then meets.

@@ -27,11 +27,20 @@ import (
 
 func TestConfigAcceptsDocumentedSnakeCaseJSON(t *testing.T) {
 	var cfg Config
-	if err := json.Unmarshal([]byte(`{"log_dir":"ignored","log_mode":"none","seed":99,"dealer_hedge_mode":"off","short_option_tenor":7200000000000,"spot_passive_maker_post_only":true}`), &cfg); err != nil {
+	if err := json.Unmarshal([]byte(`{"log_dir":"ignored","log_mode":"none","seed":99,"dealer_hedge_mode":"off","short_option_tenor":7200000000000,"spot_passive_maker_post_only":true,"spot_passive_maker_cancel_before_replace":true}`), &cfg); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if cfg.LogMode != "none" || cfg.Seed != 99 || cfg.DealerHedgeMode != "off" || cfg.ShortOptionTenor != 2*time.Hour || !cfg.SpotPassiveMakerPostOnly {
+	if cfg.LogMode != "none" || cfg.Seed != 99 || cfg.DealerHedgeMode != "off" || cfg.ShortOptionTenor != 2*time.Hour || !cfg.SpotPassiveMakerPostOnly || !cfg.SpotPassiveMakerCancelBeforeReplace {
 		t.Fatalf("snake-case config was not decoded: %+v", cfg)
+	}
+}
+
+func TestConfigRejectsCancelBeforeReplaceWithoutPostOnly(t *testing.T) {
+	_, err := NewSim(time.Second, Config{
+		LogDir: t.TempDir(), LogMode: "none", SpotPassiveMakerCancelBeforeReplace: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires spot passive maker post-only") {
+		t.Fatalf("NewSim error = %v, want explicit post-only requirement", err)
 	}
 }
 
@@ -197,11 +206,12 @@ func TestCrossAssetSpotGraphListsAndValuesEveryPair(t *testing.T) {
 func TestSpotPassiveMakerPostOnlySelectsAllCDFRefreshFamilies(t *testing.T) {
 	sim, err := NewSim(time.Second, Config{
 		LogDir: t.TempDir(), LogMode: "none", CrossAssetSpotGraph: true,
-		SpotPassiveMakerPostOnly:  true,
-		FixedDistanceMakerCount:   1,
-		FixedDistanceMakerSymbols: []string{"CDF/USD"},
-		ImbalanceMakerCount:       1,
-		ImbalanceMakerSymbols:     []string{"CDF/USD"},
+		SpotPassiveMakerPostOnly:            true,
+		SpotPassiveMakerCancelBeforeReplace: true,
+		FixedDistanceMakerCount:             1,
+		FixedDistanceMakerSymbols:           []string{"CDF/USD"},
+		ImbalanceMakerCount:                 1,
+		ImbalanceMakerSymbols:               []string{"CDF/USD"},
 	})
 	if err != nil {
 		t.Fatalf("NewSim: %v", err)
@@ -209,17 +219,17 @@ func TestSpotPassiveMakerPostOnlySelectsAllCDFRefreshFamilies(t *testing.T) {
 	defer sim.Close()
 	for _, venue := range sim.Venues {
 		for _, maker := range venue.SpotMakers {
-			if !maker.cfg.PostOnly {
+			if !maker.cfg.PostOnly || !maker.cfg.PostOnlyCancelBeforeReplace {
 				t.Fatalf("venue %s Stoikov maker %s is not post-only", venue.ID, maker.cfg.Symbol)
 			}
 		}
 		for _, maker := range venue.FixedDistanceMakers {
-			if !maker.cfg.PostOnly || maker.cfg.Symbol != "CDF/USD" {
+			if !maker.cfg.PostOnly || !maker.cfg.PostOnlyCancelBeforeReplace || maker.cfg.Symbol != "CDF/USD" {
 				t.Fatalf("venue %s fixed-distance config = %+v", venue.ID, maker.cfg)
 			}
 		}
 		for _, maker := range venue.ImbalanceMakers {
-			if !maker.cfg.PostOnly || maker.cfg.Symbol != "CDF/USD" {
+			if !maker.cfg.PostOnly || !maker.cfg.PostOnlyCancelBeforeReplace || maker.cfg.Symbol != "CDF/USD" {
 				t.Fatalf("venue %s imbalance config = %+v", venue.ID, maker.cfg)
 			}
 		}
