@@ -54,14 +54,24 @@ type DecisionFrontierVector struct {
 }
 
 type decisionFrontierVectorArtifact struct {
-	SchemaVersion      int                    `json:"schema_version"`
-	Domain             string                 `json:"domain"`
-	Ordering           string                 `json:"ordering"`
-	BaseManifest       string                 `json:"base_manifest"`
-	BaseManifestDigest string                 `json:"base_manifest_digest"`
-	Decisions          evidenceFileArtifact   `json:"decisions"`
-	Components         evidenceFileArtifact   `json:"components"`
-	Symbols            []receiptSymbolCatalog `json:"symbols"`
+	SchemaVersion       int                            `json:"schema_version"`
+	Domain              string                         `json:"domain"`
+	Ordering            string                         `json:"ordering"`
+	BaseManifest        string                         `json:"base_manifest"`
+	BaseManifestDigest  string                         `json:"base_manifest_digest"`
+	RequiredScalarLinks []decisionFrontierRequiredLink `json:"required_scalar_decision_links"`
+	Decisions           evidenceFileArtifact           `json:"decisions"`
+	Components          evidenceFileArtifact           `json:"components"`
+	Symbols             []receiptSymbolCatalog         `json:"symbols"`
+}
+
+// decisionFrontierRequiredLink declares a scalar V2-0 gateway link whose
+// every persisted order decision must be represented by exactly one V3
+// vector. Without this inverse declaration a missing vector could look like a
+// merely absent observation rather than dropped decision-side evidence.
+type decisionFrontierRequiredLink struct {
+	ClientID uint64 `json:"client_id"`
+	LinkID   uint32 `json:"link_id"`
 }
 
 // DecisionFrontierVectorRecorder is evidence-only. It creates no scheduler
@@ -74,6 +84,7 @@ type DecisionFrontierVectorRecorder struct {
 	components   *evidenceWriter
 	symbols      map[string]uint32
 	symbolRows   []receiptSymbolCatalog
+	required     map[decisionFrontierRequiredLink]struct{}
 	nextDecision uint64
 	writeErr     error
 	finalized    bool
@@ -91,8 +102,27 @@ func NewDecisionFrontierVectorRecorder(dir string) (*DecisionFrontierVectorRecor
 	}
 	return &DecisionFrontierVectorRecorder{
 		dir: dir, decisions: decisions, components: components,
-		symbols: make(map[string]uint32),
+		symbols: make(map[string]uint32), required: make(map[decisionFrontierRequiredLink]struct{}),
 	}, nil
+}
+
+// RequireScalarDecisionLink declares that every V2-0 scalar decision emitted
+// by this trading client/link must have one V3 vector. It is setup-only and
+// does not affect actor or exchange state.
+func (r *DecisionFrontierVectorRecorder) RequireScalarDecisionLink(clientID uint64, linkID uint32) error {
+	if r == nil {
+		return fmt.Errorf("decision frontier-vector recorder is nil")
+	}
+	if clientID == 0 || linkID == 0 {
+		return fmt.Errorf("invalid required scalar decision link")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.finalized || r.writeErr != nil {
+		return fmt.Errorf("decision frontier-vector recorder is unavailable")
+	}
+	r.required[decisionFrontierRequiredLink{ClientID: clientID, LinkID: linkID}] = struct{}{}
+	return nil
 }
 
 // Record records an already constructed order immediately before it enters a
@@ -205,11 +235,22 @@ func (r *DecisionFrontierVectorRecorder) Finalize(baseManifestPath string) error
 	baseDigest := sha256.Sum256(baseRaw)
 	symbols := append([]receiptSymbolCatalog(nil), r.symbolRows...)
 	sort.Slice(symbols, func(i, j int) bool { return symbols[i].ID < symbols[j].ID })
+	required := make([]decisionFrontierRequiredLink, 0, len(r.required))
+	for link := range r.required {
+		required = append(required, link)
+	}
+	sort.Slice(required, func(i, j int) bool {
+		if required[i].ClientID != required[j].ClientID {
+			return required[i].ClientID < required[j].ClientID
+		}
+		return required[i].LinkID < required[j].LinkID
+	})
 	artifact := decisionFrontierVectorArtifact{
 		SchemaVersion: 1, Domain: decisionFrontierVectorDomain, Ordering: decisionFrontierVectorOrdering,
 		BaseManifest: filepath.Base(baseManifestPath), BaseManifestDigest: hex.EncodeToString(baseDigest[:]),
-		Decisions:  r.decisions.artifact("market-data-decision-vectors-v1.bin"),
-		Components: r.components.artifact("market-data-frontier-components-v1.bin"), Symbols: symbols,
+		RequiredScalarLinks: required,
+		Decisions:           r.decisions.artifact("market-data-decision-vectors-v1.bin"),
+		Components:          r.components.artifact("market-data-frontier-components-v1.bin"), Symbols: symbols,
 	}
 	raw, err := json.MarshalIndent(artifact, "", "  ")
 	if err != nil {

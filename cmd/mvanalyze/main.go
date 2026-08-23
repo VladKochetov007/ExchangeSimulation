@@ -56,6 +56,17 @@ func main() {
 		os.Exit(2)
 	}
 	for _, dir := range flag.Args() {
+		// These compact V2 evidence artifacts are intentionally analyzable
+		// without raw JSON logs, Greek reports, or a Run wrapper. Opening a Run
+		// first would turn a successful information-boundary audit into a false
+		// failure merely because unrelated market reports were not retained.
+		if handled, err := emitStandaloneEvidenceMetric(*metric, dir, *asJSON); handled {
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			continue
+		}
 		run, err := analysis.Open(dir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
@@ -350,29 +361,6 @@ func main() {
 			}
 			emit(dir, result, *asJSON, func() {
 				fmt.Printf("%-22s evidence artifact records %d  unordered digest %s\n", dir, result.Events, result.Digest)
-			})
-		case "observationreceipts":
-			result, err := analysis.AuditMarketDataReceipts(dir)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
-				os.Exit(1)
-			}
-			emit(dir, result, *asJSON, func() {
-				fmt.Printf("%-22s schedules/receipts/decisions %d/%d/%d digests %t/%t/%t valid %t future %d/%d missing %d frontier %d\n",
-					dir, result.Schedules, result.Receipts, result.Decisions,
-					result.ScheduleDigestMatches, result.ReceiptDigestMatches, result.DecisionDigestMatches, result.Valid,
-					result.ScheduledBeforePub, result.FutureDecisionUse, result.MissingDueReceipt, result.BadDecisionFrontier)
-			})
-		case "frontiervectors":
-			result, err := analysis.AuditDecisionFrontierVectors(dir)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
-				os.Exit(1)
-			}
-			emit(dir, result, *asJSON, func() {
-				fmt.Printf("%-22s vector decisions/components %d/%d base %t valid %t future %d missing %d\n",
-					dir, result.Decisions, result.Components, result.BaseEvidenceValid, result.Valid,
-					result.FutureComponentUse, result.MissingDecisionComponents)
 			})
 		case "basis":
 			result, err := run.MeasureBasis(analysis.BasisOptions{})
@@ -885,6 +873,40 @@ func main() {
 			fmt.Fprintf(os.Stderr, "unknown metric %q\n", *metric)
 			os.Exit(2)
 		}
+	}
+}
+
+// emitStandaloneEvidenceMetric handles compact evidence artifacts without
+// constructing analysis.Run, whose raw-log and report prerequisites are
+// intentionally unrelated to the evidence contract. The bool reports whether
+// metric was one of those standalone contracts.
+func emitStandaloneEvidenceMetric(metric, dir string, asJSON bool) (bool, error) {
+	switch metric {
+	case "observationreceipts":
+		result, err := analysis.AuditMarketDataReceipts(dir)
+		if err != nil {
+			return true, err
+		}
+		emit(dir, result, asJSON, func() {
+			fmt.Printf("%-22s schedules/receipts/decisions %d/%d/%d digests %t/%t/%t valid %t future %d/%d missing %d frontier %d\n",
+				dir, result.Schedules, result.Receipts, result.Decisions,
+				result.ScheduleDigestMatches, result.ReceiptDigestMatches, result.DecisionDigestMatches, result.Valid,
+				result.ScheduledBeforePub, result.FutureDecisionUse, result.MissingDueReceipt, result.BadDecisionFrontier)
+		})
+		return true, nil
+	case "frontiervectors":
+		result, err := analysis.AuditDecisionFrontierVectors(dir)
+		if err != nil {
+			return true, err
+		}
+		emit(dir, result, asJSON, func() {
+			fmt.Printf("%-22s vector decisions/components %d/%d base %t valid %t future %d missing-components %d missing-vectors %d\n",
+				dir, result.Decisions, result.Components, result.BaseEvidenceValid, result.Valid,
+				result.FutureComponentUse, result.MissingDecisionComponents, result.MissingVectorDecision)
+		})
+		return true, nil
+	default:
+		return false, nil
 	}
 }
 

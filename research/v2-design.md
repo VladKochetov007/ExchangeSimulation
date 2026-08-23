@@ -64,12 +64,13 @@ cache/composite; then a heterogeneous roster; only then delete the old shared
 index from the V2 scenario. Preserve an ae13 compatibility mode only for
 historical comparison, never as a hidden V2 fallback.
 
-Progress ledger: the single-source, single-maker-cache prerequisite is now
-implemented as [V2-1a](v2-1-single-feed-cache.md). It intentionally uses a
-local delayed feed first. The required
-[frontier-vector artifact](v2-1-frontier-vectors.md) now exists and has caught
-future and dropped-component mutations. A remote source remains blocked until
-that artifact is activated in a live one-maker smoke world.
+Progress ledger: the local delayed cache prerequisite is
+[V2-1a](v2-1-single-feed-cache.md). The required
+[frontier-vector artifact](v2-1-frontier-vectors.md) now catches future,
+dropped-component, and dropped-decision mutations. Its first live remote,
+one-maker proof is [V2-1c](v2-1-remote-feed-smoke.md). It has no economic
+claim. A heterogeneous roster remains blocked until its distinct information
+sets have equivalent evidence and activation tests.
 
 ## V2-2 — executable cross-venue arbitrage
 

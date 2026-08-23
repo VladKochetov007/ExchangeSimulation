@@ -2,11 +2,16 @@ package actor
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"exchange_sim/exchange"
 )
+
+type eventHandlerFunc func(context.Context, *Event)
+
+func (fn eventHandlerFunc) HandleEvent(ctx context.Context, event *Event) { fn(ctx, event) }
 
 func TestBaseActorID(t *testing.T) {
 	gateway := exchange.NewClientGateway(123)
@@ -81,6 +86,63 @@ func TestBaseActorOrderDecisionObserverRunsBeforeGatewaySend(t *testing.T) {
 	case <-gateway.RequestCh:
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("observer prevented order from reaching gateway")
+	}
+}
+
+func TestBaseActorDeterministicAuxiliaryFeedIsOrderedAndReadOnly(t *testing.T) {
+	trading := exchange.NewClientGateway(1)
+	feed := exchange.NewClientGateway(2)
+	base := NewBaseActor(1, trading)
+	var order []string
+	base.SetHandler(eventHandlerFunc(func(_ context.Context, event *Event) {
+		if event.Type == EventBookSnapshot {
+			order = append(order, "trading")
+		}
+	}))
+	if err := base.AddMarketDataFeed(feed, func(message *exchange.MarketDataMsg) {
+		if message.Symbol == "REMOTE/USD" {
+			order = append(order, "feed")
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := base.SubscribeMarketDataFeed(feed, "REMOTE/USD", exchange.MDSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case request := <-feed.RequestCh:
+		if request.Type != exchange.ReqSubscribe || request.QueryReq.Symbol != "REMOTE/USD" {
+			t.Fatalf("feed subscription = %+v", request)
+		}
+	default:
+		t.Fatal("auxiliary feed subscription was not sent")
+	}
+	base.EnableDeterministicPhases()
+	if err := base.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer base.Stop()
+	trading.MarketData <- &exchange.MarketDataMsg{Type: exchange.MDSnapshot, Symbol: "LOCAL/USD", Data: &exchange.BookSnapshot{}}
+	feed.ResponseCh <- exchange.Response{RequestID: 1, Success: true}
+	feed.MarketData <- &exchange.MarketDataMsg{Type: exchange.MDSnapshot, Symbol: "REMOTE/USD", Data: &exchange.BookSnapshot{}}
+	if !base.PumpDeterministicPhase(context.Background()) {
+		t.Fatal("deterministic feed pump processed no work")
+	}
+	if got, want := fmt.Sprint(order), "[trading feed]"; got != want {
+		t.Fatalf("inbox order = %s, want %s", got, want)
+	}
+	if !base.Idle() {
+		t.Fatal("auxiliary response/feed inbox was not drained")
+	}
+}
+
+func TestBaseActorRejectsAuxiliaryFeedOutsideDeterministicMode(t *testing.T) {
+	base := NewBaseActor(1, exchange.NewClientGateway(1))
+	if err := base.AddMarketDataFeed(exchange.NewClientGateway(2), func(*exchange.MarketDataMsg) {}); err != nil {
+		t.Fatal(err)
+	}
+	if err := base.Start(context.Background()); err == nil {
+		t.Fatal("asynchronous actor accepted an auxiliary feed")
 	}
 }
 

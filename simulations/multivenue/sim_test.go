@@ -1065,6 +1065,95 @@ func TestSpotMakerLocalReferenceCacheRejectsGlobalOrUndelayedPath(t *testing.T) 
 	}
 }
 
+// V2-1c is deliberately one maker, one remote source, and one composite
+// weight. Its purpose is to prove the information path before a heterogeneous
+// maker roster or economic attribution is attempted. Every quoted order from
+// the target maker must bind both actor-owned feed frontiers.
+func TestRemoteMakerFeedProducesAuditableTwoFeedDecisionFrontier(t *testing.T) {
+	dir := t.TempDir()
+	sim, err := NewSim(20*time.Second, Config{
+		LogDir: dir, LogMode: "none", Seed: 101,
+		MakerAnchor:                   "own_mid",
+		SpotMakerLocalReferenceCache:  true,
+		RecordMarketDataReceipts:      true,
+		RecordDecisionFrontierVectors: true,
+		MarketDataReceiptRoles:        []string{"spot_maker", "v2_remote_feed"},
+		LatencyProfiles: map[string]LatencyProfile{
+			"spot_maker": {Model: "constant", Delay: 10 * time.Millisecond},
+		},
+		RemoteMakerFeed: &RemoteMakerFeedConfig{
+			TargetVenue: "north", SourceVenue: "south", Symbol: "ABC/USD", Weight: 0.5,
+			Latency: LatencyProfile{Model: "constant", Delay: 20 * time.Millisecond},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sim.Close()
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	var north, south *Venue
+	for _, venue := range sim.Venues {
+		switch venue.ID {
+		case "north":
+			north = venue
+		case "south":
+			south = venue
+		}
+	}
+	if north == nil || south == nil || len(north.SpotMakers) == 0 || len(south.FeedSessions) != 1 {
+		t.Fatalf("remote feed setup north=%v south=%v source sessions=%d", north != nil, south != nil, len(south.FeedSessions))
+	}
+	if got := south.FeedSessions[0]; got.Role != "v2_remote_feed" || got.VenueID != "south" || got.ClientID == 0 {
+		t.Fatalf("unexpected remote feed session: %+v", got)
+	}
+	var target *StoikovMarketMaker
+	for _, maker := range north.SpotMakers {
+		if maker.cfg.Symbol == "ABC/USD" {
+			target = maker
+			break
+		}
+	}
+	if target == nil || target.cfg.AnchorToIndex {
+		t.Fatal("target maker retained a shared index path")
+	}
+	remote, active := target.RemoteReferenceView()
+	if !active || remote.SourceVenue != "south" || remote.Symbol != "ABC/USD" || remote.Updates == 0 {
+		t.Fatalf("target remote cache did not activate: %+v active=%t", remote, active)
+	}
+	scalar, err := analysis.AuditMarketDataReceipts(dir)
+	if err != nil || !scalar.Valid || scalar.Receipts == 0 || scalar.Decisions == 0 {
+		t.Fatalf("remote scalar evidence invalid: audit=%+v err=%v", scalar, err)
+	}
+	vectors, err := analysis.AuditDecisionFrontierVectors(dir)
+	if err != nil || !vectors.Valid || vectors.Decisions == 0 || vectors.Components != 2*vectors.Decisions {
+		t.Fatalf("remote two-feed frontier invalid: audit=%+v err=%v", vectors, err)
+	}
+}
+
+func TestRemoteMakerFeedRejectsIncompleteEvidenceContract(t *testing.T) {
+	base := Config{
+		LogDir: t.TempDir(), LogMode: "none", Seed: 101,
+		MakerAnchor:                   "own_mid",
+		SpotMakerLocalReferenceCache:  true,
+		RecordMarketDataReceipts:      true,
+		RecordDecisionFrontierVectors: true,
+		MarketDataReceiptRoles:        []string{"spot_maker"},
+		LatencyProfiles: map[string]LatencyProfile{
+			"spot_maker": {Model: "constant", Delay: time.Millisecond},
+		},
+		RemoteMakerFeed: &RemoteMakerFeedConfig{
+			TargetVenue: "north", SourceVenue: "south", Symbol: "ABC/USD", Weight: 0.5,
+			Latency: LatencyProfile{Model: "constant", Delay: time.Millisecond},
+		},
+	}
+	if _, err := NewSim(time.Second, base); err == nil || !strings.Contains(err.Error(), "v2_remote_feed") {
+		t.Fatalf("remote feed accepted incomplete evidence contract: %v", err)
+	}
+}
+
 // The consensus index is a median of the venues' midpoints and must ignore a
 // single venue that has run away, which is the property that lets it hold a
 // market that cannot hold itself.

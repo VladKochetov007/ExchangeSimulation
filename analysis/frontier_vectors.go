@@ -28,6 +28,8 @@ type DecisionFrontierVectorAudit struct {
 	BadDecisionID             int64 `json:"bad_decision_id"`
 	BadDecisionFields         int64 `json:"bad_decision_fields"`
 	MissingScalarDecision     int64 `json:"missing_scalar_decision"`
+	MissingVectorDecision     int64 `json:"missing_vector_decision"`
+	DuplicateVectorDecision   int64 `json:"duplicate_vector_decision"`
 	UnknownComponentLink      int64 `json:"unknown_component_link"`
 	BadComponentOrdinal       int64 `json:"bad_component_ordinal"`
 	DuplicateComponent        int64 `json:"duplicate_component"`
@@ -40,14 +42,20 @@ type DecisionFrontierVectorAudit struct {
 }
 
 type frontierVectorManifest struct {
-	SchemaVersion      int                   `json:"schema_version"`
-	Domain             string                `json:"domain"`
-	Ordering           string                `json:"ordering"`
-	BaseManifest       string                `json:"base_manifest"`
-	BaseManifestDigest string                `json:"base_manifest_digest"`
-	Decisions          vectorFileArtifact    `json:"decisions"`
-	Components         vectorFileArtifact    `json:"components"`
-	Symbols            []vectorSymbolCatalog `json:"symbols"`
+	SchemaVersion       int                          `json:"schema_version"`
+	Domain              string                       `json:"domain"`
+	Ordering            string                       `json:"ordering"`
+	BaseManifest        string                       `json:"base_manifest"`
+	BaseManifestDigest  string                       `json:"base_manifest_digest"`
+	RequiredScalarLinks []requiredScalarDecisionLink `json:"required_scalar_decision_links"`
+	Decisions           vectorFileArtifact           `json:"decisions"`
+	Components          vectorFileArtifact           `json:"components"`
+	Symbols             []vectorSymbolCatalog        `json:"symbols"`
+}
+
+type requiredScalarDecisionLink struct {
+	ClientID uint64 `json:"client_id"`
+	LinkID   uint32 `json:"link_id"`
 }
 
 type vectorFileArtifact struct {
@@ -175,11 +183,30 @@ func AuditDecisionFrontierVectors(dir string) (*DecisionFrontierVectorAudit, err
 	}
 	history := reconstructReceiptHistory(receiptsRaw)
 	scalar := make(map[scalarDecisionKey][]decisionRecord, baseManifest.Decisions.Records)
+	requiredLinks := make(map[linkKey]struct{}, len(manifest.RequiredScalarLinks))
+	for _, required := range manifest.RequiredScalarLinks {
+		key := linkKey{clientID: required.ClientID, linkID: required.LinkID}
+		if required.ClientID == 0 || required.LinkID == 0 {
+			return nil, fmt.Errorf("invalid required scalar decision link")
+		}
+		if _, known := baseLinks[required.LinkID]; !known {
+			return nil, fmt.Errorf("unknown required scalar decision link %d", required.LinkID)
+		}
+		if _, duplicate := requiredLinks[key]; duplicate {
+			return nil, fmt.Errorf("duplicate required scalar decision link client %d link %d", required.ClientID, required.LinkID)
+		}
+		requiredLinks[key] = struct{}{}
+	}
+	requiredScalar := make(map[scalarDecisionKey][]decisionRecord)
 	for offset := 0; offset < len(scalarRaw); offset += marketDataDecisionRecordBytes {
 		record := decodeDecision(scalarRaw[offset : offset+marketDataDecisionRecordBytes])
 		key := scalarDecisionKey{clientID: record.clientID, linkID: record.linkID, requestID: record.requestID}
 		scalar[key] = append(scalar[key], record)
+		if _, required := requiredLinks[linkKey{clientID: record.clientID, linkID: record.linkID}]; required {
+			requiredScalar[key] = append(requiredScalar[key], record)
+		}
 	}
+	matchedRequired := make(map[scalarDecisionKey]int, len(requiredScalar))
 
 	componentsByDecision := make(map[uint64][]vectorComponentRecord, result.Decisions)
 	for offset := 0; offset < len(componentsRaw); offset += decisionFrontierComponentRecordBytes {
@@ -209,8 +236,9 @@ func AuditDecisionFrontierVectors(dir string) (*DecisionFrontierVectorAudit, err
 			record.side > 1 || record.orderType > 1 || record.tif > 2 || record.decisionAt == 0 || record.price <= 0 || record.qty <= 0 {
 			result.BadDecisionFields++
 		}
+		key := scalarDecisionKey{clientID: record.clientID, linkID: record.tradingLinkID, requestID: record.requestID}
 		matchingScalar := false
-		for _, candidate := range scalar[scalarDecisionKey{clientID: record.clientID, linkID: record.tradingLinkID, requestID: record.requestID}] {
+		for _, candidate := range scalar[key] {
 			if baseSymbolNames[candidate.symbolID] == symbol && candidate.side == record.side && candidate.orderType == record.orderType && candidate.tif == record.tif &&
 				candidate.decisionAt == record.decisionAt && candidate.price == record.price && candidate.qty == record.qty {
 				matchingScalar = true
@@ -219,8 +247,19 @@ func AuditDecisionFrontierVectors(dir string) (*DecisionFrontierVectorAudit, err
 		}
 		if !matchingScalar {
 			result.MissingScalarDecision++
+		} else if _, required := requiredScalar[key]; required {
+			matchedRequired[key]++
 		}
 		validateVectorComponents(result, record, componentsByDecision[record.id], history, baseLinks)
+	}
+	for key, scalarDecisions := range requiredScalar {
+		matches := matchedRequired[key]
+		if matches < len(scalarDecisions) {
+			result.MissingVectorDecision += int64(len(scalarDecisions) - matches)
+		}
+		if matches > len(scalarDecisions) {
+			result.DuplicateVectorDecision += int64(matches - len(scalarDecisions))
+		}
 	}
 	for decisionID, components := range componentsByDecision {
 		if decisionID == 0 || decisionID > uint64(result.Decisions) {
@@ -228,7 +267,7 @@ func AuditDecisionFrontierVectors(dir string) (*DecisionFrontierVectorAudit, err
 		}
 	}
 	result.Valid = result.BaseEvidenceValid && result.BaseManifestDigestMatches && result.DecisionDigestMatches && result.ComponentDigestMatches &&
-		result.BadDecisionID == 0 && result.BadDecisionFields == 0 && result.MissingScalarDecision == 0 && result.UnknownComponentLink == 0 &&
+		result.BadDecisionID == 0 && result.BadDecisionFields == 0 && result.MissingScalarDecision == 0 && result.MissingVectorDecision == 0 && result.DuplicateVectorDecision == 0 && result.UnknownComponentLink == 0 &&
 		result.BadComponentOrdinal == 0 && result.DuplicateComponent == 0 && result.BadComponentFrontier == 0 && result.FutureComponentUse == 0 &&
 		result.MissingDecisionComponents == 0 && result.ExtraDecisionComponents == 0 && result.NonzeroReserved == 0
 	return result, nil

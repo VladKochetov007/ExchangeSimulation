@@ -47,6 +47,9 @@ func writeDecisionVectorFixture(t *testing.T, dir string) MarketDataFrontier {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := vectors.RequireScalarDecisionLink(11, frontier.LinkID); err != nil {
+		t.Fatal(err)
+	}
 	vectors.Record(DecisionFrontierVector{
 		ActorID: 99, ClientID: 11, TradingLinkID: frontier.LinkID, Symbol: "ABC/USD", RequestID: 31,
 		Side: exchange.Buy, OrderType: exchange.LimitOrder, TimeInForce: exchange.GTC, Price: 99, Qty: 3, DecisionAt: 120,
@@ -134,6 +137,46 @@ func TestDecisionFrontierVectorAuditCatchesDroppedComponentMutation(t *testing.T
 	audit, err := analysis.AuditDecisionFrontierVectors(dir)
 	if err != nil || audit.Valid || audit.MissingDecisionComponents == 0 {
 		t.Fatalf("dropped component mutation survived: audit=%+v err=%v", audit, err)
+	}
+}
+
+// A vector can be internally well formed yet absent for one audited scalar
+// gateway decision. The required-link declaration makes that omission
+// independently observable instead of treating it as an empty information
+// set.
+func TestDecisionFrontierVectorAuditCatchesDroppedDecisionMutation(t *testing.T) {
+	dir := t.TempDir()
+	writeDecisionVectorFixture(t, dir)
+	for _, file := range []string{"market-data-decision-vectors-v1.bin", "market-data-frontier-components-v1.bin"} {
+		if err := os.WriteFile(filepath.Join(dir, file), nil, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	emptyDigest := sha256.Sum256(nil)
+	manifestPath := filepath.Join(dir, "market-data-frontier-vectors-v1.json")
+	manifestRaw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"decisions", "components"} {
+		artifact := manifest[name].(map[string]any)
+		artifact["records"] = float64(0)
+		artifact["digest"] = hex.EncodeToString(emptyDigest[:])
+	}
+	encoded, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, append(encoded, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := analysis.AuditDecisionFrontierVectors(dir)
+	if err != nil || audit.Valid || audit.MissingVectorDecision != 1 {
+		t.Fatalf("dropped decision vector survived: audit=%+v err=%v", audit, err)
 	}
 }
 

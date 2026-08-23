@@ -1,6 +1,9 @@
 package multivenue
 
-import "exchange_sim/actor"
+import (
+	"exchange_sim/actor"
+	"exchange_sim/exchange"
+)
 
 // LocalBookCache is one participant's read-only view of one declared public
 // book feed. It deliberately stores copied top-of-book fields rather than an
@@ -61,6 +64,22 @@ func (c *LocalBookCache) ObserveSnapshot(event actor.BookSnapshotEvent) bool {
 	c.sequence, c.publishedAt = event.SeqNum, event.Timestamp
 	c.updates++
 	return true
+}
+
+// ObserveMarketData accepts an actor-facing raw public-feed message. It is the
+// adapter used by an auxiliary remote feed; the cache still copies only the
+// visible top of book and never receives a venue/book reference.
+func (c *LocalBookCache) ObserveMarketData(message *exchange.MarketDataMsg) bool {
+	if message == nil || message.Type != exchange.MDSnapshot {
+		return false
+	}
+	snapshot, ok := message.Data.(*exchange.BookSnapshot)
+	if !ok {
+		return false
+	}
+	return c.ObserveSnapshot(actor.BookSnapshotEvent{
+		Symbol: message.Symbol, Snapshot: snapshot, Timestamp: message.Timestamp, SeqNum: message.SeqNum,
+	})
 }
 
 func (c *LocalBookCache) View() (LocalBookView, bool) {

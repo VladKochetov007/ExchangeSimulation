@@ -2,6 +2,7 @@ package actor
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,6 +44,11 @@ type phaseTicker struct {
 	fn     func(time.Time)
 }
 
+type marketDataFeed struct {
+	gateway Gateway
+	handler func(*exchange.MarketDataMsg)
+}
+
 type tickAcknowledger interface {
 	Acknowledge()
 }
@@ -71,6 +77,7 @@ type BaseActor struct {
 	// frontier. It must be installed before Start and must never feed a value
 	// back to the actor; nil is the normal, zero-cost path.
 	orderDecisionObserver func(exchange.Request)
+	marketDataFeeds       []marketDataFeed
 
 	// phaseMode is an opt-in single-threaded execution mode used by the
 	// simulation runner. It keeps the ordinary asynchronous actor path intact,
@@ -109,6 +116,11 @@ func (a *BaseActor) Idle() bool {
 		len(a.gateway.MarketDataCh()) == 0
 	if !idle {
 		return false
+	}
+	for _, feed := range a.marketDataFeeds {
+		if len(feed.gateway.Responses()) != 0 || len(feed.gateway.MarketDataCh()) != 0 {
+			return false
+		}
 	}
 	for _, ticker := range a.phaseTickers {
 		if len(ticker.ticker.C()) != 0 {
@@ -150,6 +162,39 @@ func (a *BaseActor) SetOrderDecisionObserver(observer func(exchange.Request)) {
 	a.orderDecisionObserver = observer
 }
 
+// AddMarketDataFeed adds an actor-owned, read-only public-feed session. The
+// deterministic runner drains feeds after the actor's trading gateway and in
+// registration order; auxiliary feeds are deliberately unsupported in the
+// asynchronous mode because a host goroutine would otherwise choose their
+// causal order. Call before Start.
+func (a *BaseActor) AddMarketDataFeed(gateway Gateway, handler func(*exchange.MarketDataMsg)) error {
+	if gateway == nil || handler == nil {
+		return errors.New("actor: market-data feed gateway and handler are required")
+	}
+	if a.running.Load() {
+		return errors.New("actor: market-data feeds must be added before Start")
+	}
+	a.marketDataFeeds = append(a.marketDataFeeds, marketDataFeed{gateway: gateway, handler: handler})
+	return nil
+}
+
+// SubscribeMarketDataFeed sends a public-data subscription on a previously
+// registered feed session. Request IDs remain unique per actor; the feed
+// account is intentionally unable to submit an order through this method.
+func (a *BaseActor) SubscribeMarketDataFeed(gateway Gateway, symbol string, kinds ...exchange.MDType) error {
+	for _, feed := range a.marketDataFeeds {
+		if feed.gateway != gateway {
+			continue
+		}
+		reqID := atomic.AddUint64(&a.requestSeq, 1)
+		gateway.Send(exchange.Request{Type: exchange.ReqSubscribe, QueryReq: &exchange.QueryRequest{
+			RequestID: reqID, Symbol: symbol, Types: kinds,
+		}})
+		return nil
+	}
+	return errors.New("actor: subscription gateway is not a registered market-data feed")
+}
+
 // EnableDeterministicPhases switches this actor to the simulation runner's
 // explicit phase pump. It must be called before Start.
 func (a *BaseActor) EnableDeterministicPhases() { a.phaseMode = true }
@@ -174,6 +219,10 @@ func (a *BaseActor) Start(ctx context.Context) error {
 	if a.phaseMode {
 		a.startPhaseTickers()
 		return nil
+	}
+	if len(a.marketDataFeeds) != 0 {
+		a.running.Store(false)
+		return errors.New("actor: auxiliary market-data feeds require deterministic phases")
 	}
 	// Register simulation timers before returning. Runner starts actors in a
 	// deterministic order; deferring registration to the run goroutine makes
@@ -265,6 +314,29 @@ func (a *BaseActor) PumpDeterministicPhase(ctx context.Context) bool {
 			processed = true
 			continue
 		default:
+		}
+
+		for _, feed := range a.marketDataFeeds {
+			select {
+			case <-feed.gateway.Responses():
+				a.processing.Add(1)
+				// Feed-only sessions use subscription acknowledgements only. They
+				// are intentionally not strategy events, but must be drained so
+				// the deterministic runner can prove the session is quiescent.
+				a.processing.Add(-1)
+				processed = true
+				goto nextMessage
+			default:
+			}
+			select {
+			case md := <-feed.gateway.MarketDataCh():
+				a.processing.Add(1)
+				feed.handler(md)
+				a.processing.Add(-1)
+				processed = true
+				goto nextMessage
+			default:
+			}
 		}
 
 		for _, ticker := range a.phaseTickers {

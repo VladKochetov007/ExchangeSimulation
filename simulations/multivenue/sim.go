@@ -52,6 +52,18 @@ type VenueRule struct {
 	FundingIntervalSeconds int64 `json:"funding_interval_seconds"`
 }
 
+// RemoteMakerFeedConfig is the one-maker V2-1 smoke treatment. It creates a
+// feed-only account on SourceVenue and binds it to the first ABC/USD maker on
+// TargetVenue. It is deliberately not a roster language: heterogeneous source
+// selection waits for this single remote cache to pass its evidence gate.
+type RemoteMakerFeedConfig struct {
+	TargetVenue string         `json:"target_venue"`
+	SourceVenue string         `json:"source_venue"`
+	Symbol      string         `json:"symbol"`
+	Weight      float64        `json:"weight"`
+	Latency     LatencyProfile `json:"latency"`
+}
+
 // Config creates exactly three separately funded direct venues on one
 // deterministic simulated clock. The one-second default is intentional: all
 // configured actor and venue timers are at least one second, making hour/day
@@ -81,6 +93,9 @@ type Config struct {
 	// link cannot silently look like fully observed participant information.
 	RecordMarketDataReceipts bool     `json:"record_market_data_receipts"`
 	MarketDataReceiptRoles   []string `json:"market_data_receipt_roles,omitempty"`
+	// RecordDecisionFrontierVectors persists the optional V2-1b multi-feed
+	// evidence sidecar. It requires the scalar V2-0 receipt sidecars.
+	RecordDecisionFrontierVectors bool `json:"record_decision_frontier_vectors"`
 	// CheckpointIntervalSeconds writes a rolling digest of the event stream at
 	// each simulated-time boundary, so two runs of one seed can be compared
 	// without retaining their logs. Zero disables it.
@@ -141,6 +156,9 @@ type Config struct {
 	// the first V2-1 smoke slice has only one feed; pairing it with consensus
 	// would retain the prohibited shared instantaneous index path.
 	SpotMakerLocalReferenceCache bool `json:"spot_maker_local_reference_cache"`
+	// RemoteMakerFeed is the one-source V2-1 smoke configuration. It is never
+	// a fallback for the historical shared consensus index.
+	RemoteMakerFeed *RemoteMakerFeedConfig `json:"remote_maker_feed,omitempty"`
 	// RoundTripTraderCount adds participants whose demand mean-reverts in
 	// quantity: they open a position and unwind it after RoundTripHold. Pure
 	// random-side flow mean-reverts in price but not in quantity, which leaves
@@ -539,6 +557,9 @@ func (c *Config) normalize() error {
 			return errors.New("multivenue: spot maker local reference cache requires an explicit nonzero spot_maker feed delay")
 		}
 	}
+	if c.RecordDecisionFrontierVectors && !c.RecordMarketDataReceipts {
+		return errors.New("multivenue: decision frontier vectors require market-data receipt evidence")
+	}
 	if c.LogMode != "full" && c.LogMode != "none" {
 		return fmt.Errorf("multivenue: log mode must be full or none, got %q", c.LogMode)
 	}
@@ -570,6 +591,42 @@ func (c *Config) normalize() error {
 		}
 		if rule.MatchingRule != MatchingPriceTime && rule.MatchingRule != MatchingProRata {
 			return fmt.Errorf("multivenue: venue %q has unsupported matching rule %q", id, rule.MatchingRule)
+		}
+	}
+	if c.RemoteMakerFeed != nil {
+		remote := c.RemoteMakerFeed
+		if !c.SpotMakerLocalReferenceCache || c.MakerAnchor != "own_mid" {
+			return errors.New("multivenue: remote maker feed requires the local-cache own_mid V2-1 path")
+		}
+		// A scientific remote-feed run must retain both scalar receipts and
+		// vector frontiers. The instrumentation-off variant remains valid only
+		// for the fresh-process neutrality regression: it runs the same market
+		// path with neither recorder, so no result from it is evidence.
+		if c.RecordMarketDataReceipts {
+			if !c.RecordDecisionFrontierVectors {
+				return errors.New("multivenue: instrumented remote maker feed requires decision frontier vectors")
+			}
+			if !slices.Contains(c.MarketDataReceiptRoles, "spot_maker") || !slices.Contains(c.MarketDataReceiptRoles, "v2_remote_feed") {
+				return errors.New("multivenue: instrumented remote maker feed requires spot_maker and v2_remote_feed receipt roles")
+			}
+		}
+		if remote.TargetVenue == "" || remote.SourceVenue == "" || remote.TargetVenue == remote.SourceVenue {
+			return errors.New("multivenue: remote maker feed needs distinct source and target venues")
+		}
+		if _, exists := seen[remote.TargetVenue]; !exists {
+			return fmt.Errorf("multivenue: remote maker feed target venue %q is unknown", remote.TargetVenue)
+		}
+		if _, exists := seen[remote.SourceVenue]; !exists {
+			return fmt.Errorf("multivenue: remote maker feed source venue %q is unknown", remote.SourceVenue)
+		}
+		if remote.Symbol != "ABC/USD" || remote.Weight <= 0 || remote.Weight > 1 {
+			return errors.New("multivenue: remote maker feed requires ABC/USD and a weight in (0,1]")
+		}
+		if err := remote.Latency.validate("remote_maker_feed"); err != nil {
+			return err
+		}
+		if remote.Latency.zero() {
+			return errors.New("multivenue: remote maker feed needs a nonzero delayed link")
 		}
 	}
 	if c.Step == 0 {
@@ -718,6 +775,9 @@ func (c *Config) normalize() error {
 				return fmt.Errorf("multivenue: duplicate market-data receipt role %q", role)
 			}
 			seenReceiptRoles[role] = struct{}{}
+			if role == "v2_remote_feed" && c.RemoteMakerFeed != nil {
+				continue
+			}
 			profile, configured := c.latencyProfileFor(role)
 			if !configured || profile.zero() {
 				return fmt.Errorf("multivenue: market-data receipt role %q needs an explicit nonzero delayed link", role)
@@ -907,6 +967,7 @@ type Venue struct {
 	scheduler            *simulation.EventScheduler
 	clock                *simulation.SimulatedClock
 	Participants         []Participant
+	FeedSessions         []MarketDataFeedSession
 	RequestPolicy        *exchange.TieredRequestPolicy
 	SpotMakers           []*StoikovMarketMaker
 	PerpMaker            *StoikovMarketMaker
@@ -955,6 +1016,15 @@ type Participant struct {
 	VenueID  string `json:"venue_id"`
 	ClientID uint64 `json:"client_id"`
 	Role     string `json:"role"`
+}
+
+// MarketDataFeedSession is a non-economic public-feed account. It is kept
+// separate from Participants so ecology/accounting reports cannot mistake a
+// subscription transport endpoint for capital-bearing market participation.
+type MarketDataFeedSession struct {
+	VenueID  string
+	ClientID uint64
+	Role     string
 }
 
 // ParticipantAccountSnapshot is a strict marked account for one participant
@@ -1291,6 +1361,7 @@ type Sim struct {
 	checkpoints        *checkpointSink
 	latencyTelemetry   *simulation.LatencyStats
 	marketDataReceipts *simulation.MarketDataReceiptRecorder
+	frontierVectors    *simulation.DecisionFrontierVectorRecorder
 }
 
 // Run starts all venue automation under one context and drives the common
@@ -1382,14 +1453,19 @@ func (s *Sim) Close() {
 }
 
 func (s *Sim) finalizeMarketDataReceipts() error {
-	if s.marketDataReceipts == nil {
-		return nil
-	}
 	terminalAt := int64(0)
 	if len(s.Venues) > 0 && s.Venues[0].Exchange != nil && s.Venues[0].Exchange.Clock != nil {
 		terminalAt = s.Venues[0].Exchange.Clock.NowUnixNano()
 	}
-	return s.marketDataReceipts.Finalize(terminalAt)
+	if s.marketDataReceipts != nil {
+		if err := s.marketDataReceipts.Finalize(terminalAt); err != nil {
+			return err
+		}
+	}
+	if s.frontierVectors != nil {
+		return s.frontierVectors.Finalize(filepath.Join(s.Config.LogDir, "market-data-evidence-v2.json"))
+	}
+	return nil
 }
 
 // evidenceArtifactRecord is written after all JSONL writers close. Its input
@@ -1541,6 +1617,14 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		}
 		sim.marketDataReceipts = recorder
 	}
+	if cfg.RecordDecisionFrontierVectors {
+		recorder, err := simulation.NewDecisionFrontierVectorRecorder(cfg.LogDir)
+		if err != nil {
+			sim.Close()
+			return nil, err
+		}
+		sim.frontierVectors = recorder
+	}
 	// Seed the reference before the first quote: until the first automation
 	// tick the index would otherwise be empty, leaving makers to fall back to
 	// their own midpoint exactly when the book is thinnest.
@@ -1625,6 +1709,10 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 			runner.AddActor(latent)
 		}
 	}
+	if err := sim.addRemoteMakerFeed(); err != nil {
+		sim.Close()
+		return nil, err
+	}
 	if err := sim.addMetaorderTraders(timers, &actorID); err != nil {
 		sim.Close()
 		return nil, err
@@ -1663,10 +1751,16 @@ func (s *Sim) validateMarketDataReceiptCoverage() error {
 				expected[class]++
 			}
 		}
+		for _, feed := range venue.FeedSessions {
+			class := roleClass(feed.Role)
+			if s.Config.recordsMarketDataReceipts(class) {
+				expected[class]++
+			}
+		}
 	}
 	for _, class := range s.Config.MarketDataReceiptRoles {
 		if expected[class] == 0 {
-			return fmt.Errorf("multivenue: audited market-data role %q has no participants", class)
+			return fmt.Errorf("multivenue: audited market-data role %q has no participants or feed sessions", class)
 		}
 		if got := s.marketDataReceipts.RegisteredRoleCount(class); got != expected[class] {
 			return fmt.Errorf("multivenue: audited market-data role %q has %d participants but %d instrumented links", class, expected[class], got)
@@ -1696,6 +1790,9 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		return venueLogger{venueID: id, inner: logger, sink: s.checkpoints}, nil
 	}
 	estimatedClients := 5 + s.Config.NoiseTraderCount + s.Config.OptionFlowCount + len(s.Config.CrossVenueArbTiers)
+	if remote := s.Config.RemoteMakerFeed; remote != nil && remote.SourceVenue == id {
+		estimatedClients++
+	}
 	if s.Config.CrossAssetSpotGraph {
 		estimatedClients += 4
 	}
@@ -2305,6 +2402,19 @@ func (v *Venue) connectParticipant(mount *simulation.Mount, role string, balance
 	return clientID, gw
 }
 
+// connectMarketDataFeed creates a subscription-only venue session. It is not
+// a Participant: it has no economic mandate, capital, position, or order path.
+func (v *Venue) connectMarketDataFeed(mount *simulation.Mount, role string) (uint64, actor.Gateway) {
+	if role == "" || mount == nil {
+		panic("multivenue: feed role and mount are required")
+	}
+	v.nextClient++
+	clientID := v.nextClient
+	gw := mount.ConnectNewClient(clientID, nil, &exchange.FixedFee{})
+	v.FeedSessions = append(v.FeedSessions, MarketDataFeedSession{VenueID: v.ID, ClientID: clientID, Role: role})
+	return clientID, simulation.NewFeedOnlyGateway(gw)
+}
+
 // mountForRole returns the venue mount carrying the link a role connects
 // through, building it once per role class.
 func (v *Venue) mountForRole(role string) *simulation.Mount {
@@ -2362,6 +2472,91 @@ func (v *Venue) mountForRole(role string) *simulation.Mount {
 		v.registerMount(mount)
 	}
 	return mount
+}
+
+func (s *Sim) venueByID(id string) *Venue {
+	for _, venue := range s.Venues {
+		if venue.ID == id {
+			return venue
+		}
+	}
+	return nil
+}
+
+// addRemoteMakerFeed wires exactly one V2-1 remote public feed. The target
+// maker has already been registered with the runner but has not started, so
+// adding its auxiliary inbox here changes only the opt-in V2 scenario.
+func (s *Sim) addRemoteMakerFeed() error {
+	if s.Config.RemoteMakerFeed == nil {
+		return nil
+	}
+	cfg := s.Config.RemoteMakerFeed
+	target, source := s.venueByID(cfg.TargetVenue), s.venueByID(cfg.SourceVenue)
+	if target == nil || source == nil || len(target.SpotMakers) == 0 {
+		return errors.New("multivenue: remote maker feed venues or target maker are unavailable")
+	}
+	var maker *StoikovMarketMaker
+	for _, candidate := range target.SpotMakers {
+		if candidate.cfg.Symbol == cfg.Symbol {
+			maker = candidate
+			break
+		}
+	}
+	if maker == nil {
+		return fmt.Errorf("multivenue: remote maker feed found no target maker for %s", cfg.Symbol)
+	}
+	local, ok := maker.Gateway().(*simulation.DelayedGateway)
+	if !ok {
+		return errors.New("multivenue: remote maker feed target lacks delayed local trading link")
+	}
+	if s.frontierVectors != nil {
+		if err := s.frontierVectors.RequireScalarDecisionLink(local.ID(), local.MarketDataFrontier().LinkID); err != nil {
+			return fmt.Errorf("multivenue: require remote-maker decision-vector coverage: %w", err)
+		}
+	}
+	seed := source.latencySeed + 71_003
+	mount := simulation.NewMount(source.Exchange, simulation.LatencyConfig{
+		Request:            cfg.Latency.provider(seed, 1),
+		Response:           cfg.Latency.provider(seed+1, cfg.Latency.ResponseScale),
+		MarketData:         cfg.Latency.provider(seed+2, cfg.Latency.MarketDataScale),
+		Scheduler:          source.scheduler,
+		Clock:              source.clock,
+		Telemetry:          s.latencyTelemetry,
+		TelemetryLabel:     source.ID + "/v2_remote_feed/" + target.ID,
+		MarketDataReceipts: s.marketDataReceipts,
+		ReceiptSourceVenue: source.ID,
+		ReceiptLink:        source.ID + "/v2_remote_feed/" + target.ID,
+		ReceiptRole:        "v2_remote_feed",
+	})
+	_, feedGateway := source.connectMarketDataFeed(mount, "v2_remote_feed")
+	feed, ok := feedGateway.(*simulation.FeedOnlyGateway)
+	if !ok {
+		return errors.New("multivenue: remote maker feed lost feed-only gateway")
+	}
+	if err := maker.AttachRemoteReferenceFeed(feed, source.ID, cfg.Weight); err != nil {
+		return err
+	}
+	if s.frontierVectors != nil {
+		maker.SetOrderDecisionObserver(func(request exchange.Request) {
+			if request.Type != exchange.ReqPlaceOrder || request.OrderReq == nil {
+				return
+			}
+			localFrontier := local.MarketDataFrontier()
+			remoteFrontier := feed.MarketDataFrontier()
+			s.frontierVectors.Record(simulation.DecisionFrontierVector{
+				ActorID: maker.ID(), ClientID: local.ID(), TradingLinkID: localFrontier.LinkID,
+				Symbol: request.OrderReq.Symbol, RequestID: request.OrderReq.RequestID,
+				Side: request.OrderReq.Side, OrderType: request.OrderReq.Type, TimeInForce: request.OrderReq.TimeInForce,
+				Price: request.OrderReq.Price, Qty: request.OrderReq.Qty, DecisionAt: target.clock.NowUnixNano(),
+				Components: []simulation.DecisionFrontierComponent{
+					{ClientID: local.ID(), Frontier: localFrontier},
+					{ClientID: feed.ID(), Frontier: remoteFrontier},
+				},
+			})
+		})
+	}
+	s.Runner.AddMount(mount)
+	return nil
 }
 
 func (s *Sim) addCrossVenueRouters(clock *simulation.SimulatedClock, scheduler *simulation.EventScheduler, timers *simulation.SimTimerFactory, actorID *uint64) error {

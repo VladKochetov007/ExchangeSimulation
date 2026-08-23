@@ -1227,3 +1227,40 @@ instrumentation, disabled by default. It presently audits emitted orders and
 quotes on one delayed feed link, not no-op strategy ticks or a future
 multi-source composite; those limits are explicit in
 `research/v2-0-information-boundary.md` and gate the next local-cache design.
+
+## V-033 — multi-feed vector audit had no inverse decision-coverage check
+
+The initial V2-1b auditor checked that every retained vector joined one scalar
+V2-0 gateway decision. That direction is necessary but insufficient: deleting
+one vector, its components, and rewriting the vector-file counts and digests
+would leave the remaining vectors valid. A remote-maker result could then omit
+decision-side evidence without detection.
+
+The vector manifest now optionally declares required scalar trading
+`(client_id, link_id)` pairs. For each such pair the analyzer independently
+replays all scalar gateway decisions and requires exactly one equal vector.
+The first remote-feed configuration must declare its target maker's delayed
+trading link; old generic V2-1b fixtures can remain coverage-neutral because
+they make no live remote claim.
+
+The regression mutation removes the only vector and its components, rewrites
+both vector artifacts' counts and SHA-256 digests, and leaves the scalar V2-0
+order intact. The audit now fails with `missing_vector_decision=1`. Future
+component and missing-component mutations remain caught. This is V2-only
+instrumentation/provenance work; it changes neither ae13f9a execution nor any
+economic state.
+
+## V-034 — compact evidence metrics unnecessarily required raw run reports
+
+`mvanalyze -metric observationreceipts` and `frontiervectors` opened the
+generic raw-log `analysis.Run` before invoking their independent sidecar
+audits. A compact V2 smoke intentionally retaining only evidence sidecars
+therefore failed for a missing unrelated `greeks.json`, despite valid receipt
+and vector artifacts. That would discourage compact diagnostics and could
+misclassify preserved evidence as unanalyzable.
+
+The command now dispatches these two standalone evidence metrics before the
+raw-log loader. A sidecar-only fixture with no `greeks.json` passes the receipt
+audit, and the real remote V2-1c smoke passes both command-line audits. Raw-log
+metrics retain their existing `analysis.Run` prerequisite. This is analyzer
+only and does not alter simulation execution or ae13f9a provenance.

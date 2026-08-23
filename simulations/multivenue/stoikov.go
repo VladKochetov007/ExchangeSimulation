@@ -4,6 +4,7 @@ package multivenue
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 
@@ -228,6 +229,8 @@ type StoikovMarketMaker struct {
 	forward            int64
 	indexPrice         int64
 	localReference     *LocalBookCache
+	remoteReference    *LocalBookCache
+	remoteWeight       float64
 	forwardAt          int64
 	lastForward        int64
 	lastForwardTS      int64
@@ -281,6 +284,42 @@ func (mm *StoikovMarketMaker) LocalReferenceView() (LocalBookView, bool) {
 		return LocalBookView{}, false
 	}
 	return mm.localReference.View()
+}
+
+// RemoteReferenceView is controller-only activation evidence for the one
+// remote-feed V2-1 smoke world. It returns a copy, never an exchange object.
+func (mm *StoikovMarketMaker) RemoteReferenceView() (LocalBookView, bool) {
+	if mm == nil {
+		return LocalBookView{}, false
+	}
+	return mm.remoteReference.View()
+}
+
+// AttachRemoteReferenceFeed attaches one feed-only delayed public session to
+// this maker. It must be called before the deterministic runner starts. The
+// maker's reference is withheld until both its local and remote caches have a
+// delivered two-sided observation; there is no global-index fallback.
+func (mm *StoikovMarketMaker) AttachRemoteReferenceFeed(feed actor.Gateway, sourceVenue string, weight float64) error {
+	if mm == nil || feed == nil || sourceVenue == "" || weight <= 0 || weight > 1 {
+		return fmt.Errorf("multivenue: invalid remote reference feed")
+	}
+	if mm.localReference == nil {
+		return fmt.Errorf("multivenue: remote reference needs a local cache")
+	}
+	if mm.remoteReference != nil {
+		return fmt.Errorf("multivenue: remote reference already attached")
+	}
+	cache := NewLocalBookCache(sourceVenue, mm.cfg.ReferenceSymbol)
+	if err := mm.AddMarketDataFeed(feed, func(message *exchange.MarketDataMsg) {
+		cache.ObserveMarketData(message)
+	}); err != nil {
+		return err
+	}
+	if err := mm.SubscribeMarketDataFeed(feed, mm.cfg.ReferenceSymbol, exchange.MDSnapshot); err != nil {
+		return err
+	}
+	mm.remoteReference, mm.remoteWeight = cache, weight
+	return nil
 }
 
 func (mm *StoikovMarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
@@ -701,6 +740,19 @@ func (mm *StoikovMarketMaker) referencePrice() int64 {
 		book = mm.cfg.BootstrapPrice
 	}
 	if !mm.cfg.AnchorToIndex || mm.indexPrice <= 0 {
+		if mm.remoteReference != nil {
+			local, localOK := mm.localReference.Mid()
+			remote, remoteOK := mm.remoteReference.Mid()
+			if !localOK || !remoteOK {
+				return 0
+			}
+			weight := mm.remoteWeight
+			composite := (1-weight)*float64(local) + weight*float64(remote)
+			if !finite(composite) || composite <= 0 {
+				return 0
+			}
+			return int64(composite)
+		}
 		return book
 	}
 	weight := mm.cfg.IndexWeight

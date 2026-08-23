@@ -67,3 +67,20 @@ func TestLocalBookCacheRejectsInvalidTop(t *testing.T) {
 		t.Fatal("invalid source created usable cache state")
 	}
 }
+
+func TestLocalBookCacheRemoteAdapterStillCopiesOnlySnapshot(t *testing.T) {
+	cache := NewLocalBookCache("south", "ABC/USD")
+	if cache.ObserveMarketData(&exchange.MarketDataMsg{Type: exchange.MDTrade, Symbol: "ABC/USD"}) {
+		t.Fatal("trade message advanced a book cache")
+	}
+	if !cache.ObserveMarketData(&exchange.MarketDataMsg{
+		Type: exchange.MDSnapshot, Symbol: "ABC/USD", SeqNum: 1, Timestamp: 77,
+		Data: &exchange.BookSnapshot{Bids: []exchange.PriceLevel{{Price: 99, VisibleQty: 1}}, Asks: []exchange.PriceLevel{{Price: 101, VisibleQty: 1}}},
+	}) {
+		t.Fatal("valid remote snapshot did not enter cache")
+	}
+	view, ok := cache.View()
+	if !ok || view.SourceVenue != "south" || view.Sequence != 1 || view.PublishedAt != 77 {
+		t.Fatalf("remote cache view = %+v, %t", view, ok)
+	}
+}
