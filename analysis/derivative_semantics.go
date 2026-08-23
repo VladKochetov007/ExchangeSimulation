@@ -373,7 +373,15 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 
 	for key := range perpHistory {
 		points := perpHistory[key]
-		sort.Slice(points, func(i, j int) bool { return points[i].at < points[j].at })
+		sort.Slice(points, func(i, j int) bool {
+			if points[i].at != points[j].at {
+				return points[i].at < points[j].at
+			}
+			if points[i].file != points[j].file {
+				return points[i].file < points[j].file
+			}
+			return points[i].ordinal < points[j].ordinal
+		})
 		perpHistory[key] = points
 	}
 
