@@ -103,3 +103,58 @@ func TestAcceptedOrderEvidenceRetainsRequestIDAndFlatOrderFields(t *testing.T) {
 		t.Fatalf("accepted evidence unexpectedly nested order: %s", raw)
 	}
 }
+
+func TestRejectedOrderEvidenceRetainsAttemptedRequestFields(t *testing.T) {
+	ex := newPostOnlyTestExchange(t)
+	log := &recordingLogger{}
+	ex.SetLogger("ABC/USD", log)
+	if response := ex.PlaceOrder(2, &OrderRequest{
+		RequestID: 1, Symbol: "ABC/USD", Side: Sell, Type: LimitOrder,
+		Price: 100, Qty: 3, TimeInForce: GTC, Visibility: Normal,
+	}); !response.Success {
+		t.Fatalf("seed ask rejected: %+v", response)
+	}
+	const requestID = 74
+	response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: requestID, Symbol: "ABC/USD", Side: Buy, Type: LimitOrder,
+		Price: 100, Qty: 2, TimeInForce: GTC, Visibility: Normal, PostOnly: true,
+	})
+	if response.Success || response.Error != RejectPostOnlyWouldTake {
+		t.Fatalf("post-only rejection = %+v", response)
+	}
+	var rejected any
+	for _, record := range log.records {
+		if record.event == "OrderRejected" {
+			rejected = record.data
+			break
+		}
+	}
+	if rejected == nil {
+		t.Fatalf("rejected evidence = %#v", log.records)
+	}
+	evidence, ok := rejected.(rejectedOrderEvidence)
+	if !ok {
+		t.Fatalf("rejected evidence type = %T, want rejectedOrderEvidence", rejected)
+	}
+	if evidence.RequestID != requestID || evidence.Error != RejectPostOnlyWouldTake || evidence.Symbol != "ABC/USD" ||
+		evidence.Side != Buy || evidence.Type != LimitOrder || evidence.TimeInForce != GTC || !evidence.PostOnly || evidence.Price != 100 || evidence.Qty != 2 {
+		t.Fatalf("rejected evidence = %#v", evidence)
+	}
+
+	raw, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatalf("marshal rejected evidence: %v", err)
+	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatalf("decode rejected evidence: %v", err)
+	}
+	for _, field := range []string{"request_id", "error", "symbol", "side", "type", "time_in_force", "post_only", "price", "qty"} {
+		if _, ok := wire[field]; !ok {
+			t.Fatalf("flat rejected evidence missing %q: %s", field, raw)
+		}
+	}
+	if _, nested := wire["response"]; nested {
+		t.Fatalf("rejected evidence unexpectedly nested response: %s", raw)
+	}
+}

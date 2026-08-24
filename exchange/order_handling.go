@@ -20,6 +20,35 @@ type acceptedOrderEvidence struct {
 	RequestID uint64 `json:"request_id"`
 }
 
+// rejectedOrderEvidence keeps rejection evidence tied to the attempted order,
+// rather than making a failed response indistinguishable from a request that
+// was never delivered. The embedded Response preserves the established flat
+// response fields. This is evidence only; rejection remains non-mutating.
+type rejectedOrderEvidence struct {
+	Response
+	Symbol      string      `json:"symbol"`
+	Side        Side        `json:"side"`
+	Type        OrderType   `json:"type"`
+	TimeInForce TimeInForce `json:"time_in_force"`
+	PostOnly    bool        `json:"post_only"`
+	Price       int64       `json:"price"`
+	Qty         int64       `json:"qty"`
+}
+
+func rejectedOrderEvidenceFromRequest(response Response, req *OrderRequest) rejectedOrderEvidence {
+	return rejectedOrderEvidence{
+		Response: response, Symbol: req.Symbol, Side: req.Side, Type: req.Type,
+		TimeInForce: req.TimeInForce, PostOnly: req.PostOnly, Price: req.Price, Qty: req.Qty,
+	}
+}
+
+func rejectedOrderEvidenceFromOrder(response Response, symbol string, order *Order) rejectedOrderEvidence {
+	return rejectedOrderEvidence{
+		Response: response, Symbol: symbol, Side: order.Side, Type: order.Type,
+		TimeInForce: order.TimeInForce, PostOnly: order.PostOnly, Price: order.Price, Qty: order.Qty,
+	}
+}
+
 func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Response {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -42,7 +71,7 @@ func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Respons
 	// depth walk, so custom allocation, iceberg, and self-trade rules cannot
 	// disagree with the atomicity check.
 	if req.TimeInForce == FOK && !e.canPreviewFullyMatch(book, order) {
-		return e.rejectOrder(order, req.RequestID, clientID, RejectFOKNotFilled, log)
+		return e.rejectOrder(order, req.RequestID, clientID, book.Symbol, RejectFOKNotFilled, log)
 	}
 	// Preflight every currently executable pair's fee before reservations or
 	// auto-borrow. A maker's configured external fee source is just as much a
@@ -51,7 +80,7 @@ func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Respons
 	if feeFailure != nil {
 		if feeFailure.err != nil {
 			e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "fee_match_preflight", feeFailure.err)
-			return e.rejectOrder(order, req.RequestID, clientID, RejectPriceUnavailable, log)
+			return e.rejectOrder(order, req.RequestID, clientID, book.Symbol, RejectPriceUnavailable, log)
 		}
 		panic("matching engine could not produce fee preflight")
 	}
@@ -75,12 +104,12 @@ func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Respons
 				releaseReserved(client, book.Instrument, order)
 				borrowSnapshot.restore(e, clientID, client)
 				e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "fee_preflight", failure.err)
-				return e.rejectOrder(order, req.RequestID, clientID, RejectPriceUnavailable, log)
+				return e.rejectOrder(order, req.RequestID, clientID, book.Symbol, RejectPriceUnavailable, log)
 			}
 			if failure.makerOrderID == 0 {
 				releaseReserved(client, book.Instrument, order)
 				borrowSnapshot.restore(e, clientID, client)
-				return e.rejectOrder(order, req.RequestID, clientID, RejectInsufficientBalance, log)
+				return e.rejectOrder(order, req.RequestID, clientID, book.Symbol, RejectInsufficientBalance, log)
 			}
 			excludedMakers[failure.makerOrderID] = struct{}{}
 			// The next dry run excludes a maker. Its execution frontier can
@@ -91,7 +120,7 @@ func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Respons
 		if req.TimeInForce == FOK && !spotPlan.fullyFilled {
 			releaseReserved(client, book.Instrument, order)
 			borrowSnapshot.restore(e, clientID, client)
-			return e.rejectOrder(order, req.RequestID, clientID, RejectFOKNotFilled, log)
+			return e.rejectOrder(order, req.RequestID, clientID, book.Symbol, RejectFOKNotFilled, log)
 		}
 		if len(excludedMakers) > 0 {
 			makerIDs := make([]uint64, 0, len(excludedMakers))
@@ -111,7 +140,7 @@ func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Respons
 					releaseReserved(client, book.Instrument, order)
 					borrowSnapshot.restore(e, clientID, client)
 					e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "fee_preflight", failure.err)
-					return e.rejectOrder(order, req.RequestID, clientID, RejectPriceUnavailable, log)
+					return e.rejectOrder(order, req.RequestID, clientID, book.Symbol, RejectPriceUnavailable, log)
 				}
 				panic("spot execution plan changed during commit")
 			}
@@ -487,7 +516,7 @@ func (e *DefaultExchange) validatePlaceOrder(clientID uint64, req *OrderRequest)
 	}
 	log := e.getLogger(req.Symbol)
 	reject := func(reason RejectReason) *Response {
-		resp := rejectWithLog(req.RequestID, clientID, reason, log, e.Clock)
+		resp := rejectWithLog(req, clientID, reason, log, e.Clock)
 		return &resp
 	}
 	if e.Clients[clientID] == nil {
@@ -1495,7 +1524,7 @@ func (e *DefaultExchange) reserveOrderFunds(client *Client, book *OrderBook, ord
 			reason = RejectPriceUnavailable
 			e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "order_fee_admission", err)
 		}
-		resp := e.rejectOrder(order, requestID, order.ClientID, reason, log)
+		resp := e.rejectOrder(order, requestID, order.ClientID, book.Symbol, reason, log)
 		return &resp
 	}
 	// Freeze/reserve foreign fee exposure before the trade-leg path can invoke
@@ -1508,7 +1537,7 @@ func (e *DefaultExchange) reserveOrderFunds(client *Client, book *OrderBook, ord
 			reason = RejectPriceUnavailable
 			e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "order_fee_reservation", err)
 		}
-		resp := e.rejectOrder(order, requestID, order.ClientID, reason, log)
+		resp := e.rejectOrder(order, requestID, order.ClientID, book.Symbol, reason, log)
 		return &resp
 	}
 	var (
@@ -1530,7 +1559,7 @@ func (e *DefaultExchange) reserveOrderFunds(client *Client, book *OrderBook, ord
 			reason = RejectPriceUnavailable
 			e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "order_admission", admissionErr)
 		}
-		resp := e.rejectOrder(order, requestID, order.ClientID, reason, log)
+		resp := e.rejectOrder(order, requestID, order.ClientID, book.Symbol, reason, log)
 		return &resp
 	}
 	return nil
@@ -1704,22 +1733,23 @@ func (e *DefaultExchange) cancelOwnCrossingQuotes(client *Client, book *OrderBoo
 	}
 }
 
-// rejectWithLog builds a failed Response and optionally logs it.
-func rejectWithLog(requestID uint64, clientID uint64, reason RejectReason, log Logger, clock Clock) Response {
-	resp := Response{RequestID: requestID, Success: false, Error: reason}
+// rejectWithLog builds a failed Response and logs the exact attempted request.
+func rejectWithLog(req *OrderRequest, clientID uint64, reason RejectReason, log Logger, clock Clock) Response {
+	resp := Response{RequestID: req.RequestID, Success: false, Error: reason}
 	if log != nil {
-		log.LogEvent(clock.NowUnixNano(), clientID, "OrderRejected", resp)
+		log.LogEvent(clock.NowUnixNano(), clientID, "OrderRejected", rejectedOrderEvidenceFromRequest(resp, req))
 	}
 	return resp
 }
 
 // rejectOrder recycles the order and returns a logged rejection Response.
 // Caller must hold e.mu.Lock().
-func (e *DefaultExchange) rejectOrder(order *Order, requestID uint64, clientID uint64, reason RejectReason, log Logger) Response {
-	putOrder(order)
+func (e *DefaultExchange) rejectOrder(order *Order, requestID uint64, clientID uint64, symbol string, reason RejectReason, log Logger) Response {
 	resp := Response{RequestID: requestID, Success: false, Error: reason}
+	evidence := rejectedOrderEvidenceFromOrder(resp, symbol, order)
+	putOrder(order)
 	if log != nil {
-		log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", resp)
+		log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderRejected", evidence)
 	}
 	return resp
 }
