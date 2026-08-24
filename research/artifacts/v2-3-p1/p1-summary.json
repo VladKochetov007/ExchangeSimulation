@@ -1,0 +1,2137 @@
+{
+  "schema_version": 1,
+  "experiment": "V2-3-P1",
+  "comparison_contract": {
+    "b_minus_a": "inventory-asymmetric displayed quote size with P0-R1 C passive refresh held fixed",
+    "primary": "decision-time signed size association; market rows descriptive only",
+    "seeds": [
+      101,
+      103
+    ]
+  },
+  "rows": [
+    {
+      "arm": "A",
+      "seed": 101,
+      "provenance": {
+        "config_sha256": "ac80dd09cd88ac508193564f1a14d8d496778f8f1426e7350cc0a21811f33872",
+        "binary_sha256": "7163428d9c5ad3564fbf5aa7bcfd24cd4245d8040732ee1d2f69056329a64cc2",
+        "git_revision": "5c24635e70d4646c8e0f45704845f728efc2d775",
+        "gomaxprocs": "3",
+        "evidence": {
+          "events": 353332,
+          "digest": "23ea24352aa23f37f246e76652b54199bc1162e9177300fed6ecc2a9cc05f6e8"
+        }
+      },
+      "policy": {
+        "size_skew_bps": 0,
+        "post_only": true,
+        "cancel_before_replace": true
+      },
+      "information_boundary": {
+        "valid": true,
+        "schedules": 72628,
+        "receipts": 72524,
+        "decisions": 3953,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0
+      },
+      "activation": {
+        "decisions": 1386,
+        "decision_sides": 2772,
+        "zero_risk_decisions": 36,
+        "nonzero_risk_decisions": 1350,
+        "zero_risk_symmetric": 36,
+        "long_risk_decisions": 221,
+        "short_risk_decisions": 1129,
+        "long_positive_size_skew": 0,
+        "short_negative_size_skew": 0,
+        "nonzero_risk_zero_size_skew": 1350,
+        "wrong_direction_size_skew": 0,
+        "nonzero_adjustments": 0,
+        "accepted": 2731,
+        "rejected": 37,
+        "horizon_censored_sides": 4,
+        "censored_outcome_deliveries": 0,
+        "missing_outcomes": 0,
+        "duplicate_outcomes": 0,
+        "duplicate_decision_sides": 0,
+        "decision_field_mismatches": 0,
+        "outcome_field_mismatches": 0,
+        "invalid_decision_records": 0,
+        "invalid_censor_records": 0,
+        "skew_buckets": [
+          {
+            "size_skew_bps": 0,
+            "decisions": 1386,
+            "zero_risk": 36,
+            "nonzero_risk": 1350,
+            "adjusted": 0
+          }
+        ],
+        "maker_buckets": [
+          {
+            "venue_id": "central",
+            "maker": "abc_cdf_spot_maker_1",
+            "symbol": "ABC/CDF",
+            "decisions": 126,
+            "decision_sides": 252,
+            "zero_risk": 1,
+            "nonzero_risk": 125,
+            "adjusted": 0,
+            "accepted": 245,
+            "rejected": 7,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "abc_cdf_spot_maker_2",
+            "symbol": "ABC/CDF",
+            "decisions": 126,
+            "decision_sides": 252,
+            "zero_risk": 1,
+            "nonzero_risk": 125,
+            "adjusted": 0,
+            "accepted": 245,
+            "rejected": 7,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "cdf_spot_maker_1",
+            "symbol": "CDF/USD",
+            "decisions": 27,
+            "decision_sides": 54,
+            "zero_risk": 1,
+            "nonzero_risk": 26,
+            "adjusted": 0,
+            "accepted": 54,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "cdf_spot_maker_2",
+            "symbol": "CDF/USD",
+            "decisions": 27,
+            "decision_sides": 54,
+            "zero_risk": 1,
+            "nonzero_risk": 26,
+            "adjusted": 0,
+            "accepted": 54,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_1",
+            "symbol": "ABC/USD",
+            "decisions": 111,
+            "decision_sides": 222,
+            "zero_risk": 1,
+            "nonzero_risk": 110,
+            "adjusted": 0,
+            "accepted": 222,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_2",
+            "symbol": "ABC/USD",
+            "decisions": 10,
+            "decision_sides": 20,
+            "zero_risk": 1,
+            "nonzero_risk": 9,
+            "adjusted": 0,
+            "accepted": 20,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_3",
+            "symbol": "ABC/USD",
+            "decisions": 10,
+            "decision_sides": 20,
+            "zero_risk": 1,
+            "nonzero_risk": 9,
+            "adjusted": 0,
+            "accepted": 20,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_4",
+            "symbol": "ABC/USD",
+            "decisions": 13,
+            "decision_sides": 26,
+            "zero_risk": 1,
+            "nonzero_risk": 12,
+            "adjusted": 0,
+            "accepted": 24,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "north",
+            "maker": "abc_cdf_spot_maker_1",
+            "symbol": "ABC/CDF",
+            "decisions": 139,
+            "decision_sides": 278,
+            "zero_risk": 8,
+            "nonzero_risk": 131,
+            "adjusted": 0,
+            "accepted": 271,
+            "rejected": 7,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "abc_cdf_spot_maker_2",
+            "symbol": "ABC/CDF",
+            "decisions": 141,
+            "decision_sides": 282,
+            "zero_risk": 1,
+            "nonzero_risk": 140,
+            "adjusted": 0,
+            "accepted": 274,
+            "rejected": 8,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "cdf_spot_maker_1",
+            "symbol": "CDF/USD",
+            "decisions": 24,
+            "decision_sides": 48,
+            "zero_risk": 1,
+            "nonzero_risk": 23,
+            "adjusted": 0,
+            "accepted": 48,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "cdf_spot_maker_2",
+            "symbol": "CDF/USD",
+            "decisions": 27,
+            "decision_sides": 54,
+            "zero_risk": 1,
+            "nonzero_risk": 26,
+            "adjusted": 0,
+            "accepted": 54,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_1",
+            "symbol": "ABC/USD",
+            "decisions": 105,
+            "decision_sides": 210,
+            "zero_risk": 4,
+            "nonzero_risk": 101,
+            "adjusted": 0,
+            "accepted": 210,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_2",
+            "symbol": "ABC/USD",
+            "decisions": 16,
+            "decision_sides": 32,
+            "zero_risk": 1,
+            "nonzero_risk": 15,
+            "adjusted": 0,
+            "accepted": 32,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_3",
+            "symbol": "ABC/USD",
+            "decisions": 16,
+            "decision_sides": 32,
+            "zero_risk": 1,
+            "nonzero_risk": 15,
+            "adjusted": 0,
+            "accepted": 32,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_4",
+            "symbol": "ABC/USD",
+            "decisions": 15,
+            "decision_sides": 30,
+            "zero_risk": 3,
+            "nonzero_risk": 12,
+            "adjusted": 0,
+            "accepted": 28,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "south",
+            "maker": "abc_cdf_spot_maker_1",
+            "symbol": "ABC/CDF",
+            "decisions": 130,
+            "decision_sides": 260,
+            "zero_risk": 1,
+            "nonzero_risk": 129,
+            "adjusted": 0,
+            "accepted": 256,
+            "rejected": 4,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "abc_cdf_spot_maker_2",
+            "symbol": "ABC/CDF",
+            "decisions": 130,
+            "decision_sides": 260,
+            "zero_risk": 1,
+            "nonzero_risk": 129,
+            "adjusted": 0,
+            "accepted": 256,
+            "rejected": 4,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "cdf_spot_maker_1",
+            "symbol": "CDF/USD",
+            "decisions": 21,
+            "decision_sides": 42,
+            "zero_risk": 1,
+            "nonzero_risk": 20,
+            "adjusted": 0,
+            "accepted": 42,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "cdf_spot_maker_2",
+            "symbol": "CDF/USD",
+            "decisions": 21,
+            "decision_sides": 42,
+            "zero_risk": 1,
+            "nonzero_risk": 20,
+            "adjusted": 0,
+            "accepted": 42,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_1",
+            "symbol": "ABC/USD",
+            "decisions": 116,
+            "decision_sides": 232,
+            "zero_risk": 1,
+            "nonzero_risk": 115,
+            "adjusted": 0,
+            "accepted": 232,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_2",
+            "symbol": "ABC/USD",
+            "decisions": 9,
+            "decision_sides": 18,
+            "zero_risk": 1,
+            "nonzero_risk": 8,
+            "adjusted": 0,
+            "accepted": 18,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_3",
+            "symbol": "ABC/USD",
+            "decisions": 10,
+            "decision_sides": 20,
+            "zero_risk": 1,
+            "nonzero_risk": 9,
+            "adjusted": 0,
+            "accepted": 20,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_4",
+            "symbol": "ABC/USD",
+            "decisions": 16,
+            "decision_sides": 32,
+            "zero_risk": 1,
+            "nonzero_risk": 15,
+            "adjusted": 0,
+            "accepted": 32,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          }
+        ]
+      },
+      "maker_net_delta": {
+        "series": 24,
+        "observations": 7200,
+        "mean_abs_net_delta": 3417426586.1811113,
+        "mean_lag1_autocorrelation": 0.9656856070417804
+      },
+      "spot_books": [
+        {
+          "symbol": "ABC/CDF",
+          "venues": [
+            "central",
+            "north",
+            "south"
+          ],
+          "snapshots": 900,
+          "empty_side_snapshots": 82,
+          "two_sided_share": 0.9088888888888889,
+          "trades": 2929,
+          "volume": 299057123878
+        },
+        {
+          "symbol": "ABC/USD",
+          "venues": [
+            "central",
+            "north",
+            "south"
+          ],
+          "snapshots": 900,
+          "empty_side_snapshots": 9,
+          "two_sided_share": 0.99,
+          "trades": 11300,
+          "volume": 87723985018
+        },
+        {
+          "symbol": "CDF/USD",
+          "venues": [
+            "central",
+            "north",
+            "south"
+          ],
+          "snapshots": 900,
+          "empty_side_snapshots": 29,
+          "two_sided_share": 0.9677777777777777,
+          "trades": 5450,
+          "volume": 792121832188
+        }
+      ],
+      "executed_trade_price_ratios": [
+        {
+          "venue_id": "central",
+          "symbol": "ABC/CDF",
+          "available": true,
+          "trades": 1040,
+          "opening_trade_price": 1666500000,
+          "terminal_trade_price": 1689000000,
+          "terminal_opening_price_ratio": 1.0135013501350134
+        },
+        {
+          "venue_id": "central",
+          "symbol": "ABC/USD",
+          "available": true,
+          "trades": 4812,
+          "opening_trade_price": 4999790000,
+          "terminal_trade_price": 5000480000,
+          "terminal_opening_price_ratio": 1.0001380057962435
+        },
+        {
+          "venue_id": "central",
+          "symbol": "CDF/USD",
+          "available": true,
+          "trades": 2390,
+          "opening_trade_price": 299900000,
+          "terminal_trade_price": 299900000,
+          "terminal_opening_price_ratio": 1
+        },
+        {
+          "venue_id": "north",
+          "symbol": "ABC/CDF",
+          "available": true,
+          "trades": 827,
+          "opening_trade_price": 1666800000,
+          "terminal_trade_price": 1687600000,
+          "terminal_opening_price_ratio": 1.0124790016798657
+        },
+        {
+          "venue_id": "north",
+          "symbol": "ABC/USD",
+          "available": true,
+          "trades": 2403,
+          "opening_trade_price": 4999790000,
+          "terminal_trade_price": 5000610000,
+          "terminal_opening_price_ratio": 1.0001640068882893
+        },
+        {
+          "venue_id": "north",
+          "symbol": "CDF/USD",
+          "available": true,
+          "trades": 652,
+          "opening_trade_price": 299900000,
+          "terminal_trade_price": 299900000,
+          "terminal_opening_price_ratio": 1
+        },
+        {
+          "venue_id": "south",
+          "symbol": "ABC/CDF",
+          "available": true,
+          "trades": 1062,
+          "opening_trade_price": 1666800000,
+          "terminal_trade_price": 1688700000,
+          "terminal_opening_price_ratio": 1.0131389488840892
+        },
+        {
+          "venue_id": "south",
+          "symbol": "ABC/USD",
+          "available": true,
+          "trades": 4085,
+          "opening_trade_price": 4999790000,
+          "terminal_trade_price": 5000040000,
+          "terminal_opening_price_ratio": 1.0000500021000882
+        },
+        {
+          "venue_id": "south",
+          "symbol": "CDF/USD",
+          "available": true,
+          "trades": 2408,
+          "opening_trade_price": 299900000,
+          "terminal_trade_price": 299900000,
+          "terminal_opening_price_ratio": 1
+        }
+      ],
+      "gates": {
+        "information_boundary_valid": true,
+        "decision_request_integrity": true,
+        "every_scoped_venue_maker_active": true,
+        "scoped_spot_viable": true,
+        "p0c_passive_refresh_preserved": true,
+        "terminal_censoring_explicit": true
+      }
+    },
+    {
+      "arm": "A",
+      "seed": 103,
+      "provenance": {
+        "config_sha256": "4fb1b26fa07b6f90ac451c9456b1587e3d031a83cd134595eef10570f4e64cac",
+        "binary_sha256": "7163428d9c5ad3564fbf5aa7bcfd24cd4245d8040732ee1d2f69056329a64cc2",
+        "git_revision": "5c24635e70d4646c8e0f45704845f728efc2d775",
+        "gomaxprocs": "3",
+        "evidence": {
+          "events": 357205,
+          "digest": "51fb1430bb5857d3e51c0341400a61dc1accc4925ee775f09f0d30c1873fde8a"
+        }
+      },
+      "policy": {
+        "size_skew_bps": 0,
+        "post_only": true,
+        "cancel_before_replace": true
+      },
+      "information_boundary": {
+        "valid": true,
+        "schedules": 77536,
+        "receipts": 77416,
+        "decisions": 3938,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0
+      },
+      "activation": {
+        "decisions": 1429,
+        "decision_sides": 2858,
+        "zero_risk_decisions": 36,
+        "nonzero_risk_decisions": 1393,
+        "zero_risk_symmetric": 36,
+        "long_risk_decisions": 214,
+        "short_risk_decisions": 1179,
+        "long_positive_size_skew": 0,
+        "short_negative_size_skew": 0,
+        "nonzero_risk_zero_size_skew": 1393,
+        "wrong_direction_size_skew": 0,
+        "nonzero_adjustments": 0,
+        "accepted": 2784,
+        "rejected": 62,
+        "horizon_censored_sides": 12,
+        "censored_outcome_deliveries": 0,
+        "missing_outcomes": 0,
+        "duplicate_outcomes": 0,
+        "duplicate_decision_sides": 0,
+        "decision_field_mismatches": 0,
+        "outcome_field_mismatches": 0,
+        "invalid_decision_records": 0,
+        "invalid_censor_records": 0,
+        "skew_buckets": [
+          {
+            "size_skew_bps": 0,
+            "decisions": 1429,
+            "zero_risk": 36,
+            "nonzero_risk": 1393,
+            "adjusted": 0
+          }
+        ],
+        "maker_buckets": [
+          {
+            "venue_id": "central",
+            "maker": "abc_cdf_spot_maker_1",
+            "symbol": "ABC/CDF",
+            "decisions": 136,
+            "decision_sides": 272,
+            "zero_risk": 2,
+            "nonzero_risk": 134,
+            "adjusted": 0,
+            "accepted": 264,
+            "rejected": 6,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "central",
+            "maker": "abc_cdf_spot_maker_2",
+            "symbol": "ABC/CDF",
+            "decisions": 136,
+            "decision_sides": 272,
+            "zero_risk": 2,
+            "nonzero_risk": 134,
+            "adjusted": 0,
+            "accepted": 264,
+            "rejected": 6,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "central",
+            "maker": "cdf_spot_maker_1",
+            "symbol": "CDF/USD",
+            "decisions": 24,
+            "decision_sides": 48,
+            "zero_risk": 1,
+            "nonzero_risk": 23,
+            "adjusted": 0,
+            "accepted": 48,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "cdf_spot_maker_2",
+            "symbol": "CDF/USD",
+            "decisions": 24,
+            "decision_sides": 48,
+            "zero_risk": 1,
+            "nonzero_risk": 23,
+            "adjusted": 0,
+            "accepted": 48,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_1",
+            "symbol": "ABC/USD",
+            "decisions": 124,
+            "decision_sides": 248,
+            "zero_risk": 1,
+            "nonzero_risk": 123,
+            "adjusted": 0,
+            "accepted": 248,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_2",
+            "symbol": "ABC/USD",
+            "decisions": 8,
+            "decision_sides": 16,
+            "zero_risk": 1,
+            "nonzero_risk": 7,
+            "adjusted": 0,
+            "accepted": 16,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_3",
+            "symbol": "ABC/USD",
+            "decisions": 7,
+            "decision_sides": 14,
+            "zero_risk": 1,
+            "nonzero_risk": 6,
+            "adjusted": 0,
+            "accepted": 14,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_4",
+            "symbol": "ABC/USD",
+            "decisions": 9,
+            "decision_sides": 18,
+            "zero_risk": 1,
+            "nonzero_risk": 8,
+            "adjusted": 0,
+            "accepted": 18,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "abc_cdf_spot_maker_1",
+            "symbol": "ABC/CDF",
+            "decisions": 131,
+            "decision_sides": 262,
+            "zero_risk": 3,
+            "nonzero_risk": 128,
+            "adjusted": 0,
+            "accepted": 247,
+            "rejected": 15,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "abc_cdf_spot_maker_2",
+            "symbol": "ABC/CDF",
+            "decisions": 130,
+            "decision_sides": 260,
+            "zero_risk": 2,
+            "nonzero_risk": 128,
+            "adjusted": 0,
+            "accepted": 233,
+            "rejected": 27,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "cdf_spot_maker_1",
+            "symbol": "CDF/USD",
+            "decisions": 35,
+            "decision_sides": 70,
+            "zero_risk": 1,
+            "nonzero_risk": 34,
+            "adjusted": 0,
+            "accepted": 70,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "cdf_spot_maker_2",
+            "symbol": "CDF/USD",
+            "decisions": 32,
+            "decision_sides": 64,
+            "zero_risk": 1,
+            "nonzero_risk": 31,
+            "adjusted": 0,
+            "accepted": 64,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_1",
+            "symbol": "ABC/USD",
+            "decisions": 116,
+            "decision_sides": 232,
+            "zero_risk": 1,
+            "nonzero_risk": 115,
+            "adjusted": 0,
+            "accepted": 232,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_2",
+            "symbol": "ABC/USD",
+            "decisions": 17,
+            "decision_sides": 34,
+            "zero_risk": 3,
+            "nonzero_risk": 14,
+            "adjusted": 0,
+            "accepted": 32,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_3",
+            "symbol": "ABC/USD",
+            "decisions": 19,
+            "decision_sides": 38,
+            "zero_risk": 2,
+            "nonzero_risk": 17,
+            "adjusted": 0,
+            "accepted": 38,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_4",
+            "symbol": "ABC/USD",
+            "decisions": 19,
+            "decision_sides": 38,
+            "zero_risk": 3,
+            "nonzero_risk": 16,
+            "adjusted": 0,
+            "accepted": 36,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "south",
+            "maker": "abc_cdf_spot_maker_1",
+            "symbol": "ABC/CDF",
+            "decisions": 137,
+            "decision_sides": 274,
+            "zero_risk": 2,
+            "nonzero_risk": 135,
+            "adjusted": 0,
+            "accepted": 268,
+            "rejected": 4,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "south",
+            "maker": "abc_cdf_spot_maker_2",
+            "symbol": "ABC/CDF",
+            "decisions": 137,
+            "decision_sides": 274,
+            "zero_risk": 2,
+            "nonzero_risk": 135,
+            "adjusted": 0,
+            "accepted": 268,
+            "rejected": 4,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "south",
+            "maker": "cdf_spot_maker_1",
+            "symbol": "CDF/USD",
+            "decisions": 14,
+            "decision_sides": 28,
+            "zero_risk": 1,
+            "nonzero_risk": 13,
+            "adjusted": 0,
+            "accepted": 28,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "cdf_spot_maker_2",
+            "symbol": "CDF/USD",
+            "decisions": 14,
+            "decision_sides": 28,
+            "zero_risk": 1,
+            "nonzero_risk": 13,
+            "adjusted": 0,
+            "accepted": 28,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_1",
+            "symbol": "ABC/USD",
+            "decisions": 125,
+            "decision_sides": 250,
+            "zero_risk": 1,
+            "nonzero_risk": 124,
+            "adjusted": 0,
+            "accepted": 250,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_2",
+            "symbol": "ABC/USD",
+            "decisions": 12,
+            "decision_sides": 24,
+            "zero_risk": 1,
+            "nonzero_risk": 11,
+            "adjusted": 0,
+            "accepted": 24,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_3",
+            "symbol": "ABC/USD",
+            "decisions": 9,
+            "decision_sides": 18,
+            "zero_risk": 1,
+            "nonzero_risk": 8,
+            "adjusted": 0,
+            "accepted": 18,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_4",
+            "symbol": "ABC/USD",
+            "decisions": 14,
+            "decision_sides": 28,
+            "zero_risk": 1,
+            "nonzero_risk": 13,
+            "adjusted": 0,
+            "accepted": 28,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          }
+        ]
+      },
+      "maker_net_delta": {
+        "series": 24,
+        "observations": 7200,
+        "mean_abs_net_delta": 4015988663.380833,
+        "mean_lag1_autocorrelation": 0.9753834581262056
+      },
+      "spot_books": [
+        {
+          "symbol": "ABC/CDF",
+          "venues": [
+            "central",
+            "north",
+            "south"
+          ],
+          "snapshots": 900,
+          "empty_side_snapshots": 75,
+          "two_sided_share": 0.9166666666666666,
+          "trades": 2902,
+          "volume": 280080094957
+        },
+        {
+          "symbol": "ABC/USD",
+          "venues": [
+            "central",
+            "north",
+            "south"
+          ],
+          "snapshots": 900,
+          "empty_side_snapshots": 9,
+          "two_sided_share": 0.99,
+          "trades": 12527,
+          "volume": 91779097526
+        },
+        {
+          "symbol": "CDF/USD",
+          "venues": [
+            "central",
+            "north",
+            "south"
+          ],
+          "snapshots": 900,
+          "empty_side_snapshots": 32,
+          "two_sided_share": 0.9644444444444444,
+          "trades": 4642,
+          "volume": 838327632005
+        }
+      ],
+      "executed_trade_price_ratios": [
+        {
+          "venue_id": "central",
+          "symbol": "ABC/CDF",
+          "available": true,
+          "trades": 1016,
+          "opening_trade_price": 1666800000,
+          "terminal_trade_price": 1687200000,
+          "terminal_opening_price_ratio": 1.0122390208783298
+        },
+        {
+          "venue_id": "central",
+          "symbol": "ABC/USD",
+          "available": true,
+          "trades": 5641,
+          "opening_trade_price": 5000210000,
+          "terminal_trade_price": 5000610000,
+          "terminal_opening_price_ratio": 1.000079996640141
+        },
+        {
+          "venue_id": "central",
+          "symbol": "CDF/USD",
+          "available": true,
+          "trades": 1744,
+          "opening_trade_price": 299900000,
+          "terminal_trade_price": 299800000,
+          "terminal_opening_price_ratio": 0.9996665555185061
+        },
+        {
+          "venue_id": "north",
+          "symbol": "ABC/CDF",
+          "available": true,
+          "trades": 804,
+          "opening_trade_price": 1666800000,
+          "terminal_trade_price": 1686400000,
+          "terminal_opening_price_ratio": 1.0117590592752579
+        },
+        {
+          "venue_id": "north",
+          "symbol": "ABC/USD",
+          "available": true,
+          "trades": 2471,
+          "opening_trade_price": 4999790000,
+          "terminal_trade_price": 5000740000,
+          "terminal_opening_price_ratio": 1.0001900079803352
+        },
+        {
+          "venue_id": "north",
+          "symbol": "CDF/USD",
+          "available": true,
+          "trades": 670,
+          "opening_trade_price": 300100000,
+          "terminal_trade_price": 299900000,
+          "terminal_opening_price_ratio": 0.9993335554815062
+        },
+        {
+          "venue_id": "south",
+          "symbol": "ABC/CDF",
+          "available": true,
+          "trades": 1082,
+          "opening_trade_price": 1666800000,
+          "terminal_trade_price": 1687100000,
+          "terminal_opening_price_ratio": 1.0121790256779457
+        },
+        {
+          "venue_id": "south",
+          "symbol": "ABC/USD",
+          "available": true,
+          "trades": 4415,
+          "opening_trade_price": 4999790000,
+          "terminal_trade_price": 5000210000,
+          "terminal_opening_price_ratio": 1.0000840035281482
+        },
+        {
+          "venue_id": "south",
+          "symbol": "CDF/USD",
+          "available": true,
+          "trades": 2228,
+          "opening_trade_price": 300100000,
+          "terminal_trade_price": 299900000,
+          "terminal_opening_price_ratio": 0.9993335554815062
+        }
+      ],
+      "gates": {
+        "information_boundary_valid": true,
+        "decision_request_integrity": true,
+        "every_scoped_venue_maker_active": true,
+        "scoped_spot_viable": true,
+        "p0c_passive_refresh_preserved": true,
+        "terminal_censoring_explicit": true
+      }
+    },
+    {
+      "arm": "B",
+      "seed": 101,
+      "provenance": {
+        "config_sha256": "f88e6bcda8bd86181f59945f0fad8a8f757d05b1b349a84f9446b0c0c9b3ed11",
+        "binary_sha256": "7163428d9c5ad3564fbf5aa7bcfd24cd4245d8040732ee1d2f69056329a64cc2",
+        "git_revision": "5c24635e70d4646c8e0f45704845f728efc2d775",
+        "gomaxprocs": "3",
+        "evidence": {
+          "events": 367285,
+          "digest": "8999ff44e1c9f67693e0b6bfd3262e9e6a66d2fe6dc5f60180ea4fcf619126c1"
+        }
+      },
+      "policy": {
+        "size_skew_bps": 5000,
+        "post_only": true,
+        "cancel_before_replace": true
+      },
+      "information_boundary": {
+        "valid": true,
+        "schedules": 68024,
+        "receipts": 67860,
+        "decisions": 6567,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0
+      },
+      "activation": {
+        "decisions": 3090,
+        "decision_sides": 6180,
+        "zero_risk_decisions": 31,
+        "nonzero_risk_decisions": 3059,
+        "zero_risk_symmetric": 31,
+        "long_risk_decisions": 704,
+        "short_risk_decisions": 2355,
+        "long_positive_size_skew": 704,
+        "short_negative_size_skew": 2355,
+        "nonzero_risk_zero_size_skew": 0,
+        "wrong_direction_size_skew": 0,
+        "nonzero_adjustments": 3059,
+        "accepted": 6036,
+        "rejected": 120,
+        "horizon_censored_sides": 24,
+        "censored_outcome_deliveries": 0,
+        "missing_outcomes": 0,
+        "duplicate_outcomes": 0,
+        "duplicate_decision_sides": 0,
+        "decision_field_mismatches": 0,
+        "outcome_field_mismatches": 0,
+        "invalid_decision_records": 0,
+        "invalid_censor_records": 0,
+        "skew_buckets": [
+          {
+            "size_skew_bps": 5000,
+            "decisions": 3090,
+            "zero_risk": 31,
+            "nonzero_risk": 3059,
+            "adjusted": 3059
+          }
+        ],
+        "maker_buckets": [
+          {
+            "venue_id": "central",
+            "maker": "abc_cdf_spot_maker_1",
+            "symbol": "ABC/CDF",
+            "decisions": 141,
+            "decision_sides": 282,
+            "zero_risk": 1,
+            "nonzero_risk": 140,
+            "adjusted": 140,
+            "accepted": 280,
+            "rejected": 2,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "abc_cdf_spot_maker_2",
+            "symbol": "ABC/CDF",
+            "decisions": 141,
+            "decision_sides": 282,
+            "zero_risk": 1,
+            "nonzero_risk": 140,
+            "adjusted": 140,
+            "accepted": 280,
+            "rejected": 2,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "cdf_spot_maker_1",
+            "symbol": "CDF/USD",
+            "decisions": 127,
+            "decision_sides": 254,
+            "zero_risk": 1,
+            "nonzero_risk": 126,
+            "adjusted": 126,
+            "accepted": 252,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "central",
+            "maker": "cdf_spot_maker_2",
+            "symbol": "CDF/USD",
+            "decisions": 127,
+            "decision_sides": 254,
+            "zero_risk": 1,
+            "nonzero_risk": 126,
+            "adjusted": 126,
+            "accepted": 252,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_1",
+            "symbol": "ABC/USD",
+            "decisions": 145,
+            "decision_sides": 290,
+            "zero_risk": 1,
+            "nonzero_risk": 144,
+            "adjusted": 144,
+            "accepted": 290,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_2",
+            "symbol": "ABC/USD",
+            "decisions": 139,
+            "decision_sides": 278,
+            "zero_risk": 1,
+            "nonzero_risk": 138,
+            "adjusted": 138,
+            "accepted": 276,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_3",
+            "symbol": "ABC/USD",
+            "decisions": 139,
+            "decision_sides": 278,
+            "zero_risk": 1,
+            "nonzero_risk": 138,
+            "adjusted": 138,
+            "accepted": 276,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_4",
+            "symbol": "ABC/USD",
+            "decisions": 138,
+            "decision_sides": 276,
+            "zero_risk": 1,
+            "nonzero_risk": 137,
+            "adjusted": 137,
+            "accepted": 274,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "north",
+            "maker": "abc_cdf_spot_maker_1",
+            "symbol": "ABC/CDF",
+            "decisions": 146,
+            "decision_sides": 292,
+            "zero_risk": 2,
+            "nonzero_risk": 144,
+            "adjusted": 144,
+            "accepted": 255,
+            "rejected": 35,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "north",
+            "maker": "abc_cdf_spot_maker_2",
+            "symbol": "ABC/CDF",
+            "decisions": 145,
+            "decision_sides": 290,
+            "zero_risk": 1,
+            "nonzero_risk": 144,
+            "adjusted": 144,
+            "accepted": 213,
+            "rejected": 77,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "cdf_spot_maker_1",
+            "symbol": "CDF/USD",
+            "decisions": 92,
+            "decision_sides": 184,
+            "zero_risk": 1,
+            "nonzero_risk": 91,
+            "adjusted": 91,
+            "accepted": 182,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "north",
+            "maker": "cdf_spot_maker_2",
+            "symbol": "CDF/USD",
+            "decisions": 79,
+            "decision_sides": 158,
+            "zero_risk": 1,
+            "nonzero_risk": 78,
+            "adjusted": 78,
+            "accepted": 158,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_1",
+            "symbol": "ABC/USD",
+            "decisions": 142,
+            "decision_sides": 284,
+            "zero_risk": 5,
+            "nonzero_risk": 137,
+            "adjusted": 137,
+            "accepted": 284,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_2",
+            "symbol": "ABC/USD",
+            "decisions": 104,
+            "decision_sides": 208,
+            "zero_risk": 1,
+            "nonzero_risk": 103,
+            "adjusted": 103,
+            "accepted": 208,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_3",
+            "symbol": "ABC/USD",
+            "decisions": 101,
+            "decision_sides": 202,
+            "zero_risk": 1,
+            "nonzero_risk": 100,
+            "adjusted": 100,
+            "accepted": 202,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_4",
+            "symbol": "ABC/USD",
+            "decisions": 89,
+            "decision_sides": 178,
+            "zero_risk": 3,
+            "nonzero_risk": 86,
+            "adjusted": 86,
+            "accepted": 178,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "abc_cdf_spot_maker_1",
+            "symbol": "ABC/CDF",
+            "decisions": 147,
+            "decision_sides": 294,
+            "zero_risk": 1,
+            "nonzero_risk": 146,
+            "adjusted": 146,
+            "accepted": 292,
+            "rejected": 2,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "abc_cdf_spot_maker_2",
+            "symbol": "ABC/CDF",
+            "decisions": 147,
+            "decision_sides": 294,
+            "zero_risk": 1,
+            "nonzero_risk": 146,
+            "adjusted": 146,
+            "accepted": 292,
+            "rejected": 2,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "cdf_spot_maker_1",
+            "symbol": "CDF/USD",
+            "decisions": 125,
+            "decision_sides": 250,
+            "zero_risk": 1,
+            "nonzero_risk": 124,
+            "adjusted": 124,
+            "accepted": 248,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "south",
+            "maker": "cdf_spot_maker_2",
+            "symbol": "CDF/USD",
+            "decisions": 125,
+            "decision_sides": 250,
+            "zero_risk": 1,
+            "nonzero_risk": 124,
+            "adjusted": 124,
+            "accepted": 248,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_1",
+            "symbol": "ABC/USD",
+            "decisions": 147,
+            "decision_sides": 294,
+            "zero_risk": 1,
+            "nonzero_risk": 146,
+            "adjusted": 146,
+            "accepted": 294,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_2",
+            "symbol": "ABC/USD",
+            "decisions": 133,
+            "decision_sides": 266,
+            "zero_risk": 1,
+            "nonzero_risk": 132,
+            "adjusted": 132,
+            "accepted": 264,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_3",
+            "symbol": "ABC/USD",
+            "decisions": 133,
+            "decision_sides": 266,
+            "zero_risk": 1,
+            "nonzero_risk": 132,
+            "adjusted": 132,
+            "accepted": 264,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_4",
+            "symbol": "ABC/USD",
+            "decisions": 138,
+            "decision_sides": 276,
+            "zero_risk": 1,
+            "nonzero_risk": 137,
+            "adjusted": 137,
+            "accepted": 274,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          }
+        ]
+      },
+      "maker_net_delta": {
+        "series": 24,
+        "observations": 7200,
+        "mean_abs_net_delta": 6790950701.473333,
+        "mean_lag1_autocorrelation": 0.9636153896870111
+      },
+      "spot_books": [
+        {
+          "symbol": "ABC/CDF",
+          "venues": [
+            "central",
+            "north",
+            "south"
+          ],
+          "snapshots": 900,
+          "empty_side_snapshots": 51,
+          "two_sided_share": 0.9433333333333334,
+          "trades": 3238,
+          "volume": 295590891317
+        },
+        {
+          "symbol": "ABC/USD",
+          "venues": [
+            "central",
+            "north",
+            "south"
+          ],
+          "snapshots": 900,
+          "empty_side_snapshots": 9,
+          "two_sided_share": 0.99,
+          "trades": 10149,
+          "volume": 77346097995
+        },
+        {
+          "symbol": "CDF/USD",
+          "venues": [
+            "central",
+            "north",
+            "south"
+          ],
+          "snapshots": 900,
+          "empty_side_snapshots": 9,
+          "two_sided_share": 0.99,
+          "trades": 5191,
+          "volume": 654831509560
+        }
+      ],
+      "executed_trade_price_ratios": [
+        {
+          "venue_id": "central",
+          "symbol": "ABC/CDF",
+          "available": true,
+          "trades": 1152,
+          "opening_trade_price": 1666500000,
+          "terminal_trade_price": 1683600000,
+          "terminal_opening_price_ratio": 1.0102610261026104
+        },
+        {
+          "venue_id": "central",
+          "symbol": "ABC/USD",
+          "available": true,
+          "trades": 4722,
+          "opening_trade_price": 4999790000,
+          "terminal_trade_price": 5001010000,
+          "terminal_opening_price_ratio": 1.0002440102484305
+        },
+        {
+          "venue_id": "central",
+          "symbol": "CDF/USD",
+          "available": true,
+          "trades": 2152,
+          "opening_trade_price": 299900000,
+          "terminal_trade_price": 299900000,
+          "terminal_opening_price_ratio": 1
+        },
+        {
+          "venue_id": "north",
+          "symbol": "ABC/CDF",
+          "available": true,
+          "trades": 816,
+          "opening_trade_price": 1666800000,
+          "terminal_trade_price": 1683900000,
+          "terminal_opening_price_ratio": 1.0102591792656588
+        },
+        {
+          "venue_id": "north",
+          "symbol": "ABC/USD",
+          "available": true,
+          "trades": 2039,
+          "opening_trade_price": 4999790000,
+          "terminal_trade_price": 5001000000,
+          "terminal_opening_price_ratio": 1.000242010164427
+        },
+        {
+          "venue_id": "north",
+          "symbol": "CDF/USD",
+          "available": true,
+          "trades": 831,
+          "opening_trade_price": 299900000,
+          "terminal_trade_price": 299900000,
+          "terminal_opening_price_ratio": 1
+        },
+        {
+          "venue_id": "south",
+          "symbol": "ABC/CDF",
+          "available": true,
+          "trades": 1270,
+          "opening_trade_price": 1666800000,
+          "terminal_trade_price": 1683200000,
+          "terminal_opening_price_ratio": 1.009839212862971
+        },
+        {
+          "venue_id": "south",
+          "symbol": "ABC/USD",
+          "available": true,
+          "trades": 3388,
+          "opening_trade_price": 4999790000,
+          "terminal_trade_price": 5000920000,
+          "terminal_opening_price_ratio": 1.0002260094923987
+        },
+        {
+          "venue_id": "south",
+          "symbol": "CDF/USD",
+          "available": true,
+          "trades": 2208,
+          "opening_trade_price": 299900000,
+          "terminal_trade_price": 299900000,
+          "terminal_opening_price_ratio": 1
+        }
+      ],
+      "gates": {
+        "information_boundary_valid": true,
+        "decision_request_integrity": true,
+        "every_scoped_venue_maker_active": true,
+        "scoped_spot_viable": true,
+        "p0c_passive_refresh_preserved": true,
+        "terminal_censoring_explicit": true
+      }
+    },
+    {
+      "arm": "B",
+      "seed": 103,
+      "provenance": {
+        "config_sha256": "734b1f615cf524a0c43de093587721bef1d8623220c06471773493941ec83b50",
+        "binary_sha256": "7163428d9c5ad3564fbf5aa7bcfd24cd4245d8040732ee1d2f69056329a64cc2",
+        "git_revision": "5c24635e70d4646c8e0f45704845f728efc2d775",
+        "gomaxprocs": "3",
+        "evidence": {
+          "events": 329967,
+          "digest": "593bfdbfba97fef62f67574255d5ae5d943e8e3d45bd9699b1b9dc5a45952ae7"
+        }
+      },
+      "policy": {
+        "size_skew_bps": 5000,
+        "post_only": true,
+        "cancel_before_replace": true
+      },
+      "information_boundary": {
+        "valid": true,
+        "schedules": 59416,
+        "receipts": 59304,
+        "decisions": 6139,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0
+      },
+      "activation": {
+        "decisions": 2939,
+        "decision_sides": 5878,
+        "zero_risk_decisions": 33,
+        "nonzero_risk_decisions": 2906,
+        "zero_risk_symmetric": 33,
+        "long_risk_decisions": 398,
+        "short_risk_decisions": 2508,
+        "long_positive_size_skew": 398,
+        "short_negative_size_skew": 2508,
+        "nonzero_risk_zero_size_skew": 0,
+        "wrong_direction_size_skew": 0,
+        "nonzero_adjustments": 2906,
+        "accepted": 5844,
+        "rejected": 10,
+        "horizon_censored_sides": 24,
+        "censored_outcome_deliveries": 0,
+        "missing_outcomes": 0,
+        "duplicate_outcomes": 0,
+        "duplicate_decision_sides": 0,
+        "decision_field_mismatches": 0,
+        "outcome_field_mismatches": 0,
+        "invalid_decision_records": 0,
+        "invalid_censor_records": 0,
+        "skew_buckets": [
+          {
+            "size_skew_bps": 5000,
+            "decisions": 2939,
+            "zero_risk": 33,
+            "nonzero_risk": 2906,
+            "adjusted": 2906
+          }
+        ],
+        "maker_buckets": [
+          {
+            "venue_id": "central",
+            "maker": "abc_cdf_spot_maker_1",
+            "symbol": "ABC/CDF",
+            "decisions": 140,
+            "decision_sides": 280,
+            "zero_risk": 2,
+            "nonzero_risk": 138,
+            "adjusted": 138,
+            "accepted": 278,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "central",
+            "maker": "abc_cdf_spot_maker_2",
+            "symbol": "ABC/CDF",
+            "decisions": 140,
+            "decision_sides": 280,
+            "zero_risk": 2,
+            "nonzero_risk": 138,
+            "adjusted": 138,
+            "accepted": 278,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "central",
+            "maker": "cdf_spot_maker_1",
+            "symbol": "CDF/USD",
+            "decisions": 106,
+            "decision_sides": 212,
+            "zero_risk": 1,
+            "nonzero_risk": 105,
+            "adjusted": 105,
+            "accepted": 210,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "central",
+            "maker": "cdf_spot_maker_2",
+            "symbol": "CDF/USD",
+            "decisions": 106,
+            "decision_sides": 212,
+            "zero_risk": 1,
+            "nonzero_risk": 105,
+            "adjusted": 105,
+            "accepted": 210,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_1",
+            "symbol": "ABC/USD",
+            "decisions": 145,
+            "decision_sides": 290,
+            "zero_risk": 1,
+            "nonzero_risk": 144,
+            "adjusted": 144,
+            "accepted": 290,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_2",
+            "symbol": "ABC/USD",
+            "decisions": 130,
+            "decision_sides": 260,
+            "zero_risk": 1,
+            "nonzero_risk": 129,
+            "adjusted": 129,
+            "accepted": 258,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_3",
+            "symbol": "ABC/USD",
+            "decisions": 138,
+            "decision_sides": 276,
+            "zero_risk": 1,
+            "nonzero_risk": 137,
+            "adjusted": 137,
+            "accepted": 276,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "central",
+            "maker": "spot_maker_4",
+            "symbol": "ABC/USD",
+            "decisions": 141,
+            "decision_sides": 282,
+            "zero_risk": 1,
+            "nonzero_risk": 140,
+            "adjusted": 140,
+            "accepted": 282,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "abc_cdf_spot_maker_1",
+            "symbol": "ABC/CDF",
+            "decisions": 141,
+            "decision_sides": 282,
+            "zero_risk": 2,
+            "nonzero_risk": 139,
+            "adjusted": 139,
+            "accepted": 278,
+            "rejected": 4,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "abc_cdf_spot_maker_2",
+            "symbol": "ABC/CDF",
+            "decisions": 141,
+            "decision_sides": 282,
+            "zero_risk": 2,
+            "nonzero_risk": 139,
+            "adjusted": 139,
+            "accepted": 278,
+            "rejected": 4,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "cdf_spot_maker_1",
+            "symbol": "CDF/USD",
+            "decisions": 79,
+            "decision_sides": 158,
+            "zero_risk": 1,
+            "nonzero_risk": 78,
+            "adjusted": 78,
+            "accepted": 158,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "cdf_spot_maker_2",
+            "symbol": "CDF/USD",
+            "decisions": 74,
+            "decision_sides": 148,
+            "zero_risk": 1,
+            "nonzero_risk": 73,
+            "adjusted": 73,
+            "accepted": 146,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_1",
+            "symbol": "ABC/USD",
+            "decisions": 140,
+            "decision_sides": 280,
+            "zero_risk": 2,
+            "nonzero_risk": 138,
+            "adjusted": 138,
+            "accepted": 280,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_2",
+            "symbol": "ABC/USD",
+            "decisions": 112,
+            "decision_sides": 224,
+            "zero_risk": 3,
+            "nonzero_risk": 109,
+            "adjusted": 109,
+            "accepted": 222,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_3",
+            "symbol": "ABC/USD",
+            "decisions": 89,
+            "decision_sides": 178,
+            "zero_risk": 2,
+            "nonzero_risk": 87,
+            "adjusted": 87,
+            "accepted": 176,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "north",
+            "maker": "spot_maker_4",
+            "symbol": "ABC/USD",
+            "decisions": 89,
+            "decision_sides": 178,
+            "zero_risk": 2,
+            "nonzero_risk": 87,
+            "adjusted": 87,
+            "accepted": 178,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "abc_cdf_spot_maker_1",
+            "symbol": "ABC/CDF",
+            "decisions": 141,
+            "decision_sides": 282,
+            "zero_risk": 1,
+            "nonzero_risk": 140,
+            "adjusted": 140,
+            "accepted": 281,
+            "rejected": 1,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "abc_cdf_spot_maker_2",
+            "symbol": "ABC/CDF",
+            "decisions": 141,
+            "decision_sides": 282,
+            "zero_risk": 1,
+            "nonzero_risk": 140,
+            "adjusted": 140,
+            "accepted": 281,
+            "rejected": 1,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "cdf_spot_maker_1",
+            "symbol": "CDF/USD",
+            "decisions": 106,
+            "decision_sides": 212,
+            "zero_risk": 1,
+            "nonzero_risk": 105,
+            "adjusted": 105,
+            "accepted": 210,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "south",
+            "maker": "cdf_spot_maker_2",
+            "symbol": "CDF/USD",
+            "decisions": 106,
+            "decision_sides": 212,
+            "zero_risk": 1,
+            "nonzero_risk": 105,
+            "adjusted": 105,
+            "accepted": 210,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_1",
+            "symbol": "ABC/USD",
+            "decisions": 145,
+            "decision_sides": 290,
+            "zero_risk": 1,
+            "nonzero_risk": 144,
+            "adjusted": 144,
+            "accepted": 290,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_2",
+            "symbol": "ABC/USD",
+            "decisions": 135,
+            "decision_sides": 270,
+            "zero_risk": 1,
+            "nonzero_risk": 134,
+            "adjusted": 134,
+            "accepted": 268,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_3",
+            "symbol": "ABC/USD",
+            "decisions": 133,
+            "decision_sides": 266,
+            "zero_risk": 1,
+            "nonzero_risk": 132,
+            "adjusted": 132,
+            "accepted": 264,
+            "rejected": 0,
+            "horizon_censored_sides": 2
+          },
+          {
+            "venue_id": "south",
+            "maker": "spot_maker_4",
+            "symbol": "ABC/USD",
+            "decisions": 121,
+            "decision_sides": 242,
+            "zero_risk": 1,
+            "nonzero_risk": 120,
+            "adjusted": 120,
+            "accepted": 242,
+            "rejected": 0,
+            "horizon_censored_sides": 0
+          }
+        ]
+      },
+      "maker_net_delta": {
+        "series": 24,
+        "observations": 7200,
+        "mean_abs_net_delta": 5246692781.299583,
+        "mean_lag1_autocorrelation": 0.9607682105106847
+      },
+      "spot_books": [
+        {
+          "symbol": "ABC/CDF",
+          "venues": [
+            "central",
+            "north",
+            "south"
+          ],
+          "snapshots": 900,
+          "empty_side_snapshots": 88,
+          "two_sided_share": 0.9022222222222223,
+          "trades": 2434,
+          "volume": 357003924001
+        },
+        {
+          "symbol": "ABC/USD",
+          "venues": [
+            "central",
+            "north",
+            "south"
+          ],
+          "snapshots": 900,
+          "empty_side_snapshots": 9,
+          "two_sided_share": 0.99,
+          "trades": 7997,
+          "volume": 77817222799
+        },
+        {
+          "symbol": "CDF/USD",
+          "venues": [
+            "central",
+            "north",
+            "south"
+          ],
+          "snapshots": 900,
+          "empty_side_snapshots": 11,
+          "two_sided_share": 0.9877777777777778,
+          "trades": 3219,
+          "volume": 724413584026
+        }
+      ],
+      "executed_trade_price_ratios": [
+        {
+          "venue_id": "central",
+          "symbol": "ABC/CDF",
+          "available": true,
+          "trades": 816,
+          "opening_trade_price": 1666800000,
+          "terminal_trade_price": 1676100000,
+          "terminal_opening_price_ratio": 1.005579553635709
+        },
+        {
+          "venue_id": "central",
+          "symbol": "ABC/USD",
+          "available": true,
+          "trades": 3239,
+          "opening_trade_price": 5000210000,
+          "terminal_trade_price": 5001120000,
+          "terminal_opening_price_ratio": 1.000181992356321
+        },
+        {
+          "venue_id": "central",
+          "symbol": "CDF/USD",
+          "available": true,
+          "trades": 1360,
+          "opening_trade_price": 299900000,
+          "terminal_trade_price": 299900000,
+          "terminal_opening_price_ratio": 1
+        },
+        {
+          "venue_id": "north",
+          "symbol": "ABC/CDF",
+          "available": true,
+          "trades": 734,
+          "opening_trade_price": 1666800000,
+          "terminal_trade_price": 1674700000,
+          "terminal_opening_price_ratio": 1.0047396208303336
+        },
+        {
+          "venue_id": "north",
+          "symbol": "ABC/USD",
+          "available": true,
+          "trades": 2102,
+          "opening_trade_price": 4999790000,
+          "terminal_trade_price": 5000770000,
+          "terminal_opening_price_ratio": 1.0001960082323458
+        },
+        {
+          "venue_id": "north",
+          "symbol": "CDF/USD",
+          "available": true,
+          "trades": 685,
+          "opening_trade_price": 300100000,
+          "terminal_trade_price": 299900000,
+          "terminal_opening_price_ratio": 0.9993335554815062
+        },
+        {
+          "venue_id": "south",
+          "symbol": "ABC/CDF",
+          "available": true,
+          "trades": 884,
+          "opening_trade_price": 1666800000,
+          "terminal_trade_price": 1674300000,
+          "terminal_opening_price_ratio": 1.0044996400287978
+        },
+        {
+          "venue_id": "south",
+          "symbol": "ABC/USD",
+          "available": true,
+          "trades": 2656,
+          "opening_trade_price": 4999790000,
+          "terminal_trade_price": 5001150000,
+          "terminal_opening_price_ratio": 1.0002720114244799
+        },
+        {
+          "venue_id": "south",
+          "symbol": "CDF/USD",
+          "available": true,
+          "trades": 1174,
+          "opening_trade_price": 300100000,
+          "terminal_trade_price": 299900000,
+          "terminal_opening_price_ratio": 0.9993335554815062
+        }
+      ],
+      "gates": {
+        "information_boundary_valid": true,
+        "decision_request_integrity": true,
+        "every_scoped_venue_maker_active": true,
+        "scoped_spot_viable": true,
+        "p0c_passive_refresh_preserved": true,
+        "terminal_censoring_explicit": true
+      }
+    }
+  ],
+  "paired_deltas": [
+    {
+      "seed": 101,
+      "b_minus_a": {
+        "decisions": 1704,
+        "nonzero_risk_decisions": 1709,
+        "nonzero_adjustments": 3059,
+        "accepted": 3305,
+        "rejected": 83,
+        "mean_abs_maker_net_delta": 3373524115.292222,
+        "mean_lag1_maker_net_delta": -0.0020702173547693103,
+        "spot_books": [
+          {
+            "symbol": "ABC/USD",
+            "two_sided_share": 0,
+            "trades": -1151,
+            "volume": -10377887023
+          },
+          {
+            "symbol": "CDF/USD",
+            "two_sided_share": 0.022222222222222254,
+            "trades": -259,
+            "volume": -137290322628
+          },
+          {
+            "symbol": "ABC/CDF",
+            "two_sided_share": 0.0344444444444445,
+            "trades": 309,
+            "volume": -3466232561
+          }
+        ]
+      }
+    },
+    {
+      "seed": 103,
+      "b_minus_a": {
+        "decisions": 1510,
+        "nonzero_risk_decisions": 1513,
+        "nonzero_adjustments": 2906,
+        "accepted": 3060,
+        "rejected": -52,
+        "mean_abs_maker_net_delta": 1230704117.9187503,
+        "mean_lag1_maker_net_delta": -0.01461524761552091,
+        "spot_books": [
+          {
+            "symbol": "ABC/USD",
+            "two_sided_share": 0,
+            "trades": -4530,
+            "volume": -13961874727
+          },
+          {
+            "symbol": "CDF/USD",
+            "two_sided_share": 0.023333333333333317,
+            "trades": -1423,
+            "volume": -113914047979
+          },
+          {
+            "symbol": "ABC/CDF",
+            "two_sided_share": -0.014444444444444371,
+            "trades": -468,
+            "volume": 76923829044
+          }
+        ]
+      }
+    }
+  ],
+  "gates": {
+    "all_cells_complete": true,
+    "common_binary": true,
+    "common_simulator_revision": true
+  }
+}

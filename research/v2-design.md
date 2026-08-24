@@ -115,6 +115,16 @@ cross-venue composite, local microprice/imbalance, queue-sensitive,
 flow/toxicity-sensitive, volatility-aware, and inventory-constrained. Each
 family needs a stated information set and objective.
 
+Progress ledger: the P0 A/B/C passive-refresh screen is completed in
+[`v2-3-passive-making-p0-results.md`](v2-3-passive-making-p0-results.md).
+The subsequent P1 size-only screen is completed in
+[`v2-3-inventory-size-p1-results.md`](v2-3-inventory-size-p1-results.md):
+the declared long/short displayed-size response is active in both paired seeds
+without a short-horizon viability collapse. It is not a stabilization claim.
+The next mechanism must be a separately preregistered explicit, costly,
+rate-limited inventory rebalance; no P1 coefficient or population tuning is
+licensed by that result.
+
 ## V2-4 — economically motivated demand and ecology
 
 | field | design |
