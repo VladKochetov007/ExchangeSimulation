@@ -158,6 +158,19 @@ the narrow local hedge-gap mechanism. It licenses a separately preregistered
 L1 replacement screen only; it does not license parameter tuning or a claim
 that the actor stabilizes CDF/USD or supplies realistic aggregate demand.
 
+The registered matched L1 side-policy screen is now complete in
+[`v2-4-l1-cdf-motive-control-results.md`](v2-4-l1-cdf-motive-control-results.md)
+and `artifacts/v2-4-l1/l1-summary.json`. With all six broad legacy
+`noise_flow` actors deliberately retained, the delivery-liability policy
+reduced its own exact time-averaged gap in both paired seeds relative to an
+otherwise matched random-side policy; every exercised delivery fill reduced
+the replayed gap, while the control had many nonreducing fills. This is
+**SUPPORTED (screening)** for the local motive distinction only. The CDF/USD
+non-collapse floor also passed in all cells, but it is explicitly not an
+ecology, price-stability, or replacement result. The next V2-4 gate is a
+preregistered phase/offset test (L1-P) before any CDF allocation or legacy
+roster-demotion claim; it must not tune the L1 policies or parent population.
+
 ## V2-5 — identifiable perp funding and dated carry
 
 | field | design |

@@ -549,3 +549,34 @@ finish and their contracts pass.
   licensed. Next V2 gate: preregister L1 as a controlled replacement of one
   activity-generator family, with long-run viability, phase, and holdout
   conditions fixed before implementation.
+
+### 2026-08-24 V2-4 L1 matched CDF motive-control screen
+
+- The registered 30-minute full-evidence A/B × paired-{101,103} screen is
+  complete. A retains the named CDF/USD-only slot but uses
+  `random_side_control`; B differs only by `delivery_liability`. All six
+  broad legacy `noise_flow` actors remain in both arms; neither L1 arm is a
+  roster-replacement experiment.
+- All four cells have final `greeks.json`/`latency.json` sentinels, retained
+  raw evidence, a V2 receipt/frontier audit, an exact persisted-evidence
+  artifact digest, a valid independent policy replay, 180 state updates for
+  each of three slots, accepted requests in each slot, and the weak CDF/USD
+  non-collapse floor. The scored provenance is
+  `research/artifacts/v2-4-l1/l1-summary.json`.
+- Result: **SUPPORTED (screening), local motive only.** In both seeds every
+  B fill reduced its independently replayed delivery gap, A contained many
+  nonreducing fills, and exact B−A mean absolute gaps were
+  −8,898,362,628.476 (101) and −4,334,242,294.419 (103) raw units. See
+  `research/v2-4-l1-cdf-motive-control-results.md`. This does not support a
+  price-stability, demand-realism, wealth/ecology, robustness, or
+  `noise_flow`-replacement claim.
+- Two analyzer-only defects were found during retained-evidence replay and
+  fixed before final extraction: `4364fed` distinguishes an intended
+  no-touch defer (`request_id=0`) from a real request; `1a2641a` accepts the
+  exchange's documented exact-zero-fee representation (`amount=0, asset=""`)
+  while rejecting missing positive fees. Neither changed simulator behavior or
+  raw evidence. Their normal/race fixtures pass.
+- Next gate: preregister and run L1-P phase/offset sensitivity, holding the
+  L1 roster, obligations, policy, caps, fees, latency, and cadence frequency
+  fixed. Do not demote legacy `noise_flow` or tune economic parameters before
+  that result.
