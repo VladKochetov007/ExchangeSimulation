@@ -1,0 +1,52 @@
+{
+  "experiment": "V2-5 P3c mandate encoding preflight",
+  "verdict": "PASSED (instrumentation/configuration preflight only)",
+  "scope": "declared P3c mandate preserves pre-mandate entry and evidence encoding; not a close, funding, basis, profitability, or market-quality result",
+  "preregistration": "research/v2-5-p3c-term-completion-preregistration.md",
+  "simulation_source_revision": "1b4d25ecd7748179b2ed7f762c07dc8f0de9c2e2",
+  "manifest_worktree_modified": true,
+  "seed": 107,
+  "horizon": "5m simulated",
+  "gomaxprocs": 4,
+  "config_sha256": "b4dfa018d075f12ede15dcc082d862322cadf6dcf0f06e0c4a8fd4c70a6b222b",
+  "simulator_sha256": "ef32c40f15a26e6968cd9ac6906c5db537034eca1710077ac9d78c2a96585e47",
+  "analyzer_sha256": "7384a8f493cf62804c86fe1a6f319021bd23367a564887c9167e0221ccb5bde2",
+  "prunegate_sha256": "378297e59df669c6f9baf69010b4a65160f89793109e61731eef7d1d16275b42",
+  "execution": {
+    "domain": "execution_observations",
+    "ordering": "ordered_stream",
+    "events": 56189,
+    "hash": "f8bf4844729c762b76097ac44cf664c5148c3e6a853dcb157ca9c86b0d93d1c2",
+    "matches_pre_mandate_short_world": true
+  },
+  "persisted_evidence": {
+    "domain": "persisted_evidence",
+    "ordering": "unordered_multiset",
+    "events": 56648,
+    "hash": "9d9f608f899b75f0d60ec0e23fb1b72fa6a7dae5274fd9202ca89477ddd38665",
+    "artifact_domain": "persisted_json_records",
+    "artifact_hash": "6ebd26dc7b7f5f54502a7837384fe06716d3a73410c9857678db1447eb63f241"
+  },
+  "evidence_gates": {
+    "completion_sentinels": true,
+    "term_carry_valid": true,
+    "decisions": 450,
+    "submitted": 4,
+    "accepted": 4,
+    "fills": 5,
+    "active_terms": 2,
+    "first_exposure_mismatches": 0,
+    "receipt_replay_valid": true,
+    "receipt_schedules": 2679,
+    "receipt_deliveries": 2670,
+    "receipt_audited_decisions": 4,
+    "conservation_delta_mismatches": 0,
+    "conservation_broken_chains": 0,
+    "position_disagreements": 0,
+    "order_lifecycle_errors": 0,
+    "funding_errors": 0
+  },
+  "raw_evidence_retained": true,
+  "safe_to_prune": false,
+  "next_gate": "Run the immutable 98-hour P3c full-evidence term-completion cell; score exactly-once close and terminal flatness only after every extracted evidence contract passes."
+}
