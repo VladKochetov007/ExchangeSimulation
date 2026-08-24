@@ -197,16 +197,18 @@ func (r *DecisionFrontierVectorRecorder) Record(decision DecisionFrontierVector)
 	}
 }
 
-// validDecisionOrderPrice distinguishes a market request's protocol price of
-// zero from an unavailable market reference. Limit decisions need a positive
-// limit; Market requests deliberately carry zero because their price is
-// determined by later executable book levels, not this request field.
+// validDecisionOrderPrice validates only the evidence wire contract, not an
+// instrument's price domain. A limit price is an explicit signed numeric value
+// whose admissibility is decided later by the receiving exchange's instrument
+// policy. Market requests deliberately carry zero because their price is
+// determined by later executable book levels, not this request field. That
+// protocol zero is neither a market reference nor an unavailable price.
 func validDecisionOrderPrice(orderType types.OrderType, price int64) bool {
 	switch orderType {
 	case types.Market:
 		return price == 0
 	case types.LimitOrder:
-		return price > 0
+		return true
 	default:
 		return false
 	}
