@@ -738,6 +738,9 @@ func (c *Config) normalize() error {
 			if !c.RecordPerpExposureHedgerDecisions || !c.RecordMarketDataReceipts || !slices.Contains(c.MarketDataReceiptRoles, "perp_exposure_hedger") {
 				return errors.New("multivenue: instrumented perp exposure hedger requires decisions and perp_exposure_hedger market-data receipts")
 			}
+			if !c.StrictPopulationAccounting {
+				return errors.New("multivenue: instrumented perp exposure hedger requires strict population accounting for its independent role roster")
+			}
 		}
 	}
 	if c.RecordPerpExposureHedgerDecisions && c.PerpExposureHedger == nil {
@@ -1968,6 +1971,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		}
 		for _, arb := range venue.FundingCarryArbs {
 			runner.AddActor(arb)
+		}
+		for _, hedger := range venue.PerpExposureHedgers {
+			runner.AddActor(hedger)
 		}
 		for _, latent := range venue.LatentLiquidity {
 			runner.AddActor(latent)
