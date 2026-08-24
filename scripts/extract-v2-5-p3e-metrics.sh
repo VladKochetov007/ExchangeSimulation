@@ -94,24 +94,28 @@ if [[ "$experiment_mode" == lifecycle ]]; then
 	' "$cell/termcarrylifecycle.json" >/dev/null
 fi
 
-# A P3e P0 term can intentionally still be economically open at the horizon,
-# so this checks only independently reconstructible mechanical evidence. The
-# registered activation predicate and any closure claim are scored elsewhere.
-jq -e '
-  .result.valid == true and .result.receipt_audit_valid == true and
-  .result.receipt_evidence_errors == 0 and
-  .result.source_mismatches == 0 and .result.future_source_use == 0 and
-  .result.invalid_decision_records == 0 and .result.decision_field_mismatches == 0 and
-  .result.arithmetic_mismatches == 0 and .result.missing_gateway_decisions == 0 and
-  .result.gateway_decision_mismatches == 0 and .result.missing_venue_outcomes == 0 and
-  .result.duplicate_venue_outcomes == 0 and .result.missing_actor_outcomes == 0 and
-  .result.actor_outcome_mismatches == 0 and .result.lifecycle_violations == 0 and
-  .result.position_continuity_errors == 0 and .result.terminal_perp_mismatches == 0 and
-  .result.terminal_spot_mismatches == 0 and .result.first_exposure_mismatches == 0 and
-  .result.outside_term_funding_settlements == 0 and
-  .result.missing_passive_exit_cancellations == 0 and
-  .result.passive_exit_cancellation_mismatches == 0
-' "$cell/termcarry.json" >/dev/null
+if [[ "$experiment_mode" == lifecycle ]]; then
+	"$root_dir/scripts/check-v2-5-p3e-lifecycle-termcarry.sh" "$cell"
+else
+	# A P3e P0 term can intentionally still be economically open at the horizon,
+	# so this checks only independently reconstructible mechanical evidence. The
+	# registered activation predicate and any closure claim are scored elsewhere.
+	jq -e '
+	  .result.valid == true and .result.receipt_audit_valid == true and
+	  .result.receipt_evidence_errors == 0 and
+	  .result.source_mismatches == 0 and .result.future_source_use == 0 and
+	  .result.invalid_decision_records == 0 and .result.decision_field_mismatches == 0 and
+	  .result.arithmetic_mismatches == 0 and .result.missing_gateway_decisions == 0 and
+	  .result.gateway_decision_mismatches == 0 and .result.missing_venue_outcomes == 0 and
+	  .result.duplicate_venue_outcomes == 0 and .result.missing_actor_outcomes == 0 and
+	  .result.actor_outcome_mismatches == 0 and .result.lifecycle_violations == 0 and
+	  .result.position_continuity_errors == 0 and .result.terminal_perp_mismatches == 0 and
+	  .result.terminal_spot_mismatches == 0 and .result.first_exposure_mismatches == 0 and
+	  .result.outside_term_funding_settlements == 0 and
+	  .result.missing_passive_exit_cancellations == 0 and
+	  .result.passive_exit_cancellation_mismatches == 0
+	' "$cell/termcarry.json" >/dev/null
+fi
 jq -e '.result.valid == true' "$cell/observationreceipts.json" >/dev/null
 jq -e '
   .result.funding_broken == 0 and .result.funding_sign_wrong == 0 and
