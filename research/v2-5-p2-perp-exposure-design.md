@@ -1,7 +1,10 @@
 # V2-5 P2 design — finite physical-exposure perp hedger
 
-Status: **design ledger; not implemented, rendered, or simulated.** It follows
-the valid-but-unexercised P1a result. It does not revise P0/P1a, change their
+Status: **implementation and independent-evidence gate passed; P2a unrun.**
+The actor, local receipt-bound decision evidence, independent replay, evidence
+mutations, and evidence-on/off fresh-process neutrality are committed through
+`6013808`. P2a remains the first market-backed experiment. It follows the
+valid-but-unexercised P1a result; it does not revise P0/P1a, change their
 costs, inject a funding rate, or authorize a P1b market score.
 
 ## Observed constraint
