@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "experiment": "V2-4-L1-P",
+  "verdict": "SUPPORTED (screening)",
+  "claim_scope": "the delivery-liability policy's independently reconstructed local-gap-reducing fills and the preregistered CDF/USD non-collapse floor survive an explicit one-second phase offset from the legacy all-zero liability phase",
+  "limits": [
+    "two paired seeds are screening evidence, not robustness",
+    "no price-stability, demand-elasticity, ecology, wealth, or legacy-noise-flow replacement claim",
+    "large descriptive phase differences are an unresolved clock-interaction discovery candidate, not a post-hoc scored directional effect",
+    "raw evidence is retained; this summary is not pruning authorization"
+  ],
+  "implementation_revision": "af7a284",
+  "zero_phase_equivalence_test_revision": "160508a",
+  "run_revision": "160508a73f08d17679fe9d9e72713d7197fa0dc5",
+  "multivenue_binary_sha256": "cfc920ce12c1aa9790bf43424418fdcb921a5dbbebcd2f22c4109550523515e1",
+  "analysis_revision": "160508a73f08d17679fe9d9e72713d7197fa0dc5",
+  "mvanalyze_binary_sha256": "09a66168f74a91c48655ea4680542e552aecde6950ca7414de10dfc0a518b93f",
+  "horizon": "30m",
+  "gomaxprocs": 3,
+  "economic_arm_delta": {
+    "P0": "cdf_liability_hedger.decision_phase_offset=0",
+    "P1": "cdf_liability_hedger.decision_phase_offset=1000000000"
+  },
+  "cells": [
+    {
+      "arm": "P0",
+      "seed": 101,
+      "config_sha256": "10f69dafa042e1555bf5098d620f2fcfb317104e0c4e1a55b191a4c6c5501b12",
+      "evidence_artifact": {"events": 2398538, "digest": "2a059d0f287ac79983a9c1fe8310b8f9bd8383975293f90c56eeceda35a31d24"},
+      "receipt_audit": {"valid": true, "schedules": 484185, "receipts": 483954, "decisions": 54435},
+      "policy_replay": {"valid": true, "phase_configured": true, "phase_nanos": 0, "decisions": 2700, "state_updates": 540, "submitted": 1984, "accepted": 1982, "fills": 1944, "reducing_fills": 1944, "nonreducing_fills": 0, "absolute_gap_sum": "898726083300", "gap_samples": 2700, "checks": 0},
+      "noncollapse_floor_pass": true
+    },
+    {
+      "arm": "P0",
+      "seed": 103,
+      "config_sha256": "01785e79ccebbca4a448fb1eebc2053096acacf47f0b364b5beaa2bd18ee5d7f",
+      "evidence_artifact": {"events": 2396423, "digest": "8b5a7f1fc8ce542afd33900fae205e8f3747595a6b0e5ecc5ba1a66212187a92"},
+      "receipt_audit": {"valid": true, "schedules": 485679, "receipts": 485540, "decisions": 59138},
+      "policy_replay": {"valid": true, "phase_configured": true, "phase_nanos": 0, "decisions": 2700, "state_updates": 540, "submitted": 2014, "accepted": 2014, "fills": 2068, "reducing_fills": 2068, "nonreducing_fills": 0, "absolute_gap_sum": "1310482630795", "gap_samples": 2700, "checks": 0},
+      "noncollapse_floor_pass": true
+    },
+    {
+      "arm": "P1",
+      "seed": 101,
+      "config_sha256": "1b87168513a2b980c834b2af4fe1afaff1ec09d688ee12759c531687be0bdb8a",
+      "evidence_artifact": {"events": 2356591, "digest": "d8e5d8863b537ef4581fafd4ec9960ba522abc018e0e3d4cedf80667184e2275"},
+      "receipt_audit": {"valid": true, "schedules": 474512, "receipts": 474293, "decisions": 52008},
+      "policy_replay": {"valid": true, "phase_configured": true, "phase_nanos": 1000000000, "decisions": 2697, "state_updates": 540, "submitted": 1801, "accepted": 1797, "fills": 3995, "reducing_fills": 3995, "nonreducing_fills": 0, "absolute_gap_sum": "248170300184", "gap_samples": 2697, "checks": 0},
+      "noncollapse_floor_pass": true
+    },
+    {
+      "arm": "P1",
+      "seed": 103,
+      "config_sha256": "4ed922d8b2f1bccc5d61a25204e1d13947cf546743546cf53c418cb5c23dd285",
+      "evidence_artifact": {"events": 2310735, "digest": "da058fbf061f1ff9e546a3880cca42804b8a86d428ba38e50c0c646194d8e9d2"},
+      "receipt_audit": {"valid": true, "schedules": 466090, "receipts": 465967, "decisions": 52514},
+      "policy_replay": {"valid": true, "phase_configured": true, "phase_nanos": 1000000000, "decisions": 2697, "state_updates": 540, "submitted": 1690, "accepted": 1690, "fills": 3802, "reducing_fills": 3802, "nonreducing_fills": 0, "absolute_gap_sum": "235658169214", "gap_samples": 2697, "checks": 0},
+      "noncollapse_floor_pass": true
+    }
+  ],
+  "paired_descriptive_results": [
+    {"seed": 101, "P0_mean_absolute_gap": "898726083300/2700 = 332861512.333333333333", "P1_mean_absolute_gap": "248170300184/2697 = 92017167.291064144", "P1_minus_P0": "-240844345.042269189", "P0_fills": 1944, "P1_fills": 3995},
+    {"seed": 103, "P0_mean_absolute_gap": "1310482630795/2700 = 485363937.331481481481", "P1_mean_absolute_gap": "235658169214/2697 = 87377889.956989247", "P1_minus_P0": "-397986047.374492234", "P0_fills": 2068, "P1_fills": 3802}
+  ],
+  "activation_gates": {
+    "all_receipt_audits_valid": true,
+    "all_persisted_evidence_artifact_hashes_present": true,
+    "all_independent_policy_phase_replays_valid": true,
+    "minimum_updates_per_slot": 180,
+    "preregistered_minimum_updates_per_slot": 120,
+    "at_least_one_accepted_request_per_slot": true,
+    "all_cells_pass_cdf_noncollapse_floor": true,
+    "all_exercised_delivery_fills_reduce_gap": true
+  },
+  "raw_log_policy": "retained; no L1-P raw evidence is prunable from this summary"
+}

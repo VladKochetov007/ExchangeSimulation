@@ -129,3 +129,17 @@ Passing L1-P does not demonstrate phase robustness beyond this one half-period
 offset, price stability, realistic demand, legacy-actor replacement, or a
 causal effect on the wider market. Failure is a result: it blocks L2 roster
 allocation until the relevant timing interaction is decomposed.
+
+## Registered outcome (append-only)
+
+The predeclared local-motive and non-collapse criterion passed in P0/P1 ×
+seed-{101,103}; the result is **SUPPORTED (screening)** at this one
+half-period offset. Every evidence contract and local fill-direction check
+passed. The outcome and provenance are recorded in
+[`v2-4-l1p-phase-results.md`](v2-4-l1p-phase-results.md) and
+`artifacts/v2-4-l1p/l1p-summary.json`.
+
+The descriptive mean-gap and fill changes are large in both seeds, but had no
+preregistered directional threshold. They remain a clock-interaction discovery
+candidate and do not convert the registered result into an ecology-wide phase
+robustness claim.

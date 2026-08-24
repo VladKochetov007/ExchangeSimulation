@@ -580,3 +580,32 @@ finish and their contracts pass.
   L1 roster, obligations, policy, caps, fees, latency, and cadence frequency
   fixed. Do not demote legacy `noise_flow` or tune economic parameters before
   that result.
+
+### 2026-08-24 V2-4 L1-P liability-hedger phase screen
+
+- L1-P is complete and scored at `research/v2-4-l1p-phase-results.md` with
+  compact provenance in `artifacts/v2-4-l1p/l1p-summary.json`. It varies only
+  `cdf_liability_hedger.decision_phase_offset`: P0 is explicit zero/first
+  decision at start+2s; P1 is +1s/first decision at start+3s. All policy,
+  population, fees, prices, latency, periods, and other clocks remain fixed.
+- `af7a284` provides the phase capability. Explicit zero routes through the
+  legacy timer code; `160508a` proves explicit-zero and absent legacy phase
+  have identical fresh-process execution hashes at GOMAXPROCS 1/4. The
+  nonzero phase evidence-on/off fresh-process matrix is also hash-neutral and
+  its independent replay rejects missing/mismatched/off-phase records.
+- The full-evidence P0/P1 × seed-{101,103} cells ran 30m from `160508a`,
+  `GOMAXPROCS=3`, and multivenue SHA-256
+  `cfc920ce12c1aa9790bf43424418fdcb921a5dbbebcd2f22c4109550523515e1`.
+  Every completion decision used only final `greeks.json` and `latency.json`.
+  All receipt audits, evidence artifact hashes, independent policy/phase
+  replays, slot activity gates, and CDF/USD non-collapse floors pass. Raw
+  evidence is retained at `artifacts/v2-4-l1p/{P0,P1}/seed-{101,103}` and is
+  not prunable.
+- Result: **SUPPORTED (screening), narrow local-motive contract.** Every
+  exercised delivery fill reduces its independently replayed gap under both
+  phases. P1 has much lower descriptive mean gap and more fills in both seeds
+  (not a preregistered directional score). This is a clock-interaction
+  discovery candidate; it does not establish ecology-wide phase robustness or
+  support L2 roster demotion. Next: preregister an L1-P2 phase-decomposition
+  screen with holdout replication and one periodic counterpart isolated at a
+  time. Do not tune policy, population, price, spread, frequency, or latency.
