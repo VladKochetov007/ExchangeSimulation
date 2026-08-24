@@ -196,6 +196,9 @@ func TestViabilityRollsUpEachBookAndDatesItsFirstBreach(t *testing.T) {
 	if summary.Windows != 2 || summary.Viable != 1 {
 		t.Errorf("summary = %d windows %d viable, want 2 and 1", summary.Windows, summary.Viable)
 	}
+	if summary.TakerRoles != 2 || summary.MakerRoles != 1 || summary.Snapshots != 2 || summary.EmptySideSnapshots != 1 {
+		t.Errorf("whole-book role/snapshot totals = %+v, want 2 takers, 1 maker, 2 snapshots, 1 empty", summary)
+	}
 	// The second window's events land at ten seconds, which is window two of a
 	// five-second grid counted from the run's first window.
 	if summary.FirstBreachWindow != 2 {

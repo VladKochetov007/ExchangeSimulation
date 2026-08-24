@@ -113,6 +113,13 @@ type BookViability struct {
 	Symbol  string `json:"symbol"`
 	Windows int    `json:"windows"`
 	Viable  int    `json:"viable"`
+	// These are whole-book unions/totals, unlike a single MarketWindow. They
+	// make a predeclared non-collapse floor inspectable without pretending a
+	// later-selected healthy window represents the full run.
+	TakerRoles         int `json:"taker_roles"`
+	MakerRoles         int `json:"maker_roles"`
+	Snapshots          int `json:"snapshots"`
+	EmptySideSnapshots int `json:"empty_side_snapshots"`
 	// FirstBreachWindow is the index of the earliest window this book failed,
 	// or minus one if it never did. A market that dies in cycle seven and one
 	// that was never alive are different failures.
@@ -373,6 +380,8 @@ func summariseViability(windows map[windowKey]*windowAccumulator, opts Viability
 		result.Windows = append(result.Windows, window)
 	}
 	summaries := make(map[string]*BookViability)
+	summaryTakerRoles := make(map[string]map[string]struct{})
+	summaryMakerRoles := make(map[string]map[string]struct{})
 	order := make([]string, 0, len(windowsPerBook))
 	// keys and result.Windows were built in the same order, so the index is
 	// shared between them.
@@ -386,11 +395,22 @@ func summariseViability(windows map[windowKey]*windowAccumulator, opts Viability
 				Breaches: make(map[string]int),
 			}
 			summaries[book] = summary
+			summaryTakerRoles[book] = make(map[string]struct{})
+			summaryMakerRoles[book] = make(map[string]struct{})
 			order = append(order, book)
 		}
 		window := result.Windows[index]
+		accumulator := windows[key]
 		summary.Windows++
 		summary.Trades += window.Trades
+		summary.Snapshots += window.Snapshots
+		summary.EmptySideSnapshots += window.EmptySideSnapshots
+		for role := range accumulator.takerRoleVolume {
+			summaryTakerRoles[book][role] = struct{}{}
+		}
+		for role := range accumulator.makerRoles {
+			summaryMakerRoles[book][role] = struct{}{}
+		}
 		if window.Viable() {
 			summary.Viable++
 			summary.LastViableWindow = window.Index
@@ -404,6 +424,8 @@ func summariseViability(windows map[windowKey]*windowAccumulator, opts Viability
 		}
 	}
 	for _, book := range order {
+		summaries[book].TakerRoles = len(summaryTakerRoles[book])
+		summaries[book].MakerRoles = len(summaryMakerRoles[book])
 		result.BookSummaries = append(result.BookSummaries, *summaries[book])
 	}
 
