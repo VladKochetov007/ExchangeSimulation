@@ -249,6 +249,7 @@ type StoikovMMConfig struct {
 	InventoryRebalanceDecisionClient       uint64
 	InventoryRebalanceDecisionTerminalNano int64
 	InventoryRebalanceTakerFeeBps          int64
+	InventoryRebalanceFillObserver         func(MakerInventoryRebalanceFill)
 }
 
 // InventoryRebalanceConfig is the local, rate-limited P2 action contract. It
@@ -295,6 +296,8 @@ type MakerInventoryRebalanceDecision struct {
 	Symbol               string        `json:"symbol"`
 	DecisionTime         int64         `json:"decision_time"`
 	Enabled              bool          `json:"enabled"`
+	Subscribed           bool          `json:"subscribed"`
+	RequestPending       bool          `json:"request_pending"`
 	ActionOrDeferReason  string        `json:"action_or_defer_reason"`
 	Inventory            int64         `json:"inventory"`
 	RiskBandQty          int64         `json:"risk_band_qty"`
@@ -310,7 +313,10 @@ type MakerInventoryRebalanceDecision struct {
 	DesiredReduction     int64         `json:"desired_reduction"`
 	ParticipationCap     int64         `json:"participation_cap"`
 	MaxRequestQty        int64         `json:"max_request_qty"`
+	ParticipationBps     int64         `json:"participation_bps"`
 	SlippageBps          int64         `json:"slippage_bps"`
+	EvaluationInterval   int64         `json:"evaluation_interval"`
+	Cooldown             int64         `json:"cooldown"`
 	LimitPrice           int64         `json:"limit_price"`
 	RequestedQty         int64         `json:"requested_qty"`
 	TakerFeeBps          int64         `json:"taker_fee_bps"`
@@ -318,6 +324,27 @@ type MakerInventoryRebalanceDecision struct {
 	CooldownUntil        int64         `json:"cooldown_until"`
 	OutcomeExpectation   string        `json:"outcome_expectation"`
 	CensorReason         string        `json:"censor_reason,omitempty"`
+}
+
+// MakerInventoryRebalanceFill attests the submitting maker's actor-local
+// inventory immediately around an exchange-confirmed P2 fill. The exchange
+// fill remains the source for execution and fee semantics; this companion
+// record makes the claimed individual risk reduction independently testable.
+type MakerInventoryRebalanceFill struct {
+	VenueID       string        `json:"venue_id"`
+	Maker         string        `json:"maker"`
+	ClientID      uint64        `json:"client_id"`
+	Symbol        string        `json:"symbol"`
+	Timestamp     int64         `json:"timestamp"`
+	OrderID       uint64        `json:"order_id"`
+	TradeID       uint64        `json:"trade_id"`
+	Side          exchange.Side `json:"side"`
+	Qty           int64         `json:"qty"`
+	Price         int64         `json:"price"`
+	FeeAmount     int64         `json:"fee_amount"`
+	FeeAsset      string        `json:"fee_asset"`
+	PreInventory  int64         `json:"pre_inventory"`
+	PostInventory int64         `json:"post_inventory"`
 }
 
 // MakerQuoteSizeDecision records a P1 quantity decision before either quote
@@ -690,10 +717,30 @@ func (mm *StoikovMarketMaker) onFill(e actor.OrderFillEvent) {
 	if e.Symbol != mm.cfg.Symbol {
 		return
 	}
+	_, rebalanceFill := mm.rebalanceOrderIDs[e.OrderID]
+	preInventory := mm.inventory
 	if e.Side == exchange.Buy {
 		mm.inventory += e.Qty
 	} else {
 		mm.inventory -= e.Qty
+	}
+	if rebalanceFill && mm.cfg.InventoryRebalanceFillObserver != nil {
+		mm.cfg.InventoryRebalanceFillObserver(MakerInventoryRebalanceFill{
+			VenueID:       mm.cfg.InventoryRebalanceDecisionVenue,
+			Maker:         mm.cfg.InventoryRebalanceDecisionMaker,
+			ClientID:      mm.cfg.InventoryRebalanceDecisionClient,
+			Symbol:        e.Symbol,
+			Timestamp:     e.Timestamp,
+			OrderID:       e.OrderID,
+			TradeID:       e.TradeID,
+			Side:          e.Side,
+			Qty:           e.Qty,
+			Price:         e.Price,
+			FeeAmount:     e.FeeAmount,
+			FeeAsset:      e.FeeAsset,
+			PreInventory:  preInventory,
+			PostInventory: mm.inventory,
+		})
 	}
 	if !e.IsFull {
 		return
@@ -764,6 +811,8 @@ func (mm *StoikovMarketMaker) rebalanceDecision(now time.Time) MakerInventoryReb
 		ClientID:             mm.cfg.InventoryRebalanceDecisionClient,
 		Symbol:               mm.cfg.Symbol,
 		DecisionTime:         now.UnixNano(),
+		Subscribed:           mm.subscribed,
+		RequestPending:       mm.rebalancePending,
 		Inventory:            mm.inventory,
 		LastBookSourceTime:   book.SourceTime,
 		LastBookReceivedTime: book.ReceivedTime,
@@ -781,7 +830,10 @@ func (mm *StoikovMarketMaker) rebalanceDecision(now time.Time) MakerInventoryReb
 	decision.RiskBandQty = policy.RiskBandQty
 	decision.TargetBandQty = policy.TargetBandQty
 	decision.MaxRequestQty = policy.MaxRequestQty
+	decision.ParticipationBps = policy.ParticipationBps
 	decision.SlippageBps = policy.SlippageBps
+	decision.EvaluationInterval = int64(policy.Interval)
+	decision.Cooldown = int64(policy.Cooldown)
 	decision.TakerFeeBps = mm.cfg.InventoryRebalanceTakerFeeBps
 	if !policy.Enabled {
 		decision.ActionOrDeferReason = "POLICY_DISABLED"

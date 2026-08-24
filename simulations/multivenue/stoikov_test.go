@@ -73,6 +73,7 @@ func TestQuoteTickRoundingPreservesOrdering(t *testing.T) {
 func TestInventoryRebalancePlanUsesOnlyLocalContraTouchAndCaps(t *testing.T) {
 	gw := newStoikovStubGateway()
 	var decisions []MakerInventoryRebalanceDecision
+	var fills []MakerInventoryRebalanceFill
 	now := time.Unix(10, 0)
 	policy := &InventoryRebalanceConfig{
 		Enabled: true, Interval: 10 * time.Second, Cooldown: 30 * time.Second,
@@ -82,6 +83,7 @@ func TestInventoryRebalancePlanUsesOnlyLocalContraTouchAndCaps(t *testing.T) {
 	mm := NewStoikovMarketMaker(1, gw, StoikovMMConfig{
 		Symbol: "CDF/USD", TickSize: 10, InventoryRebalance: policy,
 		InventoryRebalanceDecisionObserver: func(decision MakerInventoryRebalanceDecision) { decisions = append(decisions, decision) },
+		InventoryRebalanceFillObserver:     func(fill MakerInventoryRebalanceFill) { fills = append(fills, fill) },
 	})
 	mm.subscribed = true
 	mm.inventory = 1_500
@@ -114,6 +116,12 @@ func TestInventoryRebalancePlanUsesOnlyLocalContraTouchAndCaps(t *testing.T) {
 	}
 	if len(gw.requests) != 1 {
 		t.Fatalf("accepted P2 IOC was incorrectly cancelled: %+v", gw.requests)
+	}
+	mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{
+		OrderID: 44, Symbol: "CDF/USD", Side: exchange.Sell, Qty: 100, Price: 990, TradeID: 8, IsFull: true, FeeAmount: 4, FeeAsset: "USD", Timestamp: now.UnixNano(),
+	}})
+	if len(fills) != 1 || fills[0].PreInventory != 1_500 || fills[0].PostInventory != 1_400 || fills[0].OrderID != 44 || fills[0].FeeAmount != 4 {
+		t.Fatalf("P2 fill transition evidence = %+v", fills)
 	}
 }
 

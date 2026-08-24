@@ -2198,6 +2198,12 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		// no path back into an actor, exchange, scheduler, or checkpoint sink.
 		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "maker_inventory_rebalance_decision", decision)
 	}
+	rebalanceFillObserver := func(fill MakerInventoryRebalanceFill) {
+		// The exchange's OrderFill remains the execution source of truth. This
+		// companion actor-state row only attests the submitting maker's local
+		// inventory transition around that exact fill.
+		venue.makerStateLog.LogEvidenceOnly(fill.Timestamp, fill.ClientID, "maker_inventory_rebalance_fill", fill)
+	}
 	quoteSizeObserver := func(decision MakerQuoteSizeDecision) {
 		// P1 decision telemetry is persisted evidence only. Sending it through
 		// LogEvent would make optional recording perturb the execution hash.
@@ -2217,6 +2223,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			makerConfig.InventoryRebalanceTakerFeeBps = s.Config.TakerFeeBps
 			if s.Config.RecordMakerInventoryRebalanceDecisions {
 				makerConfig.InventoryRebalanceDecisionObserver = rebalanceDecisionObserver
+				makerConfig.InventoryRebalanceFillObserver = rebalanceFillObserver
 			}
 		}
 		clientID, gateway := venue.connectParticipant(mount, role, mmBalances, 100_000_000*mvQuotePrecision, makerFee)

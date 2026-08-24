@@ -67,12 +67,22 @@ Every evaluation persists a `maker_inventory_rebalance_decision` in the
 evidence-only domain, including:
 
 ```text
-venue_id, maker, client_id, symbol, decision_time, enabled, action_or_defer_reason,
+venue_id, maker, client_id, symbol, decision_time, enabled, subscribed,
+request_pending, action_or_defer_reason,
 inventory, risk_band, target_band, last_book_source_time, last_book_received_time,
 bid_price, bid_visible_qty, ask_price, ask_visible_qty, side, desired_reduction,
 participation_cap, max_request_qty, slippage_bps, limit_price, requested_qty,
 taker_fee_bps, request_id, cooldown_until
 ```
+
+The record also retains the declared participation rate, evaluation interval,
+cooldown, subscription/pending state, and snapshot sequence so an offline
+audit can recompute the policy without trusting an in-memory configuration
+object. Each exchange-confirmed
+P2 fill additionally emits a compact `maker_inventory_rebalance_fill` row with
+the exact order/trade/fee fields and actor-local pre/post inventory. This is
+not an execution substitute: it must exactly join the exchange fill, and makes
+the claimed individual risk-reducing transition falsifiable.
 
 For submissions, `request_id` must exactly join accepted/rejected evidence;
 accepted order IDs must join IOC cancellation/fill records. Every fill must
