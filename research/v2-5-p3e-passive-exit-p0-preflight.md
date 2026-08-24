@@ -49,6 +49,30 @@ The term policy entered two ordinary matched terms and left them active, which
 is expected in five minutes. The action stream contains no P3e passive-exit
 action and therefore supplies no test of the primary activation condition.
 
+## Analyzer-contract rerun
+
+After the pre-run P4 residual-funding replay correction, the same exact
+five-minute command was rerun from source `8b8dfa64c97af40d05454b2c5731de4fa600b722`
+to `artifacts/v2-5-p3e/preflight-r2-B-107/`. The only source change was the
+offline analyzer/extractor contract documented in
+[`v2-5-p3e-residual-funding-audit.md`](v2-5-p3e-residual-funding-audit.md).
+It produced the exact prior execution identity:
+
+| item | original / rerun |
+| --- | --- |
+| execution observations | 56,189 / 56,189 |
+| ordered execution hash | `f8bf4844729c762b76097ac44cf664c5148c3e6a853dcb157ca9c86b0d93d1c2` / identical |
+| persisted JSON records | 56,648 / 56,648 |
+| exact persisted JSON artifact digest | `16c850a020faaa0e156869b82eee296eddb6a3efa56151b3a209c97248d9a97c` / identical |
+
+The rerun's simulator/analyzer/prune-gate SHA-256 values are
+`cd4ca00def13a59d6c14882b55ac43fb19dcdf08db529e26389bc30912be53ec`,
+`ff4b764e8e2903e746ae88b22cca034390cf532f22e3910d617ee9ec018f529e`,
+and `1772d8fff87a84545a49b0e8507b2b1e0cffe86082830b76ca2da990249daad9`.
+The hardened extractor now requires `termcarry.result.valid=true` and zero
+unattributed funding; it passes on the rerun. This establishes instrumentation
+neutrality for the audit correction, not P3e activation.
+
 ## Retention and prune gate
 
 `scripts/extract-v2-5-p3e-metrics.sh` writes the complete P3e mechanical

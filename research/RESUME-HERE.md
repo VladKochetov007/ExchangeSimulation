@@ -713,19 +713,23 @@ finish and their contracts pass.
   committed head; verify the config SHA above; run with `GOMAXPROCS=4`, full
   evidence, and `-duration 98h`. Completion means only both final sidecars
   exist and are nonempty. Then run the P3e extractor before reading/scoring.
-- **Pre-score analyzer contract to resolve before the fresh long launch:**
-  static review found that `analysis.TermCarryAudit.Valid` currently treats
-  every funding settlement after `term_end` as `OutsideTermFunding`. P3e's
-  declared policy intentionally retains a real residual and its funding risk
-  until its explicit passive-exit deadline. Add a narrowly scoped analyzer
-  distinction (e.g. residual-pending-exit funding) before observing/scoring a
-  new P0 result: it must allow only P4 open residual funding through the
-  declared deadline and still reject funding after deadline, for closed terms,
-  overlapping terms, or non-P4 policies. Add independent fixtures/mutations;
-  document it as an analyzer-contract correction, not simulator economics.
-  Do not retrospectively reinterpret P3c.
-- Current committed head at shutdown is `74e8b75` (`docs(v2): retain
-  interrupted P3e P0 attempt`). The only tracked worktree differences are
+- The pre-score P3e residual-funding analyzer correction is complete at
+  `8b8dfa6`, with the rationale frozen in
+  `research/v2-5-p3e-residual-funding-audit.md`. The earlier handoff sentence
+  that said post-deadline funding must be rejected was wrong: P3e explicitly
+  leaves an expired residual economically open, so its ordinary funding must
+  remain visible. The replay now separately counts post-term funding before
+  the passive deadline and after deadline, but accepts either only with a
+  strictly earlier persisted P4 residual state and a nonzero perpetual
+  position. Legacy, closed/flat, same-timestamp/future, and unproven residual
+  funding remains `OutsideTermFunding` and invalid. P3c is unchanged.
+- A fresh five-minute P3e preflight rerun from `8b8dfa6` produced exactly the
+  earlier 56,189-observation ordered execution hash and 56,648-record
+  persisted-evidence digest; the hardened extractor passes. See
+  `research/v2-5-p3e-passive-exit-p0-preflight.md`. This analyzer-only change
+  does not alter simulator behavior.
+- Current committed head before the next long launch is `8b8dfa6`
+  (`fix(analysis): audit P3e residual funding`). The only tracked worktree differences are
   user-owned historical ae13f9a scoreboard artifacts:
   `derivatives.json`, `exposure.json`, `reaction.json`, and `streamhash.json`
   under `research/artifacts/scoreboard/f2_baseline_101/`. No simulator,

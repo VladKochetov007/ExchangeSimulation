@@ -1,9 +1,10 @@
 # V2-5 P3e — passive finite-term exit under sub-minimum aggressive depth
 
-Status: **implementation and independent-replay gates passed; not yet
-configured, preregistered, run, or scored.** It follows the valid P3c
-lifecycle falsification and the invalid P3d attempt. It does not alter their
-retained evidence, conclusions, or the current V2 economic configuration.
+Status: **implementation, independent-replay, and P0 preflight gates passed;
+one 98-hour P0 activation cell is preregistered but not yet completed or
+scored.** It follows the valid P3c lifecycle falsification and the invalid
+P3d attempt. It does not alter their retained evidence, conclusions, or the
+current V2 economic configuration.
 
 ## Implementation gate — passed, not an economic result
 
