@@ -15,7 +15,7 @@ func TestMakerInventoryRebalanceAuditJoinsLocalPolicyReceiptAndFill(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Valid || result.Decisions != 1 || result.Submitted != 1 || result.Accepted != 1 || result.Fills != 1 || result.FilledQty != 500_000_000 || result.ReceiptMatches != 1 || result.CancelledIOC != 0 || len(result.Checks) != 0 {
+	if !result.Valid || result.Decisions != 1 || result.Submitted != 1 || result.Accepted != 1 || result.Fills != 1 || result.FilledQty != 500_000_000 || result.ReceiptMatches != 1 || result.ActionCounts["SUBMIT_IOC"] != 1 || result.CancelledIOC != 0 || len(result.Checks) != 0 {
 		t.Fatalf("valid P2 evidence audit = %+v", result)
 	}
 }
@@ -26,7 +26,7 @@ func TestMakerInventoryRebalanceAuditDisabledControlDoesNotRequireUnusedSnapshot
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Valid || result.Decisions != 1 || result.DisabledDecisions != 1 || result.Submitted != 0 || result.ReceiptMatches != 0 || len(result.Checks) != 0 {
+	if !result.Valid || result.Decisions != 1 || result.DisabledDecisions != 1 || result.Submitted != 0 || result.ReceiptMatches != 0 || result.ActionCounts["POLICY_DISABLED"] != 1 || len(result.Checks) != 0 {
 		t.Fatalf("disabled P2 control audit = %+v", result)
 	}
 }

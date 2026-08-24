@@ -33,26 +33,27 @@ type MakerInventoryRebalanceAudit struct {
 	ReceiptMismatches     int64 `json:"receipt_mismatches"`
 	FutureReceiptUse      int64 `json:"future_receipt_use"`
 
-	InvalidDecisionRecords    int64 `json:"invalid_decision_records"`
-	DecisionFieldMismatches   int64 `json:"decision_field_mismatches"`
-	DisabledSubmissions       int64 `json:"disabled_submissions"`
-	DuplicateDecisions        int64 `json:"duplicate_decisions"`
-	MissingOutcomes           int64 `json:"missing_outcomes"`
-	DuplicateOutcomes         int64 `json:"duplicate_outcomes"`
-	CensoredOutcomeDeliveries int64 `json:"censored_outcome_deliveries"`
-	OutcomeFieldMismatches    int64 `json:"outcome_field_mismatches"`
-	MissingIOCTerminals       int64 `json:"missing_ioc_terminals"`
-	DuplicateIOCTerminals     int64 `json:"duplicate_ioc_terminals"`
-	FillQuantityMismatches    int64 `json:"fill_quantity_mismatches"`
-	MissingFillEvidence       int64 `json:"missing_fill_evidence"`
-	UnexpectedFillEvidence    int64 `json:"unexpected_fill_evidence"`
-	FillEvidenceMismatches    int64 `json:"fill_evidence_mismatches"`
-	NonReducingFills          int64 `json:"non_reducing_fills"`
-	UnknownCounterparties     int64 `json:"unknown_counterparties"`
-	SelfFills                 int64 `json:"self_fills"`
-	NonTakerFills             int64 `json:"non_taker_fills"`
-	NonPositiveFees           int64 `json:"non_positive_fees"`
-	FeeMismatches             int64 `json:"fee_mismatches"`
+	InvalidDecisionRecords    int64            `json:"invalid_decision_records"`
+	DecisionFieldMismatches   int64            `json:"decision_field_mismatches"`
+	DisabledSubmissions       int64            `json:"disabled_submissions"`
+	DuplicateDecisions        int64            `json:"duplicate_decisions"`
+	MissingOutcomes           int64            `json:"missing_outcomes"`
+	DuplicateOutcomes         int64            `json:"duplicate_outcomes"`
+	CensoredOutcomeDeliveries int64            `json:"censored_outcome_deliveries"`
+	OutcomeFieldMismatches    int64            `json:"outcome_field_mismatches"`
+	MissingIOCTerminals       int64            `json:"missing_ioc_terminals"`
+	DuplicateIOCTerminals     int64            `json:"duplicate_ioc_terminals"`
+	FillQuantityMismatches    int64            `json:"fill_quantity_mismatches"`
+	MissingFillEvidence       int64            `json:"missing_fill_evidence"`
+	UnexpectedFillEvidence    int64            `json:"unexpected_fill_evidence"`
+	FillEvidenceMismatches    int64            `json:"fill_evidence_mismatches"`
+	NonReducingFills          int64            `json:"non_reducing_fills"`
+	UnknownCounterparties     int64            `json:"unknown_counterparties"`
+	SelfFills                 int64            `json:"self_fills"`
+	NonTakerFills             int64            `json:"non_taker_fills"`
+	NonPositiveFees           int64            `json:"non_positive_fees"`
+	FeeMismatches             int64            `json:"fee_mismatches"`
+	ActionCounts              map[string]int64 `json:"action_counts,omitempty"`
 
 	Checks []MakerInventoryRebalanceCheck `json:"checks,omitempty"`
 	Valid  bool                           `json:"valid"`
@@ -194,7 +195,7 @@ type makerInventoryRebalanceReceipt struct {
 // only an exact local-policy decision, accepted IOC, external fill, positive
 // fee, and local pre/post reduction qualify.
 func (r *Run) MeasureMakerInventoryRebalance() (*MakerInventoryRebalanceAudit, error) {
-	result := &MakerInventoryRebalanceAudit{}
+	result := &MakerInventoryRebalanceAudit{ActionCounts: make(map[string]int64)}
 	receipts, receiptAudit, receiptErr := makerInventoryRebalanceReceipts(r.Dir)
 	if receiptErr != nil {
 		result.ReceiptEvidenceErrors++
@@ -229,6 +230,7 @@ func (r *Run) MeasureMakerInventoryRebalance() (*MakerInventoryRebalanceAudit, e
 				return
 			}
 			result.Decisions++
+			result.ActionCounts[decision.Action]++
 			if decision.Enabled {
 				result.EnabledDecisions++
 			} else {
