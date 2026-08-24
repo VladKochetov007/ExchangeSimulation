@@ -112,13 +112,22 @@ is emitted before gateway requests. It is persisted through `LogEvidenceOnly`,
 outside the ordered execution hash; ordinary order, fill, and cancellation
 events remain the independent venue source of truth.
 
+The actor also records a compact evidence-only
+`perp_quote_replenishment_lifecycle` row on each own acknowledgement,
+partial/full fill, cancellation, and quote rejection. It includes the
+simulation-clock delivery observation time, exchange fill time where present,
+side, request/order identity, fill quantity, target, and post-event locally
+known residual. This is necessary because an exchange fill time is not itself
+the time at which a delayed actor received the notification. Each lifecycle row
+must exactly join the independent venue raw event; it does not replace it.
+
 The analyzer must reconstruct active quote state independently from exact
-request/acceptance, fill, and cancellation chains. It must recompute the
-strict threshold using arbitrary-precision arithmetic, join the decision's
-request IDs to venue outcomes, and report missing, duplicate, wrong-order,
-wrong-side, field-mismatched, or unexpected refresh relations separately. It
-must not trust `maker_state`, an actor pointer, a book snapshot, or a terminal
-inventory to infer the residual.
+request/acceptance, lifecycle-receipt, fill, and cancellation chains. It must
+recompute the strict threshold using arbitrary-precision arithmetic, join the
+decision's request IDs to venue outcomes, and report missing, duplicate,
+wrong-order, wrong-side, field-mismatched, delayed/future, or unexpected
+refresh relations separately. It must not trust `maker_state`, an actor
+pointer, a book snapshot, or a terminal inventory to infer the residual.
 
 ## Fixed first mechanism-identification screen
 

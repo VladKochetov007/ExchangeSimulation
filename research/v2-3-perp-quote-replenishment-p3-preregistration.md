@@ -37,12 +37,15 @@ construction, post-only, or ordering fields.
 ## Evidence contract
 
 Both arms record `perp_quote_replenishment_decision`; only B can mark
-`refresh_due=true` for a below-threshold confirmed residual. Independent
-analysis uses venue `OrderAccepted`, `OrderRejected`, `OrderFill`, and
-`OrderCancelled` records joined by venue/client/request/order identity. It
-derives residuals with arbitrary-precision arithmetic and rejects a missing,
-duplicated, reordered, wrong-side, or unjoined lifecycle relation. It may not
-read actor state or substitute `maker_state` targets for resting quantity.
+`refresh_due=true` for a below-threshold confirmed residual. Every maker-local
+acknowledgement, fill, cancellation, and quote rejection also records a compact
+`perp_quote_replenishment_lifecycle` row with the actor-observed delivery time
+and the exchange fill time where present. Independent analysis joins each row
+to venue `OrderAccepted`, `OrderRejected`, `OrderFill`, and `OrderCancelled`
+records by venue/client/request/order identity. It derives residuals with
+arbitrary-precision arithmetic and rejects a missing, duplicated, reordered,
+wrong-side, late/future, or unjoined lifecycle relation. It may not read actor
+state or substitute `maker_state` targets for resting quantity.
 
 The decision record is evidence-only and must not change execution hash.
 Final-horizon decisions are explicitly censored; nonterminal missing venue

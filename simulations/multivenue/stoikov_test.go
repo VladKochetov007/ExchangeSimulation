@@ -925,6 +925,50 @@ func TestStoikovPerpReplenishmentFullFillKeepsLegacyReplacement(t *testing.T) {
 	}
 }
 
+func TestStoikovPerpReplenishmentLifecycleEvidenceTracksActorReceipt(t *testing.T) {
+	gw := newStoikovStubGateway()
+	var lifecycle []PerpQuoteReplenishmentLifecycle
+	maker := NewStoikovMarketMaker(1, gw, StoikovMMConfig{
+		Symbol: "ABC-PERP", ReferenceSymbol: "ABC-PERP", BootstrapPrice: 100_000,
+		BasePrecision: 1_000, QuotePrecision: 1_000, TickSize: 10, QuoteQty: 100,
+		QuoteInterval: time.Second, VolatilityHalfLife: time.Minute,
+		InitialLogVariancePerSec: 0, InventoryHorizon: time.Minute,
+		RelativeRiskAversion: 0.01 * 100, RelativeFillDecay: 2 * 100, MinHalfSpreadTicks: 1,
+		InventoryLimit: 100, RestingQuoteReplenishmentBelowBps: 5_000,
+		QuoteReplenishmentDecisionVenue: "central", QuoteReplenishmentDecisionMaker: "perp_maker", QuoteReplenishmentDecisionClient: 7,
+		QuoteReplenishmentLifecycleObserver: func(event PerpQuoteReplenishmentLifecycle) { lifecycle = append(lifecycle, event) },
+	})
+	now := time.Unix(10, 0)
+	maker.onTick(now)
+	maker.HandleEvent(context.Background(), makerSnapshot("ABC-PERP", 99_990, 100_010))
+	maker.onTick(now)
+	bid, ask := gw.requests[2].OrderReq, gw.requests[3].OrderReq
+	maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: bid.RequestID, OrderID: 10}})
+	maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: ask.RequestID, OrderID: 11}})
+	maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderPartialFill, Data: actor.OrderFillEvent{
+		Symbol: "ABC-PERP", OrderID: 10, Side: exchange.Buy, Qty: 51, IsFull: false, Timestamp: now.Add(20 * time.Millisecond).UnixNano(),
+	}})
+	if len(lifecycle) != 3 {
+		t.Fatalf("lifecycle events = %d, want acknowledgement/acknowledgement/partial-fill", len(lifecycle))
+	}
+	if lifecycle[0].Transition != "ACKNOWLEDGED" || lifecycle[0].Side != exchange.Buy || lifecycle[0].RequestID != bid.RequestID || lifecycle[0].OrderID != 10 || lifecycle[0].TargetQty != 100 || lifecycle[0].KnownRestingQty != 100 {
+		t.Fatalf("bid acknowledgement = %+v", lifecycle[0])
+	}
+	if lifecycle[2].Transition != "PARTIAL_FILL" || lifecycle[2].Side != exchange.Buy || lifecycle[2].OrderID != 10 || lifecycle[2].Qty != 51 || lifecycle[2].TargetQty != 100 || lifecycle[2].KnownRestingQty != 49 || lifecycle[2].ExchangeTimestamp != now.Add(20*time.Millisecond).UnixNano() {
+		t.Fatalf("partial fill lifecycle = %+v", lifecycle[2])
+	}
+}
+
+func TestPerpQuoteReplenishmentLifecyclePersistsZeroValuedBuy(t *testing.T) {
+	raw, err := json.Marshal(PerpQuoteReplenishmentLifecycle{Transition: "ACKNOWLEDGED", Side: exchange.Buy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"side":"BUY"`)) {
+		t.Fatalf("zero-valued BUY disappeared from P3 lifecycle evidence: %s", raw)
+	}
+}
+
 func TestRestingBelowFractionIsExactAcrossInt64Range(t *testing.T) {
 	for _, tc := range []struct {
 		name                 string

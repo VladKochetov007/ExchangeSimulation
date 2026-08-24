@@ -255,6 +255,10 @@ type StoikovMMConfig struct {
 	QuoteReplenishmentDecisionMaker        string
 	QuoteReplenishmentDecisionClient       uint64
 	QuoteReplenishmentDecisionTerminalNano int64
+	// QuoteReplenishmentLifecycleObserver attests when this actor actually
+	// received an own quote lifecycle response. It is evidence-only; the
+	// observer cannot feed a value back into the maker.
+	QuoteReplenishmentLifecycleObserver func(PerpQuoteReplenishmentLifecycle)
 	// InventoryRebalanceDecisionObserver is the P2 counterpart to the P1
 	// quantity observer. It is write-only evidence and never returns state to
 	// the actor, exchange, scheduler, or policy.
@@ -420,6 +424,26 @@ type PerpQuoteReplenishmentDecision struct {
 	AskRequestID        uint64 `json:"ask_request_id"`
 	OutcomeExpectation  string `json:"outcome_expectation"`
 	CensorReason        string `json:"censor_reason,omitempty"`
+}
+
+// PerpQuoteReplenishmentLifecycle attests a single actor-received own-order
+// transition. ObservedAt is supplied by the simulation-side evidence closure,
+// while ExchangeTimestamp identifies a fill at the venue. Keeping both makes
+// a delayed notification distinguishable from an earlier exchange execution.
+type PerpQuoteReplenishmentLifecycle struct {
+	VenueID           string        `json:"venue_id"`
+	Maker             string        `json:"maker"`
+	ClientID          uint64        `json:"client_id"`
+	Symbol            string        `json:"symbol"`
+	ObservedAt        int64         `json:"observed_at"`
+	ExchangeTimestamp int64         `json:"exchange_timestamp"`
+	Transition        string        `json:"transition"`
+	Side              exchange.Side `json:"side"`
+	RequestID         uint64        `json:"request_id"`
+	OrderID           uint64        `json:"order_id"`
+	Qty               int64         `json:"qty"`
+	TargetQty         int64         `json:"target_qty"`
+	KnownRestingQty   int64         `json:"known_resting_qty"`
 }
 
 // quoteReplenishmentState is the actor-local pre-cancel state attested by a
@@ -738,9 +762,11 @@ func (mm *StoikovMarketMaker) onAccepted(e actor.OrderAcceptedEvent) {
 	if side == stoikovBid {
 		mm.bidID = e.OrderID
 		mm.bidRestingQty = mm.bidQty
+		mm.emitQuoteReplenishmentLifecycle("ACKNOWLEDGED", exchange.Buy, e.RequestID, e.OrderID, 0, mm.bidQty, mm.bidRestingQty, 0)
 	} else {
 		mm.askID = e.OrderID
 		mm.askRestingQty = mm.askQty
+		mm.emitQuoteReplenishmentLifecycle("ACKNOWLEDGED", exchange.Sell, e.RequestID, e.OrderID, 0, mm.askQty, mm.askRestingQty, 0)
 	}
 }
 
@@ -760,8 +786,10 @@ func (mm *StoikovMarketMaker) onRejected(e actor.OrderRejectedEvent) {
 	}
 	delete(mm.pending, e.RequestID)
 	if side == stoikovBid {
+		mm.emitQuoteReplenishmentLifecycle("REJECTED", exchange.Buy, e.RequestID, 0, 0, mm.bidQty, 0, 0)
 		mm.bidPrice, mm.bidQty, mm.bidRestingQty = 0, 0, 0
 	} else {
+		mm.emitQuoteReplenishmentLifecycle("REJECTED", exchange.Sell, e.RequestID, 0, 0, mm.askQty, 0, 0)
 		mm.askPrice, mm.askQty, mm.askRestingQty = 0, 0, 0
 	}
 }
@@ -808,21 +836,29 @@ func (mm *StoikovMarketMaker) onFill(e actor.OrderFillEvent) {
 		})
 	}
 	if e.OrderID == mm.bidID {
+		targetQty := mm.bidQty
 		mm.bidRestingQty = decrementKnownResting(mm.bidRestingQty, e.Qty)
+		if e.IsFull {
+			mm.bidID, mm.bidPrice, mm.bidQty, mm.bidRestingQty = 0, 0, 0, 0
+			mm.emitQuoteReplenishmentLifecycle("FULL_FILL", exchange.Buy, 0, e.OrderID, e.Qty, targetQty, 0, e.Timestamp)
+		} else {
+			mm.emitQuoteReplenishmentLifecycle("PARTIAL_FILL", exchange.Buy, 0, e.OrderID, e.Qty, targetQty, mm.bidRestingQty, e.Timestamp)
+		}
 	}
 	if e.OrderID == mm.askID {
+		targetQty := mm.askQty
 		mm.askRestingQty = decrementKnownResting(mm.askRestingQty, e.Qty)
+		if e.IsFull {
+			mm.askID, mm.askPrice, mm.askQty, mm.askRestingQty = 0, 0, 0, 0
+			mm.emitQuoteReplenishmentLifecycle("FULL_FILL", exchange.Sell, 0, e.OrderID, e.Qty, targetQty, 0, e.Timestamp)
+		} else {
+			mm.emitQuoteReplenishmentLifecycle("PARTIAL_FILL", exchange.Sell, 0, e.OrderID, e.Qty, targetQty, mm.askRestingQty, e.Timestamp)
+		}
 	}
 	if !e.IsFull {
 		return
 	}
 	delete(mm.rebalanceOrderIDs, e.OrderID)
-	if e.OrderID == mm.bidID {
-		mm.bidID, mm.bidPrice, mm.bidQty, mm.bidRestingQty = 0, 0, 0, 0
-	}
-	if e.OrderID == mm.askID {
-		mm.askID, mm.askPrice, mm.askQty, mm.askRestingQty = 0, 0, 0, 0
-	}
 }
 
 func (mm *StoikovMarketMaker) onCancelled(e actor.OrderCancelledEvent) {
@@ -831,9 +867,11 @@ func (mm *StoikovMarketMaker) onCancelled(e actor.OrderCancelledEvent) {
 	// remainder; the flag must clear on that too.
 	mm.hedgePending = false
 	if e.OrderID == mm.bidID {
+		mm.emitQuoteReplenishmentLifecycle("CANCELLED", exchange.Buy, e.RequestID, e.OrderID, 0, mm.bidQty, 0, 0)
 		mm.bidID, mm.bidPrice, mm.bidQty, mm.bidRestingQty = 0, 0, 0, 0
 	}
 	if e.OrderID == mm.askID {
+		mm.emitQuoteReplenishmentLifecycle("CANCELLED", exchange.Sell, e.RequestID, e.OrderID, 0, mm.askQty, 0, 0)
 		mm.askID, mm.askPrice, mm.askQty, mm.askRestingQty = 0, 0, 0, 0
 	}
 }
@@ -1264,6 +1302,26 @@ func (mm *StoikovMarketMaker) emitQuoteReplenishmentDecision(now time.Time, stat
 		AskRequestID:        askRequestID,
 		OutcomeExpectation:  expectation,
 		CensorReason:        censorReason,
+	})
+}
+
+func (mm *StoikovMarketMaker) emitQuoteReplenishmentLifecycle(transition string, side exchange.Side, requestID, orderID uint64, qty, targetQty, knownRestingQty, exchangeTimestamp int64) {
+	if mm.cfg.QuoteReplenishmentLifecycleObserver == nil {
+		return
+	}
+	mm.cfg.QuoteReplenishmentLifecycleObserver(PerpQuoteReplenishmentLifecycle{
+		VenueID:           mm.cfg.QuoteReplenishmentDecisionVenue,
+		Maker:             mm.cfg.QuoteReplenishmentDecisionMaker,
+		ClientID:          mm.cfg.QuoteReplenishmentDecisionClient,
+		Symbol:            mm.cfg.Symbol,
+		Transition:        transition,
+		Side:              side,
+		RequestID:         requestID,
+		OrderID:           orderID,
+		Qty:               qty,
+		TargetQty:         targetQty,
+		KnownRestingQty:   knownRestingQty,
+		ExchangeTimestamp: exchangeTimestamp,
 	})
 }
 

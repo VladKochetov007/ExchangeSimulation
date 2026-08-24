@@ -22,29 +22,31 @@ import (
 )
 
 type v20HelperResult struct {
-	ExecutionHash            string `json:"execution_hash"`
-	Schedules                int64  `json:"schedules"`
-	Receipts                 int64  `json:"receipts"`
-	Decisions                int64  `json:"decisions"`
-	ScheduleDigest           string `json:"schedule_digest"`
-	ReceiptDigest            string `json:"receipt_digest"`
-	DecisionDigest           string `json:"decision_digest"`
-	FrontierVectorDecisions  int64  `json:"frontier_vector_decisions"`
-	FrontierVectorComponents int64  `json:"frontier_vector_components"`
-	FrontierVectorDigest     string `json:"frontier_vector_digest"`
-	FrontierComponentDigest  string `json:"frontier_component_digest"`
-	MakerQuoteSizeDecisions  int64  `json:"maker_quote_size_decisions"`
-	MakerRebalanceDecisions  int64  `json:"maker_rebalance_decisions"`
-	LiabilityHedgerDecisions int64  `json:"liability_hedger_decisions"`
-	LiabilityHedgerPhase     int64  `json:"liability_hedger_phase_nanos"`
-	LiabilityHedgerPhaseSet  bool   `json:"liability_hedger_phase_configured"`
-	NoiseFlowPhaseDecisions  int64  `json:"noise_flow_phase_decisions"`
-	NoiseFlowPhase           int64  `json:"noise_flow_phase_nanos"`
-	NoiseFlowPhaseSet        bool   `json:"noise_flow_phase_configured"`
-	FundingCarryDecisions    int64  `json:"funding_carry_decisions"`
-	TermCarryDecisions       int64  `json:"term_carry_decisions"`
-	EvidenceArtifactEvents   int64  `json:"evidence_artifact_events"`
-	EvidenceArtifactDigest   string `json:"evidence_artifact_digest"`
+	ExecutionHash              string `json:"execution_hash"`
+	Schedules                  int64  `json:"schedules"`
+	Receipts                   int64  `json:"receipts"`
+	Decisions                  int64  `json:"decisions"`
+	ScheduleDigest             string `json:"schedule_digest"`
+	ReceiptDigest              string `json:"receipt_digest"`
+	DecisionDigest             string `json:"decision_digest"`
+	FrontierVectorDecisions    int64  `json:"frontier_vector_decisions"`
+	FrontierVectorComponents   int64  `json:"frontier_vector_components"`
+	FrontierVectorDigest       string `json:"frontier_vector_digest"`
+	FrontierComponentDigest    string `json:"frontier_component_digest"`
+	MakerQuoteSizeDecisions    int64  `json:"maker_quote_size_decisions"`
+	MakerRebalanceDecisions    int64  `json:"maker_rebalance_decisions"`
+	PerpReplenishmentDecisions int64  `json:"perp_replenishment_decisions"`
+	PerpReplenishmentLifecycle int64  `json:"perp_replenishment_lifecycle"`
+	LiabilityHedgerDecisions   int64  `json:"liability_hedger_decisions"`
+	LiabilityHedgerPhase       int64  `json:"liability_hedger_phase_nanos"`
+	LiabilityHedgerPhaseSet    bool   `json:"liability_hedger_phase_configured"`
+	NoiseFlowPhaseDecisions    int64  `json:"noise_flow_phase_decisions"`
+	NoiseFlowPhase             int64  `json:"noise_flow_phase_nanos"`
+	NoiseFlowPhaseSet          bool   `json:"noise_flow_phase_configured"`
+	FundingCarryDecisions      int64  `json:"funding_carry_decisions"`
+	TermCarryDecisions         int64  `json:"term_carry_decisions"`
+	EvidenceArtifactEvents     int64  `json:"evidence_artifact_events"`
+	EvidenceArtifactDigest     string `json:"evidence_artifact_digest"`
 }
 
 // TestV20EvidenceHelper deliberately runs in a fresh test process. Parent test
@@ -75,6 +77,7 @@ func TestV20EvidenceHelper(t *testing.T) {
 	routerEvidence := os.Getenv("V22_ROUTER") == "1"
 	p1QuoteSizeEvidence := os.Getenv("V23_P1_QUOTE_SIZE") == "1"
 	p2RebalanceEvidence := os.Getenv("V23_P2_REBALANCE") == "1"
+	p3PerpReplenishmentEvidence := os.Getenv("V23_P3_PERP_REPLENISHMENT") == "1"
 	l0LiabilityHedgerEvidence := os.Getenv("V24_L0_LIABILITY_HEDGER") == "1"
 	l1RandomSideControlEvidence := os.Getenv("V24_L1_RANDOM_SIDE_CONTROL") == "1"
 	l1PhaseControlEvidence := os.Getenv("V24_L1_PHASE_CONTROL") == "1"
@@ -108,6 +111,14 @@ func TestV20EvidenceHelper(t *testing.T) {
 			ParticipationBps: 1_000, SlippageBps: 50,
 		}
 		cfg.RecordMakerInventoryRebalanceDecisions = p2RebalanceEvidence && os.Getenv("V20_EVIDENCE_ON") == "1"
+	}
+	if p3PerpReplenishmentEvidence {
+		// P3 varies only append-only evidence across children. The local
+		// own-order policy is present in both runs so the execution digest can
+		// detect any recorder-induced scheduler or ordering perturbation.
+		cfg.LogMode = "full"
+		cfg.PerpMakerReplenishBelowBps = 5_000
+		cfg.RecordPerpMakerReplenishmentDecisions = os.Getenv("V20_EVIDENCE_ON") == "1"
 	}
 	if liabilityHedgerEvidence {
 		cfg.LogMode = "full"
@@ -260,7 +271,7 @@ func TestV20EvidenceHelper(t *testing.T) {
 		sim.Close()
 		t.Fatal(err)
 	}
-	if (liabilityHedgerEvidence && cfg.RecordLiabilityHedgerDecisions) || (fundingCarryEvidence && cfg.RecordFundingCarryDecisions) || (termCarryEvidence && cfg.RecordTermCarryDecisions) {
+	if (liabilityHedgerEvidence && cfg.RecordLiabilityHedgerDecisions) || (fundingCarryEvidence && cfg.RecordFundingCarryDecisions) || (termCarryEvidence && cfg.RecordTermCarryDecisions) || (p3PerpReplenishmentEvidence && cfg.RecordPerpMakerReplenishmentDecisions) {
 		if err := writeV24AnalysisReport(output, sim); err != nil {
 			sim.Close()
 			t.Fatalf("write V2-4 independent-replay report: %v", err)
@@ -350,6 +361,37 @@ func TestV20EvidenceHelper(t *testing.T) {
 		if result.MakerRebalanceDecisions == 0 {
 			t.Fatal("P2 recorder emitted no inventory-rebalance decisions")
 		}
+	}
+	if p3PerpReplenishmentEvidence && cfg.RecordPerpMakerReplenishmentDecisions {
+		result.PerpReplenishmentDecisions = countRawEvent(t, output, "perp_quote_replenishment_decision")
+		result.PerpReplenishmentLifecycle = countRawEvent(t, output, "perp_quote_replenishment_lifecycle")
+		if result.PerpReplenishmentDecisions == 0 || result.PerpReplenishmentLifecycle == 0 {
+			t.Fatalf("P3 recorder emitted insufficient evidence: decisions=%d lifecycle=%d", result.PerpReplenishmentDecisions, result.PerpReplenishmentLifecycle)
+		}
+		run, err := analysis.Open(output)
+		if err != nil {
+			t.Fatalf("open P3 replenishment evidence for independent replay: %v", err)
+		}
+		audit, err := run.MeasurePerpQuoteReplenishment()
+		if err != nil || !audit.Valid {
+			t.Fatalf("invalid P3 replenishment evidence: audit=%+v err=%v", audit, err)
+		}
+		if audit.Decisions != result.PerpReplenishmentDecisions {
+			t.Fatalf("P3 raw/replay decision count mismatch: raw=%d replay=%d", result.PerpReplenishmentDecisions, audit.Decisions)
+		}
+		artifactRaw, err := os.ReadFile(filepath.Join(output, "evidence-artifact-hash.json"))
+		if err != nil {
+			t.Fatalf("read P3 evidence artifact digest: %v", err)
+		}
+		var artifact struct {
+			Events int64  `json:"events"`
+			Digest string `json:"digest"`
+		}
+		if err := json.Unmarshal(artifactRaw, &artifact); err != nil || artifact.Events == 0 || artifact.Digest == "" {
+			t.Fatalf("decode P3 evidence artifact digest: artifact=%+v err=%v", artifact, err)
+		}
+		result.EvidenceArtifactEvents = artifact.Events
+		result.EvidenceArtifactDigest = artifact.Digest
 	}
 	if liabilityHedgerEvidence && cfg.RecordLiabilityHedgerDecisions {
 		result.LiabilityHedgerDecisions = countRawEvent(t, output, "liability_hedger_decision")
@@ -688,6 +730,35 @@ func TestV23P2RebalanceEvidenceIsFreshProcessDeterministicAndNeutral(t *testing.
 		left.Schedules != right.Schedules || left.Receipts != right.Receipts || left.Decisions != right.Decisions ||
 		left.ScheduleDigest != right.ScheduleDigest || left.ReceiptDigest != right.ReceiptDigest || left.DecisionDigest != right.DecisionDigest {
 		t.Fatalf("P2 evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
+	}
+}
+
+// P3's maker receives its own delayed order lifecycle responses. This matrix
+// proves that recording those receipt boundaries cannot affect the actor's
+// requests, event ordering, or process-level deterministic trajectory.
+func TestV23P3PerpReplenishmentEvidenceIsFreshProcessDeterministicAndNeutral(t *testing.T) {
+	results := make(map[string]v20HelperResult)
+	for _, gomax := range []string{"1", "4"} {
+		for _, evidence := range []bool{false, true} {
+			key := "g" + gomax + "/off"
+			if evidence {
+				key = "g" + gomax + "/on"
+			}
+			results[key] = runV23P3PerpReplenishmentEvidenceHelper(t, gomax, evidence)
+		}
+	}
+	want := results["g1/off"].ExecutionHash
+	for key, result := range results {
+		if result.ExecutionHash == "" || result.ExecutionHash != want {
+			t.Fatalf("P3 recorder changed execution with process setting: want %s, %s=%s", want, key, result.ExecutionHash)
+		}
+	}
+	left, right := results["g1/on"], results["g4/on"]
+	if left.PerpReplenishmentDecisions == 0 || left.PerpReplenishmentLifecycle == 0 ||
+		left.PerpReplenishmentDecisions != right.PerpReplenishmentDecisions || left.PerpReplenishmentLifecycle != right.PerpReplenishmentLifecycle ||
+		left.EvidenceArtifactEvents == 0 || left.EvidenceArtifactEvents != right.EvidenceArtifactEvents ||
+		left.EvidenceArtifactDigest == "" || left.EvidenceArtifactDigest != right.EvidenceArtifactDigest {
+		t.Fatalf("P3 evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
 	}
 }
 
@@ -1177,6 +1248,32 @@ func runV23P2EvidenceHelper(t *testing.T, gomax string, evidence bool) v20Helper
 	}
 	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
 		t.Fatalf("decode P2 evidence helper output %q: %v", raw, err)
+	}
+	return result
+}
+
+func runV23P3PerpReplenishmentEvidenceHelper(t *testing.T, gomax string, evidence bool) v20HelperResult {
+	t.Helper()
+	output := filepath.Join(t.TempDir(), "run")
+	cmd := exec.Command(os.Args[0], "-test.run=TestV20EvidenceHelper", "--")
+	cmd.Env = append(os.Environ(), "V20_EVIDENCE_HELPER=1", "V20_EVIDENCE_OUTPUT="+output, "V23_P3_PERP_REPLENISHMENT=1", "GOMAXPROCS="+gomax)
+	if evidence {
+		cmd.Env = append(cmd.Env, "V20_EVIDENCE_ON=1")
+	}
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("P3 evidence helper GOMAXPROCS=%s evidence=%t: %v\n%s", gomax, evidence, err, raw)
+	}
+	var result v20HelperResult
+	var encoded string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "{") {
+			encoded = line
+			break
+		}
+	}
+	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
+		t.Fatalf("decode P3 evidence helper output %q: %v", raw, err)
 	}
 	return result
 }

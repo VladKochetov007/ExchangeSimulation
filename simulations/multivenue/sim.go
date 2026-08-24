@@ -2452,6 +2452,13 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		// ordered execution hash or provide a callback into the actor.
 		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "perp_quote_replenishment_decision", decision)
 	}
+	perpQuoteReplenishmentLifecycleObserver := func(lifecycle PerpQuoteReplenishmentLifecycle) {
+		lifecycle.ObservedAt = venue.Exchange.Clock.NowUnixNano()
+		// This is actor-receipt timing evidence, not a simulation input. It
+		// binds a local residual update to the independently logged exchange
+		// lifecycle without exposing clock state to maker policy.
+		venue.makerStateLog.LogEvidenceOnly(lifecycle.ObservedAt, lifecycle.ClientID, "perp_quote_replenishment_lifecycle", lifecycle)
+	}
 	newSpotStoikovMaker := func(role string, makerConfig StoikovMMConfig) *StoikovMarketMaker {
 		makerFee := exchange.FeeModel(zeroFee)
 		// Both P2 arms attach the same fee schedule to the scoped CDF maker
@@ -2520,6 +2527,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		perpMakerConfig.QuoteReplenishmentDecisionMaker = "perp_maker"
 		perpMakerConfig.QuoteReplenishmentDecisionClient = perpClientID
 		perpMakerConfig.QuoteReplenishmentDecisionTerminalNano = s.terminalNano
+		perpMakerConfig.QuoteReplenishmentLifecycleObserver = perpQuoteReplenishmentLifecycleObserver
 	}
 	venue.PerpMaker = NewStoikovMarketMaker(nextActor(), perpGateway, perpMakerConfig)
 	venue.PerpMaker.SetTickerFactory(timers)

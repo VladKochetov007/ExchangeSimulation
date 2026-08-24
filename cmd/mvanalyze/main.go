@@ -95,7 +95,7 @@ func (p *analyzerProfiles) Stop() {
 }
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, liabilityhedger, fundingcarry, termcarry, perpexposurehedger, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, perpreplenishment, liabilityhedger, fundingcarry, termcarry, perpexposurehedger, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
 	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
 	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
@@ -235,6 +235,22 @@ func main() {
 					result.Fills, result.FilledQty, result.ReceiptAuditValid, result.MissingReceipts, result.ReceiptMismatches, result.FutureReceiptUse,
 					result.DecisionFieldMismatches, result.OutcomeFieldMismatches, result.MissingOutcomes, result.DuplicateOutcomes,
 					result.FeeMismatches, result.SelfFills, result.NonReducingFills, result.Valid)
+			})
+		case "perpreplenishment":
+			result, err := run.MeasurePerpQuoteReplenishment()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			if result.Decisions == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no P3 perp replenishment decision evidence\n", dir)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s decisions %6d enabled/disabled %6d/%6d refresh/no-refresh %6d/%6d accepted/rejected/censored %6d/%6d/%6d lifecycle %6d threshold/lifecycle/outcome/missing %d/%d/%d/%d valid %t\n",
+					dir, result.Decisions, result.EnabledDecisions, result.DisabledDecisions, result.RefreshDue, result.NoRefresh,
+					result.Accepted, result.Rejected, result.HorizonCensored, result.LifecycleRows,
+					result.ThresholdMismatches, result.LifecycleMismatches, result.OutcomeFieldMismatches, result.MissingOutcomes, result.Valid)
 			})
 		case "liabilityhedger":
 			result, err := run.MeasureLiabilityHedger()
