@@ -1,0 +1,53 @@
+{
+  "experiment": "V2-5-P3D-preflight",
+  "status": "PASSED_CONFIGURATION_AND_EVIDENCE_ONLY",
+  "attempt_zero": {
+    "status": "INVALID_BEFORE_SIMULATOR_CONSTRUCTION",
+    "reason": "DecodeConfig rejected unsupported root field causal_arm",
+    "simulator_world_created": false,
+    "evidence_created": false,
+    "corrective_commit": "18886e6"
+  },
+  "source": {
+    "simulator_commit": "6310b438f8504539926076e4072a72ddfc493ab7",
+    "implementation_commit": "9d20c15",
+    "replay_commit": "6310b43",
+    "simulator_sha256": "c68c93cbb7ee539bec239f3557b7337d648d16330730cff08c4ee7a5110bc1fb",
+    "analyzer_sha256": "f22c6f6dab5985a4867b4f41787717cfe82000280b9dd6469a6f0c4c1fda4625",
+    "prunegate_sha256": "272bef32dd0b136626e4f8b701334958c1dff1e00bf4ad518895600ce2c66282"
+  },
+  "cells": {
+    "legacy_exit_floor": {
+      "config": "research/configs/v2-5-p3d/term-exit-legacy-107.json",
+      "config_sha256": "cbb18d86752b59be3000998f8832851305f29f5cd2c440190d71039f9658ca76",
+      "unwind_min_order_size": 100000,
+      "output": "research/artifacts/v2-5-p3d/preflight-legacy-107",
+      "execution_observations": 56189,
+      "execution_stream_hash": "f8bf4844729c762b76097ac44cf664c5148c3e6a853dcb157ca9c86b0d93d1c2",
+      "evidence_records": 56648,
+      "evidence_multiset_digest": "0d5540e52f9f651e584f99035fe837d09ca0634ff882b845eb4684ebce2486a5",
+      "evidence_artifact_digest": "bcefaf13f7e82a6f202ffc9f8175b3462637fc4cff15903265994cbe64be6bda"
+    },
+    "exchange_unit_exit_floor": {
+      "config": "research/configs/v2-5-p3d/term-exit-unit-107.json",
+      "config_sha256": "3b5844597b5f89651888f4433183a118c4a842a6adf43dea903d37d86a97ed37",
+      "unwind_min_order_size": 0,
+      "output": "research/artifacts/v2-5-p3d/preflight-unit-107",
+      "execution_observations": 56189,
+      "execution_stream_hash": "f8bf4844729c762b76097ac44cf664c5148c3e6a853dcb157ca9c86b0d93d1c2",
+      "evidence_records": 56648,
+      "evidence_multiset_digest": "2eda288715b04e883d0cac8877e61dc0d9f16cba387b26987b30bc27c47f02f5",
+      "evidence_artifact_digest": "91a4cc89f0b06e22fac03d5bd0c00d6c7e40d13137a7cda518184f5d87d3132f"
+    }
+  },
+  "independent_gates": {
+    "term_carry_replay_valid": true,
+    "receipt_replay_valid": true,
+    "all_required_sidecars_present": true,
+    "execution_hash_equal_before_expiry": true,
+    "market_data_latency_ns": 40000000,
+    "request_response_latency_ns": 20000000
+  },
+  "interpretation": "Full paired cells authorized. No exit, funding, basis, PnL, or realism conclusion is permitted from this five-minute preflight.",
+  "raw_evidence_prunable": false
+}
