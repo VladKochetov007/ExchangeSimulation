@@ -34,6 +34,10 @@ type Sweep struct {
 	// elapsed value means the identifier was reused across separate crossings,
 	// which would count a later repricing as if it were a walk down the book.
 	ElapsedSecondsWhenMulti Distribution `json:"elapsed_seconds_when_multi"`
+	// UndefinedBpsOrders counts orders whose signed price span cannot be
+	// expressed as a percentage because it touches or crosses zero. Their
+	// price-level and tick-span observations remain included.
+	UndefinedBpsOrders int `json:"undefined_bps_orders"`
 }
 
 // MeanSpanBps is the expected span across all orders, including the zeros.
@@ -69,7 +73,7 @@ func (r *Run) MeasureSweep(opts BookShapeOptions) (*Sweep, error) {
 	}
 	err := r.Scan(ScanOptions{Events: []string{"Trade"}, Files: opts.Files, FilesSelected: true}, func(event Event) {
 		var decoded payload
-		if event.Decode(&decoded) != nil || decoded.Price <= 0 || decoded.TakerOrderID == 0 {
+		if event.Decode(&decoded) != nil || decoded.TakerOrderID == 0 {
 			return
 		}
 		mu.Lock()
@@ -111,15 +115,20 @@ func (r *Run) MeasureSweep(opts BookShapeOptions) (*Sweep, error) {
 		// The span is unsigned: an order's side is not needed to know how far
 		// its fills were spread across prices.
 		span := 0.0
-		if entry.best > 0 {
-			span = 10_000 * float64(entry.worst-entry.best) / float64(entry.best)
+		bpsDefined := entry.best > 0 && entry.worst > 0
+		if bpsDefined {
+			span = 10_000 * (float64(entry.worst) - float64(entry.best)) / float64(entry.best)
+			spans = append(spans, span)
+		} else {
+			sweep.UndefinedBpsOrders++
 		}
-		spans = append(spans, span)
 		if len(entry.prices) > 1 {
 			sweep.MultiPrice++
-			spansWhenMulti = append(spansWhenMulti, span)
+			if bpsDefined {
+				spansWhenMulti = append(spansWhenMulti, span)
+			}
 			if opts.TickSize > 0 {
-				ticksWhenMulti = append(ticksWhenMulti, float64(entry.worst-entry.best)/float64(opts.TickSize))
+				ticksWhenMulti = append(ticksWhenMulti, (float64(entry.worst)-float64(entry.best))/float64(opts.TickSize))
 			}
 			elapsedWhenMulti = append(elapsedWhenMulti, float64(entry.lastSeen-entry.firstSeen)/1e9)
 		}

@@ -4,6 +4,8 @@ import (
 	"math"
 	"sort"
 	"sync"
+
+	etypes "exchange_sim/types"
 )
 
 // TradeTape is one instrument's executions in time order.
@@ -35,6 +37,11 @@ type TradeTape struct {
 	// nothing else, the second left a smaller bias that survived because signed
 	// order flow is autocorrelated.
 	PreMid []int64
+	// PreMidAvailable is parallel to PreMid. It makes a present numeric zero
+	// midpoint distinct from a trade that had no preceding two-sided snapshot.
+	// Older hand-built test tapes that omit this field declare every supplied
+	// PreMid entry present; production tapes always populate it explicitly.
+	PreMidAvailable []bool
 	// TakerOrderIDs identifies the order that crossed, so trades belonging to
 	// one aggressive order can be recognised as a single sweep.
 	TakerOrderIDs []uint64
@@ -123,7 +130,11 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 			Price int64 `json:"price"`
 		} `json:"asks"`
 	}
-	midAt := map[int64]int64{}
+	type midpointObservation struct {
+		price int64
+		ok    bool
+	}
+	midAt := map[int64]midpointObservation{}
 	var midMu sync.Mutex
 	if err := r.Scan(ScanOptions{Events: []string{"BookSnapshot"}, Files: files, FilesSelected: true}, func(event Event) {
 		var decoded snapshotPayload
@@ -137,12 +148,11 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 		if len(bids) == 0 || len(asks) == 0 {
 			return
 		}
-		mid := (bids[0].Price + asks[0].Price) / 2
-		if mid <= 0 {
+		if bids[0].Price > asks[0].Price {
 			return
 		}
 		midMu.Lock()
-		midAt[event.SimTS] = mid
+		midAt[event.SimTS] = midpointObservation{price: etypes.Midpoint(bids[0].Price, asks[0].Price), ok: true}
 		midMu.Unlock()
 	}); err != nil {
 		return nil, err
@@ -152,17 +162,18 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 		midKeys = append(midKeys, key)
 	}
 	sort.Slice(midKeys, func(i, j int) bool { return midKeys[i] < midKeys[j] })
-	lastMidAtOrBefore := func(ts int64) int64 {
+	lastMidAtOrBefore := func(ts int64) (int64, bool) {
 		index := sort.Search(len(midKeys), func(i int) bool { return midKeys[i] > ts }) - 1
 		if index < 0 {
-			return 0
+			return 0, false
 		}
-		return midAt[midKeys[index]]
+		observation := midAt[midKeys[index]]
+		return observation.price, observation.ok
 	}
 
 	err := r.Scan(ScanOptions{Events: []string{"Trade"}, Files: files, FilesSelected: true}, func(event Event) {
 		var decoded payload
-		if event.Decode(&decoded) != nil || decoded.Price <= 0 {
+		if event.Decode(&decoded) != nil {
 			return
 		}
 		sign := int8(1)
@@ -189,11 +200,26 @@ func (r *Run) Tape(venueID, symbol string) (*TradeTape, error) {
 		tape.Prices = append(tape.Prices, rec.price)
 		tape.Qtys = append(tape.Qtys, rec.qty)
 		tape.Signs = append(tape.Signs, rec.sign)
-		tape.PreMid = append(tape.PreMid, lastMidAtOrBefore(rec.ts))
+		mid, midOK := lastMidAtOrBefore(rec.ts)
+		tape.PreMid = append(tape.PreMid, mid)
+		tape.PreMidAvailable = append(tape.PreMidAvailable, midOK)
 		tape.Roles = append(tape.Roles, rec.role)
 		tape.TakerOrderIDs = append(tape.TakerOrderIDs, rec.orderID)
 	}
 	return tape, nil
+}
+
+func (t *TradeTape) preMidAt(index int) (int64, bool) {
+	if index < 0 || index >= len(t.PreMid) {
+		return 0, false
+	}
+	if len(t.PreMidAvailable) == 0 {
+		return t.PreMid[index], true
+	}
+	if index >= len(t.PreMidAvailable) || !t.PreMidAvailable[index] {
+		return 0, false
+	}
+	return t.PreMid[index], true
 }
 
 // LogReturns are successive log price changes in basis points.
