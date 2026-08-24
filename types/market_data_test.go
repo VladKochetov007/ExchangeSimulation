@@ -1,9 +1,57 @@
 package types
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"math"
 	"testing"
 )
+
+func TestMarketDataFingerprintRetainsReceiptCanonicalEncoding(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  *MarketDataMsg
+	}{
+		{
+			name: "book snapshot",
+			msg: &MarketDataMsg{Type: MDSnapshot, Symbol: "ABC-PERP", SeqNum: 41, Timestamp: 123,
+				Data: &BookSnapshot{Bids: []PriceLevel{{Price: 100, VisibleQty: 3}}, Asks: []PriceLevel{{Price: 101, VisibleQty: 4}}}},
+		},
+		{
+			name: "zero settlement remains present in the message identity",
+			msg:  &MarketDataMsg{Type: MDInstrument, Symbol: InstrumentFeedSymbol, SeqNum: 7, Timestamp: 456, Data: &InstrumentAnnouncement{Action: "settled", Symbol: "OIL-FUT", SettlementPrice: int64Pointer(0)}},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := MarketDataFingerprint(tc.msg)
+			if err != nil {
+				t.Fatalf("fingerprint: %v", err)
+			}
+			raw, err := json.Marshal(struct {
+				Type      MDType `json:"type"`
+				Symbol    string `json:"symbol"`
+				Sequence  uint64 `json:"sequence"`
+				Timestamp int64  `json:"timestamp"`
+				Data      any    `json:"data"`
+			}{tc.msg.Type, tc.msg.Symbol, tc.msg.SeqNum, tc.msg.Timestamp, tc.msg.Data})
+			if err != nil {
+				t.Fatalf("legacy receipt encoding: %v", err)
+			}
+			wantHash := sha256.Sum256(raw)
+			var want [16]byte
+			copy(want[:], wantHash[:])
+			if got != want {
+				t.Fatalf("fingerprint drifted from receipt encoding: got %x want %x", got, want)
+			}
+		})
+	}
+
+	if _, err := MarketDataFingerprint(&MarketDataMsg{Data: math.Inf(1)}); err == nil {
+		t.Fatal("unencodable market-data payload was silently fingerprinted")
+	}
+}
 
 // Instrument lifecycle evidence must distinguish a missing settlement source
 // from every signed numeric settlement that an instrument contract permits.

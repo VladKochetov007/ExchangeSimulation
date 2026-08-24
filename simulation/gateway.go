@@ -1,8 +1,6 @@
 package simulation
 
 import (
-	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -404,7 +402,7 @@ func (d *DelayedGateway) scheduleMarketDataReceipt(msg *exchange.MarketDataMsg, 
 	if d.receiptSink == nil || msg == nil {
 		return scheduledMarketDataReceipt{}
 	}
-	fingerprint, err := marketDataFingerprint(msg)
+	fingerprint, err := types.MarketDataFingerprint(msg)
 	if err != nil {
 		d.receiptSink.Fail(fmt.Errorf("fingerprint market-data message: %w", err))
 		return scheduledMarketDataReceipt{}
@@ -463,25 +461,6 @@ func (d *DelayedGateway) recordMarketDataDecision(req exchange.Request) {
 		DecisionAt:  d.clock.NowUnixNano(),
 		Frontier:    frontier,
 	})
-}
-
-func marketDataFingerprint(msg *exchange.MarketDataMsg) ([16]byte, error) {
-	// Include every actor-visible field. SeqNum alone is not sufficient for
-	// directed lifecycle replay, which historically carries zero.
-	raw, err := json.Marshal(struct {
-		Type      types.MDType `json:"type"`
-		Symbol    string       `json:"symbol"`
-		Sequence  uint64       `json:"sequence"`
-		Timestamp int64        `json:"timestamp"`
-		Data      any          `json:"data"`
-	}{msg.Type, msg.Symbol, msg.SeqNum, msg.Timestamp, msg.Data})
-	if err != nil {
-		return [16]byte{}, err
-	}
-	digest := sha256.Sum256(raw)
-	var fingerprint [16]byte
-	copy(fingerprint[:], digest[:])
-	return fingerprint, nil
 }
 
 // EgressBlocked reports that the gateway holds messages whose delivery time

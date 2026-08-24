@@ -102,6 +102,7 @@ type PerpExposureHedgerDecision struct {
 	HasSnapshot     bool   `json:"has_snapshot"`
 	BookPublishedAt int64  `json:"book_published_at"`
 	BookSequence    uint64 `json:"book_sequence"`
+	BookFingerprint string `json:"book_fingerprint"`
 	HasBid          bool   `json:"has_bid"`
 	BidPrice        int64  `json:"bid_price"`
 	BidVisibleQty   int64  `json:"bid_visible_qty"`
@@ -150,6 +151,7 @@ type perpExposureBook struct {
 	hasSnapshot bool
 	publishedAt int64
 	sequence    uint64
+	fingerprint [16]byte
 	hasBid      bool
 	bidPrice    int64
 	bidQty      int64
@@ -215,6 +217,9 @@ func (h *PerpExposureHedger) observeSnapshot(event actor.BookSnapshotEvent) {
 		return
 	}
 	book := perpExposureBook{hasSnapshot: true, publishedAt: event.Timestamp, sequence: event.SeqNum}
+	if fingerprint, err := etypes.MarketDataFingerprint(&etypes.MarketDataMsg{Type: etypes.MDSnapshot, Symbol: event.Symbol, SeqNum: event.SeqNum, Timestamp: event.Timestamp, Data: event.Snapshot}); err == nil {
+		book.fingerprint = fingerprint
+	}
 	if event.Snapshot != nil {
 		if len(event.Snapshot.Bids) > 0 {
 			book.hasBid = true
@@ -411,7 +416,8 @@ func (h *PerpExposureHedger) baseDecision(now time.Time, action string) PerpExpo
 		PhysicalExposureLimit: h.cfg.MaxAbsExposure, FilledPerpPosition: h.perpPosition,
 		DecisionInterval: int64(h.cfg.DecisionInterval), ExposureInterval: int64(h.cfg.ExposureInterval),
 		HasSnapshot: h.book.hasSnapshot, BookPublishedAt: h.book.publishedAt, BookSequence: h.book.sequence,
-		HasBid: h.book.hasBid, BidPrice: h.book.bidPrice, BidVisibleQty: h.book.bidQty,
+		BookFingerprint: fmt.Sprintf("%x", h.book.fingerprint),
+		HasBid:          h.book.hasBid, BidPrice: h.book.bidPrice, BidVisibleQty: h.book.bidQty,
 		HasAsk: h.book.hasAsk, AskPrice: h.book.askPrice, AskVisibleQty: h.book.askQty,
 		DecisionFrontierLinkID: frontier.LinkID, DecisionFrontierOrdinal: frontier.Ordinal,
 		DecisionFrontierDeliveredAt: frontier.DeliveredAt, DecisionFrontierDigest: fmt.Sprintf("%x", frontier.Digest),

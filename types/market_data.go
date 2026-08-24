@@ -1,11 +1,39 @@
 package types
 
+import (
+	"crypto/sha256"
+	"encoding/json"
+)
+
 type MarketDataMsg struct {
 	Type      MDType
 	Symbol    string
 	SeqNum    uint64
 	Timestamp int64
 	Data      any
+}
+
+// MarketDataFingerprint is the canonical identity of one public message as a
+// participant receives it. It intentionally covers every actor-visible field
+// and is shared by delivery evidence and compact decision attestations.
+func MarketDataFingerprint(msg *MarketDataMsg) ([16]byte, error) {
+	if msg == nil {
+		return [16]byte{}, nil
+	}
+	raw, err := json.Marshal(struct {
+		Type      MDType `json:"type"`
+		Symbol    string `json:"symbol"`
+		Sequence  uint64 `json:"sequence"`
+		Timestamp int64  `json:"timestamp"`
+		Data      any    `json:"data"`
+	}{msg.Type, msg.Symbol, msg.SeqNum, msg.Timestamp, msg.Data})
+	if err != nil {
+		return [16]byte{}, err
+	}
+	digest := sha256.Sum256(raw)
+	var fingerprint [16]byte
+	copy(fingerprint[:], digest[:])
+	return fingerprint, nil
 }
 
 type BookSnapshot struct {

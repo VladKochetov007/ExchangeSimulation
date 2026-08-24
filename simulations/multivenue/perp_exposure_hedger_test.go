@@ -2,10 +2,15 @@ package multivenue
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"exchange_sim/actor"
+	"exchange_sim/analysis"
 	"exchange_sim/exchange"
 	"exchange_sim/simulation"
 )
@@ -60,6 +65,7 @@ func TestPerpExposureHedgerTargetsOppositePhysicalExposureAtLocalTouch(t *testin
 				decision.PolicyVersion != perpExposureHedgerPolicyVersion ||
 				decision.Side != tc.wantSide.String() || decision.LimitPrice != tc.wantPrice || decision.RequestedQty != 10 ||
 				decision.DecisionFrontierLinkID != 9 || decision.DecisionFrontierOrdinal != 4 ||
+				len(decision.BookFingerprint) != 32 || decision.BookFingerprint == "00000000000000000000000000000000" ||
 				request.RequestID != decision.RequestID || request.Symbol != "ABC-PERP" || request.Side != tc.wantSide ||
 				request.Price != tc.wantPrice || request.Qty != 10 || request.TimeInForce != exchange.IOC {
 				t.Fatalf("physical target/local order mismatch: decision=%+v request=%+v", decision, request)
@@ -146,6 +152,10 @@ func TestPerpExposureHedgerConfigRequiresAuditedDelayedFeed(t *testing.T) {
 	sim.Close()
 	base.RecordPerpExposureHedgerDecisions = true
 	if _, err := NewSim(time.Second, base); err == nil {
+		t.Fatal("instrumented P2 accepted without a strict participant-role roster")
+	}
+	base.StrictPopulationAccounting = true
+	if _, err := NewSim(time.Second, base); err == nil {
 		t.Fatal("instrumented P2 accepted without independently recorded local feed receipts")
 	}
 	base.RecordMarketDataReceipts = true
@@ -160,4 +170,252 @@ func TestPerpExposureHedgerConfigRequiresAuditedDelayedFeed(t *testing.T) {
 			t.Fatalf("venue %s perp exposure actors = %d, want 1", venue.ID, len(venue.PerpExposureHedgers))
 		}
 	}
+}
+
+func TestPerpExposureHedgerEvidenceHasIndependentReplay(t *testing.T) {
+	dir := perpExposureEvidenceRun(t)
+	run, err := analysis.Open(dir)
+	if err != nil {
+		t.Fatalf("open evidence: %v", err)
+	}
+	audit, err := run.MeasurePerpExposureHedger()
+	if err != nil {
+		t.Fatalf("independent replay: %v", err)
+	}
+	if !audit.Valid || audit.Decisions == 0 || audit.StateUpdates == 0 || audit.Submitted == 0 {
+		t.Fatalf("invalid P2 independent replay: %+v", audit)
+	}
+}
+
+func TestPerpExposureHedgerAuditCatchesDecisionMutations(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(map[string]any) bool
+		caught func(*analysis.PerpExposureHedgerAudit) bool
+	}{
+		{
+			name: "reversed target sign",
+			mutate: func(payload map[string]any) bool {
+				if payload["action_or_defer_reason"] != "SUBMIT_IOC" {
+					return false
+				}
+				payload["target_perp_position"] = float64(0)
+				return true
+			},
+			caught: func(audit *analysis.PerpExposureHedgerAudit) bool { return audit.DecisionMismatches > 0 },
+		},
+		{
+			name: "future cached book",
+			mutate: func(payload map[string]any) bool {
+				if payload["action_or_defer_reason"] != "SUBMIT_IOC" {
+					return false
+				}
+				payload["book_published_at"] = payload["decision_time"].(float64) + 1
+				return true
+			},
+			caught: func(audit *analysis.PerpExposureHedgerAudit) bool {
+				return audit.DecisionMismatches+audit.MissingReceipts > 0
+			},
+		},
+		{
+			name: "off-touch over-cap IOC",
+			mutate: func(payload map[string]any) bool {
+				if payload["action_or_defer_reason"] != "SUBMIT_IOC" {
+					return false
+				}
+				payload["limit_price"] = payload["limit_price"].(float64) + 1_000_000
+				payload["requested_qty"] = payload["requested_qty"].(float64) + 1
+				return true
+			},
+			caught: func(audit *analysis.PerpExposureHedgerAudit) bool {
+				return audit.DecisionMismatches+audit.GatewayMismatches+audit.OutcomeMismatches > 0
+			},
+		},
+		{
+			name: "forged cached book body identity",
+			mutate: func(payload map[string]any) bool {
+				if payload["action_or_defer_reason"] != "SUBMIT_IOC" {
+					return false
+				}
+				payload["book_fingerprint"] = "00000000000000000000000000000000"
+				return true
+			},
+			caught: func(audit *analysis.PerpExposureHedgerAudit) bool {
+				return audit.ReceiptMismatches > 0
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := perpExposureEvidenceRun(t)
+			if !mutateFirstP2Decision(t, dir, tc.mutate) {
+				t.Fatal("fixture had no eligible P2 submission")
+			}
+			run, err := analysis.Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			audit, err := run.MeasurePerpExposureHedger()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if audit.Valid || !tc.caught(audit) {
+				t.Fatalf("mutation survived: %+v", audit)
+			}
+		})
+	}
+}
+
+func TestPerpExposureHedgerAuditCatchesDroppedFillAttestation(t *testing.T) {
+	dir := perpExposureEvidenceRun(t)
+	run, err := analysis.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := run.MeasurePerpExposureHedger()
+	if err != nil || !baseline.Valid || baseline.Fills == 0 {
+		t.Fatalf("P2 fill fixture was not exercised: audit=%+v err=%v", baseline, err)
+	}
+	if !dropFirstP2EvidenceEvent(t, dir, "perp_exposure_hedger_fill") {
+		t.Fatal("fixture emitted no P2 fill attestation")
+	}
+	mutated, err := analysis.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit, err := mutated.MeasurePerpExposureHedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.Valid || audit.MissingFillEvidence == 0 || audit.FillEvidenceMismatches == 0 {
+		t.Fatalf("dropped P2 fill attestation survived: %+v", audit)
+	}
+}
+
+func perpExposureEvidenceRun(t *testing.T) string {
+	t.Helper()
+	policy := perpExposureTestConfig()
+	policy.DecisionInterval = 2 * time.Second
+	policy.ExposureInterval = 10 * time.Second
+	policy.ExposureStepQty = 10_000_000
+	policy.MaxAbsExposure = 100_000_000
+	policy.MaxRequestQty = 10_000_000
+	policy.TickSize = 1_000_000
+	policy.InitialQuoteBalance = 200_000_000 * mvQuotePrecision
+	policy.InitialMargin = 100_000_000 * mvQuotePrecision
+	dir := t.TempDir()
+	cfg := Config{
+		LogDir: dir, LogMode: "full", Seed: 101, TakerFeeBps: 5,
+		StrictPopulationAccounting:        true,
+		RecordMarketDataReceipts:          true,
+		MarketDataReceiptRoles:            []string{"perp_exposure_hedger"},
+		RecordPerpExposureHedgerDecisions: true,
+		LatencyProfiles:                   map[string]LatencyProfile{"perp_exposure_hedger": {Model: "constant", Delay: 40 * time.Millisecond}},
+		PerpExposureHedger:                &policy,
+	}
+	sim, err := NewSim(16*time.Second, cfg)
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	if err := sim.Run(context.Background()); err != nil {
+		sim.Close()
+		t.Fatalf("Run: %v", err)
+	}
+	report, err := json.Marshal(struct {
+		InitialAccounts  []ParticipantAccountSnapshot `json:"initial_accounts"`
+		TerminalAccounts []ParticipantAccountSnapshot `json:"terminal_accounts"`
+		VenueLedgers     []VenueLedger                `json:"venue_ledgers"`
+	}{sim.InitialAccounts, sim.TerminalAccounts, sim.CaptureVenueLedgers()})
+	if err != nil {
+		sim.Close()
+		t.Fatalf("marshal report: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.LogDir, "greeks.json"), report, 0o644); err != nil {
+		sim.Close()
+		t.Fatalf("write report: %v", err)
+	}
+	sim.Close()
+	if count := countRawEvent(t, cfg.LogDir, "perp_exposure_hedger_decision"); count == 0 {
+		t.Fatal("P2 recorder emitted no decisions")
+	}
+	return dir
+}
+
+// mutateFirstP2Decision changes exactly one persisted decision after a valid
+// world completed. It intentionally does not repair any evidence digest: the
+// independent replay must reject the semantic contradiction itself.
+func mutateFirstP2Decision(t *testing.T, dir string, mutate func(map[string]any) bool) bool {
+	t.Helper()
+	changed := false
+	err := filepath.WalkDir(filepath.Join(dir, "venues"), func(path string, entry os.DirEntry, err error) error {
+		if err != nil || changed || entry.IsDir() || filepath.Ext(path) != ".jsonl" {
+			return err
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+		for index, line := range lines {
+			var envelope map[string]any
+			if json.Unmarshal([]byte(line), &envelope) != nil || envelope["event"] != "perp_exposure_hedger_decision" {
+				continue
+			}
+			data, ok := envelope["data"].(map[string]any)
+			if !ok {
+				continue
+			}
+			payload, ok := data["payload"].(map[string]any)
+			if !ok || !mutate(payload) {
+				continue
+			}
+			encoded, err := json.Marshal(envelope)
+			if err != nil {
+				return err
+			}
+			lines[index], changed = string(encoded), true
+			break
+		}
+		if !changed {
+			return nil
+		}
+		return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+	})
+	if err != nil {
+		t.Fatalf("mutate P2 decision: %v", err)
+	}
+	return changed
+}
+
+func dropFirstP2EvidenceEvent(t *testing.T, dir, eventName string) bool {
+	t.Helper()
+	dropped := false
+	err := filepath.WalkDir(filepath.Join(dir, "venues"), func(path string, entry os.DirEntry, err error) error {
+		if err != nil || dropped || entry.IsDir() || filepath.Ext(path) != ".jsonl" {
+			return err
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+		for index, line := range lines {
+			var envelope struct {
+				Event string `json:"event"`
+			}
+			if json.Unmarshal([]byte(line), &envelope) != nil || envelope.Event != eventName {
+				continue
+			}
+			lines = append(lines[:index], lines[index+1:]...)
+			dropped = true
+			break
+		}
+		if !dropped {
+			return nil
+		}
+		return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+	})
+	if err != nil {
+		t.Fatalf("drop P2 evidence: %v", err)
+	}
+	return dropped
 }
