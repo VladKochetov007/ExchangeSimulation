@@ -222,35 +222,50 @@ func (t *TradeTape) preMidAt(index int) (int64, bool) {
 	return t.PreMid[index], true
 }
 
-// LogReturns are successive log price changes in basis points.
-func (t *TradeTape) LogReturns() []float64 {
-	if len(t.Prices) < 2 {
-		return nil
-	}
-	out := make([]float64, 0, len(t.Prices)-1)
-	for i := 1; i < len(t.Prices); i++ {
-		if t.Prices[i-1] <= 0 || t.Prices[i] <= 0 {
-			continue
-		}
-		out = append(out, 1e4*math.Log(float64(t.Prices[i])/float64(t.Prices[i-1])))
-	}
-	return out
+// LogReturnSeries is a positive-price log-return sample plus the explicit
+// accounting required when signed price evidence lies outside that statistic's
+// domain. A zero count must never be inferred from an empty return slice.
+type LogReturnSeries struct {
+	Returns []float64 `json:"returns_bps"`
+	// CandidatePairs is the number of adjacent sampled prices considered.
+	CandidatePairs int `json:"candidate_pairs"`
+	// UndefinedDomainPairs counts present endpoint pairs that cannot enter the
+	// current positive-price log-return statistic. It is not missing evidence.
+	UndefinedDomainPairs int `json:"undefined_domain_pairs"`
 }
 
-// TimeSampledLogReturns takes the last trade in each bucket of the given width
-// and differences those, in basis points.
-//
-// This is the clock the empirical values a panel is scored against are measured
-// in, and it is not interchangeable with trade time. In trade time the absolute
-// return is the pinned half-spread and is memoryless by construction, so a
-// panel built on it reports no volatility clustering whatever the price process
-// does. The same reference tape gives |return| autocorrelation of -0.008 in
-// trade time and +0.441 at one second.
-func (t *TradeTape) TimeSampledLogReturns(bucketNanos int64) []float64 {
+func positiveLogReturns(prices []int64) LogReturnSeries {
+	if len(prices) < 2 {
+		return LogReturnSeries{}
+	}
+	result := LogReturnSeries{Returns: make([]float64, 0, len(prices)-1)}
+	for i := 1; i < len(prices); i++ {
+		result.CandidatePairs++
+		if prices[i-1] <= 0 || prices[i] <= 0 {
+			result.UndefinedDomainPairs++
+			continue
+		}
+		result.Returns = append(result.Returns, 1e4*math.Log(float64(prices[i])/float64(prices[i-1])))
+	}
+	return result
+}
+
+// LogReturnSeries returns successive positive-price log changes in basis
+// points. Prices at or below zero remain in the source tape and are accounted
+// as undefined because this conventional log-price statistic has no signed
+// market domain.
+func (t *TradeTape) LogReturnSeries() LogReturnSeries { return positiveLogReturns(t.Prices) }
+
+// LogReturns preserves the legacy slice-only API. New evidence consumers
+// should use LogReturnSeries to retain the explicit domain accounting.
+func (t *TradeTape) LogReturns() []float64 { return t.LogReturnSeries().Returns }
+
+// timeSampledPrices takes the last trade in each bucket of the given width.
+func (t *TradeTape) timeSampledPrices(bucketNanos int64) []int64 {
 	if bucketNanos <= 0 || len(t.Prices) < 2 {
 		return nil
 	}
-	var prices []int64
+	prices := make([]int64, 0, len(t.Prices))
 	lastBucket := int64(-1)
 	for i, ts := range t.Timestamps {
 		bucket := ts / bucketNanos
@@ -259,33 +274,45 @@ func (t *TradeTape) TimeSampledLogReturns(bucketNanos int64) []float64 {
 		}
 		lastBucket = bucket
 	}
-	if len(t.Prices) > 0 {
-		prices = append(prices, t.Prices[len(t.Prices)-1])
-	}
-	out := make([]float64, 0, len(prices))
-	for i := 1; i < len(prices); i++ {
-		if prices[i-1] <= 0 || prices[i] <= 0 {
-			continue
-		}
-		out = append(out, 1e4*math.Log(float64(prices[i])/float64(prices[i-1])))
-	}
-	return out
+	prices = append(prices, t.Prices[len(t.Prices)-1])
+	return prices
 }
 
-// StridedLogReturns samples the price every stride trades before differencing,
-// which removes most of the bid-ask bounce from the first lag.
-func (t *TradeTape) StridedLogReturns(stride int) []float64 {
+// TimeSampledLogReturnSeries takes the last trade in each bucket, then reports
+// the positive-price log returns and every signed-domain exclusion. This is the
+// clock the empirical panel uses: in trade time the absolute return is pinned
+// to the half-spread and can be memoryless even when the underlying process
+// has volatility clustering.
+func (t *TradeTape) TimeSampledLogReturnSeries(bucketNanos int64) LogReturnSeries {
+	return positiveLogReturns(t.timeSampledPrices(bucketNanos))
+}
+
+// TimeSampledLogReturns preserves the legacy slice-only API.
+func (t *TradeTape) TimeSampledLogReturns(bucketNanos int64) []float64 {
+	return t.TimeSampledLogReturnSeries(bucketNanos).Returns
+}
+
+// StridedLogReturnSeries samples every stride trades before reporting positive
+// log returns and explicit signed-domain exclusions.
+func (t *TradeTape) StridedLogReturnSeries(stride int) LogReturnSeries {
 	if stride < 1 || len(t.Prices) <= stride {
-		return nil
+		return LogReturnSeries{}
 	}
-	out := make([]float64, 0, len(t.Prices)/stride)
+	result := LogReturnSeries{Returns: make([]float64, 0, len(t.Prices)/stride)}
 	for i := stride; i < len(t.Prices); i += stride {
+		result.CandidatePairs++
 		if t.Prices[i-stride] <= 0 || t.Prices[i] <= 0 {
+			result.UndefinedDomainPairs++
 			continue
 		}
-		out = append(out, 1e4*math.Log(float64(t.Prices[i])/float64(t.Prices[i-stride])))
+		result.Returns = append(result.Returns, 1e4*math.Log(float64(t.Prices[i])/float64(t.Prices[i-stride])))
 	}
-	return out
+	return result
+}
+
+// StridedLogReturns preserves the legacy slice-only API.
+func (t *TradeTape) StridedLogReturns(stride int) []float64 {
+	return t.StridedLogReturnSeries(stride).Returns
 }
 
 // Autocorrelation returns the sample autocorrelation of a series at each lag
@@ -440,6 +467,14 @@ func HillTailIndex(sample []float64, tailFraction float64) float64 {
 // flow is long-range correlated because large orders are split.
 type StylizedFacts struct {
 	Trades int
+	// The return-domain counters are present evidence excluded from the
+	// conventional positive log-price statistic, never zero-valued returns.
+	LogReturnPairs                  int `json:"log_return_pairs"`
+	LogReturnUndefinedDomainPairs   int `json:"log_return_undefined_domain_pairs"`
+	Sec1ReturnUndefinedDomainPairs  int `json:"sec1_return_undefined_domain_pairs"`
+	Sec60ReturnUndefinedDomainPairs int `json:"sec60_return_undefined_domain_pairs"`
+	Stride20UndefinedDomainPairs    int `json:"stride20_return_undefined_domain_pairs"`
+	Stride100UndefinedDomainPairs   int `json:"stride100_return_undefined_domain_pairs"`
 
 	ReturnACF1     float64
 	ReturnACFMean5 float64
@@ -488,8 +523,21 @@ type StylizedFacts struct {
 
 // Facts computes the stylized-fact panel for a tape.
 func (t *TradeTape) Facts(maxLag int) StylizedFacts {
-	returns := t.LogReturns()
-	facts := StylizedFacts{Trades: len(t.Prices)}
+	returnSeries := t.LogReturnSeries()
+	returns := returnSeries.Returns
+	facts := StylizedFacts{
+		Trades:                        len(t.Prices),
+		LogReturnPairs:                returnSeries.CandidatePairs,
+		LogReturnUndefinedDomainPairs: returnSeries.UndefinedDomainPairs,
+	}
+	oneSecondSeries := t.TimeSampledLogReturnSeries(1e9)
+	oneMinuteSeries := t.TimeSampledLogReturnSeries(60e9)
+	stride20Series := t.StridedLogReturnSeries(20)
+	stride100Series := t.StridedLogReturnSeries(100)
+	facts.Sec1ReturnUndefinedDomainPairs = oneSecondSeries.UndefinedDomainPairs
+	facts.Sec60ReturnUndefinedDomainPairs = oneMinuteSeries.UndefinedDomainPairs
+	facts.Stride20UndefinedDomainPairs = stride20Series.UndefinedDomainPairs
+	facts.Stride100UndefinedDomainPairs = stride100Series.UndefinedDomainPairs
 	if len(returns) < 10 {
 		return facts
 	}
@@ -522,13 +570,13 @@ func (t *TradeTape) Facts(maxLag int) StylizedFacts {
 	facts.ExcessKurtosis = Kurtosis(returns)
 	facts.TailIndex, facts.TailSpread = HillStability(returns)
 
-	if oneSecond := t.TimeSampledLogReturns(1e9); len(oneSecond) > 50 {
+	if oneSecond := oneSecondSeries.Returns; len(oneSecond) > 50 {
 		facts.Sec1ReturnACF1 = Autocorrelation(oneSecond, 1)[0]
 		absOne := Autocorrelation(Abs(oneSecond), 10)
 		facts.Sec1AbsReturnACF1, facts.Sec1AbsReturnACF10 = absOne[0], absOne[9]
 		facts.Sec1Kurtosis = Kurtosis(oneSecond)
 	}
-	if oneMinute := t.TimeSampledLogReturns(60e9); len(oneMinute) > 50 {
+	if oneMinute := oneMinuteSeries.Returns; len(oneMinute) > 50 {
 		lags := Autocorrelation(oneMinute, 30)
 		facts.Sec60ReturnACF1 = lags[0]
 		facts.Sec60AbsReturnACF1 = Autocorrelation(Abs(oneMinute), 1)[0]
@@ -544,8 +592,16 @@ func (t *TradeTape) Facts(maxLag int) StylizedFacts {
 		}
 		facts.Sec60VarianceRatio = 1 + 2*weighted
 	}
-	for _, stride := range []int{20, 100} {
-		strided := t.StridedLogReturns(stride)
+	for _, sample := range []struct {
+		stride int
+		series LogReturnSeries
+	}{
+		{stride: 20, series: stride20Series},
+		{stride: 100, series: stride100Series},
+	} {
+		stride := sample.stride
+		stridedSeries := sample.series
+		strided := stridedSeries.Returns
 		if len(strided) < 50 {
 			continue
 		}
