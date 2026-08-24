@@ -331,7 +331,7 @@ func (e *DefaultExchange) buildPositionSnapshots(clientID uint64) []PositionSnap
 			markErr = fmt.Errorf("display mark for %s: %w", pos.Symbol, ErrNoBookPrice)
 		}
 		var unrealizedPnL int64
-		if markPrice != nil && pos.EntryPrice > 0 {
+		if markPrice != nil {
 			if instrument := e.Instruments[pos.Symbol]; instrument != nil {
 				unrealizedPnL = positionUPnL(&pos, *markPrice, instrument.BasePrecision())
 			}

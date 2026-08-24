@@ -99,6 +99,23 @@ func TestSettlementObserverRetainsSignedAndZeroObservations(t *testing.T) {
 	}
 }
 
+func TestOptionMarksUseErrorsRatherThanZeroForAbsence(t *testing.T) {
+	option := NewEuropeanOption("OIL-0-C", "OIL", "USD", "OIL/USD", 1, 1, 1, 1, 1, 1, true)
+	if mark, err := option.PositionMark(); mark != 0 || !errors.Is(err, etypes.ErrNoPrice) {
+		t.Fatalf("unmarked premium = (%d, %v), want ErrNoPrice", mark, err)
+	}
+	if mark, err := option.UnderlyingMark(); mark != 0 || !errors.Is(err, etypes.ErrNoPrice) {
+		t.Fatalf("unmarked underlying = (%d, %v), want ErrNoPrice", mark, err)
+	}
+	option.SetMarks(1, 0)
+	if mark, err := option.PositionMark(); mark != 0 || err != nil {
+		t.Fatalf("zero premium mark = (%d, %v), want (0, nil)", mark, err)
+	}
+	if mark, err := option.UnderlyingMark(); mark != 1 || err != nil {
+		t.Fatalf("present underlying mark = (%d, %v), want (1, nil)", mark, err)
+	}
+}
+
 func TestSetPriceDomainRejectsTickMutation(t *testing.T) {
 	future := NewExpiringFutures("OIL-FUT", "OIL", "USD", 1, 1, 5, 1, 1)
 	if err := future.SetPriceDomain(etypes.SignedPriceDomain(10)); err == nil {

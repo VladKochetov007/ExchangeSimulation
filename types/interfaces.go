@@ -188,9 +188,11 @@ type OrderMarginer interface {
 // and premium marks move account equity). Without it a position is invisible
 // to the risk engine and can never trigger liquidation.
 type PositionMarginer interface {
-	// PositionMark is the price positions are marked at for unrealized PnL
-	// (zero when no mark has been set yet — the position then marks neutral).
-	PositionMark() int64
+	// PositionMark is the price positions are marked at for unrealized PnL.
+	// It returns ErrNoPrice before the instrument has received a mark; a
+	// numeric zero can be a valid option premium and is never an absence
+	// sentinel.
+	PositionMark() (int64, error)
 	// MaintenanceForPosition returns the quote-asset maintenance requirement
 	// for a signed position of the given size.
 	MaintenanceForPosition(size, precision int64) int64

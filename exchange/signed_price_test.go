@@ -84,3 +84,22 @@ func TestSignedPricePostOnlyAndIOCFOkContracts(t *testing.T) {
 		}
 	})
 }
+
+func TestSignedDatedFutureRiskTreatsZeroMarkAsPresent(t *testing.T) {
+	ex, future := newSignedFutureExchange(t)
+	defer ex.Shutdown()
+	future.GetFundingRate().MarkAvailable = true
+	future.GetFundingRate().MarkPrice = 0
+
+	mark, err := riskMark(future, ex.Books[future.Symbol()])
+	if err != nil || mark != 0 {
+		t.Fatalf("zero available future mark = (%d, %v), want (0, nil)", mark, err)
+	}
+	pos := &Position{Size: 1, EntryPrice: -20}
+	if pnl, ok := tryPositionUPnL(pos, mark, 1); !ok || pnl != 20 {
+		t.Fatalf("zero-mark signed PnL = (%d, %t), want (20, true)", pnl, ok)
+	}
+	if maintenance, ok := positionMaintenanceAtMark(future, pos.Size, mark); !ok || maintenance != 0 {
+		t.Fatalf("zero-mark maintenance = (%d, %t), want (0, true)", maintenance, ok)
+	}
+}

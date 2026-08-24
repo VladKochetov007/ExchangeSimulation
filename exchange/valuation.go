@@ -228,23 +228,30 @@ func riskMark(inst Instrument, book *OrderBook) (int64, error) {
 	// atomic underlying mark distinguishes that valid zero from an option that
 	// has not yet received its first derivative mark update.
 	if option, ok := inst.(*EuropeanOption); ok {
-		mark := option.PositionMark()
-		if option.UnderlyingMark() <= 0 || mark < 0 {
-			return 0, fmt.Errorf("option risk mark: %w", ErrNoBookPrice)
+		mark, err := option.PositionMark()
+		if err != nil {
+			return 0, fmt.Errorf("option risk mark: %w", err)
+		}
+		underlying, err := option.UnderlyingMark()
+		if err != nil {
+			return 0, fmt.Errorf("option underlying risk mark: %w", err)
+		}
+		if underlying <= 0 || mark < 0 {
+			return 0, fmt.Errorf("option risk mark: %w", etypes.ErrPriceDomain)
 		}
 		return mark, nil
 	}
 	if pm, ok := inst.(PositionMarginer); ok {
-		mark := pm.PositionMark()
-		if mark <= 0 {
-			return 0, fmt.Errorf("position risk mark: %w", ErrNoBookPrice)
+		mark, err := pm.PositionMark()
+		if err != nil {
+			return 0, fmt.Errorf("position risk mark: %w", err)
 		}
 		return mark, nil
 	}
 	if perp := marginCore(inst); perp != nil {
 		fundingRate := perp.GetFundingRate()
 		mark := fundingRate.MarkPrice
-		if fundingRate.MarkAvailable && mark > 0 {
+		if fundingRate.MarkAvailable {
 			return mark, nil
 		}
 		mark, err := liveBookReferencePrice(book)
@@ -265,11 +272,7 @@ func positionMaintenanceAtMark(inst Instrument, size, mark int64) (int64, bool) 
 	if perp == nil {
 		return 0, false
 	}
-	absSize, ok := positiveMagnitude(size)
-	if !ok {
-		return 0, false
-	}
-	notional, ok := etypes.TryMulDiv(absSize, mark, inst.BasePrecision())
+	notional, ok := etypes.TryAbsMulDiv(size, mark, inst.BasePrecision())
 	if !ok {
 		return 0, false
 	}
@@ -277,22 +280,7 @@ func positionMaintenanceAtMark(inst Instrument, size, mark int64) (int64, bool) 
 }
 
 func tryPositionUPnL(pos *Position, mark, precision int64) (int64, bool) {
-	if pos.Size >= 0 {
-		delta, ok := etypes.TrySub(mark, pos.EntryPrice)
-		if !ok {
-			return 0, false
-		}
-		return etypes.TryMulDiv(pos.Size, delta, precision)
-	}
-	absSize, ok := positiveMagnitude(pos.Size)
-	if !ok {
-		return 0, false
-	}
-	delta, ok := etypes.TrySub(pos.EntryPrice, mark)
-	if !ok {
-		return 0, false
-	}
-	return etypes.TryMulDiv(absSize, delta, precision)
+	return etypes.TryPriceChangeMulDiv(pos.Size, mark, pos.EntryPrice, precision)
 }
 
 func positiveMagnitude(value int64) (int64, bool) {

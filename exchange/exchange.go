@@ -1739,10 +1739,7 @@ func (e *DefaultExchange) ChargeCollateralInterest() {
 
 // positionUPnL returns unrealized PnL for a position marked at markPrice.
 func positionUPnL(pos *Position, markPrice, precision int64) int64 {
-	if pos.Size >= 0 {
-		return MulDiv(pos.Size, markPrice-pos.EntryPrice, precision)
-	}
-	return MulDiv(-pos.Size, pos.EntryPrice-markPrice, precision)
+	return etypes.PriceChangeMulDiv(pos.Size, markPrice, pos.EntryPrice, precision)
 }
 
 // accountMarginProfile aggregates a client's cross-margin exposure in the
@@ -1784,13 +1781,10 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 		}
 		mark := triggerMark
 		if symbol == triggerSymbol {
-			if mark <= 0 {
-				return accountMarginProfile{}, fmt.Errorf("trigger mark for %s: %w", symbol, ErrNoBookPrice)
-			}
 		} else {
 			fundingRate := perp.GetFundingRate()
 			mark = fundingRate.MarkPrice
-			if !fundingRate.MarkAvailable || mark <= 0 {
+			if !fundingRate.MarkAvailable {
 				var err error
 				mark, err = liveBookReferencePrice(book)
 				if err != nil {
@@ -1805,7 +1799,7 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 				continue
 			}
 			p.EquityContribution += positionUPnL(pos, mark, precision)
-			notional := MulDiv(abs(pos.Size), mark, precision)
+			notional := etypes.AbsMulDiv(pos.Size, mark, precision)
 			p.Notional += notional
 			p.Maintenance += notional * perp.MaintenanceMarginRate / 10000
 			p.Warning += notional * perp.WarningMarginRate / 10000
@@ -1914,7 +1908,7 @@ func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, c
 		// fill. Their contribution to equity is therefore the signed current
 		// premium value, unlike futures-style entry-to-mark PnL.
 		p.EquityContribution += MulDiv(pos.Size, m, precision)
-		p.Notional += MulDiv(abs(pos.Size), m, precision)
+		p.Notional += etypes.AbsMulDiv(pos.Size, m, precision)
 		maintenance := pm.MaintenanceForPosition(pos.Size, precision)
 		// A short with zero maintenance means the instrument has no marks yet
 		// (the underlying hasn't printed): the exposure is unknown, not zero.
@@ -1937,9 +1931,6 @@ func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, c
 // positions are closed; other symbols resolve on their own mark updates.
 // Hedge-mode Long/Short positions are included.
 func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, markPrice int64) {
-	if markPrice == 0 {
-		return
-	}
 	quote := perp.QuoteAsset()
 
 	e.mu.Lock()
