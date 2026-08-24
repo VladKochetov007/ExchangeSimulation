@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "experiment_id": "V2-4-L1-P3",
+  "hypothesis_id": "V2-4-L1-P3",
+  "status": "scored",
+  "verdict": "MIXED",
+  "source_revision": "3406094e3b1eacddd26d8ff62b3082773e491f65",
+  "binary_sha256": "c4bdcc1a283b3d9ed82ee41c2775720f3795ff22f6b1af9d6e5ca4b87238dee2",
+  "analyzer_sha256": "ed1d8f1f733d2bf6252eb0a5a07a804c0bea8b12e4012240be60c2f46cf2b303",
+  "horizon": "30m0s",
+  "seeds": [107, 109, 113],
+  "evidence_gate": {
+    "all_12_cells_valid": true,
+    "all_receipt_audits_valid": true,
+    "all_noise_phase_replays_valid": true,
+    "all_liability_policy_replays_valid": true,
+    "all_exercised_fills_gap_reducing": true,
+    "all_cdf_usd_noncollapse_floors_pass": true,
+    "raw_log_policy": "retained; no L1-P3 raw evidence is prunable",
+    "noise_phase_contract": "18 noise_flow participants in every cell; zero phase has 900 ticks per actor/16,200 rows, one-second phase 899 ticks/16,182 rows"
+  },
+  "cells": [
+    {"arm":"A","seed":107,"gap_sum":"493658026704","gap_samples":2700,"accepted":1749,"fills":3399,"noise_ticks":900,"evidence_events":2429344,"evidence_digest":"731b1eaf50bcf81c830e12735578559ff484fbcaae09a98b4a3095914730648c","config_sha256":"adaca6a6606731e71b04d763479b3a814ff8a7ce65abd54860893f7d2a470515"},
+    {"arm":"B","seed":107,"gap_sum":"267337666261","gap_samples":2697,"accepted":1881,"fills":4013,"noise_ticks":900,"evidence_events":2355875,"evidence_digest":"b814a5e66ac0895cfd63f518cd3a2fd3b3c6793728fb2ffe17e91b4b0864455f","config_sha256":"805454f1d29d7ad42973c96ee6e93cff0a44d4d60759957b38c5bb972202aa8f"},
+    {"arm":"C","seed":107,"gap_sum":"244327202111","gap_samples":2700,"accepted":1803,"fills":4135,"noise_ticks":899,"evidence_events":2421928,"evidence_digest":"49c79f8ebceae77375854a697055c57e314650f1bdf75a6d95aaa9a8b5490172","config_sha256":"898f56ce103e9bdaf7bf2ae6e78d447988c2a7a7b95d7a3121b65bea26533845"},
+    {"arm":"D","seed":107,"gap_sum":"229629622856","gap_samples":2697,"accepted":1499,"fills":3718,"noise_ticks":899,"evidence_events":2430132,"evidence_digest":"204e4d1812475f15c1e642e4c14cba017bba18c77e6ec4d4752c90e0929b41b2","config_sha256":"f2c311d1724145486c5913712ea20d56ab469487ce460f2785b9e2ff15c05954"},
+    {"arm":"A","seed":109,"gap_sum":"403016017145","gap_samples":2700,"accepted":1791,"fills":2670,"noise_ticks":900,"evidence_events":2364973,"evidence_digest":"4f4124d2fdba5822df46fca30673c56a0cf2a8b2a3d5491c078a673f6c5a69c8","config_sha256":"7e71081d3c159995307a6f597bbc01a4fb276f3796b8f540a09d6d29b20b1717"},
+    {"arm":"B","seed":109,"gap_sum":"250718208422","gap_samples":2697,"accepted":1785,"fills":3818,"noise_ticks":900,"evidence_events":2362291,"evidence_digest":"30056268ac9b1e2845f8cc17e4090331812b4448037d68f401f9e557cbad058d","config_sha256":"20a2c2dd42d9650e73422d48d8a8d2d6fcb2f356d63b2bf6cce39ef08f3f3a4b"},
+    {"arm":"C","seed":109,"gap_sum":"245599225952","gap_samples":2700,"accepted":1717,"fills":3709,"noise_ticks":899,"evidence_events":2416106,"evidence_digest":"991a2f0011bb2e25db91f6a6e4c901627425bf6ec0cac1a3dbefca85d422f9a8","config_sha256":"feb2ee821845d6e41ff6322925a27297444cef37b06f1a34162eb6445ed1f629"},
+    {"arm":"D","seed":109,"gap_sum":"456397810956","gap_samples":2697,"accepted":1746,"fills":2888,"noise_ticks":899,"evidence_events":2437927,"evidence_digest":"d2776fa123bda0de7b2032e3512d0771aaaf5f49ceffb2045ecf036b754cc6da","config_sha256":"38cccb3a84947cbadaa6906f1a5d13ff1896666b33f9add2513fbc664cdf4749"},
+    {"arm":"A","seed":113,"gap_sum":"194400597342","gap_samples":2700,"accepted":1308,"fills":3812,"noise_ticks":900,"evidence_events":2371352,"evidence_digest":"0a152c1ce34276976c95b5f3de338a50006d365ae92bec7f0f93cde39bbdb86b","config_sha256":"b8db84286aec9472192a60a03644bd380040348b93ceaa451f8b0993e43b3fcd"},
+    {"arm":"B","seed":113,"gap_sum":"247913804824","gap_samples":2697,"accepted":1878,"fills":4082,"noise_ticks":900,"evidence_events":2374353,"evidence_digest":"38a8dae0d0a3407d2992053ed62fb3f8ab0d198cf54ef5ace1cdae851f01513b","config_sha256":"3bce22efcb6e6afcc07f41d30c071cb762cbbc377d77134b473156d4c453797b"},
+    {"arm":"C","seed":113,"gap_sum":"244205172921","gap_samples":2700,"accepted":1830,"fills":4049,"noise_ticks":899,"evidence_events":2424487,"evidence_digest":"762247fbe1f89fd75a364539af85766b4e4c69be16a22a0f59200bac3e9d1463","config_sha256":"f3dc0c7d984f6e0dd842a4112cb00fcf2b275a69b43e7f2300eb851952399a18"},
+    {"arm":"D","seed":113,"gap_sum":"199971233311","gap_samples":2697,"accepted":1365,"fills":3840,"noise_ticks":899,"evidence_events":2453255,"evidence_digest":"b69f7e50e3099107a4cd919bad73a73c583b53986cf5b6fe9e69c9141299a45c","config_sha256":"7818eabb31d50e69182b2881512e95fdb92c6c4ea77daf93375d877d4647ee94"}
+  ],
+  "exact_score": {
+    "common_denominator": 2427300,
+    "definition": "M_arm=absolute_gap_sum/gap_samples; aligned=(A+D)/2; dealigned=(B+C)/2; interaction=(D-C)-(B-A). Exact numerators use common_denominator; displayed decimals belong in the report only.",
+    "seed_107":{"aligned_numerator":650465226577296,"dealigned_numerator":460254054332689,"mean_denominator":4854600,"aligned_minus_dealigned_numerator":190211172244607,"interaction_numerator":190211172244607,"interaction_denominator":2427300,"predicted_direction":true,"positive_interaction":true},
+    "seed_109":{"aligned_numerator":773069429273755,"dealigned_numerator":446440091710648,"mean_denominator":4854600,"aligned_minus_dealigned_numerator":326629337563107,"interaction_numerator":326629337563107,"interaction_denominator":2427300,"predicted_direction":true,"positive_interaction":true},
+    "seed_113":{"aligned_numerator":354740246990358,"dealigned_numerator":442662874797579,"mean_denominator":4854600,"aligned_minus_dealigned_numerator":-87922627807221,"interaction_numerator":-87922627807221,"interaction_denominator":2427300,"predicted_direction":false,"positive_interaction":false}
+  },
+  "interpretation": {
+    "supported": [],
+    "weakened": ["The L1-P2 relative-phase effect does not reproduce under the strict three-seed untouched-holdout criterion."],
+    "not_supported": ["a timing-robust causal attribution", "a unique LCM explanation", "price stability", "demand realism", "L2 roster demotion"],
+    "next_gate": "Use retained decision evidence for a noncausal seed-heterogeneity diagnostic. Do not tune or change the population in response to this mixed replication."
+  }
+}

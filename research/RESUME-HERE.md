@@ -643,3 +643,22 @@ finish and their contracts pass.
   support phase robustness, a unique LCM explanation, price stability, demand
   realism, or L2 roster demotion. Next: preregister and run a fresh 2×2
   holdout-seed replication before any population change.
+
+### 2026-08-24 V2-4 L1-P3 untouched-seed holdout replication
+
+- The fixed 2×2 A/B/C/D phase design was rerun without source, policy,
+  population, price, spread, fee, latency, or frequency changes for untouched
+  seeds 107/109/113. All 12 full-evidence cells pass final-sidecar, receipt,
+  artifact-digest, liability/noise-phase replay, exercised-fill, and CDF/USD
+  non-collapse gates. Raw evidence remains retained at
+  `artifacts/v2-4-l1p3/{A,B,C,D}/seed-{107,109,113}`.
+- Result: **MIXED** under the preregistered rule. Seeds 107 and 109 reproduce
+  the aligned-greater-than-de-aligned endpoint and positive interaction; seed
+  113 reverses both. Exact raw ratios and digests are in
+  `research/v2-4-l1p3-holdout-results.md` and
+  `artifacts/v2-4-l1p3/l1p3-summary.json`.
+- Consequence: the L1-P2 result is seed-sensitive, not a timing-robust causal
+  attribution. It does not support L2 roster demotion, economic tuning, a
+  unique LCM mechanism, or any price-stability claim. The next permitted step
+  is an explicitly exploratory diagnostic on retained evidence to explain the
+  reversal; it cannot revise or rescue the preregistered score.

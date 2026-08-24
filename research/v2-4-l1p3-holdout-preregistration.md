@@ -70,3 +70,16 @@ This remains a replication of one local endpoint, not a price, demand,
 ecology, or unique-LCM claim. It does not license L2 population changes. If it
 replicates, later clock work must still vary other counterpart clocks and
 nearby phases before a general timing claim.
+
+## Result (appended after collection and scoring)
+
+All 12 cells passed the registered completion, receipt, persisted-evidence,
+liability-policy, noise-phase, gap-reduction, and non-collapse gates. The
+replication verdict is nevertheless **MIXED**: seeds 107 and 109 have the
+predicted aligned-greater-than-de-aligned direction and positive interaction,
+whereas seed 113 has both in the opposite direction. The all-three-seed
+SUPPORTED rule is therefore not met, and the all-three-opposite FALSIFIED rule
+is not met either. See
+[`v2-4-l1p3-holdout-results.md`](v2-4-l1p3-holdout-results.md) and
+`artifacts/v2-4-l1p3/l1p3-summary.json` for exact ratios, configuration
+hashes, and evidence digests.

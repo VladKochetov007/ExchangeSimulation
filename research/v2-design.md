@@ -185,6 +185,16 @@ robustness. Before any L2 allocation/demotion, replicate the exact 2×2 on
 untouched holdout seeds; do not tune policy, population, spread, latency, or
 frequency.
 
+The preregistered untouched-seed replication is now complete in
+[`v2-4-l1p3-holdout-results.md`](v2-4-l1p3-holdout-results.md) and
+`artifacts/v2-4-l1p3/l1p3-summary.json`. It is **MIXED**: 107 and 109 repeat
+the registered direction, but 113 reverses it. Thus L1-P2 remains a
+seed-sensitive timing observation, not timing-robust causal support. It does
+not license L2 allocation/demotion, economic tuning, a unique LCM explanation,
+or any market-level claim. The only permitted next step on this line is an
+exploratory retained-evidence diagnostic of the seed heterogeneity, clearly
+separate from the preregistered causal score.
+
 ## V2-5 — identifiable perp funding and dated carry
 
 | field | design |
