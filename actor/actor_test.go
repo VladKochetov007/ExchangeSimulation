@@ -165,10 +165,9 @@ func TestBaseActorCancelOrder(t *testing.T) {
 	gateway := exchange.NewClientGateway(1)
 	actor := NewBaseActor(1, gateway)
 
-	done := make(chan bool)
+	done := make(chan uint64, 1)
 	go func() {
-		actor.CancelOrder(999)
-		done <- true
+		done <- actor.CancelOrder(999)
 	}()
 
 	select {
@@ -179,11 +178,12 @@ func TestBaseActorCancelOrder(t *testing.T) {
 		if req.CancelReq.OrderID != 999 {
 			t.Errorf("Expected OrderID 999, got %d", req.CancelReq.OrderID)
 		}
+		if got := <-done; got != req.CancelReq.RequestID {
+			t.Errorf("CancelOrder returned request ID %d, want %d", got, req.CancelReq.RequestID)
+		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("Timeout waiting for cancel request")
 	}
-
-	<-done
 }
 
 func TestBaseActorQueryBalance(t *testing.T) {

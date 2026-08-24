@@ -285,8 +285,11 @@ func TestBaseActorCancelResponseTracksOriginalOrder(t *testing.T) {
 	trader.activeOrders.Store(orderID, &OrderInfo{OrderID: orderID, RequestID: placeRequestID})
 	trader.requestToOrder.Store(placeRequestID, orderID)
 
-	trader.CancelOrder(orderID)
+	cancelRequestID := trader.CancelOrder(orderID)
 	request := <-gateway.RequestCh
+	if cancelRequestID != request.CancelReq.RequestID {
+		t.Fatalf("CancelOrder returned request ID %d, want %d", cancelRequestID, request.CancelReq.RequestID)
+	}
 	events := trader.decodeResponse(exchange.Response{
 		RequestID: request.CancelReq.RequestID,
 		Success:   true,

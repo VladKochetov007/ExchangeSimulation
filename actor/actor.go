@@ -719,7 +719,10 @@ func (a *BaseActor) sendOrderDecision(request exchange.Request) {
 	a.gateway.Send(request)
 }
 
-func (a *BaseActor) CancelOrder(orderID uint64) {
+// CancelOrder sends a cancellation request and returns its actor-local request
+// identity. Callers that need to reconcile a scheduled cancellation against
+// exchange evidence must retain this value; callers that do not may ignore it.
+func (a *BaseActor) CancelOrder(orderID uint64) uint64 {
 	reqID := atomic.AddUint64(&a.requestSeq, 1)
 	a.cancelRequests.Store(reqID, orderID)
 	a.gateway.Send(exchange.Request{
@@ -729,6 +732,7 @@ func (a *BaseActor) CancelOrder(orderID uint64) {
 			OrderID:   orderID,
 		},
 	})
+	return reqID
 }
 
 func (a *BaseActor) QueryBalance() {
