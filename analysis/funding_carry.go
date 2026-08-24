@@ -190,6 +190,7 @@ type fundingCarryGatewayDecision struct {
 	clientID   uint64
 	linkID     uint32
 	requestID  uint64
+	symbol     string
 	decisionAt int64
 	price      int64
 	qty        int64
@@ -574,10 +575,14 @@ func fundingCarryReceipts(dir string) (map[fundingCarrySourceKey][]observationRe
 	for _, link := range manifest.Links {
 		linkVenue[link.ID] = link.SourceVenue
 	}
+	symbolName := make(map[uint32]string, len(manifest.Symbols))
+	for _, symbol := range manifest.Symbols {
+		symbolName[symbol.ID] = symbol.Symbol
+	}
 	gateways := make(map[fundingCarryKey]fundingCarryGatewayDecision)
 	for offset := 0; offset < len(decisionRaw); offset += marketDataDecisionRecordBytes {
 		record := decodeDecision(decisionRaw[offset : offset+marketDataDecisionRecordBytes])
-		gateways[fundingCarryKey{linkVenue[record.linkID], record.clientID, record.requestID}] = fundingCarryGatewayDecision{clientID: record.clientID, linkID: record.linkID, requestID: record.requestID, decisionAt: record.decisionAt, price: record.price, qty: record.qty, side: record.side, orderType: record.orderType, tif: record.tif}
+		gateways[fundingCarryKey{linkVenue[record.linkID], record.clientID, record.requestID}] = fundingCarryGatewayDecision{clientID: record.clientID, linkID: record.linkID, requestID: record.requestID, symbol: symbolName[record.symbolID], decisionAt: record.decisionAt, price: record.price, qty: record.qty, side: record.side, orderType: record.orderType, tif: record.tif}
 	}
 	return sources, frontiers, gateways, audit, nil
 }
@@ -899,11 +904,14 @@ func fundingCarrySubmission(action string) bool {
 }
 
 func fundingCarryGatewayMatches(decision fundingCarryDecision, gateway fundingCarryGatewayDecision) bool {
-	return gateway.requestID == decision.RequestID && gateway.decisionAt == decision.DecisionTime && gateway.price == decision.LimitPrice && gateway.qty == decision.RequestedQty && gateway.side == uint8(exchangeSide(decision.Side)) && gateway.orderType == uint8(exchange.LimitOrder) && gateway.tif == uint8(exchange.IOC)
+	return gateway.requestID == decision.RequestID && gateway.symbol == mapFundingCarryAuditSymbol(decision) && gateway.decisionAt == decision.DecisionTime && gateway.price == decision.LimitPrice && gateway.qty == decision.RequestedQty && gateway.side == uint8(exchangeSide(decision.Side)) && gateway.orderType == uint8(exchange.LimitOrder) && gateway.tif == uint8(exchange.IOC)
 }
 
 func fundingCarryVenueOrderMatches(decision fundingCarryDecision, order fundingCarryVenueOrder) bool {
-	return order.Symbol == mapFundingCarryAuditSymbol(decision) && order.Side == decision.Side && order.Type == exchange.LimitOrder.String() && order.TimeInForce == exchange.IOC.String() && order.Price == decision.LimitPrice && order.Qty == decision.RequestedQty
+	// OrderAccepted/Rejected intentionally do not persist Symbol. The exact
+	// request symbol is independently verified on the V2-0 gateway decision;
+	// request ID links that complete scalar record to this venue response.
+	return order.Side == decision.Side && order.Type == exchange.LimitOrder.String() && order.TimeInForce == exchange.IOC.String() && order.Price == decision.LimitPrice && order.Qty == decision.RequestedQty
 }
 
 func mapFundingCarryAuditSymbol(decision fundingCarryDecision) string {

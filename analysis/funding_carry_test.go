@@ -40,6 +40,24 @@ func TestFundingCarryAuditAcceptsExplicitEmptyRegisteredFrontier(t *testing.T) {
 	}
 }
 
+func TestFundingCarryGatewayRequiresExactScalarSymbol(t *testing.T) {
+	decision := fundingCarryDecision{
+		SpotSymbol: "ABC/USD", PerpSymbol: "ABC-PERP", Leg: "SPOT_TARGET_ADJUSTMENT",
+		RequestID: 7, DecisionTime: 10, LimitPrice: 100, RequestedQty: 2, Side: exchange.Buy.String(),
+	}
+	matching := fundingCarryGatewayDecision{
+		requestID: 7, symbol: "ABC/USD", decisionAt: 10, price: 100, qty: 2,
+		side: uint8(exchange.Buy), orderType: uint8(exchange.LimitOrder), tif: uint8(exchange.IOC),
+	}
+	if !fundingCarryGatewayMatches(decision, matching) {
+		t.Fatal("matching scalar gateway decision rejected")
+	}
+	matching.symbol = "ABC-PERP"
+	if fundingCarryGatewayMatches(decision, matching) {
+		t.Fatal("gateway symbol mutation survived")
+	}
+}
+
 func TestFundingCarryAuditCatchesEvidenceAndEconomicMutations(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -163,7 +181,7 @@ func fundingCarryTestRun(t *testing.T, mutate func(*testing.T, string, *fundingC
 		mutate(t, dir, &decision)
 	}
 	accepted := fundingCarryVenueOrder{
-		RequestID: decision.RequestID, OrderID: 100, Symbol: "ABC/USD",
+		RequestID: decision.RequestID, OrderID: 100,
 		Side: exchange.Buy.String(), Type: exchange.LimitOrder.String(),
 		TimeInForce: exchange.IOC.String(), Price: 1_002, Qty: 100,
 	}
