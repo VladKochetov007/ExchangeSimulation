@@ -144,3 +144,28 @@ func TestTermCarryFinancialsUseExactDirectionalTermCost(t *testing.T) {
 		t.Fatalf("negative directional financing = %+v positive=%+v ok=%t", negative, positive, ok)
 	}
 }
+
+func TestTermCarryConfigRequiresExplicitEvidencePath(t *testing.T) {
+	policy := termCarryTestConfig()
+	base := Config{
+		LogDir: t.TempDir(), LogMode: "full", TakerFeeBps: policy.TakerFeeBps,
+		TermCarryAllocator: &policy, RecordTermCarryDecisions: true,
+	}
+	if _, err := NewSim(time.Second, base); err == nil {
+		t.Fatal("term carry accepted without delayed public receipt evidence")
+	}
+	base.RecordMarketDataReceipts = true
+	base.MarketDataReceiptRoles = []string{"term_carry_allocator"}
+	base.LatencyProfiles = map[string]LatencyProfile{"term_carry_allocator": {Model: "constant", Delay: time.Millisecond}}
+	base.StrictPopulationAccounting = true
+	sim, err := NewSim(time.Second, base)
+	if err != nil {
+		t.Fatalf("term carry rejected documented receipt path: %v", err)
+	}
+	defer sim.Close()
+	for _, venue := range sim.Venues {
+		if len(venue.TermCarryAllocators) != 1 {
+			t.Fatalf("venue %s term carry allocators = %d, want 1", venue.ID, len(venue.TermCarryAllocators))
+		}
+	}
+}

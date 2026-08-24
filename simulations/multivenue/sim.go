@@ -126,6 +126,10 @@ type Config struct {
 	// evaluation and linked non-atomic leg outcome. It is optional evidence
 	// only; the policy never reads the recorder or receipt sidecar.
 	RecordFundingCarryDecisions bool `json:"record_funding_carry_decisions"`
+	// RecordTermCarryDecisions retains every V2-5 P3 term-carry lifecycle
+	// evaluation and its ordinary leg outcomes. It is evidence only and never
+	// enters the execution checkpoint domain or feeds an actor decision.
+	RecordTermCarryDecisions bool `json:"record_term_carry_decisions"`
 	// RecordPerpExposureHedgerDecisions retains the V2-5 P2 physical-exposure
 	// hedger's local state/action and fill attestations. It is append-only
 	// evidence only and never reaches the ordered execution checkpoint domain.
@@ -445,6 +449,9 @@ type Config struct {
 	// separate from the historical fixed-basis CarryArbitrageur, so nil retains
 	// every pre-P0 trajectory exactly.
 	FundingCarryArbitrageur *FundingCarryArbitrageurConfig `json:"funding_carry_arbitrageur,omitempty"`
+	// TermCarryAllocator configures the opt-in V2-5 P3 lifecycle-bearing carry
+	// participant. Nil preserves every pre-P3 trajectory exactly.
+	TermCarryAllocator *TermCarryAllocatorConfig `json:"term_carry_allocator,omitempty"`
 	// MakerIndexWeight blends the index with the maker's own midpoint.
 	MakerIndexWeight float64 `json:"maker_index_weight"`
 
@@ -668,6 +675,9 @@ func (c *Config) normalize() error {
 	if c.RecordFundingCarryDecisions && c.LogMode != "full" {
 		return errors.New("multivenue: funding-carry decisions require full persisted evidence")
 	}
+	if c.RecordTermCarryDecisions && c.LogMode != "full" {
+		return errors.New("multivenue: term-carry decisions require full persisted evidence")
+	}
 	if c.SpotStoikovInventorySizeSkewBps < 0 || c.SpotStoikovInventorySizeSkewBps > 5_000 {
 		return fmt.Errorf("multivenue: spot Stoikov inventory size skew bps must be in [0,5000], got %d", c.SpotStoikovInventorySizeSkewBps)
 	}
@@ -769,6 +779,35 @@ func (c *Config) normalize() error {
 	}
 	if c.RecordFundingCarryDecisions && c.FundingCarryArbitrageur == nil {
 		return errors.New("multivenue: funding-carry evidence requires a funding-carry policy")
+	}
+	if c.TermCarryAllocator != nil {
+		if c.TermCarryAllocator.SpotSymbol != "ABC/USD" || c.TermCarryAllocator.PerpSymbol != "ABC-PERP" {
+			return fmt.Errorf("multivenue: V2-5 term carry P3 must use ABC/USD and ABC-PERP, got %q and %q", c.TermCarryAllocator.SpotSymbol, c.TermCarryAllocator.PerpSymbol)
+		}
+		if c.TermCarryAllocator.TakerFeeBps != c.TakerFeeBps {
+			return fmt.Errorf("multivenue: term carry must price the configured taker fee %d bps, got %d", c.TakerFeeBps, c.TermCarryAllocator.TakerFeeBps)
+		}
+		if err := c.TermCarryAllocator.validate(); err != nil {
+			return fmt.Errorf("multivenue: term carry allocator: %w", err)
+		}
+		// The actor's local public-feed contract holds in every world, including
+		// recorder-neutrality worlds. Instrumented scientific cells additionally
+		// require the append-only lifecycle rows and receipt sidecars together.
+		profile, configured := c.latencyProfileFor("term_carry_allocator")
+		if !configured || profile.zero() {
+			return errors.New("multivenue: term carry allocator requires an explicit nonzero term_carry_allocator public-feed link")
+		}
+		if c.RecordTermCarryDecisions || c.RecordMarketDataReceipts {
+			if !c.RecordTermCarryDecisions || !c.RecordMarketDataReceipts || !slices.Contains(c.MarketDataReceiptRoles, "term_carry_allocator") {
+				return errors.New("multivenue: instrumented term carry requires decisions and term_carry_allocator market-data receipts")
+			}
+			if !c.StrictPopulationAccounting {
+				return errors.New("multivenue: instrumented term carry requires strict population accounting for its independent role roster")
+			}
+		}
+	}
+	if c.RecordTermCarryDecisions && c.TermCarryAllocator == nil {
+		return errors.New("multivenue: term-carry evidence requires a term-carry allocator policy")
 	}
 	if len(c.VenueIDs) == 0 {
 		c.VenueIDs = []string{"north", "central", "south"}
@@ -1238,6 +1277,7 @@ type Venue struct {
 	LiabilityHedgers    []*LiabilityHedger
 	CarryArbs           []*CarryArbitrageur
 	FundingCarryArbs    []*FundingCarryArbitrageur
+	TermCarryAllocators []*TermCarryAllocator
 	PerpExposureHedgers []*PerpExposureHedger
 	LatentLiquidity     []*LatentLiquidity
 	MetaorderTraders    []*MetaorderTrader
@@ -1972,6 +2012,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		for _, arb := range venue.FundingCarryArbs {
 			runner.AddActor(arb)
 		}
+		for _, allocator := range venue.TermCarryAllocators {
+			runner.AddActor(allocator)
+		}
 		for _, hedger := range venue.PerpExposureHedgers {
 			runner.AddActor(hedger)
 		}
@@ -2357,6 +2400,18 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		}
 		venue.makerStateLog.LogEvidenceOnly(simTime, outcome.ClientID, "funding_carry_leg_outcome", outcome)
 	}
+	termCarryDecisionObserver := func(decision TermCarryDecision) {
+		// P3 lifecycle observations attest state before ingress only. This
+		// recorder never feeds the allocator, scheduler, RNG, exchange, or hash.
+		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "term_carry_decision", decision)
+	}
+	termCarryOutcomeObserver := func(outcome TermCarryLegOutcome) {
+		simTime := outcome.DecisionTime
+		if outcome.ExecutionTime != 0 {
+			simTime = outcome.ExecutionTime
+		}
+		venue.makerStateLog.LogEvidenceOnly(simTime, outcome.ClientID, "term_carry_leg_outcome", outcome)
+	}
 	perpExposureDecisionObserver := func(decision PerpExposureHedgerDecision) {
 		// P2 local-state telemetry is append-only evidence. It has no callback
 		// path into the actor, exchange, scheduler, checkpoint, or RNG state.
@@ -2740,6 +2795,21 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		arb := NewFundingCarryArbitrageur(nextActor(), gateway, cfg)
 		arb.SetTickerFactory(timers)
 		venue.FundingCarryArbs = append(venue.FundingCarryArbs, arb)
+	}
+
+	if policy := s.Config.TermCarryAllocator; policy != nil {
+		cfg := *policy
+		role := "term_carry_allocator_1"
+		balances := map[string]int64{"ABC": 2_000 * mvBasePrecision, "USD": 200_000_000 * mvQuotePrecision}
+		clientID, gateway := venue.connectParticipant(mount, role, balances, 100_000_000*mvQuotePrecision, noiseFee)
+		cfg.VenueID, cfg.Desk, cfg.ClientID, cfg.TerminalNano = venue.ID, role, clientID, s.terminalNano
+		if s.Config.RecordTermCarryDecisions {
+			cfg.DecisionObserver = termCarryDecisionObserver
+			cfg.OutcomeObserver = termCarryOutcomeObserver
+		}
+		allocator := NewTermCarryAllocator(nextActor(), gateway, cfg)
+		allocator.SetTickerFactory(timers)
+		venue.TermCarryAllocators = append(venue.TermCarryAllocators, allocator)
 	}
 
 	if policy := s.Config.PerpExposureHedger; policy != nil {
