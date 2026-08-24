@@ -1398,6 +1398,16 @@ func TestConsensusIndexIsRobustToOneRunawayVenue(t *testing.T) {
 	}
 }
 
+func TestConsensusIndexRetainsSignedObservedMidpoints(t *testing.T) {
+	provider := newSpotIndexProvider("consensus", "OIL-FUT")
+	provider.observeVenueMid("OIL-FUT", "north", -20)
+	provider.observeVenueMid("OIL-FUT", "central", 0)
+	provider.observeVenueMid("OIL-FUT", "south", 10)
+	if got, err := provider.Price("OIL-FUT"); err != nil || got != 0 {
+		t.Fatalf("signed consensus = (%d, %v), want present zero", got, err)
+	}
+}
+
 // A round-trip participant must return to flat, which is the property that
 // distinguishes it from random-side flow: a fresh coin flip each tick
 // mean-reverts in price but leaves the participant's net position a random

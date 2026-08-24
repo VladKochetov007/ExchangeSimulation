@@ -40,7 +40,7 @@ func newSpotIndexProvider(mode string, symbols ...string) *spotIndexProvider {
 
 // observeVenueMid records one venue's current midpoint for a symbol.
 func (p *spotIndexProvider) observeVenueMid(symbol, venueID string, mid int64) {
-	if p == nil || mid <= 0 {
+	if p == nil {
 		return
 	}
 	p.mu.Lock()
@@ -66,9 +66,10 @@ func (p *spotIndexProvider) Price(symbol string) (int64, error) {
 	case "consensus":
 		mids := make([]int64, 0, len(p.venueMids[symbol]))
 		for _, mid := range p.venueMids[symbol] {
-			if mid > 0 {
-				mids = append(mids, mid)
-			}
+			// Map membership is the receipt/presence state. A zero or negative
+			// midpoint is present evidence and must reach the consumer, which
+			// can then apply its own positive-index or signed-price domain.
+			mids = append(mids, mid)
 		}
 		if len(mids) == 0 {
 			return 0, fmt.Errorf("spot index has no observations for %s: %w", symbol, etypes.ErrNoPrice)
