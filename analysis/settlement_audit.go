@@ -36,6 +36,10 @@ type SettlementCheck struct {
 	// TradesAfterExpiry counts fills recorded after the expiry instant, which
 	// must be zero.
 	TradesAfterExpiry int `json:"trades_after_expiry"`
+	// Unrepresentable means the signed fixed-point payout cannot be represented
+	// as int64. Such a contract is unresolved, never silently converted to a
+	// zero payout and scored as a matching settlement.
+	Unrepresentable bool `json:"unrepresentable"`
 }
 
 // SettlementAudit is the independent check of expiry semantics.
@@ -48,6 +52,9 @@ type SettlementAudit struct {
 	Unpaid     int `json:"unpaid"`
 	// TotalTradesAfterExpiry is the count across all audited contracts.
 	TotalTradesAfterExpiry int `json:"total_trades_after_expiry"`
+	// ArithmeticFailures counts contracts for which the independent payout
+	// reconstruction exceeded the artifact's int64 representation.
+	ArithmeticFailures int `json:"arithmetic_failures"`
 }
 
 // MeasureSettlements recomputes every dated-future settlement.
@@ -217,19 +224,45 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 				continue
 			}
 			check.Holders++
-			check.NetSize += state.size
-			check.ExpectedPayout += mulDiv(contract.price-state.entry, state.size, precision)
+			netSize, ok := exactAdd(check.NetSize, state.size)
+			if !ok {
+				check.Unrepresentable = true
+				continue
+			}
+			check.NetSize = netSize
+			change, ok := exactSub(contract.price, state.entry)
+			if !ok {
+				check.Unrepresentable = true
+				continue
+			}
+			expected, ok := mulDiv(change, state.size, precision)
+			if !ok {
+				check.Unrepresentable = true
+				continue
+			}
+			expectedPayout, ok := exactAdd(check.ExpectedPayout, expected)
+			if !ok {
+				check.Unrepresentable = true
+				continue
+			}
+			check.ExpectedPayout = expectedPayout
 		}
 		entry := paid[key]
 		check.PaidOut = entry.amount
 		check.PaidAccounts = entry.accounts
-		check.Residual = check.PaidOut - check.ExpectedPayout
+		if residual, ok := exactSub(check.PaidOut, check.ExpectedPayout); ok {
+			check.Residual = residual
+		} else {
+			check.Unrepresentable = true
+		}
 		for _, at := range fillTimes[key] {
 			if at > contract.expiry {
 				check.TradesAfterExpiry++
 			}
 		}
-		if check.Residual != 0 {
+		if check.Unrepresentable {
+			result.ArithmeticFailures++
+		} else if check.Residual != 0 {
 			result.Mismatched++
 		}
 		if check.PaidAccounts != check.Holders {
