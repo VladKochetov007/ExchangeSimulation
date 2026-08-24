@@ -301,17 +301,37 @@ func (p *PerpFutures) SetFundingCalculator(calc FundingCalculator) {
 	p.fundingCalc = calc
 }
 
-func (p *PerpFutures) UpdateFundingRate(indexPrice int64, markPrice int64) {
-	if indexPrice <= 0 || markPrice <= 0 {
-		p.fundingRate.IndexPrice = 0
-		p.fundingRate.MarkPrice = 0
-		p.fundingRate.IndexAvailable = false
-		p.fundingRate.MarkAvailable = false
-		return
-	}
+// UpdateMarkReferences stores an explicitly present mark/index pair. Numeric
+// zero and negative values remain representable; callers that need a
+// percentage-based funding formula must use UpdateFundingRate, which enforces
+// that formula's positive-price domain separately.
+func (p *PerpFutures) UpdateMarkReferences(indexPrice int64, markPrice int64) {
 	p.fundingRate.IndexPrice = indexPrice
 	p.fundingRate.MarkPrice = markPrice
 	p.fundingRate.IndexAvailable = true
 	p.fundingRate.MarkAvailable = true
-	p.fundingRate.Rate = p.fundingCalc.Calculate(indexPrice, markPrice)
+}
+
+// ClearMarkReferences records an unavailable reference without overwriting
+// the last numeric observations with zero. Consumers must inspect the
+// availability flags (or their error-returning lookup boundary), never the
+// numeric fields, to determine whether the current mark may be used.
+func (p *PerpFutures) ClearMarkReferences() {
+	p.fundingRate.IndexAvailable = false
+	p.fundingRate.MarkAvailable = false
+}
+
+// UpdateFundingRate stores a present pair and computes the current funding
+// rate. The present values must be admissible to the configured funding
+// formula; otherwise their availability is cleared and the domain error is
+// returned to the caller rather than manufacturing a zero rate.
+func (p *PerpFutures) UpdateFundingRate(indexPrice int64, markPrice int64) error {
+	p.UpdateMarkReferences(indexPrice, markPrice)
+	rate, err := p.fundingCalc.Calculate(indexPrice, markPrice)
+	if err != nil {
+		p.ClearMarkReferences()
+		return err
+	}
+	p.fundingRate.Rate = rate
+	return nil
 }

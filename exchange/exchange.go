@@ -1571,7 +1571,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		// availability contract; the numeric fields remain diagnostics only
 		// when it is false.
 		e.mu.Lock()
-		d.perp.UpdateFundingRate(0, 0)
+		d.perp.ClearMarkReferences()
 		fundingSnapshot := *d.perp.GetFundingRate()
 		e.mu.Unlock()
 		e.reportPriceUnavailable(timestamp, d.symbol, d.operation, d.err)
@@ -1617,9 +1617,21 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		// a snapshot copy — publishing the live pointer would let actor
 		// goroutines read fields mid-update.
 		e.mu.Lock()
-		u.perp.UpdateFundingRate(u.indexPrice, u.markPrice)
+		var updateErr error
+		if u.isPerp {
+			updateErr = u.perp.UpdateFundingRate(u.indexPrice, u.markPrice)
+		} else {
+			u.perp.UpdateMarkReferences(u.indexPrice, u.markPrice)
+		}
 		fundingSnapshot := *u.perp.GetFundingRate()
 		e.mu.Unlock()
+		if updateErr != nil {
+			e.reportPriceUnavailable(timestamp, u.symbol, "perp_funding", updateErr)
+			if u.isPerp {
+				e.MDPublisher.PublishFunding(u.symbol, &fundingSnapshot, timestamp)
+			}
+			continue
+		}
 
 		if log := e.getLogger(u.symbol); log != nil {
 			log.LogEvent(timestamp, 0, "mark_price_update", MarkPriceUpdateEvent{
