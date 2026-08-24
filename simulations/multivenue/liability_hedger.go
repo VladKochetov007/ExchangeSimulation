@@ -84,8 +84,11 @@ type LiabilityHedgerDecision struct {
 	LastBookSourceTime   int64         `json:"last_book_source_time"`
 	LastBookReceivedTime int64         `json:"last_book_received_time"`
 	LastBookSequence     uint64        `json:"last_book_sequence"`
+	HasSnapshot          bool          `json:"has_snapshot"`
+	HasBid               bool          `json:"has_bid"`
 	BidPrice             int64         `json:"bid_price"`
 	BidVisibleQty        int64         `json:"bid_visible_qty"`
+	HasAsk               bool          `json:"has_ask"`
 	AskPrice             int64         `json:"ask_price"`
 	AskVisibleQty        int64         `json:"ask_visible_qty"`
 	Side                 exchange.Side `json:"-"`
@@ -119,11 +122,14 @@ type LiabilityHedgerFill struct {
 }
 
 type liabilityHedgerBook struct {
+	HasSnapshot  bool
 	SourceTime   int64
 	ReceivedTime int64
 	Sequence     uint64
+	HasBid       bool
 	BidPrice     int64
 	BidQty       int64
+	HasAsk       bool
 	AskPrice     int64
 	AskQty       int64
 }
@@ -184,12 +190,14 @@ func (h *LiabilityHedger) observeSnapshot(event actor.BookSnapshotEvent) {
 	if event.Symbol != h.cfg.Symbol {
 		return
 	}
-	book := liabilityHedgerBook{SourceTime: event.Timestamp, Sequence: event.SeqNum}
+	book := liabilityHedgerBook{HasSnapshot: true, SourceTime: event.Timestamp, Sequence: event.SeqNum}
 	if event.Snapshot != nil {
 		if len(event.Snapshot.Bids) > 0 {
+			book.HasBid = true
 			book.BidPrice, book.BidQty = event.Snapshot.Bids[0].Price, event.Snapshot.Bids[0].VisibleQty
 		}
 		if len(event.Snapshot.Asks) > 0 {
+			book.HasAsk = true
 			book.AskPrice, book.AskQty = event.Snapshot.Asks[0].Price, event.Snapshot.Asks[0].VisibleQty
 		}
 	}
@@ -310,7 +318,7 @@ func (h *LiabilityHedger) decision(now time.Time) LiabilityHedgerDecision {
 		decision.ActionOrDeferReason = "IN_BAND"
 		return decision
 	}
-	if h.book.SourceTime == 0 {
+	if !h.book.HasSnapshot {
 		decision.ActionOrDeferReason = "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE"
 		return decision
 	}
@@ -331,15 +339,19 @@ func (h *LiabilityHedger) decision(now time.Time) LiabilityHedgerDecision {
 	if gap > 0 {
 		decision.Side = exchange.Buy
 		decision.SideEvidence = exchange.Buy.String()
+		if !h.book.HasAsk {
+			decision.ActionOrDeferReason = "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE"
+			return decision
+		}
 		decision.LimitPrice = h.book.AskPrice
 	} else {
 		decision.Side = exchange.Sell
 		decision.SideEvidence = exchange.Sell.String()
+		if !h.book.HasBid {
+			decision.ActionOrDeferReason = "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE"
+			return decision
+		}
 		decision.LimitPrice = h.book.BidPrice
-	}
-	if decision.LimitPrice <= 0 {
-		decision.ActionOrDeferReason = "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE"
-		return decision
 	}
 	decision.RequestID = h.PeekNextRequestID()
 	decision.ActionOrDeferReason = "SUBMIT_IOC"
@@ -360,8 +372,10 @@ func (h *LiabilityHedger) baseDecision(now time.Time, action string) LiabilityHe
 		ObligationLimit: h.cfg.MaxAbsObligationQty, PositionBefore: h.position,
 		DecisionInterval: int64(h.cfg.DecisionInterval), ObligationInterval: int64(h.cfg.ObligationInterval),
 		LastBookSourceTime: h.book.SourceTime, LastBookReceivedTime: h.book.ReceivedTime,
-		LastBookSequence: h.book.Sequence, BidPrice: h.book.BidPrice, BidVisibleQty: h.book.BidQty,
-		AskPrice: h.book.AskPrice, AskVisibleQty: h.book.AskQty, TakerFeeBps: h.cfg.TakerFeeBps,
+		LastBookSequence: h.book.Sequence, HasSnapshot: h.book.HasSnapshot,
+		HasBid: h.book.HasBid, BidPrice: h.book.BidPrice, BidVisibleQty: h.book.BidQty,
+		HasAsk: h.book.HasAsk, AskPrice: h.book.AskPrice, AskVisibleQty: h.book.AskQty,
+		TakerFeeBps: h.cfg.TakerFeeBps,
 	}
 }
 

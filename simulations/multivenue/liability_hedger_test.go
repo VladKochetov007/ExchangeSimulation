@@ -44,7 +44,7 @@ func TestLiabilityHedgerUsesOnlyRequiredExecutableSide(t *testing.T) {
 		t.Fatalf("missing ask created a request: %+v", gw.requests)
 	}
 	missing := decisions[len(decisions)-1]
-	if missing.ActionOrDeferReason != "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE" || missing.SideEvidence != "BUY" || missing.LimitPrice != 0 {
+	if missing.ActionOrDeferReason != "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE" || missing.SideEvidence != "BUY" || missing.HasAsk || missing.LimitPrice != 0 {
 		t.Fatalf("missing executable ask decision = %+v", missing)
 	}
 	encoded, err := json.Marshal(missing)
@@ -53,6 +53,9 @@ func TestLiabilityHedgerUsesOnlyRequiredExecutableSide(t *testing.T) {
 	}
 	if !bytes.Contains(encoded, []byte(`"side":"BUY"`)) {
 		t.Fatalf("BUY evidence omitted at explicit unavailable-price boundary: %s", encoded)
+	}
+	if !bytes.Contains(encoded, []byte(`"has_ask":false`)) {
+		t.Fatalf("missing executable ask was not represented explicitly: %s", encoded)
 	}
 
 	hedger.HandleEvent(context.Background(), &actor.Event{Type: actor.EventBookSnapshot, Data: actor.BookSnapshotEvent{
@@ -72,6 +75,26 @@ func TestLiabilityHedgerUsesOnlyRequiredExecutableSide(t *testing.T) {
 	}
 }
 
+// A numeric zero and a missing ask are distinct states. CDF/USD itself rejects
+// zero at exchange admission, but this actor must never reinterpret a present
+// numeric book level as absence before that explicit domain boundary.
+func TestLiabilityHedgerDoesNotUseZeroPriceAsMissingSide(t *testing.T) {
+	gw := newStoikovStubGateway()
+	cfg := liabilityHedgerTestConfig()
+	hedger := NewLiabilityHedger(1, gw, cfg)
+	now := time.Unix(10, 0)
+	hedger.subscribed = true
+	hedger.obligation, hedger.lastUpdate = 200, now.UnixNano()
+	hedger.HandleEvent(context.Background(), &actor.Event{Type: actor.EventBookSnapshot, Data: actor.BookSnapshotEvent{
+		Symbol: "CDF/USD", Timestamp: 0, SeqNum: 1,
+		Snapshot: &exchange.BookSnapshot{Asks: []exchange.PriceLevel{{Price: 0, VisibleQty: 1_000}}},
+	}})
+	hedger.onTick(now)
+	if len(gw.requests) != 1 || gw.requests[0].OrderReq == nil || gw.requests[0].OrderReq.Price != 0 {
+		t.Fatalf("present zero-valued ask became an unavailable side: %+v", gw.requests)
+	}
+}
+
 func TestLiabilityHedgerFillReducesExplicitGap(t *testing.T) {
 	gw := newStoikovStubGateway()
 	var fills []LiabilityHedgerFill
@@ -81,7 +104,7 @@ func TestLiabilityHedgerFillReducesExplicitGap(t *testing.T) {
 	now := time.Unix(20, 0)
 	hedger.subscribed = true
 	hedger.obligation, hedger.lastUpdate = 200, now.UnixNano()
-	hedger.book = liabilityHedgerBook{SourceTime: now.UnixNano(), Sequence: 1, BidPrice: 99, BidQty: 1_000, AskPrice: 101, AskQty: 1_000}
+	hedger.book = liabilityHedgerBook{HasSnapshot: true, SourceTime: now.UnixNano(), Sequence: 1, HasBid: true, BidPrice: 99, BidQty: 1_000, HasAsk: true, AskPrice: 101, AskQty: 1_000}
 
 	hedger.onTick(now)
 	if len(gw.requests) != 1 || gw.requests[0].OrderReq == nil {

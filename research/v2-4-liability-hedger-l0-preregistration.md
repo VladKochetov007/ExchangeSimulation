@@ -94,7 +94,8 @@ venue_id, hedger, client_id, symbol, decision_time, enabled, subscribed,
 action, obligation_before, obligation_after, obligation_step, obligation_limit,
 position_before, hedge_gap, decision_interval, update_interval,
 last_book_source_time, last_book_received_time, snapshot_sequence,
-bid_price, bid_visible_qty, ask_price, ask_visible_qty,
+has_snapshot, has_bid, bid_price, bid_visible_qty, has_ask, ask_price,
+ask_visible_qty,
 side, limit_price, requested_qty, request_id, taker_fee_bps
 ```
 
@@ -103,6 +104,12 @@ zero enum cannot disappear under JSON `omitempty`; the completed V2 zero-enum
 wire audit is a required preflight. Every exchange-confirmed L0 fill additionally
 emits `liability_hedger_fill` with order/trade/fee fields and actor-local
 pre/post position.
+
+`has_snapshot`, `has_bid`, and `has_ask` are explicit availability fields.
+Their numeric companion prices remain present observations, including numeric
+zero in a signed or zero-permitted future contract. For the current
+positive-price CDF/USD contract zero would be rejected by exchange admission,
+but it is never overloaded as this actor's missing-side sentinel.
 
 The generic V2-0 receipt sidecar covers the role's delayed local trading link.
 For each submitted request, the independent auditor must join the exact local
