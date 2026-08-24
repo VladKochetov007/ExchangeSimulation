@@ -53,7 +53,8 @@ venue logs, manifest, checkpoints, V2 receipt sidecars, and:
 2. `observationreceipts`: V2 inbox delivery audit;
 3. `streamhash` and `evidenceartifacthash` provenance;
 4. `conservation` and `positions` terminal mechanical checks; and
-5. `latency` confirmation of the delivered 40-ms / requested 20-ms contract.
+5. direct inspection of the simulator's compact `latency.json` confirmation
+   of the delivered 40-ms / requested 20-ms contract.
 
 The evidence gate is valid only if all required metrics parse and their audit
 failure counts are zero. Any missing P2 decision, receipt, source fingerprint,

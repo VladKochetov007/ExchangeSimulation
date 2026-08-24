@@ -27,12 +27,17 @@ For every completed cell, retain raw evidence and write:
 ```text
 mvanalyze -metric perpexposurehedger -json
 mvanalyze -metric observationreceipts -json
-mvanalyze -metric latency -json
 mvanalyze -metric streamhash -json
 mvanalyze -metric evidenceartifacthash -json
 mvanalyze -metric conservation -json
 mvanalyze -metric positions -json
 ```
+
+`latency.json` is already the simulator's compact persisted courier-delivery
+artifact, not an `mvanalyze` metric. Validate its non-empty rows directly:
+each P2 link must report 40-ms delivered market data and 20-ms delivered
+requests. Do not create a replacement analyzer artifact merely to duplicate
+that evidence.
 
 Then run the hardened prune gate as a read-only check. P2a is not prunable:
 the dedicated P2 measurement contract and paired verdict must be recorded
