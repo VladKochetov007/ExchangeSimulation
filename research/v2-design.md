@@ -125,6 +125,11 @@ The next mechanism must be a separately preregistered explicit, costly,
 rate-limited inventory rebalance; no P1 coefficient or population tuning is
 licensed by that result.
 
+The P2 contract is fixed in
+[`v2-3-inventory-rebalance-p2-preregistration.md`](v2-3-inventory-rebalance-p2-preregistration.md).
+It deliberately scopes the first action to unhedged CDF/USD makers and scores
+individual risk transfer, not a market-stability target or aggregate exposure.
+
 ## V2-4 — economically motivated demand and ecology
 
 | field | design |
