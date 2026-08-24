@@ -10,6 +10,16 @@ import (
 	etypes "exchange_sim/types"
 )
 
+// acceptedOrderEvidence keeps an accepted order's established flat wire schema
+// while retaining the client request that caused its admission. Order IDs alone
+// cannot join a pre-submission actor decision to an accepted venue request.
+// This wrapper is evidence only; RequestID is deliberately not live Order
+// state because matching and settlement do not need it.
+type acceptedOrderEvidence struct {
+	*Order
+	RequestID uint64 `json:"request_id"`
+}
+
 func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Response {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -118,7 +128,10 @@ func (e *DefaultExchange) PlaceOrder(clientID uint64, req *OrderRequest) Respons
 	// to unavailable configured price sources.
 	e.NextOrderID = orderID
 	if log != nil {
-		log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderAccepted", order)
+		log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderAccepted", acceptedOrderEvidence{
+			Order:     order,
+			RequestID: req.RequestID,
+		})
 	}
 
 	result := e.Matcher.Match(book.Bids, book.Asks, order)

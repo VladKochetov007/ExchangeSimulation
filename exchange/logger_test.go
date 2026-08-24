@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -46,4 +47,59 @@ func TestInstrumentLoggerFallbackDoesNotReplaceGlobalLogger(t *testing.T) {
 		t.Fatal("symbol-specific logger did not take precedence")
 	}
 
+}
+
+func TestAcceptedOrderEvidenceRetainsRequestIDAndFlatOrderFields(t *testing.T) {
+	ex := newPostOnlyTestExchange(t)
+	log := &recordingLogger{}
+	ex.SetLogger("ABC/USD", log)
+
+	const requestID = 73
+	response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID:   requestID,
+		Symbol:      "ABC/USD",
+		Side:        Buy,
+		Type:        LimitOrder,
+		Price:       99,
+		Qty:         2,
+		TimeInForce: GTC,
+		Visibility:  Normal,
+	})
+	if !response.Success {
+		t.Fatalf("resting order rejected: %+v", response)
+	}
+	var accepted any
+	for _, record := range log.records {
+		if record.event == "OrderAccepted" {
+			accepted = record.data
+			break
+		}
+	}
+	if accepted == nil {
+		t.Fatalf("accepted evidence = %#v", log.records)
+	}
+	evidence, ok := accepted.(acceptedOrderEvidence)
+	if !ok {
+		t.Fatalf("accepted evidence type = %T, want acceptedOrderEvidence", accepted)
+	}
+	if evidence.RequestID != requestID || evidence.Order == nil || evidence.Price != 99 || evidence.Qty != 2 || evidence.ClientID != 1 {
+		t.Fatalf("accepted evidence = %#v", evidence)
+	}
+
+	raw, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatalf("marshal accepted evidence: %v", err)
+	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatalf("decode accepted evidence: %v", err)
+	}
+	for _, field := range []string{"request_id", "order_id", "client_id", "price", "qty", "post_only"} {
+		if _, ok := wire[field]; !ok {
+			t.Fatalf("flat accepted evidence missing %q: %s", field, raw)
+		}
+	}
+	if _, nested := wire["order"]; nested {
+		t.Fatalf("accepted evidence unexpectedly nested order: %s", raw)
+	}
 }
