@@ -282,6 +282,16 @@ func (r *Run) MeasureMakerInventoryRebalance() (*MakerInventoryRebalanceAudit, e
 			if order.Symbol == "" {
 				order.Symbol = event.Symbol
 			}
+			// Spot order-acceptance payloads intentionally omit the redundant
+			// symbol because each persisted book file is instrument-specific.
+			// P2 knows only CDF/USD, whose declared filename identity is
+			// CDF-USD.jsonl. Recover that exact book identity rather than treating
+			// a missing payload field as a different or fabricated instrument. Do
+			// not generalize this into a scanner-wide fallback: other analyzers may
+			// scan general logs, whose filename is not a market symbol.
+			if order.Symbol == "" && pathHasSymbol(event.File, event.VenueID, "CDF-USD") {
+				order.Symbol = "CDF/USD"
+			}
 			key := makerInventoryRebalanceKey{venueID: event.VenueID, clientID: event.ClientID, request: order.RequestID}
 			outcomes[key] = append(outcomes[key], makerInventoryRebalanceOutcome{accepted: event.Name == "OrderAccepted", order: order})
 			if event.Name == "OrderAccepted" && order.OrderID != 0 {

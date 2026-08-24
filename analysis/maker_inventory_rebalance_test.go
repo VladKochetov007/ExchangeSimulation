@@ -20,6 +20,20 @@ func TestMakerInventoryRebalanceAuditJoinsLocalPolicyReceiptAndFill(t *testing.T
 	}
 }
 
+// Spot OrderAccepted evidence is scoped by its book-log path rather than a
+// redundant payload symbol. This regression prevents the P2 join from reading
+// an empty payload field as a non-CDF order or as an evidence omission.
+func TestMakerInventoryRebalanceAuditDerivesCDFSymbolFromSpotBookPath(t *testing.T) {
+	run := p2TestRun(t, p2Fixture{OmitAcceptedSymbol: true})
+	result, err := run.MeasureMakerInventoryRebalance()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || result.Accepted != 1 || result.OutcomeFieldMismatches != 0 || len(result.Checks) != 0 {
+		t.Fatalf("path-scoped P2 acceptance audit = %+v", result)
+	}
+}
+
 func TestMakerInventoryRebalanceAuditDisabledControlDoesNotRequireUnusedSnapshot(t *testing.T) {
 	run := p2TestRun(t, p2Fixture{Disabled: true})
 	result, err := run.MeasureMakerInventoryRebalance()
@@ -128,6 +142,7 @@ type p2Fixture struct {
 	PartialFill        bool
 	DropCancel         bool
 	Disabled           bool
+	OmitAcceptedSymbol bool
 	CounterpartyClient uint64
 	ReceiptAt          int64
 }
@@ -169,6 +184,9 @@ func p2TestRun(t *testing.T, fixture p2Fixture) *Run {
 		return &Run{Dir: dir, files: []string{path}, roles: map[Participant]string{{VenueID: "north", ClientID: 7}: "cdf_spot_maker"}}
 	}
 	order := map[string]any{"order_id": uint64(70), "client_id": uint64(7), "request_id": uint64(42), "symbol": "CDF/USD", "side": "SELL", "type": "LIMIT", "time_in_force": "IOC", "post_only": false, "price": int64(298_500_000), "qty": int64(500_000_000)}
+	if fixture.OmitAcceptedSymbol {
+		delete(order, "symbol")
+	}
 	qty := int64(500_000_000)
 	if fixture.PartialFill {
 		qty = 400_000_000
@@ -200,6 +218,12 @@ func p2TestRun(t *testing.T, fixture p2Fixture) *Run {
 		lines = append(lines, logLine(20_000_000_000, 7, "maker_inventory_rebalance_decision", decision))
 	}
 	path := filepath.Join(dir, "general.jsonl")
+	if fixture.OmitAcceptedSymbol {
+		path = filepath.Join(dir, "north", "spot", "CDF-USD.jsonl")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.WriteFile(path, []byte(joinLines(lines)), 0o644); err != nil {
 		t.Fatal(err)
 	}
