@@ -17,7 +17,11 @@ import (
 // bounded external delivery obligation. The obligation is off-exchange motive
 // state; every market action still uses an ordinary venue-local account.
 type LiabilityHedgerConfig struct {
-	Enabled             bool                          `json:"enabled"`
+	Enabled bool `json:"enabled"`
+	// PolicyMode selects the declared L1 side-selection policy. The empty
+	// legacy configuration is deliberately equivalent to delivery_liability so
+	// retained L0 configurations keep their exact behavior.
+	PolicyMode          LiabilityHedgerPolicyMode     `json:"policy_mode"`
 	Symbol              string                        `json:"symbol"`
 	DecisionInterval    time.Duration                 `json:"decision_interval"`
 	ObligationInterval  time.Duration                 `json:"obligation_interval"`
@@ -25,6 +29,7 @@ type LiabilityHedgerConfig struct {
 	MaxAbsObligationQty int64                         `json:"max_abs_obligation_qty"`
 	MaxRequestQty       int64                         `json:"max_request_qty"`
 	Seed                int64                         `json:"-"`
+	PolicySeed          int64                         `json:"-"`
 	VenueID             string                        `json:"-"`
 	Hedger              string                        `json:"-"`
 	ClientID            uint64                        `json:"-"`
@@ -34,7 +39,36 @@ type LiabilityHedgerConfig struct {
 	FillObserver        func(LiabilityHedgerFill)     `json:"-"`
 }
 
+// LiabilityHedgerPolicyMode is a named economic side-selection policy, not an
+// availability sentinel. Both supported modes can represent BUY, SELL, and a
+// deferred decision explicitly in the persisted evidence.
+type LiabilityHedgerPolicyMode string
+
+const (
+	// LiabilityHedgerPolicyDeliveryLiability trades in the direction implied by
+	// the signed delivery-liability gap. This is L0's legacy behavior.
+	LiabilityHedgerPolicyDeliveryLiability LiabilityHedgerPolicyMode = "delivery_liability"
+	// LiabilityHedgerPolicyRandomSideControl is L1's matched activity-generator
+	// control. It shares every execution condition with the treatment but draws
+	// the side from its independently seeded policy stream.
+	LiabilityHedgerPolicyRandomSideControl LiabilityHedgerPolicyMode = "random_side_control"
+)
+
+func (c LiabilityHedgerConfig) effectivePolicyMode() (LiabilityHedgerPolicyMode, error) {
+	switch c.PolicyMode {
+	case "", LiabilityHedgerPolicyDeliveryLiability:
+		return LiabilityHedgerPolicyDeliveryLiability, nil
+	case LiabilityHedgerPolicyRandomSideControl:
+		return LiabilityHedgerPolicyRandomSideControl, nil
+	default:
+		return "", fmt.Errorf("unsupported policy mode %q", c.PolicyMode)
+	}
+}
+
 func (c LiabilityHedgerConfig) validate() error {
+	if _, err := c.effectivePolicyMode(); err != nil {
+		return err
+	}
 	if c.Symbol == "" {
 		return fmt.Errorf("symbol is required")
 	}
@@ -70,6 +104,7 @@ type LiabilityHedgerDecision struct {
 	Symbol               string        `json:"symbol"`
 	DecisionTime         int64         `json:"decision_time"`
 	Enabled              bool          `json:"enabled"`
+	PolicyMode           string        `json:"policy_mode"`
 	Subscribed           bool          `json:"subscribed"`
 	RequestPending       bool          `json:"request_pending"`
 	ActionOrDeferReason  string        `json:"action_or_defer_reason"`
@@ -109,6 +144,7 @@ type LiabilityHedgerFill struct {
 	Hedger       string `json:"hedger"`
 	ClientID     uint64 `json:"client_id"`
 	Symbol       string `json:"symbol"`
+	PolicyMode   string `json:"policy_mode"`
 	Timestamp    int64  `json:"timestamp"`
 	OrderID      uint64 `json:"order_id"`
 	TradeID      uint64 `json:"trade_id"`
@@ -138,8 +174,10 @@ type liabilityHedgerBook struct {
 // shared index, an exchange-owned book, a midpoint, or a price-zero fallback.
 type LiabilityHedger struct {
 	*actor.BaseActor
-	cfg LiabilityHedgerConfig
-	rng *rand.Rand
+	cfg       LiabilityHedgerConfig
+	mode      LiabilityHedgerPolicyMode
+	rng       *rand.Rand
+	policyRNG *rand.Rand
 
 	book             liabilityHedgerBook
 	obligation       int64
@@ -153,10 +191,19 @@ type LiabilityHedger struct {
 
 // NewLiabilityHedger creates a locally informed delivery-liability participant.
 func NewLiabilityHedger(id uint64, gateway actor.Gateway, cfg LiabilityHedgerConfig) *LiabilityHedger {
+	mode, err := cfg.effectivePolicyMode()
+	if err != nil {
+		// Config validation rejects this before a production actor is built. Keep
+		// direct unit construction deterministic instead of creating an actor
+		// with an implicit random behavior.
+		mode = LiabilityHedgerPolicyDeliveryLiability
+	}
 	h := &LiabilityHedger{
 		BaseActor:    actor.NewBaseActor(id, gateway),
 		cfg:          cfg,
+		mode:         mode,
 		rng:          rand.New(rand.NewSource(cfg.Seed)),
+		policyRNG:    rand.New(rand.NewSource(cfg.PolicySeed)),
 		activeOrders: make(map[uint64]struct{}),
 	}
 	h.SetHandler(h)
@@ -248,7 +295,7 @@ func (h *LiabilityHedger) onFill(event actor.OrderFillEvent) {
 	if h.cfg.FillObserver != nil {
 		h.cfg.FillObserver(LiabilityHedgerFill{
 			VenueID: h.cfg.VenueID, Hedger: h.cfg.Hedger, ClientID: h.cfg.ClientID,
-			Symbol: event.Symbol, Timestamp: event.Timestamp, OrderID: event.OrderID,
+			Symbol: event.Symbol, PolicyMode: string(h.mode), Timestamp: event.Timestamp, OrderID: event.OrderID,
 			TradeID: event.TradeID, Side: event.Side.String(), Qty: event.Qty,
 			Price: event.Price, FeeAmount: event.FeeAmount, FeeAsset: event.FeeAsset,
 			PrePosition: prePosition, PostPosition: h.position,
@@ -347,17 +394,15 @@ func (h *LiabilityHedger) decision(now time.Time) LiabilityHedgerDecision {
 		decision.ActionOrDeferReason = "ZERO_REQUEST_QUANTITY"
 		return decision
 	}
-	if gap > 0 {
-		decision.Side = exchange.Buy
-		decision.SideEvidence = exchange.Buy.String()
+	decision.Side = h.selectSide(gap)
+	decision.SideEvidence = decision.Side.String()
+	if decision.Side == exchange.Buy {
 		if !h.book.HasAsk {
 			decision.ActionOrDeferReason = "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE"
 			return decision
 		}
 		decision.LimitPrice = h.book.AskPrice
 	} else {
-		decision.Side = exchange.Sell
-		decision.SideEvidence = exchange.Sell.String()
 		if !h.book.HasBid {
 			decision.ActionOrDeferReason = "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE"
 			return decision
@@ -368,6 +413,24 @@ func (h *LiabilityHedger) decision(now time.Time) LiabilityHedgerDecision {
 	decision.ActionOrDeferReason = "SUBMIT_IOC"
 	decision.OutcomeExpectation = "VENUE_OUTCOME_REQUIRED"
 	return decision
+}
+
+// selectSide is called only after a nonzero, representable gap has passed the
+// terminal and local-snapshot guards. In L1 control mode one independent bit
+// is consumed here, before checking the selected executable side; a missing
+// selected side remains an explicit defer rather than a hidden alternative
+// price or a skipped draw.
+func (h *LiabilityHedger) selectSide(gap int64) exchange.Side {
+	if h.mode == LiabilityHedgerPolicyRandomSideControl {
+		if h.policyRNG.Intn(2) == 0 {
+			return exchange.Buy
+		}
+		return exchange.Sell
+	}
+	if gap > 0 {
+		return exchange.Buy
+	}
+	return exchange.Sell
 }
 
 func (h *LiabilityHedger) terminalRoundTripCensored(now int64) bool {
@@ -386,6 +449,7 @@ func (h *LiabilityHedger) baseDecision(now time.Time, action string) LiabilityHe
 	return LiabilityHedgerDecision{
 		VenueID: h.cfg.VenueID, Hedger: h.cfg.Hedger, ClientID: h.cfg.ClientID,
 		Symbol: h.cfg.Symbol, DecisionTime: now.UnixNano(), Enabled: h.cfg.Enabled,
+		PolicyMode: string(h.mode),
 		Subscribed: h.subscribed, RequestPending: h.pending, ActionOrDeferReason: action,
 		ObligationBefore: h.obligation, ObligationAfter: h.obligation,
 		ObligationLimit: h.cfg.MaxAbsObligationQty, PositionBefore: h.position,

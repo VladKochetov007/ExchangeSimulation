@@ -2633,6 +2633,10 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		}
 		clientID, gateway := venue.connectParticipant(mount, role, balances, 0, noiseFee)
 		cfg.Seed = flowSeed(s.Config.Seed, venueIndex, 0, 14)
+		// L1's matched random-side control must not consume the obligation
+		// stream. Keep its side bits in a separately named deterministic stream;
+		// delivery_liability leaves this stream actor-invisible.
+		cfg.PolicySeed = flowSeed(s.Config.Seed, venueIndex, 0, 15)
 		cfg.VenueID, cfg.Hedger, cfg.ClientID = venue.ID, role, clientID
 		cfg.TerminalNano, cfg.TakerFeeBps = s.terminalNano, s.Config.TakerFeeBps
 		if s.Config.RecordLiabilityHedgerDecisions {

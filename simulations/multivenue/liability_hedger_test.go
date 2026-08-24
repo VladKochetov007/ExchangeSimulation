@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -182,6 +183,84 @@ func TestLiabilityHedgerDisabledControlStillEvolvesState(t *testing.T) {
 	}
 }
 
+func TestLiabilityHedgerLegacyModeDefaultsToDeliveryLiability(t *testing.T) {
+	now := time.Unix(40, 0)
+	newHedger := func(mode LiabilityHedgerPolicyMode) (*LiabilityHedger, *stoikovStubGateway) {
+		gw := newStoikovStubGateway()
+		cfg := liabilityHedgerTestConfig()
+		cfg.PolicyMode = mode
+		hedger := NewLiabilityHedger(1, gw, cfg)
+		hedger.subscribed = true
+		hedger.obligation, hedger.lastUpdate = 200, now.UnixNano()
+		hedger.book = liabilityHedgerBook{HasSnapshot: true, SourceTime: now.UnixNano(), Sequence: 1, HasBid: true, BidPrice: 99, BidQty: 1_000, HasAsk: true, AskPrice: 101, AskQty: 1_000}
+		return hedger, gw
+	}
+	legacy, legacyGW := newHedger("")
+	explicit, explicitGW := newHedger(LiabilityHedgerPolicyDeliveryLiability)
+	legacy.onTick(now)
+	explicit.onTick(now)
+	if len(legacyGW.requests) != 1 || len(explicitGW.requests) != 1 {
+		t.Fatalf("legacy/explicit requests = %d/%d", len(legacyGW.requests), len(explicitGW.requests))
+	}
+	left, right := legacyGW.requests[0].OrderReq, explicitGW.requests[0].OrderReq
+	if left == nil || right == nil || left.Side != exchange.Buy || left.Side != right.Side || left.Price != right.Price || left.Qty != right.Qty || legacy.mode != LiabilityHedgerPolicyDeliveryLiability || explicit.mode != LiabilityHedgerPolicyDeliveryLiability {
+		t.Fatalf("legacy delivery mode diverged: legacy=%+v explicit=%+v modes=%q/%q", left, right, legacy.mode, explicit.mode)
+	}
+}
+
+func TestLiabilityHedgerRandomSideControlUsesIndependentDeclaredStream(t *testing.T) {
+	gw := newStoikovStubGateway()
+	var decisions []LiabilityHedgerDecision
+	cfg := liabilityHedgerTestConfig()
+	cfg.PolicyMode = LiabilityHedgerPolicyRandomSideControl
+	cfg.PolicySeed = 31
+	cfg.DecisionObserver = func(decision LiabilityHedgerDecision) { decisions = append(decisions, decision) }
+	hedger := NewLiabilityHedger(1, gw, cfg)
+	now := time.Unix(50, 0)
+	hedger.subscribed = true
+	hedger.obligation, hedger.lastUpdate = 200, now.UnixNano()
+	// The first independently replayed side has no matching executable level.
+	// It must still be recorded as that side and consume exactly one bit.
+	want := rand.New(rand.NewSource(cfg.PolicySeed))
+	firstBuy := want.Intn(2) == 0
+	book := liabilityHedgerBook{HasSnapshot: true, SourceTime: now.UnixNano(), Sequence: 1}
+	if firstBuy {
+		book.HasBid, book.BidPrice, book.BidQty = true, 99, 1_000
+	} else {
+		book.HasAsk, book.AskPrice, book.AskQty = true, 101, 1_000
+	}
+	hedger.book = book
+	hedger.onTick(now)
+	if len(gw.requests) != 0 || len(decisions) != 1 {
+		t.Fatalf("unavailable selected side submitted: requests=%+v decisions=%+v", gw.requests, decisions)
+	}
+	first := decisions[0]
+	wantSide := "SELL"
+	if firstBuy {
+		wantSide = "BUY"
+	}
+	if first.PolicyMode != string(LiabilityHedgerPolicyRandomSideControl) || first.SideEvidence != wantSide || first.ActionOrDeferReason != "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE" {
+		t.Fatalf("first random-control decision = %+v, want side=%s unavailable", first, wantSide)
+	}
+
+	// A two-sided next tick must use the *next* independent bit, not retry the
+	// prior unavailable side and not consume the obligation RNG.
+	secondBuy := want.Intn(2) == 0
+	hedgerBook := liabilityHedgerBook{HasSnapshot: true, SourceTime: now.Add(cfg.DecisionInterval).UnixNano(), Sequence: 2, HasBid: true, BidPrice: 99, BidQty: 1_000, HasAsk: true, AskPrice: 101, AskQty: 1_000}
+	hedger.book = hedgerBook
+	hedger.onTick(now.Add(cfg.DecisionInterval))
+	if len(gw.requests) != 1 || len(decisions) != 2 || gw.requests[0].OrderReq == nil {
+		t.Fatalf("second random-control request/decision = requests=%+v decisions=%+v", gw.requests, decisions)
+	}
+	request := gw.requests[0].OrderReq
+	if (secondBuy && request.Side != exchange.Buy) || (!secondBuy && request.Side != exchange.Sell) {
+		t.Fatalf("second random side = %s, want buy=%t", request.Side, secondBuy)
+	}
+	if decisions[1].SideEvidence != request.Side.String() || decisions[1].ActionOrDeferReason != "SUBMIT_IOC" {
+		t.Fatalf("second random-control evidence = %+v request=%+v", decisions[1], request)
+	}
+}
+
 func TestLiabilityHedgerConfigValidation(t *testing.T) {
 	valid := liabilityHedgerTestConfig()
 	cases := []struct {
@@ -192,6 +271,7 @@ func TestLiabilityHedgerConfigValidation(t *testing.T) {
 		{"zero request cap", func(c *LiabilityHedgerConfig) { c.MaxRequestQty = 0 }},
 		{"nonmultiple obligation interval", func(c *LiabilityHedgerConfig) { c.ObligationInterval = 3 * time.Second }},
 		{"step exceeds bound", func(c *LiabilityHedgerConfig) { c.MaxAbsObligationQty = c.ObligationStepQty - 1 }},
+		{"unknown policy mode", func(c *LiabilityHedgerConfig) { c.PolicyMode = "unbounded_magic" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
