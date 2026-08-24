@@ -31,7 +31,13 @@ func validTermCarryEntry(t *testing.T, policy termCarryPolicyConfig, rate int64)
 		HasFunding: true, FundingRateBps: rate, FundingPublishedAt: 900, FundingSequence: 13, FundingNextAt: 1_000 + 8*60*60*1_000_000_000, FundingIntervalSeconds: 8 * 60 * 60, FundingAgeNanos: 100,
 		TargetSpot: policy.MaxPosition, TargetPerp: -policy.MaxPosition, Leg: "ENTRY_SPOT_IOC", Side: "BUY", LimitPrice: 101, RequestedQty: 50, RequestID: 99,
 	}
-	financials, ok := termCarryAuditFinancials(policy, decision, 1)
+	setTermCarryFinancialEvidence(t, policy, &decision, 1)
+	return decision
+}
+
+func setTermCarryFinancialEvidence(t *testing.T, policy termCarryPolicyConfig, decision *termCarryDecision, direction int64) {
+	t.Helper()
+	financials, ok := termCarryAuditFinancials(policy, *decision, direction)
 	if !ok {
 		t.Fatal("build financials")
 	}
@@ -42,7 +48,6 @@ func validTermCarryEntry(t *testing.T, policy termCarryPolicyConfig, rate int64)
 	decision.NetCarryBpsNumerator = financials.net.String()
 	decision.RationalDenominator = financials.denominator.String()
 	decision.FinancingDirection = financials.direction
-	return decision
 }
 
 func TestTermCarryEntryEconomicsRejectsForgedFundingAndFinancing(t *testing.T) {
@@ -95,6 +100,50 @@ func TestTermCarryLifecycleReplaysOneFiniteFundingTerm(t *testing.T) {
 	if !result.Valid || result.ActiveTerms != 1 || result.ClosedTerms != 1 || result.OpenTerms != 0 || result.ActiveTermFunding != 1 || result.OutsideTermFunding != 0 || result.PositionContinuityErrors != 0 || result.TerminalPerpMismatches != 0 {
 		t.Fatalf("finite term lifecycle replay = %+v", result)
 	}
+}
+
+func TestTermCarryLifecycleDistinguishesProjectionFromOwnership(t *testing.T) {
+	t.Run("net carry defer retains a non-owned projected end", func(t *testing.T) {
+		run := termCarryLifecycleTestRun(t, func(fixture *termCarryLifecycleFixture) {
+			deferred := validTermCarryEntry(t, fixture.policy, 0)
+			deferred.DecisionTime = 999
+			deferred.FundingAgeNanos = 99
+			setTermCarryFinancialEvidence(t, fixture.policy, &deferred, 1)
+			deferred.EntryAt = 0
+			deferred.State, deferred.Action = "IDLE", "NET_CARRY_BELOW_MINIMUM"
+			deferred.TargetSpot, deferred.TargetPerp = 0, 0
+			deferred.Leg, deferred.Side, deferred.RequestID, deferred.RequestedQty = "", "", 0, 0
+			fixture.decisions = append(fixture.decisions, deferred)
+		})
+		result, err := run.MeasureTermCarry()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Valid || result.LifecycleViolations != 0 {
+			t.Fatalf("non-owned projected term was treated as invalid: %+v", result)
+		}
+	})
+
+	t.Run("unexpected projected end is rejected", func(t *testing.T) {
+		run := termCarryLifecycleTestRun(t, func(fixture *termCarryLifecycleFixture) {
+			deferred := validTermCarryEntry(t, fixture.policy, 0)
+			deferred.DecisionTime = 999
+			deferred.FundingAgeNanos = 99
+			setTermCarryFinancialEvidence(t, fixture.policy, &deferred, 1)
+			deferred.EntryAt = 0
+			deferred.State, deferred.Action = "IDLE", "ZERO_PREMIUM"
+			deferred.TargetSpot, deferred.TargetPerp = 0, 0
+			deferred.Leg, deferred.Side, deferred.RequestID, deferred.RequestedQty = "", "", 0, 0
+			fixture.decisions = append(fixture.decisions, deferred)
+		})
+		result, err := run.MeasureTermCarry()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Valid || result.LifecycleViolations == 0 {
+			t.Fatalf("unexpected projected term survived: %+v", result)
+		}
+	})
 }
 
 func TestTermCarryLifecycleMutationsAreDetected(t *testing.T) {

@@ -529,8 +529,15 @@ func auditTermCarryLifecycle(run *Run, policy termCarryPolicyConfig, decisions [
 }
 
 func validateTermCarryLifecycleDecision(policy termCarryPolicyConfig, decision termCarryDecision, spotPosition, perpPosition int64, current **termCarryLifecycleTerm, terms *[]*termCarryLifecycleTerm) string {
-	hasTerm := decision.EntryAt != 0 || decision.TermEnd != 0
-	if hasTerm && (decision.EntryAt <= 0 || decision.TermEnd <= decision.EntryAt) {
+	// A rejected economic candidate has a calculated TermEnd but no EntryAt:
+	// it is a projection used to explain NET_CARRY_BELOW_MINIMUM, not an owned
+	// term. Ownership begins only with the first submitted spot-entry request.
+	// validateTermCarryEntryEconomics independently checks the projected end.
+	if decision.EntryAt == 0 && decision.TermEnd != 0 && decision.Action != "NET_CARRY_BELOW_MINIMUM" {
+		return "term_end_without_ownership_term"
+	}
+	hasTerm := decision.EntryAt != 0
+	if hasTerm && decision.TermEnd <= decision.EntryAt {
 		return "invalid_term_bounds"
 	}
 	if *current != nil && (decision.EntryAt != (*current).entryAt || decision.TermEnd != (*current).termEnd) {
