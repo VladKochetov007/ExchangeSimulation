@@ -252,6 +252,25 @@ func main() {
 					result.DecisionFieldMismatches, result.OutcomeFieldMismatches, result.MissingOutcomes, result.DuplicateOutcomes,
 					result.FeeMismatches, result.SelfFills, result.NonReducingFills, result.Valid)
 			})
+		case "fundingcarry":
+			result, err := run.MeasureFundingCarry()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			if result.Decisions == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no V2-5 P0 funding-carry decision evidence\n", dir)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s decisions %6d submitted/accepted/rejected %6d/%6d/%6d fills/cancelled %6d/%6d receipt ok/funding/book/missing/mismatch/future %t/%d/%d/%d/%d/%d arithmetic/sign/gateway %d/%d/%d valid %t\n",
+					dir, result.Decisions, result.Submitted, result.Accepted, result.Rejected,
+					result.Fills, result.Cancelled, result.ReceiptAuditValid, result.FundingReceiptMatches,
+					result.BookReceiptMatches, result.MissingFundingReceipt+result.MissingBookReceipt,
+					result.ReceiptMismatches, result.FutureReceiptUse, result.FundingArithmeticMismatches,
+					result.FundingSignMismatches, result.MissingGatewayDecisions+result.GatewayDecisionMismatches,
+					result.Valid)
+			})
 		case "noiseflowphase":
 			result, err := run.MeasureNoiseFlowPhase()
 			if err != nil {
