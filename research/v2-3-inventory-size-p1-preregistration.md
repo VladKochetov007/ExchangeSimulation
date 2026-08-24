@@ -89,6 +89,13 @@ matching engine, or request ordering may be introduced. The existing raw order
 acceptance/rejection evidence remains the independent record of what actually
 reached the venue.
 
+`maker_quote_size_decision` belongs to the persisted-evidence artifact domain,
+not the ordered execution-stream hash domain. Its writer must therefore bypass
+the checkpoint sink while retaining ordinary JSONL persistence. A paired
+logging-on/off fixture compares the simulated execution hash with the recorder
+enabled/disabled; an evidence record that changes that hash fails the P1
+instrumentation contract.
+
 The P1 analyzer must join this decision stream to accepted/rejected order
 evidence by maker/symbol/time and separately report unmatched decisions rather
 than treating an absent order as zero size. Its policy activation check uses the
