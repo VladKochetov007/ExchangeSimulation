@@ -55,9 +55,9 @@ type TakerConfig struct {
 }
 
 // RandomTakerDecision records one evaluated broad-flow tick before any venue
-// response can feed back to the actor. SubmittedRequestCount distinguishes an
-// evaluated no-order tick from missing evidence. The observer is optional and
-// write-only: it must not alter actor state, timing, or random draws.
+// request enters its gateway. SubmittedRequestCount distinguishes an
+// evaluated no-order tick from missing evidence. The observer is optional
+// and write-only: it must not alter actor state, timing, or random draws.
 type RandomTakerDecision struct {
 	VenueID               string `json:"venue_id"`
 	Role                  string `json:"role"`
@@ -172,13 +172,24 @@ func (rt *RandomTaker) onTick(now time.Time) {
 		orders += int(rt.excitation)
 		rt.excitation *= rt.decay
 	}
-	submitted := int64(0)
+	// excitation is capped at five, so a tick creates at most six plans. Keep
+	// this small pre-ingress buffer on the stack rather than making phase
+	// evidence add a per-tick heap allocation to the legacy flow population.
+	var plans [6]randomTakerOrderPlan
+	planned := 0
 	for i := 0; i < orders; i++ {
-		if rt.fireOrder() {
-			submitted++
+		if plan, ok := rt.planOrder(); ok {
+			plans[planned] = plan
+			planned++
 		}
 	}
-	rt.observeDecision(now, "EVALUATE", submitted)
+	// Emit the complete decision before its planned requests enter the gateway.
+	// planOrder consumes the same RNG draws as the legacy fireOrder path, and
+	// no gateway response can reach this actor until the callback returns.
+	rt.observeDecision(now, "EVALUATE", int64(planned))
+	for _, plan := range plans[:planned] {
+		rt.submitPlannedOrder(plan)
+	}
 }
 
 func (rt *RandomTaker) observeDecision(now time.Time, action string, submitted int64) {
@@ -223,15 +234,24 @@ func finiteSize(value float64) bool {
 	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 1
 }
 
-func (rt *RandomTaker) fireOrder() bool {
+type randomTakerOrderPlan struct {
+	symbol string
+	side   exchange.Side
+	qty    int64
+}
+
+// planOrder is the actor-local pre-ingress portion of one random-taker order.
+// It intentionally contains every legacy RNG draw; submitPlannedOrder only
+// turns that already chosen decision into a gateway request.
+func (rt *RandomTaker) planOrder() (randomTakerOrderPlan, bool) {
 	sym := rt.cfg.Symbols[rt.rng.Intn(len(rt.cfg.Symbols))]
 	baseQty := rt.cfg.TargetQtys[sym]
 	if baseQty == 0 {
-		return false
+		return randomTakerOrderPlan{}, false
 	}
 	qty := rt.drawSize(baseQty)
 	if qty <= 0 {
-		return false
+		return randomTakerOrderPlan{}, false
 	}
 
 	pBuy := 0.5
@@ -258,8 +278,11 @@ func (rt *RandomTaker) fireOrder() bool {
 		qty = facing
 	}
 	if qty <= 0 {
-		return false
+		return randomTakerOrderPlan{}, false
 	}
-	rt.SubmitOrder(sym, side, exchange.Market, 0, qty)
-	return true
+	return randomTakerOrderPlan{symbol: sym, side: side, qty: qty}, true
+}
+
+func (rt *RandomTaker) submitPlannedOrder(plan randomTakerOrderPlan) {
+	rt.SubmitOrder(plan.symbol, plan.side, exchange.Market, 0, plan.qty)
 }
