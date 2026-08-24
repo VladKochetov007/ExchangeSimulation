@@ -114,6 +114,10 @@ type Config struct {
 	// inventory-rebalance evaluation. It is evidence-only: the optional raw
 	// rows must not enter the ordered execution checkpoint domain.
 	RecordMakerInventoryRebalanceDecisions bool `json:"record_maker_inventory_rebalance_decisions"`
+	// RecordLiabilityHedgerDecisions retains every V2-4 L0 delivery-liability
+	// evaluation. Like the P1/P2 rows, these observations are excluded from the
+	// execution checkpoint domain and must not affect actor behavior.
+	RecordLiabilityHedgerDecisions bool `json:"record_liability_hedger_decisions"`
 	// CheckpointIntervalSeconds writes a rolling digest of the event stream at
 	// each simulated-time boundary, so two runs of one seed can be compared
 	// without retaining their logs. Zero disables it.
@@ -414,6 +418,9 @@ type Config struct {
 	// CDFInventoryRebalance configures the separately scheduled V2-3 P2
 	// aggressive risk-transfer policy. Nil preserves the P1 population exactly.
 	CDFInventoryRebalance *InventoryRebalanceConfig `json:"cdf_inventory_rebalance,omitempty"`
+	// CDFLiabilityHedger configures the V2-4 L0 finite-capital delivery
+	// obligation participant. Nil preserves the completed V2-3 population.
+	CDFLiabilityHedger *LiabilityHedgerConfig `json:"cdf_liability_hedger,omitempty"`
 	// MakerIndexWeight blends the index with the maker's own midpoint.
 	MakerIndexWeight float64 `json:"maker_index_weight"`
 
@@ -628,6 +635,9 @@ func (c *Config) normalize() error {
 	if c.RecordMakerInventoryRebalanceDecisions && c.LogMode != "full" {
 		return errors.New("multivenue: maker inventory-rebalance decisions require full persisted evidence")
 	}
+	if c.RecordLiabilityHedgerDecisions && c.LogMode != "full" {
+		return errors.New("multivenue: liability-hedger decisions require full persisted evidence")
+	}
 	if c.SpotStoikovInventorySizeSkewBps < 0 || c.SpotStoikovInventorySizeSkewBps > 5_000 {
 		return fmt.Errorf("multivenue: spot Stoikov inventory size skew bps must be in [0,5000], got %d", c.SpotStoikovInventorySizeSkewBps)
 	}
@@ -653,6 +663,32 @@ func (c *Config) normalize() error {
 	}
 	if c.RecordMakerInventoryRebalanceDecisions && c.CDFInventoryRebalance == nil {
 		return errors.New("multivenue: maker inventory-rebalance evidence requires a CDF inventory-rebalance policy")
+	}
+	if c.CDFLiabilityHedger != nil {
+		if !c.CrossAssetSpotGraph {
+			return errors.New("multivenue: CDF liability hedger requires the cross-asset spot graph")
+		}
+		if c.CDFLiabilityHedger.Symbol != "CDF/USD" {
+			return fmt.Errorf("multivenue: CDF liability hedger must trade CDF/USD, got %q", c.CDFLiabilityHedger.Symbol)
+		}
+		if err := c.CDFLiabilityHedger.validate(); err != nil {
+			return fmt.Errorf("multivenue: CDF liability hedger: %w", err)
+		}
+		// Evidence is mandatory for scientific L0 cells but optional for the
+		// paired recorder-neutrality process. The actor never consults receipt
+		// telemetry, so on/off must preserve its execution path.
+		if c.RecordLiabilityHedgerDecisions || c.RecordMarketDataReceipts {
+			if !c.RecordLiabilityHedgerDecisions || !c.RecordMarketDataReceipts || !slices.Contains(c.MarketDataReceiptRoles, "liability_hedger") {
+				return errors.New("multivenue: instrumented CDF liability hedger requires decisions and liability_hedger market-data receipts")
+			}
+			profile, configured := c.latencyProfileFor("liability_hedger")
+			if !configured || profile.zero() {
+				return errors.New("multivenue: instrumented CDF liability hedger requires an explicit nonzero liability_hedger public-feed link")
+			}
+		}
+	}
+	if c.RecordLiabilityHedgerDecisions && c.CDFLiabilityHedger == nil {
+		return errors.New("multivenue: liability-hedger evidence requires a CDF liability-hedger policy")
 	}
 	if len(c.VenueIDs) == 0 {
 		c.VenueIDs = []string{"north", "central", "south"}
@@ -1116,6 +1152,7 @@ type Venue struct {
 	NoiseTraders      []*feesim.RandomTaker
 	RoundTripTraders  []*RoundTripTrader
 	Suppliers         []*ElasticSupplier
+	LiabilityHedgers  []*LiabilityHedger
 	CarryArbs         []*CarryArbitrageur
 	LatentLiquidity   []*LatentLiquidity
 	MetaorderTraders  []*MetaorderTrader
@@ -1840,6 +1877,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		for _, supplier := range venue.Suppliers {
 			runner.AddActor(supplier)
 		}
+		for _, hedger := range venue.LiabilityHedgers {
+			runner.AddActor(hedger)
+		}
 		for _, arb := range venue.CarryArbs {
 			runner.AddActor(arb)
 		}
@@ -2203,6 +2243,14 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		// companion actor-state row only attests the submitting maker's local
 		// inventory transition around that exact fill.
 		venue.makerStateLog.LogEvidenceOnly(fill.Timestamp, fill.ClientID, "maker_inventory_rebalance_fill", fill)
+	}
+	liabilityHedgerDecisionObserver := func(decision LiabilityHedgerDecision) {
+		// L0 decision telemetry is append-only evidence. It has no callback
+		// path into the actor, exchange, scheduler, checkpoint, or RNG state.
+		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "liability_hedger_decision", decision)
+	}
+	liabilityHedgerFillObserver := func(fill LiabilityHedgerFill) {
+		venue.makerStateLog.LogEvidenceOnly(fill.Timestamp, fill.ClientID, "liability_hedger_fill", fill)
 	}
 	quoteSizeObserver := func(decision MakerQuoteSizeDecision) {
 		// P1 decision telemetry is persisted evidence only. Sending it through
@@ -2574,6 +2622,26 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		})
 		supplier.SetTickerFactory(timers)
 		venue.Suppliers = append(venue.Suppliers, supplier)
+	}
+
+	if policy := s.Config.CDFLiabilityHedger; policy != nil {
+		cfg := *policy
+		role := "liability_hedger_1"
+		balances := map[string]int64{
+			"CDF": 100 * mvBasePrecision,
+			"USD": 100_000_000 * mvQuotePrecision,
+		}
+		clientID, gateway := venue.connectParticipant(mount, role, balances, 0, noiseFee)
+		cfg.Seed = flowSeed(s.Config.Seed, venueIndex, 0, 14)
+		cfg.VenueID, cfg.Hedger, cfg.ClientID = venue.ID, role, clientID
+		cfg.TerminalNano, cfg.TakerFeeBps = s.terminalNano, s.Config.TakerFeeBps
+		if s.Config.RecordLiabilityHedgerDecisions {
+			cfg.DecisionObserver = liabilityHedgerDecisionObserver
+			cfg.FillObserver = liabilityHedgerFillObserver
+		}
+		hedger := NewLiabilityHedger(nextActor(), gateway, cfg)
+		hedger.SetTickerFactory(timers)
+		venue.LiabilityHedgers = append(venue.LiabilityHedgers, hedger)
 	}
 
 	for participant := 0; participant < s.Config.RoundTripTraderCount; participant++ {
