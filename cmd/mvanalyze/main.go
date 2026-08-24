@@ -212,8 +212,8 @@ func main() {
 						bucket.SizeSkewBps, bucket.Decisions, bucket.ZeroRisk, bucket.NonzeroRisk, bucket.Adjusted)
 				}
 				for _, maker := range result.MakerBuckets {
-					fmt.Printf("    maker %-24s %-8s decisions %6d accepted/rejected %6d/%6d censored %6d\n",
-						maker.Maker, maker.Symbol, maker.Decisions, maker.Accepted, maker.Rejected, maker.HorizonCensoredSides)
+					fmt.Printf("    maker %-8s %-24s %-8s decisions %6d accepted/rejected %6d/%6d censored %6d\n",
+						maker.VenueID, maker.Maker, maker.Symbol, maker.Decisions, maker.Accepted, maker.Rejected, maker.HorizonCensoredSides)
 				}
 			})
 		case "stalls":

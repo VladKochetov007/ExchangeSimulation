@@ -58,6 +58,7 @@ type QuoteSizeSkewBucket struct {
 // QuoteSizeMakerBucket preserves numbered maker identity for P1's per-maker
 // viability gate. Role aggregation alone could hide one silent participant.
 type QuoteSizeMakerBucket struct {
+	VenueID              string `json:"venue_id"`
 	Maker                string `json:"maker"`
 	Symbol               string `json:"symbol"`
 	Decisions            int64  `json:"decisions"`
@@ -128,7 +129,12 @@ type makerQuoteSizeExpected struct {
 	qty      int64
 	postOnly bool
 	censored bool
-	maker    string
+	maker    makerQuoteSizeMakerKey
+}
+
+type makerQuoteSizeMakerKey struct {
+	venueID string
+	maker   string
 }
 
 type makerQuoteSizeOutcome struct {
@@ -148,7 +154,7 @@ func (r *Run) MeasureMakerQuoteSize(options MakerQuoteSizeOptions) (*MakerQuoteS
 	expected := make(map[makerQuoteSizeKey]makerQuoteSizeExpected)
 	outcomes := make(map[makerQuoteSizeKey][]makerQuoteSizeOutcome)
 	buckets := make(map[int64]*QuoteSizeSkewBucket)
-	makers := make(map[string]*QuoteSizeMakerBucket)
+	makers := make(map[makerQuoteSizeMakerKey]*QuoteSizeMakerBucket)
 	addCheck := func(key makerQuoteSizeKey, side, failure string) {
 		result.Checks = append(result.Checks, MakerQuoteSizeCheck{
 			VenueID: key.venueID, ClientID: key.clientID, RequestID: key.request,
@@ -188,10 +194,11 @@ func (r *Run) MeasureMakerQuoteSize(options MakerQuoteSizeOptions) (*MakerQuoteS
 				buckets[decision.SizeSkewBps] = bucket
 			}
 			bucket.Decisions++
-			maker := makers[decision.Maker]
+			makerKey := makerQuoteSizeMakerKey{venueID: event.VenueID, maker: decision.Maker}
+			maker := makers[makerKey]
 			if maker == nil {
-				maker = &QuoteSizeMakerBucket{Maker: decision.Maker, Symbol: decision.Symbol}
-				makers[decision.Maker] = maker
+				maker = &QuoteSizeMakerBucket{VenueID: event.VenueID, Maker: decision.Maker, Symbol: decision.Symbol}
+				makers[makerKey] = maker
 			}
 			if maker.Symbol != decision.Symbol {
 				result.InvalidDecisionRecords++
@@ -267,7 +274,7 @@ func (r *Run) MeasureMakerQuoteSize(options MakerQuoteSizeOptions) (*MakerQuoteS
 					addCheck(key, side.name, "duplicate_decision_side")
 					continue
 				}
-				expected[key] = makerQuoteSizeExpected{symbol: decision.Symbol, side: side.name, price: side.price, qty: side.qty, postOnly: decision.PostOnly, censored: censored, maker: decision.Maker}
+				expected[key] = makerQuoteSizeExpected{symbol: decision.Symbol, side: side.name, price: side.price, qty: side.qty, postOnly: decision.PostOnly, censored: censored, maker: makerKey}
 			}
 		case "OrderAccepted", "OrderRejected":
 			var order makerQuoteSizeOrder
@@ -334,6 +341,9 @@ func (r *Run) MeasureMakerQuoteSize(options MakerQuoteSizeOptions) (*MakerQuoteS
 	}
 	sort.Slice(result.SkewBuckets, func(i, j int) bool { return result.SkewBuckets[i].SizeSkewBps < result.SkewBuckets[j].SizeSkewBps })
 	sort.Slice(result.MakerBuckets, func(i, j int) bool {
+		if result.MakerBuckets[i].VenueID != result.MakerBuckets[j].VenueID {
+			return result.MakerBuckets[i].VenueID < result.MakerBuckets[j].VenueID
+		}
 		if result.MakerBuckets[i].Maker != result.MakerBuckets[j].Maker {
 			return result.MakerBuckets[i].Maker < result.MakerBuckets[j].Maker
 		}

@@ -1,6 +1,9 @@
 package analysis
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestMakerQuoteSizeAuditJoinsExactRequestEvidence(t *testing.T) {
 	lines := []string{
@@ -31,7 +34,7 @@ func TestMakerQuoteSizeAuditJoinsExactRequestEvidence(t *testing.T) {
 	if len(result.SkewBuckets) != 2 || result.SkewBuckets[0].SizeSkewBps != 0 || result.SkewBuckets[1].SizeSkewBps != 5_000 || result.SkewBuckets[1].Adjusted != 1 {
 		t.Fatalf("P1 skew buckets = %+v", result.SkewBuckets)
 	}
-	if len(result.MakerBuckets) != 1 || result.MakerBuckets[0].Maker != "spot_maker_1" || result.MakerBuckets[0].Decisions != 2 || result.MakerBuckets[0].Accepted != 3 || result.MakerBuckets[0].Rejected != 1 {
+	if len(result.MakerBuckets) != 1 || result.MakerBuckets[0].VenueID != "north" || result.MakerBuckets[0].Maker != "spot_maker_1" || result.MakerBuckets[0].Decisions != 2 || result.MakerBuckets[0].Accepted != 3 || result.MakerBuckets[0].Rejected != 1 {
 		t.Fatalf("P1 maker buckets = %+v", result.MakerBuckets)
 	}
 	if result.ZeroRiskSymmetric != 1 || result.LongRiskDecisions != 1 || result.LongPositiveSizeSkew != 1 || result.ShortRiskDecisions != 0 || result.WrongDirectionSizeSkew != 0 {
@@ -136,6 +139,31 @@ func TestMakerQuoteSizeAuditClassifiesExplicitTerminalCensoring(t *testing.T) {
 			t.Fatalf("delivered censored request survived P1 audit: %+v", result)
 		}
 	})
+}
+
+func TestMakerQuoteSizeAuditSeparatesSameMakerAcrossVenues(t *testing.T) {
+	decision := map[string]any{
+		"maker": "spot_maker_1", "client_id": 7, "symbol": "ABC/USD", "decision_time": 10, "bid_request_id": 10, "ask_request_id": 11,
+		"base_volatility_size": 100, "risk_position": 0, "inventory_limit": 100, "size_skew_bps": 0,
+		"full_adjustment": 0, "adjustment": 0, "bid_price": 99, "ask_price": 101, "bid_qty": 100, "ask_qty": 100, "post_only": true, "cancel_before_replace": true,
+		"outcome_expectation": "SIMULATION_HORIZON_CENSORED", "censor_reason": "terminal_horizon_before_venue_ingress",
+	}
+	north := logLine(10, 7, "maker_quote_size_decision", decision)
+	central := strings.Replace(north, `"north"`, `"central"`, 1)
+	run := &Run{
+		files: []string{writeLog(t, []string{north, central})},
+		roles: map[Participant]string{
+			{VenueID: "north", ClientID: 7}:   "spot_maker",
+			{VenueID: "central", ClientID: 7}: "spot_maker",
+		},
+	}
+	result, err := run.MeasureMakerQuoteSize(MakerQuoteSizeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.MakerBuckets) != 2 || result.MakerBuckets[0].VenueID != "central" || result.MakerBuckets[1].VenueID != "north" || result.MakerBuckets[0].Maker != "spot_maker_1" || result.MakerBuckets[1].Maker != "spot_maker_1" {
+		t.Fatalf("venue-maker identities merged: %+v", result.MakerBuckets)
+	}
 }
 
 func p1OrderLine(ts int64, clientID, requestID uint64, side string, qty int64, reject string) string {
