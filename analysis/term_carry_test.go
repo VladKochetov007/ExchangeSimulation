@@ -91,6 +91,43 @@ func TestTermCarrySubmissionRejectsForgedTouch(t *testing.T) {
 	}
 }
 
+func TestTermCarryV3ExitMinimumIsIndependentAndReplayable(t *testing.T) {
+	zero := int64(0)
+	policy := termCarryAuditPolicy()
+	policy.MinOrderSize, policy.UnwindMinOrderSize = 75, &zero
+	decision := validTermCarryEntry(t, policy, 3)
+	decision.PolicyVersion, decision.UnwindMinOrderSize = termCarryPolicyV3, &zero
+
+	// The explicit zero is legal only for a risk-reducing unwind. The same
+	// 50-unit entry remains below the 75-unit entry materiality policy.
+	decision.RequestedQty = 50
+	if err := validateTermCarrySubmission(policy, decision); err == nil {
+		t.Fatal("entry incorrectly used the explicit unwind minimum")
+	}
+
+	decision.Action, decision.State = "SUBMIT_UNWIND_PERP_IOC", "UNWIND_PERP"
+	decision.Leg, decision.Side = "UNWIND_PERP_IOC", exchange.Buy.String()
+	decision.SpotPosition, decision.PerpPosition = 50, -50
+	decision.LimitPrice, decision.RequestedQty, decision.RequestID = decision.PerpAsk, 50, 99
+	if err := validateTermCarryPolicyEvidence(policy, decision); err != nil {
+		t.Fatalf("valid explicit zero policy rejected: %v", err)
+	}
+	if err := validateTermCarrySubmission(policy, decision); err != nil {
+		t.Fatalf("valid bounded v3 unwind rejected: %v", err)
+	}
+
+	forgedMinimum := int64(75)
+	decision.UnwindMinOrderSize = &forgedMinimum
+	if err := validateTermCarryPolicyEvidence(policy, decision); err == nil {
+		t.Fatal("forged v3 effective exit minimum survived")
+	}
+	decision.UnwindMinOrderSize = &zero
+	decision.RequestedQty = 51
+	if err := validateTermCarrySubmission(policy, decision); err == nil {
+		t.Fatal("oversized v3 unwind child survived")
+	}
+}
+
 func TestTermCarryLifecycleReplaysOneFiniteFundingTerm(t *testing.T) {
 	run := termCarryLifecycleTestRun(t, nil)
 	result, err := run.MeasureTermCarry()
@@ -110,6 +147,32 @@ func TestTermCarryV2LifecycleUsesCanonicalFirstExposure(t *testing.T) {
 	}
 	if !result.Valid || result.ActiveTerms != 1 || result.ClosedTerms != 1 || result.ActiveTermFunding != 1 || result.FirstExposureMismatches != 0 {
 		t.Fatalf("v2 first-exposure lifecycle replay = %+v", result)
+	}
+}
+
+func TestTermCarryV3LifecycleUsesCanonicalFirstExposure(t *testing.T) {
+	run := termCarryLifecycleTestRun(t, makeTermCarryLifecycleV3)
+	result, err := run.MeasureTermCarry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || result.ActiveTerms != 1 || result.ClosedTerms != 1 || result.ActiveTermFunding != 1 || result.FirstExposureMismatches != 0 {
+		t.Fatalf("v3 first-exposure lifecycle replay = %+v", result)
+	}
+}
+
+func TestTermCarryV3LifecycleRejectsForgedExitMinimum(t *testing.T) {
+	run := termCarryLifecycleTestRun(t, func(fixture *termCarryLifecycleFixture) {
+		makeTermCarryLifecycleV3(fixture)
+		forged := int64(1)
+		fixture.decisions[3].UnwindMinOrderSize = &forged
+	})
+	result, err := run.MeasureTermCarry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid || result.DecisionFieldMismatches == 0 {
+		t.Fatalf("forged v3 exit minimum survived: %+v", result)
 	}
 }
 
@@ -142,6 +205,16 @@ func makeTermCarryLifecycleV2(fixture *termCarryLifecycleFixture) {
 		decision.FirstExposureAt = firstExposureAt
 	}
 	fixture.decisions[0].FirstExposureAt = 0
+}
+
+func makeTermCarryLifecycleV3(fixture *termCarryLifecycleFixture) {
+	zero := int64(0)
+	fixture.policy.UnwindMinOrderSize = &zero
+	makeTermCarryLifecycleV2(fixture)
+	for index := range fixture.decisions {
+		fixture.decisions[index].PolicyVersion = termCarryPolicyV3
+		fixture.decisions[index].UnwindMinOrderSize = &zero
+	}
 }
 
 func TestTermCarryLifecycleDistinguishesProjectionFromOwnership(t *testing.T) {

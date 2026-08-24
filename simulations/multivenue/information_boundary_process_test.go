@@ -167,9 +167,13 @@ func TestV20EvidenceHelper(t *testing.T) {
 		// P3 holds the identical actor, delayed feed, and population across ON
 		// and OFF. Its explicit one-minute treasury mandate is shorter than the
 		// eight-hour minimum term, exercising declared-policy censoring rather
-		// than leaking the hidden simulation stop time into the actor.
+		// than leaking the hidden simulation stop time into the actor. The
+		// explicit zero P3d exit floor is evidence-only here: the censored
+		// helper never opens a term, but it exercises v3 decision serialization
+		// and replay without treating zero as unavailable.
 		cfg.LogMode = "full"
 		cfg.StrictPopulationAccounting = true
+		unwindMinimum := int64(0)
 		cfg.TermCarryAllocator = &TermCarryAllocatorConfig{
 			Enabled: true, SpotSymbol: "ABC/USD", PerpSymbol: "ABC-PERP", DecisionPeriod: 2 * time.Second,
 			CommitmentIntervals: 1, MaxFundingAge: 10 * time.Second,
@@ -178,7 +182,7 @@ func TestV20EvidenceHelper(t *testing.T) {
 			MandateEndAtNano: time.Date(2025, 1, 1, 0, 1, 0, 0, time.UTC).UnixNano(),
 			TakerFeeBps:      cfg.TakerFeeBps, LongSpotFundingBps: 0, ShortSpotBorrowBps: 0,
 			BalanceSheetBps: 0, MarginRiskBps: 0, LegRiskBps: 0, MinNetCarryBps: 0,
-			MaxPosition: 100_000_000, LotQty: 10_000_000, MinOrderSize: 100_000, SpotTick: 1_000_000, PerpTick: 1_000_000,
+			MaxPosition: 100_000_000, LotQty: 10_000_000, MinOrderSize: 100_000, UnwindMinOrderSize: &unwindMinimum, SpotTick: 1_000_000, PerpTick: 1_000_000,
 		}
 		cfg.LatencyProfiles = map[string]LatencyProfile{"term_carry_allocator": {Model: "constant", Delay: 10 * time.Millisecond}}
 		cfg.RecordTermCarryDecisions = os.Getenv("V20_EVIDENCE_ON") == "1"

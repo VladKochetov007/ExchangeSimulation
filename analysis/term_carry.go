@@ -62,6 +62,7 @@ type TermCarryCheck struct {
 const (
 	termCarryPolicyV1 = "v2_5_p3_term_carry_v1"
 	termCarryPolicyV2 = "v2_5_p3_term_carry_v2"
+	termCarryPolicyV3 = "v2_5_p3_term_carry_v3"
 )
 
 type termCarryPolicyConfig struct {
@@ -82,6 +83,7 @@ type termCarryPolicyConfig struct {
 	MaxPosition         int64  `json:"max_position"`
 	LotQty              int64  `json:"lot_qty"`
 	MinOrderSize        int64  `json:"min_order_size"`
+	UnwindMinOrderSize  *int64 `json:"unwind_min_order_size,omitempty"`
 	SpotTick            int64  `json:"spot_tick"`
 	PerpTick            int64  `json:"perp_tick"`
 }
@@ -118,6 +120,7 @@ type termCarryDecision struct {
 	TermEnd                     int64  `json:"term_end"`
 	MandateEndAt                int64  `json:"mandate_end_at"`
 	CommitmentIntervals         int64  `json:"commitment_intervals"`
+	UnwindMinOrderSize          *int64 `json:"unwind_min_order_size,omitempty"`
 	HasSpotBook                 bool   `json:"has_spot_book"`
 	SpotPublishedAt             int64  `json:"spot_published_at"`
 	SpotSequence                uint64 `json:"spot_sequence"`
@@ -533,7 +536,7 @@ func auditTermCarryLifecycle(run *Run, policy termCarryPolicyConfig, decisions [
 				check(participant.venue, participant.client, outcome.RequestID, "outcome_without_matching_submission")
 			}
 			spotPosition, perpPosition = applyTermCarryOutcome(policy, *outcome, spotPosition, perpPosition, result, check)
-			if current != nil && current.policyVersion == termCarryPolicyV2 && current.firstExposureAt == 0 && (spotPosition != 0 || perpPosition != 0) {
+			if current != nil && termCarryUsesV2Lifecycle(current.policyVersion) && current.firstExposureAt == 0 && (spotPosition != 0 || perpPosition != 0) {
 				if outcome.Event != "ORDER_FILL" || outcome.ExecutionTime < current.planCreatedAt {
 					result.LifecycleViolations++
 					result.FirstExposureMismatches++
@@ -542,7 +545,7 @@ func auditTermCarryLifecycle(run *Run, policy termCarryPolicyConfig, decisions [
 					current.firstExposureAt = outcome.ExecutionTime
 				}
 			}
-			if current != nil && current.policyVersion == termCarryPolicyV2 && current.firstExposureAt == 0 && spotPosition == 0 && perpPosition == 0 && (outcome.Event == "ORDER_REJECTED" || outcome.Event == "ORDER_CANCELLED") {
+			if current != nil && termCarryUsesV2Lifecycle(current.policyVersion) && current.firstExposureAt == 0 && spotPosition == 0 && perpPosition == 0 && (outcome.Event == "ORDER_REJECTED" || outcome.Event == "ORDER_CANCELLED") {
 				current.aborted = true
 				current = nil
 			}
@@ -617,7 +620,7 @@ func termCarrySpotBalance(balances []Balance, asset string) (int64, bool) {
 }
 
 func validateTermCarryLifecycleDecision(policy termCarryPolicyConfig, decision termCarryDecision, spotPosition, perpPosition int64, current **termCarryLifecycleTerm, terms *[]*termCarryLifecycleTerm) string {
-	if decision.PolicyVersion == termCarryPolicyV2 {
+	if termCarryUsesV2Lifecycle(decision.PolicyVersion) {
 		return validateTermCarryLifecycleDecisionV2(policy, decision, spotPosition, perpPosition, current, terms)
 	}
 	// A rejected economic candidate has a calculated TermEnd but no EntryAt:
@@ -717,7 +720,7 @@ func validateTermCarryLifecycleDecisionV2(policy termCarryPolicyConfig, decision
 		if *current != nil || decision.State != "ENTRY_SPOT" || decision.PlanCreatedAt != decision.DecisionTime || decision.FirstExposureAt != 0 || decision.TargetSpot == 0 || decision.TargetSpot != -decision.TargetPerp || (decision.TargetSpot != policy.MaxPosition && decision.TargetSpot != -policy.MaxPosition) {
 			return "entry_spot_invalid_plan"
 		}
-		*current = &termCarryLifecycleTerm{owner: termCarryParticipant{venue: decision.VenueID, client: decision.ClientID}, policyVersion: termCarryPolicyV2, planCreatedAt: decision.PlanCreatedAt, termEnd: decision.TermEnd}
+		*current = &termCarryLifecycleTerm{owner: termCarryParticipant{venue: decision.VenueID, client: decision.ClientID}, policyVersion: decision.PolicyVersion, planCreatedAt: decision.PlanCreatedAt, termEnd: decision.TermEnd}
 		*terms = append(*terms, *current)
 	case "SUBMIT_ENTRY_PERP_IOC":
 		if *current == nil || decision.State != "ENTRY_PERP" {
@@ -825,6 +828,9 @@ func validTermCarryPolicy(policy termCarryPolicyConfig) error {
 	if policy.SpotSymbol != "ABC/USD" || policy.PerpSymbol != "ABC-PERP" || policy.DecisionPeriod <= 0 || policy.CommitmentIntervals <= 0 || policy.MaxFundingAge <= 0 || policy.MandateEndAtNano < 0 || policy.MaxPosition <= 0 || policy.LotQty <= 0 || policy.MinOrderSize < 0 || policy.SpotTick <= 0 || policy.PerpTick <= 0 {
 		return fmt.Errorf("invalid term-carry policy manifest")
 	}
+	if policy.UnwindMinOrderSize != nil && *policy.UnwindMinOrderSize < 0 {
+		return fmt.Errorf("negative explicit term-carry unwind minimum")
+	}
 	for _, value := range []int64{policy.TakerFeeBps, policy.LongSpotFundingBps, policy.ShortSpotBorrowBps, policy.BalanceSheetBps, policy.MarginRiskBps, policy.LegRiskBps, policy.MinNetCarryBps} {
 		if value < 0 {
 			return fmt.Errorf("negative term-carry bps policy")
@@ -837,7 +843,10 @@ func validateTermCarryDecision(policy termCarryPolicyConfig, decision termCarryD
 	if decision.VenueID == "" || decision.ClientID == 0 || decision.Desk == "" || !termCarryKnownPolicyVersion(decision.PolicyVersion) || decision.DecisionTime == 0 || decision.Action == "" || decision.SpotSymbol != policy.SpotSymbol || decision.PerpSymbol != policy.PerpSymbol || decision.MandateEndAt != policy.MandateEndAtNano || decision.CommitmentIntervals != policy.CommitmentIntervals || !termCarryKnownAction(decision.Action) {
 		return fmt.Errorf("invalid_decision_fields")
 	}
-	if decision.PolicyVersion == termCarryPolicyV2 && (decision.EntryAt != 0 || decision.FirstExposureAt < 0 || decision.PlanCreatedAt < 0 || (decision.FirstExposureAt != 0 && decision.PlanCreatedAt == 0)) {
+	if err := validateTermCarryPolicyEvidence(policy, decision); err != nil {
+		return err
+	}
+	if termCarryUsesV2Lifecycle(decision.PolicyVersion) && (decision.EntryAt != 0 || decision.FirstExposureAt < 0 || decision.PlanCreatedAt < 0 || (decision.FirstExposureAt != 0 && decision.PlanCreatedAt == 0)) {
 		return fmt.Errorf("invalid_decision_fields")
 	}
 	if termCarrySubmission(decision.Action) && (decision.RequestID == 0 || decision.Leg == "" || decision.Side == "" || decision.RequestedQty <= 0) {
@@ -874,7 +883,24 @@ func validateTermCarryDecision(policy termCarryPolicyConfig, decision termCarryD
 }
 
 func termCarryKnownPolicyVersion(version string) bool {
-	return version == termCarryPolicyV1 || version == termCarryPolicyV2
+	return version == termCarryPolicyV1 || version == termCarryPolicyV2 || version == termCarryPolicyV3
+}
+
+func termCarryUsesV2Lifecycle(version string) bool {
+	return version == termCarryPolicyV2 || version == termCarryPolicyV3
+}
+
+func validateTermCarryPolicyEvidence(policy termCarryPolicyConfig, decision termCarryDecision) error {
+	if policy.UnwindMinOrderSize == nil {
+		if decision.PolicyVersion == termCarryPolicyV3 || decision.UnwindMinOrderSize != nil {
+			return fmt.Errorf("term_carry_unwind_policy_mismatch")
+		}
+		return nil
+	}
+	if decision.PolicyVersion != termCarryPolicyV3 || decision.UnwindMinOrderSize == nil || *decision.UnwindMinOrderSize != *policy.UnwindMinOrderSize {
+		return fmt.Errorf("term_carry_unwind_policy_mismatch")
+	}
+	return nil
 }
 
 func validateTermCarryEntryEconomics(policy termCarryPolicyConfig, decision termCarryDecision) error {
@@ -911,7 +937,7 @@ func validateTermCarryEntryEconomics(policy termCarryPolicyConfig, decision term
 		if financials.net.Cmp(minimum) < 0 || decision.TargetSpot != direction*policy.MaxPosition || decision.TargetPerp != -decision.TargetSpot || decision.State != "ENTRY_SPOT" {
 			return fmt.Errorf("arithmetic_entry_mismatch")
 		}
-		if decision.PolicyVersion == termCarryPolicyV2 && (decision.PlanCreatedAt != decision.DecisionTime || decision.FirstExposureAt != 0) {
+		if termCarryUsesV2Lifecycle(decision.PolicyVersion) && (decision.PlanCreatedAt != decision.DecisionTime || decision.FirstExposureAt != 0) {
 			return fmt.Errorf("arithmetic_entry_mismatch")
 		}
 	}
@@ -1008,7 +1034,14 @@ func validateTermCarrySubmission(policy termCarryPolicyConfig, decision termCarr
 			available = decision.SpotBidQty
 		}
 	}
-	wantQty, ok := fundingCarryAuditSizedQty(gap, policy.LotQty, available, policy.MinOrderSize)
+	minimum := policy.MinOrderSize
+	if decision.PolicyVersion == termCarryPolicyV3 && (decision.Leg == "UNWIND_PERP_IOC" || decision.Leg == "UNWIND_SPOT_IOC") {
+		if policy.UnwindMinOrderSize == nil {
+			return fmt.Errorf("submission_unwind_policy_missing")
+		}
+		minimum = *policy.UnwindMinOrderSize
+	}
+	wantQty, ok := fundingCarryAuditSizedQty(gap, policy.LotQty, available, minimum)
 	if !ok || decision.Side != wantSide || decision.LimitPrice != price || decision.RequestedQty != wantQty || !fundingCarryAuditPositiveGrid(price, tick) {
 		return fmt.Errorf("submission_mismatch")
 	}
