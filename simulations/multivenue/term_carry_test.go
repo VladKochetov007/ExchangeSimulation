@@ -2,6 +2,7 @@ package multivenue
 
 import (
 	"context"
+	"encoding/json"
 	"math/big"
 	"testing"
 	"time"
@@ -173,6 +174,101 @@ func TestTermCarryAllocatorDoesNotCreateTermBeforeExecutableEntry(t *testing.T) 
 	}
 }
 
+func TestTermCarryAllocatorSeparatesEntryAndUnwindMinimums(t *testing.T) {
+	zero := int64(0)
+	for _, tc := range []struct {
+		name           string
+		unwindMinimum  *int64
+		wantPolicy     string
+		wantAction     string
+		wantRequestQty int64
+	}{
+		{
+			name:       "legacy policy retains entry floor for unwind",
+			wantPolicy: termCarryPolicyVersionV2, wantAction: "EXECUTABLE_SIZE_UNAVAILABLE",
+		},
+		{
+			name:          "explicit zero permits exchange-unit unwind only",
+			unwindMinimum: &zero, wantPolicy: termCarryPolicyVersionV3,
+			wantAction: "SUBMIT_UNWIND_PERP_IOC", wantRequestQty: 50,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wantEffectiveMinimum := int64(75)
+			if tc.unwindMinimum != nil {
+				wantEffectiveMinimum = *tc.unwindMinimum
+			}
+			gateway := newFundingCarryStubGateway()
+			var decisions []TermCarryDecision
+			cfg := termCarryTestConfig()
+			cfg.MaxPosition, cfg.LotQty, cfg.MinOrderSize, cfg.UnwindMinOrderSize = 100, 100, 75, tc.unwindMinimum
+			cfg.DecisionObserver = func(decision TermCarryDecision) { decisions = append(decisions, decision) }
+			allocator := NewTermCarryAllocator(1, gateway, cfg)
+			allocator.subscribed = true
+			now := time.Unix(10, 0)
+			observeTermCarryBooks(t, allocator, gateway, now, 100, 101, 102, 103, 100)
+			allocator.spot.askQty, allocator.perp.askQty = 50, 50
+
+			// The 50-unit entry remains below the 75-unit entry floor under both
+			// policies; the exit exception must never leak into admission.
+			allocator.onTick(now.Add(time.Second))
+			entry := decisions[len(decisions)-1]
+			if entry.Action != "EXECUTABLE_SIZE_UNAVAILABLE" || entry.RequestID != 0 || entry.PolicyVersion != tc.wantPolicy || (tc.unwindMinimum == nil && entry.UnwindMinOrderSize != nil) || (tc.unwindMinimum != nil && (entry.UnwindMinOrderSize == nil || *entry.UnwindMinOrderSize != wantEffectiveMinimum)) {
+				t.Fatalf("entry policy leaked or evidence was ambiguous: %+v", entry)
+			}
+
+			allocator.state = termCarryActive
+			allocator.plan = &termCarryPlan{direction: 1, planCreatedAt: now.UnixNano(), firstExposureAt: now.UnixNano(), termEnd: now.Add(time.Second).UnixNano()}
+			allocator.spotPosition, allocator.perpPosition = 50, -50
+			allocator.onTick(now.Add(2 * time.Second))
+			unwind := decisions[len(decisions)-1]
+			if unwind.Action != tc.wantAction || unwind.RequestedQty != tc.wantRequestQty || unwind.PolicyVersion != tc.wantPolicy || (tc.unwindMinimum == nil && unwind.UnwindMinOrderSize != nil) || (tc.unwindMinimum != nil && (unwind.UnwindMinOrderSize == nil || *unwind.UnwindMinOrderSize != wantEffectiveMinimum)) {
+				t.Fatalf("unwind minimum policy mismatch: %+v", unwind)
+			}
+			if tc.unwindMinimum == nil && unwind.RequestID != 0 {
+				t.Fatalf("legacy undersized unwind unexpectedly entered: %+v", unwind)
+			}
+			if tc.unwindMinimum != nil && unwind.RequestID == 0 {
+				t.Fatalf("explicit zero unwind did not enter: %+v", unwind)
+			}
+		})
+	}
+}
+
+func TestTermCarryAllocatorPartialUnwindRetainsResidual(t *testing.T) {
+	zero := int64(0)
+	gateway := newFundingCarryStubGateway()
+	var decisions []TermCarryDecision
+	cfg := termCarryTestConfig()
+	cfg.MaxPosition, cfg.LotQty, cfg.MinOrderSize, cfg.UnwindMinOrderSize = 100, 100, 75, &zero
+	cfg.DecisionObserver = func(decision TermCarryDecision) { decisions = append(decisions, decision) }
+	allocator := NewTermCarryAllocator(1, gateway, cfg)
+	allocator.subscribed = true
+	now := time.Unix(10, 0)
+	observeTermCarryBooks(t, allocator, gateway, now, 100, 101, 102, 103, 100)
+	allocator.perp.askQty = 50
+	allocator.state = termCarryActive
+	allocator.plan = &termCarryPlan{direction: 1, planCreatedAt: now.UnixNano(), firstExposureAt: now.UnixNano(), termEnd: now.Add(time.Second).UnixNano()}
+	allocator.spotPosition, allocator.perpPosition = 100, -100
+
+	allocator.onTick(now.Add(2 * time.Second))
+	first := decisions[len(decisions)-1]
+	if first.Action != "SUBMIT_UNWIND_PERP_IOC" || first.RequestedQty != 50 || first.RequestID == 0 {
+		t.Fatalf("first bounded unwind = %+v", first)
+	}
+	allocator.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: first.RequestID, OrderID: 41}})
+	allocator.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderPartialFill, Data: actor.OrderFillEvent{OrderID: 41, Symbol: "ABC-PERP", Side: exchange.Buy, Qty: 20, Price: 103, TradeID: 1, Timestamp: now.Add(3 * time.Second).UnixNano()}})
+	allocator.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderCancelled, Data: actor.OrderCancelledEvent{OrderID: 41, RemainingQty: 30}})
+	if allocator.perpPosition != -80 || allocator.state != termCarryUnwindPerp || allocator.plan == nil {
+		t.Fatalf("partial unwind was closed or erased: position=%d state=%s plan=%+v", allocator.perpPosition, allocator.state, allocator.plan)
+	}
+	allocator.onTick(now.Add(4 * time.Second))
+	next := decisions[len(decisions)-1]
+	if next.Action != "SUBMIT_UNWIND_PERP_IOC" || next.RequestedQty != 50 || next.RequestID == 0 || allocator.state != termCarryUnwindPerp {
+		t.Fatalf("residual was not retried at bounded touch: %+v", next)
+	}
+}
+
 func TestTermCarryAllocatorResetsRejectedFlatEntry(t *testing.T) {
 	gateway := newFundingCarryStubGateway()
 	var decisions []TermCarryDecision
@@ -258,4 +354,40 @@ func TestTermCarryConfigRequiresExplicitEvidencePath(t *testing.T) {
 			t.Fatalf("venue %s allocator received an undeclared mandate: got %d want %d", venue.ID, venue.TermCarryAllocators[0].cfg.MandateEndAtNano, policy.MandateEndAtNano)
 		}
 	}
+}
+
+func TestTermCarryConfigRejectsNegativeExplicitUnwindMinimum(t *testing.T) {
+	negative := int64(-1)
+	policy := termCarryTestConfig()
+	policy.UnwindMinOrderSize = &negative
+	if err := policy.validate(); err == nil {
+		t.Fatal("negative explicit unwind minimum was accepted")
+	}
+}
+
+func TestTermCarryDecisionV3PersistsExplicitZeroUnwindMinimum(t *testing.T) {
+	zero := int64(0)
+	v3, err := json.Marshal(TermCarryDecision{PolicyVersion: termCarryPolicyVersionV3, UnwindMinOrderSize: &zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(v3) == "" || !containsJSONField(v3, "unwind_min_order_size", "0") {
+		t.Fatalf("v3 explicit zero exit floor was not persisted: %s", v3)
+	}
+	v2, err := json.Marshal(TermCarryDecision{PolicyVersion: termCarryPolicyVersionV2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsJSONField(v2, "unwind_min_order_size", "0") {
+		t.Fatalf("legacy v2 emitted an absent v3 policy field: %s", v2)
+	}
+}
+
+func containsJSONField(encoded []byte, field, value string) bool {
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		return false
+	}
+	raw, ok := decoded[field]
+	return ok && string(raw) == value
 }

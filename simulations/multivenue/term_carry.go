@@ -10,37 +10,45 @@ import (
 	"exchange_sim/exchange"
 )
 
-const termCarryPolicyVersion = "v2_5_p3_term_carry_v2"
+const (
+	termCarryPolicyVersionV2 = "v2_5_p3_term_carry_v2"
+	termCarryPolicyVersionV3 = "v2_5_p3_term_carry_v3"
+)
 
 // TermCarryAllocatorConfig declares an opt-in, lifecycle-bearing carry
 // participant. It is deliberately distinct from FundingCarryArbitrageur: the
 // declared commitment is actual actor state with a deterministic unwind, not
 // merely an expected-income multiplier.
 type TermCarryAllocatorConfig struct {
-	Enabled             bool                      `json:"enabled"`
-	SpotSymbol          string                    `json:"spot_symbol"`
-	PerpSymbol          string                    `json:"perp_symbol"`
-	DecisionPeriod      time.Duration             `json:"decision_period"`
-	CommitmentIntervals int64                     `json:"commitment_intervals"`
-	MaxFundingAge       time.Duration             `json:"max_funding_age"`
-	TakerFeeBps         int64                     `json:"taker_fee_bps"`
-	LongSpotFundingBps  int64                     `json:"long_spot_funding_bps"`
-	ShortSpotBorrowBps  int64                     `json:"short_spot_borrow_bps"`
-	BalanceSheetBps     int64                     `json:"balance_sheet_bps"`
-	MarginRiskBps       int64                     `json:"margin_risk_bps"`
-	LegRiskBps          int64                     `json:"leg_risk_bps"`
-	MinNetCarryBps      int64                     `json:"min_net_carry_bps"`
-	MandateEndAtNano    int64                     `json:"mandate_end_at_nano"` // Participant-known deadline; zero means no mandate, never simulator termination.
-	MaxPosition         int64                     `json:"max_position"`
-	LotQty              int64                     `json:"lot_qty"`
-	MinOrderSize        int64                     `json:"min_order_size"`
-	SpotTick            int64                     `json:"spot_tick"`
-	PerpTick            int64                     `json:"perp_tick"`
-	VenueID             string                    `json:"-"`
-	Desk                string                    `json:"-"`
-	ClientID            uint64                    `json:"-"`
-	DecisionObserver    func(TermCarryDecision)   `json:"-"`
-	OutcomeObserver     func(TermCarryLegOutcome) `json:"-"`
+	Enabled             bool          `json:"enabled"`
+	SpotSymbol          string        `json:"spot_symbol"`
+	PerpSymbol          string        `json:"perp_symbol"`
+	DecisionPeriod      time.Duration `json:"decision_period"`
+	CommitmentIntervals int64         `json:"commitment_intervals"`
+	MaxFundingAge       time.Duration `json:"max_funding_age"`
+	TakerFeeBps         int64         `json:"taker_fee_bps"`
+	LongSpotFundingBps  int64         `json:"long_spot_funding_bps"`
+	ShortSpotBorrowBps  int64         `json:"short_spot_borrow_bps"`
+	BalanceSheetBps     int64         `json:"balance_sheet_bps"`
+	MarginRiskBps       int64         `json:"margin_risk_bps"`
+	LegRiskBps          int64         `json:"leg_risk_bps"`
+	MinNetCarryBps      int64         `json:"min_net_carry_bps"`
+	MandateEndAtNano    int64         `json:"mandate_end_at_nano"` // Participant-known deadline; zero means no mandate, never simulator termination.
+	MaxPosition         int64         `json:"max_position"`
+	LotQty              int64         `json:"lot_qty"`
+	MinOrderSize        int64         `json:"min_order_size"`
+	// UnwindMinOrderSize is optional so legacy P3 policies retain their
+	// entry-sized unwind floor. A present zero explicitly permits any positive
+	// exchange-admissible exit child; it is a quantity policy, never a price
+	// availability sentinel.
+	UnwindMinOrderSize *int64                    `json:"unwind_min_order_size,omitempty"`
+	SpotTick           int64                     `json:"spot_tick"`
+	PerpTick           int64                     `json:"perp_tick"`
+	VenueID            string                    `json:"-"`
+	Desk               string                    `json:"-"`
+	ClientID           uint64                    `json:"-"`
+	DecisionObserver   func(TermCarryDecision)   `json:"-"`
+	OutcomeObserver    func(TermCarryLegOutcome) `json:"-"`
 }
 
 func (c TermCarryAllocatorConfig) validate() error {
@@ -55,6 +63,9 @@ func (c TermCarryAllocatorConfig) validate() error {
 	}
 	if c.MaxPosition <= 0 || c.LotQty <= 0 || c.MinOrderSize < 0 || c.SpotTick <= 0 || c.PerpTick <= 0 {
 		return fmt.Errorf("position, lot, and tick policy inputs are invalid")
+	}
+	if c.UnwindMinOrderSize != nil && *c.UnwindMinOrderSize < 0 {
+		return fmt.Errorf("unwind minimum order size must be non-negative")
 	}
 	for _, component := range []struct {
 		name  string
@@ -110,6 +121,10 @@ type TermCarryDecision struct {
 	TermEnd             int64  `json:"term_end"`
 	MandateEndAt        int64  `json:"mandate_end_at"`
 	CommitmentIntervals int64  `json:"commitment_intervals"`
+	// UnwindMinOrderSize is present only for the explicit v3 policy, including
+	// a legitimate zero. Its pointer distinguishes a v2 inherited entry floor
+	// from an explicit exchange-unit exit floor without a numeric sentinel.
+	UnwindMinOrderSize *int64 `json:"unwind_min_order_size,omitempty"`
 
 	HasSpotBook     bool   `json:"has_spot_book"`
 	SpotPublishedAt int64  `json:"spot_published_at"`
@@ -450,7 +465,7 @@ func (a *TermCarryAllocator) adjustSpotDecision(decision TermCarryDecision, acti
 		decision.State = a.state
 		return a.adjustPerpDecision(decision, "ENTRY_PERP_IOC")
 	}
-	return a.orderFromGap(decision, a.spot, gap, a.cfg.SpotTick, action, "SPOT_ENTRY_PRICE_UNAVAILABLE", "SPOT_ENTRY_PRICE_OUTSIDE_DOMAIN")
+	return a.orderFromGap(decision, a.spot, gap, a.cfg.SpotTick, a.cfg.MinOrderSize, action, "SPOT_ENTRY_PRICE_UNAVAILABLE", "SPOT_ENTRY_PRICE_OUTSIDE_DOMAIN")
 }
 
 func (a *TermCarryAllocator) adjustPerpDecision(decision TermCarryDecision, action string) TermCarryDecision {
@@ -473,7 +488,7 @@ func (a *TermCarryAllocator) adjustPerpDecision(decision TermCarryDecision, acti
 	if gap == 0 {
 		return a.adjustSpotDecision(decision, "ENTRY_SPOT_IOC")
 	}
-	return a.orderFromGap(decision, a.perp, gap, a.cfg.PerpTick, action, "PERP_ENTRY_PRICE_UNAVAILABLE", "PERP_ENTRY_PRICE_OUTSIDE_DOMAIN")
+	return a.orderFromGap(decision, a.perp, gap, a.cfg.PerpTick, a.cfg.MinOrderSize, action, "PERP_ENTRY_PRICE_UNAVAILABLE", "PERP_ENTRY_PRICE_OUTSIDE_DOMAIN")
 }
 
 func (a *TermCarryAllocator) unwindDecision(decision TermCarryDecision) TermCarryDecision {
@@ -485,7 +500,7 @@ func (a *TermCarryAllocator) unwindDecision(decision TermCarryDecision) TermCarr
 			decision.Action = "UNWIND_PERP_GAP_UNREPRESENTABLE"
 			return decision
 		}
-		return a.orderFromGap(decision, a.perp, gap, a.cfg.PerpTick, "UNWIND_PERP_IOC", "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN")
+		return a.orderFromGap(decision, a.perp, gap, a.cfg.PerpTick, a.unwindMinOrderSize(), "UNWIND_PERP_IOC", "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN")
 	}
 	if a.spotPosition != 0 {
 		a.state = termCarryUnwindSpot
@@ -495,7 +510,7 @@ func (a *TermCarryAllocator) unwindDecision(decision TermCarryDecision) TermCarr
 			decision.Action = "UNWIND_SPOT_GAP_UNREPRESENTABLE"
 			return decision
 		}
-		return a.orderFromGap(decision, a.spot, gap, a.cfg.SpotTick, "UNWIND_SPOT_IOC", "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN")
+		return a.orderFromGap(decision, a.spot, gap, a.cfg.SpotTick, a.unwindMinOrderSize(), "UNWIND_SPOT_IOC", "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN")
 	}
 	a.state, a.plan = termCarryIdle, nil
 	decision.State = a.state
@@ -503,7 +518,7 @@ func (a *TermCarryAllocator) unwindDecision(decision TermCarryDecision) TermCarr
 	return decision
 }
 
-func (a *TermCarryAllocator) orderFromGap(decision TermCarryDecision, book fundingCarryBook, gap, tick int64, action, unavailable, outsideDomain string) TermCarryDecision {
+func (a *TermCarryAllocator) orderFromGap(decision TermCarryDecision, book fundingCarryBook, gap, tick, minOrderSize int64, action, unavailable, outsideDomain string) TermCarryDecision {
 	quantity, ok := nonnegativeMagnitude(gap)
 	if !ok {
 		decision.Action = "ORDER_QUANTITY_UNREPRESENTABLE"
@@ -531,7 +546,7 @@ func (a *TermCarryAllocator) orderFromGap(decision TermCarryDecision, book fundi
 		decision.Action = outsideDomain
 		return decision
 	}
-	if sized, ok := venueSizedQty(quantity, fundingCarryAvailable(book, decision.Side), a.cfg.MinOrderSize); ok {
+	if sized, ok := venueSizedQty(quantity, fundingCarryAvailable(book, decision.Side), minOrderSize); ok {
 		decision.RequestedQty = sized
 	} else {
 		decision.Action = "EXECUTABLE_SIZE_UNAVAILABLE"
@@ -554,8 +569,8 @@ func (a *TermCarryAllocator) baseDecision(now time.Time, action string) TermCarr
 			targetSpot = -targetSpot
 		}
 	}
-	return TermCarryDecision{
-		VenueID: a.cfg.VenueID, Desk: a.cfg.Desk, ClientID: a.cfg.ClientID, PolicyVersion: termCarryPolicyVersion,
+	decision := TermCarryDecision{
+		VenueID: a.cfg.VenueID, Desk: a.cfg.Desk, ClientID: a.cfg.ClientID, PolicyVersion: a.policyVersion(),
 		DecisionTime: now.UnixNano(), Enabled: a.cfg.Enabled, Subscribed: a.subscribed, Pending: a.pending != nil, State: a.state, Action: action,
 		SpotSymbol: a.cfg.SpotSymbol, PerpSymbol: a.cfg.PerpSymbol, SpotPosition: a.spotPosition, PerpPosition: a.perpPosition, TargetSpot: targetSpot, TargetPerp: -targetSpot,
 		PlanCreatedAt: planCreatedAt, FirstExposureAt: firstExposureAt, TermEnd: termEnd, MandateEndAt: a.cfg.MandateEndAtNano, CommitmentIntervals: a.cfg.CommitmentIntervals,
@@ -564,6 +579,25 @@ func (a *TermCarryAllocator) baseDecision(now time.Time, action string) TermCarr
 		HasFunding: a.funding.has, FundingRateBps: a.funding.rate.Rate, FundingPublishedAt: a.funding.publishedAt, FundingSequence: a.funding.sequence, FundingNextAt: a.funding.rate.NextFunding, FundingIntervalSeconds: a.funding.rate.Interval, FundingAgeNanos: 0,
 		DecisionFrontierLinkID: frontier.LinkID, DecisionFrontierOrdinal: frontier.Ordinal, DecisionFrontierDeliveredAt: frontier.DeliveredAt, DecisionFrontierDigest: fmt.Sprintf("%x", frontier.Digest),
 	}
+	if a.cfg.UnwindMinOrderSize != nil {
+		unwindMinimum := a.unwindMinOrderSize()
+		decision.UnwindMinOrderSize = &unwindMinimum
+	}
+	return decision
+}
+
+func (a *TermCarryAllocator) policyVersion() string {
+	if a.cfg.UnwindMinOrderSize != nil {
+		return termCarryPolicyVersionV3
+	}
+	return termCarryPolicyVersionV2
+}
+
+func (a *TermCarryAllocator) unwindMinOrderSize() int64 {
+	if a.cfg.UnwindMinOrderSize != nil {
+		return *a.cfg.UnwindMinOrderSize
+	}
+	return a.cfg.MinOrderSize
 }
 
 func (a *TermCarryAllocator) onAccepted(event actor.OrderAcceptedEvent) {
