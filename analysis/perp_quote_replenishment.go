@@ -83,6 +83,7 @@ type perpQuoteReplenishmentLifecycle struct {
 	Side              string `json:"side"`
 	RequestID         uint64 `json:"request_id"`
 	OrderID           uint64 `json:"order_id"`
+	TradeID           uint64 `json:"trade_id"`
 	Qty               int64  `json:"qty"`
 	TargetQty         int64  `json:"target_qty"`
 	KnownRestingQty   int64  `json:"known_resting_qty"`
@@ -107,6 +108,7 @@ type perpQuoteVenueFill struct {
 	At      int64
 	Ordinal int64
 	OrderID uint64 `json:"order_id"`
+	TradeID uint64 `json:"trade_id"`
 	Symbol  string `json:"symbol"`
 	Side    string `json:"side"`
 	Qty     int64  `json:"qty"`
@@ -295,7 +297,7 @@ func auditPerpQuoteLifecycle(lifecycle *perpQuoteReplenishmentLifecycle, owner p
 	switch lifecycle.Transition {
 	case "ACKNOWLEDGED":
 		rows := accepted[requestKey]
-		if len(rows) != 1 || lifecycle.OrderID == 0 || lifecycle.TargetQty <= 0 || lifecycle.KnownRestingQty != lifecycle.TargetQty || !perpQuoteAcceptedMatchesLifecycle(rows, lifecycle) {
+		if len(rows) != 1 || lifecycle.TradeID != 0 || lifecycle.OrderID == 0 || lifecycle.TargetQty <= 0 || lifecycle.KnownRestingQty != lifecycle.TargetQty || !perpQuoteAcceptedMatchesLifecycle(rows, lifecycle) {
 			fail("acknowledgement_does_not_match_venue_order")
 			return
 		}
@@ -306,7 +308,7 @@ func auditPerpQuoteLifecycle(lifecycle *perpQuoteReplenishmentLifecycle, owner p
 		states[lifecycle.OrderID] = perpQuoteState{side: lifecycle.Side, request: lifecycle.RequestID, target: lifecycle.TargetQty, resting: lifecycle.KnownRestingQty}
 	case "REJECTED":
 		rows := rejected[requestKey]
-		if len(rows) != 1 || lifecycle.OrderID != 0 || lifecycle.Qty != 0 || lifecycle.KnownRestingQty != 0 || lifecycle.TargetQty <= 0 || rows[0].At > lifecycle.ObservedAt {
+		if len(rows) != 1 || lifecycle.TradeID != 0 || lifecycle.OrderID != 0 || lifecycle.Qty != 0 || lifecycle.KnownRestingQty != 0 || lifecycle.TargetQty <= 0 || rows[0].At > lifecycle.ObservedAt {
 			fail("rejection_does_not_match_venue_outcome")
 		}
 	case "PARTIAL_FILL", "FULL_FILL":
@@ -336,7 +338,7 @@ func auditPerpQuoteLifecycle(lifecycle *perpQuoteReplenishmentLifecycle, owner p
 		}
 	case "CANCELLED":
 		state, found := states[lifecycle.OrderID]
-		if !found || lifecycle.Qty != 0 || lifecycle.TargetQty != state.target || lifecycle.Side != state.side || lifecycle.KnownRestingQty != 0 || !perpQuoteHasVenueCancellation(cancels[orderKey], lifecycle.ObservedAt) {
+		if !found || lifecycle.TradeID != 0 || lifecycle.Qty != 0 || lifecycle.TargetQty != state.target || lifecycle.Side != state.side || lifecycle.KnownRestingQty != 0 || !perpQuoteHasVenueCancellation(cancels[orderKey], lifecycle.ObservedAt) {
 			fail("cancellation_does_not_match_venue_or_local_quote")
 			return
 		}
@@ -450,7 +452,7 @@ func perpQuoteAcceptedMatchesLifecycle(rows []perpQuoteVenueOrder, lifecycle *pe
 func perpQuoteHasVenueFill(rows []perpQuoteVenueFill, lifecycle *perpQuoteReplenishmentLifecycle, owner perpQuoteParticipant) bool {
 	matched := 0
 	for _, row := range rows {
-		if row.At == lifecycle.ExchangeTimestamp && row.At <= lifecycle.ObservedAt && row.Symbol == "ABC-PERP" && row.Side == lifecycle.Side && row.Qty == lifecycle.Qty {
+		if row.TradeID == lifecycle.TradeID && row.At == lifecycle.ExchangeTimestamp && row.At <= lifecycle.ObservedAt && row.Symbol == "ABC-PERP" && row.Side == lifecycle.Side && row.Qty == lifecycle.Qty {
 			matched++
 		}
 	}

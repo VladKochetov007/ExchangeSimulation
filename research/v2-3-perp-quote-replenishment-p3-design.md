@@ -118,10 +118,13 @@ The actor also records a compact evidence-only
 `perp_quote_replenishment_lifecycle` row on each own acknowledgement,
 partial/full fill, cancellation, and quote rejection. It includes the
 simulation-clock delivery observation time, exchange fill time where present,
-side, request/order identity, fill quantity, target, and post-event locally
-known residual. This is necessary because an exchange fill time is not itself
-the time at which a delayed actor received the notification. Each lifecycle row
-must exactly join the independent venue raw event; it does not replace it.
+side, request/order identity, exchange `trade_id` for fills (including the
+valid zero-valued first trade ID), fill quantity,
+target, and post-event locally known residual. This is necessary because an
+exchange fill time is not itself the time at which a delayed actor received the
+notification, and pro-rata matching can create distinct equal-quantity fills at
+one timestamp. Each lifecycle row must exactly join the independent venue raw
+event; it does not replace it.
 
 The analyzer must reconstruct active quote state independently from exact
 request/acceptance, lifecycle-receipt, fill, and cancellation chains. It must

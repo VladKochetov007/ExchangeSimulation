@@ -16,6 +16,39 @@ func TestPerpQuoteReplenishmentReplaysConfirmedResidualAndRefresh(t *testing.T) 
 	}
 }
 
+func TestPerpQuoteReplenishmentUsesTradeIDForSameTimestampFills(t *testing.T) {
+	lifecycle := &perpQuoteReplenishmentLifecycle{
+		ExchangeTimestamp: 3,
+		ObservedAt:        4,
+		Side:              "BUY",
+		Qty:               25,
+		TradeID:           71,
+	}
+	rows := []perpQuoteVenueFill{
+		{At: 3, OrderID: 10, TradeID: 71, Symbol: "ABC-PERP", Side: "BUY", Qty: 25},
+		{At: 3, OrderID: 10, TradeID: 72, Symbol: "ABC-PERP", Side: "BUY", Qty: 25},
+	}
+	if !perpQuoteHasVenueFill(rows, lifecycle, perpQuoteParticipant{venue: "north", client: 7}) {
+		t.Fatal("distinct same-timestamp pro-rata fill did not join its trade identity")
+	}
+	lifecycle.TradeID = 73
+	if perpQuoteHasVenueFill(rows, lifecycle, perpQuoteParticipant{venue: "north", client: 7}) {
+		t.Fatal("unknown trade identity joined a same-timestamp fill")
+	}
+}
+
+func TestPerpQuoteReplenishmentAcceptsZeroValuedFirstTradeID(t *testing.T) {
+	lines := replaceP3EventField(p3ReplenishmentValidLines(), "OrderFill", `"trade_id":71`, `"trade_id":0`)
+	lines = replaceP3LifecycleTransitionField(lines, "PARTIAL_FILL", `"trade_id":71`, `"trade_id":0`)
+	result, err := p3ReplenishmentTestRun(t, lines).MeasurePerpQuoteReplenishment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid {
+		t.Fatalf("zero-valued first trade ID became unavailable: %+v", result)
+	}
+}
+
 func TestPerpQuoteReplenishmentCatchesLifecycleAndThresholdMutations(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -47,7 +80,14 @@ func TestPerpQuoteReplenishmentCatchesLifecycleAndThresholdMutations(t *testing.
 		{
 			name: "duplicate venue fill",
 			mutate: func(lines []string) []string {
-				return append(lines, p3FillLine(3, 10, "BUY", 51))
+				return append(lines, p3FillLine(3, 10, "BUY", 51, 71))
+			},
+			caught: func(result *PerpQuoteReplenishmentAudit) bool { return result.LifecycleMismatches > 0 },
+		},
+		{
+			name: "wrong trade identity",
+			mutate: func(lines []string) []string {
+				return replaceP3LifecycleTransitionField(lines, "PARTIAL_FILL", `"trade_id":71`, `"trade_id":72`)
 			},
 			caught: func(result *PerpQuoteReplenishmentAudit) bool { return result.LifecycleMismatches > 0 },
 		},
@@ -106,10 +146,10 @@ func p3ReplenishmentValidLines() []string {
 			"venue_id": "north", "maker": "perp_maker", "client_id": 7, "symbol": "ABC-PERP", "observed_at": 2, "exchange_timestamp": 0,
 			"transition": "ACKNOWLEDGED", "side": "SELL", "request_id": 2, "order_id": 11, "qty": 0, "target_qty": 100, "known_resting_qty": 100,
 		}),
-		p3FillLine(3, 10, "BUY", 51),
+		p3FillLine(3, 10, "BUY", 51, 71),
 		logLine(4, 7, "perp_quote_replenishment_lifecycle", map[string]any{
 			"venue_id": "north", "maker": "perp_maker", "client_id": 7, "symbol": "ABC-PERP", "observed_at": 4, "exchange_timestamp": 3,
-			"transition": "PARTIAL_FILL", "side": "BUY", "request_id": 0, "order_id": 10, "qty": 51, "target_qty": 100, "known_resting_qty": 49,
+			"transition": "PARTIAL_FILL", "side": "BUY", "request_id": 0, "order_id": 10, "trade_id": 71, "qty": 51, "target_qty": 100, "known_resting_qty": 49,
 		}),
 		logLine(5, 7, "perp_quote_replenishment_decision", map[string]any{
 			"venue_id": "north", "maker": "perp_maker", "client_id": 7, "symbol": "ABC-PERP", "decision_time": 5,
@@ -131,9 +171,9 @@ func p3OrderLine(ts int64, requestID, orderID uint64, side string, price, qty in
 	})
 }
 
-func p3FillLine(ts int64, orderID uint64, side string, qty int64) string {
+func p3FillLine(ts int64, orderID uint64, side string, qty int64, tradeID uint64) string {
 	return logLine(ts, 7, "OrderFill", map[string]any{
-		"order_id": orderID, "symbol": "ABC-PERP", "side": side, "qty": qty,
+		"order_id": orderID, "trade_id": tradeID, "symbol": "ABC-PERP", "side": side, "qty": qty,
 	})
 }
 

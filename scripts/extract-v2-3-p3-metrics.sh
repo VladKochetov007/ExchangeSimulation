@@ -49,7 +49,7 @@ for arm in A B; do
 		  .result.duplicate_outcomes == 0 and
 		  .result.outcome_field_mismatches == 0
 		' "$cell/perpreplenishment.json" >/dev/null
-		jq -e '.events > 0 and (.digest | length) == 64' "$cell/evidenceartifacthash.json" >/dev/null
+		jq -e '.result.events > 0 and (.result.digest | length) == 64' "$cell/evidenceartifacthash.json" >/dev/null
 
 		jq -n \
 			--arg analysis_revision "$(git -C "$root_dir" rev-parse HEAD)" \

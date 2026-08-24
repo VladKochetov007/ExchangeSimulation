@@ -946,7 +946,7 @@ func TestStoikovPerpReplenishmentLifecycleEvidenceTracksActorReceipt(t *testing.
 	maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: bid.RequestID, OrderID: 10}})
 	maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: ask.RequestID, OrderID: 11}})
 	maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderPartialFill, Data: actor.OrderFillEvent{
-		Symbol: "ABC-PERP", OrderID: 10, Side: exchange.Buy, Qty: 51, IsFull: false, Timestamp: now.Add(20 * time.Millisecond).UnixNano(),
+		Symbol: "ABC-PERP", OrderID: 10, TradeID: 88, Side: exchange.Buy, Qty: 51, IsFull: false, Timestamp: now.Add(20 * time.Millisecond).UnixNano(),
 	}})
 	if len(lifecycle) != 3 {
 		t.Fatalf("lifecycle events = %d, want acknowledgement/acknowledgement/partial-fill", len(lifecycle))
@@ -954,7 +954,7 @@ func TestStoikovPerpReplenishmentLifecycleEvidenceTracksActorReceipt(t *testing.
 	if lifecycle[0].Transition != "ACKNOWLEDGED" || lifecycle[0].Side != exchange.Buy || lifecycle[0].RequestID != bid.RequestID || lifecycle[0].OrderID != 10 || lifecycle[0].TargetQty != 100 || lifecycle[0].KnownRestingQty != 100 {
 		t.Fatalf("bid acknowledgement = %+v", lifecycle[0])
 	}
-	if lifecycle[2].Transition != "PARTIAL_FILL" || lifecycle[2].Side != exchange.Buy || lifecycle[2].OrderID != 10 || lifecycle[2].Qty != 51 || lifecycle[2].TargetQty != 100 || lifecycle[2].KnownRestingQty != 49 || lifecycle[2].ExchangeTimestamp != now.Add(20*time.Millisecond).UnixNano() {
+	if lifecycle[2].Transition != "PARTIAL_FILL" || lifecycle[2].Side != exchange.Buy || lifecycle[2].OrderID != 10 || lifecycle[2].TradeID != 88 || lifecycle[2].Qty != 51 || lifecycle[2].TargetQty != 100 || lifecycle[2].KnownRestingQty != 49 || lifecycle[2].ExchangeTimestamp != now.Add(20*time.Millisecond).UnixNano() {
 		t.Fatalf("partial fill lifecycle = %+v", lifecycle[2])
 	}
 }
@@ -964,7 +964,7 @@ func TestPerpQuoteReplenishmentLifecyclePersistsZeroValuedBuy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(raw, []byte(`"side":"BUY"`)) {
+	if !bytes.Contains(raw, []byte(`"side":"BUY"`)) || !bytes.Contains(raw, []byte(`"trade_id":0`)) {
 		t.Fatalf("zero-valued BUY disappeared from P3 lifecycle evidence: %s", raw)
 	}
 }
