@@ -102,6 +102,21 @@ func TestViabilitySeparatesWindowsAndCountsClasses(t *testing.T) {
 	}
 }
 
+func TestViabilityStartNanosAppliesAnExplicitWarmupBoundary(t *testing.T) {
+	run := viabilityRun(t)
+	result, err := run.MeasureViability(ViabilityOptions{WindowNanos: 5_000_000_000, StartNanos: 10_000_000_000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Windows) != 1 || len(result.BookSummaries) != 1 {
+		t.Fatalf("warmup-filtered windows/summaries = %d/%d, want 1/1", len(result.Windows), len(result.BookSummaries))
+	}
+	window, summary := result.Windows[0], result.BookSummaries[0]
+	if window.Trades != 1 || window.EmptySideSnapshots != 1 || summary.Trades != 1 || summary.Snapshots != 1 || summary.EmptySideSnapshots != 1 {
+		t.Fatalf("warmup boundary retained pre-start evidence: window=%+v summary=%+v", window, summary)
+	}
+}
+
 // Volume above zero is the test the corridor exists to replace: the window
 // where the book went one-sided and a single class was left trading passes it.
 func TestViabilityRulesRejectAMarketThatStillTrades(t *testing.T) {

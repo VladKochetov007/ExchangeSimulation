@@ -26,6 +26,10 @@ type ViabilityOptions struct {
 	// Zero measures the whole run as a single window, which answers whether a
 	// market ever traded and not whether it stayed alive.
 	WindowNanos int64
+	// StartNanos excludes the declared startup/warmup prefix from every input
+	// event. It is an explicit measurement boundary, never an after-the-fact
+	// removal of windows that look unfavorable.
+	StartNanos int64
 	// TickSize converts spreads to ticks. Zero leaves the spread in quote
 	// units, which is not comparable across instruments.
 	TickSize int64
@@ -198,6 +202,9 @@ func (r *Run) MeasureViability(opts ViabilityOptions) (*Viability, error) {
 	}
 	scan := ScanOptions{Events: []string{"OrderFill"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
 	if err := r.Scan(scan, func(event Event) {
+		if event.SimTS < opts.StartNanos {
+			return
+		}
 		var fill fillPayload
 		if event.Decode(&fill) != nil || fill.Qty <= 0 {
 			return
@@ -221,6 +228,9 @@ func (r *Run) MeasureViability(opts ViabilityOptions) (*Viability, error) {
 
 	snapshotScan := ScanOptions{Events: []string{"BookSnapshot"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
 	if err := r.Scan(snapshotScan, func(event Event) {
+		if event.SimTS < opts.StartNanos {
+			return
+		}
 		if !isPeriodicSnapshot(event) {
 			return
 		}

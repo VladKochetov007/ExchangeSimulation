@@ -119,6 +119,7 @@ func main() {
 	basePrecision := flag.Int64("base-precision", 100_000_000, "base-asset precision, for converting position sizes into contracts")
 	quotePrecision := flag.Int64("quote-precision", 100_000, "quote-asset precision, for converting logged prices into currency units")
 	viabilityWindow := flag.Float64("viability-window", 900, "viability window length in simulated seconds")
+	viabilityStart := flag.Float64("viability-start", 0, "exclude viability evidence before this simulated-second boundary")
 	minTradesPerWindow := flag.Int("viability-min-trades", 1, "fewest taker trades a window may have and stay viable")
 	minTakerClasses := flag.Int("viability-min-taker-classes", 2, "fewest distinct taker classes a viable window needs")
 	minMakerClasses := flag.Int("viability-min-maker-classes", 1, "fewest distinct maker classes a viable window needs")
@@ -961,6 +962,7 @@ func main() {
 			}
 			result, err := run.MeasureViability(analysis.ViabilityOptions{
 				WindowNanos: int64(*viabilityWindow * 1e9),
+				StartNanos:  int64(*viabilityStart * 1e9),
 				TickSize:    *tickSize,
 				Rules:       rules,
 			})
