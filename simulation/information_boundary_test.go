@@ -91,6 +91,9 @@ func TestMarketDataReceiptAttestsInboxArrival(t *testing.T) {
 		if symbolID := binary.BigEndian.Uint32(record[12:16]); symbolID != 1 {
 			t.Fatalf("receipt %d symbol ID = %d, want 1", i, symbolID)
 		}
+		if i == 0 && record[16] != byte(exchange.MDSnapshot) {
+			t.Fatalf("snapshot MDType = %d, want zero-valued MDSnapshot", record[16])
+		}
 		if got := binary.BigEndian.Uint64(record[20:28]); got != uint64(17+i) {
 			t.Fatalf("receipt %d sequence = %d, want %d", i, got, 17+i)
 		}
@@ -114,6 +117,9 @@ func TestMarketDataReceiptAttestsInboxArrival(t *testing.T) {
 	}
 	if len(decisions) != 96 || binary.BigEndian.Uint64(decisions[24:32]) != 41 || binary.BigEndian.Uint64(decisions[40:48]) != 2 {
 		t.Fatalf("decision does not cite received local frontier: %v", decisions)
+	}
+	if decisions[16] != byte(exchange.Buy) || decisions[17] != byte(exchange.LimitOrder) || decisions[18] != byte(exchange.GTC) {
+		t.Fatalf("decision lost zero-valued enum fields: side=%d type=%d tif=%d", decisions[16], decisions[17], decisions[18])
 	}
 
 	manifestRaw, err := os.ReadFile(filepath.Join(dir, "market-data-evidence-v2.json"))
