@@ -1,0 +1,27 @@
+{
+  "experiment": "V2-5 P2 retained public signal readiness",
+  "verdict": "READY_FOR_PUBLIC_SIGNAL_INPUT_ONLY",
+  "scope": "descriptive feed readiness; not P2 causality, funding economics, carry profitability, or basis convergence",
+  "analyzer_commit": "8c29024",
+  "analyzer_sha256": "6120c632b2e33120bbe5fc9fe57c80c4c62b0f1b046a91cbf0f6e87bbed1cac4",
+  "symbol": "ABC-PERP",
+  "required_venues": ["central", "north", "south"],
+  "funding_interval": "8h",
+  "horizon": "5m simulated",
+  "cells": {
+    "A-101": {"ready": true, "valid": true, "updates_per_venue": 298, "pooled_distinct_mark_index_pairs": 197, "pooled_distinct_funding_rates": 3, "funding_settlement_events": 0},
+    "A-103": {"ready": true, "valid": true, "updates_per_venue": 298, "pooled_distinct_mark_index_pairs": 195, "pooled_distinct_funding_rates": 4, "funding_settlement_events": 0},
+    "B-101": {"ready": true, "valid": true, "updates_per_venue": 298, "pooled_distinct_mark_index_pairs": 196, "pooled_distinct_funding_rates": 3, "funding_settlement_events": 0},
+    "B-103": {"ready": true, "valid": true, "updates_per_venue": 298, "pooled_distinct_mark_index_pairs": 202, "pooled_distinct_funding_rates": 4, "funding_settlement_events": 0}
+  },
+  "interpretation": {
+    "public_signal_ready_in_enabled_pairs": true,
+    "funding_settlement_expected_absent": true,
+    "p2_causal_attribution_supported": false,
+    "p1a_carry_actor_active": false,
+    "p2b_market_screen_authorized": false,
+    "next_gate": "new viable carry-participant representation with independent local-economic activation"
+  },
+  "raw_evidence_retained": true,
+  "safe_to_prune": false
+}
