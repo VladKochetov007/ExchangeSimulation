@@ -636,7 +636,18 @@ func validateFundingCarryDecision(policy fundingCarryPolicyConfig, decision fund
 	if fundingCarrySubmission(decision.Action) && (!decision.Enabled || !decision.Subscribed || decision.Pending) {
 		return fmt.Errorf("submission_state_mismatch")
 	}
-	if decision.DecisionFrontierOrdinal != 0 || decision.DecisionFrontierLinkID != 0 || decision.DecisionFrontierDeliveredAt != 0 || decision.DecisionFrontierDigest != "" {
+	if decision.DecisionFrontierOrdinal == 0 {
+		// A delayed gateway retains its registered link before the first public
+		// delivery. This explicitly attests an empty local frontier; it is not a
+		// missing observation and cannot justify a cached input.
+		zeroDigest := hex.EncodeToString(make([]byte, 16))
+		if decision.DecisionFrontierLinkID == 0 || decision.DecisionFrontierDeliveredAt != 0 || decision.DecisionFrontierDigest != zeroDigest {
+			return fmt.Errorf("receipt_frontier_mismatch")
+		}
+		if decision.HasSpotBook || decision.HasPerpBook || decision.HasFunding {
+			return fmt.Errorf("receipt_frontier_missing")
+		}
+	} else {
 		frontier, found := frontiers[fundingCarryReceiptKey{decision.ClientID, decision.DecisionFrontierLinkID, decision.DecisionFrontierOrdinal}]
 		if !found || decision.DecisionFrontierDeliveredAt != frontier.deliveredAt || decision.DecisionFrontierDigest == "" || decision.DecisionFrontierDigest != hex.EncodeToString(frontier.digest[:]) {
 			return fmt.Errorf("receipt_frontier_mismatch")
@@ -644,8 +655,6 @@ func validateFundingCarryDecision(policy fundingCarryPolicyConfig, decision fund
 		if decision.DecisionFrontierDeliveredAt > decision.DecisionTime {
 			return fmt.Errorf("future_receipt")
 		}
-	} else if decision.HasSpotBook || decision.HasPerpBook || decision.HasFunding {
-		return fmt.Errorf("receipt_frontier_missing")
 	}
 	if fundingCarrySubmission(decision.Action) {
 		if decision.RequestID == 0 || decision.Leg == "" || decision.Side == "" || decision.RequestedQty <= 0 {

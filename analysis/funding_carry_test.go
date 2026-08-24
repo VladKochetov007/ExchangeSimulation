@@ -22,6 +22,24 @@ func TestFundingCarryAuditReplaysLocalFundingDecision(t *testing.T) {
 	}
 }
 
+func TestFundingCarryAuditAcceptsExplicitEmptyRegisteredFrontier(t *testing.T) {
+	policy := fundingCarryPolicyConfig{
+		Enabled: true, SpotSymbol: "ABC/USD", PerpSymbol: "ABC-PERP",
+		DecisionPeriod: 1, FundingHorizon: 1, MaxFundingAge: 1,
+		MaxPosition: 1, LotQty: 1, SpotTick: 1, PerpTick: 1,
+	}
+	decision := fundingCarryDecision{
+		VenueID: "north", Desk: "funding_carry_arb_1", ClientID: 7,
+		PolicyVersion: "v2_5_p0_funding_carry_v2", DecisionTime: 1,
+		Action: "NOT_SUBSCRIBED", SpotSymbol: "ABC/USD", PerpSymbol: "ABC-PERP",
+		FundingHorizon: 1, DecisionFrontierLinkID: 1,
+		DecisionFrontierDigest: "00000000000000000000000000000000",
+	}
+	if err := validateFundingCarryDecision(policy, decision, nil); err != nil {
+		t.Fatalf("empty registered frontier rejected: %v", err)
+	}
+}
+
 func TestFundingCarryAuditCatchesEvidenceAndEconomicMutations(t *testing.T) {
 	tests := []struct {
 		name   string
