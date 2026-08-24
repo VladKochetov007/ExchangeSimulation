@@ -57,6 +57,7 @@ func TestPerpExposureHedgerTargetsOppositePhysicalExposureAtLocalTouch(t *testin
 			decision := decisions[len(decisions)-1]
 			request := gateway.requests[0].OrderReq
 			if decision.ActionOrDeferReason != "SUBMIT_IOC" || decision.TargetPerpPosition != -tc.physical ||
+				decision.PolicyVersion != perpExposureHedgerPolicyVersion ||
 				decision.Side != tc.wantSide.String() || decision.LimitPrice != tc.wantPrice || decision.RequestedQty != 10 ||
 				decision.DecisionFrontierLinkID != 9 || decision.DecisionFrontierOrdinal != 4 ||
 				request.RequestID != decision.RequestID || request.Symbol != "ABC-PERP" || request.Side != tc.wantSide ||

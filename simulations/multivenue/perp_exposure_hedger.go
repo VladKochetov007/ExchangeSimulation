@@ -76,9 +76,13 @@ func (c PerpExposureHedgerConfig) validate() error {
 // sentinels; the explicit presence fields carry that meaning. Side is a named
 // string because BUY is a valid zero-valued internal enum.
 type PerpExposureHedgerDecision struct {
-	VenueID               string `json:"venue_id"`
-	Hedger                string `json:"hedger"`
-	ClientID              uint64 `json:"client_id"`
+	VenueID  string `json:"venue_id"`
+	Hedger   string `json:"hedger"`
+	ClientID uint64 `json:"client_id"`
+	// PolicyVersion binds an evidence row to the exact P2 local-exposure
+	// contract. Offline auditors must reject a row from an unknown policy
+	// rather than silently applying this replay to it.
+	PolicyVersion         string `json:"policy_version"`
 	Symbol                string `json:"symbol"`
 	DecisionTime          int64  `json:"decision_time"`
 	Enabled               bool   `json:"enabled"`
@@ -400,7 +404,8 @@ func (h *PerpExposureHedger) terminalRoundTripCensored(now int64) bool {
 func (h *PerpExposureHedger) baseDecision(now time.Time, action string) PerpExposureHedgerDecision {
 	frontier := perpExposureFrontier(h.Gateway())
 	return PerpExposureHedgerDecision{
-		VenueID: h.cfg.VenueID, Hedger: h.cfg.Hedger, ClientID: h.cfg.ClientID, Symbol: h.cfg.Symbol,
+		VenueID: h.cfg.VenueID, Hedger: h.cfg.Hedger, ClientID: h.cfg.ClientID,
+		PolicyVersion: perpExposureHedgerPolicyVersion, Symbol: h.cfg.Symbol,
 		DecisionTime: now.UnixNano(), Enabled: h.cfg.Enabled, Subscribed: h.subscribed, RequestPending: h.pending,
 		ActionOrDeferReason: action, PhysicalBefore: h.physicalExposure, PhysicalAfter: h.physicalExposure,
 		PhysicalExposureLimit: h.cfg.MaxAbsExposure, FilledPerpPosition: h.perpPosition,
@@ -413,6 +418,8 @@ func (h *PerpExposureHedger) baseDecision(now time.Time, action string) PerpExpo
 		TakerFeeBps: h.cfg.TakerFeeBps,
 	}
 }
+
+const perpExposureHedgerPolicyVersion = "v2_5_p2_perp_exposure_v1"
 
 func (h *PerpExposureHedger) nextExposure() (int64, int64, bool) {
 	step := h.cfg.ExposureStepQty
