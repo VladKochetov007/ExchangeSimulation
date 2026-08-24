@@ -1,6 +1,7 @@
 # V2 signed-price post-merge hardening ledger
 
-Status: **open — dedicated branch `autoresearch/v2-signed-price-hardening`**
+Status: **merge gate passed pending Git-flow merge — dedicated branch
+`autoresearch/v2-signed-price-hardening`**
 
 ## Scope and provenance
 
@@ -47,17 +48,35 @@ market-order `Price == 0` are not price-availability tests.
 
 ## Migration slices
 
-1. **H1 lifecycle wire:** make settlement availability explicit on
-   `InstrumentAnnouncement`; preserve numeric signed settlement exactly.
-2. **H2 executable-book presence:** repair multivenue router and fee-sim
-   basis-book touch selection; distinguish missing vs present/out-of-domain.
-3. **H3 valuation/actor cache boundary:** remove sign-as-cache-presence from
-   V2 multivenue marks; retain declared positive USD valuation semantics.
-4. **H4 regression gate:** focused/race/full tests, signed fixtures,
-   fresh-process positive-world execution/evidence equivalence, and
-   parent/branch performance comparison.  Append results to
-   `v2-signed-price-audit.md`, then merge only if exact positive behavior is
-   unchanged.
+1. **H1 lifecycle wire — complete:** `InstrumentAnnouncement` uses a nullable
+   settlement pointer: `nil` is unavailable/nonterminal, while a nonnil value
+   preserves negative, zero, or positive settlement exactly.  The first
+   boolean-based implementation added fields to ordinary listing evidence and
+   failed positive-world equivalence; `0f6a3c6` corrects that without changing
+   market state or terminal settlement economics.
+2. **H2 executable-book presence — complete:** multivenue router and fee-sim
+   touch selection carry bid/ask presence separately.  Present non-positive
+   touches reach a named positive-domain policy, rather than being erased as
+   unavailable.
+3. **H3 valuation/actor cache boundary — complete:** V2 multivenue marks and
+   consensus-index observations retain signed presence; positive USD valuation
+   is enforced only at the named valuation boundary with `ErrPriceDomain`.
+4. **H4 analysis-domain boundary — complete:** basis BPS, triangular ratio,
+   arbitrage, IV, log-return, liquidation-fill, impact, and settlement
+   analyzers retain signed observations and report an explicit undefined
+   mathematical domain where required.
+5. **H5 regression gate — evidence accepted:** parent `99ce69c` and candidate
+   `0f6a3c6` are byte/evidence/execution equivalent for the retained positive
+   V2 specimen.  Both have 2,126,782 execution observations, hash
+   `5db76448…5989e5f6`, and evidence digest `f2544069…bf20dd3d`; logging
+   mode and GOMAXPROCS 1/4 do not perturb the trajectory.  The alternating
+   timing and CPU/heap profiles show no material regression.  Exact artifacts
+   are in `research/artifacts/v2-signed-price-hardening-gate.json`.  `go test
+   ./...`, `go vet ./...`, and source builds pass. Race coverage passed for
+   all changed packages plus the direct signed mark/router/cache boundaries in
+   `simulations/multivenue`; the all-package process-isolation matrix is
+   intentionally not a routine branch gate because it launches many unrelated
+   two-minute fresh worlds.
 
 ## Explicit non-goals
 

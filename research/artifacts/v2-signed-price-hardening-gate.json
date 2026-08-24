@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "status": "merge_gate_passed_pending_git_flow_merge",
+  "subject_branch": "autoresearch/v2-signed-price-hardening",
+  "parent_commit": "99ce69cd0d646e4d1e885a349250ce9d57b9c88f",
+  "candidate_commit": "0f6a3c61ef1f3333c0ea759596d9c7d1c9ee75d0",
+  "config": "research/configs/frozen-baseline-2026-08-22.json",
+  "config_sha256": "ca933bf2244eec8e104d4313456bed386809703bb7a1179125b8d9255f1b1036",
+  "seed": 101,
+  "simulated_horizon": "30m",
+  "checkpoint_interval": "60s",
+  "receipt_evidence_actor": "spot_maker",
+  "positive_world_equivalence": {
+    "event_count": 2126782,
+    "execution_stream_hash": "5db76448ebb8c5ca60d04366a5fe89540e745564c7fb86cc328be7515989e5f6",
+    "checkpoint_jsonl_sha256": "56bb7981b9d8524d772b2ef5815b8547d0ba5ce4902777d86d07c7f600ab8ace",
+    "evidence_domain": "persisted_json_records",
+    "evidence_ordering": "unordered_multiset",
+    "evidence_event_count": 2126782,
+    "evidence_digest": "f2544069b4d332985c25b4f9b3382cf61271a57f4feb8bd0cf6bd4b1bf20dd3d",
+    "raw_venue_json": "byte_identical",
+    "receipt_sidecars": "byte_identical",
+    "logging_modes_verified": ["full", "none"],
+    "gomaxprocs_verified": [1, 4]
+  },
+  "initial_invalid_equivalence_attempt": {
+    "candidate_execution_stream_hash": "cab14d",
+    "cause": "SettlementPrice availability was serialized on ordinary nonterminal instrument_listed events; corrected by nullable SettlementPrice only on terminal announcements.",
+    "disposition": "historical diagnostic only; not used for acceptance"
+  },
+  "performance": {
+    "measurement": "30m no-log GOMAXPROCS=1 alternating A/B/A/B",
+    "parent_wall_seconds": [29.39, 27.70],
+    "candidate_wall_seconds": [26.48, 25.52],
+    "parent_median_seconds": 28.545,
+    "candidate_median_seconds": 26.0,
+    "candidate_vs_parent_median_percent": -8.92,
+    "parent_max_rss_kib": [799144, 796640],
+    "candidate_max_rss_kib": [810344, 815260],
+    "profiled_parent_wall_seconds": 29.82,
+    "profiled_candidate_wall_seconds": 33.45,
+    "profiled_alloc_bytes": {"parent": 11454617128960, "candidate": 11619483361280},
+    "profiled_alloc_percent_change": 1.44,
+    "profiled_max_rss_kib": {"parent": 812344, "candidate": 816824},
+    "profiled_max_rss_percent_change": 0.55,
+    "interpretation": "No material signed-price regression. Wall-clock samples are noisy; allocation, RSS, and sampled hotspot composition show no material added cost."
+  },
+  "profile_paths": {
+    "parent_cpu": "scratch/signed-price-hardening-20260824/perf-parent.cpu",
+    "parent_alloc": "scratch/signed-price-hardening-20260824/perf-parent.alloc",
+    "candidate_cpu": "scratch/signed-price-hardening-20260824/perf-branch.cpu",
+    "candidate_alloc": "scratch/signed-price-hardening-20260824/perf-branch.alloc"
+  },
+  "profile_sha256": {
+    "parent_cpu": "e8bb0f57eef9bf04eab8a83f1bad56849c225ae7bb684429dcfb39549869ec69",
+    "parent_alloc": "d8c0c0ddec0506be35f718e0e920dc8b8100ce97e6f0b13423d7fdd9c971d1de",
+    "candidate_cpu": "3886911eb0b53e7b512bbddfde070b771049597f39be7844fe429bc87ada0454",
+    "candidate_alloc": "98514fa971a6a990543d8163627f00434082ef85fee77712a54280e19746dbbb"
+  },
+  "verification": {
+    "gofmt": "pass",
+    "go_test_all": "pass",
+    "go_vet_all": "pass",
+    "source_builds": ["cmd/multivenue", "cmd/mvanalyze", "cmd/prunegate"],
+    "race": {
+      "changed_packages": ["types", "book", "matching", "instrument", "price", "exchange", "simulation", "analysis", "simulations/feesim", "tests"],
+      "multivenue_direct_contracts": ["signed mark presence", "bootstrap fallback", "signed consensus index", "signed router touch/policy", "explicit local-book presence", "liability hedger zero-side handling"],
+      "result": "pass"
+    },
+    "golangci_lint": "unavailable on host; not claimed as a pass"
+  }
+}

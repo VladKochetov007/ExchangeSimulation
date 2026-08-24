@@ -1,7 +1,7 @@
 # V2 signed-price audit
 
-Status: **implementation and merge gate complete on `v2/signed-price`; awaiting
-the Git-flow merge.**
+Status: **historical signed-price migration merged at `320262e`; post-merge
+hardening merge gate passed on its dedicated branch, pending Git-flow merge.**
 
 This branch starts at `198a3b2`, after the P0 passive-refresh result. It does
 not modify P0 economics. The earlier
@@ -316,3 +316,88 @@ and Sonic require broader differential screening before offline adoption.
 4. Cached in-process actor observations may use explicit availability booleans
    on hot paths. Public/client/action boundaries use errors; no cache derives
    availability from a numeric zero.
+
+## Post-merge hardening, 2026-08-24
+
+The original migration was already merged at `320262e`.  Later V2 work added
+new evidence, routing, mark, lifecycle, and analysis boundaries, so a narrow
+hardening branch (`autoresearch/v2-signed-price-hardening`, parent `99ce69c`)
+was used to re-audit the claim rather than reopening signed-price economics.
+It contains no P0/P2/L1 population, clock, latency, scheduler, RNG, or market
+rule change.
+
+### Findings and corrections
+
+- `InstrumentAnnouncement.SettlementPrice` had a new wire ambiguity: an
+  `omitempty` scalar could not distinguish absent settlement from a present
+  zero settlement.  The final form is `*int64`: `nil` for nonterminal or
+  unavailable, and a nonnil pointer for negative, zero, or positive terminal
+  settlement.  Wire fixtures cover all four states.  The explicit
+  `settlement_price_available` field was deliberately removed because writing
+  it on every ordinary listing announcement changed otherwise unchanged
+  evidence.
+- Multivenue and fee-sim executable-touch selection now tracks side presence,
+  so negative books and books spanning zero cannot be reinterpreted as empty.
+  Current router/fee economics remain an explicit positive-spot policy and
+  record a *domain deferral* separately from an unavailable quote.
+- Risk bootstrap/mark capture, consensus-index input, settlement audit,
+  liquidation fills, impact, arbitrage, triangular ratios, BPS basis, IV, and
+  log returns now preserve signed raw values.  Where the statistic is not
+  mathematically defined at/crossing zero, the result reports an explicit
+  unavailable-domain count instead of filtering the observation as absent.
+
+The commits are `1d731a7`, `82147bf`, `8bb7a72`, `fd6dda8`, `098e9af`,
+`e4eecdf`, `4c71bfa`, `3859fbf`, `b3faf44`, `a982dd1`, `2fca45e`,
+`665381e`, and `0f6a3c6`.  The first full equivalence run on the branch is
+retained as an invalid diagnostic: it diverged at the first ordinary
+`instrument_listed` announcement because it wrote settlement fields which the
+parent did not write.  It is not evidence for or against economics.  Commit
+`0f6a3c6` fixed the representation, after which the final gate below was run
+from scratch.
+
+### Corrected positive-world equivalence
+
+The parent (`99ce69c`) and corrected candidate (`0f6a3c6`) ran the same
+retained V2 world: `frozen-baseline-2026-08-22.json`
+(`ca933bf…f1b1036`), seed 101, 30 simulated minutes, 60-second checkpoints,
+and `spot_maker` receipt evidence.
+
+| Contract | Result |
+| --- | --- |
+| ordered execution | 2,126,782 observations and `5db76448ebb8c5ca60d04366a5fe89540e745564c7fb86cc328be7515989e5f6` on parent and candidate |
+| persisted evidence | 2,126,782 JSON records and unordered-multiset digest `f2544069b4d332985c25b4f9b3382cf61271a57f4feb8bd0cf6bd4b1bf20dd3d` on both |
+| raw evidence | every persisted venue JSON file byte-identical |
+| information evidence | receipt, schedule, decision, and frontier-summary sidecars byte-identical |
+| logging/parallelism | candidate full and none logging at `GOMAXPROCS=1`, plus none at `GOMAXPROCS=4`, all produced the same complete checkpoint file and execution hash |
+
+This is a behavior-preservation result for the existing positive-domain world,
+not evidence that ratio-based funding or Black-76 support signed underlyings.
+Machine-readable provenance, hashes, profile paths, and sampled timings are in
+[`v2-signed-price-hardening-gate.json`](artifacts/v2-signed-price-hardening-gate.json).
+
+### Performance comparison
+
+The alternating no-log A/B/A/B runs were 29.39/27.70 seconds for the parent
+and 26.48/25.52 seconds for the candidate.  The profiled single pair varied in
+the opposite direction (29.82 vs 33.45 seconds), so wall time is treated as
+noisy rather than as an improvement claim.  The more stable profiles show only
++1.44% sampled allocation and +0.55% peak RSS.  CPU remained dominated by
+order admission/matching (about 41% cumulative), logging/`encoding/json`
+(about 25–31%), and execution processing (about 21%); no signed-price-specific
+hotspot appeared.  This passes the no-material-regression gate.
+
+`encoding/json` remains the evidence reference.  No JSON library was adopted:
+the previous `goccy/go-json` overflow incompatibility remains disqualifying,
+and Sonic/jsoniter require a fresh analyzer-only differential gate after this
+branch is merged.
+
+### Remaining explicit domains
+
+The generic infrastructure and persisted evidence now preserve all signed
+values.  Existing Stoikov, fixed-distance, metaorder, and Black-76 actor paths
+remain deliberately positive-domain crypto/model policies; their internal
+reference helpers must explicitly defer/reject an out-of-domain *present*
+price and cannot use it as a generic unavailable sentinel.  A signed commodity
+future population, signed funding ratios, and options on negative forwards are
+new economic mechanisms, not cleanup tasks.  They require their own declared
+model and causal validation before V2-5/V2-6 claims can extend to them.
