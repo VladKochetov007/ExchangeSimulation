@@ -46,6 +46,9 @@ type TermCarryAudit struct {
 	OpenTerms                 int64            `json:"open_terms"`
 	ActiveTermFunding         int64            `json:"active_term_funding_settlements"`
 	OutsideTermFunding        int64            `json:"outside_term_funding_settlements"`
+	PassiveExitCancellations  int64            `json:"passive_exit_cancellations"`
+	MissingPassiveExitCancels int64            `json:"missing_passive_exit_cancellations"`
+	PassiveExitCancelMismatch int64            `json:"passive_exit_cancellation_mismatches"`
 	ActionCounts              map[string]int64 `json:"action_counts"`
 	Checks                    []TermCarryCheck `json:"checks,omitempty"`
 	Valid                     bool             `json:"valid"`
@@ -63,29 +66,36 @@ const (
 	termCarryPolicyV1 = "v2_5_p3_term_carry_v1"
 	termCarryPolicyV2 = "v2_5_p3_term_carry_v2"
 	termCarryPolicyV3 = "v2_5_p3_term_carry_v3"
+	termCarryPolicyV4 = "v2_5_p3e_passive_exit_v1"
 )
 
+type termCarryPassiveExitPolicy struct {
+	SliceQty       int64 `json:"slice_qty"`
+	DeadlineAtNano int64 `json:"deadline_at_nano"`
+}
+
 type termCarryPolicyConfig struct {
-	Enabled             bool   `json:"enabled"`
-	SpotSymbol          string `json:"spot_symbol"`
-	PerpSymbol          string `json:"perp_symbol"`
-	DecisionPeriod      int64  `json:"decision_period"`
-	CommitmentIntervals int64  `json:"commitment_intervals"`
-	MaxFundingAge       int64  `json:"max_funding_age"`
-	TakerFeeBps         int64  `json:"taker_fee_bps"`
-	LongSpotFundingBps  int64  `json:"long_spot_funding_bps"`
-	ShortSpotBorrowBps  int64  `json:"short_spot_borrow_bps"`
-	BalanceSheetBps     int64  `json:"balance_sheet_bps"`
-	MarginRiskBps       int64  `json:"margin_risk_bps"`
-	LegRiskBps          int64  `json:"leg_risk_bps"`
-	MinNetCarryBps      int64  `json:"min_net_carry_bps"`
-	MandateEndAtNano    int64  `json:"mandate_end_at_nano"`
-	MaxPosition         int64  `json:"max_position"`
-	LotQty              int64  `json:"lot_qty"`
-	MinOrderSize        int64  `json:"min_order_size"`
-	UnwindMinOrderSize  *int64 `json:"unwind_min_order_size,omitempty"`
-	SpotTick            int64  `json:"spot_tick"`
-	PerpTick            int64  `json:"perp_tick"`
+	Enabled             bool                        `json:"enabled"`
+	SpotSymbol          string                      `json:"spot_symbol"`
+	PerpSymbol          string                      `json:"perp_symbol"`
+	DecisionPeriod      int64                       `json:"decision_period"`
+	CommitmentIntervals int64                       `json:"commitment_intervals"`
+	MaxFundingAge       int64                       `json:"max_funding_age"`
+	TakerFeeBps         int64                       `json:"taker_fee_bps"`
+	LongSpotFundingBps  int64                       `json:"long_spot_funding_bps"`
+	ShortSpotBorrowBps  int64                       `json:"short_spot_borrow_bps"`
+	BalanceSheetBps     int64                       `json:"balance_sheet_bps"`
+	MarginRiskBps       int64                       `json:"margin_risk_bps"`
+	LegRiskBps          int64                       `json:"leg_risk_bps"`
+	MinNetCarryBps      int64                       `json:"min_net_carry_bps"`
+	MandateEndAtNano    int64                       `json:"mandate_end_at_nano"`
+	MaxPosition         int64                       `json:"max_position"`
+	LotQty              int64                       `json:"lot_qty"`
+	MinOrderSize        int64                       `json:"min_order_size"`
+	UnwindMinOrderSize  *int64                      `json:"unwind_min_order_size,omitempty"`
+	PassiveExit         *termCarryPassiveExitPolicy `json:"passive_exit,omitempty"`
+	SpotTick            int64                       `json:"spot_tick"`
+	PerpTick            int64                       `json:"perp_tick"`
 }
 
 type termCarryManifest struct {
@@ -121,6 +131,8 @@ type termCarryDecision struct {
 	MandateEndAt                int64  `json:"mandate_end_at"`
 	CommitmentIntervals         int64  `json:"commitment_intervals"`
 	UnwindMinOrderSize          *int64 `json:"unwind_min_order_size,omitempty"`
+	PassiveExitSliceQty         *int64 `json:"passive_exit_slice_qty,omitempty"`
+	PassiveExitDeadlineAtNano   *int64 `json:"passive_exit_deadline_at_nano,omitempty"`
 	HasSpotBook                 bool   `json:"has_spot_book"`
 	SpotPublishedAt             int64  `json:"spot_published_at"`
 	SpotSequence                uint64 `json:"spot_sequence"`
@@ -161,6 +173,11 @@ type termCarryDecision struct {
 	LimitPrice                  int64  `json:"limit_price"`
 	RequestedQty                int64  `json:"requested_qty"`
 	RequestID                   uint64 `json:"request_id"`
+	OrderType                   string `json:"order_type,omitempty"`
+	TimeInForce                 string `json:"time_in_force,omitempty"`
+	PostOnly                    *bool  `json:"post_only,omitempty"`
+	CancelOrderID               uint64 `json:"cancel_order_id"`
+	CancelRequestID             uint64 `json:"cancel_request_id"`
 }
 
 type termCarryOutcome struct {
@@ -183,6 +200,7 @@ type termCarryOutcome struct {
 	FeeAsset           string `json:"fee_asset"`
 	RemainingQty       int64  `json:"remaining_qty"`
 	RejectReason       string `json:"reject_reason"`
+	CancelRequestID    uint64 `json:"cancel_request_id"`
 	SpotPositionBefore int64  `json:"spot_position_before"`
 	SpotPositionAfter  int64  `json:"spot_position_after"`
 	PerpPositionBefore int64  `json:"perp_position_before"`
@@ -193,6 +211,14 @@ type termCarryFundingSettlement struct {
 	VenueID  string
 	ClientID uint64
 	At       int64
+}
+
+type termCarryVenueCancellation struct {
+	VenueID      string
+	ClientID     uint64
+	OrderID      uint64 `json:"order_id"`
+	RequestID    uint64 `json:"request_id"`
+	RemainingQty int64  `json:"remaining_qty"`
 }
 
 // MeasureTermCarry replays only persisted evidence. A pass means the declared
@@ -222,7 +248,7 @@ func (r *Run) MeasureTermCarry() (*TermCarryAudit, error) {
 	accepted := make(map[fundingCarryKey][]fundingCarryVenueOrder)
 	rejected := make(map[fundingCarryKey][]fundingCarryVenueOrder)
 	fills := make(map[fundingCarryOrderKey][]fundingCarryVenueFill)
-	cancels := make(map[fundingCarryOrderKey]int)
+	cancels := make(map[fundingCarryOrderKey][]termCarryVenueCancellation)
 	err = r.Scan(ScanOptions{Events: []string{"term_carry_decision", "term_carry_leg_outcome", "OrderAccepted", "OrderRejected", "OrderFill", "OrderCancelled", "balance_change"}, Workers: 1}, func(event Event) {
 		switch event.Name {
 		case "term_carry_decision":
@@ -261,11 +287,11 @@ func (r *Run) MeasureTermCarry() (*TermCarryAudit, error) {
 			fill.VenueID, fill.ClientID = event.VenueID, event.ClientID
 			fills[fundingCarryOrderKey{event.VenueID, event.ClientID, fill.OrderID}] = append(fills[fundingCarryOrderKey{event.VenueID, event.ClientID, fill.OrderID}], fill)
 		case "OrderCancelled":
-			var cancellation struct {
-				OrderID uint64 `json:"order_id"`
-			}
+			var cancellation termCarryVenueCancellation
 			if event.Decode(&cancellation) == nil && cancellation.OrderID != 0 && r.Role(event.VenueID, event.ClientID) == "term_carry_allocator" {
-				cancels[fundingCarryOrderKey{event.VenueID, event.ClientID, cancellation.OrderID}]++
+				cancellation.VenueID, cancellation.ClientID = event.VenueID, event.ClientID
+				key := fundingCarryOrderKey{event.VenueID, event.ClientID, cancellation.OrderID}
+				cancels[key] = append(cancels[key], cancellation)
 			}
 		case "balance_change":
 			var balance balanceChangeRecord
@@ -300,6 +326,19 @@ func (r *Run) MeasureTermCarry() (*TermCarryAudit, error) {
 		byRequest[fundingCarryKey{outcome.VenueID, outcome.ClientID, outcome.RequestID}] = append(byRequest[fundingCarryKey{outcome.VenueID, outcome.ClientID, outcome.RequestID}], outcome)
 	}
 	seen := make(map[fundingCarryKey]struct{})
+	cancelActions := make(map[fundingCarryKey]termCarryDecision)
+	for _, decision := range decisions {
+		if decision.Action != "CANCEL_PASSIVE_EXIT_AT_DEADLINE" {
+			continue
+		}
+		key := fundingCarryKey{decision.VenueID, decision.ClientID, decision.CancelRequestID}
+		if _, duplicate := cancelActions[key]; duplicate {
+			result.PassiveExitCancelMismatch++
+			check(decision.VenueID, decision.ClientID, decision.CancelRequestID, "duplicate_passive_exit_cancellation_decision")
+		}
+		cancelActions[key] = decision
+	}
+	matchedCancelActions := make(map[fundingCarryKey]struct{})
 	for _, decision := range decisions {
 		result.Decisions++
 		result.ActionCounts[decision.Action]++
@@ -350,11 +389,22 @@ func (r *Run) MeasureTermCarry() (*TermCarryAudit, error) {
 					check(decision.VenueID, decision.ClientID, decision.RequestID, "actor_fill_mismatch")
 				}
 			}
-			if cancels[fundingCarryOrderKey{key.venue, key.client, acceptRows[0].OrderID}] > 0 {
+			for _, cancellation := range cancels[fundingCarryOrderKey{key.venue, key.client, acceptRows[0].OrderID}] {
 				result.Cancelled++
 				if !termCarryHasOutcome(byRequest[key], "ORDER_CANCELLED", acceptRows[0].OrderID) {
 					result.MissingActorOutcomes++
 					check(decision.VenueID, decision.ClientID, decision.RequestID, "missing_actor_cancellation")
+				}
+				if decision.PolicyVersion == termCarryPolicyV4 && decision.PostOnly != nil && *decision.PostOnly {
+					result.PassiveExitCancellations++
+					cancelKey := fundingCarryKey{key.venue, key.client, cancellation.RequestID}
+					cancelDecision, found := cancelActions[cancelKey]
+					if failure := validateTermCarryPassiveExitCancellationChain(cancellation, acceptRows[0].OrderID, cancelDecision, found, byRequest[key]); failure != "" {
+						result.PassiveExitCancelMismatch++
+						check(decision.VenueID, decision.ClientID, cancellation.RequestID, failure)
+					} else {
+						matchedCancelActions[cancelKey] = struct{}{}
+					}
 				}
 			}
 		} else {
@@ -369,8 +419,14 @@ func (r *Run) MeasureTermCarry() (*TermCarryAudit, error) {
 			}
 		}
 	}
+	for key, decision := range cancelActions {
+		if _, matched := matchedCancelActions[key]; !matched {
+			result.MissingPassiveExitCancels++
+			check(decision.VenueID, decision.ClientID, decision.CancelRequestID, "missing_passive_exit_cancellation_evidence")
+		}
+	}
 	auditTermCarryLifecycle(r, policy, decisions, outcomes, settlements, result, check)
-	result.Valid = result.ReceiptAuditValid && result.ReceiptEvidenceErrors == 0 && result.SourceMismatches == 0 && result.FutureSourceUse == 0 && result.InvalidDecisionRecords == 0 && result.DecisionFieldMismatches == 0 && result.ArithmeticMismatches == 0 && result.MissingGatewayDecisions == 0 && result.GatewayDecisionMismatches == 0 && result.MissingVenueOutcomes == 0 && result.DuplicateVenueOutcomes == 0 && result.MissingActorOutcomes == 0 && result.ActorOutcomeMismatches == 0 && result.LifecycleViolations == 0 && result.PositionContinuityErrors == 0 && result.TerminalPerpMismatches == 0 && result.TerminalSpotMismatches == 0 && result.FirstExposureMismatches == 0 && result.OutsideTermFunding == 0
+	result.Valid = result.ReceiptAuditValid && result.ReceiptEvidenceErrors == 0 && result.SourceMismatches == 0 && result.FutureSourceUse == 0 && result.InvalidDecisionRecords == 0 && result.DecisionFieldMismatches == 0 && result.ArithmeticMismatches == 0 && result.MissingGatewayDecisions == 0 && result.GatewayDecisionMismatches == 0 && result.MissingVenueOutcomes == 0 && result.DuplicateVenueOutcomes == 0 && result.MissingActorOutcomes == 0 && result.ActorOutcomeMismatches == 0 && result.LifecycleViolations == 0 && result.PositionContinuityErrors == 0 && result.TerminalPerpMismatches == 0 && result.TerminalSpotMismatches == 0 && result.FirstExposureMismatches == 0 && result.OutsideTermFunding == 0 && result.MissingPassiveExitCancels == 0 && result.PassiveExitCancelMismatch == 0
 	return result, nil
 }
 
@@ -666,15 +722,15 @@ func validateTermCarryLifecycleDecision(policy termCarryPolicyConfig, decision t
 		if !(*current).active {
 			(*current).active, (*current).activeAt = true, decision.DecisionTime
 		}
-	case "SUBMIT_UNWIND_PERP_IOC":
+	case "SUBMIT_UNWIND_PERP_IOC", "SUBMIT_UNWIND_PERP_POST_ONLY":
 		if *current == nil || decision.State != "UNWIND_PERP" || decision.DecisionTime < (*current).termEnd || perpPosition == 0 {
 			return "perp_unwind_state_mismatch"
 		}
-	case "SUBMIT_UNWIND_SPOT_IOC":
+	case "SUBMIT_UNWIND_SPOT_IOC", "SUBMIT_UNWIND_SPOT_POST_ONLY":
 		if *current == nil || decision.State != "UNWIND_SPOT" || decision.DecisionTime < (*current).termEnd || perpPosition != 0 || spotPosition == 0 {
 			return "spot_unwind_state_mismatch"
 		}
-	case "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN", "UNWIND_PERP_GAP_UNREPRESENTABLE", "UNWIND_SPOT_GAP_UNREPRESENTABLE":
+	case "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN", "UNWIND_PERP_GAP_UNREPRESENTABLE", "UNWIND_SPOT_GAP_UNREPRESENTABLE", "PASSIVE_EXIT_REFERENCE_UNAVAILABLE", "PASSIVE_EXIT_PRICE_OUTSIDE_DOMAIN", "PASSIVE_EXIT_SIZE_BELOW_MINIMUM", "PASSIVE_EXIT_RESTING", "PASSIVE_EXIT_AWAITING_ACCEPTANCE", "CANCEL_PASSIVE_EXIT_AT_DEADLINE", "PASSIVE_EXIT_CANCEL_PENDING", "PASSIVE_EXIT_DEADLINE_EXPIRED":
 		if *current == nil || (decision.State != "UNWIND_PERP" && decision.State != "UNWIND_SPOT") || decision.DecisionTime < (*current).termEnd {
 			return "unwind_defer_state_mismatch"
 		}
@@ -733,15 +789,15 @@ func validateTermCarryLifecycleDecisionV2(policy termCarryPolicyConfig, decision
 		if !(*current).active {
 			(*current).active, (*current).activeAt = true, decision.DecisionTime
 		}
-	case "SUBMIT_UNWIND_PERP_IOC":
+	case "SUBMIT_UNWIND_PERP_IOC", "SUBMIT_UNWIND_PERP_POST_ONLY":
 		if *current == nil || decision.State != "UNWIND_PERP" || decision.DecisionTime < (*current).termEnd || perpPosition == 0 {
 			return "perp_unwind_state_mismatch"
 		}
-	case "SUBMIT_UNWIND_SPOT_IOC":
+	case "SUBMIT_UNWIND_SPOT_IOC", "SUBMIT_UNWIND_SPOT_POST_ONLY":
 		if *current == nil || decision.State != "UNWIND_SPOT" || decision.DecisionTime < (*current).termEnd || perpPosition != 0 || spotPosition == 0 {
 			return "spot_unwind_state_mismatch"
 		}
-	case "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN", "UNWIND_PERP_GAP_UNREPRESENTABLE", "UNWIND_SPOT_GAP_UNREPRESENTABLE":
+	case "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN", "UNWIND_PERP_GAP_UNREPRESENTABLE", "UNWIND_SPOT_GAP_UNREPRESENTABLE", "PASSIVE_EXIT_REFERENCE_UNAVAILABLE", "PASSIVE_EXIT_PRICE_OUTSIDE_DOMAIN", "PASSIVE_EXIT_SIZE_BELOW_MINIMUM", "PASSIVE_EXIT_RESTING", "PASSIVE_EXIT_AWAITING_ACCEPTANCE", "CANCEL_PASSIVE_EXIT_AT_DEADLINE", "PASSIVE_EXIT_CANCEL_PENDING", "PASSIVE_EXIT_DEADLINE_EXPIRED":
 		if *current == nil || (decision.State != "UNWIND_PERP" && decision.State != "UNWIND_SPOT") || decision.DecisionTime < (*current).termEnd {
 			return "unwind_defer_state_mismatch"
 		}
@@ -771,7 +827,7 @@ func applyTermCarryOutcome(policy termCarryPolicyConfig, outcome termCarryOutcom
 		fail("outcome_position_before_mismatch")
 	}
 	switch outcome.Event {
-	case "ORDER_ACCEPTED", "ORDER_REJECTED", "ORDER_CANCELLED":
+	case "ORDER_ACCEPTED", "ORDER_REJECTED", "ORDER_CANCELLED", "ORDER_CANCEL_REJECTED":
 		if outcome.SpotPositionAfter != spotPosition || outcome.PerpPositionAfter != perpPosition {
 			fail("nonfill_changed_position")
 		}
@@ -831,6 +887,18 @@ func validTermCarryPolicy(policy termCarryPolicyConfig) error {
 	if policy.UnwindMinOrderSize != nil && *policy.UnwindMinOrderSize < 0 {
 		return fmt.Errorf("negative explicit term-carry unwind minimum")
 	}
+	if policy.PassiveExit != nil {
+		if policy.PassiveExit.SliceQty <= 0 || policy.PassiveExit.DeadlineAtNano <= 0 {
+			return fmt.Errorf("invalid term-carry passive-exit policy")
+		}
+		minimum := policy.MinOrderSize
+		if policy.UnwindMinOrderSize != nil && *policy.UnwindMinOrderSize > minimum {
+			minimum = *policy.UnwindMinOrderSize
+		}
+		if policy.PassiveExit.SliceQty < minimum {
+			return fmt.Errorf("passive-exit slice below explicit unwind minimum")
+		}
+	}
 	for _, value := range []int64{policy.TakerFeeBps, policy.LongSpotFundingBps, policy.ShortSpotBorrowBps, policy.BalanceSheetBps, policy.MarginRiskBps, policy.LegRiskBps, policy.MinNetCarryBps} {
 		if value < 0 {
 			return fmt.Errorf("negative term-carry bps policy")
@@ -854,6 +922,9 @@ func validateTermCarryDecision(policy termCarryPolicyConfig, decision termCarryD
 	}
 	if !termCarrySubmission(decision.Action) && decision.RequestID != 0 {
 		return fmt.Errorf("deferred_action_has_request_id")
+	}
+	if err := validateTermCarryPassiveExitDecision(policy, decision); err != nil {
+		return err
 	}
 	frontierDecision := fundingCarryDecision{ClientID: decision.ClientID, DecisionTime: decision.DecisionTime, DecisionFrontierLinkID: decision.DecisionFrontierLinkID, DecisionFrontierOrdinal: decision.DecisionFrontierOrdinal, DecisionFrontierDeliveredAt: decision.DecisionFrontierDeliveredAt, DecisionFrontierDigest: decision.DecisionFrontierDigest}
 	if decision.DecisionFrontierOrdinal == 0 {
@@ -883,22 +954,63 @@ func validateTermCarryDecision(policy termCarryPolicyConfig, decision termCarryD
 }
 
 func termCarryKnownPolicyVersion(version string) bool {
-	return version == termCarryPolicyV1 || version == termCarryPolicyV2 || version == termCarryPolicyV3
+	return version == termCarryPolicyV1 || version == termCarryPolicyV2 || version == termCarryPolicyV3 || version == termCarryPolicyV4
 }
 
 func termCarryUsesV2Lifecycle(version string) bool {
-	return version == termCarryPolicyV2 || version == termCarryPolicyV3
+	return version == termCarryPolicyV2 || version == termCarryPolicyV3 || version == termCarryPolicyV4
 }
 
 func validateTermCarryPolicyEvidence(policy termCarryPolicyConfig, decision termCarryDecision) error {
 	if policy.UnwindMinOrderSize == nil {
-		if decision.PolicyVersion == termCarryPolicyV3 || decision.UnwindMinOrderSize != nil {
+		if decision.UnwindMinOrderSize != nil {
+			return fmt.Errorf("term_carry_unwind_policy_mismatch")
+		}
+	} else if (decision.PolicyVersion != termCarryPolicyV3 && decision.PolicyVersion != termCarryPolicyV4) || decision.UnwindMinOrderSize == nil || *decision.UnwindMinOrderSize != *policy.UnwindMinOrderSize {
+		return fmt.Errorf("term_carry_unwind_policy_mismatch")
+	}
+	if policy.PassiveExit == nil {
+		if decision.PolicyVersion == termCarryPolicyV4 || decision.PassiveExitSliceQty != nil || decision.PassiveExitDeadlineAtNano != nil {
+			return fmt.Errorf("term_carry_passive_exit_policy_mismatch")
+		}
+		if policy.UnwindMinOrderSize == nil && decision.PolicyVersion == termCarryPolicyV3 {
 			return fmt.Errorf("term_carry_unwind_policy_mismatch")
 		}
 		return nil
 	}
-	if decision.PolicyVersion != termCarryPolicyV3 || decision.UnwindMinOrderSize == nil || *decision.UnwindMinOrderSize != *policy.UnwindMinOrderSize {
-		return fmt.Errorf("term_carry_unwind_policy_mismatch")
+	if decision.PolicyVersion != termCarryPolicyV4 || decision.PassiveExitSliceQty == nil || decision.PassiveExitDeadlineAtNano == nil || *decision.PassiveExitSliceQty != policy.PassiveExit.SliceQty || *decision.PassiveExitDeadlineAtNano != policy.PassiveExit.DeadlineAtNano {
+		return fmt.Errorf("term_carry_passive_exit_policy_mismatch")
+	}
+	return nil
+}
+
+func validateTermCarryPassiveExitDecision(policy termCarryPolicyConfig, decision termCarryDecision) error {
+	if decision.PolicyVersion != termCarryPolicyV4 {
+		if decision.OrderType != "" || decision.TimeInForce != "" || decision.PostOnly != nil || decision.CancelOrderID != 0 || decision.CancelRequestID != 0 {
+			return fmt.Errorf("term_carry_passive_exit_fields_on_legacy_policy")
+		}
+		return nil
+	}
+	if termCarrySubmission(decision.Action) {
+		if decision.OrderType != exchange.LimitOrder.String() || decision.TimeInForce == "" || decision.PostOnly == nil || decision.CancelOrderID != 0 || decision.CancelRequestID != 0 {
+			return fmt.Errorf("term_carry_passive_exit_submission_contract")
+		}
+		return nil
+	}
+	if decision.Action == "CANCEL_PASSIVE_EXIT_AT_DEADLINE" {
+		if decision.CancelOrderID == 0 || decision.CancelRequestID == 0 || decision.DecisionTime < policy.PassiveExit.DeadlineAtNano || decision.OrderType != "" || decision.TimeInForce != "" || decision.PostOnly != nil {
+			return fmt.Errorf("term_carry_passive_exit_cancel_contract")
+		}
+		return nil
+	}
+	if decision.Action == "PASSIVE_EXIT_CANCEL_PENDING" {
+		if decision.CancelOrderID == 0 || decision.CancelRequestID == 0 || decision.DecisionTime < policy.PassiveExit.DeadlineAtNano || decision.OrderType != "" || decision.TimeInForce != "" || decision.PostOnly != nil {
+			return fmt.Errorf("term_carry_passive_exit_cancel_pending_contract")
+		}
+		return nil
+	}
+	if decision.CancelOrderID != 0 || decision.CancelRequestID != 0 || decision.OrderType != "" || decision.TimeInForce != "" || decision.PostOnly != nil {
+		return fmt.Errorf("term_carry_passive_exit_unexpected_wire_fields")
 	}
 	return nil
 }
@@ -985,18 +1097,21 @@ func termCarryAuditFinancials(policy termCarryPolicyConfig, decision termCarryDe
 
 func termCarryKnownAction(action string) bool {
 	switch action {
-	case "NOT_SUBSCRIBED", "POLICY_DISABLED", "REQUEST_PENDING", "FUNDING_UNAVAILABLE", "FUNDING_IDENTITY_UNAVAILABLE", "FUNDING_PUBLICATION_FUTURE", "FUNDING_AGE_UNREPRESENTABLE", "FUNDING_STALE", "FUNDING_REFERENCE_UNAVAILABLE", "LOCAL_REFERENCE_UNAVAILABLE", "LOCAL_PRICE_OUTSIDE_DOMAIN", "TERM_HORIZON_CENSORED", "ZERO_PREMIUM", "TERM_FINANCIALS_UNAVAILABLE", "NET_CARRY_BELOW_MINIMUM", "ENTRY_PLAN_UNAVAILABLE", "ENTRY_PERP_IOC", "TERM_ACTIVE", "UNWIND_PERP_IOC", "UNWIND_SPOT_IOC", "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN", "TERM_CLOSED", "SPOT_TARGET_UNREPRESENTABLE", "PERP_TARGET_UNREPRESENTABLE", "PERP_GAP_UNREPRESENTABLE", "UNWIND_PERP_GAP_UNREPRESENTABLE", "UNWIND_SPOT_GAP_UNREPRESENTABLE", "ORDER_QUANTITY_UNREPRESENTABLE", "ORDER_ZERO_QUANTITY", "EXECUTABLE_SIZE_UNAVAILABLE", "SPOT_ENTRY_PRICE_UNAVAILABLE", "SPOT_ENTRY_PRICE_OUTSIDE_DOMAIN", "PERP_ENTRY_PRICE_UNAVAILABLE", "PERP_ENTRY_PRICE_OUTSIDE_DOMAIN", "UNKNOWN_LIFECYCLE_STATE", "ACTIVE_PLAN_UNAVAILABLE":
+	case "NOT_SUBSCRIBED", "POLICY_DISABLED", "REQUEST_PENDING", "FUNDING_UNAVAILABLE", "FUNDING_IDENTITY_UNAVAILABLE", "FUNDING_PUBLICATION_FUTURE", "FUNDING_AGE_UNREPRESENTABLE", "FUNDING_STALE", "FUNDING_REFERENCE_UNAVAILABLE", "LOCAL_REFERENCE_UNAVAILABLE", "LOCAL_PRICE_OUTSIDE_DOMAIN", "TERM_HORIZON_CENSORED", "ZERO_PREMIUM", "TERM_FINANCIALS_UNAVAILABLE", "NET_CARRY_BELOW_MINIMUM", "ENTRY_PLAN_UNAVAILABLE", "ENTRY_PERP_IOC", "TERM_ACTIVE", "UNWIND_PERP_IOC", "UNWIND_SPOT_IOC", "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN", "TERM_CLOSED", "SPOT_TARGET_UNREPRESENTABLE", "PERP_TARGET_UNREPRESENTABLE", "PERP_GAP_UNREPRESENTABLE", "UNWIND_PERP_GAP_UNREPRESENTABLE", "UNWIND_SPOT_GAP_UNREPRESENTABLE", "ORDER_QUANTITY_UNREPRESENTABLE", "ORDER_ZERO_QUANTITY", "EXECUTABLE_SIZE_UNAVAILABLE", "SPOT_ENTRY_PRICE_UNAVAILABLE", "SPOT_ENTRY_PRICE_OUTSIDE_DOMAIN", "PERP_ENTRY_PRICE_UNAVAILABLE", "PERP_ENTRY_PRICE_OUTSIDE_DOMAIN", "UNKNOWN_LIFECYCLE_STATE", "ACTIVE_PLAN_UNAVAILABLE", "PASSIVE_EXIT_REFERENCE_UNAVAILABLE", "PASSIVE_EXIT_PRICE_OUTSIDE_DOMAIN", "PASSIVE_EXIT_SIZE_BELOW_MINIMUM", "PASSIVE_EXIT_RESTING", "PASSIVE_EXIT_AWAITING_ACCEPTANCE", "CANCEL_PASSIVE_EXIT_AT_DEADLINE", "PASSIVE_EXIT_CANCEL_PENDING", "PASSIVE_EXIT_DEADLINE_EXPIRED":
 		return true
 	default:
-		return action == "SUBMIT_ENTRY_SPOT_IOC" || action == "SUBMIT_ENTRY_PERP_IOC" || action == "SUBMIT_UNWIND_PERP_IOC" || action == "SUBMIT_UNWIND_SPOT_IOC"
+		return action == "SUBMIT_ENTRY_SPOT_IOC" || action == "SUBMIT_ENTRY_PERP_IOC" || action == "SUBMIT_UNWIND_PERP_IOC" || action == "SUBMIT_UNWIND_SPOT_IOC" || action == "SUBMIT_UNWIND_PERP_POST_ONLY" || action == "SUBMIT_UNWIND_SPOT_POST_ONLY"
 	}
 }
 
 func termCarrySubmission(action string) bool {
-	return action == "SUBMIT_ENTRY_SPOT_IOC" || action == "SUBMIT_ENTRY_PERP_IOC" || action == "SUBMIT_UNWIND_PERP_IOC" || action == "SUBMIT_UNWIND_SPOT_IOC"
+	return action == "SUBMIT_ENTRY_SPOT_IOC" || action == "SUBMIT_ENTRY_PERP_IOC" || action == "SUBMIT_UNWIND_PERP_IOC" || action == "SUBMIT_UNWIND_SPOT_IOC" || action == "SUBMIT_UNWIND_PERP_POST_ONLY" || action == "SUBMIT_UNWIND_SPOT_POST_ONLY"
 }
 
 func validateTermCarrySubmission(policy termCarryPolicyConfig, decision termCarryDecision) error {
+	if decision.Leg == "UNWIND_PERP_POST_ONLY" || decision.Leg == "UNWIND_SPOT_POST_ONLY" {
+		return validateTermCarryPassiveExitSubmission(policy, decision)
+	}
 	var bookBid, bookAsk, available, tick int64
 	perp := decision.Leg == "ENTRY_PERP_IOC" || decision.Leg == "UNWIND_PERP_IOC"
 	if perp {
@@ -1035,7 +1150,7 @@ func validateTermCarrySubmission(policy termCarryPolicyConfig, decision termCarr
 		}
 	}
 	minimum := policy.MinOrderSize
-	if decision.PolicyVersion == termCarryPolicyV3 && (decision.Leg == "UNWIND_PERP_IOC" || decision.Leg == "UNWIND_SPOT_IOC") {
+	if (decision.PolicyVersion == termCarryPolicyV3 || (decision.PolicyVersion == termCarryPolicyV4 && policy.UnwindMinOrderSize != nil)) && (decision.Leg == "UNWIND_PERP_IOC" || decision.Leg == "UNWIND_SPOT_IOC") {
 		if policy.UnwindMinOrderSize == nil {
 			return fmt.Errorf("submission_unwind_policy_missing")
 		}
@@ -1050,14 +1165,89 @@ func validateTermCarrySubmission(policy termCarryPolicyConfig, decision termCarr
 	return nil
 }
 
+// validateTermCarryPassiveExitSubmission independently reconstructs the one
+// legal resting child from persisted local same-side touch evidence. It never
+// substitutes opposing executable depth: that depth was precisely the failed
+// IOC precondition that made the passive policy eligible.
+func validateTermCarryPassiveExitSubmission(policy termCarryPolicyConfig, decision termCarryDecision) error {
+	if policy.PassiveExit == nil || decision.PolicyVersion != termCarryPolicyV4 || decision.PostOnly == nil || !*decision.PostOnly || decision.OrderType != exchange.LimitOrder.String() || decision.TimeInForce != exchange.GTC.String() {
+		return fmt.Errorf("passive_exit_submission_contract")
+	}
+	perp := decision.Leg == "UNWIND_PERP_POST_ONLY"
+	if !perp && decision.Leg != "UNWIND_SPOT_POST_ONLY" {
+		return fmt.Errorf("passive_exit_unknown_leg")
+	}
+	gap := decision.SpotPosition
+	if perp {
+		gap = decision.PerpPosition
+	}
+	if gap == 0 {
+		return fmt.Errorf("passive_exit_zero_gap")
+	}
+	// The passive child closes the current signed position: a negative position
+	// needs a buy at the bid, while a positive position needs a sell at the ask.
+	wantSide, price, displayedQty, contraQty, tick := exchange.Buy.String(), int64(0), int64(0), int64(0), policy.SpotTick
+	hasSameSide, hasContra := false, false
+	if perp {
+		tick = policy.PerpTick
+	}
+	if gap < 0 {
+		if perp {
+			price, displayedQty, contraQty, hasSameSide, hasContra = decision.PerpBid, decision.PerpBidQty, decision.PerpAskQty, decision.HasPerpBid, decision.HasPerpAsk
+		} else {
+			price, displayedQty, contraQty, hasSameSide, hasContra = decision.SpotBid, decision.SpotBidQty, decision.SpotAskQty, decision.HasSpotBid, decision.HasSpotAsk
+		}
+	} else {
+		wantSide = exchange.Sell.String()
+		if perp {
+			price, displayedQty, contraQty, hasSameSide, hasContra = decision.PerpAsk, decision.PerpAskQty, decision.PerpBidQty, decision.HasPerpAsk, decision.HasPerpBid
+		} else {
+			price, displayedQty, contraQty, hasSameSide, hasContra = decision.SpotAsk, decision.SpotAskQty, decision.SpotBidQty, decision.HasSpotAsk, decision.HasSpotBid
+		}
+	}
+	if !hasSameSide || !hasContra || displayedQty <= 0 || !fundingCarryAuditPositiveGrid(price, tick) {
+		return fmt.Errorf("passive_exit_reference_unavailable")
+	}
+	minimum := policy.MinOrderSize
+	if policy.UnwindMinOrderSize != nil && *policy.UnwindMinOrderSize > minimum {
+		minimum = *policy.UnwindMinOrderSize
+	}
+	if _, executable := fundingCarryAuditSizedQty(gap, policy.LotQty, contraQty, minimum); executable {
+		return fmt.Errorf("passive_exit_executable_ioc_available")
+	}
+	quantity, ok := fundingCarryAuditMagnitude(gap)
+	if !ok {
+		return fmt.Errorf("passive_exit_unrepresentable_quantity")
+	}
+	if policy.LotQty < quantity {
+		quantity = policy.LotQty
+	}
+	if policy.PassiveExit.SliceQty < quantity {
+		quantity = policy.PassiveExit.SliceQty
+	}
+	if quantity < minimum || decision.Side != wantSide || decision.LimitPrice != price || decision.RequestedQty != quantity {
+		return fmt.Errorf("passive_exit_submission_mismatch")
+	}
+	return nil
+}
+
 func termCarryGatewayMatches(decision termCarryDecision, gateway fundingCarryGatewayDecision) bool {
-	return gateway.requestID == decision.RequestID && gateway.symbol == termCarryAuditSymbol(decision) && gateway.decisionAt == decision.DecisionTime && gateway.price == decision.LimitPrice && gateway.qty == decision.RequestedQty && gateway.side == uint8(exchangeSide(decision.Side)) && gateway.orderType == uint8(exchange.LimitOrder) && gateway.tif == uint8(exchange.IOC)
+	tif := exchange.IOC
+	if decision.PolicyVersion == termCarryPolicyV4 && decision.TimeInForce == exchange.GTC.String() {
+		tif = exchange.GTC
+	}
+	return gateway.requestID == decision.RequestID && gateway.symbol == termCarryAuditSymbol(decision) && gateway.decisionAt == decision.DecisionTime && gateway.price == decision.LimitPrice && gateway.qty == decision.RequestedQty && gateway.side == uint8(exchangeSide(decision.Side)) && gateway.orderType == uint8(exchange.LimitOrder) && gateway.tif == uint8(tif)
 }
 func termCarryVenueOrderMatches(decision termCarryDecision, order fundingCarryVenueOrder) bool {
-	return order.Side == decision.Side && order.Type == exchange.LimitOrder.String() && order.TimeInForce == exchange.IOC.String() && order.Price == decision.LimitPrice && order.Qty == decision.RequestedQty
+	tif, postOnly := exchange.IOC.String(), false
+	if decision.PolicyVersion == termCarryPolicyV4 {
+		tif = decision.TimeInForce
+		postOnly = decision.PostOnly != nil && *decision.PostOnly
+	}
+	return order.Side == decision.Side && order.Type == exchange.LimitOrder.String() && order.TimeInForce == tif && order.PostOnly == postOnly && order.Price == decision.LimitPrice && order.Qty == decision.RequestedQty
 }
 func termCarryAuditSymbol(decision termCarryDecision) string {
-	if decision.Leg == "ENTRY_PERP_IOC" || decision.Leg == "UNWIND_PERP_IOC" {
+	if decision.Leg == "ENTRY_PERP_IOC" || decision.Leg == "UNWIND_PERP_IOC" || decision.Leg == "UNWIND_PERP_POST_ONLY" {
 		return decision.PerpSymbol
 	}
 	return decision.SpotSymbol
@@ -1069,6 +1259,28 @@ func termCarryHasOutcome(outcomes []termCarryOutcome, event string, orderID uint
 		}
 	}
 	return false
+}
+
+func termCarryHasCancellationOutcome(outcomes []termCarryOutcome, orderID, cancelRequestID uint64) bool {
+	for _, outcome := range outcomes {
+		if outcome.Event == "ORDER_CANCELLED" && outcome.OrderID == orderID && outcome.CancelRequestID == cancelRequestID {
+			return true
+		}
+	}
+	return false
+}
+
+// validateTermCarryPassiveExitCancellationChain proves that the recorded
+// deadline decision, canonical venue cancellation, and actor lifecycle row
+// identify one same order. It intentionally has no simulator dependency.
+func validateTermCarryPassiveExitCancellationChain(cancellation termCarryVenueCancellation, acceptedOrderID uint64, decision termCarryDecision, decisionFound bool, outcomes []termCarryOutcome) string {
+	if cancellation.RequestID == 0 || !decisionFound || decision.Action != "CANCEL_PASSIVE_EXIT_AT_DEADLINE" || decision.CancelRequestID != cancellation.RequestID || decision.CancelOrderID != acceptedOrderID || cancellation.OrderID != acceptedOrderID {
+		return "passive_exit_cancellation_chain_mismatch"
+	}
+	if !termCarryHasCancellationOutcome(outcomes, acceptedOrderID, cancellation.RequestID) {
+		return "passive_exit_cancellation_actor_outcome_missing"
+	}
+	return ""
 }
 func termCarryHasRejected(outcomes []termCarryOutcome, reason string) bool {
 	for _, outcome := range outcomes {

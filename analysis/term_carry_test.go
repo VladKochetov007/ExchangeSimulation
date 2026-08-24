@@ -133,6 +133,92 @@ func TestTermCarryV3ExitFloorCannotUndercutVenueMinimum(t *testing.T) {
 	}
 }
 
+func TestTermCarryPassiveExitRequiresExactDepthFailureAndPostOnlyContract(t *testing.T) {
+	policy := termCarryAuditPolicy()
+	policy.LotQty, policy.MinOrderSize = 100, 75
+	policy.PassiveExit = &termCarryPassiveExitPolicy{SliceQty: 75, DeadlineAtNano: 2_000}
+	decision := validTermCarryEntry(t, policy, 3)
+	slice, deadline, postOnly := policy.PassiveExit.SliceQty, policy.PassiveExit.DeadlineAtNano, true
+	decision.PolicyVersion = termCarryPolicyV4
+	decision.PassiveExitSliceQty, decision.PassiveExitDeadlineAtNano = &slice, &deadline
+	decision.DecisionTime = 1_500
+	decision.State, decision.Action = "UNWIND_PERP", "SUBMIT_UNWIND_PERP_POST_ONLY"
+	decision.SpotPosition, decision.PerpPosition = 100, -100
+	decision.TargetSpot, decision.TargetPerp = 0, 0
+	decision.Leg, decision.Side, decision.LimitPrice, decision.RequestedQty, decision.RequestID = "UNWIND_PERP_POST_ONLY", exchange.Buy.String(), decision.PerpBid, 75, 99
+	decision.OrderType, decision.TimeInForce, decision.PostOnly = exchange.LimitOrder.String(), exchange.GTC.String(), &postOnly
+	decision.PerpBidQty, decision.PerpAskQty = 100, 50
+	if err := validateTermCarryPolicyEvidence(policy, decision); err != nil {
+		t.Fatalf("valid P3e policy evidence rejected: %v", err)
+	}
+	if err := validateTermCarryPassiveExitDecision(policy, decision); err != nil {
+		t.Fatalf("valid P3e wire contract rejected: %v", err)
+	}
+	if err := validateTermCarrySubmission(policy, decision); err != nil {
+		t.Fatalf("valid passive exit rejected: %v", err)
+	}
+	venue := fundingCarryVenueOrder{Side: decision.Side, Type: exchange.LimitOrder.String(), TimeInForce: exchange.GTC.String(), PostOnly: true, Price: decision.LimitPrice, Qty: decision.RequestedQty}
+	if !termCarryVenueOrderMatches(decision, venue) {
+		t.Fatal("canonical accepted order did not preserve the post-only contract")
+	}
+
+	decision.PerpAskQty = 75
+	if err := validateTermCarrySubmission(policy, decision); err == nil {
+		t.Fatal("passive exit survived when its ordinary IOC precondition was executable")
+	}
+	decision.PerpAskQty = 50
+	stripped := false
+	decision.PostOnly = &stripped
+	if err := validateTermCarrySubmission(policy, decision); err == nil {
+		t.Fatal("stripped post-only mutation survived")
+	}
+	decision.PostOnly = &postOnly
+	venue.PostOnly = false
+	if termCarryVenueOrderMatches(decision, venue) {
+		t.Fatal("venue post-only stripping survived")
+	}
+}
+
+func TestTermCarryPassiveExitCancellationRequiresCanonicalChain(t *testing.T) {
+	policy := termCarryAuditPolicy()
+	policy.PassiveExit = &termCarryPassiveExitPolicy{SliceQty: 50, DeadlineAtNano: 2_000}
+	decision := validTermCarryEntry(t, policy, 3)
+	slice, deadline := policy.PassiveExit.SliceQty, policy.PassiveExit.DeadlineAtNano
+	decision.PolicyVersion = termCarryPolicyV4
+	decision.PassiveExitSliceQty, decision.PassiveExitDeadlineAtNano = &slice, &deadline
+	decision.DecisionTime, decision.State, decision.Action = deadline, "UNWIND_PERP", "CANCEL_PASSIVE_EXIT_AT_DEADLINE"
+	decision.RequestID, decision.Leg, decision.Side, decision.RequestedQty = 0, "", "", 0
+	decision.CancelOrderID, decision.CancelRequestID = 41, 77
+	if err := validateTermCarryPolicyEvidence(policy, decision); err != nil {
+		t.Fatalf("valid cancellation policy evidence rejected: %v", err)
+	}
+	if err := validateTermCarryPassiveExitDecision(policy, decision); err != nil {
+		t.Fatalf("valid cancellation contract rejected: %v", err)
+	}
+	decision.CancelRequestID = 0
+	if err := validateTermCarryPassiveExitDecision(policy, decision); err == nil {
+		t.Fatal("zero cancellation identity survived")
+	}
+}
+
+func TestTermCarryPassiveExitCancellationChainRejectsForgedIdentity(t *testing.T) {
+	cancel := termCarryVenueCancellation{VenueID: "north", ClientID: 9, OrderID: 41, RequestID: 77, RemainingQty: 75}
+	decision := termCarryDecision{VenueID: "north", ClientID: 9, Action: "CANCEL_PASSIVE_EXIT_AT_DEADLINE", CancelOrderID: 41, CancelRequestID: 77}
+	outcomes := []termCarryOutcome{{VenueID: "north", ClientID: 9, Event: "ORDER_CANCELLED", OrderID: 41, RequestID: 99, CancelRequestID: 77}}
+	if failure := validateTermCarryPassiveExitCancellationChain(cancel, 41, decision, true, outcomes); failure != "" {
+		t.Fatalf("valid passive-exit cancellation chain rejected: %s", failure)
+	}
+	decision.CancelOrderID = 42
+	if failure := validateTermCarryPassiveExitCancellationChain(cancel, 41, decision, true, outcomes); failure == "" {
+		t.Fatal("forged cancellation order identity survived")
+	}
+	decision.CancelOrderID = 41
+	outcomes[0].CancelRequestID = 78
+	if failure := validateTermCarryPassiveExitCancellationChain(cancel, 41, decision, true, outcomes); failure == "" {
+		t.Fatal("missing actor cancellation identity survived")
+	}
+}
+
 func TestTermCarryLifecycleReplaysOneFiniteFundingTerm(t *testing.T) {
 	run := termCarryLifecycleTestRun(t, nil)
 	result, err := run.MeasureTermCarry()
@@ -163,6 +249,17 @@ func TestTermCarryV3LifecycleUsesCanonicalFirstExposure(t *testing.T) {
 	}
 	if !result.Valid || result.ActiveTerms != 1 || result.ClosedTerms != 1 || result.ActiveTermFunding != 1 || result.FirstExposureMismatches != 0 {
 		t.Fatalf("v3 first-exposure lifecycle replay = %+v", result)
+	}
+}
+
+func TestTermCarryV4LifecyclePreservesExplicitFalsePostOnly(t *testing.T) {
+	run := termCarryLifecycleTestRun(t, makeTermCarryLifecycleV4)
+	result, err := run.MeasureTermCarry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || result.GatewayDecisionMismatches != 0 || result.LifecycleViolations != 0 {
+		t.Fatalf("v4 ordinary IOC lifecycle replay = %+v", result)
 	}
 }
 
@@ -219,6 +316,25 @@ func makeTermCarryLifecycleV3(fixture *termCarryLifecycleFixture) {
 	for index := range fixture.decisions {
 		fixture.decisions[index].PolicyVersion = termCarryPolicyV3
 		fixture.decisions[index].UnwindMinOrderSize = &zero
+	}
+}
+
+// makeTermCarryLifecycleV4 establishes that the P3e policy carries explicit
+// false PostOnly and IOC fields even when its exceptional passive path does
+// not activate. This prevents a zero-value bool from becoming ambiguous on the
+// evidence boundary.
+func makeTermCarryLifecycleV4(fixture *termCarryLifecycleFixture) {
+	makeTermCarryLifecycleV2(fixture)
+	deadline := fixture.decisions[len(fixture.decisions)-1].DecisionTime + 1_000
+	fixture.policy.PassiveExit = &termCarryPassiveExitPolicy{SliceQty: fixture.policy.MinOrderSize, DeadlineAtNano: deadline}
+	for index := range fixture.decisions {
+		decision := &fixture.decisions[index]
+		slice, decisionDeadline, postOnly := fixture.policy.PassiveExit.SliceQty, fixture.policy.PassiveExit.DeadlineAtNano, false
+		decision.PolicyVersion = termCarryPolicyV4
+		decision.PassiveExitSliceQty, decision.PassiveExitDeadlineAtNano = &slice, &decisionDeadline
+		if termCarrySubmission(decision.Action) {
+			decision.OrderType, decision.TimeInForce, decision.PostOnly = exchange.LimitOrder.String(), exchange.IOC.String(), &postOnly
+		}
 	}
 }
 
@@ -399,7 +515,15 @@ func termCarryLifecycleTestRun(t *testing.T, mutate func(*termCarryLifecycleFixt
 	for _, outcome := range fixture.outcomes {
 		lines = append(lines, logLine(termCarryOutcomeTimestamp(outcome), outcome.ClientID, "term_carry_leg_outcome", mustFundingCarryMap(t, outcome)))
 		if outcome.Event == "ORDER_ACCEPTED" {
-			order := fundingCarryVenueOrder{RequestID: outcome.RequestID, OrderID: outcome.OrderID, Side: termCarryOutcomeSide(fixture.decisions, outcome.RequestID), Type: exchange.LimitOrder.String(), TimeInForce: exchange.IOC.String(), Price: termCarryOutcomePrice(fixture.decisions, outcome.RequestID), Qty: termCarryOutcomeQty(fixture.decisions, outcome.RequestID)}
+			decision := termCarryOutcomeDecision(fixture.decisions, outcome.RequestID)
+			tif, postOnly := exchange.IOC.String(), false
+			if decision.TimeInForce != "" {
+				tif = decision.TimeInForce
+			}
+			if decision.PostOnly != nil {
+				postOnly = *decision.PostOnly
+			}
+			order := fundingCarryVenueOrder{RequestID: outcome.RequestID, OrderID: outcome.OrderID, Side: termCarryOutcomeSide(fixture.decisions, outcome.RequestID), Type: exchange.LimitOrder.String(), TimeInForce: tif, PostOnly: postOnly, Price: termCarryOutcomePrice(fixture.decisions, outcome.RequestID), Qty: termCarryOutcomeQty(fixture.decisions, outcome.RequestID)}
 			lines = append(lines, logLine(termCarryOutcomeTimestamp(outcome), outcome.ClientID, "OrderAccepted", mustFundingCarryMap(t, order)))
 		}
 		if outcome.Event == "ORDER_FILL" {
@@ -510,7 +634,11 @@ func writeTermCarryLifecycleReceipts(t *testing.T, dir string, decisions []termC
 		if !termCarrySubmission(decision.Action) {
 			continue
 		}
-		recorder.RecordDecision(simulation.MarketDataDecision{ClientID: decision.ClientID, SourceVenue: "north", Link: link, Symbol: termCarryAuditSymbol(decision), RequestID: decision.RequestID, Side: exchangeSide(decision.Side), OrderType: exchange.LimitOrder, TimeInForce: exchange.IOC, Price: decision.LimitPrice, Qty: decision.RequestedQty, DecisionAt: decision.DecisionTime, Frontier: frontier})
+		tif := exchange.IOC
+		if decision.TimeInForce == exchange.GTC.String() {
+			tif = exchange.GTC
+		}
+		recorder.RecordDecision(simulation.MarketDataDecision{ClientID: decision.ClientID, SourceVenue: "north", Link: link, Symbol: termCarryAuditSymbol(decision), RequestID: decision.RequestID, Side: exchangeSide(decision.Side), OrderType: exchange.LimitOrder, TimeInForce: tif, Price: decision.LimitPrice, Qty: decision.RequestedQty, DecisionAt: decision.DecisionTime, Frontier: frontier})
 	}
 	if err := recorder.Finalize(1_000); err != nil {
 		t.Fatal(err)

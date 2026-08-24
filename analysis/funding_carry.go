@@ -208,6 +208,7 @@ type fundingCarryVenueOrder struct {
 	Side        string `json:"side"`
 	Type        string `json:"type"`
 	TimeInForce string `json:"time_in_force"`
+	PostOnly    bool   `json:"post_only"`
 	Price       int64  `json:"price"`
 	Qty         int64  `json:"qty"`
 	Error       string `json:"error"`
