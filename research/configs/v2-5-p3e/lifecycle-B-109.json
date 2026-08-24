@@ -1,0 +1,49 @@
+{
+  "experiment_id": "v2-5-p3e-lifecycle-B-seed-109",
+  "hypothesis_id": "V2-5-P3E-LIFECYCLE",
+  "date": "2026-08-24",
+  "status": "preregistered",
+  "description": "Paired P3e lifecycle treatment for seed 109. It differs economically from A only by the declared 100000-unit passive post-only exit policy with deadline 1736038805000000000.",
+  "log_mode": "full",
+  "seed": 109,
+  "strict_population_accounting": true,
+  "checkpoint_interval_seconds": 30,
+  "taker_fee_bps": 5,
+  "record_market_data_receipts": true,
+  "market_data_receipt_roles": [
+    "term_carry_allocator"
+  ],
+  "record_term_carry_decisions": true,
+  "latency_profiles": {
+    "term_carry_allocator": {
+      "model": "constant",
+      "delay": 20000000,
+      "market_data_scale": 2
+    }
+  },
+  "term_carry_allocator": {
+    "enabled": true,
+    "spot_symbol": "ABC/USD",
+    "perp_symbol": "ABC-PERP",
+    "decision_period": 2000000000,
+    "commitment_intervals": 12,
+    "max_funding_age": 10000000000,
+    "taker_fee_bps": 5,
+    "long_spot_funding_bps": 500,
+    "short_spot_borrow_bps": 500,
+    "balance_sheet_bps": 1,
+    "margin_risk_bps": 1,
+    "leg_risk_bps": 1,
+    "min_net_carry_bps": 1,
+    "mandate_end_at_nano": 1736035205000000000,
+    "max_position": 100000000,
+    "lot_qty": 10000000,
+    "min_order_size": 100000,
+    "passive_exit": {
+      "slice_qty": 100000,
+      "deadline_at_nano": 1736038805000000000
+    },
+    "spot_tick": 1000000,
+    "perp_tick": 1000000
+  }
+}
