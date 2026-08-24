@@ -35,6 +35,7 @@ type v20HelperResult struct {
 	FrontierComponentDigest  string `json:"frontier_component_digest"`
 	MakerQuoteSizeDecisions  int64  `json:"maker_quote_size_decisions"`
 	MakerRebalanceDecisions  int64  `json:"maker_rebalance_decisions"`
+	LiabilityHedgerDecisions int64  `json:"liability_hedger_decisions"`
 	EvidenceArtifactEvents   int64  `json:"evidence_artifact_events"`
 	EvidenceArtifactDigest   string `json:"evidence_artifact_digest"`
 }
@@ -67,6 +68,7 @@ func TestV20EvidenceHelper(t *testing.T) {
 	routerEvidence := os.Getenv("V22_ROUTER") == "1"
 	p1QuoteSizeEvidence := os.Getenv("V23_P1_QUOTE_SIZE") == "1"
 	p2RebalanceEvidence := os.Getenv("V23_P2_REBALANCE") == "1"
+	l0LiabilityHedgerEvidence := os.Getenv("V24_L0_LIABILITY_HEDGER") == "1"
 	if p1QuoteSizeEvidence {
 		// P1 varies only optional raw decision recording. Both sides retain full
 		// logs so an identical logger topology cannot mask a recorder effect.
@@ -90,7 +92,17 @@ func TestV20EvidenceHelper(t *testing.T) {
 			RiskBandQty: 10_000_000_000, TargetBandQty: 5_000_000_000, MaxRequestQty: 500_000_000,
 			ParticipationBps: 1_000, SlippageBps: 50,
 		}
-		cfg.RecordMakerInventoryRebalanceDecisions = os.Getenv("V20_EVIDENCE_ON") == "1"
+		cfg.RecordMakerInventoryRebalanceDecisions = p2RebalanceEvidence && os.Getenv("V20_EVIDENCE_ON") == "1"
+	}
+	if l0LiabilityHedgerEvidence {
+		cfg.LogMode = "full"
+		cfg.CrossAssetSpotGraph = true
+		cfg.CDFLiabilityHedger = &LiabilityHedgerConfig{
+			Enabled: true, Symbol: "CDF/USD", DecisionInterval: 2 * time.Second,
+			ObligationInterval: 10 * time.Second, ObligationStepQty: 200_000_000,
+			MaxAbsObligationQty: 2_000_000_000, MaxRequestQty: 100_000_000,
+		}
+		cfg.RecordLiabilityHedgerDecisions = os.Getenv("V20_EVIDENCE_ON") == "1"
 	}
 	if os.Getenv("V21_LOCAL_CACHE") == "1" || remoteFeed || remoteRoster {
 		cfg.MakerAnchor = "own_mid"
@@ -99,16 +111,22 @@ func TestV20EvidenceHelper(t *testing.T) {
 			"spot_maker": {Model: "constant", Delay: 10 * time.Millisecond},
 		}
 	}
-	cfg.RecordMarketDataReceipts = !p1QuoteSizeEvidence && !p2RebalanceEvidence && os.Getenv("V20_EVIDENCE_ON") == "1"
-	if p2RebalanceEvidence {
+	cfg.RecordMarketDataReceipts = !p1QuoteSizeEvidence && !p2RebalanceEvidence && !l0LiabilityHedgerEvidence && os.Getenv("V20_EVIDENCE_ON") == "1"
+	if p2RebalanceEvidence || l0LiabilityHedgerEvidence {
 		cfg.RecordMarketDataReceipts = os.Getenv("V20_EVIDENCE_ON") == "1"
 	}
 	if cfg.RecordMarketDataReceipts {
 		if routerEvidence {
 			cfg.MarketDataReceiptRoles = []string{"cross_venue_router_tier"}
 			cfg.RecordDecisionFrontierVectors = true
-		} else if p2RebalanceEvidence {
-			cfg.MarketDataReceiptRoles = []string{"cdf_spot_maker"}
+		} else if p2RebalanceEvidence || l0LiabilityHedgerEvidence {
+			cfg.MarketDataReceiptRoles = nil
+			if p2RebalanceEvidence {
+				cfg.MarketDataReceiptRoles = append(cfg.MarketDataReceiptRoles, "cdf_spot_maker")
+			}
+			if l0LiabilityHedgerEvidence {
+				cfg.MarketDataReceiptRoles = append(cfg.MarketDataReceiptRoles, "liability_hedger")
+			}
 		} else {
 			cfg.MarketDataReceiptRoles = []string{"spot_maker"}
 		}
@@ -231,6 +249,12 @@ func TestV20EvidenceHelper(t *testing.T) {
 		result.MakerRebalanceDecisions = countRawEvent(t, output, "maker_inventory_rebalance_decision")
 		if result.MakerRebalanceDecisions == 0 {
 			t.Fatal("P2 recorder emitted no inventory-rebalance decisions")
+		}
+	}
+	if l0LiabilityHedgerEvidence && cfg.RecordLiabilityHedgerDecisions {
+		result.LiabilityHedgerDecisions = countRawEvent(t, output, "liability_hedger_decision")
+		if result.LiabilityHedgerDecisions == 0 {
+			t.Fatal("L0 recorder emitted no liability-hedger decisions")
 		}
 	}
 	encoded, err := json.Marshal(result)
@@ -472,6 +496,36 @@ func TestV23P2RebalanceEvidenceIsFreshProcessDeterministicAndNeutral(t *testing.
 		left.Schedules != right.Schedules || left.Receipts != right.Receipts || left.Decisions != right.Decisions ||
 		left.ScheduleDigest != right.ScheduleDigest || left.ReceiptDigest != right.ReceiptDigest || left.DecisionDigest != right.DecisionDigest {
 		t.Fatalf("P2 evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
+	}
+}
+
+// L0 adds an actor and its deterministic liability stream in both variants;
+// this test varies only append-only decision/fill and receipt evidence. It
+// protects against a recorder affecting timer order, RNG consumption, or the
+// actor-visible public-feed frontier.
+func TestV24L0LiabilityHedgerEvidenceIsFreshProcessDeterministicAndNeutral(t *testing.T) {
+	results := make(map[string]v20HelperResult)
+	for _, gomax := range []string{"1", "4"} {
+		for _, evidence := range []bool{false, true} {
+			key := "g" + gomax + "/off"
+			if evidence {
+				key = "g" + gomax + "/on"
+			}
+			results[key] = runV24L0EvidenceHelper(t, gomax, evidence)
+		}
+	}
+	want := results["g1/off"].ExecutionHash
+	for key, result := range results {
+		if result.ExecutionHash == "" || result.ExecutionHash != want {
+			t.Fatalf("L0 recorder changed execution with process setting: want %s, %s=%s", want, key, result.ExecutionHash)
+		}
+	}
+	left, right := results["g1/on"], results["g4/on"]
+	if left.LiabilityHedgerDecisions == 0 || left.LiabilityHedgerDecisions != right.LiabilityHedgerDecisions ||
+		left.Schedules == 0 || left.Receipts == 0 || left.Decisions == 0 ||
+		left.Schedules != right.Schedules || left.Receipts != right.Receipts || left.Decisions != right.Decisions ||
+		left.ScheduleDigest != right.ScheduleDigest || left.ReceiptDigest != right.ReceiptDigest || left.DecisionDigest != right.DecisionDigest {
+		t.Fatalf("L0 evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
 	}
 }
 
@@ -724,6 +778,32 @@ func runV23P2EvidenceHelper(t *testing.T, gomax string, evidence bool) v20Helper
 	}
 	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
 		t.Fatalf("decode P2 evidence helper output %q: %v", raw, err)
+	}
+	return result
+}
+
+func runV24L0EvidenceHelper(t *testing.T, gomax string, evidence bool) v20HelperResult {
+	t.Helper()
+	output := filepath.Join(t.TempDir(), "run")
+	cmd := exec.Command(os.Args[0], "-test.run=TestV20EvidenceHelper", "--")
+	cmd.Env = append(os.Environ(), "V20_EVIDENCE_HELPER=1", "V20_EVIDENCE_OUTPUT="+output, "V24_L0_LIABILITY_HEDGER=1", "GOMAXPROCS="+gomax)
+	if evidence {
+		cmd.Env = append(cmd.Env, "V20_EVIDENCE_ON=1")
+	}
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("L0 evidence helper GOMAXPROCS=%s evidence=%t: %v\n%s", gomax, evidence, err, raw)
+	}
+	var result v20HelperResult
+	var encoded string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "{") {
+			encoded = line
+			break
+		}
+	}
+	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
+		t.Fatalf("decode L0 evidence helper output %q: %v", raw, err)
 	}
 	return result
 }
