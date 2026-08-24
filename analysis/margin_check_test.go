@@ -118,6 +118,23 @@ func TestMarginCheckAuditExcludesAmbiguousSameTimestampMark(t *testing.T) {
 	}
 }
 
+func TestMarginCheckAuditDoesNotTreatZeroMarkAsMissing(t *testing.T) {
+	derivative := []string{
+		marginPositionLine(2, "north", 7, 0, -100, 100),
+		marginMarkLine(3, "north", 0),
+	}
+	result, err := marginTestRun(t, derivative, nil).MeasureMarginChecks(marginTestOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.UnsupportedMarkDomain != 1 || result.EligibleCandidates != 0 || result.ExcludedCandidates != 1 {
+		t.Fatalf("zero mark was silently ignored: %+v", result)
+	}
+	if len(result.Exclusions) != 1 || result.Exclusions[0].Reasons[0] != "unsupported_positive_mark_domain" {
+		t.Fatalf("zero-mark exclusion = %+v", result.Exclusions)
+	}
+}
+
 func TestIndependentMarginCheckUsesExactIntermediateArithmetic(t *testing.T) {
 	// These are an observed V-005 check's pre-liquidation inputs. The raw
 	// quantity-times-price products exceed int64, so a float or int64-only
