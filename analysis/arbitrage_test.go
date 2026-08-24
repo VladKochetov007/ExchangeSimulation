@@ -163,3 +163,39 @@ func TestArbitrageChargesFeesOnBothLegsAcrossVenues(t *testing.T) {
 		t.Error("no cross-venue cycle was evaluated at all")
 	}
 }
+
+// A signed or zero quote is a present book observation. The current
+// cash-return arb metric cannot price it, but must report that condition rather
+// than silently treating the book as missing or assigning it a zero edge.
+func TestArbitrageRetainsSignedQuotesAsExplicitUndefinedDomain(t *testing.T) {
+	const precision = int64(100_000_000)
+	books := map[string][]string{}
+	add := func(file, line string) { books[file] = append(books[file], line) }
+	file, line := quoteLine(int64(1e9), "north", "north/spot/ABC-USD.jsonl", 100, 101)
+	add(file, line)
+	file, line = quoteLine(int64(1e9), "north", "north/spot/CDF-USD.jsonl", 0, 1)
+	add(file, line)
+	file, line = quoteLine(int64(1e9), "north", "north/spot/ABC-CDF.jsonl", 100*precision, 101*precision)
+	add(file, line)
+
+	dir := writeRun(t, Report{}, books)
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureArbitrage(ArbitrageOptions{
+		TakerFeeBps: 2, StalenessNanos: int64(2e9),
+		BaseSymbol: "ABC-USD", QuoteSymbol: "CDF-USD", CrossSymbol: "ABC-CDF",
+		CrossPrecision: precision,
+	})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if len(result.Cycles) != 1 {
+		t.Fatalf("cycles = %d, want one undefined triangle: %+v", len(result.Cycles), result.Cycles)
+	}
+	cycle := result.Cycles[0]
+	if cycle.Observations != 0 || cycle.UndefinedDomainObservations != 1 {
+		t.Fatalf("cycle = %+v, want zero measured and one undefined-domain observation", cycle)
+	}
+}

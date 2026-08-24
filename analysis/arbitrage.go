@@ -46,6 +46,13 @@ type CycleResult struct {
 	Cycle string `json:"cycle"`
 	// Observations is how many instants had every leg fresh enough to trade.
 	Observations int `json:"observations"`
+	// UndefinedDomainObservations is how many instants had all required book
+	// sides present and fresh but could not be expressed by this audit's
+	// current positive-cashflow BPS statistic. It is deliberately separate
+	// from a missing or stale quote: a signed or zero price remains evidence,
+	// but the ratio-based cycle is not mathematically/economically defined for
+	// the current spot/Black-76 policy.
+	UndefinedDomainObservations int `json:"undefined_domain_observations"`
 	// Profitable is how many of those had a positive edge after fees.
 	Profitable int `json:"profitable"`
 	// MeanEdgeBps is over profitable observations only, MaxEdgeBps the best
@@ -84,22 +91,37 @@ type quote struct {
 // arrival order is meaningless. Keeping the best edge per instant also stops
 // one instant being counted several times when several books publish at it.
 type cycleAccumulator struct {
-	edges map[int64]float64
+	edges     map[int64]float64
+	undefined map[int64]struct{}
 }
 
 func newCycleAccumulator() *cycleAccumulator {
-	return &cycleAccumulator{edges: make(map[int64]float64)}
+	return &cycleAccumulator{
+		edges:     make(map[int64]float64),
+		undefined: make(map[int64]struct{}),
+	}
 }
 
 func (c *cycleAccumulator) observe(at int64, edgeBps float64) {
+	delete(c.undefined, at)
 	if existing, seen := c.edges[at]; seen && existing >= edgeBps {
 		return
 	}
 	c.edges[at] = edgeBps
 }
 
+// observeUndefined records an instant with every required leg present but
+// outside this metric's declared domain. Do not add a numeric zero edge: that
+// would falsely claim that an unpriceable signed cycle was arbitrage-free.
+func (c *cycleAccumulator) observeUndefined(at int64) {
+	if _, measured := c.edges[at]; measured {
+		return
+	}
+	c.undefined[at] = struct{}{}
+}
+
 func (c *cycleAccumulator) result(name string) CycleResult {
-	out := CycleResult{Cycle: name}
+	out := CycleResult{Cycle: name, UndefinedDomainObservations: len(c.undefined)}
 	if len(c.edges) == 0 {
 		return out
 	}
@@ -174,7 +196,7 @@ func (r *Run) MeasureArbitrage(opts ArbitrageOptions) (*ArbitrageAudit, error) {
 		}
 		bestBid, _, bidOK := bestWithDepth(bids, true)
 		bestAsk, _, askOK := bestWithDepth(asks, false)
-		if !bidOK || !askOK || bestBid <= 0 || bestAsk <= 0 {
+		if !bidOK || !askOK {
 			return
 		}
 		// A derivative record names its book beside the payload; a spot record
@@ -243,6 +265,10 @@ func (r *Run) MeasureArbitrage(opts ArbitrageOptions) (*ArbitrageAudit, error) {
 				if triangles[venue] == nil {
 					triangles[venue] = newCycleAccumulator()
 				}
+				if !positiveCashflowQuotes(base, quotePair, cross) {
+					triangles[venue].observeUndefined(at)
+					continue
+				}
 				triangles[venue].observe(at, triangleEdgeBps(&base, &quotePair, &cross, opts.CrossPrecision, feeFactor))
 			}
 		}
@@ -262,6 +288,10 @@ func (r *Run) MeasureArbitrage(opts ArbitrageOptions) (*ArbitrageAudit, error) {
 				name := buyVenue + "->" + sellVenue
 				if crossVenue[name] == nil {
 					crossVenue[name] = newCycleAccumulator()
+				}
+				if !positiveCashflowQuotes(offered, bid) {
+					crossVenue[name].observeUndefined(at)
+					continue
 				}
 				edge := float64(bid.bid)*feeFactor/(float64(offered.ask)/feeFactor) - 1
 				crossVenue[name].observe(at, 1e4*edge)
@@ -287,6 +317,10 @@ func (r *Run) MeasureArbitrage(opts ArbitrageOptions) (*ArbitrageAudit, error) {
 					if parity[venue] == nil {
 						parity[venue] = newCycleAccumulator()
 					}
+					if !positiveCashflowQuotes(call, put, forward) {
+						parity[venue].observeUndefined(at)
+						continue
+					}
 					parity[venue].observe(at, parityEdgeBps(call, put, forward, pair.strike, feeFactor))
 				}
 			}
@@ -304,6 +338,10 @@ func (r *Run) MeasureArbitrage(opts ArbitrageOptions) (*ArbitrageAudit, error) {
 				}
 				if basis[venue] == nil {
 					basis[venue] = newCycleAccumulator()
+				}
+				if !positiveCashflowQuotes(perp, spot) {
+					basis[venue].observeUndefined(at)
+					continue
 				}
 				// The edge of buying spot and selling the perpetual, after
 				// paying both spreads and both fees. It is a carry, not an
@@ -348,6 +386,19 @@ func (r *Run) MeasureArbitrage(opts ArbitrageOptions) (*ArbitrageAudit, error) {
 		audit.Cycles = append(audit.Cycles, crossVenue[name].result("cross_venue "+name))
 	}
 	return audit, nil
+}
+
+// positiveCashflowQuotes declares the current domain of the fee-aware
+// arbitrage and carry statistics. A book can contain signed valid levels, but
+// each present bid/ask must be strictly positive before a cash-return ratio is
+// meaningful. This is a statistic/model rule, never a book-availability test.
+func positiveCashflowQuotes(quotes ...quote) bool {
+	for _, quote := range quotes {
+		if quote.bid <= 0 || quote.ask <= 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // triangleEdgeBps prices the round trip USD to base to cross-quote and back.
@@ -442,9 +493,6 @@ func parityEdgeBps(call, put, forward quote, strike int64, feeFactor float64) fl
 	best := buySynthetic
 	if sellSynthetic > best {
 		best = sellSynthetic
-	}
-	if forward.ask <= 0 {
-		return 0
 	}
 	return 1e4 * best / float64(forward.ask)
 }

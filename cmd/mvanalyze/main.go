@@ -716,8 +716,8 @@ func main() {
 				fmt.Printf("%-22s arbitrage at %.1f bps taker fee, %.1fs staleness\n",
 					dir, result.FeeBps, float64(result.StalenessNanos)/1e9)
 				for _, cycle := range result.Cycles {
-					fmt.Printf("    %-24s obs %7d  profitable %6d (%5.2f%%)  mean %+7.2f bps  max %+8.2f bps  mean-all %+7.2f bps  longest run %6.1fs\n",
-						cycle.Cycle, cycle.Observations, cycle.Profitable, 100*cycle.ProfitableShare,
+					fmt.Printf("    %-24s obs %7d  domain-undefined %6d  profitable %6d (%5.2f%%)  mean %+7.2f bps  max %+8.2f bps  mean-all %+7.2f bps  longest run %6.1fs\n",
+						cycle.Cycle, cycle.Observations, cycle.UndefinedDomainObservations, cycle.Profitable, 100*cycle.ProfitableShare,
 						cycle.MeanEdgeBps, cycle.MaxEdgeBps, cycle.MeanAllBps,
 						float64(cycle.LongestRunNanos)/1e9)
 				}
