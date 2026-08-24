@@ -95,7 +95,7 @@ func (p *analyzerProfiles) Stop() {
 }
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, perpreplenishment, liabilityhedger, fundingcarry, termcarry, perpexposurehedger, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, perpreplenishment, liabilityhedger, fundingcarry, termcarry, termcarrylifecycle, perpexposurehedger, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
 	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
 	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
@@ -117,6 +117,7 @@ func main() {
 	crossVenuePositiveTimes := flag.Bool("cross-venue-positive-times", false, "include positive sampled cross-venue dispersion times for activation-window joins")
 	perpSignalSymbol := flag.String("perp-signal-symbol", "ABC-PERP", "perpetual symbol for persisted public mark/funding signal audit")
 	perpSignalVenues := flag.String("perp-signal-venues", "central,north,south", "comma-separated venues required by persisted public mark/funding signal audit")
+	termCarryLifecycleDeadline := flag.Int64("term-carry-lifecycle-deadline", 0, "registered term-carry lifecycle deadline/cutoff in Unix nanoseconds")
 	conservationBook := flag.String("conservation-book", "", "restrict the conservation audit to one book, e.g. ABC/USD")
 	basePrecision := flag.Int64("base-precision", 100_000_000, "base-asset precision, for converting position sizes into contracts")
 	quotePrecision := flag.Int64("quote-precision", 100_000, "quote-asset precision, for converting logged prices into currency units")
@@ -641,6 +642,17 @@ func main() {
 			}
 			emit(dir, result, *asJSON, func() {
 				fmt.Printf("%-22s term-carry decisions %d, submitted %d, fills %d, valid %t\n", dir, result.Decisions, result.Submitted, result.Fills, result.Valid)
+			})
+		case "termcarrylifecycle":
+			result, err := run.MeasureTermCarryLifecycle(analysis.TermCarryLifecycleOptions{DeadlineAtNano: *termCarryLifecycleDeadline})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s term-carry lifecycle owned %d, eligible %d, proven closed %d, integrity %t\n",
+					dir, result.Aggregates.OwnedTerms, result.Aggregates.EligibleTerms,
+					result.Aggregates.ProvenClosedEligibleTerms, result.IntegrityValid)
 			})
 		case "optionsurface":
 			result, err := run.MeasureOptionSurface(analysis.SurfaceOptions{QuotePrecision: *quotePrecision})
