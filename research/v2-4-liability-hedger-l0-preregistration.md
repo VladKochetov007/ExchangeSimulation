@@ -62,6 +62,13 @@ buying needs a local executable **ask**, selling needs a local executable
 needed executable side is an observable `LOCAL_EXECUTABLE_PRICE_UNAVAILABLE`
 defer, never numeric price zero.
 
+Before rendering the cells, the new role's link is fixed to a deterministic
+20 ms request/response delay and a 40 ms market-data delay
+(`constant`, `delay=20,000,000`, `market_data_scale=2`). The channels remain
+separate in the deterministic courier; the role is not granted a direct or
+shared-book path. This is a declared input to the screen, not a latency-tuned
+parameter.
+
 The actor starts with finite CDF and USD deposits sufficient for both sides of
 the bounded five-minute L0 screen; exchange admission, balance reservations,
 and ordinary fee posting still determine whether a request can execute.
