@@ -129,6 +129,10 @@ The P2 contract is fixed in
 [`v2-3-inventory-rebalance-p2-preregistration.md`](v2-3-inventory-rebalance-p2-preregistration.md).
 It deliberately scopes the first action to unhedged CDF/USD makers and scores
 individual risk transfer, not a market-stability target or aggregate exposure.
+The final post-schema-audit A/B × seed-101/103 P2 campaign is now recorded in
+[`v2-3-inventory-rebalance-p2-results.md`](v2-3-inventory-rebalance-p2-results.md):
+it supports only that mechanism-integrity claim. Its result licenses no P2
+coefficient, clock, spread, demand, or population tuning.
 
 ## V2-4 — economically motivated demand and ecology
 
@@ -140,6 +144,13 @@ individual risk transfer, not a market-stability target or aggregate exposure.
 | Causal design | Introduce one motive family at a time against an otherwise fixed roster. Remove it after activation and test its predicted flow, inventory, and market contribution. Report wealth shares and turnover by class. |
 | Kill criterion | “Agent keeps book alive” or a fixed net directional flow without an economic state is not an objective. A class whose state never changes is inactive, not validated. |
 | Main risk | Replacing all generators at once can make every book empty. Stage by asset and retain explicit viability gates. |
+
+The first V2-4 slice is
+[`V2-4 L0`](v2-4-liability-hedger-l0-preregistration.md): it first establishes
+that a finite-capital, stateful delivery-liability hedger is observable and
+locally executable before using it to replace any activity generator. L0's
+A/B control retains the same liability state path and changes only the actor's
+submit permission; it has no registered price-stability or replacement claim.
 
 ## V2-5 — identifiable perp funding and dated carry
 
