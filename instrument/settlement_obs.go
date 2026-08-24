@@ -2,6 +2,7 @@ package instrument
 
 import (
 	"fmt"
+	"math/big"
 	"sync"
 
 	etypes "exchange_sim/types"
@@ -15,7 +16,7 @@ type settlementObserver struct {
 	obs          []settlementObs
 	settled      bool
 	settledPrice int64
-	// lastDeclaredReference is a prior positive observation supplied through
+	// lastDeclaredReference is a prior observation supplied through
 	// ObserveSettlement by the contract's declared underlying-reference path;
 	// it is never a trade, book-mid, or numeric-zero fallback.
 	lastDeclaredReference    int64
@@ -28,9 +29,6 @@ type settlementObs struct {
 }
 
 func (s *settlementObserver) observe(price, tsNano int64) {
-	if price <= 0 {
-		return
-	}
 	s.mu.Lock()
 	s.lastDeclaredReference = price
 	s.hasLastDeclaredReference = true
@@ -56,24 +54,22 @@ func (s *settlementObserver) settlementPrice() (int64, error) {
 	}
 	n := int64(len(s.obs))
 	if n == 0 {
-		if !s.hasLastDeclaredReference || s.lastDeclaredReference <= 0 {
+		if !s.hasLastDeclaredReference {
 			return 0, fmt.Errorf("settlement observation: %w", etypes.ErrNoPrice)
 		}
 		s.settledPrice = s.lastDeclaredReference
 		s.settled = true
 		return s.settledPrice, nil
 	}
-	// Sum quotient and remainder separately so the mean stays exact for
-	// prices near the int64 range.
-	var sum, rem int64
+	// Settlement is infrequent and the observation window is short. Use exact
+	// arithmetic here rather than letting a signed sum overflow near the full
+	// int64 domain; Quo matches Go's truncation-toward-zero semantics.
+	sum := new(big.Int)
 	for _, o := range s.obs {
-		sum += o.price / n
-		rem += o.price % n
+		sum.Add(sum, big.NewInt(o.price))
 	}
-	s.settledPrice = sum + rem/n
-	if s.settledPrice <= 0 {
-		return 0, fmt.Errorf("settlement observation: %w", etypes.ErrNoPrice)
-	}
+	sum.Quo(sum, big.NewInt(n))
+	s.settledPrice = sum.Int64()
 	s.settled = true
 	return s.settledPrice, nil
 }

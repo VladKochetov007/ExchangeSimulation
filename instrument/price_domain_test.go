@@ -1,6 +1,8 @@
 package instrument
 
 import (
+	"errors"
+	"math"
 	"testing"
 
 	etypes "exchange_sim/types"
@@ -36,12 +38,73 @@ func TestInstrumentPriceDomainsAreExplicit(t *testing.T) {
 	}
 }
 
+func TestSignedDatedFutureKeepsCashFlowsSignedAndRiskNotionalNonNegative(t *testing.T) {
+	future := NewExpiringFutures("OIL-FUT", "OIL", "USD", 1, 1, 1, 1, 1)
+	if err := future.SetPriceDomain(etypes.SignedPriceDomain(1)); err != nil {
+		t.Fatalf("set signed future domain: %v", err)
+	}
+	future.MarginRate = 1_000 // ten percent of absolute traded notional.
+	if got := future.MarginRequired(3, -20, 1); got != 6 {
+		t.Fatalf("negative-price margin = %d, want 6", got)
+	}
+	if got := future.MarginRequired(3, 0, 1); got != 0 {
+		t.Fatalf("zero-price margin = %d, want 0 under declared absolute-notional policy", got)
+	}
+	future.DeliveryFeeBps = 1_000
+	if got := future.DeliveryFee(-3, -20, 1); got != 6 {
+		t.Fatalf("negative settlement delivery fee = %d, want 6", got)
+	}
+
+	for _, tc := range []struct {
+		name             string
+		size, entry, end int64
+		want             int64
+	}{
+		{name: "long positive to negative", size: 1, entry: 20, end: -20, want: -40},
+		{name: "short positive to negative", size: -1, entry: 20, end: -20, want: 40},
+		{name: "long negative to positive", size: 1, entry: -20, end: 20, want: 40},
+		{name: "short negative to positive", size: -1, entry: -20, end: 20, want: -40},
+		{name: "long more negative", size: 1, entry: -20, end: -40, want: -20},
+		{name: "short less negative", size: -1, entry: -40, end: -20, want: -20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := future.ExpiryCashFlow(tc.size, tc.entry, tc.end, 1); got != tc.want {
+				t.Fatalf("ExpiryCashFlow(%d, %d, %d) = %d, want %d", tc.size, tc.entry, tc.end, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSettlementObserverRetainsSignedAndZeroObservations(t *testing.T) {
+	future := NewExpiringFutures("OIL-FUT", "OIL", "USD", 1, 1, 1, 1, 1)
+	if got, err := future.SettlementPrice(); got != 0 || !errors.Is(err, etypes.ErrNoPrice) {
+		t.Fatalf("missing settlement = (%d, %v), want ErrNoPrice", got, err)
+	}
+	future.ObserveSettlement(-20, 1)
+	if got, err := future.SettlementPrice(); err != nil || got != -20 {
+		t.Fatalf("negative settlement = (%d, %v), want (-20, nil)", got, err)
+	}
+
+	zero := NewExpiringFutures("ZERO-FUT", "OIL", "USD", 1, 1, 1, 1, 1)
+	zero.ObserveSettlement(0, 1)
+	if got, err := zero.SettlementPrice(); err != nil || got != 0 {
+		t.Fatalf("zero settlement = (%d, %v), want (0, nil)", got, err)
+	}
+
+	wide := NewExpiringFutures("WIDE-FUT", "OIL", "USD", 1, 1, 1, 1, 1)
+	wide.ObserveSettlement(math.MinInt64, 1)
+	wide.ObserveSettlement(math.MaxInt64, 2)
+	if got, err := wide.SettlementPrice(); err != nil || got != 0 {
+		t.Fatalf("wide signed settlement mean = (%d, %v), want (0, nil)", got, err)
+	}
+}
+
 func TestSetPriceDomainRejectsTickMutation(t *testing.T) {
-	spot := NewSpotInstrument("BTC/USD", "BTC", "USD", 1, 1, 5, 1)
-	if err := spot.SetPriceDomain(etypes.SignedPriceDomain(10)); err == nil {
+	future := NewExpiringFutures("OIL-FUT", "OIL", "USD", 1, 1, 5, 1, 1)
+	if err := future.SetPriceDomain(etypes.SignedPriceDomain(10)); err == nil {
 		t.Fatal("SetPriceDomain accepted a mismatched tick")
 	}
-	if spot.PriceDomain().SignPolicy() != etypes.PositivePrice {
-		t.Fatalf("failed SetPriceDomain mutated existing domain: %#v", spot.PriceDomain())
+	if future.PriceDomain().SignPolicy() != etypes.PositivePrice {
+		t.Fatalf("failed SetPriceDomain mutated existing domain: %#v", future.PriceDomain())
 	}
 }

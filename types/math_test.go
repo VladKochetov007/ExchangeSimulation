@@ -113,3 +113,54 @@ func TestMidpointExhaustiveSmallSignedRange(t *testing.T) {
 		}
 	}
 }
+
+func TestTryAbsMulDivUsesMagnitudeWithoutMinIntOverflow(t *testing.T) {
+	tests := []struct {
+		name string
+		a    int64
+		b    int64
+		c    int64
+		want int64
+		ok   bool
+	}{
+		{name: "negative price", a: 3, b: -20, c: 1, want: 60, ok: true},
+		{name: "zero price", a: 3, b: 0, c: 1, want: 0, ok: true},
+		{name: "min price divided", a: 1, b: math.MinInt64, c: 2, want: 1 << 62, ok: true},
+		{name: "unrepresentable min magnitude", a: 1, b: math.MinInt64, c: 1, ok: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := TryAbsMulDiv(tc.a, tc.b, tc.c)
+			if ok != tc.ok || ok && got != tc.want {
+				t.Fatalf("TryAbsMulDiv(%d, %d, %d) = (%d, %t), want (%d, %t)", tc.a, tc.b, tc.c, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func TestTryPriceChangeMulDivMatchesBigIntAcrossSignedPriceChanges(t *testing.T) {
+	tests := []struct {
+		qty, to, from, precision int64
+	}{
+		{qty: 1, from: 20, to: -20, precision: 1},
+		{qty: -1, from: 20, to: -20, precision: 1},
+		{qty: 1, from: -20, to: 20, precision: 1},
+		{qty: -1, from: -20, to: 20, precision: 1},
+		{qty: 1, from: -20, to: -40, precision: 1},
+		{qty: -1, from: -40, to: -20, precision: 1},
+		{qty: 1, from: math.MinInt64, to: math.MaxInt64, precision: math.MaxInt64},
+	}
+	for _, tc := range tests {
+		t.Run("signed price change", func(t *testing.T) {
+			want := new(big.Int).Mul(big.NewInt(tc.qty), new(big.Int).Sub(big.NewInt(tc.to), big.NewInt(tc.from)))
+			want.Quo(want, big.NewInt(tc.precision))
+			if !want.IsInt64() {
+				t.Fatal("test reference unexpectedly exceeds int64")
+			}
+			got, ok := TryPriceChangeMulDiv(tc.qty, tc.to, tc.from, tc.precision)
+			if !ok || got != want.Int64() {
+				t.Fatalf("TryPriceChangeMulDiv(%d, %d, %d, %d) = (%d, %t), want (%d, true)", tc.qty, tc.to, tc.from, tc.precision, got, ok, want.Int64())
+			}
+		})
+	}
+}

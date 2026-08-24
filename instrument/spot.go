@@ -47,11 +47,11 @@ func (i *SpotInstrument) ValidatePrice(price int64) bool {
 	return i.PriceDomain().Validate(price)
 }
 
-// SetPriceDomain changes this instrument's declared signed numeric price
+// setPriceDomain changes this instrument's declared signed numeric price
 // domain. It is configuration-time only: callers must set a domain using the
 // instrument's own tick size, so a sign-policy change cannot also change tick
 // admission implicitly.
-func (i *SpotInstrument) SetPriceDomain(domain etypes.PriceDomain) error {
+func (i *SpotInstrument) setPriceDomain(domain etypes.PriceDomain) error {
 	if domain.TickSize() != i.tickSize {
 		return fmt.Errorf("price domain tick %d does not match instrument tick %d", domain.TickSize(), i.tickSize)
 	}

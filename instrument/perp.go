@@ -52,10 +52,14 @@ func (p *PerpFutures) IsPerp() bool           { return true }
 func (p *PerpFutures) InstrumentType() string { return "PERP" }
 
 func (p *PerpFutures) MarginRequired(qty, price, precision int64) int64 {
-	if qty < 0 || price < 0 || p.MarginRate < 0 {
+	if qty < 0 || p.MarginRate < 0 {
 		return -1
 	}
-	notional, ok := etypes.TryMulDiv(qty, price, precision)
+	// Futures cash flows retain the sign of price, but initial/maintenance
+	// margin is a non-negative risk quantity. The current simple contract uses
+	// absolute traded notional as that risk base; it does not reinterpret a
+	// negative price as an unavailable mark.
+	notional, ok := etypes.TryAbsMulDiv(qty, price, precision)
 	if !ok {
 		return -1
 	}
@@ -67,9 +71,6 @@ func (p *PerpFutures) MarginRequired(qty, price, precision int64) int64 {
 }
 
 func (p *PerpFutures) MarginForMarket(qty, refPrice, precision int64) int64 {
-	if refPrice == 0 {
-		return 0
-	}
 	return p.MarginRequired(qty, refPrice, precision)
 }
 
@@ -278,7 +279,18 @@ func calcPerpPnL(oldSize, oldEntryPrice, tradeQty, tradePrice int64, tradeSide e
 	if oldSize < 0 {
 		sign = -1
 	}
-	return sign * etypes.MulDiv(closedQty, tradePrice-oldEntryPrice, basePrecision)
+	pnl, ok := etypes.TryPriceChangeMulDiv(closedQty, tradePrice, oldEntryPrice, basePrecision)
+	if !ok {
+		panic("calcPerpPnL: unrepresentable realized PnL")
+	}
+	if sign < 0 {
+		var negateOK bool
+		pnl, negateOK = etypes.TrySub(0, pnl)
+		if !negateOK {
+			panic("calcPerpPnL: unrepresentable short realized PnL")
+		}
+	}
+	return pnl
 }
 
 var _ etypes.Settleable = (*PerpFutures)(nil)

@@ -861,7 +861,7 @@ func (e *DefaultExchange) previewMatchExcluding(book *OrderBook, order *Order, e
 	executions := result.Executions
 	var filled int64
 	for _, exec := range executions {
-		if exec == nil || exec.Qty <= 0 || exec.Price <= 0 || exec.TakerClientID != order.ClientID {
+		if exec == nil || exec.Qty <= 0 || !book.Instrument.ValidatePrice(exec.Price) || exec.TakerClientID != order.ClientID {
 			releasePreviewExecutions(executions)
 			return nil, false
 		}
@@ -1148,9 +1148,6 @@ func (e *DefaultExchange) foreignFeeReservations(feePlan FeeModel, book *OrderBo
 		return nil, remaining == 0, nil
 	}
 	price := order.Price
-	if price <= 0 {
-		return nil, true, nil
-	}
 	base, quote := instrument.BaseAsset(), instrument.QuoteAsset()
 	margined := isMarginedInstrument(instrument)
 	reserved := make(map[string]int64)
@@ -1222,7 +1219,7 @@ func marketForeignFeeReservations(feePlan FeeModel, instrument Instrument, order
 	reserved := make(map[string]int64)
 	var receivedNet int64
 	for _, exec := range executions {
-		if exec == nil || exec.Qty <= 0 || exec.Price <= 0 {
+		if exec == nil || exec.Qty <= 0 || !instrument.ValidatePrice(exec.Price) {
 			return nil, false, nil
 		}
 		if receivedAsset != "" {
@@ -1369,7 +1366,7 @@ func (e *DefaultExchange) cancelUnfundedFeeRemainder(book *OrderBook, client *Cl
 // as maker later, so reserving just the taker schedule lets a maker-heavy fee
 // plan debit the perp wallet below its available balance.
 func quoteFeeHeadroom(feePlan FeeModel, base, quote string, qty, price, precision int64) (int64, error) {
-	if feePlan == nil || qty <= 0 || price <= 0 {
+	if feePlan == nil || qty <= 0 {
 		return 0, nil
 	}
 	probe := Execution{Price: price, Qty: qty}
