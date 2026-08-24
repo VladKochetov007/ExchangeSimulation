@@ -1,6 +1,7 @@
 # V2 signed-price audit
 
-Status: **pre-implementation audit complete; migration not yet started.**
+Status: **implementation and merge gate complete on `v2/signed-price`; awaiting
+the Git-flow merge.**
 
 This branch starts at `198a3b2`, after the P0 passive-refresh result. It does
 not modify P0 economics. The earlier
@@ -136,3 +137,182 @@ alone unless a line combines them with a price availability assumption.
 
 Every S-stage is a separate commit. No P0 setting, scheduler order, RNG use,
 or actor timing changes belong to this branch.
+
+## Completed migration
+
+The branch implements the staged contract above in small commits, starting
+with `54a4d3e`. The most important completed boundaries are:
+
+| Boundary | Completed contract |
+| --- | --- |
+| `PriceDomain` | Explicit `Positive`, `NonNegative`, and `Signed` domains with a tick. Storage remains signed `int64`; availability is never inferred from its numeric value. |
+| book prices | Best bid, ask, last trade, strict midpoint, and named one-sided reference return present signed numeric values; unavailable book state is an error. |
+| midpoint | `types.Midpoint` is correct over ordered `int64` endpoints and truncates the exact mean toward zero without forming an overflowing signed distance. |
+| orders and matching | A signed-domain dated future admits negative and zero limits. Matching, post-only admission, detached IOC/FOK preview, market sweeps, price-time order, and self-trade prevention use signed ordering. |
+| sources and marks | `PriceSource` succeeds for any numeric `int64`; `ErrNoPrice` alone signals absence. Positive index/borrow/fee/funding consumers use a named positive-domain boundary and get `ErrPriceDomain` for a present unsuitable value. |
+| expiry, risk, analysis | Signed dated settlement and zero option premiums survive independently from availability. Analyses retain signed/zero values and annotate log/ratio/BPS/IV observations that are mathematically undefined. |
+
+The call graph is deliberately not universally permissive. Current crypto
+spot, current crypto perps, their funding premium calculation, positive
+index-mark models, and Black-76/SABR remain positive-domain consumers. The
+existing multivenue actors declare that positive-domain policy through named
+helpers. A future commodity-future actor must select a signed-future policy
+explicitly; it cannot obtain one by treating zero as cache absence.
+
+### Arithmetic proof and fixtures
+
+`types.Midpoint(a,b)` uses a bit decomposition of the exact two's-complement
+sum, then corrects a negative odd floor mean to Go's truncation-toward-zero
+result. Tests compare it with `math/big` over exhaustive small signed values
+and `MinInt64/MinInt64`, `MaxInt64/MaxInt64`, `MinInt64/MaxInt64`, negative /
+negative, negative / zero, negative / positive, zero / positive, equal
+endpoints, ordinary positive endpoints, and odd signed distances.
+
+`TryPriceChangeMulDiv` computes future PnL without forming
+`settlement-entry` as an `int64`; it is tested against exact arithmetic across
+the signed endpoint range. Risk magnitude uses `TryAbsMulDiv`, not an implicit
+`abs(price)` substitution for cash-flow logic. Signed fixtures cover
+`+20 -> -20`, `-20 -> +20`, `-20 -> -40`, and `-40 -> -20` for long and short
+positions, negative-price queue priority, zero-crossing matching, negative
+post-only, IOC/FOK preview, market execution, and self-trade prevention.
+
+The independent settlement/exercise replayers had a separate defect: an
+unrepresentable fixed-point `a*b/c` became numeric zero. They now report
+explicit `unrepresentable` / arithmetic-failure fields, so a validator cannot
+falsely accept a zero payout produced by its own overflow. The positive-price
+ABC-perp margin replay also records and excludes a present out-of-domain mark
+rather than treating it as missing.
+
+### Explicit semantic changes
+
+1. A dated future opting into `SignedPriceDomain` can trade and settle at
+   negative or zero prices. Its cash PnL is signed while margin and delivery
+   fee use their declared non-negative risk quantity.
+2. A zero-premium option short now reserves its defined short margin; it is no
+   longer incorrectly treated as a no-price/no-risk state.
+3. An expired Black-76 option with only a zero/negative forward remains halted
+   and visibly `SETTLEMENT_PENDING` until a valid declared reference arrives;
+   there is no automatic last-trade or zero-price fallback.
+4. A zero-priced signed-future liquidation fill is a real fill, not an empty
+   book. Clearance fees use their explicit non-negative exposure base.
+
+No P0 passive-refresh setting, spread, clock, inventory skew, population,
+latency, scheduler ordering, or RNG draw changed on this branch.
+
+### Legitimate numeric zero fields
+
+- A `Market` order request price is a protocol placeholder identified by type.
+- A signed dated-future order/trade/book/mark/settlement price may be zero.
+- An option premium may be zero under its non-negative contract.
+- Margin/risk/notional results, fees, PnL, funding rates, position/quantity,
+  balance deltas, and timestamps may be zero when their own type defines it.
+- In-process cache/frontier booleans are explicit availability state; no cache
+  infers availability from numeric price.
+
+## Positive-world equivalence and determinism gate
+
+The comparison parent is P0 commit `198a3b2`. Both revisions ran the retained
+representative V2 world:
+
+```text
+config: research/configs/frozen-baseline-2026-08-22.json
+config SHA-256: ca933bf2244eec8e104d4313456bed386809703bb7a1179125b8d9255f1b1036
+seed: 101
+simulated horizon: 30 minutes
+receipt evidence: spot_maker
+```
+
+With full raw logs at `GOMAXPROCS=1`, every persisted JSON record file and
+receipt sidecar was byte-identical (679,873,179 raw venue bytes per run).
+Both persisted-evidence artifacts state:
+
+```text
+domain: persisted_json_records / unordered_multiset
+events: 2,126,782
+digest: c530af24a5c75950e2090b95f858c271d70ab47e55b1e44d66ec531885f7bb75
+```
+
+With raw logging disabled and 60-second ordered checkpoints, all 31 checkpoint
+records were byte-identical (file SHA-256
+`abdc784b75645120ec0b3157f0b88af9b7ae5004888bce096d16f302dfcb7b03`). The
+terminal execution attestation was identical:
+
+```text
+domain: execution_observations / ordered_stream
+events: 2,126,782
+execution_stream_hash: 1eb482c7d5a21a08092c751252ca31dc6e4a0b8decf50fedefa08b2904afb2c7
+```
+
+The candidate repeated the no-log run at `GOMAXPROCS=4`; its complete
+checkpoint file, count, and hash were again exact. The signed representation
+therefore does not change a positive-domain trajectory or make host
+parallelism a model input.
+
+Raw run/profile provenance is retained under:
+
+```text
+scratch/signed-price-parent.sHRI9N
+scratch/signed-price-current.LRrZoX
+scratch/signed-exec-parent.rqDzH4
+scratch/signed-exec-current.h6hjky
+scratch/signed-exec-gomax4.rwXPUH
+scratch/signed-prof-parent.g2jUOy
+scratch/signed-prof-current.11qyEy
+```
+
+## Performance gate
+
+No performance optimization was introduced. The controlled no-log profile
+comparison (`GOMAXPROCS=1`, receipt evidence and checkpoints enabled) is:
+
+| Measure | `198a3b2` | signed branch | Difference |
+| --- | ---: | ---: | ---: |
+| wall time | 23.77 s | 24.21 s | +1.9% |
+| simulated seconds / wall second | 75.72 | 74.35 | -1.8% |
+| sampled allocation | 9.390 GB | 9.396 GB | +0.1% |
+| peak RSS | 811,512 KiB | 827,796 KiB | +2.0% |
+| execution hash | `1eb482…afb2c7` | `1eb482…afb2c7` | exact |
+
+The full-log confirmation was 25.27 s versus 26.40 s (+4.5%), within observed
+wall variation; its raw files and evidence digest remained identical. CPU
+profiles remain dominated by order admission/matching, checkpoint JSON
+canonicalization, and detached preview allocation. The branch introduced no
+new material hotspot: `PlaceOrder` cumulative CPU was 32.9% versus 33.5%,
+checkpoint observation 17.2% versus 17.0%, and sampled allocation was nearly
+unchanged. Block profiles contain only pprof shutdown delay; mutex profiles
+show no application contention.
+
+This passes the branch criterion of no material measured regression. It does
+not authorize a JSON-library replacement: `encoding/json` remains the evidence
+reference; `goccy/go-json` remains rejected by overflow compatibility; jsoniter
+and Sonic require broader differential screening before offline adoption.
+
+## Tests and operational checks
+
+- `gofmt`, `go vet ./...`, and `go test ./...` passed, including signed
+  matcher, lifecycle, accounting, funding, margin/liquidation, analyzer,
+  receipt/frontier, and multivenue fixtures.
+- Race coverage passed for `types`, `book`, `matching`, `instrument`, `price`,
+  `exchange`, `simulation`, `analysis`, `simulations/multivenue`, and `tests`.
+- `multivenue`, `mvanalyze`, and `prunegate` were rebuilt from this branch.
+- The hardened prune gate ran without `-prune`: frozen baselines 101/102/103
+  are `SAFE_TO_PRUNE`; incomplete treatment rows remain blocked. No raw
+  evidence was deleted.
+- `golangci-lint` is not installed on this host. This is not represented as a
+  lint pass; `go vet` is the completed static check.
+
+## Remaining intentional limitations
+
+1. A signed commodity future is mechanically represented and tested, but the
+   current multivenue ecology does not instantiate an economically motivated
+   commodity population. That is a later V2 mechanism, not a reason to loosen
+   current crypto domains.
+2. Percentage/log returns, basis bps, relative spread, funding premium, and
+   Black-76/SABR/IV quantities remain undefined at or across zero. Analysis
+   must report undefined coverage and never normalize with `abs`.
+3. Options on a negative-capable future require an explicit normal (Bachelier)
+   or shifted model. This branch intentionally does not make Black-76 accept a
+   negative forward.
+4. Cached in-process actor observations may use explicit availability booleans
+   on hot paths. Public/client/action boundaries use errors; no cache derives
+   availability from a numeric zero.
