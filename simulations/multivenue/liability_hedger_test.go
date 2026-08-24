@@ -95,6 +95,28 @@ func TestLiabilityHedgerDoesNotUseZeroPriceAsMissingSide(t *testing.T) {
 	}
 }
 
+func TestLiabilityHedgerDefersUnsafeTerminalRoundTrip(t *testing.T) {
+	gw := newStoikovStubGateway()
+	cfg := liabilityHedgerTestConfig()
+	now := time.Unix(10, 0)
+	cfg.TerminalNano = now.Add(3 * time.Second).UnixNano()
+	var decisions []LiabilityHedgerDecision
+	cfg.DecisionObserver = func(decision LiabilityHedgerDecision) { decisions = append(decisions, decision) }
+	hedger := NewLiabilityHedger(1, gw, cfg)
+	hedger.subscribed = true
+	hedger.obligation, hedger.lastUpdate = 200, now.UnixNano()
+	hedger.book = liabilityHedgerBook{HasSnapshot: true, SourceTime: now.UnixNano(), Sequence: 1, HasBid: true, BidPrice: 99, BidQty: 1_000, HasAsk: true, AskPrice: 101, AskQty: 1_000}
+
+	hedger.onTick(now)
+	if len(gw.requests) != 0 || len(decisions) != 1 {
+		t.Fatalf("unsafe terminal tail submitted a request: requests=%+v decisions=%+v", gw.requests, decisions)
+	}
+	decision := decisions[0]
+	if decision.ActionOrDeferReason != "SIMULATION_HORIZON_CENSORED" || decision.OutcomeExpectation != "SIMULATION_HORIZON_CENSORED" || decision.CensorReason != "terminal_horizon_before_round_trip" || decision.RequestID != 0 || decision.RequestedQty != 0 {
+		t.Fatalf("terminal defer evidence = %+v", decision)
+	}
+}
+
 func TestLiabilityHedgerFillReducesExplicitGap(t *testing.T) {
 	gw := newStoikovStubGateway()
 	var fills []LiabilityHedgerFill

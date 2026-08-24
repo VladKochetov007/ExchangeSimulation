@@ -318,6 +318,17 @@ func (h *LiabilityHedger) decision(now time.Time) LiabilityHedgerDecision {
 		decision.ActionOrDeferReason = "IN_BAND"
 		return decision
 	}
+	// A request may reach the book on the next runner phase and its response
+	// may reach this actor one phase after that. Do not create a final-tail
+	// exchange fill that the actor cannot observe and attest before the fixed
+	// simulation horizon. This is an explicit policy defer, not a missing-fill
+	// exemption in the evidence analyzer.
+	if h.terminalRoundTripCensored(now.UnixNano()) {
+		decision.ActionOrDeferReason = "SIMULATION_HORIZON_CENSORED"
+		decision.OutcomeExpectation = "SIMULATION_HORIZON_CENSORED"
+		decision.CensorReason = "terminal_horizon_before_round_trip"
+		return decision
+	}
 	if !h.book.HasSnapshot {
 		decision.ActionOrDeferReason = "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE"
 		return decision
@@ -356,11 +367,19 @@ func (h *LiabilityHedger) decision(now time.Time) LiabilityHedgerDecision {
 	decision.RequestID = h.PeekNextRequestID()
 	decision.ActionOrDeferReason = "SUBMIT_IOC"
 	decision.OutcomeExpectation = "VENUE_OUTCOME_REQUIRED"
-	if h.cfg.TerminalNano != 0 && now.UnixNano() >= h.cfg.TerminalNano {
-		decision.OutcomeExpectation = "SIMULATION_HORIZON_CENSORED"
-		decision.CensorReason = "terminal_horizon_before_venue_ingress"
-	}
 	return decision
+}
+
+func (h *LiabilityHedger) terminalRoundTripCensored(now int64) bool {
+	if h.cfg.TerminalNano == 0 {
+		return false
+	}
+	deadline, ok := etypes.TryAdd(now, int64(h.cfg.DecisionInterval))
+	if !ok {
+		return true
+	}
+	deadline, ok = etypes.TryAdd(deadline, int64(h.cfg.DecisionInterval))
+	return !ok || deadline > h.cfg.TerminalNano
 }
 
 func (h *LiabilityHedger) baseDecision(now time.Time, action string) LiabilityHedgerDecision {

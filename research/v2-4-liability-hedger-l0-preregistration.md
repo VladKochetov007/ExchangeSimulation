@@ -91,6 +91,17 @@ Each cell is five simulated minutes, uses full persisted evidence, and is
 complete only when final `greeks.json` and `latency.json` sidecars exist. Raw
 evidence stays retained; no L0 extractor may prune it.
 
+An L0 request is not submitted when fewer than two actor decision intervals
+remain before the declared horizon. This conservatively leaves one deterministic
+runner phase for venue ingress/execution and one for the delayed actor response,
+so every exchange fill claimed as an actor-local hedge can have a corresponding
+local fill attestation. The defer is emitted as
+`SIMULATION_HORIZON_CENSORED` with
+`terminal_horizon_before_round_trip`; it is not an analyzer exemption for an
+unattested terminal fill. This tail policy was added after the non-evidentiary
+15-second startup smoke exposed the otherwise-unobservable boundary case, and
+before any registered L0 cell was run.
+
 ## Required evidence and independent replay
 
 Every two-second evaluation emits an evidence-only
@@ -130,7 +141,7 @@ source of truth.
 Deferred actions remain observable. In particular, `POLICY_DISABLED`,
 `NOT_SUBSCRIBED`, `REQUEST_PENDING`, `IN_BAND`,
 `LOCAL_EXECUTABLE_PRICE_UNAVAILABLE`, `INVALID_LIMIT_PRICE`,
-`ZERO_REQUEST_QUANTITY`, and terminal-horizon censoring are distinct states.
+`ZERO_REQUEST_QUANTITY`, and `SIMULATION_HORIZON_CENSORED` are distinct states.
 
 ## Activation gates and falsifiers
 
