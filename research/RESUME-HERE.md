@@ -468,3 +468,10 @@ finish and their contracts pass.
   inventory, trade-ratio, and metadata before interpreting anything. If the
   corrected B audit is not valid, preserve that attempt under a new historical
   label and repair only the evidence/auditor defect.
+- Pre-shutdown verification at corrected `023e671`: focused normal and race
+  P2 tests, `go vet` for analysis/multivenue/mvanalyze, and `go test ./...`
+  passed; `multivenue` and `mvanalyze` were rebuilt; renderer output exactly
+  matches the committed immutable configs. No simulator or analyzer process was
+  left running. Recheck the working tree after reboot, but do not treat the
+  pre-shutdown binaries as provenance for the rerun: rebuild again from the
+  verified source revision.
