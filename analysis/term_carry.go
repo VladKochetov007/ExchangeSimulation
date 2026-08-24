@@ -40,6 +40,7 @@ type TermCarryAudit struct {
 	PositionContinuityErrors  int64            `json:"position_continuity_errors"`
 	TerminalPerpMismatches    int64            `json:"terminal_perp_mismatches"`
 	TerminalSpotMismatches    int64            `json:"terminal_spot_mismatches"`
+	FirstExposureMismatches   int64            `json:"first_exposure_mismatches"`
 	ActiveTerms               int64            `json:"active_terms"`
 	ClosedTerms               int64            `json:"closed_terms"`
 	OpenTerms                 int64            `json:"open_terms"`
@@ -57,6 +58,11 @@ type TermCarryCheck struct {
 	RequestID uint64 `json:"request_id"`
 	Failure   string `json:"failure"`
 }
+
+const (
+	termCarryPolicyV1 = "v2_5_p3_term_carry_v1"
+	termCarryPolicyV2 = "v2_5_p3_term_carry_v2"
+)
 
 type termCarryPolicyConfig struct {
 	Enabled             bool   `json:"enabled"`
@@ -88,22 +94,26 @@ type termCarryManifest struct {
 }
 
 type termCarryDecision struct {
-	VenueID                     string `json:"venue_id"`
-	Desk                        string `json:"desk"`
-	ClientID                    uint64 `json:"client_id"`
-	PolicyVersion               string `json:"policy_version"`
-	DecisionTime                int64  `json:"decision_time"`
-	Enabled                     bool   `json:"enabled"`
-	Subscribed                  bool   `json:"subscribed"`
-	Pending                     bool   `json:"pending"`
-	State                       string `json:"state"`
-	Action                      string `json:"action_or_defer_reason"`
-	SpotSymbol                  string `json:"spot_symbol"`
-	PerpSymbol                  string `json:"perp_symbol"`
-	SpotPosition                int64  `json:"spot_position"`
-	PerpPosition                int64  `json:"perp_position"`
-	TargetSpot                  int64  `json:"target_spot_position"`
-	TargetPerp                  int64  `json:"target_perp_position"`
+	VenueID         string `json:"venue_id"`
+	Desk            string `json:"desk"`
+	ClientID        uint64 `json:"client_id"`
+	PolicyVersion   string `json:"policy_version"`
+	DecisionTime    int64  `json:"decision_time"`
+	Enabled         bool   `json:"enabled"`
+	Subscribed      bool   `json:"subscribed"`
+	Pending         bool   `json:"pending"`
+	State           string `json:"state"`
+	Action          string `json:"action_or_defer_reason"`
+	SpotSymbol      string `json:"spot_symbol"`
+	PerpSymbol      string `json:"perp_symbol"`
+	SpotPosition    int64  `json:"spot_position"`
+	PerpPosition    int64  `json:"perp_position"`
+	TargetSpot      int64  `json:"target_spot_position"`
+	TargetPerp      int64  `json:"target_perp_position"`
+	PlanCreatedAt   int64  `json:"plan_created_at"`
+	FirstExposureAt int64  `json:"first_exposure_at"`
+	// EntryAt is the legacy v1 plan-creation timestamp. V2 replaces it with
+	// explicit plan_created_at and first_exposure_at evidence.
 	EntryAt                     int64  `json:"entry_at"`
 	TermEnd                     int64  `json:"term_end"`
 	MandateEndAt                int64  `json:"mandate_end_at"`
@@ -357,7 +367,7 @@ func (r *Run) MeasureTermCarry() (*TermCarryAudit, error) {
 		}
 	}
 	auditTermCarryLifecycle(r, policy, decisions, outcomes, settlements, result, check)
-	result.Valid = result.ReceiptAuditValid && result.ReceiptEvidenceErrors == 0 && result.SourceMismatches == 0 && result.FutureSourceUse == 0 && result.InvalidDecisionRecords == 0 && result.DecisionFieldMismatches == 0 && result.ArithmeticMismatches == 0 && result.MissingGatewayDecisions == 0 && result.GatewayDecisionMismatches == 0 && result.MissingVenueOutcomes == 0 && result.DuplicateVenueOutcomes == 0 && result.MissingActorOutcomes == 0 && result.ActorOutcomeMismatches == 0 && result.LifecycleViolations == 0 && result.PositionContinuityErrors == 0 && result.TerminalPerpMismatches == 0 && result.TerminalSpotMismatches == 0 && result.OutsideTermFunding == 0
+	result.Valid = result.ReceiptAuditValid && result.ReceiptEvidenceErrors == 0 && result.SourceMismatches == 0 && result.FutureSourceUse == 0 && result.InvalidDecisionRecords == 0 && result.DecisionFieldMismatches == 0 && result.ArithmeticMismatches == 0 && result.MissingGatewayDecisions == 0 && result.GatewayDecisionMismatches == 0 && result.MissingVenueOutcomes == 0 && result.DuplicateVenueOutcomes == 0 && result.MissingActorOutcomes == 0 && result.ActorOutcomeMismatches == 0 && result.LifecycleViolations == 0 && result.PositionContinuityErrors == 0 && result.TerminalPerpMismatches == 0 && result.TerminalSpotMismatches == 0 && result.FirstExposureMismatches == 0 && result.OutsideTermFunding == 0
 	return result, nil
 }
 
@@ -370,13 +380,17 @@ type termCarryParticipant struct {
 }
 
 type termCarryLifecycleTerm struct {
-	owner    termCarryParticipant
-	entryAt  int64
-	termEnd  int64
-	activeAt int64
-	closedAt int64
-	active   bool
-	closed   bool
+	owner           termCarryParticipant
+	policyVersion   string
+	planCreatedAt   int64
+	firstExposureAt int64
+	entryAt         int64 // v1 compatibility only; use firstExposureAt for v2.
+	termEnd         int64
+	activeAt        int64
+	closedAt        int64
+	aborted         bool
+	active          bool
+	closed          bool
 }
 
 type termCarryLifecycleItem struct {
@@ -505,6 +519,9 @@ func auditTermCarryLifecycle(run *Run, policy termCarryPolicyConfig, decisions [
 				}
 				if violation := validateTermCarryLifecycleDecision(policy, *decision, spotPosition, perpPosition, &current, &terms); violation != "" {
 					result.LifecycleViolations++
+					if violation == "first_exposure_mismatch" || violation == "first_exposure_without_plan" || violation == "first_exposure_before_plan" || violation == "active_term_without_first_exposure" {
+						result.FirstExposureMismatches++
+					}
 					check(participant.venue, participant.client, decision.RequestID, violation)
 				}
 				continue
@@ -516,6 +533,19 @@ func auditTermCarryLifecycle(run *Run, policy termCarryPolicyConfig, decisions [
 				check(participant.venue, participant.client, outcome.RequestID, "outcome_without_matching_submission")
 			}
 			spotPosition, perpPosition = applyTermCarryOutcome(policy, *outcome, spotPosition, perpPosition, result, check)
+			if current != nil && current.policyVersion == termCarryPolicyV2 && current.firstExposureAt == 0 && (spotPosition != 0 || perpPosition != 0) {
+				if outcome.Event != "ORDER_FILL" || outcome.ExecutionTime < current.planCreatedAt {
+					result.LifecycleViolations++
+					result.FirstExposureMismatches++
+					check(participant.venue, participant.client, outcome.RequestID, "first_exposure_mismatch")
+				} else {
+					current.firstExposureAt = outcome.ExecutionTime
+				}
+			}
+			if current != nil && current.policyVersion == termCarryPolicyV2 && current.firstExposureAt == 0 && spotPosition == 0 && perpPosition == 0 && (outcome.Event == "ORDER_REJECTED" || outcome.Event == "ORDER_CANCELLED") {
+				current.aborted = true
+				current = nil
+			}
 		}
 		if current != nil {
 			result.OpenTerms++
@@ -587,6 +617,9 @@ func termCarrySpotBalance(balances []Balance, asset string) (int64, bool) {
 }
 
 func validateTermCarryLifecycleDecision(policy termCarryPolicyConfig, decision termCarryDecision, spotPosition, perpPosition int64, current **termCarryLifecycleTerm, terms *[]*termCarryLifecycleTerm) string {
+	if decision.PolicyVersion == termCarryPolicyV2 {
+		return validateTermCarryLifecycleDecisionV2(policy, decision, spotPosition, perpPosition, current, terms)
+	}
 	// A rejected economic candidate has a calculated TermEnd but no EntryAt:
 	// it is a projection used to explain NET_CARRY_BELOW_MINIMUM, not an owned
 	// term. Ownership begins only with the first submitted spot-entry request.
@@ -616,7 +649,7 @@ func validateTermCarryLifecycleDecision(policy termCarryPolicyConfig, decision t
 			if decision.EntryAt != decision.DecisionTime {
 				return "entry_spot_entry_time_mismatch"
 			}
-			*current = &termCarryLifecycleTerm{owner: termCarryParticipant{venue: decision.VenueID, client: decision.ClientID}, entryAt: decision.EntryAt, termEnd: decision.TermEnd}
+			*current = &termCarryLifecycleTerm{owner: termCarryParticipant{venue: decision.VenueID, client: decision.ClientID}, policyVersion: termCarryPolicyV1, entryAt: decision.EntryAt, termEnd: decision.TermEnd}
 			*terms = append(*terms, *current)
 		}
 	case "SUBMIT_ENTRY_PERP_IOC":
@@ -626,6 +659,73 @@ func validateTermCarryLifecycleDecision(policy termCarryPolicyConfig, decision t
 	case "TERM_ACTIVE":
 		if *current == nil || decision.State != "ACTIVE_TERM" || spotPosition == 0 || perpPosition != -spotPosition || decision.DecisionTime >= (*current).termEnd {
 			return "active_term_state_mismatch"
+		}
+		if !(*current).active {
+			(*current).active, (*current).activeAt = true, decision.DecisionTime
+		}
+	case "SUBMIT_UNWIND_PERP_IOC":
+		if *current == nil || decision.State != "UNWIND_PERP" || decision.DecisionTime < (*current).termEnd || perpPosition == 0 {
+			return "perp_unwind_state_mismatch"
+		}
+	case "SUBMIT_UNWIND_SPOT_IOC":
+		if *current == nil || decision.State != "UNWIND_SPOT" || decision.DecisionTime < (*current).termEnd || perpPosition != 0 || spotPosition == 0 {
+			return "spot_unwind_state_mismatch"
+		}
+	case "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN", "UNWIND_PERP_GAP_UNREPRESENTABLE", "UNWIND_SPOT_GAP_UNREPRESENTABLE":
+		if *current == nil || (decision.State != "UNWIND_PERP" && decision.State != "UNWIND_SPOT") || decision.DecisionTime < (*current).termEnd {
+			return "unwind_defer_state_mismatch"
+		}
+	case "TERM_CLOSED":
+		if *current == nil || decision.State != "IDLE" || decision.DecisionTime < (*current).termEnd || spotPosition != 0 || perpPosition != 0 {
+			return "term_close_state_mismatch"
+		}
+		if (*current).closed {
+			return "duplicate_term_close"
+		}
+		(*current).closed, (*current).closedAt = true, decision.DecisionTime
+		*current = nil
+	default:
+		if *current == nil && decision.State != "IDLE" {
+			return "nonidle_state_without_open_term"
+		}
+	}
+	return ""
+}
+
+// validateTermCarryLifecycleDecisionV2 distinguishes an executable entry plan
+// from the owned term. The latter begins only at the canonical first fill.
+func validateTermCarryLifecycleDecisionV2(policy termCarryPolicyConfig, decision termCarryDecision, spotPosition, perpPosition int64, current **termCarryLifecycleTerm, terms *[]*termCarryLifecycleTerm) string {
+	if decision.PlanCreatedAt == 0 {
+		if decision.FirstExposureAt != 0 {
+			return "first_exposure_without_plan"
+		}
+	} else if decision.TermEnd <= decision.PlanCreatedAt {
+		return "invalid_term_bounds"
+	} else if decision.FirstExposureAt != 0 && (decision.FirstExposureAt < decision.PlanCreatedAt || decision.FirstExposureAt > decision.DecisionTime) {
+		return "first_exposure_before_plan"
+	}
+	if *current != nil {
+		if decision.PlanCreatedAt != (*current).planCreatedAt || decision.TermEnd != (*current).termEnd {
+			return "term_identity_changed_while_open"
+		}
+		if decision.FirstExposureAt != (*current).firstExposureAt {
+			return "first_exposure_mismatch"
+		}
+	}
+	switch decision.Action {
+	case "SUBMIT_ENTRY_SPOT_IOC":
+		if *current != nil || decision.State != "ENTRY_SPOT" || decision.PlanCreatedAt != decision.DecisionTime || decision.FirstExposureAt != 0 || decision.TargetSpot == 0 || decision.TargetSpot != -decision.TargetPerp || (decision.TargetSpot != policy.MaxPosition && decision.TargetSpot != -policy.MaxPosition) {
+			return "entry_spot_invalid_plan"
+		}
+		*current = &termCarryLifecycleTerm{owner: termCarryParticipant{venue: decision.VenueID, client: decision.ClientID}, policyVersion: termCarryPolicyV2, planCreatedAt: decision.PlanCreatedAt, termEnd: decision.TermEnd}
+		*terms = append(*terms, *current)
+	case "SUBMIT_ENTRY_PERP_IOC":
+		if *current == nil || decision.State != "ENTRY_PERP" {
+			return "entry_perp_without_entry_state"
+		}
+	case "TERM_ACTIVE":
+		if *current == nil || decision.State != "ACTIVE_TERM" || (*current).firstExposureAt == 0 || spotPosition == 0 || perpPosition != -spotPosition || decision.DecisionTime >= (*current).termEnd {
+			return "active_term_without_first_exposure"
 		}
 		if !(*current).active {
 			(*current).active, (*current).activeAt = true, decision.DecisionTime
@@ -734,7 +834,10 @@ func validTermCarryPolicy(policy termCarryPolicyConfig) error {
 }
 
 func validateTermCarryDecision(policy termCarryPolicyConfig, decision termCarryDecision, sources map[fundingCarrySourceKey][]observationRecord, frontiers map[fundingCarryReceiptKey]auditedFrontier) error {
-	if decision.VenueID == "" || decision.ClientID == 0 || decision.Desk == "" || decision.PolicyVersion != "v2_5_p3_term_carry_v1" || decision.DecisionTime == 0 || decision.Action == "" || decision.SpotSymbol != policy.SpotSymbol || decision.PerpSymbol != policy.PerpSymbol || decision.MandateEndAt != policy.MandateEndAtNano || decision.CommitmentIntervals != policy.CommitmentIntervals || !termCarryKnownAction(decision.Action) {
+	if decision.VenueID == "" || decision.ClientID == 0 || decision.Desk == "" || !termCarryKnownPolicyVersion(decision.PolicyVersion) || decision.DecisionTime == 0 || decision.Action == "" || decision.SpotSymbol != policy.SpotSymbol || decision.PerpSymbol != policy.PerpSymbol || decision.MandateEndAt != policy.MandateEndAtNano || decision.CommitmentIntervals != policy.CommitmentIntervals || !termCarryKnownAction(decision.Action) {
+		return fmt.Errorf("invalid_decision_fields")
+	}
+	if decision.PolicyVersion == termCarryPolicyV2 && (decision.EntryAt != 0 || decision.FirstExposureAt < 0 || decision.PlanCreatedAt < 0 || (decision.FirstExposureAt != 0 && decision.PlanCreatedAt == 0)) {
 		return fmt.Errorf("invalid_decision_fields")
 	}
 	if termCarrySubmission(decision.Action) && (decision.RequestID == 0 || decision.Leg == "" || decision.Side == "" || decision.RequestedQty <= 0) {
@@ -770,6 +873,10 @@ func validateTermCarryDecision(policy termCarryPolicyConfig, decision termCarryD
 	return nil
 }
 
+func termCarryKnownPolicyVersion(version string) bool {
+	return version == termCarryPolicyV1 || version == termCarryPolicyV2
+}
+
 func validateTermCarryEntryEconomics(policy termCarryPolicyConfig, decision termCarryDecision) error {
 	if !decision.HasSpotBook || !decision.HasPerpBook || !decision.HasFunding || !decision.HasSpotBid || !decision.HasSpotAsk || !decision.HasPerpBid || !decision.HasPerpAsk || decision.FundingPublishedAt > decision.DecisionTime || decision.FundingNextAt <= decision.DecisionTime || decision.FundingIntervalSeconds <= 0 {
 		return fmt.Errorf("arithmetic_missing_input")
@@ -802,6 +909,9 @@ func validateTermCarryEntryEconomics(policy termCarryPolicyConfig, decision term
 	}
 	if decision.Action == "SUBMIT_ENTRY_SPOT_IOC" {
 		if financials.net.Cmp(minimum) < 0 || decision.TargetSpot != direction*policy.MaxPosition || decision.TargetPerp != -decision.TargetSpot || decision.State != "ENTRY_SPOT" {
+			return fmt.Errorf("arithmetic_entry_mismatch")
+		}
+		if decision.PolicyVersion == termCarryPolicyV2 && (decision.PlanCreatedAt != decision.DecisionTime || decision.FirstExposureAt != 0) {
 			return fmt.Errorf("arithmetic_entry_mismatch")
 		}
 	}

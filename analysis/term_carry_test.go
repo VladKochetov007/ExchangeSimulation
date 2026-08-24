@@ -102,6 +102,48 @@ func TestTermCarryLifecycleReplaysOneFiniteFundingTerm(t *testing.T) {
 	}
 }
 
+func TestTermCarryV2LifecycleUsesCanonicalFirstExposure(t *testing.T) {
+	run := termCarryLifecycleTestRun(t, makeTermCarryLifecycleV2)
+	result, err := run.MeasureTermCarry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || result.ActiveTerms != 1 || result.ClosedTerms != 1 || result.ActiveTermFunding != 1 || result.FirstExposureMismatches != 0 {
+		t.Fatalf("v2 first-exposure lifecycle replay = %+v", result)
+	}
+}
+
+func TestTermCarryV2LifecycleRejectsForgedFirstExposure(t *testing.T) {
+	run := termCarryLifecycleTestRun(t, func(fixture *termCarryLifecycleFixture) {
+		makeTermCarryLifecycleV2(fixture)
+		for index := range fixture.decisions {
+			if fixture.decisions[index].FirstExposureAt != 0 {
+				fixture.decisions[index].FirstExposureAt++
+			}
+		}
+	})
+	result, err := run.MeasureTermCarry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid || result.FirstExposureMismatches == 0 {
+		t.Fatalf("forged first exposure survived: %+v", result)
+	}
+}
+
+func makeTermCarryLifecycleV2(fixture *termCarryLifecycleFixture) {
+	firstExposureAt := fixture.outcomes[1].ExecutionTime
+	planCreatedAt := fixture.decisions[0].DecisionTime
+	for index := range fixture.decisions {
+		decision := &fixture.decisions[index]
+		decision.PolicyVersion = termCarryPolicyV2
+		decision.EntryAt = 0
+		decision.PlanCreatedAt = planCreatedAt
+		decision.FirstExposureAt = firstExposureAt
+	}
+	fixture.decisions[0].FirstExposureAt = 0
+}
+
 func TestTermCarryLifecycleDistinguishesProjectionFromOwnership(t *testing.T) {
 	t.Run("net carry defer retains a non-owned projected end", func(t *testing.T) {
 		run := termCarryLifecycleTestRun(t, func(fixture *termCarryLifecycleFixture) {
