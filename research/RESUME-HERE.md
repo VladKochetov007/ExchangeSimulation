@@ -790,3 +790,35 @@ finish and their contracts pass.
   the final metrics and score the narrow registered P0 activation/integrity
   predicate. P0 cannot support a market, basis, funding-anchor, cancellation,
   or closure claim because the passive deadline lies after its horizon.
+
+### 2026-08-24 — P3e P0 scored; signed-price hard checkpoint
+
+- The completed P3e P0 raw cell was extracted to a complete fail-closed
+  analysis contract and scored in `bdba08d`; see
+  `v2-5-p3e-passive-exit-p0-results.md` and
+  `artifacts/v2-5-p3e/p0-B-107/p0-verdict.json`. It is **SUPPORTED
+  (screening), activation/integrity only**: two owned active finite terms had
+  locally delivered opposing perp ask depth 16,286/16,348 below the explicit
+  legal 100,000 IOC floor; two exact 100,000 BUY `LIMIT/GTC/post_only` P4
+  children were independently attested, accepted, and later filled. Runtime
+  and offline exact persisted-evidence identities agree at 51,165,698 records
+  / `2e36cc856c71df92624057e48e7aa9e193d6a96b24f0ec9a0c6fa41b26203bf0`.
+  Do not promote later `TERM_CLOSED` rows, passive fills, or residual funding
+  to closure/funding results: P0 was not registered for those claims and its
+  deadline is outside its horizon.
+- The required signed-price architectural check is satisfied. Original branch
+  `v2/signed-price` closed at `cc91896` and merged at `320262e`; a later
+  dedicated hardening branch was integrated at `5afdd45`, with final
+  provenance closure `7644b2`. All are ancestors of the active head. The
+  authoritative ledger/audit/gate are `v2-signed-price-audit.md`,
+  `v2-signed-price-hardening-ledger.md`, and
+  `artifacts/v2-signed-price-hardening-gate.json`. Signed numeric values,
+  explicit availability, zero-settlement wire preservation, full-range
+  midpoint, signed matcher/accounting fixtures, deterministic positive-world
+  equivalence, and parent-vs-branch performance are complete. See the
+  separate P3e checkpoint document for the exact evidence.
+- Next: preregister a fresh same-build P3e lifecycle A/B with the passive
+  deadline inside the horizon. Do not use P3c as control; do not tune depth,
+  slice, population, spreads, or clocks. Keep activation, partial liquidity,
+  cancellation, open residual, actual flat closure, and funding attribution
+  as independent endpoints.
