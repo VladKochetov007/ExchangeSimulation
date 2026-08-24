@@ -82,6 +82,19 @@ type OptionSurface struct {
 	Trades  int            `json:"trades"`
 	Priced  int            `json:"priced"`
 	Skipped int            `json:"skipped_unpriceable"`
+	// SkippedUnavailableIndex means no published index preceded the option
+	// trade. It is an evidence-availability condition, distinct from a present
+	// signed index that Black-76 cannot price.
+	SkippedUnavailableIndex int `json:"skipped_unavailable_index"`
+	// SkippedBlack76Domain counts a present index/contract combination outside
+	// Black-76's positive-forward/positive-strike/positive-time domain.
+	SkippedBlack76Domain int `json:"skipped_black76_domain"`
+	// SkippedNonInvertiblePremium counts a present premium with no recoverable
+	// time value (including a valid zero premium). It is not an absent price.
+	SkippedNonInvertiblePremium int `json:"skipped_noninvertible_premium"`
+	// SkippedInversionBounds counts present inputs within the basic Black-76
+	// domain that nevertheless fail the bounded implied-vol inversion.
+	SkippedInversionBounds int `json:"skipped_inversion_bounds"`
 	// Pooled statistics across every fitted expiry, volume weighted. These are
 	// the numbers an arm is compared on.
 	PooledATMVol     float64 `json:"pooled_atm_vol"`
@@ -250,7 +263,7 @@ func (r *Run) MeasureOptionSurface(opts SurfaceOptions) (*OptionSurface, error) 
 		switch event.Name {
 		case "mark_price_update":
 			var payload markPayload
-			if event.Decode(&payload) != nil || payload.IndexPrice <= 0 {
+			if event.Decode(&payload) != nil {
 				return
 			}
 			at := payload.Timestamp
@@ -266,7 +279,7 @@ func (r *Run) MeasureOptionSurface(opts SurfaceOptions) (*OptionSurface, error) 
 				return
 			}
 			var payload tradePayload
-			if event.Decode(&payload) != nil || payload.Price <= 0 || payload.Qty <= 0 {
+			if event.Decode(&payload) != nil || payload.Qty <= 0 {
 				return
 			}
 			mu.Lock()
@@ -302,15 +315,27 @@ func (r *Run) MeasureOptionSurface(opts SurfaceOptions) (*OptionSurface, error) 
 			continue
 		}
 		forward, known := indexAt(trade.venue, trade.at)
-		if !known || forward <= 0 {
+		if !known {
 			result.Skipped++
+			result.SkippedUnavailableIndex++
 			continue
 		}
 		tte := float64(expiry-trade.at) / 1e9 / secondsPerYear
 		price := float64(trade.price) / precision
+		if forward <= 0 || strike <= 0 || tte <= 0 {
+			result.Skipped++
+			result.SkippedBlack76Domain++
+			continue
+		}
+		if price <= 0 {
+			result.Skipped++
+			result.SkippedNonInvertiblePremium++
+			continue
+		}
 		vol, inverted := impliedVol(price, forward, strike, tte, isCall)
 		if !inverted {
 			result.Skipped++
+			result.SkippedInversionBounds++
 			continue
 		}
 		result.Priced++
