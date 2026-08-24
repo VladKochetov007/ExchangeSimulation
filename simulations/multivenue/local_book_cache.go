@@ -3,6 +3,7 @@ package multivenue
 import (
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	etypes "exchange_sim/types"
 )
 
 // LocalBookCache is one participant's read-only view of one declared public
@@ -18,6 +19,7 @@ type LocalBookCache struct {
 	symbol      string
 
 	bid, ask       int64
+	hasBid, hasAsk bool
 	bidQty, askQty int64
 	sequence       uint64
 	publishedAt    int64
@@ -37,16 +39,16 @@ type LocalBookView struct {
 	Updates     uint64
 }
 
-// twoSidedMidpoint is the only midpoint arithmetic used by participant-side
-// book views. Valid exchange prices are positive and uncrossed, so ask-bid is
-// non-negative and bounded by MaxInt64-1; this avoids the overflow possible
-// in (bid+ask)/2. Its boolean is the availability boundary: callers must not
-// interpret the zero result when it is false as a market price.
+// twoSidedMidpoint is the positive-domain compatibility helper used by legacy
+// spot-only actors. Their caller-owned cache contract rules out zero and
+// negative prices before reaching this function. New generic feed consumers
+// must retain explicit side-presence state and use types.Midpoint directly,
+// as LocalBookCache does below.
 func twoSidedMidpoint(bid, ask int64) (int64, bool) {
 	if bid <= 0 || ask <= 0 || bid > ask {
 		return 0, false
 	}
-	return bid + (ask-bid)/2, true
+	return etypes.Midpoint(bid, ask), true
 }
 
 func NewLocalBookCache(sourceVenue, symbol string) *LocalBookCache {
@@ -63,7 +65,7 @@ func (c *LocalBookCache) ObserveSnapshot(event actor.BookSnapshotEvent) bool {
 	}
 	bid := event.Snapshot.Bids[0]
 	ask := event.Snapshot.Asks[0]
-	if bid.Price <= 0 || ask.Price <= bid.Price || bid.VisibleQty <= 0 || ask.VisibleQty <= 0 {
+	if bid.Price > ask.Price || bid.VisibleQty <= 0 || ask.VisibleQty <= 0 {
 		return false
 	}
 	if (event.SeqNum != 0 && c.sequence != 0 && event.SeqNum <= c.sequence) ||
@@ -72,6 +74,7 @@ func (c *LocalBookCache) ObserveSnapshot(event actor.BookSnapshotEvent) bool {
 		return false
 	}
 	c.bid, c.ask = bid.Price, ask.Price
+	c.hasBid, c.hasAsk = true, true
 	c.bidQty, c.askQty = bid.VisibleQty, ask.VisibleQty
 	c.sequence, c.publishedAt = event.SeqNum, event.Timestamp
 	c.updates++
@@ -95,7 +98,7 @@ func (c *LocalBookCache) ObserveMarketData(message *exchange.MarketDataMsg) bool
 }
 
 func (c *LocalBookCache) View() (LocalBookView, bool) {
-	if c == nil || c.bid <= 0 || c.ask <= c.bid {
+	if c == nil || !c.hasBid || !c.hasAsk || c.bid > c.ask {
 		return LocalBookView{}, false
 	}
 	return LocalBookView{
@@ -111,7 +114,7 @@ func (c *LocalBookCache) Mid() (int64, bool) {
 	if !ok {
 		return 0, false
 	}
-	return twoSidedMidpoint(view.Bid, view.Ask)
+	return etypes.Midpoint(view.Bid, view.Ask), true
 }
 
 func (c *LocalBookCache) RejectedStale() uint64 {
