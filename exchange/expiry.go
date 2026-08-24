@@ -29,6 +29,14 @@ func (f listingPriceSourceFunc) Price(symbol string) (int64, error) { return f(s
 // books: none establishes a usable midpoint.
 var ErrNoBookPrice = etypes.ErrNoPrice
 
+// isPriceUnavailable classifies a failed consumer price boundary. ErrNoPrice
+// means no observation arrived; ErrPriceDomain means a numeric observation
+// arrived but cannot be used by this operation's declared model. Both must be
+// surfaced to a client or periodic diagnostic, never converted to price zero.
+func isPriceUnavailable(err error) bool {
+	return errors.Is(err, etypes.ErrNoPrice) || errors.Is(err, etypes.ErrPriceDomain)
+}
+
 // expiryLifecycleState names the contractual lifecycle rather than deriving it
 // from whether a price happened to be available on one particular automation
 // tick. ACTIVE is a live instrument before expiry; EXPIRY_REACHED immediately
@@ -241,7 +249,7 @@ func (e *DefaultExchange) CheckListings() {
 	for _, policy := range e.listingPolicies {
 		pending, err := policy.PendingListings(now, prices)
 		if err != nil {
-			if errors.Is(err, ErrNoBookPrice) {
+			if isPriceUnavailable(err) {
 				// No valid underlying midpoint: defer this automatic listing.
 				e.reportPriceUnavailable(now, etypes.InstrumentFeedSymbol, "listing", err)
 				continue

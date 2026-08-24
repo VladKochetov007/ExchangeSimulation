@@ -2,7 +2,6 @@ package exchange
 
 import (
 	"cmp"
-	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -1333,7 +1332,7 @@ func (e *DefaultExchange) restoreForeignFeeReservation(book *OrderBook, order *O
 	if order.FilledQty < order.Qty {
 		ok, err := e.reserveForeignFeeFunds(client, book, order, precision)
 		if !ok {
-			if errors.Is(err, ErrNoBookPrice) {
+			if isPriceUnavailable(err) {
 				e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "fee_reservation_refresh", err)
 			}
 			e.cancelUnfundedFeeRemainder(book, client, order)
@@ -1474,7 +1473,7 @@ func (e *DefaultExchange) reserveOrderFunds(client *Client, book *OrderBook, ord
 	// any funds, when the client cannot cover the worst-case fee.
 	if ok, err := e.checkForeignFeeFunds(client, book, order, precision); !ok {
 		reason := RejectInsufficientBalance
-		if errors.Is(err, ErrNoBookPrice) {
+		if isPriceUnavailable(err) {
 			reason = RejectPriceUnavailable
 			e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "order_fee_admission", err)
 		}
@@ -1487,7 +1486,7 @@ func (e *DefaultExchange) reserveOrderFunds(client *Client, book *OrderBook, ord
 	// exact reservation only after that price boundary has succeeded.
 	if ok, err := e.reserveForeignFeeFunds(client, book, order, precision); !ok {
 		reason := RejectInsufficientBalance
-		if errors.Is(err, ErrNoBookPrice) {
+		if isPriceUnavailable(err) {
 			reason = RejectPriceUnavailable
 			e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "order_fee_reservation", err)
 		}
@@ -1509,7 +1508,7 @@ func (e *DefaultExchange) reserveOrderFunds(client *Client, book *OrderBook, ord
 	if !ok {
 		releaseForeignFeeReservation(client, book.Instrument, order)
 		reason := RejectInsufficientBalance
-		if errors.Is(admissionErr, ErrNoBookPrice) {
+		if isPriceUnavailable(admissionErr) {
 			reason = RejectPriceUnavailable
 			e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "order_admission", admissionErr)
 		}

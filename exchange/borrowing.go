@@ -3,6 +3,8 @@ package exchange
 import (
 	"errors"
 	"fmt"
+
+	etypes "exchange_sim/types"
 )
 
 // BorrowContext carries already-resolved, mutable client state for a single borrow/repay call.
@@ -177,7 +179,9 @@ func (bm *BorrowingManager) validateCrossMarginCollateral(client *Client, borrow
 			return 0, fmt.Errorf("collateral price for %s: %w", asset, err)
 		}
 		if price <= 0 {
-			return 0, fmt.Errorf("collateral price for %s: %w", asset, ErrNoBookPrice)
+			// Collateral valuation is intentionally a positive-price contract:
+			// a numeric zero/negative quote is present but cannot back borrowing.
+			return 0, fmt.Errorf("collateral price for %s: %w", asset, etypes.ErrPriceDomain)
 		}
 		return price, nil
 	}
@@ -281,7 +285,7 @@ func (bm *BorrowingManager) CalculateCollateralUsed(asset string, amount int64) 
 		return 0, fmt.Errorf("collateral price for %s: %w", asset, err)
 	}
 	if price <= 0 {
-		return 0, fmt.Errorf("collateral price for %s: %w", asset, ErrNoBookPrice)
+		return 0, fmt.Errorf("collateral price for %s: %w", asset, etypes.ErrPriceDomain)
 	}
 	factor := bm.getCollateralFactor(asset)
 	if factor == 0 {

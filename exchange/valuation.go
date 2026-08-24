@@ -210,7 +210,7 @@ func valueInReport(amount int64, asset string, spec etypes.AccountValuationSpec)
 	}
 	mark, ok := spec.AssetMarks[asset]
 	if !ok || mark.Price <= 0 || mark.Precision <= 0 {
-		return 0, fmt.Errorf("missing valid %s/%s conversion", asset, spec.ReportAsset)
+		return 0, fmt.Errorf("%s/%s conversion requires a positive mark: %w", asset, spec.ReportAsset, etypes.ErrPriceDomain)
 	}
 	value, ok := etypes.TryMulDiv(amount, mark.Price, mark.Precision)
 	if !ok {
