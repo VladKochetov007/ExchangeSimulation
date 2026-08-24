@@ -80,7 +80,8 @@ venue_id, symbol, maker, decision_time,
 client_id, bid_request_id, ask_request_id,
 base_volatility_size, risk_position, inventory_limit,
 size_skew_bps, full_adjustment, adjustment,
-bid_qty, ask_qty, post_only, cancel_before_replace
+bid_price, ask_price, bid_qty, ask_qty,
+post_only, cancel_before_replace
 ```
 
 The event is emitted at the actor decision point before either request is sent;
