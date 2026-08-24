@@ -412,7 +412,17 @@ func (a *TermCarryAllocator) openDecision(decision TermCarryDecision, now time.T
 	a.plan = &termCarryPlan{direction: direction, entryAt: now.UnixNano(), termEnd: financials.termEnd}
 	a.state = termCarryEntrySpot
 	decision.State, decision.EntryAt = a.state, a.plan.entryAt
-	return a.adjustSpotDecision(decision, "ENTRY_SPOT_IOC")
+	decision = a.adjustSpotDecision(decision, "ENTRY_SPOT_IOC")
+	if !termCarrySubmitsOrder(decision.Action) {
+		// A price/size defer has no economic exposure and therefore no ownership
+		// term. Retaining the provisional horizon would turn a missing book or
+		// zero-fill admission into fictitious carry time. A later tick must
+		// recompute its economics from its then-local observations.
+		a.resetFlatEntryPlan()
+		decision.State, decision.EntryAt, decision.TermEnd = a.state, 0, 0
+		decision.TargetSpot, decision.TargetPerp = 0, 0
+	}
+	return decision
 }
 
 func (a *TermCarryAllocator) adjustSpotDecision(decision TermCarryDecision, action string) TermCarryDecision {
@@ -564,6 +574,7 @@ func (a *TermCarryAllocator) onRejected(event actor.OrderRejectedEvent) {
 	}
 	a.emitOutcome(TermCarryLegOutcome{VenueID: a.cfg.VenueID, Desk: a.cfg.Desk, ClientID: a.cfg.ClientID, DecisionTime: a.pending.decisionTime, State: a.pending.state, Event: "ORDER_REJECTED", Leg: a.pending.leg, RequestID: event.RequestID, Symbol: a.pending.symbol, RejectReason: string(event.Reason), SpotPositionBefore: a.spotPosition, SpotPositionAfter: a.spotPosition, PerpPositionBefore: a.perpPosition, PerpPositionAfter: a.perpPosition})
 	a.pending = nil
+	a.resetFlatEntryPlan()
 }
 
 func (a *TermCarryAllocator) onFill(event actor.OrderFillEvent) {
@@ -596,6 +607,17 @@ func (a *TermCarryAllocator) onCancelled(event actor.OrderCancelledEvent) {
 	}
 	a.emitOutcome(TermCarryLegOutcome{VenueID: a.cfg.VenueID, Desk: a.cfg.Desk, ClientID: a.cfg.ClientID, DecisionTime: a.pending.decisionTime, State: a.pending.state, Event: "ORDER_CANCELLED", Leg: a.pending.leg, RequestID: a.pending.requestID, OrderID: event.OrderID, Symbol: a.pending.symbol, RemainingQty: event.RemainingQty, SpotPositionBefore: a.spotPosition, SpotPositionAfter: a.spotPosition, PerpPositionBefore: a.perpPosition, PerpPositionAfter: a.perpPosition})
 	a.pending = nil
+	a.resetFlatEntryPlan()
+}
+
+// resetFlatEntryPlan abandons only a failed, fully flat admission attempt. A
+// partially filled leg remains a real exposure and must continue through the
+// deterministic hedge/unwind state machine instead of being erased.
+func (a *TermCarryAllocator) resetFlatEntryPlan() {
+	if a.pending != nil || a.spotPosition != 0 || a.perpPosition != 0 || (a.state != termCarryEntrySpot && a.state != termCarryEntryPerp) {
+		return
+	}
+	a.state, a.plan = termCarryIdle, nil
 }
 
 func (a *TermCarryAllocator) emitDecision(decision TermCarryDecision) {
@@ -622,6 +644,15 @@ func termCarrySide(side string) exchange.Side {
 		return exchange.Sell
 	}
 	return exchange.Buy
+}
+
+func termCarrySubmitsOrder(action string) bool {
+	switch action {
+	case "SUBMIT_ENTRY_SPOT_IOC", "SUBMIT_ENTRY_PERP_IOC", "SUBMIT_UNWIND_PERP_IOC", "SUBMIT_UNWIND_SPOT_IOC":
+		return true
+	default:
+		return false
+	}
 }
 
 type termCarryFinancials struct {

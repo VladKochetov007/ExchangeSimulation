@@ -125,6 +125,52 @@ func TestTermCarryAllocatorDefersUnavailableUnwindAndRecovers(t *testing.T) {
 	}
 }
 
+func TestTermCarryAllocatorDoesNotCreateTermBeforeExecutableEntry(t *testing.T) {
+	gateway := newFundingCarryStubGateway()
+	var decisions []TermCarryDecision
+	cfg := termCarryTestConfig()
+	cfg.MaxPosition, cfg.LotQty, cfg.MinOrderSize = 100, 100, 75
+	cfg.DecisionObserver = func(decision TermCarryDecision) { decisions = append(decisions, decision) }
+	allocator := NewTermCarryAllocator(1, gateway, cfg)
+	allocator.subscribed = true
+	now := time.Unix(10, 0)
+	observeTermCarryBooks(t, allocator, gateway, now, 100, 101, 102, 103, 100)
+	allocator.spot.askQty = 50
+
+	allocator.onTick(now.Add(time.Second))
+	deferred := decisions[len(decisions)-1]
+	if deferred.Action != "EXECUTABLE_SIZE_UNAVAILABLE" || deferred.State != termCarryIdle || deferred.EntryAt != 0 || deferred.TermEnd != 0 || deferred.TargetSpot != 0 || deferred.TargetPerp != 0 || allocator.plan != nil || allocator.state != termCarryIdle {
+		t.Fatalf("flat unavailable entry created a term: decision=%+v state=%s plan=%+v", deferred, allocator.state, allocator.plan)
+	}
+
+	allocator.spot.askQty = 1_000
+	allocator.onTick(now.Add(2 * time.Second))
+	if entry := decisions[len(decisions)-1]; entry.Action != "SUBMIT_ENTRY_SPOT_IOC" || entry.State != termCarryEntrySpot || entry.EntryAt == 0 || entry.TermEnd <= entry.EntryAt || allocator.plan == nil {
+		t.Fatalf("fresh executable retry did not create a term: decision=%+v state=%s plan=%+v", entry, allocator.state, allocator.plan)
+	}
+}
+
+func TestTermCarryAllocatorResetsRejectedFlatEntry(t *testing.T) {
+	gateway := newFundingCarryStubGateway()
+	var decisions []TermCarryDecision
+	cfg := termCarryTestConfig()
+	cfg.DecisionObserver = func(decision TermCarryDecision) { decisions = append(decisions, decision) }
+	allocator := NewTermCarryAllocator(1, gateway, cfg)
+	allocator.subscribed = true
+	now := time.Unix(10, 0)
+	observeTermCarryBooks(t, allocator, gateway, now, 100, 101, 102, 103, 100)
+
+	allocator.onTick(now.Add(time.Second))
+	entry := decisions[len(decisions)-1]
+	if entry.Action != "SUBMIT_ENTRY_SPOT_IOC" {
+		t.Fatalf("entry decision = %+v", entry)
+	}
+	allocator.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderRejected, Data: actor.OrderRejectedEvent{RequestID: entry.RequestID, Reason: exchange.RejectInsufficientBalance}})
+	if allocator.pending != nil || allocator.plan != nil || allocator.state != termCarryIdle {
+		t.Fatalf("rejected flat entry retained term state: pending=%+v state=%s plan=%+v", allocator.pending, allocator.state, allocator.plan)
+	}
+}
+
 func TestTermCarryFinancialsUseExactDirectionalTermCost(t *testing.T) {
 	cfg := termCarryTestConfig()
 	cfg.CommitmentIntervals = 12
