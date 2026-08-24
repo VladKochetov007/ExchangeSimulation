@@ -93,8 +93,8 @@ denominator is zero, not zero-valued economic inputs.
 Each decision and lifecycle transition must persist:
 
 - allocator/venue/client identity, finite capital limit, policy version, state
-  before/after, entry time, term end, actual next funding time, and close
-  deadline;
+  before/after, explicit plan-creation time, canonical first-exposure time,
+  term end, actual next funding time, and close deadline;
 - all local book/funding identities and the exact decision frontier;
 - signed target pair, actual two-leg positions, matched quantity, orphan
   quantity, entry/unwind reason, request IDs, accepted/rejected/fill/cancel
@@ -124,6 +124,14 @@ fill, and a one-unit terminal spot-balance mismatch. Evidence ON/OFF fresh
 process × GOMAXPROCS neutral checks are complete for the terminal-censored
 short helper. P3a's immutable short-world config, activation contract, and
 full-evidence analysis command were committed before its market cells ran.
+
+P3a retained its v1 plan-time field because the five-minute screen only claims
+ordinary matched activation. P3b and later cells emit policy version
+`v2_5_p3_term_carry_v2`: `plan_created_at` identifies the pre-ingress plan and
+`first_exposure_at` identifies the first actual canonical fill. A flat
+rejected/cancelled plan is aborted rather than counted as an open ownership
+term. The independent replay rejects a forged first-exposure timestamp and
+continues to parse v1 evidence only as historical evidence.
 
 Required mutations: reversed funding sign; dropped/delayed/duplicate/reordered
 funding or book receipt; a valid zero incorrectly treated absent; a forged

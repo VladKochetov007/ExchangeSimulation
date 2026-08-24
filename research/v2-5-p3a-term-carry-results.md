@@ -25,9 +25,9 @@ all required extracted artifacts remain retained under
 | persisted evidence records / multiset digest | 56,802 / `062e880fe30913314c8ccdb1d7e7bb660eb098a9fe984be80fd774bca1eed417` | 56,648 / `4955ab18bf51a723a3c7050822a994e838b642c7b94f01a361b6e150dd105dc6` |
 | persisted evidence-artifact digest | `229422399354ff81bc82071b652a34264d08234dc55f8d87468100597c9bf512` | `15eff06bd198c851fbad2335acc751100176a918e8d51a7003cbc0ea6ffc377c` |
 
-The final analyzer was rebuilt after the retained-evidence V-039/V-040
-repairs at `8b41c4a`; its SHA-256 is
-`2d67562dc0d4a884426864c4a613e233d5b30571c2f3115545e2e6aa0b44aa01`.
+The final reanalysis was rebuilt after the retained-evidence V-039/V-040
+repairs and V-041's versioned first-exposure replay at `55cd06a`; its SHA-256
+is `942871e5e01be82090238a01b55281cbf937c30318a02b9706480a285bf0ecc4`.
 Those repairs are analyzer-only and did not regenerate either world. The
 simulator's immutable A/B delta, after removing provenance strings, is only
 `term_carry_allocator.enabled: false → true`.
@@ -87,8 +87,7 @@ under its declared local-source and 12-interval belief contract. It does not
 identify any market-level funding channel. P3b may now be preregistered as a
 separate nine-hour realization cell whose primary activation condition is at
 least one funding settlement while a reconstructed matched term remains
-active. Before that run, its entry-time evidence must distinguish first actual
-exposure from an entry request, and its finite 10m initial commitment must be
-described exactly rather than conflated with the 100m risk ceiling. No basis,
-profitability, price, spread, clock, latency, or population result from P3a
-will be used to tune P3b.
+active. P3b must use the v2 plan/first-exposure fields, and its finite 10m
+initial commitment must be described exactly rather than conflated with the
+100m risk ceiling. No basis, profitability, price, spread, clock, latency, or
+population result from P3a will be used to tune P3b.

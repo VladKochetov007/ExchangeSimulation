@@ -4,8 +4,8 @@
   "scope": "locally informed, ordinary matched spot/perpetual entry only; not funding anchoring, realized carry, basis convergence, price stability, or realism",
   "preregistration": "research/v2-5-p3a-term-carry-preregistration.md",
   "simulation_source_commit": "fe5152ce57affd96cb9472a27026bcc3e56ecc38",
-  "analyzer_source_commit": "8b41c4a",
-  "analyzer_sha256": "2d67562dc0d4a884426864c4a613e233d5b30571c2f3115545e2e6aa0b44aa01",
+  "analyzer_source_commit": "55cd06a",
+  "analyzer_sha256": "942871e5e01be82090238a01b55281cbf937c30318a02b9706480a285bf0ecc4",
   "seed": 107,
   "horizon": "5m simulated",
   "gomaxprocs": 3,
@@ -67,5 +67,5 @@
     "order_lifecycle_valid": true,
     "terminal_spot_reconciliation_valid": true
   },
-  "next_gate": "Preregister P3b nine-hour realization with first-exposure timestamp and active-term funding-settlement reconstruction; do not score P3a as carry economics."
+  "next_gate": "Preregister P3b nine-hour realization using v2 plan-created/first-exposure evidence and active-term funding-settlement reconstruction; do not score P3a as carry economics."
 }

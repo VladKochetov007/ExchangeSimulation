@@ -1394,3 +1394,24 @@ the terminal balance by one raw unit invalidates the audit. Retained P3a A and
 B replays both have zero terminal spot and perpetual mismatches. This is an
 analyzer-only coverage repair; it neither changes simulator execution nor
 alters P3a's raw evidence.
+
+## V-041 — P3 v1 called plan creation an entry time
+
+P3 v1 wrote `entry_at` when the actor submitted its first spot IOC request.
+That proves an executable plan existed, but it is not the time at which the
+actor first acquired economic exposure: the request can be delayed, rejected,
+or partially filled later. P3a does not claim realized funding and its
+five-minute activation verdict remains valid on the ordinary order/fill chain;
+however, P3b cannot use v1's field to establish that a funding payment occurred
+while actual exposure was held.
+
+P3 v2 replaces the ambiguous field on new evidence with explicit
+`plan_created_at` and `first_exposure_at`. The actor sets the latter exactly
+once from its first canonical fill, including a partial fill, without adding a
+scheduler event, random draw, delivery, or economic decision. The independent
+replay permits a zero-exposure executable plan, derives its first exposure
+from the actor-attested/canonical fill chain, rejects a forged first-exposure
+timestamp, and treats a flat rejected/cancelled plan as aborted rather than as
+an open term. Historical v1 evidence remains supported by its versioned replay
+path and P3a re-extracts with zero new mismatches. P3b is prohibited from using
+the legacy `entry_at` field.
