@@ -1,5 +1,7 @@
 package analysis
 
+import "math"
+
 // LevelSpacing describes the geometry of the book a taker actually faces:
 // how many prices are stacked on a side, and how far apart they sit.
 //
@@ -58,9 +60,10 @@ func MeasureLevelSpacing(path string, opts SpacingOptions) (*LevelSpacing, error
 		if seen%sampleEvery != 0 {
 			return
 		}
-		bid, ask := book.BestBid(), book.BestAsk()
-		if bid > 0 && ask > 0 {
-			spreads = append(spreads, float64(ask-bid)/float64(opts.TickSize))
+		bid, bidOK := book.BestBid()
+		ask, askOK := book.BestAsk()
+		if bidOK && askOK && bid <= ask {
+			spreads = append(spreads, (float64(ask)-float64(bid))/float64(opts.TickSize))
 		}
 		for _, side := range []bool{true, false} {
 			prices := book.sortedLevels(side)
@@ -73,13 +76,13 @@ func MeasureLevelSpacing(path string, opts SpacingOptions) (*LevelSpacing, error
 			}
 			// sortedLevels returns prices in consumption order, so successive
 			// entries are adjacent levels moving away from the touch.
-			first := absInt(prices[1] - prices[0])
-			firstGaps = append(firstGaps, float64(first)/float64(opts.TickSize))
+			first := math.Abs(float64(prices[1]) - float64(prices[0]))
+			firstGaps = append(firstGaps, first/float64(opts.TickSize))
 			for i := 1; i < len(prices); i++ {
-				gap := absInt(prices[i] - prices[i-1])
-				allGaps = append(allGaps, float64(gap)/float64(opts.TickSize))
+				gap := math.Abs(float64(prices[i]) - float64(prices[i-1]))
+				allGaps = append(allGaps, gap/float64(opts.TickSize))
 				totalGaps++
-				if gap == opts.TickSize {
+				if gap == float64(opts.TickSize) {
 					singleTick++
 				}
 			}
@@ -98,11 +101,4 @@ func MeasureLevelSpacing(path string, opts SpacingOptions) (*LevelSpacing, error
 		result.SingleTickGapShare = float64(singleTick) / float64(totalGaps)
 	}
 	return result, nil
-}
-
-func absInt(value int64) int64 {
-	if value < 0 {
-		return -value
-	}
-	return value
 }

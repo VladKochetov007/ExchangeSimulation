@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"sort"
+
+	etypes "exchange_sim/types"
 )
 
 // ReplayedBook is a book reconstructed by sequential replay of a venue's log.
@@ -50,29 +52,40 @@ func (b *ReplayedBook) Reset(bids, asks []bookLevel) {
 	}
 }
 
-func (b *ReplayedBook) BestBid() int64 { return extremePrice(b.bids, true) }
-func (b *ReplayedBook) BestAsk() int64 { return extremePrice(b.asks, false) }
+// BestBid returns the executable bid and an explicit presence flag. A numeric
+// zero can be a real signed-contract level; it is never the empty-book
+// sentinel.
+func (b *ReplayedBook) BestBid() (int64, bool) { return extremePrice(b.bids, true) }
 
-func extremePrice(levels map[int64]int64, highest bool) int64 {
-	best := int64(0)
+// BestAsk returns the executable ask and an explicit presence flag. A numeric
+// zero can be a real signed-contract level; it is never the empty-book
+// sentinel.
+func (b *ReplayedBook) BestAsk() (int64, bool) { return extremePrice(b.asks, false) }
+
+func extremePrice(levels map[int64]int64, highest bool) (int64, bool) {
+	var best int64
+	found := false
 	for price, qty := range levels {
 		if qty <= 0 {
 			continue
 		}
-		if best == 0 || (highest && price > best) || (!highest && price < best) {
+		if !found || (highest && price > best) || (!highest && price < best) {
 			best = price
+			found = true
 		}
 	}
-	return best
+	return best, found
 }
 
-// Mid is the midpoint, or zero when either side is empty.
-func (b *ReplayedBook) Mid() int64 {
-	bid, ask := b.BestBid(), b.BestAsk()
-	if bid <= 0 || ask <= 0 {
-		return 0
+// Mid returns the exact signed midpoint when both sides are present and
+// uncrossed. Absence is the boolean result, not a numeric zero.
+func (b *ReplayedBook) Mid() (int64, bool) {
+	bid, bidOK := b.BestBid()
+	ask, askOK := b.BestAsk()
+	if !bidOK || !askOK || bid > ask {
+		return 0, false
 	}
-	return (bid + ask) / 2
+	return etypes.Midpoint(bid, ask), true
 }
 
 // sortedLevels returns one side's prices in the order a taker consumes them.
@@ -103,8 +116,8 @@ func (b *ReplayedBook) sortedLevels(buySide bool) []int64 {
 // This is the mechanical part of impact, isolated: it is what the order alone
 // does to the touch, before anybody requotes. It returns zero when the side is
 // exhausted, which the caller must treat as unmeasurable rather than as a move
-// to price zero.
-func (b *ReplayedBook) ConsumeCounterfactual(takerBuys bool, qty int64) int64 {
+// to price zero. Its boolean makes the exhausted state explicit.
+func (b *ReplayedBook) ConsumeCounterfactual(takerBuys bool, qty int64) (int64, bool) {
 	// A buying taker consumes asks; the levels it walks are the ask side.
 	prices := b.sortedLevels(!takerBuys)
 	levels := b.asks
@@ -114,23 +127,21 @@ func (b *ReplayedBook) ConsumeCounterfactual(takerBuys bool, qty int64) int64 {
 	remaining := qty
 	for _, price := range prices {
 		if remaining < levels[price] {
-			return price
+			return price, true
 		}
 		remaining -= levels[price]
 	}
-	return 0
+	return 0, false
 }
 
-// DeepestVisible reports the furthest price on the side a taker would consume,
-// or zero when that side is empty. It is the price a walk reaches when the
-// order exhausts the visible book, and so bounds the mechanical move for the
-// orders ConsumeCounterfactual refuses.
-func (b *ReplayedBook) DeepestVisible(takerBuys bool) int64 {
+// DeepestVisible reports the furthest price on the side a taker would consume.
+// Its boolean makes an empty side explicit; zero remains a valid level.
+func (b *ReplayedBook) DeepestVisible(takerBuys bool) (int64, bool) {
 	prices := b.sortedLevels(!takerBuys)
 	if len(prices) == 0 {
-		return 0
+		return 0, false
 	}
-	return prices[len(prices)-1]
+	return prices[len(prices)-1], true
 }
 
 // replayEvent is the subset of a log record the replay needs, decoded once.
@@ -151,18 +162,21 @@ type deltaPayload struct {
 	HiddenQty  int64  `json:"hidden_qty"`
 }
 
-// bestOf is the best price on one side of a published snapshot.
-func bestOf(levels []bookLevel, highest bool) int64 {
-	best := int64(0)
+// bestOf is the best price on one side of a published snapshot. The presence
+// flag prevents a zero level from being confused with no published side.
+func bestOf(levels []bookLevel, highest bool) (int64, bool) {
+	var best int64
+	found := false
 	for _, level := range levels {
 		if level.VisibleQty+level.HiddenQty <= 0 {
 			continue
 		}
-		if best == 0 || (highest && level.Price > best) || (!highest && level.Price < best) {
+		if !found || (highest && level.Price > best) || (!highest && level.Price < best) {
 			best = level.Price
+			found = true
 		}
 	}
-	return best
+	return best, found
 }
 
 type tradePayload struct {
@@ -267,7 +281,12 @@ func ReplayFileWith(path string, visit ReplayVisitor, onAccept AcceptVisitor) (*
 			// check would pass however broken the replay was; it would also
 			// truncate the book to the snapshot's depth limit permanently.
 			drift.Checks++
-			if book.BestBid() != bestOf(snapshot.Bids, true) || book.BestAsk() != bestOf(snapshot.Asks, false) {
+			bookBid, bookBidOK := book.BestBid()
+			bookAsk, bookAskOK := book.BestAsk()
+			snapshotBid, snapshotBidOK := bestOf(snapshot.Bids, true)
+			snapshotAsk, snapshotAskOK := bestOf(snapshot.Asks, false)
+			if bookBidOK != snapshotBidOK || bookAskOK != snapshotAskOK ||
+				(bookBidOK && bookBid != snapshotBid) || (bookAskOK && bookAsk != snapshotAsk) {
 				drift.Mismatches++
 			}
 		}
