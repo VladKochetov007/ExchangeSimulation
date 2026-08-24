@@ -43,32 +43,37 @@ type LiabilityHedgerAudit struct {
 	MissingGatewayDecisions int64 `json:"missing_gateway_decisions"`
 	GatewayDecisionMismatch int64 `json:"gateway_decision_mismatches"`
 
-	InvalidDecisionRecords   int64                   `json:"invalid_decision_records"`
-	StateTransitionMismatch  int64                   `json:"state_transition_mismatches"`
-	DecisionFieldMismatches  int64                   `json:"decision_field_mismatches"`
-	DisabledSubmissions      int64                   `json:"disabled_submissions"`
-	DuplicateDecisions       int64                   `json:"duplicate_decisions"`
-	MissingOutcomes          int64                   `json:"missing_outcomes"`
-	DuplicateOutcomes        int64                   `json:"duplicate_outcomes"`
-	CensoredOutcomeDelivery  int64                   `json:"censored_outcome_deliveries"`
-	OutcomeFieldMismatches   int64                   `json:"outcome_field_mismatches"`
-	MissingIOCTerminals      int64                   `json:"missing_ioc_terminals"`
-	DuplicateIOCTerminals    int64                   `json:"duplicate_ioc_terminals"`
-	FillQuantityMismatches   int64                   `json:"fill_quantity_mismatches"`
-	MissingFillEvidence      int64                   `json:"missing_fill_evidence"`
-	UnexpectedFillEvidence   int64                   `json:"unexpected_fill_evidence"`
-	FillEvidenceMismatches   int64                   `json:"fill_evidence_mismatches"`
-	NonReducingFills         int64                   `json:"non_reducing_fills"`
-	RandomControlFills       int64                   `json:"random_control_fills"`
-	RandomControlReducing    int64                   `json:"random_control_reducing_fills"`
-	RandomControlNonReducing int64                   `json:"random_control_non_reducing_fills"`
-	UnknownCounterparties    int64                   `json:"unknown_counterparties"`
-	SelfFills                int64                   `json:"self_fills"`
-	NonTakerFills            int64                   `json:"non_taker_fills"`
-	NonPositiveFees          int64                   `json:"non_positive_fees"`
-	FeeMismatches            int64                   `json:"fee_mismatches"`
-	ActionCounts             map[string]int64        `json:"action_counts,omitempty"`
-	PolicyMode               string                  `json:"policy_mode"`
+	InvalidDecisionRecords   int64            `json:"invalid_decision_records"`
+	StateTransitionMismatch  int64            `json:"state_transition_mismatches"`
+	DecisionFieldMismatches  int64            `json:"decision_field_mismatches"`
+	DisabledSubmissions      int64            `json:"disabled_submissions"`
+	DuplicateDecisions       int64            `json:"duplicate_decisions"`
+	MissingOutcomes          int64            `json:"missing_outcomes"`
+	DuplicateOutcomes        int64            `json:"duplicate_outcomes"`
+	CensoredOutcomeDelivery  int64            `json:"censored_outcome_deliveries"`
+	OutcomeFieldMismatches   int64            `json:"outcome_field_mismatches"`
+	MissingIOCTerminals      int64            `json:"missing_ioc_terminals"`
+	DuplicateIOCTerminals    int64            `json:"duplicate_ioc_terminals"`
+	FillQuantityMismatches   int64            `json:"fill_quantity_mismatches"`
+	MissingFillEvidence      int64            `json:"missing_fill_evidence"`
+	UnexpectedFillEvidence   int64            `json:"unexpected_fill_evidence"`
+	FillEvidenceMismatches   int64            `json:"fill_evidence_mismatches"`
+	NonReducingFills         int64            `json:"non_reducing_fills"`
+	RandomControlFills       int64            `json:"random_control_fills"`
+	RandomControlReducing    int64            `json:"random_control_reducing_fills"`
+	RandomControlNonReducing int64            `json:"random_control_non_reducing_fills"`
+	UnknownCounterparties    int64            `json:"unknown_counterparties"`
+	SelfFills                int64            `json:"self_fills"`
+	NonTakerFills            int64            `json:"non_taker_fills"`
+	NonPositiveFees          int64            `json:"non_positive_fees"`
+	FeeMismatches            int64            `json:"fee_mismatches"`
+	ActionCounts             map[string]int64 `json:"action_counts,omitempty"`
+	PolicyMode               string           `json:"policy_mode"`
+	// DecisionPhaseOffsetNanos is checked against every persisted decision
+	// timestamp. PhaseConfigured distinguishes retained L0/L1 logs, which
+	// predate an explicit phase field, from an explicit zero phase.
+	DecisionPhaseOffsetNanos int64                   `json:"decision_phase_offset_nanos"`
+	PhaseConfigured          bool                    `json:"phase_configured"`
 	Hedgers                  []LiabilityHedgerBucket `json:"hedgers,omitempty"`
 
 	Checks []LiabilityHedgerCheck `json:"checks,omitempty"`
@@ -119,6 +124,7 @@ type liabilityHedgerDecision struct {
 	PositionBefore       int64  `json:"position_before"`
 	HedgeGap             int64  `json:"hedge_gap"`
 	DecisionInterval     int64  `json:"decision_interval"`
+	DecisionPhaseOffset  *int64 `json:"decision_phase_offset_nanos"`
 	ObligationInterval   int64  `json:"obligation_interval"`
 	LastBookSourceTime   int64  `json:"last_book_source_time"`
 	LastBookReceivedTime int64  `json:"last_book_received_time"`
@@ -251,19 +257,22 @@ type liabilityHedgerReplayState struct {
 	seenFirst  bool
 }
 
+type liabilityHedgerPolicyConfig struct {
+	Enabled             bool   `json:"enabled"`
+	PolicyMode          string `json:"policy_mode"`
+	Symbol              string `json:"symbol"`
+	DecisionInterval    int64  `json:"decision_interval"`
+	DecisionPhaseOffset *int64 `json:"decision_phase_offset"`
+	ObligationInterval  int64  `json:"obligation_interval"`
+	ObligationStepQty   int64  `json:"obligation_step_qty"`
+	MaxAbsObligationQty int64  `json:"max_abs_obligation_qty"`
+	MaxRequestQty       int64  `json:"max_request_qty"`
+}
+
 type liabilityHedgerRunConfig struct {
-	Seed               int64    `json:"seed"`
-	VenueIDs           []string `json:"venue_ids"`
-	CDFLiabilityHedger *struct {
-		Enabled             bool   `json:"enabled"`
-		PolicyMode          string `json:"policy_mode"`
-		Symbol              string `json:"symbol"`
-		DecisionInterval    int64  `json:"decision_interval"`
-		ObligationInterval  int64  `json:"obligation_interval"`
-		ObligationStepQty   int64  `json:"obligation_step_qty"`
-		MaxAbsObligationQty int64  `json:"max_abs_obligation_qty"`
-		MaxRequestQty       int64  `json:"max_request_qty"`
-	} `json:"cdf_liability_hedger"`
+	Seed               int64                        `json:"seed"`
+	VenueIDs           []string                     `json:"venue_ids"`
+	CDFLiabilityHedger *liabilityHedgerPolicyConfig `json:"cdf_liability_hedger"`
 }
 
 const (
@@ -275,6 +284,9 @@ const (
 	liabilityHedgerFeeBps             = int64(5)
 	liabilityHedgerPolicyLiability    = "delivery_liability"
 	liabilityHedgerPolicyRandom       = "random_side_control"
+	// This fixed epoch must equal the one in multivenue.NewSim. Phase replay
+	// uses absolute simulation time, never JSONL file or logger ordering.
+	liabilityHedgerSimulationStart = int64(1_735_689_600_000_000_000)
 )
 
 // MeasureLiabilityHedger audits the complete L0 evidence relation. It does
@@ -290,7 +302,13 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 	}
 	receipts, gatewayDecisions, receiptAudit, receiptErr := liabilityHedgerEvidence(r.Dir)
 	policyMode := effectiveLiabilityHedgerPolicyMode(config.CDFLiabilityHedger.PolicyMode)
-	result := &LiabilityHedgerAudit{ActionCounts: make(map[string]int64), PolicyMode: policyMode}
+	phaseOffset, phaseConfigured := liabilityHedgerConfiguredPhase(config.CDFLiabilityHedger)
+	result := &LiabilityHedgerAudit{
+		ActionCounts:             make(map[string]int64),
+		PolicyMode:               policyMode,
+		DecisionPhaseOffsetNanos: phaseOffset,
+		PhaseConfigured:          phaseConfigured,
+	}
 	terminalAt := int64(0)
 	if receiptAudit != nil {
 		terminalAt = receiptAudit.TerminalAt
@@ -450,7 +468,7 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 				addCheck(event.venueID, event.clientID, event.decision.RequestID, 0, "duplicate_liability_decision_tick")
 			}
 			seenDecisionTick[participant][event.decision.DecisionTime] = true
-			valid, update, submitted := validateLiabilityHedgerDecision(*event.decision, state, terminalAt, policyMode)
+			valid, update, submitted := validateLiabilityHedgerDecision(*event.decision, state, terminalAt, policyMode, phaseOffset, phaseConfigured)
 			if update {
 				result.StateUpdates++
 				bucket.StateUpdates++
@@ -747,6 +765,9 @@ func validLiabilityHedgerRunConfig(config liabilityHedgerRunConfig) error {
 	if policy == nil || len(config.VenueIDs) != 3 || policy.Symbol != "CDF/USD" || policy.DecisionInterval != liabilityHedgerDecisionInterval || policy.ObligationInterval != liabilityHedgerObligationInterval || policy.ObligationStepQty != liabilityHedgerStep || policy.MaxAbsObligationQty != liabilityHedgerLimit || policy.MaxRequestQty != liabilityHedgerRequestCap {
 		return fmt.Errorf("unsupported L0/L1 policy/configuration")
 	}
+	if policy.DecisionPhaseOffset != nil && (*policy.DecisionPhaseOffset < 0 || *policy.DecisionPhaseOffset >= policy.DecisionInterval) {
+		return fmt.Errorf("unsupported L1 phase offset %d", *policy.DecisionPhaseOffset)
+	}
 	if policy.PolicyMode != "" && policy.PolicyMode != liabilityHedgerPolicyLiability && policy.PolicyMode != liabilityHedgerPolicyRandom {
 		return fmt.Errorf("unsupported L0/L1 policy mode %q", policy.PolicyMode)
 	}
@@ -761,6 +782,13 @@ func validLiabilityHedgerRunConfig(config liabilityHedgerRunConfig) error {
 		seen[venueID] = struct{}{}
 	}
 	return nil
+}
+
+func liabilityHedgerConfiguredPhase(policy *liabilityHedgerPolicyConfig) (int64, bool) {
+	if policy.DecisionPhaseOffset == nil {
+		return 0, false
+	}
+	return *policy.DecisionPhaseOffset, true
 }
 
 // effectiveLiabilityHedgerPolicyMode preserves the L0 evidence contract:
@@ -835,8 +863,11 @@ func liabilityHedgerEvidence(dir string) (map[liabilityHedgerReceiptKey][]liabil
 	return receipts, decisions, audit, nil
 }
 
-func validateLiabilityHedgerDecision(d liabilityHedgerDecision, state *liabilityHedgerReplayState, terminalAt int64, policyMode string) (valid bool, update bool, submitted bool) {
+func validateLiabilityHedgerDecision(d liabilityHedgerDecision, state *liabilityHedgerReplayState, terminalAt int64, policyMode string, phaseOffset int64, phaseConfigured bool) (valid bool, update bool, submitted bool) {
 	if d.Symbol != "CDF/USD" || d.ObligationLimit != liabilityHedgerLimit || d.DecisionInterval != liabilityHedgerDecisionInterval || d.ObligationInterval != liabilityHedgerObligationInterval || d.TakerFeeBps != liabilityHedgerFeeBps || d.DecisionTime <= 0 {
+		return false, false, false
+	}
+	if !liabilityHedgerDecisionMatchesPhase(d, phaseOffset, phaseConfigured) {
 		return false, false, false
 	}
 	if !liabilityHedgerObservedPolicyModeMatches(d.PolicyMode, policyMode) {
@@ -925,6 +956,23 @@ func validateLiabilityHedgerDecision(d liabilityHedgerDecision, state *liability
 		return false, update, false
 	}
 	return true, update, true
+}
+
+func liabilityHedgerDecisionMatchesPhase(d liabilityHedgerDecision, offset int64, configured bool) bool {
+	if !configured {
+		// Historic L0/L1 evidence predates the explicit field. Current zero-phase
+		// rows may include it, but an absent legacy field remains distinguishable
+		// from a configured zero phase at the run-config boundary.
+		return d.DecisionPhaseOffset == nil || *d.DecisionPhaseOffset == 0
+	}
+	if d.DecisionPhaseOffset == nil || *d.DecisionPhaseOffset != offset {
+		return false
+	}
+	elapsed := d.DecisionTime - liabilityHedgerSimulationStart
+	if elapsed < liabilityHedgerDecisionInterval+offset {
+		return false
+	}
+	return (elapsed-offset)%liabilityHedgerDecisionInterval == 0
 }
 
 func liabilityHedgerTailDeadline(decisionAt int64) (int64, bool) {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"exchange_sim/exchange"
 	"exchange_sim/simulation"
@@ -201,6 +202,31 @@ func TestLiabilityHedgerBookEvidenceSeparatesPresenceFromPrice(t *testing.T) {
 	decision.AskPrice = 1
 	if validLiabilityHedgerBookEvidence(decision) {
 		t.Fatal("missing ask retained a numeric price field")
+	}
+}
+
+func TestLiabilityHedgerDecisionPhaseEvidenceRejectsMissingMismatchedAndOffPhaseRows(t *testing.T) {
+	offset := int64(time.Second)
+	d := liabilityHedgerDecision{
+		DecisionTime:        liabilityHedgerSimulationStart + liabilityHedgerDecisionInterval + offset,
+		DecisionPhaseOffset: &offset,
+	}
+	if !liabilityHedgerDecisionMatchesPhase(d, offset, true) {
+		t.Fatal("configured 1s phase decision was rejected")
+	}
+	d.DecisionPhaseOffset = nil
+	if liabilityHedgerDecisionMatchesPhase(d, offset, true) {
+		t.Fatal("missing explicit configured phase survived")
+	}
+	wrong := int64(0)
+	d.DecisionPhaseOffset = &wrong
+	if liabilityHedgerDecisionMatchesPhase(d, offset, true) {
+		t.Fatal("mismatched phase field survived")
+	}
+	d.DecisionPhaseOffset = &offset
+	d.DecisionTime--
+	if liabilityHedgerDecisionMatchesPhase(d, offset, true) {
+		t.Fatal("off-phase decision timestamp survived")
 	}
 }
 

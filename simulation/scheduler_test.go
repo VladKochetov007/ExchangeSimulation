@@ -118,6 +118,78 @@ func TestSimTickerBasicOperation(t *testing.T) {
 	}
 }
 
+func TestSimTickerWithOffsetPreservesIntervalAndMovesFirstTick(t *testing.T) {
+	clock := NewSimulatedClock(0)
+	scheduler := NewEventScheduler(clock)
+	clock.SetScheduler(scheduler)
+	factory := NewSimTimerFactory(scheduler)
+
+	ticker := factory.NewTickerWithOffset(100*time.Millisecond, 50*time.Millisecond)
+	defer ticker.Stop()
+	ack := ticker.(interface{ Acknowledge() })
+
+	clock.Advance(149 * time.Millisecond)
+	select {
+	case tick := <-ticker.C():
+		t.Fatalf("offset ticker fired early at %s", tick)
+	default:
+	}
+	clock.Advance(time.Millisecond)
+	if tick := <-ticker.C(); tick.UnixNano() != int64(150*time.Millisecond) {
+		t.Fatalf("first offset tick = %s, want 150ms", tick)
+	}
+	ack.Acknowledge()
+	clock.Advance(100 * time.Millisecond)
+	if tick := <-ticker.C(); tick.UnixNano() != int64(250*time.Millisecond) {
+		t.Fatalf("second offset tick = %s, want 250ms", tick)
+	}
+	ack.Acknowledge()
+}
+
+func TestSimTickerZeroOffsetUsesLegacySchedule(t *testing.T) {
+	clock := NewSimulatedClock(0)
+	scheduler := NewEventScheduler(clock)
+	clock.SetScheduler(scheduler)
+	factory := NewSimTimerFactory(scheduler)
+
+	legacy := factory.NewTicker(100 * time.Millisecond)
+	zero := factory.NewTickerWithOffset(100*time.Millisecond, 0)
+	defer legacy.Stop()
+	defer zero.Stop()
+	clock.Advance(100 * time.Millisecond)
+	if tick := <-legacy.C(); tick.UnixNano() != int64(100*time.Millisecond) {
+		t.Fatalf("legacy tick = %s", tick)
+	}
+	if tick := <-zero.C(); tick.UnixNano() != int64(100*time.Millisecond) {
+		t.Fatalf("zero-offset tick = %s", tick)
+	}
+}
+
+func TestSimTickerWithOffsetRejectsInvalidPhase(t *testing.T) {
+	clock := NewSimulatedClock(0)
+	scheduler := NewEventScheduler(clock)
+	clock.SetScheduler(scheduler)
+	factory := NewSimTimerFactory(scheduler)
+	for _, tc := range []struct {
+		name     string
+		interval time.Duration
+		offset   time.Duration
+	}{
+		{name: "nonpositive interval", interval: 0, offset: 0},
+		{name: "negative offset", interval: time.Second, offset: -time.Nanosecond},
+		{name: "offset at interval", interval: time.Second, offset: time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("invalid ticker phase did not panic")
+				}
+			}()
+			factory.NewTickerWithOffset(tc.interval, tc.offset)
+		})
+	}
+}
+
 func TestSimTickerStop(t *testing.T) {
 	clock := NewSimulatedClock(0)
 	scheduler := NewEventScheduler(clock)

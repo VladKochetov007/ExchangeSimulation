@@ -74,6 +74,31 @@ func (es *EventScheduler) ScheduleRepeating(interval int64, callback func()) uin
 	return es.nextID
 }
 
+// ScheduleRepeatingWithOffset schedules the first callback after interval plus
+// offset, then repeats at interval. It leaves ScheduleRepeating unchanged so
+// legacy zero-phase tickers retain their established scheduling path.
+func (es *EventScheduler) ScheduleRepeatingWithOffset(interval, offset int64, callback func()) uint64 {
+	if interval < 1 {
+		interval = 1
+	}
+	if offset < 0 || offset >= interval {
+		panic("simulation: repeating ticker offset must be in [0, interval)")
+	}
+	es.mu.Lock()
+	defer es.mu.Unlock()
+
+	es.nextID++
+	event := &ScheduledEvent{
+		Time:      es.clock.NowUnixNano() + interval + offset,
+		Callback:  callback,
+		Repeating: true,
+		Interval:  interval,
+		id:        es.nextID,
+	}
+	heap.Push(&es.events, event)
+	return es.nextID
+}
+
 // Cancel removes a scheduled event by ID
 func (es *EventScheduler) Cancel(id uint64) {
 	es.mu.Lock()

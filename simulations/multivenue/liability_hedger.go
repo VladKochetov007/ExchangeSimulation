@@ -21,9 +21,13 @@ type LiabilityHedgerConfig struct {
 	// PolicyMode selects the declared L1 side-selection policy. The empty
 	// legacy configuration is deliberately equivalent to delivery_liability so
 	// retained L0 configurations keep their exact behavior.
-	PolicyMode          LiabilityHedgerPolicyMode     `json:"policy_mode"`
-	Symbol              string                        `json:"symbol"`
-	DecisionInterval    time.Duration                 `json:"decision_interval"`
+	PolicyMode       LiabilityHedgerPolicyMode `json:"policy_mode"`
+	Symbol           string                    `json:"symbol"`
+	DecisionInterval time.Duration             `json:"decision_interval"`
+	// DecisionPhaseOffset moves the first periodic decision by a deterministic
+	// offset while preserving DecisionInterval. Zero preserves L0/L1's legacy
+	// ticker schedule exactly.
+	DecisionPhaseOffset time.Duration                 `json:"decision_phase_offset"`
 	ObligationInterval  time.Duration                 `json:"obligation_interval"`
 	ObligationStepQty   int64                         `json:"obligation_step_qty"`
 	MaxAbsObligationQty int64                         `json:"max_abs_obligation_qty"`
@@ -75,6 +79,9 @@ func (c LiabilityHedgerConfig) validate() error {
 	if c.DecisionInterval <= 0 || c.ObligationInterval <= 0 {
 		return fmt.Errorf("decision and obligation intervals must be positive")
 	}
+	if c.DecisionPhaseOffset < 0 || c.DecisionPhaseOffset >= c.DecisionInterval {
+		return fmt.Errorf("decision phase offset must be in [0, decision interval)")
+	}
 	if c.ObligationInterval%c.DecisionInterval != 0 {
 		return fmt.Errorf("obligation interval must be a multiple of decision interval")
 	}
@@ -115,6 +122,7 @@ type LiabilityHedgerDecision struct {
 	PositionBefore       int64         `json:"position_before"`
 	HedgeGap             int64         `json:"hedge_gap"`
 	DecisionInterval     int64         `json:"decision_interval"`
+	DecisionPhaseOffset  int64         `json:"decision_phase_offset_nanos"`
 	ObligationInterval   int64         `json:"obligation_interval"`
 	LastBookSourceTime   int64         `json:"last_book_source_time"`
 	LastBookReceivedTime int64         `json:"last_book_received_time"`
@@ -207,7 +215,7 @@ func NewLiabilityHedger(id uint64, gateway actor.Gateway, cfg LiabilityHedgerCon
 		activeOrders: make(map[uint64]struct{}),
 	}
 	h.SetHandler(h)
-	h.AddTicker(cfg.DecisionInterval, h.onTick)
+	h.AddTickerWithOffset(cfg.DecisionInterval, cfg.DecisionPhaseOffset, h.onTick)
 	return h
 }
 
@@ -453,7 +461,8 @@ func (h *LiabilityHedger) baseDecision(now time.Time, action string) LiabilityHe
 		Subscribed: h.subscribed, RequestPending: h.pending, ActionOrDeferReason: action,
 		ObligationBefore: h.obligation, ObligationAfter: h.obligation,
 		ObligationLimit: h.cfg.MaxAbsObligationQty, PositionBefore: h.position,
-		DecisionInterval: int64(h.cfg.DecisionInterval), ObligationInterval: int64(h.cfg.ObligationInterval),
+		DecisionInterval: int64(h.cfg.DecisionInterval), DecisionPhaseOffset: int64(h.cfg.DecisionPhaseOffset),
+		ObligationInterval: int64(h.cfg.ObligationInterval),
 		LastBookSourceTime: h.book.SourceTime, LastBookReceivedTime: h.book.ReceivedTime,
 		LastBookSequence: h.book.Sequence, HasSnapshot: h.book.HasSnapshot,
 		HasBid: h.book.HasBid, BidPrice: h.book.BidPrice, BidVisibleQty: h.book.BidQty,

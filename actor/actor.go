@@ -30,6 +30,7 @@ type Actor interface {
 
 type tickEntry struct {
 	interval time.Duration
+	offset   time.Duration
 	fn       func(time.Time)
 }
 
@@ -209,7 +210,18 @@ func (a *BaseActor) SupportsDeterministicPhases() bool { return a.handler != nil
 // it shares the same concurrency domain as HandleEvent — no extra locking needed.
 // With a SimulatedClock TickerFactory the callback advances with simulation time.
 func (a *BaseActor) AddTicker(d time.Duration, fn func(time.Time)) {
-	a.tickers = append(a.tickers, tickEntry{d, fn})
+	a.tickers = append(a.tickers, tickEntry{interval: d, fn: fn})
+}
+
+// AddTickerWithOffset registers a periodic callback with a declared phase
+// offset. Zero offset deliberately uses AddTicker's legacy representation.
+// A nonzero offset requires a factory that explicitly supports phase control.
+func (a *BaseActor) AddTickerWithOffset(interval, offset time.Duration, fn func(time.Time)) {
+	if offset == 0 {
+		a.AddTicker(interval, fn)
+		return
+	}
+	a.tickers = append(a.tickers, tickEntry{interval: interval, offset: offset, fn: fn})
 }
 
 func (a *BaseActor) Start(ctx context.Context) error {
@@ -375,7 +387,7 @@ func (a *BaseActor) startTickers(ctx context.Context) <-chan tickCall {
 	}
 	ch := make(chan tickCall, len(a.tickers))
 	for _, entry := range a.tickers {
-		ticker := a.tickerFactory.NewTicker(entry.interval)
+		ticker := a.newTicker(entry)
 		fn := entry.fn
 		stopCh := a.stopCh
 		go func() {
@@ -413,10 +425,21 @@ func (a *BaseActor) startPhaseTickers() {
 	a.phaseTickers = make([]phaseTicker, 0, len(a.tickers))
 	for _, entry := range a.tickers {
 		a.phaseTickers = append(a.phaseTickers, phaseTicker{
-			ticker: a.tickerFactory.NewTicker(entry.interval),
+			ticker: a.newTicker(entry),
 			fn:     entry.fn,
 		})
 	}
+}
+
+func (a *BaseActor) newTicker(entry tickEntry) exchange.Ticker {
+	if entry.offset == 0 {
+		return a.tickerFactory.NewTicker(entry.interval)
+	}
+	factory, ok := a.tickerFactory.(types.OffsetTickerFactory)
+	if !ok {
+		panic("actor: configured ticker phase offset requires OffsetTickerFactory")
+	}
+	return factory.NewTickerWithOffset(entry.interval, entry.offset)
 }
 
 func (a *BaseActor) decodeResponse(resp exchange.Response) []*Event {

@@ -82,6 +82,29 @@ func (f *SimTimerFactory) NewTicker(d time.Duration) exchange.Ticker {
 	return t
 }
 
+// NewTickerWithOffset creates a simulation-time ticker whose first callback
+// is interval+offset after registration. Offset zero deliberately delegates
+// to NewTicker so existing simulations retain their exact scheduler path.
+func (f *SimTimerFactory) NewTickerWithOffset(interval, offset time.Duration) exchange.Ticker {
+	if offset == 0 {
+		return f.NewTicker(interval)
+	}
+	if interval <= 0 || offset < 0 || offset >= interval {
+		panic("simulation: ticker offset must be in [0, interval)")
+	}
+	t := &simTimer{
+		scheduler:           f.scheduler,
+		interval:            interval.Nanoseconds(),
+		ch:                  make(chan time.Time, 1), // Buffered to prevent blocking
+		deterministicPhases: &f.deterministicPhases,
+	}
+	t.startWithOffset(offset.Nanoseconds())
+	f.mu.Lock()
+	f.timers = append(f.timers, t)
+	f.mu.Unlock()
+	return t
+}
+
 type simTimer struct {
 	scheduler *EventScheduler
 	interval  int64
@@ -123,24 +146,34 @@ func (t *simTimer) Stop() {
 
 func (t *simTimer) start() {
 	t.eventID = t.scheduler.ScheduleRepeating(t.interval, func() {
-		t.mu.Lock()
-		if t.stopped {
-			t.mu.Unlock()
-			return
-		}
-		t.mu.Unlock()
-		// Account before exposing the tick. A receiving goroutine may run as
-		// soon as the send completes, so incrementing afterward reintroduces
-		// the quiescence hand-off gap this counter is meant to close.
-		t.pending.Add(1)
-		// Non-blocking send - if channel full, skip this tick.
-		select {
-		case t.ch <- time.Unix(0, t.scheduler.clock.NowUnixNano()):
-		default:
-			t.pending.Add(-1)
-			if t.deterministicPhases != nil && t.deterministicPhases.Load() {
-				t.dropped.Add(1)
-			}
-		}
+		t.fire()
 	})
+}
+
+func (t *simTimer) startWithOffset(offset int64) {
+	t.eventID = t.scheduler.ScheduleRepeatingWithOffset(t.interval, offset, func() {
+		t.fire()
+	})
+}
+
+func (t *simTimer) fire() {
+	t.mu.Lock()
+	if t.stopped {
+		t.mu.Unlock()
+		return
+	}
+	t.mu.Unlock()
+	// Account before exposing the tick. A receiving goroutine may run as
+	// soon as the send completes, so incrementing afterward reintroduces
+	// the quiescence hand-off gap this counter is meant to close.
+	t.pending.Add(1)
+	// Non-blocking send - if channel full, skip this tick.
+	select {
+	case t.ch <- time.Unix(0, t.scheduler.clock.NowUnixNano()):
+	default:
+		t.pending.Add(-1)
+		if t.deterministicPhases != nil && t.deterministicPhases.Load() {
+			t.dropped.Add(1)
+		}
+	}
 }

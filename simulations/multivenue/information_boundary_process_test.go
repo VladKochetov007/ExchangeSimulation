@@ -36,6 +36,8 @@ type v20HelperResult struct {
 	MakerQuoteSizeDecisions  int64  `json:"maker_quote_size_decisions"`
 	MakerRebalanceDecisions  int64  `json:"maker_rebalance_decisions"`
 	LiabilityHedgerDecisions int64  `json:"liability_hedger_decisions"`
+	LiabilityHedgerPhase     int64  `json:"liability_hedger_phase_nanos"`
+	LiabilityHedgerPhaseSet  bool   `json:"liability_hedger_phase_configured"`
 	EvidenceArtifactEvents   int64  `json:"evidence_artifact_events"`
 	EvidenceArtifactDigest   string `json:"evidence_artifact_digest"`
 }
@@ -70,7 +72,8 @@ func TestV20EvidenceHelper(t *testing.T) {
 	p2RebalanceEvidence := os.Getenv("V23_P2_REBALANCE") == "1"
 	l0LiabilityHedgerEvidence := os.Getenv("V24_L0_LIABILITY_HEDGER") == "1"
 	l1RandomSideControlEvidence := os.Getenv("V24_L1_RANDOM_SIDE_CONTROL") == "1"
-	liabilityHedgerEvidence := l0LiabilityHedgerEvidence || l1RandomSideControlEvidence
+	l1PhaseOffsetEvidence := os.Getenv("V24_L1_PHASE_OFFSET") == "1"
+	liabilityHedgerEvidence := l0LiabilityHedgerEvidence || l1RandomSideControlEvidence || l1PhaseOffsetEvidence
 	if p1QuoteSizeEvidence {
 		// P1 varies only optional raw decision recording. Both sides retain full
 		// logs so an identical logger topology cannot mask a recorder effect.
@@ -99,6 +102,10 @@ func TestV20EvidenceHelper(t *testing.T) {
 	if liabilityHedgerEvidence {
 		cfg.LogMode = "full"
 		cfg.CrossAssetSpotGraph = true
+		// The independent L0/L1/L1-P replay joins records to the preserved
+		// participant roster. This is report-only accounting capture, held fixed
+		// across evidence ON/OFF; it is not an economic input.
+		cfg.StrictPopulationAccounting = true
 		cfg.CDFLiabilityHedger = &LiabilityHedgerConfig{
 			Enabled: true, Symbol: "CDF/USD", DecisionInterval: 2 * time.Second,
 			ObligationInterval: 10 * time.Second, ObligationStepQty: 200_000_000,
@@ -106,6 +113,9 @@ func TestV20EvidenceHelper(t *testing.T) {
 		}
 		if l1RandomSideControlEvidence {
 			cfg.CDFLiabilityHedger.PolicyMode = LiabilityHedgerPolicyRandomSideControl
+		}
+		if l1PhaseOffsetEvidence {
+			cfg.CDFLiabilityHedger.DecisionPhaseOffset = time.Second
 		}
 		cfg.RecordLiabilityHedgerDecisions = os.Getenv("V20_EVIDENCE_ON") == "1"
 	}
@@ -160,6 +170,11 @@ func TestV20EvidenceHelper(t *testing.T) {
 		cfg.CrossVenueArbLotQty = mvBasePrecision / 100
 		cfg.CrossVenueArbMaxAttempts = 1
 	}
+	if liabilityHedgerEvidence {
+		if err := writeV24RunConfig(output, cfg); err != nil {
+			t.Fatalf("write V2-4 independent-replay config: %v", err)
+		}
+	}
 	sim, err := NewSim(2*time.Minute, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -170,6 +185,12 @@ func TestV20EvidenceHelper(t *testing.T) {
 	if err := sim.Run(context.Background()); err != nil {
 		sim.Close()
 		t.Fatal(err)
+	}
+	if liabilityHedgerEvidence && cfg.RecordLiabilityHedgerDecisions {
+		if err := writeV24AnalysisReport(output, sim); err != nil {
+			sim.Close()
+			t.Fatalf("write V2-4 independent-replay report: %v", err)
+		}
 	}
 	sim.Close()
 	checkpointRaw, err := os.ReadFile(filepath.Join(output, "checkpoints.jsonl"))
@@ -261,6 +282,16 @@ func TestV20EvidenceHelper(t *testing.T) {
 		if result.LiabilityHedgerDecisions == 0 {
 			t.Fatal("V2-4 recorder emitted no liability-hedger decisions")
 		}
+		run, err := analysis.Open(output)
+		if err != nil {
+			t.Fatalf("open V2-4 evidence for independent replay: %v", err)
+		}
+		audit, err := run.MeasureLiabilityHedger()
+		if err != nil || !audit.Valid {
+			t.Fatalf("invalid V2-4 liability evidence: audit=%+v err=%v", audit, err)
+		}
+		result.LiabilityHedgerPhase = audit.DecisionPhaseOffsetNanos
+		result.LiabilityHedgerPhaseSet = audit.PhaseConfigured
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
@@ -306,6 +337,38 @@ func countRawEvent(t *testing.T, dir, name string) int64 {
 		t.Fatalf("count %s evidence: %v", name, err)
 	}
 	return count
+}
+
+// writeV24AnalysisReport is a test-only adapter for the public multivenue
+// command's report boundary. Sim.Run deliberately owns raw evidence while the
+// command owns greeks.json; producing this compact equivalent lets the
+// independent analyzer join raw V2-4 evidence to the captured role roster.
+func writeV24AnalysisReport(dir string, sim *Sim) error {
+	report := struct {
+		InitialAccounts  []ParticipantAccountSnapshot `json:"initial_accounts"`
+		TerminalAccounts []ParticipantAccountSnapshot `json:"terminal_accounts"`
+		VenueLedgers     []VenueLedger                `json:"venue_ledgers"`
+	}{
+		InitialAccounts:  sim.InitialAccounts,
+		TerminalAccounts: sim.TerminalAccounts,
+		VenueLedgers:     sim.CaptureVenueLedgers(),
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "greeks.json"), raw, 0o644)
+}
+
+func writeV24RunConfig(dir string, cfg Config) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "run-config.json"), raw, 0o644)
 }
 
 func TestV20EvidenceDoesNotChangeExecutionAcrossFreshProcesses(t *testing.T) {
@@ -561,6 +624,38 @@ func TestV24L1RandomSideControlEvidenceIsFreshProcessDeterministicAndNeutral(t *
 		left.Schedules != right.Schedules || left.Receipts != right.Receipts || left.Decisions != right.Decisions ||
 		left.ScheduleDigest != right.ScheduleDigest || left.ReceiptDigest != right.ReceiptDigest || left.DecisionDigest != right.DecisionDigest {
 		t.Fatalf("L1 random-control evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
+	}
+}
+
+// L1-P varies only the first liability-hedger decision time. The fresh-process
+// matrix proves its additional sidecars remain observational, while the
+// independent replay verifies every row carries the configured phase and is
+// aligned to the fixed simulation epoch.
+func TestV24L1PhaseOffsetEvidenceIsFreshProcessDeterministicAndNeutral(t *testing.T) {
+	results := make(map[string]v20HelperResult)
+	for _, gomax := range []string{"1", "4"} {
+		for _, evidence := range []bool{false, true} {
+			key := "g" + gomax + "/off"
+			if evidence {
+				key = "g" + gomax + "/on"
+			}
+			results[key] = runV24L1PhaseEvidenceHelper(t, gomax, evidence)
+		}
+	}
+	want := results["g1/off"].ExecutionHash
+	for key, result := range results {
+		if result.ExecutionHash == "" || result.ExecutionHash != want {
+			t.Fatalf("L1-P recorder changed execution with process setting: want %s, %s=%s", want, key, result.ExecutionHash)
+		}
+	}
+	left, right := results["g1/on"], results["g4/on"]
+	if left.LiabilityHedgerDecisions == 0 || left.LiabilityHedgerDecisions != right.LiabilityHedgerDecisions ||
+		!left.LiabilityHedgerPhaseSet || !right.LiabilityHedgerPhaseSet ||
+		left.LiabilityHedgerPhase != int64(time.Second) || left.LiabilityHedgerPhase != right.LiabilityHedgerPhase ||
+		left.Schedules == 0 || left.Receipts == 0 || left.Decisions == 0 ||
+		left.Schedules != right.Schedules || left.Receipts != right.Receipts || left.Decisions != right.Decisions ||
+		left.ScheduleDigest != right.ScheduleDigest || left.ReceiptDigest != right.ReceiptDigest || left.DecisionDigest != right.DecisionDigest {
+		t.Fatalf("L1-P phase evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
 	}
 }
 
@@ -865,6 +960,32 @@ func runV24L1EvidenceHelper(t *testing.T, gomax string, evidence bool) v20Helper
 	}
 	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
 		t.Fatalf("decode L1 evidence helper output %q: %v", raw, err)
+	}
+	return result
+}
+
+func runV24L1PhaseEvidenceHelper(t *testing.T, gomax string, evidence bool) v20HelperResult {
+	t.Helper()
+	output := filepath.Join(t.TempDir(), "run")
+	cmd := exec.Command(os.Args[0], "-test.run=TestV20EvidenceHelper", "--")
+	cmd.Env = append(os.Environ(), "V20_EVIDENCE_HELPER=1", "V20_EVIDENCE_OUTPUT="+output, "V24_L1_PHASE_OFFSET=1", "GOMAXPROCS="+gomax)
+	if evidence {
+		cmd.Env = append(cmd.Env, "V20_EVIDENCE_ON=1")
+	}
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("L1-P evidence helper GOMAXPROCS=%s evidence=%t: %v\n%s", gomax, evidence, err, raw)
+	}
+	var result v20HelperResult
+	var encoded string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "{") {
+			encoded = line
+			break
+		}
+	}
+	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
+		t.Fatalf("decode L1-P evidence helper output %q: %v", raw, err)
 	}
 	return result
 }

@@ -298,3 +298,13 @@ type Ticker interface {
 type TickerFactory interface {
 	NewTicker(d time.Duration) Ticker
 }
+
+// OffsetTickerFactory optionally creates a periodic ticker whose first tick is
+// delayed by a declared phase offset in addition to its interval. The offset
+// is a scheduling policy, not a source of randomness. Implementations require
+// 0 <= offset < interval; callers use the ordinary TickerFactory path for the
+// legacy zero-offset schedule.
+type OffsetTickerFactory interface {
+	TickerFactory
+	NewTickerWithOffset(interval, offset time.Duration) Ticker
+}

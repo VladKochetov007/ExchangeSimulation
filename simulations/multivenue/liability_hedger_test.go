@@ -58,6 +58,9 @@ func TestLiabilityHedgerUsesOnlyRequiredExecutableSide(t *testing.T) {
 	if !bytes.Contains(encoded, []byte(`"has_ask":false`)) {
 		t.Fatalf("missing executable ask was not represented explicitly: %s", encoded)
 	}
+	if !bytes.Contains(encoded, []byte(`"decision_phase_offset_nanos":0`)) {
+		t.Fatalf("zero decision phase was omitted from evidence: %s", encoded)
+	}
 
 	hedger.HandleEvent(context.Background(), &actor.Event{Type: actor.EventBookSnapshot, Data: actor.BookSnapshotEvent{
 		Symbol: "CDF/USD", Timestamp: now.Add(cfg.DecisionInterval).UnixNano(), SeqNum: 8,
@@ -270,6 +273,8 @@ func TestLiabilityHedgerConfigValidation(t *testing.T) {
 		{"empty symbol", func(c *LiabilityHedgerConfig) { c.Symbol = "" }},
 		{"zero request cap", func(c *LiabilityHedgerConfig) { c.MaxRequestQty = 0 }},
 		{"nonmultiple obligation interval", func(c *LiabilityHedgerConfig) { c.ObligationInterval = 3 * time.Second }},
+		{"negative decision phase", func(c *LiabilityHedgerConfig) { c.DecisionPhaseOffset = -time.Nanosecond }},
+		{"decision phase at interval", func(c *LiabilityHedgerConfig) { c.DecisionPhaseOffset = c.DecisionInterval }},
 		{"step exceeds bound", func(c *LiabilityHedgerConfig) { c.MaxAbsObligationQty = c.ObligationStepQty - 1 }},
 		{"unknown policy mode", func(c *LiabilityHedgerConfig) { c.PolicyMode = "unbounded_magic" }},
 	}
