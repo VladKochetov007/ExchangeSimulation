@@ -107,3 +107,19 @@ func TestSignedDatedFutureRiskTreatsZeroMarkAsPresent(t *testing.T) {
 		t.Fatalf("zero-mark maintenance = (%d, %t), want (0, true)", maintenance, ok)
 	}
 }
+
+func TestForceCloseDistinguishesZeroPriceFillFromNoLiquidity(t *testing.T) {
+	ex, future := newSignedFutureExchange(t)
+	defer ex.Shutdown()
+	if response := placeSignedFutureOrder(t, ex, 2, 1, Buy, 0, 1, GTC, false); !response.Success {
+		t.Fatalf("zero-price signed bid rejected: %#v", response)
+	}
+	ex.Positions.UpdatePosition(1, future.Symbol(), 1, 0, Buy, PositionBoth)
+
+	ex.mu.Lock()
+	price, quantity, filled := ex.forceClose(1, ex.Clients[1], ex.Books[future.Symbol()], future, Sell, PositionBoth, 1, 1)
+	ex.mu.Unlock()
+	if !filled || quantity != 1 || price != 0 {
+		t.Fatalf("zero-price force close = (price=%d quantity=%d filled=%t), want (0, 1, true)", price, quantity, filled)
+	}
+}

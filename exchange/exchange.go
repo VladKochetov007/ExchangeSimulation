@@ -2067,8 +2067,8 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 	if pos.Size < 0 {
 		closeSide = Buy
 	}
-	fillPrice, filledQty := e.forceClose(clientID, client, book, book.Instrument, closeSide, pos.PositionSide, abs(pos.Size), timestamp)
-	if fillPrice == 0 {
+	fillPrice, filledQty, filled := e.forceClose(clientID, client, book, book.Instrument, closeSide, pos.PositionSide, abs(pos.Size), timestamp)
+	if !filled {
 		// No liquidity in the book; position stays open for retry on next mark price update.
 		return
 	}
@@ -2184,7 +2184,10 @@ func (e *DefaultExchange) chargeClearanceFee(clientID uint64, client *Client, sy
 		return
 	}
 	quote := inst.QuoteAsset()
-	fee := MulDiv(closedSize, fillPrice, inst.BasePrecision()) * e.LiquidationFeeBps / 10000
+	// A liquidation fee is a non-negative service/risk charge. It is based on
+	// exposure magnitude, not signed futures cash-flow direction; a negative
+	// price must not turn it into a rebate or numeric no-price sentinel.
+	fee := etypes.AbsMulDiv(closedSize, fillPrice, inst.BasePrecision()) * e.LiquidationFeeBps / 10000
 	if available := client.PerpAvailable(quote); fee > available {
 		fee = available
 	}
