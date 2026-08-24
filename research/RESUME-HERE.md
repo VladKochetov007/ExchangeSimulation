@@ -609,3 +609,37 @@ finish and their contracts pass.
   support L2 roster demotion. Next: preregister an L1-P2 phase-decomposition
   screen with holdout replication and one periodic counterpart isolated at a
   time. Do not tune policy, population, price, spread, frequency, or latency.
+
+### 2026-08-24 V2-4 L1-P2 liability/noise phase decomposition
+
+- L1-P2 is complete and scored at
+  `research/v2-4-l1p2-noise-phase-results.md`, with exact machine provenance
+  at `research/artifacts/v2-4-l1p2/l1p2-summary.json`. It keeps the L1-B
+  population and every non-noise clock fixed, then crosses a 0/1-second first
+  tick for the delivery-liability hedger and the named broad `noise_flow_*`
+  population. No economic coefficient, price, spread, latency, or roster was
+  tuned.
+- `15405b1` adds the only new behavioral control:
+  `noise_flow_decision_phase_offset`. It affects only `noise_flow_*` random
+  takers; zero goes through the legacy ticker. `0de1144` tightens the optional
+  timing row to be emitted after local planning but before any planned request
+  enters its gateway. Fresh-process GOMAXPROCS 1/4 tests prove recorder
+  ON/OFF neutrality and absent/explicit-zero equivalence; an independent
+  replay catches dropped, duplicated, off-phase, phase-mismatched, and
+  phase-omitted rows. A direct old/new two-minute L1-B comparison has the same
+  ordered execution hash `6569cfce031a985df8c361261d3a4d3a1b35cb07e8c7e595fbc8c36acae4857c`.
+- All eight 30-minute A/B/C/D × seed-101/103 cells have final
+  `greeks.json`/`latency.json`, valid receipt and persisted-artifact evidence,
+  valid liability and noise timing replays, 540 liability state updates,
+  zero nonreducing delivery fills, and passing CDF/USD non-collapse floors.
+  Raw evidence is retained at `artifacts/v2-4-l1p2/{A,B,C,D}/seed-{101,103}`
+  and is not prunable. An initial shell-terminated attempt has no completion
+  sidecars and is retained solely as `NON_EVIDENCE` under
+  `artifacts/historical/v2-4-l1p2-attempt0-shell-terminated`.
+- Result: **SUPPORTED (screening), narrow relative-clock attribution.** Both
+  seeds satisfy the preregistered aligned-greater-than-dealigned direction and
+  positive interaction. This says broad `noise_flow_*` timing is a causal
+  counterpart for the L1-P local-gap contrast in this population; it does not
+  support phase robustness, a unique LCM explanation, price stability, demand
+  realism, or L2 roster demotion. Next: preregister and run a fresh 2×2
+  holdout-seed replication before any population change.

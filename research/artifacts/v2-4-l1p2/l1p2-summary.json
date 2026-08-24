@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "experiment_id": "V2-4-L1-P2",
+  "hypothesis_id": "V2-4-L1-P2",
+  "status": "scored",
+  "verdict": "SUPPORTED (screening)",
+  "claim_scope": "The paired 2x2 screen supports the narrow attribution that the relative two-second phase of the declared delivery-liability hedger and broad noise_flow population changes the registered local-gap endpoint in this frozen V2-4 L1 population. It is not a robustness, ecology, price-stability, or demand-realism claim.",
+  "source_revision": "a6daf93d5db8046d7ef63a37c215afb8fb4bf96c",
+  "binary_sha256": "c4bdcc1a283b3d9ed82ee41c2775720f3795ff22f6b1af9d6e5ca4b87238dee2",
+  "analyzer_sha256": "ed1d8f1f733d2bf6252eb0a5a07a804c0bea8b12e4012240be60c2f46cf2b303",
+  "horizon": "30m0s",
+  "seeds": [101, 103],
+  "attempts": {
+    "attempt_0": {
+      "status": "NON_EVIDENCE",
+      "reason": "background jobs were terminated at the tool-shell boundary before final greeks.json and latency.json existed",
+      "retained_path": "research/artifacts/historical/v2-4-l1p2-attempt0-shell-terminated"
+    },
+    "attempt_1": {
+      "status": "SCORED",
+      "completion_sentinels": ["greeks.json", "latency.json"],
+      "raw_log_policy": "retained; no L1-P2 raw evidence is prunable"
+    }
+  },
+  "evidence_gate": {
+    "all_cells_valid": true,
+    "all_receipt_audits_valid": true,
+    "all_noise_phase_replays_valid": true,
+    "all_liability_policy_replays_valid": true,
+    "all_exercised_fills_gap_reducing": true,
+    "all_cdf_usd_noncollapse_floors_pass": true,
+    "noise_phase_contract": "zero phase: 900 ticks per actor and 16,200 decision rows; one-second phase: 899 ticks per actor and 16,182 decision rows; every cell has 18 noise_flow participants"
+  },
+  "cells": [
+    {"arm":"A","seed":101,"liability_phase_nanos":0,"noise_phase_nanos":0,"absolute_gap_sum":"898726083300","gap_samples":2700,"state_updates":540,"accepted":1982,"fills":1944,"nonreducing_fills":0,"noise_ticks_per_participant":900,"noise_decisions":16200,"cdf_usd_floor":true,"evidence_artifact_events":2414738,"evidence_artifact_digest":"398e95a4b33eec2b479602aae38cfd534b80addfac5e8f4fa7a19c21d4f6f50c","config_sha256":"5562c4a54652918bfc48071952f9ce2d128e15889810ac896822d0ff24a8e5b7"},
+    {"arm":"B","seed":101,"liability_phase_nanos":1000000000,"noise_phase_nanos":0,"absolute_gap_sum":"248170300184","gap_samples":2697,"state_updates":540,"accepted":1797,"fills":3995,"nonreducing_fills":0,"noise_ticks_per_participant":900,"noise_decisions":16200,"cdf_usd_floor":true,"evidence_artifact_events":2372791,"evidence_artifact_digest":"e86ed11bc617a3861c0bf0814d15a513e027e649e7d8d3903eaad3aeb7a1fa5d","config_sha256":"0ec3a351261842f3162a8c0e0bdb0042b3cc466b560cd381859550a50f96763d"},
+    {"arm":"C","seed":101,"liability_phase_nanos":0,"noise_phase_nanos":1000000000,"absolute_gap_sum":"239882748070","gap_samples":2700,"state_updates":540,"accepted":1742,"fills":3910,"nonreducing_fills":0,"noise_ticks_per_participant":899,"noise_decisions":16182,"cdf_usd_floor":true,"evidence_artifact_events":2412972,"evidence_artifact_digest":"d59796d34aedc08899f5a74700b9b5a300ef6152859d2ea1a18e58e8491c8195","config_sha256":"f2cb9414d86e72a8c59580feef357fd4412beb5bdefabc052151508c27af85d1"},
+    {"arm":"D","seed":101,"liability_phase_nanos":1000000000,"noise_phase_nanos":1000000000,"absolute_gap_sum":"367839888814","gap_samples":2697,"state_updates":540,"accepted":1810,"fills":2922,"nonreducing_fills":0,"noise_ticks_per_participant":899,"noise_decisions":16182,"cdf_usd_floor":true,"evidence_artifact_events":2400617,"evidence_artifact_digest":"5bd2735ed57896fab3c4b3edde507e228964d32170f17054f0f17556daa7d6e9","config_sha256":"4da92d0a6a362ec7c3e079523616a8e60674d366b9ace4391fd36060db94c53d"},
+    {"arm":"A","seed":103,"liability_phase_nanos":0,"noise_phase_nanos":0,"absolute_gap_sum":"1310482630795","gap_samples":2700,"state_updates":540,"accepted":2014,"fills":2068,"nonreducing_fills":0,"noise_ticks_per_participant":900,"noise_decisions":16200,"cdf_usd_floor":true,"evidence_artifact_events":2412623,"evidence_artifact_digest":"9ae377b5539278bcc11fd0bc0e9ca2e8c54483a2c4d8f50fac5473a9b16c527a","config_sha256":"ca0226aeec11618419a2adc4fe05e35ba43a90fd7d800d2f0903918e033a7f21"},
+    {"arm":"B","seed":103,"liability_phase_nanos":1000000000,"noise_phase_nanos":0,"absolute_gap_sum":"235658169214","gap_samples":2697,"state_updates":540,"accepted":1690,"fills":3802,"nonreducing_fills":0,"noise_ticks_per_participant":900,"noise_decisions":16200,"cdf_usd_floor":true,"evidence_artifact_events":2326935,"evidence_artifact_digest":"e98e885490e3448ba932e4346d4686d9d987b11c8284cf285cbf31a9342cc1ba","config_sha256":"2c28371fce204a2a34d0380247bd2d5b69604fcae035690032d939c764006412"},
+    {"arm":"C","seed":103,"liability_phase_nanos":0,"noise_phase_nanos":1000000000,"absolute_gap_sum":"260038590689","gap_samples":2700,"state_updates":540,"accepted":1782,"fills":3952,"nonreducing_fills":0,"noise_ticks_per_participant":899,"noise_decisions":16182,"cdf_usd_floor":true,"evidence_artifact_events":2420175,"evidence_artifact_digest":"98055489e81172250f5d0b3a24c238940d449a3ed449b8e2cb9f66eb7db4a369","config_sha256":"35277f33abc3438959d60e88d1429f56acdbc4ac925f569fa4f7b334af5bef57"},
+    {"arm":"D","seed":103,"liability_phase_nanos":1000000000,"noise_phase_nanos":1000000000,"absolute_gap_sum":"675072737350","gap_samples":2697,"state_updates":540,"accepted":1890,"fills":2655,"nonreducing_fills":0,"noise_ticks_per_participant":899,"noise_decisions":16182,"cdf_usd_floor":true,"evidence_artifact_events":2412452,"evidence_artifact_digest":"5652d47c43bb22c9ea5bc3c453316ee5bd4c0f71fdda5fc560e3381100df85f4","config_sha256":"332a901912e761d3f70bcbd6754fd298fdb7b36293d2352a86a896a95c95fef4"}
+  ],
+  "exact_score": {
+    "common_denominator": 2427300,
+    "definition": "M_arm = absolute_gap_sum/gap_samples. aligned=(A+D)/2; dealigned=(B+C)/2; interaction=(D-C)-(B-A). Numerators below use common_denominator; decimal values are displays only.",
+    "seed_101": {"aligned_numerator":1139010648819300,"dealigned_numerator":439007860680530,"mean_denominator":4854600,"aligned_minus_dealigned_numerator":700002788138770,"interaction_numerator":700002788138770,"interaction_denominator":2427300,"aligned_gt_dealigned":true,"positive_interaction":true},
+    "seed_103": {"aligned_numerator":1785689348699705,"dealigned_numerator":445867045322011,"mean_denominator":4854600,"aligned_minus_dealigned_numerator":1339822303377694,"interaction_numerator":1339822303377694,"interaction_denominator":2427300,"aligned_gt_dealigned":true,"positive_interaction":true}
+  },
+  "interpretation": {
+    "supported": ["Both valid paired seeds meet the preregistered aligned-greater-than-dealigned direction and positive-interaction requirement."],
+    "not_supported": ["ecology-wide phase robustness", "price stability", "demand realism", "L2 roster demotion", "a unique least-common-multiple mechanism", "generalization beyond this population or two seeds"],
+    "next_gate": "Replicate the registered 2x2 with untouched holdout seeds before using this clock mechanism to constrain later population changes."
+  }
+}

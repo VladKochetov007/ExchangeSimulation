@@ -171,17 +171,19 @@ ecology, price-stability, or replacement result. L1-P was the required
 preregistered phase/offset test before any CDF allocation or legacy
 roster-demotion claim; it did not tune the L1 policies or parent population.
 
-L1-P is now complete in
+L1-P is complete in
 [`v2-4-l1p-phase-results.md`](v2-4-l1p-phase-results.md) and
-`artifacts/v2-4-l1p/l1p-summary.json`. The narrow local-motive criterion and
-non-collapse floor survive an explicit one-second half-period phase offset in
-both paired seeds. However, the offset also produces large, same-direction
-descriptive changes in mean local gap and fill count. Those values had no
-preregistered directional score, so they are an unresolved clock-interaction
-candidate rather than a market claim. Before any L2 allocation/demotion, run a
-separately preregistered phase-decomposition screen that replicates both phases
-on holdout seeds and isolates the relevant periodic counterpart without
-tuning policy, population, spread, latency, or frequency.
+`artifacts/v2-4-l1p/l1p-summary.json`. Its large descriptive phase contrast
+was followed, without tuning, by the preregistered L1-P2 2×2 decomposition in
+[`v2-4-l1p2-noise-phase-results.md`](v2-4-l1p2-noise-phase-results.md) and
+`artifacts/v2-4-l1p2/l1p2-summary.json`. Both paired seeds meet the registered
+aligned-greater-than-dealigned and positive-interaction criteria, supporting a
+narrow relative-phase contribution from broad `noise_flow_*` timing to this
+local gap endpoint. Absolute phase still differs within the aligned arms, so
+this does not identify a unique LCM mechanism or ecology-wide timing
+robustness. Before any L2 allocation/demotion, replicate the exact 2×2 on
+untouched holdout seeds; do not tune policy, population, spread, latency, or
+frequency.
 
 ## V2-5 — identifiable perp funding and dated carry
 

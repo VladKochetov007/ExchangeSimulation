@@ -113,3 +113,24 @@ The threshold deliberately makes no claim about price, spread, volume,
 wealth, ecological viability, or demand realism. A null or mixed interaction
 means only that broad noise-flow alignment is not the identified explanation;
 it does not prove clocks are economically irrelevant.
+
+## Registered result — appended after complete extraction
+
+All eight A/B/C/D × seed-{101,103} full-evidence cells completed with final
+`greeks.json` and `latency.json`, then passed receipt, persisted-artifact,
+liability-policy/phase, noise-timing, activity, and CDF/USD floor contracts.
+The initial shell-terminated attempt has neither completion sidecar and is
+retained only as `NON_EVIDENCE` under
+`artifacts/historical/v2-4-l1p2-attempt0-shell-terminated`.
+
+The scored attempt is **SUPPORTED (screening)** under the criterion above:
+both seeds have `M_aligned > M_dealigned` and a positive exact interaction.
+The cell-level integer sums, denominators, artifact digests, and exact
+interaction numerators are retained in
+`artifacts/v2-4-l1p2/l1p2-summary.json`; interpretation is in
+`v2-4-l1p2-noise-phase-results.md`.
+
+This supports a narrow relative-clock attribution in the retained L1
+population. It does not establish a unique cadence mechanism, phase robustness
+of the wider ecology, demand realism, price stability, or a population-change
+decision. The next gate is a fresh holdout-seed 2×2 replication, not tuning.
