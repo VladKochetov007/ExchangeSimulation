@@ -1,0 +1,71 @@
+{
+  "experiment": "V2-5 P3a finite term-carry allocator integrity",
+  "verdict": "SUPPORTED (development screening)",
+  "scope": "locally informed, ordinary matched spot/perpetual entry only; not funding anchoring, realized carry, basis convergence, price stability, or realism",
+  "preregistration": "research/v2-5-p3a-term-carry-preregistration.md",
+  "simulation_source_commit": "fe5152ce57affd96cb9472a27026bcc3e56ecc38",
+  "analyzer_source_commit": "8b41c4a",
+  "analyzer_sha256": "2d67562dc0d4a884426864c4a613e233d5b30571c2f3115545e2e6aa0b44aa01",
+  "seed": 107,
+  "horizon": "5m simulated",
+  "gomaxprocs": 3,
+  "raw_evidence_retained": true,
+  "safe_to_prune": false,
+  "cells": {
+    "A-disabled": {
+      "config_sha256": "b381be43daed1c7cfd7d05bb632b81e8870282d9a1a34c26977ba6c7fb1de935",
+      "execution_events": 56352,
+      "execution_stream_hash": "98bf11a0e8cad9f5da5d3d00cfc99908bd6005964f9ba159c42e770aaed1d19a",
+      "evidence_events": 56802,
+      "evidence_multiset_hash": "062e880fe30913314c8ccdb1d7e7bb660eb098a9fe984be80fd774bca1eed417",
+      "evidence_artifact_hash": "229422399354ff81bc82071b652a34264d08234dc55f8d87468100597c9bf512",
+      "decisions": 450,
+      "submitted": 0,
+      "accepted": 0,
+      "rejected": 0,
+      "fills": 0,
+      "cancelled": 0,
+      "active_terms": 0,
+      "open_terms": 0,
+      "closed_terms": 0
+    },
+    "B-enabled": {
+      "config_sha256": "cab3740164d8176f47d079d3c9a4086f5b069d7caec2ff7119660502220c1cf1",
+      "execution_events": 56189,
+      "execution_stream_hash": "f8bf4844729c762b76097ac44cf664c5148c3e6a853dcb157ca9c86b0d93d1c2",
+      "evidence_events": 56648,
+      "evidence_multiset_hash": "4955ab18bf51a723a3c7050822a994e838b642c7b94f01a361b6e150dd105dc6",
+      "evidence_artifact_hash": "15eff06bd198c851fbad2335acc751100176a918e8d51a7003cbc0ea6ffc377c",
+      "decisions": 450,
+      "submitted": 4,
+      "accepted": 4,
+      "rejected": 0,
+      "fills": 5,
+      "cancelled": 0,
+      "active_terms": 2,
+      "open_terms": 2,
+      "closed_terms": 0,
+      "active_term_funding_settlements": 0,
+      "action_counts": {
+        "FUNDING_UNAVAILABLE": 3,
+        "LOCAL_REFERENCE_UNAVAILABLE": 2,
+        "NET_CARRY_BELOW_MINIMUM": 54,
+        "NOT_SUBSCRIBED": 3,
+        "SUBMIT_ENTRY_PERP_IOC": 2,
+        "SUBMIT_ENTRY_SPOT_IOC": 2,
+        "TERM_ACTIVE": 239,
+        "ZERO_PREMIUM": 145
+      }
+    }
+  },
+  "evidence_gate": {
+    "term_carry_valid": true,
+    "receipt_valid": true,
+    "latency_contract_valid": true,
+    "conservation_valid": true,
+    "position_replay_valid": true,
+    "order_lifecycle_valid": true,
+    "terminal_spot_reconciliation_valid": true
+  },
+  "next_gate": "Preregister P3b nine-hour realization with first-exposure timestamp and active-term funding-settlement reconstruction; do not score P3a as carry economics."
+}
