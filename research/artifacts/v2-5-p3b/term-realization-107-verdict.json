@@ -1,0 +1,98 @@
+{
+  "experiment": "V2-5 P3b first realized funding term",
+  "verdict": "SUPPORTED (development screening)",
+  "scope": "delayed-local-observation to ordinary matched spot/perpetual entry, canonical first exposure, active-term funding transfer only; not funding anchoring, profitability, basis convergence, price quality, robustness, or realism",
+  "preregistration": "research/v2-5-p3b-term-realization-preregistration.md",
+  "simulation_source_revision": "9bdb0b5132a14e1610ec72ab3f38d98098071f41",
+  "manifest_worktree_modified": true,
+  "seed": 107,
+  "horizon": "9h simulated",
+  "gomaxprocs": 4,
+  "config_sha256": "b58a21a1f9c2e77f2516a5e45736f3990790cf10ff0377cde45ac3166203cab3",
+  "simulator_sha256": "648d2c977a6ae1360485b793f911a866c2e99ce9f1681e4298113e1451b0f881",
+  "analyzer_sha256": "e161bef701ef52f1e62da33b3b0ca302340070ea26ae2e545891868da496cfeb",
+  "prunegate_sha256": "fd6bd26afc6df91cc3ecae01c4ec04106714315e45a37c240a39785de5d5d9cc",
+  "execution": {
+    "domain": "execution_observations",
+    "ordering": "ordered_stream",
+    "events": 4925694,
+    "hash": "da7e8b13bdcad482e22260252c420bd9187df80676f2a23b632ee8f65cf553a6"
+  },
+  "persisted_evidence": {
+    "domain": "persisted_evidence",
+    "ordering": "unordered_multiset",
+    "events": 4974303,
+    "hash": "f84ab492b4522a9bbc0b80637b41506af4cb32b32ddf5f00b5e1a3bbdc6af218",
+    "artifact_domain": "persisted_json_records",
+    "artifact_hash": "d30a416469e52a02a2c5492dca238a18087c28e43402ebc98e82a5d4a84dc0f4"
+  },
+  "completion_sentinels": {
+    "greeks_json_nonempty": true,
+    "latency_json_nonempty": true
+  },
+  "activation": {
+    "term_carry_valid": true,
+    "decisions": 48600,
+    "submitted": 4,
+    "accepted": 4,
+    "fills": 5,
+    "first_exposure_mismatches": 0,
+    "active_terms": 2,
+    "open_terms": 2,
+    "closed_terms": 0,
+    "active_term_funding_settlements": 2,
+    "outside_term_funding_settlements": 0,
+    "active_venues": ["central", "south"],
+    "inactive_venue": "north"
+  },
+  "p3_funding_ledger": [
+    {
+      "venue": "central",
+      "symbol": "ABC-PERP",
+      "timestamp": 1735718401000000000,
+      "client_id": 8,
+      "usd_delta": 150014,
+      "rate": 3,
+      "directed": true,
+      "sign_consistent": true
+    },
+    {
+      "venue": "south",
+      "symbol": "ABC-PERP",
+      "timestamp": 1735718401000000000,
+      "client_id": 8,
+      "usd_delta": 150014,
+      "rate": 3,
+      "directed": true,
+      "sign_consistent": true
+    }
+  ],
+  "evidence_gates": {
+    "receipt_replay_valid": true,
+    "receipt_schedules": 291582,
+    "receipt_deliveries": 291573,
+    "receipt_audited_decisions": 4,
+    "conservation_delta_rows_checked": 306081,
+    "conservation_delta_mismatches": 0,
+    "conservation_broken_chains": 0,
+    "position_disagreements": 0,
+    "non_zero_net_contracts": 0,
+    "order_lifecycle_errors": 0,
+    "funding_broken": 0,
+    "funding_sign_wrong": 0,
+    "funding_misdirected": 0,
+    "funding_undirected": 0,
+    "funding_duplicate_payments": 0,
+    "terminal_perpetual_mismatches": 0,
+    "terminal_spot_mismatches": 0
+  },
+  "raw_evidence_retained": true,
+  "safe_to_prune": false,
+  "limitations": [
+    "single enabled cell and seed",
+    "term remains open by declared 96-hour commitment",
+    "not a causal A/B market comparison",
+    "does not establish exit-cost-adjusted profitability or funding-driven basis dynamics"
+  ],
+  "next_gate": "Preregister and run P3c full-evidence term completion: one ordinary exit after the declared term, exactly one close, terminal flat ownership, and conservation before any market-level carry comparison."
+}
