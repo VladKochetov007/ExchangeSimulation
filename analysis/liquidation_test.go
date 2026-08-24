@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -92,5 +93,22 @@ func TestLiquidationAuditReconstructsForcedClosePositionPath(t *testing.T) {
 	}
 	if result.PositionPathFailures != 1 || result.PositionConservationFailures != 0 {
 		t.Fatalf("nonreducing close accepted: %+v", result)
+	}
+}
+
+func TestLiquidationAuditRetainsSignedFillPriceAsPresent(t *testing.T) {
+	line := liquidationLine(int64(1e9), "north", 7, 0)
+	line = strings.Replace(line, `"fill_price":5000`, `"fill_price":0`, 1)
+	dir := writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": {line}})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureLiquidations()
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.Liquidations != 1 || result.InvalidLiquidations != 0 || result.SignedOrZeroFillPrices != 1 {
+		t.Fatalf("zero fill price must remain present evidence: %+v", result)
 	}
 }

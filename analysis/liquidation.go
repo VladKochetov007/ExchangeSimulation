@@ -21,6 +21,11 @@ type LiquidationAudit struct {
 	DeficitBalanceResidual   int64 `json:"deficit_balance_residual"`
 	DeficitMismatchInstants  int   `json:"deficit_mismatch_instants"`
 	InvalidLiquidations      int   `json:"invalid_liquidations"`
+	// SignedOrZeroFillPrices counts present numeric fill prices that a
+	// positive-domain liquidation policy might reject upstream. They are not
+	// classified as absent/invalid evidence here: this generic reconstruction
+	// has no instrument-domain declaration from which to make that judgment.
+	SignedOrZeroFillPrices int `json:"signed_or_zero_fill_prices"`
 	// PositionPathRecords are liquidations for which the same-file, same-time
 	// position-update batch provides both the pre-close and post-close state.
 	// The liquidation event records the pre-close size because liquidate holds a
@@ -207,8 +212,11 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 				venueAccounts[event.VenueID] = make(map[Participant]struct{})
 			}
 			venueAccounts[event.VenueID][participant] = struct{}{}
-			if symbol == "" || payload.FillPrice <= 0 || payload.PositionSize == 0 || payload.RemainingDebt < 0 {
+			if symbol == "" || payload.PositionSize == 0 || payload.RemainingDebt < 0 {
 				result.InvalidLiquidations++
+			}
+			if payload.FillPrice <= 0 {
+				result.SignedOrZeroFillPrices++
 			}
 			positionKey := liquidationPositionKey{venue: event.VenueID, file: event.File, clientID: event.ClientID, symbol: symbol}
 			batch, found := positionBatches[positionKey]
