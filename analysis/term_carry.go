@@ -35,6 +35,14 @@ type TermCarryAudit struct {
 	DuplicateVenueOutcomes    int64            `json:"duplicate_venue_outcomes"`
 	MissingActorOutcomes      int64            `json:"missing_actor_outcomes"`
 	ActorOutcomeMismatches    int64            `json:"actor_outcome_mismatches"`
+	LifecycleViolations       int64            `json:"lifecycle_violations"`
+	PositionContinuityErrors  int64            `json:"position_continuity_errors"`
+	TerminalPerpMismatches    int64            `json:"terminal_perp_mismatches"`
+	ActiveTerms               int64            `json:"active_terms"`
+	ClosedTerms               int64            `json:"closed_terms"`
+	OpenTerms                 int64            `json:"open_terms"`
+	ActiveTermFunding         int64            `json:"active_term_funding_settlements"`
+	OutsideTermFunding        int64            `json:"outside_term_funding_settlements"`
 	ActionCounts              map[string]int64 `json:"action_counts"`
 	Checks                    []TermCarryCheck `json:"checks,omitempty"`
 	Valid                     bool             `json:"valid"`
@@ -139,20 +147,35 @@ type termCarryDecision struct {
 }
 
 type termCarryOutcome struct {
-	VenueID      string `json:"venue_id"`
-	ClientID     uint64 `json:"client_id"`
-	Event        string `json:"event"`
-	RequestID    uint64 `json:"request_id"`
-	OrderID      uint64 `json:"order_id"`
-	TradeID      uint64 `json:"trade_id"`
-	Symbol       string `json:"symbol"`
-	Side         string `json:"side"`
-	Qty          int64  `json:"qty"`
-	Price        int64  `json:"price"`
-	FeeAmount    int64  `json:"fee_amount"`
-	FeeAsset     string `json:"fee_asset"`
-	RemainingQty int64  `json:"remaining_qty"`
-	RejectReason string `json:"reject_reason"`
+	VenueID            string `json:"venue_id"`
+	Desk               string `json:"desk"`
+	ClientID           uint64 `json:"client_id"`
+	DecisionTime       int64  `json:"decision_time"`
+	ExecutionTime      int64  `json:"execution_time"`
+	State              string `json:"state"`
+	Event              string `json:"event"`
+	Leg                string `json:"leg"`
+	RequestID          uint64 `json:"request_id"`
+	OrderID            uint64 `json:"order_id"`
+	TradeID            uint64 `json:"trade_id"`
+	Symbol             string `json:"symbol"`
+	Side               string `json:"side"`
+	Qty                int64  `json:"qty"`
+	Price              int64  `json:"price"`
+	FeeAmount          int64  `json:"fee_amount"`
+	FeeAsset           string `json:"fee_asset"`
+	RemainingQty       int64  `json:"remaining_qty"`
+	RejectReason       string `json:"reject_reason"`
+	SpotPositionBefore int64  `json:"spot_position_before"`
+	SpotPositionAfter  int64  `json:"spot_position_after"`
+	PerpPositionBefore int64  `json:"perp_position_before"`
+	PerpPositionAfter  int64  `json:"perp_position_after"`
+}
+
+type termCarryFundingSettlement struct {
+	VenueID  string
+	ClientID uint64
+	At       int64
 }
 
 // MeasureTermCarry replays only persisted evidence. A pass means the declared
@@ -178,11 +201,12 @@ func (r *Run) MeasureTermCarry() (*TermCarryAudit, error) {
 	}
 	var decisions []termCarryDecision
 	var outcomes []termCarryOutcome
+	var settlements []termCarryFundingSettlement
 	accepted := make(map[fundingCarryKey][]fundingCarryVenueOrder)
 	rejected := make(map[fundingCarryKey][]fundingCarryVenueOrder)
 	fills := make(map[fundingCarryOrderKey][]fundingCarryVenueFill)
 	cancels := make(map[fundingCarryOrderKey]int)
-	err = r.Scan(ScanOptions{Events: []string{"term_carry_decision", "term_carry_leg_outcome", "OrderAccepted", "OrderRejected", "OrderFill", "OrderCancelled"}, Workers: 1}, func(event Event) {
+	err = r.Scan(ScanOptions{Events: []string{"term_carry_decision", "term_carry_leg_outcome", "OrderAccepted", "OrderRejected", "OrderFill", "OrderCancelled", "balance_change"}, Workers: 1}, func(event Event) {
 		switch event.Name {
 		case "term_carry_decision":
 			var decision termCarryDecision
@@ -194,7 +218,7 @@ func (r *Run) MeasureTermCarry() (*TermCarryAudit, error) {
 			decisions = append(decisions, decision)
 		case "term_carry_leg_outcome":
 			var outcome termCarryOutcome
-			if event.Decode(&outcome) != nil || outcome.VenueID != event.VenueID || outcome.ClientID != event.ClientID {
+			if event.Decode(&outcome) != nil || outcome.VenueID != event.VenueID || outcome.ClientID != event.ClientID || outcome.Desk == "" || r.Role(event.VenueID, event.ClientID) != "term_carry_allocator" {
 				result.ActorOutcomeMismatches++
 				check(event.VenueID, event.ClientID, 0, "invalid_actor_outcome")
 				return
@@ -226,6 +250,16 @@ func (r *Run) MeasureTermCarry() (*TermCarryAudit, error) {
 			if event.Decode(&cancellation) == nil && cancellation.OrderID != 0 && r.Role(event.VenueID, event.ClientID) == "term_carry_allocator" {
 				cancels[fundingCarryOrderKey{event.VenueID, event.ClientID, cancellation.OrderID}]++
 			}
+		case "balance_change":
+			var balance balanceChangeRecord
+			if event.Decode(&balance) != nil || balance.Symbol != policy.PerpSymbol || balance.Reason != "funding_settlement" || r.Role(event.VenueID, event.ClientID) != "term_carry_allocator" {
+				return
+			}
+			at := balance.Timestamp
+			if at == 0 {
+				at = event.SimTS
+			}
+			settlements = append(settlements, termCarryFundingSettlement{VenueID: event.VenueID, ClientID: event.ClientID, At: at})
 		}
 	})
 	if err != nil {
@@ -318,8 +352,287 @@ func (r *Run) MeasureTermCarry() (*TermCarryAudit, error) {
 			}
 		}
 	}
-	result.Valid = result.ReceiptAuditValid && result.ReceiptEvidenceErrors == 0 && result.SourceMismatches == 0 && result.FutureSourceUse == 0 && result.InvalidDecisionRecords == 0 && result.DecisionFieldMismatches == 0 && result.ArithmeticMismatches == 0 && result.MissingGatewayDecisions == 0 && result.GatewayDecisionMismatches == 0 && result.MissingVenueOutcomes == 0 && result.DuplicateVenueOutcomes == 0 && result.MissingActorOutcomes == 0 && result.ActorOutcomeMismatches == 0
+	auditTermCarryLifecycle(r, policy, decisions, outcomes, settlements, result, check)
+	result.Valid = result.ReceiptAuditValid && result.ReceiptEvidenceErrors == 0 && result.SourceMismatches == 0 && result.FutureSourceUse == 0 && result.InvalidDecisionRecords == 0 && result.DecisionFieldMismatches == 0 && result.ArithmeticMismatches == 0 && result.MissingGatewayDecisions == 0 && result.GatewayDecisionMismatches == 0 && result.MissingVenueOutcomes == 0 && result.DuplicateVenueOutcomes == 0 && result.MissingActorOutcomes == 0 && result.ActorOutcomeMismatches == 0 && result.LifecycleViolations == 0 && result.PositionContinuityErrors == 0 && result.TerminalPerpMismatches == 0 && result.OutsideTermFunding == 0
 	return result, nil
+}
+
+// termCarryParticipant is deliberately local to the replay rather than the
+// simulator's actor identity. The analyzer must establish lifecycle facts from
+// persisted evidence alone.
+type termCarryParticipant struct {
+	venue  string
+	client uint64
+}
+
+type termCarryLifecycleTerm struct {
+	owner    termCarryParticipant
+	entryAt  int64
+	termEnd  int64
+	activeAt int64
+	closedAt int64
+	active   bool
+	closed   bool
+}
+
+type termCarryLifecycleItem struct {
+	at       int64
+	index    int
+	decision *termCarryDecision
+	outcome  *termCarryOutcome
+}
+
+// auditTermCarryLifecycle reconstructs the actor's declared finite ownership
+// term from its decisions and actor-side response attestations. It never reads
+// TermCarryAllocator. Open terms are reported, not called invalid here: P3a
+// and P3b deliberately stop before the registered commitment horizon. P3c
+// separately requires eventual closure.
+func auditTermCarryLifecycle(run *Run, policy termCarryPolicyConfig, decisions []termCarryDecision, outcomes []termCarryOutcome, settlements []termCarryFundingSettlement, result *TermCarryAudit, check func(string, uint64, uint64, string)) {
+	byParticipantDecisions := make(map[termCarryParticipant][]termCarryDecision)
+	byParticipantOutcomes := make(map[termCarryParticipant][]termCarryOutcome)
+	participants := make(map[termCarryParticipant]struct{})
+	for _, decision := range decisions {
+		key := termCarryParticipant{venue: decision.VenueID, client: decision.ClientID}
+		byParticipantDecisions[key] = append(byParticipantDecisions[key], decision)
+		participants[key] = struct{}{}
+	}
+	for _, outcome := range outcomes {
+		key := termCarryParticipant{venue: outcome.VenueID, client: outcome.ClientID}
+		byParticipantOutcomes[key] = append(byParticipantOutcomes[key], outcome)
+		participants[key] = struct{}{}
+	}
+
+	var terms []*termCarryLifecycleTerm
+	terminalPerp := make(map[termCarryParticipant]int64)
+	terminalFound := make(map[termCarryParticipant]bool)
+	for _, row := range run.Report.TerminalAccounts {
+		key := termCarryParticipant{venue: row.VenueID, client: row.ClientID}
+		if run.Role(row.VenueID, row.ClientID) != "term_carry_allocator" {
+			continue
+		}
+		terminalFound[key] = true
+		for _, position := range row.Account.Positions {
+			if position.Symbol == policy.PerpSymbol {
+				terminalPerp[key] = position.Size
+			}
+		}
+	}
+
+	participantKeys := make([]termCarryParticipant, 0, len(participants))
+	for participant := range participants {
+		participantKeys = append(participantKeys, participant)
+	}
+	sort.Slice(participantKeys, func(i, j int) bool {
+		if participantKeys[i].venue != participantKeys[j].venue {
+			return participantKeys[i].venue < participantKeys[j].venue
+		}
+		return participantKeys[i].client < participantKeys[j].client
+	})
+	for _, participant := range participantKeys {
+		items := make([]termCarryLifecycleItem, 0, len(byParticipantDecisions[participant])+len(byParticipantOutcomes[participant]))
+		submitted := make(map[uint64]termCarryDecision)
+		for index := range byParticipantDecisions[participant] {
+			decision := &byParticipantDecisions[participant][index]
+			items = append(items, termCarryLifecycleItem{at: decision.DecisionTime, index: index, decision: decision})
+			if termCarrySubmission(decision.Action) {
+				submitted[decision.RequestID] = *decision
+			}
+		}
+		for index := range byParticipantOutcomes[participant] {
+			outcome := &byParticipantOutcomes[participant][index]
+			at := outcome.DecisionTime
+			if outcome.Event == "ORDER_FILL" {
+				at = outcome.ExecutionTime
+			}
+			items = append(items, termCarryLifecycleItem{at: at, index: index, outcome: outcome})
+		}
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].at != items[j].at {
+				return items[i].at < items[j].at
+			}
+			// A decision is causally before its same-timestamp response. There is
+			// no need to infer a cross-file global order for a single participant.
+			if items[i].decision != nil || items[j].decision != nil {
+				return items[i].decision != nil
+			}
+			return items[i].index < items[j].index
+		})
+
+		spotPosition, perpPosition := int64(0), int64(0)
+		var current *termCarryLifecycleTerm
+		for _, item := range items {
+			if item.at <= 0 {
+				result.LifecycleViolations++
+				check(participant.venue, participant.client, 0, "nonpositive_lifecycle_timestamp")
+				continue
+			}
+			if item.decision != nil {
+				decision := item.decision
+				if decision.SpotPosition != spotPosition || decision.PerpPosition != perpPosition {
+					result.PositionContinuityErrors++
+					check(participant.venue, participant.client, decision.RequestID, "decision_position_discontinuity")
+				}
+				if violation := validateTermCarryLifecycleDecision(policy, *decision, spotPosition, perpPosition, &current, &terms); violation != "" {
+					result.LifecycleViolations++
+					check(participant.venue, participant.client, decision.RequestID, violation)
+				}
+				continue
+			}
+
+			outcome := item.outcome
+			if submittedDecision, found := submitted[outcome.RequestID]; !found || outcome.DecisionTime != submittedDecision.DecisionTime || outcome.State != submittedDecision.State || outcome.Leg != submittedDecision.Leg || outcome.Symbol != termCarryAuditSymbol(submittedDecision) {
+				result.LifecycleViolations++
+				check(participant.venue, participant.client, outcome.RequestID, "outcome_without_matching_submission")
+			}
+			spotPosition, perpPosition = applyTermCarryOutcome(policy, *outcome, spotPosition, perpPosition, result, check)
+		}
+		if current != nil {
+			result.OpenTerms++
+		}
+		if !terminalFound[participant] || terminalPerp[participant] != perpPosition {
+			result.TerminalPerpMismatches++
+			check(participant.venue, participant.client, 0, "terminal_perp_position_mismatch")
+		}
+	}
+
+	for _, term := range terms {
+		if term.active {
+			result.ActiveTerms++
+		}
+		if term.closed {
+			result.ClosedTerms++
+		}
+	}
+	for _, settlement := range settlements {
+		matches := 0
+		for _, term := range terms {
+			if term.owner != (termCarryParticipant{venue: settlement.VenueID, client: settlement.ClientID}) || !term.active {
+				continue
+			}
+			if settlement.At >= term.activeAt && settlement.At <= term.termEnd && (term.closedAt == 0 || settlement.At <= term.closedAt) {
+				matches++
+			}
+		}
+		if matches == 1 {
+			result.ActiveTermFunding++
+			continue
+		}
+		result.OutsideTermFunding++
+		check(settlement.VenueID, settlement.ClientID, 0, "funding_settlement_outside_active_term")
+		if matches > 1 {
+			result.LifecycleViolations++
+			check(settlement.VenueID, settlement.ClientID, 0, "funding_settlement_matches_overlapping_terms")
+		}
+	}
+}
+
+func validateTermCarryLifecycleDecision(policy termCarryPolicyConfig, decision termCarryDecision, spotPosition, perpPosition int64, current **termCarryLifecycleTerm, terms *[]*termCarryLifecycleTerm) string {
+	hasTerm := decision.EntryAt != 0 || decision.TermEnd != 0
+	if hasTerm && (decision.EntryAt <= 0 || decision.TermEnd <= decision.EntryAt) {
+		return "invalid_term_bounds"
+	}
+	if *current != nil && (decision.EntryAt != (*current).entryAt || decision.TermEnd != (*current).termEnd) {
+		return "term_identity_changed_while_open"
+	}
+	if *current == nil && hasTerm && decision.Action != "SUBMIT_ENTRY_SPOT_IOC" {
+		return "term_metadata_without_open_term"
+	}
+	switch decision.Action {
+	case "SUBMIT_ENTRY_SPOT_IOC":
+		if decision.State != "ENTRY_SPOT" && decision.State != "ENTRY_PERP" {
+			return "entry_spot_wrong_state"
+		}
+		if decision.TargetSpot == 0 || decision.TargetSpot != -decision.TargetPerp || (decision.TargetSpot != policy.MaxPosition && decision.TargetSpot != -policy.MaxPosition) {
+			return "entry_spot_invalid_targets"
+		}
+		if *current == nil {
+			if decision.EntryAt != decision.DecisionTime {
+				return "entry_spot_entry_time_mismatch"
+			}
+			*current = &termCarryLifecycleTerm{owner: termCarryParticipant{venue: decision.VenueID, client: decision.ClientID}, entryAt: decision.EntryAt, termEnd: decision.TermEnd}
+			*terms = append(*terms, *current)
+		}
+	case "SUBMIT_ENTRY_PERP_IOC":
+		if *current == nil || decision.State != "ENTRY_PERP" {
+			return "entry_perp_without_entry_state"
+		}
+	case "TERM_ACTIVE":
+		if *current == nil || decision.State != "ACTIVE_TERM" || spotPosition == 0 || perpPosition != -spotPosition || decision.DecisionTime >= (*current).termEnd {
+			return "active_term_state_mismatch"
+		}
+		if !(*current).active {
+			(*current).active, (*current).activeAt = true, decision.DecisionTime
+		}
+	case "SUBMIT_UNWIND_PERP_IOC":
+		if *current == nil || decision.State != "UNWIND_PERP" || decision.DecisionTime < (*current).termEnd || perpPosition == 0 {
+			return "perp_unwind_state_mismatch"
+		}
+	case "SUBMIT_UNWIND_SPOT_IOC":
+		if *current == nil || decision.State != "UNWIND_SPOT" || decision.DecisionTime < (*current).termEnd || perpPosition != 0 || spotPosition == 0 {
+			return "spot_unwind_state_mismatch"
+		}
+	case "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN", "UNWIND_PERP_GAP_UNREPRESENTABLE", "UNWIND_SPOT_GAP_UNREPRESENTABLE":
+		if *current == nil || (decision.State != "UNWIND_PERP" && decision.State != "UNWIND_SPOT") || decision.DecisionTime < (*current).termEnd {
+			return "unwind_defer_state_mismatch"
+		}
+	case "TERM_CLOSED":
+		if *current == nil || decision.State != "IDLE" || decision.DecisionTime < (*current).termEnd || spotPosition != 0 || perpPosition != 0 {
+			return "term_close_state_mismatch"
+		}
+		if (*current).closed {
+			return "duplicate_term_close"
+		}
+		(*current).closed, (*current).closedAt = true, decision.DecisionTime
+		*current = nil
+	default:
+		if *current == nil && decision.State != "IDLE" {
+			return "nonidle_state_without_open_term"
+		}
+	}
+	return ""
+}
+
+func applyTermCarryOutcome(policy termCarryPolicyConfig, outcome termCarryOutcome, spotPosition, perpPosition int64, result *TermCarryAudit, check func(string, uint64, uint64, string)) (int64, int64) {
+	fail := func(reason string) {
+		result.PositionContinuityErrors++
+		check(outcome.VenueID, outcome.ClientID, outcome.RequestID, reason)
+	}
+	if outcome.DecisionTime <= 0 || outcome.State == "" || outcome.Leg == "" || outcome.RequestID == 0 || outcome.SpotPositionBefore != spotPosition || outcome.PerpPositionBefore != perpPosition {
+		fail("outcome_position_before_mismatch")
+	}
+	switch outcome.Event {
+	case "ORDER_ACCEPTED", "ORDER_REJECTED", "ORDER_CANCELLED":
+		if outcome.SpotPositionAfter != spotPosition || outcome.PerpPositionAfter != perpPosition {
+			fail("nonfill_changed_position")
+		}
+		return spotPosition, perpPosition
+	case "ORDER_FILL":
+		if outcome.ExecutionTime <= 0 || outcome.Qty <= 0 || (outcome.Symbol != policy.SpotSymbol && outcome.Symbol != policy.PerpSymbol) || (outcome.Side != exchange.Buy.String() && outcome.Side != exchange.Sell.String()) {
+			fail("invalid_fill_outcome")
+			return spotPosition, perpPosition
+		}
+		delta := outcome.Qty
+		if outcome.Side == exchange.Sell.String() {
+			delta = -delta
+		}
+		if outcome.Symbol == policy.SpotSymbol {
+			next, ok := fundingCarryAuditAdd(spotPosition, delta)
+			if !ok || outcome.SpotPositionAfter != next || outcome.PerpPositionAfter != perpPosition {
+				fail("spot_fill_position_mismatch")
+				return spotPosition, perpPosition
+			}
+			return next, perpPosition
+		}
+		next, ok := fundingCarryAuditAdd(perpPosition, delta)
+		if !ok || outcome.SpotPositionAfter != spotPosition || outcome.PerpPositionAfter != next {
+			fail("perp_fill_position_mismatch")
+			return spotPosition, perpPosition
+		}
+		return spotPosition, next
+	default:
+		fail("unknown_term_carry_outcome")
+		return spotPosition, perpPosition
+	}
 }
 
 func loadTermCarryPolicy(dir string) (termCarryPolicyConfig, error) {
