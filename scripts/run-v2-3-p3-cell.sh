@@ -14,8 +14,9 @@ case "$arm" in A|B) ;; *) echo "unknown P3 arm: $arm" >&2; exit 2;; esac
 case "$seed" in 101|103) ;; *) echo "unregistered P3 seed: $seed" >&2; exit 2;; esac
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-config="$root_dir/research/configs/v2-3-p3/$arm-$seed.json"
-output="$root_dir/research/artifacts/v2-3-p3/$arm/seed-$seed"
+variant=${P3_VARIANT:-v2-3-p3}
+config="$root_dir/research/configs/$variant/$arm-$seed.json"
+output="$root_dir/research/artifacts/$variant/$arm/seed-$seed"
 binary=${3:-"$root_dir/bin/multivenue"}
 
 if [[ ! -f "$config" ]]; then
@@ -34,6 +35,7 @@ fi
 mkdir -p "$output"
 cp "$config" "$output/run-config.json"
 jq -n \
+	--arg variant "$variant" \
 	--arg arm "$arm" \
 	--argjson seed "$seed" \
 	--arg config_sha256 "$(sha256sum "$config" | awk '{print $1}')" \
@@ -43,7 +45,7 @@ jq -n \
 	--arg gomaxprocs "${GOMAXPROCS:-default}" \
 	--arg output_dir "$output" \
 	'{
-	  experiment_id: ("v2-3-p3-" + $arm + "-seed-" + ($seed|tostring)),
+	  experiment_id: ($variant + "-" + $arm + "-seed-" + ($seed|tostring)),
 	  arm: $arm,
 	  seed: $seed,
 	  simulated_horizon: "5m0s",

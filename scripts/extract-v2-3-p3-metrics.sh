@@ -3,7 +3,8 @@
 set -euo pipefail
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-artifact_dir="$root_dir/research/artifacts/v2-3-p3"
+variant=${P3_VARIANT:-v2-3-p3}
+artifact_dir="$root_dir/research/artifacts/$variant"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 
 if [[ ! -x "$analyzer" ]]; then
