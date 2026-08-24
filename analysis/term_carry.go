@@ -70,6 +70,7 @@ type termCarryPolicyConfig struct {
 	MarginRiskBps       int64  `json:"margin_risk_bps"`
 	LegRiskBps          int64  `json:"leg_risk_bps"`
 	MinNetCarryBps      int64  `json:"min_net_carry_bps"`
+	MandateEndAtNano    int64  `json:"mandate_end_at_nano"`
 	MaxPosition         int64  `json:"max_position"`
 	LotQty              int64  `json:"lot_qty"`
 	MinOrderSize        int64  `json:"min_order_size"`
@@ -103,6 +104,7 @@ type termCarryDecision struct {
 	TargetPerp                  int64  `json:"target_perp_position"`
 	EntryAt                     int64  `json:"entry_at"`
 	TermEnd                     int64  `json:"term_end"`
+	MandateEndAt                int64  `json:"mandate_end_at"`
 	CommitmentIntervals         int64  `json:"commitment_intervals"`
 	HasSpotBook                 bool   `json:"has_spot_book"`
 	SpotPublishedAt             int64  `json:"spot_published_at"`
@@ -655,7 +657,7 @@ func loadTermCarryPolicy(dir string) (termCarryPolicyConfig, error) {
 }
 
 func validTermCarryPolicy(policy termCarryPolicyConfig) error {
-	if policy.SpotSymbol != "ABC/USD" || policy.PerpSymbol != "ABC-PERP" || policy.DecisionPeriod <= 0 || policy.CommitmentIntervals <= 0 || policy.MaxFundingAge <= 0 || policy.MaxPosition <= 0 || policy.LotQty <= 0 || policy.MinOrderSize < 0 || policy.SpotTick <= 0 || policy.PerpTick <= 0 {
+	if policy.SpotSymbol != "ABC/USD" || policy.PerpSymbol != "ABC-PERP" || policy.DecisionPeriod <= 0 || policy.CommitmentIntervals <= 0 || policy.MaxFundingAge <= 0 || policy.MandateEndAtNano < 0 || policy.MaxPosition <= 0 || policy.LotQty <= 0 || policy.MinOrderSize < 0 || policy.SpotTick <= 0 || policy.PerpTick <= 0 {
 		return fmt.Errorf("invalid term-carry policy manifest")
 	}
 	for _, value := range []int64{policy.TakerFeeBps, policy.LongSpotFundingBps, policy.ShortSpotBorrowBps, policy.BalanceSheetBps, policy.MarginRiskBps, policy.LegRiskBps, policy.MinNetCarryBps} {
@@ -667,7 +669,7 @@ func validTermCarryPolicy(policy termCarryPolicyConfig) error {
 }
 
 func validateTermCarryDecision(policy termCarryPolicyConfig, decision termCarryDecision, sources map[fundingCarrySourceKey][]observationRecord, frontiers map[fundingCarryReceiptKey]auditedFrontier) error {
-	if decision.VenueID == "" || decision.ClientID == 0 || decision.Desk == "" || decision.PolicyVersion != "v2_5_p3_term_carry_v1" || decision.DecisionTime == 0 || decision.Action == "" || decision.SpotSymbol != policy.SpotSymbol || decision.PerpSymbol != policy.PerpSymbol || decision.CommitmentIntervals != policy.CommitmentIntervals || !termCarryKnownAction(decision.Action) {
+	if decision.VenueID == "" || decision.ClientID == 0 || decision.Desk == "" || decision.PolicyVersion != "v2_5_p3_term_carry_v1" || decision.DecisionTime == 0 || decision.Action == "" || decision.SpotSymbol != policy.SpotSymbol || decision.PerpSymbol != policy.PerpSymbol || decision.MandateEndAt != policy.MandateEndAtNano || decision.CommitmentIntervals != policy.CommitmentIntervals || !termCarryKnownAction(decision.Action) {
 		return fmt.Errorf("invalid_decision_fields")
 	}
 	if termCarrySubmission(decision.Action) && (decision.RequestID == 0 || decision.Leg == "" || decision.Side == "" || decision.RequestedQty <= 0) {

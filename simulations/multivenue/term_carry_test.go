@@ -171,6 +171,24 @@ func TestTermCarryAllocatorResetsRejectedFlatEntry(t *testing.T) {
 	}
 }
 
+func TestTermCarryAllocatorUsesDeclaredMandateNotWorldTermination(t *testing.T) {
+	gateway := newFundingCarryStubGateway()
+	var decisions []TermCarryDecision
+	cfg := termCarryTestConfig()
+	cfg.DecisionObserver = func(decision TermCarryDecision) { decisions = append(decisions, decision) }
+	now := time.Unix(10, 0)
+	cfg.MandateEndAtNano = now.Add(time.Hour).UnixNano()
+	allocator := NewTermCarryAllocator(1, gateway, cfg)
+	allocator.subscribed = true
+	observeTermCarryBooks(t, allocator, gateway, now, 100, 101, 102, 103, 100)
+
+	allocator.onTick(now.Add(time.Second))
+	censored := decisions[len(decisions)-1]
+	if censored.Action != "TERM_HORIZON_CENSORED" || censored.State != termCarryIdle || censored.MandateEndAt != cfg.MandateEndAtNano || allocator.plan != nil {
+		t.Fatalf("declared mandate did not censor infeasible term: decision=%+v plan=%+v", censored, allocator.plan)
+	}
+}
+
 func TestTermCarryFinancialsUseExactDirectionalTermCost(t *testing.T) {
 	cfg := termCarryTestConfig()
 	cfg.CommitmentIntervals = 12
@@ -212,6 +230,9 @@ func TestTermCarryConfigRequiresExplicitEvidencePath(t *testing.T) {
 	for _, venue := range sim.Venues {
 		if len(venue.TermCarryAllocators) != 1 {
 			t.Fatalf("venue %s term carry allocators = %d, want 1", venue.ID, len(venue.TermCarryAllocators))
+		}
+		if venue.TermCarryAllocators[0].cfg.MandateEndAtNano != policy.MandateEndAtNano {
+			t.Fatalf("venue %s allocator received an undeclared mandate: got %d want %d", venue.ID, venue.TermCarryAllocators[0].cfg.MandateEndAtNano, policy.MandateEndAtNano)
 		}
 	}
 }

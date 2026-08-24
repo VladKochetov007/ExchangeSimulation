@@ -165,15 +165,18 @@ func TestV20EvidenceHelper(t *testing.T) {
 	}
 	if termCarryEvidence {
 		// P3 holds the identical actor, delayed feed, and population across ON
-		// and OFF. The 2-minute helper horizon is intentionally shorter than its
-		// eight-hour minimum term, exercising explicit terminal censoring rather
-		// than fabricating an entry just for telemetry coverage.
+		// and OFF. Its explicit one-minute treasury mandate is shorter than the
+		// eight-hour minimum term, exercising declared-policy censoring rather
+		// than leaking the hidden simulation stop time into the actor.
 		cfg.LogMode = "full"
 		cfg.StrictPopulationAccounting = true
 		cfg.TermCarryAllocator = &TermCarryAllocatorConfig{
 			Enabled: true, SpotSymbol: "ABC/USD", PerpSymbol: "ABC-PERP", DecisionPeriod: 2 * time.Second,
 			CommitmentIntervals: 1, MaxFundingAge: 10 * time.Second,
-			TakerFeeBps: cfg.TakerFeeBps, LongSpotFundingBps: 0, ShortSpotBorrowBps: 0,
+			// This is an explicit participant mandate, serialized with the P3
+			// helper config; it is not the hidden simulation stop time.
+			MandateEndAtNano: time.Date(2025, 1, 1, 0, 1, 0, 0, time.UTC).UnixNano(),
+			TakerFeeBps:      cfg.TakerFeeBps, LongSpotFundingBps: 0, ShortSpotBorrowBps: 0,
 			BalanceSheetBps: 0, MarginRiskBps: 0, LegRiskBps: 0, MinNetCarryBps: 0,
 			MaxPosition: 100_000_000, LotQty: 10_000_000, MinOrderSize: 100_000, SpotTick: 1_000_000, PerpTick: 1_000_000,
 		}

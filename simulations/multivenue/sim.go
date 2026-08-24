@@ -2802,7 +2802,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		role := "term_carry_allocator_1"
 		balances := map[string]int64{"ABC": 2_000 * mvBasePrecision, "USD": 200_000_000 * mvQuotePrecision}
 		clientID, gateway := venue.connectParticipant(mount, role, balances, 100_000_000*mvQuotePrecision, noiseFee)
-		cfg.VenueID, cfg.Desk, cfg.ClientID, cfg.TerminalNano = venue.ID, role, clientID, s.terminalNano
+		cfg.VenueID, cfg.Desk, cfg.ClientID = venue.ID, role, clientID
 		if s.Config.RecordTermCarryDecisions {
 			cfg.DecisionObserver = termCarryDecisionObserver
 			cfg.OutcomeObserver = termCarryOutcomeObserver

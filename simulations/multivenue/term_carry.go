@@ -30,6 +30,7 @@ type TermCarryAllocatorConfig struct {
 	MarginRiskBps       int64                     `json:"margin_risk_bps"`
 	LegRiskBps          int64                     `json:"leg_risk_bps"`
 	MinNetCarryBps      int64                     `json:"min_net_carry_bps"`
+	MandateEndAtNano    int64                     `json:"mandate_end_at_nano"` // Participant-known deadline; zero means no mandate, never simulator termination.
 	MaxPosition         int64                     `json:"max_position"`
 	LotQty              int64                     `json:"lot_qty"`
 	MinOrderSize        int64                     `json:"min_order_size"`
@@ -38,7 +39,6 @@ type TermCarryAllocatorConfig struct {
 	VenueID             string                    `json:"-"`
 	Desk                string                    `json:"-"`
 	ClientID            uint64                    `json:"-"`
-	TerminalNano        int64                     `json:"-"`
 	DecisionObserver    func(TermCarryDecision)   `json:"-"`
 	OutcomeObserver     func(TermCarryLegOutcome) `json:"-"`
 }
@@ -49,6 +49,9 @@ func (c TermCarryAllocatorConfig) validate() error {
 	}
 	if c.DecisionPeriod <= 0 || c.MaxFundingAge <= 0 || c.CommitmentIntervals <= 0 {
 		return fmt.Errorf("decision period, maximum funding age, and commitment intervals must be positive")
+	}
+	if c.MandateEndAtNano < 0 {
+		return fmt.Errorf("mandate end must be non-negative")
 	}
 	if c.MaxPosition <= 0 || c.LotQty <= 0 || c.MinOrderSize < 0 || c.SpotTick <= 0 || c.PerpTick <= 0 {
 		return fmt.Errorf("position, lot, and tick policy inputs are invalid")
@@ -104,6 +107,7 @@ type TermCarryDecision struct {
 	TargetPerp          int64  `json:"target_perp_position"`
 	EntryAt             int64  `json:"entry_at"`
 	TermEnd             int64  `json:"term_end"`
+	MandateEndAt        int64  `json:"mandate_end_at"`
 	CommitmentIntervals int64  `json:"commitment_intervals"`
 
 	HasSpotBook     bool   `json:"has_spot_book"`
@@ -374,7 +378,7 @@ func (a *TermCarryAllocator) openDecision(decision TermCarryDecision, now time.T
 		decision.Action = reason
 		return decision
 	}
-	if !termCarryTerminalAllowsEntry(a.cfg, now.UnixNano(), a.funding.rate) {
+	if !termCarryMandateAllowsEntry(a.cfg, now.UnixNano(), a.funding.rate) {
 		decision.Action = "TERM_HORIZON_CENSORED"
 		return decision
 	}
@@ -552,7 +556,7 @@ func (a *TermCarryAllocator) baseDecision(now time.Time, action string) TermCarr
 		VenueID: a.cfg.VenueID, Desk: a.cfg.Desk, ClientID: a.cfg.ClientID, PolicyVersion: termCarryPolicyVersion,
 		DecisionTime: now.UnixNano(), Enabled: a.cfg.Enabled, Subscribed: a.subscribed, Pending: a.pending != nil, State: a.state, Action: action,
 		SpotSymbol: a.cfg.SpotSymbol, PerpSymbol: a.cfg.PerpSymbol, SpotPosition: a.spotPosition, PerpPosition: a.perpPosition, TargetSpot: targetSpot, TargetPerp: -targetSpot,
-		EntryAt: entryAt, TermEnd: termEnd, CommitmentIntervals: a.cfg.CommitmentIntervals,
+		EntryAt: entryAt, TermEnd: termEnd, MandateEndAt: a.cfg.MandateEndAtNano, CommitmentIntervals: a.cfg.CommitmentIntervals,
 		HasSpotBook: a.spot.hasSnapshot, SpotPublishedAt: a.spot.publishedAt, SpotSequence: a.spot.sequence, HasSpotBid: a.spot.hasBid, SpotBid: a.spot.bid, SpotBidQty: a.spot.bidQty, HasSpotAsk: a.spot.hasAsk, SpotAsk: a.spot.ask, SpotAskQty: a.spot.askQty,
 		HasPerpBook: a.perp.hasSnapshot, PerpPublishedAt: a.perp.publishedAt, PerpSequence: a.perp.sequence, HasPerpBid: a.perp.hasBid, PerpBid: a.perp.bid, PerpBidQty: a.perp.bidQty, HasPerpAsk: a.perp.hasAsk, PerpAsk: a.perp.ask, PerpAskQty: a.perp.askQty,
 		HasFunding: a.funding.has, FundingRateBps: a.funding.rate.Rate, FundingPublishedAt: a.funding.publishedAt, FundingSequence: a.funding.sequence, FundingNextAt: a.funding.rate.NextFunding, FundingIntervalSeconds: a.funding.rate.Interval, FundingAgeNanos: 0,
@@ -698,8 +702,8 @@ func termCarryComputeFinancials(cfg TermCarryAllocatorConfig, rate exchange.Fund
 	return termCarryFinancials{termEnd: end.Int64(), fundingIncome: funding, fees: fees, financing: financing, net: net, denominator: denominator, financingDirection: financingDirection}, true
 }
 
-func termCarryTerminalAllowsEntry(cfg TermCarryAllocatorConfig, now int64, rate exchange.FundingRate) bool {
-	if cfg.TerminalNano == 0 {
+func termCarryMandateAllowsEntry(cfg TermCarryAllocatorConfig, now int64, rate exchange.FundingRate) bool {
+	if cfg.MandateEndAtNano == 0 {
 		return true
 	}
 	financials, ok := termCarryComputeFinancials(cfg, rate, now, 1)
@@ -708,5 +712,5 @@ func termCarryTerminalAllowsEntry(cfg TermCarryAllocatorConfig, now int64, rate 
 	}
 	closeBudget := new(big.Int).Mul(big.NewInt(int64(cfg.DecisionPeriod)), big.NewInt(2))
 	deadline := new(big.Int).Add(big.NewInt(financials.termEnd), closeBudget)
-	return deadline.IsInt64() && deadline.Int64() <= cfg.TerminalNano
+	return deadline.IsInt64() && deadline.Int64() <= cfg.MandateEndAtNano
 }
