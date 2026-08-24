@@ -88,7 +88,10 @@ For submissions, `request_id` must exactly join accepted/rejected evidence;
 accepted order IDs must join IOC cancellation/fill records. Every fill must
 show the requested symbol/side, a different counterparty client, and a positive
 quote fee equal to the existing integer percentage-fee formula. Deferred rows
-have no request ID but remain observable.
+have no request ID but remain observable. The action `side` is absent when no
+side was selected; every submitted BUY or SELL serializes its named side. In
+particular, the zero-valued internal BUY enum is never allowed to disappear
+under JSON `omitempty`.
 
 The recorder adds no scheduler event, RNG draw, actor-visible state, callback,
 or request-order change. Fresh-process recorder on/off must preserve execution

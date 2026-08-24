@@ -290,40 +290,44 @@ func (c InventoryRebalanceConfig) validate() error {
 // book fields come only from the actor's locally delivered CDF/USD snapshot;
 // price zero remains a numeric field, never an availability sentinel.
 type MakerInventoryRebalanceDecision struct {
-	VenueID              string        `json:"venue_id"`
-	Maker                string        `json:"maker"`
-	ClientID             uint64        `json:"client_id"`
-	Symbol               string        `json:"symbol"`
-	DecisionTime         int64         `json:"decision_time"`
-	Enabled              bool          `json:"enabled"`
-	Subscribed           bool          `json:"subscribed"`
-	RequestPending       bool          `json:"request_pending"`
-	ActionOrDeferReason  string        `json:"action_or_defer_reason"`
-	Inventory            int64         `json:"inventory"`
-	RiskBandQty          int64         `json:"risk_band_qty"`
-	TargetBandQty        int64         `json:"target_band_qty"`
-	LastBookSourceTime   int64         `json:"last_book_source_time"`
-	LastBookReceivedTime int64         `json:"last_book_received_time"`
-	LastBookSequence     uint64        `json:"last_book_sequence"`
-	BidPrice             int64         `json:"bid_price"`
-	BidVisibleQty        int64         `json:"bid_visible_qty"`
-	AskPrice             int64         `json:"ask_price"`
-	AskVisibleQty        int64         `json:"ask_visible_qty"`
-	Side                 exchange.Side `json:"side,omitempty"`
-	DesiredReduction     int64         `json:"desired_reduction"`
-	ParticipationCap     int64         `json:"participation_cap"`
-	MaxRequestQty        int64         `json:"max_request_qty"`
-	ParticipationBps     int64         `json:"participation_bps"`
-	SlippageBps          int64         `json:"slippage_bps"`
-	EvaluationInterval   int64         `json:"evaluation_interval"`
-	Cooldown             int64         `json:"cooldown"`
-	LimitPrice           int64         `json:"limit_price"`
-	RequestedQty         int64         `json:"requested_qty"`
-	TakerFeeBps          int64         `json:"taker_fee_bps"`
-	RequestID            uint64        `json:"request_id,omitempty"`
-	CooldownUntil        int64         `json:"cooldown_until"`
-	OutcomeExpectation   string        `json:"outcome_expectation"`
-	CensorReason         string        `json:"censor_reason,omitempty"`
+	VenueID              string `json:"venue_id"`
+	Maker                string `json:"maker"`
+	ClientID             uint64 `json:"client_id"`
+	Symbol               string `json:"symbol"`
+	DecisionTime         int64  `json:"decision_time"`
+	Enabled              bool   `json:"enabled"`
+	Subscribed           bool   `json:"subscribed"`
+	RequestPending       bool   `json:"request_pending"`
+	ActionOrDeferReason  string `json:"action_or_defer_reason"`
+	Inventory            int64  `json:"inventory"`
+	RiskBandQty          int64  `json:"risk_band_qty"`
+	TargetBandQty        int64  `json:"target_band_qty"`
+	LastBookSourceTime   int64  `json:"last_book_source_time"`
+	LastBookReceivedTime int64  `json:"last_book_received_time"`
+	LastBookSequence     uint64 `json:"last_book_sequence"`
+	BidPrice             int64  `json:"bid_price"`
+	BidVisibleQty        int64  `json:"bid_visible_qty"`
+	AskPrice             int64  `json:"ask_price"`
+	AskVisibleQty        int64  `json:"ask_visible_qty"`
+	// Side remains the execution representation. SideEvidence is deliberately
+	// separate because Buy is the zero-valued enum and therefore cannot use
+	// omitempty without turning a real BUY decision into absent evidence.
+	Side               exchange.Side `json:"-"`
+	SideEvidence       string        `json:"side,omitempty"`
+	DesiredReduction   int64         `json:"desired_reduction"`
+	ParticipationCap   int64         `json:"participation_cap"`
+	MaxRequestQty      int64         `json:"max_request_qty"`
+	ParticipationBps   int64         `json:"participation_bps"`
+	SlippageBps        int64         `json:"slippage_bps"`
+	EvaluationInterval int64         `json:"evaluation_interval"`
+	Cooldown           int64         `json:"cooldown"`
+	LimitPrice         int64         `json:"limit_price"`
+	RequestedQty       int64         `json:"requested_qty"`
+	TakerFeeBps        int64         `json:"taker_fee_bps"`
+	RequestID          uint64        `json:"request_id,omitempty"`
+	CooldownUntil      int64         `json:"cooldown_until"`
+	OutcomeExpectation string        `json:"outcome_expectation"`
+	CensorReason       string        `json:"censor_reason,omitempty"`
 }
 
 // MakerInventoryRebalanceFill attests the submitting maker's actor-local
@@ -889,6 +893,7 @@ func (mm *StoikovMarketMaker) rebalanceDecision(now time.Time) MakerInventoryReb
 		decision.ParticipationCap = rebalanceParticipationCap(book.AskQty, policy.ParticipationBps)
 		decision.LimitPrice = rebalanceOutwardLimit(book.AskPrice, policy.SlippageBps, mm.cfg.TickSize, exchange.Buy)
 	}
+	decision.SideEvidence = decision.Side.String()
 	if decision.ParticipationCap <= 0 {
 		decision.ActionOrDeferReason = "LOCAL_CONTRA_TOUCH_UNAVAILABLE"
 		return decision

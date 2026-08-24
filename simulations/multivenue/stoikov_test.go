@@ -1,7 +1,9 @@
 package multivenue
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"math"
 	"testing"
 	"time"
@@ -195,6 +197,13 @@ func TestInventoryRebalanceBuyRoundsOutwardAndTerminalIsCensored(t *testing.T) {
 	}
 	if len(gw.requests) != 1 || gw.requests[0].OrderReq.TimeInForce != exchange.IOC || gw.requests[0].OrderReq.Price != 1_010 {
 		t.Fatalf("buy IOC = %+v", gw.requests)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(encoded, []byte(`"side":"BUY"`)) {
+		t.Fatalf("BUY evidence omitted from P2 decision: %s", encoded)
 	}
 }
 
