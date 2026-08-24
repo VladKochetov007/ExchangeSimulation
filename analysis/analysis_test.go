@@ -212,6 +212,31 @@ func TestTriangularDeviationIsZeroAtParity(t *testing.T) {
 	}
 }
 
+// A zero or signed print is a retained triangle leg, not an absent trade. The
+// conventional positive-rate ratio is explicitly undefined for that bucket.
+func TestTriangularDeviationRetainsSignedTradesAsUndefinedDomain(t *testing.T) {
+	const crossPrecision = 100_000_000
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/spot/ABC-USD.jsonl": {`{"sim_ts":1000000000,"data":{"venue_id":"north","payload":{"price":50000}},"event":"Trade"}`},
+		"north/spot/CDF-USD.jsonl": {`{"sim_ts":1000000000,"data":{"venue_id":"north","payload":{"price":0}},"event":"Trade"}`},
+		"north/spot/ABC-CDF.jsonl": {`{"sim_ts":1000000000,"data":{"venue_id":"north","payload":{"price":16666000000}},"event":"Trade"}`},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	result, err := run.MeasureTriangularDeviation(TriangularConfig{
+		VenueID: "north", BaseSymbol: "ABC-USD", QuotePair: "CDF-USD", CrossPair: "ABC-CDF",
+		CrossPrecision: crossPrecision,
+	})
+	if err != nil {
+		t.Fatalf("MeasureTriangularDeviation: %v", err)
+	}
+	if result.CompleteBuckets != 1 || result.UndefinedDomainObservations != 1 || len(result.DeviationsBps) != 0 {
+		t.Fatalf("result = %+v, want one explicit undefined bucket", result)
+	}
+}
+
 func TestDescribeReportsOrderStatistics(t *testing.T) {
 	got := Describe([]float64{5, 1, 4, 2, 3})
 	if got.N != 5 || got.Median != 3 || got.Max != 5 {

@@ -1063,7 +1063,7 @@ func main() {
 				}
 			})
 		case "triangular":
-			deviations, err := run.TriangularDeviation(analysis.TriangularConfig{
+			result, err := run.MeasureTriangularDeviation(analysis.TriangularConfig{
 				VenueID: *venue, BaseSymbol: *base, QuotePair: *quote, CrossPair: *cross,
 				CrossPrecision: *crossPrecision,
 			})
@@ -1071,10 +1071,10 @@ func main() {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)
 			}
-			summary := analysis.Describe(analysis.Abs(deviations))
-			emit(dir, summary, *asJSON, func() {
-				fmt.Printf("%-24s n %6d median %6.1f p90 %6.1f p99 %6.1f max %6.1f bps\n",
-					dir, summary.N, summary.Median, summary.P90, summary.P99, summary.Max)
+			summary := analysis.Describe(analysis.Abs(result.DeviationsBps))
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-24s n %6d domain-undefined %6d median %6.1f p90 %6.1f p99 %6.1f max %6.1f bps\n",
+					dir, summary.N, result.UndefinedDomainObservations, summary.Median, summary.P90, summary.P99, summary.Max)
 			})
 		default:
 			fmt.Fprintf(os.Stderr, "unknown metric %q\n", *metric)

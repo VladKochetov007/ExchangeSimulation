@@ -26,10 +26,28 @@ type TriangularConfig struct {
 	BucketNanos int64
 }
 
-// TriangularDeviation returns the basis-point deviation of the cross rate from
-// the rate implied by the other two books, one observation per bucket in which
-// all three books traded.
-func (r *Run) TriangularDeviation(cfg TriangularConfig) ([]float64, error) {
+// TriangularDeviationResult is the positive-ratio triangular statistic and
+// its declared-domain accounting. A signed trade remains in the evidence scan;
+// it is not converted to a missing trade merely because the current ratio is
+// undefined at or across zero.
+type TriangularDeviationResult struct {
+	// DeviationsBps has one positive-domain observation per bucket in which all
+	// three books traded.
+	DeviationsBps []float64 `json:"deviations_bps"`
+	// CompleteBuckets has all three trade observations before application of
+	// the current positive-ratio domain.
+	CompleteBuckets int `json:"complete_buckets"`
+	// UndefinedDomainObservations counts complete buckets excluded because one
+	// of the prices is zero or negative. It is not a missing-data count.
+	UndefinedDomainObservations int `json:"undefined_domain_observations"`
+}
+
+// MeasureTriangularDeviation returns the basis-point deviation of the cross
+// rate from the rate implied by the other two books, one observation per bucket
+// in which all three books traded. The calculation currently models a positive
+// cash-rate triangle; signed levels are retained as explicit undefined-domain
+// observations instead of being silently discarded.
+func (r *Run) MeasureTriangularDeviation(cfg TriangularConfig) (*TriangularDeviationResult, error) {
 	if cfg.CrossPrecision <= 0 {
 		return nil, fmt.Errorf("analysis: cross precision must be positive")
 	}
@@ -56,7 +74,7 @@ func (r *Run) TriangularDeviation(cfg TriangularConfig) ([]float64, error) {
 	var mu sync.Mutex
 	err := r.Scan(ScanOptions{Events: []string{"Trade"}, Files: files, FilesSelected: true}, func(event Event) {
 		var trade tradePayload
-		if event.Decode(&trade) != nil || trade.Price <= 0 {
+		if event.Decode(&trade) != nil {
 			return
 		}
 		symbol := symbolFromPath(event.File)
@@ -83,15 +101,35 @@ func (r *Run) TriangularDeviation(cfg TriangularConfig) ([]float64, error) {
 		buckets = append(buckets, key)
 	}
 	sort.Slice(buckets, func(i, j int) bool { return buckets[i] < buckets[j] })
-	deviations := make([]float64, 0, len(buckets))
+	result := &TriangularDeviationResult{DeviationsBps: make([]float64, 0, len(buckets))}
 	for _, key := range buckets {
-		implied := float64(base[key]) / float64(quote[key]) * float64(cfg.CrossPrecision)
-		if implied <= 0 {
+		result.CompleteBuckets++
+		if !positiveTriangleRatePrices(base[key], quote[key], cross[key]) {
+			result.UndefinedDomainObservations++
 			continue
 		}
-		deviations = append(deviations, 1e4*(float64(cross[key])/implied-1))
+		implied := float64(base[key]) / float64(quote[key]) * float64(cfg.CrossPrecision)
+		result.DeviationsBps = append(result.DeviationsBps, 1e4*(float64(cross[key])/implied-1))
 	}
-	return deviations, nil
+	return result, nil
+}
+
+// TriangularDeviation preserves the legacy slice-only API. New evidence
+// consumers should use MeasureTriangularDeviation so undefined signed-domain
+// observations cannot be mistaken for absent triangle activity.
+func (r *Run) TriangularDeviation(cfg TriangularConfig) ([]float64, error) {
+	result, err := r.MeasureTriangularDeviation(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return result.DeviationsBps, nil
+}
+
+// positiveTriangleRatePrices is the current triangle statistic's domain, not
+// a presence test. A signed currency pair can be present but cannot enter the
+// conventional rate ratio without a separately declared signed-rate model.
+func positiveTriangleRatePrices(base, quote, cross int64) bool {
+	return base > 0 && quote > 0 && cross > 0
 }
 
 // pathHasSymbol reports whether a log file belongs to a venue's symbol book.
