@@ -55,6 +55,12 @@ type SettlementAudit struct {
 	// ArithmeticFailures counts contracts for which the independent payout
 	// reconstruction exceeded the artifact's int64 representation.
 	ArithmeticFailures int `json:"arithmetic_failures"`
+	// ExplicitUnavailableAnnouncements counts terminal settlement events whose
+	// new wire contract explicitly says their numeric settlement price is not
+	// available. Such an event is invalid lifecycle evidence and is never
+	// reconstructed as a zero-price settlement. Legacy logs omit the field and
+	// remain readable for historical provenance.
+	ExplicitUnavailableAnnouncements int `json:"explicit_unavailable_announcements"`
 }
 
 // MeasureSettlements recomputes every dated-future settlement.
@@ -72,12 +78,13 @@ type SettlementAudit struct {
 // close-out was logged after expiry, which is all of them.
 func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit, error) {
 	type instrumentPayload struct {
-		Action          string `json:"action"`
-		Symbol          string `json:"symbol"`
-		InstrumentType  string `json:"instrument_type"`
-		ExpiryNano      int64  `json:"expiry_nano"`
-		SettlementPrice int64  `json:"settlement_price"`
-		Timestamp       int64  `json:"timestamp"`
+		Action                   string `json:"action"`
+		Symbol                   string `json:"symbol"`
+		InstrumentType           string `json:"instrument_type"`
+		ExpiryNano               int64  `json:"expiry_nano"`
+		SettlementPrice          int64  `json:"settlement_price"`
+		SettlementPriceAvailable *bool  `json:"settlement_price_available"`
+		Timestamp                int64  `json:"timestamp"`
 	}
 	type positionPayload struct {
 		Timestamp     int64  `json:"timestamp"`
@@ -118,6 +125,7 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 		accounts int
 	})
 	fillTimes := make(map[markKey][]int64)
+	explicitUnavailableAnnouncements := 0
 
 	// First pass: learn every contract's expiry instant, so the second pass can
 	// tell a pre-settlement position from a post-settlement close-out.
@@ -125,6 +133,9 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 	if err := r.Scan(expiryScan, func(event Event) {
 		var payload instrumentPayload
 		if event.Decode(&payload) != nil || payload.InstrumentType != "FUTURE" || !interesting(payload.Symbol) {
+			return
+		}
+		if payload.SettlementPriceAvailable != nil && !*payload.SettlementPriceAvailable {
 			return
 		}
 		mu.Lock()
@@ -144,6 +155,12 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 		case "instrument_settled":
 			var payload instrumentPayload
 			if event.Decode(&payload) != nil || payload.InstrumentType != "FUTURE" || !interesting(payload.Symbol) {
+				return
+			}
+			if payload.SettlementPriceAvailable != nil && !*payload.SettlementPriceAvailable {
+				mu.Lock()
+				explicitUnavailableAnnouncements++
+				mu.Unlock()
 				return
 			}
 			mu.Lock()
@@ -213,7 +230,7 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 	if precision <= 0 {
 		precision = 1
 	}
-	result := &SettlementAudit{}
+	result := &SettlementAudit{ExplicitUnavailableAnnouncements: explicitUnavailableAnnouncements}
 	for key, contract := range settled {
 		check := SettlementCheck{
 			VenueID: key.venue, Symbol: key.symbol,

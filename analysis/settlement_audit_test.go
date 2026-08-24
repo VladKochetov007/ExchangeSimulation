@@ -34,6 +34,22 @@ func TestSettlementAuditDoesNotConvertOverflowToZeroPayout(t *testing.T) {
 	}
 }
 
+func TestSettlementAuditRejectsExplicitlyUnavailablePrice(t *testing.T) {
+	line := `{"sim_ts":1000000000,"client_id":0,"event":"instrument_settled","data":{"venue_id":"north","payload":{"action":"settled","symbol":"OIL-FUT-1","instrument_type":"FUTURE","expiry_nano":1000000000,"settlement_price":0,"settlement_price_available":false,"timestamp":1000000000}}}`
+	dir := writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": {line}})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureSettlements(SettlementAuditOptions{BasePrecision: 1})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.ExplicitUnavailableAnnouncements != 1 || len(result.Checks) != 0 {
+		t.Fatalf("unavailable terminal settlement was reconstructed: %+v", result)
+	}
+}
+
 func positionLine(ts int64, venue string, clientID uint64, symbol string, size, entry int64) string {
 	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"position_update","data":{"venue_id":%q,"payload":{"symbol":%q,"payload":{"timestamp":%d,"client_id":%d,"symbol":%q,"new_size":%d,"new_entry_price":%d}}}}`,
 		ts, clientID, venue, symbol, ts, clientID, symbol, size, entry)
