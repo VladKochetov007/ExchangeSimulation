@@ -102,3 +102,13 @@ and terminal balance mismatch—remain required. P3d adds the committed v3
 mutations: forged effective exit floor, entry using the exit exception, and an
 oversized local-touch child. A pass still does not establish funding anchoring,
 positive realized carry after exit, or realistic execution quality.
+
+## Outcome addendum — invalid attempt, 2026-08-24
+
+The preceding preregistration is immutable historical text. Its premise that
+`unwind_min_order_size=0` meant the venue's positive-unit admission floor was
+false: both ABC instruments have an actual 100,000-unit minimum. The B arm
+submitted 16,286/16,348-unit children and was rejected as `INVALID_QTY`; it is
+therefore **INVALID / NOT SCORED**, rather than a causal falsification of the
+actor-only exit-floor hypothesis. Full provenance and the independent replay
+are recorded in [`v2-5-p3d-exit-liquidity-results.md`](v2-5-p3d-exit-liquidity-results.md).

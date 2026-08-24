@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "experiment_id": "V2-5-P3D",
+  "status": "INVALID_ATTEMPT_NOT_SCORED",
+  "reason": "The treatment interpreted a configured zero as an exchange positive-unit minimum, but ABC/USD and ABC-PERP enforce a 100000 raw-unit instrument minimum. B submitted 16286/16348-unit unwind children and received INVALID_QTY.",
+  "raw_evidence_retained": true,
+  "prune_eligible": false,
+  "arms": {
+    "legacy": {
+      "seed": 107,
+      "config_sha256": "cbb18d86752b59be3000998f8832851305f29f5cd2c440190d71039f9658ca76",
+      "execution_observations": 50614472,
+      "execution_stream_hash": "a38aca12e63cf12f70be86cecc463d92a487ff25fbc8d143d5f70630c8236dbe",
+      "evidence_records": 51143681,
+      "evidence_multiset_digest": "35fcd3cc5a391741c4cee1dfd22e169b1cf5ae359192d8b8d9b8f88faa331b83",
+      "termcarry": {
+        "submitted": 4,
+        "deferred": 529196,
+        "active_terms": 2,
+        "closed_terms": 0,
+        "open_terms": 2,
+        "outside_term_funding_settlements": 1,
+        "unwind_size_deferrals": 7200
+      }
+    },
+    "unit": {
+      "seed": 107,
+      "config_sha256": "3b5844597b5f89651888f4433183a118c4a842a6adf43dea903d37d86a97ed37",
+      "execution_observations": 50621670,
+      "execution_stream_hash": "9e912f98fee7d41c290565c54b13bc8d937f8a41a4c0d536414e70a0a53e2821",
+      "evidence_records": 51158077,
+      "evidence_multiset_digest": "8c69eccf93e406dba76f99152100a27cc490ed58e50834c24288af6a21da25db",
+      "termcarry_replay_after_hardening": {
+        "submitted": 7204,
+        "rejected": 7198,
+        "submission_mismatches": 7200,
+        "missing_terminal_venue_outcomes": 2,
+        "active_terms": 2,
+        "closed_terms": 0,
+        "open_terms": 2,
+        "outside_term_funding_settlements": 1
+      }
+    }
+  },
+  "correction_commits": [
+    "2cb51bf",
+    "21d17ae"
+  ],
+  "next_gate": "Do not rerun P3D. Design a separate entry-time exit-capacity or participation-limited execution mechanism before funding/basis inference."
+}

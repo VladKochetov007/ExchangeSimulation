@@ -1,8 +1,10 @@
 # V2-5 P3d — explicit exit-liquidity policy design
 
-Status: **design only; no P3d configuration, code, preflight, or market world
-has run.** This proposal follows the retained P3c negative result. It does not
-alter P3a–P3c configs, scores, or evidence.
+Status: **historical design; the registered P3d attempt ran and is INVALID / NOT
+SCORED.** The original proposal follows the retained P3c negative result and
+does not alter P3a–P3c configs, scores, or evidence. Its false
+exchange-minimum premise and retained outcome are appended below rather than
+rewritten out of the pre-run design record.
 
 ## Observed failure
 
@@ -15,11 +17,11 @@ child before exchange admission, emitted 7,200
 `EXECUTABLE_SIZE_UNAVAILABLE` decisions, left both pairs open, and allowed one
 south funding transfer after the declared term.
 
-The exchange itself admits any positive integer quantity; this 100,000 floor
-is not a venue rule. It was an entry-materiality policy inadvertently reused
-for risk reduction. P3c therefore does not show that no executable price or
-liquidity existed. It shows that the current participant policy cannot use the
-available liquidity.
+The pre-run proposal assumed the exchange itself admitted any positive integer
+quantity and therefore treated the 100,000 floor as actor-local. That premise
+was false: ABC spot and perpetual both enforce a 100,000-unit venue minimum.
+P3c therefore shows insufficient *executable* exit capacity at the contract's
+actual quantity rule; it does not identify a separate actor-only floor.
 
 ## Local hypothesis
 
@@ -142,3 +144,17 @@ its funding-persistence belief, prove positive net carry after all exits,
 establish funding anchoring, or demonstrate a realistic optimal execution
 strategy. A later execution/participation model would require a new
 mechanism-level experiment, not an in-place P3d parameter adjustment.
+
+## Outcome addendum — invalid attempt, 2026-08-24
+
+The status line above is historical. P3d was implemented, preflighted, and
+run, but the full paired attempt is **INVALID / NOT SCORED**. The premise that
+the exchange accepted any positive quantity was false: both ABC instruments
+enforce a 100,000-unit minimum. The B policy submitted 16,286/16,348-unit
+unwind children and received `INVALID_QTY`; it could not identify an
+actor-only exit floor. The retained evidence and exact correction are recorded
+in [`v2-5-p3d-exit-liquidity-results.md`](v2-5-p3d-exit-liquidity-results.md).
+
+The later code treats zero as *no additional actor materiality floor*, while
+the venue minimum remains binding. This does not retroactively alter P3d raw
+evidence or justify a parameter rerun.

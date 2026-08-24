@@ -193,3 +193,14 @@ This actor can establish a causally inspectable response to its **declared
 funding-persistence belief**. It cannot by itself show that funding is an
 endogenous general-market anchor, that the belief is realistic, or that
 basis convergence emerges without imposed participant priors.
+
+## P3d correction — do not score the exit-floor contrast
+
+The separately registered P3d attempt is retained as
+[`v2-5-p3d-exit-liquidity-results.md`](v2-5-p3d-exit-liquidity-results.md).
+It is **INVALID / NOT SCORED**, not a successful recovery from P3c: the
+assumed actor-only 100,000-unit floor was the actual ABC venue minimum. Its
+zero-floor B treatment sent sub-minimum children, which the exchange rejected.
+The implementation and replay now prevent that category of invalid child;
+P3's remaining live limitation is future exit capacity, not numeric
+price/quantity availability.
