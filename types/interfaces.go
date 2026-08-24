@@ -27,8 +27,10 @@ type Venue interface {
 var ErrNoPrice = errors.New("no usable price")
 
 // PriceSource provides a configured or externally observed reference price.
-// Implementations must return a positive price on success and wrap ErrNoPrice
-// when the source, symbol, or required observation is unavailable.
+// Implementations return any numeric price admitted by the consuming
+// instrument's PriceDomain and wrap ErrNoPrice when the source, symbol, or
+// required observation is unavailable. Numeric zero is never an availability
+// sentinel.
 type PriceSource interface {
 	Price(symbol string) (int64, error)
 }
@@ -108,6 +110,7 @@ type Instrument interface {
 	QuotePrecision() int64
 	TickSize() int64
 	MinOrderSize() int64
+	PriceDomain() PriceDomain
 	ValidatePrice(price int64) bool
 	ValidateQty(qty int64) bool
 	IsPerp() bool

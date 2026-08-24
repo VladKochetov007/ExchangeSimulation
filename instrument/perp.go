@@ -24,6 +24,7 @@ func NewPerpFutures(symbol, base, quote string, basePrecision, quotePrecision, t
 			quotePrecision: quotePrecision,
 			tickSize:       tickSize,
 			minOrderSize:   minOrderSize,
+			priceDomain:    etypes.PositivePriceDomain(tickSize),
 		},
 		fundingRate: &etypes.FundingRate{
 			Symbol:         symbol,

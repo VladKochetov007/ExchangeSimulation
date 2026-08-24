@@ -23,7 +23,8 @@ func DefaultOptionMarginParams() OptionMarginParams {
 // unit (quote precision). Buyers pay the full premium from the perp wallet;
 // sellers post initial margin there. At expiry every position auto-exercises
 // against the settlement TWAP of the underlying: intrinsic value is exchanged
-// in the quote asset and short margin is released.
+// in the quote asset and short margin is released. Premiums are non-negative;
+// zero is a valid numeric premium, not an unavailable-price sentinel.
 type EuropeanOption struct {
 	SpotInstrument
 	Strike     int64 // quote precision units
@@ -70,6 +71,7 @@ func NewEuropeanOption(symbol, base, quote, underlying string, basePrecision, qu
 			quotePrecision: quotePrecision,
 			tickSize:       tickSize,
 			minOrderSize:   minOrderSize,
+			priceDomain:    etypes.NonNegativePriceDomain(tickSize),
 		},
 		Strike:     strike,
 		IsCall:     isCall,
@@ -83,10 +85,10 @@ func NewEuropeanOption(symbol, base, quote, underlying string, basePrecision, qu
 
 func (o *EuropeanOption) InstrumentType() string { return "OPTION" }
 
-// Premiums can legitimately rest at a single tick, so unlike spot the price
-// only needs tick alignment.
+// Premiums can be exactly zero when a listed option is economically
+// worthless. Negative premium remains outside the current option contract.
 func (o *EuropeanOption) ValidatePrice(price int64) bool {
-	return price > 0 && price%o.tickSize == 0
+	return o.PriceDomain().Validate(price)
 }
 
 // SetObservationWindow overrides the settlement TWAP lookback (default 60s).

@@ -92,6 +92,56 @@ func TestBookMidPriceArithmeticUsesAdmittedPriceDomain(t *testing.T) {
 	}
 }
 
+func TestBookMidPriceLockedSupportsFullSignedArithmetic(t *testing.T) {
+	tests := []struct {
+		name string
+		bid  int64
+		ask  int64
+		want int64
+	}{
+		{name: "entirely negative", bid: -20, ask: -10, want: -15},
+		{name: "negative to zero odd", bid: -5, ask: 0, want: -2},
+		{name: "spans zero odd", bid: -5, ask: 4, want: 0},
+		{name: "zero to positive", bid: 0, ask: 5, want: 2},
+		{name: "min to max", bid: math.MinInt64, ask: math.MaxInt64, want: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ex := newBookPriceExchange(t)
+			defer ex.Shutdown()
+			addBookPriceQuote(t, ex, Buy, tc.bid)
+			addBookPriceQuote(t, ex, Sell, tc.ask)
+			got, err := ex.bookMidPrice("ABC/USD")
+			if err != nil || got != tc.want {
+				t.Fatalf("bookMidPrice = (%d, %v), want (%d, nil)", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestBookReferencePriceMakesSignedOneSidedPolicyExplicit(t *testing.T) {
+	tests := []struct {
+		name  string
+		side  Side
+		price int64
+	}{
+		{name: "negative bid", side: Buy, price: -20},
+		{name: "zero ask", side: Sell, price: 0},
+		{name: "positive ask", side: Sell, price: 20},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ex := newBookPriceExchange(t)
+			defer ex.Shutdown()
+			addBookPriceQuote(t, ex, tc.side, tc.price)
+			got, err := ex.bookReferencePrice("ABC/USD")
+			if err != nil || got != tc.price {
+				t.Fatalf("bookReferencePrice = (%d, %v), want (%d, nil)", got, err, tc.price)
+			}
+		})
+	}
+}
+
 func TestBookReferencePriceMakesOneSidedPolicyExplicit(t *testing.T) {
 	tests := []struct {
 		name    string

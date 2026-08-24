@@ -74,3 +74,42 @@ func TestTryMulBps(t *testing.T) {
 		t.Fatalf("rebate bps = (%d, %t), want (-25, true)", got, ok)
 	}
 }
+
+func TestMidpointMatchesBigIntAcrossSignedDomain(t *testing.T) {
+	cases := []struct {
+		name string
+		a    int64
+		b    int64
+	}{
+		{name: "min/min", a: math.MinInt64, b: math.MinInt64},
+		{name: "max/max", a: math.MaxInt64, b: math.MaxInt64},
+		{name: "min/max", a: math.MinInt64, b: math.MaxInt64},
+		{name: "negative/negative odd", a: -5, b: -4},
+		{name: "negative/zero odd", a: -5, b: 0},
+		{name: "negative/positive odd", a: -5, b: 4},
+		{name: "zero/positive odd", a: 0, b: 5},
+		{name: "ordinary positive odd", a: 100, b: 101},
+		{name: "equal endpoints", a: -99, b: -99},
+		{name: "wide signed interval", a: math.MinInt64 + 1, b: math.MaxInt64},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			want := new(big.Int).Add(big.NewInt(tc.a), big.NewInt(tc.b))
+			want.Quo(want, big.NewInt(2))
+			if got := Midpoint(tc.a, tc.b); got != want.Int64() {
+				t.Fatalf("Midpoint(%d, %d) = %d, want %d", tc.a, tc.b, got, want.Int64())
+			}
+		})
+	}
+}
+
+func TestMidpointExhaustiveSmallSignedRange(t *testing.T) {
+	for a := int64(-256); a <= 256; a++ {
+		for b := int64(-256); b <= 256; b++ {
+			want := (a + b) / 2
+			if got := Midpoint(a, b); got != want {
+				t.Fatalf("Midpoint(%d, %d) = %d, want %d", a, b, got, want)
+			}
+		}
+	}
+}
