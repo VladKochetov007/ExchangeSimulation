@@ -60,20 +60,21 @@ func TestTermCarryAllocatorCompletesOneExplicitTerm(t *testing.T) {
 
 	allocator.onTick(now.Add(time.Second))
 	entrySpot := decisions[len(decisions)-1]
-	if entrySpot.Action != "SUBMIT_ENTRY_SPOT_IOC" || entrySpot.State != termCarryEntrySpot || entrySpot.TermEnd != now.Add(8*time.Hour).UnixNano() || entrySpot.Side != "BUY" || entrySpot.RequestID == 0 {
+	if entrySpot.Action != "SUBMIT_ENTRY_SPOT_IOC" || entrySpot.State != termCarryEntrySpot || entrySpot.PlanCreatedAt != entrySpot.DecisionTime || entrySpot.FirstExposureAt != 0 || entrySpot.TermEnd != now.Add(8*time.Hour).UnixNano() || entrySpot.Side != "BUY" || entrySpot.RequestID == 0 {
 		t.Fatalf("entry spot decision = %+v", entrySpot)
 	}
-	acceptAndFillTermCarry(t, allocator, entrySpot.RequestID, 41, "ABC/USD", exchange.Buy, now.Add(2*time.Second))
+	firstFillAt := now.Add(2 * time.Second)
+	acceptAndFillTermCarry(t, allocator, entrySpot.RequestID, 41, "ABC/USD", exchange.Buy, firstFillAt)
 
 	allocator.onTick(now.Add(3 * time.Second))
 	entryPerp := decisions[len(decisions)-1]
-	if entryPerp.Action != "SUBMIT_ENTRY_PERP_IOC" || entryPerp.State != termCarryEntryPerp || entryPerp.Side != "SELL" || entryPerp.TargetSpot != 50 || entryPerp.TargetPerp != -50 {
+	if entryPerp.Action != "SUBMIT_ENTRY_PERP_IOC" || entryPerp.State != termCarryEntryPerp || entryPerp.PlanCreatedAt != entrySpot.DecisionTime || entryPerp.FirstExposureAt != firstFillAt.UnixNano() || entryPerp.Side != "SELL" || entryPerp.TargetSpot != 50 || entryPerp.TargetPerp != -50 {
 		t.Fatalf("entry perp decision = %+v", entryPerp)
 	}
 	acceptAndFillTermCarry(t, allocator, entryPerp.RequestID, 42, "ABC-PERP", exchange.Sell, now.Add(4*time.Second))
 
 	allocator.onTick(now.Add(5 * time.Second))
-	if active := decisions[len(decisions)-1]; active.Action != "TERM_ACTIVE" || active.State != termCarryActive || allocator.spotPosition != 50 || allocator.perpPosition != -50 {
+	if active := decisions[len(decisions)-1]; active.Action != "TERM_ACTIVE" || active.State != termCarryActive || active.FirstExposureAt != firstFillAt.UnixNano() || allocator.spotPosition != 50 || allocator.perpPosition != -50 {
 		t.Fatalf("matched pair did not become active: decision=%+v positions=%d/%d", active, allocator.spotPosition, allocator.perpPosition)
 	}
 
@@ -100,6 +101,28 @@ func TestTermCarryAllocatorCompletesOneExplicitTerm(t *testing.T) {
 	}
 }
 
+func TestTermCarryAllocatorRecordsFirstPartialExposureOnce(t *testing.T) {
+	gateway := newFundingCarryStubGateway()
+	cfg := termCarryTestConfig()
+	allocator := NewTermCarryAllocator(1, gateway, cfg)
+	allocator.subscribed = true
+	now := time.Unix(10, 0)
+	observeTermCarryBooks(t, allocator, gateway, now, 100, 101, 102, 103, 100)
+
+	allocator.onTick(now.Add(time.Second))
+	requestID := allocator.pending.requestID
+	allocator.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: requestID, OrderID: 41}})
+	first := now.Add(2 * time.Second)
+	allocator.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderPartialFill, Data: actor.OrderFillEvent{OrderID: 41, Symbol: "ABC/USD", Side: exchange.Buy, Qty: 20, Price: 101, TradeID: 1, Timestamp: first.UnixNano()}})
+	if allocator.plan == nil || allocator.plan.firstExposureAt != first.UnixNano() {
+		t.Fatalf("first partial fill did not set first exposure: %+v", allocator.plan)
+	}
+	allocator.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{OrderID: 41, Symbol: "ABC/USD", Side: exchange.Buy, Qty: 30, Price: 101, TradeID: 2, IsFull: true, Timestamp: now.Add(3 * time.Second).UnixNano()}})
+	if allocator.plan.firstExposureAt != first.UnixNano() {
+		t.Fatalf("later fill changed first exposure: %+v", allocator.plan)
+	}
+}
+
 func TestTermCarryAllocatorDefersUnavailableUnwindAndRecovers(t *testing.T) {
 	gateway := newFundingCarryStubGateway()
 	var decisions []TermCarryDecision
@@ -110,7 +133,7 @@ func TestTermCarryAllocatorDefersUnavailableUnwindAndRecovers(t *testing.T) {
 	now := time.Unix(10, 0)
 	observeTermCarryBooks(t, allocator, gateway, now, 100, 101, 102, 103, 100)
 	allocator.state = termCarryActive
-	allocator.plan = &termCarryPlan{direction: 1, entryAt: now.UnixNano(), termEnd: now.Add(time.Second).UnixNano()}
+	allocator.plan = &termCarryPlan{direction: 1, planCreatedAt: now.UnixNano(), firstExposureAt: now.UnixNano(), termEnd: now.Add(time.Second).UnixNano()}
 	allocator.spotPosition, allocator.perpPosition = 50, -50
 	allocator.perp.hasAsk = false
 
@@ -139,13 +162,13 @@ func TestTermCarryAllocatorDoesNotCreateTermBeforeExecutableEntry(t *testing.T) 
 
 	allocator.onTick(now.Add(time.Second))
 	deferred := decisions[len(decisions)-1]
-	if deferred.Action != "EXECUTABLE_SIZE_UNAVAILABLE" || deferred.State != termCarryIdle || deferred.EntryAt != 0 || deferred.TermEnd != 0 || deferred.TargetSpot != 0 || deferred.TargetPerp != 0 || allocator.plan != nil || allocator.state != termCarryIdle {
+	if deferred.Action != "EXECUTABLE_SIZE_UNAVAILABLE" || deferred.State != termCarryIdle || deferred.PlanCreatedAt != 0 || deferred.FirstExposureAt != 0 || deferred.TermEnd != 0 || deferred.TargetSpot != 0 || deferred.TargetPerp != 0 || allocator.plan != nil || allocator.state != termCarryIdle {
 		t.Fatalf("flat unavailable entry created a term: decision=%+v state=%s plan=%+v", deferred, allocator.state, allocator.plan)
 	}
 
 	allocator.spot.askQty = 1_000
 	allocator.onTick(now.Add(2 * time.Second))
-	if entry := decisions[len(decisions)-1]; entry.Action != "SUBMIT_ENTRY_SPOT_IOC" || entry.State != termCarryEntrySpot || entry.EntryAt == 0 || entry.TermEnd <= entry.EntryAt || allocator.plan == nil {
+	if entry := decisions[len(decisions)-1]; entry.Action != "SUBMIT_ENTRY_SPOT_IOC" || entry.State != termCarryEntrySpot || entry.PlanCreatedAt == 0 || entry.FirstExposureAt != 0 || entry.TermEnd <= entry.PlanCreatedAt || allocator.plan == nil {
 		t.Fatalf("fresh executable retry did not create a term: decision=%+v state=%s plan=%+v", entry, allocator.state, allocator.plan)
 	}
 }

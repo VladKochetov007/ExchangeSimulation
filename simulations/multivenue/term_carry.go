@@ -10,7 +10,7 @@ import (
 	"exchange_sim/exchange"
 )
 
-const termCarryPolicyVersion = "v2_5_p3_term_carry_v1"
+const termCarryPolicyVersion = "v2_5_p3_term_carry_v2"
 
 // TermCarryAllocatorConfig declares an opt-in, lifecycle-bearing carry
 // participant. It is deliberately distinct from FundingCarryArbitrageur: the
@@ -105,7 +105,8 @@ type TermCarryDecision struct {
 	PerpPosition        int64  `json:"perp_position"`
 	TargetSpot          int64  `json:"target_spot_position"`
 	TargetPerp          int64  `json:"target_perp_position"`
-	EntryAt             int64  `json:"entry_at"`
+	PlanCreatedAt       int64  `json:"plan_created_at"`
+	FirstExposureAt     int64  `json:"first_exposure_at"`
 	TermEnd             int64  `json:"term_end"`
 	MandateEndAt        int64  `json:"mandate_end_at"`
 	CommitmentIntervals int64  `json:"commitment_intervals"`
@@ -185,9 +186,10 @@ type TermCarryLegOutcome struct {
 }
 
 type termCarryPlan struct {
-	direction int64
-	entryAt   int64
-	termEnd   int64
+	direction       int64
+	planCreatedAt   int64
+	firstExposureAt int64
+	termEnd         int64
 }
 
 type termCarryPending struct {
@@ -413,9 +415,9 @@ func (a *TermCarryAllocator) openDecision(decision TermCarryDecision, now time.T
 		decision.TargetSpot = -a.cfg.MaxPosition
 	}
 	decision.TargetPerp = -decision.TargetSpot
-	a.plan = &termCarryPlan{direction: direction, entryAt: now.UnixNano(), termEnd: financials.termEnd}
+	a.plan = &termCarryPlan{direction: direction, planCreatedAt: now.UnixNano(), termEnd: financials.termEnd}
 	a.state = termCarryEntrySpot
-	decision.State, decision.EntryAt = a.state, a.plan.entryAt
+	decision.State, decision.PlanCreatedAt, decision.TermEnd = a.state, a.plan.planCreatedAt, a.plan.termEnd
 	decision = a.adjustSpotDecision(decision, "ENTRY_SPOT_IOC")
 	if !termCarrySubmitsOrder(decision.Action) {
 		// A price/size defer has no economic exposure and therefore no ownership
@@ -423,7 +425,7 @@ func (a *TermCarryAllocator) openDecision(decision TermCarryDecision, now time.T
 		// zero-fill admission into fictitious carry time. A later tick must
 		// recompute its economics from its then-local observations.
 		a.resetFlatEntryPlan()
-		decision.State, decision.EntryAt, decision.TermEnd = a.state, 0, 0
+		decision.State, decision.PlanCreatedAt, decision.FirstExposureAt, decision.TermEnd = a.state, 0, 0, 0
 		decision.TargetSpot, decision.TargetPerp = 0, 0
 	}
 	return decision
@@ -541,9 +543,9 @@ func (a *TermCarryAllocator) orderFromGap(decision TermCarryDecision, book fundi
 
 func (a *TermCarryAllocator) baseDecision(now time.Time, action string) TermCarryDecision {
 	frontier := fundingCarryFrontier(a.Gateway())
-	entryAt, termEnd := int64(0), int64(0)
+	planCreatedAt, firstExposureAt, termEnd := int64(0), int64(0), int64(0)
 	if a.plan != nil {
-		entryAt, termEnd = a.plan.entryAt, a.plan.termEnd
+		planCreatedAt, firstExposureAt, termEnd = a.plan.planCreatedAt, a.plan.firstExposureAt, a.plan.termEnd
 	}
 	targetSpot := int64(0)
 	if a.plan != nil && a.state != termCarryUnwindPerp && a.state != termCarryUnwindSpot {
@@ -556,7 +558,7 @@ func (a *TermCarryAllocator) baseDecision(now time.Time, action string) TermCarr
 		VenueID: a.cfg.VenueID, Desk: a.cfg.Desk, ClientID: a.cfg.ClientID, PolicyVersion: termCarryPolicyVersion,
 		DecisionTime: now.UnixNano(), Enabled: a.cfg.Enabled, Subscribed: a.subscribed, Pending: a.pending != nil, State: a.state, Action: action,
 		SpotSymbol: a.cfg.SpotSymbol, PerpSymbol: a.cfg.PerpSymbol, SpotPosition: a.spotPosition, PerpPosition: a.perpPosition, TargetSpot: targetSpot, TargetPerp: -targetSpot,
-		EntryAt: entryAt, TermEnd: termEnd, MandateEndAt: a.cfg.MandateEndAtNano, CommitmentIntervals: a.cfg.CommitmentIntervals,
+		PlanCreatedAt: planCreatedAt, FirstExposureAt: firstExposureAt, TermEnd: termEnd, MandateEndAt: a.cfg.MandateEndAtNano, CommitmentIntervals: a.cfg.CommitmentIntervals,
 		HasSpotBook: a.spot.hasSnapshot, SpotPublishedAt: a.spot.publishedAt, SpotSequence: a.spot.sequence, HasSpotBid: a.spot.hasBid, SpotBid: a.spot.bid, SpotBidQty: a.spot.bidQty, HasSpotAsk: a.spot.hasAsk, SpotAsk: a.spot.ask, SpotAskQty: a.spot.askQty,
 		HasPerpBook: a.perp.hasSnapshot, PerpPublishedAt: a.perp.publishedAt, PerpSequence: a.perp.sequence, HasPerpBid: a.perp.hasBid, PerpBid: a.perp.bid, PerpBidQty: a.perp.bidQty, HasPerpAsk: a.perp.hasAsk, PerpAsk: a.perp.ask, PerpAskQty: a.perp.askQty,
 		HasFunding: a.funding.has, FundingRateBps: a.funding.rate.Rate, FundingPublishedAt: a.funding.publishedAt, FundingSequence: a.funding.sequence, FundingNextAt: a.funding.rate.NextFunding, FundingIntervalSeconds: a.funding.rate.Interval, FundingAgeNanos: 0,
@@ -598,6 +600,12 @@ func (a *TermCarryAllocator) onFill(event actor.OrderFillEvent) {
 	}
 	if !ok {
 		panic("term carry position overflow")
+	}
+	if a.plan != nil && a.plan.firstExposureAt == 0 {
+		if event.Timestamp <= 0 {
+			panic("term carry first exposure has nonpositive execution time")
+		}
+		a.plan.firstExposureAt = event.Timestamp
 	}
 	a.emitOutcome(TermCarryLegOutcome{VenueID: a.cfg.VenueID, Desk: a.cfg.Desk, ClientID: a.cfg.ClientID, DecisionTime: a.pending.decisionTime, ExecutionTime: event.Timestamp, State: a.pending.state, Event: "ORDER_FILL", Leg: a.pending.leg, RequestID: a.pending.requestID, OrderID: event.OrderID, TradeID: event.TradeID, Symbol: event.Symbol, Side: event.Side.String(), Qty: event.Qty, Price: event.Price, FeeAmount: event.FeeAmount, FeeAsset: event.FeeAsset, SpotPositionBefore: beforeSpot, SpotPositionAfter: a.spotPosition, PerpPositionBefore: beforePerp, PerpPositionAfter: a.perpPosition})
 	if event.IsFull {
