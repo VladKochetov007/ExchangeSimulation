@@ -368,6 +368,25 @@ func TestMechanicalImpactExcludesAnExhaustedSide(t *testing.T) {
 	}
 }
 
+func TestMechanicalImpactReportsSignedReplayAsUndefinedDomain(t *testing.T) {
+	lines := []string{
+		deltaLine(1, "BUY", -10_000, 1_000),
+		deltaLine(1, "SELL", -9_800, 40),
+		deltaLine(1, "SELL", -9_600, 1_000),
+		tradeEventLine(2, 1, "BUY", -9_800, 60),
+		deltaLine(2, "SELL", -9_800, 0),
+		tradeEventLine(3, 2, "BUY", -9_600, 1),
+		deltaLine(3, "SELL", -9_600, 999),
+	}
+	result, err := MeasureMechanicalImpact(writeLog(t, lines), MechanicalOptions{HorizonTrades: 1})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.Orders == 0 || result.UndefinedDomainOrders == 0 || result.UnmeasurableOrders < result.UndefinedDomainOrders {
+		t.Fatalf("signed domain exclusion was not explicit: %+v", result)
+	}
+}
+
 // Dropping the orders that clear the whole visible side censors the mechanical
 // distribution from above, and how often that happens is an outcome of whatever
 // an experiment manipulated. A policy must be able to price them instead, so a

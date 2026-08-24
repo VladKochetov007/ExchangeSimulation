@@ -78,6 +78,10 @@ type MechanicalImpact struct {
 	// empty, or the order exhausted the visible side so the counterfactual has
 	// no price. Reported rather than silently excluded.
 	UnmeasurableOrders int `json:"unmeasurable_orders"`
+	// UndefinedDomainOrders is the subset with a complete signed replay whose
+	// log-return decomposition is undefined because a midpoint is non-positive.
+	// It remains separate from missing/exhausted book evidence.
+	UndefinedDomainOrders int `json:"undefined_domain_orders"`
 	// ExhaustedOrders counts orders that would consume the whole visible side.
 	// ExhaustedPriced counts how many of those an ExhaustedPolicy priced rather
 	// than dropped; the gap between a dropping run and a pricing run is the
@@ -231,6 +235,7 @@ func MeasureMechanicalImpact(path string, opts MechanicalOptions) (*MechanicalIm
 		// silently absolute-valued.
 		if order.preMid.value <= 0 || counterfactualMid <= 0 || midBeforeTrade[terminal].value <= 0 {
 			result.UnmeasurableOrders++
+			result.UndefinedDomainOrders++
 			continue
 		}
 
