@@ -1,0 +1,33 @@
+{
+  "experiment": "V2-5 P3b v2 evidence encoding preflight",
+  "verdict": "PASSED (instrumentation preflight only)",
+  "scope": "P3 v2 plan-created/first-exposure wire and replay; not funding, carry, basis, or market economics",
+  "source_commit": "9bdb0b5132a14e1610ec72ab3f38d98098071f41",
+  "config_sha256": "b58a21a1f9c2e77f2516a5e45736f3990790cf10ff0377cde45ac3166203cab3",
+  "seed": 107,
+  "horizon": "5m simulated",
+  "gomaxprocs": 3,
+  "raw_evidence_retained": true,
+  "safe_to_prune": false,
+  "execution": {
+    "events": 56189,
+    "ordered_hash": "f8bf4844729c762b76097ac44cf664c5148c3e6a853dcb157ca9c86b0d93d1c2",
+    "positive_control_matches_p3a_b_execution": true
+  },
+  "evidence": {
+    "events": 56648,
+    "multiset_hash": "231d8d54c7c9c9ea4105758853e50d0b0db6cc08702d6d8ba8850709413b9e3e",
+    "artifact_hash": "8ab665903e4db10503f97b07f817139770ff2ca7142a15e99fec6bc8697a907f"
+  },
+  "term_carry": {
+    "valid": true,
+    "decisions": 450,
+    "submitted": 4,
+    "accepted": 4,
+    "fills": 5,
+    "active_terms": 2,
+    "open_terms": 2,
+    "first_exposure_mismatches": 0
+  },
+  "next_gate": "run the preregistered immutable nine-hour realization cell; do not score this preflight economically"
+}
