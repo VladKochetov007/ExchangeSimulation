@@ -14,7 +14,8 @@ import (
 
 // TermCarryAudit independently checks the P3 local-source, exact-term-cost,
 // and ordinary order-chain contract. It deliberately imports neither the P3
-// actor nor the multivenue implementation.
+// actor nor the multivenue implementation. P4 separately reports funding on
+// a replayed nonzero exit residual before and after the passive deadline.
 type TermCarryAudit struct {
 	Decisions                 int64            `json:"decisions"`
 	Submitted                 int64            `json:"submitted"`
@@ -45,6 +46,8 @@ type TermCarryAudit struct {
 	ClosedTerms               int64            `json:"closed_terms"`
 	OpenTerms                 int64            `json:"open_terms"`
 	ActiveTermFunding         int64            `json:"active_term_funding_settlements"`
+	ResidualExitFunding       int64            `json:"residual_exit_funding_settlements"`
+	ExpiredResidualFunding    int64            `json:"expired_residual_funding_settlements"`
 	OutsideTermFunding        int64            `json:"outside_term_funding_settlements"`
 	PassiveExitCancellations  int64            `json:"passive_exit_cancellations"`
 	MissingPassiveExitCancels int64            `json:"missing_passive_exit_cancellations"`
@@ -459,6 +462,26 @@ type termCarryLifecycleItem struct {
 	outcome  *termCarryOutcome
 }
 
+// termCarryFundingState is the independently reconstructed actor state after
+// one persisted decision or outcome. Funding attribution intentionally uses
+// only a strictly earlier state, because the venue logs do not preserve a
+// cross-file total order for same-timestamp events.
+type termCarryFundingState struct {
+	at           int64
+	term         *termCarryLifecycleTerm
+	active       bool
+	spotPosition int64
+	perpPosition int64
+}
+
+type termCarryResidualFundingClass uint8
+
+const (
+	termCarryNoResidualFunding termCarryResidualFundingClass = iota
+	termCarryResidualFunding
+	termCarryExpiredResidualFunding
+)
+
 // auditTermCarryLifecycle reconstructs the actor's declared finite ownership
 // term from its decisions and actor-side response attestations. It never reads
 // TermCarryAllocator. Open terms are reported, not called invalid here: P3a
@@ -468,6 +491,7 @@ func auditTermCarryLifecycle(run *Run, policy termCarryPolicyConfig, decisions [
 	byParticipantDecisions := make(map[termCarryParticipant][]termCarryDecision)
 	byParticipantOutcomes := make(map[termCarryParticipant][]termCarryOutcome)
 	participants := make(map[termCarryParticipant]struct{})
+	fundingStates := make(map[termCarryParticipant][]termCarryFundingState)
 	for _, decision := range decisions {
 		key := termCarryParticipant{venue: decision.VenueID, client: decision.ClientID}
 		byParticipantDecisions[key] = append(byParticipantDecisions[key], decision)
@@ -564,6 +588,12 @@ func auditTermCarryLifecycle(run *Run, policy termCarryPolicyConfig, decisions [
 
 		spotPosition, perpPosition := int64(0), int64(0)
 		var current *termCarryLifecycleTerm
+		recordFundingState := func(at int64) {
+			fundingStates[participant] = append(fundingStates[participant], termCarryFundingState{
+				at: at, term: current, active: current != nil && current.active,
+				spotPosition: spotPosition, perpPosition: perpPosition,
+			})
+		}
 		for _, item := range items {
 			if item.at <= 0 {
 				result.LifecycleViolations++
@@ -583,6 +613,7 @@ func auditTermCarryLifecycle(run *Run, policy termCarryPolicyConfig, decisions [
 					}
 					check(participant.venue, participant.client, decision.RequestID, violation)
 				}
+				recordFundingState(item.at)
 				continue
 			}
 
@@ -605,6 +636,7 @@ func auditTermCarryLifecycle(run *Run, policy termCarryPolicyConfig, decisions [
 				current.aborted = true
 				current = nil
 			}
+			recordFundingState(item.at)
 		}
 		if current != nil {
 			result.OpenTerms++
@@ -642,6 +674,16 @@ func auditTermCarryLifecycle(run *Run, policy termCarryPolicyConfig, decisions [
 			result.ActiveTermFunding++
 			continue
 		}
+		if matches == 0 {
+			switch termCarryClassifyResidualFunding(policy, settlement, fundingStates[termCarryParticipant{venue: settlement.VenueID, client: settlement.ClientID}]) {
+			case termCarryResidualFunding:
+				result.ResidualExitFunding++
+				continue
+			case termCarryExpiredResidualFunding:
+				result.ExpiredResidualFunding++
+				continue
+			}
+		}
 		result.OutsideTermFunding++
 		check(settlement.VenueID, settlement.ClientID, 0, "funding_settlement_outside_active_term")
 		if matches > 1 {
@@ -649,6 +691,30 @@ func auditTermCarryLifecycle(run *Run, policy termCarryPolicyConfig, decisions [
 			check(settlement.VenueID, settlement.ClientID, 0, "funding_settlement_matches_overlapping_terms")
 		}
 	}
+}
+
+// termCarryClassifyResidualFunding recognizes only an already-evidenced P4
+// residual. It deliberately does not infer a post-term position from a future
+// decision, same-timestamp event, deadline, or numeric funding amount.
+func termCarryClassifyResidualFunding(policy termCarryPolicyConfig, settlement termCarryFundingSettlement, states []termCarryFundingState) termCarryResidualFundingClass {
+	if policy.PassiveExit == nil {
+		return termCarryNoResidualFunding
+	}
+	var latest termCarryFundingState
+	found := false
+	for _, state := range states {
+		if state.at >= settlement.At {
+			continue
+		}
+		latest, found = state, true
+	}
+	if !found || latest.term == nil || !latest.active || latest.term.policyVersion != termCarryPolicyV4 || latest.perpPosition == 0 || settlement.At <= latest.term.termEnd || latest.at < latest.term.termEnd {
+		return termCarryNoResidualFunding
+	}
+	if settlement.At < policy.PassiveExit.DeadlineAtNano {
+		return termCarryResidualFunding
+	}
+	return termCarryExpiredResidualFunding
 }
 
 // termCarryBaseAsset returns the spot asset whose terminal inventory must

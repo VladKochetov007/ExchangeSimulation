@@ -38,7 +38,7 @@ done
 # so this checks only independently reconstructible mechanical evidence. The
 # registered activation predicate and any closure claim are scored elsewhere.
 jq -e '
-  .result.receipt_audit_valid == true and
+  .result.valid == true and .result.receipt_audit_valid == true and
   .result.receipt_evidence_errors == 0 and
   .result.source_mismatches == 0 and .result.future_source_use == 0 and
   .result.invalid_decision_records == 0 and .result.decision_field_mismatches == 0 and
@@ -48,6 +48,7 @@ jq -e '
   .result.actor_outcome_mismatches == 0 and .result.lifecycle_violations == 0 and
   .result.position_continuity_errors == 0 and .result.terminal_perp_mismatches == 0 and
   .result.terminal_spot_mismatches == 0 and .result.first_exposure_mismatches == 0 and
+  .result.outside_term_funding_settlements == 0 and
   .result.missing_passive_exit_cancellations == 0 and
   .result.passive_exit_cancellation_mismatches == 0
 ' "$cell/termcarry.json" >/dev/null

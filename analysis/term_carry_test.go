@@ -263,6 +263,136 @@ func TestTermCarryV4LifecyclePreservesExplicitFalsePostOnly(t *testing.T) {
 	}
 }
 
+func TestTermCarryV4ResidualFundingIsExplicitlyClassified(t *testing.T) {
+	t.Run("before passive deadline", func(t *testing.T) {
+		run := termCarryLifecycleTestRun(t, func(fixture *termCarryLifecycleFixture) {
+			makeTermCarryLifecycleV4PassiveResidual(fixture, false)
+		})
+		result, err := run.MeasureTermCarry()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Valid || result.ActiveTermFunding != 0 || result.ResidualExitFunding != 1 || result.ExpiredResidualFunding != 0 || result.OutsideTermFunding != 0 || result.OpenTerms != 1 || result.ClosedTerms != 0 {
+			t.Fatalf("pre-deadline P4 residual funding = %+v", result)
+		}
+	})
+
+	t.Run("after passive deadline remains real risk", func(t *testing.T) {
+		run := termCarryLifecycleTestRun(t, func(fixture *termCarryLifecycleFixture) {
+			makeTermCarryLifecycleV4PassiveResidual(fixture, true)
+		})
+		result, err := run.MeasureTermCarry()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Valid || result.ResidualExitFunding != 0 || result.ExpiredResidualFunding != 1 || result.OutsideTermFunding != 0 || result.OpenTerms != 1 || result.ClosedTerms != 0 {
+			t.Fatalf("expired P4 residual funding = %+v", result)
+		}
+	})
+
+	t.Run("same timestamp cannot use a future passive decision", func(t *testing.T) {
+		run := termCarryLifecycleTestRun(t, func(fixture *termCarryLifecycleFixture) {
+			makeTermCarryLifecycleV4PassiveResidual(fixture, false)
+			fixture.settlementAt = fixture.decisions[len(fixture.decisions)-1].DecisionTime
+		})
+		result, err := run.MeasureTermCarry()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Valid || result.ResidualExitFunding != 0 || result.ExpiredResidualFunding != 0 || result.OutsideTermFunding != 1 {
+			t.Fatalf("same-timestamp future-information mutation survived: %+v", result)
+		}
+	})
+
+	t.Run("closed P4 term cannot masquerade as a residual", func(t *testing.T) {
+		run := termCarryLifecycleTestRun(t, func(fixture *termCarryLifecycleFixture) {
+			makeTermCarryLifecycleV4(fixture)
+			fixture.settlementAt = fixture.decisions[len(fixture.decisions)-1].DecisionTime + 1
+		})
+		result, err := run.MeasureTermCarry()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Valid || result.ResidualExitFunding != 0 || result.ExpiredResidualFunding != 0 || result.OutsideTermFunding != 1 {
+			t.Fatalf("closed P4 term was accepted as residual funding: %+v", result)
+		}
+	})
+
+	t.Run("legacy residual remains outside the finite term", func(t *testing.T) {
+		run := termCarryLifecycleTestRun(t, func(fixture *termCarryLifecycleFixture) {
+			fixture.decisions = fixture.decisions[:4]
+			fixture.outcomes = fixture.outcomes[:5]
+			fixture.terminalSpot, fixture.terminalPerp = fixture.initialSpot+fixture.policy.MaxPosition, -fixture.policy.MaxPosition
+			fixture.settlementAt = fixture.decisions[len(fixture.decisions)-1].DecisionTime + 1
+		})
+		result, err := run.MeasureTermCarry()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Valid || result.ResidualExitFunding != 0 || result.ExpiredResidualFunding != 0 || result.OutsideTermFunding != 1 {
+			t.Fatalf("legacy residual funding was silently accepted: %+v", result)
+		}
+	})
+}
+
+func TestTermCarryResidualFundingClassifierRejectsUnauditedStates(t *testing.T) {
+	policy := termCarryAuditPolicy()
+	policy.PassiveExit = &termCarryPassiveExitPolicy{SliceQty: 10, DeadlineAtNano: 200}
+	term := &termCarryLifecycleTerm{policyVersion: termCarryPolicyV4, termEnd: 100}
+	legacy := &termCarryLifecycleTerm{policyVersion: termCarryPolicyV3, termEnd: 100}
+	tests := []struct {
+		name       string
+		settlement int64
+		state      termCarryFundingState
+		want       termCarryResidualFundingClass
+	}{
+		{
+			name:       "audited residual before deadline",
+			settlement: 151,
+			state:      termCarryFundingState{at: 150, term: term, active: true, perpPosition: -10},
+			want:       termCarryResidualFunding,
+		},
+		{
+			name:       "expired residual remains risk",
+			settlement: 201,
+			state:      termCarryFundingState{at: 200, term: term, active: true, perpPosition: -10},
+			want:       termCarryExpiredResidualFunding,
+		},
+		{
+			name:       "zero perpetual residual",
+			settlement: 151,
+			state:      termCarryFundingState{at: 150, term: term, active: true, perpPosition: 0},
+			want:       termCarryNoResidualFunding,
+		},
+		{
+			name:       "legacy policy",
+			settlement: 151,
+			state:      termCarryFundingState{at: 150, term: legacy, active: true, perpPosition: -10},
+			want:       termCarryNoResidualFunding,
+		},
+		{
+			name:       "future state cannot prove earlier settlement",
+			settlement: 150,
+			state:      termCarryFundingState{at: 150, term: term, active: true, perpPosition: -10},
+			want:       termCarryNoResidualFunding,
+		},
+		{
+			name:       "pre-term state",
+			settlement: 151,
+			state:      termCarryFundingState{at: 99, term: term, active: true, perpPosition: -10},
+			want:       termCarryNoResidualFunding,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := termCarryClassifyResidualFunding(policy, termCarryFundingSettlement{At: tc.settlement}, []termCarryFundingState{tc.state})
+			if got != tc.want {
+				t.Fatalf("classification = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTermCarryV3LifecycleRejectsForgedExitMinimum(t *testing.T) {
 	run := termCarryLifecycleTestRun(t, func(fixture *termCarryLifecycleFixture) {
 		makeTermCarryLifecycleV3(fixture)
@@ -336,6 +466,49 @@ func makeTermCarryLifecycleV4(fixture *termCarryLifecycleFixture) {
 			decision.OrderType, decision.TimeInForce, decision.PostOnly = exchange.LimitOrder.String(), exchange.IOC.String(), &postOnly
 		}
 	}
+}
+
+// makeTermCarryLifecycleV4PassiveResidual preserves a real unmatched
+// spot/perpetual exposure after the finite term. The P4 passive child is
+// accepted but deliberately receives no fill; later funding must be classified
+// as residual risk rather than as a closed term or an unowned payment.
+func makeTermCarryLifecycleV4PassiveResidual(fixture *termCarryLifecycleFixture, expired bool) {
+	fixture.policy.MinOrderSize = 10
+	makeTermCarryLifecycleV4(fixture)
+	termEnd := fixture.decisions[2].TermEnd
+	deadline := termEnd + 10
+	if expired {
+		deadline = termEnd + 2
+	}
+	fixture.policy.PassiveExit = &termCarryPassiveExitPolicy{SliceQty: fixture.policy.MinOrderSize, DeadlineAtNano: deadline}
+	for index := range fixture.decisions {
+		slice, decisionDeadline := fixture.policy.PassiveExit.SliceQty, fixture.policy.PassiveExit.DeadlineAtNano
+		fixture.decisions[index].PassiveExitSliceQty = &slice
+		fixture.decisions[index].PassiveExitDeadlineAtNano = &decisionDeadline
+	}
+	fixture.decisions = fixture.decisions[:4]
+	passive := &fixture.decisions[3]
+	postOnly := true
+	passive.State, passive.Action = "UNWIND_PERP", "SUBMIT_UNWIND_PERP_POST_ONLY"
+	passive.TargetSpot, passive.TargetPerp = 0, 0
+	passive.Leg, passive.Side = "UNWIND_PERP_POST_ONLY", exchange.Buy.String()
+	passive.LimitPrice, passive.RequestedQty = passive.PerpBid, fixture.policy.MinOrderSize
+	passive.OrderType, passive.TimeInForce, passive.PostOnly = exchange.LimitOrder.String(), exchange.GTC.String(), &postOnly
+	passive.PerpAskQty = fixture.policy.MinOrderSize - 1
+	fixture.outcomes = fixture.outcomes[:5]
+	fixture.outcomes[4] = termCarryAccepted(*passive, 102, fixture.policy.MaxPosition, -fixture.policy.MaxPosition)
+	fixture.terminalSpot, fixture.terminalPerp = fixture.initialSpot+fixture.policy.MaxPosition, -fixture.policy.MaxPosition
+	fixture.settlementAt = passive.DecisionTime + 1
+	if !expired {
+		return
+	}
+	expiredDecision := *passive
+	expiredDecision.DecisionTime = deadline
+	expiredDecision.Action, expiredDecision.Leg, expiredDecision.Side = "PASSIVE_EXIT_DEADLINE_EXPIRED", "", ""
+	expiredDecision.LimitPrice, expiredDecision.RequestedQty, expiredDecision.RequestID = 0, 0, 0
+	expiredDecision.OrderType, expiredDecision.TimeInForce, expiredDecision.PostOnly = "", "", nil
+	fixture.decisions = append(fixture.decisions, expiredDecision)
+	fixture.settlementAt = expiredDecision.DecisionTime + 1
 }
 
 func TestTermCarryLifecycleDistinguishesProjectionFromOwnership(t *testing.T) {
@@ -447,6 +620,7 @@ type termCarryLifecycleFixture struct {
 	settlementAt int64
 	initialSpot  int64
 	terminalSpot int64
+	terminalPerp int64
 }
 
 // termCarryLifecycleTestRun creates a retained-evidence term without calling
@@ -600,7 +774,7 @@ func writeTermCarryLifecycleManifest(t *testing.T, dir string, fixture *termCarr
 		InitialAccounts: []AccountRow{{VenueID: "north", ClientID: 9, Role: "term_carry_allocator_1", Account: Account{SpotBalances: []Balance{{Asset: "ABC", NetAsset: fixture.initialSpot}}}}},
 		TerminalAccounts: []AccountRow{{VenueID: "north", ClientID: 9, Role: "term_carry_allocator_1", Account: Account{
 			SpotBalances: []Balance{{Asset: "ABC", NetAsset: fixture.terminalSpot}},
-			Positions:    []Position{{Symbol: fixture.policy.PerpSymbol, Size: 0}},
+			Positions:    []Position{{Symbol: fixture.policy.PerpSymbol, Size: fixture.terminalPerp}},
 		}}},
 	}
 	raw, err = json.Marshal(report)
