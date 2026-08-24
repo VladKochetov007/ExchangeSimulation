@@ -130,3 +130,33 @@ func TestPerpExposureHedgerConfigRejectsAmbiguousOrUnsafeContract(t *testing.T) 
 		})
 	}
 }
+
+func TestPerpExposureHedgerConfigRequiresAuditedDelayedFeed(t *testing.T) {
+	policy := perpExposureTestConfig()
+	base := Config{LogDir: t.TempDir(), LogMode: "full", PerpExposureHedger: &policy}
+	if _, err := NewSim(time.Second, base); err == nil {
+		t.Fatal("P2 accepted without an explicit participant-local feed")
+	}
+	base.LatencyProfiles = map[string]LatencyProfile{"perp_exposure_hedger": {Model: "constant", Delay: time.Millisecond}}
+	sim, err := NewSim(time.Second, base)
+	if err != nil {
+		t.Fatalf("P2 recorder-neutral path rejected documented local feed: %v", err)
+	}
+	sim.Close()
+	base.RecordPerpExposureHedgerDecisions = true
+	if _, err := NewSim(time.Second, base); err == nil {
+		t.Fatal("instrumented P2 accepted without independently recorded local feed receipts")
+	}
+	base.RecordMarketDataReceipts = true
+	base.MarketDataReceiptRoles = []string{"perp_exposure_hedger"}
+	sim, err = NewSim(time.Second, base)
+	if err != nil {
+		t.Fatalf("P2 rejected documented receipt path: %v", err)
+	}
+	defer sim.Close()
+	for _, venue := range sim.Venues {
+		if len(venue.PerpExposureHedgers) != 1 {
+			t.Fatalf("venue %s perp exposure actors = %d, want 1", venue.ID, len(venue.PerpExposureHedgers))
+		}
+	}
+}

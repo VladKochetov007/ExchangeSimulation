@@ -126,6 +126,10 @@ type Config struct {
 	// evaluation and linked non-atomic leg outcome. It is optional evidence
 	// only; the policy never reads the recorder or receipt sidecar.
 	RecordFundingCarryDecisions bool `json:"record_funding_carry_decisions"`
+	// RecordPerpExposureHedgerDecisions retains the V2-5 P2 physical-exposure
+	// hedger's local state/action and fill attestations. It is append-only
+	// evidence only and never reaches the ordered execution checkpoint domain.
+	RecordPerpExposureHedgerDecisions bool `json:"record_perp_exposure_hedger_decisions"`
 	// CheckpointIntervalSeconds writes a rolling digest of the event stream at
 	// each simulated-time boundary, so two runs of one seed can be compared
 	// without retaining their logs. Zero disables it.
@@ -434,6 +438,9 @@ type Config struct {
 	// CDFLiabilityHedger configures the V2-4 L0 finite-capital delivery
 	// obligation participant. Nil preserves the completed V2-3 population.
 	CDFLiabilityHedger *LiabilityHedgerConfig `json:"cdf_liability_hedger,omitempty"`
+	// PerpExposureHedger configures the V2-5 P2 finite-capital physical-ABC
+	// exposure hedger. Nil preserves every pre-P2 trajectory exactly.
+	PerpExposureHedger *PerpExposureHedgerConfig `json:"perp_exposure_hedger,omitempty"`
 	// FundingCarryArbitrageur configures the opt-in V2-5 P0 desk. It is
 	// separate from the historical fixed-basis CarryArbitrageur, so nil retains
 	// every pre-P0 trajectory exactly.
@@ -712,6 +719,29 @@ func (c *Config) normalize() error {
 	}
 	if c.RecordLiabilityHedgerDecisions && c.CDFLiabilityHedger == nil {
 		return errors.New("multivenue: liability-hedger evidence requires a CDF liability-hedger policy")
+	}
+	if c.PerpExposureHedger != nil {
+		if err := c.PerpExposureHedger.validate(); err != nil {
+			return fmt.Errorf("multivenue: perp exposure hedger: %w", err)
+		}
+		// This is the actor's economic information contract, not merely a
+		// telemetry requirement. Even recorder-neutrality worlds must declare a
+		// nonzero participant-local public-feed link.
+		profile, configured := c.latencyProfileFor("perp_exposure_hedger")
+		if !configured || profile.zero() {
+			return errors.New("multivenue: perp exposure hedger requires an explicit nonzero perp_exposure_hedger public-feed link")
+		}
+		// Scientific P2 cells require the delayed public book consumed by the
+		// actor and its append-only state/outcome evidence. A recorder-neutrality
+		// process may turn both recorders off; neither recorder feeds the actor.
+		if c.RecordPerpExposureHedgerDecisions || c.RecordMarketDataReceipts {
+			if !c.RecordPerpExposureHedgerDecisions || !c.RecordMarketDataReceipts || !slices.Contains(c.MarketDataReceiptRoles, "perp_exposure_hedger") {
+				return errors.New("multivenue: instrumented perp exposure hedger requires decisions and perp_exposure_hedger market-data receipts")
+			}
+		}
+	}
+	if c.RecordPerpExposureHedgerDecisions && c.PerpExposureHedger == nil {
+		return errors.New("multivenue: perp-exposure-hedger evidence requires a perp-exposure-hedger policy")
 	}
 	if c.FundingCarryArbitrageur != nil {
 		if c.FundingCarryArbitrageur.SpotSymbol != "ABC/USD" || c.FundingCarryArbitrageur.PerpSymbol != "ABC-PERP" {
@@ -1197,31 +1227,32 @@ type Venue struct {
 	OptionDealerClientID uint64
 	// Singular fields retain the baseline participant for callers written
 	// before configurable rosters. All actors live in the corresponding slice.
-	makerStateLog     venueLogger
-	NoiseTrader       *feesim.RandomTaker
-	NoiseTraders      []*feesim.RandomTaker
-	RoundTripTraders  []*RoundTripTrader
-	Suppliers         []*ElasticSupplier
-	LiabilityHedgers  []*LiabilityHedger
-	CarryArbs         []*CarryArbitrageur
-	FundingCarryArbs  []*FundingCarryArbitrageur
-	LatentLiquidity   []*LatentLiquidity
-	MetaorderTraders  []*MetaorderTrader
-	lastTwoSided      map[string]twoSidedMark
-	Microstructure    *MicrostructureStats
-	OptionFlow        *derivsim.OptionTaker
-	OptionFlows       []*derivsim.OptionTaker
-	OptionValueTakers []*derivsim.OptionValueTaker
-	FutureFlows       []*derivsim.OptionTaker
-	VannaVolgaDesks   []*derivsim.VannaVolgaHedger
-	InitialRisk       *VenueRiskSnapshot
-	RiskTimeline      []VenueRiskSnapshot
-	PreExpiryRisk     []VenueRiskSnapshot
-	TerminalRisk      *VenueRiskSnapshot
-	riskErr           error
-	riskLastNano      int64
-	optionListedNano  map[string]int64
-	nextClient        uint64
+	makerStateLog       venueLogger
+	NoiseTrader         *feesim.RandomTaker
+	NoiseTraders        []*feesim.RandomTaker
+	RoundTripTraders    []*RoundTripTrader
+	Suppliers           []*ElasticSupplier
+	LiabilityHedgers    []*LiabilityHedger
+	CarryArbs           []*CarryArbitrageur
+	FundingCarryArbs    []*FundingCarryArbitrageur
+	PerpExposureHedgers []*PerpExposureHedger
+	LatentLiquidity     []*LatentLiquidity
+	MetaorderTraders    []*MetaorderTrader
+	lastTwoSided        map[string]twoSidedMark
+	Microstructure      *MicrostructureStats
+	OptionFlow          *derivsim.OptionTaker
+	OptionFlows         []*derivsim.OptionTaker
+	OptionValueTakers   []*derivsim.OptionValueTaker
+	FutureFlows         []*derivsim.OptionTaker
+	VannaVolgaDesks     []*derivsim.VannaVolgaHedger
+	InitialRisk         *VenueRiskSnapshot
+	RiskTimeline        []VenueRiskSnapshot
+	PreExpiryRisk       []VenueRiskSnapshot
+	TerminalRisk        *VenueRiskSnapshot
+	riskErr             error
+	riskLastNano        int64
+	optionListedNano    map[string]int64
+	nextClient          uint64
 }
 
 // Participant identifies one independently funded account. It is recorded by
@@ -2320,6 +2351,14 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		}
 		venue.makerStateLog.LogEvidenceOnly(simTime, outcome.ClientID, "funding_carry_leg_outcome", outcome)
 	}
+	perpExposureDecisionObserver := func(decision PerpExposureHedgerDecision) {
+		// P2 local-state telemetry is append-only evidence. It has no callback
+		// path into the actor, exchange, scheduler, checkpoint, or RNG state.
+		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "perp_exposure_hedger_decision", decision)
+	}
+	perpExposureFillObserver := func(fill PerpExposureHedgerFill) {
+		venue.makerStateLog.LogEvidenceOnly(fill.Timestamp, fill.ClientID, "perp_exposure_hedger_fill", fill)
+	}
 	noiseFlowPhaseObserver := func(decision feesim.RandomTakerDecision) {
 		// L1-P2 timing rows are optional evidence only. They attest a complete
 		// evaluated tick, including a zero-order evaluation, but have no route
@@ -2695,6 +2734,23 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		arb := NewFundingCarryArbitrageur(nextActor(), gateway, cfg)
 		arb.SetTickerFactory(timers)
 		venue.FundingCarryArbs = append(venue.FundingCarryArbs, arb)
+	}
+
+	if policy := s.Config.PerpExposureHedger; policy != nil {
+		cfg := *policy
+		role := "perp_exposure_hedger_1"
+		balances := map[string]int64{"USD": cfg.InitialQuoteBalance}
+		clientID, gateway := venue.connectParticipant(mount, role, balances, cfg.InitialMargin, noiseFee)
+		cfg.Seed = flowSeed(s.Config.Seed, venueIndex, 0, 16)
+		cfg.VenueID, cfg.Hedger, cfg.ClientID, cfg.TerminalNano = venue.ID, role, clientID, s.terminalNano
+		cfg.TakerFeeBps = s.Config.TakerFeeBps
+		if s.Config.RecordPerpExposureHedgerDecisions {
+			cfg.DecisionObserver = perpExposureDecisionObserver
+			cfg.FillObserver = perpExposureFillObserver
+		}
+		hedger := NewPerpExposureHedger(nextActor(), gateway, cfg)
+		hedger.SetTickerFactory(timers)
+		venue.PerpExposureHedgers = append(venue.PerpExposureHedgers, hedger)
 	}
 
 	supplierBalances := map[string]int64{"ABC": 20_000 * mvBasePrecision, "USD": 500_000_000 * mvQuotePrecision}
