@@ -44,11 +44,11 @@ func TestSignedDatedFutureKeepsCashFlowsSignedAndRiskNotionalNonNegative(t *test
 		t.Fatalf("set signed future domain: %v", err)
 	}
 	future.MarginRate = 1_000 // ten percent of absolute traded notional.
-	if got := future.MarginRequired(3, -20, 1); got != 6 {
-		t.Fatalf("negative-price margin = %d, want 6", got)
+	if got, err := future.MarginRequired(3, -20, 1); err != nil || got != 6 {
+		t.Fatalf("negative-price margin = (%d, %v), want (6, nil)", got, err)
 	}
-	if got := future.MarginRequired(3, 0, 1); got != 0 {
-		t.Fatalf("zero-price margin = %d, want 0 under declared absolute-notional policy", got)
+	if got, err := future.MarginRequired(3, 0, 1); err != nil || got != 0 {
+		t.Fatalf("zero-price margin = (%d, %v), want (0, nil) under declared absolute-notional policy", got, err)
 	}
 	future.DeliveryFeeBps = 1_000
 	if got := future.DeliveryFee(-3, -20, 1); got != 6 {
@@ -70,6 +70,37 @@ func TestSignedDatedFutureKeepsCashFlowsSignedAndRiskNotionalNonNegative(t *test
 		t.Run(tc.name, func(t *testing.T) {
 			if got := future.ExpiryCashFlow(tc.size, tc.entry, tc.end, 1); got != tc.want {
 				t.Fatalf("ExpiryCashFlow(%d, %d, %d) = %d, want %d", tc.size, tc.entry, tc.end, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMarginRequiredUsesErrorsRatherThanNumericFailureSentinels(t *testing.T) {
+	perp := NewPerpFutures("OIL-PERP", "OIL", "USD", 1, 1, 1, 1)
+	perp.MarginRate = 1_000
+
+	tests := []struct {
+		name                  string
+		qty, price, precision int64
+		want                  int64
+		wantErr               bool
+	}{
+		{name: "zero price is a valid zero risk input", qty: 3, price: 0, precision: 1, want: 0},
+		{name: "negative price uses magnitude", qty: 3, price: -20, precision: 1, want: 6},
+		{name: "zero precision is an explicit error", qty: 3, price: 20, precision: 0, wantErr: true},
+		{name: "negative quantity is an explicit error", qty: -3, price: 20, precision: 1, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := perp.MarginRequired(tc.qty, tc.price, tc.precision)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("MarginRequired(%d, %d, %d) = (%d, nil), want an explicit error", tc.qty, tc.price, tc.precision, got)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("MarginRequired(%d, %d, %d) = (%d, %v), want (%d, nil)", tc.qty, tc.price, tc.precision, got, err, tc.want)
 			}
 		})
 	}

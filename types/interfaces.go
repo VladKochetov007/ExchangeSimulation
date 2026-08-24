@@ -168,9 +168,12 @@ type PerpExchange interface {
 // Margined is implemented by instruments that use margin-based fund reservation.
 // The exchange calls these instead of the IsPerp()+type-assert path.
 type Margined interface {
-	MarginRequired(qty, price, precision int64) int64
-	MarginForMarket(qty, refPrice, precision int64) int64
-	MarginOnCancel(remainingQty, orderPrice, precision int64) int64
+	// MarginRequired returns a non-negative risk reservation or an error. A
+	// numeric zero can be a valid risk result at a zero-priced contract; it is
+	// never a sentinel for unavailable price or invalid arithmetic.
+	MarginRequired(qty, price, precision int64) (int64, error)
+	MarginForMarket(qty, refPrice, precision int64) (int64, error)
+	MarginOnCancel(remainingQty, orderPrice, precision int64) (int64, error)
 }
 
 // OrderMarginer is implemented by instruments whose order reservation depends

@@ -1,5 +1,7 @@
 package instrument
 
+import "fmt"
+
 import etypes "exchange_sim/types"
 
 type PerpFutures struct {
@@ -51,9 +53,9 @@ func NewPerpFutures(symbol, base, quote string, basePrecision, quotePrecision, t
 func (p *PerpFutures) IsPerp() bool           { return true }
 func (p *PerpFutures) InstrumentType() string { return "PERP" }
 
-func (p *PerpFutures) MarginRequired(qty, price, precision int64) int64 {
+func (p *PerpFutures) MarginRequired(qty, price, precision int64) (int64, error) {
 	if qty < 0 || p.MarginRate < 0 {
-		return -1
+		return 0, fmt.Errorf("perp margin inputs: qty=%d margin_rate=%d", qty, p.MarginRate)
 	}
 	// Futures cash flows retain the sign of price, but initial/maintenance
 	// margin is a non-negative risk quantity. The current simple contract uses
@@ -61,20 +63,20 @@ func (p *PerpFutures) MarginRequired(qty, price, precision int64) int64 {
 	// negative price as an unavailable mark.
 	notional, ok := etypes.TryAbsMulDiv(qty, price, precision)
 	if !ok {
-		return -1
+		return 0, fmt.Errorf("perp margin notional: qty=%d price=%d precision=%d", qty, price, precision)
 	}
 	margin, ok := etypes.TryMulDiv(notional, p.MarginRate, 10000)
 	if !ok {
-		return -1
+		return 0, fmt.Errorf("perp margin rate: notional=%d margin_rate=%d", notional, p.MarginRate)
 	}
-	return margin
+	return margin, nil
 }
 
-func (p *PerpFutures) MarginForMarket(qty, refPrice, precision int64) int64 {
+func (p *PerpFutures) MarginForMarket(qty, refPrice, precision int64) (int64, error) {
 	return p.MarginRequired(qty, refPrice, precision)
 }
 
-func (p *PerpFutures) MarginOnCancel(remainingQty, orderPrice, precision int64) int64 {
+func (p *PerpFutures) MarginOnCancel(remainingQty, orderPrice, precision int64) (int64, error) {
 	return p.MarginRequired(remainingQty, orderPrice, precision)
 }
 
@@ -135,7 +137,10 @@ func (p *PerpFutures) releaseOrderMargin(ctx etypes.SettlementContext, order *et
 	if order == nil || order.Type == etypes.Market {
 		return
 	}
-	stillNeeded := p.MarginRequired(order.Qty-order.FilledQty, order.Price, precision)
+	stillNeeded, err := p.MarginRequired(order.Qty-order.FilledQty, order.Price, precision)
+	if err != nil {
+		panic(fmt.Sprintf("perp release order margin: %v", err))
+	}
 	if release := order.Reserved - stillNeeded; release > 0 {
 		ctx.ReleasePerp(clientID, quote, release)
 		order.Reserved = stillNeeded
@@ -152,7 +157,11 @@ func (p *PerpFutures) settlePositionMargin(ctx etypes.SettlementContext, clientI
 		if hasLedger {
 			release = ledger.ReleasePositionMargin(clientID, ctx.BookSymbol, posSide, closedQty, delta.OldSize)
 		} else {
-			release = p.MarginRequired(closedQty, delta.OldEntryPrice, precision)
+			var err error
+			release, err = p.MarginRequired(closedQty, delta.OldEntryPrice, precision)
+			if err != nil {
+				panic(fmt.Sprintf("perp release position margin: %v", err))
+			}
 		}
 		ctx.ReleasePerp(clientID, quote, release)
 	}
@@ -160,7 +169,10 @@ func (p *PerpFutures) settlePositionMargin(ctx etypes.SettlementContext, clientI
 	// closedQty: hedge-mode reduces clamp at zero and discard overshoot, so the
 	// naive difference would margin quantity that never opened.
 	if openedQty := absInt(delta.NewSize) - absInt(delta.OldSize) + closedQty; openedQty > 0 {
-		needed := p.MarginRequired(openedQty, ctx.Exec.Price, precision)
+		needed, err := p.MarginRequired(openedQty, ctx.Exec.Price, precision)
+		if err != nil {
+			panic(fmt.Sprintf("perp reserve position margin: %v", err))
+		}
 		ctx.ReservePerp(clientID, quote, needed)
 		if hasLedger {
 			ledger.AddPositionMargin(clientID, ctx.BookSymbol, posSide, needed)

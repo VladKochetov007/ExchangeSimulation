@@ -485,7 +485,11 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 		if hasLedger {
 			release = ledger.ReleasePositionMargin(ep.clientID, symbol, pos.PositionSide, absSize, pos.Size)
 		} else if isMargined {
-			release = margined.MarginRequired(absSize, pos.EntryPrice, precision)
+			var marginErr error
+			release, marginErr = margined.MarginRequired(absSize, pos.EntryPrice, precision)
+			if marginErr != nil {
+				panic(fmt.Sprintf("expiry margin release %s: %v", symbol, marginErr))
+			}
 		}
 		if release > 0 {
 			client.ReleasePerp(quote, release)

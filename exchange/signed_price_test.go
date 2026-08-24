@@ -41,8 +41,12 @@ func TestSignedDatedFutureAdmissionAndPreviewMatch(t *testing.T) {
 	if pos := ex.Positions.GetPosition(2, future.Symbol()); pos == nil || pos.Size != 1 || pos.EntryPrice != -20 {
 		t.Fatalf("buyer signed future position = %#v, want +1 at -20", pos)
 	}
-	if got := ex.Clients[1].PerpReserved["USD"]; got != future.MarginRequired(1, -20, 1) {
-		t.Fatalf("seller signed future margin = %d, want %d", got, future.MarginRequired(1, -20, 1))
+	wantMargin, err := future.MarginRequired(1, -20, 1)
+	if err != nil {
+		t.Fatalf("signed future expected margin: %v", err)
+	}
+	if got := ex.Clients[1].PerpReserved["USD"]; got != wantMargin {
+		t.Fatalf("seller signed future margin = %d, want %d", got, wantMargin)
 	}
 }
 

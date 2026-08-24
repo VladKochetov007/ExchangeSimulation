@@ -729,7 +729,10 @@ func (e *DefaultExchange) checkMarketOrderFunds(client *Client, book *OrderBook,
 	instrument := book.Instrument
 	quote := instrument.QuoteAsset()
 	if om, ok := instrument.(OrderMarginer); ok {
-		required, ok, err := derivativeMarketRequirement(client.FeePlan, instrument, order.Side, executions, precision, om.MarginForMarketOrder)
+		required, ok, err := derivativeMarketRequirement(client.FeePlan, instrument, order.Side, executions, precision,
+			func(side Side, qty, price, precision int64) (int64, error) {
+				return om.MarginForMarketOrder(side, qty, price, precision), nil
+			})
 		if err != nil {
 			return false, err
 		}
@@ -740,7 +743,9 @@ func (e *DefaultExchange) checkMarketOrderFunds(client *Client, book *OrderBook,
 	}
 	if m, ok := instrument.(Margined); ok {
 		required, ok, err := derivativeMarketRequirement(client.FeePlan, instrument, order.Side, executions, precision,
-			func(_ Side, qty, price, precision int64) int64 { return m.MarginForMarket(qty, price, precision) })
+			func(_ Side, qty, price, precision int64) (int64, error) {
+				return m.MarginForMarket(qty, price, precision)
+			})
 		if err != nil {
 			return false, err
 		}
@@ -958,13 +963,13 @@ func marketDepthSaneExcluding(book *OrderBook, order *Order, excluded map[uint64
 // mutates positions and cannot rely on a favourable execution path.
 func derivativeMarketRequirement(
 	feePlan FeeModel, instrument Instrument, side Side, executions []*Execution, precision int64,
-	margin func(side Side, qty, price, precision int64) int64,
+	margin func(side Side, qty, price, precision int64) (int64, error),
 ) (int64, bool, error) {
 	var required int64
 	for _, exec := range executions {
-		marginRequired := margin(side, exec.Qty, exec.Price, precision)
-		if marginRequired < 0 {
-			return 0, false, nil
+		marginRequired, err := margin(side, exec.Qty, exec.Price, precision)
+		if err != nil {
+			return 0, false, fmt.Errorf("market margin at price %d for quantity %d: %w", exec.Price, exec.Qty, err)
 		}
 		var ok bool
 		required, ok = etypes.TryAdd(required, marginRequired)
@@ -1057,13 +1062,13 @@ func (e *DefaultExchange) reserveLimitOrderFunds(client *Client, instrument Inst
 		return true, nil
 	}
 	if m, ok := instrument.(Margined); ok {
-		margin := m.MarginRequired(order.Qty, order.Price, precision)
+		margin, err := m.MarginRequired(order.Qty, order.Price, precision)
+		if err != nil {
+			return false, fmt.Errorf("limit-order margin for %s: %w", instrument.Symbol(), err)
+		}
 		fee, err := quoteFeeHeadroom(client.FeePlan, base, quote, order.Qty, order.Price, precision)
 		if err != nil {
 			return false, err
-		}
-		if margin < 0 {
-			return false, nil
 		}
 		total, ok := etypes.TryAdd(margin, fee)
 		if !ok {

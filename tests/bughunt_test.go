@@ -98,7 +98,10 @@ func TestHedgeReduceOvershootNoGhostMargin(t *testing.T) {
 	if reserves[1] != 0 {
 		t.Fatalf("taker overshoot must not reserve margin (position never opened), reserved %d", reserves[1])
 	}
-	wantMaker := perp.MarginRequired(BTCAmount(1.0), USDAmount(100), BTC_PRECISION)
+	wantMaker, err := perp.MarginRequired(BTCAmount(1.0), USDAmount(100), BTC_PRECISION)
+	if err != nil {
+		t.Fatalf("expected maker margin: %v", err)
+	}
 	if reserves[2] != wantMaker {
 		t.Fatalf("maker margin: want %d, got %d", wantMaker, reserves[2])
 	}
