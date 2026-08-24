@@ -330,6 +330,7 @@ func TestTermCarryFinancialsUseExactDirectionalTermCost(t *testing.T) {
 
 func TestTermCarryConfigRequiresExplicitEvidencePath(t *testing.T) {
 	policy := termCarryTestConfig()
+	policy.MinOrderSize = mvBasePrecision / 1_000
 	base := Config{
 		LogDir: t.TempDir(), LogMode: "full", TakerFeeBps: policy.TakerFeeBps,
 		TermCarryAllocator: &policy, RecordTermCarryDecisions: true,
@@ -352,6 +353,20 @@ func TestTermCarryConfigRequiresExplicitEvidencePath(t *testing.T) {
 		}
 		if venue.TermCarryAllocators[0].cfg.MandateEndAtNano != policy.MandateEndAtNano {
 			t.Fatalf("venue %s allocator received an undeclared mandate: got %d want %d", venue.ID, venue.TermCarryAllocators[0].cfg.MandateEndAtNano, policy.MandateEndAtNano)
+		}
+	}
+}
+
+func TestTermCarryConfigBindsItsOrderFloorToTheVenue(t *testing.T) {
+	for _, minimum := range []int64{1, mvBasePrecision/1_000 + 1} {
+		policy := termCarryTestConfig()
+		policy.MinOrderSize = minimum
+		base := Config{
+			LogDir: t.TempDir(), TakerFeeBps: policy.TakerFeeBps, TermCarryAllocator: &policy,
+			LatencyProfiles: map[string]LatencyProfile{"term_carry_allocator": {Model: "constant", Delay: time.Millisecond}},
+		}
+		if _, err := NewSim(time.Second, base); err == nil {
+			t.Fatalf("term carry accepted non-venue order floor %d", minimum)
 		}
 	}
 }

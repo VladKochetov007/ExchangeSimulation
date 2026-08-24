@@ -784,6 +784,9 @@ func (c *Config) normalize() error {
 		if c.TermCarryAllocator.SpotSymbol != "ABC/USD" || c.TermCarryAllocator.PerpSymbol != "ABC-PERP" {
 			return fmt.Errorf("multivenue: V2-5 term carry P3 must use ABC/USD and ABC-PERP, got %q and %q", c.TermCarryAllocator.SpotSymbol, c.TermCarryAllocator.PerpSymbol)
 		}
+		if c.TermCarryAllocator.MinOrderSize != mvBasePrecision/1_000 {
+			return fmt.Errorf("multivenue: term carry min_order_size must equal the ABC venue minimum %d, got %d", mvBasePrecision/1_000, c.TermCarryAllocator.MinOrderSize)
+		}
 		if c.TermCarryAllocator.TakerFeeBps != c.TakerFeeBps {
 			return fmt.Errorf("multivenue: term carry must price the configured taker fee %d bps, got %d", c.TakerFeeBps, c.TermCarryAllocator.TakerFeeBps)
 		}
