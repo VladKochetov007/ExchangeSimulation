@@ -95,7 +95,7 @@ func (p *analyzerProfiles) Stop() {
 }
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, liabilityhedger, fundingcarry, perpexposurehedger, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, liabilityhedger, fundingcarry, termcarry, perpexposurehedger, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
 	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
 	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
@@ -616,6 +616,15 @@ func main() {
 			emit(dir, result, *asJSON, func() {
 				fmt.Printf("%-22s %s: mark pairs %d, funding rates %d, ready %t, valid %t\n",
 					dir, result.Symbol, result.PooledDistinctMarkPairs, result.PooledDistinctFundingRates, result.Ready, result.Valid)
+			})
+		case "termcarry":
+			result, err := run.MeasureTermCarry()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s term-carry decisions %d, submitted %d, fills %d, valid %t\n", dir, result.Decisions, result.Submitted, result.Fills, result.Valid)
 			})
 		case "optionsurface":
 			result, err := run.MeasureOptionSurface(analysis.SurfaceOptions{QuotePrecision: *quotePrecision})
