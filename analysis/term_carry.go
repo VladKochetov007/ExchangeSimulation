@@ -1039,7 +1039,9 @@ func validateTermCarrySubmission(policy termCarryPolicyConfig, decision termCarr
 		if policy.UnwindMinOrderSize == nil {
 			return fmt.Errorf("submission_unwind_policy_missing")
 		}
-		minimum = *policy.UnwindMinOrderSize
+		// The explicit v3 value is an additional actor materiality floor. It
+		// cannot lower the exchange instrument minimum declared by the policy.
+		minimum = max(policy.MinOrderSize, *policy.UnwindMinOrderSize)
 	}
 	wantQty, ok := fundingCarryAuditSizedQty(gap, policy.LotQty, available, minimum)
 	if !ok || decision.Side != wantSide || decision.LimitPrice != price || decision.RequestedQty != wantQty || !fundingCarryAuditPositiveGrid(price, tick) {

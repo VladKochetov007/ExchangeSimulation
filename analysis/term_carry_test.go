@@ -91,15 +91,15 @@ func TestTermCarrySubmissionRejectsForgedTouch(t *testing.T) {
 	}
 }
 
-func TestTermCarryV3ExitMinimumIsIndependentAndReplayable(t *testing.T) {
+func TestTermCarryV3ExitFloorCannotUndercutVenueMinimum(t *testing.T) {
 	zero := int64(0)
 	policy := termCarryAuditPolicy()
-	policy.MinOrderSize, policy.UnwindMinOrderSize = 75, &zero
+	policy.LotQty, policy.MinOrderSize, policy.UnwindMinOrderSize = 100, 75, &zero
 	decision := validTermCarryEntry(t, policy, 3)
 	decision.PolicyVersion, decision.UnwindMinOrderSize = termCarryPolicyV3, &zero
 
-	// The explicit zero is legal only for a risk-reducing unwind. The same
-	// 50-unit entry remains below the 75-unit entry materiality policy.
+	// The explicit zero is legal as "no additional actor floor", but it cannot
+	// undercut the exchange's 75-unit instrument minimum on entry or unwind.
 	decision.RequestedQty = 50
 	if err := validateTermCarrySubmission(policy, decision); err == nil {
 		t.Fatal("entry incorrectly used the explicit unwind minimum")
@@ -107,13 +107,18 @@ func TestTermCarryV3ExitMinimumIsIndependentAndReplayable(t *testing.T) {
 
 	decision.Action, decision.State = "SUBMIT_UNWIND_PERP_IOC", "UNWIND_PERP"
 	decision.Leg, decision.Side = "UNWIND_PERP_IOC", exchange.Buy.String()
-	decision.SpotPosition, decision.PerpPosition = 50, -50
+	decision.SpotPosition, decision.PerpPosition = 100, -100
+	decision.PerpAskQty = 100
 	decision.LimitPrice, decision.RequestedQty, decision.RequestID = decision.PerpAsk, 50, 99
 	if err := validateTermCarryPolicyEvidence(policy, decision); err != nil {
 		t.Fatalf("valid explicit zero policy rejected: %v", err)
 	}
+	if err := validateTermCarrySubmission(policy, decision); err == nil {
+		t.Fatal("sub-venue-minimum v3 unwind survived")
+	}
+	decision.RequestedQty = 100
 	if err := validateTermCarrySubmission(policy, decision); err != nil {
-		t.Fatalf("valid bounded v3 unwind rejected: %v", err)
+		t.Fatalf("venue-admissible v3 unwind rejected: %v", err)
 	}
 
 	forgedMinimum := int64(75)
@@ -122,7 +127,7 @@ func TestTermCarryV3ExitMinimumIsIndependentAndReplayable(t *testing.T) {
 		t.Fatal("forged v3 effective exit minimum survived")
 	}
 	decision.UnwindMinOrderSize = &zero
-	decision.RequestedQty = 51
+	decision.RequestedQty = 101
 	if err := validateTermCarrySubmission(policy, decision); err == nil {
 		t.Fatal("oversized v3 unwind child survived")
 	}

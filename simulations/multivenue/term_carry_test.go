@@ -188,15 +188,15 @@ func TestTermCarryAllocatorSeparatesEntryAndUnwindMinimums(t *testing.T) {
 			wantPolicy: termCarryPolicyVersionV2, wantAction: "EXECUTABLE_SIZE_UNAVAILABLE",
 		},
 		{
-			name:          "explicit zero permits exchange-unit unwind only",
+			name:          "explicit zero cannot undercut venue unwind minimum",
 			unwindMinimum: &zero, wantPolicy: termCarryPolicyVersionV3,
-			wantAction: "SUBMIT_UNWIND_PERP_IOC", wantRequestQty: 50,
+			wantAction: "EXECUTABLE_SIZE_UNAVAILABLE",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			wantEffectiveMinimum := int64(75)
+			wantConfiguredMinimum := int64(0)
 			if tc.unwindMinimum != nil {
-				wantEffectiveMinimum = *tc.unwindMinimum
+				wantConfiguredMinimum = *tc.unwindMinimum
 			}
 			gateway := newFundingCarryStubGateway()
 			var decisions []TermCarryDecision
@@ -213,7 +213,7 @@ func TestTermCarryAllocatorSeparatesEntryAndUnwindMinimums(t *testing.T) {
 			// policies; the exit exception must never leak into admission.
 			allocator.onTick(now.Add(time.Second))
 			entry := decisions[len(decisions)-1]
-			if entry.Action != "EXECUTABLE_SIZE_UNAVAILABLE" || entry.RequestID != 0 || entry.PolicyVersion != tc.wantPolicy || (tc.unwindMinimum == nil && entry.UnwindMinOrderSize != nil) || (tc.unwindMinimum != nil && (entry.UnwindMinOrderSize == nil || *entry.UnwindMinOrderSize != wantEffectiveMinimum)) {
+			if entry.Action != "EXECUTABLE_SIZE_UNAVAILABLE" || entry.RequestID != 0 || entry.PolicyVersion != tc.wantPolicy || (tc.unwindMinimum == nil && entry.UnwindMinOrderSize != nil) || (tc.unwindMinimum != nil && (entry.UnwindMinOrderSize == nil || *entry.UnwindMinOrderSize != wantConfiguredMinimum)) {
 				t.Fatalf("entry policy leaked or evidence was ambiguous: %+v", entry)
 			}
 
@@ -222,14 +222,14 @@ func TestTermCarryAllocatorSeparatesEntryAndUnwindMinimums(t *testing.T) {
 			allocator.spotPosition, allocator.perpPosition = 50, -50
 			allocator.onTick(now.Add(2 * time.Second))
 			unwind := decisions[len(decisions)-1]
-			if unwind.Action != tc.wantAction || unwind.RequestedQty != tc.wantRequestQty || unwind.PolicyVersion != tc.wantPolicy || (tc.unwindMinimum == nil && unwind.UnwindMinOrderSize != nil) || (tc.unwindMinimum != nil && (unwind.UnwindMinOrderSize == nil || *unwind.UnwindMinOrderSize != wantEffectiveMinimum)) {
+			if unwind.Action != tc.wantAction || unwind.RequestedQty != tc.wantRequestQty || unwind.PolicyVersion != tc.wantPolicy || (tc.unwindMinimum == nil && unwind.UnwindMinOrderSize != nil) || (tc.unwindMinimum != nil && (unwind.UnwindMinOrderSize == nil || *unwind.UnwindMinOrderSize != wantConfiguredMinimum)) {
 				t.Fatalf("unwind minimum policy mismatch: %+v", unwind)
 			}
 			if tc.unwindMinimum == nil && unwind.RequestID != 0 {
 				t.Fatalf("legacy undersized unwind unexpectedly entered: %+v", unwind)
 			}
-			if tc.unwindMinimum != nil && unwind.RequestID == 0 {
-				t.Fatalf("explicit zero unwind did not enter: %+v", unwind)
+			if tc.unwindMinimum != nil && unwind.RequestID != 0 {
+				t.Fatalf("explicit zero bypassed the venue minimum: %+v", unwind)
 			}
 		})
 	}
@@ -246,14 +246,14 @@ func TestTermCarryAllocatorPartialUnwindRetainsResidual(t *testing.T) {
 	allocator.subscribed = true
 	now := time.Unix(10, 0)
 	observeTermCarryBooks(t, allocator, gateway, now, 100, 101, 102, 103, 100)
-	allocator.perp.askQty = 50
+	allocator.perp.askQty = 75
 	allocator.state = termCarryActive
 	allocator.plan = &termCarryPlan{direction: 1, planCreatedAt: now.UnixNano(), firstExposureAt: now.UnixNano(), termEnd: now.Add(time.Second).UnixNano()}
 	allocator.spotPosition, allocator.perpPosition = 100, -100
 
 	allocator.onTick(now.Add(2 * time.Second))
 	first := decisions[len(decisions)-1]
-	if first.Action != "SUBMIT_UNWIND_PERP_IOC" || first.RequestedQty != 50 || first.RequestID == 0 {
+	if first.Action != "SUBMIT_UNWIND_PERP_IOC" || first.RequestedQty != 75 || first.RequestID == 0 {
 		t.Fatalf("first bounded unwind = %+v", first)
 	}
 	allocator.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: first.RequestID, OrderID: 41}})
@@ -264,7 +264,7 @@ func TestTermCarryAllocatorPartialUnwindRetainsResidual(t *testing.T) {
 	}
 	allocator.onTick(now.Add(4 * time.Second))
 	next := decisions[len(decisions)-1]
-	if next.Action != "SUBMIT_UNWIND_PERP_IOC" || next.RequestedQty != 50 || next.RequestID == 0 || allocator.state != termCarryUnwindPerp {
+	if next.Action != "SUBMIT_UNWIND_PERP_IOC" || next.RequestedQty != 75 || next.RequestID == 0 || allocator.state != termCarryUnwindPerp {
 		t.Fatalf("residual was not retried at bounded touch: %+v", next)
 	}
 }

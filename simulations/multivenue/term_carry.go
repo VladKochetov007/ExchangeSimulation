@@ -38,9 +38,11 @@ type TermCarryAllocatorConfig struct {
 	LotQty              int64         `json:"lot_qty"`
 	MinOrderSize        int64         `json:"min_order_size"`
 	// UnwindMinOrderSize is optional so legacy P3 policies retain their
-	// entry-sized unwind floor. A present zero explicitly permits any positive
-	// exchange-admissible exit child; it is a quantity policy, never a price
-	// availability sentinel.
+	// entry-sized unwind floor. When present, it is an additional actor
+	// materiality floor: zero means no additional floor. It never lowers the
+	// instrument's MinOrderSize, which remains the exchange-admissible minimum
+	// for every child. It is a quantity policy, never a price-availability
+	// sentinel.
 	UnwindMinOrderSize *int64                    `json:"unwind_min_order_size,omitempty"`
 	SpotTick           int64                     `json:"spot_tick"`
 	PerpTick           int64                     `json:"perp_tick"`
@@ -123,7 +125,8 @@ type TermCarryDecision struct {
 	CommitmentIntervals int64  `json:"commitment_intervals"`
 	// UnwindMinOrderSize is present only for the explicit v3 policy, including
 	// a legitimate zero. Its pointer distinguishes a v2 inherited entry floor
-	// from an explicit exchange-unit exit floor without a numeric sentinel.
+	// from an explicit policy with no additional unwind materiality floor; the
+	// exchange minimum remains separately binding.
 	UnwindMinOrderSize *int64 `json:"unwind_min_order_size,omitempty"`
 
 	HasSpotBook     bool   `json:"has_spot_book"`
@@ -580,8 +583,8 @@ func (a *TermCarryAllocator) baseDecision(now time.Time, action string) TermCarr
 		DecisionFrontierLinkID: frontier.LinkID, DecisionFrontierOrdinal: frontier.Ordinal, DecisionFrontierDeliveredAt: frontier.DeliveredAt, DecisionFrontierDigest: fmt.Sprintf("%x", frontier.Digest),
 	}
 	if a.cfg.UnwindMinOrderSize != nil {
-		unwindMinimum := a.unwindMinOrderSize()
-		decision.UnwindMinOrderSize = &unwindMinimum
+		configuredMinimum := *a.cfg.UnwindMinOrderSize
+		decision.UnwindMinOrderSize = &configuredMinimum
 	}
 	return decision
 }
@@ -594,7 +597,7 @@ func (a *TermCarryAllocator) policyVersion() string {
 }
 
 func (a *TermCarryAllocator) unwindMinOrderSize() int64 {
-	if a.cfg.UnwindMinOrderSize != nil {
+	if a.cfg.UnwindMinOrderSize != nil && *a.cfg.UnwindMinOrderSize > a.cfg.MinOrderSize {
 		return *a.cfg.UnwindMinOrderSize
 	}
 	return a.cfg.MinOrderSize
