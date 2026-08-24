@@ -179,6 +179,18 @@
     "passive_filled_quantity_difference": "not numerically defined because A is not_applicable; B observed 200000 in each seed"
   },
   "classification_rule_satisfied": "both exercised seed pairs have positive B-minus-A closure effects and B proves actual closure",
+  "validation": {
+    "gofmt": "pass",
+    "focused_tests": "pass",
+    "affected_package_race_tests": "pass",
+    "go_vet_all": "pass",
+    "go_test_all": "one pre-existing unrelated repository-policy failure: TestTrackedFilesAvoidSystemTempPaths flags scripts/summarize-v2-3-p3-r1-results.sh; every other reported package passed",
+    "golangci_lint": "unavailable",
+    "shellcheck": "unavailable",
+    "config_structure_guard": "pass",
+    "lifecycle_shell_regressions": "pass",
+    "machine_verdict_consistency": "pass"
+  },
   "promoted_contract": "finite-term execution only",
   "non_claims": [
     "basis convergence or dynamics",

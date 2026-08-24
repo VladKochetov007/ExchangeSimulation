@@ -112,6 +112,21 @@ were not rerun.
 
 All four immutable raw cells were fully re-extracted after the final repair.
 
+## Validation record
+
+`gofmt`, focused analysis/CLI/prune-gate tests, affected-package race tests,
+and `go vet ./...` pass. The config structural guard, lifecycle shell
+regressions, exact digest/metadata checks, and machine-verdict consistency
+checks also pass. `golangci-lint` and `shellcheck` are not installed on this
+host and are explicitly not claimed.
+
+`go test ./...` completed every simulation package successfully, including
+`simulations/multivenue`, but the aggregate command exits nonzero on the
+pre-existing repository-policy test `TestTrackedFilesAvoidSystemTempPaths`:
+tracked `scripts/summarize-v2-3-p3-r1-results.sh` contains
+`${TMPDIR:-/tmp}`. The same line exists at the parent of the P3e base, so it is
+not changed or hidden in this scoped result.
+
 ## Verdict and continuation boundary
 
 The preregistered rule yields **SUPPORTED (screening)**: both exercised seed
