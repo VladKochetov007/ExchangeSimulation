@@ -40,12 +40,16 @@ type BasisSeriesStats struct {
 	VenueID string `json:"venue_id"`
 	Symbol  string `json:"symbol"`
 	// Observations is the number of published mark/index pairs.
-	Observations int     `json:"observations"`
-	MeanBps      float64 `json:"mean_bps"`
-	MeanAbsBps   float64 `json:"mean_abs_bps"`
-	StdDevBps    float64 `json:"std_dev_bps"`
-	MinBps       float64 `json:"min_bps"`
-	MaxBps       float64 `json:"max_bps"`
+	Observations int `json:"observations"`
+	// UndefinedDomain counts published pairs retained by the evidence scan but
+	// excluded from this positive-index BPS statistic. A present zero or signed
+	// price is never silently treated as a missing mark.
+	UndefinedDomain int     `json:"undefined_domain_observations"`
+	MeanBps         float64 `json:"mean_bps"`
+	MeanAbsBps      float64 `json:"mean_abs_bps"`
+	StdDevBps       float64 `json:"std_dev_bps"`
+	MinBps          float64 `json:"min_bps"`
+	MaxBps          float64 `json:"max_bps"`
 	// AR1 is the lag-one autocorrelation of the series and HalfLifeSeconds the
 	// implied time for a deviation to decay by half. A coefficient at or above
 	// one means the series does not revert on this sample and the half-life is
@@ -82,8 +86,9 @@ type Basis struct {
 	// ConvergenceSlopeBpsPerHour regresses absolute dated basis on time to
 	// expiry. Positive means wider when further from expiry, which is what
 	// convergence looks like.
-	ConvergenceSlopeBpsPerHour float64 `json:"convergence_slope_bps_per_hour"`
-	ConvergenceObservations    int     `json:"convergence_observations"`
+	ConvergenceSlopeBpsPerHour  float64 `json:"convergence_slope_bps_per_hour"`
+	ConvergenceObservations     int     `json:"convergence_observations"`
+	UndefinedDomainObservations int     `json:"undefined_domain_observations"`
 }
 
 type basisPoint struct {
@@ -119,6 +124,7 @@ func (r *Run) MeasureBasis(opts BasisOptions) (*Basis, error) {
 	}
 	var mu sync.Mutex
 	series := make(map[markKey][]basisPoint)
+	undefined := make(map[markKey]int)
 
 	scan := ScanOptions{
 		Events:        []string{"mark_price_update"},
@@ -130,22 +136,26 @@ func (r *Run) MeasureBasis(opts BasisOptions) (*Basis, error) {
 		if event.Decode(&payload) != nil || payload.Symbol == "" {
 			return
 		}
-		if payload.IndexPrice <= 0 || payload.MarkPrice <= 0 {
-			return
-		}
 		at := payload.Timestamp
 		if at == 0 {
 			at = event.SimTS
 		}
+		key := markKey{event.VenueID, payload.Symbol}
+		bps, defined := positiveIndexBasisBPS(payload.MarkPrice, payload.IndexPrice)
+		if !defined {
+			mu.Lock()
+			undefined[key]++
+			mu.Unlock()
+			return
+		}
 		point := basisPoint{
 			at:  at,
-			bps: 10000 * float64(payload.MarkPrice-payload.IndexPrice) / float64(payload.IndexPrice),
+			bps: bps,
 			tte: -1,
 		}
 		if expiry, dated := expiryFromSymbol(payload.Symbol); dated {
 			point.tte = float64(expiry-at) / 1e9
 		}
-		key := markKey{event.VenueID, payload.Symbol}
 		mu.Lock()
 		series[key] = append(series[key], point)
 		mu.Unlock()
@@ -155,8 +165,15 @@ func (r *Run) MeasureBasis(opts BasisOptions) (*Basis, error) {
 
 	result := &Basis{}
 	var perpPool, datedPool []basisPoint
-	keys := make([]markKey, 0, len(series))
+	keys := make([]markKey, 0, len(series)+len(undefined))
+	seenKeys := make(map[markKey]struct{}, len(series)+len(undefined))
 	for key := range series {
+		seenKeys[key] = struct{}{}
+	}
+	for key := range undefined {
+		seenKeys[key] = struct{}{}
+	}
+	for key := range seenKeys {
 		keys = append(keys, key)
 	}
 	sort.Slice(keys, func(i, j int) bool {
@@ -172,6 +189,8 @@ func (r *Run) MeasureBasis(opts BasisOptions) (*Basis, error) {
 		// depends on order.
 		sort.Slice(points, func(i, j int) bool { return points[i].at < points[j].at })
 		stats := summariseBasis(key, points)
+		stats.UndefinedDomain = undefined[key]
+		result.UndefinedDomainObservations += stats.UndefinedDomain
 		if _, dated := expiryFromSymbol(key.symbol); dated {
 			result.Dated = append(result.Dated, stats)
 			datedPool = append(datedPool, points...)
@@ -185,6 +204,12 @@ func (r *Run) MeasureBasis(opts BasisOptions) (*Basis, error) {
 	sort.Slice(datedPool, func(i, j int) bool { return datedPool[i].at < datedPool[j].at })
 	result.PerpPooled = summariseBasis(markKey{"pooled", "perp"}, perpPool)
 	result.DatedPooled = summariseBasis(markKey{"pooled", "dated"}, datedPool)
+	for _, stats := range result.Perp {
+		result.PerpPooled.UndefinedDomain += stats.UndefinedDomain
+	}
+	for _, stats := range result.Dated {
+		result.DatedPooled.UndefinedDomain += stats.UndefinedDomain
+	}
 
 	edges := opts.ConvergenceBuckets
 	if len(edges) == 0 {
@@ -193,6 +218,17 @@ func (r *Run) MeasureBasis(opts BasisOptions) (*Basis, error) {
 	result.Convergence, result.ConvergenceSlopeBpsPerHour, result.ConvergenceObservations =
 		convergence(datedPool, edges)
 	return result, nil
+}
+
+// positiveIndexBasisBPS defines the current funding/carry statistic. Its
+// positive index denominator and positive mark are a mathematical/economic
+// model domain, not an evidence-availability rule. Signed futures need a
+// separately declared non-ratio basis statistic at or across zero.
+func positiveIndexBasisBPS(mark, index int64) (float64, bool) {
+	if mark <= 0 || index <= 0 {
+		return 0, false
+	}
+	return 10000 * float64(mark-index) / float64(index), true
 }
 
 // summariseBasis reduces one time-ordered series to its moments and its
