@@ -450,7 +450,10 @@ func (s *spotPlanState) finishTerminalOrder(adjustment *spotPlanOrder) bool {
 }
 
 func (s *spotPlanState) applyExecution(instrument Instrument, clientID uint64, side Side, qty, price int64, fee Fee) bool {
-	if qty <= 0 || price <= 0 {
+	// Spot cash settlement requires an order price admitted by that specific
+	// instrument's declared domain. The current spot instruments remain
+	// positive-only, but availability is not inferred from numeric sign here.
+	if qty <= 0 || !instrument.ValidatePrice(price) {
 		return false
 	}
 	notional, ok := etypes.TryMulDiv(qty, price, instrument.BasePrecision())
