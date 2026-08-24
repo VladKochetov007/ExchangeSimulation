@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "experiment": "V2-5-P3E-LIFECYCLE",
+  "classification": "SUPPORTED (screening)",
+  "scope": "finite-term passive-exit execution contract in paired development seeds 107 and 109 only",
+  "registered_lifecycle_deadline_at_nano": 1736038805000000000,
+  "provenance": {
+    "preregistration_commit": "38f99cf",
+    "simulation_source_revision": "4ef83610266e68981f5ea0e4df334e714c2e62f7",
+    "analysis_revision": "9b21903d4aa3902477943059d489269a073984ea",
+    "horizon": "98h",
+    "log_mode": "full",
+    "gomaxprocs": 4,
+    "binaries": {
+      "multivenue_sha256": "70303065a0714224bc28322a1972e5c4c6c3f43f783579a06eb4172adb697805",
+      "mvanalyze_sha256": "a7cdaa8629e2ccaf4408263e05055979e28eb801035a2356524ea14fae72470c",
+      "prunegate_sha256": "3ca77f0f34826ab4aa56d064747a02a6a28b20c9744c491782034e355cdbac13"
+    },
+    "analysis_repairs": [
+      {
+        "commit": "05a1ffa",
+        "scope": "use explicit trade identity and same-file decision/outcome ordinals for simultaneous fill receipt ordering"
+      },
+      {
+        "commit": "9b4b99e",
+        "scope": "regress canonical fills persisted in a separately scanned file"
+      },
+      {
+        "commit": "9b21903",
+        "scope": "reconcile only exact A residual-funding counts across historical and lifecycle audits"
+      }
+    ]
+  },
+  "configs": {
+    "structural_pair_delta_valid": true,
+    "A-107_sha256": "bb11a68bec082305d6c5245d1ef47b4f1103f36ea8d001e2d7b6ab0b2dff715f",
+    "B-107_sha256": "cfcf9ede724cd9a6b3f2c5f36c1c0e6c0ddc6272d73287295808ae69ad6f21e1",
+    "A-109_sha256": "2a799bde450c4eb69da271843c1e770e50cbcfc6dcb3603c13efdbdfd28c1d04",
+    "B-109_sha256": "136e63ddc19491879fb3be26dc7e27a3d3feefa220d2e6494324254af5742cc1"
+  },
+  "evidence_contract": {
+    "all_four_completion_sentinels_nonempty": true,
+    "all_four_lifecycle_integrity_valid": true,
+    "all_four_receipt_frontiers_valid": true,
+    "all_four_canonical_order_chains_valid": true,
+    "all_four_position_replays_valid": true,
+    "all_four_derivative_audits_valid": true,
+    "all_four_conservation_audits_valid": true,
+    "all_four_runtime_offline_artifact_digests_match": true,
+    "post_close_funding_settlements": 0,
+    "integrity_failures": 0,
+    "control_residual_reconciliation": "each A historical outside-term count is exactly one and equals the independent lifecycle residual-before-deadline count; no other historical audit check is present"
+  },
+  "cells": {
+    "A-107": {
+      "execution_observations": 50614472,
+      "execution_hash": "82df4a9e32353ce8bffe9adc9bb4623b56ad8b8e26e1a1776732ddde46bdf85c",
+      "evidence_records": 51143681,
+      "evidence_artifact_digest": "e1525e3a1c325745f9148253678abd25321de6f38ed9b91103c4a59b4cea4867",
+      "evidence_multiset_digest": "fe601cb10bcf83dbba7b2361c9b97fab230958fafb85e550fff5525e92ef0bd5",
+      "eligible_terms": 2,
+      "proven_closed_eligible_terms": 0,
+      "closure_fraction": 0.0,
+      "all_eligible_terms_closed_by_deadline": false,
+      "passive_filled_quantity": {"status": "not_applicable"},
+      "terminal_residual_magnitude": 40000000,
+      "residual_funding": {"settlements": 1, "net_quote_delta": 150014}
+    },
+    "B-107": {
+      "execution_observations": 50636477,
+      "execution_hash": "cfe9bc22f5312235d40065cf4ea9d6e5b8287f1f194b78f146ab8f6cd911b680",
+      "evidence_records": 51165698,
+      "evidence_artifact_digest": "041483b170a43efdd93b1986fdbcf62960fef1bb9420042f82e5a26c1dae6e24",
+      "evidence_multiset_digest": "f8307ba1598afa944b9914651849877a1ece117db9b5dbe60c8061daab09bfb6",
+      "eligible_terms": 2,
+      "proven_closed_eligible_terms": 2,
+      "closure_fraction": 1.0,
+      "all_eligible_terms_closed_by_deadline": true,
+      "passive_filled_quantity": {"status": "observed", "quantity": 200000},
+      "terminal_residual_magnitude": 0,
+      "residual_funding": {"settlements": 1, "net_quote_delta": 49495},
+      "terms": {
+        "central": {
+          "resting_duration_nanos": 19000000000,
+          "partial_filled_quantity": 0,
+          "full_filled_quantity": 100000,
+          "time_to_first_residual_reduction_nanos": 21000000000,
+          "time_to_flat_nanos": 28000000000,
+          "close_transition_count": 1,
+          "proven_closed_by_deadline": true
+        },
+        "south": {
+          "resting_duration_nanos": 1000000000,
+          "partial_filled_quantity": 0,
+          "full_filled_quantity": 100000,
+          "time_to_first_residual_reduction_nanos": 3000000000,
+          "time_to_flat_nanos": 10000000000,
+          "close_transition_count": 1,
+          "proven_closed_by_deadline": true
+        }
+      }
+    },
+    "A-109": {
+      "execution_observations": 50971660,
+      "execution_hash": "f86f4086c872ee7b287a7dcd1b53ef96484e765a08b181dab75e798c2bd8e181",
+      "evidence_records": 51500869,
+      "evidence_artifact_digest": "62244ad77796f37e573e4508044f71118b8718d4c041fcc9a603bca298792654",
+      "evidence_multiset_digest": "ddcbce03996e7dca6e80c7f7189ec11da3f5ba20db91ac95f8188f2d5febe4d4",
+      "eligible_terms": 2,
+      "proven_closed_eligible_terms": 0,
+      "closure_fraction": 0.0,
+      "all_eligible_terms_closed_by_deadline": false,
+      "passive_filled_quantity": {"status": "not_applicable"},
+      "terminal_residual_magnitude": 40000000,
+      "residual_funding": {"settlements": 1, "net_quote_delta": 150014}
+    },
+    "B-109": {
+      "execution_observations": 51011869,
+      "execution_hash": "bb6df851dce0629d5cc6ef7d81be4061e69f2d25c5da4ce4501ebea878c788d3",
+      "evidence_records": 51541090,
+      "evidence_artifact_digest": "da7560eb282ddfcfbd98f94ce26bbe2c58649b3c4bc1bcbbbf804affddc0b059",
+      "evidence_multiset_digest": "5e2a7d7cc41e03c6b9108dd8d875da7629a9878e3e9224bfaa057ad325ee30c2",
+      "eligible_terms": 2,
+      "proven_closed_eligible_terms": 2,
+      "closure_fraction": 1.0,
+      "all_eligible_terms_closed_by_deadline": true,
+      "passive_filled_quantity": {"status": "observed", "quantity": 200000},
+      "terminal_residual_magnitude": 0,
+      "residual_funding": {"settlements": 1, "net_quote_delta": 150014},
+      "terms": {
+        "central": {
+          "resting_duration_nanos": 23000000000,
+          "partial_filled_quantity": 0,
+          "full_filled_quantity": 100000,
+          "time_to_first_residual_reduction_nanos": 25000000000,
+          "time_to_flat_nanos": 32000000000,
+          "close_transition_count": 1,
+          "proven_closed_by_deadline": true
+        },
+        "south": {
+          "resting_duration_nanos": 19000000000,
+          "partial_filled_quantity": 0,
+          "full_filled_quantity": 100000,
+          "time_to_first_residual_reduction_nanos": 21000000000,
+          "time_to_flat_nanos": 28000000000,
+          "close_transition_count": 1,
+          "proven_closed_by_deadline": true
+        }
+      }
+    }
+  },
+  "paired_effects": {
+    "107": {
+      "eligible_terms_B_minus_A": 0,
+      "proven_closed_terms_B_minus_A": 2,
+      "closure_fraction_B_minus_A": 1.0,
+      "terminal_residual_magnitude_B_minus_A": -40000000,
+      "residual_funding_settlements_B_minus_A": 0,
+      "residual_funding_net_quote_delta_B_minus_A": -100519,
+      "time_effect": "B finite; A not_observed through terminal censoring"
+    },
+    "109": {
+      "eligible_terms_B_minus_A": 0,
+      "proven_closed_terms_B_minus_A": 2,
+      "closure_fraction_B_minus_A": 1.0,
+      "terminal_residual_magnitude_B_minus_A": -40000000,
+      "residual_funding_settlements_B_minus_A": 0,
+      "residual_funding_net_quote_delta_B_minus_A": 0,
+      "time_effect": "B finite; A not_observed through terminal censoring"
+    },
+    "passive_filled_quantity_difference": "not numerically defined because A is not_applicable; B observed 200000 in each seed"
+  },
+  "classification_rule_satisfied": "both exercised seed pairs have positive B-minus-A closure effects and B proves actual closure",
+  "promoted_contract": "finite-term execution only",
+  "non_claims": [
+    "basis convergence or dynamics",
+    "funding anchoring",
+    "carry profitability",
+    "price stability",
+    "liquidity realism",
+    "broader market or population robustness",
+    "dated carry or settlement behavior"
+  ],
+  "raw_log_policy": "retained uncommitted; no ae13f9a prune authority"
+}
