@@ -1,0 +1,34 @@
+{
+  "experiment_id": "v2-5-p2-A-seed-101",
+  "hypothesis_id": "V2-5-P2A",
+  "date": "2026-08-24",
+  "status": "preregistered",
+  "description": "Physical-exposure hedger installed with identical state, local delayed feed, capital, timer, and evidence contract to B; only submit permission is disabled.",
+  "log_mode": "full",
+  "seed": 101,
+  "strict_population_accounting": true,
+  "checkpoint_interval_seconds": 30,
+  "taker_fee_bps": 5,
+  "record_market_data_receipts": true,
+  "market_data_receipt_roles": ["perp_exposure_hedger"],
+  "record_perp_exposure_hedger_decisions": true,
+  "latency_profiles": {
+    "perp_exposure_hedger": {
+      "model": "constant",
+      "delay": 20000000,
+      "market_data_scale": 2
+    }
+  },
+  "perp_exposure_hedger": {
+    "enabled": false,
+    "symbol": "ABC-PERP",
+    "decision_interval": 2000000000,
+    "exposure_interval": 10000000000,
+    "exposure_step_qty": 10000000,
+    "max_abs_exposure": 100000000,
+    "max_request_qty": 10000000,
+    "tick_size": 1000000,
+    "initial_quote_balance": 20000000000000,
+    "initial_margin": 10000000000000
+  }
+}
