@@ -1,9 +1,36 @@
 # V2-5 P3e — passive finite-term exit under sub-minimum aggressive depth
 
-Status: **design candidate; not implemented, configured, preregistered, or
-scored.** It follows the valid P3c lifecycle falsification and the invalid P3d
-attempt. It does not alter their retained evidence, conclusions, or the
-current V2 economic configuration.
+Status: **implementation and independent-replay gates passed; not yet
+configured, preregistered, run, or scored.** It follows the valid P3c
+lifecycle falsification and the invalid P3d attempt. It does not alter their
+retained evidence, conclusions, or the current V2 economic configuration.
+
+## Implementation gate — passed, not an economic result
+
+The implementation is an opt-in P4 policy (`v2_5_p3e_passive_exit_v1`). With
+no `passive_exit` configuration, legacy P3 behavior remains IOC-only. When the
+policy is declared, it can submit a child only after the ordinary local IOC
+size rule emits `EXECUTABLE_SIZE_UNAVAILABLE`; it chooses the delivered
+same-side touch and sends an ordinary `LIMIT` / `GTC` / `post_only` request.
+The child cannot undercut the effective exchange/actor unwind floor.
+
+The actor records the configured slice and deadline on every P4 decision; each
+P4 submission records explicit order type, time-in-force, and a pointer-valued
+`post_only` flag so `false` remains distinguishable from a legacy omitted
+field. At deadline it records one cancellation request identity tied to the
+accepted order. A later unfilled residual emits `PASSIVE_EXIT_DEADLINE_EXPIRED`
+and remains open; it does not fabricate a close or stop funding.
+
+Independent replay reconstructs the failed IOC precondition, passive side,
+price, legal size, GTC/post-only wire contract, canonical venue acceptance or
+rejection, and a successful cancellation chain. It rejects a forged passive
+price/side/size, a post-only bit stripped from the canonical venue order, a
+passive submission while an IOC was actually legal, and a forged
+cancel/order/actor-outcome identity. The fresh-process `GOMAXPROCS=1/4` matrix
+also showed evidence OFF/ON equality of the ordered execution hash and stable
+receipt/decision sidecar digests while the P4 policy was active but entry was
+deliberately mandate-censored. These are mechanism/evidence gates only; they
+do not establish that a real P3c-like term will activate P3e.
 
 ## New static/evidence finding — C-002
 
@@ -85,7 +112,7 @@ When that path emits `EXECUTABLE_SIZE_UNAVAILABLE` at term end:
 
 1. Select the **same-side passive touch** from the actor's delivered local
    snapshot: bid for a buy-to-cover; ask for a sell-to-close. Absence is an
-   explicit `PASSIVE_EXIT_PRICE_UNAVAILABLE` defer, not a numeric price.
+   explicit `PASSIVE_EXIT_REFERENCE_UNAVAILABLE` defer, not a numeric price.
 2. Submit at most one ordinary `post_only` limit child, using the existing
    request latency and the venue's normal price-time admission. Its quantity is
    `min(remaining position magnitude, declared passive-exit slice)` and must
