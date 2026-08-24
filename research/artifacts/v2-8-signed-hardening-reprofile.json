@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "commit": "5afdd45",
+  "purpose": "post-signed-price-hardening merged-code performance reprofile",
+  "simulator": {
+    "config": "research/configs/frozen-baseline-2026-08-22.json",
+    "config_sha256": "ca933bf2244eec8e104d4313456bed386809703bb7a1179125b8d9255f1b1036",
+    "seed": 101,
+    "horizon": "30m",
+    "gomaxprocs": 1,
+    "raw_log_mode": "none",
+    "receipt_evidence_role": "spot_maker",
+    "event_count": 2126782,
+    "execution_stream_hash": "5db76448ebb8c5ca60d04366a5fe89540e745564c7fb86cc328be7515989e5f6",
+    "wall_seconds": 22.25,
+    "max_rss_kib": 812756,
+    "sampled_alloc_mb": 9246.13,
+    "gc_cycles": 21,
+    "allocation_rate_mb_per_second": 418.57,
+    "cpu_cumulative_percent": {
+      "place_order": 32.55,
+      "checkpoint_observe_and_logger": 17.98,
+      "encoding_json_marshal": 15.62,
+      "process_executions": 14.71
+    },
+    "alloc_percent": {
+      "drain_ingress_inclusive": 48.46,
+      "detached_preview_clone_inclusive": 13.58,
+      "encoding_json_marshal_inclusive": 10.65,
+      "market_data_schedule_inclusive": 7.73
+    },
+    "block_profile": "pprof shutdown only; no application block bottleneck",
+    "mutex_profile": "no observed contention",
+    "profiles": {
+      "directory": "scratch/signed-price-hardening-20260824/merged-simulator-none-seed101",
+      "cpu_sha256": "797c0a44b92972d0d0f2b591bdc347003b39e12aeaa140d7dbc4e8a5b65d3770",
+      "alloc_sha256": "fe8dac0a914594bd4561d6f7782f031a3ad66609741832804b608ab64c41d383",
+      "block_sha256": "d30851d1eb57f50c01b192ae5307ab5b30b4ef246ac4550e921386d71a6219f2",
+      "mutex_sha256": "4caf68ead711046021b81049b3c464e49ebaeed282e16884396f94d1f81cf9e4"
+    }
+  },
+  "analyzer": {
+    "binary": "mvanalyze",
+    "metric": "crossvenue",
+    "gomaxprocs": 14,
+    "source_run": "scratch/signed-price-hardening-20260824/full-evidence-seed101",
+    "raw_evidence_size": "707M",
+    "wall_seconds": 0.73,
+    "max_rss_kib": 64968,
+    "sampled_alloc_mb": 410.85,
+    "cpu_cumulative_percent": {
+      "encoding_json_unmarshal": 70.57,
+      "bytes_contains_prefilter": 19.4,
+      "event_payload_decode": 21.4
+    },
+    "alloc_percent": {
+      "raw_message_unmarshal": 31.53,
+      "encoding_json_unmarshal_inclusive": 81.55,
+      "scan_file_inclusive": 98.04
+    },
+    "block_profile": "WaitGroup joins worker scans; no analyzer-lock bottleneck",
+    "mutex_profile": "10.36ms total, runtime dominated",
+    "profiles": {
+      "directory": "scratch/signed-price-hardening-20260824/merged-analyzer-crossvenue-seed101",
+      "cpu_sha256": "b2d0223466b6c22671a43647b8fcc2720159e659109d0a981807bdce7ed9cf35",
+      "alloc_sha256": "1ac695db1915125e4f1d7f6fe42afbf0352f9e0b8263642c0800dc309e4014cd",
+      "block_sha256": "1c92b7a0c11b19c1ff0073944ed3e8b42a0ff597212e1decce1df27ab4e7f871",
+      "mutex_sha256": "b41a111735e39653c16cb95504ce0b6808b5956d8b80d26bb229a278f5980a88"
+    }
+  },
+  "decision": "No dependency or optimization adopted. encoding/json remains the semantic reference; re-open only with an analyzer-only full differential compatibility/evidence-equivalence gate."
+}

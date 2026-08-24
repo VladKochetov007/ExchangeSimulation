@@ -162,3 +162,36 @@ Raw merged artifacts are retained under
 no simulator or analyzer optimization in this step, and reprofile only when a
 new workload (option-heavy or liquidation-reachable) changes the measured
 hotspot mix.
+
+## Post-hardening reprofile — `5afdd45`
+
+The signed-price *hardening* branch was subsequently fast-forwarded at
+`5afdd45`.  This is a new measurement rather than a claim based on the earlier
+`320262e` profile.  The simulator used the retained 30-minute baseline config,
+seed 101, `GOMAXPROCS=1`, 60-second checkpoints, and `spot_maker` receipt
+evidence with raw JSON logging disabled.  It produced 2,126,782 observations
+and the expected ordered execution hash
+`5db76448ebb8c5ca60d04366a5fe89540e745564c7fb86cc328be7515989e5f6`.
+
+| Component | Measurement | Decision |
+| --- | ---: | --- |
+| Simulator wall / speed | 22.25 s / 80.9 simulated seconds per wall second | No regression signal; not an improvement claim from one timing specimen. |
+| Simulator RSS / allocation / GC | 812,756 KiB / 9.246 GB sampled / 21 cycles (418.6 MB/s) | Allocation remains material. |
+| Core order path | `PlaceOrder` 32.6% cumulative CPU; `processExecutions` 14.7% | Do not alter matching/admission without a separate ownership and exact-equivalence proof. |
+| Checkpoint/logging | checkpoint observation/logger 18.0%; `encoding/json.Marshal` 15.6% | Still material but semantic-risky; no encoder swap. |
+| Detached preview | 13.6% inclusive sampled allocation | Potential future candidate only after matcher ownership/fill equivalence proof. |
+| Scheduler/courier/locks | no new standalone hotspot; block is pprof shutdown and mutex profile is empty | No ordering or synchronization change. |
+| Analyzer replay | 0.73 s wall, 64,968 KiB RSS, 410.85 MB sampled allocation | `encoding/json.Unmarshal` 70.6% cumulative CPU; still a material offline-only bottleneck. |
+| Analyzer structural scan | prefilter 19.4% cumulative CPU; worker block is only the terminal `WaitGroup` join | Existing whole-workload `bytes.Contains` comparison was too small to justify a change. |
+
+The analyzer replay was `crossvenue` over the retained 707 MB full-evidence
+specimen.  The data reconfirms that an analyzer-only decoder is the only
+plausible future JSON optimization surface, but it does **not** authorize a
+dependency: `goccy/go-json` remains rejected for overflow incompatibility;
+Sonic/jsoniter need a broader malformed/duplicate-key/UTF-8/RawMessage/
+integer-boundary differential and identical end-to-end analyzer output before
+any adoption.  No simulator JSON encoding, evidence digest, event domain, or
+economic logic changed here.  Compact machine-readable provenance and pprof
+hashes are in
+[`v2-8-signed-hardening-reprofile.json`](artifacts/v2-8-signed-hardening-reprofile.json);
+the profile binaries are retained under `scratch/signed-price-hardening-20260824/`.
