@@ -1,8 +1,10 @@
 # V2-3 P3 design — confirmed passive-quote replenishment
 
-Status: **design only; no implementation, rendered configuration, or P3 market
-screen exists yet.** This is a narrow V2-3 microstructure mechanism prompted by
-the retained V2-5 P3c term-completion evidence. It is not an exit-policy fix,
+Status: **implemented and preregistered; first final screen has not yet run.**
+The implementation, rendered configurations, independent lifecycle replay, and
+evidence-only neutrality checks are committed separately from the pending P3
+market evidence. This is a narrow V2-3 microstructure mechanism prompted by the
+retained V2-5 P3c term-completion evidence. It is not an exit-policy fix,
 funding/carry result, price-stability treatment, or a replacement for a
 price-elastic counterparty population.
 
