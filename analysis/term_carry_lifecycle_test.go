@@ -77,6 +77,7 @@ func TestTermCarryLifecycleSameTimestampFillUsesReceiptOrder(t *testing.T) {
 	var deadline int64
 	run := termCarryLifecycleTestRun(t, func(fixture *termCarryLifecycleFixture) {
 		deadline = makeLifecyclePassiveClosure(fixture)
+		fixture.splitCanonicalLog = true
 		passive := fixture.decisions[3]
 		fill := fixture.outcomes[5]
 		resting := passive

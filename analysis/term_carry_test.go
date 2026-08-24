@@ -614,13 +614,14 @@ func TestTermCarryLifecycleMutationsAreDetected(t *testing.T) {
 }
 
 type termCarryLifecycleFixture struct {
-	policy       termCarryPolicyConfig
-	decisions    []termCarryDecision
-	outcomes     []termCarryOutcome
-	settlementAt int64
-	initialSpot  int64
-	terminalSpot int64
-	terminalPerp int64
+	policy            termCarryPolicyConfig
+	decisions         []termCarryDecision
+	outcomes          []termCarryOutcome
+	settlementAt      int64
+	initialSpot       int64
+	terminalSpot      int64
+	terminalPerp      int64
+	splitCanonicalLog bool
 }
 
 // termCarryLifecycleTestRun creates a retained-evidence term without calling
@@ -683,6 +684,14 @@ func termCarryLifecycleTestRun(t *testing.T, mutate func(*termCarryLifecycleFixt
 	writeTermCarryLifecycleManifest(t, dir, fixture)
 	writeTermCarryLifecycleReceipts(t, dir, fixture.decisions)
 	lines := make([]string, 0, len(fixture.decisions)+2*len(fixture.outcomes)+1)
+	canonicalLines := make([]string, 0, len(fixture.outcomes))
+	appendCanonical := func(line string) {
+		if fixture.splitCanonicalLog {
+			canonicalLines = append(canonicalLines, line)
+			return
+		}
+		lines = append(lines, line)
+	}
 	for _, decision := range fixture.decisions {
 		lines = append(lines, logLine(decision.DecisionTime, decision.ClientID, "term_carry_decision", mustFundingCarryMap(t, decision)))
 	}
@@ -698,24 +707,42 @@ func termCarryLifecycleTestRun(t *testing.T, mutate func(*termCarryLifecycleFixt
 				postOnly = *decision.PostOnly
 			}
 			order := fundingCarryVenueOrder{RequestID: outcome.RequestID, OrderID: outcome.OrderID, Side: termCarryOutcomeSide(fixture.decisions, outcome.RequestID), Type: exchange.LimitOrder.String(), TimeInForce: tif, PostOnly: postOnly, Price: termCarryOutcomePrice(fixture.decisions, outcome.RequestID), Qty: termCarryOutcomeQty(fixture.decisions, outcome.RequestID)}
-			lines = append(lines, logLine(termCarryOutcomeTimestamp(outcome), outcome.ClientID, "OrderAccepted", mustFundingCarryMap(t, order)))
+			appendCanonical(logLine(termCarryOutcomeTimestamp(outcome), outcome.ClientID, "OrderAccepted", mustFundingCarryMap(t, order)))
 		}
 		if outcome.Event == "ORDER_FILL" {
 			fill := fundingCarryVenueFill{OrderID: outcome.OrderID, TradeID: outcome.TradeID, Symbol: outcome.Symbol, Side: outcome.Side, Qty: outcome.Qty, Price: outcome.Price, FeeAmount: outcome.FeeAmount, FeeAsset: outcome.FeeAsset}
-			lines = append(lines, logLine(outcome.ExecutionTime, outcome.ClientID, "OrderFill", mustFundingCarryMap(t, fill)))
+			appendCanonical(logLine(outcome.ExecutionTime, outcome.ClientID, "OrderFill", mustFundingCarryMap(t, fill)))
 		}
 		if outcome.Event == "ORDER_CANCELLED" {
 			cancellation := termCarryVenueCancellation{OrderID: outcome.OrderID, RequestID: outcome.CancelRequestID, RemainingQty: outcome.RemainingQty}
-			lines = append(lines, logLine(termCarryOutcomeTimestamp(outcome), outcome.ClientID, "OrderCancelled", mustFundingCarryMap(t, cancellation)))
+			appendCanonical(logLine(termCarryOutcomeTimestamp(outcome), outcome.ClientID, "OrderCancelled", mustFundingCarryMap(t, cancellation)))
 		}
 	}
 	lines = append(lines, fundingPayLine(fixture.settlementAt, "north", entry.ClientID, 1))
 	writeFundingCarryLog(t, dir, lines)
+	if fixture.splitCanonicalLog {
+		writeTermCarryCanonicalLog(t, dir, canonicalLines)
+	}
 	run, err := Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return run
+}
+
+func writeTermCarryCanonicalLog(t *testing.T, dir string, lines []string) {
+	t.Helper()
+	path := filepath.Join(dir, "venues", "north", "derivatives.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := ""
+	for _, line := range lines {
+		content += line + "\n"
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func mustTermCarryEnd(t *testing.T, policy termCarryPolicyConfig, decision termCarryDecision) int64 {
