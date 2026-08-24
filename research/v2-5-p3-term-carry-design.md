@@ -169,6 +169,26 @@ realized term carry.
    scored before funding response, basis, or price metrics. No inventory/order
    change is `NOT IDENTIFIED`, regardless of an attractive basis chart.
 
+## P3c outcome — do not bypass this gate
+
+P3c is complete and **falsified the current finite-term exit policy**; its
+retained result is
+[`v2-5-p3c-term-completion-results.md`](v2-5-p3c-term-completion-results.md).
+Two locally informed 10m matched terms reached their declared end, but the
+perpetual cover touch held only 16,286 (central) and 16,348 (south) raw units,
+below the registered 100,000 minimum child size. The actor emitted 7,200
+explicit `EXECUTABLE_SIZE_UNAVAILABLE` deferrals over the two-hour close
+window, submitted no unwind order, retained both positions, and south received
+one funding transfer after its term window. Information-boundary, accounting,
+generic funding, and order-lifecycle gates are clean; this is a policy/ecology
+failure rather than evidence corruption.
+
+Do not rerun P3c or alter its registered parameters. A later P3 exit-liquidity
+revision must be separately designed and preregistered: it needs a named
+observed-depth child-order/participation policy, finite residual-risk rule,
+activation metric, partial-fill and deadline mutations, and a fresh lifecycle
+screen before any funding/basis market comparison.
+
 This actor can establish a causally inspectable response to its **declared
 funding-persistence belief**. It cannot by itself show that funding is an
 endogenous general-market anchor, that the belief is realistic, or that
