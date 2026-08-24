@@ -662,3 +662,72 @@ finish and their contracts pass.
   unique LCM mechanism, or any price-stability claim. The next permitted step
   is an explicitly exploratory diagnostic on retained evidence to explain the
   reversal; it cannot revise or rescue the preregistered score.
+
+### 2026-08-24 V2-5 P3e passive finite-term exit — restart handoff
+
+- P3c remains a valid **FALSIFIED** lifecycle result: two genuine finite
+  spot/perpetual terms reached their declared end but local opposing touch
+  quantities (16,286 and 16,348) were below the venue's legal 100,000 minimum.
+  P3d's lower-floor premise is invalid. Do not tune this population or reuse
+  its invalid subminimum-order behavior.
+- P3e is the committed, opt-in policy `v2_5_p3e_passive_exit_v1`:
+  only after independently demonstrated `EXECUTABLE_SIZE_UNAVAILABLE`, it
+  posts one legal same-side 100,000-unit GTC post-only child at the participant's
+  local passive touch. It has an explicit known deadline, exact cancel request
+  identity, no synthetic fill, and no changed venue minimum. Implementation,
+  independent replay/mutations, and telemetry-neutrality commits are
+  `87d430f`, `2860d5c`, `afc901a`, and `713a9a0`.
+- The P3e P0 protocol and immutable config are committed at `e1905d7` and
+  `0f006f2`. Config SHA-256 is
+  `206fc24ee0bc7f16aacabcbebc794b1fedd611922ef58e4578d5df142b323835`.
+  P0 is one seed-107, 98-hour B integrity/activation cell; it is **not** a
+  paired market, funding, basis, profitability, or realism screen. Its
+  deadline is five seconds after the run horizon, so P0 cannot make a
+  deadline-cancellation or closure claim.
+- The five-minute full-evidence preflight is complete and documented at
+  `research/v2-5-p3e-passive-exit-p0-preflight.md` (commits `9e2c94f`,
+  `ac223ca`, `02191c7`). It has valid P4/source/frontier/gateway/actor replay,
+  valid observation receipts, clean generic accounting/positions/lifecycle,
+  matching runtime/offline persisted-evidence artifact identity, and a passing
+  fresh-process `-race` evidence-neutrality test (GOMAXPROCS 1/4). It cannot
+  exercise P3e before its 96-hour term end.
+- `scripts/extract-v2-5-p3e-metrics.sh` is the fail-closed retained-evidence
+  extractor. It requires final nonempty `greeks.json` **and** `latency.json`,
+  writes all nine P3e metrics atomically, and proves runtime/offline exact
+  persisted-evidence artifact identity. It deliberately does not score the
+  P0 activation predicate and never prunes raw evidence. `prunegate` unit
+  tests pass; its read-only result for P3e is `MEASUREMENT_INCOMPLETE` because
+  the historical ae13f9a manifest has no P3e arm contract. That is the
+  intended fail-closed result; never bypass it.
+- An initial full P0 launch was explicitly interrupted at
+  `2026-08-24T20:29:58+03:00` for laptop shutdown. It has no final
+  `greeks.json` or `latency.json`; its incomplete sidecars/checkpoints are
+  retained only at
+  `research/artifacts/historical/v2-5-p3e-p0-attempt0-interrupted/`.
+  It is **NON-EVIDENCE**: never extract, score, compare, cite, or prune it.
+  See `research/v2-5-p3e-passive-exit-p0-attempt0-interruption.md`.
+- The next launch must be fresh into the now-empty registered path
+  `research/artifacts/v2-5-p3e/p0-B-107/`. First verify the worktree/process/
+  disk state; do not touch the four user-owned ae13f9a scoreboard edits.
+  Rebuild `bin/multivenue`, `bin/mvanalyze`, and `bin/prunegate` from the
+  committed head; verify the config SHA above; run with `GOMAXPROCS=4`, full
+  evidence, and `-duration 98h`. Completion means only both final sidecars
+  exist and are nonempty. Then run the P3e extractor before reading/scoring.
+- **Pre-score analyzer contract to resolve before the fresh long launch:**
+  static review found that `analysis.TermCarryAudit.Valid` currently treats
+  every funding settlement after `term_end` as `OutsideTermFunding`. P3e's
+  declared policy intentionally retains a real residual and its funding risk
+  until its explicit passive-exit deadline. Add a narrowly scoped analyzer
+  distinction (e.g. residual-pending-exit funding) before observing/scoring a
+  new P0 result: it must allow only P4 open residual funding through the
+  declared deadline and still reject funding after deadline, for closed terms,
+  overlapping terms, or non-P4 policies. Add independent fixtures/mutations;
+  document it as an analyzer-contract correction, not simulator economics.
+  Do not retrospectively reinterpret P3c.
+- Current committed head at shutdown is `74e8b75` (`docs(v2): retain
+  interrupted P3e P0 attempt`). The only tracked worktree differences are
+  user-owned historical ae13f9a scoreboard artifacts:
+  `derivatives.json`, `exposure.json`, `reaction.json`, and `streamhash.json`
+  under `research/artifacts/scoreboard/f2_baseline_101/`. No simulator,
+  analyzer, config, or research-ledger change is uncommitted. Disk free space:
+  about 331 GB. No simulator/analyzer/test process remains.
