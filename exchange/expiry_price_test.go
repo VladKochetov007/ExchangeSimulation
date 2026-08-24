@@ -7,6 +7,7 @@ import (
 	"time"
 
 	einstrument "exchange_sim/instrument"
+	etypes "exchange_sim/types"
 )
 
 func newBookPriceExchange(t *testing.T) *DefaultExchange {
@@ -376,5 +377,66 @@ func TestExpirySettlementPendingRetriesThenSettlesExactlyOnce(t *testing.T) {
 	}
 	if pendingEvents != 3 || unavailableEvents != 3 {
 		t.Fatalf("pending evidence count = pending %d unavailable %d, want 3/3", pendingEvents, unavailableEvents)
+	}
+}
+
+func TestOptionExpiryDefersDomainInvalidForwardThenSettlesOnce(t *testing.T) {
+	clock := &expiryManualClock{now: 100}
+	ex := NewExchange(2, clock)
+	defer ex.Shutdown()
+	option := NewEuropeanOption("OIL-100-C", "OIL", "USD", "OIL/USD", 1, 1, 1, 1, 100, clock.now, true)
+	option.SetObservationWindow(0)
+	// This is a delivered, present observation. It is not an unavailable
+	// source, but the current Black-76 option contract rejects it explicitly.
+	option.ObserveSettlement(0, clock.now)
+	ex.AddInstrument(option)
+	global := &recordingLogger{}
+	ex.SetLogger("_global", global)
+	for _, id := range []uint64{1, 2} {
+		ex.ConnectNewClient(id, nil, &FixedFee{})
+		ex.AddPerpBalance(id, "USD", 1_000)
+	}
+	ex.Positions.UpdatePosition(1, option.Symbol(), 1, 10, Buy, PositionBoth)
+	ex.Positions.UpdatePosition(2, option.Symbol(), 1, 10, Sell, PositionBoth)
+	opening := ex.Clients[1].PerpBalance("USD") + ex.Clients[2].PerpBalance("USD")
+
+	ex.CheckExpiries()
+	pending, ok := ex.settlementPending[option.Symbol()]
+	_, settlementErr := option.SettlementPrice()
+	if !ok || pending.Attempts != 1 || !errors.Is(settlementErr, etypes.ErrPriceDomain) {
+		// The pending reason is a persisted diagnostic; keep the contract test
+		// independent of its wording while still proving this is domain, not
+		// availability, deferral.
+		t.Fatalf("invalid option forward was not observable as pending domain deferral: %#v", pending)
+	}
+	if response := ex.PlaceOrder(1, &OrderRequest{RequestID: 1, Symbol: option.Symbol(), Side: Buy, Type: LimitOrder, Price: 1, Qty: 1, TimeInForce: GTC, Visibility: Normal}); response.Success || response.Error != RejectInstrumentExpired {
+		t.Fatalf("post-expiry option order = %#v, want instrument-expired rejection", response)
+	}
+	if total := ex.Clients[1].PerpBalance("USD") + ex.Clients[2].PerpBalance("USD"); total != opening {
+		t.Fatalf("domain-pending option settlement changed conservation: got %d want %d", total, opening)
+	}
+
+	clock.Advance(time.Second)
+	option.ObserveSettlement(120, clock.now)
+	ex.CheckExpiries()
+	if ex.Instruments[option.Symbol()] != nil || ex.Books[option.Symbol()] != nil {
+		t.Fatal("option was not delisted after valid settlement reference arrived")
+	}
+	for _, id := range []uint64{1, 2} {
+		if pos := ex.Positions.GetPosition(id, option.Symbol()); pos == nil || pos.Size != 0 {
+			t.Fatalf("client %d option position after delayed settlement = %#v", id, pos)
+		}
+	}
+	if total := ex.Clients[1].PerpBalance("USD") + ex.Clients[2].PerpBalance("USD"); total != opening {
+		t.Fatalf("delayed option settlement changed conservation: got %d want %d", total, opening)
+	}
+	settled := 0
+	for _, record := range global.records {
+		if record.event == "instrument_settled" {
+			settled++
+		}
+	}
+	if settled != 1 {
+		t.Fatalf("delayed option instrument_settled count = %d, want 1", settled)
 	}
 }

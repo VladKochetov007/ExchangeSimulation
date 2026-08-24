@@ -148,6 +148,22 @@ func TestSettlementObserverRetainsSignedAndZeroObservations(t *testing.T) {
 	}
 }
 
+func TestOptionSettlementDefersInvalidForwardUntilAValidReferenceArrives(t *testing.T) {
+	option := NewEuropeanOption("OIL-100-C", "OIL", "USD", "OIL/USD", 1, 1, 1, 1, 100, 1, true)
+	option.SetObservationWindow(0)
+	option.ObserveSettlement(0, 1)
+	if price, err := option.SettlementPrice(); price != 0 || !errors.Is(err, etypes.ErrPriceDomain) {
+		t.Fatalf("zero option forward settlement = (%d, %v), want ErrPriceDomain", price, err)
+	}
+	// The invalid observation must not have frozen the lifecycle. Once the
+	// declared source delivers a positive forward, only that new zero-window
+	// observation remains and settlement succeeds exactly at that value.
+	option.ObserveSettlement(125, 2)
+	if price, err := option.SettlementPrice(); err != nil || price != 125 {
+		t.Fatalf("recovered option settlement = (%d, %v), want (125, nil)", price, err)
+	}
+}
+
 func TestOptionMarksUseErrorsRatherThanZeroForAbsence(t *testing.T) {
 	option := NewEuropeanOption("OIL-0-C", "OIL", "USD", "OIL/USD", 1, 1, 1, 1, 1, 1, true)
 	if mark, err := option.PositionMark(); mark != 0 || !errors.Is(err, etypes.ErrNoPrice) {

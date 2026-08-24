@@ -1,6 +1,7 @@
 package instrument
 
 import (
+	"fmt"
 	"sync/atomic"
 
 	etypes "exchange_sim/types"
@@ -161,7 +162,16 @@ func (o *EuropeanOption) SettlementPrice() (int64, error) {
 	// Settlement is based only on observations received through the declared
 	// underlying-reference path. A cached option mark is not an implicit final
 	// fallback: if no observation was ever delivered, expiry remains pending.
-	return o.observer.settlementPrice()
+	// The current option contract uses a positive-forward model. A delivered
+	// zero or negative underlying is therefore a present-but-domain-invalid
+	// reference, not a numeric zero settlement or a Black-76 fallback; the
+	// generic expiry state machine keeps the contract pending and observable.
+	return o.observer.settlementPriceWith(func(price int64) error {
+		if price <= 0 {
+			return fmt.Errorf("option settlement underlying %d: %w", price, etypes.ErrPriceDomain)
+		}
+		return nil
+	})
 }
 
 // intrinsicValue is the exercise value per base unit at the given underlying
