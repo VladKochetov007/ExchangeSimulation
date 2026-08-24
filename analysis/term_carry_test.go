@@ -182,6 +182,13 @@ func TestTermCarryLifecycleMutationsAreDetected(t *testing.T) {
 			},
 			check: func(result *TermCarryAudit) bool { return !result.Valid && result.PositionContinuityErrors > 0 },
 		},
+		{
+			name: "terminal spot balance must match filled inventory",
+			mutate: func(fixture *termCarryLifecycleFixture) {
+				fixture.terminalSpot++
+			},
+			check: func(result *TermCarryAudit) bool { return !result.Valid && result.TerminalSpotMismatches == 1 },
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -202,6 +209,8 @@ type termCarryLifecycleFixture struct {
 	decisions    []termCarryDecision
 	outcomes     []termCarryOutcome
 	settlementAt int64
+	initialSpot  int64
+	terminalSpot int64
 }
 
 // termCarryLifecycleTestRun creates a retained-evidence term without calling
@@ -255,11 +264,13 @@ func termCarryLifecycleTestRun(t *testing.T, mutate func(*termCarryLifecycleFixt
 			termCarryAccepted(unwindSpot, 103, policy.MaxPosition, 0), termCarryFilled(unwindSpot, 103, policy.MaxPosition, 0, 0, 0),
 		},
 		settlementAt: active.DecisionTime + 1,
+		initialSpot:  1_000,
+		terminalSpot: 1_000,
 	}
 	if mutate != nil {
 		mutate(fixture)
 	}
-	writeTermCarryLifecycleManifest(t, dir, fixture.policy)
+	writeTermCarryLifecycleManifest(t, dir, fixture)
 	writeTermCarryLifecycleReceipts(t, dir, fixture.decisions)
 	lines := make([]string, 0, len(fixture.decisions)+2*len(fixture.outcomes)+1)
 	for _, decision := range fixture.decisions {
@@ -330,10 +341,10 @@ func termCarryOutcomeQty(decisions []termCarryDecision, requestID uint64) int64 
 	return termCarryOutcomeDecision(decisions, requestID).RequestedQty
 }
 
-func writeTermCarryLifecycleManifest(t *testing.T, dir string, policy termCarryPolicyConfig) {
+func writeTermCarryLifecycleManifest(t *testing.T, dir string, fixture *termCarryLifecycleFixture) {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{
-		"config": map[string]any{"taker_fee_bps": policy.TakerFeeBps, "term_carry_allocator": policy},
+		"config": map[string]any{"taker_fee_bps": fixture.policy.TakerFeeBps, "term_carry_allocator": fixture.policy},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -341,7 +352,13 @@ func writeTermCarryLifecycleManifest(t *testing.T, dir string, policy termCarryP
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	report := Report{TerminalAccounts: []AccountRow{{VenueID: "north", ClientID: 9, Role: "term_carry_allocator_1", Account: Account{Positions: []Position{{Symbol: policy.PerpSymbol, Size: 0}}}}}}
+	report := Report{
+		InitialAccounts: []AccountRow{{VenueID: "north", ClientID: 9, Role: "term_carry_allocator_1", Account: Account{SpotBalances: []Balance{{Asset: "ABC", NetAsset: fixture.initialSpot}}}}},
+		TerminalAccounts: []AccountRow{{VenueID: "north", ClientID: 9, Role: "term_carry_allocator_1", Account: Account{
+			SpotBalances: []Balance{{Asset: "ABC", NetAsset: fixture.terminalSpot}},
+			Positions:    []Position{{Symbol: fixture.policy.PerpSymbol, Size: 0}},
+		}}},
+	}
 	raw, err = json.Marshal(report)
 	if err != nil {
 		t.Fatal(err)

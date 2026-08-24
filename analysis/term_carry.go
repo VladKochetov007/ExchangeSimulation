@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"exchange_sim/exchange"
 )
@@ -38,6 +39,7 @@ type TermCarryAudit struct {
 	LifecycleViolations       int64            `json:"lifecycle_violations"`
 	PositionContinuityErrors  int64            `json:"position_continuity_errors"`
 	TerminalPerpMismatches    int64            `json:"terminal_perp_mismatches"`
+	TerminalSpotMismatches    int64            `json:"terminal_spot_mismatches"`
 	ActiveTerms               int64            `json:"active_terms"`
 	ClosedTerms               int64            `json:"closed_terms"`
 	OpenTerms                 int64            `json:"open_terms"`
@@ -355,7 +357,7 @@ func (r *Run) MeasureTermCarry() (*TermCarryAudit, error) {
 		}
 	}
 	auditTermCarryLifecycle(r, policy, decisions, outcomes, settlements, result, check)
-	result.Valid = result.ReceiptAuditValid && result.ReceiptEvidenceErrors == 0 && result.SourceMismatches == 0 && result.FutureSourceUse == 0 && result.InvalidDecisionRecords == 0 && result.DecisionFieldMismatches == 0 && result.ArithmeticMismatches == 0 && result.MissingGatewayDecisions == 0 && result.GatewayDecisionMismatches == 0 && result.MissingVenueOutcomes == 0 && result.DuplicateVenueOutcomes == 0 && result.MissingActorOutcomes == 0 && result.ActorOutcomeMismatches == 0 && result.LifecycleViolations == 0 && result.PositionContinuityErrors == 0 && result.TerminalPerpMismatches == 0 && result.OutsideTermFunding == 0
+	result.Valid = result.ReceiptAuditValid && result.ReceiptEvidenceErrors == 0 && result.SourceMismatches == 0 && result.FutureSourceUse == 0 && result.InvalidDecisionRecords == 0 && result.DecisionFieldMismatches == 0 && result.ArithmeticMismatches == 0 && result.MissingGatewayDecisions == 0 && result.GatewayDecisionMismatches == 0 && result.MissingVenueOutcomes == 0 && result.DuplicateVenueOutcomes == 0 && result.MissingActorOutcomes == 0 && result.ActorOutcomeMismatches == 0 && result.LifecycleViolations == 0 && result.PositionContinuityErrors == 0 && result.TerminalPerpMismatches == 0 && result.TerminalSpotMismatches == 0 && result.OutsideTermFunding == 0
 	return result, nil
 }
 
@@ -404,15 +406,42 @@ func auditTermCarryLifecycle(run *Run, policy termCarryPolicyConfig, decisions [
 		participants[key] = struct{}{}
 	}
 
+	baseAsset, ok := termCarryBaseAsset(policy.SpotSymbol)
+	if !ok {
+		result.LifecycleViolations++
+		check("", 0, 0, "invalid_spot_symbol_base_asset")
+		return
+	}
+
 	var terms []*termCarryLifecycleTerm
 	terminalPerp := make(map[termCarryParticipant]int64)
 	terminalFound := make(map[termCarryParticipant]bool)
+	terminalSpot := make(map[termCarryParticipant]int64)
+	terminalSpotFound := make(map[termCarryParticipant]bool)
+	initialSpot := make(map[termCarryParticipant]int64)
+	initialSpotFound := make(map[termCarryParticipant]bool)
+	for _, row := range run.Report.InitialAccounts {
+		key := termCarryParticipant{venue: row.VenueID, client: row.ClientID}
+		if run.Role(row.VenueID, row.ClientID) != "term_carry_allocator" {
+			continue
+		}
+		balance, found := termCarrySpotBalance(row.Account.SpotBalances, baseAsset)
+		if found {
+			initialSpot[key] = balance
+			initialSpotFound[key] = true
+		}
+	}
 	for _, row := range run.Report.TerminalAccounts {
 		key := termCarryParticipant{venue: row.VenueID, client: row.ClientID}
 		if run.Role(row.VenueID, row.ClientID) != "term_carry_allocator" {
 			continue
 		}
 		terminalFound[key] = true
+		balance, found := termCarrySpotBalance(row.Account.SpotBalances, baseAsset)
+		if found {
+			terminalSpot[key] = balance
+			terminalSpotFound[key] = true
+		}
 		for _, position := range row.Account.Positions {
 			if position.Symbol == policy.PerpSymbol {
 				terminalPerp[key] = position.Size
@@ -495,6 +524,11 @@ func auditTermCarryLifecycle(run *Run, policy termCarryPolicyConfig, decisions [
 			result.TerminalPerpMismatches++
 			check(participant.venue, participant.client, 0, "terminal_perp_position_mismatch")
 		}
+		spotDelta, validSpotDelta := fundingCarryAuditSub(terminalSpot[participant], initialSpot[participant])
+		if !initialSpotFound[participant] || !terminalSpotFound[participant] || !validSpotDelta || spotDelta != spotPosition {
+			result.TerminalSpotMismatches++
+			check(participant.venue, participant.client, 0, "terminal_spot_balance_mismatch")
+		}
 	}
 
 	for _, term := range terms {
@@ -526,6 +560,30 @@ func auditTermCarryLifecycle(run *Run, policy termCarryPolicyConfig, decisions [
 			check(settlement.VenueID, settlement.ClientID, 0, "funding_settlement_matches_overlapping_terms")
 		}
 	}
+}
+
+// termCarryBaseAsset returns the spot asset whose terminal inventory must
+// match the independently reconstructed term-carry spot position.
+func termCarryBaseAsset(symbol string) (string, bool) {
+	base, quote, found := strings.Cut(symbol, "/")
+	return base, found && base != "" && quote != ""
+}
+
+// termCarrySpotBalance returns exactly one declared balance. Missing and
+// duplicate balances are evidence failures, never implicit numeric zero.
+func termCarrySpotBalance(balances []Balance, asset string) (int64, bool) {
+	var value int64
+	found := false
+	for _, balance := range balances {
+		if balance.Asset != asset {
+			continue
+		}
+		if found {
+			return 0, false
+		}
+		value, found = balance.NetAsset, true
+	}
+	return value, found
 }
 
 func validateTermCarryLifecycleDecision(policy termCarryPolicyConfig, decision termCarryDecision, spotPosition, perpPosition int64, current **termCarryLifecycleTerm, terms *[]*termCarryLifecycleTerm) string {
