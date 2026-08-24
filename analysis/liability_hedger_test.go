@@ -70,6 +70,32 @@ func TestLiabilityHedgerAuditAcceptsExplicitUnavailableTouchWithoutRequest(t *te
 	}
 }
 
+func TestLiabilityHedgerAuditAcceptsExactZeroFeeRounding(t *testing.T) {
+	run := l0TestRun(t, l0Fixture{TinyPartialFill: true})
+	result, err := run.MeasureLiabilityHedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || result.Fills != 1 || result.FeeMismatches != 0 || result.NonPositiveFees != 0 || len(result.Checks) != 0 {
+		t.Fatalf("exact zero-fee partial fill = %+v", result)
+	}
+
+	// The zero-fee representation is exact: assigning it a quote asset is as
+	// invalid as omitting the asset of a positive fee.
+	mutated := l0TestRun(t, l0Fixture{
+		TinyPartialFill: true,
+		Fill:            map[string]any{"fee_asset": "USD"},
+		FillEvidence:    map[string]any{"fee_asset": "USD"},
+	})
+	result, err = mutated.MeasureLiabilityHedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid || result.FeeMismatches == 0 {
+		t.Fatalf("zero-fee asset mutation survived: %+v", result)
+	}
+}
+
 func TestLiabilityHedgerAuditAcceptsOnlyARealTailCensor(t *testing.T) {
 	run := l0TestRun(t, l0Fixture{TailCensored: true})
 	result, err := run.MeasureLiabilityHedger()
@@ -199,6 +225,7 @@ type l0Fixture struct {
 	NoExecutableTouch   bool
 	ReverseSide         bool
 	PartialFill         bool
+	TinyPartialFill     bool
 	DropCancel          bool
 	CounterpartyClient  uint64
 	ReceiptAt           int64
@@ -320,6 +347,9 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 		if fixture.PartialFill {
 			quantity = 50_000_000
 		}
+		if fixture.TinyPartialFill {
+			quantity = 1
+		}
 		fee, ok := liabilityHedgerFee(quantity, price, 5)
 		if !ok {
 			t.Fatal("fixture fee overflow")
@@ -336,8 +366,12 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 		}
 		order := map[string]any{"order_id": uint64(70), "client_id": uint64(7), "request_id": uint64(42), "symbol": "CDF/USD", "side": side, "type": "LIMIT", "time_in_force": "IOC", "post_only": false, "price": price, "qty": int64(100_000_000)}
 		counter := map[string]any{"order_id": uint64(80), "client_id": counterpartyClient, "request_id": uint64(43), "symbol": "CDF/USD", "side": counterSide, "type": "LIMIT", "time_in_force": "GTC", "post_only": false, "price": price, "qty": quantity}
-		fill := map[string]any{"order_id": uint64(70), "trade_id": uint64(9), "symbol": "CDF/USD", "side": side, "qty": quantity, "price": price, "fee_amount": fee, "fee_asset": "USD", "role": "taker"}
-		fillEvidence := map[string]any{"venue_id": "north", "hedger": "liability_hedger_1", "client_id": uint64(7), "symbol": "CDF/USD", "timestamp": int64(13_000_000_000), "order_id": uint64(70), "trade_id": uint64(9), "side": side, "qty": quantity, "price": price, "fee_amount": fee, "fee_asset": "USD", "pre_position": int64(0), "post_position": postPosition}
+		feeAsset := "USD"
+		if fee == 0 {
+			feeAsset = ""
+		}
+		fill := map[string]any{"order_id": uint64(70), "trade_id": uint64(9), "symbol": "CDF/USD", "side": side, "qty": quantity, "price": price, "fee_amount": fee, "fee_asset": feeAsset, "role": "taker"}
+		fillEvidence := map[string]any{"venue_id": "north", "hedger": "liability_hedger_1", "client_id": uint64(7), "symbol": "CDF/USD", "timestamp": int64(13_000_000_000), "order_id": uint64(70), "trade_id": uint64(9), "side": side, "qty": quantity, "price": price, "fee_amount": fee, "fee_asset": feeAsset, "pre_position": int64(0), "post_position": postPosition}
 		if fixture.PolicyMode != "" {
 			fillEvidence["policy_mode"] = fixture.PolicyMode
 		}
@@ -354,8 +388,8 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 			logLine(13_000_000_000, 7, "OrderFill", fill),
 			logLine(13_000_000_000, 7, "liability_hedger_fill", fillEvidence),
 		)
-		if fixture.PartialFill && !fixture.DropCancel {
-			lines = append(lines, logLine(13_000_000_000, 7, "OrderCancelled", map[string]any{"order_id": uint64(70), "remaining_qty": int64(50_000_000)}))
+		if (fixture.PartialFill || fixture.TinyPartialFill) && !fixture.DropCancel {
+			lines = append(lines, logLine(13_000_000_000, 7, "OrderCancelled", map[string]any{"order_id": uint64(70), "remaining_qty": int64(100_000_000) - quantity}))
 		}
 	}
 	path := filepath.Join(dir, "general.jsonl")

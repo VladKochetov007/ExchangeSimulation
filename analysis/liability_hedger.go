@@ -606,13 +606,19 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 				result.NonTakerFills++
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "liability_fill_not_taker")
 			}
-			if fill.FeeAmount <= 0 || fill.FeeAsset != "USD" {
-				result.NonPositiveFees++
-				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "non_positive_or_wrong_asset_fee")
-			}
-			if want, ok := liabilityHedgerFee(fill.Qty, fill.Price, decision.TakerFeeBps); !ok || want != fill.FeeAmount {
+			want, feeOK := liabilityHedgerFee(fill.Qty, fill.Price, decision.TakerFeeBps)
+			// normalizedExecutionFee represents an exactly zero rounded fee as
+			// Fee{}: amount zero and no asset. A positive fee must be the CDF/USD
+			// quote fee in USD. The distinction is part of the exchange evidence
+			// contract, not a waiver for an omitted positive fee.
+			assetOK := (want == 0 && fill.FeeAsset == "") || (want > 0 && fill.FeeAsset == "USD")
+			if !feeOK || want != fill.FeeAmount || !assetOK {
 				result.FeeMismatches++
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "fee_formula_mismatch")
+			}
+			if feeOK && want > 0 && fill.FeeAmount <= 0 {
+				result.NonPositiveFees++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "non_positive_fee_when_fee_due")
 			}
 			if !liabilityHedgerHasExternalCounterparty(trades[key], orders, key, fill) {
 				result.UnknownCounterparties++
