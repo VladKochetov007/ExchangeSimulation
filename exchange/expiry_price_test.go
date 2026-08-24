@@ -363,6 +363,15 @@ func TestExpirySettlementPendingRetriesThenSettlesExactlyOnce(t *testing.T) {
 	if settled != 1 {
 		t.Fatalf("instrument_settled count = %d, want exactly one", settled)
 	}
+	for _, record := range global.records {
+		if record.event != "instrument_settled" {
+			continue
+		}
+		announcement, ok := record.data.(*etypes.InstrumentAnnouncement)
+		if !ok || !announcement.SettlementPriceAvailable || announcement.SettlementPrice != 120 {
+			t.Fatalf("settlement lifecycle evidence = %#v, want present price 120", record.data)
+		}
+	}
 	pendingEvents, unavailableEvents := 0, 0
 	for _, record := range log.records {
 		switch record.event {

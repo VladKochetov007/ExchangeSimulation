@@ -42,17 +42,21 @@ const InstrumentFeedSymbol = "_instruments"
 // InstrumentAnnouncement describes an instrument lifecycle event and doubles
 // as the instrument descriptor returned by QueryInstruments.
 type InstrumentAnnouncement struct {
-	Action          string `json:"action"` // "listed" | "settled"
-	Symbol          string `json:"symbol"`
-	InstrumentType  string `json:"instrument_type"`
-	Underlying      string `json:"underlying,omitempty"` // spot symbol the contract references
-	Strike          int64  `json:"strike,omitempty"`     // quote precision units (options)
-	IsCall          bool   `json:"is_call,omitempty"`
-	ExpiryNano      int64  `json:"expiry_nano,omitempty"`
-	SettlementPrice int64  `json:"settlement_price,omitempty"` // set on "settled"
-	TickSize        int64  `json:"tick_size,omitempty"`
-	MinOrderSize    int64  `json:"min_order_size,omitempty"`
-	Timestamp       int64  `json:"timestamp"`
+	Action         string `json:"action"` // "listed" | "settled"
+	Symbol         string `json:"symbol"`
+	InstrumentType string `json:"instrument_type"`
+	Underlying     string `json:"underlying,omitempty"` // spot symbol the contract references
+	Strike         int64  `json:"strike,omitempty"`     // quote precision units (options)
+	IsCall         bool   `json:"is_call,omitempty"`
+	ExpiryNano     int64  `json:"expiry_nano,omitempty"`
+	// SettlementPrice is numeric evidence only. It may be negative or zero
+	// when SettlementPriceAvailable is true; availability must never be
+	// inferred from the numeric value or JSON-field omission.
+	SettlementPrice          int64 `json:"settlement_price"`
+	SettlementPriceAvailable bool  `json:"settlement_price_available"`
+	TickSize                 int64 `json:"tick_size,omitempty"`
+	MinOrderSize             int64 `json:"min_order_size,omitempty"`
+	Timestamp                int64 `json:"timestamp"`
 }
 
 type Subscription struct {
