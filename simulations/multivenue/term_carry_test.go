@@ -269,6 +269,113 @@ func TestTermCarryAllocatorPartialUnwindRetainsResidual(t *testing.T) {
 	}
 }
 
+func TestTermCarryAllocatorPassiveExitIsPostOnlyAndDeadlineBounded(t *testing.T) {
+	gateway := newFundingCarryStubGateway()
+	var decisions []TermCarryDecision
+	var outcomes []TermCarryLegOutcome
+	now := time.Unix(10, 0)
+	cfg := termCarryTestConfig()
+	cfg.MaxPosition, cfg.LotQty, cfg.MinOrderSize = 100, 100, 75
+	cfg.PassiveExit = &TermCarryPassiveExitConfig{SliceQty: 75, DeadlineAtNano: now.Add(5 * time.Second).UnixNano()}
+	cfg.DecisionObserver = func(decision TermCarryDecision) { decisions = append(decisions, decision) }
+	cfg.OutcomeObserver = func(outcome TermCarryLegOutcome) { outcomes = append(outcomes, outcome) }
+	allocator := NewTermCarryAllocator(1, gateway, cfg)
+	allocator.subscribed = true
+	observeTermCarryBooks(t, allocator, gateway, now, 100, 101, 102, 103, 100)
+	// The contra ask cannot support a legal 75-unit IOC exit, while the local
+	// bid is a valid same-side reference for a resting buy-to-cover child.
+	allocator.perp.askQty, allocator.perp.bidQty = 50, 1_000
+	allocator.state = termCarryActive
+	allocator.plan = &termCarryPlan{direction: 1, planCreatedAt: now.UnixNano(), firstExposureAt: now.UnixNano(), termEnd: now.Add(time.Second).UnixNano()}
+	allocator.spotPosition, allocator.perpPosition = 100, -100
+
+	allocator.onTick(now.Add(2 * time.Second))
+	if len(gateway.requests) != 1 || gateway.requests[0].OrderReq == nil {
+		t.Fatalf("passive exit did not submit exactly one ordinary order: %+v", gateway.requests)
+	}
+	first := decisions[len(decisions)-1]
+	order := gateway.requests[0].OrderReq
+	if first.PolicyVersion != termCarryPolicyVersionV4 || first.Action != "SUBMIT_UNWIND_PERP_POST_ONLY" || first.Leg != "UNWIND_PERP_POST_ONLY" || first.Side != exchange.Buy.String() || first.RequestedQty != 75 || first.LimitPrice != 102 || first.OrderType != exchange.LimitOrder.String() || first.TimeInForce != exchange.GTC.String() || first.PostOnly == nil || !*first.PostOnly || first.PassiveExitSliceQty == nil || *first.PassiveExitSliceQty != 75 || first.PassiveExitDeadlineAtNano == nil || *first.PassiveExitDeadlineAtNano != cfg.PassiveExit.DeadlineAtNano {
+		t.Fatalf("passive-exit decision lost its declared contract: %+v", first)
+	}
+	if order.RequestID != first.RequestID || order.Symbol != "ABC-PERP" || order.Side != exchange.Buy || order.Price != 102 || order.Qty != 75 || order.TimeInForce != exchange.GTC || !order.PostOnly {
+		t.Fatalf("submitted passive exit disagrees with decision: order=%+v decision=%+v", order, first)
+	}
+
+	allocator.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: first.RequestID, OrderID: 41}})
+	allocator.onTick(now.Add(4 * time.Second))
+	if resting := decisions[len(decisions)-1]; resting.Action != "PASSIVE_EXIT_RESTING" || resting.RequestID != 0 || resting.CancelRequestID != 0 {
+		t.Fatalf("resting passive child was not explicitly observed: %+v", resting)
+	}
+	if len(gateway.requests) != 1 {
+		t.Fatalf("resting passive child created another request: %+v", gateway.requests)
+	}
+
+	allocator.onTick(now.Add(5 * time.Second))
+	cancel := decisions[len(decisions)-1]
+	if cancel.Action != "CANCEL_PASSIVE_EXIT_AT_DEADLINE" || cancel.RequestID != 0 || cancel.CancelOrderID != 41 || cancel.CancelRequestID == 0 || len(gateway.requests) != 2 || gateway.requests[1].CancelReq == nil || gateway.requests[1].CancelReq.OrderID != 41 || gateway.requests[1].CancelReq.RequestID != cancel.CancelRequestID {
+		t.Fatalf("deadline cancellation is not exact/order-bound evidence: decision=%+v requests=%+v", cancel, gateway.requests)
+	}
+	allocator.onTick(now.Add(5*time.Second + time.Nanosecond))
+	if pending := decisions[len(decisions)-1]; pending.Action != "PASSIVE_EXIT_CANCEL_PENDING" || pending.CancelOrderID != 41 || pending.CancelRequestID != cancel.CancelRequestID || len(gateway.requests) != 2 {
+		t.Fatalf("pending cancellation was resent or became unobservable: decision=%+v requests=%+v", pending, gateway.requests)
+	}
+	allocator.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderCancelled, Data: actor.OrderCancelledEvent{OrderID: 41, RequestID: cancel.CancelRequestID, RemainingQty: 75}})
+	if len(outcomes) == 0 {
+		t.Fatal("deadline cancellation emitted no actor outcome")
+	}
+	lastOutcome := outcomes[len(outcomes)-1]
+	if lastOutcome.Event != "ORDER_CANCELLED" || lastOutcome.RequestID != first.RequestID || lastOutcome.CancelRequestID != cancel.CancelRequestID || lastOutcome.RemainingQty != 75 {
+		t.Fatalf("cancellation outcome lost placement/cancel identity: %+v", lastOutcome)
+	}
+
+	allocator.onTick(now.Add(6 * time.Second))
+	if expired := decisions[len(decisions)-1]; expired.Action != "PASSIVE_EXIT_DEADLINE_EXPIRED" || expired.RequestID != 0 || expired.CancelRequestID != 0 || allocator.perpPosition != -100 || allocator.spotPosition != 100 || allocator.pending != nil {
+		t.Fatalf("deadline expiry manufactured an exit or new request: %+v positions=%d/%d pending=%+v", expired, allocator.spotPosition, allocator.perpPosition, allocator.pending)
+	}
+	if len(gateway.requests) != 2 {
+		t.Fatalf("expired passive policy submitted another child: %+v", gateway.requests)
+	}
+}
+
+func TestTermCarryAllocatorRetriesRejectedPassiveExitCancellation(t *testing.T) {
+	gateway := newFundingCarryStubGateway()
+	var decisions []TermCarryDecision
+	now := time.Unix(10, 0)
+	cfg := termCarryTestConfig()
+	cfg.MaxPosition, cfg.LotQty, cfg.MinOrderSize = 100, 100, 75
+	cfg.PassiveExit = &TermCarryPassiveExitConfig{SliceQty: 75, DeadlineAtNano: now.Add(5 * time.Second).UnixNano()}
+	cfg.DecisionObserver = func(decision TermCarryDecision) { decisions = append(decisions, decision) }
+	allocator := NewTermCarryAllocator(1, gateway, cfg)
+	allocator.subscribed = true
+	observeTermCarryBooks(t, allocator, gateway, now, 100, 101, 102, 103, 100)
+	allocator.perp.askQty, allocator.perp.bidQty = 50, 1_000
+	allocator.state = termCarryActive
+	allocator.plan = &termCarryPlan{direction: 1, planCreatedAt: now.UnixNano(), firstExposureAt: now.UnixNano(), termEnd: now.Add(time.Second).UnixNano()}
+	allocator.spotPosition, allocator.perpPosition = 100, -100
+
+	allocator.onTick(now.Add(2 * time.Second))
+	entry := decisions[len(decisions)-1]
+	allocator.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: entry.RequestID, OrderID: 41}})
+	allocator.onTick(now.Add(5 * time.Second))
+	firstCancel := decisions[len(decisions)-1]
+	allocator.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderCancelRejected, Data: actor.OrderCancelRejectedEvent{OrderID: 41, RequestID: firstCancel.CancelRequestID, Reason: exchange.RejectOrderNotFound}})
+	allocator.onTick(now.Add(6 * time.Second))
+	retry := decisions[len(decisions)-1]
+	if retry.Action != "CANCEL_PASSIVE_EXIT_AT_DEADLINE" || retry.CancelOrderID != 41 || retry.CancelRequestID == 0 || retry.CancelRequestID == firstCancel.CancelRequestID || len(gateway.requests) != 3 || gateway.requests[2].CancelReq == nil || gateway.requests[2].CancelReq.RequestID != retry.CancelRequestID {
+		t.Fatalf("rejected deadline cancellation did not retry deterministically: first=%+v retry=%+v requests=%+v", firstCancel, retry, gateway.requests)
+	}
+}
+
+func TestTermCarryPassiveExitConfigRejectsIllegalSlice(t *testing.T) {
+	cfg := termCarryTestConfig()
+	cfg.MinOrderSize = 75
+	cfg.PassiveExit = &TermCarryPassiveExitConfig{SliceQty: 74, DeadlineAtNano: time.Unix(10, 0).UnixNano()}
+	if err := cfg.validate(); err == nil {
+		t.Fatal("term carry accepted a passive child below its venue minimum")
+	}
+}
+
 func TestTermCarryAllocatorResetsRejectedFlatEntry(t *testing.T) {
 	gateway := newFundingCarryStubGateway()
 	var decisions []TermCarryDecision

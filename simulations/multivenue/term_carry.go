@@ -13,7 +13,17 @@ import (
 const (
 	termCarryPolicyVersionV2 = "v2_5_p3_term_carry_v2"
 	termCarryPolicyVersionV3 = "v2_5_p3_term_carry_v3"
+	termCarryPolicyVersionV4 = "v2_5_p3e_passive_exit_v1"
 )
+
+// TermCarryPassiveExitConfig declares a finite, participant-local passive
+// unwind policy. It is intentionally opt-in: absent configuration preserves
+// the P3 IOC-only lifecycle. DeadlineAtNano is a policy deadline known to the
+// participant, never an inference from simulator termination.
+type TermCarryPassiveExitConfig struct {
+	SliceQty       int64 `json:"slice_qty"`
+	DeadlineAtNano int64 `json:"deadline_at_nano"`
+}
 
 // TermCarryAllocatorConfig declares an opt-in, lifecycle-bearing carry
 // participant. It is deliberately distinct from FundingCarryArbitrageur: the
@@ -43,14 +53,18 @@ type TermCarryAllocatorConfig struct {
 	// instrument's MinOrderSize, which remains the exchange-admissible minimum
 	// for every child. It is a quantity policy, never a price-availability
 	// sentinel.
-	UnwindMinOrderSize *int64                    `json:"unwind_min_order_size,omitempty"`
-	SpotTick           int64                     `json:"spot_tick"`
-	PerpTick           int64                     `json:"perp_tick"`
-	VenueID            string                    `json:"-"`
-	Desk               string                    `json:"-"`
-	ClientID           uint64                    `json:"-"`
-	DecisionObserver   func(TermCarryDecision)   `json:"-"`
-	OutcomeObserver    func(TermCarryLegOutcome) `json:"-"`
+	UnwindMinOrderSize *int64 `json:"unwind_min_order_size,omitempty"`
+	// PassiveExit is an explicit finite fallback for an already-owned term
+	// whose aggressive child cannot meet the venue's displayed executable-size
+	// floor. It does not apply to entry and cannot relax MinOrderSize.
+	PassiveExit      *TermCarryPassiveExitConfig `json:"passive_exit,omitempty"`
+	SpotTick         int64                       `json:"spot_tick"`
+	PerpTick         int64                       `json:"perp_tick"`
+	VenueID          string                      `json:"-"`
+	Desk             string                      `json:"-"`
+	ClientID         uint64                      `json:"-"`
+	DecisionObserver func(TermCarryDecision)     `json:"-"`
+	OutcomeObserver  func(TermCarryLegOutcome)   `json:"-"`
 }
 
 func (c TermCarryAllocatorConfig) validate() error {
@@ -68,6 +82,18 @@ func (c TermCarryAllocatorConfig) validate() error {
 	}
 	if c.UnwindMinOrderSize != nil && *c.UnwindMinOrderSize < 0 {
 		return fmt.Errorf("unwind minimum order size must be non-negative")
+	}
+	if c.PassiveExit != nil {
+		if c.PassiveExit.SliceQty <= 0 || c.PassiveExit.DeadlineAtNano <= 0 {
+			return fmt.Errorf("passive exit slice quantity and deadline must be positive")
+		}
+		minimum := c.MinOrderSize
+		if c.UnwindMinOrderSize != nil && *c.UnwindMinOrderSize > minimum {
+			minimum = *c.UnwindMinOrderSize
+		}
+		if c.PassiveExit.SliceQty < minimum {
+			return fmt.Errorf("passive exit slice quantity must meet the unwind minimum")
+		}
 	}
 	for _, component := range []struct {
 		name  string
@@ -128,6 +154,10 @@ type TermCarryDecision struct {
 	// from an explicit policy with no additional unwind materiality floor; the
 	// exchange minimum remains separately binding.
 	UnwindMinOrderSize *int64 `json:"unwind_min_order_size,omitempty"`
+	// PassiveExit fields are present for every v4 decision, including non-order
+	// decisions, so a replay can establish the exact finite fallback contract.
+	PassiveExitSliceQty       *int64 `json:"passive_exit_slice_qty,omitempty"`
+	PassiveExitDeadlineAtNano *int64 `json:"passive_exit_deadline_at_nano,omitempty"`
 
 	HasSpotBook     bool   `json:"has_spot_book"`
 	SpotPublishedAt int64  `json:"spot_published_at"`
@@ -172,6 +202,13 @@ type TermCarryDecision struct {
 	LimitPrice   int64  `json:"limit_price"`
 	RequestedQty int64  `json:"requested_qty"`
 	RequestID    uint64 `json:"request_id"`
+	// P4 submission fields are pointers so historical P3 rows remain exactly
+	// distinguishable from P4's explicit false post-only and GTC/IOC choices.
+	OrderType       string `json:"order_type,omitempty"`
+	TimeInForce     string `json:"time_in_force,omitempty"`
+	PostOnly        *bool  `json:"post_only,omitempty"`
+	CancelOrderID   uint64 `json:"cancel_order_id"`
+	CancelRequestID uint64 `json:"cancel_request_id"`
 }
 
 // TermCarryLegOutcome links a normal venue response to the lifecycle state
@@ -197,6 +234,7 @@ type TermCarryLegOutcome struct {
 	FeeAsset           string         `json:"fee_asset"`
 	RemainingQty       int64          `json:"remaining_qty"`
 	RejectReason       string         `json:"reject_reason"`
+	CancelRequestID    uint64         `json:"cancel_request_id"`
 	SpotPositionBefore int64          `json:"spot_position_before"`
 	SpotPositionAfter  int64          `json:"spot_position_after"`
 	PerpPositionBefore int64          `json:"perp_position_before"`
@@ -211,12 +249,14 @@ type termCarryPlan struct {
 }
 
 type termCarryPending struct {
-	requestID    uint64
-	orderID      uint64
-	leg          string
-	symbol       string
-	decisionTime int64
-	state        TermCarryState
+	requestID       uint64
+	orderID         uint64
+	leg             string
+	symbol          string
+	decisionTime    int64
+	state           TermCarryState
+	postOnly        bool
+	cancelRequestID uint64
 }
 
 // TermCarryAllocator is a finite, local-information participant with a
@@ -258,6 +298,8 @@ func (a *TermCarryAllocator) HandleEvent(_ context.Context, event *actor.Event) 
 		a.onFill(event.Data.(actor.OrderFillEvent))
 	case actor.EventOrderCancelled:
 		a.onCancelled(event.Data.(actor.OrderCancelledEvent))
+	case actor.EventOrderCancelRejected:
+		a.onCancelRejected(event.Data.(actor.OrderCancelRejectedEvent))
 	}
 }
 
@@ -304,11 +346,30 @@ func (a *TermCarryAllocator) onTick(now time.Time) {
 	}
 	decision := a.decision(now)
 	a.emitDecision(decision)
+	if decision.Action == "CANCEL_PASSIVE_EXIT_AT_DEADLINE" {
+		if decision.CancelRequestID == 0 {
+			panic("term carry passive-exit cancellation lacks a request ID")
+		}
+		if a.pending == nil || a.pending.orderID == 0 || decision.CancelOrderID != a.pending.orderID {
+			panic("term carry passive-exit cancellation lacks the accepted pending order")
+		}
+		requestID := a.CancelOrder(decision.CancelOrderID)
+		if requestID != decision.CancelRequestID {
+			panic(fmt.Sprintf("term carry cancellation request ID changed from %d to %d", decision.CancelRequestID, requestID))
+		}
+		a.pending.cancelRequestID = requestID
+		return
+	}
 	if decision.RequestID == 0 {
 		return
 	}
-	a.pending = &termCarryPending{requestID: decision.RequestID, leg: decision.Leg, symbol: termCarryLegSymbol(a.cfg, decision.Leg), decisionTime: decision.DecisionTime, state: a.state}
-	requestID := a.SubmitOrderWithTimeInForce(a.pending.symbol, termCarrySide(decision.Side), exchange.LimitOrder, decision.LimitPrice, decision.RequestedQty, exchange.IOC)
+	a.pending = &termCarryPending{requestID: decision.RequestID, leg: decision.Leg, symbol: termCarryLegSymbol(a.cfg, decision.Leg), decisionTime: decision.DecisionTime, state: a.state, postOnly: decision.PostOnly != nil && *decision.PostOnly}
+	var requestID uint64
+	if a.pending.postOnly {
+		requestID = a.SubmitPostOnlyOrder(a.pending.symbol, termCarrySide(decision.Side), decision.LimitPrice, decision.RequestedQty)
+	} else {
+		requestID = a.SubmitOrderWithTimeInForce(a.pending.symbol, termCarrySide(decision.Side), exchange.LimitOrder, decision.LimitPrice, decision.RequestedQty, termCarryTimeInForce(decision.TimeInForce))
+	}
 	if requestID != decision.RequestID {
 		panic(fmt.Sprintf("term carry request ID changed from %d to %d", decision.RequestID, requestID))
 	}
@@ -321,8 +382,7 @@ func (a *TermCarryAllocator) decision(now time.Time) TermCarryDecision {
 		return decision
 	}
 	if a.pending != nil {
-		decision.Action = "REQUEST_PENDING"
-		return decision
+		return a.pendingDecision(decision, now)
 	}
 	switch a.state {
 	case termCarryIdle:
@@ -495,6 +555,10 @@ func (a *TermCarryAllocator) adjustPerpDecision(decision TermCarryDecision, acti
 }
 
 func (a *TermCarryAllocator) unwindDecision(decision TermCarryDecision) TermCarryDecision {
+	if a.passiveExitExpired(decision.DecisionTime) {
+		decision.Action = "PASSIVE_EXIT_DEADLINE_EXPIRED"
+		return decision
+	}
 	if a.perpPosition != 0 {
 		a.state = termCarryUnwindPerp
 		decision.State = a.state
@@ -503,7 +567,7 @@ func (a *TermCarryAllocator) unwindDecision(decision TermCarryDecision) TermCarr
 			decision.Action = "UNWIND_PERP_GAP_UNREPRESENTABLE"
 			return decision
 		}
-		return a.orderFromGap(decision, a.perp, gap, a.cfg.PerpTick, a.unwindMinOrderSize(), "UNWIND_PERP_IOC", "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN")
+		return a.unwindOrderFromGap(decision, a.perp, gap, a.cfg.PerpTick, "UNWIND_PERP_IOC", "UNWIND_PERP_POST_ONLY", "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN")
 	}
 	if a.spotPosition != 0 {
 		a.state = termCarryUnwindSpot
@@ -513,11 +577,64 @@ func (a *TermCarryAllocator) unwindDecision(decision TermCarryDecision) TermCarr
 			decision.Action = "UNWIND_SPOT_GAP_UNREPRESENTABLE"
 			return decision
 		}
-		return a.orderFromGap(decision, a.spot, gap, a.cfg.SpotTick, a.unwindMinOrderSize(), "UNWIND_SPOT_IOC", "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN")
+		return a.unwindOrderFromGap(decision, a.spot, gap, a.cfg.SpotTick, "UNWIND_SPOT_IOC", "UNWIND_SPOT_POST_ONLY", "UNWIND_PRICE_UNAVAILABLE", "UNWIND_PRICE_OUTSIDE_DOMAIN")
 	}
 	a.state, a.plan = termCarryIdle, nil
 	decision.State = a.state
 	decision.Action = "TERM_CLOSED"
+	return decision
+}
+
+// unwindOrderFromGap retains P3's bounded IOC exit as the first choice. Only
+// a declared P4 passive policy may react to the exact displayed-depth failure
+// where that IOC cannot satisfy the venue's legal minimum.
+func (a *TermCarryAllocator) unwindOrderFromGap(decision TermCarryDecision, book fundingCarryBook, gap, tick int64, iocAction, passiveAction, unavailable, outsideDomain string) TermCarryDecision {
+	decision = a.orderFromGap(decision, book, gap, tick, a.unwindMinOrderSize(), iocAction, unavailable, outsideDomain)
+	if decision.Action != "EXECUTABLE_SIZE_UNAVAILABLE" || a.cfg.PassiveExit == nil {
+		return decision
+	}
+	return a.passiveExitOrderFromGap(decision, book, gap, tick, passiveAction, "PASSIVE_EXIT_REFERENCE_UNAVAILABLE", "PASSIVE_EXIT_PRICE_OUTSIDE_DOMAIN")
+}
+
+// passiveExitOrderFromGap submits one legal-size resting child at the local
+// same-side touch. It never uses opposing executable depth, hidden book state,
+// or a lowered quantity floor. Venue admission remains the final post-only
+// check after modeled request latency.
+func (a *TermCarryAllocator) passiveExitOrderFromGap(decision TermCarryDecision, book fundingCarryBook, gap, tick int64, action, unavailable, outsideDomain string) TermCarryDecision {
+	if a.cfg.PassiveExit == nil {
+		return decision
+	}
+	quantity, ok := nonnegativeMagnitude(gap)
+	if !ok {
+		decision.Action = "ORDER_QUANTITY_UNREPRESENTABLE"
+		return decision
+	}
+	quantity = minInt64(quantity, a.cfg.LotQty)
+	quantity = minInt64(quantity, a.cfg.PassiveExit.SliceQty)
+	if quantity < a.unwindMinOrderSize() {
+		decision.Action = "PASSIVE_EXIT_SIZE_BELOW_MINIMUM"
+		return decision
+	}
+	if gap > 0 {
+		if !book.hasBid || book.bidQty <= 0 {
+			decision.Action = unavailable
+			return decision
+		}
+		decision.Side, decision.LimitPrice = exchange.Buy.String(), book.bid
+	} else {
+		if !book.hasAsk || book.askQty <= 0 {
+			decision.Action = unavailable
+			return decision
+		}
+		decision.Side, decision.LimitPrice = exchange.Sell.String(), book.ask
+	}
+	if !fundingCarryPositiveGridPrice(decision.LimitPrice, tick) {
+		decision.Action = outsideDomain
+		return decision
+	}
+	decision.RequestedQty = quantity
+	decision.Leg, decision.RequestID, decision.Action = action, a.PeekNextRequestID(), "SUBMIT_"+action
+	a.setSubmissionContract(&decision, exchange.GTC, true)
 	return decision
 }
 
@@ -556,6 +673,7 @@ func (a *TermCarryAllocator) orderFromGap(decision TermCarryDecision, book fundi
 		return decision
 	}
 	decision.Leg, decision.RequestID, decision.Action = action, a.PeekNextRequestID(), "SUBMIT_"+action
+	a.setSubmissionContract(&decision, exchange.IOC, false)
 	return decision
 }
 
@@ -586,14 +704,71 @@ func (a *TermCarryAllocator) baseDecision(now time.Time, action string) TermCarr
 		configuredMinimum := *a.cfg.UnwindMinOrderSize
 		decision.UnwindMinOrderSize = &configuredMinimum
 	}
+	if a.cfg.PassiveExit != nil {
+		sliceQty, deadline := a.cfg.PassiveExit.SliceQty, a.cfg.PassiveExit.DeadlineAtNano
+		decision.PassiveExitSliceQty = &sliceQty
+		decision.PassiveExitDeadlineAtNano = &deadline
+	}
 	return decision
 }
 
 func (a *TermCarryAllocator) policyVersion() string {
+	if a.cfg.PassiveExit != nil {
+		return termCarryPolicyVersionV4
+	}
 	if a.cfg.UnwindMinOrderSize != nil {
 		return termCarryPolicyVersionV3
 	}
 	return termCarryPolicyVersionV2
+}
+
+func (a *TermCarryAllocator) setSubmissionContract(decision *TermCarryDecision, tif exchange.TimeInForce, postOnly bool) {
+	if a.cfg.PassiveExit == nil {
+		return
+	}
+	decision.OrderType = exchange.LimitOrder.String()
+	decision.TimeInForce = tif.String()
+	decision.PostOnly = &postOnly
+}
+
+func (a *TermCarryAllocator) passiveExitExpired(now int64) bool {
+	return a.cfg.PassiveExit != nil && now >= a.cfg.PassiveExit.DeadlineAtNano
+}
+
+// pendingDecision makes a resting passive child and its cancellation lifecycle
+// observable. A deadline is terminal for new P3e children: expiry never fakes
+// a close, stops funding, or silently reverts to aggressive orders.
+func (a *TermCarryAllocator) pendingDecision(decision TermCarryDecision, now time.Time) TermCarryDecision {
+	if a.pending == nil || !a.pending.postOnly {
+		decision.Action = "REQUEST_PENDING"
+		return decision
+	}
+	if !a.passiveExitExpired(now.UnixNano()) {
+		decision.Action = "PASSIVE_EXIT_RESTING"
+		return decision
+	}
+	if a.pending.orderID == 0 {
+		decision.Action = "PASSIVE_EXIT_AWAITING_ACCEPTANCE"
+		return decision
+	}
+	if a.pending.cancelRequestID != 0 {
+		decision.Action = "PASSIVE_EXIT_CANCEL_PENDING"
+		decision.CancelOrderID, decision.CancelRequestID = a.pending.orderID, a.pending.cancelRequestID
+		return decision
+	}
+	decision.Action = "CANCEL_PASSIVE_EXIT_AT_DEADLINE"
+	decision.CancelOrderID, decision.CancelRequestID = a.pending.orderID, a.PeekNextRequestID()
+	return decision
+}
+
+func termCarryTimeInForce(value string) exchange.TimeInForce {
+	if value == exchange.GTC.String() {
+		return exchange.GTC
+	}
+	if value != "" && value != exchange.IOC.String() {
+		panic(fmt.Sprintf("unknown term carry time in force %q", value))
+	}
+	return exchange.IOC
 }
 
 func (a *TermCarryAllocator) unwindMinOrderSize() int64 {
@@ -654,9 +829,20 @@ func (a *TermCarryAllocator) onCancelled(event actor.OrderCancelledEvent) {
 	if a.pending == nil || event.OrderID != a.pending.orderID {
 		return
 	}
-	a.emitOutcome(TermCarryLegOutcome{VenueID: a.cfg.VenueID, Desk: a.cfg.Desk, ClientID: a.cfg.ClientID, DecisionTime: a.pending.decisionTime, State: a.pending.state, Event: "ORDER_CANCELLED", Leg: a.pending.leg, RequestID: a.pending.requestID, OrderID: event.OrderID, Symbol: a.pending.symbol, RemainingQty: event.RemainingQty, SpotPositionBefore: a.spotPosition, SpotPositionAfter: a.spotPosition, PerpPositionBefore: a.perpPosition, PerpPositionAfter: a.perpPosition})
+	a.emitOutcome(TermCarryLegOutcome{VenueID: a.cfg.VenueID, Desk: a.cfg.Desk, ClientID: a.cfg.ClientID, DecisionTime: a.pending.decisionTime, State: a.pending.state, Event: "ORDER_CANCELLED", Leg: a.pending.leg, RequestID: a.pending.requestID, OrderID: event.OrderID, Symbol: a.pending.symbol, RemainingQty: event.RemainingQty, CancelRequestID: event.RequestID, SpotPositionBefore: a.spotPosition, SpotPositionAfter: a.spotPosition, PerpPositionBefore: a.perpPosition, PerpPositionAfter: a.perpPosition})
 	a.pending = nil
 	a.resetFlatEntryPlan()
+}
+
+func (a *TermCarryAllocator) onCancelRejected(event actor.OrderCancelRejectedEvent) {
+	if a.pending == nil || !a.pending.postOnly || event.RequestID == 0 || event.RequestID != a.pending.cancelRequestID || event.OrderID != a.pending.orderID {
+		return
+	}
+	a.emitOutcome(TermCarryLegOutcome{VenueID: a.cfg.VenueID, Desk: a.cfg.Desk, ClientID: a.cfg.ClientID, DecisionTime: a.pending.decisionTime, State: a.pending.state, Event: "ORDER_CANCEL_REJECTED", Leg: a.pending.leg, RequestID: a.pending.requestID, OrderID: event.OrderID, Symbol: a.pending.symbol, RejectReason: string(event.Reason), CancelRequestID: event.RequestID, SpotPositionBefore: a.spotPosition, SpotPositionAfter: a.spotPosition, PerpPositionBefore: a.perpPosition, PerpPositionAfter: a.perpPosition})
+	// The live order has not been proven absent by a rejected cancellation. The
+	// next deterministic tick retries the explicit cancellation unless a fill
+	// or cancellation arrives first.
+	a.pending.cancelRequestID = 0
 }
 
 // resetFlatEntryPlan abandons only a failed, fully flat admission attempt. A
@@ -682,7 +868,7 @@ func (a *TermCarryAllocator) emitOutcome(outcome TermCarryLegOutcome) {
 }
 
 func termCarryLegSymbol(cfg TermCarryAllocatorConfig, leg string) string {
-	if leg == "ENTRY_PERP_IOC" || leg == "UNWIND_PERP_IOC" {
+	if leg == "ENTRY_PERP_IOC" || leg == "UNWIND_PERP_IOC" || leg == "UNWIND_PERP_POST_ONLY" {
 		return cfg.PerpSymbol
 	}
 	return cfg.SpotSymbol
