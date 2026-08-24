@@ -8,6 +8,50 @@ import (
 	"exchange_sim/simulation"
 )
 
+func TestCrossVenueQuoteBookRetainsSignedTouches(t *testing.T) {
+	tests := []struct {
+		name        string
+		bids, asks  []exchange.PriceLevel
+		wantBid     int64
+		wantAsk     int64
+		wantPresent bool
+	}{
+		{
+			name: "entirely negative", bids: []exchange.PriceLevel{{Price: -100, VisibleQty: 1}, {Price: -20, VisibleQty: 2}},
+			asks: []exchange.PriceLevel{{Price: -10, VisibleQty: 3}, {Price: 5, VisibleQty: 4}}, wantBid: -20, wantAsk: -10, wantPresent: true,
+		},
+		{
+			name: "zero bid", bids: []exchange.PriceLevel{{Price: -1, VisibleQty: 1}, {Price: 0, VisibleQty: 2}},
+			asks: []exchange.PriceLevel{{Price: 1, VisibleQty: 3}}, wantBid: 0, wantAsk: 1, wantPresent: true,
+		},
+		{
+			name: "zero ask", bids: []exchange.PriceLevel{{Price: -1, VisibleQty: 1}},
+			asks: []exchange.PriceLevel{{Price: 0, VisibleQty: 3}, {Price: 1, VisibleQty: 2}}, wantBid: -1, wantAsk: 0, wantPresent: true,
+		},
+		{name: "missing ask", bids: []exchange.PriceLevel{{Price: 1, VisibleQty: 1}}, wantBid: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			book := crossVenueQuoteBook{}
+			book.reset(&exchange.BookSnapshot{Bids: tc.bids, Asks: tc.asks})
+			bid, _, ask, _, present := book.best()
+			if present != tc.wantPresent || bid != tc.wantBid || ask != tc.wantAsk {
+				t.Fatalf("best = bid %d ask %d present %t, want %d/%d/%t", bid, ask, present, tc.wantBid, tc.wantAsk, tc.wantPresent)
+			}
+		})
+	}
+}
+
+func TestCrossVenueRouterRejectsPresentSignedQuotesByPolicy(t *testing.T) {
+	router := testCrossVenueRouter(t, 0)
+	if edge, ok := router.executableEdge(-10, -20); ok || edge != 0 {
+		t.Fatalf("signed positive-spot route edge = %d, ok=%t", edge, ok)
+	}
+	if router.Report().OutOfDomainQuotePairs != 1 {
+		t.Fatalf("out-of-domain quote pair was not observable: %#v", router.Report())
+	}
+}
+
 func TestCrossVenueRouterRequiresAllInExecutableEdge(t *testing.T) {
 	router := testCrossVenueRouter(t, 100) // 1% fee per leg in integer units.
 	setRouterBook(router.legs[0], 100, 101)

@@ -41,6 +41,26 @@ func TestBasisArbExecutableEdgeRequiresDisplayedLot(t *testing.T) {
 	}
 }
 
+func TestBasisArbRetainsSignedTouchAndDefersByDeclaredDomain(t *testing.T) {
+	arb := &FeeAwareBasisArb{cfg: BasisArbConfig{SpotSymbol: "ABC/USD", PerpSymbol: "ABC-PERP", LotSize: 1, BasePrecision: 1}}
+	for _, symbol := range []string{"ABC/USD", "ABC-PERP"} {
+		arb.onSnapshot(actor.BookSnapshotEvent{
+			Symbol: symbol,
+			Snapshot: &exchange.BookSnapshot{
+				Bids: []exchange.PriceLevel{{Price: -2, VisibleQty: 1}, {Price: 0, VisibleQty: 1}},
+				Asks: []exchange.PriceLevel{{Price: 1, VisibleQty: 1}},
+			},
+		})
+	}
+	if !arb.spotQuotesPresent || !arb.perpQuotesPresent || arb.spotBid != 0 || arb.perpBid != 0 {
+		t.Fatalf("signed touches were not retained: spot=%d/%d present=%t perp=%d/%d present=%t", arb.spotBid, arb.spotAsk, arb.spotQuotesPresent, arb.perpBid, arb.perpAsk, arb.perpQuotesPresent)
+	}
+	arb.checkBasis()
+	if arb.report.PriceDomainDeferrals != 1 || arb.report.QuoteUnavailableDeferrals != 0 || arb.report.SubmittedPairs != 0 {
+		t.Fatalf("signed present touches were not explicitly deferred: %#v", arb.report)
+	}
+}
+
 func TestBasisArbReconstructsDisplayedTouchFromSnapshotAndDeltas(t *testing.T) {
 	arb := &FeeAwareBasisArb{cfg: BasisArbConfig{SpotSymbol: "ABC/USD", PerpSymbol: "ABC-PERP"}}
 	arb.onSnapshot(actor.BookSnapshotEvent{

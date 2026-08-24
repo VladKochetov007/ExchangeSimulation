@@ -67,23 +67,28 @@ type CrossVenueArb struct {
 // attempts, fully completed conversions, failures, and non-atomic residual.
 // It is execution telemetry, not a marked-PnL claim.
 type CrossVenueArbReport struct {
-	Tier              float64                 `json:"tier"`
-	RouterID          uint64                  `json:"router_id"`
-	ExecutableSignals int                     `json:"executable_signals"`
-	SubmittedGroups   int                     `json:"submitted_groups"`
-	CompletedGroups   int                     `json:"completed_groups"`
-	FailedGroups      int                     `json:"failed_groups"`
-	PendingGroups     int                     `json:"pending_groups"`
-	BuyFilledQty      int64                   `json:"buy_filled_qty"`
-	SellFilledQty     int64                   `json:"sell_filled_qty"`
-	BuyNotional       int64                   `json:"buy_notional"`
-	SellNotional      int64                   `json:"sell_notional"`
-	QuoteFees         int64                   `json:"quote_fees"`
-	UnpricedFeeCount  int                     `json:"unpriced_fee_count"`
-	CompletedCashflow int64                   `json:"completed_quote_cashflow"`
-	CashflowGroups    int                     `json:"completed_cashflow_groups"`
-	ResidualBaseQty   int64                   `json:"residual_base_qty"`
-	Groups            []CrossVenueGroupReport `json:"groups"`
+	Tier              float64 `json:"tier"`
+	RouterID          uint64  `json:"router_id"`
+	ExecutableSignals int     `json:"executable_signals"`
+	SubmittedGroups   int     `json:"submitted_groups"`
+	CompletedGroups   int     `json:"completed_groups"`
+	FailedGroups      int     `json:"failed_groups"`
+	PendingGroups     int     `json:"pending_groups"`
+	BuyFilledQty      int64   `json:"buy_filled_qty"`
+	SellFilledQty     int64   `json:"sell_filled_qty"`
+	BuyNotional       int64   `json:"buy_notional"`
+	SellNotional      int64   `json:"sell_notional"`
+	QuoteFees         int64   `json:"quote_fees"`
+	UnpricedFeeCount  int     `json:"unpriced_fee_count"`
+	// OutOfDomainQuotePairs counts present executable touches that this
+	// positive-spot router deliberately cannot price. It is distinct from a
+	// missing book: the feed delivered a signed numeric quote, but the
+	// strategy's fee/notional model does not admit it.
+	OutOfDomainQuotePairs int                     `json:"out_of_domain_quote_pairs,omitempty"`
+	CompletedCashflow     int64                   `json:"completed_quote_cashflow"`
+	CashflowGroups        int                     `json:"completed_cashflow_groups"`
+	ResidualBaseQty       int64                   `json:"residual_base_qty"`
+	Groups                []CrossVenueGroupReport `json:"groups"`
 }
 
 // CrossVenueGroupReport retains each two-leg outcome so an aggregate cannot
@@ -319,7 +324,13 @@ func (r *CrossVenueArb) bestOpportunity() (buy, sell *crossVenueArbLeg, edge int
 }
 
 func (r *CrossVenueArb) executableEdge(sellBid, buyAsk int64) (int64, bool) {
-	if sellBid <= 0 || buyAsk <= 0 {
+	// CrossVenueArb currently models a positive-price spot cash conversion:
+	// fees and quoted cashflow are denominated as non-negative quote notional.
+	// A signed touch is therefore present but outside this actor's declared
+	// economics, not a missing price. A signed-future router must provide its
+	// own cash-flow and risk policy rather than inheriting this rejection.
+	if !positiveSpotCashflowPrices(sellBid, buyAsk) {
+		r.report.OutOfDomainQuotePairs++
 		return 0, false
 	}
 	sellNotional, ok := etypes.TryMulDiv(r.cfg.LotQty, sellBid, r.cfg.BasePrecision)
@@ -347,6 +358,10 @@ func (r *CrossVenueArb) executableEdge(sellBid, buyAsk int64) (int64, bool) {
 		return 0, false
 	}
 	return etypes.TrySub(proceeds, cost)
+}
+
+func positiveSpotCashflowPrices(sellBid, buyAsk int64) bool {
+	return sellBid > 0 && buyAsk > 0
 }
 
 func (r *CrossVenueArb) openGroup(buy, sell *crossVenueArbLeg, edge int64) {
@@ -550,17 +565,21 @@ func (b *crossVenueQuoteBook) apply(delta *exchange.BookDelta) {
 }
 
 func (b *crossVenueQuoteBook) best() (bid, bidQty, ask, askQty int64, ok bool) {
+	haveBid := false
 	for price, qty := range b.bids {
-		if qty > 0 && price > bid {
+		if qty > 0 && (!haveBid || price > bid) {
 			bid, bidQty = price, qty
+			haveBid = true
 		}
 	}
+	haveAsk := false
 	for price, qty := range b.asks {
-		if qty > 0 && (ask == 0 || price < ask) {
+		if qty > 0 && (!haveAsk || price < ask) {
 			ask, askQty = price, qty
+			haveAsk = true
 		}
 	}
-	return bid, bidQty, ask, askQty, bid > 0 && ask > 0
+	return bid, bidQty, ask, askQty, haveBid && haveAsk
 }
 
 func checkedAdd(left, right int64, field string) int64 {

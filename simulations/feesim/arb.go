@@ -62,19 +62,24 @@ type BasisArbConfig struct {
 // It intentionally distinguishes execution from submitted orders: an ecology
 // result cannot treat a signal, request, or intended pair as a completed arb.
 type BasisArbReport struct {
-	ClientID             uint64 `json:"client_id"`
-	ExecutableSignals    int    `json:"executable_signals"`
-	SubmittedPairs       int    `json:"submitted_pairs"`
-	SpotBoughtQty        int64  `json:"spot_bought_qty"`
-	SpotSoldQty          int64  `json:"spot_sold_qty"`
-	PerpBoughtQty        int64  `json:"perp_bought_qty"`
-	PerpSoldQty          int64  `json:"perp_sold_qty"`
-	SpotNotional         int64  `json:"spot_notional"`
-	PerpNotional         int64  `json:"perp_notional"`
-	QuoteFees            int64  `json:"quote_fees"`
-	UnpricedFeeCount     int    `json:"unpriced_fee_count"`
-	ResidualBaseQty      int64  `json:"residual_base_qty"`
-	OpenPerpPositionLots int64  `json:"open_perp_position_lots"`
+	ClientID          uint64 `json:"client_id"`
+	ExecutableSignals int    `json:"executable_signals"`
+	SubmittedPairs    int    `json:"submitted_pairs"`
+	SpotBoughtQty     int64  `json:"spot_bought_qty"`
+	SpotSoldQty       int64  `json:"spot_sold_qty"`
+	PerpBoughtQty     int64  `json:"perp_bought_qty"`
+	PerpSoldQty       int64  `json:"perp_sold_qty"`
+	SpotNotional      int64  `json:"spot_notional"`
+	PerpNotional      int64  `json:"perp_notional"`
+	QuoteFees         int64  `json:"quote_fees"`
+	UnpricedFeeCount  int    `json:"unpriced_fee_count"`
+	// QuoteUnavailableDeferrals and PriceDomainDeferrals distinguish an
+	// incomplete observed book from a present signed quote that this
+	// positive-spot/perp strategy cannot price with its current cashflow model.
+	QuoteUnavailableDeferrals int   `json:"quote_unavailable_deferrals,omitempty"`
+	PriceDomainDeferrals      int   `json:"price_domain_deferrals,omitempty"`
+	ResidualBaseQty           int64 `json:"residual_base_qty"`
+	OpenPerpPositionLots      int64 `json:"open_perp_position_lots"`
 }
 
 // FeeAwareBasisArb arbitrages a spot/perp basis only when the observed best
@@ -107,6 +112,7 @@ type FeeAwareBasisArb struct {
 
 	spotBid, spotBidQty, spotAsk, spotAskQty int64
 	perpBid, perpBidQty, perpAsk, perpAskQty int64
+	spotQuotesPresent, perpQuotesPresent     bool
 	spotBook                                 quoteBook
 	perpBook                                 quoteBook
 
@@ -160,17 +166,21 @@ func (b *quoteBook) apply(delta *exchange.BookDelta) {
 }
 
 func (b *quoteBook) best() (bid, bidQty, ask, askQty int64, ok bool) {
+	haveBid := false
 	for price, qty := range b.bids {
-		if qty > 0 && price > bid {
+		if qty > 0 && (!haveBid || price > bid) {
 			bid, bidQty = price, qty
+			haveBid = true
 		}
 	}
+	haveAsk := false
 	for price, qty := range b.asks {
-		if qty > 0 && (ask == 0 || price < ask) {
+		if qty > 0 && (!haveAsk || price < ask) {
 			ask, askQty = price, qty
+			haveAsk = true
 		}
 	}
-	return bid, bidQty, ask, askQty, bid > 0 && ask > 0
+	return bid, bidQty, ask, askQty, haveBid && haveAsk
 }
 
 // now is the actor's view of time: the last tick it observed. Resolution is
@@ -450,11 +460,11 @@ func (a *FeeAwareBasisArb) onSnapshot(e actor.BookSnapshotEvent) {
 	switch e.Symbol {
 	case a.cfg.SpotSymbol:
 		a.spotBook.reset(e.Snapshot)
-		a.spotBid, a.spotBidQty, a.spotAsk, a.spotAskQty, _ = a.spotBook.best()
+		a.spotBid, a.spotBidQty, a.spotAsk, a.spotAskQty, a.spotQuotesPresent = a.spotBook.best()
 		a.spotSeq++
 	case a.cfg.PerpSymbol:
 		a.perpBook.reset(e.Snapshot)
-		a.perpBid, a.perpBidQty, a.perpAsk, a.perpAskQty, _ = a.perpBook.best()
+		a.perpBid, a.perpBidQty, a.perpAsk, a.perpAskQty, a.perpQuotesPresent = a.perpBook.best()
 		a.perpSeq++
 	}
 }
@@ -463,11 +473,11 @@ func (a *FeeAwareBasisArb) onDelta(e actor.BookDeltaEvent) {
 	switch e.Symbol {
 	case a.cfg.SpotSymbol:
 		a.spotBook.apply(e.Delta)
-		a.spotBid, a.spotBidQty, a.spotAsk, a.spotAskQty, _ = a.spotBook.best()
+		a.spotBid, a.spotBidQty, a.spotAsk, a.spotAskQty, a.spotQuotesPresent = a.spotBook.best()
 		a.spotSeq++
 	case a.cfg.PerpSymbol:
 		a.perpBook.apply(e.Delta)
-		a.perpBid, a.perpBidQty, a.perpAsk, a.perpAskQty, _ = a.perpBook.best()
+		a.perpBid, a.perpBidQty, a.perpAsk, a.perpAskQty, a.perpQuotesPresent = a.perpBook.best()
 		a.perpSeq++
 	}
 }
@@ -500,7 +510,7 @@ func (a *FeeAwareBasisArb) executableEdge(perpSide exchange.Side) (int64, bool) 
 		perpQty = a.perpAskQty
 		spotQty = a.spotBidQty
 	}
-	if perpPrice <= 0 || spotPrice <= 0 || perpQty < a.cfg.LotSize || spotQty < a.cfg.LotSize {
+	if !positiveSpotPerpCashflowPrices(perpPrice, spotPrice) || perpQty < a.cfg.LotSize || spotQty < a.cfg.LotSize {
 		return 0, false
 	}
 	perpNotional, ok := etypes.TryMulDiv(a.cfg.LotSize, perpPrice, a.cfg.BasePrecision)
@@ -541,8 +551,17 @@ func (a *FeeAwareBasisArb) executableEdge(perpSide exchange.Side) (int64, bool) 
 	return etypes.TrySub(proceeds, cost)
 }
 
+func positiveSpotPerpCashflowPrices(perpPrice, spotPrice int64) bool {
+	return perpPrice > 0 && spotPrice > 0
+}
+
 func (a *FeeAwareBasisArb) checkBasis() {
-	if a.spotBid == 0 || a.spotAsk == 0 || a.perpBid == 0 || a.perpAsk == 0 {
+	if !a.spotQuotesPresent || !a.perpQuotesPresent {
+		a.report.QuoteUnavailableDeferrals++
+		return
+	}
+	if !positiveSpotPerpCashflowPrices(a.spotBid, a.spotAsk) || !positiveSpotPerpCashflowPrices(a.perpBid, a.perpAsk) {
+		a.report.PriceDomainDeferrals++
 		return
 	}
 
