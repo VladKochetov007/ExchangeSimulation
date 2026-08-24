@@ -39,12 +39,12 @@ type LocalBookView struct {
 	Updates     uint64
 }
 
-// twoSidedMidpoint is the positive-domain compatibility helper used by legacy
+// positiveDomainTwoSidedMidpoint is the positive-domain compatibility helper used by legacy
 // spot-only actors. Their caller-owned cache contract rules out zero and
 // negative prices before reaching this function. New generic feed consumers
 // must retain explicit side-presence state and use types.Midpoint directly,
 // as LocalBookCache does below.
-func twoSidedMidpoint(bid, ask int64) (int64, bool) {
+func positiveDomainTwoSidedMidpoint(bid, ask int64) (int64, bool) {
 	if bid <= 0 || ask <= 0 || bid > ask {
 		return 0, false
 	}

@@ -24,9 +24,9 @@ func TestTwoSidedMidpointIsOverflowSafeAndExplicit(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, ok := twoSidedMidpoint(test.bid, test.ask)
+			got, ok := positiveDomainTwoSidedMidpoint(test.bid, test.ask)
 			if got != test.want || ok != test.ok {
-				t.Fatalf("twoSidedMidpoint(%d, %d) = (%d, %t), want (%d, %t)", test.bid, test.ask, got, ok, test.want, test.ok)
+				t.Fatalf("positiveDomainTwoSidedMidpoint(%d, %d) = (%d, %t), want (%d, %t)", test.bid, test.ask, got, ok, test.want, test.ok)
 			}
 		})
 	}

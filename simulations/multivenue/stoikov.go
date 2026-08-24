@@ -375,7 +375,7 @@ func (mm *StoikovMarketMaker) onSnapshot(e actor.BookSnapshotEvent) {
 	if e.Symbol != mm.cfg.ReferenceSymbol || e.Snapshot == nil || len(e.Snapshot.Bids) == 0 || len(e.Snapshot.Asks) == 0 {
 		return
 	}
-	mid, available := twoSidedMidpoint(e.Snapshot.Bids[0].Price, e.Snapshot.Asks[0].Price)
+	mid, available := positiveDomainTwoSidedMidpoint(e.Snapshot.Bids[0].Price, e.Snapshot.Asks[0].Price)
 	if !available {
 		return
 	}
@@ -607,7 +607,7 @@ func (mm *StoikovMarketMaker) onTick(now time.Time) {
 	}
 	if mm.cfg.RequoteBps > 0 && mm.bidID != 0 && mm.askID != 0 {
 		moved := maxInt64(absInt64(bid-mm.bidPrice), absInt64(ask-mm.askPrice))
-		if reference, available := twoSidedMidpoint(mm.bidPrice, mm.askPrice); available && moved*10000 < mm.cfg.RequoteBps*reference {
+		if reference, available := positiveDomainTwoSidedMidpoint(mm.bidPrice, mm.askPrice); available && moved*10000 < mm.cfg.RequoteBps*reference {
 			return
 		}
 	}
