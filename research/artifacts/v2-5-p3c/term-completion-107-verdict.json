@@ -1,0 +1,70 @@
+{
+  "experiment": "V2-5 P3c finite term completion",
+  "verdict": "FALSIFIED (development lifecycle screen)",
+  "scope": "current fixed-minimum-size term-carry exit policy only; not a claim about funding anchoring, basis, profitability, price quality, or realism",
+  "preregistration": "research/v2-5-p3c-term-completion-preregistration.md",
+  "simulation_source_revision": "0ee828ffff098538fb9741b690d424d759b14b18",
+  "manifest_worktree_modified": true,
+  "seed": 107,
+  "horizon": "98h simulated",
+  "gomaxprocs": 4,
+  "config_sha256": "b4dfa018d075f12ede15dcc082d862322cadf6dcf0f06e0c4a8fd4c70a6b222b",
+  "simulator_sha256": "cb4c8c5ea1ec8b4872894d5f760b8a4b348ab015c08f782fa2680f4db87aba74",
+  "analyzer_sha256": "8d9ea7edb3cafc7a221c981da81c10e2bb32308413c991b714d0a2a634a9d8bb",
+  "prunegate_sha256": "f33bf066769d791f6afd8c83b3a1b3176186d9f03b3791ac97fa60590f60e437",
+  "execution": {
+    "domain": "execution_observations",
+    "ordering": "ordered_stream",
+    "events": 50614472,
+    "hash": "429482c755a7a9e3635728f6f06bdffc646b65f209d5688e9cac7736f028e67b"
+  },
+  "persisted_evidence": {
+    "domain": "persisted_evidence",
+    "ordering": "unordered_multiset",
+    "events": 51143681,
+    "hash": "82c2f8453361b24f7dc3645ae1bf85ec49569c93bd01c9691b209aafaf269130",
+    "artifact_domain": "persisted_json_records",
+    "artifact_hash": "785182a0949d3cf7042ad8a7efe5e2c2e03b1836fb46e0690eb69f31176faf07"
+  },
+  "world_evidence_complete": true,
+  "term_completion_gate": {
+    "term_carry_valid": false,
+    "active_terms": 2,
+    "closed_terms": 0,
+    "open_terms": 2,
+    "active_term_funding_settlements": 23,
+    "outside_term_funding_settlements": 1,
+    "failure": "fixed min_order_size exceeds all delivered perp ask depth after term end",
+    "term_end": 1736035201000000000,
+    "terminal_positions": {
+      "central": {"spot_position_delta_abc": 10000000, "perp_abc_perp": -10000000},
+      "south": {"spot_position_delta_abc": 10000000, "perp_abc_perp": -10000000},
+      "north": {"spot_position_delta_abc": 0, "perp_abc_perp": 0}
+    },
+    "post_term_unwind_deferrals": {
+      "central": {"count": 3600, "reason": "EXECUTABLE_SIZE_UNAVAILABLE", "perp_ask_qty": 16286},
+      "south": {"count": 3600, "reason": "EXECUTABLE_SIZE_UNAVAILABLE", "perp_ask_qty": 16348}
+    },
+    "registered_min_order_size": 100000,
+    "submitted_unwind_orders": 0,
+    "term_closed_actions": 0
+  },
+  "mechanical_gates": {
+    "completion_sentinels": true,
+    "receipt_replay_valid": true,
+    "receipt_schedules": 3175215,
+    "receipt_deliveries": 3175206,
+    "receipt_audited_decisions": 4,
+    "conservation_delta_rows_checked": 3078491,
+    "conservation_delta_mismatches": 0,
+    "conservation_broken_chains": 0,
+    "position_disagreements": 0,
+    "order_lifecycle_errors": 0,
+    "generic_funding_errors": 0,
+    "term_source_frontier_gateway_actor_arithmetic_errors": 0,
+    "term_terminal_position_mismatches": 0
+  },
+  "raw_evidence_retained": true,
+  "safe_to_prune": false,
+  "next_gate": "Design and preregister a separate observed-depth, economically justified P3 exit-liquidity policy with partial-execution and residual-risk tests. Do not rerun or tune P3c."
+}
