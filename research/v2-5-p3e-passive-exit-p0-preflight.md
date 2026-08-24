@@ -37,6 +37,7 @@ checkpoints, and every extracted artifact remain at
 | --- | --- |
 | P4 term-carry replay | valid: 450 decisions, 4 submitted/accepted requests, 5 fills; all source, arithmetic, gateway, venue, actor, continuity, and passive-cancellation counters zero |
 | P4 policy serialization | explicit passive configuration parsed: slice `100,000`, deadline `1736042405000000000`; the P4 policy is present without producing an exit action before term end |
+| telemetry neutrality | `TestV25P3eEvidenceIsFreshProcessDeterministicAndNeutral` passes under `-race` in 96.068 s; its fresh-process `GOMAXPROCS={1,4}` and evidence on/off matrix retains the same execution identity |
 | receipt/frontier replay | valid: 2,679 schedules, 2,670 deliveries, 4 audited decisions; zero early, future, reordered, or missing-due observations |
 | actual allocator latency | all three market-data links: 40 ms mean delivery; request/response links: 20 ms mean delivery |
 | generic order lifecycle | 5,669 accepted, 1,826 fills, 4,614 cancellations; all registered generic error counters zero |
