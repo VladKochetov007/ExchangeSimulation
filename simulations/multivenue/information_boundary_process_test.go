@@ -42,6 +42,7 @@ type v20HelperResult struct {
 	NoiseFlowPhase           int64  `json:"noise_flow_phase_nanos"`
 	NoiseFlowPhaseSet        bool   `json:"noise_flow_phase_configured"`
 	FundingCarryDecisions    int64  `json:"funding_carry_decisions"`
+	TermCarryDecisions       int64  `json:"term_carry_decisions"`
 	EvidenceArtifactEvents   int64  `json:"evidence_artifact_events"`
 	EvidenceArtifactDigest   string `json:"evidence_artifact_digest"`
 }
@@ -81,6 +82,7 @@ func TestV20EvidenceHelper(t *testing.T) {
 	l1ExplicitZeroPhaseEvidence := os.Getenv("V24_L1_EXPLICIT_ZERO_PHASE") == "1"
 	l1P2NoisePhaseEvidence := os.Getenv("V24_L1P2_NOISE_PHASE") != ""
 	fundingCarryEvidence := os.Getenv("V25_FUNDING_CARRY") == "1"
+	termCarryEvidence := os.Getenv("V25_TERM_CARRY") == "1"
 	liabilityHedgerEvidence := l0LiabilityHedgerEvidence || l1RandomSideControlEvidence || l1PhaseControlEvidence || l1PhaseOffsetEvidence || l1ExplicitZeroPhaseEvidence || l1P2NoisePhaseEvidence
 	if p1QuoteSizeEvidence {
 		// P1 varies only optional raw decision recording. Both sides retain full
@@ -161,6 +163,23 @@ func TestV20EvidenceHelper(t *testing.T) {
 		cfg.LatencyProfiles = map[string]LatencyProfile{"funding_carry_arb": {Model: "constant", Delay: 10 * time.Millisecond}}
 		cfg.RecordFundingCarryDecisions = os.Getenv("V20_EVIDENCE_ON") == "1"
 	}
+	if termCarryEvidence {
+		// P3 holds the identical actor, delayed feed, and population across ON
+		// and OFF. The 2-minute helper horizon is intentionally shorter than its
+		// eight-hour minimum term, exercising explicit terminal censoring rather
+		// than fabricating an entry just for telemetry coverage.
+		cfg.LogMode = "full"
+		cfg.StrictPopulationAccounting = true
+		cfg.TermCarryAllocator = &TermCarryAllocatorConfig{
+			Enabled: true, SpotSymbol: "ABC/USD", PerpSymbol: "ABC-PERP", DecisionPeriod: 2 * time.Second,
+			CommitmentIntervals: 1, MaxFundingAge: 10 * time.Second,
+			TakerFeeBps: cfg.TakerFeeBps, LongSpotFundingBps: 0, ShortSpotBorrowBps: 0,
+			BalanceSheetBps: 0, MarginRiskBps: 0, LegRiskBps: 0, MinNetCarryBps: 0,
+			MaxPosition: 100_000_000, LotQty: 10_000_000, MinOrderSize: 100_000, SpotTick: 1_000_000, PerpTick: 1_000_000,
+		}
+		cfg.LatencyProfiles = map[string]LatencyProfile{"term_carry_allocator": {Model: "constant", Delay: 10 * time.Millisecond}}
+		cfg.RecordTermCarryDecisions = os.Getenv("V20_EVIDENCE_ON") == "1"
+	}
 	if os.Getenv("V21_LOCAL_CACHE") == "1" || remoteFeed || remoteRoster {
 		cfg.MakerAnchor = "own_mid"
 		cfg.SpotMakerLocalReferenceCache = true
@@ -168,15 +187,15 @@ func TestV20EvidenceHelper(t *testing.T) {
 			"spot_maker": {Model: "constant", Delay: 10 * time.Millisecond},
 		}
 	}
-	cfg.RecordMarketDataReceipts = !p1QuoteSizeEvidence && !p2RebalanceEvidence && !liabilityHedgerEvidence && !fundingCarryEvidence && os.Getenv("V20_EVIDENCE_ON") == "1"
-	if p2RebalanceEvidence || liabilityHedgerEvidence || fundingCarryEvidence {
+	cfg.RecordMarketDataReceipts = !p1QuoteSizeEvidence && !p2RebalanceEvidence && !liabilityHedgerEvidence && !fundingCarryEvidence && !termCarryEvidence && os.Getenv("V20_EVIDENCE_ON") == "1"
+	if p2RebalanceEvidence || liabilityHedgerEvidence || fundingCarryEvidence || termCarryEvidence {
 		cfg.RecordMarketDataReceipts = os.Getenv("V20_EVIDENCE_ON") == "1"
 	}
 	if cfg.RecordMarketDataReceipts {
 		if routerEvidence {
 			cfg.MarketDataReceiptRoles = []string{"cross_venue_router_tier"}
 			cfg.RecordDecisionFrontierVectors = true
-		} else if p2RebalanceEvidence || liabilityHedgerEvidence || fundingCarryEvidence {
+		} else if p2RebalanceEvidence || liabilityHedgerEvidence || fundingCarryEvidence || termCarryEvidence {
 			cfg.MarketDataReceiptRoles = nil
 			if p2RebalanceEvidence {
 				cfg.MarketDataReceiptRoles = append(cfg.MarketDataReceiptRoles, "cdf_spot_maker")
@@ -186,6 +205,9 @@ func TestV20EvidenceHelper(t *testing.T) {
 			}
 			if fundingCarryEvidence {
 				cfg.MarketDataReceiptRoles = append(cfg.MarketDataReceiptRoles, "funding_carry_arb")
+			}
+			if termCarryEvidence {
+				cfg.MarketDataReceiptRoles = append(cfg.MarketDataReceiptRoles, "term_carry_allocator")
 			}
 		} else {
 			cfg.MarketDataReceiptRoles = []string{"spot_maker"}
@@ -215,7 +237,7 @@ func TestV20EvidenceHelper(t *testing.T) {
 		cfg.CrossVenueArbLotQty = mvBasePrecision / 100
 		cfg.CrossVenueArbMaxAttempts = 1
 	}
-	if liabilityHedgerEvidence || fundingCarryEvidence {
+	if liabilityHedgerEvidence || fundingCarryEvidence || termCarryEvidence {
 		if err := writeV24RunConfig(output, cfg); err != nil {
 			t.Fatalf("write V2-4 independent-replay config: %v", err)
 		}
@@ -231,7 +253,7 @@ func TestV20EvidenceHelper(t *testing.T) {
 		sim.Close()
 		t.Fatal(err)
 	}
-	if (liabilityHedgerEvidence && cfg.RecordLiabilityHedgerDecisions) || (fundingCarryEvidence && cfg.RecordFundingCarryDecisions) {
+	if (liabilityHedgerEvidence && cfg.RecordLiabilityHedgerDecisions) || (fundingCarryEvidence && cfg.RecordFundingCarryDecisions) || (termCarryEvidence && cfg.RecordTermCarryDecisions) {
 		if err := writeV24AnalysisReport(output, sim); err != nil {
 			sim.Close()
 			t.Fatalf("write V2-4 independent-replay report: %v", err)
@@ -252,7 +274,7 @@ func TestV20EvidenceHelper(t *testing.T) {
 	result := v20HelperResult{ExecutionHash: checkpoint.ExecutionHash}
 	if cfg.RecordMarketDataReceipts {
 		audit, err := analysis.AuditMarketDataReceipts(output)
-		if err != nil || !audit.Valid || (!fundingCarryEvidence && audit.Decisions == 0) {
+		if err != nil || !audit.Valid || (!fundingCarryEvidence && !termCarryEvidence && audit.Decisions == 0) {
 			t.Fatalf("invalid V2-0 evidence: audit=%+v err=%v", audit, err)
 		}
 		result.Schedules, result.Receipts, result.Decisions = audit.Schedules, audit.Receipts, audit.Decisions
@@ -369,6 +391,23 @@ func TestV20EvidenceHelper(t *testing.T) {
 		}
 		if audit.Decisions != result.FundingCarryDecisions {
 			t.Fatalf("V2-5 P0 raw/replay decision count mismatch: raw=%d replay=%d", result.FundingCarryDecisions, audit.Decisions)
+		}
+	}
+	if termCarryEvidence && cfg.RecordTermCarryDecisions {
+		result.TermCarryDecisions = countRawEvent(t, output, "term_carry_decision")
+		if result.TermCarryDecisions == 0 {
+			t.Fatal("V2-5 P3 recorder emitted no term-carry decisions")
+		}
+		run, err := analysis.Open(output)
+		if err != nil {
+			t.Fatalf("open V2-5 P3 evidence for independent replay: %v", err)
+		}
+		audit, err := run.MeasureTermCarry()
+		if err != nil || !audit.Valid {
+			t.Fatalf("invalid V2-5 P3 term-carry evidence: audit=%+v err=%v", audit, err)
+		}
+		if audit.Decisions != result.TermCarryDecisions {
+			t.Fatalf("V2-5 P3 raw/replay decision count mismatch: raw=%d replay=%d", result.TermCarryDecisions, audit.Decisions)
 		}
 	}
 	encoded, err := json.Marshal(result)
@@ -701,6 +740,38 @@ func TestV25FundingCarryEvidenceIsFreshProcessDeterministicAndNeutral(t *testing
 		left.Schedules != right.Schedules || left.Receipts != right.Receipts || left.Decisions != right.Decisions ||
 		left.ScheduleDigest != right.ScheduleDigest || left.ReceiptDigest != right.ReceiptDigest || left.DecisionDigest != right.DecisionDigest {
 		t.Fatalf("V2-5 P0 evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
+	}
+}
+
+// P3 uses the same delayed public-feed evidence boundary as P0, but a finite
+// term allocator. The helper horizon is intentionally shorter than one
+// funding interval: it must record a terminal-censored decision without
+// manufacturing an order merely to exercise telemetry. This matrix proves
+// those append-only records neither alter execution nor become host-parallel
+// dependent before a longer lifecycle run is admitted.
+func TestV25TermCarryEvidenceIsFreshProcessDeterministicAndNeutral(t *testing.T) {
+	results := make(map[string]v20HelperResult)
+	for _, gomax := range []string{"1", "4"} {
+		for _, evidence := range []bool{false, true} {
+			key := "g" + gomax + "/off"
+			if evidence {
+				key = "g" + gomax + "/on"
+			}
+			results[key] = runV25TermCarryEvidenceHelper(t, gomax, evidence)
+		}
+	}
+	want := results["g1/off"].ExecutionHash
+	for key, result := range results {
+		if result.ExecutionHash == "" || result.ExecutionHash != want {
+			t.Fatalf("V2-5 P3 recorder changed execution with process setting: want %s, %s=%s", want, key, result.ExecutionHash)
+		}
+	}
+	left, right := results["g1/on"], results["g4/on"]
+	if left.TermCarryDecisions == 0 || left.TermCarryDecisions != right.TermCarryDecisions ||
+		left.Schedules == 0 || left.Receipts == 0 ||
+		left.Schedules != right.Schedules || left.Receipts != right.Receipts || left.Decisions != right.Decisions ||
+		left.ScheduleDigest != right.ScheduleDigest || left.ReceiptDigest != right.ReceiptDigest || left.DecisionDigest != right.DecisionDigest {
+		t.Fatalf("V2-5 P3 evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
 	}
 }
 
@@ -1151,6 +1222,32 @@ func runV25FundingCarryEvidenceHelper(t *testing.T, gomax string, evidence bool)
 	}
 	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
 		t.Fatalf("decode V2-5 P0 helper output %q: %v", raw, err)
+	}
+	return result
+}
+
+func runV25TermCarryEvidenceHelper(t *testing.T, gomax string, evidence bool) v20HelperResult {
+	t.Helper()
+	output := filepath.Join(t.TempDir(), "run")
+	cmd := exec.Command(os.Args[0], "-test.run=TestV20EvidenceHelper", "--")
+	cmd.Env = append(os.Environ(), "V20_EVIDENCE_HELPER=1", "V20_EVIDENCE_OUTPUT="+output, "V25_TERM_CARRY=1", "GOMAXPROCS="+gomax)
+	if evidence {
+		cmd.Env = append(cmd.Env, "V20_EVIDENCE_ON=1")
+	}
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("V2-5 P3 evidence helper GOMAXPROCS=%s evidence=%t: %v\n%s", gomax, evidence, err, raw)
+	}
+	var result v20HelperResult
+	var encoded string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "{") {
+			encoded = line
+			break
+		}
+	}
+	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
+		t.Fatalf("decode V2-5 P3 helper output %q: %v", raw, err)
 	}
 	return result
 }
