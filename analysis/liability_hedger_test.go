@@ -33,6 +33,17 @@ func TestLiabilityHedgerAuditDisabledControlEvolvesButDoesNotAct(t *testing.T) {
 	}
 }
 
+func TestLiabilityHedgerAuditAcceptsOnlyARealTailCensor(t *testing.T) {
+	run := l0TestRun(t, l0Fixture{TailCensored: true})
+	result, err := run.MeasureLiabilityHedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || result.HorizonCensored != 1 || result.Submitted != 0 || result.ActionCounts["SIMULATION_HORIZON_CENSORED"] != 1 {
+		t.Fatalf("terminal L0 defer = %+v", result)
+	}
+}
+
 func TestLiabilityHedgerAuditCatchesDeclaredMutations(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -115,11 +126,13 @@ type l0Fixture struct {
 	DropInitialDecision bool
 	DuplicateDecision   bool
 	DropGatewayDecision bool
+	TailCensored        bool
 	ReverseSide         bool
 	PartialFill         bool
 	DropCancel          bool
 	CounterpartyClient  uint64
 	ReceiptAt           int64
+	TerminalAt          int64
 	Decision            map[string]any
 	Fill                map[string]any
 	FillEvidence        map[string]any
@@ -131,6 +144,12 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 	if fixture.ReceiptAt == 0 {
 		fixture.ReceiptAt = 11_000_000_000
 	}
+	if fixture.TerminalAt == 0 {
+		fixture.TerminalAt = 100_000_000_000
+	}
+	if fixture.TailCensored {
+		fixture.TerminalAt = 13_000_000_000
+	}
 	writeL0Config(t, dir, fixture.Disabled)
 
 	step := l0FixtureStep()
@@ -139,7 +158,7 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 	if step > 0 {
 		side, price, orderSide = "BUY", 300_100_000, exchange.Buy
 	}
-	writeL0Evidence(t, dir, fixture.ReceiptAt, !fixture.Disabled && !fixture.DropGatewayDecision, orderSide, price)
+	writeL0Evidence(t, dir, fixture.ReceiptAt, fixture.TerminalAt, !fixture.Disabled && !fixture.TailCensored && !fixture.DropGatewayDecision, orderSide, price)
 	active := map[string]any{
 		"venue_id": "north", "hedger": "liability_hedger_1", "client_id": uint64(7), "symbol": "CDF/USD",
 		"decision_time": int64(12_000_000_000), "enabled": !fixture.Disabled, "subscribed": true, "request_pending": false,
@@ -159,6 +178,15 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 		active["requested_qty"] = int64(0)
 		active["request_id"] = uint64(0)
 		active["outcome_expectation"] = ""
+	}
+	if fixture.TailCensored {
+		active["action_or_defer_reason"] = "SIMULATION_HORIZON_CENSORED"
+		active["side"] = ""
+		active["limit_price"] = int64(0)
+		active["requested_qty"] = int64(0)
+		active["request_id"] = uint64(0)
+		active["outcome_expectation"] = "SIMULATION_HORIZON_CENSORED"
+		active["censor_reason"] = "terminal_horizon_before_round_trip"
 	}
 	if fixture.ReverseSide {
 		if side == "BUY" {
@@ -190,7 +218,7 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 	if fixture.DuplicateDecision {
 		lines = append(lines, logLine(12_000_000_000, 7, "liability_hedger_decision", active))
 	}
-	if !fixture.Disabled {
+	if !fixture.Disabled && !fixture.TailCensored {
 		quantity := int64(100_000_000)
 		if fixture.PartialFill {
 			quantity = 50_000_000
@@ -254,7 +282,7 @@ func writeL0Config(t *testing.T, dir string, disabled bool) {
 	}
 }
 
-func writeL0Evidence(t *testing.T, dir string, deliveredAt int64, submitted bool, side exchange.Side, price int64) {
+func writeL0Evidence(t *testing.T, dir string, deliveredAt, terminalAt int64, submitted bool, side exchange.Side, price int64) {
 	t.Helper()
 	recorder, err := simulation.NewMarketDataReceiptRecorder(dir)
 	if err != nil {
@@ -272,7 +300,7 @@ func writeL0Evidence(t *testing.T, dir string, deliveredAt int64, submitted bool
 			Price: price, Qty: 100_000_000, DecisionAt: 12_000_000_000, Frontier: frontier,
 		})
 	}
-	if err := recorder.Finalize(100_000_000_000); err != nil {
+	if err := recorder.Finalize(terminalAt); err != nil {
 		t.Fatal(err)
 	}
 }

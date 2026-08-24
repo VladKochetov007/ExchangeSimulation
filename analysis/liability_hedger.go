@@ -270,6 +270,10 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 	}
 	receipts, gatewayDecisions, receiptAudit, receiptErr := liabilityHedgerEvidence(r.Dir)
 	result := &LiabilityHedgerAudit{ActionCounts: make(map[string]int64)}
+	terminalAt := int64(0)
+	if receiptAudit != nil {
+		terminalAt = receiptAudit.TerminalAt
+	}
 	if receiptErr != nil {
 		result.ReceiptEvidenceErrors++
 	} else {
@@ -420,7 +424,7 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 				addCheck(event.venueID, event.clientID, event.decision.RequestID, 0, "duplicate_liability_decision_tick")
 			}
 			seenDecisionTick[participant][event.decision.DecisionTime] = true
-			valid, update, submitted := validateLiabilityHedgerDecision(*event.decision, state)
+			valid, update, submitted := validateLiabilityHedgerDecision(*event.decision, state, terminalAt)
 			if update {
 				result.StateUpdates++
 				bucket.StateUpdates++
@@ -445,6 +449,9 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 			}
 			if !submitted {
 				result.Deferred++
+				if event.decision.Action == "SIMULATION_HORIZON_CENSORED" {
+					result.HorizonCensored++
+				}
 				if event.decision.RequestID != 0 || event.decision.RequestedQty != 0 {
 					result.DecisionFieldMismatches++
 					addCheck(event.venueID, event.clientID, event.decision.RequestID, 0, "deferred_policy_has_request")
@@ -732,7 +739,7 @@ func liabilityHedgerEvidence(dir string) (map[liabilityHedgerReceiptKey][]liabil
 	return receipts, decisions, audit, nil
 }
 
-func validateLiabilityHedgerDecision(d liabilityHedgerDecision, state *liabilityHedgerReplayState) (valid bool, update bool, submitted bool) {
+func validateLiabilityHedgerDecision(d liabilityHedgerDecision, state *liabilityHedgerReplayState, terminalAt int64) (valid bool, update bool, submitted bool) {
 	if d.Symbol != "CDF/USD" || d.ObligationLimit != liabilityHedgerLimit || d.DecisionInterval != liabilityHedgerDecisionInterval || d.ObligationInterval != liabilityHedgerObligationInterval || d.TakerFeeBps != liabilityHedgerFeeBps || d.DecisionTime <= 0 {
 		return false, false, false
 	}
@@ -778,6 +785,12 @@ func validateLiabilityHedgerDecision(d liabilityHedgerDecision, state *liability
 	if gap.Sign() == 0 {
 		return d.Action == "IN_BAND" && d.RequestID == 0 && d.RequestedQty == 0 && d.Side == "" && d.LimitPrice == 0, update, false
 	}
+	if d.Action == "SIMULATION_HORIZON_CENSORED" {
+		deadline, ok := liabilityHedgerTailDeadline(d.DecisionTime)
+		return ok && terminalAt != 0 && deadline > terminalAt &&
+			d.RequestID == 0 && d.RequestedQty == 0 && d.Side == "" && d.LimitPrice == 0 &&
+			d.OutcomeExpectation == "SIMULATION_HORIZON_CENSORED" && d.CensorReason == "terminal_horizon_before_round_trip", update, false
+	}
 	if !d.HasSnapshot {
 		return d.Action == "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE" && d.RequestID == 0 && d.RequestedQty == 0 && d.Side == "" && d.LimitPrice == 0, update, false
 	}
@@ -805,6 +818,16 @@ func validateLiabilityHedgerDecision(d liabilityHedgerDecision, state *liability
 		return false, update, false
 	}
 	return true, update, true
+}
+
+func liabilityHedgerTailDeadline(decisionAt int64) (int64, bool) {
+	deadline := big.NewInt(decisionAt)
+	deadline.Add(deadline, big.NewInt(liabilityHedgerDecisionInterval))
+	deadline.Add(deadline, big.NewInt(liabilityHedgerDecisionInterval))
+	if !deadline.IsInt64() {
+		return 0, false
+	}
+	return deadline.Int64(), true
 }
 
 // validLiabilityHedgerBookEvidence keeps side availability separate from every
