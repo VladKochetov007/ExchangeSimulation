@@ -77,6 +77,7 @@ are:
 
 ```text
 venue_id, symbol, maker, decision_time,
+client_id, bid_request_id, ask_request_id,
 base_volatility_size, risk_position, inventory_limit,
 size_skew_bps, full_adjustment, adjustment,
 bid_qty, ask_qty, post_only, cancel_before_replace
@@ -96,11 +97,14 @@ logging-on/off fixture compares the simulated execution hash with the recorder
 enabled/disabled; an evidence record that changes that hash fails the P1
 instrumentation contract.
 
-The P1 analyzer must join this decision stream to accepted/rejected order
-evidence by maker/symbol/time and separately report unmatched decisions rather
-than treating an absent order as zero size. Its policy activation check uses the
-decision event itself; it must not use post-hoc inventory or fill outcomes to
-define the treatment.
+The P1 analyzer must join each decision side to independent accepted/rejected
+order evidence by the exact `(venue_id, client_id, request_id)` tuple. Accepted
+order evidence must therefore persist the originating `request_id` alongside
+its existing flat order fields. It must separately report a missing,
+duplicate, or wrong-side relation rather than inferring an outcome from a
+timestamp, or treating an absent order as a zero-sized quote. Its policy
+activation check uses the decision event itself; it must not use post-hoc
+inventory or fill outcomes to define the treatment.
 
 ## Preregistered short screen
 
