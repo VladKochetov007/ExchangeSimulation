@@ -72,8 +72,10 @@ func TestV20EvidenceHelper(t *testing.T) {
 	p2RebalanceEvidence := os.Getenv("V23_P2_REBALANCE") == "1"
 	l0LiabilityHedgerEvidence := os.Getenv("V24_L0_LIABILITY_HEDGER") == "1"
 	l1RandomSideControlEvidence := os.Getenv("V24_L1_RANDOM_SIDE_CONTROL") == "1"
+	l1PhaseControlEvidence := os.Getenv("V24_L1_PHASE_CONTROL") == "1"
 	l1PhaseOffsetEvidence := os.Getenv("V24_L1_PHASE_OFFSET") == "1"
-	liabilityHedgerEvidence := l0LiabilityHedgerEvidence || l1RandomSideControlEvidence || l1PhaseOffsetEvidence
+	l1ExplicitZeroPhaseEvidence := os.Getenv("V24_L1_EXPLICIT_ZERO_PHASE") == "1"
+	liabilityHedgerEvidence := l0LiabilityHedgerEvidence || l1RandomSideControlEvidence || l1PhaseControlEvidence || l1PhaseOffsetEvidence || l1ExplicitZeroPhaseEvidence
 	if p1QuoteSizeEvidence {
 		// P1 varies only optional raw decision recording. Both sides retain full
 		// logs so an identical logger topology cannot mask a recorder effect.
@@ -114,8 +116,14 @@ func TestV20EvidenceHelper(t *testing.T) {
 		if l1RandomSideControlEvidence {
 			cfg.CDFLiabilityHedger.PolicyMode = LiabilityHedgerPolicyRandomSideControl
 		}
+		if l1PhaseControlEvidence || l1PhaseOffsetEvidence || l1ExplicitZeroPhaseEvidence {
+			cfg.CDFLiabilityHedger.PolicyMode = LiabilityHedgerPolicyDeliveryLiability
+		}
 		if l1PhaseOffsetEvidence {
 			cfg.CDFLiabilityHedger.DecisionPhaseOffset = time.Second
+		}
+		if l1ExplicitZeroPhaseEvidence {
+			cfg.CDFLiabilityHedger.DecisionPhaseOffset = 0
 		}
 		cfg.RecordLiabilityHedgerDecisions = os.Getenv("V20_EVIDENCE_ON") == "1"
 	}
@@ -659,6 +667,37 @@ func TestV24L1PhaseOffsetEvidenceIsFreshProcessDeterministicAndNeutral(t *testin
 	}
 }
 
+// Explicit zero is a V2 evidence-schema requirement, but not a scheduling
+// change. Compare it with the otherwise identical L1 delivery parent whose
+// config predates the field, across fresh processes and GOMAXPROCS values.
+func TestV24L1PExplicitZeroPhaseMatchesLegacySchedule(t *testing.T) {
+	results := make(map[string]v20HelperResult)
+	for _, gomax := range []string{"1", "4"} {
+		results["legacy/g"+gomax] = runV24L1PhaseControlEvidenceHelper(t, gomax, false, false)
+		results["zero-off/g"+gomax] = runV24L1PhaseControlEvidenceHelper(t, gomax, true, false)
+		results["zero-on/g"+gomax] = runV24L1PhaseControlEvidenceHelper(t, gomax, true, true)
+	}
+	want := results["legacy/g1"].ExecutionHash
+	for key, result := range results {
+		if result.ExecutionHash == "" || result.ExecutionHash != want {
+			t.Fatalf("explicit zero phase changed legacy execution: want %s, %s=%s", want, key, result.ExecutionHash)
+		}
+	}
+	for _, gomax := range []string{"1", "4"} {
+		zero := results["zero-on/g"+gomax]
+		if zero.LiabilityHedgerDecisions == 0 || !zero.LiabilityHedgerPhaseSet || zero.LiabilityHedgerPhase != 0 ||
+			zero.Schedules == 0 || zero.Receipts == 0 || zero.Decisions == 0 {
+			t.Fatalf("explicit zero phase missing required evidence at GOMAXPROCS=%s: %+v", gomax, zero)
+		}
+	}
+	left, right := results["zero-on/g1"], results["zero-on/g4"]
+	if left.LiabilityHedgerDecisions != right.LiabilityHedgerDecisions ||
+		left.Schedules != right.Schedules || left.Receipts != right.Receipts || left.Decisions != right.Decisions ||
+		left.ScheduleDigest != right.ScheduleDigest || left.ReceiptDigest != right.ReceiptDigest || left.DecisionDigest != right.DecisionDigest {
+		t.Fatalf("explicit zero phase evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
+	}
+}
+
 func TestV22InstrumentedRouterRegistersEveryCustomLeg(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "research", "configs", "frozen-baseline-2026-08-22.json"))
 	if err != nil {
@@ -968,7 +1007,7 @@ func runV24L1PhaseEvidenceHelper(t *testing.T, gomax string, evidence bool) v20H
 	t.Helper()
 	output := filepath.Join(t.TempDir(), "run")
 	cmd := exec.Command(os.Args[0], "-test.run=TestV20EvidenceHelper", "--")
-	cmd.Env = append(os.Environ(), "V20_EVIDENCE_HELPER=1", "V20_EVIDENCE_OUTPUT="+output, "V24_L1_PHASE_OFFSET=1", "GOMAXPROCS="+gomax)
+	cmd.Env = append(os.Environ(), "V20_EVIDENCE_HELPER=1", "V20_EVIDENCE_OUTPUT="+output, "V24_L1_PHASE_CONTROL=1", "V24_L1_PHASE_OFFSET=1", "GOMAXPROCS="+gomax)
 	if evidence {
 		cmd.Env = append(cmd.Env, "V20_EVIDENCE_ON=1")
 	}
@@ -986,6 +1025,35 @@ func runV24L1PhaseEvidenceHelper(t *testing.T, gomax string, evidence bool) v20H
 	}
 	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
 		t.Fatalf("decode L1-P evidence helper output %q: %v", raw, err)
+	}
+	return result
+}
+
+func runV24L1PhaseControlEvidenceHelper(t *testing.T, gomax string, explicitZero, evidence bool) v20HelperResult {
+	t.Helper()
+	output := filepath.Join(t.TempDir(), "run")
+	cmd := exec.Command(os.Args[0], "-test.run=TestV20EvidenceHelper", "--")
+	cmd.Env = append(os.Environ(), "V20_EVIDENCE_HELPER=1", "V20_EVIDENCE_OUTPUT="+output, "V24_L1_PHASE_CONTROL=1", "GOMAXPROCS="+gomax)
+	if explicitZero {
+		cmd.Env = append(cmd.Env, "V24_L1_EXPLICIT_ZERO_PHASE=1")
+	}
+	if evidence {
+		cmd.Env = append(cmd.Env, "V20_EVIDENCE_ON=1")
+	}
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("L1-P phase-control helper GOMAXPROCS=%s explicitZero=%t evidence=%t: %v\n%s", gomax, explicitZero, evidence, err, raw)
+	}
+	var result v20HelperResult
+	var encoded string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "{") {
+			encoded = line
+			break
+		}
+	}
+	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
+		t.Fatalf("decode L1-P phase-control helper output %q: %v", raw, err)
 	}
 	return result
 }
