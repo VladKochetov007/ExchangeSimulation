@@ -1,6 +1,7 @@
 package multivenue
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -32,6 +33,9 @@ type v20HelperResult struct {
 	FrontierVectorComponents int64  `json:"frontier_vector_components"`
 	FrontierVectorDigest     string `json:"frontier_vector_digest"`
 	FrontierComponentDigest  string `json:"frontier_component_digest"`
+	MakerQuoteSizeDecisions  int64  `json:"maker_quote_size_decisions"`
+	EvidenceArtifactEvents   int64  `json:"evidence_artifact_events"`
+	EvidenceArtifactDigest   string `json:"evidence_artifact_digest"`
 }
 
 // TestV20EvidenceHelper deliberately runs in a fresh test process. Parent test
@@ -60,6 +64,17 @@ func TestV20EvidenceHelper(t *testing.T) {
 	remoteFeed := os.Getenv("V21_REMOTE_FEED") == "1"
 	remoteRoster := os.Getenv("V21_REMOTE_ROSTER") == "1"
 	routerEvidence := os.Getenv("V22_ROUTER") == "1"
+	p1QuoteSizeEvidence := os.Getenv("V23_P1_QUOTE_SIZE") == "1"
+	if p1QuoteSizeEvidence {
+		// P1 varies only optional raw decision recording. Both sides retain full
+		// logs so an identical logger topology cannot mask a recorder effect.
+		cfg.LogMode = "full"
+		cfg.CrossAssetSpotGraph = true
+		cfg.SpotPassiveMakerPostOnly = true
+		cfg.SpotPassiveMakerCancelBeforeReplace = true
+		cfg.SpotStoikovInventorySizeSkewBps = 5_000
+		cfg.RecordMakerQuoteSizeDecisions = os.Getenv("V20_EVIDENCE_ON") == "1"
+	}
 	if os.Getenv("V21_LOCAL_CACHE") == "1" || remoteFeed || remoteRoster {
 		cfg.MakerAnchor = "own_mid"
 		cfg.SpotMakerLocalReferenceCache = true
@@ -67,7 +82,7 @@ func TestV20EvidenceHelper(t *testing.T) {
 			"spot_maker": {Model: "constant", Delay: 10 * time.Millisecond},
 		}
 	}
-	cfg.RecordMarketDataReceipts = os.Getenv("V20_EVIDENCE_ON") == "1"
+	cfg.RecordMarketDataReceipts = !p1QuoteSizeEvidence && os.Getenv("V20_EVIDENCE_ON") == "1"
 	if cfg.RecordMarketDataReceipts {
 		if routerEvidence {
 			cfg.MarketDataReceiptRoles = []string{"cross_venue_router_tier"}
@@ -171,11 +186,69 @@ func TestV20EvidenceHelper(t *testing.T) {
 			result.FrontierVectorDigest, result.FrontierComponentDigest = vectorManifest.Decisions.Digest, vectorManifest.Components.Digest
 		}
 	}
+	if p1QuoteSizeEvidence && cfg.RecordMakerQuoteSizeDecisions {
+		result.MakerQuoteSizeDecisions = countRawEvent(t, output, "maker_quote_size_decision")
+		if result.MakerQuoteSizeDecisions == 0 {
+			t.Fatal("P1 recorder emitted no quote-size decisions")
+		}
+		artifactRaw, err := os.ReadFile(filepath.Join(output, "evidence-artifact-hash.json"))
+		if err != nil {
+			t.Fatalf("read P1 evidence artifact digest: %v", err)
+		}
+		var artifact struct {
+			Events int64  `json:"events"`
+			Digest string `json:"digest"`
+		}
+		if err := json.Unmarshal(artifactRaw, &artifact); err != nil || artifact.Events == 0 || artifact.Digest == "" {
+			t.Fatalf("decode P1 evidence artifact digest: artifact=%+v err=%v", artifact, err)
+		}
+		result.EvidenceArtifactEvents = artifact.Events
+		result.EvidenceArtifactDigest = artifact.Digest
+	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fmt.Println(string(encoded))
+}
+
+func countRawEvent(t *testing.T, dir, name string) int64 {
+	t.Helper()
+	var count int64
+	err := filepath.WalkDir(filepath.Join(dir, "venues"), func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".jsonl" {
+			return nil
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 0, 1<<20), 1<<24)
+		for scanner.Scan() {
+			var envelope struct {
+				Event string `json:"event"`
+			}
+			if err := json.Unmarshal(scanner.Bytes(), &envelope); err != nil {
+				return fmt.Errorf("decode persisted event %s: %w", path, err)
+			}
+			if envelope.Event == name {
+				count++
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("count %s evidence: %v", name, err)
+	}
+	return count
 }
 
 func TestV20EvidenceDoesNotChangeExecutionAcrossFreshProcesses(t *testing.T) {
@@ -314,6 +387,34 @@ func TestV22RouterIsFreshProcessDeterministicAndEvidenceNeutral(t *testing.T) {
 		left.FrontierVectorComponents != 3*left.FrontierVectorDecisions ||
 		left.FrontierVectorDigest != right.FrontierVectorDigest || left.FrontierComponentDigest != right.FrontierComponentDigest {
 		t.Fatalf("V2-2 router evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
+	}
+}
+
+// P1's recorder is optional persisted evidence rather than an execution
+// observation. This fresh-process check holds the P0-C policy and full logger
+// topology fixed while varying only the recorder, across host parallelism.
+func TestV23P1QuoteSizeEvidenceIsFreshProcessDeterministicAndNeutral(t *testing.T) {
+	results := make(map[string]v20HelperResult)
+	for _, gomax := range []string{"1", "4"} {
+		for _, evidence := range []bool{false, true} {
+			key := "g" + gomax + "/off"
+			if evidence {
+				key = "g" + gomax + "/on"
+			}
+			results[key] = runV23P1EvidenceHelper(t, gomax, evidence)
+		}
+	}
+	want := results["g1/off"].ExecutionHash
+	for key, result := range results {
+		if result.ExecutionHash == "" || result.ExecutionHash != want {
+			t.Fatalf("P1 recorder changed execution with process setting: want %s, %s=%s", want, key, result.ExecutionHash)
+		}
+	}
+	left, right := results["g1/on"], results["g4/on"]
+	if left.MakerQuoteSizeDecisions == 0 || left.MakerQuoteSizeDecisions != right.MakerQuoteSizeDecisions ||
+		left.EvidenceArtifactEvents == 0 || left.EvidenceArtifactEvents != right.EvidenceArtifactEvents ||
+		left.EvidenceArtifactDigest == "" || left.EvidenceArtifactDigest != right.EvidenceArtifactDigest {
+		t.Fatalf("P1 evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
 	}
 }
 
@@ -516,6 +617,32 @@ func runEvidenceHelper(t *testing.T, gomax string, evidence, localCache bool) v2
 
 func runV22RouterEvidenceHelper(t *testing.T, gomax string, evidence bool) v20HelperResult {
 	return runV2EvidenceHelper(t, gomax, evidence, false, false, false, true)
+}
+
+func runV23P1EvidenceHelper(t *testing.T, gomax string, evidence bool) v20HelperResult {
+	t.Helper()
+	output := filepath.Join(t.TempDir(), "run")
+	cmd := exec.Command(os.Args[0], "-test.run=TestV20EvidenceHelper", "--")
+	cmd.Env = append(os.Environ(), "V20_EVIDENCE_HELPER=1", "V20_EVIDENCE_OUTPUT="+output, "V23_P1_QUOTE_SIZE=1", "GOMAXPROCS="+gomax)
+	if evidence {
+		cmd.Env = append(cmd.Env, "V20_EVIDENCE_ON=1")
+	}
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("P1 evidence helper GOMAXPROCS=%s evidence=%t: %v\n%s", gomax, evidence, err, raw)
+	}
+	var result v20HelperResult
+	var encoded string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "{") {
+			encoded = line
+			break
+		}
+	}
+	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
+		t.Fatalf("decode P1 evidence helper output %q: %v", raw, err)
+	}
+	return result
 }
 
 func runV2EvidenceHelper(t *testing.T, gomax string, evidence, localCache, remoteFeed, remoteRoster, routerEvidence bool) v20HelperResult {

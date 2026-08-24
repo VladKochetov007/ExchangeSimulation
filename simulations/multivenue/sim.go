@@ -106,6 +106,10 @@ type Config struct {
 	// RecordDecisionFrontierVectors persists the optional V2-1b multi-feed
 	// evidence sidecar. It requires the scalar V2-0 receipt sidecars.
 	RecordDecisionFrontierVectors bool `json:"record_decision_frontier_vectors"`
+	// RecordMakerQuoteSizeDecisions retains the compact raw evidence used by
+	// the V2-3 P1 inventory-size screen. These observations are excluded from
+	// the execution checkpoint domain by design.
+	RecordMakerQuoteSizeDecisions bool `json:"record_maker_quote_size_decisions"`
 	// CheckpointIntervalSeconds writes a rolling digest of the event stream at
 	// each simulated-time boundary, so two runs of one seed can be compared
 	// without retaining their logs. Zero disables it.
@@ -399,6 +403,10 @@ type Config struct {
 	// inventory limit, in basis points. Zero keeps the textbook
 	// variance-derived skew.
 	MakerInventorySkewBps int64 `json:"maker_inventory_skew_bps"`
+	// SpotStoikovInventorySizeSkewBps redistributes an explicitly scoped spot
+	// Stoikov maker's existing quote size across bid and ask. It is distinct
+	// from reservation-price skew and never applies to the perpetual maker.
+	SpotStoikovInventorySizeSkewBps int64 `json:"spot_stoikov_inventory_size_skew_bps"`
 	// MakerIndexWeight blends the index with the maker's own midpoint.
 	MakerIndexWeight float64 `json:"maker_index_weight"`
 
@@ -606,6 +614,12 @@ func (c *Config) normalize() error {
 	}
 	if c.LogMode != "full" && c.LogMode != "none" {
 		return fmt.Errorf("multivenue: log mode must be full or none, got %q", c.LogMode)
+	}
+	if c.RecordMakerQuoteSizeDecisions && c.LogMode != "full" {
+		return errors.New("multivenue: maker quote-size decisions require full persisted evidence")
+	}
+	if c.SpotStoikovInventorySizeSkewBps < 0 || c.SpotStoikovInventorySizeSkewBps > 5_000 {
+		return fmt.Errorf("multivenue: spot Stoikov inventory size skew bps must be in [0,5000], got %d", c.SpotStoikovInventorySizeSkewBps)
 	}
 	if len(c.VenueIDs) == 0 {
 		c.VenueIDs = []string{"north", "central", "south"}
@@ -1580,6 +1594,16 @@ func (l venueLogger) LogEvent(simTime int64, clientID uint64, eventName string, 
 	l.inner.LogEvent(simTime, clientID, eventName, venueLogEvent{VenueID: l.venueID, Payload: event})
 }
 
+// LogEvidenceOnly persists an observation without adding it to the ordered
+// execution-stream hash. It is reserved for instrumentation which must not
+// change the simulated trajectory or logging-on/off execution digest.
+func (l venueLogger) LogEvidenceOnly(simTime int64, clientID uint64, eventName string, event any) {
+	if l.inner == nil {
+		return
+	}
+	l.inner.LogEvent(simTime, clientID, eventName, venueLogEvent{VenueID: l.venueID, Payload: event})
+}
+
 type manifest struct {
 	SchemaVersion int       `json:"schema_version"`
 	VenueIDs      []string  `json:"venue_ids"`
@@ -2125,12 +2149,38 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		*postOnly = s.Config.SpotPassiveMakerPostOnly
 		*cancelBeforeReplace = s.Config.SpotPassiveMakerCancelBeforeReplace
 	}
+	applySpotInventorySizePolicy := func(symbol string, sizeSkewBps *int64) {
+		book := venue.Exchange.Books[symbol]
+		if book == nil {
+			return
+		}
+		if _, ok := book.Instrument.(*exchange.SpotInstrument); !ok {
+			return
+		}
+		*sizeSkewBps = s.Config.SpotStoikovInventorySizeSkewBps
+	}
+	quoteSizeObserver := func(decision MakerQuoteSizeDecision) {
+		// P1 decision telemetry is persisted evidence only. Sending it through
+		// LogEvent would make optional recording perturb the execution hash.
+		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "maker_quote_size_decision", decision)
+	}
+	newSpotStoikovMaker := func(role string, makerConfig StoikovMMConfig) *StoikovMarketMaker {
+		clientID, gateway := venue.connectParticipant(mount, role, mmBalances, 100_000_000*mvQuotePrecision, zeroFee)
+		if s.Config.RecordMakerQuoteSizeDecisions {
+			makerConfig.QuoteSizeDecisionObserver = quoteSizeObserver
+			makerConfig.QuoteSizeDecisionMaker = role
+			makerConfig.QuoteSizeDecisionClient = clientID
+		}
+		maker := NewStoikovMarketMaker(nextActor(), gateway, makerConfig)
+		maker.SetTickerFactory(timers)
+		return maker
+	}
 	for i := 0; i < s.Config.SpotMakerCount; i++ {
 		makerConfig := stoikovConfig("ABC/USD", "ABC/USD", mvBootstrapPrice, mvQuotePrecision, tick)
 		applySpotPassivePolicy(makerConfig.Symbol, &makerConfig.PostOnly, &makerConfig.PostOnlyCancelBeforeReplace)
+		applySpotInventorySizePolicy(makerConfig.Symbol, &makerConfig.InventorySizeSkewBps)
 		makerConfig.RequoteBps = requoteThresholdFor(s.Config.SpotMakerRequoteBpsTiers, s.Config.SpotMakerRequoteBps, i)
-		maker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), makerConfig)
-		maker.SetTickerFactory(timers)
+		maker := newSpotStoikovMaker(fmt.Sprintf("spot_maker_%d", i+1), makerConfig)
 		venue.SpotMakers = append(venue.SpotMakers, maker)
 	}
 	if s.Config.CrossAssetSpotGraph {
@@ -2140,13 +2190,13 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		for i := 0; i < 2; i++ {
 			cdfConfig := stoikovConfig("CDF/USD", "CDF/USD", mvCDFBootstrap, mvQuotePrecision, cdfTick)
 			applySpotPassivePolicy(cdfConfig.Symbol, &cdfConfig.PostOnly, &cdfConfig.PostOnlyCancelBeforeReplace)
-			cdfMaker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("cdf_spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), cdfConfig)
-			cdfMaker.SetTickerFactory(timers)
+			applySpotInventorySizePolicy(cdfConfig.Symbol, &cdfConfig.InventorySizeSkewBps)
+			cdfMaker := newSpotStoikovMaker(fmt.Sprintf("cdf_spot_maker_%d", i+1), cdfConfig)
 			venue.SpotMakers = append(venue.SpotMakers, cdfMaker)
 			crossConfig := stoikovConfig("ABC/CDF", "ABC/CDF", crossBootstrap, mvBasePrecision, crossTick)
 			applySpotPassivePolicy(crossConfig.Symbol, &crossConfig.PostOnly, &crossConfig.PostOnlyCancelBeforeReplace)
-			crossMaker := NewStoikovMarketMaker(nextActor(), connect(fmt.Sprintf("abc_cdf_spot_maker_%d", i+1), mmBalances, 100_000_000*mvQuotePrecision, zeroFee), crossConfig)
-			crossMaker.SetTickerFactory(timers)
+			applySpotInventorySizePolicy(crossConfig.Symbol, &crossConfig.InventorySizeSkewBps)
+			crossMaker := newSpotStoikovMaker(fmt.Sprintf("abc_cdf_spot_maker_%d", i+1), crossConfig)
 			venue.SpotMakers = append(venue.SpotMakers, crossMaker)
 		}
 	}

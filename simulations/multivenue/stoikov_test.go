@@ -581,3 +581,124 @@ func TestForwardHalfLifeMakesImpactDecay(t *testing.T) {
 		t.Errorf("a tenth-of-a-second spike moved the belief to %d, want it barely changed", transient.forward)
 	}
 }
+
+func TestStoikovInventoryQuoteSizePlan(t *testing.T) {
+	base := StoikovMMConfig{QuoteQty: 1_000, BasePrecision: 1_000, InventoryLimit: 1_000, InventorySizeSkewBps: 5_000}
+	tests := []struct {
+		name      string
+		inventory int64
+		baseQty   int64
+		limit     int64
+		wantBid   int64
+		wantAsk   int64
+		wantAdj   int64
+		ok        bool
+	}{
+		{name: "flat", wantBid: 1_000, wantAsk: 1_000, ok: true},
+		{name: "long half limit", inventory: 500, wantBid: 750, wantAsk: 1_250, wantAdj: 250, ok: true},
+		{name: "short half limit", inventory: -500, wantBid: 1_250, wantAsk: 750, wantAdj: 250, ok: true},
+		{name: "long clamped", inventory: 2_000, wantBid: 500, wantAsk: 1_500, wantAdj: 500, ok: true},
+		{name: "short min int clamped", inventory: math.MinInt64, wantBid: 1_500, wantAsk: 500, wantAdj: 500, ok: true},
+		{name: "integer adjustment rounds to zero", inventory: 1, baseQty: 3, limit: 3, wantBid: 3, wantAsk: 3, ok: true},
+		{name: "expanded side overflow is refused", inventory: 1_000, baseQty: math.MaxInt64, wantBid: 0, wantAsk: 0, ok: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base
+			if tc.baseQty != 0 {
+				cfg.QuoteQty = tc.baseQty
+			}
+			if tc.limit != 0 {
+				cfg.InventoryLimit = tc.limit
+			}
+			maker := &StoikovMarketMaker{cfg: cfg, inventory: tc.inventory}
+			plan, ok := maker.quoteSizePlan()
+			if ok != tc.ok {
+				t.Fatalf("quoteSizePlan ok = %t, want %t (plan=%+v)", ok, tc.ok, plan)
+			}
+			if !ok {
+				return
+			}
+			if plan.BidQty != tc.wantBid || plan.AskQty != tc.wantAsk || plan.Adjustment != tc.wantAdj {
+				t.Fatalf("quoteSizePlan = %+v, want bid/ask/adjustment %d/%d/%d", plan, tc.wantBid, tc.wantAsk, tc.wantAdj)
+			}
+		})
+	}
+}
+
+func TestStoikovInventorySizeRefreshesWithoutPriceChange(t *testing.T) {
+	gw := newStoikovStubGateway()
+	maker := NewStoikovMarketMaker(1, gw, StoikovMMConfig{
+		Symbol: "ABC/USD", ReferenceSymbol: "ABC/USD", BootstrapPrice: 100_000,
+		BasePrecision: 1_000, QuotePrecision: 1_000, TickSize: 10, QuoteQty: 100,
+		QuoteInterval: time.Second, VolatilityHalfLife: time.Minute,
+		InitialLogVariancePerSec: 0, InventoryHorizon: time.Minute,
+		RelativeRiskAversion: 0.01 * 100, RelativeFillDecay: 2 * 100, MinHalfSpreadTicks: 1,
+		InventoryLimit: 100, InventorySizeSkewBps: 5_000,
+		SubmitBeforeCancel: true, PostOnly: true, PostOnlyCancelBeforeReplace: true,
+	})
+	now := time.Unix(10, 0)
+	maker.onTick(now) // subscriptions
+	maker.HandleEvent(context.Background(), makerSnapshot("ABC/USD", 99_990, 100_010))
+	maker.onTick(now)
+	if len(gw.requests) != 4 {
+		t.Fatalf("initial quote requests = %d, want 4", len(gw.requests))
+	}
+	initialBid, initialAsk := gw.requests[2].OrderReq, gw.requests[3].OrderReq
+	maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: initialBid.RequestID, OrderID: 10}})
+	maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: initialAsk.RequestID, OrderID: 11}})
+	// A partial fill preserves both order IDs. With zero variance the price pair
+	// stays unchanged, so this refresh is attributable to the size policy.
+	maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderPartialFill, Data: actor.OrderFillEvent{
+		Symbol: "ABC/USD", OrderID: 10, Side: exchange.Buy, Qty: 50, IsFull: false,
+	}})
+	maker.onTick(now.Add(time.Second))
+	if len(gw.requests) != 8 || gw.requests[4].Type != exchange.ReqCancelOrder || gw.requests[5].Type != exchange.ReqCancelOrder {
+		t.Fatalf("size-only refresh did not keep P0-C cancel-before-replace: %+v", gw.requests)
+	}
+	newBid, newAsk := gw.requests[6].OrderReq, gw.requests[7].OrderReq
+	if newBid.Price != initialBid.Price || newAsk.Price != initialAsk.Price {
+		t.Fatalf("size-only policy changed prices: initial=%d/%d new=%d/%d", initialBid.Price, initialAsk.Price, newBid.Price, newAsk.Price)
+	}
+	if newBid.Qty != 75 || newAsk.Qty != 125 {
+		t.Fatalf("long inventory quantities = %d/%d, want 75/125", newBid.Qty, newAsk.Qty)
+	}
+}
+
+func TestStoikovQuoteSizeDecisionPrecedesRequestsAndCarriesIDs(t *testing.T) {
+	gw := newStoikovStubGateway()
+	var decisions []MakerQuoteSizeDecision
+	maker := NewStoikovMarketMaker(1, gw, StoikovMMConfig{
+		Symbol: "ABC/USD", ReferenceSymbol: "ABC/USD", BootstrapPrice: 100_000,
+		BasePrecision: 1_000, QuotePrecision: 1_000, TickSize: 10, QuoteQty: 100,
+		QuoteInterval: time.Second, VolatilityHalfLife: time.Minute,
+		InitialLogVariancePerSec: 1.0 / (100.0 * 100.0), InventoryHorizon: time.Minute,
+		RelativeRiskAversion: 0.01 * 100, RelativeFillDecay: 2 * 100, MinHalfSpreadTicks: 1,
+		InventoryLimit: 100, PostOnly: true, PostOnlyCancelBeforeReplace: true,
+		QuoteSizeDecisionMaker: "spot_maker_1", QuoteSizeDecisionClient: 7,
+		QuoteSizeDecisionObserver: func(decision MakerQuoteSizeDecision) {
+			if len(gw.requests) != 2 {
+				t.Fatalf("decision observed after quote gateway send: %d requests", len(gw.requests))
+			}
+			decisions = append(decisions, decision)
+		},
+	})
+	now := time.Unix(10, 0)
+	maker.onTick(now)
+	maker.HandleEvent(context.Background(), makerSnapshot("ABC/USD", 99_990, 100_010))
+	maker.onTick(now)
+	if len(decisions) != 1 || len(gw.requests) != 4 {
+		t.Fatalf("decision/request counts = %d/%d, want 1/4", len(decisions), len(gw.requests))
+	}
+	got := decisions[0]
+	if got.Maker != "spot_maker_1" || got.ClientID != 7 || got.Symbol != "ABC/USD" || got.DecisionTime != now.UnixNano() {
+		t.Fatalf("decision identity = %+v", got)
+	}
+	if got.BidRequestID != gw.requests[2].OrderReq.RequestID || got.AskRequestID != gw.requests[3].OrderReq.RequestID {
+		t.Fatalf("decision request IDs = %d/%d, orders = %d/%d", got.BidRequestID, got.AskRequestID, gw.requests[2].OrderReq.RequestID, gw.requests[3].OrderReq.RequestID)
+	}
+	if got.BidPrice != gw.requests[2].OrderReq.Price || got.AskPrice != gw.requests[3].OrderReq.Price ||
+		got.BidQty != gw.requests[2].OrderReq.Qty || got.AskQty != gw.requests[3].OrderReq.Qty || !got.PostOnly || !got.CancelBeforeReplace {
+		t.Fatalf("decision did not match emitted P0-C requests: decision=%+v orders=%+v", got, gw.requests[2:])
+	}
+}

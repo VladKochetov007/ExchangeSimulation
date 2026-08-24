@@ -35,6 +35,40 @@ func TestConfigAcceptsDocumentedSnakeCaseJSON(t *testing.T) {
 	}
 }
 
+func TestSpotStoikovInventorySizePolicyIsScopedToSpot(t *testing.T) {
+	sim, err := NewSim(time.Second, Config{
+		LogDir: t.TempDir(), LogMode: "none", Seed: 101,
+		CrossAssetSpotGraph:                 true,
+		SpotStoikovInventorySizeSkewBps:     5_000,
+		SpotPassiveMakerPostOnly:            true,
+		SpotPassiveMakerCancelBeforeReplace: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sim.Close)
+	for _, venue := range sim.Venues {
+		if venue.PerpMaker.cfg.InventorySizeSkewBps != 0 {
+			t.Fatalf("%s perpetual received scoped spot size policy: %d", venue.ID, venue.PerpMaker.cfg.InventorySizeSkewBps)
+		}
+		for _, maker := range venue.SpotMakers {
+			if maker.cfg.InventorySizeSkewBps != 5_000 {
+				t.Fatalf("%s %s size skew bps = %d, want 5000", venue.ID, maker.cfg.Symbol, maker.cfg.InventorySizeSkewBps)
+			}
+		}
+	}
+}
+
+func TestMakerQuoteSizeEvidenceRequiresFullLogMode(t *testing.T) {
+	_, err := NewSim(time.Second, Config{
+		LogDir: t.TempDir(), LogMode: "none", Seed: 101,
+		RecordMakerQuoteSizeDecisions: true,
+	})
+	if err == nil {
+		t.Fatal("maker quote-size evidence was accepted without persisted raw logs")
+	}
+}
+
 func TestConfigRejectsCancelBeforeReplaceWithoutPostOnly(t *testing.T) {
 	_, err := NewSim(time.Second, Config{
 		LogDir: t.TempDir(), LogMode: "none", SpotPassiveMakerCancelBeforeReplace: true,

@@ -160,6 +160,12 @@ type StoikovMMConfig struct {
 	// limit — or large enough to move the price itself and diverge. Setting the
 	// shift at the limit makes the control calibratable and bounded.
 	InventorySkewBps int64
+	// InventorySizeSkewBps redistributes the existing volatility-adjusted quote
+	// size across bid and ask as the maker's carried risk moves away from zero.
+	// It is separate from InventorySkewBps: that field moves reservation price,
+	// while this field changes only displayed quantity. V2-3 P1 configures this
+	// only for selected spot makers; zero retains symmetric sizes.
+	InventorySizeSkewBps int64
 	// HedgeInterval, when positive, gives the hedge its own cadence instead of
 	// running it inside the quote cycle.
 	//
@@ -218,6 +224,37 @@ type StoikovMMConfig struct {
 	// replacements before cancellation; with true, it sends cancellations first.
 	// In both cases the venue checks post-only at actual arrival.
 	PostOnlyCancelBeforeReplace bool
+
+	// QuoteSizeDecisionObserver is an evidence-only P1 hook. It runs before
+	// quote requests enter the gateway and has no return path into strategy,
+	// exchange, scheduler, or matching state.
+	QuoteSizeDecisionObserver func(MakerQuoteSizeDecision)
+	QuoteSizeDecisionMaker    string
+	QuoteSizeDecisionClient   uint64
+}
+
+// MakerQuoteSizeDecision records a P1 quantity decision before either quote
+// request is submitted. Venue acceptance/rejection evidence independently
+// records what subsequently reached the matching engine.
+type MakerQuoteSizeDecision struct {
+	Maker               string `json:"maker"`
+	ClientID            uint64 `json:"client_id"`
+	Symbol              string `json:"symbol"`
+	DecisionTime        int64  `json:"decision_time"`
+	BidRequestID        uint64 `json:"bid_request_id"`
+	AskRequestID        uint64 `json:"ask_request_id"`
+	BaseVolatilitySize  int64  `json:"base_volatility_size"`
+	RiskPosition        int64  `json:"risk_position"`
+	InventoryLimit      int64  `json:"inventory_limit"`
+	SizeSkewBps         int64  `json:"size_skew_bps"`
+	FullAdjustment      int64  `json:"full_adjustment"`
+	Adjustment          int64  `json:"adjustment"`
+	BidPrice            int64  `json:"bid_price"`
+	AskPrice            int64  `json:"ask_price"`
+	BidQty              int64  `json:"bid_qty"`
+	AskQty              int64  `json:"ask_qty"`
+	PostOnly            bool   `json:"post_only"`
+	CancelBeforeReplace bool   `json:"cancel_before_replace"`
 }
 
 type quoteSide bool
@@ -248,6 +285,7 @@ type StoikovMarketMaker struct {
 	inventory          int64
 	bidID, askID       uint64
 	bidPrice, askPrice int64
+	bidQty, askQty     int64
 	hedgePosition      int64
 	hedgePending       bool
 	hedgeRequest       uint64
@@ -480,9 +518,9 @@ func (mm *StoikovMarketMaker) onRejected(e actor.OrderRejectedEvent) {
 	}
 	delete(mm.pending, e.RequestID)
 	if side == stoikovBid {
-		mm.bidPrice = 0
+		mm.bidPrice, mm.bidQty = 0, 0
 	} else {
-		mm.askPrice = 0
+		mm.askPrice, mm.askQty = 0, 0
 	}
 }
 
@@ -511,10 +549,10 @@ func (mm *StoikovMarketMaker) onFill(e actor.OrderFillEvent) {
 		return
 	}
 	if e.OrderID == mm.bidID {
-		mm.bidID, mm.bidPrice = 0, 0
+		mm.bidID, mm.bidPrice, mm.bidQty = 0, 0, 0
 	}
 	if e.OrderID == mm.askID {
-		mm.askID, mm.askPrice = 0, 0
+		mm.askID, mm.askPrice, mm.askQty = 0, 0, 0
 	}
 }
 
@@ -523,10 +561,10 @@ func (mm *StoikovMarketMaker) onCancelled(e actor.OrderCancelledEvent) {
 	// remainder; the flag must clear on that too.
 	mm.hedgePending = false
 	if e.OrderID == mm.bidID {
-		mm.bidID, mm.bidPrice = 0, 0
+		mm.bidID, mm.bidPrice, mm.bidQty = 0, 0, 0
 	}
 	if e.OrderID == mm.askID {
-		mm.askID, mm.askPrice = 0, 0
+		mm.askID, mm.askPrice, mm.askQty = 0, 0, 0
 	}
 }
 
@@ -602,10 +640,15 @@ func (mm *StoikovMarketMaker) onTick(now time.Time) {
 	if !okBid || !okAsk || bid <= 0 || ask <= bid {
 		return
 	}
-	if bid == mm.bidPrice && ask == mm.askPrice && mm.bidID != 0 && mm.askID != 0 {
+	sizes, ok := mm.quoteSizePlan()
+	if !ok {
 		return
 	}
-	if mm.cfg.RequoteBps > 0 && mm.bidID != 0 && mm.askID != 0 {
+	sizeUnchanged := sizes.BidQty == mm.bidQty && sizes.AskQty == mm.askQty
+	if bid == mm.bidPrice && ask == mm.askPrice && sizeUnchanged && mm.bidID != 0 && mm.askID != 0 {
+		return
+	}
+	if mm.cfg.RequoteBps > 0 && sizeUnchanged && mm.bidID != 0 && mm.askID != 0 {
 		moved := maxInt64(absInt64(bid-mm.bidPrice), absInt64(ask-mm.askPrice))
 		if reference, available := positiveDomainTwoSidedMidpoint(mm.bidPrice, mm.askPrice); available && moved*10000 < mm.cfg.RequoteBps*reference {
 			return
@@ -621,10 +664,13 @@ func (mm *StoikovMarketMaker) onTick(now time.Time) {
 		mm.hedgeDelta()
 	}
 	mm.bidPrice, mm.askPrice = bid, ask
-	size := mm.quoteSize()
-	bidRequest := mm.submitQuote(exchange.Buy, bid, size)
+	mm.bidQty, mm.askQty = sizes.BidQty, sizes.AskQty
+	bidRequestID := mm.PeekNextRequestID()
+	askRequestID := bidRequestID + 1
+	mm.emitQuoteSizeDecision(now, sizes, bid, ask, bidRequestID, askRequestID)
+	bidRequest := mm.submitQuote(exchange.Buy, bid, sizes.BidQty)
 	mm.pending[bidRequest] = stoikovBid
-	askRequest := mm.submitQuote(exchange.Sell, ask, size)
+	askRequest := mm.submitQuote(exchange.Sell, ask, sizes.AskQty)
 	mm.pending[askRequest] = stoikovAsk
 	if mm.cfg.SubmitBeforeCancel && !(mm.cfg.PostOnly && mm.cfg.PostOnlyCancelBeforeReplace) {
 		// Cancelling only after the replacements are submitted keeps depth
@@ -677,6 +723,121 @@ func (mm *StoikovMarketMaker) quoteSize() int64 {
 		scale = floor
 	}
 	return int64(float64(mm.cfg.QuoteQty) * scale)
+}
+
+type quoteSizePlan struct {
+	BaseVolatilitySize int64
+	RiskPosition       int64
+	InventoryLimit     int64
+	SizeSkewBps        int64
+	FullAdjustment     int64
+	Adjustment         int64
+	BidQty             int64
+	AskQty             int64
+}
+
+// quoteSizePlan evaluates the V2-3 P1 quantity policy without changing any
+// price or exchange state. Checked fixed-point arithmetic prevents a large
+// configuration value from wrapping into a superficially valid quote.
+func (mm *StoikovMarketMaker) quoteSizePlan() (quoteSizePlan, bool) {
+	base := mm.quoteSize()
+	limit := mm.cfg.InventoryLimit
+	if limit <= 0 {
+		// Keep direct-maker fixtures and the existing inventory-fraction
+		// contract aligned with scenario-normalized configurations.
+		limit = mm.cfg.BasePrecision
+	}
+	bps := mm.cfg.InventorySizeSkewBps
+	if base <= 0 || limit <= 0 || bps < 0 || bps > 5_000 {
+		return quoteSizePlan{}, false
+	}
+	plan := quoteSizePlan{
+		BaseVolatilitySize: base,
+		RiskPosition:       mm.riskPosition(),
+		InventoryLimit:     limit,
+		SizeSkewBps:        bps,
+		BidQty:             base,
+		AskQty:             base,
+	}
+	full, ok := etypes.TryMulBps(base, bps)
+	if !ok {
+		return quoteSizePlan{}, false
+	}
+	plan.FullAdjustment = full
+	positionMagnitude := clampAbsInventory(plan.RiskPosition, limit)
+	adjustment, ok := etypes.TryMulDiv(full, positionMagnitude, limit)
+	if !ok || adjustment < 0 || adjustment > base {
+		return quoteSizePlan{}, false
+	}
+	plan.Adjustment = adjustment
+	if adjustment == 0 || plan.RiskPosition == 0 {
+		return plan, true
+	}
+	if plan.RiskPosition > 0 {
+		plan.BidQty -= adjustment
+		plan.AskQty, ok = etypes.TryAdd(base, adjustment)
+	} else {
+		plan.AskQty -= adjustment
+		plan.BidQty, ok = etypes.TryAdd(base, adjustment)
+	}
+	if !ok || plan.BidQty <= 0 || plan.AskQty <= 0 {
+		return quoteSizePlan{}, false
+	}
+	return plan, true
+}
+
+// riskPosition is the same carried-risk state used by inventoryFraction: a
+// hedged maker sizes against net delta, while an unhedged maker sizes against
+// the spot inventory it actually carries.
+func (mm *StoikovMarketMaker) riskPosition() int64 {
+	if mm.cfg.HedgeSymbol != "" {
+		return mm.NetDelta()
+	}
+	return mm.inventory
+}
+
+// clampAbsInventory returns min(abs(position), limit) without negating
+// math.MinInt64. limit is a validated positive quantity bound.
+func clampAbsInventory(position, limit int64) int64 {
+	if limit <= 0 {
+		return 0
+	}
+	if position >= 0 {
+		if position > limit {
+			return limit
+		}
+		return position
+	}
+	if position == math.MinInt64 || -position > limit {
+		return limit
+	}
+	return -position
+}
+
+func (mm *StoikovMarketMaker) emitQuoteSizeDecision(now time.Time, plan quoteSizePlan, bidPrice, askPrice int64, bidRequestID, askRequestID uint64) {
+	if mm.cfg.QuoteSizeDecisionObserver == nil {
+		return
+	}
+	mm.cfg.QuoteSizeDecisionObserver(MakerQuoteSizeDecision{
+		Maker:               mm.cfg.QuoteSizeDecisionMaker,
+		ClientID:            mm.cfg.QuoteSizeDecisionClient,
+		Symbol:              mm.cfg.Symbol,
+		DecisionTime:        now.UnixNano(),
+		BidRequestID:        bidRequestID,
+		AskRequestID:        askRequestID,
+		BaseVolatilitySize:  plan.BaseVolatilitySize,
+		RiskPosition:        plan.RiskPosition,
+		InventoryLimit:      plan.InventoryLimit,
+		SizeSkewBps:         plan.SizeSkewBps,
+		FullAdjustment:      plan.FullAdjustment,
+		Adjustment:          plan.Adjustment,
+		BidPrice:            bidPrice,
+		AskPrice:            askPrice,
+		BidQty:              plan.BidQty,
+		AskQty:              plan.AskQty,
+		PostOnly:            mm.cfg.PostOnly,
+		CancelBeforeReplace: mm.cfg.PostOnlyCancelBeforeReplace,
+	})
 }
 
 func (mm *StoikovMarketMaker) hedgeDelta() {
@@ -741,11 +902,7 @@ func (mm *StoikovMarketMaker) inventoryFraction() float64 {
 	if scale <= 0 {
 		scale = mm.cfg.BasePrecision
 	}
-	position := mm.inventory
-	if mm.cfg.HedgeSymbol != "" {
-		// Skew against the risk actually carried, not the raw spot position.
-		position = mm.NetDelta()
-	}
+	position := mm.riskPosition()
 	fraction := float64(position) / float64(scale)
 	if fraction > 1 {
 		return 1
