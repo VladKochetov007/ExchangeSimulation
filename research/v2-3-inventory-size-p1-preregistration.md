@@ -81,7 +81,7 @@ client_id, bid_request_id, ask_request_id,
 base_volatility_size, risk_position, inventory_limit,
 size_skew_bps, full_adjustment, adjustment,
 bid_price, ask_price, bid_qty, ask_qty,
-post_only, cancel_before_replace
+post_only, cancel_before_replace, outcome_expectation
 ```
 
 The event is emitted at the actor decision point before either request is sent;
@@ -90,6 +90,15 @@ only: no scheduler event, RNG draw, actor-visible state, callback into the
 matching engine, or request ordering may be introduced. The existing raw order
 acceptance/rejection evidence remains the independent record of what actually
 reached the venue.
+
+At the exact terminal simulated timestamp, a request can be constructed after
+the final venue-ingress phase. Such a request did not reach a venue and has no
+acceptance/rejection outcome inside the registered horizon. The decision record
+must therefore state `outcome_expectation="SIMULATION_HORIZON_CENSORED"` with
+the explicit horizon reason. All earlier decisions must state
+`outcome_expectation="VENUE_OUTCOME_REQUIRED"`. The analyzer must retain and
+count censored sides separately, reject a censored side that nevertheless has
+a venue outcome, and never relabel a nonterminal missing outcome as censoring.
 
 `maker_quote_size_decision` belongs to the persisted-evidence artifact domain,
 not the ordered execution-stream hash domain. Its writer must therefore bypass
