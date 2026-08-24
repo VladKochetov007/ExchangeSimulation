@@ -34,6 +34,9 @@ func TestMakerQuoteSizeAuditJoinsExactRequestEvidence(t *testing.T) {
 	if len(result.MakerBuckets) != 1 || result.MakerBuckets[0].Maker != "spot_maker_1" || result.MakerBuckets[0].Decisions != 2 || result.MakerBuckets[0].Accepted != 3 || result.MakerBuckets[0].Rejected != 1 {
 		t.Fatalf("P1 maker buckets = %+v", result.MakerBuckets)
 	}
+	if result.ZeroRiskSymmetric != 1 || result.LongRiskDecisions != 1 || result.LongPositiveSizeSkew != 1 || result.ShortRiskDecisions != 0 || result.WrongDirectionSizeSkew != 0 {
+		t.Fatalf("P1 signed activation = %+v", result)
+	}
 }
 
 func TestMakerQuoteSizeAuditCatchesPolicyAndEvidenceMutations(t *testing.T) {

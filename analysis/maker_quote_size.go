@@ -21,6 +21,13 @@ type MakerQuoteSizeAudit struct {
 	DecisionSides             int64                  `json:"decision_sides"`
 	ZeroRiskDecisions         int64                  `json:"zero_risk_decisions"`
 	NonzeroRiskDecisions      int64                  `json:"nonzero_risk_decisions"`
+	ZeroRiskSymmetric         int64                  `json:"zero_risk_symmetric"`
+	LongRiskDecisions         int64                  `json:"long_risk_decisions"`
+	ShortRiskDecisions        int64                  `json:"short_risk_decisions"`
+	LongPositiveSizeSkew      int64                  `json:"long_positive_size_skew"`
+	ShortNegativeSizeSkew     int64                  `json:"short_negative_size_skew"`
+	NonzeroRiskZeroSizeSkew   int64                  `json:"nonzero_risk_zero_size_skew"`
+	WrongDirectionSizeSkew    int64                  `json:"wrong_direction_size_skew"`
 	NonzeroAdjustments        int64                  `json:"nonzero_adjustments"`
 	Accepted                  int64                  `json:"accepted"`
 	Rejected                  int64                  `json:"rejected"`
@@ -195,10 +202,38 @@ func (r *Run) MeasureMakerQuoteSize(options MakerQuoteSizeOptions) (*MakerQuoteS
 				result.ZeroRiskDecisions++
 				bucket.ZeroRisk++
 				maker.ZeroRisk++
+				if decision.AskQty == decision.BidQty {
+					result.ZeroRiskSymmetric++
+				} else {
+					result.WrongDirectionSizeSkew++
+					addCheck(makerQuoteSizeKey{venueID: event.VenueID, clientID: event.ClientID}, "", "zero_risk_asymmetric_size")
+				}
 			} else {
 				result.NonzeroRiskDecisions++
 				bucket.NonzeroRisk++
 				maker.NonzeroRisk++
+				skew := decision.AskQty - decision.BidQty
+				if decision.RiskPosition > 0 {
+					result.LongRiskDecisions++
+					if skew > 0 {
+						result.LongPositiveSizeSkew++
+					} else if skew == 0 {
+						result.NonzeroRiskZeroSizeSkew++
+					} else {
+						result.WrongDirectionSizeSkew++
+						addCheck(makerQuoteSizeKey{venueID: event.VenueID, clientID: event.ClientID}, "", "long_risk_wrong_size_direction")
+					}
+				} else {
+					result.ShortRiskDecisions++
+					if skew < 0 {
+						result.ShortNegativeSizeSkew++
+					} else if skew == 0 {
+						result.NonzeroRiskZeroSizeSkew++
+					} else {
+						result.WrongDirectionSizeSkew++
+						addCheck(makerQuoteSizeKey{venueID: event.VenueID, clientID: event.ClientID}, "", "short_risk_wrong_size_direction")
+					}
+				}
 			}
 			if decision.Adjustment > 0 {
 				result.NonzeroAdjustments++

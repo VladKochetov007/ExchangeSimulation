@@ -202,10 +202,11 @@ func main() {
 				os.Exit(1)
 			}
 			emit(dir, result, *asJSON, func() {
-				fmt.Printf("%-22s decisions %6d sides %6d risk zero/nonzero %6d/%6d adjustment %6d accepted/rejected %6d/%6d censored/delivered %d/%d missing/duplicate %d/%d policy/request/censor mismatches %d/%d/%d\n",
+				fmt.Printf("%-22s decisions %6d sides %6d risk zero/nonzero %6d/%6d adjustment %6d signed long+/short-/zero %6d/%6d/%6d accepted/rejected %6d/%6d censored/delivered %d/%d missing/duplicate %d/%d policy/request/censor/direction mismatches %d/%d/%d/%d\n",
 					dir, result.Decisions, result.DecisionSides, result.ZeroRiskDecisions, result.NonzeroRiskDecisions,
-					result.NonzeroAdjustments, result.Accepted, result.Rejected, result.HorizonCensoredSides, result.CensoredOutcomeDeliveries,
-					result.MissingOutcomes, result.DuplicateOutcomes, result.DecisionFieldMismatches, result.OutcomeFieldMismatches, result.InvalidCensorRecords)
+					result.NonzeroAdjustments, result.LongPositiveSizeSkew, result.ShortNegativeSizeSkew, result.ZeroRiskSymmetric,
+					result.Accepted, result.Rejected, result.HorizonCensoredSides, result.CensoredOutcomeDeliveries,
+					result.MissingOutcomes, result.DuplicateOutcomes, result.DecisionFieldMismatches, result.OutcomeFieldMismatches, result.InvalidCensorRecords, result.WrongDirectionSizeSkew)
 				for _, bucket := range result.SkewBuckets {
 					fmt.Printf("    size-skew %5d bps decisions %6d zero/nonzero %6d/%6d adjusted %6d\n",
 						bucket.SizeSkewBps, bucket.Decisions, bucket.ZeroRisk, bucket.NonzeroRisk, bucket.Adjusted)
