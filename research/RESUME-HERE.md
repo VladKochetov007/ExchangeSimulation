@@ -475,3 +475,36 @@ finish and their contracts pass.
   left running. Recheck the working tree after reboot, but do not treat the
   pre-shutdown binaries as provenance for the rerun: rebuild again from the
   verified source revision.
+
+### 2026-08-24 V2-3 P2 final evidence and score
+
+- The restart gate above is now complete. The narrow zero-valued-enum audit is
+  committed at `fb8665d` in `research/v2-zero-valued-enum-evidence-audit.md`.
+  It found the BUY omission to be a schema-class hazard, added independent
+  zero-member wire fixtures, and found no remaining numeric zero enum with
+  `json:",omitempty"` in persisted scientific/provenance records. It makes no
+  simulator-economic change. `InstrumentAnnouncement.SettlementPrice` remains
+  an explicitly open *price* availability issue, not an enum exception.
+- The final full-evidence A/B × seed-101/103 campaign was rebuilt and run from
+  source `675e117`, then independently extracted and audited. Raw evidence is
+  retained at `research/artifacts/v2-3-p2/{A,B}/seed-{101,103}`; no P2 raw
+  evidence is prunable. Completion was determined only from final
+  `greeks.json` and `latency.json` sidecars.
+- All four V2-0 receipt/frontier audits and all four independent P2 policy /
+  request / fill replays are valid. A has exactly 180 `POLICY_DISABLED`
+  decisions and zero submissions per seed. B has 46/50 submissions,
+  44/48 accepted requests, and 88/96 externally counterparty fills for seeds
+  101/103; the two tail requests per seed are declared horizon-censored.
+  The replay found zero future/missing/ambiguous receipts, policy mismatches,
+  unmatched outcomes, non-IOC terminals, self fills, fee errors, or
+  non-reducing local fill transitions.
+- `3fa3e2c` records the final P2 score: **SUPPORTED (screening), mechanism
+  integrity only**. It supports auditable, capped, locally informed, costly
+  external risk transfer; it does **not** support aggregate inventory
+  reduction, CDF/USD stabilization, price elasticity, ecology viability, or
+  robustness. Attempt 0 remains invalid and attempt 1 pre-audit diagnostic;
+  neither may be pooled or cited as final.
+- Next: append/commit this updated handoff, then select and preregister the
+  next minimal V2 mechanism from `research/v2-design.md` before changing
+  economic behavior. Do not tune P2 coefficients, clocks, spreads, demand, or
+  population in response to the short mechanism screen.
