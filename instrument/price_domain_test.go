@@ -106,6 +106,24 @@ func TestMarginRequiredUsesErrorsRatherThanNumericFailureSentinels(t *testing.T)
 	}
 }
 
+func TestZeroOptionPremiumDoesNotSuppressShortMarketMargin(t *testing.T) {
+	option := NewEuropeanOption("OIL-100-C", "OIL", "USD", "OIL/USD", 1, 1, 1, 1, 100, 1, true)
+	// A zero premium is a real executable option price. The short's risk is
+	// determined by the marked underlying and must not disappear because zero
+	// used to be overloaded as a missing market-order reference.
+	option.SetMarks(100, 10)
+	want := option.MarginForOrder(etypes.Sell, 1, 0, 1)
+	if want == 0 {
+		t.Fatal("marked short option margin unexpectedly zero")
+	}
+	if got := option.MarginForMarketOrder(etypes.Sell, 1, 0, 1); got != want {
+		t.Fatalf("zero-premium short market margin = %d, want explicit margin policy result %d", got, want)
+	}
+	if got := option.MarginForMarketOrder(etypes.Buy, 1, 0, 1); got != 0 {
+		t.Fatalf("zero-premium long market margin = %d, want paid premium 0", got)
+	}
+}
+
 func TestSettlementObserverRetainsSignedAndZeroObservations(t *testing.T) {
 	future := NewExpiringFutures("OIL-FUT", "OIL", "USD", 1, 1, 1, 1, 1)
 	if got, err := future.SettlementPrice(); got != 0 || !errors.Is(err, etypes.ErrNoPrice) {

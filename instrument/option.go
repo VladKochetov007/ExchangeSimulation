@@ -247,9 +247,6 @@ func (o *EuropeanOption) MarginForOrder(side etypes.Side, qty, price, precision 
 }
 
 func (o *EuropeanOption) MarginForMarketOrder(side etypes.Side, qty, refPrice, precision int64) int64 {
-	if refPrice == 0 {
-		return 0
-	}
 	return o.MarginForOrder(side, qty, refPrice, precision)
 }
 
