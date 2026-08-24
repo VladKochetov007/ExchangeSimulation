@@ -1356,3 +1356,41 @@ one-sided, and same-timestamp-order tests. This is an analyzer-only extension
 to an already retained raw stream, not a new outcome metric or a changed
 preregistration threshold. V2-2b cells must be re-extracted with the flag
 before the local-execution activation condition is scored.
+
+## V-039 — P3 lifecycle replay confused a rejected carry projection with owned inventory
+
+The first replay of the retained P3a enabled cell reported 54 invalid term
+bounds. The raw decision records show that every one was a
+`NET_CARRY_BELOW_MINIMUM` deferral: it deliberately preserved a projected
+`term_end` so that the exact economic rejection could be recomputed, while
+`entry_at=0` correctly declared that the allocator owned no term or inventory.
+The analyzer had used `entry_at != 0 || term_end != 0` as its ownership test
+and therefore turned a valid explanatory projection into a false lifecycle
+failure.
+
+The replay now treats `term_end` without `entry_at` as legal only for the
+declared `NET_CARRY_BELOW_MINIMUM` projection, whose arithmetic is already
+checked independently. Any other non-owned `term_end` remains a lifecycle
+failure. A regression fixture accepts the valid projected rejection and
+rejects a forged zero-premium projection. This is analyzer-only: the retained
+world, raw evidence, execution trajectory, and economics were not changed or
+rerun. After re-extraction P3a B is valid; the earlier invalid analysis result
+is historical diagnostic evidence, not a property of the world.
+
+## V-040 — P3 terminal lifecycle evidence did not close the spot-inventory loop
+
+The P3 lifecycle replay reconstructed spot inventory from actor-attested fills
+and compared terminal perpetual position, but it did not independently compare
+the reconstructed spot position with the terminal account's base-asset balance
+relative to its initial balance. That left a possible evidence inconsistency
+uncaught: a terminal account report could lose or create base inventory without
+breaking the actor-local fill sequence.
+
+The analyzer now requires exactly one initial and terminal base-asset balance
+for every term-carry participant and checks their checked signed difference
+against reconstructed spot inventory. Missing or duplicate balances are an
+explicit evidence failure, never an implicit numeric zero. A mutation changing
+the terminal balance by one raw unit invalidates the audit. Retained P3a A and
+B replays both have zero terminal spot and perpetual mismatches. This is an
+analyzer-only coverage repair; it neither changes simulator execution nor
+alters P3a's raw evidence.

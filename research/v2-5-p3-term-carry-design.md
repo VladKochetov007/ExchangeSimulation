@@ -1,10 +1,12 @@
 # V2-5 P3 design — term carry allocator with realized lifecycle
 
 Status: **P3 core, receipt boundary, and independent lifecycle replay are
-implemented; no P3 market world exists.** This remains the next permissible
-V2-5 experiment after P1a `NOT EXERCISED`, P2a's narrow local-hedge activation
-pass, P2 public-signal readiness, and lifecycle finding C-001. It does not
-alter an earlier V2 result.
+implemented; P3a's five-minute development integrity screen has completed.**
+It follows P1a `NOT EXERCISED`, P2a's narrow local-hedge activation pass, P2
+public-signal readiness, and lifecycle finding C-001. P3a supports only
+locally informed, ordinary matched entry; it is not a funding, basis, or
+realized-carry result. See
+[`v2-5-p3a-term-carry-results.md`](v2-5-p3a-term-carry-results.md).
 
 ## Observed failure and new representation
 
@@ -115,12 +117,13 @@ unwind defer and recovery, directional exact financing, a valid present-zero
 funding input, flat first-leg deferral, and rejected flat entry reset. The
 independent evidence replay verifies source frontiers, exact financial terms,
 gateway/venue/actor order chains, position continuity, active-term funding
-settlement attribution, terminal perpetual position, and closure cardinality.
-Its mutations catch a missing close as an open term, duplicate close, funding
-outside an active term, and a dropped unwind fill. Evidence ON/OFF fresh
+settlement attribution, terminal perpetual position, terminal base-asset
+balance delta, and closure cardinality. Its mutations catch a missing close as
+an open term, duplicate close, funding outside an active term, a dropped unwind
+fill, and a one-unit terminal spot-balance mismatch. Evidence ON/OFF fresh
 process × GOMAXPROCS neutral checks are complete for the terminal-censored
-short helper. P3a is still prohibited until its immutable short-world config,
-activation contract, and full-evidence analysis command are committed.
+short helper. P3a's immutable short-world config, activation contract, and
+full-evidence analysis command were committed before its market cells ran.
 
 Required mutations: reversed funding sign; dropped/delayed/duplicate/reordered
 funding or book receipt; a valid zero incorrectly treated absent; a forged
