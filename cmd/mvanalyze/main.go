@@ -263,10 +263,10 @@ func main() {
 				os.Exit(1)
 			}
 			emit(dir, result, *asJSON, func() {
-				fmt.Printf("%-22s decisions %6d submitted/accepted/rejected %6d/%6d/%6d fills/cancelled %6d/%6d receipt ok/funding/book/missing/mismatch/future %t/%d/%d/%d/%d/%d arithmetic/sign/gateway %d/%d/%d valid %t\n",
+				fmt.Printf("%-22s decisions %6d submitted/accepted/rejected %6d/%6d/%6d fills/cancelled %6d/%6d receipt ok/funding-observation/book-observation/missing/mismatch/future %t/%d/%d/%d/%d/%d arithmetic/sign/gateway %d/%d/%d valid %t\n",
 					dir, result.Decisions, result.Submitted, result.Accepted, result.Rejected,
-					result.Fills, result.Cancelled, result.ReceiptAuditValid, result.FundingReceiptMatches,
-					result.BookReceiptMatches, result.MissingFundingReceipt+result.MissingBookReceipt,
+					result.Fills, result.Cancelled, result.ReceiptAuditValid, result.FundingObservationMatches,
+					result.BookObservationMatches, result.MissingFundingObservation+result.MissingBookObservation,
 					result.ReceiptMismatches, result.FutureReceiptUse, result.FundingArithmeticMismatches,
 					result.FundingSignMismatches, result.MissingGatewayDecisions+result.GatewayDecisionMismatches,
 					result.Valid)

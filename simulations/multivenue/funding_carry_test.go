@@ -79,7 +79,7 @@ func TestFundingCarryUsesDelayedDeliveredFundingForPositivePremium(t *testing.T)
 	request := gateway.requests[2].OrderReq
 	if decision.ActionOrDefer != "SUBMIT_SPOT_TARGET_IOC" || decision.Side != "BUY" || decision.Leg != "SPOT_TARGET_ADJUSTMENT" ||
 		decision.PremiumBps <= 0 || decision.FundingIncomeBps != 100 || decision.NetCarryBps != 96 ||
-		decision.FundingSequence != 13 || decision.FundingReceiptOrdinal != 3 || decision.FundingDeliveredAt > decision.DecisionTime ||
+		decision.FundingSequence != 13 || decision.DecisionFrontierOrdinal != 3 || decision.DecisionFrontierDeliveredAt > decision.DecisionTime ||
 		request.RequestID != decision.RequestID || request.Symbol != "ABC/USD" || request.Side != exchange.Buy || request.Price != 101 || request.Qty != 50 || request.TimeInForce != exchange.IOC {
 		t.Fatalf("positive funding decision/request mismatch: decision=%+v request=%+v", decision, request)
 	}
@@ -157,7 +157,7 @@ func TestFundingCarryRejectsStaleDuplicateAndPresentZeroPriceExplicitly(t *testi
 			Symbol: "ABC-PERP", Timestamp: now.UnixNano(), SeqNum: 13,
 			FundingRate: &exchange.FundingRate{Rate: -100, NextFunding: now.Add(8 * time.Hour).UnixNano(), Interval: 28_800, MarkAvailable: true, IndexAvailable: true},
 		}})
-		if desk.funding.rate.Rate != 100 || desk.funding.frontier.Ordinal != 3 {
+		if desk.funding.rate.Rate != 100 || desk.funding.sequence != 13 {
 			t.Fatalf("duplicate funding advanced local cache: %+v", desk.funding)
 		}
 	})

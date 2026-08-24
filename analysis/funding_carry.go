@@ -25,14 +25,14 @@ type FundingCarryAudit struct {
 	Fills     int64 `json:"fills"`
 	Cancelled int64 `json:"cancelled"`
 
-	ReceiptAuditValid     bool  `json:"receipt_audit_valid"`
-	ReceiptEvidenceErrors int64 `json:"receipt_evidence_errors"`
-	FundingReceiptMatches int64 `json:"funding_receipt_matches"`
-	BookReceiptMatches    int64 `json:"book_receipt_matches"`
-	MissingFundingReceipt int64 `json:"missing_funding_receipt"`
-	MissingBookReceipt    int64 `json:"missing_book_receipt"`
-	ReceiptMismatches     int64 `json:"receipt_mismatches"`
-	FutureReceiptUse      int64 `json:"future_receipt_use"`
+	ReceiptAuditValid         bool  `json:"receipt_audit_valid"`
+	ReceiptEvidenceErrors     int64 `json:"receipt_evidence_errors"`
+	FundingObservationMatches int64 `json:"funding_observation_matches"`
+	BookObservationMatches    int64 `json:"book_observation_matches"`
+	MissingFundingObservation int64 `json:"missing_funding_observation"`
+	MissingBookObservation    int64 `json:"missing_book_observation"`
+	ReceiptMismatches         int64 `json:"receipt_mismatches"`
+	FutureReceiptUse          int64 `json:"future_receipt_use"`
 
 	InvalidDecisionRecords      int64 `json:"invalid_decision_records"`
 	MissingDecisionEvidence     int64 `json:"missing_decision_evidence"`
@@ -105,49 +105,43 @@ type fundingCarryDecision struct {
 	DesiredSpotPosition int64  `json:"desired_spot_position"`
 	DesiredPerpPosition int64  `json:"desired_perp_position"`
 
-	HasSpotBook        bool   `json:"has_spot_book"`
-	SpotPublishedAt    int64  `json:"spot_published_at"`
-	SpotDeliveredAt    int64  `json:"spot_delivered_at"`
-	SpotSequence       uint64 `json:"spot_sequence"`
-	SpotReceiptLinkID  uint32 `json:"spot_receipt_link_id"`
-	SpotReceiptOrdinal uint64 `json:"spot_receipt_ordinal"`
-	HasSpotBid         bool   `json:"has_spot_bid"`
-	SpotBid            int64  `json:"spot_bid"`
-	SpotBidQty         int64  `json:"spot_bid_qty"`
-	HasSpotAsk         bool   `json:"has_spot_ask"`
-	SpotAsk            int64  `json:"spot_ask"`
-	SpotAskQty         int64  `json:"spot_ask_qty"`
+	HasSpotBook     bool   `json:"has_spot_book"`
+	SpotPublishedAt int64  `json:"spot_published_at"`
+	SpotSequence    uint64 `json:"spot_sequence"`
+	HasSpotBid      bool   `json:"has_spot_bid"`
+	SpotBid         int64  `json:"spot_bid"`
+	SpotBidQty      int64  `json:"spot_bid_qty"`
+	HasSpotAsk      bool   `json:"has_spot_ask"`
+	SpotAsk         int64  `json:"spot_ask"`
+	SpotAskQty      int64  `json:"spot_ask_qty"`
 
-	HasPerpBook        bool   `json:"has_perp_book"`
-	PerpPublishedAt    int64  `json:"perp_published_at"`
-	PerpDeliveredAt    int64  `json:"perp_delivered_at"`
-	PerpSequence       uint64 `json:"perp_sequence"`
-	PerpReceiptLinkID  uint32 `json:"perp_receipt_link_id"`
-	PerpReceiptOrdinal uint64 `json:"perp_receipt_ordinal"`
-	HasPerpBid         bool   `json:"has_perp_bid"`
-	PerpBid            int64  `json:"perp_bid"`
-	PerpBidQty         int64  `json:"perp_bid_qty"`
-	HasPerpAsk         bool   `json:"has_perp_ask"`
-	PerpAsk            int64  `json:"perp_ask"`
-	PerpAskQty         int64  `json:"perp_ask_qty"`
+	HasPerpBook     bool   `json:"has_perp_book"`
+	PerpPublishedAt int64  `json:"perp_published_at"`
+	PerpSequence    uint64 `json:"perp_sequence"`
+	HasPerpBid      bool   `json:"has_perp_bid"`
+	PerpBid         int64  `json:"perp_bid"`
+	PerpBidQty      int64  `json:"perp_bid_qty"`
+	HasPerpAsk      bool   `json:"has_perp_ask"`
+	PerpAsk         int64  `json:"perp_ask"`
+	PerpAskQty      int64  `json:"perp_ask_qty"`
 
-	HasFunding             bool   `json:"has_funding"`
-	FundingRateBps         int64  `json:"funding_rate_bps"`
-	FundingPublishedAt     int64  `json:"funding_published_at"`
-	FundingDeliveredAt     int64  `json:"funding_delivered_at"`
-	FundingSequence        uint64 `json:"funding_sequence"`
-	FundingReceiptLinkID   uint32 `json:"funding_receipt_link_id"`
-	FundingReceiptOrdinal  uint64 `json:"funding_receipt_ordinal"`
-	FundingReceiptDigest   string `json:"funding_receipt_digest"`
-	FundingNextAt          int64  `json:"funding_next_at"`
-	FundingIntervalSeconds int64  `json:"funding_interval_seconds"`
-	FundingMarkAvailable   bool   `json:"funding_mark_available"`
-	FundingMarkPrice       int64  `json:"funding_mark_price"`
-	FundingIndexAvailable  bool   `json:"funding_index_available"`
-	FundingIndexPrice      int64  `json:"funding_index_price"`
-	FundingAgeNanos        int64  `json:"funding_age_nanos"`
-	FundingHorizon         int64  `json:"funding_horizon"`
-	HoldingNanos           int64  `json:"holding_nanos"`
+	HasFunding                  bool   `json:"has_funding"`
+	FundingRateBps              int64  `json:"funding_rate_bps"`
+	FundingPublishedAt          int64  `json:"funding_published_at"`
+	FundingSequence             uint64 `json:"funding_sequence"`
+	FundingNextAt               int64  `json:"funding_next_at"`
+	FundingIntervalSeconds      int64  `json:"funding_interval_seconds"`
+	FundingMarkAvailable        bool   `json:"funding_mark_available"`
+	FundingMarkPrice            int64  `json:"funding_mark_price"`
+	FundingIndexAvailable       bool   `json:"funding_index_available"`
+	FundingIndexPrice           int64  `json:"funding_index_price"`
+	FundingAgeNanos             int64  `json:"funding_age_nanos"`
+	FundingHorizon              int64  `json:"funding_horizon"`
+	HoldingNanos                int64  `json:"holding_nanos"`
+	DecisionFrontierLinkID      uint32 `json:"decision_frontier_link_id"`
+	DecisionFrontierOrdinal     uint64 `json:"decision_frontier_ordinal"`
+	DecisionFrontierDeliveredAt int64  `json:"decision_frontier_delivered_at"`
+	DecisionFrontierDigest      string `json:"decision_frontier_digest"`
 
 	SpotMid             int64  `json:"spot_mid"`
 	PerpMid             int64  `json:"perp_mid"`
@@ -245,6 +239,14 @@ type fundingCarryReceiptKey struct {
 	ordinal uint64
 }
 
+type fundingCarrySourceKey struct {
+	client    uint64
+	link      uint32
+	mdType    uint8
+	sequence  uint64
+	published int64
+}
+
 // MeasureFundingCarry independently audits V2-5 P0. A valid result means the
 // recorder contract and declared calculation are internally evidenced; it is
 // not a claim that funding anchors the market.
@@ -261,7 +263,7 @@ func (r *Run) MeasureFundingCarry() (*FundingCarryAudit, error) {
 		result.Checks = append(result.Checks, FundingCarryCheck{VenueID: venue, ClientID: client, RequestID: request, Failure: failure})
 	}
 
-	receipts, frontiers, gateway, receiptAudit, receiptErr := fundingCarryReceipts(r.Dir)
+	sources, frontiers, gateway, receiptAudit, receiptErr := fundingCarryReceipts(r.Dir)
 	if receiptErr != nil {
 		result.ReceiptEvidenceErrors++
 	} else {
@@ -369,7 +371,7 @@ func (r *Run) MeasureFundingCarry() (*FundingCarryAudit, error) {
 			addCheck(decision.VenueID, decision.ClientID, decision.RequestID, "duplicate_decision_tick")
 		}
 		seenDecisionTicks[tick] = struct{}{}
-		if err := validateFundingCarryDecision(policy, decision, receipts, frontiers); err != nil {
+		if err := validateFundingCarryDecision(policy, decision, frontiers); err != nil {
 			result.DecisionFieldMismatches++
 			if isFundingCarryArithmeticFailure(err) {
 				result.FundingArithmeticMismatches++
@@ -386,43 +388,43 @@ func (r *Run) MeasureFundingCarry() (*FundingCarryAudit, error) {
 			addCheck(decision.VenueID, decision.ClientID, decision.RequestID, err.Error())
 		}
 		if decision.HasFunding {
-			if receipt, found := receipts[fundingCarryReceiptKey{decision.ClientID, decision.FundingReceiptLinkID, decision.FundingReceiptOrdinal}]; !found {
-				result.MissingFundingReceipt++
-				addCheck(decision.VenueID, decision.ClientID, decision.RequestID, "missing_funding_receipt")
-			} else if fundingCarryReceiptMatches(decision, receipt, frontiers[fundingCarryReceiptKey{decision.ClientID, decision.FundingReceiptLinkID, decision.FundingReceiptOrdinal}], exchange.MDFunding) {
-				result.FundingReceiptMatches++
+			if err := fundingCarrySourceInFrontier(decision, sources, exchange.MDFunding, decision.FundingSequence, decision.FundingPublishedAt, frontiers); err != nil {
+				if isFundingCarrySourceMissing(err) {
+					result.MissingFundingObservation++
+				} else {
+					result.ReceiptMismatches++
+				}
+				if isFundingCarryFutureFailure(err) {
+					result.FutureReceiptUse++
+				}
+				addCheck(decision.VenueID, decision.ClientID, decision.RequestID, err.Error())
 			} else {
-				result.ReceiptMismatches++
-				addCheck(decision.VenueID, decision.ClientID, decision.RequestID, "funding_receipt_identity_mismatch")
+				result.FundingObservationMatches++
 			}
 		}
 		for _, book := range []struct {
-			present              bool
-			link                 uint32
-			ordinal              uint64
-			sequence             uint64
-			published, delivered int64
+			present   bool
+			sequence  uint64
+			published int64
 		}{
-			{decision.HasSpotBook, decision.SpotReceiptLinkID, decision.SpotReceiptOrdinal, decision.SpotSequence, decision.SpotPublishedAt, decision.SpotDeliveredAt},
-			{decision.HasPerpBook, decision.PerpReceiptLinkID, decision.PerpReceiptOrdinal, decision.PerpSequence, decision.PerpPublishedAt, decision.PerpDeliveredAt},
+			{decision.HasSpotBook, decision.SpotSequence, decision.SpotPublishedAt},
+			{decision.HasPerpBook, decision.PerpSequence, decision.PerpPublishedAt},
 		} {
 			if !book.present {
 				continue
 			}
-			receipt, found := receipts[fundingCarryReceiptKey{decision.ClientID, book.link, book.ordinal}]
-			if !found {
-				result.MissingBookReceipt++
-				addCheck(decision.VenueID, decision.ClientID, decision.RequestID, "missing_book_receipt")
-				continue
-			}
-			if receipt.mdType != uint8(exchange.MDSnapshot) || receipt.sequence != book.sequence || receipt.publishedAt != book.published || receipt.deliveredAt != book.delivered || receipt.deliveredAt > decision.DecisionTime {
-				result.ReceiptMismatches++
-				if receipt.deliveredAt > decision.DecisionTime {
+			if err := fundingCarrySourceInFrontier(decision, sources, exchange.MDSnapshot, book.sequence, book.published, frontiers); err != nil {
+				if isFundingCarrySourceMissing(err) {
+					result.MissingBookObservation++
+				} else {
+					result.ReceiptMismatches++
+				}
+				if isFundingCarryFutureFailure(err) {
 					result.FutureReceiptUse++
 				}
-				addCheck(decision.VenueID, decision.ClientID, decision.RequestID, "book_receipt_identity_or_time_mismatch")
+				addCheck(decision.VenueID, decision.ClientID, decision.RequestID, err.Error())
 			} else {
-				result.BookReceiptMatches++
+				result.BookObservationMatches++
 			}
 		}
 		if !fundingCarrySubmission(decision.Action) {
@@ -505,7 +507,7 @@ func (r *Run) MeasureFundingCarry() (*FundingCarryAudit, error) {
 		}
 	}
 
-	result.Valid = result.ReceiptAuditValid && result.ReceiptEvidenceErrors == 0 && result.MissingFundingReceipt == 0 && result.MissingBookReceipt == 0 && result.ReceiptMismatches == 0 && result.FutureReceiptUse == 0 && result.InvalidDecisionRecords == 0 && result.MissingDecisionEvidence == 0 && result.DuplicateDecisions == 0 && result.DecisionFieldMismatches == 0 && result.FundingArithmeticMismatches == 0 && result.FundingSignMismatches == 0 && result.MissingGatewayDecisions == 0 && result.GatewayDecisionMismatches == 0 && result.MissingVenueOutcomes == 0 && result.DuplicateVenueOutcomes == 0 && result.MissingActorOutcomes == 0 && result.ActorOutcomeMismatches == 0
+	result.Valid = result.ReceiptAuditValid && result.ReceiptEvidenceErrors == 0 && result.MissingFundingObservation == 0 && result.MissingBookObservation == 0 && result.ReceiptMismatches == 0 && result.FutureReceiptUse == 0 && result.InvalidDecisionRecords == 0 && result.MissingDecisionEvidence == 0 && result.DuplicateDecisions == 0 && result.DecisionFieldMismatches == 0 && result.FundingArithmeticMismatches == 0 && result.FundingSignMismatches == 0 && result.MissingGatewayDecisions == 0 && result.GatewayDecisionMismatches == 0 && result.MissingVenueOutcomes == 0 && result.DuplicateVenueOutcomes == 0 && result.MissingActorOutcomes == 0 && result.ActorOutcomeMismatches == 0
 	return result, nil
 }
 
@@ -536,7 +538,7 @@ func validFundingCarryPolicy(policy fundingCarryPolicyConfig) error {
 	return nil
 }
 
-func fundingCarryReceipts(dir string) (map[fundingCarryReceiptKey]observationRecord, map[fundingCarryReceiptKey]auditedFrontier, map[fundingCarryKey]fundingCarryGatewayDecision, *MarketDataReceiptAudit, error) {
+func fundingCarryReceipts(dir string) (map[fundingCarrySourceKey][]observationRecord, map[fundingCarryReceiptKey]auditedFrontier, map[fundingCarryKey]fundingCarryGatewayDecision, *MarketDataReceiptAudit, error) {
 	audit, err := AuditMarketDataReceipts(dir)
 	if err != nil {
 		return nil, nil, nil, audit, err
@@ -557,10 +559,11 @@ func fundingCarryReceipts(dir string) (map[fundingCarryReceiptKey]observationRec
 	if err != nil {
 		return nil, nil, nil, audit, err
 	}
-	receipts := make(map[fundingCarryReceiptKey]observationRecord, manifest.Receipts.Records)
+	sources := make(map[fundingCarrySourceKey][]observationRecord, manifest.Receipts.Records)
 	for offset := 0; offset < len(receiptRaw); offset += marketDataReceiptRecordBytes {
 		record := decodeObservation(receiptRaw[offset : offset+marketDataReceiptRecordBytes])
-		receipts[fundingCarryReceiptKey{record.clientID, record.linkID, record.ordinal}] = record
+		key := fundingCarrySourceKey{record.clientID, record.linkID, record.mdType, record.sequence, record.publishedAt}
+		sources[key] = append(sources[key], record)
 	}
 	frontierHistory := reconstructReceiptHistory(receiptRaw)
 	frontiers := make(map[fundingCarryReceiptKey]auditedFrontier, len(frontierHistory))
@@ -576,18 +579,43 @@ func fundingCarryReceipts(dir string) (map[fundingCarryReceiptKey]observationRec
 		record := decodeDecision(decisionRaw[offset : offset+marketDataDecisionRecordBytes])
 		gateways[fundingCarryKey{linkVenue[record.linkID], record.clientID, record.requestID}] = fundingCarryGatewayDecision{clientID: record.clientID, linkID: record.linkID, requestID: record.requestID, decisionAt: record.decisionAt, price: record.price, qty: record.qty, side: record.side, orderType: record.orderType, tif: record.tif}
 	}
-	return receipts, frontiers, gateways, audit, nil
+	return sources, frontiers, gateways, audit, nil
 }
 
-func fundingCarryReceiptMatches(decision fundingCarryDecision, receipt observationRecord, frontier auditedFrontier, want exchange.MDType) bool {
-	if receipt.mdType != uint8(want) || receipt.sequence != decision.FundingSequence || receipt.publishedAt != decision.FundingPublishedAt || receipt.deliveredAt != decision.FundingDeliveredAt || receipt.deliveredAt > decision.DecisionTime {
-		return false
+func fundingCarrySourceInFrontier(decision fundingCarryDecision, sources map[fundingCarrySourceKey][]observationRecord, want exchange.MDType, sequence uint64, publishedAt int64, frontiers map[fundingCarryReceiptKey]auditedFrontier) error {
+	if decision.DecisionFrontierLinkID == 0 || decision.DecisionFrontierOrdinal == 0 {
+		return fmt.Errorf("source_frontier_missing")
 	}
-	return frontier.ordinal == decision.FundingReceiptOrdinal && frontier.deliveredAt == decision.FundingDeliveredAt && decision.FundingReceiptDigest == hex.EncodeToString(frontier.digest[:])
+	frontier, found := frontiers[fundingCarryReceiptKey{decision.ClientID, decision.DecisionFrontierLinkID, decision.DecisionFrontierOrdinal}]
+	if !found {
+		return fmt.Errorf("source_frontier_missing")
+	}
+	if decision.DecisionFrontierDeliveredAt != frontier.deliveredAt || decision.DecisionFrontierDigest != hex.EncodeToString(frontier.digest[:]) {
+		return fmt.Errorf("source_frontier_mismatch")
+	}
+	if decision.DecisionFrontierDeliveredAt > decision.DecisionTime {
+		return fmt.Errorf("future_receipt")
+	}
+	key := fundingCarrySourceKey{decision.ClientID, decision.DecisionFrontierLinkID, uint8(want), sequence, publishedAt}
+	records := sources[key]
+	if len(records) == 0 {
+		return fmt.Errorf("source_missing")
+	}
+	if len(records) != 1 {
+		return fmt.Errorf("source_identity_ambiguous")
+	}
+	record := records[0]
+	if record.ordinal > decision.DecisionFrontierOrdinal {
+		return fmt.Errorf("source_after_frontier")
+	}
+	if record.deliveredAt > decision.DecisionTime || record.publishedAt > decision.DecisionTime {
+		return fmt.Errorf("future_receipt")
+	}
+	return nil
 }
 
-func validateFundingCarryDecision(policy fundingCarryPolicyConfig, decision fundingCarryDecision, receipts map[fundingCarryReceiptKey]observationRecord, frontiers map[fundingCarryReceiptKey]auditedFrontier) error {
-	if decision.VenueID == "" || decision.ClientID == 0 || decision.Desk == "" || decision.PolicyVersion != "v2_5_p0_funding_carry_v1" || decision.DecisionTime == 0 || decision.Action == "" || decision.SpotSymbol != policy.SpotSymbol || decision.PerpSymbol != policy.PerpSymbol || decision.FundingHorizon != policy.FundingHorizon || decision.MinNetCarryBps != policy.MinNetCarryBps {
+func validateFundingCarryDecision(policy fundingCarryPolicyConfig, decision fundingCarryDecision, frontiers map[fundingCarryReceiptKey]auditedFrontier) error {
+	if decision.VenueID == "" || decision.ClientID == 0 || decision.Desk == "" || decision.PolicyVersion != "v2_5_p0_funding_carry_v2" || decision.DecisionTime == 0 || decision.Action == "" || decision.SpotSymbol != policy.SpotSymbol || decision.PerpSymbol != policy.PerpSymbol || decision.FundingHorizon != policy.FundingHorizon || decision.MinNetCarryBps != policy.MinNetCarryBps {
 		return fmt.Errorf("invalid_decision_fields")
 	}
 	if !fundingCarryKnownAction(decision.Action) {
@@ -608,21 +636,16 @@ func validateFundingCarryDecision(policy fundingCarryPolicyConfig, decision fund
 	if fundingCarrySubmission(decision.Action) && (!decision.Enabled || !decision.Subscribed || decision.Pending) {
 		return fmt.Errorf("submission_state_mismatch")
 	}
-	if decision.HasFunding {
-		if decision.FundingDeliveredAt > decision.DecisionTime || decision.FundingPublishedAt > decision.DecisionTime {
+	if decision.DecisionFrontierOrdinal != 0 || decision.DecisionFrontierLinkID != 0 || decision.DecisionFrontierDeliveredAt != 0 || decision.DecisionFrontierDigest != "" {
+		frontier, found := frontiers[fundingCarryReceiptKey{decision.ClientID, decision.DecisionFrontierLinkID, decision.DecisionFrontierOrdinal}]
+		if !found || decision.DecisionFrontierDeliveredAt != frontier.deliveredAt || decision.DecisionFrontierDigest == "" || decision.DecisionFrontierDigest != hex.EncodeToString(frontier.digest[:]) {
+			return fmt.Errorf("receipt_frontier_mismatch")
+		}
+		if decision.DecisionFrontierDeliveredAt > decision.DecisionTime {
 			return fmt.Errorf("future_receipt")
 		}
-		receipt, found := receipts[fundingCarryReceiptKey{decision.ClientID, decision.FundingReceiptLinkID, decision.FundingReceiptOrdinal}]
-		if !found {
-			return fmt.Errorf("receipt_missing")
-		}
-		frontier, knownFrontier := frontiers[fundingCarryReceiptKey{decision.ClientID, decision.FundingReceiptLinkID, decision.FundingReceiptOrdinal}]
-		if !knownFrontier || !fundingCarryReceiptMatches(decision, receipt, frontier, exchange.MDFunding) {
-			return fmt.Errorf("receipt_mismatch")
-		}
-		if decision.FundingReceiptDigest == "" {
-			return fmt.Errorf("receipt_digest_missing")
-		}
+	} else if decision.HasSpotBook || decision.HasPerpBook || decision.HasFunding {
+		return fmt.Errorf("receipt_frontier_missing")
 	}
 	if fundingCarrySubmission(decision.Action) {
 		if decision.RequestID == 0 || decision.Leg == "" || decision.Side == "" || decision.RequestedQty <= 0 {
@@ -912,6 +935,7 @@ func fundingCarryHasActorFill(outcomes []fundingCarryOutcome, fill fundingCarryV
 	return false
 }
 func isFundingCarryReceiptFailure(err error) bool { return stringsHasPrefix(err.Error(), "receipt_") }
+func isFundingCarrySourceMissing(err error) bool  { return err.Error() == "source_missing" }
 func isFundingCarryFutureFailure(err error) bool  { return err.Error() == "future_receipt" }
 func isFundingCarryArithmeticFailure(err error) bool {
 	return stringsHasPrefix(err.Error(), "arithmetic_")

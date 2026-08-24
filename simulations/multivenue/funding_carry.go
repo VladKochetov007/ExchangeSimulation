@@ -12,7 +12,10 @@ import (
 	etypes "exchange_sim/types"
 )
 
-const fundingCarryPolicyVersion = "v2_5_p0_funding_carry_v1"
+// v2 records one exact decision frontier and locates every cached source
+// observation within that delivered prefix. Version one incorrectly claimed
+// each cached observation was itself the current shared-link frontier.
+const fundingCarryPolicyVersion = "v2_5_p0_funding_carry_v2"
 
 const fundingCarryYearNanos int64 = 365 * 24 * int64(time.Hour)
 
@@ -101,40 +104,30 @@ type FundingCarryDecision struct {
 	DesiredSpotPosition int64  `json:"desired_spot_position"`
 	DesiredPerpPosition int64  `json:"desired_perp_position"`
 
-	HasSpotBook        bool   `json:"has_spot_book"`
-	SpotPublishedAt    int64  `json:"spot_published_at"`
-	SpotDeliveredAt    int64  `json:"spot_delivered_at"`
-	SpotSequence       uint64 `json:"spot_sequence"`
-	SpotReceiptLinkID  uint32 `json:"spot_receipt_link_id"`
-	SpotReceiptOrdinal uint64 `json:"spot_receipt_ordinal"`
-	HasSpotBid         bool   `json:"has_spot_bid"`
-	SpotBid            int64  `json:"spot_bid"`
-	SpotBidQty         int64  `json:"spot_bid_qty"`
-	HasSpotAsk         bool   `json:"has_spot_ask"`
-	SpotAsk            int64  `json:"spot_ask"`
-	SpotAskQty         int64  `json:"spot_ask_qty"`
+	HasSpotBook     bool   `json:"has_spot_book"`
+	SpotPublishedAt int64  `json:"spot_published_at"`
+	SpotSequence    uint64 `json:"spot_sequence"`
+	HasSpotBid      bool   `json:"has_spot_bid"`
+	SpotBid         int64  `json:"spot_bid"`
+	SpotBidQty      int64  `json:"spot_bid_qty"`
+	HasSpotAsk      bool   `json:"has_spot_ask"`
+	SpotAsk         int64  `json:"spot_ask"`
+	SpotAskQty      int64  `json:"spot_ask_qty"`
 
-	HasPerpBook        bool   `json:"has_perp_book"`
-	PerpPublishedAt    int64  `json:"perp_published_at"`
-	PerpDeliveredAt    int64  `json:"perp_delivered_at"`
-	PerpSequence       uint64 `json:"perp_sequence"`
-	PerpReceiptLinkID  uint32 `json:"perp_receipt_link_id"`
-	PerpReceiptOrdinal uint64 `json:"perp_receipt_ordinal"`
-	HasPerpBid         bool   `json:"has_perp_bid"`
-	PerpBid            int64  `json:"perp_bid"`
-	PerpBidQty         int64  `json:"perp_bid_qty"`
-	HasPerpAsk         bool   `json:"has_perp_ask"`
-	PerpAsk            int64  `json:"perp_ask"`
-	PerpAskQty         int64  `json:"perp_ask_qty"`
+	HasPerpBook     bool   `json:"has_perp_book"`
+	PerpPublishedAt int64  `json:"perp_published_at"`
+	PerpSequence    uint64 `json:"perp_sequence"`
+	HasPerpBid      bool   `json:"has_perp_bid"`
+	PerpBid         int64  `json:"perp_bid"`
+	PerpBidQty      int64  `json:"perp_bid_qty"`
+	HasPerpAsk      bool   `json:"has_perp_ask"`
+	PerpAsk         int64  `json:"perp_ask"`
+	PerpAskQty      int64  `json:"perp_ask_qty"`
 
 	HasFunding             bool   `json:"has_funding"`
 	FundingRateBps         int64  `json:"funding_rate_bps"`
 	FundingPublishedAt     int64  `json:"funding_published_at"`
-	FundingDeliveredAt     int64  `json:"funding_delivered_at"`
 	FundingSequence        uint64 `json:"funding_sequence"`
-	FundingReceiptLinkID   uint32 `json:"funding_receipt_link_id"`
-	FundingReceiptOrdinal  uint64 `json:"funding_receipt_ordinal"`
-	FundingReceiptDigest   string `json:"funding_receipt_digest"`
 	FundingNextAt          int64  `json:"funding_next_at"`
 	FundingIntervalSeconds int64  `json:"funding_interval_seconds"`
 	FundingMarkAvailable   bool   `json:"funding_mark_available"`
@@ -144,6 +137,15 @@ type FundingCarryDecision struct {
 	FundingAgeNanos        int64  `json:"funding_age_nanos"`
 	FundingHorizon         int64  `json:"funding_horizon"`
 	HoldingNanos           int64  `json:"holding_nanos"`
+
+	// DecisionFrontier is the full actor-local public-feed prefix immediately
+	// before this evaluation. The cached book/funding identities above are
+	// located independently within this prefix; they are not falsely labelled
+	// as the last message delivered on a busy shared link.
+	DecisionFrontierLinkID      uint32 `json:"decision_frontier_link_id"`
+	DecisionFrontierOrdinal     uint64 `json:"decision_frontier_ordinal"`
+	DecisionFrontierDeliveredAt int64  `json:"decision_frontier_delivered_at"`
+	DecisionFrontierDigest      string `json:"decision_frontier_digest"`
 
 	SpotMid             int64 `json:"spot_mid"`
 	PerpMid             int64 `json:"perp_mid"`
@@ -198,9 +200,7 @@ type FundingCarryLegOutcome struct {
 type fundingCarryBook struct {
 	hasSnapshot bool
 	publishedAt int64
-	deliveredAt int64
 	sequence    uint64
-	frontier    simulation.MarketDataFrontier
 	hasBid      bool
 	bid, bidQty int64
 	hasAsk      bool
@@ -211,9 +211,7 @@ type fundingCarryFunding struct {
 	has         bool
 	rate        exchange.FundingRate
 	publishedAt int64
-	deliveredAt int64
 	sequence    uint64
-	frontier    simulation.MarketDataFrontier
 }
 
 type fundingCarryPending struct {
@@ -283,8 +281,6 @@ func (d *FundingCarryArbitrageur) observeBook(event actor.BookSnapshotEvent) {
 			book.hasAsk, book.ask, book.askQty = true, event.Snapshot.Asks[0].Price, event.Snapshot.Asks[0].VisibleQty
 		}
 	}
-	book.frontier, book.deliveredAt = fundingCarryFrontier(d.Gateway()), 0
-	book.deliveredAt = book.frontier.DeliveredAt
 	*target = book
 }
 
@@ -298,10 +294,8 @@ func (d *FundingCarryArbitrageur) observeFunding(event actor.FundingUpdateEvent)
 	if d.funding.has && event.SeqNum != 0 && event.SeqNum <= d.funding.sequence {
 		return
 	}
-	frontier := fundingCarryFrontier(d.Gateway())
 	d.funding = fundingCarryFunding{
-		has: true, rate: *event.FundingRate, publishedAt: event.Timestamp,
-		deliveredAt: frontier.DeliveredAt, sequence: event.SeqNum, frontier: frontier,
+		has: true, rate: *event.FundingRate, publishedAt: event.Timestamp, sequence: event.SeqNum,
 	}
 }
 
@@ -695,22 +689,22 @@ func (d *FundingCarryArbitrageur) terminalRoundTripCensored(now int64) bool {
 }
 
 func (d *FundingCarryArbitrageur) baseDecision(now time.Time, action string) FundingCarryDecision {
+	frontier := fundingCarryFrontier(d.Gateway())
 	decision := FundingCarryDecision{
 		VenueID: d.cfg.VenueID, Desk: d.cfg.Desk, ClientID: d.cfg.ClientID, PolicyVersion: fundingCarryPolicyVersion,
 		DecisionTime: now.UnixNano(), Enabled: d.cfg.Enabled, Subscribed: d.subscribed, Pending: d.pending != nil, ActionOrDefer: action,
 		SpotSymbol: d.cfg.SpotSymbol, PerpSymbol: d.cfg.PerpSymbol, SpotPosition: d.spotPosition, PerpPosition: d.perpPosition,
-		HasSpotBook: d.spot.hasSnapshot, SpotPublishedAt: d.spot.publishedAt, SpotDeliveredAt: d.spot.deliveredAt,
-		SpotSequence: d.spot.sequence, SpotReceiptLinkID: d.spot.frontier.LinkID, SpotReceiptOrdinal: d.spot.frontier.Ordinal,
+		HasSpotBook: d.spot.hasSnapshot, SpotPublishedAt: d.spot.publishedAt, SpotSequence: d.spot.sequence,
 		HasSpotBid: d.spot.hasBid, SpotBid: d.spot.bid, SpotBidQty: d.spot.bidQty, HasSpotAsk: d.spot.hasAsk, SpotAsk: d.spot.ask, SpotAskQty: d.spot.askQty,
-		HasPerpBook: d.perp.hasSnapshot, PerpPublishedAt: d.perp.publishedAt, PerpDeliveredAt: d.perp.deliveredAt,
-		PerpSequence: d.perp.sequence, PerpReceiptLinkID: d.perp.frontier.LinkID, PerpReceiptOrdinal: d.perp.frontier.Ordinal,
+		HasPerpBook: d.perp.hasSnapshot, PerpPublishedAt: d.perp.publishedAt, PerpSequence: d.perp.sequence,
 		HasPerpBid: d.perp.hasBid, PerpBid: d.perp.bid, PerpBidQty: d.perp.bidQty, HasPerpAsk: d.perp.hasAsk, PerpAsk: d.perp.ask, PerpAskQty: d.perp.askQty,
-		HasFunding: d.funding.has, FundingRateBps: d.funding.rate.Rate, FundingPublishedAt: d.funding.publishedAt, FundingDeliveredAt: d.funding.deliveredAt,
-		FundingSequence: d.funding.sequence, FundingReceiptLinkID: d.funding.frontier.LinkID, FundingReceiptOrdinal: d.funding.frontier.Ordinal,
-		FundingReceiptDigest: fmt.Sprintf("%x", d.funding.frontier.Digest), FundingNextAt: d.funding.rate.NextFunding, FundingIntervalSeconds: d.funding.rate.Interval,
+		HasFunding: d.funding.has, FundingRateBps: d.funding.rate.Rate, FundingPublishedAt: d.funding.publishedAt, FundingSequence: d.funding.sequence,
+		FundingNextAt: d.funding.rate.NextFunding, FundingIntervalSeconds: d.funding.rate.Interval,
 		FundingMarkAvailable: d.funding.rate.MarkAvailable, FundingMarkPrice: d.funding.rate.MarkPrice,
 		FundingIndexAvailable: d.funding.rate.IndexAvailable, FundingIndexPrice: d.funding.rate.IndexPrice,
 		FundingHorizon: d.cfg.FundingHorizon, MinNetCarryBps: d.cfg.MinNetCarryBps,
+		DecisionFrontierLinkID: frontier.LinkID, DecisionFrontierOrdinal: frontier.Ordinal,
+		DecisionFrontierDeliveredAt: frontier.DeliveredAt, DecisionFrontierDigest: fmt.Sprintf("%x", frontier.Digest),
 	}
 	return decision
 }

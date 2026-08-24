@@ -17,7 +17,7 @@ func TestFundingCarryAuditReplaysLocalFundingDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Valid || result.Decisions != 1 || result.Submitted != 1 || result.Accepted != 1 || result.FundingReceiptMatches != 1 || result.BookReceiptMatches != 2 || result.MissingGatewayDecisions != 0 || len(result.Checks) != 0 {
+	if !result.Valid || result.Decisions != 1 || result.Submitted != 1 || result.Accepted != 1 || result.FundingObservationMatches != 1 || result.BookObservationMatches != 2 || result.MissingGatewayDecisions != 0 || len(result.Checks) != 0 {
 		t.Fatalf("valid funding-carry audit = %+v", result)
 	}
 }
@@ -25,30 +25,50 @@ func TestFundingCarryAuditReplaysLocalFundingDecision(t *testing.T) {
 func TestFundingCarryAuditCatchesEvidenceAndEconomicMutations(t *testing.T) {
 	tests := []struct {
 		name   string
-		mutate func(*fundingCarryDecision)
+		mutate func(*testing.T, string, *fundingCarryDecision)
 		check  func(*FundingCarryAudit) bool
 	}{
 		{
 			name: "frontier digest substitution",
-			mutate: func(decision *fundingCarryDecision) {
-				decision.FundingReceiptDigest = "00000000000000000000000000000000"
+			mutate: func(_ *testing.T, _ string, decision *fundingCarryDecision) {
+				decision.DecisionFrontierDigest = "00000000000000000000000000000000"
 			},
 			check: func(result *FundingCarryAudit) bool {
 				return result.ReceiptMismatches > 0
 			},
 		},
 		{
-			name: "future delivered funding",
-			mutate: func(decision *fundingCarryDecision) {
-				decision.FundingDeliveredAt = decision.DecisionTime + 1
+			name: "future decision frontier",
+			mutate: func(_ *testing.T, _ string, decision *fundingCarryDecision) {
+				decision.DecisionFrontierDeliveredAt = decision.DecisionTime + 1
 			},
 			check: func(result *FundingCarryAudit) bool {
-				return result.FutureReceiptUse > 0
+				return result.ReceiptMismatches > 0
+			},
+		},
+		{
+			name: "missing cached source identity",
+			mutate: func(_ *testing.T, _ string, decision *fundingCarryDecision) {
+				decision.SpotSequence = 4
+			},
+			check: func(result *FundingCarryAudit) bool {
+				return result.MissingBookObservation > 0
+			},
+		},
+		{
+			name: "cached funding appears after decision frontier",
+			mutate: func(t *testing.T, dir string, decision *fundingCarryDecision) {
+				decision.DecisionFrontierOrdinal = 2
+				decision.DecisionFrontierDeliveredAt = 40
+				decision.DecisionFrontierDigest = fundingCarryFixtureFrontierDigest(t, dir, 2)
+			},
+			check: func(result *FundingCarryAudit) bool {
+				return result.ReceiptMismatches > 0
 			},
 		},
 		{
 			name: "funding arithmetic substitution",
-			mutate: func(decision *fundingCarryDecision) {
+			mutate: func(_ *testing.T, _ string, decision *fundingCarryDecision) {
 				decision.FundingIncomeBps--
 			},
 			check: func(result *FundingCarryAudit) bool {
@@ -57,7 +77,7 @@ func TestFundingCarryAuditCatchesEvidenceAndEconomicMutations(t *testing.T) {
 		},
 		{
 			name: "gateway side substitution",
-			mutate: func(decision *fundingCarryDecision) {
+			mutate: func(_ *testing.T, _ string, decision *fundingCarryDecision) {
 				decision.Side = exchange.Sell.String()
 			},
 			check: func(result *FundingCarryAudit) bool {
@@ -83,7 +103,7 @@ func TestFundingCarryAuditCatchesEvidenceAndEconomicMutations(t *testing.T) {
 // intentionally absent: the analyzer must replay evidence, not call the
 // policy that originally produced it. The scalar decision uses BUY (the zero
 // enum member), exercising the evidence wire contract at this boundary.
-func fundingCarryTestRun(t *testing.T, mutate func(*fundingCarryDecision)) *Run {
+func fundingCarryTestRun(t *testing.T, mutate func(*testing.T, string, *fundingCarryDecision)) *Run {
 	t.Helper()
 	dir := t.TempDir()
 	policy := fundingCarryPolicyConfig{
@@ -97,21 +117,18 @@ func fundingCarryTestRun(t *testing.T, mutate func(*fundingCarryDecision)) *Run 
 
 	decision := fundingCarryDecision{
 		VenueID: "north", Desk: "funding_carry_arb_1", ClientID: 7,
-		PolicyVersion: "v2_5_p0_funding_carry_v1", DecisionTime: 60,
+		PolicyVersion: "v2_5_p0_funding_carry_v2", DecisionTime: 60,
 		Enabled: true, Subscribed: true, Action: "SUBMIT_SPOT_TARGET_IOC",
 		SpotSymbol: "ABC/USD", PerpSymbol: "ABC-PERP",
 		DesiredSpotPosition: 100, DesiredPerpPosition: -100,
-		HasSpotBook: true, SpotPublishedAt: 10, SpotDeliveredAt: 30,
-		SpotSequence: 1, SpotReceiptLinkID: 1, SpotReceiptOrdinal: 1,
+		HasSpotBook: true, SpotPublishedAt: 10, SpotSequence: 1,
 		HasSpotBid: true, SpotBid: 1_000, SpotBidQty: 100,
 		HasSpotAsk: true, SpotAsk: 1_002, SpotAskQty: 100,
-		HasPerpBook: true, PerpPublishedAt: 11, PerpDeliveredAt: 40,
-		PerpSequence: 2, PerpReceiptLinkID: 1, PerpReceiptOrdinal: 2,
+		HasPerpBook: true, PerpPublishedAt: 11, PerpSequence: 2,
 		HasPerpBid: true, PerpBid: 1_010, PerpBidQty: 100,
 		HasPerpAsk: true, PerpAsk: 1_012, PerpAskQty: 100,
 		HasFunding: true, FundingRateBps: 10, FundingPublishedAt: 12,
-		FundingDeliveredAt: 50, FundingSequence: 3, FundingReceiptLinkID: 1,
-		FundingReceiptOrdinal: 3, FundingNextAt: 1_000,
+		FundingSequence: 3, FundingNextAt: 1_000,
 		FundingIntervalSeconds: 100, FundingMarkAvailable: true,
 		FundingMarkPrice: 1_011, FundingIndexAvailable: true,
 		FundingIndexPrice: 1_001, FundingAgeNanos: 48, FundingHorizon: 1,
@@ -120,9 +137,12 @@ func fundingCarryTestRun(t *testing.T, mutate func(*fundingCarryDecision)) *Run 
 		MinNetCarryBps: 1, Leg: "SPOT_TARGET_ADJUSTMENT", Side: "BUY",
 		LimitPrice: 1_002, RequestedQty: 100, RequestID: 42,
 	}
-	decision.FundingReceiptDigest = fundingCarryFixtureFrontierDigest(t, dir)
+	decision.DecisionFrontierLinkID = 1
+	decision.DecisionFrontierOrdinal = 3
+	decision.DecisionFrontierDeliveredAt = 50
+	decision.DecisionFrontierDigest = fundingCarryFixtureFrontierDigest(t, dir, 3)
 	if mutate != nil {
-		mutate(&decision)
+		mutate(t, dir, &decision)
 	}
 	accepted := fundingCarryVenueOrder{
 		RequestID: decision.RequestID, OrderID: 100, Symbol: "ABC/USD",
@@ -199,14 +219,14 @@ func writeFundingCarryReceipts(t *testing.T, dir string) {
 	}
 }
 
-func fundingCarryFixtureFrontierDigest(t *testing.T, dir string) string {
+func fundingCarryFixtureFrontierDigest(t *testing.T, dir string, ordinal uint64) string {
 	t.Helper()
 	_, raw, err := fundingCarryFixtureReceiptRaw(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	frontiers := reconstructReceiptHistory(raw)
-	frontier, found := frontiers[vectorFrontierKey{clientID: 7, linkID: 1, ordinal: 3}]
+	frontier, found := frontiers[vectorFrontierKey{clientID: 7, linkID: 1, ordinal: ordinal}]
 	if !found {
 		t.Fatal("funding receipt frontier missing")
 	}
