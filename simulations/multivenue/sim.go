@@ -122,6 +122,10 @@ type Config struct {
 	// V2-4 L1-P2 relative-phase experiment. These rows are persisted evidence
 	// only and deliberately excluded from the execution checkpoint domain.
 	RecordNoiseFlowPhaseDecisions bool `json:"record_noise_flow_phase_decisions"`
+	// RecordFundingCarryDecisions retains every V2-5 P0 funding-aware carry
+	// evaluation and linked non-atomic leg outcome. It is optional evidence
+	// only; the policy never reads the recorder or receipt sidecar.
+	RecordFundingCarryDecisions bool `json:"record_funding_carry_decisions"`
 	// CheckpointIntervalSeconds writes a rolling digest of the event stream at
 	// each simulated-time boundary, so two runs of one seed can be compared
 	// without retaining their logs. Zero disables it.
@@ -430,6 +434,10 @@ type Config struct {
 	// CDFLiabilityHedger configures the V2-4 L0 finite-capital delivery
 	// obligation participant. Nil preserves the completed V2-3 population.
 	CDFLiabilityHedger *LiabilityHedgerConfig `json:"cdf_liability_hedger,omitempty"`
+	// FundingCarryArbitrageur configures the opt-in V2-5 P0 desk. It is
+	// separate from the historical fixed-basis CarryArbitrageur, so nil retains
+	// every pre-P0 trajectory exactly.
+	FundingCarryArbitrageur *FundingCarryArbitrageurConfig `json:"funding_carry_arbitrageur,omitempty"`
 	// MakerIndexWeight blends the index with the maker's own midpoint.
 	MakerIndexWeight float64 `json:"maker_index_weight"`
 
@@ -650,6 +658,9 @@ func (c *Config) normalize() error {
 	if c.RecordNoiseFlowPhaseDecisions && c.LogMode != "full" {
 		return errors.New("multivenue: noise-flow phase decisions require full persisted evidence")
 	}
+	if c.RecordFundingCarryDecisions && c.LogMode != "full" {
+		return errors.New("multivenue: funding-carry decisions require full persisted evidence")
+	}
 	if c.SpotStoikovInventorySizeSkewBps < 0 || c.SpotStoikovInventorySizeSkewBps > 5_000 {
 		return fmt.Errorf("multivenue: spot Stoikov inventory size skew bps must be in [0,5000], got %d", c.SpotStoikovInventorySizeSkewBps)
 	}
@@ -701,6 +712,30 @@ func (c *Config) normalize() error {
 	}
 	if c.RecordLiabilityHedgerDecisions && c.CDFLiabilityHedger == nil {
 		return errors.New("multivenue: liability-hedger evidence requires a CDF liability-hedger policy")
+	}
+	if c.FundingCarryArbitrageur != nil {
+		if c.FundingCarryArbitrageur.SpotSymbol != "ABC/USD" || c.FundingCarryArbitrageur.PerpSymbol != "ABC-PERP" {
+			return fmt.Errorf("multivenue: V2-5 funding carry P0 must use ABC/USD and ABC-PERP, got %q and %q", c.FundingCarryArbitrageur.SpotSymbol, c.FundingCarryArbitrageur.PerpSymbol)
+		}
+		if err := c.FundingCarryArbitrageur.validate(); err != nil {
+			return fmt.Errorf("multivenue: funding carry arbitrageur: %w", err)
+		}
+		// Scientific P0 cells must retain both local decision/outcome evidence
+		// and the delayed public feed which the policy consumes. The paired
+		// recorder-neutrality test may turn both off; neither recorder is read by
+		// the strategy.
+		if c.RecordFundingCarryDecisions || c.RecordMarketDataReceipts {
+			if !c.RecordFundingCarryDecisions || !c.RecordMarketDataReceipts || !slices.Contains(c.MarketDataReceiptRoles, "funding_carry_arb") {
+				return errors.New("multivenue: instrumented funding carry requires decisions and funding_carry_arb market-data receipts")
+			}
+			profile, configured := c.latencyProfileFor("funding_carry_arb")
+			if !configured || profile.zero() {
+				return errors.New("multivenue: instrumented funding carry requires an explicit nonzero funding_carry_arb public-feed link")
+			}
+		}
+	}
+	if c.RecordFundingCarryDecisions && c.FundingCarryArbitrageur == nil {
+		return errors.New("multivenue: funding-carry evidence requires a funding-carry policy")
 	}
 	if len(c.VenueIDs) == 0 {
 		c.VenueIDs = []string{"north", "central", "south"}
@@ -1169,6 +1204,7 @@ type Venue struct {
 	Suppliers         []*ElasticSupplier
 	LiabilityHedgers  []*LiabilityHedger
 	CarryArbs         []*CarryArbitrageur
+	FundingCarryArbs  []*FundingCarryArbitrageur
 	LatentLiquidity   []*LatentLiquidity
 	MetaorderTraders  []*MetaorderTrader
 	lastTwoSided      map[string]twoSidedMark
@@ -1899,6 +1935,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		for _, arb := range venue.CarryArbs {
 			runner.AddActor(arb)
 		}
+		for _, arb := range venue.FundingCarryArbs {
+			runner.AddActor(arb)
+		}
 		for _, latent := range venue.LatentLiquidity {
 			runner.AddActor(latent)
 		}
@@ -2268,6 +2307,19 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	liabilityHedgerFillObserver := func(fill LiabilityHedgerFill) {
 		venue.makerStateLog.LogEvidenceOnly(fill.Timestamp, fill.ClientID, "liability_hedger_fill", fill)
 	}
+	fundingCarryDecisionObserver := func(decision FundingCarryDecision) {
+		// P0 records local economic evaluation separately from execution. It is
+		// append-only evidence only and deliberately never reaches the ordered
+		// execution hash, actor, scheduler, RNG, or exchange state.
+		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "funding_carry_decision", decision)
+	}
+	fundingCarryOutcomeObserver := func(outcome FundingCarryLegOutcome) {
+		simTime := outcome.DecisionTime
+		if outcome.ExecutionTime != 0 {
+			simTime = outcome.ExecutionTime
+		}
+		venue.makerStateLog.LogEvidenceOnly(simTime, outcome.ClientID, "funding_carry_leg_outcome", outcome)
+	}
 	noiseFlowPhaseObserver := func(decision feesim.RandomTakerDecision) {
 		// L1-P2 timing rows are optional evidence only. They attest a complete
 		// evaluated tick, including a zero-order evaluation, but have no route
@@ -2628,6 +2680,21 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		})
 		arb.SetTickerFactory(timers)
 		venue.CarryArbs = append(venue.CarryArbs, arb)
+	}
+
+	if policy := s.Config.FundingCarryArbitrageur; policy != nil {
+		cfg := *policy
+		role := "funding_carry_arb_1"
+		balances := map[string]int64{"ABC": 2_000 * mvBasePrecision, "USD": 200_000_000 * mvQuotePrecision}
+		clientID, gateway := venue.connectParticipant(mount, role, balances, 100_000_000*mvQuotePrecision, noiseFee)
+		cfg.VenueID, cfg.Desk, cfg.ClientID, cfg.TerminalNano = venue.ID, role, clientID, s.terminalNano
+		if s.Config.RecordFundingCarryDecisions {
+			cfg.DecisionObserver = fundingCarryDecisionObserver
+			cfg.OutcomeObserver = fundingCarryOutcomeObserver
+		}
+		arb := NewFundingCarryArbitrageur(nextActor(), gateway, cfg)
+		arb.SetTickerFactory(timers)
+		venue.FundingCarryArbs = append(venue.FundingCarryArbs, arb)
 	}
 
 	supplierBalances := map[string]int64{"ABC": 20_000 * mvBasePrecision, "USD": 500_000_000 * mvQuotePrecision}

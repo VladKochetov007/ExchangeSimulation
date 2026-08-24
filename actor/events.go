@@ -106,6 +106,11 @@ type FundingUpdateEvent struct {
 	Symbol      string
 	FundingRate *exchange.FundingRate
 	Timestamp   int64
+	// SeqNum preserves the publisher-assigned public-message identity. Funding
+	// policies that record their local information boundary must be able to
+	// join a cached rate to its delayed market-data receipt rather than treating
+	// a numeric rate as self-identifying.
+	SeqNum uint64
 }
 
 type OpenInterestEvent struct {

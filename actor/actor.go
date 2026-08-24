@@ -625,6 +625,7 @@ func (a *BaseActor) decodeMarketData(md *exchange.MarketDataMsg) *Event {
 				Symbol:      md.Symbol,
 				FundingRate: md.Data.(*exchange.FundingRate),
 				Timestamp:   md.Timestamp,
+				SeqNum:      md.SeqNum,
 			},
 		}
 	case exchange.MDOpenInterest:
