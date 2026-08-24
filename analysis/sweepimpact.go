@@ -223,18 +223,16 @@ func (t *TradeTape) orderObservation(orderID uint64, first, last, horizon int, r
 	if size <= 0 {
 		return zero, false
 	}
-	reference := int64(0)
-	if first < len(t.PreMid) {
-		reference = t.PreMid[first]
-	}
-	if reference <= 0 {
+	reference, referenceOK := t.preMidAt(first)
+	if !referenceOK {
 		reference = t.Prices[first-1]
+		referenceOK = true
 	}
-	if reference <= 0 {
+	if !referenceOK || reference <= 0 {
 		return zero, false
 	}
-	terminal := t.terminalMid(last + horizon)
-	if terminal <= 0 {
+	terminal, terminalOK := t.terminalMid(last + horizon)
+	if !terminalOK || terminal <= 0 {
 		return zero, false
 	}
 	response := 1e4 * math.Log(float64(terminal)/float64(reference))

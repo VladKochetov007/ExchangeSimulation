@@ -117,7 +117,10 @@ func (l *OptionChainLister) PendingListings(nowNano int64, prices etypes.Listing
 		return nil, fmt.Errorf("option-chain listing underlying %s: %w", l.Underlying, err)
 	}
 	if spot <= 0 {
-		return nil, fmt.Errorf("option-chain listing underlying %s: non-positive price", l.Underlying)
+		// Current chains use strictly-positive strikes and Black-76 marks.
+		// A numeric non-positive underlying is therefore present but outside
+		// this lister's model domain, not an implicit absence sentinel.
+		return nil, fmt.Errorf("option-chain listing underlying %s: %w", l.Underlying, etypes.ErrPriceDomain)
 	}
 	center := ((spot + l.StrikeStep/2) / l.StrikeStep) * l.StrikeStep
 

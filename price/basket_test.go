@@ -1,6 +1,8 @@
 package price
 
 import (
+	"errors"
+	"math"
 	"sync"
 	"testing"
 
@@ -68,6 +70,25 @@ func TestBasketIndexBelowMinSourcesReturnsUnavailable(t *testing.T) {
 	all := basketOf(ExcludeOutliers{ThresholdBps: 1}, 1, 10000, 20000)
 	if _, err := all.Price("X"); err == nil {
 		t.Fatal("fully-excluded basket returned a price")
+	}
+}
+
+func TestBasketIndexWeightedAverageDoesNotOverflowAtSignedBoundary(t *testing.T) {
+	b := NewBasketIndex([]BasketSource{
+		{Source: &fixedSource{math.MaxInt64}, Weight: math.MaxInt64},
+		{Source: &fixedSource{math.MaxInt64}, Weight: math.MaxInt64},
+	}, nil, 1)
+	got, err := b.Price("X")
+	if err != nil || got != math.MaxInt64 {
+		t.Fatalf("extreme weighted index = (%d, %v), want MaxInt64", got, err)
+	}
+}
+
+func TestBasketIndexReportsAdjustmentOverflowNotUnavailable(t *testing.T) {
+	b := basketOf(ClampToMedian{ThresholdBps: math.MaxInt64}, 1, math.MaxInt64, math.MaxInt64)
+	_, err := b.Price("X")
+	if err == nil || errors.Is(err, etypes.ErrNoPrice) {
+		t.Fatalf("adjustment overflow became unavailable: %v", err)
 	}
 }
 

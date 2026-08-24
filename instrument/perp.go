@@ -1,5 +1,7 @@
 package instrument
 
+import "fmt"
+
 import etypes "exchange_sim/types"
 
 type PerpFutures struct {
@@ -24,6 +26,7 @@ func NewPerpFutures(symbol, base, quote string, basePrecision, quotePrecision, t
 			quotePrecision: quotePrecision,
 			tickSize:       tickSize,
 			minOrderSize:   minOrderSize,
+			priceDomain:    etypes.PositivePriceDomain(tickSize),
 		},
 		fundingRate: &etypes.FundingRate{
 			Symbol:         symbol,
@@ -50,29 +53,30 @@ func NewPerpFutures(symbol, base, quote string, basePrecision, quotePrecision, t
 func (p *PerpFutures) IsPerp() bool           { return true }
 func (p *PerpFutures) InstrumentType() string { return "PERP" }
 
-func (p *PerpFutures) MarginRequired(qty, price, precision int64) int64 {
-	if qty < 0 || price < 0 || p.MarginRate < 0 {
-		return -1
+func (p *PerpFutures) MarginRequired(qty, price, precision int64) (int64, error) {
+	if qty < 0 || p.MarginRate < 0 {
+		return 0, fmt.Errorf("perp margin inputs: qty=%d margin_rate=%d", qty, p.MarginRate)
 	}
-	notional, ok := etypes.TryMulDiv(qty, price, precision)
+	// Futures cash flows retain the sign of price, but initial/maintenance
+	// margin is a non-negative risk quantity. The current simple contract uses
+	// absolute traded notional as that risk base; it does not reinterpret a
+	// negative price as an unavailable mark.
+	notional, ok := etypes.TryAbsMulDiv(qty, price, precision)
 	if !ok {
-		return -1
+		return 0, fmt.Errorf("perp margin notional: qty=%d price=%d precision=%d", qty, price, precision)
 	}
 	margin, ok := etypes.TryMulDiv(notional, p.MarginRate, 10000)
 	if !ok {
-		return -1
+		return 0, fmt.Errorf("perp margin rate: notional=%d margin_rate=%d", notional, p.MarginRate)
 	}
-	return margin
+	return margin, nil
 }
 
-func (p *PerpFutures) MarginForMarket(qty, refPrice, precision int64) int64 {
-	if refPrice == 0 {
-		return 0
-	}
+func (p *PerpFutures) MarginForMarket(qty, refPrice, precision int64) (int64, error) {
 	return p.MarginRequired(qty, refPrice, precision)
 }
 
-func (p *PerpFutures) MarginOnCancel(remainingQty, orderPrice, precision int64) int64 {
+func (p *PerpFutures) MarginOnCancel(remainingQty, orderPrice, precision int64) (int64, error) {
 	return p.MarginRequired(remainingQty, orderPrice, precision)
 }
 
@@ -133,7 +137,10 @@ func (p *PerpFutures) releaseOrderMargin(ctx etypes.SettlementContext, order *et
 	if order == nil || order.Type == etypes.Market {
 		return
 	}
-	stillNeeded := p.MarginRequired(order.Qty-order.FilledQty, order.Price, precision)
+	stillNeeded, err := p.MarginRequired(order.Qty-order.FilledQty, order.Price, precision)
+	if err != nil {
+		panic(fmt.Sprintf("perp release order margin: %v", err))
+	}
 	if release := order.Reserved - stillNeeded; release > 0 {
 		ctx.ReleasePerp(clientID, quote, release)
 		order.Reserved = stillNeeded
@@ -150,7 +157,11 @@ func (p *PerpFutures) settlePositionMargin(ctx etypes.SettlementContext, clientI
 		if hasLedger {
 			release = ledger.ReleasePositionMargin(clientID, ctx.BookSymbol, posSide, closedQty, delta.OldSize)
 		} else {
-			release = p.MarginRequired(closedQty, delta.OldEntryPrice, precision)
+			var err error
+			release, err = p.MarginRequired(closedQty, delta.OldEntryPrice, precision)
+			if err != nil {
+				panic(fmt.Sprintf("perp release position margin: %v", err))
+			}
 		}
 		ctx.ReleasePerp(clientID, quote, release)
 	}
@@ -158,7 +169,10 @@ func (p *PerpFutures) settlePositionMargin(ctx etypes.SettlementContext, clientI
 	// closedQty: hedge-mode reduces clamp at zero and discard overshoot, so the
 	// naive difference would margin quantity that never opened.
 	if openedQty := absInt(delta.NewSize) - absInt(delta.OldSize) + closedQty; openedQty > 0 {
-		needed := p.MarginRequired(openedQty, ctx.Exec.Price, precision)
+		needed, err := p.MarginRequired(openedQty, ctx.Exec.Price, precision)
+		if err != nil {
+			panic(fmt.Sprintf("perp reserve position margin: %v", err))
+		}
 		ctx.ReservePerp(clientID, quote, needed)
 		if hasLedger {
 			ledger.AddPositionMargin(clientID, ctx.BookSymbol, posSide, needed)
@@ -277,7 +291,18 @@ func calcPerpPnL(oldSize, oldEntryPrice, tradeQty, tradePrice int64, tradeSide e
 	if oldSize < 0 {
 		sign = -1
 	}
-	return sign * etypes.MulDiv(closedQty, tradePrice-oldEntryPrice, basePrecision)
+	pnl, ok := etypes.TryPriceChangeMulDiv(closedQty, tradePrice, oldEntryPrice, basePrecision)
+	if !ok {
+		panic("calcPerpPnL: unrepresentable realized PnL")
+	}
+	if sign < 0 {
+		var negateOK bool
+		pnl, negateOK = etypes.TrySub(0, pnl)
+		if !negateOK {
+			panic("calcPerpPnL: unrepresentable short realized PnL")
+		}
+	}
+	return pnl
 }
 
 var _ etypes.Settleable = (*PerpFutures)(nil)
@@ -288,17 +313,37 @@ func (p *PerpFutures) SetFundingCalculator(calc FundingCalculator) {
 	p.fundingCalc = calc
 }
 
-func (p *PerpFutures) UpdateFundingRate(indexPrice int64, markPrice int64) {
-	if indexPrice <= 0 || markPrice <= 0 {
-		p.fundingRate.IndexPrice = 0
-		p.fundingRate.MarkPrice = 0
-		p.fundingRate.IndexAvailable = false
-		p.fundingRate.MarkAvailable = false
-		return
-	}
+// UpdateMarkReferences stores an explicitly present mark/index pair. Numeric
+// zero and negative values remain representable; callers that need a
+// percentage-based funding formula must use UpdateFundingRate, which enforces
+// that formula's positive-price domain separately.
+func (p *PerpFutures) UpdateMarkReferences(indexPrice int64, markPrice int64) {
 	p.fundingRate.IndexPrice = indexPrice
 	p.fundingRate.MarkPrice = markPrice
 	p.fundingRate.IndexAvailable = true
 	p.fundingRate.MarkAvailable = true
-	p.fundingRate.Rate = p.fundingCalc.Calculate(indexPrice, markPrice)
+}
+
+// ClearMarkReferences records an unavailable reference without overwriting
+// the last numeric observations with zero. Consumers must inspect the
+// availability flags (or their error-returning lookup boundary), never the
+// numeric fields, to determine whether the current mark may be used.
+func (p *PerpFutures) ClearMarkReferences() {
+	p.fundingRate.IndexAvailable = false
+	p.fundingRate.MarkAvailable = false
+}
+
+// UpdateFundingRate stores a present pair and computes the current funding
+// rate. The present values must be admissible to the configured funding
+// formula; otherwise their availability is cleared and the domain error is
+// returned to the caller rather than manufacturing a zero rate.
+func (p *PerpFutures) UpdateFundingRate(indexPrice int64, markPrice int64) error {
+	p.UpdateMarkReferences(indexPrice, markPrice)
+	rate, err := p.fundingCalc.Calculate(indexPrice, markPrice)
+	if err != nil {
+		p.ClearMarkReferences()
+		return err
+	}
+	p.fundingRate.Rate = rate
+	return nil
 }

@@ -3,6 +3,8 @@ package analysis
 import (
 	"sort"
 	"sync"
+
+	etypes "exchange_sim/types"
 )
 
 // CrossVenueDispersionOptions selects same-asset venue quotes for an offline,
@@ -21,14 +23,18 @@ type CrossVenueDispersionOptions struct {
 // two-sided venue midpoints. Bps is the relative max-minus-min midpoint range
 // using the minimum midpoint as denominator.
 type CrossVenueDispersion struct {
-	Symbol                   string       `json:"symbol"`
-	StalenessNanos           int64        `json:"staleness_nanos"`
-	MinVenues                int          `json:"min_venues"`
-	QuoteUpdates             int          `json:"quote_updates"`
-	Evaluated                int          `json:"evaluated"`
-	SkippedInsufficientFresh int          `json:"skipped_insufficient_fresh"`
-	MidpointRangeBps         Distribution `json:"midpoint_range_bps"`
-	LongestPositiveRunNanos  int64        `json:"longest_positive_run_nanos"`
+	Symbol                   string `json:"symbol"`
+	StalenessNanos           int64  `json:"staleness_nanos"`
+	MinVenues                int    `json:"min_venues"`
+	QuoteUpdates             int    `json:"quote_updates"`
+	Evaluated                int    `json:"evaluated"`
+	SkippedInsufficientFresh int    `json:"skipped_insufficient_fresh"`
+	// UndefinedRelativeRanges counts fresh multi-venue comparisons that have
+	// signed midpoints at or below zero. The quote observations are retained,
+	// but a bps denominator is mathematically undefined there.
+	UndefinedRelativeRanges int          `json:"undefined_relative_ranges"`
+	MidpointRangeBps        Distribution `json:"midpoint_range_bps"`
+	LongestPositiveRunNanos int64        `json:"longest_positive_run_nanos"`
 	// PositiveObservationTimes is opt-in because a long raw run can contain
 	// many periodic snapshots. Each entry is a sampled instant, not a claim
 	// that dispersion remained positive between publications.
@@ -81,13 +87,12 @@ func (r *Run) MeasureCrossVenueDispersion(opts CrossVenueDispersionOptions) (*Cr
 		if len(bids) == 0 || len(asks) == 0 {
 			return
 		}
-		bid, ask := bestBid(bids), bestAsk(asks)
-		if bid <= 0 || ask <= 0 || bid > ask {
+		bid, _, bidOK := bestWithDepth(bids, true)
+		ask, _, askOK := bestWithDepth(asks, false)
+		if !bidOK || !askOK || bid > ask {
 			return
 		}
-		// Positive uncrossed prices imply ask-bid is nonnegative and cannot
-		// overflow int64. This is the same strict midpoint contract as V2.
-		quote := venueMidQuote{mid: bid + (ask-bid)/2, at: event.SimTS, ordinal: event.Ordinal}
+		quote := venueMidQuote{mid: etypes.Midpoint(bid, ask), at: event.SimTS, ordinal: event.Ordinal}
 		mu.Lock()
 		series[event.VenueID] = append(series[event.VenueID], quote)
 		result.QuoteUpdates++
@@ -156,7 +161,12 @@ func (r *Run) MeasureCrossVenueDispersion(opts CrossVenueDispersionOptions) (*Cr
 				high = item.quote.mid
 			}
 		}
-		bps := 1e4 * float64(high-low) / float64(low)
+		if low <= 0 {
+			result.UndefinedRelativeRanges++
+			inPositiveRun = false
+			continue
+		}
+		bps := 1e4 * (float64(high) - float64(low)) / float64(low)
 		ranges = append(ranges, bps)
 		result.Evaluated++
 		if bps <= 0 {

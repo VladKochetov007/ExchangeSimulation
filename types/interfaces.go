@@ -26,9 +26,17 @@ type Venue interface {
 // premium, while unavailable is a distinct state.
 var ErrNoPrice = errors.New("no usable price")
 
+// ErrPriceDomain means a numeric price was present but lies outside the
+// consumer's declared mathematical or economic domain. It is distinct from
+// ErrNoPrice: for example, zero is a present value from a signed commodity
+// source but is unusable by the current positive-forward Black-76 model.
+var ErrPriceDomain = errors.New("price outside consumer domain")
+
 // PriceSource provides a configured or externally observed reference price.
-// Implementations must return a positive price on success and wrap ErrNoPrice
-// when the source, symbol, or required observation is unavailable.
+// Implementations return any numeric price admitted by the consuming
+// instrument's PriceDomain and wrap ErrNoPrice when the source, symbol, or
+// required observation is unavailable. Numeric zero is never an availability
+// sentinel.
 type PriceSource interface {
 	Price(symbol string) (int64, error)
 }
@@ -108,6 +116,7 @@ type Instrument interface {
 	QuotePrecision() int64
 	TickSize() int64
 	MinOrderSize() int64
+	PriceDomain() PriceDomain
 	ValidatePrice(price int64) bool
 	ValidateQty(qty int64) bool
 	IsPerp() bool
@@ -159,9 +168,12 @@ type PerpExchange interface {
 // Margined is implemented by instruments that use margin-based fund reservation.
 // The exchange calls these instead of the IsPerp()+type-assert path.
 type Margined interface {
-	MarginRequired(qty, price, precision int64) int64
-	MarginForMarket(qty, refPrice, precision int64) int64
-	MarginOnCancel(remainingQty, orderPrice, precision int64) int64
+	// MarginRequired returns a non-negative risk reservation or an error. A
+	// numeric zero can be a valid risk result at a zero-priced contract; it is
+	// never a sentinel for unavailable price or invalid arithmetic.
+	MarginRequired(qty, price, precision int64) (int64, error)
+	MarginForMarket(qty, refPrice, precision int64) (int64, error)
+	MarginOnCancel(remainingQty, orderPrice, precision int64) (int64, error)
 }
 
 // OrderMarginer is implemented by instruments whose order reservation depends
@@ -179,9 +191,11 @@ type OrderMarginer interface {
 // and premium marks move account equity). Without it a position is invisible
 // to the risk engine and can never trigger liquidation.
 type PositionMarginer interface {
-	// PositionMark is the price positions are marked at for unrealized PnL
-	// (zero when no mark has been set yet — the position then marks neutral).
-	PositionMark() int64
+	// PositionMark is the price positions are marked at for unrealized PnL.
+	// It returns ErrNoPrice before the instrument has received a mark; a
+	// numeric zero can be a valid option premium and is never an absence
+	// sentinel.
+	PositionMark() (int64, error)
 	// MaintenanceForPosition returns the quote-asset maintenance requirement
 	// for a signed position of the given size.
 	MaintenanceForPosition(size, precision int64) int64

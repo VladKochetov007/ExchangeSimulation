@@ -234,7 +234,7 @@ func (m *MetaorderTrader) onTick(now time.Time) {
 		if timestamp < m.nextStartTS {
 			return
 		}
-		if _, available := twoSidedMidpoint(m.bestBid, m.bestAsk); !available {
+		if _, available := positiveDomainTwoSidedMidpoint(m.bestBid, m.bestAsk); !available {
 			return
 		}
 		m.begin(timestamp)
@@ -246,7 +246,7 @@ func (m *MetaorderTrader) onTick(now time.Time) {
 // begin starts a parent order. Size is Pareto and sign is a fair coin, both
 // independent of the price path.
 func (m *MetaorderTrader) begin(timestamp int64) {
-	mid, available := twoSidedMidpoint(m.bestBid, m.bestAsk)
+	mid, available := positiveDomainTwoSidedMidpoint(m.bestBid, m.bestAsk)
 	if !available {
 		return
 	}
@@ -386,7 +386,7 @@ func (m *MetaorderTrader) externalVolume() int64 {
 
 func (m *MetaorderTrader) finish(timestamp int64, completed bool) {
 	endMid := m.startMid
-	if current, available := twoSidedMidpoint(m.bestBid, m.bestAsk); available {
+	if current, available := positiveDomainTwoSidedMidpoint(m.bestBid, m.bestAsk); available {
 		endMid = current
 	}
 	record := MetaorderRecord{

@@ -61,7 +61,10 @@ func TestRegressionPartialFillKeepsFeeHeadroomReserved(t *testing.T) {
 	}
 
 	remaining := BTCAmount(9)
-	wantMargin := perp.MarginRequired(remaining, price, BTC_PRECISION)
+	wantMargin, err := perp.MarginRequired(remaining, price, BTC_PRECISION)
+	if err != nil {
+		t.Fatalf("expected remainder margin: %v", err)
+	}
 	wantFee := MulDiv(remaining, price, BTC_PRECISION) * 10 / 10000
 	if want := wantMargin + wantFee; order.Reserved != want {
 		t.Fatalf("remainder Reserved = %d, want margin(9)+fee(9) = %d+%d = %d",

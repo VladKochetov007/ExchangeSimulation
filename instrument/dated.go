@@ -36,6 +36,14 @@ func (f *ExpiringFutures) SetObservationWindow(windowNano int64) {
 func (f *ExpiringFutures) IsPerp() bool           { return false }
 func (f *ExpiringFutures) InstrumentType() string { return "FUTURE" }
 
+// SetPriceDomain configures the dated contract's numeric price domain. It is
+// intentionally exposed on dated futures, rather than on generic spot or
+// perpetual instruments: a commodity future may admit negative/zero prices,
+// while the current crypto spot and perpetual contracts remain positive-only.
+func (f *ExpiringFutures) SetPriceDomain(domain etypes.PriceDomain) error {
+	return f.SpotInstrument.setPriceDomain(domain)
+}
+
 // Perp exposes the embedded perpetual so the exchange's mark-price and
 // liquidation machinery can treat dated futures like any margined book.
 func (f *ExpiringFutures) Perp() *PerpFutures { return &f.PerpFutures }
@@ -57,17 +65,15 @@ func (f *ExpiringFutures) SettlementPrice() (int64, error) {
 // ExpiryCashFlow marks the position from entry to settlement: the standard
 // futures cash settlement (size signed, long positive).
 func (f *ExpiringFutures) ExpiryCashFlow(size, entryPrice, settlementPrice, basePrecision int64) int64 {
-	return etypes.MulDiv(size, settlementPrice-entryPrice, basePrecision)
+	return etypes.PriceChangeMulDiv(size, settlementPrice, entryPrice, basePrecision)
 }
 
 func (f *ExpiringFutures) DeliveryFee(size, settlementPrice, basePrecision int64) int64 {
 	if f.DeliveryFeeBps <= 0 {
 		return 0
 	}
-	if size < 0 {
-		size = -size
-	}
-	return etypes.MulDiv(size, settlementPrice, basePrecision) * f.DeliveryFeeBps / 10000
+	notional := etypes.AbsMulDiv(size, settlementPrice, basePrecision)
+	return etypes.MulDiv(notional, f.DeliveryFeeBps, 10000)
 }
 
 var _ etypes.Expirable = (*ExpiringFutures)(nil)

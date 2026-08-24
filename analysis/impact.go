@@ -74,18 +74,16 @@ func (t *TradeTape) Impact(opts ImpactOptions) ImpactCurve {
 		if opts.Role != "" && (i >= len(t.Roles) || t.Roles[i] != opts.Role) {
 			continue
 		}
-		reference := int64(0)
-		if i < len(t.PreMid) {
-			reference = t.PreMid[i]
-		}
-		if reference <= 0 {
+		reference, referenceOK := t.preMidAt(i)
+		if !referenceOK {
 			reference = t.Prices[i-1]
+			referenceOK = true
 		}
-		if reference <= 0 {
+		if !referenceOK || reference <= 0 {
 			continue
 		}
-		terminal := t.terminalMid(i + horizon)
-		if terminal <= 0 {
+		terminal, terminalOK := t.terminalMid(i + horizon)
+		if !terminalOK || terminal <= 0 {
 			continue
 		}
 		response := 1e4 * math.Log(float64(terminal)/float64(reference))
@@ -142,14 +140,8 @@ func (t *TradeTape) Impact(opts ImpactOptions) ImpactCurve {
 // the horizon times the half spread — a bias that does not decay with horizon
 // and, at the spreads in this campaign, is the same size as the effect being
 // measured. It also scales with the spread, which several experiments varied.
-func (t *TradeTape) terminalMid(index int) int64 {
-	if index < 0 || index >= len(t.Prices) {
-		return 0
-	}
-	if index < len(t.PreMid) && t.PreMid[index] > 0 {
-		return t.PreMid[index]
-	}
-	return 0
+func (t *TradeTape) terminalMid(index int) (int64, bool) {
+	return t.preMidAt(index)
 }
 
 func fitLine(x, y []float64) (slope, r2 float64) {

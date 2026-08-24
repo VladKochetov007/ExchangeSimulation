@@ -3183,7 +3183,10 @@ func exchangeGreekRisk(venue *Venue, account etypes.MarkedAccountSnapshot, phase
 			// state before this lifecycle point.
 			continue
 		}
-		forward := option.UnderlyingMark()
+		forward, err := option.UnderlyingMark()
+		if err != nil {
+			return derivsim.GreekProfile{}, nil, fmt.Errorf("multivenue: venue %s option %s underlying mark: %w", venue.ID, option.Symbol(), err)
+		}
 		yearsLeft := float64(timeToExpiry) / float64(365*24*time.Hour)
 		// The exchange marks with the instrument's own volatility, not with
 		// the dealer's. Once dealers hold their own models the two views

@@ -1,6 +1,6 @@
 package analysis
 
-import "math/bits"
+import "math/big"
 
 // mulDiv computes a*b/c in 128-bit intermediate precision, truncating toward
 // zero, which is what the exchange itself does.
@@ -10,33 +10,15 @@ import "math/bits"
 // against an int64 ceiling of 9.2e18. An audit that overflows reports the
 // venue as wrong and is itself the thing that is wrong, which is how this
 // function came to exist.
-func mulDiv(a, b, c int64) int64 {
+func mulDiv(a, b, c int64) (int64, bool) {
 	if c == 0 {
-		return 0
+		return 0, false
 	}
-	negative := (a < 0) != (b < 0)
-	if c < 0 {
-		negative = !negative
-		c = -c
+	var product, divisor, quotient big.Int
+	product.Mul(big.NewInt(a), big.NewInt(b))
+	quotient.Quo(&product, divisor.SetInt64(c))
+	if !quotient.IsInt64() {
+		return 0, false
 	}
-	hi, lo := bits.Mul64(absUint(a), absUint(b))
-	divisor := uint64(c)
-	if hi >= divisor {
-		// The quotient does not fit. Saturating is a lie; report zero and let
-		// the caller's residual make the problem visible instead.
-		return 0
-	}
-	quotient, _ := bits.Div64(hi, lo, divisor)
-	result := int64(quotient)
-	if negative {
-		return -result
-	}
-	return result
-}
-
-func absUint(value int64) uint64 {
-	if value < 0 {
-		return uint64(-value)
-	}
-	return uint64(value)
+	return quotient.Int64(), true
 }

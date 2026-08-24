@@ -37,9 +37,11 @@ type ContractBalance struct {
 	GrossSize int64 `json:"gross_size"`
 	Holders   int   `json:"holders"`
 	// MarkPrice is the venue's last published mark, and OpenValue the cash
-	// that would change hands if every holder closed there.
-	MarkPrice int64 `json:"mark_price"`
-	OpenValue int64 `json:"open_value"`
+	// that would change hands if every holder closed there. MarkAvailable keeps
+	// a present zero/negative mark distinct from no mark publication.
+	MarkPrice     int64 `json:"mark_price"`
+	MarkAvailable bool  `json:"mark_available"`
+	OpenValue     int64 `json:"open_value"`
 }
 
 // PositionReconstruction is the independent rebuild of every open position.
@@ -66,6 +68,9 @@ type PositionReconstruction struct {
 	// and counting them was overstating the open value by the settled amount.
 	SettledContractsExcluded int   `json:"settled_contracts_excluded"`
 	SettledSizeExcluded      int64 `json:"settled_size_excluded"`
+	// UnrepresentableOpenValues counts signed price changes whose exact
+	// position cash flow exceeded int64. They are not rewritten as zero.
+	UnrepresentableOpenValues int `json:"unrepresentable_open_values"`
 }
 
 type positionKey struct {
@@ -163,7 +168,7 @@ func (r *Run) MeasurePositions(opts PositionOptions) (*PositionReconstruction, e
 			mu.Unlock()
 		case "mark_price_update":
 			var payload markPayload
-			if event.Decode(&payload) != nil || payload.Symbol == "" || payload.MarkPrice <= 0 {
+			if event.Decode(&payload) != nil || payload.Symbol == "" {
 				return
 			}
 			at := payload.Timestamp
@@ -203,6 +208,7 @@ func (r *Run) MeasurePositions(opts PositionOptions) (*PositionReconstruction, e
 			contract = &ContractBalance{VenueID: key.venue, Symbol: key.symbol}
 			if mark := marks[contractKey]; mark != nil {
 				contract.MarkPrice = mark.price
+				contract.MarkAvailable = true
 			}
 			contracts[contractKey] = contract
 		}
@@ -213,8 +219,23 @@ func (r *Run) MeasurePositions(opts PositionOptions) (*PositionReconstruction, e
 		}
 		contract.GrossSize += gross
 		contract.Holders++
-		if contract.MarkPrice > 0 {
-			contract.OpenValue += mulDiv(contract.MarkPrice-state.entry, state.size, precision)
+		if contract.MarkAvailable {
+			change, ok := exactSub(contract.MarkPrice, state.entry)
+			if !ok {
+				result.UnrepresentableOpenValues++
+				continue
+			}
+			value, ok := exactMulDiv(change, state.size, precision)
+			if !ok {
+				result.UnrepresentableOpenValues++
+				continue
+			}
+			next, ok := exactAdd(contract.OpenValue, value)
+			if !ok {
+				result.UnrepresentableOpenValues++
+				continue
+			}
+			contract.OpenValue = next
 		}
 	}
 

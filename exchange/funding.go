@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+
+	etypes "exchange_sim/types"
 )
 
 type positionKey struct {
@@ -284,7 +286,7 @@ func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpF
 // Payments are zero-sum: net flow between longs and shorts routes to/from exchange revenue.
 func settleFunding(store PositionStore, clients map[uint64]*Client, perp *PerpFutures, clock Clock, sink fundingEventSink) bool {
 	fundingRate := perp.GetFundingRate()
-	if !fundingRate.MarkAvailable || fundingRate.MarkPrice <= 0 {
+	if !fundingRate.MarkAvailable {
 		// A missing mark is not permission to value funding at each position's
 		// entry price. That would turn price absence into a hidden per-account
 		// fallback and break the shared-mark funding contract.
@@ -308,7 +310,7 @@ func settleFunding(store PositionStore, clients map[uint64]*Client, perp *PerpFu
 		if client == nil {
 			return
 		}
-		positionValue := MulDiv(abs(pos.Size), markPrice, precision)
+		positionValue := etypes.AbsMulDiv(pos.Size, markPrice, precision)
 		funding := positionValue * fundingRate.Rate / 10000
 
 		oldBalance := client.PerpBalances[quote]

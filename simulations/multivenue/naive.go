@@ -143,7 +143,7 @@ func (m *FixedDistanceMaker) onTick(time.Time) {
 	if len(m.pending) != 0 {
 		return
 	}
-	mid, available := twoSidedMidpoint(m.bestBid, m.bestAsk)
+	mid, available := positiveDomainTwoSidedMidpoint(m.bestBid, m.bestAsk)
 	if !available || m.bestAsk == m.bestBid {
 		return
 	}
@@ -298,7 +298,7 @@ func (m *ImbalanceMaker) onImbalanceTick(time.Time) {
 	if len(m.pending) != 0 {
 		return
 	}
-	mid, available := twoSidedMidpoint(m.bestBid, m.bestAsk)
+	mid, available := positiveDomainTwoSidedMidpoint(m.bestBid, m.bestAsk)
 	if !available || m.bestAsk == m.bestBid {
 		return
 	}

@@ -72,7 +72,7 @@ func (m *MicrostructureStats) observe(bestBid, bestAsk, cumulativeTrades int64) 
 		m.firstTrades, m.started = cumulativeTrades, true
 	}
 	m.lastTrades = cumulativeTrades
-	mid, available := twoSidedMidpoint(bestBid, bestAsk)
+	mid, available := positiveDomainTwoSidedMidpoint(bestBid, bestAsk)
 	if !available || bestAsk == bestBid {
 		m.hasLastMid = false
 		return

@@ -54,6 +54,11 @@ type MarginCheckAudit struct {
 	EligibleCandidates int `json:"eligible_candidates"`
 	ExcludedCandidates int `json:"excluded_candidates"`
 	MarkUpdates        int `json:"mark_updates"`
+	// UnsupportedMarkDomain counts published marks outside this frozen
+	// positive-price perpetual contract. They are present observations, not
+	// missing marks; affected candidates are excluded rather than replayed with
+	// a numeric sentinel.
+	UnsupportedMarkDomain int `json:"unsupported_mark_domain"`
 	// AmbiguousMarkTimestampCollisions counts repeated ABC-PERP mark records at
 	// one venue/time. General and derivative logs have no shared ordinal, so a
 	// liquidation_check at that time could not be matched to one of those marks.
@@ -274,7 +279,16 @@ func (r *Run) MeasureMarginChecks(opts MarginCheckOptions) (*MarginCheckAudit, e
 				return
 			}
 			var payload markPayload
-			if event.Decode(&payload) != nil || payload.MarkPrice <= 0 {
+			if event.Decode(&payload) != nil {
+				return
+			}
+			if payload.MarkPrice <= 0 {
+				result.UnsupportedMarkDomain++
+				for _, current := range states {
+					if current.participant.VenueID == event.VenueID {
+						current.exclude("unsupported_positive_mark_domain")
+					}
+				}
 				return
 			}
 			markKey := marginMarkTimestampKey{venueID: event.VenueID, timestamp: event.SimTS}

@@ -24,9 +24,9 @@ func TestTwoSidedMidpointIsOverflowSafeAndExplicit(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, ok := twoSidedMidpoint(test.bid, test.ask)
+			got, ok := positiveDomainTwoSidedMidpoint(test.bid, test.ask)
 			if got != test.want || ok != test.ok {
-				t.Fatalf("twoSidedMidpoint(%d, %d) = (%d, %t), want (%d, %t)", test.bid, test.ask, got, ok, test.want, test.ok)
+				t.Fatalf("positiveDomainTwoSidedMidpoint(%d, %d) = (%d, %t), want (%d, %t)", test.bid, test.ask, got, ok, test.want, test.ok)
 			}
 		})
 	}
@@ -76,10 +76,6 @@ func TestLocalBookCacheRejectsInvalidTop(t *testing.T) {
 	for _, snapshot := range []actor.BookSnapshotEvent{
 		{Symbol: "ABC/USD", SeqNum: 1, Timestamp: 1},
 		{Symbol: "ABC/USD", SeqNum: 1, Timestamp: 1, Snapshot: &exchange.BookSnapshot{
-			Bids: []exchange.PriceLevel{{Price: 100, VisibleQty: 1}},
-			Asks: []exchange.PriceLevel{{Price: 100, VisibleQty: 1}},
-		}},
-		{Symbol: "ABC/USD", SeqNum: 1, Timestamp: 1, Snapshot: &exchange.BookSnapshot{
 			Bids: []exchange.PriceLevel{{Price: 99, VisibleQty: 0}},
 			Asks: []exchange.PriceLevel{{Price: 101, VisibleQty: 1}},
 		}},
@@ -90,6 +86,34 @@ func TestLocalBookCacheRejectsInvalidTop(t *testing.T) {
 	}
 	if _, ok := cache.View(); ok {
 		t.Fatal("invalid source created usable cache state")
+	}
+}
+
+func TestLocalBookCacheRetainsSignedAndZeroLevelsWithExplicitPresence(t *testing.T) {
+	cache := NewLocalBookCache("oil", "OIL-FUT")
+	for _, test := range []struct {
+		name     string
+		sequence uint64
+		bid, ask int64
+		wantMid  int64
+	}{
+		{name: "negative book", sequence: 1, bid: -40, ask: -20, wantMid: -30},
+		{name: "crosses zero", sequence: 2, bid: -1, ask: 0, wantMid: 0},
+		{name: "locked zero", sequence: 3, bid: 0, ask: 0, wantMid: 0},
+		{name: "full signed range", sequence: 4, bid: math.MinInt64, ask: math.MaxInt64, wantMid: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if !cache.ObserveSnapshot(localCacheSnapshot("OIL-FUT", test.sequence, int64(test.sequence), test.bid, test.ask)) {
+				t.Fatalf("signed snapshot rejected: bid=%d ask=%d", test.bid, test.ask)
+			}
+			view, ok := cache.View()
+			if !ok || view.Bid != test.bid || view.Ask != test.ask {
+				t.Fatalf("signed cache view = %+v, %t", view, ok)
+			}
+			if got, ok := cache.Mid(); !ok || got != test.wantMid {
+				t.Fatalf("signed cache mid = %d, %t; want %d, true", got, ok, test.wantMid)
+			}
+		})
 	}
 }
 

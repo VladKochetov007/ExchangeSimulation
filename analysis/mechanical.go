@@ -1,6 +1,10 @@
 package analysis
 
-import "math"
+import (
+	"math"
+
+	etypes "exchange_sim/types"
+)
 
 // MechanicalImpact decomposes the price response of an aggressive order into
 // the part the order itself removed from the book and the part the makers
@@ -113,26 +117,32 @@ type MechanicalOptions struct {
 }
 
 // ExhaustedPolicy prices an order that would exhaust the side it consumes.
-// Returning zero leaves the order unmeasurable.
-type ExhaustedPolicy func(book *ReplayedBook, takerBuys bool, qty int64) int64
+// Its boolean leaves the order explicitly unmeasurable; a numeric zero may be
+// a valid signed-contract price.
+type ExhaustedPolicy func(book *ReplayedBook, takerBuys bool, qty int64) (int64, bool)
 
 // ExhaustedAtDeepestVisible prices an exhausting order at the far end of the
 // book it clears: the largest mechanical move the visible depth can justify.
-func ExhaustedAtDeepestVisible(book *ReplayedBook, takerBuys bool, qty int64) int64 {
+func ExhaustedAtDeepestVisible(book *ReplayedBook, takerBuys bool, qty int64) (int64, bool) {
 	return book.DeepestVisible(takerBuys)
+}
+
+type replayedPrice struct {
+	value int64
+	ok    bool
 }
 
 // orderReplay accumulates one aggressive order during the walk.
 type orderReplay struct {
 	firstTrade int
 	lastTrade  int
-	preMid     int64
+	preMid     replayedPrice
 	buys       bool
 	qty        int64
 	// counterfactualBest is the best price on the consumed side after removing
 	// the order's quantity, computed against the book as it stood before the
 	// order began.
-	preBid, preAsk int64
+	preBid, preAsk replayedPrice
 	bookAtStart    *ReplayedBook
 }
 
@@ -143,29 +153,32 @@ func MeasureMechanicalImpact(path string, opts MechanicalOptions) (*MechanicalIm
 		horizon = 10
 	}
 
-	var midBeforeTrade []int64
+	var midBeforeTrade []replayedPrice
 	var tradeTimestamps []int64
 	// Best prices as they stood before each trade. The state before trade i+1
 	// is also the state after trade i's whole delta block, because the
 	// exchange holds its lock from matching through publication.
-	var preBestBid, preBestAsk []int64
+	var preBestBid, preBestAsk []replayedPrice
 	var orders []*orderReplay
 	byID := map[uint64]*orderReplay{}
 	tradeIndex := 0
 
 	drift, err := ReplayFile(path, func(ts int64, trade tradePayload, book *ReplayedBook) {
-		midBeforeTrade = append(midBeforeTrade, book.Mid())
+		mid, midOK := book.Mid()
+		midBeforeTrade = append(midBeforeTrade, replayedPrice{value: mid, ok: midOK})
 		tradeTimestamps = append(tradeTimestamps, ts)
-		preBestBid = append(preBestBid, book.BestBid())
-		preBestAsk = append(preBestAsk, book.BestAsk())
+		bid, bidOK := book.BestBid()
+		ask, askOK := book.BestAsk()
+		preBestBid = append(preBestBid, replayedPrice{value: bid, ok: bidOK})
+		preBestAsk = append(preBestAsk, replayedPrice{value: ask, ok: askOK})
 		existing := byID[trade.TakerOrderID]
 		if existing == nil {
 			existing = &orderReplay{
 				firstTrade: tradeIndex,
-				preMid:     book.Mid(),
+				preMid:     replayedPrice{value: mid, ok: midOK},
 				buys:       trade.Side == "BUY",
-				preBid:     book.BestBid(),
-				preAsk:     book.BestAsk(),
+				preBid:     replayedPrice{value: bid, ok: bidOK},
+				preAsk:     replayedPrice{value: ask, ok: askOK},
 				bookAtStart: &ReplayedBook{
 					bids: copyLevels(book.bids),
 					asks: copyLevels(book.asks),
@@ -191,24 +204,32 @@ func MeasureMechanicalImpact(path string, opts MechanicalOptions) (*MechanicalIm
 	for _, order := range orders {
 		result.Orders++
 		terminal, ok := terminalIndex(order, horizon, opts.HorizonNanos, tradeTimestamps)
-		if !ok || order.preMid <= 0 || midBeforeTrade[terminal] <= 0 {
+		if !ok || !order.preMid.ok || !midBeforeTrade[terminal].ok {
 			result.UnmeasurableOrders++
 			continue
 		}
-		counterfactualBest := order.bookAtStart.ConsumeCounterfactual(order.buys, order.qty)
-		if counterfactualBest <= 0 {
+		counterfactualBest, counterfactualOK := order.bookAtStart.ConsumeCounterfactual(order.buys, order.qty)
+		if !counterfactualOK {
 			result.ExhaustedOrders++
 			if opts.ExhaustedPrice != nil {
-				counterfactualBest = opts.ExhaustedPrice(order.bookAtStart, order.buys, order.qty)
+				counterfactualBest, counterfactualOK = opts.ExhaustedPrice(order.bookAtStart, order.buys, order.qty)
 			}
-			if counterfactualBest <= 0 {
+			if !counterfactualOK {
 				result.UnmeasurableOrders++
 				continue
 			}
 			result.ExhaustedPriced++
 		}
-		counterfactualMid := counterfactualMidpoint(order, counterfactualBest)
-		if counterfactualMid <= 0 {
+		counterfactualMid, counterfactualMidOK := counterfactualMidpoint(order, counterfactualBest)
+		if !counterfactualMidOK {
+			result.UnmeasurableOrders++
+			continue
+		}
+		// This decomposition is intentionally a log-return statistic. A signed
+		// replayed book is valid evidence, but bps/log returns are undefined at
+		// or across zero and must be reported as unmeasurable rather than
+		// silently absolute-valued.
+		if order.preMid.value <= 0 || counterfactualMid <= 0 || midBeforeTrade[terminal].value <= 0 {
 			result.UnmeasurableOrders++
 			continue
 		}
@@ -217,15 +238,15 @@ func MeasureMechanicalImpact(path string, opts MechanicalOptions) (*MechanicalIm
 		if !order.buys {
 			sign = -1.0
 		}
-		mechanicalBps := sign * 1e4 * math.Log(float64(counterfactualMid)/float64(order.preMid))
-		actualBps := sign * 1e4 * math.Log(float64(midBeforeTrade[terminal])/float64(order.preMid))
+		mechanicalBps := sign * 1e4 * math.Log(float64(counterfactualMid)/float64(order.preMid.value))
+		actualBps := sign * 1e4 * math.Log(float64(midBeforeTrade[terminal].value)/float64(order.preMid.value))
 		revisionBps := actualBps - mechanicalBps
 
 		allMechanical = append(allMechanical, mechanicalBps)
 		allActual = append(allActual, actualBps)
 		allRevision = append(allRevision, revisionBps)
 
-		if counterfactualMid == order.preMid {
+		if counterfactualMid == order.preMid.value {
 			result.ZeroMechanical++
 			zeroSubsampleAbs = append(zeroSubsampleAbs, math.Abs(actualBps))
 		} else {
@@ -243,9 +264,9 @@ func MeasureMechanicalImpact(path string, opts MechanicalOptions) (*MechanicalIm
 				if !order.buys {
 					published = preBestBid[next]
 				}
-				if published > 0 {
+				if published.ok {
 					walkChecked++
-					if published == counterfactualBest {
+					if published.value == counterfactualBest {
 						walkAgreed++
 					}
 				}
@@ -332,18 +353,18 @@ func covarianceOf(a, b []float64) float64 {
 
 // counterfactualMidpoint rebuilds the midpoint from the untouched side and the
 // consumed side's new best price.
-func counterfactualMidpoint(order *orderReplay, consumedBest int64) int64 {
+func counterfactualMidpoint(order *orderReplay, consumedBest int64) (int64, bool) {
 	if order.buys {
 		// A buyer consumed asks; the bid is where it was.
-		if order.preBid <= 0 {
-			return 0
+		if !order.preBid.ok || order.preBid.value > consumedBest {
+			return 0, false
 		}
-		return (order.preBid + consumedBest) / 2
+		return etypes.Midpoint(order.preBid.value, consumedBest), true
 	}
-	if order.preAsk <= 0 {
-		return 0
+	if !order.preAsk.ok || consumedBest > order.preAsk.value {
+		return 0, false
 	}
-	return (consumedBest + order.preAsk) / 2
+	return etypes.Midpoint(consumedBest, order.preAsk.value), true
 }
 
 func copyLevels(source map[int64]int64) map[int64]int64 {

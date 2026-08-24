@@ -29,6 +29,14 @@ func (f listingPriceSourceFunc) Price(symbol string) (int64, error) { return f(s
 // books: none establishes a usable midpoint.
 var ErrNoBookPrice = etypes.ErrNoPrice
 
+// isPriceUnavailable classifies a failed consumer price boundary. ErrNoPrice
+// means no observation arrived; ErrPriceDomain means a numeric observation
+// arrived but cannot be used by this operation's declared model. Both must be
+// surfaced to a client or periodic diagnostic, never converted to price zero.
+func isPriceUnavailable(err error) bool {
+	return errors.Is(err, etypes.ErrNoPrice) || errors.Is(err, etypes.ErrPriceDomain)
+}
+
 // expiryLifecycleState names the contractual lifecycle rather than deriving it
 // from whether a price happened to be available on one particular automation
 // tick. ACTIVE is a live instrument before expiry; EXPIRY_REACHED immediately
@@ -106,13 +114,10 @@ func (e *DefaultExchange) bookMidPriceLocked(symbol string) (int64, error) {
 		return 0, fmt.Errorf("%w: %s book is one-sided or empty", ErrNoBookPrice, symbol)
 	}
 	bid, ask := book.Bids.Best.Price, book.Asks.Best.Price
-	if bid <= 0 || ask <= 0 || bid > ask {
+	if bid > ask {
 		return 0, fmt.Errorf("%w: %s has invalid best prices bid=%d ask=%d", ErrNoBookPrice, symbol, bid, ask)
 	}
-	// Resting limit prices are positive and an uncrossed live book has
-	// bid <= ask, so ask-bid is in [0, MaxInt64-1] and cannot overflow.
-	// This form avoids the otherwise possible overflow in bid+ask.
-	return bid + (ask-bid)/2, nil
+	return etypes.Midpoint(bid, ask), nil
 }
 
 // bookReferencePrice returns the declared derivative/index reference policy:
@@ -133,17 +138,18 @@ func (e *DefaultExchange) bookReferencePriceLocked(symbol string) (int64, error)
 	if book.Bids.Best != nil && book.Asks.Best != nil {
 		return e.bookMidPriceLocked(symbol)
 	}
-	if book.Bids.Best != nil && book.Bids.Best.Price > 0 {
+	if book.Bids.Best != nil {
 		return book.Bids.Best.Price, nil
 	}
-	if book.Asks.Best != nil && book.Asks.Best.Price > 0 {
+	if book.Asks.Best != nil {
 		return book.Asks.Best.Price, nil
 	}
 	return 0, fmt.Errorf("%w: %s book is empty or has an invalid best price", ErrNoBookPrice, symbol)
 }
 
-// configuredIndexPrice uses the declared external reference only when it
-// supplies a positive price.
+// configuredIndexPrice uses the declared external reference when its source
+// reports a value. The consuming instrument validates the numeric domain;
+// availability is represented solely by the returned error.
 func (e *DefaultExchange) configuredIndexPrice(symbol string) (int64, error) {
 	if e.indexProvider == nil {
 		return 0, fmt.Errorf("%w: no configured index for %s", ErrNoBookPrice, symbol)
@@ -151,9 +157,6 @@ func (e *DefaultExchange) configuredIndexPrice(symbol string) (int64, error) {
 	price, err := e.indexProvider.Price(symbol)
 	if err != nil {
 		return 0, fmt.Errorf("configured index for %s: %w", symbol, err)
-	}
-	if price <= 0 {
-		return 0, fmt.Errorf("%w: configured index unavailable for %s", ErrNoBookPrice, symbol)
 	}
 	return price, nil
 }
@@ -182,9 +185,6 @@ func (e *DefaultExchange) configuredIndexPriceLocked(symbol string) (int64, erro
 	}
 	if err != nil {
 		return 0, fmt.Errorf("configured index for %s: %w", symbol, err)
-	}
-	if price <= 0 {
-		return 0, fmt.Errorf("%w: configured index unavailable for %s", ErrNoBookPrice, symbol)
 	}
 	return price, nil
 }
@@ -249,7 +249,7 @@ func (e *DefaultExchange) CheckListings() {
 	for _, policy := range e.listingPolicies {
 		pending, err := policy.PendingListings(now, prices)
 		if err != nil {
-			if errors.Is(err, ErrNoBookPrice) {
+			if isPriceUnavailable(err) {
 				// No valid underlying midpoint: defer this automatic listing.
 				e.reportPriceUnavailable(now, etypes.InstrumentFeedSymbol, "listing", err)
 				continue
@@ -485,7 +485,11 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 		if hasLedger {
 			release = ledger.ReleasePositionMargin(ep.clientID, symbol, pos.PositionSide, absSize, pos.Size)
 		} else if isMargined {
-			release = margined.MarginRequired(absSize, pos.EntryPrice, precision)
+			var marginErr error
+			release, marginErr = margined.MarginRequired(absSize, pos.EntryPrice, precision)
+			if marginErr != nil {
+				panic(fmt.Sprintf("expiry margin release %s: %v", symbol, marginErr))
+			}
 		}
 		if release > 0 {
 			client.ReleasePerp(quote, release)

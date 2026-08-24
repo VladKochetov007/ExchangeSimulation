@@ -49,20 +49,20 @@ func MeasureRestingPlacement(path string, opts RestingOptions) (*RestingPlacemen
 	result := &RestingPlacement{ByRole: map[string]*PlacementStats{}}
 
 	drift, err := ReplayFileWith(path, nil, func(_ int64, accepted acceptedPayload, book *ReplayedBook) {
-		if accepted.Price <= 0 || accepted.Qty <= 0 {
+		if accepted.Qty <= 0 {
 			return
 		}
-		mid := book.Mid()
-		if mid <= 0 {
+		mid, midOK := book.Mid()
+		if !midOK {
 			return
 		}
 		// Distance is signed away from the mid on the order's own side, so a
 		// bid ten ticks below and an ask ten ticks above both read as ten.
-		var distance int64
+		var distance float64
 		if accepted.Side == "BUY" {
-			distance = mid - accepted.Price
+			distance = float64(mid) - float64(accepted.Price)
 		} else {
-			distance = accepted.Price - mid
+			distance = float64(accepted.Price) - float64(mid)
 		}
 		if distance < 0 {
 			// Priced through the mid: this order is crossing, not resting.
@@ -83,7 +83,7 @@ func MeasureRestingPlacement(path string, opts RestingOptions) (*RestingPlacemen
 			result.ByRole[role] = stats
 		}
 		stats.Orders++
-		stats.distances = append(stats.distances, float64(distance)/float64(opts.TickSize))
+		stats.distances = append(stats.distances, distance/float64(opts.TickSize))
 		stats.qtys = append(stats.qtys, float64(accepted.Qty))
 	})
 	if err != nil {

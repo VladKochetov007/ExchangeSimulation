@@ -13,21 +13,21 @@ type OrderBook struct {
 }
 
 func (ob *OrderBook) GetLastPrice() (int64, error) {
-	if ob != nil && ob.LastTrade != nil && ob.LastTrade.Price > 0 {
+	if ob != nil && ob.LastTrade != nil {
 		return ob.LastTrade.Price, nil
 	}
 	return 0, etypes.ErrNoPrice
 }
 
 func (ob *OrderBook) GetBestBid() (int64, error) {
-	if ob != nil && ob.Bids != nil && ob.Bids.Best != nil && ob.Bids.Best.Price > 0 {
+	if ob != nil && ob.Bids != nil && ob.Bids.Best != nil {
 		return ob.Bids.Best.Price, nil
 	}
 	return 0, etypes.ErrNoPrice
 }
 
 func (ob *OrderBook) GetBestAsk() (int64, error) {
-	if ob != nil && ob.Asks != nil && ob.Asks.Best != nil && ob.Asks.Best.Price > 0 {
+	if ob != nil && ob.Asks != nil && ob.Asks.Best != nil {
 		return ob.Asks.Best.Price, nil
 	}
 	return 0, etypes.ErrNoPrice
@@ -36,6 +36,8 @@ func (ob *OrderBook) GetBestAsk() (int64, error) {
 // GetMidPrice returns the true midpoint between the current executable best
 // bid and ask. It deliberately does not fall back to a last trade or a
 // one-sided quote: callers requiring either must select that policy by name.
+// The returned numeric value may be negative or zero when the instrument's
+// declared price domain permits it; absence is always returned as ErrNoPrice.
 func (ob *OrderBook) GetMidPrice() (int64, error) {
 	bestBid, err := ob.GetBestBid()
 	if err != nil {
@@ -48,7 +50,7 @@ func (ob *OrderBook) GetMidPrice() (int64, error) {
 	if bestBid > bestAsk {
 		return 0, etypes.ErrNoPrice
 	}
-	return bestBid + (bestAsk-bestBid)/2, nil
+	return etypes.Midpoint(bestBid, bestAsk), nil
 }
 
 // FindOrder searches both sides for an order by ID.

@@ -102,6 +102,21 @@ func TestRealizedVolatilityDeclinesBeforeItHasSeenAnything(t *testing.T) {
 	}
 }
 
+func TestRealizedVolatilityReportsSignedDomainRejections(t *testing.T) {
+	estimator := NewRealizedVolatility(0, 600, 1, 0, 0)
+	estimator.Observe(100, 1)
+	estimator.Observe(0, 2)
+	estimator.Observe(-100, 3)
+	estimator.Observe(110, 1) // timestamp did not advance.
+	nonPositive, outOfOrder := estimator.Rejected()
+	if nonPositive != 2 || outOfOrder != 1 {
+		t.Fatalf("rejections = non-positive %d, out-of-order %d; want 2, 1", nonPositive, outOfOrder)
+	}
+	if estimator.Samples() != 0 {
+		t.Fatalf("rejected signed prices became samples=%d", estimator.Samples())
+	}
+}
+
 // The smile must be able to arise from what a dealer is holding rather than
 // from a parameter: the strikes it is short are the strikes it marks up.
 func TestInventoryVolatilityMarksUpTheStrikesADealerIsShort(t *testing.T) {

@@ -1,6 +1,8 @@
 package price
 
 import (
+	"fmt"
+	"math/bits"
 	"sync"
 
 	ebook "exchange_sim/book"
@@ -53,7 +55,7 @@ func (c *WeightedMidPriceCalculator) Calculate(book *ebook.OrderBook) (int64, er
 	}
 
 	if bidQty == 0 && askQty == 0 {
-		return bidPrice + (askPrice-bidPrice)/2, nil
+		return etypes.Midpoint(bidPrice, askPrice), nil
 	}
 	if bidQty == 0 {
 		return askPrice, nil
@@ -62,16 +64,42 @@ func (c *WeightedMidPriceCalculator) Calculate(book *ebook.OrderBook) (int64, er
 		return bidPrice, nil
 	}
 
-	// Weighted mid = bid + spread × bidQty/(bidQty+askQty); avoids the
-	// price×qty product, which overflows int64 at realistic sizes.
-	totalWeight, ok := etypes.TryAdd(bidQty, askQty)
-	if !ok || totalWeight <= 0 {
-		// Both sides can be individually valid while their combined depth
-		// exceeds int64. The ordinary midpoint stays well-defined and avoids
-		// allowing an aggregate overflow to move a mark price.
-		return bidPrice + (askPrice-bidPrice)/2, nil
+	// The bid-side quantity weights the ask endpoint (the standard
+	// microprice convention). weightedPrice handles the full signed int64
+	// price domain without forming either price×quantity or ask-bid in int64.
+	return weightedPrice(bidPrice, askPrice, bidQty, askQty)
+}
+
+// weightedPrice returns (lower*lowerWeight + upper*upperWeight) /
+// (lowerWeight + upperWeight), truncating toward zero. The endpoints are
+// ordered signed prices; their distance may span the whole uint64 range.
+//
+// The quotient/remainder decomposition is exact: upperWeight is strictly
+// smaller than the total, so the 128-bit product's quotient remains in the
+// uint64 range even when upper-lower is MaxUint64. Adding that unsigned offset
+// to lower is safe in two's-complement form because the exact mean lies within
+// the signed endpoint interval. The correction for a negative lower-anchored
+// result restores Go's truncation-toward-zero rule without ever constructing
+// the potentially overflowing weighted sum.
+func weightedPrice(lower, upper, upperWeight, lowerWeight int64) (int64, error) {
+	if lower > upper || upperWeight <= 0 || lowerWeight <= 0 {
+		return 0, fmt.Errorf("weighted price inputs: lower=%d upper=%d upper_weight=%d lower_weight=%d", lower, upper, upperWeight, lowerWeight)
 	}
-	return bidPrice + etypes.MulDiv(askPrice-bidPrice, bidQty, totalWeight), nil
+	totalWeight := uint64(upperWeight) + uint64(lowerWeight)
+	if totalWeight == 0 { // impossible for positive int64 weights, retained as a proof guard.
+		return 0, fmt.Errorf("weighted price total weight overflow")
+	}
+	distance := uint64(upper) - uint64(lower)
+	hi, lo := bits.Mul64(distance, uint64(upperWeight))
+	if hi >= totalWeight { // would make bits.Div64 panic; unreachable because upperWeight < totalWeight.
+		return 0, fmt.Errorf("weighted price quotient outside uint64 range")
+	}
+	offset, remainder := bits.Div64(hi, lo, totalWeight)
+	price := int64(uint64(lower) + offset)
+	if price < 0 && remainder != 0 {
+		price++
+	}
+	return price, nil
 }
 
 // Index-anchored mark price models — all require a PriceSource for the external spot reference.
@@ -88,7 +116,7 @@ func NewMedianMarkPrice(symbol string, index etypes.PriceSource) *MedianMarkPric
 }
 
 func (c *MedianMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
-	indexPrice, err := sourcePrice(c.index, c.symbol)
+	indexPrice, err := positiveSourcePrice(c.index, c.symbol)
 	if err != nil {
 		return 0, err
 	}
@@ -101,7 +129,7 @@ func (c *MedianMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
 		ask = book.Asks.Best.Price
 	}
 
-	if bid <= 0 || ask <= 0 || bid > ask {
+	if book.Bids.Best == nil || book.Asks.Best == nil || bid > ask {
 		return indexPrice, nil
 	}
 
@@ -149,7 +177,7 @@ func emaAlpha(windowSamples int) int64 {
 }
 
 func (c *EMAMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
-	indexPrice, err := sourcePrice(c.index, c.symbol)
+	indexPrice, err := positiveSourcePrice(c.index, c.symbol)
 	if err != nil {
 		return 0, err
 	}
@@ -197,7 +225,7 @@ func NewClampedEMAMarkPrice(symbol string, index etypes.PriceSource, windowSampl
 }
 
 func (c *ClampedEMAMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
-	indexPrice, err := sourcePrice(c.index, c.symbol)
+	indexPrice, err := positiveSourcePrice(c.index, c.symbol)
 	if err != nil {
 		return 0, err
 	}
@@ -253,7 +281,7 @@ func NewTWAPMarkPrice(symbol string, index etypes.PriceSource, windowSamples int
 }
 
 func (c *TWAPMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
-	indexPrice, err := sourcePrice(c.index, c.symbol)
+	indexPrice, err := positiveSourcePrice(c.index, c.symbol)
 	if err != nil {
 		return 0, err
 	}

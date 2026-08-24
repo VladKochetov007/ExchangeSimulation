@@ -108,3 +108,35 @@ func TestAutoBorrowPriceUnavailableRejectsBeforeMutation(t *testing.T) {
 		t.Fatalf("missing observable collateral-price rejection: %#v", log.records)
 	}
 }
+
+func TestAutoBorrowPresentZeroCollateralPriceRejectsBeforeMutation(t *testing.T) {
+	ex := NewExchange(2, &RealClock{})
+	defer ex.Shutdown()
+	ex.AddInstrument(NewSpotInstrument("ABC/USD", "ABC", "USD", 1, 1, 1, 1))
+	if err := ex.EnableBorrowing(BorrowingConfig{
+		Enabled: true, AutoBorrowSpot: true, DefaultMarginMode: CrossMargin,
+		PriceSource: priceSourceFunc(func(asset string) (int64, error) {
+			if asset == "USD" {
+				return 1, nil
+			}
+			return 0, nil // Present numeric value; invalid only for collateral.
+		}),
+		AssetPrecisions: map[string]int64{"ABC": 1, "USD": 1},
+	}); err != nil {
+		t.Fatalf("enable borrowing: %v", err)
+	}
+	ex.ConnectNewClient(1, map[string]int64{"ABC": 10}, &FixedFee{})
+	client := ex.Clients[1]
+	initialID := ex.NextOrderID
+
+	response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 9, Symbol: "ABC/USD", Side: Buy, Type: LimitOrder,
+		Price: 10, Qty: 1, TimeInForce: GTC, Visibility: Normal,
+	})
+	if response.Success || response.Error != RejectPriceUnavailable {
+		t.Fatalf("zero collateral admission = %#v, want PRICE_UNAVAILABLE", response)
+	}
+	if ex.NextOrderID != initialID || client.Borrowed["USD"] != 0 || client.Balances["USD"] != 0 || client.Reserved["USD"] != 0 || len(client.OrderIDs) != 0 {
+		t.Fatalf("zero collateral price mutated admission state: id=%d borrowed=%v balances=%v reserved=%v orders=%v", ex.NextOrderID, client.Borrowed, client.Balances, client.Reserved, client.OrderIDs)
+	}
+}

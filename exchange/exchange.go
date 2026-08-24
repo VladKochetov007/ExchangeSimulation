@@ -1571,7 +1571,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		// availability contract; the numeric fields remain diagnostics only
 		// when it is false.
 		e.mu.Lock()
-		d.perp.UpdateFundingRate(0, 0)
+		d.perp.ClearMarkReferences()
 		fundingSnapshot := *d.perp.GetFundingRate()
 		e.mu.Unlock()
 		e.reportPriceUnavailable(timestamp, d.symbol, d.operation, d.err)
@@ -1617,9 +1617,21 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		// a snapshot copy — publishing the live pointer would let actor
 		// goroutines read fields mid-update.
 		e.mu.Lock()
-		u.perp.UpdateFundingRate(u.indexPrice, u.markPrice)
+		var updateErr error
+		if u.isPerp {
+			updateErr = u.perp.UpdateFundingRate(u.indexPrice, u.markPrice)
+		} else {
+			u.perp.UpdateMarkReferences(u.indexPrice, u.markPrice)
+		}
 		fundingSnapshot := *u.perp.GetFundingRate()
 		e.mu.Unlock()
+		if updateErr != nil {
+			e.reportPriceUnavailable(timestamp, u.symbol, "perp_funding", updateErr)
+			if u.isPerp {
+				e.MDPublisher.PublishFunding(u.symbol, &fundingSnapshot, timestamp)
+			}
+			continue
+		}
 
 		if log := e.getLogger(u.symbol); log != nil {
 			log.LogEvent(timestamp, 0, "mark_price_update", MarkPriceUpdateEvent{
@@ -1739,10 +1751,7 @@ func (e *DefaultExchange) ChargeCollateralInterest() {
 
 // positionUPnL returns unrealized PnL for a position marked at markPrice.
 func positionUPnL(pos *Position, markPrice, precision int64) int64 {
-	if pos.Size >= 0 {
-		return MulDiv(pos.Size, markPrice-pos.EntryPrice, precision)
-	}
-	return MulDiv(-pos.Size, pos.EntryPrice-markPrice, precision)
+	return etypes.PriceChangeMulDiv(pos.Size, markPrice, pos.EntryPrice, precision)
 }
 
 // accountMarginProfile aggregates a client's cross-margin exposure in the
@@ -1784,13 +1793,10 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 		}
 		mark := triggerMark
 		if symbol == triggerSymbol {
-			if mark <= 0 {
-				return accountMarginProfile{}, fmt.Errorf("trigger mark for %s: %w", symbol, ErrNoBookPrice)
-			}
 		} else {
 			fundingRate := perp.GetFundingRate()
 			mark = fundingRate.MarkPrice
-			if !fundingRate.MarkAvailable || mark <= 0 {
+			if !fundingRate.MarkAvailable {
 				var err error
 				mark, err = liveBookReferencePrice(book)
 				if err != nil {
@@ -1805,7 +1811,7 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 				continue
 			}
 			p.EquityContribution += positionUPnL(pos, mark, precision)
-			notional := MulDiv(abs(pos.Size), mark, precision)
+			notional := etypes.AbsMulDiv(pos.Size, mark, precision)
 			p.Notional += notional
 			p.Maintenance += notional * perp.MaintenanceMarginRate / 10000
 			p.Warning += notional * perp.WarningMarginRate / 10000
@@ -1914,7 +1920,7 @@ func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, c
 		// fill. Their contribution to equity is therefore the signed current
 		// premium value, unlike futures-style entry-to-mark PnL.
 		p.EquityContribution += MulDiv(pos.Size, m, precision)
-		p.Notional += MulDiv(abs(pos.Size), m, precision)
+		p.Notional += etypes.AbsMulDiv(pos.Size, m, precision)
 		maintenance := pm.MaintenanceForPosition(pos.Size, precision)
 		// A short with zero maintenance means the instrument has no marks yet
 		// (the underlying hasn't printed): the exposure is unknown, not zero.
@@ -1937,9 +1943,6 @@ func (e *DefaultExchange) addPositionMarginerExposure(p *accountMarginProfile, c
 // positions are closed; other symbols resolve on their own mark updates.
 // Hedge-mode Long/Short positions are included.
 func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, markPrice int64) {
-	if markPrice == 0 {
-		return
-	}
 	quote := perp.QuoteAsset()
 
 	e.mu.Lock()
@@ -2064,8 +2067,8 @@ func (e *DefaultExchange) liquidate(clientID uint64, client *Client, symbol stri
 	if pos.Size < 0 {
 		closeSide = Buy
 	}
-	fillPrice, filledQty := e.forceClose(clientID, client, book, book.Instrument, closeSide, pos.PositionSide, abs(pos.Size), timestamp)
-	if fillPrice == 0 {
+	fillPrice, filledQty, filled := e.forceClose(clientID, client, book, book.Instrument, closeSide, pos.PositionSide, abs(pos.Size), timestamp)
+	if !filled {
 		// No liquidity in the book; position stays open for retry on next mark price update.
 		return
 	}
@@ -2181,7 +2184,10 @@ func (e *DefaultExchange) chargeClearanceFee(clientID uint64, client *Client, sy
 		return
 	}
 	quote := inst.QuoteAsset()
-	fee := MulDiv(closedSize, fillPrice, inst.BasePrecision()) * e.LiquidationFeeBps / 10000
+	// A liquidation fee is a non-negative service/risk charge. It is based on
+	// exposure magnitude, not signed futures cash-flow direction; a negative
+	// price must not turn it into a rebate or numeric no-price sentinel.
+	fee := etypes.AbsMulDiv(closedSize, fillPrice, inst.BasePrecision()) * e.LiquidationFeeBps / 10000
 	if available := client.PerpAvailable(quote); fee > available {
 		fee = available
 	}

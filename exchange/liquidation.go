@@ -9,12 +9,13 @@ type ForcedCancelNotification struct {
 }
 
 // forceClose cancels all open orders for clientID on the given book, then executes
-// a market order to close qty on the given side. Returns the last fill price
-// (0 if no fill) and the quantity actually closed — a thin book can absorb
-// only part of the position, and downstream accounting (clearance fee) must
-// bill what executed, not what was attempted.
+// a market order to close qty on the given side. Its final boolean says
+// whether any fill occurred; a numeric zero may be the valid last fill price
+// of a signed contract. A thin book can absorb only part of the position, and
+// downstream accounting (clearance fee) must bill what executed, not what was
+// attempted.
 // Caller must hold e.mu.Lock().
-func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *OrderBook, instrument Instrument, side Side, posSide PositionSide, qty, timestamp int64) (fillPrice, filledQty int64) {
+func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *OrderBook, instrument Instrument, side Side, posSide PositionSide, qty, timestamp int64) (fillPrice, filledQty int64, filled bool) {
 	// Same allocation pattern as PlaceOrder (increment, then use): taking the
 	// value first would reuse the most recently placed order's ID.
 	e.NextOrderID++
@@ -44,7 +45,7 @@ func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *Orde
 		if failure.err != nil {
 			e.reportPriceUnavailable(timestamp, book.Symbol, "liquidation_fee_preflight", failure.err)
 			putOrder(order)
-			return 0, 0
+			return 0, 0, false
 		}
 		panic("matching engine could not produce liquidation fee preflight")
 	}
@@ -57,12 +58,13 @@ func (e *DefaultExchange) forceClose(clientID uint64, client *Client, book *Orde
 		fillPrice = result.Executions[len(result.Executions)-1].Price
 	}
 	filledQty = order.FilledQty
+	filled = filledQty > 0
 	levels := collectAffectedLevels(book, result.Executions)
 	e.processExecutions(book, result.Executions, order, plan)
 	e.removeMakerOrders(book, result.Executions)
 	e.publishLevels(book, levels)
 	putOrder(order)
-	return fillPrice, filledQty
+	return fillPrice, filledQty, filled
 }
 
 // cancelClientOrdersOnBook cancels all open orders for client on the given book,

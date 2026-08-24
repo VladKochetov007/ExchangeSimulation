@@ -2,12 +2,36 @@ package analysis
 
 import (
 	"fmt"
+	"math"
 	"testing"
 )
 
 func settledLine(ts int64, venue, symbol string, price, expiry int64) string {
 	return fmt.Sprintf(`{"sim_ts":%d,"client_id":0,"event":"instrument_settled","data":{"venue_id":%q,"payload":{"action":"settled","symbol":%q,"instrument_type":"FUTURE","expiry_nano":%d,"settlement_price":%d,"timestamp":%d}}}`,
 		ts, venue, symbol, expiry, price, ts)
+}
+
+func TestSettlementAuditDoesNotConvertOverflowToZeroPayout(t *testing.T) {
+	const expiry = int64(1_000_000_000)
+	lines := []string{
+		positionLine(expiry-1, "north", 1, "OIL-FUT-1", 2, math.MinInt64),
+		settledLine(expiry, "north", "OIL-FUT-1", math.MaxInt64, expiry),
+	}
+	dir := writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureSettlements(SettlementAuditOptions{BasePrecision: 1})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.ArithmeticFailures != 1 || !result.Checks[0].Unrepresentable {
+		t.Fatalf("overflow status = %+v, want explicit unrepresentable check", result)
+	}
+	if result.Mismatched != 0 {
+		t.Fatalf("unrepresentable contract became mismatch=%d instead of explicit unresolved status", result.Mismatched)
+	}
 }
 
 func positionLine(ts int64, venue string, clientID uint64, symbol string, size, entry int64) string {

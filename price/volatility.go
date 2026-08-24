@@ -60,6 +60,14 @@ type RealizedVolatility struct {
 	lastNano   int64
 	samples    int
 	initialSet bool
+	// RejectedNonPositive is not an unavailable-price count. It records
+	// observations outside this log-return estimator's declared positive-price
+	// mathematical domain, so callers can distinguish an inactive estimator
+	// from one whose input domain was not applicable.
+	RejectedNonPositive int
+	// RejectedOutOfOrder records non-monotone timestamps separately from price
+	// domain rejection. Neither condition manufactures a zero return.
+	RejectedOutOfOrder int
 }
 
 // NewRealizedVolatility seeds an estimator at an initial volatility so it can
@@ -80,14 +88,23 @@ func NewRealizedVolatility(initial, halfLifeSeconds, premium, floor, ceiling flo
 
 const secondsPerYear = 365 * 24 * 60 * 60
 
-// Observe folds one underlying price into the estimate. Out-of-order or
-// non-positive observations are ignored, so a caller may feed it every mid it
-// sees without filtering first.
+// Observe folds one underlying price into the estimate. This is a log-return
+// estimator, so non-positive observations are explicitly rejected as outside
+// its mathematical domain, rather than being interpreted as unavailable or as
+// zero. Rejection counts are retained for actor diagnostics.
 func (v *RealizedVolatility) Observe(price, nano int64) {
-	if price <= 0 || nano <= 0 {
+	if price <= 0 {
+		v.RejectedNonPositive++
+		return
+	}
+	if nano <= 0 {
+		v.RejectedOutOfOrder++
 		return
 	}
 	if v.lastPrice <= 0 || nano <= v.lastNano {
+		if v.lastPrice > 0 && nano <= v.lastNano {
+			v.RejectedOutOfOrder++
+		}
 		v.lastPrice, v.lastNano = price, nano
 		return
 	}
@@ -113,6 +130,12 @@ func (v *RealizedVolatility) Observe(price, nano int64) {
 
 // Samples reports how many returns the estimate has absorbed.
 func (v *RealizedVolatility) Samples() int { return v.samples }
+
+// Rejected reports observations this positive log-return model could not
+// absorb. They are model-domain diagnostics, not price-availability state.
+func (v *RealizedVolatility) Rejected() (nonPositive, outOfOrder int) {
+	return v.RejectedNonPositive, v.RejectedOutOfOrder
+}
 
 // Volatility implements VolatilityModel.
 func (v *RealizedVolatility) Volatility(int64, int64, float64, bool) float64 {

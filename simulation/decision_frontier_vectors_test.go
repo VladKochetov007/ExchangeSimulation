@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -80,6 +81,19 @@ func TestDecisionFrontierVectorAcceptsMarketProtocolPriceZero(t *testing.T) {
 	audit, err := analysis.AuditDecisionFrontierVectors(dir)
 	if err != nil || !audit.Valid || audit.BadDecisionFields != 0 {
 		t.Fatalf("market protocol price zero rejected as unavailable: audit=%+v err=%v", audit, err)
+	}
+}
+
+func TestDecisionFrontierVectorRetainsSignedLimitPrices(t *testing.T) {
+	for _, limit := range []int64{-99, 0, 99} {
+		t.Run(fmt.Sprintf("limit_%d", limit), func(t *testing.T) {
+			dir := t.TempDir()
+			writeDecisionVectorFixtureOrder(t, dir, exchange.LimitOrder, limit)
+			audit, err := analysis.AuditDecisionFrontierVectors(dir)
+			if err != nil || !audit.Valid || audit.BadDecisionFields != 0 {
+				t.Fatalf("signed limit price %d rejected by evidence contract: audit=%+v err=%v", limit, audit, err)
+			}
+		})
 	}
 }
 

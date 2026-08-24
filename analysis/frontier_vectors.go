@@ -274,15 +274,17 @@ func AuditDecisionFrontierVectors(dir string) (*DecisionFrontierVectorAudit, err
 }
 
 // validVectorOrderPrice mirrors the persisted request protocol without
-// importing simulator code: market requests intentionally encode their
-// unspecified limit as zero, while a limit request must carry a positive
-// price. This field is not an availability sentinel.
+// importing simulator code. Market requests intentionally encode their
+// unspecified limit as zero. A limit request carries an explicit signed
+// numeric price: this information-boundary auditor does not reimplement the
+// receiving instrument's domain policy. Neither form is an availability
+// sentinel.
 func validVectorOrderPrice(orderType uint8, price int64) bool {
 	switch orderType {
 	case 0: // types.Market
 		return price == 0
 	case 1: // types.LimitOrder
-		return price > 0
+		return true
 	default:
 		return false
 	}

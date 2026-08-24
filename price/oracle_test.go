@@ -1,6 +1,7 @@
 package price
 
 import (
+	"errors"
 	"testing"
 
 	ebook "exchange_sim/book"
@@ -9,6 +10,35 @@ import (
 
 type mockBookProvider struct {
 	books map[string]*ebook.OrderBook
+}
+
+func TestStaticPriceOracleSeparatesAvailabilityFromSignedValues(t *testing.T) {
+	oracle := NewStaticPriceOracle(map[string]int64{
+		"NEG":  -20,
+		"ZERO": 0,
+		"POS":  20,
+	})
+	for symbol, want := range map[string]int64{"NEG": -20, "ZERO": 0, "POS": 20} {
+		got, err := oracle.Price(symbol)
+		if err != nil || got != want {
+			t.Fatalf("static %s = (%d, %v), want (%d, nil)", symbol, got, err, want)
+		}
+	}
+	if got, err := oracle.Price("MISSING"); got != 0 || !errors.Is(err, etypes.ErrNoPrice) {
+		t.Fatalf("missing static price = (%d, %v), want ErrNoPrice", got, err)
+	}
+}
+
+func TestPositiveSourcePolicyRejectsPresentNonPositiveValuesByDomain(t *testing.T) {
+	for _, value := range []int64{-1, 0} {
+		source := NewStaticPriceOracle(map[string]int64{"X": value})
+		if got, err := sourcePrice(source, "X"); err != nil || got != value {
+			t.Fatalf("generic source(%d) = (%d, %v), want present numeric value", value, got, err)
+		}
+		if got, err := positiveSourcePrice(source, "X"); got != 0 || !errors.Is(err, etypes.ErrPriceDomain) || errors.Is(err, etypes.ErrNoPrice) {
+			t.Fatalf("positive source(%d) = (%d, %v), want domain error only", value, got, err)
+		}
+	}
 }
 
 func (m *mockBookProvider) GetBook(symbol string) *ebook.OrderBook { return m.books[symbol] }

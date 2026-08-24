@@ -130,6 +130,10 @@ type ExerciseCheck struct {
 	WorstHolderGap int64 `json:"worst_holder_gap"`
 	// OutOfMoneyPaid flags an option that paid something while worthless.
 	OutOfMoneyPaid bool `json:"out_of_money_paid"`
+	// Unrepresentable means an exact signed integer recomputation could not be
+	// represented in the artifact's int64 field. This is not a zero payout and
+	// not a passing exercise check.
+	Unrepresentable bool `json:"unrepresentable"`
 }
 
 // DerivativeSemantics is the audit of funding and exercise.
@@ -151,6 +155,10 @@ type DerivativeSemantics struct {
 	// payout did not match their own position.
 	HoldersMispaid int `json:"holders_mispaid"`
 	WorthlessPaid  int `json:"worthless_paid"`
+	// ExerciseArithmeticFailures counts contracts the independent replay could
+	// not represent exactly. They remain explicitly unresolved rather than
+	// being compared after an overflow was rewritten as zero.
+	ExerciseArithmeticFailures int `json:"exercise_arithmetic_failures"`
 }
 
 // MeasureDerivativeSemantics audits perpetual funding and option exercise.
@@ -497,10 +505,28 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				continue
 			}
 			check.Holders++
-			check.NetSize += state.size
-			expected := mulDiv(check.Intrinsic, state.size, precision)
-			check.ExpectedPayout += expected
-			gap := optionPaidPerHolder[holderKey] - expected
+			netSize, ok := exactAdd(check.NetSize, state.size)
+			if !ok {
+				check.Unrepresentable = true
+				continue
+			}
+			check.NetSize = netSize
+			expected, ok := mulDiv(check.Intrinsic, state.size, precision)
+			if !ok {
+				check.Unrepresentable = true
+				continue
+			}
+			expectedPayout, ok := exactAdd(check.ExpectedPayout, expected)
+			if !ok {
+				check.Unrepresentable = true
+				continue
+			}
+			check.ExpectedPayout = expectedPayout
+			gap, ok := exactSub(optionPaidPerHolder[holderKey], expected)
+			if !ok {
+				check.Unrepresentable = true
+				continue
+			}
 			if gap > 1 || gap < -1 {
 				check.HoldersMispaid++
 				if absInt64(gap) > absInt64(check.WorstHolderGap) {
@@ -510,7 +536,16 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		}
 		entry := optionPaid[key]
 		check.PaidOut = entry.amount
-		check.Residual = check.PaidOut - check.ExpectedPayout
+		if residual, ok := exactSub(check.PaidOut, check.ExpectedPayout); ok {
+			check.Residual = residual
+		} else {
+			check.Unrepresentable = true
+		}
+		if check.Unrepresentable {
+			result.ExerciseArithmeticFailures++
+			result.Exercises = append(result.Exercises, check)
+			continue
+		}
 		// A worthless option may still show a unit or two of rounding dust, so
 		// the test is against the number of accounts paid rather than zero.
 		check.OutOfMoneyPaid = check.Intrinsic == 0 && absInt64(entry.amount) > int64(entry.accounts)

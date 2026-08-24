@@ -43,6 +43,12 @@ func (f *OptionFee) CalculateFee(ctx etypes.FillContext) (etypes.Fee, error) {
 			// boundary instead of inventing a zero fee.
 			return etypes.Fee{}, fmt.Errorf("option fee underlying %s: %w", underlyingSymbol, err)
 		}
+		if underlying <= 0 {
+			// The current underlying-notional option schedule is defined only
+			// for positive Black-76-style forwards. Do not convert a present
+			// zero/negative reference into a zero or negative fee.
+			return etypes.Fee{}, fmt.Errorf("option fee underlying %s: %w", underlyingSymbol, etypes.ErrPriceDomain)
+		}
 		amount = etypes.MulDiv(ctx.Exec.Qty, underlying, ctx.Precision) * bps / 10000
 	} else {
 		// This is the declared premium-notional schedule when no underlying

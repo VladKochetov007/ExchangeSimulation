@@ -79,12 +79,13 @@ func TestRegressionStaleIndexSkipsMarkUpdate(t *testing.T) {
 	if funding := perp.GetFundingRate(); !funding.MarkAvailable || funding.MarkPrice <= 0 {
 		t.Fatalf("initial mark unavailable: %#v", funding)
 	}
+	lastMark, lastIndex := perp.GetFundingRate().MarkPrice, perp.GetFundingRate().IndexPrice
 
 	oracle.price = 0
 	ex.UpdatePerpPrices()
 
-	if funding := perp.GetFundingRate(); funding.MarkAvailable || funding.IndexAvailable || funding.MarkPrice != 0 || funding.IndexPrice != 0 {
-		t.Fatalf("stale index preserved an apparent usable mark: %#v", funding)
+	if funding := perp.GetFundingRate(); funding.MarkAvailable || funding.IndexAvailable || funding.MarkPrice != lastMark || funding.IndexPrice != lastIndex {
+		t.Fatalf("stale index availability/numeric diagnostics = %#v, want unavailable flags and retained last observations", funding)
 	}
 }
 

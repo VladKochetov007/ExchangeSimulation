@@ -115,7 +115,10 @@ func TestDatedFuturesLifecycle(t *testing.T) {
 	<-gw1.ResponseCh // fill
 	<-gw2.ResponseCh // fill
 
-	wantMargin := fut.MarginRequired(BTC_PRECISION, entry, BTC_PRECISION)
+	wantMargin, err := fut.MarginRequired(BTC_PRECISION, entry, BTC_PRECISION)
+	if err != nil {
+		t.Fatalf("expected future margin: %v", err)
+	}
 	for _, id := range []uint64{1, 2} {
 		if got := ex.Clients[id].PerpReserved["USD"]; got != wantMargin {
 			t.Fatalf("client %d position margin = %d, want %d", id, got, wantMargin)

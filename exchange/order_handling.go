@@ -2,7 +2,6 @@ package exchange
 
 import (
 	"cmp"
-	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -331,7 +330,7 @@ func (e *DefaultExchange) buildPositionSnapshots(clientID uint64) []PositionSnap
 			markErr = fmt.Errorf("display mark for %s: %w", pos.Symbol, ErrNoBookPrice)
 		}
 		var unrealizedPnL int64
-		if markPrice != nil && pos.EntryPrice > 0 {
+		if markPrice != nil {
 			if instrument := e.Instruments[pos.Symbol]; instrument != nil {
 				unrealizedPnL = positionUPnL(&pos, *markPrice, instrument.BasePrecision())
 			}
@@ -730,7 +729,10 @@ func (e *DefaultExchange) checkMarketOrderFunds(client *Client, book *OrderBook,
 	instrument := book.Instrument
 	quote := instrument.QuoteAsset()
 	if om, ok := instrument.(OrderMarginer); ok {
-		required, ok, err := derivativeMarketRequirement(client.FeePlan, instrument, order.Side, executions, precision, om.MarginForMarketOrder)
+		required, ok, err := derivativeMarketRequirement(client.FeePlan, instrument, order.Side, executions, precision,
+			func(side Side, qty, price, precision int64) (int64, error) {
+				return om.MarginForMarketOrder(side, qty, price, precision), nil
+			})
 		if err != nil {
 			return false, err
 		}
@@ -741,7 +743,9 @@ func (e *DefaultExchange) checkMarketOrderFunds(client *Client, book *OrderBook,
 	}
 	if m, ok := instrument.(Margined); ok {
 		required, ok, err := derivativeMarketRequirement(client.FeePlan, instrument, order.Side, executions, precision,
-			func(_ Side, qty, price, precision int64) int64 { return m.MarginForMarket(qty, price, precision) })
+			func(_ Side, qty, price, precision int64) (int64, error) {
+				return m.MarginForMarket(qty, price, precision)
+			})
 		if err != nil {
 			return false, err
 		}
@@ -861,7 +865,7 @@ func (e *DefaultExchange) previewMatchExcluding(book *OrderBook, order *Order, e
 	executions := result.Executions
 	var filled int64
 	for _, exec := range executions {
-		if exec == nil || exec.Qty <= 0 || exec.Price <= 0 || exec.TakerClientID != order.ClientID {
+		if exec == nil || exec.Qty <= 0 || !book.Instrument.ValidatePrice(exec.Price) || exec.TakerClientID != order.ClientID {
 			releasePreviewExecutions(executions)
 			return nil, false
 		}
@@ -959,13 +963,13 @@ func marketDepthSaneExcluding(book *OrderBook, order *Order, excluded map[uint64
 // mutates positions and cannot rely on a favourable execution path.
 func derivativeMarketRequirement(
 	feePlan FeeModel, instrument Instrument, side Side, executions []*Execution, precision int64,
-	margin func(side Side, qty, price, precision int64) int64,
+	margin func(side Side, qty, price, precision int64) (int64, error),
 ) (int64, bool, error) {
 	var required int64
 	for _, exec := range executions {
-		marginRequired := margin(side, exec.Qty, exec.Price, precision)
-		if marginRequired < 0 {
-			return 0, false, nil
+		marginRequired, err := margin(side, exec.Qty, exec.Price, precision)
+		if err != nil {
+			return 0, false, fmt.Errorf("market margin at price %d for quantity %d: %w", exec.Price, exec.Qty, err)
 		}
 		var ok bool
 		required, ok = etypes.TryAdd(required, marginRequired)
@@ -1058,13 +1062,13 @@ func (e *DefaultExchange) reserveLimitOrderFunds(client *Client, instrument Inst
 		return true, nil
 	}
 	if m, ok := instrument.(Margined); ok {
-		margin := m.MarginRequired(order.Qty, order.Price, precision)
+		margin, err := m.MarginRequired(order.Qty, order.Price, precision)
+		if err != nil {
+			return false, fmt.Errorf("limit-order margin for %s: %w", instrument.Symbol(), err)
+		}
 		fee, err := quoteFeeHeadroom(client.FeePlan, base, quote, order.Qty, order.Price, precision)
 		if err != nil {
 			return false, err
-		}
-		if margin < 0 {
-			return false, nil
 		}
 		total, ok := etypes.TryAdd(margin, fee)
 		if !ok {
@@ -1148,9 +1152,6 @@ func (e *DefaultExchange) foreignFeeReservations(feePlan FeeModel, book *OrderBo
 		return nil, remaining == 0, nil
 	}
 	price := order.Price
-	if price <= 0 {
-		return nil, true, nil
-	}
 	base, quote := instrument.BaseAsset(), instrument.QuoteAsset()
 	margined := isMarginedInstrument(instrument)
 	reserved := make(map[string]int64)
@@ -1222,7 +1223,7 @@ func marketForeignFeeReservations(feePlan FeeModel, instrument Instrument, order
 	reserved := make(map[string]int64)
 	var receivedNet int64
 	for _, exec := range executions {
-		if exec == nil || exec.Qty <= 0 || exec.Price <= 0 {
+		if exec == nil || exec.Qty <= 0 || !instrument.ValidatePrice(exec.Price) {
 			return nil, false, nil
 		}
 		if receivedAsset != "" {
@@ -1336,7 +1337,7 @@ func (e *DefaultExchange) restoreForeignFeeReservation(book *OrderBook, order *O
 	if order.FilledQty < order.Qty {
 		ok, err := e.reserveForeignFeeFunds(client, book, order, precision)
 		if !ok {
-			if errors.Is(err, ErrNoBookPrice) {
+			if isPriceUnavailable(err) {
 				e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "fee_reservation_refresh", err)
 			}
 			e.cancelUnfundedFeeRemainder(book, client, order)
@@ -1369,7 +1370,7 @@ func (e *DefaultExchange) cancelUnfundedFeeRemainder(book *OrderBook, client *Cl
 // as maker later, so reserving just the taker schedule lets a maker-heavy fee
 // plan debit the perp wallet below its available balance.
 func quoteFeeHeadroom(feePlan FeeModel, base, quote string, qty, price, precision int64) (int64, error) {
-	if feePlan == nil || qty <= 0 || price <= 0 {
+	if feePlan == nil || qty <= 0 {
 		return 0, nil
 	}
 	probe := Execution{Price: price, Qty: qty}
@@ -1477,7 +1478,7 @@ func (e *DefaultExchange) reserveOrderFunds(client *Client, book *OrderBook, ord
 	// any funds, when the client cannot cover the worst-case fee.
 	if ok, err := e.checkForeignFeeFunds(client, book, order, precision); !ok {
 		reason := RejectInsufficientBalance
-		if errors.Is(err, ErrNoBookPrice) {
+		if isPriceUnavailable(err) {
 			reason = RejectPriceUnavailable
 			e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "order_fee_admission", err)
 		}
@@ -1490,7 +1491,7 @@ func (e *DefaultExchange) reserveOrderFunds(client *Client, book *OrderBook, ord
 	// exact reservation only after that price boundary has succeeded.
 	if ok, err := e.reserveForeignFeeFunds(client, book, order, precision); !ok {
 		reason := RejectInsufficientBalance
-		if errors.Is(err, ErrNoBookPrice) {
+		if isPriceUnavailable(err) {
 			reason = RejectPriceUnavailable
 			e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "order_fee_reservation", err)
 		}
@@ -1512,7 +1513,7 @@ func (e *DefaultExchange) reserveOrderFunds(client *Client, book *OrderBook, ord
 	if !ok {
 		releaseForeignFeeReservation(client, book.Instrument, order)
 		reason := RejectInsufficientBalance
-		if errors.Is(admissionErr, ErrNoBookPrice) {
+		if isPriceUnavailable(admissionErr) {
 			reason = RejectPriceUnavailable
 			e.reportPriceUnavailable(e.Clock.NowUnixNano(), book.Symbol, "order_admission", admissionErr)
 		}

@@ -83,20 +83,21 @@ func TestConsumeCounterfactualWalksTheLadder(t *testing.T) {
 		buys     bool
 		qty      int64
 		wantBest int64
+		wantOK   bool
 	}{
-		{"buyer inside the touch", true, 10, 102},
-		{"buyer taking all but one", true, 39, 102},
-		{"buyer clearing the touch exactly", true, 40, 103},
-		{"buyer into the second level", true, 60, 103},
-		{"buyer clearing two levels", true, 100, 104},
-		{"buyer exhausting the side", true, 500, 0},
-		{"seller inside the touch", false, 10, 100},
-		{"seller clearing the touch", false, 40, 99},
-		{"seller exhausting the side", false, 200, 0},
+		{"buyer inside the touch", true, 10, 102, true},
+		{"buyer taking all but one", true, 39, 102, true},
+		{"buyer clearing the touch exactly", true, 40, 103, true},
+		{"buyer into the second level", true, 60, 103, true},
+		{"buyer clearing two levels", true, 100, 104, true},
+		{"buyer exhausting the side", true, 500, 0, false},
+		{"seller inside the touch", false, 10, 100, true},
+		{"seller clearing the touch", false, 40, 99, true},
+		{"seller exhausting the side", false, 200, 0, false},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			if got := book.ConsumeCounterfactual(testCase.buys, testCase.qty); got != testCase.wantBest {
-				t.Errorf("consuming %d gave best %d, want %d", testCase.qty, got, testCase.wantBest)
+			if got, ok := book.ConsumeCounterfactual(testCase.buys, testCase.qty); got != testCase.wantBest || ok != testCase.wantOK {
+				t.Errorf("consuming %d gave best (%d, %t), want (%d, %t)", testCase.qty, got, ok, testCase.wantBest, testCase.wantOK)
 			}
 		})
 	}
@@ -115,8 +116,33 @@ func TestReplayedBookAppliesAbsoluteSizes(t *testing.T) {
 	if _, present := book.bids[100]; present {
 		t.Error("a zero delta left the level in the book")
 	}
-	if book.BestBid() != 0 {
-		t.Errorf("best bid = %d after the only level was removed", book.BestBid())
+	if bid, ok := book.BestBid(); ok || bid != 0 {
+		t.Errorf("best bid = (%d, %t) after the only level was removed", bid, ok)
+	}
+}
+
+func TestReplayedBookKeepsSignedZeroLevelsSeparateFromAbsence(t *testing.T) {
+	book := NewReplayedBook()
+	book.Apply("BUY", -1, 10)
+	book.Apply("SELL", 0, 10)
+	if bid, ok := book.BestBid(); !ok || bid != -1 {
+		t.Fatalf("signed best bid = (%d, %t), want (-1, true)", bid, ok)
+	}
+	if ask, ok := book.BestAsk(); !ok || ask != 0 {
+		t.Fatalf("zero best ask = (%d, %t), want (0, true)", ask, ok)
+	}
+	if mid, ok := book.Mid(); !ok || mid != 0 {
+		t.Fatalf("signed midpoint = (%d, %t), want (0, true)", mid, ok)
+	}
+	if price, ok := book.ConsumeCounterfactual(true, 0); !ok || price != 0 {
+		t.Fatalf("zero consumed-side price = (%d, %t), want (0, true)", price, ok)
+	}
+	if price, ok := book.DeepestVisible(true); !ok || price != 0 {
+		t.Fatalf("zero deepest visible price = (%d, %t), want (0, true)", price, ok)
+	}
+	book.Apply("SELL", 0, 0)
+	if ask, ok := book.BestAsk(); ok || ask != 0 {
+		t.Fatalf("removed zero ask = (%d, %t), want (0, false)", ask, ok)
 	}
 }
 

@@ -1,7 +1,9 @@
 package exchange_test
 
 import (
+	"errors"
 	. "exchange_sim/exchange"
+	etypes "exchange_sim/types"
 	"testing"
 )
 
@@ -48,7 +50,9 @@ func TestPerpFuturesUpdateFundingRate(t *testing.T) {
 	indexPrice := int64(50000 * BTC_PRECISION)
 	markPrice := int64(50100 * BTC_PRECISION)
 
-	perp.UpdateFundingRate(indexPrice, markPrice)
+	if err := perp.UpdateFundingRate(indexPrice, markPrice); err != nil {
+		t.Fatalf("UpdateFundingRate: %v", err)
+	}
 
 	fr := perp.GetFundingRate()
 	if fr.IndexPrice != indexPrice {
@@ -72,7 +76,10 @@ func TestSimpleFundingCalcPositivePremium(t *testing.T) {
 	indexPrice := int64(50000 * BTC_PRECISION)
 	markPrice := int64(50100 * BTC_PRECISION)
 
-	rate := calc.Calculate(indexPrice, markPrice)
+	rate, err := calc.Calculate(indexPrice, markPrice)
+	if err != nil {
+		t.Fatalf("Calculate: %v", err)
+	}
 
 	premium := ((markPrice - indexPrice) * 10000) / indexPrice
 	expectedRate := int64(10 + (premium * 100 / 100))
@@ -92,7 +99,10 @@ func TestSimpleFundingCalcNegativePremium(t *testing.T) {
 	indexPrice := int64(50000 * BTC_PRECISION)
 	markPrice := int64(49900 * BTC_PRECISION)
 
-	rate := calc.Calculate(indexPrice, markPrice)
+	rate, err := calc.Calculate(indexPrice, markPrice)
+	if err != nil {
+		t.Fatalf("Calculate: %v", err)
+	}
 
 	if rate >= 10 {
 		t.Errorf("Expected rate < 10 for negative premium, got %d", rate)
@@ -109,7 +119,10 @@ func TestSimpleFundingCalcMaxRateCap(t *testing.T) {
 	indexPrice := int64(50000 * BTC_PRECISION)
 	markPrice := int64(60000 * BTC_PRECISION)
 
-	rate := calc.Calculate(indexPrice, markPrice)
+	rate, err := calc.Calculate(indexPrice, markPrice)
+	if err != nil {
+		t.Fatalf("Calculate: %v", err)
+	}
 
 	if rate > calc.MaxRate {
 		t.Errorf("Rate should be capped at MaxRate %d, got %d", calc.MaxRate, rate)
@@ -129,7 +142,10 @@ func TestSimpleFundingCalcMinRateCap(t *testing.T) {
 	indexPrice := int64(50000 * BTC_PRECISION)
 	markPrice := int64(40000 * BTC_PRECISION)
 
-	rate := calc.Calculate(indexPrice, markPrice)
+	rate, err := calc.Calculate(indexPrice, markPrice)
+	if err != nil {
+		t.Fatalf("Calculate: %v", err)
+	}
 
 	if rate < -calc.MaxRate {
 		t.Errorf("Rate should be capped at -MaxRate %d, got %d", -calc.MaxRate, rate)
@@ -146,10 +162,31 @@ func TestSimpleFundingCalcZeroIndex(t *testing.T) {
 		MaxRate:  75,
 	}
 
-	rate := calc.Calculate(0, 50000*BTC_PRECISION)
+	rate, err := calc.Calculate(0, 50000*BTC_PRECISION)
+	if rate != 0 || !errors.Is(err, etypes.ErrPriceDomain) {
+		t.Errorf("zero index = (%d, %v), want ErrPriceDomain", rate, err)
+	}
+}
 
-	if rate != 0 {
-		t.Errorf("Expected rate 0 for zero index price, got %d", rate)
+func TestFundingReferenceAvailabilityDoesNotUseZeroSentinel(t *testing.T) {
+	perp := NewPerpFutures("BTC-PERP", "BTC", "USD", BTC_PRECISION, USD_PRECISION, BTC_PRECISION, BTC_PRECISION/100)
+	if err := perp.UpdateFundingRate(50_000*BTC_PRECISION, 50_100*BTC_PRECISION); err != nil {
+		t.Fatalf("initial funding update: %v", err)
+	}
+	if err := perp.UpdateFundingRate(0, 50_100*BTC_PRECISION); !errors.Is(err, etypes.ErrPriceDomain) {
+		t.Fatalf("zero index update error = %v, want ErrPriceDomain", err)
+	}
+	if funding := perp.GetFundingRate(); funding.IndexAvailable || funding.MarkAvailable || funding.IndexPrice != 0 || funding.MarkPrice != 50_100*BTC_PRECISION {
+		t.Fatalf("invalid numeric index state = %#v, want unavailable flags with preserved observed numbers", funding)
+	}
+
+	// Dated futures do not use percentage funding, so their signed reference
+	// state remains available without asking the positive-only calculator to
+	// manufacture a rate.
+	future := NewExpiringFutures("OIL-FUT", "OIL", "USD", 1, 1, 1, 1, 1)
+	future.UpdateMarkReferences(-20, 0)
+	if funding := future.GetFundingRate(); !funding.IndexAvailable || !funding.MarkAvailable || funding.IndexPrice != -20 || funding.MarkPrice != 0 {
+		t.Fatalf("signed dated reference state = %#v", funding)
 	}
 }
 

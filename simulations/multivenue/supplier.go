@@ -165,7 +165,7 @@ func (s *ElasticSupplier) onTick(now time.Time) {
 	if s.pending || s.cfg.RebalanceLot <= 0 {
 		return
 	}
-	mid, available := twoSidedMidpoint(s.bestBid, s.bestAsk)
+	mid, available := positiveDomainTwoSidedMidpoint(s.bestBid, s.bestAsk)
 	if !available {
 		return
 	}

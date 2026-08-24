@@ -66,6 +66,11 @@ type Reaction struct {
 	Observations      int                `json:"observations"`
 	Adverse           []AdverseSelection `json:"adverse_selection"`
 	PooledMarkoutBps  float64            `json:"pooled_markout_bps"`
+	// UndefinedMarkouts counts otherwise valid maker-fill horizons whose
+	// relative-return denominator or terminal price is non-positive. The
+	// signed prices remain in the tape; this percentage statistic is simply
+	// undefined across zero and is never abs-normalized.
+	UndefinedMarkouts int `json:"undefined_markouts"`
 }
 
 // MeasureReaction computes delivered reaction lag and maker markouts.
@@ -133,7 +138,7 @@ func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 			mu.Unlock()
 		case "Trade":
 			var payload tradePayload
-			if event.Decode(&payload) != nil || payload.Price <= 0 {
+			if event.Decode(&payload) != nil {
 				return
 			}
 			mu.Lock()
@@ -141,7 +146,7 @@ func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 			mu.Unlock()
 		case "OrderFill":
 			var payload fillPayload
-			if event.Decode(&payload) != nil || payload.Price <= 0 || payload.Role != "maker" {
+			if event.Decode(&payload) != nil || payload.Role != "maker" {
 				return
 			}
 			mu.Lock()
@@ -252,6 +257,10 @@ func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 				continue
 			}
 			future := float64(series[index].price)
+			if fill.price <= 0 || series[index].price <= 0 {
+				result.UndefinedMarkouts++
+				continue
+			}
 			move := (future - float64(fill.price)) / float64(fill.price) * 10000
 			// A maker who bought loses when the price falls; a maker who sold
 			// loses when it rises. Markout is stated as a loss to the maker.

@@ -1,6 +1,7 @@
 package instrument
 
 import (
+	"fmt"
 	"sync/atomic"
 
 	etypes "exchange_sim/types"
@@ -23,7 +24,8 @@ func DefaultOptionMarginParams() OptionMarginParams {
 // unit (quote precision). Buyers pay the full premium from the perp wallet;
 // sellers post initial margin there. At expiry every position auto-exercises
 // against the settlement TWAP of the underlying: intrinsic value is exchanged
-// in the quote asset and short margin is released.
+// in the quote asset and short margin is released. Premiums are non-negative;
+// zero is a valid numeric premium, not an unavailable-price sentinel.
 type EuropeanOption struct {
 	SpotInstrument
 	Strike     int64 // quote precision units
@@ -52,12 +54,14 @@ type optionMarks struct {
 	premium    int64
 }
 
-// loadMarks returns the current mark pair (zeros before the first SetMarks).
-func (o *EuropeanOption) loadMarks() optionMarks {
+// loadMarks returns the current mark pair and whether the exchange has
+// published one. The boolean is internal state only; exported price lookups
+// expose absence as ErrNoPrice so numeric zero remains a valid premium.
+func (o *EuropeanOption) loadMarks() (optionMarks, bool) {
 	if m := o.marks.Load(); m != nil {
-		return *m
+		return *m, true
 	}
-	return optionMarks{}
+	return optionMarks{}, false
 }
 
 func NewEuropeanOption(symbol, base, quote, underlying string, basePrecision, quotePrecision, tickSize, minOrderSize, strike, expiryNano int64, isCall bool) *EuropeanOption {
@@ -70,6 +74,7 @@ func NewEuropeanOption(symbol, base, quote, underlying string, basePrecision, qu
 			quotePrecision: quotePrecision,
 			tickSize:       tickSize,
 			minOrderSize:   minOrderSize,
+			priceDomain:    etypes.NonNegativePriceDomain(tickSize),
 		},
 		Strike:     strike,
 		IsCall:     isCall,
@@ -83,10 +88,10 @@ func NewEuropeanOption(symbol, base, quote, underlying string, basePrecision, qu
 
 func (o *EuropeanOption) InstrumentType() string { return "OPTION" }
 
-// Premiums can legitimately rest at a single tick, so unlike spot the price
-// only needs tick alignment.
+// Premiums can be exactly zero when a listed option is economically
+// worthless. Negative premium remains outside the current option contract.
 func (o *EuropeanOption) ValidatePrice(price int64) bool {
-	return price > 0 && price%o.tickSize == 0
+	return o.PriceDomain().Validate(price)
 }
 
 // SetObservationWindow overrides the settlement TWAP lookback (default 60s).
@@ -100,19 +105,31 @@ func (o *EuropeanOption) SetMarks(underlyingMark, markPremium int64) {
 	o.marks.Store(&optionMarks{underlying: underlyingMark, premium: markPremium})
 }
 
-func (o *EuropeanOption) MarkPremium() int64 { return o.loadMarks().premium }
+func (o *EuropeanOption) MarkPremium() (int64, error) {
+	marks, ok := o.loadMarks()
+	if !ok {
+		return 0, etypes.ErrNoPrice
+	}
+	return marks.premium, nil
+}
 
 // UnderlyingMark returns the underlying input paired atomically with
 // MarkPremium. Risk telemetry uses this rather than an actor-local quote so its
 // Black-76 sensitivities use the exact forward proxy that produced the option
 // mark.
-func (o *EuropeanOption) UnderlyingMark() int64 { return o.loadMarks().underlying }
+func (o *EuropeanOption) UnderlyingMark() (int64, error) {
+	marks, ok := o.loadMarks()
+	if !ok {
+		return 0, etypes.ErrNoPrice
+	}
+	return marks.underlying, nil
+}
 
 // --- PositionMarginer ---
 
 // PositionMark marks open positions at the current premium mark for
 // cross-margin mark-to-market.
-func (o *EuropeanOption) PositionMark() int64 { return o.loadMarks().premium }
+func (o *EuropeanOption) PositionMark() (int64, error) { return o.MarkPremium() }
 
 // MaintenanceForPosition returns the quote maintenance requirement for a
 // signed option position. Longs owe nothing (premium was fully paid at
@@ -124,7 +141,10 @@ func (o *EuropeanOption) MaintenanceForPosition(size, precision int64) int64 {
 		return 0
 	}
 	short := -size
-	m := o.loadMarks()
+	m, marked := o.loadMarks()
+	if !marked {
+		return 0
+	}
 	mm := etypes.MulDiv(short, m.underlying, precision) * o.Margin.MMBps / 10000
 	return mm + etypes.MulDiv(short, m.premium, precision)
 }
@@ -142,7 +162,16 @@ func (o *EuropeanOption) SettlementPrice() (int64, error) {
 	// Settlement is based only on observations received through the declared
 	// underlying-reference path. A cached option mark is not an implicit final
 	// fallback: if no observation was ever delivered, expiry remains pending.
-	return o.observer.settlementPrice()
+	// The current option contract uses a positive-forward model. A delivered
+	// zero or negative underlying is therefore a present-but-domain-invalid
+	// reference, not a numeric zero settlement or a Black-76 fallback; the
+	// generic expiry state machine keeps the contract pending and observable.
+	return o.observer.settlementPriceWith(func(price int64) error {
+		if price <= 0 {
+			return fmt.Errorf("option settlement underlying %d: %w", price, etypes.ErrPriceDomain)
+		}
+		return nil
+	})
 }
 
 // intrinsicValue is the exercise value per base unit at the given underlying
@@ -193,12 +222,18 @@ var _ etypes.Expirable = (*EuropeanOption)(nil)
 // Before the first mark update (no underlying price cached) it falls back to
 // 2× the order premium, which over-margins rather than under-margins.
 func (o *EuropeanOption) sellerIMPerUnit(refPremium int64) int64 {
-	pair := o.loadMarks()
-	s, mark := pair.underlying, pair.premium
-	if mark == 0 {
-		mark = refPremium
+	pair, marked := o.loadMarks()
+	if !marked {
+		// Explicit initial-order policy: before the first exchange mark, a
+		// short option reserves two times its submitted premium. This is not a
+		// zero-price fallback; it is a conservative order-admission contract.
+		return 2 * refPremium
 	}
+	s, mark := pair.underlying, pair.premium
 	if s <= 0 {
+		// Black-76 is positive-forward only. A present zero/negative mark
+		// cannot be fed into its percentage OTM formula; preserve the declared
+		// conservative initial-order policy until a supported mark arrives.
 		return 2 * refPremium
 	}
 	var otmBps int64
@@ -222,9 +257,6 @@ func (o *EuropeanOption) MarginForOrder(side etypes.Side, qty, price, precision 
 }
 
 func (o *EuropeanOption) MarginForMarketOrder(side etypes.Side, qty, refPrice, precision int64) int64 {
-	if refPrice == 0 {
-		return 0
-	}
 	return o.MarginForOrder(side, qty, refPrice, precision)
 }
 

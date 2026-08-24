@@ -668,6 +668,22 @@ func TestImpactRecoversAKnownExponent(t *testing.T) {
 	}
 }
 
+func TestTradeTapeSeparatesZeroMidpointFromNoSnapshot(t *testing.T) {
+	tape := &TradeTape{
+		PreMid:          []int64{0, 0, -10},
+		PreMidAvailable: []bool{true, false, true},
+	}
+	if price, ok := tape.preMidAt(0); !ok || price != 0 {
+		t.Fatalf("present zero midpoint = (%d, %t), want (0, true)", price, ok)
+	}
+	if price, ok := tape.preMidAt(1); ok || price != 0 {
+		t.Fatalf("missing midpoint = (%d, %t), want (0, false)", price, ok)
+	}
+	if price, ok := tape.preMidAt(2); !ok || price != -10 {
+		t.Fatalf("present negative midpoint = (%d, %t), want (-10, true)", price, ok)
+	}
+}
+
 // Impact pooled over every participant measures who trades at each size rather
 // than what a trade does. Conditioning on one class is what gives the curve a
 // single meaning.
