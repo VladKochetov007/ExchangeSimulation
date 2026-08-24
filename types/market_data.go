@@ -49,14 +49,15 @@ type InstrumentAnnouncement struct {
 	Strike         int64  `json:"strike,omitempty"`     // quote precision units (options)
 	IsCall         bool   `json:"is_call,omitempty"`
 	ExpiryNano     int64  `json:"expiry_nano,omitempty"`
-	// SettlementPrice is numeric evidence only. It may be negative or zero
-	// when SettlementPriceAvailable is true; availability must never be
-	// inferred from the numeric value or JSON-field omission.
-	SettlementPrice          int64 `json:"settlement_price"`
-	SettlementPriceAvailable bool  `json:"settlement_price_available"`
-	TickSize                 int64 `json:"tick_size,omitempty"`
-	MinOrderSize             int64 `json:"min_order_size,omitempty"`
-	Timestamp                int64 `json:"timestamp"`
+	// SettlementPrice is nil when this announcement has no terminal settlement
+	// value (including a normal listing), and otherwise may be negative, zero,
+	// or positive. Pointer presence is the availability contract: numeric zero
+	// is never an absence sentinel. A nullable field avoids adding fake
+	// unavailable-settlement fields to unrelated listing evidence.
+	SettlementPrice *int64 `json:"settlement_price,omitempty"`
+	TickSize        int64  `json:"tick_size,omitempty"`
+	MinOrderSize    int64  `json:"min_order_size,omitempty"`
+	Timestamp       int64  `json:"timestamp"`
 }
 
 type Subscription struct {

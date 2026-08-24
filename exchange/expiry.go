@@ -539,8 +539,7 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 	e.mu.Unlock()
 
 	ann := describeInstrument(inst, "settled", now)
-	ann.SettlementPrice = settlementPrice
-	ann.SettlementPriceAvailable = true
+	ann.SettlementPrice = &settlementPrice
 	e.MDPublisher.Publish(etypes.InstrumentFeedSymbol, MDInstrument, ann, now)
 	if glog := e.getLogger("_global"); glog != nil {
 		glog.LogEvent(now, 0, "instrument_settled", ann)

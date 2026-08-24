@@ -11,24 +11,22 @@ import (
 // JSON omission behind the same in-memory value.
 func TestInstrumentAnnouncementSettlementPriceWireContract(t *testing.T) {
 	tests := []struct {
-		name      string
-		available bool
-		price     int64
+		name  string
+		price *int64
 	}{
-		{name: "unavailable", available: false},
-		{name: "negative", available: true, price: -20},
-		{name: "zero", available: true, price: 0},
-		{name: "positive", available: true, price: 20},
+		{name: "unavailable"},
+		{name: "negative", price: int64Pointer(-20)},
+		{name: "zero", price: int64Pointer(0)},
+		{name: "positive", price: int64Pointer(20)},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			original := InstrumentAnnouncement{
-				Action:                   "settled",
-				Symbol:                   "OIL-FUT",
-				InstrumentType:           "FUTURE",
-				SettlementPrice:          tc.price,
-				SettlementPriceAvailable: tc.available,
+				Action:          "settled",
+				Symbol:          "OIL-FUT",
+				InstrumentType:  "FUTURE",
+				SettlementPrice: tc.price,
 			}
 			raw, err := json.Marshal(original)
 			if err != nil {
@@ -39,19 +37,23 @@ func TestInstrumentAnnouncementSettlementPriceWireContract(t *testing.T) {
 			if err := json.Unmarshal(raw, &wire); err != nil {
 				t.Fatalf("decode generic wire: %v", err)
 			}
-			for _, field := range []string{"settlement_price", "settlement_price_available"} {
-				if _, ok := wire[field]; !ok {
-					t.Fatalf("%s missing from lifecycle evidence: %s", field, raw)
-				}
+			_, priceOnWire := wire["settlement_price"]
+			if (tc.price != nil) != priceOnWire {
+				t.Fatalf("settlement price presence = %t, want %t: %s", priceOnWire, tc.price != nil, raw)
 			}
 
 			var replayed InstrumentAnnouncement
 			if err := json.Unmarshal(raw, &replayed); err != nil {
 				t.Fatalf("round trip: %v", err)
 			}
-			if replayed.SettlementPriceAvailable != tc.available || replayed.SettlementPrice != tc.price {
-				t.Fatalf("round trip = %+v, want availability=%t price=%d", replayed, tc.available, tc.price)
+			if (replayed.SettlementPrice == nil) != (tc.price == nil) {
+				t.Fatalf("round trip availability = %#v, want %#v", replayed.SettlementPrice, tc.price)
+			}
+			if tc.price != nil && *replayed.SettlementPrice != *tc.price {
+				t.Fatalf("round trip price = %d, want %d", *replayed.SettlementPrice, *tc.price)
 			}
 		})
 	}
 }
+
+func int64Pointer(value int64) *int64 { return &value }

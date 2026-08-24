@@ -88,7 +88,9 @@ func (cs *contractSet) handle(evt *actor.Event) bool {
 			if c, ok := cs.contracts[ann.Symbol]; ok {
 				delete(cs.contracts, ann.Symbol)
 				if cs.onSettle != nil {
-					cs.onSettle(c, ann.SettlementPrice)
+					if ann.SettlementPrice != nil {
+						cs.onSettle(c, *ann.SettlementPrice)
+					}
 				}
 			}
 		}

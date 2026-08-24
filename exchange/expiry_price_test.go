@@ -368,7 +368,7 @@ func TestExpirySettlementPendingRetriesThenSettlesExactlyOnce(t *testing.T) {
 			continue
 		}
 		announcement, ok := record.data.(*etypes.InstrumentAnnouncement)
-		if !ok || !announcement.SettlementPriceAvailable || announcement.SettlementPrice != 120 {
+		if !ok || announcement.SettlementPrice == nil || *announcement.SettlementPrice != 120 {
 			t.Fatalf("settlement lifecycle evidence = %#v, want present price 120", record.data)
 		}
 	}
