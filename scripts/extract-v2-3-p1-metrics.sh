@@ -92,6 +92,44 @@ write_maker_delta() {
 	mv "$temp" "$output"
 }
 
+write_spot_trade_price_ratio() {
+	local cell=$1
+	local output="$cell/spot-trade-price-ratio.json"
+	local scratch
+	scratch=$(mktemp -d -t v2-3-p1-price-ratio-XXXXXX)
+	local file venue filename symbol row
+	while IFS= read -r -d '' file; do
+		venue=$(basename "$(dirname "$(dirname "$file")")")
+		filename=$(basename "$file")
+		case "$filename" in
+			ABC-USD.jsonl) symbol="ABC/USD" ;;
+			CDF-USD.jsonl) symbol="CDF/USD" ;;
+			ABC-CDF.jsonl) symbol="ABC/CDF" ;;
+			*) continue ;;
+		esac
+		row="$scratch/${venue}-${filename}.json"
+		jq -s --arg venue "$venue" --arg symbol "$symbol" '
+		  [ .[] | select(.event == "Trade") | .data.payload.price ] as $prices |
+		  if ($prices | length) == 0 then
+		    {venue_id: $venue, symbol: $symbol, available: false, reason: "no_executed_spot_trade"}
+		  elif $prices[0] == 0 then
+		    {venue_id: $venue, symbol: $symbol, available: false, reason: "opening_trade_price_zero_ratio_undefined", trades: ($prices | length), opening_trade_price: $prices[0], terminal_trade_price: $prices[-1]}
+		  else
+		    {venue_id: $venue, symbol: $symbol, available: true, trades: ($prices | length), opening_trade_price: $prices[0], terminal_trade_price: $prices[-1], terminal_opening_price_ratio: ($prices[-1] / $prices[0])}
+		  end
+		' "$file" >"$row"
+	done < <(find "$cell/venues" -type f -path '*/spot/*.jsonl' -print0 | sort -z)
+	if ! compgen -G "$scratch/*.json" >/dev/null; then
+		echo "no scoped spot raw evidence for P1 trade-price ratio: $cell" >&2
+		exit 1
+	fi
+	jq -s '{
+	  schema_version: 1,
+	  source: "first and terminal executed trade per venue/spot book; ratio explicitly unavailable when no trade or opening price is zero",
+	  rows: sort_by(.venue_id, .symbol)
+	}' "$scratch"/*.json >"$output"
+}
+
 for arm in A B; do
 	for seed in 101 103; do
 		cell="$artifact_dir/$arm/seed-$seed"
@@ -109,6 +147,7 @@ for arm in A B; do
 		write_metric "$cell/makerquotesize.json" "$analyzer" -metric makerquotesize -json "$cell"
 		write_metric "$cell/viability.json" "$analyzer" -metric viability -json -viability-window 60 "$cell"
 		write_maker_delta "$cell"
+		write_spot_trade_price_ratio "$cell"
 
 		temp=$(mktemp "$cell/spot-viability.json.tmp-XXXXXX")
 		jq '{
@@ -129,7 +168,7 @@ for arm in A B; do
 			  completion_sentinels: ["greeks.json", "latency.json"],
 			  required_artifacts: [
 			    "observationreceipts.json", "evidenceartifacthash.json", "makerquotesize.json",
-			    "viability.json", "spot-viability.json", "maker-net-delta.json"
+			    "viability.json", "spot-viability.json", "maker-net-delta.json", "spot-trade-price-ratio.json"
 			  ],
 			  raw_log_policy: "retained; no P1 raw evidence is prunable from this script"
 			}' >"$cell/analysis-metadata.json"
