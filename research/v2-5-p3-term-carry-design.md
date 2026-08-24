@@ -1,9 +1,10 @@
 # V2-5 P3 design — term carry allocator with realized lifecycle
 
-Status: **design only; no P3 code or P3 market world exists.** This is the
-next permissible V2-5 representation slice after P1a `NOT EXERCISED`, P2a's
-narrow local-hedge activation pass, P2 public-signal readiness, and lifecycle
-finding C-001. It does not alter an earlier V2 result.
+Status: **P3 core, receipt boundary, and independent lifecycle replay are
+implemented; no P3 market world exists.** This remains the next permissible
+V2-5 experiment after P1a `NOT EXERCISED`, P2a's narrow local-hedge activation
+pass, P2 public-signal readiness, and lifecycle finding C-001. It does not
+alter an earlier V2 result.
 
 ## Observed failure and new representation
 
@@ -53,14 +54,19 @@ IDLE → ENTRY_SPOT → ENTRY_PERP → ACTIVE_TERM
      → UNWIND_PERP → UNWIND_SPOT → IDLE
 ```
 
-Partial/rejected/cancelled IOC legs remain in their actual state. An entry
-whose first leg cannot become a matched pair follows a named `ENTRY_REPAIR` or
-`ENTRY_ABORT_UNWIND` path; it is never booked as a carry holding. At term end
-the actor first unwinds the perpetual, then the spot position. An unavailable
-local executable price yields an observable `UNWIND_PRICE_UNAVAILABLE` defer
-and deterministic retry; it does not renew the term, use a hidden last price,
-or turn numeric zero into unavailable. A terminal horizon that cannot include
-the declared term plus its two-leg close bars a new entry.
+Partial IOC legs remain in their actual state. A locally unavailable or
+sub-minimum first leg does not create a plan at all; a rejected or zero-fill
+cancelled flat first leg deterministically resets to `IDLE`, so it cannot
+accumulate fictional carry time. Once any leg fills, its real exposure remains
+in the entry/repair path and cannot be erased. At term end the actor first
+unwinds the perpetual, then the spot position. An unavailable local executable
+price yields an observable `UNWIND_PRICE_UNAVAILABLE` defer and deterministic
+retry; it does not renew the term, use a hidden last price, or turn numeric
+zero into unavailable. A participant-known `mandate_end_at_nano` may bar a
+new term that cannot include its declared close; it is serialized policy,
+not the simulator's hidden run termination time. With no mandate, a short
+technical screen may end while a term remains explicitly open/censored and
+cannot make an economic carry claim.
 
 ## Exact economics and domains
 
@@ -102,12 +108,34 @@ order chains, active-term funding payments, and exactly one eventual unwind.
 It must separately reconstruct closed positions and conservation; it may not
 infer a pair merely because two leg intents were emitted.
 
+### Current implementation gate
+
+The P3-0 direct fixtures now cover one finite four-leg term, a term-end
+unwind defer and recovery, directional exact financing, a valid present-zero
+funding input, flat first-leg deferral, and rejected flat entry reset. The
+independent evidence replay verifies source frontiers, exact financial terms,
+gateway/venue/actor order chains, position continuity, active-term funding
+settlement attribution, terminal perpetual position, and closure cardinality.
+Its mutations catch a missing close as an open term, duplicate close, funding
+outside an active term, and a dropped unwind fill. Evidence ON/OFF fresh
+process × GOMAXPROCS neutral checks are complete for the terminal-censored
+short helper. P3a is still prohibited until its immutable short-world config,
+activation contract, and full-evidence analysis command are committed.
+
 Required mutations: reversed funding sign; dropped/delayed/duplicate/reordered
 funding or book receipt; a valid zero incorrectly treated absent; a forged
 term/exit time; a missing entry/unwind fill or IOC cancellation; a skipped
 unwind; double unwind; a funding payment outside the active term; and an
 evidence-on/off execution-hash comparison across fresh processes and relevant
 GOMAXPROCS values.
+
+The original hidden `TerminalNano` gate was removed from P3 before a market
+cell: giving a participant the simulator stop time would violate the local
+information contract and made a five-minute activation cell impossible. The
+replacement is the declared, persisted treasury mandate deadline above. A
+short P3a technical screen either uses no mandate and is terminal-censored in
+analysis, or a separately declared real mandate; neither is scored as
+realized term carry.
 
 ## Staged experiments and kill criteria
 
