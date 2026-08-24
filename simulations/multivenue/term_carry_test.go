@@ -367,6 +367,39 @@ func TestTermCarryAllocatorRetriesRejectedPassiveExitCancellation(t *testing.T) 
 	}
 }
 
+func TestTermCarryAllocatorPreservesResidualAfterRejectedPassiveExit(t *testing.T) {
+	gateway := newFundingCarryStubGateway()
+	var decisions []TermCarryDecision
+	now := time.Unix(10, 0)
+	cfg := termCarryTestConfig()
+	cfg.MaxPosition, cfg.LotQty, cfg.MinOrderSize = 100, 100, 75
+	cfg.PassiveExit = &TermCarryPassiveExitConfig{SliceQty: 75, DeadlineAtNano: now.Add(10 * time.Second).UnixNano()}
+	cfg.DecisionObserver = func(decision TermCarryDecision) { decisions = append(decisions, decision) }
+	allocator := NewTermCarryAllocator(1, gateway, cfg)
+	allocator.subscribed = true
+	observeTermCarryBooks(t, allocator, gateway, now, 100, 101, 102, 103, 100)
+	allocator.perp.askQty, allocator.perp.bidQty = 50, 1_000
+	allocator.state = termCarryActive
+	allocator.plan = &termCarryPlan{direction: 1, planCreatedAt: now.UnixNano(), firstExposureAt: now.UnixNano(), termEnd: now.Add(time.Second).UnixNano()}
+	allocator.spotPosition, allocator.perpPosition = 100, -100
+
+	allocator.onTick(now.Add(2 * time.Second))
+	first := decisions[len(decisions)-1]
+	if first.Action != "SUBMIT_UNWIND_PERP_POST_ONLY" || first.RequestID == 0 {
+		t.Fatalf("passive exit decision = %+v", first)
+	}
+	allocator.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderRejected, Data: actor.OrderRejectedEvent{RequestID: first.RequestID, Reason: exchange.RejectPostOnlyWouldTake}})
+	if allocator.pending != nil || allocator.plan == nil || allocator.state != termCarryUnwindPerp || allocator.spotPosition != 100 || allocator.perpPosition != -100 {
+		t.Fatalf("rejected passive exit erased residual: pending=%+v state=%s plan=%+v positions=%d/%d", allocator.pending, allocator.state, allocator.plan, allocator.spotPosition, allocator.perpPosition)
+	}
+
+	allocator.onTick(now.Add(3 * time.Second))
+	retry := decisions[len(decisions)-1]
+	if retry.Action != "SUBMIT_UNWIND_PERP_POST_ONLY" || retry.RequestID == 0 || retry.RequestID == first.RequestID {
+		t.Fatalf("rejected passive exit did not make a new explicit local choice: first=%+v retry=%+v", first, retry)
+	}
+}
+
 func TestTermCarryPassiveExitConfigRejectsIllegalSlice(t *testing.T) {
 	cfg := termCarryTestConfig()
 	cfg.MinOrderSize = 75
