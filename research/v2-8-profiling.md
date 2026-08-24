@@ -125,3 +125,40 @@ small at whole-analyzer scale to justify a production change alone. Results:
    optimizing those paths.
 5. Continue V2-3 P0 only with its A/B/C causal separation and fixed viability
    gates; profiling does not alter its economics or preregistration.
+
+## Reprofile after signed-price merge — 2026-08-24
+
+The signed-price branch merged as `320262e`. The relevant V2-8 profiles were
+re-run from that merged code, rather than relying on pre-merge percentages.
+This is the same retained 30-minute seed-101 baseline workload, with full raw
+logs, `spot_maker` receipt evidence, 60-second execution checkpoints, and
+`GOMAXPROCS=1` for the simulator. The terminal ordered execution hash remained
+`1eb482c7d5a21a08092c751252ca31dc6e4a0b8decf50fedefa08b2904afb2c7` at
+2,126,782 observations; the persisted evidence digest remained
+`c530af24a5c75950e2090b95f858c271d70ab47e55b1e44d66ec531885f7bb75`.
+
+| Component | Merged measurement | Interpretation |
+| --- | ---: | --- |
+| simulator wall time | 30.22 s / 59.56 simulated seconds per wall second | Within the prior full-log profile range; no signed-price regression signal. |
+| simulator peak RSS / sampled allocation | 808,916 KiB / 10.83 GB | Logging allocation remains material. |
+| order admission | `PlaceOrder` 41.1% cumulative CPU | Still the largest core-engine target; no safe optimization proposed. |
+| matching/settlement | `processExecutions` 23.0% cumulative CPU | Coupled to accounting and preview correctness. |
+| JSON logging | `encoding/json.Marshal` 25.7% cumulative CPU; 19.8% sampled allocation | Still material, but persisted byte semantics rule out an intuition-driven encoder swap. |
+| detached preview | 12.5% cumulative sampled allocation | Material allocation, but pooling remains high semantic risk. |
+| scheduler/courier | no new standalone material hotspot | Do not alter event ordering or receipt paths. |
+| block/mutex | no application contention | No synchronization optimization justified. |
+
+Offline `mvanalyze -metric crossvenue` was separately replayed at
+`GOMAXPROCS=14` over the merged run: 0.87 s wall, 3.56 s CPU, 69,120 KiB peak
+RSS, and 394.45 MB sampled allocation. `encoding/json.Unmarshal` consumed
+73.0% cumulative CPU; `bytesContains`/event prefiltering 16.6%; payload decode
+23.3% cumulative. This is the same qualitative bottleneck as the original
+gate. The small whole-analyzer filter opportunity remains insufficient to
+justify a change, and the signed representation creates no decoder reason to
+adopt a dependency.
+
+Raw merged artifacts are retained under
+`scratch/v2-8-signed-merged.xD8xvN/`. Decision: retain `encoding/json`, make
+no simulator or analyzer optimization in this step, and reprofile only when a
+new workload (option-heavy or liquidation-reachable) changes the measured
+hotspot mix.
