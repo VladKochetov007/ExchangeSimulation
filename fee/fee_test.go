@@ -132,3 +132,22 @@ func TestOptionFeeUsesOnlyItsDeclaredPriceSchedule(t *testing.T) {
 		t.Fatal("configured unavailable underlying silently selected premium schedule")
 	}
 }
+
+func TestOptionFeeRejectsPresentNonPositiveUnderlyingAsDomainError(t *testing.T) {
+	ctx := etypes.FillContext{
+		Exec:       &etypes.Execution{Price: 1_000_000, Qty: 1},
+		BaseAsset:  "ABC-C",
+		QuoteAsset: "USD",
+		Precision:  1,
+	}
+	for _, value := range []int64{-1, 0} {
+		fee := &OptionFee{
+			TakerUnderlyingBps: 1,
+			Source:             optionFeeSource{price: value},
+			SymbolMap:          func(_, _ string) string { return "ABC/USD" },
+		}
+		if _, err := fee.CalculateFee(ctx); !errors.Is(err, etypes.ErrPriceDomain) || errors.Is(err, etypes.ErrNoPrice) {
+			t.Fatalf("underlying %d error = %v, want domain error only", value, err)
+		}
+	}
+}

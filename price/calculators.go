@@ -53,7 +53,7 @@ func (c *WeightedMidPriceCalculator) Calculate(book *ebook.OrderBook) (int64, er
 	}
 
 	if bidQty == 0 && askQty == 0 {
-		return bidPrice + (askPrice-bidPrice)/2, nil
+		return etypes.Midpoint(bidPrice, askPrice), nil
 	}
 	if bidQty == 0 {
 		return askPrice, nil
@@ -69,7 +69,7 @@ func (c *WeightedMidPriceCalculator) Calculate(book *ebook.OrderBook) (int64, er
 		// Both sides can be individually valid while their combined depth
 		// exceeds int64. The ordinary midpoint stays well-defined and avoids
 		// allowing an aggregate overflow to move a mark price.
-		return bidPrice + (askPrice-bidPrice)/2, nil
+		return etypes.Midpoint(bidPrice, askPrice), nil
 	}
 	return bidPrice + etypes.MulDiv(askPrice-bidPrice, bidQty, totalWeight), nil
 }
@@ -88,7 +88,7 @@ func NewMedianMarkPrice(symbol string, index etypes.PriceSource) *MedianMarkPric
 }
 
 func (c *MedianMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
-	indexPrice, err := sourcePrice(c.index, c.symbol)
+	indexPrice, err := positiveSourcePrice(c.index, c.symbol)
 	if err != nil {
 		return 0, err
 	}
@@ -101,7 +101,7 @@ func (c *MedianMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
 		ask = book.Asks.Best.Price
 	}
 
-	if bid <= 0 || ask <= 0 || bid > ask {
+	if book.Bids.Best == nil || book.Asks.Best == nil || bid > ask {
 		return indexPrice, nil
 	}
 
@@ -149,7 +149,7 @@ func emaAlpha(windowSamples int) int64 {
 }
 
 func (c *EMAMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
-	indexPrice, err := sourcePrice(c.index, c.symbol)
+	indexPrice, err := positiveSourcePrice(c.index, c.symbol)
 	if err != nil {
 		return 0, err
 	}
@@ -197,7 +197,7 @@ func NewClampedEMAMarkPrice(symbol string, index etypes.PriceSource, windowSampl
 }
 
 func (c *ClampedEMAMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
-	indexPrice, err := sourcePrice(c.index, c.symbol)
+	indexPrice, err := positiveSourcePrice(c.index, c.symbol)
 	if err != nil {
 		return 0, err
 	}
@@ -253,7 +253,7 @@ func NewTWAPMarkPrice(symbol string, index etypes.PriceSource, windowSamples int
 }
 
 func (c *TWAPMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
-	indexPrice, err := sourcePrice(c.index, c.symbol)
+	indexPrice, err := positiveSourcePrice(c.index, c.symbol)
 	if err != nil {
 		return 0, err
 	}

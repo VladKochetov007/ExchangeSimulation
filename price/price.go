@@ -40,8 +40,20 @@ func sourcePrice(source etypes.PriceSource, symbol string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("price source for %s: %w", symbol, err)
 	}
+	return price, nil
+}
+
+// positiveSourcePrice is the explicit policy boundary for the current
+// percentage/basis mark models. Those formulas require a strictly-positive
+// index; zero or a negative numeric value is present, but outside their
+// declared mathematical domain rather than a missing-source sentinel.
+func positiveSourcePrice(source etypes.PriceSource, symbol string) (int64, error) {
+	price, err := sourcePrice(source, symbol)
+	if err != nil {
+		return 0, err
+	}
 	if price <= 0 {
-		return 0, fmt.Errorf("price source for %s returned non-positive price: %w", symbol, etypes.ErrNoPrice)
+		return 0, fmt.Errorf("positive source price for %s: %w", symbol, etypes.ErrPriceDomain)
 	}
 	return price, nil
 }

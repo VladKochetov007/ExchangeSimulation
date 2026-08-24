@@ -26,6 +26,12 @@ type Venue interface {
 // premium, while unavailable is a distinct state.
 var ErrNoPrice = errors.New("no usable price")
 
+// ErrPriceDomain means a numeric price was present but lies outside the
+// consumer's declared mathematical or economic domain. It is distinct from
+// ErrNoPrice: for example, zero is a present value from a signed commodity
+// source but is unusable by the current positive-forward Black-76 model.
+var ErrPriceDomain = errors.New("price outside consumer domain")
+
 // PriceSource provides a configured or externally observed reference price.
 // Implementations return any numeric price admitted by the consuming
 // instrument's PriceDomain and wrap ErrNoPrice when the source, symbol, or

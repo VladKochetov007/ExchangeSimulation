@@ -78,7 +78,7 @@ func (b *BasketIndex) Price(symbol string) (int64, error) {
 		if s.Source == nil || s.Weight <= 0 {
 			continue
 		}
-		p, err := sourcePrice(s.Source, symbol)
+		p, err := positiveSourcePrice(s.Source, symbol)
 		if err == nil {
 			live = append(live, quote{p, s.Weight})
 			prices = append(prices, p)
@@ -93,7 +93,7 @@ func (b *BasketIndex) Price(symbol string) (int64, error) {
 	if len(prices)%2 == 0 {
 		lower := prices[len(prices)/2-1]
 		upper := prices[len(prices)/2]
-		median = lower + (upper-lower)/2
+		median = etypes.Midpoint(lower, upper)
 	}
 
 	var weightedSum, totalWeight int64
@@ -113,7 +113,7 @@ func (b *BasketIndex) Price(symbol string) (int64, error) {
 	}
 	price := weightedSum / totalWeight
 	if price <= 0 {
-		return 0, fmt.Errorf("basket %s produced non-positive price: %w", symbol, etypes.ErrNoPrice)
+		return 0, fmt.Errorf("basket %s produced non-positive price: %w", symbol, etypes.ErrPriceDomain)
 	}
 	return price, nil
 }

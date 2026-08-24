@@ -57,7 +57,7 @@ func NewShrunkBasisMarkPrice(symbol string, index etypes.PriceSource, maSamples,
 }
 
 func (c *ShrunkBasisMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
-	indexPrice, err := sourcePrice(c.index, c.symbol)
+	indexPrice, err := positiveSourcePrice(c.index, c.symbol)
 	if err != nil {
 		return 0, err
 	}
@@ -155,7 +155,7 @@ func NewBinanceMedianMarkPrice(symbol string, index etypes.PriceSource, clock et
 }
 
 func (c *BinanceMedianMarkPrice) Calculate(book *ebook.OrderBook) (int64, error) {
-	indexPrice, indexErr := sourcePrice(c.index, c.symbol)
+	indexPrice, indexErr := positiveSourcePrice(c.index, c.symbol)
 	if indexErr != nil {
 		// Last Price Protected: no stable index reference, fall back to the
 		// contract's own last trade only.

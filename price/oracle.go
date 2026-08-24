@@ -91,7 +91,7 @@ func NewStaticPriceOracle(prices map[string]int64) *StaticPriceOracle {
 
 func (o *StaticPriceOracle) Price(symbol string) (int64, error) {
 	price, ok := o.prices[symbol]
-	if !ok || price <= 0 {
+	if !ok {
 		return 0, fmt.Errorf("static price for %s: %w", symbol, etypes.ErrNoPrice)
 	}
 	return price, nil
