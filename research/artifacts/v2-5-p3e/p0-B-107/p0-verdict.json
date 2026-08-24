@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "experiment": "V2-5-P3E-P0",
+  "classification": "ACTIVATED",
+  "verdict": "SUPPORTED (screening)",
+  "scope": "narrow passive-exit activation and evidence integrity only; single B/107 cell",
+  "provenance": {
+    "config": "research/configs/v2-5-p3e/p0-B-107.json",
+    "config_sha256": "206fc24ee0bc7f16aacabcbebc794b1fedd611922ef58e4578d5df142b323835",
+    "simulator_revision": "1714c26b6c9253f51cc3da61df52c30956cb4ea8",
+    "seed": 107,
+    "horizon": "98h",
+    "log_mode": "full",
+    "gomaxprocs": 4,
+    "execution": {
+      "domain": "execution_observations",
+      "ordering": "ordered_stream",
+      "events": 50636477,
+      "hash": "e385d5b62666f3ca035d5da45ba01023649eb0e4fd63884326638a52473be7b2"
+    },
+    "evidence_artifact": {
+      "events": 51165698,
+      "digest": "2e36cc856c71df92624057e48e7aa9e193d6a96b24f0ec9a0c6fa41b26203bf0"
+    },
+    "evidence_multiset": {
+      "events": 51165698,
+      "digest": "3e6c1625db379a858403a80c19a6a72f2826f8aa0169c1b8594c5dcf4713f2e1"
+    },
+    "analysis_revision": "45f3eab4acb5d7abe85af7af92395e92e67325d8",
+    "analyzer_sha256": "64df29c5d4f673e6f3ef56588433db18364f7ed7b85bc00df07d21252e9a0523"
+  },
+  "evidence_contract": {
+    "completion_sentinels": {
+      "greeks_json_nonempty": true,
+      "latency_json_nonempty": true
+    },
+    "analysis_metadata_complete": true,
+    "runtime_offline_artifact_digest_match": true,
+    "term_carry_valid": true,
+    "observation_receipts_valid": true,
+    "generic_order_lifecycle_valid": true,
+    "positions_valid": true,
+    "conservation_delta_chain_valid": true,
+    "derivatives_valid": true
+  },
+  "activation": {
+    "owned_active_terms": 2,
+    "post_only_actions": 2,
+    "post_only_accepted": 2,
+    "post_only_filled_orders": 2,
+    "post_only_filled_qty": 200000,
+    "required_minimum_qty": 100000,
+    "opposing_ioc_ask_qty": {
+      "central": 16286,
+      "south": 16348
+    },
+    "post_only_child": {
+      "leg": "UNWIND_PERP_POST_ONLY",
+      "side": "BUY",
+      "limit_price": 4999000000,
+      "quantity": 100000,
+      "order_type": "LIMIT",
+      "time_in_force": "GTC",
+      "post_only": true
+    }
+  },
+  "observed_but_unscored": {
+    "term_closed_rows": 2,
+    "active_term_funding_settlements": 23,
+    "residual_exit_funding_settlements": 1,
+    "expired_residual_funding_settlements": 0,
+    "deadline_cancellations": 0
+  },
+  "non_claims": [
+    "term closure",
+    "deadline cancellation success",
+    "market or basis effect",
+    "funding anchoring",
+    "carry profitability",
+    "ecological viability or realism",
+    "robustness beyond this single fixed cell"
+  ],
+  "raw_log_policy": "retained; no manual pruning; historical ae13f9a prunegate has no authority over this V2 cell"
+}
