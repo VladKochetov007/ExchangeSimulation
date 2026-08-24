@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "experiment": "v2-5-p1a-fee-aware-B-seed-107",
+  "status": "NOT_EXERCISED",
+  "interpretation_scope": "Fee-aware feasibility gate only; not a paired causal funding, basis-convergence, profitability, or realism result.",
+  "simulator_source_commit": "e1a31559dabaa40d29f1cb79a4c574e38aa4c130",
+  "analysis_source_commit": "e1a31559dabaa40d29f1cb79a4c574e38aa4c130",
+  "config_sha256": "9684e677d650f465afe50fbd49598290b4b50796824d5ee57e1a875bcc710c0b",
+  "simulator_binary_sha256": "c9d8cb37f82fcbc4ec811d5194be7326d966f261f6f4634536dd163f21a4dee1",
+  "analyzer_binary_sha256": "701c5234117311e030acc54b36749143a49445639796e48759ab68aef1144f24",
+  "prunegate_binary_sha256": "48386f59cbc15ef9ba32f9edf6d6017de7f7902becfaddc07d45f2c9f02688b5",
+  "seed": 107,
+  "horizon_seconds": 1800,
+  "terminal_event_count": 312700,
+  "execution_stream_hash": "37bda2da23fa7d9cce6dcf99f1b175f4a9ac5fb8778c503c297ad81b7e609315",
+  "evidence_artifact": {
+    "domain": "persisted_json_records",
+    "ordering": "unordered_multiset",
+    "events": 315400,
+    "digest": "65298ade0b6451e2f934a2d420162dd30a054d000998814ee725355fb74eaa7c"
+  },
+  "receipt_audit": {
+    "valid": true,
+    "schedules": 16179,
+    "receipts": 16170,
+    "scalar_order_decisions": 0,
+    "schedule_digest_matches": true,
+    "receipt_digest_matches": true,
+    "decision_digest_matches": true,
+    "bad_decision_frontier": 0,
+    "future_decision_use": 0,
+    "missing_due_receipt": 0
+  },
+  "funding_carry_audit": {
+    "valid": true,
+    "decisions": 2700,
+    "submitted": 0,
+    "deferred": 2700,
+    "accepted": 0,
+    "rejected": 0,
+    "fills": 0,
+    "cancelled": 0,
+    "receipt_mismatches": 0,
+    "future_receipt_use": 0,
+    "decision_field_mismatches": 0,
+    "funding_arithmetic_mismatches": 0,
+    "funding_sign_mismatches": 0,
+    "gateway_decision_mismatches": 0,
+    "missing_actor_outcomes": 0,
+    "actor_outcome_mismatches": 0,
+    "action_counts": {
+      "FUNDING_UNAVAILABLE": 3,
+      "LOCAL_REFERENCE_UNAVAILABLE": 24,
+      "NET_CARRY_BELOW_MINIMUM": 1780,
+      "NOT_SUBSCRIBED": 3,
+      "SIMULATION_HORIZON_CENSORED": 6,
+      "ZERO_PREMIUM": 884
+    }
+  },
+  "costed_decision_frontier": {
+    "funding_rate_bps_min": 1,
+    "funding_rate_bps_max": 3,
+    "net_carry_bps_min": -24,
+    "net_carry_bps_max": -20,
+    "taker_fee_cost_bps": 20,
+    "borrow_cost_bps": 0,
+    "balance_sheet_cost_bps": 1,
+    "margin_risk_cost_bps": 1,
+    "leg_risk_cost_bps": 1,
+    "min_net_carry_bps": 1,
+    "required_gross_funding_bps_at_least": 24,
+    "observed_maximum_shortfall_bps": 21,
+    "borrow_rounding_note": "The declared 500 annual bps rounds to zero in the policy's integer-bps representation over one 8-hour funding horizon; that is recorded rather than treated as an absent cost."
+  },
+  "terminal_accounting": {
+    "delta_records_checked": 18150,
+    "delta_records_mismatched": 0,
+    "delta_chain_broken": 0,
+    "aggregate_abc_residual": 0,
+    "aggregate_usd_residual": 0
+  },
+  "generic_funding_semantics": {
+    "funding_instants": 0,
+    "funding_broken": 0,
+    "funding_sign_wrong": 0,
+    "reason": "The 30-minute P1a horizon is shorter than the configured eight-hour funding settlement interval."
+  },
+  "build_worktree_note": "manifest.json reports modified=true because the shared worktree contained user-owned research artifact changes. git diff --name-only showed only research/artifacts/scoreboard files and no tracked source-path changes; no untracked source-like files were present.",
+  "raw_evidence_retained": true,
+  "next_gate": "The P1b paired A/B market screen is halted at these preregistered economics. A later V2-5 P2 must separately address cost-resolution or participant/funding-scale feasibility before a causal anchoring claim can be tested."
+}
