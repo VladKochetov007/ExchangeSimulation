@@ -7,6 +7,14 @@
   "provenance": {
     "preregistration_commit": "38f99cf",
     "simulation_source_revision": "4ef83610266e68981f5ea0e4df334e714c2e62f7",
+    "simulation_manifest_modified": true,
+    "manifest_tracked_changes": [
+      "research/artifacts/scoreboard/f2_baseline_101/derivatives.json",
+      "research/artifacts/scoreboard/f2_baseline_101/exposure.json",
+      "research/artifacts/scoreboard/f2_baseline_101/reaction.json",
+      "research/artifacts/scoreboard/f2_baseline_101/streamhash.json"
+    ],
+    "manifest_source_or_config_changes": 0,
     "analysis_revision": "9b21903d4aa3902477943059d489269a073984ea",
     "horizon": "98h",
     "log_mode": "full",

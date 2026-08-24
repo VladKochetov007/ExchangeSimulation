@@ -22,6 +22,12 @@ final analyzer, and prune-gate SHA-256 values are respectively
 `70303065…9805`, `a7cdaa86…2470c`, and `3ca77f0f…ac13`. The final analysis
 revision is `9b21903d4aa3902477943059d489269a073984ea`.
 
+Each run manifest records `modified=true` solely because the shared worktree
+contained the four preserved user-owned
+`research/artifacts/scoreboard/f2_baseline_101/{derivatives,exposure,reaction,streamhash}.json`
+edits. There was no tracked simulator, analyzer, experiment-config, or script
+change relative to the recorded simulation revision at launch.
+
 The structural config guard passes: within each seed, removing only B's
 declared `term_carry_allocator.passive_exit` leaves the complete A/B economic
 configuration identical; experiment descriptions and IDs are provenance
