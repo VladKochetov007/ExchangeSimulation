@@ -1,7 +1,6 @@
 {
   "experiment_id": "v2-5-p3d-exit-liquidity-legacy-seed-107",
   "hypothesis_id": "V2-5-P3D",
-  "causal_arm": "A_legacy_exit_floor",
   "date": "2026-08-24",
   "status": "preregistered",
   "description": "Paired P3d v3 finite-term control. It retains P3c's entry and exit floor as an explicitly persisted 100000-unit exit policy. It evaluates the exit-floor mechanism only, not funding anchoring, basis, profitability, or realism.",

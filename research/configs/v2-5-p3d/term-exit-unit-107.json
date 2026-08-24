@@ -1,7 +1,6 @@
 {
   "experiment_id": "v2-5-p3d-exit-liquidity-unit-seed-107",
   "hypothesis_id": "V2-5-P3D",
-  "causal_arm": "B_exchange_unit_exit_floor",
   "date": "2026-08-24",
   "status": "preregistered",
   "description": "Paired P3d v3 finite-term treatment. It changes only the explicitly persisted exit child minimum to the exchange's positive-unit admission floor. It evaluates the exit-floor mechanism only, not funding anchoring, basis, profitability, or realism.",
