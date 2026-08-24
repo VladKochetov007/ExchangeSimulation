@@ -1,0 +1,42 @@
+{
+  "experiment_id": "v2-5-p1a-fee-aware-B-seed-107",
+  "hypothesis_id": "V2-5-P1A",
+  "date": "2026-08-24",
+  "status": "preregistered",
+  "description": "Thirty-minute fresh-seed fee-aware feasibility gate for V2-5 funding carry. It retains P0 r1 population, clocks, feed latency, and non-atomic policy; it makes the exchange fee and every declared carry cost explicit. It is not a funding-anchor market screen.",
+  "log_mode": "full",
+  "seed": 107,
+  "strict_population_accounting": true,
+  "checkpoint_interval_seconds": 30,
+  "taker_fee_bps": 5,
+  "record_market_data_receipts": true,
+  "market_data_receipt_roles": [
+    "funding_carry_arb"
+  ],
+  "latency_profiles": {
+    "funding_carry_arb": {
+      "model": "constant",
+      "delay": 10000000
+    }
+  },
+  "funding_carry_arbitrageur": {
+    "enabled": true,
+    "spot_symbol": "ABC/USD",
+    "perp_symbol": "ABC-PERP",
+    "decision_period": 2000000000,
+    "funding_horizon": 1,
+    "max_funding_age": 10000000000,
+    "taker_fee_bps": 5,
+    "borrow_annual_bps": 500,
+    "balance_sheet_bps": 1,
+    "margin_risk_bps": 1,
+    "leg_risk_bps": 1,
+    "min_net_carry_bps": 1,
+    "max_position": 100000000,
+    "lot_qty": 10000000,
+    "min_order_size": 100000,
+    "spot_tick": 1000000,
+    "perp_tick": 1000000
+  },
+  "record_funding_carry_decisions": true
+}
