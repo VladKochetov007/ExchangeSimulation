@@ -100,11 +100,13 @@ instrumentation contract.
 The P1 analyzer must join each decision side to independent accepted/rejected
 order evidence by the exact `(venue_id, client_id, request_id)` tuple. Accepted
 order evidence must therefore persist the originating `request_id` alongside
-its existing flat order fields. It must separately report a missing,
-duplicate, or wrong-side relation rather than inferring an outcome from a
-timestamp, or treating an absent order as a zero-sized quote. Its policy
-activation check uses the decision event itself; it must not use post-hoc
-inventory or fill outcomes to define the treatment.
+its existing flat order fields. Rejected order evidence must likewise retain
+the attempted request's `symbol`, `side`, `type`, `time_in_force`, `post_only`,
+`price`, and `qty` alongside the existing response fields. It must separately
+report a missing, duplicate, wrong-side, or field-mismatched relation rather
+than inferring an outcome from a timestamp, or treating an absent order as a
+zero-sized quote. Its policy activation check uses the decision event itself;
+it must not use post-hoc inventory or fill outcomes to define the treatment.
 
 ## Preregistered short screen
 
