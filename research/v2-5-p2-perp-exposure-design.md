@@ -1,11 +1,13 @@
 # V2-5 P2 design — finite physical-exposure perp hedger
 
-Status: **implementation and independent-evidence gate passed; P2a unrun.**
+Status: **P2a passed its narrow actor-activation screen.** The result is
+recorded in [`v2-5-p2-perp-exposure-results.md`](v2-5-p2-perp-exposure-results.md).
 The actor, local receipt-bound decision evidence, independent replay, evidence
 mutations, and evidence-on/off fresh-process neutrality are committed through
-`6013808`. P2a remains the first market-backed experiment. It follows the
-valid-but-unexercised P1a result; it does not revise P0/P1a, change their
-costs, inject a funding rate, or authorize a P1b market score.
+`6013808`; P2a's implementation, analyzer, configuration, and verdict follow
+in later commits. It follows the valid-but-unexercised P1a result; it does not
+revise P0/P1a, change their costs, inject a funding rate, or authorize a P1b
+market score.
 
 ## Observed constraint
 
@@ -125,16 +127,22 @@ state activation, ordinary accepted/fill-qualified hedges, and individual gap
 reduction. It explicitly does not score a basis, funding benefit, stability,
 or price realism.
 
-### P2b — only after P2a passes
+### P2b — only after P2a passes and signal readiness is measured
 
-Before a P2b market screen, retain the P2a mark/funding observations. If those
-observations show no usable variation, P2b is halted as `NOT IDENTIFIED`; a
-funding-carry desk cannot respond to a signal that P2a did not activate. If
-they do vary, preregister a 2×2 with physical-exposure hedgers off/on and the
-costed funding-carry policy off/on. Score in order: actor activation;
-funding-carry local expected-rate → net-carry → inventory → order chain; then
-paired signed-basis and funding-response metrics. A price/basis difference
-without the desk's actual inventory/order change is not a funding attribution.
+Before a P2b market screen, retain and independently extract P2a's public
+mark/funding observations under the separate
+[`P2 signal-readiness preregistration`](v2-5-p2-signal-readiness-preregistration.md).
+If those observations show no usable variation, P2b is halted as `NOT
+IDENTIFIED`; a funding-carry desk cannot respond to a signal that is absent
+from its public feed. Passing that readiness screen establishes only that the
+public signal is present. It does not revive P1a: P1a's costed four-leg policy
+still has zero inventory and orders. A separately designed viable carry
+participant must first pass its own local-economic activation gate. Only then
+may a preregistered 2×2 compare physical-exposure hedgers off/on with that
+active policy off/on. Score in order: actor activation; local expected-rate →
+net-carry → inventory → order chain; then paired signed-basis and
+funding-response metrics. A price/basis difference without the desk's actual
+inventory/order change is not a funding attribution.
 
 ## Explicit limitations
 
