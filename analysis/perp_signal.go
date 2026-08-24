@@ -109,7 +109,7 @@ func (r *Run) MeasurePerpSignals(opts PerpSignalOptions) (*PerpSignalAudit, erro
 		return item
 	}
 
-	result := &PerpSignalAudit{Symbol: opts.Symbol}
+	result := &PerpSignalAudit{Symbol: opts.Symbol, MissingRequiredVenues: make([]string, 0)}
 	err := r.Scan(ScanOptions{Events: []string{"mark_price_update", "funding_rate_update", "balance_change"}, Workers: 1}, func(event Event) {
 		switch event.Name {
 		case "mark_price_update":
