@@ -31,6 +31,9 @@ func TestMakerQuoteSizeAuditJoinsExactRequestEvidence(t *testing.T) {
 	if len(result.SkewBuckets) != 2 || result.SkewBuckets[0].SizeSkewBps != 0 || result.SkewBuckets[1].SizeSkewBps != 5_000 || result.SkewBuckets[1].Adjusted != 1 {
 		t.Fatalf("P1 skew buckets = %+v", result.SkewBuckets)
 	}
+	if len(result.MakerBuckets) != 1 || result.MakerBuckets[0].Maker != "spot_maker_1" || result.MakerBuckets[0].Decisions != 2 || result.MakerBuckets[0].Accepted != 3 || result.MakerBuckets[0].Rejected != 1 {
+		t.Fatalf("P1 maker buckets = %+v", result.MakerBuckets)
+	}
 }
 
 func TestMakerQuoteSizeAuditCatchesPolicyAndEvidenceMutations(t *testing.T) {

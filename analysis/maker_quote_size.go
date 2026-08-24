@@ -17,24 +17,25 @@ type MakerQuoteSizeOptions struct {
 // policy rather than inferring inventory appetite from later fills or book
 // snapshots.
 type MakerQuoteSizeAudit struct {
-	Decisions                 int64                 `json:"decisions"`
-	DecisionSides             int64                 `json:"decision_sides"`
-	ZeroRiskDecisions         int64                 `json:"zero_risk_decisions"`
-	NonzeroRiskDecisions      int64                 `json:"nonzero_risk_decisions"`
-	NonzeroAdjustments        int64                 `json:"nonzero_adjustments"`
-	Accepted                  int64                 `json:"accepted"`
-	Rejected                  int64                 `json:"rejected"`
-	HorizonCensoredSides      int64                 `json:"horizon_censored_sides"`
-	CensoredOutcomeDeliveries int64                 `json:"censored_outcome_deliveries"`
-	MissingOutcomes           int64                 `json:"missing_outcomes"`
-	DuplicateOutcomes         int64                 `json:"duplicate_outcomes"`
-	DuplicateDecisionSides    int64                 `json:"duplicate_decision_sides"`
-	DecisionFieldMismatches   int64                 `json:"decision_field_mismatches"`
-	OutcomeFieldMismatches    int64                 `json:"outcome_field_mismatches"`
-	InvalidDecisionRecords    int64                 `json:"invalid_decision_records"`
-	InvalidCensorRecords      int64                 `json:"invalid_censor_records"`
-	SkewBuckets               []QuoteSizeSkewBucket `json:"skew_buckets"`
-	Checks                    []MakerQuoteSizeCheck `json:"checks,omitempty"`
+	Decisions                 int64                  `json:"decisions"`
+	DecisionSides             int64                  `json:"decision_sides"`
+	ZeroRiskDecisions         int64                  `json:"zero_risk_decisions"`
+	NonzeroRiskDecisions      int64                  `json:"nonzero_risk_decisions"`
+	NonzeroAdjustments        int64                  `json:"nonzero_adjustments"`
+	Accepted                  int64                  `json:"accepted"`
+	Rejected                  int64                  `json:"rejected"`
+	HorizonCensoredSides      int64                  `json:"horizon_censored_sides"`
+	CensoredOutcomeDeliveries int64                  `json:"censored_outcome_deliveries"`
+	MissingOutcomes           int64                  `json:"missing_outcomes"`
+	DuplicateOutcomes         int64                  `json:"duplicate_outcomes"`
+	DuplicateDecisionSides    int64                  `json:"duplicate_decision_sides"`
+	DecisionFieldMismatches   int64                  `json:"decision_field_mismatches"`
+	OutcomeFieldMismatches    int64                  `json:"outcome_field_mismatches"`
+	InvalidDecisionRecords    int64                  `json:"invalid_decision_records"`
+	InvalidCensorRecords      int64                  `json:"invalid_censor_records"`
+	SkewBuckets               []QuoteSizeSkewBucket  `json:"skew_buckets"`
+	MakerBuckets              []QuoteSizeMakerBucket `json:"maker_buckets"`
+	Checks                    []MakerQuoteSizeCheck  `json:"checks,omitempty"`
 }
 
 // QuoteSizeSkewBucket keeps control and treatment evidence separate instead of
@@ -45,6 +46,21 @@ type QuoteSizeSkewBucket struct {
 	ZeroRisk    int64 `json:"zero_risk"`
 	NonzeroRisk int64 `json:"nonzero_risk"`
 	Adjusted    int64 `json:"adjusted"`
+}
+
+// QuoteSizeMakerBucket preserves numbered maker identity for P1's per-maker
+// viability gate. Role aggregation alone could hide one silent participant.
+type QuoteSizeMakerBucket struct {
+	Maker                string `json:"maker"`
+	Symbol               string `json:"symbol"`
+	Decisions            int64  `json:"decisions"`
+	DecisionSides        int64  `json:"decision_sides"`
+	ZeroRisk             int64  `json:"zero_risk"`
+	NonzeroRisk          int64  `json:"nonzero_risk"`
+	Adjusted             int64  `json:"adjusted"`
+	Accepted             int64  `json:"accepted"`
+	Rejected             int64  `json:"rejected"`
+	HorizonCensoredSides int64  `json:"horizon_censored_sides"`
 }
 
 // MakerQuoteSizeCheck names one evidence or policy-contract failure. Stable
@@ -105,6 +121,7 @@ type makerQuoteSizeExpected struct {
 	qty      int64
 	postOnly bool
 	censored bool
+	maker    string
 }
 
 type makerQuoteSizeOutcome struct {
@@ -124,6 +141,7 @@ func (r *Run) MeasureMakerQuoteSize(options MakerQuoteSizeOptions) (*MakerQuoteS
 	expected := make(map[makerQuoteSizeKey]makerQuoteSizeExpected)
 	outcomes := make(map[makerQuoteSizeKey][]makerQuoteSizeOutcome)
 	buckets := make(map[int64]*QuoteSizeSkewBucket)
+	makers := make(map[string]*QuoteSizeMakerBucket)
 	addCheck := func(key makerQuoteSizeKey, side, failure string) {
 		result.Checks = append(result.Checks, MakerQuoteSizeCheck{
 			VenueID: key.venueID, ClientID: key.clientID, RequestID: key.request,
@@ -151,6 +169,11 @@ func (r *Run) MeasureMakerQuoteSize(options MakerQuoteSizeOptions) (*MakerQuoteS
 				addCheck(makerQuoteSizeKey{venueID: event.VenueID, clientID: event.ClientID}, "", "decision_client_mismatch")
 				return
 			}
+			if decision.Maker == "" || RoleGroup(decision.Maker) != r.Role(event.VenueID, event.ClientID) {
+				result.InvalidDecisionRecords++
+				addCheck(makerQuoteSizeKey{venueID: event.VenueID, clientID: event.ClientID}, "", "decision_maker_mismatch")
+				return
+			}
 			result.Decisions++
 			bucket := buckets[decision.SizeSkewBps]
 			if bucket == nil {
@@ -158,16 +181,29 @@ func (r *Run) MeasureMakerQuoteSize(options MakerQuoteSizeOptions) (*MakerQuoteS
 				buckets[decision.SizeSkewBps] = bucket
 			}
 			bucket.Decisions++
+			maker := makers[decision.Maker]
+			if maker == nil {
+				maker = &QuoteSizeMakerBucket{Maker: decision.Maker, Symbol: decision.Symbol}
+				makers[decision.Maker] = maker
+			}
+			if maker.Symbol != decision.Symbol {
+				result.InvalidDecisionRecords++
+				addCheck(makerQuoteSizeKey{venueID: event.VenueID, clientID: event.ClientID}, "", "maker_symbol_mismatch")
+			}
+			maker.Decisions++
 			if decision.RiskPosition == 0 {
 				result.ZeroRiskDecisions++
 				bucket.ZeroRisk++
+				maker.ZeroRisk++
 			} else {
 				result.NonzeroRiskDecisions++
 				bucket.NonzeroRisk++
+				maker.NonzeroRisk++
 			}
 			if decision.Adjustment > 0 {
 				result.NonzeroAdjustments++
 				bucket.Adjusted++
+				maker.Adjusted++
 			}
 
 			if !validMakerQuoteSizeDecision(decision) {
@@ -190,12 +226,13 @@ func (r *Run) MeasureMakerQuoteSize(options MakerQuoteSizeOptions) (*MakerQuoteS
 			} {
 				key := makerQuoteSizeKey{venueID: event.VenueID, clientID: event.ClientID, request: side.requestID}
 				result.DecisionSides++
+				maker.DecisionSides++
 				if _, duplicate := expected[key]; duplicate {
 					result.DuplicateDecisionSides++
 					addCheck(key, side.name, "duplicate_decision_side")
 					continue
 				}
-				expected[key] = makerQuoteSizeExpected{symbol: decision.Symbol, side: side.name, price: side.price, qty: side.qty, postOnly: decision.PostOnly, censored: censored}
+				expected[key] = makerQuoteSizeExpected{symbol: decision.Symbol, side: side.name, price: side.price, qty: side.qty, postOnly: decision.PostOnly, censored: censored, maker: decision.Maker}
 			}
 		case "OrderAccepted", "OrderRejected":
 			var order makerQuoteSizeOrder
@@ -217,10 +254,12 @@ func (r *Run) MeasureMakerQuoteSize(options MakerQuoteSizeOptions) (*MakerQuoteS
 	}
 
 	for key, want := range expected {
+		maker := makers[want.maker]
 		got := outcomes[key]
 		if want.censored {
 			if len(got) == 0 {
 				result.HorizonCensoredSides++
+				maker.HorizonCensoredSides++
 				continue
 			}
 			result.CensoredOutcomeDeliveries += int64(len(got))
@@ -241,8 +280,10 @@ func (r *Run) MeasureMakerQuoteSize(options MakerQuoteSizeOptions) (*MakerQuoteS
 		outcome := got[0]
 		if outcome.accepted {
 			result.Accepted++
+			maker.Accepted++
 		} else {
 			result.Rejected++
+			maker.Rejected++
 		}
 		if outcome.order.Symbol != want.symbol || outcome.order.Side != want.side || outcome.order.Type != "LIMIT" ||
 			outcome.order.TimeInForce != "GTC" || outcome.order.PostOnly != want.postOnly || outcome.order.Price != want.price || outcome.order.Qty != want.qty {
@@ -253,7 +294,16 @@ func (r *Run) MeasureMakerQuoteSize(options MakerQuoteSizeOptions) (*MakerQuoteS
 	for _, bucket := range buckets {
 		result.SkewBuckets = append(result.SkewBuckets, *bucket)
 	}
+	for _, maker := range makers {
+		result.MakerBuckets = append(result.MakerBuckets, *maker)
+	}
 	sort.Slice(result.SkewBuckets, func(i, j int) bool { return result.SkewBuckets[i].SizeSkewBps < result.SkewBuckets[j].SizeSkewBps })
+	sort.Slice(result.MakerBuckets, func(i, j int) bool {
+		if result.MakerBuckets[i].Maker != result.MakerBuckets[j].Maker {
+			return result.MakerBuckets[i].Maker < result.MakerBuckets[j].Maker
+		}
+		return result.MakerBuckets[i].Symbol < result.MakerBuckets[j].Symbol
+	})
 	sort.Slice(result.Checks, func(i, j int) bool {
 		left, right := result.Checks[i], result.Checks[j]
 		if left.VenueID != right.VenueID {
