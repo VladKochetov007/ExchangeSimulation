@@ -1,0 +1,18 @@
+{
+  "experiment": "V2-5 P2a physical-exposure hedge activation",
+  "verdict": "SUPPORTED (screening)",
+  "scope": "local actor activation only; not funding, carry, basis, price stability, or realism",
+  "source_commit": "1eed365a832dd920beed16f6ba52f3724a8d7699",
+  "horizon": "5m simulated",
+  "raw_evidence_retained": true,
+  "safe_to_prune": false,
+  "cells": {
+    "A-101": {"execution_hash": "32325dfa7ee25bd6b7129bd7f8ca55c3cbfeac7ce6d39c65660900649cc94b2e", "evidence_events": 56624, "evidence_digest": "7290ebe81e1f0ac77c6a493cf66a7127b9cab201a3ed32e7c89e4671c9be467f", "artifact_digest": "736be90281d6f3d5fbcfcd510c275468b6cf67142c17339a013e7db4d3186953", "decisions": 450, "state_updates": 90, "submitted": 0, "accepted": 0, "filled": 0, "gap_sum": 11770000000},
+    "A-103": {"execution_hash": "e089333c917b15b630f3a8f9858cbffb3b433825e46968d6205f13a4ad9de540", "evidence_events": 57131, "evidence_digest": "7e87c04524d058f9ee0ab9a1f81cdb15e4bcbf3d76c2d03e0de050e7becb5cc5", "artifact_digest": "16cc441195213c041abc91bd8e58caaf9950dba1787d151003981036e559d4db", "decisions": 450, "state_updates": 90, "submitted": 0, "accepted": 0, "filled": 0, "gap_sum": 8470000000},
+    "B-101": {"execution_hash": "f0bc867df337227f65a6b364cd70a476416c80c05f82f6725ebeea8dd5eae59a", "evidence_events": 58879, "evidence_digest": "9a5750e1b9d46fe24934825c4e7cba4ecce2c0952add0bab361f0238fd000f1d", "artifact_digest": "ff199215d41ad4030e9ad06b11a2557e687d81946a7e4c94bb17fd6a0c9538d7", "decisions": 450, "state_updates": 90, "submitted": 119, "accepted": 119, "filled": 119, "ioc_terminal_cancellations": 29, "gap_sum": 1060701675, "delta_gap_sum_vs_A": -10709298325},
+    "B-103": {"execution_hash": "1906741706a8bfff918c21c6a980821a9e2c90e62d5590a0613409fe6b9f1e82", "evidence_events": 59059, "evidence_digest": "144bd76d1d33b5838e8cc77295cc12c4ee4e92954fee5148f884afed43f129f6", "artifact_digest": "3e9b687eac27c4f46535dcdcba8dcc6d82b9a776fc0c253daf50882373bf96d2", "decisions": 450, "state_updates": 90, "submitted": 124, "accepted": 124, "filled": 123, "ioc_terminal_cancellations": 34, "gap_sum": 1073491844, "delta_gap_sum_vs_A": -7396508156}
+  },
+  "evidence_gate": {"perp_exposure_hedger_valid": true, "receipt_audit_valid": true, "latency_contract_valid": true, "position_replay_valid": true, "conservation_valid": true},
+  "fresh_process_reproduction": {"cell": "B-101", "gomaxprocs": [1, 4], "execution_hash_equal": true, "evidence_digest_equal": true, "artifact_digest_equal": true, "actor_counts_equal": true},
+  "next_gate": "separately preregistered public mark/funding-variation readiness audit; do not score P2a as market economics"
+}
