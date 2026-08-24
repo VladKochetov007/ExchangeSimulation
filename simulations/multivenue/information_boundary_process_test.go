@@ -86,6 +86,7 @@ func TestV20EvidenceHelper(t *testing.T) {
 	l1P2NoisePhaseEvidence := os.Getenv("V24_L1P2_NOISE_PHASE") != ""
 	fundingCarryEvidence := os.Getenv("V25_FUNDING_CARRY") == "1"
 	termCarryEvidence := os.Getenv("V25_TERM_CARRY") == "1"
+	termCarryP3eEvidence := os.Getenv("V25_TERM_CARRY_P3E") == "1"
 	liabilityHedgerEvidence := l0LiabilityHedgerEvidence || l1RandomSideControlEvidence || l1PhaseControlEvidence || l1PhaseOffsetEvidence || l1ExplicitZeroPhaseEvidence || l1P2NoisePhaseEvidence
 	if p1QuoteSizeEvidence {
 		// P1 varies only optional raw decision recording. Both sides retain full
@@ -194,6 +195,16 @@ func TestV20EvidenceHelper(t *testing.T) {
 			TakerFeeBps:      cfg.TakerFeeBps, LongSpotFundingBps: 0, ShortSpotBorrowBps: 0,
 			BalanceSheetBps: 0, MarginRiskBps: 0, LegRiskBps: 0, MinNetCarryBps: 0,
 			MaxPosition: 100_000_000, LotQty: 10_000_000, MinOrderSize: 100_000, UnwindMinOrderSize: &unwindMinimum, SpotTick: 1_000_000, PerpTick: 1_000_000,
+		}
+		if termCarryP3eEvidence {
+			// P3e remains semantically active in both ON/OFF children while the
+			// short helper mandate censors entry. This exercises the versioned
+			// passive-exit wire fields without manufacturing an exit event just
+			// to test telemetry.
+			cfg.TermCarryAllocator.PassiveExit = &TermCarryPassiveExitConfig{
+				SliceQty:       cfg.TermCarryAllocator.MinOrderSize,
+				DeadlineAtNano: time.Date(2025, 1, 1, 0, 2, 0, 0, time.UTC).UnixNano(),
+			}
 		}
 		cfg.LatencyProfiles = map[string]LatencyProfile{"term_carry_allocator": {Model: "constant", Delay: 10 * time.Millisecond}}
 		cfg.RecordTermCarryDecisions = os.Getenv("V20_EVIDENCE_ON") == "1"
@@ -853,6 +864,32 @@ func TestV25TermCarryEvidenceIsFreshProcessDeterministicAndNeutral(t *testing.T)
 	}
 }
 
+func TestV25P3eEvidenceIsFreshProcessDeterministicAndNeutral(t *testing.T) {
+	results := make(map[string]v20HelperResult)
+	for _, gomax := range []string{"1", "4"} {
+		for _, evidence := range []bool{false, true} {
+			key := "g" + gomax + "/off"
+			if evidence {
+				key = "g" + gomax + "/on"
+			}
+			results[key] = runV25P3eEvidenceHelper(t, gomax, evidence)
+		}
+	}
+	want := results["g1/off"].ExecutionHash
+	for key, result := range results {
+		if result.ExecutionHash == "" || result.ExecutionHash != want {
+			t.Fatalf("V2-5 P3e recorder changed execution with process setting: want %s, %s=%s", want, key, result.ExecutionHash)
+		}
+	}
+	left, right := results["g1/on"], results["g4/on"]
+	if left.TermCarryDecisions == 0 || left.TermCarryDecisions != right.TermCarryDecisions ||
+		left.Schedules == 0 || left.Receipts == 0 ||
+		left.Schedules != right.Schedules || left.Receipts != right.Receipts || left.Decisions != right.Decisions ||
+		left.ScheduleDigest != right.ScheduleDigest || left.ReceiptDigest != right.ReceiptDigest || left.DecisionDigest != right.DecisionDigest {
+		t.Fatalf("V2-5 P3e evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
+	}
+}
+
 // L1 changes the actor's declared economic side-selection policy, but its
 // decision/fill recorder and V2 receipt sidecars must still be append-only.
 // This fresh-process matrix therefore exercises the random-side control rather
@@ -1352,6 +1389,32 @@ func runV25TermCarryEvidenceHelper(t *testing.T, gomax string, evidence bool) v2
 	}
 	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
 		t.Fatalf("decode V2-5 P3 helper output %q: %v", raw, err)
+	}
+	return result
+}
+
+func runV25P3eEvidenceHelper(t *testing.T, gomax string, evidence bool) v20HelperResult {
+	t.Helper()
+	output := filepath.Join(t.TempDir(), "run")
+	cmd := exec.Command(os.Args[0], "-test.run=TestV20EvidenceHelper", "--")
+	cmd.Env = append(os.Environ(), "V20_EVIDENCE_HELPER=1", "V20_EVIDENCE_OUTPUT="+output, "V25_TERM_CARRY=1", "V25_TERM_CARRY_P3E=1", "GOMAXPROCS="+gomax)
+	if evidence {
+		cmd.Env = append(cmd.Env, "V20_EVIDENCE_ON=1")
+	}
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("V2-5 P3e evidence helper GOMAXPROCS=%s evidence=%t: %v\n%s", gomax, evidence, err, raw)
+	}
+	var result v20HelperResult
+	var encoded string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "{") {
+			encoded = line
+			break
+		}
+	}
+	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
+		t.Fatalf("decode V2-5 P3e helper output %q: %v", raw, err)
 	}
 	return result
 }
