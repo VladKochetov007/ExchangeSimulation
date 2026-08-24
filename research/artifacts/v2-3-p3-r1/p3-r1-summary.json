@@ -1,0 +1,341 @@
+{
+  "schema_version": 1,
+  "experiment": "V2-3-P3-R1",
+  "comparison_contract": {
+    "a": "perp_maker_replenish_below_bps = 0; policy disabled",
+    "b": "perp_maker_replenish_below_bps = 5000; strict below-half confirmed residual",
+    "primary_activation": "B must have a qualifying confirmed partial fill and refresh exactly at the next otherwise-unchanged decision",
+    "score_rule": "if a valid B cell has zero qualifying partial fills, the seed is NOT EXERCISED"
+  },
+  "rows": [
+    {
+      "arm": "A",
+      "seed": 101,
+      "provenance": {
+        "config_sha256": "90504bb2df7ed62f940341cb71faacdaf2d3450b5e3c686557818b5777518161",
+        "binary_sha256": "916fbcbbee24fe07c98dfd66979e227486ed958139773350e5b75a6d509a0333",
+        "git_revision": "e79eb37541b1c9af14e06e9f12ef042ec80a091e",
+        "gomaxprocs": "3",
+        "evidence": {
+          "domain": "persisted_json_records",
+          "ordering": "unordered_multiset",
+          "events": 368301,
+          "digest": "2a97c6d08a10d8906cf26148010331df34b6c99a83415eb539c71d228e092904"
+        }
+      },
+      "p3_replay": {
+        "valid": true,
+        "decisions": 49,
+        "enabled_decisions": 0,
+        "disabled_decisions": 49,
+        "refresh_due": 0,
+        "no_refresh": 49,
+        "action_counts": {
+          "POLICY_DISABLED": 49
+        },
+        "lifecycle_rows": 967,
+        "structural_mismatches": {
+          "invalid_decision_records": 0,
+          "invalid_lifecycle_records": 0,
+          "lifecycle_mismatches": 0,
+          "threshold_mismatches": 0,
+          "missing_outcomes": 0,
+          "duplicate_outcomes": 0,
+          "outcome_field_mismatches": 0
+        }
+      },
+      "information_boundary": {
+        "valid": true,
+        "schedules": 68024,
+        "receipts": 67860,
+        "decisions": 6567
+      },
+      "order_lifecycle": {
+        "accepted": 49066,
+        "fill_records": 46964,
+        "cancelled": 33491,
+        "fully_filled": 15111,
+        "required_immediate_terminal": 17594,
+        "missing_immediate_terminal": 0,
+        "unknown_fills": 0,
+        "unknown_cancellations": 0,
+        "duplicate_acceptances": 0,
+        "duplicate_terminals": 0,
+        "fills_after_terminal": 0,
+        "fill_quantity_mismatches": 0,
+        "cancel_quantity_mismatches": 0,
+        "client_mismatches": 0
+      },
+      "abc_perp_viability": {
+        "venues": [
+          "central",
+          "north",
+          "south"
+        ],
+        "snapshots": 900,
+        "empty_side_snapshots": 16,
+        "two_sided_share": 0.9822222222222222,
+        "trades": 761,
+        "viable_windows": 14,
+        "windows": 18
+      },
+      "gates": {
+        "p3_replay_valid": true,
+        "information_boundary_valid": true,
+        "quote_decisions_active": true,
+        "quote_order_activity_active": true,
+        "perp_snapshots_present": true,
+        "perp_two_sided_available": true,
+        "perp_trading_active": true
+      }
+    },
+    {
+      "arm": "A",
+      "seed": 103,
+      "provenance": {
+        "config_sha256": "b8fb9b8fdac15d221e44bb01dfc1a70a02317de0368d360ef590c5c1a0f25dd0",
+        "binary_sha256": "916fbcbbee24fe07c98dfd66979e227486ed958139773350e5b75a6d509a0333",
+        "git_revision": "e79eb37541b1c9af14e06e9f12ef042ec80a091e",
+        "gomaxprocs": "3",
+        "evidence": {
+          "domain": "persisted_json_records",
+          "ordering": "unordered_multiset",
+          "events": 330938,
+          "digest": "aa01e5a041a11b54d3068bb1335e0149b91063ebbb3b8df4c8406ba01e10072a"
+        }
+      },
+      "p3_replay": {
+        "valid": true,
+        "decisions": 22,
+        "enabled_decisions": 0,
+        "disabled_decisions": 22,
+        "refresh_due": 0,
+        "no_refresh": 22,
+        "action_counts": {
+          "POLICY_DISABLED": 22
+        },
+        "lifecycle_rows": 949,
+        "structural_mismatches": {
+          "invalid_decision_records": 0,
+          "invalid_lifecycle_records": 0,
+          "lifecycle_mismatches": 0,
+          "threshold_mismatches": 0,
+          "missing_outcomes": 0,
+          "duplicate_outcomes": 0,
+          "outcome_field_mismatches": 0
+        }
+      },
+      "information_boundary": {
+        "valid": true,
+        "schedules": 59416,
+        "receipts": 59304,
+        "decisions": 6139
+      },
+      "order_lifecycle": {
+        "accepted": 47910,
+        "fill_records": 36862,
+        "cancelled": 33980,
+        "fully_filled": 13437,
+        "required_immediate_terminal": 16385,
+        "missing_immediate_terminal": 0,
+        "unknown_fills": 0,
+        "unknown_cancellations": 0,
+        "duplicate_acceptances": 0,
+        "duplicate_terminals": 0,
+        "fills_after_terminal": 0,
+        "fill_quantity_mismatches": 0,
+        "cancel_quantity_mismatches": 0,
+        "client_mismatches": 0
+      },
+      "abc_perp_viability": {
+        "venues": [
+          "central",
+          "north",
+          "south"
+        ],
+        "snapshots": 900,
+        "empty_side_snapshots": 20,
+        "two_sided_share": 0.9777777777777777,
+        "trades": 791,
+        "viable_windows": 15,
+        "windows": 18
+      },
+      "gates": {
+        "p3_replay_valid": true,
+        "information_boundary_valid": true,
+        "quote_decisions_active": true,
+        "quote_order_activity_active": true,
+        "perp_snapshots_present": true,
+        "perp_two_sided_available": true,
+        "perp_trading_active": true
+      }
+    },
+    {
+      "arm": "B",
+      "seed": 101,
+      "provenance": {
+        "config_sha256": "934907b027c31d833a222911013a9ac4c4d6599e8a8b7929fbade2ef18b08c7f",
+        "binary_sha256": "916fbcbbee24fe07c98dfd66979e227486ed958139773350e5b75a6d509a0333",
+        "git_revision": "e79eb37541b1c9af14e06e9f12ef042ec80a091e",
+        "gomaxprocs": "3",
+        "evidence": {
+          "domain": "persisted_json_records",
+          "ordering": "unordered_multiset",
+          "events": 368301,
+          "digest": "ec890e2c10e168a3f33a302a954b05b2931a8e7a7b1a38ee0ff14564488b4fd6"
+        }
+      },
+      "p3_replay": {
+        "valid": true,
+        "decisions": 49,
+        "enabled_decisions": 49,
+        "disabled_decisions": 0,
+        "refresh_due": 0,
+        "no_refresh": 49,
+        "action_counts": {
+          "ABOVE_THRESHOLD": 49
+        },
+        "lifecycle_rows": 967,
+        "structural_mismatches": {
+          "invalid_decision_records": 0,
+          "invalid_lifecycle_records": 0,
+          "lifecycle_mismatches": 0,
+          "threshold_mismatches": 0,
+          "missing_outcomes": 0,
+          "duplicate_outcomes": 0,
+          "outcome_field_mismatches": 0
+        }
+      },
+      "information_boundary": {
+        "valid": true,
+        "schedules": 68024,
+        "receipts": 67860,
+        "decisions": 6567
+      },
+      "order_lifecycle": {
+        "accepted": 49066,
+        "fill_records": 46964,
+        "cancelled": 33491,
+        "fully_filled": 15111,
+        "required_immediate_terminal": 17594,
+        "missing_immediate_terminal": 0,
+        "unknown_fills": 0,
+        "unknown_cancellations": 0,
+        "duplicate_acceptances": 0,
+        "duplicate_terminals": 0,
+        "fills_after_terminal": 0,
+        "fill_quantity_mismatches": 0,
+        "cancel_quantity_mismatches": 0,
+        "client_mismatches": 0
+      },
+      "abc_perp_viability": {
+        "venues": [
+          "central",
+          "north",
+          "south"
+        ],
+        "snapshots": 900,
+        "empty_side_snapshots": 16,
+        "two_sided_share": 0.9822222222222222,
+        "trades": 761,
+        "viable_windows": 14,
+        "windows": 18
+      },
+      "gates": {
+        "p3_replay_valid": true,
+        "information_boundary_valid": true,
+        "quote_decisions_active": true,
+        "quote_order_activity_active": true,
+        "perp_snapshots_present": true,
+        "perp_two_sided_available": true,
+        "perp_trading_active": true
+      }
+    },
+    {
+      "arm": "B",
+      "seed": 103,
+      "provenance": {
+        "config_sha256": "517cb33073b093fa3e9287c41ea348fb1179ef850d7ef1e2c8fb583f30bae5c7",
+        "binary_sha256": "916fbcbbee24fe07c98dfd66979e227486ed958139773350e5b75a6d509a0333",
+        "git_revision": "e79eb37541b1c9af14e06e9f12ef042ec80a091e",
+        "gomaxprocs": "3",
+        "evidence": {
+          "domain": "persisted_json_records",
+          "ordering": "unordered_multiset",
+          "events": 330938,
+          "digest": "e1286de1a4d2c51bf9a8851417ef5221e48117de3264a48472c28ca7589b5757"
+        }
+      },
+      "p3_replay": {
+        "valid": true,
+        "decisions": 22,
+        "enabled_decisions": 22,
+        "disabled_decisions": 0,
+        "refresh_due": 0,
+        "no_refresh": 22,
+        "action_counts": {
+          "ABOVE_THRESHOLD": 22
+        },
+        "lifecycle_rows": 949,
+        "structural_mismatches": {
+          "invalid_decision_records": 0,
+          "invalid_lifecycle_records": 0,
+          "lifecycle_mismatches": 0,
+          "threshold_mismatches": 0,
+          "missing_outcomes": 0,
+          "duplicate_outcomes": 0,
+          "outcome_field_mismatches": 0
+        }
+      },
+      "information_boundary": {
+        "valid": true,
+        "schedules": 59416,
+        "receipts": 59304,
+        "decisions": 6139
+      },
+      "order_lifecycle": {
+        "accepted": 47910,
+        "fill_records": 36862,
+        "cancelled": 33980,
+        "fully_filled": 13437,
+        "required_immediate_terminal": 16385,
+        "missing_immediate_terminal": 0,
+        "unknown_fills": 0,
+        "unknown_cancellations": 0,
+        "duplicate_acceptances": 0,
+        "duplicate_terminals": 0,
+        "fills_after_terminal": 0,
+        "fill_quantity_mismatches": 0,
+        "cancel_quantity_mismatches": 0,
+        "client_mismatches": 0
+      },
+      "abc_perp_viability": {
+        "venues": [
+          "central",
+          "north",
+          "south"
+        ],
+        "snapshots": 900,
+        "empty_side_snapshots": 20,
+        "two_sided_share": 0.9777777777777777,
+        "trades": 791,
+        "viable_windows": 15,
+        "windows": 18
+      },
+      "gates": {
+        "p3_replay_valid": true,
+        "information_boundary_valid": true,
+        "quote_decisions_active": true,
+        "quote_order_activity_active": true,
+        "perp_snapshots_present": true,
+        "perp_two_sided_available": true,
+        "perp_trading_active": true
+      }
+    }
+  ],
+  "score": {
+    "verdict": "NOT EXERCISED",
+    "reason": "neither fixed-threshold treatment cell had a qualifying below-half confirmed residual at an audited decision"
+  },
+  "raw_evidence_policy": "retained; this compact scorecard does not authorize pruning"
+}
