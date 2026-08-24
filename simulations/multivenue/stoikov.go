@@ -231,6 +231,10 @@ type StoikovMMConfig struct {
 	QuoteSizeDecisionObserver func(MakerQuoteSizeDecision)
 	QuoteSizeDecisionMaker    string
 	QuoteSizeDecisionClient   uint64
+	// QuoteSizeDecisionTerminalNano declares the run boundary for optional P1
+	// evidence only. A quote decision at that instant cannot reach venue
+	// ingress before the registered horizon closes.
+	QuoteSizeDecisionTerminalNano int64
 }
 
 // MakerQuoteSizeDecision records a P1 quantity decision before either quote
@@ -255,6 +259,8 @@ type MakerQuoteSizeDecision struct {
 	AskQty              int64  `json:"ask_qty"`
 	PostOnly            bool   `json:"post_only"`
 	CancelBeforeReplace bool   `json:"cancel_before_replace"`
+	OutcomeExpectation  string `json:"outcome_expectation"`
+	CensorReason        string `json:"censor_reason,omitempty"`
 }
 
 type quoteSide bool
@@ -818,6 +824,11 @@ func (mm *StoikovMarketMaker) emitQuoteSizeDecision(now time.Time, plan quoteSiz
 	if mm.cfg.QuoteSizeDecisionObserver == nil {
 		return
 	}
+	expectation, reason := "VENUE_OUTCOME_REQUIRED", ""
+	if mm.cfg.QuoteSizeDecisionTerminalNano != 0 && now.UnixNano() >= mm.cfg.QuoteSizeDecisionTerminalNano {
+		expectation = "SIMULATION_HORIZON_CENSORED"
+		reason = "terminal_horizon_before_venue_ingress"
+	}
 	mm.cfg.QuoteSizeDecisionObserver(MakerQuoteSizeDecision{
 		Maker:               mm.cfg.QuoteSizeDecisionMaker,
 		ClientID:            mm.cfg.QuoteSizeDecisionClient,
@@ -837,6 +848,8 @@ func (mm *StoikovMarketMaker) emitQuoteSizeDecision(now time.Time, plan quoteSiz
 		AskQty:              plan.AskQty,
 		PostOnly:            mm.cfg.PostOnly,
 		CancelBeforeReplace: mm.cfg.PostOnlyCancelBeforeReplace,
+		OutcomeExpectation:  expectation,
+		CensorReason:        reason,
 	})
 }
 

@@ -1456,6 +1456,7 @@ type Sim struct {
 	latencyTelemetry   *simulation.LatencyStats
 	marketDataReceipts *simulation.MarketDataReceiptRecorder
 	frontierVectors    *simulation.DecisionFrontierVectorRecorder
+	terminalNano       int64
 }
 
 // Run starts all venue automation under one context and drives the common
@@ -1704,7 +1705,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	})
 	runner.AddIdler(timers)
 
-	sim := &Sim{Config: cfg, Runner: runner,
+	sim := &Sim{Config: cfg, Runner: runner, terminalNano: start + int64(simTime),
 		SpotIndex: newSpotIndexProvider(cfg.MakerAnchor, "ABC/USD", "ABC-PERP", "CDF/USD", "ABC/CDF"),
 		Venues:    make([]*Venue, 0, len(cfg.VenueIDs)), latencyTelemetry: simulation.NewLatencyStats()}
 	// Built before any venue, because every venue logger carries it.
@@ -2170,6 +2171,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			makerConfig.QuoteSizeDecisionObserver = quoteSizeObserver
 			makerConfig.QuoteSizeDecisionMaker = role
 			makerConfig.QuoteSizeDecisionClient = clientID
+			makerConfig.QuoteSizeDecisionTerminalNano = s.terminalNano
 		}
 		maker := NewStoikovMarketMaker(nextActor(), gateway, makerConfig)
 		maker.SetTickerFactory(timers)

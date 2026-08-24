@@ -701,4 +701,29 @@ func TestStoikovQuoteSizeDecisionPrecedesRequestsAndCarriesIDs(t *testing.T) {
 		got.BidQty != gw.requests[2].OrderReq.Qty || got.AskQty != gw.requests[3].OrderReq.Qty || !got.PostOnly || !got.CancelBeforeReplace {
 		t.Fatalf("decision did not match emitted P0-C requests: decision=%+v orders=%+v", got, gw.requests[2:])
 	}
+	if got.OutcomeExpectation != "VENUE_OUTCOME_REQUIRED" || got.CensorReason != "" {
+		t.Fatalf("ordinary decision outcome contract = %+v", got)
+	}
+}
+
+func TestStoikovQuoteSizeDecisionMarksTerminalHorizonCensoring(t *testing.T) {
+	gateway := newStoikovStubGateway()
+	var decisions []MakerQuoteSizeDecision
+	now := time.Unix(10, 0)
+	maker := NewStoikovMarketMaker(1, gateway, StoikovMMConfig{
+		Symbol: "ABC/USD", ReferenceSymbol: "ABC/USD", BootstrapPrice: 100_000,
+		BasePrecision: 1_000, QuotePrecision: 1_000, TickSize: 10, QuoteQty: 100,
+		QuoteInterval: time.Second, VolatilityHalfLife: time.Minute,
+		InitialLogVariancePerSec: 1.0 / (100.0 * 100.0), InventoryHorizon: time.Minute,
+		RelativeRiskAversion: 0.01 * 100, RelativeFillDecay: 2 * 100, MinHalfSpreadTicks: 1,
+		InventoryLimit: 100, PostOnly: true, PostOnlyCancelBeforeReplace: true,
+		QuoteSizeDecisionTerminalNano: now.UnixNano(),
+		QuoteSizeDecisionObserver:     func(decision MakerQuoteSizeDecision) { decisions = append(decisions, decision) },
+	})
+	maker.onTick(now)
+	maker.HandleEvent(context.Background(), makerSnapshot("ABC/USD", 99_990, 100_010))
+	maker.onTick(now)
+	if len(decisions) != 1 || decisions[0].OutcomeExpectation != "SIMULATION_HORIZON_CENSORED" || decisions[0].CensorReason != "terminal_horizon_before_venue_ingress" {
+		t.Fatalf("terminal decision censoring = %+v", decisions)
+	}
 }
