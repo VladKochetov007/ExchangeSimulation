@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "experiment_id": "v2-3-p2",
+  "status": "SCORED_SCREENING_ONLY",
+  "provenance": {
+    "simulator_source_revision": "675e1176f56ee5f4fc11dc8ef02a4538abe08a1f",
+    "simulator_binary_sha256": "6930aefd8b05824cedf5543a0ff18d6cd22ebef862bc816d8b31055d5afba90c",
+    "analysis_source_revision": "675e1176f56ee5f4fc11dc8ef02a4538abe08a1f",
+    "analyzer_binary_sha256": "c18002b77d1bb7920fecf937d03910ff48e150cb43c57f672127d2a77b7349de",
+    "simulated_horizon": "5m0s",
+    "log_mode": "full",
+    "gomaxprocs_per_world": 3,
+    "raw_log_policy": "retain; no P2 evidence is authorized for pruning"
+  },
+  "preconditions": {
+    "zero_enum_schema_audit": "research/v2-zero-valued-enum-evidence-audit.md",
+    "p2_outcome_symbol_analyzer_fix": "3eed5da",
+    "full_suite": "passed",
+    "focused_race_suite": "passed",
+    "config_delta": "A/B differ only in declared provenance and cdf_inventory_rebalance.enabled"
+  },
+  "arms": [
+    {
+      "arm": "A",
+      "seed": 101,
+      "config_sha256": "1ef7ff28265c0c8c9d05a809ee33b91eb5129d5d2483caa2a3a4524e30813084",
+      "evidence_events": 367465,
+      "evidence_multiset_digest": "924b744660e8c855c0a98b57880fe4305eb54847dc0e0e917b62a63d6310ebc9",
+      "audit_valid": true,
+      "decisions": 180,
+      "submissions": 0,
+      "accepted": 0,
+      "fills": 0,
+      "filled_qty": 0,
+      "action_counts": {"POLICY_DISABLED": 180}
+    },
+    {
+      "arm": "A",
+      "seed": 103,
+      "config_sha256": "d75d9c380a08335dc8ee4dc1d7e0b2ffa359afbdaeacbcde47d331ecae68faeb",
+      "evidence_events": 330147,
+      "evidence_multiset_digest": "ff099a21be474f7cb89050413bf164bf2c8150431e74c39cc458e612bd9bd71f",
+      "audit_valid": true,
+      "decisions": 180,
+      "submissions": 0,
+      "accepted": 0,
+      "fills": 0,
+      "filled_qty": 0,
+      "action_counts": {"POLICY_DISABLED": 180}
+    },
+    {
+      "arm": "B",
+      "seed": 101,
+      "config_sha256": "cfc6ae3bb0c0eebaf139c4a8f9e3e168d090e7cd9c46a3c1845a067a898c6e0f",
+      "evidence_events": 368074,
+      "evidence_multiset_digest": "d82607b243e17016e43d6a2c42724803f0d7b5f5a0646448398812b0e2de96d6",
+      "audit_valid": true,
+      "decisions": 180,
+      "submissions": 46,
+      "accepted": 44,
+      "horizon_censored": 2,
+      "fills": 88,
+      "filled_qty": 5665000000,
+      "action_counts": {"COOLDOWN": 88, "IN_BAND": 46, "SUBMIT_IOC": 46}
+    },
+    {
+      "arm": "B",
+      "seed": 103,
+      "config_sha256": "b5853d000fa241301be76f6d85909b0c98ea4cd75847b32ce1b4c40fedc6c1f6",
+      "evidence_events": 331057,
+      "evidence_multiset_digest": "cd70493bbf001591f00da02af365853c0ecbcbf55d7cc1db4bb3d142e1b80543",
+      "audit_valid": true,
+      "decisions": 180,
+      "submissions": 50,
+      "accepted": 48,
+      "horizon_censored": 2,
+      "fills": 96,
+      "filled_qty": 9150000000,
+      "action_counts": {"COOLDOWN": 94, "IN_BAND": 36, "SUBMIT_IOC": 50}
+    }
+  ],
+  "paired_descriptive_inventory": {
+    "seed_101": {
+      "mean_abs_inventory_delta_B_minus_A": 307049321.7511139,
+      "max_abs_inventory_delta_B_minus_A": 703386457,
+      "terminal_inventory_sum_delta_B_minus_A": -6816507368
+    },
+    "seed_103": {
+      "mean_abs_inventory_delta_B_minus_A": 195133385.97555923,
+      "max_abs_inventory_delta_B_minus_A": -2597896325,
+      "terminal_inventory_sum_delta_B_minus_A": -1753627783
+    }
+  },
+  "primary_score": {
+    "claim": "The enabled P2 policy provides an auditable, costly, capped, locally informed IOC risk-transfer action for out-of-band CDF/USD makers.",
+    "verdict": "SUPPORTED (screening)",
+    "evidence": [
+      "Both A controls have 180 POLICY_DISABLED decisions and zero submissions.",
+      "Both B treatments have eligible SUBMIT_IOC decisions and exchange-accepted IOC orders.",
+      "Every audited B fill is external-counterparty, taker-fee-positive, and reduces the submitting maker's absolute inventory; all contract mismatch counts are zero."
+    ],
+    "not_established": [
+      "aggregate maker-risk reduction",
+      "price stability or runaway control",
+      "long-run ecological viability",
+      "robustness beyond the two five-minute screening seeds"
+    ]
+  }
+}

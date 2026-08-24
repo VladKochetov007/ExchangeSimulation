@@ -137,3 +137,16 @@ local-information IOC risk-transfer action. It does not establish realistic
 price elasticity, aggregate risk absorption, runaway control, or viable
 long-run ecology. Those require later value/liability counterparties and
 phase-robust longer experiments.
+
+## Results — appended after preregistration
+
+Final post-audit cells A/B × seeds 101/103 pass the complete evidence contract
+and score **SUPPORTED (screening)** for the primary mechanism-integrity claim.
+Controls each have 180 disabled decisions and zero submissions. Treatment has
+46/50 submissions, 44/48 accepted IOC orders, 88/96 fills, and
+5,665,000,000/9,150,000,000 filled units for seeds 101/103; two submissions in
+each treatment are explicitly terminal-horizon censored. Every audited fill is
+external-counterparty, fee-positive, and locally inventory-reducing. This does
+not score aggregate inventory, price stability, runaway control, or long-run
+ecology. See `v2-3-inventory-rebalance-p2-results.md` and
+`artifacts/v2-3-p2/p2-summary.json` for exact paired values and provenance.
