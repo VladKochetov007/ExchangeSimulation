@@ -95,7 +95,7 @@ func (p *analyzerProfiles) Stop() {
 }
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, liabilityhedger, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, liabilityhedger, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, observationreceipts, frontiervectors")
 	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
 	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
@@ -251,6 +251,21 @@ func main() {
 					result.ReceiptAuditValid, result.MissingReceipts, result.ReceiptMismatches, result.FutureReceiptUse,
 					result.DecisionFieldMismatches, result.OutcomeFieldMismatches, result.MissingOutcomes, result.DuplicateOutcomes,
 					result.FeeMismatches, result.SelfFills, result.NonReducingFills, result.Valid)
+			})
+		case "noiseflowphase":
+			result, err := run.MeasureNoiseFlowPhase()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			if result.Decisions == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no L1-P2 noise-flow phase decision evidence\n", dir)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s phase %d interval %d decisions %6d subscribe/evaluate %6d/%6d submitted %6d expected actors/ticks %d/%d receipt %t missing/duplicate/offphase/phase/action/extra %d/%d/%d/%d/%d/%d valid %t\n",
+					dir, result.DecisionPhaseOffsetNanos, result.NoiseIntervalNanos, result.Decisions, result.SubscribeDecisions, result.EvaluateDecisions, result.SubmittedRequests,
+					result.ExpectedParticipants, result.ExpectedTicks, result.ReceiptAuditValid, result.MissingTicks, result.DuplicateTicks, result.OffPhaseTicks, result.PhaseMismatches, result.ActionMismatches, result.ExtraTicks, result.Valid)
 			})
 		case "stalls":
 			stats := run.Stalls(analysis.StallOptions{HorizonSeconds: *horizon, Desks: *desks, RunSeconds: *runSeconds})

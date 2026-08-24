@@ -121,3 +121,29 @@ func TestTakerBoundsOrdersByTheDepthFacingThem(t *testing.T) {
 		t.Fatalf("expected both sides to trade, got %d buys and %d sells", buys, sells)
 	}
 }
+
+func TestRandomTakerPhaseDecisionEvidenceIncludesNoOrderEvaluation(t *testing.T) {
+	gw := newStubGateway()
+	var decisions []RandomTakerDecision
+	taker := NewRandomTaker(1, gw, TakerConfig{
+		// A configured zero target is the actor-side no-order branch. An empty
+		// displayed book is intentionally not: legacy RandomTaker submits its
+		// market request and lets venue admission decide its outcome.
+		Symbols: []string{"ABC/USD"}, TargetQtys: map[string]int64{"ABC/USD": 0},
+		TakeInterval: time.Second, DecisionPhaseOffset: 500 * time.Millisecond, Seed: 3,
+		VenueID: "north", Role: "noise_flow_1", ClientID: 7,
+		DecisionObserver: func(decision RandomTakerDecision) { decisions = append(decisions, decision) },
+	})
+	now := time.Unix(10, 0)
+	taker.onTick(now)
+	if len(decisions) != 1 || decisions[0].Action != "SUBSCRIBE" || decisions[0].SubmittedRequestCount != 0 ||
+		decisions[0].DecisionTime != now.UnixNano() || decisions[0].DecisionPhaseOffset != int64(500*time.Millisecond) ||
+		decisions[0].VenueID != "north" || decisions[0].Role != "noise_flow_1" || decisions[0].ClientID != 7 {
+		t.Fatalf("subscription timing evidence = %+v", decisions)
+	}
+	taker.onTick(now.Add(time.Second))
+	if len(decisions) != 2 || decisions[1].Action != "EVALUATE" || decisions[1].SubmittedRequestCount != 0 ||
+		decisions[1].DecisionTime != now.Add(time.Second).UnixNano() {
+		t.Fatalf("zero-order evaluation was not explicitly evidenced: %+v", decisions)
+	}
+}

@@ -38,6 +38,9 @@ type v20HelperResult struct {
 	LiabilityHedgerDecisions int64  `json:"liability_hedger_decisions"`
 	LiabilityHedgerPhase     int64  `json:"liability_hedger_phase_nanos"`
 	LiabilityHedgerPhaseSet  bool   `json:"liability_hedger_phase_configured"`
+	NoiseFlowPhaseDecisions  int64  `json:"noise_flow_phase_decisions"`
+	NoiseFlowPhase           int64  `json:"noise_flow_phase_nanos"`
+	NoiseFlowPhaseSet        bool   `json:"noise_flow_phase_configured"`
 	EvidenceArtifactEvents   int64  `json:"evidence_artifact_events"`
 	EvidenceArtifactDigest   string `json:"evidence_artifact_digest"`
 }
@@ -75,7 +78,8 @@ func TestV20EvidenceHelper(t *testing.T) {
 	l1PhaseControlEvidence := os.Getenv("V24_L1_PHASE_CONTROL") == "1"
 	l1PhaseOffsetEvidence := os.Getenv("V24_L1_PHASE_OFFSET") == "1"
 	l1ExplicitZeroPhaseEvidence := os.Getenv("V24_L1_EXPLICIT_ZERO_PHASE") == "1"
-	liabilityHedgerEvidence := l0LiabilityHedgerEvidence || l1RandomSideControlEvidence || l1PhaseControlEvidence || l1PhaseOffsetEvidence || l1ExplicitZeroPhaseEvidence
+	l1P2NoisePhaseEvidence := os.Getenv("V24_L1P2_NOISE_PHASE") != ""
+	liabilityHedgerEvidence := l0LiabilityHedgerEvidence || l1RandomSideControlEvidence || l1PhaseControlEvidence || l1PhaseOffsetEvidence || l1ExplicitZeroPhaseEvidence || l1P2NoisePhaseEvidence
 	if p1QuoteSizeEvidence {
 		// P1 varies only optional raw decision recording. Both sides retain full
 		// logs so an identical logger topology cannot mask a recorder effect.
@@ -126,6 +130,20 @@ func TestV20EvidenceHelper(t *testing.T) {
 			cfg.CDFLiabilityHedger.DecisionPhaseOffset = 0
 		}
 		cfg.RecordLiabilityHedgerDecisions = os.Getenv("V20_EVIDENCE_ON") == "1"
+	}
+	if l1P2NoisePhaseEvidence {
+		switch os.Getenv("V24_L1P2_NOISE_PHASE") {
+		case "absent":
+			// Preserve the source-config omission path: zero is the Go default,
+			// but no test helper assignment is made.
+		case "zero":
+			cfg.NoiseFlowDecisionPhaseOffset = 0
+		case "one_second":
+			cfg.NoiseFlowDecisionPhaseOffset = time.Second
+		default:
+			t.Fatalf("unknown V24_L1P2_NOISE_PHASE=%q", os.Getenv("V24_L1P2_NOISE_PHASE"))
+		}
+		cfg.RecordNoiseFlowPhaseDecisions = os.Getenv("V20_EVIDENCE_ON") == "1"
 	}
 	if os.Getenv("V21_LOCAL_CACHE") == "1" || remoteFeed || remoteRoster {
 		cfg.MakerAnchor = "own_mid"
@@ -300,6 +318,22 @@ func TestV20EvidenceHelper(t *testing.T) {
 		}
 		result.LiabilityHedgerPhase = audit.DecisionPhaseOffsetNanos
 		result.LiabilityHedgerPhaseSet = audit.PhaseConfigured
+	}
+	if l1P2NoisePhaseEvidence && cfg.RecordNoiseFlowPhaseDecisions {
+		result.NoiseFlowPhaseDecisions = countRawEvent(t, output, "noise_flow_phase_decision")
+		if result.NoiseFlowPhaseDecisions == 0 {
+			t.Fatal("L1-P2 recorder emitted no noise-flow phase decisions")
+		}
+		run, err := analysis.Open(output)
+		if err != nil {
+			t.Fatalf("open L1-P2 evidence for independent replay: %v", err)
+		}
+		audit, err := run.MeasureNoiseFlowPhase()
+		if err != nil || !audit.Valid {
+			t.Fatalf("invalid L1-P2 noise-flow timing evidence: audit=%+v err=%v", audit, err)
+		}
+		result.NoiseFlowPhase = audit.DecisionPhaseOffsetNanos
+		result.NoiseFlowPhaseSet = true
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
@@ -698,6 +732,59 @@ func TestV24L1PExplicitZeroPhaseMatchesLegacySchedule(t *testing.T) {
 	}
 }
 
+// L1-P2's recorder must not become a hidden causal participant. A one-second
+// broad-noise phase changes only the configured first noise tick; evidence
+// ON/OFF and fresh process parallelism must leave the execution hash intact.
+func TestV24L1P2NoisePhaseEvidenceIsFreshProcessDeterministicAndNeutral(t *testing.T) {
+	results := make(map[string]v20HelperResult)
+	for _, gomax := range []string{"1", "4"} {
+		for _, evidence := range []bool{false, true} {
+			key := "g" + gomax + "/off"
+			if evidence {
+				key = "g" + gomax + "/on"
+			}
+			results[key] = runV24L1P2NoisePhaseEvidenceHelper(t, gomax, "one_second", evidence)
+		}
+	}
+	want := results["g1/off"].ExecutionHash
+	for key, result := range results {
+		if result.ExecutionHash == "" || result.ExecutionHash != want {
+			t.Fatalf("L1-P2 recorder changed execution with process setting: want %s, %s=%s", want, key, result.ExecutionHash)
+		}
+	}
+	left, right := results["g1/on"], results["g4/on"]
+	if left.NoiseFlowPhaseDecisions == 0 || left.NoiseFlowPhaseDecisions != right.NoiseFlowPhaseDecisions ||
+		!left.NoiseFlowPhaseSet || !right.NoiseFlowPhaseSet || left.NoiseFlowPhase != int64(time.Second) || left.NoiseFlowPhase != right.NoiseFlowPhase ||
+		left.LiabilityHedgerDecisions == 0 || left.Schedules == 0 || left.Receipts == 0 || left.Decisions == 0 ||
+		left.Schedules != right.Schedules || left.Receipts != right.Receipts || left.Decisions != right.Decisions ||
+		left.ScheduleDigest != right.ScheduleDigest || left.ReceiptDigest != right.ReceiptDigest || left.DecisionDigest != right.DecisionDigest {
+		t.Fatalf("L1-P2 noise phase evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
+	}
+}
+
+// A zero phase is an explicit schema value but must preserve RandomTaker's
+// legacy ticker representation. The absent source-config path and explicit
+// zero configuration are compared across fresh processes and GOMAX settings.
+func TestV24L1P2ExplicitZeroNoisePhaseMatchesLegacySchedule(t *testing.T) {
+	results := make(map[string]v20HelperResult)
+	for _, gomax := range []string{"1", "4"} {
+		results["absent/g"+gomax] = runV24L1P2NoisePhaseEvidenceHelper(t, gomax, "absent", false)
+		results["zero-off/g"+gomax] = runV24L1P2NoisePhaseEvidenceHelper(t, gomax, "zero", false)
+		results["zero-on/g"+gomax] = runV24L1P2NoisePhaseEvidenceHelper(t, gomax, "zero", true)
+	}
+	want := results["absent/g1"].ExecutionHash
+	for key, result := range results {
+		if result.ExecutionHash == "" || result.ExecutionHash != want {
+			t.Fatalf("explicit zero noise phase changed legacy execution: want %s, %s=%s", want, key, result.ExecutionHash)
+		}
+	}
+	left, right := results["zero-on/g1"], results["zero-on/g4"]
+	if left.NoiseFlowPhaseDecisions == 0 || left.NoiseFlowPhaseDecisions != right.NoiseFlowPhaseDecisions ||
+		!left.NoiseFlowPhaseSet || !right.NoiseFlowPhaseSet || left.NoiseFlowPhase != 0 || left.NoiseFlowPhase != right.NoiseFlowPhase {
+		t.Fatalf("explicit zero noise phase evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
+	}
+}
+
 func TestV22InstrumentedRouterRegistersEveryCustomLeg(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "research", "configs", "frozen-baseline-2026-08-22.json"))
 	if err != nil {
@@ -1054,6 +1141,32 @@ func runV24L1PhaseControlEvidenceHelper(t *testing.T, gomax string, explicitZero
 	}
 	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
 		t.Fatalf("decode L1-P phase-control helper output %q: %v", raw, err)
+	}
+	return result
+}
+
+func runV24L1P2NoisePhaseEvidenceHelper(t *testing.T, gomax, phase string, evidence bool) v20HelperResult {
+	t.Helper()
+	output := filepath.Join(t.TempDir(), "run")
+	cmd := exec.Command(os.Args[0], "-test.run=TestV20EvidenceHelper", "--")
+	cmd.Env = append(os.Environ(), "V20_EVIDENCE_HELPER=1", "V20_EVIDENCE_OUTPUT="+output, "V24_L1P2_NOISE_PHASE="+phase, "GOMAXPROCS="+gomax)
+	if evidence {
+		cmd.Env = append(cmd.Env, "V20_EVIDENCE_ON=1")
+	}
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("L1-P2 noise phase helper GOMAXPROCS=%s phase=%s evidence=%t: %v\n%s", gomax, phase, evidence, err, raw)
+	}
+	var result v20HelperResult
+	var encoded string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "{") {
+			encoded = line
+			break
+		}
+	}
+	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
+		t.Fatalf("decode L1-P2 noise phase helper output %q: %v", raw, err)
 	}
 	return result
 }

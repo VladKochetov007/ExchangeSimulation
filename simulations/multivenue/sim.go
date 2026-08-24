@@ -118,6 +118,10 @@ type Config struct {
 	// evaluation. Like the P1/P2 rows, these observations are excluded from the
 	// execution checkpoint domain and must not affect actor behavior.
 	RecordLiabilityHedgerDecisions bool `json:"record_liability_hedger_decisions"`
+	// RecordNoiseFlowPhaseDecisions retains each broad noise-flow tick for the
+	// V2-4 L1-P2 relative-phase experiment. These rows are persisted evidence
+	// only and deliberately excluded from the execution checkpoint domain.
+	RecordNoiseFlowPhaseDecisions bool `json:"record_noise_flow_phase_decisions"`
 	// CheckpointIntervalSeconds writes a rolling digest of the event stream at
 	// each simulated-time boundary, so two runs of one seed can be compared
 	// without retaining their logs. Zero disables it.
@@ -147,7 +151,12 @@ type Config struct {
 	AutomationInterval time.Duration `json:"automation_interval"`
 	QuoteInterval      time.Duration `json:"quote_interval"`
 	NoiseInterval      time.Duration `json:"noise_interval"`
-	GreekInterval      time.Duration `json:"greek_interval"`
+	// NoiseFlowDecisionPhaseOffset applies only to RandomTaker instances named
+	// noise_flow_*. It never changes option, futures, liquidity, supplier,
+	// maker, funding, or lifecycle clocks. Zero routes to the legacy ticker
+	// representation exactly.
+	NoiseFlowDecisionPhaseOffset time.Duration `json:"noise_flow_decision_phase_offset"`
+	GreekInterval                time.Duration `json:"greek_interval"`
 	// NoiseTraderCount and OptionFlowCount control independently funded,
 	// independently seeded flow participants on every venue. A zero value
 	// preserves the historical one-each baseline.
@@ -638,6 +647,9 @@ func (c *Config) normalize() error {
 	if c.RecordLiabilityHedgerDecisions && c.LogMode != "full" {
 		return errors.New("multivenue: liability-hedger decisions require full persisted evidence")
 	}
+	if c.RecordNoiseFlowPhaseDecisions && c.LogMode != "full" {
+		return errors.New("multivenue: noise-flow phase decisions require full persisted evidence")
+	}
 	if c.SpotStoikovInventorySizeSkewBps < 0 || c.SpotStoikovInventorySizeSkewBps > 5_000 {
 		return fmt.Errorf("multivenue: spot Stoikov inventory size skew bps must be in [0,5000], got %d", c.SpotStoikovInventorySizeSkewBps)
 	}
@@ -800,6 +812,9 @@ func (c *Config) normalize() error {
 	}
 	if c.NoiseInterval == 0 {
 		c.NoiseInterval = 2 * time.Second
+	}
+	if c.NoiseFlowDecisionPhaseOffset < 0 || c.NoiseFlowDecisionPhaseOffset >= c.NoiseInterval {
+		return fmt.Errorf("multivenue: noise-flow decision phase offset must be in [0, noise interval), got %s for interval %s", c.NoiseFlowDecisionPhaseOffset, c.NoiseInterval)
 	}
 	if c.GreekInterval == 0 {
 		c.GreekInterval = time.Minute
@@ -2252,6 +2267,12 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	liabilityHedgerFillObserver := func(fill LiabilityHedgerFill) {
 		venue.makerStateLog.LogEvidenceOnly(fill.Timestamp, fill.ClientID, "liability_hedger_fill", fill)
 	}
+	noiseFlowPhaseObserver := func(decision feesim.RandomTakerDecision) {
+		// L1-P2 timing rows are optional evidence only. They attest a complete
+		// evaluated tick, including a zero-order evaluation, but have no route
+		// into a participant, exchange, scheduler, or execution checkpoint.
+		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "noise_flow_phase_decision", decision)
+	}
 	quoteSizeObserver := func(decision MakerQuoteSizeDecision) {
 		// P1 decision telemetry is persisted evidence only. Sending it through
 		// LogEvent would make optional recording perturb the execution hash.
@@ -2403,15 +2424,23 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	}
 	noiseFee := &exchange.PercentageFee{MakerBps: 0, TakerBps: s.Config.TakerFeeBps, InQuote: true}
 	for participant := 0; participant < s.Config.NoiseTraderCount; participant++ {
-		noise := feesim.NewRandomTaker(nextActor(), connect(fmt.Sprintf("noise_flow_%d", participant+1), noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), feesim.TakerConfig{
+		role := fmt.Sprintf("noise_flow_%d", participant+1)
+		clientID, gateway := venue.connectParticipant(mount, role, noiseBalances, 10_000_000*mvQuotePrecision, noiseFee)
+		noiseConfig := feesim.TakerConfig{
 			Symbols: noiseSymbols, TargetQtys: noiseTargetQtys,
-			TakeInterval: s.Config.NoiseInterval, Seed: flowSeed(s.Config.Seed, venueIndex, participant, 1),
+			TakeInterval: s.Config.NoiseInterval, DecisionPhaseOffset: s.Config.NoiseFlowDecisionPhaseOffset,
+			Seed:              flowSeed(s.Config.Seed, venueIndex, participant, 1),
 			SizeParetoAlpha:   s.Config.NoiseSizeParetoAlpha,
 			SizeCapMultiple:   s.Config.NoiseSizeCapMultiple,
 			ImbalanceCoupling: s.Config.NoiseImbalanceCoupling,
 			ExciteAlpha:       s.Config.NoiseExciteAlpha,
 			ExciteBetaPerSec:  s.Config.NoiseExciteBetaPerSec,
-		})
+		}
+		if s.Config.RecordNoiseFlowPhaseDecisions {
+			noiseConfig.VenueID, noiseConfig.Role, noiseConfig.ClientID = venue.ID, role, clientID
+			noiseConfig.DecisionObserver = noiseFlowPhaseObserver
+		}
+		noise := feesim.NewRandomTaker(nextActor(), gateway, noiseConfig)
 		noise.SetTickerFactory(timers)
 		venue.NoiseTraders = append(venue.NoiseTraders, noise)
 	}

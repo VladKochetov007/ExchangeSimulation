@@ -14,7 +14,18 @@ type TakerConfig struct {
 	Symbols      []string
 	TargetQtys   map[string]int64 // per-symbol base qty per order
 	TakeInterval time.Duration
-	Seed         int64
+	// DecisionPhaseOffset moves only the first periodic decision. Zero retains
+	// the legacy ticker path exactly; a nonzero phase is an explicit causal
+	// clock input rather than a scheduler accident.
+	DecisionPhaseOffset time.Duration
+	Seed                int64
+	// VenueID, Role, and ClientID identify optional decision evidence. They are
+	// simulator wiring, not strategy inputs, and remain empty for ordinary
+	// fee-simulation uses.
+	VenueID          string
+	Role             string
+	ClientID         uint64
+	DecisionObserver func(RandomTakerDecision)
 
 	// ImbalanceCoupling tilts order side toward book imbalance (herding flow,
 	// queue-reactive style): p(buy) = 0.5 + coupling×imbalance/2 with
@@ -43,6 +54,20 @@ type TakerConfig struct {
 	SizeCapMultiple float64
 }
 
+// RandomTakerDecision records one evaluated broad-flow tick before any venue
+// response can feed back to the actor. SubmittedRequestCount distinguishes an
+// evaluated no-order tick from missing evidence. The observer is optional and
+// write-only: it must not alter actor state, timing, or random draws.
+type RandomTakerDecision struct {
+	VenueID               string `json:"venue_id"`
+	Role                  string `json:"role"`
+	ClientID              uint64 `json:"client_id"`
+	DecisionTime          int64  `json:"decision_time"`
+	DecisionPhaseOffset   int64  `json:"decision_phase_offset_nanos"`
+	Action                string `json:"action"`
+	SubmittedRequestCount int64  `json:"submitted_request_count"`
+}
+
 type RandomTaker struct {
 	*actor.BaseActor
 	cfg       TakerConfig
@@ -67,7 +92,7 @@ func NewRandomTaker(id uint64, gw actor.Gateway, cfg TakerConfig) *RandomTaker {
 		decay:     math.Exp(-cfg.ExciteBetaPerSec * cfg.TakeInterval.Seconds()),
 	}
 	t.SetHandler(t)
-	t.AddTicker(cfg.TakeInterval, t.onTick)
+	t.AddTickerWithOffset(cfg.TakeInterval, cfg.DecisionPhaseOffset, t.onTick)
 	return t
 }
 
@@ -129,8 +154,9 @@ func topImbalance(snap *exchange.BookSnapshot) float64 {
 	return float64(bid-ask) / float64(bid+ask)
 }
 
-func (rt *RandomTaker) onTick(_ time.Time) {
+func (rt *RandomTaker) onTick(now time.Time) {
 	if !rt.subscribed {
+		rt.observeDecision(now, "SUBSCRIBE", 0)
 		for _, sym := range rt.cfg.Symbols {
 			rt.Subscribe(sym, exchange.MDSnapshot, exchange.MDTrade)
 		}
@@ -146,9 +172,24 @@ func (rt *RandomTaker) onTick(_ time.Time) {
 		orders += int(rt.excitation)
 		rt.excitation *= rt.decay
 	}
+	submitted := int64(0)
 	for i := 0; i < orders; i++ {
-		rt.fireOrder()
+		if rt.fireOrder() {
+			submitted++
+		}
 	}
+	rt.observeDecision(now, "EVALUATE", submitted)
+}
+
+func (rt *RandomTaker) observeDecision(now time.Time, action string, submitted int64) {
+	if rt.cfg.DecisionObserver == nil {
+		return
+	}
+	rt.cfg.DecisionObserver(RandomTakerDecision{
+		VenueID: rt.cfg.VenueID, Role: rt.cfg.Role, ClientID: rt.cfg.ClientID,
+		DecisionTime: now.UnixNano(), DecisionPhaseOffset: int64(rt.cfg.DecisionPhaseOffset),
+		Action: action, SubmittedRequestCount: submitted,
+	})
 }
 
 // drawSize returns one order's quantity: uniform within half the target when no
@@ -182,15 +223,15 @@ func finiteSize(value float64) bool {
 	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 1
 }
 
-func (rt *RandomTaker) fireOrder() {
+func (rt *RandomTaker) fireOrder() bool {
 	sym := rt.cfg.Symbols[rt.rng.Intn(len(rt.cfg.Symbols))]
 	baseQty := rt.cfg.TargetQtys[sym]
 	if baseQty == 0 {
-		return
+		return false
 	}
 	qty := rt.drawSize(baseQty)
 	if qty <= 0 {
-		return
+		return false
 	}
 
 	pBuy := 0.5
@@ -217,7 +258,8 @@ func (rt *RandomTaker) fireOrder() {
 		qty = facing
 	}
 	if qty <= 0 {
-		return
+		return false
 	}
 	rt.SubmitOrder(sym, side, exchange.Market, 0, qty)
+	return true
 }
