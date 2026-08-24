@@ -44,6 +44,32 @@ func TestLiabilityHedgerAuditReplaysRandomSideControlAndReportsItsGapDirection(t
 	}
 }
 
+func TestLiabilityHedgerAuditAcceptsExplicitUnavailableTouchWithoutRequest(t *testing.T) {
+	run := l0TestRun(t, l0Fixture{PolicyMode: liabilityHedgerPolicyRandom, NoExecutableTouch: true})
+	result, err := run.MeasureLiabilityHedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || result.Deferred != 2 || result.Submitted != 0 || result.DecisionFieldMismatches != 0 || result.ActionCounts["LOCAL_EXECUTABLE_PRICE_UNAVAILABLE"] != 1 || len(result.Checks) != 0 {
+		t.Fatalf("unavailable-touch random-control defer = %+v", result)
+	}
+
+	// The deferred policy may expose its intended quantity, but it must not
+	// smuggle an actual venue request across the decision boundary.
+	mutated := l0TestRun(t, l0Fixture{
+		PolicyMode:        liabilityHedgerPolicyRandom,
+		NoExecutableTouch: true,
+		Decision:          map[string]any{"request_id": uint64(42)},
+	})
+	result, err = mutated.MeasureLiabilityHedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid || result.DecisionFieldMismatches == 0 {
+		t.Fatalf("unavailable-touch request-id mutation survived: %+v", result)
+	}
+}
+
 func TestLiabilityHedgerAuditAcceptsOnlyARealTailCensor(t *testing.T) {
 	run := l0TestRun(t, l0Fixture{TailCensored: true})
 	result, err := run.MeasureLiabilityHedger()
@@ -170,6 +196,7 @@ type l0Fixture struct {
 	DuplicateDecision   bool
 	DropGatewayDecision bool
 	TailCensored        bool
+	NoExecutableTouch   bool
 	ReverseSide         bool
 	PartialFill         bool
 	DropCancel          bool
@@ -206,7 +233,8 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 	} else if step > 0 {
 		side, price, orderSide = "BUY", 300_100_000, exchange.Buy
 	}
-	writeL0Evidence(t, dir, fixture.ReceiptAt, fixture.TerminalAt, !fixture.Disabled && !fixture.TailCensored && !fixture.DropGatewayDecision, orderSide, price)
+	submitted := !fixture.Disabled && !fixture.TailCensored && !fixture.NoExecutableTouch && !fixture.DropGatewayDecision
+	writeL0Evidence(t, dir, fixture.ReceiptAt, fixture.TerminalAt, submitted, orderSide, price)
 	active := map[string]any{
 		"venue_id": "north", "hedger": "liability_hedger_1", "client_id": uint64(7), "symbol": "CDF/USD",
 		"decision_time": int64(12_000_000_000), "enabled": !fixture.Disabled, "subscribed": true, "request_pending": false,
@@ -238,6 +266,21 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 		active["request_id"] = uint64(0)
 		active["outcome_expectation"] = "SIMULATION_HORIZON_CENSORED"
 		active["censor_reason"] = "terminal_horizon_before_round_trip"
+	}
+	if fixture.NoExecutableTouch {
+		active["action_or_defer_reason"] = "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE"
+		active["limit_price"] = int64(0)
+		active["request_id"] = uint64(0)
+		active["outcome_expectation"] = ""
+		if side == "BUY" {
+			active["has_ask"] = false
+			active["ask_price"] = int64(0)
+			active["ask_visible_qty"] = int64(0)
+		} else {
+			active["has_bid"] = false
+			active["bid_price"] = int64(0)
+			active["bid_visible_qty"] = int64(0)
+		}
 	}
 	if fixture.ReverseSide {
 		if side == "BUY" {
@@ -272,7 +315,7 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 	if fixture.DuplicateDecision {
 		lines = append(lines, logLine(12_000_000_000, 7, "liability_hedger_decision", active))
 	}
-	if !fixture.Disabled && !fixture.TailCensored {
+	if submitted {
 		quantity := int64(100_000_000)
 		if fixture.PartialFill {
 			quantity = 50_000_000

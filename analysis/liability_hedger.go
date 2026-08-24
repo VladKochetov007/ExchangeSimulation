@@ -486,9 +486,15 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 				if event.decision.Action == "SIMULATION_HORIZON_CENSORED" {
 					result.HorizonCensored++
 				}
-				if event.decision.RequestID != 0 || event.decision.RequestedQty != 0 {
+				// A decision that selected a side and capped desired quantity may
+				// still defer when the corresponding executable local touch is
+				// absent. RequestedQty is deliberately retained in that evidence to
+				// make the selected policy independently replayable; RequestID is
+				// the boundary at which an actual venue request exists. The decision
+				// validator above verifies the permitted unavailable-touch shape.
+				if event.decision.RequestID != 0 {
 					result.DecisionFieldMismatches++
-					addCheck(event.venueID, event.clientID, event.decision.RequestID, 0, "deferred_policy_has_request")
+					addCheck(event.venueID, event.clientID, event.decision.RequestID, 0, "deferred_policy_has_request_id")
 				}
 				continue
 			}
