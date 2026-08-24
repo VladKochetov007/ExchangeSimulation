@@ -735,3 +735,58 @@ finish and their contracts pass.
   under `research/artifacts/scoreboard/f2_baseline_101/`. No simulator,
   analyzer, config, or research-ledger change is uncommitted. Disk free space:
   about 331 GB. No simulator/analyzer/test process remains.
+
+### 2026-08-24 21:35 EEST — P3e P0 clean stop
+
+- The fresh, registered `P3e` P0 B/107 full-evidence cell is **simulation
+  complete and raw evidence is valid**, but its offline analysis was deliberately
+  interrupted for this laptop shutdown. Do not score it yet. It ran from source
+  `1714c26b6c9253f51cc3da61df52c30956cb4ea8` with the immutable P0 config
+  SHA-256 `206fc24ee0bc7f16aacabcbebc794b1fedd611922ef58e4578d5df142b323835`,
+  seed 107, 98 simulated hours, full evidence, and `GOMAXPROCS=4`.
+- Its final simulator completion line was `sim=98h0m0s`, wall `6m0s`. Both and
+  only the completion sentinels are present and nonempty: `greeks.json`
+  (397,352,788 bytes) and `latency.json` (2,623 bytes). The terminal ordered
+  execution checkpoint is 50,636,477 `execution_observations` with hash
+  `e385d5b62666f3ca035d5da45ba01023649eb0e4fd63884326638a52473be7b2`.
+- Runtime evidence provenance is retained in
+  `research/artifacts/v2-5-p3e/p0-B-107/evidence-artifact-hash.json`. Launch
+  executable SHA-256 values were simulator
+  `a4326f11a53a4b8c2170797ef045761ac3c601668f5250f2c8d69627aa446583`, analyzer
+  `09c7e45ebd6c125cf25e440c857b66c156d13f4fecd7eb4f32a4b05636fa82bf`, and
+  prune-gate `cde05218e52dac137b83dc040bc79c5d875c841194c2f6e840da104c23779dbc`.
+  The manifest's `modified=true` is solely the four pre-existing user-owned
+  ae13f9a scoreboard edits; do not touch them.
+- Before the run, the residual-funding replay was corrected and committed:
+  `0c77309` documents the P4 contract, `8b8dfa6` classifies only proven
+  P4 residual funding separately before/after the passive deadline, `1714c26`
+  records an execution/evidence-identical preflight rerun, and `4d9113e` adds
+  a regression proving a rejected post-only passive exit preserves the real
+  residual instead of silently flattening it. These are analyzer/docs/test
+  changes only; no simulator scheduling, RNG, matching, or economics changed.
+- The P0 extractor (`scripts/extract-v2-5-p3e-metrics.sh`) was interrupted by
+  SIGINT while scanning the completed raw logs. It atomically finished some
+  individual metric JSON files but did **not** reach `streamhash`,
+  `evidenceartifacthash`, validation, or `analysis-metadata.json`; therefore
+  there is no completed P3e analysis contract. Those partial derived files are
+  not a verdict and must not be read, cited, or pruned. Leave them in place;
+  rerunning the same fail-closed extractor overwrites each metric atomically
+  from the preserved raw evidence.
+- No simulator, mvanalyze, extractor, or test process remains. Disk free space
+  is approximately 330 GB. Raw P0 evidence, both preflights, and historical
+  interrupted attempt 0 remain retained. Never manually prune P3e: global
+  `prunegate` has no P3e measurement-manifest arm and correctly fails closed.
+- At restart: verify the four known user-owned edits only, rebuild
+  `bin/multivenue`, `bin/mvanalyze`, and `bin/prunegate`, then rerun exactly:
+
+  ```bash
+  P3E_CELL="$PWD/research/artifacts/v2-5-p3e/p0-B-107" \
+  MVANALYZE_BIN="$PWD/bin/mvanalyze" \
+  scripts/extract-v2-5-p3e-metrics.sh
+  ```
+
+  Treat extraction as complete only if it exits zero, prints `extracted V2-5
+  P3e evidence`, and writes a complete `analysis-metadata.json`. Then inspect
+  the final metrics and score the narrow registered P0 activation/integrity
+  predicate. P0 cannot support a market, basis, funding-anchor, cancellation,
+  or closure claim because the passive deadline lies after its horizon.
