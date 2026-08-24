@@ -95,7 +95,7 @@ func (p *analyzerProfiles) Stop() {
 }
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, postonly, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, observationreceipts, frontiervectors")
 	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
 	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
@@ -190,6 +190,26 @@ func main() {
 					dir, result.Events, result.AcceptedPostOnly, result.AcceptedRegular,
 					result.PostOnlyFills, result.PostOnlyFilledQty, result.RejectedWouldTake,
 					result.RejectedInvalid, result.UnmatchedFillOrders)
+			})
+		case "makerquotesize":
+			result, err := run.MeasureMakerQuoteSize(analysis.MakerQuoteSizeOptions{})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			if result.Decisions == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no P1 maker quote-size decision evidence\n", dir)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s decisions %6d sides %6d risk zero/nonzero %6d/%6d adjustment %6d accepted/rejected %6d/%6d censored/delivered %d/%d missing/duplicate %d/%d policy/request/censor mismatches %d/%d/%d\n",
+					dir, result.Decisions, result.DecisionSides, result.ZeroRiskDecisions, result.NonzeroRiskDecisions,
+					result.NonzeroAdjustments, result.Accepted, result.Rejected, result.HorizonCensoredSides, result.CensoredOutcomeDeliveries,
+					result.MissingOutcomes, result.DuplicateOutcomes, result.DecisionFieldMismatches, result.OutcomeFieldMismatches, result.InvalidCensorRecords)
+				for _, bucket := range result.SkewBuckets {
+					fmt.Printf("    size-skew %5d bps decisions %6d zero/nonzero %6d/%6d adjusted %6d\n",
+						bucket.SizeSkewBps, bucket.Decisions, bucket.ZeroRisk, bucket.NonzeroRisk, bucket.Adjusted)
+				}
 			})
 		case "stalls":
 			stats := run.Stalls(analysis.StallOptions{HorizonSeconds: *horizon, Desks: *desks, RunSeconds: *runSeconds})
