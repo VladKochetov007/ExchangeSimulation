@@ -704,6 +704,10 @@ func termCarryLifecycleTestRun(t *testing.T, mutate func(*termCarryLifecycleFixt
 			fill := fundingCarryVenueFill{OrderID: outcome.OrderID, TradeID: outcome.TradeID, Symbol: outcome.Symbol, Side: outcome.Side, Qty: outcome.Qty, Price: outcome.Price, FeeAmount: outcome.FeeAmount, FeeAsset: outcome.FeeAsset}
 			lines = append(lines, logLine(outcome.ExecutionTime, outcome.ClientID, "OrderFill", mustFundingCarryMap(t, fill)))
 		}
+		if outcome.Event == "ORDER_CANCELLED" {
+			cancellation := termCarryVenueCancellation{OrderID: outcome.OrderID, RequestID: outcome.CancelRequestID, RemainingQty: outcome.RemainingQty}
+			lines = append(lines, logLine(termCarryOutcomeTimestamp(outcome), outcome.ClientID, "OrderCancelled", mustFundingCarryMap(t, cancellation)))
+		}
 	}
 	lines = append(lines, fundingPayLine(fixture.settlementAt, "north", entry.ClientID, 1))
 	writeFundingCarryLog(t, dir, lines)
