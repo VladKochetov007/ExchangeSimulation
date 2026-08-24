@@ -2,6 +2,7 @@ package price
 
 import (
 	"fmt"
+	"math/big"
 	"slices"
 
 	etypes "exchange_sim/types"
@@ -14,8 +15,9 @@ import (
 type DeviationPolicy interface {
 	// Adjust receives a constituent's price, the basket median, and the
 	// constituent's weight; it returns the price and weight to use. A zero
-	// adjusted weight removes the constituent from this pass.
-	Adjust(price, median, weight int64) (adjPrice, adjWeight int64)
+	// adjusted weight removes the constituent from this pass. An error is a
+	// malformed or unrepresentable index calculation, not source absence.
+	Adjust(price, median, weight int64) (adjPrice, adjWeight int64, err error)
 }
 
 // ClampToMedian caps a constituent's deviation at ThresholdBps of the median
@@ -23,27 +25,52 @@ type DeviationPolicy interface {
 // pull the index further than the threshold.
 type ClampToMedian struct{ ThresholdBps int64 }
 
-func (p ClampToMedian) Adjust(price, median, weight int64) (int64, int64) {
-	limit := median * p.ThresholdBps / 10000
-	if price > median+limit {
-		return median + limit, weight
+func (p ClampToMedian) Adjust(price, median, weight int64) (int64, int64, error) {
+	limit, err := deviationLimit(median, p.ThresholdBps)
+	if err != nil {
+		return 0, 0, err
 	}
-	if price < median-limit {
-		return median - limit, weight
+	if price > median && price-median > limit {
+		adjusted, ok := etypes.TryAdd(median, limit)
+		if !ok {
+			return 0, 0, fmt.Errorf("clamp upper bound: unrepresentable")
+		}
+		return adjusted, weight, nil
 	}
-	return price, weight
+	if price < median && median-price > limit {
+		adjusted, ok := etypes.TrySub(median, limit)
+		if !ok {
+			return 0, 0, fmt.Errorf("clamp lower bound: unrepresentable")
+		}
+		return adjusted, weight, nil
+	}
+	return price, weight, nil
 }
 
 // ExcludeOutliers drops a constituent entirely once it deviates more than
 // ThresholdBps from the median (Bybit-style exclusion).
 type ExcludeOutliers struct{ ThresholdBps int64 }
 
-func (p ExcludeOutliers) Adjust(price, median, weight int64) (int64, int64) {
-	limit := median * p.ThresholdBps / 10000
-	if price > median+limit || price < median-limit {
-		return price, 0
+func (p ExcludeOutliers) Adjust(price, median, weight int64) (int64, int64, error) {
+	limit, err := deviationLimit(median, p.ThresholdBps)
+	if err != nil {
+		return 0, 0, err
 	}
-	return price, weight
+	if (price > median && price-median > limit) || (price < median && median-price > limit) {
+		return price, 0, nil
+	}
+	return price, weight, nil
+}
+
+func deviationLimit(median, bps int64) (int64, error) {
+	if median <= 0 || bps < 0 {
+		return 0, fmt.Errorf("invalid positive basket median=%d or threshold_bps=%d", median, bps)
+	}
+	limit, ok := etypes.TryMulBps(median, bps)
+	if !ok {
+		return 0, fmt.Errorf("basket deviation limit overflows int64")
+	}
+	return limit, nil
 }
 
 // BasketSource is one constituent of a BasketIndex.
@@ -51,6 +78,8 @@ type BasketSource struct {
 	Source etypes.PriceSource
 	Weight int64 // relative weight; keep small (basis points or 1..100)
 }
+
+type basketQuote struct{ price, weight int64 }
 
 // BasketIndex aggregates several price sources into one index the way real
 // venues do: unavailable sources drop out, survivors are medianed, the
@@ -71,8 +100,7 @@ func NewBasketIndex(sources []BasketSource, policy DeviationPolicy, minSources i
 }
 
 func (b *BasketIndex) Price(symbol string) (int64, error) {
-	type quote struct{ price, weight int64 }
-	live := make([]quote, 0, len(b.sources))
+	live := make([]basketQuote, 0, len(b.sources))
 	prices := make([]int64, 0, len(b.sources))
 	for _, s := range b.sources {
 		if s.Source == nil || s.Weight <= 0 {
@@ -80,7 +108,7 @@ func (b *BasketIndex) Price(symbol string) (int64, error) {
 		}
 		p, err := positiveSourcePrice(s.Source, symbol)
 		if err == nil {
-			live = append(live, quote{p, s.Weight})
+			live = append(live, basketQuote{p, s.Weight})
 			prices = append(prices, p)
 		}
 	}
@@ -96,24 +124,53 @@ func (b *BasketIndex) Price(symbol string) (int64, error) {
 		median = etypes.Midpoint(lower, upper)
 	}
 
-	var weightedSum, totalWeight int64
+	adjusted := make([]basketQuote, 0, len(live))
 	for _, q := range live {
 		price, weight := q.price, q.weight
 		if b.policy != nil {
-			price, weight = b.policy.Adjust(price, median, weight)
+			var err error
+			price, weight, err = b.policy.Adjust(price, median, weight)
+			if err != nil {
+				return 0, fmt.Errorf("basket %s adjustment: %w", symbol, err)
+			}
 		}
 		if weight <= 0 {
 			continue
 		}
-		weightedSum += price * weight
-		totalWeight += weight
+		adjusted = append(adjusted, basketQuote{price, weight})
 	}
-	if totalWeight == 0 {
-		return 0, fmt.Errorf("basket %s has no weighted constituents: %w", symbol, etypes.ErrNoPrice)
+	price, err := weightedBasketPrice(adjusted)
+	if err != nil {
+		return 0, fmt.Errorf("basket %s weighted average: %w", symbol, err)
 	}
-	price := weightedSum / totalWeight
 	if price <= 0 {
 		return 0, fmt.Errorf("basket %s produced non-positive price: %w", symbol, etypes.ErrPriceDomain)
 	}
 	return price, nil
+}
+
+// weightedBasketPrice uses exact integers because a positive index can still
+// overflow a native price×weight intermediate near the signed-price boundary.
+// An absent weighted constituent set returns ErrNoPrice. An unrepresentable
+// arithmetic result returns its own error; it is not price absence.
+func weightedBasketPrice(quotes []basketQuote) (int64, error) {
+	var weightedSum, totalWeight, term, price, weight, quotient big.Int
+	for _, quote := range quotes {
+		if quote.weight <= 0 {
+			continue
+		}
+		price.SetInt64(quote.price)
+		weight.SetInt64(quote.weight)
+		term.Mul(&price, &weight)
+		weightedSum.Add(&weightedSum, &term)
+		totalWeight.Add(&totalWeight, &weight)
+	}
+	if totalWeight.Sign() == 0 {
+		return 0, etypes.ErrNoPrice
+	}
+	quotient.Quo(&weightedSum, &totalWeight)
+	if !quotient.IsInt64() {
+		return 0, fmt.Errorf("weighted result overflows int64")
+	}
+	return quotient.Int64(), nil
 }
