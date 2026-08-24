@@ -1,6 +1,6 @@
 # V2 signed-price post-merge hardening ledger
 
-Status: **merge gate passed pending Git-flow merge — dedicated branch
+Status: **merge gate passed and integrated at `5afdd45` from dedicated branch
 `autoresearch/v2-signed-price-hardening`**
 
 ## Scope and provenance

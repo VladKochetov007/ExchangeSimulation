@@ -1,7 +1,8 @@
 # V2 signed-price audit
 
 Status: **historical signed-price migration merged at `320262e`; post-merge
-hardening merge gate passed on its dedicated branch, pending Git-flow merge.**
+hardening gate closed at `5afdd45` and is an ancestor of the active V2 research
+head.**
 
 This branch starts at `198a3b2`, after the P0 passive-refresh result. It does
 not modify P0 economics. The earlier
