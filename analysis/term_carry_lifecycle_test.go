@@ -73,6 +73,29 @@ func TestTermCarryLifecycleReconstructsPassiveClosure(t *testing.T) {
 	}
 }
 
+func TestTermCarryLifecycleSameTimestampFillUsesReceiptOrder(t *testing.T) {
+	var deadline int64
+	run := termCarryLifecycleTestRun(t, func(fixture *termCarryLifecycleFixture) {
+		deadline = makeLifecyclePassiveClosure(fixture)
+		passive := fixture.decisions[3]
+		fill := fixture.outcomes[5]
+		resting := passive
+		resting.DecisionTime = fill.ExecutionTime
+		resting.Action, resting.Leg, resting.Side = "PASSIVE_EXIT_RESTING", "", ""
+		resting.LimitPrice, resting.RequestedQty, resting.RequestID = 0, 0, 0
+		resting.OrderType, resting.TimeInForce, resting.PostOnly = "", "", nil
+		fixture.decisions = append(fixture.decisions, resting)
+	})
+
+	result, err := run.MeasureTermCarryLifecycle(TermCarryLifecycleOptions{DeadlineAtNano: deadline})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IntegrityValid {
+		t.Fatalf("same-timestamp decision-before-fill receipt rejected: %+v", result.IntegrityFailures)
+	}
+}
+
 func makeLifecyclePassiveClosure(fixture *termCarryLifecycleFixture) int64 {
 	fixture.policy.MinOrderSize = fixture.policy.MaxPosition
 	makeTermCarryLifecycleV4(fixture)

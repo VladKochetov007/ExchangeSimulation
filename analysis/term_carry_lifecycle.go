@@ -194,7 +194,22 @@ type TermCarryLifecycleAudit struct {
 
 type lifecycleDecisionEvidence struct {
 	termCarryDecision
-	at int64
+	at      int64
+	file    string
+	ordinal int64
+}
+
+type lifecycleEventCoordinate struct {
+	at      int64
+	file    string
+	ordinal int64
+}
+
+type lifecycleTradeKey struct {
+	venue  string
+	client uint64
+	order  uint64
+	trade  uint64
 }
 
 type lifecycleOrderEvidence struct {
@@ -229,6 +244,7 @@ type lifecycleTermCandidate struct {
 	planCreatedAt int64
 	termEnd       int64
 	decisions     []termCarryDecision
+	decisionRows  []lifecycleDecisionEvidence
 	fills         []lifecycleFillEvidence
 	actorOutcomes []termCarryOutcome
 }
@@ -277,14 +293,15 @@ func (c *lifecycleFailureCollector) sorted() []TermCarryLifecycleIntegrityFailur
 }
 
 type lifecycleEvidence struct {
-	decisions      []lifecycleDecisionEvidence
-	outcomes       []termCarryOutcome
-	accepted       map[fundingCarryKey][]lifecycleOrderEvidence
-	rejected       map[fundingCarryKey][]lifecycleOrderEvidence
-	fills          map[fundingCarryOrderKey][]lifecycleFillEvidence
-	cancellations  map[fundingCarryOrderKey][]lifecycleCancellationEvidence
-	funding        map[termCarryParticipant][]lifecycleFundingEvidence
-	observationEnd int64
+	decisions            []lifecycleDecisionEvidence
+	outcomes             []termCarryOutcome
+	actorFillCoordinates map[lifecycleTradeKey][]lifecycleEventCoordinate
+	accepted             map[fundingCarryKey][]lifecycleOrderEvidence
+	rejected             map[fundingCarryKey][]lifecycleOrderEvidence
+	fills                map[fundingCarryOrderKey][]lifecycleFillEvidence
+	cancellations        map[fundingCarryOrderKey][]lifecycleCancellationEvidence
+	funding              map[termCarryParticipant][]lifecycleFundingEvidence
+	observationEnd       int64
 }
 
 // MeasureTermCarryLifecycle independently grades finite-term ownership and
@@ -334,11 +351,12 @@ func (r *Run) MeasureTermCarryLifecycle(opts TermCarryLifecycleOptions) (*TermCa
 
 func (r *Run) scanTermCarryLifecycleEvidence(policy termCarryPolicyConfig, failures *lifecycleFailureCollector) (lifecycleEvidence, error) {
 	evidence := lifecycleEvidence{
-		accepted:      make(map[fundingCarryKey][]lifecycleOrderEvidence),
-		rejected:      make(map[fundingCarryKey][]lifecycleOrderEvidence),
-		fills:         make(map[fundingCarryOrderKey][]lifecycleFillEvidence),
-		cancellations: make(map[fundingCarryOrderKey][]lifecycleCancellationEvidence),
-		funding:       make(map[termCarryParticipant][]lifecycleFundingEvidence),
+		actorFillCoordinates: make(map[lifecycleTradeKey][]lifecycleEventCoordinate),
+		accepted:             make(map[fundingCarryKey][]lifecycleOrderEvidence),
+		rejected:             make(map[fundingCarryKey][]lifecycleOrderEvidence),
+		fills:                make(map[fundingCarryOrderKey][]lifecycleFillEvidence),
+		cancellations:        make(map[fundingCarryOrderKey][]lifecycleCancellationEvidence),
+		funding:              make(map[termCarryParticipant][]lifecycleFundingEvidence),
 	}
 	events := []string{"term_carry_decision", "term_carry_leg_outcome", "OrderAccepted", "OrderRejected", "OrderFill", "OrderCancelled", "balance_change"}
 	err := r.Scan(ScanOptions{Events: events, Workers: 1}, func(event Event) {
@@ -355,7 +373,9 @@ func (r *Run) scanTermCarryLifecycleEvidence(policy termCarryPolicyConfig, failu
 				failures.add("", event.VenueID, event.ClientID, 0, "invalid_decision_record")
 				return
 			}
-			evidence.decisions = append(evidence.decisions, lifecycleDecisionEvidence{termCarryDecision: decision, at: event.SimTS})
+			evidence.decisions = append(evidence.decisions, lifecycleDecisionEvidence{
+				termCarryDecision: decision, at: event.SimTS, file: event.File, ordinal: event.Ordinal,
+			})
 		case "term_carry_leg_outcome":
 			var outcome termCarryOutcome
 			if event.Decode(&outcome) != nil || outcome.VenueID != event.VenueID || outcome.ClientID != event.ClientID {
@@ -363,6 +383,12 @@ func (r *Run) scanTermCarryLifecycleEvidence(policy termCarryPolicyConfig, failu
 				return
 			}
 			evidence.outcomes = append(evidence.outcomes, outcome)
+			if outcome.Event == "ORDER_FILL" {
+				key := lifecycleTradeKey{event.VenueID, event.ClientID, outcome.OrderID, outcome.TradeID}
+				evidence.actorFillCoordinates[key] = append(evidence.actorFillCoordinates[key], lifecycleEventCoordinate{
+					at: event.SimTS, file: event.File, ordinal: event.Ordinal,
+				})
+			}
 		case "OrderAccepted", "OrderRejected":
 			var order fundingCarryVenueOrder
 			if event.Decode(&order) != nil || order.RequestID == 0 {
@@ -613,6 +639,7 @@ func buildLifecycleTermCandidates(evidence lifecycleEvidence, requests map[fundi
 			failures.add(lifecycleTermID(decision.VenueID, decision.ClientID, decision.PlanCreatedAt), decision.VenueID, decision.ClientID, decision.RequestID, "term_identity_mutated")
 		}
 		candidate.decisions = append(candidate.decisions, decision)
+		candidate.decisionRows = append(candidate.decisionRows, row)
 	}
 	for key, decision := range requests {
 		if decision.PlanCreatedAt == 0 {
@@ -690,11 +717,11 @@ func gradeLifecycleTerms(run *Run, policy termCarryPolicyConfig, opts TermCarryL
 		term.PositionAtTermEnd = lifecyclePositionAt(timeline, candidate.termEnd)
 		term.PositionAtDeadline = lifecyclePositionAt(timeline, opts.DeadlineAtNano)
 		term.TerminalPosition = lifecyclePositionAt(timeline, evidence.observationEnd)
-		term.AggressiveEligibility = findLifecycleAggressiveIneligibility(policy, candidate, timeline)
+		term.AggressiveEligibility = findLifecycleAggressiveIneligibility(policy, candidate, timeline, evidence.actorFillCoordinates, termID, failures)
 		gradeLifecyclePassiveEvidence(policy, candidate, timeline, evidence, &term, failures)
 		gradeLifecycleReductionAndClosure(candidate, timeline, opts.DeadlineAtNano, &term, failures)
 		gradeLifecycleFunding(policy, candidate, timeline, evidence, &term, failures)
-		validateLifecycleActorPositions(candidate, timeline, termID, failures)
+		validateLifecycleActorPositions(candidate, timeline, evidence.actorFillCoordinates, termID, failures)
 		terms = append(terms, term)
 	}
 	return terms
@@ -739,15 +766,21 @@ func replayLifecycleTermFills(policy termCarryPolicyConfig, candidate *lifecycle
 	return candidate.fills
 }
 
-func findLifecycleAggressiveIneligibility(policy termCarryPolicyConfig, candidate *lifecycleTermCandidate, timeline []lifecycleFillEvidence) TermCarryLifecycleAggressiveEvidence {
+func findLifecycleAggressiveIneligibility(policy termCarryPolicyConfig, candidate *lifecycleTermCandidate, timeline []lifecycleFillEvidence, actorFillCoordinates map[lifecycleTradeKey][]lifecycleEventCoordinate, termID string, failures *lifecycleFailureCollector) TermCarryLifecycleAggressiveEvidence {
 	result := TermCarryLifecycleAggressiveEvidence{Status: LifecycleNotExercised, EffectiveMinimum: lifecycleUnwindMinimum(policy)}
-	sort.Slice(candidate.decisions, func(i, j int) bool { return candidate.decisions[i].DecisionTime < candidate.decisions[j].DecisionTime })
-	for _, decision := range candidate.decisions {
+	sort.Slice(candidate.decisionRows, func(i, j int) bool {
+		return candidate.decisionRows[i].DecisionTime < candidate.decisionRows[j].DecisionTime
+	})
+	for _, decision := range candidate.decisionRows {
 		if decision.DecisionTime < candidate.termEnd {
 			continue
 		}
-		spot, perp := lifecyclePositionsAt(timeline, decision.DecisionTime, true)
-		leg, side, available, present, price, tick, gap := lifecycleAggressiveInputs(policy, decision, spot, perp)
+		spot, perp, ordered := lifecyclePositionsAtDecision(timeline, decision, actorFillCoordinates)
+		if !ordered {
+			failures.add(termID, decision.VenueID, decision.ClientID, decision.RequestID, "ambiguous_same_timestamp_fill_order")
+			continue
+		}
+		leg, side, available, present, price, tick, gap := lifecycleAggressiveInputs(policy, decision.termCarryDecision, spot, perp)
 		if gap == 0 || !present || !fundingCarryAuditPositiveGrid(price, tick) {
 			continue
 		}
@@ -975,9 +1008,13 @@ func gradeLifecycleFunding(policy termCarryPolicyConfig, candidate *lifecycleTer
 	}
 }
 
-func validateLifecycleActorPositions(candidate *lifecycleTermCandidate, timeline []lifecycleFillEvidence, termID string, failures *lifecycleFailureCollector) {
-	for _, decision := range candidate.decisions {
-		spot, perp := lifecyclePositionsAt(timeline, decision.DecisionTime, true)
+func validateLifecycleActorPositions(candidate *lifecycleTermCandidate, timeline []lifecycleFillEvidence, actorFillCoordinates map[lifecycleTradeKey][]lifecycleEventCoordinate, termID string, failures *lifecycleFailureCollector) {
+	for _, decision := range candidate.decisionRows {
+		spot, perp, ordered := lifecyclePositionsAtDecision(timeline, decision, actorFillCoordinates)
+		if !ordered {
+			failures.add(termID, decision.VenueID, decision.ClientID, decision.RequestID, "ambiguous_same_timestamp_fill_order")
+			continue
+		}
 		if decision.SpotPosition != spot || decision.PerpPosition != perp {
 			failures.add(termID, decision.VenueID, decision.ClientID, decision.RequestID, "actor_decision_position_disagreement")
 		}
@@ -1003,6 +1040,38 @@ func validateLifecycleActorPositions(candidate *lifecycleTermCandidate, timeline
 			failures.add(termID, outcome.VenueID, outcome.ClientID, outcome.RequestID, "nonfill_actor_outcome_mutated_position")
 		}
 	}
+}
+
+func lifecyclePositionsAtDecision(timeline []lifecycleFillEvidence, decision lifecycleDecisionEvidence, actorFillCoordinates map[lifecycleTradeKey][]lifecycleEventCoordinate) (int64, int64, bool) {
+	spot, perp := int64(0), int64(0)
+	for _, fill := range timeline {
+		if fill.at > decision.DecisionTime {
+			break
+		}
+		include := fill.at < decision.DecisionTime
+		if fill.at == decision.DecisionTime {
+			key := lifecycleTradeKey{decision.VenueID, decision.ClientID, fill.fill.OrderID, fill.fill.TradeID}
+			coordinates := actorFillCoordinates[key]
+			if len(coordinates) != 1 || coordinates[0].at != fill.at || coordinates[0].file != decision.file {
+				return 0, 0, false
+			}
+			include = coordinates[0].ordinal < decision.ordinal
+		}
+		if !include {
+			continue
+		}
+		spotDelta, spotOK := fundingCarryAuditSub(fill.spotAfter, fill.spotBefore)
+		perpDelta, perpOK := fundingCarryAuditSub(fill.perpAfter, fill.perpBefore)
+		var ok bool
+		spot, ok = fundingCarryAuditAdd(spot, spotDelta)
+		spotOK = spotOK && ok
+		perp, ok = fundingCarryAuditAdd(perp, perpDelta)
+		perpOK = perpOK && ok
+		if !spotOK || !perpOK {
+			return 0, 0, false
+		}
+	}
+	return spot, perp, true
 }
 
 func lifecycleTermConservation(run *Run, policy termCarryPolicyConfig, candidate *lifecycleTermCandidate, timeline []lifecycleFillEvidence, termID string, failures *lifecycleFailureCollector) TermCarryLifecycleConservation {
