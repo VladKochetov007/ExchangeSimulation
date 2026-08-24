@@ -33,6 +33,17 @@ func TestLiabilityHedgerAuditDisabledControlEvolvesButDoesNotAct(t *testing.T) {
 	}
 }
 
+func TestLiabilityHedgerAuditReplaysRandomSideControlAndReportsItsGapDirection(t *testing.T) {
+	run := l0TestRun(t, l0Fixture{PolicyMode: liabilityHedgerPolicyRandom})
+	result, err := run.MeasureLiabilityHedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || result.PolicyMode != liabilityHedgerPolicyRandom || result.RandomControlFills != 1 || result.RandomControlReducing+result.RandomControlNonReducing != 1 || result.NonReducingFills != 0 {
+		t.Fatalf("valid L1 random-control audit = %+v", result)
+	}
+}
+
 func TestLiabilityHedgerAuditAcceptsOnlyARealTailCensor(t *testing.T) {
 	run := l0TestRun(t, l0Fixture{TailCensored: true})
 	result, err := run.MeasureLiabilityHedger()
@@ -109,6 +120,26 @@ func TestLiabilityHedgerAuditCatchesDeclaredMutations(t *testing.T) {
 	}
 }
 
+func TestLiabilityHedgerAuditCatchesRandomControlModeAndSideMutations(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup l0Fixture
+	}{
+		{name: "omitted random policy mode", setup: l0Fixture{PolicyMode: liabilityHedgerPolicyRandom, Decision: map[string]any{"policy_mode": ""}}},
+		{name: "reversed random policy side", setup: l0Fixture{PolicyMode: liabilityHedgerPolicyRandom, ReverseSide: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := l0TestRun(t, tc.setup).MeasureLiabilityHedger()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Valid || result.DecisionFieldMismatches == 0 {
+				t.Fatalf("random-control mutation survived: %+v", result)
+			}
+		})
+	}
+}
+
 func TestLiabilityHedgerBookEvidenceSeparatesPresenceFromPrice(t *testing.T) {
 	decision := liabilityHedgerDecision{HasSnapshot: true, HasAsk: true, AskPrice: 0}
 	if !validLiabilityHedgerBookEvidence(decision) {
@@ -121,8 +152,20 @@ func TestLiabilityHedgerBookEvidenceSeparatesPresenceFromPrice(t *testing.T) {
 	}
 }
 
+func TestLiabilityHedgerAuditClassifiesRandomControlGapIncreaseWithoutRejectingIt(t *testing.T) {
+	state := &liabilityHedgerReplayState{seenFirst: true, obligation: 100, position: 0}
+	valid, reduces := validateLiabilityHedgerStateFill(liabilityHedgerFillEvidence{
+		PolicyMode: liabilityHedgerPolicyRandom, Side: "SELL", Qty: 100,
+		PrePosition: 0, PostPosition: -100,
+	}, state, liabilityHedgerPolicyRandom)
+	if !valid || reduces || state.position != -100 {
+		t.Fatalf("random-control gap-increasing fill classification = valid=%t reduces=%t state=%+v", valid, reduces, state)
+	}
+}
+
 type l0Fixture struct {
 	Disabled            bool
+	PolicyMode          string
 	DropInitialDecision bool
 	DuplicateDecision   bool
 	DropGatewayDecision bool
@@ -150,12 +193,17 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 	if fixture.TailCensored {
 		fixture.TerminalAt = 13_000_000_000
 	}
-	writeL0Config(t, dir, fixture.Disabled)
+	writeL0Config(t, dir, fixture.Disabled, fixture.PolicyMode)
 
 	step := l0FixtureStep()
 	side, price := "SELL", int64(300_000_000)
 	orderSide := exchange.Sell
-	if step > 0 {
+	if fixture.PolicyMode == liabilityHedgerPolicyRandom {
+		control := rand.New(rand.NewSource(liabilityHedgerFlowSeed(101, 0, 0, 15)))
+		if control.Intn(2) == 0 {
+			side, price, orderSide = "BUY", 300_100_000, exchange.Buy
+		}
+	} else if step > 0 {
 		side, price, orderSide = "BUY", 300_100_000, exchange.Buy
 	}
 	writeL0Evidence(t, dir, fixture.ReceiptAt, fixture.TerminalAt, !fixture.Disabled && !fixture.TailCensored && !fixture.DropGatewayDecision, orderSide, price)
@@ -170,6 +218,9 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 		"has_ask": true, "ask_price": int64(300_100_000), "ask_visible_qty": int64(1_000_000_000),
 		"side": side, "limit_price": price, "requested_qty": int64(100_000_000), "request_id": uint64(42), "taker_fee_bps": int64(5),
 		"outcome_expectation": "VENUE_OUTCOME_REQUIRED",
+	}
+	if fixture.PolicyMode != "" {
+		active["policy_mode"] = fixture.PolicyMode
 	}
 	if fixture.Disabled {
 		active["action_or_defer_reason"] = "POLICY_DISABLED"
@@ -209,6 +260,9 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 		"has_ask": false, "ask_price": int64(0), "ask_visible_qty": int64(0),
 		"side": "", "limit_price": int64(0), "requested_qty": int64(0), "request_id": uint64(0), "taker_fee_bps": int64(5),
 	}
+	if fixture.PolicyMode != "" {
+		initial["policy_mode"] = fixture.PolicyMode
+	}
 
 	lines := make([]string, 0, 8)
 	if !fixture.DropInitialDecision {
@@ -241,6 +295,9 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 		counter := map[string]any{"order_id": uint64(80), "client_id": counterpartyClient, "request_id": uint64(43), "symbol": "CDF/USD", "side": counterSide, "type": "LIMIT", "time_in_force": "GTC", "post_only": false, "price": price, "qty": quantity}
 		fill := map[string]any{"order_id": uint64(70), "trade_id": uint64(9), "symbol": "CDF/USD", "side": side, "qty": quantity, "price": price, "fee_amount": fee, "fee_asset": "USD", "role": "taker"}
 		fillEvidence := map[string]any{"venue_id": "north", "hedger": "liability_hedger_1", "client_id": uint64(7), "symbol": "CDF/USD", "timestamp": int64(13_000_000_000), "order_id": uint64(70), "trade_id": uint64(9), "side": side, "qty": quantity, "price": price, "fee_amount": fee, "fee_asset": "USD", "pre_position": int64(0), "post_position": postPosition}
+		if fixture.PolicyMode != "" {
+			fillEvidence["policy_mode"] = fixture.PolicyMode
+		}
 		for field, value := range fixture.Fill {
 			fill[field] = value
 		}
@@ -265,14 +322,18 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 	return &Run{Dir: dir, files: []string{path}, roles: map[Participant]string{{VenueID: "north", ClientID: 7}: "liability_hedger", {VenueID: "north", ClientID: 8}: "noise_flow"}}
 }
 
-func writeL0Config(t *testing.T, dir string, disabled bool) {
+func writeL0Config(t *testing.T, dir string, disabled bool, policyMode string) {
 	t.Helper()
+	policy := map[string]any{
+		"enabled": !disabled, "symbol": "CDF/USD", "decision_interval": int64(2_000_000_000), "obligation_interval": int64(10_000_000_000),
+		"obligation_step_qty": int64(200_000_000), "max_abs_obligation_qty": int64(2_000_000_000), "max_request_qty": int64(100_000_000),
+	}
+	if policyMode != "" {
+		policy["policy_mode"] = policyMode
+	}
 	raw, err := json.Marshal(map[string]any{
 		"seed": int64(101), "venue_ids": []string{"north", "central", "south"},
-		"cdf_liability_hedger": map[string]any{
-			"enabled": !disabled, "symbol": "CDF/USD", "decision_interval": int64(2_000_000_000), "obligation_interval": int64(10_000_000_000),
-			"obligation_step_qty": int64(200_000_000), "max_abs_obligation_qty": int64(2_000_000_000), "max_request_qty": int64(100_000_000),
-		},
+		"cdf_liability_hedger": policy,
 	})
 	if err != nil {
 		t.Fatal(err)

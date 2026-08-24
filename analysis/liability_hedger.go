@@ -27,6 +27,11 @@ type LiabilityHedgerAudit struct {
 	Fills             int64 `json:"fills"`
 	FilledQty         int64 `json:"filled_qty"`
 	CancelledIOC      int64 `json:"cancelled_ioc"`
+	// AbsoluteGapSum and GapSamples retain an exact decision-time aggregate.
+	// The mean is intentionally reconstructed as sum/samples rather than a
+	// floating approximation so paired L1 comparisons cannot hide rounding.
+	AbsoluteGapSum string `json:"absolute_gap_sum"`
+	GapSamples     int64  `json:"gap_samples"`
 
 	ReceiptAuditValid       bool  `json:"receipt_audit_valid"`
 	ReceiptEvidenceErrors   int64 `json:"receipt_evidence_errors"`
@@ -38,29 +43,33 @@ type LiabilityHedgerAudit struct {
 	MissingGatewayDecisions int64 `json:"missing_gateway_decisions"`
 	GatewayDecisionMismatch int64 `json:"gateway_decision_mismatches"`
 
-	InvalidDecisionRecords  int64                   `json:"invalid_decision_records"`
-	StateTransitionMismatch int64                   `json:"state_transition_mismatches"`
-	DecisionFieldMismatches int64                   `json:"decision_field_mismatches"`
-	DisabledSubmissions     int64                   `json:"disabled_submissions"`
-	DuplicateDecisions      int64                   `json:"duplicate_decisions"`
-	MissingOutcomes         int64                   `json:"missing_outcomes"`
-	DuplicateOutcomes       int64                   `json:"duplicate_outcomes"`
-	CensoredOutcomeDelivery int64                   `json:"censored_outcome_deliveries"`
-	OutcomeFieldMismatches  int64                   `json:"outcome_field_mismatches"`
-	MissingIOCTerminals     int64                   `json:"missing_ioc_terminals"`
-	DuplicateIOCTerminals   int64                   `json:"duplicate_ioc_terminals"`
-	FillQuantityMismatches  int64                   `json:"fill_quantity_mismatches"`
-	MissingFillEvidence     int64                   `json:"missing_fill_evidence"`
-	UnexpectedFillEvidence  int64                   `json:"unexpected_fill_evidence"`
-	FillEvidenceMismatches  int64                   `json:"fill_evidence_mismatches"`
-	NonReducingFills        int64                   `json:"non_reducing_fills"`
-	UnknownCounterparties   int64                   `json:"unknown_counterparties"`
-	SelfFills               int64                   `json:"self_fills"`
-	NonTakerFills           int64                   `json:"non_taker_fills"`
-	NonPositiveFees         int64                   `json:"non_positive_fees"`
-	FeeMismatches           int64                   `json:"fee_mismatches"`
-	ActionCounts            map[string]int64        `json:"action_counts,omitempty"`
-	Hedgers                 []LiabilityHedgerBucket `json:"hedgers,omitempty"`
+	InvalidDecisionRecords   int64                   `json:"invalid_decision_records"`
+	StateTransitionMismatch  int64                   `json:"state_transition_mismatches"`
+	DecisionFieldMismatches  int64                   `json:"decision_field_mismatches"`
+	DisabledSubmissions      int64                   `json:"disabled_submissions"`
+	DuplicateDecisions       int64                   `json:"duplicate_decisions"`
+	MissingOutcomes          int64                   `json:"missing_outcomes"`
+	DuplicateOutcomes        int64                   `json:"duplicate_outcomes"`
+	CensoredOutcomeDelivery  int64                   `json:"censored_outcome_deliveries"`
+	OutcomeFieldMismatches   int64                   `json:"outcome_field_mismatches"`
+	MissingIOCTerminals      int64                   `json:"missing_ioc_terminals"`
+	DuplicateIOCTerminals    int64                   `json:"duplicate_ioc_terminals"`
+	FillQuantityMismatches   int64                   `json:"fill_quantity_mismatches"`
+	MissingFillEvidence      int64                   `json:"missing_fill_evidence"`
+	UnexpectedFillEvidence   int64                   `json:"unexpected_fill_evidence"`
+	FillEvidenceMismatches   int64                   `json:"fill_evidence_mismatches"`
+	NonReducingFills         int64                   `json:"non_reducing_fills"`
+	RandomControlFills       int64                   `json:"random_control_fills"`
+	RandomControlReducing    int64                   `json:"random_control_reducing_fills"`
+	RandomControlNonReducing int64                   `json:"random_control_non_reducing_fills"`
+	UnknownCounterparties    int64                   `json:"unknown_counterparties"`
+	SelfFills                int64                   `json:"self_fills"`
+	NonTakerFills            int64                   `json:"non_taker_fills"`
+	NonPositiveFees          int64                   `json:"non_positive_fees"`
+	FeeMismatches            int64                   `json:"fee_mismatches"`
+	ActionCounts             map[string]int64        `json:"action_counts,omitempty"`
+	PolicyMode               string                  `json:"policy_mode"`
+	Hedgers                  []LiabilityHedgerBucket `json:"hedgers,omitempty"`
 
 	Checks []LiabilityHedgerCheck `json:"checks,omitempty"`
 	Valid  bool                   `json:"valid"`
@@ -69,13 +78,18 @@ type LiabilityHedgerAudit struct {
 // LiabilityHedgerBucket retains activation counts without averaging different
 // venue-local accounts into one apparent participant.
 type LiabilityHedgerBucket struct {
-	VenueID      string `json:"venue_id"`
-	ClientID     uint64 `json:"client_id"`
-	Decisions    int64  `json:"decisions"`
-	StateUpdates int64  `json:"state_updates"`
-	Submitted    int64  `json:"submitted"`
-	Accepted     int64  `json:"accepted"`
-	Fills        int64  `json:"fills"`
+	VenueID             string `json:"venue_id"`
+	ClientID            uint64 `json:"client_id"`
+	Decisions           int64  `json:"decisions"`
+	StateUpdates        int64  `json:"state_updates"`
+	Submitted           int64  `json:"submitted"`
+	Accepted            int64  `json:"accepted"`
+	Fills               int64  `json:"fills"`
+	AbsoluteGapSum      string `json:"absolute_gap_sum"`
+	GapSamples          int64  `json:"gap_samples"`
+	TerminalAbsoluteGap string `json:"terminal_absolute_gap"`
+	ReducingFills       int64  `json:"reducing_fills"`
+	NonReducingFills    int64  `json:"non_reducing_fills"`
 }
 
 // LiabilityHedgerCheck identifies a specific independent replay failure.
@@ -94,6 +108,7 @@ type liabilityHedgerDecision struct {
 	Symbol               string `json:"symbol"`
 	DecisionTime         int64  `json:"decision_time"`
 	Enabled              bool   `json:"enabled"`
+	PolicyMode           string `json:"policy_mode"`
 	Subscribed           bool   `json:"subscribed"`
 	RequestPending       bool   `json:"request_pending"`
 	Action               string `json:"action_or_defer_reason"`
@@ -129,6 +144,7 @@ type liabilityHedgerFillEvidence struct {
 	Hedger       string `json:"hedger"`
 	ClientID     uint64 `json:"client_id"`
 	Symbol       string `json:"symbol"`
+	PolicyMode   string `json:"policy_mode"`
 	Timestamp    int64  `json:"timestamp"`
 	OrderID      uint64 `json:"order_id"`
 	TradeID      uint64 `json:"trade_id"`
@@ -227,6 +243,7 @@ type liabilityHedgerStateEvent struct {
 
 type liabilityHedgerReplayState struct {
 	rng        *rand.Rand
+	policyRNG  *rand.Rand
 	obligation int64
 	position   int64
 	lastUpdate int64
@@ -239,6 +256,7 @@ type liabilityHedgerRunConfig struct {
 	VenueIDs           []string `json:"venue_ids"`
 	CDFLiabilityHedger *struct {
 		Enabled             bool   `json:"enabled"`
+		PolicyMode          string `json:"policy_mode"`
 		Symbol              string `json:"symbol"`
 		DecisionInterval    int64  `json:"decision_interval"`
 		ObligationInterval  int64  `json:"obligation_interval"`
@@ -255,6 +273,8 @@ const (
 	liabilityHedgerLimit              = int64(2_000_000_000)
 	liabilityHedgerRequestCap         = int64(100_000_000)
 	liabilityHedgerFeeBps             = int64(5)
+	liabilityHedgerPolicyLiability    = "delivery_liability"
+	liabilityHedgerPolicyRandom       = "random_side_control"
 )
 
 // MeasureLiabilityHedger audits the complete L0 evidence relation. It does
@@ -269,7 +289,8 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 		return nil, err
 	}
 	receipts, gatewayDecisions, receiptAudit, receiptErr := liabilityHedgerEvidence(r.Dir)
-	result := &LiabilityHedgerAudit{ActionCounts: make(map[string]int64)}
+	policyMode := effectiveLiabilityHedgerPolicyMode(config.CDFLiabilityHedger.PolicyMode)
+	result := &LiabilityHedgerAudit{ActionCounts: make(map[string]int64), PolicyMode: policyMode}
 	terminalAt := int64(0)
 	if receiptAudit != nil {
 		terminalAt = receiptAudit.TerminalAt
@@ -377,6 +398,8 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 	stateBuckets := make(map[Participant]*LiabilityHedgerBucket)
 	stateFiles := make(map[Participant]string)
 	seenDecisionTick := make(map[Participant]map[int64]bool)
+	gapSums := make(map[Participant]*big.Int)
+	gapCounts := make(map[Participant]int64)
 	sort.Slice(stateEvents, func(i, j int) bool {
 		left, right := stateEvents[i], stateEvents[j]
 		if left.venueID != right.venueID {
@@ -405,7 +428,10 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 				addCheck(event.venueID, event.clientID, 0, 0, "unknown_venue_in_liability_state")
 				continue
 			}
-			state = &liabilityHedgerReplayState{rng: rand.New(rand.NewSource(liabilityHedgerFlowSeed(config.Seed, index, 0, 14)))}
+			state = &liabilityHedgerReplayState{
+				rng:       rand.New(rand.NewSource(liabilityHedgerFlowSeed(config.Seed, index, 0, 14))),
+				policyRNG: rand.New(rand.NewSource(liabilityHedgerFlowSeed(config.Seed, index, 0, 15))),
+			}
 			states[participant] = state
 			stateBuckets[participant] = &LiabilityHedgerBucket{VenueID: event.venueID, ClientID: event.clientID}
 			seenDecisionTick[participant] = make(map[int64]bool)
@@ -424,7 +450,7 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 				addCheck(event.venueID, event.clientID, event.decision.RequestID, 0, "duplicate_liability_decision_tick")
 			}
 			seenDecisionTick[participant][event.decision.DecisionTime] = true
-			valid, update, submitted := validateLiabilityHedgerDecision(*event.decision, state, terminalAt)
+			valid, update, submitted := validateLiabilityHedgerDecision(*event.decision, state, terminalAt, policyMode)
 			if update {
 				result.StateUpdates++
 				bucket.StateUpdates++
@@ -432,6 +458,14 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 			if !valid {
 				result.DecisionFieldMismatches++
 				addCheck(event.venueID, event.clientID, event.decision.RequestID, 0, "decision_policy_or_state_mismatch")
+			} else {
+				sum := gapSums[participant]
+				if sum == nil {
+					sum = new(big.Int)
+					gapSums[participant] = sum
+				}
+				sum.Add(sum, new(big.Int).Abs(big.NewInt(event.decision.HedgeGap)))
+				gapCounts[participant]++
 			}
 			if liabilityHedgerUsesLocalBook(*event.decision) {
 				liabilityHedgerCheckReceipt(result, receipts, receiptErr, *event.decision, addCheck)
@@ -474,13 +508,25 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 			continue
 		}
 		if event.fill != nil {
-			valid, reducesGap := validateLiabilityHedgerStateFill(*event.fill, state)
+			valid, reducesGap := validateLiabilityHedgerStateFill(*event.fill, state, policyMode)
 			if !valid {
 				result.FillEvidenceMismatches++
 				addCheck(event.venueID, event.clientID, 0, event.fill.OrderID, "actor_local_position_transition_mismatch")
+			} else if policyMode == liabilityHedgerPolicyRandom {
+				result.RandomControlFills++
+				if reducesGap {
+					result.RandomControlReducing++
+					bucket.ReducingFills++
+				} else {
+					result.RandomControlNonReducing++
+					bucket.NonReducingFills++
+				}
 			} else if !reducesGap {
 				result.NonReducingFills++
+				bucket.NonReducingFills++
 				addCheck(event.venueID, event.clientID, 0, event.fill.OrderID, "fill_does_not_reduce_actor_gap")
+			} else {
+				bucket.ReducingFills++
 			}
 		}
 	}
@@ -625,9 +671,24 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 			addCheck(key.venueID, 0, 0, key.orderID, "fill_evidence_without_accepted_l0_order")
 		}
 	}
-	for _, bucket := range stateBuckets {
+	totalGap := new(big.Int)
+	for participant, bucket := range stateBuckets {
+		if sum := gapSums[participant]; sum != nil {
+			bucket.AbsoluteGapSum = sum.String()
+			totalGap.Add(totalGap, sum)
+		} else {
+			bucket.AbsoluteGapSum = "0"
+		}
+		bucket.GapSamples = gapCounts[participant]
+		result.GapSamples += bucket.GapSamples
+		if state := states[participant]; state != nil {
+			bucket.TerminalAbsoluteGap = new(big.Int).Abs(new(big.Int).Sub(big.NewInt(state.obligation), big.NewInt(state.position))).String()
+		} else {
+			bucket.TerminalAbsoluteGap = "0"
+		}
 		result.Hedgers = append(result.Hedgers, *bucket)
 	}
+	result.AbsoluteGapSum = totalGap.String()
 
 	sort.Slice(result.Hedgers, func(i, j int) bool {
 		if result.Hedgers[i].VenueID != result.Hedgers[j].VenueID {
@@ -672,7 +733,10 @@ func loadLiabilityHedgerRunConfig(dir string) (liabilityHedgerRunConfig, error) 
 func validLiabilityHedgerRunConfig(config liabilityHedgerRunConfig) error {
 	policy := config.CDFLiabilityHedger
 	if policy == nil || len(config.VenueIDs) != 3 || policy.Symbol != "CDF/USD" || policy.DecisionInterval != liabilityHedgerDecisionInterval || policy.ObligationInterval != liabilityHedgerObligationInterval || policy.ObligationStepQty != liabilityHedgerStep || policy.MaxAbsObligationQty != liabilityHedgerLimit || policy.MaxRequestQty != liabilityHedgerRequestCap {
-		return fmt.Errorf("unsupported L0 policy/configuration")
+		return fmt.Errorf("unsupported L0/L1 policy/configuration")
+	}
+	if policy.PolicyMode != "" && policy.PolicyMode != liabilityHedgerPolicyLiability && policy.PolicyMode != liabilityHedgerPolicyRandom {
+		return fmt.Errorf("unsupported L0/L1 policy mode %q", policy.PolicyMode)
 	}
 	seen := make(map[string]struct{}, len(config.VenueIDs))
 	for _, venueID := range config.VenueIDs {
@@ -685,6 +749,26 @@ func validLiabilityHedgerRunConfig(config liabilityHedgerRunConfig) error {
 		seen[venueID] = struct{}{}
 	}
 	return nil
+}
+
+// effectiveLiabilityHedgerPolicyMode preserves the L0 evidence contract:
+// historical configs and decision rows did not carry the field, and their
+// only supported behavior was delivery-liability direction. L1 configs must
+// state a non-empty mode and its decision evidence is checked strictly below.
+func effectiveLiabilityHedgerPolicyMode(mode string) string {
+	if mode == "" {
+		return liabilityHedgerPolicyLiability
+	}
+	return mode
+}
+
+func liabilityHedgerObservedPolicyModeMatches(observed, configured string) bool {
+	if configured == liabilityHedgerPolicyLiability {
+		// Accept legacy L0 rows without a field, plus new explicit treatment
+		// rows. The random control is never allowed to omit its mode.
+		return observed == "" || observed == liabilityHedgerPolicyLiability
+	}
+	return observed == configured
 }
 
 func liabilityHedgerEvidence(dir string) (map[liabilityHedgerReceiptKey][]liabilityHedgerReceipt, map[liabilityHedgerKey][]liabilityHedgerGatewayDecision, *MarketDataReceiptAudit, error) {
@@ -739,8 +823,11 @@ func liabilityHedgerEvidence(dir string) (map[liabilityHedgerReceiptKey][]liabil
 	return receipts, decisions, audit, nil
 }
 
-func validateLiabilityHedgerDecision(d liabilityHedgerDecision, state *liabilityHedgerReplayState, terminalAt int64) (valid bool, update bool, submitted bool) {
+func validateLiabilityHedgerDecision(d liabilityHedgerDecision, state *liabilityHedgerReplayState, terminalAt int64, policyMode string) (valid bool, update bool, submitted bool) {
 	if d.Symbol != "CDF/USD" || d.ObligationLimit != liabilityHedgerLimit || d.DecisionInterval != liabilityHedgerDecisionInterval || d.ObligationInterval != liabilityHedgerObligationInterval || d.TakerFeeBps != liabilityHedgerFeeBps || d.DecisionTime <= 0 {
+		return false, false, false
+	}
+	if !liabilityHedgerObservedPolicyModeMatches(d.PolicyMode, policyMode) {
 		return false, false, false
 	}
 	if !validLiabilityHedgerBookEvidence(d) {
@@ -797,9 +884,17 @@ func validateLiabilityHedgerDecision(d liabilityHedgerDecision, state *liability
 	if d.LastBookSourceTime > d.DecisionTime {
 		return d.Action == "LOCAL_BOOK_SOURCE_FUTURE" && d.RequestID == 0 && d.RequestedQty == 0 && d.Side == "" && d.LimitPrice == 0, update, false
 	}
-	wantSide, hasTouch, touch := "SELL", d.HasBid, d.BidPrice
-	if gap.Sign() > 0 {
-		wantSide, hasTouch, touch = "BUY", d.HasAsk, d.AskPrice
+	wantSide := "SELL"
+	if policyMode == liabilityHedgerPolicyRandom {
+		if state.policyRNG.Intn(2) == 0 {
+			wantSide = "BUY"
+		}
+	} else if gap.Sign() > 0 {
+		wantSide = "BUY"
+	}
+	hasTouch, touch := d.HasBid, d.BidPrice
+	if wantSide == "BUY" {
+		hasTouch, touch = d.HasAsk, d.AskPrice
 	}
 	quantity := new(big.Int).Abs(gap)
 	if quantity.Cmp(big.NewInt(liabilityHedgerRequestCap)) > 0 {
@@ -927,8 +1022,8 @@ func liabilityHedgerCheckGatewayDecision(result *LiabilityHedgerAudit, decisions
 	}
 }
 
-func validateLiabilityHedgerStateFill(fill liabilityHedgerFillEvidence, state *liabilityHedgerReplayState) (valid bool, reducesGap bool) {
-	if !state.seenFirst || fill.Qty <= 0 || (fill.Side != "BUY" && fill.Side != "SELL") || fill.PrePosition != state.position {
+func validateLiabilityHedgerStateFill(fill liabilityHedgerFillEvidence, state *liabilityHedgerReplayState, policyMode string) (valid bool, reducesGap bool) {
+	if !state.seenFirst || fill.Qty <= 0 || (fill.Side != "BUY" && fill.Side != "SELL") || fill.PrePosition != state.position || !liabilityHedgerObservedPolicyModeMatches(fill.PolicyMode, policyMode) {
 		return false, false
 	}
 	next := new(big.Int).SetInt64(state.position)
