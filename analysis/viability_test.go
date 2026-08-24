@@ -22,6 +22,23 @@ func viabilitySnapshotLine(ts int64, venue, symbol string, bid, ask, depth int64
 		ts, venue, symbol, bids, asks)
 }
 
+func TestBestWithDepthRetainsSignedZeroLevels(t *testing.T) {
+	levels := []bookLevel{
+		{Price: -10, VisibleQty: 2},
+		{Price: 0, VisibleQty: 3},
+		{Price: 5, VisibleQty: 0},
+	}
+	if best, depth, ok := bestWithDepth(levels, true); !ok || best != 0 || depth != 3 {
+		t.Fatalf("signed bid best = (%d, %d, %t), want (0, 3, true)", best, depth, ok)
+	}
+	if best, depth, ok := bestWithDepth(levels, false); !ok || best != -10 || depth != 2 {
+		t.Fatalf("signed ask best = (%d, %d, %t), want (-10, 2, true)", best, depth, ok)
+	}
+	if best, depth, ok := bestWithDepth([]bookLevel{{Price: 0, VisibleQty: 0}}, true); ok || best != 0 || depth != 0 {
+		t.Fatalf("empty side = (%d, %d, %t), want (0, 0, false)", best, depth, ok)
+	}
+}
+
 func viabilityRun(t *testing.T) *Run {
 	t.Helper()
 	const second = int64(1_000_000_000)

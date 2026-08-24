@@ -172,9 +172,9 @@ func (r *Run) MeasureArbitrage(opts ArbitrageOptions) (*ArbitrageAudit, error) {
 		if len(bids) == 0 || len(asks) == 0 {
 			return
 		}
-		bestBid, _ := bestWithDepth(bids, true)
-		bestAsk, _ := bestWithDepth(asks, false)
-		if bestBid <= 0 || bestAsk <= 0 {
+		bestBid, _, bidOK := bestWithDepth(bids, true)
+		bestAsk, _, askOK := bestWithDepth(asks, false)
+		if !bidOK || !askOK || bestBid <= 0 || bestAsk <= 0 {
 			return
 		}
 		// A derivative record names its book beside the payload; a spot record

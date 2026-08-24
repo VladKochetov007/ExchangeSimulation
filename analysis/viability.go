@@ -231,9 +231,14 @@ func (r *Run) MeasureViability(opts ViabilityOptions) (*Viability, error) {
 			mu.Unlock()
 			return
 		}
-		bestBid, bidDepth := bestWithDepth(bids, true)
-		bestAsk, askDepth := bestWithDepth(asks, false)
-		spread := float64(bestAsk - bestBid)
+		bestBid, bidDepth, bidOK := bestWithDepth(bids, true)
+		bestAsk, askDepth, askOK := bestWithDepth(asks, false)
+		if !bidOK || !askOK || bestBid > bestAsk {
+			accumulator.emptySide++
+			mu.Unlock()
+			return
+		}
+		spread := float64(bestAsk) - float64(bestBid)
 		if opts.TickSize > 0 {
 			spread /= float64(opts.TickSize)
 		}
@@ -259,23 +264,26 @@ func symbolFromSpotFile(path string) string {
 	return strings.ReplaceAll(strings.TrimSuffix(file, ".jsonl"), "-", "/")
 }
 
-// bestWithDepth returns the best price on a side and the depth resting at it.
-func bestWithDepth(levels []bookLevel, buySide bool) (int64, int64) {
-	best := int64(0)
+// bestWithDepth returns the best present price, its resting depth, and an
+// explicit side-presence flag. A zero level is a valid signed-book level.
+func bestWithDepth(levels []bookLevel, buySide bool) (int64, int64, bool) {
+	var best int64
 	depth := int64(0)
+	found := false
 	for _, level := range levels {
-		if level.Price <= 0 {
+		if level.VisibleQty+level.HiddenQty <= 0 {
 			continue
 		}
-		if best == 0 || (buySide && level.Price > best) || (!buySide && level.Price < best) {
+		if !found || (buySide && level.Price > best) || (!buySide && level.Price < best) {
 			best = level.Price
 			depth = 0
+			found = true
 		}
 		if level.Price == best {
 			depth += level.VisibleQty + level.HiddenQty
 		}
 	}
-	return best, depth
+	return best, depth, found
 }
 
 func summariseViability(windows map[windowKey]*windowAccumulator, opts ViabilityOptions) *Viability {

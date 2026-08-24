@@ -157,9 +157,9 @@ func (r *Run) MeasureBookShape(opts BookShapeOptions) (*BookShape, error) {
 			record(askTouch, askTotal, askHidden)
 		}
 		if bidCount > 0 && askCount > 0 && opts.TickSize > 0 {
-			spread := bestAsk(asks) - bestBid(bids)
+			spread := float64(bestAsk(asks)) - float64(bestBid(bids))
 			if spread > 0 {
-				spreadTicks = append(spreadTicks, float64(spread)/float64(opts.TickSize))
+				spreadTicks = append(spreadTicks, spread/float64(opts.TickSize))
 			}
 		}
 	})
