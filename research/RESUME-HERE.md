@@ -440,3 +440,31 @@ finish and their contracts pass.
 - It is now legitimate to start the separate v2 design ledger. Do not tune or
   alter the ae13f9a simulator, and preserve all frozen artifacts as the v1
   comparator.
+
+### 2026-08-24 V2-3 P2 clean-stop gate
+
+- P0 and P1 are completed, committed V2 mechanism screens. P2 is the
+  preregistered five-minute CDF/USD maker inventory-rebalance screen in
+  `v2-3-inventory-rebalance-p2-preregistration.md`; it is **not yet scored**.
+- Attempt 0 ran all four immutable A/B × seed-101/103 cells from `6c3cedd`,
+  but is invalidated before causal scoring. `exchange.Buy` is numeric zero and
+  `MakerInventoryRebalanceDecision.Side` had `omitempty`, so persisted BUY
+  decision records omitted their required side. The exchange request/fill
+  records prove activity, but cannot retrospectively repair the independent
+  decision evidence. Raw logs and every extracted sidecar are retained at
+  `artifacts/historical/v2-3-p2-attempt0-buy-side-omission/`; see
+  `v2-3-inventory-rebalance-p2-attempt0-invalidation.md`. Do not prune or cite
+  them as final results.
+- `ce096d2` introduces the explicit persisted `SideEvidence` string without
+  changing execution semantics; `b9c271c` adds the negative-inventory BUY
+  analyzer regression. Focused normal/race testing and evidence on/off
+  execution-hash neutrality passed. The instrumentation correction requires a
+  completely fresh four-cell rerun, not a patch of the old evidence.
+- Exact restart gate: verify a clean source diff except user-owned artifacts;
+  rebuild `bin/multivenue` and `bin/mvanalyze`; run focused normal/race P2
+  tests and vet; rerender and byte-diff P2 A/B configs; run all four five-minute
+  cells from scratch; use only final `greeks.json` + `latency.json` as run
+  sentinels; extract receipts, evidence artifact hash, P2 replay, viability,
+  inventory, trade-ratio, and metadata before interpreting anything. If the
+  corrected B audit is not valid, preserve that attempt under a new historical
+  label and repair only the evidence/auditor defect.
