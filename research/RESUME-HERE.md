@@ -508,3 +508,44 @@ finish and their contracts pass.
   next minimal V2 mechanism from `research/v2-design.md` before changing
   economic behavior. Do not tune P2 coefficients, clocks, spreads, demand, or
   population in response to the short mechanism screen.
+
+### 2026-08-24 V2-4 L0 delivery-liability activation screen
+
+- L0 was preregistered before implementation/configuration at `29de0c5`, then
+  implemented at `85038fa`. It adds one finite-capital CDF/USD delivery-liability
+  hedger per venue; its private, bounded obligation state determines side and
+  its public local snapshot supplies only the named executable touch. It has no
+  index/mid/shared-book fallback. Explicit side availability and a present
+  numeric price are separate fields (`84fb97e`).
+- The first 15-second, non-registered B startup smoke exposed a genuine
+  terminal-tail evidence defect: an exchange fill can occur at the final
+  boundary while its delayed response cannot reach the actor, leaving no local
+  fill attestation. It is retained as diagnostic-only at
+  `scratch/v2-4-l0-smoke-gsNxBi`; it is not campaign evidence. `ee2a842`
+  changes only the new L0 policy to emit an explicit
+  `SIMULATION_HORIZON_CENSORED` defer when fewer than two decision intervals
+  remain, instead of accepting an unattested fill. `5d5df31` makes the
+  independent replay prove that this defer is actually at the horizon.
+- The required V2-0 receipt/on-off fresh-process/GOMAXPROCS L0 neutrality test
+  passes; L0 recorder telemetry is append-only and does not change execution
+  hash. The independent L0 auditor and adversarial fixtures are in `967b6e7`.
+- The immutable A/B × seed-101/103 five-minute full-evidence cells ran from
+  source `5d5df3175cefd055523b4377d4eee20091d235be`, binary SHA-256
+  `692261802d7359c4a4cd297ea6ec90b33a6040a472cd46baec494c80de1c07cc`,
+  and `GOMAXPROCS=4`. Raw evidence is retained at
+  `research/artifacts/v2-4-l0/{A,B}/seed-{101,103}` and must not be pruned.
+  Completion was determined only from final `greeks.json` + `latency.json`.
+- All four V2-0 receipt audits, evidence-artifact hashes, and independent L0
+  replays are valid with zero checks. Controls have 90 state updates and zero
+  L0 requests per seed. Treatments have 310/282 accepted IOC requests,
+  480/466 fills, and 15,689,798,578/15,599,737,574 filled CDF units for seeds
+  101/103. Every actor has 30 state updates; all treatment directions and
+  local fill transitions reduce its signed hedge gap. Seed 103 records six
+  explicit tail censors; seed 101 is in-band at the analogous final choices.
+- Result: **SUPPORTED (screening), narrow mechanism integrity only**. See
+  `research/v2-4-liability-hedger-l0-results.md` and
+  `research/artifacts/v2-4-l0/l0-summary.json`. No price-stability, demand
+  elasticity, replacement, viability, realism, or robustness claim is
+  licensed. Next V2 gate: preregister L1 as a controlled replacement of one
+  activity-generator family, with long-run viability, phase, and holdout
+  conditions fixed before implementation.

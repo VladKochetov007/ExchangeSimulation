@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "experiment": "V2-4-L0",
+  "verdict": "SUPPORTED (screening)",
+  "claim_scope": "finite-capital delivery-liability state activates locally informed, capped, fee-paying CDF/USD hedge requests that reduce the actor-local signed hedge gap",
+  "limits": [
+    "two paired seeds are screening evidence, not robustness",
+    "no price-stability, liquidity, demand-elasticity, replacement, or realism claim",
+    "raw evidence retained; this summary is not a pruning authorization"
+  ],
+  "run_revision": "5d5df3175cefd055523b4377d4eee20091d235be",
+  "multivenue_binary_sha256": "692261802d7359c4a4cd297ea6ec90b33a6040a472cd46baec494c80de1c07cc",
+  "analysis_revision": "5d5df3175cefd055523b4377d4eee20091d235be",
+  "cells": [
+    {
+      "arm": "A",
+      "seed": 101,
+      "config_sha256": "06fdd6ea2c324b84c3ef2ca61e945463d9250f3c378212e61ae8400c06d5e75d",
+      "evidence_artifact": {"events": 368545, "digest": "3a10bc807f8170cd7365f8d38e374cd63d96ea1b2e257cab9b090d0e5af8c8fd"},
+      "receipt_audit_valid": true,
+      "l0_audit": {"valid": true, "decisions": 450, "state_updates": 90, "submitted": 0, "accepted": 0, "fills": 0, "filled_qty": 0, "horizon_censored": 0, "checks": 0}
+    },
+    {
+      "arm": "A",
+      "seed": 103,
+      "config_sha256": "6274b20da4bfdfa68d47805864dbb71bb0bc3748bee1d1b94da485927703753f",
+      "evidence_artifact": {"events": 331528, "digest": "88d4272d6cf8130d0738263d9cb4d07220e56116c458e0050fabccc307d2bbc7"},
+      "receipt_audit_valid": true,
+      "l0_audit": {"valid": true, "decisions": 450, "state_updates": 90, "submitted": 0, "accepted": 0, "fills": 0, "filled_qty": 0, "horizon_censored": 0, "checks": 0}
+    },
+    {
+      "arm": "B",
+      "seed": 101,
+      "config_sha256": "4a3707fd60f392a0773aa3509d49b6b140af1d0e8212cc99bb159be4daafcaf5",
+      "evidence_artifact": {"events": 370762, "digest": "489c56763bdefe6eabe30cb31b360c5d0fd91d21b082b1569b396586933470ce"},
+      "receipt_audit_valid": true,
+      "l0_audit": {"valid": true, "decisions": 450, "state_updates": 90, "submitted": 310, "accepted": 310, "fills": 480, "filled_qty": 15689798578, "horizon_censored": 0, "checks": 0}
+    },
+    {
+      "arm": "B",
+      "seed": 103,
+      "config_sha256": "c36cde2c8d9c3bb17e4a4f0fcf468d12b49c1e33ccf61edb120a95ffa0f341cd",
+      "evidence_artifact": {"events": 335267, "digest": "3889e15cfb407fd0b0866477a40eba2f442d831d59b20be9b4f0be3c7e14f957"},
+      "receipt_audit_valid": true,
+      "l0_audit": {"valid": true, "decisions": 450, "state_updates": 90, "submitted": 282, "accepted": 282, "fills": 466, "filled_qty": 15599737574, "horizon_censored": 6, "checks": 0}
+    }
+  ],
+  "activation_gates": {
+    "all_v2_receipt_audits_valid": true,
+    "all_evidence_artifact_hashes_present": true,
+    "all_independent_l0_replays_valid": true,
+    "minimum_updates_per_hedger": 30,
+    "preregistered_minimum_updates_per_hedger": 20,
+    "control_l0_submissions": 0,
+    "treatment_accepted_requests": {"101": 310, "103": 282}
+  },
+  "raw_log_policy": "retained; no raw evidence is prunable from this summary"
+}

@@ -151,6 +151,12 @@ that a finite-capital, stateful delivery-liability hedger is observable and
 locally executable before using it to replace any activity generator. L0's
 A/B control retains the same liability state path and changes only the actor's
 submit permission; it has no registered price-stability or replacement claim.
+The completed A/B × seed-101/103 activation screen is recorded in
+[`v2-4-liability-hedger-l0-results.md`](v2-4-liability-hedger-l0-results.md)
+and `artifacts/v2-4-l0/l0-summary.json`: it is **SUPPORTED (screening)** for
+the narrow local hedge-gap mechanism. It licenses a separately preregistered
+L1 replacement screen only; it does not license parameter tuning or a claim
+that the actor stabilizes CDF/USD or supplies realistic aggregate demand.
 
 ## V2-5 — identifiable perp funding and dated carry
 
