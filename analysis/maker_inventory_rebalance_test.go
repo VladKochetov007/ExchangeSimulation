@@ -31,6 +31,30 @@ func TestMakerInventoryRebalanceAuditDisabledControlDoesNotRequireUnusedSnapshot
 	}
 }
 
+// This is a byte-for-byte field fixture for the first B/101 P2 submission
+// that the independent replay initially rejected. It prevents a future
+// arithmetic or rounding change from silently rejecting a valid negative
+// inventory BUY plan.
+func TestMakerInventoryRebalanceAuditAcceptsNegativeInventoryBuyPlan(t *testing.T) {
+	decision := makerInventoryRebalanceDecision{
+		VenueID: "central", Maker: "cdf_spot_maker_1", ClientID: 5, Symbol: "CDF/USD",
+		DecisionTime: 1_735_689_660_000_000_000, Enabled: true, Subscribed: true,
+		Action: "SUBMIT_IOC", Inventory: -10_003_011_834,
+		RiskBandQty: 10_000_000_000, TargetBandQty: 5_000_000_000,
+		LastBookSourceTime: 1_735_689_659_000_000_000, LastBookReceivedTime: 1_735_689_660_000_000_000, LastBookSequence: 7_781,
+		BidPrice: 299_900_000, BidVisibleQty: 16_586_393_709,
+		AskPrice: 300_200_000, AskVisibleQty: 10_357_986_133,
+		Side: "BUY", DesiredReduction: 5_003_011_834, ParticipationCap: 1_035_798_613,
+		MaxRequestQty: 500_000_000, ParticipationBps: 1_000, SlippageBps: 50,
+		EvaluationInterval: 10_000_000_000, Cooldown: 30_000_000_000,
+		LimitPrice: 301_800_000, RequestedQty: 500_000_000, TakerFeeBps: 5,
+		RequestID: 98, CooldownUntil: 1_735_689_690_000_000_000, OutcomeExpectation: "VENUE_OUTCOME_REQUIRED",
+	}
+	if !validMakerInventoryRebalanceDecision(decision) {
+		t.Fatalf("recorded negative-inventory P2 buy plan rejected: %+v", decision)
+	}
+}
+
 func TestMakerInventoryRebalanceAuditCatchesDeclaredMutations(t *testing.T) {
 	tests := []struct {
 		name  string
