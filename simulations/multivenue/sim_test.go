@@ -70,6 +70,37 @@ func TestMakerQuoteSizeEvidenceRequiresFullLogMode(t *testing.T) {
 	}
 }
 
+func TestPerpMakerReplenishmentConfigurationIsScopedAndValidated(t *testing.T) {
+	sim, err := NewSim(time.Second, Config{
+		LogDir: t.TempDir(), LogMode: "none", Seed: 101,
+		PerpMakerReplenishBelowBps: 5_000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sim.Close)
+	for _, venue := range sim.Venues {
+		if venue.PerpMaker.cfg.RestingQuoteReplenishmentBelowBps != 5_000 {
+			t.Fatalf("%s perp replenishment threshold = %d, want 5000", venue.ID, venue.PerpMaker.cfg.RestingQuoteReplenishmentBelowBps)
+		}
+		for _, maker := range venue.SpotMakers {
+			if maker.cfg.RestingQuoteReplenishmentBelowBps != 0 {
+				t.Fatalf("%s %s received perp replenishment policy: %d", venue.ID, maker.cfg.Symbol, maker.cfg.RestingQuoteReplenishmentBelowBps)
+			}
+		}
+	}
+	for _, bps := range []int64{-1, 10_001} {
+		_, err := NewSim(time.Second, Config{LogDir: t.TempDir(), LogMode: "none", PerpMakerReplenishBelowBps: bps})
+		if err == nil || !strings.Contains(err.Error(), "perp maker replenishment bps") {
+			t.Fatalf("threshold %d error = %v, want explicit range rejection", bps, err)
+		}
+	}
+	_, err = NewSim(time.Second, Config{LogDir: t.TempDir(), LogMode: "none", RecordPerpMakerReplenishmentDecisions: true})
+	if err == nil || !strings.Contains(err.Error(), "perp maker replenishment decisions require full persisted evidence") {
+		t.Fatalf("non-full replenishment evidence error = %v", err)
+	}
+}
+
 func TestConfigRejectsCancelBeforeReplaceWithoutPostOnly(t *testing.T) {
 	_, err := NewSim(time.Second, Config{
 		LogDir: t.TempDir(), LogMode: "none", SpotPassiveMakerCancelBeforeReplace: true,

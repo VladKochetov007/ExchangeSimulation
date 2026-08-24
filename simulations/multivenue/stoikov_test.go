@@ -818,6 +818,136 @@ func TestStoikovInventorySizeRefreshesWithoutPriceChange(t *testing.T) {
 	}
 }
 
+func TestStoikovPerpReplenishesOnlyConfirmedResidualBelowThreshold(t *testing.T) {
+	newMaker := func(threshold int64) (*StoikovMarketMaker, *stoikovStubGateway, *[]PerpQuoteReplenishmentDecision, time.Time) {
+		gw := newStoikovStubGateway()
+		decisions := make([]PerpQuoteReplenishmentDecision, 0, 1)
+		maker := NewStoikovMarketMaker(1, gw, StoikovMMConfig{
+			Symbol: "ABC-PERP", ReferenceSymbol: "ABC-PERP", BootstrapPrice: 100_000,
+			BasePrecision: 1_000, QuotePrecision: 1_000, TickSize: 10, QuoteQty: 100,
+			QuoteInterval: time.Second, VolatilityHalfLife: time.Minute,
+			InitialLogVariancePerSec: 0, InventoryHorizon: time.Minute,
+			RelativeRiskAversion: 0.01 * 100, RelativeFillDecay: 2 * 100, MinHalfSpreadTicks: 1,
+			InventoryLimit: 100, RestingQuoteReplenishmentBelowBps: threshold,
+			QuoteReplenishmentDecisionVenue: "central", QuoteReplenishmentDecisionMaker: "perp_maker", QuoteReplenishmentDecisionClient: 7,
+			QuoteReplenishmentDecisionObserver: func(decision PerpQuoteReplenishmentDecision) { decisions = append(decisions, decision) },
+		})
+		now := time.Unix(10, 0)
+		maker.onTick(now) // subscriptions
+		maker.HandleEvent(context.Background(), makerSnapshot("ABC-PERP", 99_990, 100_010))
+		maker.onTick(now)
+		if len(gw.requests) != 4 {
+			t.Fatalf("initial requests = %d, want 4", len(gw.requests))
+		}
+		bid, ask := gw.requests[2].OrderReq, gw.requests[3].OrderReq
+		maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: bid.RequestID, OrderID: 10}})
+		maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: ask.RequestID, OrderID: 11}})
+		return maker, gw, &decisions, now
+	}
+
+	t.Run("strictly below half refreshes through ordinary path", func(t *testing.T) {
+		maker, gw, decisions, now := newMaker(5_000)
+		maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderPartialFill, Data: actor.OrderFillEvent{
+			Symbol: "ABC-PERP", OrderID: 10, Side: exchange.Buy, Qty: 51, IsFull: false,
+		}})
+		maker.onTick(now.Add(time.Second))
+		if len(*decisions) != 1 {
+			t.Fatalf("decisions = %d, want 1", len(*decisions))
+		}
+		decision := (*decisions)[0]
+		if !decision.Enabled || !decision.BidReplenishmentDue || decision.AskReplenishmentDue || !decision.RefreshDue || decision.Reason != "BID_BELOW_THRESHOLD" || decision.BidKnownRestingQty != 49 || decision.AskKnownRestingQty != 100 {
+			t.Fatalf("unexpected P3 decision: %+v", decision)
+		}
+		if decision.OutcomeExpectation != "VENUE_OUTCOME_REQUIRED" || decision.BidRequestID == 0 || decision.AskRequestID != decision.BidRequestID+1 {
+			t.Fatalf("refresh outcome contract = %+v", decision)
+		}
+		if len(gw.requests) != 8 || gw.requests[4].Type != exchange.ReqCancelOrder || gw.requests[5].Type != exchange.ReqCancelOrder {
+			t.Fatalf("replenishment did not use ordinary cancel-before-submit path: %+v", gw.requests)
+		}
+		if gw.requests[6].OrderReq.RequestID != decision.BidRequestID || gw.requests[7].OrderReq.RequestID != decision.AskRequestID {
+			t.Fatalf("replenishment decision/request mismatch: decision=%+v requests=%+v", decision, gw.requests[6:])
+		}
+	})
+
+	t.Run("exactly half preserves priority", func(t *testing.T) {
+		maker, gw, decisions, now := newMaker(5_000)
+		maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderPartialFill, Data: actor.OrderFillEvent{
+			Symbol: "ABC-PERP", OrderID: 10, Side: exchange.Buy, Qty: 50, IsFull: false,
+		}})
+		maker.onTick(now.Add(time.Second))
+		if len(*decisions) != 1 || (*decisions)[0].RefreshDue || (*decisions)[0].Reason != "ABOVE_THRESHOLD" || (*decisions)[0].BidKnownRestingQty != 50 || (*decisions)[0].OutcomeExpectation != "NO_VENUE_REQUEST" {
+			t.Fatalf("half residual should not refresh: %+v", *decisions)
+		}
+		if len(gw.requests) != 4 {
+			t.Fatalf("half residual reset queue with requests: %+v", gw.requests)
+		}
+	})
+
+	t.Run("disabled control remains target only", func(t *testing.T) {
+		maker, gw, decisions, now := newMaker(0)
+		maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderPartialFill, Data: actor.OrderFillEvent{
+			Symbol: "ABC-PERP", OrderID: 10, Side: exchange.Buy, Qty: 99, IsFull: false,
+		}})
+		maker.onTick(now.Add(time.Second))
+		if len(*decisions) != 1 || (*decisions)[0].Enabled || (*decisions)[0].RefreshDue || (*decisions)[0].Reason != "POLICY_DISABLED" || (*decisions)[0].BidKnownRestingQty != 1 {
+			t.Fatalf("disabled control decision = %+v", *decisions)
+		}
+		if len(gw.requests) != 4 {
+			t.Fatalf("disabled policy emitted refresh: %+v", gw.requests)
+		}
+	})
+}
+
+func TestStoikovPerpReplenishmentFullFillKeepsLegacyReplacement(t *testing.T) {
+	gw := newStoikovStubGateway()
+	maker := NewStoikovMarketMaker(1, gw, StoikovMMConfig{
+		Symbol: "ABC-PERP", ReferenceSymbol: "ABC-PERP", BootstrapPrice: 100_000,
+		BasePrecision: 1_000, QuotePrecision: 1_000, TickSize: 10, QuoteQty: 100,
+		QuoteInterval: time.Second, VolatilityHalfLife: time.Minute,
+		InitialLogVariancePerSec: 0, InventoryHorizon: time.Minute,
+		RelativeRiskAversion: 0.01 * 100, RelativeFillDecay: 2 * 100, MinHalfSpreadTicks: 1,
+		InventoryLimit: 100, RestingQuoteReplenishmentBelowBps: 5_000,
+	})
+	now := time.Unix(10, 0)
+	maker.onTick(now)
+	maker.HandleEvent(context.Background(), makerSnapshot("ABC-PERP", 99_990, 100_010))
+	maker.onTick(now)
+	bid := gw.requests[2].OrderReq
+	ask := gw.requests[3].OrderReq
+	maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: bid.RequestID, OrderID: 10}})
+	maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: ask.RequestID, OrderID: 11}})
+	maker.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{
+		Symbol: "ABC-PERP", OrderID: 10, Side: exchange.Buy, Qty: 100, IsFull: true,
+	}})
+	maker.onTick(now.Add(time.Second))
+	if len(gw.requests) != 7 || gw.requests[4].Type != exchange.ReqCancelOrder || gw.requests[5].OrderReq == nil || gw.requests[6].OrderReq == nil {
+		t.Fatalf("full fill did not take the legacy re-quote path: %+v", gw.requests)
+	}
+}
+
+func TestRestingBelowFractionIsExactAcrossInt64Range(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		resting, target, bps int64
+		want                 bool
+	}{
+		{name: "one below half", resting: 49, target: 100, bps: 5_000, want: true},
+		{name: "exact half", resting: 50, target: 100, bps: 5_000, want: false},
+		{name: "fractional threshold exact", resting: 1, target: 3, bps: 5_000, want: true},
+		{name: "zero rest", resting: 0, target: 3, bps: 5_000, want: true},
+		{name: "disabled", resting: 0, target: 3, bps: 0, want: false},
+		{name: "maximum exact equality", resting: math.MaxInt64, target: math.MaxInt64, bps: 10_000, want: false},
+		{name: "maximum one below", resting: math.MaxInt64 - 1, target: math.MaxInt64, bps: 10_000, want: true},
+		{name: "invalid target", resting: 0, target: 0, bps: 5_000, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := restingBelowFraction(tc.resting, tc.target, tc.bps); got != tc.want {
+				t.Fatalf("restingBelowFraction(%d,%d,%d) = %t, want %t", tc.resting, tc.target, tc.bps, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestStoikovQuoteSizeDecisionPrecedesRequestsAndCarriesIDs(t *testing.T) {
 	gw := newStoikovStubGateway()
 	var decisions []MakerQuoteSizeDecision

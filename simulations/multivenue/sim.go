@@ -114,6 +114,10 @@ type Config struct {
 	// inventory-rebalance evaluation. It is evidence-only: the optional raw
 	// rows must not enter the ordered execution checkpoint domain.
 	RecordMakerInventoryRebalanceDecisions bool `json:"record_maker_inventory_rebalance_decisions"`
+	// RecordPerpMakerReplenishmentDecisions retains V2-3 P3 own-order
+	// residual decisions. These rows are append-only evidence and deliberately
+	// excluded from the execution checkpoint domain.
+	RecordPerpMakerReplenishmentDecisions bool `json:"record_perp_maker_replenishment_decisions"`
 	// RecordLiabilityHedgerDecisions retains every V2-4 L0 delivery-liability
 	// evaluation. Like the P1/P2 rows, these observations are excluded from the
 	// execution checkpoint domain and must not affect actor behavior.
@@ -298,6 +302,9 @@ type Config struct {
 	// have nothing to do with the perpetual; separating them isolates the
 	// premium.
 	PerpMakerInventoryLimit int64 `json:"perp_maker_inventory_limit"`
+	// PerpMakerReplenishBelowBps is the V2-3 P3 passive residual threshold for
+	// the ABC-PERP Stoikov maker. Zero preserves target-only legacy refresh.
+	PerpMakerReplenishBelowBps int64 `json:"perp_maker_replenish_below_bps"`
 
 	// FundingIntervalSeconds is how often perpetual funding settles. It matters
 	// beyond bookkeeping: the ranking between market making and carry
@@ -666,6 +673,9 @@ func (c *Config) normalize() error {
 	if c.RecordMakerInventoryRebalanceDecisions && c.LogMode != "full" {
 		return errors.New("multivenue: maker inventory-rebalance decisions require full persisted evidence")
 	}
+	if c.RecordPerpMakerReplenishmentDecisions && c.LogMode != "full" {
+		return errors.New("multivenue: perp maker replenishment decisions require full persisted evidence")
+	}
 	if c.RecordLiabilityHedgerDecisions && c.LogMode != "full" {
 		return errors.New("multivenue: liability-hedger decisions require full persisted evidence")
 	}
@@ -680,6 +690,9 @@ func (c *Config) normalize() error {
 	}
 	if c.SpotStoikovInventorySizeSkewBps < 0 || c.SpotStoikovInventorySizeSkewBps > 5_000 {
 		return fmt.Errorf("multivenue: spot Stoikov inventory size skew bps must be in [0,5000], got %d", c.SpotStoikovInventorySizeSkewBps)
+	}
+	if c.PerpMakerReplenishBelowBps < 0 || c.PerpMakerReplenishBelowBps > 10_000 {
+		return fmt.Errorf("multivenue: perp maker replenishment bps must be in [0,10000], got %d", c.PerpMakerReplenishBelowBps)
 	}
 	if c.CDFInventoryRebalance != nil {
 		if !c.CrossAssetSpotGraph {
@@ -2434,6 +2447,11 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		// LogEvent would make optional recording perturb the execution hash.
 		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "maker_quote_size_decision", decision)
 	}
+	perpQuoteReplenishmentObserver := func(decision PerpQuoteReplenishmentDecision) {
+		// P3 observations are persisted evidence only. They must not enter the
+		// ordered execution hash or provide a callback into the actor.
+		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "perp_quote_replenishment_decision", decision)
+	}
 	newSpotStoikovMaker := func(role string, makerConfig StoikovMMConfig) *StoikovMarketMaker {
 		makerFee := exchange.FeeModel(zeroFee)
 		// Both P2 arms attach the same fee schedule to the scoped CDF maker
@@ -2494,7 +2512,16 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	if s.Config.PerpMakerInventoryLimit > 0 {
 		perpMakerConfig.InventoryLimit = s.Config.PerpMakerInventoryLimit
 	}
-	venue.PerpMaker = NewStoikovMarketMaker(nextActor(), connect("perp_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee), perpMakerConfig)
+	perpMakerConfig.RestingQuoteReplenishmentBelowBps = s.Config.PerpMakerReplenishBelowBps
+	perpClientID, perpGateway := venue.connectParticipant(mount, "perp_maker", mmBalances, 100_000_000*mvQuotePrecision, zeroFee)
+	if s.Config.RecordPerpMakerReplenishmentDecisions {
+		perpMakerConfig.QuoteReplenishmentDecisionObserver = perpQuoteReplenishmentObserver
+		perpMakerConfig.QuoteReplenishmentDecisionVenue = venue.ID
+		perpMakerConfig.QuoteReplenishmentDecisionMaker = "perp_maker"
+		perpMakerConfig.QuoteReplenishmentDecisionClient = perpClientID
+		perpMakerConfig.QuoteReplenishmentDecisionTerminalNano = s.terminalNano
+	}
+	venue.PerpMaker = NewStoikovMarketMaker(nextActor(), perpGateway, perpMakerConfig)
 	venue.PerpMaker.SetTickerFactory(timers)
 
 	for i := 0; i < s.Config.FuturesMakerCount; i++ {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/bits"
 	"time"
 
 	"exchange_sim/actor"
@@ -167,6 +168,12 @@ type StoikovMMConfig struct {
 	// while this field changes only displayed quantity. V2-3 P1 configures this
 	// only for selected spot makers; zero retains symmetric sizes.
 	InventorySizeSkewBps int64
+	// RestingQuoteReplenishmentBelowBps refreshes an acknowledged passive side
+	// only after its known remaining quantity falls strictly below this fraction
+	// of the current target. Zero retains the historical target-only refresh
+	// policy. The multivenue V2-3 P3 wiring scopes the field to ABC-PERP; the
+	// actor itself neither assumes an exchange book nor creates a new cadence.
+	RestingQuoteReplenishmentBelowBps int64
 	// InventoryRebalance is an explicit, separately scheduled aggressive
 	// risk-transfer action. It is nil for the passive P0/P1 population; unlike
 	// passive requotes it can take locally visible liquidity and pay taker fees.
@@ -240,6 +247,14 @@ type StoikovMMConfig struct {
 	// evidence only. A quote decision at that instant cannot reach venue
 	// ingress before the registered horizon closes.
 	QuoteSizeDecisionTerminalNano int64
+	// QuoteReplenishmentDecisionObserver records V2-3 P3's local own-order
+	// lifecycle decision before any ordinary refresh request is submitted. It
+	// has no return path into actor, gateway, scheduler, or matching state.
+	QuoteReplenishmentDecisionObserver     func(PerpQuoteReplenishmentDecision)
+	QuoteReplenishmentDecisionVenue        string
+	QuoteReplenishmentDecisionMaker        string
+	QuoteReplenishmentDecisionClient       uint64
+	QuoteReplenishmentDecisionTerminalNano int64
 	// InventoryRebalanceDecisionObserver is the P2 counterpart to the P1
 	// quantity observer. It is write-only evidence and never returns state to
 	// the actor, exchange, scheduler, or policy.
@@ -377,6 +392,49 @@ type MakerQuoteSizeDecision struct {
 	CensorReason        string `json:"censor_reason,omitempty"`
 }
 
+// PerpQuoteReplenishmentDecision is V2-3 P3 evidence for a maker's ordinary
+// quote-tick decision after an own confirmed partial fill. Target quantities
+// and known resting quantities are intentionally distinct: a maker_state
+// target is not a claim about exchange residual depth.
+type PerpQuoteReplenishmentDecision struct {
+	VenueID             string `json:"venue_id"`
+	Maker               string `json:"maker"`
+	ClientID            uint64 `json:"client_id"`
+	Symbol              string `json:"symbol"`
+	DecisionTime        int64  `json:"decision_time"`
+	Enabled             bool   `json:"enabled"`
+	ThresholdBps        int64  `json:"threshold_bps"`
+	BidOrderID          uint64 `json:"bid_order_id"`
+	AskOrderID          uint64 `json:"ask_order_id"`
+	BidTargetQty        int64  `json:"bid_target_qty"`
+	AskTargetQty        int64  `json:"ask_target_qty"`
+	BidKnownRestingQty  int64  `json:"bid_known_resting_qty"`
+	AskKnownRestingQty  int64  `json:"ask_known_resting_qty"`
+	BidReplenishmentDue bool   `json:"bid_replenishment_due"`
+	AskReplenishmentDue bool   `json:"ask_replenishment_due"`
+	RefreshDue          bool   `json:"refresh_due"`
+	Reason              string `json:"reason"`
+	BidPrice            int64  `json:"bid_price"`
+	AskPrice            int64  `json:"ask_price"`
+	BidRequestID        uint64 `json:"bid_request_id"`
+	AskRequestID        uint64 `json:"ask_request_id"`
+	OutcomeExpectation  string `json:"outcome_expectation"`
+	CensorReason        string `json:"censor_reason,omitempty"`
+}
+
+// quoteReplenishmentState is the actor-local pre-cancel state attested by a
+// P3 decision. The ordinary refresh clears current IDs before it allocates
+// request IDs, so recording this value copy prevents evidence from confusing a
+// deliberately cancelled prior quote with an absent prior quote.
+type quoteReplenishmentState struct {
+	bidDue, askDue               bool
+	refreshDue                   bool
+	bidOrderID, askOrderID       uint64
+	bidTargetQty, askTargetQty   int64
+	bidRestingQty, askRestingQty int64
+	bidPrice, askPrice           int64
+}
+
 type quoteSide bool
 
 const (
@@ -391,41 +449,42 @@ type StoikovMarketMaker struct {
 	*actor.BaseActor
 	cfg StoikovMMConfig
 
-	forward             int64
-	indexPrice          int64
-	localReference      *LocalBookCache
-	remoteReference     *LocalBookCache
-	remoteWeight        float64
-	remoteConfidence    float64
-	remoteMaxAge        time.Duration
-	forwardAt           int64
-	lastForward         int64
-	lastForwardTS       int64
-	logVariancePerSec   float64
-	inventory           int64
-	bidID, askID        uint64
-	bidPrice, askPrice  int64
-	bidQty, askQty      int64
-	hedgePosition       int64
-	hedgePending        bool
-	hedgeRequest        uint64
-	hedgeAttempts       int
-	hedgeFills          int
-	hedgeRejects        int
-	hedgeLastReject     exchange.RejectReason
-	hedgeLastQty        int64
-	hedgeBid, hedgeAsk  int64
-	hedgeBidQty         int64
-	hedgeAskQty         int64
-	hedgeBookSeen       int
-	hedgeBookTwoSided   int
-	rebalanceBook       localRebalanceBook
-	rebalancePending    bool
-	rebalanceRequest    uint64
-	rebalanceOrderIDs   map[uint64]struct{}
-	rebalanceCooldownAt int64
-	pending             map[uint64]quoteSide
-	subscribed          bool
+	forward                      int64
+	indexPrice                   int64
+	localReference               *LocalBookCache
+	remoteReference              *LocalBookCache
+	remoteWeight                 float64
+	remoteConfidence             float64
+	remoteMaxAge                 time.Duration
+	forwardAt                    int64
+	lastForward                  int64
+	lastForwardTS                int64
+	logVariancePerSec            float64
+	inventory                    int64
+	bidID, askID                 uint64
+	bidPrice, askPrice           int64
+	bidQty, askQty               int64
+	bidRestingQty, askRestingQty int64
+	hedgePosition                int64
+	hedgePending                 bool
+	hedgeRequest                 uint64
+	hedgeAttempts                int
+	hedgeFills                   int
+	hedgeRejects                 int
+	hedgeLastReject              exchange.RejectReason
+	hedgeLastQty                 int64
+	hedgeBid, hedgeAsk           int64
+	hedgeBidQty                  int64
+	hedgeAskQty                  int64
+	hedgeBookSeen                int
+	hedgeBookTwoSided            int
+	rebalanceBook                localRebalanceBook
+	rebalancePending             bool
+	rebalanceRequest             uint64
+	rebalanceOrderIDs            map[uint64]struct{}
+	rebalanceCooldownAt          int64
+	pending                      map[uint64]quoteSide
+	subscribed                   bool
 }
 
 // localRebalanceBook is the last actor-local CDF/USD snapshot. It stores both
@@ -678,8 +737,10 @@ func (mm *StoikovMarketMaker) onAccepted(e actor.OrderAcceptedEvent) {
 	delete(mm.pending, e.RequestID)
 	if side == stoikovBid {
 		mm.bidID = e.OrderID
+		mm.bidRestingQty = mm.bidQty
 	} else {
 		mm.askID = e.OrderID
+		mm.askRestingQty = mm.askQty
 	}
 }
 
@@ -699,9 +760,9 @@ func (mm *StoikovMarketMaker) onRejected(e actor.OrderRejectedEvent) {
 	}
 	delete(mm.pending, e.RequestID)
 	if side == stoikovBid {
-		mm.bidPrice, mm.bidQty = 0, 0
+		mm.bidPrice, mm.bidQty, mm.bidRestingQty = 0, 0, 0
 	} else {
-		mm.askPrice, mm.askQty = 0, 0
+		mm.askPrice, mm.askQty, mm.askRestingQty = 0, 0, 0
 	}
 }
 
@@ -746,15 +807,21 @@ func (mm *StoikovMarketMaker) onFill(e actor.OrderFillEvent) {
 			PostInventory: mm.inventory,
 		})
 	}
+	if e.OrderID == mm.bidID {
+		mm.bidRestingQty = decrementKnownResting(mm.bidRestingQty, e.Qty)
+	}
+	if e.OrderID == mm.askID {
+		mm.askRestingQty = decrementKnownResting(mm.askRestingQty, e.Qty)
+	}
 	if !e.IsFull {
 		return
 	}
 	delete(mm.rebalanceOrderIDs, e.OrderID)
 	if e.OrderID == mm.bidID {
-		mm.bidID, mm.bidPrice, mm.bidQty = 0, 0, 0
+		mm.bidID, mm.bidPrice, mm.bidQty, mm.bidRestingQty = 0, 0, 0, 0
 	}
 	if e.OrderID == mm.askID {
-		mm.askID, mm.askPrice, mm.askQty = 0, 0, 0
+		mm.askID, mm.askPrice, mm.askQty, mm.askRestingQty = 0, 0, 0, 0
 	}
 }
 
@@ -764,10 +831,10 @@ func (mm *StoikovMarketMaker) onCancelled(e actor.OrderCancelledEvent) {
 	// remainder; the flag must clear on that too.
 	mm.hedgePending = false
 	if e.OrderID == mm.bidID {
-		mm.bidID, mm.bidPrice, mm.bidQty = 0, 0, 0
+		mm.bidID, mm.bidPrice, mm.bidQty, mm.bidRestingQty = 0, 0, 0, 0
 	}
 	if e.OrderID == mm.askID {
-		mm.askID, mm.askPrice, mm.askQty = 0, 0, 0
+		mm.askID, mm.askPrice, mm.askQty, mm.askRestingQty = 0, 0, 0, 0
 	}
 }
 
@@ -1053,7 +1120,16 @@ func (mm *StoikovMarketMaker) onTick(now time.Time) {
 		return
 	}
 	sizeUnchanged := sizes.BidQty == mm.bidQty && sizes.AskQty == mm.askQty
-	if bid == mm.bidPrice && ask == mm.askPrice && sizeUnchanged && mm.bidID != 0 && mm.askID != 0 {
+	quoteUnchanged := bid == mm.bidPrice && ask == mm.askPrice && sizeUnchanged && mm.bidID != 0 && mm.askID != 0
+	if quoteUnchanged {
+		bidDue, askDue := mm.replenishmentDue()
+		refreshDue := bidDue || askDue
+		replenishment := mm.quoteReplenishmentState(bidDue, askDue, refreshDue)
+		if !refreshDue {
+			mm.emitQuoteReplenishmentDecision(now, replenishment, 0, 0)
+			return
+		}
+		mm.refreshQuotePair(now, bid, ask, sizes, replenishment)
 		return
 	}
 	if mm.cfg.RequoteBps > 0 && sizeUnchanged && mm.bidID != 0 && mm.askID != 0 {
@@ -1062,11 +1138,16 @@ func (mm *StoikovMarketMaker) onTick(now time.Time) {
 			return
 		}
 	}
+	mm.refreshQuotePair(now, bid, ask, sizes, quoteReplenishmentState{})
+}
+
+func (mm *StoikovMarketMaker) refreshQuotePair(now time.Time, bid, ask int64, sizes quoteSizePlan, replenishment quoteReplenishmentState) {
 	previousBid, previousAsk := mm.bidID, mm.askID
 	if !mm.cfg.SubmitBeforeCancel || (mm.cfg.PostOnly && mm.cfg.PostOnlyCancelBeforeReplace) {
 		mm.cancelResting(previousBid, previousAsk)
 	}
 	mm.bidID, mm.askID = 0, 0
+	mm.bidRestingQty, mm.askRestingQty = 0, 0
 	// With a cadence configured the hedge runs on its own timer instead.
 	if mm.cfg.HedgeInterval <= 0 {
 		mm.hedgeDelta()
@@ -1075,6 +1156,9 @@ func (mm *StoikovMarketMaker) onTick(now time.Time) {
 	mm.bidQty, mm.askQty = sizes.BidQty, sizes.AskQty
 	bidRequestID := mm.PeekNextRequestID()
 	askRequestID := bidRequestID + 1
+	if replenishment.refreshDue {
+		mm.emitQuoteReplenishmentDecision(now, replenishment, bidRequestID, askRequestID)
+	}
 	mm.emitQuoteSizeDecision(now, sizes, bid, ask, bidRequestID, askRequestID)
 	bidRequest := mm.submitQuote(exchange.Buy, bid, sizes.BidQty)
 	mm.pending[bidRequest] = stoikovBid
@@ -1086,6 +1170,101 @@ func (mm *StoikovMarketMaker) onTick(now time.Time) {
 		// of the phase, which every actor scheduled behind the maker then meets.
 		mm.cancelResting(previousBid, previousAsk)
 	}
+}
+
+// decrementKnownResting updates only the maker's locally confirmed quantity.
+// Exchange fill quantities are positive by admission invariant. A malformed or
+// duplicate fill cannot manufacture residual liquidity: it leaves the local
+// known amount at zero and the independent P3 replay reports the broken raw
+// lifecycle relation.
+func decrementKnownResting(resting, fill int64) int64 {
+	if resting <= 0 || fill <= 0 || fill >= resting {
+		return 0
+	}
+	return resting - fill
+}
+
+// restingBelowFraction compares resting*10,000 < target*bps with 128-bit
+// unsigned products. Inputs are non-negative quantities and bps is validated
+// in [0,10,000], so this is exact for the complete int64 quantity domain and
+// never relies on a rounded threshold quantity.
+func restingBelowFraction(resting, target, bps int64) bool {
+	if resting < 0 || target <= 0 || bps <= 0 {
+		return false
+	}
+	leftHi, leftLo := bits.Mul64(uint64(resting), 10_000)
+	rightHi, rightLo := bits.Mul64(uint64(target), uint64(bps))
+	return leftHi < rightHi || (leftHi == rightHi && leftLo < rightLo)
+}
+
+func (mm *StoikovMarketMaker) replenishmentDue() (bidDue, askDue bool) {
+	bps := mm.cfg.RestingQuoteReplenishmentBelowBps
+	if bps <= 0 || mm.bidID == 0 || mm.askID == 0 {
+		return false, false
+	}
+	return restingBelowFraction(mm.bidRestingQty, mm.bidQty, bps), restingBelowFraction(mm.askRestingQty, mm.askQty, bps)
+}
+
+func (mm *StoikovMarketMaker) quoteReplenishmentState(bidDue, askDue, refreshDue bool) quoteReplenishmentState {
+	return quoteReplenishmentState{
+		bidDue: bidDue, askDue: askDue, refreshDue: refreshDue,
+		bidOrderID: mm.bidID, askOrderID: mm.askID,
+		bidTargetQty: mm.bidQty, askTargetQty: mm.askQty,
+		bidRestingQty: mm.bidRestingQty, askRestingQty: mm.askRestingQty,
+		bidPrice: mm.bidPrice, askPrice: mm.askPrice,
+	}
+}
+
+func (mm *StoikovMarketMaker) emitQuoteReplenishmentDecision(now time.Time, state quoteReplenishmentState, bidRequestID, askRequestID uint64) {
+	if mm.cfg.QuoteReplenishmentDecisionObserver == nil {
+		return
+	}
+	reason := "POLICY_DISABLED"
+	if state.refreshDue {
+		switch {
+		case state.bidDue && state.askDue:
+			reason = "BOTH_BELOW_THRESHOLD"
+		case state.bidDue:
+			reason = "BID_BELOW_THRESHOLD"
+		default:
+			reason = "ASK_BELOW_THRESHOLD"
+		}
+	} else if mm.cfg.RestingQuoteReplenishmentBelowBps > 0 {
+		reason = "ABOVE_THRESHOLD"
+	}
+	expectation, censorReason := "NO_VENUE_REQUEST", ""
+	if state.refreshDue {
+		expectation = "VENUE_OUTCOME_REQUIRED"
+		if mm.cfg.QuoteReplenishmentDecisionTerminalNano != 0 && now.UnixNano() >= mm.cfg.QuoteReplenishmentDecisionTerminalNano {
+			expectation = "SIMULATION_HORIZON_CENSORED"
+			censorReason = "terminal_horizon_before_venue_ingress"
+		}
+	}
+	mm.cfg.QuoteReplenishmentDecisionObserver(PerpQuoteReplenishmentDecision{
+		VenueID:             mm.cfg.QuoteReplenishmentDecisionVenue,
+		Maker:               mm.cfg.QuoteReplenishmentDecisionMaker,
+		ClientID:            mm.cfg.QuoteReplenishmentDecisionClient,
+		Symbol:              mm.cfg.Symbol,
+		DecisionTime:        now.UnixNano(),
+		Enabled:             mm.cfg.RestingQuoteReplenishmentBelowBps > 0,
+		ThresholdBps:        mm.cfg.RestingQuoteReplenishmentBelowBps,
+		BidOrderID:          state.bidOrderID,
+		AskOrderID:          state.askOrderID,
+		BidTargetQty:        state.bidTargetQty,
+		AskTargetQty:        state.askTargetQty,
+		BidKnownRestingQty:  state.bidRestingQty,
+		AskKnownRestingQty:  state.askRestingQty,
+		BidReplenishmentDue: state.bidDue,
+		AskReplenishmentDue: state.askDue,
+		RefreshDue:          state.refreshDue,
+		Reason:              reason,
+		BidPrice:            state.bidPrice,
+		AskPrice:            state.askPrice,
+		BidRequestID:        bidRequestID,
+		AskRequestID:        askRequestID,
+		OutcomeExpectation:  expectation,
+		CensorReason:        censorReason,
+	})
 }
 
 func (mm *StoikovMarketMaker) submitQuote(side exchange.Side, price, qty int64) uint64 {
