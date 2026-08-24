@@ -10,6 +10,7 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/simulation"
 	etypes "exchange_sim/types"
 )
 
@@ -166,6 +167,10 @@ type StoikovMMConfig struct {
 	// while this field changes only displayed quantity. V2-3 P1 configures this
 	// only for selected spot makers; zero retains symmetric sizes.
 	InventorySizeSkewBps int64
+	// InventoryRebalance is an explicit, separately scheduled aggressive
+	// risk-transfer action. It is nil for the passive P0/P1 population; unlike
+	// passive requotes it can take locally visible liquidity and pay taker fees.
+	InventoryRebalance *InventoryRebalanceConfig
 	// HedgeInterval, when positive, gives the hedge its own cadence instead of
 	// running it inside the quote cycle.
 	//
@@ -235,6 +240,84 @@ type StoikovMMConfig struct {
 	// evidence only. A quote decision at that instant cannot reach venue
 	// ingress before the registered horizon closes.
 	QuoteSizeDecisionTerminalNano int64
+	// InventoryRebalanceDecisionObserver is the P2 counterpart to the P1
+	// quantity observer. It is write-only evidence and never returns state to
+	// the actor, exchange, scheduler, or policy.
+	InventoryRebalanceDecisionObserver     func(MakerInventoryRebalanceDecision)
+	InventoryRebalanceDecisionVenue        string
+	InventoryRebalanceDecisionMaker        string
+	InventoryRebalanceDecisionClient       uint64
+	InventoryRebalanceDecisionTerminalNano int64
+	InventoryRebalanceTakerFeeBps          int64
+}
+
+// InventoryRebalanceConfig is the local, rate-limited P2 action contract. It
+// is deliberately separate from a maker's passive quote policy: the action is
+// a normal IOC order with its own cadence, participation cap, and cooldown.
+type InventoryRebalanceConfig struct {
+	Enabled          bool          `json:"enabled"`
+	Interval         time.Duration `json:"interval"`
+	Cooldown         time.Duration `json:"cooldown"`
+	RiskBandQty      int64         `json:"risk_band_qty"`
+	TargetBandQty    int64         `json:"target_band_qty"`
+	MaxRequestQty    int64         `json:"max_request_qty"`
+	ParticipationBps int64         `json:"participation_bps"`
+	SlippageBps      int64         `json:"slippage_bps"`
+}
+
+func (c InventoryRebalanceConfig) validate() error {
+	if c.Interval <= 0 || c.Cooldown <= 0 {
+		return fmt.Errorf("interval and cooldown must be positive")
+	}
+	if c.RiskBandQty <= 0 || c.TargetBandQty < 0 || c.TargetBandQty >= c.RiskBandQty {
+		return fmt.Errorf("require 0 <= target band < positive risk band")
+	}
+	if c.MaxRequestQty <= 0 {
+		return fmt.Errorf("maximum request quantity must be positive")
+	}
+	if c.ParticipationBps <= 0 || c.ParticipationBps > 10_000 {
+		return fmt.Errorf("participation bps must be in [1,10000]")
+	}
+	if c.SlippageBps < 0 || c.SlippageBps > 10_000 {
+		return fmt.Errorf("slippage bps must be in [0,10000]")
+	}
+	return nil
+}
+
+// MakerInventoryRebalanceDecision is P2's persisted, pre-ingress evidence.
+// It records an evaluation even when the declared local policy defers. The
+// book fields come only from the actor's locally delivered CDF/USD snapshot;
+// price zero remains a numeric field, never an availability sentinel.
+type MakerInventoryRebalanceDecision struct {
+	VenueID              string        `json:"venue_id"`
+	Maker                string        `json:"maker"`
+	ClientID             uint64        `json:"client_id"`
+	Symbol               string        `json:"symbol"`
+	DecisionTime         int64         `json:"decision_time"`
+	Enabled              bool          `json:"enabled"`
+	ActionOrDeferReason  string        `json:"action_or_defer_reason"`
+	Inventory            int64         `json:"inventory"`
+	RiskBandQty          int64         `json:"risk_band_qty"`
+	TargetBandQty        int64         `json:"target_band_qty"`
+	LastBookSourceTime   int64         `json:"last_book_source_time"`
+	LastBookReceivedTime int64         `json:"last_book_received_time"`
+	LastBookSequence     uint64        `json:"last_book_sequence"`
+	BidPrice             int64         `json:"bid_price"`
+	BidVisibleQty        int64         `json:"bid_visible_qty"`
+	AskPrice             int64         `json:"ask_price"`
+	AskVisibleQty        int64         `json:"ask_visible_qty"`
+	Side                 exchange.Side `json:"side,omitempty"`
+	DesiredReduction     int64         `json:"desired_reduction"`
+	ParticipationCap     int64         `json:"participation_cap"`
+	MaxRequestQty        int64         `json:"max_request_qty"`
+	SlippageBps          int64         `json:"slippage_bps"`
+	LimitPrice           int64         `json:"limit_price"`
+	RequestedQty         int64         `json:"requested_qty"`
+	TakerFeeBps          int64         `json:"taker_fee_bps"`
+	RequestID            uint64        `json:"request_id,omitempty"`
+	CooldownUntil        int64         `json:"cooldown_until"`
+	OutcomeExpectation   string        `json:"outcome_expectation"`
+	CensorReason         string        `json:"censor_reason,omitempty"`
 }
 
 // MakerQuoteSizeDecision records a P1 quantity decision before either quote
@@ -277,36 +360,54 @@ type StoikovMarketMaker struct {
 	*actor.BaseActor
 	cfg StoikovMMConfig
 
-	forward            int64
-	indexPrice         int64
-	localReference     *LocalBookCache
-	remoteReference    *LocalBookCache
-	remoteWeight       float64
-	remoteConfidence   float64
-	remoteMaxAge       time.Duration
-	forwardAt          int64
-	lastForward        int64
-	lastForwardTS      int64
-	logVariancePerSec  float64
-	inventory          int64
-	bidID, askID       uint64
-	bidPrice, askPrice int64
-	bidQty, askQty     int64
-	hedgePosition      int64
-	hedgePending       bool
-	hedgeRequest       uint64
-	hedgeAttempts      int
-	hedgeFills         int
-	hedgeRejects       int
-	hedgeLastReject    exchange.RejectReason
-	hedgeLastQty       int64
-	hedgeBid, hedgeAsk int64
-	hedgeBidQty        int64
-	hedgeAskQty        int64
-	hedgeBookSeen      int
-	hedgeBookTwoSided  int
-	pending            map[uint64]quoteSide
-	subscribed         bool
+	forward             int64
+	indexPrice          int64
+	localReference      *LocalBookCache
+	remoteReference     *LocalBookCache
+	remoteWeight        float64
+	remoteConfidence    float64
+	remoteMaxAge        time.Duration
+	forwardAt           int64
+	lastForward         int64
+	lastForwardTS       int64
+	logVariancePerSec   float64
+	inventory           int64
+	bidID, askID        uint64
+	bidPrice, askPrice  int64
+	bidQty, askQty      int64
+	hedgePosition       int64
+	hedgePending        bool
+	hedgeRequest        uint64
+	hedgeAttempts       int
+	hedgeFills          int
+	hedgeRejects        int
+	hedgeLastReject     exchange.RejectReason
+	hedgeLastQty        int64
+	hedgeBid, hedgeAsk  int64
+	hedgeBidQty         int64
+	hedgeAskQty         int64
+	hedgeBookSeen       int
+	hedgeBookTwoSided   int
+	rebalanceBook       localRebalanceBook
+	rebalancePending    bool
+	rebalanceRequest    uint64
+	rebalanceOrderIDs   map[uint64]struct{}
+	rebalanceCooldownAt int64
+	pending             map[uint64]quoteSide
+	subscribed          bool
+}
+
+// localRebalanceBook is the last actor-local CDF/USD snapshot. It stores both
+// the source publication and observed inbox delivery boundaries so P2 can be
+// independently joined back to V2-0 receipts without reading an exchange book.
+type localRebalanceBook struct {
+	SourceTime   int64
+	ReceivedTime int64
+	Sequence     uint64
+	BidPrice     int64
+	BidQty       int64
+	AskPrice     int64
+	AskQty       int64
 }
 
 func NewStoikovMarketMaker(id uint64, gw actor.Gateway, cfg StoikovMMConfig) *StoikovMarketMaker {
@@ -316,6 +417,7 @@ func NewStoikovMarketMaker(id uint64, gw actor.Gateway, cfg StoikovMMConfig) *St
 		forward:           cfg.BootstrapPrice,
 		logVariancePerSec: cfg.InitialLogVariancePerSec,
 		pending:           make(map[uint64]quoteSide),
+		rebalanceOrderIDs: make(map[uint64]struct{}),
 	}
 	if cfg.UseLocalReferenceCache {
 		mm.localReference = NewLocalBookCache(cfg.LocalReferenceSourceVenue, cfg.ReferenceSymbol)
@@ -324,6 +426,9 @@ func NewStoikovMarketMaker(id uint64, gw actor.Gateway, cfg StoikovMMConfig) *St
 	mm.AddTicker(cfg.QuoteInterval, mm.onTick)
 	if cfg.HedgeInterval > 0 {
 		mm.AddTicker(cfg.HedgeInterval, mm.onHedgeTick)
+	}
+	if cfg.InventoryRebalance != nil && cfg.InventoryRebalance.Interval > 0 {
+		mm.AddTicker(cfg.InventoryRebalance.Interval, mm.onRebalanceTick)
 	}
 	return mm
 }
@@ -400,6 +505,9 @@ func (mm *StoikovMarketMaker) HandleEvent(_ context.Context, evt *actor.Event) {
 }
 
 func (mm *StoikovMarketMaker) onSnapshot(e actor.BookSnapshotEvent) {
+	if mm.cfg.InventoryRebalance != nil && e.Symbol == mm.cfg.Symbol {
+		mm.observeRebalanceBook(e)
+	}
 	if mm.cfg.HedgeSymbol != "" && e.Symbol == mm.cfg.HedgeSymbol {
 		mm.hedgeBid, mm.hedgeBidQty, mm.hedgeAsk, mm.hedgeAskQty = 0, 0, 0, 0
 		if e.Snapshot != nil {
@@ -432,6 +540,30 @@ func (mm *StoikovMarketMaker) onSnapshot(e actor.BookSnapshotEvent) {
 		}
 	}
 	mm.forward = mm.blendForward(mid, e.Timestamp)
+}
+
+// observeRebalanceBook copies one actor-local public snapshot for the P2
+// policy. The optional receipt frontier is evidence metadata only: the policy
+// never branches on it. In deterministic phases any snapshot dispatched here
+// was inserted into the inbox at that delivery time; the offline P2 auditor
+// additionally verifies this source timestamp/sequence against the V2-0
+// receipt ledger.
+func (mm *StoikovMarketMaker) observeRebalanceBook(e actor.BookSnapshotEvent) {
+	book := localRebalanceBook{SourceTime: e.Timestamp, Sequence: e.SeqNum}
+	if e.Snapshot != nil {
+		if len(e.Snapshot.Bids) > 0 {
+			book.BidPrice, book.BidQty = e.Snapshot.Bids[0].Price, e.Snapshot.Bids[0].VisibleQty
+		}
+		if len(e.Snapshot.Asks) > 0 {
+			book.AskPrice, book.AskQty = e.Snapshot.Asks[0].Price, e.Snapshot.Asks[0].VisibleQty
+		}
+	}
+	if gateway, ok := mm.Gateway().(interface {
+		MarketDataFrontier() simulation.MarketDataFrontier
+	}); ok {
+		book.ReceivedTime = gateway.MarketDataFrontier().DeliveredAt
+	}
+	mm.rebalanceBook = book
 }
 
 // blendForward moves the maker's view toward the observed midpoint at the
@@ -493,6 +625,14 @@ func (mm *StoikovMarketMaker) maxLogVariance() float64 {
 }
 
 func (mm *StoikovMarketMaker) onAccepted(e actor.OrderAcceptedEvent) {
+	if mm.rebalanceRequest != 0 && e.RequestID == mm.rebalanceRequest {
+		// An accepted P2 IOC must remain live long enough to receive its normal
+		// fill/cancel notifications. It is not a passive quote and must never be
+		// cancelled by the unknown-acknowledgement guard below.
+		mm.rebalancePending, mm.rebalanceRequest = false, 0
+		mm.rebalanceOrderIDs[e.OrderID] = struct{}{}
+		return
+	}
 	if mm.hedgeRequest != 0 && e.RequestID == mm.hedgeRequest {
 		// A hedge is not a quote. Cancelling every unknown acknowledgement
 		// would cancel the maker's own hedge before it could execute.
@@ -513,6 +653,10 @@ func (mm *StoikovMarketMaker) onAccepted(e actor.OrderAcceptedEvent) {
 }
 
 func (mm *StoikovMarketMaker) onRejected(e actor.OrderRejectedEvent) {
+	if mm.rebalanceRequest != 0 && e.RequestID == mm.rebalanceRequest {
+		mm.rebalancePending, mm.rebalanceRequest = false, 0
+		return
+	}
 	side, ok := mm.pending[e.RequestID]
 	if !ok {
 		// A rejected hedge must release the in-flight flag, otherwise one
@@ -554,6 +698,7 @@ func (mm *StoikovMarketMaker) onFill(e actor.OrderFillEvent) {
 	if !e.IsFull {
 		return
 	}
+	delete(mm.rebalanceOrderIDs, e.OrderID)
 	if e.OrderID == mm.bidID {
 		mm.bidID, mm.bidPrice, mm.bidQty = 0, 0, 0
 	}
@@ -563,6 +708,7 @@ func (mm *StoikovMarketMaker) onFill(e actor.OrderFillEvent) {
 }
 
 func (mm *StoikovMarketMaker) onCancelled(e actor.OrderCancelledEvent) {
+	delete(mm.rebalanceOrderIDs, e.OrderID)
 	// An immediate-or-cancel hedge that partly filled is cancelled for its
 	// remainder; the flag must clear on that too.
 	mm.hedgePending = false
@@ -580,6 +726,205 @@ func (mm *StoikovMarketMaker) onHedgeTick(_ time.Time) {
 		return
 	}
 	mm.hedgeDelta()
+}
+
+// onRebalanceTick runs P2's explicit CDF/USD risk-transfer policy on its
+// independently declared cadence. It shares neither quote refreshes nor hedge
+// decisions: a passive maker must make any aggressive inventory reduction
+// observable, costly, rate-limited, and non-guaranteed.
+func (mm *StoikovMarketMaker) onRebalanceTick(now time.Time) {
+	policy := mm.cfg.InventoryRebalance
+	if policy == nil || policy.Interval <= 0 {
+		return
+	}
+	decision := mm.rebalanceDecision(now)
+	if decision.ActionOrDeferReason != "SUBMIT_IOC" {
+		mm.emitInventoryRebalanceDecision(decision)
+		return
+	}
+	// Cooldown begins at the attempted action boundary, not at a later fill or
+	// acceptance. A rejected or unfilled IOC therefore cannot hammer the book.
+	mm.rebalancePending = true
+	mm.rebalanceRequest = decision.RequestID
+	mm.rebalanceCooldownAt = decision.CooldownUntil
+	mm.emitInventoryRebalanceDecision(decision)
+	mm.SubmitOrderWithTimeInForce(mm.cfg.Symbol, decision.Side, exchange.LimitOrder, decision.LimitPrice, decision.RequestedQty, exchange.IOC)
+}
+
+// rebalanceDecision is deliberately pure with respect to venue state: it reads
+// only the maker's inventory and the last locally delivered public snapshot.
+// Its explicit reason is persisted for every timer evaluation, including the
+// disabled control arm.
+func (mm *StoikovMarketMaker) rebalanceDecision(now time.Time) MakerInventoryRebalanceDecision {
+	policy := mm.cfg.InventoryRebalance
+	book := mm.rebalanceBook
+	decision := MakerInventoryRebalanceDecision{
+		VenueID:              mm.cfg.InventoryRebalanceDecisionVenue,
+		Maker:                mm.cfg.InventoryRebalanceDecisionMaker,
+		ClientID:             mm.cfg.InventoryRebalanceDecisionClient,
+		Symbol:               mm.cfg.Symbol,
+		DecisionTime:         now.UnixNano(),
+		Inventory:            mm.inventory,
+		LastBookSourceTime:   book.SourceTime,
+		LastBookReceivedTime: book.ReceivedTime,
+		LastBookSequence:     book.Sequence,
+		BidPrice:             book.BidPrice,
+		BidVisibleQty:        book.BidQty,
+		AskPrice:             book.AskPrice,
+		AskVisibleQty:        book.AskQty,
+	}
+	if policy == nil {
+		decision.ActionOrDeferReason = "POLICY_UNCONFIGURED"
+		return decision
+	}
+	decision.Enabled = policy.Enabled
+	decision.RiskBandQty = policy.RiskBandQty
+	decision.TargetBandQty = policy.TargetBandQty
+	decision.MaxRequestQty = policy.MaxRequestQty
+	decision.SlippageBps = policy.SlippageBps
+	decision.TakerFeeBps = mm.cfg.InventoryRebalanceTakerFeeBps
+	if !policy.Enabled {
+		decision.ActionOrDeferReason = "POLICY_DISABLED"
+		return decision
+	}
+	if !mm.subscribed {
+		decision.ActionOrDeferReason = "NOT_SUBSCRIBED"
+		return decision
+	}
+	if mm.rebalancePending {
+		decision.ActionOrDeferReason = "REQUEST_PENDING"
+		return decision
+	}
+	if now.UnixNano() < mm.rebalanceCooldownAt {
+		decision.ActionOrDeferReason = "COOLDOWN"
+		decision.CooldownUntil = mm.rebalanceCooldownAt
+		return decision
+	}
+	magnitude := clampAbsInventory(mm.inventory, math.MaxInt64)
+	if magnitude < policy.RiskBandQty {
+		decision.ActionOrDeferReason = "IN_BAND"
+		return decision
+	}
+	if book.SourceTime == 0 {
+		decision.ActionOrDeferReason = "LOCAL_BOOK_UNAVAILABLE"
+		return decision
+	}
+	// P2 has no free staleness parameter: the actor-visible source publication
+	// is stale exactly once it is older than the already declared evaluation
+	// interval. Receipt delivery time remains evidence-only, so turning V2-0
+	// instrumentation on cannot alter the simulated action.
+	age := now.UnixNano() - book.SourceTime
+	if age < 0 {
+		decision.ActionOrDeferReason = "LOCAL_BOOK_SOURCE_FUTURE"
+		return decision
+	}
+	if age > int64(policy.Interval) {
+		decision.ActionOrDeferReason = "LOCAL_BOOK_STALE"
+		return decision
+	}
+	if magnitude <= policy.TargetBandQty {
+		decision.ActionOrDeferReason = "IN_BAND"
+		return decision
+	}
+	desired := magnitude - policy.TargetBandQty
+	decision.DesiredReduction = desired
+	if mm.inventory > 0 {
+		decision.Side = exchange.Sell
+		decision.ParticipationCap = rebalanceParticipationCap(book.BidQty, policy.ParticipationBps)
+		decision.LimitPrice = rebalanceOutwardLimit(book.BidPrice, policy.SlippageBps, mm.cfg.TickSize, exchange.Sell)
+	} else {
+		decision.Side = exchange.Buy
+		decision.ParticipationCap = rebalanceParticipationCap(book.AskQty, policy.ParticipationBps)
+		decision.LimitPrice = rebalanceOutwardLimit(book.AskPrice, policy.SlippageBps, mm.cfg.TickSize, exchange.Buy)
+	}
+	if decision.ParticipationCap <= 0 {
+		decision.ActionOrDeferReason = "LOCAL_CONTRA_TOUCH_UNAVAILABLE"
+		return decision
+	}
+	if decision.LimitPrice <= 0 {
+		decision.ActionOrDeferReason = "INVALID_OUTWARD_LIMIT"
+		return decision
+	}
+	decision.RequestedQty = minInt64(desired, policy.MaxRequestQty, decision.ParticipationCap)
+	if decision.RequestedQty <= 0 {
+		decision.ActionOrDeferReason = "REQUEST_QUANTITY_UNAVAILABLE"
+		return decision
+	}
+	cooldownUntil, ok := etypes.TryAdd(now.UnixNano(), int64(policy.Cooldown))
+	if !ok {
+		decision.ActionOrDeferReason = "COOLDOWN_OVERFLOW"
+		return decision
+	}
+	decision.RequestID = mm.PeekNextRequestID()
+	decision.CooldownUntil = cooldownUntil
+	decision.ActionOrDeferReason = "SUBMIT_IOC"
+	decision.OutcomeExpectation = "VENUE_OUTCOME_REQUIRED"
+	if mm.cfg.InventoryRebalanceDecisionTerminalNano != 0 && now.UnixNano() >= mm.cfg.InventoryRebalanceDecisionTerminalNano {
+		decision.OutcomeExpectation = "SIMULATION_HORIZON_CENSORED"
+		decision.CensorReason = "terminal_horizon_before_venue_ingress"
+	}
+	return decision
+}
+
+func rebalanceParticipationCap(visibleQty, bps int64) int64 {
+	if visibleQty <= 0 || bps <= 0 {
+		return 0
+	}
+	cap, ok := etypes.TryMulBps(visibleQty, bps)
+	if !ok || cap <= 0 {
+		return 0
+	}
+	return cap
+}
+
+func rebalanceOutwardLimit(touch, slippageBps, tick int64, side exchange.Side) int64 {
+	if touch <= 0 || slippageBps < 0 || tick <= 0 {
+		return 0
+	}
+	concession, ok := etypes.TryMulBps(touch, slippageBps)
+	if !ok || concession < 0 {
+		return 0
+	}
+	price := touch
+	if side == exchange.Buy {
+		price, ok = etypes.TryAdd(touch, concession)
+	} else {
+		price, ok = etypes.TryAdd(touch, -concession)
+	}
+	if !ok || price <= 0 {
+		return 0
+	}
+	remainder := price % tick
+	if remainder == 0 {
+		return price
+	}
+	if side == exchange.Buy {
+		price, ok = etypes.TryAdd(price, tick-remainder)
+		if !ok {
+			return 0
+		}
+		return price
+	}
+	return price - remainder
+}
+
+func minInt64(values ...int64) int64 {
+	if len(values) == 0 {
+		return 0
+	}
+	minimum := values[0]
+	for _, value := range values[1:] {
+		if value < minimum {
+			minimum = value
+		}
+	}
+	return minimum
+}
+
+func (mm *StoikovMarketMaker) emitInventoryRebalanceDecision(decision MakerInventoryRebalanceDecision) {
+	if mm.cfg.InventoryRebalanceDecisionObserver != nil {
+		mm.cfg.InventoryRebalanceDecisionObserver(decision)
+	}
 }
 
 func (mm *StoikovMarketMaker) onTick(now time.Time) {

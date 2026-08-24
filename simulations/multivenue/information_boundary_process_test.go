@@ -34,6 +34,7 @@ type v20HelperResult struct {
 	FrontierVectorDigest     string `json:"frontier_vector_digest"`
 	FrontierComponentDigest  string `json:"frontier_component_digest"`
 	MakerQuoteSizeDecisions  int64  `json:"maker_quote_size_decisions"`
+	MakerRebalanceDecisions  int64  `json:"maker_rebalance_decisions"`
 	EvidenceArtifactEvents   int64  `json:"evidence_artifact_events"`
 	EvidenceArtifactDigest   string `json:"evidence_artifact_digest"`
 }
@@ -65,6 +66,7 @@ func TestV20EvidenceHelper(t *testing.T) {
 	remoteRoster := os.Getenv("V21_REMOTE_ROSTER") == "1"
 	routerEvidence := os.Getenv("V22_ROUTER") == "1"
 	p1QuoteSizeEvidence := os.Getenv("V23_P1_QUOTE_SIZE") == "1"
+	p2RebalanceEvidence := os.Getenv("V23_P2_REBALANCE") == "1"
 	if p1QuoteSizeEvidence {
 		// P1 varies only optional raw decision recording. Both sides retain full
 		// logs so an identical logger topology cannot mask a recorder effect.
@@ -75,6 +77,21 @@ func TestV20EvidenceHelper(t *testing.T) {
 		cfg.SpotStoikovInventorySizeSkewBps = 5_000
 		cfg.RecordMakerQuoteSizeDecisions = os.Getenv("V20_EVIDENCE_ON") == "1"
 	}
+	if p2RebalanceEvidence {
+		// Hold P0-C, P1-B, fee topology, and the policy parameters fixed. The
+		// child varies only evidence sidecars/recorders, never an economic input.
+		cfg.LogMode = "full"
+		cfg.CrossAssetSpotGraph = true
+		cfg.SpotPassiveMakerPostOnly = true
+		cfg.SpotPassiveMakerCancelBeforeReplace = true
+		cfg.SpotStoikovInventorySizeSkewBps = 5_000
+		cfg.CDFInventoryRebalance = &InventoryRebalanceConfig{
+			Enabled: true, Interval: 10 * time.Second, Cooldown: 30 * time.Second,
+			RiskBandQty: 10_000_000_000, TargetBandQty: 5_000_000_000, MaxRequestQty: 500_000_000,
+			ParticipationBps: 1_000, SlippageBps: 50,
+		}
+		cfg.RecordMakerInventoryRebalanceDecisions = os.Getenv("V20_EVIDENCE_ON") == "1"
+	}
 	if os.Getenv("V21_LOCAL_CACHE") == "1" || remoteFeed || remoteRoster {
 		cfg.MakerAnchor = "own_mid"
 		cfg.SpotMakerLocalReferenceCache = true
@@ -82,11 +99,16 @@ func TestV20EvidenceHelper(t *testing.T) {
 			"spot_maker": {Model: "constant", Delay: 10 * time.Millisecond},
 		}
 	}
-	cfg.RecordMarketDataReceipts = !p1QuoteSizeEvidence && os.Getenv("V20_EVIDENCE_ON") == "1"
+	cfg.RecordMarketDataReceipts = !p1QuoteSizeEvidence && !p2RebalanceEvidence && os.Getenv("V20_EVIDENCE_ON") == "1"
+	if p2RebalanceEvidence {
+		cfg.RecordMarketDataReceipts = os.Getenv("V20_EVIDENCE_ON") == "1"
+	}
 	if cfg.RecordMarketDataReceipts {
 		if routerEvidence {
 			cfg.MarketDataReceiptRoles = []string{"cross_venue_router_tier"}
 			cfg.RecordDecisionFrontierVectors = true
+		} else if p2RebalanceEvidence {
+			cfg.MarketDataReceiptRoles = []string{"cdf_spot_maker"}
 		} else {
 			cfg.MarketDataReceiptRoles = []string{"spot_maker"}
 		}
@@ -204,6 +226,12 @@ func TestV20EvidenceHelper(t *testing.T) {
 		}
 		result.EvidenceArtifactEvents = artifact.Events
 		result.EvidenceArtifactDigest = artifact.Digest
+	}
+	if p2RebalanceEvidence && cfg.RecordMakerInventoryRebalanceDecisions {
+		result.MakerRebalanceDecisions = countRawEvent(t, output, "maker_inventory_rebalance_decision")
+		if result.MakerRebalanceDecisions == 0 {
+			t.Fatal("P2 recorder emitted no inventory-rebalance decisions")
+		}
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
@@ -415,6 +443,35 @@ func TestV23P1QuoteSizeEvidenceIsFreshProcessDeterministicAndNeutral(t *testing.
 		left.EvidenceArtifactEvents == 0 || left.EvidenceArtifactEvents != right.EvidenceArtifactEvents ||
 		left.EvidenceArtifactDigest == "" || left.EvidenceArtifactDigest != right.EvidenceArtifactDigest {
 		t.Fatalf("P1 evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
+	}
+}
+
+// P2's local action must not read receipt telemetry. This fresh-process
+// control holds the economic policy—including the CDF maker fee model—fixed
+// while turning only its evidence sidecars and raw-decision recorder on/off.
+func TestV23P2RebalanceEvidenceIsFreshProcessDeterministicAndNeutral(t *testing.T) {
+	results := make(map[string]v20HelperResult)
+	for _, gomax := range []string{"1", "4"} {
+		for _, evidence := range []bool{false, true} {
+			key := "g" + gomax + "/off"
+			if evidence {
+				key = "g" + gomax + "/on"
+			}
+			results[key] = runV23P2EvidenceHelper(t, gomax, evidence)
+		}
+	}
+	want := results["g1/off"].ExecutionHash
+	for key, result := range results {
+		if result.ExecutionHash == "" || result.ExecutionHash != want {
+			t.Fatalf("P2 recorder changed execution with process setting: want %s, %s=%s", want, key, result.ExecutionHash)
+		}
+	}
+	left, right := results["g1/on"], results["g4/on"]
+	if left.MakerRebalanceDecisions == 0 || left.MakerRebalanceDecisions != right.MakerRebalanceDecisions ||
+		left.Schedules == 0 || left.Receipts == 0 || left.Decisions == 0 ||
+		left.Schedules != right.Schedules || left.Receipts != right.Receipts || left.Decisions != right.Decisions ||
+		left.ScheduleDigest != right.ScheduleDigest || left.ReceiptDigest != right.ReceiptDigest || left.DecisionDigest != right.DecisionDigest {
+		t.Fatalf("P2 evidence is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
 	}
 }
 
@@ -641,6 +698,32 @@ func runV23P1EvidenceHelper(t *testing.T, gomax string, evidence bool) v20Helper
 	}
 	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
 		t.Fatalf("decode P1 evidence helper output %q: %v", raw, err)
+	}
+	return result
+}
+
+func runV23P2EvidenceHelper(t *testing.T, gomax string, evidence bool) v20HelperResult {
+	t.Helper()
+	output := filepath.Join(t.TempDir(), "run")
+	cmd := exec.Command(os.Args[0], "-test.run=TestV20EvidenceHelper", "--")
+	cmd.Env = append(os.Environ(), "V20_EVIDENCE_HELPER=1", "V20_EVIDENCE_OUTPUT="+output, "V23_P2_REBALANCE=1", "GOMAXPROCS="+gomax)
+	if evidence {
+		cmd.Env = append(cmd.Env, "V20_EVIDENCE_ON=1")
+	}
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("P2 evidence helper GOMAXPROCS=%s evidence=%t: %v\n%s", gomax, evidence, err, raw)
+	}
+	var result v20HelperResult
+	var encoded string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "{") {
+			encoded = line
+			break
+		}
+	}
+	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
+		t.Fatalf("decode P2 evidence helper output %q: %v", raw, err)
 	}
 	return result
 }

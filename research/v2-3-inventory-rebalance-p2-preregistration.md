@@ -50,7 +50,11 @@ For inventory `q`, P2 sells if `q > 0`, buys if `q < 0`, and starts from
 minimum of desired reduction, maximum request, and participation cap.
 Missing/stale local book, in-band risk, pending request, cooldown, zero or
 overflowed cap, and invalid tick-aligned price are explicit deferred reasons;
-none becomes a zero-price or zero-quantity order.
+none becomes a zero-price or zero-quantity order. “Stale” is not a new free
+parameter: a local snapshot is stale when its actor-visible source-publication
+age exceeds the already declared 10-s evaluation interval. Receipt delivery
+time is retained solely as independent evidence; turning its recorder off for
+the neutrality regression must not alter whether the policy acts.
 
 An own resting touch may appear in the local public snapshot. Standard
 same-client self-trade prevention skips it; only another client can fill the

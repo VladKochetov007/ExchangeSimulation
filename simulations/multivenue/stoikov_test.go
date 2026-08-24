@@ -70,6 +70,142 @@ func TestQuoteTickRoundingPreservesOrdering(t *testing.T) {
 	}
 }
 
+func TestInventoryRebalancePlanUsesOnlyLocalContraTouchAndCaps(t *testing.T) {
+	gw := newStoikovStubGateway()
+	var decisions []MakerInventoryRebalanceDecision
+	now := time.Unix(10, 0)
+	policy := &InventoryRebalanceConfig{
+		Enabled: true, Interval: 10 * time.Second, Cooldown: 30 * time.Second,
+		RiskBandQty: 1_000, TargetBandQty: 1_000, MaxRequestQty: 200,
+		ParticipationBps: 1_000, SlippageBps: 50,
+	}
+	mm := NewStoikovMarketMaker(1, gw, StoikovMMConfig{
+		Symbol: "CDF/USD", TickSize: 10, InventoryRebalance: policy,
+		InventoryRebalanceDecisionObserver: func(decision MakerInventoryRebalanceDecision) { decisions = append(decisions, decision) },
+	})
+	mm.subscribed = true
+	mm.inventory = 1_500
+	mm.rebalanceBook = localRebalanceBook{
+		SourceTime: now.UnixNano() - int64(time.Millisecond), ReceivedTime: now.UnixNano() - int64(time.Millisecond), Sequence: 7,
+		BidPrice: 1_000, BidQty: 1_000, AskPrice: 1_100, AskQty: 1_000,
+	}
+	mm.onRebalanceTick(now)
+	if len(decisions) != 1 {
+		t.Fatalf("decisions = %d, want 1", len(decisions))
+	}
+	got := decisions[0]
+	if got.ActionOrDeferReason != "SUBMIT_IOC" || got.Side != exchange.Sell || got.DesiredReduction != 500 || got.ParticipationCap != 100 || got.RequestedQty != 100 || got.LimitPrice != 990 {
+		t.Fatalf("unexpected P2 plan: %+v", got)
+	}
+	if len(gw.requests) != 1 || gw.requests[0].OrderReq == nil {
+		t.Fatalf("P2 did not emit one order: %+v", gw.requests)
+	}
+	order := gw.requests[0].OrderReq
+	if order.RequestID != got.RequestID || order.Symbol != "CDF/USD" || order.Side != exchange.Sell || order.TimeInForce != exchange.IOC || order.PostOnly || order.Price != got.LimitPrice || order.Qty != got.RequestedQty {
+		t.Fatalf("submitted order disagrees with P2 evidence: order=%+v decision=%+v", order, got)
+	}
+	if got.CooldownUntil != now.Add(policy.Cooldown).UnixNano() || !mm.rebalancePending {
+		t.Fatalf("P2 cooldown/pending state not set at submission: decision=%+v pending=%t", got, mm.rebalancePending)
+	}
+
+	mm.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: got.RequestID, OrderID: 44}})
+	if mm.rebalancePending || mm.rebalanceRequest != 0 {
+		t.Fatalf("accepted P2 IOC left request pending: pending=%t request=%d", mm.rebalancePending, mm.rebalanceRequest)
+	}
+	if len(gw.requests) != 1 {
+		t.Fatalf("accepted P2 IOC was incorrectly cancelled: %+v", gw.requests)
+	}
+}
+
+func TestInventoryRebalanceDeferralsAreExplicitAndDoNotSubmit(t *testing.T) {
+	now := time.Unix(10, 0)
+	base := InventoryRebalanceConfig{
+		Enabled: true, Interval: 10 * time.Second, Cooldown: 30 * time.Second,
+		RiskBandQty: 1_000, TargetBandQty: 500, MaxRequestQty: 200,
+		ParticipationBps: 1_000, SlippageBps: 50,
+	}
+	newMaker := func() (*StoikovMarketMaker, *stoikovStubGateway, *[]MakerInventoryRebalanceDecision) {
+		gw := newStoikovStubGateway()
+		decisions := make([]MakerInventoryRebalanceDecision, 0, 1)
+		mm := NewStoikovMarketMaker(1, gw, StoikovMMConfig{
+			Symbol: "CDF/USD", TickSize: 10, InventoryRebalance: &base,
+			InventoryRebalanceDecisionObserver: func(decision MakerInventoryRebalanceDecision) { decisions = append(decisions, decision) },
+		})
+		mm.subscribed, mm.inventory = true, 1_500
+		return mm, gw, &decisions
+	}
+	for name, mutate := range map[string]func(*StoikovMarketMaker){
+		"missing receipt": func(mm *StoikovMarketMaker) {},
+		"stale local book": func(mm *StoikovMarketMaker) {
+			mm.rebalanceBook = localRebalanceBook{SourceTime: now.Add(-20 * time.Second).UnixNano(), ReceivedTime: now.Add(-11 * time.Second).UnixNano(), BidPrice: 1_000, BidQty: 1_000, AskPrice: 1_100, AskQty: 1_000}
+		},
+		"empty contra touch": func(mm *StoikovMarketMaker) {
+			mm.rebalanceBook = localRebalanceBook{SourceTime: now.UnixNano(), ReceivedTime: now.UnixNano(), BidPrice: 1_000, AskPrice: 1_100, AskQty: 1_000}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mm, gw, decisions := newMaker()
+			mutate(mm)
+			mm.onRebalanceTick(now)
+			if len(*decisions) != 1 || (*decisions)[0].ActionOrDeferReason == "SUBMIT_IOC" || len(gw.requests) != 0 {
+				t.Fatalf("defer was not explicit/non-submitting: decisions=%+v requests=%+v", *decisions, gw.requests)
+			}
+		})
+	}
+
+	mm, gw, decisions := newMaker()
+	mm.cfg.InventoryRebalance.Enabled = false
+	mm.onRebalanceTick(now)
+	if len(*decisions) != 1 || (*decisions)[0].ActionOrDeferReason != "POLICY_DISABLED" || len(gw.requests) != 0 {
+		t.Fatalf("disabled control was not explicit/no-action: decisions=%+v requests=%+v", *decisions, gw.requests)
+	}
+}
+
+func TestInventoryRebalanceBuyRoundsOutwardAndTerminalIsCensored(t *testing.T) {
+	gw := newStoikovStubGateway()
+	var decisions []MakerInventoryRebalanceDecision
+	now := time.Unix(10, 0)
+	policy := &InventoryRebalanceConfig{
+		Enabled: true, Interval: 10 * time.Second, Cooldown: time.Second,
+		RiskBandQty: 1_000, TargetBandQty: 500, MaxRequestQty: 200,
+		ParticipationBps: 1_000, SlippageBps: 50,
+	}
+	mm := NewStoikovMarketMaker(1, gw, StoikovMMConfig{
+		Symbol: "CDF/USD", TickSize: 10, InventoryRebalance: policy,
+		InventoryRebalanceDecisionTerminalNano: now.UnixNano(),
+		InventoryRebalanceDecisionObserver:     func(decision MakerInventoryRebalanceDecision) { decisions = append(decisions, decision) },
+	})
+	mm.subscribed, mm.inventory = true, -1_500
+	mm.rebalanceBook = localRebalanceBook{SourceTime: now.UnixNano(), ReceivedTime: now.UnixNano(), BidPrice: 900, BidQty: 1_000, AskPrice: 1_001, AskQty: 1_000}
+	mm.onRebalanceTick(now)
+	if len(decisions) != 1 {
+		t.Fatalf("decisions = %d", len(decisions))
+	}
+	got := decisions[0]
+	if got.Side != exchange.Buy || got.LimitPrice != 1_010 || got.OutcomeExpectation != "SIMULATION_HORIZON_CENSORED" || got.CensorReason != "terminal_horizon_before_venue_ingress" {
+		t.Fatalf("buy/censor plan = %+v", got)
+	}
+	if len(gw.requests) != 1 || gw.requests[0].OrderReq.TimeInForce != exchange.IOC || gw.requests[0].OrderReq.Price != 1_010 {
+		t.Fatalf("buy IOC = %+v", gw.requests)
+	}
+}
+
+func TestInventoryRebalanceValidationRejectsAmbiguousEvidencePath(t *testing.T) {
+	base := Config{LogDir: t.TempDir(), LogMode: "full", CrossAssetSpotGraph: true, RecordMakerInventoryRebalanceDecisions: true,
+		CDFInventoryRebalance: &InventoryRebalanceConfig{Interval: time.Second, Cooldown: time.Second, RiskBandQty: 10, TargetBandQty: 5, MaxRequestQty: 1, ParticipationBps: 1, SlippageBps: 0}}
+	if _, err := NewSim(time.Second, base); err == nil {
+		t.Fatal("P2 accepted without independently recorded local feed receipts")
+	}
+	base.RecordMarketDataReceipts = true
+	base.MarketDataReceiptRoles = []string{"cdf_spot_maker"}
+	base.LatencyProfiles = map[string]LatencyProfile{"cdf_spot_maker": {Model: "constant", Delay: time.Millisecond}}
+	sim, err := NewSim(time.Second, base)
+	if err != nil {
+		t.Fatalf("P2 rejected documented receipt path: %v", err)
+	}
+	sim.Close()
+}
+
 type stoikovStubGateway struct {
 	requests   []etypes.Request
 	responses  chan etypes.Response

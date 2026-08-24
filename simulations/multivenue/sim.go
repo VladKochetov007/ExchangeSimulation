@@ -110,6 +110,10 @@ type Config struct {
 	// the V2-3 P1 inventory-size screen. These observations are excluded from
 	// the execution checkpoint domain by design.
 	RecordMakerQuoteSizeDecisions bool `json:"record_maker_quote_size_decisions"`
+	// RecordMakerInventoryRebalanceDecisions retains every V2-3 P2 CDF/USD
+	// inventory-rebalance evaluation. It is evidence-only: the optional raw
+	// rows must not enter the ordered execution checkpoint domain.
+	RecordMakerInventoryRebalanceDecisions bool `json:"record_maker_inventory_rebalance_decisions"`
 	// CheckpointIntervalSeconds writes a rolling digest of the event stream at
 	// each simulated-time boundary, so two runs of one seed can be compared
 	// without retaining their logs. Zero disables it.
@@ -407,6 +411,9 @@ type Config struct {
 	// Stoikov maker's existing quote size across bid and ask. It is distinct
 	// from reservation-price skew and never applies to the perpetual maker.
 	SpotStoikovInventorySizeSkewBps int64 `json:"spot_stoikov_inventory_size_skew_bps"`
+	// CDFInventoryRebalance configures the separately scheduled V2-3 P2
+	// aggressive risk-transfer policy. Nil preserves the P1 population exactly.
+	CDFInventoryRebalance *InventoryRebalanceConfig `json:"cdf_inventory_rebalance,omitempty"`
 	// MakerIndexWeight blends the index with the maker's own midpoint.
 	MakerIndexWeight float64 `json:"maker_index_weight"`
 
@@ -618,8 +625,34 @@ func (c *Config) normalize() error {
 	if c.RecordMakerQuoteSizeDecisions && c.LogMode != "full" {
 		return errors.New("multivenue: maker quote-size decisions require full persisted evidence")
 	}
+	if c.RecordMakerInventoryRebalanceDecisions && c.LogMode != "full" {
+		return errors.New("multivenue: maker inventory-rebalance decisions require full persisted evidence")
+	}
 	if c.SpotStoikovInventorySizeSkewBps < 0 || c.SpotStoikovInventorySizeSkewBps > 5_000 {
 		return fmt.Errorf("multivenue: spot Stoikov inventory size skew bps must be in [0,5000], got %d", c.SpotStoikovInventorySizeSkewBps)
+	}
+	if c.CDFInventoryRebalance != nil {
+		if !c.CrossAssetSpotGraph {
+			return errors.New("multivenue: CDF inventory rebalance requires the cross-asset spot graph")
+		}
+		if err := c.CDFInventoryRebalance.validate(); err != nil {
+			return fmt.Errorf("multivenue: CDF inventory rebalance: %w", err)
+		}
+		// Evidence is mandatory for scientific P2 cells but intentionally
+		// optional for the paired instrumentation-neutrality process. The policy
+		// itself consumes no receipt telemetry, so on/off must execute identically.
+		if c.RecordMakerInventoryRebalanceDecisions || c.RecordMarketDataReceipts {
+			if !c.RecordMakerInventoryRebalanceDecisions || !c.RecordMarketDataReceipts || !slices.Contains(c.MarketDataReceiptRoles, "cdf_spot_maker") {
+				return errors.New("multivenue: instrumented CDF inventory rebalance requires decisions and cdf_spot_maker market-data receipts")
+			}
+			profile, configured := c.latencyProfileFor("cdf_spot_maker")
+			if !configured || profile.zero() {
+				return errors.New("multivenue: instrumented CDF inventory rebalance requires an explicit nonzero cdf_spot_maker public-feed link")
+			}
+		}
+	}
+	if c.RecordMakerInventoryRebalanceDecisions && c.CDFInventoryRebalance == nil {
+		return errors.New("multivenue: maker inventory-rebalance evidence requires a CDF inventory-rebalance policy")
 	}
 	if len(c.VenueIDs) == 0 {
 		c.VenueIDs = []string{"north", "central", "south"}
@@ -2160,18 +2193,41 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		}
 		*sizeSkewBps = s.Config.SpotStoikovInventorySizeSkewBps
 	}
+	rebalanceDecisionObserver := func(decision MakerInventoryRebalanceDecision) {
+		// P2 evaluation telemetry is persisted evidence only. The recorder has
+		// no path back into an actor, exchange, scheduler, or checkpoint sink.
+		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "maker_inventory_rebalance_decision", decision)
+	}
 	quoteSizeObserver := func(decision MakerQuoteSizeDecision) {
 		// P1 decision telemetry is persisted evidence only. Sending it through
 		// LogEvent would make optional recording perturb the execution hash.
 		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "maker_quote_size_decision", decision)
 	}
 	newSpotStoikovMaker := func(role string, makerConfig StoikovMMConfig) *StoikovMarketMaker {
-		clientID, gateway := venue.connectParticipant(mount, role, mmBalances, 100_000_000*mvQuotePrecision, zeroFee)
+		makerFee := exchange.FeeModel(zeroFee)
+		// Both P2 arms attach the same fee schedule to the scoped CDF maker
+		// accounts. Passive fills remain maker-zero, while an enabled rebalance
+		// is an ordinary five-bps quote-fee IOC action rather than a free repair.
+		if makerConfig.Symbol == "CDF/USD" && s.Config.CDFInventoryRebalance != nil {
+			makerFee = &exchange.PercentageFee{MakerBps: 0, TakerBps: s.Config.TakerFeeBps, InQuote: true}
+			makerConfig.InventoryRebalance = s.Config.CDFInventoryRebalance
+			makerConfig.InventoryRebalanceDecisionVenue = venue.ID
+			makerConfig.InventoryRebalanceDecisionMaker = role
+			makerConfig.InventoryRebalanceDecisionTerminalNano = s.terminalNano
+			makerConfig.InventoryRebalanceTakerFeeBps = s.Config.TakerFeeBps
+			if s.Config.RecordMakerInventoryRebalanceDecisions {
+				makerConfig.InventoryRebalanceDecisionObserver = rebalanceDecisionObserver
+			}
+		}
+		clientID, gateway := venue.connectParticipant(mount, role, mmBalances, 100_000_000*mvQuotePrecision, makerFee)
 		if s.Config.RecordMakerQuoteSizeDecisions {
 			makerConfig.QuoteSizeDecisionObserver = quoteSizeObserver
 			makerConfig.QuoteSizeDecisionMaker = role
 			makerConfig.QuoteSizeDecisionClient = clientID
 			makerConfig.QuoteSizeDecisionTerminalNano = s.terminalNano
+		}
+		if makerConfig.InventoryRebalance != nil {
+			makerConfig.InventoryRebalanceDecisionClient = clientID
 		}
 		maker := NewStoikovMarketMaker(nextActor(), gateway, makerConfig)
 		maker.SetTickerFactory(timers)
