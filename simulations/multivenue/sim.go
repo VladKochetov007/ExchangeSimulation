@@ -1518,12 +1518,13 @@ func pickFloat(values []float64, i int, fallback float64) float64 {
 // values are the source of truth for wallet, debt, and PnL; Greeks remain model
 // diagnostics and are deliberately kept separate from cash accounting.
 type VenueRiskSnapshot struct {
-	VenueID        string                       `json:"venue_id"`
-	ClientID       uint64                       `json:"client_id"`
-	Phase          string                       `json:"phase"`
-	Account        etypes.MarkedAccountSnapshot `json:"account"`
-	GreekProfile   derivsim.GreekProfile        `json:"greek_profile"`
-	GreekPositions []derivsim.GreekPosition     `json:"greek_positions"`
+	VenueID           string                       `json:"venue_id"`
+	ClientID          uint64                       `json:"client_id"`
+	Phase             string                       `json:"phase"`
+	AccountMarkSource string                       `json:"account_mark_source"`
+	Account           etypes.MarkedAccountSnapshot `json:"account"`
+	GreekProfile      derivsim.GreekProfile        `json:"greek_profile"`
+	GreekPositions    []derivsim.GreekPosition     `json:"greek_positions"`
 }
 
 // Sim owns the three venue ecology and every log file created for it.
@@ -3213,7 +3214,7 @@ func (v *Venue) recordTwoSidedMarks(symbols []string, timestamp int64) {
 		v.lastTwoSided = make(map[string]twoSidedMark, len(symbols))
 	}
 	for _, symbol := range symbols {
-		if mid, ok := v.Exchange.TwoSidedMidPrice(symbol); ok && mid > 0 {
+		if mid, ok := v.Exchange.TwoSidedMidPrice(symbol); ok {
 			v.lastTwoSided[symbol] = twoSidedMark{price: mid, timestamp: timestamp}
 		}
 	}
@@ -3223,17 +3224,31 @@ func (v *Venue) recordTwoSidedMarks(symbols []string, timestamp int64) {
 // one within maxStaleness. A book that is durably one-sided still fails: the
 // fallback covers a momentary gap in a live market, not a broken one.
 func (v *Venue) valuationMark(symbol string, now, maxStaleness int64) (int64, bool, bool) {
-	if mid, ok := v.Exchange.TwoSidedMidPrice(symbol); ok && mid > 0 {
+	if mid, ok := v.Exchange.TwoSidedMidPrice(symbol); ok {
 		return mid, true, false
 	}
 	cached, ok := v.lastTwoSided[symbol]
-	if !ok || cached.price <= 0 {
+	if !ok {
 		return 0, false, false
 	}
 	if maxStaleness > 0 && now-cached.timestamp > maxStaleness {
 		return 0, false, false
 	}
 	return cached.price, true, true
+}
+
+// requirePositiveUSDValuationMark is the explicit economic boundary for the
+// current multivenue population: assets are valued in a positive USD quote.
+// A signed numeric mark is present data, so it is reported as a domain error
+// rather than being collapsed into an unavailable mark.
+func requirePositiveUSDValuationMark(phase, symbol, venueID string, mark int64, available bool) error {
+	if !available {
+		return fmt.Errorf("multivenue: %s participant valuation requires two-sided %s mark on venue %s: %w", phase, symbol, venueID, etypes.ErrNoPrice)
+	}
+	if mark <= 0 {
+		return fmt.Errorf("multivenue: %s participant valuation has present out-of-domain %s mark on venue %s: %w", phase, symbol, venueID, etypes.ErrPriceDomain)
+	}
+	return nil
 }
 
 func populationValuationSpec(venue *Venue, phase string, crossAssetSpotGraph bool, now, maxStaleness int64) (etypes.AccountValuationSpec, string, error) {
@@ -3249,8 +3264,8 @@ func populationValuationSpec(venue *Venue, phase string, crossAssetSpotGraph boo
 		var ok bool
 		var stale bool
 		spotMark, ok, stale = venue.valuationMark("ABC/USD", now, maxStaleness)
-		if !ok || spotMark <= 0 {
-			return etypes.AccountValuationSpec{}, "", fmt.Errorf("multivenue: %s participant valuation requires two-sided ABC/USD mark on venue %s", phase, venue.ID)
+		if err := requirePositiveUSDValuationMark(phase, "ABC/USD", venue.ID, spotMark, ok); err != nil {
+			return etypes.AccountValuationSpec{}, "", err
 		}
 		markSource = "two_sided_ABC_USD_mid"
 		if stale {
@@ -3264,8 +3279,8 @@ func populationValuationSpec(venue *Venue, phase string, crossAssetSpotGraph boo
 			var ok bool
 			var cdfStale bool
 			cdfMark, ok, cdfStale = venue.valuationMark("CDF/USD", now, maxStaleness)
-			if !ok || cdfMark <= 0 {
-				return etypes.AccountValuationSpec{}, "", fmt.Errorf("multivenue: %s participant valuation requires two-sided CDF/USD mark on venue %s", phase, venue.ID)
+			if err := requirePositiveUSDValuationMark(phase, "CDF/USD", venue.ID, cdfMark, ok); err != nil {
+				return etypes.AccountValuationSpec{}, "", err
 			}
 			markSource = "two_sided_ABC_USD_and_CDF_USD_mid"
 			if cdfStale || markSource == "recent_two_sided_ABC_USD_mid" {
@@ -3286,22 +3301,44 @@ func captureVenueRisk(venue *Venue, phase string) (*VenueRiskSnapshot, error) {
 	// Dealer risk is captured on the automation tick and at shutdown, so it can
 	// land in the instant between a maker's cancel and its replacement. Reuse
 	// the same bounded-staleness mark the population accounts use rather than
-	// silently valuing ABC at zero.
+	// silently valuing ABC at zero. The one exception is the initial snapshot:
+	// it precedes all book activity and is explicitly valued from the configured
+	// bootstrap manifest, not from an absent book or implicit numeric sentinel.
 	now := venue.Exchange.Clock.NowUnixNano()
-	spotMid, ok, _ := venue.valuationMark("ABC/USD", now, venueRiskMarkStaleness)
-	if !ok || spotMid <= 0 {
-		spotMid = 0
+	spotMid := int64(mvBootstrapPrice)
+	accountMarkSource := "bootstrap_manifest_initial"
+	if phase != "initial" {
+		var ok bool
+		var stale bool
+		spotMid, ok, stale = venue.valuationMark("ABC/USD", now, venueRiskMarkStaleness)
+		if !ok {
+			// Before this venue has observed even one two-sided ABC/USD mark,
+			// the initial bootstrap manifest remains the declared valuation
+			// source. Once a real mark has existed, a missing/stale mark is a
+			// visible failure rather than a return to the bootstrap value.
+			if _, observedLiveMark := venue.lastTwoSided["ABC/USD"]; !observedLiveMark {
+				spotMid, ok = mvBootstrapPrice, true
+				accountMarkSource = "bootstrap_manifest_pre_first_two_sided_mark"
+			}
+		} else if stale {
+			accountMarkSource = "recent_two_sided_ABC_USD_mid"
+		} else {
+			accountMarkSource = "two_sided_ABC_USD_mid"
+		}
+		if err := requirePositiveUSDValuationMark(phase, "ABC/USD", venue.ID, spotMid, ok); err != nil {
+			return nil, fmt.Errorf("multivenue: venue %s dealer risk capture: %w", venue.ID, err)
+		}
 	}
 	marks := map[string]etypes.AssetValuationMark{
 		"USD": {Price: mvQuotePrecision, Precision: mvQuotePrecision},
 	}
-	if spotMid > 0 {
-		marks["ABC"] = etypes.AssetValuationMark{Price: spotMid, Precision: mvBasePrecision}
-	}
-	if venue.lastTwoSided != nil {
-		if cdf, cdfOK, _ := venue.valuationMark("CDF/USD", now, venueRiskMarkStaleness); cdfOK && cdf > 0 {
-			marks["CDF"] = etypes.AssetValuationMark{Price: cdf, Precision: mvBasePrecision}
+	marks["ABC"] = etypes.AssetValuationMark{Price: spotMid, Precision: mvBasePrecision}
+	if _, tracksCDF := venue.lastTwoSided["CDF/USD"]; tracksCDF {
+		cdf, cdfOK, _ := venue.valuationMark("CDF/USD", now, venueRiskMarkStaleness)
+		if err := requirePositiveUSDValuationMark(phase, "CDF/USD", venue.ID, cdf, cdfOK); err != nil {
+			return nil, fmt.Errorf("multivenue: venue %s dealer risk capture: %w", venue.ID, err)
 		}
+		marks["CDF"] = etypes.AssetValuationMark{Price: cdf, Precision: mvBasePrecision}
 	}
 	account, err := venue.Exchange.MarkedAccount(venue.OptionDealerClientID, etypes.AccountValuationSpec{
 		ReportAsset: "USD", ReportPrecision: mvQuotePrecision, AssetMarks: marks,
@@ -3314,12 +3351,13 @@ func captureVenueRisk(venue *Venue, phase string) (*VenueRiskSnapshot, error) {
 		return nil, err
 	}
 	return &VenueRiskSnapshot{
-		VenueID:        venue.ID,
-		ClientID:       venue.OptionDealerClientID,
-		Phase:          phase,
-		Account:        account,
-		GreekProfile:   profile,
-		GreekPositions: positions,
+		VenueID:           venue.ID,
+		ClientID:          venue.OptionDealerClientID,
+		Phase:             phase,
+		AccountMarkSource: accountMarkSource,
+		Account:           account,
+		GreekProfile:      profile,
+		GreekPositions:    positions,
 	}, nil
 }
 

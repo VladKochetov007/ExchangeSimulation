@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -281,8 +282,58 @@ func TestSpotPassiveMakerPostOnlySelectsAllCDFRefreshFamilies(t *testing.T) {
 
 func TestPopulationValuationRejectsMissingTerminalTwoSidedMark(t *testing.T) {
 	venue := &Venue{ID: "unpriced", Exchange: exchange.NewExchange(1, nil)}
-	if _, _, err := populationValuationSpec(venue, "terminal_post_mark", false, 0, 0); err == nil {
-		t.Fatal("terminal population valuation accepted a venue without a two-sided ABC/USD mark")
+	if _, _, err := populationValuationSpec(venue, "terminal_post_mark", false, 0, 0); !errors.Is(err, etypes.ErrNoPrice) {
+		t.Fatalf("terminal population valuation error = %v, want ErrNoPrice", err)
+	}
+}
+
+func TestValuationMarkPreservesSignedPresenceAndSeparatesDomain(t *testing.T) {
+	venue := &Venue{
+		ID:       "signed",
+		Exchange: exchange.NewExchange(1, nil),
+		lastTwoSided: map[string]twoSidedMark{
+			"ABC/USD": {price: 0, timestamp: 100},
+			"CDF/USD": {price: -20, timestamp: 100},
+		},
+	}
+	defer venue.Exchange.Shutdown()
+	for _, tc := range []struct {
+		symbol string
+		want   int64
+	}{
+		{symbol: "ABC/USD", want: 0},
+		{symbol: "CDF/USD", want: -20},
+	} {
+		t.Run(tc.symbol, func(t *testing.T) {
+			got, available, stale := venue.valuationMark(tc.symbol, 100, 0)
+			if !available || !stale || got != tc.want {
+				t.Fatalf("valuation mark = (%d, available=%t, stale=%t), want (%d, true, true)", got, available, stale, tc.want)
+			}
+		})
+	}
+	if err := requirePositiveUSDValuationMark("probe", "ABC/USD", venue.ID, 0, true); !errors.Is(err, etypes.ErrPriceDomain) {
+		t.Fatalf("present zero valuation mark error = %v, want ErrPriceDomain", err)
+	}
+	if err := requirePositiveUSDValuationMark("probe", "ABC/USD", venue.ID, 0, false); !errors.Is(err, etypes.ErrNoPrice) {
+		t.Fatalf("missing valuation mark error = %v, want ErrNoPrice", err)
+	}
+}
+
+func TestRiskSnapshotMarksBootstrapFallbackExplicitly(t *testing.T) {
+	venue := &Venue{
+		ID:                   "bootstrap",
+		Exchange:             exchange.NewExchange(1, nil),
+		OptionDealer:         &derivsim.OptionMarketMaker{},
+		OptionDealerClientID: 1,
+	}
+	defer venue.Exchange.Shutdown()
+	venue.Exchange.ConnectNewClient(1, nil, &exchange.FixedFee{})
+	risk, err := captureVenueRisk(venue, "post_derivative_mark")
+	if err != nil {
+		t.Fatalf("capture pre-first-mark risk: %v", err)
+	}
+	if risk.AccountMarkSource != "bootstrap_manifest_pre_first_two_sided_mark" {
+		t.Fatalf("bootstrap risk mark source = %q", risk.AccountMarkSource)
 	}
 }
 
