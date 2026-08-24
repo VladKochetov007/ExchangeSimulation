@@ -95,7 +95,7 @@ func (p *analyzerProfiles) Stop() {
 }
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, liabilityhedger, fundingcarry, perpexposurehedger, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, liabilityhedger, fundingcarry, perpexposurehedger, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
 	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
 	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
@@ -115,6 +115,8 @@ func main() {
 	crossVenueSymbol := flag.String("cross-venue-symbol", "ABC-USD", "same asset book to compare across venues")
 	crossVenueMin := flag.Int("cross-venue-min-venues", 3, "fewest fresh two-sided venues required for a midpoint-dispersion observation")
 	crossVenuePositiveTimes := flag.Bool("cross-venue-positive-times", false, "include positive sampled cross-venue dispersion times for activation-window joins")
+	perpSignalSymbol := flag.String("perp-signal-symbol", "ABC-PERP", "perpetual symbol for persisted public mark/funding signal audit")
+	perpSignalVenues := flag.String("perp-signal-venues", "central,north,south", "comma-separated venues required by persisted public mark/funding signal audit")
 	conservationBook := flag.String("conservation-book", "", "restrict the conservation audit to one book, e.g. ABC/USD")
 	basePrecision := flag.Int64("base-precision", 100_000_000, "base-asset precision, for converting position sizes into contracts")
 	quotePrecision := flag.Int64("quote-precision", 100_000, "quote-asset precision, for converting logged prices into currency units")
@@ -602,6 +604,18 @@ func main() {
 					fmt.Printf("      tte %8.0f-%8.0fs  n %7d  |basis| %8.2f bps\n",
 						bucket.LowerSeconds, bucket.UpperSeconds, bucket.Observations, bucket.MeanAbsBps)
 				}
+			})
+		case "perpsignals":
+			result, err := run.MeasurePerpSignals(analysis.PerpSignalOptions{
+				Symbol: *perpSignalSymbol, RequiredVenues: splitNonEmpty(*perpSignalVenues),
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s %s: mark pairs %d, funding rates %d, ready %t, valid %t\n",
+					dir, result.Symbol, result.PooledDistinctMarkPairs, result.PooledDistinctFundingRates, result.Ready, result.Valid)
 			})
 		case "optionsurface":
 			result, err := run.MeasureOptionSurface(analysis.SurfaceOptions{QuotePrecision: *quotePrecision})
@@ -1175,6 +1189,17 @@ func parseSizes(spec string) ([]int64, error) {
 		return nil, fmt.Errorf("no walk sizes in %q", spec)
 	}
 	return sizes, nil
+}
+
+func splitNonEmpty(spec string) []string {
+	var values []string
+	for _, field := range strings.Split(spec, ",") {
+		field = strings.TrimSpace(field)
+		if field != "" {
+			values = append(values, field)
+		}
+	}
+	return values
 }
 
 func emit(dir string, value any, asJSON bool, table func()) {
