@@ -7,6 +7,20 @@ set -euo pipefail
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cell=${P3E_CELL:-"$root_dir/research/artifacts/v2-5-p3e/p0-B-107"}
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
+experiment_mode=${P3E_EXPERIMENT_MODE:-p0}
+lifecycle_deadline=0
+
+case "$experiment_mode" in
+p0)
+	;;
+lifecycle)
+	lifecycle_deadline=1736038805000000000
+	;;
+*)
+	echo "unknown V2-5 P3e experiment mode: $experiment_mode" >&2
+	exit 1
+	;;
+esac
 
 if [[ ! -x "$analyzer" ]]; then
 	echo "missing executable analyzer: $analyzer" >&2
@@ -30,9 +44,55 @@ write_metric() {
 	mv "$temporary" "$output"
 }
 
-for metric in termcarry observationreceipts derivatives conservation positions orderlifecycle lifecycle streamhash evidenceartifacthash; do
-	write_metric "$cell/${metric}.json" "$analyzer" -metric "$metric" -json "$cell"
+metrics=(termcarry observationreceipts derivatives conservation positions orderlifecycle lifecycle streamhash evidenceartifacthash)
+if [[ "$experiment_mode" == lifecycle ]]; then
+	metrics=(termcarrylifecycle "${metrics[@]}")
+fi
+for metric in "${metrics[@]}"; do
+	if [[ "$metric" == termcarrylifecycle ]]; then
+		write_metric "$cell/${metric}.json" "$analyzer" -metric "$metric" -term-carry-lifecycle-deadline "$lifecycle_deadline" -json "$cell"
+	else
+		write_metric "$cell/${metric}.json" "$analyzer" -metric "$metric" -json "$cell"
+	fi
 done
+
+if [[ "$experiment_mode" == lifecycle ]]; then
+	jq -e --argjson deadline "$lifecycle_deadline" '
+	  .result.schema_version == 1 and
+	  (.result.arm == "A" or .result.arm == "B") and
+	  .result.analysis_deadline_at_nano == $deadline and
+	  .result.observation_end_at_nano >= $deadline and
+	  .result.integrity_valid == true and
+	  (.result.integrity_failures | length) == 0 and
+	  (.result.terms | all(
+	    .position_at_term_end.status == "observed" and
+	    .position_at_deadline.status == "observed" and
+	    .terminal_position.status == "observed" and
+	    .conservation.fill_chain_valid == true and
+	    .conservation.terminal_spot_agrees == true and
+	    .conservation.terminal_perp_agrees == true
+	  )) and
+	  (if .result.arm == "A" then
+	    (.result.terms | all(
+	      .passive_eligibility.status == "not_applicable" and
+	      .passive_admission.status == "not_applicable" and
+	      .passive_filled_quantity.status == "not_applicable" and
+	      .cancellation.status == "not_applicable" and
+	      (.passive_orders | length) == 0
+	    ))
+	  else
+	    (.result.terms | all(
+	      .policy_version == "v2_5_p3e_passive_exit_v1" and
+	      (if .aggressive_eligibility.status == "observed" then
+	        .aggressive_eligibility.eligible == false and
+	        .passive_eligibility.status == "observed"
+	      else
+	        .passive_eligibility.status == "not_exercised"
+	      end)
+	    ))
+	  end)
+	' "$cell/termcarrylifecycle.json" >/dev/null
+fi
 
 # A P3e P0 term can intentionally still be economically open at the horizon,
 # so this checks only independently reconstructible mechanical evidence. The
@@ -69,6 +129,7 @@ jq -e '.result.disagreement == 0 and .result.unrepresentable_open_values == 0' "
 jq -e '
   .result.unknown_fills == 0 and .result.unknown_cancellations == 0 and
   .result.duplicate_acceptances == 0 and .result.duplicate_terminals == 0 and
+  .result.missing_immediate_terminal == 0 and
   .result.fills_after_terminal == 0 and .result.fill_quantity_mismatches == 0 and
   .result.cancel_quantity_mismatches == 0 and .result.client_mismatches == 0
 ' "$cell/orderlifecycle.json" >/dev/null
@@ -87,17 +148,21 @@ fi
 jq -n \
 	--arg analysis_revision "$(git -C "$root_dir" rev-parse HEAD)" \
 	--arg analyzer_sha256 "$(sha256sum "$analyzer" | awk '{print $1}')" \
+	--arg experiment_mode "$experiment_mode" \
+	--argjson lifecycle_deadline_at_nano "$lifecycle_deadline" \
 	--arg runtime_evidence_digest "$runtime_digest" \
 	--argjson runtime_evidence_events "$runtime_events" \
 	'{
 	  analysis_revision: $analysis_revision,
 	  analyzer_sha256: $analyzer_sha256,
+	  experiment_mode: $experiment_mode,
+	  lifecycle_deadline_at_nano: (if $lifecycle_deadline_at_nano == 0 then null else $lifecycle_deadline_at_nano end),
 	  completion_sentinels: ["greeks.json", "latency.json"],
-	  required_artifacts: [
+	  required_artifacts: ((if $experiment_mode == "lifecycle" then ["termcarrylifecycle.json"] else [] end) + [
 	    "termcarry.json", "observationreceipts.json", "derivatives.json",
 	    "conservation.json", "positions.json", "orderlifecycle.json",
 	    "lifecycle.json", "streamhash.json", "evidenceartifacthash.json"
-	  ],
+	  ]),
 	  runtime_evidence_artifact: {
 	    events: $runtime_evidence_events,
 	    digest: $runtime_evidence_digest
