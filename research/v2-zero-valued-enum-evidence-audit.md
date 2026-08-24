@@ -46,6 +46,27 @@ the planned signed-price contract, it is recorded as a separate price-evidence
 API follow-up; this audit does not conflate it with an enum omission or change
 lifecycle semantics.
 
+## Explicit review of other evidence/provenance classifications
+
+The requested broader naming categories were also traced. They do not add a
+second zero-valued numeric-enum omission in the persisted scientific surface:
+
+| category | persisted boundary | zero/absence classification |
+| --- | --- | --- |
+| side, order type, time-in-force, visibility, order status, position side | `Order`, `FillNotification`, order/fill evidence and V2 decision records | numeric zero is semantic and the field is required; covered by the generic-envelope fixture |
+| market-data action/type | compact V2 receipt/schedule/decision records | `MDSnapshot` is numeric zero but occupies a fixed byte; covered by the receipt byte fixture |
+| role | multivenue provenance and decision evidence | role is a non-empty named string at the emitting policy boundary, not a numeric zero enum; there is no `omitempty` role field in persisted decision evidence |
+| client/order rejection reason | `Response`, actor rejection events, router leg reports | the reason field is required whenever a rejection record exists; an empty string is not a valid recorded rejection reason |
+| action/defer and policy decision | maker, rebalance, liability, and noise-flow evidence | action/policy fields are required strings. Conditional fields such as `side_evidence` are omitted only when no side was selected; a `SUBMIT_IOC` row must carry `BUY` or `SELL` and is independently rejected otherwise |
+| venue bucket / instrument lifecycle kind | venue-balance and instrument-announcement evidence | these are required non-empty strings (`bucket`, `action`, `instrument_type`), never numeric zero enums |
+| expiry, settlement, funding, liquidation state | pending-settlement, funding, and liquidation evidence | lifecycle state/policy/reason fields are required strings; unavailable settlement is an explicit pending state, not zero price. `SettlementPrice` itself is a distinct signed-price field, not covered by this enum audit |
+
+This table deliberately does **not** reclassify every zero-valued configuration
+scalar as an evidence enum. For example, `RemoteMakerFeedConfig.TargetMaker`
+uses omitted/zero as a documented compatibility default for ordinal one; it is
+not a runtime event enum and does not cause a replayed scientific observation
+to vanish. Its provenance ambiguity is therefore outside this narrow audit.
+
 ## Related P2 analyzer finding
 
 During the preflight replay, the independent P2 analyzer initially rejected
