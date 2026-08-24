@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "experiment": "V2-5-P3E-LIFECYCLE",
+  "stage": "preflight",
+  "status": "PASS_NONSCORING",
+  "source_revision": "4ef83610266e68981f5ea0e4df334e714c2e62f7",
+  "binaries": {
+    "multivenue_sha256": "70303065a0714224bc28322a1972e5c4c6c3f43f783579a06eb4172adb697805",
+    "mvanalyze_sha256": "041112576e84e530e9f852b594d9749ef65e7cc2a3071b97e1447d1b800c1a35",
+    "prunegate_sha256": "3ca77f0f34826ab4aa56d064747a02a6a28b20c9744c491782034e355cdbac13"
+  },
+  "duration": "5m",
+  "seed": 107,
+  "gomaxprocs": 4,
+  "log_mode": "full",
+  "registered_lifecycle_deadline_at_nano": 1736038805000000000,
+  "structural_config_delta_valid": true,
+  "ordered_execution": {
+    "observations": 56189,
+    "hash": "f8bf4844729c762b76097ac44cf664c5148c3e6a853dcb157ca9c86b0d93d1c2",
+    "arms_equal": true
+  },
+  "cells": {
+    "A-107": {
+      "config_sha256": "bb11a68bec082305d6c5245d1ef47b4f1103f36ea8d001e2d7b6ab0b2dff715f",
+      "manifest_sha256": "d7aa036daaa594ad56feaa1f60c9171210ce54d943487dbf738bbd3dee6892ae",
+      "passive_exit_serialized": false,
+      "evidence_records": 56648,
+      "evidence_artifact_digest": "6720b21c194cecd74f293043d5d922024618c70d61ba1cb951ef8c19a2d66ee2"
+    },
+    "B-107": {
+      "config_sha256": "cfcf9ede724cd9a6b3f2c5f36c1c0e6c0ddc6272d73287295808ae69ad6f21e1",
+      "manifest_sha256": "3db8cd33dc96166ae47f1bc473d19613cce99fcc20f7dfd83eeda0433916dd78",
+      "passive_exit_serialized": true,
+      "passive_exit_slice_qty": 100000,
+      "passive_exit_deadline_at_nano": 1736038805000000000,
+      "evidence_records": 56648,
+      "evidence_artifact_digest": "6906866f4af89e05e9b23a68a1733f6b5ea6cc11c93942d90c5af678a1a65e71"
+    }
+  },
+  "lifecycle_extractor": {
+    "expected_exit_code": 1,
+    "eligible_terms": 0,
+    "sole_failure": "analysis_deadline_not_observed",
+    "scorable": false
+  },
+  "raw_evidence_policy": "retained_uncommitted_no_prune_authority"
+}
