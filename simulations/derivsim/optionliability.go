@@ -218,7 +218,7 @@ func (u *OptionLiabilityTaker) observeUnderlying(e actor.BookSnapshotEvent) {
 		if bid <= ask {
 			// The option model is positive-domain, but the midpoint arithmetic is
 			// still the engine's overflow-safe primitive for signed prices.
-			obs.mid = bid + (ask-bid)/2
+			obs.mid = etypes.Midpoint(bid, ask)
 			obs.has = true
 		}
 	}
@@ -309,6 +309,7 @@ func (u *OptionLiabilityTaker) decision(now time.Time) OptionLiabilityDecision {
 		d.Reason = "LIABILITY_TARGET_FILLED"
 		return d
 	}
+	d.RemainingQty = remaining
 	if u.pending {
 		d.Reason = "REQUEST_PENDING"
 		return d
@@ -389,10 +390,14 @@ func (u *OptionLiabilityTaker) terminalRoundTripCensored(now int64) bool {
 }
 
 func (u *OptionLiabilityTaker) baseDecision(now time.Time, reason string) OptionLiabilityDecision {
+	remaining, _ := etypes.TrySub(u.cfg.TargetQty, u.position)
+	if remaining < 0 {
+		remaining = 0
+	}
 	return OptionLiabilityDecision{
 		VenueID: u.cfg.VenueID, User: u.cfg.User, ClientID: u.cfg.ClientID,
 		Underlying: u.cfg.Underlying, DecisionTime: now.UnixNano(), Action: "DEFER", Reason: reason,
-		TargetQty: u.cfg.TargetQty, TargetStrikeBps: u.cfg.TargetStrikeBps,
+		TargetQty: u.cfg.TargetQty, RemainingQty: remaining, TargetStrikeBps: u.cfg.TargetStrikeBps,
 		PositionBefore: u.position, HasUnderlying: u.spot.has, UnderlyingMid: u.spot.mid,
 		UnderlyingSourceTime: u.spot.sourceTime, UnderlyingReceivedAt: u.spot.receivedAt,
 		UnderlyingSequence: u.spot.sequence,
