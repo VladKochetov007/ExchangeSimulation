@@ -10,25 +10,30 @@ import (
 // order, and trade identity; the actor's own counters are never trusted as
 // execution evidence.
 type OptionLiabilityAudit struct {
-	Role                 string `json:"role"`
-	Participants         int    `json:"participants"`
-	Decisions            int    `json:"decisions"`
-	SubmitDecisions      int    `json:"submit_decisions"`
-	DeferredDecisions    int    `json:"deferred_decisions"`
-	Accepted             int    `json:"accepted"`
-	Rejected             int    `json:"rejected"`
-	CanonicalFills       int    `json:"canonical_fills"`
-	ActorFills           int    `json:"actor_fills"`
-	FilledQty            int64  `json:"filled_qty"`
-	FutureObservationUse int    `json:"future_observation_use"`
-	DecodeErrors         int    `json:"decode_errors"`
-	MissingOutcomes      int    `json:"missing_outcomes"`
-	DuplicateOutcomes    int    `json:"duplicate_outcomes"`
-	OrphanOutcomes       int    `json:"orphan_outcomes"`
-	OutcomeMismatches    int    `json:"outcome_mismatches"`
-	InvalidDecisions     int    `json:"invalid_decisions"`
-	TargetReached        bool   `json:"target_reached"`
-	Valid                bool   `json:"valid"`
+	Role                  string           `json:"role"`
+	Participants          int              `json:"participants"`
+	ParticipantsByVenue   map[string]int   `json:"participants_by_venue"`
+	Decisions             int              `json:"decisions"`
+	DecisionsByVenue      map[string]int   `json:"decisions_by_venue"`
+	SubmitDecisions       int              `json:"submit_decisions"`
+	DeferredDecisions     int              `json:"deferred_decisions"`
+	Accepted              int              `json:"accepted"`
+	Rejected              int              `json:"rejected"`
+	CanonicalFills        int              `json:"canonical_fills"`
+	CanonicalFillsByVenue map[string]int   `json:"canonical_fills_by_venue"`
+	ActorFills            int              `json:"actor_fills"`
+	ActorFillsByVenue     map[string]int   `json:"actor_fills_by_venue"`
+	FilledQty             int64            `json:"filled_qty"`
+	FilledQtyByVenue      map[string]int64 `json:"filled_qty_by_venue"`
+	FutureObservationUse  int              `json:"future_observation_use"`
+	DecodeErrors          int              `json:"decode_errors"`
+	MissingOutcomes       int              `json:"missing_outcomes"`
+	DuplicateOutcomes     int              `json:"duplicate_outcomes"`
+	OrphanOutcomes        int              `json:"orphan_outcomes"`
+	OutcomeMismatches     int              `json:"outcome_mismatches"`
+	InvalidDecisions      int              `json:"invalid_decisions"`
+	TargetReached         bool             `json:"target_reached"`
+	Valid                 bool             `json:"valid"`
 }
 
 type optionLiabilityDecisionEvidence struct {
@@ -98,7 +103,14 @@ type optionP6RequestKey struct {
 // callers classify inactive O0/O1 stages separately as NOT APPLICABLE.
 func (r *Run) MeasureOptionLiability() (*OptionLiabilityAudit, error) {
 	const role = "option_liability_user"
-	result := &OptionLiabilityAudit{Role: role}
+	result := &OptionLiabilityAudit{
+		Role:                  role,
+		ParticipantsByVenue:   make(map[string]int),
+		DecisionsByVenue:      make(map[string]int),
+		CanonicalFillsByVenue: make(map[string]int),
+		ActorFillsByVenue:     make(map[string]int),
+		FilledQtyByVenue:      make(map[string]int64),
+	}
 	decisionByRequest := make(map[optionP6RequestKey]optionLiabilityDecisionEvidence)
 	acceptedByRequest := make(map[optionP6RequestKey]optionOrderAcceptedEvidence)
 	acceptedCounts := make(map[optionP6RequestKey]int)
@@ -117,7 +129,11 @@ func (r *Run) MeasureOptionLiability() (*OptionLiabilityAudit, error) {
 			return
 		}
 		mu.Lock()
-		participants[Participant{event.VenueID, event.ClientID}] = struct{}{}
+		participant := Participant{event.VenueID, event.ClientID}
+		if _, seen := participants[participant]; !seen {
+			participants[participant] = struct{}{}
+			result.ParticipantsByVenue[event.VenueID]++
+		}
 		mu.Unlock()
 		switch event.Name {
 		case "option_liability_user_decision":
@@ -130,6 +146,7 @@ func (r *Run) MeasureOptionLiability() (*OptionLiabilityAudit, error) {
 			}
 			mu.Lock()
 			result.Decisions++
+			result.DecisionsByVenue[event.VenueID]++
 			if row.Action == "SUBMIT_PUT_IOC" {
 				result.SubmitDecisions++
 				if targetQty == 0 {
@@ -160,6 +177,8 @@ func (r *Run) MeasureOptionLiability() (*OptionLiabilityAudit, error) {
 			mu.Lock()
 			result.ActorFills++
 			result.FilledQty += row.Qty
+			result.ActorFillsByVenue[event.VenueID]++
+			result.FilledQtyByVenue[event.VenueID] += row.Qty
 			actorFills[optionP6FillKey{VenueID: event.VenueID, ClientID: event.ClientID, OrderID: row.OrderID, TradeID: row.TradeID, Qty: row.Qty, Price: row.Price, Side: row.Side}]++
 			mu.Unlock()
 		case "OrderAccepted":
@@ -196,6 +215,7 @@ func (r *Run) MeasureOptionLiability() (*OptionLiabilityAudit, error) {
 			}
 			mu.Lock()
 			result.CanonicalFills++
+			result.CanonicalFillsByVenue[event.VenueID]++
 			canonicalFills[optionP6FillKey{VenueID: event.VenueID, ClientID: event.ClientID, OrderID: row.OrderID, TradeID: row.TradeID, Qty: row.Qty, Price: row.Price, Side: row.Side}]++
 			mu.Unlock()
 		}

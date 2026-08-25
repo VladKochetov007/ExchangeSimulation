@@ -54,6 +54,9 @@ func TestOptionLiabilityAuditScopesRequestIdentityByVenue(t *testing.T) {
 	if audit.MissingOutcomes != 0 || audit.DuplicateOutcomes != 0 || audit.OrphanOutcomes != 0 || !audit.Valid {
 		t.Fatalf("independent venue outcomes were not joined exactly: %+v", audit)
 	}
+	if audit.ParticipantsByVenue["north"] != 1 || audit.ParticipantsByVenue["south"] != 1 || audit.DecisionsByVenue["north"] != 1 || audit.DecisionsByVenue["south"] != 1 {
+		t.Fatalf("per-venue activation counts = participants=%v decisions=%v", audit.ParticipantsByVenue, audit.DecisionsByVenue)
+	}
 }
 
 func TestOptionLiabilityAuditCatchesOutcomeAndFrontierMutations(t *testing.T) {
