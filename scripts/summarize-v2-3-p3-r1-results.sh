@@ -14,7 +14,7 @@ require_file() {
 	fi
 }
 
-row_file=$(mktemp "${TMPDIR:-/tmp}/v2-3-p3-r1-row-XXXXXX.json")
+row_file=$(mktemp "$artifact_dir/.p3-r1-row-XXXXXX.json")
 summary_file=$(mktemp "${output}.tmp-XXXXXX")
 trap 'rm -f "$row_file" "$summary_file"' EXIT
 

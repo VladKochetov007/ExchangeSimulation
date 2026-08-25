@@ -120,12 +120,14 @@ regressions, exact digest/metadata checks, and machine-verdict consistency
 checks also pass. `golangci-lint` and `shellcheck` are not installed on this
 host and are explicitly not claimed.
 
-`go test ./...` completed every simulation package successfully, including
-`simulations/multivenue`, but the aggregate command exits nonzero on the
-pre-existing repository-policy test `TestTrackedFilesAvoidSystemTempPaths`:
-tracked `scripts/summarize-v2-3-p3-r1-results.sh` contains
-`${TMPDIR:-/tmp}`. The same line exists at the parent of the P3e base, so it is
-not changed or hidden in this scoped result.
+At the P3e result revision, `go test ./...` completed every simulation package,
+including `simulations/multivenue`, but the aggregate command exited nonzero on
+the pre-existing repository-policy test `TestTrackedFilesAvoidSystemTempPaths`:
+tracked `scripts/summarize-v2-3-p3-r1-results.sh` used a configurable system
+temporary-directory fallback. That historical validation outcome is retained
+here. A later semantics-neutral housekeeping change moved only its scratch row
+file beside the already-declared result artifact; it did not alter this P3e
+world, analyzer output, or verdict.
 
 ## Verdict and continuation boundary
 
