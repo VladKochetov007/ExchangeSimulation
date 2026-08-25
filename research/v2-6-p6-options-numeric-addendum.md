@@ -51,7 +51,11 @@ with a 20 ms request / 40 ms market-data link (A for the link; C for the
 finite objective and phase). It submits no order when the local underlying,
 put ask, target quantity, budget, or terminal round trip is unavailable; each
 defer reason is persisted. It has finite local balances and no borrowing
-privilege beyond ordinary exchange admission (B).
+privilege beyond ordinary exchange admission (B). The endowment is 1,000 ABC
+units and 100,000,000 USD in the spot wallet, plus 10,000,000 USD in the perp
+wallet. The latter is an explicit inherited derivative-trader capital
+allocation because option premium reservation is charged from the perp wallet;
+it is not a price or execution guarantee.
 
 The O2 liability target and premium budget are deliberately not selected to
 guarantee a fill. A zero-fill outcome is a valid liquidity result and makes
@@ -64,4 +68,3 @@ final 30 minutes (C). A listed generation counts only if its listing, at least
 one market-price observation, and settlement/expiry lifecycle are independently
 reconstructed. No stage is promoted to holdout on a convenient subset of
 strikes or venues.
-

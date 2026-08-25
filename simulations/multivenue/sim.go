@@ -2803,7 +2803,14 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			"ABC": 1_000 * mvBasePrecision,
 			"USD": 100_000_000 * mvQuotePrecision,
 		}
-		clientID, gateway := venue.connectParticipant(mount, cfg.User, balances, 0, noiseFee)
+		// Option premiums and their admission reservation are settled from the
+		// perp wallet by the declared option contract. Give this finite user the
+		// same ordinary derivative-trader quote capital used by the inherited
+		// option-flow population; the spot wallet remains its separate local
+		// asset/liability endowment. Without this explicit perp balance every
+		// valid observed ask would be rejected before execution, which would be a
+		// wiring error rather than a liquidity observation.
+		clientID, gateway := venue.connectParticipant(mount, cfg.User, balances, 10_000_000*mvQuotePrecision, noiseFee)
 		cfg.ClientID = clientID
 		if s.Config.RecordOptionLiabilityUserDecisions {
 			cfg.DecisionObserver = optionLiabilityDecisionObserver
