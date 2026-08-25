@@ -459,7 +459,7 @@ func measureP4BasisWindow(run *Run, venue string, t0, direction int64) (TermCarr
 			symbol = envelope.Symbol
 		}
 		if symbol == "" {
-			symbol = symbolFromPath(event.File)
+			symbol = symbolFromSpotFile(event.File)
 		}
 		if symbol != "ABC/USD" && symbol != "ABC-PERP" {
 			return

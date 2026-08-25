@@ -95,7 +95,7 @@ func TestP4BasisWindowUsesRegisteredClockCoverageAndDirection(t *testing.T) {
 	spot := make([]string, 0, 333)
 	perp := make([]string, 0, 333)
 	for at := t0 - 32*second; at < t0+300*second; at += second {
-		spot = append(spot, p4SnapshotLine(at, "north", "ABC/USD", 99, 101))
+		spot = append(spot, p4SpotSnapshotLine(at, "north", 99, 101))
 		perpMid := int64(102)
 		if at >= t0 {
 			perpMid = 100
@@ -129,7 +129,7 @@ func TestP4BasisWindowFailsClosedForStaleOneSidedAndCensoredEvidence(t *testing.
 	const second = int64(1_000_000_000)
 	t0 := int64(100) * second
 	run := writeRunAndOpen(t, map[string][]string{
-		"north/spot/ABC-USD.jsonl": {p4SnapshotLine(t0-3*second, "north", "ABC/USD", 99, 101)},
+		"north/spot/ABC-USD.jsonl": {p4SpotSnapshotLine(t0-3*second, "north", 99, 101)},
 		"north/derivatives.jsonl":  {p4SnapshotLine(t0-3*second, "north", "ABC-PERP", 101, 103)},
 	})
 	window, err := measureP4BasisWindow(run, "north", t0, 1)
@@ -151,6 +151,13 @@ func TestP4BasisWindowFailsClosedForStaleOneSidedAndCensoredEvidence(t *testing.
 func p4SnapshotLine(ts int64, venue, symbol string, bid, ask int64) string {
 	return fmt.Sprintf(`{"sim_ts":%d,"client_id":0,"event":"BookSnapshot","data":{"venue_id":%q,"payload":{"symbol":%q,"bids":[{"price":%d,"visible_qty":10}],"asks":[{"price":%d,"visible_qty":10}]}}}`,
 		ts, venue, symbol, bid, ask)
+}
+
+// Spot book snapshots deliberately carry their symbol only in the file path;
+// this is the actual persisted wire shape, not a convenience test envelope.
+func p4SpotSnapshotLine(ts int64, venue string, bid, ask int64) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":0,"event":"BookSnapshot","data":{"venue_id":%q,"payload":{"bids":[{"price":%d,"visible_qty":10}],"asks":[{"price":%d,"visible_qty":10}]}}}`,
+		ts, venue, bid, ask)
 }
 
 func writeRunAndOpen(t *testing.T, logs map[string][]string) *Run {
