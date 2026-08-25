@@ -47,19 +47,20 @@ across active levels.  Only the participant's finite initial perpetual margin
 differs.  The disabled control has the same account, feed, timers, and evidence
 contract but cannot submit.
 
-| cell | participant | initial perp margin | effective gross leverage at the opening $50 reference | purpose |
+| cell | participant | initial perp margin | effective gross leverage at the opening $50,000 reference | purpose |
 |---|---|---:|---:|---|
-| C | installed, disabled | 12,000,000 raw USD | 4.17x if active | roster/evidence control |
-| L | enabled, fixed liability | 12,000,000 raw USD | 4.17x | lower-risk active level |
-| H | enabled, fixed liability | 6,000,000 raw USD | 8.33x | higher-risk active level |
+| C | installed, disabled | 120,000,000,000 raw USD | 4.17x if active | roster/evidence control |
+| L | enabled, fixed liability | 120,000,000,000 raw USD | 4.17x | lower-risk active level |
+| H | enabled, fixed liability | 60,000,000,000 raw USD | 8.33x | higher-risk active level |
 
 The fixed physical exposure is `-1,000,000,000` raw ABC (10 ABC), the target
 is therefore `+1,000,000,000` raw ABC, and each request is capped at
-`250,000,000` raw ABC.  At the inherited $50 opening reference the position's
-gross notional is approximately $500 and the exchange's 10% initial-margin
-rule requires approximately $50.  The 12m/6m raw-USD deposits are an
-ex-ante capital ladder (not chosen from a realized mark path); the high level
-leaves a smaller buffer for an adverse move while remaining admissible.  The
+`250,000,000` raw ABC.  At the inherited $50,000 opening reference the
+position's gross notional is approximately $500,000 and the exchange's 10%
+initial-margin rule requires approximately $50,000.  The 120bn/60bn raw-USD
+deposits are an ex-ante capital ladder (not chosen from a realized mark path);
+the high level leaves a smaller buffer for an adverse move while remaining
+admissible.  The
 existing five-basis-point taker fee is unchanged.
 
 All cells inherit the V2 environment's three venues, matching rules, maker and
@@ -143,4 +144,3 @@ development failure stops holdout promotion and leads to a redesign ledger
 entry rather than parameter tuning.  A later P7b may vary shock source (flow
 versus an independently motivated liability event), but it is a new
 preregistration and cannot be folded into this result.
-
