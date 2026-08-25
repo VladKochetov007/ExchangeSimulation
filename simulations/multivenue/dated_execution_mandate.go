@@ -79,6 +79,7 @@ type DatedExecutionMandateDecision struct {
 	OriginalTenorNanos          int64  `json:"original_tenor_nanos"`
 	ListingPublishedAt          int64  `json:"listing_published_at"`
 	ListingSequence             uint64 `json:"listing_sequence"`
+	ListingFingerprint          string `json:"listing_fingerprint"`
 	ParentQty                   int64  `json:"parent_qty"`
 	FilledQty                   int64  `json:"filled_qty"`
 	RemainingQty                int64  `json:"remaining_qty"`
@@ -130,6 +131,7 @@ type datedMandateContract struct {
 	listedAt, expiryAt           int64
 	listingPublishedAt           int64
 	listingSequence              uint64
+	listingFingerprint           string
 	startAt, endAt               int64
 	filled                       int64
 	book                         fundingCarryBook
@@ -209,10 +211,14 @@ func (m *DatedExecutionMandate) observeInstrument(event actor.InstrumentEvent) {
 	if _, exists := m.contracts[announcement.Symbol]; exists {
 		return
 	}
+	fingerprint, ok := datedInstrumentFingerprint(event)
+	if !ok {
+		return
+	}
 	m.contracts[announcement.Symbol] = &datedMandateContract{
 		symbol: announcement.Symbol, underlying: announcement.Underlying,
 		listedAt: *announcement.ListedNano, expiryAt: announcement.ExpiryNano,
-		listingPublishedAt: event.Timestamp, listingSequence: event.SeqNum,
+		listingPublishedAt: event.Timestamp, listingSequence: event.SeqNum, listingFingerprint: fingerprint,
 		startAt: start, endAt: end,
 	}
 	m.Subscribe(announcement.Symbol, exchange.MDSnapshot)
@@ -351,6 +357,7 @@ func (m *DatedExecutionMandate) baseDecision(now int64, contract *datedMandateCo
 	decision.Symbol, decision.ListedNano, decision.ExpiryNano = contract.symbol, contract.listedAt, contract.expiryAt
 	decision.OriginalTenorNanos = contract.expiryAt - contract.listedAt
 	decision.ListingPublishedAt, decision.ListingSequence = contract.listingPublishedAt, contract.listingSequence
+	decision.ListingFingerprint = contract.listingFingerprint
 	decision.FilledQty, decision.RemainingQty, decision.StartAt, decision.EndAt = contract.filled, remaining, contract.startAt, contract.endAt
 	book := contract.book
 	decision.HasBook, decision.BookPublishedAt, decision.BookSequence = book.hasSnapshot, book.publishedAt, book.sequence
@@ -437,4 +444,17 @@ func mandateSide(side string) exchange.Side {
 		return exchange.Sell
 	}
 	return exchange.Buy
+}
+
+func datedInstrumentFingerprint(event actor.InstrumentEvent) (string, bool) {
+	if event.Announcement == nil {
+		return "", false
+	}
+	digest, err := etypes.MarketDataFingerprint(&etypes.MarketDataMsg{
+		Type: exchange.MDInstrument, Symbol: exchange.InstrumentFeedSymbol, SeqNum: event.SeqNum, Timestamp: event.Timestamp, Data: event.Announcement,
+	})
+	if err != nil {
+		return "", false
+	}
+	return fmt.Sprintf("%x", digest), true
 }
