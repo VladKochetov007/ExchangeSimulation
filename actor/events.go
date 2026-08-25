@@ -122,6 +122,7 @@ type OpenInterestEvent struct {
 type InstrumentEvent struct {
 	Announcement *exchange.InstrumentAnnouncement
 	Timestamp    int64
+	SeqNum       uint64
 }
 
 type BalanceUpdateEvent struct {

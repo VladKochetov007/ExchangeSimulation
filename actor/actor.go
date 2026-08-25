@@ -649,6 +649,7 @@ func (a *BaseActor) decodeMarketData(md *exchange.MarketDataMsg) *Event {
 			Data: InstrumentEvent{
 				Announcement: md.Data.(*exchange.InstrumentAnnouncement),
 				Timestamp:    md.Timestamp,
+				SeqNum:       md.SeqNum,
 			},
 		}
 	}
