@@ -134,6 +134,11 @@ type Config struct {
 	// evaluation and its ordinary leg outcomes. It is evidence only and never
 	// enters the execution checkpoint domain or feeds an actor decision.
 	RecordTermCarryDecisions bool `json:"record_term_carry_decisions"`
+	// RecordDatedExecutionMandateDecisions and
+	// RecordDatedTermCarryDecisions retain P5 participant-local lifecycle rows.
+	// They are append-only evidence and never enter actor or exchange state.
+	RecordDatedExecutionMandateDecisions bool `json:"record_dated_execution_mandate_decisions"`
+	RecordDatedTermCarryDecisions        bool `json:"record_dated_term_carry_decisions"`
 	// RecordPerpExposureHedgerDecisions retains the V2-5 P2 physical-exposure
 	// hedger's local state/action and fill attestations. It is append-only
 	// evidence only and never reaches the ordered execution checkpoint domain.
@@ -341,6 +346,9 @@ type Config struct {
 	// expiry, which is what produces a square-root convergence envelope.
 	DatedCarryScaleEdge bool `json:"dated_carry_scale_edge"`
 	FuturesMakerCount   int  `json:"futures_maker_count"`
+	// OptionFlowIncludeFutures is explicit because false is the P5 contract.
+	// Nil preserves the historical option-flow universe, which included futures.
+	OptionFlowIncludeFutures *bool `json:"option_flow_include_futures,omitempty"`
 
 	// FuturesMakerSelfAnchored lets each dated book price itself from its own
 	// last trade instead of pinning its mid to the spot mid. Pinned to spot the
@@ -459,6 +467,10 @@ type Config struct {
 	// TermCarryAllocator configures the opt-in V2-5 P3 lifecycle-bearing carry
 	// participant. Nil preserves every pre-P3 trajectory exactly.
 	TermCarryAllocator *TermCarryAllocatorConfig `json:"term_carry_allocator,omitempty"`
+	// P5 replaces legacy random dated flow and fixed-edge cash carry with an
+	// explicit finite execution objective and an exact-cost shadow/active desk.
+	DatedFutureExecutionMandate *DatedExecutionMandateConfig   `json:"dated_future_execution_mandate,omitempty"`
+	DatedTermCarryAllocator     *DatedTermCarryAllocatorConfig `json:"dated_term_carry_allocator,omitempty"`
 	// MakerIndexWeight blends the index with the maker's own midpoint.
 	MakerIndexWeight float64 `json:"maker_index_weight"`
 
@@ -688,6 +700,12 @@ func (c *Config) normalize() error {
 	if c.RecordTermCarryDecisions && c.LogMode != "full" {
 		return errors.New("multivenue: term-carry decisions require full persisted evidence")
 	}
+	if c.RecordDatedExecutionMandateDecisions && c.LogMode != "full" {
+		return errors.New("multivenue: dated execution mandate decisions require full persisted evidence")
+	}
+	if c.RecordDatedTermCarryDecisions && c.LogMode != "full" {
+		return errors.New("multivenue: dated carry decisions require full persisted evidence")
+	}
 	if c.SpotStoikovInventorySizeSkewBps < 0 || c.SpotStoikovInventorySizeSkewBps > 5_000 {
 		return fmt.Errorf("multivenue: spot Stoikov inventory size skew bps must be in [0,5000], got %d", c.SpotStoikovInventorySizeSkewBps)
 	}
@@ -825,6 +843,61 @@ func (c *Config) normalize() error {
 	if c.RecordTermCarryDecisions && c.TermCarryAllocator == nil {
 		return errors.New("multivenue: term-carry evidence requires a term-carry allocator policy")
 	}
+	if c.DatedFutureExecutionMandate != nil {
+		if c.DatedFutureExecutionMandate.Underlying != "ABC/USD" || c.DatedFutureExecutionMandate.TargetTenor != c.ShortFutureTenor {
+			return fmt.Errorf("multivenue: P5 execution mandate must target ABC/USD short tenor %s", c.ShortFutureTenor)
+		}
+		if err := c.DatedFutureExecutionMandate.validate(); err != nil {
+			return fmt.Errorf("multivenue: dated execution mandate: %w", err)
+		}
+		profile, configured := c.latencyProfileFor("dated_execution_mandate")
+		if !configured || profile.zero() {
+			return errors.New("multivenue: dated execution mandate requires an explicit nonzero public-feed link")
+		}
+		if c.RecordDatedExecutionMandateDecisions || c.RecordMarketDataReceipts {
+			if !c.RecordDatedExecutionMandateDecisions || !c.RecordMarketDataReceipts || !slices.Contains(c.MarketDataReceiptRoles, "dated_execution_mandate") {
+				return errors.New("multivenue: instrumented dated execution mandate requires decisions and dated_execution_mandate receipts")
+			}
+			if !c.StrictPopulationAccounting {
+				return errors.New("multivenue: instrumented dated execution mandate requires strict population accounting")
+			}
+		}
+	}
+	if c.RecordDatedExecutionMandateDecisions && c.DatedFutureExecutionMandate == nil {
+		return errors.New("multivenue: dated execution mandate evidence requires its policy")
+	}
+	if c.DatedTermCarryAllocator != nil {
+		if c.DatedTermCarryAllocator.SpotSymbol != "ABC/USD" {
+			return fmt.Errorf("multivenue: P5 dated carry must use ABC/USD, got %q", c.DatedTermCarryAllocator.SpotSymbol)
+		}
+		if c.DatedTermCarryAllocator.TargetTenor != c.ShortFutureTenor {
+			return fmt.Errorf("multivenue: P5 dated carry target tenor must equal short future tenor %s", c.ShortFutureTenor)
+		}
+		if c.DatedFutureExecutionMandate == nil {
+			return errors.New("multivenue: P5 dated carry requires its declared dated execution mandate")
+		}
+		if c.DatedTermCarryAllocator.TakerFeeBps != c.TakerFeeBps {
+			return fmt.Errorf("multivenue: P5 dated carry must price configured taker fee %d bps, got %d", c.TakerFeeBps, c.DatedTermCarryAllocator.TakerFeeBps)
+		}
+		if err := c.DatedTermCarryAllocator.validate(); err != nil {
+			return fmt.Errorf("multivenue: dated term carry allocator: %w", err)
+		}
+		profile, configured := c.latencyProfileFor("dated_term_carry_allocator")
+		if !configured || profile.zero() {
+			return errors.New("multivenue: dated term carry allocator requires an explicit nonzero public-feed link")
+		}
+		if c.RecordDatedTermCarryDecisions || c.RecordMarketDataReceipts {
+			if !c.RecordDatedTermCarryDecisions || !c.RecordMarketDataReceipts || !slices.Contains(c.MarketDataReceiptRoles, "dated_term_carry_allocator") {
+				return errors.New("multivenue: instrumented dated carry requires decisions and dated_term_carry_allocator receipts")
+			}
+			if !c.StrictPopulationAccounting {
+				return errors.New("multivenue: instrumented dated carry requires strict population accounting")
+			}
+		}
+	}
+	if c.RecordDatedTermCarryDecisions && c.DatedTermCarryAllocator == nil {
+		return errors.New("multivenue: dated carry evidence requires its allocator")
+	}
 	if len(c.VenueIDs) == 0 {
 		c.VenueIDs = []string{"north", "central", "south"}
 	}
@@ -947,6 +1020,10 @@ func (c *Config) normalize() error {
 	}
 	if c.OptionFlowCount == 0 {
 		c.OptionFlowCount = 1
+	}
+	if c.OptionFlowIncludeFutures == nil {
+		includeFutures := true
+		c.OptionFlowIncludeFutures = &includeFutures
 	}
 	if c.StoikovMaxVarianceMultiple == 0 {
 		c.StoikovMaxVarianceMultiple = 25
@@ -1285,33 +1362,35 @@ type Venue struct {
 	OptionDealerClientID uint64
 	// Singular fields retain the baseline participant for callers written
 	// before configurable rosters. All actors live in the corresponding slice.
-	makerStateLog       venueLogger
-	NoiseTrader         *feesim.RandomTaker
-	NoiseTraders        []*feesim.RandomTaker
-	RoundTripTraders    []*RoundTripTrader
-	Suppliers           []*ElasticSupplier
-	LiabilityHedgers    []*LiabilityHedger
-	CarryArbs           []*CarryArbitrageur
-	FundingCarryArbs    []*FundingCarryArbitrageur
-	TermCarryAllocators []*TermCarryAllocator
-	PerpExposureHedgers []*PerpExposureHedger
-	LatentLiquidity     []*LatentLiquidity
-	MetaorderTraders    []*MetaorderTrader
-	lastTwoSided        map[string]twoSidedMark
-	Microstructure      *MicrostructureStats
-	OptionFlow          *derivsim.OptionTaker
-	OptionFlows         []*derivsim.OptionTaker
-	OptionValueTakers   []*derivsim.OptionValueTaker
-	FutureFlows         []*derivsim.OptionTaker
-	VannaVolgaDesks     []*derivsim.VannaVolgaHedger
-	InitialRisk         *VenueRiskSnapshot
-	RiskTimeline        []VenueRiskSnapshot
-	PreExpiryRisk       []VenueRiskSnapshot
-	TerminalRisk        *VenueRiskSnapshot
-	riskErr             error
-	riskLastNano        int64
-	optionListedNano    map[string]int64
-	nextClient          uint64
+	makerStateLog            venueLogger
+	NoiseTrader              *feesim.RandomTaker
+	NoiseTraders             []*feesim.RandomTaker
+	RoundTripTraders         []*RoundTripTrader
+	Suppliers                []*ElasticSupplier
+	LiabilityHedgers         []*LiabilityHedger
+	CarryArbs                []*CarryArbitrageur
+	FundingCarryArbs         []*FundingCarryArbitrageur
+	TermCarryAllocators      []*TermCarryAllocator
+	DatedExecutionMandates   []*DatedExecutionMandate
+	DatedTermCarryAllocators []*DatedTermCarryAllocator
+	PerpExposureHedgers      []*PerpExposureHedger
+	LatentLiquidity          []*LatentLiquidity
+	MetaorderTraders         []*MetaorderTrader
+	lastTwoSided             map[string]twoSidedMark
+	Microstructure           *MicrostructureStats
+	OptionFlow               *derivsim.OptionTaker
+	OptionFlows              []*derivsim.OptionTaker
+	OptionValueTakers        []*derivsim.OptionValueTaker
+	FutureFlows              []*derivsim.OptionTaker
+	VannaVolgaDesks          []*derivsim.VannaVolgaHedger
+	InitialRisk              *VenueRiskSnapshot
+	RiskTimeline             []VenueRiskSnapshot
+	PreExpiryRisk            []VenueRiskSnapshot
+	TerminalRisk             *VenueRiskSnapshot
+	riskErr                  error
+	riskLastNano             int64
+	optionListedNano         map[string]int64
+	nextClient               uint64
 }
 
 // Participant identifies one independently funded account. It is recorded by
@@ -2031,6 +2110,12 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		for _, allocator := range venue.TermCarryAllocators {
 			runner.AddActor(allocator)
 		}
+		for _, mandate := range venue.DatedExecutionMandates {
+			runner.AddActor(mandate)
+		}
+		for _, allocator := range venue.DatedTermCarryAllocators {
+			runner.AddActor(allocator)
+		}
 		for _, hedger := range venue.PerpExposureHedgers {
 			runner.AddActor(hedger)
 		}
@@ -2428,6 +2513,26 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		}
 		venue.makerStateLog.LogEvidenceOnly(simTime, outcome.ClientID, "term_carry_leg_outcome", outcome)
 	}
+	datedExecutionDecisionObserver := func(decision DatedExecutionMandateDecision) {
+		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "dated_execution_mandate_decision", decision)
+	}
+	datedExecutionOutcomeObserver := func(outcome DatedExecutionMandateOutcome) {
+		simTime := outcome.DecisionTime
+		if outcome.ExecutionTime != 0 {
+			simTime = outcome.ExecutionTime
+		}
+		venue.makerStateLog.LogEvidenceOnly(simTime, outcome.ClientID, "dated_execution_mandate_outcome", outcome)
+	}
+	datedCarryDecisionObserver := func(decision DatedTermCarryDecision) {
+		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "dated_term_carry_decision", decision)
+	}
+	datedCarryOutcomeObserver := func(outcome DatedTermCarryOutcome) {
+		simTime := outcome.DecisionTime
+		if outcome.ExecutionTime != 0 {
+			simTime = outcome.ExecutionTime
+		}
+		venue.makerStateLog.LogEvidenceOnly(simTime, outcome.ClientID, "dated_term_carry_outcome", outcome)
+	}
 	perpExposureDecisionObserver := func(decision PerpExposureHedgerDecision) {
 		// P2 local-state telemetry is append-only evidence. It has no callback
 		// path into the actor, exchange, scheduler, checkpoint, or RNG state.
@@ -2639,7 +2744,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	for participant := 0; participant < s.Config.OptionFlowCount; participant++ {
 		flow := derivsim.NewOptionTaker(nextActor(), connect(fmt.Sprintf("option_flow_%d", participant+1), noiseBalances, 10_000_000*mvQuotePrecision, noiseFee), derivsim.OptionTakerConfig{
 			Underlying: "ABC/USD", PBuy: *s.Config.OptionBuyProbability, LotQty: mvBasePrecision / 100,
-			Interval: s.Config.NoiseInterval, Seed: flowSeed(s.Config.Seed, venueIndex, participant, 2), IncludeFutures: true,
+			Interval: s.Config.NoiseInterval, Seed: flowSeed(s.Config.Seed, venueIndex, participant, 2), IncludeFutures: *s.Config.OptionFlowIncludeFutures,
 		})
 		flow.SetTickerFactory(timers)
 		venue.OptionFlows = append(venue.OptionFlows, flow)
@@ -2848,6 +2953,34 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		allocator := NewTermCarryAllocator(nextActor(), gateway, cfg)
 		allocator.SetTickerFactory(timers)
 		venue.TermCarryAllocators = append(venue.TermCarryAllocators, allocator)
+	}
+
+	if policy := s.Config.DatedFutureExecutionMandate; policy != nil {
+		cfg := *policy
+		role := "dated_execution_mandate_1"
+		balances := map[string]int64{"USD": 200_000_000 * mvQuotePrecision}
+		clientID, gateway := venue.connectParticipant(mount, role, balances, 100_000_000*mvQuotePrecision, noiseFee)
+		cfg.VenueID, cfg.Desk, cfg.ClientID = venue.ID, role, clientID
+		if s.Config.RecordDatedExecutionMandateDecisions {
+			cfg.DecisionObserver, cfg.OutcomeObserver = datedExecutionDecisionObserver, datedExecutionOutcomeObserver
+		}
+		mandate := NewDatedExecutionMandate(nextActor(), gateway, cfg)
+		mandate.SetTickerFactory(timers)
+		venue.DatedExecutionMandates = append(venue.DatedExecutionMandates, mandate)
+	}
+
+	if policy := s.Config.DatedTermCarryAllocator; policy != nil {
+		cfg := *policy
+		role := "dated_term_carry_allocator_1"
+		balances := map[string]int64{"ABC": 2_000 * mvBasePrecision, "USD": 200_000_000 * mvQuotePrecision}
+		clientID, gateway := venue.connectParticipant(mount, role, balances, 100_000_000*mvQuotePrecision, noiseFee)
+		cfg.VenueID, cfg.Desk, cfg.ClientID = venue.ID, role, clientID
+		if s.Config.RecordDatedTermCarryDecisions {
+			cfg.DecisionObserver, cfg.OutcomeObserver = datedCarryDecisionObserver, datedCarryOutcomeObserver
+		}
+		allocator := NewDatedTermCarryAllocator(nextActor(), gateway, cfg)
+		allocator.SetTickerFactory(timers)
+		venue.DatedTermCarryAllocators = append(venue.DatedTermCarryAllocators, allocator)
 	}
 
 	if policy := s.Config.PerpExposureHedger; policy != nil {

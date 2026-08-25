@@ -36,6 +36,26 @@ func TestConfigAcceptsDocumentedSnakeCaseJSON(t *testing.T) {
 	}
 }
 
+func TestP5ConfigRetainsExplicitFalseFutureFlowAndActorClocks(t *testing.T) {
+	var cfg Config
+	raw := []byte(`{
+		"option_flow_include_futures":false,
+		"record_dated_execution_mandate_decisions":true,
+		"record_dated_term_carry_decisions":true,
+		"dated_future_execution_mandate":{"enabled":true,"underlying":"ABC/USD","target_tenor_nanos":28800000000000,"side":"BUY","parent_qty":200,"child_qty":10,"start_delay_nanos":600000000000,"execution_duration_nanos":7200000000000,"decision_period_nanos":300000000000,"decision_phase_offset_nanos":0,"max_market_age_nanos":10000000000,"slippage_bps":15,"tick_size":1},
+		"dated_term_carry_allocator":{"enabled":true,"trade_enabled":false,"spot_symbol":"ABC/USD","target_tenor_nanos":28800000000000,"decision_period_nanos":2000000000,"decision_phase_offset_nanos":0,"max_market_age_nanos":10000000000,"min_time_to_expiry_nanos":600000000000,"taker_fee_bps":5,"long_spot_funding_bps":500,"short_spot_borrow_bps":500,"balance_sheet_bps":1,"margin_risk_bps":1,"leg_risk_bps":1,"settlement_mismatch_bps":2,"post_settlement_exit_bps":2,"min_net_carry_bps":1,"max_position":100,"lot_qty":10,"min_order_size":1,"spot_tick":1,"future_tick":1,"passive_exit_slice_qty":1,"exit_deadline_after_settlement_nanos":3600000000000}
+	}`)
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OptionFlowIncludeFutures == nil || *cfg.OptionFlowIncludeFutures || cfg.DatedFutureExecutionMandate == nil || cfg.DatedTermCarryAllocator == nil || cfg.DatedTermCarryAllocator.TradeEnabled {
+		t.Fatalf("P5 explicit serialization was lost: %+v", cfg)
+	}
+	if cfg.DatedFutureExecutionMandate.DecisionPeriod != 5*time.Minute || cfg.DatedTermCarryAllocator.DecisionPeriod != 2*time.Second {
+		t.Fatalf("P5 clocks decoded incorrectly: mandate=%s carry=%s", cfg.DatedFutureExecutionMandate.DecisionPeriod, cfg.DatedTermCarryAllocator.DecisionPeriod)
+	}
+}
+
 func TestSpotStoikovInventorySizePolicyIsScopedToSpot(t *testing.T) {
 	sim, err := NewSim(time.Second, Config{
 		LogDir: t.TempDir(), LogMode: "none", Seed: 101,
