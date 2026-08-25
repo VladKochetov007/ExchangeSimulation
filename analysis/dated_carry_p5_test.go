@@ -125,6 +125,56 @@ func TestP5ShadowAndActivePoliciesHaveOneAuthorityDifference(t *testing.T) {
 	}
 }
 
+func TestP5OrderChainRequiresExactGatewayVenueAndActorEvidence(t *testing.T) {
+	policy := p5TestPolicy(true)
+	decision := p5TestCandidate(policy)
+	gateway := fundingCarryGatewayDecision{
+		clientID: decision.ClientID, linkID: 2, requestID: decision.RequestID, symbol: decision.SpotSymbol,
+		decisionAt: decision.DecisionTime, price: decision.LimitPrice, qty: decision.RequestedQty,
+		side: uint8(exchange.Buy), orderType: uint8(exchange.LimitOrder), tif: uint8(exchange.IOC),
+	}
+	if !p5GatewayMatches(decision, gateway) {
+		t.Fatal("exact gateway decision rejected")
+	}
+	order := fundingCarryVenueOrder{
+		RequestID: decision.RequestID, OrderID: 77, Side: decision.Side, Type: exchange.LimitOrder.String(),
+		TimeInForce: exchange.IOC.String(), PostOnly: false, Price: decision.LimitPrice, Qty: decision.RequestedQty,
+	}
+	if !p5VenueOrderMatches(decision, order) {
+		t.Fatal("exact venue admission rejected")
+	}
+	fill := fundingCarryVenueFill{OrderID: 77, Symbol: decision.SpotSymbol, Side: decision.Side, Qty: decision.RequestedQty, Price: decision.LimitPrice, TradeID: 88, FeeAmount: 5, FeeAsset: "USD"}
+	outcomes := []datedCarryP5Outcome{
+		{Event: "ORDER_ACCEPTED", OrderID: 77},
+		{Event: "ORDER_FILL", OrderID: 77, Symbol: fill.Symbol, Side: fill.Side, Qty: fill.Qty, Price: fill.Price, TradeID: fill.TradeID, FeeAmount: fill.FeeAmount, FeeAsset: fill.FeeAsset},
+	}
+	if !p5ActorAccepted(outcomes, 77) || !p5ActorFillMatches(outcomes, fill) {
+		t.Fatal("exact actor response evidence rejected")
+	}
+	mutations := []struct {
+		name   string
+		mutate func(*fundingCarryGatewayDecision)
+	}{
+		{"wrong symbol", func(v *fundingCarryGatewayDecision) { v.symbol = decision.FutureSymbol }},
+		{"reversed side", func(v *fundingCarryGatewayDecision) { v.side = uint8(exchange.Sell) }},
+		{"future decision", func(v *fundingCarryGatewayDecision) { v.decisionAt++ }},
+		{"atomic quantity substitution", func(v *fundingCarryGatewayDecision) { v.qty++ }},
+	}
+	for _, tc := range mutations {
+		t.Run(tc.name, func(t *testing.T) {
+			mutant := gateway
+			tc.mutate(&mutant)
+			if p5GatewayMatches(decision, mutant) {
+				t.Fatal("gateway mutation survived")
+			}
+		})
+	}
+	outcomes[1].TradeID++
+	if p5ActorFillMatches(outcomes, fill) {
+		t.Fatal("forged actor fill survived")
+	}
+}
+
 func TestP5ReceiptJoinRejectsFutureWrongAndAmbiguousSources(t *testing.T) {
 	var digest [16]byte
 	digest[0] = 7
