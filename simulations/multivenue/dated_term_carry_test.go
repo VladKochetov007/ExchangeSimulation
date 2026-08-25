@@ -200,6 +200,24 @@ func TestDatedCarryDoesNotSubmitBeyondEvidenceHorizon(t *testing.T) {
 	}
 }
 
+func TestDatedCarryDoesNotOpenTermWhoseClosureIsCensored(t *testing.T) {
+	gateway := newFundingCarryStubGateway()
+	var decisions []DatedTermCarryDecision
+	listed := time.Unix(100, 0)
+	cfg := datedCarryTestConfig(true)
+	cfg.TerminalNano = listed.Add(8*time.Hour + 30*time.Minute).UnixNano()
+	cfg.DecisionObserver = func(decision DatedTermCarryDecision) { decisions = append(decisions, decision) }
+	allocator := NewDatedTermCarryAllocator(1, gateway, cfg)
+	allocator.subscribed = true
+	observeDatedCarryWorld(t, allocator, gateway, listed, 9_999, 10_000, 10_100, 10_101)
+	requestsBefore := len(gateway.requests)
+	allocator.onTick(listed.Add(2 * time.Second))
+	got := decisions[len(decisions)-1]
+	if got.Action != "TERM_HORIZON_CENSORED" || got.RequestID != 0 || len(gateway.requests) != requestsBefore || got.ProposedTargetSpot != 0 {
+		t.Fatalf("term horizon evidence = decision %+v requests %d/%d", got, requestsBefore, len(gateway.requests))
+	}
+}
+
 func acceptAndFillDatedCarry(t *testing.T, allocator *DatedTermCarryAllocator, requestID, orderID uint64, symbol string, side exchange.Side, quantity int64, at time.Time) {
 	t.Helper()
 	allocator.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: requestID, OrderID: orderID}})

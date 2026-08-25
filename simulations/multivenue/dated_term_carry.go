@@ -501,6 +501,13 @@ func (a *DatedTermCarryAllocator) openDecision(decision DatedTermCarryDecision, 
 		decision.Action = "TIME_TO_EXPIRY_BELOW_MINIMUM"
 		return decision
 	}
+	if a.cfg.TerminalNano != 0 {
+		closureHorizon, ok := etypes.TryAdd(contract.expiryAt, int64(a.cfg.ExitDeadlineAfterSettlement))
+		if !ok || closureHorizon > a.cfg.TerminalNano {
+			decision.Action = "TERM_HORIZON_CENSORED"
+			return decision
+		}
+	}
 	spotAge, futureAge, reason := datedCarryBookAges(now, a.spot, contract.book)
 	decision.SpotAgeNanos, decision.FutureAgeNanos = spotAge, futureAge
 	if reason != "" {
