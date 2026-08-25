@@ -95,7 +95,7 @@ func (p *analyzerProfiles) Stop() {
 }
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, perpreplenishment, liabilityhedger, optionliabilityp6, fundingcarry, termcarry, termcarryp4chain, termcarryp4pair, datedcarryp5, datedcarryp5pair, datedmandatep5, termcarrylifecycle, perpexposurehedger, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, perpreplenishment, liabilityhedger, optionliabilityp6, optionvaluetakerp6, vannavolgap6, fundingcarry, termcarry, termcarryp4chain, termcarryp4pair, datedcarryp5, datedcarryp5pair, datedmandatep5, termcarrylifecycle, perpexposurehedger, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
 	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
 	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
@@ -333,6 +333,20 @@ func main() {
 					result.Accepted, result.Rejected, result.CanonicalFills, result.ActorFills, result.FilledQty,
 					result.FutureObservationUse, result.DecodeErrors, result.MissingOutcomes, result.DuplicateOutcomes,
 					result.OrphanOutcomes, result.OutcomeMismatches, result.TargetReached, result.Valid)
+			})
+		case "optionvaluetakerp6", "vannavolgap6":
+			role := "option_value_taker"
+			if *metric == "vannavolgap6" {
+				role = "vanna_volga_desk"
+			}
+			result, err := run.MeasureOptionRoleActivity(role)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s role %s decisions %d accepted/rejected %d/%d fills %d qty %d\n",
+					dir, result.Role, result.Decisions, result.Accepted, result.Rejected, result.Fills, result.FilledQty)
 			})
 		case "fundingcarry":
 			result, err := run.MeasureFundingCarry()

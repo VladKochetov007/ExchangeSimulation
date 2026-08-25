@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -272,4 +273,92 @@ func (r *Run) MeasureOptionLiability() (*OptionLiabilityAudit, error) {
 
 func (a OptionLiabilityAudit) String() string {
 	return fmt.Sprintf("option liability decisions=%d submits=%d fills=%d valid=%t", a.Decisions, a.SubmitDecisions, a.ActorFills, a.Valid)
+}
+
+// OptionRoleActivity is an execution-side activation audit for an explicit
+// option participant. Canonical accepted/rejected/fill records are the source
+// of truth; this does not trust an actor counter or model intention.
+type OptionRoleActivity struct {
+	Role         string                             `json:"role"`
+	Participants int                                `json:"participants"`
+	Decisions    int                                `json:"decisions"`
+	Accepted     int                                `json:"accepted"`
+	Rejected     int                                `json:"rejected"`
+	Fills        int                                `json:"fills"`
+	FilledQty    int64                              `json:"filled_qty"`
+	ByVenue      map[string]OptionRoleVenueActivity `json:"by_venue"`
+}
+
+type OptionRoleVenueActivity struct {
+	Decisions int   `json:"decisions"`
+	Accepted  int   `json:"accepted"`
+	Rejected  int   `json:"rejected"`
+	Fills     int   `json:"fills"`
+	FilledQty int64 `json:"filled_qty"`
+}
+
+type optionRoleOrderEvidence struct {
+	Symbol string `json:"symbol"`
+	Qty    int64  `json:"qty"`
+}
+
+// MeasureOptionRoleActivity counts only canonical venue outcomes for one
+// role's option orders. An option symbol is identified by the persisted
+// expiry/strike/call-put naming contract, never by the participant's model.
+func (r *Run) MeasureOptionRoleActivity(role string) (*OptionRoleActivity, error) {
+	result := &OptionRoleActivity{Role: role, ByVenue: make(map[string]OptionRoleVenueActivity)}
+	participants := make(map[Participant]struct{})
+	var mu sync.Mutex
+	if err := r.Scan(ScanOptions{Events: []string{"OrderAccepted", "OrderRejected", "OrderFill"}}, func(event Event) {
+		if r.Role(event.VenueID, event.ClientID) != role {
+			return
+		}
+		symbol := event.Symbol
+		if symbol == "" {
+			var row optionRoleOrderEvidence
+			if event.Decode(&row) != nil {
+				return
+			}
+			symbol = row.Symbol
+		}
+		if !strings.HasSuffix(symbol, "-C") && !strings.HasSuffix(symbol, "-P") {
+			return
+		}
+		var row optionRoleOrderEvidence
+		if event.Name == "OrderFill" || event.Symbol == "" {
+			if err := event.Decode(&row); err != nil {
+				return
+			}
+		}
+		mu.Lock()
+		participants[Participant{event.VenueID, event.ClientID}] = struct{}{}
+		venue := result.ByVenue[event.VenueID]
+		switch event.Name {
+		case "OrderAccepted":
+			result.Decisions++
+			result.Accepted++
+			venue.Decisions++
+			venue.Accepted++
+		case "OrderRejected":
+			result.Decisions++
+			result.Rejected++
+			venue.Decisions++
+			venue.Rejected++
+		case "OrderFill":
+			if row.Qty <= 0 {
+				mu.Unlock()
+				return
+			}
+			result.Fills++
+			result.FilledQty += row.Qty
+			venue.Fills++
+			venue.FilledQty += row.Qty
+		}
+		result.ByVenue[event.VenueID] = venue
+		mu.Unlock()
+	}); err != nil {
+		return nil, err
+	}
+	result.Participants = len(participants)
+	return result, nil
 }

@@ -102,3 +102,27 @@ func TestOptionLiabilityAuditCatchesOutcomeAndFrontierMutations(t *testing.T) {
 		})
 	}
 }
+
+func TestOptionRoleActivityUsesCanonicalOptionOutcomes(t *testing.T) {
+	dir := writeRun(t, Report{TerminalAccounts: []AccountRow{{VenueID: "north", ClientID: 9, Role: "option_value_taker_1"}}}, map[string][]string{
+		"north/derivatives.jsonl": {
+			`{"sim_ts":1,"client_id":9,"event":"OrderAccepted","data":{"venue_id":"north","symbol":"ABC-1000-50000-P","payload":{"request_id":1,"order_id":2}}}`,
+			`{"sim_ts":2,"client_id":9,"event":"OrderFill","data":{"venue_id":"north","symbol":"ABC-1000-50000-P","payload":{"order_id":2,"trade_id":3,"qty":7,"price":100}}}`,
+			`{"sim_ts":3,"client_id":9,"event":"OrderRejected","data":{"venue_id":"north","symbol":"ABC-1000-50000-C","payload":{"request_id":4,"error":"NO_LIQUIDITY"}}}`,
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	activity, err := run.MeasureOptionRoleActivity("option_value_taker")
+	if err != nil {
+		t.Fatalf("MeasureOptionRoleActivity: %v", err)
+	}
+	if activity.Participants != 1 || activity.Decisions != 2 || activity.Accepted != 1 || activity.Rejected != 1 || activity.Fills != 1 || activity.FilledQty != 7 {
+		t.Fatalf("activity = %+v, want one accepted/rejected and one fill", activity)
+	}
+	if got := activity.ByVenue["north"]; got.Fills != 1 || got.FilledQty != 7 {
+		t.Fatalf("venue activity = %+v, want one fill qty 7", got)
+	}
+}
