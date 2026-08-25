@@ -95,7 +95,7 @@ func (p *analyzerProfiles) Stop() {
 }
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, perpreplenishment, liabilityhedger, fundingcarry, termcarry, termcarryp4chain, termcarryp4pair, datedcarryp5, datedmandatep5, termcarrylifecycle, perpexposurehedger, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, perpreplenishment, liabilityhedger, fundingcarry, termcarry, termcarryp4chain, termcarryp4pair, datedcarryp5, datedcarryp5pair, datedmandatep5, termcarrylifecycle, perpexposurehedger, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
 	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
 	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
@@ -173,6 +173,31 @@ func main() {
 		}
 		emit("P4-pair", result, *asJSON, func() {
 			fmt.Printf("P4 pair activation/execution/basis %t/%t/%t valid %t\n", result.ActivationValid, result.ExecutionValid, result.BasisMeasurable, result.Valid)
+		})
+		return
+	}
+	if *metric == "datedcarryp5pair" {
+		if len(flag.Args()) != 2 {
+			fmt.Fprintln(os.Stderr, "datedcarryp5pair requires exactly: <control run dir> <treatment run dir>")
+			os.Exit(2)
+		}
+		control, err := analysis.Open(flag.Args()[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", flag.Args()[0], err)
+			os.Exit(1)
+		}
+		treatment, err := analysis.Open(flag.Args()[1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", flag.Args()[1], err)
+			os.Exit(1)
+		}
+		result, err := analysis.MeasureDatedCarryP5Pair(control, treatment)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "P5 pair: %v\n", err)
+			os.Exit(1)
+		}
+		emit("P5-pair", result, *asJSON, func() {
+			fmt.Printf("P5 pair activation/execution/lifecycle/basis %t/%t/%t/%t qualified %d valid %t\n", result.ActivationValid, result.ExecutionValid, result.LifecycleValid, result.BasisMeasurable, result.QualifiedTerms, result.Valid)
 		})
 		return
 	}
