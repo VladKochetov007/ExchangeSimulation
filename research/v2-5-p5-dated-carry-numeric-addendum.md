@@ -9,6 +9,19 @@ The source revision is `ea0eb66`. The exact configs are under
 before their implementation; running these configs before the implementation
 and structural preflight is prohibited.
 
+Pre-outcome implementation correction: the first 15-minute mechanics-only
+preflight at implementation revision `e127f5f` showed that a mandate tick at
+the exact simulation terminal timestamp could submit a request whose latency-
+delayed venue outcome necessarily fell beyond retained evidence. No P5 carry
+candidate was eligible and no basis outcome was inspected. Commit `bda9626`
+adds an internal, non-serialized terminal boundary to both new P5 actors: the
+terminal decision is now explicitly `SIMULATION_HORIZON_CENSORED` and cannot
+submit. This does not change any immutable JSON value or paired A/B delta. A
+fresh 20-minute mechanics preflight at `112e7fd` then independently joined all
+three mandate children to gateway admission and ordinary fills with no audit
+error. Both short preflights are mechanics diagnostics only and have no P5
+economic status.
+
 Pre-implementation evidence correction: commit `47ce6a0` mistakenly retained
 the obsolete P4 receipt role `term_carry_allocator`. Before either new actor
 existed and before any P5 run or outcome inspection, the role contract was
