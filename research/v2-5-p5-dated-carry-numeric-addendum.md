@@ -13,8 +13,11 @@ Pre-implementation evidence correction: commit `47ce6a0` mistakenly retained
 the obsolete P4 receipt role `term_carry_allocator`. Before either new actor
 existed and before any P5 run or outcome inspection, the role contract was
 replaced by the required `dated_execution_mandate` and
-`dated_term_carry_allocator` roles. The superseded hashes from `47ce6a0` are
-provenance only and are not runnable P5 cells; the hashes below are canonical.
+`dated_term_carry_allocator` roles. The follow-up audit also replaced the
+obsolete latency-profile key with one explicit inherited 20 ms request / 40 ms
+market-data profile for each new role. The superseded hashes from `47ce6a0` and
+`6a67193` are provenance only and are not runnable P5 cells; the hashes below
+are canonical.
 
 ## Environment changes and sole intervention
 
@@ -45,16 +48,16 @@ evidences the same candidates as B but cannot change target or submit.
 
 | cell | SHA-256 |
 | --- | --- |
-| A-117 | `c1ca7a6401ac0723a9226c826ccdb2002232a0743ef88847778b41c8b1487685` |
-| B-117 | `55bfedd029d3ad91d8ff0b99983ba8692dc95f3b91dc30b6f953d3c3d8ea0544` |
-| A-119 | `9085c514316ba988a288f51eb4d2da6987fa3ef368f79bfa28193c2e8fc576ae` |
-| B-119 | `630684b1d68fb4e0cb42644d8dea92c66e13cc4fb70a9f01af66bed413d8fe77` |
-| A-139 | `ec832268ffbb6a0b9584868af062af8782498223cb1be6feb27b8b208f42ceb3` |
-| B-139 | `37d3d94b3bc2ddb1ca6985aef8b09d1a18547babfb8b7f56b436d35f5660ea64` |
-| A-149 | `c2e930e468ab9415f0c16c45b7c6199edbdcb6188afc47621350ccb29b20454f` |
-| B-149 | `da9d96804a76ca695e78099169d3724b1f4c2bb8b581990d96babcb4cbb62df4` |
-| A-151 | `545d60feb5bf6b536e59bdff88ebc03b2e80958e4bab01e69625d1c86fdac2fc` |
-| B-151 | `0bce13c8f202a20330a35a3e87bca2438b7faf4a6a381b45786cbed994e62f7c` |
+| A-117 | `ef212666c0f7126c4ece902ea6f51af6860e59617bd5c31204257b6f8092f834` |
+| B-117 | `f43f5fc0a368d01aed7e748a8a9e71b41cb1a70f0dc07893b1ee2b25fc92e096` |
+| A-119 | `848029742d0337cdb846d175c6e622558f6387c6ac25c5f408be266f7f6ff97c` |
+| B-119 | `726c42f7934108197d26459f5bc91cb1264cabc7c4b2a42889a8aae01d3f0e5b` |
+| A-139 | `7d7e97f3a466123afec64e6156a37e5341acc99ef1234fc7ba2100e691034a1b` |
+| B-139 | `6f90d563a26a975376341fb14f8b2730c5f2d57e6d362d1a634c54ad512a4fe1` |
+| A-149 | `647aab3668ed8bd6a3789b4e1c9f095057c1348ea5f01b149680ea71b7e0da41` |
+| B-149 | `5c2ce805ac2ab0a3660c449516975ae35fd71fdacc24253e235b845f9d8c6399` |
+| A-151 | `e3793b4ac22c1c5284f3d19cb06b13c3b2aba6d2e999e01b942a5437bcc7e75b` |
+| B-151 | `eb4558ebc87e9ed2c0e83db32420d78bd65fd65851c37d670bd4d3e49132b7c6` |
 
 Development paired seeds are 117 and 119, the first unused primes after the
 prior 113 timing holdout. Untouched holdouts are 139, 149, and 151, the first

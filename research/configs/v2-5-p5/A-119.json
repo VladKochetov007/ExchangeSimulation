@@ -150,7 +150,20 @@
     "inventory_max_adjustment": 0
   },
   "latency_profiles": {
-    "term_carry_allocator": {
+    "dated_execution_mandate": {
+      "model": "constant",
+      "delay": 20000000,
+      "min": 0,
+      "max": 0,
+      "std_dev": 0,
+      "sigma": 0,
+      "cap": 0,
+      "spike_delay": 0,
+      "spike_probability": 0,
+      "response_scale": 0,
+      "market_data_scale": 2
+    },
+    "dated_term_carry_allocator": {
       "model": "constant",
       "delay": 20000000,
       "min": 0,
