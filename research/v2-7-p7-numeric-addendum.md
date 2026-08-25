@@ -32,7 +32,7 @@ provenance and must not be used to generate a config.
 | taker fee | configured 5 bps | A | inherited venue fee; no subsidy |
 | max exposure bound | 1,000,000,000 raw ABC | C | equals the declared fixed liability and prevents hidden leverage growth |
 | exposure step | 1 raw ABC | C | required schema field but unused by fixed policy; nonzero validation without RNG-driven state changes |
-| tick size | 1,000,000 raw quote | A | inherited ABC-PERP grid |
+| tick size | 10,000 raw quote | A | inherited `SpotTickQuoteUnits` ABC-PERP grid in the checked base config |
 | development seeds | 307, 311 | C | fresh odd screening seeds not used by completed P4/P5/P6 development or holdout cells |
 | holdout seeds | 313, 317, 331 | C | fresh untouched seeds reserved before any outcome inspection |
 | preflight horizon | 15 min | C | cheap mechanics-only activation check; cannot score risk |
@@ -62,21 +62,25 @@ H-307, H-311  enabled fixed-liability,  60,000,000,000 raw initial margin
 All fields not listed as a P7 field are byte-for-byte inherited from the
 checked base config `research/configs/v005-stress-perp.json`, except that
 `cross_asset_spot_graph` is explicitly `false` to remove the known CDF/USD
-mark-viability censor from this perp-only mechanism screen.  The generated
-configs must retain the full evidence contract and must record the P7 policy
-version in their manifest.
+mark-viability censor from this perp-only mechanism screen.  Because that
+graph removes CDF/USD and ABC/CDF books, the generated configs also restrict
+the inherited fixed-distance/imbalance maker symbol rosters to
+`["ABC/USD", "ABC-PERP"]` and remove the two unavailable CDF noise-target
+entries; these are validity-preserving projections, not economic treatments.
+The generated configs must retain the full evidence contract and must record
+the P7 policy version in their manifest.
 
 The checked renderer is `scripts/render-v2-7-p7-configs.sh`; the exact config
 hashes are verified by `scripts/check-v2-7-p7-configs.sh`:
 
 | cell | SHA-256 |
 |---|---|
-| C-307 | `25ae4e23510e2fbbdf539c5af0c1c419e1790cea87efa20e904c2a85bbef3173` |
-| C-311 | `e6a6167d1d37b12de41414eb2b2dcef9722419330c13be9b7376651c074317e2` |
-| L-307 | `5280b20934d750a4a1a966ef4db774d71718f0c174447df75e99b61dc948ed49` |
-| L-311 | `28e08418fc5914a6506736772a4aae830b79866f944da95b3f1b2dcd684ac740` |
-| H-307 | `8b3a3fdde285fa7e4891df1393af2310322f48aa0189e48c1a8cde28fdb1f4a5` |
-| H-311 | `f737817490fdf5561e2d5ef24a35fea7337b81b77f54759f13bee2d532ad0e14` |
+| C-307 | `633750a02818b8204e174e81126ec2e506ec75b1d6cbba48d22f1feba60aca82` |
+| C-311 | `e604150c2d23528fa9e684311ca6a141e3a4ddbe996453252a0241c37a9d5c85` |
+| L-307 | `45083d2bb6527a3c61b53a638c95afe42815c0e9186c0c0dfc68180f28d9fd79` |
+| L-311 | `c1ef3301735b059ddca8a07af30f69244af7828d769b0375a3bc67c5f5b5fdd8` |
+| H-307 | `b2606c9757a7d8106d1dc1a94c52c23d0a204c60f184aa93b4ef2e55f7e7fbdc` |
+| H-311 | `0f97b833c03df7901c6b990b56fa6547a2e1652c310db146fa42a945adfedda1` |
 
 No holdout config may be generated until both development levels have passed
 the activation/evidence gate.  If an active level is inactive or invalid, all

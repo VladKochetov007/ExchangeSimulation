@@ -7,12 +7,12 @@ config_dir="$root_dir/research/configs/v2-7-p7"
 base="$root_dir/research/configs/v005-stress-perp.json"
 
 declare -A expected=(
-	[C-307]=25ae4e23510e2fbbdf539c5af0c1c419e1790cea87efa20e904c2a85bbef3173
-	[C-311]=e6a6167d1d37b12de41414eb2b2dcef9722419330c13be9b7376651c074317e2
-	[H-307]=8b3a3fdde285fa7e4891df1393af2310322f48aa0189e48c1a8cde28fdb1f4a5
-	[H-311]=f737817490fdf5561e2d5ef24a35fea7337b81b77f54759f13bee2d532ad0e14
-	[L-307]=5280b20934d750a4a1a966ef4db774d71718f0c174447df75e99b61dc948ed49
-	[L-311]=28e08418fc5914a6506736772a4aae830b79866f944da95b3f1b2dcd684ac740
+	[C-307]=633750a02818b8204e174e81126ec2e506ec75b1d6cbba48d22f1feba60aca82
+	[C-311]=e604150c2d23528fa9e684311ca6a141e3a4ddbe996453252a0241c37a9d5c85
+	[H-307]=b2606c9757a7d8106d1dc1a94c52c23d0a204c60f184aa93b4ef2e55f7e7fbdc
+	[H-311]=0f97b833c03df7901c6b990b56fa6547a2e1652c310db146fa42a945adfedda1
+	[L-307]=45083d2bb6527a3c61b53a638c95afe42815c0e9186c0c0dfc68180f28d9fd79
+	[L-311]=c1ef3301735b059ddca8a07af30f69244af7828d769b0375a3bc67c5f5b5fdd8
 )
 
 for cell in C-307 C-311 L-307 L-311 H-307 H-311; do
@@ -32,6 +32,9 @@ for cell in C-307 C-311 L-307 L-311 H-307 H-311; do
     .seed == $seed and .status == "preregistered" and
     .hypothesis_id == "V2-7-P7A-DISTRESS" and .log_mode == "full" and
     .cross_asset_spot_graph == false and .checkpoint_interval_seconds == 30 and
+    .fixed_distance_maker_symbols == ["ABC/USD", "ABC-PERP"] and
+    .imbalance_maker_symbols == ["ABC/USD", "ABC-PERP"] and
+    (.noise_target_qty_by_symbol | keys) == ["ABC-PERP"] and
     .strict_population_accounting == true and
     .record_market_data_receipts == true and
     .record_perp_exposure_hedger_decisions == true and
@@ -47,7 +50,7 @@ for cell in C-307 C-311 L-307 L-311 H-307 H-311; do
     .perp_exposure_hedger.exposure_step_qty == 1 and
     .perp_exposure_hedger.max_abs_exposure == 1000000000 and
     .perp_exposure_hedger.max_request_qty == 250000000 and
-    .perp_exposure_hedger.tick_size == 1000000 and
+    .perp_exposure_hedger.tick_size == 10000 and
     .perp_exposure_hedger.initial_quote_balance == 50000000 and
     .perp_exposure_hedger.initial_margin == $margin
   ' "$file" >/dev/null
@@ -57,6 +60,8 @@ normalise_base() {
 	jq -S '
     del(.experiment_id,.hypothesis_id,.description,.date,.status,.seed,
         .cross_asset_spot_graph,.checkpoint_interval_seconds,
+        .fixed_distance_maker_symbols,.imbalance_maker_symbols,
+        .noise_target_qty_by_symbol,
         .record_market_data_receipts,.market_data_receipt_roles,
         .record_perp_exposure_hedger_decisions,.latency_profiles.perp_exposure_hedger,
         .perp_exposure_hedger)

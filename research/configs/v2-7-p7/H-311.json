@@ -234,14 +234,10 @@
   },
   "fixed_distance_maker_symbols": [
     "ABC/USD",
-    "CDF/USD",
-    "ABC/CDF",
     "ABC-PERP"
   ],
   "imbalance_maker_symbols": [
     "ABC/USD",
-    "CDF/USD",
-    "ABC/CDF",
     "ABC-PERP"
   ],
   "vanna_volga_desk_count": 3,
@@ -341,8 +337,6 @@
     "delay": 5000000
   },
   "noise_target_qty_by_symbol": {
-    "CDF/USD": 500000000,
-    "ABC/CDF": 500000000,
     "ABC-PERP": 1000000000
   },
   "future_flow_count": 3,
@@ -364,7 +358,7 @@
     "exposure_step_qty": 1,
     "max_abs_exposure": 1000000000,
     "max_request_qty": 250000000,
-    "tick_size": 1000000,
+    "tick_size": 10000,
     "initial_quote_balance": 50000000,
     "initial_margin": 60000000000
   }

@@ -67,8 +67,11 @@ All cells inherit the V2 environment's three venues, matching rules, maker and
 taker roster, borrowing configuration, spread/depth, latency profiles,
 funding, listing/expiry, and deterministic one-second runner step.  The
 cross-asset graph is disabled for this first slice so CDF/USD mark viability
-cannot censor a perp-only distress question.  No existing V2 population is
-retuned.
+cannot censor a perp-only distress question.  The fixed-distance and
+imbalance maker rosters are therefore projected onto the remaining
+`["ABC/USD", "ABC-PERP"]` books, and CDF noise-target entries are removed;
+without that validity projection the inherited config names books that do not
+exist.  No existing V2 population is retuned.
 
 Development seeds are **307 and 311**.  They are new screening seeds, not
 holdouts from P4/P5/P6.  Untouched holdouts are **313, 317, and 331** and are

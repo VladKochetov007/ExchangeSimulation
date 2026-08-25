@@ -33,6 +33,9 @@ for seed in 307 311; do
 			 | .description = ("P7a fixed-liability distress screen " + $cell + "; only declared participant enablement and finite perp margin differ across cells")
 			 | .seed = $seed
 			 | .cross_asset_spot_graph = false
+			 | .fixed_distance_maker_symbols = ["ABC/USD", "ABC-PERP"]
+			 | .imbalance_maker_symbols = ["ABC/USD", "ABC-PERP"]
+			 | .noise_target_qty_by_symbol = {"ABC-PERP": .noise_target_qty_by_symbol["ABC-PERP"]}
 			 | .checkpoint_interval_seconds = 30
 			 | .record_market_data_receipts = true
 			 | .market_data_receipt_roles = ["perp_exposure_hedger"]
@@ -50,7 +53,7 @@ for seed in 307 311; do
 			     exposure_step_qty: 1,
 			     max_abs_exposure: 1000000000,
 			     max_request_qty: 250000000,
-			     tick_size: 1000000,
+			     tick_size: 10000,
 			     initial_quote_balance: 50000000,
 			     initial_margin: $margin
 			   }
