@@ -1,0 +1,4 @@
+jq: error: $output is not defined at <top-level>, line 7, column 41:
+    	  gomaxprocs: $gomaxprocs, output_dir: $output,
+                                            ^^^^^^^
+jq: 1 compile error

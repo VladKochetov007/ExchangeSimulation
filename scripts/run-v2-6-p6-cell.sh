@@ -51,7 +51,7 @@ jq -n \
 	  stage: $stage, seed: $seed, simulated_horizon: "8h0m0s",
 	  config_sha256: $config_sha256, binary_sha256: $binary_sha256,
 	  git_revision: $git_revision, go_version: $go_version,
-	  gomaxprocs: $gomaxprocs, output_dir: $output,
+	  gomaxprocs: $gomaxprocs, output_dir: $output_dir,
 	  command: ["multivenue", "-config", "run-config.json", "-duration", "8h", "-log-mode", "full"],
 	  completion_sentinels: ["greeks.json", "latency.json"],
 	  raw_log_policy: "retain until every registered P6 evidence contract passes"
@@ -64,4 +64,3 @@ if [[ ! -s "$output/greeks.json" || ! -s "$output/latency.json" ]]; then
 	exit 1
 fi
 echo "completed P6 cell: $output"
-
