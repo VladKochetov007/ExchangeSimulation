@@ -26,20 +26,21 @@ const (
 type DatedCarryP5Audit struct {
 	TradeEnabled bool `json:"trade_enabled"`
 
-	Decisions          int64            `json:"decisions"`
-	CandidateDecisions int64            `json:"candidate_decisions"`
-	EligibleDecisions  int64            `json:"eligible_decisions"`
-	ShadowEligible     int64            `json:"shadow_eligible"`
-	TargetChanges      int64            `json:"target_changes"`
-	Submitted          int64            `json:"submitted"`
-	Accepted           int64            `json:"accepted"`
-	Rejected           int64            `json:"rejected"`
-	Fills              int64            `json:"fills"`
-	FilledQty          int64            `json:"filled_qty"`
-	Cancelled          int64            `json:"cancelled"`
-	Settlements        int64            `json:"settlements"`
-	ClosedTerms        int64            `json:"closed_terms"`
-	ActionCounts       map[string]int64 `json:"action_counts"`
+	Decisions          int64              `json:"decisions"`
+	CandidateDecisions int64              `json:"candidate_decisions"`
+	EligibleDecisions  int64              `json:"eligible_decisions"`
+	ShadowEligible     int64              `json:"shadow_eligible"`
+	TargetChanges      int64              `json:"target_changes"`
+	Submitted          int64              `json:"submitted"`
+	Accepted           int64              `json:"accepted"`
+	Rejected           int64              `json:"rejected"`
+	Fills              int64              `json:"fills"`
+	FilledQty          int64              `json:"filled_qty"`
+	Cancelled          int64              `json:"cancelled"`
+	Settlements        int64              `json:"settlements"`
+	ClosedTerms        int64              `json:"closed_terms"`
+	ActionCounts       map[string]int64   `json:"action_counts"`
+	Terms              []DatedCarryP5Term `json:"terms,omitempty"`
 
 	ReceiptAuditValid     bool                `json:"receipt_audit_valid"`
 	ReceiptEvidenceErrors int64               `json:"receipt_evidence_errors"`
@@ -60,6 +61,36 @@ type DatedCarryP5Audit struct {
 	PositionErrors        int64               `json:"position_errors"`
 	Checks                []DatedCarryP5Check `json:"checks,omitempty"`
 	Valid                 bool                `json:"valid"`
+}
+
+// DatedCarryP5Term is one first independently eligible candidate for a
+// venue/contract generation and the complete ordinary-execution lifecycle
+// linked to it. Repeated two-second decisions never overweight one term.
+type DatedCarryP5Term struct {
+	VenueID             string `json:"venue_id"`
+	ClientID            uint64 `json:"client_id"`
+	FutureSymbol        string `json:"future_symbol"`
+	ListedNano          int64  `json:"listed_nano"`
+	ExpiryNano          int64  `json:"expiry_nano"`
+	CandidateAt         int64  `json:"candidate_at"`
+	TargetChangedAt     int64  `json:"target_changed_at"`
+	Direction           int64  `json:"direction"`
+	DirectionName       string `json:"direction_name"`
+	NetCarryNumerator   string `json:"net_carry_bps_numerator"`
+	RationalDenominator string `json:"rational_denominator"`
+	MinimumNumerator    string `json:"minimum_net_bps_numerator"`
+	Eligible            bool   `json:"eligible"`
+	Shadow              bool   `json:"shadow"`
+	TargetSpot          int64  `json:"target_spot"`
+	TargetFuture        int64  `json:"target_future"`
+	SpotFilledQty       int64  `json:"spot_filled_qty"`
+	FutureFilledQty     int64  `json:"future_filled_qty"`
+	MatchedQty          int64  `json:"matched_qty"`
+	ExecutionQualified  bool   `json:"execution_qualified"`
+	TermActive          bool   `json:"term_active"`
+	SettlementProven    bool   `json:"settlement_proven"`
+	ClosedExactlyOnce   bool   `json:"closed_exactly_once"`
+	LifecycleQualified  bool   `json:"lifecycle_qualified"`
 }
 
 type DatedCarryP5Check struct {
@@ -651,21 +682,23 @@ func p5VenueOrderMatches(decision datedCarryP5Decision, order fundingCarryVenueO
 }
 
 func p5ActorAccepted(outcomes []datedCarryP5Outcome, orderID uint64) bool {
+	matches := 0
 	for _, outcome := range outcomes {
 		if outcome.Event == "ORDER_ACCEPTED" && outcome.OrderID == orderID {
-			return true
+			matches++
 		}
 	}
-	return false
+	return matches == 1
 }
 
 func p5ActorRejected(outcomes []datedCarryP5Outcome, reason string) bool {
+	matches := 0
 	for _, outcome := range outcomes {
 		if outcome.Event == "ORDER_REJECTED" && outcome.RejectReason == reason {
-			return true
+			matches++
 		}
 	}
-	return false
+	return matches == 1
 }
 
 func p5ActorFillMatches(outcomes []datedCarryP5Outcome, fill fundingCarryVenueFill) bool {
@@ -687,6 +720,220 @@ func p5ActorCancelled(outcomes []datedCarryP5Outcome, orderID uint64, remaining 
 		}
 	}
 	return matches == 1
+}
+
+type p5CarryTermKey struct {
+	venue, symbol string
+	client        uint64
+}
+
+type p5CarryTimelineItem struct {
+	at       int64
+	index    int
+	decision *datedCarryP5Decision
+	outcome  *datedCarryP5Outcome
+}
+
+type p5CarryLifecycle struct {
+	active      map[p5CarryTermKey]bool
+	settlements map[p5CarryTermKey]int
+	closed      map[p5CarryTermKey]int
+}
+
+func auditP5CarryLifecycle(policy datedCarryP5Config, decisions []datedCarryP5Decision, outcomes []datedCarryP5Outcome, canonicalSettlements map[p5ListingKey]p5Listing, result *DatedCarryP5Audit, check func(datedCarryP5Decision, string)) p5CarryLifecycle {
+	lifecycle := p5CarryLifecycle{active: make(map[p5CarryTermKey]bool), settlements: make(map[p5CarryTermKey]int), closed: make(map[p5CarryTermKey]int)}
+	byParticipantDecisions := make(map[termCarryParticipant][]datedCarryP5Decision)
+	byParticipantOutcomes := make(map[termCarryParticipant][]datedCarryP5Outcome)
+	participants := make(map[termCarryParticipant]struct{})
+	requestContract := make(map[fundingCarryKey]string)
+	expiry := make(map[p5CarryTermKey]int64)
+	for _, decision := range decisions {
+		participant := termCarryParticipant{venue: decision.VenueID, client: decision.ClientID}
+		byParticipantDecisions[participant] = append(byParticipantDecisions[participant], decision)
+		participants[participant] = struct{}{}
+		if decision.RequestID != 0 {
+			requestContract[fundingCarryKey{decision.VenueID, decision.ClientID, decision.RequestID}] = decision.FutureSymbol
+		}
+		if decision.FutureSymbol != "" {
+			expiry[p5CarryTermKey{decision.VenueID, decision.FutureSymbol, decision.ClientID}] = decision.ExpiryNano
+		}
+	}
+	for _, outcome := range outcomes {
+		participant := termCarryParticipant{venue: outcome.VenueID, client: outcome.ClientID}
+		byParticipantOutcomes[participant] = append(byParticipantOutcomes[participant], outcome)
+		participants[participant] = struct{}{}
+	}
+	for participant := range participants {
+		items := make([]p5CarryTimelineItem, 0, len(byParticipantDecisions[participant])+len(byParticipantOutcomes[participant]))
+		for index := range byParticipantDecisions[participant] {
+			decision := &byParticipantDecisions[participant][index]
+			items = append(items, p5CarryTimelineItem{at: decision.DecisionTime, index: index, decision: decision})
+		}
+		for index := range byParticipantOutcomes[participant] {
+			outcome := &byParticipantOutcomes[participant][index]
+			at := outcome.DecisionTime
+			if outcome.ExecutionTime != 0 {
+				at = outcome.ExecutionTime
+			}
+			items = append(items, p5CarryTimelineItem{at: at, index: index, outcome: outcome})
+		}
+		sort.SliceStable(items, func(i, j int) bool {
+			if items[i].at != items[j].at {
+				return items[i].at < items[j].at
+			}
+			if (items[i].decision != nil) != (items[j].decision != nil) {
+				return items[i].decision != nil
+			}
+			return items[i].index < items[j].index
+		})
+		spotPosition := int64(0)
+		futurePositions := make(map[string]int64)
+		for _, item := range items {
+			if item.decision != nil {
+				decision := *item.decision
+				if decision.SpotPosition != spotPosition || decision.FutureSymbol != "" && decision.FuturePosition != futurePositions[decision.FutureSymbol] {
+					result.PositionErrors++
+					check(decision, "decision_position_continuity")
+				}
+				if decision.Action == "TERM_ACTIVE" && decision.FutureSymbol != "" {
+					lifecycle.active[p5CarryTermKey{decision.VenueID, decision.FutureSymbol, decision.ClientID}] = true
+				}
+				if decision.Action == "TERM_CLOSED" {
+					key := p5CarryTermKey{decision.VenueID, decision.FutureSymbol, decision.ClientID}
+					lifecycle.closed[key]++
+					if spotPosition != 0 || futurePositions[decision.FutureSymbol] != 0 || lifecycle.settlements[key] != 1 {
+						result.PositionErrors++
+						check(decision, "unproven_term_close")
+					}
+				}
+				continue
+			}
+			outcome := *item.outcome
+			contract := outcome.Symbol
+			if contract == policy.SpotSymbol {
+				contract = requestContract[fundingCarryKey{outcome.VenueID, outcome.ClientID, outcome.RequestID}]
+			}
+			key := p5CarryTermKey{outcome.VenueID, contract, outcome.ClientID}
+			if outcome.SpotPositionBefore != spotPosition || outcome.FuturePositionBefore != futurePositions[contract] {
+				result.PositionErrors++
+				result.Checks = append(result.Checks, DatedCarryP5Check{VenueID: outcome.VenueID, ClientID: outcome.ClientID, At: item.at, Failure: "outcome_position_before_discontinuity"})
+			}
+			switch outcome.Event {
+			case "ORDER_FILL":
+				delta := outcome.Qty
+				if outcome.Side == exchange.Sell.String() {
+					delta = -delta
+				}
+				if outcome.Symbol == policy.SpotSymbol {
+					spotPosition += delta
+				} else {
+					futurePositions[contract] += delta
+				}
+				if expiryAt := expiry[key]; expiryAt != 0 && strings.HasPrefix(outcome.Leg, "ENTRY_") && outcome.ExecutionTime > expiryAt {
+					result.PositionErrors++
+					result.Checks = append(result.Checks, DatedCarryP5Check{VenueID: outcome.VenueID, ClientID: outcome.ClientID, At: item.at, Failure: "entry_fill_after_expiry"})
+				}
+			case "CONTRACT_SETTLED":
+				canonical, found := canonicalSettlements[p5ListingKey{outcome.VenueID, outcome.Symbol}]
+				if !found || canonical.announcement.SettlementPrice == nil || !outcome.HasSettlement || *canonical.announcement.SettlementPrice != outcome.SettlementPrice || canonical.at > item.at {
+					result.PositionErrors++
+					result.Checks = append(result.Checks, DatedCarryP5Check{VenueID: outcome.VenueID, ClientID: outcome.ClientID, At: item.at, Failure: "settlement_evidence_mismatch"})
+				}
+				futurePositions[contract] = 0
+				lifecycle.settlements[key]++
+			case "ORDER_ACCEPTED", "ORDER_REJECTED", "ORDER_CANCELLED", "ORDER_CANCEL_REJECTED":
+			default:
+				result.ActorOutcomeErrors++
+				result.Checks = append(result.Checks, DatedCarryP5Check{VenueID: outcome.VenueID, ClientID: outcome.ClientID, At: item.at, Failure: "unknown_actor_outcome"})
+			}
+			if outcome.SpotPositionAfter != spotPosition || outcome.FuturePositionAfter != futurePositions[contract] {
+				result.PositionErrors++
+				result.Checks = append(result.Checks, DatedCarryP5Check{VenueID: outcome.VenueID, ClientID: outcome.ClientID, At: item.at, Failure: "outcome_position_after_discontinuity"})
+			}
+		}
+	}
+	for key, count := range lifecycle.settlements {
+		if count != 1 {
+			result.PositionErrors++
+			result.Checks = append(result.Checks, DatedCarryP5Check{VenueID: key.venue, ClientID: key.client, Failure: "settlement_not_exactly_once"})
+		}
+	}
+	for key, count := range lifecycle.closed {
+		if count != 1 {
+			result.PositionErrors++
+			result.Checks = append(result.Checks, DatedCarryP5Check{VenueID: key.venue, ClientID: key.client, Failure: "term_close_not_exactly_once"})
+		}
+	}
+	return lifecycle
+}
+
+func buildP5Terms(policy datedCarryP5Config, decisions []datedCarryP5Decision, outcomes []datedCarryP5Outcome, lifecycle p5CarryLifecycle) []DatedCarryP5Term {
+	terms := make(map[p5CarryTermKey]DatedCarryP5Term)
+	requestContract := make(map[fundingCarryKey]string)
+	for _, decision := range decisions {
+		if decision.RequestID != 0 && decision.FutureSymbol != "" {
+			requestContract[fundingCarryKey{decision.VenueID, decision.ClientID, decision.RequestID}] = decision.FutureSymbol
+		}
+		if decision.Action != "SHADOW_ELIGIBLE" && decision.Action != "SUBMIT_ENTRY_SPOT_IOC" {
+			continue
+		}
+		key := p5CarryTermKey{decision.VenueID, decision.FutureSymbol, decision.ClientID}
+		if _, exists := terms[key]; exists {
+			continue
+		}
+		financials, err := recomputeP5Financials(policy, decision)
+		if err != nil || !financials.eligible {
+			continue
+		}
+		direction := int64(1)
+		if financials.direction == "CHEAP_FUTURE" {
+			direction = -1
+		}
+		terms[key] = DatedCarryP5Term{
+			VenueID: decision.VenueID, ClientID: decision.ClientID, FutureSymbol: decision.FutureSymbol,
+			ListedNano: decision.ListedNano, ExpiryNano: decision.ExpiryNano, CandidateAt: decision.DecisionTime,
+			TargetChangedAt: decision.TargetChangedAt, Direction: direction, DirectionName: financials.direction,
+			NetCarryNumerator: financials.net.String(), RationalDenominator: financials.denominator.String(), MinimumNumerator: financials.minimum.String(),
+			Eligible: true, Shadow: !policy.TradeEnabled, TargetSpot: decision.TargetSpot, TargetFuture: decision.TargetFuture,
+		}
+	}
+	for key, term := range terms {
+		for _, outcome := range outcomes {
+			if outcome.VenueID != key.venue || outcome.ClientID != key.client || outcome.Event != "ORDER_FILL" || requestContract[fundingCarryKey{outcome.VenueID, outcome.ClientID, outcome.RequestID}] != key.symbol {
+				continue
+			}
+			if outcome.Leg == "ENTRY_SPOT_IOC" && outcome.Symbol == policy.SpotSymbol && (term.Direction > 0 && outcome.Side == exchange.Buy.String() || term.Direction < 0 && outcome.Side == exchange.Sell.String()) {
+				term.SpotFilledQty += outcome.Qty
+			}
+			if outcome.Leg == "ENTRY_FUTURE_IOC" && outcome.Symbol == key.symbol && (term.Direction > 0 && outcome.Side == exchange.Sell.String() || term.Direction < 0 && outcome.Side == exchange.Buy.String()) {
+				term.FutureFilledQty += outcome.Qty
+			}
+		}
+		term.MatchedQty = term.SpotFilledQty
+		if term.FutureFilledQty < term.MatchedQty {
+			term.MatchedQty = term.FutureFilledQty
+		}
+		term.ExecutionQualified = term.MatchedQty >= policy.LotQty
+		term.TermActive = lifecycle.active[key]
+		term.SettlementProven = lifecycle.settlements[key] == 1
+		term.ClosedExactlyOnce = lifecycle.closed[key] == 1
+		term.LifecycleQualified = term.ExecutionQualified && term.TermActive && term.SettlementProven && term.ClosedExactlyOnce
+		terms[key] = term
+	}
+	result := make([]DatedCarryP5Term, 0, len(terms))
+	for _, term := range terms {
+		result = append(result, term)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].VenueID != result[j].VenueID {
+			return result[i].VenueID < result[j].VenueID
+		}
+		if result[i].ListedNano != result[j].ListedNano {
+			return result[i].ListedNano < result[j].ListedNano
+		}
+		return result[i].FutureSymbol < result[j].FutureSymbol
+	})
+	return result
 }
 
 // MeasureDatedCarryP5 audits P5 links 1--3 and the declared shadow/active
@@ -721,7 +968,8 @@ func (r *Run) MeasureDatedCarryP5() (*DatedCarryP5Audit, error) {
 	fills := make(map[fundingCarryOrderKey][]fundingCarryVenueFill)
 	cancels := make(map[fundingCarryOrderKey][]termCarryVenueCancellation)
 	listings := make(map[p5ListingKey]p5Listing)
-	if err := r.Scan(ScanOptions{Events: []string{"dated_term_carry_decision", "dated_term_carry_outcome", "instrument_listed", "OrderAccepted", "OrderRejected", "OrderFill", "OrderCancelled"}, Workers: 1}, func(event Event) {
+	settlements := make(map[p5ListingKey]p5Listing)
+	if err := r.Scan(ScanOptions{Events: []string{"dated_term_carry_decision", "dated_term_carry_outcome", "instrument_listed", "instrument_settled", "OrderAccepted", "OrderRejected", "OrderFill", "OrderCancelled"}, Workers: 1}, func(event Event) {
 		switch event.Name {
 		case "dated_term_carry_decision":
 			var decision datedCarryP5Decision
@@ -737,17 +985,25 @@ func (r *Run) MeasureDatedCarryP5() (*DatedCarryP5Audit, error) {
 				return
 			}
 			outcomes = append(outcomes, outcome)
-		case "instrument_listed":
+		case "instrument_listed", "instrument_settled":
 			var announcement etypes.InstrumentAnnouncement
 			if event.Decode(&announcement) != nil || announcement.Symbol == "" {
 				return
 			}
 			key := p5ListingKey{event.VenueID, announcement.Symbol}
-			if _, duplicate := listings[key]; duplicate {
-				result.TermMismatches++
-				return
+			if event.Name == "instrument_listed" {
+				if _, duplicate := listings[key]; duplicate {
+					result.TermMismatches++
+					return
+				}
+				listings[key] = p5Listing{at: event.SimTS, announcement: announcement}
+			} else {
+				if _, duplicate := settlements[key]; duplicate {
+					result.PositionErrors++
+					return
+				}
+				settlements[key] = p5Listing{at: event.SimTS, announcement: announcement}
 			}
-			listings[key] = p5Listing{at: event.SimTS, announcement: announcement}
 		case "OrderAccepted", "OrderRejected":
 			if r.Role(event.VenueID, event.ClientID) != "dated_term_carry_allocator" {
 				return
@@ -1004,6 +1260,8 @@ func (r *Run) MeasureDatedCarryP5() (*DatedCarryP5Audit, error) {
 			}
 		}
 	}
+	lifecycle := auditP5CarryLifecycle(*manifest.Config.DatedTermCarry, decisions, outcomes, settlements, result, check)
+	result.Terms = buildP5Terms(*manifest.Config.DatedTermCarry, decisions, outcomes, lifecycle)
 	if result.Decisions == 0 {
 		result.PolicyMismatches++
 		result.Checks = append(result.Checks, DatedCarryP5Check{Failure: "missing_dated_carry_decisions"})

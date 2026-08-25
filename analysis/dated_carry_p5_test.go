@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"exchange_sim/exchange"
+	etypes "exchange_sim/types"
 )
 
 func p5TestPolicy(trade bool) datedCarryP5Config {
@@ -203,5 +204,88 @@ func TestP5ReceiptJoinRejectsFutureWrongAndAmbiguousSources(t *testing.T) {
 	decision.DecisionTime = 79
 	if err := p5SourceInFrontier(decision, evidence, exchange.MDInstrument, "_instruments", 0, 50, hex.EncodeToString(firstFingerprint[:])); err == nil {
 		t.Fatal("future delivery survived")
+	}
+}
+
+func TestP5LifecycleRequiresRealExitAndExactlyOneZeroSettlement(t *testing.T) {
+	policy := p5TestPolicy(true)
+	entry := p5TestCandidate(policy)
+	entry.FutureSymbol = "ABC-FUT"
+	entry.ExpiryNano = entry.DecisionTime + 100
+	entry.RequestID = 41
+	futureOrder := entry
+	futureOrder.DecisionTime += 2
+	futureOrder.Action, futureOrder.Leg, futureOrder.Side, futureOrder.RequestID = "SUBMIT_ENTRY_FUTURE_IOC", "ENTRY_FUTURE_IOC", exchange.Sell.String(), 42
+	futureOrder.SpotPosition = policy.LotQty
+	active := futureOrder
+	active.DecisionTime += 2
+	active.Action, active.RequestID, active.SpotPosition, active.FuturePosition = "TERM_ACTIVE", 0, policy.LotQty, -policy.LotQty
+	exit := active
+	exit.DecisionTime = entry.ExpiryNano + 2
+	exit.Action, exit.Leg, exit.Side, exit.RequestID = "SUBMIT_EXIT_SPOT_IOC", "EXIT_SPOT_IOC", exchange.Sell.String(), 43
+	exit.FuturePosition = 0
+	closed := exit
+	closed.DecisionTime += 2
+	closed.Action, closed.RequestID, closed.SpotPosition = "TERM_CLOSED", 0, 0
+	decisions := []datedCarryP5Decision{entry, futureOrder, active, exit, closed}
+	outcomes := []datedCarryP5Outcome{
+		{VenueID: "north", ClientID: 9, DecisionTime: entry.DecisionTime, ExecutionTime: entry.DecisionTime + 1, Event: "ORDER_FILL", Leg: "ENTRY_SPOT_IOC", Symbol: policy.SpotSymbol, Side: exchange.Buy.String(), RequestID: 41, OrderID: 51, TradeID: 61, Qty: policy.LotQty, SpotPositionAfter: policy.LotQty},
+		{VenueID: "north", ClientID: 9, DecisionTime: futureOrder.DecisionTime, ExecutionTime: futureOrder.DecisionTime + 1, Event: "ORDER_FILL", Leg: "ENTRY_FUTURE_IOC", Symbol: entry.FutureSymbol, Side: exchange.Sell.String(), RequestID: 42, OrderID: 52, TradeID: 62, Qty: policy.LotQty, SpotPositionBefore: policy.LotQty, SpotPositionAfter: policy.LotQty, FuturePositionAfter: -policy.LotQty},
+		{VenueID: "north", ClientID: 9, ExecutionTime: entry.ExpiryNano + 1, Event: "CONTRACT_SETTLED", Symbol: entry.FutureSymbol, SpotPositionBefore: policy.LotQty, SpotPositionAfter: policy.LotQty, FuturePositionBefore: -policy.LotQty, HasSettlement: true},
+		{VenueID: "north", ClientID: 9, DecisionTime: exit.DecisionTime, ExecutionTime: exit.DecisionTime + 1, Event: "ORDER_FILL", Leg: "EXIT_SPOT_IOC", Symbol: policy.SpotSymbol, Side: exchange.Sell.String(), RequestID: 43, OrderID: 53, TradeID: 63, Qty: policy.LotQty, SpotPositionBefore: policy.LotQty},
+	}
+	zero := int64(0)
+	settlements := map[p5ListingKey]p5Listing{{"north", entry.FutureSymbol}: {at: entry.ExpiryNano, announcement: etypes.InstrumentAnnouncement{Action: "settled", Symbol: entry.FutureSymbol, SettlementPrice: &zero}}}
+	result := &DatedCarryP5Audit{}
+	check := func(decision datedCarryP5Decision, failure string) {
+		result.Checks = append(result.Checks, DatedCarryP5Check{At: decision.DecisionTime, Failure: failure})
+	}
+	lifecycle := auditP5CarryLifecycle(policy, decisions, outcomes, settlements, result, check)
+	key := p5CarryTermKey{"north", entry.FutureSymbol, 9}
+	if result.PositionErrors != 0 || !lifecycle.active[key] || lifecycle.settlements[key] != 1 || lifecycle.closed[key] != 1 {
+		t.Fatalf("valid lifecycle = result %+v lifecycle %+v", result, lifecycle)
+	}
+
+	withoutExit := append([]datedCarryP5Outcome(nil), outcomes[:3]...)
+	broken := &DatedCarryP5Audit{}
+	auditP5CarryLifecycle(policy, decisions, withoutExit, settlements, broken, func(datedCarryP5Decision, string) {})
+	if broken.PositionErrors == 0 {
+		t.Fatal("synthetic spot reset/close survived without canonical exit fill")
+	}
+
+	duplicated := append(append([]datedCarryP5Outcome(nil), outcomes...), outcomes[2])
+	broken = &DatedCarryP5Audit{}
+	auditP5CarryLifecycle(policy, decisions, duplicated, settlements, broken, func(datedCarryP5Decision, string) {})
+	if broken.PositionErrors == 0 {
+		t.Fatal("double settlement survived")
+	}
+}
+
+func TestP5TermsBindSpotFillsToTheirRequestContract(t *testing.T) {
+	policy := p5TestPolicy(true)
+	first := p5TestCandidate(policy)
+	first.FutureSymbol, first.RequestID = "ABC-FUT-1", 41
+	second := first
+	second.FutureSymbol, second.RequestID, second.DecisionTime = "ABC-FUT-2", 42, first.DecisionTime+1_000
+	second.SpotPublishedAt += 1_000
+	second.FuturePublishedAt += 1_000
+	firstFuture := first
+	firstFuture.Leg, firstFuture.RequestID = "ENTRY_FUTURE_IOC", 51
+	secondFuture := second
+	secondFuture.Leg, secondFuture.RequestID = "ENTRY_FUTURE_IOC", 52
+	outcomes := []datedCarryP5Outcome{
+		{VenueID: "north", ClientID: 9, Event: "ORDER_FILL", Leg: "ENTRY_SPOT_IOC", Symbol: policy.SpotSymbol, Side: exchange.Buy.String(), RequestID: 41, Qty: policy.LotQty},
+		{VenueID: "north", ClientID: 9, Event: "ORDER_FILL", Leg: "ENTRY_FUTURE_IOC", Symbol: first.FutureSymbol, Side: exchange.Sell.String(), RequestID: 51, Qty: policy.LotQty},
+		{VenueID: "north", ClientID: 9, Event: "ORDER_FILL", Leg: "ENTRY_SPOT_IOC", Symbol: policy.SpotSymbol, Side: exchange.Buy.String(), RequestID: 42, Qty: policy.LotQty},
+		{VenueID: "north", ClientID: 9, Event: "ORDER_FILL", Leg: "ENTRY_FUTURE_IOC", Symbol: second.FutureSymbol, Side: exchange.Sell.String(), RequestID: 52, Qty: policy.LotQty},
+	}
+	terms := buildP5Terms(policy, []datedCarryP5Decision{first, firstFuture, second, secondFuture}, outcomes, p5CarryLifecycle{active: map[p5CarryTermKey]bool{}, settlements: map[p5CarryTermKey]int{}, closed: map[p5CarryTermKey]int{}})
+	if len(terms) != 2 {
+		t.Fatalf("terms = %+v", terms)
+	}
+	for _, term := range terms {
+		if term.SpotFilledQty != policy.LotQty || term.FutureFilledQty != policy.LotQty || term.MatchedQty != policy.LotQty {
+			t.Fatalf("cross-term fill contamination: %+v", term)
+		}
 	}
 }
