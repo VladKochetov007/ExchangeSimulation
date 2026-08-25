@@ -99,6 +99,7 @@ func main() {
 	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
 	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
+	marginRole := flag.String("margin-role", "noise_flow", "role for the independent margin-check replay")
 	base := flag.String("base", "ABC-USD", "triangle base book")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
 	cross := flag.String("cross", "ABC-CDF", "triangle cross book")
@@ -890,7 +891,9 @@ func main() {
 					result.TotalDeficit, result.DeficitInsuranceResidual, result.DeficitBalanceResidual)
 			})
 		case "marginchecks":
-			result, err := run.MeasureMarginChecks(analysis.DefaultMarginCheckOptions())
+			opts := analysis.DefaultMarginCheckOptions()
+			opts.Role = *marginRole
+			result, err := run.MeasureMarginChecks(opts)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)
