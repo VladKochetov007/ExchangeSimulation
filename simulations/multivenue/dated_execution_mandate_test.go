@@ -116,4 +116,25 @@ func TestDatedExecutionMandateRejectsAmbiguousListingEpoch(t *testing.T) {
 	}
 }
 
+func TestDatedExecutionMandateDoesNotSubmitBeyondEvidenceHorizon(t *testing.T) {
+	gateway := newFundingCarryStubGateway()
+	var decisions []DatedExecutionMandateDecision
+	listed := time.Unix(100, 0)
+	terminal := listed.Add(10 * time.Minute)
+	cfg := datedMandateTestConfig()
+	cfg.TerminalNano = terminal.UnixNano()
+	cfg.DecisionObserver = func(decision DatedExecutionMandateDecision) { decisions = append(decisions, decision) }
+	mandate := NewDatedExecutionMandate(1, gateway, cfg)
+	mandate.subscribed = true
+	deliverDatedMandateListing(t, mandate, listed, "ABC-FUT-8H", 8*time.Hour, 7)
+	contract := mandate.contracts["ABC-FUT-8H"]
+	contract.book = fundingCarryBook{hasSnapshot: true, publishedAt: terminal.UnixNano(), hasAsk: true, ask: 100, askQty: 10}
+	requestsBefore := len(gateway.requests)
+	mandate.onTick(terminal)
+	got := decisions[len(decisions)-1]
+	if got.Action != "SIMULATION_HORIZON_CENSORED" || got.RequestID != 0 || len(gateway.requests) != requestsBefore || got.RemainingQty != cfg.ParentQty {
+		t.Fatalf("terminal evidence = decision %+v requests %d/%d", got, requestsBefore, len(gateway.requests))
+	}
+}
+
 func contractTime(nanos int64) time.Time { return time.Unix(0, nanos) }

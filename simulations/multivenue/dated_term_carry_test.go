@@ -181,6 +181,25 @@ func TestDatedCarrySettlementDoesNotErasePendingLeg(t *testing.T) {
 	}
 }
 
+func TestDatedCarryDoesNotSubmitBeyondEvidenceHorizon(t *testing.T) {
+	gateway := newFundingCarryStubGateway()
+	var decisions []DatedTermCarryDecision
+	listed := time.Unix(100, 0)
+	terminal := listed.Add(2 * time.Second)
+	cfg := datedCarryTestConfig(true)
+	cfg.TerminalNano = terminal.UnixNano()
+	cfg.DecisionObserver = func(decision DatedTermCarryDecision) { decisions = append(decisions, decision) }
+	allocator := NewDatedTermCarryAllocator(1, gateway, cfg)
+	allocator.subscribed = true
+	observeDatedCarryWorld(t, allocator, gateway, listed, 9_999, 10_000, 10_100, 10_101)
+	requestsBefore := len(gateway.requests)
+	allocator.onTick(terminal)
+	got := decisions[len(decisions)-1]
+	if got.Action != "SIMULATION_HORIZON_CENSORED" || got.RequestID != 0 || len(gateway.requests) != requestsBefore || got.SpotPosition != 0 || got.FuturePosition != 0 {
+		t.Fatalf("terminal evidence = decision %+v requests %d/%d", got, requestsBefore, len(gateway.requests))
+	}
+}
+
 func acceptAndFillDatedCarry(t *testing.T, allocator *DatedTermCarryAllocator, requestID, orderID uint64, symbol string, side exchange.Side, quantity int64, at time.Time) {
 	t.Helper()
 	allocator.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: requestID, OrderID: orderID}})

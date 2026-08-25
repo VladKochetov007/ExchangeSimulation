@@ -32,6 +32,7 @@ type DatedExecutionMandateConfig struct {
 	MaxMarketAge      time.Duration                       `json:"max_market_age_nanos"`
 	SlippageBps       int64                               `json:"slippage_bps"`
 	TickSize          int64                               `json:"tick_size"`
+	TerminalNano      int64                               `json:"-"`
 	VenueID           string                              `json:"-"`
 	Desk              string                              `json:"-"`
 	ClientID          uint64                              `json:"-"`
@@ -252,6 +253,10 @@ func (m *DatedExecutionMandate) onTick(now time.Time) {
 	contract := m.nextContract()
 	if contract == nil {
 		m.emitDecision(m.baseDecision(now.UnixNano(), nil, "NO_ELIGIBLE_CONTRACT"))
+		return
+	}
+	if m.cfg.TerminalNano != 0 && now.UnixNano() >= m.cfg.TerminalNano {
+		m.emitDecision(m.baseDecision(now.UnixNano(), contract, "SIMULATION_HORIZON_CENSORED"))
 		return
 	}
 	decision := m.decide(now.UnixNano(), contract)

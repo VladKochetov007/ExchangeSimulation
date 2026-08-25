@@ -44,6 +44,7 @@ type DatedTermCarryAllocatorConfig struct {
 	FutureTick                  int64                        `json:"future_tick"`
 	PassiveExitSliceQty         int64                        `json:"passive_exit_slice_qty"`
 	ExitDeadlineAfterSettlement time.Duration                `json:"exit_deadline_after_settlement_nanos"`
+	TerminalNano                int64                        `json:"-"`
 	VenueID                     string                       `json:"-"`
 	Desk                        string                       `json:"-"`
 	ClientID                    uint64                       `json:"-"`
@@ -368,6 +369,10 @@ func (a *DatedTermCarryAllocator) onTick(now time.Time) {
 		return
 	}
 	contract := a.nextContract()
+	if a.cfg.TerminalNano != 0 && now.UnixNano() >= a.cfg.TerminalNano {
+		a.emitDecision(a.baseDecision(now.UnixNano(), contract, "SIMULATION_HORIZON_CENSORED"))
+		return
+	}
 	decision := a.decide(now.UnixNano(), contract)
 	a.emitDecision(decision)
 	if decision.Action == "CANCEL_PASSIVE_EXIT_AT_DEADLINE" {
