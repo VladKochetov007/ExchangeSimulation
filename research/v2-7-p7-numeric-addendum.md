@@ -66,6 +66,18 @@ mark-viability censor from this perp-only mechanism screen.  The generated
 configs must retain the full evidence contract and must record the P7 policy
 version in their manifest.
 
+The checked renderer is `scripts/render-v2-7-p7-configs.sh`; the exact config
+hashes are verified by `scripts/check-v2-7-p7-configs.sh`:
+
+| cell | SHA-256 |
+|---|---|
+| C-307 | `25ae4e23510e2fbbdf539c5af0c1c419e1790cea87efa20e904c2a85bbef3173` |
+| C-311 | `e6a6167d1d37b12de41414eb2b2dcef9722419330c13be9b7376651c074317e2` |
+| L-307 | `5280b20934d750a4a1a966ef4db774d71718f0c174447df75e99b61dc948ed49` |
+| L-311 | `28e08418fc5914a6506736772a4aae830b79866f944da95b3f1b2dcd684ac740` |
+| H-307 | `8b3a3fdde285fa7e4891df1393af2310322f48aa0189e48c1a8cde28fdb1f4a5` |
+| H-311 | `f737817490fdf5561e2d5ef24a35fea7337b81b77f54759f13bee2d532ad0e14` |
+
 No holdout config may be generated until both development levels have passed
 the activation/evidence gate.  If an active level is inactive or invalid, all
 its registered cells remain in the ledger and no number is changed.
