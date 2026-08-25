@@ -95,7 +95,7 @@ func (p *analyzerProfiles) Stop() {
 }
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, perpreplenishment, liabilityhedger, fundingcarry, termcarry, termcarryp4chain, termcarryp4pair, datedcarryp5, termcarrylifecycle, perpexposurehedger, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, perpreplenishment, liabilityhedger, fundingcarry, termcarry, termcarryp4chain, termcarryp4pair, datedcarryp5, datedmandatep5, termcarrylifecycle, perpexposurehedger, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
 	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
 	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
@@ -330,6 +330,22 @@ func main() {
 					dir, result.TradeEnabled, result.Decisions, result.CandidateDecisions, result.EligibleDecisions,
 					result.ShadowEligible, result.TargetChanges, result.Submitted, result.ReceiptAuditValid, result.RoleLinksActive,
 					result.SourceMismatches, result.FrontierMismatches, result.TermMismatches, result.ArithmeticMismatches, result.PolicyMismatches, result.Valid)
+			})
+		case "datedmandatep5":
+			result, err := run.MeasureDatedMandateP5()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			if result.Decisions == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no P5 dated-mandate decision evidence\n", dir)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s decisions/submitted/accepted/rejected/fills %d/%d/%d/%d/%d filled %d receipt/roles %t/%t source/frontier/policy/parent/gateway/venue/actor errors %d/%d/%d/%d/%d/%d/%d valid %t\n",
+					dir, result.Decisions, result.Submitted, result.Accepted, result.Rejected, result.Fills, result.FilledQty,
+					result.ReceiptAuditValid, result.RoleLinksActive, result.SourceErrors, result.FrontierErrors, result.PolicyErrors,
+					result.ParentErrors, result.MissingGateway+result.GatewayErrors, result.VenueOutcomeErrors, result.ActorOutcomeErrors, result.Valid)
 			})
 		case "perpexposurehedger":
 			result, err := run.MeasurePerpExposureHedger()
