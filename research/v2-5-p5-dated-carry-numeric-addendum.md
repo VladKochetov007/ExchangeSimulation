@@ -22,6 +22,18 @@ three mandate children to gateway admission and ordinary fills with no audit
 error. Both short preflights are mechanics diagnostics only and have no P5
 economic status.
 
+Pre-outcome horizon correction: the fourth eight-hour-start contract would
+settle at the 24-hour boundary and its declared one-hour post-settlement exit
+could not be observed inside the 26-hour retained horizon. Before any economic
+outcome was inspected, commit `526fe07` therefore made the terminal boundary
+explicit: the dated-carry actor emits `TERM_HORIZON_CENSORED` and submits no
+request when the complete settlement/exit lifecycle would extend beyond
+retained evidence. This preserves the registered analysis censoring rule and
+prevents an unobservable term from being counted as a failed fill or a
+successful close. The primary gate still requires the two complete eight-hour
+generations per venue observable within the horizon; no term was selected
+using a basis response.
+
 Pre-implementation evidence correction: commit `47ce6a0` mistakenly retained
 the obsolete P4 receipt role `term_carry_allocator`. Before either new actor
 existed and before any P5 run or outcome inspection, the role contract was
