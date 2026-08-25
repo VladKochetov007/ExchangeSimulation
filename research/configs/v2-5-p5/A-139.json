@@ -7,7 +7,8 @@
   "log_mode": "full",
   "record_market_data_receipts": true,
   "market_data_receipt_roles": [
-    "term_carry_allocator"
+    "dated_execution_mandate",
+    "dated_term_carry_allocator"
   ],
   "record_decision_frontier_vectors": false,
   "record_maker_quote_size_decisions": false,

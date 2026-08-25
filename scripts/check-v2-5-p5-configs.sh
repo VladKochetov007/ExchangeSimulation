@@ -6,16 +6,16 @@ root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 config_dir="$root_dir/research/configs/v2-5-p5"
 
 declare -A expected=(
-  [A-117]=83fa1d0431825e3926c416cc9a81ae8b7d6df278315bd6abd9df1372ea844f12
-  [B-117]=3d7e9629d2387ab531138250ff72ac034115596fcaf34985365b7bd6988739be
-  [A-119]=c40d0a324d8b827a09db7bc2594df584eee87377c513675fff3dc83ee24bcad4
-  [B-119]=b74a090f871274ad8c8a4b4260179649e7899f36a712ac1507b8e44ead489403
-  [A-139]=5f225a67355a60294d4a3fee20d53db4af4d420359e4a670d564e052a7516da1
-  [B-139]=9b0a9f3f0047045c23dd1d388e4063e7633a094a518062006dfce15993c18fdb
-  [A-149]=4c3d7fe31401a157534a308ea98209c8c6b0dd5590d50165d627e6650b0b02f1
-  [B-149]=fdebc14de7ce3ee12be5a04a55ed07460d3fd2f82a3699995006e61fd861edf4
-  [A-151]=090169094c3116f710512af7f222ded7ea9328d6c0474fbd955ceb98e3d5705c
-  [B-151]=77fa8e726dd56e41515d8ac9947a742227b9dbaa883b87da984bece59814b4a3
+  [A-117]=c1ca7a6401ac0723a9226c826ccdb2002232a0743ef88847778b41c8b1487685
+  [B-117]=55bfedd029d3ad91d8ff0b99983ba8692dc95f3b91dc30b6f953d3c3d8ea0544
+  [A-119]=9085c514316ba988a288f51eb4d2da6987fa3ef368f79bfa28193c2e8fc576ae
+  [B-119]=630684b1d68fb4e0cb42644d8dea92c66e13cc4fb70a9f01af66bed413d8fe77
+  [A-139]=ec832268ffbb6a0b9584868af062af8782498223cb1be6feb27b8b208f42ceb3
+  [B-139]=37d3d94b3bc2ddb1ca6985aef8b09d1a18547babfb8b7f56b436d35f5660ea64
+  [A-149]=c2e930e468ab9415f0c16c45b7c6199edbdcb6188afc47621350ccb29b20454f
+  [B-149]=da9d96804a76ca695e78099169d3724b1f4c2bb8b581990d96babcb4cbb62df4
+  [A-151]=545d60feb5bf6b536e59bdff88ebc03b2e80958e4bab01e69625d1c86fdac2fc
+  [B-151]=0bce13c8f202a20330a35a3e87bca2438b7faf4a6a381b45786cbed994e62f7c
 )
 
 for cell in "${!expected[@]}"; do
@@ -31,6 +31,7 @@ for cell in "${!expected[@]}"; do
 	[[ "$arm" == B ]] && trade=true
 	jq -e --argjson seed "$seed" --argjson trade "$trade" '
     .seed == $seed and .log_mode == "full" and
+    .market_data_receipt_roles == ["dated_execution_mandate", "dated_term_carry_allocator"] and
     .term_carry_allocator == null and .record_term_carry_decisions == false and
     .option_flow_include_futures == false and
     .record_dated_execution_mandate_decisions == true and
