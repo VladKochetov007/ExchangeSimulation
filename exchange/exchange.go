@@ -125,13 +125,16 @@ func (l scopedInstrumentLogger) LogEvent(simTime int64, clientID uint64, eventNa
 }
 
 type DefaultExchange struct {
-	ID              string
-	Clients         map[uint64]*Client
-	Gateways        map[uint64]*ClientGateway
-	Books           map[string]*OrderBook
-	Instruments     map[string]Instrument
-	Positions       PositionStore
-	ExchangeBalance *ExchangeBalance
+	ID          string
+	Clients     map[uint64]*Client
+	Gateways    map[uint64]*ClientGateway
+	Books       map[string]*OrderBook
+	Instruments map[string]Instrument
+	// instrumentListedAt retains the original public listing time. Reference-
+	// data replays must not rewrite contract tenor as subscription time.
+	instrumentListedAt map[string]int64
+	Positions          PositionStore
+	ExchangeBalance    *ExchangeBalance
 	// conservation accumulates every recorded movement so that a balance
 	// changed without one can be detected, which no audit of the log itself
 	// could do: the log would be self-consistent and merely incomplete.
@@ -267,12 +270,13 @@ func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
 
 	matcher := ematching.NewPriceTimeMatcher(config.Clock)
 	ex := &DefaultExchange{
-		ID:          config.ID,
-		Clients:     make(map[uint64]*Client, config.EstimatedClients),
-		Gateways:    make(map[uint64]*ClientGateway, config.EstimatedClients),
-		Books:       make(map[string]*OrderBook, 16),
-		Instruments: make(map[string]Instrument, 16),
-		Positions:   NewPositionManager(config.Clock),
+		ID:                 config.ID,
+		Clients:            make(map[uint64]*Client, config.EstimatedClients),
+		Gateways:           make(map[uint64]*ClientGateway, config.EstimatedClients),
+		Books:              make(map[string]*OrderBook, 16),
+		Instruments:        make(map[string]Instrument, 16),
+		instrumentListedAt: make(map[string]int64, 16),
+		Positions:          NewPositionManager(config.Clock),
 		ExchangeBalance: &ExchangeBalance{
 			FeeRevenue:    make(map[string]int64),
 			InsuranceFund: make(map[string]int64),
@@ -619,6 +623,7 @@ func (e *DefaultExchange) AddInstrument(instrument Instrument) {
 		}
 	}
 	e.Instruments[symbol] = instrument
+	e.instrumentListedAt[symbol] = e.Clock.NowUnixNano()
 	e.Books[symbol] = &OrderBook{
 		Symbol:     symbol,
 		Instrument: instrument,

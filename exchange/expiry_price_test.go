@@ -368,7 +368,7 @@ func TestExpirySettlementPendingRetriesThenSettlesExactlyOnce(t *testing.T) {
 			continue
 		}
 		announcement, ok := record.data.(*etypes.InstrumentAnnouncement)
-		if !ok || announcement.SettlementPrice == nil || *announcement.SettlementPrice != 120 {
+		if !ok || announcement.SettlementPrice == nil || *announcement.SettlementPrice != 120 || announcement.ListedNano == nil || *announcement.ListedNano != 100 {
 			t.Fatalf("settlement lifecycle evidence = %#v, want present price 120", record.data)
 		}
 	}
@@ -386,6 +386,40 @@ func TestExpirySettlementPendingRetriesThenSettlesExactlyOnce(t *testing.T) {
 	}
 	if pendingEvents != 3 || unavailableEvents != 3 {
 		t.Fatalf("pending evidence count = pending %d unavailable %d, want 3/3", pendingEvents, unavailableEvents)
+	}
+}
+
+func TestInstrumentReplayRetainsOriginalListingTime(t *testing.T) {
+	clock := &expiryManualClock{now: 100}
+	ex := NewExchange(1, clock)
+	defer ex.Shutdown()
+	future := NewExpiringFutures("ABC-FUT", "ABC", "USD", 1, 1, 1, 1, 8*int64(time.Hour)+clock.now)
+	future.Underlying = "ABC/USD"
+	ex.AddInstrument(future)
+
+	clock.Advance(5 * time.Minute)
+	gateway := ex.ConnectNewClient(1, nil, &FixedFee{}).(*ClientGateway)
+	response := ex.Subscribe(1, &QueryRequest{RequestID: 1, Symbol: InstrumentFeedSymbol, Types: []MDType{MDInstrument}}, gateway)
+	if !response.Success {
+		t.Fatalf("subscribe: %#v", response)
+	}
+	select {
+	case message := <-gateway.MarketDataCh():
+		announcement, ok := message.Data.(*etypes.InstrumentAnnouncement)
+		if !ok {
+			t.Fatalf("replay data = %T", message.Data)
+		}
+		if message.Timestamp != clock.now || announcement.Timestamp != clock.now {
+			t.Fatalf("replay time = message %d announcement %d, want %d", message.Timestamp, announcement.Timestamp, clock.now)
+		}
+		if announcement.ListedNano == nil || *announcement.ListedNano != 100 {
+			t.Fatalf("original listing time = %v, want 100", announcement.ListedNano)
+		}
+		if announcement.ExpiryNano-*announcement.ListedNano != 8*int64(time.Hour) {
+			t.Fatalf("original tenor = %d, want %d", announcement.ExpiryNano-*announcement.ListedNano, 8*int64(time.Hour))
+		}
+	default:
+		t.Fatal("instrument replay was not delivered")
 	}
 }
 

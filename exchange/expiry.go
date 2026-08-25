@@ -265,7 +265,7 @@ func (e *DefaultExchange) CheckListings() {
 				continue
 			}
 			e.AddInstrument(inst)
-			ann := describeInstrument(inst, "listed", now)
+			ann := describeInstrument(inst, "listed", now, &now)
 			e.MDPublisher.Publish(etypes.InstrumentFeedSymbol, MDInstrument, ann, now)
 			if log := e.getLogger("_global"); log != nil {
 				log.LogEvent(now, 0, "instrument_listed", ann)
@@ -524,8 +524,10 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 		e.recordFeeRevenue(quote, Fee{Amount: feeTotal, Asset: quote}, Fee{}, book, now)
 	}
 
+	listedAt, hasListedAt := e.instrumentListedAt[symbol]
 	delete(e.Books, symbol)
 	delete(e.Instruments, symbol)
+	delete(e.instrumentListedAt, symbol)
 	delete(e.settlementPending, symbol)
 	// The AUTO-anchored mark calculator dies with the instrument: the map is
 	// keyed by symbol, and a relisting under the same symbol must seed a
@@ -538,7 +540,11 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 	}
 	e.mu.Unlock()
 
-	ann := describeInstrument(inst, "settled", now)
+	var listedAtEvidence *int64
+	if hasListedAt {
+		listedAtEvidence = &listedAt
+	}
+	ann := describeInstrument(inst, "settled", now, listedAtEvidence)
 	ann.SettlementPrice = &settlementPrice
 	e.MDPublisher.Publish(etypes.InstrumentFeedSymbol, MDInstrument, ann, now)
 	if glog := e.getLogger("_global"); glog != nil {
@@ -574,11 +580,16 @@ func (e *DefaultExchange) replayListedInstruments(clientID uint64, gateway *Clie
 		if !gateway.IsRunning() {
 			return
 		}
+		listedAt, hasListedAt := e.instrumentListedAt[symbol]
+		var listedAtEvidence *int64
+		if hasListedAt {
+			listedAtEvidence = &listedAt
+		}
 		message := &etypes.MarketDataMsg{
 			Type:      MDInstrument,
 			Symbol:    etypes.InstrumentFeedSymbol,
 			Timestamp: now,
-			Data:      describeInstrument(instrument, "listed", now),
+			Data:      describeInstrument(instrument, "listed", now, listedAtEvidence),
 		}
 		select {
 		case gateway.MarketDataChan() <- message:
@@ -591,7 +602,7 @@ func (e *DefaultExchange) replayListedInstruments(clientID uint64, gateway *Clie
 	}
 }
 
-func describeInstrument(inst Instrument, action string, now int64) *etypes.InstrumentAnnouncement {
+func describeInstrument(inst Instrument, action string, now int64, listedAt *int64) *etypes.InstrumentAnnouncement {
 	ann := &etypes.InstrumentAnnouncement{
 		Action:         action,
 		Symbol:         inst.Symbol(),
@@ -605,6 +616,7 @@ func describeInstrument(inst Instrument, action string, now int64) *etypes.Instr
 	}
 	if exp, ok := inst.(Expirable); ok {
 		ann.ExpiryNano = exp.ExpiryNano()
+		ann.ListedNano = listedAt
 	}
 	if opt, ok := inst.(*einstrument.EuropeanOption); ok {
 		ann.Strike = opt.Strike
@@ -620,7 +632,12 @@ func (e *DefaultExchange) QueryInstruments(clientID uint64, req *QueryRequest) R
 	defer e.mu.RUnlock()
 	instruments := make([]*etypes.InstrumentAnnouncement, 0, len(e.Instruments))
 	for _, inst := range e.Instruments {
-		instruments = append(instruments, describeInstrument(inst, "listed", now))
+		listedAt, hasListedAt := e.instrumentListedAt[inst.Symbol()]
+		var listedAtEvidence *int64
+		if hasListedAt {
+			listedAtEvidence = &listedAt
+		}
+		instruments = append(instruments, describeInstrument(inst, "listed", now, listedAtEvidence))
 	}
 	reqID := uint64(0)
 	if req != nil {

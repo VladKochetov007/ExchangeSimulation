@@ -77,6 +77,11 @@ type InstrumentAnnouncement struct {
 	Strike         int64  `json:"strike,omitempty"`     // quote precision units (options)
 	IsCall         bool   `json:"is_call,omitempty"`
 	ExpiryNano     int64  `json:"expiry_nano,omitempty"`
+	// ListedNano is the exchange publication time of the original listing.
+	// Replays retain it even though the replay message itself has a later
+	// Timestamp, so a participant can distinguish original tenor from current
+	// time to expiry without parsing a symbol or reading hidden venue state.
+	ListedNano *int64 `json:"listed_nano,omitempty"`
 	// SettlementPrice is nil when this announcement has no terminal settlement
 	// value (including a normal listing), and otherwise may be negative, zero,
 	// or positive. Pointer presence is the availability contract: numeric zero

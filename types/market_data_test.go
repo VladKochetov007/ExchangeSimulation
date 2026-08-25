@@ -104,4 +104,38 @@ func TestInstrumentAnnouncementSettlementPriceWireContract(t *testing.T) {
 	}
 }
 
+func TestInstrumentAnnouncementListingTimeRoundTrip(t *testing.T) {
+	listed := int64(17)
+	original := InstrumentAnnouncement{
+		Action: "listed", Symbol: "ABC-FUT", InstrumentType: "FUTURE",
+		ListedNano: &listed, ExpiryNano: 29,
+	}
+	raw, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replayed InstrumentAnnouncement
+	if err := json.Unmarshal(raw, &replayed); err != nil {
+		t.Fatal(err)
+	}
+	if replayed.ListedNano == nil || *replayed.ListedNano != *original.ListedNano || replayed.ExpiryNano != original.ExpiryNano {
+		t.Fatalf("listing lifecycle round trip = %#v, want %#v", replayed, original)
+	}
+}
+
+func TestInstrumentAnnouncementZeroListingTimeIsPresent(t *testing.T) {
+	listed := int64(0)
+	raw, err := json.Marshal(InstrumentAnnouncement{Action: "listed", Symbol: "ABC-FUT", InstrumentType: "FUTURE", ListedNano: &listed, ExpiryNano: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := wire["listed_nano"]; !present {
+		t.Fatalf("zero listing time was omitted: %s", raw)
+	}
+}
+
 func int64Pointer(value int64) *int64 { return &value }
