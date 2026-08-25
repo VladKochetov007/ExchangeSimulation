@@ -95,7 +95,7 @@ func (p *analyzerProfiles) Stop() {
 }
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, perpreplenishment, liabilityhedger, fundingcarry, termcarry, termcarrylifecycle, perpexposurehedger, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, perpreplenishment, liabilityhedger, fundingcarry, termcarry, termcarryp4chain, termcarryp4pair, termcarrylifecycle, perpexposurehedger, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
 	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
 	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
@@ -151,6 +151,31 @@ func main() {
 		os.Exit(1)
 	}
 	defer profiles.Stop()
+	if *metric == "termcarryp4pair" {
+		if len(flag.Args()) != 2 {
+			fmt.Fprintln(os.Stderr, "termcarryp4pair requires exactly: <control run dir> <treatment run dir>")
+			os.Exit(2)
+		}
+		control, err := analysis.Open(flag.Args()[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", flag.Args()[0], err)
+			os.Exit(1)
+		}
+		treatment, err := analysis.Open(flag.Args()[1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", flag.Args()[1], err)
+			os.Exit(1)
+		}
+		result, err := analysis.MeasureTermCarryP4Pair(control, treatment)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "P4 pair: %v\n", err)
+			os.Exit(1)
+		}
+		emit("P4-pair", result, *asJSON, func() {
+			fmt.Printf("P4 pair activation/execution/basis %t/%t/%t valid %t\n", result.ActivationValid, result.ExecutionValid, result.BasisMeasurable, result.Valid)
+		})
+		return
+	}
 	for _, dir := range flag.Args() {
 		// These compact V2 evidence artifacts are intentionally analyzable
 		// without raw JSON logs, Greek reports, or a Run wrapper. Opening a Run
@@ -642,6 +667,15 @@ func main() {
 			}
 			emit(dir, result, *asJSON, func() {
 				fmt.Printf("%-22s term-carry decisions %d, submitted %d, fills %d, valid %t\n", dir, result.Decisions, result.Submitted, result.Fills, result.Valid)
+			})
+		case "termcarryp4chain":
+			result, err := run.MeasureTermCarryP4Chain()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s P4 exact-cost decisions %d, submitted %d, valid %t\n", dir, result.DecisionsEvaluated, len(result.SubmittedCandidates), result.Valid)
 			})
 		case "termcarrylifecycle":
 			result, err := run.MeasureTermCarryLifecycle(analysis.TermCarryLifecycleOptions{DeadlineAtNano: *termCarryLifecycleDeadline})
