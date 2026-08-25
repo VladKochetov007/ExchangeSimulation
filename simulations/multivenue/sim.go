@@ -143,6 +143,10 @@ type Config struct {
 	// hedger's local state/action and fill attestations. It is append-only
 	// evidence only and never reaches the ordered execution checkpoint domain.
 	RecordPerpExposureHedgerDecisions bool `json:"record_perp_exposure_hedger_decisions"`
+	// RecordOptionLiabilityUserDecisions retains the V2-6 O2 fixed downside-
+	// liability participant's local decisions and fill attestations. These rows
+	// are evidence-only and never feed the actor, scheduler, or execution hash.
+	RecordOptionLiabilityUserDecisions bool `json:"record_option_liability_user_decisions"`
 	// CheckpointIntervalSeconds writes a rolling digest of the event stream at
 	// each simulated-time boundary, so two runs of one seed can be compared
 	// without retaining their logs. Zero disables it.
@@ -328,6 +332,9 @@ type Config struct {
 	// derivative markets are one against many; competing dealers are what makes
 	// them many against many.
 	OptionDealerCount int `json:"option_dealer_count"`
+	// OptionLiabilityUser is the optional O2+ finite downside-protection
+	// participant. It is one explicit objective, not a random activity stream.
+	OptionLiabilityUser *derivsim.OptionLiabilityTakerConfig `json:"option_liability_user,omitempty"`
 
 	// DatedCarryArbCount and ParityArbCount populate the two classes that take
 	// the other side of the derivative dealers: cash-and-carry desks that trade
@@ -688,6 +695,9 @@ func (c *Config) normalize() error {
 	if c.RecordPerpMakerReplenishmentDecisions && c.LogMode != "full" {
 		return errors.New("multivenue: perp maker replenishment decisions require full persisted evidence")
 	}
+	if c.RecordOptionLiabilityUserDecisions && c.LogMode != "full" {
+		return errors.New("multivenue: option-liability decisions require full persisted evidence")
+	}
 	if c.RecordLiabilityHedgerDecisions && c.LogMode != "full" {
 		return errors.New("multivenue: liability-hedger decisions require full persisted evidence")
 	}
@@ -760,6 +770,26 @@ func (c *Config) normalize() error {
 	}
 	if c.RecordLiabilityHedgerDecisions && c.CDFLiabilityHedger == nil {
 		return errors.New("multivenue: liability-hedger evidence requires a CDF liability-hedger policy")
+	}
+	if c.OptionLiabilityUser != nil {
+		if err := c.OptionLiabilityUser.Validate(); err != nil {
+			return fmt.Errorf("multivenue: option liability user: %w", err)
+		}
+		if c.OptionLiabilityUser.Underlying != "ABC/USD" {
+			return fmt.Errorf("multivenue: option liability user must observe ABC/USD, got %q", c.OptionLiabilityUser.Underlying)
+		}
+		profile, configured := c.latencyProfileFor("option_liability_user")
+		if !configured || profile.zero() {
+			return errors.New("multivenue: option liability user requires an explicit nonzero option_liability_user public-feed link")
+		}
+		if c.RecordOptionLiabilityUserDecisions || c.RecordMarketDataReceipts {
+			if !c.RecordOptionLiabilityUserDecisions || !c.RecordMarketDataReceipts || !slices.Contains(c.MarketDataReceiptRoles, "option_liability_user") {
+				return errors.New("multivenue: instrumented option liability user requires decisions and option_liability_user market-data receipts")
+			}
+		}
+	}
+	if c.RecordOptionLiabilityUserDecisions && c.OptionLiabilityUser == nil {
+		return errors.New("multivenue: option-liability evidence requires an option liability user policy")
 	}
 	if c.PerpExposureHedger != nil {
 		if err := c.PerpExposureHedger.validate(); err != nil {
@@ -1380,6 +1410,7 @@ type Venue struct {
 	Microstructure           *MicrostructureStats
 	OptionFlow               *derivsim.OptionTaker
 	OptionFlows              []*derivsim.OptionTaker
+	OptionLiabilityUsers     []*derivsim.OptionLiabilityTaker
 	OptionValueTakers        []*derivsim.OptionValueTaker
 	FutureFlows              []*derivsim.OptionTaker
 	VannaVolgaDesks          []*derivsim.VannaVolgaHedger
@@ -2082,6 +2113,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		for _, taker := range venue.OptionValueTakers {
 			runner.AddActor(taker)
 		}
+		for _, user := range venue.OptionLiabilityUsers {
+			runner.AddActor(user)
+		}
 		for _, flow := range venue.FutureFlows {
 			runner.AddActor(flow)
 		}
@@ -2204,6 +2238,9 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		return venueLogger{venueID: id, inner: logger, sink: s.checkpoints}, nil
 	}
 	estimatedClients := 5 + s.Config.NoiseTraderCount + s.Config.OptionFlowCount + len(s.Config.CrossVenueArbTiers)
+	if s.Config.OptionLiabilityUser != nil {
+		estimatedClients++
+	}
 	for _, remote := range s.Config.remoteMakerFeeds() {
 		if remote.SourceVenue == id {
 			estimatedClients++
@@ -2488,6 +2525,12 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	liabilityHedgerFillObserver := func(fill LiabilityHedgerFill) {
 		venue.makerStateLog.LogEvidenceOnly(fill.Timestamp, fill.ClientID, "liability_hedger_fill", fill)
 	}
+	optionLiabilityDecisionObserver := func(decision derivsim.OptionLiabilityDecision) {
+		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "option_liability_user_decision", decision)
+	}
+	optionLiabilityFillObserver := func(fill derivsim.OptionLiabilityFill) {
+		venue.makerStateLog.LogEvidenceOnly(fill.Timestamp, fill.ClientID, "option_liability_user_fill", fill)
+	}
 	fundingCarryDecisionObserver := func(decision FundingCarryDecision) {
 		// P0 records local economic evaluation separately from execution. It is
 		// append-only evidence only and deliberately never reaches the ordered
@@ -2750,6 +2793,26 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		venue.OptionFlows = append(venue.OptionFlows, flow)
 	}
 	venue.OptionFlow = venue.OptionFlows[0]
+
+	if policy := s.Config.OptionLiabilityUser; policy != nil {
+		cfg := *policy
+		cfg.VenueID = venue.ID
+		cfg.User = "option_liability_user_1"
+		cfg.TerminalNano = s.terminalNano
+		balances := map[string]int64{
+			"ABC": 1_000 * mvBasePrecision,
+			"USD": 100_000_000 * mvQuotePrecision,
+		}
+		clientID, gateway := venue.connectParticipant(mount, cfg.User, balances, 0, noiseFee)
+		cfg.ClientID = clientID
+		if s.Config.RecordOptionLiabilityUserDecisions {
+			cfg.DecisionObserver = optionLiabilityDecisionObserver
+			cfg.FillObserver = optionLiabilityFillObserver
+		}
+		user := derivsim.NewOptionLiabilityTaker(nextActor(), gateway, cfg)
+		user.SetTickerFactory(timers)
+		venue.OptionLiabilityUsers = append(venue.OptionLiabilityUsers, user)
+	}
 
 	futureLot := s.Config.FutureFlowLotQty
 	if futureLot <= 0 {
