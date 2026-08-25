@@ -3,7 +3,6 @@ package analysis
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -84,6 +83,8 @@ type TermCarryP4Pair struct {
 	ExecutionValid  bool                   `json:"execution_valid"`
 	BasisMeasurable bool                   `json:"basis_measurable"`
 	SeedStatistic   *float64               `json:"seed_statistic,omitempty"`
+	SeedExact       string                 `json:"seed_statistic_exact,omitempty"`
+	SeedSign        int                    `json:"seed_statistic_sign"`
 	Valid           bool                   `json:"valid"`
 }
 
@@ -101,6 +102,8 @@ type TermCarryP4VenuePair struct {
 	ControlBasis              TermCarryP4BasisWindow `json:"control_basis"`
 	TreatmentBasis            TermCarryP4BasisWindow `json:"treatment_basis"`
 	PairedConvergence         *float64               `json:"paired_convergence,omitempty"`
+	PairedConvergenceExact    string                 `json:"paired_convergence_exact,omitempty"`
+	PairedConvergenceSign     int                    `json:"paired_convergence_sign"`
 }
 
 // TermCarryP4BasisWindow is the sole preregistered 30-second/300-second event
@@ -111,6 +114,9 @@ type TermCarryP4BasisWindow struct {
 	PreMeanBps       *float64 `json:"pre_mean_oriented_premium_bps,omitempty"`
 	PostMeanBps      *float64 `json:"post_mean_oriented_premium_bps,omitempty"`
 	DeltaBps         *float64 `json:"delta_oriented_premium_bps,omitempty"`
+	PreMeanExact     string   `json:"pre_mean_oriented_premium_bps_exact,omitempty"`
+	PostMeanExact    string   `json:"post_mean_oriented_premium_bps_exact,omitempty"`
+	DeltaExact       string   `json:"delta_oriented_premium_bps_exact,omitempty"`
 	Measurable       bool     `json:"measurable"`
 	CensoredByCutoff bool     `json:"censored_by_cutoff"`
 }
@@ -335,8 +341,16 @@ func MeasureTermCarryP4Pair(control, treatment *Run) (*TermCarryP4Pair, error) {
 				return nil, err
 			}
 			if venue.ControlBasis.Measurable && venue.TreatmentBasis.Measurable {
-				value := *venue.ControlBasis.DeltaBps - *venue.TreatmentBasis.DeltaBps
+				controlDelta, controlOK := new(big.Rat).SetString(venue.ControlBasis.DeltaExact)
+				treatmentDelta, treatmentOK := new(big.Rat).SetString(venue.TreatmentBasis.DeltaExact)
+				if !controlOK || !treatmentOK {
+					return nil, fmt.Errorf("P4 exact basis delta unavailable")
+				}
+				exact := new(big.Rat).Sub(controlDelta, treatmentDelta)
+				value, _ := exact.Float64()
 				venue.PairedConvergence = &value
+				venue.PairedConvergenceExact = exact.RatString()
+				venue.PairedConvergenceSign = exact.Sign()
 			}
 		}
 		result.Venues = append(result.Venues, venue)
@@ -346,18 +360,25 @@ func MeasureTermCarryP4Pair(control, treatment *Run) (*TermCarryP4Pair, error) {
 	}
 	result.ActivationValid = len(result.Venues) > 0
 	result.ExecutionValid = len(result.Venues) > 0
-	var values []float64
+	var values []*big.Rat
 	for _, venue := range result.Venues {
 		result.ActivationValid = result.ActivationValid && venue.LocalInputsComparable && venue.FundingChangedAsPredicted && venue.ExactCarryCrossed && venue.TargetChangedAsPredicted
 		result.ExecutionValid = result.ExecutionValid && venue.ExecutionQualified
 		if venue.PairedConvergence != nil {
-			values = append(values, *venue.PairedConvergence)
+			exact, ok := new(big.Rat).SetString(venue.PairedConvergenceExact)
+			if !ok {
+				return nil, fmt.Errorf("P4 exact paired convergence unavailable")
+			}
+			values = append(values, exact)
 		}
 	}
 	result.BasisMeasurable = result.ExecutionValid && len(values) == len(result.Venues)
 	if result.BasisMeasurable {
-		mean := meanFloat64(values)
+		exact := meanRat(values)
+		mean, _ := exact.Float64()
 		result.SeedStatistic = &mean
+		result.SeedExact = exact.RatString()
+		result.SeedSign = exact.Sign()
 	}
 	result.Valid = len(result.Checks) == 0 && result.ActivationValid && result.ExecutionValid && result.BasisMeasurable
 	return result, nil
@@ -491,30 +512,32 @@ func measureP4BasisWindow(run *Run, venue string, t0, direction int64) (TermCarr
 	if len(pre) < p4BasisMinPreSamples || len(post) < p4BasisMinPostSamples {
 		return result, nil
 	}
-	preMean, postMean := meanFloat64(pre), meanFloat64(post)
-	delta := postMean - preMean
+	preMeanExact, postMeanExact := meanRat(pre), meanRat(post)
+	deltaExact := new(big.Rat).Sub(postMeanExact, preMeanExact)
+	preMean, _ := preMeanExact.Float64()
+	postMean, _ := postMeanExact.Float64()
+	delta, _ := deltaExact.Float64()
 	result.PreMeanBps, result.PostMeanBps, result.DeltaBps = &preMean, &postMean, &delta
+	result.PreMeanExact, result.PostMeanExact, result.DeltaExact = preMeanExact.RatString(), postMeanExact.RatString(), deltaExact.RatString()
 	result.Measurable = true
 	return result, nil
 }
 
-func sampleP4Premium(series map[string][]p4Quote, start, end, direction int64) []float64 {
+func sampleP4Premium(series map[string][]p4Quote, start, end, direction int64) []*big.Rat {
 	first := ceilSecond(start)
 	spotIndex, perpIndex := 0, 0
 	var spot, perp p4Quote
 	spotFound, perpFound := false, false
-	values := make([]float64, 0, int((end-start)/1_000_000_000)+1)
+	values := make([]*big.Rat, 0, int((end-start)/1_000_000_000)+1)
 	for at := first; at < end; at += 1_000_000_000 {
 		spotIndex, spot, spotFound = advanceP4Quote(series["ABC/USD"], spotIndex, at, spot, spotFound)
 		perpIndex, perp, perpFound = advanceP4Quote(series["ABC-PERP"], perpIndex, at, perp, perpFound)
 		if !spotFound || !perpFound || at-spot.at > p4BasisMaxAgeNanos || at-perp.at > p4BasisMaxAgeNanos || spot.mid <= 0 {
 			continue
 		}
-		premium := 10_000 * (float64(perp.mid) - float64(spot.mid)) / float64(spot.mid)
-		if math.IsNaN(premium) || math.IsInf(premium, 0) {
-			continue
-		}
-		values = append(values, float64(direction)*premium)
+		numerator := new(big.Int).Sub(big.NewInt(perp.mid), big.NewInt(spot.mid))
+		numerator.Mul(numerator, big.NewInt(10_000*direction))
+		values = append(values, new(big.Rat).SetFrac(numerator, big.NewInt(spot.mid)))
 	}
 	return values
 }
@@ -536,12 +559,12 @@ func ceilSecond(value int64) int64 {
 	return quotient * second
 }
 
-func meanFloat64(values []float64) float64 {
-	var sum float64
+func meanRat(values []*big.Rat) *big.Rat {
+	sum := new(big.Rat)
 	for _, value := range values {
-		sum += value
+		sum.Add(sum, value)
 	}
-	return sum / float64(len(values))
+	return sum.Quo(sum, new(big.Rat).SetInt64(int64(len(values))))
 }
 
 func min64(a, b int64) int64 {

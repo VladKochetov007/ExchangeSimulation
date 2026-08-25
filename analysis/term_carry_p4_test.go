@@ -116,6 +116,9 @@ func TestP4BasisWindowUsesRegisteredClockCoverageAndDirection(t *testing.T) {
 	if *window.PreMeanBps != 200 || *window.PostMeanBps != 0 || *window.DeltaBps != -200 {
 		t.Fatalf("basis means/delta = %.6f/%.6f/%.6f", *window.PreMeanBps, *window.PostMeanBps, *window.DeltaBps)
 	}
+	if window.PreMeanExact != "200" || window.PostMeanExact != "0" || window.DeltaExact != "-200" {
+		t.Fatalf("exact basis means/delta = %q/%q/%q", window.PreMeanExact, window.PostMeanExact, window.DeltaExact)
+	}
 	reversed, err := measureP4BasisWindow(run, "north", t0, -1)
 	if err != nil {
 		t.Fatal(err)
