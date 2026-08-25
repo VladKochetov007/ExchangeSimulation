@@ -287,6 +287,14 @@ func MeasureDatedCarryP5Pair(control, treatment *Run) (*DatedCarryP5Pair, error)
 	if result.ControlAudit.TradeEnabled || !result.TreatmentAudit.TradeEnabled {
 		result.Checks = append(result.Checks, "arm_authority_reversed")
 	}
+	// The preregistered classification is NOT EXERCISED when no exact-cost
+	// treatment candidate exists. Do not rescan millions of book events for a
+	// basis statistic that the protocol explicitly forbids in this state.
+	if len(result.TreatmentAudit.Terms) == 0 {
+		result.Checks = append(result.Checks, "no_treatment_eligible_terms")
+		result.Valid = false
+		return result, nil
+	}
 
 	symbols := make(map[p5BasisKey]bool)
 	for _, term := range result.TreatmentAudit.Terms {
