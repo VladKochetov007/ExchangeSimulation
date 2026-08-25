@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "hypothesis_id": "V2-5-P4-FUNDING-CARRY",
+  "verdict": "FALSIFIED",
+  "scope": "registered market basis endpoint",
+  "simulator_revision": "2d36b902cd671428710d43b1d458b640abb990b9",
+  "simulator_binary_sha256": "63e97b2f1e5d1b1f77e3197ce2063b9473ad251911c7236ce650e8735c40d67d",
+  "analysis_revision": "2d36b902cd671428710d43b1d458b640abb990b9",
+  "analyzer_sha256": "b6b58f1ffa1ea993df97dc0dd71c03be303e3d24905ce9fc857d1ef215cd7771",
+  "development_seeds": [107, 109],
+  "holdout_seeds_consumed": [],
+  "links": {
+    "delivered_funding": true,
+    "independent_expected_funding": true,
+    "exact_net_carry": true,
+    "target_inventory_response": true,
+    "ordinary_spot_perp_execution": true,
+    "basis_response": false
+  },
+  "pairs": [
+    {
+      "seed": 107,
+      "activation_valid": true,
+      "execution_valid": true,
+      "basis_measurable": true,
+      "seed_statistic_exact": "0",
+      "seed_statistic_sign": 0,
+      "venues": [
+        {"venue_id": "central", "control_rate_bps": 1, "treatment_rate_bps": 3, "control_expected_funding_bps": "12", "treatment_expected_funding_bps": "36", "control_net_carry_numerator": "-519668500000000000", "treatment_net_carry_numerator": "237195500000000000", "rational_denominator": "31536000000000000", "matched_exposure_qty": 10000000, "paired_convergence_exact": "0", "paired_convergence_sign": 0},
+        {"venue_id": "south", "control_rate_bps": 1, "treatment_rate_bps": 3, "control_expected_funding_bps": "12", "treatment_expected_funding_bps": "36", "control_net_carry_numerator": "-519665500000000000", "treatment_net_carry_numerator": "237198500000000000", "rational_denominator": "31536000000000000", "matched_exposure_qty": 10000000, "paired_convergence_exact": "0", "paired_convergence_sign": 0}
+      ]
+    },
+    {
+      "seed": 109,
+      "activation_valid": true,
+      "execution_valid": true,
+      "basis_measurable": true,
+      "seed_statistic_exact": "0",
+      "seed_statistic_sign": 0,
+      "venues": [
+        {"venue_id": "central", "control_rate_bps": 1, "treatment_rate_bps": 3, "control_expected_funding_bps": "12", "treatment_expected_funding_bps": "36", "control_net_carry_numerator": "-519667500000000000", "treatment_net_carry_numerator": "237196500000000000", "rational_denominator": "31536000000000000", "matched_exposure_qty": 10000000, "paired_convergence_exact": "0", "paired_convergence_sign": 0},
+        {"venue_id": "south", "control_rate_bps": 1, "treatment_rate_bps": 3, "control_expected_funding_bps": "12", "treatment_expected_funding_bps": "36", "control_net_carry_numerator": "-519667500000000000", "treatment_net_carry_numerator": "237196500000000000", "rational_denominator": "31536000000000000", "matched_exposure_qty": 10000000, "paired_convergence_exact": "0", "paired_convergence_sign": 0}
+      ]
+    }
+  ],
+  "primary_basis_contract": {
+    "pre_window_seconds": 30,
+    "post_window_seconds": 300,
+    "max_snapshot_age_seconds": 2,
+    "minimum_pre_samples": 24,
+    "minimum_post_samples": 240,
+    "exact_pre_and_post_oriented_premium_bps": "20000/9999",
+    "all_paired_convergence_exact": "0"
+  },
+  "evidence_integrity": {
+    "all_cell_contracts_valid": true,
+    "runtime_offline_artifact_hashes_match": true,
+    "receipt_frontiers_valid": true,
+    "canonical_order_fill_chains_valid": true,
+    "accounting_and_conservation_valid": true,
+    "lifecycle_valid": true,
+    "raw_evidence_retained": true
+  },
+  "interpretation": "The registered funding change causes exact carry eligibility, target inventory, and matched ordinary spot/perpetual execution, but produces no registered midpoint-basis response. This does not imply that funding is generally unimportant."
+}
