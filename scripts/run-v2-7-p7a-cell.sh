@@ -15,7 +15,8 @@ case "$seed" in 307|311) ;; *) echo "unregistered P7 seed: $seed" >&2; exit 2 ;;
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 config="$root_dir/research/configs/v2-7-p7/$cell-$seed.json"
-output="$root_dir/research/artifacts/v2-7-p7a/$cell-$seed"
+artifact_root=${P7_OUTPUT_ROOT:-"$root_dir/research/artifacts/v2-7-p7a"}
+output="$artifact_root/$cell-$seed"
 binary=${3:-"$root_dir/bin/multivenue"}
 
 if [[ ! -s "$config" || ! -x "$binary" ]]; then
