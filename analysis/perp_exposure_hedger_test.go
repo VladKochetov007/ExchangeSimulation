@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+func fixedLiabilityReplayPolicy() *perpExposurePolicyConfig {
+	return &perpExposurePolicyConfig{
+		Enabled: true, Symbol: "ABC-PERP", ExposureMode: fixedLiabilityExposureMode, InitialPhysicalExposure: -100,
+		DecisionInterval: 2, ExposureInterval: 10, ExposureStepQty: 10, MaxAbsExposure: 100,
+		MaxRequestQty: 100, TickSize: 1, InitialQuoteBalance: 1, InitialMargin: 1,
+	}
+}
+
 func TestPerpExposureDecisionReplayRejectsReversedTargetAndOffTouch(t *testing.T) {
 	policy := &perpExposurePolicyConfig{
 		Enabled: true, Symbol: "ABC-PERP", DecisionInterval: 2, ExposureInterval: 10,
@@ -78,5 +86,35 @@ func TestPerpExposureFeeAndCounterpartyContracts(t *testing.T) {
 	delete(orders, perpExposureOrderKey{venue: "north", order: 8})
 	if perpExposureHasExternalCounterparty(trades, orders, key, fill) {
 		t.Fatal("unrecorded counterparty was accepted")
+	}
+}
+
+func TestFixedLiabilityDecisionReplayUsesDeclaredInitialExposureAndHold(t *testing.T) {
+	policy := fixedLiabilityReplayPolicy()
+	state := &perpExposureReplayState{physical: policy.InitialPhysicalExposure}
+	first := perpExposureDecision{
+		VenueID: "north", Hedger: "perp_exposure_hedger_1", ClientID: 7,
+		PolicyVersion: fixedLiabilityPolicyVersion, ExposureMode: fixedLiabilityExposureMode, Symbol: policy.Symbol,
+		DecisionTime: 10, Enabled: true, PhysicalBefore: -100, PhysicalAfter: -100,
+		PhysicalExposureLimit: 100, DecisionInterval: 2, ExposureInterval: 10,
+		FilledPerpPosition: 0, TargetPerpPosition: 0, HedgeGap: 0,
+		Action: "NOT_SUBSCRIBED", BookFingerprint: "00000000000000000000000000000000", TakerFeeBps: 5,
+	}
+	if valid, updated, submitted := validatePerpExposureDecision(first, state, policy, 5, 0); !valid || updated || submitted {
+		t.Fatalf("fixed first decision rejected: valid=%t updated=%t submitted=%t", valid, updated, submitted)
+	}
+	state.position, state.entryComplete, state.lastTick = 100, true, 10
+	hold := first
+	hold.DecisionTime = 12
+	hold.Subscribed = true
+	hold.PhysicalBefore, hold.PhysicalAfter = -100, -100
+	hold.FilledPerpPosition, hold.TargetPerpPosition, hold.HedgeGap = 100, 100, 0
+	hold.Action = "FIXED_LIABILITY_HELD"
+	if valid, updated, submitted := validatePerpExposureDecision(hold, state, policy, 5, 0); !valid || updated || submitted {
+		t.Fatalf("fixed hold decision rejected: valid=%t updated=%t submitted=%t", valid, updated, submitted)
+	}
+	hold.PolicyVersion = perpExposurePolicyVersion
+	if valid, _, _ := validatePerpExposureDecision(hold, state, policy, 5, 0); valid {
+		t.Fatal("fixed policy accepted historical random-walk policy version")
 	}
 }

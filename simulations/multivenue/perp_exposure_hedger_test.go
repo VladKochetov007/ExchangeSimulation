@@ -138,6 +138,77 @@ func TestPerpExposureHedgerConfigRejectsAmbiguousOrUnsafeContract(t *testing.T) 
 	}
 }
 
+func TestPerpExposureHedgerFixedLiabilityEntersOnceAndThenHolds(t *testing.T) {
+	gateway := newFundingCarryStubGateway()
+	var decisions []PerpExposureHedgerDecision
+	cfg := perpExposureTestConfig()
+	cfg.ExposureMode = fixedLiabilityExposureMode
+	cfg.InitialPhysicalExposure = -20
+	cfg.DecisionObserver = func(decision PerpExposureHedgerDecision) { decisions = append(decisions, decision) }
+	h := NewPerpExposureHedger(1, gateway, cfg)
+	if h.PhysicalExposure() != -20 {
+		t.Fatalf("fixed liability was not installed: %d", h.PhysicalExposure())
+	}
+	now := time.Unix(10, 0)
+	h.onTick(now)
+	if len(decisions) != 1 || decisions[0].PolicyVersion != fixedLiabilityHedgerPolicyVersion || decisions[0].ExposureMode != fixedLiabilityExposureMode || decisions[0].PhysicalBefore != -20 || decisions[0].PhysicalAfter != -20 || decisions[0].ActionOrDeferReason != "NOT_SUBSCRIBED" {
+		t.Fatalf("fixed initial decision is not auditable: %+v", decisions)
+	}
+	observePerpExposureBook(h, gateway, now, 100, 101)
+	h.onTick(now.Add(time.Second))
+	if len(gateway.requests) < 2 || len(decisions) != 2 {
+		t.Fatalf("fixed liability did not submit its entry IOC: requests=%+v decisions=%+v", gateway.requests, decisions)
+	}
+	decision := decisions[1]
+	request := gateway.requests[len(gateway.requests)-1].OrderReq
+	if decision.ActionOrDeferReason != "SUBMIT_IOC" || decision.Side != exchange.Buy.String() || decision.RequestedQty != cfg.MaxRequestQty || decision.TargetPerpPosition != 20 || decision.PolicyVersion != fixedLiabilityHedgerPolicyVersion {
+		t.Fatalf("fixed entry decision mismatch: %+v", decision)
+	}
+	h.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: request.RequestID, OrderID: 77}})
+	h.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{OrderID: 77, Symbol: cfg.Symbol, Side: exchange.Buy, Qty: cfg.MaxRequestQty, Price: 101, TradeID: 88, IsFull: true, Timestamp: now.Add(2 * time.Second).UnixNano()}})
+	if h.PerpPosition() != cfg.MaxRequestQty || h.entryComplete {
+		t.Fatalf("partial fixed entry unexpectedly became complete: position=%d complete=%t", h.PerpPosition(), h.entryComplete)
+	}
+	// A second IOC completes the fixed target; only then is the policy held.
+	h.onTick(now.Add(3 * time.Second))
+	if len(decisions) != 3 || decisions[2].ActionOrDeferReason != "SUBMIT_IOC" || len(gateway.requests) != 3 {
+		t.Fatalf("fixed liability did not continue its bounded entry: decision=%+v requests=%+v", decisions[2], gateway.requests)
+	}
+	request = gateway.requests[len(gateway.requests)-1].OrderReq
+	h.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: request.RequestID, OrderID: 78}})
+	h.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{OrderID: 78, Symbol: cfg.Symbol, Side: exchange.Buy, Qty: cfg.MaxRequestQty, Price: 101, TradeID: 89, IsFull: true, Timestamp: now.Add(4 * time.Second).UnixNano()}})
+	if h.PerpPosition() != 2*cfg.MaxRequestQty || !h.entryComplete {
+		t.Fatalf("fixed entry did not become complete: position=%d complete=%t", h.PerpPosition(), h.entryComplete)
+	}
+	h.onTick(now.Add(5 * time.Second))
+	if len(decisions) != 4 || decisions[3].ActionOrDeferReason != "FIXED_LIABILITY_HELD" || decisions[3].RequestID != 0 || len(gateway.requests) != 3 {
+		t.Fatalf("fixed liability reopened after entry: decision=%+v requests=%+v", decisions[3], gateway.requests)
+	}
+}
+
+func TestPerpExposureHedgerFixedLiabilityConfigRequiresBoundedNonzeroExposure(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*PerpExposureHedgerConfig)
+	}{
+		{"zero physical exposure", func(c *PerpExposureHedgerConfig) {
+			c.ExposureMode, c.InitialPhysicalExposure = fixedLiabilityExposureMode, 0
+		}},
+		{"exposure above bound", func(c *PerpExposureHedgerConfig) {
+			c.ExposureMode, c.InitialPhysicalExposure = fixedLiabilityExposureMode, c.MaxAbsExposure+1
+		}},
+		{"unknown mode", func(c *PerpExposureHedgerConfig) { c.ExposureMode = "random_shock" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := perpExposureTestConfig()
+			tc.edit(&cfg)
+			if err := cfg.validate(); err == nil {
+				t.Fatal("invalid fixed-liability policy accepted")
+			}
+		})
+	}
+}
+
 func TestPerpExposureHedgerConfigRequiresAuditedDelayedFeed(t *testing.T) {
 	policy := perpExposureTestConfig()
 	base := Config{LogDir: t.TempDir(), LogMode: "full", PerpExposureHedger: &policy}

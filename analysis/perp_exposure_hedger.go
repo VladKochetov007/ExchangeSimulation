@@ -96,16 +96,18 @@ type PerpExposureHedgerCheck struct {
 }
 
 type perpExposurePolicyConfig struct {
-	Enabled             bool   `json:"enabled"`
-	Symbol              string `json:"symbol"`
-	DecisionInterval    int64  `json:"decision_interval"`
-	ExposureInterval    int64  `json:"exposure_interval"`
-	ExposureStepQty     int64  `json:"exposure_step_qty"`
-	MaxAbsExposure      int64  `json:"max_abs_exposure"`
-	MaxRequestQty       int64  `json:"max_request_qty"`
-	TickSize            int64  `json:"tick_size"`
-	InitialQuoteBalance int64  `json:"initial_quote_balance"`
-	InitialMargin       int64  `json:"initial_margin"`
+	Enabled                 bool   `json:"enabled"`
+	Symbol                  string `json:"symbol"`
+	ExposureMode            string `json:"exposure_mode"`
+	InitialPhysicalExposure int64  `json:"initial_physical_exposure"`
+	DecisionInterval        int64  `json:"decision_interval"`
+	ExposureInterval        int64  `json:"exposure_interval"`
+	ExposureStepQty         int64  `json:"exposure_step_qty"`
+	MaxAbsExposure          int64  `json:"max_abs_exposure"`
+	MaxRequestQty           int64  `json:"max_request_qty"`
+	TickSize                int64  `json:"tick_size"`
+	InitialQuoteBalance     int64  `json:"initial_quote_balance"`
+	InitialMargin           int64  `json:"initial_margin"`
 }
 
 type perpExposureRunConfig struct {
@@ -124,6 +126,7 @@ type perpExposureDecision struct {
 	Hedger                string `json:"hedger"`
 	ClientID              uint64 `json:"client_id"`
 	PolicyVersion         string `json:"policy_version"`
+	ExposureMode          string `json:"exposure_mode"`
 	Symbol                string `json:"symbol"`
 	DecisionTime          int64  `json:"decision_time"`
 	Enabled               bool   `json:"enabled"`
@@ -259,9 +262,19 @@ type perpExposureReplayState struct {
 	rng                                      *rand.Rand
 	physical, position, lastUpdate, lastTick int64
 	seenFirst                                bool
+	entryComplete                            bool
 }
 
 const perpExposurePolicyVersion = "v2_5_p2_perp_exposure_v1"
+const fixedLiabilityExposureMode = "fixed_liability"
+const fixedLiabilityPolicyVersion = "v2_7_fixed_liability_v1"
+
+func perpExposurePolicyVersionFor(mode string) string {
+	if mode == fixedLiabilityExposureMode {
+		return fixedLiabilityPolicyVersion
+	}
+	return perpExposurePolicyVersion
+}
 
 // MeasurePerpExposureHedger verifies the complete P2 local state/action
 // chain. A valid outcome proves evidence coherence and ordinary execution; it
@@ -419,6 +432,9 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 				continue
 			}
 			state = &perpExposureReplayState{rng: rand.New(rand.NewSource(perpExposureFlowSeed(config.Seed, index, 0, 16)))}
+			if policy.ExposureMode == fixedLiabilityExposureMode {
+				state.physical = policy.InitialPhysicalExposure
+			}
 			states[participant] = state
 			buckets[participant] = &PerpExposureHedgerBucket{VenueID: event.venue, ClientID: event.client}
 			seenTicks[participant] = make(map[int64]bool)
@@ -439,6 +455,9 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 				add(event.venue, event.client, 0, event.fill.OrderID, "fill_does_not_reduce_hedge_gap")
 			} else {
 				buckets[participant].ReducingFills++
+			}
+			if policy.ExposureMode == fixedLiabilityExposureMode && state.position == -state.physical {
+				state.entryComplete = true
 			}
 			continue
 		}
@@ -692,8 +711,11 @@ func loadPerpExposureRunConfig(dir string) (perpExposureRunConfig, error) {
 
 func validPerpExposureRunConfig(c perpExposureRunConfig) error {
 	p := c.PerpExposureHedger
-	if p == nil || len(c.VenueIDs) == 0 || p.Symbol != "ABC-PERP" || p.DecisionInterval <= 0 || p.ExposureInterval <= 0 || p.ExposureInterval%p.DecisionInterval != 0 || p.ExposureStepQty <= 0 || p.MaxAbsExposure < p.ExposureStepQty || p.MaxAbsExposure > math.MaxInt64-p.ExposureStepQty || p.MaxRequestQty <= 0 || p.TickSize <= 0 || p.InitialQuoteBalance <= 0 || p.InitialMargin <= 0 || c.TakerFeeBps < 0 || c.TakerFeeBps > 10_000 {
+	if p == nil || len(c.VenueIDs) == 0 || p.Symbol != "ABC-PERP" || (p.ExposureMode != "" && p.ExposureMode != fixedLiabilityExposureMode) || p.DecisionInterval <= 0 || p.ExposureInterval <= 0 || p.ExposureInterval%p.DecisionInterval != 0 || p.ExposureStepQty <= 0 || p.MaxAbsExposure < p.ExposureStepQty || p.MaxAbsExposure > math.MaxInt64-p.ExposureStepQty || p.MaxRequestQty <= 0 || p.TickSize <= 0 || p.InitialQuoteBalance <= 0 || p.InitialMargin <= 0 || c.TakerFeeBps < 0 || c.TakerFeeBps > 10_000 {
 		return fmt.Errorf("unsupported P2 policy/configuration")
+	}
+	if p.ExposureMode == fixedLiabilityExposureMode && (p.InitialPhysicalExposure == 0 || p.InitialPhysicalExposure > p.MaxAbsExposure || p.InitialPhysicalExposure < -p.MaxAbsExposure) {
+		return fmt.Errorf("unsupported fixed-liability exposure")
 	}
 	seen := make(map[string]bool, len(c.VenueIDs))
 	for _, venue := range c.VenueIDs {
@@ -706,7 +728,7 @@ func validPerpExposureRunConfig(c perpExposureRunConfig) error {
 }
 
 func validatePerpExposureDecision(d perpExposureDecision, state *perpExposureReplayState, p *perpExposurePolicyConfig, expectedTakerFeeBps, terminalAt int64) (bool, bool, bool) {
-	if d.PolicyVersion != perpExposurePolicyVersion || d.Symbol != p.Symbol || d.DecisionTime <= 0 || d.Enabled != p.Enabled || d.PhysicalExposureLimit != p.MaxAbsExposure || d.DecisionInterval != p.DecisionInterval || d.ExposureInterval != p.ExposureInterval || d.TakerFeeBps < 0 {
+	if d.PolicyVersion != perpExposurePolicyVersionFor(p.ExposureMode) || d.ExposureMode != p.ExposureMode || d.Symbol != p.Symbol || d.DecisionTime <= 0 || d.Enabled != p.Enabled || d.PhysicalExposureLimit != p.MaxAbsExposure || d.DecisionInterval != p.DecisionInterval || d.ExposureInterval != p.ExposureInterval || d.TakerFeeBps < 0 {
 		return false, false, false
 	}
 	if d.TakerFeeBps != expectedTakerFeeBps {
@@ -717,14 +739,18 @@ func validatePerpExposureDecision(d perpExposureDecision, state *perpExposureRep
 	}
 	if !state.seenFirst {
 		state.seenFirst, state.lastTick = true, d.DecisionTime
-		return !d.Subscribed && d.Action == "NOT_SUBSCRIBED" && d.PhysicalBefore == 0 && d.PhysicalAfter == 0 && d.PhysicalStep == 0 && d.FilledPerpPosition == 0 && d.TargetPerpPosition == 0 && d.HedgeGap == 0 && d.RequestID == 0 && d.RequestedQty == 0 && d.Side == "" && !d.HasSnapshot, false, false
+		return !d.Subscribed && d.Action == "NOT_SUBSCRIBED" && d.PhysicalBefore == state.physical && d.PhysicalAfter == state.physical && d.PhysicalStep == 0 && d.FilledPerpPosition == 0 && d.TargetPerpPosition == 0 && d.HedgeGap == 0 && d.RequestID == 0 && d.RequestedQty == 0 && d.Side == "" && !d.HasSnapshot, false, false
 	}
 	if d.DecisionTime-state.lastTick != p.DecisionInterval || !d.Subscribed || d.PhysicalBefore != state.physical || d.FilledPerpPosition != state.position {
 		return false, false, false
 	}
 	state.lastTick = d.DecisionTime
 	updated := false
-	if state.lastUpdate == 0 || d.DecisionTime-state.lastUpdate >= p.ExposureInterval {
+	if p.ExposureMode == fixedLiabilityExposureMode {
+		if d.PhysicalStep != 0 || d.PhysicalAfter != state.physical {
+			return false, false, false
+		}
+	} else if state.lastUpdate == 0 || d.DecisionTime-state.lastUpdate >= p.ExposureInterval {
 		step, next, ok := perpExposureNextStep(state, p)
 		if !ok || d.PhysicalStep != step || d.PhysicalAfter != next {
 			return false, false, false
@@ -743,6 +769,9 @@ func validatePerpExposureDecision(d perpExposureDecision, state *perpExposureRep
 	}
 	if !d.Enabled {
 		return false, updated, false
+	}
+	if p.ExposureMode == fixedLiabilityExposureMode && state.entryComplete {
+		return d.Action == "FIXED_LIABILITY_HELD" && d.RequestID == 0 && d.RequestedQty == 0 && d.Side == "", updated, false
 	}
 	if d.RequestPending {
 		return d.Action == "REQUEST_PENDING" && d.RequestID == 0, updated, false

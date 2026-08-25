@@ -18,14 +18,20 @@ import (
 // state is a motive only: it does not write a price, funding rate, exchange
 // balance, or counterparty order.
 type PerpExposureHedgerConfig struct {
-	Enabled          bool          `json:"enabled"`
-	Symbol           string        `json:"symbol"`
-	DecisionInterval time.Duration `json:"decision_interval"`
-	ExposureInterval time.Duration `json:"exposure_interval"`
-	ExposureStepQty  int64         `json:"exposure_step_qty"`
-	MaxAbsExposure   int64         `json:"max_abs_exposure"`
-	MaxRequestQty    int64         `json:"max_request_qty"`
-	TickSize         int64         `json:"tick_size"`
+	Enabled bool   `json:"enabled"`
+	Symbol  string `json:"symbol"`
+	// ExposureMode selects the declared off-exchange motive. An empty value is
+	// the historical bounded random-walk P2 policy. fixed_liability is the V2-7
+	// policy: the participant enters one fixed hedge and holds it, so a later
+	// exchange-side liquidation cannot silently turn into a new entry.
+	ExposureMode            string        `json:"exposure_mode,omitempty"`
+	InitialPhysicalExposure int64         `json:"initial_physical_exposure,omitempty"`
+	DecisionInterval        time.Duration `json:"decision_interval"`
+	ExposureInterval        time.Duration `json:"exposure_interval"`
+	ExposureStepQty         int64         `json:"exposure_step_qty"`
+	MaxAbsExposure          int64         `json:"max_abs_exposure"`
+	MaxRequestQty           int64         `json:"max_request_qty"`
+	TickSize                int64         `json:"tick_size"`
 
 	// InitialQuoteBalance and InitialMargin are raw quote-asset quantities for
 	// the ordinary venue account. They are declared in the experiment config so
@@ -47,6 +53,9 @@ func (c PerpExposureHedgerConfig) validate() error {
 	if c.Symbol != "ABC-PERP" {
 		return fmt.Errorf("perp exposure hedger must trade ABC-PERP, got %q", c.Symbol)
 	}
+	if c.ExposureMode != "" && c.ExposureMode != fixedLiabilityExposureMode {
+		return fmt.Errorf("unsupported exposure mode %q", c.ExposureMode)
+	}
 	if c.DecisionInterval <= 0 || c.ExposureInterval <= 0 {
 		return fmt.Errorf("decision and exposure intervals must be positive")
 	}
@@ -55,6 +64,14 @@ func (c PerpExposureHedgerConfig) validate() error {
 	}
 	if c.ExposureStepQty <= 0 || c.MaxAbsExposure < c.ExposureStepQty {
 		return fmt.Errorf("require positive exposure step no greater than maximum absolute exposure")
+	}
+	if c.ExposureMode == fixedLiabilityExposureMode {
+		if c.InitialPhysicalExposure == 0 {
+			return fmt.Errorf("fixed-liability exposure must be nonzero")
+		}
+		if c.InitialPhysicalExposure > c.MaxAbsExposure || c.InitialPhysicalExposure < -c.MaxAbsExposure {
+			return fmt.Errorf("fixed-liability exposure %d exceeds absolute bound %d", c.InitialPhysicalExposure, c.MaxAbsExposure)
+		}
 	}
 	if c.MaxAbsExposure > math.MaxInt64-c.ExposureStepQty {
 		return fmt.Errorf("exposure bounds leave no safe reflected update")
@@ -79,10 +96,11 @@ type PerpExposureHedgerDecision struct {
 	VenueID  string `json:"venue_id"`
 	Hedger   string `json:"hedger"`
 	ClientID uint64 `json:"client_id"`
-	// PolicyVersion binds an evidence row to the exact P2 local-exposure
+	// PolicyVersion binds an evidence row to the exact local-exposure
 	// contract. Offline auditors must reject a row from an unknown policy
 	// rather than silently applying this replay to it.
 	PolicyVersion         string `json:"policy_version"`
+	ExposureMode          string `json:"exposure_mode,omitempty"`
 	Symbol                string `json:"symbol"`
 	DecisionTime          int64  `json:"decision_time"`
 	Enabled               bool   `json:"enabled"`
@@ -176,7 +194,10 @@ type PerpExposureHedger struct {
 	pendingRequestID uint64
 	activeOrders     map[uint64]struct{}
 	subscribed       bool
+	entryComplete    bool
 }
+
+const fixedLiabilityExposureMode = "fixed_liability"
 
 // NewPerpExposureHedger constructs an opt-in, locally informed P2 actor.
 func NewPerpExposureHedger(id uint64, gateway actor.Gateway, cfg PerpExposureHedgerConfig) *PerpExposureHedger {
@@ -185,6 +206,9 @@ func NewPerpExposureHedger(id uint64, gateway actor.Gateway, cfg PerpExposureHed
 		cfg:          cfg,
 		rng:          rand.New(rand.NewSource(cfg.Seed)),
 		activeOrders: make(map[uint64]struct{}),
+	}
+	if cfg.ExposureMode == fixedLiabilityExposureMode {
+		h.physicalExposure = cfg.InitialPhysicalExposure
 	}
 	h.SetHandler(h)
 	h.AddTicker(cfg.DecisionInterval, h.onTick)
@@ -269,6 +293,11 @@ func (h *PerpExposureHedger) onFill(event actor.OrderFillEvent) {
 		return
 	}
 	h.perpPosition = next
+	if h.cfg.ExposureMode == fixedLiabilityExposureMode {
+		if target, targetOK := etypes.TrySub(0, h.physicalExposure); targetOK && h.perpPosition == target {
+			h.entryComplete = true
+		}
+	}
 	if h.cfg.FillObserver != nil {
 		h.cfg.FillObserver(PerpExposureHedgerFill{
 			VenueID: h.cfg.VenueID, Hedger: h.cfg.Hedger, ClientID: h.cfg.ClientID,
@@ -313,7 +342,7 @@ func (h *PerpExposureHedger) onTick(now time.Time) {
 
 func (h *PerpExposureHedger) decision(now time.Time) PerpExposureHedgerDecision {
 	decision := h.baseDecision(now, "")
-	if h.lastUpdate == 0 || now.UnixNano()-h.lastUpdate >= int64(h.cfg.ExposureInterval) {
+	if h.cfg.ExposureMode != fixedLiabilityExposureMode && (h.lastUpdate == 0 || now.UnixNano()-h.lastUpdate >= int64(h.cfg.ExposureInterval)) {
 		step, next, ok := h.nextExposure()
 		if !ok {
 			decision.ActionOrDeferReason = "PHYSICAL_EXPOSURE_UPDATE_OVERFLOW"
@@ -337,6 +366,10 @@ func (h *PerpExposureHedger) decision(now time.Time) PerpExposureHedgerDecision 
 	decision.HedgeGap = gap
 	if !h.cfg.Enabled {
 		decision.ActionOrDeferReason = "POLICY_DISABLED"
+		return decision
+	}
+	if h.cfg.ExposureMode == fixedLiabilityExposureMode && h.entryComplete {
+		decision.ActionOrDeferReason = "FIXED_LIABILITY_HELD"
 		return decision
 	}
 	if h.pending {
@@ -410,7 +443,7 @@ func (h *PerpExposureHedger) baseDecision(now time.Time, action string) PerpExpo
 	frontier := perpExposureFrontier(h.Gateway())
 	return PerpExposureHedgerDecision{
 		VenueID: h.cfg.VenueID, Hedger: h.cfg.Hedger, ClientID: h.cfg.ClientID,
-		PolicyVersion: perpExposureHedgerPolicyVersion, Symbol: h.cfg.Symbol,
+		PolicyVersion: h.policyVersion(), ExposureMode: h.cfg.ExposureMode, Symbol: h.cfg.Symbol,
 		DecisionTime: now.UnixNano(), Enabled: h.cfg.Enabled, Subscribed: h.subscribed, RequestPending: h.pending,
 		ActionOrDeferReason: action, PhysicalBefore: h.physicalExposure, PhysicalAfter: h.physicalExposure,
 		PhysicalExposureLimit: h.cfg.MaxAbsExposure, FilledPerpPosition: h.perpPosition,
@@ -426,6 +459,14 @@ func (h *PerpExposureHedger) baseDecision(now time.Time, action string) PerpExpo
 }
 
 const perpExposureHedgerPolicyVersion = "v2_5_p2_perp_exposure_v1"
+const fixedLiabilityHedgerPolicyVersion = "v2_7_fixed_liability_v1"
+
+func (h *PerpExposureHedger) policyVersion() string {
+	if h.cfg.ExposureMode == fixedLiabilityExposureMode {
+		return fixedLiabilityHedgerPolicyVersion
+	}
+	return perpExposureHedgerPolicyVersion
+}
 
 func (h *PerpExposureHedger) nextExposure() (int64, int64, bool) {
 	step := h.cfg.ExposureStepQty
