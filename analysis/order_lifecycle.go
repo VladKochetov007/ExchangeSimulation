@@ -11,21 +11,27 @@ import (
 // terminal event: a GTC order can legitimately remain resting when a finite run
 // stops, and an unlogged cancel request cannot be inferred from the evidence.
 type OrderLifecycleAudit struct {
-	Accepted                  int                   `json:"accepted"`
-	FillRecords               int                   `json:"fill_records"`
-	Cancelled                 int                   `json:"cancelled"`
-	FullyFilled               int                   `json:"fully_filled"`
-	RequiredImmediateTerminal int                   `json:"required_immediate_terminal"`
-	MissingImmediateTerminal  int                   `json:"missing_immediate_terminal"`
-	UnknownFills              int                   `json:"unknown_fills"`
-	UnknownCancellations      int                   `json:"unknown_cancellations"`
-	DuplicateAcceptances      int                   `json:"duplicate_acceptances"`
-	DuplicateTerminals        int                   `json:"duplicate_terminals"`
-	FillsAfterTerminal        int                   `json:"fills_after_terminal"`
-	FillQuantityMismatches    int                   `json:"fill_quantity_mismatches"`
-	CancelQuantityMismatches  int                   `json:"cancel_quantity_mismatches"`
-	ClientMismatches          int                   `json:"client_mismatches"`
-	Checks                    []OrderLifecycleCheck `json:"checks,omitempty"`
+	Accepted                  int `json:"accepted"`
+	FillRecords               int `json:"fill_records"`
+	Cancelled                 int `json:"cancelled"`
+	FullyFilled               int `json:"fully_filled"`
+	RequiredImmediateTerminal int `json:"required_immediate_terminal"`
+	MissingImmediateTerminal  int `json:"missing_immediate_terminal"`
+	UnknownFills              int `json:"unknown_fills"`
+	// LiquidationFills are forced-close fills emitted by the exchange without
+	// an ordinary OrderAccepted event. They are valid only when linked to a
+	// same-file, same-time, same-client liquidation record; UnlinkedFills are
+	// evidence-contract failures.
+	LiquidationFills         int                   `json:"liquidation_fills"`
+	UnlinkedFills            int                   `json:"unlinked_fills"`
+	UnknownCancellations     int                   `json:"unknown_cancellations"`
+	DuplicateAcceptances     int                   `json:"duplicate_acceptances"`
+	DuplicateTerminals       int                   `json:"duplicate_terminals"`
+	FillsAfterTerminal       int                   `json:"fills_after_terminal"`
+	FillQuantityMismatches   int                   `json:"fill_quantity_mismatches"`
+	CancelQuantityMismatches int                   `json:"cancel_quantity_mismatches"`
+	ClientMismatches         int                   `json:"client_mismatches"`
+	Checks                   []OrderLifecycleCheck `json:"checks,omitempty"`
 }
 
 // OrderLifecycleCheck names a broken order-level evidence contract. Checks are
@@ -55,6 +61,20 @@ type orderLifecycleState struct {
 	failed    map[string]bool
 }
 
+type orderLifecycleLiquidationKey struct {
+	file      string
+	timestamp int64
+	clientID  uint64
+	symbol    string
+}
+
+type orderLifecycleUnknownFill struct {
+	key       orderLifecycleKey
+	timestamp int64
+	clientID  uint64
+	symbol    string
+}
+
 // MeasureOrderLifecycle reconstructs accepted orders from their persisted
 // lifecycle records. It is an evidence-contract audit, not a replacement for
 // the matcher: it catches missing terminal records and invalid ordered fill
@@ -69,10 +89,14 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 	}
 	type fillPayload struct {
 		OrderID      uint64 `json:"order_id"`
+		Symbol       string `json:"symbol"`
 		Qty          int64  `json:"qty"`
 		FilledQty    int64  `json:"filled_qty"`
 		RemainingQty int64  `json:"remaining_qty"`
 		IsFull       bool   `json:"is_full"`
+	}
+	type liquidationPayload struct {
+		Symbol string `json:"symbol"`
 	}
 	type cancelPayload struct {
 		OrderID      uint64 `json:"order_id"`
@@ -81,6 +105,8 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 
 	result := &OrderLifecycleAudit{}
 	states := make(map[orderLifecycleKey]*orderLifecycleState)
+	liquidations := make(map[orderLifecycleLiquidationKey]struct{})
+	unknownFills := make([]orderLifecycleUnknownFill, 0)
 	var mu sync.Mutex
 	addFailure := func(key orderLifecycleKey, state *orderLifecycleState, failure string) {
 		if state != nil {
@@ -98,7 +124,7 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 	// Lifecycle state is order-sensitive within each book. A single worker
 	// preserves file order; the file component of the key still prevents
 	// cross-book order-ID reuse from colliding.
-	scan := ScanOptions{Events: []string{"OrderAccepted", "OrderFill", "OrderCancelled"}, Workers: 1}
+	scan := ScanOptions{Events: []string{"OrderAccepted", "OrderFill", "OrderCancelled", "liquidation"}, Workers: 1}
 	if err := r.Scan(scan, func(event Event) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -134,7 +160,13 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 			state := states[key]
 			if state == nil {
 				result.UnknownFills++
-				addFailure(key, nil, "fill_without_acceptance")
+				symbol := payload.Symbol
+				if symbol == "" {
+					symbol = event.Symbol
+				}
+				unknownFills = append(unknownFills, orderLifecycleUnknownFill{
+					key: key, timestamp: event.SimTS, clientID: event.ClientID, symbol: symbol,
+				})
 				return
 			}
 			if state.clientID != 0 && event.ClientID != state.clientID {
@@ -186,9 +218,36 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 			} else {
 				state.terminal = true
 			}
+		case "liquidation":
+			var payload liquidationPayload
+			if event.Decode(&payload) != nil {
+				return
+			}
+			symbol := payload.Symbol
+			if symbol == "" {
+				symbol = event.Symbol
+			}
+			if symbol == "" || event.ClientID == 0 {
+				return
+			}
+			liquidations[orderLifecycleLiquidationKey{
+				file: event.File, timestamp: event.SimTS, clientID: event.ClientID, symbol: symbol,
+			}] = struct{}{}
 		}
 	}); err != nil {
 		return nil, err
+	}
+	for _, unknown := range unknownFills {
+		liquidationKey := orderLifecycleLiquidationKey{
+			file: unknown.key.file, timestamp: unknown.timestamp,
+			clientID: unknown.clientID, symbol: unknown.symbol,
+		}
+		if _, ok := liquidations[liquidationKey]; ok {
+			result.LiquidationFills++
+			continue
+		}
+		result.UnlinkedFills++
+		addFailure(unknown.key, nil, "fill_without_acceptance")
 	}
 
 	for key, state := range states {

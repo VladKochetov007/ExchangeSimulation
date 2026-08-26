@@ -20,6 +20,16 @@ func lifecycleCancelLine(ts int64, venue string, clientID, orderID uint64, remai
 		ts, clientID, venue, orderID, remaining)
 }
 
+func lifecycleLiquidationLine(ts int64, venue string, clientID uint64, symbol string) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"liquidation","data":{"venue_id":%q,"payload":{"symbol":%q,"position_size":-10,"fill_price":100,"remaining_debt":0}}}`,
+		ts, clientID, venue, symbol)
+}
+
+func lifecycleFillWithSymbolLine(ts int64, venue string, clientID, orderID uint64, symbol string, quantity, filled, remaining int64, full bool) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"OrderFill","data":{"venue_id":%q,"payload":{"symbol":%q,"order_id":%d,"qty":%d,"filled_qty":%d,"remaining_qty":%d,"is_full":%t}}}`,
+		ts, clientID, venue, symbol, orderID, quantity, filled, remaining, full)
+}
+
 func TestOrderLifecycleAudit(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -124,5 +134,40 @@ func TestOrderLifecycleSeparatesBooksWithReusedOrderIDs(t *testing.T) {
 	if got.Accepted != 2 || got.FillRecords != 2 || got.UnknownFills != 0 ||
 		got.DuplicateAcceptances != 0 || len(got.Checks) != 0 {
 		t.Fatalf("reused book order ID was not separated: %+v", got)
+	}
+}
+
+func TestOrderLifecycleLinksForcedCloseFills(t *testing.T) {
+	const instant = int64(1_000_000_000)
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/derivatives/ABC-PERP.jsonl": {
+			lifecycleFillWithSymbolLine(instant, "north", 7, 99, "ABC-PERP", 10, 10, 0, true),
+			lifecycleLiquidationLine(instant, "north", 7, "ABC-PERP"),
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	got, err := run.MeasureOrderLifecycle()
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if got.UnknownFills != 1 || got.LiquidationFills != 1 || got.UnlinkedFills != 0 || len(got.Checks) != 0 {
+		t.Fatalf("forced-close fill was not linked: %+v", got)
+	}
+
+	dir = writeRun(t, Report{}, map[string][]string{
+		"north/derivatives/ABC-PERP.jsonl": {
+			lifecycleFillWithSymbolLine(instant, "north", 7, 99, "ABC-PERP", 10, 10, 0, true),
+		},
+	})
+	run, _ = Open(dir)
+	got, err = run.MeasureOrderLifecycle()
+	if err != nil {
+		t.Fatalf("measure missing liquidation: %v", err)
+	}
+	if got.UnknownFills != 1 || got.LiquidationFills != 0 || got.UnlinkedFills != 1 || len(got.Checks) != 1 {
+		t.Fatalf("unlinked forced-close mutation was not rejected: %+v", got)
 	}
 }
