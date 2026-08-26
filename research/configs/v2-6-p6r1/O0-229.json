@@ -1,0 +1,383 @@
+{
+  "automation_interval": 1000000000,
+  "bootstrap_depth": null,
+  "bootstrap_depth_count": 0,
+  "carry_arbitrageur_count": 2,
+  "carry_entry_bps": 2,
+  "carry_exit_bps": 1,
+  "carry_lot_qty": 200000000,
+  "carry_max_position": 50000000000,
+  "cdf_inventory_rebalance": {
+    "enabled": true,
+    "interval": 10000000000,
+    "cooldown": 30000000000,
+    "risk_band_qty": 10000000000,
+    "target_band_qty": 5000000000,
+    "max_request_qty": 500000000,
+    "participation_bps": 1000,
+    "slippage_bps": 50
+  },
+  "cdf_liability_hedger": {
+    "enabled": true,
+    "symbol": "CDF/USD",
+    "decision_interval": 2000000000,
+    "obligation_interval": 10000000000,
+    "obligation_step_qty": 200000000,
+    "max_abs_obligation_qty": 2000000000,
+    "max_request_qty": 100000000,
+    "policy_mode": "delivery_liability",
+    "decision_phase_offset": 0
+  },
+  "cross_asset_spot_graph": true,
+  "cross_venue_arb_lot_qty": 0,
+  "cross_venue_arb_max_attempts": 0,
+  "cross_venue_arb_tiers": null,
+  "cross_venue_base_latency": 0,
+  "date": "2026-08-26",
+  "dated_carry_arb_count": 2,
+  "dated_carry_check_interval": 0,
+  "dated_carry_edge_bps": 10,
+  "dated_carry_scale_edge": false,
+  "dated_carry_slippage_bps": 15,
+  "dealer_hedge_mode": "off",
+  "default_latency_profile": {
+    "model": "constant",
+    "delay": 5000000
+  },
+  "degraded_index": null,
+  "description": "V2-6 P6-R1 explicit cross-asset collateral-mark viability O0; untouched holdout; no other stage or ecology delta.",
+  "elastic_supplier_count": 8,
+  "elastic_supplier_reference_half_life": 0,
+  "elastic_supplier_units_per_percent": 15000000000,
+  "experiment_id": "v2-6-p6r1-cross-asset-mark-O0-seed-229",
+  "fixed_distance_maker": {
+    "symbol": "",
+    "spread_bps": 3,
+    "requote_bps": 2,
+    "quote_qty": 25000000,
+    "max_inventory": 20000000000,
+    "quote_interval": 0
+  },
+  "fixed_distance_maker_count": 8,
+  "fixed_distance_maker_symbols": [
+    "ABC/USD",
+    "CDF/USD",
+    "ABC/CDF",
+    "ABC-PERP"
+  ],
+  "funding_interval_seconds": 28800,
+  "funding_max_rate_bps": 75,
+  "future_flow_count": 3,
+  "future_flow_interval": 5000000000,
+  "future_flow_lot_qty": 2000000,
+  "futures_maker_count": 2,
+  "futures_maker_self_anchored": true,
+  "greek_interval": 60000000000,
+  "hypothesis_id": "V2-6-P6R1-CROSS-ASSET-MARK",
+  "imbalance_maker": {
+    "symbol": "",
+    "spread_bps": 3,
+    "requote_bps": 2,
+    "quote_qty": 25000000,
+    "max_inventory": 20000000000,
+    "quote_interval": 0,
+    "lean_bps": 3,
+    "suppress_at": 0
+  },
+  "imbalance_maker_count": 8,
+  "imbalance_maker_symbols": [
+    "ABC/USD",
+    "CDF/USD",
+    "ABC/CDF",
+    "ABC-PERP"
+  ],
+  "latency_profiles": {
+    "spot_maker": {
+      "model": "lognormal",
+      "delay": 500000,
+      "sigma": 0.5
+    },
+    "fixed_distance_maker": {
+      "model": "spiky",
+      "delay": 1000000,
+      "spike_delay": 50000000,
+      "spike_probability": 0.01
+    },
+    "imbalance_maker": {
+      "model": "normal",
+      "delay": 2000000,
+      "std_dev": 500000
+    },
+    "noise_flow": {
+      "model": "lognormal",
+      "delay": 20000000,
+      "sigma": 1.0,
+      "cap": 500000000
+    },
+    "option_flow": {
+      "model": "lognormal",
+      "delay": 20000000,
+      "sigma": 1.0,
+      "cap": 500000000
+    },
+    "option_value_taker": {
+      "model": "lognormal",
+      "delay": 5000000,
+      "sigma": 0.7
+    },
+    "carry_arb": {
+      "model": "constant",
+      "delay": 1000000
+    },
+    "triangle_arb": {
+      "model": "constant",
+      "delay": 800000
+    },
+    "dated_carry_arb": {
+      "model": "constant",
+      "delay": 1500000
+    },
+    "parity_arb": {
+      "model": "constant",
+      "delay": 1500000
+    },
+    "option_dealer": {
+      "model": "normal",
+      "delay": 1500000,
+      "std_dev": 400000
+    },
+    "vanna_volga_desk": {
+      "model": "normal",
+      "delay": 3000000,
+      "std_dev": 800000
+    },
+    "future_flow": {
+      "model": "lognormal",
+      "delay": 15000000,
+      "sigma": 0.8
+    },
+    "liability_hedger": {
+      "model": "constant",
+      "delay": 20000000,
+      "market_data_scale": 2
+    },
+    "option_liability_user": {
+      "model": "constant",
+      "delay": 20000000,
+      "market_data_scale": 2
+    }
+  },
+  "latent_liquidity": null,
+  "latent_liquidity_count": 6,
+  "log_mode": "full",
+  "long_future_tenor": 21600000000000,
+  "long_option_tenor": 21600000000000,
+  "maker_anchor": "consensus",
+  "maker_forward_half_life": 0,
+  "maker_hedge_band_qty": 100000000,
+  "maker_hedge_interval": 60000000000,
+  "maker_hedge_slippage_bps": 50,
+  "maker_hedge_symbol": "ABC-PERP",
+  "maker_index_weight": 0.3,
+  "maker_inventory_limit": 10000000000,
+  "maker_inventory_skew_bps": 3,
+  "maker_min_half_spread_ticks": 1,
+  "maker_min_quote_size_fraction": 0,
+  "maker_quote_qty": 500000000,
+  "maker_quote_size_vol_elasticity": 0,
+  "market_data_receipt_roles": [
+    "spot_maker",
+    "fixed_distance_maker",
+    "imbalance_maker",
+    "cdf_spot_maker",
+    "liability_hedger"
+  ],
+  "metaorder_trader_count": 6,
+  "metaorder_traders": {
+    "symbol": "",
+    "base_precision": 0,
+    "tick_size": 0,
+    "min_qty": 50000000,
+    "max_qty": 2000000000,
+    "pareto_alpha": 1.3,
+    "child_interval": 1000000000,
+    "participation_rate": 0.05,
+    "min_child_qty": 1000000,
+    "min_order_size": 0,
+    "rest_interval": 20000000000,
+    "max_slippage_bps": 0,
+    "max_duration": 900000000000,
+    "seed": 0
+  },
+  "noise_excite_alpha": 0,
+  "noise_excite_beta_per_sec": 0,
+  "noise_flow_decision_phase_offset": 0,
+  "noise_funding_lots": 20000,
+  "noise_imbalance_coupling": 0,
+  "noise_interval": 2000000000,
+  "noise_order_qty": 20000000,
+  "noise_size_cap_multiple": 0,
+  "noise_size_pareto_alpha": 1.5,
+  "noise_target_qty_by_symbol": {
+    "CDF/USD": 500000000,
+    "ABC/CDF": 500000000
+  },
+  "noise_trader_count": 6,
+  "option_buy_probability": 0.65,
+  "option_dealer_count": 1,
+  "option_dealer_hedge_interval_seconds": 60,
+  "option_dealer_hedge_policies": [
+    "none"
+  ],
+  "option_dealer_vol": {
+    "model": "flat"
+  },
+  "option_flow_count": 4,
+  "option_iv": 0.8,
+  "option_liability_user": null,
+  "option_max_strikes_per_expiry": 5,
+  "option_value_taker_count": 0,
+  "option_value_taker_edge_bps": 400,
+  "option_value_taker_interval": 5000000000,
+  "option_value_taker_lot_qty": 1000000,
+  "option_value_taker_max_position": 100000000,
+  "option_value_taker_vol": {
+    "model": "sabr",
+    "sabr_alphas": [
+      0.6,
+      0.9,
+      0.75,
+      0.5
+    ],
+    "sabr_beta": 1.0,
+    "sabr_rho": -0.25,
+    "sabr_nu": 0.7
+  },
+  "parity_arb_count": 2,
+  "parity_edge_bps": 20,
+  "perp_maker_inventory_limit": 0,
+  "quote_interval": 1000000000,
+  "rate_limit_tiers": {
+    "all": {
+      "roles": [
+        "spot_maker",
+        "cdf_spot_maker",
+        "abc_cdf_spot_maker",
+        "perp_maker",
+        "futures_maker",
+        "option_dealer",
+        "fixed_distance_maker",
+        "imbalance_maker",
+        "noise_flow",
+        "option_flow",
+        "metaorder_trader",
+        "round_trip",
+        "elastic_supplier",
+        "carry_arb",
+        "dated_carry_arb",
+        "parity_arb",
+        "triangle_arb"
+      ],
+      "weight_per_minute": 0,
+      "orders_per_10s": 100000,
+      "orders_per_day": 0,
+      "priority_depth": null,
+      "secondary_depth": null
+    }
+  },
+  "record_decision_frontier_vectors": false,
+  "record_liability_hedger_decisions": true,
+  "record_maker_inventory_rebalance_decisions": true,
+  "record_maker_quote_size_decisions": true,
+  "record_market_data_receipts": true,
+  "record_noise_flow_phase_decisions": true,
+  "record_option_liability_user_decisions": false,
+  "round_trip_hold": 180000000000,
+  "round_trip_inventory_lots": 20,
+  "round_trip_lot_qty": 50000000,
+  "round_trip_trader_count": 8,
+  "seed": 229,
+  "short_future_tenor": 7200000000000,
+  "short_option_tenor": 7200000000000,
+  "snapshot_interval": 1000000000,
+  "spot_maker_count": 4,
+  "spot_maker_requote_bps": 0,
+  "spot_maker_requote_bps_tiers": [
+    0,
+    10,
+    25,
+    40
+  ],
+  "spot_maker_submit_before_cancel": true,
+  "spot_passive_maker_cancel_before_replace": true,
+  "spot_passive_maker_post_only": true,
+  "spot_stoikov_inventory_size_skew_bps": 5000,
+  "spot_tick_quote_units": 10000,
+  "status": "preregistered",
+  "step": 1000000000,
+  "stoikov_fill_decay": 0.5,
+  "stoikov_inventory_horizon": 600000000000,
+  "stoikov_max_variance_multiple": 25,
+  "stoikov_risk_aversion": 0.000002,
+  "stoikov_variance_per_second": 25,
+  "stoikov_volatility_half_life": 600000000000,
+  "stoikov_volatility_sample_interval": 30000000000,
+  "strict_population_accounting": true,
+  "strike_step_usd": 1000,
+  "strikes_per_side": 2,
+  "taker_fee_bps": 5,
+  "triangle_arb": {
+    "base_quote": "",
+    "cross_quote": "",
+    "base_cross": "",
+    "edge_bps": 20,
+    "taker_fee_bps": 0,
+    "legs": 0,
+    "lot_qty": 5000000,
+    "check_interval": 0,
+    "max_firings": 0
+  },
+  "triangle_arb_count": 2,
+  "vanna_volga_desk_count": 0,
+  "vanna_volga_interval": 10000000000,
+  "vanna_volga_lot_qty": 5000000,
+  "vanna_volga_max_contracts": 500000000,
+  "vanna_volga_vanna_tolerance": 0.5,
+  "vanna_volga_vega_tolerance": 50000.0,
+  "vanna_volga_vol": {
+    "model": "realized",
+    "half_life_seconds": [
+      600,
+      2400,
+      4800
+    ],
+    "premiums": [
+      0.9,
+      1.1,
+      1.3
+    ],
+    "floor": 0.2,
+    "ceiling": 3.0
+  },
+  "vanna_volga_volga_tolerance": 500000.0,
+  "venue_ids": [
+    "north",
+    "central",
+    "south"
+  ],
+  "venue_rules": {
+    "north": {
+      "matching_rule": "price_time",
+      "funding_interval_seconds": 28800
+    },
+    "central": {
+      "matching_rule": "pro_rata",
+      "funding_interval_seconds": 3600
+    },
+    "south": {
+      "matching_rule": "pro_rata",
+      "funding_interval_seconds": 7200
+    }
+  },
+  "cross_asset_collateral_marks": true
+}
