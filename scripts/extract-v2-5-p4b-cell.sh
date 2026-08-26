@@ -133,7 +133,10 @@ jq -e '.result.events > 0 and (.result.digest | type) == "string" and (.result.d
 	"$cell/streamhash.json" >/dev/null
 jq -e '.result.events > 0 and (.result.digest | type) == "string" and (.result.digest | length) == 64' \
 	"$cell/evidenceartifacthash.json" >/dev/null
-jq -e '.result.valid == true' "$cell/basis.json" >/dev/null
+jq -e '
+  (.result.perp | length) > 0 and
+  all(.result.perp[]; .observations > 0 and .undefined_domain_observations == 0)
+' "$cell/basis.json" >/dev/null
 jq -e '.result.valid == true' "$cell/perpsignals.json" >/dev/null
 
 runtime_events=$(jq -er '.events' "$cell/evidence-artifact-hash.json")
