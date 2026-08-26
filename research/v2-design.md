@@ -206,6 +206,29 @@ separate from the preregistered causal score.
 | Kill criterion | No observed basis-trader inventory/order response to a changed expected funding rate means funding is not identified; do not infer an anchoring verdict. |
 | Main risk | Directly setting price equal to funding-implied fair value would impose the result and is forbidden. |
 
+### V2-5 progress ledger
+
+The registered P4 funding/carry screen is recorded in
+[`v2-5-p4-funding-carry-results.md`](v2-5-p4-funding-carry-results.md). Its
+six-link chain is reproducible through actual inventory and ordinary
+non-atomic orders, but the paired market-basis endpoint is exactly unchanged
+in both development seeds; the verdict is **FALSIFIED** at that endpoint.
+This is local to the frozen own-mid ecology and is not a claim that funding is
+generally irrelevant. The P5 dated-carry screen is separately recorded in
+[`v2-5-p5-dated-carry-results.md`](v2-5-p5-dated-carry-results.md) as
+**NOT EXERCISED** because no exact-cost eligible term appeared in either
+development seed.
+
+The validated P2 physical-exposure participant remains a distinct,
+**SUPPORTED (screening)** local hedge-activation result. It licenses a
+separately preregistered conditional funding screen with that fixed
+independent perpetual-flow source; it does not license changing P4's capital,
+fees, thresholds, clocks, or funding magnitude after observing the null.
+
+P7c's longer fixed-liability risk horizon is recorded as **NOT EXERCISED** for
+participant-specific distress and does not change the funding design. Its
+generic venue liquidations are diagnostic only.
+
 ## V2-6 — staged options ecology
 
 | stage | participants and permitted prior | purpose / causal comparison |
