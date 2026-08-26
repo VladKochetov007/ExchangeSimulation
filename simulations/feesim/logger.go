@@ -6,7 +6,9 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 )
@@ -76,8 +78,10 @@ func (d EvidenceDigest) Hex() string {
 type JSONLinesLogger struct {
 	mu       sync.Mutex
 	w        *bufio.Writer
-	f        *os.File
+	f        io.WriteCloser
 	evidence EvidenceDigest
+	err      error
+	closed   bool
 }
 
 // persistedEvent preserves the exact key order produced by encoding/json for
@@ -96,36 +100,116 @@ func NewJSONLinesLogger(path string) (*JSONLinesLogger, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &JSONLinesLogger{f: f, w: bufio.NewWriterSize(f, 64*1024)}, nil
+	return newJSONLinesLogger(f, 64*1024), nil
+}
+
+// newJSONLinesLogger is kept separate from path creation so transport failures
+// can be exercised without filesystem timing or capacity assumptions.
+func newJSONLinesLogger(f io.WriteCloser, bufferSize int) *JSONLinesLogger {
+	return &JSONLinesLogger{f: f, w: bufio.NewWriterSize(f, bufferSize)}
 }
 
 func (l *JSONLinesLogger) LogEvent(simTime int64, clientID uint64, eventName string, event any) {
 	b, err := json.Marshal(persistedEvent{ClientID: clientID, Data: event, Event: eventName, SimTS: simTime})
-	if err != nil {
-		panic(fmt.Sprintf("feesim: marshal persisted event %q: %v", eventName, err))
-	}
-	l.mu.Lock()
-	l.w.Write(b)
-	l.w.WriteByte('\n')
-	l.evidence.addRecord(b)
-	l.mu.Unlock()
-}
-
-// EvidenceDigest returns a snapshot of the records that have been accepted
-// for persistence by this logger. It remains available after Close.
-func (l *JSONLinesLogger) EvidenceDigest() EvidenceDigest {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.evidence
+	if l.err != nil || l.closed {
+		return
+	}
+	if err != nil {
+		l.fail(fmt.Errorf("marshal persisted event %q: %w", eventName, err))
+		return
+	}
+	if n, err := l.w.Write(b); err != nil {
+		l.fail(fmt.Errorf("write persisted event %q: %w", eventName, err))
+		return
+	} else if n != len(b) {
+		l.fail(fmt.Errorf("write persisted event %q: %w", eventName, io.ErrShortWrite))
+		return
+	}
+	if err := l.w.WriteByte('\n'); err != nil {
+		l.fail(fmt.Errorf("write persisted event newline %q: %w", eventName, err))
+		return
+	}
+	l.evidence.addRecord(b)
 }
 
-func (l *JSONLinesLogger) Flush() {
+func (l *JSONLinesLogger) fail(err error) {
+	if err != nil {
+		l.err = errors.Join(l.err, err)
+	}
+}
+
+// EvidenceDigest returns the records accepted for persistence only when no
+// transport failure has been observed. A caller must close all loggers before
+// treating this as an evidence artifact.
+func (l *JSONLinesLogger) EvidenceDigest() (EvidenceDigest, error) {
 	l.mu.Lock()
-	l.w.Flush()
-	l.mu.Unlock()
+	defer l.mu.Unlock()
+	if l.err != nil {
+		return EvidenceDigest{}, l.err
+	}
+	return l.evidence, nil
 }
 
-func (l *JSONLinesLogger) Close() {
-	l.Flush()
-	l.f.Close()
+// Flush persists all buffered bytes and retains any transport failure for
+// Close, so callers that only have a Close boundary cannot lose it.
+func (l *JSONLinesLogger) Flush() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed {
+		return l.err
+	}
+	if err := l.w.Flush(); err != nil {
+		l.fail(fmt.Errorf("flush persisted events: %w", err))
+	}
+	return l.err
+}
+
+// Close flushes and closes even after an earlier write failure. It reports all
+// observed transport errors so a failed evidence stream cannot look complete.
+func (l *JSONLinesLogger) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed {
+		return l.err
+	}
+	l.closed = true
+	if err := l.w.Flush(); err != nil {
+		l.fail(fmt.Errorf("flush persisted events: %w", err))
+	}
+	if err := l.f.Close(); err != nil {
+		l.fail(fmt.Errorf("close persisted events: %w", err))
+	}
+	return l.err
+}
+
+// CloseLoggers closes every required evidence logger before returning its
+// aggregate digest. Any transport error returns a zero digest, which prevents
+// callers from emitting a success attestation for partial raw evidence.
+func CloseLoggers(loggers []*JSONLinesLogger) (EvidenceDigest, error) {
+	var closeErr error
+	for _, logger := range loggers {
+		if logger == nil {
+			continue
+		}
+		if err := logger.Close(); err != nil {
+			closeErr = errors.Join(closeErr, err)
+		}
+	}
+	if closeErr != nil {
+		return EvidenceDigest{}, closeErr
+	}
+	var evidence EvidenceDigest
+	for _, logger := range loggers {
+		if logger == nil {
+			continue
+		}
+		digest, err := logger.EvidenceDigest()
+		if err != nil {
+			return EvidenceDigest{}, err
+		}
+		evidence.Add(digest)
+	}
+	return evidence, nil
 }

@@ -23,8 +23,31 @@ import (
 	"exchange_sim/matching"
 	eprice "exchange_sim/price"
 	"exchange_sim/simulations/derivsim"
+	"exchange_sim/simulations/feesim"
 	etypes "exchange_sim/types"
 )
+
+func TestCloseSuppressesRawEvidenceHashAfterLoggerFailure(t *testing.T) {
+	if _, err := os.Stat("/dev/full"); err != nil {
+		t.Skipf("failure-injection device unavailable: %v", err)
+	}
+	logger, err := feesim.NewJSONLinesLogger("/dev/full")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger.LogEvent(1, 1, "event", nil)
+	dir := t.TempDir()
+	sim := &Sim{
+		Config:  Config{LogMode: "full", LogDir: dir},
+		loggers: []*feesim.JSONLinesLogger{logger},
+	}
+	if err := sim.Close(); err == nil {
+		t.Fatal("Close succeeded after raw evidence write failure")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "evidence-artifact-hash.json")); !os.IsNotExist(err) {
+		t.Fatalf("runtime evidence hash exists after failed close: %v", err)
+	}
+}
 
 func TestConfigAcceptsDocumentedSnakeCaseJSON(t *testing.T) {
 	var cfg Config
@@ -67,7 +90,11 @@ func TestSpotStoikovInventorySizePolicyIsScopedToSpot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(sim.Close)
+	t.Cleanup(func() {
+		if err := sim.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	for _, venue := range sim.Venues {
 		if venue.PerpMaker.cfg.InventorySizeSkewBps != 0 {
 			t.Fatalf("%s perpetual received scoped spot size policy: %d", venue.ID, venue.PerpMaker.cfg.InventorySizeSkewBps)
@@ -98,7 +125,11 @@ func TestPerpMakerReplenishmentConfigurationIsScopedAndValidated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(sim.Close)
+	t.Cleanup(func() {
+		if err := sim.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	for _, venue := range sim.Venues {
 		if venue.PerpMaker.cfg.RestingQuoteReplenishmentBelowBps != 5_000 {
 			t.Fatalf("%s perp replenishment threshold = %d, want 5000", venue.ID, venue.PerpMaker.cfg.RestingQuoteReplenishmentBelowBps)

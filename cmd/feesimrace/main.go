@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -24,6 +25,13 @@ type result struct {
 }
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "feesimrace: %v\n", err)
+		os.Exit(2)
+	}
+}
+
+func run() (err error) {
 	duration := flag.Duration("duration", 2*time.Minute, "simulated duration")
 	seed := flag.Int64("seed", 42, "world seed")
 	noiseTraders := flag.Int("noise-traders", 8, "independent random-flow participants")
@@ -31,11 +39,11 @@ func main() {
 	logDir := flag.String("logdir", "logs/feesim-race", "raw event-log directory")
 	flag.Parse()
 	if *duration <= 0 || *noiseTraders <= 0 {
-		fatalf("-duration and -noise-traders must be positive")
+		return fmt.Errorf("-duration and -noise-traders must be positive")
 	}
 	tierOrder, err := parseTiers(*tiers)
 	if err != nil {
-		fatalf("%v", err)
+		return err
 	}
 
 	cfg := feesim.DefaultSimConfig()
@@ -57,9 +65,14 @@ func main() {
 
 	sim, err := feesim.NewSim(*duration, cfg)
 	if err != nil {
-		fatalf("NewSim: %v", err)
+		return fmt.Errorf("NewSim: %w", err)
 	}
-	defer sim.Close()
+	closed := false
+	defer func() {
+		if !closed {
+			err = errors.Join(err, sim.Close())
+		}
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sim.Exchange().StartAutomation(ctx)
@@ -68,18 +81,23 @@ func main() {
 		sim.Exchange().StopAutomation()
 	})
 	if err := sim.Runner.Run(ctx); err != nil {
-		fatalf("run: %v", err)
+		return fmt.Errorf("run: %w", err)
 	}
 	reports, err := sim.RaceArbTerminalReports()
 	if err != nil {
-		fatalf("terminal report: %v", err)
+		return fmt.Errorf("terminal report: %w", err)
 	}
+	if err := sim.Close(); err != nil {
+		return fmt.Errorf("seal evidence: %w", err)
+	}
+	closed = true
 	if err := json.NewEncoder(os.Stdout).Encode(result{
 		Seed: *seed, Duration: *duration, NoiseTraders: *noiseTraders,
 		TierOrder: tierOrder, Reports: reports,
 	}); err != nil {
-		fatalf("write result: %v", err)
+		return fmt.Errorf("write result: %w", err)
 	}
+	return nil
 }
 
 func parseTiers(value string) ([]float64, error) {
@@ -101,9 +119,4 @@ func parseTiers(value string) ([]float64, error) {
 		tiers = append(tiers, tier)
 	}
 	return tiers, nil
-}
-
-func fatalf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "feesimrace: "+format+"\n", args...)
-	os.Exit(2)
 }

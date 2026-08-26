@@ -6,7 +6,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -130,6 +132,13 @@ func (p *runProfiles) Stop() {
 }
 
 func main() {
+	if err := run(); err != nil {
+		log.Print(err)
+		os.Exit(1)
+	}
+}
+
+func run() (err error) {
 	configPath := flag.String("config", "", "path to multivenue Config JSON")
 	duration := flag.Duration("duration", 8*time.Hour, "simulated duration; must be a multiple of the configured step")
 	logDir := flag.String("logdir", "logs/multivenue", "output directory")
@@ -150,11 +159,11 @@ func main() {
 	if *configPath != "" {
 		raw, readErr := os.ReadFile(*configPath)
 		if readErr != nil {
-			log.Fatal(readErr)
+			return readErr
 		}
 		decoded, decodeErr := multivenue.DecodeConfig(raw)
 		if decodeErr != nil {
-			log.Fatal(decodeErr)
+			return decodeErr
 		}
 		cfg = decoded
 	}
@@ -180,20 +189,36 @@ func main() {
 
 	sim, err := multivenue.NewSim(*duration, cfg)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	defer sim.Close()
+	closed := false
+	defer func() {
+		if !closed {
+			err = errors.Join(err, sim.Close())
+		}
+	}()
 	profiles, err := startRunProfiles(*cpuProfile, *allocProfile, *mutexProfile, *blockProfile, *traceProfile)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
+	profilesStopped := false
+	defer func() {
+		if !profilesStopped {
+			profiles.Stop()
+		}
+	}()
 
 	started := time.Now()
 	runErr := sim.Run(context.Background())
 	profiles.Stop()
+	profilesStopped = true
 	if runErr != nil {
-		log.Fatal(runErr)
+		return runErr
 	}
+	if err := sim.Close(); err != nil {
+		return fmt.Errorf("seal evidence: %w", err)
+	}
+	closed = true
 	output := greekOutput{
 		SchemaVersion:  6,
 		InitialRisk:    make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
@@ -211,7 +236,7 @@ func main() {
 	}
 	for _, venue := range sim.Venues {
 		if venue.InitialRisk == nil || venue.TerminalRisk == nil {
-			log.Fatalf("venue %s missing initial or terminal risk snapshot", venue.ID)
+			return fmt.Errorf("venue %s missing initial or terminal risk snapshot", venue.ID)
 		}
 		output.InitialRisk[venue.ID] = *venue.InitialRisk
 		output.RiskTimeline[venue.ID] = append([]multivenue.VenueRiskSnapshot(nil), venue.RiskTimeline...)
@@ -236,10 +261,11 @@ func main() {
 	}
 	b, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if err := os.WriteFile(filepath.Join(*logDir, "greeks.json"), b, 0644); err != nil {
-		log.Fatal(err)
+		return err
 	}
 	log.Printf("done: sim=%s wall=%s logs=%s", *duration, time.Since(started).Round(time.Second), *logDir)
+	return nil
 }

@@ -1850,13 +1850,15 @@ func (s *Sim) Run(ctx context.Context) error {
 	return riskErr
 }
 
-func (s *Sim) Close() {
+// Close seals all required evidence before emitting the unordered raw-artifact
+// hash. If any close fails, no hash is written and the caller must not publish
+// terminal metadata for the run.
+func (s *Sim) Close() error {
 	s.checkpoints.close()
-	_ = s.finalizeMarketDataReceipts()
-	var evidence feesim.EvidenceDigest
-	for _, logger := range s.loggers {
-		logger.Close()
-		evidence.Add(logger.EvidenceDigest())
+	closeErr := s.finalizeMarketDataReceipts()
+	evidence, loggerErr := feesim.CloseLoggers(s.loggers)
+	if closeErr != nil || loggerErr != nil {
+		return errors.Join(closeErr, loggerErr)
 	}
 	// The evidence files are written by several independent loggers and do not
 	// preserve one global causal order. This artifact attests exactly the
@@ -1869,13 +1871,20 @@ func (s *Sim) Close() {
 			Events:   evidence.Events,
 			Digest:   evidence.Hex(),
 		}
-		if raw, err := json.MarshalIndent(artifact, "", "  "); err == nil {
-			_ = os.WriteFile(filepath.Join(s.Config.LogDir, "evidence-artifact-hash.json"), append(raw, '\n'), 0644)
+		raw, err := json.MarshalIndent(artifact, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal evidence artifact hash: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(s.Config.LogDir, "evidence-artifact-hash.json"), append(raw, '\n'), 0644); err != nil {
+			return fmt.Errorf("write evidence artifact hash: %w", err)
 		}
 	}
 	if s.latencyTelemetry != nil {
-		_ = s.latencyTelemetry.WriteJSON(filepath.Join(s.Config.LogDir, "latency.json"))
+		if err := s.latencyTelemetry.WriteJSON(filepath.Join(s.Config.LogDir, "latency.json")); err != nil {
+			return fmt.Errorf("write latency evidence: %w", err)
+		}
 	}
+	return nil
 }
 
 func (s *Sim) finalizeMarketDataReceipts() error {

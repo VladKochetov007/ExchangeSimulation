@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"math"
 	"os"
@@ -27,6 +29,13 @@ type summary struct {
 }
 
 func main() {
+	if err := run(); err != nil {
+		log.Print(err)
+		os.Exit(1)
+	}
+}
+
+func run() (err error) {
 	configPath := flag.String("config", "", "path to SimConfig JSON")
 	duration := flag.Duration("duration", 20*time.Minute, "simulation time")
 	logDir := flag.String("logdir", "logs/derivsim", "log directory")
@@ -36,19 +45,24 @@ func main() {
 	if *configPath != "" {
 		raw, err := os.ReadFile(*configPath)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 		if err := json.Unmarshal(raw, &cfg); err != nil {
-			log.Fatal(err)
+			return err
 		}
 	}
 	cfg.LogDir = *logDir
 
 	sim, err := derivsim.NewSim(*duration, cfg)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	defer sim.Close()
+	closed := false
+	defer func() {
+		if !closed {
+			err = errors.Join(err, sim.Close())
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sim.Exchange().StartAutomation(ctx)
@@ -58,8 +72,12 @@ func main() {
 	})
 	started := time.Now()
 	if err := sim.Runner.Run(ctx); err != nil {
-		log.Fatal(err)
+		return err
 	}
+	if err := sim.Close(); err != nil {
+		return fmt.Errorf("seal evidence: %w", err)
+	}
+	closed = true
 
 	out := summary{
 		HedgeTraded:   sim.Dealer.HedgeTraded(),
@@ -85,23 +103,27 @@ func main() {
 	}
 	greekReport, err := derivsim.BuildGreekReportWithPositions(sim.Dealer.GreekProfiles(), sim.Dealer.GreekPositionProfiles())
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	out.Greeks = greekReport.Summary
 
-	b, _ := json.MarshalIndent(out, "", "  ")
+	b, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(*logDir, "summary.json"), b, 0644); err != nil {
-		log.Fatal(err)
+		return err
 	}
 	greekBytes, err := json.MarshalIndent(greekReport, "", "  ")
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if err := os.WriteFile(filepath.Join(*logDir, "greeks.json"), greekBytes, 0644); err != nil {
-		log.Fatal(err)
+		return err
 	}
 	log.Printf("done: sim=%s wall=%s logs=%s", *duration, time.Since(started).Round(time.Second), *logDir)
 	log.Printf("summary: %s", string(b))
+	return nil
 }
 
 func meanAbsBasis(series []derivsim.BasisSample) float64 {

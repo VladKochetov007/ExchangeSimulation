@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -46,6 +48,13 @@ func fmtDuration(d time.Duration) string {
 }
 
 func main() {
+	if err := run(); err != nil {
+		log.Print(err)
+		os.Exit(1)
+	}
+}
+
+func run() (err error) {
 	zeroFee := flag.Bool("zerofee", false, "run with zero fees")
 	flag.Parse()
 
@@ -58,9 +67,14 @@ func main() {
 
 	sim, err := feesim.NewSim(simDuration, cfg)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	defer sim.Close()
+	closed := false
+	defer func() {
+		if !closed {
+			err = errors.Join(err, sim.Close())
+		}
+	}()
 
 	started := time.Now()
 	sim.Runner.SetProgressCallback(100_000, func(done, total int) {
@@ -76,8 +90,12 @@ func main() {
 		sim.Exchange().StopAutomation()
 	})
 	if err := sim.Runner.Run(ctx); err != nil {
-		log.Fatal(err)
+		return err
 	}
+	if err := sim.Close(); err != nil {
+		return fmt.Errorf("seal evidence: %w", err)
+	}
+	closed = true
 	fmt.Println()
 
 	const usd = float64(exchange.USD_PRECISION)
@@ -89,4 +107,5 @@ func main() {
 			arb.Symbol(), arb.PerpSymbol(), arb.Position())
 	}
 	log.Printf("Logs written to %s/", cfg.LogDir)
+	return nil
 }

@@ -7,9 +7,26 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"testing"
 )
+
+type injectedWriteCloser struct {
+	bytes.Buffer
+	write func([]byte) (int, error)
+	close error
+}
+
+func (w *injectedWriteCloser) Write(p []byte) (int, error) {
+	if w.write != nil {
+		return w.write(p)
+	}
+	return w.Buffer.Write(p)
+}
+
+func (w *injectedWriteCloser) Close() error { return w.close }
 
 func TestPersistedEventPreservesLegacyCanonicalBytes(t *testing.T) {
 	tests := []struct {
@@ -75,9 +92,14 @@ func TestJSONLinesLoggerEvidenceDigestCountsPersistedRecordsOnce(t *testing.T) {
 	}
 	logger.LogEvent(1, 7, "one", map[string]int{"n": 1})
 	logger.LogEvent(2, 8, "two", map[string]int{"n": 2})
-	logger.Close()
+	if err := logger.Close(); err != nil {
+		t.Fatal(err)
+	}
 
-	got := logger.EvidenceDigest()
+	got, err := logger.EvidenceDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got.Events != 2 {
 		t.Fatalf("runtime record count = %d, want 2", got.Events)
 	}
@@ -120,3 +142,89 @@ func TestJSONLinesLoggerEvidenceDigestCountsPersistedRecordsOnce(t *testing.T) {
 		t.Fatalf("offline evidence %d/%s, runtime %d/%s", count, want, got.Events, got.Hex())
 	}
 }
+
+func TestJSONLinesLoggerFailsClosedOnWriteFlushAndCloseErrors(t *testing.T) {
+	writeErr := errors.New("injected write failure")
+	flushErr := errors.New("injected flush failure")
+	closeErr := errors.New("injected close failure")
+	tests := []struct {
+		name   string
+		logger *JSONLinesLogger
+		want   error
+		flush  bool
+	}{
+		{
+			name: "write",
+			logger: newJSONLinesLogger(&injectedWriteCloser{write: func([]byte) (int, error) {
+				return 0, writeErr
+			}}, 1),
+			want: writeErr,
+		},
+		{
+			name: "flush",
+			logger: newJSONLinesLogger(&injectedWriteCloser{write: func([]byte) (int, error) {
+				return 0, flushErr
+			}}, 1024),
+			want:  flushErr,
+			flush: true,
+		},
+		{
+			name:   "close",
+			logger: newJSONLinesLogger(&injectedWriteCloser{close: closeErr}, 1024),
+			want:   closeErr,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.logger.LogEvent(1, 1, "event", map[string]int{"n": 1})
+			if test.flush {
+				if err := test.logger.Flush(); !errors.Is(err, test.want) {
+					t.Fatalf("Flush error = %v, want %v", err, test.want)
+				}
+			}
+			if err := test.logger.Close(); !errors.Is(err, test.want) {
+				t.Fatalf("Close error = %v, want %v", err, test.want)
+			}
+			if _, err := test.logger.EvidenceDigest(); !errors.Is(err, test.want) {
+				t.Fatalf("EvidenceDigest error = %v, want %v", err, test.want)
+			}
+		})
+	}
+}
+
+func TestJSONLinesLoggerRejectsPartialFinalEventWrite(t *testing.T) {
+	partialErr := errors.New("injected partial write")
+	logger := newJSONLinesLogger(&injectedWriteCloser{write: func(p []byte) (int, error) {
+		return len(p) - 1, partialErr
+	}}, 1)
+	logger.LogEvent(1, 1, "event", map[string]int{"n": 1})
+	if err := logger.Close(); !errors.Is(err, partialErr) {
+		t.Fatalf("Close error = %v, want %v", err, partialErr)
+	}
+	if digest, err := logger.EvidenceDigest(); !errors.Is(err, partialErr) || digest.Events != 0 {
+		t.Fatalf("partial record produced digest=%+v err=%v", digest, err)
+	}
+}
+
+func TestSimCloseReportsEvidenceFailureAndClosesEveryLogger(t *testing.T) {
+	writeErr := errors.New("injected write failure")
+	failed := newJSONLinesLogger(&injectedWriteCloser{write: func([]byte) (int, error) {
+		return 0, writeErr
+	}}, 1)
+	closed := newJSONLinesLogger(&injectedWriteCloser{}, 1024)
+	failed.LogEvent(1, 1, "failed", nil)
+	closed.LogEvent(1, 1, "surviving", nil)
+
+	sim := &Sim{Loggers: []*JSONLinesLogger{failed, closed}}
+	if err := sim.Close(); !errors.Is(err, writeErr) {
+		t.Fatalf("Close error = %v, want %v", err, writeErr)
+	}
+	if _, err := closed.EvidenceDigest(); err != nil {
+		t.Fatalf("healthy logger was not closed cleanly: %v", err)
+	}
+	if err := sim.Close(); !errors.Is(err, writeErr) {
+		t.Fatalf("repeat Close error = %v, want %v", err, writeErr)
+	}
+}
+
+var _ io.WriteCloser = (*injectedWriteCloser)(nil)

@@ -311,10 +311,11 @@ func (s *Sim) RaceArbTerminalReports() ([]RaceArbTerminalReport, error) {
 	return reports, nil
 }
 
-func (s *Sim) Close() {
-	for _, l := range s.Loggers {
-		l.Close()
-	}
+// Close seals the raw evidence transport. A caller must treat an error as a
+// failed run rather than emitting terminal metrics or success metadata.
+func (s *Sim) Close() error {
+	_, err := CloseLoggers(s.Loggers)
+	return err
 }
 
 func NewSim(simTime time.Duration, cfg SimConfig) (*Sim, error) {
