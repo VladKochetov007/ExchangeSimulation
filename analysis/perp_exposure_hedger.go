@@ -19,20 +19,24 @@ import (
 // multivenue package: the persisted configuration, receipt sidecars, gateway
 // decisions, and venue events are the only sources of this verdict.
 type PerpExposureHedgerAudit struct {
-	Decisions         int64  `json:"decisions"`
-	EnabledDecisions  int64  `json:"enabled_decisions"`
-	DisabledDecisions int64  `json:"disabled_decisions"`
-	StateUpdates      int64  `json:"state_updates"`
-	Submitted         int64  `json:"submitted"`
-	Deferred          int64  `json:"deferred"`
-	Accepted          int64  `json:"accepted"`
-	Rejected          int64  `json:"rejected"`
-	HorizonCensored   int64  `json:"horizon_censored"`
-	Fills             int64  `json:"fills"`
-	FilledQty         int64  `json:"filled_qty"`
-	CancelledIOC      int64  `json:"cancelled_ioc"`
-	AbsoluteGapSum    string `json:"absolute_gap_sum"`
-	GapSamples        int64  `json:"gap_samples"`
+	Decisions                 int64  `json:"decisions"`
+	EnabledDecisions          int64  `json:"enabled_decisions"`
+	DisabledDecisions         int64  `json:"disabled_decisions"`
+	StateUpdates              int64  `json:"state_updates"`
+	Submitted                 int64  `json:"submitted"`
+	Deferred                  int64  `json:"deferred"`
+	Accepted                  int64  `json:"accepted"`
+	Rejected                  int64  `json:"rejected"`
+	HorizonCensored           int64  `json:"horizon_censored"`
+	Fills                     int64  `json:"fills"`
+	FilledQty                 int64  `json:"filled_qty"`
+	CancelledIOC              int64  `json:"cancelled_ioc"`
+	AutoPerpBorrowEvents      int64  `json:"auto_perp_borrow_events"`
+	AutoPerpBorrowedQuote     string `json:"auto_perp_borrowed_quote"`
+	UnexpectedAutoPerpBorrows int64  `json:"unexpected_auto_perp_borrows"`
+	InvalidBorrowEvents       int64  `json:"invalid_borrow_events"`
+	AbsoluteGapSum            string `json:"absolute_gap_sum"`
+	GapSamples                int64  `json:"gap_samples"`
 
 	ReceiptAuditValid       bool  `json:"receipt_audit_valid"`
 	ReceiptEvidenceErrors   int64 `json:"receipt_evidence_errors"`
@@ -343,7 +347,8 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 	cancels := make(map[perpExposureOrderKey][]perpExposureCancellation)
 	trades := make(map[perpExposureOrderKey][]perpExposureTrade)
 	fillEvidence := make(map[perpExposureOrderKey][]perpExposureFillEvidence)
-	err = r.Scan(ScanOptions{Events: []string{"perp_exposure_hedger_decision", "perp_exposure_hedger_fill", "OrderAccepted", "OrderRejected", "OrderFill", "OrderCancelled", "Trade"}, Workers: 1}, func(event Event) {
+	autoPerpBorrowed := new(big.Int)
+	err = r.Scan(ScanOptions{Events: []string{"perp_exposure_hedger_decision", "perp_exposure_hedger_fill", "OrderAccepted", "OrderRejected", "OrderFill", "OrderCancelled", "Trade", "borrow"}, Workers: 1}, func(event Event) {
 		switch event.Name {
 		case "perp_exposure_hedger_decision":
 			var d perpExposureDecision
@@ -414,11 +419,26 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 				key := perpExposureOrderKey{event.VenueID, trade.MakerOrderID}
 				trades[key] = append(trades[key], trade)
 			}
+		case "borrow":
+			var borrow exchange.BorrowEvent
+			if event.Decode(&borrow) != nil || borrow.ClientID == 0 || borrow.Asset == "" || borrow.Amount <= 0 {
+				result.InvalidBorrowEvents++
+				return
+			}
+			if borrow.Reason != "auto_perp" {
+				return
+			}
+			result.AutoPerpBorrowEvents++
+			autoPerpBorrowed.Add(autoPerpBorrowed, big.NewInt(borrow.Amount))
+			if !policy.AutoBorrowPerp || borrow.Asset != "USD" || r.Role(event.VenueID, event.ClientID) != "perp_exposure_hedger" {
+				result.UnexpectedAutoPerpBorrows++
+			}
 		}
 	})
 	if err != nil {
 		return nil, err
 	}
+	result.AutoPerpBorrowedQuote = autoPerpBorrowed.String()
 	if result.Decisions == 0 {
 		result.InvalidDecisionRecords++
 		add("", 0, 0, 0, "missing_perp_exposure_decisions")
@@ -722,7 +742,7 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 		}
 		return a.Failure < b.Failure
 	})
-	result.Valid = result.Decisions > 0 && result.ReceiptAuditValid && result.ReceiptEvidenceErrors == 0 && result.MissingReceipts == 0 && result.AmbiguousReceipts == 0 && result.ReceiptMismatches == 0 && result.FutureReceiptUse == 0 && result.MissingGatewayDecisions == 0 && result.GatewayMismatches == 0 && result.InvalidDecisionRecords == 0 && result.StateMismatches == 0 && result.DecisionMismatches == 0 && result.DisabledSubmissions == 0 && result.DuplicateDecisions == 0 && result.MissingOutcomes == 0 && result.DuplicateOutcomes == 0 && result.OutcomeMismatches == 0 && result.MissingIOCTerminals == 0 && result.DuplicateIOCTerminals == 0 && result.FillQuantityMismatches == 0 && result.MissingFillEvidence == 0 && result.UnexpectedFillEvidence == 0 && result.FillEvidenceMismatches == 0 && result.NonReducingFills == 0 && result.UnknownCounterparties == 0 && result.SelfFills == 0 && result.NonTakerFills == 0 && result.FeeMismatches == 0
+	result.Valid = result.Decisions > 0 && result.ReceiptAuditValid && result.ReceiptEvidenceErrors == 0 && result.MissingReceipts == 0 && result.AmbiguousReceipts == 0 && result.ReceiptMismatches == 0 && result.FutureReceiptUse == 0 && result.MissingGatewayDecisions == 0 && result.GatewayMismatches == 0 && result.InvalidDecisionRecords == 0 && result.InvalidBorrowEvents == 0 && result.UnexpectedAutoPerpBorrows == 0 && result.StateMismatches == 0 && result.DecisionMismatches == 0 && result.DisabledSubmissions == 0 && result.DuplicateDecisions == 0 && result.MissingOutcomes == 0 && result.DuplicateOutcomes == 0 && result.OutcomeMismatches == 0 && result.MissingIOCTerminals == 0 && result.DuplicateIOCTerminals == 0 && result.FillQuantityMismatches == 0 && result.MissingFillEvidence == 0 && result.UnexpectedFillEvidence == 0 && result.FillEvidenceMismatches == 0 && result.NonReducingFills == 0 && result.UnknownCounterparties == 0 && result.SelfFills == 0 && result.NonTakerFills == 0 && result.FeeMismatches == 0
 	return result, nil
 }
 
