@@ -12,6 +12,25 @@ fi
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cell=$(CDPATH= cd -- "$1" && pwd)
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
+distress_protocol=${P7_DISTRESS_PROTOCOL:-p7a}
+case "$distress_protocol" in
+	p7a)
+		hypothesis_id="V2-7-P7A-DISTRESS"
+		experiment_prefix="v2-7-p7a-distress-"
+		analysis_contract="v2-7-p7a-distress-v1"
+		expected_horizon="4h"
+		;;
+	p7b)
+		hypothesis_id="V2-7-P7B-DISTRESS"
+		experiment_prefix="v2-7-p7b-distress-"
+		analysis_contract="v2-7-p7b-distress-v1"
+		expected_horizon="24h"
+		;;
+	*)
+		echo "unknown V2-7 distress protocol: $distress_protocol" >&2
+		exit 2
+		;;
+esac
 
 if [[ ! -x "$analyzer" ]]; then
 	echo "missing executable analyzer: $analyzer" >&2
@@ -19,7 +38,7 @@ if [[ ! -x "$analyzer" ]]; then
 fi
 for input in greeks.json latency.json manifest.json evidence-artifact-hash.json run-config.json run-metadata.json checkpoints.jsonl; do
 	if [[ ! -s "$cell/$input" ]]; then
-		echo "missing P7a completion/provenance input $input: $cell" >&2
+		echo "missing V2-7 distress completion/provenance input $input: $cell" >&2
 		exit 1
 	fi
 done
@@ -30,31 +49,35 @@ fi
 
 preflight=$(jq -r '.preflight' "$cell/run-metadata.json")
 [[ "$preflight" == false ]] || {
-	echo "refusing to score a P7a preflight directory: $cell" >&2
+		echo "refusing to score a V2-7 distress preflight directory: $cell" >&2
 	exit 1
 }
 horizon=$(jq -er '.simulated_horizon' "$cell/run-metadata.json")
-[[ "$horizon" == 4h ]] || {
-	echo "unexpected registered P7a horizon $horizon: $cell" >&2
+[[ "$horizon" == "$expected_horizon" ]] || {
+	echo "unexpected registered V2-7 distress horizon $horizon: $cell" >&2
 	exit 1
 }
 cell_id=$(jq -er '.cell' "$cell/run-metadata.json")
 seed=$(jq -er '.seed' "$cell/run-metadata.json")
-case "$cell_id" in C|L|H) ;; *) echo "invalid P7a cell $cell_id" >&2; exit 1 ;; esac
-case "$seed" in 307|311) ;; *) echo "invalid P7a development seed $seed" >&2; exit 1 ;; esac
+case "$cell_id" in C|L|H) ;; *) echo "invalid V2-7 distress cell $cell_id" >&2; exit 1 ;; esac
 
 # The run directory is itself part of the provenance contract.  Refuse a
 # copied cell whose metadata/config no longer identify the same registered
 # experiment.
-jq -e --arg cell "$cell_id" --argjson seed "$seed" '
-  .hypothesis_id == "V2-7-P7A-DISTRESS" and
+jq -e --arg cell "$cell_id" --argjson seed "$seed" --arg hypothesis "$hypothesis_id" --arg prefix "$experiment_prefix" '
+  .hypothesis_id == $hypothesis and
   .cell == $cell and .seed == $seed and
-  (.experiment_id | startswith("v2-7-p7a-distress-")) and
+  (.experiment_id | startswith($prefix)) and
   (.completion_sentinels == ["greeks.json", "latency.json"])
 ' "$cell/run-metadata.json" >/dev/null
-jq -e --argjson seed "$seed" --arg cell "$cell_id" '
+if [[ "$distress_protocol" == p7a ]]; then
+	case "$seed" in 307|311) ;; *) echo "invalid P7a development seed $seed" >&2; exit 1 ;; esac
+else
+	case "$seed" in 337|341) ;; *) echo "invalid P7b development seed $seed" >&2; exit 1 ;; esac
+fi
+jq -e --argjson seed "$seed" --arg cell "$cell_id" --arg hypothesis "$hypothesis_id" '
   .schema_version == 2 and .config.seed == $seed and
-  .config.hypothesis_id == "V2-7-P7A-DISTRESS" and
+  .config.hypothesis_id == $hypothesis and
   .config.log_mode == "full" and
   .config.record_market_data_receipts == true and
   .config.record_perp_exposure_hedger_decisions == true and
@@ -159,13 +182,15 @@ jq -n \
 	--arg analysis_revision "$(git -C "$root_dir" rev-parse HEAD)" \
 	--arg analyzer_sha256 "$(sha256sum "$analyzer" | awk '{print $1}')" \
 	--arg cell "$cell_id" \
+	--arg analysis_contract "$analysis_contract" \
+	--arg distress_protocol "$distress_protocol" \
 	--argjson seed "$seed" \
 	--arg runtime_evidence_digest "$runtime_digest" \
 	--argjson runtime_evidence_events "$runtime_events" \
 	'{
 	  analysis_revision: $analysis_revision,
 	  analyzer_sha256: $analyzer_sha256,
-	  analysis_contract: "v2-7-p7a-distress-v1",
+	  analysis_contract: $analysis_contract,
 	  cell: $cell,
 	  seed: $seed,
 	  completion_sentinels: ["greeks.json", "latency.json"],
@@ -177,8 +202,8 @@ jq -n \
 	    "expiryfills.json", "derivatives.json", "ecology.json", "roleaudit.json"
 	  ],
 	  runtime_evidence_artifact: {events: $runtime_evidence_events, digest: $runtime_evidence_digest},
-	  raw_log_policy: "retained; this extractor has no prune authority"
+	  raw_log_policy: ("retained; no prune authority (" + $distress_protocol + ")")
 }' >"$metadata_tmp"
 mv "$metadata_tmp" "$cell/analysis-metadata.json"
 
-echo "extracted V2-7 P7a evidence: $cell"
+	echo "extracted V2-7 distress evidence ($distress_protocol): $cell"
