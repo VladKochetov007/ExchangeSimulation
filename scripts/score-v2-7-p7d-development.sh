@@ -32,7 +32,6 @@ done
 
 source_revision=$(jq -er '.git_revision' "$base/C-431/run-metadata.json")
 binary_sha256=$(jq -er '.binary_sha256' "$base/C-431/run-metadata.json")
-analysis_revision=$(jq -er '.analysis_revision' "$base/C-431/analysis-metadata.json")
 analyzer_sha256=$(jq -er '.analyzer_sha256' "$base/C-431/analysis-metadata.json")
 
 for id in "${cells[@]}"; do
@@ -44,8 +43,8 @@ for id in "${cells[@]}"; do
      .preflight == false and .simulated_horizon == "4h" and
      .completion_sentinels == ["greeks.json", "latency.json"]' \
     "$cell/run-metadata.json" >/dev/null
-  jq -e --arg rev "$analysis_revision" --arg bin "$analyzer_sha256" \
-    '.analysis_revision == $rev and .analyzer_sha256 == $bin and
+  jq -e --arg bin "$analyzer_sha256" \
+    '.analyzer_sha256 == $bin and
      .analysis_contract == "v2-7-p7d-directional-distress-v1" and
      (.required_artifacts | length) == 16 and
      .runtime_evidence_artifact.events > 0 and
@@ -93,11 +92,13 @@ for id in "${cells[@]}"; do
   cell="$base/$id"
   arm=${id%%-*}
   seed=${id##*-}
+  cell_analysis_revision=$(jq -er '.analysis_revision' "$cell/analysis-metadata.json")
   cell_records+=("$(jq -n --arg cell "$arm" --argjson seed "$seed" \
+    --arg analysis_revision "$cell_analysis_revision" \
     --slurpfile p "$cell/perpexposurehedger.json" --slurpfile r "$cell/perpexposurerisk.json" \
     --slurpfile o "$cell/observationreceipts.json" --slurpfile l "$cell/liquidations.json" \
     --slurpfile e "$cell/evidenceartifacthash.json" '
-    {cell:$cell,seed:$seed,
+    {cell:$cell,seed:$seed,analysis_revision:$analysis_revision,
      activation:{enabled_decisions:$p[0].result.enabled_decisions,
        disabled_decisions:$p[0].result.disabled_decisions,decisions:$p[0].result.decisions,
        submitted:$p[0].result.submitted,accepted:$p[0].result.accepted,
@@ -121,6 +122,16 @@ for id in "${cells[@]}"; do
      risk:{candidates:$r[0].result.candidates,mark_updates:$r[0].result.mark_updates,
        expected_breaches:$r[0].result.expected_breaches,
        observed_checks:$r[0].result.observed_checks,
+       arithmetic_failures:$r[0].result.arithmetic_failures,
+       mark_mismatches:$r[0].result.mark_mismatches,
+       balance_mismatches:$r[0].result.balance_mismatches,
+       contribution_mismatches:$r[0].result.contribution_mismatches,
+       equity_mismatches:$r[0].result.equity_mismatches,
+       notional_mismatches:$r[0].result.notional_mismatches,
+       maintenance_mismatches:$r[0].result.maintenance_mismatches,
+       mark_domain_failures:$r[0].result.mark_domain_failures,
+       cross_file_ambiguities:$r[0].result.cross_file_ambiguities,
+       malformed_records:$r[0].result.malformed_records,
        missing_checks:$r[0].result.missing_checks,unexpected_checks:$r[0].result.unexpected_checks,
        duplicate_checks:$r[0].result.duplicate_checks,field_mismatches:$r[0].result.field_mismatches,
        position_path_failures:$r[0].result.position_path_failures,
@@ -161,7 +172,7 @@ fi
 mkdir -p "$(dirname -- "$output")"
 jq -n --arg protocol v2-7-p7d-directional-distress-v1 --arg classification "$classification" \
   --arg source_revision "$source_revision" --arg binary_sha256 "$binary_sha256" \
-  --arg analysis_revision "$analysis_revision" --arg analyzer_sha256 "$analyzer_sha256" \
+  --arg analyzer_sha256 "$analyzer_sha256" \
   --argjson control_valid "$control_valid" --argjson activation_valid "$activation_valid" \
   --argjson integrity_valid "$integrity_valid" --argjson risk_integrity "$risk_integrity" \
   --argjson long_risk "$long_risk" --argjson short_risk "$short_risk" \
@@ -169,7 +180,7 @@ jq -n --arg protocol v2-7-p7d-directional-distress-v1 --arg classification "$cla
   {protocol:$protocol,classification:$classification,development_seeds:[431,433],
    untouched_holdout_seeds:[439,443,449],holdouts_consumed:false,
    source_revision:$source_revision,binary_sha256:$binary_sha256,
-   analysis_revision:$analysis_revision,analyzer_sha256:$analyzer_sha256,
+   analyzer_sha256:$analyzer_sha256,
    predicates:{control_valid:$control_valid,activation_valid:$activation_valid,
      evidence_integrity_valid:$integrity_valid,participant_risk_replay_valid:$risk_integrity,
      long_risk_exercised:$long_risk,short_risk_exercised:$short_risk,
