@@ -96,18 +96,20 @@ type PerpExposureHedgerCheck struct {
 }
 
 type perpExposurePolicyConfig struct {
-	Enabled                 bool   `json:"enabled"`
-	Symbol                  string `json:"symbol"`
-	ExposureMode            string `json:"exposure_mode"`
-	InitialPhysicalExposure int64  `json:"initial_physical_exposure"`
-	DecisionInterval        int64  `json:"decision_interval"`
-	ExposureInterval        int64  `json:"exposure_interval"`
-	ExposureStepQty         int64  `json:"exposure_step_qty"`
-	MaxAbsExposure          int64  `json:"max_abs_exposure"`
-	MaxRequestQty           int64  `json:"max_request_qty"`
-	TickSize                int64  `json:"tick_size"`
-	InitialQuoteBalance     int64  `json:"initial_quote_balance"`
-	InitialMargin           int64  `json:"initial_margin"`
+	Enabled                   bool   `json:"enabled"`
+	Symbol                    string `json:"symbol"`
+	ExposureMode              string `json:"exposure_mode"`
+	InitialPhysicalExposure   int64  `json:"initial_physical_exposure"`
+	InitialTargetPerpPosition int64  `json:"initial_target_perp_position"`
+	AutoBorrowPerp            bool   `json:"auto_borrow_perp"`
+	DecisionInterval          int64  `json:"decision_interval"`
+	ExposureInterval          int64  `json:"exposure_interval"`
+	ExposureStepQty           int64  `json:"exposure_step_qty"`
+	MaxAbsExposure            int64  `json:"max_abs_exposure"`
+	MaxRequestQty             int64  `json:"max_request_qty"`
+	TickSize                  int64  `json:"tick_size"`
+	InitialQuoteBalance       int64  `json:"initial_quote_balance"`
+	InitialMargin             int64  `json:"initial_margin"`
 }
 
 type perpExposureRunConfig struct {
@@ -261,6 +263,7 @@ type perpExposureStateEvent struct {
 type perpExposureReplayState struct {
 	rng                                      *rand.Rand
 	physical, position, lastUpdate, lastTick int64
+	target                                   int64
 	seenFirst                                bool
 	entryComplete                            bool
 }
@@ -268,12 +271,35 @@ type perpExposureReplayState struct {
 const perpExposurePolicyVersion = "v2_5_p2_perp_exposure_v1"
 const fixedLiabilityExposureMode = "fixed_liability"
 const fixedLiabilityPolicyVersion = "v2_7_fixed_liability_v1"
+const fixedDirectionalExposureMode = "fixed_directional"
+const fixedDirectionalPolicyVersion = "v2_7_fixed_directional_v1"
 
 func perpExposurePolicyVersionFor(mode string) string {
 	if mode == fixedLiabilityExposureMode {
 		return fixedLiabilityPolicyVersion
 	}
+	if mode == fixedDirectionalExposureMode {
+		return fixedDirectionalPolicyVersion
+	}
 	return perpExposurePolicyVersion
+}
+
+func fixedExposureMode(mode string) bool {
+	return mode == fixedLiabilityExposureMode || mode == fixedDirectionalExposureMode
+}
+
+func fixedExposureHeldAction(mode string) string {
+	if mode == fixedDirectionalExposureMode {
+		return "FIXED_DIRECTIONAL_HELD"
+	}
+	return "FIXED_LIABILITY_HELD"
+}
+
+func perpExposureTarget(state *perpExposureReplayState, policy *perpExposurePolicyConfig) int64 {
+	if policy.ExposureMode == fixedDirectionalExposureMode {
+		return state.target
+	}
+	return -state.physical
 }
 
 // MeasurePerpExposureHedger verifies the complete P2 local state/action
@@ -432,8 +458,11 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 				continue
 			}
 			state = &perpExposureReplayState{rng: rand.New(rand.NewSource(perpExposureFlowSeed(config.Seed, index, 0, 16)))}
-			if policy.ExposureMode == fixedLiabilityExposureMode {
+			switch policy.ExposureMode {
+			case fixedLiabilityExposureMode:
 				state.physical = policy.InitialPhysicalExposure
+			case fixedDirectionalExposureMode:
+				state.target = policy.InitialTargetPerpPosition
 			}
 			states[participant] = state
 			buckets[participant] = &PerpExposureHedgerBucket{VenueID: event.venue, ClientID: event.client}
@@ -446,7 +475,7 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 			filesByParticipant[participant] = event.file
 		}
 		if event.fill != nil {
-			reducesGap := perpExposureFillReducesGap(*event.fill, state)
+			reducesGap := perpExposureFillReducesGap(*event.fill, state, policy)
 			if !perpExposureApplyFill(*event.fill, state) {
 				result.FillEvidenceMismatches++
 				add(event.venue, event.client, 0, event.fill.OrderID, "actor_position_transition_mismatch")
@@ -456,7 +485,7 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 			} else {
 				buckets[participant].ReducingFills++
 			}
-			if policy.ExposureMode == fixedLiabilityExposureMode && state.position == -state.physical {
+			if fixedExposureMode(policy.ExposureMode) && state.position == perpExposureTarget(state, policy) {
 				state.entryComplete = true
 			}
 			continue
@@ -664,7 +693,7 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 		bucket.GapSamples = gapCounts[participant]
 		result.GapSamples += bucket.GapSamples
 		if state := states[participant]; state != nil {
-			bucket.TerminalAbsoluteGap = new(big.Int).Abs(new(big.Int).Sub(big.NewInt(-state.physical), big.NewInt(state.position))).String()
+			bucket.TerminalAbsoluteGap = new(big.Int).Abs(new(big.Int).Sub(big.NewInt(perpExposureTarget(state, policy)), big.NewInt(state.position))).String()
 		} else {
 			bucket.TerminalAbsoluteGap = "0"
 		}
@@ -711,11 +740,18 @@ func loadPerpExposureRunConfig(dir string) (perpExposureRunConfig, error) {
 
 func validPerpExposureRunConfig(c perpExposureRunConfig) error {
 	p := c.PerpExposureHedger
-	if p == nil || len(c.VenueIDs) == 0 || p.Symbol != "ABC-PERP" || (p.ExposureMode != "" && p.ExposureMode != fixedLiabilityExposureMode) || p.DecisionInterval <= 0 || p.ExposureInterval <= 0 || p.ExposureInterval%p.DecisionInterval != 0 || p.ExposureStepQty <= 0 || p.MaxAbsExposure < p.ExposureStepQty || p.MaxAbsExposure > math.MaxInt64-p.ExposureStepQty || p.MaxRequestQty <= 0 || p.TickSize <= 0 || p.InitialQuoteBalance <= 0 || p.InitialMargin <= 0 || c.TakerFeeBps < 0 || c.TakerFeeBps > 10_000 {
+	if p == nil || len(c.VenueIDs) == 0 || p.Symbol != "ABC-PERP" || (p.ExposureMode != "" && p.ExposureMode != fixedLiabilityExposureMode && p.ExposureMode != fixedDirectionalExposureMode) || p.DecisionInterval <= 0 || p.ExposureInterval <= 0 || p.ExposureInterval%p.DecisionInterval != 0 || p.ExposureStepQty <= 0 || p.MaxAbsExposure < p.ExposureStepQty || p.MaxAbsExposure > math.MaxInt64-p.ExposureStepQty || p.MaxRequestQty <= 0 || p.TickSize <= 0 || p.InitialQuoteBalance <= 0 || p.InitialMargin <= 0 || c.TakerFeeBps < 0 || c.TakerFeeBps > 10_000 {
 		return fmt.Errorf("unsupported P2 policy/configuration")
 	}
 	if p.ExposureMode == fixedLiabilityExposureMode && (p.InitialPhysicalExposure == 0 || p.InitialPhysicalExposure > p.MaxAbsExposure || p.InitialPhysicalExposure < -p.MaxAbsExposure) {
 		return fmt.Errorf("unsupported fixed-liability exposure")
+	}
+	if p.ExposureMode == fixedDirectionalExposureMode {
+		if (p.Enabled && p.InitialTargetPerpPosition == 0) || p.InitialTargetPerpPosition > p.MaxAbsExposure || p.InitialTargetPerpPosition < -p.MaxAbsExposure || !p.AutoBorrowPerp {
+			return fmt.Errorf("unsupported fixed-directional exposure")
+		}
+	} else if p.AutoBorrowPerp {
+		return fmt.Errorf("unsupported perpetual auto-borrow policy")
 	}
 	seen := make(map[string]bool, len(c.VenueIDs))
 	for _, venue := range c.VenueIDs {
@@ -746,7 +782,7 @@ func validatePerpExposureDecision(d perpExposureDecision, state *perpExposureRep
 	}
 	state.lastTick = d.DecisionTime
 	updated := false
-	if p.ExposureMode == fixedLiabilityExposureMode {
+	if fixedExposureMode(p.ExposureMode) {
 		if d.PhysicalStep != 0 || d.PhysicalAfter != state.physical {
 			return false, false, false
 		}
@@ -759,7 +795,7 @@ func validatePerpExposureDecision(d perpExposureDecision, state *perpExposureRep
 	} else if d.PhysicalStep != 0 || d.PhysicalAfter != state.physical {
 		return false, false, false
 	}
-	target := new(big.Int).Neg(big.NewInt(state.physical))
+	target := big.NewInt(perpExposureTarget(state, p))
 	gap := new(big.Int).Sub(target, big.NewInt(state.position))
 	if !target.IsInt64() || !gap.IsInt64() || d.TargetPerpPosition != target.Int64() || d.HedgeGap != gap.Int64() {
 		return false, updated, false
@@ -770,8 +806,8 @@ func validatePerpExposureDecision(d perpExposureDecision, state *perpExposureRep
 	if !d.Enabled {
 		return false, updated, false
 	}
-	if p.ExposureMode == fixedLiabilityExposureMode && state.entryComplete {
-		return d.Action == "FIXED_LIABILITY_HELD" && d.RequestID == 0 && d.RequestedQty == 0 && d.Side == "", updated, false
+	if fixedExposureMode(p.ExposureMode) && state.entryComplete {
+		return d.Action == fixedExposureHeldAction(p.ExposureMode) && d.RequestID == 0 && d.RequestedQty == 0 && d.Side == "", updated, false
 	}
 	if d.RequestPending {
 		return d.Action == "REQUEST_PENDING" && d.RequestID == 0, updated, false
@@ -860,11 +896,14 @@ func perpExposureApplyFill(f perpExposureFillEvidence, s *perpExposureReplayStat
 	return true
 }
 
-func perpExposureFillReducesGap(f perpExposureFillEvidence, s *perpExposureReplayState) bool {
+func perpExposureFillReducesGap(f perpExposureFillEvidence, s *perpExposureReplayState, p *perpExposurePolicyConfig) bool {
 	if !s.seenFirst || f.PrePosition != s.position {
 		return false
 	}
-	target := new(big.Int).Neg(big.NewInt(s.physical))
+	// The replay state stores the explicit directional target for fixed
+	// mandates and derives the opposite hedge target for physical-liability
+	// policies. Both paths remain independent of actor memory.
+	target := big.NewInt(perpExposureTarget(s, p))
 	before := new(big.Int).Sub(target, big.NewInt(f.PrePosition))
 	after := new(big.Int).Sub(target, big.NewInt(f.PostPosition))
 	return new(big.Int).Abs(after).Cmp(new(big.Int).Abs(before)) < 0

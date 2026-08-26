@@ -209,6 +209,88 @@ func TestPerpExposureHedgerFixedLiabilityConfigRequiresBoundedNonzeroExposure(t 
 	}
 }
 
+func TestPerpExposureHedgerFixedDirectionalTargetsAndHolds(t *testing.T) {
+	gateway := newFundingCarryStubGateway()
+	var decisions []PerpExposureHedgerDecision
+	cfg := perpExposureTestConfig()
+	cfg.ExposureMode = fixedDirectionalExposureMode
+	cfg.InitialTargetPerpPosition = 20
+	cfg.MaxAbsExposure = 50
+	cfg.AutoBorrowPerp = true
+	cfg.DecisionObserver = func(decision PerpExposureHedgerDecision) { decisions = append(decisions, decision) }
+	h := NewPerpExposureHedger(1, gateway, cfg)
+	if h.PhysicalExposure() != 0 || h.targetPerpPosition != 20 {
+		t.Fatalf("directional policy installed an unexpected physical/target state: physical=%d target=%d", h.PhysicalExposure(), h.targetPerpPosition)
+	}
+	now := time.Unix(10, 0)
+	h.onTick(now)
+	observePerpExposureBook(h, gateway, now, 100, 101)
+	h.onTick(now.Add(time.Second))
+	if len(decisions) != 2 || len(gateway.requests) != 2 {
+		t.Fatalf("directional policy did not submit its first IOC: decisions=%+v requests=%+v", decisions, gateway.requests)
+	}
+	decision := decisions[1]
+	request := gateway.requests[len(gateway.requests)-1].OrderReq
+	if decision.PolicyVersion != fixedDirectionalHedgerPolicyVersion || decision.ExposureMode != fixedDirectionalExposureMode || decision.TargetPerpPosition != 20 || decision.HedgeGap != 20 || decision.Side != exchange.Buy.String() || decision.LimitPrice != 101 || decision.RequestedQty != 10 || request.Side != exchange.Buy || request.Price != 101 || request.Qty != 10 {
+		t.Fatalf("directional entry decision mismatch: decision=%+v request=%+v", decision, request)
+	}
+	h.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: request.RequestID, OrderID: 91}})
+	h.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{OrderID: 91, Symbol: cfg.Symbol, Side: exchange.Buy, Qty: 10, Price: 101, TradeID: 92, IsFull: true, Timestamp: now.Add(2 * time.Second).UnixNano()}})
+	if h.PerpPosition() != 10 || h.entryComplete {
+		t.Fatalf("partial directional entry unexpectedly held: position=%d complete=%t", h.PerpPosition(), h.entryComplete)
+	}
+	h.onTick(now.Add(3 * time.Second))
+	if len(decisions) != 3 || decisions[2].ActionOrDeferReason != "SUBMIT_IOC" || len(gateway.requests) != 3 {
+		t.Fatalf("directional policy did not complete its bounded entry: decision=%+v requests=%+v", decisions[2], gateway.requests)
+	}
+	request = gateway.requests[len(gateway.requests)-1].OrderReq
+	h.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{RequestID: request.RequestID, OrderID: 93}})
+	h.HandleEvent(context.Background(), &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{OrderID: 93, Symbol: cfg.Symbol, Side: exchange.Buy, Qty: 10, Price: 101, TradeID: 94, IsFull: true, Timestamp: now.Add(4 * time.Second).UnixNano()}})
+	if h.PerpPosition() != 20 || !h.entryComplete {
+		t.Fatalf("directional entry did not become complete: position=%d complete=%t", h.PerpPosition(), h.entryComplete)
+	}
+	h.onTick(now.Add(5 * time.Second))
+	if len(decisions) != 4 || decisions[3].ActionOrDeferReason != "FIXED_DIRECTIONAL_HELD" || decisions[3].RequestID != 0 || len(gateway.requests) != 3 {
+		t.Fatalf("directional policy reopened after entry: decision=%+v requests=%+v", decisions[3], gateway.requests)
+	}
+}
+
+func TestPerpExposureHedgerFixedDirectionalContractValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*PerpExposureHedgerConfig)
+	}{
+		{"enabled zero target", func(c *PerpExposureHedgerConfig) {
+			c.ExposureMode, c.InitialTargetPerpPosition, c.AutoBorrowPerp = fixedDirectionalExposureMode, 0, true
+		}},
+		{"target above bound", func(c *PerpExposureHedgerConfig) {
+			c.ExposureMode, c.InitialTargetPerpPosition, c.AutoBorrowPerp = fixedDirectionalExposureMode, c.MaxAbsExposure+1, true
+		}},
+		{"implicit borrowing", func(c *PerpExposureHedgerConfig) {
+			c.ExposureMode, c.InitialTargetPerpPosition = fixedDirectionalExposureMode, 20
+		}},
+		{"borrowing on random policy", func(c *PerpExposureHedgerConfig) {
+			c.AutoBorrowPerp = true
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := perpExposureTestConfig()
+			tc.edit(&cfg)
+			if err := cfg.validate(); err == nil {
+				t.Fatal("invalid fixed-directional contract accepted")
+			}
+		})
+	}
+
+	disabled := perpExposureTestConfig()
+	disabled.Enabled = false
+	disabled.ExposureMode = fixedDirectionalExposureMode
+	disabled.AutoBorrowPerp = true
+	if err := disabled.validate(); err != nil {
+		t.Fatalf("disabled directional control with zero target rejected: %v", err)
+	}
+}
+
 func TestPerpExposureHedgerConfigRequiresAuditedDelayedFeed(t *testing.T) {
 	policy := perpExposureTestConfig()
 	base := Config{LogDir: t.TempDir(), LogMode: "full", PerpExposureHedger: &policy}
@@ -239,6 +321,28 @@ func TestPerpExposureHedgerConfigRequiresAuditedDelayedFeed(t *testing.T) {
 	for _, venue := range sim.Venues {
 		if len(venue.PerpExposureHedgers) != 1 {
 			t.Fatalf("venue %s perp exposure actors = %d, want 1", venue.ID, len(venue.PerpExposureHedgers))
+		}
+	}
+}
+
+func TestFixedDirectionalBorrowPolicyReachesVenueContract(t *testing.T) {
+	policy := perpExposureTestConfig()
+	policy.ExposureMode = fixedDirectionalExposureMode
+	policy.InitialTargetPerpPosition = 20
+	policy.MaxAbsExposure = 50
+	policy.AutoBorrowPerp = true
+	cfg := Config{
+		LogDir: t.TempDir(), LogMode: "none", PerpExposureHedger: &policy,
+		LatencyProfiles: map[string]LatencyProfile{"perp_exposure_hedger": {Model: "constant", Delay: time.Millisecond}},
+	}
+	sim, err := NewSim(time.Second, cfg)
+	if err != nil {
+		t.Fatalf("directional policy rejected: %v", err)
+	}
+	defer sim.Close()
+	for _, venue := range sim.Venues {
+		if venue.Exchange.BorrowingMgr == nil || !venue.Exchange.BorrowingMgr.Config.AutoBorrowPerp {
+			t.Fatalf("venue %s lost the declared auto-perp-borrow policy", venue.ID)
 		}
 	}
 }

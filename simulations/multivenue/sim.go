@@ -2406,9 +2406,17 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		assetPrecisions["CDF"] = mvBasePrecision
 		collateralPrices["CDF"] = mvCDFBootstrap
 	}
+	autoBorrowPerp := false
+	if policy := s.Config.PerpExposureHedger; policy != nil {
+		// The fixed-directional P7d policy explicitly opts into the existing
+		// exchange margin-borrow path. Other populations retain the historical
+		// no-auto-perp-borrow contract.
+		autoBorrowPerp = policy.AutoBorrowPerp
+	}
 	if err := ex.EnableBorrowing(exchange.BorrowingConfig{
 		Enabled:           true,
 		AutoBorrowSpot:    true,
+		AutoBorrowPerp:    autoBorrowPerp,
 		DefaultMarginMode: exchange.CrossMargin,
 		CollateralFactors: map[string]float64{"USD": 1},
 		MaxBorrowPerAsset: maxBorrowPerAsset,

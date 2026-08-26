@@ -14,24 +14,31 @@ import (
 )
 
 // PerpExposureHedgerConfig declares a venue-local participant with a bounded
-// external physical exposure and an ordinary perpetual hedge. The physical
-// state is a motive only: it does not write a price, funding rate, exchange
-// balance, or counterparty order.
+// local exposure mandate and ordinary perpetual orders. The physical state is
+// a motive only: it does not write a price, funding rate, exchange balance, or
+// counterparty order.
 type PerpExposureHedgerConfig struct {
 	Enabled bool   `json:"enabled"`
 	Symbol  string `json:"symbol"`
-	// ExposureMode selects the declared off-exchange motive. An empty value is
+	// ExposureMode selects the declared local exposure policy. An empty value is
 	// the historical bounded random-walk P2 policy. fixed_liability is the V2-7
 	// policy: the participant enters one fixed hedge and holds it, so a later
 	// exchange-side liquidation cannot silently turn into a new entry.
-	ExposureMode            string        `json:"exposure_mode,omitempty"`
-	InitialPhysicalExposure int64         `json:"initial_physical_exposure,omitempty"`
-	DecisionInterval        time.Duration `json:"decision_interval"`
-	ExposureInterval        time.Duration `json:"exposure_interval"`
-	ExposureStepQty         int64         `json:"exposure_step_qty"`
-	MaxAbsExposure          int64         `json:"max_abs_exposure"`
-	MaxRequestQty           int64         `json:"max_request_qty"`
-	TickSize                int64         `json:"tick_size"`
+	// fixed_directional is a finite-capital one-sided perpetual mandate whose
+	// target is held after entry; it has no off-exchange physical offset.
+	ExposureMode              string `json:"exposure_mode,omitempty"`
+	InitialPhysicalExposure   int64  `json:"initial_physical_exposure,omitempty"`
+	InitialTargetPerpPosition int64  `json:"initial_target_perp_position,omitempty"`
+	// AutoBorrowPerp is an explicit balance-sheet policy for fixed directional
+	// distress screens. It is passed to the venue borrowing contract; the
+	// actor never receives an implicit credit exemption.
+	AutoBorrowPerp   bool          `json:"auto_borrow_perp,omitempty"`
+	DecisionInterval time.Duration `json:"decision_interval"`
+	ExposureInterval time.Duration `json:"exposure_interval"`
+	ExposureStepQty  int64         `json:"exposure_step_qty"`
+	MaxAbsExposure   int64         `json:"max_abs_exposure"`
+	MaxRequestQty    int64         `json:"max_request_qty"`
+	TickSize         int64         `json:"tick_size"`
 
 	// InitialQuoteBalance and InitialMargin are raw quote-asset quantities for
 	// the ordinary venue account. They are declared in the experiment config so
@@ -53,7 +60,7 @@ func (c PerpExposureHedgerConfig) validate() error {
 	if c.Symbol != "ABC-PERP" {
 		return fmt.Errorf("perp exposure hedger must trade ABC-PERP, got %q", c.Symbol)
 	}
-	if c.ExposureMode != "" && c.ExposureMode != fixedLiabilityExposureMode {
+	if c.ExposureMode != "" && c.ExposureMode != fixedLiabilityExposureMode && c.ExposureMode != fixedDirectionalExposureMode {
 		return fmt.Errorf("unsupported exposure mode %q", c.ExposureMode)
 	}
 	if c.DecisionInterval <= 0 || c.ExposureInterval <= 0 {
@@ -72,6 +79,19 @@ func (c PerpExposureHedgerConfig) validate() error {
 		if c.InitialPhysicalExposure > c.MaxAbsExposure || c.InitialPhysicalExposure < -c.MaxAbsExposure {
 			return fmt.Errorf("fixed-liability exposure %d exceeds absolute bound %d", c.InitialPhysicalExposure, c.MaxAbsExposure)
 		}
+	}
+	if c.ExposureMode == fixedDirectionalExposureMode {
+		if c.Enabled && c.InitialTargetPerpPosition == 0 {
+			return fmt.Errorf("enabled fixed-directional target must be nonzero")
+		}
+		if c.InitialTargetPerpPosition > c.MaxAbsExposure || c.InitialTargetPerpPosition < -c.MaxAbsExposure {
+			return fmt.Errorf("fixed-directional target %d exceeds absolute bound %d", c.InitialTargetPerpPosition, c.MaxAbsExposure)
+		}
+		if !c.AutoBorrowPerp {
+			return fmt.Errorf("fixed-directional policy requires explicit perpetual auto-borrow")
+		}
+	} else if c.AutoBorrowPerp {
+		return fmt.Errorf("perpetual auto-borrow is only valid for fixed-directional policy")
 	}
 	if c.MaxAbsExposure > math.MaxInt64-c.ExposureStepQty {
 		return fmt.Errorf("exposure bounds leave no safe reflected update")
@@ -178,26 +198,27 @@ type perpExposureBook struct {
 	askQty      int64
 }
 
-// PerpExposureHedger converts an external physical ABC exposure into a
-// target perpetual position with the opposite sign. It has no local reference
-// price beyond the most recently delivered executable touch.
+// PerpExposureHedger works a declared perpetual target using no local
+// reference price beyond the most recently delivered executable touch.
 type PerpExposureHedger struct {
 	*actor.BaseActor
 	cfg PerpExposureHedgerConfig
 	rng *rand.Rand
 
-	book             perpExposureBook
-	physicalExposure int64
-	perpPosition     int64
-	lastUpdate       int64
-	pending          bool
-	pendingRequestID uint64
-	activeOrders     map[uint64]struct{}
-	subscribed       bool
-	entryComplete    bool
+	book               perpExposureBook
+	physicalExposure   int64
+	targetPerpPosition int64
+	perpPosition       int64
+	lastUpdate         int64
+	pending            bool
+	pendingRequestID   uint64
+	activeOrders       map[uint64]struct{}
+	subscribed         bool
+	entryComplete      bool
 }
 
 const fixedLiabilityExposureMode = "fixed_liability"
+const fixedDirectionalExposureMode = "fixed_directional"
 
 // NewPerpExposureHedger constructs an opt-in, locally informed P2 actor.
 func NewPerpExposureHedger(id uint64, gateway actor.Gateway, cfg PerpExposureHedgerConfig) *PerpExposureHedger {
@@ -209,6 +230,8 @@ func NewPerpExposureHedger(id uint64, gateway actor.Gateway, cfg PerpExposureHed
 	}
 	if cfg.ExposureMode == fixedLiabilityExposureMode {
 		h.physicalExposure = cfg.InitialPhysicalExposure
+	} else if cfg.ExposureMode == fixedDirectionalExposureMode {
+		h.targetPerpPosition = cfg.InitialTargetPerpPosition
 	}
 	h.SetHandler(h)
 	h.AddTicker(cfg.DecisionInterval, h.onTick)
@@ -293,8 +316,8 @@ func (h *PerpExposureHedger) onFill(event actor.OrderFillEvent) {
 		return
 	}
 	h.perpPosition = next
-	if h.cfg.ExposureMode == fixedLiabilityExposureMode {
-		if target, targetOK := etypes.TrySub(0, h.physicalExposure); targetOK && h.perpPosition == target {
+	if h.cfg.ExposureMode == fixedLiabilityExposureMode || h.cfg.ExposureMode == fixedDirectionalExposureMode {
+		if target, targetOK := h.targetPosition(); targetOK && h.perpPosition == target {
 			h.entryComplete = true
 		}
 	}
@@ -342,7 +365,7 @@ func (h *PerpExposureHedger) onTick(now time.Time) {
 
 func (h *PerpExposureHedger) decision(now time.Time) PerpExposureHedgerDecision {
 	decision := h.baseDecision(now, "")
-	if h.cfg.ExposureMode != fixedLiabilityExposureMode && (h.lastUpdate == 0 || now.UnixNano()-h.lastUpdate >= int64(h.cfg.ExposureInterval)) {
+	if h.cfg.ExposureMode != fixedLiabilityExposureMode && h.cfg.ExposureMode != fixedDirectionalExposureMode && (h.lastUpdate == 0 || now.UnixNano()-h.lastUpdate >= int64(h.cfg.ExposureInterval)) {
 		step, next, ok := h.nextExposure()
 		if !ok {
 			decision.ActionOrDeferReason = "PHYSICAL_EXPOSURE_UPDATE_OVERFLOW"
@@ -352,7 +375,7 @@ func (h *PerpExposureHedger) decision(now time.Time) PerpExposureHedgerDecision 
 		decision.PhysicalStep, decision.PhysicalAfter = step, next
 	}
 	decision.FilledPerpPosition = h.perpPosition
-	target, ok := etypes.TrySub(0, h.physicalExposure)
+	target, ok := h.targetPosition()
 	if !ok {
 		decision.ActionOrDeferReason = "PERP_TARGET_UNREPRESENTABLE"
 		return decision
@@ -368,8 +391,8 @@ func (h *PerpExposureHedger) decision(now time.Time) PerpExposureHedgerDecision 
 		decision.ActionOrDeferReason = "POLICY_DISABLED"
 		return decision
 	}
-	if h.cfg.ExposureMode == fixedLiabilityExposureMode && h.entryComplete {
-		decision.ActionOrDeferReason = "FIXED_LIABILITY_HELD"
+	if (h.cfg.ExposureMode == fixedLiabilityExposureMode || h.cfg.ExposureMode == fixedDirectionalExposureMode) && h.entryComplete {
+		decision.ActionOrDeferReason = fixedExposureHeldAction(h.cfg.ExposureMode)
 		return decision
 	}
 	if h.pending {
@@ -460,12 +483,30 @@ func (h *PerpExposureHedger) baseDecision(now time.Time, action string) PerpExpo
 
 const perpExposureHedgerPolicyVersion = "v2_5_p2_perp_exposure_v1"
 const fixedLiabilityHedgerPolicyVersion = "v2_7_fixed_liability_v1"
+const fixedDirectionalHedgerPolicyVersion = "v2_7_fixed_directional_v1"
 
 func (h *PerpExposureHedger) policyVersion() string {
 	if h.cfg.ExposureMode == fixedLiabilityExposureMode {
 		return fixedLiabilityHedgerPolicyVersion
 	}
+	if h.cfg.ExposureMode == fixedDirectionalExposureMode {
+		return fixedDirectionalHedgerPolicyVersion
+	}
 	return perpExposureHedgerPolicyVersion
+}
+
+func (h *PerpExposureHedger) targetPosition() (int64, bool) {
+	if h.cfg.ExposureMode == fixedDirectionalExposureMode {
+		return h.targetPerpPosition, true
+	}
+	return etypes.TrySub(0, h.physicalExposure)
+}
+
+func fixedExposureHeldAction(mode string) string {
+	if mode == fixedDirectionalExposureMode {
+		return "FIXED_DIRECTIONAL_HELD"
+	}
+	return "FIXED_LIABILITY_HELD"
 }
 
 func (h *PerpExposureHedger) nextExposure() (int64, int64, bool) {
