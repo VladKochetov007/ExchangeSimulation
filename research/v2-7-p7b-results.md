@@ -19,8 +19,9 @@ and every extractor returned status `0` with the 15 required artifacts.
 
 The fail-closed analysis contract is `v2-7-p7b-distress-v1`.  Runtime and
 offline persisted-evidence artifact hashes agree exactly in every cell.  The
-first five cells were extracted under analysis revision `ab78e4e`; L-341 was
-extracted under `e021a34` after a scorer-only nested-field check was corrected.
+first three cells (C-337, C-341, and L-337) were extracted under analysis
+revision `ab78e4e`; L-341, H-337, and H-341 were extracted under `e021a34`
+after a scorer-only nested-field check was corrected.
 The analyzer SHA-256 is identical in all cells:
 `2dc0b8b3dd99f47d403d5a720438d527a0628193794fb99569ca879ce827dcb7`.
 
