@@ -104,6 +104,16 @@ if [[ "$distress_protocol" == p7d ]]; then
 		S) target=-2000000000; enabled=true ;;
 		*) echo "invalid P7d cell: $cell_id" >&2; exit 1 ;;
 	esac
+	# run-config.json is the exact persisted input copied before execution and
+	# therefore remains authoritative when the manifest's legacy omitempty tag
+	# drops the valid zero control target.  Active nonzero targets must still be
+	# present in both representations.
+	jq -e --argjson target "$target" --argjson enabled "$enabled" '
+    .perp_exposure_hedger.initial_target_perp_position == $target and
+    .perp_exposure_hedger.enabled == $enabled and
+    .perp_exposure_hedger.exposure_mode == "fixed_directional" and
+    .perp_exposure_hedger.auto_borrow_perp == true
+  ' "$cell/run-config.json" >/dev/null
 	jq -e --argjson seed "$seed" --arg cell "$cell_id" --arg hypothesis "$hypothesis_id" --argjson target "$target" --argjson enabled "$enabled" '
     .schema_version == 2 and .config.seed == $seed and
     .config.hypothesis_id == $hypothesis and
@@ -111,7 +121,8 @@ if [[ "$distress_protocol" == p7d ]]; then
     .config.record_market_data_receipts == true and
     .config.record_perp_exposure_hedger_decisions == true and
     .config.perp_exposure_hedger.exposure_mode == "fixed_directional" and
-    .config.perp_exposure_hedger.initial_target_perp_position == $target and
+    ((.config.perp_exposure_hedger.initial_target_perp_position // 0) == $target) and
+    ($target == 0 or .config.perp_exposure_hedger.initial_target_perp_position != null) and
     .config.perp_exposure_hedger.auto_borrow_perp == true and
     .config.perp_exposure_hedger.enabled == $enabled
   ' "$cell/manifest.json" >/dev/null
@@ -259,6 +270,7 @@ jq -n \
 	--argjson seed "$seed" \
 	--arg runtime_evidence_digest "$runtime_digest" \
 	--argjson runtime_evidence_events "$runtime_events" \
+	--argjson manifest_target_present "$(jq 'has("config") and (.config.perp_exposure_hedger | has("initial_target_perp_position"))' "$cell/manifest.json")" \
 	'{
 	  analysis_revision: $analysis_revision,
 	  analyzer_sha256: $analyzer_sha256,
@@ -280,6 +292,7 @@ jq -n \
 	    "expiryfills.json", "derivatives.json", "ecology.json", "roleaudit.json"
 	  ] end),
 	  runtime_evidence_artifact: {events: $runtime_evidence_events, digest: $runtime_evidence_digest},
+	  configuration_provenance: {source: "run-config.json", manifest_target_present: $manifest_target_present},
 	  raw_log_policy: ("retained; no prune authority (" + $distress_protocol + ")")
 }' >"$metadata_tmp"
 mv "$metadata_tmp" "$cell/analysis-metadata.json"
