@@ -1,0 +1,32 @@
+{
+  "contract": "v2-5-p4b-preflight-v1",
+  "source_revision": "84d609ada19f3625a9ca1394c5820d47b48a80a8",
+  "multivenue_sha256": "f4e3e9f354d1e4f930eba131fb654ae77187a263fa0b0bab7b5352f40d7abea4",
+  "mvanalyze_sha256": "552f65c2f425d009eeb74d308b3c1cb4811b18c27a9801c48d2059fc756e2c84",
+  "duration": "5m",
+  "cells": {
+    "A-401": {
+      "evidence_events": 59447,
+      "evidence_digest": "06160f54e313b39447d0aab0acbd1d6f96a892d9683d3bd68b471d85cf657b84",
+      "exposure_valid": true,
+      "exposure_decisions": 450,
+      "exposure_fills": 125
+    },
+    "B-401": {
+      "evidence_events": 59516,
+      "evidence_digest": "c942c60c2221cb929e550074edb87e4a4309b763c4cf3d249e662719df52cebc",
+      "exposure_valid": true,
+      "exposure_decisions": 450,
+      "exposure_fills": 122
+    }
+  },
+  "checks": {
+    "config_family": true,
+    "final_completion_sentinels": true,
+    "term_carry_chain": true,
+    "physical_exposure_chain": true,
+    "receipt_frontiers": true,
+    "runtime_offline_evidence_digest": true,
+    "raw_evidence_policy": "temporary mechanics diagnostics; no scoring or prune authority"
+  }
+}
