@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-08-27T02:11:34+03:00",
+  "purpose": "analyzer-only crossvenue target pre-decode filter",
+  "source_commit": "be717d39f628682e7022f22fe61df7bf534620cb",
+  "workload": {
+    "source_run": "/home/vlad/development/exchange_simulation/scratch/signed-price-hardening-20260824/full-evidence-seed101",
+    "source_run_content_sha256": "8127a6578ff24988be72e3aacf4f60f0439bb60fb6c214937e078319aa92ce51",
+    "greeks_sha256": "a33c7df40ac383160839c4dcc8ad2345c09cf82e2fd7b9ea61993373892dc972",
+    "event_files": 15,
+    "raw_event_bytes": 684592532,
+    "metric": "crossvenue",
+    "cross_venue_symbol": "ABC-USD",
+    "cross_venue_min_venues": 3,
+    "arb_staleness_seconds": 2
+  },
+  "environment": {
+    "go_version": "go1.26.6-X:nodwarf5",
+    "goos": "linux",
+    "goarch": "amd64",
+    "host_logical_cpus": 16,
+    "gomaxprocs": 14,
+    "build": "go build -trimpath ./cmd/mvanalyze"
+  },
+  "canonical_output": {
+    "sha256": "eb03100f367ab28669490f01a08cfb7cf8539be1b2fe393798ef33e3fef990e4",
+    "byte_identical": true,
+    "result": {
+      "symbol": "ABC-USD",
+      "staleness_nanos": 2000000000,
+      "min_venues": 3,
+      "quote_updates": 5391,
+      "evaluated": 1797,
+      "skipped_insufficient_fresh": 0,
+      "undefined_relative_ranges": 0,
+      "midpoint_range_bps": {
+        "N": 1797,
+        "Median": 0.5299671420371936,
+        "P75": 0.7100134902563149,
+        "P90": 0.8101361028652814,
+        "P99": 0.9500798067037631,
+        "Max": 0.9800823269154609,
+        "Mean": 0.5223758968844084
+      },
+      "longest_positive_run_nanos": 1778000000000
+    }
+  },
+  "profiled_runs": {
+    "baseline": {
+      "binary_sha256": "65c687b7fff97f132f3389a46cce4983270bed5afc09f9ec856cb482cc958ad5",
+      "wall_seconds": 1.01,
+      "cpu_seconds": 4.67,
+      "max_rss_kib": 70408,
+      "sampled_alloc_mb": 403.76,
+      "cpu_profile_sha256": "e9f7c5fd2a2c285f3d078b8786235a99ed56a13bf19bec36795ead0df3ff6715",
+      "alloc_profile_sha256": "ef1fc4d0687e2bbaf130ac213c077739f55420a4ea68abe44d1abef40a6384b7"
+    },
+    "candidate": {
+      "binary_sha256": "7099faccd6ee153c350d735a9bfe2576c7719258bd1763f21b380053799685a1",
+      "wall_seconds": 0.61,
+      "cpu_seconds": 2.98,
+      "max_rss_kib": 67720,
+      "sampled_alloc_mb": 326.58,
+      "cpu_profile_sha256": "cb8b0b00d7a0367fc2e882edd6b51583a12c4b95b8cffce28f429d07d2010f7b",
+      "alloc_profile_sha256": "7791ab3ce2b00574478e08ea9e26d68b2dfd31a34d4b7776db2c9fbdbdf61c5e"
+    }
+  },
+  "warm_cache_benchmark": {
+    "method": "five alternating baseline/candidate runs with /usr/bin/time and -allocprofile; medians reported",
+    "baseline_median": {
+      "wall_seconds": 0.86,
+      "cpu_seconds": 3.9,
+      "max_rss_kib": 66568,
+      "sampled_alloc_mb": 394.53
+    },
+    "candidate_median": {
+      "wall_seconds": 0.61,
+      "cpu_seconds": 2.91,
+      "max_rss_kib": 61704,
+      "sampled_alloc_mb": 319.07
+    },
+    "candidate_change_percent": {
+      "wall_seconds": -29.07,
+      "cpu_seconds": -25.38,
+      "max_rss_kib": -7.31,
+      "sampled_alloc_mb": -19.13
+    }
+  },
+  "decision": "keep: target filtering precedes BookSnapshot payload decoding, preserves the derivative and filename symbol fallbacks, and is byte-equivalent on retained evidence"
+}

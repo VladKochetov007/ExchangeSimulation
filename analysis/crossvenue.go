@@ -72,15 +72,15 @@ func (r *Run) MeasureCrossVenueDispersion(opts CrossVenueDispersionOptions) (*Cr
 		if !isPeriodicSnapshot(event) {
 			return
 		}
-		var envelope bookSnapshotEnvelope
-		if event.Decode(&envelope) != nil {
-			return
-		}
 		symbol := event.Symbol
 		if symbol == "" {
 			symbol = symbolFromPath(event.File)
 		}
 		if opts.Symbol != "" && symbol != opts.Symbol {
+			return
+		}
+		var envelope bookSnapshotEnvelope
+		if event.Decode(&envelope) != nil {
 			return
 		}
 		bids, asks := envelope.levels()
