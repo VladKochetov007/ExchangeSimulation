@@ -52,7 +52,7 @@ done
 # Classify both event types in one jq pass over all venue files.  The previous
 # implementation launched jq once per class and reread every multi-gigabyte
 # JSONL file twice; this is analysis-only and preserves the exact predicates.
-read -r cdf_borrow_events cdf_price_unavailable_rejections < <(
+viability_counts=$(
 	find "$cell/venues" -type f -name '*.jsonl' -print0 |
 		xargs -0 -r jq -r '
 			if (.event == "borrow" and .data.payload.asset == "CDF") then "B"
@@ -62,6 +62,7 @@ read -r cdf_borrow_events cdf_price_unavailable_rejections < <(
 		awk '{ if ($1 == "B") b++; else if ($1 == "R") r++ }
 		     END { printf "%d %d\n", b + 0, r + 0 }'
 )
+read -r cdf_borrow_events cdf_price_unavailable_rejections <<<"$viability_counts"
 jq -n \
 	--argjson cdf_borrow_events "$cdf_borrow_events" \
 	--argjson cdf_price_unavailable_rejections "$cdf_price_unavailable_rejections" \
