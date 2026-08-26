@@ -32,6 +32,12 @@ case "$distress_protocol" in
 		analysis_contract="v2-7-p7c-distress-v1"
 		expected_horizon="48h"
 		;;
+	p7d)
+		hypothesis_id="V2-7-P7D-DIRECTIONAL-DISTRESS"
+		experiment_prefix="v2-7-p7d-directional-distress-"
+		analysis_contract="v2-7-p7d-directional-distress-v1"
+		expected_horizon="4h"
+		;;
 	*)
 		echo "unknown V2-7 distress protocol: $distress_protocol" >&2
 		exit 2
@@ -67,6 +73,8 @@ cell_id=$(jq -er '.cell' "$cell/run-metadata.json")
 seed=$(jq -er '.seed' "$cell/run-metadata.json")
 if [[ "$distress_protocol" == p7c ]]; then
 	case "$cell_id" in C|T) ;; *) echo "invalid P7c distress cell $cell_id" >&2; exit 1 ;; esac
+	elif [[ "$distress_protocol" == p7d ]]; then
+	case "$cell_id" in C|L|S) ;; *) echo "invalid P7d distress cell $cell_id" >&2; exit 1 ;; esac
 else
 	case "$cell_id" in C|L|H) ;; *) echo "invalid V2-7 distress cell $cell_id" >&2; exit 1 ;; esac
 fi
@@ -84,19 +92,41 @@ if [[ "$distress_protocol" == p7a ]]; then
 	case "$seed" in 307|311) ;; *) echo "invalid P7a development seed $seed" >&2; exit 1 ;; esac
 elif [[ "$distress_protocol" == p7b ]]; then
 	case "$seed" in 337|341) ;; *) echo "invalid P7b development seed $seed" >&2; exit 1 ;; esac
+elif [[ "$distress_protocol" == p7d ]]; then
+	case "$seed" in 431|433) ;; *) echo "invalid P7d development seed $seed" >&2; exit 1 ;; esac
 else
 	case "$seed" in 367|371) ;; *) echo "invalid P7c development seed $seed" >&2; exit 1 ;; esac
 fi
-jq -e --argjson seed "$seed" --arg cell "$cell_id" --arg hypothesis "$hypothesis_id" '
-  .schema_version == 2 and .config.seed == $seed and
-  .config.hypothesis_id == $hypothesis and
-  .config.log_mode == "full" and
-  .config.record_market_data_receipts == true and
-  .config.record_perp_exposure_hedger_decisions == true and
-  .config.perp_exposure_hedger.exposure_mode == "fixed_liability" and
-  .config.perp_exposure_hedger.initial_physical_exposure == -1000000000 and
-  .config.perp_exposure_hedger.enabled == ($cell != "C")
-' "$cell/manifest.json" >/dev/null
+if [[ "$distress_protocol" == p7d ]]; then
+	case "$cell_id" in
+		C) target=0; enabled=false ;;
+		L) target=2000000000; enabled=true ;;
+		S) target=-2000000000; enabled=true ;;
+		*) echo "invalid P7d cell: $cell_id" >&2; exit 1 ;;
+	esac
+	jq -e --argjson seed "$seed" --arg cell "$cell_id" --arg hypothesis "$hypothesis_id" --argjson target "$target" --argjson enabled "$enabled" '
+    .schema_version == 2 and .config.seed == $seed and
+    .config.hypothesis_id == $hypothesis and
+    .config.log_mode == "full" and
+    .config.record_market_data_receipts == true and
+    .config.record_perp_exposure_hedger_decisions == true and
+    .config.perp_exposure_hedger.exposure_mode == "fixed_directional" and
+    .config.perp_exposure_hedger.initial_target_perp_position == $target and
+    .config.perp_exposure_hedger.auto_borrow_perp == true and
+    .config.perp_exposure_hedger.enabled == $enabled
+  ' "$cell/manifest.json" >/dev/null
+else
+	jq -e --argjson seed "$seed" --arg cell "$cell_id" --arg hypothesis "$hypothesis_id" '
+    .schema_version == 2 and .config.seed == $seed and
+    .config.hypothesis_id == $hypothesis and
+    .config.log_mode == "full" and
+    .config.record_market_data_receipts == true and
+    .config.record_perp_exposure_hedger_decisions == true and
+    .config.perp_exposure_hedger.exposure_mode == "fixed_liability" and
+    .config.perp_exposure_hedger.initial_physical_exposure == -1000000000 and
+    .config.perp_exposure_hedger.enabled == ($cell != "C")
+  ' "$cell/manifest.json" >/dev/null
+fi
 config_sha=$(sha256sum "$cell/run-config.json" | awk '{print $1}')
 jq -e --arg config_sha "$config_sha" '.config_sha256 == $config_sha' "$cell/run-metadata.json" >/dev/null
 
@@ -145,6 +175,16 @@ jq -e '.result.events > 0 and (.result.digest | type) == "string" and
   (.result.digest | length) == 64' "$cell/evidenceartifacthash.json" >/dev/null
 jq -e '.result.events > 0 and (.result.digest | type) == "string" and
   (.result.digest | length) == 64' "$cell/streamhash.json" >/dev/null
+
+if [[ "$distress_protocol" == p7d ]]; then
+	# Borrowing is an ordinary venue event, not an actor assertion. The
+	# independent P2 replay rejects malformed or cross-role auto_perp events;
+	# this branch additionally requires its compact borrow totals to remain
+	# within the registered finite cap.
+	jq -e '.result.invalid_borrow_events == 0 and .result.unexpected_auto_perp_borrows == 0 and
+	  ((.result.auto_perp_borrowed_quote | tonumber) <= 5500000000)' \
+		"$cell/perpexposurehedger.json" >/dev/null
+fi
 
 # Mechanical reconstruction checks are fail-closed.  Risk events may be zero,
 # but any emitted event must still satisfy the independent accounting checks.
@@ -218,4 +258,4 @@ jq -n \
 }' >"$metadata_tmp"
 mv "$metadata_tmp" "$cell/analysis-metadata.json"
 
-	echo "extracted V2-7 distress evidence ($distress_protocol): $cell"
+echo "extracted V2-7 distress evidence ($distress_protocol): $cell"
