@@ -49,17 +49,19 @@ done
 # than inferred from a terminal account alone.  A CDF borrow proves the new
 # oracle path was exercised; a CDF/USD PRICE_UNAVAILABLE order rejection is
 # the exact historical failure and invalidates this cell's viability contract.
-count_events() {
-	local filter=$1
-	local total=0 file count
-	while IFS= read -r -d '' file; do
-		count=$(jq -r "$filter" "$file" | wc -l)
-		total=$((total + count))
-	done < <(find "$cell/venues" -type f -name '*.jsonl' -print0)
-	printf '%d' "$total"
-}
-cdf_borrow_events=$(count_events 'select(.event == "borrow" and .data.payload.asset == "CDF") | 1')
-cdf_price_unavailable_rejections=$(count_events 'select(.event == "OrderRejected" and .data.payload.symbol == "CDF/USD" and .data.payload.error == "PRICE_UNAVAILABLE") | 1')
+# Classify both event types in one jq pass over all venue files.  The previous
+# implementation launched jq once per class and reread every multi-gigabyte
+# JSONL file twice; this is analysis-only and preserves the exact predicates.
+read -r cdf_borrow_events cdf_price_unavailable_rejections < <(
+	find "$cell/venues" -type f -name '*.jsonl' -print0 |
+		xargs -0 -r jq -r '
+			if (.event == "borrow" and .data.payload.asset == "CDF") then "B"
+			elif (.event == "OrderRejected" and .data.payload.symbol == "CDF/USD" and .data.payload.error == "PRICE_UNAVAILABLE") then "R"
+			else empty end
+		' |
+		awk '{ if ($1 == "B") b++; else if ($1 == "R") r++ }
+		     END { printf "%d %d\n", b + 0, r + 0 }'
+)
 jq -n \
 	--argjson cdf_borrow_events "$cdf_borrow_events" \
 	--argjson cdf_price_unavailable_rejections "$cdf_price_unavailable_rejections" \
