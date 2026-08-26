@@ -107,7 +107,7 @@ cells_json=$(printf '%s\n' "${cell_json[@]}" | jq -s '.')
 activation=$(jq -e 'all(.[];.cell=="C" or .activation.active_valid)' <<<"$cells_json" >/dev/null && echo true || echo false)
 control_valid=$(jq -e 'all(.[];.cell!="C" or .activation.control_valid)' <<<"$cells_json" >/dev/null && echo true || echo false)
 integrity=$(jq -e 'all(.[];.activation.valid and .activation.receipt_audit_valid and
-	.future_receipt_use==0 and .information_integrity.observations_valid and
+	.activation.future_receipt_use==0 and .information_integrity.observations_valid and
 	.information_integrity.future_decision_use==0 and .information_integrity.bad_decision_frontier==0 and
 	.information_integrity.receipt_errors==0)' <<<"$cells_json" >/dev/null && echo true || echo false)
 risk_exercised=$(jq -e 'any(.[];.cell!="C" and (.risk.expected_breaches>0 or
