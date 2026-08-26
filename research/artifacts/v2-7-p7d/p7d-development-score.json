@@ -1,0 +1,421 @@
+{
+  "protocol": "v2-7-p7d-directional-distress-v1",
+  "classification": "SUPPORTED (screening)",
+  "development_seeds": [
+    431,
+    433
+  ],
+  "untouched_holdout_seeds": [
+    439,
+    443,
+    449
+  ],
+  "holdouts_consumed": false,
+  "source_revision": "8b1d013a33129beeb61a578b6f59aefa59cce0c2",
+  "binary_sha256": "0bcc40ef78f87f08301555bf203366780569c19ed42e84c024e39de34d2ebece",
+  "analyzer_sha256": "934993a87a817cf3fcb52eb29e8b1392d0b81e2149b52a4f5706026d57e763ad",
+  "predicates": {
+    "control_valid": true,
+    "activation_valid": true,
+    "evidence_integrity_valid": true,
+    "participant_risk_replay_valid": true,
+    "long_risk_exercised": true,
+    "short_risk_exercised": true,
+    "deficit_insurance_bankruptcy_exercised": true
+  },
+  "verdicts": {
+    "directional_activation": "SUPPORTED (screening)",
+    "participant_specific_risk": "SUPPORTED (screening)",
+    "deficit_insurance_bankruptcy": "OBSERVED; separate accounting review required"
+  },
+  "cells": [
+    {
+      "cell": "C",
+      "seed": 431,
+      "analysis_revision": "abc42a164679c5aded881be14cb08f63d9fae0b8",
+      "activation": {
+        "enabled_decisions": 0,
+        "disabled_decisions": 21600,
+        "decisions": 21600,
+        "submitted": 0,
+        "accepted": 0,
+        "fills": 0,
+        "filled_qty": 0,
+        "terminal_absolute_gaps": [
+          "0",
+          "0",
+          "0"
+        ],
+        "target_reached": true,
+        "control_valid": true,
+        "active_valid": false,
+        "action_counts": {
+          "NOT_SUBSCRIBED": 3,
+          "POLICY_DISABLED": 21597
+        }
+      },
+      "information_integrity": {
+        "observations_valid": true,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0,
+        "receipt_errors": 0
+      },
+      "risk": {
+        "candidates": 3,
+        "mark_updates": 43186,
+        "expected_breaches": 0,
+        "observed_checks": 0,
+        "arithmetic_failures": 0,
+        "mark_mismatches": 0,
+        "balance_mismatches": 0,
+        "contribution_mismatches": 0,
+        "equity_mismatches": 0,
+        "notional_mismatches": 0,
+        "maintenance_mismatches": 0,
+        "mark_domain_failures": 0,
+        "cross_file_ambiguities": 0,
+        "malformed_records": 0,
+        "missing_checks": 0,
+        "unexpected_checks": 0,
+        "duplicate_checks": 0,
+        "field_mismatches": 0,
+        "position_path_failures": 0,
+        "terminal_state_mismatches": 0,
+        "participant_liquidations": 0,
+        "deficits": 0,
+        "total_deficit": 0,
+        "insurance_deficit": 0,
+        "risk_exercised": false
+      },
+      "evidence": {
+        "events": 14326272,
+        "digest": "d7fb4765a3ae5f56f1b763120662f6375da4bfe844ff872cc71a17a1ccda2f68"
+      }
+    },
+    {
+      "cell": "C",
+      "seed": 433,
+      "analysis_revision": "dae67ae5687c79396dbbe1af8e8a5b83236443d0",
+      "activation": {
+        "enabled_decisions": 0,
+        "disabled_decisions": 21600,
+        "decisions": 21600,
+        "submitted": 0,
+        "accepted": 0,
+        "fills": 0,
+        "filled_qty": 0,
+        "terminal_absolute_gaps": [
+          "0",
+          "0",
+          "0"
+        ],
+        "target_reached": true,
+        "control_valid": true,
+        "active_valid": false,
+        "action_counts": {
+          "NOT_SUBSCRIBED": 3,
+          "POLICY_DISABLED": 21597
+        }
+      },
+      "information_integrity": {
+        "observations_valid": true,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0,
+        "receipt_errors": 0
+      },
+      "risk": {
+        "candidates": 3,
+        "mark_updates": 43189,
+        "expected_breaches": 0,
+        "observed_checks": 0,
+        "arithmetic_failures": 0,
+        "mark_mismatches": 0,
+        "balance_mismatches": 0,
+        "contribution_mismatches": 0,
+        "equity_mismatches": 0,
+        "notional_mismatches": 0,
+        "maintenance_mismatches": 0,
+        "mark_domain_failures": 0,
+        "cross_file_ambiguities": 0,
+        "malformed_records": 0,
+        "missing_checks": 0,
+        "unexpected_checks": 0,
+        "duplicate_checks": 0,
+        "field_mismatches": 0,
+        "position_path_failures": 0,
+        "terminal_state_mismatches": 0,
+        "participant_liquidations": 0,
+        "deficits": 0,
+        "total_deficit": 0,
+        "insurance_deficit": 0,
+        "risk_exercised": false
+      },
+      "evidence": {
+        "events": 14417901,
+        "digest": "8f385ae653c8f62f95e37b44f6ed43dee62028ddfb4c419beafdb34d9b0ad325"
+      }
+    },
+    {
+      "cell": "L",
+      "seed": 431,
+      "analysis_revision": "dae67ae5687c79396dbbe1af8e8a5b83236443d0",
+      "activation": {
+        "enabled_decisions": 21600,
+        "disabled_decisions": 0,
+        "decisions": 21600,
+        "submitted": 306,
+        "accepted": 306,
+        "fills": 40,
+        "filled_qty": 6000000000,
+        "terminal_absolute_gaps": [
+          "0",
+          "0",
+          "0"
+        ],
+        "target_reached": true,
+        "control_valid": false,
+        "active_valid": true,
+        "action_counts": {
+          "FIXED_DIRECTIONAL_HELD": 21289,
+          "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE": 2,
+          "NOT_SUBSCRIBED": 3,
+          "SUBMIT_IOC": 306
+        }
+      },
+      "information_integrity": {
+        "observations_valid": true,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0,
+        "receipt_errors": 0
+      },
+      "risk": {
+        "candidates": 3,
+        "mark_updates": 43188,
+        "expected_breaches": 16,
+        "observed_checks": 16,
+        "arithmetic_failures": 0,
+        "mark_mismatches": 0,
+        "balance_mismatches": 0,
+        "contribution_mismatches": 0,
+        "equity_mismatches": 0,
+        "notional_mismatches": 0,
+        "maintenance_mismatches": 0,
+        "mark_domain_failures": 0,
+        "cross_file_ambiguities": 0,
+        "malformed_records": 0,
+        "missing_checks": 0,
+        "unexpected_checks": 0,
+        "duplicate_checks": 0,
+        "field_mismatches": 0,
+        "position_path_failures": 0,
+        "terminal_state_mismatches": 0,
+        "participant_liquidations": 10,
+        "deficits": 3,
+        "total_deficit": 3970335945,
+        "insurance_deficit": 3970335945,
+        "risk_exercised": true
+      },
+      "evidence": {
+        "events": 14294967,
+        "digest": "9a52d217ff01e4bd87a16127c710e3798c570466b37983ffdaee886712f9b03e"
+      }
+    },
+    {
+      "cell": "L",
+      "seed": 433,
+      "analysis_revision": "dae67ae5687c79396dbbe1af8e8a5b83236443d0",
+      "activation": {
+        "enabled_decisions": 21600,
+        "disabled_decisions": 0,
+        "decisions": 21600,
+        "submitted": 266,
+        "accepted": 266,
+        "fills": 40,
+        "filled_qty": 6000000000,
+        "terminal_absolute_gaps": [
+          "0",
+          "0",
+          "0"
+        ],
+        "target_reached": true,
+        "control_valid": false,
+        "active_valid": true,
+        "action_counts": {
+          "FIXED_DIRECTIONAL_HELD": 21327,
+          "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE": 4,
+          "NOT_SUBSCRIBED": 3,
+          "SUBMIT_IOC": 266
+        }
+      },
+      "information_integrity": {
+        "observations_valid": true,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0,
+        "receipt_errors": 0
+      },
+      "risk": {
+        "candidates": 3,
+        "mark_updates": 43189,
+        "expected_breaches": 14,
+        "observed_checks": 14,
+        "arithmetic_failures": 0,
+        "mark_mismatches": 0,
+        "balance_mismatches": 0,
+        "contribution_mismatches": 0,
+        "equity_mismatches": 0,
+        "notional_mismatches": 0,
+        "maintenance_mismatches": 0,
+        "mark_domain_failures": 0,
+        "cross_file_ambiguities": 0,
+        "malformed_records": 0,
+        "missing_checks": 0,
+        "unexpected_checks": 0,
+        "duplicate_checks": 0,
+        "field_mismatches": 0,
+        "position_path_failures": 0,
+        "terminal_state_mismatches": 0,
+        "participant_liquidations": 12,
+        "deficits": 1,
+        "total_deficit": 823797845,
+        "insurance_deficit": 823797845,
+        "risk_exercised": true
+      },
+      "evidence": {
+        "events": 14237964,
+        "digest": "f32d059fcfbc0ed2a3bc7c71e3cf95d3ec463ba02b675de21e6e194507ef3918"
+      }
+    },
+    {
+      "cell": "S",
+      "seed": 431,
+      "analysis_revision": "dae67ae5687c79396dbbe1af8e8a5b83236443d0",
+      "activation": {
+        "enabled_decisions": 21600,
+        "disabled_decisions": 0,
+        "decisions": 21600,
+        "submitted": 46,
+        "accepted": 46,
+        "fills": 47,
+        "filled_qty": 6000000000,
+        "terminal_absolute_gaps": [
+          "0",
+          "0",
+          "0"
+        ],
+        "target_reached": true,
+        "control_valid": false,
+        "active_valid": true,
+        "action_counts": {
+          "FIXED_DIRECTIONAL_HELD": 21523,
+          "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE": 28,
+          "NOT_SUBSCRIBED": 3,
+          "SUBMIT_IOC": 46
+        }
+      },
+      "information_integrity": {
+        "observations_valid": true,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0,
+        "receipt_errors": 0
+      },
+      "risk": {
+        "candidates": 3,
+        "mark_updates": 43185,
+        "expected_breaches": 1,
+        "observed_checks": 1,
+        "arithmetic_failures": 0,
+        "mark_mismatches": 0,
+        "balance_mismatches": 0,
+        "contribution_mismatches": 0,
+        "equity_mismatches": 0,
+        "notional_mismatches": 0,
+        "maintenance_mismatches": 0,
+        "mark_domain_failures": 0,
+        "cross_file_ambiguities": 0,
+        "malformed_records": 0,
+        "missing_checks": 0,
+        "unexpected_checks": 0,
+        "duplicate_checks": 0,
+        "field_mismatches": 0,
+        "position_path_failures": 0,
+        "terminal_state_mismatches": 0,
+        "participant_liquidations": 1,
+        "deficits": 0,
+        "total_deficit": 0,
+        "insurance_deficit": 0,
+        "risk_exercised": true
+      },
+      "evidence": {
+        "events": 14303031,
+        "digest": "9cc9a4f9d32ea0580d62626efd484995801e8f0c29f43c21b5fd778dd70c9f62"
+      }
+    },
+    {
+      "cell": "S",
+      "seed": 433,
+      "analysis_revision": "dae67ae5687c79396dbbe1af8e8a5b83236443d0",
+      "activation": {
+        "enabled_decisions": 21600,
+        "disabled_decisions": 0,
+        "decisions": 21600,
+        "submitted": 22,
+        "accepted": 22,
+        "fills": 51,
+        "filled_qty": 6000000000,
+        "terminal_absolute_gaps": [
+          "0",
+          "0",
+          "0"
+        ],
+        "target_reached": true,
+        "control_valid": false,
+        "active_valid": true,
+        "action_counts": {
+          "FIXED_DIRECTIONAL_HELD": 21569,
+          "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE": 6,
+          "NOT_SUBSCRIBED": 3,
+          "SUBMIT_IOC": 22
+        }
+      },
+      "information_integrity": {
+        "observations_valid": true,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0,
+        "receipt_errors": 0
+      },
+      "risk": {
+        "candidates": 3,
+        "mark_updates": 43189,
+        "expected_breaches": 1,
+        "observed_checks": 1,
+        "arithmetic_failures": 0,
+        "mark_mismatches": 0,
+        "balance_mismatches": 0,
+        "contribution_mismatches": 0,
+        "equity_mismatches": 0,
+        "notional_mismatches": 0,
+        "maintenance_mismatches": 0,
+        "mark_domain_failures": 0,
+        "cross_file_ambiguities": 0,
+        "malformed_records": 0,
+        "missing_checks": 0,
+        "unexpected_checks": 0,
+        "duplicate_checks": 0,
+        "field_mismatches": 0,
+        "position_path_failures": 0,
+        "terminal_state_mismatches": 0,
+        "participant_liquidations": 1,
+        "deficits": 0,
+        "total_deficit": 0,
+        "insurance_deficit": 0,
+        "risk_exercised": true
+      },
+      "evidence": {
+        "events": 14356776,
+        "digest": "ef80f19a15bd4c9e49bd51da9b9b13556bc9fe338b05c3602754ae8ee6bc2584"
+      }
+    }
+  ],
+  "interpretation": "P7d scores only the preregistered finite-capital directional activation, evidence integrity, and participant-specific maintenance-breach replay. Risk events, deficits, insurance, bankruptcy, funding, basis, profitability, and realism are separate endpoints.",
+  "next_action": "Review risk-event accounting and authorize reserved holdout policy; do not tune development cells."
+}
