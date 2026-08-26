@@ -48,7 +48,7 @@ jq -e --argjson seed "$seed" --arg arm "$arm" '
   .config.record_term_carry_decisions == true and
   .config.market_data_receipt_roles == ["term_carry_allocator", "perp_exposure_hedger"] and
   .config.perp_exposure_hedger.enabled == true and
-  .config.perp_exposure_hedger.exposure_mode == "random" and
+  ((.config.perp_exposure_hedger.exposure_mode // "random") == "random") and
   .config.funding_max_rate_bps == (if $arm == "A" then 1 else 75 end)
 ' "$cell/manifest.json" >/dev/null
 config_sha=$(sha256sum "$cell/run-config.json" | awk '{print $1}')
