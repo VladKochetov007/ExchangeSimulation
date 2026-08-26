@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "experiment_id": "v2-6-p6r1-cross-asset-mark",
+  "hypothesis_id": "V2-6-P6R1-CROSS-ASSET-MARK",
+  "contract": "v2-6-p6r1-cross-asset-mark-v1",
+  "classification": "SUPPORTED_SCREENING",
+  "scope": "viability_and_stage_activation_only",
+  "simulator_revision": "bf4927b1e02f2671ee4c365ce1f4a5b5a100f987",
+  "multivenue_sha256": "edb2eece46ba0cffd0a3e94f3a83009a8f1e1755f213163c945d986d093ad0be",
+  "analysis_revision": "706965d6473a6afc772d2499dac024ec97b0132e",
+  "mvanalyze_sha256": "a17e40e7b548a824bf44808a80c8a6a46386d206d10f820237d352c9ed4d65d6",
+  "horizon": "8h",
+  "development_seeds": [211, 213],
+  "holdout_seeds": [223, 227, 229],
+  "raw_log_policy": "retain_until_all_registered_contracts_and_holdout_prune_gate_pass",
+  "runtime_offline_evidence_digest_equal": true,
+  "all_required_artifacts_valid": true,
+  "config_checker_passed": true,
+  "cdf_collateral_mark": {
+    "enabled": true,
+    "bootstrap_price": 3000,
+    "borrow_cap_units": 20000,
+    "participant_visible": false,
+    "purpose": "collateral_authorization_and_accounting_only"
+  },
+  "cells": [
+    {"cell":"O0-211","stage":"O0","seed":211,"config_sha256":"5948f6f009df73a3230e646b5804c38beae8e6892a79f98d41a957ffd9d23b6c","evidence_events":30439762,"evidence_digest":"580462da90ab09611f68b2678c6dd67e4a49da686d2541a52bdca67a60d151f7","cdf_borrow_events":21722,"cdf_price_unavailable_rejections":0,"surface_trades":161168,"surface_priced":73830,"surface_points":150,"liability_decisions":0,"liability_canonical_fills":0,"liability_filled_qty":0,"value_taker_decisions":0,"value_taker_fills":0,"value_taker_filled_qty":0,"vv_decisions":0,"vv_fills":0,"vv_filled_qty":0},
+    {"cell":"O0-213","stage":"O0","seed":213,"config_sha256":"229707d82180e53f348814164bfa2aa0078293f8362ebd4e4a656d75cd0f4e68","evidence_events":30429748,"evidence_digest":"a95bb6906d0803c74b67f6fcf11dc4029581f5ae1afd8cf8523c828b1a540f3d","cdf_borrow_events":21010,"cdf_price_unavailable_rejections":0,"surface_trades":161125,"surface_priced":72590,"surface_points":150,"liability_decisions":0,"liability_canonical_fills":0,"liability_filled_qty":0,"value_taker_decisions":0,"value_taker_fills":0,"value_taker_filled_qty":0,"vv_decisions":0,"vv_fills":0,"vv_filled_qty":0},
+    {"cell":"O1-211","stage":"O1","seed":211,"config_sha256":"848326866157f8067c26052bbb035e2119d5b433fbe692cb341f7776f477784f","evidence_events":33587003,"evidence_digest":"a6ae0b595abd482236279cd6c04f22acc53901673a11f5f491e3173ea586abe3","cdf_borrow_events":21508,"cdf_price_unavailable_rejections":0,"surface_trades":247406,"surface_priced":154488,"surface_points":150,"liability_decisions":0,"liability_canonical_fills":0,"liability_filled_qty":0,"value_taker_decisions":0,"value_taker_fills":0,"value_taker_filled_qty":0,"vv_decisions":0,"vv_fills":0,"vv_filled_qty":0},
+    {"cell":"O1-213","stage":"O1","seed":213,"config_sha256":"c58f338eb196c878d48bf7d7efc2b0f12e36ae0a2c0dc60ad935d76bea26ba52","evidence_events":35169307,"evidence_digest":"86ce0a89c7f8ac8ef8f7c55259dc70ee5114be98f0ccd3568eb375075f3a589e","cdf_borrow_events":18248,"cdf_price_unavailable_rejections":0,"surface_trades":250752,"surface_priced":156394,"surface_points":150,"liability_decisions":0,"liability_canonical_fills":0,"liability_filled_qty":0,"value_taker_decisions":0,"value_taker_fills":0,"value_taker_filled_qty":0,"vv_decisions":0,"vv_fills":0,"vv_filled_qty":0},
+    {"cell":"O2-211","stage":"O2","seed":211,"config_sha256":"837141bb7a665d87a7681450b790ad3231bbfdce6198867bde6a7d528f271a34","evidence_events":33921824,"evidence_digest":"530d45392506de7d55e28fd9828943117f05558cd2eff199c245f5fb0517bfe7","cdf_borrow_events":21115,"cdf_price_unavailable_rejections":0,"surface_trades":245958,"surface_priced":154230,"surface_points":150,"liability_decisions":17280,"liability_canonical_fills":44,"liability_filled_qty":300000000,"value_taker_decisions":0,"value_taker_fills":0,"value_taker_filled_qty":0,"vv_decisions":0,"vv_fills":0,"vv_filled_qty":0},
+    {"cell":"O2-213","stage":"O2","seed":213,"config_sha256":"a195cf64c10467d47dac0a708d01a1e268eee02f0dde4b0355753c67c032b135","evidence_events":34696592,"evidence_digest":"d7347f221498b940f3bfcc982cb993f02f07f429828f0822aabdc68228bf8772","cdf_borrow_events":19568,"cdf_price_unavailable_rejections":0,"surface_trades":243781,"surface_priced":153624,"surface_points":150,"liability_decisions":17280,"liability_canonical_fills":43,"liability_filled_qty":300000000,"value_taker_decisions":0,"value_taker_fills":0,"value_taker_filled_qty":0,"vv_decisions":0,"vv_fills":0,"vv_filled_qty":0},
+    {"cell":"O3-211","stage":"O3","seed":211,"config_sha256":"2ed17e3e68d424a667ffe075e9c8a464f73eaa0a5d1ec113c9db4d189f07384a","evidence_events":34702818,"evidence_digest":"e5d03246b5a62c4ae47aeb0d39c8f7c880c9b95fdf80e5f05018d5365877383d","cdf_borrow_events":19730,"cdf_price_unavailable_rejections":0,"surface_trades":260227,"surface_priced":176523,"surface_points":150,"liability_decisions":17280,"liability_canonical_fills":44,"liability_filled_qty":300000000,"value_taker_decisions":10937,"value_taker_fills":16915,"value_taker_filled_qty":10708000000,"vv_decisions":0,"vv_fills":0,"vv_filled_qty":0},
+    {"cell":"O3-213","stage":"O3","seed":213,"config_sha256":"8d39677d0e28eae0d132e6a7376f796c88f873ccf74d8aa848f3fbed232c9508","evidence_events":35296682,"evidence_digest":"173e38db811cfb9d11e8f981d114923fbc91ecabd724cbedd6754aeb25a3bae4","cdf_borrow_events":15220,"cdf_price_unavailable_rejections":0,"surface_trades":257658,"surface_priced":176730,"surface_points":150,"liability_decisions":17280,"liability_canonical_fills":43,"liability_filled_qty":300000000,"value_taker_decisions":10939,"value_taker_fills":16624,"value_taker_filled_qty":10721000000,"vv_decisions":0,"vv_fills":0,"vv_filled_qty":0},
+    {"cell":"O4-211","stage":"O4","seed":211,"config_sha256":"b89e6a52d107c4aa9d395786a4ea72a74a48f5746b1b6d13934ac144507af557","evidence_events":33747463,"evidence_digest":"657247a56fd14acec01e3344e865dac903a4fa8ad97ae94cacbc267b2c6d42f9","cdf_borrow_events":9999,"cdf_price_unavailable_rejections":0,"surface_trades":266908,"surface_priced":179849,"surface_points":150,"liability_decisions":17280,"liability_canonical_fills":44,"liability_filled_qty":300000000,"value_taker_decisions":11139,"value_taker_fills":16460,"value_taker_filled_qty":10982000000,"vv_decisions":6177,"vv_fills":7569,"vv_filled_qty":30455000000},
+    {"cell":"O4-213","stage":"O4","seed":213,"config_sha256":"e13281501ddd7f28af4e2fc8602354cded844c2b883f07b52ddfc11c75d8fc12","evidence_events":32851287,"evidence_digest":"776c0e90c3af1117601bfc6e62b933f95e06f28e71804990ab551d97a1726bbd","cdf_borrow_events":8460,"cdf_price_unavailable_rejections":0,"surface_trades":271911,"surface_priced":181470,"surface_points":150,"liability_decisions":17280,"liability_canonical_fills":43,"liability_filled_qty":300000000,"value_taker_decisions":10913,"value_taker_fills":16885,"value_taker_filled_qty":10719000000,"vv_decisions":5967,"vv_fills":6871,"vv_filled_qty":27695000000}
+  ],
+  "interpretation": {
+    "viability": "SUPPORTED_SCREENING",
+    "o0_activation": "SUPPORTED_SCREENING",
+    "o1_activation": "SUPPORTED_SCREENING",
+    "o2_activation": "SUPPORTED_SCREENING",
+    "o3_activation": "SUPPORTED_SCREENING",
+    "o4_activation": "SUPPORTED_SCREENING",
+    "option_surface_causality": "NOT_SCORED",
+    "emergent_smile_claim": "NOT_LICENSED",
+    "holdouts": "AUTHORIZED_NOT_RUN"
+  }
+}

@@ -359,3 +359,23 @@ The completed repository-wide ledger is
 [v2-price-api-audit.md](v2-price-api-audit.md). It records the finished
 migration, explicit lifecycle/fee/funding behavior changes, and the remaining
 zero-valued fields that are legitimate quantities rather than sentinels.
+
+## V2-6 P6-R1 viability repair (completed)
+
+The original P6 O3/O4 failures were traced to a population-level omission:
+strict CDF/USD collateral valuation had no declared CDF mark when the CDF
+maker needed cross-margin borrowing.  The separately preregistered repair adds
+an opt-in positive CDF/USD collateral mark and finite borrow cap for
+authorization/accounting only; it does not expose a hidden price to actors or
+change their quote references.
+
+The fresh O0--O4 paired development cells (seeds 211/213) all completed the
+full evidence contract.  Each exercised CDF borrowing with zero exact
+`CDF/USD` `PRICE_UNAVAILABLE` rejects, and every stage's registered option
+activation gate passed, including liability/delta-hedge (O2), SABR value-taker
+(O3), and Vanna--Volga (O4) activity.  The result is **SUPPORTED (screening)**
+for viability and activation only.  It does not upgrade the incomplete old
+P6 worlds, and all O3/O4 surface structure remains explicitly prior-driven
+until a separately paired causal comparison is run.  Detailed provenance is
+in [v2-6-p6r1-viability-results.md](v2-6-p6r1-viability-results.md) and
+`artifacts/v2-6-p6r1/development-summary.json`.
