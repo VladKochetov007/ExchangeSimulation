@@ -32,12 +32,17 @@ type OrderLifecycleAudit struct {
 // emitted in deterministic venue/order order so artifacts remain comparable.
 type OrderLifecycleCheck struct {
 	VenueID string `json:"venue_id"`
+	// File identifies the instrument/book log. Order IDs are allocated by a
+	// venue but may be reused across independent books, so venue+order ID is
+	// not a sufficient lifecycle key.
+	File    string `json:"file"`
 	OrderID uint64 `json:"order_id"`
 	Failure string `json:"failure"`
 }
 
 type orderLifecycleKey struct {
 	venueID string
+	file    string
 	orderID uint64
 }
 
@@ -87,10 +92,13 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 			}
 			state.failed[failure] = true
 		}
-		result.Checks = append(result.Checks, OrderLifecycleCheck{VenueID: key.venueID, OrderID: key.orderID, Failure: failure})
+		result.Checks = append(result.Checks, OrderLifecycleCheck{VenueID: key.venueID, File: key.file, OrderID: key.orderID, Failure: failure})
 	}
 
-	scan := ScanOptions{Events: []string{"OrderAccepted", "OrderFill", "OrderCancelled"}}
+	// Lifecycle state is order-sensitive within each book. A single worker
+	// preserves file order; the file component of the key still prevents
+	// cross-book order-ID reuse from colliding.
+	scan := ScanOptions{Events: []string{"OrderAccepted", "OrderFill", "OrderCancelled"}, Workers: 1}
 	if err := r.Scan(scan, func(event Event) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -100,7 +108,7 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 			if event.Decode(&payload) != nil || payload.OrderID == 0 || payload.Qty <= 0 {
 				return
 			}
-			key := orderLifecycleKey{venueID: event.VenueID, orderID: payload.OrderID}
+			key := orderLifecycleKey{venueID: event.VenueID, file: event.File, orderID: payload.OrderID}
 			if states[key] != nil {
 				result.DuplicateAcceptances++
 				addFailure(key, states[key], "duplicate_acceptance")
@@ -122,7 +130,7 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 				return
 			}
 			result.FillRecords++
-			key := orderLifecycleKey{venueID: event.VenueID, orderID: payload.OrderID}
+			key := orderLifecycleKey{venueID: event.VenueID, file: event.File, orderID: payload.OrderID}
 			state := states[key]
 			if state == nil {
 				result.UnknownFills++
@@ -157,7 +165,7 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 				return
 			}
 			result.Cancelled++
-			key := orderLifecycleKey{venueID: event.VenueID, orderID: payload.OrderID}
+			key := orderLifecycleKey{venueID: event.VenueID, file: event.File, orderID: payload.OrderID}
 			state := states[key]
 			if state == nil {
 				result.UnknownCancellations++
@@ -195,6 +203,9 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 	sort.Slice(result.Checks, func(i, j int) bool {
 		if result.Checks[i].VenueID != result.Checks[j].VenueID {
 			return result.Checks[i].VenueID < result.Checks[j].VenueID
+		}
+		if result.Checks[i].File != result.Checks[j].File {
+			return result.Checks[i].File < result.Checks[j].File
 		}
 		if result.Checks[i].OrderID != result.Checks[j].OrderID {
 			return result.Checks[i].OrderID < result.Checks[j].OrderID

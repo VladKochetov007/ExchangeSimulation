@@ -96,3 +96,33 @@ func TestOrderLifecycleAudit(t *testing.T) {
 		})
 	}
 }
+
+func TestOrderLifecycleSeparatesBooksWithReusedOrderIDs(t *testing.T) {
+	// The exchange allocates order IDs per venue, while independent book logs
+	// can reuse an ID. The lifecycle key must therefore include the source
+	// file; otherwise a fill in one book can be paired with an acceptance in
+	// another (or appear to be an unknown fill when Scan visits files out of
+	// order).
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/spot/ABC-USD.jsonl": {
+			lifecycleAcceptedLine(1, "north", 1, 10, "LIMIT", "GTC", 10),
+			lifecycleFillLine(2, "north", 1, 10, 10, 10, 0, true),
+		},
+		"north/derivatives/ABC-PERP.jsonl": {
+			lifecycleAcceptedLine(1, "north", 2, 10, "LIMIT", "GTC", 10),
+			lifecycleFillLine(2, "north", 2, 10, 10, 10, 0, true),
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	got, err := run.MeasureOrderLifecycle()
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if got.Accepted != 2 || got.FillRecords != 2 || got.UnknownFills != 0 ||
+		got.DuplicateAcceptances != 0 || len(got.Checks) != 0 {
+		t.Fatalf("reused book order ID was not separated: %+v", got)
+	}
+}
