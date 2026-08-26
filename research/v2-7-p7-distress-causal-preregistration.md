@@ -147,3 +147,28 @@ development failure stops holdout promotion and leads to a redesign ledger
 entry rather than parameter tuning.  A later P7b may vary shock source (flow
 versus an independently motivated liability event), but it is a new
 preregistration and cannot be folded into this result.
+
+## Outcome addendum — P7a development (post-outcome)
+
+The six registered development cells completed with valid independent
+extraction and exact runtime/offline evidence-artifact digest agreement. The
+machine-readable score is
+`research/artifacts/v2-7-p7a/p7a-development-score.json`; the detailed table
+and provenance are in `research/v2-7-p7a-results.md`.
+
+Classification: **NOT EXERCISED** for participant risk/forced-close/deficit,
+with **SUPPORTED (screening)** fixed-liability activation. Both active levels
+(L and H) made ordinary IOC requests, filled the complete 3,000,000,000-raw
+ABC target in both seeds, and ended with zero target gap in all three venues.
+The disabled controls remained inactive. The active actor had 43,170--43,177
+independent mark checks but zero expected or observed breaches; an independent
+scan found zero liquidation events for client 59. Generic exchange
+liquidations (195--557 per cell) affected other accounts and passed their
+independent path/conservation checks, so they do not satisfy the P7 actor-risk
+predicate. All deficit, insurance and bankruptcy measures were zero.
+
+The P7a promotion rule is not met. Holdout seeds 313, 317 and 331 were not
+consumed, and no P7a number, clock, liquidity or population is changed. The
+result licenses only ordinary fixed-liability activation, not liquidation
+economics or any market-level realism conclusion. A subsequent P7b must be a
+new preregistered economically reachable distress mechanism.

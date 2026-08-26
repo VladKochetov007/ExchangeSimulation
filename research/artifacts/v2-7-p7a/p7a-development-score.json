@@ -1,0 +1,374 @@
+{
+  "protocol": "v2-7-p7a-distress-v1",
+  "classification": "NOT EXERCISED",
+  "development_seeds": [
+    307,
+    311
+  ],
+  "untouched_holdout_seeds": [
+    313,
+    317,
+    331
+  ],
+  "holdouts_consumed": false,
+  "source_revision": "8d36f74a401ada2218f169fba8c6d2e2ffcd0d12",
+  "binary_sha256": "8c5420573b1d38a7d32cde1ad7798a3c8aff22c9ac8eef80bf65210edc6ed549",
+  "predicates": {
+    "control_valid": true,
+    "activation_valid": true,
+    "evidence_integrity_valid": true,
+    "actor_risk_path_exercised": false,
+    "deficit_path_exercised": false
+  },
+  "verdicts": {
+    "fixed_liability_activation": "SUPPORTED (screening)",
+    "participant_margin_call": "NOT EXERCISED",
+    "participant_forced_close": "NOT EXERCISED",
+    "deficit_insurance_bankruptcy": "NOT EXERCISED",
+    "finite_margin_ladder_effect": "NOT EXERCISED"
+  },
+  "cells": [
+    {
+      "cell": "C",
+      "seed": 307,
+      "activation": {
+        "enabled_decisions": 0,
+        "disabled_decisions": 21600,
+        "decisions": 21600,
+        "submitted": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0,
+        "terminal_absolute_gaps": [
+          "1000000000",
+          "1000000000",
+          "1000000000"
+        ],
+        "action_counts": {
+          "NOT_SUBSCRIBED": 3,
+          "POLICY_DISABLED": 21597
+        },
+        "receipt_audit_valid": true,
+        "future_receipt_use": 0,
+        "valid": true,
+        "control_valid": true,
+        "active_valid": false
+      },
+      "information_integrity": {
+        "observations_valid": true,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0,
+        "receipt_errors": 0
+      },
+      "risk": {
+        "active_mark_checks": 0,
+        "expected_breaches": 0,
+        "observed_checks": 0,
+        "missing_checks": 0,
+        "unexpected_checks": 0,
+        "actor_margin_events": 0,
+        "actor_liquidations": 0,
+        "generic_liquidations": 557,
+        "generic_liquidation_checks": 1190,
+        "generic_affected_accounts": 10,
+        "deficits": 0,
+        "total_deficit": 0,
+        "insurance_deficit": 0,
+        "invalid_liquidations": 0,
+        "path_failures": 0,
+        "conservation_failures": 0
+      },
+      "evidence": {
+        "events": 14241527,
+        "digest": "c37aeb57de2e1f793c454634369fdbc9e62a9ca180b87f0cd4a94226bb318530"
+      }
+    },
+    {
+      "cell": "C",
+      "seed": 311,
+      "activation": {
+        "enabled_decisions": 0,
+        "disabled_decisions": 21600,
+        "decisions": 21600,
+        "submitted": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0,
+        "terminal_absolute_gaps": [
+          "1000000000",
+          "1000000000",
+          "1000000000"
+        ],
+        "action_counts": {
+          "NOT_SUBSCRIBED": 3,
+          "POLICY_DISABLED": 21597
+        },
+        "receipt_audit_valid": true,
+        "future_receipt_use": 0,
+        "valid": true,
+        "control_valid": true,
+        "active_valid": false
+      },
+      "information_integrity": {
+        "observations_valid": true,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0,
+        "receipt_errors": 0
+      },
+      "risk": {
+        "active_mark_checks": 0,
+        "expected_breaches": 0,
+        "observed_checks": 0,
+        "missing_checks": 0,
+        "unexpected_checks": 0,
+        "actor_margin_events": 0,
+        "actor_liquidations": 0,
+        "generic_liquidations": 195,
+        "generic_liquidation_checks": 385,
+        "generic_affected_accounts": 7,
+        "deficits": 0,
+        "total_deficit": 0,
+        "insurance_deficit": 0,
+        "invalid_liquidations": 0,
+        "path_failures": 0,
+        "conservation_failures": 0
+      },
+      "evidence": {
+        "events": 14236505,
+        "digest": "fbec628015a8e310fc386e2e9040be0f7143aa486f17f32568c5cf5976b2bdd0"
+      }
+    },
+    {
+      "cell": "L",
+      "seed": 307,
+      "activation": {
+        "enabled_decisions": 21600,
+        "disabled_decisions": 0,
+        "decisions": 21600,
+        "submitted": 109,
+        "accepted": 109,
+        "rejected": 0,
+        "fills": 21,
+        "filled_qty": 3000000000,
+        "terminal_absolute_gaps": [
+          "0",
+          "0",
+          "0"
+        ],
+        "action_counts": {
+          "FIXED_LIABILITY_HELD": 21488,
+          "NOT_SUBSCRIBED": 3,
+          "SUBMIT_IOC": 109
+        },
+        "receipt_audit_valid": true,
+        "future_receipt_use": 0,
+        "valid": true,
+        "control_valid": false,
+        "active_valid": true
+      },
+      "information_integrity": {
+        "observations_valid": true,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0,
+        "receipt_errors": 0
+      },
+      "risk": {
+        "active_mark_checks": 43177,
+        "expected_breaches": 0,
+        "observed_checks": 0,
+        "missing_checks": 0,
+        "unexpected_checks": 0,
+        "actor_margin_events": 0,
+        "actor_liquidations": 0,
+        "generic_liquidations": 282,
+        "generic_liquidation_checks": 767,
+        "generic_affected_accounts": 8,
+        "deficits": 0,
+        "total_deficit": 0,
+        "insurance_deficit": 0,
+        "invalid_liquidations": 0,
+        "path_failures": 0,
+        "conservation_failures": 0
+      },
+      "evidence": {
+        "events": 14320521,
+        "digest": "afc1bae7ffa823d53d237632f29d356c0fa77ef69394ca18d02fb1627a508e59"
+      }
+    },
+    {
+      "cell": "L",
+      "seed": 311,
+      "activation": {
+        "enabled_decisions": 21600,
+        "disabled_decisions": 0,
+        "decisions": 21600,
+        "submitted": 163,
+        "accepted": 163,
+        "rejected": 0,
+        "fills": 18,
+        "filled_qty": 3000000000,
+        "terminal_absolute_gaps": [
+          "0",
+          "0",
+          "0"
+        ],
+        "action_counts": {
+          "FIXED_LIABILITY_HELD": 21434,
+          "NOT_SUBSCRIBED": 3,
+          "SUBMIT_IOC": 163
+        },
+        "receipt_audit_valid": true,
+        "future_receipt_use": 0,
+        "valid": true,
+        "control_valid": false,
+        "active_valid": true
+      },
+      "information_integrity": {
+        "observations_valid": true,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0,
+        "receipt_errors": 0
+      },
+      "risk": {
+        "active_mark_checks": 43170,
+        "expected_breaches": 0,
+        "observed_checks": 0,
+        "missing_checks": 0,
+        "unexpected_checks": 0,
+        "actor_margin_events": 0,
+        "actor_liquidations": 0,
+        "generic_liquidations": 274,
+        "generic_liquidation_checks": 543,
+        "generic_affected_accounts": 8,
+        "deficits": 0,
+        "total_deficit": 0,
+        "insurance_deficit": 0,
+        "invalid_liquidations": 0,
+        "path_failures": 0,
+        "conservation_failures": 0
+      },
+      "evidence": {
+        "events": 14300444,
+        "digest": "acd25908ad89af61f7b7d781a42f27b65ad5fd15b71f24bcf805b36f6fc44bec"
+      }
+    },
+    {
+      "cell": "H",
+      "seed": 307,
+      "activation": {
+        "enabled_decisions": 21600,
+        "disabled_decisions": 0,
+        "decisions": 21600,
+        "submitted": 109,
+        "accepted": 109,
+        "rejected": 0,
+        "fills": 21,
+        "filled_qty": 3000000000,
+        "terminal_absolute_gaps": [
+          "0",
+          "0",
+          "0"
+        ],
+        "action_counts": {
+          "FIXED_LIABILITY_HELD": 21488,
+          "NOT_SUBSCRIBED": 3,
+          "SUBMIT_IOC": 109
+        },
+        "receipt_audit_valid": true,
+        "future_receipt_use": 0,
+        "valid": true,
+        "control_valid": false,
+        "active_valid": true
+      },
+      "information_integrity": {
+        "observations_valid": true,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0,
+        "receipt_errors": 0
+      },
+      "risk": {
+        "active_mark_checks": 43177,
+        "expected_breaches": 0,
+        "observed_checks": 0,
+        "missing_checks": 0,
+        "unexpected_checks": 0,
+        "actor_margin_events": 0,
+        "actor_liquidations": 0,
+        "generic_liquidations": 282,
+        "generic_liquidation_checks": 767,
+        "generic_affected_accounts": 8,
+        "deficits": 0,
+        "total_deficit": 0,
+        "insurance_deficit": 0,
+        "invalid_liquidations": 0,
+        "path_failures": 0,
+        "conservation_failures": 0
+      },
+      "evidence": {
+        "events": 14320521,
+        "digest": "1a634437b5b661f762701f9c2ca6f047988584474a17f2aeb1b017bf5d4f842e"
+      }
+    },
+    {
+      "cell": "H",
+      "seed": 311,
+      "activation": {
+        "enabled_decisions": 21600,
+        "disabled_decisions": 0,
+        "decisions": 21600,
+        "submitted": 163,
+        "accepted": 163,
+        "rejected": 0,
+        "fills": 18,
+        "filled_qty": 3000000000,
+        "terminal_absolute_gaps": [
+          "0",
+          "0",
+          "0"
+        ],
+        "action_counts": {
+          "FIXED_LIABILITY_HELD": 21434,
+          "NOT_SUBSCRIBED": 3,
+          "SUBMIT_IOC": 163
+        },
+        "receipt_audit_valid": true,
+        "future_receipt_use": 0,
+        "valid": true,
+        "control_valid": false,
+        "active_valid": true
+      },
+      "information_integrity": {
+        "observations_valid": true,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0,
+        "receipt_errors": 0
+      },
+      "risk": {
+        "active_mark_checks": 43170,
+        "expected_breaches": 0,
+        "observed_checks": 0,
+        "missing_checks": 0,
+        "unexpected_checks": 0,
+        "actor_margin_events": 0,
+        "actor_liquidations": 0,
+        "generic_liquidations": 274,
+        "generic_liquidation_checks": 543,
+        "generic_affected_accounts": 8,
+        "deficits": 0,
+        "total_deficit": 0,
+        "insurance_deficit": 0,
+        "invalid_liquidations": 0,
+        "path_failures": 0,
+        "conservation_failures": 0
+      },
+      "evidence": {
+        "events": 14300444,
+        "digest": "835398f7d69aae225340aea01804b8b8cf33543339e1baa82462af0fcbb41952"
+      }
+    }
+  ],
+  "interpretation": "Both enabled fixed-liability cells independently entered and filled the declared target with valid evidence. No margin breach, margin-call event, or client-59 forced close occurred; generic liquidation events for other accounts do not activate the P7 hedger risk mechanism. No deficit or insurance path was exercised.",
+  "next_action": "Do not consume holdout seeds or tune P7a numbers. Record the risk path as NOT EXERCISED and preregister a new economically reachable distress mechanism before any further stress run."
+}
