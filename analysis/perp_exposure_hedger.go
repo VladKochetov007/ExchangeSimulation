@@ -427,7 +427,11 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 				result.InvalidBorrowEvents++
 				return
 			}
-			if borrow.Reason != "auto_perp" {
+			// Borrowing is a shared venue stream.  Other roles (for example the
+			// ordinary noise population) may legitimately use the same
+			// auto_perp reason; they are outside this participant-specific
+			// evidence contract and must not invalidate the replay.
+			if !perpExposureBorrowRelevant(borrow, r.Role(event.VenueID, event.ClientID)) {
 				return
 			}
 			result.AutoPerpBorrowEvents++
@@ -439,7 +443,7 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 				autoPerpBorrowedByParticipant[participant] = participantBorrowed
 			}
 			participantBorrowed.Add(participantBorrowed, big.NewInt(borrow.Amount))
-			if !policy.AutoBorrowPerp || borrow.Asset != "USD" || r.Role(event.VenueID, event.ClientID) != "perp_exposure_hedger" {
+			if !policy.AutoBorrowPerp || borrow.Asset != "USD" {
 				result.UnexpectedAutoPerpBorrows++
 			}
 		}
@@ -758,6 +762,10 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 	})
 	result.Valid = result.Decisions > 0 && result.ReceiptAuditValid && result.ReceiptEvidenceErrors == 0 && result.MissingReceipts == 0 && result.AmbiguousReceipts == 0 && result.ReceiptMismatches == 0 && result.FutureReceiptUse == 0 && result.MissingGatewayDecisions == 0 && result.GatewayMismatches == 0 && result.InvalidDecisionRecords == 0 && result.InvalidBorrowEvents == 0 && result.UnexpectedAutoPerpBorrows == 0 && result.StateMismatches == 0 && result.DecisionMismatches == 0 && result.DisabledSubmissions == 0 && result.DuplicateDecisions == 0 && result.MissingOutcomes == 0 && result.DuplicateOutcomes == 0 && result.OutcomeMismatches == 0 && result.MissingIOCTerminals == 0 && result.DuplicateIOCTerminals == 0 && result.FillQuantityMismatches == 0 && result.MissingFillEvidence == 0 && result.UnexpectedFillEvidence == 0 && result.FillEvidenceMismatches == 0 && result.NonReducingFills == 0 && result.UnknownCounterparties == 0 && result.SelfFills == 0 && result.NonTakerFills == 0 && result.FeeMismatches == 0
 	return result, nil
+}
+
+func perpExposureBorrowRelevant(borrow exchange.BorrowEvent, role string) bool {
+	return borrow.Reason == "auto_perp" && role == "perp_exposure_hedger"
 }
 
 func loadPerpExposureRunConfig(dir string) (perpExposureRunConfig, error) {

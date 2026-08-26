@@ -3,6 +3,8 @@ package analysis
 import (
 	"math/rand"
 	"testing"
+
+	"exchange_sim/exchange"
 )
 
 func fixedLiabilityReplayPolicy() *perpExposurePolicyConfig {
@@ -95,6 +97,20 @@ func TestPerpExposureFeeAndCounterpartyContracts(t *testing.T) {
 	delete(orders, perpExposureOrderKey{venue: "north", order: 8})
 	if perpExposureHasExternalCounterparty(trades, orders, key, fill) {
 		t.Fatal("unrecorded counterparty was accepted")
+	}
+}
+
+func TestPerpExposureBorrowScopeIgnoresOtherRoles(t *testing.T) {
+	borrow := exchange.BorrowEvent{Reason: "auto_perp", Asset: "USD", Amount: 1}
+	if !perpExposureBorrowRelevant(borrow, "perp_exposure_hedger") {
+		t.Fatal("declared directional participant borrow was not in scope")
+	}
+	if perpExposureBorrowRelevant(borrow, "noise_flow") {
+		t.Fatal("unrelated auto_perp borrow was treated as directional evidence")
+	}
+	borrow.Reason = "auto_spot"
+	if perpExposureBorrowRelevant(borrow, "perp_exposure_hedger") {
+		t.Fatal("auto_spot borrow was treated as directional evidence")
 	}
 }
 
