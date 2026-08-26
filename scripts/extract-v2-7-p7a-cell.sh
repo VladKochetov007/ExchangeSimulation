@@ -147,6 +147,13 @@ metrics=(
 	liquidations marginchecks conservation positions fillpositions orderlifecycle
 	settlements expiryfills derivatives ecology roleaudit
 )
+if [[ "$distress_protocol" == p7d ]]; then
+	metrics=(
+		perpexposurehedger perpexposurerisk observationreceipts evidenceartifacthash streamhash
+		liquidations marginchecks conservation positions fillpositions orderlifecycle
+		settlements expiryfills derivatives ecology roleaudit
+	)
+fi
 for metric in "${metrics[@]}"; do
 	if [[ "$metric" == marginchecks ]]; then
 		write_metric "$cell/$metric.json" "$analyzer" -metric "$metric" -margin-role perp_exposure_hedger -json "$cell"
@@ -214,11 +221,24 @@ jq -e '.result.invalid_liquidations == 0 and
   .result.position_conservation_failures == 0 and
   .result.deficit_insurance_residual == 0 and
   .result.deficit_balance_residual == 0' "$cell/liquidations.json" >/dev/null
-jq -e '.result.excluded_candidates == 0 and .result.arithmetic_failures == 0 and
-  .result.balance_chain_failures == 0 and .result.position_chain_failures == 0 and
-  .result.mark_mismatches == 0 and .result.balance_mismatches == 0 and
-  .result.equity_mismatches == 0 and .result.notional_mismatches == 0 and
-  .result.maintenance_mismatches == 0' "$cell/marginchecks.json" >/dev/null
+if [[ "$distress_protocol" == p7d ]]; then
+	# P7d intentionally permits borrowed quote collateral.  The generic
+	# marginchecks contract is no-debt only; its exclusions are retained as a
+	# diagnostic and cannot invalidate this separately declared replay.
+	jq -e '.result.valid == true and .result.candidates > 0 and
+	  .result.mark_updates > 0 and .result.missing_checks == 0 and
+	  .result.unexpected_checks == 0 and .result.duplicate_checks == 0 and
+	  .result.field_mismatches == 0 and .result.position_chain_failures == 0 and
+	  .result.balance_chain_failures == 0 and .result.borrow_amount_mismatches == 0 and
+	  .result.position_path_failures == 0 and .result.terminal_state_mismatches == 0' \
+		"$cell/perpexposurerisk.json" >/dev/null
+else
+	jq -e '.result.excluded_candidates == 0 and .result.arithmetic_failures == 0 and
+	  .result.balance_chain_failures == 0 and .result.position_chain_failures == 0 and
+	  .result.mark_mismatches == 0 and .result.balance_mismatches == 0 and
+	  .result.equity_mismatches == 0 and .result.notional_mismatches == 0 and
+	  .result.maintenance_mismatches == 0' "$cell/marginchecks.json" >/dev/null
+fi
 
 runtime_events=$(jq -er '.events' "$cell/evidence-artifact-hash.json")
 runtime_digest=$(jq -er '.digest' "$cell/evidence-artifact-hash.json")
@@ -246,13 +266,19 @@ jq -n \
 	  cell: $cell,
 	  seed: $seed,
 	  completion_sentinels: ["greeks.json", "latency.json"],
-	  required_artifacts: [
+	  required_artifacts: (if $distress_protocol == "p7d" then [
+	    "perpexposurehedger.json", "perpexposurerisk.json", "observationreceipts.json",
+	    "evidenceartifacthash.json", "streamhash.json", "liquidations.json",
+	    "marginchecks.json", "conservation.json", "positions.json",
+	    "fillpositions.json", "orderlifecycle.json", "settlements.json",
+	    "expiryfills.json", "derivatives.json", "ecology.json", "roleaudit.json"
+	  ] else [
 	    "perpexposurehedger.json", "observationreceipts.json",
 	    "evidenceartifacthash.json", "streamhash.json", "liquidations.json",
 	    "marginchecks.json", "conservation.json", "positions.json",
 	    "fillpositions.json", "orderlifecycle.json", "settlements.json",
 	    "expiryfills.json", "derivatives.json", "ecology.json", "roleaudit.json"
-	  ],
+	  ] end),
 	  runtime_evidence_artifact: {events: $runtime_evidence_events, digest: $runtime_evidence_digest},
 	  raw_log_policy: ("retained; no prune authority (" + $distress_protocol + ")")
 }' >"$metadata_tmp"
