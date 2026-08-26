@@ -35,7 +35,7 @@ promotion rule is met.
 
 | cell | SHA-256 |
 |---|---|
-| C-367 | `TO_BE_RENDERED` |
-| C-371 | `TO_BE_RENDERED` |
-| T-367 | `TO_BE_RENDERED` |
-| T-371 | `TO_BE_RENDERED` |
+| C-367 | `a2b225ed060099ebc87aeec00a95501d6e5296de095897f4c44eb5003d4ef1b9` |
+| C-371 | `7627709f7fceb3fd9f8d9c40e7020752639f316a9eb12f268c79acc4af5e4488` |
+| T-367 | `0a6fc74c0f89e2b0e2a7fffa8d017705021afea7645cb46be0ffaf0cd179651a` |
+| T-371 | `6a3d8c6cb33ab4587eee662a8a7ace5888583e19c02d83e4279a45e4d26cd1b1` |
