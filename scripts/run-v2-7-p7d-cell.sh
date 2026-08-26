@@ -4,13 +4,23 @@
 set -euo pipefail
 
 if [[ $# -lt 2 || $# -gt 3 ]]; then
-  echo "usage: $0 C|L|S 431|433 [multivenue-binary]" >&2
+  echo "usage: $0 C|L|S 431|433|439|443|449 [multivenue-binary]" >&2
   exit 2
 fi
 cell=$1
 seed=$2
 case "$cell" in C|L|S) ;; *) echo "unknown P7d cell: $cell" >&2; exit 2 ;; esac
-case "$seed" in 431|433) ;; *) echo "unregistered P7d seed: $seed" >&2; exit 2 ;; esac
+case "$seed" in
+  431|433) holdout=false ;;
+  439|443|449)
+    holdout=true
+    [[ "${P7D_ALLOW_HOLDOUT:-0}" == 1 ]] || {
+      echo "refusing P7d holdout before development promotion: set P7D_ALLOW_HOLDOUT=1" >&2
+      exit 1
+    }
+    ;;
+  *) echo "unregistered P7d seed: $seed" >&2; exit 2 ;;
+esac
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 config="$root_dir/research/configs/v2-7-p7d/$cell-$seed.json"
@@ -35,7 +45,11 @@ if [[ -e "$output" ]]; then
   echo "refusing to overwrite P7d evidence directory: $output" >&2
   exit 1
 fi
-"$root_dir/scripts/check-v2-7-p7d-configs.sh" >/dev/null
+if [[ "$holdout" == true ]]; then
+  "$root_dir/scripts/check-v2-7-p7d-holdout-configs.sh" >/dev/null
+else
+  "$root_dir/scripts/check-v2-7-p7d-configs.sh" >/dev/null
+fi
 
 mkdir -p "$output"
 cp "$config" "$output/run-config.json"
@@ -55,11 +69,12 @@ jq -n \
   --arg git_revision "$git_revision" \
   --arg go_version "$(go version)" \
   --arg gomaxprocs "${GOMAXPROCS:-default}" \
+  --argjson holdout "$holdout" \
   --arg output_dir "$output" \
   '{
     experiment_id: ("v2-7-p7d-directional-distress-" + $cell + "-seed-" + ($seed|tostring)),
     hypothesis_id: "V2-7-P7D-DIRECTIONAL-DISTRESS",
-    cell: $cell, seed: $seed, simulated_horizon: $horizon, preflight: $preflight,
+    cell: $cell, seed: $seed, holdout: $holdout, simulated_horizon: $horizon, preflight: $preflight,
     config_sha256: $config_sha256, binary_sha256: $binary_sha256,
     git_revision: $git_revision, go_version: $go_version,
     gomaxprocs: $gomaxprocs, output_dir: $output_dir,

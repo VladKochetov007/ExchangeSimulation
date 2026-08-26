@@ -93,7 +93,16 @@ if [[ "$distress_protocol" == p7a ]]; then
 elif [[ "$distress_protocol" == p7b ]]; then
 	case "$seed" in 337|341) ;; *) echo "invalid P7b development seed $seed" >&2; exit 1 ;; esac
 elif [[ "$distress_protocol" == p7d ]]; then
-	case "$seed" in 431|433) ;; *) echo "invalid P7d development seed $seed" >&2; exit 1 ;; esac
+	case "$seed" in
+		431|433) ;;
+		439|443|449)
+			[[ "${P7D_ALLOW_HOLDOUT:-0}" == 1 ]] || {
+				echo "refusing P7d holdout extraction before development promotion: set P7D_ALLOW_HOLDOUT=1" >&2
+				exit 1
+			}
+			;;
+		*) echo "invalid P7d seed $seed" >&2; exit 1 ;;
+	esac
 else
 	case "$seed" in 367|371) ;; *) echo "invalid P7c development seed $seed" >&2; exit 1 ;; esac
 fi
