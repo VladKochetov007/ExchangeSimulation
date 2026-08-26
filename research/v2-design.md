@@ -225,6 +225,19 @@ separately preregistered conditional funding screen with that fixed
 independent perpetual-flow source; it does not license changing P4's capital,
 fees, thresholds, clocks, or funding magnitude after observing the null.
 
+The conditional P4b screen is recorded in
+[`v2-5-p4b-independent-perp-flow-results.md`](v2-5-p4b-independent-perp-flow-results.md)
+and machine-readable form in
+`research/artifacts/v2-5-p4b/p4b-development-score.json`.  The independent
+perpetual-flow actor and the funding-linked target response activated in both
+development seeds.  Seed 401 failed the registered matched ordinary
+spot/perpetual execution gate because both treatment perpetual legs were only
+partially filled; seed 409 reached the complete endpoint but its exact paired
+basis statistic was zero.  The aggregate classification is therefore
+**FALSIFIED AT EXECUTION** (development screening), with no P4b holdout seeds
+consumed.  This does not establish a general funding null and does not license
+post-outcome retuning.
+
 P7c's longer fixed-liability risk horizon is recorded as **NOT EXERCISED** for
 participant-specific distress and does not change the funding design. Its
 generic venue liquidations are diagnostic only.
