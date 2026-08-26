@@ -1,0 +1,1805 @@
+{
+  "schema_version": 1,
+  "experiment_id": "v2-6-p6r1-cross-asset-mark",
+  "hypothesis_id": "V2-6-P6R1-CROSS-ASSET-MARK",
+  "contract": "v2-6-p6r1-cross-asset-mark-v1",
+  "classification": "SUPPORTED_SCREENING",
+  "scope": "untouched_holdout_viability_and_stage_activation_only",
+  "simulator_revision": "ca12843f69c2c8f0aae802aef3b77992c76c5512",
+  "binary_sha256": "edb2eece46ba0cffd0a3e94f3a83009a8f1e1755f213163c945d986d093ad0be",
+  "analysis_revision": "ca12843f69c2c8f0aae802aef3b77992c76c5512",
+  "analyzer_sha256": "a17e40e7b548a824bf44808a80c8a6a46386d206d10f820237d352c9ed4d65d6",
+  "horizon": "8h",
+  "development_seeds": [
+    211,
+    213
+  ],
+  "holdout_seeds": [
+    223,
+    227,
+    229
+  ],
+  "config_hashes_pinned": true,
+  "all_required_artifacts_valid": true,
+  "runtime_offline_evidence_digest_equal": true,
+  "cdf_collateral_mark": {
+    "enabled": true,
+    "bootstrap_price": 3000,
+    "borrow_cap_units": 20000,
+    "participant_visible": false,
+    "purpose": "collateral_authorization_and_accounting_only"
+  },
+  "raw_log_policy": "retained; no P6-R1 prune authority",
+  "cells": [
+    {
+      "cell": "O0-223",
+      "stage": "O0",
+      "seed": 223,
+      "config_sha256": "c03f6f67e1778c709793a504229a046bd248d18cfaf493c68ac3e93eab01c637",
+      "evidence_events": 30330262,
+      "evidence_digest": "ab20c13422a19098ed05ac60d07f8d6c97f87cf4a7272cdb10914635894525d2",
+      "runtime_offline_equal": true,
+      "cdf_collateral": {
+        "cdf_borrow_events": 17946,
+        "cdf_price_unavailable_rejections": 0,
+        "collateral_mark_contract": "explicit CDF/USD bootstrap mark plus finite borrow cap"
+      },
+      "surface": {
+        "trades": 160279,
+        "priced": 73533,
+        "points": 150
+      },
+      "lifecycle": {
+        "listings": {
+          "FUTURE": 15,
+          "OPTION": 150
+        },
+        "settlements": {
+          "FUTURE": 9,
+          "OPTION": 90
+        }
+      },
+      "liability": {
+        "participants": 0,
+        "decisions": 0,
+        "submit_decisions": 0,
+        "deferred_decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "canonical_fills": 0,
+        "filled_qty": 0,
+        "target_reached": false,
+        "valid": false
+      },
+      "value_taker": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "vanna_volga": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "exposure": {
+        "pooled_hedge_ratio": 0,
+        "pooled_mean_abs_net_delta": 3.565727259259025,
+        "pooled_max_abs_net_delta": 11.399999999999999,
+        "pooled_mean_abs_vega": 275212278.3576961,
+        "pooled_mean_abs_vanna": 0.4062193773670539,
+        "pooled_mean_abs_volga": 375972104.41688216,
+        "pooled_correlation": -0.0005220100386472403,
+        "transmission": [
+          {
+            "venue_id": "central",
+            "buckets": 480,
+            "correlation": 0.011625752726287894,
+            "lagged_correlation": 0.04545142035286308,
+            "option_volume": 63950000000,
+            "underlying_volume": 2001234691871
+          },
+          {
+            "venue_id": "north",
+            "buckets": 480,
+            "correlation": -0.027760283368223178,
+            "lagged_correlation": -0.03530860671567968,
+            "option_volume": 63251000000,
+            "underlying_volume": 1950164990343
+          },
+          {
+            "venue_id": "south",
+            "buckets": 480,
+            "correlation": 0.014568500525993565,
+            "lagged_correlation": 0.022592686828794097,
+            "option_volume": 66020000000,
+            "underlying_volume": 1937922679766
+          }
+        ],
+        "hedge_flows": [
+          {
+            "venue_id": "central",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 53301
+          },
+          {
+            "venue_id": "north",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 53251
+          },
+          {
+            "venue_id": "south",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 53727
+          }
+        ]
+      }
+    },
+    {
+      "cell": "O0-227",
+      "stage": "O0",
+      "seed": 227,
+      "config_sha256": "6260f57a237a95f94824ed7a45896b621524fcb3a3810e35f13a8b67bbea7e49",
+      "evidence_events": 30804178,
+      "evidence_digest": "19cde458e93cbf32b3692870019da74724c1761fd0ba7c70813f3d4209849b90",
+      "runtime_offline_equal": true,
+      "cdf_collateral": {
+        "cdf_borrow_events": 18423,
+        "cdf_price_unavailable_rejections": 0,
+        "collateral_mark_contract": "explicit CDF/USD bootstrap mark plus finite borrow cap"
+      },
+      "surface": {
+        "trades": 161136,
+        "priced": 73474,
+        "points": 150
+      },
+      "lifecycle": {
+        "listings": {
+          "FUTURE": 15,
+          "OPTION": 150
+        },
+        "settlements": {
+          "FUTURE": 9,
+          "OPTION": 90
+        }
+      },
+      "liability": {
+        "participants": 0,
+        "decisions": 0,
+        "submit_decisions": 0,
+        "deferred_decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "canonical_fills": 0,
+        "filled_qty": 0,
+        "target_reached": false,
+        "valid": false
+      },
+      "value_taker": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "vanna_volga": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "exposure": {
+        "pooled_hedge_ratio": 0,
+        "pooled_mean_abs_net_delta": 3.0206145648692515,
+        "pooled_max_abs_net_delta": 10.720209088925522,
+        "pooled_mean_abs_vega": 290292306.0985871,
+        "pooled_mean_abs_vanna": 0.4832438393408256,
+        "pooled_mean_abs_volga": 377334227.348675,
+        "pooled_correlation": -0.02195968862479864,
+        "transmission": [
+          {
+            "venue_id": "central",
+            "buckets": 480,
+            "correlation": -0.03659800126357026,
+            "lagged_correlation": -0.07872652064463594,
+            "option_volume": 63004000000,
+            "underlying_volume": 2023612610647
+          },
+          {
+            "venue_id": "north",
+            "buckets": 480,
+            "correlation": -0.016371651827684786,
+            "lagged_correlation": -0.05211724731884465,
+            "option_volume": 67624000000,
+            "underlying_volume": 1750646486650
+          },
+          {
+            "venue_id": "south",
+            "buckets": 480,
+            "correlation": -0.012909412783140875,
+            "lagged_correlation": 0.010587139298597918,
+            "option_volume": 66360000000,
+            "underlying_volume": 1843177183629
+          }
+        ],
+        "hedge_flows": [
+          {
+            "venue_id": "central",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 53163
+          },
+          {
+            "venue_id": "north",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 54246
+          },
+          {
+            "venue_id": "south",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 53727
+          }
+        ]
+      }
+    },
+    {
+      "cell": "O0-229",
+      "stage": "O0",
+      "seed": 229,
+      "config_sha256": "db68eb8d2535b4e7a37487f110c8bfbdc131e340d4d0930f0295d364be2fb0f3",
+      "evidence_events": 29224683,
+      "evidence_digest": "e4f1809f9e2c7e0ad87837c0e76b1189290b7b43d882aec0089c151afc25b1bf",
+      "runtime_offline_equal": true,
+      "cdf_collateral": {
+        "cdf_borrow_events": 10923,
+        "cdf_price_unavailable_rejections": 0,
+        "collateral_mark_contract": "explicit CDF/USD bootstrap mark plus finite borrow cap"
+      },
+      "surface": {
+        "trades": 161108,
+        "priced": 73200,
+        "points": 150
+      },
+      "lifecycle": {
+        "listings": {
+          "FUTURE": 15,
+          "OPTION": 150
+        },
+        "settlements": {
+          "FUTURE": 9,
+          "OPTION": 90
+        }
+      },
+      "liability": {
+        "participants": 0,
+        "decisions": 0,
+        "submit_decisions": 0,
+        "deferred_decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "canonical_fills": 0,
+        "filled_qty": 0,
+        "target_reached": false,
+        "valid": false
+      },
+      "value_taker": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "vanna_volga": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "exposure": {
+        "pooled_hedge_ratio": 0,
+        "pooled_mean_abs_net_delta": 3.0490670150658623,
+        "pooled_max_abs_net_delta": 9.746513774579544,
+        "pooled_mean_abs_vega": 285698425.30183727,
+        "pooled_mean_abs_vanna": 0.4490435533625348,
+        "pooled_mean_abs_volga": 393733465.3148096,
+        "pooled_correlation": -0.006675492698657464,
+        "transmission": [
+          {
+            "venue_id": "central",
+            "buckets": 480,
+            "correlation": 0.021650638495806805,
+            "lagged_correlation": 0.05520058547572615,
+            "option_volume": 65938000000,
+            "underlying_volume": 1822966506468
+          },
+          {
+            "venue_id": "north",
+            "buckets": 480,
+            "correlation": 0.013505087209755936,
+            "lagged_correlation": 0.01942107832763154,
+            "option_volume": 66305000000,
+            "underlying_volume": 1876422163954
+          },
+          {
+            "venue_id": "south",
+            "buckets": 480,
+            "correlation": -0.055182203801535136,
+            "lagged_correlation": -0.008003540640969399,
+            "option_volume": 64619000000,
+            "underlying_volume": 2028474182242
+          }
+        ],
+        "hedge_flows": [
+          {
+            "venue_id": "central",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 53870
+          },
+          {
+            "venue_id": "north",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 53772
+          },
+          {
+            "venue_id": "south",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 53466
+          }
+        ]
+      }
+    },
+    {
+      "cell": "O1-223",
+      "stage": "O1",
+      "seed": 223,
+      "config_sha256": "08c12ceab666775f3a4dcfa6a8afd2ccc2977e94d431dbe0d80c3d04c2fc98ae",
+      "evidence_events": 33979011,
+      "evidence_digest": "73037868cfcf1d48f2e93ad971db49841f52f263f89c947407e6052e57c62d21",
+      "runtime_offline_equal": true,
+      "cdf_collateral": {
+        "cdf_borrow_events": 17895,
+        "cdf_price_unavailable_rejections": 0,
+        "collateral_mark_contract": "explicit CDF/USD bootstrap mark plus finite borrow cap"
+      },
+      "surface": {
+        "trades": 242564,
+        "priced": 154656,
+        "points": 150
+      },
+      "lifecycle": {
+        "listings": {
+          "FUTURE": 15,
+          "OPTION": 150
+        },
+        "settlements": {
+          "FUTURE": 9,
+          "OPTION": 90
+        }
+      },
+      "liability": {
+        "participants": 0,
+        "decisions": 0,
+        "submit_decisions": 0,
+        "deferred_decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "canonical_fills": 0,
+        "filled_qty": 0,
+        "target_reached": false,
+        "valid": false
+      },
+      "value_taker": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "vanna_volga": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "exposure": {
+        "pooled_hedge_ratio": 0,
+        "pooled_mean_abs_net_delta": 1.281239229375894,
+        "pooled_max_abs_net_delta": 3.2182558800000005,
+        "pooled_mean_abs_vega": 24882457.36123156,
+        "pooled_mean_abs_vanna": 0.999195711193491,
+        "pooled_mean_abs_volga": 122437903.70729311,
+        "pooled_correlation": 0.060306115395101785,
+        "transmission": [
+          {
+            "venue_id": "central",
+            "buckets": 480,
+            "correlation": 0.05137312160588148,
+            "lagged_correlation": 0.08178934914765934,
+            "option_volume": 52462333332,
+            "underlying_volume": 1914247247996
+          },
+          {
+            "venue_id": "north",
+            "buckets": 480,
+            "correlation": 0.025247999102197737,
+            "lagged_correlation": -0.037279723562433524,
+            "option_volume": 52163000000,
+            "underlying_volume": 1871779725507
+          },
+          {
+            "venue_id": "south",
+            "buckets": 480,
+            "correlation": 0.10429722547722614,
+            "lagged_correlation": 0.08792306039170791,
+            "option_volume": 52101666666,
+            "underlying_volume": 1930151702592
+          }
+        ],
+        "hedge_flows": [
+          {
+            "venue_id": "central",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 94739
+          },
+          {
+            "venue_id": "north",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 51319
+          },
+          {
+            "venue_id": "south",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 96506
+          }
+        ]
+      }
+    },
+    {
+      "cell": "O1-227",
+      "stage": "O1",
+      "seed": 227,
+      "config_sha256": "75f958fdd629f96d629341f71509451d4e44a196e806414a16935ed72ac6d8ed",
+      "evidence_events": 34173797,
+      "evidence_digest": "5077df707622c96d6e88d2dfe1706be8ec768a78fe11edb921ccd15e3e63b776",
+      "runtime_offline_equal": true,
+      "cdf_collateral": {
+        "cdf_borrow_events": 18450,
+        "cdf_price_unavailable_rejections": 0,
+        "collateral_mark_contract": "explicit CDF/USD bootstrap mark plus finite borrow cap"
+      },
+      "surface": {
+        "trades": 241226,
+        "priced": 153917,
+        "points": 150
+      },
+      "lifecycle": {
+        "listings": {
+          "FUTURE": 15,
+          "OPTION": 150
+        },
+        "settlements": {
+          "FUTURE": 9,
+          "OPTION": 90
+        }
+      },
+      "liability": {
+        "participants": 0,
+        "decisions": 0,
+        "submit_decisions": 0,
+        "deferred_decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "canonical_fills": 0,
+        "filled_qty": 0,
+        "target_reached": false,
+        "valid": false
+      },
+      "value_taker": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "vanna_volga": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "exposure": {
+        "pooled_hedge_ratio": 0,
+        "pooled_mean_abs_net_delta": 1.1498640535711897,
+        "pooled_max_abs_net_delta": 2.9700000000000006,
+        "pooled_mean_abs_vega": 27473178.055973347,
+        "pooled_mean_abs_vanna": 1.0630701158133236,
+        "pooled_mean_abs_volga": 116605614.6477969,
+        "pooled_correlation": 0.047414495600357376,
+        "transmission": [
+          {
+            "venue_id": "central",
+            "buckets": 480,
+            "correlation": 0.0632679413095877,
+            "lagged_correlation": 0.003707470686818365,
+            "option_volume": 51861333335,
+            "underlying_volume": 2007160548236
+          },
+          {
+            "venue_id": "north",
+            "buckets": 480,
+            "correlation": 0.040149920080988596,
+            "lagged_correlation": 0.06140768810320775,
+            "option_volume": 52360000000,
+            "underlying_volume": 2044201205830
+          },
+          {
+            "venue_id": "south",
+            "buckets": 480,
+            "correlation": 0.03882562541049585,
+            "lagged_correlation": 0.010162455551244719,
+            "option_volume": 51976666662,
+            "underlying_volume": 2035045482928
+          }
+        ],
+        "hedge_flows": [
+          {
+            "venue_id": "central",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 95576
+          },
+          {
+            "venue_id": "north",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 51486
+          },
+          {
+            "venue_id": "south",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 94164
+          }
+        ]
+      }
+    },
+    {
+      "cell": "O1-229",
+      "stage": "O1",
+      "seed": 229,
+      "config_sha256": "35b4fe5d79265361674e49f565c9277eee1969d03d4ae5ab9ddc4e9db3f89a74",
+      "evidence_events": 34461132,
+      "evidence_digest": "018df0796e380788f58de5e38f6416faa12d1ac71179d0f1a615171b347f369f",
+      "runtime_offline_equal": true,
+      "cdf_collateral": {
+        "cdf_borrow_events": 18211,
+        "cdf_price_unavailable_rejections": 0,
+        "collateral_mark_contract": "explicit CDF/USD bootstrap mark plus finite borrow cap"
+      },
+      "surface": {
+        "trades": 242397,
+        "priced": 153711,
+        "points": 150
+      },
+      "lifecycle": {
+        "listings": {
+          "FUTURE": 15,
+          "OPTION": 150
+        },
+        "settlements": {
+          "FUTURE": 9,
+          "OPTION": 90
+        }
+      },
+      "liability": {
+        "participants": 0,
+        "decisions": 0,
+        "submit_decisions": 0,
+        "deferred_decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "canonical_fills": 0,
+        "filled_qty": 0,
+        "target_reached": false,
+        "valid": false
+      },
+      "value_taker": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "vanna_volga": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "exposure": {
+        "pooled_hedge_ratio": 0,
+        "pooled_mean_abs_net_delta": 1.125544939707258,
+        "pooled_max_abs_net_delta": 2.729341239999999,
+        "pooled_mean_abs_vega": 27795177.96032958,
+        "pooled_mean_abs_vanna": 1.064213226162727,
+        "pooled_mean_abs_volga": 113540603.48640075,
+        "pooled_correlation": 0.03736557842581233,
+        "transmission": [
+          {
+            "venue_id": "central",
+            "buckets": 480,
+            "correlation": -0.012620139059294221,
+            "lagged_correlation": 0.10507462572583766,
+            "option_volume": 52677666666,
+            "underlying_volume": 1934550793475
+          },
+          {
+            "venue_id": "north",
+            "buckets": 480,
+            "correlation": 0.08662412519936485,
+            "lagged_correlation": 0.09610573244938451,
+            "option_volume": 52011000000,
+            "underlying_volume": 2009919806643
+          },
+          {
+            "venue_id": "south",
+            "buckets": 480,
+            "correlation": 0.03809274913736636,
+            "lagged_correlation": 0.1017899789702133,
+            "option_volume": 52248666666,
+            "underlying_volume": 2007093032712
+          }
+        ],
+        "hedge_flows": [
+          {
+            "venue_id": "central",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 94898
+          },
+          {
+            "venue_id": "north",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 51315
+          },
+          {
+            "venue_id": "south",
+            "role": "option_dealer",
+            "taker_fills": 0,
+            "taker_volume": 0,
+            "maker_fills": 0,
+            "option_fills": 96184
+          }
+        ]
+      }
+    },
+    {
+      "cell": "O2-223",
+      "stage": "O2",
+      "seed": 223,
+      "config_sha256": "d4863b18791ecb45cd9caeeee979cb07e0b14c6624c8ea4cf77b4e0e70cb6de2",
+      "evidence_events": 34294095,
+      "evidence_digest": "14feb1c9a0605c779ad2db9aea932d041fab3f12654eabf40ec43fd86c26a3fc",
+      "runtime_offline_equal": true,
+      "cdf_collateral": {
+        "cdf_borrow_events": 16883,
+        "cdf_price_unavailable_rejections": 0,
+        "collateral_mark_contract": "explicit CDF/USD bootstrap mark plus finite borrow cap"
+      },
+      "surface": {
+        "trades": 243196,
+        "priced": 155200,
+        "points": 150
+      },
+      "lifecycle": {
+        "listings": {
+          "FUTURE": 15,
+          "OPTION": 150
+        },
+        "settlements": {
+          "FUTURE": 9,
+          "OPTION": 90
+        }
+      },
+      "liability": {
+        "participants": 3,
+        "decisions": 17280,
+        "submit_decisions": 63,
+        "deferred_decisions": 17217,
+        "accepted": 63,
+        "rejected": 0,
+        "canonical_fills": 49,
+        "filled_qty": 300000000,
+        "target_reached": true,
+        "valid": true
+      },
+      "value_taker": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "vanna_volga": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "exposure": {
+        "pooled_hedge_ratio": 1.0003522462303092,
+        "pooled_mean_abs_net_delta": 0.007367026649601301,
+        "pooled_max_abs_net_delta": 0.16561731602343566,
+        "pooled_mean_abs_vega": 26282174.63262745,
+        "pooled_mean_abs_vanna": 1.0121753835259362,
+        "pooled_mean_abs_volga": 112717992.88945974,
+        "pooled_correlation": -0.019149688351273782,
+        "transmission": [
+          {
+            "venue_id": "central",
+            "buckets": 480,
+            "correlation": -0.008713388423979012,
+            "lagged_correlation": 0.1123449931685483,
+            "option_volume": 52613000002,
+            "underlying_volume": 1989029194253
+          },
+          {
+            "venue_id": "north",
+            "buckets": 480,
+            "correlation": -0.062268936703089015,
+            "lagged_correlation": -0.092334892577866,
+            "option_volume": 52383000000,
+            "underlying_volume": 2038261792851
+          },
+          {
+            "venue_id": "south",
+            "buckets": 480,
+            "correlation": 0.013533260073246685,
+            "lagged_correlation": 0.07663062334778696,
+            "option_volume": 52526333332,
+            "underlying_volume": 1973798128924
+          }
+        ],
+        "hedge_flows": [
+          {
+            "venue_id": "central",
+            "role": "option_dealer",
+            "taker_fills": 18055,
+            "taker_volume": 11931784098,
+            "maker_fills": 0,
+            "option_fills": 96676
+          },
+          {
+            "venue_id": "north",
+            "role": "option_dealer",
+            "taker_fills": 10791,
+            "taker_volume": 15278784136,
+            "maker_fills": 0,
+            "option_fills": 51395
+          },
+          {
+            "venue_id": "south",
+            "role": "option_dealer",
+            "taker_fills": 17145,
+            "taker_volume": 12266383692,
+            "maker_fills": 0,
+            "option_fills": 95125
+          }
+        ]
+      }
+    },
+    {
+      "cell": "O2-227",
+      "stage": "O2",
+      "seed": 227,
+      "config_sha256": "b78abf1206f4cebd3f62b62b48d0538fb311aab96e1a2d1bd5b905b65b0fca62",
+      "evidence_events": 34267192,
+      "evidence_digest": "cbd3549bb609855558d26b753282b1c802fac2c7af3617da5740a7a303fe591b",
+      "runtime_offline_equal": true,
+      "cdf_collateral": {
+        "cdf_borrow_events": 18438,
+        "cdf_price_unavailable_rejections": 0,
+        "collateral_mark_contract": "explicit CDF/USD bootstrap mark plus finite borrow cap"
+      },
+      "surface": {
+        "trades": 244188,
+        "priced": 154694,
+        "points": 150
+      },
+      "lifecycle": {
+        "listings": {
+          "FUTURE": 15,
+          "OPTION": 150
+        },
+        "settlements": {
+          "FUTURE": 9,
+          "OPTION": 90
+        }
+      },
+      "liability": {
+        "participants": 3,
+        "decisions": 17280,
+        "submit_decisions": 70,
+        "deferred_decisions": 17210,
+        "accepted": 70,
+        "rejected": 0,
+        "canonical_fills": 44,
+        "filled_qty": 300000000,
+        "target_reached": true,
+        "valid": true
+      },
+      "value_taker": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "vanna_volga": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "exposure": {
+        "pooled_hedge_ratio": 1.0056124621441016,
+        "pooled_mean_abs_net_delta": 0.03278744511508821,
+        "pooled_max_abs_net_delta": 1.304771707032517,
+        "pooled_mean_abs_vega": 30542109.437034305,
+        "pooled_mean_abs_vanna": 0.9194445391129205,
+        "pooled_mean_abs_volga": 96568375.25035404,
+        "pooled_correlation": -0.04312829587006779,
+        "transmission": [
+          {
+            "venue_id": "central",
+            "buckets": 480,
+            "correlation": -0.02970004687728407,
+            "lagged_correlation": -0.03318814553902219,
+            "option_volume": 52357000002,
+            "underlying_volume": 1727759202128
+          },
+          {
+            "venue_id": "north",
+            "buckets": 480,
+            "correlation": -0.026114900480407793,
+            "lagged_correlation": 0.06819892058662175,
+            "option_volume": 52897000000,
+            "underlying_volume": 2032244361901
+          },
+          {
+            "venue_id": "south",
+            "buckets": 480,
+            "correlation": -0.07356994025251153,
+            "lagged_correlation": -0.06286181445167234,
+            "option_volume": 52197333334,
+            "underlying_volume": 2045010339523
+          }
+        ],
+        "hedge_flows": [
+          {
+            "venue_id": "central",
+            "role": "option_dealer",
+            "taker_fills": 17877,
+            "taker_volume": 11837545797,
+            "maker_fills": 0,
+            "option_fills": 96234
+          },
+          {
+            "venue_id": "north",
+            "role": "option_dealer",
+            "taker_fills": 10904,
+            "taker_volume": 15488688273,
+            "maker_fills": 0,
+            "option_fills": 51651
+          },
+          {
+            "venue_id": "south",
+            "role": "option_dealer",
+            "taker_fills": 17508,
+            "taker_volume": 11844915160,
+            "maker_fills": 0,
+            "option_fills": 96303
+          }
+        ]
+      }
+    },
+    {
+      "cell": "O2-229",
+      "stage": "O2",
+      "seed": 229,
+      "config_sha256": "44970b418e7044a71b5b25e81fefc8f52864a8665bcc547440026092cdf8e463",
+      "evidence_events": 34075257,
+      "evidence_digest": "52597ba7a3c63d1f82b2c7735402e3a812e21a1f11951216e6f8c8d3a21f7cd8",
+      "runtime_offline_equal": true,
+      "cdf_collateral": {
+        "cdf_borrow_events": 16126,
+        "cdf_price_unavailable_rejections": 0,
+        "collateral_mark_contract": "explicit CDF/USD bootstrap mark plus finite borrow cap"
+      },
+      "surface": {
+        "trades": 247628,
+        "priced": 154389,
+        "points": 150
+      },
+      "lifecycle": {
+        "listings": {
+          "FUTURE": 15,
+          "OPTION": 150
+        },
+        "settlements": {
+          "FUTURE": 9,
+          "OPTION": 90
+        }
+      },
+      "liability": {
+        "participants": 3,
+        "decisions": 17280,
+        "submit_decisions": 59,
+        "deferred_decisions": 17221,
+        "accepted": 59,
+        "rejected": 0,
+        "canonical_fills": 45,
+        "filled_qty": 300000000,
+        "target_reached": true,
+        "valid": true
+      },
+      "value_taker": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "vanna_volga": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "exposure": {
+        "pooled_hedge_ratio": 1.0101501693144805,
+        "pooled_mean_abs_net_delta": 0.01894647475438665,
+        "pooled_max_abs_net_delta": 0.39894748852531803,
+        "pooled_mean_abs_vega": 27026222.208398525,
+        "pooled_mean_abs_vanna": 1.048737012263265,
+        "pooled_mean_abs_volga": 113006978.11216341,
+        "pooled_correlation": 0.005765630788173448,
+        "transmission": [
+          {
+            "venue_id": "central",
+            "buckets": 480,
+            "correlation": -0.07014741708489443,
+            "lagged_correlation": 0.012854412574683904,
+            "option_volume": 52273000002,
+            "underlying_volume": 1825370670131
+          },
+          {
+            "venue_id": "north",
+            "buckets": 480,
+            "correlation": -0.00675938121734009,
+            "lagged_correlation": -0.024072558871833478,
+            "option_volume": 52469000000,
+            "underlying_volume": 1902456226120
+          },
+          {
+            "venue_id": "south",
+            "buckets": 480,
+            "correlation": 0.09420369066675487,
+            "lagged_correlation": 0.07952456202578863,
+            "option_volume": 52438333338,
+            "underlying_volume": 1818726041141
+          }
+        ],
+        "hedge_flows": [
+          {
+            "venue_id": "central",
+            "role": "option_dealer",
+            "taker_fills": 19661,
+            "taker_volume": 12089045325,
+            "maker_fills": 0,
+            "option_fills": 98166
+          },
+          {
+            "venue_id": "north",
+            "role": "option_dealer",
+            "taker_fills": 10696,
+            "taker_volume": 15033783912,
+            "maker_fills": 0,
+            "option_fills": 51439
+          },
+          {
+            "venue_id": "south",
+            "role": "option_dealer",
+            "taker_fills": 18639,
+            "taker_volume": 11340214745,
+            "maker_fills": 0,
+            "option_fills": 98023
+          }
+        ]
+      }
+    },
+    {
+      "cell": "O3-223",
+      "stage": "O3",
+      "seed": 223,
+      "config_sha256": "dc48ff6b058eba3c08278ad2cb3667ef2d48b61b8ba8d3362effe7c9120376d7",
+      "evidence_events": 33560572,
+      "evidence_digest": "085ca6d2cb2981d1a925503769cfcf5d6bc6a126dac60a31c0cb6813d198e791",
+      "runtime_offline_equal": true,
+      "cdf_collateral": {
+        "cdf_borrow_events": 18381,
+        "cdf_price_unavailable_rejections": 0,
+        "collateral_mark_contract": "explicit CDF/USD bootstrap mark plus finite borrow cap"
+      },
+      "surface": {
+        "trades": 262480,
+        "priced": 177880,
+        "points": 150
+      },
+      "lifecycle": {
+        "listings": {
+          "FUTURE": 15,
+          "OPTION": 150
+        },
+        "settlements": {
+          "FUTURE": 9,
+          "OPTION": 90
+        }
+      },
+      "liability": {
+        "participants": 3,
+        "decisions": 17280,
+        "submit_decisions": 63,
+        "deferred_decisions": 17217,
+        "accepted": 63,
+        "rejected": 0,
+        "canonical_fills": 49,
+        "filled_qty": 300000000,
+        "target_reached": true,
+        "valid": true
+      },
+      "value_taker": {
+        "participants": 3,
+        "decisions": 11000,
+        "accepted": 11000,
+        "rejected": 0,
+        "fills": 16943,
+        "filled_qty": 10776000000
+      },
+      "vanna_volga": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "exposure": {
+        "pooled_hedge_ratio": 1.0027725746873337,
+        "pooled_mean_abs_net_delta": 0.009918559789923297,
+        "pooled_max_abs_net_delta": 0.14523321965950214,
+        "pooled_mean_abs_vega": 23527101.5870749,
+        "pooled_mean_abs_vanna": 0.9028012980184004,
+        "pooled_mean_abs_volga": 100706341.9849963,
+        "pooled_correlation": -0.06213928320378482,
+        "transmission": [
+          {
+            "venue_id": "central",
+            "buckets": 480,
+            "correlation": -0.035343651497551705,
+            "lagged_correlation": -0.05174634159879602,
+            "option_volume": 55177000000,
+            "underlying_volume": 1952343791282
+          },
+          {
+            "venue_id": "north",
+            "buckets": 480,
+            "correlation": -0.07098293027401092,
+            "lagged_correlation": -0.09058273218778132,
+            "option_volume": 55479000000,
+            "underlying_volume": 1785744137503
+          },
+          {
+            "venue_id": "south",
+            "buckets": 480,
+            "correlation": -0.08009126783979184,
+            "lagged_correlation": -0.05441455762632653,
+            "option_volume": 55354666668,
+            "underlying_volume": 1864142547333
+          }
+        ],
+        "hedge_flows": [
+          {
+            "venue_id": "central",
+            "role": "option_dealer",
+            "taker_fills": 19195,
+            "taker_volume": 12361930138,
+            "maker_fills": 0,
+            "option_fills": 104130
+          },
+          {
+            "venue_id": "north",
+            "role": "option_dealer",
+            "taker_fills": 11368,
+            "taker_volume": 15786038495,
+            "maker_fills": 0,
+            "option_fills": 54589
+          },
+          {
+            "venue_id": "south",
+            "role": "option_dealer",
+            "taker_fills": 19945,
+            "taker_volume": 12173707972,
+            "maker_fills": 0,
+            "option_fills": 103761
+          }
+        ]
+      }
+    },
+    {
+      "cell": "O3-227",
+      "stage": "O3",
+      "seed": 227,
+      "config_sha256": "9bedf971b69e362513081a24ea2e0a0cb6cab8fd5b7ce5b60992be213baa4a4d",
+      "evidence_events": 33979888,
+      "evidence_digest": "990498c4c015f3235999ae39edbc474404420f96e15ed78841664dfd827b0912",
+      "runtime_offline_equal": true,
+      "cdf_collateral": {
+        "cdf_borrow_events": 17557,
+        "cdf_price_unavailable_rejections": 0,
+        "collateral_mark_contract": "explicit CDF/USD bootstrap mark plus finite borrow cap"
+      },
+      "surface": {
+        "trades": 260644,
+        "priced": 178082,
+        "points": 150
+      },
+      "lifecycle": {
+        "listings": {
+          "FUTURE": 15,
+          "OPTION": 150
+        },
+        "settlements": {
+          "FUTURE": 9,
+          "OPTION": 90
+        }
+      },
+      "liability": {
+        "participants": 3,
+        "decisions": 17280,
+        "submit_decisions": 63,
+        "deferred_decisions": 17217,
+        "accepted": 63,
+        "rejected": 0,
+        "canonical_fills": 43,
+        "filled_qty": 300000000,
+        "target_reached": true,
+        "valid": true
+      },
+      "value_taker": {
+        "participants": 3,
+        "decisions": 11113,
+        "accepted": 11113,
+        "rejected": 0,
+        "fills": 17270,
+        "filled_qty": 10865000000
+      },
+      "vanna_volga": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "exposure": {
+        "pooled_hedge_ratio": 1.0004511769818163,
+        "pooled_mean_abs_net_delta": 0.007224964300088415,
+        "pooled_max_abs_net_delta": 0.07175788158834162,
+        "pooled_mean_abs_vega": 26259666.40015573,
+        "pooled_mean_abs_vanna": 0.9346855235270174,
+        "pooled_mean_abs_volga": 97717272.16039687,
+        "pooled_correlation": -0.0006683397008061371,
+        "transmission": [
+          {
+            "venue_id": "central",
+            "buckets": 480,
+            "correlation": -0.014286442332263834,
+            "lagged_correlation": -0.05677601839145025,
+            "option_volume": 55392666667,
+            "underlying_volume": 1910556866021
+          },
+          {
+            "venue_id": "north",
+            "buckets": 480,
+            "correlation": 0.03807163467320654,
+            "lagged_correlation": 0.0707229500868917,
+            "option_volume": 55448000000,
+            "underlying_volume": 1702777815348
+          },
+          {
+            "venue_id": "south",
+            "buckets": 480,
+            "correlation": -0.02579021144336112,
+            "lagged_correlation": -0.06207024943103227,
+            "option_volume": 55306000000,
+            "underlying_volume": 1867879332575
+          }
+        ],
+        "hedge_flows": [
+          {
+            "venue_id": "central",
+            "role": "option_dealer",
+            "taker_fills": 19334,
+            "taker_volume": 12305727702,
+            "maker_fills": 0,
+            "option_fills": 102789
+          },
+          {
+            "venue_id": "north",
+            "role": "option_dealer",
+            "taker_fills": 11076,
+            "taker_volume": 15213783056,
+            "maker_fills": 0,
+            "option_fills": 54704
+          },
+          {
+            "venue_id": "south",
+            "role": "option_dealer",
+            "taker_fills": 20022,
+            "taker_volume": 11802855445,
+            "maker_fills": 0,
+            "option_fills": 103151
+          }
+        ]
+      }
+    },
+    {
+      "cell": "O3-229",
+      "stage": "O3",
+      "seed": 229,
+      "config_sha256": "efe156e690e56b94f9da4436ee1271a94e68754a94ca7acbc9b47901b0f64a3b",
+      "evidence_events": 34787825,
+      "evidence_digest": "b3c9a74dcb2064da7059ac772f4559b585e924867382e541dde6b506778921ef",
+      "runtime_offline_equal": true,
+      "cdf_collateral": {
+        "cdf_borrow_events": 18942,
+        "cdf_price_unavailable_rejections": 0,
+        "collateral_mark_contract": "explicit CDF/USD bootstrap mark plus finite borrow cap"
+      },
+      "surface": {
+        "trades": 254256,
+        "priced": 173556,
+        "points": 150
+      },
+      "lifecycle": {
+        "listings": {
+          "FUTURE": 15,
+          "OPTION": 150
+        },
+        "settlements": {
+          "FUTURE": 9,
+          "OPTION": 90
+        }
+      },
+      "liability": {
+        "participants": 3,
+        "decisions": 17280,
+        "submit_decisions": 59,
+        "deferred_decisions": 17221,
+        "accepted": 59,
+        "rejected": 0,
+        "canonical_fills": 45,
+        "filled_qty": 300000000,
+        "target_reached": true,
+        "valid": true
+      },
+      "value_taker": {
+        "participants": 3,
+        "decisions": 10909,
+        "accepted": 10909,
+        "rejected": 0,
+        "fills": 16565,
+        "filled_qty": 10671000000
+      },
+      "vanna_volga": {
+        "participants": 0,
+        "decisions": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "fills": 0,
+        "filled_qty": 0
+      },
+      "exposure": {
+        "pooled_hedge_ratio": 1.007096997727102,
+        "pooled_mean_abs_net_delta": 0.013700354015865883,
+        "pooled_max_abs_net_delta": 0.33511811628234095,
+        "pooled_mean_abs_vega": 26953267.019687492,
+        "pooled_mean_abs_vanna": 0.7788702030152008,
+        "pooled_mean_abs_volga": 85328703.43563432,
+        "pooled_correlation": -0.01648815916440508,
+        "transmission": [
+          {
+            "venue_id": "central",
+            "buckets": 480,
+            "correlation": -0.08784886960292516,
+            "lagged_correlation": -0.025927119219293006,
+            "option_volume": 55427333332,
+            "underlying_volume": 2032467683028
+          },
+          {
+            "venue_id": "north",
+            "buckets": 480,
+            "correlation": -0.09702191039726657,
+            "lagged_correlation": -0.15447963303633416,
+            "option_volume": 55075000000,
+            "underlying_volume": 2041920200245
+          },
+          {
+            "venue_id": "south",
+            "buckets": 480,
+            "correlation": 0.13540630250697652,
+            "lagged_correlation": 0.07539444918876669,
+            "option_volume": 55213000000,
+            "underlying_volume": 1973408505174
+          }
+        ],
+        "hedge_flows": [
+          {
+            "venue_id": "central",
+            "role": "option_dealer",
+            "taker_fills": 18920,
+            "taker_volume": 12685661448,
+            "maker_fills": 0,
+            "option_fills": 98659
+          },
+          {
+            "venue_id": "north",
+            "role": "option_dealer",
+            "taker_fills": 11108,
+            "taker_volume": 15062061929,
+            "maker_fills": 0,
+            "option_fills": 54382
+          },
+          {
+            "venue_id": "south",
+            "role": "option_dealer",
+            "taker_fills": 18806,
+            "taker_volume": 12797257945,
+            "maker_fills": 0,
+            "option_fills": 101215
+          }
+        ]
+      }
+    },
+    {
+      "cell": "O4-223",
+      "stage": "O4",
+      "seed": 223,
+      "config_sha256": "2c69f6f01f14c9180079a1dc154c84e15dba4c1c12b7860a0392fcc30da9b9aa",
+      "evidence_events": 35034582,
+      "evidence_digest": "c51439fb11e469fc31b7a8805809484620fb06d7b070d48849475f68ec9b8ecb",
+      "runtime_offline_equal": true,
+      "cdf_collateral": {
+        "cdf_borrow_events": 20315,
+        "cdf_price_unavailable_rejections": 0,
+        "collateral_mark_contract": "explicit CDF/USD bootstrap mark plus finite borrow cap"
+      },
+      "surface": {
+        "trades": 261779,
+        "priced": 178157,
+        "points": 150
+      },
+      "lifecycle": {
+        "listings": {
+          "FUTURE": 15,
+          "OPTION": 150
+        },
+        "settlements": {
+          "FUTURE": 9,
+          "OPTION": 90
+        }
+      },
+      "liability": {
+        "participants": 3,
+        "decisions": 17280,
+        "submit_decisions": 66,
+        "deferred_decisions": 17214,
+        "accepted": 66,
+        "rejected": 0,
+        "canonical_fills": 48,
+        "filled_qty": 300000000,
+        "target_reached": true,
+        "valid": true
+      },
+      "value_taker": {
+        "participants": 3,
+        "decisions": 10862,
+        "accepted": 10862,
+        "rejected": 0,
+        "fills": 16405,
+        "filled_qty": 10688000000
+      },
+      "vanna_volga": {
+        "participants": 3,
+        "decisions": 5915,
+        "accepted": 5915,
+        "rejected": 0,
+        "fills": 7093,
+        "filled_qty": 27945000000
+      },
+      "exposure": {
+        "pooled_hedge_ratio": 0.9990708731061283,
+        "pooled_mean_abs_net_delta": 0.009525627392426801,
+        "pooled_max_abs_net_delta": 0.19162510474731217,
+        "pooled_mean_abs_vega": 30703344.766925678,
+        "pooled_mean_abs_vanna": 1.1099512252434245,
+        "pooled_mean_abs_volga": 120735317.74313416,
+        "pooled_correlation": 0.015503341587718758,
+        "transmission": [
+          {
+            "venue_id": "central",
+            "buckets": 480,
+            "correlation": 0.09688473118737854,
+            "lagged_correlation": 0.10071723314284745,
+            "option_volume": 68324521093,
+            "underlying_volume": 1928281442636
+          },
+          {
+            "venue_id": "north",
+            "buckets": 480,
+            "correlation": -0.0484091134891186,
+            "lagged_correlation": 0.00008218729981374458,
+            "option_volume": 69715000000,
+            "underlying_volume": 1976141894753
+          },
+          {
+            "venue_id": "south",
+            "buckets": 480,
+            "correlation": -0.001965592935103659,
+            "lagged_correlation": -0.00629862773001384,
+            "option_volume": 69305166669,
+            "underlying_volume": 2000696620211
+          }
+        ],
+        "hedge_flows": [
+          {
+            "venue_id": "central",
+            "role": "option_dealer",
+            "taker_fills": 19570,
+            "taker_volume": 15712324985,
+            "maker_fills": 0,
+            "option_fills": 98437
+          },
+          {
+            "venue_id": "north",
+            "role": "option_dealer",
+            "taker_fills": 11856,
+            "taker_volume": 18995786331,
+            "maker_fills": 0,
+            "option_fills": 57691
+          },
+          {
+            "venue_id": "south",
+            "role": "option_dealer",
+            "taker_fills": 19599,
+            "taker_volume": 15193973867,
+            "maker_fills": 0,
+            "option_fills": 105651
+          }
+        ]
+      }
+    },
+    {
+      "cell": "O4-227",
+      "stage": "O4",
+      "seed": 227,
+      "config_sha256": "4a89d33cd91b2f51aa71c40cf16e5ee123fd4f52986ddeaa7d6f7b4981cd4fe6",
+      "evidence_events": 32072029,
+      "evidence_digest": "49eeb9a622f29d7e92040940fa985128a9ed6b224ee6ff4adc4ac2b7381b269c",
+      "runtime_offline_equal": true,
+      "cdf_collateral": {
+        "cdf_borrow_events": 6859,
+        "cdf_price_unavailable_rejections": 0,
+        "collateral_mark_contract": "explicit CDF/USD bootstrap mark plus finite borrow cap"
+      },
+      "surface": {
+        "trades": 265756,
+        "priced": 178823,
+        "points": 150
+      },
+      "lifecycle": {
+        "listings": {
+          "FUTURE": 15,
+          "OPTION": 150
+        },
+        "settlements": {
+          "FUTURE": 9,
+          "OPTION": 90
+        }
+      },
+      "liability": {
+        "participants": 3,
+        "decisions": 17280,
+        "submit_decisions": 65,
+        "deferred_decisions": 17215,
+        "accepted": 65,
+        "rejected": 0,
+        "canonical_fills": 44,
+        "filled_qty": 300000000,
+        "target_reached": true,
+        "valid": true
+      },
+      "value_taker": {
+        "participants": 3,
+        "decisions": 10941,
+        "accepted": 10941,
+        "rejected": 0,
+        "fills": 16999,
+        "filled_qty": 10729000000
+      },
+      "vanna_volga": {
+        "participants": 3,
+        "decisions": 5849,
+        "accepted": 5849,
+        "rejected": 0,
+        "fills": 6930,
+        "filled_qty": 27335000000
+      },
+      "exposure": {
+        "pooled_hedge_ratio": 0.999142187232682,
+        "pooled_mean_abs_net_delta": 0.00905080189579058,
+        "pooled_max_abs_net_delta": 0.15955526729623604,
+        "pooled_mean_abs_vega": 32788058.31526842,
+        "pooled_mean_abs_vanna": 1.2313281490407126,
+        "pooled_mean_abs_volga": 123438705.0689343,
+        "pooled_correlation": 0.029265712541991673,
+        "transmission": [
+          {
+            "venue_id": "central",
+            "buckets": 480,
+            "correlation": -0.06592684524704295,
+            "lagged_correlation": -0.06323770596392427,
+            "option_volume": 68605190475,
+            "underlying_volume": 1850705506662
+          },
+          {
+            "venue_id": "north",
+            "buckets": 480,
+            "correlation": 0.037010021006399926,
+            "lagged_correlation": 0.0669268458803915,
+            "option_volume": 68615000000,
+            "underlying_volume": 2112490235091
+          },
+          {
+            "venue_id": "south",
+            "buckets": 480,
+            "correlation": 0.11671396186661805,
+            "lagged_correlation": 0.12179934558737508,
+            "option_volume": 69621333334,
+            "underlying_volume": 1767249292786
+          }
+        ],
+        "hedge_flows": [
+          {
+            "venue_id": "central",
+            "role": "option_dealer",
+            "taker_fills": 20475,
+            "taker_volume": 14943736747,
+            "maker_fills": 0,
+            "option_fills": 103583
+          },
+          {
+            "venue_id": "north",
+            "role": "option_dealer",
+            "taker_fills": 11808,
+            "taker_volume": 18090462068,
+            "maker_fills": 0,
+            "option_fills": 57522
+          },
+          {
+            "venue_id": "south",
+            "role": "option_dealer",
+            "taker_fills": 20785,
+            "taker_volume": 15355988453,
+            "maker_fills": 0,
+            "option_fills": 104651
+          }
+        ]
+      }
+    },
+    {
+      "cell": "O4-229",
+      "stage": "O4",
+      "seed": 229,
+      "config_sha256": "8767a6b400c5cb45103a49076b9ae35414a753ea987393014ae3ec583c2ad554",
+      "evidence_events": 34650407,
+      "evidence_digest": "1c430d9f74518e96a89a36b06d5b057ef575a1160186c9bf630f086fe052528d",
+      "runtime_offline_equal": true,
+      "cdf_collateral": {
+        "cdf_borrow_events": 18647,
+        "cdf_price_unavailable_rejections": 0,
+        "collateral_mark_contract": "explicit CDF/USD bootstrap mark plus finite borrow cap"
+      },
+      "surface": {
+        "trades": 266950,
+        "priced": 179964,
+        "points": 150
+      },
+      "lifecycle": {
+        "listings": {
+          "FUTURE": 15,
+          "OPTION": 150
+        },
+        "settlements": {
+          "FUTURE": 9,
+          "OPTION": 90
+        }
+      },
+      "liability": {
+        "participants": 3,
+        "decisions": 17280,
+        "submit_decisions": 61,
+        "deferred_decisions": 17219,
+        "accepted": 61,
+        "rejected": 0,
+        "canonical_fills": 45,
+        "filled_qty": 300000000,
+        "target_reached": true,
+        "valid": true
+      },
+      "value_taker": {
+        "participants": 3,
+        "decisions": 10826,
+        "accepted": 10826,
+        "rejected": 0,
+        "fills": 16406,
+        "filled_qty": 10630000000
+      },
+      "vanna_volga": {
+        "participants": 3,
+        "decisions": 5898,
+        "accepted": 5898,
+        "rejected": 0,
+        "fills": 7223,
+        "filled_qty": 28805000000
+      },
+      "exposure": {
+        "pooled_hedge_ratio": 1.0007038374522166,
+        "pooled_mean_abs_net_delta": 0.009932183223473967,
+        "pooled_max_abs_net_delta": 0.15178061498504158,
+        "pooled_mean_abs_vega": 28441858.35941292,
+        "pooled_mean_abs_vanna": 1.0374215618800258,
+        "pooled_mean_abs_volga": 129670908.97281373,
+        "pooled_correlation": 0.14999009671524247,
+        "transmission": [
+          {
+            "venue_id": "central",
+            "buckets": 480,
+            "correlation": 0.14573119431469092,
+            "lagged_correlation": 0.19546769251571108,
+            "option_volume": 68498333336,
+            "underlying_volume": 1773994706928
+          },
+          {
+            "venue_id": "north",
+            "buckets": 480,
+            "correlation": 0.15152726262128854,
+            "lagged_correlation": 0.1394444833629857,
+            "option_volume": 67792000000,
+            "underlying_volume": 1887485852377
+          },
+          {
+            "venue_id": "south",
+            "buckets": 480,
+            "correlation": 0.15271183320974785,
+            "lagged_correlation": 0.17189406324324566,
+            "option_volume": 68378000004,
+            "underlying_volume": 1876407686152
+          }
+        ],
+        "hedge_flows": [
+          {
+            "venue_id": "central",
+            "role": "option_dealer",
+            "taker_fills": 20309,
+            "taker_volume": 14679096935,
+            "maker_fills": 0,
+            "option_fills": 103200
+          },
+          {
+            "venue_id": "north",
+            "role": "option_dealer",
+            "taker_fills": 11444,
+            "taker_volume": 17711392802,
+            "maker_fills": 0,
+            "option_fills": 57192
+          },
+          {
+            "venue_id": "south",
+            "role": "option_dealer",
+            "taker_fills": 20559,
+            "taker_volume": 14420621127,
+            "maker_fills": 0,
+            "option_fills": 106558
+          }
+        ]
+      }
+    }
+  ]
+}
