@@ -9,6 +9,10 @@ analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 base="$root_dir/research/artifacts/v2-5-p4b/full"
 score="$root_dir/research/artifacts/v2-5-p4b/p4b-development-score.json"
 seeds=(401 409)
+pair_replay_mode="replayed-from-full-evidence"
+if [[ "${P4B_REUSE_PAIR_RESULTS:-0}" == "1" ]]; then
+	pair_replay_mode="reused-existing-pair-json"
+fi
 
 test -x "$analyzer"
 for seed in "${seeds[@]}"; do
@@ -23,14 +27,18 @@ for seed in "${seeds[@]}"; do
 	done
 
 	pair="$root_dir/research/artifacts/v2-5-p4b/pair-$seed.json"
-	temporary=$(mktemp "${pair}.tmp-XXXXXX")
-	if ! "$analyzer" -metric termcarryp4pair -json \
-		"$base/A-$seed" "$base/B-$seed" >"$temporary" 2>"$pair.err"; then
-		rm -f "$temporary"
-		echo "P4b pair analyzer failed for development seed $seed" >&2
-		exit 1
+	if [[ "$pair_replay_mode" == "replayed-from-full-evidence" ]]; then
+		temporary=$(mktemp "${pair}.tmp-XXXXXX")
+		if ! "$analyzer" -metric termcarryp4pair -json \
+			"$base/A-$seed" "$base/B-$seed" >"$temporary" 2>"$pair.err"; then
+			rm -f "$temporary"
+			echo "P4b pair analyzer failed for development seed $seed" >&2
+			exit 1
+		fi
+		mv "$temporary" "$pair"
+	else
+		test -s "$pair"
 	fi
-	mv "$temporary" "$pair"
 done
 
 for seed in "${seeds[@]}"; do
@@ -50,12 +58,19 @@ jq -n \
 	--arg contract "v2-5-p4b-independent-perp-flow-v1" \
 	--arg source_revision "$(git -C "$root_dir" rev-parse HEAD)" \
 	--arg analyzer_sha256 "$(sha256sum "$analyzer" | awk '{print $1}')" \
+	--arg pair_replay_mode "$pair_replay_mode" \
+	--arg pair401_sha256 "$(sha256sum "$root_dir/research/artifacts/v2-5-p4b/pair-401.json" | awk '{print $1}')" \
+	--arg pair409_sha256 "$(sha256sum "$root_dir/research/artifacts/v2-5-p4b/pair-409.json" | awk '{print $1}')" \
 	--slurpfile p401 "$root_dir/research/artifacts/v2-5-p4b/pair-401.json" \
 	--slurpfile p409 "$root_dir/research/artifacts/v2-5-p4b/pair-409.json" \
 	--slurpfile a401 "$base/A-401/analysis-metadata.json" \
 	--slurpfile a409 "$base/A-409/analysis-metadata.json" \
 	--slurpfile b401 "$base/B-401/analysis-metadata.json" \
 	--slurpfile b409 "$base/B-409/analysis-metadata.json" \
+	--slurpfile ra401 "$base/A-401/run-metadata.json" \
+	--slurpfile ra409 "$base/A-409/run-metadata.json" \
+	--slurpfile rb401 "$base/B-401/run-metadata.json" \
+	--slurpfile rb409 "$base/B-409/run-metadata.json" \
 	--slurpfile ea401 "$base/A-401/perpexposurehedger.json" \
 	--slurpfile ea409 "$base/A-409/perpexposurehedger.json" \
 	--slurpfile eb401 "$base/B-401/perpexposurehedger.json" \
@@ -79,12 +94,17 @@ jq -n \
 		else
 			"FALSIFIED"
 		end;
-	  def cellmeta($m): {
+	  def cellmeta($m;$r): {
 		analysis_revision: $m.analysis_revision,
 		analyzer_sha256: $m.analyzer_sha256,
 		arm: $m.arm,
 		seed: $m.seed,
-		runtime_evidence_artifact: $m.runtime_evidence_artifact
+		runtime_evidence_artifact: $m.runtime_evidence_artifact,
+		simulator_revision: $r.git_revision,
+		simulator_binary_sha256: $r.binary_sha256,
+		config_sha256: $r.config_sha256,
+		gomaxprocs: $r.gomaxprocs,
+		simulated_horizon: $r.simulated_horizon
 	  };
 	  def exposure($e): {
 		valid: $e.result.valid,
@@ -121,7 +141,9 @@ jq -n \
 		untouched_holdouts: [419, 421, 431],
 		source_revision: $source_revision,
 		analyzer_sha256: $analyzer_sha256,
-		simulator_revisions: [cellmeta($a401[0]), cellmeta($a409[0]), cellmeta($b401[0]), cellmeta($b409[0])],
+		pair_replay_mode: $pair_replay_mode,
+		pair_artifact_sha256: {"401": $pair401_sha256, "409": $pair409_sha256},
+		simulator_revisions: [cellmeta($a401[0];$ra401[0]), cellmeta($a409[0];$ra409[0]), cellmeta($b401[0];$rb401[0]), cellmeta($b409[0];$rb409[0])],
 		paired_results: [
 			{seed: 401, result: $r401, complete: complete($r401), verdict: pair_verdict($r401)},
 			{seed: 409, result: $r409, complete: complete($r409), verdict: pair_verdict($r409)}
