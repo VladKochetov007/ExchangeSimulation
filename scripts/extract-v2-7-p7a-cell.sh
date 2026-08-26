@@ -28,7 +28,7 @@ if [[ ! -d "$cell/venues" ]] || ! find "$cell/venues" -type f -name '*.jsonl' -p
 	exit 1
 fi
 
-preflight=$(jq -er '.preflight' "$cell/run-metadata.json")
+preflight=$(jq -r '.preflight' "$cell/run-metadata.json")
 [[ "$preflight" == false ]] || {
 	echo "refusing to score a P7a preflight directory: $cell" >&2
 	exit 1
