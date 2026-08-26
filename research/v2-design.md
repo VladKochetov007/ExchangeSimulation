@@ -379,3 +379,16 @@ P6 worlds, and all O3/O4 surface structure remains explicitly prior-driven
 until a separately paired causal comparison is run.  Detailed provenance is
 in [v2-6-p6r1-viability-results.md](v2-6-p6r1-viability-results.md) and
 `artifacts/v2-6-p6r1/development-summary.json`.
+
+The fixed untouched holdout policy (seeds 223, 227 and 229) is now complete
+in [v2-6-p6r1-holdout-results.md](v2-6-p6r1-holdout-results.md) and
+`artifacts/v2-6-p6r1/holdout-summary.json`.  All fifteen O0--O4 cells pass the
+same receipt/frontier, conservation, lifecycle, settlement, expiry, and
+runtime/offline persisted-evidence digest checks.  Every cell exercises CDF
+borrowing with zero exact historical CDF/USD `PRICE_UNAVAILABLE` rejections;
+the O2 liability/delta-hedge, O3 SABR-view, and O4 Vanna--Volga activation
+gates remain positive on all three untouched seeds.  This is **SUPPORTED
+(screening)** for out-of-sample viability and stage activation only.  It does
+not license a causal option-surface or emergence claim: O3 and O4 structure
+still contains explicit SABR/Vanna--Volga priors, and O2 surface structure
+requires a separately paired causal intervention.
