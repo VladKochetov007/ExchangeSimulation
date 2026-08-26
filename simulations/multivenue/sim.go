@@ -170,6 +170,12 @@ type Config struct {
 	// the smallest FFA asset graph: ABC/USD, CDF/USD, and ABC/CDF. It is opt-in
 	// so retained one-underlying derivative controls remain unchanged.
 	CrossAssetSpotGraph bool `json:"cross_asset_spot_graph"`
+	// CrossAssetCollateralMarks explicitly enables the CDF/USD bootstrap mark
+	// and finite CDF borrow contract used by cross-asset spot collateral. It is
+	// deliberately separate from CrossAssetSpotGraph: a public CDF book is not
+	// by itself permission to invent a collateral conversion, and the default
+	// remains disabled for every pre-R1 scenario.
+	CrossAssetCollateralMarks bool `json:"cross_asset_collateral_marks"`
 
 	Step               time.Duration `json:"step"`
 	SnapshotInterval   time.Duration `json:"snapshot_interval"`
@@ -671,6 +677,9 @@ func (c *Config) normalize() error {
 		if !configured || profile.zero() {
 			return errors.New("multivenue: spot maker local reference cache requires an explicit nonzero spot_maker feed delay")
 		}
+	}
+	if c.CrossAssetCollateralMarks && !c.CrossAssetSpotGraph {
+		return errors.New("multivenue: cross-asset collateral marks require the cross-asset spot graph")
 	}
 	if c.RecordDecisionFrontierVectors && !c.RecordMarketDataReceipts {
 		return errors.New("multivenue: decision frontier vectors require market-data receipt evidence")
@@ -2386,14 +2395,25 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			captureScheduledVenueRisk(venue, s.Config.GreekInterval, s.Config.AutomationInterval)
 		},
 	})
+	maxBorrowPerAsset := map[string]int64{"USD": 20_000_000 * mvQuotePrecision, "ABC": 20_000 * mvBasePrecision}
+	assetPrecisions := map[string]int64{"USD": mvQuotePrecision, "ABC": mvBasePrecision}
+	collateralPrices := map[string]int64{"USD": mvQuotePrecision, "ABC": mvBootstrapPrice}
+	if s.Config.CrossAssetCollateralMarks {
+		// CDF collateral is an explicit positive bootstrap conversion for the
+		// cross-asset population. The cap mirrors the inherited ABC base-asset
+		// cap; omitting it would silently turn the repair into unlimited credit.
+		maxBorrowPerAsset["CDF"] = 20_000 * mvBasePrecision
+		assetPrecisions["CDF"] = mvBasePrecision
+		collateralPrices["CDF"] = mvCDFBootstrap
+	}
 	if err := ex.EnableBorrowing(exchange.BorrowingConfig{
 		Enabled:           true,
 		AutoBorrowSpot:    true,
 		DefaultMarginMode: exchange.CrossMargin,
 		CollateralFactors: map[string]float64{"USD": 1},
-		MaxBorrowPerAsset: map[string]int64{"USD": 20_000_000 * mvQuotePrecision, "ABC": 20_000 * mvBasePrecision},
-		AssetPrecisions:   map[string]int64{"USD": mvQuotePrecision, "ABC": mvBasePrecision},
-		PriceSource:       exchange.NewStaticPriceOracle(map[string]int64{"USD": mvQuotePrecision, "ABC": mvBootstrapPrice}),
+		MaxBorrowPerAsset: maxBorrowPerAsset,
+		AssetPrecisions:   assetPrecisions,
+		PriceSource:       exchange.NewStaticPriceOracle(collateralPrices),
 	}); err != nil {
 		return nil, err
 	}
@@ -3691,6 +3711,50 @@ func requirePositiveUSDValuationMark(phase, symbol, venueID string, mark int64, 
 	return nil
 }
 
+// clientRequiresAssetMark reports whether a client's captured account carries
+// any non-zero state whose valuation depends on asset. It is intentionally
+// conservative: a non-zero wallet/debt/collateral entry or a live position
+// quoted in the asset requires an explicit mark. A venue having observed an
+// unrelated book is not enough to make that asset part of dealer risk.
+func clientRequiresAssetMark(venue *Venue, clientID uint64, asset string) bool {
+	if venue == nil || venue.Exchange == nil {
+		return false
+	}
+	client := venue.Exchange.Clients[clientID]
+	if client == nil {
+		return false
+	}
+	for _, balances := range []map[string]int64{
+		client.Balances,
+		client.PerpBalances,
+		client.Borrowed,
+		client.BorrowedSpot,
+		client.Reserved,
+		client.PerpReserved,
+	} {
+		if balances[asset] != 0 {
+			return true
+		}
+	}
+	for _, isolated := range client.IsolatedPositions {
+		if isolated == nil {
+			continue
+		}
+		if isolated.Collateral[asset] != 0 || isolated.Borrowed[asset] != 0 {
+			return true
+		}
+	}
+	for _, position := range venue.Exchange.Positions.GetAllPositions(clientID) {
+		if position.Size == 0 {
+			continue
+		}
+		if book := venue.Exchange.Books[position.Symbol]; book != nil && book.Instrument.QuoteAsset() == asset {
+			return true
+		}
+	}
+	return false
+}
+
 func populationValuationSpec(venue *Venue, phase string, crossAssetSpotGraph bool, now, maxStaleness int64) (etypes.AccountValuationSpec, string, error) {
 	if venue == nil || venue.Exchange == nil {
 		return etypes.AccountValuationSpec{}, "", errors.New("multivenue: missing venue for population valuation")
@@ -3773,7 +3837,7 @@ func captureVenueRisk(venue *Venue, phase string) (*VenueRiskSnapshot, error) {
 		"USD": {Price: mvQuotePrecision, Precision: mvQuotePrecision},
 	}
 	marks["ABC"] = etypes.AssetValuationMark{Price: spotMid, Precision: mvBasePrecision}
-	if _, tracksCDF := venue.lastTwoSided["CDF/USD"]; tracksCDF {
+	if clientRequiresAssetMark(venue, venue.OptionDealerClientID, "CDF") {
 		cdf, cdfOK, _ := venue.valuationMark("CDF/USD", now, venueRiskMarkStaleness)
 		if err := requirePositiveUSDValuationMark(phase, "CDF/USD", venue.ID, cdf, cdfOK); err != nil {
 			return nil, fmt.Errorf("multivenue: venue %s dealer risk capture: %w", venue.ID, err)

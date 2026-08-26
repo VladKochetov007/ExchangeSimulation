@@ -388,6 +388,80 @@ func TestRiskSnapshotMarksBootstrapFallbackExplicitly(t *testing.T) {
 	}
 }
 
+func TestCrossAssetCollateralMarksAreExplicitAndFinite(t *testing.T) {
+	_, err := NewSim(time.Second, Config{
+		LogDir: t.TempDir(), LogMode: "none", Seed: 101,
+		CrossAssetCollateralMarks: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "require the cross-asset spot graph") {
+		t.Fatalf("collateral marks without graph error = %v, want explicit graph requirement", err)
+	}
+
+	legacy, err := NewSim(time.Second, Config{
+		LogDir: t.TempDir(), LogMode: "none", Seed: 101,
+		CrossAssetSpotGraph: true,
+	})
+	if err != nil {
+		t.Fatalf("legacy cross-asset NewSim: %v", err)
+	}
+	defer legacy.Close()
+	if _, err := legacy.Venues[0].Exchange.BorrowingMgr.Config.PriceSource.Price("CDF"); err == nil {
+		t.Fatal("legacy cross-asset collateral oracle unexpectedly priced CDF")
+	}
+
+	repaired, err := NewSim(time.Second, Config{
+		LogDir: t.TempDir(), LogMode: "none", Seed: 101,
+		CrossAssetSpotGraph: true, CrossAssetCollateralMarks: true,
+	})
+	if err != nil {
+		t.Fatalf("repaired cross-asset NewSim: %v", err)
+	}
+	defer repaired.Close()
+	borrowing := repaired.Venues[0].Exchange.BorrowingMgr.Config
+	price, err := borrowing.PriceSource.Price("CDF")
+	if err != nil || price != mvCDFBootstrap {
+		t.Fatalf("CDF collateral mark = (%d, %v), want (%d, nil)", price, err, mvCDFBootstrap)
+	}
+	if got := borrowing.AssetPrecisions["CDF"]; got != mvBasePrecision {
+		t.Fatalf("CDF collateral precision = %d, want %d", got, mvBasePrecision)
+	}
+	if got := borrowing.MaxBorrowPerAsset["CDF"]; got != 20_000*mvBasePrecision {
+		t.Fatalf("CDF max borrow = %d, want %d", got, 20_000*mvBasePrecision)
+	}
+}
+
+func TestDealerRiskDoesNotRequireUnrelatedCDFMark(t *testing.T) {
+	venue := &Venue{
+		ID:                   "dealer",
+		Exchange:             exchange.NewExchange(1, nil),
+		OptionDealer:         &derivsim.OptionMarketMaker{},
+		OptionDealerClientID: 1,
+		lastTwoSided: map[string]twoSidedMark{
+			"CDF/USD": {price: mvCDFBootstrap, timestamp: 100},
+		},
+	}
+	defer venue.Exchange.Shutdown()
+	venue.Exchange.ConnectNewClient(1, nil, &exchange.FixedFee{})
+	if _, err := captureVenueRisk(venue, "post_derivative_mark"); err != nil {
+		t.Fatalf("dealer risk demanded unrelated CDF mark: %v", err)
+	}
+}
+
+func TestDealerRiskRequiresCDFMarkForCDFExposure(t *testing.T) {
+	venue := &Venue{
+		ID:                   "cdf-dealer",
+		Exchange:             exchange.NewExchange(1, nil),
+		OptionDealer:         &derivsim.OptionMarketMaker{},
+		OptionDealerClientID: 1,
+	}
+	defer venue.Exchange.Shutdown()
+	venue.Exchange.ConnectNewClient(1, map[string]int64{"CDF": 1}, &exchange.FixedFee{})
+	_, err := captureVenueRisk(venue, "post_derivative_mark")
+	if err == nil || !errors.Is(err, etypes.ErrNoPrice) {
+		t.Fatalf("CDF exposure risk error = %v, want ErrNoPrice", err)
+	}
+}
+
 func TestStrictPopulationAccountsDigestAcrossGOMAXPROCS(t *testing.T) {
 	run := func(procs int) ([]ParticipantAccountSnapshot, []ParticipantAccountSnapshot) {
 		t.Helper()
