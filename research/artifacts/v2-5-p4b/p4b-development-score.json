@@ -1,0 +1,625 @@
+{
+  "contract": "v2-5-p4b-independent-perp-flow-v1",
+  "verdict": "FALSIFIED AT EXECUTION",
+  "verdict_rule": "precedence: invalid control/treatment => NOT IDENTIFIED; activation failure => FALSIFIED AT ACTIVATION; execution failure after activation => FALSIFIED AT EXECUTION; missing measurable basis => NOT IDENTIFIED; both complete paired seed statistics strictly positive => SUPPORTED (screening); otherwise complete non-positive => FALSIFIED",
+  "primary_endpoint": "exact P4 paired oriented-premium change",
+  "development_seeds": [
+    401,
+    409
+  ],
+  "untouched_holdouts": [
+    419,
+    421,
+    431
+  ],
+  "source_revision": "22cc7549c9fd127bf8f6ec1cbb5e2659802ace0d",
+  "analyzer_sha256": "f1d93dd8eba2382e751c5e919c0213785199c03432918e47b762498df4b1eb74",
+  "pair_replay_mode": "reused-existing-pair-json",
+  "pair_artifact_sha256": {
+    "401": "d8547d36372ae1d2b8602f4fc66ba9db076af5dc148fd84d4ae162f93e7a5ff7",
+    "409": "a150e87363dc070d147a0b12d5bc8e70007ea4bd7e421364d3671d1119450e4a"
+  },
+  "simulator_revisions": [
+    {
+      "analysis_revision": "5ee1ceefd50fc46c5db4bd69e5271c3c1615be43",
+      "analyzer_sha256": "f1d93dd8eba2382e751c5e919c0213785199c03432918e47b762498df4b1eb74",
+      "arm": "A",
+      "seed": 401,
+      "runtime_evidence_artifact": {
+        "events": 56755691,
+        "digest": "9b7bbd5765e6f4c46169114970f38c1247fb5f3d1a9eafc2d8e53531646d1cc5"
+      },
+      "simulator_revision": "5fdb0c7848186db7cddbf249a0bebd4e54a5cfe8",
+      "simulator_binary_sha256": "9bd573558d21d4de0d14975e7b2cc0f714e49d1bacfc6f4ad7f4262b5532f324",
+      "config_sha256": "cd9b377fa3efe696ed816e8448eab7e6df7c5b36614fdf03c7f901fb28df19f8",
+      "gomaxprocs": "4",
+      "simulated_horizon": "98h0m0s"
+    },
+    {
+      "analysis_revision": "84be138eb18fee66202cd8001cd0d60d38b4778d",
+      "analyzer_sha256": "f1d93dd8eba2382e751c5e919c0213785199c03432918e47b762498df4b1eb74",
+      "arm": "A",
+      "seed": 409,
+      "runtime_evidence_artifact": {
+        "events": 58005609,
+        "digest": "d01dac35166b8ffb5f7adde37bb5afeee2f18432c332a3b0eb02c653f9f191be"
+      },
+      "simulator_revision": "5fdb0c7848186db7cddbf249a0bebd4e54a5cfe8",
+      "simulator_binary_sha256": "9bd573558d21d4de0d14975e7b2cc0f714e49d1bacfc6f4ad7f4262b5532f324",
+      "config_sha256": "a9e887e20c9ee860e41796c05e180ebaa22fb4cb7ba96d83a5851decc0ad3778",
+      "gomaxprocs": "4",
+      "simulated_horizon": "98h0m0s"
+    },
+    {
+      "analysis_revision": "84be138eb18fee66202cd8001cd0d60d38b4778d",
+      "analyzer_sha256": "f1d93dd8eba2382e751c5e919c0213785199c03432918e47b762498df4b1eb74",
+      "arm": "B",
+      "seed": 401,
+      "runtime_evidence_artifact": {
+        "events": 56755912,
+        "digest": "e8f45d122db458407a78791548ab4ddb5725fd8cefc0bb8d46b6e5099ae51f49"
+      },
+      "simulator_revision": "5fdb0c7848186db7cddbf249a0bebd4e54a5cfe8",
+      "simulator_binary_sha256": "9bd573558d21d4de0d14975e7b2cc0f714e49d1bacfc6f4ad7f4262b5532f324",
+      "config_sha256": "a39d721741a047a9e1f3866ba75089b5ddb8012bda7b150c4c5077db598849f0",
+      "gomaxprocs": "4",
+      "simulated_horizon": "98h0m0s"
+    },
+    {
+      "analysis_revision": "84be138eb18fee66202cd8001cd0d60d38b4778d",
+      "analyzer_sha256": "f1d93dd8eba2382e751c5e919c0213785199c03432918e47b762498df4b1eb74",
+      "arm": "B",
+      "seed": 409,
+      "runtime_evidence_artifact": {
+        "events": 58005667,
+        "digest": "b941e0ca8db298da339b3db9b843b3a857daf5a5b58fdeffa0aa09f9effa9cfa"
+      },
+      "simulator_revision": "5fdb0c7848186db7cddbf249a0bebd4e54a5cfe8",
+      "simulator_binary_sha256": "9bd573558d21d4de0d14975e7b2cc0f714e49d1bacfc6f4ad7f4262b5532f324",
+      "config_sha256": "6cb26da55db930cca89900eb2ce1656f219a93ad10be34a2900d03193c648804",
+      "gomaxprocs": "4",
+      "simulated_horizon": "98h0m0s"
+    }
+  ],
+  "paired_results": [
+    {
+      "seed": 401,
+      "result": {
+        "control_cap_bps": 1,
+        "treatment_cap_bps": 75,
+        "control_valid": true,
+        "treatment_valid": true,
+        "venues": [
+          {
+            "venue_id": "south",
+            "decision_time": 1735689654000000000,
+            "control": {
+              "venue_id": "south",
+              "client_id": 8,
+              "decision_time": 1735689654000000000,
+              "action": "NET_CARRY_BELOW_MINIMUM",
+              "funding_rate_bps": 1,
+              "funding_published_at": 1735689653000000000,
+              "funding_sequence": 299,
+              "spot_bid": 4998000000,
+              "spot_ask": 5001000000,
+              "perp_bid": 4999000000,
+              "perp_ask": 5002000000,
+              "direction": 1,
+              "expected_funding_bps": "12",
+              "execution_fee_bps": "20",
+              "financing_bps_numerator": "172773500000000000",
+              "fixed_cost_bps": 3,
+              "net_carry_bps_numerator": "-519669500000000000",
+              "rational_denominator": "31536000000000000",
+              "minimum_net_return_numerator": "31536000000000000",
+              "eligible": false,
+              "target_spot": 0,
+              "target_perp": 0,
+              "spot_request_id": 0,
+              "spot_accepted": false,
+              "spot_filled_qty": 0,
+              "perp_request_id": 0,
+              "perp_accepted": false,
+              "perp_filled_qty": 0,
+              "matched_exposure_qty": 0,
+              "execution_qualified": false
+            },
+            "treatment": {
+              "venue_id": "south",
+              "client_id": 8,
+              "decision_time": 1735689654000000000,
+              "action": "SUBMIT_ENTRY_SPOT_IOC",
+              "funding_rate_bps": 3,
+              "funding_published_at": 1735689653000000000,
+              "funding_sequence": 299,
+              "spot_bid": 4998000000,
+              "spot_ask": 5001000000,
+              "perp_bid": 4999000000,
+              "perp_ask": 5002000000,
+              "direction": 1,
+              "expected_funding_bps": "36",
+              "execution_fee_bps": "20",
+              "financing_bps_numerator": "172773500000000000",
+              "fixed_cost_bps": 3,
+              "net_carry_bps_numerator": "237194500000000000",
+              "rational_denominator": "31536000000000000",
+              "minimum_net_return_numerator": "31536000000000000",
+              "eligible": true,
+              "target_spot": 100000000,
+              "target_perp": -100000000,
+              "spot_request_id": 3,
+              "spot_accepted": true,
+              "spot_filled_qty": 10000000,
+              "perp_request_id": 4,
+              "perp_accepted": true,
+              "perp_filled_qty": 6984901,
+              "matched_exposure_qty": 6984901,
+              "execution_qualified": false
+            },
+            "local_inputs_comparable": true,
+            "funding_changed_as_predicted": true,
+            "exact_carry_crossed": true,
+            "target_changed_as_predicted": true,
+            "execution_qualified": false,
+            "control_basis": {
+              "pre_samples": 0,
+              "post_samples": 0,
+              "measurable": false,
+              "censored_by_cutoff": false
+            },
+            "treatment_basis": {
+              "pre_samples": 0,
+              "post_samples": 0,
+              "measurable": false,
+              "censored_by_cutoff": false
+            },
+            "paired_convergence_sign": 0
+          },
+          {
+            "venue_id": "central",
+            "decision_time": 1735689656000000000,
+            "control": {
+              "venue_id": "central",
+              "client_id": 8,
+              "decision_time": 1735689656000000000,
+              "action": "NET_CARRY_BELOW_MINIMUM",
+              "funding_rate_bps": 1,
+              "funding_published_at": 1735689655000000000,
+              "funding_sequence": 304,
+              "spot_bid": 4998000000,
+              "spot_ask": 5001000000,
+              "perp_bid": 4999000000,
+              "perp_ask": 5002000000,
+              "direction": 1,
+              "expected_funding_bps": "12",
+              "execution_fee_bps": "20",
+              "financing_bps_numerator": "172772500000000000",
+              "fixed_cost_bps": 3,
+              "net_carry_bps_numerator": "-519668500000000000",
+              "rational_denominator": "31536000000000000",
+              "minimum_net_return_numerator": "31536000000000000",
+              "eligible": false,
+              "target_spot": 0,
+              "target_perp": 0,
+              "spot_request_id": 0,
+              "spot_accepted": false,
+              "spot_filled_qty": 0,
+              "perp_request_id": 0,
+              "perp_accepted": false,
+              "perp_filled_qty": 0,
+              "matched_exposure_qty": 0,
+              "execution_qualified": false
+            },
+            "treatment": {
+              "venue_id": "central",
+              "client_id": 8,
+              "decision_time": 1735689656000000000,
+              "action": "SUBMIT_ENTRY_SPOT_IOC",
+              "funding_rate_bps": 3,
+              "funding_published_at": 1735689655000000000,
+              "funding_sequence": 304,
+              "spot_bid": 4998000000,
+              "spot_ask": 5001000000,
+              "perp_bid": 4999000000,
+              "perp_ask": 5002000000,
+              "direction": 1,
+              "expected_funding_bps": "36",
+              "execution_fee_bps": "20",
+              "financing_bps_numerator": "172772500000000000",
+              "fixed_cost_bps": 3,
+              "net_carry_bps_numerator": "237195500000000000",
+              "rational_denominator": "31536000000000000",
+              "minimum_net_return_numerator": "31536000000000000",
+              "eligible": true,
+              "target_spot": 100000000,
+              "target_perp": -100000000,
+              "spot_request_id": 3,
+              "spot_accepted": true,
+              "spot_filled_qty": 10000000,
+              "perp_request_id": 4,
+              "perp_accepted": true,
+              "perp_filled_qty": 3200034,
+              "matched_exposure_qty": 3200034,
+              "execution_qualified": false
+            },
+            "local_inputs_comparable": true,
+            "funding_changed_as_predicted": true,
+            "exact_carry_crossed": true,
+            "target_changed_as_predicted": true,
+            "execution_qualified": false,
+            "control_basis": {
+              "pre_samples": 0,
+              "post_samples": 0,
+              "measurable": false,
+              "censored_by_cutoff": false
+            },
+            "treatment_basis": {
+              "pre_samples": 0,
+              "post_samples": 0,
+              "measurable": false,
+              "censored_by_cutoff": false
+            },
+            "paired_convergence_sign": 0
+          }
+        ],
+        "activation_valid": true,
+        "execution_valid": false,
+        "basis_measurable": false,
+        "seed_statistic_sign": 0,
+        "valid": false
+      },
+      "complete": false,
+      "verdict": "FALSIFIED AT EXECUTION"
+    },
+    {
+      "seed": 409,
+      "result": {
+        "control_cap_bps": 1,
+        "treatment_cap_bps": 75,
+        "control_valid": true,
+        "treatment_valid": true,
+        "venues": [
+          {
+            "venue_id": "south",
+            "decision_time": 1735689658000000000,
+            "control": {
+              "venue_id": "south",
+              "client_id": 8,
+              "decision_time": 1735689658000000000,
+              "action": "NET_CARRY_BELOW_MINIMUM",
+              "funding_rate_bps": 1,
+              "funding_published_at": 1735689657000000000,
+              "funding_sequence": 322,
+              "spot_bid": 4998000000,
+              "spot_ask": 5001000000,
+              "perp_bid": 4999000000,
+              "perp_ask": 5002000000,
+              "direction": 1,
+              "expected_funding_bps": "12",
+              "execution_fee_bps": "20",
+              "financing_bps_numerator": "172771500000000000",
+              "fixed_cost_bps": 3,
+              "net_carry_bps_numerator": "-519667500000000000",
+              "rational_denominator": "31536000000000000",
+              "minimum_net_return_numerator": "31536000000000000",
+              "eligible": false,
+              "target_spot": 0,
+              "target_perp": 0,
+              "spot_request_id": 0,
+              "spot_accepted": false,
+              "spot_filled_qty": 0,
+              "perp_request_id": 0,
+              "perp_accepted": false,
+              "perp_filled_qty": 0,
+              "matched_exposure_qty": 0,
+              "execution_qualified": false
+            },
+            "treatment": {
+              "venue_id": "south",
+              "client_id": 8,
+              "decision_time": 1735689658000000000,
+              "action": "SUBMIT_ENTRY_SPOT_IOC",
+              "funding_rate_bps": 3,
+              "funding_published_at": 1735689657000000000,
+              "funding_sequence": 322,
+              "spot_bid": 4998000000,
+              "spot_ask": 5001000000,
+              "perp_bid": 4999000000,
+              "perp_ask": 5002000000,
+              "direction": 1,
+              "expected_funding_bps": "36",
+              "execution_fee_bps": "20",
+              "financing_bps_numerator": "172771500000000000",
+              "fixed_cost_bps": 3,
+              "net_carry_bps_numerator": "237196500000000000",
+              "rational_denominator": "31536000000000000",
+              "minimum_net_return_numerator": "31536000000000000",
+              "eligible": true,
+              "target_spot": 100000000,
+              "target_perp": -100000000,
+              "spot_request_id": 3,
+              "spot_accepted": true,
+              "spot_filled_qty": 10000000,
+              "perp_request_id": 4,
+              "perp_accepted": true,
+              "perp_filled_qty": 10000000,
+              "matched_exposure_qty": 10000000,
+              "execution_qualified": true
+            },
+            "local_inputs_comparable": true,
+            "funding_changed_as_predicted": true,
+            "exact_carry_crossed": true,
+            "target_changed_as_predicted": true,
+            "execution_qualified": true,
+            "control_basis": {
+              "pre_samples": 30,
+              "post_samples": 300,
+              "pre_mean_oriented_premium_bps": 2.000200020002,
+              "post_mean_oriented_premium_bps": 2.000200020002,
+              "delta_oriented_premium_bps": 0,
+              "pre_mean_oriented_premium_bps_exact": "20000/9999",
+              "post_mean_oriented_premium_bps_exact": "20000/9999",
+              "delta_oriented_premium_bps_exact": "0",
+              "measurable": true,
+              "censored_by_cutoff": false
+            },
+            "treatment_basis": {
+              "pre_samples": 30,
+              "post_samples": 300,
+              "pre_mean_oriented_premium_bps": 2.000200020002,
+              "post_mean_oriented_premium_bps": 2.000200020002,
+              "delta_oriented_premium_bps": 0,
+              "pre_mean_oriented_premium_bps_exact": "20000/9999",
+              "post_mean_oriented_premium_bps_exact": "20000/9999",
+              "delta_oriented_premium_bps_exact": "0",
+              "measurable": true,
+              "censored_by_cutoff": false
+            },
+            "paired_convergence": 0,
+            "paired_convergence_exact": "0",
+            "paired_convergence_sign": 0
+          }
+        ],
+        "activation_valid": true,
+        "execution_valid": true,
+        "basis_measurable": true,
+        "seed_statistic": 0,
+        "seed_statistic_exact": "0",
+        "seed_statistic_sign": 0,
+        "valid": true
+      },
+      "complete": true,
+      "verdict": "FALSIFIED"
+    }
+  ],
+  "pair_verdicts": [
+    {
+      "seed": 401,
+      "verdict": "FALSIFIED AT EXECUTION"
+    },
+    {
+      "seed": 409,
+      "verdict": "FALSIFIED"
+    }
+  ],
+  "activation_status": "PASSED",
+  "execution_status": "FAILED",
+  "basis_status": "NOT MEASURABLE",
+  "aggregate_verdict_basis": "The aggregate reports the first registered failing stage across paired development seeds; only complete pairs reach the primary basis-sign rule.",
+  "exposure_activation": [
+    {
+      "cell": "A-401",
+      "result": {
+        "valid": true,
+        "receipt_audit_valid": true,
+        "decisions": 529200,
+        "submitted": 147603,
+        "fills": 146302,
+        "filled_qty": 1058388413418,
+        "hedgers": [
+          {
+            "venue_id": "central",
+            "client_id": 9,
+            "decisions": 176400,
+            "state_updates": 35280,
+            "submitted": 49176,
+            "accepted": 48916,
+            "fills": 48772,
+            "reducing_fills": 48772,
+            "absolute_gap_sum": "413863706381",
+            "gap_samples": 176400,
+            "terminal_absolute_gap": "0"
+          },
+          {
+            "venue_id": "north",
+            "client_id": 9,
+            "decisions": 176400,
+            "state_updates": 35280,
+            "submitted": 49249,
+            "accepted": 48893,
+            "fills": 48787,
+            "reducing_fills": 48787,
+            "absolute_gap_sum": "413445780207",
+            "gap_samples": 176400,
+            "terminal_absolute_gap": "0"
+          },
+          {
+            "venue_id": "south",
+            "client_id": 9,
+            "decisions": 176400,
+            "state_updates": 35280,
+            "submitted": 49178,
+            "accepted": 48858,
+            "fills": 48743,
+            "reducing_fills": 48743,
+            "absolute_gap_sum": "412616514685",
+            "gap_samples": 176400,
+            "terminal_absolute_gap": "0"
+          }
+        ]
+      }
+    },
+    {
+      "cell": "A-409",
+      "result": {
+        "valid": true,
+        "receipt_audit_valid": true,
+        "decisions": 529200,
+        "submitted": 147559,
+        "fills": 146408,
+        "filled_qty": 1058388518472,
+        "hedgers": [
+          {
+            "venue_id": "central",
+            "client_id": 9,
+            "decisions": 176400,
+            "state_updates": 35280,
+            "submitted": 49206,
+            "accepted": 48902,
+            "fills": 48793,
+            "reducing_fills": 48793,
+            "absolute_gap_sum": "413378130244",
+            "gap_samples": 176400,
+            "terminal_absolute_gap": "0"
+          },
+          {
+            "venue_id": "north",
+            "client_id": 9,
+            "decisions": 176400,
+            "state_updates": 35280,
+            "submitted": 49140,
+            "accepted": 48952,
+            "fills": 48826,
+            "reducing_fills": 48826,
+            "absolute_gap_sum": "413543833243",
+            "gap_samples": 176400,
+            "terminal_absolute_gap": "0"
+          },
+          {
+            "venue_id": "south",
+            "client_id": 9,
+            "decisions": 176400,
+            "state_updates": 35280,
+            "submitted": 49213,
+            "accepted": 48913,
+            "fills": 48789,
+            "reducing_fills": 48789,
+            "absolute_gap_sum": "413760561281",
+            "gap_samples": 176400,
+            "terminal_absolute_gap": "0"
+          }
+        ]
+      }
+    },
+    {
+      "cell": "B-401",
+      "result": {
+        "valid": true,
+        "receipt_audit_valid": true,
+        "decisions": 529200,
+        "submitted": 147601,
+        "fills": 146300,
+        "filled_qty": 1058388413418,
+        "hedgers": [
+          {
+            "venue_id": "central",
+            "client_id": 9,
+            "decisions": 176400,
+            "state_updates": 35280,
+            "submitted": 49174,
+            "accepted": 48914,
+            "fills": 48770,
+            "reducing_fills": 48770,
+            "absolute_gap_sum": "413847714127",
+            "gap_samples": 176400,
+            "terminal_absolute_gap": "0"
+          },
+          {
+            "venue_id": "north",
+            "client_id": 9,
+            "decisions": 176400,
+            "state_updates": 35280,
+            "submitted": 49249,
+            "accepted": 48893,
+            "fills": 48787,
+            "reducing_fills": 48787,
+            "absolute_gap_sum": "413445780207",
+            "gap_samples": 176400,
+            "terminal_absolute_gap": "0"
+          },
+          {
+            "venue_id": "south",
+            "client_id": 9,
+            "decisions": 176400,
+            "state_updates": 35280,
+            "submitted": 49178,
+            "accepted": 48858,
+            "fills": 48743,
+            "reducing_fills": 48743,
+            "absolute_gap_sum": "412631164461",
+            "gap_samples": 176400,
+            "terminal_absolute_gap": "0"
+          }
+        ]
+      }
+    },
+    {
+      "cell": "B-409",
+      "result": {
+        "valid": true,
+        "receipt_audit_valid": true,
+        "decisions": 529200,
+        "submitted": 147560,
+        "fills": 146408,
+        "filled_qty": 1058388518472,
+        "hedgers": [
+          {
+            "venue_id": "central",
+            "client_id": 9,
+            "decisions": 176400,
+            "state_updates": 35280,
+            "submitted": 49206,
+            "accepted": 48902,
+            "fills": 48793,
+            "reducing_fills": 48793,
+            "absolute_gap_sum": "413378130244",
+            "gap_samples": 176400,
+            "terminal_absolute_gap": "0"
+          },
+          {
+            "venue_id": "north",
+            "client_id": 9,
+            "decisions": 176400,
+            "state_updates": 35280,
+            "submitted": 49140,
+            "accepted": 48952,
+            "fills": 48826,
+            "reducing_fills": 48826,
+            "absolute_gap_sum": "413543833243",
+            "gap_samples": 176400,
+            "terminal_absolute_gap": "0"
+          },
+          {
+            "venue_id": "south",
+            "client_id": 9,
+            "decisions": 176400,
+            "state_updates": 35280,
+            "submitted": 49214,
+            "accepted": 48914,
+            "fills": 48789,
+            "reducing_fills": 48789,
+            "absolute_gap_sum": "413784052820",
+            "gap_samples": 176400,
+            "terminal_absolute_gap": "0"
+          }
+        ]
+      }
+    }
+  ],
+  "interpretation_fence": [
+    "No profitability, wealth, stability, liquidity, or realism claim is licensed.",
+    "A positive development result would still require the registered exposure-off/on interaction factorial and holdout replication.",
+    "An exact-zero or negative complete pair is a registered FALSIFIED basis endpoint, not a reason to retune."
+  ]
+}
