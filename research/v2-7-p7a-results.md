@@ -76,3 +76,16 @@ put this participant near a contemporaneous margin breach under the registered
 market path. Any P7b must be a new preregistration with an ex-ante economic
 leverage/distress mechanism; it must not retrofit P7a or use post-outcome shock
 tuning.
+
+## Post-outcome unit audit
+
+The numeric addendum's prose labels contain a raw-unit conversion error. The
+engine declares `USD_PRECISION = 100,000`, so the actually deposited
+120,000,000,000 and 60,000,000,000 raw USD equal 1,200,000 and 600,000 USD.
+The declared 10-ABC opening notional is approximately 500,000 USD, making the
+active levels about 0.42x and 0.83x gross leverage, not 4.17x and 8.33x. The
+5,000,000,000-raw initial-margin requirement (about 50,000 USD) remains
+correct. This is an ex-post design/provenance erratum; it does not alter the
+immutable configs or the `NOT EXERCISED` score. It is the concrete reason the
+capital ladder supplied ample buffer in these worlds and must be corrected only
+through a new P7b preregistration.

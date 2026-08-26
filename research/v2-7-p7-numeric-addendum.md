@@ -85,3 +85,21 @@ hashes are verified by `scripts/check-v2-7-p7-configs.sh`:
 No holdout config may be generated until both development levels have passed
 the activation/evidence gate.  If an active level is inactive or invalid, all
 its registered cells remain in the ledger and no number is changed.
+
+## Post-outcome unit audit (does not alter the immutable configs)
+
+After the P7a development cells were complete, the raw-unit arithmetic was
+checked directly against `exchange.USD_PRECISION = 100,000`. Therefore the
+registered margins are 1,200,000 USD (120,000,000,000 raw) and 600,000 USD
+(60,000,000,000 raw), while the declared 10-ABC opening notional is about
+500,000 USD. The realized gross leverage of the two active levels was thus
+approximately 0.42x and 0.83x, rather than the 4.17x and 8.33x labels in the
+pre-outcome rationale. The stated 5,000,000,000-raw initial requirement is
+consistent with the 10% rule; the error is the conversion and leverage labels,
+not the configs actually run.
+
+This erratum is recorded after outcomes and does not rewrite, regenerate, or
+reinterpret the P7a cells. It explains why the registered capital ladder had
+large collateral buffers and why participant margin breaches were not
+economically reachable. Any P7b must use a newly preregistered, independently
+audited unit scale.
