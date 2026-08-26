@@ -18,6 +18,15 @@ artifact_root=${P7D_OUTPUT_ROOT:-"$root_dir/research/artifacts/v2-7-p7d/full"}
 output="$artifact_root/$cell-$seed"
 binary=${3:-"$root_dir/bin/multivenue"}
 
+# Analyzer/evidence commits may advance HEAD without changing the simulator
+# executable.  For a paired campaign, pin the simulator provenance explicitly
+# when reusing that immutable binary; otherwise default to the current HEAD.
+git_revision=${P7D_SIMULATOR_REVISION:-$(git -C "$root_dir" rev-parse HEAD)}
+[[ "$git_revision" =~ ^[0-9a-f]{40}$ ]] || {
+  echo "invalid P7D_SIMULATOR_REVISION: $git_revision" >&2
+  exit 1
+}
+
 if [[ ! -s "$config" || ! -x "$binary" ]]; then
   echo "missing P7d config or executable: $config / $binary" >&2
   exit 1
@@ -43,7 +52,7 @@ jq -n \
   --argjson preflight "$preflight" \
   --arg config_sha256 "$(sha256sum "$config" | awk '{print $1}')" \
   --arg binary_sha256 "$(sha256sum "$binary" | awk '{print $1}')" \
-  --arg git_revision "$(git -C "$root_dir" rev-parse HEAD)" \
+  --arg git_revision "$git_revision" \
   --arg go_version "$(go version)" \
   --arg gomaxprocs "${GOMAXPROCS:-default}" \
   --arg output_dir "$output" \
