@@ -182,7 +182,7 @@ if [[ "$distress_protocol" == p7d ]]; then
 	# this branch additionally requires its compact borrow totals to remain
 	# within the registered finite cap.
 	jq -e '.result.invalid_borrow_events == 0 and .result.unexpected_auto_perp_borrows == 0 and
-	  ((.result.auto_perp_borrowed_quote | tonumber) <= 5500000000)' \
+	  all(.result.hedgers[]; ((.auto_perp_borrowed_quote | tonumber) <= 5500000000))' \
 		"$cell/perpexposurehedger.json" >/dev/null
 fi
 

@@ -77,17 +77,18 @@ type PerpExposureHedgerAudit struct {
 // PerpExposureHedgerBucket retains per-account activation rather than
 // averaging independently funded venue-local participants into one actor.
 type PerpExposureHedgerBucket struct {
-	VenueID             string `json:"venue_id"`
-	ClientID            uint64 `json:"client_id"`
-	Decisions           int64  `json:"decisions"`
-	StateUpdates        int64  `json:"state_updates"`
-	Submitted           int64  `json:"submitted"`
-	Accepted            int64  `json:"accepted"`
-	Fills               int64  `json:"fills"`
-	ReducingFills       int64  `json:"reducing_fills"`
-	AbsoluteGapSum      string `json:"absolute_gap_sum"`
-	GapSamples          int64  `json:"gap_samples"`
-	TerminalAbsoluteGap string `json:"terminal_absolute_gap"`
+	VenueID               string `json:"venue_id"`
+	ClientID              uint64 `json:"client_id"`
+	Decisions             int64  `json:"decisions"`
+	StateUpdates          int64  `json:"state_updates"`
+	Submitted             int64  `json:"submitted"`
+	Accepted              int64  `json:"accepted"`
+	Fills                 int64  `json:"fills"`
+	ReducingFills         int64  `json:"reducing_fills"`
+	AbsoluteGapSum        string `json:"absolute_gap_sum"`
+	GapSamples            int64  `json:"gap_samples"`
+	AutoPerpBorrowedQuote string `json:"auto_perp_borrowed_quote"`
+	TerminalAbsoluteGap   string `json:"terminal_absolute_gap"`
 }
 
 // PerpExposureHedgerCheck is an independently predicted evidence failure.
@@ -348,6 +349,7 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 	trades := make(map[perpExposureOrderKey][]perpExposureTrade)
 	fillEvidence := make(map[perpExposureOrderKey][]perpExposureFillEvidence)
 	autoPerpBorrowed := new(big.Int)
+	autoPerpBorrowedByParticipant := make(map[Participant]*big.Int)
 	err = r.Scan(ScanOptions{Events: []string{"perp_exposure_hedger_decision", "perp_exposure_hedger_fill", "OrderAccepted", "OrderRejected", "OrderFill", "OrderCancelled", "Trade", "borrow"}, Workers: 1}, func(event Event) {
 		switch event.Name {
 		case "perp_exposure_hedger_decision":
@@ -421,7 +423,7 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 			}
 		case "borrow":
 			var borrow exchange.BorrowEvent
-			if event.Decode(&borrow) != nil || borrow.ClientID == 0 || borrow.Asset == "" || borrow.Amount <= 0 {
+			if event.Decode(&borrow) != nil || borrow.ClientID == 0 || borrow.ClientID != event.ClientID || borrow.Asset == "" || borrow.Amount <= 0 {
 				result.InvalidBorrowEvents++
 				return
 			}
@@ -430,6 +432,13 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 			}
 			result.AutoPerpBorrowEvents++
 			autoPerpBorrowed.Add(autoPerpBorrowed, big.NewInt(borrow.Amount))
+			participant := Participant{VenueID: event.VenueID, ClientID: event.ClientID}
+			participantBorrowed := autoPerpBorrowedByParticipant[participant]
+			if participantBorrowed == nil {
+				participantBorrowed = new(big.Int)
+				autoPerpBorrowedByParticipant[participant] = participantBorrowed
+			}
+			participantBorrowed.Add(participantBorrowed, big.NewInt(borrow.Amount))
 			if !policy.AutoBorrowPerp || borrow.Asset != "USD" || r.Role(event.VenueID, event.ClientID) != "perp_exposure_hedger" {
 				result.UnexpectedAutoPerpBorrows++
 			}
@@ -711,6 +720,11 @@ func (r *Run) MeasurePerpExposureHedger() (*PerpExposureHedgerAudit, error) {
 			bucket.AbsoluteGapSum = "0"
 		}
 		bucket.GapSamples = gapCounts[participant]
+		if borrowed := autoPerpBorrowedByParticipant[participant]; borrowed != nil {
+			bucket.AutoPerpBorrowedQuote = borrowed.String()
+		} else {
+			bucket.AutoPerpBorrowedQuote = "0"
+		}
 		result.GapSamples += bucket.GapSamples
 		if state := states[participant]; state != nil {
 			bucket.TerminalAbsoluteGap = new(big.Int).Abs(new(big.Int).Sub(big.NewInt(perpExposureTarget(state, policy)), big.NewInt(state.position))).String()
