@@ -1,0 +1,199 @@
+{
+  "protocol": "v2-7-p7d-directional-distress-v1",
+  "scope": "one preregistered untouched seed; no cross-seed aggregate inference",
+  "holdout_seed": 439,
+  "classification": "MIXED",
+  "source_revision": "8b1d013a33129beeb61a578b6f59aefa59cce0c2",
+  "binary_sha256": "0bcc40ef78f87f08301555bf203366780569c19ed42e84c024e39de34d2ebece",
+  "analyzer_sha256": "934993a87a817cf3fcb52eb29e8b1392d0b81e2149b52a4f5706026d57e763ad",
+  "development_reference": {
+    "classification": "SUPPORTED (screening)",
+    "seeds": [
+      431,
+      433
+    ],
+    "directional_risk_both_signs": true
+  },
+  "predicates": {
+    "control_valid": true,
+    "activation_valid": true,
+    "evidence_integrity_valid": true,
+    "participant_risk_replay_valid": true,
+    "long_risk_exercised": true,
+    "short_risk_exercised": false,
+    "deficit_insurance_bankruptcy_exercised": false
+  },
+  "verdicts": {
+    "directional_activation": "SUPPORTED (screening)",
+    "participant_specific_risk": "MIXED",
+    "deficit_insurance_bankruptcy": "NOT EXERCISED"
+  },
+  "cells": [
+    {
+      "cell": "C",
+      "seed": 439,
+      "analysis_revision": "061493a769832204a6845248f40a04d96cc4bc6c",
+      "activation": {
+        "enabled_decisions": 0,
+        "disabled_decisions": 21600,
+        "decisions": 21600,
+        "submitted": 0,
+        "accepted": 0,
+        "fills": 0,
+        "filled_qty": 0,
+        "terminal_absolute_gaps": [
+          "0",
+          "0",
+          "0"
+        ],
+        "control_valid": true,
+        "active_valid": false,
+        "action_counts": {
+          "NOT_SUBSCRIBED": 3,
+          "POLICY_DISABLED": 21597
+        }
+      },
+      "information_integrity": {
+        "observations_valid": true,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0,
+        "receipt_errors": 0
+      },
+      "risk": {
+        "candidates": 3,
+        "mark_updates": 43190,
+        "expected_breaches": 0,
+        "observed_checks": 0,
+        "missing_checks": 0,
+        "unexpected_checks": 0,
+        "duplicate_checks": 0,
+        "field_mismatches": 0,
+        "position_path_failures": 0,
+        "terminal_state_mismatches": 0,
+        "participant_liquidations": 0,
+        "risk_exercised": false,
+        "deficits": 0,
+        "total_deficit": 0,
+        "insurance_deficit": 0
+      },
+      "evidence": {
+        "events": 14242855,
+        "digest": "48dab1016d114637d78781df792c19fa5c825af31c32cf3651046e2b7d423c10"
+      }
+    },
+    {
+      "cell": "L",
+      "seed": 439,
+      "analysis_revision": "061493a769832204a6845248f40a04d96cc4bc6c",
+      "activation": {
+        "enabled_decisions": 21600,
+        "disabled_decisions": 0,
+        "decisions": 21600,
+        "submitted": 246,
+        "accepted": 246,
+        "fills": 33,
+        "filled_qty": 6000000000,
+        "terminal_absolute_gaps": [
+          "0",
+          "0",
+          "0"
+        ],
+        "control_valid": false,
+        "active_valid": true,
+        "action_counts": {
+          "FIXED_DIRECTIONAL_HELD": 21349,
+          "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE": 2,
+          "NOT_SUBSCRIBED": 3,
+          "SUBMIT_IOC": 246
+        }
+      },
+      "information_integrity": {
+        "observations_valid": true,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0,
+        "receipt_errors": 0
+      },
+      "risk": {
+        "candidates": 3,
+        "mark_updates": 43188,
+        "expected_breaches": 12,
+        "observed_checks": 12,
+        "missing_checks": 0,
+        "unexpected_checks": 0,
+        "duplicate_checks": 0,
+        "field_mismatches": 0,
+        "position_path_failures": 0,
+        "terminal_state_mismatches": 0,
+        "participant_liquidations": 11,
+        "risk_exercised": true,
+        "deficits": 0,
+        "total_deficit": 0,
+        "insurance_deficit": 0
+      },
+      "evidence": {
+        "events": 14269247,
+        "digest": "af7479342837a70fbdb2c1bd0eba57a77504e109d72c9256f58b08d4e37b38e1"
+      }
+    },
+    {
+      "cell": "S",
+      "seed": 439,
+      "analysis_revision": "47abf26f0a7da7d1043709febac6dc36dc38f10d",
+      "activation": {
+        "enabled_decisions": 21600,
+        "disabled_decisions": 0,
+        "decisions": 21600,
+        "submitted": 26,
+        "accepted": 26,
+        "fills": 39,
+        "filled_qty": 6000000000,
+        "terminal_absolute_gaps": [
+          "0",
+          "0",
+          "0"
+        ],
+        "control_valid": false,
+        "active_valid": true,
+        "action_counts": {
+          "FIXED_DIRECTIONAL_HELD": 21557,
+          "LOCAL_EXECUTABLE_PRICE_UNAVAILABLE": 14,
+          "NOT_SUBSCRIBED": 3,
+          "SUBMIT_IOC": 26
+        }
+      },
+      "information_integrity": {
+        "observations_valid": true,
+        "future_decision_use": 0,
+        "bad_decision_frontier": 0,
+        "receipt_errors": 0
+      },
+      "risk": {
+        "candidates": 3,
+        "mark_updates": 43188,
+        "expected_breaches": 0,
+        "observed_checks": 0,
+        "missing_checks": 0,
+        "unexpected_checks": 0,
+        "duplicate_checks": 0,
+        "field_mismatches": 0,
+        "position_path_failures": 0,
+        "terminal_state_mismatches": 0,
+        "participant_liquidations": 0,
+        "risk_exercised": false,
+        "deficits": 0,
+        "total_deficit": 0,
+        "insurance_deficit": 0
+      },
+      "evidence": {
+        "events": 14381958,
+        "digest": "333bfd94539128b6cdee0b1848c4f56e59f96d492b40c69a23c523ba8404d58f"
+      }
+    }
+  ],
+  "remaining_preregistered_holdout_seeds": [
+    443,
+    449
+  ],
+  "interpretation": "This is a fail-closed per-seed replication score of the immutable P7d directional activation, evidence-integrity, and participant-specific maintenance-risk predicate. It does not aggregate the pre-reserved holdout seeds and does not support a claim about bankruptcy, full-ecology liquidation realism, funding, basis, profitability, or market stability.",
+  "next_action": "Do not tune. Preserve this raw evidence; complete remaining pre-reserved holdout seeds under their immutable configs before any aggregate out-of-sample interpretation."
+}
