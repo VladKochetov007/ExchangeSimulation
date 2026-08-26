@@ -428,6 +428,53 @@ func TestCrossAssetCollateralMarksAreExplicitAndFinite(t *testing.T) {
 	if got := borrowing.MaxBorrowPerAsset["CDF"]; got != 20_000*mvBasePrecision {
 		t.Fatalf("CDF max borrow = %d, want %d", got, 20_000*mvBasePrecision)
 	}
+	var makerClientID uint64
+	for _, participant := range repaired.Venues[0].Participants {
+		if participant.Role == "cdf_spot_maker_1" {
+			makerClientID = participant.ClientID
+			break
+		}
+	}
+	if makerClientID == 0 {
+		t.Fatal("repaired world has no CDF maker client")
+	}
+	client := repaired.Venues[0].Exchange.Clients[makerClientID]
+	beforeBalance, beforeDebt := client.Balances["CDF"], client.Borrowed["CDF"]
+	if err := borrowingManagerBorrow(repaired.Venues[0].Exchange, makerClientID, "CDF", mvBasePrecision); err != nil {
+		t.Fatalf("explicit CDF collateral borrow: %v", err)
+	}
+	if client.Balances["CDF"] != beforeBalance+mvBasePrecision || client.Borrowed["CDF"] != beforeDebt+mvBasePrecision {
+		t.Fatalf("CDF borrow did not credit/debit one unit: balance %d debt %d", client.Balances["CDF"], client.Borrowed["CDF"])
+	}
+	debtAfterSmallBorrow := client.Borrowed["CDF"]
+	if err := borrowingManagerBorrow(repaired.Venues[0].Exchange, makerClientID, "CDF", 20_000*mvBasePrecision); err == nil {
+		t.Fatal("CDF borrow beyond finite cap unexpectedly succeeded")
+	}
+	if client.Borrowed["CDF"] != debtAfterSmallBorrow {
+		t.Fatalf("cap rejection mutated CDF debt: got %d want %d", client.Borrowed["CDF"], debtAfterSmallBorrow)
+	}
+	var legacyMakerClientID uint64
+	for _, participant := range legacy.Venues[0].Participants {
+		if participant.Role == "cdf_spot_maker_1" {
+			legacyMakerClientID = participant.ClientID
+			break
+		}
+	}
+	legacyClient := legacy.Venues[0].Exchange.Clients[legacyMakerClientID]
+	legacyBalance, legacyDebt := legacyClient.Balances["CDF"], legacyClient.Borrowed["CDF"]
+	if err := borrowingManagerBorrow(legacy.Venues[0].Exchange, legacyMakerClientID, "CDF", mvBasePrecision); err == nil {
+		t.Fatal("legacy CDF collateral borrow unexpectedly succeeded without an oracle mark")
+	}
+	if legacyClient.Balances["CDF"] != legacyBalance || legacyClient.Borrowed["CDF"] != legacyDebt {
+		t.Fatalf("missing CDF mark borrow mutated account: balance %d/%d debt %d/%d", legacyClient.Balances["CDF"], legacyBalance, legacyClient.Borrowed["CDF"], legacyDebt)
+	}
+}
+
+func borrowingManagerBorrow(ex *exchange.Exchange, clientID uint64, asset string, amount int64) error {
+	client := ex.Clients[clientID]
+	return ex.BorrowingMgr.BorrowMargin(exchange.BorrowContext{
+		Client: client, ClientID: clientID, Timestamp: ex.Clock.NowUnixNano(), CreditSpot: true,
+	}, asset, amount, "test")
 }
 
 func TestDealerRiskDoesNotRequireUnrelatedCDFMark(t *testing.T) {
