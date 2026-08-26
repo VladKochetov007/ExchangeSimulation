@@ -26,6 +26,12 @@ case "$distress_protocol" in
 		analysis_contract="v2-7-p7b-distress-v1"
 		expected_horizon="24h"
 		;;
+	p7c)
+		hypothesis_id="V2-7-P7C-DISTRESS"
+		experiment_prefix="v2-7-p7c-distress-"
+		analysis_contract="v2-7-p7c-distress-v1"
+		expected_horizon="48h"
+		;;
 	*)
 		echo "unknown V2-7 distress protocol: $distress_protocol" >&2
 		exit 2
@@ -59,7 +65,11 @@ horizon=$(jq -er '.simulated_horizon' "$cell/run-metadata.json")
 }
 cell_id=$(jq -er '.cell' "$cell/run-metadata.json")
 seed=$(jq -er '.seed' "$cell/run-metadata.json")
-case "$cell_id" in C|L|H) ;; *) echo "invalid V2-7 distress cell $cell_id" >&2; exit 1 ;; esac
+if [[ "$distress_protocol" == p7c ]]; then
+	case "$cell_id" in C|T) ;; *) echo "invalid P7c distress cell $cell_id" >&2; exit 1 ;; esac
+else
+	case "$cell_id" in C|L|H) ;; *) echo "invalid V2-7 distress cell $cell_id" >&2; exit 1 ;; esac
+fi
 
 # The run directory is itself part of the provenance contract.  Refuse a
 # copied cell whose metadata/config no longer identify the same registered
@@ -72,8 +82,10 @@ jq -e --arg cell "$cell_id" --argjson seed "$seed" --arg hypothesis "$hypothesis
 ' "$cell/run-metadata.json" >/dev/null
 if [[ "$distress_protocol" == p7a ]]; then
 	case "$seed" in 307|311) ;; *) echo "invalid P7a development seed $seed" >&2; exit 1 ;; esac
-else
+elif [[ "$distress_protocol" == p7b ]]; then
 	case "$seed" in 337|341) ;; *) echo "invalid P7b development seed $seed" >&2; exit 1 ;; esac
+else
+	case "$seed" in 367|371) ;; *) echo "invalid P7c development seed $seed" >&2; exit 1 ;; esac
 fi
 jq -e --argjson seed "$seed" --arg cell "$cell_id" --arg hypothesis "$hypothesis_id" '
   .schema_version == 2 and .config.seed == $seed and
