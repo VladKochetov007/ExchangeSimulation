@@ -121,7 +121,9 @@ jq -e '.result.disagreement == 0 and .result.unrepresentable_open_values == 0' \
 jq -e '.result.missing_position_update == 0 and
   .result.unexpected_position_update == 0 and
   .result.position_chain_failures == 0' "$cell/fillpositions.json" >/dev/null
-jq -e '.result.unknown_fills == 0 and .result.unknown_cancellations == 0 and
+jq -e '.result.unlinked_fills == 0 and
+  .result.unknown_fills == .result.liquidation_fills and
+  .result.unknown_cancellations == 0 and
   .result.duplicate_acceptances == 0 and .result.duplicate_terminals == 0 and
   .result.missing_immediate_terminal == 0 and .result.fills_after_terminal == 0 and
   .result.fill_quantity_mismatches == 0 and .result.cancel_quantity_mismatches == 0 and
