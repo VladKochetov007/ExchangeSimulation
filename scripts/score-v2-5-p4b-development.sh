@@ -62,9 +62,23 @@ jq -n \
 	--slurpfile eb409 "$base/B-409/perpexposurehedger.json" \
 	'
 	  def complete($r):
-		$r.control_valid and $r.treatment_valid and
-		$r.activation_valid and $r.execution_valid and $r.basis_measurable and
-		$r.valid;
+		$r.control_valid == true and $r.treatment_valid == true and
+		$r.activation_valid == true and $r.execution_valid == true and
+		$r.basis_measurable == true and $r.valid == true;
+	  def pair_verdict($r):
+		if ($r.control_valid != true or $r.treatment_valid != true) then
+			"NOT IDENTIFIED"
+		elif ($r.activation_valid != true) then
+			"FALSIFIED AT ACTIVATION"
+		elif ($r.execution_valid != true) then
+			"FALSIFIED AT EXECUTION"
+		elif ($r.basis_measurable != true or $r.valid != true) then
+			"NOT IDENTIFIED"
+		elif ($r.seed_statistic_sign > 0) then
+			"SUPPORTED (screening)"
+		else
+			"FALSIFIED"
+		end;
 	  def cellmeta($m): {
 		analysis_revision: $m.analysis_revision,
 		analyzer_sha256: $m.analyzer_sha256,
@@ -79,20 +93,29 @@ jq -n \
 		submitted: $e.result.submitted,
 		fills: $e.result.fills,
 		filled_qty: $e.result.filled_qty,
-		venues: $e.result.venues
+		hedgers: $e.result.hedgers
 	  };
 	  ($p401[0].result) as $r401 |
 	  ($p409[0].result) as $r409 |
 	  [$r401, $r409] as $pairs |
-	  (if ($pairs | all(complete(.))) then
-		(if ($pairs | all(.seed_statistic_sign > 0)) then
-			"SUPPORTED (screening)"
-		 else "FALSIFIED" end)
-	   else "NOT IDENTIFIED" end) as $verdict |
+	  [$pairs[] | pair_verdict(.)] as $pair_verdicts |
+	  (if any($pairs[]; (.control_valid != true or .treatment_valid != true)) then
+		"NOT IDENTIFIED"
+	   elif any($pairs[]; .activation_valid != true) then
+		"FALSIFIED AT ACTIVATION"
+	   elif any($pairs[]; .execution_valid != true) then
+		"FALSIFIED AT EXECUTION"
+	   elif any($pairs[]; (.basis_measurable != true or .valid != true)) then
+		"NOT IDENTIFIED"
+	   elif all($pairs[]; .seed_statistic_sign > 0) then
+		"SUPPORTED (screening)"
+	   else
+		"FALSIFIED"
+	   end) as $verdict |
 	  {
 		contract: $contract,
 		verdict: $verdict,
-		verdict_rule: "both complete paired seed statistics strictly positive => SUPPORTED (screening); any complete non-positive statistic => FALSIFIED; incomplete/invalid chain => NOT IDENTIFIED",
+		verdict_rule: "precedence: invalid control/treatment => NOT IDENTIFIED; activation failure => FALSIFIED AT ACTIVATION; execution failure after activation => FALSIFIED AT EXECUTION; missing measurable basis => NOT IDENTIFIED; both complete paired seed statistics strictly positive => SUPPORTED (screening); otherwise complete non-positive => FALSIFIED",
 		primary_endpoint: "exact P4 paired oriented-premium change",
 		development_seeds: [401, 409],
 		untouched_holdouts: [419, 421, 431],
@@ -100,9 +123,17 @@ jq -n \
 		analyzer_sha256: $analyzer_sha256,
 		simulator_revisions: [cellmeta($a401[0]), cellmeta($a409[0]), cellmeta($b401[0]), cellmeta($b409[0])],
 		paired_results: [
-			{seed: 401, result: $r401, complete: complete($r401)},
-			{seed: 409, result: $r409, complete: complete($r409)}
+			{seed: 401, result: $r401, complete: complete($r401), verdict: pair_verdict($r401)},
+			{seed: 409, result: $r409, complete: complete($r409), verdict: pair_verdict($r409)}
 		],
+		pair_verdicts: [
+			{seed: 401, verdict: pair_verdict($r401)},
+			{seed: 409, verdict: pair_verdict($r409)}
+		],
+		activation_status: (if any($pairs[]; .activation_valid != true) then "FAILED" else "PASSED" end),
+		execution_status: (if any($pairs[]; .execution_valid != true) then "FAILED" else "PASSED" end),
+		basis_status: (if any($pairs[]; .basis_measurable != true) then "NOT MEASURABLE" else "MEASURABLE" end),
+		aggregate_verdict_basis: "The aggregate reports the first registered failing stage across paired development seeds; only complete pairs reach the primary basis-sign rule.",
 		exposure_activation: [
 			{cell: "A-401", result: exposure($ea401[0])},
 			{cell: "A-409", result: exposure($ea409[0])},
