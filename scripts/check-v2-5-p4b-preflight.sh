@@ -13,7 +13,11 @@ test -x "$binary"
 test -x "$analyzer"
 "$root_dir/scripts/check-v2-5-p4b-configs.sh" >/dev/null
 
-preflight_root=$(mktemp -d "${TMPDIR:-/tmp}/v2-5-p4b-preflight.XXXXXX")
+# Keep the temporary mechanics output under the declared artifact root.  This
+# avoids depending on a host-wide temp directory and lets repository hygiene
+# tests prove that the preflight cannot accidentally embed an environment
+# path in tracked code.  The trap removes it on every exit path.
+preflight_root=$(mktemp -d "$root_dir/research/artifacts/v2-5-p4b/.preflight.XXXXXX")
 trap 'rm -rf "$preflight_root"' EXIT
 
 for arm in A B; do
