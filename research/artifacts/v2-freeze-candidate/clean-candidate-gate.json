@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "status": "CANDIDATE_GATE_PASS_PENDING_INDEPENDENT_REVIEW",
+  "source_commit": "0e7be06da81895c4fcc1ebdf9316e1ff27ba047b",
+  "latest_simulator_semantic_commit": "2068d9d",
+  "config": "research/configs/frozen-baseline-2026-08-22.json",
+  "config_sha256": "ca933bf2244eec8e104d4313456bed386809703bb7a1179125b8d9255f1b1036",
+  "toolchain": "go1.26.6-X:nodwarf5 linux/amd64",
+  "build_flags": ["-trimpath"],
+  "binaries": {
+    "multivenue_sha256": "1185bff8d4dbc1234fcd7fda581734682c5e63d6ba9c6716f6642782a9cb4b7c",
+    "mvanalyze_sha256": "7099faccd6ee153c350d735a9bfe2576c7719258bd1763f21b380053799685a1",
+    "prunegate_sha256": "dbeb45035b820c26fe930638b9786eaca91e51931764dc22a8b10a01deecb90a"
+  },
+  "smoke": {
+    "duration": "10s",
+    "seed": 101,
+    "checkpoint_interval_seconds": 1,
+    "fresh_output_directories": true,
+    "cases": [
+      {"name": "run-g1a", "gomaxprocs": 1, "log_mode": "full"},
+      {"name": "run-g1b", "gomaxprocs": 1, "log_mode": "full"},
+      {"name": "run-g4", "gomaxprocs": 4, "log_mode": "full"},
+      {"name": "run-none4", "gomaxprocs": 4, "log_mode": "none"}
+    ],
+    "execution_domain": "execution_observations/ordered_stream",
+    "execution_events": 7073,
+    "execution_stream_sha256": "fff1801f4f97795674421f3508854fbcd473d94ac356208e1387d16e15106d43",
+    "full_evidence_domain": "persisted_json_records/unordered_multiset",
+    "full_evidence_events": 7073,
+    "full_evidence_digest": "1d2d0b425053ff9158081a2775630d703db5b27fdd9227c0616ffe97a16e6148",
+    "runtime_offline_evidence_artifact_equal": true,
+    "logs_off_execution_equal": true,
+    "full_process_execution_equal": true,
+    "latency_sidecar_present": true,
+    "greeks_sidecar_present_full": true,
+    "greeks_sidecar_present_logs_off": true
+  },
+  "verification": {
+    "go_test_all": "pass",
+    "go_vet_all": "pass",
+    "targeted_race_evidence_boundaries": "pass",
+    "cross_process_determinism_test": "pass",
+    "full_race": "not_promoted: ten-minute timeout in pre-existing TestV23P3PerpReplenishmentEvidenceIsFreshProcessDeterministicAndNeutral with no race report",
+    "economic_outcome_campaign": "not_run",
+    "untouched_holdout_consumed": false
+  },
+  "evidence_location": "/tmp/v2-freeze-candidate.KRHrLd",
+  "notes": [
+    "The /tmp location is a transient reproduction workspace; binary hashes and commands are the durable provenance.",
+    "Evidence sidecars are atomically published after sync, but streamed JSONL is not claimed crash-durable or directory-fsync durable.",
+    "This is a pre-freeze candidate gate, not the immutable V2 freeze declaration."
+  ]
+}
