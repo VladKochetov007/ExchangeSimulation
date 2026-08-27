@@ -42,6 +42,22 @@ horizon=${V2_LONGRUN_HORIZON:-24h}
 	exit 1
 }
 
+# The simulator intentionally accepts only the two pre-run provenance files in
+# a fresh output directory. Keep process stdout/stderr beside (not inside) the
+# cell until NewSim has opened its evidence sink; creating log files inside the
+# cell before launch would make the directory look reused and fail closed.
+mkdir -p "$output_root"
+binary_revision=$(go version -m "$binary" | awk '$1 == "build" && $2 == "vcs.revision=" {sub("vcs.revision=", "", $2); print $2; exit}')
+binary_modified=$(go version -m "$binary" | awk '$1 == "build" && $2 == "vcs.modified=" {sub("vcs.modified=", "", $2); print $2; exit}')
+[[ "$binary_revision" == "$sim_revision" ]] || {
+	echo "binary VCS revision $binary_revision does not match requested $sim_revision" >&2
+	exit 1
+}
+[[ "$binary_modified" == "false" ]] || {
+	echo "binary is not a clean VCS build (vcs.modified=$binary_modified)" >&2
+	exit 1
+}
+
 log_mode=$(jq -er '.log_mode' "$config")
 seed=$(jq -er '.seed' "$config")
 holdout=false
@@ -73,9 +89,11 @@ jq -n \
 	  raw_log_policy: "retained until every registered integrated long-run evidence contract passes"
 	}' >"$output/run-metadata.json"
 
+stdout_log="$output_root/$cell.simulator.stdout.log"
+stderr_log="$output_root/$cell.simulator.stderr.log"
 set +e
 "$binary" -config "$config" -duration "$horizon" -logdir "$output" -log-mode "$log_mode" \
-	>"$output/simulator.stdout.log" 2>"$output/simulator.stderr.log"
+	>"$stdout_log" 2>"$stderr_log"
 status=$?
 set -e
 if [[ "$status" -ne 0 ]]; then
