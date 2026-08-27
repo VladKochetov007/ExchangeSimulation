@@ -72,6 +72,7 @@ type MakerPassiveRefreshOrdering struct {
 	OutOfOrderCancellations   int64                      `json:"out_of_order_cancellations"`
 	HorizonCensoredSides      int64                      `json:"horizon_censored_sides"`
 	CensoredOutcomeDeliveries int64                      `json:"censored_outcome_deliveries"`
+	InvalidOrderRecords       int64                      `json:"invalid_order_records"`
 	BookFiles                 int64                      `json:"book_files"`
 	MissingBookFiles          int64                      `json:"missing_book_files"`
 	LineageRows               int64                      `json:"lineage_rows"`
@@ -342,9 +343,10 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 		}
 		for _, path := range files {
 			result.BookFiles++
+			canonicalFile := filepath.ToSlash(filepath.Join("venues", book.venueID, "spot", filepath.Base(path)))
 			for _, item := range expected {
 				if item.file == "" {
-					item.file = path
+					item.file = canonicalFile
 				}
 			}
 			tracked := make(map[uint64]struct{})
@@ -400,6 +402,7 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 				var accepted struct {
 					OrderID  uint64 `json:"order_id"`
 					ClientID uint64 `json:"client_id"`
+					Symbol   string `json:"symbol"`
 					Side     string `json:"side"`
 					Type     string `json:"type"`
 					TIF      string `json:"time_in_force"`
@@ -414,14 +417,14 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 				var fill struct {
 					OrderID      uint64 `json:"order_id"`
 					Qty          int64  `json:"qty"`
-					FilledQty    int64  `json:"filled_qty"`
-					RemainingQty int64  `json:"remaining_qty"`
-					IsFull       bool   `json:"is_full"`
+					FilledQty    *int64 `json:"filled_qty"`
+					RemainingQty *int64 `json:"remaining_qty"`
+					IsFull       *bool  `json:"is_full"`
 				}
 				var cancel struct {
-					OrderID      uint64 `json:"order_id"`
-					RemainingQty int64  `json:"remaining_qty"`
-					Request      uint64 `json:"request_id"`
+					OrderID      uint64  `json:"order_id"`
+					RemainingQty *int64  `json:"remaining_qty"`
+					Request      *uint64 `json:"request_id"`
 				}
 				switch event.Name {
 				case "OrderAccepted":
@@ -435,8 +438,15 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					if _, ok := tracked[clientID]; !ok || accepted.OrderID == 0 || accepted.Side == "" {
 						return
 					}
+					if (accepted.ClientID != 0 && accepted.ClientID != event.ClientID) ||
+						(accepted.Symbol != "" && accepted.Symbol != book.symbol) || accepted.Request == 0 ||
+						accepted.Type == "" || accepted.TIF == "" || accepted.Qty <= 0 {
+						result.InvalidOrderRecords++
+						result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: clientID, Symbol: book.symbol, Side: accepted.Side, RequestID: accepted.Request, Failure: "invalid_accepted_order_fields"})
+						return
+					}
 					consumeOutcome(event, clientID, accepted.Side, accepted.Request, "accepted")
-					if accepted.Type != "LIMIT" || accepted.TIF != "GTC" || accepted.Qty <= 0 {
+					if accepted.Type != "LIMIT" || accepted.TIF != "GTC" {
 						return
 					}
 					state := getLocalSide(clientID, accepted.Side)
@@ -483,8 +493,8 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					}
 					expectedFilled := order.filled + fill.Qty
 					expectedRemaining := order.qty - expectedFilled
-					if (fill.FilledQty != 0 && fill.FilledQty != expectedFilled) || fill.RemainingQty != expectedRemaining || expectedFilled > order.qty ||
-						(fill.IsFull != (expectedRemaining == 0)) {
+					if fill.FilledQty == nil || fill.RemainingQty == nil || fill.IsFull == nil || *fill.FilledQty != expectedFilled || *fill.RemainingQty != expectedRemaining || expectedFilled > order.qty ||
+						(*fill.IsFull != (expectedRemaining == 0)) {
 						result.FillQuantityMismatches++
 						result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: order.clientID, Symbol: book.symbol, Side: order.side, RequestID: order.requestID, Failure: "fill_quantity_mismatch"})
 						return
@@ -510,7 +520,7 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 						result.DuplicateCancellations++
 						return
 					}
-					if cancel.RemainingQty != order.qty-order.filled {
+					if cancel.RemainingQty == nil || *cancel.RemainingQty != order.qty-order.filled {
 						result.CancelQuantityMismatches++
 						result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: order.clientID, Symbol: book.symbol, Side: order.side, RequestID: order.requestID, Failure: "cancel_quantity_mismatch"})
 					}
@@ -518,7 +528,11 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					state.priorOrderIDs = []uint64{cancel.OrderID}
 					state.lastTerminal = "cancel"
 					state.terminalOrdinal = event.Ordinal
-					state.terminalRequestID = cancel.Request
+					if cancel.Request != nil {
+						state.terminalRequestID = *cancel.Request
+					} else {
+						state.terminalRequestID = 0
+					}
 					result.CancellationsObserved++
 				}
 			})
@@ -620,7 +634,7 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 		}
 		return left.Failure < right.Failure
 	})
-	result.Valid = result.Decisions > 0 && result.InvalidDecisionRecords == 0 && result.Missing == 0 && result.Duplicate == 0 && result.Late == 0 && result.OutOfOrderCancellations == 0 && result.CensoredOutcomeDeliveries == 0 && result.MissingBookFiles == 0 && result.DuplicateBookFiles == 0 && result.DuplicateOrderIDs == 0 && result.DuplicateCancellations == 0 && result.FillQuantityMismatches == 0 && result.CancelQuantityMismatches == 0
+	result.Valid = result.Decisions > 0 && result.InvalidDecisionRecords == 0 && result.Missing == 0 && result.Duplicate == 0 && result.Late == 0 && result.OutOfOrderCancellations == 0 && result.CensoredOutcomeDeliveries == 0 && result.MissingBookFiles == 0 && result.DuplicateBookFiles == 0 && result.DuplicateOrderIDs == 0 && result.DuplicateCancellations == 0 && result.FillQuantityMismatches == 0 && result.CancelQuantityMismatches == 0 && result.InvalidOrderRecords == 0
 	return result, nil
 }
 
