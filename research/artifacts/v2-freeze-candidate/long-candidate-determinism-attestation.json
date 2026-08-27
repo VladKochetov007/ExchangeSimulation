@@ -53,6 +53,12 @@
         "ordering": "unordered_multiset",
         "events": 111419965,
         "digest": "547d34311821d98420599e0060b5c400228cdd8e26feb3bd6ab08af287c1f1ba"
+      },
+      "normalized_evidence_stream": {
+        "domain": "persisted_evidence",
+        "ordering": "unordered_multiset",
+        "events": 111419965,
+        "digest": "86b15d1b4899c0a8f4eddbef79f8fceb4373eb648444a12af22d977abbb9a5aa"
       }
     },
     "long-baseline-103-v3": {
