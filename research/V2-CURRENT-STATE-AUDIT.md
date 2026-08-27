@@ -594,3 +594,48 @@ file itself is intentionally not modified by this audit.
    autopsy.  Treat broad ecology replacement, trade-mediated discovery,
    bankruptcy, and mixed timing as explicit limitations unless their existing
    protocols produce identifiable evidence.
+
+## Post-audit update: P7d holdout package
+
+This append-only update supersedes the P7d portion of the reconciliation above
+without rewriting its historical state.  At result commit `c84d671` and review
+commit `d4d31b8`, the pre-reserved P7d holdout seeds 439, 443 and 449 have all
+been consumed under the pinned source revision, binary, configs and evidence
+contract.  All nine C/L/S cells have complete extraction status, final
+`greeks.json`/`latency.json` sentinels, all sixteen registered metric artifacts,
+analysis metadata and runtime/offline evidence-artifact digest equality.  Raw
+evidence remains retained.
+
+Per-seed result classifications are:
+
+| seed | activation | participant-specific risk |
+|---:|---|---|
+| 439 | `SUPPORTED (screening)` | `MIXED` (long exercised, short not exercised) |
+| 443 | `SUPPORTED (screening)` | `SUPPORTED (screening)` |
+| 449 | `SUPPORTED (screening)` | `SUPPORTED (screening)` |
+
+The machine package is
+`research/artifacts/v2-7-p7d/p7d-holdout-verdict.json`.  It now contains
+exactly one per-seed record for each of 439/443/449 and explicitly records
+aggregate `NOT IDENTIFIED`: the P7d preregistration reserved three seeds but
+did not define an all-seed, majority or other aggregate rule.  No aggregate
+replication claim is licensed.  The seed-439 scorer was written after its
+metrics existed and was reviewed with a narrower factual claim; that
+provenance is retained.  The 443/449 cells were run only after that scorer
+review and the pinned scorer was applied unchanged.
+
+The current package does **not** score participant-specific deficit or
+insurance, because the available ancillary liquidation field is ecology-wide;
+bankruptcy remains not exercised/not identified.  It also makes no funding,
+basis, profitability, market-stability or full-ecology liquidation claim.
+Earlier pre-review 443/449 attempts are archived as status-143 invalid runs
+and are excluded from the valid package.  The fallback red-team review
+(`research/reviews/v2-7-p7d-holdout-results-independent-review.md`) records
+`ACCEPT WITH NARROWER CLAIM`; configured Sol-xhigh review agents were
+unavailable due to the usage limit, so this is explicitly not an independent
+Sol review.
+
+The next licensed scientific gate is the V2-6 causal option disposition (or a
+formal closure as `NOT IDENTIFIED` if no clean contrast exists), followed by a
+freeze-readiness review.  P4/P4b/P5 and the mixed L1-P3 timing line remain
+explicit limitations; no P7d distress retuning is authorized.
