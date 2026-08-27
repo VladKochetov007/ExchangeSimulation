@@ -1,0 +1,14 @@
+interface:
+  display_name: Creative Research Foundry
+  short_description: Run falsifiable, tool-driven research loops
+  default_prompt: Use $conduct-creative-research to turn this question into an actor-critic
+    research program and run the highest-value verified experiments.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true
