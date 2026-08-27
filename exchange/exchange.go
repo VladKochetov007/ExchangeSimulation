@@ -1777,7 +1777,19 @@ type accountMarginProfile struct {
 
 func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, triggerSymbol string, triggerMark int64) (accountMarginProfile, error) {
 	var p accountMarginProfile
-	for symbol, book := range e.Books {
+	// Cross-margin marks can fail on the first unmarked book and emit the
+	// reason into the execution evidence.  A map walk here therefore made the
+	// ordered execution digest depend on the process's map hash seed (the
+	// failure surfaced only once the option chain had grown enough to invoke
+	// this path).  Keep the same economic aggregation, but make the diagnostic
+	// and any subsequent work visit books in canonical symbol order.
+	symbols := make([]string, 0, len(e.Books))
+	for symbol := range e.Books {
+		symbols = append(symbols, symbol)
+	}
+	slices.Sort(symbols)
+	for _, symbol := range symbols {
+		book := e.Books[symbol]
 		if _, pending := e.settlementPending[symbol]; pending {
 			continue
 		}
