@@ -12,7 +12,7 @@ verbosity does not change the ordered execution stream.
 - simulator change under test: canonical ordering of `e.Books` in
   `buildAccountMarginProfile`; this removes process-map-order dependence from
   the ordered execution observation payload
-- binary: `/tmp/v2-freeze-bins3.ni8bPl/multivenue`
+- binary: the clean-build multivenue executable recorded by SHA-256 below
 - binary SHA-256:
   `048204c05d0b53cffe09b37980e938601935bcdd65f95d7e8ee11c88a523e28a`
 - config: the candidate `FROZEN-2` configuration, with only
