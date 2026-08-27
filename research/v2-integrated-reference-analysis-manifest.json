@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "experiment_id": "v2-integrated-reference-dev-601",
+  "run_path": "research/artifacts/v2-integrated/reference-dev-601-full-clean",
+  "run_config_sha256": "0724f2d022ee9b13ca814cdda67d70b057aa8d5c8b4c33f92cd57a1f52015475",
+  "simulator_source_revision": "b312336a3fff3e758ba672137aee0ac917f1bddc",
+  "analyzer_source_revisions": {
+    "mvanalyze_before_refresh_replay": "b312336a3fff3e758ba672137aee0ac917f1bddc",
+    "mvanalyze_refresh_replay": "bacb7d86cc45c616b0825235919850df6fbb04cc"
+  },
+  "go_toolchain": "go1.26.6-X:nodwarf5",
+  "analysis_environment": {
+    "gomaxprocs": 4,
+    "working_tree": "clean detached worktree at the recorded analyzer revision",
+    "evidence_mode": "offline replay of preserved raw logs"
+  },
+  "binary_archives": {
+    "multivenue": {
+      "path": "research/artifacts/v2-integrated/binaries/multivenue-b312336",
+      "sha256": "0d3e7c08fdc8d9f7bf892c30381a4583615cb7f0883b519f64f778409022672e",
+      "source_revision": "b312336a3fff3e758ba672137aee0ac917f1bddc"
+    },
+    "prunegate": {
+      "path": "research/artifacts/v2-integrated/binaries/prunegate-b312336",
+      "sha256": "57e38453263d3b8c68f8b70319a745d46490b125f88a822a38bbde429da24d56",
+      "source_revision": "b312336a3fff3e758ba672137aee0ac917f1bddc"
+    },
+    "mvanalyze_before_refresh_replay": {
+      "path": "research/artifacts/v2-integrated/binaries/mvanalyze-b312336-pre-refresh",
+      "sha256": "7bd1f0620ded51f08ca550fda4f40b567406dc89cbf4285ed46415b2727fc3d2",
+      "source_revision": "b312336a3fff3e758ba672137aee0ac917f1bddc"
+    },
+    "mvanalyze_refresh_replay": {
+      "path": "research/artifacts/v2-integrated/binaries/mvanalyze-bacb7d8-clean-vcs",
+      "sha256": "e00314ce97de6763edd3b45770090a3bb04b243a1841eca9113135a128ce5870",
+      "source_revision": "bacb7d86cc45c616b0825235919850df6fbb04cc",
+      "vcs_modified": false
+    }
+  },
+  "command_contract": {
+    "simulator": "<multivenue-archive> -config research/configs/v2-integrated/reference-dev-601.json -duration 5m -seed 601 -logdir <run>",
+    "analyzer": "GOMAXPROCS=4 <mvanalyze-archive> -metric <metric> -json research/artifacts/v2-integrated/reference-dev-601-full-clean",
+    "digest_replay": "GOMAXPROCS=4 <mvanalyze-archive> -metric evidenceartifacthash -json research/artifacts/v2-integrated/reference-dev-601-full-clean",
+    "refresh_replay": "GOMAXPROCS=4 research/artifacts/v2-integrated/binaries/mvanalyze-bacb7d8-clean-vcs -metric makerrefresh -json research/artifacts/v2-integrated/reference-dev-601-full-clean"
+  },
+  "metric_outputs": {
+    "arbitrage": {"path": "arbitrage.json", "sha256": "750c1feab5cd08865afa983c4d7c02b65770b00dbe1c320e1573b5996b8ccb16", "analyzer": "mvanalyze_before_refresh_replay"},
+    "conservation": {"path": "conservation.json", "sha256": "c4b420d624427e4aaa25ed4b8706468dff46881b783e8abf7fcb0ce93fe5b81e", "analyzer": "mvanalyze_before_refresh_replay"},
+    "crossvenue": {"path": "crossvenue.json", "sha256": "2a09835eecd9e146f56d5fdf74ab5b05d2b1679eb134ae865683d3bb4fa69b25", "analyzer": "mvanalyze_before_refresh_replay"},
+    "ecology": {"path": "ecology.json", "sha256": "99c58ffa8aa81d1ee1e5ed5ed22a5a7e08b656de93901e8787e4632bf73f3e38", "analyzer": "mvanalyze_before_refresh_replay"},
+    "fillpositions": {"path": "fillpositions.json", "sha256": "897edf8b00fa2336bf50973d40e733bc19ff94f813376432cc139349dacf190d", "analyzer": "mvanalyze_before_refresh_replay"},
+    "frontiervectors": {"path": "frontiervectors.json", "sha256": "368995263f2b4210123854e2d6508fe06dd61d8736e7f0035ffc14ebf6a7a4bb", "analyzer": "mvanalyze_before_refresh_replay"},
+    "liabilityhedger": {"path": "liabilityhedger.json", "sha256": "e33cee345f0767cb83f0cb061e370fac73292e836c04c8ce95df0c59e1d0a8c1", "analyzer": "mvanalyze_before_refresh_replay"},
+    "lifecycle": {"path": "lifecycle.json", "sha256": "2bb8b5ca6f89e1fa58a928f864b3158ba97b94eff4b5d570be4967890e6e8399", "analyzer": "mvanalyze_before_refresh_replay"},
+    "makerrebalance": {"path": "makerrebalance.json", "sha256": "29db72e78498a98a001958f66b2cc3ef06463bd618fbca0c654ad48616332c06", "analyzer": "mvanalyze_before_refresh_replay"},
+    "makerrefresh": {"path": "makerrefresh.json", "sha256": "93f42b8c0c46b3eecd435e2505746e1e447ab94027fbba4752ded38b76872e34", "analyzer": "mvanalyze_refresh_replay"},
+    "mechanical": {"path": "mechanical.json", "sha256": "ff68f12a7215449550c93e6f5ad66afa54388f423698e8389977ee871ddb4ed1", "analyzer": "mvanalyze_before_refresh_replay"},
+    "observationreceipts": {"path": "observationreceipts.json", "sha256": "dc7b0c949f5b2431304d5921c38937fc34e06599db0ef72a4158d65746746a2b", "analyzer": "mvanalyze_before_refresh_replay"},
+    "offline-evidenceartifacthash": {"path": "offline-evidenceartifacthash.json", "sha256": "c4501a3793193b7aeab39d1e775df0c03bed030b7e1f9fa4eb5872ad5e0279d5", "analyzer": "mvanalyze_before_refresh_replay"},
+    "optionliabilityp6": {"path": "optionliabilityp6.json", "sha256": "e785b86f3005936d6cef3b754afc44aa95f1a37f798a0592d8127a5970ec3433", "analyzer": "mvanalyze_before_refresh_replay"},
+    "optionvaluetakerp6": {"path": "optionvaluetakerp6.json", "sha256": "f5c709234f1bce4d3120d63530e69bd1656b942794a921ae12bc9e140b1d01e4", "analyzer": "mvanalyze_before_refresh_replay"},
+    "positions": {"path": "positions.json", "sha256": "e4131a162e649b62cdc658682ad02c7d3972687c914695e4d32b4cdac00e46db", "analyzer": "mvanalyze_before_refresh_replay"},
+    "postonly": {"path": "postonly.json", "sha256": "a22dd8d7cec27f54a8bb286333ed860f7ce8d4a202ef4c2d2f90a7916cf6ead7", "analyzer": "mvanalyze_before_refresh_replay"},
+    "roleaudit": {"path": "roleaudit.json", "sha256": "ab5c462ef9113970acceb8a9315c85047d719fd4f1b3bee7449e9dd30fb3ea36", "analyzer": "mvanalyze_before_refresh_replay"},
+    "settlements": {"path": "settlements.json", "sha256": "45195794dc683c96b012bb97b6f310911829f77adb867b388c3cfd6292407c24", "analyzer": "mvanalyze_before_refresh_replay"},
+    "vannavolgap6": {"path": "vannavolgap6.json", "sha256": "b5938970caf2350e16289bc8e316ed62d225b6e14e05417e42c3d9b228fd9096", "analyzer": "mvanalyze_before_refresh_replay"}
+  },
+  "raw_provenance": {
+    "checkpoints": {"path": "checkpoints.jsonl", "sha256": "e54de55bdeaa3c1c378a87276a540818bf14ae9fb5de0d44a727b1f3ebe6b8e8"},
+    "greeks": {"path": "greeks.json", "sha256": "34fd3d332071429162c99c5894481e1a0b0b8e331142f0a1355efa59a6fc25c6"},
+    "latency": {"path": "latency.json", "sha256": "29ecc5747cd6506611610176022d268cb76c7224c3007e5430b857b8e4c4e425"},
+    "run_config": {"path": "run-config.json", "sha256": "0724f2d022ee9b13ca814cdda67d70b057aa8d5c8b4c33f92cd57a1f52015475"},
+    "runtime_evidence_digest": "3dc2ac37e4e0d594eb17fada96cdb29ebc2bc2ad82a2caf714019a55fb5d66d2",
+    "runtime_evidence_records": 359325,
+    "execution_observations": 352099,
+    "persisted_json_files": [
+      {"path": "venues/central/derivatives.jsonl", "records": 58162, "sha256": "52805776796b08fddc33804a835352d3897b2ef060c04f0c5e85c66e0a4dc28d"},
+      {"path": "venues/central/general.jsonl", "records": 5851, "sha256": "a93e00e591d9e7fcd34e2031c110014dde80bb3ee1c5e09e565746348b7388c1"},
+      {"path": "venues/central/spot/ABC-CDF.jsonl", "records": 14837, "sha256": "78ed3c08ae1ed0b472b9052281451f5fd626e4c72b5f5138585bba1634d501ff"},
+      {"path": "venues/central/spot/ABC-USD.jsonl", "records": 45012, "sha256": "ac4798dae92fb9db30abd5fad69a0b430c4f5bd8c334f25d55c501efeac406e8"},
+      {"path": "venues/central/spot/CDF-USD.jsonl", "records": 21340, "sha256": "3d304cfb9877ba76aa3af1a68474d911572201102d598c4358f485cbdfa9dbe8"},
+      {"path": "venues/north/derivatives.jsonl", "records": 50989, "sha256": "6c73bcc22e8820acb3e560ed61b4acf16c215210226fa36b04647171c38b598b"},
+      {"path": "venues/north/general.jsonl", "records": 5494, "sha256": "ff17ca69bacf31cdf2dffb7e20654a757d046befb4ff59f02688ee2dd83e25f5"},
+      {"path": "venues/north/spot/ABC-CDF.jsonl", "records": 11110, "sha256": "39c0370fdf0b67901b0307c98b6a0ca7317fb8880a08967ae0bc1d72d72420af"},
+      {"path": "venues/north/spot/ABC-USD.jsonl", "records": 26772, "sha256": "6209af5b594398d1cb957b1dc458170cd2f9b9618b0cbf83441c6ab7c8e89435"},
+      {"path": "venues/north/spot/CDF-USD.jsonl", "records": 10497, "sha256": "7c703b0865e0c50676a975cf369512b93cf8aec4bedb9957e0cb7ef4922f5b2a"},
+      {"path": "venues/south/derivatives.jsonl", "records": 57614, "sha256": "866c9010f60fa3dec714d34846e0c455c45754497c1081e165c170c760dff285"},
+      {"path": "venues/south/general.jsonl", "records": 5792, "sha256": "48bde9918928c9143203fd197b18fb24b8ce30f3817e95d7c0a7df2f5896055f"},
+      {"path": "venues/south/spot/ABC-CDF.jsonl", "records": 8912, "sha256": "9216f891e58c5b499227daf56c79698b1a1c24e0ea3f3ec9d10df423f018ec9f"},
+      {"path": "venues/south/spot/ABC-USD.jsonl", "records": 25822, "sha256": "9311f8962da1a4746f513d539e29aa438e91b33197e514ee6e63972147ed3a41"},
+      {"path": "venues/south/spot/CDF-USD.jsonl", "records": 11121, "sha256": "2771b1401c52a92229b95acf073a7983a3d1c5a72861ba04879ea36c3389d9a9"}
+    ],
+    "persisted_json_record_count": 359325,
+    "terminal_sim_time": 1735689900000000000,
+    "close_flush_checkpoint_bound": 1735689960000000000
+  }
+}

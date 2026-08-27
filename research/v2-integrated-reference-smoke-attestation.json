@@ -38,6 +38,34 @@
       "decisions": 3051,
       "invalid_contract_rows": 0
     },
+    "passive_maker_refresh_ordering": {
+      "decisions": 3051,
+      "decision_sides": 6102,
+      "initial_or_no_prior": 116,
+      "checked": 5493,
+      "replacement_sides": 5970,
+      "cancellation_terminated_sides": 5493,
+      "full_fill_terminated_sides": 477,
+      "horizon_censored_sides": 16,
+      "accepted_outcomes": 6017,
+      "rejected_outcomes": 69,
+      "cancellations_observed": 5493,
+      "missing": 0,
+      "duplicate": 0,
+      "late": 0,
+      "out_of_order_cancellations": 0,
+      "fill_quantity_mismatches": 0,
+      "cancel_quantity_mismatches": 0,
+      "unmapped_passive_outcomes": 0,
+      "unmatched_order_fills": 0,
+      "unmatched_order_cancellations": 0,
+      "duplicate_fills": 0,
+      "lineage_rows": 6102,
+      "invalid_order_records": 0,
+      "lineage_digest": "c0c681b6bd2d6f8de8d4348fe0ca48e6df6e5db1abab4fec114f24a6bbc7b5de",
+      "valid": true,
+      "analyzer": "research/artifacts/v2-integrated/binaries/mvanalyze-bacb7d8-clean-vcs"
+    },
     "post_only": {
       "accepted_post_only": 9391,
       "events": 92807,
@@ -77,13 +105,20 @@
     "gomaxprocs_run": 4,
     "multivenue_sha256": "0d3e7c08fdc8d9f7bf892c30381a4583615cb7f0883b519f64f778409022672e",
     "mvanalyze_sha256": "7bd1f0620ded51f08ca550fda4f40b567406dc89cbf4285ed46415b2727fc3d2",
-    "prunegate_sha256": "57e38453263d3b8c68f8b70319a745d46490b125f88a822a38bbde429da24d56"
+    "makerrefresh_mvanalyze_sha256": "e00314ce97de6763edd3b45770090a3bb04b243a1841eca9113135a128ce5870",
+    "makerrefresh_mvanalyze_source_revision": "bacb7d86cc45c616b0825235919850df6fbb04cc",
+    "makerrefresh_mvanalyze_vcs_modified": false,
+    "prunegate_sha256": "57e38453263d3b8c68f8b70319a745d46490b125f88a822a38bbde429da24d56",
+    "archive_manifest": "research/v2-integrated-reference-analysis-manifest.json",
+    "archive_dir": "research/artifacts/v2-integrated/binaries"
   },
   "claim_boundary": [
     "This smoke passes the declared integrated-reference compatibility/evidence gate only.",
     "It does not license realism, funding anchoring, convergence, or emergence claims.",
     "SABR and Vanna--Volga activity is inherited by construction from O4; it is not emergent evidence.",
     "The no-log parity companion disables optional raw JSON evidence rows required by the full-mode validator; the full run is the complete scientific evidence source."
+    ,"The raw-log maker refresh replay independently proves venue order for 5,493 checked prior-resting sides; 116 sides were initial/no-prior, 477 had a prior full fill, and 16 were validly horizon-censored. It reports zero missing, duplicate, late, quantity, or cancellation-order failures. Ordinary IOC/taker orders from selected maker clients were tracked as known non-passive orders and excluded from the passive lifecycle contract."
+    ,"Settlement, cross-asset CDF borrowing, and executable router legs were not exercised in this five-minute smoke and remain NOT EXERCISED."
   ],
   "configs": {
     "full": {
@@ -332,5 +367,12 @@
   },
   "schema_version": 1,
   "simulator_source_revision": "b312336a3fff3e758ba672137aee0ac917f1bddc",
-  "status": "compatibility_smoke_complete_pending_independent_review"
+  "status": "compatibility_smoke_complete_independently_reviewed"
+  ,"terminal_time": {
+    "start_sim_unix_nanos": 1735689600000000000,
+    "terminal_sim_unix_nanos": 1735689900000000000,
+    "terminal_elapsed_seconds": 300,
+    "close_flush_checkpoint_bound_unix_nanos": 1735689960000000000,
+    "close_flush_checkpoint_is_not_horizon": true
+  }
 }
