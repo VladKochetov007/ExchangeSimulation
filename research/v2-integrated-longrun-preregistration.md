@@ -82,8 +82,9 @@ The fail-closed extractor must independently produce, at minimum:
 
 Required artifacts are considered complete only when every registered file is
 present, parses, has a complete `analysis-metadata.json`, and records the
-analyzer revision/SHA.  Raw evidence is retained; this protocol grants no
-prune authority.
+analyzer revision/SHA plus a recomputed SHA-256 matching the extractor's
+artifact hash map. Raw evidence is retained; this protocol grants no prune
+authority.
 
 The extractor's registered artifact set is immutable for this campaign:
 
@@ -123,7 +124,9 @@ counters must be zero wherever their result schema defines them. A late-path
 cell must observe funding, listing/expiry/settlement activity, and non-empty
 settlement checks; zero activity is not a pass for that path.
 
-The runner and extractor require a clean current-HEAD source identity,
+The development runner permanently refuses the reserved holdout identities;
+holdout validation requires a separately committed post-freeze runner and
+protocol. The runner and extractor require a clean current-HEAD source identity,
 byte-identical registered configuration, clean embedded simulator/analyzer
 build metadata (`vcs.revision` equal to the declared revision and
 `vcs.modified=false`), immutable run metadata, and hash-linked completion
