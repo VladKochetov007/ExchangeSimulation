@@ -35,7 +35,7 @@ P7d, or the mixed-timing line.
 
 ## Verification state
 
-Shell syntax and the negative-path contract tests pass. The mandatory Go test
-suite is being run in tmux with `GOMAXPROCS=4`; its result is recorded only
-after completion. No long-run binary has been rebuilt and no simulation has
-started at the time of this note.
+Shell syntax, the negative-path contract tests, and the mandatory Go test
+suite pass with `GOMAXPROCS=4`. An independent Sol-xhigh review returned
+`ACCEPT` at `06bd7cc`; it accessed no simulation, holdout, or private archive
+evidence during review. No registered long-run cell has been consumed.
