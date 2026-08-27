@@ -46,10 +46,10 @@
     "untouched_holdout_consumed": false
   },
   "embedded_vcs": {"revision": "29d28835469a44afe1eeaf2ed63032d56f23b936", "time": "2026-08-27T08:46:27Z", "modified": false},
-  "evidence_location": "/tmp/v2-freeze-vcs-smoke.wHjF0P",
+  "evidence_location": "transient-workspace/v2-freeze-vcs-smoke.wHjF0P",
   "durable_evidence": "research/artifacts/v2-freeze-candidate/smoke-vcs",
   "notes": [
-    "The /tmp location is a transient reproduction workspace; binary hashes and commands are the durable provenance.",
+    "The transient-workspace location is a transient reproduction workspace; binary hashes and commands are the durable provenance.",
     "Evidence sidecars are atomically published after sync, but streamed JSONL is not claimed crash-durable or directory-fsync durable.",
     "Independent review verdict is RECOMPUTE: this package is only a short-horizon logging/GOMAXPROCS neutrality smoke, not an immutable V2 freeze declaration.",
     "The full registered long-horizon mechanical, information, lifecycle, accounting, risk and mutation package remains required."

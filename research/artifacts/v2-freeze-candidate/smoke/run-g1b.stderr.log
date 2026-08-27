@@ -1,4 +1,4 @@
-2026/08/27 11:43:09 done: sim=10s wall=0s logs=/tmp/v2-freeze-candidate.KRHrLd/run-g1b
+2026/08/27 11:43:09 done: sim=10s wall=0s logs=transient-workspace/v2-freeze-candidate.KRHrLd/run-g1b
 real 0.22
 user 0.17
 sys 0.04
