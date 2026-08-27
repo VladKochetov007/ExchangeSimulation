@@ -384,6 +384,12 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 				byRequest[requestKey] = append(byRequest[requestKey], item)
 			}
 			orders := make(map[uint64]*makerPassiveRefreshOrder)
+			// seenOrderIDs covers every accepted order from a selected maker,
+			// including ordinary IOC/market inventory actions that are outside
+			// the passive refresh contract.  It prevents those legitimate fills
+			// from being mistaken for missing passive-order evidence while still
+			// flagging a fill/cancel whose accepted identity is absent entirely.
+			seenOrderIDs := make(map[uint64]struct{})
 			localStates := make(map[makerPassiveRefreshSideKey]*makerPassiveRefreshSide)
 			getLocalSide := func(clientID uint64, side string) *makerPassiveRefreshSide {
 				key := makerPassiveRefreshSideKey{clientID: clientID, side: side}
@@ -477,9 +483,18 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					if clientID == 0 {
 						clientID = event.ClientID
 					}
+					// OrderAccepted payloads in the persisted per-book stream do
+					// not repeat the symbol.  The canonical book path is the
+					// independently persisted symbol boundary; recover it here
+					// rather than treating an omitted redundant field as an
+					// invalid order.
+					if accepted.Symbol == "" {
+						accepted.Symbol = book.symbol
+					}
 					if _, ok := tracked[clientID]; !ok || accepted.OrderID == 0 || accepted.Side == "" {
 						return
 					}
+					seenOrderIDs[accepted.OrderID] = struct{}{}
 					item := expectedForRequest(byRequest, clientID, accepted.Side, accepted.Request)
 					consumeOutcome(event, clientID, accepted.Side, accepted.Request, "accepted")
 					invalid := (accepted.ClientID != 0 && accepted.ClientID != event.ClientID) || accepted.Request == 0 ||
@@ -548,8 +563,11 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					order := orders[fill.OrderID]
 					if order == nil {
 						if _, trackedClient := tracked[event.ClientID]; trackedClient {
+							if _, known := seenOrderIDs[fill.OrderID]; known {
+								return
+							}
 							result.UnmatchedOrderFills++
-							result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: event.ClientID, Symbol: book.symbol, Failure: "unmatched_fill_order"})
+							result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: event.ClientID, Symbol: book.symbol, Failure: "unmatched_fill_order", PriorOrderIDs: []uint64{fill.OrderID}})
 						}
 						return
 					}
@@ -592,8 +610,11 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					order := orders[cancel.OrderID]
 					if order == nil {
 						if _, trackedClient := tracked[event.ClientID]; trackedClient {
+							if _, known := seenOrderIDs[cancel.OrderID]; known {
+								return
+							}
 							result.UnmatchedOrderCancellations++
-							result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: event.ClientID, Symbol: book.symbol, Failure: "unmatched_cancel_order"})
+							result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: event.ClientID, Symbol: book.symbol, Failure: "unmatched_cancel_order", PriorOrderIDs: []uint64{cancel.OrderID}})
 						}
 						return
 					}
