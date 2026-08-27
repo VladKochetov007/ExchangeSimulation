@@ -77,7 +77,10 @@ jq -e --arg cell "$cell_name" \
 head_revision=$(git -C "$root_dir" rev-parse HEAD)
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "source worktree is dirty"
 metadata_revision=$(jq -er '.git_revision' "$cell/run-metadata.json")
-[[ "$metadata_revision" == "$head_revision" ]] || fail "run source revision is not current HEAD"
+# The simulator revision is immutable run provenance. Analyzer-only fixes may
+# advance HEAD without changing the already pinned simulator; both identities
+# are recorded separately below and the analyzer must be a clean current build.
+[[ "$metadata_revision" =~ ^[0-9a-f]{40}$ ]] || fail "invalid run source revision"
 
 simulator_binary=$(jq -er '.binary_path' "$cell/run-metadata.json")
 require_file "$simulator_binary"

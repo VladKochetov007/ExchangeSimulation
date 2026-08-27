@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -43,6 +44,21 @@ func TestAuditMarketDataEvidenceAcceptsIndependentValidFixture(t *testing.T) {
 		LinkID: 2, SourceVenue: "south", Link: "south/v2_remote_feed/north/maker_1/client/2", Role: "v2_remote_feed",
 	}) {
 		t.Fatalf("link activity = %+v, want active and visibly inactive links", audit.LinkActivity)
+	}
+}
+
+func TestAuditMarketDataEvidenceStreamingMatchesBufferedOracle(t *testing.T) {
+	dir := writeEvidenceFixture(t, nil)
+	streaming, err := AuditMarketDataReceipts(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buffered, err := auditMarketDataReceiptsBuffered(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(streaming, buffered) {
+		t.Fatalf("streaming audit differs from buffered oracle:\nstreaming=%+v\nbuffered=%+v", streaming, buffered)
 	}
 }
 

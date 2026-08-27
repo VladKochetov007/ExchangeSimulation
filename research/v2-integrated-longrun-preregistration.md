@@ -59,8 +59,8 @@ The development/holdout partition is fixed as follows:
 
 ## Required provenance and evidence contract
 
-Every cell must be launched in a fresh directory using a clean binary built
-from one declared source revision.  The directory must contain pre-run
+Every cell must be launched in a fresh directory using a clean simulator
+binary built from one declared simulator source revision.  The directory must contain pre-run
 `run-config.json` and `run-metadata.json`, and post-run `greeks.json` and
 `latency.json` written only after successful simulator completion.  The runner
 must record source revision, binary SHA-256, config SHA-256, Go toolchain,
@@ -83,8 +83,11 @@ The fail-closed extractor must independently produce, at minimum:
 Required artifacts are considered complete only when every registered file is
 present, parses, has a complete `analysis-metadata.json`, and records the
 analyzer revision/SHA plus a recomputed SHA-256 matching the extractor's
-artifact hash map. Raw evidence is retained; this protocol grants no prune
-authority.
+artifact hash map. Analyzer-only correctness or bounded-memory fixes may use a
+new clean analyzer revision against already completed simulator evidence; the
+metadata must retain both immutable simulator and analyzer identities, and the
+analyzer must be clean/current at extraction time. Raw evidence is retained;
+this protocol grants no prune authority.
 
 The extractor's registered artifact set is immutable for this campaign:
 
@@ -126,12 +129,14 @@ settlement checks; zero activity is not a pass for that path.
 
 The development runner permanently refuses the reserved holdout identities;
 holdout validation requires a separately committed post-freeze runner and
-protocol. The runner and extractor require a clean current-HEAD source identity,
-byte-identical registered configuration, clean embedded simulator/analyzer
-build metadata (`vcs.revision` equal to the declared revision and
-`vcs.modified=false`), immutable run metadata, and hash-linked completion
-sidecars. The scorer refuses to overwrite an existing score and is the only
-candidate aggregate decision surface.
+protocol. The runner requires a clean current-HEAD simulator source identity at
+launch. The extractor requires the recorded simulator identity to match the
+binary and manifest, plus a clean current-HEAD analyzer identity, byte-identical
+registered configuration, clean embedded simulator/analyzer build metadata
+(`vcs.revision` equal to each declared identity and `vcs.modified=false`),
+immutable run metadata, and hash-linked completion sidecars. The scorer refuses
+to overwrite an existing score and is the only candidate aggregate decision
+surface.
 
 ## Candidate qualification predicates
 

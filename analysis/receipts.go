@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -177,6 +179,14 @@ type auditedFrontier struct {
 // contract. Matching a file checksum is insufficient: all mutations below
 // deliberately remain detectable even when their attacker recomputes digests.
 func AuditMarketDataReceipts(dir string) (*MarketDataReceiptAudit, error) {
+	return auditMarketDataReceiptsStreaming(dir)
+}
+
+// auditMarketDataReceiptsBuffered is retained temporarily as a review oracle
+// while the production path moves to bounded streaming. It is not called by
+// the analyzer; keeping it during the transition makes semantic comparison
+// against the prior implementation straightforward in tests and review.
+func auditMarketDataReceiptsBuffered(dir string) (*MarketDataReceiptAudit, error) {
 	manifestRaw, err := os.ReadFile(filepath.Join(dir, "market-data-evidence-v2.json"))
 	if err != nil {
 		return nil, fmt.Errorf("read market-data evidence manifest: %w", err)
@@ -352,6 +362,288 @@ func AuditMarketDataReceipts(dir string) (*MarketDataReceiptAudit, error) {
 	return result, nil
 }
 
+// evidenceRecordStream reads one fixed-width sidecar without materializing the
+// file. The recorder appends each sidecar in the same global event order, so
+// three streams can be merged while retaining the exact semantic checks.
+type evidenceRecordStream struct {
+	file        *os.File
+	path        string
+	recordBytes int
+	expected    int64
+	read        int64
+	wantDigest  string
+	hasher      hash.Hash
+	record      []byte
+	finished    bool
+	digestMatch bool
+}
+
+func openEvidenceRecordStream(dir, name string, recordBytes int, records int64, wantDigest string) (*evidenceRecordStream, error) {
+	if recordBytes <= 0 || records < 0 || len(wantDigest) != 64 {
+		return nil, fmt.Errorf("invalid evidence stream contract for %s", name)
+	}
+	path := filepath.Join(dir, name)
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open market-data evidence %s: %w", name, err)
+	}
+	return &evidenceRecordStream{
+		file: file, path: path, recordBytes: recordBytes, expected: records,
+		wantDigest: wantDigest, hasher: sha256.New(), record: make([]byte, recordBytes), digestMatch: true,
+	}, nil
+}
+
+func (s *evidenceRecordStream) close() error {
+	return s.file.Close()
+}
+
+func (s *evidenceRecordStream) next() (bool, error) {
+	if s.finished {
+		return false, nil
+	}
+	if s.read == s.expected {
+		var extra [1]byte
+		n, err := s.file.Read(extra[:])
+		if n != 0 {
+			return false, fmt.Errorf("market-data evidence %s has records beyond manifest count", s.path)
+		}
+		if err != io.EOF {
+			if err == nil {
+				return false, fmt.Errorf("market-data evidence %s did not reach EOF", s.path)
+			}
+			return false, fmt.Errorf("read market-data evidence %s: %w", s.path, err)
+		}
+		got := hex.EncodeToString(s.hasher.Sum(nil))
+		s.digestMatch = got == s.wantDigest
+		s.finished = true
+		return false, nil
+	}
+	n, err := io.ReadFull(s.file, s.record)
+	if err != nil {
+		return false, fmt.Errorf("read market-data evidence %s record %d: %w", s.path, s.read+1, err)
+	}
+	if n != s.recordBytes {
+		return false, fmt.Errorf("short market-data evidence %s record %d", s.path, s.read+1)
+	}
+	if _, err := s.hasher.Write(s.record); err != nil {
+		return false, fmt.Errorf("hash market-data evidence %s: %w", s.path, err)
+	}
+	s.read++
+	return true, nil
+}
+
+type evidenceEventStream struct {
+	kind         eventKind
+	records      *evidenceRecordStream
+	available    bool
+	eventOrdinal uint64
+}
+
+func (s *evidenceEventStream) advance() error {
+	available, err := s.records.next()
+	if err != nil {
+		return err
+	}
+	s.available = available
+	if !available {
+		return nil
+	}
+	if s.kind == eventDecision {
+		s.eventOrdinal = binary.BigEndian.Uint64(s.records.record[88:96])
+	} else {
+		s.eventOrdinal = binary.BigEndian.Uint64(s.records.record[76:84])
+	}
+	return nil
+}
+
+func auditMarketDataReceiptsStreaming(dir string) (*MarketDataReceiptAudit, error) {
+	manifestRaw, err := os.ReadFile(filepath.Join(dir, "market-data-evidence-v2.json"))
+	if err != nil {
+		return nil, fmt.Errorf("read market-data evidence manifest: %w", err)
+	}
+	var manifest marketDataEvidenceManifest
+	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+		return nil, fmt.Errorf("decode market-data evidence manifest: %w", err)
+	}
+	if manifest.SchemaVersion != 2 || manifest.Domain != "participant_information_boundary_v2" ||
+		manifest.Ordering != "per_link_fifo_schedule_receipt_decision" {
+		return nil, fmt.Errorf("unsupported market-data evidence contract: schema=%d domain=%q ordering=%q", manifest.SchemaVersion, manifest.Domain, manifest.Ordering)
+	}
+	if manifest.Schedules.File != "market-data-schedules-v2.bin" || manifest.Receipts.File != "market-data-receipts-v2.bin" || manifest.Decisions.File != "market-data-decisions-v2.bin" {
+		return nil, fmt.Errorf("unsupported market-data evidence file names")
+	}
+	links, symbols, err := validateEvidenceCatalog(manifest)
+	if err != nil {
+		return nil, err
+	}
+	schedules, err := openEvidenceRecordStream(dir, manifest.Schedules.File, marketDataScheduleRecordBytes, manifest.Schedules.Records, manifest.Schedules.Digest)
+	if err != nil {
+		return nil, err
+	}
+	receipts, err := openEvidenceRecordStream(dir, manifest.Receipts.File, marketDataReceiptRecordBytes, manifest.Receipts.Records, manifest.Receipts.Digest)
+	if err != nil {
+		_ = schedules.close()
+		return nil, err
+	}
+	decisions, err := openEvidenceRecordStream(dir, manifest.Decisions.File, marketDataDecisionRecordBytes, manifest.Decisions.Records, manifest.Decisions.Digest)
+	if err != nil {
+		_ = schedules.close()
+		_ = receipts.close()
+		return nil, err
+	}
+	defer schedules.close()
+	defer receipts.close()
+	defer decisions.close()
+
+	result := &MarketDataReceiptAudit{
+		SchemaVersion: manifest.SchemaVersion, Domain: manifest.Domain, Ordering: manifest.Ordering,
+		TerminalAt: manifest.TerminalAt, Schedules: manifest.Schedules.Records,
+		Receipts: manifest.Receipts.Records, Decisions: manifest.Decisions.Records,
+		ScheduleDigestMatches: true, ReceiptDigestMatches: true, DecisionDigestMatches: true,
+	}
+	linkActivity := make(map[uint32]*MarketDataLinkActivity, len(manifest.Links))
+	for _, row := range manifest.Links {
+		linkActivity[row.ID] = &MarketDataLinkActivity{LinkID: row.ID, SourceVenue: row.SourceVenue, Link: row.Link, Role: row.Role}
+	}
+
+	events := []*evidenceEventStream{
+		{kind: eventSchedule, records: schedules},
+		{kind: eventReceipt, records: receipts},
+		{kind: eventDecision, records: decisions},
+	}
+	for _, stream := range events {
+		if err := stream.advance(); err != nil {
+			return nil, err
+		}
+	}
+	pendingSchedules := make(map[scheduleKey]observationRecord, manifest.Schedules.Records)
+	sources := make(map[sourceKey]struct{}, manifest.Schedules.Records)
+	frontiers := make(map[linkKey]auditedFrontier)
+	lastSchedule := make(map[linkKey]uint64)
+	lastReceipt := make(map[linkKey]uint64)
+	lastEvent := uint64(0)
+	for {
+		var selected *evidenceEventStream
+		for _, stream := range events {
+			if !stream.available || (selected != nil && stream.eventOrdinal >= selected.eventOrdinal) {
+				continue
+			}
+			selected = stream
+		}
+		if selected == nil {
+			break
+		}
+		raw := selected.records.record
+		if selected.eventOrdinal == 0 || selected.eventOrdinal != lastEvent+1 {
+			result.BadEventOrder++
+		}
+		if selected.eventOrdinal > lastEvent {
+			lastEvent = selected.eventOrdinal
+		}
+		switch selected.kind {
+		case eventSchedule:
+			record := decodeObservationView(raw)
+			record.raw = raw
+			validateObservation(result, record, links, symbols, false)
+			record.raw = nil
+			if activity := linkActivity[record.linkID]; activity != nil {
+				activity.Schedules++
+			}
+			key := linkKey{record.clientID, record.linkID}
+			if record.ordinal != lastSchedule[key]+1 {
+				result.BadScheduleOrdinal++
+			}
+			lastSchedule[key] = record.ordinal
+			schedule := scheduleKey{linkKey: key, ordinal: record.ordinal}
+			if _, exists := pendingSchedules[schedule]; exists {
+				result.BadScheduleOrdinal++
+			}
+			pendingSchedules[schedule] = record
+			source := sourceKey{linkKey: key, sequence: record.sequence, fingerprint: record.fingerprint}
+			if _, exists := sources[source]; exists {
+				result.DuplicateSource++
+			}
+			sources[source] = struct{}{}
+		case eventReceipt:
+			record := decodeObservationView(raw)
+			record.raw = raw
+			validateObservation(result, record, links, symbols, true)
+			record.raw = nil
+			if activity := linkActivity[record.linkID]; activity != nil {
+				activity.Receipts++
+			}
+			key := linkKey{record.clientID, record.linkID}
+			if record.ordinal != lastReceipt[key]+1 {
+				result.BadReceiptOrdinal++
+			}
+			lastReceipt[key] = record.ordinal
+			schedule, exists := pendingSchedules[scheduleKey{linkKey: key, ordinal: record.ordinal}]
+			if !exists {
+				result.ReceiptWithoutSchedule++
+			} else if !sameObservation(schedule, record) {
+				result.ScheduleMismatch++
+			}
+			previous := frontiers[key]
+			chain := sha256.New()
+			_, _ = chain.Write(previous.digest[:])
+			_, _ = chain.Write(raw)
+			var digest [16]byte
+			copy(digest[:], chain.Sum(nil))
+			frontiers[key] = auditedFrontier{ordinal: record.ordinal, deliveredAt: record.deliveredAt, digest: digest}
+		case eventDecision:
+			record := decodeDecision(raw)
+			if _, exists := links[record.linkID]; !exists {
+				result.DecisionWithoutLink++
+			}
+			if _, exists := symbols[record.symbolID]; !exists || record.symbolID == 0 {
+				result.UnknownSymbolID++
+			}
+			if record.side > 1 || record.orderType > 1 || record.tif > 2 {
+				result.BadDecisionFrontier++
+			}
+			if activity := linkActivity[record.linkID]; activity != nil {
+				activity.Decisions++
+			}
+			for _, value := range raw[19:24] {
+				if value != 0 {
+					result.NonzeroReserved++
+					break
+				}
+			}
+			frontier := frontiers[linkKey{record.clientID, record.linkID}]
+			if frontier.ordinal != record.frontierOrdinal || frontier.deliveredAt != record.frontierDeliveredAt || frontier.digest != record.frontierDigest {
+				result.BadDecisionFrontier++
+			}
+			if record.frontierOrdinal > 0 && record.frontierDeliveredAt > record.decisionAt {
+				result.FutureDecisionUse++
+			}
+		}
+		if err := selected.advance(); err != nil {
+			return nil, err
+		}
+	}
+	result.ScheduleDigestMatches = schedules.digestMatch
+	result.ReceiptDigestMatches = receipts.digestMatch
+	result.DecisionDigestMatches = decisions.digestMatch
+	for schedule, record := range pendingSchedules {
+		if record.scheduledAt <= manifest.TerminalAt && lastReceipt[schedule.linkKey] < schedule.ordinal {
+			result.MissingDueReceipt++
+		}
+	}
+	result.LinkActivity = make([]MarketDataLinkActivity, 0, len(linkActivity))
+	for _, activity := range linkActivity {
+		result.LinkActivity = append(result.LinkActivity, *activity)
+	}
+	sort.Slice(result.LinkActivity, func(i, j int) bool { return result.LinkActivity[i].LinkID < result.LinkActivity[j].LinkID })
+	result.Valid = result.ScheduleDigestMatches && result.ReceiptDigestMatches && result.DecisionDigestMatches &&
+		result.UnknownLinkID == 0 && result.UnknownSymbolID == 0 && result.UnknownType == 0 && result.NonzeroReserved == 0 &&
+		result.ScheduledBeforePub == 0 && result.DeliveredBeforePlan == 0 && result.BadScheduleOrdinal == 0 &&
+		result.BadReceiptOrdinal == 0 && result.DuplicateSource == 0 && result.ReceiptWithoutSchedule == 0 &&
+		result.ScheduleMismatch == 0 && result.MissingDueReceipt == 0 && result.BadEventOrder == 0 &&
+		result.DecisionWithoutLink == 0 && result.BadDecisionFrontier == 0 && result.FutureDecisionUse == 0
+	return result, nil
+}
+
 func readEvidenceFile(dir, name string, recordBytes int, records int64, wantDigest string) ([]byte, bool, error) {
 	if len(wantDigest) != 64 {
 		return nil, false, fmt.Errorf("invalid evidence digest for %s", name)
@@ -392,6 +684,12 @@ func validateEvidenceCatalog(manifest marketDataEvidenceManifest) (map[uint32]st
 }
 
 func decodeObservation(raw []byte) observationRecord {
+	record := decodeObservationView(raw)
+	record.raw = append([]byte(nil), raw...)
+	return record
+}
+
+func decodeObservationView(raw []byte) observationRecord {
 	var fingerprint [16]byte
 	copy(fingerprint[:], raw[28:44])
 	return observationRecord{
@@ -406,7 +704,6 @@ func decodeObservation(raw []byte) observationRecord {
 		deliveredAt:  int64(binary.BigEndian.Uint64(raw[60:68])),
 		ordinal:      binary.BigEndian.Uint64(raw[68:76]),
 		eventOrdinal: binary.BigEndian.Uint64(raw[76:84]),
-		raw:          append([]byte(nil), raw...),
 	}
 }
 
