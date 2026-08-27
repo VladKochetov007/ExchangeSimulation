@@ -10,8 +10,8 @@ machine).
 
 - Repository: `/home/vlad/development/exchange_simulation`
 - Branch: `autoresearch/ffa-ecology-gen0`
-- HEAD: `cf0d83f59c3e1c1d3363b474edb9d1def641f8c1`
-- HEAD subject: `docs(research): refine private transfer scope`
+- HEAD: `2008daa39d7735da664986249b8f019122940897`
+- HEAD subject: `docs(research): record archive checksum`
 - Public remote: `github`
   (`https://github.com/VladKochetov007/ExchangeSimulation.git`)
 - Before transfer, `github/autoresearch/ffa-ecology-gen0` points to
@@ -30,14 +30,15 @@ machine).
 
 The recent commits immediately preceding this handoff are:
 
-1. `cf0d83f` — recorded the compact private-archive scope.
-2. `deb00f9` — moved the three untracked research notes under `research/`
+1. `2008daa` — recorded the compact private-archive checksum and contents.
+2. `cf0d83f` — recorded the compact private-archive scope.
+3. `deb00f9` — moved the three untracked research notes under `research/`
    so the notes travel with the public source history.
-3. `d6d99e0` — added this tracked remote handoff.
-4. `30176e0` — hardened integrated long-run provenance, registered GOMAXPROCS
+4. `d6d99e0` — added this tracked remote handoff.
+5. `30176e0` — hardened integrated long-run provenance, registered GOMAXPROCS
    and 24-hour identity, copied-config execution, and atomic completion
    status.
-5. `5af4573` — validated clean binary provenance for long-run runs.
+6. `5af4573` — validated clean binary provenance for long-run runs.
 
 ## Scientific position
 
