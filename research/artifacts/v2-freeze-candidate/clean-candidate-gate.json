@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "CANDIDATE_GATE_PASS_PENDING_INDEPENDENT_REVIEW",
+  "status": "RECOMPUTE_REQUIRED_AFTER_INDEPENDENT_REVIEW",
   "source_commit": "29d28835469a44afe1eeaf2ed63032d56f23b936",
   "latest_simulator_semantic_commit": "2068d9d",
   "config": "research/configs/frozen-baseline-2026-08-22.json",
@@ -40,7 +40,7 @@
     "go_test_all": "pass",
     "go_vet_all": "pass",
     "targeted_race_evidence_boundaries": "pass",
-    "cross_process_determinism_test": "pass",
+    "cross_process_determinism_test": "pass (short-horizon smoke only)",
     "full_race": "not_promoted: ten-minute timeout in pre-existing TestV23P3PerpReplenishmentEvidenceIsFreshProcessDeterministicAndNeutral with no race report",
     "economic_outcome_campaign": "not_run",
     "untouched_holdout_consumed": false
@@ -51,6 +51,7 @@
   "notes": [
     "The /tmp location is a transient reproduction workspace; binary hashes and commands are the durable provenance.",
     "Evidence sidecars are atomically published after sync, but streamed JSONL is not claimed crash-durable or directory-fsync durable.",
-    "This is a pre-freeze candidate gate, not the immutable V2 freeze declaration."
+    "Independent review verdict is RECOMPUTE: this package is only a short-horizon logging/GOMAXPROCS neutrality smoke, not an immutable V2 freeze declaration.",
+    "The full registered long-horizon mechanical, information, lifecycle, accounting, risk and mutation package remains required."
   ]
 }
