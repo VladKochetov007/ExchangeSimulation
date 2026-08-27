@@ -311,11 +311,11 @@
       "weight_per_minute": 0
     }
   },
-  "record_decision_frontier_vectors": true,
+  "record_decision_frontier_vectors": false,
   "record_liability_hedger_decisions": false,
   "record_maker_inventory_rebalance_decisions": false,
   "record_maker_quote_size_decisions": false,
-  "record_market_data_receipts": true,
+  "record_market_data_receipts": false,
   "record_noise_flow_phase_decisions": false,
   "record_option_liability_user_decisions": false,
   "remote_maker_feeds": [
