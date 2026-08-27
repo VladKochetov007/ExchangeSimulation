@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -49,6 +50,8 @@ type checkpointSink struct {
 	events     int64
 	nextBound  int64
 	firstEvent bool
+	err        error
+	closed     bool
 }
 
 // checkpointRecord is one line of the checkpoint file.
@@ -125,6 +128,9 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
 
 	if s.firstEvent && s.intervalNano > 0 {
 		s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
@@ -150,8 +156,9 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 		}
 		record.Symbol, record.OrderID = identifyPayload(encoded)
 		if line, err := json.Marshal(record); err == nil {
-			s.trace.Write(line)
-			s.trace.Write([]byte("\n"))
+			s.writeLineLocked(s.trace, line, "write execution trace")
+		} else {
+			s.failLocked(fmt.Errorf("marshal execution trace: %w", err))
 		}
 	}
 
@@ -162,6 +169,9 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 }
 
 func (s *checkpointSink) writeCheckpointLocked(at int64) {
+	if s.checkpoints == nil {
+		return
+	}
 	record := checkpointRecord{
 		Domain:              "execution_observations",
 		Ordering:            "ordered_stream",
@@ -170,29 +180,65 @@ func (s *checkpointSink) writeCheckpointLocked(at int64) {
 		ExecutionStreamHash: hex.EncodeToString(s.rolling[:]),
 		Rolling:             hex.EncodeToString(s.rolling[:]),
 	}
-	if line, err := json.Marshal(record); err == nil {
-		s.checkpoints.Write(line)
-		s.checkpoints.Write([]byte("\n"))
+	line, err := json.Marshal(record)
+	if err != nil {
+		s.failLocked(fmt.Errorf("marshal execution checkpoint: %w", err))
+		return
+	}
+	s.writeLineLocked(s.checkpoints, line, "write execution checkpoint")
+}
+
+func (s *checkpointSink) writeLineLocked(w io.WriteCloser, line []byte, operation string) {
+	if w == nil || s.err != nil {
+		return
+	}
+	if n, err := w.Write(line); err != nil {
+		s.failLocked(fmt.Errorf("%s: %w", operation, err))
+		return
+	} else if n != len(line) {
+		s.failLocked(fmt.Errorf("%s: %w", operation, io.ErrShortWrite))
+		return
+	}
+	if n, err := w.Write([]byte("\n")); err != nil {
+		s.failLocked(fmt.Errorf("%s newline: %w", operation, err))
+	} else if n != 1 {
+		s.failLocked(fmt.Errorf("%s newline: %w", operation, io.ErrShortWrite))
+	}
+}
+
+func (s *checkpointSink) failLocked(err error) {
+	if err != nil {
+		s.err = errors.Join(s.err, err)
 	}
 }
 
 // close flushes a final checkpoint so a run that ends between boundaries is
-// still comparable.
-func (s *checkpointSink) close() {
+// still comparable. It reports checkpoint/trace transport failures so callers
+// cannot publish a successful execution attestation for a partial file.
+func (s *checkpointSink) close() error {
 	if s == nil {
-		return
+		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return s.err
+	}
+	s.closed = true
 	if s.checkpoints != nil {
 		s.writeCheckpointLocked(s.nextBound)
-		s.checkpoints.Close()
+		if err := s.checkpoints.Close(); err != nil {
+			s.failLocked(fmt.Errorf("close execution checkpoints: %w", err))
+		}
 		s.checkpoints = nil
 	}
 	if s.trace != nil {
-		s.trace.Close()
+		if err := s.trace.Close(); err != nil {
+			s.failLocked(fmt.Errorf("close execution trace: %w", err))
+		}
 		s.trace = nil
 	}
+	return s.err
 }
 
 // identifyPayload pulls the two fields that make a trace line readable without

@@ -49,6 +49,26 @@ func TestCloseSuppressesRawEvidenceHashAfterLoggerFailure(t *testing.T) {
 	}
 }
 
+func TestCloseSuppressesEvidenceArtifactAfterCheckpointFailure(t *testing.T) {
+	want := errors.New("injected checkpoint write failure")
+	logger, err := feesim.NewJSONLinesLogger(filepath.Join(t.TempDir(), "evidence.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	sim := &Sim{
+		Config:      Config{LogMode: "full", LogDir: dir},
+		loggers:     []*feesim.JSONLinesLogger{logger},
+		checkpoints: &checkpointSink{intervalNano: 1, checkpoints: &checkpointFailWriter{err: want}, firstEvent: true},
+	}
+	if err := sim.Close(); !errors.Is(err, want) {
+		t.Fatalf("Close error = %v, want %v", err, want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "evidence-artifact-hash.json")); !os.IsNotExist(err) {
+		t.Fatalf("runtime evidence hash exists after checkpoint failure: %v", err)
+	}
+}
+
 func TestConfigAcceptsDocumentedSnakeCaseJSON(t *testing.T) {
 	var cfg Config
 	if err := json.Unmarshal([]byte(`{"log_dir":"ignored","log_mode":"none","seed":99,"dealer_hedge_mode":"off","short_option_tenor":7200000000000,"spot_passive_maker_post_only":true,"spot_passive_maker_cancel_before_replace":true}`), &cfg); err != nil {

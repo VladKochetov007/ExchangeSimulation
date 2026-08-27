@@ -1854,11 +1854,11 @@ func (s *Sim) Run(ctx context.Context) error {
 // hash. If any close fails, no hash is written and the caller must not publish
 // terminal metadata for the run.
 func (s *Sim) Close() error {
-	s.checkpoints.close()
+	checkpointErr := s.checkpoints.close()
 	closeErr := s.finalizeMarketDataReceipts()
 	evidence, loggerErr := feesim.CloseLoggers(s.loggers)
-	if closeErr != nil || loggerErr != nil {
-		return errors.Join(closeErr, loggerErr)
+	if checkpointErr != nil || closeErr != nil || loggerErr != nil {
+		return errors.Join(checkpointErr, closeErr, loggerErr)
 	}
 	// The evidence files are written by several independent loggers and do not
 	// preserve one global causal order. This artifact attests exactly the

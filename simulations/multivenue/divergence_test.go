@@ -2,12 +2,41 @@ package multivenue
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"testing"
 
 	"exchange_sim/simulations/feesim"
 )
+
+type checkpointFailWriter struct {
+	bytes.Buffer
+	err error
+}
+
+func (w *checkpointFailWriter) Write([]byte) (int, error) { return 0, w.err }
+func (w *checkpointFailWriter) Close() error              { return nil }
+
+func TestCheckpointSinkReportsTransportFailure(t *testing.T) {
+	want := errors.New("injected checkpoint write failure")
+	sink := &checkpointSink{
+		intervalNano: 1,
+		checkpoints:  &checkpointFailWriter{err: want},
+		firstEvent:   true,
+	}
+	sink.observe(1, 1, "event", "north", map[string]int{"n": 1})
+	if err := sink.close(); !errors.Is(err, want) {
+		t.Fatalf("checkpoint close error = %v, want %v", err, want)
+	}
+	if err := sink.close(); !errors.Is(err, want) {
+		t.Fatalf("repeat checkpoint close error = %v, want %v", err, want)
+	}
+}
+
+var _ io.WriteCloser = (*checkpointFailWriter)(nil)
 
 func TestMakerTelemetryReusesGlobalCheckpointLogger(t *testing.T) {
 	dir := t.TempDir()
