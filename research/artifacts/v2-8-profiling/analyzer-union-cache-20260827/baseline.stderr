@@ -1,0 +1,1 @@
+mode=baseline wall_seconds=14.224333 total_alloc_bytes=3104773312 mallocs=46833264 num_gc=192 heap_alloc_end=74260328
