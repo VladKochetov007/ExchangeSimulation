@@ -10,11 +10,12 @@ machine).
 
 - Repository: `/home/vlad/development/exchange_simulation`
 - Branch: `autoresearch/ffa-ecology-gen0`
-- HEAD: `deb00f9873b097cf20062de169ef3de1811be655`
-- HEAD subject: `docs(research): organize research notes`
+- HEAD: `cf0d83f59c3e1c1d3363b474edb9d1def641f8c1`
+- HEAD subject: `docs(research): refine private transfer scope`
 - Public remote: `github`
   (`https://github.com/VladKochetov007/ExchangeSimulation.git`)
-- Current branch already equals `github/autoresearch/ffa-ecology-gen0`.
+- Before transfer, `github/autoresearch/ffa-ecology-gen0` points to
+  `7f563665`; this handoff commit is the pending branch update.
 - Local `main`: `ffe1434`; it is ten commits ahead of
   `github/main` (`99961760ee17ad7831810bf40f094f6df1b7d1d0`).
 - No simulator, analyzer, extractor, or long-run process is active at the
@@ -29,13 +30,14 @@ machine).
 
 The recent commits immediately preceding this handoff are:
 
-1. `deb00f9` — moved the three untracked research notes under `research/`
+1. `cf0d83f` — recorded the compact private-archive scope.
+2. `deb00f9` — moved the three untracked research notes under `research/`
    so the notes travel with the public source history.
-2. `d6d99e0` — added this tracked remote handoff.
-3. `30176e0` — hardened integrated long-run provenance, registered GOMAXPROCS
+3. `d6d99e0` — added this tracked remote handoff.
+4. `30176e0` — hardened integrated long-run provenance, registered GOMAXPROCS
    and 24-hour identity, copied-config execution, and atomic completion
    status.
-4. `5af4573` — validated clean binary provenance for long-run runs.
+5. `5af4573` — validated clean binary provenance for long-run runs.
 
 ## Scientific position
 
@@ -103,7 +105,18 @@ raw `*.jsonl`/`*.bin` streams), the goal objective, working-tree patch and
 status metadata, and the private Codex chain state. A manifest records omitted
 raw evidence paths and byte totals. Rebuildable `.cache`, `.venv`, `bin/`,
 test binaries, and old compressed cache files are also omitted. Archive
-creation is bounded to named paths and does not remove originals.
+creation is bounded to named paths and does not remove originals. The concrete
+archive is:
+
+- `/home/vlad/development/exchange_simulation-private-json-state-20260827.tar.gz`
+- 990,588,093 bytes (945 MiB)
+- SHA-256:
+  `805af36031ea66f06ecbd94e002d743cd98492b70f3c87a87e59e9e8d9e1da88`
+- 5,068 experiment JSON entries, 13,476,897,831 uncompressed bytes, plus 15
+  private-state metadata entries and three chain entries.
+
+The archive was created from source commit `cf0d83f`; this final documentation
+update does not change simulator or evidence semantics.
 
 Current checked-in simulator/analyzer binaries under `bin/` are not a valid
 provenance source; rebuild from a clean clone after the final pre-run commits.
