@@ -1,7 +1,7 @@
 # V2 integrated long-run gate hardening
 
 Date: 2026-08-27
-Status: pre-run; no development or holdout cell consumed
+Status: development gate in progress; holdouts remain unconsumed
 Contract: `v2-integrated-longrun-candidate-v2`
 
 ## Scope
@@ -38,4 +38,11 @@ P7d, or the mixed-timing line.
 Shell syntax, the negative-path contract tests, and the mandatory Go test
 suite pass with `GOMAXPROCS=4`. An independent Sol-xhigh review returned
 `ACCEPT` at `06bd7cc`; it accessed no simulation, holdout, or private archive
-evidence during review. No registered long-run cell has been consumed.
+evidence during review. The first registered 607 simulator run completed with
+clean provenance and was preserved at the external evidence root. Its first
+extractor attempt failed before any derived artifact was written because
+`jq -e` was used to read the manifest's valid `build.modified: false` value.
+The raw result is retained as a failed protocol-attempt record; the boolean
+read is now fail-closed through an explicit string comparison, and the
+simulator will be rerun from the corrected pinned revision before candidate
+scoring.

@@ -91,7 +91,9 @@ binary_modified=$(go version -m "$simulator_binary" | awk '$1 == "build" && inde
 config_sha256=$(sha256sum "$cell/run-config.json" | awk '{print $1}')
 [[ "$config_sha256" == "$(jq -er '.config_sha256' "$cell/run-metadata.json")" ]] || fail "run config hash changed"
 manifest_revision=$(jq -er '.build.revision' "$cell/manifest.json")
-manifest_modified=$(jq -er '.build.modified' "$cell/manifest.json")
+# jq -e returns failure for a valid false boolean; this is a provenance value,
+# not a predicate whose false result should abort before the explicit check.
+manifest_modified=$(jq -r '.build.modified' "$cell/manifest.json")
 jq -e --arg revision "$metadata_revision" --argjson seed "$seed" --arg log_mode "$log_mode" \
 	--arg experiment "$config_experiment" \
 	'type == "object" and .schema_version == 2 and .build.revision == $revision and
