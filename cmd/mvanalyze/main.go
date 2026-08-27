@@ -95,7 +95,7 @@ func (p *analyzerProfiles) Stop() {
 }
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrebalance, perpreplenishment, liabilityhedger, optionliabilityp6, optionvaluetakerp6, vannavolgap6, fundingcarry, termcarry, termcarryp4chain, termcarryp4pair, datedcarryp5, datedcarryp5pair, datedmandatep5, termcarrylifecycle, perpexposurehedger, perpexposurerisk, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrefresh, makerrebalance, perpreplenishment, liabilityhedger, optionliabilityp6, optionvaluetakerp6, vannavolgap6, fundingcarry, termcarry, termcarryp4chain, termcarryp4pair, datedcarryp5, datedcarryp5pair, datedmandatep5, termcarrylifecycle, perpexposurehedger, perpexposurerisk, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
 	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
 	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
@@ -270,6 +270,23 @@ func main() {
 					fmt.Printf("    maker %-8s %-24s %-8s decisions %6d accepted/rejected %6d/%6d censored %6d\n",
 						maker.VenueID, maker.Maker, maker.Symbol, maker.Decisions, maker.Accepted, maker.Rejected, maker.HorizonCensoredSides)
 				}
+			})
+		case "makerrefresh":
+			result, err := run.MeasureMakerPassiveRefreshOrdering(analysis.MakerQuoteSizeOptions{})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			if result.Decisions == 0 {
+				fmt.Fprintf(os.Stderr, "%s: no maker refresh decision evidence\n", dir)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s decisions %6d sides %6d initial %6d checked %6d censored %6d accepted/rejected %6d/%6d missing/duplicate/late %d/%d/%d cancel-order/fill/cancel mismatches %d/%d/%d valid %t lineage %s\n",
+					dir, result.Decisions, result.DecisionSides, result.InitialOrNoPrior, result.Checked,
+					result.HorizonCensoredSides, result.AcceptedOutcomes, result.RejectedOutcomes,
+					result.Missing, result.Duplicate, result.Late, result.OutOfOrderCancellations,
+					result.FillQuantityMismatches, result.CancelQuantityMismatches, result.Valid, result.LineageDigest)
 			})
 		case "makerrebalance":
 			result, err := run.MeasureMakerInventoryRebalance()
