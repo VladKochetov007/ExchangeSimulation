@@ -47,8 +47,8 @@ horizon=${V2_LONGRUN_HORIZON:-24h}
 # cell until NewSim has opened its evidence sink; creating log files inside the
 # cell before launch would make the directory look reused and fail closed.
 mkdir -p "$output_root"
-binary_revision=$(go version -m "$binary" | awk '$1 == "build" && $2 == "vcs.revision=" {sub("vcs.revision=", "", $2); print $2; exit}')
-binary_modified=$(go version -m "$binary" | awk '$1 == "build" && $2 == "vcs.modified=" {sub("vcs.modified=", "", $2); print $2; exit}')
+binary_revision=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
+binary_modified=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
 [[ "$binary_revision" == "$sim_revision" ]] || {
 	echo "binary VCS revision $binary_revision does not match requested $sim_revision" >&2
 	exit 1
@@ -83,7 +83,7 @@ jq -n \
 	  simulated_horizon: $horizon, log_mode: $log_mode,
 	  config_sha256: $config_sha256, binary_sha256: $binary_sha256,
 	  git_revision: $git_revision, go_version: $go_version,
-	  gomaxprocs: $gomaxprocs, output_dir: $output,
+	  gomaxprocs: $gomaxprocs, output_dir: $output_dir,
 	  command: ["multivenue", "-config", "run-config.json", "-duration", $horizon, "-log-mode", $log_mode],
 	  completion_sentinels: ["greeks.json", "latency.json"],
 	  raw_log_policy: "retained until every registered integrated long-run evidence contract passes"
