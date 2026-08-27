@@ -109,6 +109,16 @@ func TestAuditMarketDataEvidenceCatchesAdversarialMutations(t *testing.T) {
 			caught: func(a *MarketDataReceiptAudit) bool { return a.DuplicateSource > 0 },
 		},
 		{
+			name: "zero source fingerprint",
+			mutate: func(s, r, _ []byte) {
+				for index := range s[28:44] {
+					s[28+index] = 0
+					r[28+index] = 0
+				}
+			},
+			caught: func(a *MarketDataReceiptAudit) bool { return a.DuplicateSource > 0 },
+		},
+		{
 			name: "reordered schedule ordinal",
 			mutate: func(s, _, _ []byte) {
 				binary.BigEndian.PutUint64(s[68:76], 2)

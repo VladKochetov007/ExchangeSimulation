@@ -927,7 +927,7 @@ func auditMarketDataReceiptsStreaming(dir string) (*MarketDataReceiptAudit, erro
 	if err != nil {
 		return nil, err
 	}
-	result.DuplicateSource = duplicates
+	result.DuplicateSource += duplicates
 	result.LinkActivity = make([]MarketDataLinkActivity, 0, len(linkActivity))
 	for _, activity := range linkActivity {
 		result.LinkActivity = append(result.LinkActivity, *activity)
