@@ -50,6 +50,9 @@ func TestExchangeCancelOrder(t *testing.T) {
 	if reservedAfter != 0 {
 		t.Errorf("Expected reserved balance to be released, got %d", reservedAfter)
 	}
+	if ex.Books["BTC/USD"].FindOrder(orderID) != nil {
+		t.Fatal("cancelled GTC order remained executable on the book")
+	}
 
 	gateway.Close()
 }
