@@ -22,6 +22,7 @@ import (
 	"exchange_sim/exchange"
 	"exchange_sim/matching"
 	eprice "exchange_sim/price"
+	"exchange_sim/simulation"
 	"exchange_sim/simulations/derivsim"
 	"exchange_sim/simulations/feesim"
 	etypes "exchange_sim/types"
@@ -66,6 +67,62 @@ func TestCloseSuppressesEvidenceArtifactAfterCheckpointFailure(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "evidence-artifact-hash.json")); !os.IsNotExist(err) {
 		t.Fatalf("runtime evidence hash exists after checkpoint failure: %v", err)
+	}
+}
+
+func TestNewSimRejectsEvidenceDirectoryReuse(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "stale-completion.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewSim(time.Second, Config{LogDir: dir, LogMode: "none", Seed: 101})
+	if err == nil || !strings.Contains(err.Error(), "refusing evidence reuse") {
+		t.Fatalf("non-empty evidence directory accepted: %v", err)
+	}
+}
+
+func TestCloseRetainsLateSidecarFailure(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "not-a-directory-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sim := &Sim{
+		Config:           Config{LogMode: "none", LogDir: file.Name()},
+		latencyTelemetry: simulation.NewLatencyStats(),
+	}
+	first := sim.Close()
+	if first == nil {
+		t.Fatal("Close succeeded when latency sidecar parent was a regular file")
+	}
+	second := sim.Close()
+	if second == nil || second.Error() != first.Error() {
+		t.Fatalf("sticky close error changed: first=%v second=%v", first, second)
+	}
+}
+
+func TestClosePublishesNoHashWhenLatencySidecarFails(t *testing.T) {
+	root := t.TempDir()
+	badPath := filepath.Join(root, "latency-parent")
+	if err := os.WriteFile(badPath, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logger, err := feesim.NewJSONLinesLogger(filepath.Join(root, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sim := &Sim{
+		Config:           Config{LogMode: "full", LogDir: badPath},
+		loggers:          []*feesim.JSONLinesLogger{logger},
+		latencyTelemetry: simulation.NewLatencyStats(),
+	}
+	if err := sim.Close(); err == nil {
+		t.Fatal("Close succeeded after latency sidecar failure")
+	}
+	if _, err := os.Stat(filepath.Join(badPath, "evidence-artifact-hash.json")); err == nil {
+		t.Fatal("runtime evidence hash exists after latency failure")
 	}
 }
 

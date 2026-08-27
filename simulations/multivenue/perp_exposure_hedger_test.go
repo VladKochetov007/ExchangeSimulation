@@ -297,6 +297,9 @@ func TestPerpExposureHedgerConfigRequiresAuditedDelayedFeed(t *testing.T) {
 	if _, err := NewSim(time.Second, base); err == nil {
 		t.Fatal("P2 accepted without an explicit participant-local feed")
 	}
+	// NewSim now rejects reuse of a directory that contains constructor or
+	// evidence artifacts. Each validation attempt therefore gets a fresh sink.
+	base.LogDir = t.TempDir()
 	base.LatencyProfiles = map[string]LatencyProfile{"perp_exposure_hedger": {Model: "constant", Delay: time.Millisecond}}
 	sim, err := NewSim(time.Second, base)
 	if err != nil {
@@ -304,15 +307,18 @@ func TestPerpExposureHedgerConfigRequiresAuditedDelayedFeed(t *testing.T) {
 	}
 	sim.Close()
 	base.RecordPerpExposureHedgerDecisions = true
+	base.LogDir = t.TempDir()
 	if _, err := NewSim(time.Second, base); err == nil {
 		t.Fatal("instrumented P2 accepted without a strict participant-role roster")
 	}
 	base.StrictPopulationAccounting = true
+	base.LogDir = t.TempDir()
 	if _, err := NewSim(time.Second, base); err == nil {
 		t.Fatal("instrumented P2 accepted without independently recorded local feed receipts")
 	}
 	base.RecordMarketDataReceipts = true
 	base.MarketDataReceiptRoles = []string{"perp_exposure_hedger"}
+	base.LogDir = t.TempDir()
 	sim, err = NewSim(time.Second, base)
 	if err != nil {
 		t.Fatalf("P2 rejected documented receipt path: %v", err)

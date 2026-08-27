@@ -2,9 +2,12 @@ package simulation
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"math"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -190,7 +193,45 @@ func (s *LatencyStats) WriteJSON(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(raw, '\n'), 0644)
+	return WriteFileAtomically(path, append(raw, '\n'))
+}
+
+// WriteFileAtomically writes a compact evidence sidecar through a temporary
+// file, flushes it, and renames it into place. A caller can therefore treat a
+// successfully renamed sidecar as complete rather than as a partially written
+// JSON file. This helper is intentionally limited to small terminal evidence
+// artifacts; it is not a substitute for streaming event-log durability.
+func WriteFileAtomically(path string, data []byte) (err error) {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	tmp, err := os.CreateTemp(dir, "."+base+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temporary evidence file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		if err != nil {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if n, writeErr := tmp.Write(data); writeErr != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temporary evidence file: %w", writeErr)
+	} else if n != len(data) {
+		_ = tmp.Close()
+		return fmt.Errorf("write temporary evidence file: %w", io.ErrShortWrite)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync temporary evidence file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temporary evidence file: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("rename temporary evidence file: %w", err)
+	}
+	return nil
 }
 
 type ConstantLatency struct {

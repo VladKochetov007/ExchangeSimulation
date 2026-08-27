@@ -11,6 +11,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"exchange_sim/actor"
@@ -1788,6 +1789,9 @@ type Sim struct {
 	marketDataReceipts *simulation.MarketDataReceiptRecorder
 	frontierVectors    *simulation.DecisionFrontierVectorRecorder
 	terminalNano       int64
+	closeMu            sync.Mutex
+	closed             bool
+	closeErr           error
 }
 
 // Run starts all venue automation under one context and drives the common
@@ -1852,8 +1856,20 @@ func (s *Sim) Run(ctx context.Context) error {
 
 // Close seals all required evidence before emitting the unordered raw-artifact
 // hash. If any close fails, no hash is written and the caller must not publish
-// terminal metadata for the run.
+// terminal metadata for the run. The result is sticky: a later Close cannot
+// turn a failed seal into an apparent success.
 func (s *Sim) Close() error {
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+	if s.closed {
+		return s.closeErr
+	}
+	s.closed = true
+	s.closeErr = s.closeEvidence()
+	return s.closeErr
+}
+
+func (s *Sim) closeEvidence() error {
 	checkpointErr := s.checkpoints.close()
 	closeErr := s.finalizeMarketDataReceipts()
 	evidence, loggerErr := feesim.CloseLoggers(s.loggers)
@@ -1863,7 +1879,13 @@ func (s *Sim) Close() error {
 	// The evidence files are written by several independent loggers and do not
 	// preserve one global causal order. This artifact attests exactly the
 	// persisted JSON-record multiset; the ordered execution hash remains the
-	// checkpoint sink's separate contract.
+	// checkpoint sink's separate contract. Publish latency first, then the hash,
+	// so the hash is never mistaken for a complete run after a latency failure.
+	if s.latencyTelemetry != nil {
+		if err := s.latencyTelemetry.WriteJSON(filepath.Join(s.Config.LogDir, "latency.json")); err != nil {
+			return fmt.Errorf("write latency evidence: %w", err)
+		}
+	}
 	if s.Config.LogMode == "full" {
 		artifact := evidenceArtifactRecord{
 			Domain:   "persisted_json_records",
@@ -1875,13 +1897,8 @@ func (s *Sim) Close() error {
 		if err != nil {
 			return fmt.Errorf("marshal evidence artifact hash: %w", err)
 		}
-		if err := os.WriteFile(filepath.Join(s.Config.LogDir, "evidence-artifact-hash.json"), append(raw, '\n'), 0644); err != nil {
+		if err := simulation.WriteFileAtomically(filepath.Join(s.Config.LogDir, "evidence-artifact-hash.json"), append(raw, '\n')); err != nil {
 			return fmt.Errorf("write evidence artifact hash: %w", err)
-		}
-	}
-	if s.latencyTelemetry != nil {
-		if err := s.latencyTelemetry.WriteJSON(filepath.Join(s.Config.LogDir, "latency.json")); err != nil {
-			return fmt.Errorf("write latency evidence: %w", err)
 		}
 	}
 	return nil
@@ -1995,6 +2012,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	}
 	if simTime <= 0 || simTime%cfg.Step != 0 {
 		return nil, fmt.Errorf("multivenue: simulation duration %s must be a positive multiple of step %s", simTime, cfg.Step)
+	}
+	if err := requireEmptyLogDir(cfg.LogDir); err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Join(cfg.LogDir, "venues"), 0755); err != nil {
 		return nil, err
@@ -2199,6 +2219,38 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		}
 	}
 	return sim, nil
+}
+
+// requireEmptyLogDir prevents a failed or interrupted run from being
+// mistaken for a fresh run through stale completion sidecars. Campaign
+// launchers already allocate fresh directories; enforcing the same rule at
+// the simulator boundary protects direct callers and the generic CLI too.
+func requireEmptyLogDir(path string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("multivenue: inspect log directory %q: %w", path, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("multivenue: log path %q is not a directory", path)
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return fmt.Errorf("multivenue: inspect log directory %q: %w", path, err)
+	}
+	for _, entry := range entries {
+		switch entry.Name() {
+		case "run-config.json", "run-metadata.json":
+			// Campaign launchers may persist immutable provenance before
+			// constructing the simulator. All simulator-owned artifacts still
+			// have to be absent.
+		default:
+			return fmt.Errorf("multivenue: log directory %q is not empty; refusing evidence reuse", path)
+		}
+	}
+	return nil
 }
 
 // validateMarketDataReceiptCoverage rejects a configuration that declares an

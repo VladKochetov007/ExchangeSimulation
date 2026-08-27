@@ -1,9 +1,33 @@
 package simulation
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestWriteFileAtomicallyPublishesCompleteSidecar(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "latency.json")
+	if err := WriteFileAtomically(path, []byte("{\"ok\":true}\n")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "{\"ok\":true}\n" {
+		t.Fatalf("sidecar = %q", got)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "latency.json" {
+		t.Fatalf("temporary evidence file leaked: %+v", entries)
+	}
+}
 
 func TestConstantLatency(t *testing.T) {
 	delay := 100 * time.Millisecond
