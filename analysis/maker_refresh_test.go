@@ -176,6 +176,64 @@ func TestMakerPassiveRefreshOrderingCatchesDroppedPassiveAcceptance(t *testing.T
 	}
 }
 
+func TestMakerPassiveRefreshOrderingRequiresAuthoritativeCensorHorizon(t *testing.T) {
+	decision := func() string {
+		return logLine(10, 7, "maker_quote_size_decision", map[string]any{
+			"maker": "spot_maker_1", "client_id": uint64(7), "symbol": "ABC/USD",
+			"bid_request_id": uint64(10), "ask_request_id": uint64(11), "post_only": true,
+			"bid_price": int64(99), "ask_price": int64(101), "bid_qty": int64(100), "ask_qty": int64(100),
+			"cancel_before_replace": true, "outcome_expectation": "SIMULATION_HORIZON_CENSORED",
+			"censor_reason": "terminal_horizon_before_venue_ingress",
+		})
+	}
+	tests := []struct {
+		name      string
+		terminals []AccountRow
+		wantValid bool
+	}{
+		{name: "zero terminal timestamp", terminals: []AccountRow{{VenueID: "north", ClientID: 7, Role: "spot_maker_1"}}, wantValid: false},
+		{name: "mixed terminal timestamps", terminals: []AccountRow{
+			{VenueID: "north", ClientID: 7, Role: "spot_maker_1", Account: Account{Timestamp: 100}},
+			{VenueID: "south", ClientID: 7, Role: "spot_maker_1", Account: Account{Timestamp: 101}},
+		}, wantValid: false},
+		{name: "authoritative terminal timestamp", terminals: []AccountRow{
+			{VenueID: "north", ClientID: 7, Role: "spot_maker_1", Account: Account{Timestamp: 10}},
+		}, wantValid: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			run, err := Open(writeRun(t, Report{TerminalAccounts: tc.terminals}, map[string][]string{
+				"north/general.jsonl":      {decision()},
+				"north/spot/ABC-USD.jsonl": nil,
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := run.MeasureMakerPassiveRefreshOrdering(MakerQuoteSizeOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Valid != tc.wantValid || (!tc.wantValid && result.InvalidDecisionRecords == 0) || (tc.wantValid && result.InvalidDecisionRecords != 0) {
+				t.Fatalf("censor horizon result = %+v, want valid=%t", result, tc.wantValid)
+			}
+		})
+	}
+}
+
+func TestTerminalAccountTimestampRejectsMissingZeroAndMixedEvidence(t *testing.T) {
+	if got, ok := terminalAccountTimestamp(Report{}); ok || got != 0 {
+		t.Fatalf("missing terminal evidence = (%d, %t)", got, ok)
+	}
+	if got, ok := terminalAccountTimestamp(Report{TerminalAccounts: []AccountRow{{Account: Account{Timestamp: 0}}}}); ok || got != 0 {
+		t.Fatalf("zero terminal evidence = (%d, %t)", got, ok)
+	}
+	if got, ok := terminalAccountTimestamp(Report{TerminalAccounts: []AccountRow{
+		{Account: Account{Timestamp: 100}}, {Account: Account{Timestamp: 101}},
+	}}); ok || got != 0 {
+		t.Fatalf("mixed terminal evidence = (%d, %t)", got, ok)
+	}
+}
+
 func TestMakerPassiveRefreshOrderingCatchesOrderingAndQuantityMutations(t *testing.T) {
 	tests := []struct {
 		name          string

@@ -277,7 +277,7 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 				Failure: "invalid_censor_contract",
 			})
 		}
-		if censored && terminalKnown && event.SimTS != terminalAt {
+		if censored && (!terminalKnown || event.SimTS != terminalAt) {
 			result.InvalidDecisionRecords++
 			result.Checks = append(result.Checks, MakerPassiveRefreshCheck{
 				VenueID: event.VenueID, ClientID: decision.ClientID, Symbol: decision.Symbol,
@@ -768,15 +768,19 @@ func selectionSet(values []string) map[string]struct{} {
 }
 
 // terminalAccountTimestamp returns the independently persisted terminal fixed
-// point.  A censor declaration is accepted only when every terminal account
-// agrees on the timestamp; otherwise the replay cannot establish that the
-// producer's horizon marker refers to the actual run horizon.
+// point. A censor declaration is accepted only when every terminal account is
+// present, has a nonzero timestamp, and agrees on that timestamp; otherwise
+// the replay cannot establish that the producer's horizon marker refers to the
+// actual run horizon.
 func terminalAccountTimestamp(report Report) (int64, bool) {
+	if len(report.TerminalAccounts) == 0 {
+		return 0, false
+	}
 	var terminal int64
 	for _, row := range report.TerminalAccounts {
 		at := row.Account.Timestamp
 		if at == 0 {
-			continue
+			return 0, false
 		}
 		if terminal == 0 {
 			terminal = at
