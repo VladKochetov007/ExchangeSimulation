@@ -83,3 +83,25 @@ document.
 The next licensed action is evidence-durability disposition and clean freeze
 preparation—not another funding, timing, options, distress, or ecology tuning
 experiment.
+
+## Amendment after evidence-transport correction (2026-08-27)
+
+The original decision above predates the evidence commits.  The fail-closed
+transport correction is now present at `6f988a3`, `eee70d4`, `ba96597`, and
+`2068d9d`, with review `research/reviews/v2-8-evidence-durability-review.md`.
+Logger/checkpoint/receipt/frontier failures are latched; compact sidecars are
+atomically published; `Sim.Close` retains its first result; and
+`NewSim` rejects reused non-empty evidence directories (while allowing only
+pre-run `run-config.json`/`run-metadata.json`).
+
+Evidence durability is therefore **READY WITH EXPLICIT LIMITATION** for the
+fresh-directory, zero-exit, newly validated sidecar contract.  The contract
+does not claim crash-durable streaming JSONL, directory `fsync`, or recovery
+of a reused directory.  The clean candidate gate must use fresh directories
+and validate `greeks.json`, `latency.json`, runtime/offline evidence digests,
+and analyzer metadata before scoring.
+
+The remaining blockers are consequently (1) a clean-source candidate with
+fresh-process exact determinism and mechanical/mutation gates, and (2) final
+validation generated only after that candidate is declared immutable.  No
+economic redesign is licensed by this amendment.

@@ -666,3 +666,23 @@ the fallback red-team review is explicitly labeled non-independent in
 simulation or holdout was consumed.  This closes the option-emergence question
 as an explicit V2 limitation and licenses a freeze-readiness review rather
 than a post-outcome options experiment.
+
+## Post-audit update: evidence durability and freeze preparation
+
+At `930c313` the evidence-durability review recorded the Sol-family verdict
+`ACCEPT WITH NARROWER CLAIM` for the earlier transport changes.  The follow-up
+correctness commit `2068d9d` now enforces the required fresh evidence sink at
+the `multivenue.NewSim` boundary, retains the first `Sim.Close` result, writes
+latency before the raw-artifact attestation, and atomically publishes compact
+sidecars.  The successful scientific contract is therefore:
+
+    fresh output directory (optionally containing only run-config/run-metadata)
+    + zero simulator exit
+    + fresh greeks.json and latency.json
+    + runtime/offline evidence-digest equality
+
+This does not claim crash-durable streaming JSONL or directory `fsync`; those
+remain explicit limitations.  The correction is instrumentation/evidence
+handling only and does not change successful-run economic state, scheduling,
+RNG consumption, or event ordering.  A clean-source candidate determinism and
+mechanical-gate run remains outstanding before the immutable V2 freeze.
