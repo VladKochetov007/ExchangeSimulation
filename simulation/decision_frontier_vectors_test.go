@@ -227,6 +227,40 @@ func TestDecisionFrontierVectorRecorderRejectsEmptyObservationComponent(t *testi
 	}
 }
 
+func TestReceiptFinalizeRetainsManifestWriteFailure(t *testing.T) {
+	dir := t.TempDir()
+	recorder, err := NewMarketDataReceiptRecorder(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder.manifestPath = filepath.Join(dir, "missing", "market-data-evidence-v2.json")
+	first := recorder.Finalize(1)
+	if first == nil {
+		t.Fatal("Finalize succeeded despite an unwritable manifest path")
+	}
+	second := recorder.Finalize(2)
+	if second == nil || second.Error() != first.Error() {
+		t.Fatalf("repeat Finalize error = %v, want the retained first error %v", second, first)
+	}
+}
+
+func TestDecisionFrontierFinalizeRetainsBaseManifestFailure(t *testing.T) {
+	dir := t.TempDir()
+	recorder, err := NewDecisionFrontierVectorRecorder(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "missing", "market-data-evidence-v2.json")
+	first := recorder.Finalize(missing)
+	if first == nil {
+		t.Fatal("Finalize succeeded despite a missing base manifest")
+	}
+	second := recorder.Finalize(missing)
+	if second == nil || second.Error() != first.Error() {
+		t.Fatalf("repeat Finalize error = %v, want the retained first error %v", second, first)
+	}
+}
+
 // This joins the real actor pre-send hook, delayed gateway receipt state, the
 // ordinary scalar decision ledger, and the vector artifact. A hand-written
 // vector fixture alone would not prove that the actor-facing integration is

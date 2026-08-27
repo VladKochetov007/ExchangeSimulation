@@ -443,10 +443,12 @@ func (r *MarketDataReceiptRecorder) Finalize(terminalAt int64) error {
 	}
 	raw, err := json.MarshalIndent(artifact, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal market-data evidence manifest: %w", err)
+		r.writeErr = fmt.Errorf("marshal market-data evidence manifest: %w", err)
+		return r.writeErr
 	}
 	if err := os.WriteFile(r.manifestPath, append(raw, '\n'), 0644); err != nil {
-		return fmt.Errorf("write market-data evidence manifest: %w", err)
+		r.writeErr = fmt.Errorf("write market-data evidence manifest: %w", err)
+		return r.writeErr
 	}
 	return nil
 }

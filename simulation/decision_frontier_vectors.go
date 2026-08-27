@@ -247,7 +247,8 @@ func (r *DecisionFrontierVectorRecorder) Finalize(baseManifestPath string) error
 	}
 	baseRaw, err := os.ReadFile(baseManifestPath)
 	if err != nil {
-		return fmt.Errorf("read base market-data evidence manifest: %w", err)
+		r.writeErr = fmt.Errorf("read base market-data evidence manifest: %w", err)
+		return r.writeErr
 	}
 	baseDigest := sha256.Sum256(baseRaw)
 	symbols := append([]receiptSymbolCatalog(nil), r.symbolRows...)
@@ -271,10 +272,12 @@ func (r *DecisionFrontierVectorRecorder) Finalize(baseManifestPath string) error
 	}
 	raw, err := json.MarshalIndent(artifact, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal decision frontier-vector manifest: %w", err)
+		r.writeErr = fmt.Errorf("marshal decision frontier-vector manifest: %w", err)
+		return r.writeErr
 	}
 	if err := os.WriteFile(filepath.Join(r.dir, "market-data-frontier-vectors-v1.json"), append(raw, '\n'), 0644); err != nil {
-		return fmt.Errorf("write decision frontier-vector manifest: %w", err)
+		r.writeErr = fmt.Errorf("write decision frontier-vector manifest: %w", err)
+		return r.writeErr
 	}
 	return nil
 }
