@@ -98,6 +98,8 @@
         "record_liability_hedger_decisions",
         "record_noise_flow_phase_decisions",
         "record_option_liability_user_decisions",
+        "record_market_data_receipts",
+        "record_decision_frontier_vectors",
         "description"
       ],
       "path": "research/configs/v2-integrated/reference-dev-601-none.json",
