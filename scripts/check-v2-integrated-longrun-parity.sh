@@ -18,8 +18,15 @@ require_object() {
 	jq -e 'type == "object"' "$1" >/dev/null || fail "malformed parity JSON: $1"
 }
 [[ ! -e "$attestation" ]] || fail "refusing to overwrite parity attestation: $attestation"
+[[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "parity requires a clean gate worktree"
 
 "$root_dir/scripts/check-v2-integrated-longrun-configs.sh" >/dev/null
+cmp -s "$root_dir/research/configs/v2-integrated-longrun/dev-607.json" \
+	"$output_root/dev-607/run-config.json" || fail "seed-607 full config differs from registry"
+cmp -s "$root_dir/research/configs/v2-integrated-longrun/dev-607-none.json" \
+	"$output_root/dev-607-none/run-config.json" || fail "seed-607 no-log config differs from registry"
+cmp -s "$root_dir/research/configs/v2-integrated-longrun/dev-607.json" \
+	"$output_root/dev-607-g8/run-config.json" || fail "seed-607 g8 config differs from registry"
 for cell in dev-607 dev-607-none dev-607-g8; do
 	cell_dir="$output_root/$cell"
 	[[ -d "$cell_dir" ]] || fail "missing parity cell: $cell"
@@ -50,6 +57,16 @@ for cell in dev-607 dev-607-none dev-607-g8; do
 		.simulated_horizon == "24h" and
 		.completion_sentinels == ["greeks.json", "latency.json"]' \
 		"$output_root/$cell/run-status.json" >/dev/null || fail "incomplete parity cell: $cell"
+	for file in run-metadata.json manifest.json greeks.json latency.json; do
+		actual_sha256=$(sha256sum "$output_root/$cell/$file" | awk '{print $1}')
+		case "$file" in
+			run-metadata.json) declared_sha256=$(jq -er '.run_metadata_sha256' "$output_root/$cell/run-status.json") ;;
+			manifest.json) declared_sha256=$(jq -er '.manifest_sha256' "$output_root/$cell/run-status.json") ;;
+			greeks.json) declared_sha256=$(jq -er '.greeks_sha256' "$output_root/$cell/run-status.json") ;;
+			latency.json) declared_sha256=$(jq -er '.latency_sha256' "$output_root/$cell/run-status.json") ;;
+		esac
+		[[ "$actual_sha256" == "$declared_sha256" ]] || fail "run-status hash mismatch: $cell/$file"
+	done
 done
 
 for file in checkpoints.jsonl greeks.json latency.json; do
@@ -72,9 +89,15 @@ g8_runtime_digest=$(jq -er '.digest' "$output_root/dev-607-g8/evidence-artifact-
 [[ "$full_runtime_events" == "$g8_runtime_events" && "$full_runtime_digest" == "$g8_runtime_digest" ]] || fail "full runtime evidence hashes are not equal"
 
 source_revision=$(jq -er '.git_revision' "$output_root/dev-607/run-metadata.json")
+head_revision=$(git -C "$root_dir" rev-parse HEAD)
+[[ "$source_revision" == "$head_revision" ]] || fail "parity source revision is not current HEAD"
+binary_sha256=$(jq -er '.binary_sha256' "$output_root/dev-607/run-metadata.json")
+binary_go_version=$(jq -er '.binary_go_version' "$output_root/dev-607/run-metadata.json")
 for cell in dev-607 dev-607-none dev-607-g8; do
 	jq -e --arg revision "$source_revision" \
-		'.git_revision == $revision and .binary_vcs_modified == false and .binary_vcs_revision == $revision' \
+		--arg binary_sha256 "$binary_sha256" --arg binary_go_version "$binary_go_version" \
+		'.git_revision == $revision and .binary_vcs_modified == false and .binary_vcs_revision == $revision and
+		 .binary_sha256 == $binary_sha256 and .binary_go_version == $binary_go_version' \
 		"$output_root/$cell/run-metadata.json" >/dev/null || fail "parity source identity differs: $cell"
 	jq -e --arg revision "$source_revision" \
 		'.build.revision == $revision and .build.modified == false' \
@@ -122,5 +145,6 @@ jq -n \
 	}' >"$tmp"
 mv "$tmp" "$attestation"
 require_object "$attestation"
-jq -e 'all(.predicates | to_entries[]; .value == true)' "$attestation" >/dev/null || fail "parity attestation self-check failed"
+jq -e '(.predicates | keys) == ["deterministic_sidecars_equal", "full_evidence_equal", "no_log_evidence_absent", "ordered_checkpoints_equal", "source_and_build_identity_equal"] and
+	all(.predicates | to_entries[]; .value == true)' "$attestation" >/dev/null || fail "parity attestation self-check failed"
 printf 'integrated long-run parity verified: %s\n' "$attestation"

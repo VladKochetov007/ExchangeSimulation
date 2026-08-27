@@ -25,6 +25,9 @@ require_object() {
 "$root_dir/scripts/check-v2-integrated-longrun-parity.sh" "$output_root" >/dev/null
 require_file "$parity"
 require_object "$parity"
+jq -e '.contract == "v2-integrated-longrun-parity-v1" and
+	(.predicates | keys) == ["deterministic_sidecars_equal", "full_evidence_equal", "no_log_evidence_absent", "ordered_checkpoints_equal", "source_and_build_identity_equal"] and
+	all(.predicates | to_entries[]; .value == true)' "$parity" >/dev/null || fail "invalid parity attestation"
 
 required=(
 	observationreceipts.json frontiervectors.json mechanical.json conservation.json
@@ -49,10 +52,22 @@ for cell in dev-607 dev-613 dev-617; do
 	jq -e --arg cell "$cell" --argjson required_artifacts "$required_json" \
 		'.cell == $cell and .seed == (.cell | split("-")[-1] | tonumber) and
 		.analysis_contract == "v2-integrated-longrun-candidate-v2" and
-		.analyzer_vcs_modified == false and .required_artifacts == $required_artifacts' \
+		.analyzer_vcs_modified == false and .required_artifacts == $required_artifacts and
+		(.artifact_sha256 | keys) == ($required_artifacts | sort) and
+		all(.artifact_sha256 | to_entries[]; (.value | test("^[0-9a-f]{64}$")))' \
 		"$cell_dir/analysis-metadata.json" >/dev/null || fail "invalid analysis metadata: $cell"
-	jq -e 'all(.predicates | to_entries[]; .value == true)' "$cell_dir/integrity.json" >/dev/null || fail "integrity predicate failed: $cell"
-	jq -e 'all(.result.predicates | to_entries[]; .value == true)' "$cell_dir/activation.json" >/dev/null || fail "activation predicate failed: $cell"
+	for artifact in "${required[@]}"; do
+		require_file "$cell_dir/$artifact"
+		require_object "$cell_dir/$artifact"
+		actual_sha256=$(sha256sum "$cell_dir/$artifact" | awk '{print $1}')
+		declared_sha256=$(jq -er --arg artifact "$artifact" '.artifact_sha256[$artifact]' "$cell_dir/analysis-metadata.json")
+		[[ "$actual_sha256" == "$declared_sha256" ]] || fail "artifact hash mismatch: $cell/$artifact"
+	done
+	jq -e '(.predicates | keys) == ["activation", "conservation", "derivatives", "exposure", "expiry", "fill_positions", "frontier_vectors", "hedging", "late_path", "liability_hedger", "liquidations", "maker_quote_size", "maker_rebalance", "maker_refresh", "margin", "mechanical", "observation_receipts", "option_liability", "option_surface", "option_value_taker", "order_lifecycle", "positions", "post_only", "settlement", "vanna_volga"] and
+		all(.predicates | to_entries[]; .value == true)' "$cell_dir/integrity.json" >/dev/null || fail "integrity predicate failed: $cell"
+	jq -e '(.result.predicates | length) == 2 and
+		(.result.predicates | keys) == ["cdf_collateral_borrowing_observed", "zero_price_unavailable_order_rejections"] and
+		all(.result.predicates | to_entries[]; .value == true)' "$cell_dir/activation.json" >/dev/null || fail "activation predicate failed: $cell"
 	for inactive in fundingcarry termcarry datedcarryp5 datedmandatep5 perpreplenishment; do
 		jq -e --arg metric "$inactive" \
 			'.result.status == "OUT_OF_SCOPE" and .result.classification == "RECORDER_NOT_ENABLED" and .result.metric == $metric' \
@@ -65,6 +80,8 @@ analyzer_revision=$(jq -er '.analyzer_revision' "$output_root/dev-607/analysis-m
 simulator_revision=$(jq -er '.simulator_revision' "$output_root/dev-607/analysis-metadata.json")
 analyzer_sha256=$(jq -er '.analyzer_sha256' "$output_root/dev-607/analysis-metadata.json")
 simulator_sha256=$(jq -er '.simulator_sha256' "$output_root/dev-607/analysis-metadata.json")
+parity_source_revision=$(jq -er '.source_revision' "$parity")
+[[ "$parity_source_revision" == "$source_revision" ]] || fail "parity source revision differs from development analysis revision"
 for cell in dev-607 dev-613 dev-617; do
 	jq -e --arg source_revision "$source_revision" --arg analyzer_revision "$analyzer_revision" \
 		--arg simulator_revision "$simulator_revision" --arg analyzer_sha256 "$analyzer_sha256" \
@@ -108,24 +125,27 @@ jq -n \
 	--arg simulator_sha256 "$simulator_sha256" \
 	--arg parity_sha256 "$parity_sha256" \
 	--argjson cells "$cells_json" \
-	'def all_true($objects): all($objects[]; all(to_entries[]; .value == true));
+	--slurpfile parity_report "$parity" \
+	'def all_true($objects): (($objects | length) > 0 and all($objects[]; ((. | type) == "object" and (length > 0) and all(to_entries[]; .value == true))));
 	 {
 		schema_version: 1, contract: $contract,
-		status: (if (all_true([$cells[].integrity]) and all_true([$cells[].activation])) then "QUALIFIED" else "BLOCKED" end),
+		status: (if (all_true([$cells[].integrity]) and all_true([$cells[].activation]) and
+			all($parity_report[0].predicates | to_entries[]; .value == true) and
+			$parity_report[0].source_revision == $source_revision) then "QUALIFIED" else "BLOCKED" end),
 		claim_scope: "integrated deterministic/evidence/lifecycle candidate gate only; no market realism claim",
 		source_revision: $source_revision, analyzer_revision: $analyzer_revision,
 		analyzer_sha256: $analyzer_sha256, simulator_revision: $simulator_revision,
 		simulator_sha256: $simulator_sha256, parity_attestation_sha256: $parity_sha256,
 		development_seeds: [607, 613, 617], reserved_holdout_seeds: [619, 631, 641],
-		holdouts_consumed: false,
+		holdout_status: "RESERVED_AND_NOT_READ_BY_DEVELOPMENT_SCORER",
 		predicates: {
 			all_development_integrity: all_true([$cells[].integrity]),
 			all_development_activation: all_true([$cells[].activation]),
-			parity_attested: true,
+			parity_attested: (all($parity_report[0].predicates | to_entries[]; .value == true) and $parity_report[0].source_revision == $source_revision),
 			provenance_consistent: (($cells | map(.source_revision) | unique | length) == 1 and
 				($cells | map(.analyzer_revision) | unique | length) == 1 and
 				($cells | map(.simulator_revision) | unique | length) == 1),
-			holdouts_unconsumed: true
+			holdout_access_policy_enforced: true
 		},
 		cells: $cells,
 		interpretation: [

@@ -211,7 +211,9 @@ jq -n --argjson cdf_borrow_events "$cdf_borrow_events" \
 			zero_price_unavailable_order_rejections: ($price_unavailable_rejections == 0)}}}' >"$activation_tmp"
 mv "$activation_tmp" "$cell/activation.json"
 require_json_object "$cell/activation.json"
-jq -e 'all(.result.predicates | to_entries[]; .value == true)' "$cell/activation.json" >/dev/null ||
+jq -e '(.result.predicates | length) == 2 and
+	(.result.predicates | keys) == ["cdf_collateral_borrowing_observed", "zero_price_unavailable_order_rejections"] and
+	all(.result.predicates | to_entries[]; .value == true)' "$cell/activation.json" >/dev/null ||
 	fail "candidate activation contract not satisfied"
 
 integrity_tmp=$(mktemp "$cell/integrity.json.tmp-XXXXXX")
@@ -230,6 +232,11 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 	--slurpfile liquidations "$cell/liquidations.json" \
 	--slurpfile marginchecks "$cell/marginchecks.json" \
 	--slurpfile optionliability "$cell/optionliabilityp6.json" \
+	--slurpfile optionvaluetaker "$cell/optionvaluetakerp6.json" \
+	--slurpfile vannavolga "$cell/vannavolgap6.json" \
+	--slurpfile optionsurface "$cell/optionsurface.json" \
+	--slurpfile exposure "$cell/exposure.json" \
+	--slurpfile hedging "$cell/hedging.json" \
 	--slurpfile makerrefresh "$cell/makerrefresh.json" \
 	--slurpfile makerquotesize "$cell/makerquotesize.json" \
 	--slurpfile makerrebalance "$cell/makerrebalance.json" \
@@ -239,7 +246,7 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 	--arg contract "$contract_version" \
 	'def r($x): $x[0].result;
 	 def field($x; $name): (r($x) | getpath($name | split(".")));
-	 def count($x; $name): (field($x; $name) // 0);
+	 def count($x; $name): (field($x; $name) // 0) as $value | if ($value | type) == "array" then ($value | length) elif ($value | type) == "number" then $value else 0 end;
 	 def zero($x; $name): ((field($x; $name) | type) == "number" and field($x; $name) == 0);
 	 def absolute($x): if ($x | type) == "number" then (if $x < 0 then -$x else $x end) else 999999999999999999 end;
 	 def residuals_within($items): all(($items // [])[]; absolute(.residual // 0) <= $tolerance);
@@ -248,23 +255,28 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 		tolerances: {max_abs_identity_residual_fixed_units: $tolerance},
 		predicates: {
 			observation_receipts: (r($receipts).valid == true and count($receipts; "schedules") > 0 and count($receipts; "receipts") > 0 and count($receipts; "decisions") > 0 and field_zeroes($receipts; ["unknown_link_id", "unknown_symbol_id", "unknown_type", "nonzero_reserved", "scheduled_before_publication", "delivered_before_scheduled", "bad_schedule_ordinal", "bad_receipt_ordinal", "duplicate_source_identity", "receipt_without_schedule", "schedule_receipt_mismatch", "missing_due_receipt", "bad_global_event_order", "decision_without_link", "bad_decision_frontier", "future_decision_use"])),
-			frontier_vectors: (r($frontiers).valid == true and count($frontiers; "decisions") > 0 and count($frontiers; "components") > 0 and field_zeroes($frontiers; ["bad_decision_id", "bad_decision_fields", "missing_scalar", "missing_vector", "duplicate_vector", "unknown_component_link", "bad_component_ordinal", "bad_component_frontier", "future_component_use", "missing_components", "extra_components", "nonzero_reserved"])),
+			frontier_vectors: (r($frontiers).valid == true and r($frontiers).base_evidence_valid == true and r($frontiers).base_manifest_digest_matches == true and r($frontiers).decision_digest_matches == true and r($frontiers).component_digest_matches == true and count($frontiers; "decisions") > 0 and count($frontiers; "components") > 0 and field_zeroes($frontiers; ["bad_decision_id", "bad_decision_fields", "missing_scalar_decision", "missing_vector_decision", "duplicate_vector_decision", "unknown_component_link", "bad_component_ordinal", "duplicate_component", "bad_component_frontier", "future_component_use", "missing_decision_components", "extra_decision_components", "nonzero_reserved"])),
 			mechanical: (count($mechanical; "orders") > 0 and zero($mechanical; "drift.mismatches")),
 			conservation: (count($conservation; "flows") > 0 and count($conservation; "delta_consistency.checked") > 0 and zero($conservation; "delta_consistency.mismatched") and zero($conservation; "delta_consistency.chain_broken") and zero($conservation; "delta_consistency.decode_failures") and residuals_within(r($conservation).identities) and residuals_within(r($conservation).venue_identities)),
-			positions: (zero($positions; "disagreement") and zero($positions; "unrepresentable_open_values")),
+			positions: (count($positions; "contracts") > 0 and zero($positions; "non_zero_net_contracts") and zero($positions; "disagreement") and zero($positions; "unrepresentable_open_values")),
 			fill_positions: (zero($fillpositions; "missing_position_update") and zero($fillpositions; "unexpected_position_update") and zero($fillpositions; "position_chain_failures")),
-			order_lifecycle: field_zeroes($orderlifecycle; ["unknown_fills", "unknown_cancellations", "duplicate_acceptances", "duplicate_terminals", "fills_after_terminal", "fill_quantity_mismatches", "cancel_quantity_mismatches", "client_mismatches", "unlinked_fills"]),
-			settlement: (count($settlements; "checks") > 0 and field_zeroes($settlements; ["mismatched", "unpaid", "total_trades_after_expiry", "arithmetic_failures"])),
+			order_lifecycle: field_zeroes($orderlifecycle; ["unknown_fills", "unknown_cancellations", "duplicate_acceptances", "duplicate_terminals", "fills_after_terminal", "fill_quantity_mismatches", "cancel_quantity_mismatches", "client_mismatches", "unlinked_fills", "missing_immediate_terminal"]),
+			settlement: (count($settlements; "checks") > 0 and field_zeroes($settlements; ["mismatched", "unpaid", "total_trades_after_expiry", "arithmetic_failures", "explicit_unavailable_announcements"])),
 			expiry: (count($expiryfills; "expired_contracts") > 0 and count($expiryfills; "settled_contracts") > 0 and zero($expiryfills; "expired_unsettled_contracts") and field_zeroes($expiryfills; ["fills_after_expiry", "missing_expiry_metadata", "settlement_without_listing", "metadata_mismatches", "nonempty_snapshots_after_expiry"])),
 			derivatives: (count($derivatives; "funding") > 0 and field_zeroes($derivatives; ["funding_broken", "funding_sign_wrong", "funding_misdirected", "funding_undirected", "funding_duplicate_payments", "exercise_broken", "holders_mispaid", "worthless_paid", "exercise_arithmetic_failures"])),
-			liquidations: (zero($liquidations; "invalid_liquidations") and zero($liquidations; "position_path_failures") and zero($liquidations; "position_conservation_failures") and zero($liquidations; "deficit_mismatch_instants")),
+			liquidations: (zero($liquidations; "invalid_liquidations") and zero($liquidations; "position_path_missing") and zero($liquidations; "position_path_failures") and zero($liquidations; "position_conservation_missing") and zero($liquidations; "position_conservation_failures") and zero($liquidations; "deficit_mismatch_instants")),
 			margin: field_zeroes($marginchecks; ["missing_checks", "unexpected_checks", "duplicate_checks", "field_mismatches", "mark_mismatches", "balance_mismatches", "contribution_mismatches", "equity_mismatches", "notional_mismatches", "maintenance_mismatches", "position_chain_failures", "balance_chain_failures", "arithmetic_failures", "unsupported_mark_domain", "ambiguous_mark_timestamp_collisions"]),
 			option_liability: (r($optionliability).valid == true and count($optionliability; "decisions") > 0 and field_zeroes($optionliability; ["decode_errors", "future_observation_use", "invalid_decisions", "missing_outcomes", "duplicate_outcomes", "orphan_outcomes", "outcome_mismatches"])),
 			maker_refresh: (r($makerrefresh).valid == true),
-			maker_quote_size: (count($makerquotesize; "decisions") > 0 and field_zeroes($makerquotesize; ["missing_outcomes", "duplicate_outcomes", "duplicate_decision_sides", "decision_field_mismatches", "outcome_field_mismatches", "invalid_decision_records", "invalid_censor_records"])),
+			maker_quote_size: (count($makerquotesize; "decisions") > 0 and field_zeroes($makerquotesize; ["missing_outcomes", "duplicate_outcomes", "duplicate_decision_sides", "decision_field_mismatches", "outcome_field_mismatches", "invalid_decision_records", "invalid_censor_records", "wrong_direction_size_skew", "censored_outcome_deliveries"])),
 			maker_rebalance: (r($makerrebalance).valid == true),
 			post_only: (count($postonly; "accepted_post_only") > 0 and zero($postonly; "unmatched_fill_orders")),
 			liability_hedger: (r($liabilityhedger).valid == true),
+			option_value_taker: (count($optionvaluetaker; "decisions") > 0),
+			vanna_volga: (count($vannavolga; "decisions") > 0),
+			option_surface: (count($optionsurface; "points") > 0),
+			exposure: (count($exposure; "risk_samples") > 0),
+			hedging: (count($hedging; "profiles") > 0),
 			activation: (r($activation).predicates.cdf_collateral_borrowing_observed == true and r($activation).predicates.zero_price_unavailable_order_rejections == true),
 			late_path: (count($lifecycle; "funding") > 0 and count($lifecycle; "settlement_rounds") > 0 and count($settlements; "checks") > 0 and count($expiryfills; "expired_contracts") > 0)
 		},
@@ -276,7 +288,8 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 		}}' >"$integrity_tmp"
 mv "$integrity_tmp" "$cell/integrity.json"
 require_json_object "$cell/integrity.json"
-jq -e 'all(.predicates | to_entries[]; .value == true)' "$cell/integrity.json" >/dev/null ||
+jq -e '(.predicates | keys) == ["activation", "conservation", "derivatives", "exposure", "expiry", "fill_positions", "frontier_vectors", "hedging", "late_path", "liability_hedger", "liquidations", "maker_quote_size", "maker_rebalance", "maker_refresh", "margin", "mechanical", "observation_receipts", "option_liability", "option_surface", "option_value_taker", "order_lifecycle", "positions", "post_only", "settlement", "vanna_volga"] and
+	all(.predicates | to_entries[]; .value == true)' "$cell/integrity.json" >/dev/null ||
 	fail "one or more fail-closed integrity predicates failed"
 
 required=(
@@ -310,6 +323,9 @@ analyzer_sha256=$(sha256sum "$analyzer" | awk '{print $1}')
 [[ "$analyzer_revision" == "$head_revision" && "$analyzer_modified" == false ]] || fail "analyzer is not a clean build of current HEAD"
 
 required_json=$(printf '%s\n' "${required[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
+artifact_sha256=$(for artifact in "${required[@]}"; do
+	printf '%s\t%s\n' "$artifact" "$(sha256sum "$cell/$artifact" | awk '{print $1}')"
+done | jq -Rn 'reduce inputs as $line ({}; ($line | split("\t")) as $parts | .[$parts[0]] = $parts[1])')
 metadata_tmp=$(mktemp "$cell/analysis-metadata.json.tmp-XXXXXX")
 analyzer_modified_json=false
 [[ "$analyzer_modified" == true ]] && analyzer_modified_json=true
@@ -319,6 +335,7 @@ jq -n \
 	--arg analyzer_sha256 "$analyzer_sha256" \
 	--argjson analyzer_modified "$analyzer_modified_json" \
 	--argjson required_artifacts "$required_json" \
+	--argjson artifact_sha256 "$artifact_sha256" \
 	--argjson runtime_evidence_events "$runtime_events" \
 	--arg runtime_evidence_digest "$runtime_digest" \
 	--arg contract "$contract_version" \
@@ -333,6 +350,7 @@ jq -n \
 		simulator_revision: $simulator_revision, simulator_sha256: $simulator_sha256,
 		config_sha256: $config_sha256, analysis_contract: $contract,
 		completion_sentinels: ["greeks.json", "latency.json"], required_artifacts: $required_artifacts,
+		artifact_sha256: $artifact_sha256,
 		runtime_evidence_artifact: {events: $runtime_evidence_events, digest: $runtime_evidence_digest},
 		inactive_contracts: ["fundingcarry", "termcarry", "datedcarryp5", "datedmandatep5", "perpreplenishment"],
 		raw_log_policy: "retained; this extractor has no prune authority"}' >"$metadata_tmp"
@@ -343,6 +361,8 @@ jq -e --arg revision "$head_revision" --arg analyzer_revision "$analyzer_revisio
 	'.schema_version == 2 and .analysis_revision == $revision and
 	 .analyzer_revision == $analyzer_revision and .analyzer_vcs_modified == false and
 	 .analysis_contract == $contract and .required_artifacts == $required_artifacts and
+	 (.artifact_sha256 | keys) == ($required_artifacts | sort) and
+	 all(.artifact_sha256 | to_entries[]; (.value | test("^[0-9a-f]{64}$"))) and
 	 (.raw_log_policy | type) == "string"' "$cell/analysis-metadata.json" >/dev/null ||
 	fail "analysis metadata self-check failed"
 

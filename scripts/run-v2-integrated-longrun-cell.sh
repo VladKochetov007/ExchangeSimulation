@@ -24,12 +24,8 @@ case "$cell" in
 		expected_gomaxprocs=8
 		;;
 	holdout-619|holdout-631|holdout-641)
-		[[ "${V2_LONGRUN_ALLOW_HOLDOUT:-0}" == 1 ]] || {
-			echo "refusing integrated long-run holdout before immutable freeze" >&2
-			exit 1
-		}
-		config_name="$cell.json"
-		expected_gomaxprocs=4
+		echo "refusing reserved holdout in development runner; use a separately pinned post-freeze protocol" >&2
+		exit 1
 		;;
 	*) echo "unregistered integrated long-run cell: $cell" >&2; exit 2 ;;
 esac
