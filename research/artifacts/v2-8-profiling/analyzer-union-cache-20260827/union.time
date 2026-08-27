@@ -1,4 +1,4 @@
-	Command being timed: "/tmp/exsim-unionbench.rouZo9/bin/mvunionbench -mode union -run /home/vlad/development/exchange_simulation/scratch/signed-price-hardening-20260824/full-evidence-seed101 -cpuprofile /tmp/exsim-unionbench.rouZo9/results/union.cpu.pprof -allocprofile /tmp/exsim-unionbench.rouZo9/results/union.alloc.pprof"
+	Command being timed: "<temporary-unionbench>/bin/mvunionbench -mode union -run scratch/signed-price-hardening-20260824/full-evidence-seed101 -cpuprofile <temporary-unionbench>/results/union.cpu.pprof -allocprofile <temporary-unionbench>/results/union.alloc.pprof"
 	User time (seconds): 28.40
 	System time (seconds): 0.95
 	Percent of CPU this job got: 354%
