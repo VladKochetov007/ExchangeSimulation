@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "candidate_source_revision": "548f92c0f026bc92d43b28a7e471179ec50c107f",
+  "candidate_semantic_commit": "548f92c",
+  "binary_sha256": "048204c05d0b53cffe09b37980e938601935bcdd65f95d7e8ee11c88a523e28a",
+  "analyzer_sha256": "3fd2907a7587b19a776ad3137aa885999093b3d41a6bfcb49a33858c1164518e",
+  "prunegate_sha256": "d889e19669e4f5cd743339ce245895429025e6195021ecc7e58383448f5a1e93",
+  "go_version": "go1.26.6-X:nodwarf5 linux/amd64",
+  "horizon": "24h",
+  "checkpoint_interval_seconds": 60,
+  "cases": {
+    "long-baseline-101-v3": {
+      "seed": 101,
+      "log_mode": "full",
+      "gomaxprocs": "10",
+      "config_sha256": "d5f5dbb8d2dca46e2034a9c97904ad3f1d20b2c0888e3e42522d5f5aeb0c17a8",
+      "checkpoints": 1441,
+      "event_count": 105712997,
+      "execution_stream_hash": "d7c0952906af41316391d9ce436f88aa86213e2c5f105e857b5f7321cb893c30",
+      "greeks_sha256": "874719b98188663bad67ab0c0e74f82520268efdf1f755127afee647bb0d327f",
+      "latency_sha256": "55e9e700a6a34860a9e94bd97efb46c43786cce3928d2f82eb659a9ce61600bf",
+      "runtime_evidence": {
+        "domain": "persisted_json_records",
+        "ordering": "unordered_multiset",
+        "events": 105712997,
+        "digest": "f10918bf4f1f57505f802dc9cc3156c000c448a2a1655ef8db773d538f232a7f"
+      },
+      "offline_evidence": {
+        "domain": "persisted_json_records",
+        "ordering": "unordered_multiset",
+        "events": 105712997,
+        "digest": "f10918bf4f1f57505f802dc9cc3156c000c448a2a1655ef8db773d538f232a7f"
+      }
+    },
+    "long-baseline-102-v3": {
+      "seed": 102,
+      "log_mode": "full",
+      "gomaxprocs": 10,
+      "config_sha256": "8cdb3eff2cf2ff1892a05f56a534fb9ae3258a1018d5683363d0d7efc806b596",
+      "checkpoints": 1441,
+      "event_count": 111419965,
+      "execution_stream_hash": "4085ad898a16698e36188afb700de9de1204679c1f34982576188317bc3bfe96",
+      "greeks_sha256": "03f61f48862f514e5b9a92cb77c0e69021328d4ea8c51808f5f133922eb82a7b",
+      "latency_sha256": "9d11def23618ebd1ca1929be5b44ff8b7080f1b4c34d763dcc57dd0fa31c9665",
+      "runtime_evidence": {
+        "domain": "persisted_json_records",
+        "ordering": "unordered_multiset",
+        "events": 111419965,
+        "digest": "547d34311821d98420599e0060b5c400228cdd8e26feb3bd6ab08af287c1f1ba"
+      },
+      "offline_evidence": {
+        "domain": "persisted_json_records",
+        "ordering": "unordered_multiset",
+        "events": 111419965,
+        "digest": "547d34311821d98420599e0060b5c400228cdd8e26feb3bd6ab08af287c1f1ba"
+      }
+    },
+    "long-baseline-103-v3": {
+      "seed": 103,
+      "log_mode": "full",
+      "gomaxprocs": "10",
+      "config_sha256": "025cb624c3de4ca1981407ccc62123641b47ba3756489feccb22986c01b1fe8a",
+      "checkpoints": 1441,
+      "event_count": 105533283,
+      "execution_stream_hash": "e4b2f3b6d28c218b94324b4fa78b6aabb4c15c9df5989a67101566639182ccd6",
+      "greeks_sha256": "bc9f945914575aceed3e65492a185f14ff640b856f9a3b98fad3e26acb2491ac",
+      "latency_sha256": "3d6a9c420c7c2decb05273ca54d3e7500df76506e5dc13488d4f0675ef4c6abc",
+      "runtime_evidence": {
+        "domain": "persisted_json_records",
+        "ordering": "unordered_multiset",
+        "events": 105533283,
+        "digest": "d622d65a87140cc713b5dd03a975219f841927bba55a0b1b91c90826e463ccbf"
+      },
+      "offline_evidence": {
+        "domain": "persisted_json_records",
+        "ordering": "unordered_multiset",
+        "events": 105533283,
+        "digest": "d622d65a87140cc713b5dd03a975219f841927bba55a0b1b91c90826e463ccbf"
+      }
+    },
+    "long-baseline-101-v3-off": {
+      "seed": 101,
+      "log_mode": "none",
+      "gomaxprocs": "10",
+      "config_sha256": "3f307d2ae2a844e93e2f2454c10f3db94544eed16d1c225fa7169483e390bc15",
+      "checkpoints": 1441,
+      "event_count": 105712997,
+      "execution_stream_hash": "d7c0952906af41316391d9ce436f88aa86213e2c5f105e857b5f7321cb893c30",
+      "greeks_sha256": "874719b98188663bad67ab0c0e74f82520268efdf1f755127afee647bb0d327f",
+      "latency_sha256": "55e9e700a6a34860a9e94bd97efb46c43786cce3928d2f82eb659a9ce61600bf"
+    },
+    "long-baseline-101-v3-g1": {
+      "seed": 101,
+      "log_mode": "none",
+      "gomaxprocs": 1,
+      "config_sha256": "d35af819cdba3726356716e7e83a6e59dd038df0b02f71f218822cfa918dd48c",
+      "checkpoints": 1441,
+      "event_count": 105712997,
+      "execution_stream_hash": "d7c0952906af41316391d9ce436f88aa86213e2c5f105e857b5f7321cb893c30",
+      "greeks_sha256": "874719b98188663bad67ab0c0e74f82520268efdf1f755127afee647bb0d327f",
+      "latency_sha256": "55e9e700a6a34860a9e94bd97efb46c43786cce3928d2f82eb659a9ce61600bf"
+    },
+    "long-baseline-101-v3-g4": {
+      "seed": 101,
+      "log_mode": "none",
+      "gomaxprocs": 4,
+      "config_sha256": "f45146ddc33e61b04ac8f085b9dce3fc8f43adf65234eba1fe4cea4bd351dd7b",
+      "checkpoints": 1441,
+      "event_count": 105712997,
+      "execution_stream_hash": "d7c0952906af41316391d9ce436f88aa86213e2c5f105e857b5f7321cb893c30",
+      "greeks_sha256": "874719b98188663bad67ab0c0e74f82520268efdf1f755127afee647bb0d327f",
+      "latency_sha256": "55e9e700a6a34860a9e94bd97efb46c43786cce3928d2f82eb659a9ce61600bf"
+    }
+  },
+  "determinism": {
+    "seed101_full_vs_none_gomaxprocs10": true,
+    "seed101_none_gomaxprocs1_vs4_vs10": true,
+    "seed101_all_checkpoint_bytes_equal": true,
+    "seed101_greeks_latency_bytes_equal": true,
+    "seed101_full_runtime_offline_evidence_equal": true,
+    "seed103_full_runtime_offline_evidence_equal": true
+  },
+  "claim_boundary": [
+    "exact ordered execution-observation determinism for the historical FROZEN-2 control config",
+    "exact persisted JSON evidence digest reconstruction for full-log cases",
+    "not an integrated-V2 freeze and not proof of unlogged no-op or scheduler observation equality"
+  ]
+}

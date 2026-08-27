@@ -1,0 +1,6 @@
+{
+  "domain": "persisted_json_records",
+  "ordering": "unordered_multiset",
+  "events": 111419965,
+  "digest": "547d34311821d98420599e0060b5c400228cdd8e26feb3bd6ab08af287c1f1ba"
+}

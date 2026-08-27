@@ -1,0 +1,43 @@
+{
+  "experiment_id": "v2-freeze-candidate-long-baseline-102-v3",
+  "source_revision": "548f92c0f026bc92d43b28a7e471179ec50c107f",
+  "latest_simulator_semantic_commit": "548f92c",
+  "config_sha256": "8cdb3eff2cf2ff1892a05f56a534fb9ae3258a1018d5683363d0d7efc806b596",
+  "binary_sha256": "048204c05d0b53cffe09b37980e938601935bcdd65f95d7e8ee11c88a523e28a",
+  "analyzer_sha256": "3fd2907a7587b19a776ad3137aa885999093b3d41a6bfcb49a33858c1164518e",
+  "prunegate_sha256": "d889e19669e4f5cd743339ce245895429025e6195021ecc7e58383448f5a1e93",
+  "go_version": "go version go1.26.6-X:nodwarf5 linux/amd64",
+  "gomaxprocs": 10,
+  "simulated_horizon": "24h",
+  "seed": 102,
+  "log_mode": "full",
+  "checkpoint_interval_seconds": 60,
+  "completion_sentinels": [
+    "greeks.json",
+    "latency.json"
+  ],
+  "output_dir": "/home/vlad/development/exchange_simulation/research/artifacts/v2-freeze-candidate/long-baseline-102-v3",
+  "holdout": false,
+  "exit_code": 0,
+  "terminal_execution": {
+    "events": 111419965,
+    "sim_time": 1735776060000000000,
+    "hash": "4085ad898a16698e36188afb700de9de1204679c1f34982576188317bc3bfe96"
+  },
+  "runtime_evidence": {
+    "domain": "persisted_json_records",
+    "ordering": "unordered_multiset",
+    "events": 111419965,
+    "digest": "547d34311821d98420599e0060b5c400228cdd8e26feb3bd6ab08af287c1f1ba"
+  },
+  "offline_evidence": {
+    "domain": "persisted_json_records",
+    "ordering": "unordered_multiset",
+    "events": 111419965,
+    "digest": "547d34311821d98420599e0060b5c400228cdd8e26feb3bd6ab08af287c1f1ba"
+  },
+  "runtime_offline_evidence_equal": true,
+  "raw_evidence_policy": "retain until candidate gates pass",
+  "diagnostic_fix": "548f92c: canonical cross-margin book traversal",
+  "purpose": "three-seed calibration control for current deterministic candidate"
+}
