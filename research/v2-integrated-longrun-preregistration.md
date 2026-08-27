@@ -2,6 +2,7 @@
 
 Status: **pre-registered before long-run outcomes**
 Date: 2026-08-27
+Contract revision: `v2-integrated-longrun-candidate-v2`
 
 ## Purpose and scope
 
@@ -76,12 +77,58 @@ The fail-closed extractor must independently produce, at minimum:
 * maker refresh/rebalance, liability hedger, cross-venue, arbitrage, role and
   ecology reports;
 * derivatives, liquidations, margin checks, and dated/funding diagnostics,
-  including explicit zero-activity results where a path is not exercised.
+  including explicit zero-activity results where a path is not exercised;
+* `activation.json`, `integrity.json`, and `analysis-metadata.json`.
 
 Required artifacts are considered complete only when every registered file is
 present, parses, has a complete `analysis-metadata.json`, and records the
 analyzer revision/SHA.  Raw evidence is retained; this protocol grants no
 prune authority.
+
+The extractor's registered artifact set is immutable for this campaign:
+
+```text
+observationreceipts frontiervectors mechanical conservation positions
+fillpositions orderlifecycle lifecycle settlements expiryfills
+evidenceartifacthash streamhash arbitrage crossvenue roleaudit ecology
+derivatives liquidations marginchecks optionsurface optionliabilityp6
+optionvaluetakerp6 vannavolgap6 exposure hedging makerrefresh makerquotesize
+makerrebalance postonly liabilityhedger perpsignals datedmandatep5
+fundingcarry termcarry datedcarryp5 perpreplenishment activation integrity
+```
+
+Every analyzer result must be a JSON object with an object-valued `result`.
+Disabled P3/P4/P5 recorders are represented as `status=OUT_OF_SCOPE` and
+`classification=RECORDER_NOT_ENABLED`; a missing decision stream is never
+interpreted as a zero response. The exact disabled fields are
+`record_funding_carry_decisions`, `record_term_carry_decisions`,
+`record_dated_term_carry_decisions`,
+`record_dated_execution_mandate_decisions`, and
+`record_perp_maker_replenishment_decisions`.
+
+The candidate activation contract is fixed before outcomes. Across all raw
+JSONL venue records, at least one positive `borrow` record for asset `CDF`
+must have positive `collateral_used`, with both cross-asset graph and
+cross-asset collateral marks enabled. There must be zero `OrderRejected`
+records whose error is exactly `PRICE_UNAVAILABLE`. Startup or mark-level
+`price_unavailable` observations are not silently counted as order
+rejections. The extractor records both counts in `activation.json` and fails
+closed if either predicate is false.
+
+Conservation identity residuals are checked in fixed-point report units with
+the precommitted bound `abs(residual) <= 1000`, independently for global and
+per-venue identities. Delta consistency, chain, decode, lifecycle, position,
+settlement, expiry, derivative, margin, and enabled actor-replay mismatch
+counters must be zero wherever their result schema defines them. A late-path
+cell must observe funding, listing/expiry/settlement activity, and non-empty
+settlement checks; zero activity is not a pass for that path.
+
+The runner and extractor require a clean current-HEAD source identity,
+byte-identical registered configuration, clean embedded simulator/analyzer
+build metadata (`vcs.revision` equal to the declared revision and
+`vcs.modified=false`), immutable run metadata, and hash-linked completion
+sidecars. The scorer refuses to overwrite an existing score and is the only
+candidate aggregate decision surface.
 
 ## Candidate qualification predicates
 
@@ -97,7 +144,8 @@ The candidate is qualified only if all of the following hold:
 4. Seed-607 full, no-log, and full-g8 runs have identical ordered execution
    checkpoints and deterministic sidecars at the common horizon.  Persisted
    evidence content/digest is compared only for the full evidence pair; the
-   no-log cell intentionally has a different evidence domain.
+   no-log cell intentionally has a different evidence domain and must not
+   contain full-evidence hash or venue JSONL artifacts.
 5. Receipt/frontier replay confirms delivery-before-decision for every audited
    role and no required evidence class is missing.
 6. The complete provenance bundle is reproducible from the declared clean

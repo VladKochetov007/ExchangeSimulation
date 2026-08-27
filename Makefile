@@ -91,6 +91,7 @@ rebuild: clean build
 test:
 	@echo "Running tests..."
 	@$(GOTEST) ./...
+	@./scripts/test-v2-integrated-longrun-contract.sh
 
 ## test-short: Run tests without long-running tests
 test-short:

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run one pre-registered integrated V2 long-run candidate cell. Completion is
-# fail-closed: only final greeks.json and latency.json sidecars are sentinels.
-# No holdout may run before the immutable freeze policy authorizes it.
+# fail-closed: final sidecars, manifest identity, and an atomic run-status are
+# all required. No holdout may run before the immutable freeze policy authorizes
+# it.
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
@@ -22,7 +23,7 @@ case "$cell" in
 		config_name="dev-607.json"
 		expected_gomaxprocs=8
 		;;
-	 holdout-619|holdout-631|holdout-641)
+	holdout-619|holdout-631|holdout-641)
 		[[ "${V2_LONGRUN_ALLOW_HOLDOUT:-0}" == 1 ]] || {
 			echo "refusing integrated long-run holdout before immutable freeze" >&2
 			exit 1
@@ -54,6 +55,10 @@ head_revision=$(git -C "$root_dir" rev-parse HEAD)
 	echo "simulator revision $sim_revision is not current repository HEAD $head_revision" >&2
 	exit 1
 }
+[[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || {
+	echo "refusing long-run launch from a dirty source worktree; build and run from a clean worktree" >&2
+	exit 1
+}
 [[ "${GOMAXPROCS:-}" == "$expected_gomaxprocs" ]] || {
 	echo "registered cell $cell requires GOMAXPROCS=$expected_gomaxprocs (got ${GOMAXPROCS:-unset})" >&2
 	exit 1
@@ -69,6 +74,11 @@ head_revision=$(git -C "$root_dir" rev-parse HEAD)
 # cell until NewSim has opened its evidence sink; creating log files inside the
 # cell before launch would make the directory look reused and fail closed.
 mkdir -p "$output_root"
+available_kb=$(df -Pk "$output_root" | awk 'NR == 2 {print $4}')
+[[ "$available_kb" =~ ^[0-9]+$ && "$available_kb" -ge 5242880 ]] || {
+	echo "refusing long-run launch with less than 5 GiB free on evidence filesystem" >&2
+	exit 1
+}
 binary_revision=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
 binary_modified=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
 [[ "$binary_revision" == "$sim_revision" ]] || {
@@ -88,34 +98,48 @@ holdout=false
 [[ "$cell" == holdout-* ]] && holdout=true
 mkdir -p "$output"
 cp "$config" "$output/run-config.json"
+cmp -s "$config" "$output/run-config.json" || {
+	echo "registered config copy changed before launch: $cell" >&2
+	exit 1
+}
+config_sha256=$(sha256sum "$config" | awk '{print $1}')
+binary_sha256=$(sha256sum "$binary" | awk '{print $1}')
 jq -n \
 	--arg cell "$cell" \
 	--argjson seed "$seed" \
 	--arg horizon "$horizon" \
 	--arg log_mode "$log_mode" \
-	--arg config_sha256 "$(sha256sum "$config" | awk '{print $1}')" \
-	--arg binary_sha256 "$(sha256sum "$binary" | awk '{print $1}')" \
+	--arg config_sha256 "$config_sha256" \
+	--arg binary_sha256 "$binary_sha256" \
 	--arg git_revision "$sim_revision" \
 	--arg go_version "$(go version)" \
 	--arg binary_go_version "$(go version -m "$binary" | sed -n '1s/.*: //p')" \
-	--arg gomaxprocs "$GOMAXPROCS" \
+	--argjson gomaxprocs "$GOMAXPROCS" \
 	--arg output_dir "$output" \
 	--argjson holdout "$holdout" \
+	--arg binary_path "$binary" \
+	--arg config_path "$config" \
+	--arg binary_vcs_revision "$binary_revision" \
+	--arg binary_vcs_modified "$binary_modified" \
 	--arg config_hypothesis "$config_hypothesis" \
 	--arg config_experiment "$config_experiment" \
 	'{
+		  schema_version: 2, runner_contract: "v2-integrated-longrun-runner-v2",
 		  experiment_id: ("v2-integrated-longrun-" + $cell),
 		  config_experiment_id: $config_experiment,
 		  hypothesis_id: $config_hypothesis,
 		  cell: $cell, seed: $seed, holdout: $holdout,
 		  simulated_horizon: $horizon, log_mode: $log_mode,
 		  config_sha256: $config_sha256, binary_sha256: $binary_sha256,
+		  config_path: $config_path, binary_path: $binary_path,
+		  binary_vcs_revision: $binary_vcs_revision, binary_vcs_modified: ($binary_vcs_modified == "true"),
 		  git_revision: $git_revision, go_version: $go_version, binary_go_version: $binary_go_version,
 		  gomaxprocs: $gomaxprocs, output_dir: $output_dir,
 		  command: ["multivenue", "-config", "run-config.json", "-duration", $horizon, "-logdir", $output_dir, "-log-mode", $log_mode],
 		  completion_sentinels: ["greeks.json", "latency.json"],
 		  raw_log_policy: "retained until every registered integrated long-run evidence contract passes"
 		}' >"$output/run-metadata.json"
+run_metadata_sha256_before=$(sha256sum "$output/run-metadata.json" | awk '{print $1}')
 
 stdout_log="$output_root/$cell.simulator.stdout.log"
 stderr_log="$output_root/$cell.simulator.stderr.log"
@@ -132,14 +156,43 @@ if [[ ! -s "$output/greeks.json" || ! -s "$output/latency.json" ]]; then
 	echo "simulator exited without both completion sentinels: $output" >&2
 	exit 1
 fi
+jq -e 'type == "object" and (.build.revision | type) == "string" and
+	.build.revision == $revision and .build.modified == false and
+	.config.seed == $seed and .config.log_mode == $log_mode and
+	.config.experiment_id == $experiment' \
+	--arg revision "$sim_revision" --argjson seed "$seed" --arg log_mode "$log_mode" \
+	--arg experiment "$config_experiment" "$output/manifest.json" >/dev/null || {
+	echo "manifest provenance/config identity mismatch: $output" >&2
+	exit 1
+}
+jq -e 'type == "object"' "$output/greeks.json" >/dev/null || {
+	echo "malformed greeks completion sentinel: $output" >&2
+	exit 1
+}
+jq -e 'type == "object"' "$output/latency.json" >/dev/null || {
+	echo "malformed latency completion sentinel: $output" >&2
+	exit 1
+}
+run_metadata_sha256_after=$(sha256sum "$output/run-metadata.json" | awk '{print $1}')
+[[ "$run_metadata_sha256_before" == "$run_metadata_sha256_after" ]] || {
+	echo "run metadata changed during simulation: $output" >&2
+	exit 1
+}
 status_tmp="$output/run-status.json.tmp-$$"
 jq -n \
 	--argjson exit_status "$status" \
 	--arg cell "$cell" \
 	--arg horizon "$horizon" \
+	--arg run_metadata_sha256 "$run_metadata_sha256_after" \
+	--arg manifest_sha256 "$(sha256sum "$output/manifest.json" | awk '{print $1}')" \
+	--arg greeks_sha256 "$(sha256sum "$output/greeks.json" | awk '{print $1}')" \
+	--arg latency_sha256 "$(sha256sum "$output/latency.json" | awk '{print $1}')" \
 	--argjson sentinels '["greeks.json", "latency.json"]' \
 	'{schema_version: 1, cell: $cell, exit_status: $exit_status,
 	  completion_verified: true, simulated_horizon: $horizon,
-	  completion_sentinels: $sentinels}' >"$status_tmp"
+	  completion_sentinels: $sentinels,
+	  run_metadata_sha256: $run_metadata_sha256,
+	  manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256,
+	  latency_sha256: $latency_sha256}' >"$status_tmp"
 mv "$status_tmp" "$output/run-status.json"
 echo "completed integrated long-run cell: $output"
