@@ -822,3 +822,51 @@ finish and their contracts pass.
   slice, population, spreads, or clocks. Keep activation, partial liquidity,
   cancellation, open residual, actual flat closure, and funding attribution
   as independent endpoints.
+
+### 2026-08-27 — integrated V2 long-run gate paused before simulation
+
+- The active branch is `autoresearch/ffa-ecology-gen0` at `30176e0`
+  (`fix(research): harden long-run cell provenance`). No simulator, analyzer,
+  extractor, or experiment process is running. No new outcome world was
+  launched in this iteration.
+- The runner hardening is committed separately. It now registers the
+  `dev-607-g8` parity cell, requires the registered `GOMAXPROCS`, hard-codes
+  the registered 24-hour horizon, executes the copied `run-config.json`,
+  records config/hypothesis identity and binary Go provenance, requires a
+  clean binary revision equal to the current repository HEAD, refuses reused
+  output directories, and writes an atomic `run-status.json` only after both
+  `greeks.json` and `latency.json` are present and the simulator exits zero.
+- The integrated 24-hour candidate has **not** started. The next required
+  pre-run work is to revise the protocol/extractor/scorer under the independent
+  Sol-xhigh review: parse every required JSON; verify analyzer VCS revision and
+  clean build; reconcile metadata/config/seed/cell/hypothesis; add late-path
+  activation and bounded-integer accounting tolerances; require lifecycle,
+  order, settlement, expiry, derivative and margin integrity predicates; add
+  the CDF borrow / `PRICE_UNAVAILABLE` cross-asset activation check; classify
+  disabled P4/P5/P3 recorders as `OUT_OF_SCOPE`/`RECORDER_NOT_ENABLED`; and
+  precommit the three-development-cell aggregate plus seed-607 G4/G8/no-log
+  parity scorer. Obtain reviewer acceptance before any 24-hour cell.
+- Existing accepted integrated reference smoke remains valid and unchanged:
+  source revision `b312336`, six execution checkpoints, 352,099 execution
+  observations, execution hash prefix `9d40fd652c0c...`, and persisted
+  evidence digest
+  `3dc2ac37e4e0d594eb17fada96cdb29ebc2bc2ad82a2caf714019a55fb5d66d2`.
+  It is compatibility evidence only, not a long-run realism or funding claim.
+- Independent analyzer work found and fixed deterministic ecology-HHI
+  accumulation ordering in `1bf1b35`; current replay matches all scientific
+  result subobjects from the archived smoke. The old ecology artifact differs
+  only in the last floating-point bits of HHI because it was produced before
+  that analyzer fix. The analyzer-only performance branch rejected a fused
+  decoder prototype (`fccde0e`) after malformed-input/duplicate-key semantics
+  diverged despite a measured valid-replay speedup.
+- Preserve the four pre-existing user-owned tracked scoreboard edits and all
+  untracked retained evidence. Current disk free space is approximately 237 GB.
+  Do not stage or delete those files. No holdout seeds have been consumed by
+  the integrated candidate; holdout execution remains gated.
+- Safe continuation sequence: inspect `30176e0`; update and commit the
+  protocol hardening, extractor hardening, and precommitted scorer as separate
+  logical commits; run shell/tests and obtain the independent reviewer result;
+  rebuild from a clean source tree with VCS metadata; only then launch the
+  registered development cells sequentially with disk/RAM monitoring. Do not
+  infer completion from host process names and do not consume holdouts before
+  the candidate gate qualifies.
