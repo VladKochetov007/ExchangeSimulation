@@ -52,6 +52,7 @@ an ecology run.
 | Settle against a strike 1% away, **ecology run** | 60 settlements over 5h | the same | 0 mispaid | **386 holders mispaid** | yes |
 | Settle funding twice, **ecology run** | 5 funding instants / 85 duplicate account postings | one funding posting per funded account, contract, and instant | 0 duplicates | **85 duplicates; 5 broken instants** | yes, after V-022 rebuilt the detector |
 | Drop immediate-order cancellation **records**, ecology run | 169,935 immediate cancellation records | every accepted non-resting order has a persisted fill-or-cancel terminal record | 0 missing terminals | **169,935 missing terminals** | yes, through `-metric orderlifecycle` |
+| Drop client GTC cancellation from the resting book | 1 fixture cancellation | a successful GTC cancel removes the order from the executable book and releases its reservation | order absent, reservation released | **order remained executable** while client state claimed cancellation | yes, through `TestExchangeCancelOrder` |
 | Credit spot fee revenue twice, ecology run | 6,048,990 balance deltas | closed-system identity includes every venue fee credit | bounded truncation residual only | **CDF 126,548,770,107; USD 235,583,218,129 residual** | yes, through `-metric conservation` |
 | Negate Black-76 delta in live option-dealer hedge decisions, ecology run | 903 exchange-owned risk snapshots / all three hedge policies | actual underlying hedge offsets independently marked option delta | mean \|net delta\| 0.0170; max 0.1650; drift 0.00038/h | **mean \|net delta\| 1.9264; max 10.8592; drift 1.1844/h** | yes, through exchange-owned `-metric exposure` |
 | Settle first ABC-PERP match twice but emit one fill, ecology run | 1 match / 2 participant position paths | each logged linear fill has exactly one matching position transition | 248,898 linear fills and updates; 0 extras | **248,898 fills, 248,900 updates; 2 extras** | yes, through `-metric fillpositions` |
@@ -144,7 +145,6 @@ listing after expiry.
 
 | mutation | invariant that must fail | detector |
 |---|---|---|
-| Drop a GTC cancellation request or state transition | resting order can remain executable after a requested cancel; request evidence is not persisted | none yet |
 | Use stale collateral for liquidation beyond one-perpetual/no-debt scope | full cross-margin trigger must use contemporaneous collateral and all risk marks | `marginchecks` covers only ABC-PERP, USD cash, and no-debt accounts; options, FX collateral, isolated margin, and borrowing remain untestable from retained evidence |
 
 ## What the table already says about the audit
@@ -163,13 +163,15 @@ The scheduler-backed delivery path now rejects an explicit negative-latency
 mutation: one message published at 1.000 s with 10 ms latency is absent until
 1.010 s, while the scratch source mutation is caught at publication. This is
 not a per-observation trace of the historical logs, and it does not cover
-IB-1's direct dealer-inventory read. The immediate-order cancellation *record*
-is now covered, but an unlogged GTC cancellation request or state transition
-remains untestable from the retained evidence. Two more classes are blocked
-behind mechanisms that never execute. So the audit as it stands covers
-money and lifecycle thoroughly, covers derivative semantics well now that the
-funding direction check has been rebuilt and the exercise fixtures exist, and
-covers matching, order handling and information flow barely.
+IB-1's direct dealer-inventory read. Immediate-order cancellation *records* and
+the venue-level GTC book-removal boundary now have separate detectors. The
+persisted evidence still lacks a request-level GTC cancellation receipt, so a
+dropped wire request would require a dedicated evidence contract rather than
+this fixture. One cross-margin class remains blocked behind mechanisms that
+never execute. The audit therefore covers money and lifecycle thoroughly,
+derivative semantics well now that the funding direction check has been rebuilt
+and the exercise fixtures exist, and matching/order handling at both matcher and
+direct venue boundaries.
 
 Two early mutation runs were initially **missed** -- the unrecorded venue
 movement and the reversed funding sign -- and in both cases the fix was to

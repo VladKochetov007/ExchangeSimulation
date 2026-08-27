@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "mutation": "drop_gtc_cancel",
+  "source_file": "exchange/order_handling.go",
+  "detector": "tests/TestExchangeCancelOrder",
+  "control": {
+    "test_exit": 0,
+    "book_order_present_after_cancel": false,
+    "reservation_after_cancel": 0
+  },
+  "mutant": {
+    "test_exit": 1,
+    "book_order_present_after_cancel": true,
+    "reservation_after_cancel": 0,
+    "failure": "cancelled GTC order remained executable on the book"
+  },
+  "classification": "CAUGHT",
+  "trigger_count": 1,
+  "notes": "A fixture-level venue boundary detector catches removal loss even though client state, reservation release, and cancellation response remain superficially successful. The persisted evidence contract still lacks a request-level GTC cancellation receipt."
+}
