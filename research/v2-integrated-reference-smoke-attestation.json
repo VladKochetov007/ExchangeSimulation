@@ -1,4 +1,333 @@
-  File "<stdin>", line 32
-    'configs':{'full':{'path':'research/configs/v2-integrated/reference-dev-601.json','sha256':'0724f2d022ee9b13ca814cdda67d70b057aa8d5c8b4c33f92cd57a1f52015475'},'none_parity':{'path':'research/configs/v2-integrated/reference-dev-601-none.json','sha256':'2b43cc846a06dd5ade991592dbc9823e3f4adcf1dcb25add1f44d86a0852ffcb','declared_differences':['log_mode','record_maker_quote_size_decisions','record_maker_inventory_rebalance_decisions','record_liability_hedger_decisions','record_noise_flow_phase_decisions','record_option_liability_user_decisions','description'}}},
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    ^
-SyntaxError: closing parenthesis '}' does not match opening parenthesis '['
+{
+  "activation": {
+    "cdf_inventory_rebalance": {
+      "accepted": 39,
+      "decisions": 180,
+      "deferred": 141,
+      "filled_qty": 16530000000,
+      "fills": 115,
+      "future_receipt_use": 0,
+      "missing_outcomes": 0,
+      "receipt_audit_valid": true,
+      "submitted": 39,
+      "valid": true
+    },
+    "cdf_liability_hedger": {
+      "accepted": 276,
+      "decisions": 450,
+      "deferred": 174,
+      "filled_qty": 16094513280,
+      "fills": 505,
+      "future_receipt_use": 0,
+      "missing_outcomes": 0,
+      "receipt_audit_valid": true,
+      "submitted": 276,
+      "valid": true
+    },
+    "option_liability_user": {
+      "accepted": 67,
+      "actor_fills": 45,
+      "decisions": 180,
+      "filled_qty": 300000000,
+      "future_observation_use": 0,
+      "submit_decisions": 67,
+      "target_reached": true,
+      "valid": true
+    },
+    "passive_maker_quote_contract": {
+      "decisions": 3051,
+      "invalid_contract_rows": 0
+    },
+    "post_only": {
+      "accepted_post_only": 9391,
+      "events": 92807,
+      "post_only_filled_qty": 1992516930524,
+      "post_only_fills": 16452,
+      "rejected_would_take": 75,
+      "unmatched_fill_orders": 0
+    },
+    "router": [
+      {
+        "completed_groups": 0,
+        "executable_signals": 0,
+        "pending_groups": 0,
+        "residual_base_qty": 0,
+        "router_id": 250,
+        "submitted_groups": 0,
+        "tier": 1
+      }
+    ],
+    "router_classification": "NOT_EXERCISED (zero executable signals/submitted groups)",
+    "sabr_option_value_taker": {
+      "accepted": 174,
+      "decisions": 174,
+      "filled_qty": 174000000,
+      "fills": 174,
+      "participants": 3
+    },
+    "vanna_volga": {
+      "accepted": 84,
+      "decisions": 84,
+      "filled_qty": 420000000,
+      "fills": 85,
+      "participants": 3
+    }
+  },
+  "binary": {
+    "gomaxprocs_run": 4,
+    "multivenue_sha256": "0d3e7c08fdc8d9f7bf892c30381a4583615cb7f0883b519f64f778409022672e",
+    "mvanalyze_sha256": "7bd1f0620ded51f08ca550fda4f40b567406dc89cbf4285ed46415b2727fc3d2",
+    "prunegate_sha256": "57e38453263d3b8c68f8b70319a745d46490b125f88a822a38bbde429da24d56"
+  },
+  "claim_boundary": [
+    "This smoke passes the declared integrated-reference compatibility/evidence gate only.",
+    "It does not license realism, funding anchoring, convergence, or emergence claims.",
+    "SABR and Vanna--Volga activity is inherited by construction from O4; it is not emergent evidence.",
+    "The no-log parity companion disables optional raw JSON evidence rows required by the full-mode validator; the full run is the complete scientific evidence source."
+  ],
+  "configs": {
+    "full": {
+      "path": "research/configs/v2-integrated/reference-dev-601.json",
+      "sha256": "0724f2d022ee9b13ca814cdda67d70b057aa8d5c8b4c33f92cd57a1f52015475"
+    },
+    "none_parity": {
+      "declared_differences": [
+        "log_mode",
+        "record_maker_quote_size_decisions",
+        "record_maker_inventory_rebalance_decisions",
+        "record_liability_hedger_decisions",
+        "record_noise_flow_phase_decisions",
+        "record_option_liability_user_decisions",
+        "description"
+      ],
+      "path": "research/configs/v2-integrated/reference-dev-601-none.json",
+      "sha256": "2b43cc846a06dd5ade991592dbc9823e3f4adcf1dcb25add1f44d86a0852ffcb"
+    }
+  },
+  "execution_equivalence": {
+    "all_checkpoint_files_equal": true,
+    "all_checkpoint_hashes_equal": true,
+    "all_event_counts_equal": true,
+    "full_vs_none": true,
+    "greeks_bytes_equal": true,
+    "latency_bytes_equal": true,
+    "none_g4_vs_none_g1": true
+  },
+  "experiment_id": "v2-integrated-reference-dev-601",
+  "information_boundary": {
+    "frontier_vectors": {
+      "bad_component_frontier": 0,
+      "bad_component_ordinal": 0,
+      "bad_decision_fields": 0,
+      "bad_decision_id": 0,
+      "base_evidence_valid": true,
+      "base_manifest_digest_matches": true,
+      "component_digest_matches": true,
+      "components": 1772,
+      "decision_digest_matches": true,
+      "decisions": 886,
+      "duplicate_component": 0,
+      "duplicate_vector_decision": 0,
+      "extra_decision_components": 0,
+      "future_component_use": 0,
+      "missing_decision_components": 0,
+      "missing_scalar_decision": 0,
+      "missing_vector_decision": 0,
+      "unknown_component_link": 0,
+      "valid": true
+    },
+    "observation_receipts": {
+      "bad_decision_frontier": 0,
+      "bad_global_event_order": 0,
+      "bad_receipt_ordinal": 0,
+      "bad_schedule_ordinal": 0,
+      "decision_digest_matches": true,
+      "decision_without_link": 0,
+      "decisions": 8378,
+      "delivered_before_scheduled": 0,
+      "duplicate_source_identity": 0,
+      "future_decision_use": 0
+    },
+    "role_activity": {
+      "cdf_spot_maker": {
+        "decisions": 1403,
+        "links": 6,
+        "receipts": 10191,
+        "schedules": 10225
+      },
+      "cross_venue_router_tier": {
+        "decisions": 0,
+        "links": 3,
+        "receipts": 13274,
+        "schedules": 13312
+      },
+      "fixed_distance_maker": {
+        "decisions": 1842,
+        "links": 24,
+        "receipts": 7776,
+        "schedules": 7800
+      },
+      "imbalance_maker": {
+        "decisions": 1742,
+        "links": 24,
+        "receipts": 7728,
+        "schedules": 7752
+      },
+      "liability_hedger": {
+        "decisions": 276,
+        "links": 3,
+        "receipts": 909,
+        "schedules": 912
+      },
+      "option_liability_user": {
+        "decisions": 67,
+        "links": 3,
+        "receipts": 18534,
+        "schedules": 18597
+      },
+      "spot_maker": {
+        "decisions": 3048,
+        "links": 12,
+        "receipts": 45596,
+        "schedules": 45648
+      },
+      "v2_remote_feed": {
+        "decisions": 0,
+        "links": 3,
+        "receipts": 1104,
+        "schedules": 1107
+      }
+    }
+  },
+  "mechanical": {
+    "conservation_delta_consistency": {
+      "chain_broken": 0,
+      "chain_checked": 720,
+      "checked": 79768,
+      "decode_failures": 0,
+      "mismatched": 0,
+      "worst_chain_gap": 0,
+      "worst_gap": 0
+    },
+    "fill_position_reconstruction": {
+      "by_venue": [
+        {
+          "linear_fills": 2236,
+          "matched": 2236,
+          "missing_position_update": 0,
+          "position_chain_checks": 2200,
+          "position_chain_failures": 0,
+          "trade_position_updates": 2236,
+          "unexpected_position_update": 0,
+          "venue_id": "central"
+        },
+        {
+          "linear_fills": 1260,
+          "matched": 1260,
+          "missing_position_update": 0,
+          "position_chain_checks": 1221,
+          "position_chain_failures": 0,
+          "trade_position_updates": 1260,
+          "unexpected_position_update": 0,
+          "venue_id": "north"
+        },
+        {
+          "linear_fills": 2008,
+          "matched": 2008,
+          "missing_position_update": 0,
+          "position_chain_checks": 1970,
+          "position_chain_failures": 0,
+          "trade_position_updates": 2008,
+          "unexpected_position_update": 0,
+          "venue_id": "south"
+        }
+      ],
+      "linear_fills": 5504,
+      "matched": 5504,
+      "missing_position_update": 0,
+      "position_chain_checks": 5391,
+      "position_chain_failures": 0,
+      "trade_position_updates": 5504,
+      "unexpected_position_update": 0
+    },
+    "lifecycle_audit": {
+      "contracts": 66,
+      "settled_contracts": 0
+    },
+    "settlement_audit": {
+      "arithmetic_failures": 0,
+      "checks": null,
+      "explicit_unavailable_announcements": 0,
+      "mismatched": 0,
+      "total_trades_after_expiry": 0,
+      "unpaid": 0
+    }
+  },
+  "pass": true,
+  "persisted_evidence": {
+    "offline": {
+      "digest": "3dc2ac37e4e0d594eb17fada96cdb29ebc2bc2ad82a2caf714019a55fb5d66d2",
+      "domain": "persisted_json_records",
+      "events": 359325,
+      "ordering": "unordered_multiset"
+    },
+    "runtime": {
+      "digest": "3dc2ac37e4e0d594eb17fada96cdb29ebc2bc2ad82a2caf714019a55fb5d66d2",
+      "domain": "persisted_json_records",
+      "events": 359325,
+      "ordering": "unordered_multiset"
+    },
+    "runtime_equals_offline": true
+  },
+  "protocol": "research/v2-integrated-reference-preregistration.md",
+  "runs": {
+    "full_clean_g4": {
+      "build": {
+        "modified": false,
+        "revision": "b312336a3fff3e758ba672137aee0ac917f1bddc",
+        "time": "2026-08-27T13:11:34Z"
+      },
+      "checkpoint_count": 6,
+      "checkpoint_sha256": "e54de55bdeaa3c1c378a87276a540818bf14ae9fb5de0d44a727b1f3ebe6b8e8",
+      "event_count": 352099,
+      "execution_stream_hash": "9d40fd652c0c291079332dbe70cfd33bc744f991cdb5da4ca6bdc730803a4e01",
+      "greeks_sha256": "34fd3d332071429162c99c5894481e1a0b0b8e331142f0a1355efa59a6fc25c6",
+      "latency_sha256": "29ecc5747cd6506611610176022d268cb76c7224c3007e5430b857b8e4c4e425",
+      "log_mode": "full",
+      "path": "research/artifacts/v2-integrated/reference-dev-601-full-clean"
+    },
+    "none_clean_g1": {
+      "build": {
+        "modified": false,
+        "revision": "b312336a3fff3e758ba672137aee0ac917f1bddc",
+        "time": "2026-08-27T13:11:34Z"
+      },
+      "checkpoint_count": 6,
+      "checkpoint_sha256": "e54de55bdeaa3c1c378a87276a540818bf14ae9fb5de0d44a727b1f3ebe6b8e8",
+      "event_count": 352099,
+      "execution_stream_hash": "9d40fd652c0c291079332dbe70cfd33bc744f991cdb5da4ca6bdc730803a4e01",
+      "greeks_sha256": "34fd3d332071429162c99c5894481e1a0b0b8e331142f0a1355efa59a6fc25c6",
+      "latency_sha256": "29ecc5747cd6506611610176022d268cb76c7224c3007e5430b857b8e4c4e425",
+      "log_mode": "none",
+      "path": "research/artifacts/v2-integrated/reference-dev-601-none-clean-g1"
+    },
+    "none_clean_g4": {
+      "build": {
+        "modified": false,
+        "revision": "b312336a3fff3e758ba672137aee0ac917f1bddc",
+        "time": "2026-08-27T13:11:34Z"
+      },
+      "checkpoint_count": 6,
+      "checkpoint_sha256": "e54de55bdeaa3c1c378a87276a540818bf14ae9fb5de0d44a727b1f3ebe6b8e8",
+      "event_count": 352099,
+      "execution_stream_hash": "9d40fd652c0c291079332dbe70cfd33bc744f991cdb5da4ca6bdc730803a4e01",
+      "greeks_sha256": "34fd3d332071429162c99c5894481e1a0b0b8e331142f0a1355efa59a6fc25c6",
+      "latency_sha256": "29ecc5747cd6506611610176022d268cb76c7224c3007e5430b857b8e4c4e425",
+      "log_mode": "none",
+      "path": "research/artifacts/v2-integrated/reference-dev-601-none-clean"
+    }
+  },
+  "schema_version": 1,
+  "simulator_source_revision": "b312336a3fff3e758ba672137aee0ac917f1bddc",
+  "status": "compatibility_smoke_complete_pending_independent_review"
+}
