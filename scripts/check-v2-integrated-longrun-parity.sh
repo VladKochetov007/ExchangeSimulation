@@ -89,8 +89,7 @@ g8_runtime_digest=$(jq -er '.digest' "$output_root/dev-607-g8/evidence-artifact-
 [[ "$full_runtime_events" == "$g8_runtime_events" && "$full_runtime_digest" == "$g8_runtime_digest" ]] || fail "full runtime evidence hashes are not equal"
 
 source_revision=$(jq -er '.git_revision' "$output_root/dev-607/run-metadata.json")
-head_revision=$(git -C "$root_dir" rev-parse HEAD)
-[[ "$source_revision" == "$head_revision" ]] || fail "parity source revision is not current HEAD"
+[[ "$source_revision" =~ ^[0-9a-f]{40}$ ]] || fail "parity simulator source revision is invalid"
 binary_sha256=$(jq -er '.binary_sha256' "$output_root/dev-607/run-metadata.json")
 binary_go_version=$(jq -er '.binary_go_version' "$output_root/dev-607/run-metadata.json")
 for cell in dev-607 dev-607-none dev-607-g8; do
@@ -119,7 +118,7 @@ jq -n \
 	--arg evidence_digest "$full_runtime_digest" \
 	'{
 		schema_version: 1, contract: $contract, seed: 607, horizon: "24h",
-		source_revision: $source_revision, controls: [
+		source_revision: $source_revision, simulator_revision: $source_revision, controls: [
 			{cell: "dev-607", log_mode: "full", gomaxprocs: 4},
 			{cell: "dev-607-none", log_mode: "none", gomaxprocs: 4},
 			{cell: "dev-607-g8", log_mode: "full", gomaxprocs: 8}

@@ -45,4 +45,11 @@ extractor attempt failed before any derived artifact was written because
 The raw result is retained as a failed protocol-attempt record; the boolean
 read is now fail-closed through an explicit string comparison, and the
 simulator will be rerun from the corrected pinned revision before candidate
-scoring.
+scoring. The corrected extractor was then measured on the retry: the prior
+receipt auditor reached approximately 23 GiB RSS and was stopped safely;
+fixed-width receipt streaming reduced the same first audit to approximately
+7 GiB, and the final implementation spills schedule lookup and exact source
+identity deduplication to bounded temporary disk state. A second independent
+Sol-xhigh review rejected the intermediate change until parity/scoring bound
+the simulator revision separately and the remaining linear maps were removed;
+those corrections are included before extraction resumes.

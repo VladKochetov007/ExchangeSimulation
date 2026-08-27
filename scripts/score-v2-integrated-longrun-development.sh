@@ -81,7 +81,7 @@ simulator_revision=$(jq -er '.simulator_revision' "$output_root/dev-607/analysis
 analyzer_sha256=$(jq -er '.analyzer_sha256' "$output_root/dev-607/analysis-metadata.json")
 simulator_sha256=$(jq -er '.simulator_sha256' "$output_root/dev-607/analysis-metadata.json")
 parity_source_revision=$(jq -er '.source_revision' "$parity")
-[[ "$parity_source_revision" == "$source_revision" ]] || fail "parity source revision differs from development analysis revision"
+[[ "$parity_source_revision" == "$simulator_revision" ]] || fail "parity simulator revision differs from development simulator revision"
 for cell in dev-607 dev-613 dev-617; do
 	jq -e --arg source_revision "$source_revision" --arg analyzer_revision "$analyzer_revision" \
 		--arg simulator_revision "$simulator_revision" --arg analyzer_sha256 "$analyzer_sha256" \
@@ -131,7 +131,7 @@ jq -n \
 		schema_version: 1, contract: $contract,
 		status: (if (all_true([$cells[].integrity]) and all_true([$cells[].activation]) and
 			all($parity_report[0].predicates | to_entries[]; .value == true) and
-			$parity_report[0].source_revision == $source_revision) then "QUALIFIED" else "BLOCKED" end),
+			$parity_report[0].source_revision == $simulator_revision) then "QUALIFIED" else "BLOCKED" end),
 		claim_scope: "integrated deterministic/evidence/lifecycle candidate gate only; no market realism claim",
 		source_revision: $source_revision, analyzer_revision: $analyzer_revision,
 		analyzer_sha256: $analyzer_sha256, simulator_revision: $simulator_revision,
@@ -141,7 +141,7 @@ jq -n \
 		predicates: {
 			all_development_integrity: all_true([$cells[].integrity]),
 			all_development_activation: all_true([$cells[].activation]),
-			parity_attested: (all($parity_report[0].predicates | to_entries[]; .value == true) and $parity_report[0].source_revision == $source_revision),
+			parity_attested: (all($parity_report[0].predicates | to_entries[]; .value == true) and $parity_report[0].source_revision == $simulator_revision),
 			provenance_consistent: (($cells | map(.source_revision) | unique | length) == 1 and
 				($cells | map(.analyzer_revision) | unique | length) == 1 and
 				($cells | map(.simulator_revision) | unique | length) == 1),

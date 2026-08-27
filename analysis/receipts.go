@@ -1,6 +1,9 @@
 package analysis
 
 import (
+	"bufio"
+	"bytes"
+	"container/heap"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -439,6 +442,288 @@ type evidenceEventStream struct {
 	eventOrdinal uint64
 }
 
+type scheduleStoreFile struct {
+	file   *os.File
+	writer *bufio.Writer
+	count  uint64
+}
+
+type scheduleStore struct {
+	dir   string
+	files map[linkKey]*scheduleStoreFile
+}
+
+func newScheduleStore(dir string) *scheduleStore {
+	return &scheduleStore{dir: dir, files: make(map[linkKey]*scheduleStoreFile)}
+}
+
+func (s *scheduleStore) fileFor(key linkKey) (*scheduleStoreFile, error) {
+	if stored, ok := s.files[key]; ok {
+		return stored, nil
+	}
+	path := filepath.Join(s.dir, fmt.Sprintf("schedule-%d-%d.bin", key.clientID, key.linkID))
+	file, err := os.Create(path)
+	if err != nil {
+		return nil, fmt.Errorf("create schedule spill %s: %w", path, err)
+	}
+	stored := &scheduleStoreFile{file: file, writer: bufio.NewWriterSize(file, 1<<20)}
+	s.files[key] = stored
+	return stored, nil
+}
+
+func (s *scheduleStore) append(key linkKey, raw []byte) error {
+	stored, err := s.fileFor(key)
+	if err != nil {
+		return err
+	}
+	if _, err := stored.writer.Write(raw); err != nil {
+		return fmt.Errorf("spill schedule client %d link %d: %w", key.clientID, key.linkID, err)
+	}
+	stored.count++
+	return nil
+}
+
+func (s *scheduleStore) read(key linkKey, ordinal uint64) ([]byte, bool, error) {
+	stored, ok := s.files[key]
+	if !ok || ordinal == 0 || ordinal > stored.count {
+		return nil, false, nil
+	}
+	if err := stored.writer.Flush(); err != nil {
+		return nil, false, fmt.Errorf("flush schedule client %d link %d: %w", key.clientID, key.linkID, err)
+	}
+	if ordinal > uint64(^uint64(0)>>1)/marketDataScheduleRecordBytes {
+		return nil, false, nil
+	}
+	raw := make([]byte, marketDataScheduleRecordBytes)
+	offset := int64((ordinal - 1) * marketDataScheduleRecordBytes)
+	read, err := stored.file.ReadAt(raw, offset)
+	if err != nil {
+		return nil, false, fmt.Errorf("read spilled schedule client %d link %d ordinal %d: %w", key.clientID, key.linkID, ordinal, err)
+	}
+	if read != len(raw) {
+		return nil, false, fmt.Errorf("short spilled schedule client %d link %d ordinal %d", key.clientID, key.linkID, ordinal)
+	}
+	return raw, true, nil
+}
+
+func (s *scheduleStore) missingDue(terminalAt int64, lastReceipt map[linkKey]uint64) (int64, error) {
+	var missing int64
+	for key, stored := range s.files {
+		if err := stored.writer.Flush(); err != nil {
+			return 0, fmt.Errorf("flush schedule client %d link %d: %w", key.clientID, key.linkID, err)
+		}
+		if _, err := stored.file.Seek(0, io.SeekStart); err != nil {
+			return 0, fmt.Errorf("seek spilled schedules client %d link %d: %w", key.clientID, key.linkID, err)
+		}
+		var raw [marketDataScheduleRecordBytes]byte
+		for ordinal := uint64(1); ordinal <= stored.count; ordinal++ {
+			if _, err := io.ReadFull(stored.file, raw[:]); err != nil {
+				return 0, fmt.Errorf("read spilled schedules client %d link %d: %w", key.clientID, key.linkID, err)
+			}
+			record := decodeObservationView(raw[:])
+			if record.scheduledAt <= terminalAt && lastReceipt[key] < ordinal {
+				missing++
+			}
+		}
+	}
+	return missing, nil
+}
+
+func (s *scheduleStore) close() error {
+	var first error
+	for key, stored := range s.files {
+		if err := stored.writer.Flush(); err != nil && first == nil {
+			first = fmt.Errorf("flush schedule client %d link %d: %w", key.clientID, key.linkID, err)
+		}
+		if err := stored.file.Close(); err != nil && first == nil {
+			first = fmt.Errorf("close schedule client %d link %d: %w", key.clientID, key.linkID, err)
+		}
+	}
+	return first
+}
+
+type sourceIdentity struct {
+	clientID    uint64
+	linkID      uint32
+	sequence    uint64
+	fingerprint [16]byte
+}
+
+const sourceIdentityRecordBytes = 36
+const sourceIdentityChunkSize = 1 << 20
+
+func compareSourceIdentity(left, right sourceIdentity) int {
+	if left.clientID < right.clientID {
+		return -1
+	}
+	if left.clientID > right.clientID {
+		return 1
+	}
+	if left.linkID < right.linkID {
+		return -1
+	}
+	if left.linkID > right.linkID {
+		return 1
+	}
+	if left.sequence < right.sequence {
+		return -1
+	}
+	if left.sequence > right.sequence {
+		return 1
+	}
+	return bytes.Compare(left.fingerprint[:], right.fingerprint[:])
+}
+
+func encodeSourceIdentity(raw []byte, identity sourceIdentity) {
+	binary.BigEndian.PutUint64(raw[0:8], identity.clientID)
+	binary.BigEndian.PutUint32(raw[8:12], identity.linkID)
+	binary.BigEndian.PutUint64(raw[12:20], identity.sequence)
+	copy(raw[20:36], identity.fingerprint[:])
+}
+
+func decodeSourceIdentity(raw []byte) sourceIdentity {
+	var fingerprint [16]byte
+	copy(fingerprint[:], raw[20:36])
+	return sourceIdentity{
+		clientID: binary.BigEndian.Uint64(raw[0:8]), linkID: binary.BigEndian.Uint32(raw[8:12]),
+		sequence: binary.BigEndian.Uint64(raw[12:20]), fingerprint: fingerprint,
+	}
+}
+
+type sourceRunManager struct {
+	dir       string
+	chunk     []sourceIdentity
+	runPaths  []string
+	nextRunID int
+}
+
+func newSourceRunManager(dir string) *sourceRunManager {
+	return &sourceRunManager{dir: dir, chunk: make([]sourceIdentity, 0, sourceIdentityChunkSize)}
+}
+
+func (m *sourceRunManager) add(identity sourceIdentity) error {
+	m.chunk = append(m.chunk, identity)
+	if len(m.chunk) < sourceIdentityChunkSize {
+		return nil
+	}
+	return m.flush()
+}
+
+func (m *sourceRunManager) flush() error {
+	if len(m.chunk) == 0 {
+		return nil
+	}
+	sort.Slice(m.chunk, func(i, j int) bool { return compareSourceIdentity(m.chunk[i], m.chunk[j]) < 0 })
+	path := filepath.Join(m.dir, fmt.Sprintf("source-run-%06d.bin", m.nextRunID))
+	m.nextRunID++
+	file, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create source duplicate run %s: %w", path, err)
+	}
+	var raw [sourceIdentityRecordBytes]byte
+	for _, identity := range m.chunk {
+		encodeSourceIdentity(raw[:], identity)
+		if _, err := file.Write(raw[:]); err != nil {
+			_ = file.Close()
+			return fmt.Errorf("write source duplicate run %s: %w", path, err)
+		}
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close source duplicate run %s: %w", path, err)
+	}
+	m.runPaths = append(m.runPaths, path)
+	m.chunk = m.chunk[:0]
+	return nil
+}
+
+type sourceRunReader struct {
+	file      *os.File
+	current   sourceIdentity
+	available bool
+}
+
+func (r *sourceRunReader) next() error {
+	var raw [sourceIdentityRecordBytes]byte
+	read, err := io.ReadFull(r.file, raw[:])
+	if err == io.EOF && read == 0 {
+		r.available = false
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read source duplicate run: %w", err)
+	}
+	r.current = decodeSourceIdentity(raw[:])
+	r.available = true
+	return nil
+}
+
+type sourceRunHeap []*sourceRunReader
+
+func (h sourceRunHeap) Len() int { return len(h) }
+func (h sourceRunHeap) Less(i, j int) bool {
+	return compareSourceIdentity(h[i].current, h[j].current) < 0
+}
+func (h sourceRunHeap) Swap(i, j int)   { h[i], h[j] = h[j], h[i] }
+func (h *sourceRunHeap) Push(value any) { *h = append(*h, value.(*sourceRunReader)) }
+func (h *sourceRunHeap) Pop() any {
+	old := *h
+	last := len(old) - 1
+	value := old[last]
+	*h = old[:last]
+	return value
+}
+
+func (m *sourceRunManager) duplicateCount() (int64, error) {
+	if err := m.flush(); err != nil {
+		return 0, err
+	}
+	readers := make([]*sourceRunReader, 0, len(m.runPaths))
+	for _, path := range m.runPaths {
+		file, err := os.Open(path)
+		if err != nil {
+			return 0, fmt.Errorf("open source duplicate run %s: %w", path, err)
+		}
+		reader := &sourceRunReader{file: file}
+		if err := reader.next(); err != nil {
+			_ = file.Close()
+			return 0, err
+		}
+		if reader.available {
+			readers = append(readers, reader)
+		} else {
+			_ = file.Close()
+		}
+	}
+	heapQueue := sourceRunHeap(readers)
+	heap.Init(&heapQueue)
+	var previous sourceIdentity
+	havePrevious := false
+	var duplicates int64
+	for len(heapQueue) > 0 {
+		reader := heap.Pop(&heapQueue).(*sourceRunReader)
+		if havePrevious && compareSourceIdentity(previous, reader.current) == 0 {
+			duplicates++
+		}
+		previous = reader.current
+		havePrevious = true
+		if err := reader.next(); err != nil {
+			return 0, err
+		}
+		if reader.available {
+			heap.Push(&heapQueue, reader)
+		} else if err := reader.file.Close(); err != nil {
+			return 0, fmt.Errorf("close source duplicate run: %w", err)
+		}
+	}
+	return duplicates, nil
+}
+
+func (m *sourceRunManager) cleanup() {
+	for _, path := range m.runPaths {
+		_ = os.Remove(path)
+	}
+}
+
 func (s *evidenceEventStream) advance() error {
 	available, err := s.records.next()
 	if err != nil {
@@ -505,6 +790,15 @@ func auditMarketDataReceiptsStreaming(dir string) (*MarketDataReceiptAudit, erro
 	for _, row := range manifest.Links {
 		linkActivity[row.ID] = &MarketDataLinkActivity{LinkID: row.ID, SourceVenue: row.SourceVenue, Link: row.Link, Role: row.Role}
 	}
+	spillDir, err := os.MkdirTemp("", "v2-market-data-audit-")
+	if err != nil {
+		return nil, fmt.Errorf("create market-data audit spill directory: %w", err)
+	}
+	defer os.RemoveAll(spillDir)
+	scheduleSpill := newScheduleStore(spillDir)
+	sourceRuns := newSourceRunManager(spillDir)
+	defer sourceRuns.cleanup()
+	defer scheduleSpill.close()
 
 	events := []*evidenceEventStream{
 		{kind: eventSchedule, records: schedules},
@@ -516,8 +810,6 @@ func auditMarketDataReceiptsStreaming(dir string) (*MarketDataReceiptAudit, erro
 			return nil, err
 		}
 	}
-	pendingSchedules := make(map[scheduleKey]observationRecord, manifest.Schedules.Records)
-	sources := make(map[sourceKey]struct{}, manifest.Schedules.Records)
 	frontiers := make(map[linkKey]auditedFrontier)
 	lastSchedule := make(map[linkKey]uint64)
 	lastReceipt := make(map[linkKey]uint64)
@@ -553,17 +845,15 @@ func auditMarketDataReceiptsStreaming(dir string) (*MarketDataReceiptAudit, erro
 			if record.ordinal != lastSchedule[key]+1 {
 				result.BadScheduleOrdinal++
 			}
+			if record.ordinal == lastSchedule[key]+1 {
+				if err := scheduleSpill.append(key, raw); err != nil {
+					return nil, err
+				}
+			}
 			lastSchedule[key] = record.ordinal
-			schedule := scheduleKey{linkKey: key, ordinal: record.ordinal}
-			if _, exists := pendingSchedules[schedule]; exists {
-				result.BadScheduleOrdinal++
+			if err := sourceRuns.add(sourceIdentity{clientID: record.clientID, linkID: record.linkID, sequence: record.sequence, fingerprint: record.fingerprint}); err != nil {
+				return nil, err
 			}
-			pendingSchedules[schedule] = record
-			source := sourceKey{linkKey: key, sequence: record.sequence, fingerprint: record.fingerprint}
-			if _, exists := sources[source]; exists {
-				result.DuplicateSource++
-			}
-			sources[source] = struct{}{}
 		case eventReceipt:
 			record := decodeObservationView(raw)
 			record.raw = raw
@@ -577,10 +867,13 @@ func auditMarketDataReceiptsStreaming(dir string) (*MarketDataReceiptAudit, erro
 				result.BadReceiptOrdinal++
 			}
 			lastReceipt[key] = record.ordinal
-			schedule, exists := pendingSchedules[scheduleKey{linkKey: key, ordinal: record.ordinal}]
+			scheduleRaw, exists, err := scheduleSpill.read(key, record.ordinal)
+			if err != nil {
+				return nil, err
+			}
 			if !exists {
 				result.ReceiptWithoutSchedule++
-			} else if !sameObservation(schedule, record) {
+			} else if !sameObservation(decodeObservationView(scheduleRaw), record) {
 				result.ScheduleMismatch++
 			}
 			previous := frontiers[key]
@@ -625,11 +918,16 @@ func auditMarketDataReceiptsStreaming(dir string) (*MarketDataReceiptAudit, erro
 	result.ScheduleDigestMatches = schedules.digestMatch
 	result.ReceiptDigestMatches = receipts.digestMatch
 	result.DecisionDigestMatches = decisions.digestMatch
-	for schedule, record := range pendingSchedules {
-		if record.scheduledAt <= manifest.TerminalAt && lastReceipt[schedule.linkKey] < schedule.ordinal {
-			result.MissingDueReceipt++
-		}
+	missingDue, err := scheduleSpill.missingDue(manifest.TerminalAt, lastReceipt)
+	if err != nil {
+		return nil, err
 	}
+	result.MissingDueReceipt = missingDue
+	duplicates, err := sourceRuns.duplicateCount()
+	if err != nil {
+		return nil, err
+	}
+	result.DuplicateSource = duplicates
 	result.LinkActivity = make([]MarketDataLinkActivity, 0, len(linkActivity))
 	for _, activity := range linkActivity {
 		result.LinkActivity = append(result.LinkActivity, *activity)
