@@ -102,7 +102,13 @@ func (r *Run) MeasureEcology() (*Ecology, error) {
 			return nil, fmt.Errorf("ecology: terminal account %s/%d absent from initial report", key.VenueID, key.ClientID)
 		}
 	}
-	for role, state := range byRole {
+	roles := make([]string, 0, len(byRole))
+	for role := range byRole {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	for _, role := range roles {
+		state := byRole[role]
 		row := EcologyRole{Role: role, Accounts: state.accounts, InitialEquity: state.initial, TerminalEquity: state.terminal}
 		if state.initial != 0 {
 			row.EquityReturn = float64(state.terminal-state.initial) / float64(state.initial)
@@ -117,7 +123,6 @@ func (r *Run) MeasureEcology() (*Ecology, error) {
 		}
 		result.Roles = append(result.Roles, row)
 	}
-	sort.Slice(result.Roles, func(i, j int) bool { return result.Roles[i].Role < result.Roles[j].Role })
 	return result, nil
 }
 

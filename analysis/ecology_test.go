@@ -61,3 +61,39 @@ func TestMeasureEcology(t *testing.T) {
 		})
 	}
 }
+
+func TestMeasureEcologyConcentrationIsDeterministic(t *testing.T) {
+	run := Run{Report: Report{
+		InitialAccounts: []AccountRow{
+			{VenueID: "north", ClientID: 1, Role: "zeta", Account: Account{Equity: 10}},
+			{VenueID: "north", ClientID: 2, Role: "alpha", Account: Account{Equity: 20}},
+			{VenueID: "north", ClientID: 3, Role: "beta", Account: Account{Equity: 30}},
+		},
+		TerminalAccounts: []AccountRow{
+			{VenueID: "north", ClientID: 1, Role: "zeta", Account: Account{Equity: 13}},
+			{VenueID: "north", ClientID: 2, Role: "alpha", Account: Account{Equity: 17}},
+			{VenueID: "north", ClientID: 3, Role: "beta", Account: Account{Equity: 30}},
+		},
+	}}
+	first, err := run.MeasureEcology()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 100; i++ {
+		got, err := run.MeasureEcology()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.InitialConcentrationHHI != first.InitialConcentrationHHI || got.TerminalConcentrationHHI != first.TerminalConcentrationHHI {
+			t.Fatalf("iteration %d changed HHI: got %.17g/%.17g, first %.17g/%.17g", i, got.InitialConcentrationHHI, got.TerminalConcentrationHHI, first.InitialConcentrationHHI, first.TerminalConcentrationHHI)
+		}
+		if len(got.Roles) != len(first.Roles) {
+			t.Fatalf("iteration %d changed role count: got %d, first %d", i, len(got.Roles), len(first.Roles))
+		}
+		for j := range first.Roles {
+			if got.Roles[j].Role != first.Roles[j].Role {
+				t.Fatalf("iteration %d changed role order: got %q at %d, first %q", i, got.Roles[j].Role, j, first.Roles[j].Role)
+			}
+		}
+	}
+}
