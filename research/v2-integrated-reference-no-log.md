@@ -24,5 +24,7 @@ The full-evidence run is therefore the sole source for the complete scientific
 evidence contract. This companion is used only for execution-hash neutrality;
 the actor does not read any recorder or receipt output.
 
-The derived input is not a new economic treatment and does not alter the
-pre-registered integrated reference values.
+The exact recursive diff is retained in
+`research/v2-integrated-reference-no-log-structural-diff.json`; it has no
+unexpected fields. The derived input is not a new economic treatment and does
+not alter the pre-registered integrated reference values.

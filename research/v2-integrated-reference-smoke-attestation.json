@@ -103,7 +103,8 @@
         "description"
       ],
       "path": "research/configs/v2-integrated/reference-dev-601-none.json",
-      "sha256": "2b43cc846a06dd5ade991592dbc9823e3f4adcf1dcb25add1f44d86a0852ffcb"
+      "sha256": "2b43cc846a06dd5ade991592dbc9823e3f4adcf1dcb25add1f44d86a0852ffcb",
+      "structural_diff_artifact": "research/v2-integrated-reference-no-log-structural-diff.json"
     }
   },
   "execution_equivalence": {

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "base_config": "research/configs/v2-integrated/reference-dev-601.json",
+  "derived_config": "research/configs/v2-integrated/reference-dev-601-none.json",
+  "base_sha256": "0724f2d022ee9b13ca814cdda67d70b057aa8d5c8b4c33f92cd57a1f52015475",
+  "derived_sha256": "2b43cc846a06dd5ade991592dbc9823e3f4adcf1dcb25add1f44d86a0852ffcb",
+  "allowed_differences": [
+    "description",
+    "log_mode",
+    "record_decision_frontier_vectors",
+    "record_liability_hedger_decisions",
+    "record_maker_inventory_rebalance_decisions",
+    "record_maker_quote_size_decisions",
+    "record_market_data_receipts",
+    "record_noise_flow_phase_decisions",
+    "record_option_liability_user_decisions"
+  ],
+  "unexpected_differences": [],
+  "pass": true
+}
