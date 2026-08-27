@@ -1,0 +1,41 @@
+{
+  "protocol": "v2-6-option-causal-disposition",
+  "classification": "NOT IDENTIFIED",
+  "scope": "emergent option-surface and option-to-underlying hedge-response causality",
+  "reviewed_protocols": [
+    "v2-6-p6-options-causal-preregistration",
+    "v2-6-p6r1-cross-asset-mark-viability-preregistration"
+  ],
+  "development_seeds": [211, 213],
+  "holdout_seeds": [223, 227, 229],
+  "holdouts_consumed": true,
+  "stage_viability": "SUPPORTED (screening)",
+  "stage_activation": {
+    "O0": "SUPPORTED (screening)",
+    "O1": "SUPPORTED (screening)",
+    "O2": "SUPPORTED (screening)",
+    "O3": "SUPPORTED (screening)",
+    "O4": "SUPPORTED (screening)"
+  },
+  "causal_components": {
+    "O1_minus_O0_surface": "NOT IDENTIFIED",
+    "O2_minus_O1_surface": "NOT IDENTIFIED",
+    "O2_option_to_underlying_direction": "NOT IDENTIFIED",
+    "O3_minus_O2_surface": "INHERITED_EXPLICIT_SABR_PRIOR",
+    "O4_minus_O3_surface": "INHERITED_EXPLICIT_VANNA_VOLGA_PRIOR"
+  },
+  "reasons": [
+    "O1 to O2 bundles liability demand and dealer delta hedging",
+    "the O2 transmission sign and effect-size corridor were not fixed",
+    "O3 and O4 add explicit priors and therefore cannot establish emergence",
+    "no matched prior removal/restoration or belief permutation was preregistered",
+    "P6-R1 holdouts measured viability and activation, not a causal surface corridor"
+  ],
+  "permitted_claims": [
+    "O0-O4 viability and participant activation replicate at screening level",
+    "market-price IV and hedge evidence are independently measurable",
+    "O3/O4 structure is inherited from explicit priors",
+    "O2 hedge/liability activation is present but directional transmission is unresolved"
+  ],
+  "next_action": "Retain as explicit V2 limitation; no new option simulation is required before freeze-readiness review"
+}
