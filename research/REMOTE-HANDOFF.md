@@ -10,8 +10,8 @@ machine).
 
 - Repository: `/home/vlad/development/exchange_simulation`
 - Branch: `autoresearch/ffa-ecology-gen0`
-- HEAD: `7f563665872a739961eed644f8633b87c6e44538`
-- HEAD subject: `docs(research): checkpoint integrated gate`
+- HEAD: `deb00f9873b097cf20062de169ef3de1811be655`
+- HEAD subject: `docs(research): organize research notes`
 - Public remote: `github`
   (`https://github.com/VladKochetov007/ExchangeSimulation.git`)
 - Current branch already equals `github/autoresearch/ffa-ecology-gen0`.
@@ -27,12 +27,15 @@ machine).
 - All untracked retained evidence is preserved. Do not run a broad `git add .`
   or delete untracked artifacts on the remote machine.
 
-The two commits immediately preceding this handoff are:
+The recent commits immediately preceding this handoff are:
 
-1. `30176e0` — hardened integrated long-run provenance, registered GOMAXPROCS
+1. `deb00f9` — moved the three untracked research notes under `research/`
+   so the notes travel with the public source history.
+2. `d6d99e0` — added this tracked remote handoff.
+3. `30176e0` — hardened integrated long-run provenance, registered GOMAXPROCS
    and 24-hour identity, copied-config execution, and atomic completion
    status.
-2. `5af4573` — validated clean binary provenance for long-run runs.
+4. `5af4573` — validated clean binary provenance for long-run runs.
 
 ## Scientific position
 
@@ -93,11 +96,14 @@ measure byte rate, backpressure, durability, and shutdown semantics first.
 
 At handoff, free disk was approximately 237 GB on a 1.3 TB Btrfs volume. The
 working tree contains about 1.3 TB under `research/artifacts`, 963 GB under
-`logs`, and 54 GB under `scratch`; these are retained private evidence and are
-not suitable for GitHub. Rebuildable `.cache`, `.venv`, `bin/`, test binaries,
-and old compressed cache files are omitted from the private transfer archive.
-The archive creation is bounded to the named evidence paths and does not
-remove the originals.
+`logs`, and 54 GB under `scratch`; raw JSONL/bin evidence is not suitable for
+GitHub and is intentionally not copied into the compact transfer archive. The
+archive contains experiment JSON outputs (`research/artifacts/**/*.json`, not
+raw `*.jsonl`/`*.bin` streams), the goal objective, working-tree patch and
+status metadata, and the private Codex chain state. A manifest records omitted
+raw evidence paths and byte totals. Rebuildable `.cache`, `.venv`, `bin/`,
+test binaries, and old compressed cache files are also omitted. Archive
+creation is bounded to named paths and does not remove originals.
 
 Current checked-in simulator/analyzer binaries under `bin/` are not a valid
 provenance source; rebuild from a clean clone after the final pre-run commits.
