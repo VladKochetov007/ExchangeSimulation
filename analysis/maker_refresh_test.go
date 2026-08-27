@@ -7,6 +7,7 @@ func TestMakerPassiveRefreshOrderingReplaysCancellationBeforeReplacement(t *test
 		return logLine(ts, 7, "maker_quote_size_decision", map[string]any{
 			"maker": "spot_maker_1", "client_id": uint64(7), "symbol": "ABC/USD",
 			"bid_request_id": bid, "ask_request_id": ask, "post_only": true,
+			"bid_price": int64(99), "ask_price": int64(101), "bid_qty": int64(100), "ask_qty": int64(100),
 			"cancel_before_replace": true, "outcome_expectation": "VENUE_OUTCOME_REQUIRED",
 		})
 	}
@@ -79,6 +80,7 @@ func TestMakerPassiveRefreshOrderingCatchesOrderingAndQuantityMutations(t *testi
 				return logLine(ts, 7, "maker_quote_size_decision", map[string]any{
 					"maker": "spot_maker_1", "client_id": uint64(7), "symbol": "ABC/USD",
 					"bid_request_id": bid, "ask_request_id": ask, "post_only": true,
+					"bid_price": int64(99), "ask_price": int64(101), "bid_qty": int64(100), "ask_qty": int64(100),
 					"cancel_before_replace": true, "outcome_expectation": "VENUE_OUTCOME_REQUIRED",
 				})
 			}
@@ -86,7 +88,7 @@ func TestMakerPassiveRefreshOrderingCatchesOrderingAndQuantityMutations(t *testi
 				return logLine(ts, 7, "OrderAccepted", map[string]any{
 					"order_id": orderID, "client_id": uint64(7), "request_id": requestID,
 					"symbol": "ABC/USD", "side": side, "type": "LIMIT", "time_in_force": "GTC",
-					"post_only": true, "price": int64(99), "qty": int64(100),
+					"post_only": true, "price": map[string]int64{"BUY": 99, "SELL": 101}[side], "qty": int64(100),
 				})
 			}
 			rejected := func(ts int64, requestID uint64, side string) string {

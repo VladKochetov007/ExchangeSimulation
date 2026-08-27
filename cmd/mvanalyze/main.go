@@ -282,10 +282,12 @@ func main() {
 				os.Exit(1)
 			}
 			emit(dir, result, *asJSON, func() {
-				fmt.Printf("%-22s decisions %6d sides %6d initial %6d checked %6d censored %6d accepted/rejected %6d/%6d missing/duplicate/late %d/%d/%d cancel-order/fill/cancel mismatches %d/%d/%d valid %t lineage %s\n",
+				fmt.Printf("%-22s decisions %6d sides %6d initial %6d checked %6d replacements %6d cancel/fullfill %6d/%6d censored %6d accepted/rejected %6d/%6d missing/duplicate/late %d/%d/%d invalid/unmapped %d/%d unmatched/duplicate fills %d/%d cancel-order/fill/cancel mismatches %d/%d/%d valid %t lineage %s\n",
 					dir, result.Decisions, result.DecisionSides, result.InitialOrNoPrior, result.Checked,
+					result.ReplacementSides, result.CancellationTerminated, result.FullFillTerminated,
 					result.HorizonCensoredSides, result.AcceptedOutcomes, result.RejectedOutcomes,
-					result.Missing, result.Duplicate, result.Late, result.OutOfOrderCancellations,
+					result.Missing, result.Duplicate, result.Late, result.InvalidOrderRecords, result.UnmappedPassiveOutcomes,
+					result.UnmatchedOrderFills, result.DuplicateFills, result.OutOfOrderCancellations,
 					result.FillQuantityMismatches, result.CancelQuantityMismatches, result.Valid, result.LineageDigest)
 			})
 		case "makerrebalance":

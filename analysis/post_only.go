@@ -52,33 +52,40 @@ type postOnlyOrderKey struct {
 // classification is based on the physical order of accepted, rejected, fill,
 // and cancellation records in each persisted book log.
 type MakerPassiveRefreshOrdering struct {
-	Decisions                 int64                      `json:"decisions"`
-	DecisionSides             int64                      `json:"decision_sides"`
-	InitialOrNoPrior          int64                      `json:"initial_or_no_prior"`
-	Checked                   int64                      `json:"checked"`
-	Missing                   int64                      `json:"missing"`
-	Late                      int64                      `json:"late"`
-	Duplicate                 int64                      `json:"duplicate"`
-	AcceptedOutcomes          int64                      `json:"accepted_outcomes"`
-	RejectedOutcomes          int64                      `json:"rejected_outcomes"`
-	CancellationsObserved     int64                      `json:"cancellations_observed"`
-	InvalidDecisionRecords    int64                      `json:"invalid_decision_records"`
-	DuplicateDecisionSides    int64                      `json:"duplicate_decision_sides"`
-	DuplicateOrderIDs         int64                      `json:"duplicate_order_ids"`
-	DuplicateCancellations    int64                      `json:"duplicate_cancellations"`
-	DuplicateBookFiles        int64                      `json:"duplicate_book_files"`
-	FillQuantityMismatches    int64                      `json:"fill_quantity_mismatches"`
-	CancelQuantityMismatches  int64                      `json:"cancel_quantity_mismatches"`
-	OutOfOrderCancellations   int64                      `json:"out_of_order_cancellations"`
-	HorizonCensoredSides      int64                      `json:"horizon_censored_sides"`
-	CensoredOutcomeDeliveries int64                      `json:"censored_outcome_deliveries"`
-	InvalidOrderRecords       int64                      `json:"invalid_order_records"`
-	BookFiles                 int64                      `json:"book_files"`
-	MissingBookFiles          int64                      `json:"missing_book_files"`
-	LineageRows               int64                      `json:"lineage_rows"`
-	LineageDigest             string                     `json:"lineage_digest"`
-	Valid                     bool                       `json:"valid"`
-	Checks                    []MakerPassiveRefreshCheck `json:"checks,omitempty"`
+	Decisions                   int64                      `json:"decisions"`
+	DecisionSides               int64                      `json:"decision_sides"`
+	InitialOrNoPrior            int64                      `json:"initial_or_no_prior"`
+	Checked                     int64                      `json:"checked"`
+	Missing                     int64                      `json:"missing"`
+	Late                        int64                      `json:"late"`
+	Duplicate                   int64                      `json:"duplicate"`
+	AcceptedOutcomes            int64                      `json:"accepted_outcomes"`
+	RejectedOutcomes            int64                      `json:"rejected_outcomes"`
+	CancellationsObserved       int64                      `json:"cancellations_observed"`
+	ReplacementSides            int64                      `json:"replacement_sides"`
+	CancellationTerminated      int64                      `json:"cancellation_terminated_sides"`
+	FullFillTerminated          int64                      `json:"full_fill_terminated_sides"`
+	InvalidDecisionRecords      int64                      `json:"invalid_decision_records"`
+	DuplicateDecisionSides      int64                      `json:"duplicate_decision_sides"`
+	DuplicateOrderIDs           int64                      `json:"duplicate_order_ids"`
+	DuplicateCancellations      int64                      `json:"duplicate_cancellations"`
+	DuplicateBookFiles          int64                      `json:"duplicate_book_files"`
+	FillQuantityMismatches      int64                      `json:"fill_quantity_mismatches"`
+	CancelQuantityMismatches    int64                      `json:"cancel_quantity_mismatches"`
+	OutOfOrderCancellations     int64                      `json:"out_of_order_cancellations"`
+	HorizonCensoredSides        int64                      `json:"horizon_censored_sides"`
+	CensoredOutcomeDeliveries   int64                      `json:"censored_outcome_deliveries"`
+	InvalidOrderRecords         int64                      `json:"invalid_order_records"`
+	UnmappedPassiveOutcomes     int64                      `json:"unmapped_passive_outcomes"`
+	UnmatchedOrderFills         int64                      `json:"unmatched_order_fills"`
+	UnmatchedOrderCancellations int64                      `json:"unmatched_order_cancellations"`
+	DuplicateFills              int64                      `json:"duplicate_fills"`
+	BookFiles                   int64                      `json:"book_files"`
+	MissingBookFiles            int64                      `json:"missing_book_files"`
+	LineageRows                 int64                      `json:"lineage_rows"`
+	LineageDigest               string                     `json:"lineage_digest"`
+	Valid                       bool                       `json:"valid"`
+	Checks                      []MakerPassiveRefreshCheck `json:"checks,omitempty"`
 }
 
 // MakerPassiveRefreshCheck identifies an independently replayed contract
@@ -123,6 +130,8 @@ type makerPassiveRefreshExpected struct {
 	clientID          uint64
 	requestID         uint64
 	side              string
+	price             int64
+	qty               int64
 	decision          int64
 	count             int
 	outcome           string
@@ -237,15 +246,17 @@ func (r *Run) MeasurePostOnlyActivity(options PostOnlyActivityOptions) (PostOnly
 // requests against the canonical order of its persisted spot-book stream.  A
 // request is "checked" only when the prior resting quote is represented by a
 // cancellation record that appears before the replacement acceptance or
-// rejection.  A fill-terminated prior order is classified as no-prior: there
-// was no resting order left that required cancellation.  The method never
-// trusts the cancel_before_replace field as evidence of ordering.
+// rejection.  A full-fill-terminated prior order is reported separately as
+// full_fill_prior: there was no resting order left that required cancellation.
+// The method never trusts the cancel_before_replace field as evidence of
+// ordering.
 func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) (*MakerPassiveRefreshOrdering, error) {
 	roles := selectionSet(options.Roles)
 	if len(roles) == 0 {
 		roles = selectionSet([]string{"spot_maker", "cdf_spot_maker", "abc_cdf_spot_maker"})
 	}
 	result := &MakerPassiveRefreshOrdering{}
+	terminalAt, terminalKnown := terminalAccountTimestamp(r.Report)
 	byBook := make(map[makerPassiveRefreshBookKey]map[makerPassiveRefreshExpectedKey]*makerPassiveRefreshExpected)
 	if err := r.Scan(ScanOptions{Events: []string{"maker_quote_size_decision"}, Workers: 1}, func(event Event) {
 		if !selected(r.Role(event.VenueID, event.ClientID), roles) {
@@ -261,6 +272,17 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 		censored, validCensor := validMakerQuoteSizeCensor(decision)
 		if !validCensor {
 			result.InvalidDecisionRecords++
+			result.Checks = append(result.Checks, MakerPassiveRefreshCheck{
+				VenueID: event.VenueID, ClientID: decision.ClientID, Symbol: decision.Symbol,
+				Failure: "invalid_censor_contract",
+			})
+		}
+		if censored && terminalKnown && event.SimTS != terminalAt {
+			result.InvalidDecisionRecords++
+			result.Checks = append(result.Checks, MakerPassiveRefreshCheck{
+				VenueID: event.VenueID, ClientID: decision.ClientID, Symbol: decision.Symbol,
+				Failure: "censor_terminal_time_mismatch",
+			})
 		}
 		result.Decisions++
 		book := makerPassiveRefreshBookKey{venueID: event.VenueID, symbol: decision.Symbol}
@@ -270,11 +292,13 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 			byBook[book] = requests
 		}
 		for _, side := range []struct {
-			name string
-			id   uint64
+			name  string
+			id    uint64
+			price int64
+			qty   int64
 		}{
-			{name: "BUY", id: decision.BidRequestID},
-			{name: "SELL", id: decision.AskRequestID},
+			{name: "BUY", id: decision.BidRequestID, price: decision.BidPrice, qty: decision.BidQty},
+			{name: "SELL", id: decision.AskRequestID, price: decision.AskPrice, qty: decision.AskQty},
 		} {
 			result.DecisionSides++
 			key := makerPassiveRefreshExpectedKey{clientID: decision.ClientID, requestID: side.id, side: side.name}
@@ -288,7 +312,8 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 			}
 			requests[key] = &makerPassiveRefreshExpected{
 				venueID: event.VenueID, symbol: decision.Symbol, clientID: decision.ClientID,
-				requestID: side.id, side: side.name, decision: event.SimTS, censored: censored,
+				requestID: side.id, side: side.name, price: side.price, qty: side.qty,
+				decision: event.SimTS, censored: censored,
 			}
 			if !decision.PostOnly || !decision.CancelBeforeReplace {
 				result.InvalidDecisionRecords++
@@ -393,6 +418,15 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 						item.terminalRequestID = state.terminalRequestID
 						item.outcomeOrdinal = event.Ordinal
 						item.outcome = outcome
+						// A terminal cancellation/fill belongs to the first subsequent
+						// quote outcome.  Consume it so a later rejected attempt cannot
+						// be misclassified as another replacement of the same order.
+						if !item.censored {
+							state.lastTerminal = ""
+							state.terminalOrdinal = 0
+							state.terminalRequestID = 0
+							state.priorOrderIDs = nil
+						}
 					}
 					item.count++
 				}
@@ -406,12 +440,20 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					Side     string `json:"side"`
 					Type     string `json:"type"`
 					TIF      string `json:"time_in_force"`
+					PostOnly *bool  `json:"post_only"`
+					Price    int64  `json:"price"`
 					Qty      int64  `json:"qty"`
 					Request  uint64 `json:"request_id"`
 				}
 				var rejected struct {
 					ClientID uint64 `json:"client_id"`
+					Symbol   string `json:"symbol"`
 					Side     string `json:"side"`
+					Type     string `json:"type"`
+					TIF      string `json:"time_in_force"`
+					PostOnly *bool  `json:"post_only"`
+					Price    int64  `json:"price"`
+					Qty      int64  `json:"qty"`
 					Request  uint64 `json:"request_id"`
 				}
 				var fill struct {
@@ -438,14 +480,23 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					if _, ok := tracked[clientID]; !ok || accepted.OrderID == 0 || accepted.Side == "" {
 						return
 					}
-					if (accepted.ClientID != 0 && accepted.ClientID != event.ClientID) ||
-						(accepted.Symbol != "" && accepted.Symbol != book.symbol) || accepted.Request == 0 ||
-						accepted.Type == "" || accepted.TIF == "" || accepted.Qty <= 0 {
+					item := expectedForRequest(byRequest, clientID, accepted.Side, accepted.Request)
+					consumeOutcome(event, clientID, accepted.Side, accepted.Request, "accepted")
+					invalid := (accepted.ClientID != 0 && accepted.ClientID != event.ClientID) || accepted.Request == 0 ||
+						accepted.Type == "" || accepted.TIF == "" || accepted.Qty <= 0
+					if item != nil {
+						invalid = invalid || accepted.Symbol != book.symbol || accepted.Type != "LIMIT" || accepted.TIF != "GTC" ||
+							accepted.PostOnly == nil || !*accepted.PostOnly || accepted.Price != item.price || accepted.Qty != item.qty
+					}
+					if invalid {
 						result.InvalidOrderRecords++
 						result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: clientID, Symbol: book.symbol, Side: accepted.Side, RequestID: accepted.Request, Failure: "invalid_accepted_order_fields"})
 						return
 					}
-					consumeOutcome(event, clientID, accepted.Side, accepted.Request, "accepted")
+					if item == nil && accepted.PostOnly != nil && *accepted.PostOnly {
+						result.UnmappedPassiveOutcomes++
+						result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: clientID, Symbol: book.symbol, Side: accepted.Side, RequestID: accepted.Request, Failure: "unmapped_passive_outcome"})
+					}
 					if accepted.Type != "LIMIT" || accepted.TIF != "GTC" {
 						return
 					}
@@ -473,17 +524,44 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					if _, ok := tracked[clientID]; !ok || rejected.Request == 0 || rejected.Side == "" {
 						return
 					}
+					if rejected.ClientID != 0 && rejected.ClientID != event.ClientID {
+						result.InvalidOrderRecords++
+						result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: clientID, Symbol: book.symbol, Side: rejected.Side, RequestID: rejected.Request, Failure: "rejected_client_mismatch"})
+						return
+					}
+					if item := expectedForRequest(byRequest, clientID, rejected.Side, rejected.Request); item != nil &&
+						(rejected.Symbol != book.symbol || rejected.Type != "LIMIT" || rejected.TIF != "GTC" ||
+							rejected.PostOnly == nil || !*rejected.PostOnly || rejected.Price != item.price || rejected.Qty != item.qty) {
+						result.InvalidOrderRecords++
+						result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: clientID, Symbol: book.symbol, Side: rejected.Side, RequestID: rejected.Request, Failure: "invalid_rejected_order_fields"})
+						return
+					}
 					consumeOutcome(event, clientID, rejected.Side, rejected.Request, "rejected")
+					if rejected.PostOnly != nil && *rejected.PostOnly && expectedForRequest(byRequest, clientID, rejected.Side, rejected.Request) == nil {
+						result.UnmappedPassiveOutcomes++
+						result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: clientID, Symbol: book.symbol, Side: rejected.Side, RequestID: rejected.Request, Failure: "unmapped_passive_outcome"})
+					}
 				case "OrderFill":
 					if event.Decode(&fill) != nil {
 						return
 					}
 					order := orders[fill.OrderID]
 					if order == nil {
+						if _, trackedClient := tracked[event.ClientID]; trackedClient {
+							result.UnmatchedOrderFills++
+							result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: event.ClientID, Symbol: book.symbol, Failure: "unmatched_fill_order"})
+						}
+						return
+					}
+					if event.ClientID != 0 && event.ClientID != order.clientID {
+						result.InvalidOrderRecords++
+						result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: order.clientID, Symbol: book.symbol, Side: order.side, RequestID: order.requestID, Failure: "fill_client_mismatch"})
 						return
 					}
 					state := getLocalSide(order.clientID, order.side)
 					if _, active := state.active[fill.OrderID]; !active {
+						result.DuplicateFills++
+						result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: order.clientID, Symbol: book.symbol, Side: order.side, RequestID: order.requestID, Failure: "duplicate_fill"})
 						return
 					}
 					if fill.Qty <= 0 {
@@ -513,6 +591,15 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					}
 					order := orders[cancel.OrderID]
 					if order == nil {
+						if _, trackedClient := tracked[event.ClientID]; trackedClient {
+							result.UnmatchedOrderCancellations++
+							result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: event.ClientID, Symbol: book.symbol, Failure: "unmatched_cancel_order"})
+						}
+						return
+					}
+					if event.ClientID != 0 && event.ClientID != order.clientID {
+						result.InvalidOrderRecords++
+						result.Checks = append(result.Checks, MakerPassiveRefreshCheck{VenueID: book.venueID, File: path, ClientID: order.clientID, Symbol: book.symbol, Side: order.side, RequestID: order.requestID, Failure: "cancel_client_mismatch"})
 						return
 					}
 					state := getLocalSide(order.clientID, order.side)
@@ -543,22 +630,26 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 
 		for _, item := range expected {
 			classification := "initial_or_no_prior"
-			if item.count == 0 && item.censored {
+			switch {
+			case item.count == 0 && item.censored:
 				classification = "horizon_censored"
 				result.HorizonCensoredSides++
-			} else if item.count == 0 {
+			case item.count == 0:
 				classification = "missing"
 				result.Missing++
-			} else if item.count > 1 {
+			case item.count > 1:
 				classification = "duplicate"
 				result.Duplicate++
-			} else if item.censored {
+			case item.censored:
 				classification = "censored_outcome_delivered"
 				result.CensoredOutcomeDeliveries++
-			} else if item.hadActive {
+			case item.hadActive:
+				result.ReplacementSides++
 				classification = "late"
 				result.Late++
-			} else if item.terminal == "cancel" {
+			case item.terminal == "cancel":
+				result.ReplacementSides++
+				result.CancellationTerminated++
 				if item.terminalRequestID == 0 || item.terminalRequestID >= item.requestID {
 					classification = "cancellation_order_violation"
 					result.OutOfOrderCancellations++
@@ -566,7 +657,11 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					classification = "checked"
 					result.Checked++
 				}
-			} else {
+			case item.terminal == "fill":
+				result.ReplacementSides++
+				result.FullFillTerminated++
+				classification = "full_fill_prior"
+			default:
 				result.InitialOrNoPrior++
 			}
 			if item.count == 1 {
@@ -634,7 +729,7 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 		}
 		return left.Failure < right.Failure
 	})
-	result.Valid = result.Decisions > 0 && result.InvalidDecisionRecords == 0 && result.Missing == 0 && result.Duplicate == 0 && result.Late == 0 && result.OutOfOrderCancellations == 0 && result.CensoredOutcomeDeliveries == 0 && result.MissingBookFiles == 0 && result.DuplicateBookFiles == 0 && result.DuplicateOrderIDs == 0 && result.DuplicateCancellations == 0 && result.FillQuantityMismatches == 0 && result.CancelQuantityMismatches == 0 && result.InvalidOrderRecords == 0
+	result.Valid = result.Decisions > 0 && result.InvalidDecisionRecords == 0 && result.Missing == 0 && result.Duplicate == 0 && result.Late == 0 && result.OutOfOrderCancellations == 0 && result.CensoredOutcomeDeliveries == 0 && result.MissingBookFiles == 0 && result.DuplicateBookFiles == 0 && result.DuplicateOrderIDs == 0 && result.DuplicateCancellations == 0 && result.DuplicateFills == 0 && result.UnmatchedOrderFills == 0 && result.UnmatchedOrderCancellations == 0 && result.FillQuantityMismatches == 0 && result.CancelQuantityMismatches == 0 && result.InvalidOrderRecords == 0 && result.UnmappedPassiveOutcomes == 0
 	return result, nil
 }
 
@@ -649,6 +744,37 @@ func selectionSet(values []string) map[string]struct{} {
 		}
 	}
 	return result
+}
+
+// terminalAccountTimestamp returns the independently persisted terminal fixed
+// point.  A censor declaration is accepted only when every terminal account
+// agrees on the timestamp; otherwise the replay cannot establish that the
+// producer's horizon marker refers to the actual run horizon.
+func terminalAccountTimestamp(report Report) (int64, bool) {
+	var terminal int64
+	for _, row := range report.TerminalAccounts {
+		at := row.Account.Timestamp
+		if at == 0 {
+			continue
+		}
+		if terminal == 0 {
+			terminal = at
+			continue
+		}
+		if at != terminal {
+			return 0, false
+		}
+	}
+	return terminal, terminal != 0
+}
+
+func expectedForRequest(byRequest map[makerPassiveRefreshRequestKey][]*makerPassiveRefreshExpected, clientID uint64, side string, requestID uint64) *makerPassiveRefreshExpected {
+	for _, item := range byRequest[makerPassiveRefreshRequestKey{clientID: clientID, requestID: requestID}] {
+		if item.side == side {
+			return item
+		}
+	}
+	return nil
 }
 
 func selected(value string, selection map[string]struct{}) bool {
