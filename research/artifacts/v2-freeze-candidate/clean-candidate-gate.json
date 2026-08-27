@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
   "status": "CANDIDATE_GATE_PASS_PENDING_INDEPENDENT_REVIEW",
-  "source_commit": "0e7be06da81895c4fcc1ebdf9316e1ff27ba047b",
+  "source_commit": "29d28835469a44afe1eeaf2ed63032d56f23b936",
   "latest_simulator_semantic_commit": "2068d9d",
   "config": "research/configs/frozen-baseline-2026-08-22.json",
   "config_sha256": "ca933bf2244eec8e104d4313456bed386809703bb7a1179125b8d9255f1b1036",
   "toolchain": "go1.26.6-X:nodwarf5 linux/amd64",
   "build_flags": ["-trimpath"],
   "binaries": {
-    "multivenue_sha256": "1185bff8d4dbc1234fcd7fda581734682c5e63d6ba9c6716f6642782a9cb4b7c",
-    "mvanalyze_sha256": "7099faccd6ee153c350d735a9bfe2576c7719258bd1763f21b380053799685a1",
-    "prunegate_sha256": "dbeb45035b820c26fe930638b9786eaca91e51931764dc22a8b10a01deecb90a"
+    "multivenue_sha256": "980a902cf75dae49dc956e5225be7d4e09f27ef864027f5884b89571ab6d378c",
+    "mvanalyze_sha256": "e17db684a026302bc552cd77d914f25d78076c825f5ea29349b7767df4414762",
+    "prunegate_sha256": "90342569c58edbf0f745c1228d36dbc3f2561b89f3c4df3ad3d057556a7ae131"
   },
   "smoke": {
     "duration": "10s",
@@ -45,7 +45,9 @@
     "economic_outcome_campaign": "not_run",
     "untouched_holdout_consumed": false
   },
-  "evidence_location": "/tmp/v2-freeze-candidate.KRHrLd",
+  "embedded_vcs": {"revision": "29d28835469a44afe1eeaf2ed63032d56f23b936", "time": "2026-08-27T08:46:27Z", "modified": false},
+  "evidence_location": "/tmp/v2-freeze-vcs-smoke.wHjF0P",
+  "durable_evidence": "research/artifacts/v2-freeze-candidate/smoke-vcs",
   "notes": [
     "The /tmp location is a transient reproduction workspace; binary hashes and commands are the durable provenance.",
     "Evidence sidecars are atomically published after sync, but streamed JSONL is not claimed crash-durable or directory-fsync durable.",
