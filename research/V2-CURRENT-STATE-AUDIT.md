@@ -639,3 +639,30 @@ The next licensed scientific gate is the V2-6 causal option disposition (or a
 formal closure as `NOT IDENTIFIED` if no clean contrast exists), followed by a
 freeze-readiness review.  P4/P4b/P5 and the mixed L1-P3 timing line remain
 explicit limitations; no P7d distress retuning is authorized.
+
+## Post-audit update: V2-6 causal option disposition
+
+At commits `08b236c` and `7882310`, the V2-6 causal question was reviewed after
+the complete P6-R1 viability/stage-activation development and untouched
+replication.  The disposition is `NOT IDENTIFIED` for an emergent option
+surface or directional option-to-underlying hedge-response claim.  P6-R1
+remains `SUPPORTED (screening)` for O0--O4 viability and participant
+activation on development seeds 211/213 and consumed holdout seeds 223/227/229.
+
+The reason is contractual, not an activation failure: O1→O2 bundles liability
+demand with dealer delta hedging and never fixed the O2 transmission sign or
+effect-size corridor; O3→O2 and O4→O3 add explicit SABR and Vanna--Volga
+priors, respectively, so any incremental surface structure is inherited by
+construction.  No matched prior removal/restoration or belief-permutation
+contrast was preregistered.  Market IV, parity, dealer exposure and hedge
+evidence are independently measurable, but their causal surface/feedback
+interpretation is not licensed.  The machine disposition is
+`research/artifacts/v2-6-option-causal-disposition.json`; the detailed record
+is `research/v2-6-option-causal-disposition.md`.
+
+Configured Sol-xhigh reviewers were unavailable due to the model-usage limit;
+the fallback red-team review is explicitly labeled non-independent in
+`research/reviews/v2-6-option-causal-disposition-review.md`.  No new option
+simulation or holdout was consumed.  This closes the option-emergence question
+as an explicit V2 limitation and licenses a freeze-readiness review rather
+than a post-outcome options experiment.
