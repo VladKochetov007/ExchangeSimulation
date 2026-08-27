@@ -288,7 +288,7 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 		}}' >"$integrity_tmp"
 mv "$integrity_tmp" "$cell/integrity.json"
 require_json_object "$cell/integrity.json"
-jq -e '(.predicates | keys) == ["activation", "conservation", "derivatives", "exposure", "expiry", "fill_positions", "frontier_vectors", "hedging", "late_path", "liability_hedger", "liquidations", "maker_quote_size", "maker_rebalance", "maker_refresh", "margin", "mechanical", "observation_receipts", "option_liability", "option_surface", "option_value_taker", "order_lifecycle", "positions", "post_only", "settlement", "vanna_volga"] and
+jq -e '(.predicates | keys) == ["activation", "conservation", "derivatives", "expiry", "exposure", "fill_positions", "frontier_vectors", "hedging", "late_path", "liability_hedger", "liquidations", "maker_quote_size", "maker_rebalance", "maker_refresh", "margin", "mechanical", "observation_receipts", "option_liability", "option_surface", "option_value_taker", "order_lifecycle", "positions", "post_only", "settlement", "vanna_volga"] and
 	all(.predicates | to_entries[]; .value == true)' "$cell/integrity.json" >/dev/null ||
 	fail "one or more fail-closed integrity predicates failed"
 
