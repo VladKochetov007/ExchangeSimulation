@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -69,6 +70,25 @@ type DeltaConsistency struct {
 	DecodeFailures int `json:"decode_failures"`
 }
 
+// PositionRoundingAudit independently validates the terminal carry ledger.
+// A rounding event is not accepted merely because its balance adjustment was
+// recorded: its bounded sub-unit remainder and both client/venue links must
+// agree with the same symbol-scoped terminal event.
+type PositionRoundingAudit struct {
+	Events                     int   `json:"events"`
+	UniqueTerminalKeys         int   `json:"unique_terminal_keys"`
+	DuplicateTerminalKeys      int   `json:"duplicate_terminal_keys"`
+	Invalid                    int   `json:"invalid"`
+	RemainderOutOfRange        int   `json:"remainder_out_of_range"`
+	BalanceLinkFailures        int   `json:"balance_link_failures"`
+	VenueLinkFailures          int   `json:"venue_link_failures"`
+	AssetWalletFailures        int   `json:"asset_wallet_failures"`
+	VenueBucketFailures        int   `json:"venue_bucket_failures"`
+	AggregateTerminalRemainder int64 `json:"aggregate_terminal_remainder"`
+	AggregateRemainderOverflow bool  `json:"aggregate_remainder_overflow"`
+	Valid                      bool  `json:"valid"`
+}
+
 // Conservation is the audit of a run's logged balance movements.
 //
 // It deliberately does not read the account snapshots the exchange reports:
@@ -80,8 +100,9 @@ type Conservation struct {
 	// PerVenueNet is the net movement of each asset at each venue across every
 	// reason, which is the run's external funding: deposits and borrowing in,
 	// nothing else.
-	PerVenueNet map[string]map[string]int64 `json:"per_venue_net"`
-	Deltas      DeltaConsistency            `json:"delta_consistency"`
+	PerVenueNet      map[string]map[string]int64 `json:"per_venue_net"`
+	Deltas           DeltaConsistency            `json:"delta_consistency"`
+	PositionRounding PositionRoundingAudit       `json:"position_rounding"`
 	// FundingInstants reports the net funding transfer at each settlement
 	// instant. Funding is a transfer between longs and shorts, so each instant
 	// must net to zero at a venue.
@@ -180,6 +201,64 @@ type flowKey struct {
 	asset  string
 }
 
+type positionRoundingKey struct {
+	venue     string
+	clientID  uint64
+	symbol    string
+	timestamp int64
+	asset     string
+}
+
+type venueRoundingKey struct {
+	venue     string
+	symbol    string
+	timestamp int64
+	asset     string
+}
+
+type positionRoundingEventRecord struct {
+	Timestamp          int64  `json:"timestamp"`
+	ClientID           uint64 `json:"client_id"`
+	Symbol             string `json:"symbol"`
+	Asset              string `json:"asset"`
+	CashAdjustment     int64  `json:"cash_adjustment"`
+	RemainderNumerator int64  `json:"remainder_numerator"`
+	Precision          int64  `json:"precision"`
+}
+
+type positionRoundingRecord struct {
+	VenueID            string
+	ClientID           uint64
+	Symbol             string
+	Timestamp          int64
+	Asset              string
+	CashAdjustment     int64
+	RemainderNumerator int64
+	Precision          int64
+}
+
+func addAuditInt64(a, b int64) (int64, bool) {
+	if b > 0 && a > math.MaxInt64-b || b < 0 && a < math.MinInt64-b {
+		return 0, false
+	}
+	return a + b, true
+}
+
+func addAuditInt64OrMarkOverflow(a, b int64, overflow *bool) int64 {
+	if result, ok := addAuditInt64(a, b); ok {
+		return result
+	}
+	*overflow = true
+	return a
+}
+
+func negateAuditInt64(value int64) (int64, bool) {
+	if value == math.MinInt64 {
+		return 0, false
+	}
+	return -value, true
+}
+
 type instantKey struct {
 	venue     string
 	timestamp int64
@@ -217,17 +296,58 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	venueRecorded := make(map[string]int64)
 	classNet := make(map[string]map[string]int64)
 	classRecords := make(map[string]int)
-	scan := ScanOptions{Events: []string{"balance_change", "fee_revenue", "venue_balance_change"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
+	roundingRecords := make(map[positionRoundingKey]*positionRoundingRecord)
+	roundingBalances := make(map[positionRoundingKey]int64)
+	roundingVenueFlows := make(map[venueRoundingKey]int64)
+	var rounding PositionRoundingAudit
+	scan := ScanOptions{Events: []string{"balance_change", "fee_revenue", "venue_balance_change", "position_rounding"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
 	type feePayload struct {
 		Asset    string `json:"asset"`
 		TakerFee int64  `json:"taker_fee"`
 		MakerFee int64  `json:"maker_fee"`
 	}
 	type venueMovement struct {
-		Asset string `json:"asset"`
-		Delta int64  `json:"delta"`
+		Timestamp int64  `json:"timestamp"`
+		Bucket    string `json:"bucket"`
+		Asset     string `json:"asset"`
+		Delta     int64  `json:"delta"`
+		Symbol    string `json:"symbol"`
+		Reason    string `json:"reason"`
 	}
 	if err := r.Scan(scan, func(event Event) {
+		if event.Name == "position_rounding" {
+			var record positionRoundingEventRecord
+			if event.Decode(&record) != nil || record.Symbol == "" || record.Asset == "" || record.Precision <= 0 {
+				mu.Lock()
+				rounding.Invalid++
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			rounding.Events++
+			if record.RemainderNumerator <= -record.Precision || record.RemainderNumerator >= record.Precision {
+				rounding.RemainderOutOfRange++
+			}
+			roundingTimestamp := record.Timestamp
+			if roundingTimestamp == 0 {
+				roundingTimestamp = event.SimTS
+			}
+			if next, ok := addAuditInt64(rounding.AggregateTerminalRemainder, record.RemainderNumerator); ok {
+				rounding.AggregateTerminalRemainder = next
+			} else {
+				rounding.AggregateRemainderOverflow = true
+			}
+			key := positionRoundingKey{venue: event.VenueID, clientID: record.ClientID, symbol: record.Symbol}
+			key.timestamp = roundingTimestamp
+			key.asset = record.Asset
+			if roundingRecords[key] == nil {
+				roundingRecords[key] = &positionRoundingRecord{ClientID: record.ClientID, Symbol: record.Symbol, Timestamp: roundingTimestamp, Asset: record.Asset, VenueID: event.VenueID, CashAdjustment: record.CashAdjustment, RemainderNumerator: record.RemainderNumerator, Precision: record.Precision}
+			} else {
+				rounding.DuplicateTerminalKeys++
+			}
+			return
+		}
 		if event.Name == "venue_balance_change" {
 			var movement venueMovement
 			if event.Decode(&movement) != nil || movement.Asset == "" {
@@ -235,6 +355,17 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			}
 			mu.Lock()
 			venueRecorded[movement.Asset] += movement.Delta
+			if movement.Reason == "position_rounding" {
+				movementTimestamp := movement.Timestamp
+				if movementTimestamp == 0 {
+					movementTimestamp = event.SimTS
+				}
+				key := venueRoundingKey{venue: event.VenueID, symbol: movement.Symbol, timestamp: movementTimestamp, asset: movement.Asset}
+				roundingVenueFlows[key] = addAuditInt64OrMarkOverflow(roundingVenueFlows[key], movement.Delta, &rounding.AggregateRemainderOverflow)
+				if movement.Bucket != "fee_revenue" {
+					rounding.VenueBucketFailures++
+				}
+			}
 			mu.Unlock()
 			return
 		}
@@ -264,6 +395,13 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		defer mu.Unlock()
 		classRecords[class]++
 		for _, change := range record.Changes {
+			if record.Reason == "position_rounding" {
+				key := positionRoundingKey{venue: event.VenueID, clientID: record.ClientID, symbol: record.Symbol, timestamp: instant, asset: change.Asset}
+				roundingBalances[key] = addAuditInt64OrMarkOverflow(roundingBalances[key], change.Delta, &rounding.AggregateRemainderOverflow)
+				if change.Wallet != "perp" {
+					rounding.AssetWalletFailures++
+				}
+			}
 			deltas.Checked++
 			if gap := change.NewBalance - change.OldBalance - change.Delta; gap != 0 {
 				deltas.Mismatched++
@@ -355,6 +493,35 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	}); err != nil {
 		return nil, err
 	}
+	rounding.UniqueTerminalKeys = len(roundingRecords)
+	expectedVenueFlows := make(map[venueRoundingKey]int64)
+	for key, record := range roundingRecords {
+		if roundingBalances[key] != record.CashAdjustment {
+			rounding.BalanceLinkFailures++
+		}
+		venueKey := venueRoundingKey{venue: key.venue, symbol: key.symbol, timestamp: key.timestamp, asset: key.asset}
+		if negated, ok := negateAuditInt64(record.CashAdjustment); ok {
+			expectedVenueFlows[venueKey] = addAuditInt64OrMarkOverflow(expectedVenueFlows[venueKey], negated, &rounding.AggregateRemainderOverflow)
+		} else {
+			rounding.VenueLinkFailures++
+		}
+	}
+	for key, amount := range roundingBalances {
+		if record := roundingRecords[key]; record == nil || record.CashAdjustment != amount {
+			rounding.BalanceLinkFailures++
+		}
+	}
+	for key, amount := range roundingVenueFlows {
+		if amount != expectedVenueFlows[key] {
+			rounding.VenueLinkFailures++
+		}
+	}
+	for key, expected := range expectedVenueFlows {
+		if roundingVenueFlows[key] != expected {
+			rounding.VenueLinkFailures++
+		}
+	}
+	rounding.Valid = rounding.Invalid == 0 && rounding.RemainderOutOfRange == 0 && rounding.DuplicateTerminalKeys == 0 && rounding.BalanceLinkFailures == 0 && rounding.VenueLinkFailures == 0 && rounding.AssetWalletFailures == 0 && rounding.VenueBucketFailures == 0 && !rounding.AggregateRemainderOverflow
 
 	// The movements are checked against the account report rather than against
 	// their own first and last record. Many records share a timestamp and the
@@ -396,7 +563,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		}
 	}
 
-	result := &Conservation{PerVenueNet: perVenue, Deltas: deltas, FeesLogged: fees, VenueRecorded: venueRecorded, ClassNet: classNet, ClassRecords: classRecords}
+	result := &Conservation{PerVenueNet: perVenue, Deltas: deltas, PositionRounding: rounding, FeesLogged: fees, VenueRecorded: venueRecorded, ClassNet: classNet, ClassRecords: classRecords}
 	result.Identities = r.conservationIdentities(flows)
 	result.VenueIdentities = r.venueIdentities(venueFlows)
 	for _, flow := range flows {

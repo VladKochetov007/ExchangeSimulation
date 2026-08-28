@@ -97,6 +97,16 @@ type PositionUpdateEvent struct {
 	Reason        string `json:"reason"`
 }
 
+type PositionRoundingEvent struct {
+	Timestamp          int64  `json:"timestamp"`
+	ClientID           uint64 `json:"client_id"`
+	Symbol             string `json:"symbol"`
+	Asset              string `json:"asset"`
+	CashAdjustment     int64  `json:"cash_adjustment"`
+	RemainderNumerator int64  `json:"remainder_numerator"`
+	Precision          int64  `json:"precision"`
+}
+
 type RealizedPnLEvent struct {
 	Timestamp  int64  `json:"timestamp"`
 	ClientID   uint64 `json:"client_id"`

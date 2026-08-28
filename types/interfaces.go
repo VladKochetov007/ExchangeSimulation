@@ -72,6 +72,43 @@ type PositionStore interface {
 	GetAllPositions(clientID uint64) []Position
 }
 
+// ExactLinearPositionStore supplies one atomic exact lifecycle transition and
+// the matching marked/settlement values. It is optional so custom
+// PositionStore implementations remain source-compatible; strict exchanges
+// can require it before accepting orders.
+type ExactLinearPositionStore interface {
+	PositionStore
+	CanUpdatePositionWithAccounting(clientID uint64, symbol string, qty, price int64, tradeSide Side, posSide PositionSide) bool
+	UpdatePositionWithAccounting(clientID uint64, symbol string, qty, price int64, tradeSide Side, posSide PositionSide) (PositionDelta, PositionAccountingDelta)
+	PositionUnrealizedPnL(position Position, markPrice, precision int64) (int64, bool)
+	CanSettlePositionAtPrice(position Position, settlementPrice, precision int64) bool
+	SettlePositionAtPrice(position Position, settlementPrice, precision int64) (int64, bool)
+	PreviewPositionAccountingTerminalization(symbol string, settlementPrice, precision int64) ([]PositionAccountingRounding, bool)
+	CommitPositionAccountingCarry(symbol string, precision int64, expected []PositionAccountingRounding) ([]PositionAccountingRounding, bool)
+	PositionLiquidationPrice(position Position, netBalance, precision int64) (int64, bool)
+	DrainPositionAccountingCarry(symbol string, precision int64) ([]PositionAccountingRounding, bool)
+}
+
+// PositionAccountingPolicy exposes strict-mode behavior without adding a
+// requirement to PositionStore implementations.
+type PositionAccountingPolicy interface {
+	ExactLinearPositionAccountingRequired() bool
+}
+
+// PositionPrecisionRegistrar lets an exchange register the instrument's base
+// precision before the first position update. It is optional for custom
+// stores; exact accounting cannot activate without this denomination.
+type PositionPrecisionRegistrar interface {
+	SetPositionPrecision(symbol string, precision int64)
+}
+
+// PositionPrecisionReleaser removes a denomination when a linear contract is
+// successfully delisted. It prevents a later instrument reusing the symbol
+// from inheriting the old contract's exact-accounting policy.
+type PositionPrecisionReleaser interface {
+	ClearPositionPrecision(symbol string)
+}
+
 // MarginLedger is optionally implemented by PositionStore backends to track
 // position margin exactly. When absent, settlement falls back to recomputing
 // margin from entry price, which can leave rounding dust in reservations.
@@ -247,6 +284,11 @@ type SettlementContext struct {
 	TakerFee     Fee
 	MakerFee     Fee
 	Positions    PositionStore
+	// RequireExactLinearPositionAccounting is set by a strict exchange on
+	// every settlement context. It is carried here rather than inferred from
+	// optional store methods, so a custom exact store cannot accidentally run
+	// the legacy fallback in a conservation-scored venue.
+	RequireExactLinearPositionAccounting bool
 
 	// Account mutation callbacks.
 	PerpBalance       func(clientID uint64, asset string) int64

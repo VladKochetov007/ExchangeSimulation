@@ -57,7 +57,13 @@ func (e *DefaultExchange) MarkedAccount(clientID uint64, spec etypes.AccountValu
 		if err != nil {
 			return etypes.MarkedAccountSnapshot{}, fmt.Errorf("exchange: marked position %s: %w", pos.Symbol, err)
 		}
-		unrealized, ok := tryPositionUPnL(&pos, mark, book.Instrument.BasePrecision())
+		var unrealized int64
+		var ok bool
+		if _, linear := book.Instrument.(Margined); linear {
+			unrealized, ok = e.tryPositionUPnL(&pos, mark, book.Instrument.BasePrecision())
+		} else {
+			unrealized, ok = tryPositionUPnL(&pos, mark, book.Instrument.BasePrecision())
+		}
 		if !ok {
 			return etypes.MarkedAccountSnapshot{}, fmt.Errorf("exchange: marked position %s has unrepresentable PnL", pos.Symbol)
 		}
@@ -281,6 +287,33 @@ func positionMaintenanceAtMark(inst Instrument, size, mark int64) (int64, bool) 
 
 func tryPositionUPnL(pos *Position, mark, precision int64) (int64, bool) {
 	return etypes.TryPriceChangeMulDiv(pos.Size, mark, pos.EntryPrice, precision)
+}
+
+func (e *DefaultExchange) tryPositionUPnL(pos *Position, mark, precision int64) (int64, bool) {
+	if accounting, ok := e.Positions.(etypes.ExactLinearPositionStore); ok {
+		if pnl, valid := accounting.PositionUnrealizedPnL(*pos, mark, precision); valid {
+			return pnl, true
+		}
+		if e.requireExactLinearAccounting {
+			return 0, false
+		}
+	}
+	return tryPositionUPnL(pos, mark, precision)
+}
+
+func (e *DefaultExchange) positionUPnL(pos *Position, mark, precision int64) int64 {
+	pnl, ok := e.tryPositionUPnL(pos, mark, precision)
+	if !ok {
+		panic("exchange: position PnL overflows int64")
+	}
+	return pnl
+}
+
+func (e *DefaultExchange) positionUPnLForInstrument(pos *Position, mark int64, instrument Instrument) int64 {
+	if _, linear := instrument.(Margined); linear {
+		return e.positionUPnL(pos, mark, instrument.BasePrecision())
+	}
+	return positionUPnL(pos, mark, instrument.BasePrecision())
 }
 
 func positiveMagnitude(value int64) (int64, bool) {

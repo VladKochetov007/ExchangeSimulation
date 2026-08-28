@@ -278,15 +278,16 @@ func (e *DefaultExchange) buildSettlementContext(ctx executionContext) Settlemen
 	clients := e.Clients
 	book, timestamp := ctx.book, ctx.timestamp
 	return SettlementContext{
-		Exec:              ctx.exec,
-		TakerOrder:        ctx.takerOrder,
-		MakerOrder:        ctx.makerOrder,
-		MakerPosSide:      ctx.makerPosSide,
-		TakerFee:          ctx.takerFee,
-		MakerFee:          ctx.makerFee,
-		Positions:         e.Positions,
-		PerpBalance:       func(clientID uint64, asset string) int64 { return clients[clientID].PerpBalance(asset) },
-		MutatePerpBalance: func(clientID uint64, asset string, delta int64) { clients[clientID].MutatePerpBalance(asset, delta) },
+		Exec:                                 ctx.exec,
+		TakerOrder:                           ctx.takerOrder,
+		MakerOrder:                           ctx.makerOrder,
+		MakerPosSide:                         ctx.makerPosSide,
+		TakerFee:                             ctx.takerFee,
+		MakerFee:                             ctx.makerFee,
+		Positions:                            e.Positions,
+		RequireExactLinearPositionAccounting: e.requireExactLinearAccounting,
+		PerpBalance:                          func(clientID uint64, asset string) int64 { return clients[clientID].PerpBalance(asset) },
+		MutatePerpBalance:                    func(clientID uint64, asset string, delta int64) { clients[clientID].MutatePerpBalance(asset, delta) },
 		// Post-trade margin is owed once the fill happened: force-reserve even
 		// past available so the shortfall is visible to the liquidation sweep.
 		ReservePerp: func(clientID uint64, asset string, amount int64) bool {

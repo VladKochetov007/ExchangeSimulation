@@ -2320,14 +2320,15 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		estimatedClients += 4
 	}
 	ex := exchange.NewExchangeWithConfig(exchange.ExchangeConfig{
-		ID:                      id,
-		EstimatedClients:        estimatedClients,
-		Clock:                   clock,
-		TickerFactory:           timers,
-		DeterministicIngress:    true,
-		DeterministicPhases:     true,
-		SnapshotInterval:        s.Config.SnapshotInterval,
-		BalanceSnapshotInterval: time.Minute,
+		ID:                                   id,
+		EstimatedClients:                     estimatedClients,
+		Clock:                                clock,
+		TickerFactory:                        timers,
+		DeterministicIngress:                 true,
+		DeterministicPhases:                  true,
+		RequireExactLinearPositionAccounting: true,
+		SnapshotInterval:                     s.Config.SnapshotInterval,
+		BalanceSnapshotInterval:              time.Minute,
 	})
 	matchingRule := s.Config.matchingRule(id)
 	if matchingRule == MatchingProRata {

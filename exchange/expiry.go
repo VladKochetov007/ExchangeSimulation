@@ -442,6 +442,94 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 	}
 	quote := inst.QuoteAsset()
 	precision := inst.BasePrecision()
+	margined, isMargined := inst.(Margined)
+	exactStore, hasExactAccounting := e.Positions.(etypes.ExactLinearPositionStore)
+	if e.requireExactLinearAccounting && isMargined && !hasExactAccounting {
+		panic("exchange: exact linear position store required for expiry")
+	}
+
+	type expiringPos struct {
+		clientID uint64
+		pos      Position
+	}
+	var positions []expiringPos
+	e.Positions.PositionsForFunding(symbol, func(clientID uint64, pos Position) {
+		positions = append(positions, expiringPos{clientID: clientID, pos: pos})
+	})
+	_, hasMarginLedger := e.Positions.(etypes.MarginLedger)
+
+	var expectedRounding []PositionAccountingRounding
+	if e.requireExactLinearAccounting && isMargined {
+		var valid bool
+		expectedRounding, valid = exactStore.PreviewPositionAccountingTerminalization(symbol, settlementPrice, precision)
+		if !valid {
+			panic("exchange: exact linear expiry terminalization unavailable")
+		}
+		simulatedBalances := make(map[uint64]int64)
+		simulatedFeeRevenue := e.ExchangeBalance.FeeRevenue[quote]
+		var simulatedFeeTotal int64
+		for _, ep := range positions {
+			client := e.Clients[ep.clientID]
+			if client == nil {
+				panic("exchange: expiry settlement recipient is unavailable")
+			}
+			simulatedBalance, seen := simulatedBalances[ep.clientID]
+			if !seen {
+				simulatedBalance = client.PerpBalances[quote]
+			}
+			release := ep.pos.Margin
+			if !hasMarginLedger {
+				var releaseErr error
+				release, releaseErr = margined.MarginRequired(abs(ep.pos.Size), ep.pos.EntryPrice, precision)
+				if releaseErr != nil {
+					panic(fmt.Sprintf("expiry margin release %s: %v", symbol, releaseErr))
+				}
+			}
+			if release > 0 {
+				var ok bool
+				simulatedBalance, ok = etypes.TryAdd(simulatedBalance, release)
+				if !ok {
+					panic("exchange: expiry margin release overflows balance")
+				}
+			}
+			cash, cashOK := exactStore.PositionUnrealizedPnL(ep.pos, settlementPrice, precision)
+			if !cashOK || !exactStore.CanSettlePositionAtPrice(ep.pos, settlementPrice, precision) {
+				panic("exchange: exact linear expiry transition unavailable")
+			}
+			fee := exp.DeliveryFee(ep.pos.Size, settlementPrice, precision)
+			var feeOK bool
+			if simulatedFeeTotal, feeOK = etypes.TryAdd(simulatedFeeTotal, fee); !feeOK {
+				panic("exchange: expiry delivery fees overflow")
+			}
+			if simulatedBalance, cashOK = etypes.TryAdd(simulatedBalance, cash); !cashOK {
+				panic("exchange: expiry settlement cash overflows balance")
+			}
+			if simulatedBalance, cashOK = etypes.TrySub(simulatedBalance, fee); !cashOK {
+				panic("exchange: expiry delivery fee overflows balance")
+			}
+			simulatedBalances[ep.clientID] = simulatedBalance
+		}
+		for _, adjustment := range expectedRounding {
+			client := e.Clients[adjustment.ClientID]
+			if client == nil {
+				panic("exchange: expiry rounding recipient is unavailable")
+			}
+			simulatedBalance, seen := simulatedBalances[adjustment.ClientID]
+			if !seen {
+				simulatedBalance = client.PerpBalances[quote]
+			}
+			var adjustmentOK bool
+			if simulatedBalance, adjustmentOK = etypes.TryAdd(simulatedBalance, adjustment.Amount); !adjustmentOK {
+				panic("exchange: expiry rounding adjustment overflows balance")
+			}
+			if simulatedFeeRevenue, adjustmentOK = etypes.TrySub(simulatedFeeRevenue, adjustment.Amount); !adjustmentOK {
+				panic("exchange: expiry rounding ledger overflows venue balance")
+			}
+		}
+		if _, ok := etypes.TryAdd(simulatedFeeRevenue, simulatedFeeTotal); !ok {
+			panic("exchange: expiry delivery fees overflow venue balance")
+		}
+	}
 
 	// Cancel in client-ID order: each cancel republishes the book, so map
 	// order would produce a different delta sequence every run.
@@ -454,17 +542,7 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 		e.cancelClientOrdersOnBook(e.Clients[clientID], book, inst)
 	}
 
-	type expiringPos struct {
-		clientID uint64
-		pos      Position
-	}
-	var positions []expiringPos
-	e.Positions.PositionsForFunding(symbol, func(clientID uint64, pos Position) {
-		positions = append(positions, expiringPos{clientID: clientID, pos: pos})
-	})
-
 	ledger, hasLedger := e.Positions.(etypes.MarginLedger)
-	margined, isMargined := inst.(Margined)
 	log := e.getLogger(symbol)
 
 	var feeTotal int64
@@ -496,16 +574,36 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 		}
 
 		cash := exp.ExpiryCashFlow(pos.Size, pos.EntryPrice, settlementPrice, precision)
+		usedExactAccounting := false
+		if isMargined && hasExactAccounting {
+			var valid bool
+			cash, valid = exactStore.SettlePositionAtPrice(pos, settlementPrice, precision)
+			if !valid {
+				if e.requireExactLinearAccounting {
+					panic("exchange: exact linear expiry settlement unavailable")
+				}
+				cash = exp.ExpiryCashFlow(pos.Size, pos.EntryPrice, settlementPrice, precision)
+			} else {
+				usedExactAccounting = true
+			}
+		}
 		fee := exp.DeliveryFee(pos.Size, settlementPrice, precision)
 		oldBal := client.PerpBalances[quote]
-		client.PerpBalances[quote] += cash - fee
-		feeTotal += fee
+		netCash, ok := etypes.TrySub(cash, fee)
+		if !ok {
+			panic("expiry settlement cash overflows balance")
+		}
+		newBal := etypes.AddAmount(oldBal, netCash)
+		client.PerpBalances[quote] = newBal
+		feeTotal = etypes.AddAmount(feeTotal, fee)
 
 		closeSide := Sell
 		if pos.Size < 0 {
 			closeSide = Buy
 		}
-		e.Positions.UpdatePosition(ep.clientID, symbol, absSize, settlementPrice, closeSide, pos.PositionSide)
+		if !usedExactAccounting {
+			e.Positions.UpdatePosition(ep.clientID, symbol, absSize, settlementPrice, closeSide, pos.PositionSide)
+		}
 
 		if log != nil {
 			log.LogEvent(now, ep.clientID, "expiry_settlement", ExpirySettlementEvent{
@@ -515,13 +613,60 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 			})
 			log.LogEvent(now, ep.clientID, "balance_change", BalanceChangeEvent{
 				Timestamp: now, ClientID: ep.clientID, Symbol: symbol, Reason: "expiry_settlement",
-				Changes: []BalanceDelta{{Asset: quote, Wallet: "perp", OldBalance: oldBal, NewBalance: oldBal + cash - fee, Delta: cash - fee}},
+				Changes: []BalanceDelta{{Asset: quote, Wallet: "perp", OldBalance: oldBal, NewBalance: newBal, Delta: netCash}},
 			})
+		}
+	}
+
+	if isMargined && hasExactAccounting {
+		var rounding []PositionAccountingRounding
+		var valid bool
+		if e.requireExactLinearAccounting {
+			rounding, valid = exactStore.CommitPositionAccountingCarry(symbol, precision, expectedRounding)
+		} else {
+			rounding, valid = exactStore.DrainPositionAccountingCarry(symbol, precision)
+		}
+		if !valid {
+			if e.requireExactLinearAccounting {
+				panic("exchange: exact linear expiry rounding drain unavailable")
+			}
+		} else {
+			for _, adjustment := range rounding {
+				client := e.Clients[adjustment.ClientID]
+				if client == nil {
+					if e.requireExactLinearAccounting {
+						panic("exchange: expiry rounding recipient is unavailable")
+					}
+					continue
+				}
+				if adjustment.Amount != 0 {
+					oldBalance := client.PerpBalances[quote]
+					newBalance := etypes.AddAmount(oldBalance, adjustment.Amount)
+					client.PerpBalances[quote] = newBalance
+					logBalanceChange(e, now, adjustment.ClientID, symbol, "position_rounding", []BalanceDelta{
+						{Asset: quote, Wallet: "perp", OldBalance: oldBalance, NewBalance: newBalance, Delta: adjustment.Amount},
+					})
+					e.moveVenueBalance(VenueFeeRevenue, quote, -adjustment.Amount, now, symbol, "position_rounding")
+				}
+				if log != nil {
+					log.LogEvent(now, adjustment.ClientID, "position_rounding", PositionRoundingEvent{
+						Timestamp: now, ClientID: adjustment.ClientID, Symbol: symbol,
+						Asset:          quote,
+						CashAdjustment: adjustment.Amount, RemainderNumerator: adjustment.RemainderNumerator,
+						Precision: precision,
+					})
+				}
+			}
 		}
 	}
 
 	if feeTotal > 0 {
 		e.recordFeeRevenue(quote, Fee{Amount: feeTotal, Asset: quote}, Fee{}, book, now)
+	}
+	if isMargined {
+		if releaser, ok := e.Positions.(etypes.PositionPrecisionReleaser); ok {
+			releaser.ClearPositionPrecision(symbol)
+		}
 	}
 
 	listedAt, hasListedAt := e.instrumentListedAt[symbol]

@@ -398,7 +398,7 @@ func (e *DefaultExchange) buildPositionSnapshots(clientID uint64) []PositionSnap
 		var unrealizedPnL int64
 		if markPrice != nil {
 			if instrument := e.Instruments[pos.Symbol]; instrument != nil {
-				unrealizedPnL = positionUPnL(&pos, *markPrice, instrument.BasePrecision())
+				unrealizedPnL = e.positionUPnLForInstrument(&pos, *markPrice, instrument)
 			}
 		}
 		markReason := ""

@@ -110,3 +110,141 @@ func TestConservationSeparatesExternalInflowFromTransfers(t *testing.T) {
 		t.Errorf("venue net = %d, want the deposit alone", result.PerVenueNet["north"]["USD"])
 	}
 }
+
+func TestConservationAuditsPositionRoundingLinksAndRemainder(t *testing.T) {
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/derivatives.jsonl": {
+			`{"sim_ts":1,"client_id":1,"event":"position_rounding","data":{"venue_id":"north","payload":{"timestamp":1,"client_id":1,"symbol":"ABC-FUT","asset":"USD","cash_adjustment":3,"remainder_numerator":-2,"precision":10}}}`,
+			`{"sim_ts":1,"client_id":1,"event":"balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"client_id":1,"symbol":"ABC-FUT","reason":"position_rounding","changes":[{"asset":"USD","wallet":"perp","old_balance":0,"new_balance":3,"delta":3}]}}}`,
+			`{"sim_ts":1,"client_id":0,"event":"venue_balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"bucket":"fee_revenue","asset":"USD","symbol":"ABC-FUT","reason":"position_rounding","old_balance":0,"new_balance":-3,"delta":-3}}}`,
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	conservation, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatalf("MeasureConservation: %v", err)
+	}
+	audit := conservation.PositionRounding
+	if !audit.Valid || audit.Events != 1 || audit.UniqueTerminalKeys != 1 || audit.RemainderOutOfRange != 0 || audit.BalanceLinkFailures != 0 || audit.VenueLinkFailures != 0 {
+		t.Fatalf("rounding audit = %+v, want one valid linked event", audit)
+	}
+}
+
+func TestConservationRejectsUnboundedPositionRoundingRemainder(t *testing.T) {
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/derivatives.jsonl": {
+			`{"sim_ts":1,"client_id":1,"event":"position_rounding","data":{"venue_id":"north","payload":{"timestamp":1,"client_id":1,"symbol":"ABC-FUT","asset":"USD","cash_adjustment":0,"remainder_numerator":10,"precision":10}}}`,
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	conservation, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatalf("MeasureConservation: %v", err)
+	}
+	if conservation.PositionRounding.Valid || conservation.PositionRounding.Events != 1 || conservation.PositionRounding.RemainderOutOfRange != 1 {
+		t.Fatalf("unbounded remainder audit = %+v, want invalid", conservation.PositionRounding)
+	}
+}
+
+func TestConservationRejectsPositionRoundingLinkViolations(t *testing.T) {
+	baseEvent := `{"sim_ts":1,"client_id":1,"event":"position_rounding","data":{"venue_id":"north","payload":{"timestamp":1,"client_id":1,"symbol":"ABC-FUT","asset":"USD","cash_adjustment":3,"remainder_numerator":-2,"precision":10}}}`
+	measure := func(t *testing.T, lines []string) PositionRoundingAudit {
+		t.Helper()
+		run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines}))
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		conservation, err := run.MeasureConservation(ConservationOptions{})
+		if err != nil {
+			t.Fatalf("MeasureConservation: %v", err)
+		}
+		return conservation.PositionRounding
+	}
+
+	missing := measure(t, []string{baseEvent})
+	if missing.Valid || missing.BalanceLinkFailures == 0 || missing.VenueLinkFailures == 0 {
+		t.Fatalf("missing links audit = %+v, want both link failures", missing)
+	}
+
+	wrongWallet := measure(t, []string{
+		baseEvent,
+		`{"sim_ts":1,"client_id":1,"event":"balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"client_id":1,"symbol":"ABC-FUT","reason":"position_rounding","changes":[{"asset":"USD","wallet":"spot","old_balance":0,"new_balance":3,"delta":3}]}}}`,
+		`{"sim_ts":1,"client_id":0,"event":"venue_balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"bucket":"fee_revenue","asset":"USD","symbol":"ABC-FUT","reason":"position_rounding","old_balance":0,"new_balance":-3,"delta":-3}}}`,
+	})
+	if wrongWallet.Valid || wrongWallet.AssetWalletFailures == 0 {
+		t.Fatalf("wrong wallet audit = %+v, want invalid asset/wallet link", wrongWallet)
+	}
+
+	wrongAsset := measure(t, []string{
+		baseEvent,
+		`{"sim_ts":1,"client_id":1,"event":"balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"client_id":1,"symbol":"ABC-FUT","reason":"position_rounding","changes":[{"asset":"ABC","wallet":"perp","old_balance":0,"new_balance":3,"delta":3}]}}}`,
+		`{"sim_ts":1,"client_id":0,"event":"venue_balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"bucket":"fee_revenue","asset":"USD","symbol":"ABC-FUT","reason":"position_rounding","old_balance":0,"new_balance":-3,"delta":-3}}}`,
+	})
+	if wrongAsset.Valid || wrongAsset.BalanceLinkFailures == 0 {
+		t.Fatalf("wrong asset audit = %+v, want invalid denomination link", wrongAsset)
+	}
+
+	wrongBucket := measure(t, []string{
+		baseEvent,
+		`{"sim_ts":1,"client_id":1,"event":"balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"client_id":1,"symbol":"ABC-FUT","reason":"position_rounding","changes":[{"asset":"USD","wallet":"perp","old_balance":0,"new_balance":3,"delta":3}]}}}`,
+		`{"sim_ts":1,"client_id":0,"event":"venue_balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"bucket":"insurance_fund","asset":"USD","symbol":"ABC-FUT","reason":"position_rounding","old_balance":0,"new_balance":-3,"delta":-3}}}`,
+	})
+	if wrongBucket.Valid || wrongBucket.VenueBucketFailures == 0 {
+		t.Fatalf("wrong bucket audit = %+v, want invalid venue bucket link", wrongBucket)
+	}
+}
+
+func TestConservationDistinguishesRoundingRelistingsAndOverflow(t *testing.T) {
+	relisting := func(timestamp int64) string {
+		return `{"sim_ts":` + itoa(timestamp) + `,"client_id":1,"event":"position_rounding","data":{"venue_id":"north","payload":{"timestamp":` + itoa(timestamp) + `,"client_id":1,"symbol":"ABC-FUT","asset":"USD","cash_adjustment":0,"remainder_numerator":1,"precision":10}}}`
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{
+		"north/derivatives.jsonl": {relisting(1), relisting(2)},
+	}))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	conservation, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatalf("MeasureConservation: %v", err)
+	}
+	if !conservation.PositionRounding.Valid || conservation.PositionRounding.UniqueTerminalKeys != 2 || conservation.PositionRounding.DuplicateTerminalKeys != 0 {
+		t.Fatalf("relisting audit = %+v, want two distinct terminal events", conservation.PositionRounding)
+	}
+	run, err = Open(writeRun(t, Report{}, map[string][]string{
+		"north/derivatives.jsonl": {relisting(1), relisting(1)},
+	}))
+	if err != nil {
+		t.Fatalf("Open duplicate: %v", err)
+	}
+	conservation, err = run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatalf("MeasureConservation duplicate: %v", err)
+	}
+	if conservation.PositionRounding.Valid || conservation.PositionRounding.DuplicateTerminalKeys != 1 {
+		t.Fatalf("duplicate audit = %+v, want invalid duplicate", conservation.PositionRounding)
+	}
+
+	overflowEvent := func(clientID int64) string {
+		return `{"sim_ts":1,"client_id":` + itoa(clientID) + `,"event":"position_rounding","data":{"venue_id":"north","payload":{"timestamp":1,"client_id":` + itoa(clientID) + `,"symbol":"ABC-FUT","asset":"USD","cash_adjustment":0,"remainder_numerator":9223372036854775806,"precision":9223372036854775807}}}`
+	}
+	run, err = Open(writeRun(t, Report{}, map[string][]string{
+		"north/derivatives.jsonl": {overflowEvent(1), overflowEvent(2)},
+	}))
+	if err != nil {
+		t.Fatalf("Open overflow: %v", err)
+	}
+	conservation, err = run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatalf("MeasureConservation overflow: %v", err)
+	}
+	if conservation.PositionRounding.Valid || !conservation.PositionRounding.AggregateRemainderOverflow {
+		t.Fatalf("overflow audit = %+v, want invalid aggregate overflow", conservation.PositionRounding)
+	}
+}

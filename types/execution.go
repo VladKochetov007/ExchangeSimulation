@@ -32,3 +32,21 @@ type PositionDelta struct {
 	NewSize       int64
 	NewEntryPrice int64
 }
+
+// PositionAccountingDelta is returned by an optional exact position store.
+// It is separate from PositionDelta so existing users with unkeyed literals
+// retain source compatibility.
+type PositionAccountingDelta struct {
+	RealizedPnL int64
+	Valid       bool
+}
+
+// PositionAccountingRounding is a lifecycle remainder drained when a
+// contract is delisted. Amount is the integer cash correction assigned to the
+// client; RemainderNumerator is the residual below one cash unit retained in
+// the audit record.
+type PositionAccountingRounding struct {
+	ClientID           uint64
+	Amount             int64
+	RemainderNumerator int64
+}

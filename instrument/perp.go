@@ -86,8 +86,12 @@ func (p *PerpFutures) Settle(ctx etypes.SettlementContext) etypes.SettlementResu
 	exec := ctx.Exec
 	quote := p.QuoteAsset()
 
-	takerDelta := ctx.Positions.UpdatePosition(exec.TakerClientID, ctx.BookSymbol, exec.Qty, exec.Price, ctx.TakerOrder.Side, ctx.TakerOrder.PositionSide)
-	makerDelta := ctx.Positions.UpdatePosition(exec.MakerClientID, ctx.BookSymbol, exec.Qty, exec.Price, exec.MakerSide, ctx.MakerPosSide)
+	preflightPositionAccounting(ctx.Positions, ctx.RequireExactLinearPositionAccounting,
+		positionAccountingUpdate{clientID: exec.TakerClientID, symbol: ctx.BookSymbol, qty: exec.Qty, price: exec.Price, tradeSide: ctx.TakerOrder.Side, posSide: ctx.TakerOrder.PositionSide},
+		positionAccountingUpdate{clientID: exec.MakerClientID, symbol: ctx.BookSymbol, qty: exec.Qty, price: exec.Price, tradeSide: exec.MakerSide, posSide: ctx.MakerPosSide},
+	)
+	takerDelta, takerAccounting := updatePositionWithAccounting(ctx.Positions, ctx.RequireExactLinearPositionAccounting, exec.TakerClientID, ctx.BookSymbol, exec.Qty, exec.Price, ctx.TakerOrder.Side, ctx.TakerOrder.PositionSide)
+	makerDelta, makerAccounting := updatePositionWithAccounting(ctx.Positions, ctx.RequireExactLinearPositionAccounting, exec.MakerClientID, ctx.BookSymbol, exec.Qty, exec.Price, exec.MakerSide, ctx.MakerPosSide)
 
 	if ctx.Log != nil {
 		ctx.Log.LogEvent(ctx.Timestamp, exec.TakerClientID, "position_update", etypes.PositionUpdateEvent{
@@ -123,8 +127,8 @@ func (p *PerpFutures) Settle(ctx etypes.SettlementContext) etypes.SettlementResu
 	p.settlePositionMargin(ctx, exec.TakerClientID, ctx.TakerOrder.PositionSide, takerDelta, takerClosedQty, quote, precision)
 	p.settlePositionMargin(ctx, exec.MakerClientID, ctx.MakerPosSide, makerDelta, makerClosedQty, quote, precision)
 
-	takerPnL := p.settleSide(ctx, exec.TakerClientID, ctx.TakerOrder.Side, takerDelta, takerClosedQty, ctx.TakerFee, quote)
-	makerPnL := p.settleSide(ctx, exec.MakerClientID, exec.MakerSide, makerDelta, makerClosedQty, ctx.MakerFee, quote)
+	takerPnL := p.settleSide(ctx, exec.TakerClientID, ctx.TakerOrder.Side, takerDelta, takerAccounting, takerClosedQty, ctx.TakerFee, quote)
+	makerPnL := p.settleSide(ctx, exec.MakerClientID, exec.MakerSide, makerDelta, makerAccounting, makerClosedQty, ctx.MakerFee, quote)
 	recordSettlementFees(ctx, quote)
 
 	return etypes.SettlementResult{TakerDelta: takerDelta, MakerDelta: makerDelta, TakerPnL: takerPnL, MakerPnL: makerPnL}
@@ -180,8 +184,11 @@ func (p *PerpFutures) settlePositionMargin(ctx etypes.SettlementContext, clientI
 	}
 }
 
-func (p *PerpFutures) settleSide(ctx etypes.SettlementContext, clientID uint64, side etypes.Side, delta etypes.PositionDelta, closedQty int64, fee etypes.Fee, quote string) int64 {
+func (p *PerpFutures) settleSide(ctx etypes.SettlementContext, clientID uint64, side etypes.Side, delta etypes.PositionDelta, accounting etypes.PositionAccountingDelta, closedQty int64, fee etypes.Fee, quote string) int64 {
 	pnl := calcPerpPnL(delta.OldSize, delta.OldEntryPrice, ctx.Exec.Qty, ctx.Exec.Price, side, ctx.BasePrecision)
+	if accounting.Valid {
+		pnl = accounting.RealizedPnL
+	}
 	if pnl != 0 && ctx.Log != nil {
 		ctx.Log.LogEvent(ctx.Timestamp, clientID, "realized_pnl", etypes.RealizedPnLEvent{
 			Timestamp:  ctx.Timestamp,

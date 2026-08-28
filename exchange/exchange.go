@@ -141,23 +141,24 @@ type DefaultExchange struct {
 	conservation *conservationTracker
 	// RequestPolicy meters and admits incoming requests. Nil leaves the venue
 	// unmetered, which is what scenarios without a published budget expect.
-	RequestPolicy         RequestPolicy
-	NextOrderID           uint64
-	Matcher               MatchingEngine
-	MDPublisher           *MDPublisher
-	Clock                 Clock
-	Loggers               map[string]Logger
-	instrumentLogFallback Logger
-	BorrowingMgr          *BorrowingManager
-	CollateralRate        int64
-	LiquidationFeeBps     int64
-	autoAnchorMarks       bool
-	deterministicIngress  bool
-	deterministicPhases   bool
-	markEMAWindow         int
-	markBandBps           int64
-	autoAnchoredSymbols   map[string]bool
-	requestsInFlight      atomic.Int64
+	RequestPolicy                RequestPolicy
+	NextOrderID                  uint64
+	Matcher                      MatchingEngine
+	MDPublisher                  *MDPublisher
+	Clock                        Clock
+	Loggers                      map[string]Logger
+	instrumentLogFallback        Logger
+	BorrowingMgr                 *BorrowingManager
+	CollateralRate               int64
+	LiquidationFeeBps            int64
+	requireExactLinearAccounting bool
+	autoAnchorMarks              bool
+	deterministicIngress         bool
+	deterministicPhases          bool
+	markEMAWindow                int
+	markBandBps                  int64
+	autoAnchoredSymbols          map[string]bool
+	requestsInFlight             atomic.Int64
 	// automInFlight counts automation-loop work (mark prices, funding,
 	// expiry) in progress. These loops react to the same clock the runner
 	// advances, so a barrier that ignored them would move time while the
@@ -211,6 +212,11 @@ type ExchangeConfig struct {
 	// DeterministicIngress; scheduler-backed mounts must additionally opt into
 	// the simulation runner's deterministic latency courier.
 	DeterministicPhases bool
+
+	// RequireExactLinearPositionAccounting rejects a custom position store that
+	// cannot provide one atomic cost-basis transition and matching valuation.
+	// It is the required mode for conservation-scored research runs.
+	RequireExactLinearPositionAccounting bool
 
 	// EstimatedClients pre-allocates capacity for client maps (default: 10)
 	EstimatedClients int
@@ -281,23 +287,27 @@ func NewExchangeWithConfig(config ExchangeConfig) *DefaultExchange {
 			FeeRevenue:    make(map[string]int64),
 			InsuranceFund: make(map[string]int64),
 		},
-		conservation:            newConservationTracker(),
-		NextOrderID:             1,
-		Matcher:                 matcher,
-		MDPublisher:             NewMDPublisher(),
-		Clock:                   config.Clock,
-		Loggers:                 make(map[string]Logger),
-		settlementPending:       make(map[string]expirySettlementPending),
-		tickerFactory:           config.TickerFactory,
-		deterministicIngress:    config.DeterministicIngress,
-		deterministicPhases:     config.DeterministicPhases,
-		running:                 false,
-		shutdownCh:              make(chan struct{}),
-		snapshotStopCh:          make(chan struct{}),
-		snapshotInterval:        config.SnapshotInterval,
-		snapshotPollInterval:    config.SnapshotPollInterval,
-		balanceSnapshotStopCh:   make(chan struct{}),
-		balanceSnapshotInterval: config.BalanceSnapshotInterval,
+		conservation:                 newConservationTracker(),
+		NextOrderID:                  1,
+		Matcher:                      matcher,
+		MDPublisher:                  NewMDPublisher(),
+		Clock:                        config.Clock,
+		Loggers:                      make(map[string]Logger),
+		settlementPending:            make(map[string]expirySettlementPending),
+		tickerFactory:                config.TickerFactory,
+		deterministicIngress:         config.DeterministicIngress,
+		deterministicPhases:          config.DeterministicPhases,
+		requireExactLinearAccounting: config.RequireExactLinearPositionAccounting,
+		running:                      false,
+		shutdownCh:                   make(chan struct{}),
+		snapshotStopCh:               make(chan struct{}),
+		snapshotInterval:             config.SnapshotInterval,
+		snapshotPollInterval:         config.SnapshotPollInterval,
+		balanceSnapshotStopCh:        make(chan struct{}),
+		balanceSnapshotInterval:      config.BalanceSnapshotInterval,
+	}
+	if policy, ok := ex.Positions.(interface{ SetRequireExactLinearPositionAccounting(bool) }); ok {
+		policy.SetRequireExactLinearPositionAccounting(config.RequireExactLinearPositionAccounting)
 	}
 	return ex
 }
@@ -622,7 +632,18 @@ func (e *DefaultExchange) AddInstrument(instrument Instrument) {
 			}
 		}
 	}
+	_, isLinear := instrument.(etypes.Margined)
+	if e.requireExactLinearAccounting && isLinear {
+		if _, ok := e.Positions.(etypes.ExactLinearPositionStore); !ok {
+			panic("exchange: exact linear position accounting is required")
+		}
+	}
 	e.Instruments[symbol] = instrument
+	if isLinear {
+		if registrar, ok := e.Positions.(etypes.PositionPrecisionRegistrar); ok {
+			registrar.SetPositionPrecision(symbol, instrument.BasePrecision())
+		}
+	}
 	e.instrumentListedAt[symbol] = e.Clock.NowUnixNano()
 	e.Books[symbol] = &OrderBook{
 		Symbol:     symbol,
@@ -1828,7 +1849,7 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 			if pos == nil || pos.Size == 0 {
 				continue
 			}
-			p.EquityContribution += positionUPnL(pos, mark, precision)
+			p.EquityContribution += e.positionUPnL(pos, mark, precision)
 			notional := etypes.AbsMulDiv(pos.Size, mark, precision)
 			p.Notional += notional
 			p.Maintenance += notional * perp.MaintenanceMarginRate / 10000
@@ -2067,6 +2088,14 @@ func (e *DefaultExchange) EstimateLiquidationPrice(pos *Position, clientID uint6
 	// Net perp-attributed debt out of the collateral: the loan is a liability,
 	// so the price at which equity hits zero is reached sooner, not later.
 	balance := client.PerpBalance(perp.QuoteAsset()) - client.BorrowedPerpPortion(perp.QuoteAsset())
+	if accounting, ok := e.Positions.(etypes.ExactLinearPositionStore); ok {
+		if liquidationPrice, valid := accounting.PositionLiquidationPrice(*pos, balance, precision); valid {
+			return liquidationPrice, nil
+		}
+		if e.requireExactLinearAccounting {
+			return 0, fmt.Errorf("liquidation-price exact accounting: %w", ErrNoBookPrice)
+		}
+	}
 	if pos.Size > 0 {
 		return pos.EntryPrice - MulDiv(balance, precision, pos.Size), nil
 	}
