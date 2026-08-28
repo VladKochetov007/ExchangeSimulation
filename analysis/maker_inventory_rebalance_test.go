@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,6 +19,8 @@ func TestMakerInventoryRebalanceBoundedJoinMatchesBufferedOracle(t *testing.T) {
 		{FillEvidence: map[string]any{"post_inventory": int64(15_000_000_000)}},
 		{PartialFill: true},
 		{PartialFill: true, DropCancel: true},
+		{DuplicateFillEvidence: true},
+		{Decision: map[string]any{"action_or_defer_reason": "LOCAL_BOOK_STALE", "last_book_source_time": int64(1), "request_id": uint64(0), "requested_qty": int64(0), "cooldown_until": int64(0)}},
 		{Disabled: true},
 	}
 	for index, fixture := range fixtures {
@@ -93,6 +96,13 @@ func TestMakerInventoryRebalanceRejectsAcceptedOrderIDCollision(t *testing.T) {
 	}
 	if result.Valid || result.DuplicateAcceptedOrderIDs == 0 {
 		t.Fatalf("accepted order-ID collision survived: %+v", result)
+	}
+}
+
+func TestMakerInventoryRebalanceRejectsFilledQuantityOverflow(t *testing.T) {
+	run := p2TestRun(t, p2Fixture{OverflowFills: true})
+	if _, err := run.MeasureMakerInventoryRebalance(); err == nil {
+		t.Fatal("filled quantity overflow was not fail-closed")
 	}
 }
 
@@ -192,6 +202,8 @@ type p2Fixture struct {
 	DuplicateDecision         bool
 	PartialFill               bool
 	DropCancel                bool
+	DuplicateFillEvidence     bool
+	OverflowFills             bool
 	Disabled                  bool
 	OmitAcceptedSymbol        bool
 	CounterpartyClient        uint64
@@ -267,6 +279,24 @@ func p2TestRun(t *testing.T, fixture p2Fixture) *Run {
 		logLine(21_000_000_000, 0, "Trade", map[string]any{"trade_id": uint64(9), "price": int64(298_500_000), "qty": qty, "taker_order_id": uint64(70), "maker_order_id": uint64(80)}),
 		logLine(21_000_000_000, 7, "OrderFill", fill),
 		logLine(21_000_000_000, 7, "maker_inventory_rebalance_fill", fillEvidence),
+	}
+	if fixture.DuplicateFillEvidence {
+		extraEvidence := make(map[string]any, len(fillEvidence))
+		for field, value := range fillEvidence {
+			extraEvidence[field] = value
+		}
+		extraEvidence["post_inventory"] = int64(15_000_000_000)
+		lines = append(lines, logLine(21_000_000_000, 7, "maker_inventory_rebalance_fill", extraEvidence))
+	}
+	if fixture.OverflowFills {
+		for range 3 {
+			overflowFill := make(map[string]any, len(fill))
+			for field, value := range fill {
+				overflowFill[field] = value
+			}
+			overflowFill["qty"] = int64(math.MaxInt64 / 2)
+			lines = append(lines, logLine(21_000_000_000, 7, "OrderFill", overflowFill))
+		}
 	}
 	if fixture.PartialFill && !fixture.DropCancel {
 		lines = append(lines, logLine(21_000_000_000, 7, "OrderCancelled", map[string]any{"order_id": uint64(70), "remaining_qty": int64(500_000_000 - qty)}))

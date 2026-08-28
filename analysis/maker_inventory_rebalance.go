@@ -3,6 +3,7 @@ package analysis
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -176,6 +177,22 @@ type makerInventoryRebalanceFillMatchKey struct {
 	timestamp int64
 }
 
+type makerInventoryRebalanceEvidenceQueue struct {
+	reduces []bool
+	next    int
+}
+
+type makerInventoryRebalanceTradeMatchKey struct {
+	tradeID uint64
+	qty     int64
+	price   int64
+}
+
+type makerInventoryRebalanceCounterpartyRelation struct {
+	external bool
+	self     bool
+}
+
 type makerInventoryRebalanceKey struct {
 	venueID  string
 	clientID uint64
@@ -216,6 +233,7 @@ const (
 func (r *Run) MeasureMakerInventoryRebalance() (*MakerInventoryRebalanceAudit, error) {
 	result := &MakerInventoryRebalanceAudit{ActionCounts: make(map[string]int64)}
 	expected := make(map[makerInventoryRebalanceKey]makerInventoryRebalanceDecision)
+	receiptDecisions := make([]makerInventoryRebalanceDecision, 0)
 	var stateErr error
 	addCheck := func(venue string, client, request, order uint64, failure string) {
 		if stateErr != nil {
@@ -244,6 +262,13 @@ func (r *Run) MeasureMakerInventoryRebalance() (*MakerInventoryRebalanceAudit, e
 			result.EnabledDecisions++
 		} else {
 			result.DisabledDecisions++
+		}
+		if makerInventoryRebalanceUsesLocalBook(decision.Action) {
+			if len(receiptDecisions) >= maxMakerInventoryRebalanceRows {
+				stateErr = fmt.Errorf("maker inventory rebalance audit exceeded %d receipt-dependent decisions", maxMakerInventoryRebalanceRows)
+				return
+			}
+			receiptDecisions = append(receiptDecisions, decision)
 		}
 		if !validMakerInventoryRebalanceDecision(decision) {
 			result.DecisionFieldMismatches++
@@ -289,7 +314,7 @@ func (r *Run) MeasureMakerInventoryRebalance() (*MakerInventoryRebalanceAudit, e
 		return nil, stateErr
 	}
 
-	receipts, receiptAudit, receiptErr := makerInventoryRebalanceReceiptsForKeys(r.Dir, expected)
+	receipts, receiptAudit, receiptErr := makerInventoryRebalanceReceiptsForDecisions(r.Dir, receiptDecisions)
 	if receiptErr != nil {
 		result.ReceiptEvidenceErrors++
 	} else {
@@ -298,10 +323,8 @@ func (r *Run) MeasureMakerInventoryRebalance() (*MakerInventoryRebalanceAudit, e
 			result.ReceiptEvidenceErrors++
 		}
 	}
-	for _, decision := range expected {
-		if makerInventoryRebalanceUsesLocalBook(decision.Action) {
-			makerInventoryRebalanceCheckReceipt(result, receipts, receiptErr, decision, addCheck)
-		}
+	for _, decision := range receiptDecisions {
+		makerInventoryRebalanceCheckReceipt(result, receipts, receiptErr, decision, addCheck)
 	}
 	if stateErr != nil {
 		return nil, stateErr
@@ -528,17 +551,50 @@ func (r *Run) MeasureMakerInventoryRebalance() (*MakerInventoryRebalanceAudit, e
 		return nil, stateErr
 	}
 
+	counterpartyRelations := make(map[makerInventoryRebalanceOrderKey]map[makerInventoryRebalanceTradeMatchKey]makerInventoryRebalanceCounterpartyRelation, len(trades))
+	for ownKey, ownTrades := range trades {
+		ownOrder := orders[ownKey]
+		relations := make(map[makerInventoryRebalanceTradeMatchKey]makerInventoryRebalanceCounterpartyRelation)
+		for _, trade := range ownTrades {
+			otherOrderID := trade.MakerOrderID
+			if otherOrderID == ownKey.orderID {
+				otherOrderID = trade.TakerOrderID
+			}
+			if otherOrderID == 0 || otherOrderID == ownKey.orderID {
+				continue
+			}
+			otherOrder, ok := orders[makerInventoryRebalanceOrderKey{venueID: ownKey.venueID, orderID: otherOrderID}]
+			if !ok {
+				continue
+			}
+			matchKey := makerInventoryRebalanceTradeKey(trade)
+			relation := relations[matchKey]
+			relation.external = true
+			relation.self = relation.self || otherOrder.ClientID == ownOrder.ClientID
+			relations[matchKey] = relation
+		}
+		if len(relations) > 0 {
+			counterpartyRelations[ownKey] = relations
+		}
+	}
+
 	for key, decision := range accepted {
 		order := orders[key]
 		orderFills := fills[key]
 		orderCancels := cancels[key]
-		evidenceByKey := make(map[makerInventoryRebalanceFillMatchKey][]bool)
+		evidenceByKey := make(map[makerInventoryRebalanceFillMatchKey]makerInventoryRebalanceEvidenceQueue)
 		for _, evidence := range fillEvidence[key] {
 			matchKey := makerInventoryRebalanceEvidenceKey(evidence)
-			evidenceByKey[matchKey] = append(evidenceByKey[matchKey], makerInventoryRebalanceReduces(evidence))
+			queue := evidenceByKey[matchKey]
+			queue.reduces = append(queue.reduces, makerInventoryRebalanceReduces(evidence))
+			evidenceByKey[matchKey] = queue
 		}
 		var filled int64
 		for _, fill := range orderFills {
+			if fill.Qty > math.MaxInt64-filled || fill.Qty > math.MaxInt64-result.FilledQty {
+				stateErr = fmt.Errorf("maker inventory rebalance fill quantity overflows int64")
+				return nil, stateErr
+			}
 			filled += fill.Qty
 			result.Fills++
 			result.FilledQty += fill.Qty
@@ -554,31 +610,32 @@ func (r *Run) MeasureMakerInventoryRebalance() (*MakerInventoryRebalanceAudit, e
 				result.FeeMismatches++
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "fee_formula_mismatch")
 			}
-			if !makerInventoryRebalanceHasExternalCounterparty(trades[key], orders, key, fill) {
+			relation := counterpartyRelations[key][makerInventoryRebalanceTradeKeyFromFill(fill)]
+			if !relation.external {
 				result.UnknownCounterparties++
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "missing_external_counterparty")
-			} else if makerInventoryRebalanceHasSelfCounterparty(trades[key], orders, key, fill, order.ClientID) {
+			} else if relation.self {
 				result.SelfFills++
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "self_fill")
 			}
 			matchKey := makerInventoryRebalanceFillKey(order.ClientID, fill)
-			candidates := evidenceByKey[matchKey]
-			if len(candidates) == 0 {
+			queue := evidenceByKey[matchKey]
+			if queue.next >= len(queue.reduces) {
 				result.MissingFillEvidence++
 				result.FillEvidenceMismatches++
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "missing_exact_fill_evidence")
 			} else {
-				last := len(candidates) - 1
-				reduces := candidates[last]
-				evidenceByKey[matchKey] = candidates[:last]
+				reduces := queue.reduces[queue.next]
+				queue.next++
+				evidenceByKey[matchKey] = queue
 				if !reduces {
 					result.NonReducingFills++
 					addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "fill_does_not_reduce_actor_inventory")
 				}
 			}
 		}
-		for _, candidates := range evidenceByKey {
-			for range candidates {
+		for _, queue := range evidenceByKey {
+			for range queue.reduces[queue.next:] {
 				result.UnexpectedFillEvidence++
 				result.FillEvidenceMismatches++
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "unexpected_fill_evidence")
@@ -837,10 +894,10 @@ func (r *Run) measureMakerInventoryRebalanceBuffered() (*MakerInventoryRebalance
 				result.FeeMismatches++
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "fee_formula_mismatch")
 			}
-			if !makerInventoryRebalanceHasExternalCounterparty(trades[key], orders, key, fill) {
+			if !makerInventoryRebalanceBufferedHasExternalCounterparty(trades[key], orders, key, fill) {
 				result.UnknownCounterparties++
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "missing_external_counterparty")
-			} else if makerInventoryRebalanceHasSelfCounterparty(trades[key], orders, key, fill, order.ClientID) {
+			} else if makerInventoryRebalanceBufferedHasSelfCounterparty(trades[key], orders, key, fill, order.ClientID) {
 				result.SelfFills++
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "self_fill")
 			}
@@ -975,7 +1032,7 @@ func makerInventoryRebalanceUsesLocalBook(action string) bool {
 	}
 }
 
-func makerInventoryRebalanceReceiptsForKeys(dir string, wanted map[makerInventoryRebalanceKey]makerInventoryRebalanceDecision) (map[makerInventoryRebalanceReceiptKey][]makerInventoryRebalanceReceipt, *MarketDataReceiptAudit, error) {
+func makerInventoryRebalanceReceiptsForDecisions(dir string, decisions []makerInventoryRebalanceDecision) (map[makerInventoryRebalanceReceiptKey][]makerInventoryRebalanceReceipt, *MarketDataReceiptAudit, error) {
 	audit, err := AuditMarketDataReceipts(dir)
 	if err != nil {
 		return nil, nil, err
@@ -996,8 +1053,8 @@ func makerInventoryRebalanceReceiptsForKeys(dir string, wanted map[makerInventor
 	for _, symbol := range manifest.Symbols {
 		symbols[symbol.ID] = symbol.Symbol
 	}
-	wantedReceipts := make(map[makerInventoryRebalanceReceiptKey]struct{}, len(wanted))
-	for _, decision := range wanted {
+	wantedReceipts := make(map[makerInventoryRebalanceReceiptKey]struct{}, len(decisions))
+	for _, decision := range decisions {
 		if makerInventoryRebalanceUsesLocalBook(decision.Action) {
 			wantedReceipts[makerInventoryRebalanceReceiptKey{venueID: decision.VenueID, clientID: decision.ClientID, symbol: decision.Symbol, sequence: decision.LastBookSequence, published: decision.LastBookSourceTime}] = struct{}{}
 		}
@@ -1224,7 +1281,22 @@ func makerInventoryRebalanceFee(qty, price, bps int64) (int64, bool) {
 	return value.Int64(), true
 }
 
-func makerInventoryRebalanceHasExternalCounterparty(trades []makerInventoryRebalanceTrade, orders map[makerInventoryRebalanceOrderKey]makerInventoryRebalanceOrder, own makerInventoryRebalanceOrderKey, fill makerInventoryRebalanceFill) bool {
+func makerInventoryRebalanceFillKey(clientID uint64, fill makerInventoryRebalanceFill) makerInventoryRebalanceFillMatchKey {
+	return makerInventoryRebalanceFillMatchKey{
+		clientID: clientID, symbol: fill.Symbol, side: fill.Side, qty: fill.Qty, price: fill.Price,
+		feeAmount: fill.FeeAmount, feeAsset: fill.FeeAsset, tradeID: fill.TradeID, timestamp: fill.Timestamp,
+	}
+}
+
+func makerInventoryRebalanceTradeKey(trade makerInventoryRebalanceTrade) makerInventoryRebalanceTradeMatchKey {
+	return makerInventoryRebalanceTradeMatchKey{tradeID: trade.TradeID, qty: trade.Qty, price: trade.Price}
+}
+
+func makerInventoryRebalanceTradeKeyFromFill(fill makerInventoryRebalanceFill) makerInventoryRebalanceTradeMatchKey {
+	return makerInventoryRebalanceTradeMatchKey{tradeID: fill.TradeID, qty: fill.Qty, price: fill.Price}
+}
+
+func makerInventoryRebalanceBufferedHasExternalCounterparty(trades []makerInventoryRebalanceTrade, orders map[makerInventoryRebalanceOrderKey]makerInventoryRebalanceOrder, own makerInventoryRebalanceOrderKey, fill makerInventoryRebalanceFill) bool {
 	for _, trade := range trades {
 		if trade.TradeID != fill.TradeID || trade.Qty != fill.Qty || trade.Price != fill.Price {
 			continue
@@ -1243,7 +1315,7 @@ func makerInventoryRebalanceHasExternalCounterparty(trades []makerInventoryRebal
 	return false
 }
 
-func makerInventoryRebalanceHasSelfCounterparty(trades []makerInventoryRebalanceTrade, orders map[makerInventoryRebalanceOrderKey]makerInventoryRebalanceOrder, own makerInventoryRebalanceOrderKey, fill makerInventoryRebalanceFill, clientID uint64) bool {
+func makerInventoryRebalanceBufferedHasSelfCounterparty(trades []makerInventoryRebalanceTrade, orders map[makerInventoryRebalanceOrderKey]makerInventoryRebalanceOrder, own makerInventoryRebalanceOrderKey, fill makerInventoryRebalanceFill, clientID uint64) bool {
 	for _, trade := range trades {
 		if trade.TradeID != fill.TradeID || trade.Qty != fill.Qty || trade.Price != fill.Price {
 			continue
@@ -1257,13 +1329,6 @@ func makerInventoryRebalanceHasSelfCounterparty(trades []makerInventoryRebalance
 		}
 	}
 	return false
-}
-
-func makerInventoryRebalanceFillKey(clientID uint64, fill makerInventoryRebalanceFill) makerInventoryRebalanceFillMatchKey {
-	return makerInventoryRebalanceFillMatchKey{
-		clientID: clientID, symbol: fill.Symbol, side: fill.Side, qty: fill.Qty, price: fill.Price,
-		feeAmount: fill.FeeAmount, feeAsset: fill.FeeAsset, tradeID: fill.TradeID, timestamp: fill.Timestamp,
-	}
 }
 
 func makerInventoryRebalanceEvidenceKey(evidence makerInventoryRebalanceFillEvidence) makerInventoryRebalanceFillMatchKey {
