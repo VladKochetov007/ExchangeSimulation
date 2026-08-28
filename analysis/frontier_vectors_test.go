@@ -1,6 +1,11 @@
 package analysis
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -10,6 +15,65 @@ import (
 )
 
 func TestDecisionFrontierVectorsStreamingMatchesBufferedOracle(t *testing.T) {
+	dir := writeFrontierVectorOracleFixture(t)
+
+	streaming, err := AuditDecisionFrontierVectors(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buffered, err := auditDecisionFrontierVectorsBuffered(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(streaming, buffered) {
+		t.Fatalf("streaming frontier audit differs from buffered oracle:\nstreaming=%+v\nbuffered=%+v", streaming, buffered)
+	}
+}
+
+func TestDecisionFrontierVectorsStreamingMatchesBufferedForNonsequentialReceipt(t *testing.T) {
+	dir := writeFrontierVectorOracleFixture(t)
+	receiptPath := filepath.Join(dir, "market-data-receipts-v2.bin")
+	receiptRaw, err := os.ReadFile(receiptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary.BigEndian.PutUint64(receiptRaw[68:76], 3)
+	if err := os.WriteFile(receiptPath, receiptRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	receiptDigest := sha256.Sum256(receiptRaw)
+	updateFixtureManifestDigest(t, filepath.Join(dir, "market-data-evidence-v2.json"), "receipts", hex.EncodeToString(receiptDigest[:]))
+
+	componentPath := filepath.Join(dir, "market-data-frontier-components-v1.bin")
+	componentRaw, err := os.ReadFile(componentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary.BigEndian.PutUint64(componentRaw[24:32], 3)
+	binary.BigEndian.PutUint64(componentRaw[32:40], 110)
+	componentDigest := sha256.Sum256(receiptRaw)
+	copy(componentRaw[40:56], componentDigest[:16])
+	if err := os.WriteFile(componentPath, componentRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	vectorDigest := sha256.Sum256(componentRaw)
+	updateFixtureManifestDigest(t, filepath.Join(dir, "market-data-frontier-vectors-v1.json"), "components", hex.EncodeToString(vectorDigest[:]))
+
+	streaming, err := AuditDecisionFrontierVectors(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buffered, err := auditDecisionFrontierVectorsBuffered(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(streaming, buffered) {
+		t.Fatalf("nonsequential streaming frontier audit differs from buffered oracle:\nstreaming=%+v\nbuffered=%+v", streaming, buffered)
+	}
+}
+
+func writeFrontierVectorOracleFixture(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
 	receipts, err := simulation.NewMarketDataReceiptRecorder(dir)
 	if err != nil {
@@ -44,16 +108,29 @@ func TestDecisionFrontierVectorsStreamingMatchesBufferedOracle(t *testing.T) {
 	if err := vectors.Finalize(filepath.Join(dir, "market-data-evidence-v2.json")); err != nil {
 		t.Fatal(err)
 	}
+	return dir
+}
 
-	streaming, err := AuditDecisionFrontierVectors(dir)
+func updateFixtureManifestDigest(t *testing.T, path, field, digest string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	buffered, err := auditDecisionFrontierVectorsBuffered(dir)
+	var manifest map[string]any
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	section, ok := manifest[field].(map[string]any)
+	if !ok {
+		t.Fatalf("manifest section %q missing", field)
+	}
+	section["digest"] = digest
+	encoded, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(streaming, buffered) {
-		t.Fatalf("streaming frontier audit differs from buffered oracle:\nstreaming=%+v\nbuffered=%+v", streaming, buffered)
+	if err := os.WriteFile(path, encoded, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
