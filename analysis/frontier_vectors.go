@@ -122,19 +122,24 @@ type frontierHistoryFile struct {
 	writer        *bufio.Writer
 	count         uint64
 	nonSequential bool
+	byOrdinal     map[uint64]auditedFrontier
 }
 
 type frontierHistoryStore struct {
-	dir       string
-	files     map[linkKey]*frontierHistoryFile
-	frontiers map[linkKey]auditedFrontier
+	dir               string
+	files             map[linkKey]*frontierHistoryFile
+	frontiers         map[linkKey]auditedFrontier
+	nonSequentialRows uint64
 }
 
 const (
-	maxFrontierVectorRecords   = 2_000_000
-	maxFrontierScalarRecords   = 5_000_000
-	maxFrontierHistoryRecords  = 100_000_000
-	frontierHistoryRecordBytes = 32
+	maxFrontierVectorRecords     = 2_000_000
+	maxFrontierScalarRecords     = 5_000_000
+	maxFrontierHistoryRecords    = 100_000_000
+	maxFrontierHistoryLinks      = 4_096
+	maxFrontierNonSequentialRows = 1_000_000
+	frontierHistoryRecordBytes   = 32
+	frontierHistoryWriterBytes   = 64 << 10
 )
 
 // AuditDecisionFrontierVectors checks a separately persisted vector artifact
@@ -311,7 +316,7 @@ func auditDecisionFrontierVectorsBuffered(dir string) (*DecisionFrontierVectorAu
 	return result, nil
 }
 
-func auditDecisionFrontierVectorsStreaming(dir string) (*DecisionFrontierVectorAudit, error) {
+func auditDecisionFrontierVectorsStreaming(dir string) (result *DecisionFrontierVectorAudit, err error) {
 	base, err := AuditMarketDataReceipts(dir)
 	if err != nil {
 		return nil, fmt.Errorf("audit base market-data evidence: %w", err)
@@ -383,7 +388,7 @@ func auditDecisionFrontierVectorsStreaming(dir string) (*DecisionFrontierVectorA
 		return nil, err
 	}
 	vectorRecords := make([]vectorDecisionRecord, 0, int(manifest.Decisions.Records))
-	result := &DecisionFrontierVectorAudit{
+	result = &DecisionFrontierVectorAudit{
 		BaseEvidenceValid:         base.Valid,
 		BaseManifestDigestMatches: manifest.BaseManifestDigest == hex.EncodeToString(baseManifestDigest[:]),
 		DecisionDigestMatches:     decisionsDigest,
@@ -478,7 +483,12 @@ func auditDecisionFrontierVectorsStreaming(dir string) (*DecisionFrontierVectorA
 	if err != nil {
 		return nil, err
 	}
-	defer history.close()
+	defer func() {
+		if closeErr := history.close(); closeErr != nil && err == nil {
+			result = nil
+			err = fmt.Errorf("close decision frontier history: %w", closeErr)
+		}
+	}()
 	for index, record := range vectorRecords {
 		if record.id != uint64(index+1) {
 			result.BadDecisionID++
@@ -606,11 +616,14 @@ func (s *frontierHistoryStore) fileFor(key linkKey) (*frontierHistoryFile, error
 	if stored, ok := s.files[key]; ok {
 		return stored, nil
 	}
+	if len(s.files) >= maxFrontierHistoryLinks {
+		return nil, fmt.Errorf("decision frontier history exceeds %d links", maxFrontierHistoryLinks)
+	}
 	file, err := os.Create(filepath.Join(s.dir, fmt.Sprintf("frontier-%d-%d.bin", key.clientID, key.linkID)))
 	if err != nil {
 		return nil, fmt.Errorf("create decision frontier history file: %w", err)
 	}
-	stored := &frontierHistoryFile{file: file, writer: bufio.NewWriterSize(file, 1<<20)}
+	stored := &frontierHistoryFile{file: file, writer: bufio.NewWriterSize(file, frontierHistoryWriterBytes)}
 	s.files[key] = stored
 	return stored, nil
 }
@@ -624,8 +637,23 @@ func (s *frontierHistoryStore) append(record observationRecord) error {
 	if stored.count == ^uint64(0) {
 		return fmt.Errorf("decision frontier history exceeds uint64 row count")
 	}
-	if record.ordinal != stored.count+1 {
+	if record.ordinal != stored.count+1 && !stored.nonSequential {
+		if s.nonSequentialRows+stored.count > maxFrontierNonSequentialRows {
+			return fmt.Errorf("nonsequential decision frontier history exceeds %d rows", maxFrontierNonSequentialRows)
+		}
+		if err := stored.writer.Flush(); err != nil {
+			return fmt.Errorf("flush nonsequential decision frontier history: %w", err)
+		}
+		stored.byOrdinal = make(map[uint64]auditedFrontier, stored.count)
+		for index := uint64(0); index < stored.count; index++ {
+			frontier, err := readFrontierHistoryRecord(stored.file, index)
+			if err != nil {
+				return err
+			}
+			stored.byOrdinal[frontier.ordinal] = frontier
+		}
 		stored.nonSequential = true
+		s.nonSequentialRows += stored.count
 	}
 	previous := s.frontiers[key]
 	chain := sha256.New()
@@ -642,6 +670,15 @@ func (s *frontierHistoryStore) append(record observationRecord) error {
 	if _, err := stored.writer.Write(raw[:]); err != nil {
 		return fmt.Errorf("spill decision frontier history: %w", err)
 	}
+	if stored.nonSequential {
+		if _, exists := stored.byOrdinal[frontier.ordinal]; !exists {
+			if s.nonSequentialRows >= maxFrontierNonSequentialRows {
+				return fmt.Errorf("nonsequential decision frontier history exceeds %d rows", maxFrontierNonSequentialRows)
+			}
+			s.nonSequentialRows++
+		}
+		stored.byOrdinal[frontier.ordinal] = frontier
+	}
 	stored.count++
 	return nil
 }
@@ -657,19 +694,37 @@ func (s *frontierHistoryStore) prepare() error {
 
 func (s *frontierHistoryStore) lookup(key vectorFrontierKey) (auditedFrontier, bool) {
 	stored, ok := s.files[linkKey{clientID: key.clientID, linkID: key.linkID}]
-	if !ok || key.ordinal == 0 || stored.nonSequential || key.ordinal > stored.count || key.ordinal-1 > uint64(^uint64(0)>>1)/frontierHistoryRecordBytes {
+	if !ok || key.ordinal == 0 || key.ordinal > stored.count || key.ordinal-1 > uint64(^uint64(0)>>1)/frontierHistoryRecordBytes {
 		return auditedFrontier{}, false
 	}
-	var raw [frontierHistoryRecordBytes]byte
-	offset := int64((key.ordinal - 1) * frontierHistoryRecordBytes)
-	read, err := stored.file.ReadAt(raw[:], offset)
-	if err != nil || read != len(raw) {
+	if stored.nonSequential {
+		frontier, exists := stored.byOrdinal[key.ordinal]
+		return frontier, exists
+	}
+	frontier, err := readFrontierHistoryRecord(stored.file, key.ordinal-1)
+	if err != nil {
 		return auditedFrontier{}, false
+	}
+	return frontier, frontier.ordinal == key.ordinal
+}
+
+func readFrontierHistoryRecord(file *os.File, index uint64) (auditedFrontier, error) {
+	if index > uint64(^uint64(0)>>1)/frontierHistoryRecordBytes {
+		return auditedFrontier{}, fmt.Errorf("decision frontier history offset overflows int64")
+	}
+	var raw [frontierHistoryRecordBytes]byte
+	offset := int64(index * frontierHistoryRecordBytes)
+	read, err := file.ReadAt(raw[:], offset)
+	if err != nil {
+		return auditedFrontier{}, fmt.Errorf("read decision frontier history record %d: %w", index, err)
+	}
+	if read != len(raw) {
+		return auditedFrontier{}, fmt.Errorf("short decision frontier history record %d", index)
 	}
 	var digest [16]byte
 	copy(digest[:], raw[16:32])
 	frontier := auditedFrontier{ordinal: binary.BigEndian.Uint64(raw[0:8]), deliveredAt: int64(binary.BigEndian.Uint64(raw[8:16])), digest: digest}
-	return frontier, frontier.ordinal == key.ordinal
+	return frontier, nil
 }
 
 func (s *frontierHistoryStore) close() error {
