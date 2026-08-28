@@ -5,8 +5,8 @@
 # it.
 set -euo pipefail
 
-if [[ $# -lt 1 || $# -gt 2 ]]; then
-	echo "usage: $0 dev-607|dev-613|dev-617|dev-607-none|dev-607-g8 [multivenue-binary]" >&2
+if [[ $# -lt 1 || $# -gt 3 ]]; then
+	echo "usage: $0 dev-607|dev-613|dev-617|dev-607-none|dev-607-g8 [multivenue-binary] [prunegate-binary]" >&2
 	exit 2
 fi
 cell=$1
@@ -31,16 +31,18 @@ case "$cell" in
 esac
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+source "$root_dir/scripts/v2-integrated-longrun-r4-contract.sh"
 config="$root_dir/research/configs/v2-integrated-longrun/$config_name"
-output_root=${V2_LONGRUN_OUTPUT_ROOT:-"$root_dir/research/artifacts/v2-integrated-longrun/candidate"}
+output_root=${V2_LONGRUN_OUTPUT_ROOT:-"$v2_r4_output_root"}
 output="$output_root/$cell"
 binary=${2:-"$root_dir/bin/multivenue"}
+prunegate_binary=${3:-"$root_dir/bin/prunegate"}
 sim_revision=${V2_LONGRUN_SIMULATOR_REVISION:-$(git -C "$root_dir" rev-parse HEAD)}
 horizon=24h
 head_revision=$(git -C "$root_dir" rev-parse HEAD)
 
-[[ -s "$config" && -x "$binary" ]] || {
-	echo "missing integrated long-run config or executable: $config / $binary" >&2
+[[ -s "$config" && -x "$binary" && -x "$prunegate_binary" ]] || {
+	echo "missing integrated long-run config or executable: $config / $binary / $prunegate_binary" >&2
 	exit 1
 }
 [[ "$sim_revision" =~ ^[0-9a-f]{40}$ ]] || {
@@ -49,6 +51,10 @@ head_revision=$(git -C "$root_dir" rev-parse HEAD)
 }
 [[ "$sim_revision" == "$head_revision" ]] || {
 	echo "simulator revision $sim_revision is not current repository HEAD $head_revision" >&2
+	exit 1
+}
+v2_r4_require_output_root "$output_root" || {
+	echo "refusing non-canonical or symlinked r4 evidence root: $output_root" >&2
 	exit 1
 }
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || {
@@ -79,6 +85,12 @@ binary_revision=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs
 binary_modified=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
 binary_trimpath=$(go version -m "$binary" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
 binary_cgo_enabled=$(go version -m "$binary" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
+binary_go_version=$(v2_r4_binary_go_version "$binary")
+prunegate_revision=$(go version -m "$prunegate_binary" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
+prunegate_modified=$(go version -m "$prunegate_binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
+prunegate_trimpath=$(go version -m "$prunegate_binary" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
+prunegate_cgo_enabled=$(go version -m "$prunegate_binary" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
+prunegate_go_version=$(v2_r4_binary_go_version "$prunegate_binary")
 [[ "$binary_revision" == "$sim_revision" ]] || {
 	echo "binary VCS revision $binary_revision does not match requested $sim_revision" >&2
 	exit 1
@@ -89,6 +101,19 @@ binary_cgo_enabled=$(go version -m "$binary" | awk '$1 == "build" && index($2, "
 }
 [[ "$binary_trimpath" == "true" && "$binary_cgo_enabled" == "0" ]] || {
 	echo "binary reproducibility settings are not enforced (-trimpath=$binary_trimpath CGO_ENABLED=$binary_cgo_enabled)" >&2
+	exit 1
+}
+v2_r4_is_go_127 "$binary_go_version" || {
+	echo "binary is not built with the pinned Go 1.27 toolchain (got $binary_go_version)" >&2
+	exit 1
+}
+[[ "$prunegate_revision" == "$sim_revision" && "$prunegate_modified" == "false" &&
+	"$prunegate_trimpath" == "true" && "$prunegate_cgo_enabled" == "0" ]] || {
+	echo "prunegate is not a clean reproducible build of current HEAD" >&2
+	exit 1
+}
+v2_r4_is_go_127 "$prunegate_go_version" || {
+	echo "prunegate is not built with the pinned Go 1.27 toolchain (got $prunegate_go_version)" >&2
 	exit 1
 }
 
@@ -115,7 +140,14 @@ jq -n \
 	--arg binary_sha256 "$binary_sha256" \
 	--arg git_revision "$sim_revision" \
 	--arg go_version "$(go version)" \
-	--arg binary_go_version "$(go version -m "$binary" | sed -n '1s/.*: //p')" \
+	--arg binary_go_version "$binary_go_version" \
+	--arg prunegate_path "$prunegate_binary" \
+	--arg prunegate_sha256 "$(sha256sum "$prunegate_binary" | awk '{print $1}')" \
+	--arg prunegate_vcs_revision "$prunegate_revision" \
+	--arg prunegate_vcs_modified "$prunegate_modified" \
+	--arg prunegate_trimpath "$prunegate_trimpath" \
+	--arg prunegate_cgo_enabled "$prunegate_cgo_enabled" \
+	--arg prunegate_go_version "$prunegate_go_version" \
 	--argjson gomaxprocs "$GOMAXPROCS" \
 	--arg output_dir "$output" \
 	--argjson holdout "$holdout" \
@@ -128,7 +160,7 @@ jq -n \
 	--arg config_hypothesis "$config_hypothesis" \
 	--arg config_experiment "$config_experiment" \
 	'{
-		  schema_version: 3, runner_contract: "v2-integrated-longrun-runner-v3",
+		  schema_version: 4, runner_contract: "v2-integrated-longrun-runner-v4",
 		  experiment_id: ("v2-integrated-longrun-" + $cell),
 		  config_experiment_id: $config_experiment,
 		  hypothesis_id: $config_hypothesis,
@@ -136,6 +168,11 @@ jq -n \
 		  simulated_horizon: $horizon, log_mode: $log_mode,
 		  config_sha256: $config_sha256, binary_sha256: $binary_sha256,
 		  config_path: $config_path, binary_path: $binary_path,
+		  prunegate_path: $prunegate_path, prunegate_sha256: $prunegate_sha256,
+		  prunegate_vcs_revision: $prunegate_vcs_revision,
+		  prunegate_vcs_modified: ($prunegate_vcs_modified == "true"),
+		  prunegate_trimpath: ($prunegate_trimpath == "true"),
+		  prunegate_cgo_enabled: $prunegate_cgo_enabled, prunegate_go_version: $prunegate_go_version,
 		  binary_vcs_revision: $binary_vcs_revision, binary_vcs_modified: ($binary_vcs_modified == "true"),
 		  binary_trimpath: ($binary_trimpath == "true"), binary_cgo_enabled: $binary_cgo_enabled,
 		  git_revision: $git_revision, go_version: $go_version, binary_go_version: $binary_go_version,

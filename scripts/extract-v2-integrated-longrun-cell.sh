@@ -9,10 +9,9 @@ if [[ $# -ne 1 ]]; then
 fi
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-cell=$(CDPATH= cd -- "$1" && pwd)
-cell_name=$(basename "$cell")
+source "$root_dir/scripts/v2-integrated-longrun-r4-contract.sh"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
-contract_version="v2-integrated-longrun-candidate-v3"
+contract_version="v2-integrated-longrun-candidate-v4"
 conservation_tolerance_fixed_units=1000
 
 fail() {
@@ -28,7 +27,13 @@ require_json_object() {
 	jq -e 'type == "object"' "$path" >/dev/null || fail "malformed JSON object: $path"
 }
 
+v2_r4_require_output_root "$v2_r4_output_root" || fail "r4 output root is not canonical"
+v2_r4_require_cell_path "$1" || fail "cell is outside the canonical r4 evidence root or is symlinked: $1"
+cell=$(realpath -e -- "$1")
+cell_name=$(basename "$cell")
 [[ -x "$analyzer" ]] || fail "missing analyzer: $analyzer"
+analyzer_go_version=$(v2_r4_binary_go_version "$analyzer")
+v2_r4_is_go_127 "$analyzer_go_version" || fail "analyzer is not built with the pinned Go 1.27 toolchain: $analyzer_go_version"
 case "$cell_name" in
 	dev-607|dev-613|dev-617) ;;
 	*) fail "extractor accepts only registered full development cells, got $cell_name" ;;
@@ -54,7 +59,7 @@ log_mode=$(jq -er '.log_mode' "$cell/run-config.json")
 [[ "$seed" == "$config_seed" ]] || fail "metadata/config seed mismatch"
 [[ "$log_mode" == full ]] || fail "development extraction requires full log mode"
 jq -e --arg cell "$cell_name" --argjson seed "$seed" --arg experiment "$config_experiment" \
-	'.schema_version == 3 and .runner_contract == "v2-integrated-longrun-runner-v3" and
+	'.schema_version == 4 and .runner_contract == "v2-integrated-longrun-runner-v4" and
 	 .cell == $cell and .seed == $seed and .holdout == false and
 	 .simulated_horizon == "24h" and .log_mode == "full" and
 	 (.gomaxprocs | type) == "number" and .gomaxprocs == 4 and
@@ -92,7 +97,23 @@ binary_revision=$(go version -m "$simulator_binary" | awk '$1 == "build" && inde
 binary_modified=$(go version -m "$simulator_binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
 binary_trimpath=$(go version -m "$simulator_binary" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
 binary_cgo_enabled=$(go version -m "$simulator_binary" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
-[[ "$binary_revision" == "$metadata_revision" && "$binary_modified" == false && "$binary_trimpath" == true && "$binary_cgo_enabled" == 0 ]] || fail "simulator binary provenance is not clean/current/reproducible"
+simulator_go_version=$(v2_r4_binary_go_version "$simulator_binary")
+v2_r4_is_go_127 "$simulator_go_version" || fail "simulator is not built with the pinned Go 1.27 toolchain: $simulator_go_version"
+declared_simulator_go_version=$(jq -er '.binary_go_version' "$cell/run-metadata.json")
+[[ "$binary_revision" == "$metadata_revision" && "$binary_modified" == false && "$binary_trimpath" == true && "$binary_cgo_enabled" == 0 && "$declared_simulator_go_version" == "$simulator_go_version" ]] || fail "simulator binary provenance is not clean/current/reproducible"
+prunegate_binary=$(jq -er '.prunegate_path' "$cell/run-metadata.json")
+require_file "$prunegate_binary"
+[[ -x "$prunegate_binary" ]] || fail "recorded prunegate binary is not executable"
+prunegate_sha256=$(sha256sum "$prunegate_binary" | awk '{print $1}')
+prunegate_revision=$(go version -m "$prunegate_binary" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
+prunegate_modified=$(go version -m "$prunegate_binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
+prunegate_trimpath=$(go version -m "$prunegate_binary" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
+prunegate_cgo_enabled=$(go version -m "$prunegate_binary" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
+prunegate_go_version=$(v2_r4_binary_go_version "$prunegate_binary")
+v2_r4_is_go_127 "$prunegate_go_version" || fail "prunegate is not built with the pinned Go 1.27 toolchain: $prunegate_go_version"
+[[ "$prunegate_sha256" == "$(jq -er '.prunegate_sha256' "$cell/run-metadata.json")" &&
+	"$prunegate_revision" == "$metadata_revision" && "$prunegate_modified" == false &&
+	"$prunegate_trimpath" == true && "$prunegate_cgo_enabled" == 0 ]] || fail "prunegate provenance is not clean/current/reproducible"
 
 config_sha256=$(sha256sum "$cell/run-config.json" | awk '{print $1}')
 [[ "$config_sha256" == "$(jq -er '.config_sha256' "$cell/run-metadata.json")" ]] || fail "run config hash changed"
@@ -282,7 +303,7 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 			frontier_vectors: (r($frontiers).valid == true and r($frontiers).base_evidence_valid == true and r($frontiers).base_manifest_digest_matches == true and r($frontiers).decision_digest_matches == true and r($frontiers).component_digest_matches == true and count($frontiers; "decisions") > 0 and count($frontiers; "components") > 0 and field_zeroes($frontiers; ["bad_decision_id", "bad_decision_fields", "missing_scalar_decision", "missing_vector_decision", "duplicate_vector_decision", "unknown_component_link", "bad_component_ordinal", "duplicate_component", "bad_component_frontier", "future_component_use", "missing_decision_components", "extra_decision_components", "nonzero_reserved"])),
 			mechanical: (count($mechanical; "orders") > 0 and zero($mechanical; "drift.mismatches")),
 			conservation: (count($conservation; "flows") > 0 and count($conservation; "delta_consistency.checked") > 0 and zero($conservation; "delta_consistency.mismatched") and zero($conservation; "delta_consistency.chain_broken") and zero($conservation; "delta_consistency.decode_failures") and residuals_within(r($conservation).identities) and residuals_within(r($conservation).venue_identities)),
-			position_rounding: (r($conservation).position_rounding.valid == true and field_zeroes($conservation; ["position_rounding.invalid", "position_rounding.remainder_out_of_range", "position_rounding.duplicate_terminal_keys", "position_rounding.balance_link_failures", "position_rounding.venue_link_failures", "position_rounding.asset_wallet_failures", "position_rounding.venue_bucket_failures"])),
+			position_rounding: (r($conservation).position_rounding.valid == true and count($conservation; "position_rounding.events") > 0 and field_zeroes($conservation; ["position_rounding.invalid", "position_rounding.remainder_out_of_range", "position_rounding.duplicate_terminal_keys", "position_rounding.balance_link_failures", "position_rounding.venue_link_failures", "position_rounding.asset_wallet_failures", "position_rounding.venue_bucket_failures"])),
 			positions: (count($positions; "contracts") > 0 and zero($positions; "non_zero_net_contracts") and zero($positions; "disagreement") and zero($positions; "unrepresentable_open_values")),
 			fill_positions: (zero($fillpositions; "missing_position_update") and zero($fillpositions; "unexpected_position_update") and zero($fillpositions; "position_chain_failures")),
 			order_lifecycle: field_zeroes($orderlifecycle; ["unknown_fills", "unknown_cancellations", "duplicate_acceptances", "duplicate_terminals", "fills_after_terminal", "fill_quantity_mismatches", "cancel_quantity_mismatches", "client_mismatches", "unlinked_fills", "missing_immediate_terminal"]),
@@ -347,8 +368,6 @@ analyzer_modified=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, 
 analyzer_sha256=$(sha256sum "$analyzer" | awk '{print $1}')
 analyzer_trimpath=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
 analyzer_cgo_enabled=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
-analyzer_go_version=$(go version -m "$analyzer" | sed -n '1s/.*: //p')
-simulator_go_version=$(jq -er '.binary_go_version' "$cell/run-metadata.json")
 [[ "$analyzer_revision" == "$head_revision" && "$analyzer_modified" == false && "$analyzer_trimpath" == true && "$analyzer_cgo_enabled" == 0 ]] || fail "analyzer is not a clean reproducible build of current HEAD"
 
 required_json=$(printf '%s\n' "${required[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
@@ -378,6 +397,11 @@ jq -n \
 	--argjson simulator_trimpath true \
 	--arg simulator_cgo_enabled "$binary_cgo_enabled" \
 	--arg simulator_go_version "$simulator_go_version" \
+	--arg prunegate_revision "$prunegate_revision" \
+	--arg prunegate_sha256 "$prunegate_sha256" \
+	--argjson prunegate_trimpath true \
+	--arg prunegate_cgo_enabled "$prunegate_cgo_enabled" \
+	--arg prunegate_go_version "$prunegate_go_version" \
 	--arg config_sha256 "$config_sha256" \
 	'{schema_version: 2, cell: $cell, seed: $seed,
 		analysis_revision: $analysis_revision, analyzer_revision: $analyzer_revision,
@@ -387,6 +411,9 @@ jq -n \
 		simulator_revision: $simulator_revision, simulator_sha256: $simulator_sha256,
 		simulator_trimpath: $simulator_trimpath, simulator_cgo_enabled: $simulator_cgo_enabled,
 		simulator_go_version: $simulator_go_version,
+		prunegate_revision: $prunegate_revision, prunegate_sha256: $prunegate_sha256,
+		prunegate_trimpath: $prunegate_trimpath, prunegate_cgo_enabled: $prunegate_cgo_enabled,
+		prunegate_go_version: $prunegate_go_version,
 		config_sha256: $config_sha256, analysis_contract: $contract,
 		integrity_contract: $contract, activation_contract: $contract,
 		completion_sentinels: ["greeks.json", "latency.json"], required_artifacts: $required_artifacts,

@@ -4,7 +4,8 @@
 set -euo pipefail
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-output_root=${1:-"$root_dir/research/artifacts/v2-integrated-longrun/candidate"}
+source "$root_dir/scripts/v2-integrated-longrun-r4-contract.sh"
+output_root=${1:-"$v2_r4_output_root"}
 attestation="$output_root/parity-attestation.json"
 
 fail() {
@@ -17,10 +18,15 @@ require_file() {
 require_object() {
 	jq -e 'type == "object"' "$1" >/dev/null || fail "malformed parity JSON: $1"
 }
+v2_r4_require_output_root "$output_root" || fail "parity root is not the canonical r4 evidence root"
 [[ ! -e "$attestation" ]] || fail "refusing to overwrite parity attestation: $attestation"
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "parity requires a clean gate worktree"
 
 "$root_dir/scripts/check-v2-integrated-longrun-configs.sh" >/dev/null
+for cell in dev-607 dev-607-none dev-607-g8; do
+	cell_dir="$output_root/$cell"
+	v2_r4_require_cell_path "$cell_dir" || fail "parity cell is outside the canonical r4 root or is symlinked: $cell"
+done
 cmp -s "$root_dir/research/configs/v2-integrated-longrun/dev-607.json" \
 	"$output_root/dev-607/run-config.json" || fail "seed-607 full config differs from registry"
 cmp -s "$root_dir/research/configs/v2-integrated-longrun/dev-607-none.json" \
@@ -39,36 +45,46 @@ for cell in dev-607 dev-607-none dev-607-g8; do
 	done
 done
 
-jq -e '.schema_version == 3 and .runner_contract == "v2-integrated-longrun-runner-v3" and
+jq -e '.schema_version == 4 and .runner_contract == "v2-integrated-longrun-runner-v4" and
 	.cell == "dev-607" and .seed == 607 and .holdout == false and
 	.log_mode == "full" and .gomaxprocs == 4 and
 	.hypothesis_id == "V2-INTEGRATED-LONG-CANDIDATE" and
 	.binary_vcs_modified == false and .binary_trimpath == true and
 	.binary_cgo_enabled == "0" and
+	(.binary_go_version | startswith("go1.27")) and
 	(.git_revision | test("^[0-9a-f]{40}$")) and
 	(.config_sha256 | test("^[0-9a-f]{64}$")) and
 	(.binary_sha256 | test("^[0-9a-f]{64}$"))' \
 	"$output_root/dev-607/run-metadata.json" >/dev/null || fail "invalid seed-607 g4 metadata"
-jq -e '.schema_version == 3 and .runner_contract == "v2-integrated-longrun-runner-v3" and
+jq -e '.schema_version == 4 and .runner_contract == "v2-integrated-longrun-runner-v4" and
 	.cell == "dev-607-none" and .seed == 607 and .holdout == false and
 	.log_mode == "none" and .gomaxprocs == 4 and
 	.hypothesis_id == "V2-INTEGRATED-LONG-CANDIDATE-PARITY" and
 	.binary_vcs_modified == false and .binary_trimpath == true and
 	.binary_cgo_enabled == "0" and
+	(.binary_go_version | startswith("go1.27")) and
 	(.git_revision | test("^[0-9a-f]{40}$")) and
 	(.config_sha256 | test("^[0-9a-f]{64}$")) and
 	(.binary_sha256 | test("^[0-9a-f]{64}$"))' \
 	"$output_root/dev-607-none/run-metadata.json" >/dev/null || fail "invalid seed-607 no-log metadata"
-jq -e '.schema_version == 3 and .runner_contract == "v2-integrated-longrun-runner-v3" and
+jq -e '.schema_version == 4 and .runner_contract == "v2-integrated-longrun-runner-v4" and
 	.cell == "dev-607-g8" and .seed == 607 and .holdout == false and
 	.log_mode == "full" and .gomaxprocs == 8 and
 	.hypothesis_id == "V2-INTEGRATED-LONG-CANDIDATE" and
 	.binary_vcs_modified == false and .binary_trimpath == true and
 	.binary_cgo_enabled == "0" and
+	(.binary_go_version | startswith("go1.27")) and
 	(.git_revision | test("^[0-9a-f]{40}$")) and
 	(.config_sha256 | test("^[0-9a-f]{64}$")) and
 	(.binary_sha256 | test("^[0-9a-f]{64}$"))' \
 	"$output_root/dev-607-g8/run-metadata.json" >/dev/null || fail "invalid seed-607 g8 metadata"
+for cell in dev-607 dev-607-none dev-607-g8; do
+	jq -e '(.prunegate_vcs_revision | test("^[0-9a-f]{40}$")) and
+		.prunegate_vcs_modified == false and .prunegate_trimpath == true and
+		.prunegate_cgo_enabled == "0" and (.prunegate_go_version | startswith("go1.27")) and
+		(.prunegate_sha256 | test("^[0-9a-f]{64}$"))' \
+		"$output_root/$cell/run-metadata.json" >/dev/null || fail "invalid prunegate metadata: $cell"
+done
 
 for cell in dev-607 dev-607-none dev-607-g8; do
 	jq -e '.exit_status == 0 and .completion_verified == true and
@@ -110,12 +126,19 @@ source_revision=$(jq -er '.git_revision' "$output_root/dev-607/run-metadata.json
 [[ "$source_revision" =~ ^[0-9a-f]{40}$ ]] || fail "parity simulator source revision is invalid"
 binary_sha256=$(jq -er '.binary_sha256' "$output_root/dev-607/run-metadata.json")
 binary_go_version=$(jq -er '.binary_go_version' "$output_root/dev-607/run-metadata.json")
+prunegate_sha256=$(jq -er '.prunegate_sha256' "$output_root/dev-607/run-metadata.json")
+prunegate_go_version=$(jq -er '.prunegate_go_version' "$output_root/dev-607/run-metadata.json")
+prunegate_revision=$(jq -er '.prunegate_vcs_revision' "$output_root/dev-607/run-metadata.json")
 for cell in dev-607 dev-607-none dev-607-g8; do
 	jq -e --arg revision "$source_revision" \
 		--arg binary_sha256 "$binary_sha256" --arg binary_go_version "$binary_go_version" \
+		--arg prunegate_sha256 "$prunegate_sha256" --arg prunegate_go_version "$prunegate_go_version" \
+		--arg prunegate_revision "$prunegate_revision" \
 		'.git_revision == $revision and .binary_vcs_modified == false and .binary_vcs_revision == $revision and
-			 .binary_sha256 == $binary_sha256 and .binary_go_version == $binary_go_version and
-			 .binary_trimpath == true and .binary_cgo_enabled == "0"' \
+				 .binary_sha256 == $binary_sha256 and .binary_go_version == $binary_go_version and
+				 .binary_trimpath == true and .binary_cgo_enabled == "0" and
+				 .prunegate_sha256 == $prunegate_sha256 and .prunegate_go_version == $prunegate_go_version and
+				 .prunegate_vcs_revision == $prunegate_revision' \
 		"$output_root/$cell/run-metadata.json" >/dev/null || fail "parity source identity differs: $cell"
 	jq -e --arg revision "$source_revision" \
 		'.build.revision == $revision and .build.modified == false' \
@@ -125,8 +148,13 @@ done
 mkdir -p "$output_root"
 tmp=$(mktemp "$attestation.tmp-XXXXXX")
 jq -n \
-	--arg contract "v2-integrated-longrun-parity-v1" \
+	--arg contract "v2-integrated-longrun-parity-v2" \
 	--arg source_revision "$source_revision" \
+	--arg simulator_binary_sha256 "$binary_sha256" \
+	--arg simulator_binary_go_version "$binary_go_version" \
+	--arg prunegate_sha256 "$prunegate_sha256" \
+	--arg prunegate_go_version "$prunegate_go_version" \
+	--arg prunegate_revision "$prunegate_revision" \
 	--arg full_g4_checkpoints "$(sha256sum "$output_root/dev-607/checkpoints.jsonl" | awk '{print $1}')" \
 	--arg none_g4_checkpoints "$(sha256sum "$output_root/dev-607-none/checkpoints.jsonl" | awk '{print $1}')" \
 	--arg full_g8_checkpoints "$(sha256sum "$output_root/dev-607-g8/checkpoints.jsonl" | awk '{print $1}')" \
@@ -137,7 +165,11 @@ jq -n \
 	--arg evidence_digest "$full_runtime_digest" \
 	'{
 		schema_version: 1, contract: $contract, seed: 607, horizon: "24h",
-		source_revision: $source_revision, simulator_revision: $source_revision, controls: [
+		source_revision: $source_revision, simulator_revision: $source_revision,
+		simulator_binary_sha256: $simulator_binary_sha256,
+		simulator_binary_go_version: $simulator_binary_go_version,
+		prunegate_sha256: $prunegate_sha256, prunegate_go_version: $prunegate_go_version,
+		prunegate_revision: $prunegate_revision, controls: [
 			{cell: "dev-607", log_mode: "full", gomaxprocs: 4},
 			{cell: "dev-607-none", log_mode: "none", gomaxprocs: 4},
 			{cell: "dev-607-g8", log_mode: "full", gomaxprocs: 8}
@@ -163,6 +195,11 @@ jq -n \
 	}' >"$tmp"
 mv "$tmp" "$attestation"
 require_object "$attestation"
-jq -e '(.predicates | keys) == ["deterministic_sidecars_equal", "full_evidence_equal", "no_log_evidence_absent", "ordered_checkpoints_equal", "source_and_build_identity_equal"] and
+jq -e '(.simulator_binary_sha256 | test("^[0-9a-f]{64}$")) and
+	(.simulator_binary_go_version | startswith("go1.27")) and
+	(.prunegate_sha256 | test("^[0-9a-f]{64}$")) and
+	(.prunegate_go_version | startswith("go1.27")) and
+	(.prunegate_revision | test("^[0-9a-f]{40}$")) and
+	(.predicates | keys) == ["deterministic_sidecars_equal", "full_evidence_equal", "no_log_evidence_absent", "ordered_checkpoints_equal", "source_and_build_identity_equal"] and
 	all(.predicates | to_entries[]; .value == true)' "$attestation" >/dev/null || fail "parity attestation self-check failed"
 printf 'integrated long-run parity verified: %s\n' "$attestation"

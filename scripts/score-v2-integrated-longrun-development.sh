@@ -5,10 +5,11 @@
 set -euo pipefail
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-output_root=${1:-"$root_dir/research/artifacts/v2-integrated-longrun/candidate"}
+source "$root_dir/scripts/v2-integrated-longrun-r4-contract.sh"
+output_root=${1:-"$v2_r4_output_root"}
 score="$output_root/development-score.json"
 parity="$output_root/parity-attestation.json"
-contract_version="v2-integrated-longrun-scorer-v2"
+contract_version="v2-integrated-longrun-scorer-v3"
 
 fail() {
 	printf 'integrated long-run scorer failure: %s\n' "$*" >&2
@@ -20,12 +21,18 @@ require_file() {
 require_object() {
 	jq -e 'type == "object"' "$1" >/dev/null || fail "malformed scorer JSON: $1"
 }
+v2_r4_require_output_root "$output_root" || fail "scorer root is not the canonical r4 evidence root"
 [[ ! -e "$score" ]] || fail "refusing to overwrite precommitted score: $score"
 "$root_dir/scripts/check-v2-integrated-longrun-configs.sh" >/dev/null
 "$root_dir/scripts/check-v2-integrated-longrun-parity.sh" "$output_root" >/dev/null
 require_file "$parity"
 require_object "$parity"
-jq -e '.contract == "v2-integrated-longrun-parity-v1" and
+jq -e '.contract == "v2-integrated-longrun-parity-v2" and
+	(.simulator_binary_sha256 | test("^[0-9a-f]{64}$")) and
+	(.simulator_binary_go_version | startswith("go1.27")) and
+	(.prunegate_sha256 | test("^[0-9a-f]{64}$")) and
+	(.prunegate_go_version | startswith("go1.27")) and
+	(.prunegate_revision | test("^[0-9a-f]{40}$")) and
 	(.predicates | keys) == ["deterministic_sidecars_equal", "full_evidence_equal", "no_log_evidence_absent", "ordered_checkpoints_equal", "source_and_build_identity_equal"] and
 	all(.predicates | to_entries[]; .value == true)' "$parity" >/dev/null || fail "invalid parity attestation"
 
@@ -43,6 +50,7 @@ required_json=$(printf '%s\n' "${required[@]}" | jq -Rsc 'split("\n") | map(sele
 cell_records=()
 for cell in dev-607 dev-613 dev-617; do
 	cell_dir="$output_root/$cell"
+	v2_r4_require_cell_path "$cell_dir" || fail "scorer cell is outside the canonical r4 root or is symlinked: $cell"
 	for file in analysis-metadata.json integrity.json activation.json; do
 		require_file "$cell_dir/$file"
 	done
@@ -51,11 +59,15 @@ for cell in dev-607 dev-613 dev-617; do
 	require_object "$cell_dir/activation.json"
 	jq -e --arg cell "$cell" --argjson required_artifacts "$required_json" \
 		'.cell == $cell and .seed == (.cell | split("-")[-1] | tonumber) and
-		.analysis_contract == "v2-integrated-longrun-candidate-v3" and
-		.integrity_contract == "v2-integrated-longrun-candidate-v3" and
-		.activation_contract == "v2-integrated-longrun-candidate-v3" and
+		.analysis_contract == "v2-integrated-longrun-candidate-v4" and
+		.integrity_contract == "v2-integrated-longrun-candidate-v4" and
+		.activation_contract == "v2-integrated-longrun-candidate-v4" and
 		.analyzer_trimpath == true and .analyzer_cgo_enabled == "0" and
 		.simulator_trimpath == true and .simulator_cgo_enabled == "0" and
+		(.analyzer_go_version | startswith("go1.27")) and (.simulator_go_version | startswith("go1.27")) and
+		(.prunegate_revision | test("^[0-9a-f]{40}$")) and (.prunegate_sha256 | test("^[0-9a-f]{64}$")) and
+		.prunegate_trimpath == true and .prunegate_cgo_enabled == "0" and
+		(.prunegate_go_version | startswith("go1.27")) and
 		(.analyzer_go_version | type) == "string" and (.simulator_go_version | type) == "string" and
 		.analyzer_vcs_modified == false and .required_artifacts == $required_artifacts and
 		(.artifact_sha256 | keys) == ($required_artifacts | sort) and
@@ -68,10 +80,10 @@ for cell in dev-607 dev-613 dev-617; do
 		declared_sha256=$(jq -er --arg artifact "$artifact" '.artifact_sha256[$artifact]' "$cell_dir/analysis-metadata.json")
 		[[ "$actual_sha256" == "$declared_sha256" ]] || fail "artifact hash mismatch: $cell/$artifact"
 	done
-	jq -e '.schema_version == 1 and .contract == "v2-integrated-longrun-candidate-v3" and
+	jq -e '.schema_version == 1 and .contract == "v2-integrated-longrun-candidate-v4" and
 		(.predicates | keys) == ["activation", "conservation", "derivatives", "expiry", "exposure", "fill_positions", "frontier_vectors", "hedging", "late_path", "liability_hedger", "liquidations", "maker_quote_size", "maker_rebalance", "maker_refresh", "margin", "mechanical", "observation_receipts", "option_liability", "option_surface", "option_value_taker", "order_lifecycle", "position_rounding", "positions", "post_only", "settlement", "vanna_volga"] and
 		all(.predicates | to_entries[]; .value == true)' "$cell_dir/integrity.json" >/dev/null || fail "integrity predicate failed: $cell"
-	jq -e '.schema_version == 1 and .result.contract == "v2-integrated-longrun-candidate-v3" and
+	jq -e '.schema_version == 1 and .result.contract == "v2-integrated-longrun-candidate-v4" and
 		(.result.predicates | length) == 2 and
 		(.result.predicates | keys) == ["cdf_collateral_borrowing_observed", "zero_price_unavailable_order_rejections"] and
 		all(.result.predicates | to_entries[]; .value == true)' "$cell_dir/activation.json" >/dev/null || fail "activation predicate failed: $cell"
@@ -95,16 +107,32 @@ simulator_cgo_enabled=$(jq -er '.simulator_cgo_enabled' "$output_root/dev-607/an
 simulator_go_version=$(jq -er '.simulator_go_version' "$output_root/dev-607/analysis-metadata.json")
 parity_source_revision=$(jq -er '.source_revision' "$parity")
 [[ "$parity_source_revision" == "$simulator_revision" ]] || fail "parity simulator revision differs from development simulator revision"
+parity_simulator_sha256=$(jq -er '.simulator_binary_sha256' "$parity")
+parity_simulator_go_version=$(jq -er '.simulator_binary_go_version' "$parity")
+[[ "$parity_simulator_sha256" == "$simulator_sha256" ]] || fail "parity simulator binary differs from development simulator binary"
+[[ "$parity_simulator_go_version" == "$simulator_go_version" ]] || fail "parity simulator Go toolchain differs from development simulator"
+prunegate_revision=$(jq -er '.prunegate_revision' "$output_root/dev-607/analysis-metadata.json")
+prunegate_sha256=$(jq -er '.prunegate_sha256' "$output_root/dev-607/analysis-metadata.json")
+prunegate_go_version=$(jq -er '.prunegate_go_version' "$output_root/dev-607/analysis-metadata.json")
+parity_prunegate_revision=$(jq -er '.prunegate_revision' "$parity")
+parity_prunegate_sha256=$(jq -er '.prunegate_sha256' "$parity")
+parity_prunegate_go_version=$(jq -er '.prunegate_go_version' "$parity")
+[[ "$parity_prunegate_revision" == "$prunegate_revision" ]] || fail "parity prunegate revision differs from development provenance"
+[[ "$parity_prunegate_sha256" == "$prunegate_sha256" ]] || fail "parity prunegate binary differs from development provenance"
+[[ "$parity_prunegate_go_version" == "$prunegate_go_version" ]] || fail "parity prunegate Go toolchain differs from development provenance"
 for cell in dev-607 dev-613 dev-617; do
 	jq -e --arg source_revision "$source_revision" --arg analyzer_revision "$analyzer_revision" \
 		--arg simulator_revision "$simulator_revision" --arg analyzer_sha256 "$analyzer_sha256" \
 		--arg simulator_sha256 "$simulator_sha256" --argjson analyzer_trimpath "$analyzer_trimpath" \
 		--arg analyzer_cgo_enabled "$analyzer_cgo_enabled" --arg analyzer_go_version "$analyzer_go_version" \
 		--argjson simulator_trimpath "$simulator_trimpath" --arg simulator_cgo_enabled "$simulator_cgo_enabled" \
-		--arg simulator_go_version "$simulator_go_version" \
+		--arg simulator_go_version "$simulator_go_version" --arg prunegate_revision "$prunegate_revision" \
+		--arg prunegate_sha256 "$prunegate_sha256" --arg prunegate_go_version "$prunegate_go_version" \
 		'.analysis_revision == $source_revision and .analyzer_revision == $analyzer_revision and
 		.simulator_revision == $simulator_revision and .analyzer_sha256 == $analyzer_sha256 and
 		.simulator_sha256 == $simulator_sha256 and .analyzer_vcs_modified == false and
+		.prunegate_revision == $prunegate_revision and .prunegate_sha256 == $prunegate_sha256 and
+		.prunegate_go_version == $prunegate_go_version and
 		.analyzer_trimpath == $analyzer_trimpath and .analyzer_cgo_enabled == $analyzer_cgo_enabled and
 		.analyzer_go_version == $analyzer_go_version and .simulator_trimpath == $simulator_trimpath and
 		.simulator_cgo_enabled == $simulator_cgo_enabled and .simulator_go_version == $simulator_go_version' \
@@ -145,6 +173,8 @@ jq -n \
 	--argjson analyzer_trimpath "$analyzer_trimpath" --arg analyzer_cgo_enabled "$analyzer_cgo_enabled" \
 	--arg analyzer_go_version "$analyzer_go_version" --argjson simulator_trimpath "$simulator_trimpath" \
 	--arg simulator_cgo_enabled "$simulator_cgo_enabled" --arg simulator_go_version "$simulator_go_version" \
+	--arg prunegate_revision "$prunegate_revision" --arg prunegate_sha256 "$prunegate_sha256" \
+	--arg prunegate_go_version "$prunegate_go_version" \
 	--arg parity_sha256 "$parity_sha256" \
 	--argjson cells "$cells_json" \
 	--slurpfile parity_report "$parity" \
@@ -153,20 +183,33 @@ jq -n \
 		schema_version: 1, contract: $contract,
 		status: (if (all_true([$cells[].integrity]) and all_true([$cells[].activation]) and
 			all($parity_report[0].predicates | to_entries[]; .value == true) and
-			$parity_report[0].source_revision == $simulator_revision) then "QUALIFIED" else "BLOCKED" end),
+			$parity_report[0].source_revision == $simulator_revision and
+			$parity_report[0].simulator_binary_sha256 == $simulator_sha256 and
+			$parity_report[0].simulator_binary_go_version == $simulator_go_version and
+			$parity_report[0].prunegate_revision == $prunegate_revision and
+			$parity_report[0].prunegate_sha256 == $prunegate_sha256 and
+			$parity_report[0].prunegate_go_version == $prunegate_go_version) then "QUALIFIED" else "BLOCKED" end),
 		claim_scope: "integrated deterministic/evidence/lifecycle candidate gate only; no market realism claim",
 		source_revision: $source_revision, analyzer_revision: $analyzer_revision,
 		analyzer_sha256: $analyzer_sha256, simulator_revision: $simulator_revision,
 		simulator_sha256: $simulator_sha256, analyzer_trimpath: $analyzer_trimpath,
 		analyzer_cgo_enabled: $analyzer_cgo_enabled, analyzer_go_version: $analyzer_go_version,
 		simulator_trimpath: $simulator_trimpath, simulator_cgo_enabled: $simulator_cgo_enabled,
-		simulator_go_version: $simulator_go_version, parity_attestation_sha256: $parity_sha256,
+		simulator_go_version: $simulator_go_version, prunegate_revision: $prunegate_revision,
+		prunegate_sha256: $prunegate_sha256, prunegate_go_version: $prunegate_go_version,
+		parity_attestation_sha256: $parity_sha256,
 		development_seeds: [607, 613, 617], reserved_holdout_seeds: [619, 631, 641],
 		holdout_status: "RESERVED_AND_NOT_READ_BY_DEVELOPMENT_SCORER",
 		predicates: {
 			all_development_integrity: all_true([$cells[].integrity]),
 			all_development_activation: all_true([$cells[].activation]),
-			parity_attested: (all($parity_report[0].predicates | to_entries[]; .value == true) and $parity_report[0].source_revision == $simulator_revision),
+			parity_attested: (all($parity_report[0].predicates | to_entries[]; .value == true) and
+				$parity_report[0].source_revision == $simulator_revision and
+				$parity_report[0].simulator_binary_sha256 == $simulator_sha256 and
+				$parity_report[0].simulator_binary_go_version == $simulator_go_version and
+				$parity_report[0].prunegate_revision == $prunegate_revision and
+				$parity_report[0].prunegate_sha256 == $prunegate_sha256 and
+				$parity_report[0].prunegate_go_version == $prunegate_go_version),
 			provenance_consistent: (($cells | map(.source_revision) | unique | length) == 1 and
 				($cells | map(.analyzer_revision) | unique | length) == 1 and
 				($cells | map(.simulator_revision) | unique | length) == 1),
