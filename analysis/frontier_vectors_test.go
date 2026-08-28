@@ -51,7 +51,11 @@ func TestDecisionFrontierVectorsStreamingMatchesBufferedForNonsequentialReceipt(
 	}
 	binary.BigEndian.PutUint64(componentRaw[24:32], 3)
 	binary.BigEndian.PutUint64(componentRaw[32:40], 110)
-	componentDigest := sha256.Sum256(receiptRaw)
+	chain := sha256.New()
+	var initialFrontierDigest [16]byte
+	_, _ = chain.Write(initialFrontierDigest[:])
+	_, _ = chain.Write(receiptRaw)
+	componentDigest := chain.Sum(nil)
 	copy(componentRaw[40:56], componentDigest[:16])
 	if err := os.WriteFile(componentPath, componentRaw, 0o644); err != nil {
 		t.Fatal(err)
@@ -69,6 +73,9 @@ func TestDecisionFrontierVectorsStreamingMatchesBufferedForNonsequentialReceipt(
 	}
 	if !reflect.DeepEqual(streaming, buffered) {
 		t.Fatalf("nonsequential streaming frontier audit differs from buffered oracle:\nstreaming=%+v\nbuffered=%+v", streaming, buffered)
+	}
+	if streaming.BadComponentFrontier != 0 {
+		t.Fatalf("nonsequential actual ordinal was not resolved: %+v", streaming)
 	}
 }
 

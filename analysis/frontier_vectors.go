@@ -694,14 +694,14 @@ func (s *frontierHistoryStore) prepare() error {
 
 func (s *frontierHistoryStore) lookup(key vectorFrontierKey) (auditedFrontier, bool) {
 	stored, ok := s.files[linkKey{clientID: key.clientID, linkID: key.linkID}]
-	if !ok || key.ordinal == 0 || key.ordinal-1 > uint64(^uint64(0)>>1)/frontierHistoryRecordBytes {
+	if !ok || key.ordinal == 0 {
 		return auditedFrontier{}, false
 	}
 	if stored.nonSequential {
 		frontier, exists := stored.byOrdinal[key.ordinal]
 		return frontier, exists
 	}
-	if key.ordinal > stored.count {
+	if key.ordinal > stored.count || key.ordinal-1 > uint64(^uint64(0)>>1)/frontierHistoryRecordBytes {
 		return auditedFrontier{}, false
 	}
 	frontier, err := readFrontierHistoryRecord(stored.file, key.ordinal-1)
