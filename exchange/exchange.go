@@ -676,6 +676,7 @@ func (e *DefaultExchange) CancelAllClientOrders(clientID uint64) int {
 		order := t.order
 		book := t.book
 		remainingQty := order.Qty - order.FilledQty
+		e.logExchangeForcedCancellation(book, order, remainingQty, exchangeForcedLifecycleReason)
 		releaseReserved(client, book.Instrument, order)
 
 		if order.Side == Buy {

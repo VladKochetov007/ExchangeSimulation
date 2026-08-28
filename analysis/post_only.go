@@ -46,6 +46,10 @@ type postOnlyOrderKey struct {
 	orderID uint64
 }
 
+func isExchangeForcedCancellation(reason string) bool {
+	return strings.HasPrefix(reason, "EXCHANGE_FORCED_")
+}
+
 // MakerPassiveRefreshOrdering is an order-level replay of the cancel-before-
 // replace contract declared by maker_quote_size_decision evidence.  It is
 // deliberately separate from the decision's self-reported boolean: the
@@ -140,6 +144,7 @@ type makerPassiveRefreshExpected struct {
 	terminal          string
 	terminalOrdinal   int64
 	terminalRequestID uint64
+	terminalForced    bool
 	outcomeOrdinal    int64
 	censored          bool
 }
@@ -162,6 +167,7 @@ type makerPassiveRefreshSide struct {
 	// and lets the replay prove cancel-before-replace using canonical request
 	// ordering rather than a maker self-report.
 	terminalRequestID uint64
+	terminalForced    bool
 }
 
 type makerPassiveRefreshLineage struct {
@@ -180,6 +186,7 @@ type makerPassiveRefreshLineage struct {
 	OutcomeOrdinal    int64    `json:"outcome_ordinal,omitempty"`
 	TerminalOrdinal   int64    `json:"terminal_ordinal,omitempty"`
 	TerminalRequestID uint64   `json:"terminal_request_id,omitempty"`
+	TerminalForced    bool     `json:"terminal_forced,omitempty"`
 }
 
 // MeasurePostOnlyActivity independently reads accepted orders, fill records,
@@ -422,6 +429,7 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 						item.terminal = state.lastTerminal
 						item.terminalOrdinal = state.terminalOrdinal
 						item.terminalRequestID = state.terminalRequestID
+						item.terminalForced = state.terminalForced
 						item.outcomeOrdinal = event.Ordinal
 						item.outcome = outcome
 						// A terminal cancellation/fill belongs to the first subsequent
@@ -431,6 +439,7 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 							state.lastTerminal = ""
 							state.terminalOrdinal = 0
 							state.terminalRequestID = 0
+							state.terminalForced = false
 							state.priorOrderIDs = nil
 						}
 					}
@@ -473,6 +482,7 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					OrderID      uint64  `json:"order_id"`
 					RemainingQty *int64  `json:"remaining_qty"`
 					Request      *uint64 `json:"request_id"`
+					Reason       string  `json:"reason"`
 				}
 				switch event.Name {
 				case "OrderAccepted":
@@ -528,6 +538,7 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					state.lastTerminal = ""
 					state.terminalOrdinal = 0
 					state.terminalRequestID = 0
+					state.terminalForced = false
 				case "OrderRejected":
 					if event.Decode(&rejected) != nil {
 						return
@@ -602,6 +613,7 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 						state.lastTerminal = "fill"
 						state.terminalOrdinal = event.Ordinal
 						state.terminalRequestID = 0
+						state.terminalForced = false
 					}
 				case "OrderCancelled":
 					if event.Decode(&cancel) != nil {
@@ -636,8 +648,13 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					state.priorOrderIDs = []uint64{cancel.OrderID}
 					state.lastTerminal = "cancel"
 					state.terminalOrdinal = event.Ordinal
+					state.terminalForced = isExchangeForcedCancellation(cancel.Reason)
 					if cancel.Request != nil {
-						state.terminalRequestID = *cancel.Request
+						if state.terminalForced {
+							state.terminalRequestID = 0
+						} else {
+							state.terminalRequestID = *cancel.Request
+						}
 					} else {
 						state.terminalRequestID = 0
 					}
@@ -671,7 +688,15 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 			case item.terminal == "cancel":
 				result.ReplacementSides++
 				result.CancellationTerminated++
-				if item.terminalRequestID == 0 || item.terminalRequestID >= item.requestID {
+				if item.terminalForced {
+					if item.terminalOrdinal <= 0 || item.outcomeOrdinal <= item.terminalOrdinal {
+						classification = "cancellation_order_violation"
+						result.OutOfOrderCancellations++
+					} else {
+						classification = "checked"
+						result.Checked++
+					}
+				} else if item.terminalRequestID == 0 || item.terminalRequestID >= item.requestID {
 					classification = "cancellation_order_violation"
 					result.OutOfOrderCancellations++
 				} else {
@@ -697,7 +722,7 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 				ClientID: item.clientID, Side: item.side, RequestID: item.requestID,
 				DecisionTime: item.decision, Outcome: item.outcome, OutcomeCount: item.count,
 				Classification: classification, PriorOrderIDs: append([]uint64(nil), item.priorIDs...), HadActive: item.hadActive,
-				OutcomeOrdinal: item.outcomeOrdinal, TerminalOrdinal: item.terminalOrdinal, TerminalRequestID: item.terminalRequestID,
+				OutcomeOrdinal: item.outcomeOrdinal, TerminalOrdinal: item.terminalOrdinal, TerminalRequestID: item.terminalRequestID, TerminalForced: item.terminalForced,
 			})
 			if classification == "missing" || classification == "duplicate" || classification == "late" || classification == "cancellation_order_violation" || classification == "censored_outcome_delivered" {
 				result.Checks = append(result.Checks, MakerPassiveRefreshCheck{

@@ -60,6 +60,62 @@ func TestMakerPassiveRefreshOrderingReplaysCancellationBeforeReplacement(t *test
 	}
 }
 
+func TestMakerPassiveRefreshOrderingAcceptsPhysicalExchangeForcedCancellation(t *testing.T) {
+	decision := logLine(1, 7, "maker_quote_size_decision", map[string]any{
+		"maker": "spot_maker_1", "client_id": uint64(7), "symbol": "ABC/USD",
+		"bid_request_id": uint64(10), "ask_request_id": uint64(11), "post_only": true,
+		"bid_price": int64(99), "ask_price": int64(101), "bid_qty": int64(100), "ask_qty": int64(100),
+		"cancel_before_replace": true, "outcome_expectation": "VENUE_OUTCOME_REQUIRED",
+	})
+	accepted := func(ts int64, orderID, requestID uint64, side string) string {
+		price := int64(99)
+		if side == "SELL" {
+			price = 101
+		}
+		return logLine(ts, 7, "OrderAccepted", map[string]any{
+			"order_id": orderID, "client_id": uint64(7), "request_id": requestID,
+			"symbol": "ABC/USD", "side": side, "type": "LIMIT", "time_in_force": "GTC",
+			"post_only": true, "price": price, "qty": int64(100),
+		})
+	}
+	forcedCancel := func(ts int64, orderID uint64) string {
+		return logLine(ts, 7, "OrderCancelled", map[string]any{
+			"order_id": orderID, "remaining_qty": int64(100),
+			"reason": "EXCHANGE_FORCED_FEE_RESERVATION",
+		})
+	}
+	actorCancel := func(ts int64, orderID, requestID uint64) string {
+		return logLine(ts, 7, "OrderCancelled", map[string]any{
+			"order_id": orderID, "request_id": requestID, "remaining_qty": int64(100),
+		})
+	}
+
+	run, err := Open(writeRun(t, Report{TerminalAccounts: []AccountRow{{VenueID: "north", ClientID: 7, Role: "spot_maker_1"}}}, map[string][]string{
+		"north/general.jsonl": {decision, logLine(5, 7, "maker_quote_size_decision", map[string]any{
+			"maker": "spot_maker_1", "client_id": uint64(7), "symbol": "ABC/USD",
+			"bid_request_id": uint64(20), "ask_request_id": uint64(21), "post_only": true,
+			"bid_price": int64(99), "ask_price": int64(101), "bid_qty": int64(100), "ask_qty": int64(100),
+			"cancel_before_replace": true, "outcome_expectation": "VENUE_OUTCOME_REQUIRED",
+		})},
+		"north/spot/ABC-USD.jsonl": {
+			accepted(2, 101, 10, "BUY"), accepted(2, 102, 11, "SELL"),
+			forcedCancel(3, 101), actorCancel(3, 102, 12),
+			accepted(4, 201, 20, "BUY"), accepted(4, 202, 21, "SELL"),
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureMakerPassiveRefreshOrdering(MakerQuoteSizeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || result.Checked != 2 || result.CancellationTerminated != 2 ||
+		result.OutOfOrderCancellations != 0 || len(result.Checks) != 0 {
+		t.Fatalf("forced cancellation refresh replay = %+v", result)
+	}
+}
+
 func TestMakerPassiveRefreshOrderingRecoversSymbolFromCanonicalBookPath(t *testing.T) {
 	decision := logLine(1, 7, "maker_quote_size_decision", map[string]any{
 		"maker": "spot_maker_1", "client_id": uint64(7), "symbol": "ABC/USD",

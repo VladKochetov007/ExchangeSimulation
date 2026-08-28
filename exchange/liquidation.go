@@ -84,6 +84,7 @@ func (e *DefaultExchange) cancelClientOrdersOnBook(client *Client, book *OrderBo
 			continue
 		}
 		remainingQty := order.Qty - order.FilledQty
+		e.logExchangeForcedCancellation(book, order, remainingQty, exchangeForcedLifecycleReason)
 		releaseReserved(client, instrument, order)
 		if order.Side == Buy {
 			book.Bids.CancelOrder(orderID)

@@ -6,9 +6,39 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strings"
 
 	etypes "exchange_sim/types"
 )
+
+const (
+	exchangeForcedFeeReservationReason = "EXCHANGE_FORCED_FEE_RESERVATION"
+	exchangeForcedLifecycleReason      = "EXCHANGE_FORCED_LIFECYCLE"
+	exchangeForcedSTPReason            = "EXCHANGE_FORCED_SELF_TRADE_PREVENTION"
+	exchangeForcedBookAdmissionReason  = "EXCHANGE_FORCED_BOOK_ADMISSION"
+	exchangeForcedCancelPrefix         = "EXCHANGE_FORCED_"
+)
+
+// logExchangeForcedCancellation records a terminal order transition caused by
+// venue mechanics rather than an actor cancel request. The absence of a
+// request_id is deliberate: analyzers must use the physical event ordinal for
+// these transitions, not invent an actor request that never existed.
+func (e *DefaultExchange) logExchangeForcedCancellation(book *OrderBook, order *Order, remainingQty int64, reason string) {
+	if book == nil || order == nil {
+		return
+	}
+	if log := e.getLogger(book.Symbol); log != nil {
+		log.LogEvent(e.Clock.NowUnixNano(), order.ClientID, "OrderCancelled", map[string]any{
+			"order_id":      order.ID,
+			"remaining_qty": remainingQty,
+			"reason":        reason,
+		})
+	}
+}
+
+func isExchangeForcedCancellation(reason string) bool {
+	return strings.HasPrefix(reason, exchangeForcedCancelPrefix)
+}
 
 // acceptedOrderEvidence keeps an accepted order's established flat wire schema
 // while retaining the client request that caused its admission. Order IDs alone
@@ -1232,6 +1262,7 @@ func (e *DefaultExchange) cancelUnfundedSpotPlanMaker(book *OrderBook, orderID u
 	if !ok || remaining < 0 {
 		return false
 	}
+	e.logExchangeForcedCancellation(book, order, remaining, exchangeForcedFeeReservationReason)
 	releaseReserved(client, book.Instrument, order)
 	if order.Side == Buy {
 		book.Bids.CancelOrder(order.ID)
@@ -1389,6 +1420,7 @@ func (e *DefaultExchange) restoreForeignFeeReservation(book *OrderBook, order *O
 
 func (e *DefaultExchange) cancelUnfundedFeeRemainder(book *OrderBook, client *Client, order *Order) {
 	remaining := order.Qty - order.FilledQty
+	e.logExchangeForcedCancellation(book, order, remaining, exchangeForcedFeeReservationReason)
 	releaseReserved(client, book.Instrument, order)
 	if order.Parent != nil {
 		if order.Side == Buy {
@@ -1629,6 +1661,7 @@ func (e *DefaultExchange) restOrReleaseOrder(client *Client, book *OrderBook, or
 			// matcher. Preserve ledger consistency if a custom matcher violates
 			// that contract rather than indexing an order the book rejected.
 			remainingQty := order.Qty - order.FilledQty
+			e.logExchangeForcedCancellation(book, order, remainingQty, exchangeForcedBookAdmissionReason)
 			order.Status = Cancelled
 			if gateway := e.Gateways[order.ClientID]; gateway != nil && gateway.IsRunning() {
 				gateway.enqueueResponse(Response{Success: true, Data: &ForcedCancelNotification{
@@ -1720,6 +1753,7 @@ func (e *DefaultExchange) cancelOwnCrossingQuotes(client *Client, book *OrderBoo
 		orderID := o.ID
 		visibility := o.Visibility
 		side, price := o.Side, o.Price
+		e.logExchangeForcedCancellation(book, o, remainingQty, exchangeForcedSTPReason)
 		releaseReserved(client, book.Instrument, o)
 		opposite.CancelOrder(orderID)
 		if visibility != Hidden {

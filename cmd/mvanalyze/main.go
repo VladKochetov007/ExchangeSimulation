@@ -101,6 +101,7 @@ func main() {
 	venue := flag.String("venue", "north", "venue for book-level metrics")
 	marginRole := flag.String("margin-role", "noise_flow", "role for the independent margin-check replay")
 	base := flag.String("base", "ABC-USD", "triangle base book")
+	hedgeSymbol := flag.String("hedge-symbol", "ABC/USD", "underlying symbol used by hedging metric")
 	quote := flag.String("quote", "CDF-USD", "triangle quote book")
 	cross := flag.String("cross", "ABC-CDF", "triangle cross book")
 	crossPrecision := flag.Int64("cross-precision", 100_000_000, "cross pair price precision")
@@ -696,7 +697,7 @@ func main() {
 			})
 		case "hedging":
 			result, err := run.MeasureHedging(analysis.HedgingOptions{
-				Symbol: *base,
+				Symbol: *hedgeSymbol,
 				Roles:  []string{"option_dealer", "vanna_volga_desk"},
 			})
 			if err != nil {
@@ -704,7 +705,7 @@ func main() {
 				os.Exit(1)
 			}
 			emit(dir, result, *asJSON, func() {
-				fmt.Printf("%-22s hedging in %s\n", dir, *base)
+				fmt.Printf("%-22s hedging in %s\n", dir, *hedgeSymbol)
 				for _, profile := range result.Profiles {
 					fmt.Printf("    %-8s %-18s trades %6d  qty %14d  gap %7.1fs (spread %7.1fs)  buys %4.2f\n",
 						profile.VenueID, profile.Role, profile.Trades, profile.Qty,

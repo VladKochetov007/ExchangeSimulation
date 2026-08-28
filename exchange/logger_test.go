@@ -104,6 +104,46 @@ func TestAcceptedOrderEvidenceRetainsRequestIDAndFlatOrderFields(t *testing.T) {
 	}
 }
 
+func TestExchangeForcedCancellationIsLoggedWithoutActorRequest(t *testing.T) {
+	ex := newPostOnlyTestExchange(t)
+	log := &recordingLogger{}
+	ex.SetLogger("ABC/USD", log)
+	response := ex.PlaceOrder(1, &OrderRequest{
+		RequestID: 73, Symbol: "ABC/USD", Side: Buy, Type: LimitOrder,
+		Price: 99, Qty: 2, TimeInForce: GTC, Visibility: Normal,
+	})
+	if !response.Success {
+		t.Fatalf("resting order rejected: %+v", response)
+	}
+	orderID, ok := response.Data.(uint64)
+	if !ok {
+		t.Fatalf("accepted order ID = %#v", response.Data)
+	}
+	if !ex.cancelUnfundedSpotPlanMaker(ex.Books["ABC/USD"], orderID) {
+		t.Fatalf("forced cancellation did not find order %d", orderID)
+	}
+
+	var cancellation map[string]any
+	for _, record := range log.records {
+		if record.event == "OrderCancelled" {
+			cancellation, ok = record.data.(map[string]any)
+			if ok {
+				break
+			}
+		}
+	}
+	if cancellation == nil {
+		t.Fatalf("forced cancellation evidence = %#v", log.records)
+	}
+	if cancellation["order_id"] != orderID || cancellation["remaining_qty"] != int64(2) ||
+		cancellation["reason"] != exchangeForcedFeeReservationReason {
+		t.Fatalf("forced cancellation evidence = %#v", cancellation)
+	}
+	if _, found := cancellation["request_id"]; found {
+		t.Fatalf("forced cancellation fabricated actor request: %#v", cancellation)
+	}
+}
+
 func TestRejectedOrderEvidenceRetainsAttemptedRequestFields(t *testing.T) {
 	ex := newPostOnlyTestExchange(t)
 	log := &recordingLogger{}
