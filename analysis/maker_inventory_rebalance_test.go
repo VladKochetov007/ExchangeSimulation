@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,17 +12,29 @@ import (
 )
 
 func TestMakerInventoryRebalanceBoundedJoinMatchesBufferedOracle(t *testing.T) {
-	run := p2TestRun(t, p2Fixture{})
-	bounded, err := run.MeasureMakerInventoryRebalance()
-	if err != nil {
-		t.Fatal(err)
+	fixtures := []p2Fixture{
+		{},
+		{FillEvidence: map[string]any{"qty": int64(400_000_000)}},
+		{FillEvidence: map[string]any{"post_inventory": int64(15_000_000_000)}},
+		{PartialFill: true},
+		{PartialFill: true, DropCancel: true},
+		{Disabled: true},
 	}
-	oracle, err := run.measureMakerInventoryRebalanceBuffered()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(bounded, oracle) {
-		t.Fatalf("bounded P2 join differs from buffered oracle:\nbounded=%+v\noracle=%+v", bounded, oracle)
+	for index, fixture := range fixtures {
+		t.Run(fmt.Sprintf("fixture-%d", index), func(t *testing.T) {
+			run := p2TestRun(t, fixture)
+			bounded, err := run.MeasureMakerInventoryRebalance()
+			if err != nil {
+				t.Fatal(err)
+			}
+			oracle, err := run.measureMakerInventoryRebalanceBuffered()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(bounded, oracle) {
+				t.Fatalf("bounded P2 join differs from buffered oracle:\nbounded=%+v\noracle=%+v", bounded, oracle)
+			}
+		})
 	}
 }
 
@@ -58,6 +71,28 @@ func TestMakerInventoryRebalanceAuditDisabledControlDoesNotRequireUnusedSnapshot
 	}
 	if !result.Valid || result.Decisions != 1 || result.DisabledDecisions != 1 || result.Submitted != 0 || result.ReceiptMatches != 0 || result.ActionCounts["POLICY_DISABLED"] != 1 || len(result.Checks) != 0 {
 		t.Fatalf("disabled P2 control audit = %+v", result)
+	}
+}
+
+func TestMakerInventoryRebalanceRejectsCounterpartyPayloadIdentitySpoof(t *testing.T) {
+	run := p2TestRun(t, p2Fixture{CounterpartyPayloadClient: 7})
+	result, err := run.MeasureMakerInventoryRebalance()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid || result.UnknownCounterparties == 0 {
+		t.Fatalf("counterparty payload identity spoof survived: %+v", result)
+	}
+}
+
+func TestMakerInventoryRebalanceRejectsAcceptedOrderIDCollision(t *testing.T) {
+	run := p2TestRun(t, p2Fixture{DuplicateAcceptedOrderID: true})
+	result, err := run.MeasureMakerInventoryRebalance()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid || result.DuplicateAcceptedOrderIDs == 0 {
+		t.Fatalf("accepted order-ID collision survived: %+v", result)
 	}
 }
 
@@ -151,16 +186,18 @@ func TestMakerInventoryRebalanceAuditCatchesDeclaredMutations(t *testing.T) {
 }
 
 type p2Fixture struct {
-	Decision           map[string]any
-	Fill               map[string]any
-	FillEvidence       map[string]any
-	DuplicateDecision  bool
-	PartialFill        bool
-	DropCancel         bool
-	Disabled           bool
-	OmitAcceptedSymbol bool
-	CounterpartyClient uint64
-	ReceiptAt          int64
+	Decision                  map[string]any
+	Fill                      map[string]any
+	FillEvidence              map[string]any
+	DuplicateDecision         bool
+	PartialFill               bool
+	DropCancel                bool
+	Disabled                  bool
+	OmitAcceptedSymbol        bool
+	CounterpartyClient        uint64
+	CounterpartyPayloadClient uint64
+	DuplicateAcceptedOrderID  bool
+	ReceiptAt                 int64
 }
 
 func p2TestRun(t *testing.T, fixture p2Fixture) *Run {
@@ -188,6 +225,10 @@ func p2TestRun(t *testing.T, fixture p2Fixture) *Run {
 	counterpartyClient := uint64(8)
 	if fixture.CounterpartyClient != 0 {
 		counterpartyClient = fixture.CounterpartyClient
+	}
+	counterpartyPayloadClient := counterpartyClient
+	if fixture.CounterpartyPayloadClient != 0 {
+		counterpartyPayloadClient = fixture.CounterpartyPayloadClient
 	}
 	for field, value := range fixture.Decision {
 		decision[field] = value
@@ -222,7 +263,7 @@ func p2TestRun(t *testing.T, fixture p2Fixture) *Run {
 	lines := []string{
 		logLine(20_000_000_000, 7, "maker_inventory_rebalance_decision", decision),
 		logLine(21_000_000_000, 7, "OrderAccepted", order),
-		logLine(21_000_000_000, counterpartyClient, "OrderAccepted", map[string]any{"order_id": uint64(80), "client_id": counterpartyClient, "request_id": uint64(43), "symbol": "CDF/USD", "side": "BUY", "type": "LIMIT", "time_in_force": "GTC", "post_only": false, "price": int64(298_500_000), "qty": qty}),
+		logLine(21_000_000_000, counterpartyClient, "OrderAccepted", map[string]any{"order_id": uint64(80), "client_id": counterpartyPayloadClient, "request_id": uint64(43), "symbol": "CDF/USD", "side": "BUY", "type": "LIMIT", "time_in_force": "GTC", "post_only": false, "price": int64(298_500_000), "qty": qty}),
 		logLine(21_000_000_000, 0, "Trade", map[string]any{"trade_id": uint64(9), "price": int64(298_500_000), "qty": qty, "taker_order_id": uint64(70), "maker_order_id": uint64(80)}),
 		logLine(21_000_000_000, 7, "OrderFill", fill),
 		logLine(21_000_000_000, 7, "maker_inventory_rebalance_fill", fillEvidence),
@@ -232,6 +273,17 @@ func p2TestRun(t *testing.T, fixture p2Fixture) *Run {
 	}
 	if fixture.DuplicateDecision {
 		lines = append(lines, logLine(20_000_000_000, 7, "maker_inventory_rebalance_decision", decision))
+	}
+	if fixture.DuplicateAcceptedOrderID {
+		duplicateDecision := make(map[string]any, len(decision))
+		for field, value := range decision {
+			duplicateDecision[field] = value
+		}
+		duplicateDecision["request_id"] = uint64(43)
+		lines = append(lines,
+			logLine(20_000_000_000, 7, "maker_inventory_rebalance_decision", duplicateDecision),
+			logLine(21_000_000_000, 7, "OrderAccepted", map[string]any{"order_id": uint64(70), "client_id": uint64(7), "request_id": uint64(43), "symbol": "CDF/USD", "side": "SELL", "type": "LIMIT", "time_in_force": "IOC", "post_only": false, "price": int64(298_500_000), "qty": int64(500_000_000)}),
+		)
 	}
 	path := filepath.Join(dir, "general.jsonl")
 	if fixture.OmitAcceptedSymbol {
