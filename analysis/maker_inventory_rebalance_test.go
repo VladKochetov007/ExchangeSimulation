@@ -3,11 +3,27 @@ package analysis
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"exchange_sim/exchange"
 	"exchange_sim/simulation"
 )
+
+func TestMakerInventoryRebalanceBoundedJoinMatchesBufferedOracle(t *testing.T) {
+	run := p2TestRun(t, p2Fixture{})
+	bounded, err := run.MeasureMakerInventoryRebalance()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oracle, err := run.measureMakerInventoryRebalanceBuffered()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(bounded, oracle) {
+		t.Fatalf("bounded P2 join differs from buffered oracle:\nbounded=%+v\noracle=%+v", bounded, oracle)
+	}
+}
 
 func TestMakerInventoryRebalanceAuditJoinsLocalPolicyReceiptAndFill(t *testing.T) {
 	run := p2TestRun(t, p2Fixture{})

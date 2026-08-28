@@ -207,6 +207,341 @@ func (r *Run) MeasureMakerInventoryRebalance() (*MakerInventoryRebalanceAudit, e
 	}
 
 	expected := make(map[makerInventoryRebalanceKey]makerInventoryRebalanceDecision)
+	addCheck := func(venue string, client, request, order uint64, failure string) {
+		result.Checks = append(result.Checks, MakerInventoryRebalanceCheck{VenueID: venue, ClientID: client, RequestID: request, OrderID: order, Failure: failure})
+	}
+	err := r.Scan(ScanOptions{Events: []string{"maker_inventory_rebalance_decision"}, Workers: 1}, func(event Event) {
+		var decision makerInventoryRebalanceDecision
+		if event.Decode(&decision) != nil || decision.ClientID == 0 || decision.VenueID != event.VenueID || decision.ClientID != event.ClientID ||
+			decision.Symbol != "CDF/USD" || decision.Maker == "" || r.Role(event.VenueID, event.ClientID) != "cdf_spot_maker" {
+			result.InvalidDecisionRecords++
+			addCheck(event.VenueID, event.ClientID, 0, 0, "invalid_decision_record")
+			return
+		}
+		result.Decisions++
+		result.ActionCounts[decision.Action]++
+		if decision.Enabled {
+			result.EnabledDecisions++
+		} else {
+			result.DisabledDecisions++
+		}
+		if makerInventoryRebalanceUsesLocalBook(decision.Action) {
+			makerInventoryRebalanceCheckReceipt(result, receipts, receiptErr, decision, addCheck)
+		}
+		if !validMakerInventoryRebalanceDecision(decision) {
+			result.DecisionFieldMismatches++
+			addCheck(event.VenueID, event.ClientID, decision.RequestID, 0, "decision_policy_mismatch")
+		}
+		if !decision.Enabled {
+			if decision.Action != "POLICY_DISABLED" || decision.RequestID != 0 || decision.RequestedQty != 0 {
+				result.DisabledSubmissions++
+				addCheck(event.VenueID, event.ClientID, decision.RequestID, 0, "disabled_policy_submitted")
+			}
+			return
+		}
+		if decision.Action != "SUBMIT_IOC" {
+			result.Deferred++
+			if decision.RequestID != 0 || decision.RequestedQty != 0 {
+				result.DecisionFieldMismatches++
+				addCheck(event.VenueID, event.ClientID, decision.RequestID, 0, "deferred_policy_has_request")
+			}
+			return
+		}
+		result.Submitted++
+		if decision.RequestID == 0 {
+			result.InvalidDecisionRecords++
+			addCheck(event.VenueID, event.ClientID, 0, 0, "submission_without_request_id")
+			return
+		}
+		key := makerInventoryRebalanceKey{venueID: event.VenueID, clientID: event.ClientID, request: decision.RequestID}
+		if _, duplicate := expected[key]; duplicate {
+			result.DuplicateDecisions++
+			addCheck(event.VenueID, event.ClientID, decision.RequestID, 0, "duplicate_submission_decision")
+			return
+		}
+		expected[key] = decision
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	decodeOrder := func(event Event) (makerInventoryRebalanceOrder, bool) {
+		var order makerInventoryRebalanceOrder
+		if event.Decode(&order) != nil || order.RequestID == 0 {
+			return makerInventoryRebalanceOrder{}, false
+		}
+		if order.ClientID == 0 {
+			order.ClientID = event.ClientID
+		}
+		if order.Symbol == "" {
+			order.Symbol = event.Symbol
+		}
+		// Spot acceptance payloads omit the redundant symbol. The event file
+		// identity is the only safe fallback for this P2-specific audit.
+		if order.Symbol == "" && pathHasSymbol(event.File, event.VenueID, "CDF-USD") {
+			order.Symbol = "CDF/USD"
+		}
+		return order, true
+	}
+
+	outcomes := make(map[makerInventoryRebalanceKey][]makerInventoryRebalanceOutcome, len(expected))
+	err = r.Scan(ScanOptions{Events: []string{"OrderAccepted", "OrderRejected"}, Workers: 1}, func(event Event) {
+		order, ok := decodeOrder(event)
+		if !ok {
+			return
+		}
+		key := makerInventoryRebalanceKey{venueID: event.VenueID, clientID: event.ClientID, request: order.RequestID}
+		if _, expected := expected[key]; expected {
+			outcomes[key] = append(outcomes[key], makerInventoryRebalanceOutcome{accepted: event.Name == "OrderAccepted", order: order})
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	accepted := make(map[makerInventoryRebalanceOrderKey]makerInventoryRebalanceDecision)
+	orders := make(map[makerInventoryRebalanceOrderKey]makerInventoryRebalanceOrder)
+	for key, decision := range expected {
+		outcome := outcomes[key]
+		censored, validCensor := validMakerInventoryRebalanceCensor(decision)
+		if !validCensor {
+			result.DecisionFieldMismatches++
+			addCheck(key.venueID, key.clientID, key.request, 0, "invalid_outcome_expectation")
+		}
+		if censored {
+			if len(outcome) == 0 {
+				result.HorizonCensored++
+				continue
+			}
+			result.CensoredOutcomeDeliveries += int64(len(outcome))
+			addCheck(key.venueID, key.clientID, key.request, 0, "terminal_censored_request_delivered")
+			continue
+		}
+		if len(outcome) == 0 {
+			result.MissingOutcomes++
+			addCheck(key.venueID, key.clientID, key.request, 0, "missing_request_outcome")
+			continue
+		}
+		if len(outcome) != 1 {
+			result.DuplicateOutcomes++
+			addCheck(key.venueID, key.clientID, key.request, 0, "duplicate_request_outcome")
+			continue
+		}
+		got := outcome[0]
+		if !validMakerInventoryRebalanceOutcome(decision, got.order) {
+			result.OutcomeFieldMismatches++
+			addCheck(key.venueID, key.clientID, key.request, got.order.OrderID, "request_fields_mismatch")
+		}
+		if !got.accepted {
+			result.Rejected++
+			continue
+		}
+		result.Accepted++
+		if got.order.OrderID == 0 {
+			result.OutcomeFieldMismatches++
+			addCheck(key.venueID, key.clientID, key.request, 0, "accepted_without_order_id")
+			continue
+		}
+		orderKey := makerInventoryRebalanceOrderKey{venueID: key.venueID, orderID: got.order.OrderID}
+		accepted[orderKey] = decision
+		orders[orderKey] = got.order
+	}
+
+	fills := make(map[makerInventoryRebalanceOrderKey][]makerInventoryRebalanceFill)
+	cancels := make(map[makerInventoryRebalanceOrderKey][]makerInventoryRebalanceCancellation)
+	trades := make(map[makerInventoryRebalanceOrderKey][]makerInventoryRebalanceTrade)
+	fillEvidence := make(map[makerInventoryRebalanceOrderKey][]makerInventoryRebalanceFillEvidence)
+	counterpartyOrders := make(map[makerInventoryRebalanceOrderKey]struct{})
+	err = r.Scan(ScanOptions{Events: []string{"maker_inventory_rebalance_fill", "OrderFill", "OrderCancelled", "Trade"}, Workers: 1}, func(event Event) {
+		switch event.Name {
+		case "OrderFill":
+			var fill makerInventoryRebalanceFill
+			if event.Decode(&fill) == nil && fill.OrderID != 0 && fill.Qty > 0 {
+				key := makerInventoryRebalanceOrderKey{venueID: event.VenueID, orderID: fill.OrderID}
+				if _, relevant := accepted[key]; relevant {
+					fill.Timestamp = event.SimTS
+					fills[key] = append(fills[key], fill)
+				}
+			}
+		case "OrderCancelled":
+			var cancel makerInventoryRebalanceCancellation
+			if event.Decode(&cancel) == nil && cancel.OrderID != 0 {
+				key := makerInventoryRebalanceOrderKey{venueID: event.VenueID, orderID: cancel.OrderID}
+				if _, relevant := accepted[key]; relevant {
+					cancels[key] = append(cancels[key], cancel)
+				}
+			}
+		case "Trade":
+			var trade makerInventoryRebalanceTrade
+			if event.Decode(&trade) != nil || trade.Qty <= 0 {
+				return
+			}
+			for _, ownOrderID := range []uint64{trade.TakerOrderID, trade.MakerOrderID} {
+				if ownOrderID == 0 {
+					continue
+				}
+				ownKey := makerInventoryRebalanceOrderKey{venueID: event.VenueID, orderID: ownOrderID}
+				if _, relevant := accepted[ownKey]; !relevant {
+					continue
+				}
+				trades[ownKey] = append(trades[ownKey], trade)
+				otherOrderID := trade.MakerOrderID
+				if ownOrderID == trade.MakerOrderID {
+					otherOrderID = trade.TakerOrderID
+				}
+				if otherOrderID != 0 && otherOrderID != ownOrderID {
+					counterpartyOrders[makerInventoryRebalanceOrderKey{venueID: event.VenueID, orderID: otherOrderID}] = struct{}{}
+				}
+			}
+		case "maker_inventory_rebalance_fill":
+			var evidence makerInventoryRebalanceFillEvidence
+			if event.Decode(&evidence) != nil || evidence.OrderID == 0 || evidence.ClientID != event.ClientID || evidence.VenueID != event.VenueID {
+				result.UnexpectedFillEvidence++
+				addCheck(event.VenueID, event.ClientID, 0, evidence.OrderID, "invalid_fill_evidence")
+				return
+			}
+			key := makerInventoryRebalanceOrderKey{venueID: event.VenueID, orderID: evidence.OrderID}
+			if _, relevant := accepted[key]; relevant {
+				fillEvidence[key] = append(fillEvidence[key], evidence)
+				return
+			}
+			result.UnexpectedFillEvidence++
+			addCheck(event.VenueID, event.ClientID, 0, evidence.OrderID, "fill_evidence_without_accepted_p2_order")
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	err = r.Scan(ScanOptions{Events: []string{"OrderAccepted"}, Workers: 1}, func(event Event) {
+		order, ok := decodeOrder(event)
+		if !ok || order.OrderID == 0 {
+			return
+		}
+		key := makerInventoryRebalanceOrderKey{venueID: event.VenueID, orderID: order.OrderID}
+		if _, relevant := counterpartyOrders[key]; relevant {
+			orders[key] = order
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	matchedFillEvidence := make(map[makerInventoryRebalanceOrderKey]map[int]bool)
+	for key, decision := range accepted {
+		order := orders[key]
+		orderFills := fills[key]
+		orderCancels := cancels[key]
+		var filled int64
+		for _, fill := range orderFills {
+			filled += fill.Qty
+			result.Fills++
+			result.FilledQty += fill.Qty
+			if fill.Role != "taker" {
+				result.NonTakerFills++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "rebalance_fill_not_taker")
+			}
+			if fill.FeeAmount <= 0 || fill.FeeAsset != "USD" {
+				result.NonPositiveFees++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "non_positive_or_wrong_asset_fee")
+			}
+			if want, ok := makerInventoryRebalanceFee(fill.Qty, fill.Price, decision.TakerFeeBps); !ok || want != fill.FeeAmount {
+				result.FeeMismatches++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "fee_formula_mismatch")
+			}
+			if !makerInventoryRebalanceHasExternalCounterparty(trades[key], orders, key, fill) {
+				result.UnknownCounterparties++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "missing_external_counterparty")
+			} else if makerInventoryRebalanceHasSelfCounterparty(trades[key], orders, key, fill, order.ClientID) {
+				result.SelfFills++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "self_fill")
+			}
+			matched := false
+			for index, evidence := range fillEvidence[key] {
+				if matchedFillEvidence[key] != nil && matchedFillEvidence[key][index] {
+					continue
+				}
+				if evidence.ClientID == order.ClientID && evidence.Symbol == fill.Symbol && evidence.Side == fill.Side && evidence.Qty == fill.Qty && evidence.Price == fill.Price && evidence.FeeAmount == fill.FeeAmount && evidence.FeeAsset == fill.FeeAsset && evidence.TradeID == fill.TradeID && evidence.Timestamp == fill.Timestamp {
+					if matchedFillEvidence[key] == nil {
+						matchedFillEvidence[key] = make(map[int]bool)
+					}
+					matchedFillEvidence[key][index] = true
+					matched = true
+					if !makerInventoryRebalanceReduces(evidence) {
+						result.NonReducingFills++
+						addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "fill_does_not_reduce_actor_inventory")
+					}
+					break
+				}
+			}
+			if !matched {
+				result.MissingFillEvidence++
+				result.FillEvidenceMismatches++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "missing_exact_fill_evidence")
+			}
+		}
+		for index := range fillEvidence[key] {
+			if !matchedFillEvidence[key][index] {
+				result.UnexpectedFillEvidence++
+				result.FillEvidenceMismatches++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "unexpected_fill_evidence")
+			}
+		}
+		if filled > order.Qty {
+			result.FillQuantityMismatches++
+			addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "filled_quantity_exceeds_request")
+		}
+		if filled < order.Qty {
+			if len(orderCancels) == 0 {
+				result.MissingIOCTerminals++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "missing_ioc_remainder_cancellation")
+			} else if len(orderCancels) != 1 || orderCancels[0].RemainingQty != order.Qty-filled {
+				result.DuplicateIOCTerminals++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "invalid_ioc_remainder_cancellation")
+			} else {
+				result.CancelledIOC++
+			}
+		} else if len(orderCancels) != 0 {
+			result.DuplicateIOCTerminals++
+			addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "full_ioc_has_cancellation")
+		}
+	}
+
+	sort.Slice(result.Checks, func(i, j int) bool {
+		left, right := result.Checks[i], result.Checks[j]
+		if left.VenueID != right.VenueID {
+			return left.VenueID < right.VenueID
+		}
+		if left.ClientID != right.ClientID {
+			return left.ClientID < right.ClientID
+		}
+		if left.RequestID != right.RequestID {
+			return left.RequestID < right.RequestID
+		}
+		if left.OrderID != right.OrderID {
+			return left.OrderID < right.OrderID
+		}
+		return left.Failure < right.Failure
+	})
+	result.Valid = result.Decisions > 0 && result.ReceiptEvidenceErrors == 0 && result.MissingReceipts == 0 && result.AmbiguousReceipts == 0 && result.ReceiptMismatches == 0 && result.FutureReceiptUse == 0 &&
+		result.InvalidDecisionRecords == 0 && result.DecisionFieldMismatches == 0 && result.DisabledSubmissions == 0 && result.DuplicateDecisions == 0 && result.MissingOutcomes == 0 && result.DuplicateOutcomes == 0 && result.CensoredOutcomeDeliveries == 0 && result.OutcomeFieldMismatches == 0 &&
+		result.MissingIOCTerminals == 0 && result.DuplicateIOCTerminals == 0 && result.FillQuantityMismatches == 0 && result.MissingFillEvidence == 0 && result.UnexpectedFillEvidence == 0 && result.FillEvidenceMismatches == 0 && result.NonReducingFills == 0 && result.UnknownCounterparties == 0 && result.SelfFills == 0 && result.NonTakerFills == 0 && result.NonPositiveFees == 0 && result.FeeMismatches == 0
+	return result, nil
+}
+
+func (r *Run) measureMakerInventoryRebalanceBuffered() (*MakerInventoryRebalanceAudit, error) {
+	result := &MakerInventoryRebalanceAudit{ActionCounts: make(map[string]int64)}
+	receipts, receiptAudit, receiptErr := makerInventoryRebalanceReceipts(r.Dir)
+	if receiptErr != nil {
+		result.ReceiptEvidenceErrors++
+	} else {
+		result.ReceiptAuditValid = receiptAudit.Valid
+		if !receiptAudit.Valid {
+			result.ReceiptEvidenceErrors++
+		}
+	}
+
+	expected := make(map[makerInventoryRebalanceKey]makerInventoryRebalanceDecision)
 	outcomes := make(map[makerInventoryRebalanceKey][]makerInventoryRebalanceOutcome)
 	orders := make(map[makerInventoryRebalanceOrderKey]makerInventoryRebalanceOrder)
 	fills := make(map[makerInventoryRebalanceOrderKey][]makerInventoryRebalanceFill)
