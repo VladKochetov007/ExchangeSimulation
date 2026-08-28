@@ -8,7 +8,7 @@ root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 output_root=${1:-"$root_dir/research/artifacts/v2-integrated-longrun/candidate"}
 score="$output_root/development-score.json"
 parity="$output_root/parity-attestation.json"
-contract_version="v2-integrated-longrun-scorer-v1"
+contract_version="v2-integrated-longrun-scorer-v2"
 
 fail() {
 	printf 'integrated long-run scorer failure: %s\n' "$*" >&2
@@ -51,7 +51,7 @@ for cell in dev-607 dev-613 dev-617; do
 	require_object "$cell_dir/activation.json"
 	jq -e --arg cell "$cell" --argjson required_artifacts "$required_json" \
 		'.cell == $cell and .seed == (.cell | split("-")[-1] | tonumber) and
-		.analysis_contract == "v2-integrated-longrun-candidate-v2" and
+		.analysis_contract == "v2-integrated-longrun-candidate-v3" and
 		.analyzer_vcs_modified == false and .required_artifacts == $required_artifacts and
 		(.artifact_sha256 | keys) == ($required_artifacts | sort) and
 		all(.artifact_sha256 | to_entries[]; (.value | test("^[0-9a-f]{64}$")))' \

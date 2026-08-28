@@ -12,7 +12,7 @@ root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cell=$(CDPATH= cd -- "$1" && pwd)
 cell_name=$(basename "$cell")
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
-contract_version="v2-integrated-longrun-candidate-v2"
+contract_version="v2-integrated-longrun-candidate-v3"
 conservation_tolerance_fixed_units=1000
 
 fail() {
