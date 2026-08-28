@@ -77,12 +77,18 @@ available_kb=$(df -Pk "$output_root" | awk 'NR == 2 {print $4}')
 }
 binary_revision=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
 binary_modified=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
+binary_trimpath=$(go version -m "$binary" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
+binary_cgo_enabled=$(go version -m "$binary" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
 [[ "$binary_revision" == "$sim_revision" ]] || {
 	echo "binary VCS revision $binary_revision does not match requested $sim_revision" >&2
 	exit 1
 }
 [[ "$binary_modified" == "false" ]] || {
 	echo "binary is not a clean VCS build (vcs.modified=$binary_modified)" >&2
+	exit 1
+}
+[[ "$binary_trimpath" == "true" && "$binary_cgo_enabled" == "0" ]] || {
+	echo "binary reproducibility settings are not enforced (-trimpath=$binary_trimpath CGO_ENABLED=$binary_cgo_enabled)" >&2
 	exit 1
 }
 
@@ -117,10 +123,12 @@ jq -n \
 	--arg config_path "$config" \
 	--arg binary_vcs_revision "$binary_revision" \
 	--arg binary_vcs_modified "$binary_modified" \
+	--arg binary_trimpath "$binary_trimpath" \
+	--arg binary_cgo_enabled "$binary_cgo_enabled" \
 	--arg config_hypothesis "$config_hypothesis" \
 	--arg config_experiment "$config_experiment" \
 	'{
-		  schema_version: 2, runner_contract: "v2-integrated-longrun-runner-v2",
+		  schema_version: 3, runner_contract: "v2-integrated-longrun-runner-v3",
 		  experiment_id: ("v2-integrated-longrun-" + $cell),
 		  config_experiment_id: $config_experiment,
 		  hypothesis_id: $config_hypothesis,
@@ -129,6 +137,7 @@ jq -n \
 		  config_sha256: $config_sha256, binary_sha256: $binary_sha256,
 		  config_path: $config_path, binary_path: $binary_path,
 		  binary_vcs_revision: $binary_vcs_revision, binary_vcs_modified: ($binary_vcs_modified == "true"),
+		  binary_trimpath: ($binary_trimpath == "true"), binary_cgo_enabled: $binary_cgo_enabled,
 		  git_revision: $git_revision, go_version: $go_version, binary_go_version: $binary_go_version,
 		  gomaxprocs: $gomaxprocs, output_dir: $output_dir,
 		  command: ["multivenue", "-config", "run-config.json", "-duration", $horizon, "-logdir", $output_dir, "-log-mode", $log_mode],

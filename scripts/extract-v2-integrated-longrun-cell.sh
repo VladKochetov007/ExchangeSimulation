@@ -54,7 +54,7 @@ log_mode=$(jq -er '.log_mode' "$cell/run-config.json")
 [[ "$seed" == "$config_seed" ]] || fail "metadata/config seed mismatch"
 [[ "$log_mode" == full ]] || fail "development extraction requires full log mode"
 jq -e --arg cell "$cell_name" --argjson seed "$seed" --arg experiment "$config_experiment" \
-	'.schema_version == 2 and .runner_contract == "v2-integrated-longrun-runner-v2" and
+	'.schema_version == 3 and .runner_contract == "v2-integrated-longrun-runner-v3" and
 	 .cell == $cell and .seed == $seed and .holdout == false and
 	 .simulated_horizon == "24h" and .log_mode == "full" and
 	 (.gomaxprocs | type) == "number" and .gomaxprocs == 4 and
@@ -62,6 +62,7 @@ jq -e --arg cell "$cell_name" --argjson seed "$seed" --arg experiment "$config_e
 	 .config_experiment_id == $experiment and
 	 (.config_sha256 | test("^[0-9a-f]{64}$")) and
 	 (.binary_sha256 | test("^[0-9a-f]{64}$")) and
+	 .binary_trimpath == true and .binary_cgo_enabled == "0" and
 	 (.git_revision | test("^[0-9a-f]{40}$")) and
 	 .completion_sentinels == ["greeks.json", "latency.json"]' \
 	"$cell/run-metadata.json" >/dev/null || fail "invalid run metadata contract"
@@ -89,7 +90,9 @@ simulator_sha256=$(sha256sum "$simulator_binary" | awk '{print $1}')
 [[ "$simulator_sha256" == "$(jq -er '.binary_sha256' "$cell/run-metadata.json")" ]] || fail "simulator binary hash changed"
 binary_revision=$(go version -m "$simulator_binary" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
 binary_modified=$(go version -m "$simulator_binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
-[[ "$binary_revision" == "$metadata_revision" && "$binary_modified" == false ]] || fail "simulator binary provenance is not clean/current"
+binary_trimpath=$(go version -m "$simulator_binary" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
+binary_cgo_enabled=$(go version -m "$simulator_binary" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
+[[ "$binary_revision" == "$metadata_revision" && "$binary_modified" == false && "$binary_trimpath" == true && "$binary_cgo_enabled" == 0 ]] || fail "simulator binary provenance is not clean/current/reproducible"
 
 config_sha256=$(sha256sum "$cell/run-config.json" | awk '{print $1}')
 [[ "$config_sha256" == "$(jq -er '.config_sha256' "$cell/run-metadata.json")" ]] || fail "run config hash changed"
@@ -112,6 +115,22 @@ for json_file in "$cell"/*.json; do
 	[[ -f "$json_file" ]] || continue
 	require_json_object "$json_file"
 done
+derived_artifacts=(
+	observationreceipts.json frontiervectors.json mechanical.json conservation.json positions.json
+	fillpositions.json orderlifecycle.json lifecycle.json settlements.json expiryfills.json
+	evidenceartifacthash.json streamhash.json arbitrage.json crossvenue.json roleaudit.json ecology.json
+	derivatives.json liquidations.json marginchecks.json optionsurface.json optionliabilityp6.json
+	optionvaluetakerp6.json vannavolgap6.json exposure.json hedging.json makerrefresh.json
+	makerquotesize.json makerrebalance.json postonly.json liabilityhedger.json perpsignals.json
+	datedmandatep5.json fundingcarry.json termcarry.json datedcarryp5.json perpreplenishment.json
+	activation.json integrity.json analysis-metadata.json
+)
+for artifact in "${derived_artifacts[@]}"; do
+	[[ ! -e "$cell/$artifact" && ! -e "$cell/$artifact.err" ]] || fail "refusing to overwrite existing derived evidence: $cell/$artifact"
+done
+if find "$cell" -maxdepth 1 -type f -name '*.json.tmp-*' -print -quit | grep -q .; then
+	fail "refusing extraction with stale temporary derived evidence in $cell"
+fi
 jq -e '.domain == "persisted_json_records" and .ordering == "unordered_multiset" and
 	 (.events | type) == "number" and .events > 0 and (.digest | test("^[0-9a-f]{64}$"))' \
 	"$cell/evidence-artifact-hash.json" >/dev/null || fail "invalid runtime evidence artifact hash"
@@ -325,7 +344,11 @@ jq -e '.result.domain == "persisted_evidence" and .result.ordering == "unordered
 analyzer_revision=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
 analyzer_modified=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
 analyzer_sha256=$(sha256sum "$analyzer" | awk '{print $1}')
-[[ "$analyzer_revision" == "$head_revision" && "$analyzer_modified" == false ]] || fail "analyzer is not a clean build of current HEAD"
+analyzer_trimpath=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
+analyzer_cgo_enabled=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
+analyzer_go_version=$(go version -m "$analyzer" | sed -n '1s/.*: //p')
+simulator_go_version=$(jq -er '.binary_go_version' "$cell/run-metadata.json")
+[[ "$analyzer_revision" == "$head_revision" && "$analyzer_modified" == false && "$analyzer_trimpath" == true && "$analyzer_cgo_enabled" == 0 ]] || fail "analyzer is not a clean reproducible build of current HEAD"
 
 required_json=$(printf '%s\n' "${required[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
 artifact_sha256=$(for artifact in "${required[@]}"; do
@@ -338,6 +361,9 @@ jq -n \
 	--arg analysis_revision "$head_revision" \
 	--arg analyzer_revision "$analyzer_revision" \
 	--arg analyzer_sha256 "$analyzer_sha256" \
+	--argjson analyzer_trimpath true \
+	--arg analyzer_cgo_enabled "$analyzer_cgo_enabled" \
+	--arg analyzer_go_version "$analyzer_go_version" \
 	--argjson analyzer_modified "$analyzer_modified_json" \
 	--argjson required_artifacts "$required_json" \
 	--argjson artifact_sha256 "$artifact_sha256" \
@@ -348,12 +374,20 @@ jq -n \
 	--argjson seed "$seed" \
 	--arg simulator_revision "$metadata_revision" \
 	--arg simulator_sha256 "$simulator_sha256" \
+	--argjson simulator_trimpath true \
+	--arg simulator_cgo_enabled "$binary_cgo_enabled" \
+	--arg simulator_go_version "$simulator_go_version" \
 	--arg config_sha256 "$config_sha256" \
 	'{schema_version: 2, cell: $cell, seed: $seed,
 		analysis_revision: $analysis_revision, analyzer_revision: $analyzer_revision,
 		analyzer_sha256: $analyzer_sha256, analyzer_vcs_modified: $analyzer_modified,
+		analyzer_trimpath: $analyzer_trimpath, analyzer_cgo_enabled: $analyzer_cgo_enabled,
+		analyzer_go_version: $analyzer_go_version,
 		simulator_revision: $simulator_revision, simulator_sha256: $simulator_sha256,
+		simulator_trimpath: $simulator_trimpath, simulator_cgo_enabled: $simulator_cgo_enabled,
+		simulator_go_version: $simulator_go_version,
 		config_sha256: $config_sha256, analysis_contract: $contract,
+		integrity_contract: $contract, activation_contract: $contract,
 		completion_sentinels: ["greeks.json", "latency.json"], required_artifacts: $required_artifacts,
 		artifact_sha256: $artifact_sha256,
 		runtime_evidence_artifact: {events: $runtime_evidence_events, digest: $runtime_evidence_digest},

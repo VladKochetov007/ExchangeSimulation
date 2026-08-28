@@ -60,11 +60,15 @@ alias, and precedence.
 
 ## Provenance and rerun authorization
 
-The extractor and development scorer use the v3 contract identifiers. A fresh
+The runner, extractor, and development scorer use the v3 contract identifiers
+(`v2-integrated-longrun-runner-v3`, `v2-integrated-longrun-candidate-v3`, and
+`v2-integrated-longrun-scorer-v2`). A fresh
 clean simulator and analyzer build is required after this amendment, with
 `trimpath`, `CGO_ENABLED=0`, clean embedded VCS metadata, and recorded SHA-256
-identities. The simulator source identity and analyzer source identity are
-recorded separately; no analyzer correction is applied retroactively to r2.
+identities. These settings and the Go toolchain version are recorded in the
+immutable run and analysis metadata and carried into the write-once score. The
+simulator source identity and analyzer source identity are recorded
+separately; no analyzer correction is applied retroactively to r2.
 
 Before any v3 development cell is launched, an independent Sol-xhigh review
 must ACCEPT the combined source correction, exact forced-cancellation schema,

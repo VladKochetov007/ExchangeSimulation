@@ -52,6 +52,11 @@ for cell in dev-607 dev-613 dev-617; do
 	jq -e --arg cell "$cell" --argjson required_artifacts "$required_json" \
 		'.cell == $cell and .seed == (.cell | split("-")[-1] | tonumber) and
 		.analysis_contract == "v2-integrated-longrun-candidate-v3" and
+		.integrity_contract == "v2-integrated-longrun-candidate-v3" and
+		.activation_contract == "v2-integrated-longrun-candidate-v3" and
+		.analyzer_trimpath == true and .analyzer_cgo_enabled == "0" and
+		.simulator_trimpath == true and .simulator_cgo_enabled == "0" and
+		(.analyzer_go_version | type) == "string" and (.simulator_go_version | type) == "string" and
 		.analyzer_vcs_modified == false and .required_artifacts == $required_artifacts and
 		(.artifact_sha256 | keys) == ($required_artifacts | sort) and
 		all(.artifact_sha256 | to_entries[]; (.value | test("^[0-9a-f]{64}$")))' \
@@ -80,15 +85,27 @@ analyzer_revision=$(jq -er '.analyzer_revision' "$output_root/dev-607/analysis-m
 simulator_revision=$(jq -er '.simulator_revision' "$output_root/dev-607/analysis-metadata.json")
 analyzer_sha256=$(jq -er '.analyzer_sha256' "$output_root/dev-607/analysis-metadata.json")
 simulator_sha256=$(jq -er '.simulator_sha256' "$output_root/dev-607/analysis-metadata.json")
+analyzer_trimpath=$(jq -er '.analyzer_trimpath' "$output_root/dev-607/analysis-metadata.json")
+analyzer_cgo_enabled=$(jq -er '.analyzer_cgo_enabled' "$output_root/dev-607/analysis-metadata.json")
+analyzer_go_version=$(jq -er '.analyzer_go_version' "$output_root/dev-607/analysis-metadata.json")
+simulator_trimpath=$(jq -er '.simulator_trimpath' "$output_root/dev-607/analysis-metadata.json")
+simulator_cgo_enabled=$(jq -er '.simulator_cgo_enabled' "$output_root/dev-607/analysis-metadata.json")
+simulator_go_version=$(jq -er '.simulator_go_version' "$output_root/dev-607/analysis-metadata.json")
 parity_source_revision=$(jq -er '.source_revision' "$parity")
 [[ "$parity_source_revision" == "$simulator_revision" ]] || fail "parity simulator revision differs from development simulator revision"
 for cell in dev-607 dev-613 dev-617; do
 	jq -e --arg source_revision "$source_revision" --arg analyzer_revision "$analyzer_revision" \
 		--arg simulator_revision "$simulator_revision" --arg analyzer_sha256 "$analyzer_sha256" \
-		--arg simulator_sha256 "$simulator_sha256" \
+		--arg simulator_sha256 "$simulator_sha256" --argjson analyzer_trimpath "$analyzer_trimpath" \
+		--arg analyzer_cgo_enabled "$analyzer_cgo_enabled" --arg analyzer_go_version "$analyzer_go_version" \
+		--argjson simulator_trimpath "$simulator_trimpath" --arg simulator_cgo_enabled "$simulator_cgo_enabled" \
+		--arg simulator_go_version "$simulator_go_version" \
 		'.analysis_revision == $source_revision and .analyzer_revision == $analyzer_revision and
 		.simulator_revision == $simulator_revision and .analyzer_sha256 == $analyzer_sha256 and
-		.simulator_sha256 == $simulator_sha256 and .analyzer_vcs_modified == false' \
+		.simulator_sha256 == $simulator_sha256 and .analyzer_vcs_modified == false and
+		.analyzer_trimpath == $analyzer_trimpath and .analyzer_cgo_enabled == $analyzer_cgo_enabled and
+		.analyzer_go_version == $analyzer_go_version and .simulator_trimpath == $simulator_trimpath and
+		.simulator_cgo_enabled == $simulator_cgo_enabled and .simulator_go_version == $simulator_go_version' \
 		"$output_root/$cell/analysis-metadata.json" >/dev/null || fail "provenance differs: $cell"
 done
 
@@ -123,6 +140,9 @@ jq -n \
 	--arg simulator_revision "$simulator_revision" \
 	--arg analyzer_sha256 "$analyzer_sha256" \
 	--arg simulator_sha256 "$simulator_sha256" \
+	--argjson analyzer_trimpath "$analyzer_trimpath" --arg analyzer_cgo_enabled "$analyzer_cgo_enabled" \
+	--arg analyzer_go_version "$analyzer_go_version" --argjson simulator_trimpath "$simulator_trimpath" \
+	--arg simulator_cgo_enabled "$simulator_cgo_enabled" --arg simulator_go_version "$simulator_go_version" \
 	--arg parity_sha256 "$parity_sha256" \
 	--argjson cells "$cells_json" \
 	--slurpfile parity_report "$parity" \
@@ -135,7 +155,10 @@ jq -n \
 		claim_scope: "integrated deterministic/evidence/lifecycle candidate gate only; no market realism claim",
 		source_revision: $source_revision, analyzer_revision: $analyzer_revision,
 		analyzer_sha256: $analyzer_sha256, simulator_revision: $simulator_revision,
-		simulator_sha256: $simulator_sha256, parity_attestation_sha256: $parity_sha256,
+		simulator_sha256: $simulator_sha256, analyzer_trimpath: $analyzer_trimpath,
+		analyzer_cgo_enabled: $analyzer_cgo_enabled, analyzer_go_version: $analyzer_go_version,
+		simulator_trimpath: $simulator_trimpath, simulator_cgo_enabled: $simulator_cgo_enabled,
+		simulator_go_version: $simulator_go_version, parity_attestation_sha256: $parity_sha256,
 		development_seeds: [607, 613, 617], reserved_holdout_seeds: [619, 631, 641],
 		holdout_status: "RESERVED_AND_NOT_READ_BY_DEVELOPMENT_SCORER",
 		predicates: {
