@@ -144,6 +144,80 @@ func TestExchangeForcedCancellationIsLoggedWithoutActorRequest(t *testing.T) {
 	}
 }
 
+func TestExchangeForcedCancellationCallSitesRetainTheirReason(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason string
+		check  func(*DefaultExchange, *OrderBook, *Client, Logger)
+	}{
+		{
+			name:   "cancel all",
+			reason: exchangeForcedLifecycleReason,
+			check: func(ex *DefaultExchange, _ *OrderBook, _ *Client, _ Logger) {
+				if got := ex.CancelAllClientOrders(1); got != 1 {
+					t.Fatalf("cancel-all count = %d, want 1", got)
+				}
+			},
+		},
+		{
+			name:   "lifecycle",
+			reason: exchangeForcedLifecycleReason,
+			check: func(ex *DefaultExchange, book *OrderBook, client *Client, _ Logger) {
+				ex.cancelClientOrdersOnBook(client, book, book.Instrument)
+			},
+		},
+		{
+			name:   "self-trade prevention",
+			reason: exchangeForcedSTPReason,
+			check: func(ex *DefaultExchange, book *OrderBook, client *Client, _ Logger) {
+				ex.cancelOwnCrossingQuotes(client, book, &Order{ClientID: client.ID, Side: Buy, Price: 100})
+			},
+		},
+		{
+			name:   "book admission",
+			reason: exchangeForcedBookAdmissionReason,
+			check: func(ex *DefaultExchange, book *OrderBook, client *Client, log Logger) {
+				order := getOrder()
+				order.ID, order.ClientID = 99, client.ID
+				order.Side, order.Type, order.TimeInForce = Buy, LimitOrder, GTC
+				order.Price, order.Qty, order.Status = 98, 2, Open
+				order.Parent = &Limit{}
+				ex.restOrReleaseOrder(client, book, order, &OrderRequest{
+					RequestID: 99, Symbol: book.Symbol, Side: Buy, Type: LimitOrder,
+					Price: 98, Qty: 2, TimeInForce: GTC,
+				}, log)
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ex := newPostOnlyTestExchange(t)
+			log := &recordingLogger{}
+			ex.SetLogger("ABC/USD", log)
+			response := ex.PlaceOrder(1, &OrderRequest{
+				RequestID: 1, Symbol: "ABC/USD", Side: Sell, Type: LimitOrder,
+				Price: 100, Qty: 2, TimeInForce: GTC, Visibility: Normal,
+			})
+			if !response.Success {
+				t.Fatalf("seed order rejected: %+v", response)
+			}
+			book := ex.Books["ABC/USD"]
+			client := ex.Clients[1]
+			tc.check(ex, book, client, log)
+			for _, record := range log.records {
+				if record.event != "OrderCancelled" {
+					continue
+				}
+				payload, ok := record.data.(map[string]any)
+				if ok && payload["reason"] == tc.reason {
+					return
+				}
+			}
+			t.Fatalf("no %s forced-cancellation reason in %#v", tc.reason, log.records)
+		})
+	}
+}
+
 func TestRejectedOrderEvidenceRetainsAttemptedRequestFields(t *testing.T) {
 	ex := newPostOnlyTestExchange(t)
 	log := &recordingLogger{}

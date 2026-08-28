@@ -116,6 +116,69 @@ func TestMakerPassiveRefreshOrderingAcceptsPhysicalExchangeForcedCancellation(t 
 	}
 }
 
+func TestMakerPassiveRefreshOrderingRejectsContradictoryForcedCancellationEvidence(t *testing.T) {
+	tests := []struct {
+		name           string
+		reason         string
+		includeRequest bool
+		cancelAfter    bool
+	}{
+		{name: "unknown forced reason", reason: "EXCHANGE_FORCED_UNKNOWN"},
+		{name: "forced reason has actor request", reason: "EXCHANGE_FORCED_LIFECYCLE", includeRequest: true},
+		{name: "forced cancellation after replacement", reason: "EXCHANGE_FORCED_LIFECYCLE", cancelAfter: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := func(ts int64, bid, ask uint64) string {
+				return logLine(ts, 7, "maker_quote_size_decision", map[string]any{
+					"maker": "spot_maker_1", "client_id": uint64(7), "symbol": "ABC/USD",
+					"bid_request_id": bid, "ask_request_id": ask, "post_only": true,
+					"bid_price": int64(99), "ask_price": int64(101), "bid_qty": int64(100), "ask_qty": int64(100),
+					"cancel_before_replace": true, "outcome_expectation": "VENUE_OUTCOME_REQUIRED",
+				})
+			}
+			accepted := func(ts int64, orderID, requestID uint64) string {
+				return logLine(ts, 7, "OrderAccepted", map[string]any{
+					"order_id": orderID, "client_id": uint64(7), "request_id": requestID,
+					"symbol": "ABC/USD", "side": "BUY", "type": "LIMIT", "time_in_force": "GTC",
+					"post_only": true, "price": int64(99), "qty": int64(100),
+				})
+			}
+			cancelPayload := map[string]any{
+				"order_id": uint64(101), "remaining_qty": int64(100), "reason": tc.reason,
+			}
+			if tc.includeRequest {
+				cancelPayload["request_id"] = uint64(12)
+			}
+			cancel := logLine(3, 7, "OrderCancelled", cancelPayload)
+			lines := []string{accepted(2, 101, 10)}
+			if tc.cancelAfter {
+				lines = append(lines, accepted(4, 201, 20), cancel)
+			} else {
+				lines = append(lines, cancel, accepted(4, 201, 20))
+			}
+			run, err := Open(writeRun(t, Report{TerminalAccounts: []AccountRow{{VenueID: "north", ClientID: 7, Role: "spot_maker_1"}}}, map[string][]string{
+				"north/general.jsonl":      {decision(1, 10, 11), decision(5, 20, 21)},
+				"north/spot/ABC-USD.jsonl": lines,
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := run.MeasureMakerPassiveRefreshOrdering(MakerQuoteSizeOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			invalidEvidence := result.InvalidOrderRecords > 0
+			if tc.cancelAfter {
+				invalidEvidence = result.Late > 0
+			}
+			if result.Valid || !invalidEvidence || len(result.Checks) == 0 {
+				t.Fatalf("contradictory forced cancellation result = %+v", result)
+			}
+		})
+	}
+}
+
 func TestMakerPassiveRefreshOrderingRecoversSymbolFromCanonicalBookPath(t *testing.T) {
 	decision := logLine(1, 7, "maker_quote_size_decision", map[string]any{
 		"maker": "spot_maker_1", "client_id": uint64(7), "symbol": "ABC/USD",

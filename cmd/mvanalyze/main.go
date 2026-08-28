@@ -19,6 +19,13 @@ import (
 	"exchange_sim/analysis"
 )
 
+func effectiveHedgeSymbol(baseSymbol, hedgeSymbol string, baseExplicit, hedgeExplicit bool) string {
+	if baseExplicit && !hedgeExplicit {
+		return baseSymbol
+	}
+	return hedgeSymbol
+}
+
 // analyzerProfiles bounds process profiling to offline analysis. It does not
 // participate in evidence decoding or alter any metric result.
 type analyzerProfiles struct {
@@ -142,6 +149,16 @@ func main() {
 	mutexProfile := flag.String("mutexprofile", "", "write mutex profile after offline analysis")
 	blockProfile := flag.String("blockprofile", "", "write block profile after offline analysis")
 	flag.Parse()
+	baseExplicit, hedgeExplicit := false, false
+	flag.Visit(func(parsed *flag.Flag) {
+		switch parsed.Name {
+		case "base":
+			baseExplicit = true
+		case "hedge-symbol":
+			hedgeExplicit = true
+		}
+	})
+	effectiveHedgeUnderlyingSymbol := effectiveHedgeSymbol(*base, *hedgeSymbol, baseExplicit, hedgeExplicit)
 
 	if flag.NArg() == 0 {
 		fmt.Fprintln(os.Stderr, "usage: mvanalyze [flags] <run dir>...")
@@ -697,7 +714,7 @@ func main() {
 			})
 		case "hedging":
 			result, err := run.MeasureHedging(analysis.HedgingOptions{
-				Symbol: *hedgeSymbol,
+				Symbol: effectiveHedgeUnderlyingSymbol,
 				Roles:  []string{"option_dealer", "vanna_volga_desk"},
 			})
 			if err != nil {
@@ -705,7 +722,7 @@ func main() {
 				os.Exit(1)
 			}
 			emit(dir, result, *asJSON, func() {
-				fmt.Printf("%-22s hedging in %s\n", dir, *hedgeSymbol)
+				fmt.Printf("%-22s hedging in %s\n", dir, effectiveHedgeUnderlyingSymbol)
 				for _, profile := range result.Profiles {
 					fmt.Printf("    %-8s %-18s trades %6d  qty %14d  gap %7.1fs (spread %7.1fs)  buys %4.2f\n",
 						profile.VenueID, profile.Role, profile.Trades, profile.Qty,

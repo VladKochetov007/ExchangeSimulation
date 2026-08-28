@@ -47,6 +47,18 @@ type postOnlyOrderKey struct {
 }
 
 func isExchangeForcedCancellation(reason string) bool {
+	switch reason {
+	case "EXCHANGE_FORCED_FEE_RESERVATION",
+		"EXCHANGE_FORCED_LIFECYCLE",
+		"EXCHANGE_FORCED_SELF_TRADE_PREVENTION",
+		"EXCHANGE_FORCED_BOOK_ADMISSION":
+		return true
+	default:
+		return false
+	}
+}
+
+func hasExchangeForcedCancellationPrefix(reason string) bool {
 	return strings.HasPrefix(reason, "EXCHANGE_FORCED_")
 }
 
@@ -619,6 +631,19 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					if event.Decode(&cancel) != nil {
 						return
 					}
+					forced := isExchangeForcedCancellation(cancel.Reason)
+					if hasExchangeForcedCancellationPrefix(cancel.Reason) && (!forced || cancel.Request != nil) {
+						invalidRequestID := uint64(0)
+						if cancel.Request != nil {
+							invalidRequestID = *cancel.Request
+						}
+						result.InvalidOrderRecords++
+						result.Checks = append(result.Checks, MakerPassiveRefreshCheck{
+							VenueID: book.venueID, File: path, ClientID: event.ClientID, Symbol: book.symbol,
+							RequestID: invalidRequestID, Failure: "invalid_forced_cancellation_evidence",
+						})
+						return
+					}
 					order := orders[cancel.OrderID]
 					if order == nil {
 						if _, trackedClient := tracked[event.ClientID]; trackedClient {
@@ -648,7 +673,7 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 					state.priorOrderIDs = []uint64{cancel.OrderID}
 					state.lastTerminal = "cancel"
 					state.terminalOrdinal = event.Ordinal
-					state.terminalForced = isExchangeForcedCancellation(cancel.Reason)
+					state.terminalForced = forced
 					if cancel.Request != nil {
 						if state.terminalForced {
 							state.terminalRequestID = 0

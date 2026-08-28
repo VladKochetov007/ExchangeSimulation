@@ -6,7 +6,6 @@ import (
 	"maps"
 	"math"
 	"slices"
-	"strings"
 
 	etypes "exchange_sim/types"
 )
@@ -16,7 +15,6 @@ const (
 	exchangeForcedLifecycleReason      = "EXCHANGE_FORCED_LIFECYCLE"
 	exchangeForcedSTPReason            = "EXCHANGE_FORCED_SELF_TRADE_PREVENTION"
 	exchangeForcedBookAdmissionReason  = "EXCHANGE_FORCED_BOOK_ADMISSION"
-	exchangeForcedCancelPrefix         = "EXCHANGE_FORCED_"
 )
 
 // logExchangeForcedCancellation records a terminal order transition caused by
@@ -34,10 +32,6 @@ func (e *DefaultExchange) logExchangeForcedCancellation(book *OrderBook, order *
 			"reason":        reason,
 		})
 	}
-}
-
-func isExchangeForcedCancellation(reason string) bool {
-	return strings.HasPrefix(reason, exchangeForcedCancelPrefix)
 }
 
 // acceptedOrderEvidence keeps an accepted order's established flat wire schema
