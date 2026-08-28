@@ -99,6 +99,17 @@ func TestMakerInventoryRebalanceRejectsAcceptedOrderIDCollision(t *testing.T) {
 	}
 }
 
+func TestMakerInventoryRebalanceRejectsCounterpartyOrderIDCollision(t *testing.T) {
+	run := p2TestRun(t, p2Fixture{DuplicateCounterpartyAcceptedOrderID: true})
+	result, err := run.MeasureMakerInventoryRebalance()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid || result.DuplicateAcceptedOrderIDs == 0 {
+		t.Fatalf("counterparty order-ID collision survived: %+v", result)
+	}
+}
+
 func TestMakerInventoryRebalanceRejectsFilledQuantityOverflow(t *testing.T) {
 	run := p2TestRun(t, p2Fixture{OverflowFills: true})
 	if _, err := run.MeasureMakerInventoryRebalance(); err == nil {
@@ -196,20 +207,21 @@ func TestMakerInventoryRebalanceAuditCatchesDeclaredMutations(t *testing.T) {
 }
 
 type p2Fixture struct {
-	Decision                  map[string]any
-	Fill                      map[string]any
-	FillEvidence              map[string]any
-	DuplicateDecision         bool
-	PartialFill               bool
-	DropCancel                bool
-	DuplicateFillEvidence     bool
-	OverflowFills             bool
-	Disabled                  bool
-	OmitAcceptedSymbol        bool
-	CounterpartyClient        uint64
-	CounterpartyPayloadClient uint64
-	DuplicateAcceptedOrderID  bool
-	ReceiptAt                 int64
+	Decision                             map[string]any
+	Fill                                 map[string]any
+	FillEvidence                         map[string]any
+	DuplicateDecision                    bool
+	PartialFill                          bool
+	DropCancel                           bool
+	DuplicateFillEvidence                bool
+	OverflowFills                        bool
+	Disabled                             bool
+	OmitAcceptedSymbol                   bool
+	CounterpartyClient                   uint64
+	CounterpartyPayloadClient            uint64
+	DuplicateAcceptedOrderID             bool
+	DuplicateCounterpartyAcceptedOrderID bool
+	ReceiptAt                            int64
 }
 
 func p2TestRun(t *testing.T, fixture p2Fixture) *Run {
@@ -279,6 +291,9 @@ func p2TestRun(t *testing.T, fixture p2Fixture) *Run {
 		logLine(21_000_000_000, 0, "Trade", map[string]any{"trade_id": uint64(9), "price": int64(298_500_000), "qty": qty, "taker_order_id": uint64(70), "maker_order_id": uint64(80)}),
 		logLine(21_000_000_000, 7, "OrderFill", fill),
 		logLine(21_000_000_000, 7, "maker_inventory_rebalance_fill", fillEvidence),
+	}
+	if fixture.DuplicateCounterpartyAcceptedOrderID {
+		lines = append(lines, logLine(21_000_000_000, counterpartyClient, "OrderAccepted", map[string]any{"order_id": uint64(80), "client_id": counterpartyClient, "request_id": uint64(44), "symbol": "CDF/USD", "side": "BUY", "type": "LIMIT", "time_in_force": "GTC", "post_only": false, "price": int64(298_500_000), "qty": qty}))
 	}
 	if fixture.DuplicateFillEvidence {
 		extraEvidence := make(map[string]any, len(fillEvidence))

@@ -531,6 +531,7 @@ func (r *Run) MeasureMakerInventoryRebalance() (*MakerInventoryRebalanceAudit, e
 		return nil, stateErr
 	}
 
+	counterpartyOrdersSeen := make(map[makerInventoryRebalanceOrderKey]struct{}, len(counterpartyOrders))
 	err = r.Scan(ScanOptions{Events: []string{"OrderAccepted"}, Workers: 1}, func(event Event) {
 		if stateErr != nil {
 			return
@@ -541,6 +542,21 @@ func (r *Run) MeasureMakerInventoryRebalance() (*MakerInventoryRebalanceAudit, e
 		}
 		key := makerInventoryRebalanceOrderKey{venueID: event.VenueID, orderID: order.OrderID}
 		if _, relevant := counterpartyOrders[key]; relevant {
+			if _, duplicate := counterpartyOrdersSeen[key]; duplicate {
+				result.DuplicateAcceptedOrderIDs++
+				addCheck(event.VenueID, order.ClientID, order.RequestID, order.OrderID, "duplicate_counterparty_order_id")
+				return
+			}
+			counterpartyOrdersSeen[key] = struct{}{}
+			if acceptedDecision, isAcceptedP2Order := accepted[key]; isAcceptedP2Order {
+				acceptedOrder := orders[key]
+				if acceptedOrder.ClientID != order.ClientID || acceptedDecision.ClientID != order.ClientID {
+					result.DuplicateAcceptedOrderIDs++
+					addCheck(event.VenueID, order.ClientID, order.RequestID, order.OrderID, "counterparty_order_id_collides_with_p2_order")
+					return
+				}
+				return
+			}
 			orders[key] = order
 		}
 	})
