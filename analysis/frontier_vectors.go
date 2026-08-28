@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -105,9 +106,46 @@ type scalarDecisionKey struct {
 	requestID uint64
 }
 
+type frontierScalarRecord struct {
+	key        scalarDecisionKey
+	symbolID   uint32
+	side       uint8
+	orderType  uint8
+	tif        uint8
+	decisionAt int64
+	price      int64
+	qty        int64
+}
+
+type frontierHistoryFile struct {
+	file          *os.File
+	writer        *bufio.Writer
+	count         uint64
+	nonSequential bool
+}
+
+type frontierHistoryStore struct {
+	dir       string
+	files     map[linkKey]*frontierHistoryFile
+	frontiers map[linkKey]auditedFrontier
+}
+
+const (
+	maxFrontierVectorRecords   = 2_000_000
+	maxFrontierScalarRecords   = 5_000_000
+	maxFrontierHistoryRecords  = 100_000_000
+	frontierHistoryRecordBytes = 32
+)
+
 // AuditDecisionFrontierVectors checks a separately persisted vector artifact
 // against the V2-0 schedule/receipt/decision evidence it names.
 func AuditDecisionFrontierVectors(dir string) (*DecisionFrontierVectorAudit, error) {
+	return auditDecisionFrontierVectorsStreaming(dir)
+}
+
+// auditDecisionFrontierVectorsBuffered is retained as a review oracle while
+// the production path moves to bounded streaming and disk-backed history.
+func auditDecisionFrontierVectorsBuffered(dir string) (*DecisionFrontierVectorAudit, error) {
 	base, err := AuditMarketDataReceipts(dir)
 	if err != nil {
 		return nil, fmt.Errorf("audit base market-data evidence: %w", err)
@@ -271,6 +309,426 @@ func AuditDecisionFrontierVectors(dir string) (*DecisionFrontierVectorAudit, err
 		result.BadComponentOrdinal == 0 && result.DuplicateComponent == 0 && result.BadComponentFrontier == 0 && result.FutureComponentUse == 0 &&
 		result.MissingDecisionComponents == 0 && result.ExtraDecisionComponents == 0 && result.NonzeroReserved == 0
 	return result, nil
+}
+
+func auditDecisionFrontierVectorsStreaming(dir string) (*DecisionFrontierVectorAudit, error) {
+	base, err := AuditMarketDataReceipts(dir)
+	if err != nil {
+		return nil, fmt.Errorf("audit base market-data evidence: %w", err)
+	}
+	vectorManifestRaw, err := os.ReadFile(filepath.Join(dir, "market-data-frontier-vectors-v1.json"))
+	if err != nil {
+		return nil, fmt.Errorf("read decision frontier-vector manifest: %w", err)
+	}
+	var manifest frontierVectorManifest
+	if err := json.Unmarshal(vectorManifestRaw, &manifest); err != nil {
+		return nil, fmt.Errorf("decode decision frontier-vector manifest: %w", err)
+	}
+	if manifest.SchemaVersion != 1 || manifest.Domain != "participant_information_frontier_vector_v1" ||
+		manifest.Ordering != "decision_then_sorted_components" || manifest.BaseManifest != "market-data-evidence-v2.json" ||
+		manifest.Decisions.File != "market-data-decision-vectors-v1.bin" || manifest.Components.File != "market-data-frontier-components-v1.bin" {
+		return nil, fmt.Errorf("unsupported decision frontier-vector contract")
+	}
+	if len(manifest.BaseManifestDigest) != 64 || manifest.Decisions.Records < 0 || manifest.Decisions.Records > maxFrontierVectorRecords ||
+		manifest.Components.Records < 0 || manifest.Components.Records > maxFrontierVectorRecords {
+		return nil, fmt.Errorf("invalid or oversized decision frontier-vector artifact")
+	}
+	baseManifestRaw, err := os.ReadFile(filepath.Join(dir, manifest.BaseManifest))
+	if err != nil {
+		return nil, fmt.Errorf("read vector base manifest: %w", err)
+	}
+	baseManifestDigest := sha256.Sum256(baseManifestRaw)
+	var baseManifest marketDataEvidenceManifest
+	if err := json.Unmarshal(baseManifestRaw, &baseManifest); err != nil {
+		return nil, fmt.Errorf("decode vector base manifest: %w", err)
+	}
+	baseLinks, _, err := validateEvidenceCatalog(baseManifest)
+	if err != nil {
+		return nil, err
+	}
+	if baseManifest.Decisions.Records < 0 || baseManifest.Decisions.Records > maxFrontierScalarRecords {
+		return nil, fmt.Errorf("oversized scalar decision evidence: %d records", baseManifest.Decisions.Records)
+	}
+	baseSymbolNames := make(map[uint32]string, len(baseManifest.Symbols))
+	for _, symbol := range baseManifest.Symbols {
+		baseSymbolNames[symbol.ID] = symbol.Symbol
+	}
+	vectorSymbols := make(map[uint32]string, len(manifest.Symbols))
+	for _, symbol := range manifest.Symbols {
+		if symbol.ID == 0 || symbol.Symbol == "" {
+			return nil, fmt.Errorf("invalid vector symbol catalog row")
+		}
+		if _, exists := vectorSymbols[symbol.ID]; exists {
+			return nil, fmt.Errorf("duplicate vector symbol catalog ID %d", symbol.ID)
+		}
+		vectorSymbols[symbol.ID] = symbol.Symbol
+	}
+	requiredLinks := make(map[linkKey]struct{}, len(manifest.RequiredScalarLinks))
+	for _, required := range manifest.RequiredScalarLinks {
+		key := linkKey{clientID: required.ClientID, linkID: required.LinkID}
+		if required.ClientID == 0 || required.LinkID == 0 {
+			return nil, fmt.Errorf("invalid required scalar decision link")
+		}
+		if _, known := baseLinks[required.LinkID]; !known {
+			return nil, fmt.Errorf("unknown required scalar decision link %d", required.LinkID)
+		}
+		if _, duplicate := requiredLinks[key]; duplicate {
+			return nil, fmt.Errorf("duplicate required scalar decision link client %d link %d", required.ClientID, required.LinkID)
+		}
+		requiredLinks[key] = struct{}{}
+	}
+
+	vectorRaw, decisionsDigest, err := readEvidenceFile(dir, manifest.Decisions.File, decisionFrontierVectorRecordBytes, manifest.Decisions.Records, manifest.Decisions.Digest)
+	if err != nil {
+		return nil, err
+	}
+	vectorRecords := make([]vectorDecisionRecord, 0, int(manifest.Decisions.Records))
+	result := &DecisionFrontierVectorAudit{
+		BaseEvidenceValid:         base.Valid,
+		BaseManifestDigestMatches: manifest.BaseManifestDigest == hex.EncodeToString(baseManifestDigest[:]),
+		DecisionDigestMatches:     decisionsDigest,
+		Decisions:                 manifest.Decisions.Records,
+		Components:                manifest.Components.Records,
+	}
+	for offset := 0; offset < len(vectorRaw); offset += decisionFrontierVectorRecordBytes {
+		if vectorRaw[offset+43] != 0 {
+			result.NonzeroReserved++
+		}
+		vectorRecords = append(vectorRecords, decodeVectorDecision(vectorRaw[offset:offset+decisionFrontierVectorRecordBytes]))
+	}
+	vectorRaw = nil
+
+	componentsRaw, componentsDigest, err := readEvidenceFile(dir, manifest.Components.File, decisionFrontierComponentRecordBytes, manifest.Components.Records, manifest.Components.Digest)
+	if err != nil {
+		return nil, err
+	}
+	result.ComponentDigestMatches = componentsDigest
+	componentsByDecision := make(map[uint64][]vectorComponentRecord)
+	for offset := 0; offset < len(componentsRaw); offset += decisionFrontierComponentRecordBytes {
+		record := decodeVectorComponent(componentsRaw[offset : offset+decisionFrontierComponentRecordBytes])
+		componentsByDecision[record.decisionID] = append(componentsByDecision[record.decisionID], record)
+	}
+	componentsRaw = nil
+
+	scalarRecords, scalarDigestMatches, err := readFrontierScalarRecords(dir, baseManifest)
+	if err != nil {
+		return nil, err
+	}
+	result.BaseEvidenceValid = result.BaseEvidenceValid && scalarDigestMatches
+	sort.Slice(scalarRecords, func(i, j int) bool {
+		return compareScalarDecisionKey(scalarRecords[i].key, scalarRecords[j].key) < 0
+	})
+	requiredScalarCounts := make(map[scalarDecisionKey]int)
+	for _, scalar := range scalarRecords {
+		if _, required := requiredLinks[linkKey{clientID: scalar.key.clientID, linkID: scalar.key.linkID}]; required {
+			requiredScalarCounts[scalar.key]++
+		}
+	}
+
+	vectorsByKey := append([]vectorDecisionRecord(nil), vectorRecords...)
+	sort.Slice(vectorsByKey, func(i, j int) bool {
+		return compareScalarDecisionKey(frontierVectorScalarKey(vectorsByKey[i]), frontierVectorScalarKey(vectorsByKey[j])) < 0
+	})
+	matchedRequired := make(map[scalarDecisionKey]int)
+	scalarIndex := 0
+	for vectorStart := 0; vectorStart < len(vectorsByKey); {
+		key := frontierVectorScalarKey(vectorsByKey[vectorStart])
+		vectorEnd := vectorStart + 1
+		for vectorEnd < len(vectorsByKey) && frontierVectorScalarKey(vectorsByKey[vectorEnd]) == key {
+			vectorEnd++
+		}
+		for scalarIndex < len(scalarRecords) && compareScalarDecisionKey(scalarRecords[scalarIndex].key, key) < 0 {
+			scalarIndex++
+		}
+		scalarStart := scalarIndex
+		for scalarIndex < len(scalarRecords) && scalarRecords[scalarIndex].key == key {
+			scalarIndex++
+		}
+		for _, vector := range vectorsByKey[vectorStart:vectorEnd] {
+			symbol, symbolOK := vectorSymbols[vector.symbolID]
+			matchingScalar := false
+			if symbolOK {
+				for _, scalar := range scalarRecords[scalarStart:scalarIndex] {
+					if baseSymbolNames[scalar.symbolID] == symbol && scalar.side == vector.side && scalar.orderType == vector.orderType && scalar.tif == vector.tif &&
+						scalar.decisionAt == vector.decisionAt && scalar.price == vector.price && scalar.qty == vector.qty {
+						matchingScalar = true
+						break
+					}
+				}
+			}
+			if !matchingScalar {
+				result.MissingScalarDecision++
+			} else if _, required := requiredLinks[linkKey{clientID: key.clientID, linkID: key.linkID}]; required {
+				matchedRequired[key]++
+			}
+		}
+		vectorStart = vectorEnd
+	}
+	for key, scalarCount := range requiredScalarCounts {
+		matches := matchedRequired[key]
+		if matches < scalarCount {
+			result.MissingVectorDecision += int64(scalarCount - matches)
+		}
+		if matches > scalarCount {
+			result.DuplicateVectorDecision += int64(matches - scalarCount)
+		}
+	}
+
+	history, err := buildFrontierHistoryStore(dir, baseManifest)
+	if err != nil {
+		return nil, err
+	}
+	defer history.close()
+	for index, record := range vectorRecords {
+		if record.id != uint64(index+1) {
+			result.BadDecisionID++
+		}
+		_, symbolOK := vectorSymbols[record.symbolID]
+		if record.actorID == 0 || record.clientID == 0 || record.requestID == 0 || record.tradingLinkID == 0 || record.componentCount == 0 || !symbolOK ||
+			record.side > 1 || !validVectorOrderPrice(record.orderType, record.price) || record.tif > 2 || record.decisionAt == 0 || record.qty <= 0 {
+			result.BadDecisionFields++
+		}
+		validateVectorComponentsStored(result, record, componentsByDecision[record.id], history, baseLinks)
+	}
+	for decisionID, components := range componentsByDecision {
+		if decisionID == 0 || decisionID > uint64(result.Decisions) {
+			result.ExtraDecisionComponents += int64(len(components))
+		}
+	}
+	result.Valid = result.BaseEvidenceValid && result.BaseManifestDigestMatches && result.DecisionDigestMatches && result.ComponentDigestMatches &&
+		result.BadDecisionID == 0 && result.BadDecisionFields == 0 && result.MissingScalarDecision == 0 && result.MissingVectorDecision == 0 && result.DuplicateVectorDecision == 0 && result.UnknownComponentLink == 0 &&
+		result.BadComponentOrdinal == 0 && result.DuplicateComponent == 0 && result.BadComponentFrontier == 0 && result.FutureComponentUse == 0 &&
+		result.MissingDecisionComponents == 0 && result.ExtraDecisionComponents == 0 && result.NonzeroReserved == 0
+	return result, nil
+}
+
+func readFrontierScalarRecords(dir string, manifest marketDataEvidenceManifest) ([]frontierScalarRecord, bool, error) {
+	stream, err := openEvidenceRecordStream(dir, manifest.Decisions.File, marketDataDecisionRecordBytes, manifest.Decisions.Records, manifest.Decisions.Digest)
+	if err != nil {
+		return nil, false, err
+	}
+	defer stream.close()
+	records := make([]frontierScalarRecord, 0, int(manifest.Decisions.Records))
+	for {
+		available, err := stream.next()
+		if err != nil {
+			return nil, false, err
+		}
+		if !available {
+			break
+		}
+		if len(records) >= maxFrontierScalarRecords {
+			return nil, false, fmt.Errorf("decision frontier scalar evidence exceeds %d records", maxFrontierScalarRecords)
+		}
+		decision := decodeDecision(stream.record)
+		records = append(records, frontierScalarRecord{
+			key:      scalarDecisionKey{clientID: decision.clientID, linkID: decision.linkID, requestID: decision.requestID},
+			symbolID: decision.symbolID, side: decision.side, orderType: decision.orderType, tif: decision.tif,
+			decisionAt: decision.decisionAt, price: decision.price, qty: decision.qty,
+		})
+	}
+	return records, stream.digestMatch, nil
+}
+
+func compareScalarDecisionKey(left, right scalarDecisionKey) int {
+	if left.clientID != right.clientID {
+		if left.clientID < right.clientID {
+			return -1
+		}
+		return 1
+	}
+	if left.linkID != right.linkID {
+		if left.linkID < right.linkID {
+			return -1
+		}
+		return 1
+	}
+	if left.requestID < right.requestID {
+		return -1
+	}
+	if left.requestID > right.requestID {
+		return 1
+	}
+	return 0
+}
+
+func frontierVectorScalarKey(record vectorDecisionRecord) scalarDecisionKey {
+	return scalarDecisionKey{clientID: record.clientID, linkID: record.tradingLinkID, requestID: record.requestID}
+}
+
+func buildFrontierHistoryStore(dir string, manifest marketDataEvidenceManifest) (*frontierHistoryStore, error) {
+	history, err := newFrontierHistoryStore()
+	if err != nil {
+		return nil, err
+	}
+	if manifest.Receipts.Records < 0 || manifest.Receipts.Records > maxFrontierHistoryRecords {
+		history.close()
+		return nil, fmt.Errorf("oversized receipt frontier history: %d records", manifest.Receipts.Records)
+	}
+	stream, err := openEvidenceRecordStream(dir, manifest.Receipts.File, marketDataReceiptRecordBytes, manifest.Receipts.Records, manifest.Receipts.Digest)
+	if err != nil {
+		history.close()
+		return nil, err
+	}
+	defer stream.close()
+	for {
+		available, err := stream.next()
+		if err != nil {
+			history.close()
+			return nil, err
+		}
+		if !available {
+			break
+		}
+		record := decodeObservationView(stream.record)
+		record.raw = stream.record
+		if err := history.append(record); err != nil {
+			history.close()
+			return nil, err
+		}
+	}
+	if err := history.prepare(); err != nil {
+		history.close()
+		return nil, err
+	}
+	return history, nil
+}
+
+func newFrontierHistoryStore() (*frontierHistoryStore, error) {
+	dir, err := os.MkdirTemp("", "v2-frontier-history-")
+	if err != nil {
+		return nil, fmt.Errorf("create decision frontier history spill directory: %w", err)
+	}
+	return &frontierHistoryStore{dir: dir, files: make(map[linkKey]*frontierHistoryFile), frontiers: make(map[linkKey]auditedFrontier)}, nil
+}
+
+func (s *frontierHistoryStore) fileFor(key linkKey) (*frontierHistoryFile, error) {
+	if stored, ok := s.files[key]; ok {
+		return stored, nil
+	}
+	file, err := os.Create(filepath.Join(s.dir, fmt.Sprintf("frontier-%d-%d.bin", key.clientID, key.linkID)))
+	if err != nil {
+		return nil, fmt.Errorf("create decision frontier history file: %w", err)
+	}
+	stored := &frontierHistoryFile{file: file, writer: bufio.NewWriterSize(file, 1<<20)}
+	s.files[key] = stored
+	return stored, nil
+}
+
+func (s *frontierHistoryStore) append(record observationRecord) error {
+	key := linkKey{clientID: record.clientID, linkID: record.linkID}
+	stored, err := s.fileFor(key)
+	if err != nil {
+		return err
+	}
+	if stored.count == ^uint64(0) {
+		return fmt.Errorf("decision frontier history exceeds uint64 row count")
+	}
+	if record.ordinal != stored.count+1 {
+		stored.nonSequential = true
+	}
+	previous := s.frontiers[key]
+	chain := sha256.New()
+	_, _ = chain.Write(previous.digest[:])
+	_, _ = chain.Write(record.raw)
+	var digest [16]byte
+	copy(digest[:], chain.Sum(nil))
+	frontier := auditedFrontier{ordinal: record.ordinal, deliveredAt: record.deliveredAt, digest: digest}
+	s.frontiers[key] = frontier
+	var raw [frontierHistoryRecordBytes]byte
+	binary.BigEndian.PutUint64(raw[0:8], record.ordinal)
+	binary.BigEndian.PutUint64(raw[8:16], uint64(record.deliveredAt))
+	copy(raw[16:32], digest[:])
+	if _, err := stored.writer.Write(raw[:]); err != nil {
+		return fmt.Errorf("spill decision frontier history: %w", err)
+	}
+	stored.count++
+	return nil
+}
+
+func (s *frontierHistoryStore) prepare() error {
+	for key, stored := range s.files {
+		if err := stored.writer.Flush(); err != nil {
+			return fmt.Errorf("flush decision frontier history client %d link %d: %w", key.clientID, key.linkID, err)
+		}
+	}
+	return nil
+}
+
+func (s *frontierHistoryStore) lookup(key vectorFrontierKey) (auditedFrontier, bool) {
+	stored, ok := s.files[linkKey{clientID: key.clientID, linkID: key.linkID}]
+	if !ok || key.ordinal == 0 || stored.nonSequential || key.ordinal > stored.count || key.ordinal-1 > uint64(^uint64(0)>>1)/frontierHistoryRecordBytes {
+		return auditedFrontier{}, false
+	}
+	var raw [frontierHistoryRecordBytes]byte
+	offset := int64((key.ordinal - 1) * frontierHistoryRecordBytes)
+	read, err := stored.file.ReadAt(raw[:], offset)
+	if err != nil || read != len(raw) {
+		return auditedFrontier{}, false
+	}
+	var digest [16]byte
+	copy(digest[:], raw[16:32])
+	frontier := auditedFrontier{ordinal: binary.BigEndian.Uint64(raw[0:8]), deliveredAt: int64(binary.BigEndian.Uint64(raw[8:16])), digest: digest}
+	return frontier, frontier.ordinal == key.ordinal
+}
+
+func (s *frontierHistoryStore) close() error {
+	var first error
+	for key, stored := range s.files {
+		if err := stored.writer.Flush(); err != nil && first == nil {
+			first = fmt.Errorf("flush decision frontier history client %d link %d: %w", key.clientID, key.linkID, err)
+		}
+		if err := stored.file.Close(); err != nil && first == nil {
+			first = fmt.Errorf("close decision frontier history client %d link %d: %w", key.clientID, key.linkID, err)
+		}
+	}
+	if err := os.RemoveAll(s.dir); err != nil && first == nil {
+		first = err
+	}
+	return first
+}
+
+func validateVectorComponentsStored(result *DecisionFrontierVectorAudit, decision vectorDecisionRecord, components []vectorComponentRecord, history *frontierHistoryStore, links map[uint32]struct{}) {
+	if len(components) == 0 {
+		result.MissingDecisionComponents++
+		return
+	}
+	if uint32(len(components)) != decision.componentCount {
+		if uint32(len(components)) < decision.componentCount {
+			result.MissingDecisionComponents++
+		} else {
+			result.ExtraDecisionComponents += int64(len(components)) - int64(decision.componentCount)
+		}
+	}
+	sort.Slice(components, func(i, j int) bool { return components[i].ordinal < components[j].ordinal })
+	seen := make(map[linkKey]struct{}, len(components))
+	for index, component := range components {
+		if component.ordinal != uint32(index+1) {
+			result.BadComponentOrdinal++
+		}
+		key := linkKey{clientID: component.clientID, linkID: component.linkID}
+		if component.clientID == 0 || component.linkID == 0 {
+			result.UnknownComponentLink++
+		}
+		if _, known := links[component.linkID]; !known {
+			result.UnknownComponentLink++
+		}
+		if _, duplicate := seen[key]; duplicate {
+			result.DuplicateComponent++
+		}
+		seen[key] = struct{}{}
+		if component.frontier.ordinal == 0 || component.frontier.deliveredAt == 0 || component.frontier.digest == ([16]byte{}) {
+			result.BadComponentFrontier++
+			continue
+		}
+		want, exists := history.lookup(vectorFrontierKey{clientID: component.clientID, linkID: component.linkID, ordinal: component.frontier.ordinal})
+		if !exists || want != component.frontier {
+			result.BadComponentFrontier++
+		}
+		if component.frontier.deliveredAt > decision.decisionAt {
+			result.FutureComponentUse++
+		}
+	}
 }
 
 // validVectorOrderPrice mirrors the persisted request protocol without
