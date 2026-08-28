@@ -68,9 +68,11 @@ for cell in dev-607 dev-613 dev-617; do
 		declared_sha256=$(jq -er --arg artifact "$artifact" '.artifact_sha256[$artifact]' "$cell_dir/analysis-metadata.json")
 		[[ "$actual_sha256" == "$declared_sha256" ]] || fail "artifact hash mismatch: $cell/$artifact"
 	done
-	jq -e '(.predicates | keys) == ["activation", "conservation", "derivatives", "expiry", "exposure", "fill_positions", "frontier_vectors", "hedging", "late_path", "liability_hedger", "liquidations", "maker_quote_size", "maker_rebalance", "maker_refresh", "margin", "mechanical", "observation_receipts", "option_liability", "option_surface", "option_value_taker", "order_lifecycle", "positions", "post_only", "settlement", "vanna_volga"] and
+	jq -e '.schema_version == 1 and .contract == "v2-integrated-longrun-candidate-v3" and
+		(.predicates | keys) == ["activation", "conservation", "derivatives", "expiry", "exposure", "fill_positions", "frontier_vectors", "hedging", "late_path", "liability_hedger", "liquidations", "maker_quote_size", "maker_rebalance", "maker_refresh", "margin", "mechanical", "observation_receipts", "option_liability", "option_surface", "option_value_taker", "order_lifecycle", "positions", "post_only", "settlement", "vanna_volga"] and
 		all(.predicates | to_entries[]; .value == true)' "$cell_dir/integrity.json" >/dev/null || fail "integrity predicate failed: $cell"
-	jq -e '(.result.predicates | length) == 2 and
+	jq -e '.schema_version == 1 and .result.contract == "v2-integrated-longrun-candidate-v3" and
+		(.result.predicates | length) == 2 and
 		(.result.predicates | keys) == ["cdf_collateral_borrowing_observed", "zero_price_unavailable_order_rejections"] and
 		all(.result.predicates | to_entries[]; .value == true)' "$cell_dir/activation.json" >/dev/null || fail "activation predicate failed: $cell"
 	for inactive in fundingcarry termcarry datedcarryp5 datedmandatep5 perpreplenishment; do

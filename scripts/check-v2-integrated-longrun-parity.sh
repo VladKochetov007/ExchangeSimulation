@@ -39,17 +39,35 @@ for cell in dev-607 dev-607-none dev-607-g8; do
 	done
 done
 
-jq -e '.cell == "dev-607" and .seed == 607 and .holdout == false and
+jq -e '.schema_version == 3 and .runner_contract == "v2-integrated-longrun-runner-v3" and
+	.cell == "dev-607" and .seed == 607 and .holdout == false and
 	.log_mode == "full" and .gomaxprocs == 4 and
-	.hypothesis_id == "V2-INTEGRATED-LONG-CANDIDATE"' \
+	.hypothesis_id == "V2-INTEGRATED-LONG-CANDIDATE" and
+	.binary_vcs_modified == false and .binary_trimpath == true and
+	.binary_cgo_enabled == "0" and
+	(.git_revision | test("^[0-9a-f]{40}$")) and
+	(.config_sha256 | test("^[0-9a-f]{64}$")) and
+	(.binary_sha256 | test("^[0-9a-f]{64}$"))' \
 	"$output_root/dev-607/run-metadata.json" >/dev/null || fail "invalid seed-607 g4 metadata"
-jq -e '.cell == "dev-607-none" and .seed == 607 and .holdout == false and
+jq -e '.schema_version == 3 and .runner_contract == "v2-integrated-longrun-runner-v3" and
+	.cell == "dev-607-none" and .seed == 607 and .holdout == false and
 	.log_mode == "none" and .gomaxprocs == 4 and
-	.hypothesis_id == "V2-INTEGRATED-LONG-CANDIDATE-PARITY"' \
+	.hypothesis_id == "V2-INTEGRATED-LONG-CANDIDATE-PARITY" and
+	.binary_vcs_modified == false and .binary_trimpath == true and
+	.binary_cgo_enabled == "0" and
+	(.git_revision | test("^[0-9a-f]{40}$")) and
+	(.config_sha256 | test("^[0-9a-f]{64}$")) and
+	(.binary_sha256 | test("^[0-9a-f]{64}$"))' \
 	"$output_root/dev-607-none/run-metadata.json" >/dev/null || fail "invalid seed-607 no-log metadata"
-jq -e '.cell == "dev-607-g8" and .seed == 607 and .holdout == false and
+jq -e '.schema_version == 3 and .runner_contract == "v2-integrated-longrun-runner-v3" and
+	.cell == "dev-607-g8" and .seed == 607 and .holdout == false and
 	.log_mode == "full" and .gomaxprocs == 8 and
-	.hypothesis_id == "V2-INTEGRATED-LONG-CANDIDATE"' \
+	.hypothesis_id == "V2-INTEGRATED-LONG-CANDIDATE" and
+	.binary_vcs_modified == false and .binary_trimpath == true and
+	.binary_cgo_enabled == "0" and
+	(.git_revision | test("^[0-9a-f]{40}$")) and
+	(.config_sha256 | test("^[0-9a-f]{64}$")) and
+	(.binary_sha256 | test("^[0-9a-f]{64}$"))' \
 	"$output_root/dev-607-g8/run-metadata.json" >/dev/null || fail "invalid seed-607 g8 metadata"
 
 for cell in dev-607 dev-607-none dev-607-g8; do
@@ -96,7 +114,8 @@ for cell in dev-607 dev-607-none dev-607-g8; do
 	jq -e --arg revision "$source_revision" \
 		--arg binary_sha256 "$binary_sha256" --arg binary_go_version "$binary_go_version" \
 		'.git_revision == $revision and .binary_vcs_modified == false and .binary_vcs_revision == $revision and
-		 .binary_sha256 == $binary_sha256 and .binary_go_version == $binary_go_version' \
+			 .binary_sha256 == $binary_sha256 and .binary_go_version == $binary_go_version and
+			 .binary_trimpath == true and .binary_cgo_enabled == "0"' \
 		"$output_root/$cell/run-metadata.json" >/dev/null || fail "parity source identity differs: $cell"
 	jq -e --arg revision "$source_revision" \
 		'.build.revision == $revision and .build.modified == false' \

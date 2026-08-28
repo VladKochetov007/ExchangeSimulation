@@ -70,6 +70,13 @@ immutable run and analysis metadata and carried into the write-once score. The
 simulator source identity and analyzer source identity are recorded
 separately; no analyzer correction is applied retroactively to r2.
 
+The parity attestation independently requires schema 3, runner-v3, clean
+VCS/build identity, `trimpath=true`, and `CGO_ENABLED=0` on the full-G4,
+no-log-G4, and full-G8 controls; a legacy runner-v2 control cannot satisfy a
+v3 parity claim. The scorer additionally verifies that each development
+`integrity.json` and `activation.json` carries the candidate-v3 contract
+inside the artifact itself, rather than trusting analysis metadata alone.
+
 Before any v3 development cell is launched, an independent Sol-xhigh review
 must ACCEPT the combined source correction, exact forced-cancellation schema,
 fail-closed scorer, hedging compatibility rule, v3 extractor, and v2 scorer.
