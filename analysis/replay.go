@@ -162,7 +162,9 @@ type deltaPayload struct {
 	HiddenQty  int64  `json:"hidden_qty"`
 }
 
-func replayedSideMatchesSnapshot(replayed map[int64]int64, snapshot []bookLevel) bool {
+const snapshotDepthLimit = 20
+
+func replayedSideMatchesSnapshot(replayed map[int64]int64, snapshot []bookLevel, highest bool) bool {
 	expected := make(map[int64]int64, len(snapshot))
 	for _, level := range snapshot {
 		quantity, ok := addAuditInt64(level.VisibleQty, level.HiddenQty)
@@ -179,11 +181,25 @@ func replayedSideMatchesSnapshot(replayed map[int64]int64, snapshot []bookLevel)
 		}
 		expected[level.Price] = quantity
 	}
-	if len(expected) != len(replayed) {
-		return false
-	}
 	for price, quantity := range expected {
 		if replayed[price] != quantity {
+			return false
+		}
+	}
+	if len(snapshot) < snapshotDepthLimit {
+		// GetSnapshot returns every active level when the side contains fewer
+		// than the cap. An extra replay level is then a genuine drift.
+		return len(expected) == len(replayed)
+	}
+	// At the cap, only levels beyond the published boundary are unobservable.
+	// An extra replay level on the observable side of that boundary would have
+	// displaced one of the published levels and is therefore a mismatch.
+	boundary := snapshot[len(snapshot)-1].Price
+	for price := range replayed {
+		if _, published := expected[price]; published {
+			continue
+		}
+		if (highest && price > boundary) || (!highest && price < boundary) {
 			return false
 		}
 	}
@@ -191,10 +207,10 @@ func replayedSideMatchesSnapshot(replayed map[int64]int64, snapshot []bookLevel)
 }
 
 func (b *ReplayedBook) matchesSnapshot(snapshot bookSnapshot) bool {
-	// The logger records the complete god-view depth, not the bounded public
-	// view. An omitted level therefore means an empty level, which makes the
-	// comparison exact and gives truncation a fail-closed meaning.
-	return replayedSideMatchesSnapshot(b.bids, snapshot.Bids) && replayedSideMatchesSnapshot(b.asks, snapshot.Asks)
+	// The logger records the god-view depth, capped at the book's explicit
+	// twenty-level snapshot limit. The published prefix is exact; only levels
+	// beyond a full prefix are intentionally unobservable.
+	return replayedSideMatchesSnapshot(b.bids, snapshot.Bids, true) && replayedSideMatchesSnapshot(b.asks, snapshot.Asks, false)
 }
 
 func decodeRequiredBookSnapshot(raw json.RawMessage, snapshot *bookSnapshot) error {
@@ -218,6 +234,32 @@ func decodeRequiredBookSnapshot(raw json.RawMessage, snapshot *bookSnapshot) err
 		}
 		if _, ok := addAuditInt64(level.VisibleQty, level.HiddenQty); !ok {
 			return fmt.Errorf("snapshot quantity overflows int64")
+		}
+	}
+	if err := validateSnapshotOrder(snapshot.Bids, true); err != nil {
+		return err
+	}
+	if err := validateSnapshotOrder(snapshot.Asks, false); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateSnapshotOrder(levels []bookLevel, highest bool) error {
+	if len(levels) > snapshotDepthLimit {
+		return fmt.Errorf("snapshot exceeds depth limit")
+	}
+	for index, level := range levels {
+		quantity, ok := addAuditInt64(level.VisibleQty, level.HiddenQty)
+		if !ok || quantity <= 0 {
+			return fmt.Errorf("snapshot contains an empty level")
+		}
+		if index == 0 {
+			continue
+		}
+		previous := levels[index-1].Price
+		if (highest && previous <= level.Price) || (!highest && previous >= level.Price) {
+			return fmt.Errorf("snapshot levels are not strictly price ordered")
 		}
 	}
 	return nil

@@ -197,6 +197,27 @@ func TestReplayDetectsDeepQuantityDrift(t *testing.T) {
 	}
 }
 
+func TestReplayHonorsTruncatedTwentyLevelSnapshotPrefix(t *testing.T) {
+	lines := []string{deltaLine(1, "BUY", 100, 50)}
+	asks := make([][2]int64, 0, snapshotDepthLimit)
+	for index := int64(0); index < snapshotDepthLimit+1; index++ {
+		price := 200 + index
+		quantity := int64(10 + index)
+		lines = append(lines, deltaLine(1, "SELL", price, quantity))
+		if index < snapshotDepthLimit {
+			asks = append(asks, [2]int64{price, quantity})
+		}
+	}
+	lines = append(lines, snapshotEventLine(2, 0, [][2]int64{{100, 50}}, asks))
+	drift, err := ReplayFile(writeLog(t, lines), nil)
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if drift.Checks != 1 || drift.Mismatches != 0 {
+		t.Fatalf("valid depth beyond the published prefix was treated as drift: %+v", drift)
+	}
+}
+
 // A snapshot delivered to a subscribing client is that client's view at the
 // moment it connected, not the standing book, so it must not resynchronise the
 // replay nor count as a check.
