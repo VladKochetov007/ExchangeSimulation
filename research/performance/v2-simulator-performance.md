@@ -274,53 +274,69 @@ less work and provably identical, but **-0.34% wall with overlapping ranges**:
 reported as no measurable gain. The string-keyed `positionKey` hash is the real
 cost here, and replacing it with an integer instrument handle is a wider change.
 
+### S9 — Index resting orders by owner (`c9c9cbf`)
+
+Order admission answers three questions that each concern one client's own
+resting orders — position exposure, hedge-reduce headroom, and self-crossing
+quotes — and each scanned the entire book side to find them: O(book) work per
+placement to examine a handful of orders. Two of the three were 3.48% and 1.66%
+of CPU.
+
+`Book` now indexes resting orders by owner, maintained at the single insertion
+and single removal site. The call sites narrow their candidate set and keep
+their ownership filters unchanged, so both paths select identically. Detached
+preview books deliberately carry no index — a preview is built and discarded
+without being queried, and indexing it would add allocation to the largest
+allocation site in the simulator to serve nobody.
+
+**-2.0% wall, -2.1% CPU.** Predicted ~5%; the gap is that these functions also
+do non-iteration work. Peak RSS rose 3.2% in that batch, and removing the map
+capacity hints did not change it, so it is GC pacing rather than the index's own
+footprint; against the pristine base peak RSS is level.
+
 ### Combined result
 
-Pristine base against S1-S8, `log_mode=full`, `GOMAXPROCS=1` pinned to one core,
+Pristine base against S1-S9, `log_mode=full`, `GOMAXPROCS=1` pinned to one core,
 six alternating repetitions:
 
 | Measure | base | optimized | change |
 | --- | ---: | ---: | ---: |
-| Wall | 17.785 s | **11.32 s** | **-36.4%** |
-| CPU | 17.665 s | 11.235 s | -36.4% |
-| Peak RSS | 762,318 KiB | 741,330 KiB | -2.8% |
+| Wall | 17.89 s | **11.095 s** | **-38.0%** |
+| CPU | 17.74 s | 11.00 s | -38.0% |
+| Peak RSS | 758,982 KiB | 758,610 KiB | -0.04% |
 | Allocated bytes | 4,395 MB | 3,221 MB | -26.7% |
 
-Ranges 17.72-17.90 against 11.24-11.37.
+> **Target metric at `GOMAXPROCS=1`: 50.3 to 81.1 simulated seconds per
+> wall-clock second, a 1.61x speedup**, with all four determinism oracles
+> identical on three seeds and both log modes.
 
-> **Target metric at `GOMAXPROCS=1`: 50.6 to 79.5 simulated seconds per
-> wall-clock second, a 1.57x speedup, with all four determinism oracles
-> identical on three seeds and both log modes.**
-
-### The simulator is GOMAXPROCS-invariant, and that is worth 14% more
+### The simulator is GOMAXPROCS-invariant, and that is worth another 15%
 
 The benchmark protocol pins `GOMAXPROCS=1` because it makes measurements
-contention-immune. It is not the fastest setting.
+contention-immune. It is not the fastest setting. Measured on the final binary:
 
 | `GOMAXPROCS` | wall | CPU | peak RSS | execution hash |
 | ---: | ---: | ---: | ---: | --- |
-| 1 | 11.83 s | 11.77 s | 747,996 KiB | `51541f91db7c5eae…` |
-| 2 | 10.43 s | 11.36 s | 631,636 KiB | `51541f91db7c5eae…` |
-| **4** | **10.14 s** | 11.26 s | 630,540 KiB | `51541f91db7c5eae…` |
-| 8 | 10.12 s | 11.42 s | 624,156 KiB | `51541f91db7c5eae…` |
+| 1 | 11.59 s | 11.52 s | 765,212 KiB | `51541f91db7c5eae…` |
+| 2 | 10.34 s | 11.24 s | 634,944 KiB | `51541f91db7c5eae…` |
+| **4** | **9.88 s** | 11.12 s | 630,676 KiB | `51541f91db7c5eae…` |
+| 8 | 10.00 s | 11.37 s | 623,644 KiB | `51541f91db7c5eae…` |
 
-`GOMAXPROCS=4` is **-14.3% wall and -15.7% peak RSS** against 1, and there is no
-further gain at 8. CPU time falls slightly too, because GC assist work overlaps
-instead of serializing onto the one runnable core — which is also why the heap
-stays smaller.
+`GOMAXPROCS=4` is **-14.8% wall and -17.6% peak RSS** against 1, with no gain at
+8. CPU time falls slightly too, because GC assist work overlaps instead of
+serializing onto the one runnable core — which is also why the heap stays
+smaller.
 
-Determinism was not assumed. Twelve runs — four each at `GOMAXPROCS` 2, 4 and 8
-— produced evidence trees **byte-identical** to the `GOMAXPROCS=1` reference,
-all 27 files and 442,225,951 bytes, `diff -rq` clean. The deterministic-phase
-barrier design is what makes this hold: ordering comes from the phase
-scheduler, not from goroutine timing.
+Determinism was verified, not assumed: twelve runs, four each at `GOMAXPROCS` 2,
+4 and 8, produced evidence trees **byte-identical** to the `GOMAXPROCS=1`
+reference — all 27 files and 442,225,951 bytes, `diff -rq` clean. Ordering comes
+from the deterministic phase barrier, not from goroutine timing.
 
-This is a run-configuration finding, not a code change, and adopting it is the
-scientific owner's call because the r5 protocol may register `GOMAXPROCS`. If it
-is adopted:
+Adopting it is the scientific owner's call, because the r5 protocol may register
+`GOMAXPROCS`. If it is adopted:
 
-> **Target metric at `GOMAXPROCS=4`: 50.6 to 88.8 simulated seconds per
-> wall-clock second, a 1.75x total speedup.**
+> **Target metric at `GOMAXPROCS=4`: 50.3 to 91.1 simulated seconds per
+> wall-clock second, a 1.81x total speedup, with peak RSS down 17%.**
 
 ## 6. Rejected optimizations
 
@@ -386,11 +402,33 @@ recorded for whoever revisits it rather than acted on.
 | Idea | Hotspot | Proposed | Expected | Risk | Status |
 | --- | --- | --- | ---: | --- | --- |
 | Adopt `GOMAXPROCS=4` | run configuration | none — no code change | **-14.3% wall, -15.7% RSS** | none technically; byte-identical over 12 runs | **measured; awaiting a protocol decision** |
-| Integer instrument/venue/client handles | map ops ~14% | resolve once at setup, index dense slices | up to ~8% | medium, wide diff | not started |
+| Integer instrument/venue/client handles | string-keyed lookups only ~1.6% | resolve once at setup, index dense slices | **<2%** | medium, wide diff | **deprioritized by measurement, see below** |
 | Incremental margin state | margin 6.3% + liquidation 5.9% | cache, invalidate on position change | up to ~8% | high: risk semantics | not started |
 | Preview-book reuse | 16.9% of allocation | reuse with a `Book.Reset` | ~1.5% | high; ownership now proved, see R6 | declined on return, not safety |
 | Reduce remaining `DelayedGateway` allocation | 338 MB after S4 | checked-out scratch buffers | ~0.4% | medium | R2 attempt failed |
 | Go PGO | whole binary | `default.pgo` from a representative run | unmeasured | low semantic | blocked: determinism and binary size proved on `perf/thread-pgo`, timing batch discarded as contaminated and never re-run |
+
+### Integer handles: the hypothesis measurement did not support
+
+Map operations are ~15% of CPU, and the obvious reading is that string-keyed
+lookups on symbols and venue identifiers are the cost, so integer handles would
+be the big win. **The profile says otherwise.** Broken down by runtime symbol:
+
+| Map cost | share |
+| --- | ---: |
+| iteration (`Iter.Next`, `matchFull`, `mapIterNext`) | ~5.4% |
+| hashing and probing (`matchH2`, `aeshashbody`, `memhash64`) | ~5.0% |
+| **string-keyed lookups** (`mapaccess*_faststr`, `getWithoutKeySmallFastStr`) | **~1.6%** |
+
+The string lookups are spread across twelve callers at 0.01-0.03 s each, none
+individually worth a refactor. The dominant cost was *iteration*, and the single
+largest iterator was `positionExposureViolation` at 42.9% of all iteration
+starts — which S9 addressed directly, by not iterating the wrong collection,
+rather than by changing what the keys are.
+
+The one remaining concentrated string-hash cost is `positionKey`, a
+`{symbol string, side}` composite that is 62.5% of `aeshashbody` — about 1.2% of
+CPU. That is the entire realistic prize for instrument handles here.
 
 ### What is no longer worth attacking
 
