@@ -1,0 +1,421 @@
+# V2 parallel performance evaluation
+
+Status: **in progress**. Analyzer line complete and measured; simulator line
+partially complete. Nothing here changes economic behavior, actor policy, RNG
+consumption, scheduler ordering, matching, admission, fees, margin, settlement,
+funding, instrument lifecycle, experiment configs, thresholds, or evidence
+meaning. Every accepted change is held to byte-identical output.
+
+## 1. Base commit and isolation
+
+| Field | Value |
+| --- | --- |
+| Scientific HEAD at start | `887899ff05f10dc6fd43d8cd8e88d52d5817c3b3` (`feat: add lossless long-run evidence archiving`) |
+| Performance branch | `autoresearch/v2-performance-research` |
+| Worktree | `/home/vlad/development/exchange_simulation-perf` |
+| Helper branches | `perf/thread-sim` (simulator baseline), `perf/thread-pgo`, `perf/thread-arch` |
+
+The active scientific worktree was never modified, reset, or checked out.
+Nothing was merged into `autoresearch/ffa-ecology-gen0`.
+
+`research/artifacts/v2-7-p7d/holdout` is the only registered holdout directory
+in the tree. It was not read, listed, run, or benchmarked against. All
+measurements use retained development evidence under `scratch/` — the same
+`signed-price-hardening-20260824` cell the previous performance gate used — or
+freshly generated benchmark runs with a non-scientific seed writing only to
+temporary directories.
+
+## 2. Machine and toolchain
+
+| Field | Value |
+| --- | --- |
+| Host | 16 CPUs, 62 GB RAM, Linux 7.1.10 |
+| Go | `go1.26.7-X:nodwarf5 linux/amd64` |
+| C++ | GCC 16.2.1, AVX2 + AVX-512 (VBMI) available |
+| External Go dependencies | none, before and after |
+
+### Benchmark discipline
+
+Three research threads shared one host, and the first timing batches of all
+three were contaminated — load average reached 11-13, and one sample came in 70%
+above its own minimum. A machine-wide mutex (`/tmp/exsim-benchlock.sh`, flock on
+`/tmp/exsim-bench.lock`) now serializes timed measurements; builds, correctness
+differentials and profile collection run unlocked.
+
+All numbers below are medians of alternating A/B repetitions with ranges quoted,
+warm page cache, fixed `GOMAXPROCS`, and the lock held. Where a sample is
+visibly contaminated it is called out rather than averaged away. Simulator
+timings are pinned to one core with `taskset`, which makes them
+contention-immune.
+
+## 3. Workloads
+
+**Analyzer.** Retained development cell
+`scratch/signed-price-hardening-20260824/full-evidence-seed101`: 15 JSONL files,
+684,601,507 bytes, 2,126,782 records, 3 venues, spot + derivatives. This is the
+same specimen the previous gate and the union-cache evaluation used, so results
+are directly comparable to them.
+
+The registered metric set is the 31 derived artifacts driven by
+`scripts/extract-v2-integrated-longrun-cell.sh`. On this development cell 5 of
+the 31 are inactive because the corresponding recorders were not enabled, so
+26 produce artifacts and 19 of those are scan-based. Benchmarks use the 19
+scan-based metrics; differentials use all 31.
+
+**Simulator.** `research/configs/v2-integrated-longrun/dev-607.json`, benchmark
+seed **900101** (non-scientific; overrides the registered seed 607), 15
+simulated minutes, `GOMAXPROCS=1`, output to temporary directories only.
+
+## 4. Baseline
+
+### 4.1 The dominant offline cost is re-reading the same evidence
+
+`MVANALYZE_SCAN_STATS=1` instrumentation counts the physical work of an
+extraction. For the 31-metric registered set on the 684MB cell:
+
+| Measure | Value |
+| --- | ---: |
+| Raw evidence | 0.685 GB |
+| Bytes read by extraction | **18.00 GB** |
+| Read amplification | **26.3x** |
+| Physical scan calls | 30 |
+| File opens | 381 |
+| Lines scanned | 55.95 M |
+| Lines discarded by the prefilter | 46.31 M (83%) |
+| Envelope decodes | 9.64 M |
+| Events delivered to a reducer | 9.35 M |
+| Wall / CPU (26 active metrics) | 90.5 s / 157.9 s |
+
+Extrapolated to a 24-hour cell (~48x this 30-minute specimen, ~33 GB raw), the
+same architecture would read roughly **860 GB**.
+
+### 4.2 Where analyzer CPU went
+
+`orderlifecycle`, the single most expensive metric, at 15.52 s of samples:
+
+| Component | CPU | Share |
+| --- | ---: | ---: |
+| `visit` (the metric's own reducer) | 5.76 s | 37.1% |
+| envelope `json.Unmarshal` | 2.42 s | 15.6% |
+| data-layer `json.Unmarshal` | 1.51 s | 9.7% |
+| **speculative nested-payload decode** | 1.44 s | 9.3% |
+| prefilter `containsAny` | 1.10 s | 7.1% |
+
+Of the reducer's own 5.76 s, `decodeRequiredJSON` was 5.45 s — 35% of the whole
+metric — and it decoded each payload **twice**: once into the target struct, and
+again into a `map[string]json.RawMessage` purely to test field presence.
+
+Allocation was even more lopsided. Of 3,208.97 MB sampled:
+
+| Source | Alloc space | Share |
+| --- | ---: | ---: |
+| `reflect.mapassign_faststr0` (the presence-check map) | 1,356.28 MB | 42.3% |
+| `json.(*RawMessage).UnmarshalJSON` (value copies) | 516.12 MB | 16.1% |
+| `decodeRequiredJSON` total (cumulative) | 1,977.81 MB | **61.6%** |
+
+Every byte of it is allocated inside `encoding/json` and `reflect`.
+
+### 4.3 Simulator baseline
+
+From `research/performance/v2-simulator-baseline.md` on `perf/thread-sim`
+(commit `dcd159b`), 15 simulated minutes at `GOMAXPROCS=1`. Two results invert
+the natural reading of the previous gate document:
+
+* **Matching is not a cost centre.** Live `Matcher.Match` is 0.03 s of 23.36 s
+  (0.13%). The 39% attributed to `PlaceOrder` is admission bookkeeping,
+  settlement accounting and evidence emission.
+* **The ordered execution hash dominates the logs-off cost.** With
+  `log_mode=none`, `checkpointSink.observe` is still 16.2% of CPU, because it
+  marshals every payload a second time purely to hash it.
+* **The logger is not I/O bound.** A 5-minute full run writing 117.8 MB of
+  venue JSONL issued 1,844 write syscalls totalling 8.12 ms of kernel time. The
+  cost is `Marshal` plus allocation, not syscalls, locking or disk.
+
+That baseline also corrects a methodology error in
+`research/v2-8-profiling.md`: `dev-607-none.json` disables *both* raw JSON
+persistence and the V2 decision recorders, so comparing `full` against it does
+not isolate raw JSON logging, which is what the earlier gate reported it as.
+
+Its own wall/CPU table was taken under load 5-10 and is flagged in that document
+as carrying unknown one-sided inflation. The CPU and allocation *shares* above
+are internally normalized fractions of a single process's own samples and are
+not affected by host load.
+
+## 5. Accepted optimizations
+
+All four analyzer changes were validated together by a differential harness that
+runs every one of the 31 registered metrics under the reference and candidate
+binaries over the same cell and requires identical stdout bytes, identical
+stderr bytes and identical exit status. **All 31 matched for every change.**
+
+### A1 — Decode each payload once (`f06a9eb`)
+
+Two decodes per visited record answered questions the raw bytes already answer.
+
+The derivative unwrap decoded every payload in full to discover whether it nests
+a second payload, discarding the result for the majority that do not. It now
+decodes only when the raw payload could possibly contain a nested `"payload"`
+key. The test is a deliberate superset — a literal key, or any backslash, since
+a backslash is the only way an escaped spelling such as `"payload"` could
+hide one. A false positive costs one decode; a false negative is impossible.
+
+`decodeRequiredJSON`'s second decode into a map was replaced by a single-pass
+scanner over the already validated bytes. It reproduces last-key-wins for
+duplicate keys, null-as-absent, and required-name ordering, and **declines to
+decide** for a non-object or an escaped key, in which case the original decode
+runs and supplies its exact error text. That fallback is what preserves failure
+semantics, which is the surface that killed two earlier candidates in this
+repository.
+
+Differential tests hold the scanner to the original map decode over 200,000
+randomized objects spanning duplicate keys, null, whitespace, nested containers,
+string escapes, braces inside strings and integer boundaries; and hold the
+nesting prefilter to the original unwrap over 100,000 randomized payloads.
+
+Effect (4 alternating reps, `GOMAXPROCS=6`, six heaviest metrics): wall 53.16 s
+to 43.17 s (**-18.8%**), CPU 73.44 s to 56.03 s (**-23.7%**). `orderlifecycle`
+-42.6% CPU. Allocation on `orderlifecycle` fell from 3,208.97 MB to 1,242.37 MB
+(**-61.3%**), with `reflect.mapassign_faststr0` eliminated entirely. `positions`
+moved +4% CPU, within this host's noise.
+
+### A2 — Share one evidence pass across independent metrics (`041e31e`)
+
+This is the change that addresses the 26.3x amplification.
+
+`Run.RunFused` serves several metrics from shared physical passes. It shares the
+record envelope and **nothing else**: each task still runs its own reducer over
+its own immutable `Event` and reaches its own verdict, so no task can observe,
+and therefore cannot borrow, another's derived state. Independent reconstruction
+is the property that lets these gates catch a bug, and it is preserved exactly.
+
+Per-metric semantics are reproduced rather than approximated:
+
+* a metric receives a record if and only if its own event filter admits it, and
+  its own raw prefilter still runs before delivery;
+* a metric that asked for one scan worker still sees the whole run from one
+  goroutine in file order. **22 analysis files request `Workers: 1`**, relying on
+  it for unsynchronized reducer state and for cross-file causal order. Such
+  metrics are fused with each other but never with the parallel group, and the
+  two groups run concurrently. An early version of this change ignored the
+  request and crashed with `concurrent map writes` inside
+  `MeasurePostOnlyActivity` — the constraint is real and load-bearing;
+* `Ordinal` remains the physical record position, counting filtered records;
+* a malformed record fails exactly the metrics whose own prefilter admits it,
+  with the same error text, and leaves the others untouched.
+
+`mvanalyze` gains `-fused-out` / `-fused-set` / `-fused-workers` as a research
+mode. It reuses the same flag variables as the single-metric switch, so the two
+paths cannot diverge on configuration. The registered extraction script is
+unchanged.
+
+Equivalence: all 19 fused artifacts are byte-identical to the single-metric
+outputs, and the fused pass delivers exactly **7,667,318** visits — the same
+count as the separate passes. New tests compare fused and unfused delivery
+record by record and cover parse-failure isolation, serial ordering and the
+nested-payload unwrap. `go test -race ./analysis` passes.
+
+Physical work, 19 scan-based metrics:
+
+| Measure | separate | fused | change |
+| --- | ---: | ---: | ---: |
+| Physical passes | 27 | 5 | -81% |
+| File opens | 336 | 75 | -78% |
+| Bytes read | 15.95 GB | 3.42 GB | -78.5% |
+| Lines scanned | 49.57 M | 10.63 M | -78.5% |
+| Envelope decodes | 7.96 M | 4.37 M | -45% |
+| Events delivered | 7.67 M | 7.67 M | identical |
+
+### A3 — Standard library substring search in the prefilter (`8b00ca1`)
+
+`bytes.Contains` computes the same predicate as the hand-rolled search with
+assembly `IndexByte` and a Rabin-Karp fallback.
+
+`research/v2-8-profiling.md` previously measured this swap at **1.11x** and
+rejected it as too small to justify. **That measurement understated it.** Over a
+101 MiB retained derivatives corpus with the twelve registered event needles,
+five repetitions at `GOMAXPROCS=1` give median 170.7 MB/s hand-rolled against
+339.6 MB/s standard library — **2.0x**. A test requires both searches to agree
+on every line of the corpus, with the previous implementation retained inside
+the test as the reference.
+
+### A4 — Cache the deterministic gateway iteration order (`3a32be5`)
+
+Both deterministic drains built a sorted client-ID slice and a parallel
+client-to-gateway map on every call, and the ingress drain does this once per
+pass while its passes repeat until one is empty — 1.51 s of 23.36 s CPU and
+511.4 MB of allocation, of which 391.85 MB was the redundant lookup map.
+
+One sorted slice of client/gateway pairs replaces both structures, and a
+generation counter bumped by the only two mutation sites — both already under
+`e.mu` — invalidates it. Iteration order is unchanged: ascending client ID.
+
+## 6. End-to-end analyzer result
+
+Pristine one-process-per-metric extraction against the optimized fused
+extraction, same 19 metrics, same cell, 3 alternating repetitions,
+`GOMAXPROCS=6`, host load 1-2, benchmark lock held:
+
+| Measure | pristine | optimized | change | ranges |
+| --- | ---: | ---: | ---: | --- |
+| Wall | 68.15 s | **30.27 s** | **-55.6%** | 66.26-69.89 \| 30.08-30.97 |
+| CPU | 134.33 s | **72.06 s** | **-46.4%** | 130.09-135.71 \| 71.08-73.41 |
+| Peak RSS | 103 MB | 221 MB | +114% | 103.06-103.22 \| 217.68-220.90 |
+
+**2.25x wall, 1.86x CPU.** The RSS increase is bounded and small: no event is
+retained. For contrast, the previously rejected full retained-event union cache
+reached 1,137 MB (+11x) for a smaller wall gain and *no* CPU gain at all.
+
+## 7. Simulator results so far
+
+| Change | log mode | wall | CPU | peak RSS |
+| --- | --- | ---: | ---: | ---: |
+| A4 gateway-order cache | full | -5.3% | -4.9% | -2.3% |
+| A4 gateway-order cache | none | (contaminated) | **-16.0%** | -1.6% |
+
+The none-mode wall range (13.24-27.56 s) contains one sample contaminated by a
+concurrent test run of my own; the CPU ranges are tight (13.10-14.33 against
+11.16-12.00) and the CPU median is the reportable figure. The drain is a larger
+share of total work with logging off, which is why the effect is larger there.
+
+### Determinism oracle
+
+Every simulator change is held to this, on `dev-607.json`, seed 900101, 15
+simulated minutes, `GOMAXPROCS=1`:
+
+| Oracle | Value |
+| --- | --- |
+| Ordered execution stream hash | `51541f91db7c5eae8688235d3961a76af421ab782f05ab62649076cf90aef332` |
+| Execution events | 1,163,127 |
+| Evidence artifact digest | `7a869b49546a60cba0f5a31f7cbc8236f331d45e73404248096ebf05812739f0` |
+| Persisted records | 1,185,184 |
+| Raw venue JSONL bytes | `ad39919d2f489bf7f8c28420756fa154…` |
+| Evidence tree | 27 files, 442,225,951 bytes, `diff -rq` clean |
+
+The hash matches the value `perf/thread-sim` obtained across all 30 of its
+baseline runs, spanning both log modes, two filesystems, `GOMAXPROCS` 1 and 4,
+and profiled and unprofiled builds.
+
+## 8. Languages and runtimes investigated
+
+### Go arenas — rejected
+
+`GOEXPERIMENT=arenas` still compiles and runs on Go 1.26.7. It is rejected on
+two independent grounds.
+
+First, **arenas cannot reach this program's allocation**. An arena only captures
+what your own code explicitly allocates into it. 100% of the analyzer's
+allocation is inside `encoding/json` and `reflect` (§4.2), which use the normal
+heap. An arena would help only after replacing `encoding/json` outright — the
+change already rejected twice in this repository on semantic grounds.
+
+Second, it changes recorded provenance: the binary stamps as
+`go1.26.7-X:arenas` and records `GOEXPERIMENT=arenas` in its build info, which
+is exactly the surface the r5 contract checks.
+
+### C++23 / SIMD / cgo — measured ceiling, not adopted
+
+The prefilter is the only hot loop coarse enough to consider moving. A C++23
+`-O3 -march=native` prototype over the same 101 MiB corpus and the same twelve
+needles:
+
+| Implementation | Throughput |
+| --- | ---: |
+| Go hand-rolled (before A3) | 170.7 MB/s |
+| Go `bytes.Contains` (after A3) | 339.6 MB/s |
+| C++ scalar naive | 222.9 MiB/s |
+| C++ `memmem` | 946.3 MiB/s |
+| C++ AVX2 first/second-byte Teddy filter | **1459.3 MiB/s** |
+
+So there is genuinely about 4.3x of headroom beyond the adopted Go version, and
+a cgo boundary at whole-file granularity would amortize the crossing cost fine.
+It is still not worth taking: after A2 the union prefilter runs over 10.63 M
+lines instead of 49.57 M, so the prefilter is a single-digit percentage of
+analyzer CPU. Spending a cgo dependency, a build-toolchain requirement and a new
+failure surface to win a few percent of one of two workloads is a bad trade.
+The prototype is retained as the ceiling measurement.
+
+Assembly was not written: the two hot byte loops are `bytes.Contains` and
+`bytes.IndexByte`, which are already hand-written assembly in the standard
+library. Reimplementing them would be reinventing stdlib.
+
+### Third-party JSON — not revisited
+
+`research/v2-8-profiling.md` already screened `goccy/go-json` (**rejected**: it
+accepts an overflowing `int64` that the standard library rejects), `jsoniter`
+(2.3x) and `sonic` (3.6x). The measurements in this document supersede the
+motivation rather than the screen: A1 and A2 removed most of the decode work
+without touching the parser, and `encoding/json` remains the semantic
+reference. No Go dependency was added; the module still has none.
+
+## 9. Rejected and superseded hypotheses
+
+| Hypothesis | Verdict | Why |
+| --- | --- | --- |
+| Retain all decoded events in a union cache | rejected (prior art, confirmed) | 11x RSS, no CPU reduction. `v2-8-analyzer-union-cache-evaluation.md` |
+| Fuse the envelope and data-layer decodes into one struct | rejected (prior art, confirmed) | 21.8% faster but diverges on duplicate `data` keys and on error classification. `v2-8-analyzer-fused-data-layer-evaluation.md` |
+| `bytes.Contains` is too small to matter | **superseded** | Re-measured at 2.0x, not 1.11x. Adopted as A3 |
+| Optimize the matching engine | rejected | `Matcher.Match` is 0.13% of simulator CPU |
+| Go arenas | rejected | Cannot reach `encoding/json` allocation; changes build provenance |
+| Move the prefilter to C++/cgo | rejected | Real 4.3x headroom, but on a single-digit share of CPU after A2 |
+| Hand-written assembly for byte scanning | rejected | The hot loops already are stdlib assembly |
+| Replace `encoding/json` with jsoniter or sonic | not adopted | Semantic screen unfinished; A1/A2 removed the motivation |
+| Pool the detached preview book | not recommended | `perf/thread-sim` judged the matcher's ownership of queue links and iceberg state too risky for the 3.6% CPU at stake |
+
+## 10. Open work
+
+* **C2, single-marshal of logged payloads.** Implemented and proven exact on
+  every oracle in §7 (identical execution hash, evidence digest, raw bytes and
+  442 MB tree). Timing in flight. Predicted ~11% simulator CPU in `full` mode
+  and none in `none` mode, since the duplicate marshal only exists when the raw
+  logger is attached.
+* **C3, `map[string]any` log payloads to lexicographically ordered structs.**
+  2.85 s CPU / 16.2 M objects (28.2%) in the baseline. Byte-identity depends on
+  declaring fields in lexicographic order, since `encoding/json` sorts map keys;
+  the codebase already sanctions the pattern in `feesim.persistedEvent`. Not
+  started.
+* **Production integration of A2.** The fused driver currently duplicates ~19
+  metric call expressions rather than refactoring `cmd/mvanalyze`'s 1,400-line
+  metric switch into a table. Byte-equality is proven, but a production version
+  should do that refactor so the two paths cannot drift.
+* **PGO.** `perf/thread-pgo` proved simulator PGO determinism (identical
+  execution hash, byte-identical 275 MB evidence tree) and measured binary size
+  cost (+1.78% analyzer, +3.23% simulator) before its session ended. Its timing
+  batch was discarded as contaminated and was never re-run, so **there is no
+  PGO speedup measurement**.
+* **Archive and compression.** `perf/thread-arch` produced nothing before its
+  session ended. Unmeasured.
+
+## 11. Escalation — not a performance finding
+
+`perf/thread-pgo` reported that `scripts/v2-integrated-longrun-r5-contract.sh`
+fails closed unless binaries report **go1.27**, while the host default toolchain
+is **go1.26.7-X:nodwarf5**. If correct, a long-run cell launched with the default
+`go` would be rejected by its own gate. The exact contract check was not quoted
+before that session ended, so this is **reported as unverified** and is for the
+scientific owner to confirm. No contract script was modified.
+
+## 12. Commit classification
+
+Against the scientific HEAD this work is based on, `887899f`.
+
+### Safe to cherry-pick
+
+| Commit | Subject | Scope |
+| --- | --- | --- |
+| `7a44f3f` | `perf: add analyzer scan-cost instrumentation` | Analyzer only; inert unless `MVANALYZE_SCAN_STATS` is set |
+| `f06a9eb` | `perf: decode evidence payloads once per record` | Analyzer only; all 31 metrics byte-identical |
+| `8b00ca1` | `perf: use the standard library substring search in the prefilter` | Analyzer only; selection proven identical |
+
+### Require scientific review
+
+| Commit | Subject | Why review |
+| --- | --- | --- |
+| `041e31e` | `perf: share one evidence pass across independent metrics` | Adds a second extraction architecture. Byte-identity and visit-count identity are proven on one development cell, but adopting it in the registered extraction script is a scientific-infrastructure decision, and the driver's duplicated call expressions should be refactored first |
+| `3a32be5` | `perf: cache the deterministic gateway iteration order` | Simulator change. Fully proven on the determinism oracle, but it touches deterministic ingress and egress ordering, which is an economic input |
+
+### Do not cherry-pick
+
+None yet. The C++ prototype and the corpus live outside the repository.
+
+Any recommendation here is against `887899f`. If the scientific branch has moved,
+these need revalidation on the then-current HEAD as a separate integration step.
