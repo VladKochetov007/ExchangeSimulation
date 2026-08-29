@@ -22,3 +22,10 @@ Action: reorder all strict analyzer flags before `-json <cell-directory>` in
 the extractor. The raw run directory was not pruned, scored, or modified by
 the failed extraction; only its non-evidence analyzer error sidecar was
 preserved for diagnosis and moved aside before retry.
+
+The retry then failed before analysis because the run was produced at the
+previous protocol revision (`adc4e03...`) and the extractor correctly requires
+the run's source revision to equal the current analysis HEAD (`f6f7c1a...`).
+That completed run remains preserved as a stale-revision diagnostic and is
+not eligible for scoring. A fresh registered `dev-607` run is required at the
+final reviewed HEAD.
