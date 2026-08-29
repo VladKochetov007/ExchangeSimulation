@@ -23,7 +23,7 @@ in the tree. It was not read, listed, run, or benchmarked against. All
 measurements use retained development evidence under `scratch/` — the same
 `signed-price-hardening-20260824` cell the previous performance gate used — or
 freshly generated benchmark runs with a non-scientific seed writing only to
-temporary directories.
+throwaway directories outside the repository.
 
 ## 2. Machine and toolchain
 
@@ -38,8 +38,8 @@ temporary directories.
 
 Three research threads shared one host, and the first timing batches of all
 three were contaminated — load average reached 11-13, and one sample came in 70%
-above its own minimum. A machine-wide mutex (`/tmp/exsim-benchlock.sh`, flock on
-`/tmp/exsim-bench.lock`) now serializes timed measurements; builds, correctness
+above its own minimum. A machine-wide mutex (a flock-based helper on a
+session-scoped lock file) now serializes timed measurements; builds, correctness
 differentials and profile collection run unlocked.
 
 All numbers below are medians of alternating A/B repetitions with ranges quoted,
