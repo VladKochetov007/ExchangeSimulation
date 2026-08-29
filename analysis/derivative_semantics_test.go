@@ -16,8 +16,12 @@ func fundingPayLine(ts int64, venue string, clientID uint64, delta int64) string
 }
 
 func optionSettledLine(ts int64, venue, symbol string, strike, settle int64, isCall bool) string {
+	return optionSettledAtLine(ts, ts, venue, symbol, strike, settle, isCall)
+}
+
+func optionSettledAtLine(eventTS, expiry int64, venue, symbol string, strike, settle int64, isCall bool) string {
 	return fmt.Sprintf(`{"sim_ts":%d,"client_id":0,"event":"instrument_settled","data":{"venue_id":%q,"payload":{"action":"settled","symbol":%q,"instrument_type":"OPTION","strike":%d,"is_call":%t,"settlement_price":%d,"expiry_nano":%d,"timestamp":%d}}}`,
-		ts, venue, symbol, strike, isCall, settle, ts, ts)
+		eventTS, venue, symbol, strike, isCall, settle, expiry, eventTS)
 }
 
 // Funding is a transfer between the two sides of one contract. An instant that
@@ -121,6 +125,46 @@ func TestExerciseAuditRecomputesIntrinsicValueAndCatchesWorthlessPayouts(t *test
 	result, _ = run.MeasureDerivativeSemantics(DerivativeAuditOptions{BasePrecision: auditPrecision})
 	if result.WorthlessPaid != 1 {
 		t.Errorf("an out-of-the-money option paid out and was accepted: %+v", result.Exercises)
+	}
+}
+
+func TestExerciseAuditRequiresDeclaredExpiryTiming(t *testing.T) {
+	const expiry = int64(1_000_000_000)
+	strike := 50_000 * auditPrecision
+	settle := 55_000 * auditPrecision
+
+	lateAnnouncement := []string{
+		optionSettledAtLine(expiry+1, expiry, "north", "ABC-LATE-C", strike, settle, true),
+		expiryPayLine(expiry, "north", 1, "ABC-LATE-C", settle-strike),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lateAnnouncement}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{BasePrecision: auditPrecision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExerciseTimingFailures != 1 {
+		// The payout is at the declared expiry; only the terminal announcement
+		// is late, so this is one lifecycle failure, not two.
+		t.Fatalf("late option announcement was not counted exactly once: %+v", result)
+	}
+
+	earlyPayout := []string{
+		optionSettledLine(expiry, "north", "ABC-EARLY-C", strike, settle, true),
+		expiryPayLine(expiry-1, "north", 1, "ABC-EARLY-C", settle-strike),
+	}
+	run, err = Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": earlyPayout}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = run.MeasureDerivativeSemantics(DerivativeAuditOptions{BasePrecision: auditPrecision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExerciseTimingFailures != 1 {
+		t.Fatalf("early option payout was not counted exactly once: %+v", result)
 	}
 }
 

@@ -23,11 +23,12 @@ type balanceDeltaRecord struct {
 }
 
 type balanceChangeRecord struct {
-	Timestamp int64                `json:"timestamp"`
-	ClientID  uint64               `json:"client_id"`
-	Symbol    string               `json:"symbol"`
-	Reason    string               `json:"reason"`
-	Changes   []balanceDeltaRecord `json:"changes"`
+	Timestamp    int64                `json:"timestamp"`
+	ClientID     uint64               `json:"client_id"`
+	Symbol       string               `json:"symbol"`
+	PositionSide string               `json:"position_side"`
+	Reason       string               `json:"reason"`
+	Changes      []balanceDeltaRecord `json:"changes"`
 }
 
 // AssetFlow is the audited movement of one asset for one reason.

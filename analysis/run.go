@@ -13,6 +13,7 @@
 package analysis
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -45,10 +46,36 @@ type Balance struct {
 
 // Position is one derivative position.
 type Position struct {
-	Symbol        string `json:"symbol"`
-	Size          int64  `json:"size"`
-	EntryPrice    int64  `json:"entry_price"`
-	UnrealizedPnL int64  `json:"unrealized_pnl"`
+	Symbol string `json:"symbol"`
+	// PositionSide is retained as raw JSON because the simulator's marked
+	// account schema serializes the enum numerically while older reports omit it.
+	// Strict audits decode it with presence preserved instead of treating absent
+	// evidence as BOTH.
+	PositionSide         json.RawMessage `json:"position_side"`
+	Size                 int64           `json:"size"`
+	EntryPrice           int64           `json:"entry_price"`
+	MarkPrice            *int64          `json:"mark_price"`
+	UnrealizedPnL        int64           `json:"unrealized_pnl"`
+	UnrealizedPnLPresent bool            `json:"-"`
+}
+
+// UnmarshalJSON preserves whether the report actually carried unrealized_pnl.
+// A missing zero-valued field is not equivalent to a measured zero in a
+// strict terminal reconciliation.
+func (p *Position) UnmarshalJSON(data []byte) error {
+	type positionWire Position
+	var decoded positionWire
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*p = Position(decoded)
+	pnl, present := fields["unrealized_pnl"]
+	p.UnrealizedPnLPresent = present && !bytes.Equal(bytes.TrimSpace(pnl), []byte("null"))
+	return nil
 }
 
 // AccountRow is one participant's account at one phase of the run.

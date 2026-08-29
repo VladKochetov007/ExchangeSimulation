@@ -62,10 +62,15 @@ for seed in $expected_full; do
 	# jq -S gives a semantic JSON comparison, avoiding irrelevant exponent or
 	# whitespace changes introduced by deterministic config generation.
 	if ! cmp -s \
-		<(jq -cS 'del(.seed, .experiment_id, .hypothesis_id, .description)' "$source_full") \
-		<(jq -cS 'del(.seed, .experiment_id, .hypothesis_id, .description)' "$file"); then
+		<(jq -cS 'del(.seed, .experiment_id, .hypothesis_id, .description, .dated_future_delivery_fee_policy)' "$source_full") \
+		<(jq -cS 'del(.seed, .experiment_id, .hypothesis_id, .description, .dated_future_delivery_fee_policy)' "$file"); then
 		fail "economic/config drift in $file"
 	fi
+done
+
+for seed in 607 613 617; do
+	jq -e '.dated_future_delivery_fee_policy == "zero"' "$config_dir/dev-$seed.json" >/dev/null ||
+		fail "development config lacks the pinned delivery fee policy: dev-$seed"
 done
 
 none="$config_dir/dev-607-none.json"
@@ -81,9 +86,12 @@ jq -e 'type == "object" and (.seed | type) == "number" and .seed == 607 and
 	.record_noise_flow_phase_decisions == false and
 	.record_option_liability_user_decisions == false' "$none" >/dev/null ||
 	fail "invalid none parity fields in $none"
+
+jq -e '.dated_future_delivery_fee_policy == "zero"' "$none" >/dev/null ||
+	fail "none parity config lacks the pinned delivery fee policy"
 if ! cmp -s \
-	<(jq -cS 'del(.seed, .experiment_id, .hypothesis_id, .description)' "$source_none") \
-	<(jq -cS 'del(.seed, .experiment_id, .hypothesis_id, .description)' "$none"); then
+	<(jq -cS 'del(.seed, .experiment_id, .hypothesis_id, .description, .dated_future_delivery_fee_policy)' "$source_none") \
+	<(jq -cS 'del(.seed, .experiment_id, .hypothesis_id, .description, .dated_future_delivery_fee_policy)' "$none"); then
 	fail "economic/config drift in $none"
 fi
 

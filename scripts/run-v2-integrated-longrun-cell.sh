@@ -31,14 +31,16 @@ case "$cell" in
 esac
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-source "$root_dir/scripts/v2-integrated-longrun-r4-contract.sh"
+source "$root_dir/scripts/v2-integrated-longrun-r5-contract.sh"
 config="$root_dir/research/configs/v2-integrated-longrun/$config_name"
-output_root=${V2_LONGRUN_OUTPUT_ROOT:-"$v2_r4_output_root"}
+output_root=${V2_LONGRUN_OUTPUT_ROOT:-"$v2_r5_output_root"}
 output="$output_root/$cell"
 binary=${2:-"$root_dir/bin/multivenue"}
 prunegate_binary=${3:-"$root_dir/bin/prunegate"}
 sim_revision=${V2_LONGRUN_SIMULATOR_REVISION:-$(git -C "$root_dir" rev-parse HEAD)}
 horizon=24h
+simulation_start_nano=1735689600000000000
+simulation_end_nano=1735776000000000000
 head_revision=$(git -C "$root_dir" rev-parse HEAD)
 
 [[ -s "$config" && -x "$binary" && -x "$prunegate_binary" ]] || {
@@ -53,8 +55,8 @@ head_revision=$(git -C "$root_dir" rev-parse HEAD)
 	echo "simulator revision $sim_revision is not current repository HEAD $head_revision" >&2
 	exit 1
 }
-v2_r4_require_output_root "$output_root" || {
-	echo "refusing non-canonical or symlinked r4 evidence root: $output_root" >&2
+v2_r5_require_output_root "$output_root" || {
+	echo "refusing non-canonical or symlinked r5 evidence root: $output_root" >&2
 	exit 1
 }
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || {
@@ -85,12 +87,12 @@ binary_revision=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs
 binary_modified=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
 binary_trimpath=$(go version -m "$binary" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
 binary_cgo_enabled=$(go version -m "$binary" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
-binary_go_version=$(v2_r4_binary_go_version "$binary")
+binary_go_version=$(v2_r5_binary_go_version "$binary")
 prunegate_revision=$(go version -m "$prunegate_binary" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
 prunegate_modified=$(go version -m "$prunegate_binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
 prunegate_trimpath=$(go version -m "$prunegate_binary" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
 prunegate_cgo_enabled=$(go version -m "$prunegate_binary" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
-prunegate_go_version=$(v2_r4_binary_go_version "$prunegate_binary")
+prunegate_go_version=$(v2_r5_binary_go_version "$prunegate_binary")
 [[ "$binary_revision" == "$sim_revision" ]] || {
 	echo "binary VCS revision $binary_revision does not match requested $sim_revision" >&2
 	exit 1
@@ -103,7 +105,7 @@ prunegate_go_version=$(v2_r4_binary_go_version "$prunegate_binary")
 	echo "binary reproducibility settings are not enforced (-trimpath=$binary_trimpath CGO_ENABLED=$binary_cgo_enabled)" >&2
 	exit 1
 }
-v2_r4_is_go_127 "$binary_go_version" || {
+v2_r5_is_go_127 "$binary_go_version" || {
 	echo "binary is not built with the pinned Go 1.27 toolchain (got $binary_go_version)" >&2
 	exit 1
 }
@@ -112,7 +114,7 @@ v2_r4_is_go_127 "$binary_go_version" || {
 	echo "prunegate is not a clean reproducible build of current HEAD" >&2
 	exit 1
 }
-v2_r4_is_go_127 "$prunegate_go_version" || {
+v2_r5_is_go_127 "$prunegate_go_version" || {
 	echo "prunegate is not built with the pinned Go 1.27 toolchain (got $prunegate_go_version)" >&2
 	exit 1
 }
@@ -135,6 +137,8 @@ jq -n \
 	--arg cell "$cell" \
 	--argjson seed "$seed" \
 	--arg horizon "$horizon" \
+	--argjson simulation_start_nano "$simulation_start_nano" \
+	--argjson simulation_end_nano "$simulation_end_nano" \
 	--arg log_mode "$log_mode" \
 	--arg config_sha256 "$config_sha256" \
 	--arg binary_sha256 "$binary_sha256" \
@@ -150,6 +154,8 @@ jq -n \
 	--arg prunegate_go_version "$prunegate_go_version" \
 	--argjson gomaxprocs "$GOMAXPROCS" \
 	--arg output_dir "$output" \
+	--arg evidence_manifest_path "$output/evidence-manifest.json" \
+	--arg external_attestation_path "$v2_r5_attestation_root/$cell.json" \
 	--argjson holdout "$holdout" \
 	--arg binary_path "$binary" \
 	--arg config_path "$config" \
@@ -160,12 +166,13 @@ jq -n \
 	--arg config_hypothesis "$config_hypothesis" \
 	--arg config_experiment "$config_experiment" \
 	'{
-		  schema_version: 4, runner_contract: "v2-integrated-longrun-runner-v4",
+		  schema_version: 5, runner_contract: "v2-integrated-longrun-runner-v5",
 		  experiment_id: ("v2-integrated-longrun-" + $cell),
 		  config_experiment_id: $config_experiment,
 		  hypothesis_id: $config_hypothesis,
 		  cell: $cell, seed: $seed, holdout: $holdout,
 		  simulated_horizon: $horizon, log_mode: $log_mode,
+		  simulation_start_nano: $simulation_start_nano, simulation_end_nano: $simulation_end_nano,
 		  config_sha256: $config_sha256, binary_sha256: $binary_sha256,
 		  config_path: $config_path, binary_path: $binary_path,
 		  prunegate_path: $prunegate_path, prunegate_sha256: $prunegate_sha256,
@@ -177,6 +184,8 @@ jq -n \
 		  binary_trimpath: ($binary_trimpath == "true"), binary_cgo_enabled: $binary_cgo_enabled,
 		  git_revision: $git_revision, go_version: $go_version, binary_go_version: $binary_go_version,
 		  gomaxprocs: $gomaxprocs, output_dir: $output_dir,
+		  evidence_manifest_path: $evidence_manifest_path,
+		  external_attestation_path: $external_attestation_path,
 		  command: ["multivenue", "-config", "run-config.json", "-duration", $horizon, "-logdir", $output_dir, "-log-mode", $log_mode],
 		  completion_sentinels: ["greeks.json", "latency.json"],
 		  raw_log_policy: "retained until every registered integrated long-run evidence contract passes"
@@ -215,9 +224,32 @@ jq -e 'type == "object"' "$output/latency.json" >/dev/null || {
 	echo "malformed latency completion sentinel: $output" >&2
 	exit 1
 }
+jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
+	'(.initial_accounts | type == "array" and length > 0 and
+	 all(.[]; .account.timestamp == $simulation_start_nano)) and
+	(.terminal_accounts | type == "array" and length > 0 and
+	 all(.[]; .account.timestamp == $simulation_end_nano))' \
+	"$output/greeks.json" >/dev/null || {
+	echo "greeks report does not attest the registered 24-hour simulated horizon: $output" >&2
+	exit 1
+}
+jq -e -s --argjson simulation_end_nano "$simulation_end_nano" \
+	'. as $checkpoints |
+	 ($checkpoints | length) > 0 and
+	 all($checkpoints[]; .domain == "execution_observations" and .ordering == "ordered_stream" and (.sim_time | type) == "number" and (.event_count | type) == "number") and
+	 all(range(1; ($checkpoints | length)); $checkpoints[. - 1].sim_time < $checkpoints[.].sim_time and $checkpoints[. - 1].event_count < $checkpoints[.].event_count) and
+	 $checkpoints[-1].sim_time == $simulation_end_nano' \
+	"$output/checkpoints.jsonl" >/dev/null || {
+	echo "checkpoint stream does not attest the registered 24-hour horizon: $output" >&2
+	exit 1
+}
 run_metadata_sha256_after=$(sha256sum "$output/run-metadata.json" | awk '{print $1}')
 [[ "$run_metadata_sha256_before" == "$run_metadata_sha256_after" ]] || {
 	echo "run metadata changed during simulation: $output" >&2
+	exit 1
+}
+v2_r5_write_evidence_manifest "$output" || {
+	echo "failed to write complete evidence manifest: $output" >&2
 	exit 1
 }
 status_tmp="$output/run-status.json.tmp-$$"
@@ -225,16 +257,26 @@ jq -n \
 	--argjson exit_status "$status" \
 	--arg cell "$cell" \
 	--arg horizon "$horizon" \
+	--argjson simulation_start_nano "$simulation_start_nano" \
+	--argjson simulation_end_nano "$simulation_end_nano" \
 	--arg run_metadata_sha256 "$run_metadata_sha256_after" \
 	--arg manifest_sha256 "$(sha256sum "$output/manifest.json" | awk '{print $1}')" \
 	--arg greeks_sha256 "$(sha256sum "$output/greeks.json" | awk '{print $1}')" \
 	--arg latency_sha256 "$(sha256sum "$output/latency.json" | awk '{print $1}')" \
+	--arg checkpoints_sha256 "$(sha256sum "$output/checkpoints.jsonl" | awk '{print $1}')" \
+	--arg evidence_manifest_sha256 "$(sha256sum "$output/evidence-manifest.json" | awk '{print $1}')" \
 	--argjson sentinels '["greeks.json", "latency.json"]' \
 	'{schema_version: 1, cell: $cell, exit_status: $exit_status,
 	  completion_verified: true, simulated_horizon: $horizon,
+	  simulation_start_nano: $simulation_start_nano, simulation_end_nano: $simulation_end_nano,
 	  completion_sentinels: $sentinels,
 	  run_metadata_sha256: $run_metadata_sha256,
 	  manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256,
-	  latency_sha256: $latency_sha256}' >"$status_tmp"
+	  latency_sha256: $latency_sha256, checkpoints_sha256: $checkpoints_sha256,
+	  evidence_manifest_sha256: $evidence_manifest_sha256}' >"$status_tmp"
 mv "$status_tmp" "$output/run-status.json"
+v2_r5_write_attestation "$output" || {
+	echo "failed to write external evidence attestation: $output" >&2
+	exit 1
+}
 echo "completed integrated long-run cell: $output"

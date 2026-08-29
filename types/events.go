@@ -44,11 +44,12 @@ type TransferEvent struct {
 }
 
 type BalanceChangeEvent struct {
-	Timestamp int64          `json:"timestamp"`
-	ClientID  uint64         `json:"client_id"`
-	Symbol    string         `json:"symbol"`
-	Reason    string         `json:"reason"`
-	Changes   []BalanceDelta `json:"changes"`
+	Timestamp    int64          `json:"timestamp"`
+	ClientID     uint64         `json:"client_id"`
+	Symbol       string         `json:"symbol"`
+	PositionSide string         `json:"position_side,omitempty"`
+	Reason       string         `json:"reason"`
+	Changes      []BalanceDelta `json:"changes"`
 }
 
 type BalanceDelta struct {
@@ -87,6 +88,8 @@ type PositionUpdateEvent struct {
 	Timestamp     int64  `json:"timestamp"`
 	ClientID      uint64 `json:"client_id"`
 	Symbol        string `json:"symbol"`
+	PositionSide  string `json:"position_side,omitempty"`
+	BasePrecision int64  `json:"base_precision,omitempty"`
 	OldSize       int64  `json:"old_size"`
 	OldEntryPrice int64  `json:"old_entry_price"`
 	NewSize       int64  `json:"new_size"`

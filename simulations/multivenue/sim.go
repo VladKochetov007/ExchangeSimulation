@@ -99,6 +99,10 @@ type Config struct {
 	Provenance
 
 	LogMode string `json:"log_mode"`
+	// DatedFutureDeliveryFeePolicy is an analyzer-side declaration retained in
+	// the run config so the strict settlement audit can reconstruct the fee
+	// contract without importing simulator implementation details.
+	DatedFutureDeliveryFeePolicy string `json:"dated_future_delivery_fee_policy,omitempty"`
 	// RecordMarketDataReceipts enables the V2 compact per-message public-feed
 	// receipt sidecar. Roles must be declared explicitly so an unwrapped direct
 	// link cannot silently look like fully observed participant information.
@@ -2074,6 +2078,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		return nil, err
 	}
 	sim.checkpoints = sink
+	if sink != nil {
+		sink.finalSimTime = sim.terminalNano
+	}
 	if cfg.RecordMarketDataReceipts {
 		recorder, err := simulation.NewMarketDataReceiptRecorder(cfg.LogDir)
 		if err != nil {
@@ -2307,6 +2314,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		s.loggers = append(s.loggers, logger)
 		return venueLogger{venueID: id, inner: logger, sink: s.checkpoints}, nil
 	}
+	var lifecycleLog etypes.Logger
 	estimatedClients := 5 + s.Config.NoiseTraderCount + s.Config.OptionFlowCount + len(s.Config.CrossVenueArbTiers)
 	if s.Config.OptionLiabilityUser != nil {
 		estimatedClients++
@@ -2349,6 +2357,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		// venueLogger would observe maker telemetry twice in the execution hash
 		// while persisting it once.
 		makerStateLog = globalLog
+		lifecycleLog = globalLog
 		derivativeLog, err := newLogger("derivatives.jsonl")
 		if err != nil {
 			return nil, err
@@ -2382,6 +2391,15 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		crossTick := int64(mvBasePrecision / 1_000)
 		ex.AddInstrument(exchange.NewSpotInstrument("CDF/USD", "CDF", "USD", mvBasePrecision, mvQuotePrecision, cdfTick, mvBasePrecision/1_000))
 		ex.AddInstrument(exchange.NewSpotInstrument("ABC/CDF", "ABC", "CDF", mvBasePrecision, mvBasePrecision, crossTick, mvBasePrecision/1_000))
+	}
+	if lifecycleLog != nil {
+		now := clock.NowUnixNano()
+		lifecycleLog.LogEvent(now, 0, "instrument_listed", staticInstrumentAnnouncement(spot, now))
+		lifecycleLog.LogEvent(now, 0, "instrument_listed", staticInstrumentAnnouncement(perp, now))
+		if s.Config.CrossAssetSpotGraph {
+			lifecycleLog.LogEvent(now, 0, "instrument_listed", staticInstrumentAnnouncement(ex.Instruments["CDF/USD"], now))
+			lifecycleLog.LogEvent(now, 0, "instrument_listed", staticInstrumentAnnouncement(ex.Instruments["ABC/CDF"], now))
+		}
 	}
 
 	index := exchange.NewMidPriceOracle(ex)
@@ -3229,6 +3247,28 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		valueBalances["CDF"] = 1_000 * mvBasePrecision
 	}
 	return venue, nil
+}
+
+func staticInstrumentAnnouncement(inst etypes.Instrument, now int64) etypes.InstrumentAnnouncement {
+	listedNano := now
+	announcement := etypes.InstrumentAnnouncement{
+		Action:         "listed",
+		Symbol:         inst.Symbol(),
+		InstrumentType: inst.InstrumentType(),
+		QuoteAsset:     inst.QuoteAsset(),
+		BasePrecision:  inst.BasePrecision(),
+		TickSize:       inst.TickSize(),
+		MinOrderSize:   inst.MinOrderSize(),
+		ListedNano:     &listedNano,
+		Timestamp:      now,
+	}
+	if reference, ok := inst.(etypes.UnderlyingRef); ok {
+		announcement.Underlying = reference.UnderlyingSymbol()
+	}
+	if expirable, ok := inst.(etypes.Expirable); ok {
+		announcement.ExpiryNano = expirable.ExpiryNano()
+	}
+	return announcement
 }
 
 // connectParticipant allocates a venue-local account ID. Router legs call it

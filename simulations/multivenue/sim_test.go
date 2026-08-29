@@ -60,7 +60,7 @@ func TestCloseSuppressesEvidenceArtifactAfterCheckpointFailure(t *testing.T) {
 	sim := &Sim{
 		Config:      Config{LogMode: "full", LogDir: dir},
 		loggers:     []*feesim.JSONLinesLogger{logger},
-		checkpoints: &checkpointSink{intervalNano: 1, checkpoints: &checkpointFailWriter{err: want}, firstEvent: true},
+		checkpoints: &checkpointSink{intervalNano: 1, checkpoints: &checkpointFailWriter{err: want}, finalSimTime: 1, firstEvent: true},
 	}
 	if err := sim.Close(); !errors.Is(err, want) {
 		t.Fatalf("Close error = %v, want %v", err, want)

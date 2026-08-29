@@ -151,6 +151,11 @@ type DerivativeSemantics struct {
 	FundingUndirected        int `json:"funding_undirected"`
 	FundingDuplicatePayments int `json:"funding_duplicate_payments"`
 	ExerciseBroken           int `json:"exercise_broken"`
+	// ExerciseTimingFailures counts option terminal announcements or payout
+	// postings that were not emitted at the contract's declared expiry. A
+	// payout amount can be arithmetically correct while still being a lifecycle
+	// violation if it is credited early or late.
+	ExerciseTimingFailures int `json:"exercise_timing_failures"`
 	// HoldersMispaid is the count across every contract of holders whose own
 	// payout did not match their own position.
 	HoldersMispaid int `json:"holders_mispaid"`
@@ -177,6 +182,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		IsCall          bool   `json:"is_call"`
 		SettlementPrice int64  `json:"settlement_price"`
 		ExpiryNano      int64  `json:"expiry_nano"`
+		Timestamp       int64  `json:"timestamp"`
 	}
 	type positionPayload struct {
 		Timestamp int64  `json:"timestamp"`
@@ -231,6 +237,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 	}
 	optionPositions := make(map[positionKey]*positionState)
 	expiries := make(map[markKey]int64)
+	exerciseTimingFailures := 0
 
 	// First pass: contract terms and expiry instants.
 	if err := r.Scan(ScanOptions{Events: []string{"instrument_settled"}, Files: files, FilesSelected: filesSelected}, func(event Event) {
@@ -239,6 +246,9 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			return
 		}
 		mu.Lock()
+		if payload.ExpiryNano <= 0 || payload.Timestamp == 0 || payload.Timestamp != event.SimTS || event.SimTS != payload.ExpiryNano {
+			exerciseTimingFailures++
+		}
 		options[markKey{event.VenueID, payload.Symbol}] = payload
 		expiries[markKey{event.VenueID, payload.Symbol}] = payload.ExpiryNano
 		mu.Unlock()
@@ -285,7 +295,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			if at == 0 {
 				at = event.SimTS
 			}
-			key := positionKey{event.VenueID, payload.ClientID, payload.Symbol}
+			key := positionKey{venue: event.VenueID, clientID: payload.ClientID, symbol: payload.Symbol}
 			mu.Lock()
 			if isOptionSymbol(payload.Symbol) {
 				// Options are rebuilt from fills above; a position update for
@@ -316,7 +326,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				mu.Unlock()
 				return
 			}
-			key := positionKey{event.VenueID, event.ClientID, symbol}
+			key := positionKey{venue: event.VenueID, clientID: event.ClientID, symbol: symbol}
 			state := optionPositions[key]
 			if state == nil {
 				state = &positionState{}
@@ -381,6 +391,10 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				bucket.paid += total
 			case record.Reason == "expiry_settlement" && isOptionSymbol(record.Symbol):
 				key := markKey{event.VenueID, record.Symbol}
+				expiry, known := expiries[key]
+				if !known || expiry <= 0 || instant != expiry || event.SimTS != expiry || (record.Timestamp != 0 && record.Timestamp != expiry) {
+					exerciseTimingFailures++
+				}
 				entry := optionPaid[key]
 				entry.amount += total
 				entry.accounts++
@@ -389,7 +403,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				if holder == 0 {
 					holder = event.ClientID
 				}
-				optionPaidPerHolder[positionKey{event.VenueID, holder, record.Symbol}] += total
+				optionPaidPerHolder[positionKey{venue: event.VenueID, clientID: holder, symbol: record.Symbol}] += total
 			}
 		}
 	}); err != nil {
@@ -415,6 +429,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		precision = 1
 	}
 	result := &DerivativeSemantics{}
+	result.ExerciseTimingFailures = exerciseTimingFailures
 
 	for key, bucket := range funding {
 		check := FundingInstantCheck{

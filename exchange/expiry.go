@@ -383,6 +383,8 @@ type ExpirySettlementEvent struct {
 	Timestamp       int64  `json:"timestamp"`
 	ClientID        uint64 `json:"client_id"`
 	Symbol          string `json:"symbol"`
+	PositionSide    string `json:"position_side,omitempty"`
+	BasePrecision   int64  `json:"base_precision,omitempty"`
 	Size            int64  `json:"size"`
 	EntryPrice      int64  `json:"entry_price"`
 	SettlementPrice int64  `json:"settlement_price"`
@@ -608,11 +610,14 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 		if log != nil {
 			log.LogEvent(now, ep.clientID, "expiry_settlement", ExpirySettlementEvent{
 				Timestamp: now, ClientID: ep.clientID, Symbol: symbol,
-				Size: pos.Size, EntryPrice: pos.EntryPrice,
+				PositionSide:  pos.PositionSide.String(),
+				BasePrecision: precision,
+				Size:          pos.Size, EntryPrice: pos.EntryPrice,
 				SettlementPrice: settlementPrice, CashFlow: cash, DeliveryFee: fee,
 			})
 			log.LogEvent(now, ep.clientID, "balance_change", BalanceChangeEvent{
-				Timestamp: now, ClientID: ep.clientID, Symbol: symbol, Reason: "expiry_settlement",
+				Timestamp: now, ClientID: ep.clientID, Symbol: symbol,
+				PositionSide: pos.PositionSide.String(), Reason: "expiry_settlement",
 				Changes: []BalanceDelta{{Asset: quote, Wallet: "perp", OldBalance: oldBal, NewBalance: newBal, Delta: netCash}},
 			})
 		}
@@ -752,6 +757,8 @@ func describeInstrument(inst Instrument, action string, now int64, listedAt *int
 		Action:         action,
 		Symbol:         inst.Symbol(),
 		InstrumentType: inst.InstrumentType(),
+		QuoteAsset:     inst.QuoteAsset(),
+		BasePrecision:  inst.BasePrecision(),
 		TickSize:       inst.TickSize(),
 		MinOrderSize:   inst.MinOrderSize(),
 		Timestamp:      now,

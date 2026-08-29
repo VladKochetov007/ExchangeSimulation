@@ -5,11 +5,12 @@
 set -euo pipefail
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-source "$root_dir/scripts/v2-integrated-longrun-r4-contract.sh"
-output_root=${1:-"$v2_r4_output_root"}
+source "$root_dir/scripts/v2-integrated-longrun-r5-contract.sh"
+output_root=${1:-"$v2_r5_output_root"}
 score="$output_root/development-score.json"
 parity="$output_root/parity-attestation.json"
-contract_version="v2-integrated-longrun-scorer-v3"
+contract_version="v2-integrated-longrun-scorer-v4"
+analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 
 fail() {
 	printf 'integrated long-run scorer failure: %s\n' "$*" >&2
@@ -21,13 +22,17 @@ require_file() {
 require_object() {
 	jq -e 'type == "object"' "$1" >/dev/null || fail "malformed scorer JSON: $1"
 }
-v2_r4_require_output_root "$output_root" || fail "scorer root is not the canonical r4 evidence root"
+v2_r5_require_output_root "$output_root" || fail "scorer root is not the canonical r5 evidence root"
 [[ ! -e "$score" ]] || fail "refusing to overwrite precommitted score: $score"
+[[ -x "$analyzer" ]] || fail "missing analyzer: $analyzer"
+for holdout in holdout-619 holdout-631 holdout-641; do
+	[[ ! -e "$output_root/$holdout" ]] || fail "reserved holdout output exists before freeze authorization: $holdout"
+done
 "$root_dir/scripts/check-v2-integrated-longrun-configs.sh" >/dev/null
 "$root_dir/scripts/check-v2-integrated-longrun-parity.sh" "$output_root" >/dev/null
 require_file "$parity"
 require_object "$parity"
-jq -e '.contract == "v2-integrated-longrun-parity-v2" and
+jq -e '.contract == "v2-integrated-longrun-parity-v3" and
 	(.simulator_binary_sha256 | test("^[0-9a-f]{64}$")) and
 	(.simulator_binary_go_version | startswith("go1.27")) and
 	(.prunegate_sha256 | test("^[0-9a-f]{64}$")) and
@@ -50,7 +55,9 @@ required_json=$(printf '%s\n' "${required[@]}" | jq -Rsc 'split("\n") | map(sele
 cell_records=()
 for cell in dev-607 dev-613 dev-617; do
 	cell_dir="$output_root/$cell"
-	v2_r4_require_cell_path "$cell_dir" || fail "scorer cell is outside the canonical r4 root or is symlinked: $cell"
+	v2_r5_require_cell_path "$cell_dir" || fail "scorer cell is outside the canonical r5 root or is symlinked: $cell"
+	MVANALYZE_BIN="$analyzer" "$root_dir/scripts/verify-v2-integrated-longrun-cell.sh" "$cell_dir" >/dev/null ||
+		fail "fresh raw-evidence derivation did not match stored artifacts: $cell"
 	for file in analysis-metadata.json integrity.json activation.json; do
 		require_file "$cell_dir/$file"
 	done
@@ -59,9 +66,9 @@ for cell in dev-607 dev-613 dev-617; do
 	require_object "$cell_dir/activation.json"
 	jq -e --arg cell "$cell" --argjson required_artifacts "$required_json" \
 		'.cell == $cell and .seed == (.cell | split("-")[-1] | tonumber) and
-		.analysis_contract == "v2-integrated-longrun-candidate-v4" and
-		.integrity_contract == "v2-integrated-longrun-candidate-v4" and
-		.activation_contract == "v2-integrated-longrun-candidate-v4" and
+		.analysis_contract == "v2-integrated-longrun-candidate-v5" and
+		.integrity_contract == "v2-integrated-longrun-candidate-v5" and
+		.activation_contract == "v2-integrated-longrun-candidate-v5" and
 		.analyzer_trimpath == true and .analyzer_cgo_enabled == "0" and
 		.simulator_trimpath == true and .simulator_cgo_enabled == "0" and
 		(.analyzer_go_version | startswith("go1.27")) and (.simulator_go_version | startswith("go1.27")) and
@@ -70,6 +77,7 @@ for cell in dev-607 dev-613 dev-617; do
 		(.prunegate_go_version | startswith("go1.27")) and
 		(.analyzer_go_version | type) == "string" and (.simulator_go_version | type) == "string" and
 		.analyzer_vcs_modified == false and .required_artifacts == $required_artifacts and
+		.require_exact_replay == true and
 		(.artifact_sha256 | keys) == ($required_artifacts | sort) and
 		all(.artifact_sha256 | to_entries[]; (.value | test("^[0-9a-f]{64}$")))' \
 		"$cell_dir/analysis-metadata.json" >/dev/null || fail "invalid analysis metadata: $cell"
@@ -80,10 +88,10 @@ for cell in dev-607 dev-613 dev-617; do
 		declared_sha256=$(jq -er --arg artifact "$artifact" '.artifact_sha256[$artifact]' "$cell_dir/analysis-metadata.json")
 		[[ "$actual_sha256" == "$declared_sha256" ]] || fail "artifact hash mismatch: $cell/$artifact"
 	done
-	jq -e '.schema_version == 1 and .contract == "v2-integrated-longrun-candidate-v4" and
+	jq -e '.schema_version == 1 and .contract == "v2-integrated-longrun-candidate-v5" and
 		(.predicates | keys) == ["activation", "conservation", "derivatives", "expiry", "exposure", "fill_positions", "frontier_vectors", "hedging", "late_path", "liability_hedger", "liquidations", "maker_quote_size", "maker_rebalance", "maker_refresh", "margin", "mechanical", "observation_receipts", "option_liability", "option_surface", "option_value_taker", "order_lifecycle", "position_rounding", "positions", "post_only", "settlement", "vanna_volga"] and
 		all(.predicates | to_entries[]; .value == true)' "$cell_dir/integrity.json" >/dev/null || fail "integrity predicate failed: $cell"
-	jq -e '.schema_version == 1 and .result.contract == "v2-integrated-longrun-candidate-v4" and
+	jq -e '.schema_version == 1 and .result.contract == "v2-integrated-longrun-candidate-v5" and
 		(.result.predicates | length) == 2 and
 		(.result.predicates | keys) == ["cdf_collateral_borrowing_observed", "zero_price_unavailable_order_rejections"] and
 		all(.result.predicates | to_entries[]; .value == true)' "$cell_dir/activation.json" >/dev/null || fail "activation predicate failed: $cell"
@@ -213,6 +221,7 @@ jq -n \
 			provenance_consistent: (($cells | map(.source_revision) | unique | length) == 1 and
 				($cells | map(.analyzer_revision) | unique | length) == 1 and
 				($cells | map(.simulator_revision) | unique | length) == 1),
+			holdout_outputs_absent: true,
 			holdout_access_policy_enforced: true
 		},
 		cells: $cells,

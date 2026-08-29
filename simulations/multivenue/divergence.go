@@ -46,12 +46,15 @@ type checkpointSink struct {
 	traceTo   int64
 	trace     io.WriteCloser
 
-	rolling    [32]byte
-	events     int64
-	nextBound  int64
-	firstEvent bool
-	err        error
-	closed     bool
+	rolling          [32]byte
+	events           int64
+	nextBound        int64
+	lastSimTime      int64
+	lastCheckpointAt int64
+	finalSimTime     int64
+	firstEvent       bool
+	err              error
+	closed           bool
 }
 
 // checkpointRecord is one line of the checkpoint file.
@@ -131,6 +134,7 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	if s.closed {
 		return
 	}
+	s.lastSimTime = simTime
 
 	if s.firstEvent && s.intervalNano > 0 {
 		s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
@@ -172,6 +176,9 @@ func (s *checkpointSink) writeCheckpointLocked(at int64) {
 	if s.checkpoints == nil {
 		return
 	}
+	if at <= s.lastCheckpointAt {
+		return
+	}
 	record := checkpointRecord{
 		Domain:              "execution_observations",
 		Ordering:            "ordered_stream",
@@ -186,6 +193,9 @@ func (s *checkpointSink) writeCheckpointLocked(at int64) {
 		return
 	}
 	s.writeLineLocked(s.checkpoints, line, "write execution checkpoint")
+	if s.err == nil {
+		s.lastCheckpointAt = at
+	}
 }
 
 func (s *checkpointSink) writeLineLocked(w io.WriteCloser, line []byte, operation string) {
@@ -226,7 +236,11 @@ func (s *checkpointSink) close() error {
 	}
 	s.closed = true
 	if s.checkpoints != nil {
-		s.writeCheckpointLocked(s.nextBound)
+		finalAt := s.finalSimTime
+		if finalAt == 0 {
+			finalAt = s.lastSimTime
+		}
+		s.writeCheckpointLocked(finalAt)
 		if err := s.checkpoints.Close(); err != nil {
 			s.failLocked(fmt.Errorf("close execution checkpoints: %w", err))
 		}

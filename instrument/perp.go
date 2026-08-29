@@ -96,13 +96,17 @@ func (p *PerpFutures) Settle(ctx etypes.SettlementContext) etypes.SettlementResu
 	if ctx.Log != nil {
 		ctx.Log.LogEvent(ctx.Timestamp, exec.TakerClientID, "position_update", etypes.PositionUpdateEvent{
 			Timestamp: ctx.Timestamp, ClientID: exec.TakerClientID, Symbol: ctx.BookSymbol,
-			OldSize: takerDelta.OldSize, OldEntryPrice: takerDelta.OldEntryPrice,
+			PositionSide:  ctx.TakerOrder.PositionSide.String(),
+			BasePrecision: ctx.BasePrecision,
+			OldSize:       takerDelta.OldSize, OldEntryPrice: takerDelta.OldEntryPrice,
 			NewSize: takerDelta.NewSize, NewEntryPrice: takerDelta.NewEntryPrice,
 			TradeQty: exec.Qty, TradePrice: exec.Price, TradeSide: ctx.TakerOrder.Side.String(), Reason: "trade",
 		})
 		ctx.Log.LogEvent(ctx.Timestamp, exec.MakerClientID, "position_update", etypes.PositionUpdateEvent{
 			Timestamp: ctx.Timestamp, ClientID: exec.MakerClientID, Symbol: ctx.BookSymbol,
-			OldSize: makerDelta.OldSize, OldEntryPrice: makerDelta.OldEntryPrice,
+			PositionSide:  ctx.MakerPosSide.String(),
+			BasePrecision: ctx.BasePrecision,
+			OldSize:       makerDelta.OldSize, OldEntryPrice: makerDelta.OldEntryPrice,
 			NewSize: makerDelta.NewSize, NewEntryPrice: makerDelta.NewEntryPrice,
 			TradeQty: exec.Qty, TradePrice: exec.Price, TradeSide: exec.MakerSide.String(), Reason: "trade",
 		})

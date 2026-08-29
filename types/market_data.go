@@ -73,6 +73,8 @@ type InstrumentAnnouncement struct {
 	Action         string `json:"action"` // "listed" | "settled"
 	Symbol         string `json:"symbol"`
 	InstrumentType string `json:"instrument_type"`
+	QuoteAsset     string `json:"quote_asset,omitempty"`
+	BasePrecision  int64  `json:"base_precision,omitempty"`
 	Underlying     string `json:"underlying,omitempty"` // spot symbol the contract references
 	Strike         int64  `json:"strike,omitempty"`     // quote precision units (options)
 	IsCall         bool   `json:"is_call,omitempty"`

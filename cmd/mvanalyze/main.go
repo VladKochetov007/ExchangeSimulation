@@ -129,6 +129,8 @@ func main() {
 	termCarryLifecycleDeadline := flag.Int64("term-carry-lifecycle-deadline", 0, "registered term-carry lifecycle deadline/cutoff in Unix nanoseconds")
 	conservationBook := flag.String("conservation-book", "", "restrict the conservation audit to one book, e.g. ABC/USD")
 	basePrecision := flag.Int64("base-precision", 100_000_000, "base-asset precision, for converting position sizes into contracts")
+	requireExactReplay := flag.Bool("require-exact-replay", false, "reject position/settlement evidence that lacks exact trade replay fields")
+	deliveryFeePolicy := flag.String("delivery-fee-policy", "", "registered settlement delivery-fee policy, e.g. zero")
 	quotePrecision := flag.Int64("quote-precision", 100_000, "quote-asset precision, for converting logged prices into currency units")
 	viabilityWindow := flag.Float64("viability-window", 900, "viability window length in simulated seconds")
 	viabilityStart := flag.Float64("viability-start", 0, "exclude viability evidence before this simulated-second boundary")
@@ -1001,7 +1003,7 @@ func main() {
 					float64(result.LongestPositiveRunNanos)/1e9)
 			})
 		case "settlements":
-			result, err := run.MeasureSettlements(analysis.SettlementAuditOptions{BasePrecision: *basePrecision})
+			result, err := run.MeasureSettlements(analysis.SettlementAuditOptions{BasePrecision: *basePrecision, RequireExactReplay: *requireExactReplay, DeliveryFeePolicy: *deliveryFeePolicy})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)
@@ -1043,7 +1045,7 @@ func main() {
 					result.FillsAfterTerminal, result.FillQuantityMismatches, result.CancelQuantityMismatches)
 			})
 		case "positions":
-			result, err := run.MeasurePositions(analysis.PositionOptions{BasePrecision: *basePrecision})
+			result, err := run.MeasurePositions(analysis.PositionOptions{BasePrecision: *basePrecision, RequireExactReplay: *requireExactReplay})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)

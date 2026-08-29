@@ -30,6 +30,7 @@ func TestExpiryFillAuditUsesContractualExpiryForFuturesAndOptions(t *testing.T) 
 		expirySettledLine(100, 100, "north", "ABC-1-C", "OPTION"),
 		expiryFillLine(100, "north", "ABC-FUT-1"),
 		expiryFillLine(101, "north", "ABC-FUT-1"),
+		expiryFillLine(100, "north", "ABC-1-C"),
 		expiryFillLine(102, "north", "ABC-1-C"),
 		expiryFillLine(999, "north", "ABC-PERP"),
 	}
@@ -41,8 +42,28 @@ func TestExpiryFillAuditUsesContractualExpiryForFuturesAndOptions(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Contracts != 2 || result.Futures != 1 || result.Options != 1 || result.SettledContracts != 2 || result.FillRecords != 3 || result.FillsAfterExpiry != 2 || result.MissingExpiryMetadata != 0 {
+	if result.Contracts != 2 || result.Futures != 1 || result.Options != 1 || result.SettledContracts != 2 || result.FillRecords != 4 || result.FillsAfterExpiry != 4 || result.MissingExpiryMetadata != 0 {
 		t.Fatalf("expiry fill audit = %+v", result)
+	}
+}
+
+func TestExpiryFillAuditRejectsMalformedAndMismatchedFillEvidence(t *testing.T) {
+	lines := []string{
+		expiryInstrumentLine("instrument_listed", 1, 100, "north", "ABC-1-C", "OPTION"),
+		`{"sim_ts":100,"client_id":7,"event":"OrderFill","data":{"venue_id":"north","symbol":"ABC-1-C","payload":{"symbol":"ABC-1-P","qty":1}}}`,
+		`{"sim_ts":100,"client_id":7,"event":"OrderFill","data":{"venue_id":"north","symbol":"ABC-1-C","payload":{"symbol":"ABC-1-C","qty":0}}}`,
+	}
+	report := Report{TerminalAccounts: []AccountRow{{Account: Account{Timestamp: 100}}}}
+	run, err := Open(writeRun(t, report, map[string][]string{"north/derivatives.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureExpiryFills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MalformedFillRecords != 1 || result.FillIdentityFailures != 1 {
+		t.Fatalf("malformed fill evidence = %+v, want one of each failure", result)
 	}
 }
 
@@ -66,6 +87,27 @@ func TestExpiryFillAuditCatchesExpiredContractWithoutSettlement(t *testing.T) {
 		result.NonEmptySnapshotsAfterExpiry != 1 || len(result.Checks) != 1 ||
 		result.Checks[0].Settled {
 		t.Fatalf("expired unsettled contract survived: %+v", result)
+	}
+}
+
+func TestExpiryFillAuditRejectsUseBeforeListing(t *testing.T) {
+	lines := []string{
+		expiryInstrumentLine("instrument_listed", 10, 100, "north", "ABC-FUT-1", "FUTURE"),
+		expirySettledLine(100, 100, "north", "ABC-FUT-1", "FUTURE"),
+		expiryFillLine(9, "north", "ABC-FUT-1"),
+		expirySnapshotLine(9, "north", "ABC-FUT-1", 1, 1),
+	}
+	report := Report{TerminalAccounts: []AccountRow{{Account: Account{Timestamp: 100}}}}
+	run, err := Open(writeRun(t, report, map[string][]string{"north/general.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureExpiryFills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FillsBeforeListing != 1 || result.SnapshotRecordsBeforeListing != 1 || result.Checks[0].FillsBeforeListing != 1 {
+		t.Fatalf("pre-listing use was not recorded: %+v", result)
 	}
 }
 

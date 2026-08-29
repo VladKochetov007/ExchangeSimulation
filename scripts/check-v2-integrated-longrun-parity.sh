@@ -4,8 +4,8 @@
 set -euo pipefail
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-source "$root_dir/scripts/v2-integrated-longrun-r4-contract.sh"
-output_root=${1:-"$v2_r4_output_root"}
+source "$root_dir/scripts/v2-integrated-longrun-r5-contract.sh"
+output_root=${1:-"$v2_r5_output_root"}
 attestation="$output_root/parity-attestation.json"
 
 fail() {
@@ -18,14 +18,14 @@ require_file() {
 require_object() {
 	jq -e 'type == "object"' "$1" >/dev/null || fail "malformed parity JSON: $1"
 }
-v2_r4_require_output_root "$output_root" || fail "parity root is not the canonical r4 evidence root"
+v2_r5_require_output_root "$output_root" || fail "parity root is not the canonical r5 evidence root"
 [[ ! -e "$attestation" ]] || fail "refusing to overwrite parity attestation: $attestation"
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "parity requires a clean gate worktree"
 
 "$root_dir/scripts/check-v2-integrated-longrun-configs.sh" >/dev/null
 for cell in dev-607 dev-607-none dev-607-g8; do
 	cell_dir="$output_root/$cell"
-	v2_r4_require_cell_path "$cell_dir" || fail "parity cell is outside the canonical r4 root or is symlinked: $cell"
+	v2_r5_require_cell_path "$cell_dir" || fail "parity cell is outside the canonical r5 root or is symlinked: $cell"
 done
 cmp -s "$root_dir/research/configs/v2-integrated-longrun/dev-607.json" \
 	"$output_root/dev-607/run-config.json" || fail "seed-607 full config differs from registry"
@@ -39,13 +39,15 @@ for cell in dev-607 dev-607-none dev-607-g8; do
 	for file in run-config.json run-metadata.json run-status.json manifest.json greeks.json latency.json checkpoints.jsonl; do
 		require_file "$cell_dir/$file"
 	done
+	v2_r5_verify_evidence_manifest "$cell_dir" || fail "raw evidence manifest mismatch: $cell"
+	v2_r5_verify_attestation "$cell_dir" || fail "external evidence attestation mismatch: $cell"
 	for json_file in "$cell_dir"/*.json; do
 		[[ -f "$json_file" ]] || continue
 		require_object "$json_file"
 	done
 done
 
-jq -e '.schema_version == 4 and .runner_contract == "v2-integrated-longrun-runner-v4" and
+jq -e '.schema_version == 5 and .runner_contract == "v2-integrated-longrun-runner-v5" and
 	.cell == "dev-607" and .seed == 607 and .holdout == false and
 	.log_mode == "full" and .gomaxprocs == 4 and
 	.hypothesis_id == "V2-INTEGRATED-LONG-CANDIDATE" and
@@ -56,7 +58,7 @@ jq -e '.schema_version == 4 and .runner_contract == "v2-integrated-longrun-runne
 	(.config_sha256 | test("^[0-9a-f]{64}$")) and
 	(.binary_sha256 | test("^[0-9a-f]{64}$"))' \
 	"$output_root/dev-607/run-metadata.json" >/dev/null || fail "invalid seed-607 g4 metadata"
-jq -e '.schema_version == 4 and .runner_contract == "v2-integrated-longrun-runner-v4" and
+jq -e '.schema_version == 5 and .runner_contract == "v2-integrated-longrun-runner-v5" and
 	.cell == "dev-607-none" and .seed == 607 and .holdout == false and
 	.log_mode == "none" and .gomaxprocs == 4 and
 	.hypothesis_id == "V2-INTEGRATED-LONG-CANDIDATE-PARITY" and
@@ -67,7 +69,7 @@ jq -e '.schema_version == 4 and .runner_contract == "v2-integrated-longrun-runne
 	(.config_sha256 | test("^[0-9a-f]{64}$")) and
 	(.binary_sha256 | test("^[0-9a-f]{64}$"))' \
 	"$output_root/dev-607-none/run-metadata.json" >/dev/null || fail "invalid seed-607 no-log metadata"
-jq -e '.schema_version == 4 and .runner_contract == "v2-integrated-longrun-runner-v4" and
+jq -e '.schema_version == 5 and .runner_contract == "v2-integrated-longrun-runner-v5" and
 	.cell == "dev-607-g8" and .seed == 607 and .holdout == false and
 	.log_mode == "full" and .gomaxprocs == 8 and
 	.hypothesis_id == "V2-INTEGRATED-LONG-CANDIDATE" and
@@ -89,15 +91,20 @@ done
 for cell in dev-607 dev-607-none dev-607-g8; do
 	jq -e '.exit_status == 0 and .completion_verified == true and
 		.simulated_horizon == "24h" and
+		.simulation_start_nano == 1735689600000000000 and
+		.simulation_end_nano == 1735776000000000000 and
+		(.checkpoints_sha256 | test("^[0-9a-f]{64}$")) and
 		.completion_sentinels == ["greeks.json", "latency.json"]' \
 		"$output_root/$cell/run-status.json" >/dev/null || fail "incomplete parity cell: $cell"
-	for file in run-metadata.json manifest.json greeks.json latency.json; do
+	for file in run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl evidence-manifest.json; do
 		actual_sha256=$(sha256sum "$output_root/$cell/$file" | awk '{print $1}')
 		case "$file" in
 			run-metadata.json) declared_sha256=$(jq -er '.run_metadata_sha256' "$output_root/$cell/run-status.json") ;;
 			manifest.json) declared_sha256=$(jq -er '.manifest_sha256' "$output_root/$cell/run-status.json") ;;
 			greeks.json) declared_sha256=$(jq -er '.greeks_sha256' "$output_root/$cell/run-status.json") ;;
 			latency.json) declared_sha256=$(jq -er '.latency_sha256' "$output_root/$cell/run-status.json") ;;
+			checkpoints.jsonl) declared_sha256=$(jq -er '.checkpoints_sha256' "$output_root/$cell/run-status.json") ;;
+			evidence-manifest.json) declared_sha256=$(jq -er '.evidence_manifest_sha256' "$output_root/$cell/run-status.json") ;;
 		esac
 		[[ "$actual_sha256" == "$declared_sha256" ]] || fail "run-status hash mismatch: $cell/$file"
 	done
@@ -148,7 +155,7 @@ done
 mkdir -p "$output_root"
 tmp=$(mktemp "$attestation.tmp-XXXXXX")
 jq -n \
-	--arg contract "v2-integrated-longrun-parity-v2" \
+	--arg contract "v2-integrated-longrun-parity-v3" \
 	--arg source_revision "$source_revision" \
 	--arg simulator_binary_sha256 "$binary_sha256" \
 	--arg simulator_binary_go_version "$binary_go_version" \

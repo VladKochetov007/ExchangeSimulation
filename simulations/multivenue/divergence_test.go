@@ -36,6 +36,36 @@ func TestCheckpointSinkReportsTransportFailure(t *testing.T) {
 	}
 }
 
+func TestCheckpointSinkClosesAtRegisteredFinalTime(t *testing.T) {
+	const second = int64(1_000_000_000)
+	dir := t.TempDir()
+	sink, err := newCheckpointSink(dir, 1, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink.finalSimTime = 3 * second
+	sink.observe(1*second, 1, "event", "north", map[string]int{"n": 1})
+	sink.observe(2*second, 1, "event", "north", map[string]int{"n": 2})
+	if err := sink.close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(dir + "/checkpoints.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var records []checkpointRecord
+	for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte("\n")) {
+		var record checkpointRecord
+		if err := json.Unmarshal(line, &record); err != nil {
+			t.Fatal(err)
+		}
+		records = append(records, record)
+	}
+	if len(records) != 2 || records[len(records)-1].SimTime != 3*second {
+		t.Fatalf("checkpoint closure = %+v, want final time %d", records, 3*second)
+	}
+}
+
 var _ io.WriteCloser = (*checkpointFailWriter)(nil)
 
 func TestMakerTelemetryReusesGlobalCheckpointLogger(t *testing.T) {

@@ -6,23 +6,25 @@ import (
 )
 
 // ExpiryFillCheck records one expired future or option and every persisted fill
-// record that arrived after the contractual expiry in its listing metadata.
+// record that arrived at or after the contractual expiry in its listing metadata.
 // Settlement metadata is a consistency check, not the source of truth: a
 // broken expiry path can omit it altogether.
 type ExpiryFillCheck struct {
-	VenueID          string `json:"venue_id"`
-	Symbol           string `json:"symbol"`
-	InstrumentType   string `json:"instrument_type"`
-	ExpiryNano       int64  `json:"expiry_nano"`
-	ListedNano       int64  `json:"listed_nano"`
-	SettlementNano   int64  `json:"settlement_nano"`
-	Settled          bool   `json:"settled"`
-	FillRecords      int    `json:"fill_records"`
-	FillsAfterExpiry int    `json:"fills_after_expiry"`
+	VenueID            string `json:"venue_id"`
+	Symbol             string `json:"symbol"`
+	InstrumentType     string `json:"instrument_type"`
+	ExpiryNano         int64  `json:"expiry_nano"`
+	ListedNano         int64  `json:"listed_nano"`
+	SettlementNano     int64  `json:"settlement_nano"`
+	Settled            bool   `json:"settled"`
+	FillRecords        int    `json:"fill_records"`
+	FillsBeforeListing int    `json:"fills_before_listing"`
+	FillsAfterExpiry   int    `json:"fills_after_expiry"`
 	// SnapshotRecordsAfterExpiry counts persisted book publications after the
 	// contractual boundary. NonEmptySnapshotsAfterExpiry is the stronger
 	// observable: a deleted instrument must not retain quoted depth.
 	SnapshotRecordsAfterExpiry   int `json:"snapshot_records_after_expiry"`
+	SnapshotRecordsBeforeListing int `json:"snapshot_records_before_listing"`
 	NonEmptySnapshotsAfterExpiry int `json:"nonempty_snapshots_after_expiry"`
 }
 
@@ -34,7 +36,7 @@ type ExpiryFillCheck struct {
 //
 // FillRecords count participant-side OrderFill records, so a matched trade
 // usually contributes two records.  The invariant is the zero count of those
-// records after the independently announced contractual expiry.
+// records at or after the independently announced contractual expiry.
 type ExpiryFillAudit struct {
 	Contracts                    int               `json:"contracts"`
 	Futures                      int               `json:"futures"`
@@ -46,8 +48,12 @@ type ExpiryFillAudit struct {
 	MetadataMismatches           int               `json:"metadata_mismatches"`
 	MissingExpiryMetadata        int               `json:"missing_expiry_metadata"`
 	FillRecords                  int               `json:"fill_records"`
+	FillsBeforeListing           int               `json:"fills_before_listing"`
 	FillsAfterExpiry             int               `json:"fills_after_expiry"`
+	MalformedFillRecords         int               `json:"malformed_fill_records"`
+	FillIdentityFailures         int               `json:"fill_identity_failures"`
 	SnapshotRecordsAfterExpiry   int               `json:"snapshot_records_after_expiry"`
+	SnapshotRecordsBeforeListing int               `json:"snapshot_records_before_listing"`
 	NonEmptySnapshotsAfterExpiry int               `json:"nonempty_snapshots_after_expiry"`
 	Checks                       []ExpiryFillCheck `json:"checks"`
 }
@@ -125,17 +131,44 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 	}
 
 	type counts struct {
-		fills, after, snapshotsAfter, nonEmptySnapshotsAfter int
+		fills, beforeListing, after, snapshotsBeforeListing, snapshotsAfter, nonEmptySnapshotsAfter int
 	}
 	fillCounts := make(map[expiryFillKey]counts)
+	malformedFillRecords := 0
+	fillIdentityFailures := 0
 	if err := r.Scan(ScanOptions{Events: []string{"OrderFill"}}, func(event Event) {
 		var payload fillPayload
-		if event.Decode(&payload) != nil || payload.Qty <= 0 {
+		if err := event.Decode(&payload); err != nil {
+			mu.Lock()
+			malformedFillRecords++
+			mu.Unlock()
+			return
+		}
+		if payload.Qty <= 0 {
+			mu.Lock()
+			malformedFillRecords++
+			mu.Unlock()
 			return
 		}
 		symbol := event.Symbol
+		eventKey := expiryFillKey{event.VenueID, event.Symbol}
+		payloadKey := expiryFillKey{event.VenueID, payload.Symbol}
+		_, eventIsExpirable := contracts[eventKey]
+		_, payloadIsExpirable := contracts[payloadKey]
+		if (eventIsExpirable || payloadIsExpirable) && (event.Symbol == "" || payload.Symbol == "" || event.Symbol != payload.Symbol) {
+			mu.Lock()
+			fillIdentityFailures++
+			mu.Unlock()
+			return
+		}
 		if symbol == "" {
 			symbol = payload.Symbol
+		}
+		if symbol == "" {
+			mu.Lock()
+			fillIdentityFailures++
+			mu.Unlock()
+			return
 		}
 		key := expiryFillKey{event.VenueID, symbol}
 		mu.Lock()
@@ -146,7 +179,10 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 		}
 		row := fillCounts[key]
 		row.fills++
-		if event.SimTS > contract.expiry {
+		if !contract.listed || event.SimTS < contract.listing {
+			row.beforeListing++
+		}
+		if event.SimTS >= contract.expiry {
 			row.after++
 		}
 		fillCounts[key] = row
@@ -168,7 +204,18 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 	if err := r.Scan(ScanOptions{Events: []string{"BookSnapshot"}}, func(event Event) {
 		key := expiryFillKey{event.VenueID, event.Symbol}
 		contract, exists := contracts[key]
-		if !exists || event.SimTS <= contract.expiry {
+		if !exists {
+			return
+		}
+		if !contract.listed || event.SimTS < contract.listing {
+			mu.Lock()
+			row := fillCounts[key]
+			row.snapshotsBeforeListing++
+			fillCounts[key] = row
+			mu.Unlock()
+			return
+		}
+		if event.SimTS < contract.expiry {
 			return
 		}
 		var payload snapshotPayload
@@ -208,7 +255,7 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 			terminalNano = row.Account.Timestamp
 		}
 	}
-	result := &ExpiryFillAudit{MissingExpiryMetadata: len(missing)}
+	result := &ExpiryFillAudit{MissingExpiryMetadata: len(missing), MalformedFillRecords: malformedFillRecords, FillIdentityFailures: fillIdentityFailures}
 	for key, contract := range contracts {
 		counts := fillCounts[key]
 		result.Contracts++
@@ -237,15 +284,18 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 			continue
 		}
 		result.FillRecords += counts.fills
+		result.FillsBeforeListing += counts.beforeListing
 		result.FillsAfterExpiry += counts.after
+		result.SnapshotRecordsBeforeListing += counts.snapshotsBeforeListing
 		result.SnapshotRecordsAfterExpiry += counts.snapshotsAfter
 		result.NonEmptySnapshotsAfterExpiry += counts.nonEmptySnapshotsAfter
 		result.Checks = append(result.Checks, ExpiryFillCheck{
 			VenueID: key.venue, Symbol: contract.symbol, InstrumentType: contract.kind,
 			ExpiryNano: contract.expiry, ListedNano: contract.listing,
 			SettlementNano: contract.settlement, Settled: contract.settled,
-			FillRecords: counts.fills, FillsAfterExpiry: counts.after,
+			FillRecords: counts.fills, FillsBeforeListing: counts.beforeListing, FillsAfterExpiry: counts.after,
 			SnapshotRecordsAfterExpiry:   counts.snapshotsAfter,
+			SnapshotRecordsBeforeListing: counts.snapshotsBeforeListing,
 			NonEmptySnapshotsAfterExpiry: counts.nonEmptySnapshotsAfter,
 		})
 	}
