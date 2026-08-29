@@ -57,8 +57,8 @@ type DelayedGateway struct {
 	phaseWG       sync.WaitGroup
 	phaseLifeMu   sync.Mutex
 	phaseMu       sync.Mutex
-	phaseResp     []exchange.Response
-	phaseMD       []phaseMarketData
+	phaseResp     phaseQueue[exchange.Response]
+	phaseMD       phaseQueue[phaseMarketData]
 	latencyStats  *LatencyStats
 	latencyLabel  string
 	receiptSink   *MarketDataReceiptRecorder
@@ -78,7 +78,7 @@ func (d *DelayedGateway) Idle() bool {
 		return false
 	}
 	d.phaseMu.Lock()
-	phaseQueued := len(d.phaseResp) != 0 || len(d.phaseMD) != 0
+	phaseQueued := d.phaseResp.len() != 0 || d.phaseMD.len() != 0
 	d.phaseMu.Unlock()
 	if phaseQueued {
 		return false
@@ -351,7 +351,7 @@ func (d *DelayedGateway) schedulePhaseResponse(resp exchange.Response) {
 	at, ticket := d.deliveryTime(&d.respMu, &d.lastRespAt, d.ResponseLatency, LatencyResponse)
 	if at <= d.clock.NowUnixNano() {
 		d.phaseMu.Lock()
-		d.phaseResp = append(d.phaseResp, resp)
+		d.phaseResp.push(resp)
 		d.phaseMu.Unlock()
 		d.delivered(ticket)
 		return
@@ -361,7 +361,7 @@ func (d *DelayedGateway) schedulePhaseResponse(resp exchange.Response) {
 			return
 		}
 		d.phaseMu.Lock()
-		d.phaseResp = append(d.phaseResp, resp)
+		d.phaseResp.push(resp)
 		d.phaseMu.Unlock()
 		d.delivered(ticket)
 	})
@@ -372,7 +372,7 @@ func (d *DelayedGateway) schedulePhaseMarketData(msg *exchange.MarketDataMsg) {
 	receipt := d.scheduleMarketDataReceipt(msg, at)
 	if at <= d.clock.NowUnixNano() {
 		d.phaseMu.Lock()
-		d.phaseMD = append(d.phaseMD, phaseMarketData{message: msg, receipt: receipt})
+		d.phaseMD.push(phaseMarketData{message: msg, receipt: receipt})
 		d.phaseMu.Unlock()
 		d.delivered(ticket)
 		return
@@ -382,10 +382,42 @@ func (d *DelayedGateway) schedulePhaseMarketData(msg *exchange.MarketDataMsg) {
 			return
 		}
 		d.phaseMu.Lock()
-		d.phaseMD = append(d.phaseMD, phaseMarketData{message: msg, receipt: receipt})
+		d.phaseMD.push(phaseMarketData{message: msg, receipt: receipt})
 		d.phaseMu.Unlock()
 		d.delivered(ticket)
 	})
+}
+
+// phaseQueue is a FIFO that reuses its backing array.
+//
+// The deterministic phase queues previously advanced by reslicing from the
+// front, which abandons the consumed prefix: the slice keeps its tail capacity
+// only, so every refill reallocates and copies, and the abandoned prefix stays
+// reachable until the whole array is dropped. That pattern was 262MB of the
+// 4.29GB a 15-minute integrated run allocates. Advancing a head index instead
+// keeps one array alive per gateway.
+//
+// Order is unchanged: items leave in exactly the order they were pushed. A
+// popped slot is zeroed so a delivered message is not kept alive by the array.
+type phaseQueue[T any] struct {
+	items []T
+	head  int
+}
+
+func (q *phaseQueue[T]) push(item T) { q.items = append(q.items, item) }
+
+func (q *phaseQueue[T]) len() int { return len(q.items) - q.head }
+
+func (q *phaseQueue[T]) front() T { return q.items[q.head] }
+
+func (q *phaseQueue[T]) pop() {
+	var zero T
+	q.items[q.head] = zero
+	q.head++
+	if q.head == len(q.items) {
+		q.items = q.items[:0]
+		q.head = 0
+	}
 }
 
 type phaseMarketData struct {
@@ -476,16 +508,16 @@ func (d *DelayedGateway) EgressBlocked() bool {
 	}
 	d.phaseMu.Lock()
 	defer d.phaseMu.Unlock()
-	if len(d.phaseResp) > 0 && len(d.responseCh) == cap(d.responseCh) {
+	if d.phaseResp.len() > 0 && len(d.responseCh) == cap(d.responseCh) {
 		return true
 	}
-	return len(d.phaseMD) > 0 && len(d.marketDataCh) == cap(d.marketDataCh)
+	return d.phaseMD.len() > 0 && len(d.marketDataCh) == cap(d.marketDataCh)
 }
 
 // PendingDescription reports what this gateway is holding and where.
 func (d *DelayedGateway) PendingDescription() string {
 	d.phaseMu.Lock()
-	resp, md := len(d.phaseResp), len(d.phaseMD)
+	resp, md := d.phaseResp.len(), d.phaseMD.len()
 	d.phaseMu.Unlock()
 	return fmt.Sprintf("gw%d[req %d/%d resp %d/%d md %d/%d phaseResp %d phaseMD %d]",
 		d.ID(), len(d.requestCh), cap(d.requestCh), len(d.responseCh), cap(d.responseCh),
@@ -502,21 +534,21 @@ func (d *DelayedGateway) DrainDeterministicPhaseEgress() bool {
 	d.phaseMu.Lock()
 	processed := false
 	received := make([]scheduledMarketDataReceipt, 0)
-	for len(d.phaseResp) > 0 {
+	for d.phaseResp.len() > 0 {
 		select {
-		case d.responseCh <- d.phaseResp[0]:
-			d.phaseResp = d.phaseResp[1:]
+		case d.responseCh <- d.phaseResp.front():
+			d.phaseResp.pop()
 			processed = true
 		default:
 			d.phaseMu.Unlock()
 			return processed
 		}
 	}
-	for len(d.phaseMD) > 0 {
+	for d.phaseMD.len() > 0 {
 		select {
-		case d.marketDataCh <- d.phaseMD[0].message:
-			received = append(received, d.phaseMD[0].receipt)
-			d.phaseMD = d.phaseMD[1:]
+		case d.marketDataCh <- d.phaseMD.front().message:
+			received = append(received, d.phaseMD.front().receipt)
+			d.phaseMD.pop()
 			processed = true
 		default:
 			d.phaseMu.Unlock()

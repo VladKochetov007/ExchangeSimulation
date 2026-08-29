@@ -28,7 +28,7 @@ func TestEgressBlockedDistinguishesAFullInboxFromAStall(t *testing.T) {
 		t.Error("an empty gateway reported backpressure")
 	}
 
-	gateway.phaseResp = append(gateway.phaseResp, exchange.Response{})
+	gateway.phaseResp.push(exchange.Response{})
 	if gateway.EgressBlocked() {
 		t.Error("a gateway with room in the inbox reported backpressure")
 	}
@@ -48,7 +48,7 @@ func TestEgressBlockedDistinguishesAFullInboxFromAStall(t *testing.T) {
 // carries is book publications, not responses.
 func TestEgressBlockedCountsMarketData(t *testing.T) {
 	gateway := blockedGateway(t)
-	gateway.phaseMD = append(gateway.phaseMD, phaseMarketData{message: &exchange.MarketDataMsg{}})
+	gateway.phaseMD.push(phaseMarketData{message: &exchange.MarketDataMsg{}})
 	gateway.marketDataCh <- &exchange.MarketDataMsg{}
 	if !gateway.EgressBlocked() {
 		t.Error("a full market-data inbox did not report backpressure")
@@ -59,7 +59,7 @@ func TestEgressBlockedCountsMarketData(t *testing.T) {
 // queues to report on and must never claim backpressure.
 func TestEgressBlockedIsFalseOutsideDeterministicPhases(t *testing.T) {
 	gateway := blockedGateway(t)
-	gateway.phaseResp = append(gateway.phaseResp, exchange.Response{})
+	gateway.phaseResp.push(exchange.Response{})
 	gateway.responseCh <- exchange.Response{}
 	gateway.phaseMode.Store(false)
 	if gateway.EgressBlocked() {
