@@ -72,10 +72,11 @@ func (pm *PositionManager) GetPositionBySide(clientID uint64, symbol string, pos
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 
-	if pm.positions[clientID] == nil {
+	clientPositions := pm.positions[clientID]
+	if clientPositions == nil {
 		return nil
 	}
-	p := pm.positions[clientID][positionKey{symbol, posSide}]
+	p := clientPositions[positionKey{symbol, posSide}]
 	if p == nil {
 		return nil
 	}
@@ -251,10 +252,11 @@ func (pm *PositionManager) AddPositionMargin(clientID uint64, symbol string, sid
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	if pm.positions[clientID] == nil {
+	clientPositions := pm.positions[clientID]
+	if clientPositions == nil {
 		return
 	}
-	if pos := pm.positions[clientID][positionKey{symbol, side}]; pos != nil {
+	if pos := clientPositions[positionKey{symbol, side}]; pos != nil {
 		pos.Margin += amount
 	}
 }
@@ -267,10 +269,11 @@ func (pm *PositionManager) ReleasePositionMargin(clientID uint64, symbol string,
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	if pm.positions[clientID] == nil {
+	clientPositions := pm.positions[clientID]
+	if clientPositions == nil {
 		return 0
 	}
-	pos := pm.positions[clientID][positionKey{symbol, side}]
+	pos := clientPositions[positionKey{symbol, side}]
 	if pos == nil || pos.Margin <= 0 {
 		return 0
 	}
@@ -795,10 +798,12 @@ func (pm *PositionManager) Unlock() { pm.mu.Unlock() }
 // InjectPosition directly sets a position for testing purposes.
 // Caller must hold Lock().
 func (pm *PositionManager) InjectPosition(clientID uint64, symbol string, pos *Position) {
-	if pm.positions[clientID] == nil {
-		pm.positions[clientID] = make(map[positionKey]*Position)
+	clientPositions := pm.positions[clientID]
+	if clientPositions == nil {
+		clientPositions = make(map[positionKey]*Position)
+		pm.positions[clientID] = clientPositions
 	}
-	pm.positions[clientID][positionKey{symbol, pos.PositionSide}] = pos
+	clientPositions[positionKey{symbol, pos.PositionSide}] = pos
 	if pm.accounting[clientID] != nil {
 		delete(pm.accounting[clientID], positionKey{symbol, pos.PositionSide})
 	}
