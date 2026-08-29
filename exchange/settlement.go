@@ -515,27 +515,57 @@ func (e *DefaultExchange) recordFeeRevenue(defaultAsset string, takerFee, makerF
 	logRevenue(makerAsset, 0, makerFee.Amount)
 }
 
+// fillEvidence is the persisted OrderFill payload.
+//
+// Fields are declared in lexicographic order of their JSON names, which is the
+// order encoding/json emits for a map. That makes this struct produce byte-
+// identical evidence to the map literal it replaces, while avoiding one
+// map allocation and sixteen interface boxes per fill. Fills are the highest-
+// volume payload that carried a map, and every payload is marshalled twice —
+// once by the ordered-execution hash sink and once by the raw evidence logger —
+// so the saving is paid on both.
+//
+// Do not reorder these fields. The order is the evidence contract.
+type fillEvidence struct {
+	FeeAmount     int64  `json:"fee_amount"`
+	FeeAsset      string `json:"fee_asset"`
+	FilledQty     int64  `json:"filled_qty"`
+	IsFull        bool   `json:"is_full"`
+	NewEntryPrice int64  `json:"new_entry_price"`
+	NewSize       int64  `json:"new_size"`
+	OrderID       uint64 `json:"order_id"`
+	PositionSide  string `json:"position_side"`
+	Price         int64  `json:"price"`
+	Qty           int64  `json:"qty"`
+	RealizedPnL   int64  `json:"realized_pnl"`
+	RemainingQty  int64  `json:"remaining_qty"`
+	Role          string `json:"role"`
+	Side          string `json:"side"`
+	Symbol        string `json:"symbol"`
+	TradeID       uint64 `json:"trade_id"`
+}
+
 func logFill(ctx executionContext, tradeID uint64, side fillSide) {
 	if ctx.log == nil {
 		return
 	}
-	ctx.log.LogEvent(ctx.timestamp, side.clientID, "OrderFill", map[string]any{
-		"order_id":        side.orderID,
-		"symbol":          ctx.book.Symbol,
-		"qty":             ctx.exec.Qty,
-		"price":           ctx.exec.Price,
-		"side":            side.side.String(),
-		"position_side":   side.posSide.String(),
-		"filled_qty":      side.filledQty,
-		"remaining_qty":   side.totalQty - side.filledQty,
-		"is_full":         side.isFull(),
-		"trade_id":        tradeID,
-		"role":            side.role,
-		"fee_amount":      side.fee.Amount,
-		"fee_asset":       side.fee.Asset,
-		"realized_pnl":    side.realizedPnL,
-		"new_size":        side.delta.NewSize,
-		"new_entry_price": side.delta.NewEntryPrice,
+	ctx.log.LogEvent(ctx.timestamp, side.clientID, "OrderFill", fillEvidence{
+		FeeAmount:     side.fee.Amount,
+		FeeAsset:      side.fee.Asset,
+		FilledQty:     side.filledQty,
+		IsFull:        side.isFull(),
+		NewEntryPrice: side.delta.NewEntryPrice,
+		NewSize:       side.delta.NewSize,
+		OrderID:       side.orderID,
+		PositionSide:  side.posSide.String(),
+		Price:         ctx.exec.Price,
+		Qty:           ctx.exec.Qty,
+		RealizedPnL:   side.realizedPnL,
+		RemainingQty:  side.totalQty - side.filledQty,
+		Role:          side.role,
+		Side:          side.side.String(),
+		Symbol:        ctx.book.Symbol,
+		TradeID:       tradeID,
 	})
 }
 

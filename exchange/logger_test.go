@@ -18,6 +18,25 @@ func (l *recordingLogger) LogEvent(_ int64, _ uint64, event string, data any) {
 	l.records = append(l.records, logRecord{event: event, data: data})
 }
 
+// evidenceFields returns a logged payload as the generic object its persisted
+// JSON describes. Asserting on that rather than on the payload's Go type keeps
+// these tests pinned to the evidence contract — field names and serialized
+// values — so a change that leaves the persisted bytes identical does not fail
+// them, and a change to a field name or value does.
+func evidenceFields(t *testing.T, data any) map[string]any {
+	t.Helper()
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("marshal evidence %#v: %v", data, err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatalf("decode evidence %s: %v", encoded, err)
+	}
+	return fields
+}
+
+
 func TestInstrumentLoggerFallbackDoesNotReplaceGlobalLogger(t *testing.T) {
 	ex := NewExchangeWithConfig(ExchangeConfig{})
 	global := &recordingLogger{}
@@ -126,16 +145,15 @@ func TestExchangeForcedCancellationIsLoggedWithoutActorRequest(t *testing.T) {
 	var cancellation map[string]any
 	for _, record := range log.records {
 		if record.event == "OrderCancelled" {
-			cancellation, ok = record.data.(map[string]any)
-			if ok {
-				break
-			}
+			cancellation = evidenceFields(t, record.data)
+			break
 		}
 	}
 	if cancellation == nil {
 		t.Fatalf("forced cancellation evidence = %#v", log.records)
 	}
-	if cancellation["order_id"] != orderID || cancellation["remaining_qty"] != int64(2) ||
+	// JSON numbers decode as float64, which is exact for these magnitudes.
+	if cancellation["order_id"] != float64(orderID) || cancellation["remaining_qty"] != float64(2) ||
 		cancellation["reason"] != exchangeForcedFeeReservationReason {
 		t.Fatalf("forced cancellation evidence = %#v", cancellation)
 	}
@@ -208,8 +226,7 @@ func TestExchangeForcedCancellationCallSitesRetainTheirReason(t *testing.T) {
 				if record.event != "OrderCancelled" {
 					continue
 				}
-				payload, ok := record.data.(map[string]any)
-				if ok && payload["reason"] == tc.reason {
+				if evidenceFields(t, record.data)["reason"] == tc.reason {
 					return
 				}
 			}

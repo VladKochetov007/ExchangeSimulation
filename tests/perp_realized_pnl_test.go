@@ -1,6 +1,8 @@
 package exchange_test
 
 import (
+	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -8,28 +10,53 @@ import (
 )
 
 // pnlLogger captures realised PnL as the exchange reports it.
+//
+// It reads the field out of the payload's persisted JSON rather than by
+// asserting the payload's Go type. The evidence contract is the field name and
+// its serialized value; whether the engine builds that payload from a map or a
+// struct is an implementation detail, and a test that asserts the Go type fails
+// on a change that leaves the persisted bytes identical. A malformed or missing
+// field is reported rather than skipped, so a silent zero cannot pass for a
+// measured zero.
 type pnlLogger struct {
-	mu    sync.Mutex
-	total int64
-	fills int
+	mu     sync.Mutex
+	total  int64
+	fills  int
+	failed error
 }
 
 func (l *pnlLogger) LogEvent(_ int64, _ uint64, eventName string, event any) {
 	if eventName != "OrderFill" {
 		return
 	}
-	payload, ok := event.(map[string]any)
-	if !ok {
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		l.record(fmt.Errorf("marshal OrderFill evidence: %w", err))
 		return
 	}
-	value, ok := payload["realized_pnl"].(int64)
-	if !ok {
+	var payload struct {
+		RealizedPnL *int64 `json:"realized_pnl"`
+	}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		l.record(fmt.Errorf("decode OrderFill evidence %s: %w", encoded, err))
+		return
+	}
+	if payload.RealizedPnL == nil {
+		l.record(fmt.Errorf("OrderFill evidence has no realized_pnl field: %s", encoded))
 		return
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.total += value
+	l.total += *payload.RealizedPnL
 	l.fills++
+}
+
+func (l *pnlLogger) record(err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.failed == nil {
+		l.failed = err
+	}
 }
 
 // A maker hedging on the perpetual pays 8.8 to 43 basis points per unit hedged
@@ -114,7 +141,11 @@ func TestPerpRealizedPnLMatchesEntryAndExit(t *testing.T) {
 			want := USDAmount(tc.wantPnLUSD)
 			logger.mu.Lock()
 			got := logger.total
+			failure := logger.failed
 			logger.mu.Unlock()
+			if failure != nil {
+				t.Fatalf("OrderFill evidence unusable: %v", failure)
+			}
 			if got != want {
 				t.Fatalf("realised PnL = %d (%.2f USD), want %d (%.0f USD)",
 					got, float64(got)/float64(USD_PRECISION), want, tc.wantPnLUSD)

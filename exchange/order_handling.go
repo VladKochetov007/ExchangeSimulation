@@ -26,10 +26,10 @@ func (e *DefaultExchange) logExchangeForcedCancellation(book *OrderBook, order *
 		return
 	}
 	if log := e.getLogger(book.Symbol); log != nil {
-		log.LogEvent(e.Clock.NowUnixNano(), order.ClientID, "OrderCancelled", map[string]any{
-			"order_id":      order.ID,
-			"remaining_qty": remainingQty,
-			"reason":        reason,
+		log.LogEvent(e.Clock.NowUnixNano(), order.ClientID, "OrderCancelled", forcedCancelEvidence{
+			OrderID:      order.ID,
+			Reason:       reason,
+			RemainingQty: remainingQty,
 		})
 	}
 }
@@ -42,6 +42,25 @@ func (e *DefaultExchange) logExchangeForcedCancellation(book *OrderBook, order *
 type acceptedOrderEvidence struct {
 	*Order
 	RequestID uint64 `json:"request_id"`
+}
+
+// The evidence payloads below replace map literals. Their fields are declared in
+// lexicographic order of their JSON names, which is the order encoding/json
+// emits for a map, so the persisted bytes are unchanged while the per-event map
+// allocation and interface boxing are not paid. Every payload is marshalled
+// twice — once by the ordered-execution hash sink and once by the raw evidence
+// logger — so the saving is paid on both.
+//
+// Do not reorder these fields. The order is the evidence contract.
+type forcedCancelEvidence struct {
+	OrderID      uint64 `json:"order_id"`
+	Reason       string `json:"reason"`
+	RemainingQty int64  `json:"remaining_qty"`
+}
+
+type bookSnapshotEvidence struct {
+	Asks []PriceLevel `json:"asks"`
+	Bids []PriceLevel `json:"bids"`
 }
 
 // rejectedOrderEvidence keeps rejection evidence tied to the attempted order,
@@ -471,9 +490,9 @@ func (e *DefaultExchange) Subscribe(clientID uint64, req *QueryRequest, gateway 
 	}, e.Clock.NowUnixNano())
 
 	if log := e.getLogger(req.Symbol); log != nil {
-		log.LogEvent(e.Clock.NowUnixNano(), clientID, "BookSnapshot", map[string]any{
-			"bids": book.Bids.GetSnapshot(),
-			"asks": book.Asks.GetSnapshot(),
+		log.LogEvent(e.Clock.NowUnixNano(), clientID, "BookSnapshot", bookSnapshotEvidence{
+			Asks: book.Asks.GetSnapshot(),
+			Bids: book.Bids.GetSnapshot(),
 		})
 	}
 

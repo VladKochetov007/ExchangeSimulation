@@ -459,9 +459,9 @@ func (e *DefaultExchange) logSnapshots() {
 		}, timestamp)
 
 		if log := e.getLogger(symbol); log != nil {
-			log.LogEvent(timestamp, 0, "BookSnapshot", map[string]any{
-				"bids": book.Bids.GetSnapshot(),
-				"asks": book.Asks.GetSnapshot(),
+			log.LogEvent(timestamp, 0, "BookSnapshot", bookSnapshotEvidence{
+				Asks: book.Asks.GetSnapshot(),
+				Bids: book.Bids.GetSnapshot(),
 			})
 		}
 	}
