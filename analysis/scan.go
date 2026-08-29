@@ -47,6 +47,15 @@ func decodeRequiredJSON(raw json.RawMessage, target any, required ...string) err
 	if err := json.Unmarshal(raw, target); err != nil {
 		return err
 	}
+	// Fast path: derive presence directly from the already validated bytes.
+	// The fallback below stays the semantic reference and still runs whenever
+	// the scanner declines to decide.
+	if missing, decided := scanRequiredFields(raw, required); decided {
+		if missing != "" {
+			return fmt.Errorf("missing required payload field %q", missing)
+		}
+		return nil
+	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
 		if err != nil {
@@ -96,6 +105,9 @@ type ScanOptions struct {
 // must be safe for concurrent use. Callers that need ordering should collect
 // per-file and merge, or restrict Files to one file.
 func (r *Run) Scan(opts ScanOptions, visit func(Event)) error {
+	if r.fuse != nil {
+		return r.fuse.scanFused(r, opts, visit)
+	}
 	// A caller that selected files and matched none must scan nothing. Treating
 	// an empty selection as "everything" turns a mistyped venue or symbol into
 	// a blend of every book in the run, which reports a full-looking tape and
@@ -196,12 +208,14 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 		}
 		// Unwrap the derivative nesting: an inner payload means the fields sit
 		// one level down and the symbol travels with them.
-		var inner dataLayer
-		if len(outer.Payload) > 0 && json.Unmarshal(outer.Payload, &inner) == nil && len(inner.Payload) > 0 {
-			if inner.Symbol != "" {
-				event.Symbol = inner.Symbol
+		if mayNestPayload(outer.Payload) {
+			var inner dataLayer
+			if json.Unmarshal(outer.Payload, &inner) == nil && len(inner.Payload) > 0 {
+				if inner.Symbol != "" {
+					event.Symbol = inner.Symbol
+				}
+				event.payload = inner.Payload
 			}
-			event.payload = inner.Payload
 		}
 		if scanStatsEnabled {
 			scanVisits.Add(1)
@@ -210,6 +224,26 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 	}
 	return scanner.Err()
 }
+
+// mayNestPayload reports whether payload can possibly carry a nested "payload"
+// key, which is the only case where the derivative unwrap changes the event.
+//
+// It is a deliberately conservative superset of the real test, so a false
+// positive costs one decode and a false negative is impossible. A JSON object
+// key that unescapes to "payload" either appears literally in the raw bytes or
+// uses a backslash escape, and a backslash can only occur inside a string, so
+// admitting every payload containing a backslash covers escaped spellings such
+// as "\u0070ayload". Records without either cannot nest, so their full decode
+// (previously performed on every visited record only to be discarded) is
+// skipped.
+func mayNestPayload(payload []byte) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	return bytes.Contains(payload, nestedPayloadKey) || bytes.IndexByte(payload, '\\') >= 0
+}
+
+var nestedPayloadKey = []byte(`"payload"`)
 
 func containsAny(line []byte, needles [][]byte) bool {
 	for _, needle := range needles {
