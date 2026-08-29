@@ -52,10 +52,8 @@ done
 
 for cell in dev-607 dev-607-g8; do
 	cell_dir="$output_root/$cell"
+	raw_stage_cells+=("$cell_dir")
 	v2_r5_stage_raw_evidence "$cell_dir" || fail "raw evidence is neither retained nor covered by a valid archive: $cell"
-	if [[ -e "$cell_dir/.raw-evidence-staged.$$" ]]; then
-		raw_stage_cells+=("$cell_dir")
-	fi
 done
 cmp -s "$root_dir/research/configs/v2-integrated-longrun/dev-607.json" \
 	"$output_root/dev-607/run-config.json" || fail "seed-607 full config differs from registry"

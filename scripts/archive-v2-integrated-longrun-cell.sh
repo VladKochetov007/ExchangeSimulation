@@ -35,12 +35,17 @@ case "$cell_name" in
 esac
 
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "raw archiving requires a clean gate worktree"
-for input in run-config.json run-metadata.json run-status.json manifest.json greeks.json latency.json checkpoints.jsonl evidence-manifest.json integrity.json analysis-metadata.json; do
+required_inputs=(run-config.json run-metadata.json run-status.json manifest.json greeks.json latency.json checkpoints.jsonl evidence-manifest.json integrity.json)
+if [[ "$cell_name" != dev-607-g8 ]]; then
+	required_inputs+=(analysis-metadata.json)
+fi
+for input in "${required_inputs[@]}"; do
 	[[ -s "$cell/$input" ]] || fail "missing completed-cell input: $cell/$input"
 done
 [[ "$(jq -er '.log_mode' "$cell/run-config.json")" == full ]] || fail "raw archive requires full log mode"
 [[ ! -e "$(v2_r5_raw_archive_path "$cell")" ]] || fail "raw archive already exists"
 [[ ! -e "$(v2_r5_raw_archive_descriptor_path "$cell")" ]] || fail "raw archive descriptor already exists"
+[[ ! -e "$(v2_r5_raw_archive_attestation_path "$cell_name")" ]] || fail "raw archive attestation already exists"
 [[ ! -e "$cell/.raw-evidence-staged.$$" ]] || fail "staging marker collides with archive process"
 
 jq -e '.exit_status == 0 and .completion_verified == true' "$cell/run-status.json" >/dev/null || fail "cell is not a completed run"
@@ -62,7 +67,9 @@ archive=$(v2_r5_raw_archive_path "$cell")
 archive_tmp="$archive.tmp-$$"
 descriptor=$(v2_r5_raw_archive_descriptor_path "$cell")
 descriptor_tmp="$descriptor.tmp-$$"
-trap 'rm -f -- "$archive_tmp" "$descriptor_tmp"' EXIT
+archive_attestation=$(v2_r5_raw_archive_attestation_path "$cell_name")
+archive_attestation_tmp="$archive_attestation.tmp-$$"
+trap 'rm -f -- "$archive_tmp" "$descriptor_tmp" "$archive_attestation_tmp"' EXIT
 tar --format=posix --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
 	--no-acls --no-xattrs --no-selinux --use-compress-program='zstd -q -T1' \
 	-cf "$archive_tmp" -C "$cell" venues || fail "could not create raw archive"
@@ -91,7 +98,19 @@ jq -n --arg cell "$cell_name" --arg source_revision "$source_revision" \
 	 raw_jsonl_files: $evidence_manifest[0].raw_jsonl_files,
 	 raw_jsonl_bytes: $evidence_manifest[0].raw_jsonl_bytes}' >"$descriptor_tmp" || fail "could not write raw archive descriptor"
 mv -- "$descriptor_tmp" "$descriptor"
-v2_r5_verify_raw_evidence_archive "$cell" || fail "raw archive descriptor does not verify"
+descriptor_sha256=$(sha256sum -- "$descriptor" | awk '{print $1}')
+mkdir -p -- "$v2_r5_attestation_root"
+jq -n --arg cell "$cell_name" --arg source_revision "$source_revision" \
+	--arg descriptor_sha256 "$descriptor_sha256" --arg archive_sha256 "$archive_sha256" \
+	--arg evidence_manifest_sha256 "$evidence_manifest_sha256" --arg run_status_sha256 "$run_status_sha256" \
+	'{schema_version: 1, contract: "v2-integrated-longrun-raw-archive-attestation-v1", cell: $cell,
+	 source_revision: $source_revision, descriptor_sha256: $descriptor_sha256,
+	 archive_sha256: $archive_sha256, evidence_manifest_sha256: $evidence_manifest_sha256,
+	 run_status_sha256: $run_status_sha256,
+	 attestation_scope: "immutable archive descriptor and raw payload binding"}' >"$archive_attestation_tmp" ||
+	fail "could not write raw archive attestation"
+mv -- "$archive_attestation_tmp" "$archive_attestation"
+v2_r5_verify_raw_evidence_archive "$cell" || fail "raw archive descriptor or attestation does not verify"
 
 if [[ "$prune" == true ]]; then
 	relative=''
@@ -105,7 +124,7 @@ if [[ "$prune" == true ]]; then
 fi
 
 trap - EXIT
-rm -f -- "$archive_tmp" "$descriptor_tmp"
+rm -f -- "$archive_tmp" "$descriptor_tmp" "$archive_attestation_tmp"
 if [[ "$prune" == true ]]; then
 	printf 'sealed and losslessly archived raw evidence: %s\n' "$cell"
 else

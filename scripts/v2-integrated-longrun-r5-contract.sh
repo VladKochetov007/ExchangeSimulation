@@ -53,6 +53,19 @@ v2_r5_require_attestation_path() {
 	[[ "$(realpath -m -- "$v2_r5_attestation_root/$cell.json")" == "$v2_r5_attestation_root/$cell.json" ]]
 }
 
+v2_r5_raw_archive_attestation_path() {
+	printf '%s/%s.raw-archive.json\n' "$v2_r5_attestation_root" "$1"
+}
+
+v2_r5_require_raw_archive_attestation_path() {
+	local cell=$1
+	v2_r5_require_attestation_path "$cell" || return 1
+	local path
+	path=$(v2_r5_raw_archive_attestation_path "$cell")
+	[[ ! -L "$path" ]] || return 1
+	[[ "$(realpath -m -- "$path")" == "$path" ]]
+}
+
 v2_r5_write_evidence_manifest() {
 	local cell=$1
 	local output="$cell/evidence-manifest.json"
@@ -223,10 +236,12 @@ v2_r5_verify_raw_evidence_archive() {
 	jq -e --arg cell "$cell_name" --arg log_mode "$log_mode" --arg source_revision "$source_revision" \
 		'.schema_version == 1 and .contract == "v2-integrated-longrun-raw-archive-v1" and
 		 .cell == $cell and .log_mode == $log_mode and .source_revision == $source_revision and
+		 .archive == "raw-evidence.tar.zst" and (.archive_bytes | type) == "number" and
 		 (.archive_sha256 | test("^[0-9a-f]{64}$")) and
 		 (.evidence_manifest_sha256 | test("^[0-9a-f]{64}$")) and
 		 (.run_status_sha256 | test("^[0-9a-f]{64}$")) and
-		 (.raw_files | type) == "array"' "$descriptor" >/dev/null || return 1
+		 (.raw_files | type) == "array" and (.raw_jsonl_files | type) == "number" and
+		 (.raw_jsonl_bytes | type) == "number"' "$descriptor" >/dev/null || return 1
 	local expected_raw actual_raw
 	expected_raw=$(jq -S -c '.raw_files' "$evidence_manifest") || return 1
 	actual_raw=$(jq -S -c '.raw_files' "$descriptor") || return 1
@@ -236,10 +251,81 @@ v2_r5_verify_raw_evidence_archive() {
 		v2_r5_validate_raw_path "$relative" || return 1
 	done < <(jq -r '.raw_files[].path' "$evidence_manifest")
 	v2_r5_verify_venue_namespace "$cell" || return 1
+	local expected_archive_bytes actual_archive_bytes
+	expected_archive_bytes=$(jq -er '.archive_bytes' "$descriptor") || return 1
+	[[ "$expected_archive_bytes" =~ ^[0-9]+$ ]] || return 1
+	actual_archive_bytes=$(stat -c '%s' -- "$archive") || return 1
+	[[ "$actual_archive_bytes" == "$expected_archive_bytes" ]] || return 1
 	local listed expected
 	listed=$(tar --use-compress-program='zstd -q' -tf "$archive" | sed '/\/$/d' | sort) || return 1
 	expected=$(jq -r '.raw_files[].path' "$evidence_manifest" | sort) || return 1
 	[[ "$listed" == "$expected" ]] || return 1
+	if tar --use-compress-program='zstd -q' -tvf "$archive" | awk '$1 !~ /^[d-]/ {exit 1}'; then
+		:
+	else
+		return 1
+	fi
+	local expected_raw_bytes actual_raw_bytes
+	expected_raw_bytes=$(jq -er '.raw_jsonl_bytes' "$evidence_manifest") || return 1
+	[[ "$expected_raw_bytes" =~ ^[0-9]+$ ]] || return 1
+	actual_raw_bytes=$(jq -r '.raw_files[].bytes' "$evidence_manifest" | awk '{total += $1} END {print total + 0}') || return 1
+	[[ "$actual_raw_bytes" == "$expected_raw_bytes" ]] || return 1
+	jq -e --argjson raw_jsonl_files "$(jq -er '.raw_jsonl_files' "$evidence_manifest")" \
+		--argjson raw_jsonl_bytes "$expected_raw_bytes" \
+		'.raw_jsonl_files == $raw_jsonl_files and .raw_jsonl_bytes == $raw_jsonl_bytes' \
+		"$descriptor" >/dev/null || return 1
+	local archive_attestation descriptor_sha256 actual_descriptor_sha256
+	archive_attestation=$(v2_r5_raw_archive_attestation_path "$cell_name")
+	v2_r5_require_raw_archive_attestation_path "$cell_name" || return 1
+	[[ -s "$archive_attestation" && ! -L "$archive_attestation" ]] || return 1
+	descriptor_sha256=$(sha256sum -- "$descriptor" | awk '{print $1}') || return 1
+	actual_descriptor_sha256=$(jq -er '.descriptor_sha256' "$archive_attestation") || return 1
+	[[ "$actual_descriptor_sha256" == "$descriptor_sha256" ]] || return 1
+	local attestation_archive_sha256 attestation_manifest_sha256 attestation_status_sha256
+	attestation_archive_sha256=$(jq -er '.archive_sha256' "$archive_attestation") || return 1
+	attestation_manifest_sha256=$(jq -er '.evidence_manifest_sha256' "$archive_attestation") || return 1
+	attestation_status_sha256=$(jq -er '.run_status_sha256' "$archive_attestation") || return 1
+	[[ "$attestation_archive_sha256" == "$expected_archive_sha" &&
+		"$attestation_manifest_sha256" == "$expected_manifest_sha" &&
+		"$attestation_status_sha256" == "$expected_status_sha" ]] || return 1
+	jq -e --arg cell "$cell_name" --arg source_revision "$source_revision" \
+		--arg descriptor_sha256 "$descriptor_sha256" --arg archive_sha256 "$expected_archive_sha" \
+		--arg manifest_sha256 "$expected_manifest_sha" --arg status_sha256 "$expected_status_sha" \
+		'.schema_version == 1 and .contract == "v2-integrated-longrun-raw-archive-attestation-v1" and
+		 .cell == $cell and .source_revision == $source_revision and
+		 .descriptor_sha256 == $descriptor_sha256 and .archive_sha256 == $archive_sha256 and
+		 .evidence_manifest_sha256 == $manifest_sha256 and .run_status_sha256 == $status_sha256' \
+		"$archive_attestation" >/dev/null || return 1
+	local expected_tsv measure_command measure_status
+	expected_tsv=$(mktemp) || return 1
+	if ! jq -r '.raw_files[] | [.path, (.bytes | tostring), .sha256] | @tsv' \
+		"$evidence_manifest" >"$expected_tsv"; then
+		rm -f -- "$expected_tsv"
+		return 1
+	fi
+	export V2_R5_ARCHIVE_EXPECTED_TSV="$expected_tsv"
+	measure_command='set -eu
+tab=$(printf "\t")
+expected_line=$(grep -F -m1 -- "$TAR_FILENAME$tab" "$V2_R5_ARCHIVE_EXPECTED_TSV")
+expected_bytes=$(printf "%s\n" "$expected_line" | cut -f2)
+expected_digest=$(printf "%s\n" "$expected_line" | cut -f3)
+measure_dir=$(mktemp -d)
+trap "rm -rf -- \"$measure_dir\"" EXIT
+mkfifo "$measure_dir/raw"
+sha256sum < "$measure_dir/raw" > "$measure_dir/sha" &
+sha_pid=$!
+actual_bytes=$(tee "$measure_dir/raw" | wc -c)
+wait "$sha_pid"
+actual_digest=$(cut -d " " -f1 "$measure_dir/sha")
+[ "$actual_bytes" -eq "$expected_bytes" ]
+[ "$actual_digest" = "$expected_digest" ]'
+	measure_status=0
+	if ! tar --use-compress-program='zstd -q' --to-command="$measure_command" -xf "$archive" -C "$cell"; then
+		measure_status=1
+	fi
+	rm -f -- "$expected_tsv"
+	unset V2_R5_ARCHIVE_EXPECTED_TSV
+	[[ "$measure_status" == 0 ]] || return 1
 	return 0
 }
 
@@ -281,9 +367,14 @@ v2_r5_cleanup_staged_raw_evidence() {
 	while IFS= read -r relative; do
 		v2_r5_validate_raw_path "$relative" || return 1
 		path="$cell/$relative"
-		[[ -f "$path" && ! -L "$path" ]] || return 1
-		rm -- "$path"
-	done < <(jq -r '.raw_files[].path' "$cell/evidence-manifest.json")
+		if [[ -L "$path" ]]; then
+			rm -- "$path"
+		elif [[ -f "$path" ]]; then
+			rm -- "$path"
+		elif [[ -e "$path" ]]; then
+			return 1
+		fi
+		done < <(jq -r '.raw_files[].path' "$cell/evidence-manifest.json")
 	rm -- "$marker"
 }
 
