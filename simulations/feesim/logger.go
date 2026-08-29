@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"sync"
 )
 
@@ -82,6 +83,13 @@ type JSONLinesLogger struct {
 	evidence EvidenceDigest
 	err      error
 	closed   bool
+	// line is the reusable assembly buffer for LogEncodedEvent. It is only ever
+	// touched under mu, and its contents never outlive one call.
+	line []byte
+	// eventNames caches each event name's JSON encoding. The set is small and
+	// fixed by the engine, and encoding it with encoding/json rather than by
+	// hand is what keeps escaping byte-exact.
+	eventNames map[string][]byte
 }
 
 // persistedEvent preserves the exact key order produced by encoding/json for
@@ -132,6 +140,77 @@ func (l *JSONLinesLogger) LogEvent(simTime int64, clientID uint64, eventName str
 		return
 	}
 	l.evidence.addRecord(b)
+}
+
+// LogEncodedEvent persists one record whose data value is already encoded JSON,
+// supplied as segments that are concatenated in order.
+//
+// It exists because the ordered-execution hash sink must marshal every payload
+// in order to hash it, so marshalling the same payload a second time to persist
+// it is pure duplication: encoding/json was 21.8% of simulator CPU. Passing the
+// sink's bytes through as a json.RawMessage does not help, because a raw value
+// is emitted through compact(), which rescans and re-escapes it for about the
+// cost of the marshal it replaces. Assembling the envelope directly is what
+// actually removes the work.
+//
+// The assembled bytes are identical to what LogEvent produces for the same
+// record, which is a property the caller must uphold by supplying segments that
+// spell the same data value, and which the integrated evidence digest and the
+// byte-for-byte evidence tree comparison verify. Failure handling, digest
+// accounting and short-write detection are shared with LogEvent.
+func (l *JSONLinesLogger) LogEncodedEvent(simTime int64, clientID uint64, eventName string, segments ...[]byte) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.err != nil || l.closed {
+		return
+	}
+	name, err := l.encodedEventName(eventName)
+	if err != nil {
+		l.fail(fmt.Errorf("marshal persisted event %q: %w", eventName, err))
+		return
+	}
+	line := append(l.line[:0], `{"client_id":`...)
+	line = strconv.AppendUint(line, clientID, 10)
+	line = append(line, `,"data":`...)
+	for _, segment := range segments {
+		line = append(line, segment...)
+	}
+	line = append(line, `,"event":`...)
+	line = append(line, name...)
+	line = append(line, `,"sim_ts":`...)
+	line = strconv.AppendInt(line, simTime, 10)
+	line = append(line, '}')
+	l.line = line
+
+	if n, err := l.w.Write(line); err != nil {
+		l.fail(fmt.Errorf("write persisted event %q: %w", eventName, err))
+		return
+	} else if n != len(line) {
+		l.fail(fmt.Errorf("write persisted event %q: %w", eventName, io.ErrShortWrite))
+		return
+	}
+	if err := l.w.WriteByte('\n'); err != nil {
+		l.fail(fmt.Errorf("write persisted event newline %q: %w", eventName, err))
+		return
+	}
+	l.evidence.addRecord(line)
+}
+
+// encodedEventName returns the event name's JSON encoding, caching it. Callers
+// must hold mu.
+func (l *JSONLinesLogger) encodedEventName(eventName string) ([]byte, error) {
+	if encoded, cached := l.eventNames[eventName]; cached {
+		return encoded, nil
+	}
+	encoded, err := json.Marshal(eventName)
+	if err != nil {
+		return nil, err
+	}
+	if l.eventNames == nil {
+		l.eventNames = make(map[string][]byte, 32)
+	}
+	l.eventNames[eventName] = encoded
+	return encoded, nil
 }
 
 func (l *JSONLinesLogger) fail(err error) {

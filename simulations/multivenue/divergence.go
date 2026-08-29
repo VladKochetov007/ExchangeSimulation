@@ -116,13 +116,20 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 
 // observe folds one event into the rolling digest and writes a checkpoint
 // whenever simulated time crosses the next boundary.
-func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venueID string, payload any) {
+// It returns the payload encoding it produced so the raw evidence logger can
+// persist those exact bytes instead of marshalling the same payload a second
+// time. The result is nil whenever the caller must not reuse it: no sink, a
+// closed sink, or a payload the encoder rejected, in which case the logger runs
+// its own marshal and keeps its own failure handling.
+func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venueID string, payload any) json.RawMessage {
 	if s == nil {
-		return
+		return nil
 	}
 	encoded, err := json.Marshal(payload)
+	reusable := encoded
 	if err != nil {
 		encoded = []byte(`"unencodable"`)
+		reusable = nil
 	}
 	payloadDigest := sha256.Sum256(encoded)
 
@@ -132,7 +139,7 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return
+		return nil
 	}
 	s.lastSimTime = simTime
 
@@ -170,6 +177,7 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 		s.writeCheckpointLocked(s.nextBound)
 		s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
 	}
+	return reusable
 }
 
 func (s *checkpointSink) writeCheckpointLocked(at int64) {

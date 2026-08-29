@@ -1941,7 +1941,12 @@ type venueLogEvent struct {
 
 type venueLogger struct {
 	venueID string
-	inner   etypes.Logger
+	// dataPrefix is the venue envelope up to the payload value:
+	// {"venue_id":"<venue>","payload":
+	// It is built once with encoding/json so the venue identifier's escaping is
+	// byte-exact, and is empty when the fast path is unavailable.
+	dataPrefix []byte
+	inner      etypes.Logger
 	// sink observes every event for the divergence locator. It runs whatever
 	// the log mode is, because a run with logging off still has to be
 	// comparable against another run of the same seed.
@@ -1949,11 +1954,47 @@ type venueLogger struct {
 }
 
 func (l venueLogger) LogEvent(simTime int64, clientID uint64, eventName string, event any) {
-	l.sink.observe(simTime, clientID, eventName, l.venueID, event)
+	// The sink has to encode this payload in order to hash it. Persisting those
+	// exact bytes rather than marshalling the payload again removes the second
+	// of two encodings per event; both come from the same encoder with the same
+	// options, so the persisted record is unchanged. Whenever the sink cannot
+	// supply bytes, or the logger cannot assemble a record itself, the payload
+	// is marshalled by the logger as before and its failure handling is
+	// untouched.
+	encoded := l.sink.observe(simTime, clientID, eventName, l.venueID, event)
 	if l.inner == nil {
 		return
 	}
+	if encoded != nil && l.dataPrefix != nil {
+		if assembler, ok := l.inner.(encodedEventLogger); ok {
+			assembler.LogEncodedEvent(simTime, clientID, eventName, l.dataPrefix, encoded, venueDataSuffix)
+			return
+		}
+	}
 	l.inner.LogEvent(simTime, clientID, eventName, venueLogEvent{VenueID: l.venueID, Payload: event})
+}
+
+// encodedEventLogger is implemented by a logger that can persist a record whose
+// data value is supplied as already encoded JSON segments.
+type encodedEventLogger interface {
+	LogEncodedEvent(simTime int64, clientID uint64, eventName string, segments ...[]byte)
+}
+
+var venueDataSuffix = []byte("}")
+
+// venueDataPrefix builds the venue envelope up to the payload value. The venue
+// identifier is encoded with encoding/json so its escaping matches what
+// marshalling venueLogEvent would produce.
+func venueDataPrefix(venueID string) ([]byte, error) {
+	encodedVenue, err := json.Marshal(venueID)
+	if err != nil {
+		return nil, err
+	}
+	prefix := make([]byte, 0, len(encodedVenue)+24)
+	prefix = append(prefix, `{"venue_id":`...)
+	prefix = append(prefix, encodedVenue...)
+	prefix = append(prefix, `,"payload":`...)
+	return prefix, nil
 }
 
 // LogEvidenceOnly persists an observation without adding it to the ordered
@@ -2311,8 +2352,12 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		if err != nil {
 			return venueLogger{}, err
 		}
+		prefix, err := venueDataPrefix(id)
+		if err != nil {
+			return venueLogger{}, err
+		}
 		s.loggers = append(s.loggers, logger)
-		return venueLogger{venueID: id, inner: logger, sink: s.checkpoints}, nil
+		return venueLogger{venueID: id, dataPrefix: prefix, inner: logger, sink: s.checkpoints}, nil
 	}
 	var lifecycleLog etypes.Logger
 	estimatedClients := 5 + s.Config.NoiseTraderCount + s.Config.OptionFlowCount + len(s.Config.CrossVenueArbTiers)
