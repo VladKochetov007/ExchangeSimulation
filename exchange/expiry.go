@@ -676,6 +676,7 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 
 	listedAt, hasListedAt := e.instrumentListedAt[symbol]
 	delete(e.Books, symbol)
+	e.bookGeneration++
 	delete(e.Instruments, symbol)
 	delete(e.instrumentListedAt, symbol)
 	delete(e.settlementPending, symbol)
