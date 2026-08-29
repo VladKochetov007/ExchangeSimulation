@@ -128,7 +128,16 @@ type DefaultExchange struct {
 	ID          string
 	Clients     map[uint64]*Client
 	Gateways    map[uint64]*ClientGateway
-	Books       map[string]*OrderBook
+	// orderedGateways caches Gateways in client-ID order for the deterministic
+	// ingress and egress drains. Both walk the whole gateway set, the ingress
+	// drain once per pass and its passes repeat until one is empty, so the
+	// snapshot was previously rebuilt and re-sorted many times per tick even
+	// though the gateway set almost never changes. gatewayGeneration is bumped
+	// by every mutation of Gateways under e.mu, which is what invalidates it.
+	orderedGateways    []orderedGateway
+	orderedGatewaysGen uint64
+	gatewayGeneration  uint64
+	Books              map[string]*OrderBook
 	Instruments map[string]Instrument
 	// instrumentListedAt retains the original public listing time. Reference-
 	// data replays must not rewrite contract tenor as subscription time.
@@ -768,6 +777,7 @@ func (e *DefaultExchange) ConnectNewClient(clientID uint64, initialBalances map[
 		gateway.enableDeterministicPhaseEgress()
 	}
 	e.Gateways[clientID] = gateway
+	e.gatewayGeneration++
 
 	if !e.deterministicIngress {
 		go e.HandleClientRequests(gateway)
@@ -886,6 +896,7 @@ func (e *DefaultExchange) DisconnectClient(clientID uint64) {
 	if gateway := e.Gateways[clientID]; gateway != nil {
 		gateway.Close()
 		delete(e.Gateways, clientID)
+		e.gatewayGeneration++
 	}
 	e.MDPublisher.UnsubscribeClient(clientID)
 }
@@ -926,6 +937,50 @@ func (e *DefaultExchange) HandleClientRequests(gateway *ClientGateway) {
 	}
 }
 
+// orderedGateway pairs a client with its gateway so one sorted slice replaces
+// the sorted ID slice and the lookup map the drains previously built together.
+type orderedGateway struct {
+	clientID uint64
+	gateway  *ClientGateway
+}
+
+// gatewaysInClientOrder returns the gateway set in ascending client-ID order.
+//
+// The returned slice is owned by the exchange and must not be retained past the
+// caller's use of e.mu, nor mutated. Callers only read it.
+func (e *DefaultExchange) gatewaysInClientOrder() []orderedGateway {
+	e.mu.RLock()
+	if e.orderedGateways != nil && e.orderedGatewaysGen == e.gatewayGeneration {
+		ordered := e.orderedGateways
+		e.mu.RUnlock()
+		return ordered
+	}
+	e.mu.RUnlock()
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.orderedGateways != nil && e.orderedGatewaysGen == e.gatewayGeneration {
+		return e.orderedGateways
+	}
+	ordered := make([]orderedGateway, 0, len(e.Gateways))
+	for clientID, gateway := range e.Gateways {
+		ordered = append(ordered, orderedGateway{clientID: clientID, gateway: gateway})
+	}
+	slices.SortFunc(ordered, func(a, b orderedGateway) int {
+		switch {
+		case a.clientID < b.clientID:
+			return -1
+		case a.clientID > b.clientID:
+			return 1
+		default:
+			return 0
+		}
+	})
+	e.orderedGateways = ordered
+	e.orderedGatewaysGen = e.gatewayGeneration
+	return ordered
+}
+
 // DrainIngress processes queued requests in deterministic client-ID
 // round-robin order. Within one client the gateway channel remains FIFO. It
 // is active only when ExchangeConfig.DeterministicIngress is set.
@@ -936,19 +991,11 @@ func (e *DefaultExchange) DrainIngress() bool {
 
 	processed := false
 	for {
-		e.mu.RLock()
-		clientIDs := make([]uint64, 0, len(e.Gateways))
-		gateways := make(map[uint64]*ClientGateway, len(e.Gateways))
-		for clientID, gateway := range e.Gateways {
-			clientIDs = append(clientIDs, clientID)
-			gateways[clientID] = gateway
-		}
-		e.mu.RUnlock()
-		slices.Sort(clientIDs)
+		ordered := e.gatewaysInClientOrder()
 
 		passProcessed := false
-		for _, clientID := range clientIDs {
-			gateway := gateways[clientID]
+		for _, entry := range ordered {
+			gateway := entry.gateway
 			if gateway == nil {
 				continue
 			}
@@ -976,19 +1023,9 @@ func (e *DefaultExchange) DrainDeterministicEgress() bool {
 	if !e.deterministicPhases {
 		return false
 	}
-	e.mu.RLock()
-	clientIDs := make([]uint64, 0, len(e.Gateways))
-	gateways := make(map[uint64]*ClientGateway, len(e.Gateways))
-	for clientID, gateway := range e.Gateways {
-		clientIDs = append(clientIDs, clientID)
-		gateways[clientID] = gateway
-	}
-	e.mu.RUnlock()
-	slices.Sort(clientIDs)
-
 	processed := false
-	for _, clientID := range clientIDs {
-		if gateways[clientID].DrainDeterministicEgress() {
+	for _, entry := range e.gatewaysInClientOrder() {
+		if entry.gateway.DrainDeterministicEgress() {
 			processed = true
 		}
 	}
