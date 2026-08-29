@@ -247,31 +247,7 @@ var nestedPayloadKey = []byte(`"payload"`)
 
 func containsAny(line []byte, needles [][]byte) bool {
 	for _, needle := range needles {
-		if bytesContains(line, needle) {
-			return true
-		}
-	}
-	return false
-}
-
-func bytesContains(haystack, needle []byte) bool {
-	if len(needle) == 0 || len(needle) > len(haystack) {
-		return false
-	}
-	first := needle[0]
-	limit := len(haystack) - len(needle)
-	for i := 0; i <= limit; i++ {
-		if haystack[i] != first {
-			continue
-		}
-		match := true
-		for j := 1; j < len(needle); j++ {
-			if haystack[i+j] != needle[j] {
-				match = false
-				break
-			}
-		}
-		if match {
+		if bytes.Contains(line, needle) {
 			return true
 		}
 	}
