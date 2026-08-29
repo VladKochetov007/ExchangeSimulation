@@ -231,14 +231,14 @@ metrics=(
 for metric in "${metrics[@]}"; do
 	if [[ "$metric" == positions || "$metric" == settlements ]]; then
 		if [[ "$metric" == settlements ]]; then
-			write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -json "$cell" -require-exact-replay -delivery-fee-policy "$delivery_fee_policy" ||
+			write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -require-exact-replay -delivery-fee-policy "$delivery_fee_policy" -json "$cell" ||
 				fail "analyzer metric failed: $metric"
 		else
-				write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -json "$cell" -require-exact-replay ||
+				write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -require-exact-replay -json "$cell" ||
 					fail "analyzer metric failed: $metric"
 		fi
 	elif [[ "$metric" == derivatives ]]; then
-		write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -json "$cell" -require-exact-replay -funding-interval-seconds "$funding_interval_seconds" ||
+		write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -require-exact-replay -funding-interval-seconds "$funding_interval_seconds" -json "$cell" ||
 			fail "analyzer metric failed: $metric"
 	else
 		write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -json "$cell" ||
