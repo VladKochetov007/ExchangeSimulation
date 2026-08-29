@@ -37,7 +37,7 @@ esac
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "raw archiving requires a clean gate worktree"
 required_inputs=(run-config.json run-metadata.json run-status.json manifest.json greeks.json latency.json checkpoints.jsonl evidence-manifest.json)
 if [[ "$cell_name" == dev-607-g8 ]]; then
-	required_inputs+=(parity-attestation.json)
+	parity_attestation="$v2_r5_output_root/parity-attestation.json"
 else
 	required_inputs+=(integrity.json analysis-metadata.json)
 fi
@@ -85,13 +85,14 @@ if [[ "$cell_name" != dev-607-g8 ]]; then
 			all(.predicates | to_entries[]; .value == true)' "$cell/integrity.json" >/dev/null ||
 		fail "cell measurement contract has not passed"
 else
+	[[ -s "$parity_attestation" ]] || fail "missing completed parity attestation: $parity_attestation"
 	jq -e --arg source_revision "$(jq -er '.git_revision' "$cell/run-metadata.json")" \
 		'any(.controls[]; .cell == "dev-607-g8" and .log_mode == "full" and .gomaxprocs == 8) and
 		 .contract == "v2-integrated-longrun-parity-v4" and
 		 .source_revision == $source_revision and
 		 .predicates.full_evidence_equal == true and
 		 .predicates.ordered_raw_evidence_equal == true and
-		 all(.predicates | to_entries[]; .value == true)' "$cell/parity-attestation.json" >/dev/null ||
+			all(.predicates | to_entries[]; .value == true)' "$parity_attestation" >/dev/null ||
 		fail "G8 parity attestation has not passed"
 fi
 v2_r5_verify_evidence_manifest "$cell" || fail "source evidence manifest does not verify"
