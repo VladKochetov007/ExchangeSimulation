@@ -1,7 +1,7 @@
 # V2 parallel performance evaluation
 
-Status: **in progress**. Analyzer line complete and measured; simulator line
-partially complete. Nothing here changes economic behavior, actor policy, RNG
+Status: **analyzer line complete and measured; simulator line measured and
+recorded separately in `v2-simulator-performance.md`.** Nothing here changes economic behavior, actor policy, RNG
 consumption, scheduler ordering, matching, admission, fees, margin, settlement,
 funding, instrument lifecycle, experiment configs, thresholds, or evidence
 meaning. Every accepted change is held to byte-identical output.
@@ -252,18 +252,21 @@ generation counter bumped by the only two mutation sites — both already under
 ## 6. End-to-end analyzer result
 
 Pristine one-process-per-metric extraction against the optimized fused
-extraction, same 19 metrics, same cell, 3 alternating repetitions,
-`GOMAXPROCS=6`, host load 1-2, benchmark lock held:
+extraction, same 19 scan-based metrics, same 684MB cell, three alternating
+repetitions, `GOMAXPROCS=6`, benchmark lock held:
 
 | Measure | pristine | optimized | change | ranges |
 | --- | ---: | ---: | ---: | --- |
-| Wall | 68.15 s | **30.27 s** | **-55.6%** | 66.26-69.89 \| 30.08-30.97 |
-| CPU | 134.33 s | **72.06 s** | **-46.4%** | 130.09-135.71 \| 71.08-73.41 |
-| Peak RSS | 103 MB | 221 MB | +114% | 103.06-103.22 \| 217.68-220.90 |
+| Wall | 72.89 s | **26.80 s** | **-63.2%** | 72.52-73.69 \| 26.73-26.93 |
+| CPU | 144.80 s | **62.46 s** | **-56.9%** | 144.24-147.10 \| 61.71-62.57 |
+| Peak RSS | 103 MB | 219 MB | +112.7% | 102.88-103.26 \| 212.26-219.01 |
 
-**2.25x wall, 1.86x CPU.** The RSS increase is bounded and small: no event is
+**2.72x wall, 2.32x CPU.** The RSS increase is bounded and small: no event is
 retained. For contrast, the previously rejected full retained-event union cache
 reached 1,137 MB (+11x) for a smaller wall gain and *no* CPU gain at all.
+
+Extrapolated to a 24-hour cell, the read amplification alone falls from roughly
+860 GB to about 165 GB.
 
 ## 7. Simulator results so far
 
@@ -396,26 +399,58 @@ scientific owner to confirm. No contract script was modified.
 
 ## 12. Commit classification
 
-Against the scientific HEAD this work is based on, `887899f`.
+Against the scientific HEAD this work is based on, `887899f`. Fifteen commits on
+`autoresearch/v2-performance-research`, none merged anywhere.
 
-### Safe to cherry-pick
+### Safe to cherry-pick — analyzer only, all 31 metrics byte-identical
 
-| Commit | Subject | Scope |
-| --- | --- | --- |
-| `7a44f3f` | `perf: add analyzer scan-cost instrumentation` | Analyzer only; inert unless `MVANALYZE_SCAN_STATS` is set |
-| `f06a9eb` | `perf: decode evidence payloads once per record` | Analyzer only; all 31 metrics byte-identical |
-| `8b00ca1` | `perf: use the standard library substring search in the prefilter` | Analyzer only; selection proven identical |
+| Commit | Subject |
+| --- | --- |
+| `7a44f3f` | `perf: add analyzer scan-cost instrumentation` |
+| `f06a9eb` | `perf: decode evidence payloads once per record` |
+| `8b00ca1` | `perf: use the standard library substring search in the prefilter` |
+| `41b391b` | `perf: split the evidence data layer without revalidating it` |
 
-### Require scientific review
+### Safe to cherry-pick — documentation only
+
+| Commit | Subject |
+| --- | --- |
+| `07cede0` | `docs: record V2 parallel performance evaluation and SIMD ceiling` |
+| `85cb7c2` | `docs: record V2 simulator performance study` |
+| `08cc417` | `fix: keep system temporary paths out of the performance evaluation` |
+| `d3d8e99` | `docs: record the accepted simulator optimizations and their measurements` |
+
+### Require scientific review — simulator, all oracles identical on three seeds and both log modes
 
 | Commit | Subject | Why review |
 | --- | --- | --- |
-| `041e31e` | `perf: share one evidence pass across independent metrics` | Adds a second extraction architecture. Byte-identity and visit-count identity are proven on one development cell, but adopting it in the registered extraction script is a scientific-infrastructure decision, and the driver's duplicated call expressions should be refactored first |
-| `3a32be5` | `perf: cache the deterministic gateway iteration order` | Simulator change. Fully proven on the determinism oracle, but it touches deterministic ingress and egress ordering, which is an economic input |
+| `3a32be5` | `perf: cache the deterministic gateway iteration order` | touches deterministic ingress and egress ordering, which is an economic input |
+| `eaf6c85` | `perf: build high-volume evidence payloads as ordered structs` | field order is now the evidence contract; a future reorder silently changes persisted bytes |
+| `087dd7a` | `perf: persist evidence without marshalling each payload twice` | assembles evidence records without the reflective encoder; largest single gain and largest surface |
+| `0ed5180` | `perf: stop reslicing the deterministic phase queues from the front` | changes market-data queue internals |
+| `5d1f0d3` | `perf: resolve each client's position map once per lookup` | no measurable gain; take it for clarity or leave it |
+| `6725639` | `perf: cache the canonical book and client iteration orders` | caches risk-sweep iteration order; the first version had a missed invalidation that the existing suite caught |
+
+### Require scientific review — new analyzer architecture
+
+| Commit | Subject | Why review |
+| --- | --- | --- |
+| `041e31e` | `perf: share one evidence pass across independent metrics` | adds a second extraction architecture. Byte-identity and visit-count identity are proven on one development cell, but adopting it in the registered extraction script is a scientific-infrastructure decision, and the driver's duplicated metric call expressions should be refactored into a table first so the two paths cannot drift |
 
 ### Do not cherry-pick
 
-None yet. The C++ prototype and the corpus live outside the repository.
+None. The two rejected optimizations were reverted rather than committed; both
+are recorded with their measurements in the rejected-hypotheses sections.
 
-Any recommendation here is against `887899f`. If the scientific branch has moved,
-these need revalidation on the then-current HEAD as a separate integration step.
+### Integration recommendation
+
+Take the four analyzer commits and the four documentation commits directly. Take
+the simulator commits as a group after review — they were measured cumulatively
+and `087dd7a` depends on the sink returning its encoding, which no earlier
+commit provides. `041e31e` is the one change that should not be integrated as
+is: it is worth the refactor, but that refactor is a separate piece of work.
+
+Every recommendation is against `887899f`. If the scientific branch has moved,
+revalidate on the then-current HEAD as a separate integration step; the
+determinism oracle and the 31-metric differential harness are the tools for
+that, and both are reusable as committed.
