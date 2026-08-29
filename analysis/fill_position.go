@@ -135,6 +135,19 @@ func (r *Run) MeasureFillPositions() (*FillPositionAudit, error) {
 	}, func(event Event) {
 		switch event.Name {
 		case "OrderFill":
+			var identity struct {
+				Symbol string `json:"symbol"`
+			}
+			if err := decodeRequiredJSON(event.Raw(), &identity, "symbol"); err != nil {
+				result.MalformedFillRecords++
+				return
+			}
+			// Options have no persisted position_update counterpart in this
+			// stream. Identify and exclude them before applying linear-only
+			// field requirements.
+			if listedTypes[event.VenueID+"\x00"+identity.Symbol] == "OPTION" || isOptionSymbol(identity.Symbol) {
+				return
+			}
 			var payload fillPayload
 			if err := decodeRequiredJSON(event.Raw(), &payload, "symbol", "qty", "side", "new_size", "price"); err != nil || !isLinearSymbol(event.VenueID, payload.Symbol, listedTypes) || payload.Qty <= 0 || payload.Side == "" {
 				result.MalformedFillRecords++
@@ -147,6 +160,16 @@ func (r *Run) MeasureFillPositions() (*FillPositionAudit, error) {
 			result.LinearFills++
 			venue(event.VenueID).LinearFills++
 		case "position_update":
+			var identity struct {
+				Symbol string `json:"symbol"`
+			}
+			if err := decodeRequiredJSON(event.Raw(), &identity, "symbol"); err != nil {
+				result.MalformedPositionUpdates++
+				return
+			}
+			if listedTypes[event.VenueID+"\x00"+identity.Symbol] == "OPTION" || isOptionSymbol(identity.Symbol) {
+				return
+			}
 			var payload positionPayload
 			if err := decodeRequiredJSON(event.Raw(), &payload, "symbol", "old_size", "new_size", "trade_qty", "trade_price", "trade_side", "reason"); err != nil || !isLinearSymbol(event.VenueID, payload.Symbol, listedTypes) || payload.Reason != "trade" || payload.TradeQty <= 0 || payload.TradeSide == "" {
 				result.MalformedPositionUpdates++

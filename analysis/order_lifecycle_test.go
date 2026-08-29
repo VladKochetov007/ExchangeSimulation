@@ -89,6 +89,19 @@ func TestOrderLifecycleAudit(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "requires_full_flag_at_quantity_terminal",
+			lines: []string{
+				lifecycleAcceptedLine(1, "north", 1, 10, "LIMIT", "GTC", 10),
+				lifecycleFillLine(2, "north", 1, 10, 10, 10, 0, false),
+			},
+			check: func(t *testing.T, got *OrderLifecycleAudit) {
+				t.Helper()
+				if got.FillQuantityMismatches != 1 || len(got.Checks) != 1 || got.Checks[0].Failure != "fill_quantity_mismatch" {
+					t.Fatalf("a quantity-terminal fill without is_full was accepted: %+v", got)
+				}
+			},
+		},
 	}
 
 	for _, test := range tests {

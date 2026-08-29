@@ -162,21 +162,39 @@ type deltaPayload struct {
 	HiddenQty  int64  `json:"hidden_qty"`
 }
 
-// bestOf is the best price on one side of a published snapshot. The presence
-// flag prevents a zero level from being confused with no published side.
-func bestOf(levels []bookLevel, highest bool) (int64, bool) {
-	var best int64
-	found := false
-	for _, level := range levels {
-		if level.VisibleQty+level.HiddenQty <= 0 {
+func replayedSideMatchesSnapshot(replayed map[int64]int64, snapshot []bookLevel) bool {
+	expected := make(map[int64]int64, len(snapshot))
+	for _, level := range snapshot {
+		quantity, ok := addAuditInt64(level.VisibleQty, level.HiddenQty)
+		if !ok {
+			return false
+		}
+		if quantity <= 0 {
 			continue
 		}
-		if !found || (highest && level.Price > best) || (!highest && level.Price < best) {
-			best = level.Price
-			found = true
+		previous := expected[level.Price]
+		quantity, ok = addAuditInt64(previous, quantity)
+		if !ok {
+			return false
+		}
+		expected[level.Price] = quantity
+	}
+	if len(expected) != len(replayed) {
+		return false
+	}
+	for price, quantity := range expected {
+		if replayed[price] != quantity {
+			return false
 		}
 	}
-	return best, found
+	return true
+}
+
+func (b *ReplayedBook) matchesSnapshot(snapshot bookSnapshot) bool {
+	// The logger records the complete god-view depth, not the bounded public
+	// view. An omitted level therefore means an empty level, which makes the
+	// comparison exact and gives truncation a fail-closed meaning.
+	return replayedSideMatchesSnapshot(b.bids, snapshot.Bids) && replayedSideMatchesSnapshot(b.asks, snapshot.Asks)
 }
 
 func decodeRequiredBookSnapshot(raw json.RawMessage, snapshot *bookSnapshot) error {
@@ -317,21 +335,16 @@ func ReplayFileWith(path string, visit ReplayVisitor, onAccept AcceptVisitor) (*
 				drift.MalformedSnapshots++
 				continue
 			}
-			// The snapshot is the engine's own view. Comparing the replayed
-			// touch against it is the only way to learn that some book mutation
-			// does not emit a delta, which would let the reconstruction drift
-			// silently for the rest of the run.
+			// The snapshot is the engine's complete god-view depth. Comparing the
+			// entire visible depth catches a mutation behind the touch, which a
+			// best-price-only comparison can leave invisible to counterfactual
+			// walks. Do not silently treat a truncated snapshot as complete.
 			// Compare, never resynchronise. Resetting from the snapshot would
 			// repair any divergence before the next check could see it, so the
 			// check would pass however broken the replay was; it would also
 			// truncate the book to the snapshot's depth limit permanently.
 			drift.Checks++
-			bookBid, bookBidOK := book.BestBid()
-			bookAsk, bookAskOK := book.BestAsk()
-			snapshotBid, snapshotBidOK := bestOf(snapshot.Bids, true)
-			snapshotAsk, snapshotAskOK := bestOf(snapshot.Asks, false)
-			if bookBidOK != snapshotBidOK || bookAskOK != snapshotAskOK ||
-				(bookBidOK && bookBid != snapshotBid) || (bookAskOK && bookAsk != snapshotAsk) {
+			if !book.matchesSnapshot(snapshot) {
 				drift.Mismatches++
 			}
 		}

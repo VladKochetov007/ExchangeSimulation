@@ -74,6 +74,38 @@ type DerivativeAuditOptions struct {
 	// strict replay verifies both the published interval field and the complete
 	// sequence of observed funding deadlines, including settlement instants.
 	ExpectedFundingIntervalSeconds int64
+	// ExpectedFundingIntervals overrides the population cadence per venue. It
+	// is needed when one run deliberately gives venues independent funding
+	// clocks; the scalar field remains the fallback for legacy callers.
+	ExpectedFundingIntervals map[string]int64
+}
+
+func expectedFundingIntervalSeconds(opts DerivativeAuditOptions, venue string) int64 {
+	if interval, ok := opts.ExpectedFundingIntervals[venue]; ok && interval > 0 {
+		return interval
+	}
+	return opts.ExpectedFundingIntervalSeconds
+}
+
+func hasNonzeroPerpPosition(history map[positionKey][]posPoint, venue, symbol string, at int64) bool {
+	for key, points := range history {
+		if key.venue != venue || key.symbol != symbol {
+			continue
+		}
+		var size int64
+		known := false
+		for _, point := range points {
+			if point.at > at {
+				break
+			}
+			size = point.size
+			known = true
+		}
+		if known && size != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // FundingInstantCheck is one venue's funding settlement, recomputed.
@@ -172,6 +204,7 @@ type DerivativeSemantics struct {
 	FundingUndirected         int `json:"funding_undirected"`
 	FundingDuplicatePayments  int `json:"funding_duplicate_payments"`
 	FundingMissingRates       int `json:"funding_missing_rates"`
+	FundingMissingSettlements int `json:"funding_missing_settlements"`
 	FundingTimingFailures     int `json:"funding_timing_failures"`
 	FundingEvidenceFailures   int `json:"funding_evidence_failures"`
 	FundingArithmeticFailures int `json:"funding_arithmetic_failures"`
@@ -257,6 +290,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 	// post-funding trade to the funded side.
 	fundingCursors := make(map[instantKey]fundingCursor)
 	fundingTimingFailures := 0
+	fundingMissingSettlements := 0
 	// Every published perpetual position, kept as a time series per account so
 	// the side held at a funding instant can be read off it. Positions arrive
 	// out of order because the scan is concurrent, so they are sorted after
@@ -675,51 +709,98 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		})
 		perpHistory[key] = points
 	}
-	if opts.RequireExactReplay && opts.ExpectedFundingIntervalSeconds > 0 {
-		expectedSeconds := opts.ExpectedFundingIntervalSeconds
-		expectedNanos, intervalOK := exactMul(expectedSeconds, 1_000_000_000)
-		if !intervalOK {
-			fundingArithmeticFailures++
-		} else {
-			for _, points := range rates {
-				deadlines := make([]int64, 0, len(points))
-				for _, point := range points {
-					if point.Interval != expectedSeconds {
-						fundingTimingFailures++
-					}
-					if point.NextFunding <= 0 {
-						fundingTimingFailures++
-						continue
-					}
-					deadlines = append(deadlines, point.NextFunding)
+	if opts.RequireExactReplay {
+		// One scalar cadence is not a valid contract for this run: the
+		// registered venues intentionally use 1h, 8h, and 2h funding clocks.
+		// Audit each venue independently and deduplicate repeated observations of
+		// the same deadline; funding_rate_update is emitted on every automation
+		// tick even though NextFunding remains unchanged until settlement.
+		publishedDeadlines := make(map[markKey][]int64)
+		for key, points := range rates {
+			expectedSeconds := expectedFundingIntervalSeconds(opts, key.venue)
+			if expectedSeconds <= 0 {
+				continue
+			}
+			expectedNanos, intervalOK := exactMul(expectedSeconds, 1_000_000_000)
+			if !intervalOK {
+				fundingArithmeticFailures++
+				continue
+			}
+			deadlines := make([]int64, 0, len(points))
+			for _, point := range points {
+				if point.Interval != expectedSeconds {
+					fundingTimingFailures++
 				}
-				sort.Slice(deadlines, func(i, j int) bool { return deadlines[i] < deadlines[j] })
-				uniqueDeadlines := deadlines[:0]
-				for _, deadline := range deadlines {
-					if len(uniqueDeadlines) > 0 && uniqueDeadlines[len(uniqueDeadlines)-1] == deadline {
-						fundingTimingFailures++
-						continue
-					}
+				if point.NextFunding <= 0 {
+					fundingTimingFailures++
+					continue
+				}
+				deadlines = append(deadlines, point.NextFunding)
+			}
+			sort.Slice(deadlines, func(i, j int) bool { return deadlines[i] < deadlines[j] })
+			uniqueDeadlines := deadlines[:0]
+			for _, deadline := range deadlines {
+				if len(uniqueDeadlines) == 0 || uniqueDeadlines[len(uniqueDeadlines)-1] != deadline {
 					uniqueDeadlines = append(uniqueDeadlines, deadline)
 				}
-				for index := 1; index < len(uniqueDeadlines); index++ {
-					gap, gapOK := exactSub(uniqueDeadlines[index], uniqueDeadlines[index-1])
-					if !gapOK || gap != expectedNanos {
-						fundingTimingFailures++
-					}
+			}
+			publishedDeadlines[key] = uniqueDeadlines
+			for index := 1; index < len(uniqueDeadlines); index++ {
+				gap, gapOK := exactSub(uniqueDeadlines[index], uniqueDeadlines[index-1])
+				if !gapOK || gap != expectedNanos {
+					fundingTimingFailures++
 				}
 			}
-			byContract := make(map[markKey][]int64)
-			for key := range funding {
-				byContract[markKey{venue: key.venue, symbol: key.asset}] = append(byContract[markKey{venue: key.venue, symbol: key.asset}], key.timestamp)
+		}
+
+		// A settlement with no matching published deadline is caught below by
+		// selectFundingRate. This reverse index catches the opposite omission:
+		// a venue announced a deadline for a contract with an open position but
+		// never emitted the corresponding settlement.
+		terminalAt, terminalKnown := terminalAccountTimestamp(r.Report)
+		for key, deadlines := range publishedDeadlines {
+			for _, deadline := range deadlines {
+				if terminalKnown && deadline > terminalAt {
+					continue
+				}
+				if !hasNonzeroPerpPosition(perpHistory, key.venue, key.symbol, deadline) {
+					continue
+				}
+				if _, settled := funding[instantKey{venue: key.venue, timestamp: deadline, asset: key.symbol}]; !settled {
+					fundingTimingFailures++
+					// Keep this separate from generic timing failures so the
+					// artifact says which direction of the join failed.
+					fundingMissingSettlements++
+				}
 			}
-			for _, instants := range byContract {
-				sort.Slice(instants, func(i, j int) bool { return instants[i] < instants[j] })
-				for index := 1; index < len(instants); index++ {
-					gap, gapOK := exactSub(instants[index], instants[index-1])
-					if !gapOK || gap != expectedNanos {
-						fundingTimingFailures++
-					}
+		}
+
+		byContract := make(map[markKey][]int64)
+		for key := range funding {
+			contractKey := markKey{venue: key.venue, symbol: key.asset}
+			byContract[contractKey] = append(byContract[contractKey], key.timestamp)
+		}
+		for key, instants := range byContract {
+			expectedSeconds := expectedFundingIntervalSeconds(opts, key.venue)
+			if expectedSeconds <= 0 {
+				continue
+			}
+			expectedNanos, intervalOK := exactMul(expectedSeconds, 1_000_000_000)
+			if !intervalOK {
+				fundingArithmeticFailures++
+				continue
+			}
+			sort.Slice(instants, func(i, j int) bool { return instants[i] < instants[j] })
+			uniqueInstants := instants[:0]
+			for _, instant := range instants {
+				if len(uniqueInstants) == 0 || uniqueInstants[len(uniqueInstants)-1] != instant {
+					uniqueInstants = append(uniqueInstants, instant)
+				}
+			}
+			for index := 1; index < len(uniqueInstants); index++ {
+				gap, gapOK := exactSub(uniqueInstants[index], uniqueInstants[index-1])
+				if !gapOK || gap != expectedNanos {
+					fundingTimingFailures++
 				}
 			}
 		}
@@ -734,6 +815,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 	result.FundingEvidenceFailures = fundingEvidenceFailures
 	result.FundingArithmeticFailures = fundingArithmeticFailures
 	result.FundingTimingFailures = fundingTimingFailures
+	result.FundingMissingSettlements = fundingMissingSettlements
 	result.ExerciseEvidenceFailures = exerciseEvidenceFailures
 
 	selectFundingRate := func(points []fundingRatePoint, instant int64, cursor fundingCursor, cursorKnown bool) (fundingRatePoint, bool) {
@@ -777,7 +859,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			check.RateTimestamp = selectedRate.Timestamp
 			check.NextFunding = selectedRate.NextFunding
 			check.RateInterval = selectedRate.Interval
-			if opts.RequireExactReplay && opts.ExpectedFundingIntervalSeconds > 0 && selectedRate.Interval != opts.ExpectedFundingIntervalSeconds {
+			if opts.RequireExactReplay && expectedFundingIntervalSeconds(opts, key.venue) > 0 && selectedRate.Interval != expectedFundingIntervalSeconds(opts, key.venue) {
 				check.TimingConsistent = false
 				result.FundingTimingFailures++
 			}

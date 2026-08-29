@@ -243,6 +243,7 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 		for _, rawLevel := range append(append([]json.RawMessage{}, payload.Bids...), payload.Asks...) {
 			var level struct {
 				VisibleQty int64 `json:"visible_qty"`
+				HiddenQty  int64 `json:"hidden_qty"`
 			}
 			if err := decodeRequiredJSON(rawLevel, &level, "visible_qty"); err != nil || level.VisibleQty < 0 {
 				mu.Lock()
@@ -250,7 +251,20 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 				mu.Unlock()
 				return
 			}
-			if level.VisibleQty > 0 {
+			if level.HiddenQty < 0 {
+				mu.Lock()
+				malformedSnapshotRecords++
+				mu.Unlock()
+				return
+			}
+			quantity, ok := addAuditInt64(level.VisibleQty, level.HiddenQty)
+			if !ok {
+				mu.Lock()
+				malformedSnapshotRecords++
+				mu.Unlock()
+				return
+			}
+			if quantity > 0 {
 				nonEmpty = true
 			}
 		}

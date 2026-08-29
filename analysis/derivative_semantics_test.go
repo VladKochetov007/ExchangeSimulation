@@ -460,8 +460,63 @@ func TestStrictFundingAuditRejectsWrongAndIncompleteCadence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.FundingTimingFailures == 0 {
-		t.Fatalf("duplicate funding deadline was accepted: %+v", result)
+	if result.FundingTimingFailures != 0 || result.FundingMissingSettlements != 0 {
+		t.Fatalf("repeated observation of one funding deadline was treated as a second settlement: %+v", result)
+	}
+
+	missingSettlement := append([]string{}, base[:2]...)
+	missingSettlement = append(missingSettlement,
+		fundingRateStrictLine(firstDeadline-intervalSeconds*1_000_000_000, firstDeadline, intervalSeconds, "north", 5),
+		fundingRateStrictLine(firstDeadline, firstDeadline+intervalSeconds*1_000_000_000, intervalSeconds, "north", 5),
+		base[3], base[4])
+	run, err = Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": missingSettlement}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true, ExpectedFundingIntervalSeconds: intervalSeconds,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingMissingSettlements != 1 || result.FundingTimingFailures == 0 {
+		t.Fatalf("published deadline without settlement was accepted: %+v", result)
+	}
+}
+
+func TestStrictFundingAuditUsesPerVenueCadence(t *testing.T) {
+	const northDeadline = int64(3_000_000_000)
+	const southDeadline = int64(6_000_000_000)
+	north := []string{
+		positionLine(northDeadline-10, "north", 1, "ABC-PERP", auditPrecision, 0),
+		positionLine(northDeadline-10, "north", 2, "ABC-PERP", -auditPrecision, 0),
+		fundingRateStrictLine(2_000_000_000, northDeadline, 1, "north", 5),
+		fundingPayLine(northDeadline, "north", 1, -400),
+		fundingPayLine(northDeadline, "north", 2, 400),
+	}
+	south := []string{
+		positionLine(southDeadline-10, "south", 3, "ABC-PERP", auditPrecision, 0),
+		positionLine(southDeadline-10, "south", 4, "ABC-PERP", -auditPrecision, 0),
+		fundingRateStrictLine(4_000_000_000, southDeadline, 2, "south", 5),
+		fundingPayLine(southDeadline, "south", 3, -400),
+		fundingPayLine(southDeadline, "south", 4, 400),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{
+		"north/derivatives.jsonl": north,
+		"south/derivatives.jsonl": south,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true,
+		ExpectedFundingIntervals: map[string]int64{"north": 1, "south": 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingTimingFailures != 0 || result.FundingMissingSettlements != 0 || result.FundingSignWrong != 0 || len(result.Funding) != 2 {
+		t.Fatalf("heterogeneous venue cadence was not audited independently: %+v", result)
 	}
 }
 
@@ -498,6 +553,27 @@ func TestExerciseAuditRequiresExactHolderPaymentCardinality(t *testing.T) {
 	check := result.Exercises[0]
 	if check.DuplicatePayouts != 1 || check.UnknownPayoutHolders != 1 || result.ExerciseBroken != 1 {
 		t.Fatalf("duplicate/unknown option payments were accepted: %+v", result)
+	}
+}
+
+func TestFillPositionAuditExcludesOptionProducerSchema(t *testing.T) {
+	lines := []string{
+		derivativePositionLine(10, 1, "north", "ABC-PERP", "BUY", 5, 0, 5),
+		derivativeFillLine(10, 1, "north", "ABC-PERP", "BUY", 5, 5),
+		// This is the option producer schema: it has no linear-only new_size or
+		// price fields and therefore must not become a malformed linear fill.
+		optionFillForAudit(10, 2, "ABC-OPT-C", "BUY", 5),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureFillPositions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.LinearFills != 1 || result.TradePositionUpdates != 1 || result.Matched != 1 || result.MalformedFillRecords != 0 || result.MalformedPositionUpdates != 0 {
+		t.Fatalf("option producer schema contaminated linear audit: %+v", result)
 	}
 }
 

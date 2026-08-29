@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/pprof"
 	"sort"
@@ -24,6 +25,32 @@ func effectiveHedgeSymbol(baseSymbol, hedgeSymbol string, baseExplicit, hedgeExp
 		return baseSymbol
 	}
 	return hedgeSymbol
+}
+
+func loadFundingIntervals(runDir string) (map[string]int64, error) {
+	raw, err := os.ReadFile(filepath.Join(runDir, "run-config.json"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var config struct {
+		VenueRules map[string]struct {
+			FundingIntervalSeconds int64 `json:"funding_interval_seconds"`
+		} `json:"venue_rules"`
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return nil, err
+	}
+	intervals := make(map[string]int64, len(config.VenueRules))
+	for venueID, rule := range config.VenueRules {
+		if rule.FundingIntervalSeconds <= 0 {
+			return nil, fmt.Errorf("venue %q has invalid funding_interval_seconds=%d", venueID, rule.FundingIntervalSeconds)
+		}
+		intervals[venueID] = rule.FundingIntervalSeconds
+	}
+	return intervals, nil
 }
 
 // analyzerProfiles bounds process profiling to offline analysis. It does not
@@ -876,7 +903,12 @@ func main() {
 				}
 			})
 		case "derivatives":
-			result, err := run.MeasureDerivativeSemantics(analysis.DerivativeAuditOptions{BasePrecision: *basePrecision, RequireExactReplay: *requireExactReplay, ExpectedFundingIntervalSeconds: *fundingIntervalSeconds})
+			fundingIntervals, err := loadFundingIntervals(dir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: load funding cadence: %v\n", dir, err)
+				os.Exit(1)
+			}
+			result, err := run.MeasureDerivativeSemantics(analysis.DerivativeAuditOptions{BasePrecision: *basePrecision, RequireExactReplay: *requireExactReplay, ExpectedFundingIntervalSeconds: *fundingIntervalSeconds, ExpectedFundingIntervals: fundingIntervals})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)

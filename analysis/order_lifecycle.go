@@ -191,7 +191,7 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 				return
 			}
 			state.filled = filled
-			if state.filled != payload.FilledQty || payload.RemainingQty != remaining || state.filled > state.quantity || (payload.IsFull && state.filled != state.quantity) {
+			if state.filled != payload.FilledQty || payload.RemainingQty != remaining || state.filled > state.quantity || (payload.IsFull && state.filled != state.quantity) || (state.filled == state.quantity && !payload.IsFull) {
 				result.FillQuantityMismatches++
 				addFailure(key, state, "fill_quantity_mismatch")
 			}

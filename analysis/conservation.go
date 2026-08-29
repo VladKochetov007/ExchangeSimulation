@@ -72,7 +72,12 @@ type DeltaConsistency struct {
 	DecodeFailures        int `json:"decode_failures"`
 	MalformedVenueRecords int `json:"malformed_venue_records"`
 	MalformedFeeRecords   int `json:"malformed_fee_records"`
-	ArithmeticFailures    int `json:"arithmetic_failures"`
+	// These compare independent movement streams with the terminal venue
+	// ledger. A self-consistent stream can still omit a movement, so the
+	// report-side reconciliation is a separate fail-closed predicate.
+	VenueBalanceMismatches int `json:"venue_balance_mismatches"`
+	FeeRevenueMismatches   int `json:"fee_revenue_mismatches"`
+	ArithmeticFailures     int `json:"arithmetic_failures"`
 }
 
 // PositionRoundingAudit independently validates the terminal carry ledger.
@@ -345,12 +350,14 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		MakerFee int64  `json:"maker_fee"`
 	}
 	type venueMovement struct {
-		Timestamp int64  `json:"timestamp"`
-		Bucket    string `json:"bucket"`
-		Asset     string `json:"asset"`
-		Delta     int64  `json:"delta"`
-		Symbol    string `json:"symbol"`
-		Reason    string `json:"reason"`
+		Timestamp  int64  `json:"timestamp"`
+		Bucket     string `json:"bucket"`
+		Asset      string `json:"asset"`
+		OldBalance int64  `json:"old_balance"`
+		NewBalance int64  `json:"new_balance"`
+		Delta      int64  `json:"delta"`
+		Symbol     string `json:"symbol"`
+		Reason     string `json:"reason"`
 	}
 	if err := r.Scan(scan, func(event Event) {
 		if event.Name == "position_rounding" {
@@ -390,6 +397,19 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		if event.Name == "venue_balance_change" {
 			var movement venueMovement
 			if err := decodeRequiredJSON(event.Raw(), &movement, "timestamp", "bucket", "asset", "reason", "old_balance", "new_balance", "delta"); err != nil || movement.Asset == "" || movement.Bucket == "" {
+				mu.Lock()
+				deltas.MalformedVenueRecords++
+				mu.Unlock()
+				return
+			}
+			expectedBalance, arithmeticOK := addAuditInt64(movement.OldBalance, movement.Delta)
+			if !arithmeticOK {
+				mu.Lock()
+				deltas.ArithmeticFailures++
+				mu.Unlock()
+				return
+			}
+			if expectedBalance != movement.NewBalance {
 				mu.Lock()
 				deltas.MalformedVenueRecords++
 				mu.Unlock()
@@ -580,6 +600,22 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	}); err != nil {
 		return nil, err
 	}
+	// Reconcile the independently rebuilt venue streams with the terminal
+	// report. Comparing the union of keys also catches a balance or fee asset
+	// present on only one side of the claimed accounting boundary.
+	reportedVenue := make(map[string]int64)
+	reportedFees := make(map[string]int64)
+	for _, ledger := range r.Report.VenueLedgers {
+		for asset, amount := range ledger.FeeRevenue {
+			addConservationValue(reportedVenue, asset, amount, &deltas.ArithmeticFailures)
+			addConservationValue(reportedFees, asset, amount, &deltas.ArithmeticFailures)
+		}
+		for asset, amount := range ledger.InsuranceFund {
+			addConservationValue(reportedVenue, asset, amount, &deltas.ArithmeticFailures)
+		}
+	}
+	deltas.VenueBalanceMismatches = countInt64MapMismatches(venueRecorded, reportedVenue)
+	deltas.FeeRevenueMismatches = countInt64MapMismatches(fees, reportedFees)
 	rounding.UniqueTerminalKeys = len(roundingRecords)
 	expectedVenueFlows := make(map[venueRoundingKey]int64)
 	for key, record := range roundingRecords {
@@ -651,7 +687,15 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	// account's entire endowment.
 	terminal, reportArithmeticFailures := reportedBalances(r.Report.TerminalAccounts)
 	deltas.ArithmeticFailures += reportArithmeticFailures
-	for key, closing := range terminal {
+	chainKeys := make(map[participantAsset]struct{}, len(moved)+len(terminal))
+	for key := range moved {
+		chainKeys[key] = struct{}{}
+	}
+	for key := range terminal {
+		chainKeys[key] = struct{}{}
+	}
+	for key := range chainKeys {
+		closing := terminal[key]
 		deltas.ChainChecked++
 		gap, ok := subAuditInt64(closing, moved[key])
 		if !ok {
@@ -670,11 +714,10 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		}
 	}
 
-	result := &Conservation{PerVenueNet: perVenue, Deltas: deltas, PositionRounding: rounding, FeesLogged: fees, VenueRecorded: venueRecorded, ClassNet: classNet, ClassRecords: classRecords}
-	var identityArithmeticFailures int
-	result.Identities, identityArithmeticFailures = r.conservationIdentities(flows)
-	result.VenueIdentities, reportArithmeticFailures = r.venueIdentities(venueFlows)
-	deltas.ArithmeticFailures += identityArithmeticFailures + reportArithmeticFailures
+	identities, identityArithmeticFailures := r.conservationIdentities(flows)
+	venueIdentities, venueIdentityArithmeticFailures := r.venueIdentities(venueFlows)
+	deltas.ArithmeticFailures += identityArithmeticFailures + venueIdentityArithmeticFailures
+	result := &Conservation{PerVenueNet: perVenue, Deltas: deltas, PositionRounding: rounding, FeesLogged: fees, VenueRecorded: venueRecorded, ClassNet: classNet, ClassRecords: classRecords, Identities: identities, VenueIdentities: venueIdentities}
 	for _, flow := range flows {
 		result.Flows = append(result.Flows, *flow)
 	}
@@ -688,6 +731,23 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	result.ExpiryInstants = sortedResiduals(expiry)
 	result.OptionExpiryInstants = sortedResiduals(optionExpiry)
 	return result, nil
+}
+
+func countInt64MapMismatches(left, right map[string]int64) int {
+	keys := make(map[string]struct{}, len(left)+len(right))
+	for key := range left {
+		keys[key] = struct{}{}
+	}
+	for key := range right {
+		keys[key] = struct{}{}
+	}
+	mismatches := 0
+	for key := range keys {
+		if left[key] != right[key] {
+			mismatches++
+		}
+	}
+	return mismatches
 }
 
 func sortedResiduals(bucket map[instantKey]*InstantResidual) []InstantResidual {

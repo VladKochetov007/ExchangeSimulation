@@ -179,6 +179,24 @@ func TestReplayReportsDriftAgainstSnapshots(t *testing.T) {
 	}
 }
 
+func TestReplayDetectsDeepQuantityDrift(t *testing.T) {
+	path := writeLog(t, []string{
+		deltaLine(1, "BUY", 100, 50),
+		deltaLine(1, "SELL", 102, 10),
+		deltaLine(1, "SELL", 103, 10),
+		// The touch is unchanged, but the second level has silently lost one
+		// unit. A touch-only audit would incorrectly call this replay exact.
+		snapshotEventLine(2, 0, [][2]int64{{100, 50}}, [][2]int64{{102, 10}, {103, 9}}),
+	})
+	drift, err := ReplayFile(path, nil)
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if drift.Checks != 1 || drift.Mismatches != 1 {
+		t.Fatalf("deep quantity drift was not detected: %+v", drift)
+	}
+}
+
 // A snapshot delivered to a subscribing client is that client's view at the
 // moment it connected, not the standing book, so it must not resynchronise the
 // replay nor count as a check.

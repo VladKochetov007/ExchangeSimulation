@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"fmt"
+	"math"
 	"testing"
 )
 
@@ -76,6 +77,91 @@ func TestConservationCatchesASelfInconsistentDelta(t *testing.T) {
 	}
 	if result.Deltas.Mismatched != 1 || result.Deltas.WorstGap != 50 {
 		t.Errorf("delta consistency = %+v, want one mismatch of 50", result.Deltas)
+	}
+}
+
+func TestConservationReconcilesVenueStreamsAndChecksVenueArithmetic(t *testing.T) {
+	report := Report{VenueLedgers: []VenueLedger{{
+		VenueID:       "north",
+		FeeRevenue:    map[string]int64{"USD": 10},
+		InsuranceFund: map[string]int64{"USD": -3},
+	}}}
+	valid := []string{
+		logLine(1, 0, "venue_balance_change", map[string]any{
+			"timestamp": 1, "bucket": "fee_revenue", "asset": "USD", "reason": "taker_fee",
+			"old_balance": 0, "new_balance": 7, "delta": 7,
+		}),
+		logLine(1, 0, "fee_revenue", map[string]any{
+			"asset": "USD", "taker_fee": 10, "maker_fee": 0,
+		}),
+	}
+	run, err := Open(writeRun(t, report, map[string][]string{"north/derivatives.jsonl": valid}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deltas.VenueBalanceMismatches != 0 || result.Deltas.FeeRevenueMismatches != 0 || result.Deltas.MalformedVenueRecords != 0 {
+		t.Fatalf("consistent venue streams were rejected: %+v", result.Deltas)
+	}
+
+	invalid := append([]string{}, valid...)
+	invalid[0] = logLine(1, 0, "venue_balance_change", map[string]any{
+		"timestamp": 1, "bucket": "fee_revenue", "asset": "USD", "reason": "taker_fee",
+		"old_balance": 0, "new_balance": 8, "delta": 7,
+	})
+	run, err = Open(writeRun(t, report, map[string][]string{"north/derivatives.jsonl": invalid}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deltas.MalformedVenueRecords != 1 || result.Deltas.VenueBalanceMismatches != 1 {
+		t.Fatalf("venue old/new/delta inconsistency was accepted: %+v", result.Deltas)
+	}
+}
+
+func TestConservationChecksMovementOnlyParticipants(t *testing.T) {
+	run, err := Open(writeRun(t, Report{}, map[string][]string{
+		"north/derivatives.jsonl": {changeLine(1, "north", 7, "ABC-PERP", "trade_settlement", [][3]any{{"USD", int64(0), int64(100)}})},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deltas.ChainChecked != 1 || result.Deltas.ChainBroken != 1 {
+		t.Fatalf("participant missing from terminal report was accepted: %+v", result.Deltas)
+	}
+}
+
+func TestConservationPropagatesIdentityArithmeticFailures(t *testing.T) {
+	const maximum = int64(math.MaxInt64)
+	report := Report{
+		TerminalAccounts: []AccountRow{{
+			VenueID: "north", ClientID: 1,
+			Account: Account{SpotBalances: []Balance{{Asset: "USD", NetAsset: maximum}}},
+		}},
+		VenueLedgers: []VenueLedger{{VenueID: "north", FeeRevenue: map[string]int64{"USD": 1}}},
+	}
+	run, err := Open(writeRun(t, report, map[string][]string{
+		"north/derivatives.jsonl": {changeLine(1, "north", 1, "ABC-PERP", "trade_settlement", [][3]any{{"USD", int64(0), maximum}})},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deltas.ArithmeticFailures == 0 {
+		t.Fatalf("identity overflow disappeared from returned deltas: %+v", result.Deltas)
 	}
 }
 
