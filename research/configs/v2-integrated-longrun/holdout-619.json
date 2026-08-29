@@ -38,6 +38,7 @@
   ],
   "cross_venue_base_latency": 1000000000,
   "date": "2026-08-27",
+  "dated_future_delivery_fee_policy": "zero",
   "dated_carry_arb_count": 2,
   "dated_carry_check_interval": 0,
   "dated_carry_edge_bps": 10,

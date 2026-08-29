@@ -227,8 +227,7 @@ func (r *Run) MeasurePositions(opts PositionOptions) (*PositionReconstruction, e
 	// reports is overstated by exactly the amount that was settled in cash.
 	settled := make(map[markKey]bool)
 	lifecyclePrecisions := make(map[markKey]int64)
-	lifecycleListed := make(map[markKey]bool)
-	lifecycleListedAt := make(map[markKey]int64)
+	lifecycleListings := make(map[markKey][]evidenceOrder)
 	settledScan := ScanOptions{
 		Events:        []string{"instrument_listed", "instrument_settled"},
 		Files:         opts.Files,
@@ -264,14 +263,9 @@ func (r *Run) MeasurePositions(opts PositionOptions) (*PositionReconstruction, e
 			return
 		}
 		if event.Name == "instrument_listed" {
-			lifecycleListed[key] = true
-			listingAt := payload.Timestamp
-			if listingAt == 0 {
-				listingAt = event.SimTS
-			}
-			if previous, exists := lifecycleListedAt[key]; !exists || listingAt < previous {
-				lifecycleListedAt[key] = listingAt
-			}
+			lifecycleListings[key] = append(lifecycleListings[key], evidenceOrder{
+				timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
+			})
 			if payload.BasePrecision > 0 {
 				if previous, exists := lifecyclePrecisions[key]; exists && previous != payload.BasePrecision {
 					evidenceFailures++
@@ -279,8 +273,13 @@ func (r *Run) MeasurePositions(opts PositionOptions) (*PositionReconstruction, e
 					lifecyclePrecisions[key] = payload.BasePrecision
 				}
 			}
-		} else if opts.RequireExactReplay && !lifecycleListed[key] {
-			evidenceFailures++
+		} else if opts.RequireExactReplay {
+			_, listed := latestCausalPrerequisite(lifecycleListings[key], evidenceOrder{
+				timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
+			})
+			if !listed {
+				evidenceFailures++
+			}
 		}
 		if event.Name == "instrument_settled" {
 			settled[key] = true
@@ -357,8 +356,10 @@ func (r *Run) MeasurePositions(opts PositionOptions) (*PositionReconstruction, e
 				return
 			}
 			if opts.RequireExactReplay {
-				listingAt, listed := lifecycleListedAt[lifecycleKey]
-				if !listed || at < listingAt {
+				_, listed := latestCausalPrerequisite(lifecycleListings[lifecycleKey], evidenceOrder{
+					timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
+				})
+				if !listed {
 					mu.Lock()
 					exactReplayFailures++
 					evidenceFailures++
@@ -452,8 +453,10 @@ func (r *Run) MeasurePositions(opts PositionOptions) (*PositionReconstruction, e
 				(event.Symbol == "" || event.Symbol == payload.Symbol) && payload.ClosedQty > 0 &&
 				payload.PnL != 0 && (payload.Side == "BUY" || payload.Side == "SELL")
 			if opts.RequireExactReplay {
-				listingAt, listed := lifecycleListedAt[markKey{event.VenueID, payload.Symbol}]
-				valid = valid && listed && payload.Timestamp >= listingAt
+				_, listed := latestCausalPrerequisite(lifecycleListings[markKey{event.VenueID, payload.Symbol}], evidenceOrder{
+					timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
+				})
+				valid = valid && listed
 			}
 			if !valid {
 				mu.Lock()
@@ -505,8 +508,10 @@ func (r *Run) MeasurePositions(opts PositionOptions) (*PositionReconstruction, e
 				return
 			}
 			if opts.RequireExactReplay {
-				listingAt, listed := lifecycleListedAt[markKey{event.VenueID, payload.Symbol}]
-				if !listed || at < listingAt {
+				_, listed := latestCausalPrerequisite(lifecycleListings[markKey{event.VenueID, payload.Symbol}], evidenceOrder{
+					timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
+				})
+				if !listed {
 					mu.Lock()
 					markIdentityFailures++
 					evidenceFailures++

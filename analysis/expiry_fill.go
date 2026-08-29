@@ -10,16 +10,17 @@ import (
 // Settlement metadata is a consistency check, not the source of truth: a
 // broken expiry path can omit it altogether.
 type ExpiryFillCheck struct {
-	VenueID            string `json:"venue_id"`
-	Symbol             string `json:"symbol"`
-	InstrumentType     string `json:"instrument_type"`
-	ExpiryNano         int64  `json:"expiry_nano"`
-	ListedNano         int64  `json:"listed_nano"`
-	SettlementNano     int64  `json:"settlement_nano"`
-	Settled            bool   `json:"settled"`
-	FillRecords        int    `json:"fill_records"`
-	FillsBeforeListing int    `json:"fills_before_listing"`
-	FillsAfterExpiry   int    `json:"fills_after_expiry"`
+	VenueID                 string `json:"venue_id"`
+	Symbol                  string `json:"symbol"`
+	InstrumentType          string `json:"instrument_type"`
+	ExpiryNano              int64  `json:"expiry_nano"`
+	ListedNano              int64  `json:"listed_nano"`
+	SettlementNano          int64  `json:"settlement_nano"`
+	Settled                 bool   `json:"settled"`
+	SettlementBeforeListing bool   `json:"settlement_before_listing"`
+	FillRecords             int    `json:"fill_records"`
+	FillsBeforeListing      int    `json:"fills_before_listing"`
+	FillsAfterExpiry        int    `json:"fills_after_expiry"`
 	// SnapshotRecordsAfterExpiry counts persisted book publications after the
 	// contractual boundary. NonEmptySnapshotsAfterExpiry is the stronger
 	// observable: a deleted instrument must not retain quoted depth.
@@ -52,6 +53,9 @@ type ExpiryFillAudit struct {
 	FillsAfterExpiry             int               `json:"fills_after_expiry"`
 	MalformedFillRecords         int               `json:"malformed_fill_records"`
 	FillIdentityFailures         int               `json:"fill_identity_failures"`
+	MalformedLifecycleRecords    int               `json:"malformed_lifecycle_records"`
+	MalformedSnapshotRecords     int               `json:"malformed_snapshot_records"`
+	SettlementBeforeListing      int               `json:"settlement_before_listing"`
 	SnapshotRecordsAfterExpiry   int               `json:"snapshot_records_after_expiry"`
 	SnapshotRecordsBeforeListing int               `json:"snapshot_records_before_listing"`
 	NonEmptySnapshotsAfterExpiry int               `json:"nonempty_snapshots_after_expiry"`
@@ -69,6 +73,8 @@ type expiryFillContract struct {
 	listing          int64
 	settled          bool
 	settlement       int64
+	listingOrder     evidenceOrder
+	settlementOrder  evidenceOrder
 	metadataMismatch bool
 }
 
@@ -91,10 +97,14 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 
 	contracts := make(map[expiryFillKey]expiryFillContract)
 	missing := make(map[expiryFillKey]struct{})
+	malformedLifecycleRecords := 0
 	var mu sync.Mutex
 	if err := r.Scan(ScanOptions{Events: []string{"instrument_listed", "instrument_settled"}}, func(event Event) {
 		var payload instrumentPayload
-		if event.Decode(&payload) != nil || payload.Symbol == "" {
+		if event.Decode(&payload) != nil || payload.Symbol == "" || payload.InstrumentType == "" {
+			mu.Lock()
+			malformedLifecycleRecords++
+			mu.Unlock()
 			return
 		}
 		if payload.InstrumentType != "FUTURE" && payload.InstrumentType != "OPTION" {
@@ -121,9 +131,14 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 			if contract.listing == 0 || event.SimTS < contract.listing {
 				contract.listing = event.SimTS
 			}
+			listingOrder := evidenceOrder{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal}
+			if contract.listingOrder.ordinal == 0 || evidenceBefore(listingOrder, contract.listingOrder) {
+				contract.listingOrder = listingOrder
+			}
 		} else {
 			contract.settled = true
 			contract.settlement = event.SimTS
+			contract.settlementOrder = evidenceOrder{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal}
 		}
 		contracts[key] = contract
 	}); err != nil {
@@ -136,6 +151,7 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 	fillCounts := make(map[expiryFillKey]counts)
 	malformedFillRecords := 0
 	fillIdentityFailures := 0
+	malformedSnapshotRecords := 0
 	if err := r.Scan(ScanOptions{Events: []string{"OrderFill"}}, func(event Event) {
 		var payload fillPayload
 		if err := event.Decode(&payload); err != nil {
@@ -179,7 +195,9 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 		}
 		row := fillCounts[key]
 		row.fills++
-		if !contract.listed || event.SimTS < contract.listing {
+		if _, listed := latestCausalPrerequisite([]evidenceOrder{contract.listingOrder}, evidenceOrder{
+			timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
+		}); !listed {
 			row.beforeListing++
 		}
 		if event.SimTS >= contract.expiry {
@@ -207,7 +225,9 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 		if !exists {
 			return
 		}
-		if !contract.listed || event.SimTS < contract.listing {
+		if _, listed := latestCausalPrerequisite([]evidenceOrder{contract.listingOrder}, evidenceOrder{
+			timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
+		}); !listed {
 			mu.Lock()
 			row := fillCounts[key]
 			row.snapshotsBeforeListing++
@@ -220,6 +240,9 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 		}
 		var payload snapshotPayload
 		if event.Decode(&payload) != nil {
+			mu.Lock()
+			malformedSnapshotRecords++
+			mu.Unlock()
 			return
 		}
 		nonEmpty := false
@@ -255,9 +278,20 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 			terminalNano = row.Account.Timestamp
 		}
 	}
-	result := &ExpiryFillAudit{MissingExpiryMetadata: len(missing), MalformedFillRecords: malformedFillRecords, FillIdentityFailures: fillIdentityFailures}
+	result := &ExpiryFillAudit{
+		MissingExpiryMetadata:     len(missing),
+		MalformedFillRecords:      malformedFillRecords,
+		FillIdentityFailures:      fillIdentityFailures,
+		MalformedLifecycleRecords: malformedLifecycleRecords,
+		MalformedSnapshotRecords:  malformedSnapshotRecords,
+	}
 	for key, contract := range contracts {
 		counts := fillCounts[key]
+		settlementBeforeListing := false
+		if contract.settled {
+			_, listedBeforeSettlement := latestCausalPrerequisite([]evidenceOrder{contract.listingOrder}, contract.settlementOrder)
+			settlementBeforeListing = !listedBeforeSettlement
+		}
 		result.Contracts++
 		if contract.kind == "FUTURE" {
 			result.Futures++
@@ -269,6 +303,9 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 		}
 		if contract.settled && !contract.listed {
 			result.SettlementWithoutListing++
+		}
+		if settlementBeforeListing {
+			result.SettlementBeforeListing++
 		}
 		if contract.metadataMismatch {
 			result.MetadataMismatches++
@@ -293,7 +330,8 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 			VenueID: key.venue, Symbol: contract.symbol, InstrumentType: contract.kind,
 			ExpiryNano: contract.expiry, ListedNano: contract.listing,
 			SettlementNano: contract.settlement, Settled: contract.settled,
-			FillRecords: counts.fills, FillsBeforeListing: counts.beforeListing, FillsAfterExpiry: counts.after,
+			SettlementBeforeListing: settlementBeforeListing,
+			FillRecords:             counts.fills, FillsBeforeListing: counts.beforeListing, FillsAfterExpiry: counts.after,
 			SnapshotRecordsAfterExpiry:   counts.snapshotsAfter,
 			SnapshotRecordsBeforeListing: counts.snapshotsBeforeListing,
 			NonEmptySnapshotsAfterExpiry: counts.nonEmptySnapshotsAfter,

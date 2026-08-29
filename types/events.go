@@ -159,6 +159,7 @@ type FundingRateUpdateEvent struct {
 	Symbol      string `json:"symbol"`
 	Rate        int64  `json:"rate"`
 	NextFunding int64  `json:"next_funding"`
+	Interval    int64  `json:"interval"`
 }
 
 // OpenInterestEvent logs total open interest for a symbol

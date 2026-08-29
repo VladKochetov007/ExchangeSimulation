@@ -35,6 +35,9 @@ require_object "$parity"
 jq -e '.contract == "v2-integrated-longrun-parity-v3" and
 	(.simulator_binary_sha256 | test("^[0-9a-f]{64}$")) and
 	(.simulator_binary_go_version | startswith("go1.27")) and
+	(.analyzer_sha256 | test("^[0-9a-f]{64}$")) and
+	(.analyzer_go_version | startswith("go1.27")) and
+	(.analyzer_revision | test("^[0-9a-f]{40}$")) and
 	(.prunegate_sha256 | test("^[0-9a-f]{64}$")) and
 	(.prunegate_go_version | startswith("go1.27")) and
 	(.prunegate_revision | test("^[0-9a-f]{40}$")) and
@@ -118,6 +121,11 @@ parity_source_revision=$(jq -er '.source_revision' "$parity")
 parity_simulator_sha256=$(jq -er '.simulator_binary_sha256' "$parity")
 parity_simulator_go_version=$(jq -er '.simulator_binary_go_version' "$parity")
 [[ "$parity_simulator_sha256" == "$simulator_sha256" ]] || fail "parity simulator binary differs from development simulator binary"
+parity_analyzer_revision=$(jq -er '.analyzer_revision' "$parity")
+parity_analyzer_sha256=$(jq -er '.analyzer_sha256' "$parity")
+parity_analyzer_go_version=$(jq -er '.analyzer_go_version' "$parity")
+[[ "$parity_analyzer_revision" == "$analyzer_revision" && "$parity_analyzer_sha256" == "$analyzer_sha256" &&
+	"$parity_analyzer_go_version" == "$analyzer_go_version" ]] || fail "parity analyzer differs from development analyzer"
 [[ "$parity_simulator_go_version" == "$simulator_go_version" ]] || fail "parity simulator Go toolchain differs from development simulator"
 prunegate_revision=$(jq -er '.prunegate_revision' "$output_root/dev-607/analysis-metadata.json")
 prunegate_sha256=$(jq -er '.prunegate_sha256' "$output_root/dev-607/analysis-metadata.json")

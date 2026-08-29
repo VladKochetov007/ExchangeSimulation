@@ -24,7 +24,8 @@ v2_r5_require_cell_path "$cell" || fail "cell is outside the canonical r5 eviden
 [[ -x "$analyzer" ]] || fail "missing analyzer: $analyzer"
 
 cell=$(realpath -e -- "$cell")
-analysis_dir=$(mktemp -d "${TMPDIR:-/tmp}/v2-r5-verify.XXXXXX")
+verification_tmp_root=${V2_VERIFY_TMP_ROOT:-"$root_dir/.git"}
+analysis_dir=$(mktemp -d "$verification_tmp_root/v2-r5-verify.XXXXXX")
 trap 'rm -rf -- "$analysis_dir"' EXIT
 
 if ! V2_ANALYSIS_OUTPUT_DIR="$analysis_dir" MVANALYZE_BIN="$analyzer" \

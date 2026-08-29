@@ -1679,6 +1679,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 					Symbol:      u.symbol,
 					Rate:        fundingSnapshot.Rate,
 					NextFunding: fundingSnapshot.NextFunding,
+					Interval:    fundingSnapshot.Interval,
 				})
 			}
 		}

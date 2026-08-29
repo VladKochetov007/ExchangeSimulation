@@ -48,12 +48,17 @@ parameters. It changes only evidence observability and the fail-closed audit:
 * the expiry boundary is strict: records at `timestamp >= expiry` are late;
 * the public rounded-entry formula remains a diagnostic (`display_formula_gap`)
   and is not used as the exact mechanics result.
-* the runner seals a manifest over every fixed sidecar and every retained raw
-  venue JSONL file; an external sibling attestation binds that manifest to
-  completion status, and the scorer re-extracts every derived artifact from
-  raw evidence before evaluating it;
+* the runner records a manifest over every fixed sidecar and every retained raw
+  venue JSONL file; an external sibling attestation cross-binds that manifest
+  to completion status and binary/config provenance, and the scorer
+  re-extracts every derived artifact from raw evidence before evaluating it.
+  These are cross-bound integrity records, not cryptographic signatures or an
+  external immutable ledger;
 * settlement rejects nonzero net dated-future supply, and lifecycle audits
-  reject position, mark, fill, snapshot, and settlement use before listing;
+  reject position, mark, fill, snapshot, and settlement use before listing.
+  Within one file, persisted sequence order is required in addition to
+  simulated time; same-timestamp records in separate files are ambiguous and
+  fail strict causality;
 * the registered 24-hour start/end timestamps are required in the report,
   checkpoint stream, and completion status; the exact replay also binds each
   nonzero transition to the independent `realized_pnl` event stream, while
@@ -62,18 +67,24 @@ parameters. It changes only evidence observability and the fail-closed audit:
   declared option expiry, with timing violations emitted as an explicit
   derivative predicate failure rather than absorbed by an amount-only payoff
   check.
+* strict derivative analysis requires funding-rate identity, a positive
+  interval, a future `next_funding`, and a rate record physically before the
+  funding ledger boundary. Each funding settlement must match that exact
+  announced instant. Shifted, backdated, malformed, overflowed, or silently
+  undecodable derivative records are counted as failures rather than discarded.
 
 The exact replay is not a realism score. The accepted claim, if the r5 gate
-passes, is limited to sealed causal evidence integrity, exact position/basis
-and settlement mechanics, lifecycle behavior, and registered activation
-predicates. It does not license claims about market realism, price discovery,
-funding anchoring, endogenous option shape, liquidation reachability, or
-inactive P3/P4/P5 recorders.
+passes, is limited to cross-bound retained-evidence integrity, exact
+position/basis and settlement mechanics, lifecycle behavior, and registered
+activation predicates. It does not license claims about market realism, price
+discovery, funding anchoring, endogenous option shape, liquidation
+reachability, or inactive P3/P4/P5 recorders.
 
 ## Registered r5 execution order
 
-1. Obtain an independent Sol-xhigh review of the complete amendment.
-2. Commit the amendment and pass `make test` plus the shell contract tests.
+1. Commit the complete amendment after `make test` plus the shell contract
+   tests pass.
+2. Obtain an independent Sol-xhigh review of that committed amendment.
 3. Build simulator, analyzer, and prune-gate binaries from one clean,
    provenance-pinned Go 1.27 worktree with `-trimpath`, `CGO_ENABLED=0`, and
    `vcs.modified=false`.

@@ -125,3 +125,47 @@ func TestExpiryFillAuditReportsMissingContractExpiry(t *testing.T) {
 		t.Fatalf("missing expiry metadata = %+v", result)
 	}
 }
+
+func TestExpiryFillAuditRejectsSameTimestampCrossFileCausality(t *testing.T) {
+	report := Report{TerminalAccounts: []AccountRow{{Account: Account{Timestamp: 100}}}}
+	run, err := Open(writeRun(t, report, map[string][]string{
+		"north/general.jsonl": {
+			expiryInstrumentLine("instrument_listed", 100, 100, "north", "ABC-FUT-1", "FUTURE"),
+		},
+		"north/derivatives.jsonl": {
+			expiryFillLine(100, "north", "ABC-FUT-1"),
+			expirySettledLine(100, 100, "north", "ABC-FUT-1", "FUTURE"),
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureExpiryFills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FillsBeforeListing != 1 || result.SettlementBeforeListing != 1 || result.SettlementWithoutListing != 0 {
+		t.Fatalf("same-timestamp cross-file evidence was treated as ordered: %+v", result)
+	}
+}
+
+func TestExpiryFillAuditCountsMalformedLifecycleAndSnapshotEvidence(t *testing.T) {
+	lines := []string{
+		expiryInstrumentLine("instrument_listed", 1, 100, "north", "ABC-FUT-1", "FUTURE"),
+		expirySettledLine(100, 100, "north", "ABC-FUT-1", "FUTURE"),
+		`{"sim_ts":2,"event":"instrument_listed","data":{"venue_id":"north","symbol":"ABC-FUT-2","payload":"broken"}}`,
+		`{"sim_ts":101,"event":"BookSnapshot","data":{"venue_id":"north","symbol":"ABC-FUT-1","payload":"broken"}}`,
+	}
+	report := Report{TerminalAccounts: []AccountRow{{Account: Account{Timestamp: 101}}}}
+	run, err := Open(writeRun(t, report, map[string][]string{"north/general.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureExpiryFills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MalformedLifecycleRecords != 1 || result.MalformedSnapshotRecords != 1 {
+		t.Fatalf("malformed derivative lifecycle evidence disappeared: %+v", result)
+	}
+}

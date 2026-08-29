@@ -6,13 +6,18 @@ import (
 )
 
 func fundingRateLine(ts int64, venue string, rate int64) string {
-	return fmt.Sprintf(`{"sim_ts":%d,"client_id":0,"event":"funding_rate_update","data":{"venue_id":%q,"payload":{"symbol":"ABC-PERP","payload":{"timestamp":%d,"symbol":"ABC-PERP","rate":%d}}}}`,
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":0,"event":"funding_rate_update","data":{"venue_id":%q,"symbol":"ABC-PERP","payload":{"symbol":"ABC-PERP","payload":{"timestamp":%d,"symbol":"ABC-PERP","rate":%d}}}}`,
 		ts, venue, ts, rate)
 }
 
 func fundingPayLine(ts int64, venue string, clientID uint64, delta int64) string {
-	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"balance_change","data":{"venue_id":%q,"payload":{"symbol":"ABC-PERP","payload":{"timestamp":%d,"client_id":%d,"symbol":"ABC-PERP","reason":"funding_settlement","changes":[{"asset":"USD","wallet":"perp","old_balance":0,"new_balance":%d,"delta":%d}]}}}}`,
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"balance_change","data":{"venue_id":%q,"symbol":"ABC-PERP","payload":{"symbol":"ABC-PERP","payload":{"timestamp":%d,"client_id":%d,"symbol":"ABC-PERP","reason":"funding_settlement","changes":[{"asset":"USD","wallet":"perp","old_balance":0,"new_balance":%d,"delta":%d}]}}}}`,
 		ts, clientID, venue, ts, clientID, delta, delta)
+}
+
+func fundingRateStrictLine(ts, nextFunding, interval int64, venue string, rate int64) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":0,"event":"funding_rate_update","data":{"venue_id":%q,"symbol":"ABC-PERP","payload":{"symbol":"ABC-PERP","payload":{"timestamp":%d,"symbol":"ABC-PERP","rate":%d,"next_funding":%d,"interval":%d}}}}`,
+		ts, venue, ts, rate, nextFunding, interval)
 }
 
 func optionSettledLine(ts int64, venue, symbol string, strike, settle int64, isCall bool) string {
@@ -307,5 +312,99 @@ func TestFundingAuditCatchesDuplicateAccountPayment(t *testing.T) {
 	}
 	if result.FundingBroken != 1 || result.FundingDuplicatePayments != 2 || result.Funding[0].DuplicatePayments != 2 {
 		t.Fatalf("duplicate funding accepted: %+v", result)
+	}
+}
+
+func TestStrictFundingAuditBindsRateScheduleAndPhysicalOrder(t *testing.T) {
+	const instant = int64(3_000_000_000)
+	const interval = int64(1)
+	rateTimestamp := instant - interval*1_000_000_000
+	good := []string{
+		positionLine(instant-10, "north", 1, "ABC-PERP", auditPrecision, 0),
+		positionLine(instant-10, "north", 2, "ABC-PERP", -auditPrecision, 0),
+		fundingRateStrictLine(rateTimestamp, instant, interval, "north", 5),
+		fundingPayLine(instant, "north", 1, -400),
+		fundingPayLine(instant, "north", 2, 400),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": good}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingEvidenceFailures != 0 || result.FundingMissingRates != 0 || result.FundingTimingFailures != 0 ||
+		result.FundingSignWrong != 0 || !result.Funding[0].RateAvailable || result.Funding[0].NextFunding != instant {
+		t.Fatalf("valid scheduled funding was rejected: %+v", result)
+	}
+
+	backdated := []string{
+		positionLine(instant-10, "north", 1, "ABC-PERP", auditPrecision, 0),
+		positionLine(instant-10, "north", 2, "ABC-PERP", -auditPrecision, 0),
+		fundingPayLine(instant, "north", 1, -400),
+		fundingPayLine(instant, "north", 2, 400),
+		// Timestamp alone would accept this announcement; its persisted order is
+		// after the settlement it claims to explain.
+		fundingRateStrictLine(rateTimestamp, instant, interval, "north", 5),
+	}
+	run, err = Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": backdated}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingMissingRates != 1 || result.FundingTimingFailures != 1 || result.FundingSignWrong != 1 {
+		t.Fatalf("backdated funding rate was accepted: %+v", result)
+	}
+
+	shifted := []string{
+		positionLine(instant-10, "north", 1, "ABC-PERP", auditPrecision, 0),
+		positionLine(instant-10, "north", 2, "ABC-PERP", -auditPrecision, 0),
+		fundingRateStrictLine(rateTimestamp, instant+interval*1_000_000_000, interval, "north", 5),
+		fundingPayLine(instant, "north", 1, -400),
+		fundingPayLine(instant, "north", 2, 400),
+	}
+	run, err = Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": shifted}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingMissingRates != 1 || result.FundingTimingFailures != 1 {
+		t.Fatalf("shifted funding schedule was accepted: %+v", result)
+	}
+}
+
+func TestStrictDerivativeAuditCountsMalformedEvidence(t *testing.T) {
+	const expiry = int64(1_000_000_000)
+	lines := []string{
+		optionSettledLine(expiry, "north", "ABC-1-C", 50, 55, true),
+		`{"sim_ts":1,"client_id":7,"event":"OrderFill","data":{"venue_id":"north","symbol":"ABC-1-C","payload":"broken"}}`,
+		fundingRateLine(expiry-1, "north", 5),
+		fundingPayLine(expiry, "north", 1, -400),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExerciseEvidenceFailures == 0 || result.FundingEvidenceFailures == 0 {
+		t.Fatalf("malformed derivative records disappeared: %+v", result)
 	}
 }

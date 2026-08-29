@@ -875,7 +875,7 @@ func main() {
 				}
 			})
 		case "derivatives":
-			result, err := run.MeasureDerivativeSemantics(analysis.DerivativeAuditOptions{BasePrecision: *basePrecision})
+			result, err := run.MeasureDerivativeSemantics(analysis.DerivativeAuditOptions{BasePrecision: *basePrecision, RequireExactReplay: *requireExactReplay})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)

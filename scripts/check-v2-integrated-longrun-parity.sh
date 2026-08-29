@@ -7,6 +7,7 @@ root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source "$root_dir/scripts/v2-integrated-longrun-r5-contract.sh"
 output_root=${1:-"$v2_r5_output_root"}
 attestation="$output_root/parity-attestation.json"
+analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 
 fail() {
 	printf 'integrated long-run parity failure: %s\n' "$*" >&2
@@ -21,6 +22,17 @@ require_object() {
 v2_r5_require_output_root "$output_root" || fail "parity root is not the canonical r5 evidence root"
 [[ ! -e "$attestation" ]] || fail "refusing to overwrite parity attestation: $attestation"
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "parity requires a clean gate worktree"
+[[ -x "$analyzer" ]] || fail "missing analyzer for independent raw parity recomputation: $analyzer"
+analyzer_revision=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
+analyzer_modified=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
+analyzer_trimpath=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
+analyzer_cgo_enabled=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
+analyzer_go_version=$(v2_r5_binary_go_version "$analyzer")
+head_revision=$(git -C "$root_dir" rev-parse HEAD)
+[[ "$analyzer_revision" == "$head_revision" && "$analyzer_modified" == false &&
+	"$analyzer_trimpath" == true && "$analyzer_cgo_enabled" == 0 ]] ||
+	fail "parity analyzer is not a clean reproducible build of current HEAD"
+v2_r5_is_go_127 "$analyzer_go_version" || fail "parity analyzer is not built with the pinned Go 1.27 toolchain: $analyzer_go_version"
 
 "$root_dir/scripts/check-v2-integrated-longrun-configs.sh" >/dev/null
 for cell in dev-607 dev-607-none dev-607-g8; do
@@ -128,6 +140,15 @@ full_runtime_digest=$(jq -er '.digest' "$output_root/dev-607/evidence-artifact-h
 g8_runtime_events=$(jq -er '.events' "$output_root/dev-607-g8/evidence-artifact-hash.json")
 g8_runtime_digest=$(jq -er '.digest' "$output_root/dev-607-g8/evidence-artifact-hash.json")
 [[ "$full_runtime_events" == "$g8_runtime_events" && "$full_runtime_digest" == "$g8_runtime_digest" ]] || fail "full runtime evidence hashes are not equal"
+full_recomputed=$("$analyzer" -metric evidenceartifacthash -json "$output_root/dev-607") || fail "could not recompute g4 raw evidence digest"
+g8_recomputed=$("$analyzer" -metric evidenceartifacthash -json "$output_root/dev-607-g8") || fail "could not recompute g8 raw evidence digest"
+full_recomputed_events=$(jq -er '.result.events' <<<"$full_recomputed") || fail "malformed g4 recomputed raw evidence digest"
+full_recomputed_digest=$(jq -er '.result.digest' <<<"$full_recomputed") || fail "malformed g4 recomputed raw evidence digest"
+g8_recomputed_events=$(jq -er '.result.events' <<<"$g8_recomputed") || fail "malformed g8 recomputed raw evidence digest"
+g8_recomputed_digest=$(jq -er '.result.digest' <<<"$g8_recomputed") || fail "malformed g8 recomputed raw evidence digest"
+[[ "$full_runtime_events" == "$full_recomputed_events" && "$full_runtime_digest" == "$full_recomputed_digest" ]] || fail "runtime/raw evidence digest mismatch: dev-607"
+[[ "$g8_runtime_events" == "$g8_recomputed_events" && "$g8_runtime_digest" == "$g8_recomputed_digest" ]] || fail "runtime/raw evidence digest mismatch: dev-607-g8"
+[[ "$full_recomputed_events" == "$g8_recomputed_events" && "$full_recomputed_digest" == "$g8_recomputed_digest" ]] || fail "independently recomputed g4/g8 raw evidence hashes are not equal"
 
 source_revision=$(jq -er '.git_revision' "$output_root/dev-607/run-metadata.json")
 [[ "$source_revision" =~ ^[0-9a-f]{40}$ ]] || fail "parity simulator source revision is invalid"
@@ -162,12 +183,19 @@ jq -n \
 	--arg prunegate_sha256 "$prunegate_sha256" \
 	--arg prunegate_go_version "$prunegate_go_version" \
 	--arg prunegate_revision "$prunegate_revision" \
+	--arg analyzer_sha256 "$(sha256sum "$analyzer" | awk '{print $1}')" \
+	--arg analyzer_go_version "$analyzer_go_version" \
+	--arg analyzer_revision "$analyzer_revision" \
 	--arg full_g4_checkpoints "$(sha256sum "$output_root/dev-607/checkpoints.jsonl" | awk '{print $1}')" \
 	--arg none_g4_checkpoints "$(sha256sum "$output_root/dev-607-none/checkpoints.jsonl" | awk '{print $1}')" \
 	--arg full_g8_checkpoints "$(sha256sum "$output_root/dev-607-g8/checkpoints.jsonl" | awk '{print $1}')" \
 	--arg greeks_sha256 "$(sha256sum "$output_root/dev-607/greeks.json" | awk '{print $1}')" \
 	--arg latency_sha256 "$(sha256sum "$output_root/dev-607/latency.json" | awk '{print $1}')" \
 	--arg evidence_hash_sha256 "$(sha256sum "$output_root/dev-607/evidence-artifact-hash.json" | awk '{print $1}')" \
+	--arg full_recomputed_events "$full_recomputed_events" \
+	--arg full_recomputed_digest "$full_recomputed_digest" \
+	--arg g8_recomputed_events "$g8_recomputed_events" \
+	--arg g8_recomputed_digest "$g8_recomputed_digest" \
 	--argjson evidence_events "$full_runtime_events" \
 	--arg evidence_digest "$full_runtime_digest" \
 	'{
@@ -175,6 +203,8 @@ jq -n \
 		source_revision: $source_revision, simulator_revision: $source_revision,
 		simulator_binary_sha256: $simulator_binary_sha256,
 		simulator_binary_go_version: $simulator_binary_go_version,
+		analyzer_sha256: $analyzer_sha256, analyzer_go_version: $analyzer_go_version,
+		analyzer_revision: $analyzer_revision,
 		prunegate_sha256: $prunegate_sha256, prunegate_go_version: $prunegate_go_version,
 		prunegate_revision: $prunegate_revision, controls: [
 			{cell: "dev-607", log_mode: "full", gomaxprocs: 4},
@@ -182,7 +212,7 @@ jq -n \
 			{cell: "dev-607-g8", log_mode: "full", gomaxprocs: 8}
 		],
 		exact_equal_domains: ["checkpoints.jsonl", "greeks.json", "latency.json"],
-		full_evidence_equal_domains: ["evidence-artifact-hash.json"],
+		full_evidence_equal_domains: ["evidence-artifact-hash.json", "recomputed_raw_jsonl"],
 		no_log_absence_contract: ["evidence-artifact-hash.json", "venues/*.jsonl"],
 		hashes: {
 			full_g4_checkpoints: $full_g4_checkpoints,
@@ -192,6 +222,10 @@ jq -n \
 			full_evidence_artifact_hash: $evidence_hash_sha256
 		},
 		full_runtime_evidence: {events: $evidence_events, digest: $evidence_digest},
+		recomputed_raw_evidence: {
+			g4: {events: ($full_recomputed_events | tonumber), digest: $full_recomputed_digest},
+			g8: {events: ($g8_recomputed_events | tonumber), digest: $g8_recomputed_digest}
+		},
 		predicates: {
 			ordered_checkpoints_equal: true,
 			deterministic_sidecars_equal: true,
@@ -204,6 +238,9 @@ mv "$tmp" "$attestation"
 require_object "$attestation"
 jq -e '(.simulator_binary_sha256 | test("^[0-9a-f]{64}$")) and
 	(.simulator_binary_go_version | startswith("go1.27")) and
+	(.analyzer_sha256 | test("^[0-9a-f]{64}$")) and
+	(.analyzer_go_version | startswith("go1.27")) and
+	(.analyzer_revision | test("^[0-9a-f]{40}$")) and
 	(.prunegate_sha256 | test("^[0-9a-f]{64}$")) and
 	(.prunegate_go_version | startswith("go1.27")) and
 	(.prunegate_revision | test("^[0-9a-f]{40}$")) and

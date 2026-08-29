@@ -148,6 +148,7 @@ v2_r5_verify_evidence_manifest() {
 	listed=$(jq -r '.raw_files[].path' "$manifest" | sort)
 	actual=$(find "$cell/venues" -type f -name '*.jsonl' -printf '%P\n' | sed 's#^#venues/#' | sort)
 	[[ "$listed" == "$actual" ]] || return 1
+	[[ "$(jq -er '.source_revision' "$manifest")" == "$(jq -er '.git_revision' "$cell/run-metadata.json")" ]] || return 1
 	return 0
 }
 
@@ -163,9 +164,18 @@ v2_r5_write_attestation() {
 	local manifest_sha status_sha
 	manifest_sha=$(sha256sum -- "$cell/evidence-manifest.json" | awk '{print $1}') || return 1
 	status_sha=$(sha256sum -- "$cell/run-status.json" | awk '{print $1}') || return 1
+	local source_revision binary_sha256 config_sha256 prunegate_sha256
+	source_revision=$(jq -er '.git_revision' "$cell/run-metadata.json") || return 1
+	binary_sha256=$(jq -er '.binary_sha256' "$cell/run-metadata.json") || return 1
+	config_sha256=$(jq -er '.config_sha256' "$cell/run-metadata.json") || return 1
+	prunegate_sha256=$(jq -er '.prunegate_sha256' "$cell/run-metadata.json") || return 1
 	jq -n --arg cell "$cell_name" --arg manifest_sha "$manifest_sha" --arg status_sha "$status_sha" \
+		--arg source_revision "$source_revision" --arg binary_sha256 "$binary_sha256" \
+		--arg config_sha256 "$config_sha256" --arg prunegate_sha256 "$prunegate_sha256" \
 		'{schema_version: 1, contract: "v2-integrated-longrun-external-attestation-v1", cell: $cell,
 		 evidence_manifest_sha256: $manifest_sha, run_status_sha256: $status_sha,
+		 source_revision: $source_revision, binary_sha256: $binary_sha256,
+		 config_sha256: $config_sha256, prunegate_sha256: $prunegate_sha256,
 		 attestation_scope: "runner-produced evidence manifest and completion status"}' >"$temporary" || return 1
 	mv -- "$temporary" "$output"
 }
@@ -180,8 +190,17 @@ v2_r5_verify_attestation() {
 	local manifest_sha status_sha
 	manifest_sha=$(sha256sum -- "$cell/evidence-manifest.json" | awk '{print $1}') || return 1
 	status_sha=$(sha256sum -- "$cell/run-status.json" | awk '{print $1}') || return 1
+	local source_revision binary_sha256 config_sha256 prunegate_sha256
+	source_revision=$(jq -er '.git_revision' "$cell/run-metadata.json") || return 1
+	binary_sha256=$(jq -er '.binary_sha256' "$cell/run-metadata.json") || return 1
+	config_sha256=$(jq -er '.config_sha256' "$cell/run-metadata.json") || return 1
+	prunegate_sha256=$(jq -er '.prunegate_sha256' "$cell/run-metadata.json") || return 1
 	jq -e --arg cell "$cell_name" --arg manifest_sha "$manifest_sha" --arg status_sha "$status_sha" \
+		--arg source_revision "$source_revision" --arg binary_sha256 "$binary_sha256" \
+		--arg config_sha256 "$config_sha256" --arg prunegate_sha256 "$prunegate_sha256" \
 		'.schema_version == 1 and .contract == "v2-integrated-longrun-external-attestation-v1" and
-		 .cell == $cell and .evidence_manifest_sha256 == $manifest_sha and .run_status_sha256 == $status_sha' \
+		 .cell == $cell and .evidence_manifest_sha256 == $manifest_sha and .run_status_sha256 == $status_sha and
+		 .source_revision == $source_revision and .binary_sha256 == $binary_sha256 and
+		 .config_sha256 == $config_sha256 and .prunegate_sha256 == $prunegate_sha256' \
 		"$attestation" >/dev/null
 }

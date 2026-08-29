@@ -220,7 +220,7 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 	}
 	settled := make(map[markKey]settledContract)
 	listings := make(map[markKey]instrumentDescriptor)
-	listingTimes := make(map[markKey]int64)
+	listingPoints := make(map[markKey][]evidenceOrder)
 	futureContracts := make(map[markKey]bool)
 	quotes := make(map[markKey]string)
 	basePrecisions := make(map[markKey]int64)
@@ -309,9 +309,9 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 			mu.Lock()
 			descriptor := instrumentDescriptor{quote: payload.QuoteAsset, basePrecision: payload.BasePrecision, expiry: payload.ExpiryNano}
 			futureContracts[contractKey] = true
-			if previous, exists := listingTimes[contractKey]; !exists || event.SimTS < previous {
-				listingTimes[contractKey] = event.SimTS
-			}
+			listingPoints[contractKey] = append(listingPoints[contractKey], evidenceOrder{
+				timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
+			})
 			if previous, exists := listings[contractKey]; exists && previous != descriptor {
 				descriptorConflicts++
 			}
@@ -394,8 +394,10 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 			}
 			contractKey := markKey{event.VenueID, payload.Symbol}
 			if opts.RequireExactReplay {
-				listingAt, listed := listingTimes[contractKey]
-				if !listed || event.SimTS < listingAt {
+				_, listed := latestCausalPrerequisite(listingPoints[contractKey], evidenceOrder{
+					timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
+				})
+				if !listed {
 					descriptorConflicts++
 					settlementTimingFailures++
 				}
@@ -474,8 +476,10 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 				return
 			}
 			if opts.RequireExactReplay {
-				listingAt, listed := listingTimes[contractKey]
-				if !listed || event.SimTS < listingAt {
+				_, listed := latestCausalPrerequisite(listingPoints[contractKey], evidenceOrder{
+					timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
+				})
+				if !listed {
 					mu.Lock()
 					settlementTimingFailures++
 					settlementEventMismatches++
@@ -578,8 +582,10 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 			// position that faced settlement.
 			expiry, known := expiries[contractKey]
 			if opts.RequireExactReplay {
-				listingAt, listed := listingTimes[contractKey]
-				if !listed || at < listingAt {
+				_, listed := latestCausalPrerequisite(listingPoints[contractKey], evidenceOrder{
+					timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
+				})
+				if !listed {
 					evidenceFailures++
 					settlementEventMismatches++
 					mu.Unlock()
@@ -667,8 +673,10 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 			mu.Lock()
 			key := markKey{event.VenueID, record.Symbol}
 			if opts.RequireExactReplay {
-				listingAt, listed := listingTimes[key]
-				if !listed || event.SimTS < listingAt {
+				_, listed := latestCausalPrerequisite(listingPoints[key], evidenceOrder{
+					timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
+				})
+				if !listed {
 					settlementTimingFailures++
 					settlementEventMismatches++
 				}
@@ -744,8 +752,10 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 			mu.Lock()
 			key := markKey{event.VenueID, symbol}
 			if opts.RequireExactReplay {
-				listingAt, listed := listingTimes[key]
-				if !listed || event.SimTS < listingAt {
+				_, listed := latestCausalPrerequisite(listingPoints[key], evidenceOrder{
+					timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,
+				})
+				if !listed {
 					settlementTimingFailures++
 					settlementEventMismatches++
 				}

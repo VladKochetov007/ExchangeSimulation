@@ -29,32 +29,36 @@ func perpSideAt(history map[positionKey][]posPoint, venue string, client uint64,
 // same-timestamp points from a physically separate file without a global order,
 // are deliberately excluded.
 func sizeAt(points []posPoint, at int64, file string, ordinal int64) (int64, bool) {
-	firstAt := sort.Search(len(points), func(i int) bool { return points[i].at >= at })
 	var size int64
 	known := false
-	if firstAt > 0 {
-		size = points[firstAt-1].size
-		known = true
-	}
-	lastAt := sort.Search(len(points), func(i int) bool { return points[i].at > at })
-	latestOrdinal := int64(-1)
-	for i := firstAt; i < lastAt; i++ {
-		point := points[i]
-		if point.file != file || point.ordinal >= ordinal || point.ordinal <= latestOrdinal {
+	var selected evidenceOrder
+	use := evidenceOrder{timestamp: at, file: file, ordinal: ordinal}
+	for _, point := range points {
+		pointOrder := evidenceOrder{timestamp: point.at, file: point.file, ordinal: point.ordinal}
+		if point.at > at || !evidenceAfter(use, pointOrder) {
 			continue
 		}
-		size = point.size
-		known = true
-		latestOrdinal = point.ordinal
+		if !known || point.at > selected.timestamp || (point.at == selected.timestamp && evidenceBefore(selected, pointOrder)) {
+			size = point.size
+			selected = pointOrder
+			known = true
+		}
 	}
 	return size, known
 }
 
 // ratePayload is a published funding rate.
 type ratePayload struct {
-	Timestamp int64  `json:"timestamp"`
-	Symbol    string `json:"symbol"`
-	Rate      int64  `json:"rate"`
+	Timestamp   int64  `json:"timestamp"`
+	Symbol      string `json:"symbol"`
+	Rate        int64  `json:"rate"`
+	NextFunding int64  `json:"next_funding"`
+	Interval    int64  `json:"interval"`
+}
+
+type fundingRatePoint struct {
+	ratePayload
+	order evidenceOrder
 }
 
 // DerivativeAuditOptions configures the funding and exercise audits.
@@ -62,6 +66,9 @@ type DerivativeAuditOptions struct {
 	Files         []string
 	FilesSelected bool
 	BasePrecision int64
+	// RequireExactReplay enables the r5 fail-closed funding evidence contract.
+	// Legacy callers may retain timestamp-only funding semantics explicitly.
+	RequireExactReplay bool
 }
 
 // FundingInstantCheck is one venue's funding settlement, recomputed.
@@ -78,8 +85,13 @@ type FundingInstantCheck struct {
 	// sides of one contract, so it must be zero up to the truncation of each
 	// account's integer share: a settlement across n accounts may lose up to n
 	// units and no more.
-	Residual int64 `json:"residual"`
-	Rate     int64 `json:"rate"`
+	Residual         int64 `json:"residual"`
+	Rate             int64 `json:"rate"`
+	RateTimestamp    int64 `json:"rate_timestamp"`
+	NextFunding      int64 `json:"next_funding"`
+	RateInterval     int64 `json:"rate_interval"`
+	RateAvailable    bool  `json:"rate_available"`
+	TimingConsistent bool  `json:"timing_consistent"`
 	// Directed counts the accounts whose perpetual side at this instant is
 	// known from the position stream, and Misdirected those among them charged
 	// the wrong way for the published rate: with a positive rate a long must
@@ -147,10 +159,14 @@ type DerivativeSemantics struct {
 	// could not be established from the position stream. A large undirected
 	// count means the direction check is weak on that run and must be said so
 	// rather than read as a pass.
-	FundingMisdirected       int `json:"funding_misdirected"`
-	FundingUndirected        int `json:"funding_undirected"`
-	FundingDuplicatePayments int `json:"funding_duplicate_payments"`
-	ExerciseBroken           int `json:"exercise_broken"`
+	FundingMisdirected        int `json:"funding_misdirected"`
+	FundingUndirected         int `json:"funding_undirected"`
+	FundingDuplicatePayments  int `json:"funding_duplicate_payments"`
+	FundingMissingRates       int `json:"funding_missing_rates"`
+	FundingTimingFailures     int `json:"funding_timing_failures"`
+	FundingEvidenceFailures   int `json:"funding_evidence_failures"`
+	FundingArithmeticFailures int `json:"funding_arithmetic_failures"`
+	ExerciseBroken            int `json:"exercise_broken"`
 	// ExerciseTimingFailures counts option terminal announcements or payout
 	// postings that were not emitted at the contract's declared expiry. A
 	// payout amount can be arithmetically correct while still being a lifecycle
@@ -164,6 +180,7 @@ type DerivativeSemantics struct {
 	// not represent exactly. They remain explicitly unresolved rather than
 	// being compared after an overflow was rewritten as zero.
 	ExerciseArithmeticFailures int `json:"exercise_arithmetic_failures"`
+	ExerciseEvidenceFailures   int `json:"exercise_evidence_failures"`
 }
 
 // MeasureDerivativeSemantics audits perpetual funding and option exercise.
@@ -203,19 +220,22 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 
 	var mu sync.Mutex
 	options := make(map[markKey]instrumentPayload)
-	rates := make(map[markKey][]ratePayload)
+	rates := make(map[markKey][]fundingRatePoint)
 	type fundingBucket struct {
 		payers, receivers, movements int
 		paid, received               int64
 	}
 	funding := make(map[instantKey]*fundingBucket)
+	fundingEvidenceFailures := 0
+	fundingArithmeticFailures := 0
 	// Per-account funding movements, so the direction of the transfer can be
 	// checked against each account's own side rather than against the sign of
 	// the total, which is the same under any sign convention.
 	fundingDeltas := make(map[instantKey]map[uint64]int64)
 	type fundingCursor struct {
-		file    string
-		ordinal int64
+		timestamp int64
+		file      string
+		ordinal   int64
 	}
 	// The first balance record at a funding instant marks the event boundary.
 	// All affected accounts are settled by that operation before later records
@@ -238,11 +258,26 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 	optionPositions := make(map[positionKey]*positionState)
 	expiries := make(map[markKey]int64)
 	exerciseTimingFailures := 0
+	exerciseEvidenceFailures := 0
 
 	// First pass: contract terms and expiry instants.
 	if err := r.Scan(ScanOptions{Events: []string{"instrument_settled"}, Files: files, FilesSelected: filesSelected}, func(event Event) {
 		var payload instrumentPayload
-		if event.Decode(&payload) != nil || payload.InstrumentType != "OPTION" {
+		if err := event.Decode(&payload); err != nil {
+			if opts.RequireExactReplay {
+				mu.Lock()
+				exerciseEvidenceFailures++
+				mu.Unlock()
+			}
+			return
+		}
+		if opts.RequireExactReplay && (payload.Symbol == "" || (event.Symbol != "" && payload.Symbol != event.Symbol) || payload.InstrumentType == "") {
+			mu.Lock()
+			exerciseEvidenceFailures++
+			mu.Unlock()
+			return
+		}
+		if payload.InstrumentType != "OPTION" {
 			return
 		}
 		mu.Lock()
@@ -274,7 +309,20 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		switch event.Name {
 		case "funding_rate_update":
 			var payload ratePayload
-			if event.Decode(&payload) != nil {
+			if err := event.Decode(&payload); err != nil {
+				if opts.RequireExactReplay {
+					mu.Lock()
+					fundingEvidenceFailures++
+					mu.Unlock()
+				}
+				return
+			}
+			if opts.RequireExactReplay && (payload.Timestamp <= 0 || payload.Timestamp != event.SimTS ||
+				payload.Symbol == "" || event.Symbol == "" || payload.Symbol != event.Symbol ||
+				payload.NextFunding <= event.SimTS || payload.Interval <= 0) {
+				mu.Lock()
+				fundingEvidenceFailures++
+				mu.Unlock()
 				return
 			}
 			if payload.Symbol == "" {
@@ -284,11 +332,30 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				return
 			}
 			mu.Lock()
-			rates[markKey{event.VenueID, payload.Symbol}] = append(rates[markKey{event.VenueID, payload.Symbol}], payload)
+			rateKey := markKey{event.VenueID, payload.Symbol}
+			rates[rateKey] = append(rates[rateKey], fundingRatePoint{
+				ratePayload: payload,
+				order:       evidenceOrder{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal},
+			})
 			mu.Unlock()
 		case "position_update":
 			var payload positionPayload
-			if event.Decode(&payload) != nil || payload.Symbol == "" {
+			if err := event.Decode(&payload); err != nil {
+				if opts.RequireExactReplay {
+					mu.Lock()
+					exerciseEvidenceFailures++
+					mu.Unlock()
+				}
+				return
+			}
+			if opts.RequireExactReplay && (payload.Timestamp == 0 || payload.Timestamp != event.SimTS ||
+				payload.ClientID == 0 || event.ClientID != payload.ClientID || event.Symbol == "" || payload.Symbol != event.Symbol) {
+				mu.Lock()
+				exerciseEvidenceFailures++
+				mu.Unlock()
+				return
+			}
+			if payload.Symbol == "" {
 				return
 			}
 			at := payload.Timestamp
@@ -307,7 +374,21 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			mu.Unlock()
 		case "OrderFill":
 			var fill optionFill
-			if event.Decode(&fill) != nil || fill.Qty <= 0 {
+			if err := event.Decode(&fill); err != nil {
+				if opts.RequireExactReplay {
+					mu.Lock()
+					exerciseEvidenceFailures++
+					mu.Unlock()
+				}
+				return
+			}
+			if fill.Qty <= 0 || (opts.RequireExactReplay && (fill.Symbol == "" || (event.Symbol != "" && event.Symbol != fill.Symbol) ||
+				(event.ClientID == 0) || (fill.Side != "BUY" && fill.Side != "SELL"))) {
+				if opts.RequireExactReplay {
+					mu.Lock()
+					exerciseEvidenceFailures++
+					mu.Unlock()
+				}
 				return
 			}
 			symbol := event.Symbol
@@ -332,17 +413,39 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				state = &positionState{}
 				optionPositions[key] = state
 			}
-			state.size += signed
+			nextSize, ok := exactAdd(state.size, signed)
+			if !ok {
+				if opts.RequireExactReplay {
+					exerciseEvidenceFailures++
+				}
+				return
+			}
+			state.size = nextSize
 			state.at = event.SimTS
 			mu.Unlock()
 		case "balance_change":
 			var record balanceChangeRecord
-			if event.Decode(&record) != nil {
+			if err := event.Decode(&record); err != nil {
+				if opts.RequireExactReplay {
+					mu.Lock()
+					fundingEvidenceFailures++
+					exerciseEvidenceFailures++
+					mu.Unlock()
+				}
 				return
 			}
 			total := int64(0)
 			for _, change := range record.Changes {
-				total += change.Delta
+				next, ok := exactAdd(total, change.Delta)
+				if !ok {
+					if opts.RequireExactReplay {
+						mu.Lock()
+						fundingArithmeticFailures++
+						mu.Unlock()
+					}
+					return
+				}
+				total = next
 			}
 			instant := record.Timestamp
 			if instant == 0 {
@@ -350,15 +453,26 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			}
 			mu.Lock()
 			defer mu.Unlock()
+			if opts.RequireExactReplay && (record.Reason == "funding_settlement" || record.Reason == "expiry_settlement") && record.Symbol == "" {
+				fundingEvidenceFailures++
+				exerciseEvidenceFailures++
+				return
+			}
 			switch {
 			case record.Reason == "funding_settlement":
-				if record.Symbol == "" {
+				if record.Symbol == "" || (opts.RequireExactReplay &&
+					(record.Timestamp == 0 || record.Timestamp != event.SimTS ||
+						event.Symbol == "" || record.Symbol != event.Symbol ||
+						record.ClientID == 0 || record.ClientID != event.ClientID)) {
+					if opts.RequireExactReplay {
+						fundingEvidenceFailures++
+					}
 					return
 				}
 				key := instantKey{event.VenueID, instant, record.Symbol}
 				cursor, seen := fundingCursors[key]
 				if !seen || (cursor.file == event.File && event.Ordinal < cursor.ordinal) {
-					fundingCursors[key] = fundingCursor{file: event.File, ordinal: event.Ordinal}
+					fundingCursors[key] = fundingCursor{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal}
 				}
 				bucket := funding[key]
 				if bucket == nil {
@@ -381,29 +495,68 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 					perAccount = make(map[uint64]int64)
 					fundingDeltas[key] = perAccount
 				}
-				perAccount[holder] += total
+				previous := perAccount[holder]
+				next, ok := exactAdd(previous, total)
+				if !ok {
+					if opts.RequireExactReplay {
+						fundingArithmeticFailures++
+					}
+					return
+				}
+				perAccount[holder] = next
 				if total > 0 {
 					bucket.receivers++
-					bucket.received += total
+					next, ok := exactAdd(bucket.received, total)
+					if !ok {
+						if opts.RequireExactReplay {
+							fundingArithmeticFailures++
+						}
+						return
+					}
+					bucket.received = next
 					return
 				}
 				bucket.payers++
-				bucket.paid += total
+				paidTotal, ok := exactAdd(bucket.paid, total)
+				if !ok {
+					if opts.RequireExactReplay {
+						fundingArithmeticFailures++
+					}
+					return
+				}
+				bucket.paid = paidTotal
 			case record.Reason == "expiry_settlement" && isOptionSymbol(record.Symbol):
 				key := markKey{event.VenueID, record.Symbol}
+				if opts.RequireExactReplay && (record.Timestamp == 0 || record.Timestamp != event.SimTS ||
+					event.Symbol == "" || event.Symbol != record.Symbol || record.ClientID == 0 || record.ClientID != event.ClientID) {
+					exerciseEvidenceFailures++
+					return
+				}
 				expiry, known := expiries[key]
 				if !known || expiry <= 0 || instant != expiry || event.SimTS != expiry || (record.Timestamp != 0 && record.Timestamp != expiry) {
 					exerciseTimingFailures++
 				}
 				entry := optionPaid[key]
-				entry.amount += total
+				nextAmount, ok := exactAdd(entry.amount, total)
+				if !ok {
+					exerciseEvidenceFailures++
+					return
+				}
+				entry.amount = nextAmount
 				entry.accounts++
 				optionPaid[key] = entry
 				holder := record.ClientID
 				if holder == 0 {
 					holder = event.ClientID
 				}
-				optionPaidPerHolder[positionKey{venue: event.VenueID, clientID: holder, symbol: record.Symbol}] += total
+				holderKey := positionKey{venue: event.VenueID, clientID: holder, symbol: record.Symbol}
+				previous := optionPaidPerHolder[holderKey]
+				nextHolderAmount, ok := exactAdd(previous, total)
+				if !ok {
+					exerciseEvidenceFailures++
+					return
+				}
+				optionPaidPerHolder[holderKey] = nextHolderAmount
 			}
 		}
 	}); err != nil {
@@ -430,22 +583,61 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 	}
 	result := &DerivativeSemantics{}
 	result.ExerciseTimingFailures = exerciseTimingFailures
+	result.FundingEvidenceFailures = fundingEvidenceFailures
+	result.FundingArithmeticFailures = fundingArithmeticFailures
+	result.ExerciseEvidenceFailures = exerciseEvidenceFailures
+
+	selectFundingRate := func(points []fundingRatePoint, instant int64, cursor fundingCursor, cursorKnown bool) (fundingRatePoint, bool) {
+		var selected fundingRatePoint
+		found := false
+		for _, point := range points {
+			if opts.RequireExactReplay {
+				if !cursorKnown || point.NextFunding != instant || point.Timestamp > instant ||
+					!evidenceAfter(evidenceOrder{timestamp: cursor.timestamp, file: cursor.file, ordinal: cursor.ordinal}, point.order) {
+					continue
+				}
+			} else if point.Timestamp > instant {
+				continue
+			}
+			if !found || point.Timestamp > selected.Timestamp ||
+				(point.Timestamp == selected.Timestamp && evidenceBefore(selected.order, point.order)) {
+				selected = point
+				found = true
+			}
+		}
+		return selected, found
+	}
 
 	for key, bucket := range funding {
+		cursor, cursorKnown := fundingCursors[key]
 		check := FundingInstantCheck{
 			VenueID: key.venue, Symbol: key.asset, Timestamp: key.timestamp,
 			Payers: bucket.payers, Receivers: bucket.receivers,
 			Paid: bucket.paid, Received: bucket.received,
-			Residual: bucket.paid + bucket.received,
 		}
-		check.Rate = rateAt(rates[markKey{key.venue, key.asset}], key.timestamp)
+		if residual, ok := exactAdd(bucket.paid, bucket.received); ok {
+			check.Residual = residual
+		} else {
+			result.FundingArithmeticFailures++
+		}
+		selectedRate, rateAvailable := selectFundingRate(rates[markKey{key.venue, key.asset}], key.timestamp, cursor, cursorKnown)
+		check.RateAvailable = rateAvailable
+		check.TimingConsistent = rateAvailable
+		if rateAvailable {
+			check.Rate = selectedRate.Rate
+			check.RateTimestamp = selectedRate.Timestamp
+			check.NextFunding = selectedRate.NextFunding
+			check.RateInterval = selectedRate.Interval
+		} else if opts.RequireExactReplay {
+			result.FundingMissingRates++
+			result.FundingTimingFailures++
+		}
 		check.DuplicatePayments = bucket.movements - len(fundingDeltas[key])
 		longsDebited, longsCredited := 0, 0
 		for holder, delta := range fundingDeltas[key] {
 			if delta == 0 {
 				continue
 			}
-			cursor, cursorKnown := fundingCursors[key]
 			if !cursorKnown {
 				check.Undirected++
 				continue
@@ -483,7 +675,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		// reconstructed sides and is the check that a reversed sign fails.
 		structural := (check.Rate != 0 && bucket.payers > 0 && bucket.receivers > 0) ||
 			(check.Rate == 0 && bucket.payers == 0 && bucket.receivers == 0)
-		check.SignConsistent = structural && check.Misdirected == 0
+		check.SignConsistent = structural && check.Misdirected == 0 && check.RateAvailable
 		result.FundingMisdirected += check.Misdirected
 		result.FundingUndirected += check.Undirected
 		result.FundingDuplicatePayments += check.DuplicatePayments
@@ -602,18 +794,6 @@ func intrinsicValue(settlement, strike int64, isCall bool) int64 {
 		return strike - settlement
 	}
 	return 0
-}
-
-// rateAt is the last published funding rate at or before an instant.
-func rateAt(published []ratePayload, at int64) int64 {
-	best := int64(0)
-	bestAt := int64(-1)
-	for _, point := range published {
-		if point.Timestamp <= at && point.Timestamp > bestAt {
-			best, bestAt = point.Rate, point.Timestamp
-		}
-	}
-	return best
 }
 
 // absInt64 is the magnitude of a signed amount.

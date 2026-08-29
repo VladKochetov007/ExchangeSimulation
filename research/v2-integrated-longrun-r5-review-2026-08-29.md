@@ -36,6 +36,19 @@ tests cover each newly executable mutation.
 
 ## Remaining gate sequence
 
+The first independent Sol-xhigh review of the pre-hardening commit was
+rejected. Its six actionable blockers were: G8 parity was bound only to
+runtime sidecars; listing causality allowed same-time/cross-file and backdated
+uses; funding rates were selected by timestamp without schedule/physical-order
+binding; malformed derivative evidence was dropped; provenance did not
+cross-bind all metadata; and the delivery-fee policy was not pinned for
+holdouts. The amendment now adds raw digest recomputation to parity, a shared
+sequence-aware causal rule, exact funding schedule binding, explicit malformed
+and arithmetic counters, metadata cross-binding, and an explicit zero-fee
+field on every registered configuration. The external attestation remains an
+unsigned cross-bound integrity record, so no cryptographic sealing claim is
+made.
+
 Run focused tests, shell contract tests, and `make test`; commit this
 hardening step; obtain a new independent Sol-xhigh review; and proceed only
 on ACCEPT or ACCEPT WITH NARROWER CLAIM. Then build clean Go 1.27 binaries in

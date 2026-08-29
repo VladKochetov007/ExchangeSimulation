@@ -66,11 +66,8 @@ for seed in $expected_full; do
 		<(jq -cS 'del(.seed, .experiment_id, .hypothesis_id, .description, .dated_future_delivery_fee_policy)' "$file"); then
 		fail "economic/config drift in $file"
 	fi
-done
-
-for seed in 607 613 617; do
-	jq -e '.dated_future_delivery_fee_policy == "zero"' "$config_dir/dev-$seed.json" >/dev/null ||
-		fail "development config lacks the pinned delivery fee policy: dev-$seed"
+	jq -e '.dated_future_delivery_fee_policy == "zero"' "$file" >/dev/null ||
+		fail "config lacks the pre-registered dated-future delivery fee policy: $file"
 done
 
 none="$config_dir/dev-607-none.json"

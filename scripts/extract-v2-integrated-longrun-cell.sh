@@ -226,6 +226,9 @@ for metric in "${metrics[@]}"; do
 			write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -json "$cell" -require-exact-replay ||
 				fail "analyzer metric failed: $metric"
 		fi
+	elif [[ "$metric" == derivatives ]]; then
+		write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -json "$cell" -require-exact-replay ||
+			fail "analyzer metric failed: $metric"
 	else
 		write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -json "$cell" ||
 			fail "analyzer metric failed: $metric"
@@ -357,8 +360,8 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 			fill_positions: (zero($fillpositions; "missing_position_update") and zero($fillpositions; "unexpected_position_update") and zero($fillpositions; "position_chain_failures")),
 			order_lifecycle: field_zeroes($orderlifecycle; ["unknown_fills", "unknown_cancellations", "duplicate_acceptances", "duplicate_terminals", "fills_after_terminal", "fill_quantity_mismatches", "cancel_quantity_mismatches", "client_mismatches", "unlinked_fills", "missing_immediate_terminal"]),
 			settlement: (count($settlements; "checks") > 0 and count($settlements; "exact_replay_checks") > 0 and field_zeroes($settlements; ["mismatched", "unpaid", "total_trades_after_expiry", "total_position_updates_after_expiry", "arithmetic_failures", "explicit_unavailable_announcements", "exact_replay_failures", "settlement_event_mismatches", "evidence_failures", "descriptor_conflicts", "settlement_timing_failures", "delivery_fee_mismatches"])),
-			expiry: (count($expiryfills; "expired_contracts") > 0 and count($expiryfills; "settled_contracts") > 0 and zero($expiryfills; "expired_unsettled_contracts") and field_zeroes($expiryfills; ["fills_before_listing", "fills_after_expiry", "malformed_fill_records", "fill_identity_failures", "missing_expiry_metadata", "settlement_without_listing", "metadata_mismatches", "snapshot_records_before_listing", "snapshot_records_after_expiry", "nonempty_snapshots_after_expiry"])),
-			derivatives: (count($derivatives; "funding") > 0 and field_zeroes($derivatives; ["funding_broken", "funding_sign_wrong", "funding_misdirected", "funding_undirected", "funding_duplicate_payments", "exercise_broken", "exercise_timing_failures", "holders_mispaid", "worthless_paid", "exercise_arithmetic_failures"])),
+			expiry: (count($expiryfills; "expired_contracts") > 0 and count($expiryfills; "settled_contracts") > 0 and zero($expiryfills; "expired_unsettled_contracts") and field_zeroes($expiryfills; ["fills_before_listing", "fills_after_expiry", "malformed_fill_records", "fill_identity_failures", "malformed_lifecycle_records", "malformed_snapshot_records", "settlement_before_listing", "missing_expiry_metadata", "settlement_without_listing", "metadata_mismatches", "snapshot_records_before_listing", "snapshot_records_after_expiry", "nonempty_snapshots_after_expiry"])),
+			derivatives: (count($derivatives; "funding") > 0 and field_zeroes($derivatives; ["funding_broken", "funding_sign_wrong", "funding_misdirected", "funding_undirected", "funding_duplicate_payments", "funding_missing_rates", "funding_timing_failures", "funding_evidence_failures", "funding_arithmetic_failures", "exercise_broken", "exercise_timing_failures", "exercise_evidence_failures", "holders_mispaid", "worthless_paid", "exercise_arithmetic_failures"])),
 			liquidations: (zero($liquidations; "invalid_liquidations") and zero($liquidations; "position_path_missing") and zero($liquidations; "position_path_failures") and zero($liquidations; "position_conservation_missing") and zero($liquidations; "position_conservation_failures") and zero($liquidations; "deficit_mismatch_instants")),
 			margin: field_zeroes($marginchecks; ["missing_checks", "unexpected_checks", "duplicate_checks", "field_mismatches", "mark_mismatches", "balance_mismatches", "contribution_mismatches", "equity_mismatches", "notional_mismatches", "maintenance_mismatches", "position_chain_failures", "balance_chain_failures", "arithmetic_failures", "unsupported_mark_domain", "ambiguous_mark_timestamp_collisions"]),
 			option_liability: (r($optionliability).valid == true and count($optionliability; "decisions") > 0 and field_zeroes($optionliability; ["decode_errors", "future_observation_use", "invalid_decisions", "missing_outcomes", "duplicate_outcomes", "orphan_outcomes", "outcome_mismatches"])),
@@ -480,8 +483,15 @@ jq -e --arg revision "$head_revision" --arg analyzer_revision "$analyzer_revisio
 	 .require_exact_replay == true and
 	 .analysis_contract == $contract and .required_artifacts == $required_artifacts and
 	 (.artifact_sha256 | keys) == ($required_artifacts | sort) and
-	 all(.artifact_sha256 | to_entries[]; (.value | test("^[0-9a-f]{64}$"))) and
-	 (.raw_log_policy | type) == "string"' "$analysis_dir/analysis-metadata.json" >/dev/null ||
+	all(.artifact_sha256 | to_entries[]; (.value | test("^[0-9a-f]{64}$"))) and
+	(.raw_log_policy | type) == "string"' "$analysis_dir/analysis-metadata.json" >/dev/null ||
 	fail "analysis metadata self-check failed"
+
+# The analyzer has no prune authority, but extraction is still a long-running
+# read of the raw stream. Revalidate the runner seal and sibling attestation
+# after all derived artifacts are produced so a concurrent raw mutation cannot
+# be mistaken for the measured result.
+v2_r5_verify_evidence_manifest "$cell" || fail "raw evidence changed during extraction: $cell"
+v2_r5_verify_attestation "$cell" || fail "external attestation changed during extraction: $cell"
 
 printf 'extracted integrated long-run evidence: %s\n' "$cell"
