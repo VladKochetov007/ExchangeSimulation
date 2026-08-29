@@ -240,6 +240,33 @@ sweep. Both accessors now also compare cached length against map length, which
 is O(1) and converts a future missed bump into a rebuild rather than a stale
 entry handed to code that dereferences it.
 
+### S7 — Cache each symbol's market-data fan-out order (`26998ae`)
+
+`Publish` rebuilt and re-sorted the subscriber client-ID list on every message —
+250 ms of its 570 ms — over a subscription set that changes only on subscribe or
+disconnect, and it re-resolved `p.gateways[symbol]` once per subscriber inside
+the fan-out loop.
+
+Fan-out order is an economic input: the subscriber handed a message first reacts
+first, which is what a latency experiment measures. The cache preserves
+ascending client-ID order exactly. The package previously had **no tests**; four
+were added covering fan-out order, tracking of all three mutation paths,
+per-symbol isolation, and recovery from a missed invalidation.
+
+### S8 — Read the simulated clock without taking a lock (`5fb87e2`)
+
+Reading the clock is the most frequent operation in the simulator, and each read
+took an RWMutex read lock — two atomic read-modify-writes. Those atomics were
+3.37% of CPU.
+
+`current` is now an `atomic.Int64`. Readers load it; writers still hold `mu`,
+because advancing the clock is a compare-and-set against `goal` that must stay
+atomic between writers. A reader observes exactly the set of values it observed
+under the read lock. `go test -race` passes.
+
+S7 and S8 together: **-3.7% wall, -3.6% CPU**, ranges non-overlapping
+(11.59-11.87 against 11.28-11.38).
+
 ### S6 — Resolve each client's position map once per lookup (`5d1f0d3`)
 
 Three `PositionManager` methods indexed `pm.positions[clientID]` twice. Strictly
@@ -249,20 +276,51 @@ cost here, and replacing it with an integer instrument handle is a wider change.
 
 ### Combined result
 
-Pristine base against S1-S6, `log_mode=full`, six alternating pinned
-repetitions:
+Pristine base against S1-S8, `log_mode=full`, `GOMAXPROCS=1` pinned to one core,
+six alternating repetitions:
 
 | Measure | base | optimized | change |
 | --- | ---: | ---: | ---: |
-| Wall | 17.475 s | **11.605 s** | **-33.6%** |
-| CPU | 17.345 s | 11.505 s | -33.7% |
-| Peak RSS | 755,852 KiB | 745,774 KiB | -1.3% |
+| Wall | 17.785 s | **11.32 s** | **-36.4%** |
+| CPU | 17.665 s | 11.235 s | -36.4% |
+| Peak RSS | 762,318 KiB | 741,330 KiB | -2.8% |
+| Allocated bytes | 4,395 MB | 3,221 MB | -26.7% |
 
-Ranges 17.39-17.53 against 11.53-11.66.
+Ranges 17.72-17.90 against 11.24-11.37.
 
-> **Target metric: 51.5 to 77.6 simulated seconds per wall-clock second, a
-> 1.51x speedup, with all four determinism oracles identical on three seeds and
-> both log modes.**
+> **Target metric at `GOMAXPROCS=1`: 50.6 to 79.5 simulated seconds per
+> wall-clock second, a 1.57x speedup, with all four determinism oracles
+> identical on three seeds and both log modes.**
+
+### The simulator is GOMAXPROCS-invariant, and that is worth 14% more
+
+The benchmark protocol pins `GOMAXPROCS=1` because it makes measurements
+contention-immune. It is not the fastest setting.
+
+| `GOMAXPROCS` | wall | CPU | peak RSS | execution hash |
+| ---: | ---: | ---: | ---: | --- |
+| 1 | 11.83 s | 11.77 s | 747,996 KiB | `51541f91db7c5eae…` |
+| 2 | 10.43 s | 11.36 s | 631,636 KiB | `51541f91db7c5eae…` |
+| **4** | **10.14 s** | 11.26 s | 630,540 KiB | `51541f91db7c5eae…` |
+| 8 | 10.12 s | 11.42 s | 624,156 KiB | `51541f91db7c5eae…` |
+
+`GOMAXPROCS=4` is **-14.3% wall and -15.7% peak RSS** against 1, and there is no
+further gain at 8. CPU time falls slightly too, because GC assist work overlaps
+instead of serializing onto the one runnable core — which is also why the heap
+stays smaller.
+
+Determinism was not assumed. Twelve runs — four each at `GOMAXPROCS` 2, 4 and 8
+— produced evidence trees **byte-identical** to the `GOMAXPROCS=1` reference,
+all 27 files and 442,225,951 bytes, `diff -rq` clean. The deterministic-phase
+barrier design is what makes this hold: ordering comes from the phase
+scheduler, not from goroutine timing.
+
+This is a run-configuration finding, not a code change, and adopting it is the
+scientific owner's call because the r5 protocol may register `GOMAXPROCS`. If it
+is adopted:
+
+> **Target metric at `GOMAXPROCS=4`: 50.6 to 88.8 simulated seconds per
+> wall-clock second, a 1.75x total speedup.**
 
 ## 6. Rejected optimizations
 
@@ -302,21 +360,47 @@ is simply too small to justify a toolchain dependency and a new failure surface.
 
 `Matcher.Match` is absent from the top 400 CPU symbols.
 
-### R6 — Pool the detached preview book
+### R6 — Reuse the detached preview book
 
-13.97% of allocation and 4.5% of CPU, so a real target, but the matcher mutates
-queue links and iceberg state on the clone. A pooling change that introduced
-aliasing would be a correctness failure, not an optimization. Not attempted.
+Now the largest single allocation site at 544.56 MB of 3,220.84 MB (16.9%).
+`perf/thread-sim` declined it because the matcher mutates queue links and
+iceberg state on the clone and the ownership question was unresolved.
+
+**The ownership proof is now available and it is favourable.** The two clone
+books are locals of `previewMatchExcluding` and are never returned. The only
+value that escapes is `*matching.MatchResult`, which is
+`{Executions []*etypes.Execution, FullyFilled bool}`, and `etypes.Execution`
+holds only IDs, prices and quantities — no pointer into the clone. The clone is
+therefore provably dead when the function returns, and its executions are
+already pooled and explicitly released on every rejection path.
+
+It is still declined here, on return rather than on safety: reusing it needs a
+`Reset` on `book.Book` that clears both indexes and returns level objects to the
+freelist, touching internals the live matcher shares. Against S4's calibration —
+-16.5% of allocation bought -1.45% of wall — 16.9% of allocation is worth
+roughly 1.5% of wall. That is the worst risk-per-gain remaining, so the proof is
+recorded for whoever revisits it rather than acted on.
 
 ## 7. Ranked next candidates
 
 | Idea | Hotspot | Proposed | Expected | Risk | Status |
 | --- | --- | --- | ---: | --- | --- |
-| Integer instrument/venue/client handles | map ops 11.0% | resolve once at setup, index dense slices | up to ~8% | medium, wide diff | not started |
+| Adopt `GOMAXPROCS=4` | run configuration | none — no code change | **-14.3% wall, -15.7% RSS** | none technically; byte-identical over 12 runs | **measured; awaiting a protocol decision** |
+| Integer instrument/venue/client handles | map ops ~14% | resolve once at setup, index dense slices | up to ~8% | medium, wide diff | not started |
 | Incremental margin state | margin 6.3% + liquidation 5.9% | cache, invalidate on position change | up to ~8% | high: risk semantics | not started |
-| Reduce remaining `DelayedGateway` allocation | ~0.9 GB after S4 | checked-out scratch buffers | ~1% | medium | R2 attempt failed |
-| Preview-book reuse | 14% of allocation | proven-ownership reuse | up to ~4% | high | R6 |
+| Preview-book reuse | 16.9% of allocation | reuse with a `Book.Reset` | ~1.5% | high; ownership now proved, see R6 | declined on return, not safety |
+| Reduce remaining `DelayedGateway` allocation | 338 MB after S4 | checked-out scratch buffers | ~0.4% | medium | R2 attempt failed |
 | Go PGO | whole binary | `default.pgo` from a representative run | unmeasured | low semantic | blocked: determinism and binary size proved on `perf/thread-pgo`, timing batch discarded as contaminated and never re-run |
+
+### What is no longer worth attacking
+
+Two blocks now dominate and both are the hash contract rather than
+implementation: `encoding/json.structEncoder` at 11.6% and SHA-256 at 7.5%,
+together about 19% of CPU. After S3 the payload is encoded exactly once, and
+that one encoding is the input to the ordered execution hash. Removing it means
+changing the hash domain, which is the reproducibility attestation the r5 gate
+seals. Everything else in the profile is now diffuse: no single remaining
+function outside those two exceeds 5%.
 
 ## 8. Open escalation — not a performance finding
 
