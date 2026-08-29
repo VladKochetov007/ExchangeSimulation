@@ -53,6 +53,16 @@ for input in manifest.json evidence-artifact-hash.json evidence-manifest.json ru
 	require_json_object "$cell/$input"
 done
 
+raw_stage_marker="$cell/.raw-evidence-staged.$$"
+cleanup_raw_stage() {
+	if [[ -e "$raw_stage_marker" ]]; then
+		v2_r5_cleanup_staged_raw_evidence "$cell" ||
+			printf 'integrated long-run extraction cleanup failure: %s\n' "$cell" >&2
+	fi
+}
+trap cleanup_raw_stage EXIT
+v2_r5_stage_raw_evidence "$cell" || fail "raw evidence is neither retained nor covered by a valid archive"
+
 expected_config="$root_dir/research/configs/v2-integrated-longrun/$cell_name.json"
 require_file "$expected_config"
 cmp -s "$expected_config" "$cell/run-config.json" || fail "run config is not byte-identical to registered $cell_name"

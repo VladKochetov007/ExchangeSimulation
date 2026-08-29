@@ -128,6 +128,7 @@ v2_r5_verify_evidence_manifest() {
 	[[ "$listed" == "$expected_fixed" ]] || return 1
 	local relative path expected_bytes expected_digest actual_bytes actual_digest
 	local actual_raw_bytes=0
+	v2_r5_verify_venue_namespace "$cell" || return 1
 	while IFS=$'\t' read -r relative expected_bytes expected_digest; do
 		path="$cell/$relative"
 		[[ -f "$path" && ! -L "$path" ]] || return 1
@@ -135,6 +136,11 @@ v2_r5_verify_evidence_manifest() {
 		actual_digest=$(sha256sum -- "$path" | awk '{print $1}') || return 1
 		[[ "$actual_bytes" == "$expected_bytes" && "$actual_digest" == "$expected_digest" ]] || return 1
 	done < <(jq -r '.fixed_files[] | [.path, (.bytes | tostring), .sha256] | @tsv' "$manifest")
+	if [[ "$log_mode" == full ]] && ! find "$cell/venues" -type f -name '*.jsonl' -print -quit 2>/dev/null | grep -q .; then
+		v2_r5_verify_raw_evidence_archive "$cell" || return 1
+		[[ "$(jq -er '.source_revision' "$manifest")" == "$(jq -er '.git_revision' "$cell/run-metadata.json")" ]] || return 1
+		return 0
+	fi
 	while IFS=$'\t' read -r relative expected_bytes expected_digest; do
 		path="$cell/$relative"
 		[[ "$relative" == venues/*.jsonl && -f "$path" && ! -L "$path" ]] || return 1
@@ -150,6 +156,135 @@ v2_r5_verify_evidence_manifest() {
 	[[ "$listed" == "$actual" ]] || return 1
 	[[ "$(jq -er '.source_revision' "$manifest")" == "$(jq -er '.git_revision' "$cell/run-metadata.json")" ]] || return 1
 	return 0
+}
+
+v2_r5_raw_archive_path() {
+	printf '%s/raw-evidence.tar.zst\n' "$1"
+}
+
+v2_r5_raw_archive_descriptor_path() {
+	printf '%s/raw-evidence-archive.json\n' "$1"
+}
+
+v2_r5_validate_raw_path() {
+	local relative=$1
+	[[ "$relative" == venues/*.jsonl && "$relative" != *$'\n'* && "$relative" != *$'\t'* ]] || return 1
+	local components component
+	IFS=/ read -r -a components <<<"$relative"
+	[[ "${components[0]:-}" == venues && "${#components[@]}" -ge 2 ]] || return 1
+	for component in "${components[@]:1}"; do
+		[[ -n "$component" && "$component" != . && "$component" != .. ]] || return 1
+	done
+}
+
+v2_r5_verify_venue_namespace() {
+	local cell=$1
+	[[ ! -L "$cell/venues" ]] || return 1
+	if [[ -e "$cell/venues" ]]; then
+		[[ -d "$cell/venues" && ! -L "$cell/venues" ]] || return 1
+	else
+		return 0
+	fi
+	if find "$cell/venues" -type l -print -quit 2>/dev/null | grep -q .; then
+		return 1
+	fi
+	if find "$cell/venues" -type f ! -name '*.jsonl' -print -quit 2>/dev/null | grep -q .; then
+		return 1
+	fi
+}
+
+v2_r5_verify_raw_evidence_archive() {
+	local cell=$1
+	local archive descriptor evidence_manifest
+	archive=$(v2_r5_raw_archive_path "$cell")
+	descriptor=$(v2_r5_raw_archive_descriptor_path "$cell")
+	evidence_manifest="$cell/evidence-manifest.json"
+	[[ -f "$archive" && ! -L "$archive" && -s "$archive" ]] || return 1
+	[[ -f "$descriptor" && ! -L "$descriptor" && -s "$descriptor" ]] || return 1
+	[[ -f "$evidence_manifest" && ! -L "$evidence_manifest" && -s "$evidence_manifest" ]] || return 1
+	local expected_archive_sha actual_archive_sha
+	expected_archive_sha=$(jq -er '.archive_sha256' "$descriptor") || return 1
+	[[ "$expected_archive_sha" =~ ^[0-9a-f]{64}$ ]] || return 1
+	actual_archive_sha=$(sha256sum -- "$archive" | awk '{print $1}') || return 1
+	[[ "$actual_archive_sha" == "$expected_archive_sha" ]] || return 1
+	local expected_manifest_sha actual_manifest_sha
+	expected_manifest_sha=$(jq -er '.evidence_manifest_sha256' "$descriptor") || return 1
+	actual_manifest_sha=$(sha256sum -- "$evidence_manifest" | awk '{print $1}') || return 1
+	[[ "$actual_manifest_sha" == "$expected_manifest_sha" ]] || return 1
+	local expected_status_sha actual_status_sha
+	[[ -s "$cell/run-status.json" ]] || return 1
+	expected_status_sha=$(jq -er '.run_status_sha256' "$descriptor") || return 1
+	actual_status_sha=$(sha256sum -- "$cell/run-status.json" | awk '{print $1}') || return 1
+	[[ "$actual_status_sha" == "$expected_status_sha" ]] || return 1
+	local cell_name log_mode source_revision
+	cell_name=$(basename "$cell")
+	log_mode=$(jq -er '.log_mode' "$cell/run-config.json") || return 1
+	source_revision=$(jq -er '.git_revision' "$cell/run-metadata.json") || return 1
+	jq -e --arg cell "$cell_name" --arg log_mode "$log_mode" --arg source_revision "$source_revision" \
+		'.schema_version == 1 and .contract == "v2-integrated-longrun-raw-archive-v1" and
+		 .cell == $cell and .log_mode == $log_mode and .source_revision == $source_revision and
+		 (.archive_sha256 | test("^[0-9a-f]{64}$")) and
+		 (.evidence_manifest_sha256 | test("^[0-9a-f]{64}$")) and
+		 (.run_status_sha256 | test("^[0-9a-f]{64}$")) and
+		 (.raw_files | type) == "array"' "$descriptor" >/dev/null || return 1
+	local expected_raw actual_raw
+	expected_raw=$(jq -S -c '.raw_files' "$evidence_manifest") || return 1
+	actual_raw=$(jq -S -c '.raw_files' "$descriptor") || return 1
+	[[ "$expected_raw" == "$actual_raw" ]] || return 1
+	local relative
+	while IFS= read -r relative; do
+		v2_r5_validate_raw_path "$relative" || return 1
+	done < <(jq -r '.raw_files[].path' "$evidence_manifest")
+	v2_r5_verify_venue_namespace "$cell" || return 1
+	local listed expected
+	listed=$(tar --use-compress-program='zstd -q' -tf "$archive" | sed '/\/$/d' | sort) || return 1
+	expected=$(jq -r '.raw_files[].path' "$evidence_manifest" | sort) || return 1
+	[[ "$listed" == "$expected" ]] || return 1
+	return 0
+}
+
+v2_r5_stage_raw_evidence() {
+	local cell=$1
+	local marker archive
+	marker="$cell/.raw-evidence-staged.$$"
+	v2_r5_verify_venue_namespace "$cell" || return 1
+	if find "$cell/venues" -type f -name '*.jsonl' -print -quit 2>/dev/null | grep -q .; then
+		return 0
+	fi
+	archive=$(v2_r5_raw_archive_path "$cell")
+	[[ -s "$archive" ]] || return 1
+	v2_r5_verify_raw_evidence_archive "$cell" || return 1
+	[[ ! -e "$marker" ]] || return 1
+	mkdir -p -- "$cell/venues"
+	touch -- "$marker"
+	tar --use-compress-program='zstd -q' -xf "$archive" -C "$cell" || return 1
+	local relative path expected_bytes expected_digest actual_bytes actual_digest
+	while IFS=$'\t' read -r relative expected_bytes expected_digest; do
+		path="$cell/$relative"
+		v2_r5_validate_raw_path "$relative" || return 1
+		[[ -f "$path" && ! -L "$path" ]] || return 1
+		actual_bytes=$(stat -c '%s' -- "$path") || return 1
+		actual_digest=$(sha256sum -- "$path" | awk '{print $1}') || return 1
+		[[ "$actual_bytes" == "$expected_bytes" && "$actual_digest" == "$expected_digest" ]] || return 1
+	done < <(jq -r '.raw_files[] | [.path, (.bytes | tostring), .sha256] | @tsv' "$cell/evidence-manifest.json")
+	local listed expected
+	listed=$(find "$cell/venues" -type f -name '*.jsonl' -printf '%P\n' | sed 's#^#venues/#' | sort)
+	expected=$(jq -r '.raw_files[].path' "$cell/evidence-manifest.json" | sort)
+	[[ "$listed" == "$expected" ]] || return 1
+}
+
+v2_r5_cleanup_staged_raw_evidence() {
+	local cell=$1
+	local marker="$cell/.raw-evidence-staged.$$"
+	[[ -e "$marker" ]] || return 0
+	local relative path
+	while IFS= read -r relative; do
+		v2_r5_validate_raw_path "$relative" || return 1
+		path="$cell/$relative"
+		[[ -f "$path" && ! -L "$path" ]] || return 1
+		rm -- "$path"
+	done < <(jq -r '.raw_files[].path' "$cell/evidence-manifest.json")
+	rm -- "$marker"
 }
 
 # Raw JSONL evidence is an ordered manifest. Object-key ordering is irrelevant,

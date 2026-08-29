@@ -34,10 +34,28 @@ head_revision=$(git -C "$root_dir" rev-parse HEAD)
 	fail "parity analyzer is not a clean reproducible build of current HEAD"
 v2_r5_is_go_127 "$analyzer_go_version" || fail "parity analyzer is not built with the pinned Go 1.27 toolchain: $analyzer_go_version"
 
+raw_stage_cells=()
+cleanup_raw_stage() {
+	local cell
+	for cell in "${raw_stage_cells[@]}"; do
+		v2_r5_cleanup_staged_raw_evidence "$cell" ||
+			printf 'integrated long-run parity cleanup failure: %s\n' "$cell" >&2
+	done
+}
+trap cleanup_raw_stage EXIT
+
 "$root_dir/scripts/check-v2-integrated-longrun-configs.sh" >/dev/null
 for cell in dev-607 dev-607-none dev-607-g8; do
 	cell_dir="$output_root/$cell"
 	v2_r5_require_cell_path "$cell_dir" || fail "parity cell is outside the canonical r5 root or is symlinked: $cell"
+done
+
+for cell in dev-607 dev-607-g8; do
+	cell_dir="$output_root/$cell"
+	v2_r5_stage_raw_evidence "$cell_dir" || fail "raw evidence is neither retained nor covered by a valid archive: $cell"
+	if [[ -e "$cell_dir/.raw-evidence-staged.$$" ]]; then
+		raw_stage_cells+=("$cell_dir")
+	fi
 done
 cmp -s "$root_dir/research/configs/v2-integrated-longrun/dev-607.json" \
 	"$output_root/dev-607/run-config.json" || fail "seed-607 full config differs from registry"
