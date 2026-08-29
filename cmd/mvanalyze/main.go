@@ -178,6 +178,11 @@ func main() {
 	allocProfile := flag.String("allocprofile", "", "write sampled allocation profile after offline analysis")
 	mutexProfile := flag.String("mutexprofile", "", "write mutex profile after offline analysis")
 	blockProfile := flag.String("blockprofile", "", "write block profile after offline analysis")
+	fusedOut := flag.String("fused-out", "",
+		"research mode: run the fused metric set over one run directory, writing <metric>.json per metric into this directory")
+	fusedSet := flag.String("fused-set", "",
+		"research mode: comma-separated metrics for -fused-out")
+	fusedWorkers := flag.Int("fused-workers", 0, "research mode: physical scan workers for -fused-out (0 = GOMAXPROCS)")
 	flag.Parse()
 	baseExplicit, hedgeExplicit := false, false
 	flag.Visit(func(parsed *flag.Flag) {
@@ -202,6 +207,40 @@ func main() {
 	defer profiles.Stop()
 	// Offline measurement aid; inert unless MVANALYZE_SCAN_STATS is set.
 	defer analysis.ReportScanStats()
+	if *fusedOut != "" {
+		if len(flag.Args()) != 1 {
+			fmt.Fprintln(os.Stderr, "-fused-out requires exactly one run directory")
+			os.Exit(2)
+		}
+		dir := flag.Args()[0]
+		run, err := analysis.Open(dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+			os.Exit(1)
+		}
+		fundingIntervals, err := loadFundingIntervals(dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+			os.Exit(1)
+		}
+		settings := fusedSettings{
+			basePrecision: *basePrecision, quotePrecision: *quotePrecision,
+			requireExactReplay: *requireExactReplay, deliveryFeePolicy: *deliveryFeePolicy,
+			fundingIntervalSeconds: *fundingIntervalSeconds, fundingIntervals: fundingIntervals,
+			arbFeeBps: *arbFeeBps, arbStaleness: *arbStaleness,
+			base: *base, quote: *quote, cross: *cross, crossPrecision: *crossPrecision,
+			crossVenueSymbol: *crossVenueSymbol, crossVenueMin: *crossVenueMin,
+			crossVenuePositiveTimes: *crossVenuePositiveTimes,
+			perpSignalSymbol: *perpSignalSymbol, perpSignalVenues: *perpSignalVenues,
+			postOnlyRoles: *postOnlyRoles, postOnlySymbols: *postOnlySymbols,
+			hedgeSymbol: effectiveHedgeUnderlyingSymbol,
+		}
+		if err := runFusedExtraction(run, dir, *fusedOut, *fusedSet, *fusedWorkers, settings); err != nil {
+			fmt.Fprintf(os.Stderr, "fused extraction: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *metric == "termcarryp4pair" {
 		if len(flag.Args()) != 2 {
 			fmt.Fprintln(os.Stderr, "termcarryp4pair requires exactly: <control run dir> <treatment run dir>")

@@ -139,6 +139,11 @@ type Run struct {
 
 	roles map[Participant]string
 	files []string
+
+	// fuse, when set, routes Scan through a fused extraction coordinator so
+	// several metrics share one physical pass. It is nil for the ordinary
+	// one-metric-per-process path.
+	fuse *fusedPass
 }
 
 // Open reads a run's report and indexes its event logs.
