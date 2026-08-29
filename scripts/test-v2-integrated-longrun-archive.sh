@@ -19,6 +19,11 @@ expect_failure() {
 
 source "$root_dir/scripts/v2-integrated-longrun-r5-contract.sh"
 v2_r5_attestation_root="$tmp_root/attestations"
+mkdir -p "$tmp_root/attestation-target"
+ln -s "$tmp_root/attestation-target" "$tmp_root/attestation-link"
+v2_r5_attestation_root="$tmp_root/attestation-link"
+expect_failure v2_r5_require_raw_archive_attestation_path dev-607
+v2_r5_attestation_root="$tmp_root/attestations"
 cell="$tmp_root/dev-607"
 mkdir -p "$cell/venues/north"
 printf '%s\n' '{"sequence":1,"event":"trade"}' >"$cell/venues/north/events.jsonl"

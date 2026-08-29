@@ -45,6 +45,7 @@ done
 [[ "$(jq -er '.log_mode' "$cell/run-config.json")" == full ]] || fail "raw archive requires full log mode"
 [[ ! -e "$(v2_r5_raw_archive_path "$cell")" ]] || fail "raw archive already exists"
 [[ ! -e "$(v2_r5_raw_archive_descriptor_path "$cell")" ]] || fail "raw archive descriptor already exists"
+v2_r5_require_raw_archive_attestation_path "$cell_name" || fail "raw archive attestation namespace is not canonical"
 [[ ! -e "$(v2_r5_raw_archive_attestation_path "$cell_name")" ]] || fail "raw archive attestation already exists"
 [[ ! -e "$cell/.raw-evidence-staged.$$" ]] || fail "staging marker collides with archive process"
 
