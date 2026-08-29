@@ -26,7 +26,8 @@ directories outside the repository.
 ## 2. Benchmark protocol
 
 15 simulated minutes (900 simulated seconds), `GOMAXPROCS=1`, pinned to one core
-with `taskset`, five alternating A/B repetitions, medians reported with ranges.
+with `taskset`, five or six alternating A/B repetitions, medians reported with
+ranges.
 Pinning makes these measurements contention-immune, which matters because up to
 three research threads shared this host and earlier unpinned batches had to be
 discarded.
@@ -47,9 +48,11 @@ The hash matches what `perf/thread-sim` obtained across all 30 of its baseline
 runs, spanning both log modes, two filesystems, `GOMAXPROCS` 1 and 4, and
 profiled and unprofiled builds.
 
-## 3. Where simulation time goes — current HEAD
+## 3. Where simulation time goes
 
-Full evidence, 14.70 s of CPU samples for 900 simulated seconds. Percentages are
+Measured after S1 and S2 were accepted and before S3-S6, which is the state the
+§4 bounds and the §7 candidate list are computed from. Full evidence, 14.70 s of
+CPU samples for 900 simulated seconds, under a profiling build. Percentages are
 cumulative and overlap; they are attribution aids, not a partition.
 
 | Subsystem | cum CPU | share |
@@ -136,123 +139,184 @@ precede, a correct Go reference.
 
 ## 5. Accepted optimizations
 
+Every change below reproduces all four oracles. Equivalence was additionally
+confirmed on **three seeds and both log modes**:
+
+| Cell | Evidence tree | Execution hash |
+| --- | --- | --- |
+| seed 900101, 15 min, `full` | 27 files / 442,225,951 B identical | `51541f91db7c5eae…` |
+| seed 900102, 10 min, `full` | 27 files / 272,736,362 B identical | `657758387ac53103…` |
+| seed 900103, 10 min, `full` | 27 files / 279,757,752 B identical | `a64a00b4dbe459db…` |
+| seed 900101, 10 min, `none` | 4 files / 1,876,201 B identical | `a208e4e4986885c6…` |
+
 ### S1 — Cache the deterministic gateway iteration order (`3a32be5`)
 
 Both deterministic drains rebuilt a sorted client-ID slice *and* a parallel
 client-to-gateway map on every call, and the ingress drain does so once per pass
 while its passes repeat until one is empty. That was 1.51 s of 23.36 s CPU and
-511.4 MB of allocation in the baseline profile, of which 391.85 MB was the
-redundant lookup map and 550 ms was the sort.
+511.4 MB of allocation, of which 391.85 MB was the redundant lookup map.
 
-The gateway set changes only when a client connects or disconnects, and both
-mutations already hold `e.mu`. A single sorted slice of client/gateway pairs
-replaces both structures, invalidated by a generation counter bumped at those two
-sites. Iteration order is unchanged: ascending client ID.
+One sorted slice of client/gateway pairs replaces both, invalidated by a
+generation counter bumped at the two mutation sites, which already hold `e.mu`.
 
 | Measure | `full` | `none` |
 | --- | ---: | ---: |
-| Wall | -5.3% | (one sample contaminated) |
 | CPU | -4.9% | **-16.0%** |
 | Peak RSS | -2.3% | -1.6% |
 
-The drain is a larger share of total work with logging off, which is why the
-effect is larger there.
-
 ### S2 — High-volume evidence payloads as ordered structs (`eaf6c85`)
 
-Every payload is marshalled **twice** — once by the ordered-execution hash sink
-and once by the raw evidence logger — so a `map[string]any` payload pays for its
-map allocation and sixteen interface boxes on both. The baseline attributed
-2.85 s of CPU and 16.2 M allocated objects (28.2% of all objects) to
-`mapEncoder`.
+Payloads are marshalled **twice** — once by the hash sink, once by the logger —
+so a `map[string]any` payload pays for its map and its interface boxes on both.
+`mapEncoder` was 2.85 s of CPU and 16.2 M allocated objects (28.2% of all
+objects).
 
-The three highest-volume map payloads became structs: `OrderFill` (149,594
-events per 15-minute run), `OrderCancelled` (111,393) and `BookSnapshot`
-(70,581). Fields are declared in lexicographic order of their JSON names, which
-is the order `encoding/json` emits for a map, so the persisted bytes are
-unchanged. Each type carries a comment recording that the order is the evidence
-contract.
+`OrderFill` (149,594 events per 15-minute run), `OrderCancelled` (111,393) and
+`BookSnapshot` (70,581) became structs whose fields are declared in
+lexicographic order of their JSON names — the order `encoding/json` emits for a
+map — so the persisted bytes are unchanged.
 
-| Measure | `full` |
+**-9.9% wall, -10.0% CPU.**
+
+Three tests asserted the payload's Go type rather than its evidence, and two
+skipped silently when the assertion failed, which is how a byte-identical change
+produced a measured PnL of zero instead of an error. They now read the field
+from the payload's persisted JSON and fail loudly on a missing field.
+
+### S3 — Persist evidence without marshalling each payload twice (`087dd7a`)
+
+`JSONLinesLogger.LogEncodedEvent` assembles a record from segments of already
+encoded JSON, appending integers with `strconv` into one reused buffer. The
+venue envelope prefix is built once per venue with `encoding/json`, and event
+names are cached the same way, so no escaping rule is reimplemented by hand.
+Every path that cannot supply bytes falls back to the reflective encoder, so the
+fast path is opt-in per record.
+
+A differential test drives the real logger and requires byte-identical output
+*and* an identical evidence digest against `LogEvent` across the cross product
+of 5 venue identifiers, 5 event names, 3 client IDs, 5 timestamps and 18 payload
+shapes — HTML escaping, U+2028/U+2029, non-ASCII, embedded quotes and
+backslashes, control characters, int64/uint64 boundaries, floats, nested
+structs, arrays, scalars and nil — plus buffer reuse over 500 records,
+write-failure propagation and short writes.
+
+**-11.0% wall, -11.0% CPU.** The single largest change.
+
+### S4 — Stop reslicing the deterministic phase queues from the front (`0ed5180`)
+
+Both phase queues advanced with `s = s[1:]`, which abandons the consumed prefix:
+the slice keeps only its tail capacity, so every refill reallocates and copies.
+A small FIFO advances a head index over one reused backing array instead, zeroing
+the popped slot so a delivered message is not kept alive.
+
+| Measure | Change |
 | --- | ---: |
-| Wall | 14.40 s to 12.98 s (**-9.9%**) |
-| CPU | 14.27 s to 12.85 s (**-10.0%**) |
-| Peak RSS | unchanged |
+| Allocated bytes | 3,793.98 MB to 3,167.14 MB (**-16.5%**) |
+| Allocated objects | 36,716,252 to 30,880,881 (**-15.9%**) |
+| Wall / CPU | -1.45% / -1.46% |
+| Peak RSS | -1.3% |
 
-Ranges 14.33-15.15 against 12.93-13.44.
+The wall gain is small because GC was not the binding constraint at 13.7% of
+CPU. The value is the allocation and resident-memory reduction, which is what
+makes long runs predictable.
+
+### S5 — Cache the canonical book and client iteration orders (`6725639`)
+
+`buildAccountMarginProfile` rebuilt and re-sorted the whole book symbol list on
+every call — it runs once per account per breach — and `CheckLiquidations` and
+the cross-book sweep rebuilt and re-sorted the client list. 250 ms of a 920 ms
+margin-profile build was the symbol sort alone, over an instrument set that is
+static between listings and expiries.
+
+Two cached accessors, each invalidated by a generation counter bumped at every
+mutation site. Iteration order is unchanged.
+
+**-2.7% wall, -2.6% CPU**, ranges non-overlapping (11.79-11.97 against
+11.52-11.56).
+
+The first version bumped the counter on book insertion but not on expiry
+deletion, and the existing suite caught it as a nil dereference in the risk
+sweep. Both accessors now also compare cached length against map length, which
+is O(1) and converts a future missed bump into a rebuild rather than a stale
+entry handed to code that dereferences it.
+
+### S6 — Resolve each client's position map once per lookup (`5d1f0d3`)
+
+Three `PositionManager` methods indexed `pm.positions[clientID]` twice. Strictly
+less work and provably identical, but **-0.34% wall with overlapping ranges**:
+reported as no measurable gain. The string-keyed `positionKey` hash is the real
+cost here, and replacing it with an integer instrument handle is a wider change.
 
 ### Combined result
 
-Pristine base against S1+S2, `log_mode=full`, five alternating pinned
+Pristine base against S1-S6, `log_mode=full`, six alternating pinned
 repetitions:
 
-| Measure | base | S1+S2 | change |
+| Measure | base | optimized | change |
 | --- | ---: | ---: | ---: |
-| Wall | 17.24 s | **13.88 s** | **-19.5%** |
-| CPU | 17.05 s | 13.71 s | -19.6% |
-| Peak RSS | 760,540 KiB | 755,828 KiB | -0.6% |
+| Wall | 17.475 s | **11.605 s** | **-33.6%** |
+| CPU | 17.345 s | 11.505 s | -33.7% |
+| Peak RSS | 755,852 KiB | 745,774 KiB | -1.3% |
 
-Ranges 16.94-18.11 against 13.11-13.93.
+Ranges 17.39-17.53 against 11.53-11.66.
 
-**Target metric: 52.2 to 64.8 simulated seconds per wall-clock second, +24.2%,
-with all four determinism oracles identical.**
+> **Target metric: 51.5 to 77.6 simulated seconds per wall-clock second, a
+> 1.51x speedup, with all four determinism oracles identical on three seeds and
+> both log modes.**
 
 ## 6. Rejected optimizations
 
-### R1 — Reuse the hash sink's encoding as the logged payload
+### R1 — Reuse the hash sink's encoding as a `json.RawMessage`
 
-The sink marshals every payload to hash it, then the logger marshals the same
-payload again. Passing the sink's bytes to the logger as a `json.RawMessage`
-looked like it should remove the second marshal outright, and the baseline
-predicted about 11% of CPU.
+Predicted about 11% of CPU. **Measured +1.15% CPU — a regression**, ranges
+non-overlapping. `encoding/json` emits a raw value through `compact()`, which
+rescans and re-escapes it for about the cost of the marshal it replaced, so the
+change traded a marshal for a compaction. Reverted. S3 is the form that works:
+skip the nested encoder entirely.
 
-**Measured: +1.15% CPU — a regression.** Five alternating pinned repetitions,
-ranges 14.62-14.92 against 14.69-14.88, so the sign is not noise.
+### R2 — Capacity-hint the receipt slice in the phase-egress drain
 
-The mechanism does not work. `encoding/json` emits a `RawMessage` through
-`compact()`, which is a full scan of the value with an HTML-escape check. That
-costs about what marshalling the payload costs, so the change trades a marshal
-for a compaction and gains nothing. Reverted.
+`received := make([]T, 0)` grows through 371,586 allocations totalling 264.75 MB,
+so sizing it from the exact queue-depth bound looked free. **Measured: allocated
+objects rose from 30,880,881 to 34,454,337** with total bytes flat.
 
-The correct version of this idea is to skip the nested encoder entirely and
-append the sink's bytes into a manually built envelope, since the persisted line
-format is fixed and its key order is already known. That has not been built yet.
+`make([]T, 0)` does not allocate — a zero-capacity slice points at `zerobase` —
+whereas `make([]T, 0, n)` always does. The hint therefore converted a free slice
+into a real allocation on every drain that delivers nothing. Reverted. Removing
+this allocation properly needs a checked-out scratch buffer, whose concurrency
+guard is not worth ~0.4% of wall time.
 
-### R2 — Replace JSON evidence with a custom binary format
+### R3 — Replace JSON evidence with a custom binary format
 
 Bounded at 1.28x by §4, and it changes both the persisted evidence contract and
-the execution-hash domain. Rejected on risk-per-gain.
+the execution-hash domain — the two artifacts the r5 gate seals. Worst
+risk-per-gain available.
 
-### R3 — Move serialization into cgo, C++, or Go assembly
+### R4 — Move serialization into cgo, C++, or Go assembly
 
-Same 1.28x bound, plus a toolchain dependency and a new failure surface. The FFI
-crossing cost is genuinely negligible at 80,624 events/s (0.03% of runtime), so
-the objection is not FFI overhead — it is that the addressable block is too
-small to justify the boundary.
+Same 1.28x bound. FFI crossing cost is genuinely negligible at 80,624 events/s
+(0.03% of runtime), so the objection is not FFI overhead — the addressable block
+is simply too small to justify a toolchain dependency and a new failure surface.
 
-### R4 — Optimize the matching engine or the order-book representation
+### R5 — Optimize the matching engine or the order-book representation
 
-`Matcher.Match` is absent from the top 400 CPU symbols. There is nothing to win
-here on this workload.
+`Matcher.Match` is absent from the top 400 CPU symbols.
 
-### R5 — Pool the detached preview book
+### R6 — Pool the detached preview book
 
-`cloneBookForPreviewExcluding` is 13.97% of allocation and 4.5% of CPU, so it is
-a real target, but the matcher mutates queue links and iceberg state on the
-clone. `perf/thread-sim` judged the ownership proof too risky for the gain and
-did not recommend it. Not attempted; a pooling change that introduced aliasing
-would be a correctness failure, not an optimization.
+13.97% of allocation and 4.5% of CPU, so a real target, but the matcher mutates
+queue links and iceberg state on the clone. A pooling change that introduced
+aliasing would be a correctness failure, not an optimization. Not attempted.
 
 ## 7. Ranked next candidates
 
-| Idea | Hotspot | Current | Proposed | Expected | Risk | Status |
-| --- | --- | --- | --- | ---: | --- | --- |
-| Manual envelope encoder appending the sink's payload bytes | `venueLogger.LogEvent`, 26.9% | two full marshals per event | one marshal + byte append into a fixed line format | ~8-10% | medium: touches evidence writing, but oracle-checkable | next |
-| Reduce `DelayedGateway` market-data allocation | 1.24 GB, 28% of allocation | per-delivery allocation and closures | preallocated per-symbol buffers | up to ~6% via GC | medium | not started |
-| Integer instrument/venue handles in hot paths | map ops 11.03% | `map[string]` lookups per event | resolve once at setup, index dense slices | up to ~8% | medium, wide diff | not started |
-| Incremental margin state | `buildAccountMarginProfile` 6.3% + `CheckLiquidations` 5.9% | recomputed per sweep | cached, invalidated on position change | up to ~8% | high: risk semantics | not started |
-| `GetPositionBySide` lookup | 6.6% | map lookup per call | dense per-instrument index | up to ~4% | low-medium | not started |
-| Go PGO | whole binary | no profile | `default.pgo` from a representative run | unmeasured | low semantic, proven deterministic | blocked: `perf/thread-pgo` proved byte-identical output and measured binary size, but its timing batch was discarded as contaminated and never re-run |
+| Idea | Hotspot | Proposed | Expected | Risk | Status |
+| --- | --- | --- | ---: | --- | --- |
+| Integer instrument/venue/client handles | map ops 11.0% | resolve once at setup, index dense slices | up to ~8% | medium, wide diff | not started |
+| Incremental margin state | margin 6.3% + liquidation 5.9% | cache, invalidate on position change | up to ~8% | high: risk semantics | not started |
+| Reduce remaining `DelayedGateway` allocation | ~0.9 GB after S4 | checked-out scratch buffers | ~1% | medium | R2 attempt failed |
+| Preview-book reuse | 14% of allocation | proven-ownership reuse | up to ~4% | high | R6 |
+| Go PGO | whole binary | `default.pgo` from a representative run | unmeasured | low semantic | blocked: determinism and binary size proved on `perf/thread-pgo`, timing batch discarded as contaminated and never re-run |
 
 ## 8. Open escalation — not a performance finding
 
