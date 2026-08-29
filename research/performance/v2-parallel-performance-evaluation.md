@@ -268,7 +268,16 @@ reached 1,137 MB (+11x) for a smaller wall gain and *no* CPU gain at all.
 Extrapolated to a 24-hour cell, the read amplification alone falls from roughly
 860 GB to about 165 GB.
 
-## 7. Simulator results so far
+## 7. Simulator results
+
+Recorded in full in `v2-simulator-performance.md`. Headline: eight accepted
+changes take the integrated V2 workload from 50.6 to 79.5 simulated seconds per
+wall-clock second at `GOMAXPROCS=1` (**1.57x**, wall -36.4%), and the simulator
+turns out to be GOMAXPROCS-invariant — `GOMAXPROCS=4` adds a further -14.3% wall
+with byte-identical evidence over twelve verification runs, reaching **88.8
+simulated seconds per wall second, 1.75x overall**, with no code change.
+
+### Earlier partial results, superseded
 
 | Change | log mode | wall | CPU | peak RSS |
 | --- | --- | ---: | ---: | ---: |
@@ -399,7 +408,7 @@ scientific owner to confirm. No contract script was modified.
 
 ## 12. Commit classification
 
-Against the scientific HEAD this work is based on, `887899f`. Fifteen commits on
+Against the scientific HEAD this work is based on, `887899f`. Eighteen commits on
 `autoresearch/v2-performance-research`, none merged anywhere.
 
 ### Safe to cherry-pick — analyzer only, all 31 metrics byte-identical
@@ -419,6 +428,8 @@ Against the scientific HEAD this work is based on, `887899f`. Fifteen commits on
 | `85cb7c2` | `docs: record V2 simulator performance study` |
 | `08cc417` | `fix: keep system temporary paths out of the performance evaluation` |
 | `d3d8e99` | `docs: record the accepted simulator optimizations and their measurements` |
+| `7dd37ca` | `docs: finalize the analyzer result and classify every commit` |
+| `bdae26b` | `docs: record the fan-out cache, the lock-free clock, and GOMAXPROCS invariance` |
 
 ### Require scientific review — simulator, all oracles identical on three seeds and both log modes
 
@@ -430,6 +441,8 @@ Against the scientific HEAD this work is based on, `887899f`. Fifteen commits on
 | `0ed5180` | `perf: stop reslicing the deterministic phase queues from the front` | changes market-data queue internals |
 | `5d1f0d3` | `perf: resolve each client's position map once per lookup` | no measurable gain; take it for clarity or leave it |
 | `6725639` | `perf: cache the canonical book and client iteration orders` | caches risk-sweep iteration order; the first version had a missed invalidation that the existing suite caught |
+| `26998ae` | `perf: cache each symbol's market-data fan-out order` | fan-out order decides which subscriber reacts first, so it is an economic input; the cache preserves it exactly and the package gained its first tests |
+| `5fb87e2` | `perf: read the simulated clock without taking a lock` | replaces a read lock with an atomic load on the most frequently read value in the simulator |
 
 ### Require scientific review — new analyzer architecture
 
@@ -444,7 +457,7 @@ are recorded with their measurements in the rejected-hypotheses sections.
 
 ### Integration recommendation
 
-Take the four analyzer commits and the four documentation commits directly. Take
+Take the four analyzer commits and the documentation commits directly. Take
 the simulator commits as a group after review — they were measured cumulatively
 and `087dd7a` depends on the sink returning its encoding, which no earlier
 commit provides. `041e31e` is the one change that should not be integrated as
