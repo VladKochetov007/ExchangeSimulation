@@ -171,3 +171,23 @@ func TestOrderLifecycleLinksForcedCloseFills(t *testing.T) {
 		t.Fatalf("unlinked forced-close mutation was not rejected: %+v", got)
 	}
 }
+
+func TestOrderLifecycleCountsMalformedTerminalEvidence(t *testing.T) {
+	lines := []string{
+		`{"sim_ts":1,"client_id":1,"event":"OrderAccepted","data":{"venue_id":"north","payload":{"order_id":10,"qty":2}}}`,
+		`{"sim_ts":2,"client_id":1,"event":"OrderFill","data":{"venue_id":"north","payload":"broken"}}`,
+		`{"sim_ts":3,"client_id":1,"event":"OrderCancelled","data":{"venue_id":"north","payload":{"order_id":10}}}`,
+		`{"sim_ts":4,"client_id":1,"event":"liquidation","data":{"venue_id":"north","payload":{}}}`,
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/spot/ABC-USD.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureOrderLifecycle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MalformedAcceptedRecords != 1 || result.MalformedFillRecords != 1 || result.MalformedCancelRecords != 1 || result.MalformedLiquidations != 1 {
+		t.Fatalf("malformed lifecycle evidence disappeared: %+v", result)
+	}
+}

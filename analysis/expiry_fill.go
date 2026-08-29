@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"encoding/json"
 	"sort"
 	"sync"
 )
@@ -212,12 +213,8 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 	// publish executable depth. This uses the listing contract already read
 	// above, not a later settlement announcement, for the expiry boundary.
 	type snapshotPayload struct {
-		Bids []struct {
-			VisibleQty int64 `json:"visible_qty"`
-		} `json:"bids"`
-		Asks []struct {
-			VisibleQty int64 `json:"visible_qty"`
-		} `json:"asks"`
+		Bids []json.RawMessage `json:"bids"`
+		Asks []json.RawMessage `json:"asks"`
 	}
 	if err := r.Scan(ScanOptions{Events: []string{"BookSnapshot"}}, func(event Event) {
 		key := expiryFillKey{event.VenueID, event.Symbol}
@@ -235,30 +232,33 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 			mu.Unlock()
 			return
 		}
-		if event.SimTS < contract.expiry {
-			return
-		}
 		var payload snapshotPayload
-		if event.Decode(&payload) != nil {
+		if err := decodeRequiredJSON(event.Raw(), &payload, "bids", "asks"); err != nil {
 			mu.Lock()
 			malformedSnapshotRecords++
 			mu.Unlock()
 			return
 		}
 		nonEmpty := false
-		for _, level := range payload.Bids {
+		for _, rawLevel := range append(append([]json.RawMessage{}, payload.Bids...), payload.Asks...) {
+			var level struct {
+				VisibleQty int64 `json:"visible_qty"`
+			}
+			if err := decodeRequiredJSON(rawLevel, &level, "visible_qty"); err != nil || level.VisibleQty < 0 {
+				mu.Lock()
+				malformedSnapshotRecords++
+				mu.Unlock()
+				return
+			}
 			if level.VisibleQty > 0 {
 				nonEmpty = true
-				break
 			}
 		}
-		if !nonEmpty {
-			for _, level := range payload.Asks {
-				if level.VisibleQty > 0 {
-					nonEmpty = true
-					break
-				}
-			}
+		// Decode every snapshot during the contract's listed lifetime, not only
+		// snapshots after expiry. A malformed active snapshot can hide the last
+		// executable depth transition and make the expiry boundary look clean.
+		if event.SimTS < contract.expiry {
+			return
 		}
 		mu.Lock()
 		row := fillCounts[key]

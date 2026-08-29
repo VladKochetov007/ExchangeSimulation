@@ -152,6 +152,17 @@ v2_r5_verify_evidence_manifest() {
 	return 0
 }
 
+# Raw JSONL evidence is an ordered manifest. Object-key ordering is irrelevant,
+# but array order is part of the contract because it is the only binding from a
+# persisted file digest to its causal path. Sorting this array would let a
+# permutation of files masquerade as a parallel execution with the same set.
+v2_r5_compare_ordered_raw_manifests() {
+	local left=$1 right=$2
+	[[ -s "$left/evidence-manifest.json" && -s "$right/evidence-manifest.json" ]] || return 1
+	cmp -s <(jq -S -c '.raw_files' "$left/evidence-manifest.json") \
+		<(jq -S -c '.raw_files' "$right/evidence-manifest.json")
+}
+
 v2_r5_write_attestation() {
 	local cell=$1
 	local cell_name

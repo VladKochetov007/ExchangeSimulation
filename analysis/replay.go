@@ -179,6 +179,32 @@ func bestOf(levels []bookLevel, highest bool) (int64, bool) {
 	return best, found
 }
 
+func decodeRequiredBookSnapshot(raw json.RawMessage, snapshot *bookSnapshot) error {
+	if err := decodeRequiredJSON(raw, snapshot, "bids", "asks"); err != nil {
+		return err
+	}
+	var fields struct {
+		Bids []json.RawMessage `json:"bids"`
+		Asks []json.RawMessage `json:"asks"`
+	}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	for _, rawLevel := range append(append([]json.RawMessage{}, fields.Bids...), fields.Asks...) {
+		var level bookLevel
+		if err := decodeRequiredJSON(rawLevel, &level, "price", "visible_qty", "hidden_qty"); err != nil {
+			return err
+		}
+		if level.VisibleQty < 0 || level.HiddenQty < 0 {
+			return fmt.Errorf("negative snapshot quantity")
+		}
+		if _, ok := addAuditInt64(level.VisibleQty, level.HiddenQty); !ok {
+			return fmt.Errorf("snapshot quantity overflows int64")
+		}
+	}
+	return nil
+}
+
 type tradePayload struct {
 	Price        int64  `json:"price"`
 	Qty          int64  `json:"qty"`
@@ -205,8 +231,13 @@ type acceptedPayload struct {
 // ReplayDrift counts how often the reconstructed book disagreed with a
 // published snapshot, which is the check that the replay is faithful.
 type ReplayDrift struct {
-	Checks     int `json:"checks"`
-	Mismatches int `json:"mismatches"`
+	Checks             int `json:"checks"`
+	Mismatches         int `json:"mismatches"`
+	MalformedRecords   int `json:"malformed_records"`
+	MalformedDeltas    int `json:"malformed_deltas"`
+	MalformedTrades    int `json:"malformed_trades"`
+	MalformedAccepts   int `json:"malformed_accepts"`
+	MalformedSnapshots int `json:"malformed_snapshots"`
 }
 
 // ReplayFile walks one book log in order, maintaining the book and calling
@@ -233,12 +264,15 @@ func ReplayFileWith(path string, visit ReplayVisitor, onAccept AcceptVisitor) (*
 	for scanner.Scan() {
 		var event replayEvent
 		if json.Unmarshal(scanner.Bytes(), &event) != nil {
+			drift.MalformedRecords++
 			continue
 		}
 		switch event.Event {
 		case "BookDelta":
 			var delta deltaPayload
-			if json.Unmarshal(event.Data.Payload, &delta) != nil {
+			if err := decodeRequiredJSON(event.Data.Payload, &delta, "price", "side", "total_qty", "visible_qty", "hidden_qty"); err != nil ||
+				(delta.Side != "BUY" && delta.Side != "SELL") || delta.TotalQty < 0 || delta.VisibleQty < 0 || delta.HiddenQty < 0 {
+				drift.MalformedDeltas++
 				continue
 			}
 			// A hidden order changes a level without publishing a delta, so a
@@ -253,7 +287,12 @@ func ReplayFileWith(path string, visit ReplayVisitor, onAccept AcceptVisitor) (*
 			book.Apply(delta.Side, delta.Price, delta.TotalQty)
 		case "Trade":
 			var trade tradePayload
-			if json.Unmarshal(event.Data.Payload, &trade) == nil && visit != nil {
+			if err := decodeRequiredJSON(event.Data.Payload, &trade, "price", "qty", "side", "taker_order_id"); err != nil ||
+				trade.Qty <= 0 || (trade.Side != "BUY" && trade.Side != "SELL") || trade.TakerOrderID == 0 {
+				drift.MalformedTrades++
+				continue
+			}
+			if visit != nil {
 				visit(event.SimTS, trade, book)
 			}
 		case "OrderAccepted":
@@ -261,7 +300,12 @@ func ReplayFileWith(path string, visit ReplayVisitor, onAccept AcceptVisitor) (*
 				continue
 			}
 			var accepted acceptedPayload
-			if json.Unmarshal(event.Data.Payload, &accepted) == nil {
+			if err := decodeRequiredJSON(event.Data.Payload, &accepted, "order_id", "side", "price", "qty", "type"); err != nil ||
+				accepted.OrderID == 0 || accepted.Qty <= 0 || (accepted.Side != "BUY" && accepted.Side != "SELL") {
+				drift.MalformedAccepts++
+				continue
+			}
+			if onAccept != nil {
 				onAccept(event.SimTS, accepted, book)
 			}
 		case "BookSnapshot":
@@ -269,7 +313,8 @@ func ReplayFileWith(path string, visit ReplayVisitor, onAccept AcceptVisitor) (*
 				continue
 			}
 			var snapshot bookSnapshot
-			if json.Unmarshal(event.Data.Payload, &snapshot) != nil {
+			if err := decodeRequiredBookSnapshot(event.Data.Payload, &snapshot); err != nil {
+				drift.MalformedSnapshots++
 				continue
 			}
 			// The snapshot is the engine's own view. Comparing the replayed

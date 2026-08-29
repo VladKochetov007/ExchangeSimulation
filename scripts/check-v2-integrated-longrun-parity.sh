@@ -128,6 +128,8 @@ for file in checkpoints.jsonl greeks.json latency.json; do
 done
 cmp -s "$output_root/dev-607/run-config.json" "$output_root/dev-607-g8/run-config.json" || fail "full g4/g8 config differs"
 cmp -s "$output_root/dev-607/evidence-artifact-hash.json" "$output_root/dev-607-g8/evidence-artifact-hash.json" || fail "full g4/g8 persisted evidence hash differs"
+v2_r5_compare_ordered_raw_manifests "$output_root/dev-607" "$output_root/dev-607-g8" ||
+	fail "full g4/g8 ordered raw evidence manifest differs"
 
 [[ ! -e "$output_root/dev-607-none/evidence-artifact-hash.json" ]] || fail "no-log cell contains runtime evidence hash"
 [[ -d "$output_root/dev-607-none/venues" ]] || fail "no-log cell is missing simulator venue root"
@@ -176,7 +178,7 @@ done
 mkdir -p "$output_root"
 tmp=$(mktemp "$attestation.tmp-XXXXXX")
 jq -n \
-	--arg contract "v2-integrated-longrun-parity-v3" \
+	--arg contract "v2-integrated-longrun-parity-v4" \
 	--arg source_revision "$source_revision" \
 	--arg simulator_binary_sha256 "$binary_sha256" \
 	--arg simulator_binary_go_version "$binary_go_version" \
@@ -212,7 +214,7 @@ jq -n \
 			{cell: "dev-607-g8", log_mode: "full", gomaxprocs: 8}
 		],
 		exact_equal_domains: ["checkpoints.jsonl", "greeks.json", "latency.json"],
-		full_evidence_equal_domains: ["evidence-artifact-hash.json", "recomputed_raw_jsonl"],
+		full_evidence_equal_domains: ["evidence-artifact-hash.json", "ordered_raw_jsonl", "recomputed_raw_jsonl"],
 		no_log_absence_contract: ["evidence-artifact-hash.json", "venues/*.jsonl"],
 		hashes: {
 			full_g4_checkpoints: $full_g4_checkpoints,
@@ -227,10 +229,11 @@ jq -n \
 			g8: {events: ($g8_recomputed_events | tonumber), digest: $g8_recomputed_digest}
 		},
 		predicates: {
-			ordered_checkpoints_equal: true,
-			deterministic_sidecars_equal: true,
-			full_evidence_equal: true,
-			no_log_evidence_absent: true,
+				ordered_checkpoints_equal: true,
+				deterministic_sidecars_equal: true,
+				full_evidence_equal: true,
+				ordered_raw_evidence_equal: true,
+				no_log_evidence_absent: true,
 			source_and_build_identity_equal: true
 		}
 	}' >"$tmp"
@@ -244,6 +247,6 @@ jq -e '(.simulator_binary_sha256 | test("^[0-9a-f]{64}$")) and
 	(.prunegate_sha256 | test("^[0-9a-f]{64}$")) and
 	(.prunegate_go_version | startswith("go1.27")) and
 	(.prunegate_revision | test("^[0-9a-f]{40}$")) and
-	(.predicates | keys) == ["deterministic_sidecars_equal", "full_evidence_equal", "no_log_evidence_absent", "ordered_checkpoints_equal", "source_and_build_identity_equal"] and
+	(.predicates | keys) == ["deterministic_sidecars_equal", "full_evidence_equal", "no_log_evidence_absent", "ordered_checkpoints_equal", "ordered_raw_evidence_equal", "source_and_build_identity_equal"] and
 	all(.predicates | to_entries[]; .value == true)' "$attestation" >/dev/null || fail "parity attestation self-check failed"
 printf 'integrated long-run parity verified: %s\n' "$attestation"

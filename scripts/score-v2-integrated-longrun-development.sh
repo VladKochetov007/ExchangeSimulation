@@ -32,7 +32,7 @@ done
 "$root_dir/scripts/check-v2-integrated-longrun-parity.sh" "$output_root" >/dev/null
 require_file "$parity"
 require_object "$parity"
-jq -e '.contract == "v2-integrated-longrun-parity-v3" and
+jq -e '.contract == "v2-integrated-longrun-parity-v4" and
 	(.simulator_binary_sha256 | test("^[0-9a-f]{64}$")) and
 	(.simulator_binary_go_version | startswith("go1.27")) and
 	(.analyzer_sha256 | test("^[0-9a-f]{64}$")) and
@@ -41,7 +41,7 @@ jq -e '.contract == "v2-integrated-longrun-parity-v3" and
 	(.prunegate_sha256 | test("^[0-9a-f]{64}$")) and
 	(.prunegate_go_version | startswith("go1.27")) and
 	(.prunegate_revision | test("^[0-9a-f]{40}$")) and
-	(.predicates | keys) == ["deterministic_sidecars_equal", "full_evidence_equal", "no_log_evidence_absent", "ordered_checkpoints_equal", "source_and_build_identity_equal"] and
+		(.predicates | keys) == ["deterministic_sidecars_equal", "full_evidence_equal", "no_log_evidence_absent", "ordered_checkpoints_equal", "ordered_raw_evidence_equal", "source_and_build_identity_equal"] and
 	all(.predicates | to_entries[]; .value == true)' "$parity" >/dev/null || fail "invalid parity attestation"
 
 required=(
@@ -238,8 +238,11 @@ jq -n \
 			"P4/P5 carry mechanisms and P3 replenishment remain OUT_OF_SCOPE when their recorders are disabled.",
 			"Funding anchoring, basis convergence, executable price discovery, liquidation reachability, endogenous option shape, and ecology realism remain separate claims."
 		]
-	}' >"$score_tmp"
-mv "$score_tmp" "$score"
+		}' >"$score_tmp"
+	for holdout in holdout-619 holdout-631 holdout-641; do
+		[[ ! -e "$output_root/$holdout" ]] || fail "reserved holdout output appeared before score publication: $holdout"
+	done
+	mv "$score_tmp" "$score"
 require_object "$score"
 jq -e '(.status == "QUALIFIED" or .status == "BLOCKED") and
 	(if .status == "QUALIFIED" then all(.predicates | to_entries[]; .value == true) else true end)' \

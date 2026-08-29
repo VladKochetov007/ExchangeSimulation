@@ -154,6 +154,7 @@ func TestExpiryFillAuditCountsMalformedLifecycleAndSnapshotEvidence(t *testing.T
 		expiryInstrumentLine("instrument_listed", 1, 100, "north", "ABC-FUT-1", "FUTURE"),
 		expirySettledLine(100, 100, "north", "ABC-FUT-1", "FUTURE"),
 		`{"sim_ts":2,"event":"instrument_listed","data":{"venue_id":"north","symbol":"ABC-FUT-2","payload":"broken"}}`,
+		`{"sim_ts":2,"event":"BookSnapshot","data":{"venue_id":"north","symbol":"ABC-FUT-1","payload":{"bids":[{}],"asks":[]}}}`,
 		`{"sim_ts":101,"event":"BookSnapshot","data":{"venue_id":"north","symbol":"ABC-FUT-1","payload":"broken"}}`,
 	}
 	report := Report{TerminalAccounts: []AccountRow{{Account: Account{Timestamp: 101}}}}
@@ -165,7 +166,7 @@ func TestExpiryFillAuditCountsMalformedLifecycleAndSnapshotEvidence(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.MalformedLifecycleRecords != 1 || result.MalformedSnapshotRecords != 1 {
+	if result.MalformedLifecycleRecords != 1 || result.MalformedSnapshotRecords != 2 {
 		t.Fatalf("malformed derivative lifecycle evidence disappeared: %+v", result)
 	}
 }

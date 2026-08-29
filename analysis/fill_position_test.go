@@ -5,14 +5,22 @@ import (
 	"testing"
 )
 
-func derivativeFillLine(ts int64, client uint64, venue, symbol, side string, qty, newSize int64) string {
-	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"OrderFill","data":{"venue_id":%q,"payload":{"symbol":%q,"qty":%d,"side":%q,"new_size":%d}}}`,
-		ts, client, venue, symbol, qty, side, newSize)
+func derivativeFillLine(ts int64, client uint64, venue, symbol, side string, qty, newSize int64, prices ...int64) string {
+	price := int64(100)
+	if len(prices) > 0 {
+		price = prices[0]
+	}
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"OrderFill","data":{"venue_id":%q,"payload":{"symbol":%q,"qty":%d,"side":%q,"new_size":%d,"price":%d}}}`,
+		ts, client, venue, symbol, qty, side, newSize, price)
 }
 
-func derivativePositionLine(ts int64, client uint64, venue, symbol, side string, qty, oldSize, newSize int64) string {
-	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"position_update","data":{"venue_id":%q,"payload":{"symbol":%q,"payload":{"symbol":%q,"old_size":%d,"new_size":%d,"trade_qty":%d,"trade_side":%q,"reason":"trade"}}}}`,
-		ts, client, venue, symbol, symbol, oldSize, newSize, qty, side)
+func derivativePositionLine(ts int64, client uint64, venue, symbol, side string, qty, oldSize, newSize int64, prices ...int64) string {
+	price := int64(100)
+	if len(prices) > 0 {
+		price = prices[0]
+	}
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"position_update","data":{"venue_id":%q,"payload":{"symbol":%q,"payload":{"symbol":%q,"old_size":%d,"new_size":%d,"trade_qty":%d,"trade_price":%d,"trade_side":%q,"reason":"trade"}}}}`,
+		ts, client, venue, symbol, symbol, oldSize, newSize, qty, price, side)
 }
 
 func TestFillPositionAuditPairsDerivativeOutcomes(t *testing.T) {
@@ -81,5 +89,23 @@ func TestFillPositionAuditChecksPhysicalPositionChain(t *testing.T) {
 	}
 	if result.PositionChainChecks != 1 || result.PositionChainFailures != 1 {
 		t.Fatalf("position-chain mutation survived: %+v", result)
+	}
+}
+
+func TestFillPositionAuditBindsExecutionPriceToPositionUpdate(t *testing.T) {
+	lines := []string{
+		derivativePositionLine(10, 1, "north", "ABC-PERP", "BUY", 5, 0, 5, 100),
+		derivativeFillLine(10, 1, "north", "ABC-PERP", "BUY", 5, 5, 101),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureFillPositions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PriceMismatches != 1 || result.Matched != 0 || result.MissingPositionUpdate != 1 || result.UnexpectedPositionUpdate != 1 {
+		t.Fatalf("execution/position price mutation was not rejected: %+v", result)
 	}
 }

@@ -238,6 +238,23 @@ func TestReplayDoesNotResynchroniseFromSnapshots(t *testing.T) {
 	}
 }
 
+func TestReplayCountsMalformedScoredRecords(t *testing.T) {
+	path := writeLog(t, []string{
+		`{"sim_ts":1,"event":"BookDelta","data":{"venue_id":"north","payload":{}}}`,
+		`{"sim_ts":2,"event":"Trade","data":{"venue_id":"north","payload":"broken"}}`,
+		`{"sim_ts":2,"event":"BookSnapshot","data":{"venue_id":"north","payload":{"bids":[{"price":101,"visible_qty":50}],"asks":[]}}}`,
+		`{"sim_ts":3,"event":"BookSnapshot","data":{"venue_id":"north","payload":"broken"}}`,
+		`not-json`,
+	})
+	drift, err := ReplayFile(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if drift.MalformedDeltas != 1 || drift.MalformedTrades != 1 || drift.MalformedSnapshots != 2 || drift.MalformedRecords != 1 {
+		t.Fatalf("malformed replay evidence disappeared: %+v", drift)
+	}
+}
+
 // The whole decomposition, on a book where the answer is computable by hand.
 //
 // The book is bid 100 x 40, ask 102 x 40 with 103 x 60 behind it, so the mid

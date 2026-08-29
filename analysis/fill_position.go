@@ -23,6 +23,9 @@ type FillPositionAudit struct {
 	Matched                  int `json:"matched"`
 	MissingPositionUpdate    int `json:"missing_position_update"`
 	UnexpectedPositionUpdate int `json:"unexpected_position_update"`
+	PriceMismatches          int `json:"price_mismatches"`
+	MalformedFillRecords     int `json:"malformed_fill_records"`
+	MalformedPositionUpdates int `json:"malformed_position_updates"`
 	// PositionChainChecks compares a trade update's old size with the prior
 	// persisted new size for that account/contract in physical file order.
 	PositionChainChecks   int                 `json:"position_chain_checks"`
@@ -38,11 +41,21 @@ type FillPositionVenue struct {
 	Matched                  int    `json:"matched"`
 	MissingPositionUpdate    int    `json:"missing_position_update"`
 	UnexpectedPositionUpdate int    `json:"unexpected_position_update"`
+	PriceMismatches          int    `json:"price_mismatches"`
+	MalformedFillRecords     int    `json:"malformed_fill_records"`
+	MalformedPositionUpdates int    `json:"malformed_position_updates"`
 	PositionChainChecks      int    `json:"position_chain_checks"`
 	PositionChainFailures    int    `json:"position_chain_failures"`
 }
 
 type fillPositionKey struct {
+	venue, file, symbol, side string
+	timestamp                 int64
+	clientID                  uint64
+	qty, newSize, price       int64
+}
+
+type fillPositionBaseKey struct {
 	venue, file, symbol, side string
 	timestamp                 int64
 	clientID                  uint64
@@ -87,18 +100,23 @@ func (r *Run) MeasureFillPositions() (*FillPositionAudit, error) {
 		Qty     int64  `json:"qty"`
 		Side    string `json:"side"`
 		NewSize int64  `json:"new_size"`
+		Price   int64  `json:"price"`
 	}
 	type positionPayload struct {
-		Symbol    string `json:"symbol"`
-		OldSize   int64  `json:"old_size"`
-		NewSize   int64  `json:"new_size"`
-		TradeQty  int64  `json:"trade_qty"`
-		TradeSide string `json:"trade_side"`
-		Reason    string `json:"reason"`
+		Symbol     string `json:"symbol"`
+		OldSize    int64  `json:"old_size"`
+		NewSize    int64  `json:"new_size"`
+		TradeQty   int64  `json:"trade_qty"`
+		TradeSide  string `json:"trade_side"`
+		Reason     string `json:"reason"`
+		TradePrice int64  `json:"trade_price"`
 	}
 
 	fills := make(map[fillPositionKey]int)
 	updates := make(map[fillPositionKey]int)
+	fillsByBase := make(map[fillPositionBaseKey]int)
+	updatesByBase := make(map[fillPositionBaseKey]int)
+	matchedByBase := make(map[fillPositionBaseKey]int)
 	chains := make(map[fillPositionChainKey]int64)
 	chainSeen := make(map[fillPositionChainKey]bool)
 	venues := make(map[string]*FillPositionVenue)
@@ -118,20 +136,26 @@ func (r *Run) MeasureFillPositions() (*FillPositionAudit, error) {
 		switch event.Name {
 		case "OrderFill":
 			var payload fillPayload
-			if event.Decode(&payload) != nil || !isLinearSymbol(event.VenueID, payload.Symbol, listedTypes) || payload.Qty <= 0 || payload.Side == "" {
+			if err := decodeRequiredJSON(event.Raw(), &payload, "symbol", "qty", "side", "new_size", "price"); err != nil || !isLinearSymbol(event.VenueID, payload.Symbol, listedTypes) || payload.Qty <= 0 || payload.Side == "" {
+				result.MalformedFillRecords++
 				return
 			}
-			key := fillPositionKey{event.VenueID, event.File, payload.Symbol, payload.Side, event.SimTS, event.ClientID, payload.Qty, payload.NewSize}
+			base := fillPositionBaseKey{event.VenueID, event.File, payload.Symbol, payload.Side, event.SimTS, event.ClientID, payload.Qty, payload.NewSize}
+			key := fillPositionKey{venue: base.venue, file: base.file, symbol: base.symbol, side: base.side, timestamp: base.timestamp, clientID: base.clientID, qty: base.qty, newSize: base.newSize, price: payload.Price}
 			fills[key]++
+			fillsByBase[base]++
 			result.LinearFills++
 			venue(event.VenueID).LinearFills++
 		case "position_update":
 			var payload positionPayload
-			if event.Decode(&payload) != nil || !isLinearSymbol(event.VenueID, payload.Symbol, listedTypes) || payload.Reason != "trade" || payload.TradeQty <= 0 || payload.TradeSide == "" {
+			if err := decodeRequiredJSON(event.Raw(), &payload, "symbol", "old_size", "new_size", "trade_qty", "trade_price", "trade_side", "reason"); err != nil || !isLinearSymbol(event.VenueID, payload.Symbol, listedTypes) || payload.Reason != "trade" || payload.TradeQty <= 0 || payload.TradeSide == "" {
+				result.MalformedPositionUpdates++
 				return
 			}
-			key := fillPositionKey{event.VenueID, event.File, payload.Symbol, payload.TradeSide, event.SimTS, event.ClientID, payload.TradeQty, payload.NewSize}
+			base := fillPositionBaseKey{event.VenueID, event.File, payload.Symbol, payload.TradeSide, event.SimTS, event.ClientID, payload.TradeQty, payload.NewSize}
+			key := fillPositionKey{venue: base.venue, file: base.file, symbol: base.symbol, side: base.side, timestamp: base.timestamp, clientID: base.clientID, qty: base.qty, newSize: base.newSize, price: payload.TradePrice}
 			updates[key]++
+			updatesByBase[base]++
 			result.TradePositionUpdates++
 			row := venue(event.VenueID)
 			row.TradePositionUpdates++
@@ -163,6 +187,7 @@ func (r *Run) MeasureFillPositions() (*FillPositionAudit, error) {
 		fillCount, updateCount := fills[key], updates[key]
 		matched := min(fillCount, updateCount)
 		result.Matched += matched
+		matchedByBase[fillPositionBaseKey{venue: key.venue, file: key.file, symbol: key.symbol, side: key.side, timestamp: key.timestamp, clientID: key.clientID, qty: key.qty, newSize: key.newSize}] += matched
 		row := venue(key.venue)
 		row.Matched += matched
 		if fillCount > updateCount {
@@ -175,6 +200,21 @@ func (r *Run) MeasureFillPositions() (*FillPositionAudit, error) {
 			result.UnexpectedPositionUpdate += delta
 			row.UnexpectedPositionUpdate += delta
 		}
+	}
+	baseKeys := make(map[fillPositionBaseKey]struct{}, len(fillsByBase)+len(updatesByBase))
+	for key := range fillsByBase {
+		baseKeys[key] = struct{}{}
+	}
+	for key := range updatesByBase {
+		baseKeys[key] = struct{}{}
+	}
+	for key := range baseKeys {
+		priceMismatch := min(fillsByBase[key], updatesByBase[key]) - matchedByBase[key]
+		if priceMismatch <= 0 {
+			continue
+		}
+		result.PriceMismatches += priceMismatch
+		venue(key.venue).PriceMismatches += priceMismatch
 	}
 	for _, row := range venues {
 		result.ByVenue = append(result.ByVenue, *row)

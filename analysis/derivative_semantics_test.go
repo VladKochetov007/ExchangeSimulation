@@ -386,6 +386,121 @@ func TestStrictFundingAuditBindsRateScheduleAndPhysicalOrder(t *testing.T) {
 	}
 }
 
+func TestStrictFundingAuditRejectsWrongAndIncompleteCadence(t *testing.T) {
+	const intervalSeconds = int64(1)
+	const firstDeadline = int64(3_000_000_000)
+	base := []string{
+		positionLine(firstDeadline-10, "north", 1, "ABC-PERP", auditPrecision, 0),
+		positionLine(firstDeadline-10, "north", 2, "ABC-PERP", -auditPrecision, 0),
+		fundingRateStrictLine(firstDeadline-intervalSeconds*1_000_000_000, firstDeadline, intervalSeconds, "north", 5),
+		fundingPayLine(firstDeadline, "north", 1, -400),
+		fundingPayLine(firstDeadline, "north", 2, 400),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": base}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true, ExpectedFundingIntervalSeconds: intervalSeconds,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingTimingFailures != 0 {
+		t.Fatalf("valid registered cadence was rejected: %+v", result)
+	}
+
+	wrongInterval := append([]string{}, base...)
+	wrongInterval[2] = fundingRateStrictLine(firstDeadline-intervalSeconds*1_000_000_000, firstDeadline, 2, "north", 5)
+	run, err = Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": wrongInterval}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true, ExpectedFundingIntervalSeconds: intervalSeconds,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingTimingFailures == 0 {
+		t.Fatalf("arbitrary funding interval was accepted: %+v", result)
+	}
+
+	incomplete := append([]string{}, base[:2]...)
+	incomplete = append(incomplete,
+		fundingRateStrictLine(firstDeadline-intervalSeconds*1_000_000_000, firstDeadline, intervalSeconds, "north", 5),
+		fundingRateStrictLine(firstDeadline, firstDeadline+3*1_000_000_000, intervalSeconds, "north", 5),
+		base[3], base[4])
+	run, err = Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": incomplete}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true, ExpectedFundingIntervalSeconds: intervalSeconds,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingTimingFailures == 0 {
+		t.Fatalf("skipped funding deadline was accepted: %+v", result)
+	}
+
+	duplicateDeadline := append([]string{}, base[:2]...)
+	duplicateDeadline = append(duplicateDeadline,
+		fundingRateStrictLine(firstDeadline-intervalSeconds*1_000_000_000, firstDeadline, intervalSeconds, "north", 5),
+		fundingRateStrictLine(firstDeadline-intervalSeconds*1_000_000_000/2, firstDeadline, intervalSeconds, "north", 6),
+		base[3], base[4])
+	run, err = Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": duplicateDeadline}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true, ExpectedFundingIntervalSeconds: intervalSeconds,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingTimingFailures == 0 {
+		t.Fatalf("duplicate funding deadline was accepted: %+v", result)
+	}
+}
+
+func optionFillForAudit(ts int64, clientID uint64, symbol, side string, quantity int64) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"OrderFill","data":{"venue_id":"north","symbol":%q,"payload":{"symbol":%q,"order_id":%d,"qty":%d,"side":%q}}}`,
+		ts, clientID, symbol, symbol, clientID+100, quantity, side)
+}
+
+func TestExerciseAuditRequiresExactHolderPaymentCardinality(t *testing.T) {
+	const expiry = int64(1_000_000_000)
+	strike := int64(50_000) * auditPrecision
+	settle := int64(55_000) * auditPrecision
+	intrinsic := settle - strike
+	lines := []string{
+		optionSettledLine(expiry, "north", "ABC-CARDINAL-C", strike, settle, true),
+		optionFillForAudit(expiry-1, 1, "ABC-CARDINAL-C", "BUY", auditPrecision),
+		optionFillForAudit(expiry-1, 2, "ABC-CARDINAL-C", "SELL", auditPrecision),
+		expiryPayLine(expiry, "north", 1, "ABC-CARDINAL-C", intrinsic),
+		expiryPayLine(expiry, "north", 1, "ABC-CARDINAL-C", intrinsic),
+		expiryPayLine(expiry, "north", 2, "ABC-CARDINAL-C", -intrinsic),
+		expiryPayLine(expiry, "north", 3, "ABC-CARDINAL-C", 1),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{BasePrecision: auditPrecision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Exercises) != 1 {
+		t.Fatalf("exercises = %d, want one", len(result.Exercises))
+	}
+	check := result.Exercises[0]
+	if check.DuplicatePayouts != 1 || check.UnknownPayoutHolders != 1 || result.ExerciseBroken != 1 {
+		t.Fatalf("duplicate/unknown option payments were accepted: %+v", result)
+	}
+}
+
 func TestStrictDerivativeAuditCountsMalformedEvidence(t *testing.T) {
 	const expiry = int64(1_000_000_000)
 	lines := []string{
@@ -406,5 +521,42 @@ func TestStrictDerivativeAuditCountsMalformedEvidence(t *testing.T) {
 	}
 	if result.ExerciseEvidenceFailures == 0 || result.FundingEvidenceFailures == 0 {
 		t.Fatalf("malformed derivative records disappeared: %+v", result)
+	}
+}
+
+func TestStrictDerivativeAuditRejectsMissingRequiredFieldsAndOverflow(t *testing.T) {
+	const expiry = int64(1_000_000_000)
+	lines := []string{
+		`{"sim_ts":1000000000,"client_id":0,"event":"instrument_settled","data":{"venue_id":"north","payload":{"action":"settled","symbol":"ABC-MISSING-C","instrument_type":"OPTION","strike":50,"settlement_price":55,"expiry_nano":1000000000,"timestamp":1000000000}}}`,
+		`{"sim_ts":1,"client_id":1,"event":"OrderFill","data":{"venue_id":"north","symbol":"ABC-MISSING-C","payload":{"symbol":"ABC-MISSING-C","qty":1}}}`,
+		`{"sim_ts":2,"client_id":1,"event":"balance_change","data":{"venue_id":"north","symbol":"ABC-MISSING-C","payload":{"timestamp":2,"client_id":1,"symbol":"ABC-MISSING-C","reason":"expiry_settlement","changes":[{"asset":"USD","wallet":"perp","old_balance":0,"new_balance":1}]}}}`,
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExerciseEvidenceFailures < 3 {
+		t.Fatalf("missing strict fields disappeared: %+v", result)
+	}
+
+	overflow := []string{
+		optionSettledLine(expiry, "north", "ABC-OVERFLOW-C", -9223372036854775807, 9223372036854775807, true),
+	}
+	run, err = Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": overflow}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = run.MeasureDerivativeSemantics(DerivativeAuditOptions{BasePrecision: auditPrecision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExerciseArithmeticFailures != 1 || len(result.Exercises) != 1 || !result.Exercises[0].Unrepresentable {
+		t.Fatalf("intrinsic overflow was not fail-closed: %+v", result)
 	}
 }

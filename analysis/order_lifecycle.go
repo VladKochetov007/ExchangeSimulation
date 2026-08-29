@@ -31,6 +31,10 @@ type OrderLifecycleAudit struct {
 	FillQuantityMismatches   int                   `json:"fill_quantity_mismatches"`
 	CancelQuantityMismatches int                   `json:"cancel_quantity_mismatches"`
 	ClientMismatches         int                   `json:"client_mismatches"`
+	MalformedAcceptedRecords int                   `json:"malformed_accepted_records"`
+	MalformedFillRecords     int                   `json:"malformed_fill_records"`
+	MalformedCancelRecords   int                   `json:"malformed_cancel_records"`
+	MalformedLiquidations    int                   `json:"malformed_liquidation_records"`
 	Checks                   []OrderLifecycleCheck `json:"checks,omitempty"`
 }
 
@@ -131,7 +135,8 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 		switch event.Name {
 		case "OrderAccepted":
 			var payload acceptedPayload
-			if event.Decode(&payload) != nil || payload.OrderID == 0 || payload.Qty <= 0 {
+			if err := decodeRequiredJSON(event.Raw(), &payload, "order_id", "type", "time_in_force", "qty"); err != nil || payload.OrderID == 0 || payload.Type == "" || payload.TimeInForce == "" || payload.Qty <= 0 {
+				result.MalformedAcceptedRecords++
 				return
 			}
 			key := orderLifecycleKey{venueID: event.VenueID, file: event.File, orderID: payload.OrderID}
@@ -152,7 +157,8 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 			result.Accepted++
 		case "OrderFill":
 			var payload fillPayload
-			if event.Decode(&payload) != nil || payload.OrderID == 0 || payload.Qty <= 0 {
+			if err := decodeRequiredJSON(event.Raw(), &payload, "order_id", "qty", "filled_qty", "remaining_qty", "is_full"); err != nil || payload.OrderID == 0 || payload.Qty <= 0 {
+				result.MalformedFillRecords++
 				return
 			}
 			result.FillRecords++
@@ -177,8 +183,15 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 				result.FillsAfterTerminal++
 				addFailure(key, state, "fill_after_terminal")
 			}
-			state.filled += payload.Qty
-			if state.filled != payload.FilledQty || payload.RemainingQty != state.quantity-state.filled || state.filled > state.quantity || (payload.IsFull && state.filled != state.quantity) {
+			filled, arithmeticOK := exactAdd(state.filled, payload.Qty)
+			remaining, remainingOK := exactSub(state.quantity, filled)
+			if !arithmeticOK || !remainingOK {
+				result.FillQuantityMismatches++
+				addFailure(key, state, "fill_quantity_mismatch")
+				return
+			}
+			state.filled = filled
+			if state.filled != payload.FilledQty || payload.RemainingQty != remaining || state.filled > state.quantity || (payload.IsFull && state.filled != state.quantity) {
 				result.FillQuantityMismatches++
 				addFailure(key, state, "fill_quantity_mismatch")
 			}
@@ -193,7 +206,8 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 			}
 		case "OrderCancelled":
 			var payload cancelPayload
-			if event.Decode(&payload) != nil || payload.OrderID == 0 {
+			if err := decodeRequiredJSON(event.Raw(), &payload, "order_id", "remaining_qty"); err != nil || payload.OrderID == 0 {
+				result.MalformedCancelRecords++
 				return
 			}
 			result.Cancelled++
@@ -220,7 +234,8 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 			}
 		case "liquidation":
 			var payload liquidationPayload
-			if event.Decode(&payload) != nil {
+			if err := decodeRequiredJSON(event.Raw(), &payload, "symbol"); err != nil {
+				result.MalformedLiquidations++
 				return
 			}
 			symbol := payload.Symbol
@@ -228,6 +243,7 @@ func (r *Run) MeasureOrderLifecycle() (*OrderLifecycleAudit, error) {
 				symbol = event.Symbol
 			}
 			if symbol == "" || event.ClientID == 0 {
+				result.MalformedLiquidations++
 				return
 			}
 			liquidations[orderLifecycleLiquidationKey{

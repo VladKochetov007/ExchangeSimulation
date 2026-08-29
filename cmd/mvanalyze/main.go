@@ -130,6 +130,7 @@ func main() {
 	conservationBook := flag.String("conservation-book", "", "restrict the conservation audit to one book, e.g. ABC/USD")
 	basePrecision := flag.Int64("base-precision", 100_000_000, "base-asset precision, for converting position sizes into contracts")
 	requireExactReplay := flag.Bool("require-exact-replay", false, "reject position/settlement evidence that lacks exact trade replay fields")
+	fundingIntervalSeconds := flag.Int64("funding-interval-seconds", 0, "registered funding cadence for strict derivative schedule validation")
 	deliveryFeePolicy := flag.String("delivery-fee-policy", "", "registered settlement delivery-fee policy, e.g. zero")
 	quotePrecision := flag.Int64("quote-precision", 100_000, "quote-asset precision, for converting logged prices into currency units")
 	viabilityWindow := flag.Float64("viability-window", 900, "viability window length in simulated seconds")
@@ -875,7 +876,7 @@ func main() {
 				}
 			})
 		case "derivatives":
-			result, err := run.MeasureDerivativeSemantics(analysis.DerivativeAuditOptions{BasePrecision: *basePrecision, RequireExactReplay: *requireExactReplay})
+			result, err := run.MeasureDerivativeSemantics(analysis.DerivativeAuditOptions{BasePrecision: *basePrecision, RequireExactReplay: *requireExactReplay, ExpectedFundingIntervalSeconds: *fundingIntervalSeconds})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)

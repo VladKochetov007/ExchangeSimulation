@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"encoding/json"
 	"math"
 	"sort"
 	"strings"
@@ -68,7 +69,10 @@ type DeltaConsistency struct {
 	// nothing produces a residual of zero for every asset, which is
 	// indistinguishable from a pass, so silence is counted rather than
 	// trusted.
-	DecodeFailures int `json:"decode_failures"`
+	DecodeFailures        int `json:"decode_failures"`
+	MalformedVenueRecords int `json:"malformed_venue_records"`
+	MalformedFeeRecords   int `json:"malformed_fee_records"`
+	ArithmeticFailures    int `json:"arithmetic_failures"`
 }
 
 // PositionRoundingAudit independently validates the terminal carry ledger.
@@ -245,6 +249,39 @@ func addAuditInt64(a, b int64) (int64, bool) {
 	return a + b, true
 }
 
+func subAuditInt64(a, b int64) (int64, bool) {
+	negated, ok := negateAuditInt64(b)
+	if !ok {
+		return 0, false
+	}
+	return addAuditInt64(a, negated)
+}
+
+func absoluteAuditInt64(value int64) (int64, bool) {
+	if value >= 0 {
+		return value, true
+	}
+	return negateAuditInt64(value)
+}
+
+func addConservationValue[K comparable](values map[K]int64, key K, amount int64, failures *int) {
+	next, ok := addAuditInt64(values[key], amount)
+	if !ok {
+		(*failures)++
+		return
+	}
+	values[key] = next
+}
+
+func addConservationField(value *int64, amount int64, failures *int) {
+	next, ok := addAuditInt64(*value, amount)
+	if !ok {
+		(*failures)++
+		return
+	}
+	*value = next
+}
+
 func addAuditInt64OrMarkOverflow(a, b int64, overflow *bool) int64 {
 	if result, ok := addAuditInt64(a, b); ok {
 		return result
@@ -318,7 +355,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	if err := r.Scan(scan, func(event Event) {
 		if event.Name == "position_rounding" {
 			var record positionRoundingEventRecord
-			if event.Decode(&record) != nil || record.Symbol == "" || record.Asset == "" || record.Precision <= 0 {
+			if err := decodeRequiredJSON(event.Raw(), &record, "timestamp", "client_id", "symbol", "asset", "cash_adjustment", "remainder_numerator", "precision"); err != nil || record.Symbol == "" || record.Asset == "" || record.Precision <= 0 {
 				mu.Lock()
 				rounding.Invalid++
 				mu.Unlock()
@@ -338,6 +375,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 				rounding.AggregateTerminalRemainder = next
 			} else {
 				rounding.AggregateRemainderOverflow = true
+				deltas.ArithmeticFailures++
 			}
 			key := positionRoundingKey{venue: event.VenueID, clientID: record.ClientID, symbol: record.Symbol}
 			key.timestamp = roundingTimestamp
@@ -351,18 +389,26 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		}
 		if event.Name == "venue_balance_change" {
 			var movement venueMovement
-			if event.Decode(&movement) != nil || movement.Asset == "" {
+			if err := decodeRequiredJSON(event.Raw(), &movement, "timestamp", "bucket", "asset", "reason", "old_balance", "new_balance", "delta"); err != nil || movement.Asset == "" || movement.Bucket == "" {
+				mu.Lock()
+				deltas.MalformedVenueRecords++
+				mu.Unlock()
 				return
 			}
 			mu.Lock()
-			venueRecorded[movement.Asset] += movement.Delta
+			addConservationValue(venueRecorded, movement.Asset, movement.Delta, &deltas.ArithmeticFailures)
 			if movement.Reason == "position_rounding" {
 				movementTimestamp := movement.Timestamp
 				if movementTimestamp == 0 {
 					movementTimestamp = event.SimTS
 				}
 				key := venueRoundingKey{venue: event.VenueID, symbol: movement.Symbol, timestamp: movementTimestamp, asset: movement.Asset}
-				roundingVenueFlows[key] = addAuditInt64OrMarkOverflow(roundingVenueFlows[key], movement.Delta, &rounding.AggregateRemainderOverflow)
+				if next, ok := addAuditInt64(roundingVenueFlows[key], movement.Delta); ok {
+					roundingVenueFlows[key] = next
+				} else {
+					rounding.AggregateRemainderOverflow = true
+					deltas.ArithmeticFailures++
+				}
 				if movement.Bucket != "fee_revenue" {
 					rounding.VenueBucketFailures++
 				}
@@ -372,20 +418,45 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		}
 		if event.Name == "fee_revenue" {
 			var payload feePayload
-			if event.Decode(&payload) != nil || payload.Asset == "" {
+			if err := decodeRequiredJSON(event.Raw(), &payload, "asset", "taker_fee", "maker_fee"); err != nil || payload.Asset == "" {
+				mu.Lock()
+				deltas.MalformedFeeRecords++
+				mu.Unlock()
 				return
 			}
 			mu.Lock()
-			fees[payload.Asset] += payload.TakerFee + payload.MakerFee
+			totalFee, ok := addAuditInt64(payload.TakerFee, payload.MakerFee)
+			if !ok {
+				deltas.ArithmeticFailures++
+			} else {
+				addConservationValue(fees, payload.Asset, totalFee, &deltas.ArithmeticFailures)
+			}
 			mu.Unlock()
 			return
 		}
 		var record balanceChangeRecord
-		if event.Decode(&record) != nil || len(record.Changes) == 0 {
+		if err := decodeRequiredJSON(event.Raw(), &record, "timestamp", "client_id", "reason", "changes"); err != nil || len(record.Changes) == 0 {
 			mu.Lock()
 			deltas.DecodeFailures++
 			mu.Unlock()
 			return
+		}
+		var fields map[string]json.RawMessage
+		var rawChanges []json.RawMessage
+		if json.Unmarshal(event.Raw(), &fields) != nil || json.Unmarshal(fields["changes"], &rawChanges) != nil {
+			mu.Lock()
+			deltas.DecodeFailures++
+			mu.Unlock()
+			return
+		}
+		for _, rawChange := range rawChanges {
+			var change balanceDeltaRecord
+			if err := decodeRequiredJSON(rawChange, &change, "asset", "wallet", "old_balance", "new_balance", "delta"); err != nil || change.Asset == "" || change.Wallet == "" {
+				mu.Lock()
+				deltas.DecodeFailures++
+				mu.Unlock()
+				return
+			}
 		}
 		class := contractClass(record.Symbol)
 		instant := record.Timestamp
@@ -398,19 +469,29 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		for _, change := range record.Changes {
 			if record.Reason == "position_rounding" {
 				key := positionRoundingKey{venue: event.VenueID, clientID: record.ClientID, symbol: record.Symbol, timestamp: instant, asset: change.Asset}
-				roundingBalances[key] = addAuditInt64OrMarkOverflow(roundingBalances[key], change.Delta, &rounding.AggregateRemainderOverflow)
+				if next, ok := addAuditInt64(roundingBalances[key], change.Delta); ok {
+					roundingBalances[key] = next
+				} else {
+					rounding.AggregateRemainderOverflow = true
+					deltas.ArithmeticFailures++
+				}
 				if change.Wallet != "perp" {
 					rounding.AssetWalletFailures++
 				}
 			}
 			deltas.Checked++
-			if gap := change.NewBalance - change.OldBalance - change.Delta; gap != 0 {
+			expectedBalance, expectedOK := addAuditInt64(change.OldBalance, change.Delta)
+			gap, gapOK := subAuditInt64(change.NewBalance, expectedBalance)
+			if !expectedOK || !gapOK {
+				deltas.ArithmeticFailures++
+				continue
+			}
+			if gap != 0 {
 				deltas.Mismatched++
-				if gap < 0 {
-					gap = -gap
-				}
-				if gap > deltas.WorstGap {
-					deltas.WorstGap = gap
+				if magnitude, ok := absoluteAuditInt64(gap); !ok {
+					deltas.ArithmeticFailures++
+				} else if magnitude > deltas.WorstGap {
+					deltas.WorstGap = magnitude
 				}
 			}
 			chainKey := walletKey{event.VenueID, record.ClientID, change.Asset, change.Wallet}
@@ -426,7 +507,12 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			// happens after the within-record check, which is about the
 			// record's own arithmetic and not about what the wallet means.
 			if change.Wallet == borrowedWallet {
-				change.Delta = -change.Delta
+				negated, ok := negateAuditInt64(change.Delta)
+				if !ok {
+					deltas.ArithmeticFailures++
+					continue
+				}
+				change.Delta = negated
 			}
 
 			key := flowKey{record.Reason, change.Asset}
@@ -437,23 +523,23 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			}
 			flow.Records++
 			if change.Delta >= 0 {
-				flow.Credits += change.Delta
+				addConservationField(&flow.Credits, change.Delta, &deltas.ArithmeticFailures)
 			} else {
-				flow.Debits += change.Delta
+				addConservationField(&flow.Debits, change.Delta, &deltas.ArithmeticFailures)
 			}
-			flow.Net += change.Delta
+			addConservationField(&flow.Net, change.Delta, &deltas.ArithmeticFailures)
 
 			if !externalReasons[record.Reason] {
 				if classNet[class] == nil {
 					classNet[class] = make(map[string]int64)
 				}
-				classNet[class][change.Asset] += change.Delta
+				addConservationValue(classNet[class], change.Asset, change.Delta, &deltas.ArithmeticFailures)
 			}
 
 			if perVenue[event.VenueID] == nil {
 				perVenue[event.VenueID] = make(map[string]int64)
 			}
-			perVenue[event.VenueID][change.Asset] += change.Delta
+			addConservationValue(perVenue[event.VenueID], change.Asset, change.Delta, &deltas.ArithmeticFailures)
 
 			if venueFlows[event.VenueID] == nil {
 				venueFlows[event.VenueID] = make(map[flowKey]*AssetFlow)
@@ -463,7 +549,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 				venueFlow = &AssetFlow{Reason: record.Reason, Asset: change.Asset}
 				venueFlows[event.VenueID][key] = venueFlow
 			}
-			venueFlow.Net += change.Delta
+			addConservationField(&venueFlow.Net, change.Delta, &deltas.ArithmeticFailures)
 			venueFlow.Records++
 
 			var bucket map[instantKey]*InstantResidual
@@ -488,7 +574,7 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 				residual = &InstantResidual{VenueID: event.VenueID, Timestamp: instant, Asset: change.Asset}
 				bucket[instantID] = residual
 			}
-			residual.Net += change.Delta
+			addConservationField(&residual.Net, change.Delta, &deltas.ArithmeticFailures)
 			residual.Accounts++
 		}
 	}); err != nil {
@@ -502,9 +588,15 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		}
 		venueKey := venueRoundingKey{venue: key.venue, symbol: key.symbol, timestamp: key.timestamp, asset: key.asset}
 		if negated, ok := negateAuditInt64(record.CashAdjustment); ok {
-			expectedVenueFlows[venueKey] = addAuditInt64OrMarkOverflow(expectedVenueFlows[venueKey], negated, &rounding.AggregateRemainderOverflow)
+			if next, ok := addAuditInt64(expectedVenueFlows[venueKey], negated); ok {
+				expectedVenueFlows[venueKey] = next
+			} else {
+				rounding.AggregateRemainderOverflow = true
+				deltas.ArithmeticFailures++
+			}
 		} else {
 			rounding.VenueLinkFailures++
+			deltas.ArithmeticFailures++
 		}
 	}
 	for key, amount := range roundingBalances {
@@ -541,32 +633,48 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			sign = -1
 		}
 		for _, point := range points {
-			moved[participantAsset{key.venue, key.clientID, key.asset}] += sign * point.delta
+			amount := point.delta
+			if sign < 0 {
+				var ok bool
+				amount, ok = negateAuditInt64(amount)
+				if !ok {
+					deltas.ArithmeticFailures++
+					continue
+				}
+			}
+			addConservationValue(moved, participantAsset{key.venue, key.clientID, key.asset}, amount, &deltas.ArithmeticFailures)
 		}
 	}
 	// Anchored at zero rather than at the reported opening balance: the
 	// deposits that create an opening balance are themselves logged
 	// movements, so adding them to a reported opening double-counts every
 	// account's entire endowment.
-	terminal := reportedBalances(r.Report.TerminalAccounts)
+	terminal, reportArithmeticFailures := reportedBalances(r.Report.TerminalAccounts)
+	deltas.ArithmeticFailures += reportArithmeticFailures
 	for key, closing := range terminal {
 		deltas.ChainChecked++
-		gap := closing - moved[key]
+		gap, ok := subAuditInt64(closing, moved[key])
+		if !ok {
+			deltas.ArithmeticFailures++
+			continue
+		}
 		if gap == 0 {
 			continue
 		}
 		deltas.ChainBroken++
-		if gap < 0 {
-			gap = -gap
-		}
-		if gap > deltas.WorstChain {
-			deltas.WorstChain = gap
+		magnitude, ok := absoluteAuditInt64(gap)
+		if !ok {
+			deltas.ArithmeticFailures++
+		} else if magnitude > deltas.WorstChain {
+			deltas.WorstChain = magnitude
 		}
 	}
 
 	result := &Conservation{PerVenueNet: perVenue, Deltas: deltas, PositionRounding: rounding, FeesLogged: fees, VenueRecorded: venueRecorded, ClassNet: classNet, ClassRecords: classRecords}
-	result.Identities = r.conservationIdentities(flows)
-	result.VenueIdentities = r.venueIdentities(venueFlows)
+	var identityArithmeticFailures int
+	result.Identities, identityArithmeticFailures = r.conservationIdentities(flows)
+	result.VenueIdentities, reportArithmeticFailures = r.venueIdentities(venueFlows)
+	deltas.ArithmeticFailures += identityArithmeticFailures + reportArithmeticFailures
 	for _, flow := range flows {
 		result.Flows = append(result.Flows, *flow)
 	}
@@ -605,15 +713,16 @@ func WorstResidual(residuals []InstantResidual) (InstantResidual, bool) {
 	worst := InstantResidual{}
 	found := false
 	for _, residual := range residuals {
-		magnitude := residual.Net
-		if magnitude < 0 {
-			magnitude = -magnitude
+		magnitude, ok := absoluteAuditInt64(residual.Net)
+		if !ok {
+			magnitude = math.MaxInt64
 		}
 		current := worst.Net
-		if current < 0 {
-			current = -current
+		currentMagnitude, currentOK := absoluteAuditInt64(current)
+		if !currentOK {
+			currentMagnitude = math.MaxInt64
 		}
-		if !found || magnitude > current {
+		if !found || magnitude > currentMagnitude {
 			worst, found = residual, true
 		}
 	}
@@ -633,32 +742,36 @@ var externalReasons = map[string]bool{"initial_deposit": true, "borrow": true}
 // rather than replacing it: a run whose venue movements were never recorded
 // still has to be auditable, and a disagreement between the two is itself the
 // finding.
-func (r *Run) venueTake() map[string]int64 {
+func (r *Run) venueTake() (map[string]int64, int) {
 	take := make(map[string]int64)
+	arithmeticFailures := 0
 	for _, ledger := range r.Report.VenueLedgers {
 		for asset, amount := range ledger.FeeRevenue {
-			take[asset] += amount
+			addConservationValue(take, asset, amount, &arithmeticFailures)
 		}
 		for asset, amount := range ledger.InsuranceFund {
-			take[asset] += amount
+			addConservationValue(take, asset, amount, &arithmeticFailures)
 		}
 	}
-	return take
+	return take, arithmeticFailures
 }
 
 // conservationIdentities closes the books per asset.
-func (r *Run) conservationIdentities(flows map[flowKey]*AssetFlow) []ConservationIdentity {
+func (r *Run) conservationIdentities(flows map[flowKey]*AssetFlow) ([]ConservationIdentity, int) {
 	external := make(map[string]int64)
 	internal := make(map[string]int64)
+	arithmeticFailures := 0
 	for key, flow := range flows {
 		if externalReasons[key.reason] {
-			external[key.asset] += flow.Net
+			addConservationValue(external, key.asset, flow.Net, &arithmeticFailures)
 			continue
 		}
-		internal[key.asset] += flow.Net
+		addConservationValue(internal, key.asset, flow.Net, &arithmeticFailures)
 	}
-	take := r.venueTake()
-	linear, optionMark := r.openPositionValue()
+	take, failures := r.venueTake()
+	arithmeticFailures += failures
+	linear, optionMark, failures := r.openPositionValue()
+	arithmeticFailures += failures
 
 	assets := make(map[string]struct{})
 	for asset := range external {
@@ -688,17 +801,28 @@ func (r *Run) conservationIdentities(flows map[flowKey]*AssetFlow) []Conservatio
 			identity.OpenLinearValue = linear
 			identity.OpenOptionMark = optionMark
 		}
-		identity.Residual = identity.InternalNet + identity.ExchangeTake + identity.OpenLinearValue
-		scale := identity.ExternalIn
-		if scale < 0 {
-			scale = -scale
+		residual, ok := addAuditInt64(identity.InternalNet, identity.ExchangeTake)
+		if !ok {
+			arithmeticFailures++
+			continue
+		}
+		residual, ok = addAuditInt64(residual, identity.OpenLinearValue)
+		if !ok {
+			arithmeticFailures++
+			continue
+		}
+		identity.Residual = residual
+		scale, scaleOK := absoluteAuditInt64(identity.ExternalIn)
+		if !scaleOK {
+			arithmeticFailures++
+			continue
 		}
 		if scale > 0 {
 			identity.ResidualRelative = float64(identity.Residual) / float64(scale)
 		}
 		identities = append(identities, identity)
 	}
-	return identities
+	return identities, arithmeticFailures
 }
 
 // settlementAsset is the asset derivative profit is paid in.
@@ -717,18 +841,19 @@ const settlementAsset = "USD"
 // frozen baseline the two agree to the unit over twenty-four hours. Any run
 // where they disagree invalidates this identity, which is why the positions
 // audit reports the gap rather than hiding it.
-func (r *Run) openPositionValue() (int64, int64) {
+func (r *Run) openPositionValue() (int64, int64, int) {
 	linear, options := int64(0), int64(0)
+	arithmeticFailures := 0
 	for _, row := range r.Report.TerminalAccounts {
 		for _, position := range row.Account.Positions {
 			if isOptionSymbol(position.Symbol) {
-				options += position.UnrealizedPnL
+				addConservationField(&options, position.UnrealizedPnL, &arithmeticFailures)
 				continue
 			}
-			linear += position.UnrealizedPnL
+			addConservationField(&linear, position.UnrealizedPnL, &arithmeticFailures)
 		}
 	}
-	return linear, options
+	return linear, options, arithmeticFailures
 }
 
 // isOptionSymbol reports whether a contract is an option, by the call or put
@@ -738,17 +863,18 @@ func isOptionSymbol(symbol string) bool {
 }
 
 // venueIdentities closes the books at each venue separately.
-func (r *Run) venueIdentities(venueFlows map[string]map[flowKey]*AssetFlow) []VenueConservationIdentity {
+func (r *Run) venueIdentities(venueFlows map[string]map[flowKey]*AssetFlow) ([]VenueConservationIdentity, int) {
 	take := make(map[string]map[string]int64)
+	arithmeticFailures := 0
 	for _, ledger := range r.Report.VenueLedgers {
 		if take[ledger.VenueID] == nil {
 			take[ledger.VenueID] = make(map[string]int64)
 		}
 		for asset, amount := range ledger.FeeRevenue {
-			take[ledger.VenueID][asset] += amount
+			addConservationValue(take[ledger.VenueID], asset, amount, &arithmeticFailures)
 		}
 		for asset, amount := range ledger.InsuranceFund {
-			take[ledger.VenueID][asset] += amount
+			addConservationValue(take[ledger.VenueID], asset, amount, &arithmeticFailures)
 		}
 	}
 	openLinear := make(map[string]int64)
@@ -757,7 +883,7 @@ func (r *Run) venueIdentities(venueFlows map[string]map[flowKey]*AssetFlow) []Ve
 			if isOptionSymbol(position.Symbol) {
 				continue
 			}
-			openLinear[row.VenueID] += position.UnrealizedPnL
+			addConservationValue(openLinear, row.VenueID, position.UnrealizedPnL, &arithmeticFailures)
 		}
 	}
 
@@ -778,10 +904,10 @@ func (r *Run) venueIdentities(venueFlows map[string]map[flowKey]*AssetFlow) []Ve
 				perAsset[key.asset] = identity
 			}
 			if externalReasons[key.reason] {
-				identity.ExternalIn += flow.Net
+				addConservationField(&identity.ExternalIn, flow.Net, &arithmeticFailures)
 			} else {
-				identity.InternalNet += flow.Net
-				identity.ByReason[key.reason] += flow.Net
+				addConservationField(&identity.InternalNet, flow.Net, &arithmeticFailures)
+				addConservationValue(identity.ByReason, key.reason, flow.Net, &arithmeticFailures)
 			}
 		}
 		assets := make([]string, 0, len(perAsset))
@@ -795,14 +921,26 @@ func (r *Run) venueIdentities(venueFlows map[string]map[flowKey]*AssetFlow) []Ve
 			if asset == settlementAsset {
 				identity.OpenLinearValue = openLinear[venue]
 			}
-			identity.Residual = identity.InternalNet + identity.ExchangeTake + identity.OpenLinearValue
-			if scale := identity.ExternalIn; scale > 0 {
+			residual, ok := addAuditInt64(identity.InternalNet, identity.ExchangeTake)
+			if !ok {
+				arithmeticFailures++
+				continue
+			}
+			residual, ok = addAuditInt64(residual, identity.OpenLinearValue)
+			if !ok {
+				arithmeticFailures++
+				continue
+			}
+			identity.Residual = residual
+			if scale, scaleOK := absoluteAuditInt64(identity.ExternalIn); scaleOK && scale > 0 {
 				identity.ResidualRelative = float64(identity.Residual) / float64(scale)
+			} else if !scaleOK {
+				arithmeticFailures++
 			}
 			out = append(out, *identity)
 		}
 	}
-	return out
+	return out, arithmeticFailures
 }
 
 // contractClass groups a symbol by how its cash conserves.
@@ -831,15 +969,16 @@ type participantAsset struct {
 
 // reportedBalances flattens an account report into net holdings per asset,
 // counting debt as negative.
-func reportedBalances(rows []AccountRow) map[participantAsset]int64 {
+func reportedBalances(rows []AccountRow) (map[participantAsset]int64, int) {
 	out := make(map[participantAsset]int64, len(rows)*2)
+	arithmeticFailures := 0
 	for _, row := range rows {
 		for _, balance := range row.Account.SpotBalances {
-			out[participantAsset{row.VenueID, row.ClientID, balance.Asset}] += balance.NetAsset
+			addConservationValue(out, participantAsset{row.VenueID, row.ClientID, balance.Asset}, balance.NetAsset, &arithmeticFailures)
 		}
 		for _, balance := range row.Account.PerpBalances {
-			out[participantAsset{row.VenueID, row.ClientID, balance.Asset}] += balance.NetAsset
+			addConservationValue(out, participantAsset{row.VenueID, row.ClientID, balance.Asset}, balance.NetAsset, &arithmeticFailures)
 		}
 	}
-	return out
+	return out, arithmeticFailures
 }

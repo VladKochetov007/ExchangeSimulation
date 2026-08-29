@@ -248,3 +248,43 @@ func TestConservationDistinguishesRoundingRelistingsAndOverflow(t *testing.T) {
 		t.Fatalf("overflow audit = %+v, want invalid aggregate overflow", conservation.PositionRounding)
 	}
 }
+
+func TestConservationCountsMalformedVenueAndFeeRecords(t *testing.T) {
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/derivatives.jsonl": {
+			`{"sim_ts":1,"client_id":0,"event":"venue_balance_change","data":{"venue_id":"north","payload":{"asset":"USD","delta":1}}}`,
+			`{"sim_ts":2,"client_id":0,"event":"fee_revenue","data":{"venue_id":"north","payload":{"asset":"USD","taker_fee":1}}}`,
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deltas.MalformedVenueRecords != 1 || result.Deltas.MalformedFeeRecords != 1 {
+		t.Fatalf("malformed venue/fee evidence disappeared: %+v", result.Deltas)
+	}
+}
+
+func TestConservationRejectsAggregateIntegerOverflow(t *testing.T) {
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/spot/ABC-USD.jsonl": {
+			`{"sim_ts":1,"client_id":1,"event":"balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"client_id":1,"reason":"trade_settlement","changes":[{"asset":"USD","wallet":"spot","old_balance":0,"new_balance":9223372036854775807,"delta":9223372036854775807}]}}}`,
+			`{"sim_ts":2,"client_id":1,"event":"balance_change","data":{"venue_id":"north","payload":{"timestamp":2,"client_id":1,"reason":"trade_settlement","changes":[{"asset":"USD","wallet":"spot","old_balance":0,"new_balance":1,"delta":1}]}}}`,
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deltas.ArithmeticFailures == 0 {
+		t.Fatalf("aggregate overflow was silently wrapped: %+v", result.Deltas)
+	}
+}

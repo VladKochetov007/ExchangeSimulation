@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -36,6 +37,31 @@ func (e *Event) Decode(target any) error { return json.Unmarshal(e.payload, targ
 
 // Raw returns the innermost payload without decoding it.
 func (e *Event) Raw() json.RawMessage { return e.payload }
+
+// decodeRequiredJSON decodes a payload and verifies that the fields which carry
+// its identity and outcome are present. json.Unmarshal intentionally leaves a
+// missing numeric field at zero; that is useful for optional fields but unsafe
+// for evidence audits, where a dropped field can otherwise become a plausible
+// zero-valued record.
+func decodeRequiredJSON(raw json.RawMessage, target any, required ...string) error {
+	if err := json.Unmarshal(raw, target); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("payload is not a JSON object")
+	}
+	for _, name := range required {
+		value, present := fields[name]
+		if !present || string(bytes.TrimSpace(value)) == "null" {
+			return fmt.Errorf("missing required payload field %q", name)
+		}
+	}
+	return nil
+}
 
 type envelope struct {
 	SimTS    int64           `json:"sim_ts"`
