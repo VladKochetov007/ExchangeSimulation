@@ -43,14 +43,26 @@ type MDPublisher struct {
 	// gateway mapping would redirect every existing symbol to the last
 	// subscriber gateway.
 	gateways map[string]map[uint64]Subscriber
-	mu       sync.Mutex
-	seqNum   uint64
+	// orderedSubscribers caches each symbol's subscriber list in client-ID
+	// order. Publish fans out in that order on every message, and rebuilding
+	// and re-sorting it per publish was 250ms of Publish's 570ms on a
+	// 15-minute integrated run, over a subscription set that changes only when
+	// a client subscribes or disconnects. subscriptionGeneration is bumped by
+	// every mutation of Subscriptions or gateways under mu, which invalidates
+	// the whole cache.
+	orderedSubscribers     map[string][]uint64
+	orderedSubscribersGen  map[string]uint64
+	subscriptionGeneration uint64
+	mu                     sync.Mutex
+	seqNum                 uint64
 }
 
 func NewMDPublisher() *MDPublisher {
 	return &MDPublisher{
-		Subscriptions: make(map[string]map[uint64]*etypes.Subscription),
-		gateways:      make(map[string]map[uint64]Subscriber),
+		Subscriptions:         make(map[string]map[uint64]*etypes.Subscription),
+		gateways:              make(map[string]map[uint64]Subscriber),
+		orderedSubscribers:    make(map[string][]uint64),
+		orderedSubscribersGen: make(map[string]uint64),
 	}
 }
 
@@ -82,6 +94,7 @@ func (p *MDPublisher) Subscribe(clientID uint64, symbol string, types []etypes.M
 		Types:    merged,
 	}
 	p.gateways[symbol][clientID] = gateway
+	p.subscriptionGeneration++
 }
 
 // Unsubscribe removes a subscription. When gateway is provided, it must be
@@ -104,9 +117,12 @@ func (p *MDPublisher) Unsubscribe(clientID uint64, symbol string, gateway ...Sub
 
 	delete(subs, clientID)
 	delete(p.gateways[symbol], clientID)
+	p.subscriptionGeneration++
 	if len(subs) == 0 {
 		delete(p.Subscriptions, symbol)
 		delete(p.gateways, symbol)
+		delete(p.orderedSubscribers, symbol)
+		delete(p.orderedSubscribersGen, symbol)
 	}
 }
 
@@ -120,9 +136,12 @@ func (p *MDPublisher) UnsubscribeClient(clientID uint64) {
 	for symbol, subs := range p.Subscriptions {
 		delete(subs, clientID)
 		delete(p.gateways[symbol], clientID)
+		p.subscriptionGeneration++
 		if len(subs) == 0 {
 			delete(p.Subscriptions, symbol)
 			delete(p.gateways, symbol)
+			delete(p.orderedSubscribers, symbol)
+			delete(p.orderedSubscribersGen, symbol)
 		}
 	}
 }
@@ -148,6 +167,30 @@ func containsMDType(types []etypes.MDType, target etypes.MDType) bool {
 	return false
 }
 
+// subscribersInClientOrder returns a symbol's subscribers in ascending
+// client-ID order. Callers must hold p.mu. The returned slice is owned by the
+// publisher: read it, do not retain or mutate it.
+//
+// The length comparison is a guard, not an optimization: a future mutation site
+// that forgets to bump subscriptionGeneration would otherwise hand Publish a
+// client that no longer subscribes. It is O(1) and turns that mistake into a
+// rebuild.
+func (p *MDPublisher) subscribersInClientOrder(symbol string, subs map[uint64]*etypes.Subscription) []uint64 {
+	if cached, ok := p.orderedSubscribers[symbol]; ok &&
+		p.orderedSubscribersGen[symbol] == p.subscriptionGeneration &&
+		len(cached) == len(subs) {
+		return cached
+	}
+	clientIDs := make([]uint64, 0, len(subs))
+	for clientID := range subs {
+		clientIDs = append(clientIDs, clientID)
+	}
+	slices.Sort(clientIDs)
+	p.orderedSubscribers[symbol] = clientIDs
+	p.orderedSubscribersGen[symbol] = p.subscriptionGeneration
+	return clientIDs
+}
+
 func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, timestamp int64) {
 	p.mu.Lock()
 	subs := p.Subscriptions[symbol]
@@ -167,18 +210,15 @@ func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, tim
 	// identical, but that only decides exact ties: subscribers with modelled
 	// latency are delivered through the scheduler at their own arrival times,
 	// so publish order does not move them.
-	clientIDs := make([]uint64, 0, len(subs))
-	for clientID := range subs {
-		clientIDs = append(clientIDs, clientID)
-	}
-	slices.Sort(clientIDs)
+	clientIDs := p.subscribersInClientOrder(symbol, subs)
+	symbolGateways := p.gateways[symbol]
 
 	for _, clientID := range clientIDs {
 		sub := subs[clientID]
 		if !containsMDType(sub.Types, mdType) {
 			continue
 		}
-		gateway := p.gateways[symbol][clientID]
+		gateway := symbolGateways[clientID]
 		if gateway != nil {
 			if !gateway.IsRunning() {
 				continue
