@@ -2,6 +2,7 @@ package simulation
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -27,7 +28,15 @@ func (c *RealClock) NowUnix() int64 {
 }
 
 type SimulatedClock struct {
-	current int64
+	// current is read far more often than anything else in the simulator: every
+	// order, every log record and every scheduled callback asks for the time.
+	// Readers therefore load it atomically instead of taking mu, which cost two
+	// atomic read-modify-writes per read through RWMutex. Writers still hold mu,
+	// because advancing the clock is a compare-and-set against goal that must
+	// stay atomic with respect to other writers; the atomic store only makes the
+	// value safely visible to lock-free readers, and a reader observes exactly
+	// the same set of values it observed under the read lock.
+	current atomic.Int64
 	// goal accumulates Advance targets so concurrent Advance calls compose
 	// additively (each gets its own disjoint time window) instead of both
 	// computing a target from the same base and losing one delta.
@@ -37,28 +46,19 @@ type SimulatedClock struct {
 }
 
 func NewSimulatedClock(start int64) *SimulatedClock {
-	return &SimulatedClock{
-		current: start,
-		goal:    start,
-	}
+	clock := &SimulatedClock{goal: start}
+	clock.current.Store(start)
+	return clock
 }
 
-func (c *SimulatedClock) NowUnixNano() int64 {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.current
-}
+func (c *SimulatedClock) NowUnixNano() int64 { return c.current.Load() }
 
-func (c *SimulatedClock) NowUnix() int64 {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.current / 1e9
-}
+func (c *SimulatedClock) NowUnix() int64 { return c.current.Load() / 1e9 }
 
 func (c *SimulatedClock) Advance(delta time.Duration) {
 	c.mu.Lock()
-	if c.goal < c.current {
-		c.goal = c.current
+	if now := c.current.Load(); c.goal < now {
+		c.goal = now
 	}
 	c.goal += int64(delta)
 	target := c.goal
@@ -75,8 +75,8 @@ func (c *SimulatedClock) Advance(delta time.Duration) {
 
 	// Rest at the requested time even when the last event fired earlier.
 	c.mu.Lock()
-	if c.current < target {
-		c.current = target
+	if c.current.Load() < target {
+		c.current.Store(target)
 	}
 	c.mu.Unlock()
 }
@@ -84,7 +84,7 @@ func (c *SimulatedClock) Advance(delta time.Duration) {
 func (c *SimulatedClock) SetTime(t int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.current = t
+	c.current.Store(t)
 }
 
 // SetScheduler sets the event scheduler for this clock
