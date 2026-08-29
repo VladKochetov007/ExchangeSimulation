@@ -206,6 +206,26 @@ v2_r5_verify_venue_namespace() {
 	fi
 }
 
+v2_r5_verify_venue_directories() {
+	local cell=$1 manifest=$2
+	local expected actual
+	expected=$({
+		printf 'venues\n'
+		jq -r '.raw_files[].path' "$manifest" | awk -F/ '{
+		path = $1
+		for (level = 2; level < NF; level++) {
+			path = path "/" $level
+			print path
+		}
+		}'
+	} | sort -u)
+	actual=$({
+		printf 'venues\n'
+		find "$cell/venues" -mindepth 1 -type d -printf '%P\n' | sed 's#^#venues/#'
+	} | sort -u)
+	[[ "$actual" == "$expected" ]]
+}
+
 v2_r5_verify_raw_evidence_archive() {
 	local cell=$1
 	local archive descriptor evidence_manifest
@@ -251,6 +271,9 @@ v2_r5_verify_raw_evidence_archive() {
 		v2_r5_validate_raw_path "$relative" || return 1
 	done < <(jq -r '.raw_files[].path' "$evidence_manifest")
 	v2_r5_verify_venue_namespace "$cell" || return 1
+	if [[ "$log_mode" == full ]]; then
+		v2_r5_verify_venue_directories "$cell" "$evidence_manifest" || return 1
+	fi
 	local expected_archive_bytes actual_archive_bytes
 	expected_archive_bytes=$(jq -er '.archive_bytes' "$descriptor") || return 1
 	[[ "$expected_archive_bytes" =~ ^[0-9]+$ ]] || return 1
@@ -260,6 +283,19 @@ v2_r5_verify_raw_evidence_archive() {
 	listed=$(tar --use-compress-program='zstd -q' -tf "$archive" | sed '/\/$/d' | sort) || return 1
 	expected=$(jq -r '.raw_files[].path' "$evidence_manifest" | sort) || return 1
 	[[ "$listed" == "$expected" ]] || return 1
+	local listed_directories expected_directories
+	listed_directories=$(tar --use-compress-program='zstd -q' -tf "$archive" | awk '/\/$/ {sub(/\/$/, ""); print}' | sort) || return 1
+	expected_directories=$({
+		printf 'venues\n'
+		jq -r '.raw_files[].path' "$evidence_manifest" | awk -F/ '{
+		path = $1
+		for (level = 2; level < NF; level++) {
+			path = path "/" $level
+			print path
+		}
+		}'
+	} | sort -u) || return 1
+	[[ "$listed_directories" == "$expected_directories" ]] || return 1
 	if tar --use-compress-program='zstd -q' -tvf "$archive" | awk '$1 !~ /^[d-]/ {exit 1}'; then
 		:
 	else
@@ -306,9 +342,9 @@ v2_r5_verify_raw_evidence_archive() {
 	export V2_R5_ARCHIVE_EXPECTED_TSV="$expected_tsv"
 	measure_command='set -eu
 tab=$(printf "\t")
-expected_line=$(grep -F -m1 -- "$TAR_FILENAME$tab" "$V2_R5_ARCHIVE_EXPECTED_TSV")
-expected_bytes=$(printf "%s\n" "$expected_line" | cut -f2)
-expected_digest=$(printf "%s\n" "$expected_line" | cut -f3)
+expected_line=$(awk -F "\t" -v path="$TAR_FILENAME" "(\$1 == path) { print \$2 \"\t\" \$3; found=1; exit } END { if (!found) exit 1 }" "$V2_R5_ARCHIVE_EXPECTED_TSV")
+expected_bytes=$(printf "%s\n" "$expected_line" | cut -f1)
+expected_digest=$(printf "%s\n" "$expected_line" | cut -f2)
 measure_dir=$(mktemp -d)
 trap "rm -rf -- \"$measure_dir\"" EXIT
 mkfifo "$measure_dir/raw"
@@ -335,7 +371,9 @@ v2_r5_stage_raw_evidence() {
 	marker="$cell/.raw-evidence-staged.$$"
 	v2_r5_verify_venue_namespace "$cell" || return 1
 	if find "$cell/venues" -type f -name '*.jsonl' -print -quit 2>/dev/null | grep -q .; then
-		return 0
+		if v2_r5_verify_evidence_manifest "$cell"; then
+			return 0
+		fi
 	fi
 	archive=$(v2_r5_raw_archive_path "$cell")
 	[[ -s "$archive" ]] || return 1

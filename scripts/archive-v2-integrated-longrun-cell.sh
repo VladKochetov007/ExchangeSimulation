@@ -35,25 +35,65 @@ case "$cell_name" in
 esac
 
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "raw archiving requires a clean gate worktree"
-required_inputs=(run-config.json run-metadata.json run-status.json manifest.json greeks.json latency.json checkpoints.jsonl evidence-manifest.json integrity.json)
-if [[ "$cell_name" != dev-607-g8 ]]; then
-	required_inputs+=(analysis-metadata.json)
+required_inputs=(run-config.json run-metadata.json run-status.json manifest.json greeks.json latency.json checkpoints.jsonl evidence-manifest.json)
+if [[ "$cell_name" == dev-607-g8 ]]; then
+	required_inputs+=(parity-attestation.json)
+else
+	required_inputs+=(integrity.json analysis-metadata.json)
 fi
 for input in "${required_inputs[@]}"; do
 	[[ -s "$cell/$input" ]] || fail "missing completed-cell input: $cell/$input"
 done
 [[ "$(jq -er '.log_mode' "$cell/run-config.json")" == full ]] || fail "raw archive requires full log mode"
-[[ ! -e "$(v2_r5_raw_archive_path "$cell")" ]] || fail "raw archive already exists"
-[[ ! -e "$(v2_r5_raw_archive_descriptor_path "$cell")" ]] || fail "raw archive descriptor already exists"
 v2_r5_require_raw_archive_attestation_path "$cell_name" || fail "raw archive attestation namespace is not canonical"
-[[ ! -e "$(v2_r5_raw_archive_attestation_path "$cell_name")" ]] || fail "raw archive attestation already exists"
+
+archive=$(v2_r5_raw_archive_path "$cell")
+descriptor=$(v2_r5_raw_archive_descriptor_path "$cell")
+archive_attestation=$(v2_r5_raw_archive_attestation_path "$cell_name")
+sealed_artifact_present=false
+for artifact in "$archive" "$descriptor" "$archive_attestation"; do
+	if [[ -e "$artifact" ]]; then
+		sealed_artifact_present=true
+	fi
+done
+if [[ "$sealed_artifact_present" == true ]]; then
+	[[ -s "$archive" && -s "$descriptor" && -s "$archive_attestation" ]] ||
+		fail "incomplete sealed archive state; refusing to repair automatically"
+	v2_r5_verify_raw_evidence_archive "$cell" || fail "existing raw archive state does not verify"
+	v2_r5_verify_attestation "$cell" || fail "external evidence attestation does not verify"
+	[[ "$prune" == true ]] || fail "raw archive already exists"
+	relative=''
+	while IFS= read -r relative; do
+		v2_r5_validate_raw_path "$relative" || fail "manifest contains an unsafe raw path"
+		local_path="$cell/$relative"
+		if [[ -L "$local_path" || -f "$local_path" ]]; then
+			rm -- "$local_path"
+		elif [[ -e "$local_path" ]]; then
+			fail "raw path is not a regular file: $local_path"
+		fi
+	done < <(jq -r '.raw_files[].path' "$cell/evidence-manifest.json")
+	v2_r5_verify_evidence_manifest "$cell" || fail "archived evidence manifest failed after resumable raw prune"
+	printf 'resumed and completed lossless raw evidence prune: %s\n' "$cell"
+	exit 0
+fi
 [[ ! -e "$cell/.raw-evidence-staged.$$" ]] || fail "staging marker collides with archive process"
 
 jq -e '.exit_status == 0 and .completion_verified == true' "$cell/run-status.json" >/dev/null || fail "cell is not a completed run"
-jq -e '.contract == "v2-integrated-longrun-candidate-v5" and
-		(.predicates | type) == "object" and
-		all(.predicates | to_entries[]; .value == true)' "$cell/integrity.json" >/dev/null ||
-	fail "cell measurement contract has not passed"
+if [[ "$cell_name" != dev-607-g8 ]]; then
+	jq -e '.contract == "v2-integrated-longrun-candidate-v5" and
+			(.predicates | type) == "object" and
+			all(.predicates | to_entries[]; .value == true)' "$cell/integrity.json" >/dev/null ||
+		fail "cell measurement contract has not passed"
+else
+	jq -e --arg source_revision "$(jq -er '.git_revision' "$cell/run-metadata.json")" \
+		'any(.controls[]; .cell == "dev-607-g8" and .log_mode == "full" and .gomaxprocs == 8) and
+		 .contract == "v2-integrated-longrun-parity-v4" and
+		 .source_revision == $source_revision and
+		 .predicates.full_evidence_equal == true and
+		 .predicates.ordered_raw_evidence_equal == true and
+		 all(.predicates | to_entries[]; .value == true)' "$cell/parity-attestation.json" >/dev/null ||
+		fail "G8 parity attestation has not passed"
+fi
 v2_r5_verify_evidence_manifest "$cell" || fail "source evidence manifest does not verify"
 v2_r5_verify_attestation "$cell" || fail "external evidence attestation does not verify"
 
@@ -64,11 +104,8 @@ if find "$cell/venues" -type f ! -name '*.jsonl' -print -quit 2>/dev/null | grep
 	fail "venue evidence contains a non-JSONL regular file"
 fi
 
-archive=$(v2_r5_raw_archive_path "$cell")
 archive_tmp="$archive.tmp-$$"
-descriptor=$(v2_r5_raw_archive_descriptor_path "$cell")
 descriptor_tmp="$descriptor.tmp-$$"
-archive_attestation=$(v2_r5_raw_archive_attestation_path "$cell_name")
 archive_attestation_tmp="$archive_attestation.tmp-$$"
 trap 'rm -f -- "$archive_tmp" "$descriptor_tmp" "$archive_attestation_tmp"' EXIT
 tar --format=posix --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
@@ -118,8 +155,7 @@ if [[ "$prune" == true ]]; then
 	while IFS= read -r relative; do
 		v2_r5_validate_raw_path "$relative" || fail "manifest contains an unsafe raw path"
 		local_path="$cell/$relative"
-		[[ -f "$local_path" && ! -L "$local_path" ]] || fail "raw path disappeared before archive prune: $local_path"
-		rm -- "$local_path"
+		[[ -f "$local_path" && ! -L "$local_path" ]] && rm -- "$local_path"
 	done < <(jq -r '.raw_files[].path' "$cell/evidence-manifest.json")
 	v2_r5_verify_evidence_manifest "$cell" || fail "archived evidence manifest failed after raw prune"
 fi

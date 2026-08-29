@@ -27,17 +27,23 @@ v2_r5_attestation_root="$tmp_root/attestations"
 cell="$tmp_root/dev-607"
 mkdir -p "$cell/venues/north"
 printf '%s\n' '{"sequence":1,"event":"trade"}' >"$cell/venues/north/events.jsonl"
+printf '%s\n' '{"sequence":3,"event":"quote"}' >"$cell/venues/north/events-extra.jsonl"
 printf '%s\n' '{"log_mode":"full"}' >"$cell/run-config.json"
 printf '%s\n' '{"git_revision":"0123456789abcdef0123456789abcdef01234567"}' >"$cell/run-metadata.json"
 printf '%s\n' '{"exit_status":0}' >"$cell/run-status.json"
 
-raw_bytes=$(stat -c '%s' "$cell/venues/north/events.jsonl")
-raw_sha256=$(sha256sum "$cell/venues/north/events.jsonl" | awk '{print $1}')
-cat_manifest=$(jq -n --arg sha256 "$raw_sha256" --argjson bytes "$raw_bytes" \
+event_bytes=$(stat -c '%s' "$cell/venues/north/events.jsonl")
+event_sha256=$(sha256sum "$cell/venues/north/events.jsonl" | awk '{print $1}')
+extra_bytes=$(stat -c '%s' "$cell/venues/north/events-extra.jsonl")
+extra_sha256=$(sha256sum "$cell/venues/north/events-extra.jsonl" | awk '{print $1}')
+raw_bytes=$((event_bytes + extra_bytes))
+cat_manifest=$(jq -n --arg event_sha256 "$event_sha256" --arg extra_sha256 "$extra_sha256" \
+	--argjson event_bytes "$event_bytes" --argjson extra_bytes "$extra_bytes" --argjson raw_bytes "$raw_bytes" \
 	'{schema_version: 1, contract: "v2-integrated-longrun-evidence-manifest-v1", cell: "dev-607",
-	 log_mode: "full", source_revision: "0123456789abcdef0123456789abcdef01234567",
-	 fixed_files: [], raw_jsonl_files: 1, raw_jsonl_bytes: $bytes,
-	 raw_files: [{path: "venues/north/events.jsonl", bytes: $bytes, sha256: $sha256}]}' )
+	 log_mode: "full", source_revision: "0123456789abcdef0123456789abcdef01234567", fixed_files: [],
+	 raw_jsonl_files: 2, raw_jsonl_bytes: $raw_bytes, raw_files: [
+	 {path: "venues/north/events.jsonl", bytes: $event_bytes, sha256: $event_sha256},
+	 {path: "venues/north/events-extra.jsonl", bytes: $extra_bytes, sha256: $extra_sha256}]}' )
 printf '%s\n' "$cat_manifest" >"$cell/evidence-manifest.json"
 
 archive=$(v2_r5_raw_archive_path "$cell")
@@ -49,14 +55,14 @@ archive_bytes=$(stat -c '%s' "$archive")
 manifest_sha256=$(sha256sum "$cell/evidence-manifest.json" | awk '{print $1}')
 status_sha256=$(sha256sum "$cell/run-status.json" | awk '{print $1}')
 jq -n --arg archive_sha256 "$archive_sha256" --arg manifest_sha256 "$manifest_sha256" \
-	--arg status_sha256 "$status_sha256" --arg raw_sha256 "$raw_sha256" --argjson raw_bytes "$raw_bytes" \
-	--argjson archive_bytes "$archive_bytes" \
+	--arg status_sha256 "$status_sha256" --argjson archive_bytes "$archive_bytes" \
+	--slurpfile evidence_manifest "$cell/evidence-manifest.json" \
 	'{schema_version: 1, contract: "v2-integrated-longrun-raw-archive-v1", cell: "dev-607",
 	 log_mode: "full", source_revision: "0123456789abcdef0123456789abcdef01234567",
 	 archive: "raw-evidence.tar.zst", archive_sha256: $archive_sha256, archive_bytes: $archive_bytes,
 	 evidence_manifest_sha256: $manifest_sha256, run_status_sha256: $status_sha256,
-	 raw_jsonl_files: 1, raw_jsonl_bytes: $raw_bytes,
-	 raw_files: [{path: "venues/north/events.jsonl", bytes: $raw_bytes, sha256: $raw_sha256}]}' \
+	 raw_jsonl_files: $evidence_manifest[0].raw_jsonl_files, raw_jsonl_bytes: $evidence_manifest[0].raw_jsonl_bytes,
+	 raw_files: $evidence_manifest[0].raw_files}' \
 	>"$(v2_r5_raw_archive_descriptor_path "$cell")" || fail "could not write descriptor"
 	descriptor_sha256=$(sha256sum "$(v2_r5_raw_archive_descriptor_path "$cell")" | awk '{print $1}')
 mkdir -p "$v2_r5_attestation_root"
@@ -74,6 +80,8 @@ v2_r5_stage_raw_evidence "$cell" || fail "valid archive did not stage"
 [[ -e "$cell/.raw-evidence-staged.$$" ]] || fail "staging marker was not created"
 cmp -s <(printf '%s\n' '{"sequence":1,"event":"trade"}') "$cell/venues/north/events.jsonl" ||
 	fail "staged raw evidence differs from source"
+cmp -s <(printf '%s\n' '{"sequence":3,"event":"quote"}') "$cell/venues/north/events-extra.jsonl" ||
+	fail "staged secondary raw evidence differs from source"
 v2_r5_cleanup_staged_raw_evidence "$cell" || fail "staged raw evidence did not clean up"
 [[ ! -e "$cell/venues/north/events.jsonl" && ! -e "$cell/.raw-evidence-staged.$$" ]] ||
 	fail "cleanup left staged evidence behind"
@@ -92,6 +100,7 @@ mv "$tmp_root/content-manifest.json" "$content_cell/evidence-manifest.json"
 content_manifest_sha256=$(sha256sum "$content_cell/evidence-manifest.json" | awk '{print $1}')
 mkdir -p "$tmp_root/tampered/venues/north"
 printf '%s\n' '{"sequence":2,"event":"tampered"}' >"$tmp_root/tampered/venues/north/events.jsonl"
+printf '%s\n' '{"sequence":3,"event":"quote"}' >"$tmp_root/tampered/venues/north/events-extra.jsonl"
 tar --format=posix --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
 	--no-acls --no-xattrs --no-selinux --use-compress-program='zstd -q -T1' \
 	-cf "$content_cell/raw-evidence.tar.zst" -C "$tmp_root/tampered" venues
@@ -116,6 +125,7 @@ expect_failure v2_r5_verify_raw_evidence_archive "$content_cell"
 rm -rf "$tmp_root/tampered"
 mkdir -p "$tmp_root/symlinked/venues/north"
 ln -s /dev/null "$tmp_root/symlinked/venues/north/events.jsonl"
+printf '%s\n' '{"sequence":3,"event":"quote"}' >"$tmp_root/symlinked/venues/north/events-extra.jsonl"
 tar --format=posix --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
 	--no-acls --no-xattrs --no-selinux --use-compress-program='zstd -q -T1' \
 	-cf "$content_cell/raw-evidence.tar.zst" -C "$tmp_root/symlinked" venues
