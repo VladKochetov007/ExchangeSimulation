@@ -135,3 +135,24 @@ func TestPrefilterSelectionIdentical(t *testing.T) {
 		}
 	}
 }
+
+// retainedCorpusLines returns the lines of the corpus named by
+// MVANALYZE_BENCH_CORPUS, or ok=false when no corpus is configured. Tests that
+// need real evidence records share it.
+func retainedCorpusLines(t *testing.T) ([][]byte, bool) {
+	t.Helper()
+	path := os.Getenv("MVANALYZE_BENCH_CORPUS")
+	if path == "" {
+		t.Skip("set MVANALYZE_BENCH_CORPUS to a JSONL evidence file")
+		return nil, false
+	}
+	blob, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := bytes.Split(blob, []byte("\n"))
+	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
+		lines = lines[:len(lines)-1]
+	}
+	return lines, true
+}

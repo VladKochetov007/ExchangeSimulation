@@ -375,8 +375,8 @@ func scanFileFused(path string, requests []*fusedRequest) {
 		if len(selected) == 0 {
 			continue
 		}
-		var outer dataLayer
-		if err := json.Unmarshal(env.Data, &outer); err != nil {
+		venueID, symbol, payload, err := decodeEventLayers(env.Data)
+		if err != nil {
 			wrapped := fmt.Errorf("analysis: parse evidence data layer in %s: %w", path, err)
 			for _, i := range selected {
 				consumers[i].request.fail(wrapped)
@@ -386,17 +386,8 @@ func scanFileFused(path string, requests []*fusedRequest) {
 		}
 		event := Event{
 			SimTS: env.SimTS, ClientID: env.ClientID, Name: env.Event,
-			VenueID: outer.VenueID, Symbol: outer.Symbol, File: path, Ordinal: ordinal,
-			payload: outer.Payload,
-		}
-		if mayNestPayload(outer.Payload) {
-			var inner dataLayer
-			if json.Unmarshal(outer.Payload, &inner) == nil && len(inner.Payload) > 0 {
-				if inner.Symbol != "" {
-					event.Symbol = inner.Symbol
-				}
-				event.payload = inner.Payload
-			}
+			VenueID: venueID, Symbol: symbol, File: path, Ordinal: ordinal,
+			payload: payload,
 		}
 		if scanStatsEnabled {
 			scanVisits.Add(int64(len(selected)))

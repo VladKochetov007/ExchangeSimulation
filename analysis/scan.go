@@ -197,25 +197,14 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 		if len(keep) > 0 && !keep[env.Event] {
 			continue
 		}
-		var outer dataLayer
-		if err := json.Unmarshal(env.Data, &outer); err != nil {
+		venueID, symbol, payload, err := decodeEventLayers(env.Data)
+		if err != nil {
 			return fmt.Errorf("analysis: parse evidence data layer in %s: %w", path, err)
 		}
 		event := Event{
 			SimTS: env.SimTS, ClientID: env.ClientID, Name: env.Event,
-			VenueID: outer.VenueID, Symbol: outer.Symbol, File: path, Ordinal: ordinal,
-			payload: outer.Payload,
-		}
-		// Unwrap the derivative nesting: an inner payload means the fields sit
-		// one level down and the symbol travels with them.
-		if mayNestPayload(outer.Payload) {
-			var inner dataLayer
-			if json.Unmarshal(outer.Payload, &inner) == nil && len(inner.Payload) > 0 {
-				if inner.Symbol != "" {
-					event.Symbol = inner.Symbol
-				}
-				event.payload = inner.Payload
-			}
+			VenueID: venueID, Symbol: symbol, File: path, Ordinal: ordinal,
+			payload: payload,
 		}
 		if scanStatsEnabled {
 			scanVisits.Add(1)
