@@ -115,6 +115,10 @@ func (r *Run) Scan(opts ScanOptions, visit func(Event)) error {
 		needles = append(needles, []byte(`"`+name+`"`))
 	}
 
+	if scanStatsEnabled {
+		scanCalls.Add(1)
+		scanFiles.Add(int64(len(files)))
+	}
 	workers := opts.Workers
 	if workers <= 0 {
 		workers = runtime.GOMAXPROCS(0)
@@ -161,8 +165,18 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 	for scanner.Scan() {
 		ordinal++
 		line := scanner.Bytes()
+		if scanStatsEnabled {
+			scanLines.Add(1)
+			scanBytes.Add(int64(len(line)) + 1)
+		}
 		if len(needles) > 0 && !containsAny(line, needles) {
+			if scanStatsEnabled {
+				scanPrefilter.Add(1)
+			}
 			continue
+		}
+		if scanStatsEnabled {
+			scanEnvelopes.Add(1)
 		}
 		var env envelope
 		if err := json.Unmarshal(line, &env); err != nil {
@@ -188,6 +202,9 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 				event.Symbol = inner.Symbol
 			}
 			event.payload = inner.Payload
+		}
+		if scanStatsEnabled {
+			scanVisits.Add(1)
 		}
 		visit(event)
 	}

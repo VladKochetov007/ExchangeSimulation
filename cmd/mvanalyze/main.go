@@ -200,6 +200,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer profiles.Stop()
+	// Offline measurement aid; inert unless MVANALYZE_SCAN_STATS is set.
+	defer analysis.ReportScanStats()
 	if *metric == "termcarryp4pair" {
 		if len(flag.Args()) != 2 {
 			fmt.Fprintln(os.Stderr, "termcarryp4pair requires exactly: <control run dir> <treatment run dir>")
