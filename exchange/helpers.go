@@ -8,6 +8,13 @@ const btcPrecision = 100_000_000
 
 func newBook(side Side) *Book { return ebook.NewBook(side) }
 
+// newDetachedBookWithCapacity builds a book for short-lived preview matching.
+// It differs from a venue book only in not maintaining the owner index that
+// admission checks consult, which no preview ever queries.
+func newDetachedBookWithCapacity(side Side, orderCapacity, limitCapacity int) *Book {
+	return ebook.NewDetachedBook(side, orderCapacity, limitCapacity)
+}
+
 func newBookWithCapacity(side Side, orderCapacity, limitCapacity int) *Book {
 	return ebook.NewBookWithCapacity(side, orderCapacity, limitCapacity)
 }

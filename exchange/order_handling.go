@@ -689,6 +689,20 @@ func previewRemainingQty(executions []*Execution, totalQty int64) (int64, bool) 
 // positionExposureViolation reserves signed position headroom for every
 // same-direction resting order, preventing a later valid match from wrapping
 // position size after the matcher has already mutated book state.
+// restingOrdersOf narrows a side to one client's resting orders when the book
+// maintains an owner index, and returns the whole side otherwise.
+//
+// Callers keep their own ownership filter, so the narrowed and full candidate
+// sets select identically; the index only avoids visiting orders that the
+// filter would reject. A detached preview book has no index and therefore takes
+// the scan, which is what it did before.
+func restingOrdersOf(side *Book, clientID uint64) map[uint64]*Order {
+	if side.TracksOwners() {
+		return side.OrdersForClient(clientID)
+	}
+	return side.Orders
+}
+
 func (e *DefaultExchange) positionExposureViolation(clientID uint64, book *OrderBook, req *OrderRequest) bool {
 	if req.PositionSide == PositionLong && req.Side == Sell || req.PositionSide == PositionShort && req.Side == Buy {
 		return false
@@ -697,11 +711,15 @@ func (e *DefaultExchange) positionExposureViolation(clientID uint64, book *Order
 	if pos := e.Positions.GetPositionBySide(clientID, req.Symbol, req.PositionSide); pos != nil {
 		size = pos.Size
 	}
-	orders := book.Bids.Orders
+	side := book.Bids
 	if req.Side == Sell {
-		orders = book.Asks.Orders
+		side = book.Asks
 	}
-	for _, order := range orders {
+	// Only this client's resting orders can change its exposure, so consult the
+	// owner index when the book maintains one. The ownership filter below is
+	// kept exactly as it was, so the indexed and scanned paths admit the same
+	// orders and a book without an index behaves as before.
+	for _, order := range restingOrdersOf(side, clientID) {
 		if order.ClientID != clientID || order.PositionSide != req.PositionSide {
 			continue
 		}
@@ -748,7 +766,7 @@ func (e *DefaultExchange) hedgeReduceViolation(clientID uint64, book *OrderBook,
 	if req.Side == Buy {
 		side = book.Bids
 	}
-	for _, order := range side.Orders {
+	for _, order := range restingOrdersOf(side, clientID) {
 		if order.ClientID == clientID && order.PositionSide == req.PositionSide {
 			resting += order.Qty - order.FilledQty
 		}
@@ -986,7 +1004,7 @@ func cloneBookForPreviewExcluding(source *Book, excluded map[uint64]struct{}) (*
 	// A preview has no lifetime beyond this admission check. Give its indexes
 	// only the live source cardinality rather than the long-lived venue-book
 	// defaults; capacity does not enter matching or queue semantics.
-	clone := newBookWithCapacity(source.Side, len(source.Orders), len(source.Limits))
+	clone := newDetachedBookWithCapacity(source.Side, len(source.Orders), len(source.Limits))
 	for limit := source.ActiveHead; limit != nil; limit = limit.Next {
 		for order := limit.Head; order != nil; order = order.Next {
 			if _, skip := excluded[order.ID]; skip {
@@ -1744,7 +1762,7 @@ func (e *DefaultExchange) cancelOwnCrossingQuotes(client *Client, book *OrderBoo
 		opposite = book.Bids
 	}
 	var targets []*Order
-	for _, o := range opposite.Orders {
+	for _, o := range restingOrdersOf(opposite, client.ID) {
 		// Parent == nil means fully filled and awaiting settlement cleanup.
 		if o.ClientID != client.ID || o.Parent == nil {
 			continue

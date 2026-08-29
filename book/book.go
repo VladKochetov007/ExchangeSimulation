@@ -171,6 +171,19 @@ type Book struct {
 	ActiveTail *etypes.Limit
 	Orders     map[uint64]*etypes.Order
 	Limits     map[int64]*etypes.Limit
+	// byClient indexes resting orders by owner. Admission answers three
+	// questions per order placement that each concern one client's own resting
+	// orders — exposure, hedge-reduce, and self-crossing quotes — and each
+	// previously scanned the whole side to find them, which is O(book) work to
+	// examine a handful of orders. Profiling put two of those scans at 3.48%
+	// and 1.66% of simulator CPU.
+	//
+	// It is nil on preview clones. A clone is built order by order and thrown
+	// away without being queried, so maintaining an index for it would add
+	// allocation to the largest allocation site in the simulator to serve
+	// nobody. OrdersForClient returns nil when the index is absent, which is
+	// how callers know to fall back to the full scan.
+	byClient map[uint64]map[uint64]*etypes.Order
 }
 
 // NewBook creates an empty one-sided book.
@@ -187,11 +200,27 @@ func NewBook(side etypes.Side) *Book {
 // and short-lived, so reserving 1,024 order and 256 level slots for every
 // preflight clone otherwise dominates allocation and GC work.
 func NewBookWithCapacity(side etypes.Side, orderCapacity, limitCapacity int) *Book {
-	return &Book{
+	return newBookWithOwnerIndex(side, orderCapacity, limitCapacity, true)
+}
+
+// NewDetachedBook creates a book for short-lived preview matching. It behaves
+// identically to NewBookWithCapacity for every queue, matching and public state
+// question, and differs only in not maintaining the owner index that admission
+// checks use on live venue books.
+func NewDetachedBook(side etypes.Side, orderCapacity, limitCapacity int) *Book {
+	return newBookWithOwnerIndex(side, orderCapacity, limitCapacity, false)
+}
+
+func newBookWithOwnerIndex(side etypes.Side, orderCapacity, limitCapacity int, trackOwners bool) *Book {
+	book := &Book{
 		Side:   side,
 		Orders: make(map[uint64]*etypes.Order, orderCapacity),
 		Limits: make(map[int64]*etypes.Limit, limitCapacity),
 	}
+	if trackOwners {
+		book.byClient = make(map[uint64]map[uint64]*etypes.Order)
+	}
+	return book
 }
 
 func (b *Book) AddOrder(order *etypes.Order) bool {
@@ -215,7 +244,44 @@ func (b *Book) AddOrder(order *etypes.Order) bool {
 		return false
 	}
 	b.Orders[order.ID] = order
+	if b.byClient != nil {
+		owned := b.byClient[order.ClientID]
+		if owned == nil {
+			owned = make(map[uint64]*etypes.Order)
+			b.byClient[order.ClientID] = owned
+		}
+		owned[order.ID] = order
+	}
 	return true
+}
+
+// OrdersForClient returns the client's resting orders on this side, or nil when
+// this book does not maintain the owner index and the caller must scan Orders.
+//
+// The returned map is owned by the book: read it, do not retain or mutate it.
+func (b *Book) OrdersForClient(clientID uint64) map[uint64]*etypes.Order {
+	if b == nil || b.byClient == nil {
+		return nil
+	}
+	return b.byClient[clientID]
+}
+
+// TracksOwners reports whether OrdersForClient is authoritative for this book.
+func (b *Book) TracksOwners() bool { return b != nil && b.byClient != nil }
+
+// forgetOwner removes an order from the owner index.
+func (b *Book) forgetOwner(order *etypes.Order) {
+	if b.byClient == nil {
+		return
+	}
+	owned := b.byClient[order.ClientID]
+	if owned == nil {
+		return
+	}
+	delete(owned, order.ID)
+	if len(owned) == 0 {
+		delete(b.byClient, order.ClientID)
+	}
 }
 
 func (b *Book) CancelOrder(orderID uint64) *etypes.Order {
@@ -227,10 +293,12 @@ func (b *Book) CancelOrder(orderID uint64) *etypes.Order {
 	if limit == nil {
 		// Fully filled and already unlinked by the matcher; only the ID index remains.
 		delete(b.Orders, orderID)
+		b.forgetOwner(order)
 		return order
 	}
 	UnlinkOrder(order)
 	delete(b.Orders, orderID)
+	b.forgetOwner(order)
 	if IsEmpty(limit) {
 		b.RemoveLimit(limit)
 	}
