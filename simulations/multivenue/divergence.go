@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"exchange_sim/census"
+	etypes "exchange_sim/types"
 	"fmt"
 	"hash"
 	"io"
@@ -134,11 +135,29 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 // time. The result is nil whenever the caller must not reuse it: no sink, a
 // closed sink, or a payload the encoder rejected, in which case the logger runs
 // its own marshal and keeps its own failure handling.
+// appendBufferHint sizes the buffer handed to a JSONAppender. The census puts
+// the mean balance_change payload at 315 bytes, so a 256-byte buffer forced a
+// growslice on most events and handed back more allocations than
+// encoding/json's pooled encoder did. Sized to clear the common case outright.
+const appendBufferHint = 512
+
 func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venueID string, payload any) json.RawMessage {
 	if s == nil {
 		return nil
 	}
-	encoded, err := json.Marshal(payload)
+	// Fast path: a payload that can append its own canonical JSON skips
+	// encoding/json's reflection entirely. The bytes are identical by contract
+	// and by differential test, so the ordered execution-stream digest this
+	// feeds is unchanged. A fresh buffer per call because the result is handed
+	// back to the caller as the log payload and must not be reused underneath
+	// it.
+	var encoded []byte
+	var err error
+	if appender, ok := payload.(etypes.JSONAppender); ok {
+		encoded = appender.AppendJSON(make([]byte, 0, appendBufferHint))
+	} else {
+		encoded, err = json.Marshal(payload)
+	}
 	reusable := encoded
 	if err != nil {
 		encoded = []byte(`"unencodable"`)

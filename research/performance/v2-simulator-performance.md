@@ -1114,8 +1114,8 @@ is called but never stored. Verified rather than assumed.
 
 | measurement | before | after | delta |
 |---|---:|---:|---|
-| allocated objects / sim-hour | 137,780,800 | 135,358,257 | **−2,422,543 (−1.76 %)** |
-| peak RSS (median of 2) | 742.6 MB | 739.5 MB | **−0.43 %** |
+| allocated objects / sim-hour | 137,780,800 | 135,358,257 | −1.76 % — **RETRACTED, see below** |
+| peak RSS (median of 2) | 742.6 MB | 739.5 MB | −0.43 % (2 samples, weak) |
 | wall clock, 1 h sim, 4 reps | 25.96 s | 26.03 s | +0.26 % (A/A control +0.20 %) |
 | execution stream hash, seeds 900101 / 900102 | — | — | **byte-identical** |
 
@@ -1203,3 +1203,77 @@ build. The acceptance test is the one already in use: identical seed and config
 must reproduce the identical execution stream hash, which is exactly the
 property a byte-identical encoder preserves and a faster-but-different encoder
 would destroy.
+
+### Correction — the allocation profile is sampled, and its noise floor is 1.9 %
+
+I accepted C1 partly on "−2,422,543 allocated objects (−1.76 %)", and called it
+a deterministic count rather than a timing. **That was wrong, and the claim is
+retracted.**
+
+`-allocprofile` is a *sampled* profile: Go records one sample per
+`MemProfileRate` bytes (512 KB by default) and scales up, so `alloc_objects` is
+an estimate, not a count. Running the identical binary on the identical seed and
+config three times:
+
+```
+mv-lazy run 1   137,718,484
+mv-lazy run 2   136,911,770
+mv-lazy run 3   139,533,169     spread 2,621,399 = 1.9 %
+```
+
+**The noise floor is larger than the effect I reported.** The −1.76 % is not
+evidence of anything.
+
+This is the same discipline that was already applied to wall clock — establish
+A/A before believing a small delta — and I simply failed to apply it to a
+profile I had labelled "deterministic" in my own head. The lesson generalizes:
+*sampling* is a property of the instrument, not of whether the number looks like
+an exact integer. `alloc_objects` prints as `137,780,800` and reads as a census;
+it is not one. The census counters in this branch are exact, because they are
+atomic increments on every call. Profiles are not.
+
+What survives for C1: the trajectory is byte-identical, the test suite is green,
+the census count of 1,387,675 fan-outs reaching nobody is exact (it is an atomic
+counter, not a profile), and wall clock is unchanged within an A/A control.
+**No performance benefit is demonstrated.** C1 removes provably redundant work,
+and that is the honest justification for keeping it — not a measured speedup.
+
+### Track E, first increment — byte-identical hand encoding, not yet justified
+
+`types.JSONAppender` is an optional interface for payloads on the hot evidence
+path: a type that can append its own JSON, byte-for-byte identical to
+`encoding/json.Marshal`. `checkpointSink.observe` uses it when the payload
+implements it and falls back to `encoding/json` otherwise, so adding a type
+costs nothing elsewhere and no registry is edited.
+
+Implemented for `BalanceChangeEvent` and `BalanceDelta` — the largest single
+event type at 20.2 % of hashed bytes. Byte identity is enforced by a
+differential test against `encoding/json`, not by inspection: 20,000 randomized
+events covering quote, backslash, control, HTML-significant (`<`, `>`, `&`),
+non-ASCII and invalid-UTF-8 strings, integer extremes, `omitempty` on and off,
+and the nil-versus-empty slice distinction (`null` versus `[]`). Strings that
+the fast path cannot reproduce verbatim fall back to `encoding/json` for that
+string, which is what makes byte identity a guarantee rather than an assumption
+about the data.
+
+| measurement | before | after |
+|---|---:|---:|
+| execution stream hash, seeds 900101 / 900102 | — | **byte-identical** |
+| `encoding/json.Marshal`, cumulative CPU | 14.99 % | **13.14 %** |
+| allocated objects, median of 3 | 135,779,557 | 143,615,708 (**+5.8 %**) |
+| wall clock, 1 h sim, 4 reps | 25.78 s | 26.11 s (+0.84 %, A/A control +0.73 %) |
+
+**Not accepted.** The reflection cost does fall — 1.85 percentage points off
+`json.Marshal` for a type worth 20.2 % of the bytes, which is the right
+direction and roughly the right size. But allocations rise 5.8 %, well outside
+the 1.9 % sampling floor, and wall clock does not move.
+
+The cause is buffer sizing. `encoding/json.Marshal` encodes into a pooled
+`encodeState` and then allocates a result of exactly the right length; the
+appender allocates a fixed hint up front. At a 256-byte hint most events grew;
+raising it to 512 stopped the growth but now over-allocates against a 315-byte
+mean. Next increment: carry a per-event-name size hint learned from the previous
+encoding so the single allocation is right-sized, then extend to the remaining
+four types that make up 76 % of hashed bytes and measure once with a signal big
+enough to clear the noise. Kept wired, and explicitly marked unaccepted, because
+the next step builds directly on it.
