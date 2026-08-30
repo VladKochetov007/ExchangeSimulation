@@ -2,6 +2,7 @@ package instrument
 
 import (
 	"fmt"
+	"strconv"
 
 	etypes "exchange_sim/types"
 )
@@ -17,15 +18,17 @@ type ContractSpec struct {
 	MinOrderSize   int64
 }
 
-// DatedFuturesLister maintains a ladder of dated futures on one underlying:
-// whenever fewer than len(TenorsNano) unexpired contracts exist, it lists a
-// new contract with exactly the configured tenor remaining. A fresh generation
-// is created only after the preceding one reaches expiry, so TenorsNano is a
-// contract lifetime rather than an epoch-dependent calendar approximation.
+// DatedFuturesLister lists dated futures on one underlying. Calendar mode is
+// selected when Calendar is non-nil; TenorsNano remains an explicit legacy
+// rolling-ladder adapter for historical configurations.
 type DatedFuturesLister struct {
 	Underlying string // spot symbol, e.g. "ABC/USD"
 	Spec       ContractSpec
-	// TenorsNano lists contract lifetimes to keep on the board (sorted ascending).
+	// Calendar generates fixed expiry timestamps from deterministic listing
+	// schedules. Schedule family names are not part of contract identity.
+	Calendar          *ExpiryCalendar
+	CalendarEpochNano int64
+	// TenorsNano is the compatibility path for historical rolling-ladder runs.
 	TenorsNano []int64
 	// DeliveryFeeBps is stamped on every listed contract.
 	DeliveryFeeBps int64
@@ -34,11 +37,15 @@ type DatedFuturesLister struct {
 
 	listed     map[int64]bool // expiry -> listed
 	nextExpiry map[int64]int64
+	calendar   calendarCursor
 }
 
 func (l *DatedFuturesLister) PendingListings(nowNano int64, _ etypes.ListingPriceSource) ([]etypes.Instrument, error) {
 	if l.listed == nil {
 		l.listed = make(map[int64]bool)
+	}
+	if l.Calendar != nil {
+		return l.pendingCalendarListings(nowNano)
 	}
 	if l.nextExpiry == nil {
 		l.nextExpiry = make(map[int64]int64)
@@ -53,29 +60,58 @@ func (l *DatedFuturesLister) PendingListings(nowNano int64, _ etypes.ListingPric
 			continue
 		}
 		l.listed[expiry] = true
-		symbol := fmt.Sprintf("%s-FUT-%d", l.Spec.Base, expiry/1e9)
-		f := NewExpiringFutures(symbol, l.Spec.Base, l.Spec.Quote,
-			l.Spec.BasePrecision, l.Spec.QuotePrecision, l.Spec.TickSize, l.Spec.MinOrderSize, expiry)
-		f.Underlying = l.Underlying
-		f.DeliveryFeeBps = l.DeliveryFeeBps
-		if l.ObservationWindowNano > 0 {
-			f.SetObservationWindow(l.ObservationWindowNano)
-		}
-		out = append(out, f)
+		out = append(out, l.newFuture(expiry))
 	}
 	return out, nil
 }
 
+func (l *DatedFuturesLister) pendingCalendarListings(nowNano int64) ([]etypes.Instrument, error) {
+	requests, nextIndex, err := l.calendar.due(l.Calendar, l.CalendarEpochNano, nowNano)
+	if err != nil {
+		return nil, fmt.Errorf("dated futures calendar: %w", err)
+	}
+	seenExpiries := make(map[int64]struct{}, len(requests))
+	var out []etypes.Instrument
+	for _, request := range requests {
+		if l.listed[request.expiryNano] {
+			continue
+		}
+		if _, exists := seenExpiries[request.expiryNano]; exists {
+			continue
+		}
+		seenExpiries[request.expiryNano] = struct{}{}
+		l.listed[request.expiryNano] = true
+		out = append(out, l.newFuture(request.expiryNano))
+	}
+	// Futures have no price-dependent construction, so every due family cursor
+	// advances even when another family requested the same expiry.
+	l.calendar.nextIndex = nextIndex
+	return out, nil
+}
+
+func (l *DatedFuturesLister) newFuture(expiryNano int64) etypes.Instrument {
+	symbol := fmt.Sprintf("%s-FUT-%s", l.Spec.Base, expirySymbolLabel(expiryNano))
+	future := NewExpiringFutures(symbol, l.Spec.Base, l.Spec.Quote,
+		l.Spec.BasePrecision, l.Spec.QuotePrecision, l.Spec.TickSize, l.Spec.MinOrderSize, expiryNano)
+	future.Underlying = l.Underlying
+	future.DeliveryFeeBps = l.DeliveryFeeBps
+	if l.ObservationWindowNano > 0 {
+		future.SetObservationWindow(l.ObservationWindowNano)
+	}
+	return future
+}
+
 var _ etypes.ListingPolicy = (*DatedFuturesLister)(nil)
 
-// OptionChainLister lists European option chains: for each tenor it creates
-// calls and puts at StrikesPerSide strikes either side of the underlying
-// price (rounded to StrikeStep), the venue pattern for keeping a chain
-// centered while spot moves.
+// OptionChainLister lists European option chains. Calendar mode creates one
+// fixed chain per expiry; TenorsNano is retained for historical rolling-ladder
+// configurations where the chain was allowed to grow as spot moved.
 type OptionChainLister struct {
-	Underlying string
-	Spec       ContractSpec
-	TenorsNano []int64
+	Underlying        string
+	Spec              ContractSpec
+	Calendar          *ExpiryCalendar
+	CalendarEpochNano int64
+	TenorsNano        []int64
 	// StrikeStep is the strike grid spacing in quote precision units.
 	StrikeStep int64
 	// StrikesPerSide counts strikes above and below the central strike.
@@ -94,23 +130,28 @@ type OptionChainLister struct {
 	// ObservationWindowNano overrides the settlement TWAP window when > 0.
 	ObservationWindowNano int64
 
-	listed     map[string]bool
-	nextExpiry map[int64]int64
-	strikes    map[int64]map[int64]struct{}
+	listed         map[string]bool
+	nextExpiry     map[int64]int64
+	strikes        map[int64]map[int64]struct{}
+	calendar       calendarCursor
+	calendarListed map[int64]bool
 }
 
 func (l *OptionChainLister) PendingListings(nowNano int64, prices etypes.ListingPriceSource) ([]etypes.Instrument, error) {
 	if l.listed == nil {
 		l.listed = make(map[string]bool)
 	}
+	if l.StrikeStep <= 0 || l.StrikesPerSide < 0 {
+		return nil, nil
+	}
+	if l.Calendar != nil {
+		return l.pendingCalendarChains(nowNano, prices)
+	}
 	if l.nextExpiry == nil {
 		l.nextExpiry = make(map[int64]int64)
 	}
 	if l.strikes == nil {
 		l.strikes = make(map[int64]map[int64]struct{})
-	}
-	if l.StrikeStep <= 0 || l.StrikesPerSide < 0 {
-		return nil, nil
 	}
 	spot, err := prices.Price(l.Underlying)
 	if err != nil {
@@ -143,6 +184,66 @@ func (l *OptionChainLister) PendingListings(nowNano int64, prices etypes.Listing
 			}
 		}
 	}
+	return out, nil
+}
+
+func (l *OptionChainLister) pendingCalendarChains(nowNano int64, prices etypes.ListingPriceSource) ([]etypes.Instrument, error) {
+	requests, nextIndex, err := l.calendar.due(l.Calendar, l.CalendarEpochNano, nowNano)
+	if err != nil {
+		return nil, fmt.Errorf("option chain calendar: %w", err)
+	}
+	if len(requests) == 0 {
+		l.calendar.nextIndex = nextIndex
+		return nil, nil
+	}
+	if prices == nil {
+		return nil, fmt.Errorf("option-chain listing underlying %s: price source is nil", l.Underlying)
+	}
+	spot, err := prices.Price(l.Underlying)
+	if err != nil {
+		return nil, fmt.Errorf("option-chain listing underlying %s: %w", l.Underlying, err)
+	}
+	if spot <= 0 {
+		return nil, fmt.Errorf("option-chain listing underlying %s: %w", l.Underlying, etypes.ErrPriceDomain)
+	}
+	center := ((spot + l.StrikeStep/2) / l.StrikeStep) * l.StrikeStep
+	if l.strikes == nil {
+		l.strikes = make(map[int64]map[int64]struct{})
+	}
+	if l.calendarListed == nil {
+		l.calendarListed = make(map[int64]bool)
+	}
+
+	seenExpiries := make(map[int64]struct{}, len(requests))
+	var out []etypes.Instrument
+	var expiries []int64
+	for _, request := range requests {
+		if l.calendarListed[request.expiryNano] {
+			continue
+		}
+		if _, exists := seenExpiries[request.expiryNano]; exists {
+			continue
+		}
+		seenExpiries[request.expiryNano] = struct{}{}
+		expiries = append(expiries, request.expiryNano)
+	}
+	for _, expiryNano := range expiries {
+		for i := -l.StrikesPerSide; i <= l.StrikesPerSide; i++ {
+			strike := center + int64(i)*l.StrikeStep
+			if strike <= 0 || !l.allowStrike(expiryNano, strike) {
+				continue
+			}
+			for _, isCall := range []bool{true, false} {
+				// appendOption is deterministic and idempotent by the full option
+				// identity, while calendarListed prevents re-centering this expiry.
+				out = l.appendOption(out, strike, expiryNano, isCall)
+			}
+		}
+		l.calendarListed[expiryNano] = true
+	}
+	// A successfully priced batch commits every schedule cursor, including
+	// colliding requests that produced no second instrument.
+	l.calendar.nextIndex = nextIndex
 	return out, nil
 }
 
@@ -214,7 +315,7 @@ func (l *OptionChainLister) appendOption(out []etypes.Instrument, strike, expiry
 	if strike%l.Spec.QuotePrecision != 0 {
 		strikeLabel = strike
 	}
-	symbol := fmt.Sprintf("%s-%d-%d-%s", l.Spec.Base, expiry/1e9, strikeLabel, cp)
+	symbol := fmt.Sprintf("%s-%s-%d-%s", l.Spec.Base, expirySymbolLabel(expiry), strikeLabel, cp)
 	if l.listed[symbol] {
 		return out
 	}
@@ -233,6 +334,13 @@ func (l *OptionChainLister) appendOption(out []etypes.Instrument, strike, expiry
 		opt.SetObservationWindow(l.ObservationWindowNano)
 	}
 	return append(out, opt)
+}
+
+func expirySymbolLabel(expiryNano int64) string {
+	if expiryNano%1_000_000_000 == 0 {
+		return strconv.FormatInt(expiryNano/1_000_000_000, 10)
+	}
+	return strconv.FormatInt(expiryNano, 10) + "ns"
 }
 
 var _ etypes.ListingPolicy = (*OptionChainLister)(nil)

@@ -509,14 +509,17 @@ type Config struct {
 	// signal.
 	MetaorderTraders *MetaorderTraderConfig `json:"metaorder_traders"`
 
-	ShortOptionTenor          time.Duration `json:"short_option_tenor"`
-	LongOptionTenor           time.Duration `json:"long_option_tenor"`
-	ShortFutureTenor          time.Duration `json:"short_future_tenor"`
-	LongFutureTenor           time.Duration `json:"long_future_tenor"`
-	OptionIV                  float64       `json:"option_iv"`
-	StrikesPerSide            int           `json:"strikes_per_side"`
-	StrikeStepUSD             int64         `json:"strike_step_usd"`
-	OptionMaxStrikesPerExpiry int           `json:"option_max_strikes_per_expiry"`
+	ShortOptionTenor time.Duration `json:"short_option_tenor"`
+	LongOptionTenor  time.Duration `json:"long_option_tenor"`
+	ShortFutureTenor time.Duration `json:"short_future_tenor"`
+	LongFutureTenor  time.Duration `json:"long_future_tenor"`
+	// R2ExpiryCalendar opts into the calendar successor. Nil preserves the
+	// rolling-ladder semantics used by every historical configuration.
+	R2ExpiryCalendar          *instrument.ExpiryCalendar `json:"r2_expiry_calendar,omitempty"`
+	OptionIV                  float64                    `json:"option_iv"`
+	StrikesPerSide            int                        `json:"strikes_per_side"`
+	StrikeStepUSD             int64                      `json:"strike_step_usd"`
+	OptionMaxStrikesPerExpiry int                        `json:"option_max_strikes_per_expiry"`
 
 	StoikovRiskAversion       float64       `json:"stoikov_risk_aversion"`
 	StoikovFillDecay          float64       `json:"stoikov_fill_decay"`
@@ -659,6 +662,11 @@ func (c Config) remoteMakerFeeds() []RemoteMakerFeedConfig {
 func (c *Config) normalize() error {
 	if c.LogDir == "" {
 		return errors.New("multivenue: LogDir is required")
+	}
+	if c.R2ExpiryCalendar != nil {
+		if err := c.R2ExpiryCalendar.Validate(); err != nil {
+			return fmt.Errorf("multivenue: R2 expiry calendar: %w", err)
+		}
 	}
 	if c.Seed == 0 {
 		c.Seed = 42
@@ -2436,20 +2444,29 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			indexFeedSymbols = append(indexFeedSymbols, "CDF/USD", "ABC/CDF")
 		}
 	}
+	futureLister := &instrument.DatedFuturesLister{
+		Underlying: "ABC/USD", Spec: spec,
+		TenorsNano: []int64{s.Config.ShortFutureTenor.Nanoseconds(), s.Config.LongFutureTenor.Nanoseconds()},
+	}
+	optionLister := &instrument.OptionChainLister{
+		Underlying: "ABC/USD", Spec: optionSpec,
+		TenorsNano: []int64{s.Config.ShortOptionTenor.Nanoseconds(), s.Config.LongOptionTenor.Nanoseconds()},
+		StrikeStep: s.Config.StrikeStepUSD * mvQuotePrecision, StrikesPerSide: s.Config.StrikesPerSide,
+		MaxStrikesPerExpiry: s.Config.OptionMaxStrikesPerExpiry, IV: s.Config.OptionIV,
+	}
+	if s.Config.R2ExpiryCalendar != nil {
+		calendar := *s.Config.R2ExpiryCalendar
+		calendar.Schedules = slices.Clone(s.Config.R2ExpiryCalendar.Schedules)
+		epochNano := clock.NowUnixNano()
+		futureLister.Calendar, futureLister.CalendarEpochNano = &calendar, epochNano
+		optionLister.Calendar, optionLister.CalendarEpochNano = &calendar, epochNano
+	}
 	ex.ConfigureAutomation(exchange.AutomationConfig{
 		IndexProvider:       index,
 		IndexFeedSymbols:    indexFeedSymbols,
 		IndexFeedProvider:   indexFeed,
 		PriceUpdateInterval: s.Config.AutomationInterval,
-		ListingPolicies: []exchange.ListingPolicy{
-			&instrument.DatedFuturesLister{Underlying: "ABC/USD", Spec: spec, TenorsNano: []int64{s.Config.ShortFutureTenor.Nanoseconds(), s.Config.LongFutureTenor.Nanoseconds()}},
-			&instrument.OptionChainLister{
-				Underlying: "ABC/USD", Spec: optionSpec,
-				TenorsNano: []int64{s.Config.ShortOptionTenor.Nanoseconds(), s.Config.LongOptionTenor.Nanoseconds()},
-				StrikeStep: s.Config.StrikeStepUSD * mvQuotePrecision, StrikesPerSide: s.Config.StrikesPerSide,
-				MaxStrikesPerExpiry: s.Config.OptionMaxStrikesPerExpiry, IV: s.Config.OptionIV,
-			},
-		},
+		ListingPolicies:     []exchange.ListingPolicy{futureLister, optionLister},
 		PreExpiryHook: func() {
 			if venue.riskErr != nil {
 				return

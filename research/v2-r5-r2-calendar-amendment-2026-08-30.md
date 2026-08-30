@@ -59,27 +59,31 @@ shared expiries are counted once.
 
 | candidate | short interval/lead | medium interval/lead | long interval/lead | family requests | completed distinct expiries | assessment |
 |---|---:|---:|---:|---:|---:|---|
-| A | 2h / 6h | 4h / 12h | 8h / 16h | 12 + 6 + 3 = 21 | 10 | enough density, natural overlaps, bounded board |
-| B | 1h / 4h | 3h / 8h | 6h / 16h | 24 + 8 + 4 = 36 | 21 | too many books and option chains for a first 24h gate |
-| C | 3h / 8h | 6h / 16h | 12h / 24h | 8 + 4 + 2 = 14 | 8 | sparse and phase-zero families do not exercise the desired overlap pattern |
-| D | 2h / 6h | 6h / 12h | 12h / 24h | 12 + 4 + 2 = 18 | 10 | viable, but fewer medium and long replacement observations |
+| A | 1h / 2h | 3h / 6h | 6h / 12h | 24 + 8 + 4 = 36 | 23 | dense short replacement, repeated natural overlaps, bounded active board |
+| B | 1h / 3h | 4h / 9h | 8h / 18h | 24 + 6 + 3 = 33 | 22 | useful staggered terms, but fewer multi-family collisions |
+| C | 2h / 6h | 4h / 12h | 8h / 16h | 12 + 6 + 3 = 21 | 10 | sparse; the old rolling-style density leaves fewer complete cycles |
+| D | 2h / 4h | 6h / 10h | 12h / 20h | 12 + 4 + 2 = 18 | 11 | viable, but medium/long overlaps are too infrequent |
 
-Candidate A is registered.  Its distinct expiry sequence through 24h is:
+Candidate A is registered.  Its distinct short-family expiry sequence through
+the 24h listing horizon is:
 
 ```
-6, 8, 10, 12, 14, 16, 18, 20, 22, 24 hours
+2, 3, 4, ..., 24, 25 hours
 ```
 
-The short family requests expiries `6,8,10,...,28`; medium requests
-`12,16,20,24,28,32`; long requests `16,24,32`.  Thus short/medium collide at
-12h, 16h, 20h, and 24h, and all three collide at 16h and 24h.  At the start
-the board has three maturities (6h, 12h, 16h); after the first short expiry,
-new listings replace expiring contracts while several later maturities remain
-simultaneously open.  The calendar produces these overlaps arithmetically; it
-does not inspect prices or encode a convergence target.
+The short family requests expiries `2,3,4,...,25`; medium requests
+`6,9,12,15,18,21,24,27`; long requests `12,18,24,30`.  Thus short/medium
+collide at `6,9,12,15,18,21,24`, and all three collide at `12,18,24`.  At the
+start the board has three maturities (2h, 6h, 12h); after the first short
+expiry, hourly listings replace expiring contracts while medium and long
+maturities remain simultaneously open.  Twenty-three distinct expiries
+complete by 24h, with later 25h, 27h, and 30h contracts still providing
+forward term structure at the terminal boundary.  The calendar produces these
+overlaps arithmetically; it does not inspect prices or encode a convergence
+target.
 
 The schedule is deliberately compressed rather than a literal month model.
-The 16h long lead is longer than the 12h medium lead while still allowing two
+The 12h long lead is longer than the 6h medium lead while still allowing three
 long-family expiry observations in a 24h run.  A later real-time calibration
 may scale these intervals without changing the identity or deduplication
 contract.
