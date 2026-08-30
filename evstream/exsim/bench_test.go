@@ -286,3 +286,96 @@ func TestReportSizes(t *testing.T) {
 			fmt.Sprintf("%.2fx", float64(jsonBytes)/float64(counter.n)))
 	}
 }
+
+// The probes and the microbenchmark disagree about what the real sink will
+// deliver: probes imply about 17 %, the balance_change microbenchmark implies
+// about 10 %. The gap is that a probe encodes a sketch and the real encoder
+// builds frame headers, walks nested fields and maintains block state.
+//
+// These benchmarks measure the retention ratio — real binary encode divided by
+// json.Marshal — for the two families at opposite ends of structural
+// complexity. BookDelta is flat integers with one interned string; a balance
+// change has a nested slice, an optional field and six interned strings.
+// Everything else in the stream lies between them, so the two ratios bracket
+// the mix.
+
+func bookDeltaPopulation(n int) []BookDelta {
+	random := rand.New(rand.NewSource(20260904))
+	symbols := []string{"ABC/USD", "CDF/USD", "ABC/CDF", "ABC-PERP", "ABC-FUT-1735696801"}
+	out := make([]BookDelta, n)
+	for i := range out {
+		out[i] = BookDelta{
+			Timestamp:  1735689600000000000 + int64(i)*1_000_000,
+			Symbol:     symbols[random.Intn(len(symbols))],
+			Side:       uint8(i % 2),
+			Price:      random.Int63n(1 << 40),
+			VisibleQty: random.Int63n(1 << 30),
+			HiddenQty:  0,
+			TotalQty:   random.Int63n(1 << 30),
+		}
+	}
+	return out
+}
+
+// bookDeltaJSONForm mirrors the struct the simulator actually logs for this
+// event, so the JSON side of the comparison is the real cost, not a strawman.
+type bookDeltaJSONForm struct {
+	HiddenQty  int64  `json:"hidden_qty"`
+	Price      int64  `json:"price"`
+	Side       string `json:"side"`
+	TotalQty   int64  `json:"total_qty"`
+	VisibleQty int64  `json:"visible_qty"`
+}
+
+func BenchmarkEncodeBookDeltaJSON(b *testing.B) {
+	events := bookDeltaPopulation(benchEvents)
+	forms := make([]bookDeltaJSONForm, len(events))
+	for i, e := range events {
+		side := "BUY"
+		if e.Side == 1 {
+			side = "SELL"
+		}
+		forms[i] = bookDeltaJSONForm{
+			HiddenQty: e.HiddenQty, Price: e.Price, Side: side,
+			TotalQty: e.TotalQty, VisibleQty: e.VisibleQty,
+		}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	var bytesOut int64
+	for b.Loop() {
+		for i := range forms {
+			encoded, err := json.Marshal(forms[i])
+			if err != nil {
+				b.Fatal(err)
+			}
+			bytesOut += int64(len(encoded))
+		}
+	}
+	reportPerEvent(b, bytesOut)
+}
+
+func BenchmarkEncodeBookDeltaBinary(b *testing.B) {
+	events := bookDeltaPopulation(benchEvents)
+	b.ReportAllocs()
+	b.ResetTimer()
+	var bytesOut int64
+	for b.Loop() {
+		counter := &countingWriter{}
+		writer := evstream.NewWriter(counter, evstream.WriterOptions{})
+		var encoded EncodedBookDelta
+		for i := range events {
+			if err := InternBookDelta(writer, events[i], &encoded); err != nil {
+				b.Fatal(err)
+			}
+			if err := writer.Append(events[i].Timestamp, 0, 0, &encoded); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if err := writer.Flush(); err != nil {
+			b.Fatal(err)
+		}
+		bytesOut += counter.n
+	}
+	reportPerEvent(b, bytesOut)
+}

@@ -112,7 +112,14 @@ func (r *Reader) SchemaEpoch() uint32 { return r.epoch }
 // ExecutionHash returns the rolling digest over the frames read so far. It is
 // meaningful only when VerifyHash was set, and it is computed over uncompressed
 // canonical frames, so it equals the writer's hash regardless of codec.
-func (r *Reader) ExecutionHash() [sha256.Size]byte { return r.rolling }
+func (r *Reader) ExecutionHash() [sha256.Size]byte {
+	var out [sha256.Size]byte
+	if r.hasher == nil {
+		return out
+	}
+	copy(out[:], r.hasher.Sum(nil))
+	return out
+}
 
 // Count returns the number of frames read, including dictionary frames.
 func (r *Reader) Count() uint64 { return r.frames }
@@ -211,10 +218,9 @@ func (r *Reader) rangeBlock(visit func(Frame) error) error {
 		r.frames++
 
 		if r.verify {
-			r.hasher.Reset()
-			r.hasher.Write(r.rolling[:])
+			// Mirrors the writer: one continuous digest over concatenated
+			// canonical frames, so the reader reproduces it exactly.
 			r.hasher.Write(frameBytes)
-			r.hasher.Sum(r.rolling[:0])
 		}
 
 		if header.SchemaID == SchemaDictionary {
