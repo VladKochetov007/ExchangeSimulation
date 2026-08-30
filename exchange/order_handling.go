@@ -69,6 +69,25 @@ type bookSnapshotEvidence struct {
 // emits for a map, so the persisted bytes are unchanged.
 //
 // Do not reorder these fields. The order is the evidence contract.
+// cancelledOrderEvidence and expiredOrderEvidence replace the last two map
+// payloads on the evidence path. Fields are declared in lexicographic order of
+// their JSON names, which is the order encoding/json emits for a map, so the
+// persisted bytes are unchanged.
+//
+// Do not reorder these fields. The order is the evidence contract.
+type cancelledOrderEvidence struct {
+	OrderID      uint64 `json:"order_id"`
+	RemainingQty int64  `json:"remaining_qty"`
+	RequestID    uint64 `json:"request_id"`
+}
+
+type expiredOrderEvidence struct {
+	OrderID      uint64 `json:"order_id"`
+	Reason       string `json:"reason"`
+	RemainingQty int64  `json:"remaining_qty"`
+	RequestID    uint64 `json:"request_id"`
+}
+
 type bookDeltaEvidence struct {
 	HiddenQty  int64  `json:"hidden_qty"`
 	Price      int64  `json:"price"`
@@ -382,12 +401,11 @@ func (e *DefaultExchange) CancelOrder(clientID uint64, req *CancelRequest) Respo
 	putOrder(order)
 
 	if log != nil {
-		cancelEvent := map[string]any{
-			"order_id":      req.OrderID,
-			"request_id":    req.RequestID,
-			"remaining_qty": remainingQty,
-		}
-		log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderCancelled", cancelEvent)
+		log.LogEvent(e.Clock.NowUnixNano(), clientID, "OrderCancelled", cancelledOrderEvidence{
+			OrderID:      req.OrderID,
+			RemainingQty: remainingQty,
+			RequestID:    req.RequestID,
+		})
 	}
 
 	return Response{RequestID: req.RequestID, Success: true, Data: remainingQty}
@@ -1862,11 +1880,11 @@ func (e *DefaultExchange) restOrReleaseOrder(client *Client, book *OrderBook, or
 			// order that repeatedly missed the touch is indistinguishable in
 			// the log from an agent that never traded.
 			if log != nil {
-				log.LogEvent(e.Clock.NowUnixNano(), order.ClientID, "OrderCancelled", map[string]any{
-					"order_id":      order.ID,
-					"request_id":    req.RequestID,
-					"remaining_qty": remainingQty,
-					"reason":        expiryReason(req.TimeInForce),
+				log.LogEvent(e.Clock.NowUnixNano(), order.ClientID, "OrderCancelled", expiredOrderEvidence{
+					OrderID:      order.ID,
+					Reason:       expiryReason(req.TimeInForce),
+					RemainingQty: remainingQty,
+					RequestID:    req.RequestID,
 				})
 			}
 		}

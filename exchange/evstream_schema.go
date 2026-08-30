@@ -338,3 +338,153 @@ var (
 	_ evstream.InterningAppender = instrumentLogEvent{}
 	_ evstream.InterningAppender = OpaqueJSON{}
 )
+
+// --- order lifecycle: accepted, cancelled, expired ---
+
+const (
+	SchemaAcceptedOrder uint16 = etypes.SchemaFirstExchange + 16 + iota
+	SchemaCancelledOrder
+	SchemaExpiredOrder
+	SchemaForcedCancel
+)
+
+// appendOrder writes the wire fields of an order. The six enums are all
+// uint8-backed, so one byte each is exact rather than a truncation waiting to
+// happen; the fields tagged json:"-" are deliberately absent, because they are
+// live engine state and were never part of the evidence.
+func appendOrder(dst []byte, order *Order) []byte {
+	dst = evstream.AppendUint64(dst, order.ID)
+	dst = evstream.AppendUint64(dst, order.ClientID)
+	dst = append(dst, byte(order.Side), byte(order.PositionSide), byte(order.Type),
+		byte(order.TimeInForce), byte(order.Visibility), byte(order.Status))
+	dst = evstream.AppendBool(dst, order.PostOnly)
+	dst = evstream.AppendInt64(dst, order.Price)
+	dst = evstream.AppendInt64(dst, order.Qty)
+	dst = evstream.AppendInt64(dst, order.FilledQty)
+	dst = evstream.AppendInt64(dst, order.IcebergQty)
+	return evstream.AppendInt64(dst, order.Timestamp)
+}
+
+func readOrder(cursor *evstream.Cursor, into *Order) {
+	into.ID = cursor.Uint64()
+	into.ClientID = cursor.Uint64()
+	into.Side = Side(cursor.Uint8())
+	into.PositionSide = PositionSide(cursor.Uint8())
+	into.Type = OrderType(cursor.Uint8())
+	into.TimeInForce = TimeInForce(cursor.Uint8())
+	into.Visibility = Visibility(cursor.Uint8())
+	into.Status = OrderStatus(cursor.Uint8())
+	into.PostOnly = cursor.Bool()
+	into.Price = cursor.Int64()
+	into.Qty = cursor.Int64()
+	into.FilledQty = cursor.Int64()
+	into.IcebergQty = cursor.Int64()
+	into.Timestamp = cursor.Int64()
+}
+
+func (e acceptedOrderEvidence) SchemaID() uint16      { return SchemaAcceptedOrder }
+func (e acceptedOrderEvidence) SchemaVersion() uint16 { return 1 }
+
+func (e acceptedOrderEvidence) AppendPayloadInterning(dst []byte, _ evstream.Interner) ([]byte, error) {
+	if e.Order == nil {
+		return nil, evstream.ErrCorrupt
+	}
+	dst = appendOrder(dst, e.Order)
+	return evstream.AppendUint64(dst, e.RequestID), nil
+}
+
+// DecodeAcceptedOrder reads the payload back into a caller-owned order.
+func DecodeAcceptedOrder(payload []byte, order *Order, into *acceptedOrderEvidence) error {
+	cursor := evstream.NewCursor(payload)
+	readOrder(cursor, order)
+	into.Order = order
+	into.RequestID = cursor.Uint64()
+	return finishCursor(cursor)
+}
+
+func (e cancelledOrderEvidence) SchemaID() uint16      { return SchemaCancelledOrder }
+func (e cancelledOrderEvidence) SchemaVersion() uint16 { return 1 }
+
+func (e cancelledOrderEvidence) AppendPayloadInterning(dst []byte, _ evstream.Interner) ([]byte, error) {
+	dst = evstream.AppendUint64(dst, e.OrderID)
+	dst = evstream.AppendInt64(dst, e.RemainingQty)
+	return evstream.AppendUint64(dst, e.RequestID), nil
+}
+
+// DecodeCancelledOrder reads the payload back.
+func DecodeCancelledOrder(payload []byte, into *cancelledOrderEvidence) error {
+	cursor := evstream.NewCursor(payload)
+	into.OrderID = cursor.Uint64()
+	into.RemainingQty = cursor.Int64()
+	into.RequestID = cursor.Uint64()
+	return finishCursor(cursor)
+}
+
+func (e expiredOrderEvidence) SchemaID() uint16      { return SchemaExpiredOrder }
+func (e expiredOrderEvidence) SchemaVersion() uint16 { return 1 }
+
+func (e expiredOrderEvidence) AppendPayloadInterning(dst []byte, in evstream.Interner) ([]byte, error) {
+	dst = evstream.AppendUint64(dst, e.OrderID)
+	dst = evstream.AppendInt64(dst, e.RemainingQty)
+	dst = evstream.AppendUint64(dst, e.RequestID)
+	ref, err := in.Intern(e.Reason)
+	if err != nil {
+		return nil, err
+	}
+	return evstream.AppendUint32(dst, ref), nil
+}
+
+// DecodeExpiredOrder reads the payload back.
+func DecodeExpiredOrder(payload []byte, resolve evstream.Resolver, into *expiredOrderEvidence) error {
+	cursor := evstream.NewCursor(payload)
+	into.OrderID = cursor.Uint64()
+	into.RemainingQty = cursor.Int64()
+	into.RequestID = cursor.Uint64()
+	ref := cursor.Uint32()
+	if err := cursor.Err(); err != nil {
+		return err
+	}
+	value, ok := resolve.Lookup(ref)
+	if !ok {
+		return evstream.ErrCorrupt
+	}
+	into.Reason = value
+	return finishCursor(cursor)
+}
+
+func (e forcedCancelEvidence) SchemaID() uint16      { return SchemaForcedCancel }
+func (e forcedCancelEvidence) SchemaVersion() uint16 { return 1 }
+
+func (e forcedCancelEvidence) AppendPayloadInterning(dst []byte, in evstream.Interner) ([]byte, error) {
+	dst = evstream.AppendUint64(dst, e.OrderID)
+	dst = evstream.AppendInt64(dst, e.RemainingQty)
+	ref, err := in.Intern(e.Reason)
+	if err != nil {
+		return nil, err
+	}
+	return evstream.AppendUint32(dst, ref), nil
+}
+
+// DecodeForcedCancel reads the payload back.
+func DecodeForcedCancel(payload []byte, resolve evstream.Resolver, into *forcedCancelEvidence) error {
+	cursor := evstream.NewCursor(payload)
+	into.OrderID = cursor.Uint64()
+	into.RemainingQty = cursor.Int64()
+	ref := cursor.Uint32()
+	if err := cursor.Err(); err != nil {
+		return err
+	}
+	value, ok := resolve.Lookup(ref)
+	if !ok {
+		return evstream.ErrCorrupt
+	}
+	into.Reason = value
+	return finishCursor(cursor)
+}
+
+var (
+	_ evstream.InterningAppender = acceptedOrderEvidence{}
+	_ evstream.InterningAppender = cancelledOrderEvidence{}
+	_ evstream.InterningAppender = expiredOrderEvidence{}
+	_ evstream.InterningAppender = forcedCancelEvidence{}
+)

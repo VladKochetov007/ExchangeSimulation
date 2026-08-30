@@ -1,6 +1,7 @@
 package exchange_test
 
 import (
+	"encoding/json"
 	"sync"
 	"testing"
 
@@ -8,10 +9,18 @@ import (
 )
 
 // expiryLogger records the terminal events an order can produce.
+//
+// Cancellations are captured as their persisted JSON rather than as a Go type.
+// The earlier version type-asserted map[string]any and appended only on
+// success, so when the payload became a struct the test reported zero
+// cancellations instead of a type error — a silent skip that looked like a
+// behavioural regression. What this test is about is the evidence a desk can
+// read back, so the evidence is what it asserts.
 type expiryLogger struct {
 	mu        sync.Mutex
 	cancelled []map[string]any
 	fills     int
+	decodeErr error
 }
 
 func (l *expiryLogger) LogEvent(_ int64, _ uint64, eventName string, event any) {
@@ -19,9 +28,17 @@ func (l *expiryLogger) LogEvent(_ int64, _ uint64, eventName string, event any) 
 	defer l.mu.Unlock()
 	switch eventName {
 	case "OrderCancelled":
-		if e, ok := event.(map[string]any); ok {
-			l.cancelled = append(l.cancelled, e)
+		encoded, err := json.Marshal(event)
+		if err != nil {
+			l.decodeErr = err
+			return
 		}
+		var record map[string]any
+		if err := json.Unmarshal(encoded, &record); err != nil {
+			l.decodeErr = err
+			return
+		}
+		l.cancelled = append(l.cancelled, record)
 	case "OrderFill":
 		l.fills++
 	}
@@ -77,9 +94,15 @@ func TestUnfilledIOCLogsItsExpiry(t *testing.T) {
 			if len(logger.cancelled) != 1 {
 				t.Fatalf("expected one logged expiry for the unfilled remainder, got %d", len(logger.cancelled))
 			}
-			got := logger.cancelled[0]["remaining_qty"]
-			if got != tc.wantRemains {
-				t.Fatalf("logged remaining_qty = %v, want %d", got, tc.wantRemains)
+			if logger.decodeErr != nil {
+				t.Fatalf("cancellation evidence did not encode: %v", logger.decodeErr)
+			}
+			// Through JSON a number arrives as float64, so compare numerically
+			// rather than by Go type.
+			got, ok := logger.cancelled[0]["remaining_qty"].(float64)
+			if !ok || int64(got) != tc.wantRemains {
+				t.Fatalf("logged remaining_qty = %v, want %d",
+					logger.cancelled[0]["remaining_qty"], tc.wantRemains)
 			}
 			if got := logger.cancelled[0]["reason"]; got != "IOC_EXPIRED" {
 				t.Fatalf("logged reason = %v, want IOC_EXPIRED", got)

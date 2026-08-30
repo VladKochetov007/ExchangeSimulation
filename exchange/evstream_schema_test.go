@@ -276,3 +276,103 @@ func TestSchemaRoundTripRandomised(t *testing.T) {
 		requireJSONPreserved(t, original, decoded)
 	}
 }
+
+// TestOrderLifecycleRoundTrip covers the accepted/cancelled/expired/forced
+// family, the largest remaining opaque group. The accepted case matters most:
+// it embeds *Order, whose six enums are all uint8-backed, so a wider encoding
+// would waste bytes and a narrower one would truncate silently.
+func TestOrderLifecycleRoundTrip(t *testing.T) {
+	order := &Order{
+		ID: 7, ClientID: 9, Side: Sell, PositionSide: PositionShort,
+		Type: LimitOrder, TimeInForce: GTC, PostOnly: true,
+		Price: math.MaxInt64, Qty: math.MinInt64, FilledQty: 3,
+		Visibility: Hidden, IcebergQty: 5, Status: PartialFill,
+		Timestamp: math.MinInt64,
+	}
+	accepted := acceptedOrderEvidence{Order: order, RequestID: math.MaxUint64}
+	frame, _ := roundTripFrame(t, accepted)
+	var decodedOrder Order
+	var decodedAccepted acceptedOrderEvidence
+	if err := DecodeAcceptedOrder(frame.Payload, &decodedOrder, &decodedAccepted); err != nil {
+		t.Fatalf("decode accepted: %v", err)
+	}
+	requireJSONPreserved(t, accepted, decodedAccepted)
+
+	cancelled := cancelledOrderEvidence{OrderID: 1, RemainingQty: math.MinInt64, RequestID: 2}
+	frame, _ = roundTripFrame(t, cancelled)
+	var decodedCancelled cancelledOrderEvidence
+	if err := DecodeCancelledOrder(frame.Payload, &decodedCancelled); err != nil {
+		t.Fatalf("decode cancelled: %v", err)
+	}
+	requireJSONPreserved(t, cancelled, decodedCancelled)
+
+	expired := expiredOrderEvidence{OrderID: 3, Reason: "ioc_unfilled",
+		RemainingQty: math.MaxInt64, RequestID: 4}
+	frame, reader := roundTripFrame(t, expired)
+	var decodedExpired expiredOrderEvidence
+	if err := DecodeExpiredOrder(frame.Payload, reader, &decodedExpired); err != nil {
+		t.Fatalf("decode expired: %v", err)
+	}
+	requireJSONPreserved(t, expired, decodedExpired)
+
+	forced := forcedCancelEvidence{OrderID: 5, Reason: "liquidation", RemainingQty: -1}
+	frame, reader = roundTripFrame(t, forced)
+	var decodedForced forcedCancelEvidence
+	if err := DecodeForcedCancel(frame.Payload, reader, &decodedForced); err != nil {
+		t.Fatalf("decode forced: %v", err)
+	}
+	requireJSONPreserved(t, forced, decodedForced)
+}
+
+// TestOrderEnumsSurviveTheirFullRange pins the one-byte enum encoding against
+// the widest value each type can hold. A silent truncation here would produce a
+// plausible order with the wrong side or status.
+func TestOrderEnumsSurviveTheirFullRange(t *testing.T) {
+	order := &Order{
+		Side: Side(255), PositionSide: PositionSide(255), Type: OrderType(255),
+		TimeInForce: TimeInForce(255), Visibility: Visibility(255), Status: OrderStatus(255),
+	}
+	accepted := acceptedOrderEvidence{Order: order}
+	frame, _ := roundTripFrame(t, accepted)
+	var decodedOrder Order
+	var decoded acceptedOrderEvidence
+	if err := DecodeAcceptedOrder(frame.Payload, &decodedOrder, &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for name, pair := range map[string][2]uint8{
+		"side":          {uint8(order.Side), uint8(decodedOrder.Side)},
+		"position_side": {uint8(order.PositionSide), uint8(decodedOrder.PositionSide)},
+		"type":          {uint8(order.Type), uint8(decodedOrder.Type)},
+		"time_in_force": {uint8(order.TimeInForce), uint8(decodedOrder.TimeInForce)},
+		"visibility":    {uint8(order.Visibility), uint8(decodedOrder.Visibility)},
+		"status":        {uint8(order.Status), uint8(decodedOrder.Status)},
+	} {
+		if pair[0] != pair[1] {
+			t.Fatalf("%s truncated: wrote %d, read %d", name, pair[0], pair[1])
+		}
+	}
+}
+
+// TestCancelStructsMatchTheMapsTheyReplaced is the oracle test: the structs
+// must encode byte-identically to the map literals they replaced, which holds
+// only while their fields stay in lexicographic order of their JSON names.
+func TestCancelStructsMatchTheMapsTheyReplaced(t *testing.T) {
+	cancelled := cancelledOrderEvidence{OrderID: 11, RemainingQty: 22, RequestID: 33}
+	wantCancelled, _ := json.Marshal(map[string]any{
+		"order_id": uint64(11), "request_id": uint64(33), "remaining_qty": int64(22),
+	})
+	gotCancelled, _ := json.Marshal(cancelled)
+	if !bytes.Equal(gotCancelled, wantCancelled) {
+		t.Fatalf("cancelled struct %s, map form %s", gotCancelled, wantCancelled)
+	}
+
+	expired := expiredOrderEvidence{OrderID: 11, Reason: "ioc", RemainingQty: 22, RequestID: 33}
+	wantExpired, _ := json.Marshal(map[string]any{
+		"order_id": uint64(11), "request_id": uint64(33),
+		"remaining_qty": int64(22), "reason": "ioc",
+	})
+	gotExpired, _ := json.Marshal(expired)
+	if !bytes.Equal(gotExpired, wantExpired) {
+		t.Fatalf("expired struct %s, map form %s", gotExpired, wantExpired)
+	}
+}
