@@ -174,3 +174,70 @@ and makes completeness checkable exactly as a derived layer should be: the union
 of `event_seq` across derived streams must equal the set in the canonical
 source. Whether that beats Parquet on class B is a measurement, not an opinion,
 and it has not been taken yet.
+
+## Block index, and the answer on Parquet
+
+A block descriptor is 64 bytes — offset, stored and uncompressed length, first
+and last `event_seq`, min and max timestamp, an **exact** event-family bitmap and
+a **probabilistic** symbol filter. Exactness in the family bitmap and one-sided
+error in the symbol filter are deliberate: a false positive costs a wasted block
+read, a false negative would silently drop events from a scientific result.
+
+The index is written as a sidecar rather than a footer, so a stream truncated by
+a crash keeps a usable index for the blocks that landed, and an index can be
+rebuilt without rewriting evidence.
+
+### Correctness before speed
+
+`TestQueryClassesAgree` runs every query three ways — JSON scan, binary full
+scan, binary indexed scan — and requires identical match counts. An indexed scan
+that skipped a block containing a match would look excellent and be wrong, so
+this gate comes first and the benchmarks are only meaningful behind it.
+
+### Measured, 120,000 mixed-family events
+
+| class | JSON scan | binary full | binary indexed | blocks skipped |
+|---|---:|---:|---:|---:|
+| A selective (one symbol, 1 % window, one family) | 414.6 ms | 4.87 ms | **0.379 ms** | 8 of 9 |
+| B broad aggregate (all symbols, one family) | 402.7 ms | 5.18 ms | 4.28 ms | **0 of 9** |
+| C causal replay (every event in order) | 396.6 ms | 4.98 ms | 4.07 ms | 0 of 9 |
+| D cross-family window | 416.9 ms | 4.93 ms | **0.513 ms** | 8 of 9 |
+
+Allocations across a full pass: **4,274,441 for JSON, 3 for the indexed scan.**
+
+**The predicted weakness appeared exactly where predicted, and it is smaller
+than expected.** Class B skips no blocks at all: families interleave in a
+globally ordered stream, so nearly every block contains every family and the
+family bitmap is worthless there. That is the structural argument for a columnar
+layer. But B is already **94x faster than the JSON baseline** in absolute terms,
+so the argument does not translate into a practical deficiency.
+
+**Provisional conclusion: the indexed binary format satisfies all four classes,
+and Parquet is not justified on this evidence.** The residual option, if class B
+ever becomes the bottleneck, is derived family-partitioned streams in the same
+format — same frames, filtered, each ordered by `event_seq`, global order
+recovered by a k-way merge — which keeps one format and one decoder instead of
+importing a second storage engine.
+
+### The caveat that matters for quoting these numbers
+
+**The JSON baseline here is `map[string]any` unmarshal, which is the worst
+case.** The production analyzer does not do that: it uses typed structs behind
+`decodeRequiredJSON`, a needle prefilter and envelope reuse, and that work
+already bought 2.83x over the naive path. So the fair comparison against the
+*current optimized* analyzer is perhaps a third of the ratios above — roughly
+30x rather than 95x on class C, and still very large on A and D where the index
+does the work rather than the decoder.
+
+The ratios that do not depend on the baseline are the ones between binary
+variants: the index is worth **12.8x on class A** and **9.6x on class D** over a
+binary full scan, and **1.2x on class B**, which is the number that decides the
+columnar question.
+
+### Block granularity is untuned
+
+120,000 events produced only 9 blocks at the 1 MB default, so selectivity is
+coarse — a query touching one event still reads a whole megabyte. Smaller blocks
+would sharpen A and D further at some cost in compression ratio. This has not
+been swept, and the A and D figures should be read as a floor rather than a
+best case.

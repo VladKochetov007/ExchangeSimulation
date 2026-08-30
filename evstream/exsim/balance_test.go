@@ -281,3 +281,58 @@ func (t *testInterner) Intern(s string) (uint32, error) {
 }
 
 func (t *testInterner) Lookup(id uint32) (string, bool) { return t.dict.Value(id) }
+
+// TestBookDeltaRoundTrip covers the second family, and exists because the first
+// version of its decoder read two bytes for a one-byte enum. A layout that
+// encodes and decodes different widths produces plausible-looking garbage
+// rather than an error, so every schema needs its own round trip.
+func TestBookDeltaRoundTrip(t *testing.T) {
+	deltas := []BookDelta{
+		{Timestamp: 1, Symbol: "ABC/USD", Side: 0, Price: 100, VisibleQty: 1, HiddenQty: 2, TotalQty: 3},
+		{Timestamp: -1, Symbol: "ABC-PERP", Side: 1,
+			Price: math.MaxInt64, VisibleQty: math.MinInt64, HiddenQty: 0, TotalQty: -1},
+		{Timestamp: math.MaxInt64, Symbol: "", Side: 255},
+	}
+
+	var buf bytes.Buffer
+	writer := evstream.NewWriter(&buf, evstream.WriterOptions{BlockBytes: 128})
+	var encoded EncodedBookDelta
+	for _, delta := range deltas {
+		if err := InternBookDelta(writer, delta, &encoded); err != nil {
+			t.Fatalf("intern: %v", err)
+		}
+		if err := writer.Append(delta.Timestamp, 0, encoded.symbolRef, &encoded); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	reader, err := evstream.NewReader(bytes.NewReader(buf.Bytes()), evstream.ReaderOptions{VerifyHash: true})
+	if err != nil {
+		t.Fatalf("reader: %v", err)
+	}
+	var got []BookDelta
+	var into BookDelta
+	if err := reader.Range(func(frame evstream.Frame) error {
+		if err := DecodeBookDelta(frame, reader, &into); err != nil {
+			return err
+		}
+		got = append(got, into)
+		return nil
+	}); err != nil {
+		t.Fatalf("range: %v", err)
+	}
+	if reader.ExecutionHash() != writer.ExecutionHash() {
+		t.Fatal("reader hash diverged from writer hash")
+	}
+	if len(got) != len(deltas) {
+		t.Fatalf("decoded %d of %d", len(got), len(deltas))
+	}
+	for i, want := range deltas {
+		if got[i] != want {
+			t.Fatalf("delta %d round-tripped to %+v, want %+v", i, got[i], want)
+		}
+	}
+}

@@ -79,6 +79,12 @@ type Writer struct {
 	wroteHdr bool
 	epoch    uint32
 	err      error
+
+	// offset tracks bytes written so the index can record where each block
+	// begins without the writer needing a seekable destination.
+	offset uint64
+	stats  blockStats
+	index  Index
 }
 
 // NewWriter starts a stream on out.
@@ -87,7 +93,7 @@ func NewWriter(out io.Writer, opts WriterOptions) *Writer {
 	if blockBytes <= 0 {
 		blockBytes = DefaultBlockBytes
 	}
-	return &Writer{
+	w := &Writer{
 		out:        out,
 		compressor: opts.Compressor,
 		blockBytes: blockBytes,
@@ -96,6 +102,8 @@ func NewWriter(out io.Writer, opts WriterOptions) *Writer {
 		dict:       NewDictionary(),
 		epoch:      opts.SchemaEpoch,
 	}
+	w.stats.reset()
+	return w
 }
 
 // Intern returns the dictionary id for s, emitting a dictionary frame the first
@@ -171,6 +179,7 @@ func (w *Writer) appendFrame(header FrameHeader, raw []byte, appender ...Payload
 	w.hasher.Write(w.frames[start : start+length])
 	w.hasher.Sum(w.rolling[:0])
 
+	w.stats.observe(header)
 	w.frameCount++
 	if len(w.frames) >= w.blockBytes {
 		return w.flushBlock()
@@ -196,6 +205,7 @@ func (w *Writer) ensureHeader() error {
 		w.err = err
 		return err
 	}
+	w.offset += StreamHeaderSize
 	w.wroteHdr = true
 	return nil
 }
@@ -236,8 +246,13 @@ func (w *Writer) flushBlock() error {
 		return err
 	}
 
+	w.index.Blocks = append(w.index.Blocks,
+		w.stats.descriptor(w.offset, uint32(len(stored)), uint32(len(uncompressed))))
+	w.offset += uint64(BlockHeaderSize + len(stored))
+
 	w.frames = w.frames[:0]
 	w.frameCount = 0
+	w.stats.reset()
 	return nil
 }
 
@@ -259,3 +274,10 @@ func (w *Writer) ExecutionHash() [sha256.Size]byte { return w.rolling }
 
 // Count returns the number of frames written, including dictionary frames.
 func (w *Writer) Count() uint64 { return w.seq }
+
+// Index returns the block directory built while writing. Valid after Flush.
+func (w *Writer) Index() *Index { return &w.index }
+
+// Dictionary exposes the interning table, which a selective reader needs in
+// order to resolve references in blocks it did not read sequentially.
+func (w *Writer) Dictionary() *Dictionary { return w.dict }

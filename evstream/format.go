@@ -322,6 +322,16 @@ func (c *Cursor) Uint16() uint16 {
 	return binary.LittleEndian.Uint16(b)
 }
 
+// Uint8 reads a single byte, used for enum-like fields that will never need
+// more than 256 values.
+func (c *Cursor) Uint8() uint8 {
+	b := c.take(1)
+	if b == nil {
+		return 0
+	}
+	return b[0]
+}
+
 // Bool reads a boolean, rejecting any byte other than 0 or 1 as corruption
 // rather than silently coercing it.
 func (c *Cursor) Bool() bool {
