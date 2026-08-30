@@ -32,6 +32,37 @@ Pinning makes these measurements contention-immune, which matters because up to
 three research threads shared this host and earlier unpinned batches had to be
 discarded.
 
+### Noise floor, and which results sit near it
+
+Run-to-run variance on this host depends on its power state, which was not
+constant across this work. An A/A control — the **same binary on both sides** of
+the alternating harness — establishes the detection threshold directly:
+
+| Setting | A/A reported "change" | ranges |
+| --- | ---: | --- |
+| `GOMAXPROCS=4`, 12 reps | **-1.11%** | 9.08-9.63 \| 9.12-9.74 |
+| `GOMAXPROCS=1`, 8 reps | **-1.24%** | 10.24-11.20 \| 10.32-11.21 |
+
+So **an effect under about 1.2% is indistinguishable, and under about 2.5% is
+weak.** This threshold applies to mains power with turbo active. On battery the
+CPU sits at a low stable frequency and repeats within 0.6%, which produced
+deceptively tight ranges for small effects; those tight ranges reflected a
+throttled machine, not a resolved measurement.
+
+Consequences, applied honestly to the results in this document:
+
+* Well above threshold and unaffected: S1 (-16.0% CPU in `none` mode), S2
+  (-9.9%), S3 (-11.0%), S11 (-3.6%, and independently corroborated by -21.6%
+  allocated objects), and every cumulative figure (-30% to -38%).
+* At roughly twice the threshold, so real but not precise: S5 (-2.7%) and S9
+  (-2.0%). Both were measured with non-overlapping ranges in the low-variance
+  state.
+* Below threshold, and accepted on other evidence rather than throughput: S4
+  (-16.5% allocation), S10 (-1.4% allocation, explicitly not a throughput
+  claim), S12 (structural work reduction only).
+* Below threshold and correctly rejected at the time: S6, and the map-payload
+  conversion in R11.
+
 ### Determinism oracle
 
 Every simulator change must reproduce all four of these:
@@ -323,11 +354,18 @@ engine, 75 times more frequent than the preview — and **94.9% find nothing**:
 the client once and reads all three sides from it. A store that does not
 implement it is probed per side as before.
 
-**-1.07% wall at `GOMAXPROCS=1`, -1.45% at `GOMAXPROCS=4`** — larger with more
-cores, consistent with removing two thirds of the read-lock acquisitions in the
-hottest function. It is modest because the remaining per-side inner lookup,
-which hashes a string-keyed composite, is the dominant cost and is unchanged
-(see R12).
+**No reproducible throughput claim.** It was first measured at -1.07% and -1.45%
+on battery, but re-measuring on mains power gave -2.25%, -0.40% and -3.99% across
+three batches, and the A/A control below puts this host's noise floor at ±1.2%.
+The effect is under that threshold. What the change does structurally is not in
+doubt — it removes two thirds of the read-lock acquisitions and client-map
+lookups in the engine's most-called function — but the wall-clock benefit cannot
+be resolved on this hardware. It is kept as strictly-less-work with byte-identical
+output, not as a measured speedup.
+
+The reason it is small is visible in the line profile: the remaining per-side
+inner lookup, which hashes a string-keyed composite, is 54% of the function and
+is unchanged (see R12).
 
 ### S9 — Index resting orders by owner (`c9c9cbf`)
 
