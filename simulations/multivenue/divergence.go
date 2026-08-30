@@ -1,6 +1,7 @@
 package multivenue
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -39,7 +40,11 @@ import (
 
 // checkpointSink records a rolling digest and, optionally, a narrow trace.
 type checkpointSink struct {
-	mu sync.Mutex
+	// binary, when set, replaces the JSON encode-and-hash path entirely.
+	binary     *binaryEvidence
+	binaryFile *os.File
+	binaryBuf  *bufio.Writer
+	mu         sync.Mutex
 
 	intervalNano int64
 	checkpoints  io.WriteCloser
@@ -124,6 +129,24 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 		}
 		sink.trace = file
 	}
+	if binaryEvidenceEnabled() {
+		// "discard" isolates encode-and-hash cost from storage. On a no-log
+		// config the JSON path writes no raw evidence at all, so a binary sink
+		// that writes a file would be measured against a JSON path doing no
+		// I/O — an unfair comparison in the binary path's disfavour. Discarding
+		// makes the two paths do the same amount of writing, which is none.
+		if binaryEvidenceDiscards() {
+			sink.binary = newBinaryEvidence(io.Discard)
+		} else {
+			file, err := os.Create(filepath.Join(dir, "events.evs"))
+			if err != nil {
+				return nil, fmt.Errorf("multivenue: binary evidence file: %w", err)
+			}
+			sink.binaryFile = file
+			sink.binaryBuf = bufio.NewWriterSize(file, 1<<20)
+			sink.binary = newBinaryEvidence(sink.binaryBuf)
+		}
+	}
 	return sink, nil
 }
 
@@ -138,6 +161,17 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	if s == nil {
 		return nil
 	}
+	// Binary path: the same ordered sequence encoded as typed frames. It
+	// replaces the marshal and the per-event digest entirely, so when it is
+	// selected the JSON encoder is never reached.
+	if s.binary != nil {
+		s.binary.record(simTime, clientID, eventName, venueID, payload)
+		s.mu.Lock()
+		s.lastSimTime = simTime
+		s.mu.Unlock()
+		return nil
+	}
+
 	encoded, err := json.Marshal(payload)
 	reusable := encoded
 	if err != nil {
@@ -270,6 +304,26 @@ func (s *checkpointSink) close() error {
 		return s.err
 	}
 	s.closed = true
+	if s.binary != nil && s.binaryFile == nil {
+		if err := s.binary.flush(); err != nil {
+			s.failLocked(fmt.Errorf("flush binary evidence: %w", err))
+		}
+	}
+	if s.binary != nil && s.binaryFile != nil {
+		// Flush the open block, then the buffered writer, then the file: each
+		// layer holds bytes the next has not seen, and skipping one truncates
+		// the stream at a block boundary that looks structurally valid.
+		if err := s.binary.flush(); err != nil {
+			s.failLocked(fmt.Errorf("flush binary evidence: %w", err))
+		}
+		if err := s.binaryBuf.Flush(); err != nil {
+			s.failLocked(fmt.Errorf("flush binary evidence buffer: %w", err))
+		}
+		if err := s.binaryFile.Close(); err != nil {
+			s.failLocked(fmt.Errorf("close binary evidence: %w", err))
+		}
+		s.binaryFile = nil
+	}
 	if s.checkpoints != nil {
 		finalAt := s.finalSimTime
 		if finalAt == 0 {
