@@ -1,6 +1,7 @@
 package marketdata
 
 import (
+	"exchange_sim/census"
 	"reflect"
 	"slices"
 	"sync"
@@ -191,7 +192,33 @@ func (p *MDPublisher) subscribersInClientOrder(symbol string, subs map[uint64]*e
 	return clientIDs
 }
 
+// censusPublish counts fan-outs that reach nobody. The payload handed to
+// Publish is built by the caller before the call, so a publish with no
+// interested subscriber has already paid for its own argument.
+var censusPublish = census.Register("marketdata.Publish",
+	"no subscriber received it: either none subscribed to the symbol or none wanted this MDType")
+
+// Per-type sites: the aggregate says half the fan-outs reach nobody, but the
+// fix belongs at whichever call site builds the most expensive payload for
+// them, so the breakdown is what makes the number actionable.
+var censusPublishByType = map[etypes.MDType]*census.Site{
+	etypes.MDSnapshot:   census.Register("marketdata.Publish[Snapshot]", "reached no subscriber"),
+	etypes.MDDelta:      census.Register("marketdata.Publish[Delta]", "reached no subscriber"),
+	etypes.MDTrade:      census.Register("marketdata.Publish[Trade]", "reached no subscriber"),
+	etypes.MDFunding:    census.Register("marketdata.Publish[Funding]", "reached no subscriber"),
+	etypes.MDInstrument: census.Register("marketdata.Publish[Instrument]", "reached no subscriber"),
+}
+
 func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, timestamp int64) {
+	delivered := 0
+	if census.Enabled {
+		defer func() {
+			censusPublish.Call(delivered == 0)
+			if site := censusPublishByType[mdType]; site != nil {
+				site.Call(delivered == 0)
+			}
+		}()
+	}
 	p.mu.Lock()
 	subs := p.Subscriptions[symbol]
 	if len(subs) == 0 {
@@ -218,6 +245,7 @@ func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, tim
 		if !containsMDType(sub.Types, mdType) {
 			continue
 		}
+		delivered++
 		gateway := symbolGateways[clientID]
 		if gateway != nil {
 			if !gateway.IsRunning() {
@@ -284,7 +312,25 @@ func clonePointer[T any](value *T) *T {
 	return &copy
 }
 
+// censusDelta counts BookDelta values allocated for a fan-out that reaches
+// nobody. Deltas fire on every book mutation, so this is the highest-frequency
+// allocation in the publisher.
+var censusDelta = census.Register("marketdata.PublishDelta.alloc",
+	"BookDelta allocated and then dropped because the symbol has no delta subscriber")
+
 func (p *MDPublisher) PublishDelta(symbol string, side etypes.Side, price, visible, hidden int64, timestamp int64) {
+	if census.Enabled {
+		p.mu.Lock()
+		wanted := false
+		for _, sub := range p.Subscriptions[symbol] {
+			if containsMDType(sub.Types, etypes.MDDelta) {
+				wanted = true
+				break
+			}
+		}
+		p.mu.Unlock()
+		censusDelta.Call(!wanted)
+	}
 	delta := &etypes.BookDelta{
 		Side:       side,
 		Price:      price,

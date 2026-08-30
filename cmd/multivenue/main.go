@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"exchange_sim/census"
 	"flag"
 	"fmt"
 	"log"
@@ -267,5 +268,8 @@ func run() (err error) {
 		return err
 	}
 	log.Printf("done: sim=%s wall=%s logs=%s", *duration, time.Since(started).Round(time.Second), *logDir)
+	// The no-op census is off unless EXSIM_CENSUS is set; when on, it goes to
+	// stderr so it never lands inside the evidence tree.
+	census.Write(os.Stderr)
 	return nil
 }

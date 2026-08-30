@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"exchange_sim/census"
 	"fmt"
 	"maps"
 	"slices"
@@ -452,6 +453,34 @@ func (e *DefaultExchange) runSnapshotLoop(ticker Ticker) {
 	}
 }
 
+// Census sites for the periodic jobs. Each runs on a fixed tick regardless of
+// whether anything changed, which is the shape that hides repeated work.
+var (
+	censusSnapshot = census.Register("exchange.logSnapshots.book",
+		"book unchanged since the previous snapshot, so the record repeats the last one")
+	censusFunding = census.Register("exchange.CheckAndSettleFunding",
+		"swept every second but settled nothing")
+	censusExpiries = census.Register("exchange.CheckExpiries",
+		"swept every second but nothing reached expiry")
+	censusListings = census.Register("exchange.CheckListings",
+		"swept every second but listed nothing")
+	censusDerivMarks = census.Register("exchange.UpdateDerivativeMarks.contract",
+		"underlying unchanged (NOT waste: Black-76 also depends on time to expiry, which moves every tick)")
+)
+
+// snapshotFingerprint summarises the displayed book so a census site can tell a
+// genuinely new snapshot from a repeat of the last one.
+func snapshotFingerprint(bids, asks []etypes.PriceLevel) uint64 {
+	h := census.NewFNV1a()
+	for _, side := range [][]etypes.PriceLevel{bids, asks} {
+		h = h.Add(int64(len(side)))
+		for _, level := range side {
+			h = h.Add(level.Price).Add(level.VisibleQty).Add(level.HiddenQty)
+		}
+	}
+	return uint64(h)
+}
+
 func (e *DefaultExchange) logSnapshots() {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -471,9 +500,15 @@ func (e *DefaultExchange) logSnapshots() {
 		}, timestamp)
 
 		if log := e.getLogger(symbol); log != nil {
+			asks, bids := book.Asks.GetSnapshot(), book.Bids.GetSnapshot()
+			if census.Enabled {
+				censusSnapshot.Call(census.Repeated(
+					fmt.Sprintf("snap/%p/%s", e, symbol), snapshotFingerprint(bids, asks)))
+				censusSnapshot.Quantity(len(bids) + len(asks))
+			}
 			log.LogEvent(timestamp, 0, "BookSnapshot", bookSnapshotEvidence{
-				Asks: book.Asks.GetSnapshot(),
-				Bids: book.Bids.GetSnapshot(),
+				Asks: asks,
+				Bids: bids,
 			})
 		}
 	}
@@ -2417,6 +2452,10 @@ func (e *DefaultExchange) CheckAndSettleFunding() {
 
 	now := e.Clock.NowUnixNano()
 
+	settled := 0
+	if census.Enabled {
+		defer func() { censusFunding.Call(settled == 0); censusFunding.Quantity(len(perps)) }()
+	}
 	for _, perp := range perps {
 		// All FundingRate reads/writes stay under e.mu; subscribers receive a
 		// snapshot copy, never the live pointer.
@@ -2439,6 +2478,7 @@ func (e *DefaultExchange) CheckAndSettleFunding() {
 			continue
 		}
 		fundingSnapshot := *fundingRate
+		settled++
 		e.mu.Unlock()
 
 		e.MDPublisher.PublishFunding(perp.Symbol(), &fundingSnapshot, now)

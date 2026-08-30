@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"errors"
+	"exchange_sim/census"
 	"fmt"
 	"slices"
 	"sort"
@@ -245,6 +246,10 @@ func (e *DefaultExchange) CheckListings() {
 		return
 	}
 	now := e.Clock.NowUnixNano()
+	listed := 0
+	if census.Enabled {
+		defer func() { censusListings.Call(listed == 0) }()
+	}
 	prices := listingPriceSourceFunc(e.bookMidPrice)
 	for _, policy := range e.listingPolicies {
 		pending, err := policy.PendingListings(now, prices)
@@ -265,6 +270,7 @@ func (e *DefaultExchange) CheckListings() {
 				continue
 			}
 			e.AddInstrument(inst)
+			listed++
 			ann := describeInstrument(inst, "listed", now, &now)
 			e.MDPublisher.Publish(etypes.InstrumentFeedSymbol, MDInstrument, ann, now)
 			if log := e.getLogger("_global"); log != nil {
@@ -297,6 +303,9 @@ func (e *DefaultExchange) UpdateDerivativeMarks() {
 		return strings.Compare(a.inst.Symbol(), b.inst.Symbol())
 	})
 
+	if census.Enabled {
+		censusDerivMarks.Quantity(len(expirables))
+	}
 	for _, data := range expirables {
 		inst := data.inst
 		underlyingPrice, err := e.derivativeUnderlyingPrice(inst)
@@ -314,6 +323,11 @@ func (e *DefaultExchange) UpdateDerivativeMarks() {
 			continue
 		}
 
+		if census.Enabled {
+			censusDerivMarks.Call(census.Repeated(
+				fmt.Sprintf("uline/%p/%s", e, inst.Symbol()),
+				uint64(census.NewFNV1a().Add(underlyingPrice))))
+		}
 		if opt, ok := inst.(*einstrument.EuropeanOption); ok {
 			yearsLeft := float64(opt.ExpiryNano()-now) / float64(365*24*time.Hour)
 			mark := eprice.Black76Premium(underlyingPrice, opt.Strike, opt.IV, yearsLeft, opt.IsCall)
@@ -362,6 +376,10 @@ func (e *DefaultExchange) CheckExpiries() {
 		}
 	}
 	e.mu.RUnlock()
+	if census.Enabled {
+		censusExpiries.Call(len(expired) == 0)
+		censusExpiries.Quantity(len(e.Instruments))
+	}
 
 	// Settlement cancels orders and emits events, so map iteration here would
 	// make same-timestamp expiries observably nondeterministic.

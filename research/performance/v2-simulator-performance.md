@@ -983,3 +983,111 @@ The relative results carry over — the speedup is 38.8% rather than 38.2% under
 go1.27 — but absolute wall times in the tables above should be read as about 6%
 optimistic relative to a real r5 build.
 
+
+## Track C — the high-frequency no-op census
+
+Ranking waste by `calls x no-op fraction x cost per call` needs a count of
+useless invocations, which a CPU profile cannot give: a profile says where time
+goes, not whether the work was needed. The `census` package supplies that. It is
+off unless `EXSIM_CENSUS` is set, the disabled path is one branch on an
+immutable global, and sites register themselves so no central table has to be
+edited to add one.
+
+Measured on `dev-607-none` (the registered logging-parity control: identical
+population to dev-607 with recorders off), seed 607, **2 simulated hours**,
+three venues, `GOMAXPROCS=4`.
+
+| site | calls | useless | useless % | verdict |
+|---|---:|---:|---:|---|
+| `marketdata.Publish` (all types) | 2,959,320 | 1,554,626 | 52.5 % | see breakdown |
+| `marketdata.Publish[Delta]` | 1,682,047 | **1,387,675** | **82.5 %** | **act** |
+| `marketdata.Publish[Trade]` | 610,963 | 62,511 | 10.2 % | leave |
+| `marketdata.Publish[Funding]` | 21,604 | **21,604** | **100 %** | **act** |
+| `marketdata.Publish[Snapshot]` | 561,981 | 171 | 0.03 % | **hypothesis rejected** |
+| `marketdata.Publish[Instrument]` | 66 | 6 | 9.1 % | negligible |
+| `exchange.logSnapshots.book` | 561,354 | 323,712 | 57.7 % | ambiguous, see below |
+| `exchange.CheckExpiries` | 21,600 | 21,600 | 100 % | **act** |
+| `exchange.CheckAndSettleFunding` | 21,600 | 21,599 | 99.995 % | **act** |
+| `exchange.CheckListings` | 21,600 | 21,594 | 99.97 % | **act** |
+| `exchange.UpdateDerivativeMarks.contract` | 475,002 | 176,946 | 37.3 % | **not waste — my error** |
+| `marketdata.PublishDelta.alloc` | 0 | 0 | — | **dead code** |
+
+### C1 — book deltas built for an audience that is not there
+
+`publishBookUpdate` (`exchange/order_handling.go:537`) heap-allocates a
+`BookDelta` and calls `Publish`. In two simulated hours **1,387,675 of those
+1,682,047 fan-outs reach no subscriber** — roughly **16.6 M wasted allocations
+and publisher-lock acquisitions per 24-hour cell**. This is the single largest
+no-op class found so far, an order of magnitude above the preview-matching and
+position-probe classes that were worth acting on earlier.
+
+`Publish[Funding]` is smaller but total: **100 % of 21,604 funding fan-outs
+reach nobody**, because nothing in this population subscribes to `MDFunding`.
+
+**Economically expected?** Yes — an actor subscribing to trades on a symbol has
+no reason to want its deltas, and the publisher is right to deliver nothing.
+The waste is not the empty delivery, it is that the payload is constructed
+before anyone asks whether it is wanted. **PERFORMANCE ONLY.**
+
+**The constraint that makes this non-trivial.** `Publish` increments `p.seqNum`
+whenever the symbol has any subscriber, *before* the per-subscriber MDType
+filter. So a fan-out with subscribers but no type match still consumes a
+sequence number. Skipping such a call outright would renumber the market-data
+stream that other subscribers observe, which can move actor behaviour and
+therefore the trajectory. Any fix must suppress **construction** while leaving
+sequence-number consumption exactly as it is.
+
+### C2 — fixed-cadence sweeps that rescan everything to discover nothing
+
+Three automation jobs run once per simulated second and answer "is anything
+due?" by scanning every instrument:
+
+* `CheckExpiries` — 21,600 sweeps, **100 % found nothing**, 561,420 instrument
+  visits in two hours;
+* `CheckAndSettleFunding` — 21,600 sweeps, **one** settlement; each sweep ranges
+  all instruments, allocates a slice, sorts it, then takes the exchange mutex
+  once per perp only to compare `now < NextFunding` and continue;
+* `CheckListings` — 21,600 sweeps, six listings.
+
+**Economically expected?** The *outcome* is: expiries and funding settlements
+are genuinely rare. The *cost* is not — every due time is known in advance, so
+a next-due watermark answers the same question with one comparison and gives
+byte-identical events in the same order. **PERFORMANCE ONLY.**
+
+### C3 — rejected hypotheses, recorded
+
+* **Public snapshots built for nobody: false.** I expected
+  `logSnapshots` to build two `GetPublicSnapshot` slices per book per second for
+  symbols with no snapshot subscriber. Measured: **171 of 561,981**, 0.03 %.
+  Snapshots are consumed almost everywhere. Hypothesis dead.
+* **`MDPublisher.PublishDelta` is dead code**: **0 calls**. Every live delta
+  goes through `publishBookUpdate` calling `Publish` directly. My first
+  instrumentation was attached to the unused function and reported zero waste
+  while 1.68 M deltas flowed past it. Worth recording as a warning: a census
+  site on the wrong function reports "no problem here" just as confidently as
+  one on the right function.
+
+### C4 — a measurement error of mine, corrected
+
+I first counted `UpdateDerivativeMarks` calls where the underlying price was
+unchanged since the previous tick (37.3 %) as repeated work. **That is wrong.**
+`Black76Premium(underlying, strike, iv, yearsLeft, isCall)` also takes time to
+expiry, which advances every tick, so an unchanged underlying still produces a
+different premium. The site is kept, with its note corrected to say so, because
+the count is still useful context — but it is not waste and must not be
+optimized away.
+
+### C5 — ambiguous: 57.7 % of book snapshots repeat the previous record
+
+`exchange.logSnapshots.book` shows **323,712 of 561,354** snapshots byte-identical
+to the previous snapshot of the same book, covering 2,513,286 serialized price
+levels. That is real redundancy in the evidence stream.
+
+It is **not** a free optimization. The r5 lifecycle analyzers consume
+`BookSnapshot` records directly — `analysis/expiry_fill.go` decodes every
+snapshot during a contract's listed lifetime specifically so that a malformed
+active snapshot cannot hide the last executable-depth transition. Emitting
+fewer records changes what those predicates see. Classified **AMBIGUOUS /
+REQUIRES SPECIFICATION**: the redundancy is measured and recorded, the decision
+whether a periodic snapshot stream may elide unchanged records belongs to the
+evidence contract, not to a performance pass.
