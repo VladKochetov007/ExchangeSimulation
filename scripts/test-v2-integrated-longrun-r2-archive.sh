@@ -174,20 +174,24 @@ jq --arg sha256 "$stale_metadata_sha256" --argjson bytes "$stale_metadata_bytes"
 	'.fixed_files |= map(if .path == "run-metadata.json" then .sha256 = $sha256 | .bytes = $bytes else . end)' \
 	"$v2_r2_output_root/dev-607/evidence-manifest.json" >"$tmp_root/stale-manifest.json"
 mv -- "$tmp_root/stale-manifest.json" "$v2_r2_output_root/dev-607/evidence-manifest.json"
-new_status_sha256=$(sha256sum -- "$v2_r2_output_root/dev-607/run-status.json" | awk '{print $1}')
 new_manifest_sha256=$(sha256sum -- "$v2_r2_output_root/dev-607/evidence-manifest.json" | awk '{print $1}')
 jq --arg metadata_sha256 "$stale_metadata_sha256" \
 	'.run_metadata_sha256 = $metadata_sha256' \
 	"$v2_r2_output_root/dev-607/run-status.json" >"$tmp_root/stale-status.json"
 mv -- "$tmp_root/stale-status.json" "$v2_r2_output_root/dev-607/run-status.json"
 new_status_sha256=$(sha256sum -- "$v2_r2_output_root/dev-607/run-status.json" | awk '{print $1}')
-jq --arg status_sha256 "$new_status_sha256" \
-	'.run_status_sha256 = $status_sha256' \
+jq --arg status_sha256 "$new_status_sha256" --arg manifest_sha256 "$new_manifest_sha256" \
+	'.run_status_sha256 = $status_sha256 | .evidence_manifest_sha256 = $manifest_sha256' \
 	"$v2_r2_attestation_root/dev-607.json" >"$tmp_root/stale-attestation.json"
 mv -- "$tmp_root/stale-attestation.json" "$v2_r2_attestation_root/dev-607.json"
-expect_failure env GOMAXPROCS=1 MVANALYZE_BIN="$analyzer" \
+if env GOMAXPROCS=1 MVANALYZE_BIN="$analyzer" \
 	"$root_dir/scripts/archive-v2-integrated-longrun-r2-cell.sh" \
-		"$v2_r2_output_root/dev-607-g8" --prune-after-verify
+		"$v2_r2_output_root/dev-607-g8" --prune-after-verify \
+		>"$tmp_root/stale-archive.log" 2>&1; then
+	fail "stale pruning-gate archive unexpectedly succeeded"
+fi
+rg -q 'pruning gate revision' "$tmp_root/stale-archive.log" ||
+	fail "stale pruning-gate archive failed for an unexpected reason"
 [[ -e "$v2_r2_output_root/dev-607-g8/venues/north/events.jsonl" ]] ||
 	fail "failed G8 provenance check deleted raw evidence"
 v2_r2_cleanup_staged_raw_evidence "$v2_r2_output_root/dev-607-g8" ||
