@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -45,6 +46,16 @@ type checkpointSink struct {
 	traceFrom int64
 	traceTo   int64
 	trace     io.WriteCloser
+
+	// hasher, sumScratch and nameScratch remove four heap allocations per
+	// observed event: a fresh SHA-256 state, the slice Sum(nil) returns, and the
+	// two string-to-[]byte conversions the identity writes used to make. All
+	// three are touched only under mu and never outlive one call. Reset leaves
+	// the hash in exactly the state New returns, and SHA-256 is a stream, so
+	// concatenating the two identity writes hashes the identical byte sequence.
+	hasher      hash.Hash
+	sumScratch  []byte
+	nameScratch []byte
 
 	rolling          [32]byte
 	events           int64
@@ -92,6 +103,7 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 		return nil, nil
 	}
 	sink := &checkpointSink{
+		hasher:       sha256.New(),
 		intervalNano: int64(intervalSeconds) * 1e9,
 		traceFrom:    traceFrom,
 		traceTo:      traceTo,
@@ -133,7 +145,6 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	}
 	payloadDigest := sha256.Sum256(encoded)
 
-	hasher := sha256.New()
 	var scratch [8]byte
 
 	s.mu.Lock()
@@ -148,15 +159,23 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 		s.firstEvent = false
 	}
 	// Chain: the digest after n events depends on all n and on their order.
+	// Lazily created so a sink built as a struct literal, which tests do, works
+	// without knowing about this field.
+	if s.hasher == nil {
+		s.hasher = sha256.New()
+	}
+	hasher := s.hasher
+	hasher.Reset()
 	hasher.Write(s.rolling[:])
 	binary.BigEndian.PutUint64(scratch[:], uint64(simTime))
 	hasher.Write(scratch[:])
 	binary.BigEndian.PutUint64(scratch[:], clientID)
 	hasher.Write(scratch[:])
-	hasher.Write([]byte(eventName))
-	hasher.Write([]byte(venueID))
+	s.nameScratch = append(append(s.nameScratch[:0], eventName...), venueID...)
+	hasher.Write(s.nameScratch)
 	hasher.Write(payloadDigest[:])
-	copy(s.rolling[:], hasher.Sum(nil))
+	s.sumScratch = hasher.Sum(s.sumScratch[:0])
+	copy(s.rolling[:], s.sumScratch)
 	s.events++
 
 	if s.trace != nil && simTime >= s.traceFrom && simTime < s.traceTo {
