@@ -411,3 +411,18 @@ archive path calls the clean `verify-v2-integrated-longrun-r2-cell.sh` raw
 recomputation immediately before any prune.  Regression tests pass for both
 cases.  The rejected verdict remains historical; the corrective successor
 requires a new independent review and full gate before development cells.
+
+## Follow-up independent review — `b1e41e7` (2026-08-30)
+
+Maxwell (Sol-xhigh) independently reviewed exact pushed commit
+`b1e41e7e1048a17af65854db1645b320855cb90d` and **REJECTED** it before any R2
+cell ran.  Equal-timestamp lifecycle records from different files were still
+ordered lexically by filename, contrary to the evidence-order contract that
+marks such records ambiguous.  The G8 archive helper also intentionally did
+nothing, so G8 raw pruning was protected only by stored parity sidecars.
+
+The current successor rejects cross-file same-timestamp lifecycle groups and
+adds a regression; G8 pruning calls a verify-existing parity recomputation and
+requires its fresh attestation to match the sealed one without overwriting it.
+The rejected verdict remains historical and no raw, development, or holdout
+evidence was deleted or run.

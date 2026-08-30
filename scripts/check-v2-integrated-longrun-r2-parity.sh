@@ -3,6 +3,16 @@
 # never reads holdout directories and refuses to overwrite its attestation.
 set -euo pipefail
 
+verify_existing=false
+if [[ ${1:-} == --verify-existing ]]; then
+	verify_existing=true
+	shift
+fi
+if [[ $# -gt 1 ]]; then
+	printf 'usage: %s [--verify-existing] [OUTPUT_ROOT]\n' "$0" >&2
+	exit 2
+fi
+
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 output_root=${1:-"$v2_r2_output_root"}
@@ -20,7 +30,11 @@ require_object() {
 	jq -e 'type == "object"' "$1" >/dev/null || fail "malformed parity JSON: $1"
 }
 v2_r2_require_output_root "$output_root" || fail "parity root is not the canonical R2 evidence root"
-[[ ! -e "$attestation" ]] || fail "refusing to overwrite parity attestation: $attestation"
+if [[ "$verify_existing" == true ]]; then
+	[[ -s "$attestation" ]] || fail "missing existing parity attestation: $attestation"
+else
+	[[ ! -e "$attestation" ]] || fail "refusing to overwrite parity attestation: $attestation"
+fi
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "parity requires a clean gate worktree"
 [[ -x "$analyzer" ]] || fail "missing analyzer for independent raw parity recomputation: $analyzer"
 analyzer_revision=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
@@ -253,7 +267,15 @@ jq -n \
 			source_and_build_identity_equal: true
 		}
 	}' >"$tmp"
-mv "$tmp" "$attestation"
+if [[ "$verify_existing" == true ]]; then
+	if ! cmp -s <(jq -S -c . "$attestation") <(jq -S -c . "$tmp"); then
+		rm -f -- "$tmp"
+		fail "existing parity attestation differs from fresh recomputation"
+	fi
+	rm -f -- "$tmp"
+else
+	mv "$tmp" "$attestation"
+fi
 require_object "$attestation"
 jq -e '(.simulator_binary_sha256 | test("^[0-9a-f]{64}$")) and
 	(.simulator_binary_go_version | startswith("go1.27")) and

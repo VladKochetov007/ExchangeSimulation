@@ -242,6 +242,18 @@ same-timestamp regression tests, and invokes the existing clean raw-evidence
 verifier immediately before prune.  No raw evidence was deleted and no
 development or holdout cell ran from the rejected commit.
 
+The follow-up review of exact commit
+`b1e41e7e1048a17af65854db1645b320855cb90d` was **REJECTED** before any R2
+cell ran.  It correctly noted that lexically ordering equal-timestamp records
+from different files still invented causality, despite the same-file fix, and
+that the supported `dev-607-g8` archive path still skipped fresh recomputation.
+The next correction rejects any same-venue, same-timestamp lifecycle group
+spanning multiple files, making the calendar metric fail closed; it adds a
+cross-file regression.  G8 pruning now invokes a verify-existing parity
+recomputation that compares a newly generated attestation without overwriting
+the sealed one.  No raw evidence was deleted and no development or holdout
+cell ran from `b1e41e7`.
+
 ## Gate status
 
 This is a semantic amendment, not a no-op repair.  Before any R2 development

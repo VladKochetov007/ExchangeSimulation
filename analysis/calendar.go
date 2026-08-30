@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 )
@@ -115,6 +116,14 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 		mu.Unlock()
 	}); err != nil {
 		return nil, err
+	}
+	filesAtTimestamp := make(map[string]string)
+	for _, event := range events {
+		key := fmt.Sprintf("%s\x00%d", event.venueID, event.at)
+		if previousFile, exists := filesAtTimestamp[key]; exists && previousFile != event.file {
+			return nil, fmt.Errorf("calendar: ambiguous same-timestamp lifecycle records span %q and %q", previousFile, event.file)
+		}
+		filesAtTimestamp[key] = event.file
 	}
 	sort.Slice(events, func(i, j int) bool {
 		left, right := events[i], events[j]
@@ -301,7 +310,7 @@ func calendarPositionPrecedes(left, right calendarEventPosition) bool {
 		return left.at < right.at
 	}
 	if left.file != right.file {
-		return left.file < right.file
+		return false
 	}
 	return left.ordinal < right.ordinal
 }

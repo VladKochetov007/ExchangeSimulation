@@ -33,6 +33,10 @@ verify_measurement_contract() {
 		MVANALYZE_BIN="$analyzer" \
 			"$root_dir/scripts/verify-v2-integrated-longrun-r2-cell.sh" "$cell" >/dev/null ||
 			fail "fresh raw-evidence recomputation did not verify the stored measurement contract"
+	else
+		"$root_dir/scripts/check-v2-integrated-longrun-r2-parity.sh" --verify-existing \
+			"$v2_r2_output_root" >/dev/null ||
+			fail "fresh parity/raw-evidence recomputation did not verify the stored G8 measurement contract"
 	fi
 }
 

@@ -93,3 +93,21 @@ func TestMeasureCalendarRejectsSameTimestampSettlementBeforeListing(t *testing.T
 		t.Fatalf("same-timestamp reversed lifecycle counts = %+v", venue)
 	}
 }
+
+func TestMeasureCalendarRejectsCrossFileSameTimestampLifecycleOrder(t *testing.T) {
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/a.jsonl": {
+			`{"sim_ts":3,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":{"symbol":"ABC-FUT-3-U4142432f555344","instrument_type":"FUTURE","expiry_nano":3}}}`,
+		},
+		"north/z.jsonl": {
+			`{"sim_ts":3,"client_id":0,"event":"instrument_settled","data":{"venue_id":"north","payload":{"symbol":"ABC-FUT-3-U4142432f555344","instrument_type":"FUTURE","expiry_nano":3}}}`,
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := run.MeasureCalendar(CalendarOptions{}); err == nil {
+		t.Fatal("same-timestamp cross-file lifecycle order was not rejected")
+	}
+}
