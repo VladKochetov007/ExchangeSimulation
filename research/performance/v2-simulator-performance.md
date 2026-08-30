@@ -1506,3 +1506,61 @@ it will not yield to a cheaper representation of the same algorithm. Reducing it
 requires an algorithmic change — a calendar or ladder queue exploiting the fact
 that event timestamps are clustered on a 1 ms grid — which is a much larger
 change and is not attempted here. Recorded so the layout idea is not retried.
+
+## The competing option: JSON appenders at the call site
+
+The binary evidence format has until now been measured against the JSON path
+as it stands. That is the wrong baseline for a promotion decision, because a
+cheaper intervention on the JSON path exists and is now measured.
+
+Re-testing the one unsound rejection in this campaign (the `instrumentLogEvent`
+wrapper appender) produced two results rather than one. Both were checked for
+byte-identical output against the reflection path first, because the ordered
+execution-stream digest is taken over exactly these bytes.
+
+**Implementing `json.Marshal` cannot win.** A `MarshalJSON` on the wrapper is
+**2.27x slower** and allocates 8 more objects per event. The cause is
+structural, not incidental: the encoder calls the `Marshaler` and then compacts
+its output into the encoder's own buffer, so a hand-written marshaller pays for
+a second buffer and a copy that the reflection walk never pays. No amount of
+tuning inside `MarshalJSON` reaches parity.
+
+**Bypassing `encoding/json` at the call site does win: 7.6x, zero
+allocations.** A `AppendJSON(dst []byte) []byte` interface, type-switched in
+`checkpointSink.observe` instead of calling `json.Marshal`, writes straight into
+a reusable scratch buffer.
+
+### What this means for the promotion decision
+
+The two options are not as far apart as the headline numbers suggest, and the
+comparison must be stated in terms of what each one addresses:
+
+| | JSON appenders | canonical binary |
+| --- | --- | --- |
+| addresses the 14.99 % marshal share | yes | yes |
+| addresses the 3.61 % per-event digest | no | yes, one continuous hasher replaces per-event `Sum256` |
+| bytes written | unchanged | 2.92x smaller |
+| typed decode, block index, selective queries | no | yes |
+| evidence format changes | no | yes |
+| per-family hand-written encoders required | yes | yes, the same set |
+| map payloads | cannot be byte-identical, must fall back | ride as opaque JSON, still typed frames |
+
+The appender path is bounded above by the marshal share it addresses, so
+roughly **13 % of wall time** against binary's measured **15.73 %**. That gap is
+real but it is not the gap between 15.73 % and zero, and an honest promotion
+recommendation has to say so.
+
+The decisive asymmetry is not the wall-clock difference. It is that the appender
+path buys speed while leaving the evidence in a format that is still 2.92x
+larger, still requires a full sequential parse to answer any question, and still
+has no typed reader. The binary format's case rests on those, with the wall
+clock as a secondary benefit — not the other way round.
+
+### Caveat on the 7.6x
+
+The appender benchmark reuses one scratch buffer and so allocates nothing. The
+real `observe` path returns its encoded bytes to the raw-evidence logger for
+reuse, so a production appender could not reuse a single buffer unconditionally
+without either copying at the handoff or retiring the JSONL writer. The 7.6x is
+therefore an upper bound on the call-site appender option, and closing that gap
+requires the same JSONL retirement the binary path requires.

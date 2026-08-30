@@ -56,12 +56,30 @@ Preserved so they are not rediscovered under different wording.
 | Parquet / columnar analytics layer | indexed binary answers all four query classes; the index is worth only 1.2x on the one class columnar would win |
 | Sparse margin profile (A′) | blocked by market-logic finding F1 — optimizing through it would have silently repaired a scientific defect while claiming a performance result |
 
-**One rejection is unsound and is recorded as such.** The `instrumentLogEvent`
-wrapper appender was rejected on a +3.3 % malloc regression measured *across*
-the introduction of a census probe that itself allocates on every fallback
-event. The later clean measurement covered only `balance_change`, not the
-wrapper. That rejection should be re-tested before the wrapper idea is
-considered dead.
+**The one unsound rejection has been re-tested, and the answer split in two.**
+The `instrumentLogEvent` wrapper appender was rejected on a +3.3 % malloc
+regression measured *across* the introduction of a census probe that itself
+allocates on every fallback event. Re-measured in isolation, byte-identity
+verified first:
+
+| arm | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| reflection, both fixtures | 1196-1231 | 592 | 13 |
+| `json.Marshal` + `MarshalJSON` on the wrapper | 2737-2793 | 1072 | 21 |
+| reflection, struct fixture only | 353-398 | 160 | 2 |
+| call-site appender, struct fixture only | 46.9-73.5 | 0 | 0 |
+
+The rejection stands for the form that was tested, for a mechanism reason the
+contaminated run never identified: `encoding/json` seeing a `json.Marshaler`
+calls it and then **compacts the returned bytes into its own buffer**, so the
+candidate pays for a second buffer and a copy that reflection never pays. It is
+**2.27x slower**. Implementing `MarshalJSON` cannot win here and could not have
+won.
+
+The form that was never tested does win: **7.6x and zero allocations**, by
+bypassing `encoding/json` at the call site rather than inside it. This is a
+competing option against the binary format and is recorded as such in
+[v2-simulator-performance.md](v2-simulator-performance.md).
 
 ## 4. Method: what this campaign learned about measuring
 
