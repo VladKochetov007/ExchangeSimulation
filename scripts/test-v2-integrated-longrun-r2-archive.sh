@@ -190,8 +190,10 @@ if env GOMAXPROCS=1 MVANALYZE_BIN="$analyzer" \
 		>"$tmp_root/stale-archive.log" 2>&1; then
 	fail "stale pruning-gate archive unexpectedly succeeded"
 fi
-rg -q 'pruning gate revision' "$tmp_root/stale-archive.log" ||
+if ! rg -q 'pruning gate revision' "$tmp_root/stale-archive.log"; then
+	sed -n '1,40p' "$tmp_root/stale-archive.log" >&2
 	fail "stale pruning-gate archive failed for an unexpected reason"
+fi
 [[ -e "$v2_r2_output_root/dev-607-g8/venues/north/events.jsonl" ]] ||
 	fail "failed G8 provenance check deleted raw evidence"
 v2_r2_cleanup_staged_raw_evidence "$v2_r2_output_root/dev-607-g8" ||
