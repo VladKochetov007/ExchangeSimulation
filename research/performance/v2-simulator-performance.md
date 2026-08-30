@@ -542,6 +542,36 @@ flip under it. Narrowing the window in which a late arrival is observed is
 exactly the kind of change that passes three seeds and fails on the fourth. Worth
 1-2%; not worth being wrong about.
 
+### R11 — Convert the remaining map log payloads to ordered structs
+
+S2 converted the three highest-volume `map[string]any` payloads and measured
+-9.9% wall. Five map payloads remain, and an allocation profile by **object
+count** rather than by bytes — a view this study had under-used — put
+`reflect.unsafe_New` at 7.5% of allocated objects over a 4-hour run, reached
+entirely through `reflect.copyVal` from `MapIter`, which is `encoding/json`
+walking those maps.
+
+The two highest-volume remainders were converted: the IOC-expiry `OrderCancelled`
+payload and `maker_state`. Evidence stayed byte-identical on both seeds, so the
+field ordering was right.
+
+**Rejected: no measurable benefit.** Six alternating pinned repetitions put wall
+and CPU at -0.49% with *identical* ranges (10.02-10.26 on both sides). Reflect
+map-iteration objects did fall 17.6% as predicted, but total allocated objects
+did not move: three passes gave a median of 33,378,280 before and 33,374,538
+after. Boxing a nine-field struct into the logger's `any` parameter costs about
+what the map iteration it replaced did, where S2's payloads won because their
+event volume was an order of magnitude higher.
+
+A first single-sample measurement showed +4.4% objects and was not trusted;
+repeating it showed the difference was noise. Reverted rather than shipped,
+because two type declarations and a test rewrite for a measured no-op is churn.
+
+The useful conclusion is the negative one: **the remaining map payloads are too
+low-volume in this composition to be worth converting**, so the S2 exercise
+should not be repeated on them without first measuring the event counts of the
+composition in question.
+
 ### R7 — Go profile-guided optimization
 
 **Rejected: PGO is a regression on this workload.**
