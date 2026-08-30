@@ -77,6 +77,7 @@ type Writer struct {
 
 	dict     *Dictionary
 	scratch  []byte
+	payload  []byte
 	wroteHdr bool
 	epoch    uint32
 	err      error
@@ -144,6 +145,36 @@ func (w *Writer) Append(simTS int64, clientID uint64, venueRef uint32, payload P
 		SchemaID:      payload.SchemaID(),
 		SchemaVersion: payload.SchemaVersion(),
 	}, nil, payload)
+}
+
+// AppendInterning writes one event whose payload resolves its own strings.
+//
+// The payload is encoded into a scratch buffer before the frame is opened, so
+// any dictionary frame emitted while interning is written first and a reader
+// never meets an id it has not yet learned. The cost is one copy of a payload
+// that is tens of bytes; the alternative — interning mid-frame — would
+// interleave a dictionary frame into the middle of an event frame and corrupt
+// the stream.
+func (w *Writer) AppendInterning(simTS int64, clientID uint64, venueRef uint32,
+	payload InterningAppender) error {
+	if w.err != nil {
+		return w.err
+	}
+	if err := w.ensureHeader(); err != nil {
+		return err
+	}
+	encoded, err := payload.AppendPayloadInterning(w.payload[:0], w)
+	if err != nil {
+		return err
+	}
+	w.payload = encoded
+	return w.appendFrame(FrameHeader{
+		SimTS:         simTS,
+		ClientID:      clientID,
+		VenueRef:      venueRef,
+		SchemaID:      payload.SchemaID(),
+		SchemaVersion: payload.SchemaVersion(),
+	}, encoded)
 }
 
 // appendFrame writes a frame whose payload is either supplied directly (the
