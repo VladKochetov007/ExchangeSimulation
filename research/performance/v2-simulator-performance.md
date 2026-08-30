@@ -436,6 +436,88 @@ Adopting it is the scientific owner's call, because the r5 protocol may register
 > **Target metric at `GOMAXPROCS=4`: 50.0 to 88.1 simulated seconds per
 > wall-clock second, a 1.76x total speedup, with peak RSS down 18%.**
 
+## Market-Logic Findings Exposed by Performance Research
+
+Structural optimization forces implicit assumptions to be stated, and stating
+them turned out to be an effective audit of the simulator's causal semantics.
+Two independent adversarial audits ran against the risk engine and the matching
+preview. Full reports: `v2-risk-semantics-audit.md`, `v2-preview-semantics-audit.md`.
+Reproductions are committed as tests, with open findings gated behind
+`AUDIT_FINDINGS=1` so the default suite stays green.
+
+**None of these were optimized through.** Every one is recorded as a finding for
+the scientific owner to rule on.
+
+### Scientific-blocking
+
+| # | Finding | Measured frequency, dev-607/900101, <=15 min |
+| --- | --- | --- |
+| F1 | An unmarked book with **zero account exposure** fails the margin profile and suppresses liquidation. The mark is resolved before the position loop, so a book contributing nothing to the profile can fail it | **0** |
+| F2 | One account's unpriceable exposure `return`s out of `CheckLiquidations`, skipping **every higher-ID account** at that mark. `CheckPositionMarginerLiquidations` uses `continue` for the identical condition — the two paths disagree | **0** |
+| F3 | Cross-margin liquidation decided against a sibling instrument's stale mark; the outcome depends on lexicographic symbol order and can liquidate a solvent account | **0** wrong outcomes, but 33 of 79 clients are cross-margined in USD, so the surface is populated |
+| F6 | Positions in a settlement-pending contract contribute 0 equity **and** 0 maintenance, for as long as the pending state lasts — the only unbounded staleness in the graph | **0** (no expiry reached in <=15 min) |
+
+F1 is the finding I hit while proving the sparse risk sweep safe, and it is why
+`buildAccountMarginProfile` was left dense. F2 is a strictly better finding that
+the audit produced independently: two code paths implementing the same condition
+differently is itself strong evidence that at least one is wrong.
+
+Note that `exchange/margin_profile_determinism_test.go:11` **asserts F1's
+behaviour as correct** — it builds a profile for a client holding no positions in
+either book and requires an error. So F1 was a deliberate choice at least once,
+which is what makes it a specification question rather than a plain defect.
+
+### Ambiguous
+
+| # | Finding | Measured frequency |
+| --- | --- | --- |
+| F8 | Borrow interest truncates to zero below ~10.5 M units with no remainder carry | **100%** — 15 of 15 debts below the threshold, **zero interest charged** |
+| F4 | `Transfer` admits withdrawal on `balance - reserved`, ignoring unrealized loss, with no risk re-check | 0 — no caller in the simulation |
+| F7 | A single breach closes every leg without re-testing solvency | 0 — netting mode only |
+| P1 | The preview silently requires `FilledQty == 0`: its self-check compares this preview's fill sum against the order's *total*, so a partially filled order would be refused | unreachable through today's callers |
+| P2 | The clone **repairs** state the live matcher rejects: `AddOrder` grants a fresh tranche to an iceberg with `DisplayRemaining == 0`, so on a corrupt book the preview reports a clean fill where committed matching panics. The clone hides a corruption signal | unreachable through today's callers |
+
+**F8 is the one to look at first.** It is classified ambiguous rather than
+blocking because it may be an intended precision floor, but it fires on every
+debt in the configuration: the simulation currently charges no borrow interest at
+all. That is an economic input, not a rounding detail.
+
+### Does any of this require a rerun?
+
+Per the audit: **no rerun for anything measured.** dev-607 at 5 and 15 minutes
+produces zero liquidations, zero margin calls, and zero `liquidation`-path
+`price_unavailable` records, so F1, F2, F3 and F6 are defects in decisions that
+were never made. The candidate F1/F2 fix reproduces the evidence digest
+byte-for-byte, which confirms it directly.
+
+Two conditions would change that, and both are cheap to check against any
+long-run artifact before trusting it:
+
+1. **Any `liquidation` event on an account holding positions in two or more
+   margined books of the same quote asset** — F3's trigger. Such a run *cannot*
+   be rescored, because the counterfactual needs equity re-evaluated against the
+   full refreshed mark set and the evidence does not contain it. It would need a
+   rerun.
+2. **Any `expiry_settlement_pending` record** — F6's trigger, and plausible in
+   the multi-hour runs that do cross dated-future expiries.
+
+A `price_unavailable` record whose operation is `liquidation` or
+`option_liquidation` is F1/F2 firing directly.
+
+Neither audit was permitted to read the registered holdouts, so nothing here
+speaks to them.
+
+### The preview path itself is clean
+
+Worth stating alongside the findings: 80,000 differential scenarios across both
+matchers — FIFO and ProRata, exclusions, partial fills, market/IOC/GTC/FOK/
+post-only, iceberg refreshes reached through real matcher passes rather than
+forged, queue depths past three, levels the order cannot reach, and levels
+holding only the incoming client's own orders — produced **no divergence in
+executable behaviour** between the preview and committed matching. The preview is
+correct where it is reachable. P1 and P2 are latent asymmetries in unreachable
+territory.
+
 ## 5b. Long-horizon behaviour
 
 Every figure above is a 15-minute cell. The registered run is 24 hours, and a

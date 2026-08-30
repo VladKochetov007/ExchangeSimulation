@@ -158,3 +158,51 @@ func TestPreviewShortCircuitOnAnEmptyBook(t *testing.T) {
 		t.Fatal("an empty book was not reported as uncrossable")
 	}
 }
+
+// TestPreviewShortCircuitHandlesMarketOrders covers the case a differential
+// audit found the first version missing: a market order crosses any price, so it
+// cannot cross only when the opposite side holds no order the preview would have
+// copied. The earlier version returned early for every market order and so built
+// a detached book to match against nothing.
+func TestPreviewShortCircuitHandlesMarketOrders(t *testing.T) {
+	matcher := NewPriceTimeMatcher()
+	market := func() *etypes.Order {
+		return &etypes.Order{ID: 99, ClientID: 1, Qty: 5,
+			Side: Buy, Type: etypes.Market, TimeInForce: etypes.IOC}
+	}
+
+	// Empty opposite side: nothing to match.
+	empty := previewTestBook(t, Sell, nil)
+	if !previewCannotCross(matcher, empty, market(), nil) {
+		t.Fatal("a market order against an empty side was reported as crossing")
+	}
+
+	// Liquidity present: must take the full preview at any price.
+	stocked := previewTestBook(t, Sell, map[int64][]uint64{100: {2}})
+	if previewCannotCross(matcher, stocked, market(), nil) {
+		t.Fatal("a market order against a stocked side was reported as unable to cross")
+	}
+
+	// Liquidity present but entirely excluded: nothing the preview would copy.
+	if !previewCannotCross(matcher, stocked, market(), map[uint64]struct{}{1: {}}) {
+		t.Fatal("a market order against a fully excluded side was reported as crossing")
+	}
+
+	// And the outcome still matches the full preview in every case.
+	gated := &DefaultExchange{Matcher: matcher}
+	ungated := &DefaultExchange{Matcher: uncommittedMatcher{inner: matcher}}
+	for _, book := range []*OrderBook{empty, stocked} {
+		g, gok := gated.previewMatchExcluding(book, market(), nil)
+		u, uok := ungated.previewMatchExcluding(book, market(), nil)
+		if gok != uok {
+			t.Fatalf("acceptance differs: gated %v ungated %v", gok, uok)
+		}
+		if gok && g.FullyFilled != u.FullyFilled {
+			t.Fatalf("FullyFilled differs: gated %v ungated %v", g.FullyFilled, u.FullyFilled)
+		}
+		if gok {
+			releasePreviewExecutions(g.Executions)
+			releasePreviewExecutions(u.Executions)
+		}
+	}
+}
