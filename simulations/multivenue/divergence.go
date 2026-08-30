@@ -87,7 +87,19 @@ type checkpointRecord struct {
 	EventCount          int64  `json:"event_count"`
 	ExecutionStreamHash string `json:"execution_stream_hash"`
 	Rolling             string `json:"rolling_hash"`
+	// Representation names the canonical bytes the hash is taken over. It is
+	// omitted for the JSON path so checkpoint files stay byte-identical to
+	// every one written before the binary sink existed, and the locator keeps
+	// reading them unchanged. A binary-mode hash is over different canonical
+	// bytes than a JSON-mode hash of the same trajectory, so comparing the two
+	// is meaningless and this field is what makes that visible rather than
+	// looking like a divergence.
+	Representation string `json:"representation,omitempty"`
 }
+
+// binaryRepresentation tags a checkpoint whose hash covers canonical binary
+// frames rather than marshalled JSON payloads.
+const binaryRepresentation = "evstream_v1"
 
 // traceRecord is one line of the narrow trace. Sequence is the sink's own
 // counter, which is the order events actually reached the log and therefore
@@ -131,6 +143,17 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 		sink.trace = file
 	}
 	if binaryEvidenceEnabled() {
+		// The trace line carries a per-event JSON payload digest and pulls the
+		// symbol and order id out of the marshalled payload. The binary path
+		// produces neither, so a requested trace would silently yield an empty
+		// file. Refuse the run instead: a missing diagnostic that looks present
+		// is worse than one that is absent.
+		if sink.trace != nil {
+			sink.trace.Close()
+			return nil, fmt.Errorf(
+				"multivenue: execution trace is not available under EXSIM_BINARY_EVIDENCE; " +
+					"unset it or drop the trace window")
+		}
 		// "discard" isolates encode-and-hash cost from storage. On a no-log
 		// config the JSON path writes no raw evidence at all, so a binary sink
 		// that writes a file would be measured against a JSON path doing no
@@ -169,8 +192,25 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	if s.binary != nil {
 		s.binary.record(simTime, clientID, eventName, venueID, payload)
 		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.closed {
+			return nil
+		}
 		s.lastSimTime = simTime
-		s.mu.Unlock()
+		// The event counter and the checkpoint boundary are part of the
+		// attestation, not part of JSON encoding, so they run in both modes.
+		// Skipping them once made binary runs write a checkpoint claiming zero
+		// events and an all-zero hash, which every pair of binary runs would
+		// have compared as identical.
+		s.events++
+		if s.firstEvent && s.intervalNano > 0 {
+			s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
+			s.firstEvent = false
+		}
+		if s.intervalNano > 0 && simTime >= s.nextBound {
+			s.writeCheckpointLocked(s.nextBound)
+			s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
+		}
 		return nil
 	}
 
@@ -185,8 +225,15 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	// The census tallies it per event name, with the encoded size as quantity,
 	// so a hand-written byte-identical encoder can be aimed at the few types
 	// that actually dominate rather than written for all of them.
-	census.CountFor("checkpoint.observe["+eventName+"]",
-		"marshalled to feed the ordered execution-stream hash", false, len(encoded))
+	// Guarded at the call site, not inside CountFor: Go evaluates the
+	// concatenated site name before the call, so an unguarded CountFor
+	// allocates one string per event even with the census disabled. That cost
+	// was live in both sinks and distorted every allocation figure taken with
+	// the census off.
+	if census.Enabled {
+		census.CountFor("checkpoint.observe["+eventName+"]",
+			"marshalled to feed the ordered execution-stream hash", false, len(encoded))
+	}
 	payloadDigest := sha256.Sum256(encoded)
 
 	var scratch [8]byte
@@ -257,6 +304,12 @@ func (s *checkpointSink) writeCheckpointLocked(at int64) {
 		EventCount:          s.events,
 		ExecutionStreamHash: hex.EncodeToString(s.rolling[:]),
 		Rolling:             hex.EncodeToString(s.rolling[:]),
+	}
+	if s.binary != nil {
+		digest := s.binary.executionHash()
+		record.ExecutionStreamHash = hex.EncodeToString(digest[:])
+		record.Rolling = record.ExecutionStreamHash
+		record.Representation = binaryRepresentation
 	}
 	line, err := json.Marshal(record)
 	if err != nil {

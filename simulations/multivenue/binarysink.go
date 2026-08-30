@@ -98,8 +98,15 @@ func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venue
 	// Coverage census: which families still ride as opaque JSON. The gap
 	// between the measured speedup and the 17.9 % ceiling is bounded by this,
 	// so it says directly how much is left and where.
-	census.CountFor("binary.sink["+eventName+"]",
-		"still opaque JSON rather than a typed schema", !typed, 0)
+	// Guarded at the call site, not inside CountFor: Go evaluates the
+	// concatenated site name before the call, so an unguarded CountFor
+	// allocates one string per event even with the census disabled. That cost
+	// was live in both sinks and distorted every allocation figure taken with
+	// the census off.
+	if census.Enabled {
+		census.CountFor("binary.sink["+eventName+"]",
+			"still opaque JSON rather than a typed schema", !typed, 0)
+	}
 	if err := b.writer.AppendInterning(simTime, clientID, venueRef,
 		sinkEnvelope{eventRef: eventRef, inner: inner}); err != nil {
 		b.err = err
