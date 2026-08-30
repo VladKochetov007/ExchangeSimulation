@@ -3,6 +3,8 @@ package exchange
 import (
 	"encoding/json"
 
+	"exchange_sim/census"
+
 	"exchange_sim/evstream"
 	etypes "exchange_sim/types"
 )
@@ -289,6 +291,11 @@ func (e instrumentLogEvent) AppendPayloadInterning(dst []byte, in evstream.Inter
 		dst = evstream.AppendUint16(dst, inner.SchemaVersion())
 		return inner.AppendPayloadInterning(dst, in)
 	}
+	// Counted so the remaining gap between the measured speedup and the
+	// ceiling can be attributed to specific inner families rather than
+	// guessed at. The outer wrapper is always typed, so a census taken at the
+	// sink cannot see these.
+	census.CountFor("binary.wrapped-opaque", "inner payload has no typed schema", true, 0)
 	dst = evstream.AppendUint16(dst, evstream.SchemaOpaqueJSON)
 	dst = evstream.AppendUint16(dst, 1)
 	encoded, err := json.Marshal(e.Payload)

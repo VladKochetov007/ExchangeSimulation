@@ -2,6 +2,8 @@ package multivenue
 
 import (
 	"crypto/sha256"
+
+	"exchange_sim/census"
 	"os"
 	"sync"
 
@@ -93,6 +95,11 @@ func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venue
 	if !typed {
 		inner = eexchange.OpaqueJSON{Value: payload}
 	}
+	// Coverage census: which families still ride as opaque JSON. The gap
+	// between the measured speedup and the 17.9 % ceiling is bounded by this,
+	// so it says directly how much is left and where.
+	census.CountFor("binary.sink["+eventName+"]",
+		"still opaque JSON rather than a typed schema", !typed, 0)
 	if err := b.writer.AppendInterning(simTime, clientID, venueRef,
 		sinkEnvelope{eventRef: eventRef, inner: inner}); err != nil {
 		b.err = err
