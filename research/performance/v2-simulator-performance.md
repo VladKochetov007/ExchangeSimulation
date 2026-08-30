@@ -289,6 +289,46 @@ memory reduction rather than as a throughput claim. The saving is smaller than
 four removed allocations suggests because escape analysis was already
 stack-allocating part of the hash state.
 
+### S11 — Skip the preview book when the order cannot cross (`a391be6`)
+
+Order admission previews FOK and spot fills against a detached copy of the book.
+Instrumenting a 5-minute run showed **65,171 of 105,672 previews were for orders
+that cannot cross at all**, and the books are small — 2.2 levels and 4 orders per
+side — so the cost was call frequency, not copy size. A matcher that gates
+execution on price returns nothing for such an order and leaves both books
+untouched, so the copy is waste.
+
+`matching.PriceCrossingMatcher` is an optional promise; both built-in matchers
+make it because both gate on `CanMatch`, a price comparison. A midpoint or
+auction venue must not, and any matcher that does not implement it gets the full
+preview. The short-circuit honours the exclusion set, and market orders always
+take the full path.
+
+**-3.6% wall, and the largest allocation reduction in this work**: allocated
+bytes 3,334MB to 2,755MB (-17.4%), objects 34,733,214 to 27,232,943 (-21.6%),
+clone objects -52.6%.
+
+This had been declined twice on an estimate of about 1.5%. The estimate assumed
+the cost was copying large books; instrumenting showed it was frequency.
+
+### S12 — Read all three position sides in one lookup (`fe9b4da`)
+
+Risk work probes every (client, symbol) pair for all three position sides.
+**7,882,019 probes in 5 simulated minutes** — the most-called function in the
+engine, 75 times more frequent than the preview — and **94.9% find nothing**:
+42.7% because the client holds no positions at all. `GetPositionBySide` was
+8.96% of CPU, against an earlier estimate of about 2%.
+
+`types.SidedPositionStore` is an optional extension for a store that resolves
+the client once and reads all three sides from it. A store that does not
+implement it is probed per side as before.
+
+**-1.07% wall at `GOMAXPROCS=1`, -1.45% at `GOMAXPROCS=4`** — larger with more
+cores, consistent with removing two thirds of the read-lock acquisitions in the
+hottest function. It is modest because the remaining per-side inner lookup,
+which hashes a string-keyed composite, is the dominant cost and is unchanged
+(see R12).
+
 ### S9 — Index resting orders by owner (`c9c9cbf`)
 
 Order admission answers three questions that each concern one client's own
@@ -572,6 +612,33 @@ low-volume in this composition to be worth converting**, so the S2 exercise
 should not be repeated on them without first measuring the event counts of the
 composition in question.
 
+### R12 — Integer instrument keys for the position map
+
+After the batched read (S12), the remaining cost in the position path is the
+inner lookup itself: line-level profiling puts `clientPositions[positionKey{...}]`
+at 54% of `PositionsAcrossSides` and the heap copy at 18%. `positionKey` is
+`{symbol string, side}`, and hashing it is 47% of all `aeshashbody` time.
+
+Keying the inner map by an interned integer instrument identifier would make
+that hash trivial. It is declined: the interning table must itself be consulted
+by symbol, so the batched read would trade three string-composite hashes for one
+string hash plus three integer hashes — roughly half of the 54%, which is about
+1% of simulator CPU, for a change to the core position-storage structure.
+
+### R13 — Return positions by value from the batched read
+
+The heap copy is 18% of `PositionsAcrossSides`, and unlike `GetPositionBySide`
+this method is new, so the public-interface objection that blocked R9 does not
+apply: it could return values and allocate nothing.
+
+Declined on aliasing. Two of the four call sites append the returned pointers to
+a slice that outlives the loop iteration, so returning a stack array and taking
+its element addresses would let a later symbol or client overwrite positions the
+liquidation path is still holding. Making those callers copy reintroduces the
+allocation; making them hold values changes their downstream signatures. About
+0.7% of CPU for pointer-lifetime risk in the liquidation path is the worst
+risk-per-gain remaining.
+
 ### R7 — Go profile-guided optimization
 
 **Rejected: PGO is a regression on this workload.**
@@ -654,6 +721,18 @@ rather than by changing what the keys are.
 The one remaining concentrated string-hash cost is `positionKey`, a
 `{symbol string, side}` composite that is 62.5% of `aeshashbody` — about 1.2% of
 CPU. That is the entire realistic prize for instrument handles here.
+
+### Map operations are diffuse, not concentrated
+
+Map work is 11.89% of CPU, which invites the assumption that some hot lookup is
+responsible. It is not. The largest single consumer of map *accesses* is
+`OrderBook.FindOrder` at 52% of them — and `FindOrder` is **1.47% of CPU**. The
+rest of the 11.89% is Swiss-table internals (`matchH2`, `matchFull`,
+`Iter.Next`) spread across the whole engine, with no caller worth attacking on
+its own.
+
+The one concentration is `positionKey` hashing at 47% of `aeshashbody`, which
+R12 prices at about 1%.
 
 ### What is no longer worth attacking
 
