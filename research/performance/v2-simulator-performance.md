@@ -311,47 +311,52 @@ footprint; against the pristine base peak RSS is level.
 
 ### Combined result
 
-Pristine base against S1-S9, `log_mode=full`, `GOMAXPROCS=1` pinned to one core,
-six alternating repetitions:
+Pristine base against S1-S10, `log_mode=full`, `GOMAXPROCS=1` pinned to one
+core, six alternating repetitions:
 
 | Measure | base | optimized | change |
 | --- | ---: | ---: | ---: |
-| Wall | 17.89 s | **11.095 s** | **-38.0%** |
-| CPU | 17.74 s | 11.00 s | -38.0% |
-| Peak RSS | 758,982 KiB | 758,610 KiB | -0.04% |
-| Allocated bytes | 4,395 MB | 3,221 MB | -26.7% |
+| Wall | 18.015 s | **11.24 s** | **-37.6%** |
+| CPU | 17.85 s | 11.135 s | -37.6% |
+| Peak RSS | 763,810 KiB | 765,232 KiB | +0.2% |
+| Allocated bytes | 4,395 MB | 3,242 MB | -26.2% |
 
-> **Target metric at `GOMAXPROCS=1`: 50.3 to 81.1 simulated seconds per
-> wall-clock second, a 1.61x speedup**, with all four determinism oracles
+> **Target metric at `GOMAXPROCS=1`: 50.0 to 80.1 simulated seconds per
+> wall-clock second, a 1.60x speedup**, with all four determinism oracles
 > identical on three seeds and both log modes.
 
-### The simulator is GOMAXPROCS-invariant, and that is worth another 15%
+Batch-to-batch medians move by roughly 1-2% on this host even under the
+benchmark lock, so the figures quoted per change and the cumulative figure agree
+to about that tolerance rather than exactly.
+
+### The simulator is GOMAXPROCS-invariant, and that is worth another 14%
 
 The benchmark protocol pins `GOMAXPROCS=1` because it makes measurements
 contention-immune. It is not the fastest setting. Measured on the final binary:
 
 | `GOMAXPROCS` | wall | CPU | peak RSS | execution hash |
 | ---: | ---: | ---: | ---: | --- |
-| 1 | 11.59 s | 11.52 s | 765,212 KiB | `51541f91db7c5eae…` |
-| 2 | 10.34 s | 11.24 s | 634,944 KiB | `51541f91db7c5eae…` |
-| **4** | **9.88 s** | 11.12 s | 630,676 KiB | `51541f91db7c5eae…` |
-| 8 | 10.00 s | 11.37 s | 623,644 KiB | `51541f91db7c5eae…` |
+| 1 | 11.84 s | 11.77 s | 760,588 KiB | `51541f91db7c5eae…` |
+| 2 | 10.29 s | 11.19 s | 634,036 KiB | `51541f91db7c5eae…` |
+| 4 | 10.22 s | 11.49 s | 624,176 KiB | `51541f91db7c5eae…` |
+| **8** | **10.14 s** | 11.41 s | 624,008 KiB | `51541f91db7c5eae…` |
 
-`GOMAXPROCS=4` is **-14.8% wall and -17.6% peak RSS** against 1, with no gain at
-8. CPU time falls slightly too, because GC assist work overlaps instead of
-serializing onto the one runnable core — which is also why the heap stays
-smaller.
+Most of the gain arrives at 2 and the curve is flat from 4 onward, so 4 is the
+sensible setting: **-13.7% wall and -17.9% peak RSS** against 1. CPU time falls
+slightly too, because GC assist work overlaps instead of serializing onto the one
+runnable core — which is also why the heap stays smaller.
 
 Determinism was verified, not assumed: twelve runs, four each at `GOMAXPROCS` 2,
 4 and 8, produced evidence trees **byte-identical** to the `GOMAXPROCS=1`
-reference — all 27 files and 442,225,951 bytes, `diff -rq` clean. Ordering comes
+reference — all 27 files and 442,225,951 bytes, `diff -rq` clean — and the
+execution hash is unchanged at every setting in every sweep since. Ordering comes
 from the deterministic phase barrier, not from goroutine timing.
 
 Adopting it is the scientific owner's call, because the r5 protocol may register
 `GOMAXPROCS`. If it is adopted:
 
-> **Target metric at `GOMAXPROCS=4`: 50.3 to 91.1 simulated seconds per
-> wall-clock second, a 1.81x total speedup, with peak RSS down 17%.**
+> **Target metric at `GOMAXPROCS=4`: 50.0 to 88.1 simulated seconds per
+> wall-clock second, a 1.76x total speedup, with peak RSS down 18%.**
 
 ## 6. Rejected optimizations
 
