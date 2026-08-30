@@ -338,6 +338,8 @@ func scanFileFused(path string, requests []*fusedRequest) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 1<<20), 1<<24)
 	var ordinal int64
+	// Reused for the same reason as the per-metric scan; see scanFile.
+	var env envelope
 	for scanner.Scan() {
 		ordinal++
 		if allStopped(consumers) {
@@ -357,7 +359,8 @@ func scanFileFused(path string, requests []*fusedRequest) {
 		if scanStatsEnabled {
 			scanEnvelopes.Add(1)
 		}
-		var env envelope
+		env.SimTS, env.ClientID, env.Event = 0, 0, ""
+		env.Data = env.Data[:0]
 		if err := json.Unmarshal(line, &env); err != nil {
 			// Only a request whose own prefilter admitted this line would have
 			// decoded it, and therefore only such a request fails.

@@ -174,6 +174,17 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 1<<20), 1<<24)
 	var ordinal int64
+	// The envelope is reused across records so RawMessage decoding appends into
+	// the buffer it already has instead of allocating one per record. Copying
+	// every record's data value was 27.4% of analyzer allocation on a 10.89GB
+	// cell. Struct decoding leaves absent fields untouched, so every field is
+	// reset first and a record missing "data" still presents an empty value
+	// rather than the previous record's.
+	//
+	// This ties an Event's payload to its visit call. No consumer retains one:
+	// every Raw() result feeds a decode immediately, and decoding into a
+	// RawMessage field copies.
+	var env envelope
 	for scanner.Scan() {
 		ordinal++
 		line := scanner.Bytes()
@@ -190,7 +201,8 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 		if scanStatsEnabled {
 			scanEnvelopes.Add(1)
 		}
-		var env envelope
+		env.SimTS, env.ClientID, env.Event = 0, 0, ""
+		env.Data = env.Data[:0]
 		if err := json.Unmarshal(line, &env); err != nil {
 			return fmt.Errorf("analysis: parse evidence record in %s: %w", path, err)
 		}
