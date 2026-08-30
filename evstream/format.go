@@ -79,6 +79,13 @@ const (
 	// needs no side channel.
 	SchemaDictionary uint16 = 0
 
+	// SchemaOpaqueJSON carries a payload that has no typed schema yet, as
+	// length-prefixed JSON inside an ordinary frame. It exists so a stream is
+	// uniformly binary from the first day: rare families ride opaque, keeping
+	// ordering, framing, indexing and the digest uniform, and each is promoted
+	// to a typed schema later without disturbing anything around it.
+	SchemaOpaqueJSON uint16 = 1
+
 	// FirstUserSchema is the lowest id available to callers.
 	FirstUserSchema uint16 = 16
 )
@@ -181,6 +188,38 @@ func ParseFrameHeader(src []byte) (FrameHeader, error) {
 		return FrameHeader{}, fmt.Errorf("%w: frame length %d below header size", ErrCorrupt, h.Length)
 	}
 	return h, nil
+}
+
+// Interner assigns a dictionary id to a repeated string, emitting a dictionary
+// frame the first time it sees one. Passed to an encoder so a value can intern
+// its own strings without knowing anything about framing.
+type Interner interface {
+	Intern(string) (uint32, error)
+}
+
+// Resolver turns a dictionary id back into the string it stands for. The reader
+// implements it; decoders take it as an interface so a schema can be decoded
+// without a live stream.
+type Resolver interface {
+	Lookup(uint32) (string, bool)
+}
+
+// InterningAppender is a payload that resolves its own strings while encoding.
+//
+// Most event families carry symbols, assets, wallets or reasons drawn from a
+// small fixed set, and interning them is what turns a twenty-byte symbol into
+// four bytes. Encoding and interning happen together rather than in two passes
+// because a value type has nowhere to store the ids between them.
+//
+// The writer encodes into a scratch buffer first, so dictionary frames emitted
+// during encoding land in the stream ahead of the event frame that references
+// them — a reader always learns an id before it is used.
+type InterningAppender interface {
+	SchemaID() uint16
+	SchemaVersion() uint16
+	// AppendPayloadInterning appends the canonical payload to dst, resolving
+	// strings through in.
+	AppendPayloadInterning(dst []byte, in Interner) ([]byte, error)
 }
 
 // PayloadAppender is implemented by the value being written. Encoding lives on
