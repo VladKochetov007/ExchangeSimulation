@@ -635,11 +635,56 @@ changing the hash domain, which is the reproducibility attestation the r5 gate
 seals. Everything else in the profile is now diffuse: no single remaining
 function outside those two exceeds 5%.
 
-## 8. Open escalation — not a performance finding
+## 8. Toolchain: the go1.27 gate, resolved
 
-`perf/thread-pgo` reported that `scripts/v2-integrated-longrun-r5-contract.sh`
-fails closed unless binaries report **go1.27**, while this host's default
-toolchain is **go1.26.7-X:nodwarf5**. If correct, a long-run cell launched with
-the default `go` would be rejected by its own gate. The exact contract check was
-not quoted before that session ended, so this is recorded as **unverified** and
-is for the scientific owner to confirm. No contract script was modified.
+`perf/thread-pgo` flagged, without evidence, that the r5 contract might reject
+binaries built with this host's default toolchain. That is now verified and
+resolved.
+
+**The gate is real.** `v2_r5_is_go_127` requires `go1.27*` and is enforced at six
+places: twice in `run-v2-integrated-longrun-cell.sh` (simulator, prunegate),
+three times in `extract-v2-integrated-longrun-cell.sh` (analyzer, simulator,
+prunegate) and once in `check-v2-integrated-longrun-parity.sh`. This host's
+default `go` stamps binaries `go1.26.7-X:nodwarf5`, which fails all six.
+
+**It is satisfiable, not blocking.** `GOTOOLCHAIN=go1.27.0` fetches and uses the
+pinned toolchain, and a binary built that way reports `go1.27.0` and passes the
+gate. No script change is needed; the requirement is on the build invocation.
+
+**The gate is protecting something specific.** Built from the same clean tree,
+go1.27 populates the run manifest's VCS provenance while the host default does
+not:
+
+    go1.26.7-X:nodwarf5   "revision": "unknown",  "time": ""
+    go1.27.0              "revision": "e4f0c5f2…", "time": "2026-08-30T04:21:07Z"
+
+So a cell built with the host default would carry an empty provenance stamp in
+its own manifest. The pin is not arbitrary and should not be relaxed.
+
+**The toolchain does not change the trajectory.** Built from one tree under both
+toolchains, the two binaries produce an identical ordered execution stream hash
+(`51541f91db7c5eae8688235d3961a76af421ab782f05ab62649076cf90aef332`) and
+byte-identical venue evidence (`94672cc58bef43a82c57392be0b01782`). The only
+difference in the whole 27-file tree is the manifest provenance above, which is
+the field doing its job.
+
+**The optimizations hold under the required toolchain.** Base against optimized,
+five alternating pinned repetitions under each:
+
+| Toolchain | base wall | optimized wall | change |
+| --- | ---: | ---: | ---: |
+| `go1.26.7-X:nodwarf5` | 18.21 s | 11.26 s | -38.2% |
+| `go1.27.0` | 19.49 s | 11.93 s | **-38.8%** |
+
+**But go1.27 itself costs about 6% on this workload.** The same source is
+consistently slower under it — base 18.21 s to 19.49 s (+7.0%), optimized
+11.26 s to 11.93 s (+5.9%), with non-overlapping ranges in both pairs. That is a
+toolchain cost the project is already committed to for provenance reasons, not
+something this work introduced, but it is worth knowing: roughly a sixth of the
+speedup measured here is spent paying for the newer compiler.
+
+Every other measurement in this document was taken under `go1.26.7-X:nodwarf5`.
+The relative results carry over — the speedup is 38.8% rather than 38.2% under
+go1.27 — but absolute wall times in the tables above should be read as about 6%
+optimistic relative to a real r5 build.
+
