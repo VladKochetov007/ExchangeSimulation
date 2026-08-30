@@ -5,6 +5,17 @@
 # including its stale public-entry position/settlement derivations.
 v2_r2_output_root="/home/vlad/v2-integrated-longrun-r2-candidate-20260830-v1"
 v2_r2_attestation_root="/home/vlad/v2-integrated-longrun-r2-candidate-20260830-v1-attestations"
+v2_r2_namespace_lock_path="/home/vlad/v2-integrated-longrun-r2-candidate.lock"
+
+v2_r2_acquire_namespace_lock() {
+	if [[ ${V2_R2_NAMESPACE_LOCK_HELD:-false} == true ]]; then
+		return 0
+	fi
+	local lock_fd
+	exec {lock_fd}>"$v2_r2_namespace_lock_path" || return 1
+	flock -n "$lock_fd" || return 1
+	export V2_R2_NAMESPACE_LOCK_HELD=true
+}
 
 v2_r2_require_output_root() {
 	local output_root=$1

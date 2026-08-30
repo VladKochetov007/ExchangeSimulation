@@ -29,6 +29,7 @@ require_file() {
 require_object() {
 	jq -e 'type == "object"' "$1" >/dev/null || fail "malformed parity JSON: $1"
 }
+v2_r2_acquire_namespace_lock || fail "could not acquire the R2 evidence namespace lock"
 v2_r2_require_output_root "$output_root" || fail "parity root is not the canonical R2 evidence root"
 if [[ "$verify_existing" == true ]]; then
 	[[ -s "$attestation" ]] || fail "missing existing parity attestation: $attestation"

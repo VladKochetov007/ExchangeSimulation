@@ -26,6 +26,7 @@ fail() {
 }
 
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
+v2_r2_acquire_namespace_lock || fail "could not acquire the R2 evidence namespace lock"
 
 verify_measurement_contract() {
 	if [[ "$cell_name" != dev-607-g8 ]]; then

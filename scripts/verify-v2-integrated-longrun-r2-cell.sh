@@ -18,6 +18,7 @@ fail() {
 	printf 'integrated long-run verification failure: %s\n' "$*" >&2
 	exit 1
 }
+v2_r2_acquire_namespace_lock || fail "could not acquire the R2 evidence namespace lock"
 
 v2_r2_require_output_root "$v2_r2_output_root" || fail "R2 output root is not canonical"
 v2_r2_require_cell_path "$cell" || fail "cell is outside the canonical R2 evidence root or is symlinked: $cell"

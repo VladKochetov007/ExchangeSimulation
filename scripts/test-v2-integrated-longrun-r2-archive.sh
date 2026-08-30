@@ -32,12 +32,24 @@ expect_failure() {
 	fi
 }
 
-[[ ! -e "$v2_r2_output_root" && ! -L "$v2_r2_output_root" ]] ||
-	fail "refusing to reuse an existing R2 output root"
-[[ ! -e "$v2_r2_attestation_root" && ! -L "$v2_r2_attestation_root" ]] ||
-	fail "refusing to reuse an existing R2 attestation root"
-mkdir -p -- "$v2_r2_output_root" "$v2_r2_attestation_root"
+if ! v2_r2_acquire_namespace_lock; then
+	printf 'integrated long-run R2 archive tests: skipped (namespace lock busy)\n'
+	exit 0
+fi
+if ! mkdir -- "$v2_r2_output_root" 2>/dev/null; then
+	printf 'integrated long-run R2 archive tests: skipped (R2 output root already exists)\n'
+	exit 0
+fi
 created_output=true
+if ! mkdir -- "$v2_r2_attestation_root" 2>/dev/null; then
+	if rmdir -- "$v2_r2_output_root"; then
+		created_output=false
+		printf 'integrated long-run R2 archive tests: skipped (R2 attestation root already exists)\n'
+		exit 0
+	fi
+	created_output=false
+	fail "could not safely abandon the test output root"
+fi
 created_attestations=true
 
 current_revision=$(git -C "$root_dir" rev-parse HEAD)

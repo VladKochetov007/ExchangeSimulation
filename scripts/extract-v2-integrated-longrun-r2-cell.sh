@@ -30,6 +30,7 @@ fail() {
 	printf 'integrated long-run extraction failure: %s\n' "$*" >&2
 	exit 1
 }
+v2_r2_acquire_namespace_lock || fail "could not acquire the R2 evidence namespace lock"
 require_file() {
 	local path=$1
 	[[ -s "$path" ]] || fail "missing required file: $path"

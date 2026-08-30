@@ -32,6 +32,10 @@ esac
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
+v2_r2_acquire_namespace_lock || {
+	echo "could not acquire the R2 evidence namespace lock" >&2
+	exit 1
+}
 config="$root_dir/research/configs/v2-integrated-longrun-r2/$config_name"
 output_root=${V2_LONGRUN_OUTPUT_ROOT:-"$v2_r2_output_root"}
 output="$output_root/$cell"
