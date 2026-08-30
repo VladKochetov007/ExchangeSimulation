@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -207,6 +208,22 @@ func main() {
 	defer profiles.Stop()
 	// Offline measurement aid; inert unless MVANALYZE_SCAN_STATS is set.
 	defer analysis.ReportScanStats()
+	// One construction of the shared metric settings, used by both the fused
+	// driver and the single-metric switch, so neither can drift from the other.
+	buildMetricSettings := func() metricSettings {
+		return metricSettings{
+			basePrecision: *basePrecision, quotePrecision: *quotePrecision,
+			requireExactReplay: *requireExactReplay, deliveryFeePolicy: *deliveryFeePolicy,
+			fundingIntervalSeconds: *fundingIntervalSeconds,
+			arbFeeBps:              *arbFeeBps, arbStaleness: *arbStaleness,
+			base: *base, quote: *quote, cross: *cross, crossPrecision: *crossPrecision,
+			crossVenueSymbol: *crossVenueSymbol, crossVenueMin: *crossVenueMin,
+			crossVenuePositiveTimes: *crossVenuePositiveTimes,
+			perpSignalSymbol:        *perpSignalSymbol, perpSignalVenues: *perpSignalVenues,
+			postOnlyRoles: *postOnlyRoles, postOnlySymbols: *postOnlySymbols,
+			hedgeSymbol: effectiveHedgeUnderlyingSymbol,
+		}
+	}
 	if *fusedOut != "" {
 		if len(flag.Args()) != 1 {
 			fmt.Fprintln(os.Stderr, "-fused-out requires exactly one run directory")
@@ -218,22 +235,18 @@ func main() {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 			os.Exit(1)
 		}
-		fundingIntervals, err := loadFundingIntervals(dir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
-			os.Exit(1)
-		}
-		settings := fusedSettings{
-			basePrecision: *basePrecision, quotePrecision: *quotePrecision,
-			requireExactReplay: *requireExactReplay, deliveryFeePolicy: *deliveryFeePolicy,
-			fundingIntervalSeconds: *fundingIntervalSeconds, fundingIntervals: fundingIntervals,
-			arbFeeBps: *arbFeeBps, arbStaleness: *arbStaleness,
-			base: *base, quote: *quote, cross: *cross, crossPrecision: *crossPrecision,
-			crossVenueSymbol: *crossVenueSymbol, crossVenueMin: *crossVenueMin,
-			crossVenuePositiveTimes: *crossVenuePositiveTimes,
-			perpSignalSymbol: *perpSignalSymbol, perpSignalVenues: *perpSignalVenues,
-			postOnlyRoles: *postOnlyRoles, postOnlySymbols: *postOnlySymbols,
-			hedgeSymbol: effectiveHedgeUnderlyingSymbol,
+		settings := buildMetricSettings()
+		// Funding intervals are read from the run directory and only the
+		// derivative audit consults them, so load them only when that metric is
+		// selected. Loading eagerly would turn an unrelated read failure into a
+		// failure of metrics that never look at the value, which the
+		// single-metric path does not do.
+		if slices.Contains(splitNonEmpty(*fusedSet), "derivatives") || *fusedSet == "" {
+			settings.fundingIntervals, err = loadFundingIntervals(dir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
 		}
 		if err := runFusedExtraction(run, dir, *fusedOut, *fusedSet, *fusedWorkers, settings); err != nil {
 			fmt.Fprintf(os.Stderr, "fused extraction: %v\n", err)
@@ -317,10 +330,7 @@ func main() {
 			}
 			emitRoles(dir, table, *asJSON)
 		case "postonly":
-			result, err := run.MeasurePostOnlyActivity(analysis.PostOnlyActivityOptions{
-				Roles:   strings.Split(*postOnlyRoles, ","),
-				Symbols: strings.Split(*postOnlySymbols, ","),
-			})
+			result, err := run.MeasurePostOnlyActivity(postOnlyOptions(buildMetricSettings()))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)
@@ -784,10 +794,7 @@ func main() {
 					result.Drift.Mismatches, result.Drift.Checks)
 			})
 		case "hedging":
-			result, err := run.MeasureHedging(analysis.HedgingOptions{
-				Symbol: effectiveHedgeUnderlyingSymbol,
-				Roles:  []string{"option_dealer", "vanna_volga_desk"},
-			})
+			result, err := run.MeasureHedging(hedgingOptions(buildMetricSettings()))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)
@@ -854,9 +861,7 @@ func main() {
 				}
 			})
 		case "perpsignals":
-			result, err := run.MeasurePerpSignals(analysis.PerpSignalOptions{
-				Symbol: *perpSignalSymbol, RequiredVenues: splitNonEmpty(*perpSignalVenues),
-			})
+			result, err := run.MeasurePerpSignals(perpSignalOptions(buildMetricSettings()))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)
@@ -895,7 +900,7 @@ func main() {
 					result.Aggregates.ProvenClosedEligibleTerms, result.IntegrityValid)
 			})
 		case "optionsurface":
-			result, err := run.MeasureOptionSurface(analysis.SurfaceOptions{QuotePrecision: *quotePrecision})
+			result, err := run.MeasureOptionSurface(optionSurfaceOptions(buildMetricSettings()))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)
@@ -911,9 +916,7 @@ func main() {
 				}
 			})
 		case "exposure":
-			result, err := run.MeasureExposure(analysis.ExposureOptions{
-				Roles: []string{"option_dealer"},
-			})
+			result, err := run.MeasureExposure(exposureOptions(buildMetricSettings()))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)
@@ -949,7 +952,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "%s: load funding cadence: %v\n", dir, err)
 				os.Exit(1)
 			}
-			result, err := run.MeasureDerivativeSemantics(analysis.DerivativeAuditOptions{BasePrecision: *basePrecision, RequireExactReplay: *requireExactReplay, ExpectedFundingIntervalSeconds: *fundingIntervalSeconds, ExpectedFundingIntervals: fundingIntervals})
+			result, err := run.MeasureDerivativeSemantics(derivativeOptions(buildMetricSettings(), fundingIntervals))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)
@@ -1031,18 +1034,7 @@ func main() {
 					result.FieldMismatches, result.FieldChecks, result.ExcludedCandidates)
 			})
 		case "arbitrage":
-			result, err := run.MeasureArbitrage(analysis.ArbitrageOptions{
-				TakerFeeBps:      *arbFeeBps,
-				StalenessNanos:   int64(*arbStaleness * 1e9),
-				BaseSymbol:       *base,
-				QuoteSymbol:      *quote,
-				CrossSymbol:      *cross,
-				CrossPrecision:   *crossPrecision,
-				CrossVenueSymbol: *base,
-				PerpSymbol:       "ABC-PERP",
-				SpotSymbol:       *base,
-				ParityUnderlying: *base,
-			})
+			result, err := run.MeasureArbitrage(arbitrageOptions(buildMetricSettings()))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)
@@ -1058,10 +1050,7 @@ func main() {
 				}
 			})
 		case "crossvenue":
-			result, err := run.MeasureCrossVenueDispersion(analysis.CrossVenueDispersionOptions{
-				Symbol: *crossVenueSymbol, StalenessNanos: int64(*arbStaleness * 1e9), MinVenues: *crossVenueMin,
-				CapturePositiveObservationTimes: *crossVenuePositiveTimes,
-			})
+			result, err := run.MeasureCrossVenueDispersion(crossVenueOptions(buildMetricSettings()))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)
@@ -1077,7 +1066,7 @@ func main() {
 					float64(result.LongestPositiveRunNanos)/1e9)
 			})
 		case "settlements":
-			result, err := run.MeasureSettlements(analysis.SettlementAuditOptions{BasePrecision: *basePrecision, RequireExactReplay: *requireExactReplay, DeliveryFeePolicy: *deliveryFeePolicy})
+			result, err := run.MeasureSettlements(settlementOptions(buildMetricSettings()))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)
@@ -1119,7 +1108,7 @@ func main() {
 					result.FillsAfterTerminal, result.FillQuantityMismatches, result.CancelQuantityMismatches)
 			})
 		case "positions":
-			result, err := run.MeasurePositions(analysis.PositionOptions{BasePrecision: *basePrecision, RequireExactReplay: *requireExactReplay})
+			result, err := run.MeasurePositions(positionOptions(buildMetricSettings()))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
 				os.Exit(1)

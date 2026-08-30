@@ -21,84 +21,45 @@ import (
 //
 // Each metric writes exactly the bytes the single-metric path writes for the
 // same run, which is the property the differential harness checks. The option
-// values come from the same flag variables as the single-metric switch, so the
-// two paths cannot silently diverge on configuration.
-
-// fusedSettings carries the flag-derived options the fused metric set needs.
-type fusedSettings struct {
-	basePrecision           int64
-	quotePrecision          int64
-	requireExactReplay      bool
-	deliveryFeePolicy       string
-	fundingIntervalSeconds  int64
-	fundingIntervals        map[string]int64
-	arbFeeBps               float64
-	arbStaleness            float64
-	base                    string
-	quote                   string
-	cross                   string
-	crossPrecision          int64
-	crossVenueSymbol        string
-	crossVenueMin           int
-	crossVenuePositiveTimes bool
-	perpSignalSymbol        string
-	perpSignalVenues        string
-	postOnlyRoles           string
-	postOnlySymbols         string
-	hedgeSymbol             string
-}
+// values come from the shared constructors in metricoptions.go, which the
+// single-metric switch also uses, so the two paths cannot silently diverge on
+// configuration.
 
 // fusedMetric computes one metric and returns the value that is serialized
 // under "result", or an error that reproduces the single-metric failure.
-type fusedMetric func(*analysis.Run, fusedSettings) (any, error)
+type fusedMetric func(*analysis.Run, metricSettings) (any, error)
 
 func fusedMetrics() map[string]fusedMetric {
 	return map[string]fusedMetric{
-		"conservation": func(run *analysis.Run, _ fusedSettings) (any, error) {
+		"conservation": func(run *analysis.Run, _ metricSettings) (any, error) {
 			return run.MeasureConservation(analysis.ConservationOptions{})
 		},
-		"positions": func(run *analysis.Run, s fusedSettings) (any, error) {
-			return run.MeasurePositions(analysis.PositionOptions{
-				BasePrecision: s.basePrecision, RequireExactReplay: s.requireExactReplay})
+		"positions": func(run *analysis.Run, s metricSettings) (any, error) {
+			return run.MeasurePositions(positionOptions(s))
 		},
-		"fillpositions": func(run *analysis.Run, _ fusedSettings) (any, error) {
+		"fillpositions": func(run *analysis.Run, _ metricSettings) (any, error) {
 			return run.MeasureFillPositions()
 		},
-		"orderlifecycle": func(run *analysis.Run, _ fusedSettings) (any, error) {
+		"orderlifecycle": func(run *analysis.Run, _ metricSettings) (any, error) {
 			return run.MeasureOrderLifecycle()
 		},
-		"lifecycle": func(run *analysis.Run, _ fusedSettings) (any, error) {
+		"lifecycle": func(run *analysis.Run, _ metricSettings) (any, error) {
 			return run.MeasureLifecycle(analysis.LifecycleOptions{})
 		},
-		"settlements": func(run *analysis.Run, s fusedSettings) (any, error) {
-			return run.MeasureSettlements(analysis.SettlementAuditOptions{
-				BasePrecision: s.basePrecision, RequireExactReplay: s.requireExactReplay,
-				DeliveryFeePolicy: s.deliveryFeePolicy})
+		"settlements": func(run *analysis.Run, s metricSettings) (any, error) {
+			return run.MeasureSettlements(settlementOptions(s))
 		},
-		"expiryfills": func(run *analysis.Run, _ fusedSettings) (any, error) {
+		"expiryfills": func(run *analysis.Run, _ metricSettings) (any, error) {
 			return run.MeasureExpiryFills()
 		},
-		"streamhash": func(run *analysis.Run, _ fusedSettings) (any, error) {
+		"streamhash": func(run *analysis.Run, _ metricSettings) (any, error) {
 			return run.MeasureStreamHash(analysis.StreamHashOptions{PerEvent: true})
 		},
-		"arbitrage": func(run *analysis.Run, s fusedSettings) (any, error) {
-			return run.MeasureArbitrage(analysis.ArbitrageOptions{
-				TakerFeeBps:      s.arbFeeBps,
-				StalenessNanos:   int64(s.arbStaleness * 1e9),
-				BaseSymbol:       s.base,
-				QuoteSymbol:      s.quote,
-				CrossSymbol:      s.cross,
-				CrossPrecision:   s.crossPrecision,
-				CrossVenueSymbol: s.base,
-				PerpSymbol:       "ABC-PERP",
-				SpotSymbol:       s.base,
-				ParityUnderlying: s.base,
-			})
+		"arbitrage": func(run *analysis.Run, s metricSettings) (any, error) {
+			return run.MeasureArbitrage(arbitrageOptions(s))
 		},
-		"crossvenue": func(run *analysis.Run, s fusedSettings) (any, error) {
-			result, err := run.MeasureCrossVenueDispersion(analysis.CrossVenueDispersionOptions{
-				Symbol: s.crossVenueSymbol, StalenessNanos: int64(s.arbStaleness * 1e9),
-				MinVenues: s.crossVenueMin, CapturePositiveObservationTimes: s.crossVenuePositiveTimes})
+		"crossvenue": func(run *analysis.Run, s metricSettings) (any, error) {
+			result, err := run.MeasureCrossVenueDispersion(crossVenueOptions(s))
 			if err != nil {
 				return nil, err
 			}
@@ -108,36 +69,29 @@ func fusedMetrics() map[string]fusedMetric {
 			}
 			return result, nil
 		},
-		"roleaudit": func(run *analysis.Run, _ fusedSettings) (any, error) {
+		"roleaudit": func(run *analysis.Run, _ metricSettings) (any, error) {
 			return run.MeasureRoles(analysis.RoleAuditOptions{})
 		},
-		"derivatives": func(run *analysis.Run, s fusedSettings) (any, error) {
-			return run.MeasureDerivativeSemantics(analysis.DerivativeAuditOptions{
-				BasePrecision: s.basePrecision, RequireExactReplay: s.requireExactReplay,
-				ExpectedFundingIntervalSeconds: s.fundingIntervalSeconds,
-				ExpectedFundingIntervals:       s.fundingIntervals})
+		"derivatives": func(run *analysis.Run, s metricSettings) (any, error) {
+			return run.MeasureDerivativeSemantics(derivativeOptions(s, s.fundingIntervals))
 		},
-		"liquidations": func(run *analysis.Run, _ fusedSettings) (any, error) {
+		"liquidations": func(run *analysis.Run, _ metricSettings) (any, error) {
 			return run.MeasureLiquidations()
 		},
-		"marginchecks": func(run *analysis.Run, _ fusedSettings) (any, error) {
+		"marginchecks": func(run *analysis.Run, _ metricSettings) (any, error) {
 			return run.MeasureMarginChecks(analysis.DefaultMarginCheckOptions())
 		},
-		"optionsurface": func(run *analysis.Run, s fusedSettings) (any, error) {
-			return run.MeasureOptionSurface(analysis.SurfaceOptions{QuotePrecision: s.quotePrecision})
+		"optionsurface": func(run *analysis.Run, s metricSettings) (any, error) {
+			return run.MeasureOptionSurface(optionSurfaceOptions(s))
 		},
-		"exposure": func(run *analysis.Run, _ fusedSettings) (any, error) {
-			return run.MeasureExposure(analysis.ExposureOptions{Roles: []string{"option_dealer"}})
+		"exposure": func(run *analysis.Run, s metricSettings) (any, error) {
+			return run.MeasureExposure(exposureOptions(s))
 		},
-		"hedging": func(run *analysis.Run, s fusedSettings) (any, error) {
-			return run.MeasureHedging(analysis.HedgingOptions{
-				Symbol: s.hedgeSymbol, Roles: []string{"option_dealer", "vanna_volga_desk"}})
+		"hedging": func(run *analysis.Run, s metricSettings) (any, error) {
+			return run.MeasureHedging(hedgingOptions(s))
 		},
-		"postonly": func(run *analysis.Run, s fusedSettings) (any, error) {
-			result, err := run.MeasurePostOnlyActivity(analysis.PostOnlyActivityOptions{
-				Roles:   strings.Split(s.postOnlyRoles, ","),
-				Symbols: strings.Split(s.postOnlySymbols, ","),
-			})
+		"postonly": func(run *analysis.Run, s metricSettings) (any, error) {
+			result, err := run.MeasurePostOnlyActivity(postOnlyOptions(s))
 			if err != nil {
 				return nil, err
 			}
@@ -146,16 +100,15 @@ func fusedMetrics() map[string]fusedMetric {
 			}
 			return result, nil
 		},
-		"perpsignals": func(run *analysis.Run, s fusedSettings) (any, error) {
-			return run.MeasurePerpSignals(analysis.PerpSignalOptions{
-				Symbol: s.perpSignalSymbol, RequiredVenues: splitNonEmpty(s.perpSignalVenues)})
+		"perpsignals": func(run *analysis.Run, s metricSettings) (any, error) {
+			return run.MeasurePerpSignals(perpSignalOptions(s))
 		},
 	}
 }
 
 // runFusedExtraction computes the selected metrics over shared physical passes
 // and writes one artifact per metric.
-func runFusedExtraction(run *analysis.Run, dir, outDir, set string, workers int, settings fusedSettings) error {
+func runFusedExtraction(run *analysis.Run, dir, outDir, set string, workers int, settings metricSettings) error {
 	available := fusedMetrics()
 	var names []string
 	if set == "" {
