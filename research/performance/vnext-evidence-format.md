@@ -354,3 +354,50 @@ is subtracted — gives
 
 Two independent routes now converge on **11.5 % to 11.7 %**, and the mechanism
 behind the number is understood rather than assumed.
+
+## Interning priced, and a contradiction that must not be averaged away
+
+The emulation appended fixed integers with no dictionary lookups, so it could
+not price interning — the one cost a real typed encoder adds that the emulation
+omitted. A third probe adds six map lookups per event against a dictionary of
+realistic size and string shape, which is what a `balance_change` costs: symbol,
+reason, optional side, plus asset and wallet per delta.
+
+| probe | A/A control | vs baseline |
+|---|---:|---:|
+| ceiling — no marshal, hash 1 B | +1.85% | −17.29% |
+| emulated — no marshal, hash 88 B | +0.88% | −17.93% |
+| **interned** — no marshal, 6 lookups, hash 88 B | −0.64% | **−16.96%** |
+
+**Interning costs at most about one percentage point, and possibly nothing** —
+the spread across the three probes (17.0 % to 17.9 %) is comparable to the
+spread of their own A/A controls. The specific design risk flagged in the
+previous iteration is retired.
+
+### The contradiction
+
+Two methods now disagree about what the real sink will deliver, and the gap is
+large enough to matter.
+
+* **The probes** say the remaining cost after removing reflection is close to
+  zero, implying the real sink lands near **17 %**.
+* **The microbenchmark** says the binary path costs 5.44 ms per 20,000 events
+  against 13.0 ms for `json.Marshal` alone — it retains about **42 %** of the
+  marshal cost, implying a gain nearer **10 %**.
+
+The explanation is that the probes are optimistic in a way the microbenchmark is
+not. A probe does six lookups and fourteen integer appends into a reused buffer.
+The real encoder additionally builds a frame header, walks a nested `changes`
+slice field by field, emits dictionary frames on first use, patches frame
+lengths, and maintains block state. None of that appears in a probe.
+
+So the honest position is a **range of 10 % to 17 %**, with the microbenchmark
+the more faithful of the two because it exercises a real implementation rather
+than a sketch of one. It is recorded as a range rather than collapsed to a point
+estimate, because averaging two measurements that disagree for an understood
+reason would manufacture a precision neither supports.
+
+What the probes do establish, and the microbenchmark cannot, is the **shape** of
+the cost: reflection dominates, byte volume is irrelevant to simulator speed,
+and interning is free. Those three facts constrain the design regardless of
+where in the range the final number falls.
