@@ -43,6 +43,10 @@ expect_failure v2_r2_require_current_source_revision "$matching_revision" \
 expect_failure v2_r2_require_current_source_revision "$matching_revision" "$matching_revision" \
 	"fedcba9876543210fedcba9876543210fedcba98"
 
+v2_r2_acquire_namespace_lock || fail "could not acquire the R2 namespace lock for contention test"
+expect_failure env -u V2_R2_NAMESPACE_LOCK_FD V2_R2_NAMESPACE_LOCK_HELD=true bash -c \
+	"source '$root_dir/scripts/v2-integrated-longrun-r2-contract.sh'; v2_r2_acquire_namespace_lock"
+
 expect_failure env GOMAXPROCS=4 "$root_dir/scripts/run-v2-integrated-longrun-r2-cell.sh" holdout-619 /bin/true
 expect_failure "$root_dir/scripts/extract-v2-integrated-longrun-r2-cell.sh" \
 	"$root_dir/research/artifacts/v2-freeze-candidate/smoke-vcs/run-g4"

@@ -8,13 +8,18 @@ v2_r2_attestation_root="/home/vlad/v2-integrated-longrun-r2-candidate-20260830-v
 v2_r2_namespace_lock_path="/home/vlad/v2-integrated-longrun-r2-candidate.lock"
 
 v2_r2_acquire_namespace_lock() {
-	if [[ ${V2_R2_NAMESPACE_LOCK_HELD:-false} == true ]]; then
+	[[ ! -L "$v2_r2_namespace_lock_path" ]] || return 1
+	local inherited_fd=${V2_R2_NAMESPACE_LOCK_FD:-}
+	if [[ "$inherited_fd" =~ ^[0-9]+$ ]] &&
+		[[ "$(readlink "/proc/$$/fd/$inherited_fd" 2>/dev/null)" == "$v2_r2_namespace_lock_path" ]] &&
+		flock -n "$inherited_fd"; then
+		export V2_R2_NAMESPACE_LOCK_FD="$inherited_fd"
 		return 0
 	fi
 	local lock_fd
 	exec {lock_fd}>"$v2_r2_namespace_lock_path" || return 1
 	flock -n "$lock_fd" || return 1
-	export V2_R2_NAMESPACE_LOCK_HELD=true
+	export V2_R2_NAMESPACE_LOCK_FD="$lock_fd"
 }
 
 v2_r2_require_output_root() {
