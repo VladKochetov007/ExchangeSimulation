@@ -1,6 +1,7 @@
 package instrument
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strconv"
 
@@ -90,7 +91,7 @@ func (l *DatedFuturesLister) pendingCalendarListings(nowNano int64) ([]etypes.In
 }
 
 func (l *DatedFuturesLister) newFuture(expiryNano int64) etypes.Instrument {
-	symbol := fmt.Sprintf("%s-FUT-%s", l.Spec.Base, expirySymbolLabel(expiryNano))
+	symbol := l.futureSymbol(expiryNano)
 	future := NewExpiringFutures(symbol, l.Spec.Base, l.Spec.Quote,
 		l.Spec.BasePrecision, l.Spec.QuotePrecision, l.Spec.TickSize, l.Spec.MinOrderSize, expiryNano)
 	future.Underlying = l.Underlying
@@ -99,6 +100,13 @@ func (l *DatedFuturesLister) newFuture(expiryNano int64) etypes.Instrument {
 		future.SetObservationWindow(l.ObservationWindowNano)
 	}
 	return future
+}
+
+func (l *DatedFuturesLister) futureSymbol(expiryNano int64) string {
+	if l.Calendar == nil {
+		return fmt.Sprintf("%s-FUT-%s", l.Spec.Base, expirySymbolLabel(expiryNano))
+	}
+	return fmt.Sprintf("%s-FUT-U%s-%s", l.Spec.Base, canonicalSymbolComponent(l.Underlying), expirySymbolLabel(expiryNano))
 }
 
 var _ etypes.ListingPolicy = (*DatedFuturesLister)(nil)
@@ -215,8 +223,11 @@ func (l *OptionChainLister) pendingCalendarChains(nowNano int64, prices etypes.L
 	}
 
 	seenExpiries := make(map[int64]struct{}, len(requests))
-	var out []etypes.Instrument
-	var expiries []int64
+	type expiryStrikeGrid struct {
+		expiry  int64
+		strikes []int64
+	}
+	var grids []expiryStrikeGrid
 	for _, request := range requests {
 		if l.calendarListed[request.expiryNano] {
 			continue
@@ -225,26 +236,45 @@ func (l *OptionChainLister) pendingCalendarChains(nowNano int64, prices etypes.L
 			continue
 		}
 		seenExpiries[request.expiryNano] = struct{}{}
-		expiries = append(expiries, request.expiryNano)
+		strikes := l.validStrikeGrid(center)
+		if len(strikes) == 0 {
+			return nil, fmt.Errorf("option-chain listing underlying %s expiry %d: configured strike grid has no positive strikes", l.Underlying, request.expiryNano)
+		}
+		grids = append(grids, expiryStrikeGrid{expiry: request.expiryNano, strikes: strikes})
 	}
-	for _, expiryNano := range expiries {
-		for i := -l.StrikesPerSide; i <= l.StrikesPerSide; i++ {
-			strike := center + int64(i)*l.StrikeStep
-			if strike <= 0 || !l.allowStrike(expiryNano, strike) {
+	var out []etypes.Instrument
+	for _, grid := range grids {
+		beforeGrid := len(out)
+		for _, strike := range grid.strikes {
+			if !l.allowStrike(grid.expiry, strike) {
 				continue
 			}
 			for _, isCall := range []bool{true, false} {
 				// appendOption is deterministic and idempotent by the full option
 				// identity, while calendarListed prevents re-centering this expiry.
-				out = l.appendOption(out, strike, expiryNano, isCall)
+				out = l.appendOption(out, strike, grid.expiry, isCall)
 			}
 		}
-		l.calendarListed[expiryNano] = true
+		if len(out) == beforeGrid {
+			return nil, fmt.Errorf("option-chain listing underlying %s: configured strike cap produced no instruments", l.Underlying)
+		}
+		l.calendarListed[grid.expiry] = true
 	}
 	// A successfully priced batch commits every schedule cursor, including
 	// colliding requests that produced no second instrument.
 	l.calendar.nextIndex = nextIndex
 	return out, nil
+}
+
+func (l *OptionChainLister) validStrikeGrid(center int64) []int64 {
+	strikes := make([]int64, 0, 2*l.StrikesPerSide+1)
+	for i := -l.StrikesPerSide; i <= l.StrikesPerSide; i++ {
+		strike := center + int64(i)*l.StrikeStep
+		if strike > 0 {
+			strikes = append(strikes, strike)
+		}
+	}
+	return strikes
 }
 
 func (l *OptionChainLister) allowStrike(expiry, strike int64) bool {
@@ -307,15 +337,12 @@ func (l *OptionChainLister) appendOption(out []etypes.Instrument, strike, expiry
 	if isCall {
 		cp = "C"
 	}
-	// Whole-quote strikes keep the compact human-readable symbol; strikes off
-	// the quote-precision grid use raw units — integer division would collide
-	// distinct strikes (e.g. step < precision) into one symbol and silently
-	// skip listings.
-	strikeLabel := strike / l.Spec.QuotePrecision
-	if strike%l.Spec.QuotePrecision != 0 {
-		strikeLabel = strike
+	var symbol string
+	if l.Calendar == nil {
+		symbol = fmt.Sprintf("%s-%s-%s-%s", l.Spec.Base, expirySymbolLabel(expiry), l.strikeSymbolLabel(strike), cp)
+	} else {
+		symbol = fmt.Sprintf("%s-OPT-U%s-%s-%s-%s", l.Spec.Base, canonicalSymbolComponent(l.Underlying), expirySymbolLabel(expiry), l.strikeSymbolLabel(strike), cp)
 	}
-	symbol := fmt.Sprintf("%s-%s-%d-%s", l.Spec.Base, expirySymbolLabel(expiry), strikeLabel, cp)
 	if l.listed[symbol] {
 		return out
 	}
@@ -336,11 +363,28 @@ func (l *OptionChainLister) appendOption(out []etypes.Instrument, strike, expiry
 	return append(out, opt)
 }
 
+func (l *OptionChainLister) strikeSymbolLabel(strike int64) string {
+	if l.Calendar != nil {
+		return "K" + strconv.FormatInt(strike, 10)
+	}
+	if l.Spec.QuotePrecision > 0 && strike%l.Spec.QuotePrecision == 0 {
+		// Preserve the historical compact spelling for precision-aligned
+		// strikes. Non-aligned strikes use a namespace that cannot collide with
+		// this decimal form.
+		return strconv.FormatInt(strike/l.Spec.QuotePrecision, 10)
+	}
+	return "R" + strconv.FormatInt(strike, 10)
+}
+
 func expirySymbolLabel(expiryNano int64) string {
 	if expiryNano%1_000_000_000 == 0 {
 		return strconv.FormatInt(expiryNano/1_000_000_000, 10)
 	}
 	return strconv.FormatInt(expiryNano, 10) + "ns"
+}
+
+func canonicalSymbolComponent(value string) string {
+	return hex.EncodeToString([]byte(value))
 }
 
 var _ etypes.ListingPolicy = (*OptionChainLister)(nil)

@@ -253,3 +253,78 @@ func TestCalendarSymbolsPreserveSubsecondExpiryIdentity(t *testing.T) {
 		t.Fatalf("distinct expiry timestamps collided in symbols: %s", listed[0].Symbol())
 	}
 }
+
+func TestCalendarInstrumentSymbolsIncludeUnderlyingIdentity(t *testing.T) {
+	calendar := &ExpiryCalendar{Schedules: []ExpirySchedule{{Name: "short", ListingIntervalNano: calendarUnit, TimeToExpiryNano: 2 * calendarUnit}}}
+	futureSymbols := make(map[string]struct{})
+	optionSymbols := make(map[string]struct{})
+	for _, underlying := range []string{"ABC/USD", "ABC/USDT"} {
+		futureLister := &DatedFuturesLister{
+			Underlying: underlying,
+			Spec:       ContractSpec{Base: "ABC", Quote: "USD", BasePrecision: 100, QuotePrecision: 1, TickSize: 1, MinOrderSize: 1},
+			Calendar:   calendar,
+		}
+		future, err := futureLister.PendingListings(0, nil)
+		if err != nil || len(future) != 1 {
+			t.Fatalf("calendar future for %s = (%d, %v), want one", underlying, len(future), err)
+		}
+		futureSymbols[future[0].Symbol()] = struct{}{}
+
+		optionLister := &OptionChainLister{
+			Underlying: underlying,
+			Spec:       ContractSpec{Base: "ABC", Quote: "USD", BasePrecision: 100, QuotePrecision: 1, TickSize: 1, MinOrderSize: 1},
+			Calendar:   calendar, StrikeStep: 10, StrikesPerSide: 0,
+		}
+		options, err := optionLister.PendingListings(0, listingPriceSource{underlying: 100})
+		if err != nil || len(options) != 2 {
+			t.Fatalf("calendar options for %s = (%d, %v), want call and put", underlying, len(options), err)
+		}
+		for _, option := range options {
+			optionSymbols[option.Symbol()] = struct{}{}
+		}
+	}
+	if len(futureSymbols) != 2 || len(optionSymbols) != 4 {
+		t.Fatalf("calendar identity collision: futures=%v options=%v", futureSymbols, optionSymbols)
+	}
+}
+
+func TestCalendarOptionStrikeSymbolsAreInjectiveInRawUnits(t *testing.T) {
+	lister := &OptionChainLister{
+		Underlying: "ABC/USD",
+		Spec:       ContractSpec{Base: "ABC", Quote: "USD", BasePrecision: 100, QuotePrecision: 2, TickSize: 1, MinOrderSize: 1},
+		Calendar:   &ExpiryCalendar{Schedules: []ExpirySchedule{{Name: "short", ListingIntervalNano: calendarUnit, TimeToExpiryNano: 2 * calendarUnit}}},
+		StrikeStep: 3, StrikesPerSide: 1,
+	}
+	options, err := lister.PendingListings(0, listingPriceSource{"ABC/USD": 3})
+	if err != nil || len(options) != 4 {
+		t.Fatalf("raw-unit strike chain = (%d, %v), want two strikes and two rights", len(options), err)
+	}
+	symbols := make(map[string]struct{}, len(options))
+	strikes := make(map[int64]struct{}, 2)
+	for _, option := range options {
+		if _, exists := symbols[option.Symbol()]; exists {
+			t.Fatalf("duplicate option symbol %q", option.Symbol())
+		}
+		symbols[option.Symbol()] = struct{}{}
+		strikes[option.(*EuropeanOption).Strike] = struct{}{}
+	}
+	if len(strikes) != 2 {
+		t.Fatalf("raw-unit strikes = %v, want 3 and 6", strikes)
+	}
+}
+
+func TestCalendarOptionRejectsEmptyChainWithoutConsumingExpiry(t *testing.T) {
+	lister := &OptionChainLister{
+		Underlying: "ABC/USD",
+		Spec:       ContractSpec{Base: "ABC", Quote: "USD", BasePrecision: 100, QuotePrecision: 1, TickSize: 1, MinOrderSize: 1},
+		Calendar:   &ExpiryCalendar{Schedules: []ExpirySchedule{{Name: "short", ListingIntervalNano: calendarUnit, TimeToExpiryNano: 2 * calendarUnit}}},
+		StrikeStep: 10, StrikesPerSide: 0,
+	}
+	if listed, err := lister.PendingListings(0, listingPriceSource{"ABC/USD": 1}); listed != nil || err == nil {
+		t.Fatalf("empty chain result = (%v, %v), want retained configuration error", listed, err)
+	}
+	listed, err := lister.PendingListings(0, listingPriceSource{"ABC/USD": 100})
+	if err != nil || len(listed) != 2 {
+		t.Fatalf("retry after empty chain = (%d, %v), want call and put", len(listed), err)
+	}
+}

@@ -288,6 +288,20 @@ plausible semantic blocker was found. No performance patch was merged or
 cherry-picked. The next checkpoint must compare only commits newer than
 `9dc6b08` and read only newly relevant reports or diffs.
 
+## Asynchronous performance-branch checkpoint — 2026-08-30 (new range)
+
+The remote advanced from the last reviewed commit `9dc6b08` through `feeb6f9`
+to `e3558df`.  I inspected only `e3558df` and `feeb6f9` plus their new report
+sections.
+They prototype a canonical binary evidence stream and report approximately
+2.4x encoding and 15.9x decoding on a 20,000-event benchmark, with lower
+allocation and compressed size.  The prototype does not yet cover every event
+family, prove JSON/typed/binary equivalence, preserve the full global order,
+or differentially reproduce all analyzer outputs.  It is therefore a future
+analytics acceleration candidate, not a production evidence-contract change;
+no code was merged or cherry-picked and no scientific result is affected.
+The next feed comparison starts at `e3558df`.
+
 ## Independent review checkpoint — 2026-08-30
 
 Reviewer Volta (Sol xhigh) independently inspected the candidate after the

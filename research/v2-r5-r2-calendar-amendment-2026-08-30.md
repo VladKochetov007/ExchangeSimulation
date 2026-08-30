@@ -64,7 +64,7 @@ shared expiries are counted once.
 | C | 2h / 6h | 4h / 12h | 8h / 16h | 12 + 6 + 3 = 21 | 10 | sparse; the old rolling-style density leaves fewer complete cycles |
 | D | 2h / 4h | 6h / 10h | 12h / 20h | 12 + 4 + 2 = 18 | 11 | viable, but medium/long overlaps are too infrequent |
 
-Candidate A is registered.  Its distinct short-family expiry sequence through
+Candidate A is the selected successor schedule.  Its distinct short-family expiry sequence through
 the 24h listing horizon is:
 
 ```
@@ -82,6 +82,14 @@ forward term structure at the terminal boundary.  The calendar produces these
 overlaps arithmetically; it does not inspect prices or encode a convergence
 target.
 
+The successor registry is `research/configs/v2-integrated-longrun-r2/`.  The
+development runner is `scripts/run-v2-integrated-longrun-r2-cell.sh`; its
+development set is `dev-607`, `dev-613`, and `dev-617`, with `dev-607-none`
+and `dev-607-g8` reserved as parity controls.  The three holdout configuration
+files are copied into the namespace only as reserved declarations; the R2
+development runner rejects them and the development scorer asserts that their
+outputs do not exist.
+
 The schedule is deliberately compressed rather than a literal month model.
 The 12h long lead is longer than the 6h medium lead while still allowing three
 long-family expiry observations in a 24h run.  A later real-time calibration
@@ -97,9 +105,10 @@ contract.
 3. Advance every due family cursor, including requests whose expiry is already
    past the poll time.  Do not advance a batch that cannot be priced or
    constructed.
-4. Deduplicate requests by expiry before creating instruments.  The futures
-   symbol remains derived from underlying/base and expiry, so a collision is
-   visible as one economic book.
+4. Deduplicate requests by expiry before creating instruments.  Calendar
+   futures and options use an injective canonical symbol component for the
+   underlying plus expiry (and raw strike units for options), so a collision
+   is visible as one economic book without cross-underlying symbol aliasing.
 5. For options, deduplicate by expiry before building the call/put chain.  A
    configured strike cap remains a safety bound, not a second listing event.
 6. Expiry, pending settlement, mark invalidation, and settlement continue to
@@ -145,7 +154,32 @@ from `2989934` to `9dc6b08`.  The new commits measure exact allocations,
 conditional book-delta construction, high-frequency no-ops, and hash payload
 encoding.  The agent retracted its sampled allocation and appender-coverage
 claims; the remaining changes are performance-only and were not merged.  The
-next review starts at `9dc6b08`.
+then advanced from `9dc6b08` through `feeb6f9` and `e3558df`, a prototype
+canonical binary evidence stream followed by additional typed payload work.
+Its encode/decode measurements are promising, but it is not an end-to-end,
+all-event, differential-tested replacement for the current JSON evidence
+contract, so it remains unmerged.  The next review starts at `e3558df`.
+
+## Independent semantic review and corrective work
+
+The exact implementation commit `80b5095` was reviewed by an independent
+Sol-xhigh agent.  The review was **REJECTED** before any successor cell ran:
+
+1. the successor configs were not yet present in that committed snapshot;
+2. calendar symbols did not encode the underlying, so two quote markets could
+   collide in the exchange symbol map;
+3. arbitrary fixed-point option strikes could collide after integer division;
+4. a non-positive rounded strike grid could mark an empty option expiry as
+   listed.
+
+The first item is addressed in the successor registry and protocol scripts.
+The remaining three are addressed in the successor implementation: calendar
+futures/options use an injective hex-encoded underlying component; calendar
+options use raw-unit strike labels; and a calendar cursor is not committed
+when a due expiry cannot produce a valid call/put chain.  Regression and
+`NewSim` activation tests cover these cases.  A fresh independent review of
+the resulting commit is required before any development cell.  The rejected
+verdict remains historical and is not silently rewritten.
 
 ## Gate status
 
