@@ -408,6 +408,81 @@ motivation rather than the screen: A1 and A2 removed most of the decode work
 without touching the parser, and `encoding/json` remains the semantic
 reference. No Go dependency was added; the module still has none.
 
+## 7b. Final analyzer result at realistic scale
+
+Every headline figure earlier in this document was measured on the 684MB
+development cell, which §6b showed is misleading about what dominates. This is
+the same comparison on the retained 10.89GB cell, in the configuration actually
+recommended for integration — the fused path with the dominant reducer split
+into its own invocation:
+
+| Configuration | wall | peak RSS |
+| --- | ---: | ---: |
+| pristine, 14 separate processes | 688.67 s | 1,360 MB |
+| **final, split-heavy fused** | **243.77 s** | **1,219 MB** |
+
+**2.83x faster at 10% lower peak RSS.** The memory reduction is the part worth
+noting: fusion alone costs memory, because peak RSS becomes the sum of
+concurrent reducer states rather than the maximum, and §6b measured that at
++88%. Splitting the dominant reducer recovers most of it, and the allocation
+work — the envelope reuse in particular, which removed 2.73GB of `RawMessage`
+copies — more than covers the rest.
+
+This is the number to quote for a 24-hour cell, not the 2.72x measured on the
+684MB specimen, and not the 1.62x measured for the fusion change alone before
+the later allocation and prefilter work landed.
+
+## 8b. Where the analyzer's remaining CPU actually goes
+
+Profiled on the 10.89GB development cell after every accepted change,
+`orderlifecycle`, 105.48s of samples:
+
+| Component | share |
+| --- | ---: |
+| `encoding/json.Unmarshal` (all of it) | 54.2% |
+| — from `scanFile`, the envelope decode | 55.3% of that |
+| — from `decodeRequiredJSON`, the payload decode | 44.4% of that |
+| `encoding/json.checkValid` | 19.5% |
+| `encoding/json.(*decodeState).skip` | 8.5% |
+| prefilter | reduced by the needle set |
+
+**About 8.7% of analyzer CPU is provably redundant validation.** `json.Unmarshal`
+validates its whole input before decoding, so the envelope decode validates the
+line — which is the fail-closed check and must stay — and each reducer's payload
+decode then re-validates a substring of bytes already known to be valid.
+
+Three routes exist to that 8.7%, and all three were rejected:
+
+* **Vendor `encoding/json` with an entry point that skips `checkValid`.**
+  Semantically exact, because it is the same code. Rejected on maintenance: this
+  project's evidence contract is defined as "what `encoding/json` does", and
+  forking it means a future standard-library fix silently stops applying to the
+  analyzer while the contract still names the original.
+* **Extract each wanted field's raw span structurally, then decode only those
+  spans.** Rejected on failure semantics, verified rather than assumed:
+
+      struct decode: json: cannot unmarshal string into Go struct field fill.qty of type int64
+      per-field    : json: cannot unmarshal string into Go value of type int64
+
+  Preserving the text requires falling back to the whole-struct decode on every
+  error path, and locating the fields at all requires reflection over the target
+  type — at which point the change is a reimplementation of `encoding/json`'s
+  struct decoder, which is the thing being avoided.
+* **Share the validation across the metrics that decode the same payload.**
+  Validation is syntactic rather than a derived conclusion, so sharing it would
+  not violate independent reconstruction. Rejected because `encoding/json`
+  exposes no way to say "already validated"; it reduces to the first route.
+
+`decodeState.skip` at 8.5% is the decoder walking payload fields the target
+struct does not want — inherent to decoding a 16-field record into a 5-field
+struct, and removable only by the same reimplementation.
+
+**The analyzer is therefore at its structural floor.** What remains is
+`encoding/json` doing its job, and every route to reducing it means forking or
+reimplementing the reference that defines the evidence contract. That is a worse
+trade than the CPU is worth, and it is the same wall that rejected
+`goccy/go-json`, the fused data-layer decode, and third-party decoders generally.
+
 ## 9. Rejected and superseded hypotheses
 
 | Hypothesis | Verdict | Why |
