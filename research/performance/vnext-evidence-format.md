@@ -241,3 +241,63 @@ coarse — a query touching one event still reads a whole megabyte. Smaller bloc
 would sharpen A and D further at some cost in compression ratio. This has not
 been swept, and the A and D figures should be read as a floor rather than a
 best case.
+
+## The Amdahl ceiling, measured rather than projected
+
+The 1.14x estimate for the simulator came from a microbenchmark ratio, and this
+campaign has produced three projected wins that measured zero. Before building
+schemas for twenty event families to get an end-to-end number, the cheap
+falsifier is to measure the **ceiling**: a build whose `observe` skips
+`json.Marshal` entirely and hashes a constant. If removing *all* of the
+serialization cost yields X, then no serialization change can ever exceed X.
+
+`dev-607-none`, seed 607, `GOMAXPROCS=4`, taskset-pinned, five alternating
+repetitions with an inline A/A control:
+
+```
+A1  median 28.32s   28.32 28.07 27.96 28.38 29.07
+A2  median 28.85s   28.58 29.51 28.85 29.16 28.70
+B   median 23.69s   23.05 23.71 23.93 23.69 23.44
+
+A/A control  : +1.85%
+B vs A pooled: -17.29%
+```
+
+Every B sample lies below every A sample. **The ceiling is −17.29 %**, or about
+1.21x, for removing serialization and its hashing from the evidence path
+entirely.
+
+### Two independent measurements agree
+
+The CPU profile put `encoding/json.Marshal` at 14.99 % and `sha256.blockSHANI`
+at 3.61 %, totalling **18.6 %**. The wall-clock ceiling probe says **17.29 %**.
+A profile and a stopwatch, measuring different things by different means,
+landing within 1.3 points of each other is the kind of corroboration this
+campaign has mostly lacked.
+
+### What the binary format should therefore deliver
+
+The microbenchmark puts the binary path at 5.44 ms against roughly 16.1 ms for
+JSON once JSON's own SHA-256 is included — it retains about **33.7 %** of the
+cost, because it still hashes, just over 2.93x fewer bytes. So it should capture
+roughly two thirds of the ceiling:
+
+    0.663 x 17.29 % = about 11.5 %, or 1.13x
+
+**That is now a bounded estimate corroborated by two independent methods, not a
+microbenchmark extrapolation.** It is also larger than anything else this
+campaign has found: the accepted `bookDeltaEvidence` change was −3.89 %, and
+every other candidate measured zero.
+
+### What this does not yet establish
+
+The probe destroys the execution hash, so it is a measurement build and nothing
+more. It bounds the opportunity; it does not demonstrate that a real binary sink
+achieves it, and the remaining third of the cost — hashing 94 bytes per event
+instead of 276 — is real work that stays. The end-to-end A/B against a genuine
+binary sink is still the number that decides this, and it needs schemas for the
+event families that make up the bulk of the stream.
+
+The order of work that follows from this is clear: the five families covering
+76 % of hashed bytes first, then the end-to-end A/B, and only then a decision
+about retiring JSON from the hot path.
