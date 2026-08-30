@@ -1408,3 +1408,64 @@ wall-clock attribution to the struct therefore rests on elimination: the
 combined change measured −3.89 % on a clean host, and the appender half measured
 nothing on a clean host. A direct struct-versus-map A/B should be repeated when
 the machine is quiet.
+
+## Where the time is not: the exchange logic itself
+
+The recurring question in this campaign has been whether core exchange logic,
+or a rewrite of it in C++/Rust/assembly, is worth pursuing. The profile answers
+it, and the answer is no.
+
+Taken on `dev-607-none` with raw logging off, so every figure below is market
+mechanics rather than evidence writing:
+
+| subtree | share of CPU |
+|---|---:|
+| `checkpointSink.observe` — serialize + hash for the execution digest | **21.35 %** |
+| `settleExecution` — position, cash and fee settlement | 7.57 % |
+| `ProRataMatcher.Match` + `PriceTimeMatcher.Match` | **0.45 %** |
+
+**The matching engine — the thing an exchange nominally is — costs 0.45 % of
+CPU.** Order admission, settlement, fee accounting and evidence production
+around it cost roughly seventy times as much. Optimizing matching, in any
+language, cannot matter.
+
+These are not additive: `settleExecution` writes events, so part of its 7.57 %
+is inside the 21.35 %. The two unambiguous statements are that evidence
+production is the largest single subtree and that matching is negligible.
+
+### The no-op census has no third instance here
+
+The two structural wins in this campaign both came from finding an operation
+that ran constantly and usually did nothing — preview matching at 62 % useless,
+position probes at 94.9 %. The settlement path was searched for a third:
+
+* `recordFeeRevenue` already returns immediately when both fees are zero;
+* `moveVenueBalance` already returns immediately on a zero delta or empty asset;
+* `restoreFeeHeadroom` already returns for market orders.
+
+**Every hot guard is already present.** This is recorded as a negative result so
+the settlement path is not re-searched for the same pattern: the cost there is
+real work — balance updates and event emission — not waste.
+
+### C++, Rust and assembly: no win available
+
+Stated with measurements rather than intuition, now that the hot paths are
+known:
+
+* The **binary encoder** after removing hashing runs at 111 ns/event for the
+  most complex family and 54 ns for the simplest. That is
+  `binary.LittleEndian.AppendUint64` compiling to a MOV against a reused buffer;
+  there is no instruction-level headroom for another language to take.
+* The **hash** is `crypto/sha256`, which Go already dispatches to SHA-NI
+  hardware instructions — `sha256.blockSHANI` is what appears in the profile.
+  Hand-written assembly would be reimplementing the same instruction.
+* The **matching engine** is 0.45 %, so even an infinitely fast rewrite is
+  invisible.
+* What remains is dominated by allocation, GC scanning and map access, which
+  are runtime and data-structure properties. A language change would have to
+  bring a different memory model to help, and that is a rewrite of the
+  simulator, not an optimization of it.
+
+The conclusion is that the remaining opportunity is **structural, not
+linguistic**: stop producing the bytes rather than encode them faster, which is
+what the VNext binary format does and why its ceiling is 17.9 %.
