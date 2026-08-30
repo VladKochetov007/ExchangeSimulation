@@ -1827,6 +1827,17 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		})
 	}
 
+	// Two passes, not one interleaved pass. buildAccountMarginProfile prices
+	// non-trigger symbols from their last STORED mark, so sweeping inside the
+	// mark loop valued every cross-margined sibling at the previous tick's
+	// mark for the first symbol in sort order and at this tick's mark for the
+	// last. The outcome of a borderline cross-margin liquidation then depended
+	// on lexicographic symbol order, which carries no economic content: the
+	// same portfolio could be liquidated or spared by renaming its legs. Every
+	// mark this tick produced is committed first, then the sweep runs once
+	// against the complete refreshed set. Mark and funding publication order is
+	// unchanged, so only the risk decision moves.
+	swept := make([]perpUpdate, 0, len(updates))
 	for _, u := range updates {
 		// FundingRate fields are mutated under e.mu only, and subscribers get
 		// a snapshot copy — publishing the live pointer would let actor
@@ -1872,6 +1883,10 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 			}
 		}
 
+		swept = append(swept, u)
+	}
+
+	for _, u := range swept {
 		e.CheckLiquidations(u.symbol, u.perp, u.markPrice)
 	}
 }
@@ -2014,9 +2029,30 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 		if perp.QuoteAsset() != quote {
 			continue
 		}
+		// Position relevance is established BEFORE the mark is resolved. A book
+		// the account holds nothing in contributes zero equity, zero notional
+		// and zero maintenance whatever its mark is, so resolving that mark
+		// first made an unrelated instrument's price feed an input to this
+		// account's solvency: a newly listed contract, unmarked for the one
+		// tick before its first mark, failed the profile of every account in
+		// the quote and suppressed their liquidation decisions. Fail-closed is
+		// retained for the case it is actually for — exposure the account does
+		// hold and whose mark is genuinely unavailable.
+		var held [3]*Position
+		anyHeld := false
+		for i, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
+			pos := e.Positions.GetPositionBySide(clientID, symbol, side)
+			if pos == nil || pos.Size == 0 {
+				continue
+			}
+			held[i] = pos
+			anyHeld = true
+		}
+		if !anyHeld {
+			continue
+		}
 		mark := triggerMark
-		if symbol == triggerSymbol {
-		} else {
+		if symbol != triggerSymbol {
 			fundingRate := perp.GetFundingRate()
 			mark = fundingRate.MarkPrice
 			if !fundingRate.MarkAvailable {
@@ -2028,8 +2064,13 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 			}
 		}
 		precision := perp.BasePrecision()
-		for _, pos := range positionsAcrossSides(e.Positions, clientID, symbol) {
-			if pos == nil || pos.Size == 0 {
+		// Iterate the exposure the relevance pass already established rather
+		// than querying the position manager a second time. The perf branch had
+		// re-queried here; that is both a redundant lookup and a bypass of the
+		// `held` array whose whole purpose is to fix which positions this
+		// profile is valued over.
+		for _, pos := range held {
+			if pos == nil {
 				continue
 			}
 			p.EquityContribution += e.positionUPnL(pos, mark, precision)
@@ -2185,8 +2226,14 @@ func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, ma
 
 		profile, err := e.buildAccountMarginProfile(clientID, quote, symbol, markPrice)
 		if err != nil {
+			// This account's own exposure is unpriceable, so its solvency is
+			// unknown and it is left alone. Every other account in the sweep
+			// still gets a decision: `return` here made one account's missing
+			// price cancel the liquidation check for every higher client ID,
+			// which the sibling sweep in CheckPositionMarginerLiquidations
+			// already avoids with `continue`.
 			e.reportPriceUnavailable(e.Clock.NowUnixNano(), symbol, "liquidation", err)
-			return
+			continue
 		}
 		equityContribution, notional := profile.EquityContribution, profile.Notional
 		// Borrowed quote is cash in the wallet but a matching liability: counting

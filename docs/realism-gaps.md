@@ -150,6 +150,27 @@ gateways, but market-data subscriptions to the delisted symbol are never
 removed and subscribers get no terminal snapshot; actors must GC on the
 `settled` announcement (derivsim's `contractSet` does). **DOCUMENTED**
 
+### Settlement-pending positions are invisible to risk
+When a contract reaches expiry with no declared settlement price
+(`expiry.go` `expiryUnavailableRetryForever`), resting orders are cancelled
+once and positions are deliberately **retained** until a settlement source
+appears — but every risk path skips a `settlementPending` symbol
+(`exchange.go:1549`, `:1816`, `:1878`, `:1990`, `:2269`). The retained position
+therefore contributes zero equity *and* zero maintenance: a short has its
+liability erased and can escape a liquidation it deserves, a long has its asset
+erased and can be liquidated on a symbol it is solvent on. The trading halt is
+right; valuing a retained position at zero is not. The correct treatment is to
+keep valuing it at the last declared mark, or to refuse the profile the way
+genuinely unpriceable held exposure does.
+
+Unreachable in the current integrated configurations, and the reason is
+mechanical rather than statistical: `settlementObserver.lastDeclaredReference`
+(`instrument/settlement_obs.go`) is set on a contract's first observation and
+never cleared, while `UpdateDerivativeMarks` feeds one every second, so a
+contract on a multi-hour tenor cannot reach expiry unobserved. Measured: 66
+settlements, zero `expiry_settlement_pending` records. Any configuration that
+can withhold a settlement source for a whole tenor reaches this. **TODO**
+
 ### Isolated margin is half-built
 `AllocateCollateralToPosition` moves funds out of `PerpBalances` into
 `IsolatedPositions`, but no solvency check reads isolated collateral and there
@@ -186,6 +207,15 @@ Collateral interest truncates to zero each per-minute charge for small debts
 (below ≈ $105 at the default 500 bps annual rate with `USD_PRECISION = 1e5`)
 and the fractional remainder is dropped rather than accrued — small debts pay
 no interest at all. Real venues accumulate fractional accruals. **DOCUMENTED**
+
+Scale note, measured over 6h30m of the integrated `dev-607` population across
+three venues: the small-debt regime is a *warm-up* phenomenon only. All 33
+outstanding (venue, client, asset) debts settled at or above 42.7 M units
+($427), four times the floor, and 11,962 USD of interest was charged over
+10,471 events. The residual effect at that scale is sub-unit rounding bounded
+by one unit per (client, asset, minute) — under $0.50 across a 24-hour run.
+A short run, or one whose borrowers stay small, sits entirely below the floor
+and will report zero interest; do not generalize either regime to the other.
 
 ## Ecology / experiment design
 
