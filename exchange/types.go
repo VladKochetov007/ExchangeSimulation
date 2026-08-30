@@ -185,6 +185,8 @@ type TickerFactory = etypes.TickerFactory
 type Gateway = etypes.Gateway
 type Venue = etypes.Venue
 type MatchingEngine = ematching.MatchingEngine
+
+type PriceCrossingMatcher = ematching.PriceCrossingMatcher
 type MatchResult = ematching.MatchResult
 type MarkPriceCalculator = eprice.MarkPriceCalculator
 type FundingCalculator = einstrument.FundingCalculator

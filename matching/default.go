@@ -133,3 +133,8 @@ func (m *PriceTimeMatcher) execute(taker, maker *etypes.Order) *etypes.Execution
 	exec.MakerPosSide = maker.PositionSide
 	return exec
 }
+
+// MatchesOnlyCrossingPrices reports that this matcher gates every execution on
+// CanMatch, which compares the incoming price against the level price, so an
+// order that does not cross the opposite best produces nothing.
+func (m *PriceTimeMatcher) MatchesOnlyCrossingPrices() bool { return true }

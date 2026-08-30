@@ -92,3 +92,21 @@ type MatchResult struct {
 type MatchingEngine interface {
 	Match(bidBook, askBook *ebook.Book, incomingOrder *etypes.Order) *MatchResult
 }
+
+// PriceCrossingMatcher is an optional promise a matcher may make: that it never
+// produces an execution for an order whose price does not cross the opposite
+// best, so an order that cannot cross yields no executions and no change to the
+// books.
+//
+// A caller that only needs to know the outcome may then skip building the
+// detached book a preview would otherwise match against. It is opt-in because
+// the promise is not implied by MatchingEngine: a venue that crosses at a
+// midpoint, or auctions, would match orders that never cross the touch, and
+// must not implement this.
+type PriceCrossingMatcher interface {
+	MatchingEngine
+	// MatchesOnlyCrossingPrices reports the promise above. Implementations
+	// return a constant; it exists as a method so the promise travels with the
+	// matcher rather than with a type assertion on a concrete type.
+	MatchesOnlyCrossingPrices() bool
+}
