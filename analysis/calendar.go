@@ -18,9 +18,10 @@ type CalendarOptions struct {
 type CalendarVenueAudit struct {
 	VenueID string `json:"venue_id"`
 
-	FuturesExpiryNanos []int64 `json:"futures_expiry_nanos"`
-	OptionExpiryNanos  []int64 `json:"option_expiry_nanos"`
-	SharedExpiryNanos  []int64 `json:"shared_expiry_nanos"`
+	FuturesExpiryNanos []int64           `json:"futures_expiry_nanos"`
+	OptionExpiryNanos  []int64           `json:"option_expiry_nanos"`
+	SharedExpiryNanos  []int64           `json:"shared_expiry_nanos"`
+	ListingTimeline    []CalendarListing `json:"listing_timeline"`
 
 	FuturesListed  int `json:"futures_listed"`
 	OptionsListed  int `json:"options_listed"`
@@ -40,6 +41,17 @@ type CalendarVenueAudit struct {
 
 	MaxSimultaneousFutureExpiries int `json:"max_simultaneous_future_expiries"`
 	MaxSimultaneousOptionExpiries int `json:"max_simultaneous_option_expiries"`
+}
+
+// CalendarListing records the realized first-listing instant and cardinality
+// for one economic expiry. Schedule-family identity is deliberately absent:
+// overlapping families must converge on one future and one option chain.
+type CalendarListing struct {
+	ExpiryNano              int64 `json:"expiry_nano"`
+	FutureFirstListedAtNano int64 `json:"future_first_listed_at_nano"`
+	OptionFirstListedAtNano int64 `json:"option_first_listed_at_nano"`
+	FutureContractCount     int   `json:"future_contract_count"`
+	OptionContractCount     int   `json:"option_contract_count"`
 }
 
 // CalendarAudit is the deterministic, analyzer-owned attestation input for
@@ -82,6 +94,12 @@ type calendarInstrumentKey struct {
 	venue  string
 	kind   string
 	symbol string
+}
+
+type calendarListingTimeline struct {
+	listing    CalendarListing
+	futureSeen bool
+	optionSeen bool
 }
 
 // MeasureCalendar reconstructs derivative listing, coexistence and
@@ -145,6 +163,7 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 		settled         map[calendarInstrumentKey]bool
 		active          map[string]map[int64]int
 		settledExpiries map[string]map[int64]bool
+		listingTimeline map[int64]calendarListingTimeline
 	}
 	states := make(map[string]*venueState)
 	stateFor := func(venueID string) *venueState {
@@ -158,6 +177,7 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 			settled:         make(map[calendarInstrumentKey]bool),
 			active:          map[string]map[int64]int{"FUTURE": {}, "OPTION": {}},
 			settledExpiries: map[string]map[int64]bool{"FUTURE": {}, "OPTION": {}},
+			listingTimeline: make(map[int64]calendarListingTimeline),
 		}
 		states[venueID] = state
 		return state
@@ -193,6 +213,22 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 			}
 			state.listed[key] = calendarEventPosition{at: event.at, file: event.file, ordinal: event.ordinal}
 			state.active[event.kind][event.expiry]++
+			timeline := state.listingTimeline[event.expiry]
+			timeline.listing.ExpiryNano = event.expiry
+			if event.kind == "FUTURE" {
+				timeline.listing.FutureContractCount++
+				if !timeline.futureSeen {
+					timeline.listing.FutureFirstListedAtNano = event.at
+					timeline.futureSeen = true
+				}
+			} else {
+				timeline.listing.OptionContractCount++
+				if !timeline.optionSeen {
+					timeline.listing.OptionFirstListedAtNano = event.at
+					timeline.optionSeen = true
+				}
+			}
+			state.listingTimeline[event.expiry] = timeline
 			if event.kind == "FUTURE" {
 				state.audit.FuturesListed++
 				globalFutures[event.expiry] = struct{}{}
@@ -279,12 +315,21 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 		venueIDs = append(venueIDs, venueID)
 	}
 	sort.Strings(venueIDs)
-	result := &CalendarAudit{SchemaVersion: 1, Contract: "calendar-audit-v1"}
+	result := &CalendarAudit{SchemaVersion: 2, Contract: "calendar-audit-v2"}
 	for _, venueID := range venueIDs {
 		state := states[venueID]
 		state.audit.FuturesExpiryNanos = expirySetFromEvents(events, venueID, "FUTURE", true)
 		state.audit.OptionExpiryNanos = expirySetFromEvents(events, venueID, "OPTION", true)
 		state.audit.SharedExpiryNanos = intersectExpiries(state.audit.FuturesExpiryNanos, state.audit.OptionExpiryNanos)
+		timelineExpiries := make([]int64, 0, len(state.listingTimeline))
+		for expiry := range state.listingTimeline {
+			timelineExpiries = append(timelineExpiries, expiry)
+		}
+		sort.Slice(timelineExpiries, func(i, j int) bool { return timelineExpiries[i] < timelineExpiries[j] })
+		state.audit.ListingTimeline = make([]CalendarListing, 0, len(timelineExpiries))
+		for _, expiry := range timelineExpiries {
+			state.audit.ListingTimeline = append(state.audit.ListingTimeline, state.listingTimeline[expiry].listing)
+		}
 		state.audit.FutureExpiryCycles = len(state.settledExpiries["FUTURE"])
 		state.audit.OptionExpiryCycles = len(state.settledExpiries["OPTION"])
 		result.Venues = append(result.Venues, state.audit)

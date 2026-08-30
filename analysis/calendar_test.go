@@ -23,7 +23,7 @@ func TestMeasureCalendarDeduplicatesIdentitiesAndMeasuresCycles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("measure: %v", err)
 	}
-	if result.SchemaVersion != 1 || result.Contract != "calendar-audit-v1" || len(result.Venues) != 1 {
+	if result.SchemaVersion != 2 || result.Contract != "calendar-audit-v2" || len(result.Venues) != 1 {
 		t.Fatalf("calendar envelope = %+v", result)
 	}
 	venue := result.Venues[0]
@@ -41,6 +41,42 @@ func TestMeasureCalendarDeduplicatesIdentitiesAndMeasuresCycles(t *testing.T) {
 	}
 	if len(result.SharedExpiryNanos) != 1 || result.SharedExpiryNanos[0] != 3 {
 		t.Fatalf("shared expiry set = %v", result.SharedExpiryNanos)
+	}
+	wantTimeline := []CalendarListing{
+		{ExpiryNano: 3, FutureFirstListedAtNano: 1, OptionFirstListedAtNano: 1, FutureContractCount: 1, OptionContractCount: 2},
+		{ExpiryNano: 4, FutureFirstListedAtNano: 2, FutureContractCount: 1},
+	}
+	if len(venue.ListingTimeline) != len(wantTimeline) {
+		t.Fatalf("listing timeline length = %d, want %d", len(venue.ListingTimeline), len(wantTimeline))
+	}
+	for index := range wantTimeline {
+		if venue.ListingTimeline[index] != wantTimeline[index] {
+			t.Fatalf("listing timeline[%d] = %+v, want %+v", index, venue.ListingTimeline[index], wantTimeline[index])
+		}
+	}
+}
+
+func TestMeasureCalendarRecordsFirstListingForEveryExpiry(t *testing.T) {
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/lifecycle.jsonl": {
+			`{"sim_ts":0,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":{"symbol":"ABC-FUT-3-U4142432f555344","instrument_type":"FUTURE","expiry_nano":3}}}`,
+			`{"sim_ts":0,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":{"symbol":"ABC-OPT-U4142432f555344-3-K100-C","instrument_type":"OPTION","expiry_nano":3}}}`,
+			`{"sim_ts":0,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":{"symbol":"ABC-OPT-U4142432f555344-3-K100-P","instrument_type":"OPTION","expiry_nano":3}}}`,
+			`{"sim_ts":1,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":{"symbol":"ABC-FUT-4-U4142432f555344","instrument_type":"FUTURE","expiry_nano":4}}}`,
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureCalendar(CalendarOptions{})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	got := result.Venues[0].ListingTimeline
+	if len(got) != 2 || got[0].FutureFirstListedAtNano != 0 || got[0].OptionFirstListedAtNano != 0 ||
+		got[0].FutureContractCount != 1 || got[0].OptionContractCount != 2 || got[1].FutureFirstListedAtNano != 1 {
+		t.Fatalf("listing timeline = %+v", got)
 	}
 }
 

@@ -47,6 +47,21 @@ v2_r2_acquire_namespace_lock || fail "could not acquire the R2 namespace lock fo
 expect_failure env -u V2_R2_NAMESPACE_LOCK_FD V2_R2_NAMESPACE_LOCK_HELD=true bash -c \
 	"source '$root_dir/scripts/v2-integrated-longrun-r2-contract.sh'; v2_r2_acquire_namespace_lock"
 
+expected_calendar_timeline=$(v2_r2_expected_calendar_listing_timeline)
+calendar_fixture="$tmp_root/calendar.json"
+jq -n --argjson timeline "$expected_calendar_timeline" \
+	'($timeline | map(.expiry_nano)) as $expiries |
+	 {result: {contract: "calendar-audit-v2", futures_expiry_nanos: $expiries,
+		option_expiry_nanos: $expiries, shared_expiry_nanos: $expiries,
+		venues: [{listing_timeline: $timeline, futures_listed: 28,
+			options_listed: 280, futures_settled: 23, options_settled: 230}]}}' \
+	>"$calendar_fixture"
+v2_r2_require_calendar_listing_timeline "$calendar_fixture" "$expected_calendar_timeline" ||
+	fail "registered first-listing timeline was rejected"
+jq '.result.venues[0].listing_timeline |= map(.future_first_listed_at_nano = 0 | .option_first_listed_at_nano = 0)' \
+	"$calendar_fixture" >"$tmp_root/calendar-all-at-zero.json"
+expect_failure v2_r2_require_calendar_listing_timeline "$tmp_root/calendar-all-at-zero.json" "$expected_calendar_timeline"
+
 expect_failure env GOMAXPROCS=4 "$root_dir/scripts/run-v2-integrated-longrun-r2-cell.sh" holdout-619 /bin/true
 expect_failure "$root_dir/scripts/extract-v2-integrated-longrun-r2-cell.sh" \
 	"$root_dir/research/artifacts/v2-freeze-candidate/smoke-vcs/run-g4"

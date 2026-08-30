@@ -156,9 +156,9 @@ write_full_cell "$v2_r2_output_root/dev-607" "$full_config" 4 "V2-INTEGRATED-LON
 write_none_cell "$v2_r2_output_root/dev-607-none" "$none_config"
 write_full_cell "$v2_r2_output_root/dev-607-g8" "$full_config" 8 "V2-INTEGRATED-LONG-R2-CANDIDATE" "v2-integrated-longrun-r2-dev-607"
 
-jq -n '{result: {contract: "v2-integrated-longrun-r2-candidate-v1", predicates: {calendar_behavior_attested: true}}}' \
+jq -n '{result: {contract: "v2-integrated-longrun-r2-candidate-v2", predicates: {calendar_behavior_attested: true}}}' \
 	>"$v2_r2_output_root/dev-607/activation.json"
-jq -n '{contract: "v2-integrated-longrun-r2-candidate-v1", predicates: {fixture: true}}' \
+jq -n '{contract: "v2-integrated-longrun-r2-candidate-v2", predicates: {fixture: true}}' \
 	>"$v2_r2_output_root/dev-607/integrity.json"
 for cell in dev-607 dev-607-none dev-607-g8; do
 	v2_r2_write_attestation "$v2_r2_output_root/$cell" || fail "could not write fixture attestation: $cell"

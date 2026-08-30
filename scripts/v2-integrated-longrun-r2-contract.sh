@@ -7,6 +7,50 @@ v2_r2_output_root="/home/vlad/v2-integrated-longrun-r2-candidate-20260830-v1"
 v2_r2_attestation_root="/home/vlad/v2-integrated-longrun-r2-candidate-20260830-v1-attestations"
 v2_r2_namespace_lock_path="/home/vlad/v2-integrated-longrun-r2-candidate.lock"
 
+v2_r2_expected_calendar_listing_timeline() {
+	local calendar_epoch_nano=1735689600000000000
+	local calendar_hour_nano=3600000000000
+	local calendar_end_nano=$((calendar_epoch_nano + 24 * calendar_hour_nano))
+	local schedule interval lead listing_nano expiry
+	local -A future_first option_first
+	for schedule in "3600000000000 7200000000000" "10800000000000 21600000000000" "21600000000000 43200000000000"; do
+		read -r interval lead <<<"$schedule"
+		listing_nano=$calendar_epoch_nano
+		while (( listing_nano <= calendar_end_nano )); do
+			expiry=$((listing_nano + lead))
+			if [[ -z ${future_first[$expiry]+set} || $listing_nano -lt ${future_first[$expiry]} ]]; then
+				future_first[$expiry]=$listing_nano
+			fi
+			if [[ -z ${option_first[$expiry]+set} || $listing_nano -lt ${option_first[$expiry]} ]]; then
+				option_first[$expiry]=$listing_nano
+			fi
+			listing_nano=$((listing_nano + interval))
+		done
+	done
+	local -a expiries=()
+	while IFS= read -r expiry; do
+		[[ -n "$expiry" ]] && expiries+=("$expiry")
+	done < <(printf '%s\n' "${!future_first[@]}" | sort -n)
+	local output='[' separator=''
+	for expiry in "${expiries[@]}"; do
+		output+="${separator}{\"expiry_nano\":$expiry,\"future_first_listed_at_nano\":${future_first[$expiry]},\"option_first_listed_at_nano\":${option_first[$expiry]},\"future_contract_count\":1,\"option_contract_count\":10}"
+		separator=,
+	done
+	output+=']'
+	printf '%s\n' "$output"
+}
+
+v2_r2_require_calendar_listing_timeline() {
+	[[ $# -ge 1 && $# -le 2 ]] || return 1
+	local calendar_path=$1
+	local expected_timeline=${2:-$(v2_r2_expected_calendar_listing_timeline)}
+	jq -e --argjson expected_timeline "$expected_timeline" \
+		'type == "object" and .result.contract == "calendar-audit-v2" and
+		 (.result.venues | type) == "array" and (.result.venues | length) > 0 and
+		 all(.result.venues[]; .listing_timeline == $expected_timeline)' \
+		"$calendar_path" >/dev/null
+}
+
 v2_r2_acquire_namespace_lock() {
 	[[ ! -L "$v2_r2_namespace_lock_path" ]] || return 1
 	local inherited_fd=${V2_R2_NAMESPACE_LOCK_FD:-}

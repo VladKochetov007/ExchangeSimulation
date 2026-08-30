@@ -70,9 +70,9 @@ for cell in dev-607 dev-613 dev-617; do
 	require_object "$cell_dir/activation.json"
 	jq -e --arg cell "$cell" --argjson required_artifacts "$required_json" \
 		'.cell == $cell and .seed == (.cell | split("-")[-1] | tonumber) and
-		.analysis_contract == "v2-integrated-longrun-r2-candidate-v1" and
-		.integrity_contract == "v2-integrated-longrun-r2-candidate-v1" and
-		.activation_contract == "v2-integrated-longrun-r2-candidate-v1" and
+		.analysis_contract == "v2-integrated-longrun-r2-candidate-v2" and
+		.integrity_contract == "v2-integrated-longrun-r2-candidate-v2" and
+		.activation_contract == "v2-integrated-longrun-r2-candidate-v2" and
 		.analyzer_trimpath == true and .analyzer_cgo_enabled == "0" and
 		.simulator_trimpath == true and .simulator_cgo_enabled == "0" and
 		(.analyzer_go_version | startswith("go1.27")) and (.simulator_go_version | startswith("go1.27")) and
@@ -92,13 +92,13 @@ for cell in dev-607 dev-613 dev-617; do
 		declared_sha256=$(jq -er --arg artifact "$artifact" '.artifact_sha256[$artifact]' "$cell_dir/analysis-metadata.json")
 		[[ "$actual_sha256" == "$declared_sha256" ]] || fail "artifact hash mismatch: $cell/$artifact"
 	done
-	jq -e '.schema_version == 1 and .contract == "v2-integrated-longrun-r2-candidate-v1" and
+	jq -e '.schema_version == 1 and .contract == "v2-integrated-longrun-r2-candidate-v2" and
 		(.predicates | keys) == ["activation", "calendar", "conservation", "derivatives", "expiry", "exposure", "fill_positions", "frontier_vectors", "hedging", "late_path", "liability_hedger", "liquidations", "maker_quote_size", "maker_rebalance", "maker_refresh", "margin", "mechanical", "observation_receipts", "option_liability", "option_surface", "option_value_taker", "order_lifecycle", "position_rounding", "positions", "post_only", "settlement", "vanna_volga"] and
 		all(.predicates | to_entries[]; .value == true)' "$cell_dir/integrity.json" >/dev/null || fail "integrity predicate failed: $cell"
-	jq -e '.schema_version == 1 and .result.contract == "v2-integrated-longrun-r2-candidate-v1" and
+	jq -e '.schema_version == 1 and .result.contract == "v2-integrated-longrun-r2-candidate-v2" and
 		(.result.predicates | length) == 3 and
 		(.result.predicates | keys) == ["calendar_behavior_attested", "cdf_collateral_borrowing_observed", "zero_price_unavailable_order_rejections"] and
-		.result.predicates.calendar_behavior_attested == true and .result.calendar.contract == "calendar-audit-v1" and
+		.result.predicates.calendar_behavior_attested == true and .result.calendar.contract == "calendar-audit-v2" and
 		all(.result.predicates | to_entries[]; .value == true)' "$cell_dir/activation.json" >/dev/null || fail "activation predicate failed: $cell"
 	for inactive in fundingcarry termcarry datedcarryp5 datedmandatep5 perpreplenishment; do
 		jq -e --arg metric "$inactive" \

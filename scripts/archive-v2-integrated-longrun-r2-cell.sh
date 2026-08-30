@@ -96,7 +96,7 @@ fi
 
 jq -e '.exit_status == 0 and .completion_verified == true' "$cell/run-status.json" >/dev/null || fail "cell is not a completed run"
 if [[ "$cell_name" != dev-607-g8 ]]; then
-	jq -e '.contract == "v2-integrated-longrun-r2-candidate-v1" and
+	jq -e '.contract == "v2-integrated-longrun-r2-candidate-v2" and
 			(.predicates | type) == "object" and
 			all(.predicates | to_entries[]; .value == true)' "$cell/integrity.json" >/dev/null ||
 		fail "cell measurement contract has not passed"
@@ -104,11 +104,11 @@ else
 	base_activation="$v2_r2_output_root/dev-607/activation.json"
 	base_integrity="$v2_r2_output_root/dev-607/integrity.json"
 	[[ -s "$base_activation" && -s "$base_integrity" ]] || fail "G8 requires the completed dev-607 measurement contract"
-	jq -e '.result.contract == "v2-integrated-longrun-r2-candidate-v1" and
+	jq -e '.result.contract == "v2-integrated-longrun-r2-candidate-v2" and
 		.result.predicates.calendar_behavior_attested == true and
 		all(.result.predicates | to_entries[]; .value == true)' "$base_activation" >/dev/null ||
 		fail "dev-607 activation contract has not passed before G8 archive"
-	jq -e '.contract == "v2-integrated-longrun-r2-candidate-v1" and
+	jq -e '.contract == "v2-integrated-longrun-r2-candidate-v2" and
 		all(.predicates | to_entries[]; .value == true)' "$base_integrity" >/dev/null ||
 		fail "dev-607 integrity contract has not passed before G8 archive"
 	[[ -s "$parity_attestation" ]] || fail "missing completed parity attestation: $parity_attestation"
@@ -122,11 +122,11 @@ else
 		fail "G8 parity attestation has not passed"
 fi
 if [[ "$cell_name" != dev-607-g8 ]]; then
-	jq -e '.result.contract == "v2-integrated-longrun-r2-candidate-v1" and
+	jq -e '.result.contract == "v2-integrated-longrun-r2-candidate-v2" and
 		.result.predicates.calendar_behavior_attested == true and
 		all(.result.predicates | to_entries[]; .value == true)' "$cell/activation.json" >/dev/null ||
 		fail "cell activation contract has not passed"
-	jq -e '.result.contract == "calendar-audit-v1" and
+	jq -e '.result.contract == "calendar-audit-v2" and
 		(.result.futures_expiry_nanos | length) == 28 and
 		(.result.option_expiry_nanos | length) == 28 and
 		(.result.shared_expiry_nanos | length) == 28' "$cell/calendar.json" >/dev/null ||
