@@ -96,6 +96,23 @@ type SidedPositionStore interface {
 	PositionsAcrossSides(clientID uint64, symbol string) [3]*Position
 }
 
+// SymbolHolderIndex is an optional extension: a store that can name the clients
+// holding a position in one symbol, so a sweep need not consider every client.
+//
+// The risk sweep visits every (symbol, client) pair and does nothing for pairs
+// with no position. On an integrated run 93.5% of those pairs were empty, so the
+// sweep's cost is dominated by iterations that cannot affect the result.
+//
+// Implementations must return ascending client IDs, and must include any client
+// whose position entry exists even at zero size — callers keep their own size
+// check, and an index that dropped zero-size entries would silently change which
+// accounts a sweep considers. A store that does not implement this is scanned in
+// full as before.
+type SymbolHolderIndex interface {
+	PositionStore
+	HoldersOfSymbol(symbol string) []uint64
+}
+
 type ExactLinearPositionStore interface {
 	PositionStore
 	CanUpdatePositionWithAccounting(clientID uint64, symbol string, qty, price int64, tradeSide Side, posSide PositionSide) bool

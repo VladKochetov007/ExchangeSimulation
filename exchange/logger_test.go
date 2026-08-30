@@ -36,7 +36,6 @@ func evidenceFields(t *testing.T, data any) map[string]any {
 	return fields
 }
 
-
 func TestInstrumentLoggerFallbackDoesNotReplaceGlobalLogger(t *testing.T) {
 	ex := NewExchangeWithConfig(ExchangeConfig{})
 	global := &recordingLogger{}

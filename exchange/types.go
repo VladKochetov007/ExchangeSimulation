@@ -70,6 +70,8 @@ type PositionSide = etypes.PositionSide
 type PositionStore = etypes.PositionStore
 
 type SidedPositionStore = etypes.SidedPositionStore
+
+type SymbolHolderIndex = etypes.SymbolHolderIndex
 type FillContext = etypes.FillContext
 type PositionSnapshot = etypes.PositionSnapshot
 type AccountSnapshot = etypes.AccountSnapshot

@@ -995,6 +995,46 @@ func (e *DefaultExchange) sortedClientIDs() []uint64 {
 	return clientIDs
 }
 
+// clientsHoldingSymbol narrows a sweep to the clients that can do work.
+//
+// The risk sweep's body is a no-op for a (symbol, client) pair with no
+// position, so visiting only holders reaches the same accounts in the same
+// ascending client-ID order and skips exactly the iterations that would have
+// done nothing. A store without the index is swept in full, as before.
+//
+// Holders that are not connected clients are dropped, because the full scan
+// iterates the connected client set and never saw them either.
+func (e *DefaultExchange) clientsHoldingSymbol(symbol string, allClients []uint64) []uint64 {
+	index, ok := e.Positions.(SymbolHolderIndex)
+	if !ok {
+		return allClients
+	}
+	holders := index.HoldersOfSymbol(symbol)
+	if len(holders) == 0 {
+		return nil
+	}
+	// The index owns its slice, so a client set that is entirely connected — the
+	// common case — is returned as is, and only a set containing a disconnected
+	// client is copied.
+	allConnected := true
+	for _, clientID := range holders {
+		if e.Clients[clientID] == nil {
+			allConnected = false
+			break
+		}
+	}
+	if allConnected {
+		return holders
+	}
+	connected := make([]uint64, 0, len(holders))
+	for _, clientID := range holders {
+		if e.Clients[clientID] != nil {
+			connected = append(connected, clientID)
+		}
+	}
+	return connected
+}
+
 // positionsAcrossSides reads a client's position in symbol for all three sides.
 //
 // A store that implements the optional SidedPositionStore extension resolves
@@ -2006,7 +2046,7 @@ func (e *DefaultExchange) CheckPositionMarginerLiquidations() {
 		book := e.Books[symbol]
 		inst := book.Instrument
 		quote := inst.QuoteAsset()
-		for _, clientID := range clientIDs {
+		for _, clientID := range e.clientsHoldingSymbol(symbol, clientIDs) {
 			client := e.Clients[clientID]
 			var positions []*Position
 			for _, pos := range positionsAcrossSides(e.Positions, clientID, symbol) {
@@ -2095,7 +2135,7 @@ func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, ma
 	// Client-ID order, not map order: when book liquidity covers only one of
 	// two simultaneous breaches, map iteration would pick the survivor
 	// randomly per run — the same seed must produce the same final state.
-	for _, clientID := range e.sortedClientIDs() {
+	for _, clientID := range e.clientsHoldingSymbol(symbol, e.sortedClientIDs()) {
 		client := e.Clients[clientID]
 		var positions []*Position
 		for _, pos := range positionsAcrossSides(e.Positions, clientID, symbol) {
