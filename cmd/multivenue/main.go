@@ -271,5 +271,14 @@ func run() (err error) {
 	// The no-op census is off unless EXSIM_CENSUS is set; when on, it goes to
 	// stderr so it never lands inside the evidence tree.
 	census.Write(os.Stderr)
+	if census.Enabled {
+		// Mallocs is an exact cumulative count, unlike -allocprofile, which is
+		// sampled once per MemProfileRate bytes and whose run-to-run spread on
+		// this workload is about 1.9 % — wider than most changes worth judging.
+		var stats runtime.MemStats
+		runtime.ReadMemStats(&stats)
+		fmt.Fprintf(os.Stderr, "exact-allocations mallocs=%d total_alloc_bytes=%d\n",
+			stats.Mallocs, stats.TotalAlloc)
+	}
 	return nil
 }

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 )
 
 // Divergence locator.
@@ -40,7 +41,9 @@ import (
 
 // checkpointSink records a rolling digest and, optionally, a narrow trace.
 type checkpointSink struct {
-	mu sync.Mutex
+	// sizeHints learns the encoded size of each event type; see sizeHintFor.
+	sizeHints sync.Map
+	mu        sync.Mutex
 
 	intervalNano int64
 	checkpoints  io.WriteCloser
@@ -135,11 +138,44 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 // time. The result is nil whenever the caller must not reuse it: no sink, a
 // closed sink, or a payload the encoder rejected, in which case the logger runs
 // its own marshal and keeps its own failure handling.
-// appendBufferHint sizes the buffer handed to a JSONAppender. The census puts
-// the mean balance_change payload at 315 bytes, so a 256-byte buffer forced a
-// growslice on most events and handed back more allocations than
-// encoding/json's pooled encoder did. Sized to clear the common case outright.
-const appendBufferHint = 512
+// appendBufferHint is the floor for a buffer handed to a JSONAppender before
+// anything is known about the event's size.
+const appendBufferHint = 96
+
+// sizeHintFor returns the buffer size to use for eventName, learned from the
+// previous encoding of the same event type.
+//
+// A fixed hint cannot win: too small forces a growslice, too large wastes
+// bytes. encoding/json avoids both by encoding into a pooled buffer and then
+// allocating a result of exactly the right length, which is why a naive
+// appender lost on bytes allocated (+0.75 %) while leaving the object count
+// untouched. Event payloads of one type are near-uniform in size, so the
+// previous length plus a small margin is an accurate predictor and costs one
+// atomic load.
+func (s *checkpointSink) sizeHintFor(eventName string) int {
+	value, ok := s.sizeHints.Load(eventName)
+	if !ok {
+		return appendBufferHint
+	}
+	hint := int(value.(*atomic.Int64).Load())
+	if hint < appendBufferHint {
+		return appendBufferHint
+	}
+	return hint
+}
+
+// recordSize updates the learned hint. The margin absorbs the small
+// event-to-event variation in string lengths without a reallocation.
+func (s *checkpointSink) recordSize(eventName string, size int) {
+	hint := int64(size + size/8 + 16)
+	if value, ok := s.sizeHints.Load(eventName); ok {
+		value.(*atomic.Int64).Store(hint)
+		return
+	}
+	stored := new(atomic.Int64)
+	stored.Store(hint)
+	s.sizeHints.Store(eventName, stored)
+}
 
 func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venueID string, payload any) json.RawMessage {
 	if s == nil {
@@ -153,8 +189,10 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	// it.
 	var encoded []byte
 	var err error
-	if appender, ok := payload.(etypes.JSONAppender); ok {
-		encoded = appender.AppendJSON(make([]byte, 0, appendBufferHint))
+	appender, fast := payload.(etypes.JSONAppender)
+	if fast {
+		encoded = appender.AppendJSON(make([]byte, 0, s.sizeHintFor(eventName)))
+		s.recordSize(eventName, len(encoded))
 	} else {
 		encoded, err = json.Marshal(payload)
 	}
@@ -169,7 +207,8 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	// so a hand-written byte-identical encoder can be aimed at the few types
 	// that actually dominate rather than written for all of them.
 	census.CountFor("checkpoint.observe["+eventName+"]",
-		"marshalled to feed the ordered execution-stream hash", false, len(encoded))
+		"still on encoding/json reflection rather than a byte-identical appender",
+		!fast, len(encoded))
 	payloadDigest := sha256.Sum256(encoded)
 
 	var scratch [8]byte

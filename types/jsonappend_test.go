@@ -142,3 +142,48 @@ func TestAppendJSONPreservesExistingBytes(t *testing.T) {
 		t.Fatalf("appended %s, want %s", got[len(prefix):], want)
 	}
 }
+
+// TestBookPayloadsMatchMarshal covers the market-data payloads that together
+// account for a further 19.5 % of hashed bytes. Side goes through
+// json.Marshaler, and the slice fields carry the same nil-versus-empty
+// distinction as balance changes.
+func TestBookPayloadsMatchMarshal(t *testing.T) {
+	for _, side := range []Side{Buy, Sell} {
+		for _, v := range []int64{0, 1, -1, math.MaxInt64, math.MinInt64} {
+			requireIdentical(t, BookDelta{Side: side, Price: v, VisibleQty: v, HiddenQty: v})
+		}
+	}
+	requireIdentical(t, PriceLevel{})
+	requireIdentical(t, BookSnapshot{})
+	requireIdentical(t, BookSnapshot{Bids: []PriceLevel{}, Asks: nil})
+	requireIdentical(t, BookSnapshot{Bids: nil, Asks: []PriceLevel{}})
+	requireIdentical(t, BookSnapshot{
+		Bids: []PriceLevel{{Price: 1, VisibleQty: 2, HiddenQty: 3}, {Price: math.MinInt64}},
+		Asks: []PriceLevel{{Price: math.MaxInt64, VisibleQty: -1}},
+	})
+}
+
+func TestBookSnapshotRandomised(t *testing.T) {
+	random := rand.New(rand.NewSource(20260831))
+	ints := []int64{0, 1, -1, 987654321, math.MaxInt64, math.MinInt64}
+	for range 20000 {
+		build := func() []PriceLevel {
+			switch random.Intn(3) {
+			case 0:
+				return nil
+			case 1:
+				return []PriceLevel{}
+			}
+			out := make([]PriceLevel, 1+random.Intn(4))
+			for i := range out {
+				out[i] = PriceLevel{
+					Price:      ints[random.Intn(len(ints))],
+					VisibleQty: ints[random.Intn(len(ints))],
+					HiddenQty:  ints[random.Intn(len(ints))],
+				}
+			}
+			return out
+		}
+		requireIdentical(t, BookSnapshot{Bids: build(), Asks: build()})
+	}
+}

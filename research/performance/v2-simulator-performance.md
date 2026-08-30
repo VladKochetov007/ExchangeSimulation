@@ -1277,3 +1277,67 @@ encoding so the single allocation is right-sized, then extend to the remaining
 four types that make up 76 % of hashed bytes and measure once with a signal big
 enough to clear the noise. Kept wired, and explicitly marked unaccepted, because
 the next step builds directly on it.
+
+### The allocation instrument, replaced
+
+The sampled profile misled in **both** directions. Replacing it with
+`runtime.MemStats.Mallocs`, which is an exact cumulative count, and re-running
+the appender question:
+
+| | mallocs (exact) | bytes allocated |
+|---|---:|---:|
+| baseline | 161,801,929 / 161,802,115 | 13.108 GB |
+| appender, fixed 512 B hint | 161,802,245 / 161,801,598 | 13.207 GB (+0.75 %) |
+| appender, learned size hint | 161,802,620 / 161,802,371 | 13.140 GB (+0.25 %) |
+
+**The object count is identical to within 600 allocations out of 161.8 million.**
+The "+5.8 % objects" that made me reject the appender was an artifact: the
+appender allocated more *bytes*, the sampled estimator saw more samples, and it
+inferred more objects that were never there. The same instrument had earlier
+invented C1's −1.76 % "win". One sampled instrument, two false readings in
+opposite directions.
+
+`runtime.MemStats.Mallocs` is now printed by the runner under `EXSIM_CENSUS`.
+Every future allocation claim in this campaign should use it. Run-to-run spread
+is under 0.001 %, against 1.9 % for the profile.
+
+The learned size hint (previous encoded length for that event name, plus an
+eighth and 16 bytes, held in a `sync.Map` of atomics) cuts the byte overhead
+from +0.75 % to +0.25 %. It cannot reach zero: `encoding/json` encodes into a
+pooled buffer and then allocates a result of exactly the right length, which a
+single up-front allocation cannot match without knowing the size in advance.
+
+### Why the appender still does not show: coverage is 17 %, not 76 %
+
+The census now reports, per event type, whether the payload took the appender or
+fell back to reflection. That turned an assumption into a measurement, and the
+assumption was wrong:
+
+| event | calls | still on reflection | bytes |
+|---|---:|---:|---:|
+| `balance_change` | 627,564 | 108,320 (**17.3 %**) | 197.5 MB |
+| `OrderFill` | 625,528 | **100 %** | 183.2 MB |
+| `OrderAccepted` | 610,350 | **100 %** | 173.9 MB |
+| `BookDelta` | 869,857 | **100 %** | 99.0 MB |
+| `BookSnapshot` | 281,181 | **100 %** | 92.0 MB |
+| all others | — | **100 %** | 232.8 MB |
+
+I wrote appenders for `types.BookDelta`, `types.PriceLevel` and
+`types.BookSnapshot` and they are never reached, because **the event payloads
+are different types**: the `BookDelta` event logs a `map[string]any`
+(`deltaLog` in `publishBookUpdate`), and the `BookSnapshot` event logs
+`bookSnapshotEvidence`, not `types.BookSnapshot`. Only `balance_change` was ever
+diverted, so actual coverage is about **17 % of hashed bytes, not the 76 % the
+five-type plan assumed** — which is exactly why the wall clock did not move.
+
+Two things follow. First, the appenders that are written are correct and tested
+but currently dead on this path; they stay, because the market-data publisher
+also encodes those types. Second, the remaining work is not "write four more
+appenders for the types I already named" — it is to find the *actual* payload
+type behind each event name first. The `map[string]any` payloads are the most
+expensive of all to marshal, since `encoding/json` sorts map keys on every call,
+so `BookDelta` at 869,857 events per simulated hour is probably the single best
+target left.
+
+Recorded as the next increment rather than guessed at: the coverage census now
+answers the question directly, so the next pass can be aimed rather than hoped.

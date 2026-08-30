@@ -128,3 +128,58 @@ var (
 	_ JSONAppender = BalanceChangeEvent{}
 	_ JSONAppender = BalanceDelta{}
 )
+
+// AppendJSON writes a BookDelta. Side implements json.Marshaler and yields
+// "BUY" or "SELL", neither of which needs escaping.
+func (d BookDelta) AppendJSON(dst []byte) []byte {
+	dst = append(dst, `{"side":"`...)
+	dst = append(dst, d.Side.String()...)
+	dst = append(dst, `","price":`...)
+	dst = AppendJSONInt(dst, d.Price)
+	dst = append(dst, `,"visible_qty":`...)
+	dst = AppendJSONInt(dst, d.VisibleQty)
+	dst = append(dst, `,"hidden_qty":`...)
+	dst = AppendJSONInt(dst, d.HiddenQty)
+	return append(dst, '}')
+}
+
+// AppendJSON writes a PriceLevel.
+func (l PriceLevel) AppendJSON(dst []byte) []byte {
+	dst = append(dst, `{"price":`...)
+	dst = AppendJSONInt(dst, l.Price)
+	dst = append(dst, `,"visible_qty":`...)
+	dst = AppendJSONInt(dst, l.VisibleQty)
+	dst = append(dst, `,"hidden_qty":`...)
+	dst = AppendJSONInt(dst, l.HiddenQty)
+	return append(dst, '}')
+}
+
+// AppendJSON writes a BookSnapshot. Both sides are plain slices, so nil must
+// render as null and an empty slice as [], exactly as encoding/json does.
+func (s BookSnapshot) AppendJSON(dst []byte) []byte {
+	dst = append(dst, `{"bids":`...)
+	dst = appendPriceLevels(dst, s.Bids)
+	dst = append(dst, `,"asks":`...)
+	dst = appendPriceLevels(dst, s.Asks)
+	return append(dst, '}')
+}
+
+func appendPriceLevels(dst []byte, levels []PriceLevel) []byte {
+	if levels == nil {
+		return append(dst, `null`...)
+	}
+	dst = append(dst, '[')
+	for i := range levels {
+		if i > 0 {
+			dst = append(dst, ',')
+		}
+		dst = levels[i].AppendJSON(dst)
+	}
+	return append(dst, ']')
+}
+
+var (
+	_ JSONAppender = BookDelta{}
+	_ JSONAppender = PriceLevel{}
+	_ JSONAppender = BookSnapshot{}
+)
