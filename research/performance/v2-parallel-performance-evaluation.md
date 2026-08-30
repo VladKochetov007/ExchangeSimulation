@@ -268,6 +268,55 @@ reached 1,137 MB (+11x) for a smaller wall gain and *no* CPU gain at all.
 Extrapolated to a 24-hour cell, the read amplification alone falls from roughly
 860 GB to about 165 GB.
 
+## 6b. Correction: fused extraction memory scales with evidence size
+
+The A2 measurement and its commit message described the fused path's peak RSS as
+"bounded; no event is retained", quoting +112% against the separate path on the
+684MB development cell. **The multiplier is roughly right; calling it bounded was
+wrong.** Validated on a retained 10.89 GB development cell, 15.9x larger:
+
+| Approach | wall | peak RSS |
+| --- | ---: | ---: |
+| separate, 14 processes | 463.33 s | 1.19 GB |
+| fused, all 14 metrics | 286.21 s | **2.19 GB** |
+| batched 3 + 11 | 309.04 s | 1.96 GB |
+| **split-heavy, 1 + 13** | **293.67 s** | **1.24 GB** |
+
+Fused peak RSS went 219 MB to 2.19 GB for a 15.9x larger input — essentially
+linear. No event is retained, and that part of the claim holds; what scales is
+the *reducers'* accumulated state, which grows with the number of distinct
+orders and contracts in the evidence. Running them concurrently makes peak RSS
+the **sum** of the concurrent states where the separate path pays only the
+**maximum**.
+
+The distribution is very skewed: on this cell `orderlifecycle` alone peaks at
+1.19 GB while eleven of the fourteen metrics peak under 131 MB. So the fix is
+not to abandon fusion but to keep the one dominant reducer out of the shared
+group. Splitting `orderlifecycle` into its own invocation recovers nearly all
+the speed — 293.67 s against 286.21 s for full fusion, still **-36.6% against
+the separate path** — while holding peak RSS to 1.24 GB, within 4% of what the
+separate path already needs.
+
+Grouping does not affect results: with `orderlifecycle` split out, all 19
+artifacts remain byte-identical to the single-metric reference.
+
+Two further corrections this scaling test forces:
+
+* The **2.72x** analyzer speedup is a 684MB-cell figure. At 10.89 GB the same
+  code is **1.62x**, because per-metric reducer work — which fusion does not
+  reduce — grows with evidence while the shared envelope work it does reduce is
+  amortized across more consumers. The larger number should not be quoted for a
+  24-hour cell.
+* Extrapolating to a ~33 GB 24-hour cell, expect roughly 3.6 GB peak RSS on the
+  separate path and roughly 3.8 GB with the split-heavy grouping. Full fusion
+  would be about 6.6 GB, which is affordable on this host but is a real cost
+  rather than a rounding error.
+
+**Recommendation for integration**: adopt the fused path with the dominant
+reducer split into its own invocation, and re-measure the split on the actual
+target cell rather than assuming this cell's skew, since which reducer dominates
+depends on the composition.
+
 ## 7. Simulator results
 
 Recorded in full in `v2-simulator-performance.md`. Headline: eight accepted
@@ -448,7 +497,7 @@ Against the scientific HEAD this work is based on, `887899f`. Eighteen commits o
 
 | Commit | Subject | Why review |
 | --- | --- | --- |
-| `041e31e` | `perf: share one evidence pass across independent metrics` | adds a second extraction architecture. Byte-identity and visit-count identity are proven on one development cell, but adopting it in the registered extraction script is a scientific-infrastructure decision, and the driver's duplicated metric call expressions should be refactored into a table first so the two paths cannot drift |
+| `041e31e` | `perf: share one evidence pass across independent metrics` | adds a second extraction architecture. Byte-identity and visit-count identity are proven, but three things must be settled first: the driver's duplicated metric call expressions should be refactored into a table so the two paths cannot drift; the dominant reducer must be split into its own invocation or peak RSS is the sum of concurrent reducer states rather than the maximum (see §6b); and the commit message's "bounded" characterisation of RSS needs the correction in §6b |
 
 ### Do not cherry-pick
 
