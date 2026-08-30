@@ -1,6 +1,9 @@
 package analysis
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestMeasureCalendarDeduplicatesIdentitiesAndMeasuresCycles(t *testing.T) {
 	dir := writeRun(t, Report{}, map[string][]string{
@@ -92,6 +95,55 @@ func TestMeasureCalendarRejectsMalformedLifecyclePayload(t *testing.T) {
 	}
 	if _, err := run.MeasureCalendar(CalendarOptions{}); err == nil {
 		t.Fatal("malformed lifecycle payload was silently discarded")
+	}
+}
+
+func TestMeasureCalendarRejectsMissingNullAndUnknownInstrumentTypes(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+	}{
+		{name: "missing", payload: `{"symbol":"ABC-FUT-BAD","expiry_nano":3}`},
+		{name: "null", payload: `{"symbol":"ABC-FUT-BAD","instrument_type":null,"expiry_nano":3}`},
+		{name: "unknown", payload: `{"symbol":"ABC-FUT-BAD","instrument_type":"WARRANT","expiry_nano":3}`},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			dir := writeRun(t, Report{}, map[string][]string{
+				"north/lifecycle.jsonl": {
+					`{"sim_ts":1,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":{"symbol":"ABC-FUT-3-U4142432f555344","instrument_type":"FUTURE","expiry_nano":3}}}`,
+					fmt.Sprintf(`{"sim_ts":1,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":%s}}`, testCase.payload),
+				},
+			})
+			run, err := Open(dir)
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			if _, err := run.MeasureCalendar(CalendarOptions{}); err == nil {
+				t.Fatalf("%s lifecycle payload was silently discarded", testCase.name)
+			}
+		})
+	}
+}
+
+func TestMeasureCalendarIgnoresKnownNonDerivativeLifecycleTypes(t *testing.T) {
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/lifecycle.jsonl": {
+			`{"sim_ts":1,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":{"symbol":"ABC/USD","instrument_type":"SPOT"}}}`,
+			`{"sim_ts":1,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":{"symbol":"ABC-PERP","instrument_type":"PERP"}}}`,
+			`{"sim_ts":1,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":{"symbol":"ABC-FUT-3-U4142432f555344","instrument_type":"FUTURE","expiry_nano":3}}}`,
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureCalendar(CalendarOptions{})
+	if err != nil {
+		t.Fatalf("measure known non-derivative lifecycle types: %v", err)
+	}
+	if result.Venues[0].FuturesListed != 1 || result.Venues[0].MalformedDerivativeEvents != 0 {
+		t.Fatalf("known non-derivative lifecycle types affected calendar: %+v", result.Venues[0])
 	}
 }
 

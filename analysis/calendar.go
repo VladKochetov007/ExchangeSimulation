@@ -116,9 +116,9 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 	}
 	if err := r.Scan(scan, func(event Event) {
 		var payload struct {
-			Symbol         string `json:"symbol"`
-			InstrumentType string `json:"instrument_type"`
-			ExpiryNano     int64  `json:"expiry_nano"`
+			Symbol         string  `json:"symbol"`
+			InstrumentType *string `json:"instrument_type"`
+			ExpiryNano     int64   `json:"expiry_nano"`
 		}
 		if err := event.Decode(&payload); err != nil {
 			mu.Lock()
@@ -128,12 +128,28 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 			mu.Unlock()
 			return
 		}
-		if payload.InstrumentType != "FUTURE" && payload.InstrumentType != "OPTION" {
+		if payload.InstrumentType == nil || *payload.InstrumentType == "" {
+			mu.Lock()
+			if malformedPayload == "" {
+				malformedPayload = fmt.Sprintf("%s:%d %s: missing instrument_type", event.File, event.Ordinal, event.Name)
+			}
+			mu.Unlock()
+			return
+		}
+		if *payload.InstrumentType == "SPOT" || *payload.InstrumentType == "PERP" {
+			return
+		}
+		if *payload.InstrumentType != "FUTURE" && *payload.InstrumentType != "OPTION" {
+			mu.Lock()
+			if malformedPayload == "" {
+				malformedPayload = fmt.Sprintf("%s:%d %s: unknown instrument_type %q", event.File, event.Ordinal, event.Name, *payload.InstrumentType)
+			}
+			mu.Unlock()
 			return
 		}
 		mu.Lock()
 		events = append(events, calendarLifecycleEvent{
-			venueID: event.VenueID, symbol: payload.Symbol, kind: payload.InstrumentType,
+			venueID: event.VenueID, symbol: payload.Symbol, kind: *payload.InstrumentType,
 			expiry: payload.ExpiryNano, at: event.SimTS,
 			listed: event.Name == "instrument_listed", file: event.File, ordinal: event.Ordinal,
 		})
