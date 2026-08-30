@@ -436,6 +436,31 @@ Code changes alone are **1.66x**; with `GOMAXPROCS=4` the total is **1.86x** at
 For the registered 24-hour cell that is roughly 29 minutes of wall time reduced
 to roughly 16.
 
+## 5c. Long-horizon profile — the shape does not change
+
+Every simulator profile above is a 15-minute cell. The analyzer's numbers turned
+out to be misleading at scale (see the parallel evaluation, §6b), so the same
+check was owed here: a 4-hour run, profiled.
+
+| Measure | 15 min | 4 hours |
+| --- | ---: | ---: |
+| Wall (`GOMAXPROCS=1`) | 11.24 s | 183.26 s |
+| Evidence written | 442 MB | 6.2 GB |
+| Retained heap after the run | 553 MB | 605 MB |
+| `sha256.blockSHANI` | 7.5% | 6.6% |
+| `structEncoder.encode` | 11.6% | 10.2% |
+| map operations | ~15% | ~14% |
+| allocator and GC | ~13% | ~13% |
+| locking (mutex + RWMutex atomics) | ~6.4% | ~7.2% |
+
+**No new hotspot appears and no cost grows superlinearly.** Retained heap is
+still flat and still dominated by the two gateway constructors, which allocate
+once at setup. This is the result that de-risks the 24-hour cell, and unlike the
+analyzer it needed no correction.
+
+The one share that grew is locking, which is why the three candidates below were
+examined and all three declined.
+
 ## 6. Rejected optimizations
 
 ### R1 — Reuse the hash sink's encoding as a `json.RawMessage`
@@ -473,6 +498,49 @@ is simply too small to justify a toolchain dependency and a new failure surface.
 ### R5 — Optimize the matching engine or the order-book representation
 
 `Matcher.Match` is absent from the top 400 CPU symbols.
+
+### R8 — Batch the three-side position probe
+
+`GetPositionBySide` is **96.7% of all RWMutex read-lock cost** — 2.64 s of the
+2.72 s in `atomic.Int32.Add`, and about 2.8% of CPU once `RUnlock` is counted.
+Four call sites probe it three times per symbol, once per position side, and
+most probes return nothing.
+
+A batched accessor taking the lock and the outer map lookup once would recover
+part of that. It is declined: the four sites are in the risk sweep and the
+liquidation path, they pass the results around as `*Position`, and a batched
+form returning into a shared buffer introduces aliasing where none exists today.
+Calibrated against S9 — which predicted ~5% and measured 2.0% — the realistic
+gain is about 2% for a change in the two most correctness-critical paths in the
+engine.
+
+### R9 — Return positions by value instead of by pointer
+
+`GetPositionBySide` heap-allocates a copy on every call: **1,745 MB and
+28,591,824 objects** over a 4-hour run, 3.15% of allocated bytes and 4.27% of
+objects. Returning `(Position, bool)` would remove all of it with no aliasing
+risk at all.
+
+Declined on the API contract rather than on safety. `GetPositionBySide` is part
+of the exported `PositionStore` interface, which is an extension point users
+implement, so its signature may not change. Working around it means an optional
+extension interface plus a cached type assertion — the pattern
+`ExactLinearPositionStore` already establishes — for a gain that S4's calibration
+(-16.5% of allocation bought -1.45% of wall) puts under 1%.
+
+### R10 — Skip the phase-drain lock when nothing is queued
+
+`ClientGateway.DrainDeterministicEgress` and `Idle` together are about 40% of
+mutex cost. The phase barrier polls every mount and actor in a loop until a
+round makes no progress, so each poll takes a gateway's lock even when both
+phase queues are empty. An atomic pending counter would let the drain return
+early without the lock.
+
+Declined on risk. The phase barrier is what makes this simulator deterministic
+and `GOMAXPROCS`-invariant, and the loop's own comment records that idleness can
+flip under it. Narrowing the window in which a late arrival is observed is
+exactly the kind of change that passes three seeds and fails on the fourth. Worth
+1-2%; not worth being wrong about.
 
 ### R7 — Go profile-guided optimization
 
