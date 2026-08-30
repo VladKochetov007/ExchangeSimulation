@@ -29,7 +29,10 @@ type binaryEvidence struct {
 	// events counts frames the sink was asked to record, which is the figure
 	// comparable to the JSON path's event count.
 	events uint64
-	err    error
+	// unencodable counts payloads replaced by a substitute, so a run reports
+	// how much detail it lost rather than only that it lost some.
+	unencodable uint64
+	err         error
 }
 
 // binaryEvidenceEnabled reports whether the binary sink is selected. Read once
@@ -107,10 +110,25 @@ func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venue
 		census.CountFor("binary.sink["+eventName+"]",
 			"still opaque JSON rather than a typed schema", !typed, 0)
 	}
-	if err := b.writer.AppendInterning(simTime, clientID, venueRef,
-		sinkEnvelope{eventRef: eventRef, inner: inner}); err != nil {
-		b.err = err
-		return
+	frame := sinkEnvelope{eventRef: eventRef, inner: inner}
+	if err := b.writer.AppendInterning(simTime, clientID, venueRef, frame); err != nil {
+		// A payload that cannot be encoded must not end the stream. The JSON
+		// path substitutes "unencodable" and keeps folding events, so a single
+		// bad payload costs one event's detail; the binary path used to stop
+		// accumulating and drop every event after it while the simulation ran
+		// on, which is a far larger loss reported only at close.
+		//
+		// The writer encodes into scratch and commits only on success, so a
+		// failed append leaves no partial frame behind and the substitute
+		// takes its place at the same sequence number.
+		frame.inner = eexchange.OpaqueJSON{Value: "unencodable"}
+		if retry := b.writer.AppendInterning(simTime, clientID, venueRef, frame); retry != nil {
+			// The substitute always encodes, so a failure here is the
+			// underlying writer, not the payload.
+			b.err = retry
+			return
+		}
+		b.unencodable++
 	}
 	b.events++
 }
@@ -132,6 +150,13 @@ func (b *binaryEvidence) flush() error {
 		return b.err
 	}
 	return b.writer.Flush()
+}
+
+// unencodableCount returns how many payloads were replaced by a substitute.
+func (b *binaryEvidence) unencodableCount() uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.unencodable
 }
 
 // count returns the number of events recorded.

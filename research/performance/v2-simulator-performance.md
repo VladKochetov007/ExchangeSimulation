@@ -1564,3 +1564,54 @@ reuse, so a production appender could not reuse a single buffer unconditionally
 without either copying at the handoff or retiring the JSONL writer. The 7.6x is
 therefore an upper bound on the call-site appender option, and closing that gap
 requires the same JSONL retirement the binary path requires.
+
+
+## What independent grading found, and what it cost
+
+A separate reproducer graded `113189a` from a clean workspace with its own
+harness. Its timing method was stronger than mine: two JSON arms as the A/A
+control with rotating order, paired within-round deltas rather than pooled
+medians.
+
+**The speedup reproduces.** −13.26 % on medians and −13.19 % paired, against an
+A/A of −0.82 % / +0.30 %; all 12 paired deltas negative, sign test p ~ 0.0002; a
+second 8-round run agreed at −13.10 %. It also built a census-free JSON arm and
+confirmed the probe does not confound the timing (−12.49 % against it).
+
+**It withdrew a claim of mine.** "Every binary sample lies below every JSON
+sample" does not survive a contended host. The paired analysis carries the
+result; the separation sentence was overreach and is retracted.
+
+**It found four defects. Three were real and are fixed.**
+
+1. **A false attestation.** Binary mode wrote `checkpoints.jsonl` with
+   `event_count: 0` and an all-zero hash, so any two binary runs compared
+   identical in the tool whose purpose is telling runs apart, while
+   `executionHash()` had no caller. This is the most serious defect the campaign
+   produced, and it would have shipped.
+2. **An unencodable payload truncated the stream.** 102 events with one bad
+   payload recorded 1 and dropped 101, reported only at close. Now substituted
+   per event, as the JSON path always did, and counted in the checkpoint.
+3. **Encoding depended on caller boxing.** `Trade` had a pointer receiver, so a
+   `Trade` value took the opaque path and a `*Trade` took the typed path: one
+   logical event, two encodings, two digests. Value receivers now; `Trade` was
+   the only pointer-receiver appender in the tree.
+
+**One finding was itself wrong, and measurement settled it.** The reproducer
+re-attributed the allocation win from 8.22 % to 5.20 %, on the grounds that a
+disabled-census line at `divergence.go` allocates one string per event. That is
+true, and it also had no way to see that `binarysink.go` carried an equivalent
+unguarded concat, so it removed the probe from one arm only. Both guarded and
+re-measured: **136,403,401 to 125,083,537 mallocs, −8.30 %**. The original
+figure stands.
+
+**One overstatement of mine, correctly caught.** The GOMAXPROCS determinism
+evidence was a 10-minute run presented among 1-hour figures. The reproducer
+checked determinism at 1h itself and it holds — 659,881,373 bytes identical
+across three runs at GOMAXPROCS 4 and 8 — but the original wording implied a
+check that had not been run.
+
+Losslessness held at field level under its own reflection test, including
+invalid UTF-8, NUL, emoji, nil-vs-empty and `omitempty`. It also noted the
+binary path *fixes* a JSON-path weakness: the old digest hashed
+`eventName+venueID` unseparated, so `("ab","c")` and `("a","bc")` collide.

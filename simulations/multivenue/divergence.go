@@ -66,6 +66,9 @@ type checkpointSink struct {
 
 	rolling          [32]byte
 	events           int64
+	// unencodable counts payloads the JSON encoder rejected and that were
+	// recorded as a substitute.
+	unencodable int64
 	nextBound        int64
 	lastSimTime      int64
 	lastCheckpointAt int64
@@ -95,6 +98,11 @@ type checkpointRecord struct {
 	// is meaningless and this field is what makes that visible rather than
 	// looking like a divergence.
 	Representation string `json:"representation,omitempty"`
+	// Unencodable counts payloads that could not be marshalled and were
+	// recorded as a substitute. Both sinks silently replaced such a payload;
+	// the count makes the loss visible in the evidence rather than only in a
+	// log line nobody reads.
+	Unencodable int64 `json:"unencodable_payloads,omitempty"`
 }
 
 // binaryRepresentation tags a checkpoint whose hash covers canonical binary
@@ -216,9 +224,11 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 
 	encoded, err := json.Marshal(payload)
 	reusable := encoded
+	unencodable := false
 	if err != nil {
 		encoded = []byte(`"unencodable"`)
 		reusable = nil
+		unencodable = true
 	}
 	// Every execution event is marshalled here to feed the ordered-stream
 	// digest, and the profile attributes 100 % of json.Marshal to this call.
@@ -244,6 +254,9 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 		return nil
 	}
 	s.lastSimTime = simTime
+	if unencodable {
+		s.unencodable++
+	}
 
 	if s.firstEvent && s.intervalNano > 0 {
 		s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
@@ -305,7 +318,9 @@ func (s *checkpointSink) writeCheckpointLocked(at int64) {
 		ExecutionStreamHash: hex.EncodeToString(s.rolling[:]),
 		Rolling:             hex.EncodeToString(s.rolling[:]),
 	}
+	record.Unencodable = s.unencodable
 	if s.binary != nil {
+		record.Unencodable = int64(s.binary.unencodableCount())
 		digest := s.binary.executionHash()
 		record.ExecutionStreamHash = hex.EncodeToString(digest[:])
 		record.Rolling = record.ExecutionStreamHash

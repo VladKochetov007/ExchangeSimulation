@@ -107,3 +107,34 @@ func TestBinarySinkRefusesATraceItCannotProduce(t *testing.T) {
 	}
 }
 
+
+// An independent reproducer found that a payload the encoder rejects used to
+// end the binary stream: the sink recorded 1 of 102 events and dropped the
+// other 101 while the simulation ran on. The failure did surface at close, but
+// only after a whole run's evidence had already been lost.
+func TestBinarySinkSurvivesAnUnencodablePayload(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("EXSIM_BINARY_EVIDENCE", "1")
+	sink, err := newCheckpointSink(dir, 1, 0, 0)
+	if err != nil {
+		t.Fatalf("new sink: %v", err)
+	}
+	for i := 0; i < 102; i++ {
+		var payload any = map[string]any{"quantity": int64(i)}
+		if i == 1 {
+			payload = map[string]any{"bad": make(chan int)}
+		}
+		sink.observe(int64(i)*1e6, 1, "OrderFill", "venue-a", payload)
+	}
+	if err := sink.close(); err != nil {
+		t.Fatalf("close: one bad payload failed the whole run: %v", err)
+	}
+	records := readCheckpoints(t, dir)
+	last := records[len(records)-1]
+	if last.EventCount != 102 {
+		t.Fatalf("event_count = %d, want 102 — the stream stopped at the bad payload", last.EventCount)
+	}
+	if last.Unencodable != 1 {
+		t.Fatalf("unencodable_payloads = %d, want 1 — the substitution is invisible", last.Unencodable)
+	}
+}

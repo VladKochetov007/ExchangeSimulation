@@ -441,3 +441,21 @@ func TestRenderRejectsUnknownSchema(t *testing.T) {
 		t.Fatal("unknown schema rendered without error")
 	}
 }
+
+// A pointer-receiver appender made the encoding depend on how the caller boxed
+// the value: a Trade fell through to opaque JSON while a *Trade took the typed
+// path, so one logical event had two encodings and two digests. For a format
+// whose identity is its canonical bytes, a Go calling convention must not
+// choose them.
+func TestEncodingDoesNotDependOnBoxing(t *testing.T) {
+	trade := etypes.Trade{
+		TradeID: 77, Price: 4975000000, Qty: 125000000,
+		Side: etypes.Buy, TakerOrderID: 3, MakerOrderID: 4,
+	}
+	byValue, _ := roundTripFrame(t, instrumentLogEvent{Symbol: "ABC/USD", Payload: trade})
+	byPointer, _ := roundTripFrame(t, instrumentLogEvent{Symbol: "ABC/USD", Payload: &trade})
+	if !bytes.Equal(byValue.Payload, byPointer.Payload) {
+		t.Fatalf("boxing changed the canonical bytes\n value   %d bytes: %x\n pointer %d bytes: %x",
+			len(byValue.Payload), byValue.Payload, len(byPointer.Payload), byPointer.Payload)
+	}
+}
