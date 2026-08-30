@@ -553,3 +553,38 @@ identified but unattempted algorithmic change.
 
 Recorded now so the post-implementation profile has a baseline to be compared
 against rather than being interpreted fresh.
+
+## Determinism under concurrency
+
+Canonical bytes are only canonical if concurrency cannot reorder them. The same
+run at three thread counts, `dev-607-none`, seed 607, ten simulated minutes:
+
+| GOMAXPROCS | bytes | SHA-256 prefix |
+|---|---:|---|
+| 2 | 84,309,184 | `f94b9a5b879e3a840dd209bb` |
+| 4 | 84,309,184 | `f94b9a5b879e3a840dd209bb` |
+| 8 | 84,309,184 | `f94b9a5b879e3a840dd209bb` |
+
+Byte-identical. This is stronger than the earlier same-thread-count check: it
+says the ordering comes from the simulation's deterministic phase structure
+rather than from the scheduler happening to interleave the same way twice.
+
+Typed coverage also shrinks the stream. The identical run produced 108,229,701
+bytes before the order-lifecycle schemas and 84,309,184 after — **22 % smaller**
+purely from families moving off opaque JSON onto typed encodings.
+
+## A design gap worth stating
+
+With the binary sink enabled *and* raw logging on, the run currently writes
+both: `observe` returns nil, so the venue logger falls through and marshals the
+payload a second time for the JSONL. Both files are produced, and the run pays
+for both.
+
+That is why the bytes comparison above used separate runs rather than one. In
+the intended end state the binary stream replaces the JSONL and
+`RenderPayloadJSON` supplies the compatibility path on demand, so nothing needs
+to be written twice. Leaving both in place is deliberate for now — it keeps the
+old evidence available for differential checking while the format is under
+review — but it means the measured wall-clock gain is the encode-and-hash saving
+only, and does not yet include the write-side saving that retiring the JSONL
+would add.
