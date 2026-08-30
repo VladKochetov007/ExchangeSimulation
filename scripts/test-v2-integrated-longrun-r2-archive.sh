@@ -119,7 +119,7 @@ write_full_cell() {
 	write_common_files "$cell" "$experiment_id"
 	printf '%s\n' '{"event":"archive-test","sequence":1}' >"$cell/venues/north/events.jsonl"
 	artifact_result=$("$analyzer" -metric evidenceartifacthash -json "$cell")
-	jq -e '.result | type == "object"' <<<"$artifact_result" >"$cell/evidence-artifact-hash.json"
+	jq -e '.result | select(type == "object")' <<<"$artifact_result" >"$cell/evidence-artifact-hash.json"
 	v2_r2_write_evidence_manifest "$cell" || fail "could not create full evidence manifest: $cell"
 	write_status "$cell"
 }
