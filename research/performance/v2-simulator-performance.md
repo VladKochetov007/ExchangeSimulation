@@ -436,6 +436,72 @@ Adopting it is the scientific owner's call, because the r5 protocol may register
 > **Target metric at `GOMAXPROCS=4`: 50.0 to 88.1 simulated seconds per
 > wall-clock second, a 1.76x total speedup, with peak RSS down 18%.**
 
+## Structural Optimization Frontier
+
+The local phase is exhausted; these are the structural hypotheses, ranked by the
+wasted work they target. Wall-clock deltas are reported but are **not** the
+acceptance evidence: this host's A/A control ranged from -1.24% to +2.82% across
+the same period, so effects under ~3% cannot be resolved by timing. Acceptance
+rests on instrumented counts and on single-process profile shares, which host
+load cannot move.
+
+| Hypothesis | Measured wasted work | Architecture | Mechanism result | Wall | Semantic risk | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| **A. Sparse risk sweep** | 1,415,810 of 1,514,700 (symbol, client) pairs per 5 sim-min do nothing — **93.5%** | per-symbol holder index, sweeps walk holders not all clients | sweep 3.98%→2.31% (-42%), probing 4.57%→2.77% (-39%) | -1.4% to -3.8%, unresolvable | low: body has no side effect before its `continue`; index keeps zero-size entries | **ACCEPTED** `57077e9` |
+| **B1. Preview short-circuit, market orders** | 2,925 clones per 5 sim-min built for market orders against an empty opposite side | extend the non-crossing test to "no included liquidity" | closes the last 4.5% of the 65,171 non-crossing previews | below noise | low | **ACCEPTED** (this commit) |
+| **B2. Bounded preview clone** | clones copied 413,901 orders where the matcher read 87,067 — **79% waste**; median 10 copied per 1 traversed | truncate the clone to the price-ordered crossing prefix | clone 3.30%→1.99% (-40%), `AddOrder` 2.27%→1.31% (-42%), objects 67.85M→64.53M (-4.9%) | -3.2% at GOMAXPROCS=4, +0.1% at 1 | medium: gated on a widened matcher promise; 30,000-case bounded-vs-unbounded differential plus the 80,000-case preview fuzz | **ACCEPTED** (this commit) |
+| **B3. Clone-free preview** | the same 79%, plus the two fixed map allocations per preview | read-only traversal with local `deltaFilled`/`display` state | not built | — | **high** | **REJECTED — see below** |
+| **A′. Sparse margin profile** | ~20 symbol iterations per profile, 37,759 profiles per 5 sim-min | iterate only the client's held symbols | not built | — | **blocked by F1** | **REJECTED — see below** |
+
+### B3 rejected: it would be a second matching engine
+
+`MatchingEngine` is a public extension point, and the preview's stated purpose is
+to run *the configured matcher* so a user-supplied allocation, iceberg or
+self-trade rule cannot disagree with the atomicity check. A read-only traversal
+cannot run an arbitrary injected matcher, so it could only ever be an opt-in fast
+path with the clone retained as fallback — i.e. a **second implementation of the
+matching traversal**, the most correctness-critical code in the simulator.
+
+The audit specified exactly what that second implementation would have to
+reproduce, and one item settles it: `PriceTimeMatcher`'s cursor reaches the
+virtual tail of an iceberg re-queue **within the same pass**. With queue `A, B, C`
+and `A` an iceberg that exhausts, the queue becomes `B, C, A`, the cursor
+continues from the already-captured `next = B`, walks `B, C`, then follows
+`C.Next → A` and fills `A` a second time on its fresh tranche — before the
+rescan flag fires. An implementation that models the refresh as "handle it next
+pass" produces a different execution sequence, and the fuzz reaches this case
+5,260 times per matcher, so it is not hypothetical. Object pooling adds a second
+trap: `RemoveLimit` returns levels to a shared `sync.Pool`, so "run the matcher
+and undo it" would hand live levels back to the pool.
+
+B2 captures most of the same waste with no second traversal: the same matcher on
+a smaller input, where the omitted levels are provably the ones it would have
+broken before reaching.
+
+### A′ rejected: the dense scan is load-bearing, and that is finding F1
+
+`buildAccountMarginProfile` resolves the mark for every perp book in the quote
+currency *before* checking whether the client holds a position there, and an
+unavailable mark fails the whole profile. Making it sparse would therefore change
+behaviour — and the behaviour it would change is the one the risk audit classified
+as a **scientific-blocking market-logic bug** (F1). Optimizing through it would
+have silently "fixed" a defect while claiming a performance result, which is
+exactly the outcome the audit objective exists to prevent. Left dense pending the
+scientific owner's ruling.
+
+### Still open
+
+* **Track C**, the high-frequency no-op census, ranked by
+  `calls × no-op fraction × cost`. Two instances found so far (previews 62%,
+  position probes 94.9%) were both worth acting on, so the census is the best
+  remaining lead.
+* **Track E**, typed market-data fingerprint hashing: `MarketDataFingerprint` is
+  24% of all `json.Marshal` and ~3.8% of CPU. Whether the fingerprint contract
+  requires canonical JSON *bytes* or merely a deterministic canonical
+  representation is unresolved and is a contract question, not a performance one.
+* **Track F**, the research acceleration cache, which is unaffected by any of the
+  above and would speed up repeated analysis rather than simulation.
+
 ## Market-Logic Findings Exposed by Performance Research
 
 Structural optimization forces implicit assumptions to be stated, and stating

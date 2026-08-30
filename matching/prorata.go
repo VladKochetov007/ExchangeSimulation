@@ -177,6 +177,7 @@ func (m *ProRataMatcher) CanMatch(incoming *etypes.Order, limit *etypes.Limit) b
 }
 
 // MatchesOnlyCrossingPrices reports that this matcher gates every execution on
-// CanMatch, which compares the incoming price against the level price, so an
-// order that does not cross the opposite best produces nothing.
+// CanMatch, which compares the incoming price against the level price, and
+// breaks out of its walk at the first level that fails it — so it neither
+// executes against nor reads a level the order does not cross.
 func (m *ProRataMatcher) MatchesOnlyCrossingPrices() bool { return true }

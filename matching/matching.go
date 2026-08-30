@@ -93,16 +93,25 @@ type MatchingEngine interface {
 	Match(bidBook, askBook *ebook.Book, incomingOrder *etypes.Order) *MatchResult
 }
 
-// PriceCrossingMatcher is an optional promise a matcher may make: that it never
-// produces an execution for an order whose price does not cross the opposite
-// best, so an order that cannot cross yields no executions and no change to the
-// books.
+// PriceCrossingMatcher is an optional promise a matcher may make about which
+// price levels it considers. An implementation asserts both of the following:
 //
-// A caller that only needs to know the outcome may then skip building the
-// detached book a preview would otherwise match against. It is opt-in because
-// the promise is not implied by MatchingEngine: a venue that crosses at a
-// midpoint, or auctions, would match orders that never cross the touch, and
-// must not implement this.
+//  1. it produces no execution against a level the incoming order's price does
+//     not cross, so an order that crosses nothing yields no executions and
+//     leaves the books unchanged; and
+//  2. it does not read such a level at all, so a book containing only the
+//     levels the order does cross yields the same MatchResult as the whole book.
+//
+// Together these let a caller that only needs the outcome skip work the matcher
+// would never have used: the entire detached book when nothing crosses, and the
+// unreachable levels when something does. Because the crossable levels are a
+// price-ordered prefix of each side, "only the levels the order crosses" is a
+// truncation rather than a filter.
+//
+// It is opt-in because MatchingEngine implies neither property: a venue that
+// crosses at a midpoint or runs an auction would match orders that never cross
+// the touch, and one that priced against depth beyond the touch would read
+// levels it cannot execute against. Such a matcher must not implement this.
 type PriceCrossingMatcher interface {
 	MatchingEngine
 	// MatchesOnlyCrossingPrices reports the promise above. Implementations
