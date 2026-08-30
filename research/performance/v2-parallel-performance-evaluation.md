@@ -497,12 +497,37 @@ Against the scientific HEAD this work is based on, `887899f`. Eighteen commits o
 
 | Commit | Subject | Why review |
 | --- | --- | --- |
-| `041e31e` | `perf: share one evidence pass across independent metrics` | adds a second extraction architecture. Byte-identity and visit-count identity are proven, but three things must be settled first: the driver's duplicated metric call expressions should be refactored into a table so the two paths cannot drift; the dominant reducer must be split into its own invocation or peak RSS is the sum of concurrent reducer states rather than the maximum (see §6b); and the commit message's "bounded" characterisation of RSS needs the correction in §6b |
+| `041e31e` + `39e3007` | `perf: share one evidence pass across independent metrics` and `refactor: define each shared metric's options once` | adds a second extraction architecture, and must be taken together with the refactor that removes the duplicated option construction. Two conditions remain for the operator rather than the code: split the dominant reducer into its own invocation or peak RSS is the sum of concurrent reducer states rather than the maximum (§6b), and read the RSS expectations from §6b rather than from `041e31e`'s own commit message |
 
 ### Do not cherry-pick
 
 None. The two rejected optimizations were reverted rather than committed; both
 are recorded with their measurements in the rejected-hypotheses sections.
+
+### The drift risk in `041e31e` is now closed
+
+`041e31e` was held back because its driver duplicated the option construction
+that the single-metric switch performs. That is the one way the two paths could
+disagree while both still produced well-formed artifacts: a metric run one way
+would answer a different question than the same metric run the other way, and
+nothing in the output would say so.
+
+`39e3007` gives each of the ten shared option sets a single definition that both
+paths call. Behaviour is unchanged in both directions — all 31 registered metrics
+still byte-identical through the single-metric path, all 19 fused artifacts still
+byte-identical to the single-metric reference.
+
+It also fixed a divergence the driver had introduced: it loaded the run's funding
+intervals eagerly, so an unrelated read failure would have failed metrics that
+never consult the value, which the single-metric path does not do. They are now
+loaded only when the derivative audit is selected.
+
+Two tests keep it closed. One pins each constructor to the settings field it is
+supposed to read, using a distinct value per field so a constructor reading the
+wrong one yields a visibly wrong option rather than a coincidentally equal
+default. The other requires the driver's metric set and the registered set to
+match in both directions, so a metric added to one and not the other fails the
+build instead of silently falling back to a separate process.
 
 ### Integration recommendation
 
