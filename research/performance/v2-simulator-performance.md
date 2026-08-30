@@ -274,6 +274,21 @@ less work and provably identical, but **-0.34% wall with overlapping ranges**:
 reported as no measurable gain. The string-keyed `positionKey` hash is the real
 cost here, and replacing it with an integer instrument handle is a wider change.
 
+### S10 — Reuse the checkpoint hasher and its scratch buffers (`b5ebf04`)
+
+The hash sink allocated per observed event: a fresh SHA-256 state, the slice
+`Sum(nil)` returns, and two string-to-`[]byte` conversions. The hasher is now
+created once and `Reset` per event, `Sum` writes into a retained slice, and the
+two identity writes are concatenated into one reusable buffer — exactly
+equivalent, since `Reset` restores the state `New` returns and SHA-256 hashes a
+stream.
+
+Allocated bytes -1.4%, objects -1.2%, peak RSS -1.2%. **Wall is not
+distinguishable from noise** (ranges overlap), so this is accepted for the
+memory reduction rather than as a throughput claim. The saving is smaller than
+four removed allocations suggests because escape analysis was already
+stack-allocating part of the hash state.
+
 ### S9 — Index resting orders by owner (`c9c9cbf`)
 
 Order admission answers three questions that each concern one client's own
@@ -376,6 +391,35 @@ is simply too small to justify a toolchain dependency and a new failure surface.
 
 `Matcher.Match` is absent from the top 400 CPU symbols.
 
+### R7 — Go profile-guided optimization
+
+**Rejected: PGO is a regression on this workload.**
+
+A merged profile was collected from three representative cells — seeds 900101
+and 900102 in `full`, and 900101 in `none`, so the profile is not tuned to one
+cell — and placed as `cmd/multivenue/default.pgo`.
+
+| Measure | non-PGO | PGO | change |
+| --- | ---: | ---: | ---: |
+| Wall | 11.165 s | 11.36 s | **+1.74%** |
+| CPU | 11.075 s | 11.275 s | +1.80% |
+| Peak RSS | 766,112 KiB | 799,506 KiB | +4.35% |
+| Binary size | 7,604,120 B | 7,834,289 B | +3.03% |
+
+Six alternating repetitions pinned to one core; the ranges do not overlap
+(11.15-11.23 against 11.31-11.47), so the sign is not noise.
+
+Correctness was not the problem: the PGO binary produced byte-identical evidence
+trees on both seeds. It is simply slower here. The plausible reason is that this
+simulator's hot path is dominated by standard-library work — `encoding/json`
+reflection and SHA-256 — that PGO cannot devirtualize, so what it mostly does is
+inline more aggressively, growing the binary 3% and costing instruction-cache
+locality without buying call-site specialisation.
+
+`default.pgo` was removed rather than retained. This closes the open item left
+by `perf/thread-pgo`, whose timing batch was discarded as contaminated: PGO does
+have a measurable effect on this workload, and it is negative.
+
 ### R6 — Reuse the detached preview book
 
 Now the largest single allocation site at 544.56 MB of 3,220.84 MB (16.9%).
@@ -406,7 +450,7 @@ recorded for whoever revisits it rather than acted on.
 | Incremental margin state | margin 6.3% + liquidation 5.9% | cache, invalidate on position change | up to ~8% | high: risk semantics | not started |
 | Preview-book reuse | 16.9% of allocation | reuse with a `Book.Reset` | ~1.5% | high; ownership now proved, see R6 | declined on return, not safety |
 | Reduce remaining `DelayedGateway` allocation | 338 MB after S4 | checked-out scratch buffers | ~0.4% | medium | R2 attempt failed |
-| Go PGO | whole binary | `default.pgo` from a representative run | unmeasured | low semantic | blocked: determinism and binary size proved on `perf/thread-pgo`, timing batch discarded as contaminated and never re-run |
+| ~~Go PGO~~ | whole binary | `default.pgo` from a representative run | **-1.7% (a regression)** | low semantic | **rejected by measurement, see R7** |
 
 ### Integer handles: the hypothesis measurement did not support
 
