@@ -466,4 +466,40 @@ an acceptance. Consequently the candidate remains unapproved: no clean
 scientific binary rebuild, R2 development cell, parity control, or holdout has
 been launched from this successor. Holdouts `619/631/641` remain untouched;
 all synthetic lock/archive fixtures were quarantined outside the canonical
-evidence namespace and are not scientific results.
+ evidence namespace and are not scientific results.
+
+## Calendar extraction correction — `ff5e714` (2026-08-30)
+
+The fresh review of `257833f` rejected it before any R2 cell ran. It found
+three gate defects: both extractor jq programs referenced the expected listing
+timeline without binding it; the registered timeline expected epoch-origin
+contracts at the calendar epoch even though the first one-second automation
+poll occurs at epoch+1s; and `MeasureCalendar` silently discarded a lifecycle
+payload that could not decode into the typed payload.
+
+`ff5e714` fixes all three. The expected timeline is now passed explicitly to
+both jq programs. For the zero-phase R2 calendar, an expiry requested at the
+epoch is attested at epoch+1s, while later whole-hour requests are attested at
+their coincident one-second poll; the expiry timestamp itself is unchanged.
+Malformed selected lifecycle payloads now make the calendar analyzer return an
+error, while structurally decodable records with missing/invalid identity still
+increment the existing fail-closed malformed counter. A simulator-level
+full-log regression verifies the first future listing at epoch+1s with the
+calendar expiry at epoch+2h.
+
+Focused calendar, multivenue, and R2 contract tests pass. The first full
+`make test` started before the timing correction was complete and failed only
+because its clean-worktree parity guard saw the in-progress edit; the clean
+committed rerun passed all packages and R2 contract/archive checks. Fresh
+`go vet ./...` and a new independent Sol-xhigh review of exact `ff5e714` remain
+required before rebuild or dev-607. No R2 scientific cell has run and
+holdouts `619/631/641` remain untouched.
+
+At this semantic-commit checkpoint, the performance branch was fetched from
+`1514c9c` through `bcb9e91`. The new range contains binary evidence fixes for
+false execution attestations and unencodable payload truncation, typed
+order-lifecycle schemas, binary rendering/index work, and benchmark reports.
+These are relevant to future evidence infrastructure but remain a separate
+performance/VNext prototype: no active-branch semantic market change was
+identified, and it still lacks the complete promotion contract for the current
+scientific campaign. Nothing from that branch was merged.

@@ -306,3 +306,28 @@ the R2 sequence remains stopped before clean binary rebuild and development
 execution. No development, parity, or holdout cell has run; holdouts
 `619/631/641` remain untouched. Synthetic gate fixtures are quarantined
 outside the canonical namespace and are not scientific evidence.
+
+## Timeline and malformed-input correction — `ff5e714` (2026-08-30)
+
+The independent review of exact `257833f` rejected the successor before any R2
+cell ran. Its three findings were valid: the extractor failed to bind the
+expected timeline into two jq programs; its expected first-listing timestamps
+were at the epoch although the exchange's first one-second automation poll is
+epoch+1s; and the calendar analyzer silently ignored a lifecycle payload that
+could not decode.
+
+`ff5e714` binds the value into both predicates, attests the actual zero-phase
+poll schedule (`epoch+1s` only for epoch-origin requests; later whole-hour
+requests at their matching poll), and fails closed on malformed selected
+lifecycle payloads. The calendar expiry remains the requested calendar date,
+not the poll timestamp. A full-log `NewSim` regression proves the first future
+listing is observed at epoch+1s and expires at epoch+2h. Focused tests and the
+clean committed full `make test` pass, including R2 contract/archive checks;
+the earlier dirty-tree run is retained as a gate diagnostic, not a scientific
+result. `go vet ./...` and fresh exact-tree independent review remain pending.
+
+The performance feed was refreshed through `bcb9e91` from last-seen `1514c9c`.
+Its binary evidence work is performance/VNext-only, includes useful attestation
+and losslessness corrections, and is deferred from this calendar candidate
+pending complete schema, ordering, analyzer differential, and promotion review.
+No performance code was merged.
