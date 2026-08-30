@@ -36,6 +36,8 @@ expect_failure "$root_dir/scripts/extract-v2-integrated-longrun-r2-cell.sh" \
 	"$root_dir/research/artifacts/v2-freeze-candidate/smoke-vcs/run-g4"
 expect_failure "$root_dir/scripts/verify-v2-integrated-longrun-r2-cell.sh" \
 	"$root_dir/research/artifacts/v2-freeze-candidate/smoke-vcs/run-g4"
+expect_failure "$root_dir/scripts/archive-v2-integrated-longrun-r2-cell.sh" \
+	"$tmp_root/dev-607"
 expect_failure "$root_dir/scripts/check-v2-integrated-longrun-r2-parity.sh" "$tmp_root/parity"
 expect_failure "$root_dir/scripts/score-v2-integrated-longrun-r2-development.sh" "$tmp_root/score"
 
