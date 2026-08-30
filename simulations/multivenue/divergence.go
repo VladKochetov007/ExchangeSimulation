@@ -64,11 +64,11 @@ type checkpointSink struct {
 	sumScratch  []byte
 	nameScratch []byte
 
-	rolling          [32]byte
-	events           int64
+	rolling [32]byte
+	events  int64
 	// unencodable counts payloads the JSON encoder rejected and that were
 	// recorded as a substitute.
-	unencodable int64
+	unencodable      int64
 	nextBound        int64
 	lastSimTime      int64
 	lastCheckpointAt int64
@@ -168,7 +168,11 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 		// I/O — an unfair comparison in the binary path's disfavour. Discarding
 		// makes the two paths do the same amount of writing, which is none.
 		if binaryEvidenceDiscards() {
-			sink.binary = newBinaryEvidence(io.Discard)
+			binary, err := newBinaryEvidence(io.Discard)
+			if err != nil {
+				return nil, err
+			}
+			sink.binary = binary
 		} else {
 			file, err := os.Create(filepath.Join(dir, "events.evs"))
 			if err != nil {
@@ -177,7 +181,12 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 			sink.binaryFile = file
 			sink.binaryIndexPath = filepath.Join(dir, "events.evx")
 			sink.binaryBuf = bufio.NewWriterSize(file, 1<<20)
-			sink.binary = newBinaryEvidence(sink.binaryBuf)
+			binary, err := newBinaryEvidence(sink.binaryBuf)
+			if err != nil {
+				file.Close()
+				return nil, err
+			}
+			sink.binary = binary
 		}
 	}
 	return sink, nil

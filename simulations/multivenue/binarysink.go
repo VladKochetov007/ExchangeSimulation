@@ -2,12 +2,14 @@ package multivenue
 
 import (
 	"crypto/sha256"
+	"fmt"
 
 	"exchange_sim/census"
 	"os"
 	"sync"
 
 	"exchange_sim/evstream"
+	"exchange_sim/evstream/codecs"
 	eexchange "exchange_sim/exchange"
 )
 
@@ -44,8 +46,37 @@ func binaryEvidenceEnabled() bool { return os.Getenv("EXSIM_BINARY_EVIDENCE") !=
 func binaryEvidenceDiscards() bool { return os.Getenv("EXSIM_BINARY_EVIDENCE") == "discard" }
 
 // newBinaryEvidence starts a binary sink writing to out.
-func newBinaryEvidence(out interface{ Write([]byte) (int, error) }) *binaryEvidence {
-	return &binaryEvidence{writer: evstream.NewWriter(out, evstream.WriterOptions{})}
+//
+// The codec is a storage decision and nothing else: the execution hash covers
+// uncompressed canonical frames, so a run's scientific identity is the same
+// whichever codec is chosen, including none. That is what makes it safe to
+// expose as configuration rather than fixing it here.
+func newBinaryEvidence(out interface{ Write([]byte) (int, error) }) (*binaryEvidence, error) {
+	compressor, err := binaryEvidenceCodec()
+	if err != nil {
+		return nil, err
+	}
+	return &binaryEvidence{writer: evstream.NewWriter(out,
+		evstream.WriterOptions{Compressor: compressor})}, nil
+}
+
+// binaryEvidenceCodec resolves EXSIM_BINARY_CODEC. An unrecognised name is an
+// error rather than a silent fallback to no compression: a run that was asked
+// for a codec and quietly wrote raw blocks would misreport its own storage
+// cost.
+func binaryEvidenceCodec() (evstream.BlockCompressor, error) {
+	switch name := os.Getenv("EXSIM_BINARY_CODEC"); name {
+	case "", "none":
+		return nil, nil
+	case "lz4":
+		return codecs.NewLZ4(), nil
+	case "s2":
+		return codecs.NewS2(), nil
+	case "zstd":
+		return codecs.NewZstdFastest()
+	default:
+		return nil, fmt.Errorf("multivenue: unknown EXSIM_BINARY_CODEC %q", name)
+	}
 }
 
 // sinkEnvelope carries the event name alongside the payload.

@@ -138,3 +138,45 @@ func TestBinarySinkSurvivesAnUnencodablePayload(t *testing.T) {
 		t.Fatalf("unencodable_payloads = %d, want 1 — the substitution is invisible", last.Unencodable)
 	}
 }
+
+// Compression is a storage decision, and the property that makes it one is
+// that the execution hash covers uncompressed canonical frames. If a codec
+// could change the attestation, choosing one would be a scientific decision and
+// every result would have to name its codec. This pins that it cannot.
+func TestCodecDoesNotChangeTheAttestation(t *testing.T) {
+	var reference string
+	for _, codec := range []string{"none", "lz4", "s2", "zstd"} {
+		dir := t.TempDir()
+		t.Setenv("EXSIM_BINARY_EVIDENCE", "1")
+		t.Setenv("EXSIM_BINARY_CODEC", codec)
+		sink, err := newCheckpointSink(dir, 1, 0, 0)
+		if err != nil {
+			t.Fatalf("codec %s: new sink: %v", codec, err)
+		}
+		for i := 0; i < 500; i++ {
+			sink.observe(int64(i)*1e6, uint64(i%5), "OrderFill", "venue-a",
+				map[string]any{"quantity": int64(i), "price": int64(50000)})
+		}
+		if err := sink.close(); err != nil {
+			t.Fatalf("codec %s: close: %v", codec, err)
+		}
+		records := readCheckpoints(t, dir)
+		got := records[len(records)-1].ExecutionStreamHash
+		if reference == "" {
+			reference = got
+			continue
+		}
+		if got != reference {
+			t.Fatalf("codec %s changed the execution hash: %s vs %s — compression is not a storage decision",
+				codec, got, reference)
+		}
+	}
+}
+
+func TestUnknownCodecIsRefused(t *testing.T) {
+	t.Setenv("EXSIM_BINARY_EVIDENCE", "1")
+	t.Setenv("EXSIM_BINARY_CODEC", "brotli")
+	if _, err := newCheckpointSink(t.TempDir(), 1, 0, 0); err == nil {
+		t.Fatal("an unknown codec was accepted, and the run would have silently written raw blocks")
+	}
+}
