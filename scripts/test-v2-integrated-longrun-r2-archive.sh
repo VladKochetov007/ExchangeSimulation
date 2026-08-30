@@ -41,7 +41,7 @@ created_output=true
 created_attestations=true
 
 current_revision=$(git -C "$root_dir" rev-parse HEAD)
-stale_revision=fedcba9876543210fedcba9876543210fedcba987
+stale_revision=fedcba9876543210fedcba9876543210fedcba98
 matching_binary_sha256=0000000000000000000000000000000000000000000000000000000000000000
 matching_prunegate_sha256=1111111111111111111111111111111111111111111111111111111111111111
 analyzer="$tmp_root/mvanalyze"
