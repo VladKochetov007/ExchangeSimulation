@@ -268,10 +268,10 @@ func (r *Run) MeasureExpiryFills() (*ExpiryFillAudit, error) {
 				nonEmpty = true
 			}
 		}
-		// Decode every snapshot during the contract's listed lifetime, not only
-		// snapshots after expiry. A malformed active snapshot can hide the last
-		// executable depth transition and make the expiry boundary look clean.
-		if event.SimTS < contract.expiry {
+		// The expiry instant is the boundary snapshot: the deterministic runtime
+		// may publish the final pre-settlement book at that timestamp before the
+		// expiry phase delists it. Only a later timestamp is post-expiry evidence.
+		if event.SimTS <= contract.expiry {
 			return
 		}
 		mu.Lock()

@@ -44,6 +44,9 @@ func TestPositionReconstructionUsesExactReplayAndKeepsDisplayGapDiagnostic(t *te
 		`{"sim_ts":2,"client_id":1,"event":"position_update","data":{"venue_id":"north","symbol":"ABC-PERP","payload":{"timestamp":2,"client_id":1,"symbol":"ABC-PERP","position_side":"BOTH","base_precision":1,"old_size":3,"old_entry_price":100,"new_size":5,"new_entry_price":100,"trade_qty":2,"trade_price":101,"trade_side":"BUY","reason":"trade"}}}`,
 		`{"sim_ts":3,"client_id":1,"event":"position_update","data":{"venue_id":"north","symbol":"ABC-PERP","payload":{"timestamp":3,"client_id":1,"symbol":"ABC-PERP","position_side":"BOTH","base_precision":1,"old_size":5,"old_entry_price":100,"new_size":3,"new_entry_price":100,"trade_qty":2,"trade_price":102,"trade_side":"SELL","reason":"trade"}}}`,
 		`{"sim_ts":3,"client_id":1,"event":"realized_pnl","data":{"venue_id":"north","payload":{"symbol":"ABC-PERP","payload":{"timestamp":3,"client_id":1,"symbol":"ABC-PERP","closed_qty":2,"entry_price":100,"exit_price":102,"pnl":3,"side":"SELL"}}}}`,
+		// Option producer records are audited from option fills and exercise
+		// payouts, not from the linear position replay.
+		`{"sim_ts":3,"client_id":1,"event":"realized_pnl","data":{"venue_id":"north","payload":{"symbol":"ABC-1-C","payload":{"timestamp":3,"client_id":1,"symbol":"ABC-1-C","closed_qty":1,"entry_price":100,"exit_price":102,"pnl":2,"side":"SELL"}}}}`,
 		`{"sim_ts":4,"client_id":0,"event":"mark_price_update","data":{"venue_id":"north","symbol":"ABC-PERP","payload":{"timestamp":4,"symbol":"ABC-PERP","mark_price":103}}}`,
 	}
 	terminalMark := int64(103)

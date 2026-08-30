@@ -2,7 +2,6 @@ package analysis
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"sort"
 	"sync"
 )
@@ -257,12 +256,11 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 	files := opts.Files
 	filesSelected := opts.FilesSelected
 	if !filesSelected && files == nil {
-		filesSelected = true
-		for _, file := range r.files {
-			if filepath.Base(file) == "derivatives.jsonl" {
-				files = append(files, file)
-			}
-		}
+		// Lifecycle announcements are written to general.jsonl and option
+		// producer fills to their spot book. The derivative audit joins those
+		// streams with derivatives.jsonl, so its default domain is the complete
+		// run rather than one physical file.
+		files = r.files
 	}
 
 	var mu sync.Mutex
@@ -390,7 +388,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			}
 			if opts.RequireExactReplay && (payload.Timestamp <= 0 || payload.Timestamp != event.SimTS ||
 				payload.Symbol == "" || (event.Symbol != "" && payload.Symbol != event.Symbol) ||
-				payload.NextFunding <= event.SimTS || payload.Interval <= 0) {
+				payload.NextFunding < event.SimTS || payload.Interval <= 0) {
 				mu.Lock()
 				fundingEvidenceFailures++
 				mu.Unlock()
@@ -823,6 +821,11 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		found := false
 		for _, point := range points {
 			if opts.RequireExactReplay {
+				// A mark refresh can run at the same timestamp immediately before
+				// funding. The exchange settles using that refreshed rate while
+				// NextFunding still names the current deadline; settlement is the
+				// operation that advances it. Require the exact deadline and physical
+				// precedence so an older published deadline cannot mask a missing rate.
 				if !cursorKnown || point.NextFunding != instant || point.Timestamp > instant ||
 					!evidenceAfter(evidenceOrder{timestamp: cursor.timestamp, file: cursor.file, ordinal: cursor.ordinal}, point.order) {
 					continue

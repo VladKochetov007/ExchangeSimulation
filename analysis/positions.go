@@ -448,6 +448,13 @@ func (r *Run) MeasurePositions(opts PositionOptions) (*PositionReconstruction, e
 				mu.Unlock()
 				return
 			}
+			// Option producer fills emit realized_pnl records, but options are
+			// deliberately outside this audit: their positions are reconstructed
+			// by the option exercise analyzer, not by linear position_update
+			// records. Comparing them here creates an artificial orphan count.
+			if isOptionSymbol(payload.Symbol) {
+				return
+			}
 			valid := payload.Timestamp != 0 && payload.Timestamp == event.SimTS &&
 				payload.ClientID == event.ClientID && payload.Symbol != "" &&
 				(event.Symbol == "" || event.Symbol == payload.Symbol) && payload.ClosedQty > 0 &&

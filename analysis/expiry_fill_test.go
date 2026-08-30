@@ -115,6 +115,27 @@ func TestExpiryFillAuditCountsHiddenDepthAfterExpiry(t *testing.T) {
 	}
 }
 
+func TestExpiryFillAuditTreatsBoundarySnapshotAsPreSettlement(t *testing.T) {
+	const expiry = int64(100)
+	lines := []string{
+		expiryInstrumentLine("instrument_listed", 1, expiry, "north", "ABC-FUT-BOUNDARY", "FUTURE"),
+		expirySettledLine(expiry, expiry, "north", "ABC-FUT-BOUNDARY", "FUTURE"),
+		expirySnapshotLine(expiry, "north", "ABC-FUT-BOUNDARY", 1, 1),
+	}
+	report := Report{TerminalAccounts: []AccountRow{{Account: Account{Timestamp: expiry}}}}
+	run, err := Open(writeRun(t, report, map[string][]string{"north/general.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureExpiryFills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SnapshotRecordsAfterExpiry != 0 || result.NonEmptySnapshotsAfterExpiry != 0 {
+		t.Fatalf("boundary snapshot was treated as post-expiry: %+v", result)
+	}
+}
+
 func TestExpiryFillAuditRejectsUseBeforeListing(t *testing.T) {
 	lines := []string{
 		expiryInstrumentLine("instrument_listed", 10, 100, "north", "ABC-FUT-1", "FUTURE"),

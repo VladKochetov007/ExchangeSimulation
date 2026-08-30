@@ -751,6 +751,13 @@ func (r *Run) MeasureSettlements(opts SettlementAuditOptions) (*SettlementAudit,
 			}
 			mu.Lock()
 			key := markKey{event.VenueID, symbol}
+			// The settlement contract is only about dated futures. Spot,
+			// perpetual, and option fills share the persisted venue tape but
+			// have no future expiry prerequisite to satisfy here.
+			if !futureContracts[key] {
+				mu.Unlock()
+				return
+			}
 			if opts.RequireExactReplay {
 				_, listed := latestCausalPrerequisite(listingPoints[key], evidenceOrder{
 					timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal,

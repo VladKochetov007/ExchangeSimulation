@@ -173,6 +173,40 @@ func TestExerciseAuditRequiresDeclaredExpiryTiming(t *testing.T) {
 	}
 }
 
+func TestExerciseAuditJoinsLifecycleAndOptionBookFilesByDefault(t *testing.T) {
+	const expiry = int64(1_000_000_000)
+	strike := int64(50_000) * auditPrecision
+	settle := int64(55_000) * auditPrecision
+	intrinsic := settle - strike
+	run, err := Open(writeRun(t, Report{}, map[string][]string{
+		"north/general.jsonl": {
+			optionSettledLine(expiry, "north", "ABC-CROSS-FILE-C", strike, settle, true),
+		},
+		"north/spot/ABC-USD.jsonl": {
+			optionFillForAudit(expiry-1, 1, "ABC-CROSS-FILE-C", "BUY", auditPrecision),
+			optionFillForAudit(expiry-1, 2, "ABC-CROSS-FILE-C", "SELL", auditPrecision),
+		},
+		"north/derivatives.jsonl": {
+			expiryPayLine(expiry, "north", 1, "ABC-CROSS-FILE-C", intrinsic),
+			expiryPayLine(expiry, "north", 2, "ABC-CROSS-FILE-C", -intrinsic),
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{BasePrecision: auditPrecision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Exercises) != 1 || result.ExerciseTimingFailures != 0 || result.ExerciseEvidenceFailures != 0 {
+		t.Fatalf("cross-file option lifecycle was not joined: %+v", result)
+	}
+	check := result.Exercises[0]
+	if check.Holders != 2 || check.PaidOut != 0 || check.Residual != 0 || check.HoldersMispaid != 0 || result.ExerciseBroken != 0 {
+		t.Fatalf("cross-file option exercise = %+v", check)
+	}
+}
+
 // The direction of a funding transfer cannot be read off the sign of the
 // total: reversing which side pays leaves the total unchanged. It can only be
 // checked against each account's own side, so this is the test that a
@@ -383,6 +417,55 @@ func TestStrictFundingAuditBindsRateScheduleAndPhysicalOrder(t *testing.T) {
 	}
 	if result.FundingMissingRates != 1 || result.FundingTimingFailures != 1 {
 		t.Fatalf("shifted funding schedule was accepted: %+v", result)
+	}
+}
+
+func TestStrictFundingAuditUsesLatestRateBeforeBoundarySettlement(t *testing.T) {
+	const instant = int64(3_000_000_000)
+	lines := []string{
+		positionLine(instant-10, "north", 1, "ABC-PERP", auditPrecision, 0),
+		positionLine(instant-10, "north", 2, "ABC-PERP", -auditPrecision, 0),
+		// The exchange refreshes the rate at the settlement timestamp before
+		// the settlement operation advances NextFunding. The current deadline is
+		// therefore valid when the refresh physically precedes the payments.
+		fundingRateStrictLine(instant, instant, 1, "north", 5),
+		fundingPayLine(instant, "north", 1, -400),
+		fundingPayLine(instant, "north", 2, 400),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{BasePrecision: auditPrecision, RequireExactReplay: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingMissingRates != 0 || result.FundingTimingFailures != 0 || result.FundingSignWrong != 0 || !result.Funding[0].RateAvailable {
+		t.Fatalf("boundary rate refresh was rejected: %+v", result)
+	}
+}
+
+func TestStrictFundingAuditRejectsStaleDeadlineAtSettlement(t *testing.T) {
+	const instant = int64(3_000_000_000)
+	lines := []string{
+		positionLine(instant-10, "north", 1, "ABC-PERP", auditPrecision, 0),
+		positionLine(instant-10, "north", 2, "ABC-PERP", -auditPrecision, 0),
+		// This publication is validly formed but names the prior deadline. It
+		// must not be used to cover a settlement for the current deadline.
+		fundingRateStrictLine(instant-2, instant-1, 1, "north", 5),
+		fundingPayLine(instant, "north", 1, -400),
+		fundingPayLine(instant, "north", 2, 400),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{BasePrecision: auditPrecision, RequireExactReplay: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingMissingRates != 1 || result.FundingTimingFailures != 1 || result.FundingSignWrong != 1 {
+		t.Fatalf("stale funding deadline was accepted: %+v", result)
 	}
 }
 

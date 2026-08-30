@@ -38,6 +38,26 @@ func TestSettlementAuditDoesNotConvertOverflowToZeroPayout(t *testing.T) {
 	}
 }
 
+func TestStrictSettlementAuditIgnoresNonFutureFills(t *testing.T) {
+	const expiry = int64(1_000_000_000)
+	lines := []string{
+		fmt.Sprintf(`{"sim_ts":1,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":{"action":"listed","symbol":"ABC-FUT-1","instrument_type":"FUTURE","quote_asset":"USD","base_precision":%d,"expiry_nano":%d,"timestamp":1}}}`, auditPrecision, expiry),
+		settledLine(expiry, "north", "ABC-FUT-1", 105*auditPrecision, expiry),
+		expiryFillLine(expiry, "north", "ABC-PERP"),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureSettlements(SettlementAuditOptions{BasePrecision: auditPrecision, RequireExactReplay: true, DeliveryFeePolicy: "zero"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SettlementEventMismatches != 0 || result.SettlementTimingFailures != 0 {
+		t.Fatalf("non-future fill contaminated settlement audit: %+v", result)
+	}
+}
+
 func TestSettlementAuditRejectsExplicitlyUnavailablePrice(t *testing.T) {
 	line := `{"sim_ts":1000000000,"client_id":0,"event":"instrument_settled","data":{"venue_id":"north","payload":{"action":"settled","symbol":"OIL-FUT-1","instrument_type":"FUTURE","expiry_nano":1000000000,"settlement_price":0,"settlement_price_available":false,"timestamp":1000000000}}}`
 	dir := writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": {line}})

@@ -838,7 +838,7 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 				result.TradeRoleMismatches++
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "liability_order_is_not_trade_taker")
 			}
-			if trade.TradeID == 0 || tradeCounts[executionKey] > 0 {
+			if tradeCounts[executionKey] > 0 {
 				result.DuplicateTradeIdentities++
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "duplicate_trade_identity")
 			}
@@ -872,7 +872,7 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 		}
 		for _, fill := range fills[key] {
 			executionKey := liabilityHedgerExecutionKey{tradeID: fill.TradeID, qty: fill.Qty, price: fill.Price}
-			if fill.TradeID == 0 || fillCounts[executionKey] > 0 {
+			if fillCounts[executionKey] > 0 {
 				result.DuplicateFillIdentities++
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "duplicate_fill_identity")
 			}
@@ -912,7 +912,7 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 			} else {
 				result.FilledQty += fill.Qty
 			}
-			if fill.TradeID == 0 || fill.Symbol != order.Symbol || fill.Side != order.Side {
+			if fill.Symbol != order.Symbol || fill.Side != order.Side {
 				result.LifecycleIdentityMismatches++
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "fill_order_identity_mismatch")
 			}

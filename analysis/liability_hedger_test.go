@@ -23,6 +23,16 @@ func TestLiabilityHedgerAuditReplaysLocalStateReceiptAndFill(t *testing.T) {
 	}
 }
 
+func TestLiabilityHedgerAuditAcceptsZeroAsFirstTradeIdentity(t *testing.T) {
+	result, err := l0TestRun(t, l0Fixture{ZeroTradeID: true}).MeasureLiabilityHedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || result.DuplicateTradeIdentities != 0 || result.DuplicateFillIdentities != 0 || result.LifecycleIdentityMismatches != 0 {
+		t.Fatalf("zero-valued first trade identity was rejected: %+v", result)
+	}
+}
+
 func TestLiabilityHedgerEventFilesExcludeUnrelatedBooks(t *testing.T) {
 	run := &Run{Dir: "/run", files: []string{
 		"/run/venues/north/general.jsonl",
@@ -477,6 +487,7 @@ type l0Fixture struct {
 	Decision                  map[string]any
 	Fill                      map[string]any
 	FillEvidence              map[string]any
+	ZeroTradeID               bool
 }
 
 func liabilityHedgerLogLine(venue string, ts int64, clientID uint64, event string, payload map[string]any) string {
@@ -689,7 +700,13 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 				feeAsset = ""
 			}
 			fill := map[string]any{"order_id": uint64(70), "trade_id": uint64(9), "symbol": "CDF/USD", "side": venueSide, "qty": quantity, "price": venuePrice, "fee_amount": fee, "fee_asset": feeAsset, "role": "taker"}
+			tradeID := uint64(9)
+			if fixture.ZeroTradeID {
+				tradeID = 0
+			}
+			fill["trade_id"] = tradeID
 			fillEvidence := map[string]any{"venue_id": venueID, "hedger": "liability_hedger_1", "client_id": uint64(7), "symbol": "CDF/USD", "timestamp": int64(13_000_000_000), "order_id": uint64(70), "trade_id": uint64(9), "side": side, "qty": quantity, "price": price, "fee_amount": fee, "fee_asset": feeAsset, "pre_position": int64(0), "post_position": postPosition}
+			fillEvidence["trade_id"] = tradeID
 			fillEvidence["side"] = venueSide
 			fillEvidence["price"] = venuePrice
 			if fixture.PolicyMode != "" {
@@ -707,7 +724,7 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 			if fixture.SwapTradeOrders {
 				takerOrderID, makerOrderID = makerOrderID, takerOrderID
 			}
-			tradeLine := liabilityHedgerLogLine(venueID, 13_000_000_000, 0, "Trade", map[string]any{"trade_id": uint64(9), "price": venuePrice, "qty": quantity, "taker_order_id": takerOrderID, "maker_order_id": makerOrderID})
+			tradeLine := liabilityHedgerLogLine(venueID, 13_000_000_000, 0, "Trade", map[string]any{"trade_id": tradeID, "price": venuePrice, "qty": quantity, "taker_order_id": takerOrderID, "maker_order_id": makerOrderID})
 			fillLine := liabilityHedgerLogLine(venueID, 13_000_000_000, fillEnvelopeClient, "OrderFill", fill)
 			cancelLine := liabilityHedgerLogLine(venueID, 13_000_000_000, 7, "OrderCancelled", map[string]any{"order_id": uint64(70), "remaining_qty": int64(100_000_000) - quantity})
 			if fixture.CancelBeforeOrder && (fixture.PartialFill || fixture.TinyPartialFill) && !fixture.DropCancel {
