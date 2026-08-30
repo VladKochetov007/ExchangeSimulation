@@ -358,6 +358,84 @@ Adopting it is the scientific owner's call, because the r5 protocol may register
 > **Target metric at `GOMAXPROCS=4`: 50.0 to 88.1 simulated seconds per
 > wall-clock second, a 1.76x total speedup, with peak RSS down 18%.**
 
+## 5b. Long-horizon behaviour
+
+Every figure above is a 15-minute cell. The registered run is 24 hours, and a
+cost that is superlinear in run length would be invisible at 15 minutes and
+dominant at r5 scale. It was worth checking rather than assuming.
+
+### Throughput is flat in run length
+
+| Horizon | wall | peak RSS | sim-s per wall-s | execution events |
+| --- | ---: | ---: | ---: | ---: |
+| 15 min | 12.15 s | 763,464 KiB | 74.0 | 1,163,127 |
+| 30 min | 24.01 s | 821,168 KiB | 74.9 | 2,317,837 |
+| 60 min | 46.55 s | 904,304 KiB | 77.3 | 4,522,662 |
+| 120 min | 90.42 s | 1,028,012 KiB | 79.6 | 8,802,887 |
+
+Throughput does not decay; it drifts slightly upward as fixed setup cost
+amortizes. Event count grows sub-linearly with horizon, so per-event work is
+constant. **There is no superlinear cost in this simulator**, which is the
+result that matters for a 24-hour cell.
+
+### The growing peak RSS is not a leak
+
+Peak RSS rises 763 MB to 1,028 MB across those runs, which looks like a leak
+and is not one. Retained heap measured after the run is **553 MB at 15 minutes
+and 559 MB at 60 minutes** — flat. Live heap is dominated by fixed setup:
+`NewClientGateway` at 237 MB and `NewDelayedGateway` at 225 MB, together 84% of
+it, allocated once.
+
+Peak RSS is an extreme-value statistic over transient GC headroom, so a longer
+run simply samples that maximum more often. It is bounded by pacing, not
+unbounded growth.
+
+### GC pacing is a real throughput knob, and tuning it is a trap above one core
+
+`GOGC` and `GOMAXPROCS` are runtime knobs with no semantic effect. Swept jointly
+on a 60-minute horizon; **the execution hash is identical in all eight
+combinations** (`f961a66193488e5a`):
+
+| `GOMAXPROCS` | `GOGC` | wall | peak RSS | sim-s per wall-s |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 100 | 44.28 s | 911,440 KiB | 81.3 |
+| 1 | 200 | 42.12 s | 1,515,248 KiB | 85.4 |
+| 1 | 400 | 40.42 s | 2,689,520 KiB | 89.0 |
+| 1 | 800 | 40.61 s | 3,976,800 KiB | 88.6 |
+| **4** | **100** | **39.12 s** | **753,464 KiB** | **92.0** |
+| 4 | 200 | 39.04 s | 1,291,208 KiB | 92.2 |
+| 4 | 400 | 40.01 s | 2,360,932 KiB | 89.9 |
+| 4 | 800 | 40.08 s | 3,339,724 KiB | 89.8 |
+
+At one core, raising `GOGC` buys real throughput — +9.5% at `GOGC=400` — because
+GC serializes onto the only runnable core, so trading memory for fewer
+collections pays. **At four cores it buys nothing**: `GOGC=200` is +0.2%
+throughput for +71% peak RSS, and 400 and 800 are slower than the default.
+GC work already overlaps, so extra heap headroom only adds page-fault and
+cache-footprint cost.
+
+The recommended operating point is therefore **`GOMAXPROCS=4` with `GOGC` left
+alone** — which is also the lowest peak RSS of any setting that reaches 90+
+simulated seconds per wall second. `GOMEMLIMIT` behaves as the same trade from
+the other side: 900 MiB costs 11% wall for 576 MB peak, 700 MiB costs 29% wall
+for 381 MB, both with the hash unchanged. Useful for fitting a constrained host,
+not for speed.
+
+### End-to-end on a 60-minute horizon
+
+| Configuration | wall | peak RSS | sim-s per wall-s |
+| --- | ---: | ---: | ---: |
+| base, `GOMAXPROCS=1` | 72.44 s | 899,284 KiB | 49.6 |
+| base, `GOMAXPROCS=4` | 62.41 s | 749,952 KiB | 57.6 |
+| optimized, `GOMAXPROCS=1` | 43.77 s | 914,248 KiB | 82.2 |
+| **optimized, `GOMAXPROCS=4`** | **38.99 s** | **752,556 KiB** | **92.3** |
+
+Code changes alone are **1.66x**; with `GOMAXPROCS=4` the total is **1.86x** at
+19% lower peak RSS than the base's own single-core configuration.
+
+For the registered 24-hour cell that is roughly 29 minutes of wall time reduced
+to roughly 16.
+
 ## 6. Rejected optimizations
 
 ### R1 — Reuse the hash sink's encoding as a `json.RawMessage`
