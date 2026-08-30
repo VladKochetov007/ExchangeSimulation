@@ -175,8 +175,8 @@ jq --arg sha256 "$stale_metadata_sha256" --argjson bytes "$stale_metadata_bytes"
 	"$v2_r2_output_root/dev-607/evidence-manifest.json" >"$tmp_root/stale-manifest.json"
 mv -- "$tmp_root/stale-manifest.json" "$v2_r2_output_root/dev-607/evidence-manifest.json"
 new_manifest_sha256=$(sha256sum -- "$v2_r2_output_root/dev-607/evidence-manifest.json" | awk '{print $1}')
-jq --arg metadata_sha256 "$stale_metadata_sha256" \
-	'.run_metadata_sha256 = $metadata_sha256' \
+jq --arg metadata_sha256 "$stale_metadata_sha256" --arg manifest_sha256 "$new_manifest_sha256" \
+	'.run_metadata_sha256 = $metadata_sha256 | .evidence_manifest_sha256 = $manifest_sha256' \
 	"$v2_r2_output_root/dev-607/run-status.json" >"$tmp_root/stale-status.json"
 mv -- "$tmp_root/stale-status.json" "$v2_r2_output_root/dev-607/run-status.json"
 new_status_sha256=$(sha256sum -- "$v2_r2_output_root/dev-607/run-status.json" | awk '{print $1}')
