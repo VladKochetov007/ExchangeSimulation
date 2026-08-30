@@ -1132,3 +1132,74 @@ assumption, carried since the preview-matching result, that a big no-op class
 is automatically a big win. Frequency alone does not decide it — the earlier
 wins removed no-ops that each dragged a book clone or a mark resolution behind
 them, while a dropped `BookDelta` is 32 bytes and a lock acquisition.
+
+### C2 rejected — the 100 % no-op sweeps are too cheap to matter
+
+`CheckExpiries`, `CheckAndSettleFunding` and `CheckListings` are the purest
+no-ops in the census: 21,600 sweeps each per two simulated hours, finding
+nothing 100 %, 99.995 % and 99.97 % of the time, and `CheckExpiries` alone
+visits 561,420 instrument entries to do it. A next-due watermark would remove
+all of it and is easy to write.
+
+**I did not implement it, because the profile says it is invisible.** In a
+one-hour CPU profile at `GOMAXPROCS=4`, none of the three functions appears
+anywhere in the top 200 nodes by cumulative time. Their combined cost is below
+roughly 0.1 %.
+
+This is the C1 lesson applied before spending effort rather than after: a 100 %
+no-op rate ranks nothing on its own. `wasted = calls x no-op fraction x cost per
+call`, and when the third factor is a map range over 26 instruments, the product
+stays near zero. Recorded as rejected so the census's most eye-catching rows do
+not get re-litigated.
+
+### The profile's actual answer: the integrity hash, not the market logic
+
+The same profile, taken on `dev-607-none` where **logging is off entirely**:
+
+| | share |
+|---|---:|
+| `encoding/json.Marshal` (cum) | **14.99 %** |
+| `crypto/.../sha256.blockSHANI` (flat) | 3.61 % |
+| `runtime.mallocgc` (cum) | 12.96 % |
+| `runtime.scanObject` (cum) | 8.22 % |
+| mutex lock + unlock (flat) | 6.02 % |
+| scheduler heap (`eventHeap.Less` + `heap.down`) | 6.22 % |
+
+`pprof -peek` attributes **100 % of `json.Marshal` to a single caller**:
+`(*checkpointSink).observe` in `simulations/multivenue/divergence.go`. Every
+execution event is marshalled to JSON and SHA-256'd to feed the ordered
+execution-stream digest — and with logging off those bytes exist *only* for the
+hash. Roughly **19 % of CPU is spent proving the run is reproducible**, not
+simulating a market.
+
+Censusing that call by event name gives the size of the job and where it is
+concentrated:
+
+| event | calls / sim-hour | bytes hashed | share | cumulative |
+|---|---:|---:|---:|---:|
+| `balance_change` | 627,564 | 197,490,082 | 20.2 % | 20.2 % |
+| `OrderFill` | 625,528 | 183,205,813 | 18.7 % | 38.9 % |
+| `OrderAccepted` | 610,350 | 173,911,957 | 17.8 % | 56.7 % |
+| `BookDelta` | 869,857 | 98,986,502 | 10.1 % | 66.8 % |
+| `BookSnapshot` | 281,181 | 91,958,423 | 9.4 % | **76.2 %** |
+| `venue_balance_change` | 300,261 | 54,942,982 | 5.6 % | 81.8 % |
+| `OrderCancelled` | 409,359 | 37,428,976 | 3.8 % | 85.6 % |
+| `fee_revenue` | 299,928 | 36,801,302 | 3.8 % | 89.4 % |
+| `Trade` | 312,764 | 36,767,535 | 3.8 % | **93.2 %** |
+| remaining 12 types | 306,510 | 66,795,000 | 6.8 % | 100 % |
+
+**978.4 MB marshalled and hashed per simulated hour**, 4,643,655 events — about
+**23.5 GB per 24-hour cell**, with logging off.
+
+**Five event types are 76 % of it; nine are 93 %.** That concentration is what
+makes this tractable: a hand-written encoder that emits *byte-identical* JSON
+for those types keeps every published hash valid while removing the reflection
+that `structEncoder.encode` spends 10.25 % of CPU on. The pattern already exists
+in this tree — `simulations/feesim/logger.go` assembles records from
+pre-encoded segments with `strconv.Append*` into a reused buffer.
+
+This is the largest single lead in the campaign so far and the next thing to
+build. The acceptance test is the one already in use: identical seed and config
+must reproduce the identical execution stream hash, which is exactly the
+property a byte-identical encoder preserves and a faster-but-different encoder
+would destroy.

@@ -139,3 +139,56 @@ func TestWriteReportsEveryRegisteredSite(t *testing.T) {
 	}
 	_ = quiet
 }
+
+// TestSiteForRegistersOnceUnderConcurrency guards the lazy path: a lost race
+// must not publish a duplicate, and must not unwind an unrelated site. An
+// earlier version popped the last registered site on losing the race, which
+// could delete a different site entirely.
+func TestSiteForRegistersOnceUnderConcurrency(t *testing.T) {
+	withCounting(t, true)
+	bystander := Register("test.sitefor.bystander", "must survive")
+
+	const workers = 32
+	done := make(chan *Site, workers)
+	for range workers {
+		go func() { done <- SiteFor("test.sitefor.shared", "shared") }()
+	}
+	first := <-done
+	for range workers - 1 {
+		if got := <-done; got != first {
+			t.Fatal("SiteFor returned two different sites for one name")
+		}
+	}
+
+	for range 10 {
+		first.Call(true)
+	}
+	if got := first.calls.Load(); got != 10 {
+		t.Fatalf("shared site calls = %d, want 10", got)
+	}
+
+	var seenShared, seenBystander int
+	for _, row := range Report() {
+		switch row.Name {
+		case "test.sitefor.shared":
+			seenShared++
+		case "test.sitefor.bystander":
+			seenBystander++
+		}
+	}
+	if seenShared != 1 {
+		t.Fatalf("shared site appears %d times in the report, want 1", seenShared)
+	}
+	if seenBystander != 1 {
+		t.Fatalf("bystander site appears %d times, want 1 — the race unwound the wrong entry", seenBystander)
+	}
+	_ = bystander
+}
+
+func TestSiteForIsInertWhenDisabled(t *testing.T) {
+	withCounting(t, false)
+	if got := SiteFor("test.sitefor.disabled", "never"); got != nil {
+		t.Fatalf("SiteFor returned %v while disabled, want nil", got)
+	}
+	CountFor("test.sitefor.disabled", "never", true, 5) // must not panic
+}

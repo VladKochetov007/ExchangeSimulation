@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"exchange_sim/census"
 	"fmt"
 	"hash"
 	"io"
@@ -143,6 +144,13 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 		encoded = []byte(`"unencodable"`)
 		reusable = nil
 	}
+	// Every execution event is marshalled here to feed the ordered-stream
+	// digest, and the profile attributes 100 % of json.Marshal to this call.
+	// The census tallies it per event name, with the encoded size as quantity,
+	// so a hand-written byte-identical encoder can be aimed at the few types
+	// that actually dominate rather than written for all of them.
+	census.CountFor("checkpoint.observe["+eventName+"]",
+		"marshalled to feed the ordered execution-stream hash", false, len(encoded))
 	payloadDigest := sha256.Sum256(encoded)
 
 	var scratch [8]byte

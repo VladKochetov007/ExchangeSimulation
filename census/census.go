@@ -167,3 +167,42 @@ func (h FNV1a) Add(v int64) FNV1a {
 	}
 	return h
 }
+
+// byName lazily registers sites discovered at runtime, for censuses keyed by a
+// value that is not known when the package is compiled — an event name, a
+// symbol, a payload type.
+var byName sync.Map // string -> *Site
+
+// SiteFor returns the site for name, registering it on first use. Safe to call
+// on a hot path: it is a map lookup once counting is on and returns nil when
+// counting is off, so callers must nil-check or use CountFor.
+func SiteFor(name, note string) *Site {
+	if !Enabled {
+		return nil
+	}
+	if existing, ok := byName.Load(name); ok {
+		return existing.(*Site)
+	}
+	// Build first, publish only if this call won the race. Registering before
+	// LoadOrStore and unwinding afterwards would pop whichever site happened to
+	// be last, which is not necessarily this one.
+	site := &Site{name: name, note: note}
+	actual, loaded := byName.LoadOrStore(name, site)
+	if !loaded {
+		mu.Lock()
+		sites = append(sites, site)
+		mu.Unlock()
+	}
+	return actual.(*Site)
+}
+
+// CountFor records one call and an associated quantity against a lazily
+// registered site, doing nothing when counting is off.
+func CountFor(name, note string, useless bool, quantity int) {
+	if !Enabled {
+		return
+	}
+	site := SiteFor(name, note)
+	site.Call(useless)
+	site.Quantity(quantity)
+}
