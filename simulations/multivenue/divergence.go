@@ -41,10 +41,11 @@ import (
 // checkpointSink records a rolling digest and, optionally, a narrow trace.
 type checkpointSink struct {
 	// binary, when set, replaces the JSON encode-and-hash path entirely.
-	binary     *binaryEvidence
-	binaryFile *os.File
-	binaryBuf  *bufio.Writer
-	mu         sync.Mutex
+	binary          *binaryEvidence
+	binaryFile      *os.File
+	binaryBuf       *bufio.Writer
+	binaryIndexPath string
+	mu              sync.Mutex
 
 	intervalNano int64
 	checkpoints  io.WriteCloser
@@ -143,6 +144,7 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 				return nil, fmt.Errorf("multivenue: binary evidence file: %w", err)
 			}
 			sink.binaryFile = file
+			sink.binaryIndexPath = filepath.Join(dir, "events.evx")
 			sink.binaryBuf = bufio.NewWriterSize(file, 1<<20)
 			sink.binary = newBinaryEvidence(sink.binaryBuf)
 		}
@@ -323,6 +325,12 @@ func (s *checkpointSink) close() error {
 			s.failLocked(fmt.Errorf("close binary evidence: %w", err))
 		}
 		s.binaryFile = nil
+		// The block index is a sidecar rather than a footer, so a stream
+		// truncated by a crash keeps a usable index for the blocks that landed
+		// and an index can be rebuilt without rewriting the evidence.
+		if err := s.binary.writeIndex(s.binaryIndexPath); err != nil {
+			s.failLocked(fmt.Errorf("write binary evidence index: %w", err))
+		}
 	}
 	if s.checkpoints != nil {
 		finalAt := s.finalSimTime

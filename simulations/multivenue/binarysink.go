@@ -133,3 +133,25 @@ func (b *binaryEvidence) count() uint64 {
 	defer b.mu.Unlock()
 	return b.events
 }
+
+// writeIndex persists the block directory beside the stream.
+//
+// It is written after the stream is closed rather than interleaved with it, so
+// the evidence file is never interrupted by index bytes, and a reader that only
+// wants to scan sequentially never has to know the index exists.
+func (b *binaryEvidence) writeIndex(path string) error {
+	if path == "" {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	if _, err := b.writer.Index().WriteTo(file); err != nil {
+		file.Close()
+		return err
+	}
+	return file.Close()
+}
