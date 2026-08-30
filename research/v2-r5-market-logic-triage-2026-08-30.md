@@ -503,3 +503,25 @@ These are relevant to future evidence infrastructure but remain a separate
 performance/VNext prototype: no active-branch semantic market change was
 identified, and it still lacks the complete promotion contract for the current
 scientific campaign. Nothing from that branch was merged.
+
+## Typed lifecycle correction — `b906705` (2026-08-30)
+
+The fresh review of exact `666548e` rejected it before any R2 cell ran. It
+identified a remaining fail-closed hole: a decodable lifecycle payload whose
+`instrument_type` was missing, null, empty, or unknown was silently ignored.
+That could let an otherwise complete calendar pass after losing a lifecycle
+record.
+
+`b906705` makes the lifecycle type pointer-valued so missing and null are
+distinguishable, explicitly accepts only the known non-derivative types `SPOT`
+and `PERP` for calendar exclusion, and rejects empty or unknown types. FUTURE
+and OPTION continue through the derivative calendar path and retain its
+existing malformed identity counters. Regression cases place missing, null,
+and unknown types beside a valid lifecycle record, and separately prove that
+SPOT/PERP records do not contaminate the derivative census.
+
+The clean committed full suite, `go vet ./...`, targeted race suite, R2
+contract test, and diff checks pass on `b906705`. A fresh independent Sol-xhigh
+review of this exact candidate is now required. No clean scientific rebuild,
+development cell, parity control, or holdout has run; holdouts
+`619/631/641` remain untouched.

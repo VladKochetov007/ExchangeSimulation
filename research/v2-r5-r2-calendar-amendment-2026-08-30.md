@@ -331,3 +331,17 @@ Its binary evidence work is performance/VNext-only, includes useful attestation
 and losslessness corrections, and is deferred from this calendar candidate
 pending complete schema, ordering, analyzer differential, and promotion review.
 No performance code was merged.
+
+## Typed lifecycle correction — `b906705` (2026-08-30)
+
+The fresh review of `666548e` rejected that candidate before any R2 cell ran:
+decodable lifecycle records with missing, null, empty, or unknown
+`instrument_type` values were silently omitted from the calendar audit.
+
+`b906705` now distinguishes missing/null from a present type, explicitly
+recognizes `SPOT` and `PERP` as valid non-derivative lifecycle records to
+exclude, and fails closed on every other absent, empty, or unknown type. Tests
+cover missing/null/unknown records alongside a valid calendar and verify that
+known SPOT/PERP records remain excluded. Clean full `make test`, `go vet`, the
+targeted race suite, and R2 contract checks pass. Fresh exact-tree independent
+review remains pending; no R2 or holdout evidence has been run.
