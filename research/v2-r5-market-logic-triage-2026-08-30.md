@@ -426,3 +426,12 @@ adds a regression; G8 pruning calls a verify-existing parity recomputation and
 requires its fresh attestation to match the sealed one without overwriting it.
 The rejected verdict remains historical and no raw, development, or holdout
 evidence was deleted or run.
+
+## Current corrective gate — `2c79654` (2026-08-30)
+
+The current successor fails closed on same-venue equal-timestamp lifecycle
+records split across files and adds a regression for that ambiguity.  Its G8
+archive path performs fresh parity/raw recomputation in a temporary attestation
+comparison mode before any prune.  The exact pushed commit has passed focused
+tests, full `make test`, `go vet`, shell syntax, and diff checks; fresh
+independent Sol-xhigh acceptance is still required before any R2 cell.

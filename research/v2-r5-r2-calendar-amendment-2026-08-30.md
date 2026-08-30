@@ -268,3 +268,15 @@ cell, the following remain required:
 No holdout is authorized by this document.  The old r5 hardening commit is
 `e29f26b`; its fresh independent approval is also still outstanding because
 the first post-fix reviewer slot was unavailable.
+
+## Current corrective gate — `2c79654` (2026-08-30)
+
+The `2c79654` correction rejects any same-venue, same-timestamp lifecycle
+group spanning multiple persisted files, because the evidence contract has no
+global cross-file ordinal.  It adds a cross-file regression and preserves
+same-file physical order.  G8 pruning now runs the parity checker in
+verify-existing mode; that checker stages archived/raw evidence, recomputes
+raw digests and control identities, and compares a temporary fresh attestation
+to the sealed one without overwriting it.  Focused tests, full `make test`,
+`go vet`, shell syntax, and diff checks pass.  Fresh independent Sol-xhigh
+acceptance of the exact pushed commit remains mandatory before any R2 cell.
