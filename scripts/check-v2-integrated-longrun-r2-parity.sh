@@ -190,6 +190,8 @@ binary_go_version=$(jq -er '.binary_go_version' "$output_root/dev-607/run-metada
 prunegate_sha256=$(jq -er '.prunegate_sha256' "$output_root/dev-607/run-metadata.json")
 prunegate_go_version=$(jq -er '.prunegate_go_version' "$output_root/dev-607/run-metadata.json")
 prunegate_revision=$(jq -er '.prunegate_vcs_revision' "$output_root/dev-607/run-metadata.json")
+v2_r2_require_matching_revision "$prunegate_revision" "$source_revision" ||
+	fail "parity pruning gate revision is not the current simulator source revision"
 for cell in dev-607 dev-607-none dev-607-g8; do
 	jq -e --arg revision "$source_revision" \
 		--arg binary_sha256 "$binary_sha256" --arg binary_go_version "$binary_go_version" \

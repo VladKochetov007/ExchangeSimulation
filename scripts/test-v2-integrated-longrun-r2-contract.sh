@@ -32,6 +32,10 @@ mv "$right_manifest_dir/permuted.json" "$right_manifest_dir/evidence-manifest.js
 expect_failure v2_r2_compare_ordered_raw_manifests "$left_manifest_dir" "$right_manifest_dir"
 
 matching_revision=0123456789abcdef0123456789abcdef01234567
+v2_r2_require_matching_revision "$matching_revision" "$matching_revision" ||
+	fail "matching revision was rejected"
+expect_failure v2_r2_require_matching_revision "$matching_revision" \
+	"fedcba9876543210fedcba9876543210fedcba987"
 v2_r2_require_current_source_revision "$matching_revision" "$matching_revision" "$matching_revision" ||
 	fail "matching current source revision was rejected"
 expect_failure v2_r2_require_current_source_revision "$matching_revision" \

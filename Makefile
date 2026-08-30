@@ -92,7 +92,9 @@ test:
 	@echo "Running tests..."
 	@$(GOTEST) ./...
 	@./scripts/test-v2-integrated-longrun-contract.sh
+	@./scripts/test-v2-integrated-longrun-r2-contract.sh
 	@./scripts/test-v2-integrated-longrun-archive.sh
+	@./scripts/test-v2-integrated-longrun-r2-archive.sh
 
 ## test-short: Run tests without long-running tests
 test-short:

@@ -44,12 +44,19 @@ v2_r2_is_go_127() {
 	[[ "$1" == go1.27* ]]
 }
 
+v2_r2_require_matching_revision() {
+	local actual_revision=$1
+	local expected_revision=$2
+	[[ "$actual_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+	[[ "$actual_revision" == "$expected_revision" ]]
+}
+
 v2_r2_require_current_source_revision() {
 	local source_revision=$1
 	local head_revision=$2
 	local analyzer_revision=$3
-	[[ "$source_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
-	[[ "$source_revision" == "$head_revision" && "$source_revision" == "$analyzer_revision" ]]
+	v2_r2_require_matching_revision "$source_revision" "$head_revision" || return 1
+	v2_r2_require_matching_revision "$source_revision" "$analyzer_revision"
 }
 
 v2_r2_require_attestation_path() {
