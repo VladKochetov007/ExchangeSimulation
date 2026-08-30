@@ -13,6 +13,18 @@ source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 contract_version="v2-integrated-longrun-r2-candidate-v1"
 conservation_tolerance_fixed_units=1000
+calendar_epoch_nano=1735689600000000000
+calendar_hour_nano=3600000000000
+expected_calendar_expiries="["
+for hour in $(seq 2 26); do
+	expected_calendar_expiries+="$((calendar_epoch_nano + hour * calendar_hour_nano)),"
+done
+expected_calendar_expiries+="$((calendar_epoch_nano + 27 * calendar_hour_nano)),$((calendar_epoch_nano + 30 * calendar_hour_nano)),$((calendar_epoch_nano + 36 * calendar_hour_nano))]"
+expected_calendar_completed_expiries="["
+for hour in $(seq 2 24); do
+	expected_calendar_completed_expiries+="$((calendar_epoch_nano + hour * calendar_hour_nano)),"
+done
+expected_calendar_completed_expiries="${expected_calendar_completed_expiries%,}]"
 
 fail() {
 	printf 'integrated long-run extraction failure: %s\n' "$*" >&2
@@ -188,7 +200,7 @@ for json_file in "$cell"/*.json; do
 done
 derived_artifacts=(
 	observationreceipts.json frontiervectors.json mechanical.json conservation.json positions.json
-	fillpositions.json orderlifecycle.json lifecycle.json settlements.json expiryfills.json
+	fillpositions.json orderlifecycle.json lifecycle.json calendar.json settlements.json expiryfills.json
 	evidenceartifacthash.json streamhash.json arbitrage.json crossvenue.json roleaudit.json ecology.json
 	derivatives.json liquidations.json marginchecks.json optionsurface.json optionliabilityp6.json
 	optionvaluetakerp6.json vannavolgap6.json exposure.json hedging.json makerrefresh.json
@@ -222,7 +234,7 @@ write_metric() {
 }
 metrics=(
 	observationreceipts frontiervectors mechanical conservation positions
-	fillpositions orderlifecycle lifecycle settlements expiryfills
+	fillpositions orderlifecycle lifecycle calendar settlements expiryfills
 	evidenceartifacthash streamhash arbitrage crossvenue roleaudit ecology
 	derivatives liquidations marginchecks optionsurface optionliabilityp6
 	optionvaluetakerp6 vannavolgap6 exposure hedging makerrefresh makerquotesize
@@ -308,19 +320,44 @@ jq -n --argjson cdf_borrow_events "$cdf_borrow_events" \
 	--argjson price_unavailable_rejections "$price_unavailable_rejections" \
 	--argjson enabled_cross_asset_spot_graph "$(jq -er '.cross_asset_spot_graph' "$cell/run-config.json")" \
 	--argjson enabled_cross_asset_collateral_marks "$(jq -er '.cross_asset_collateral_marks' "$cell/run-config.json")" \
+	--slurpfile calendar "$analysis_dir/calendar.json" \
+	--argjson expected_calendar_expiries "$expected_calendar_expiries" \
+	--argjson expected_calendar_completed_expiries "$expected_calendar_completed_expiries" \
 	--arg contract "$contract_version" \
-	'{schema_version: 1, result: {contract: $contract,
+	'def r($x): $x[0].result;
+	 {schema_version: 1, result: {contract: $contract,
 		cdf_collateral_borrowing: {events: $cdf_borrow_events,
 			enabled_cross_asset_spot_graph: $enabled_cross_asset_spot_graph,
 			enabled_cross_asset_collateral_marks: $enabled_cross_asset_collateral_marks},
 		price_unavailable_order_rejections: $price_unavailable_rejections,
+		calendar: (r($calendar)),
 		predicates: {cdf_collateral_borrowing_observed: ($cdf_borrow_events > 0 and
 			$enabled_cross_asset_spot_graph and $enabled_cross_asset_collateral_marks),
-			zero_price_unavailable_order_rejections: ($price_unavailable_rejections == 0)}}}' >"$activation_tmp"
+			zero_price_unavailable_order_rejections: ($price_unavailable_rejections == 0),
+			calendar_behavior_attested: (r($calendar).contract == "calendar-audit-v1" and
+				r($calendar).futures_expiry_nanos == $expected_calendar_expiries and
+				r($calendar).option_expiry_nanos == $expected_calendar_expiries and
+				r($calendar).shared_expiry_nanos == $expected_calendar_expiries and
+				(r($calendar).venues | length) == 3 and
+				all(r($calendar).venues[];
+					.futures_expiry_nanos == $expected_calendar_expiries and
+					.option_expiry_nanos == $expected_calendar_expiries and
+					.shared_expiry_nanos == $expected_calendar_expiries and
+					.futures_listed == 28 and .options_listed == 280 and
+					.futures_settled == 23 and .options_settled == 230 and
+					.future_expiry_cycles == 23 and .option_expiry_cycles == 23 and
+					.duplicate_future_listings == 0 and .duplicate_option_listings == 0 and
+					.duplicate_future_settlements == 0 and .duplicate_option_settlements == 0 and
+					.settlement_without_listing == 0 and .settlement_before_listing == 0 and
+					.malformed_derivative_events == 0 and
+					.max_simultaneous_future_expiries >= 3 and
+					.max_simultaneous_option_expiries >= 3 and
+					.future_expiry_cycles == ($expected_calendar_completed_expiries | length) and
+					.option_expiry_cycles == ($expected_calendar_completed_expiries | length)))}}}' >"$activation_tmp"
 mv "$activation_tmp" "$analysis_dir/activation.json"
 require_json_object "$analysis_dir/activation.json"
-jq -e '(.result.predicates | length) == 2 and
-	(.result.predicates | keys) == ["cdf_collateral_borrowing_observed", "zero_price_unavailable_order_rejections"] and
+jq -e '(.result.predicates | length) == 3 and
+	(.result.predicates | keys) == ["calendar_behavior_attested", "cdf_collateral_borrowing_observed", "zero_price_unavailable_order_rejections"] and
 	all(.result.predicates | to_entries[]; .value == true)' "$analysis_dir/activation.json" >/dev/null ||
 	fail "candidate activation contract not satisfied"
 
@@ -334,6 +371,7 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 	--slurpfile fillpositions "$analysis_dir/fillpositions.json" \
 	--slurpfile orderlifecycle "$analysis_dir/orderlifecycle.json" \
 	--slurpfile lifecycle "$analysis_dir/lifecycle.json" \
+	--slurpfile calendar "$analysis_dir/calendar.json" \
 	--slurpfile settlements "$analysis_dir/settlements.json" \
 	--slurpfile expiryfills "$analysis_dir/expiryfills.json" \
 	--slurpfile derivatives "$analysis_dir/derivatives.json" \
@@ -370,6 +408,7 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 			positions: (count($positions; "contracts") > 0 and count($positions; "exact_replay_checks") > 0 and count($positions; "realized_pnl_checks") > 0 and field_zeroes($positions; ["non_zero_net_contracts", "disagreement", "unrepresentable_open_values", "exact_replay_failures", "realized_pnl_failures", "evidence_failures", "missing_marks", "mark_identity_failures", "missing_terminal_positions", "unexpected_terminal_positions", "terminal_position_mismatches", "terminal_timestamp_failures", "post_terminal_position_updates"])),
 			fill_positions: (zero($fillpositions; "missing_position_update") and zero($fillpositions; "unexpected_position_update") and zero($fillpositions; "price_mismatches") and zero($fillpositions; "malformed_fill_records") and zero($fillpositions; "malformed_position_updates") and zero($fillpositions; "position_chain_failures")),
 			order_lifecycle: field_zeroes($orderlifecycle; ["unknown_fills", "unknown_cancellations", "duplicate_acceptances", "duplicate_terminals", "fills_after_terminal", "fill_quantity_mismatches", "cancel_quantity_mismatches", "client_mismatches", "unlinked_fills", "missing_immediate_terminal", "malformed_accepted_records", "malformed_fill_records", "malformed_cancel_records", "malformed_liquidation_records"]),
+			calendar: (r($calendar).contract == "calendar-audit-v1" and count($calendar; "venues") > 0 and zero($calendar; "duplicate_listings") and zero($calendar; "duplicate_settlements") and zero($calendar; "malformed_derivative_events")),
 			settlement: (count($settlements; "checks") > 0 and count($settlements; "exact_replay_checks") > 0 and field_zeroes($settlements; ["mismatched", "unpaid", "total_trades_after_expiry", "total_position_updates_after_expiry", "arithmetic_failures", "explicit_unavailable_announcements", "exact_replay_failures", "settlement_event_mismatches", "evidence_failures", "descriptor_conflicts", "settlement_timing_failures", "delivery_fee_mismatches"])),
 			expiry: (count($expiryfills; "expired_contracts") > 0 and count($expiryfills; "settled_contracts") > 0 and zero($expiryfills; "expired_unsettled_contracts") and field_zeroes($expiryfills; ["fills_before_listing", "fills_after_expiry", "malformed_fill_records", "fill_identity_failures", "malformed_lifecycle_records", "malformed_snapshot_records", "settlement_before_listing", "missing_expiry_metadata", "settlement_without_listing", "metadata_mismatches", "snapshot_records_before_listing", "snapshot_records_after_expiry", "nonempty_snapshots_after_expiry"])),
 				derivatives: (count($derivatives; "funding") > 0 and field_zeroes($derivatives; ["funding_broken", "funding_sign_wrong", "funding_misdirected", "funding_undirected", "funding_duplicate_payments", "funding_payment_mismatches", "funding_missing_rates", "funding_missing_settlements", "funding_timing_failures", "funding_evidence_failures", "funding_arithmetic_failures", "funding_settlement_failures", "exercise_broken", "exercise_timing_failures", "exercise_evidence_failures", "holders_mispaid", "worthless_paid", "exercise_arithmetic_failures", "exercise_missing_payouts", "exercise_extra_payouts", "exercise_duplicate_payouts", "exercise_unknown_payouts"])),
@@ -397,7 +436,7 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 		}}' >"$integrity_tmp"
 mv "$integrity_tmp" "$analysis_dir/integrity.json"
 require_json_object "$analysis_dir/integrity.json"
-jq -e '(.predicates | keys) == ["activation", "conservation", "derivatives", "expiry", "exposure", "fill_positions", "frontier_vectors", "hedging", "late_path", "liability_hedger", "liquidations", "maker_quote_size", "maker_rebalance", "maker_refresh", "margin", "mechanical", "observation_receipts", "option_liability", "option_surface", "option_value_taker", "order_lifecycle", "position_rounding", "positions", "post_only", "settlement", "vanna_volga"] and
+jq -e '(.predicates | keys) == ["activation", "calendar", "conservation", "derivatives", "expiry", "exposure", "fill_positions", "frontier_vectors", "hedging", "late_path", "liability_hedger", "liquidations", "maker_quote_size", "maker_rebalance", "maker_refresh", "margin", "mechanical", "observation_receipts", "option_liability", "option_surface", "option_value_taker", "order_lifecycle", "position_rounding", "positions", "post_only", "settlement", "vanna_volga"] and
 	all(.predicates | to_entries[]; .value == true)' "$analysis_dir/integrity.json" >/dev/null ||
 	fail "one or more fail-closed integrity predicates failed"
 
@@ -409,7 +448,7 @@ required=(
 	optionsurface.json optionliabilityp6.json optionvaluetakerp6.json vannavolgap6.json
 	exposure.json hedging.json makerrefresh.json makerquotesize.json makerrebalance.json
 	postonly.json liabilityhedger.json perpsignals.json datedmandatep5.json fundingcarry.json
-	termcarry.json datedcarryp5.json perpreplenishment.json activation.json integrity.json
+	termcarry.json datedcarryp5.json perpreplenishment.json activation.json integrity.json calendar.json
 )
 for artifact in "${required[@]}"; do
 	require_file "$analysis_dir/$artifact"

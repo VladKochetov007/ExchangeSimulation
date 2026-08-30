@@ -35,7 +35,7 @@ fi
 
 derived_artifacts=(
 	observationreceipts.json frontiervectors.json mechanical.json conservation.json positions.json
-	fillpositions.json orderlifecycle.json lifecycle.json settlements.json expiryfills.json
+	fillpositions.json orderlifecycle.json lifecycle.json calendar.json settlements.json expiryfills.json
 	evidenceartifacthash.json streamhash.json arbitrage.json crossvenue.json roleaudit.json ecology.json
 	derivatives.json liquidations.json marginchecks.json optionsurface.json optionliabilityp6.json
 	optionvaluetakerp6.json vannavolgap6.json exposure.json hedging.json makerrefresh.json makerquotesize.json

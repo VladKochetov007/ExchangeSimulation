@@ -3,7 +3,6 @@ package analysis
 import (
 	"math"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 )
@@ -97,20 +96,20 @@ type basisPoint struct {
 	tte float64 // seconds to expiry, dated contracts only
 }
 
-// expiryFromSymbol reads the expiry epoch out of a dated contract's symbol.
-// Dated futures are named ABC-FUT-<epoch>; options carry their expiry in the
-// second field and are not basis instruments.
+// expiryFromSymbol reads the expiry token out of a dated contract's symbol.
+// Legacy futures are named ABC-FUT-<epoch>; canonical calendar futures may
+// append an underlying identity component after that token.
 func expiryFromSymbol(symbol string) (int64, bool) {
 	const marker = "-FUT-"
 	index := strings.Index(symbol, marker)
 	if index < 0 {
 		return 0, false
 	}
-	epoch, err := strconv.ParseInt(symbol[index+len(marker):], 10, 64)
-	if err != nil {
-		return 0, false
+	suffix := symbol[index+len(marker):]
+	if separator := strings.IndexByte(suffix, '-'); separator >= 0 {
+		suffix = suffix[:separator]
 	}
-	return epoch * 1e9, true
+	return expiryNanoFromLabel(suffix)
 }
 
 // MeasureBasis reads every published mark and index and reports the basis, its

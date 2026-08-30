@@ -8,7 +8,7 @@ Date: 2026-08-30
 
 Scientific parent: `e29f26b` (`autoresearch/ffa-ecology-gen0`)
 
-Performance feed last reviewed: `9dc6b08`
+Performance feed last reviewed: `7fdf55f`
 
 ## Decision
 
@@ -77,8 +77,12 @@ collide at `6,9,12,15,18,21,24`, and all three collide at `12,18,24`.  At the
 start the board has three maturities (2h, 6h, 12h); after the first short
 expiry, hourly listings replace expiring contracts while medium and long
 maturities remain simultaneously open.  Twenty-three distinct expiries
-complete by 24h, with later 25h, 27h, and 30h contracts still providing
-forward term structure at the terminal boundary.  The calendar produces these
+complete by 24h.  The deterministic runner performs its final automation poll
+at exactly 24h, so the realized listing census also includes the endpoint
+requests: short expiry 26h, medium expiry 30h, and long expiry 36h (with the
+already-listed 30h collision deduplicated).  The resulting realized set has
+28 expiries, while the 25h, 26h, 27h, 30h, and 36h contracts provide forward
+term structure at the terminal boundary.  The calendar produces these
 overlaps arithmetically; it does not inspect prices or encode a convergence
 target.
 
@@ -89,6 +93,10 @@ and `dev-607-g8` reserved as parity controls.  The three holdout configuration
 files are copied into the namespace only as reserved declarations; the R2
 development runner rejects them and the development scorer asserts that their
 outputs do not exist.
+Completed full cells are sealed with
+`scripts/archive-v2-integrated-longrun-r2-cell.sh`; its optional prune action
+is authorized only after the archive, descriptor, external attestation, and
+manifest verify.
 
 The schedule is deliberately compressed rather than a literal month model.
 The 12h long lead is longer than the 6h medium lead while still allowing three
@@ -111,6 +119,15 @@ contract.
    is visible as one economic book without cross-underlying symbol aliasing.
 5. For options, deduplicate by expiry before building the call/put chain.  A
    configured strike cap remains a safety bound, not a second listing event.
+
+Calendar symbols use a parser-compatible canonical grammar.  Futures place the
+expiry token immediately after `-FUT-` and append the hex-encoded underlying;
+options place the hex-encoded underlying before the expiry and use a `K<raw>`
+strike token.  The analyzers decode these tokens using the typed quote
+precision, while legacy rolling symbols retain their historical spelling.
+This preserves exact fixed-point identity without silently dropping dated
+basis or option-surface observations.
+
 6. Expiry, pending settlement, mark invalidation, and settlement continue to
    use the existing instrument lifecycle.  Calendar listing does not settle a
    contract early and does not alter price discovery.
@@ -158,7 +175,9 @@ then advanced from `9dc6b08` through `feeb6f9` and `e3558df`, a prototype
 canonical binary evidence stream followed by additional typed payload work.
 Its encode/decode measurements are promising, but it is not an end-to-end,
 all-event, differential-tested replacement for the current JSON evidence
-contract, so it remains unmerged.  The next review starts at `e3558df`.
+contract, so it remains unmerged.  The branch then added `7fdf55f`, an indexed
+query prototype with differential query-class tests.  It remains performance
+only and unmerged; the next review starts at `7fdf55f`.
 
 ## Independent semantic review and corrective work
 
@@ -180,6 +199,26 @@ when a due expiry cannot produce a valid call/put chain.  Regression and
 `NewSim` activation tests cover these cases.  A fresh independent review of
 the resulting commit is required before any development cell.  The rejected
 verdict remains historical and is not silently rewritten.
+
+The exact successor implementation `aed83a6` was then reviewed by Hooke
+(Sol-xhigh) and **REJECTED**.  The review found three additional gate defects:
+
+1. the new future and option symbol grammars were not consumable by the
+   existing dated-basis and option-surface parsers, so R2 derivative evidence
+   could be silently discarded;
+2. a collision-only option request still performed an unnecessary spot lookup,
+   allowing an unavailable price to stall a schedule that required no new
+   chain; and
+3. the protocol scorer did not attest the defining 24-hour calendar behavior.
+
+The corrective successor moves expiry into the parser-visible symbol token,
+decodes raw option strikes with quote precision, filters collision-only
+requests before any price lookup, and adds the Go-native `calendar` metric.
+The extractor now precommits and fail-closes on the selected 28-expiry set,
+23 completed expiry cycles, equal futures/options expiry sets, duplicate-free
+identities, and at least three simultaneous futures and option maturities at
+each venue.  This review remains a rejected historical gate until the exact
+corrective commit receives a fresh independent review.
 
 ## Gate status
 

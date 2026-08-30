@@ -106,7 +106,7 @@ func (l *DatedFuturesLister) futureSymbol(expiryNano int64) string {
 	if l.Calendar == nil {
 		return fmt.Sprintf("%s-FUT-%s", l.Spec.Base, expirySymbolLabel(expiryNano))
 	}
-	return fmt.Sprintf("%s-FUT-U%s-%s", l.Spec.Base, canonicalSymbolComponent(l.Underlying), expirySymbolLabel(expiryNano))
+	return fmt.Sprintf("%s-FUT-%s-U%s", l.Spec.Base, expirySymbolLabel(expiryNano), canonicalSymbolComponent(l.Underlying))
 }
 
 var _ etypes.ListingPolicy = (*DatedFuturesLister)(nil)
@@ -204,17 +204,6 @@ func (l *OptionChainLister) pendingCalendarChains(nowNano int64, prices etypes.L
 		l.calendar.nextIndex = nextIndex
 		return nil, nil
 	}
-	if prices == nil {
-		return nil, fmt.Errorf("option-chain listing underlying %s: price source is nil", l.Underlying)
-	}
-	spot, err := prices.Price(l.Underlying)
-	if err != nil {
-		return nil, fmt.Errorf("option-chain listing underlying %s: %w", l.Underlying, err)
-	}
-	if spot <= 0 {
-		return nil, fmt.Errorf("option-chain listing underlying %s: %w", l.Underlying, etypes.ErrPriceDomain)
-	}
-	center := ((spot + l.StrikeStep/2) / l.StrikeStep) * l.StrikeStep
 	if l.strikes == nil {
 		l.strikes = make(map[int64]map[int64]struct{})
 	}
@@ -236,11 +225,31 @@ func (l *OptionChainLister) pendingCalendarChains(nowNano int64, prices etypes.L
 			continue
 		}
 		seenExpiries[request.expiryNano] = struct{}{}
+		grids = append(grids, expiryStrikeGrid{expiry: request.expiryNano})
+	}
+	if len(grids) == 0 {
+		// A family collision is a successful no-op. It must not be made
+		// contingent on a spot price that is needed only for a new chain.
+		l.calendar.nextIndex = nextIndex
+		return nil, nil
+	}
+	if prices == nil {
+		return nil, fmt.Errorf("option-chain listing underlying %s: price source is nil", l.Underlying)
+	}
+	spot, err := prices.Price(l.Underlying)
+	if err != nil {
+		return nil, fmt.Errorf("option-chain listing underlying %s: %w", l.Underlying, err)
+	}
+	if spot <= 0 {
+		return nil, fmt.Errorf("option-chain listing underlying %s: %w", l.Underlying, etypes.ErrPriceDomain)
+	}
+	center := ((spot + l.StrikeStep/2) / l.StrikeStep) * l.StrikeStep
+	for index := range grids {
 		strikes := l.validStrikeGrid(center)
 		if len(strikes) == 0 {
-			return nil, fmt.Errorf("option-chain listing underlying %s expiry %d: configured strike grid has no positive strikes", l.Underlying, request.expiryNano)
+			return nil, fmt.Errorf("option-chain listing underlying %s expiry %d: configured strike grid has no positive strikes", l.Underlying, grids[index].expiry)
 		}
-		grids = append(grids, expiryStrikeGrid{expiry: request.expiryNano, strikes: strikes})
+		grids[index].strikes = strikes
 	}
 	var out []etypes.Instrument
 	for _, grid := range grids {

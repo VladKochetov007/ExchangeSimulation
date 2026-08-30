@@ -129,7 +129,7 @@ func (p *analyzerProfiles) Stop() {
 }
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrefresh, makerrebalance, perpreplenishment, liabilityhedger, optionliabilityp6, optionvaluetakerp6, vannavolgap6, fundingcarry, termcarry, termcarryp4chain, termcarryp4pair, datedcarryp5, datedcarryp5pair, datedmandatep5, termcarrylifecycle, perpexposurehedger, perpexposurerisk, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrefresh, makerrebalance, perpreplenishment, liabilityhedger, optionliabilityp6, optionvaluetakerp6, vannavolgap6, fundingcarry, termcarry, termcarryp4chain, termcarryp4pair, datedcarryp5, datedcarryp5pair, datedmandatep5, termcarrylifecycle, perpexposurehedger, perpexposurerisk, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, calendar, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
 	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
 	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
@@ -1196,6 +1196,18 @@ func main() {
 						fmt.Printf("    %d venues settled together at %d instants\n", venues, instants)
 					}
 				}
+			})
+		case "calendar":
+			result, err := run.MeasureCalendar(analysis.CalendarOptions{})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s calendar futures %d options %d shared %d listings %d settlements %d duplicates %d/%d\n",
+					dir, len(result.FuturesExpiryNanos), len(result.OptionExpiryNanos),
+					len(result.SharedExpiryNanos), result.ListingEvents, result.SettlementEvents,
+					result.DuplicateListings, result.DuplicateSettlements)
 			})
 		case "viability":
 			classes, err := loadViabilityClasses(*viabilityThresholds)

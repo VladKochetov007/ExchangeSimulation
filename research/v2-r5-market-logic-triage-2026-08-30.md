@@ -300,7 +300,30 @@ family, prove JSON/typed/binary equivalence, preserve the full global order,
 or differentially reproduce all analyzer outputs.  It is therefore a future
 analytics acceleration candidate, not a production evidence-contract change;
 no code was merged or cherry-picked and no scientific result is affected.
-The next feed comparison starts at `e3558df`.
+The branch then added `7fdf55f`, a block-index/query prototype.  Its four
+query classes agree across JSON, binary full scan, and indexed scan; selective
+queries skip blocks while broad interleaved-family queries skip none.  This is
+useful future analytics evidence but remains performance-only, with no
+scientific-path code merged.  The next feed comparison starts at `7fdf55f`.
+
+## R2 successor review checkpoint — 2026-08-30
+
+Hooke (Sol-xhigh) reviewed the exact pushed R2 implementation `aed83a6` and
+**REJECTED** it.  The independent review found that calendar future and option
+symbols were silently dropped by the existing basis and option-surface
+parsers, that collision-only option requests still depended on a spot-price
+lookup, and that the R2 scorer had no precommitted predicate for realized
+calendar behavior.  No R2 development or holdout cell was run from that
+revision.
+
+The current corrective work independently adds parser regressions for legacy,
+canonical, and sub-second symbols; moves collision filtering ahead of price
+lookup; and introduces a Go-native `calendar` analyzer artifact.  The
+extractor/scorer will require the registered 28-expiry set, 23 completed
+cycles, equal futures/options expiry sets, zero duplicate or malformed
+identities, and at least three simultaneous maturities per venue.  The Hooke
+verdict remains historical until a fresh reviewer accepts the exact corrective
+commit.
 
 ## Independent review checkpoint — 2026-08-30
 

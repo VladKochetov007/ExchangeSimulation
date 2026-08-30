@@ -226,6 +226,24 @@ func TestOptionCalendarRetainsDueBatchAfterUnavailablePriceAndSkipsNoOpPriceLook
 	}
 }
 
+func TestOptionCalendarCollisionOnlyBatchAdvancesWithoutPriceLookup(t *testing.T) {
+	lister := &OptionChainLister{
+		Underlying: "ABC/USD",
+		Spec:       ContractSpec{Base: "ABC", Quote: "USD", BasePrecision: 100, QuotePrecision: 1, TickSize: 1, MinOrderSize: 1},
+		Calendar:   &ExpiryCalendar{Schedules: []ExpirySchedule{{Name: "short", ListingIntervalNano: calendarUnit, TimeToExpiryNano: 2 * calendarUnit}}},
+		StrikeStep: 10, StrikesPerSide: 0,
+		calendarListed: map[int64]bool{2 * calendarUnit: true},
+	}
+	missing := &countingListingPriceSource{}
+	listed, err := lister.PendingListings(0, missing)
+	if err != nil || listed != nil || missing.calls != 0 {
+		t.Fatalf("collision-only calendar batch = (%v, %v), price calls=%d; want no-op without price lookup", listed, err, missing.calls)
+	}
+	if got := lister.calendar.nextIndex["short"]; got != 1 {
+		t.Fatalf("collision-only cursor = %d, want 1", got)
+	}
+}
+
 func TestExpiryCalendarRejectsAmbiguousSchedules(t *testing.T) {
 	calendar := ExpiryCalendar{Schedules: []ExpirySchedule{
 		{Name: "short", ListingIntervalNano: 2 * calendarUnit, TimeToExpiryNano: 6 * calendarUnit},

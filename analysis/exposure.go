@@ -186,7 +186,7 @@ func secondOrderExposure(positions *[]riskGreekPosition) (float64, float64, erro
 
 // isOptionSymbolName reports whether a symbol names an option contract.
 func isOptionSymbolName(symbol string) bool {
-	_, _, _, ok := optionTerms(symbol)
+	_, _, _, ok := optionTerms(symbol, 100000)
 	return ok
 }
 

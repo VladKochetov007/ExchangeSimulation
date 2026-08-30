@@ -3,7 +3,6 @@ package analysis
 import (
 	"math"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 )
@@ -115,8 +114,9 @@ type TermPoint struct {
 	ATMVol       float64 `json:"atm_vol"`
 }
 
-// optionTerms parses ABC-<expiry epoch>-<strike>-C|P.
-func optionTerms(symbol string) (expiryNano int64, strike float64, isCall bool, ok bool) {
+// optionTerms parses the legacy ABC-<expiry epoch>-<strike>-C|P grammar and
+// the canonical R2 ABC-OPT-U<underlying>-<expiry>-K<raw-strike>-C|P grammar.
+func optionTerms(symbol string, quotePrecision int64) (expiryNano int64, strike float64, isCall bool, ok bool) {
 	parts := strings.Split(symbol, "-")
 	if len(parts) < 4 {
 		return 0, 0, false, false
@@ -125,15 +125,15 @@ func optionTerms(symbol string) (expiryNano int64, strike float64, isCall bool, 
 	if last != "C" && last != "P" {
 		return 0, 0, false, false
 	}
-	strikeRaw, err := strconv.ParseFloat(parts[len(parts)-2], 64)
-	if err != nil {
+	strike, ok = optionStrikeFromLabel(parts[len(parts)-2], quotePrecision)
+	if !ok {
 		return 0, 0, false, false
 	}
-	epoch, err := strconv.ParseInt(parts[len(parts)-3], 10, 64)
-	if err != nil {
+	expiryNano, ok = expiryNanoFromLabel(parts[len(parts)-3])
+	if !ok {
 		return 0, 0, false, false
 	}
-	return epoch * 1e9, strikeRaw, last == "C", true
+	return expiryNano, strike, last == "C", true
 }
 
 // normCDF is the standard normal distribution function.
@@ -216,10 +216,11 @@ type strikeAccumulator struct {
 // MeasureOptionSurface recovers the traded volatility surface from option
 // trades and the venue's published index.
 func (r *Run) MeasureOptionSurface(opts SurfaceOptions) (*OptionSurface, error) {
-	precision := float64(opts.QuotePrecision)
-	if precision <= 0 {
-		precision = 100000
+	quotePrecision := opts.QuotePrecision
+	if quotePrecision <= 0 {
+		quotePrecision = 100000
 	}
+	precision := float64(quotePrecision)
 	atmWindow := opts.ATMWindow
 	if atmWindow <= 0 {
 		atmWindow = 0.05
@@ -275,7 +276,7 @@ func (r *Run) MeasureOptionSurface(opts SurfaceOptions) (*OptionSurface, error) 
 			mu.Unlock()
 		case "Trade":
 			symbol := event.Symbol
-			if _, _, _, ok := optionTerms(symbol); !ok {
+			if _, _, _, ok := optionTerms(symbol, quotePrecision); !ok {
 				return
 			}
 			var payload tradePayload
@@ -309,7 +310,7 @@ func (r *Run) MeasureOptionSurface(opts SurfaceOptions) (*OptionSurface, error) 
 
 	const secondsPerYear = 365 * 24 * 3600
 	for _, trade := range trades {
-		expiry, strike, isCall, ok := optionTerms(trade.symbol)
+		expiry, strike, isCall, ok := optionTerms(trade.symbol, quotePrecision)
 		if !ok {
 			result.Skipped++
 			continue
