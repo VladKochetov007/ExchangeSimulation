@@ -53,6 +53,8 @@ expect_failure v2_r2_require_matching_revision "$stale_revision" "$current_revis
 
 write_metadata() {
 	local cell=$1
+	local cell_name
+	cell_name=$(basename "$cell")
 	local seed=$2
 	local log_mode=$3
 	local gomaxprocs=$4
@@ -60,7 +62,7 @@ write_metadata() {
 	local hypothesis_id=$6
 	local config_sha256
 	config_sha256=$(sha256sum -- "$config" | awk '{print $1}')
-	jq -n --arg cell "$cell" --argjson seed "$seed" --arg log_mode "$log_mode" \
+	jq -n --arg cell "$cell_name" --argjson seed "$seed" --arg log_mode "$log_mode" \
 		--argjson gomaxprocs "$gomaxprocs" --arg hypothesis_id "$hypothesis_id" \
 		--arg config_sha256 "$config_sha256" --arg binary_sha256 "$matching_binary_sha256" \
 		--arg source_revision "$current_revision" --arg prunegate_sha256 "$matching_prunegate_sha256" \
