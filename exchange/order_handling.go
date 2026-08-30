@@ -63,6 +63,20 @@ type bookSnapshotEvidence struct {
 	Bids []PriceLevel `json:"bids"`
 }
 
+// bookDeltaEvidence replaces the last high-volume map payload on the evidence
+// path, at roughly 870,000 events per simulated hour. Fields are in
+// lexicographic order of their JSON names, which is the order encoding/json
+// emits for a map, so the persisted bytes are unchanged.
+//
+// Do not reorder these fields. The order is the evidence contract.
+type bookDeltaEvidence struct {
+	HiddenQty  int64  `json:"hidden_qty"`
+	Price      int64  `json:"price"`
+	Side       string `json:"side"`
+	TotalQty   int64  `json:"total_qty"`
+	VisibleQty int64  `json:"visible_qty"`
+}
+
 // rejectedOrderEvidence keeps rejection evidence tied to the attempted order,
 // rather than making a failed response indistinguishable from a request that
 // was never delivered. The embedded Response preserves the established flat
@@ -540,14 +554,13 @@ func (e *DefaultExchange) publishBookUpdate(book *OrderBook, side Side, price in
 	}, e.Clock.NowUnixNano())
 
 	if log := e.getLogger(book.Symbol); log != nil {
-		deltaLog := map[string]any{
-			"side":        side.String(),
-			"price":       price,
-			"visible_qty": visible,
-			"hidden_qty":  hidden,
-			"total_qty":   totalQty,
-		}
-		log.LogEvent(e.Clock.NowUnixNano(), 0, "BookDelta", deltaLog)
+		log.LogEvent(e.Clock.NowUnixNano(), 0, "BookDelta", bookDeltaEvidence{
+			HiddenQty:  hidden,
+			Price:      price,
+			Side:       side.String(),
+			TotalQty:   totalQty,
+			VisibleQty: visible,
+		})
 	}
 }
 

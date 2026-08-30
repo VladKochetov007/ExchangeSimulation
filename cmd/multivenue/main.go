@@ -271,7 +271,12 @@ func run() (err error) {
 	// The no-op census is off unless EXSIM_CENSUS is set; when on, it goes to
 	// stderr so it never lands inside the evidence tree.
 	census.Write(os.Stderr)
-	if census.Enabled {
+	// Deliberately NOT gated on census.Enabled. The census itself allocates —
+	// its per-type site formats a %T string on every fallback event — so
+	// measuring allocations with counting on measures the probe as much as the
+	// program. Comparing two builds across a change in instrumentation is how a
+	// clean result gets read as a regression.
+	if os.Getenv("EXSIM_ALLOC") != "" {
 		// Mallocs is an exact cumulative count, unlike -allocprofile, which is
 		// sampled once per MemProfileRate bytes and whose run-to-run spread on
 		// this workload is about 1.9 % — wider than most changes worth judging.

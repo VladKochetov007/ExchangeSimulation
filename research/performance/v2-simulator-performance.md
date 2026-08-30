@@ -1341,3 +1341,70 @@ target left.
 
 Recorded as the next increment rather than guessed at: the coverage census now
 answers the question directly, so the next pass can be aimed rather than hoped.
+
+### The map payload converted — and the appender rejected
+
+Two changes were tested together and had to be separated, because only one of
+them works.
+
+**`bookDeltaEvidence` replaces the last high-volume `map[string]any` payload**
+(869,857 events per simulated hour) with a struct whose fields are declared in
+lexicographic order of their JSON names — the order `encoding/json` emits for a
+map. The test that matters is not "the struct matches `encoding/json`", which
+would be true of any field order, but "the struct matches **the map literal it
+replaced**", with the original map kept in the test as the oracle, plus a test
+that states the expected byte string outright.
+
+Measured like-for-like, census off, same tree otherwise, two runs each:
+
+| | mallocs (exact) | bytes allocated |
+|---|---:|---:|
+| map payload | 159,212,011 | 13.038 GB |
+| struct payload | 145,749,922 | 12.436 GB |
+| | **−8.46 %** | **−4.62 %** |
+
+Wall clock, on the one run whose A/A control was clean (+0.67 %): **−3.89 %**.
+
+**This does not contradict `68297a7`**, which rejected the same class of change.
+That commit converted *lower-volume* payloads and said so explicitly: "S2's
+payloads won because their event volume was an order of magnitude higher".
+`BookDelta` at 869,857 events per simulated hour is that order of magnitude.
+Its conclusion — that volume decides — is confirmed here, not overturned.
+
+**The byte-identical appenders are rejected.** `types.JSONAppender` and the
+`AppendJSON` implementations encoded correctly, were differentially tested
+against `encoding/json` over 40,000 randomised cases including HTML escaping,
+invalid UTF-8, `omitempty` and the `null`-versus-`[]` distinction, and kept the
+execution stream hash byte-identical. They also do nothing:
+
+| | mallocs | bytes | wall |
+|---|---:|---:|---:|
+| struct, appenders off | 145,750,169 | 12.436 GB | — |
+| struct, appenders on | 145,749,563 | 12.552 GB (+0.93 %) | +0.44 % (A/A +0.62 %) |
+
+Identical allocation count, 0.93 % more bytes, no wall-clock effect. The whole
+measured win belongs to removing the map; bypassing reflection on top of that
+adds nothing. Reverted rather than kept, because an encoder that must be held
+byte-identical to `encoding/json` forever is a permanent maintenance liability
+and it buys nothing.
+
+### Two instrument errors, both mine
+
+**The wrapper "regression" that never existed.** An appender on
+`instrumentLogEvent` measured as +3.3 % mallocs, and no change to it helped. The
+cause was not the wrapper: the census probe I had added to identify fallback
+types formats a `%T` string on **every** reflection-path event, so every
+measurement taken after adding it included the probe's own allocations. I was
+comparing two builds across a change in instrumentation. The exact-allocation
+counter is now gated on its own `EXSIM_ALLOC` variable rather than on
+`EXSIM_CENSUS`, so allocations can be measured without the counter that measures
+them.
+
+**A/A discipline applies to the host, not just the change.** The final
+struct-versus-map wall-clock A/B returned −0.40 % against an A/A control of
+**+5.52 %** — the machine had become an order of magnitude noisier than the
++0.62 % earlier in the same session. That run is discarded, not reported. The
+wall-clock attribution to the struct therefore rests on elimination: the
+combined change measured −3.89 % on a clean host, and the appender half measured
+nothing on a clean host. A direct struct-versus-map A/B should be repeated when
+the machine is quiet.
