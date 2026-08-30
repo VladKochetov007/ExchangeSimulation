@@ -43,3 +43,53 @@ func TestMeasureCalendarDeduplicatesIdentitiesAndMeasuresCycles(t *testing.T) {
 		t.Fatalf("shared expiry set = %v", result.SharedExpiryNanos)
 	}
 }
+
+func TestMeasureCalendarPreservesSameFileLifecycleOrder(t *testing.T) {
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/lifecycle.jsonl": {
+			`{"sim_ts":1,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":{"symbol":"ABC-FUT-1-U4142432f555344","instrument_type":"FUTURE","expiry_nano":1}}}`,
+			`{"sim_ts":1,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":{"symbol":"ABC-FUT-2-U4142432f555344","instrument_type":"FUTURE","expiry_nano":2}}}`,
+			`{"sim_ts":3,"client_id":0,"event":"instrument_settled","data":{"venue_id":"north","payload":{"symbol":"ABC-FUT-1-U4142432f555344","instrument_type":"FUTURE","expiry_nano":1}}}`,
+			`{"sim_ts":3,"client_id":0,"event":"instrument_settled","data":{"venue_id":"north","payload":{"symbol":"ABC-FUT-2-U4142432f555344","instrument_type":"FUTURE","expiry_nano":2}}}`,
+			`{"sim_ts":3,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":{"symbol":"ABC-FUT-3-U4142432f555344","instrument_type":"FUTURE","expiry_nano":3}}}`,
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureCalendar(CalendarOptions{})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if len(result.Venues) != 1 {
+		t.Fatalf("venues = %d, want one", len(result.Venues))
+	}
+	if got := result.Venues[0].MaxSimultaneousFutureExpiries; got != 2 {
+		t.Fatalf("peak future coexistence = %d, want 2", got)
+	}
+}
+
+func TestMeasureCalendarRejectsSameTimestampSettlementBeforeListing(t *testing.T) {
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/lifecycle.jsonl": {
+			`{"sim_ts":3,"client_id":0,"event":"instrument_settled","data":{"venue_id":"north","payload":{"symbol":"ABC-FUT-3-U4142432f555344","instrument_type":"FUTURE","expiry_nano":3}}}`,
+			`{"sim_ts":3,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":{"symbol":"ABC-FUT-3-U4142432f555344","instrument_type":"FUTURE","expiry_nano":3}}}`,
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureCalendar(CalendarOptions{})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	venue := result.Venues[0]
+	if venue.SettlementBeforeListing != 1 {
+		t.Fatalf("settlements before listing = %d, want one", venue.SettlementBeforeListing)
+	}
+	if venue.FuturesListed != 1 || venue.FuturesSettled != 0 {
+		t.Fatalf("same-timestamp reversed lifecycle counts = %+v", venue)
+	}
+}

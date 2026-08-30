@@ -306,6 +306,15 @@ queries skip blocks while broad interleaved-family queries skip none.  This is
 useful future analytics evidence but remains performance-only, with no
 scientific-path code merged.  The next feed comparison starts at `7fdf55f`.
 
+The feed then advanced to `4b370fa` and `52a3eca`.  I inspected only their
+new report sections.  They are performance-only measurement commits: a
+serialization-removal probe measured a 17.29% wall-time ceiling, and a
+fixed-width 88-byte hash probe was indistinguishable from that ceiling.  The
+new evidence changes the performance explanation (reflection/allocation is the
+simulator-CPU opportunity; compactness is primarily storage/analytics), but
+does not justify changing the scientific evidence path.  No code was merged or
+cherry-picked.  The next feed comparison starts at `52a3eca`.
+
 ## R2 successor review checkpoint — 2026-08-30
 
 Hooke (Sol-xhigh) reviewed the exact pushed R2 implementation `aed83a6` and
@@ -384,3 +393,21 @@ dev-607 trajectory is preserved but cannot be promoted as the corrected
 candidate. No dev-613, dev-617, parity control, or holdout cell is authorized
 until the fresh review, full tests, commit, and clean provenance-pinned rebuild
 complete. Holdouts `619/631/641` remain untouched.
+
+## Fresh independent review — `1829bd2` (2026-08-30)
+
+Schrodinger (Sol-xhigh) independently reviewed the exact pushed archive
+candidate `1829bd2c76b3274d27def0e49ccf387623289b91` and **REJECTED** it before
+any R2 cell ran.  The calendar census gave listings priority over settlements
+at equal timestamps, so its replay could report a coexistence peak that the
+physical record order did not contain and could hide a settlement-before-listing
+violation.  The archive adapter also did not run fresh derived-artifact
+recomputation before allowing raw JSONL pruning; stored passing sidecars alone
+were sufficient.
+
+The current corrective successor preserves same-file physical order and
+classifies a reversed same-timestamp lifecycle as a failed measurement.  Its
+archive path calls the clean `verify-v2-integrated-longrun-r2-cell.sh` raw
+recomputation immediately before any prune.  Regression tests pass for both
+cases.  The rejected verdict remains historical; the corrective successor
+requires a new independent review and full gate before development cells.

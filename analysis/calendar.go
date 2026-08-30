@@ -71,6 +71,12 @@ type calendarLifecycleEvent struct {
 	ordinal int64
 }
 
+type calendarEventPosition struct {
+	at      int64
+	file    string
+	ordinal int64
+}
+
 type calendarInstrumentKey struct {
 	venue  string
 	kind   string
@@ -115,9 +121,6 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 		if left.at != right.at {
 			return left.at < right.at
 		}
-		if left.listed != right.listed {
-			return left.listed
-		}
 		if left.venueID != right.venueID {
 			return left.venueID < right.venueID
 		}
@@ -129,7 +132,7 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 
 	type venueState struct {
 		audit           CalendarVenueAudit
-		listed          map[calendarInstrumentKey]int64
+		listed          map[calendarInstrumentKey]calendarEventPosition
 		settled         map[calendarInstrumentKey]bool
 		active          map[string]map[int64]int
 		settledExpiries map[string]map[int64]bool
@@ -142,7 +145,7 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 		}
 		state = &venueState{
 			audit:           CalendarVenueAudit{VenueID: venueID},
-			listed:          make(map[calendarInstrumentKey]int64),
+			listed:          make(map[calendarInstrumentKey]calendarEventPosition),
 			settled:         make(map[calendarInstrumentKey]bool),
 			active:          map[string]map[int64]int{"FUTURE": {}, "OPTION": {}},
 			settledExpiries: map[string]map[int64]bool{"FUTURE": {}, "OPTION": {}},
@@ -153,6 +156,16 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 
 	globalFutures := make(map[int64]struct{})
 	globalOptions := make(map[int64]struct{})
+	firstListings := make(map[calendarInstrumentKey]calendarEventPosition)
+	for _, event := range events {
+		if event.symbol == "" || event.expiry <= 0 || !event.listed {
+			continue
+		}
+		key := calendarInstrumentKey{venue: event.venueID, kind: event.kind, symbol: event.symbol}
+		if _, exists := firstListings[key]; !exists {
+			firstListings[key] = calendarEventPosition{at: event.at, file: event.file, ordinal: event.ordinal}
+		}
+	}
 	for _, event := range events {
 		state := stateFor(event.venueID)
 		if event.symbol == "" || event.expiry <= 0 {
@@ -169,7 +182,7 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 				}
 				continue
 			}
-			state.listed[key] = event.at
+			state.listed[key] = calendarEventPosition{at: event.at, file: event.file, ordinal: event.ordinal}
 			state.active[event.kind][event.expiry]++
 			if event.kind == "FUTURE" {
 				state.audit.FuturesListed++
@@ -181,13 +194,14 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 			continue
 		}
 
-		listedAt, listed := state.listed[key]
+		listedAt, listed := firstListings[key]
 		if !listed {
 			state.audit.SettlementWithoutListing++
 			continue
 		}
-		if event.at < listedAt {
+		if calendarPositionPrecedes(calendarEventPosition{at: event.at, file: event.file, ordinal: event.ordinal}, listedAt) {
 			state.audit.SettlementBeforeListing++
+			continue
 		}
 		if state.settled[key] {
 			if event.kind == "FUTURE" {
@@ -280,6 +294,16 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 	result.OptionExpiryNanos = sortedExpirySet(globalOptions)
 	result.SharedExpiryNanos = intersectExpiries(result.FuturesExpiryNanos, result.OptionExpiryNanos)
 	return result, nil
+}
+
+func calendarPositionPrecedes(left, right calendarEventPosition) bool {
+	if left.at != right.at {
+		return left.at < right.at
+	}
+	if left.file != right.file {
+		return left.file < right.file
+	}
+	return left.ordinal < right.ordinal
 }
 
 func expirySetFromEvents(events []calendarLifecycleEvent, venueID, kind string, listedOnly bool) []int64 {

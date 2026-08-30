@@ -8,7 +8,7 @@ Date: 2026-08-30
 
 Scientific parent: `e29f26b` (`autoresearch/ffa-ecology-gen0`)
 
-Performance feed last reviewed: `7fdf55f`
+Performance feed last reviewed: `52a3eca`
 
 ## Decision
 
@@ -177,7 +177,16 @@ Its encode/decode measurements are promising, but it is not an end-to-end,
 all-event, differential-tested replacement for the current JSON evidence
 contract, so it remains unmerged.  The branch then added `7fdf55f`, an indexed
 query prototype with differential query-class tests.  It remains performance
-only and unmerged; the next review starts at `7fdf55f`.
+only and unmerged; the next review starts at `7fdf55f`.  The next two commits,
+`4b370fa` and `52a3eca`, measured an Amdahl ceiling and decomposed it with a
+typed fixed-width hash probe.  Removing serialization and hashing entirely
+reduced the measured `dev-607-none` wall time by 17.29%; hashing an 88-byte
+typed payload instead of one byte was statistically indistinguishable from
+that ceiling.  The evidence therefore supports reflection/allocation removal
+as the simulator-CPU mechanism, while compactness remains a storage and
+analytics benefit.  These are measurement builds and do not establish a
+production replacement for the JSON evidence contract.  No code was merged;
+the next feed comparison starts at `52a3eca`.
 
 ## Independent semantic review and corrective work
 
@@ -219,6 +228,19 @@ The extractor now precommits and fail-closes on the selected 28-expiry set,
 identities, and at least three simultaneous futures and option maturities at
 each venue.  This review remains a rejected historical gate until the exact
 corrective commit receives a fresh independent review.
+
+The fresh independent review of exact commit
+`1829bd2c76b3274d27def0e49ccf387623289b91` was also **REJECTED** before any R2
+cell ran.  It found that the calendar census sorted all same-timestamp
+listings before settlements, allowing a synthetic coexistence peak and masking
+a settlement-before-listing sequence.  It also found that the raw archiver
+checked only stored booleans and expiry-array lengths before pruning; fabricated
+derived artifacts could therefore authorize deletion of raw JSONL without a
+fresh recomputation.  The corrective change removes the listing-priority sort,
+carries file/ordinal lifecycle positions into the identity pass, adds
+same-timestamp regression tests, and invokes the existing clean raw-evidence
+verifier immediately before prune.  No raw evidence was deleted and no
+development or holdout cell ran from the rejected commit.
 
 ## Gate status
 

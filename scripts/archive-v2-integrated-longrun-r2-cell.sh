@@ -25,6 +25,17 @@ fail() {
 	exit 1
 }
 
+analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
+
+verify_measurement_contract() {
+	if [[ "$cell_name" != dev-607-g8 ]]; then
+		[[ -x "$analyzer" ]] || fail "missing analyzer for measurement-contract verification: $analyzer"
+		MVANALYZE_BIN="$analyzer" \
+			"$root_dir/scripts/verify-v2-integrated-longrun-r2-cell.sh" "$cell" >/dev/null ||
+			fail "fresh raw-evidence recomputation did not verify the stored measurement contract"
+	fi
+}
+
 v2_r2_require_output_root "$v2_r2_output_root" || fail "R2 output root is not canonical"
 v2_r2_require_cell_path "$cell" || fail "cell is outside the canonical R2 evidence root or is symlinked: $cell"
 cell=$(realpath -e -- "$cell")
@@ -61,6 +72,7 @@ if [[ "$sealed_artifact_present" == true ]]; then
 	v2_r2_verify_raw_evidence_archive "$cell" || fail "existing raw archive state does not verify"
 	v2_r2_verify_attestation "$cell" || fail "external evidence attestation does not verify"
 	[[ "$prune" == true ]] || fail "raw archive already exists"
+	verify_measurement_contract
 	while IFS= read -r relative; do
 		v2_r2_validate_raw_path "$relative" || fail "manifest contains an unsafe raw path"
 		local_path="$cell/$relative"
@@ -167,6 +179,7 @@ mv -- "$archive_attestation_tmp" "$archive_attestation"
 v2_r2_verify_raw_evidence_archive "$cell" || fail "raw archive descriptor or attestation does not verify"
 
 if [[ "$prune" == true ]]; then
+	verify_measurement_contract
 	while IFS= read -r relative; do
 		v2_r2_validate_raw_path "$relative" || fail "manifest contains an unsafe raw path"
 		local_path="$cell/$relative"
