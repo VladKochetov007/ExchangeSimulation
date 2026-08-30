@@ -1091,3 +1091,44 @@ fewer records changes what those predicates see. Classified **AMBIGUOUS /
 REQUIRES SPECIFICATION**: the redundancy is measured and recorded, the decision
 whether a periodic snapshot stream may elide unchanged records belongs to the
 evidence contract, not to a performance pass.
+
+### C1 implemented — build the delta only for an audience that exists
+
+`MDPublisher.PublishBuilt(symbol, mdType, build func() any, timestamp)` calls
+`build` at most once, and only when a running subscriber will actually receive
+the message. `publishBookUpdate` now uses it.
+
+**What it deliberately does not change.** `Publish` increments `seqNum` whenever
+the symbol has any subscriber, *before* the per-subscriber MDType filter, so a
+fan-out with subscribers but no type match still consumes a sequence number.
+Suppressing the call would renumber the market-data stream other subscribers
+observe and could move the trajectory. Only construction is suppressed;
+sequence-number consumption is untouched. That is why the change is
+trajectory-neutral rather than merely "probably safe".
+
+**The closure is free.** The obvious objection is that a builder closure trades
+a `BookDelta` allocation for a closure allocation. Escape analysis says
+otherwise — `go build -gcflags=-m` reports
+`exchange/order_handling.go:534: func literal does not escape`, because `build`
+is called but never stored. Verified rather than assumed.
+
+| measurement | before | after | delta |
+|---|---:|---:|---|
+| allocated objects / sim-hour | 137,780,800 | 135,358,257 | **−2,422,543 (−1.76 %)** |
+| peak RSS (median of 2) | 742.6 MB | 739.5 MB | **−0.43 %** |
+| wall clock, 1 h sim, 4 reps | 25.96 s | 26.03 s | +0.26 % (A/A control +0.20 %) |
+| execution stream hash, seeds 900101 / 900102 | — | — | **byte-identical** |
+
+**Accepted on allocation and peak-RSS grounds, explicitly not on wall time.**
+The wall-clock difference is smaller than the A/A control measured in the same
+session, so this workload at `GOMAXPROCS=4` is not allocation-bound and the
+change must not be quoted as a speedup. The allocation reduction is a
+deterministic count, not a timing, and the RSS drop was consistent across both
+measured pairs.
+
+The honest reading is that the census found a large *count* of useless work
+whose *unit cost* is low. That is worth knowing in itself: it corrects the
+assumption, carried since the preview-matching result, that a big no-op class
+is automatically a big win. Frequency alone does not decide it — the earlier
+wins removed no-ops that each dragged a book clone or a mark resolution behind
+them, while a dropped `BookDelta` is 32 bytes and a lock acquisition.

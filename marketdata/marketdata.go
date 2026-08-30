@@ -210,6 +210,26 @@ var censusPublishByType = map[etypes.MDType]*census.Site{
 }
 
 func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, timestamp int64) {
+	p.publish(symbol, mdType, data, nil, timestamp)
+}
+
+// PublishBuilt is Publish for a payload that is expensive to construct. build
+// is called at most once, and only when a running subscriber will actually
+// receive the message; a fan-out that reaches nobody never builds anything.
+//
+// The census measured 82.5 % of book-delta fan-outs reaching no subscriber, so
+// the payload for roughly 16.6 M of them per 24-hour cell was constructed and
+// dropped. What this does NOT change is sequence-number consumption: Publish
+// increments seqNum whenever the symbol has any subscriber, before the
+// per-subscriber MDType filter, so a fan-out with subscribers but no type match
+// still consumes a number. Suppressing the call itself would renumber the
+// stream other subscribers observe and could move the trajectory; suppressing
+// only construction cannot.
+func (p *MDPublisher) PublishBuilt(symbol string, mdType etypes.MDType, build func() any, timestamp int64) {
+	p.publish(symbol, mdType, nil, build, timestamp)
+}
+
+func (p *MDPublisher) publish(symbol string, mdType etypes.MDType, data any, build func() any, timestamp int64) {
 	delivered := 0
 	if census.Enabled {
 		defer func() {
@@ -250,6 +270,11 @@ func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, tim
 		if gateway != nil {
 			if !gateway.IsRunning() {
 				continue
+			}
+			if build != nil {
+				// First subscriber that will really receive it: build once and
+				// reuse, since cloneMarketDataData gives each its own copy.
+				data, build = build(), nil
 			}
 			msgCopy := &etypes.MarketDataMsg{
 				Type:      mdType,
