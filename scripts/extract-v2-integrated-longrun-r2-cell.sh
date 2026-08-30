@@ -328,6 +328,7 @@ jq -n --argjson cdf_borrow_events "$cdf_borrow_events" \
 	--slurpfile calendar "$analysis_dir/calendar.json" \
 	--argjson expected_calendar_expiries "$expected_calendar_expiries" \
 	--argjson expected_calendar_completed_expiries "$expected_calendar_completed_expiries" \
+	--argjson expected_calendar_listing_timeline "$expected_calendar_listing_timeline" \
 	--arg contract "$contract_version" \
 	'def r($x): $x[0].result;
 	 {schema_version: 1, result: {contract: $contract,
@@ -395,6 +396,7 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 	--slurpfile postonly "$analysis_dir/postonly.json" \
 	--slurpfile liabilityhedger "$analysis_dir/liabilityhedger.json" \
 	--slurpfile activation "$analysis_dir/activation.json" \
+	--argjson expected_calendar_listing_timeline "$expected_calendar_listing_timeline" \
 	--arg contract "$contract_version" \
 	'def r($x): $x[0].result;
 	 def field($x; $name): (r($x) | getpath($name | split(".")));

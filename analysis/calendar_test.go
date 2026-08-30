@@ -80,6 +80,21 @@ func TestMeasureCalendarRecordsFirstListingForEveryExpiry(t *testing.T) {
 	}
 }
 
+func TestMeasureCalendarRejectsMalformedLifecyclePayload(t *testing.T) {
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/lifecycle.jsonl": {
+			`{"sim_ts":1,"client_id":0,"event":"instrument_listed","data":{"venue_id":"north","payload":"not-an-object"}}`,
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := run.MeasureCalendar(CalendarOptions{}); err == nil {
+		t.Fatal("malformed lifecycle payload was silently discarded")
+	}
+}
+
 func TestMeasureCalendarPreservesSameFileLifecycleOrder(t *testing.T) {
 	dir := writeRun(t, Report{}, map[string][]string{
 		"north/lifecycle.jsonl": {

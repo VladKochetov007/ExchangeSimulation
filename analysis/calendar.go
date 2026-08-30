@@ -108,6 +108,7 @@ type calendarListingTimeline struct {
 func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 	var mu sync.Mutex
 	events := make([]calendarLifecycleEvent, 0)
+	var malformedPayload string
 	scan := ScanOptions{
 		Events:        []string{"instrument_listed", "instrument_settled"},
 		Files:         opts.Files,
@@ -119,7 +120,12 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 			InstrumentType string `json:"instrument_type"`
 			ExpiryNano     int64  `json:"expiry_nano"`
 		}
-		if event.Decode(&payload) != nil {
+		if err := event.Decode(&payload); err != nil {
+			mu.Lock()
+			if malformedPayload == "" {
+				malformedPayload = fmt.Sprintf("%s:%d %s: %v", event.File, event.Ordinal, event.Name, err)
+			}
+			mu.Unlock()
 			return
 		}
 		if payload.InstrumentType != "FUTURE" && payload.InstrumentType != "OPTION" {
@@ -134,6 +140,9 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 		mu.Unlock()
 	}); err != nil {
 		return nil, err
+	}
+	if malformedPayload != "" {
+		return nil, fmt.Errorf("calendar: malformed lifecycle payload: %s", malformedPayload)
 	}
 	filesAtTimestamp := make(map[string]string)
 	for _, event := range events {

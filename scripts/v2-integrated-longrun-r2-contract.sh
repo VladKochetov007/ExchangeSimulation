@@ -11,18 +11,28 @@ v2_r2_expected_calendar_listing_timeline() {
 	local calendar_epoch_nano=1735689600000000000
 	local calendar_hour_nano=3600000000000
 	local calendar_end_nano=$((calendar_epoch_nano + 24 * calendar_hour_nano))
-	local schedule interval lead listing_nano expiry
+	# The exchange registers the one-second expiry/listing automation ticker at
+	# the calendar epoch. Its first callback therefore observes epoch-origin
+	# requests at epoch+1s; later whole-hour requests coincide exactly with a
+	# ticker callback. The expiry itself remains the calendar date, not the
+	# observation instant.
+	local listing_poll_offset_nano=1000000000
+	local schedule interval lead listing_nano expiry observed_listing_nano
 	local -A future_first option_first
 	for schedule in "3600000000000 7200000000000" "10800000000000 21600000000000" "21600000000000 43200000000000"; do
 		read -r interval lead <<<"$schedule"
 		listing_nano=$calendar_epoch_nano
 		while (( listing_nano <= calendar_end_nano )); do
 			expiry=$((listing_nano + lead))
-			if [[ -z ${future_first[$expiry]+set} || $listing_nano -lt ${future_first[$expiry]} ]]; then
-				future_first[$expiry]=$listing_nano
+			observed_listing_nano=$listing_nano
+			if (( observed_listing_nano == calendar_epoch_nano )); then
+				observed_listing_nano=$((observed_listing_nano + listing_poll_offset_nano))
 			fi
-			if [[ -z ${option_first[$expiry]+set} || $listing_nano -lt ${option_first[$expiry]} ]]; then
-				option_first[$expiry]=$listing_nano
+			if [[ -z ${future_first[$expiry]+set} || $observed_listing_nano -lt ${future_first[$expiry]} ]]; then
+				future_first[$expiry]=$observed_listing_nano
+			fi
+			if [[ -z ${option_first[$expiry]+set} || $observed_listing_nano -lt ${option_first[$expiry]} ]]; then
+				option_first[$expiry]=$observed_listing_nano
 			fi
 			listing_nano=$((listing_nano + interval))
 		done
