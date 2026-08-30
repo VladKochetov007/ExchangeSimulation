@@ -105,6 +105,12 @@ func (o *EuropeanOption) SetMarks(underlyingMark, markPremium int64) {
 	o.marks.Store(&optionMarks{underlying: underlyingMark, premium: markPremium})
 }
 
+// ClearMarks removes the last derivative mark when its declared underlying
+// reference is unavailable. A stale premium is not a valid risk input.
+func (o *EuropeanOption) ClearMarks() {
+	o.marks.Store(nil)
+}
+
 func (o *EuropeanOption) MarkPremium() (int64, error) {
 	marks, ok := o.loadMarks()
 	if !ok {

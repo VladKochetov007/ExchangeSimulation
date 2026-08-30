@@ -58,6 +58,7 @@ type MarkPriceUpdateEvent = etypes.MarkPriceUpdateEvent
 type PriceUnavailableEvent = etypes.PriceUnavailableEvent
 type ExpirySettlementPendingEvent = etypes.ExpirySettlementPendingEvent
 type FundingRateUpdateEvent = etypes.FundingRateUpdateEvent
+type FundingSettlementEvent = etypes.FundingSettlementEvent
 type OpenInterestEvent = etypes.OpenInterestEvent
 type FeeRevenueEvent = etypes.FeeRevenueEvent
 type MarginMode = etypes.MarginMode
@@ -103,25 +104,26 @@ const (
 )
 
 const (
-	RejectInsufficientBalance = etypes.RejectInsufficientBalance
-	RejectInvalidPrice        = etypes.RejectInvalidPrice
-	RejectInvalidQty          = etypes.RejectInvalidQty
-	RejectUnknownClient       = etypes.RejectUnknownClient
-	RejectUnknownInstrument   = etypes.RejectUnknownInstrument
-	RejectInstrumentExpired   = etypes.RejectInstrumentExpired
-	RejectPriceUnavailable    = etypes.RejectPriceUnavailable
-	RejectPostOnlyInvalid     = etypes.RejectPostOnlyInvalid
-	RejectPostOnlyWouldTake   = etypes.RejectPostOnlyWouldTake
-	RejectSelfTrade           = etypes.RejectSelfTrade
-	RejectDuplicateOrderID    = etypes.RejectDuplicateOrderID
-	RejectOrderNotFound       = etypes.RejectOrderNotFound
-	RejectOrderNotOwned       = etypes.RejectOrderNotOwned
-	RejectOrderAlreadyFilled  = etypes.RejectOrderAlreadyFilled
-	RejectFOKNotFilled        = etypes.RejectFOKNotFilled
-	RejectUnknownRequest      = etypes.RejectUnknownRequest
-	RejectExceedsPosition     = etypes.RejectExceedsPosition
-	RejectRateLimited         = etypes.RejectRateLimited
-	RejectOverloaded          = etypes.RejectOverloaded
+	RejectInsufficientBalance       = etypes.RejectInsufficientBalance
+	RejectInvalidPrice              = etypes.RejectInvalidPrice
+	RejectInvalidQty                = etypes.RejectInvalidQty
+	RejectUnknownClient             = etypes.RejectUnknownClient
+	RejectUnknownInstrument         = etypes.RejectUnknownInstrument
+	RejectInstrumentExpired         = etypes.RejectInstrumentExpired
+	RejectSettlementPendingExposure = etypes.RejectSettlementPendingExposure
+	RejectPriceUnavailable          = etypes.RejectPriceUnavailable
+	RejectPostOnlyInvalid           = etypes.RejectPostOnlyInvalid
+	RejectPostOnlyWouldTake         = etypes.RejectPostOnlyWouldTake
+	RejectSelfTrade                 = etypes.RejectSelfTrade
+	RejectDuplicateOrderID          = etypes.RejectDuplicateOrderID
+	RejectOrderNotFound             = etypes.RejectOrderNotFound
+	RejectOrderNotOwned             = etypes.RejectOrderNotOwned
+	RejectOrderAlreadyFilled        = etypes.RejectOrderAlreadyFilled
+	RejectFOKNotFilled              = etypes.RejectFOKNotFilled
+	RejectUnknownRequest            = etypes.RejectUnknownRequest
+	RejectExceedsPosition           = etypes.RejectExceedsPosition
+	RejectRateLimited               = etypes.RejectRateLimited
+	RejectOverloaded                = etypes.RejectOverloaded
 )
 
 const (

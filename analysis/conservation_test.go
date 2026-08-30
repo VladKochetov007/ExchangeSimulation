@@ -81,18 +81,24 @@ func TestConservationCatchesASelfInconsistentDelta(t *testing.T) {
 }
 
 func TestConservationReconcilesVenueStreamsAndChecksVenueArithmetic(t *testing.T) {
+	finalSequence := uint64(2)
 	report := Report{VenueLedgers: []VenueLedger{{
 		VenueID:       "north",
 		FeeRevenue:    map[string]int64{"USD": 10},
 		InsuranceFund: map[string]int64{"USD": -3},
+		FinalSequence: &finalSequence,
 	}}}
 	valid := []string{
 		logLine(1, 0, "venue_balance_change", map[string]any{
-			"timestamp": 1, "bucket": "fee_revenue", "asset": "USD", "reason": "taker_fee",
-			"old_balance": 0, "new_balance": 7, "delta": 7,
+			"timestamp": 1, "sequence": uint64(1), "bucket": "fee_revenue", "asset": "USD", "symbol": "ABC-PERP", "trade_id": 0, "reason": "taker_fee",
+			"old_balance": 0, "new_balance": 10, "delta": 10,
+		}),
+		logLine(1, 0, "venue_balance_change", map[string]any{
+			"timestamp": 1, "sequence": uint64(2), "bucket": "insurance_fund", "asset": "USD", "reason": "liquidation_deficit",
+			"old_balance": 0, "new_balance": -3, "delta": -3,
 		}),
 		logLine(1, 0, "fee_revenue", map[string]any{
-			"asset": "USD", "taker_fee": 10, "maker_fee": 0,
+			"timestamp": 1, "symbol": "ABC-PERP", "trade_id": 0, "asset": "USD", "taker_fee": 10, "maker_fee": 0,
 		}),
 	}
 	run, err := Open(writeRun(t, report, map[string][]string{"north/derivatives.jsonl": valid}))
@@ -109,8 +115,8 @@ func TestConservationReconcilesVenueStreamsAndChecksVenueArithmetic(t *testing.T
 
 	invalid := append([]string{}, valid...)
 	invalid[0] = logLine(1, 0, "venue_balance_change", map[string]any{
-		"timestamp": 1, "bucket": "fee_revenue", "asset": "USD", "reason": "taker_fee",
-		"old_balance": 0, "new_balance": 8, "delta": 7,
+		"timestamp": 1, "sequence": uint64(1), "bucket": "fee_revenue", "asset": "USD", "symbol": "ABC-PERP", "trade_id": 0, "reason": "taker_fee",
+		"old_balance": 0, "new_balance": 11, "delta": 10,
 	})
 	run, err = Open(writeRun(t, report, map[string][]string{"north/derivatives.jsonl": invalid}))
 	if err != nil {
@@ -122,6 +128,224 @@ func TestConservationReconcilesVenueStreamsAndChecksVenueArithmetic(t *testing.T
 	}
 	if result.Deltas.MalformedVenueRecords != 1 || result.Deltas.VenueBalanceMismatches != 1 {
 		t.Fatalf("venue old/new/delta inconsistency was accepted: %+v", result.Deltas)
+	}
+}
+
+func TestConservationRequiresTerminalVenueSequence(t *testing.T) {
+	venueMovement := func(sequence uint64, oldBalance, newBalance int64) string {
+		return logLine(1, 0, "venue_balance_change", map[string]any{
+			"timestamp": 1, "sequence": sequence, "bucket": "fee_revenue", "asset": "USD", "reason": "taker_fee",
+			"old_balance": oldBalance, "new_balance": newBalance, "delta": newBalance - oldBalance,
+		})
+	}
+	withMissingTerminal := Report{VenueLedgers: []VenueLedger{{
+		VenueID: "north", FeeRevenue: map[string]int64{"USD": 1},
+	}}}
+	run, err := Open(writeRun(t, withMissingTerminal, map[string][]string{
+		"north/derivatives.jsonl": {venueMovement(1, 0, 1)},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deltas.VenueTerminalSequenceMissing != 1 {
+		t.Fatalf("missing terminal venue sequence was accepted: %+v", result.Deltas)
+	}
+
+	finalSequence := uint64(3)
+	withOmittedPair := Report{VenueLedgers: []VenueLedger{{
+		VenueID: "north", FeeRevenue: map[string]int64{"USD": 1}, FinalSequence: &finalSequence,
+	}}}
+	run, err = Open(writeRun(t, withOmittedPair, map[string][]string{
+		// Sequence 2 could have been a balanced pair whose net venue balance
+		// returned to one. The terminal counter still proves it was omitted.
+		"north/derivatives.jsonl": {venueMovement(1, 0, 1)},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deltas.VenueSequenceMismatches != 1 {
+		t.Fatalf("omitted balanced venue pair was accepted: %+v", result.Deltas)
+	}
+}
+
+func TestConservationReconcilesRevenueByMechanism(t *testing.T) {
+	const instant = int64(1_000_000_000)
+	report := Report{VenueLedgers: []VenueLedger{{
+		VenueID:    "north",
+		FeeRevenue: map[string]int64{"USD": 14},
+	}}}
+	valid := []string{
+		logLine(instant, 0, "venue_balance_change", map[string]any{
+			"timestamp": instant, "sequence": uint64(1), "bucket": "fee_revenue", "asset": "USD", "trade_id": 0, "symbol": "ABC-PERP", "reason": "taker_fee",
+			"old_balance": 0, "new_balance": 10, "delta": 10,
+		}),
+		logLine(instant, 0, "fee_revenue", map[string]any{
+			"timestamp": instant, "symbol": "ABC-PERP", "trade_id": 0, "asset": "USD", "taker_fee": 10, "maker_fee": 0,
+		}),
+		logLine(instant, 7, "margin_interest", map[string]any{
+			"timestamp": instant, "client_id": 7, "asset": "USD", "wallet": "perp", "amount": 5,
+		}),
+		changeLine(instant, "north", 7, "", "interest_charge", [][3]any{{"USD", int64(1000), int64(-5)}}),
+		logLine(instant, 0, "venue_balance_change", map[string]any{
+			"timestamp": instant, "sequence": uint64(2), "bucket": "fee_revenue", "asset": "USD", "reason": "margin_interest",
+			"old_balance": 10, "new_balance": 15, "delta": 5,
+		}),
+		changeLine(instant, "north", 1, "ABC-PERP", "funding_settlement", [][3]any{{"USD", int64(1000), int64(-40)}}),
+		changeLine(instant, "north", 2, "ABC-PERP", "funding_settlement", [][3]any{{"USD", int64(1000), int64(41)}}),
+		logLine(instant, 0, "venue_balance_change", map[string]any{
+			"timestamp": instant, "sequence": uint64(3), "bucket": "fee_revenue", "asset": "USD", "symbol": "ABC-PERP", "reason": "funding_remainder",
+			"old_balance": 15, "new_balance": 14, "delta": -1,
+		}),
+	}
+	measure := func(t *testing.T, lines []string) *Conservation {
+		t.Helper()
+		run, err := Open(writeRun(t, report, map[string][]string{"north/derivatives.jsonl": lines}))
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		result, err := run.MeasureConservation(ConservationOptions{})
+		if err != nil {
+			t.Fatalf("measure: %v", err)
+		}
+		return result
+	}
+
+	result := measure(t, valid)
+	if result.Deltas.VenueBalanceMismatches != 0 || result.Deltas.FeeRevenueMismatches != 0 ||
+		result.Deltas.TradingFeeMismatches != 0 || result.Deltas.MarginInterestMismatches != 0 ||
+		result.Deltas.FundingRemainderMismatches != 0 || result.Deltas.UnsupportedRevenueRecords != 0 {
+		t.Fatalf("valid revenue classes were rejected: %+v", result.Deltas)
+	}
+	if result.FeesLogged["USD"] != 10 {
+		t.Fatalf("trade fee stream = %d, want 10", result.FeesLogged["USD"])
+	}
+
+	tradingMismatch := append([]string{}, valid...)
+	tradingMismatch[0] = logLine(instant, 0, "venue_balance_change", map[string]any{
+		"timestamp": instant, "sequence": uint64(1), "bucket": "fee_revenue", "asset": "USD", "trade_id": 0, "symbol": "ABC-PERP", "reason": "taker_fee",
+		"old_balance": 0, "new_balance": 9, "delta": 9,
+	})
+	if result = measure(t, tradingMismatch); result.Deltas.TradingFeeMismatches == 0 {
+		t.Fatalf("trading fee movement mismatch was accepted: %+v", result.Deltas)
+	}
+
+	marginMismatch := append([]string{}, valid...)
+	marginMismatch[3] = changeLine(instant, "north", 7, "", "interest_charge", [][3]any{{"USD", int64(1000), int64(-4)}})
+	if result = measure(t, marginMismatch); result.Deltas.MarginInterestMismatches == 0 {
+		t.Fatalf("margin-interest participant mismatch was accepted: %+v", result.Deltas)
+	}
+
+	fundingMismatch := append([]string{}, valid...)
+	fundingMismatch[7] = logLine(instant, 0, "venue_balance_change", map[string]any{
+		"timestamp": instant, "sequence": uint64(3), "bucket": "fee_revenue", "asset": "USD", "symbol": "ABC-PERP", "reason": "funding_remainder",
+		"old_balance": 15, "new_balance": 15, "delta": 0,
+	})
+	if result = measure(t, fundingMismatch); result.Deltas.FundingRemainderMismatches == 0 {
+		t.Fatalf("funding-remainder mismatch was accepted: %+v", result.Deltas)
+	}
+}
+
+func TestConservationRejectsUnsupportedFeeRevenueReason(t *testing.T) {
+	report := Report{VenueLedgers: []VenueLedger{{
+		VenueID:    "north",
+		FeeRevenue: map[string]int64{"USD": 2},
+	}}}
+	run, err := Open(writeRun(t, report, map[string][]string{"north/derivatives.jsonl": {
+		logLine(1, 0, "venue_balance_change", map[string]any{
+			"timestamp": 1, "sequence": uint64(1), "bucket": "fee_revenue", "asset": "USD", "trade_id": 0, "reason": "unclassified_revenue",
+			"old_balance": 0, "new_balance": 2, "delta": 2,
+		}),
+	}}))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.Deltas.UnsupportedRevenueRecords != 1 || result.Deltas.FeeRevenueMismatches != 1 {
+		t.Fatalf("unsupported revenue reason was accepted: %+v", result.Deltas)
+	}
+}
+
+func TestConservationRejectsDuplicateTradingFeeIdentity(t *testing.T) {
+	report := Report{VenueLedgers: []VenueLedger{{VenueID: "north", FeeRevenue: map[string]int64{"USD": 10}}}}
+	run, err := Open(writeRun(t, report, map[string][]string{"north/derivatives.jsonl": {
+		logLine(1, 0, "fee_revenue", map[string]any{
+			"timestamp": 1, "symbol": "ABC-PERP", "trade_id": 7, "asset": "USD", "taker_fee": 10, "maker_fee": 0,
+		}),
+		logLine(1, 0, "fee_revenue", map[string]any{
+			"timestamp": 1, "symbol": "ABC-PERP", "trade_id": 7, "asset": "USD", "taker_fee": 10, "maker_fee": 0,
+		}),
+		logLine(1, 0, "venue_balance_change", map[string]any{
+			"timestamp": 1, "sequence": uint64(1), "bucket": "fee_revenue", "asset": "USD", "symbol": "ABC-PERP", "trade_id": 7, "reason": "taker_fee",
+			"old_balance": 0, "new_balance": 10, "delta": 10,
+		}),
+	}}))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.Deltas.DuplicateFeeIdentities != 1 || result.Deltas.MalformedFeeRecords != 1 {
+		t.Fatalf("duplicate fee identity was accepted: %+v", result.Deltas)
+	}
+}
+
+func TestConservationRejectsDisconnectedVenueBalanceChain(t *testing.T) {
+	report := Report{VenueLedgers: []VenueLedger{{VenueID: "north", FeeRevenue: map[string]int64{"USD": 8}}}}
+	run, err := Open(writeRun(t, report, map[string][]string{"north/derivatives.jsonl": {
+		logLine(1, 0, "venue_balance_change", map[string]any{
+			"timestamp": 1, "sequence": uint64(1), "bucket": "fee_revenue", "asset": "USD", "symbol": "ABC-PERP", "trade_id": 1, "reason": "taker_fee",
+			"old_balance": 0, "new_balance": 5, "delta": 5,
+		}),
+		logLine(2, 0, "venue_balance_change", map[string]any{
+			"timestamp": 2, "sequence": uint64(2), "bucket": "fee_revenue", "asset": "USD", "symbol": "ABC-PERP", "trade_id": 2, "reason": "taker_fee",
+			"old_balance": 7, "new_balance": 10, "delta": 3,
+		}),
+	}}))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.Deltas.VenueBalanceMismatches != 0 || result.Deltas.FeeRevenueMismatches != 0 || result.Deltas.VenueChainMismatches != 1 {
+		t.Fatalf("disconnected venue chain was accepted: %+v", result.Deltas)
+	}
+}
+
+func TestConservationKeepsVenueIdentityInReconciliation(t *testing.T) {
+	report := Report{VenueLedgers: []VenueLedger{
+		{VenueID: "north", FeeRevenue: map[string]int64{"USD": 0}},
+		{VenueID: "south", FeeRevenue: map[string]int64{"USD": 10}},
+	}}
+	run, err := Open(writeRun(t, report, map[string][]string{"north/derivatives.jsonl": {
+		logLineAtVenue(1, 0, "north", "venue_balance_change", map[string]any{
+			"timestamp": 1, "sequence": uint64(1), "bucket": "fee_revenue", "asset": "USD", "symbol": "ABC-PERP", "trade_id": 1, "reason": "taker_fee",
+			"old_balance": 0, "new_balance": 10, "delta": 10,
+		}),
+	}}))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	result, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if result.Deltas.VenueBalanceMismatches != 2 || result.Deltas.FeeRevenueMismatches != 2 {
+		t.Fatalf("cross-venue relabeling was accepted: %+v", result.Deltas)
 	}
 }
 
@@ -138,6 +362,100 @@ func TestConservationChecksMovementOnlyParticipants(t *testing.T) {
 	}
 	if result.Deltas.ChainChecked != 1 || result.Deltas.ChainBroken != 1 {
 		t.Fatalf("participant missing from terminal report was accepted: %+v", result.Deltas)
+	}
+}
+
+func TestConservationRejectsFundingMutationOutsidePerpWallet(t *testing.T) {
+	run, err := Open(writeRun(t, Report{}, map[string][]string{
+		"north/derivatives.jsonl": {changeLine(1, "north", 7, "ABC-PERP", "funding_settlement", [][3]any{{"USD", int64(1000), int64(-5)}})},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deltas.FundingWalletMismatches != 0 {
+		t.Fatalf("perp funding was rejected: %+v", result.Deltas)
+	}
+
+	wrongWallet := `{"sim_ts":1,"client_id":7,"event":"balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"client_id":7,"symbol":"ABC-PERP","reason":"funding_settlement","changes":[{"asset":"USD","wallet":"spot","old_balance":1000,"new_balance":995,"delta":-5}]}}}`
+	run, err = Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": {wrongWallet}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deltas.FundingWalletMismatches != 1 {
+		t.Fatalf("funding mutation in spot wallet was accepted: %+v", result.Deltas)
+	}
+}
+
+func TestConservationRejectsVenueRecordsReorderedInTheirFile(t *testing.T) {
+	report := Report{VenueLedgers: []VenueLedger{{VenueID: "north", FeeRevenue: map[string]int64{"USD": 10}}}}
+	run, err := Open(writeRun(t, report, map[string][]string{"north/derivatives.jsonl": {
+		logLine(1, 0, "venue_balance_change", map[string]any{
+			"timestamp": 1, "sequence": uint64(2), "bucket": "fee_revenue", "asset": "USD", "symbol": "ABC-PERP", "trade_id": 2, "reason": "taker_fee",
+			"old_balance": 5, "new_balance": 10, "delta": 5,
+		}),
+		logLine(1, 0, "venue_balance_change", map[string]any{
+			"timestamp": 1, "sequence": uint64(1), "bucket": "fee_revenue", "asset": "USD", "symbol": "ABC-PERP", "trade_id": 1, "reason": "taker_fee",
+			"old_balance": 0, "new_balance": 5, "delta": 5,
+		}),
+	}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deltas.VenueOrderMismatches != 1 {
+		t.Fatalf("physically reordered venue stream was accepted: %+v", result.Deltas)
+	}
+}
+
+func TestConservationCountsFailedInterestBatch(t *testing.T) {
+	line := `{"sim_ts":1,"client_id":0,"event":"margin_interest_failed","data":{"venue_id":"north","payload":{"timestamp":1,"reason":"collateral interest arithmetic overflow"}}}`
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": {line}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deltas.MarginInterestFailures != 1 {
+		t.Fatalf("failed interest batch was not counted: %+v", result.Deltas)
+	}
+}
+
+func TestConservationBindsMarginInterestToTheChargedWallet(t *testing.T) {
+	const instant = int64(4_000_000_000)
+	report := Report{VenueLedgers: []VenueLedger{{VenueID: "north", FeeRevenue: map[string]int64{"USD": 5}}}}
+	lines := []string{
+		changeLine(instant, "north", 7, "", "interest_charge", [][3]any{{"USD", int64(100), int64(-5)}}),
+		logLine(instant, 7, "margin_interest", map[string]any{
+			"timestamp": instant, "client_id": 7, "asset": "USD", "wallet": "spot", "amount": 5,
+		}),
+		logLine(instant, 0, "venue_balance_change", map[string]any{
+			"timestamp": instant, "sequence": uint64(1), "bucket": "fee_revenue", "asset": "USD", "reason": "margin_interest",
+			"old_balance": 0, "new_balance": 5, "delta": 5,
+		}),
+	}
+	run, err := Open(writeRun(t, report, map[string][]string{"north/derivatives.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureConservation(ConservationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deltas.MarginInterestMismatches == 0 {
+		t.Fatalf("interest charged to perp but evidenced as spot was accepted: %+v", result.Deltas)
 	}
 }
 
@@ -202,7 +520,7 @@ func TestConservationAuditsPositionRoundingLinksAndRemainder(t *testing.T) {
 		"north/derivatives.jsonl": {
 			`{"sim_ts":1,"client_id":1,"event":"position_rounding","data":{"venue_id":"north","payload":{"timestamp":1,"client_id":1,"symbol":"ABC-FUT","asset":"USD","cash_adjustment":3,"remainder_numerator":-2,"precision":10}}}`,
 			`{"sim_ts":1,"client_id":1,"event":"balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"client_id":1,"symbol":"ABC-FUT","reason":"position_rounding","changes":[{"asset":"USD","wallet":"perp","old_balance":0,"new_balance":3,"delta":3}]}}}`,
-			`{"sim_ts":1,"client_id":0,"event":"venue_balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"bucket":"fee_revenue","asset":"USD","symbol":"ABC-FUT","reason":"position_rounding","old_balance":0,"new_balance":-3,"delta":-3}}}`,
+			`{"sim_ts":1,"client_id":0,"event":"venue_balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"sequence":1,"bucket":"fee_revenue","asset":"USD","symbol":"ABC-FUT","reason":"position_rounding","old_balance":0,"new_balance":-3,"delta":-3}}}`,
 		},
 	})
 	run, err := Open(dir)
@@ -261,7 +579,7 @@ func TestConservationRejectsPositionRoundingLinkViolations(t *testing.T) {
 	wrongWallet := measure(t, []string{
 		baseEvent,
 		`{"sim_ts":1,"client_id":1,"event":"balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"client_id":1,"symbol":"ABC-FUT","reason":"position_rounding","changes":[{"asset":"USD","wallet":"spot","old_balance":0,"new_balance":3,"delta":3}]}}}`,
-		`{"sim_ts":1,"client_id":0,"event":"venue_balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"bucket":"fee_revenue","asset":"USD","symbol":"ABC-FUT","reason":"position_rounding","old_balance":0,"new_balance":-3,"delta":-3}}}`,
+		`{"sim_ts":1,"client_id":0,"event":"venue_balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"sequence":1,"bucket":"fee_revenue","asset":"USD","symbol":"ABC-FUT","reason":"position_rounding","old_balance":0,"new_balance":-3,"delta":-3}}}`,
 	})
 	if wrongWallet.Valid || wrongWallet.AssetWalletFailures == 0 {
 		t.Fatalf("wrong wallet audit = %+v, want invalid asset/wallet link", wrongWallet)
@@ -270,7 +588,7 @@ func TestConservationRejectsPositionRoundingLinkViolations(t *testing.T) {
 	wrongAsset := measure(t, []string{
 		baseEvent,
 		`{"sim_ts":1,"client_id":1,"event":"balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"client_id":1,"symbol":"ABC-FUT","reason":"position_rounding","changes":[{"asset":"ABC","wallet":"perp","old_balance":0,"new_balance":3,"delta":3}]}}}`,
-		`{"sim_ts":1,"client_id":0,"event":"venue_balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"bucket":"fee_revenue","asset":"USD","symbol":"ABC-FUT","reason":"position_rounding","old_balance":0,"new_balance":-3,"delta":-3}}}`,
+		`{"sim_ts":1,"client_id":0,"event":"venue_balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"sequence":1,"bucket":"fee_revenue","asset":"USD","symbol":"ABC-FUT","reason":"position_rounding","old_balance":0,"new_balance":-3,"delta":-3}}}`,
 	})
 	if wrongAsset.Valid || wrongAsset.BalanceLinkFailures == 0 {
 		t.Fatalf("wrong asset audit = %+v, want invalid denomination link", wrongAsset)
@@ -279,7 +597,7 @@ func TestConservationRejectsPositionRoundingLinkViolations(t *testing.T) {
 	wrongBucket := measure(t, []string{
 		baseEvent,
 		`{"sim_ts":1,"client_id":1,"event":"balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"client_id":1,"symbol":"ABC-FUT","reason":"position_rounding","changes":[{"asset":"USD","wallet":"perp","old_balance":0,"new_balance":3,"delta":3}]}}}`,
-		`{"sim_ts":1,"client_id":0,"event":"venue_balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"bucket":"insurance_fund","asset":"USD","symbol":"ABC-FUT","reason":"position_rounding","old_balance":0,"new_balance":-3,"delta":-3}}}`,
+		`{"sim_ts":1,"client_id":0,"event":"venue_balance_change","data":{"venue_id":"north","payload":{"timestamp":1,"sequence":1,"bucket":"insurance_fund","asset":"USD","symbol":"ABC-FUT","reason":"position_rounding","old_balance":0,"new_balance":-3,"delta":-3}}}`,
 	})
 	if wrongBucket.Valid || wrongBucket.VenueBucketFailures == 0 {
 		t.Fatalf("wrong bucket audit = %+v, want invalid venue bucket link", wrongBucket)

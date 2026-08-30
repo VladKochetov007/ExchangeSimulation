@@ -75,8 +75,12 @@ func TestSettlementAuditRejectsExplicitlyUnavailablePrice(t *testing.T) {
 }
 
 func positionLine(ts int64, venue string, clientID uint64, symbol string, size, entry int64) string {
-	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"position_update","data":{"venue_id":%q,"payload":{"symbol":%q,"payload":{"timestamp":%d,"client_id":%d,"symbol":%q,"new_size":%d,"new_entry_price":%d}}}}`,
-		ts, clientID, venue, symbol, ts, clientID, symbol, size, entry)
+	return positionSideLine(ts, venue, clientID, symbol, size, entry, "BOTH")
+}
+
+func positionSideLine(ts int64, venue string, clientID uint64, symbol string, size, entry int64, positionSide string) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":%d,"event":"position_update","data":{"venue_id":%q,"payload":{"symbol":%q,"payload":{"timestamp":%d,"client_id":%d,"symbol":%q,"position_side":%q,"new_size":%d,"new_entry_price":%d}}}}`,
+		ts, clientID, venue, symbol, ts, clientID, symbol, positionSide, size, entry)
 }
 
 func expiryPayLine(ts int64, venue string, clientID uint64, symbol string, amount int64) string {

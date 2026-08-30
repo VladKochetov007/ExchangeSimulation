@@ -31,7 +31,10 @@ type MarginInterestEvent struct {
 	Timestamp int64  `json:"timestamp"`
 	ClientID  uint64 `json:"client_id"`
 	Asset     string `json:"asset"`
-	Amount    int64  `json:"amount"`
+	// Wallet binds the charge to the wallet that funded it; a total-only event
+	// cannot distinguish a spot/perp attribution error.
+	Wallet string `json:"wallet"`
+	Amount int64  `json:"amount"`
 }
 
 type TransferEvent struct {
@@ -160,6 +163,19 @@ type FundingRateUpdateEvent struct {
 	Rate        int64  `json:"rate"`
 	NextFunding int64  `json:"next_funding"`
 	Interval    int64  `json:"interval"`
+}
+
+// FundingSettlementEvent is emitted even when integer funding rounds to zero.
+// A balance-change stream alone cannot distinguish a valid zero-cash
+// settlement from a missed settlement deadline.
+type FundingSettlementEvent struct {
+	Timestamp     int64  `json:"timestamp"`
+	Symbol        string `json:"symbol"`
+	Rate          int64  `json:"rate"`
+	NextFunding   int64  `json:"next_funding"`
+	Interval      int64  `json:"interval"`
+	MarkPrice     int64  `json:"mark_price"`
+	BasePrecision int64  `json:"base_precision"`
 }
 
 // OpenInterestEvent logs total open interest for a symbol

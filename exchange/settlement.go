@@ -490,8 +490,8 @@ func (e *DefaultExchange) recordFeeRevenue(defaultAsset string, takerFee, makerF
 	if makerAsset == "" {
 		makerAsset = defaultAsset
 	}
-	e.moveVenueBalance(VenueFeeRevenue, takerAsset, takerFee.Amount, timestamp, book.Symbol, "taker_fee")
-	e.moveVenueBalance(VenueFeeRevenue, makerAsset, makerFee.Amount, timestamp, book.Symbol, "maker_fee")
+	e.moveVenueBalanceWithTradeID(VenueFeeRevenue, takerAsset, takerFee.Amount, timestamp, book.Symbol, book.SeqNum, "taker_fee")
+	e.moveVenueBalanceWithTradeID(VenueFeeRevenue, makerAsset, makerFee.Amount, timestamp, book.Symbol, book.SeqNum, "maker_fee")
 
 	log := e.getLogger(book.Symbol)
 	if log == nil {

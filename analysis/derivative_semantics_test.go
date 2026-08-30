@@ -20,6 +20,15 @@ func fundingRateStrictLine(ts, nextFunding, interval int64, venue string, rate i
 		ts, venue, ts, rate, nextFunding, interval)
 }
 
+func fundingSettlementLine(ts, nextFunding, interval int64, venue string, rate int64) string {
+	return fundingSettlementLineWithTerms(ts, nextFunding, interval, venue, rate, auditPrecision, auditPrecision)
+}
+
+func fundingSettlementLineWithTerms(ts, nextFunding, interval int64, venue string, rate, markPrice, basePrecision int64) string {
+	return fmt.Sprintf(`{"sim_ts":%d,"client_id":0,"event":"funding_settlement","data":{"venue_id":%q,"symbol":"ABC-PERP","payload":{"symbol":"ABC-PERP","payload":{"timestamp":%d,"symbol":"ABC-PERP","rate":%d,"next_funding":%d,"interval":%d,"mark_price":%d,"base_precision":%d}}}}`,
+		ts, venue, ts, rate, nextFunding, interval, markPrice, basePrecision)
+}
+
 func optionSettledLine(ts int64, venue, symbol string, strike, settle int64, isCall bool) string {
 	return optionSettledAtLine(ts, ts, venue, symbol, strike, settle, isCall)
 }
@@ -80,6 +89,151 @@ func TestFundingAuditCatchesUnbalancedAndMisdirectedSettlements(t *testing.T) {
 	result, _ = run.MeasureDerivativeSemantics(DerivativeAuditOptions{BasePrecision: auditPrecision})
 	if result.FundingSignWrong != 1 {
 		t.Errorf("a positive rate that charged nobody was accepted: %+v", result.Funding)
+	}
+}
+
+func TestFundingAuditAcceptsOneAggregateHedgeModePosting(t *testing.T) {
+	const instant = int64(2_000_000_000)
+	lines := []string{
+		positionSideLine(instant-10, "north", 1, "ABC-PERP", 10, 0, "LONG"),
+		positionSideLine(instant-10, "north", 1, "ABC-PERP", -4, 0, "SHORT"),
+		positionSideLine(instant-10, "north", 2, "ABC-PERP", -6, 0, "SHORT"),
+		fundingRateStrictLine(instant-1_000_000_000, instant, 1, "north", 5),
+		// The source aggregates the two hedge legs into one client-level
+		// settlement: the net position is long six contracts and pays 60. The
+		// other account receives that same amount, closing the contract-level
+		// transfer identity.
+		fundingPayLine(instant, "north", 1, -60),
+		fundingPayLine(instant, "north", 2, 60),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true, ExpectedFundingIntervalSeconds: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingBroken != 0 || result.FundingSignWrong != 0 || result.FundingMisdirected != 0 ||
+		result.FundingDuplicatePayments != 0 || result.FundingEvidenceFailures != 0 {
+		t.Fatalf("aggregate hedge-mode funding was rejected: %+v", result)
+	}
+}
+
+func TestFundingAuditDoesNotRequirePostingForNetZeroHedge(t *testing.T) {
+	const instant = int64(2_500_000_000)
+	lines := []string{
+		positionSideLine(instant-10, "north", 1, "ABC-PERP", 10, 0, "LONG"),
+		positionSideLine(instant-10, "north", 1, "ABC-PERP", -10, 0, "SHORT"),
+		fundingRateStrictLine(instant-1_000_000_000, instant, 1, "north", 5),
+		fundingSettlementLine(instant, instant+1_000_000_000, 1, "north", 5),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true, ExpectedFundingIntervalSeconds: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingMissingSettlements != 0 || result.FundingTimingFailures != 0 {
+		t.Fatalf("net-zero hedge was incorrectly required to post funding: %+v", result)
+	}
+}
+
+func TestFundingAuditDoesNotCountPostRateSameTimestampPositionAsMissingSettlement(t *testing.T) {
+	const instant = int64(3_500_000_000)
+	postRate := []string{
+		fundingRateStrictLine(instant, instant, 1, "north", 5),
+		// This position is published after the deadline's rate observation and
+		// cannot have been present for the settlement it names.
+		positionLine(instant, "north", 1, "ABC-PERP", auditPrecision, 0),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": postRate}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true, ExpectedFundingIntervalSeconds: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingMissingSettlements != 0 || result.FundingTimingFailures != 0 {
+		t.Fatalf("post-rate position was treated as pre-settlement exposure: %+v", result)
+	}
+
+	preRate := []string{
+		positionLine(instant, "north", 1, "ABC-PERP", auditPrecision, 0),
+		fundingRateStrictLine(instant, instant, 1, "north", 5),
+	}
+	run, err = Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": preRate}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true, ExpectedFundingIntervalSeconds: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingMissingSettlements != 1 {
+		t.Fatalf("pre-rate position did not require settlement evidence: %+v", result)
+	}
+}
+
+func TestFundingAuditAcceptsZeroCashSettlementMarker(t *testing.T) {
+	const instant = int64(4_000_000_000)
+	lines := []string{
+		positionLine(instant-10, "north", 1, "ABC-PERP", 1, 0),
+		fundingRateStrictLine(instant-1_000_000_000, instant, 1, "north", 5),
+		// The per-account fixed-point amount rounded to zero, so no balance
+		// change exists. The operation marker is the required evidence that the
+		// schedule nevertheless advanced.
+		fundingSettlementLine(instant, instant+1_000_000_000, 1, "north", 5),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Funding) != 1 || result.FundingMissingSettlements != 0 || result.FundingTimingFailures != 0 ||
+		result.FundingBroken != 0 || result.FundingSignWrong != 0 || result.FundingEvidenceFailures != 0 {
+		t.Fatalf("zero-cash settlement marker was not accepted: %+v", result)
+	}
+}
+
+func TestFundingAuditRejectsMarkerThatOmitsNonzeroPayments(t *testing.T) {
+	const instant = int64(5_000_000_000)
+	lines := []string{
+		positionLine(instant-10, "north", 1, "ABC-PERP", auditPrecision, 0),
+		positionLine(instant-10, "north", 2, "ABC-PERP", -auditPrecision, 0),
+		fundingRateStrictLine(instant-1_000_000_000, instant, 1, "north", 5000),
+		// The marker proves the operation ran, but both account postings are
+		// intentionally absent. A structural marker-only check must not pass.
+		fundingSettlementLineWithTerms(instant, instant+1_000_000_000, 1, "north", 5000, auditPrecision, auditPrecision),
+	}
+	run, err := Open(writeRun(t, Report{}, map[string][]string{"north/derivatives.jsonl": lines}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureDerivativeSemantics(DerivativeAuditOptions{
+		BasePrecision: auditPrecision, RequireExactReplay: true, ExpectedFundingIntervalSeconds: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FundingPaymentMismatches != 2 || result.FundingBroken != 1 || result.FundingSignWrong != 1 {
+		t.Fatalf("marker-only missing payments were accepted: %+v", result)
 	}
 }
 

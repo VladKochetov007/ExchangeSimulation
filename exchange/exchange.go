@@ -11,7 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	einstrument "exchange_sim/instrument"
 	ematching "exchange_sim/matching"
+	eprice "exchange_sim/price"
 	etypes "exchange_sim/types"
 )
 
@@ -20,6 +22,12 @@ type ExchangeBalance struct {
 	FeeRevenue    map[string]int64 `json:"fee_revenue"`
 	InsuranceFund map[string]int64 `json:"insurance_fund"`
 }
+
+// ErrSettlementPendingExposure is returned when an account still has a
+// position in a contract whose expiry settlement is unavailable. Until that
+// position is settled, admitting a new order or loan would let the account
+// increase obligations while its cross-margin collateral cannot be valued.
+var ErrSettlementPendingExposure = errors.New("account has settlement-pending exposure")
 
 // LiquidationHandler is called when a liquidation event occurs.
 type LiquidationHandler interface {
@@ -139,6 +147,10 @@ type DefaultExchange struct {
 	// changed without one can be detected, which no audit of the log itself
 	// could do: the log would be self-consistent and merely incomplete.
 	conservation *conservationTracker
+	// venueBalanceSequence is an exchange-local total order for venue ledger
+	// movements. Logs are split by symbol, so timestamps alone cannot recover
+	// the order of same-timestamp fee and insurance updates across files.
+	venueBalanceSequence uint64
 	// RequestPolicy meters and admits incoming requests. Nil leaves the venue
 	// unmetered, which is what scenarios without a published budget expect.
 	RequestPolicy                RequestPolicy
@@ -1223,12 +1235,23 @@ func (e *DefaultExchange) SettleFunding(perp *PerpFutures) error {
 		return fmt.Errorf("funding settlement: %w", ErrNoBookPrice)
 	}
 	e.mu.Lock()
-	settled := settleFunding(e.Positions, e.Clients, perp, e.Clock, buildFundingSink(e))
 	now := e.Clock.NowUnixNano()
+	settled, settleErr := settleFunding(e.Positions, e.Clients, perp, now, buildFundingSink(e))
+	settlementSnapshot := *perp.GetFundingRate()
+	if settled {
+		e.logFundingSettlementLocked(now, perp, settlementSnapshot)
+	}
 	e.mu.Unlock()
 	if !settled {
-		err := fmt.Errorf("funding settlement for %s: %w", perp.Symbol(), ErrNoBookPrice)
-		e.reportPriceUnavailable(now, perp.Symbol(), "funding_settlement", err)
+		if settleErr == nil {
+			settleErr = ErrNoBookPrice
+		}
+		err := fmt.Errorf("funding settlement for %s: %w", perp.Symbol(), settleErr)
+		if errors.Is(settleErr, ErrNoBookPrice) {
+			e.reportPriceUnavailable(now, perp.Symbol(), "funding_settlement", err)
+		} else {
+			e.reportFundingSettlementFailure(now, perp.Symbol(), settleErr)
+		}
 		return err
 	}
 	return nil
@@ -1520,29 +1543,41 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 	// calling it while already holding e.mu.RLock deadlocks when a writer waits.
 	type bookData struct {
 		symbol     string
+		book       *OrderBook
 		perp       *PerpFutures
 		markPrice  int64
 		indexPrice int64
 		hasIndex   bool
 		isPerp     bool
 	}
+	type optionData struct {
+		symbol           string
+		book             *OrderBook
+		option           *einstrument.EuropeanOption
+		underlyingPrice  int64
+		premium          int64
+		updateErr        error
+		skippedLifecycle bool
+		ready            bool
+	}
 	type deferredPrice struct {
-		symbol    string
-		operation string
-		err       error
-		perp      *PerpFutures
-		isPerp    bool
+		symbol          string
+		operation       string
+		err             error
+		perp            *PerpFutures
+		isPerp          bool
+		fundingSnapshot FundingRate
 	}
 	e.mu.RLock()
 	// Symbol order: this sweep publishes marks and can call margin and
-	// liquidation, so the order books are visited in decides the order those
-	// effects land in.
+	// liquidation, so the order books are visited deterministically.
 	markSymbols := make([]string, 0, len(e.Books))
 	for symbol := range e.Books {
 		markSymbols = append(markSymbols, symbol)
 	}
 	slices.Sort(markSymbols)
 	candidates := make([]bookData, 0, len(e.Books))
+	optionCandidates := make([]optionData, 0)
 	deferred := make([]deferredPrice, 0)
 	for _, symbol := range markSymbols {
 		book := e.Books[symbol]
@@ -1551,6 +1586,9 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 			// in UpdateDerivativeMarks, but mark/funding/liquidation work must
 			// not continue merely because the declared reference is delayed.
 			continue
+		}
+		if option, ok := book.Instrument.(*einstrument.EuropeanOption); ok && timestamp < option.ExpiryNano() {
+			optionCandidates = append(optionCandidates, optionData{symbol: symbol, book: book, option: option})
 		}
 		// Perpetuals and anything exposing the perp margin core (dated
 		// futures) get mark updates, margin calls, and liquidation sweeps.
@@ -1583,7 +1621,7 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 			continue
 		}
 		candidates = append(candidates, bookData{
-			symbol:     book.Symbol,
+			symbol: book.Symbol, book: book,
 			perp:       perp,
 			markPrice:  markPrice,
 			indexPrice: indexPrice,
@@ -1592,34 +1630,33 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		})
 	}
 	e.mu.RUnlock()
-	for _, d := range deferred {
-		// A previously valid mark is not silently retained as the current mark
-		// after its declared source becomes unusable. MarkAvailable is the
-		// availability contract; the numeric fields remain diagnostics only
-		// when it is false.
-		e.mu.Lock()
-		d.perp.ClearMarkReferences()
-		fundingSnapshot := *d.perp.GetFundingRate()
-		e.mu.Unlock()
-		e.reportPriceUnavailable(timestamp, d.symbol, d.operation, d.err)
-		if d.isPerp {
-			e.MDPublisher.PublishFunding(d.symbol, &fundingSnapshot, timestamp)
+	for index := range optionCandidates {
+		candidate := &optionCandidates[index]
+		candidate.underlyingPrice, candidate.updateErr = e.derivativeUnderlyingPrice(candidate.option)
+		if candidate.updateErr != nil {
+			continue
 		}
+		yearsLeft := float64(candidate.option.ExpiryNano()-timestamp) / float64(365*24*time.Hour)
+		candidate.premium = eprice.Black76Premium(candidate.underlyingPrice, candidate.option.Strike, candidate.option.IV, yearsLeft, candidate.option.IsCall)
 	}
 
-	// Symbol order, not map order: buildAccountMarginProfile prices
-	// non-trigger symbols from their last STORED mark, so whether a
-	// cross-margined sibling sees this tick's fresh mark or the previous
-	// tick's stale one depends on processing order — and with it, whether a
-	// borderline liquidation fires. Same seed, same state, every run.
+	// Symbol order, not map order: all successful marks and all availability
+	// clears are committed in one critical section before any risk sweep. A
+	// cross-margined portfolio must be valued against one coherent mark set;
+	// actors must not observe a mixture of this tick's marks and last tick's
+	// marks while the batch is being installed.
 	slices.SortFunc(candidates, func(a, b bookData) int { return cmp.Compare(a.symbol, b.symbol) })
 
 	type perpUpdate struct {
-		symbol     string
-		perp       *PerpFutures
-		markPrice  int64
-		indexPrice int64
-		isPerp     bool
+		symbol          string
+		perp            *PerpFutures
+		markPrice       int64
+		indexPrice      int64
+		isPerp          bool
+		ready           bool
+		skippedPending  bool
+		updateErr       error
+		fundingSnapshot FundingRate
 	}
 	updates := make([]perpUpdate, 0, len(candidates))
 	for _, c := range candidates {
@@ -1639,27 +1676,95 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		})
 	}
 
-	for _, u := range updates {
-		// FundingRate fields are mutated under e.mu only, and subscribers get
-		// a snapshot copy — publishing the live pointer would let actor
-		// goroutines read fields mid-update.
-		e.mu.Lock()
-		var updateErr error
+	e.mu.Lock()
+	for i := range deferred {
+		d := &deferred[i]
+		// A previously valid mark is not silently retained as the current mark
+		// after its declared source becomes unusable. MarkAvailable is the
+		// availability contract; the numeric fields remain diagnostics only
+		// when it is false.
+		d.perp.ClearMarkReferences()
+		d.fundingSnapshot = *d.perp.GetFundingRate()
+	}
+	for i := range updates {
+		u := &updates[i]
+		if _, pending := e.settlementPending[u.symbol]; pending ||
+			e.Books[u.symbol] != candidates[i].book {
+			// Expiry can win the lock after price collection but before this
+			// commit. Do not resurrect a halted contract's mark in that race.
+			u.skippedPending = true
+			u.fundingSnapshot = *u.perp.GetFundingRate()
+			continue
+		}
 		if u.isPerp {
-			updateErr = u.perp.UpdateFundingRate(u.indexPrice, u.markPrice)
+			u.updateErr = u.perp.UpdateFundingRate(u.indexPrice, u.markPrice)
 		} else {
 			u.perp.UpdateMarkReferences(u.indexPrice, u.markPrice)
 		}
-		fundingSnapshot := *u.perp.GetFundingRate()
-		e.mu.Unlock()
-		if updateErr != nil {
-			e.reportPriceUnavailable(timestamp, u.symbol, "perp_funding", updateErr)
-			if u.isPerp {
-				e.MDPublisher.PublishFunding(u.symbol, &fundingSnapshot, timestamp)
+		u.fundingSnapshot = *u.perp.GetFundingRate()
+		u.ready = u.updateErr == nil
+	}
+	for index := range optionCandidates {
+		candidate := &optionCandidates[index]
+		if candidate.updateErr != nil {
+			liveBook := e.Books[candidate.symbol]
+			if liveBook == candidate.book && e.Instruments[candidate.symbol] == candidate.option {
+				// Once the declared underlying is unavailable, the previous
+				// premium cannot remain a valid risk mark. Clear it while the
+				// candidate identity is protected by the exchange lock.
+				candidate.option.ClearMarks()
 			}
 			continue
 		}
+		liveBook := e.Books[candidate.symbol]
+		if _, pending := e.settlementPending[candidate.symbol]; pending ||
+			liveBook == nil || liveBook != candidate.book ||
+			e.Instruments[candidate.symbol] != candidate.option ||
+			timestamp >= candidate.option.ExpiryNano() {
+			candidate.skippedLifecycle = true
+			continue
+		}
+		candidate.option.SetMarks(candidate.underlyingPrice, candidate.premium)
+		candidate.ready = true
+	}
+	e.mu.Unlock()
+	for _, d := range deferred {
+		e.reportPriceUnavailable(timestamp, d.symbol, d.operation, d.err)
+		if d.isPerp {
+			e.MDPublisher.PublishFunding(d.symbol, &d.fundingSnapshot, timestamp)
+		}
+	}
+	for _, u := range updates {
+		if u.updateErr != nil && !u.skippedPending {
+			e.reportPriceUnavailable(timestamp, u.symbol, "perp_funding", u.updateErr)
+			if u.isPerp {
+				e.MDPublisher.PublishFunding(u.symbol, &u.fundingSnapshot, timestamp)
+			}
+			continue
+		}
+	}
+	for _, candidate := range optionCandidates {
+		if candidate.updateErr != nil && !candidate.skippedLifecycle {
+			e.reportPriceUnavailable(timestamp, candidate.symbol, "derivative_mark", candidate.updateErr)
+			continue
+		}
+		if !candidate.ready {
+			continue
+		}
+		if log := e.getLogger(candidate.symbol); log != nil {
+			log.LogEvent(timestamp, 0, "mark_price_update", MarkPriceUpdateEvent{
+				Timestamp: timestamp, Symbol: candidate.symbol,
+				MarkPrice: candidate.premium, IndexPrice: candidate.underlyingPrice,
+			})
+		}
+	}
 
+	// Publish the completed mark set in canonical symbol order. Publication is
+	// observability only; it cannot interleave with a risk decision below.
+	for _, u := range updates {
+		if !u.ready {
+			continue
+		}
 		if log := e.getLogger(u.symbol); log != nil {
 			log.LogEvent(timestamp, 0, "mark_price_update", MarkPriceUpdateEvent{
 				Timestamp:  timestamp,
@@ -1672,19 +1777,25 @@ func (e *DefaultExchange) updateAllPerpPrices() {
 		// Funding is a perpetual-only concept; dated futures reuse the rate
 		// struct purely as mark-price state.
 		if u.isPerp {
-			e.MDPublisher.PublishFunding(u.symbol, &fundingSnapshot, timestamp)
+			e.MDPublisher.PublishFunding(u.symbol, &u.fundingSnapshot, timestamp)
 			if log := e.getLogger(u.symbol); log != nil {
 				log.LogEvent(timestamp, 0, "funding_rate_update", FundingRateUpdateEvent{
 					Timestamp:   timestamp,
 					Symbol:      u.symbol,
-					Rate:        fundingSnapshot.Rate,
-					NextFunding: fundingSnapshot.NextFunding,
-					Interval:    fundingSnapshot.Interval,
+					Rate:        u.fundingSnapshot.Rate,
+					NextFunding: u.fundingSnapshot.NextFunding,
+					Interval:    u.fundingSnapshot.Interval,
 				})
 			}
 		}
+	}
 
-		e.CheckLiquidations(u.symbol, u.perp, u.markPrice)
+	// Only now evaluate risk, after every successful candidate has published
+	// its mark into the shared portfolio state.
+	for _, u := range updates {
+		if u.ready {
+			e.CheckLiquidations(u.symbol, u.perp, u.markPrice)
+		}
 	}
 }
 
@@ -1707,74 +1818,6 @@ func marginCore(inst Instrument) *PerpFutures {
 		return pp.Perp()
 	}
 	return nil
-}
-
-// ChargeCollateralInterest charges interest on borrowed amounts (one minute of time).
-func (e *DefaultExchange) ChargeCollateralInterest() {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	const dtSeconds = 60
-	const secondsPerYear = 365 * 24 * 3600
-	timestamp := e.Clock.NowUnixNano()
-
-	// Client-ID and asset order: the debits are independent, but the emitted
-	// balance/interest event stream must be identical run to run.
-	clientIDs := make([]uint64, 0, len(e.Clients))
-	for clientID := range e.Clients {
-		clientIDs = append(clientIDs, clientID)
-	}
-	slices.Sort(clientIDs)
-
-	for _, clientID := range clientIDs {
-		client := e.Clients[clientID]
-		assets := make([]string, 0, len(client.Borrowed))
-		for asset := range client.Borrowed {
-			assets = append(assets, asset)
-		}
-		slices.Sort(assets)
-		for _, asset := range assets {
-			borrowed := client.Borrowed[asset]
-			if borrowed <= 0 {
-				continue
-			}
-			interest := borrowed * e.CollateralRate * dtSeconds / (int64(secondsPerYear) * 10000)
-			if interest > 0 {
-				// Charge each wallet its attributed share of the debt: billing a
-				// spot-credited loan's interest to the perp wallet drives a
-				// spot-only borrower's empty perp balance negative every sweep.
-				spotShare := int64(0)
-				if spotPortion := client.BorrowedSpotPortion(asset); spotPortion > 0 {
-					spotShare = interest * spotPortion / borrowed
-				}
-				perpShare := interest - spotShare
-
-				changes := make([]BalanceDelta, 0, 2)
-				if perpShare > 0 {
-					oldPerp := client.PerpBalances[asset]
-					client.PerpBalances[asset] -= perpShare
-					changes = append(changes, perpDelta(asset, oldPerp, client.PerpBalances[asset]))
-				}
-				if spotShare > 0 {
-					oldSpot := client.Balances[asset]
-					client.Balances[asset] -= spotShare
-					changes = append(changes, spotDelta(asset, oldSpot, client.Balances[asset]))
-				}
-				e.moveVenueBalance(VenueFeeRevenue, asset, interest, timestamp, "", "margin_interest")
-
-				logBalanceChange(e, timestamp, client.ID, "", "interest_charge", changes)
-
-				if log := e.getLogger("_global"); log != nil {
-					log.LogEvent(timestamp, client.ID, "margin_interest", MarginInterestEvent{
-						Timestamp: timestamp,
-						ClientID:  client.ID,
-						Asset:     asset,
-						Amount:    interest,
-					})
-				}
-			}
-		}
-	}
 }
 
 // positionUPnL returns unrealized PnL for a position marked at markPrice.
@@ -1814,6 +1857,15 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 	for _, symbol := range symbols {
 		book := e.Books[symbol]
 		if _, pending := e.settlementPending[symbol]; pending {
+			for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
+				position := e.Positions.GetPositionBySide(clientID, symbol, side)
+				if position != nil && position.Size != 0 {
+					// Retained pending exposure is not an economic zero. No
+					// valid mark exists, so fail the whole account profile closed
+					// instead of allowing active sibling risk to ignore it.
+					return accountMarginProfile{}, fmt.Errorf("cross-margin exposure for %s is settlement-pending", symbol)
+				}
+			}
 			continue
 		}
 		perp := marginCore(book.Instrument)
@@ -1831,9 +1883,18 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 		if perp.QuoteAsset() != quote {
 			continue
 		}
+		positions := make([]*Position, 0, 3)
+		for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
+			pos := e.Positions.GetPositionBySide(clientID, symbol, side)
+			if pos != nil && pos.Size != 0 {
+				positions = append(positions, pos)
+			}
+		}
+		if len(positions) == 0 {
+			continue
+		}
 		mark := triggerMark
-		if symbol == triggerSymbol {
-		} else {
+		if symbol != triggerSymbol {
 			fundingRate := perp.GetFundingRate()
 			mark = fundingRate.MarkPrice
 			if !fundingRate.MarkAvailable {
@@ -1845,11 +1906,7 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 			}
 		}
 		precision := perp.BasePrecision()
-		for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
-			pos := e.Positions.GetPositionBySide(clientID, symbol, side)
-			if pos == nil || pos.Size == 0 {
-				continue
-			}
+		for _, pos := range positions {
 			p.EquityContribution += e.positionUPnL(pos, mark, precision)
 			notional := etypes.AbsMulDiv(pos.Size, mark, precision)
 			p.Notional += notional
@@ -1858,6 +1915,20 @@ func (e *DefaultExchange) buildAccountMarginProfile(clientID uint64, quote, trig
 		}
 	}
 	return p, nil
+}
+
+// clientHasSettlementPendingExposureLocked is the account-wide lifecycle
+// boundary for pending settlement. Caller must hold e.mu.Lock().
+func (e *DefaultExchange) clientHasSettlementPendingExposureLocked(clientID uint64) bool {
+	for symbol := range e.settlementPending {
+		for _, side := range []PositionSide{PositionBoth, PositionLong, PositionShort} {
+			position := e.Positions.GetPositionBySide(clientID, symbol, side)
+			if position != nil && position.Size != 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // CheckPositionMarginerLiquidations sweeps accounts holding positions on
@@ -2017,7 +2088,7 @@ func (e *DefaultExchange) CheckLiquidations(symbol string, perp *PerpFutures, ma
 		profile, err := e.buildAccountMarginProfile(clientID, quote, symbol, markPrice)
 		if err != nil {
 			e.reportPriceUnavailable(e.Clock.NowUnixNano(), symbol, "liquidation", err)
-			return
+			continue
 		}
 		equityContribution, notional := profile.EquityContribution, profile.Notional
 		// Borrowed quote is cash in the wallet but a matching liability: counting
@@ -2291,7 +2362,13 @@ func (e *DefaultExchange) CheckAndSettleFunding() {
 		if fundingRate.NextFunding == 0 {
 			// First tick after start: anchor the schedule instead of settling
 			// a full interval's funding at t=0.
-			fundingRate.NextFunding = now + fundingRate.Interval*1e9
+			nextFunding, ok := nextFundingTimestamp(now, fundingRate.Interval)
+			if !ok {
+				e.mu.Unlock()
+				e.reportFundingSettlementFailure(now, perp.Symbol(), ErrFundingArithmetic)
+				continue
+			}
+			fundingRate.NextFunding = nextFunding
 			e.mu.Unlock()
 			continue
 		}
@@ -2299,15 +2376,63 @@ func (e *DefaultExchange) CheckAndSettleFunding() {
 			e.mu.Unlock()
 			continue
 		}
-		if !settleFunding(e.Positions, e.Clients, perp, e.Clock, buildFundingSink(e)) {
+		settlementTimestamp := e.Clock.NowUnixNano()
+		settled, settleErr := settleFunding(e.Positions, e.Clients, perp, settlementTimestamp, buildFundingSink(e))
+		if !settled {
 			e.mu.Unlock()
-			e.reportPriceUnavailable(now, perp.Symbol(), "funding_settlement", fmt.Errorf("funding mark for %s: %w", perp.Symbol(), ErrNoBookPrice))
+			if settleErr == nil {
+				settleErr = ErrNoBookPrice
+			}
+			if errors.Is(settleErr, ErrNoBookPrice) {
+				e.reportPriceUnavailable(now, perp.Symbol(), "funding_settlement", fmt.Errorf("funding mark for %s: %w", perp.Symbol(), settleErr))
+			} else {
+				e.reportFundingSettlementFailure(now, perp.Symbol(), settleErr)
+			}
 			continue
 		}
 		fundingSnapshot := *fundingRate
+		e.logFundingSettlementLocked(settlementTimestamp, perp, fundingSnapshot)
 		e.mu.Unlock()
-
 		e.MDPublisher.PublishFunding(perp.Symbol(), &fundingSnapshot, now)
+	}
+}
+
+// logFundingSettlementLocked records the settlement marker while the same
+// exchange lock still protects the balance mutation and schedule advance.
+// The marker is part of the causal evidence contract, not an asynchronous
+// after-the-fact notification. Caller must hold e.mu.Lock().
+func (e *DefaultExchange) logFundingSettlementLocked(timestamp int64, perp *PerpFutures, funding FundingRate) {
+	if perp == nil {
+		return
+	}
+	log := e.getLogger(perp.Symbol())
+	if log == nil {
+		log = e.getLogger("_global")
+	}
+	if log == nil {
+		return
+	}
+	log.LogEvent(timestamp, 0, "funding_settlement", FundingSettlementEvent{
+		Timestamp: timestamp, Symbol: perp.Symbol(), Rate: funding.Rate,
+		NextFunding: funding.NextFunding, Interval: funding.Interval,
+		MarkPrice: funding.MarkPrice, BasePrecision: perp.BasePrecision(),
+	})
+}
+
+func (e *DefaultExchange) reportFundingSettlementFailure(now int64, symbol string, err error) {
+	if err == nil {
+		return
+	}
+	log := e.getLogger(symbol)
+	if log == nil {
+		log = e.getLogger("_global")
+	}
+	if log != nil {
+		log.LogEvent(now, 0, "funding_settlement_failed", map[string]any{
+			"timestamp": now,
+			"symbol":    symbol,
+			"reason":    err.Error(),
+		})
 	}
 }
 
@@ -2319,6 +2444,9 @@ func (e *DefaultExchange) BorrowMargin(clientID uint64, asset string, amount int
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	client := e.Clients[clientID]
+	if client != nil && e.clientHasSettlementPendingExposureLocked(clientID) {
+		return ErrSettlementPendingExposure
+	}
 	ctx := buildBorrowContext(e, client, clientID)
 	return e.BorrowingMgr.BorrowMargin(ctx, asset, amount, reason)
 }

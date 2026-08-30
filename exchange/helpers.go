@@ -1,6 +1,11 @@
 package exchange
 
-import ebook "exchange_sim/book"
+import (
+	"fmt"
+
+	ebook "exchange_sim/book"
+	etypes "exchange_sim/types"
+)
 
 // btcPrecision is the number of satoshis per bitcoin.
 // Used in collateral calculations. TODO: use instrument.BasePrecision() instead.
@@ -85,8 +90,14 @@ func buildFundingSink(e *DefaultExchange) fundingEventSink {
 		logBalance: func(timestamp int64, clientID uint64, symbol, reason string, changes []BalanceDelta) {
 			logBalanceChange(e, timestamp, clientID, symbol, reason, changes)
 		},
-		recordRevenue: func(asset string, amount int64) {
-			e.moveVenueBalance(VenueFeeRevenue, asset, amount, e.Clock.NowUnixNano(), "", "funding_remainder")
+		validateRevenue: func(asset string, amount int64) error {
+			if _, ok := etypes.TryAdd(e.ExchangeBalance.FeeRevenue[asset], amount); !ok {
+				return fmt.Errorf("%w: venue revenue for %s", ErrFundingArithmetic, asset)
+			}
+			return nil
+		},
+		recordRevenue: func(symbol, asset string, timestamp, amount int64) {
+			e.moveVenueBalance(VenueFeeRevenue, asset, amount, timestamp, symbol, "funding_remainder")
 		},
 	}
 }

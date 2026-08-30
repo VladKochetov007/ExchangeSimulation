@@ -10,9 +10,13 @@ import (
 
 // logLine renders one record in the envelope the venues write.
 func logLine(ts int64, clientID uint64, event string, payload map[string]any) string {
+	return logLineAtVenue(ts, clientID, "north", event, payload)
+}
+
+func logLineAtVenue(ts int64, clientID uint64, venue, event string, payload map[string]any) string {
 	raw, err := json.Marshal(map[string]any{
 		"client_id": clientID, "event": event, "sim_ts": ts,
-		"data": map[string]any{"venue_id": "north", "payload": payload},
+		"data": map[string]any{"venue_id": venue, "payload": payload},
 	})
 	if err != nil {
 		panic(err)

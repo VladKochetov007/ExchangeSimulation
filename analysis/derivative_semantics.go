@@ -15,13 +15,34 @@ type posPoint struct {
 	ordinal  int64
 }
 
+type perpPositionKey struct {
+	venue    string
+	clientID uint64
+	symbol   string
+	side     string
+}
+
 // perpSideAt returns the position size an account held in the particular
 // funded perpetual at a given instant. Funding is contract-specific; summing
 // dated-future or another perpetual exposure on the venue would make a valid
 // payment look correctly directed for the wrong reason.
-func perpSideAt(history map[positionKey][]posPoint, venue string, client uint64, symbol string, at int64, file string, ordinal int64) (int64, bool) {
-	points := history[positionKey{venue: venue, clientID: client, symbol: symbol}]
-	return sizeAt(points, at, file, ordinal)
+func perpSideAt(history map[perpPositionKey][]posPoint, venue string, client uint64, symbol string, at int64, file string, ordinal int64) (int64, bool) {
+	var total int64
+	known := false
+	for _, side := range []string{"BOTH", "LONG", "SHORT"} {
+		points := history[perpPositionKey{venue: venue, clientID: client, symbol: symbol, side: side}]
+		size, sideKnown := sizeAt(points, at, file, ordinal)
+		if !sideKnown {
+			continue
+		}
+		var ok bool
+		total, ok = exactAdd(total, size)
+		if !ok {
+			return 0, false
+		}
+		known = true
+	}
+	return total, known
 }
 
 // sizeAt is the last position published before an evidence record. Same-file
@@ -56,6 +77,27 @@ type ratePayload struct {
 	Interval    int64  `json:"interval"`
 }
 
+type fundingSettlementFailurePayload struct {
+	Timestamp int64  `json:"timestamp"`
+	Symbol    string `json:"symbol"`
+	Reason    string `json:"reason"`
+}
+
+type fundingSettlementPayload struct {
+	Timestamp     int64  `json:"timestamp"`
+	Symbol        string `json:"symbol"`
+	Rate          int64  `json:"rate"`
+	NextFunding   int64  `json:"next_funding"`
+	Interval      int64  `json:"interval"`
+	MarkPrice     int64  `json:"mark_price"`
+	BasePrecision int64  `json:"base_precision"`
+}
+
+type fundingSettlementEvidence struct {
+	payload fundingSettlementPayload
+	order   evidenceOrder
+}
+
 type fundingRatePoint struct {
 	ratePayload
 	order evidenceOrder
@@ -86,7 +128,9 @@ func expectedFundingIntervalSeconds(opts DerivativeAuditOptions, venue string) i
 	return opts.ExpectedFundingIntervalSeconds
 }
 
-func hasNonzeroPerpPosition(history map[positionKey][]posPoint, venue, symbol string, at int64) bool {
+func hasNonzeroPerpPosition(history map[perpPositionKey][]posPoint, venue, symbol string, at int64, cutoff evidenceOrder, cutoffKnown bool) bool {
+	clientSizes := make(map[uint64]int64)
+	clientKnown := make(map[uint64]bool)
 	for key, points := range history {
 		if key.venue != venue || key.symbol != symbol {
 			continue
@@ -97,14 +141,162 @@ func hasNonzeroPerpPosition(history map[positionKey][]posPoint, venue, symbol st
 			if point.at > at {
 				break
 			}
+			if point.at == at && cutoffKnown && !positionPointBeforeCutoff(point, cutoff) {
+				continue
+			}
 			size = point.size
 			known = true
 		}
-		if known && size != 0 {
+		if !known {
+			continue
+		}
+		netSize, ok := exactAdd(clientSizes[key.clientID], size)
+		if !ok {
+			// An unrepresentable reconstructed position is exposure, not proof
+			// that a funding deadline can be skipped.
+			return true
+		}
+		clientSizes[key.clientID] = netSize
+		clientKnown[key.clientID] = true
+	}
+	for clientID, size := range clientSizes {
+		if clientKnown[clientID] && size != 0 {
 			return true
 		}
 	}
 	return false
+}
+
+// positionPointBeforeCutoff determines whether a position update can describe
+// exposure at a settlement boundary. Same-file sequence is authoritative. A
+// same-timestamp point from another file remains possible exposure because the
+// logger does not persist one global order; excluding it would turn ambiguity
+// into a false proof that no settlement was required.
+func positionPointBeforeCutoff(point posPoint, cutoff evidenceOrder) bool {
+	if point.at != cutoff.timestamp {
+		return point.at < cutoff.timestamp
+	}
+	if point.file != cutoff.file {
+		return true
+	}
+	return point.ordinal < cutoff.ordinal
+}
+
+func fundingDeadlineCutoff(points []fundingRatePoint, deadline int64) (evidenceOrder, bool) {
+	var cutoff evidenceOrder
+	found := false
+	for _, point := range points {
+		if point.Timestamp != deadline || point.NextFunding != deadline {
+			continue
+		}
+		if !found || evidenceBefore(cutoff, point.order) {
+			cutoff = point.order
+			found = true
+		}
+	}
+	return cutoff, found
+}
+
+// expectedFundingDeltaAt independently replays one account's signed funding
+// movement from its published hedge legs. The exchange settles each leg using
+// the same mark and fixed-point precision, then aggregates the account result;
+// reconstructing the legs separately catches an omitted leg or an omitted
+// account even when the marker proves that the schedule advanced.
+func expectedFundingDeltaAt(history map[perpPositionKey][]posPoint, venue, symbol string, clientID uint64, timestamp int64, cutoff evidenceOrder, cutoffKnown bool, rate, markPrice, basePrecision int64) (int64, bool, bool) {
+	if markPrice <= 0 || basePrecision <= 0 {
+		return 0, false, false
+	}
+	var expected int64
+	known := false
+	for _, side := range []string{"BOTH", "LONG", "SHORT"} {
+		points := history[perpPositionKey{venue: venue, clientID: clientID, symbol: symbol, side: side}]
+		var size int64
+		var sideKnown bool
+		if cutoffKnown {
+			size, sideKnown = sizeAtBeforeCutoff(points, timestamp, cutoff)
+		} else {
+			size, sideKnown = sizeAt(points, timestamp, "", 0)
+		}
+		if !sideKnown {
+			continue
+		}
+		known = true
+		magnitude, ok := absoluteAuditInt64(size)
+		if !ok {
+			return 0, true, false
+		}
+		positionValue, ok := exactMulDiv(magnitude, markPrice, basePrecision)
+		if !ok {
+			return 0, true, false
+		}
+		payment, ok := exactMulDiv(positionValue, rate, 10_000)
+		if !ok {
+			return 0, true, false
+		}
+		if size > 0 {
+			expected, ok = exactSub(expected, payment)
+		} else if size < 0 {
+			expected, ok = exactAdd(expected, payment)
+		}
+		if !ok {
+			return 0, true, false
+		}
+	}
+	return expected, known, true
+}
+
+// sizeAtBeforeCutoff uses the marker's physical position as the settlement
+// boundary. Unlike sizeAt, it deliberately keeps same-timestamp points from a
+// different file: the logger has no cross-file total order, and excluding such
+// a point would turn an ambiguity into a false zero-exposure proof.
+func sizeAtBeforeCutoff(points []posPoint, timestamp int64, cutoff evidenceOrder) (int64, bool) {
+	var size int64
+	known := false
+	var selected evidenceOrder
+	for _, point := range points {
+		if point.at > timestamp || !positionPointBeforeCutoff(point, cutoff) {
+			continue
+		}
+		pointOrder := evidenceOrder{timestamp: point.at, file: point.file, ordinal: point.ordinal}
+		if !known || point.at > selected.timestamp || (point.at == selected.timestamp && evidenceBefore(selected, pointOrder)) {
+			size = point.size
+			selected = pointOrder
+			known = true
+		}
+	}
+	return size, known
+}
+
+func countFundingPaymentMismatches(history map[perpPositionKey][]posPoint, actual map[uint64]int64, venue, symbol string, timestamp int64, cutoff evidenceOrder, rate, markPrice, basePrecision int64) (int, int) {
+	clients := make(map[uint64]struct{})
+	for key := range history {
+		if key.venue == venue && key.symbol == symbol {
+			clients[key.clientID] = struct{}{}
+		}
+	}
+	for clientID := range actual {
+		clients[clientID] = struct{}{}
+	}
+	mismatches := 0
+	arithmeticFailures := 0
+	for clientID := range clients {
+		expected, known, arithmeticOK := expectedFundingDeltaAt(history, venue, symbol, clientID, timestamp, cutoff, true, rate, markPrice, basePrecision)
+		observed := actual[clientID]
+		if !arithmeticOK {
+			arithmeticFailures++
+			continue
+		}
+		if known {
+			if observed != expected {
+				mismatches++
+			}
+			continue
+		}
+		if observed != 0 {
+			mismatches++
+		}
+	}
+	return mismatches, arithmeticFailures
 }
 
 // FundingInstantCheck is one venue's funding settlement, recomputed.
@@ -150,6 +342,10 @@ type FundingInstantCheck struct {
 	// repeated funding operation even when repeated debits and credits still
 	// net globally and point in the right direction.
 	DuplicatePayments int `json:"duplicate_payments"`
+	// PaymentMismatches compares every account's expected integer movement with
+	// the balance stream. It remains meaningful for a zero-cash marker, where a
+	// marker-only record otherwise proves only that the schedule advanced.
+	PaymentMismatches int `json:"payment_mismatches"`
 }
 
 // ExerciseCheck is one option's settlement, recomputed from its own terms.
@@ -207,6 +403,8 @@ type DerivativeSemantics struct {
 	FundingTimingFailures     int `json:"funding_timing_failures"`
 	FundingEvidenceFailures   int `json:"funding_evidence_failures"`
 	FundingArithmeticFailures int `json:"funding_arithmetic_failures"`
+	FundingSettlementFailures int `json:"funding_settlement_failures"`
+	FundingPaymentMismatches  int `json:"funding_payment_mismatches"`
 	ExerciseBroken            int `json:"exercise_broken"`
 	// ExerciseTimingFailures counts option terminal announcements or payout
 	// postings that were not emitted at the contract's declared expiry. A
@@ -248,10 +446,11 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		Timestamp       int64  `json:"timestamp"`
 	}
 	type positionPayload struct {
-		Timestamp int64  `json:"timestamp"`
-		ClientID  uint64 `json:"client_id"`
-		Symbol    string `json:"symbol"`
-		NewSize   int64  `json:"new_size"`
+		Timestamp    int64  `json:"timestamp"`
+		ClientID     uint64 `json:"client_id"`
+		Symbol       string `json:"symbol"`
+		PositionSide string `json:"position_side"`
+		NewSize      int64  `json:"new_size"`
 	}
 	files := opts.Files
 	filesSelected := opts.FilesSelected
@@ -271,7 +470,12 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		paid, received               int64
 	}
 	funding := make(map[instantKey]*fundingBucket)
+	// A settlement marker is emitted even when every account-level integer
+	// payment rounds to zero. It proves that the scheduled operation occurred;
+	// a balance stream alone cannot distinguish that case from a missing one.
+	fundingSettlements := make(map[instantKey]fundingSettlementEvidence)
 	fundingEvidenceFailures := 0
+	fundingSettlementFailures := 0
 	fundingArithmeticFailures := 0
 	// Per-account funding movements, so the direction of the transfer can be
 	// checked against each account's own side rather than against the sign of
@@ -293,7 +497,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 	// the side held at a funding instant can be read off it. Positions arrive
 	// out of order because the scan is concurrent, so they are sorted after
 	// the pass rather than assumed ordered during it.
-	perpHistory := make(map[positionKey][]posPoint)
+	perpHistory := make(map[perpPositionKey][]posPoint)
 	optionPaid := make(map[markKey]struct {
 		amount   int64
 		accounts int
@@ -363,12 +567,70 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		Side   string `json:"side"`
 	}
 	scan := ScanOptions{
-		Events:        []string{"funding_rate_update", "balance_change", "position_update", "OrderFill"},
+		Events:        []string{"funding_rate_update", "funding_settlement", "funding_settlement_failed", "balance_change", "position_update", "OrderFill"},
 		Files:         files,
 		FilesSelected: filesSelected,
 	}
 	if err := r.Scan(scan, func(event Event) {
 		switch event.Name {
+		case "funding_settlement":
+			var payload fundingSettlementPayload
+			if err := event.Decode(&payload); err != nil {
+				if opts.RequireExactReplay {
+					mu.Lock()
+					fundingEvidenceFailures++
+					mu.Unlock()
+				}
+				return
+			}
+			if opts.RequireExactReplay && decodeRequiredJSON(event.Raw(), &payload,
+				"timestamp", "symbol", "rate", "next_funding", "interval", "mark_price", "base_precision") != nil {
+				mu.Lock()
+				fundingEvidenceFailures++
+				mu.Unlock()
+				return
+			}
+			if payload.Symbol == "" {
+				payload.Symbol = event.Symbol
+			}
+			if opts.RequireExactReplay && (payload.Timestamp <= 0 || payload.Timestamp != event.SimTS ||
+				payload.Symbol == "" || (event.Symbol != "" && payload.Symbol != event.Symbol) ||
+				payload.NextFunding <= payload.Timestamp || payload.Interval <= 0 || payload.MarkPrice <= 0 || payload.BasePrecision <= 0) {
+				mu.Lock()
+				fundingEvidenceFailures++
+				mu.Unlock()
+				return
+			}
+			if payload.Timestamp <= 0 || payload.Symbol == "" {
+				return
+			}
+			key := instantKey{venue: event.VenueID, timestamp: payload.Timestamp, asset: payload.Symbol}
+			order := evidenceOrder{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal}
+			mu.Lock()
+			if previous, duplicate := fundingSettlements[key]; duplicate {
+				if opts.RequireExactReplay && previous.order != order {
+					fundingEvidenceFailures++
+				}
+			} else {
+				fundingSettlements[key] = fundingSettlementEvidence{payload: payload, order: order}
+			}
+			if funding[key] == nil {
+				funding[key] = &fundingBucket{}
+			}
+			cursor, seen := fundingCursors[key]
+			if !seen || (cursor.file == event.File && event.Ordinal < cursor.ordinal) {
+				fundingCursors[key] = fundingCursor{timestamp: event.SimTS, file: event.File, ordinal: event.Ordinal}
+			}
+			mu.Unlock()
+		case "funding_settlement_failed":
+			var payload fundingSettlementFailurePayload
+			mu.Lock()
+			fundingSettlementFailures++
+			if event.Decode(&payload) != nil || decodeRequiredJSON(event.Raw(), &payload, "timestamp", "symbol", "reason") != nil ||
+				payload.Timestamp == 0 || payload.Timestamp != event.SimTS || payload.Symbol == "" || payload.Reason == "" {
+				fundingEvidenceFailures++
+			}
+			mu.Unlock()
 		case "funding_rate_update":
 			var payload ratePayload
 			if err := event.Decode(&payload); err != nil {
@@ -418,7 +680,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				return
 			}
 			if opts.RequireExactReplay && decodeRequiredJSON(event.Raw(), &payload,
-				"timestamp", "client_id", "symbol", "new_size") != nil {
+				"timestamp", "client_id", "symbol", "position_side", "new_size") != nil {
 				mu.Lock()
 				exerciseEvidenceFailures++
 				mu.Unlock()
@@ -432,6 +694,17 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				mu.Unlock()
 				return
 			}
+			if payload.PositionSide == "" {
+				payload.PositionSide = "BOTH"
+			}
+			if payload.PositionSide != "BOTH" && payload.PositionSide != "LONG" && payload.PositionSide != "SHORT" {
+				if opts.RequireExactReplay {
+					mu.Lock()
+					exerciseEvidenceFailures++
+					mu.Unlock()
+				}
+				return
+			}
 			if payload.Symbol == "" {
 				return
 			}
@@ -439,7 +712,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 			if at == 0 {
 				at = event.SimTS
 			}
-			key := positionKey{venue: event.VenueID, clientID: payload.ClientID, symbol: payload.Symbol}
+			key := perpPositionKey{venue: event.VenueID, clientID: payload.ClientID, symbol: payload.Symbol, side: payload.PositionSide}
 			mu.Lock()
 			if isOptionSymbol(payload.Symbol) {
 				// Options are rebuilt from fills above; a position update for
@@ -761,10 +1034,23 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 				if terminalKnown && deadline > terminalAt {
 					continue
 				}
-				if !hasNonzeroPerpPosition(perpHistory, key.venue, key.symbol, deadline) {
+				settlementKey := instantKey{venue: key.venue, timestamp: deadline, asset: key.symbol}
+				cutoff, cutoffKnown := fundingDeadlineCutoff(rates[key], deadline)
+				if marker, marked := fundingSettlements[settlementKey]; marked {
+					// The explicit marker is after all account postings and is
+					// therefore the strongest boundary for exposure reconstruction.
+					cutoff = marker.order
+					cutoffKnown = true
+				} else if cursor, cursorKnown := fundingCursors[settlementKey]; cursorKnown {
+					// Legacy/current balance evidence has no marker. The first
+					// posting is the best available boundary for that stream.
+					cutoff = evidenceOrder{timestamp: cursor.timestamp, file: cursor.file, ordinal: cursor.ordinal}
+					cutoffKnown = true
+				}
+				if !hasNonzeroPerpPosition(perpHistory, key.venue, key.symbol, deadline, cutoff, cutoffKnown) {
 					continue
 				}
-				if _, settled := funding[instantKey{venue: key.venue, timestamp: deadline, asset: key.symbol}]; !settled {
+				if _, settled := funding[settlementKey]; !settled {
 					fundingTimingFailures++
 					// Keep this separate from generic timing failures so the
 					// artifact says which direction of the join failed.
@@ -812,6 +1098,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 	result.ExerciseTimingFailures = exerciseTimingFailures
 	result.FundingEvidenceFailures = fundingEvidenceFailures
 	result.FundingArithmeticFailures = fundingArithmeticFailures
+	result.FundingSettlementFailures = fundingSettlementFailures
 	result.FundingTimingFailures = fundingTimingFailures
 	result.FundingMissingSettlements = fundingMissingSettlements
 	result.ExerciseEvidenceFailures = exerciseEvidenceFailures
@@ -909,11 +1196,42 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		check.LongsPaid = longsDebited > longsCredited
 		// Two independent conditions. The structural one holds without any
 		// position information: a non-zero rate has to move money between two
-		// sides, and a zero rate must move none. The directional one needs the
-		// reconstructed sides and is the check that a reversed sign fails.
+		// sides, and a zero rate must move none. An explicit settlement marker is
+		// also sufficient when integer rounding makes every account-level cash
+		// delta zero. The directional one needs the reconstructed sides and is
+		// the check that a reversed sign fails.
+		marker, hasSettlementMarker := fundingSettlements[key]
 		structural := (check.Rate != 0 && bucket.payers > 0 && bucket.receivers > 0) ||
-			(check.Rate == 0 && bucket.payers == 0 && bucket.receivers == 0)
+			(check.Rate == 0 && bucket.payers == 0 && bucket.receivers == 0) ||
+			(hasSettlementMarker && bucket.payers == 0 && bucket.receivers == 0)
+		paymentConsistent := true
 		check.SignConsistent = structural && check.Misdirected == 0 && check.RateAvailable && check.TimingConsistent
+		if opts.RequireExactReplay && hasSettlementMarker {
+			if !check.RateAvailable || marker.payload.Rate != check.Rate || marker.payload.Interval != check.RateInterval {
+				check.TimingConsistent = false
+				result.FundingTimingFailures++
+			}
+			intervalNanos, intervalOK := exactMul(marker.payload.Interval, 1_000_000_000)
+			expectedNext, nextOK := exactAdd(key.timestamp, intervalNanos)
+			if !intervalOK || !nextOK || marker.payload.NextFunding != expectedNext {
+				check.TimingConsistent = false
+				result.FundingTimingFailures++
+			}
+			paymentMismatches, arithmeticFailures := countFundingPaymentMismatches(
+				perpHistory, fundingDeltas[key], key.venue, key.asset, key.timestamp,
+				marker.order, marker.payload.Rate, marker.payload.MarkPrice, marker.payload.BasePrecision,
+			)
+			check.PaymentMismatches = paymentMismatches
+			if paymentMismatches != 0 {
+				paymentConsistent = false
+				result.FundingPaymentMismatches += paymentMismatches
+			}
+			if arithmeticFailures != 0 {
+				paymentConsistent = false
+				result.FundingArithmeticFailures += arithmeticFailures
+			}
+			check.SignConsistent = structural && paymentConsistent && check.Misdirected == 0 && check.RateAvailable && check.TimingConsistent
+		}
 		result.FundingMisdirected += check.Misdirected
 		result.FundingUndirected += check.Undirected
 		result.FundingDuplicatePayments += check.DuplicatePayments
@@ -921,7 +1239,7 @@ func (r *Run) MeasureDerivativeSemantics(opts DerivativeAuditOptions) (*Derivati
 		// n accounts can lose up to n units to truncation. Anything beyond
 		// that is not rounding.
 		bound := int64(bucket.payers + bucket.receivers)
-		if check.Residual > bound || check.Residual < -bound || check.DuplicatePayments != 0 {
+		if check.Residual > bound || check.Residual < -bound || check.DuplicatePayments != 0 || check.PaymentMismatches != 0 {
 			result.FundingBroken++
 		}
 		if !check.SignConsistent {

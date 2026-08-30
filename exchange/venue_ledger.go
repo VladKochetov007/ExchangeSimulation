@@ -25,13 +25,25 @@ const (
 // construction and can never test it.
 type VenueBalanceEvent struct {
 	Timestamp  int64       `json:"timestamp"`
+	Sequence   uint64      `json:"sequence"`
 	Bucket     VenueBucket `json:"bucket"`
 	Asset      string      `json:"asset"`
 	Symbol     string      `json:"symbol,omitempty"`
+	TradeID    uint64      `json:"trade_id"`
 	Reason     string      `json:"reason"`
 	OldBalance int64       `json:"old_balance"`
 	NewBalance int64       `json:"new_balance"`
 	Delta      int64       `json:"delta"`
+}
+
+// VenueBalanceSequenceForReport returns the terminal journal sequence used by
+// the simulator's independently captured venue ledger. It is deliberately a
+// read-only report adapter; callers cannot mutate the sequence outside the
+// venue movement path.
+func (e *DefaultExchange) VenueBalanceSequenceForReport() uint64 {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.venueBalanceSequence
 }
 
 // moveVenueBalance is the only way the exchange's own money moves.
@@ -43,6 +55,10 @@ type VenueBalanceEvent struct {
 //
 // Caller must hold e.mu.Lock() when mutating exchange state.
 func (e *DefaultExchange) moveVenueBalance(bucket VenueBucket, asset string, delta int64, timestamp int64, symbol, reason string) {
+	e.moveVenueBalanceWithTradeID(bucket, asset, delta, timestamp, symbol, 0, reason)
+}
+
+func (e *DefaultExchange) moveVenueBalanceWithTradeID(bucket VenueBucket, asset string, delta int64, timestamp int64, symbol string, tradeID uint64, reason string) {
 	if delta == 0 || asset == "" {
 		return
 	}
@@ -53,6 +69,8 @@ func (e *DefaultExchange) moveVenueBalance(bucket VenueBucket, asset string, del
 	old := balances[asset]
 	updated := etypes.AddAmount(old, delta)
 	balances[asset] = updated
+	e.venueBalanceSequence++
+	sequence := e.venueBalanceSequence
 	e.conservation.recordVenue(asset, delta)
 
 	log := e.getLogger(symbol)
@@ -63,8 +81,8 @@ func (e *DefaultExchange) moveVenueBalance(bucket VenueBucket, asset string, del
 		return
 	}
 	log.LogEvent(timestamp, 0, "venue_balance_change", VenueBalanceEvent{
-		Timestamp: timestamp, Bucket: bucket, Asset: asset, Symbol: symbol,
-		Reason: reason, OldBalance: old, NewBalance: updated, Delta: delta,
+		Timestamp: timestamp, Sequence: sequence, Bucket: bucket, Asset: asset, Symbol: symbol,
+		TradeID: tradeID, Reason: reason, OldBalance: old, NewBalance: updated, Delta: delta,
 	})
 }
 

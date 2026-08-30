@@ -130,6 +130,11 @@ type VenueLedger struct {
 	VenueID       string           `json:"venue_id"`
 	FeeRevenue    map[string]int64 `json:"fee_revenue"`
 	InsuranceFund map[string]int64 `json:"insurance_fund"`
+	// FinalSequence is the terminal value of the venue's monotonic balance
+	// journal sequence. A movement stream can be balanced while a complete pair
+	// of opposite movements has been omitted, so the terminal counter is an
+	// independent completeness anchor.
+	FinalSequence *uint64 `json:"final_sequence"`
 }
 
 // Run is one simulation output directory.

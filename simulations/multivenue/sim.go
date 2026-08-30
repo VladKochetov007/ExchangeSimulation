@@ -4102,6 +4102,7 @@ type VenueLedger struct {
 	VenueID       string           `json:"venue_id"`
 	FeeRevenue    map[string]int64 `json:"fee_revenue"`
 	InsuranceFund map[string]int64 `json:"insurance_fund"`
+	FinalSequence *uint64          `json:"final_sequence"`
 }
 
 // CaptureVenueLedgers snapshots every venue's own balances.
@@ -4117,6 +4118,8 @@ func (s *Sim) CaptureVenueLedgers() []VenueLedger {
 			FeeRevenue:    make(map[string]int64, len(balance.FeeRevenue)),
 			InsuranceFund: make(map[string]int64, len(balance.InsuranceFund)),
 		}
+		finalSequence := venue.Exchange.VenueBalanceSequenceForReport()
+		ledger.FinalSequence = &finalSequence
 		for asset, amount := range balance.FeeRevenue {
 			ledger.FeeRevenue[asset] = amount
 		}

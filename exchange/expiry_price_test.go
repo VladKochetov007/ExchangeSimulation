@@ -299,6 +299,9 @@ func TestExpirySettlementPendingRetriesThenSettlesExactlyOnce(t *testing.T) {
 	if !ok || pending.State != expiryStateSettlementPending || pending.Attempts != 1 || pending.Policy != expiryUnavailableRetryForever {
 		t.Fatalf("first unavailable expiry state = %#v", pending)
 	}
+	if future.GetFundingRate().MarkAvailable {
+		t.Fatal("pending expiry retained a live mark after the lifecycle boundary")
+	}
 	if ex.Instruments[future.Symbol()] == nil || ex.Books[future.Symbol()] == nil {
 		t.Fatal("unavailable settlement delisted the contract")
 	}
@@ -326,8 +329,8 @@ func TestExpirySettlementPendingRetriesThenSettlesExactlyOnce(t *testing.T) {
 		ex.CheckExpiries()
 	}
 	pending = ex.settlementPending[future.Symbol()]
-	if pending.Attempts != 3 || future.GetFundingRate().MarkPrice != 77 {
-		t.Fatalf("pending retries = %#v mark=%d, want attempts=3 unchanged mark", pending, future.GetFundingRate().MarkPrice)
+	if pending.Attempts != 3 || future.GetFundingRate().MarkAvailable || future.GetFundingRate().MarkPrice != 77 {
+		t.Fatalf("pending retries = %#v mark=%d available=%t, want attempts=3 and unavailable mark", pending, future.GetFundingRate().MarkPrice, future.GetFundingRate().MarkAvailable)
 	}
 	if total := ex.Clients[1].PerpBalance("USD") + ex.Clients[2].PerpBalance("USD"); total != openingTotal {
 		t.Fatalf("pending settlement changed conservation total: got %d want %d", total, openingTotal)

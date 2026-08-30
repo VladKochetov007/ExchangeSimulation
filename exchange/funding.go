@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -9,6 +10,8 @@ import (
 
 	etypes "exchange_sim/types"
 )
+
+var ErrFundingArithmetic = errors.New("funding arithmetic overflow")
 
 type positionKey struct {
 	Symbol string
@@ -677,8 +680,9 @@ func (pm *PositionManager) calculateOpenInterestUnsafe(symbol string) int64 {
 // fundingEventSink carries the two side-effects settleFunding needs from the exchange.
 // Defined here because it references exchange-internal types. Unexported.
 type fundingEventSink struct {
-	logBalance    func(timestamp int64, clientID uint64, symbol, reason string, changes []BalanceDelta)
-	recordRevenue func(asset string, amount int64)
+	logBalance      func(timestamp int64, clientID uint64, symbol, reason string, changes []BalanceDelta)
+	validateRevenue func(asset string, amount int64) error
+	recordRevenue   func(symbol, asset string, timestamp, amount int64)
 }
 
 // SettleFunding settles funding for perp without logging. A missing shared
@@ -688,25 +692,32 @@ func (pm *PositionManager) SettleFunding(clients map[uint64]*Client, perp *PerpF
 	if perp == nil {
 		return fmt.Errorf("funding settlement: %w", ErrNoBookPrice)
 	}
-	if !settleFunding(pm, clients, perp, pm.clock, fundingEventSink{}) {
-		return fmt.Errorf("funding settlement for %s: %w", perp.Symbol(), ErrNoBookPrice)
+	settled, err := settleFunding(pm, clients, perp, pm.clock.NowUnixNano(), fundingEventSink{})
+	if !settled {
+		if err == nil {
+			err = ErrNoBookPrice
+		}
+		return fmt.Errorf("funding settlement for %s: %w", perp.Symbol(), err)
 	}
 	return nil
 }
 
 // settleFunding applies funding payments from/to client PerpBalances.
 // Payments are zero-sum: net flow between longs and shorts routes to/from exchange revenue.
-func settleFunding(store PositionStore, clients map[uint64]*Client, perp *PerpFutures, clock Clock, sink fundingEventSink) bool {
+func settleFunding(store PositionStore, clients map[uint64]*Client, perp *PerpFutures, timestamp int64, sink fundingEventSink) (bool, error) {
 	fundingRate := perp.GetFundingRate()
 	if !fundingRate.MarkAvailable {
 		// A missing mark is not permission to value funding at each position's
 		// entry price. That would turn price absence into a hidden per-account
 		// fallback and break the shared-mark funding contract.
-		return false
+		return false, ErrNoBookPrice
 	}
 	precision := perp.BasePrecision()
-	timestamp := clock.NowUnixNano()
 	quote := perp.QuoteAsset()
+	nextFunding, arithmeticOK := nextFundingTimestamp(timestamp, fundingRate.Interval)
+	if !arithmeticOK {
+		return false, ErrFundingArithmetic
+	}
 
 	// Funding accrues on position value at MARK price (universal perp
 	// convention): equal opposite positions pay/receive equal amounts
@@ -716,38 +727,115 @@ func settleFunding(store PositionStore, clients map[uint64]*Client, perp *PerpFu
 	// netExchangeFlow > 0: exchange received more from longs than it paid to shorts.
 	// netExchangeFlow < 0: exchange paid out more to shorts than it received from longs.
 	netExchangeFlow := int64(0)
+	type fundingPayment struct {
+		client                 *Client
+		clientID               uint64
+		oldBalance, newBalance int64
+	}
+	payments := make([]fundingPayment, 0)
+	fundingDeltas := make(map[uint64]int64)
+	fundingClients := make(map[uint64]*Client)
+	var arithmeticError error
 
 	store.PositionsForFunding(perp.Symbol(), func(clientID uint64, pos Position) {
+		if arithmeticError != nil {
+			return
+		}
 		client := clients[clientID]
 		if client == nil {
 			return
 		}
-		positionValue := etypes.AbsMulDiv(pos.Size, markPrice, precision)
-		funding := positionValue * fundingRate.Rate / 10000
-
-		oldBalance := client.PerpBalances[quote]
-		if pos.Size > 0 {
-			client.PerpBalances[quote] -= funding
-			netExchangeFlow += funding
-		} else {
-			client.PerpBalances[quote] += funding
-			netExchangeFlow -= funding
+		positionValue, ok := etypes.TryAbsMulDiv(pos.Size, markPrice, precision)
+		if !ok {
+			arithmeticError = fmt.Errorf("%w: position value for client %d", ErrFundingArithmetic, clientID)
+			return
 		}
+		funding, ok := etypes.TryMulDiv(positionValue, fundingRate.Rate, 10000)
+		if !ok {
+			arithmeticError = fmt.Errorf("%w: payment for client %d", ErrFundingArithmetic, clientID)
+			return
+		}
+		clientDelta := fundingDeltas[clientID]
+		if pos.Size > 0 {
+			var clientOK, flowOK bool
+			clientDelta, clientOK = etypes.TrySub(clientDelta, funding)
+			netExchangeFlow, flowOK = etypes.TryAdd(netExchangeFlow, funding)
+			if !clientOK || !flowOK {
+				arithmeticError = fmt.Errorf("%w: client or exchange residual for client %d", ErrFundingArithmetic, clientID)
+				return
+			}
+		} else {
+			var clientOK, flowOK bool
+			clientDelta, clientOK = etypes.TryAdd(clientDelta, funding)
+			netExchangeFlow, flowOK = etypes.TrySub(netExchangeFlow, funding)
+			if !clientOK || !flowOK {
+				arithmeticError = fmt.Errorf("%w: client or exchange residual for client %d", ErrFundingArithmetic, clientID)
+				return
+			}
+		}
+		// A hedge-mode account can contribute both a long and a short leg to
+		// this callback. Aggregate those legs before touching its wallet so the
+		// scorer sees one atomic client settlement rather than mistaking a
+		// legitimate hedge for a duplicate payment.
+		fundingDeltas[clientID] = clientDelta
+		fundingClients[clientID] = client
+	})
+	if arithmeticError != nil {
+		return false, arithmeticError
+	}
+	clientIDs := make([]uint64, 0, len(fundingDeltas))
+	for clientID := range fundingDeltas {
+		clientIDs = append(clientIDs, clientID)
+	}
+	slices.Sort(clientIDs)
+	for _, clientID := range clientIDs {
+		oldBalance := fundingClients[clientID].PerpBalances[quote]
+		newBalance, ok := etypes.TryAdd(oldBalance, fundingDeltas[clientID])
+		if !ok {
+			return false, fmt.Errorf("%w: final balance for client %d", ErrFundingArithmetic, clientID)
+		}
+		if newBalance == oldBalance {
+			continue
+		}
+		payments = append(payments, fundingPayment{
+			client: fundingClients[clientID], clientID: clientID,
+			oldBalance: oldBalance, newBalance: newBalance,
+		})
+	}
+	if sink.validateRevenue != nil && netExchangeFlow != 0 {
+		if err := sink.validateRevenue(quote, netExchangeFlow); err != nil {
+			return false, err
+		}
+	}
+
+	for _, payment := range payments {
+		payment.client.PerpBalances[quote] = payment.newBalance
 		if sink.logBalance != nil {
-			sink.logBalance(timestamp, clientID, perp.Symbol(), "funding_settlement", []BalanceDelta{
-				perpDelta(quote, oldBalance, client.PerpBalances[quote]),
+			sink.logBalance(timestamp, payment.clientID, perp.Symbol(), "funding_settlement", []BalanceDelta{
+				perpDelta(quote, payment.oldBalance, payment.newBalance),
 			})
 		}
-	})
+	}
 
 	// Route net imbalance to exchange fee revenue (or drain from it if negative).
 	// On real exchanges this goes to the insurance fund when the exchange is the residual payer.
 	if sink.recordRevenue != nil && netExchangeFlow != 0 {
-		sink.recordRevenue(quote, netExchangeFlow)
+		sink.recordRevenue(perp.Symbol(), quote, timestamp, netExchangeFlow)
 	}
 
-	fundingRate.NextFunding = clock.NowUnixNano() + (fundingRate.Interval * 1e9)
-	return true
+	fundingRate.NextFunding = nextFunding
+	return true, nil
+}
+
+func nextFundingTimestamp(now, interval int64) (int64, bool) {
+	if interval <= 0 {
+		return 0, false
+	}
+	intervalNanos, ok := etypes.TryMulDiv(interval, 1_000_000_000, 1)
+	if !ok {
+		return 0, false
+	}
+	return etypes.TryAdd(now, intervalNanos)
 }
 
 // realizedPerpPnL calculates the realized PnL for a perp fill.

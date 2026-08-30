@@ -1075,13 +1075,39 @@ func TestRiskTimelineRetainsPositiveHorizonExchangeGreeksBeforeExpiry(t *testing
 	now := venue.Exchange.Clock.NowUnixNano()
 	option := exchange.NewEuropeanOption(
 		"ABC-MANUAL-2-C", "ABC", "USD", "ABC/USD", mvBasePrecision, mvQuotePrecision,
-		mvQuotePrecision, mvBasePrecision/100, mvBootstrapPrice, now+2*int64(time.Second), true,
+		mvQuotePrecision, mvBasePrecision/100, mvBootstrapPrice, now+6*int64(time.Second), true,
 	)
 	option.IV = sim.Config.OptionIV
 	option.SetMarks(mvBootstrapPrice, 10*mvQuotePrecision)
 	venue.Exchange.AddInstrument(option)
 	venue.Exchange.Positions.UpdatePosition(venue.OptionDealerClientID, option.Symbol(), mvBasePrecision/10, 10*mvQuotePrecision, exchange.Buy, exchange.PositionBoth)
 	venue.Exchange.AddPerpBalance(venue.OptionDealerClientID, "USD", -mvQuotePrecision)
+	var spotMakerClientID uint64
+	for _, participant := range venue.Participants {
+		if participant.Role == "spot_maker_1" {
+			spotMakerClientID = participant.ClientID
+			break
+		}
+	}
+	if spotMakerClientID == 0 {
+		t.Fatal("spot-maker fixture client is missing")
+	}
+	for requestID, quote := range []struct {
+		side  exchange.Side
+		price int64
+	}{
+		{side: exchange.Buy, price: mvBootstrapPrice - 10*mvQuotePrecision},
+		{side: exchange.Sell, price: mvBootstrapPrice + 10*mvQuotePrecision},
+	} {
+		response := venue.Exchange.PlaceOrder(spotMakerClientID, &exchange.OrderRequest{
+			RequestID: uint64(9_001 + requestID), Symbol: "ABC/USD", Side: quote.side,
+			Type: exchange.LimitOrder, Price: quote.price, Qty: mvBasePrecision,
+			TimeInForce: exchange.GTC, Visibility: exchange.Normal,
+		})
+		if !response.Success {
+			t.Fatalf("seed declared ABC/USD reference quote: %#v", response)
+		}
+	}
 
 	if err := sim.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)

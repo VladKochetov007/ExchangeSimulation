@@ -553,6 +553,9 @@ func (e *DefaultExchange) validatePlaceOrder(clientID uint64, req *OrderRequest)
 	if exp, ok := book.Instrument.(Expirable); ok && e.Clock.NowUnixNano() >= exp.ExpiryNano() {
 		return reject(RejectInstrumentExpired)
 	}
+	if e.clientHasSettlementPendingExposureLocked(clientID) {
+		return reject(RejectSettlementPendingExposure)
+	}
 	if req.PostOnly && (req.Type != LimitOrder || req.TimeInForce != GTC) {
 		return reject(RejectPostOnlyInvalid)
 	}

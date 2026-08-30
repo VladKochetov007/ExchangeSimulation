@@ -40,6 +40,21 @@ mark updates, liquidation, and post-expiry fills do not continue during this
 state. A source that never becomes available leaves the contract pending; any
 future terminal fallback requires an explicit new policy.
 
+### Pending-exposure risk boundary
+
+`SETTLEMENT_PENDING` does not mean that a retained position has zero value or
+zero liability. It means that the position has no valid current valuation. For
+the corrected r5 candidate, any account profile containing nonzero exposure to
+that pending contract fails closed for the whole account. The profile may not
+silently omit the position while evaluating an active sibling, and no
+liquidation, solvency, or margin verdict is admissible for that account until
+the declared settlement source succeeds. The position and collateral remain
+stored for the retry path; existing debt and other scheduled balance changes
+may still evolve under their own contracts. New order and manual-borrow
+obligations are blocked by this boundary. This is an explicit risk-isolation
+policy, not a fallback valuation, and changing it requires a new lifecycle
+preregistration.
+
 ## Client and autonomous behavior
 
 - Price-dependent client fee/collateral/borrowing preflight rejects before any

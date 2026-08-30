@@ -76,8 +76,29 @@ type DeltaConsistency struct {
 	// ledger. A self-consistent stream can still omit a movement, so the
 	// report-side reconciliation is a separate fail-closed predicate.
 	VenueBalanceMismatches int `json:"venue_balance_mismatches"`
-	FeeRevenueMismatches   int `json:"fee_revenue_mismatches"`
-	ArithmeticFailures     int `json:"arithmetic_failures"`
+	// FeeRevenueMismatches compares the complete fee_revenue venue bucket,
+	// including financing, funding remainders, and position-rounding carry,
+	// with the terminal venue report. FeesLogged remains the trade-fee event
+	// stream and is intentionally narrower.
+	FeeRevenueMismatches         int `json:"fee_revenue_mismatches"`
+	TradingFeeMismatches         int `json:"trading_fee_mismatches"`
+	TradingFeeEvents             int `json:"trading_fee_events"`
+	MarginInterestMismatches     int `json:"margin_interest_mismatches"`
+	MarginInterestEvents         int `json:"margin_interest_events"`
+	MarginInterestFailures       int `json:"margin_interest_failures"`
+	FundingRemainderMismatches   int `json:"funding_remainder_mismatches"`
+	FundingRemainderRecords      int `json:"funding_remainder_records"`
+	FundingWalletMismatches      int `json:"funding_wallet_mismatches"`
+	UnsupportedRevenueRecords    int `json:"unsupported_revenue_records"`
+	MalformedInterestRecords     int `json:"malformed_interest_records"`
+	DuplicateFeeIdentities       int `json:"duplicate_fee_identities"`
+	DuplicateFeeMovements        int `json:"duplicate_fee_movements"`
+	MalformedVenueLedgers        int `json:"malformed_venue_ledgers"`
+	VenueTerminalSequenceMissing int `json:"venue_terminal_sequence_missing"`
+	VenueOrderMismatches         int `json:"venue_order_mismatches"`
+	VenueSequenceMismatches      int `json:"venue_sequence_mismatches"`
+	VenueChainMismatches         int `json:"venue_chain_mismatches"`
+	ArithmeticFailures           int `json:"arithmetic_failures"`
 }
 
 // PositionRoundingAudit independently validates the terminal carry ledger.
@@ -202,6 +223,7 @@ type InstantResidual struct {
 	VenueID   string `json:"venue_id"`
 	Timestamp int64  `json:"timestamp"`
 	Asset     string `json:"asset"`
+	Symbol    string `json:"symbol,omitempty"`
 	Net       int64  `json:"net"`
 	Accounts  int    `json:"accounts"`
 }
@@ -209,6 +231,32 @@ type InstantResidual struct {
 type flowKey struct {
 	reason string
 	asset  string
+}
+
+type revenueKey struct {
+	venue     string
+	timestamp int64
+	asset     string
+	symbol    string
+	tradeID   uint64
+	reason    string
+}
+
+type marginInterestKey struct {
+	venue     string
+	timestamp int64
+	clientID  uint64
+	asset     string
+	wallet    string
+}
+
+func isAuditedFeeRevenueReason(reason string) bool {
+	switch reason {
+	case "taker_fee", "maker_fee", "margin_interest", "funding_remainder", "position_rounding":
+		return true
+	default:
+		return false
+	}
 }
 
 type positionRoundingKey struct {
@@ -224,6 +272,15 @@ type venueRoundingKey struct {
 	symbol    string
 	timestamp int64
 	asset     string
+}
+
+func findVenueLedger(ledgers []VenueLedger, venue string) (VenueLedger, bool) {
+	for _, ledger := range ledgers {
+		if ledger.VenueID == venue {
+			return ledger, true
+		}
+	}
+	return VenueLedger{}, false
 }
 
 type positionRoundingEventRecord struct {
@@ -308,12 +365,37 @@ type instantKey struct {
 	asset     string
 }
 
+type fundingInstantKey struct {
+	venue     string
+	timestamp int64
+	asset     string
+	symbol    string
+}
+
+type venueAssetKey struct {
+	venue string
+	asset string
+}
+
+type venueBucketKey struct {
+	venue  string
+	bucket string
+	asset  string
+}
+
+type venueTransition struct {
+	sequence   uint64
+	timestamp  int64
+	oldBalance int64
+	newBalance int64
+}
+
 // MeasureConservation audits the logged balance movements of a run.
 func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, error) {
 	var mu sync.Mutex
 	flows := make(map[flowKey]*AssetFlow)
 	perVenue := make(map[string]map[string]int64)
-	funding := make(map[instantKey]*InstantResidual)
+	funding := make(map[fundingInstantKey]*InstantResidual)
 	expiry := make(map[instantKey]*InstantResidual)
 	optionExpiry := make(map[instantKey]*InstantResidual)
 	deltas := DeltaConsistency{}
@@ -337,22 +419,53 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	venueFlows := make(map[string]map[flowKey]*AssetFlow)
 	fees := make(map[string]int64)
 	venueRecorded := make(map[string]int64)
+	tradingFeeEvents := make(map[revenueKey]int64)
+	tradingFeeVenueFlows := make(map[revenueKey]int64)
+	seenTradingFeeIdentities := make(map[revenueKey]struct{})
+	seenTradingFeeMovements := make(map[revenueKey]struct{})
+	marginInterestEvents := make(map[marginInterestKey]int64)
+	marginInterestParticipantFlows := make(map[marginInterestKey]int64)
+	marginInterestVenueFlows := make(map[instantKey]int64)
+	fundingRemainderVenueFlows := make(map[fundingInstantKey]int64)
+	feeRevenueRecorded := make(map[string]int64)
+	venueRecordedByVenue := make(map[venueAssetKey]int64)
+	feeRevenueRecordedByVenue := make(map[venueAssetKey]int64)
+	venueTransitions := make(map[venueBucketKey][]venueTransition)
+	venueSequences := make(map[string][]uint64)
+	lastVenueSequenceByFile := make(map[string]uint64)
+	observedVenues := make(map[string]struct{})
 	classNet := make(map[string]map[string]int64)
 	classRecords := make(map[string]int)
 	roundingRecords := make(map[positionRoundingKey]*positionRoundingRecord)
 	roundingBalances := make(map[positionRoundingKey]int64)
 	roundingVenueFlows := make(map[venueRoundingKey]int64)
 	var rounding PositionRoundingAudit
-	scan := ScanOptions{Events: []string{"balance_change", "fee_revenue", "venue_balance_change", "position_rounding"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
+	scan := ScanOptions{Events: []string{"balance_change", "fee_revenue", "margin_interest", "margin_interest_failed", "venue_balance_change", "position_rounding"}, Files: opts.Files, FilesSelected: opts.FilesSelected}
 	type feePayload struct {
-		Asset    string `json:"asset"`
-		TakerFee int64  `json:"taker_fee"`
-		MakerFee int64  `json:"maker_fee"`
+		Timestamp int64  `json:"timestamp"`
+		Symbol    string `json:"symbol"`
+		TradeID   uint64 `json:"trade_id"`
+		Asset     string `json:"asset"`
+		TakerFee  int64  `json:"taker_fee"`
+		MakerFee  int64  `json:"maker_fee"`
+	}
+	type marginInterestPayload struct {
+		Timestamp int64  `json:"timestamp"`
+		ClientID  uint64 `json:"client_id"`
+		Asset     string `json:"asset"`
+		Wallet    string `json:"wallet"`
+		Amount    int64  `json:"amount"`
+	}
+	type marginInterestFailurePayload struct {
+		Timestamp int64  `json:"timestamp"`
+		Reason    string `json:"reason"`
 	}
 	type venueMovement struct {
 		Timestamp  int64  `json:"timestamp"`
+		Sequence   uint64 `json:"sequence"`
 		Bucket     string `json:"bucket"`
 		Asset      string `json:"asset"`
+		TradeID    uint64 `json:"trade_id"`
 		OldBalance int64  `json:"old_balance"`
 		NewBalance int64  `json:"new_balance"`
 		Delta      int64  `json:"delta"`
@@ -360,9 +473,18 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		Reason     string `json:"reason"`
 	}
 	if err := r.Scan(scan, func(event Event) {
+		if event.VenueID == "" {
+			mu.Lock()
+			deltas.MalformedVenueRecords++
+			mu.Unlock()
+			return
+		}
+		mu.Lock()
+		observedVenues[event.VenueID] = struct{}{}
+		mu.Unlock()
 		if event.Name == "position_rounding" {
 			var record positionRoundingEventRecord
-			if err := decodeRequiredJSON(event.Raw(), &record, "timestamp", "client_id", "symbol", "asset", "cash_adjustment", "remainder_numerator", "precision"); err != nil || record.Symbol == "" || record.Asset == "" || record.Precision <= 0 {
+			if err := decodeRequiredJSON(event.Raw(), &record, "timestamp", "client_id", "symbol", "asset", "cash_adjustment", "remainder_numerator", "precision"); err != nil || record.Timestamp == 0 || record.Timestamp != event.SimTS || record.Symbol == "" || record.Asset == "" || record.Precision <= 0 {
 				mu.Lock()
 				rounding.Invalid++
 				mu.Unlock()
@@ -394,13 +516,64 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			}
 			return
 		}
+		if event.Name == "margin_interest" {
+			var payload marginInterestPayload
+			if err := decodeRequiredJSON(event.Raw(), &payload, "timestamp", "client_id", "asset", "wallet", "amount"); err != nil || payload.Timestamp == 0 || payload.Timestamp != event.SimTS || payload.ClientID != event.ClientID || payload.Asset == "" || (payload.Wallet != "spot" && payload.Wallet != "perp") || payload.Amount <= 0 {
+				mu.Lock()
+				deltas.MalformedInterestRecords++
+				mu.Unlock()
+				return
+			}
+			key := marginInterestKey{venue: event.VenueID, timestamp: payload.Timestamp, clientID: payload.ClientID, asset: payload.Asset, wallet: payload.Wallet}
+			mu.Lock()
+			deltas.MarginInterestEvents++
+			addConservationValue(marginInterestEvents, key, payload.Amount, &deltas.ArithmeticFailures)
+			mu.Unlock()
+			return
+		}
+		if event.Name == "margin_interest_failed" {
+			var payload marginInterestFailurePayload
+			mu.Lock()
+			deltas.MarginInterestFailures++
+			if err := decodeRequiredJSON(event.Raw(), &payload, "timestamp", "reason"); err != nil || payload.Timestamp == 0 || payload.Timestamp != event.SimTS || payload.Reason == "" {
+				deltas.MalformedInterestRecords++
+			}
+			mu.Unlock()
+			return
+		}
 		if event.Name == "venue_balance_change" {
 			var movement venueMovement
-			if err := decodeRequiredJSON(event.Raw(), &movement, "timestamp", "bucket", "asset", "reason", "old_balance", "new_balance", "delta"); err != nil || movement.Asset == "" || movement.Bucket == "" {
+			if err := decodeRequiredJSON(event.Raw(), &movement, "timestamp", "sequence", "bucket", "asset", "reason", "old_balance", "new_balance", "delta"); err != nil || movement.Sequence == 0 || movement.Asset == "" || movement.Bucket == "" {
 				mu.Lock()
 				deltas.MalformedVenueRecords++
 				mu.Unlock()
 				return
+			}
+			if movement.Bucket != "fee_revenue" && movement.Bucket != "insurance_fund" {
+				mu.Lock()
+				deltas.MalformedVenueRecords++
+				mu.Unlock()
+				return
+			}
+			if movement.Timestamp == 0 || movement.Timestamp != event.SimTS {
+				mu.Lock()
+				deltas.MalformedVenueRecords++
+				mu.Unlock()
+				return
+			}
+			if movement.Bucket == "fee_revenue" && movement.Reason == "funding_remainder" && (movement.Symbol == "" || movement.Delta == 0) {
+				mu.Lock()
+				deltas.MalformedVenueRecords++
+				mu.Unlock()
+				return
+			}
+			if movement.Bucket == "fee_revenue" && (movement.Reason == "taker_fee" || movement.Reason == "maker_fee") {
+				if err := decodeRequiredJSON(event.Raw(), &movement, "timestamp", "sequence", "bucket", "asset", "trade_id", "reason", "old_balance", "new_balance", "delta"); err != nil || movement.Symbol == "" || movement.Delta == 0 {
+					mu.Lock()
+					deltas.MalformedVenueRecords++
+					mu.Unlock()
+					return
+				}
 			}
 			expectedBalance, arithmeticOK := addAuditInt64(movement.OldBalance, movement.Delta)
 			if !arithmeticOK {
@@ -415,13 +588,46 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 				mu.Unlock()
 				return
 			}
+			movementTimestamp := movement.Timestamp
+			if movementTimestamp == 0 {
+				movementTimestamp = event.SimTS
+			}
 			mu.Lock()
+			if previous, present := lastVenueSequenceByFile[event.File]; present && movement.Sequence <= previous {
+				deltas.VenueOrderMismatches++
+			}
+			lastVenueSequenceByFile[event.File] = movement.Sequence
+			venueSequences[event.VenueID] = append(venueSequences[event.VenueID], movement.Sequence)
 			addConservationValue(venueRecorded, movement.Asset, movement.Delta, &deltas.ArithmeticFailures)
-			if movement.Reason == "position_rounding" {
-				movementTimestamp := movement.Timestamp
-				if movementTimestamp == 0 {
-					movementTimestamp = event.SimTS
+			addConservationValue(venueRecordedByVenue, venueAssetKey{venue: event.VenueID, asset: movement.Asset}, movement.Delta, &deltas.ArithmeticFailures)
+			venueKey := venueBucketKey{venue: event.VenueID, bucket: movement.Bucket, asset: movement.Asset}
+			venueTransitions[venueKey] = append(venueTransitions[venueKey], venueTransition{sequence: movement.Sequence, timestamp: movementTimestamp, oldBalance: movement.OldBalance, newBalance: movement.NewBalance})
+			if movement.Bucket == "fee_revenue" {
+				if !isAuditedFeeRevenueReason(movement.Reason) {
+					deltas.UnsupportedRevenueRecords++
+				} else {
+					addConservationValue(feeRevenueRecorded, movement.Asset, movement.Delta, &deltas.ArithmeticFailures)
+					addConservationValue(feeRevenueRecordedByVenue, venueAssetKey{venue: event.VenueID, asset: movement.Asset}, movement.Delta, &deltas.ArithmeticFailures)
+					switch movement.Reason {
+					case "taker_fee", "maker_fee":
+						key := revenueKey{venue: event.VenueID, timestamp: movementTimestamp, asset: movement.Asset, symbol: movement.Symbol, tradeID: movement.TradeID, reason: movement.Reason}
+						if _, seen := seenTradingFeeMovements[key]; seen {
+							deltas.DuplicateFeeMovements++
+						} else {
+							seenTradingFeeMovements[key] = struct{}{}
+						}
+						addConservationValue(tradingFeeVenueFlows, key, movement.Delta, &deltas.ArithmeticFailures)
+					case "margin_interest":
+						key := instantKey{venue: event.VenueID, timestamp: movementTimestamp, asset: movement.Asset}
+						addConservationValue(marginInterestVenueFlows, key, movement.Delta, &deltas.ArithmeticFailures)
+					case "funding_remainder":
+						key := fundingInstantKey{venue: event.VenueID, timestamp: movementTimestamp, asset: movement.Asset, symbol: movement.Symbol}
+						deltas.FundingRemainderRecords++
+						addConservationValue(fundingRemainderVenueFlows, key, movement.Delta, &deltas.ArithmeticFailures)
+					}
 				}
+			}
+			if movement.Reason == "position_rounding" {
 				key := venueRoundingKey{venue: event.VenueID, symbol: movement.Symbol, timestamp: movementTimestamp, asset: movement.Asset}
 				if next, ok := addAuditInt64(roundingVenueFlows[key], movement.Delta); ok {
 					roundingVenueFlows[key] = next
@@ -438,24 +644,55 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		}
 		if event.Name == "fee_revenue" {
 			var payload feePayload
-			if err := decodeRequiredJSON(event.Raw(), &payload, "asset", "taker_fee", "maker_fee"); err != nil || payload.Asset == "" {
+			if err := decodeRequiredJSON(event.Raw(), &payload, "timestamp", "symbol", "trade_id", "asset", "taker_fee", "maker_fee"); err != nil || payload.Timestamp == 0 || payload.Timestamp != event.SimTS || payload.Symbol == "" || payload.Asset == "" {
 				mu.Lock()
 				deltas.MalformedFeeRecords++
 				mu.Unlock()
 				return
 			}
-			mu.Lock()
 			totalFee, ok := addAuditInt64(payload.TakerFee, payload.MakerFee)
-			if !ok {
-				deltas.ArithmeticFailures++
-			} else {
-				addConservationValue(fees, payload.Asset, totalFee, &deltas.ArithmeticFailures)
+			if !ok || (payload.TakerFee == 0 && payload.MakerFee == 0) {
+				mu.Lock()
+				deltas.MalformedFeeRecords++
+				if !ok {
+					deltas.ArithmeticFailures++
+				}
+				mu.Unlock()
+				return
 			}
+			mu.Lock()
+			feeIdentities := make([]revenueKey, 0, 2)
+			if payload.TakerFee != 0 {
+				feeIdentities = append(feeIdentities, revenueKey{venue: event.VenueID, timestamp: payload.Timestamp, asset: payload.Asset, symbol: payload.Symbol, tradeID: payload.TradeID, reason: "taker_fee"})
+			}
+			if payload.MakerFee != 0 {
+				feeIdentities = append(feeIdentities, revenueKey{venue: event.VenueID, timestamp: payload.Timestamp, asset: payload.Asset, symbol: payload.Symbol, tradeID: payload.TradeID, reason: "maker_fee"})
+			}
+			duplicateIdentity := false
+			for _, identity := range feeIdentities {
+				if _, seen := seenTradingFeeIdentities[identity]; seen {
+					duplicateIdentity = true
+					break
+				}
+			}
+			if duplicateIdentity {
+				deltas.DuplicateFeeIdentities++
+				deltas.MalformedFeeRecords++
+				mu.Unlock()
+				return
+			}
+			for _, identity := range feeIdentities {
+				seenTradingFeeIdentities[identity] = struct{}{}
+			}
+			deltas.TradingFeeEvents++
+			addConservationValue(tradingFeeEvents, revenueKey{venue: event.VenueID, timestamp: payload.Timestamp, asset: payload.Asset, symbol: payload.Symbol, tradeID: payload.TradeID, reason: "taker_fee"}, payload.TakerFee, &deltas.ArithmeticFailures)
+			addConservationValue(tradingFeeEvents, revenueKey{venue: event.VenueID, timestamp: payload.Timestamp, asset: payload.Asset, symbol: payload.Symbol, tradeID: payload.TradeID, reason: "maker_fee"}, payload.MakerFee, &deltas.ArithmeticFailures)
+			addConservationValue(fees, payload.Asset, totalFee, &deltas.ArithmeticFailures)
 			mu.Unlock()
 			return
 		}
 		var record balanceChangeRecord
-		if err := decodeRequiredJSON(event.Raw(), &record, "timestamp", "client_id", "reason", "changes"); err != nil || len(record.Changes) == 0 {
+		if err := decodeRequiredJSON(event.Raw(), &record, "timestamp", "client_id", "reason", "changes"); err != nil || record.Timestamp == 0 || record.Timestamp != event.SimTS || (record.Reason == "funding_settlement" && record.Symbol == "") || len(record.Changes) == 0 {
 			mu.Lock()
 			deltas.DecodeFailures++
 			mu.Unlock()
@@ -474,6 +711,12 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			if err := decodeRequiredJSON(rawChange, &change, "asset", "wallet", "old_balance", "new_balance", "delta"); err != nil || change.Asset == "" || change.Wallet == "" {
 				mu.Lock()
 				deltas.DecodeFailures++
+				mu.Unlock()
+				return
+			}
+			if record.Reason == "funding_settlement" && change.Wallet != "perp" {
+				mu.Lock()
+				deltas.FundingWalletMismatches++
 				mu.Unlock()
 				return
 			}
@@ -534,6 +777,14 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 				}
 				change.Delta = negated
 			}
+			if record.Reason == "interest_charge" {
+				if change.Wallet != "spot" && change.Wallet != "perp" {
+					deltas.MalformedInterestRecords++
+					continue
+				}
+				key := marginInterestKey{venue: event.VenueID, timestamp: instant, clientID: record.ClientID, asset: change.Asset, wallet: change.Wallet}
+				addConservationValue(marginInterestParticipantFlows, key, change.Delta, &deltas.ArithmeticFailures)
+			}
 
 			key := flowKey{record.Reason, change.Asset}
 			flow := flows[key]
@@ -575,7 +826,15 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 			var bucket map[instantKey]*InstantResidual
 			switch {
 			case record.Reason == "funding_settlement":
-				bucket = funding
+				fundingID := fundingInstantKey{venue: event.VenueID, timestamp: instant, asset: change.Asset, symbol: record.Symbol}
+				residual := funding[fundingID]
+				if residual == nil {
+					residual = &InstantResidual{VenueID: event.VenueID, Timestamp: instant, Asset: change.Asset, Symbol: record.Symbol}
+					funding[fundingID] = residual
+				}
+				addConservationField(&residual.Net, change.Delta, &deltas.ArithmeticFailures)
+				residual.Accounts++
+				continue
 			case record.Reason == "expiry_settlement" && isOptionSymbol(record.Symbol):
 				// An option's payoff is its intrinsic value times the
 				// position, which does not depend on what the holder paid, so
@@ -603,19 +862,75 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 	// Reconcile the independently rebuilt venue streams with the terminal
 	// report. Comparing the union of keys also catches a balance or fee asset
 	// present on only one side of the claimed accounting boundary.
-	reportedVenue := make(map[string]int64)
-	reportedFees := make(map[string]int64)
+	reportedVenueByVenue := make(map[venueAssetKey]int64)
+	reportedFeesByVenue := make(map[venueAssetKey]int64)
+	reportedBucketBalances := make(map[venueBucketKey]int64)
+	seenVenueLedgers := make(map[string]struct{}, len(r.Report.VenueLedgers))
 	for _, ledger := range r.Report.VenueLedgers {
+		if ledger.VenueID == "" {
+			deltas.MalformedVenueLedgers++
+			continue
+		}
+		if _, seen := seenVenueLedgers[ledger.VenueID]; seen {
+			deltas.MalformedVenueLedgers++
+			continue
+		}
+		seenVenueLedgers[ledger.VenueID] = struct{}{}
 		for asset, amount := range ledger.FeeRevenue {
-			addConservationValue(reportedVenue, asset, amount, &deltas.ArithmeticFailures)
-			addConservationValue(reportedFees, asset, amount, &deltas.ArithmeticFailures)
+			key := venueAssetKey{venue: ledger.VenueID, asset: asset}
+			addConservationValue(reportedVenueByVenue, key, amount, &deltas.ArithmeticFailures)
+			addConservationValue(reportedFeesByVenue, key, amount, &deltas.ArithmeticFailures)
+			addConservationValue(reportedBucketBalances, venueBucketKey{venue: ledger.VenueID, bucket: "fee_revenue", asset: asset}, amount, &deltas.ArithmeticFailures)
 		}
 		for asset, amount := range ledger.InsuranceFund {
-			addConservationValue(reportedVenue, asset, amount, &deltas.ArithmeticFailures)
+			addConservationValue(reportedVenueByVenue, venueAssetKey{venue: ledger.VenueID, asset: asset}, amount, &deltas.ArithmeticFailures)
+			addConservationValue(reportedBucketBalances, venueBucketKey{venue: ledger.VenueID, bucket: "insurance_fund", asset: asset}, amount, &deltas.ArithmeticFailures)
 		}
 	}
-	deltas.VenueBalanceMismatches = countInt64MapMismatches(venueRecorded, reportedVenue)
-	deltas.FeeRevenueMismatches = countInt64MapMismatches(fees, reportedFees)
+	for venue := range observedVenues {
+		ledger, present := findVenueLedger(r.Report.VenueLedgers, venue)
+		if !present {
+			deltas.MalformedVenueLedgers++
+		} else if ledger.FinalSequence == nil {
+			deltas.VenueTerminalSequenceMissing++
+		}
+		sequences := venueSequences[venue]
+		sort.Slice(sequences, func(i, j int) bool { return sequences[i] < sequences[j] })
+		for index, sequence := range sequences {
+			if sequence != uint64(index+1) {
+				deltas.VenueSequenceMismatches++
+				break
+			}
+		}
+		if present && ledger.FinalSequence != nil {
+			terminal := *ledger.FinalSequence
+			if len(sequences) == 0 || terminal != sequences[len(sequences)-1] {
+				deltas.VenueSequenceMismatches++
+			}
+		}
+	}
+	deltas.VenueBalanceMismatches = countInt64MapMismatches(venueRecordedByVenue, reportedVenueByVenue)
+	deltas.FeeRevenueMismatches = countInt64MapMismatches(feeRevenueRecordedByVenue, reportedFeesByVenue)
+	deltas.VenueChainMismatches = countVenueChainMismatches(venueTransitions, reportedBucketBalances)
+	deltas.TradingFeeMismatches = countInt64MapMismatches(tradingFeeEvents, tradingFeeVenueFlows)
+	expectedMarginParticipantFlows := negatedConservationValues(marginInterestEvents, &deltas.ArithmeticFailures)
+	marginInterestEventTotals := make(map[instantKey]int64)
+	for key, amount := range marginInterestEvents {
+		instantID := instantKey{venue: key.venue, timestamp: key.timestamp, asset: key.asset}
+		addConservationValue(marginInterestEventTotals, instantID, amount, &deltas.ArithmeticFailures)
+	}
+	deltas.MarginInterestMismatches = countInt64MapMismatches(expectedMarginParticipantFlows, marginInterestParticipantFlows) +
+		countInt64MapMismatches(marginInterestEventTotals, marginInterestVenueFlows)
+	expectedFundingRemainders := make(map[fundingInstantKey]int64)
+	for key, residual := range funding {
+		negated, ok := negateAuditInt64(residual.Net)
+		if !ok {
+			deltas.ArithmeticFailures++
+			continue
+		}
+		expectedFundingRemainders[key] = negated
+	}
+	deltas.FundingRemainderMismatches = countInt64MapMismatches(expectedFundingRemainders, fundingRemainderVenueFlows)
 	rounding.UniqueTerminalKeys = len(roundingRecords)
 	expectedVenueFlows := make(map[venueRoundingKey]int64)
 	for key, record := range roundingRecords {
@@ -727,14 +1042,27 @@ func (r *Run) MeasureConservation(opts ConservationOptions) (*Conservation, erro
 		}
 		return result.Flows[i].Asset < result.Flows[j].Asset
 	})
-	result.FundingInstants = sortedResiduals(funding)
+	result.FundingInstants = sortedFundingResiduals(funding)
 	result.ExpiryInstants = sortedResiduals(expiry)
 	result.OptionExpiryInstants = sortedResiduals(optionExpiry)
 	return result, nil
 }
 
-func countInt64MapMismatches(left, right map[string]int64) int {
-	keys := make(map[string]struct{}, len(left)+len(right))
+func negatedConservationValues[K comparable](values map[K]int64, failures *int) map[K]int64 {
+	negated := make(map[K]int64, len(values))
+	for key, value := range values {
+		amount, ok := negateAuditInt64(value)
+		if !ok {
+			(*failures)++
+			continue
+		}
+		negated[key] = amount
+	}
+	return negated
+}
+
+func countInt64MapMismatches[K comparable](left, right map[K]int64) int {
+	keys := make(map[K]struct{}, len(left)+len(right))
 	for key := range left {
 		keys[key] = struct{}{}
 	}
@@ -745,6 +1073,36 @@ func countInt64MapMismatches(left, right map[string]int64) int {
 	for key := range keys {
 		if left[key] != right[key] {
 			mismatches++
+		}
+	}
+	return mismatches
+}
+
+func countVenueChainMismatches(transitions map[venueBucketKey][]venueTransition, terminal map[venueBucketKey]int64) int {
+	mismatches := 0
+	for key, edges := range transitions {
+		sort.Slice(edges, func(i, j int) bool { return edges[i].sequence < edges[j].sequence })
+		currentBalance := int64(0)
+		valid := true
+		for _, edge := range edges {
+			if edge.oldBalance != currentBalance {
+				valid = false
+				break
+			}
+			currentBalance = edge.newBalance
+		}
+		if currentBalance != terminal[key] {
+			valid = false
+		}
+		if !valid {
+			mismatches++
+		}
+	}
+	for key, expected := range terminal {
+		if expected != 0 {
+			if _, present := transitions[key]; !present {
+				mismatches++
+			}
 		}
 	}
 	return mismatches
@@ -763,6 +1121,26 @@ func sortedResiduals(bucket map[instantKey]*InstantResidual) []InstantResidual {
 			return out[i].Timestamp < out[j].Timestamp
 		}
 		return out[i].Asset < out[j].Asset
+	})
+	return out
+}
+
+func sortedFundingResiduals(bucket map[fundingInstantKey]*InstantResidual) []InstantResidual {
+	out := make([]InstantResidual, 0, len(bucket))
+	for _, residual := range bucket {
+		out = append(out, *residual)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].VenueID != out[j].VenueID {
+			return out[i].VenueID < out[j].VenueID
+		}
+		if out[i].Timestamp != out[j].Timestamp {
+			return out[i].Timestamp < out[j].Timestamp
+		}
+		if out[i].Asset != out[j].Asset {
+			return out[i].Asset < out[j].Asset
+		}
+		return out[i].Symbol < out[j].Symbol
 	})
 	return out
 }

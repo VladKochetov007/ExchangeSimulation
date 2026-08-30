@@ -281,15 +281,15 @@ func (e *DefaultExchange) UpdateDerivativeMarks() {
 	now := e.Clock.NowUnixNano()
 
 	type expirableData struct {
-		inst    Instrument
-		pending bool
+		symbol string
+		inst   Instrument
+		book   *OrderBook
 	}
 	e.mu.RLock()
 	expirables := make([]expirableData, 0)
 	for symbol, inst := range e.Instruments {
 		if _, ok := inst.(Expirable); ok {
-			_, pending := e.settlementPending[symbol]
-			expirables = append(expirables, expirableData{inst: inst, pending: pending})
+			expirables = append(expirables, expirableData{symbol: symbol, inst: inst, book: e.Books[symbol]})
 		}
 	}
 	e.mu.RUnlock()
@@ -303,22 +303,35 @@ func (e *DefaultExchange) UpdateDerivativeMarks() {
 		if err != nil {
 			// No valid underlying reference: defer settlement sampling and option
 			// marks rather than inventing a zero price.
+			e.mu.Lock()
+			if liveBook := e.Books[data.symbol]; liveBook == data.book && e.Instruments[data.symbol] == inst {
+				if opt, ok := inst.(*einstrument.EuropeanOption); ok {
+					opt.ClearMarks()
+				}
+			}
+			e.mu.Unlock()
 			e.reportPriceUnavailable(now, inst.Symbol(), "derivative_mark", err)
 			continue
 		}
-		inst.(Expirable).ObserveSettlement(underlyingPrice, now)
-		if data.pending {
-			// A pending contract must keep sampling its declared settlement
-			// source so that a later recovery can settle it. It is nevertheless
-			// permanently halted: no post-expiry option mark is published.
+		// Revalidate and commit the observation under the exchange lock. Expiry
+		// can remove an instrument after the unlocked price lookup; without this
+		// identity check a stale snapshot could publish a mark into a contract that
+		// has already entered settlement or been delisted.
+		e.mu.Lock()
+		liveBook := e.Books[data.symbol]
+		if liveBook == nil || liveBook != data.book {
+			e.mu.Unlock()
 			continue
 		}
-
-		if opt, ok := inst.(*einstrument.EuropeanOption); ok {
-			yearsLeft := float64(opt.ExpiryNano()-now) / float64(365*24*time.Hour)
-			mark := eprice.Black76Premium(underlyingPrice, opt.Strike, opt.IV, yearsLeft, opt.IsCall)
-			opt.SetMarks(underlyingPrice, mark)
+		inst.(Expirable).ObserveSettlement(underlyingPrice, now)
+		if _, pending := e.settlementPending[data.symbol]; !pending {
+			if opt, ok := inst.(*einstrument.EuropeanOption); ok {
+				yearsLeft := float64(opt.ExpiryNano()-now) / float64(365*24*time.Hour)
+				mark := eprice.Black76Premium(underlyingPrice, opt.Strike, opt.IV, yearsLeft, opt.IsCall)
+				opt.SetMarks(underlyingPrice, mark)
+			}
 		}
+		e.mu.Unlock()
 	}
 	e.publishIndexFeeds(now)
 	if e.postDerivativeMarkHook != nil {
@@ -430,6 +443,15 @@ func (e *DefaultExchange) settleExpiredInstrument(symbol string, now int64) {
 		pending.Attempts++
 		pending.LastReason = err.Error()
 		e.settlementPending[symbol] = pending
+		if perp := marginCore(inst); perp != nil {
+			// A mark sweep may have collected this contract before expiry won
+			// the exchange lock. Clear availability at the lifecycle boundary so
+			// pending exposure cannot be observed as a live marked contract.
+			perp.ClearMarkReferences()
+		}
+		if opt, ok := inst.(*einstrument.EuropeanOption); ok {
+			opt.ClearMarks()
+		}
 		log := e.getLogger(symbol)
 		e.mu.Unlock()
 		e.reportPriceUnavailable(now, symbol, "expiry_settlement", fmt.Errorf("expiry settlement: %w", err))
