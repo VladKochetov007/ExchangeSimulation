@@ -68,6 +68,8 @@ type PositionAccountingDelta = etypes.PositionAccountingDelta
 type PositionAccountingRounding = etypes.PositionAccountingRounding
 type PositionSide = etypes.PositionSide
 type PositionStore = etypes.PositionStore
+
+type SidedPositionStore = etypes.SidedPositionStore
 type FillContext = etypes.FillContext
 type PositionSnapshot = etypes.PositionSnapshot
 type AccountSnapshot = etypes.AccountSnapshot

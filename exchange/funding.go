@@ -84,6 +84,34 @@ func (pm *PositionManager) GetPositionBySide(clientID uint64, symbol string, pos
 	return &copy
 }
 
+// PositionsAcrossSides implements types.SidedPositionStore: it resolves the
+// client's position map once and reads all three sides from it, instead of
+// repeating the lock and the client lookup per side.
+//
+// Each returned entry is an independent copy, matching GetPositionBySide, so a
+// caller may hold the result without observing later mutation.
+func (pm *PositionManager) PositionsAcrossSides(clientID uint64, symbol string) [3]*Position {
+	var out [3]*Position
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	clientPositions := pm.positions[clientID]
+	if clientPositions == nil {
+		return out
+	}
+	for i, side := range positionSideOrder {
+		if p := clientPositions[positionKey{symbol, side}]; p != nil {
+			copy := *p
+			out[i] = &copy
+		}
+	}
+	return out
+}
+
+// positionSideOrder is the side order PositionsAcrossSides reports and every
+// risk probe walks.
+var positionSideOrder = [3]PositionSide{PositionBoth, PositionLong, PositionShort}
+
 // UpdatePosition applies a trade delta and returns old/new state.
 // Logging is the caller's responsibility.
 func (pm *PositionManager) UpdatePosition(clientID uint64, symbol string, qty, price int64, tradeSide Side, posSide PositionSide) PositionDelta {
