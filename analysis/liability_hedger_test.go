@@ -18,8 +18,214 @@ func TestLiabilityHedgerAuditReplaysLocalStateReceiptAndFill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Valid || result.Decisions != 2 || result.StateUpdates != 1 || result.Submitted != 1 || result.Accepted != 1 || result.Fills != 1 || result.ReceiptMatches != 1 || result.ActionCounts["SUBMIT_IOC"] != 1 || len(result.Hedgers) != 1 || result.Hedgers[0].Accepted != 1 || result.Hedgers[0].Fills != 1 || len(result.Checks) != 0 {
+	if !result.Valid || result.Decisions != 6 || result.StateUpdates != 3 || result.Submitted != 3 || result.Accepted != 3 || result.Fills != 3 || result.ReceiptMatches != 3 || result.ActionCounts["SUBMIT_IOC"] != 3 || len(result.Hedgers) != 3 || result.Hedgers[0].Accepted != 1 || result.Hedgers[0].Fills != 1 || len(result.Checks) != 0 {
 		t.Fatalf("valid L0 evidence audit = %+v", result)
+	}
+}
+
+func TestLiabilityHedgerEventFilesExcludeUnrelatedBooks(t *testing.T) {
+	run := &Run{Dir: "/run", files: []string{
+		"/run/venues/north/general.jsonl",
+		"/run/venues/north/spot/CDF-USD.jsonl",
+		"/run/venues/north/spot/ABC-USD.jsonl",
+		"/run/venues/north/derivatives.jsonl",
+		"/run/venues/south/general.jsonl",
+	}}
+	got := liabilityHedgerEventFiles(run, []string{"north"})
+	want := []string{
+		"/run/venues/north/general.jsonl",
+		"/run/venues/north/spot/CDF-USD.jsonl",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("liability event files = %v, want %v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("liability event files = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestLiabilityHedgerAuditRejectsAdversarialLifecycleJoins(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup l0Fixture
+		check func(*LiabilityHedgerAudit) bool
+	}{
+		{
+			name:  "counterparty payload identity spoof",
+			setup: l0Fixture{CounterpartyPayloadClient: 7},
+			check: func(result *LiabilityHedgerAudit) bool { return result.CounterpartyIdentityMismatches > 0 },
+		},
+		{
+			name:  "wrong role fill envelope",
+			setup: l0Fixture{FillEnvelopeClient: 8},
+			check: func(result *LiabilityHedgerAudit) bool { return result.LifecycleIdentityMismatches > 0 },
+		},
+		{
+			name:  "trade precedes order acceptance",
+			setup: l0Fixture{TradeBeforeOrder: true},
+			check: func(result *LiabilityHedgerAudit) bool { return result.CausalOrderMismatches > 0 },
+		},
+		{
+			name:  "duplicate order acceptance",
+			setup: l0Fixture{DuplicateOrder: true},
+			check: func(result *LiabilityHedgerAudit) bool {
+				return result.DuplicateOrderIdentities > 0 || result.DuplicateOutcomes > 0
+			},
+		},
+		{
+			name:  "trade without liability fill",
+			setup: l0Fixture{DropOrderFill: true},
+			check: func(result *LiabilityHedgerAudit) bool { return result.MissingTradeFills > 0 },
+		},
+		{
+			name:  "duplicate trade identity",
+			setup: l0Fixture{DuplicateTrade: true},
+			check: func(result *LiabilityHedgerAudit) bool { return result.DuplicateTradeIdentities > 0 },
+		},
+		{
+			name:  "duplicate fill identity",
+			setup: l0Fixture{DuplicateFill: true},
+			check: func(result *LiabilityHedgerAudit) bool { return result.DuplicateFillIdentities > 0 },
+		},
+		{
+			name:  "fill precedes trade",
+			setup: l0Fixture{FillBeforeTrade: true},
+			check: func(result *LiabilityHedgerAudit) bool { return result.CausalOrderMismatches > 0 },
+		},
+		{
+			name:  "counterparty symbol mutation",
+			setup: l0Fixture{CounterpartySymbol: "ABC/USD"},
+			check: func(result *LiabilityHedgerAudit) bool { return result.CounterpartyFieldMismatches > 0 },
+		},
+		{
+			name:  "counterparty quantity mutation",
+			setup: l0Fixture{CounterpartyQty: 1},
+			check: func(result *LiabilityHedgerAudit) bool { return result.CounterpartyFieldMismatches > 0 },
+		},
+		{
+			name:  "cancellation precedes acceptance",
+			setup: l0Fixture{PartialFill: true, CancelBeforeOrder: true},
+			check: func(result *LiabilityHedgerAudit) bool { return result.CausalOrderMismatches > 0 },
+		},
+		{
+			name:  "swapped trade maker and taker",
+			setup: l0Fixture{SwapTradeOrders: true},
+			check: func(result *LiabilityHedgerAudit) bool { return result.TradeRoleMismatches > 0 },
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := l0TestRun(t, tc.setup).MeasureLiabilityHedger()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Valid || !tc.check(result) {
+				t.Fatalf("adversarial lifecycle mutation survived: %+v", result)
+			}
+		})
+	}
+}
+
+func TestLiabilityHedgerAuditRejectsActorEvidenceInBookFile(t *testing.T) {
+	run := l0TestRun(t, l0Fixture{})
+	actorPath := filepath.Join(run.Dir, "venues", "north", "general.jsonl")
+	bookPath := filepath.Join(run.Dir, "venues", "north", "spot", "CDF-USD.jsonl")
+	actorEvidence, err := os.ReadFile(actorPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	book, err := os.OpenFile(bookPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := book.Write(actorEvidence); err != nil {
+		_ = book.Close()
+		t.Fatal(err)
+	}
+	if err := book.Close(); err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.MeasureLiabilityHedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid || result.WrongEvidenceFiles == 0 {
+		t.Fatalf("wrong-file actor evidence survived: %+v", result)
+	}
+}
+
+func TestLiabilityHedgerAuditRejectsMissingConfiguredParticipant(t *testing.T) {
+	run := l0TestRun(t, l0Fixture{})
+	missingActorPath := filepath.Join(run.Dir, "venues", "central", "general.jsonl")
+	missingBookPath := filepath.Join(run.Dir, "venues", "central", "spot", "CDF-USD.jsonl")
+	retainedFiles := make([]string, 0, len(run.files)-2)
+	for _, path := range run.files {
+		if path == missingActorPath || path == missingBookPath {
+			continue
+		}
+		retainedFiles = append(retainedFiles, path)
+	}
+	run.files = retainedFiles
+	result, err := run.MeasureLiabilityHedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid || result.ConfiguredParticipantMismatches == 0 {
+		t.Fatalf("missing configured participant survived: %+v", result)
+	}
+}
+
+func TestLiabilityHedgerAuditRejectsMissingConfiguredBookOnly(t *testing.T) {
+	run := l0TestRun(t, l0Fixture{})
+	missingBookPath := filepath.Join(run.Dir, "venues", "central", "spot", "CDF-USD.jsonl")
+	retainedFiles := make([]string, 0, len(run.files)-1)
+	for _, path := range run.files {
+		if path == missingBookPath {
+			continue
+		}
+		retainedFiles = append(retainedFiles, path)
+	}
+	run.files = retainedFiles
+	result, err := run.MeasureLiabilityHedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid || result.ConfiguredParticipantMismatches == 0 {
+		t.Fatalf("missing configured book survived: %+v", result)
+	}
+}
+
+func TestLiabilityHedgerAuditRejectsRelocatedBookFile(t *testing.T) {
+	run := l0TestRun(t, l0Fixture{})
+	canonicalPath := filepath.Join(run.Dir, "venues", "central", "spot", "CDF-USD.jsonl")
+	relocatedPath := filepath.Join(run.Dir, "venues", "central", "archive", "CDF-USD.jsonl")
+	raw, err := os.ReadFile(canonicalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(relocatedPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(relocatedPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	retainedFiles := make([]string, 0, len(run.files))
+	for _, path := range run.files {
+		if path == canonicalPath {
+			retainedFiles = append(retainedFiles, relocatedPath)
+			continue
+		}
+		retainedFiles = append(retainedFiles, path)
+	}
+	run.files = retainedFiles
+	result, err := run.MeasureLiabilityHedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid || result.ConfiguredParticipantMismatches == 0 {
+		t.Fatalf("relocated configured book survived: %+v", result)
 	}
 }
 
@@ -29,7 +235,7 @@ func TestLiabilityHedgerAuditDisabledControlEvolvesButDoesNotAct(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Valid || result.Decisions != 2 || result.DisabledDecisions != 2 || result.StateUpdates != 1 || result.Submitted != 0 || result.Accepted != 0 || result.Fills != 0 || result.ActionCounts["NOT_SUBSCRIBED"] != 1 || result.ActionCounts["POLICY_DISABLED"] != 1 || len(result.Checks) != 0 {
+	if !result.Valid || result.Decisions != 6 || result.DisabledDecisions != 6 || result.StateUpdates != 3 || result.Submitted != 0 || result.Accepted != 0 || result.Fills != 0 || result.ActionCounts["NOT_SUBSCRIBED"] != 3 || result.ActionCounts["POLICY_DISABLED"] != 3 || len(result.Checks) != 0 {
 		t.Fatalf("disabled L0 evidence audit = %+v", result)
 	}
 }
@@ -40,7 +246,7 @@ func TestLiabilityHedgerAuditReplaysRandomSideControlAndReportsItsGapDirection(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Valid || result.PolicyMode != liabilityHedgerPolicyRandom || result.RandomControlFills != 1 || result.RandomControlReducing+result.RandomControlNonReducing != 1 || result.NonReducingFills != 0 {
+	if !result.Valid || result.PolicyMode != liabilityHedgerPolicyRandom || result.RandomControlFills != 3 || result.RandomControlReducing+result.RandomControlNonReducing != 3 || result.NonReducingFills != 0 {
 		t.Fatalf("valid L1 random-control audit = %+v", result)
 	}
 }
@@ -51,7 +257,7 @@ func TestLiabilityHedgerAuditAcceptsExplicitUnavailableTouchWithoutRequest(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Valid || result.Deferred != 2 || result.Submitted != 0 || result.DecisionFieldMismatches != 0 || result.ActionCounts["LOCAL_EXECUTABLE_PRICE_UNAVAILABLE"] != 1 || len(result.Checks) != 0 {
+	if !result.Valid || result.Deferred != 6 || result.Submitted != 0 || result.DecisionFieldMismatches != 0 || result.ActionCounts["LOCAL_EXECUTABLE_PRICE_UNAVAILABLE"] != 3 || len(result.Checks) != 0 {
 		t.Fatalf("unavailable-touch random-control defer = %+v", result)
 	}
 
@@ -77,7 +283,7 @@ func TestLiabilityHedgerAuditAcceptsExactZeroFeeRounding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Valid || result.Fills != 1 || result.FeeMismatches != 0 || result.NonPositiveFees != 0 || len(result.Checks) != 0 {
+	if !result.Valid || result.Fills != 3 || result.FeeMismatches != 0 || result.NonPositiveFees != 0 || len(result.Checks) != 0 {
 		t.Fatalf("exact zero-fee partial fill = %+v", result)
 	}
 
@@ -103,7 +309,7 @@ func TestLiabilityHedgerAuditAcceptsOnlyARealTailCensor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Valid || result.HorizonCensored != 1 || result.Submitted != 0 || result.ActionCounts["SIMULATION_HORIZON_CENSORED"] != 1 {
+	if !result.Valid || result.HorizonCensored != 3 || result.Submitted != 0 || result.ActionCounts["SIMULATION_HORIZON_CENSORED"] != 3 {
 		t.Fatalf("terminal L0 defer = %+v", result)
 	}
 }
@@ -242,23 +448,46 @@ func TestLiabilityHedgerAuditClassifiesRandomControlGapIncreaseWithoutRejectingI
 }
 
 type l0Fixture struct {
-	Disabled            bool
-	PolicyMode          string
-	DropInitialDecision bool
-	DuplicateDecision   bool
-	DropGatewayDecision bool
-	TailCensored        bool
-	NoExecutableTouch   bool
-	ReverseSide         bool
-	PartialFill         bool
-	TinyPartialFill     bool
-	DropCancel          bool
-	CounterpartyClient  uint64
-	ReceiptAt           int64
-	TerminalAt          int64
-	Decision            map[string]any
-	Fill                map[string]any
-	FillEvidence        map[string]any
+	Disabled                  bool
+	PolicyMode                string
+	DropInitialDecision       bool
+	DuplicateDecision         bool
+	DropGatewayDecision       bool
+	TailCensored              bool
+	NoExecutableTouch         bool
+	ReverseSide               bool
+	PartialFill               bool
+	TinyPartialFill           bool
+	DropCancel                bool
+	DropOrderFill             bool
+	DuplicateOrder            bool
+	DuplicateTrade            bool
+	DuplicateFill             bool
+	SwapTradeOrders           bool
+	TradeBeforeOrder          bool
+	FillBeforeTrade           bool
+	CancelBeforeOrder         bool
+	CounterpartyClient        uint64
+	CounterpartyPayloadClient uint64
+	CounterpartySymbol        string
+	CounterpartyQty           int64
+	FillEnvelopeClient        uint64
+	ReceiptAt                 int64
+	TerminalAt                int64
+	Decision                  map[string]any
+	Fill                      map[string]any
+	FillEvidence              map[string]any
+}
+
+func liabilityHedgerLogLine(venue string, ts int64, clientID uint64, event string, payload map[string]any) string {
+	raw, err := json.Marshal(map[string]any{
+		"client_id": clientID, "event": event, "sim_ts": ts,
+		"data": map[string]any{"venue_id": venue, "payload": payload},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return string(raw)
 }
 
 func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
@@ -278,16 +507,11 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 	step := l0FixtureStep()
 	side, price := "SELL", int64(300_000_000)
 	orderSide := exchange.Sell
-	if fixture.PolicyMode == liabilityHedgerPolicyRandom {
-		control := rand.New(rand.NewSource(liabilityHedgerFlowSeed(101, 0, 0, 15)))
-		if control.Intn(2) == 0 {
-			side, price, orderSide = "BUY", 300_100_000, exchange.Buy
-		}
-	} else if step > 0 {
+	if fixture.PolicyMode != liabilityHedgerPolicyRandom && step > 0 {
 		side, price, orderSide = "BUY", 300_100_000, exchange.Buy
 	}
 	submitted := !fixture.Disabled && !fixture.TailCensored && !fixture.NoExecutableTouch && !fixture.DropGatewayDecision
-	writeL0Evidence(t, dir, fixture.ReceiptAt, fixture.TerminalAt, submitted, orderSide, price)
+	writeL0Evidence(t, dir, fixture.ReceiptAt, fixture.TerminalAt, submitted, fixture.PolicyMode, side, orderSide, price)
 	active := map[string]any{
 		"venue_id": "north", "hedger": "liability_hedger_1", "client_id": uint64(7), "symbol": "CDF/USD",
 		"decision_time": int64(12_000_000_000), "enabled": !fixture.Disabled, "subscribed": true, "request_pending": false,
@@ -360,69 +584,185 @@ func l0TestRun(t *testing.T, fixture l0Fixture) *Run {
 		initial["policy_mode"] = fixture.PolicyMode
 	}
 
-	lines := make([]string, 0, 8)
-	if !fixture.DropInitialDecision {
-		lines = append(lines, logLine(10_000_000_000, 7, "liability_hedger_decision", initial))
+	venueIDs := []string{"north", "central", "south"}
+	actorLines := make([]string, 0, 9)
+	bookLines := make([]string, 0, 18)
+	actorRanges := make(map[string][2]int, len(venueIDs))
+	bookRanges := make(map[string][2]int, len(venueIDs))
+	for venueIndex, venueID := range venueIDs {
+		actorStart := len(actorLines)
+		bookStart := len(bookLines)
+		venueSide, venuePrice := side, price
+		if fixture.PolicyMode == liabilityHedgerPolicyRandom {
+			control := rand.New(rand.NewSource(liabilityHedgerFlowSeed(101, venueIndex, 0, 15)))
+			if control.Intn(2) == 0 {
+				venueSide, venuePrice = "BUY", 300_100_000
+			}
+		}
+		if fixture.ReverseSide {
+			if venueSide == "BUY" {
+				venueSide = "SELL"
+			} else {
+				venueSide = "BUY"
+			}
+		}
+		active["venue_id"] = venueID
+		initial["venue_id"] = venueID
+		active["side"] = venueSide
+		active["limit_price"] = venuePrice
+		if fixture.Disabled || fixture.TailCensored {
+			active["side"] = ""
+			active["limit_price"] = int64(0)
+		}
+		if fixture.NoExecutableTouch {
+			active["limit_price"] = int64(0)
+		}
+		active["has_bid"] = true
+		active["bid_price"] = int64(300_000_000)
+		active["bid_visible_qty"] = int64(1_000_000_000)
+		active["has_ask"] = true
+		active["ask_price"] = int64(300_100_000)
+		active["ask_visible_qty"] = int64(1_000_000_000)
+		if fixture.NoExecutableTouch {
+			if venueSide == "BUY" {
+				active["has_ask"] = false
+				active["ask_price"] = int64(0)
+				active["ask_visible_qty"] = int64(0)
+			} else {
+				active["has_bid"] = false
+				active["bid_price"] = int64(0)
+				active["bid_visible_qty"] = int64(0)
+			}
+		}
+		for field, value := range fixture.Decision {
+			active[field] = value
+		}
+		if !fixture.DropInitialDecision {
+			actorLines = append(actorLines, liabilityHedgerLogLine(venueID, 10_000_000_000, 7, "liability_hedger_decision", initial))
+		}
+		actorLines = append(actorLines, liabilityHedgerLogLine(venueID, 12_000_000_000, 7, "liability_hedger_decision", active))
+		if fixture.DuplicateDecision {
+			actorLines = append(actorLines, liabilityHedgerLogLine(venueID, 12_000_000_000, 7, "liability_hedger_decision", active))
+		}
+		if submitted {
+			quantity := int64(100_000_000)
+			if fixture.PartialFill {
+				quantity = 50_000_000
+			}
+			if fixture.TinyPartialFill {
+				quantity = 1
+			}
+			fee, ok := liabilityHedgerFee(quantity, venuePrice, 5)
+			if !ok {
+				t.Fatal("fixture fee overflow")
+			}
+			postPosition := quantity
+			counterSide := "SELL"
+			if venueSide == "SELL" {
+				postPosition = -quantity
+				counterSide = "BUY"
+			}
+			counterpartyClient := uint64(8)
+			if fixture.CounterpartyClient != 0 {
+				counterpartyClient = fixture.CounterpartyClient
+			}
+			counterpartyPayloadClient := counterpartyClient
+			if fixture.CounterpartyPayloadClient != 0 {
+				counterpartyPayloadClient = fixture.CounterpartyPayloadClient
+			}
+			counterpartySymbol := "CDF/USD"
+			if fixture.CounterpartySymbol != "" {
+				counterpartySymbol = fixture.CounterpartySymbol
+			}
+			counterpartyQty := quantity
+			if fixture.CounterpartyQty != 0 {
+				counterpartyQty = fixture.CounterpartyQty
+			}
+			fillEnvelopeClient := uint64(7)
+			if fixture.FillEnvelopeClient != 0 {
+				fillEnvelopeClient = fixture.FillEnvelopeClient
+			}
+			order := map[string]any{"order_id": uint64(70), "client_id": uint64(7), "request_id": uint64(42), "symbol": "CDF/USD", "side": venueSide, "type": "LIMIT", "time_in_force": "IOC", "post_only": false, "price": venuePrice, "qty": int64(100_000_000)}
+			counter := map[string]any{"order_id": uint64(80), "client_id": counterpartyPayloadClient, "request_id": uint64(43), "symbol": counterpartySymbol, "side": counterSide, "type": "LIMIT", "time_in_force": "GTC", "post_only": false, "price": venuePrice, "qty": counterpartyQty}
+			feeAsset := "USD"
+			if fee == 0 {
+				feeAsset = ""
+			}
+			fill := map[string]any{"order_id": uint64(70), "trade_id": uint64(9), "symbol": "CDF/USD", "side": venueSide, "qty": quantity, "price": venuePrice, "fee_amount": fee, "fee_asset": feeAsset, "role": "taker"}
+			fillEvidence := map[string]any{"venue_id": venueID, "hedger": "liability_hedger_1", "client_id": uint64(7), "symbol": "CDF/USD", "timestamp": int64(13_000_000_000), "order_id": uint64(70), "trade_id": uint64(9), "side": side, "qty": quantity, "price": price, "fee_amount": fee, "fee_asset": feeAsset, "pre_position": int64(0), "post_position": postPosition}
+			fillEvidence["side"] = venueSide
+			fillEvidence["price"] = venuePrice
+			if fixture.PolicyMode != "" {
+				fillEvidence["policy_mode"] = fixture.PolicyMode
+			}
+			for field, value := range fixture.Fill {
+				fill[field] = value
+			}
+			for field, value := range fixture.FillEvidence {
+				fillEvidence[field] = value
+			}
+			orderAcceptedLine := liabilityHedgerLogLine(venueID, 13_000_000_000, 7, "OrderAccepted", order)
+			counterpartyAcceptedLine := liabilityHedgerLogLine(venueID, 13_000_000_000, counterpartyClient, "OrderAccepted", counter)
+			takerOrderID, makerOrderID := uint64(70), uint64(80)
+			if fixture.SwapTradeOrders {
+				takerOrderID, makerOrderID = makerOrderID, takerOrderID
+			}
+			tradeLine := liabilityHedgerLogLine(venueID, 13_000_000_000, 0, "Trade", map[string]any{"trade_id": uint64(9), "price": venuePrice, "qty": quantity, "taker_order_id": takerOrderID, "maker_order_id": makerOrderID})
+			fillLine := liabilityHedgerLogLine(venueID, 13_000_000_000, fillEnvelopeClient, "OrderFill", fill)
+			cancelLine := liabilityHedgerLogLine(venueID, 13_000_000_000, 7, "OrderCancelled", map[string]any{"order_id": uint64(70), "remaining_qty": int64(100_000_000) - quantity})
+			if fixture.CancelBeforeOrder && (fixture.PartialFill || fixture.TinyPartialFill) && !fixture.DropCancel {
+				bookLines = append(bookLines, cancelLine)
+			}
+			if fixture.TradeBeforeOrder {
+				bookLines = append(bookLines, tradeLine, orderAcceptedLine, counterpartyAcceptedLine)
+			} else {
+				bookLines = append(bookLines, orderAcceptedLine, counterpartyAcceptedLine)
+				if fixture.FillBeforeTrade && !fixture.DropOrderFill {
+					bookLines = append(bookLines, fillLine)
+				}
+				bookLines = append(bookLines, tradeLine)
+			}
+			if !fixture.DropOrderFill && (!fixture.FillBeforeTrade || fixture.TradeBeforeOrder) {
+				bookLines = append(bookLines, fillLine)
+			}
+			if fixture.DuplicateFill && !fixture.DropOrderFill {
+				bookLines = append(bookLines, fillLine)
+			}
+			if fixture.DuplicateTrade {
+				bookLines = append(bookLines, tradeLine)
+			}
+			actorLines = append(actorLines, liabilityHedgerLogLine(venueID, 13_000_000_000, 7, "liability_hedger_fill", fillEvidence))
+			if fixture.DuplicateOrder {
+				bookLines = append(bookLines, orderAcceptedLine)
+			}
+			if (fixture.PartialFill || fixture.TinyPartialFill) && !fixture.DropCancel && !fixture.CancelBeforeOrder {
+				bookLines = append(bookLines, cancelLine)
+			}
+		}
+		actorRanges[venueID] = [2]int{actorStart, len(actorLines)}
+		bookRanges[venueID] = [2]int{bookStart, len(bookLines)}
 	}
-	lines = append(lines, logLine(12_000_000_000, 7, "liability_hedger_decision", active))
-	if fixture.DuplicateDecision {
-		lines = append(lines, logLine(12_000_000_000, 7, "liability_hedger_decision", active))
+	roles := make(map[Participant]string, len(venueIDs)*2)
+	files := make([]string, 0, len(venueIDs)*2)
+	for _, venueID := range venueIDs {
+		actorPath := filepath.Join(dir, "venues", venueID, "general.jsonl")
+		bookPath := filepath.Join(dir, "venues", venueID, "spot", "CDF-USD.jsonl")
+		if err := os.MkdirAll(filepath.Dir(bookPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		actorRange := actorRanges[venueID]
+		bookRange := bookRanges[venueID]
+		if err := os.WriteFile(actorPath, []byte(joinLines(actorLines[actorRange[0]:actorRange[1]])), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(bookPath, []byte(joinLines(bookLines[bookRange[0]:bookRange[1]])), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		roles[Participant{VenueID: venueID, ClientID: 7}] = "liability_hedger"
+		roles[Participant{VenueID: venueID, ClientID: 8}] = "noise_flow"
+		files = append(files, actorPath, bookPath)
 	}
-	if submitted {
-		quantity := int64(100_000_000)
-		if fixture.PartialFill {
-			quantity = 50_000_000
-		}
-		if fixture.TinyPartialFill {
-			quantity = 1
-		}
-		fee, ok := liabilityHedgerFee(quantity, price, 5)
-		if !ok {
-			t.Fatal("fixture fee overflow")
-		}
-		postPosition := quantity
-		counterSide := "SELL"
-		if side == "SELL" {
-			postPosition = -quantity
-			counterSide = "BUY"
-		}
-		counterpartyClient := uint64(8)
-		if fixture.CounterpartyClient != 0 {
-			counterpartyClient = fixture.CounterpartyClient
-		}
-		order := map[string]any{"order_id": uint64(70), "client_id": uint64(7), "request_id": uint64(42), "symbol": "CDF/USD", "side": side, "type": "LIMIT", "time_in_force": "IOC", "post_only": false, "price": price, "qty": int64(100_000_000)}
-		counter := map[string]any{"order_id": uint64(80), "client_id": counterpartyClient, "request_id": uint64(43), "symbol": "CDF/USD", "side": counterSide, "type": "LIMIT", "time_in_force": "GTC", "post_only": false, "price": price, "qty": quantity}
-		feeAsset := "USD"
-		if fee == 0 {
-			feeAsset = ""
-		}
-		fill := map[string]any{"order_id": uint64(70), "trade_id": uint64(9), "symbol": "CDF/USD", "side": side, "qty": quantity, "price": price, "fee_amount": fee, "fee_asset": feeAsset, "role": "taker"}
-		fillEvidence := map[string]any{"venue_id": "north", "hedger": "liability_hedger_1", "client_id": uint64(7), "symbol": "CDF/USD", "timestamp": int64(13_000_000_000), "order_id": uint64(70), "trade_id": uint64(9), "side": side, "qty": quantity, "price": price, "fee_amount": fee, "fee_asset": feeAsset, "pre_position": int64(0), "post_position": postPosition}
-		if fixture.PolicyMode != "" {
-			fillEvidence["policy_mode"] = fixture.PolicyMode
-		}
-		for field, value := range fixture.Fill {
-			fill[field] = value
-		}
-		for field, value := range fixture.FillEvidence {
-			fillEvidence[field] = value
-		}
-		lines = append(lines,
-			logLine(13_000_000_000, 7, "OrderAccepted", order),
-			logLine(13_000_000_000, counterpartyClient, "OrderAccepted", counter),
-			logLine(13_000_000_000, 0, "Trade", map[string]any{"trade_id": uint64(9), "price": price, "qty": quantity, "taker_order_id": uint64(70), "maker_order_id": uint64(80)}),
-			logLine(13_000_000_000, 7, "OrderFill", fill),
-			logLine(13_000_000_000, 7, "liability_hedger_fill", fillEvidence),
-		)
-		if (fixture.PartialFill || fixture.TinyPartialFill) && !fixture.DropCancel {
-			lines = append(lines, logLine(13_000_000_000, 7, "OrderCancelled", map[string]any{"order_id": uint64(70), "remaining_qty": int64(100_000_000) - quantity}))
-		}
-	}
-	path := filepath.Join(dir, "general.jsonl")
-	if err := os.WriteFile(path, []byte(joinLines(lines)), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return &Run{Dir: dir, files: []string{path}, roles: map[Participant]string{{VenueID: "north", ClientID: 7}: "liability_hedger", {VenueID: "north", ClientID: 8}: "noise_flow"}}
+	return &Run{Dir: dir, files: files, roles: roles}
 }
 
 func writeL0Config(t *testing.T, dir string, disabled bool, policyMode string) {
@@ -446,23 +786,32 @@ func writeL0Config(t *testing.T, dir string, disabled bool, policyMode string) {
 	}
 }
 
-func writeL0Evidence(t *testing.T, dir string, deliveredAt, terminalAt int64, submitted bool, side exchange.Side, price int64) {
+func writeL0Evidence(t *testing.T, dir string, deliveredAt, terminalAt int64, submitted bool, policyMode, side string, orderSide exchange.Side, price int64) {
 	t.Helper()
 	recorder, err := simulation.NewMarketDataReceiptRecorder(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	link := "north/liability_hedger/client/7"
-	recorder.RegisterLink("north", link, "liability_hedger")
-	schedule := simulation.MarketDataSchedule{ClientID: 7, SourceVenue: "north", Link: link, Symbol: "CDF/USD", Type: exchange.MDSnapshot, Sequence: 7, Fingerprint: [16]byte{1}, PublishedAt: 10_000_000_000, ScheduledAt: 10_000_000_000, LinkOrdinal: 1}
-	recorder.RecordSchedule(schedule)
-	frontier := recorder.RecordReceipt(simulation.MarketDataReceipt{MarketDataSchedule: schedule, DeliveredAt: deliveredAt})
-	if submitted {
-		recorder.RecordDecision(simulation.MarketDataDecision{
-			ClientID: 7, SourceVenue: "north", Link: link, Symbol: "CDF/USD", RequestID: 42,
-			Side: side, OrderType: exchange.LimitOrder, TimeInForce: exchange.IOC,
-			Price: price, Qty: 100_000_000, DecisionAt: 12_000_000_000, Frontier: frontier,
-		})
+	for venueIndex, venueID := range []string{"north", "central", "south"} {
+		link := venueID + "/liability_hedger/client/7"
+		recorder.RegisterLink(venueID, link, "liability_hedger")
+		schedule := simulation.MarketDataSchedule{ClientID: 7, SourceVenue: venueID, Link: link, Symbol: "CDF/USD", Type: exchange.MDSnapshot, Sequence: 7, Fingerprint: [16]byte{1}, PublishedAt: 10_000_000_000, ScheduledAt: 10_000_000_000, LinkOrdinal: 1}
+		recorder.RecordSchedule(schedule)
+		frontier := recorder.RecordReceipt(simulation.MarketDataReceipt{MarketDataSchedule: schedule, DeliveredAt: deliveredAt})
+		if submitted {
+			venuePrice, venueOrderSide := price, orderSide
+			if policyMode == liabilityHedgerPolicyRandom {
+				control := rand.New(rand.NewSource(liabilityHedgerFlowSeed(101, venueIndex, 0, 15)))
+				if control.Intn(2) == 0 {
+					venuePrice, venueOrderSide = 300_100_000, exchange.Buy
+				}
+			}
+			recorder.RecordDecision(simulation.MarketDataDecision{
+				ClientID: 7, SourceVenue: venueID, Link: link, Symbol: "CDF/USD", RequestID: 42,
+				Side: venueOrderSide, OrderType: exchange.LimitOrder, TimeInForce: exchange.IOC,
+				Price: venuePrice, Qty: 100_000_000, DecisionAt: 12_000_000_000, Frontier: frontier,
+			})
+		}
 	}
 	if err := recorder.Finalize(terminalAt); err != nil {
 		t.Fatal(err)

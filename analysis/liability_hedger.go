@@ -3,6 +3,7 @@ package analysis
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"math/rand"
 	"os"
@@ -43,32 +44,43 @@ type LiabilityHedgerAudit struct {
 	MissingGatewayDecisions int64 `json:"missing_gateway_decisions"`
 	GatewayDecisionMismatch int64 `json:"gateway_decision_mismatches"`
 
-	InvalidDecisionRecords   int64            `json:"invalid_decision_records"`
-	StateTransitionMismatch  int64            `json:"state_transition_mismatches"`
-	DecisionFieldMismatches  int64            `json:"decision_field_mismatches"`
-	DisabledSubmissions      int64            `json:"disabled_submissions"`
-	DuplicateDecisions       int64            `json:"duplicate_decisions"`
-	MissingOutcomes          int64            `json:"missing_outcomes"`
-	DuplicateOutcomes        int64            `json:"duplicate_outcomes"`
-	CensoredOutcomeDelivery  int64            `json:"censored_outcome_deliveries"`
-	OutcomeFieldMismatches   int64            `json:"outcome_field_mismatches"`
-	MissingIOCTerminals      int64            `json:"missing_ioc_terminals"`
-	DuplicateIOCTerminals    int64            `json:"duplicate_ioc_terminals"`
-	FillQuantityMismatches   int64            `json:"fill_quantity_mismatches"`
-	MissingFillEvidence      int64            `json:"missing_fill_evidence"`
-	UnexpectedFillEvidence   int64            `json:"unexpected_fill_evidence"`
-	FillEvidenceMismatches   int64            `json:"fill_evidence_mismatches"`
-	NonReducingFills         int64            `json:"non_reducing_fills"`
-	RandomControlFills       int64            `json:"random_control_fills"`
-	RandomControlReducing    int64            `json:"random_control_reducing_fills"`
-	RandomControlNonReducing int64            `json:"random_control_non_reducing_fills"`
-	UnknownCounterparties    int64            `json:"unknown_counterparties"`
-	SelfFills                int64            `json:"self_fills"`
-	NonTakerFills            int64            `json:"non_taker_fills"`
-	NonPositiveFees          int64            `json:"non_positive_fees"`
-	FeeMismatches            int64            `json:"fee_mismatches"`
-	ActionCounts             map[string]int64 `json:"action_counts,omitempty"`
-	PolicyMode               string           `json:"policy_mode"`
+	InvalidDecisionRecords          int64            `json:"invalid_decision_records"`
+	WrongEvidenceFiles              int64            `json:"wrong_evidence_files"`
+	ConfiguredParticipantMismatches int64            `json:"configured_participant_mismatches"`
+	StateTransitionMismatch         int64            `json:"state_transition_mismatches"`
+	DecisionFieldMismatches         int64            `json:"decision_field_mismatches"`
+	DisabledSubmissions             int64            `json:"disabled_submissions"`
+	DuplicateDecisions              int64            `json:"duplicate_decisions"`
+	MissingOutcomes                 int64            `json:"missing_outcomes"`
+	DuplicateOutcomes               int64            `json:"duplicate_outcomes"`
+	CensoredOutcomeDelivery         int64            `json:"censored_outcome_deliveries"`
+	OutcomeFieldMismatches          int64            `json:"outcome_field_mismatches"`
+	MissingIOCTerminals             int64            `json:"missing_ioc_terminals"`
+	DuplicateIOCTerminals           int64            `json:"duplicate_ioc_terminals"`
+	FillQuantityMismatches          int64            `json:"fill_quantity_mismatches"`
+	MissingFillEvidence             int64            `json:"missing_fill_evidence"`
+	UnexpectedFillEvidence          int64            `json:"unexpected_fill_evidence"`
+	FillEvidenceMismatches          int64            `json:"fill_evidence_mismatches"`
+	NonReducingFills                int64            `json:"non_reducing_fills"`
+	RandomControlFills              int64            `json:"random_control_fills"`
+	RandomControlReducing           int64            `json:"random_control_reducing_fills"`
+	RandomControlNonReducing        int64            `json:"random_control_non_reducing_fills"`
+	UnknownCounterparties           int64            `json:"unknown_counterparties"`
+	CounterpartyIdentityMismatches  int64            `json:"counterparty_identity_mismatches"`
+	CounterpartyFieldMismatches     int64            `json:"counterparty_field_mismatches"`
+	DuplicateOrderIdentities        int64            `json:"duplicate_order_identities"`
+	CausalOrderMismatches           int64            `json:"causal_order_mismatches"`
+	MissingTradeFills               int64            `json:"missing_trade_fills"`
+	DuplicateTradeIdentities        int64            `json:"duplicate_trade_identities"`
+	DuplicateFillIdentities         int64            `json:"duplicate_fill_identities"`
+	TradeRoleMismatches             int64            `json:"trade_role_mismatches"`
+	LifecycleIdentityMismatches     int64            `json:"lifecycle_identity_mismatches"`
+	SelfFills                       int64            `json:"self_fills"`
+	NonTakerFills                   int64            `json:"non_taker_fills"`
+	NonPositiveFees                 int64            `json:"non_positive_fees"`
+	FeeMismatches                   int64            `json:"fee_mismatches"`
+	ActionCounts                    map[string]int64 `json:"action_counts,omitempty"`
+	PolicyMode                      string           `json:"policy_mode"`
 	// DecisionPhaseOffsetNanos is checked against every persisted decision
 	// timestamp. PhaseConfigured distinguishes retained L0/L1 logs, which
 	// predate an explicit phase field, from an explicit zero phase.
@@ -164,19 +176,25 @@ type liabilityHedgerFillEvidence struct {
 }
 
 type liabilityHedgerOrder struct {
-	OrderID     uint64 `json:"order_id"`
-	ClientID    uint64 `json:"client_id"`
-	RequestID   uint64 `json:"request_id"`
-	Symbol      string `json:"symbol"`
-	Side        string `json:"side"`
-	Type        string `json:"type"`
-	TimeInForce string `json:"time_in_force"`
-	PostOnly    bool   `json:"post_only"`
-	Price       int64  `json:"price"`
-	Qty         int64  `json:"qty"`
+	OrderID         uint64 `json:"order_id"`
+	ClientID        uint64 `json:"client_id"`
+	RequestID       uint64 `json:"request_id"`
+	Symbol          string `json:"symbol"`
+	Side            string `json:"side"`
+	Type            string `json:"type"`
+	TimeInForce     string `json:"time_in_force"`
+	PostOnly        bool   `json:"post_only"`
+	Price           int64  `json:"price"`
+	Qty             int64  `json:"qty"`
+	AcceptedAt      int64  `json:"-"`
+	AcceptedFile    string `json:"-"`
+	AcceptedOrdinal int64  `json:"-"`
 }
 
 type liabilityHedgerFill struct {
+	ClientID  uint64 `json:"-"`
+	File      string `json:"-"`
+	Ordinal   int64  `json:"-"`
 	Timestamp int64  `json:"-"`
 	OrderID   uint64 `json:"order_id"`
 	TradeID   uint64 `json:"trade_id"`
@@ -190,16 +208,29 @@ type liabilityHedgerFill struct {
 }
 
 type liabilityHedgerCancellation struct {
+	ClientID     uint64 `json:"-"`
+	File         string `json:"-"`
+	Ordinal      int64  `json:"-"`
+	Timestamp    int64  `json:"-"`
 	OrderID      uint64 `json:"order_id"`
 	RemainingQty int64  `json:"remaining_qty"`
 }
 
 type liabilityHedgerTrade struct {
+	Timestamp    int64  `json:"-"`
+	File         string `json:"-"`
+	Ordinal      int64  `json:"-"`
 	TradeID      uint64 `json:"trade_id"`
 	Price        int64  `json:"price"`
 	Qty          int64  `json:"qty"`
 	TakerOrderID uint64 `json:"taker_order_id"`
 	MakerOrderID uint64 `json:"maker_order_id"`
+}
+
+type liabilityHedgerExecutionKey struct {
+	tradeID uint64
+	qty     int64
+	price   int64
 }
 
 type liabilityHedgerKey struct {
@@ -329,15 +360,56 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 	cancels := make(map[liabilityHedgerOrderKey][]liabilityHedgerCancellation)
 	trades := make(map[liabilityHedgerOrderKey][]liabilityHedgerTrade)
 	fillEvidence := make(map[liabilityHedgerOrderKey][]liabilityHedgerFillEvidence)
+	actorFiles := liabilityHedgerActorFiles(r, config.VenueIDs)
+	bookFiles := liabilityHedgerBookFiles(r, config.VenueIDs)
+	scanFiles := liabilityHedgerEventFiles(r, config.VenueIDs)
+	actorFileSet := make(map[string]struct{}, len(actorFiles))
+	for _, path := range actorFiles {
+		actorFileSet[path] = struct{}{}
+	}
+	bookFileSet := make(map[string]struct{}, len(bookFiles))
+	for _, path := range bookFiles {
+		bookFileSet[path] = struct{}{}
+	}
 	addCheck := func(venue string, client, request, order uint64, failure string) {
 		result.Checks = append(result.Checks, LiabilityHedgerCheck{VenueID: venue, ClientID: client, RequestID: request, OrderID: order, Failure: failure})
+	}
+	configuredParticipants := make(map[Participant]struct{}, len(config.VenueIDs))
+	for _, venueID := range config.VenueIDs {
+		var participant Participant
+		count := 0
+		for candidate, role := range r.roles {
+			if candidate.VenueID == venueID && role == "liability_hedger" {
+				participant = candidate
+				count++
+			}
+		}
+		if count != 1 {
+			result.ConfiguredParticipantMismatches++
+			addCheck(venueID, 0, 0, 0, "configured_venue_does_not_have_exactly_one_liability_hedger")
+		} else {
+			configuredParticipants[participant] = struct{}{}
+		}
+		if _, ok := actorFileSet[filepath.Join(r.Dir, "venues", venueID, "general.jsonl")]; !ok {
+			result.ConfiguredParticipantMismatches++
+			addCheck(venueID, 0, 0, 0, "missing_liability_hedger_actor_file")
+		}
+		if !liabilityHedgerHasCanonicalBookFile(r, venueID) {
+			result.ConfiguredParticipantMismatches++
+			addCheck(venueID, 0, 0, 0, "missing_or_duplicate_cdf_usd_book_file")
+		}
 	}
 
 	err = r.Scan(ScanOptions{Events: []string{
 		"liability_hedger_decision", "liability_hedger_fill", "OrderAccepted", "OrderRejected", "OrderFill", "OrderCancelled", "Trade",
-	}, Workers: 1}, func(event Event) {
+	}, Files: scanFiles, FilesSelected: true, Workers: 1}, func(event Event) {
 		switch event.Name {
 		case "liability_hedger_decision":
+			if _, ok := actorFileSet[event.File]; !ok {
+				result.WrongEvidenceFiles++
+				addCheck(event.VenueID, event.ClientID, 0, 0, "liability_decision_in_wrong_file")
+				return
+			}
 			var decision liabilityHedgerDecision
 			if event.Decode(&decision) != nil || decision.ClientID == 0 || decision.VenueID != event.VenueID || decision.ClientID != event.ClientID ||
 				decision.Hedger == "" || decision.Symbol != "CDF/USD" || r.Role(event.VenueID, event.ClientID) != "liability_hedger" {
@@ -354,6 +426,11 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 			}
 			stateEvents = append(stateEvents, liabilityHedgerStateEvent{venueID: event.VenueID, clientID: event.ClientID, file: event.File, ordinal: event.Ordinal, time: event.SimTS, decision: &decision})
 		case "liability_hedger_fill":
+			if _, ok := actorFileSet[event.File]; !ok {
+				result.WrongEvidenceFiles++
+				addCheck(event.VenueID, event.ClientID, 0, 0, "liability_fill_evidence_in_wrong_file")
+				return
+			}
 			var evidence liabilityHedgerFillEvidence
 			if event.Decode(&evidence) != nil || evidence.OrderID == 0 || evidence.ClientID == 0 || evidence.VenueID != event.VenueID || evidence.ClientID != event.ClientID || evidence.Symbol != "CDF/USD" || evidence.Hedger == "" {
 				result.UnexpectedFillEvidence++
@@ -365,8 +442,21 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 			copy := evidence
 			stateEvents = append(stateEvents, liabilityHedgerStateEvent{venueID: event.VenueID, clientID: event.ClientID, file: event.File, ordinal: event.Ordinal, time: event.SimTS, fill: &copy})
 		case "OrderAccepted", "OrderRejected":
+			if _, ok := bookFileSet[event.File]; !ok {
+				result.WrongEvidenceFiles++
+				addCheck(event.VenueID, event.ClientID, 0, 0, "order_outcome_in_wrong_file")
+				return
+			}
+			if r.Role(event.VenueID, event.ClientID) != "liability_hedger" {
+				return
+			}
 			var order liabilityHedgerOrder
 			if event.Decode(&order) != nil || order.RequestID == 0 {
+				return
+			}
+			if order.ClientID != 0 && order.ClientID != event.ClientID {
+				result.LifecycleIdentityMismatches++
+				addCheck(event.VenueID, event.ClientID, order.RequestID, order.OrderID, "order_payload_client_mismatch")
 				return
 			}
 			if order.ClientID == 0 {
@@ -378,33 +468,21 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 			key := liabilityHedgerKey{venueID: event.VenueID, clientID: event.ClientID, request: order.RequestID}
 			outcomes[key] = append(outcomes[key], liabilityHedgerOutcome{accepted: event.Name == "OrderAccepted", order: order})
 			if event.Name == "OrderAccepted" && order.OrderID != 0 {
-				orders[liabilityHedgerOrderKey{venueID: event.VenueID, orderID: order.OrderID}] = order
+				key := liabilityHedgerOrderKey{venueID: event.VenueID, orderID: order.OrderID}
+				if _, exists := orders[key]; exists {
+					result.DuplicateOrderIdentities++
+					addCheck(event.VenueID, event.ClientID, order.RequestID, order.OrderID, "duplicate_order_acceptance")
+					return
+				}
+				order.AcceptedAt = event.SimTS
+				order.AcceptedFile = event.File
+				order.AcceptedOrdinal = event.Ordinal
+				orders[key] = order
 			}
-		case "OrderFill":
-			var fill liabilityHedgerFill
-			if event.Decode(&fill) == nil && fill.OrderID != 0 && fill.Qty > 0 {
-				fill.Timestamp = event.SimTS
-				key := liabilityHedgerOrderKey{venueID: event.VenueID, orderID: fill.OrderID}
-				fills[key] = append(fills[key], fill)
-			}
-		case "OrderCancelled":
-			var cancel liabilityHedgerCancellation
-			if event.Decode(&cancel) == nil && cancel.OrderID != 0 {
-				key := liabilityHedgerOrderKey{venueID: event.VenueID, orderID: cancel.OrderID}
-				cancels[key] = append(cancels[key], cancel)
-			}
-		case "Trade":
-			var trade liabilityHedgerTrade
-			if event.Decode(&trade) != nil || trade.Qty <= 0 {
-				return
-			}
-			if trade.TakerOrderID != 0 {
-				key := liabilityHedgerOrderKey{venueID: event.VenueID, orderID: trade.TakerOrderID}
-				trades[key] = append(trades[key], trade)
-			}
-			if trade.MakerOrderID != 0 {
-				key := liabilityHedgerOrderKey{venueID: event.VenueID, orderID: trade.MakerOrderID}
-				trades[key] = append(trades[key], trade)
+		case "OrderFill", "OrderCancelled", "Trade":
+			if _, ok := bookFileSet[event.File]; !ok {
+				result.WrongEvidenceFiles++
+				addCheck(event.VenueID, event.ClientID, 0, 0, "exchange_lifecycle_in_wrong_file")
 			}
 		}
 	})
@@ -560,6 +638,13 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 			addCheck(participant.VenueID, participant.ClientID, 0, 0, "liability_state_never_updated")
 		}
 	}
+	for participant := range configuredParticipants {
+		bucket := stateBuckets[participant]
+		if bucket == nil || bucket.Decisions == 0 {
+			result.ConfiguredParticipantMismatches++
+			addCheck(participant.VenueID, participant.ClientID, 0, 0, "configured_liability_hedger_has_no_decisions")
+		}
+	}
 
 	accepted := make(map[liabilityHedgerOrderKey]liabilityHedgerDecision)
 	for key, decision := range expected {
@@ -589,7 +674,7 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 			continue
 		}
 		got := outcome[0]
-		if !validLiabilityHedgerOutcome(decision, got.order) {
+		if !validLiabilityHedgerOutcome(decision, got.order) || got.order.ClientID != key.clientID {
 			result.OutcomeFieldMismatches++
 			addCheck(key.venueID, key.clientID, key.request, got.order.OrderID, "request_fields_mismatch")
 		}
@@ -609,14 +694,246 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 		accepted[liabilityHedgerOrderKey{venueID: key.venueID, orderID: got.order.OrderID}] = decision
 	}
 
+	// Book lifecycle rows are emitted without a participant-level guarantee that
+	// is useful to this audit. Discover them only after the liability orders are
+	// known; retaining every fill, cancellation, or trade in a multi-venue tape
+	// turns an actor-local audit into a whole-market memory workload. The scan is
+	// restricted to the declared CDF/USD books and keeps only order IDs joined to
+	// an accepted liability request.
+	if len(accepted) > 0 {
+		err = r.Scan(ScanOptions{Events: []string{"OrderFill", "OrderCancelled", "Trade"}, Files: bookFiles, FilesSelected: true, Workers: 1}, func(event Event) {
+			switch event.Name {
+			case "OrderFill":
+				var fill liabilityHedgerFill
+				if event.Decode(&fill) != nil || fill.OrderID == 0 || fill.Qty <= 0 {
+					return
+				}
+				key := liabilityHedgerOrderKey{venueID: event.VenueID, orderID: fill.OrderID}
+				if _, relevant := accepted[key]; !relevant {
+					return
+				}
+				fill.ClientID = event.ClientID
+				fill.Timestamp = event.SimTS
+				fill.File = event.File
+				fill.Ordinal = event.Ordinal
+				fills[key] = append(fills[key], fill)
+			case "OrderCancelled":
+				var cancel liabilityHedgerCancellation
+				if event.Decode(&cancel) != nil || cancel.OrderID == 0 {
+					return
+				}
+				key := liabilityHedgerOrderKey{venueID: event.VenueID, orderID: cancel.OrderID}
+				if _, relevant := accepted[key]; !relevant {
+					return
+				}
+				cancel.ClientID = event.ClientID
+				cancel.File = event.File
+				cancel.Ordinal = event.Ordinal
+				cancel.Timestamp = event.SimTS
+				cancels[key] = append(cancels[key], cancel)
+			case "Trade":
+				var trade liabilityHedgerTrade
+				if event.Decode(&trade) != nil || trade.Qty <= 0 {
+					return
+				}
+				trade.Timestamp = event.SimTS
+				trade.File = event.File
+				trade.Ordinal = event.Ordinal
+				for _, orderID := range []uint64{trade.TakerOrderID, trade.MakerOrderID} {
+					if orderID == 0 {
+						continue
+					}
+					key := liabilityHedgerOrderKey{venueID: event.VenueID, orderID: orderID}
+					if _, relevant := accepted[key]; relevant {
+						trades[key] = append(trades[key], trade)
+					}
+				}
+			}
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		counterpartyOrders := make(map[liabilityHedgerOrderKey]struct{})
+		for ownKey, rows := range trades {
+			for _, trade := range rows {
+				otherOrderID := trade.MakerOrderID
+				if otherOrderID == ownKey.orderID {
+					otherOrderID = trade.TakerOrderID
+				}
+				if otherOrderID == 0 || otherOrderID == ownKey.orderID {
+					continue
+				}
+				counterpartyOrders[liabilityHedgerOrderKey{venueID: ownKey.venueID, orderID: otherOrderID}] = struct{}{}
+			}
+		}
+		if len(counterpartyOrders) > 0 {
+			seenCounterpartyOrders := make(map[liabilityHedgerOrderKey]struct{}, len(counterpartyOrders))
+			err = r.Scan(ScanOptions{Events: []string{"OrderAccepted"}, Files: bookFiles, FilesSelected: true, Workers: 1}, func(event Event) {
+				var order liabilityHedgerOrder
+				if event.Decode(&order) != nil || order.RequestID == 0 || order.OrderID == 0 {
+					return
+				}
+				key := liabilityHedgerOrderKey{venueID: event.VenueID, orderID: order.OrderID}
+				if _, wanted := counterpartyOrders[key]; !wanted {
+					return
+				}
+				if _, duplicate := seenCounterpartyOrders[key]; duplicate {
+					result.DuplicateOrderIdentities++
+					addCheck(event.VenueID, event.ClientID, order.RequestID, order.OrderID, "duplicate_counterparty_order_acceptance")
+					return
+				}
+				seenCounterpartyOrders[key] = struct{}{}
+				if event.ClientID == 0 {
+					result.CounterpartyIdentityMismatches++
+					addCheck(event.VenueID, event.ClientID, order.RequestID, order.OrderID, "counterparty_order_missing_envelope_client")
+					return
+				}
+				if existing, ownOrder := orders[key]; ownOrder {
+					if order.ClientID != 0 && order.ClientID != existing.ClientID {
+						result.CounterpartyIdentityMismatches++
+						addCheck(event.VenueID, event.ClientID, order.RequestID, order.OrderID, "counterparty_order_payload_client_mismatch")
+					}
+					return
+				}
+				if order.ClientID != 0 && order.ClientID != event.ClientID {
+					result.CounterpartyIdentityMismatches++
+					addCheck(event.VenueID, event.ClientID, order.RequestID, order.OrderID, "counterparty_order_payload_client_mismatch")
+					return
+				}
+				if order.ClientID == 0 {
+					order.ClientID = event.ClientID
+				}
+				// Exchange order rows omit symbol in the persisted schema; the exact
+				// canonical CDF/USD book path is the registered symbol identity.
+				if order.Symbol == "" && pathHasSymbol(event.File, event.VenueID, "CDF-USD") {
+					order.Symbol = "CDF/USD"
+				}
+				if order.ClientID == 0 || order.Symbol != "CDF/USD" {
+					result.CounterpartyFieldMismatches++
+					addCheck(event.VenueID, event.ClientID, order.RequestID, order.OrderID, "counterparty_order_required_fields_missing")
+					return
+				}
+				order.AcceptedAt = event.SimTS
+				order.AcceptedFile = event.File
+				order.AcceptedOrdinal = event.Ordinal
+				orders[key] = order
+			})
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	matchedEvidence := make(map[liabilityHedgerOrderKey]map[int]bool)
 	for key, decision := range accepted {
 		order := orders[key]
+		tradeCounts := make(map[liabilityHedgerExecutionKey]int)
+		fillCounts := make(map[liabilityHedgerExecutionKey]int)
+		tradeIDs := make(map[uint64]struct{})
+		fillIDs := make(map[uint64]struct{})
+		for _, trade := range trades[key] {
+			executionKey := liabilityHedgerExecutionKey{tradeID: trade.TradeID, qty: trade.Qty, price: trade.Price}
+			if trade.TakerOrderID != key.orderID || trade.MakerOrderID == 0 || trade.MakerOrderID == key.orderID {
+				result.TradeRoleMismatches++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "liability_order_is_not_trade_taker")
+			}
+			if trade.TradeID == 0 || tradeCounts[executionKey] > 0 {
+				result.DuplicateTradeIdentities++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "duplicate_trade_identity")
+			}
+			if _, exists := tradeIDs[trade.TradeID]; exists {
+				result.DuplicateTradeIdentities++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "duplicate_trade_id")
+			}
+			tradeIDs[trade.TradeID] = struct{}{}
+			tradeCounts[executionKey]++
+			if !liabilityHedgerOrderPrecedesTrade(order, trade) {
+				result.CausalOrderMismatches++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "order_acceptance_after_trade")
+			}
+			otherOrderID := trade.MakerOrderID
+			if otherOrderID == key.orderID {
+				otherOrderID = trade.TakerOrderID
+			}
+			if otherOrderID != 0 && otherOrderID != key.orderID {
+				counterpartyKey := liabilityHedgerOrderKey{venueID: key.venueID, orderID: otherOrderID}
+				if counterparty, found := orders[counterpartyKey]; found {
+					if !liabilityHedgerCounterpartyMatches(order, counterparty, trade) {
+						result.CounterpartyFieldMismatches++
+						addCheck(key.venueID, order.ClientID, order.RequestID, otherOrderID, "counterparty_order_fields_mismatch")
+					}
+					if !liabilityHedgerOrderPrecedesTrade(counterparty, trade) {
+						result.CausalOrderMismatches++
+						addCheck(key.venueID, order.ClientID, order.RequestID, otherOrderID, "counterparty_acceptance_after_trade")
+					}
+				}
+			}
+		}
+		for _, fill := range fills[key] {
+			executionKey := liabilityHedgerExecutionKey{tradeID: fill.TradeID, qty: fill.Qty, price: fill.Price}
+			if fill.TradeID == 0 || fillCounts[executionKey] > 0 {
+				result.DuplicateFillIdentities++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "duplicate_fill_identity")
+			}
+			if _, exists := fillIDs[fill.TradeID]; exists {
+				result.DuplicateFillIdentities++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "duplicate_fill_id")
+			}
+			fillIDs[fill.TradeID] = struct{}{}
+			fillCounts[executionKey]++
+		}
+		for executionKey, tradeCount := range tradeCounts {
+			fillCount := fillCounts[executionKey]
+			if tradeCount > fillCount {
+				result.MissingTradeFills += int64(tradeCount - fillCount)
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "trade_without_matching_liability_fill")
+			}
+		}
+		for executionKey, fillCount := range fillCounts {
+			tradeCount := tradeCounts[executionKey]
+			if fillCount > tradeCount {
+				result.MissingTradeFills += int64(fillCount - tradeCount)
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "liability_fill_without_matching_trade")
+			}
+		}
 		var filled int64
 		for _, fill := range fills[key] {
-			filled += fill.Qty
+			if fill.Qty > math.MaxInt64-filled {
+				result.FillQuantityMismatches++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "filled_quantity_overflow")
+			} else {
+				filled += fill.Qty
+			}
 			result.Fills++
-			result.FilledQty += fill.Qty
+			if fill.Qty > math.MaxInt64-result.FilledQty {
+				result.FillQuantityMismatches++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "total_filled_quantity_overflow")
+			} else {
+				result.FilledQty += fill.Qty
+			}
+			if fill.TradeID == 0 || fill.Symbol != order.Symbol || fill.Side != order.Side {
+				result.LifecycleIdentityMismatches++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "fill_order_identity_mismatch")
+			}
+			if fill.ClientID != order.ClientID || r.Role(key.venueID, fill.ClientID) != "liability_hedger" {
+				result.LifecycleIdentityMismatches++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "fill_envelope_client_mismatch")
+			}
+			if !liabilityHedgerOrderPrecedesEvent(order, fill.Timestamp, fill.File, fill.Ordinal) {
+				result.CausalOrderMismatches++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "order_acceptance_after_fill")
+			}
+			for _, trade := range trades[key] {
+				if trade.TradeID != fill.TradeID || trade.Qty != fill.Qty || trade.Price != fill.Price {
+					continue
+				}
+				if !liabilityHedgerEventPrecedes(trade.Timestamp, trade.File, trade.Ordinal, fill.Timestamp, fill.File, fill.Ordinal) {
+					result.CausalOrderMismatches++
+					addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "trade_after_fill")
+				}
+				break
+			}
 			if bucket := stateBuckets[Participant{VenueID: key.venueID, ClientID: order.ClientID}]; bucket != nil {
 				bucket.Fills++
 			}
@@ -672,6 +989,18 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "unexpected_fill_evidence")
 			}
 		}
+		for _, cancel := range cancels[key] {
+			if !liabilityHedgerOrderPrecedesEvent(order, cancel.Timestamp, cancel.File, cancel.Ordinal) {
+				result.CausalOrderMismatches++
+				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "order_acceptance_after_cancellation")
+			}
+			for _, fill := range fills[key] {
+				if !liabilityHedgerEventPrecedes(fill.Timestamp, fill.File, fill.Ordinal, cancel.Timestamp, cancel.File, cancel.Ordinal) {
+					result.CausalOrderMismatches++
+					addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "cancellation_before_fill")
+				}
+			}
+		}
 		if filled > order.Qty {
 			result.FillQuantityMismatches++
 			addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "filled_quantity_exceeds_request")
@@ -685,11 +1014,21 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 				result.DuplicateIOCTerminals++
 				addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "invalid_ioc_remainder_cancellation")
 			} else {
+				if terminal[0].ClientID != order.ClientID || r.Role(key.venueID, terminal[0].ClientID) != "liability_hedger" {
+					result.LifecycleIdentityMismatches++
+					addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "cancellation_envelope_client_mismatch")
+				}
 				result.CancelledIOC++
 			}
 		} else if len(cancels[key]) != 0 {
 			result.DuplicateIOCTerminals++
 			addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "full_ioc_has_cancellation")
+			for _, cancel := range cancels[key] {
+				if cancel.ClientID != order.ClientID || r.Role(key.venueID, cancel.ClientID) != "liability_hedger" {
+					result.LifecycleIdentityMismatches++
+					addCheck(key.venueID, order.ClientID, order.RequestID, key.orderID, "cancellation_envelope_client_mismatch")
+				}
+			}
 		}
 	}
 	for key, rows := range fillEvidence {
@@ -743,8 +1082,8 @@ func (r *Run) MeasureLiabilityHedger() (*LiabilityHedgerAudit, error) {
 		return left.Failure < right.Failure
 	})
 	result.Valid = result.Decisions > 0 && result.ReceiptEvidenceErrors == 0 && result.MissingReceipts == 0 && result.AmbiguousReceipts == 0 && result.ReceiptMismatches == 0 && result.FutureReceiptUse == 0 && result.MissingGatewayDecisions == 0 && result.GatewayDecisionMismatch == 0 &&
-		result.InvalidDecisionRecords == 0 && result.StateTransitionMismatch == 0 && result.DecisionFieldMismatches == 0 && result.DisabledSubmissions == 0 && result.DuplicateDecisions == 0 && result.MissingOutcomes == 0 && result.DuplicateOutcomes == 0 && result.CensoredOutcomeDelivery == 0 && result.OutcomeFieldMismatches == 0 &&
-		result.MissingIOCTerminals == 0 && result.DuplicateIOCTerminals == 0 && result.FillQuantityMismatches == 0 && result.MissingFillEvidence == 0 && result.UnexpectedFillEvidence == 0 && result.FillEvidenceMismatches == 0 && result.NonReducingFills == 0 && result.UnknownCounterparties == 0 && result.SelfFills == 0 && result.NonTakerFills == 0 && result.NonPositiveFees == 0 && result.FeeMismatches == 0
+		result.InvalidDecisionRecords == 0 && result.WrongEvidenceFiles == 0 && result.ConfiguredParticipantMismatches == 0 && result.StateTransitionMismatch == 0 && result.DecisionFieldMismatches == 0 && result.DisabledSubmissions == 0 && result.DuplicateDecisions == 0 && result.MissingOutcomes == 0 && result.DuplicateOutcomes == 0 && result.CensoredOutcomeDelivery == 0 && result.OutcomeFieldMismatches == 0 &&
+		result.MissingIOCTerminals == 0 && result.DuplicateIOCTerminals == 0 && result.FillQuantityMismatches == 0 && result.MissingFillEvidence == 0 && result.UnexpectedFillEvidence == 0 && result.FillEvidenceMismatches == 0 && result.NonReducingFills == 0 && result.UnknownCounterparties == 0 && result.CounterpartyIdentityMismatches == 0 && result.CounterpartyFieldMismatches == 0 && result.DuplicateOrderIdentities == 0 && result.CausalOrderMismatches == 0 && result.MissingTradeFills == 0 && result.DuplicateTradeIdentities == 0 && result.DuplicateFillIdentities == 0 && result.TradeRoleMismatches == 0 && result.LifecycleIdentityMismatches == 0 && result.SelfFills == 0 && result.NonTakerFills == 0 && result.NonPositiveFees == 0 && result.FeeMismatches == 0
 	return result, nil
 }
 
@@ -824,14 +1163,16 @@ func liabilityHedgerEvidence(dir string) (map[liabilityHedgerReceiptKey][]liabil
 	if err := json.Unmarshal(rawManifest, &manifest); err != nil {
 		return nil, nil, audit, err
 	}
-	receiptRaw, _, err := readEvidenceFile(dir, manifest.Receipts.File, marketDataReceiptRecordBytes, manifest.Receipts.Records, manifest.Receipts.Digest)
+	receiptsStream, err := openEvidenceRecordStream(dir, manifest.Receipts.File, marketDataReceiptRecordBytes, manifest.Receipts.Records, manifest.Receipts.Digest)
 	if err != nil {
 		return nil, nil, audit, err
 	}
-	decisionRaw, _, err := readEvidenceFile(dir, manifest.Decisions.File, marketDataDecisionRecordBytes, manifest.Decisions.Records, manifest.Decisions.Digest)
+	defer receiptsStream.close()
+	decisionsStream, err := openEvidenceRecordStream(dir, manifest.Decisions.File, marketDataDecisionRecordBytes, manifest.Decisions.Records, manifest.Decisions.Digest)
 	if err != nil {
 		return nil, nil, audit, err
 	}
+	defer decisionsStream.close()
 	links := make(map[uint32]struct{ venue, role string }, len(manifest.Links))
 	for _, link := range manifest.Links {
 		links[link.ID] = struct{ venue, role string }{venue: link.SourceVenue, role: link.Role}
@@ -841,8 +1182,15 @@ func liabilityHedgerEvidence(dir string) (map[liabilityHedgerReceiptKey][]liabil
 		symbols[symbol.ID] = symbol.Symbol
 	}
 	receipts := make(map[liabilityHedgerReceiptKey][]liabilityHedgerReceipt)
-	for offset := 0; offset < len(receiptRaw); offset += marketDataReceiptRecordBytes {
-		record := decodeObservation(receiptRaw[offset : offset+marketDataReceiptRecordBytes])
+	for {
+		available, err := receiptsStream.next()
+		if err != nil {
+			return nil, nil, audit, err
+		}
+		if !available {
+			break
+		}
+		record := decodeObservationView(receiptsStream.record)
 		link, ok := links[record.linkID]
 		if !ok || link.role != "liability_hedger" || record.mdType != 0 || symbols[record.symbolID] != "CDF/USD" {
 			continue
@@ -851,8 +1199,15 @@ func liabilityHedgerEvidence(dir string) (map[liabilityHedgerReceiptKey][]liabil
 		receipts[key] = append(receipts[key], liabilityHedgerReceipt{deliveredAt: record.deliveredAt})
 	}
 	decisions := make(map[liabilityHedgerKey][]liabilityHedgerGatewayDecision)
-	for offset := 0; offset < len(decisionRaw); offset += marketDataDecisionRecordBytes {
-		record := decodeDecision(decisionRaw[offset : offset+marketDataDecisionRecordBytes])
+	for {
+		available, err := decisionsStream.next()
+		if err != nil {
+			return nil, nil, audit, err
+		}
+		if !available {
+			break
+		}
+		record := decodeDecision(decisionsStream.record)
 		link, ok := links[record.linkID]
 		if !ok || link.role != "liability_hedger" || symbols[record.symbolID] != "CDF/USD" || record.requestID == 0 {
 			continue
@@ -860,7 +1215,72 @@ func liabilityHedgerEvidence(dir string) (map[liabilityHedgerReceiptKey][]liabil
 		key := liabilityHedgerKey{venueID: link.venue, clientID: record.clientID, request: record.requestID}
 		decisions[key] = append(decisions[key], liabilityHedgerGatewayDecision{decisionAt: record.decisionAt, deliveredAt: record.frontierDeliveredAt, side: record.side, orderType: record.orderType, tif: record.tif, price: record.price, qty: record.qty})
 	}
+	if !receiptsStream.digestMatch {
+		audit.ReceiptDigestMatches = false
+		audit.Valid = false
+	}
+	if !decisionsStream.digestMatch {
+		audit.DecisionDigestMatches = false
+		audit.Valid = false
+	}
 	return receipts, decisions, audit, nil
+}
+
+func liabilityHedgerActorFiles(r *Run, venueIDs []string) []string {
+	available := make(map[string]struct{}, len(r.files))
+	for _, path := range r.files {
+		available[path] = struct{}{}
+	}
+	files := make([]string, 0, len(venueIDs))
+	for _, venueID := range venueIDs {
+		path := filepath.Join(r.Dir, "venues", venueID, "general.jsonl")
+		if _, ok := available[path]; ok {
+			files = append(files, path)
+		}
+	}
+	sort.Strings(files)
+	return files
+}
+
+func liabilityHedgerBookFiles(r *Run, venueIDs []string) []string {
+	selected := make(map[string]struct{})
+	for _, venueID := range venueIDs {
+		for _, path := range r.BookFiles(venueID, "CDF-USD") {
+			selected[path] = struct{}{}
+		}
+	}
+	files := make([]string, 0, len(selected))
+	for path := range selected {
+		files = append(files, path)
+	}
+	sort.Strings(files)
+	return files
+}
+
+func liabilityHedgerHasCanonicalBookFile(r *Run, venueID string) bool {
+	canonical := filepath.Join(r.Dir, "venues", venueID, "spot", "CDF-USD.jsonl")
+	matches := r.BookFiles(venueID, "CDF-USD")
+	if len(matches) != 1 || matches[0] != canonical {
+		return false
+	}
+	info, err := os.Lstat(canonical)
+	return err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0
+}
+
+func liabilityHedgerEventFiles(r *Run, venueIDs []string) []string {
+	selected := make(map[string]struct{})
+	for _, path := range liabilityHedgerActorFiles(r, venueIDs) {
+		selected[path] = struct{}{}
+	}
+	for _, path := range liabilityHedgerBookFiles(r, venueIDs) {
+		selected[path] = struct{}{}
+	}
+	files := make([]string, 0, len(selected))
+	for path := range selected {
+		files = append(files, path)
+	}
+	sort.Strings(files)
+	return files
 }
 
 func validateLiabilityHedgerDecision(d liabilityHedgerDecision, state *liabilityHedgerReplayState, terminalAt int64, policyMode string, phaseOffset int64, phaseConfigured bool) (valid bool, update bool, submitted bool) {
@@ -1129,6 +1549,41 @@ func liabilityHedgerFee(qty, price, bps int64) (int64, bool) {
 		return 0, false
 	}
 	return value.Int64(), true
+}
+
+func liabilityHedgerOrderPrecedesTrade(order liabilityHedgerOrder, trade liabilityHedgerTrade) bool {
+	return liabilityHedgerOrderPrecedesEvent(order, trade.Timestamp, trade.File, trade.Ordinal)
+}
+
+func liabilityHedgerOrderPrecedesEvent(order liabilityHedgerOrder, timestamp int64, file string, ordinal int64) bool {
+	if order.AcceptedAt <= 0 || timestamp <= 0 || order.AcceptedAt > timestamp {
+		return false
+	}
+	if order.AcceptedAt == timestamp && order.AcceptedFile == file {
+		return order.AcceptedOrdinal > 0 && ordinal > order.AcceptedOrdinal
+	}
+	return order.AcceptedAt < timestamp
+}
+
+func liabilityHedgerEventPrecedes(leftTimestamp int64, leftFile string, leftOrdinal int64, rightTimestamp int64, rightFile string, rightOrdinal int64) bool {
+	if leftTimestamp <= 0 || rightTimestamp <= 0 || leftTimestamp > rightTimestamp {
+		return false
+	}
+	if leftTimestamp == rightTimestamp && leftFile == rightFile {
+		return leftOrdinal > 0 && rightOrdinal > leftOrdinal
+	}
+	return leftTimestamp < rightTimestamp
+}
+
+func liabilityHedgerCounterpartyMatches(own, counterparty liabilityHedgerOrder, trade liabilityHedgerTrade) bool {
+	if counterparty.ClientID == 0 || counterparty.Symbol != "CDF/USD" || counterparty.Qty < trade.Qty || counterparty.Price != trade.Price {
+		return false
+	}
+	wantSide := "SELL"
+	if own.Side == "SELL" {
+		wantSide = "BUY"
+	}
+	return counterparty.Side == wantSide
 }
 
 func liabilityHedgerHasExternalCounterparty(trades []liabilityHedgerTrade, orders map[liabilityHedgerOrderKey]liabilityHedgerOrder, own liabilityHedgerOrderKey, fill liabilityHedgerFill) bool {
