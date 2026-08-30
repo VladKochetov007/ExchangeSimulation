@@ -131,6 +131,7 @@ func (r *Run) Scan(opts ScanOptions, visit func(Event)) error {
 		scanCalls.Add(1)
 		scanFiles.Add(int64(len(files)))
 	}
+	prefilter := newNeedleSet(needles)
 	workers := opts.Workers
 	if workers <= 0 {
 		workers = runtime.GOMAXPROCS(0)
@@ -152,7 +153,7 @@ func (r *Run) Scan(opts ScanOptions, visit func(Event)) error {
 		go func() {
 			defer wg.Done()
 			for path := range jobs {
-				if err := scanFile(path, keep, needles, visit); err != nil {
+				if err := scanFile(path, keep, prefilter, visit); err != nil {
 					once.Do(func() { failure = err })
 					return
 				}
@@ -163,7 +164,7 @@ func (r *Run) Scan(opts ScanOptions, visit func(Event)) error {
 	return failure
 }
 
-func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Event)) error {
+func scanFile(path string, keep map[string]bool, prefilter *needleSet, visit func(Event)) error {
 	file, err := os.Open(path)
 	if err != nil {
 		return err
@@ -192,7 +193,7 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 			scanLines.Add(1)
 			scanBytes.Add(int64(len(line)) + 1)
 		}
-		if len(needles) > 0 && !containsAny(line, needles) {
+		if !prefilter.empty && !prefilter.matches(line) {
 			if scanStatsEnabled {
 				scanPrefilter.Add(1)
 			}

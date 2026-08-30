@@ -369,7 +369,7 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 		"OrderFill":      true,
 		"OrderCancelled": true,
 	}
-	needles := [][]byte{[]byte(`"OrderAccepted"`), []byte(`"OrderRejected"`), []byte(`"OrderFill"`), []byte(`"OrderCancelled"`)}
+	prefilter := newNeedleSet([][]byte{[]byte(`"OrderAccepted"`), []byte(`"OrderRejected"`), []byte(`"OrderFill"`), []byte(`"OrderCancelled"`)})
 
 	for book, expected := range byBook {
 		files := filesByBook[book]
@@ -459,7 +459,7 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 				}
 			}
 
-			err := scanFile(path, keep, needles, func(event Event) {
+			err := scanFile(path, keep, prefilter, func(event Event) {
 				var accepted struct {
 					OrderID  uint64 `json:"order_id"`
 					ClientID uint64 `json:"client_id"`

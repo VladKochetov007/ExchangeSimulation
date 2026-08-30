@@ -299,7 +299,10 @@ func containsString(values []string, want string) bool {
 // from it, which is how a per-file scan behaves today once it returns an error.
 type fileConsumer struct {
 	request *fusedRequest
-	stopped bool
+	// prefilter is this request's own raw filter, which still decides whether it
+	// sees a record and therefore whether it fails on a malformed one.
+	prefilter *needleSet
+	stopped   bool
 }
 
 func scanFileFused(path string, requests []*fusedRequest) {
@@ -314,11 +317,11 @@ func scanFileFused(path string, requests []*fusedRequest) {
 
 	consumers := make([]fileConsumer, len(requests))
 	for i, request := range requests {
-		consumers[i] = fileConsumer{request: request}
+		consumers[i] = fileConsumer{request: request, prefilter: newNeedleSet(request.needles)}
 	}
 	// A request with no event filter admits every record, so the union
 	// prefilter cannot skip any line while one is present.
-	unionNeedles, filterAll := unionPrefilter(requests)
+	unionPrefilterSet, filterAll := unionPrefilter(requests)
 	// Dispatch by event name; the per-request needle test still runs before a
 	// record is delivered, because an event name that JSON-escapes differently
 	// than its needle spelling must remain filtered exactly as it is today.
@@ -350,7 +353,7 @@ func scanFileFused(path string, requests []*fusedRequest) {
 			scanLines.Add(1)
 			scanBytes.Add(int64(len(line)) + 1)
 		}
-		if filterAll && !containsAny(line, unionNeedles) {
+		if filterAll && !unionPrefilterSet.matches(line) {
 			if scanStatsEnabled {
 				scanPrefilter.Add(1)
 			}
@@ -366,7 +369,7 @@ func scanFileFused(path string, requests []*fusedRequest) {
 			// decoded it, and therefore only such a request fails.
 			wrapped := fmt.Errorf("analysis: parse evidence record in %s: %w", path, err)
 			for i := range consumers {
-				if consumers[i].stopped || !admits(consumers[i].request, line) {
+				if consumers[i].stopped || !admits(&consumers[i], line) {
 					continue
 				}
 				consumers[i].request.fail(wrapped)
@@ -422,7 +425,7 @@ func selectConsumers(consumers []fileConsumer, byEvent map[string][]int, always 
 		if consumers[i].stopped {
 			continue
 		}
-		if !admits(consumers[i].request, line) {
+		if !admits(&consumers[i], line) {
 			continue
 		}
 		selected = append(selected, i)
@@ -432,8 +435,8 @@ func selectConsumers(consumers []fileConsumer, byEvent map[string][]int, always 
 
 // admits reports whether a request's own raw prefilter accepts the line, which
 // is the gate a per-metric scan applies before it decodes anything.
-func admits(request *fusedRequest, line []byte) bool {
-	return len(request.needles) == 0 || containsAny(line, request.needles)
+func admits(consumer *fileConsumer, line []byte) bool {
+	return consumer.prefilter.empty || consumer.prefilter.matches(line)
 }
 
 func allStopped(consumers []fileConsumer) bool {
@@ -448,8 +451,9 @@ func allStopped(consumers []fileConsumer) bool {
 // unionPrefilter builds the deduplicated needle set for a round. filterAll is
 // false when some request admits every record, in which case no line may be
 // skipped before decoding.
-func unionPrefilter(requests []*fusedRequest) (needles [][]byte, filterAll bool) {
+func unionPrefilter(requests []*fusedRequest) (set *needleSet, filterAll bool) {
 	seen := make(map[string]bool)
+	var needles [][]byte
 	for _, request := range requests {
 		if len(request.needles) == 0 {
 			return nil, false
@@ -462,7 +466,7 @@ func unionPrefilter(requests []*fusedRequest) (needles [][]byte, filterAll bool)
 			needles = append(needles, needle)
 		}
 	}
-	return needles, true
+	return newNeedleSet(needles), true
 }
 
 func (r *fusedRequest) fail(err error) {

@@ -2,7 +2,9 @@ package analysis
 
 import (
 	"bytes"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -155,4 +157,134 @@ func retainedCorpusLines(t *testing.T) ([][]byte, bool) {
 		lines = lines[:len(lines)-1]
 	}
 	return lines, true
+}
+
+// TestNeedleSetMatchesContainsAny is the equivalence requirement: the automaton
+// must admit exactly the lines the per-needle search admits, because the
+// prefilter decides which malformed records a metric attempts to decode and so
+// which failures it reports.
+func TestNeedleSetMatchesContainsAny(t *testing.T) {
+	needleGroups := [][]string{
+		{"OrderAccepted"},
+		{"OrderAccepted", "OrderFill"},
+		benchNeedleNames,
+		{"a", "aa", "aaa"},
+		{"abc", "bcd", "cde"},
+		{"Trade", "Trade"},
+		{"x"},
+	}
+	lines := []string{
+		"", "x", `{"event":"OrderAccepted"}`, `{"event":"Trade"}`,
+		`{"event":"Unrelated","note":"OrderFill"}`, "aaaa", "aab", "abcde",
+		`{"a":1}`, "OrderAccepted", `"OrderAccepted"`, "Order", "Accepted",
+		"\x00\xff\xfe binary", strings.Repeat("z", 500) + "OrderFill",
+	}
+	for _, names := range needleGroups {
+		needles := make([][]byte, 0, len(names))
+		for _, name := range names {
+			needles = append(needles, []byte(`"`+name+`"`))
+		}
+		set := newNeedleSet(needles)
+		for _, line := range lines {
+			want := containsAny([]byte(line), needles)
+			if got := set.matches([]byte(line)); got != want {
+				t.Fatalf("needles %v line %q: automaton %v, per-needle search %v",
+					names, line, got, want)
+			}
+		}
+	}
+}
+
+// TestNeedleSetMatchesContainsAnyOverRetainedEvidence holds the automaton to the
+// per-needle search over every line of a real evidence corpus.
+func TestNeedleSetMatchesContainsAnyOverRetainedEvidence(t *testing.T) {
+	lines, ok := retainedCorpusLines(t)
+	if !ok {
+		return
+	}
+	needles := benchNeedles()
+	set := newNeedleSet(needles)
+	for index, line := range lines {
+		if set.matches(line) != containsAny(line, needles) {
+			t.Fatalf("line %d: automaton disagrees with the per-needle search", index+1)
+		}
+	}
+}
+
+func BenchmarkPrefilterNeedleSet(b *testing.B) {
+	lines, size := benchCorpus(b)
+	set := newNeedleSet(benchNeedles())
+	b.SetBytes(int64(size))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		hits := 0
+		for _, line := range lines {
+			if set.matches(line) {
+				hits++
+			}
+		}
+		if hits == 0 {
+			b.Fatal("no lines matched")
+		}
+	}
+}
+
+// BenchmarkPrefilterFiveNeedles reflects a single metric's scan, where the
+// needle count is small and the standard library's assembly search is strongest.
+func BenchmarkPrefilterFiveNeedles(b *testing.B) {
+	lines, size := benchCorpus(b)
+	names := benchNeedleNames[:5]
+	needles := make([][]byte, 0, len(names))
+	for _, name := range names {
+		needles = append(needles, []byte(`"`+name+`"`))
+	}
+	b.Run("perNeedle", func(b *testing.B) {
+		b.SetBytes(int64(size))
+		for i := 0; i < b.N; i++ {
+			for _, line := range lines {
+				_ = containsAny(line, needles)
+			}
+		}
+	})
+	set := newNeedleSet(needles)
+	b.Run("needleSet", func(b *testing.B) {
+		b.SetBytes(int64(size))
+		for i := 0; i < b.N; i++ {
+			for _, line := range lines {
+				_ = set.matches(line)
+			}
+		}
+	})
+}
+
+// BenchmarkPrefilterByNeedleCount locates the crossover between the standard
+// library's per-needle assembly search and the single-pass automaton. The
+// per-needle cost grows with the needle count while the automaton's does not,
+// so which one wins is a property of the scan, not a constant.
+func BenchmarkPrefilterByNeedleCount(b *testing.B) {
+	lines, size := benchCorpus(b)
+	for _, count := range []int{4, 6, 7, 8, 10, 12} {
+		names := benchNeedleNames[:count]
+		needles := make([][]byte, 0, count)
+		for _, name := range names {
+			needles = append(needles, []byte(`"`+name+`"`))
+		}
+		set := newNeedleSet(needles)
+		b.Run(fmt.Sprintf("n%d/perNeedle", count), func(b *testing.B) {
+			b.SetBytes(int64(size))
+			for i := 0; i < b.N; i++ {
+				for _, line := range lines {
+					_ = containsAny(line, needles)
+				}
+			}
+		})
+		b.Run(fmt.Sprintf("n%d/needleSet", count), func(b *testing.B) {
+			b.SetBytes(int64(size))
+			for i := 0; i < b.N; i++ {
+				for _, line := range lines {
+					_ = set.matches(line)
+				}
+			}
+		})
+	}
 }
