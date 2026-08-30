@@ -1469,3 +1469,40 @@ known:
 The conclusion is that the remaining opportunity is **structural, not
 linguistic**: stop producing the bytes rather than encode them faster, which is
 what the VNext binary format does and why its ceiling is 17.9 %.
+
+## Rejected: inlining the scheduler heap's ordering key
+
+**Hypothesis.** The event scheduler's priority queue costs about 5 % of CPU
+(`heap.Pop` 4.06 %, `heap.Push` 1.0 %), and `eventHeap.Less` alone is **2.37 %
+flat** for what is two integer comparisons. The heap is a `[]*ScheduledEvent`,
+so every comparison dereferences a pointer into a separately allocated event and
+every sift walks a different cache line. Storing the ordering key inline —
+`{at int64, id uint64, event *ScheduledEvent}` — should let a sift read
+contiguous memory.
+
+**Result: rejected. It is slower.**
+
+```
+A1  median 28.88s   28.87 30.29 28.88 28.60 29.82
+A2  median 28.90s   28.65 28.90 28.86 29.54 29.08
+B   median 29.27s   28.65 30.62 29.27 29.19 29.68
+
+A/A control  : +0.06%   <- the cleanest control measured in this campaign
+B vs A pooled: +1.33%
+```
+
+Evidence was byte-identical on seeds 900101 and 900102 and the full suite passed,
+so the change was correct — just worse. Reverted.
+
+**Why the hypothesis was wrong.** `Less` is expensive because it is called
+constantly, not because it misses cache. Scheduled events are allocated close
+together in time and therefore close together in memory, so the pointers were
+already resident and the dereference was nearly free. Meanwhile `Swap` went from
+moving 8 bytes to moving 24, and a heap sift does many more swaps than the
+locality saved.
+
+**What this rules out.** The scheduler's ~5 % is not a data-layout problem, so
+it will not yield to a cheaper representation of the same algorithm. Reducing it
+requires an algorithmic change — a calendar or ladder queue exploiting the fact
+that event timestamps are clustered on a 1 ms grid — which is a much larger
+change and is not attempted here. Recorded so the layout idea is not retried.
