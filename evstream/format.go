@@ -307,6 +307,10 @@ func NewCursor(src []byte) *Cursor { return &Cursor{buf: src} }
 // Err returns the first error encountered, if any.
 func (c *Cursor) Err() error { return c.err }
 
+// Offset reports how many bytes have been read, so a nested payload can be
+// handed the remainder without re-parsing the prefix.
+func (c *Cursor) Offset() int { return c.pos }
+
 // Remaining reports how many bytes are unread. A decoder should require this
 // to be zero at the end: trailing bytes mean the payload does not match the
 // schema version it claims.

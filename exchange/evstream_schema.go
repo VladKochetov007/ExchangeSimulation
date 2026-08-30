@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"exchange_sim/census"
 
@@ -488,3 +489,131 @@ var (
 	_ evstream.InterningAppender = expiredOrderEvidence{}
 	_ evstream.InterningAppender = forcedCancelEvidence{}
 )
+
+// RenderPayloadJSON turns a binary payload back into the canonical JSON the
+// old pipeline persisted for that event.
+//
+// This is what makes the format auditable rather than opaque, and it is the
+// strongest available proof of analyzer equivalence: if a whole stream renders
+// to bytes identical to the JSONL the JSON path wrote, then every analyzer
+// reading that JSONL produces identical output by construction, without having
+// to run any of them.
+//
+// The dispatch lives here rather than in a tool because the evidence types are
+// unexported — an external renderer could decode them but could not name them.
+// Adding a schema means adding one case, next to the encoder it mirrors.
+func RenderPayloadJSON(schemaID uint16, payload []byte, resolve evstream.Resolver) ([]byte, error) {
+	switch schemaID {
+	case evstream.SchemaOpaqueJSON:
+		// Already canonical JSON: it was never decoded, so it is returned
+		// exactly as it was captured.
+		cursor := evstream.NewCursor(payload)
+		body := cursor.Bytes()
+		if err := cursor.Err(); err != nil {
+			return nil, err
+		}
+		return body, nil
+
+	case SchemaInstrumentLog:
+		cursor := evstream.NewCursor(payload)
+		symbolRef := cursor.Uint32()
+		innerID, _ := cursor.Uint16(), cursor.Uint16()
+		if err := cursor.Err(); err != nil {
+			return nil, err
+		}
+		symbol, ok := resolve.Lookup(symbolRef)
+		if !ok {
+			return nil, evstream.ErrCorrupt
+		}
+		inner, err := RenderPayloadJSON(innerID, payload[cursorOffset(cursor):], resolve)
+		if err != nil {
+			return nil, err
+		}
+		out := append([]byte(`{"symbol":`), mustMarshal(symbol)...)
+		out = append(out, `,"payload":`...)
+		out = append(out, inner...)
+		return append(out, '}'), nil
+
+	case SchemaFillEvidence:
+		var value fillEvidence
+		if err := DecodeFillEvidence(payload, resolve, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	case SchemaBookDelta:
+		var value bookDeltaEvidence
+		if err := DecodeBookDelta(payload, resolve, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	case SchemaBookSnapshot:
+		var value bookSnapshotEvidence
+		if err := DecodeBookSnapshot(payload, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	case SchemaVenueBalance:
+		var value VenueBalanceEvent
+		if err := DecodeVenueBalance(payload, resolve, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	case SchemaAcceptedOrder:
+		var order Order
+		var value acceptedOrderEvidence
+		if err := DecodeAcceptedOrder(payload, &order, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	case SchemaCancelledOrder:
+		var value cancelledOrderEvidence
+		if err := DecodeCancelledOrder(payload, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	case SchemaExpiredOrder:
+		var value expiredOrderEvidence
+		if err := DecodeExpiredOrder(payload, resolve, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	case SchemaForcedCancel:
+		var value forcedCancelEvidence
+		if err := DecodeForcedCancel(payload, resolve, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+
+	case etypes.SchemaBalanceChange:
+		var value etypes.BalanceChangeEvent
+		if err := etypes.DecodeBalanceChange(payload, resolve, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	case etypes.SchemaFeeRevenue:
+		var value etypes.FeeRevenueEvent
+		if err := etypes.DecodeFeeRevenue(payload, resolve, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	case etypes.SchemaTrade:
+		var value etypes.Trade
+		if err := etypes.DecodeTrade(payload, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(&value)
+	}
+	return nil, fmt.Errorf("%w: no renderer for schema %d", evstream.ErrCorrupt, schemaID)
+}
+
+// cursorOffset reports how far a cursor has read, so a nested payload can be
+// handed the remainder without re-parsing the prefix.
+func cursorOffset(c *evstream.Cursor) int { return c.Offset() }
+
+func mustMarshal(value any) []byte {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return []byte(`""`)
+	}
+	return encoded
+}

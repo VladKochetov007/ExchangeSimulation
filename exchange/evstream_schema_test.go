@@ -376,3 +376,68 @@ func TestCancelStructsMatchTheMapsTheyReplaced(t *testing.T) {
 		t.Fatalf("expired struct %s, map form %s", gotExpired, wantExpired)
 	}
 }
+
+// TestRenderPayloadReproducesCanonicalJSON is the analyzer-equivalence proof in
+// miniature.
+//
+// If rendering a binary payload reproduces byte-for-byte the JSON the old
+// pipeline persisted, then any analyzer reading that JSON produces identical
+// output — without running a single analyzer. Running them would test the
+// analyzers; this tests the only thing that could differ.
+func TestRenderPayloadReproducesCanonicalJSON(t *testing.T) {
+	order := &Order{ID: 7, ClientID: 9, Side: Sell, PositionSide: PositionShort,
+		Type: LimitOrder, TimeInForce: GTC, PostOnly: true, Price: 100, Qty: 5,
+		FilledQty: 2, Visibility: Iceberg, IcebergQty: 1, Status: PartialFill,
+		Timestamp: 1234}
+
+	cases := []evstream.InterningAppender{
+		fillEvidence{FeeAmount: 1, FeeAsset: "USD", FilledQty: 2, IsFull: true,
+			OrderID: 3, PositionSide: "BOTH", Price: 4, Qty: 5, RealizedPnL: -6,
+			RemainingQty: 7, Role: "maker", Side: "SELL", Symbol: "ABC-PERP", TradeID: 8},
+		bookDeltaEvidence{HiddenQty: 1, Price: 2, Side: "BUY", TotalQty: 3, VisibleQty: 4},
+		bookSnapshotEvidence{Asks: []PriceLevel{{Price: 1, VisibleQty: 2}}, Bids: nil},
+		bookSnapshotEvidence{Asks: nil, Bids: []PriceLevel{}},
+		VenueBalanceEvent{Timestamp: 1, Bucket: VenueFeeRevenue, Asset: "USD",
+			Reason: "taker_fee", OldBalance: 2, NewBalance: 3, Delta: 1},
+		VenueBalanceEvent{Timestamp: 1, Bucket: VenueInsuranceFund, Asset: "USD",
+			Symbol: "ABC-PERP", Reason: "clearance"},
+		acceptedOrderEvidence{Order: order, RequestID: 11},
+		cancelledOrderEvidence{OrderID: 1, RemainingQty: 2, RequestID: 3},
+		expiredOrderEvidence{OrderID: 1, Reason: "IOC_EXPIRED", RemainingQty: 2, RequestID: 3},
+		forcedCancelEvidence{OrderID: 1, Reason: "liquidation", RemainingQty: 2},
+		etypes.BalanceChangeEvent{Timestamp: 1, ClientID: 2, Symbol: "ABC/USD",
+			Reason: "fill", Changes: []etypes.BalanceDelta{{Asset: "USD", Wallet: "perp", Delta: 3}}},
+		etypes.BalanceChangeEvent{Timestamp: 1, ClientID: 2, Symbol: "ABC/USD",
+			PositionSide: "BOTH", Reason: "funding", Changes: nil},
+		etypes.FeeRevenueEvent{Timestamp: 1, Symbol: "ABC/USD", TradeID: 2,
+			TakerFee: 3, MakerFee: 4, Asset: "USD"},
+		&etypes.Trade{TradeID: 1, Price: 2, Qty: 3, Side: Buy, TakerOrderID: 4, MakerOrderID: 5},
+		instrumentLogEvent{Symbol: "ABC/USD",
+			Payload: bookDeltaEvidence{HiddenQty: 9, Price: 8, Side: "SELL", TotalQty: 7, VisibleQty: 6}},
+		instrumentLogEvent{Symbol: "ABC/USD", Payload: map[string]any{"a": 1, "b": "two"}},
+	}
+
+	for i, original := range cases {
+		frame, reader := roundTripFrame(t, original)
+		rendered, err := RenderPayloadJSON(frame.Header.SchemaID, frame.Payload, reader)
+		if err != nil {
+			t.Fatalf("case %d: render: %v", i, err)
+		}
+		want, err := json.Marshal(original)
+		if err != nil {
+			t.Fatalf("case %d: marshal original: %v", i, err)
+		}
+		if !bytes.Equal(rendered, want) {
+			t.Fatalf("case %d: rendered JSON differs from the original\n  rendered: %s\n  original: %s",
+				i, rendered, want)
+		}
+	}
+}
+
+// TestRenderRejectsUnknownSchema pins the failure mode: an unrenderable frame
+// must be an error, not silently empty output that a diff would call equal.
+func TestRenderRejectsUnknownSchema(t *testing.T) {
+	if _, err := RenderPayloadJSON(60000, []byte{0, 0, 0, 0}, nil); err == nil {
+		t.Fatal("unknown schema rendered without error")
+	}
+}
