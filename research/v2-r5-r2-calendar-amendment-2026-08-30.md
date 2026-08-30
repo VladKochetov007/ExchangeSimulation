@@ -280,3 +280,29 @@ raw digests and control identities, and compares a temporary fresh attestation
 to the sealed one without overwriting it.  Focused tests, full `make test`,
 `go vet`, shell syntax, and diff checks pass.  Fresh independent Sol-xhigh
 acceptance of the exact pushed commit remains mandatory before any R2 cell.
+
+## Lock/provenance successor — `211865e` (2026-08-30)
+
+The namespace-lock correction is committed and pushed at exact HEAD
+`211865e8f9cf2b93a0960267796f3cbedc30636b`. Nested R2 commands now inherit a
+validated descriptor for the exact non-symlink lock path; a forged Boolean
+environment marker cannot bypass contention. The contract test proves this
+case, and the archive test exercises real G8 parity verification and pruning.
+Focused R2 contract/archive tests, ordinary `make test`, `go vet ./...`, and
+the affected-package race suite pass. The repository-wide race run timed out
+in the unrelated existing V23 P3 replenishment test after ten minutes, with no
+race report or OOM; it remains a documented limitation.
+
+The asynchronous performance branch was fetched at the same checkpoint through
+`1514c9c`. Its new commits are performance-only binary-schema, benchmark,
+measurement, and report work. The prototype is not integrated into this
+scientific candidate because complete event-family coverage, differential
+analyzer/global-order proof, end-to-end A/B, and independent promotion are
+still absent.
+
+The requested fresh Sol-xhigh review could not complete because the reviewer
+service reached its usage limit. The candidate is therefore not accepted and
+the R2 sequence remains stopped before clean binary rebuild and development
+execution. No development, parity, or holdout cell has run; holdouts
+`619/631/641` remain untouched. Synthetic gate fixtures are quarantined
+outside the canonical namespace and are not scientific evidence.

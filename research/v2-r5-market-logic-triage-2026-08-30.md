@@ -435,3 +435,35 @@ archive path performs fresh parity/raw recomputation in a temporary attestation
 comparison mode before any prune.  The exact pushed commit has passed focused
 tests, full `make test`, `go vet`, shell syntax, and diff checks; fresh
 independent Sol-xhigh acceptance is still required before any R2 cell.
+
+## Lock/provenance successor — `211865e` (2026-08-30)
+
+The namespace-lock correction is committed and pushed at exact HEAD
+`211865e8f9cf2b93a0960267796f3cbedc30636b`. Nested R2 commands now inherit a
+validated open descriptor whose `/proc` target is the exact non-symlink lock
+path; a Boolean environment marker is no longer sufficient to bypass locking.
+The contract test includes a live contention case with a forged marker and the
+archive test exercises the real G8 parity/prune path. Both focused R2 tests
+pass, as does ordinary `make test` and `go vet ./...`. The affected packages
+also pass `GOMAXPROCS=4 go test -race ./analysis ./cmd/mvanalyze ./cmd/prunegate
+./tests`.
+
+The repository-wide race run remains a limitation rather than a pass: its
+unrelated existing V23 P3 replenishment test timed out after ten minutes with
+no race report or OOM. This is retained as a gate limitation and has not been
+silently relabeled green.
+
+At the natural checkpoint, the independent performance branch advanced from
+`8f0186f` to `1514c9c`. Commits `e71e941`, `42ebac1`, `65e8f24`, `c72700d`,
+`5d41bd9`, and `1514c9c` are performance/report/schema work only. The binary
+evidence prototype remains deferred: it covers only a subset of event families
+and has no complete simulator/analyzer differential, global-completeness,
+end-to-end, or independent-promotion gate. No performance code was merged.
+
+The fresh Sol-xhigh review requested for `211865e` could not complete because
+the reviewer service hit its usage limit. This is an unavailable review, not
+an acceptance. Consequently the candidate remains unapproved: no clean
+scientific binary rebuild, R2 development cell, parity control, or holdout has
+been launched from this successor. Holdouts `619/631/641` remain untouched;
+all synthetic lock/archive fixtures were quarantined outside the canonical
+evidence namespace and are not scientific results.
