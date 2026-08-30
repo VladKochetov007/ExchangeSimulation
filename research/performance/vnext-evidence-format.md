@@ -109,10 +109,10 @@ Decode:
 
 | | ns/op | allocs/op |
 |---|---:|---:|
-| JSON | 66,452,830 | 246,516 |
-| **binary** | **4,181,613** | **35** |
+| JSON | 60,409,715 | 246,516 |
+| **binary** | **1,430,000** | **35** |
 
-**Encode 2.39x faster, decode 15.9x faster, 1,483x and 7,043x fewer
+**Encode 2.39x faster, decode 42.2x faster, 1,483x and 7,043x fewer
 allocations, 2.93x smaller raw and 6.14x smaller with zstd.** The binary encode
 figure includes the execution hash; the JSON figure does not, so the real
 encode ratio is nearer 2.96x once JSON's own SHA-256 is counted.
@@ -335,7 +335,7 @@ time was not the right one.
 |---|---|---|
 | simulator CPU | **~11.5 %** | removing reflection and per-event allocation |
 | storage | 2.93x raw, 6.14x zstd | byte-volume reduction |
-| analytics decode | 15.9x | typed decoding, no parse step |
+| analytics decode | 42.2x | typed decoding, no parse step |
 
 These are three separate wins with three separate mechanisms, and only the first
 is bounded by the 17.9 % ceiling. Designing the format for compactness in order
@@ -401,3 +401,73 @@ What the probes do establish, and the microbenchmark cannot, is the **shape** of
 the cost: reflection dominates, byte volume is irrelevant to simulator speed,
 and interning is free. Those three facts constrain the design regardless of
 where in the range the final number falls.
+
+## Retention by family complexity, and the cost that turned out to be mine
+
+The probes and the microbenchmark disagreed, so the retention ratio — real
+binary encode over `json.Marshal` — was measured for the two families at
+opposite ends of structural complexity.
+
+| family | JSON ns/event | binary ns/event | retention |
+|---|---:|---:|---:|
+| `balance_change` — nested slice, optional field, six interned strings | 619 | 244 | 39.4 % |
+| `BookDelta` — flat integers, one interned string | 272 | 174 | **63.9 %** |
+
+**The simple family retains more cost, not less.** `encoding/json` is cheap on a
+flat five-field struct, while the binary path pays a fixed per-event overhead
+whatever the payload contains. Since the stream is dominated by simple events,
+that pushed the expected gain to the bottom of the 10–17 % range.
+
+Pricing the fixed overhead found the culprit, and it was a design decision of
+mine rather than anything inherent:
+
+| | with per-frame SHA-256 | without | hashing share |
+|---|---:|---:|---:|
+| `balance_change` | 4,878,599 ns | 2,221,540 ns | **54.5 %** |
+| `BookDelta` | 3,472,636 ns | 1,082,852 ns | **68.8 %** |
+
+The writer was doing `Reset(); Write(rolling); Write(frame); Sum()` for every
+event — roughly two compression rounds plus reset overhead, 4.6 million times
+per simulated hour. It was the single largest cost in the binary path, larger
+than the encoding it existed to protect.
+
+### The tempting fix, rejected
+
+Hashing once per block would be cheaper still. It is also wrong: block
+boundaries depend on the configured block size, so the digest would depend on a
+storage parameter, and the central guarantee of this format is that storage
+choices cannot change trajectory identity. A faster hash that breaks the reason
+the hash exists is not a faster hash.
+
+### What was adopted
+
+One long-lived hasher streaming every frame, summed by cloning the state when a
+digest is needed. Order-dependent, tamper-evident, and a pure function of the
+canonical byte sequence — independent of block size, codec and buffering.
+
+| | before | after | encode delta |
+|---|---:|---:|---:|
+| `balance_change` | 4,878,599 ns | 3,732,147 ns | **−23.5 %** |
+| `BookDelta` | 3,472,636 ns | 2,244,306 ns | **−35.4 %** |
+
+Retention improves to 30.1 % and 41.3 %, giving an expected simulator gain of
+about **11.4 %** — converging with the original estimate, on a better
+implementation. `TestHashIsIndependentOfCodec` still passes.
+
+## Correction: decode is 42.2x, not 15.9x
+
+The decode figure published earlier was measured in a process where the encode
+benchmarks had already run, so the binary decode was paying for their GC state.
+Measured in isolation, three repetitions each:
+
+| | median |
+|---|---:|
+| JSON decode | 60.41 ms |
+| binary decode | **1.430 ms** |
+
+**42.2x, not 15.9x.** The correction is in the favourable direction, which makes
+it no less a correction. It is the same class of error as the sampled allocation
+profile earlier in this campaign: an instrument was trusted without checking
+what else was sharing it. Benchmarks in one process share a heap, and a decode
+benchmark that follows heavy encode benchmarks is not measuring the same
+machine.
