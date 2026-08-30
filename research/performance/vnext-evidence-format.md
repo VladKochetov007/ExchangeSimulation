@@ -523,3 +523,33 @@ almost every block and lands at 529 µs, B can skip none and pays 14.5 ms for th
 same records. That ratio, 27x between a windowed and an unwindowed query over
 one stream, is the index working, and it is measured on real data rather than a
 generated one.
+
+## What the simulator looks like after serialization is gone
+
+The ceiling build — serialization removed entirely — was profiled to find the
+bottleneck that VNext will expose. This is the post-VNext landscape, measured
+rather than guessed.
+
+| block | share |
+|---|---:|
+| map operations (`matchH2`, `aeshashbody`, `Iter.Next`, `mapaccess1_fast64`) | **~11 %** |
+| GC (`scanObject` 8.89 % cum, `mallocgcSmallScanNoHeader` 8.53 % cum) | ~9–12 % |
+| mutex lock + unlock | 5.9 % |
+| scheduler heap (`heap.down` 3.21 % cum, `Less` 1.47 %) | ~4.7 % |
+| `memmove` | 3.0 % |
+
+**The next bottleneck is the map layer, not the market logic.** Hash-map access
+is the largest single block once serialization is removed — symbol lookups,
+client lookups, order-id indexes and the per-symbol logger lookup, all keyed by
+string or uint64.
+
+Two things follow. First, the dictionary interning that VNext introduces is on
+the right side of this: replacing repeated string keys with dense `uint32` ids
+is exactly the direction that shrinks this block, so the format's design
+already leans against the next bottleneck rather than into it. Second, the
+scheduler's ~4.7 % survives, and its layout has already been tested and
+rejected — reducing it needs a calendar or ladder queue, which remains the one
+identified but unattempted algorithmic change.
+
+Recorded now so the post-implementation profile has a baseline to be compared
+against rather than being interpreted fresh.
