@@ -183,7 +183,8 @@ g8_recomputed_digest=$(jq -er '.result.digest' <<<"$g8_recomputed") || fail "mal
 [[ "$full_recomputed_events" == "$g8_recomputed_events" && "$full_recomputed_digest" == "$g8_recomputed_digest" ]] || fail "independently recomputed g4/g8 raw evidence hashes are not equal"
 
 source_revision=$(jq -er '.git_revision' "$output_root/dev-607/run-metadata.json")
-[[ "$source_revision" =~ ^[0-9a-f]{40}$ ]] || fail "parity simulator source revision is invalid"
+v2_r2_require_current_source_revision "$source_revision" "$head_revision" "$analyzer_revision" ||
+	fail "parity simulator source revision is not the current analyzer/HEAD revision"
 binary_sha256=$(jq -er '.binary_sha256' "$output_root/dev-607/run-metadata.json")
 binary_go_version=$(jq -er '.binary_go_version' "$output_root/dev-607/run-metadata.json")
 prunegate_sha256=$(jq -er '.prunegate_sha256' "$output_root/dev-607/run-metadata.json")

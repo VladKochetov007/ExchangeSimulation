@@ -31,6 +31,14 @@ jq '.raw_files |= reverse' "$right_manifest_dir/evidence-manifest.json" >"$right
 mv "$right_manifest_dir/permuted.json" "$right_manifest_dir/evidence-manifest.json"
 expect_failure v2_r2_compare_ordered_raw_manifests "$left_manifest_dir" "$right_manifest_dir"
 
+matching_revision=0123456789abcdef0123456789abcdef01234567
+v2_r2_require_current_source_revision "$matching_revision" "$matching_revision" "$matching_revision" ||
+	fail "matching current source revision was rejected"
+expect_failure v2_r2_require_current_source_revision "$matching_revision" \
+	"fedcba9876543210fedcba9876543210fedcba987" "$matching_revision"
+expect_failure v2_r2_require_current_source_revision "$matching_revision" "$matching_revision" \
+	"fedcba9876543210fedcba9876543210fedcba987"
+
 expect_failure env GOMAXPROCS=4 "$root_dir/scripts/run-v2-integrated-longrun-r2-cell.sh" holdout-619 /bin/true
 expect_failure "$root_dir/scripts/extract-v2-integrated-longrun-r2-cell.sh" \
 	"$root_dir/research/artifacts/v2-freeze-candidate/smoke-vcs/run-g4"
