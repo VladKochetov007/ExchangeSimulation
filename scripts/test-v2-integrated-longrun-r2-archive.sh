@@ -70,7 +70,8 @@ write_metadata() {
 		 seed: $seed, holdout: false, log_mode: $log_mode, gomaxprocs: $gomaxprocs,
 		 hypothesis_id: $hypothesis_id, git_revision: $source_revision,
 		 config_sha256: $config_sha256, binary_sha256: $binary_sha256,
-		 binary_vcs_modified: false, binary_trimpath: true, binary_cgo_enabled: "0",
+		 binary_vcs_revision: $source_revision, binary_vcs_modified: false,
+		 binary_trimpath: true, binary_cgo_enabled: "0",
 		 binary_go_version: "go1.27.0", prunegate_vcs_revision: $source_revision,
 		 prunegate_vcs_modified: false, prunegate_trimpath: true, prunegate_cgo_enabled: "0",
 		 prunegate_go_version: "go1.27.0", prunegate_sha256: $prunegate_sha256}' \
