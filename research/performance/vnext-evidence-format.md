@@ -301,3 +301,56 @@ event families that make up the bulk of the stream.
 The order of work that follows from this is clear: the five families covering
 76 % of hashed bytes first, then the end-to-end A/B, and only then a decision
 about retiring JSON from the hot path.
+
+## Decomposing the ceiling: the bytes do not matter, the reflection does
+
+The ceiling probe removed both the marshal and the hashed volume, so it could
+not say which of the two mattered. A second probe separates them: same removal
+of reflection and per-event allocation, but hashing **88 bytes** of appended
+integers instead of one — the byte profile a real binary encoder would produce.
+
+```
+              A/A control    vs baseline
+ceiling  (hash 1 B)   +1.85%      -17.29%
+emulated (hash 88 B)  +0.88%      -17.93%
+```
+
+**The two are indistinguishable.** Cutting hashed volume from 276 bytes per
+event to 88 buys nothing measurable. With hardware-accelerated SHA-256 the
+digest is not the constraint; the reflection-based marshal and its 40,054
+allocations per 20,000 events are.
+
+This corrects an assumption stated earlier in this campaign — that the binary
+format wins partly by removing bytes, and that the JSON appenders failed
+*because* they kept the byte volume. That reasoning was wrong in its mechanism.
+The appenders failed because their coverage was small: `balance_change` is only
+13.5 % of events by count, and at that coverage the expected effect was about
+1.5 %, below the 0.62 % A/A control's reliable detection threshold. The two
+results are consistent, not contradictory — but the explanation offered at the
+time was not the right one.
+
+### The value proposition, correctly split
+
+| dimension | gain | source |
+|---|---|---|
+| simulator CPU | **~11.5 %** | removing reflection and per-event allocation |
+| storage | 2.93x raw, 6.14x zstd | byte-volume reduction |
+| analytics decode | 15.9x | typed decoding, no parse step |
+
+These are three separate wins with three separate mechanisms, and only the first
+is bounded by the 17.9 % ceiling. Designing the format for compactness in order
+to make the *simulator* faster would be optimizing the wrong variable — a
+smaller encoding helps disk and nothing else. What makes the simulator faster is
+that the encoder is typed, branch-free and allocation-free.
+
+### Revised prediction for the real sink
+
+The emulation performs no dictionary lookups and appends eleven fixed integers,
+so it is optimistic. Estimating the real encoder at about 34.6 % of JSON's
+marshal cost — 4.5 ms of the microbenchmark's 5.44 ms once SHA-256 over 1.9 MB
+is subtracted — gives
+
+    0.654 x 17.93 % = about 11.7 %
+
+Two independent routes now converge on **11.5 % to 11.7 %**, and the mechanism
+behind the number is understood rather than assumed.
