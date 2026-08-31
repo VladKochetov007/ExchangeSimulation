@@ -1876,3 +1876,25 @@ encode — not from making the same work allocate more cleverly.
 
 That is the rule to carry forward: on this simulator, do not try to allocate
 better. Find the allocation that does not need to exist.
+
+### The fingerprint fast path, fuzzed rather than sampled
+
+A fixed corpus proves the cases its author thought of, which is the weakest
+possible evidence for a byte-identity claim: the whole risk is inputs the author
+did not imagine. The property is asymmetric and that is what makes it fuzzable —
+**declining is always safe, accepting and differing is a silent corruption** of
+an identity that appears in delivery evidence and decision attestations.
+
+`FuzzFingerprintFastPathMatchesReflection` generates symbols, sequence numbers,
+timestamps, prices, quantities, sides and `MDType` values, builds each of the
+four payload shapes including one with no canonical encoder, and asserts only
+this: **if the fast path accepts an input, its bytes equal `encoding/json`'s.**
+
+**24.2 million executions across two runs, zero mismatches**, 130 inputs
+retained as interesting. That covers `MinInt64`/`MaxInt64`/`MaxUint64` edges,
+`MDType` values outside the three encoded types, symbols requiring HTML and
+unicode escaping, and payloads with no encoder — all of which the fast path
+declines rather than guesses at.
+
+The corpus is committed, so the cases the fuzzer found interesting become
+regression tests rather than being rediscovered.
