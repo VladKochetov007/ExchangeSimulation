@@ -130,6 +130,35 @@ v2_r2_is_go_127() {
 	[[ "$1" == go1.27* ]]
 }
 
+v2_r2_capacity_attestation_path() {
+	printf '%s\n' '/home/vlad/v2-integrated-longrun-r2-binary-capacity-v1.json'
+}
+
+v2_r2_require_binary_capacity_attestation() {
+	local binary=$1 source_revision=$2
+	local attestation expected_binary_sha available_kb required_bytes peak_bytes safety_bytes
+	attestation=$(v2_r2_capacity_attestation_path)
+	[[ -s "$attestation" && ! -L "$attestation" ]] || return 1
+	expected_binary_sha=$(sha256sum -- "$binary" | awk '{print $1}') || return 1
+	peak_bytes=$(jq -er '.peak_output_bytes' "$attestation") || return 1
+	safety_bytes=$(jq -er '.safety_margin_bytes' "$attestation") || return 1
+	required_bytes=$(jq -er '.required_free_bytes' "$attestation") || return 1
+	[[ "$peak_bytes" =~ ^[0-9]+$ && "$safety_bytes" =~ ^[0-9]+$ && "$required_bytes" =~ ^[0-9]+$ ]] || return 1
+	[[ "$safety_bytes" -ge $((2 * 1024 * 1024 * 1024)) ]] || return 1
+	[[ "$required_bytes" == $((peak_bytes + safety_bytes)) ]] || return 1
+	jq -e --arg source_revision "$source_revision" --arg binary_sha256 "$expected_binary_sha" \
+		'.schema_version == 1 and .contract == "v2-integrated-longrun-r2-binary-capacity-v1" and
+		 .measurement == "full_24h_binary_evidence_capacity_probe" and
+		 .evidence_format == "evstream_v3" and .source_revision == $source_revision and
+		 .binary_sha256 == $binary_sha256 and
+		 (.peak_output_bytes | type) == "number" and (.safety_margin_bytes | type) == "number" and
+		 (.required_free_bytes | type) == "number" and .required_free_bytes == (.peak_output_bytes + .safety_margin_bytes)' \
+		"$attestation" >/dev/null || return 1
+	available_kb=$(df -Pk "$(dirname -- "$attestation")" | awk 'NR == 2 {print $4}') || return 1
+	[[ "$available_kb" =~ ^[0-9]+$ ]] || return 1
+	[[ $((available_kb * 1024)) -ge "$required_bytes" ]]
+}
+
 v2_r2_require_matching_revision() {
 	local actual_revision=$1
 	local expected_revision=$2

@@ -132,6 +132,15 @@ v2_r2_is_go_127 "$prunegate_go_version" || {
 }
 
 log_mode=$(jq -er '.log_mode' "$config")
+evidence_format=$(jq -er '.evidence_format' "$config")
+[[ "$evidence_format" == "evstream_v3" ]] || {
+	echo "registered successor cell requires evstream_v3 evidence (got $evidence_format)" >&2
+	exit 1
+}
+v2_r2_require_binary_capacity_attestation "$binary" "$sim_revision" || {
+	echo "refusing long-run launch without a matching measured binary-evidence capacity attestation" >&2
+	exit 1
+}
 seed=$(jq -er '.seed' "$config")
 config_hypothesis=$(jq -er '.hypothesis_id' "$config")
 config_experiment=$(jq -er '.experiment_id' "$config")
@@ -152,6 +161,7 @@ jq -n \
 	--argjson simulation_start_nano "$simulation_start_nano" \
 	--argjson simulation_end_nano "$simulation_end_nano" \
 	--arg log_mode "$log_mode" \
+	--arg evidence_format "$evidence_format" \
 	--arg config_sha256 "$config_sha256" \
 	--arg binary_sha256 "$binary_sha256" \
 	--arg git_revision "$sim_revision" \
@@ -178,12 +188,12 @@ jq -n \
 	--arg config_hypothesis "$config_hypothesis" \
 	--arg config_experiment "$config_experiment" \
 	'{
-		  schema_version: 5, runner_contract: "v2-integrated-longrun-r2-runner-v1",
+		  schema_version: 6, runner_contract: "v2-integrated-longrun-r2-runner-v2",
 		  experiment_id: ("v2-integrated-longrun-r2-" + $cell),
 		  config_experiment_id: $config_experiment,
 		  hypothesis_id: $config_hypothesis,
 		  cell: $cell, seed: $seed, holdout: $holdout,
-		  simulated_horizon: $horizon, log_mode: $log_mode,
+		  simulated_horizon: $horizon, log_mode: $log_mode, evidence_format: $evidence_format,
 		  simulation_start_nano: $simulation_start_nano, simulation_end_nano: $simulation_end_nano,
 		  config_sha256: $config_sha256, binary_sha256: $binary_sha256,
 		  config_path: $config_path, binary_path: $binary_path,
@@ -198,7 +208,7 @@ jq -n \
 		  gomaxprocs: $gomaxprocs, output_dir: $output_dir,
 		  evidence_manifest_path: $evidence_manifest_path,
 		  external_attestation_path: $external_attestation_path,
-		  command: ["multivenue", "-config", "run-config.json", "-duration", $horizon, "-logdir", $output_dir, "-log-mode", $log_mode],
+		  command: ["multivenue", "-config", "run-config.json", "-duration", $horizon, "-logdir", $output_dir, "-log-mode", $log_mode, "-evidence-format", $evidence_format],
 		  completion_sentinels: ["greeks.json", "latency.json"],
 		  raw_log_policy: "retained until every registered integrated long-run evidence contract passes"
 		}' >"$output/run-metadata.json"
@@ -207,7 +217,7 @@ run_metadata_sha256_before=$(sha256sum "$output/run-metadata.json" | awk '{print
 stdout_log="$output_root/$cell.simulator.stdout.log"
 stderr_log="$output_root/$cell.simulator.stderr.log"
 set +e
-"$binary" -config "$output/run-config.json" -duration "$horizon" -logdir "$output" -log-mode "$log_mode" \
+"$binary" -config "$output/run-config.json" -duration "$horizon" -logdir "$output" -log-mode "$log_mode" -evidence-format "$evidence_format" \
 	>"$stdout_log" 2>"$stderr_log"
 status=$?
 set -e
@@ -221,9 +231,9 @@ if [[ ! -s "$output/greeks.json" || ! -s "$output/latency.json" ]]; then
 fi
 jq -e 'type == "object" and (.build.revision | type) == "string" and
 	.build.revision == $revision and .build.modified == false and
-	.config.seed == $seed and .config.log_mode == $log_mode and
+	.config.seed == $seed and .config.log_mode == $log_mode and .config.evidence_format == $evidence_format and
 	.config.experiment_id == $experiment' \
-	--arg revision "$sim_revision" --argjson seed "$seed" --arg log_mode "$log_mode" \
+	--arg revision "$sim_revision" --argjson seed "$seed" --arg log_mode "$log_mode" --arg evidence_format "$evidence_format" \
 	--arg experiment "$config_experiment" "$output/manifest.json" >/dev/null || {
 	echo "manifest provenance/config identity mismatch: $output" >&2
 	exit 1
