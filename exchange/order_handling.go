@@ -471,9 +471,9 @@ func (e *DefaultExchange) Subscribe(clientID uint64, req *QueryRequest, gateway 
 	}, e.Clock.NowUnixNano())
 
 	if log := e.getLogger(req.Symbol); log != nil {
-		log.LogEvent(e.Clock.NowUnixNano(), clientID, "BookSnapshot", map[string]any{
-			"bids": book.Bids.GetSnapshot(),
-			"asks": book.Asks.GetSnapshot(),
+		log.LogEvent(e.Clock.NowUnixNano(), clientID, "BookSnapshot", bookSnapshotEvidence{
+			Bids: book.Bids.GetSnapshot(),
+			Asks: book.Asks.GetSnapshot(),
 		})
 	}
 
@@ -518,14 +518,10 @@ func (e *DefaultExchange) publishBookUpdate(book *OrderBook, side Side, price in
 	e.MDPublisher.Publish(book.Symbol, MDDelta, delta, e.Clock.NowUnixNano())
 
 	if log := e.getLogger(book.Symbol); log != nil {
-		deltaLog := map[string]any{
-			"side":        side.String(),
-			"price":       price,
-			"visible_qty": visible,
-			"hidden_qty":  hidden,
-			"total_qty":   totalQty,
-		}
-		log.LogEvent(e.Clock.NowUnixNano(), 0, "BookDelta", deltaLog)
+		log.LogEvent(e.Clock.NowUnixNano(), 0, "BookDelta", bookDeltaEvidence{
+			Side: side.String(), Price: price, VisibleQty: visible,
+			HiddenQty: hidden, TotalQty: totalQty,
+		})
 	}
 }
 

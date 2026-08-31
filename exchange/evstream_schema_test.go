@@ -316,3 +316,62 @@ func TestRenderPayloadJSONRejectsUnknownSchemaVersion(t *testing.T) {
 		t.Fatal("unknown schema version was rendered")
 	}
 }
+
+func TestHighVolumeTypedPayloadsPreserveLegacyJSONShape(t *testing.T) {
+	typedCases := []struct {
+		name  string
+		typed any
+		old   any
+	}{
+		{
+			name: "book snapshot",
+			typed: bookSnapshotEvidence{
+				Asks: []PriceLevel{{Price: 101, VisibleQty: 7, HiddenQty: 2}},
+				Bids: []PriceLevel{},
+			},
+			old: map[string]any{
+				"bids": []PriceLevel{},
+				"asks": []PriceLevel{{Price: 101, VisibleQty: 7, HiddenQty: 2}},
+			},
+		},
+		{
+			name:  "book delta",
+			typed: bookDeltaEvidence{Side: "BUY", Price: 101, VisibleQty: 7, HiddenQty: 2, TotalQty: 9},
+			old: map[string]any{
+				"side": "BUY", "price": int64(101), "visible_qty": int64(7),
+				"hidden_qty": int64(2), "total_qty": int64(9),
+			},
+		},
+		{
+			name: "order fill",
+			typed: fillEvidence{
+				OrderID: 1, Symbol: "ABC/USD", Qty: 2, Price: 101, Side: "BUY",
+				PositionSide: "BOTH", FilledQty: 2, RemainingQty: 0, IsFull: true,
+				TradeID: 3, Role: "maker", FeeAmount: 4, FeeAsset: "USD",
+				RealizedPnL: 5, NewSize: 6, NewEntryPrice: 101,
+			},
+			old: map[string]any{
+				"order_id": uint64(1), "symbol": "ABC/USD", "qty": int64(2), "price": int64(101),
+				"side": "BUY", "position_side": "BOTH", "filled_qty": int64(2),
+				"remaining_qty": int64(0), "is_full": true, "trade_id": uint64(3),
+				"role": "maker", "fee_amount": int64(4), "fee_asset": "USD",
+				"realized_pnl": int64(5), "new_size": int64(6), "new_entry_price": int64(101),
+			},
+		},
+	}
+	for _, testCase := range typedCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got, err := json.Marshal(testCase.typed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := json.Marshal(testCase.old)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("typed payload changed JSON shape:\n got %s\nwant %s", got, want)
+			}
+		})
+	}
+}
