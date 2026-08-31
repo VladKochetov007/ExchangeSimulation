@@ -129,7 +129,7 @@ write_full_cell() {
 	local hypothesis_id=$4
 	local experiment_id=$5
 	mkdir -p -- "$cell/venues/north"
-	cp -- "$config" "$cell/run-config.json"
+	jq '.evidence_format = "jsonl"' "$config" >"$cell/run-config.json"
 	write_metadata "$cell" 607 full "$gomaxprocs" "$config" "$hypothesis_id"
 	write_common_files "$cell" "$experiment_id"
 	printf '%s\n' '{"event":"archive-test","sequence":1}' >"$cell/venues/north/events.jsonl"
@@ -143,7 +143,7 @@ write_none_cell() {
 	local cell=$1
 	local config=$2
 	mkdir -p -- "$cell/venues"
-	cp -- "$config" "$cell/run-config.json"
+	jq '.evidence_format = "jsonl"' "$config" >"$cell/run-config.json"
 	write_metadata "$cell" 607 none 4 "$config" "V2-INTEGRATED-LONG-R2-CANDIDATE-PARITY"
 	write_common_files "$cell" "v2-integrated-longrun-r2-dev-607-none"
 	v2_r2_write_evidence_manifest "$cell" || fail "could not create no-log evidence manifest"

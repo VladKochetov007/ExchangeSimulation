@@ -167,16 +167,37 @@ v2_r2_require_raw_archive_attestation_path() {
 	[[ "$(realpath -m -- "$path")" == "$path" ]]
 }
 
+v2_r2_evidence_format() {
+	local cell=$1
+	jq -er '.evidence_format // "jsonl"' "$cell/run-config.json"
+}
+
 v2_r2_write_evidence_manifest() {
 	local cell=$1
 	local output="$cell/evidence-manifest.json"
-	local log_mode
+	local log_mode evidence_format contract
 	log_mode=$(jq -er '.log_mode' "$cell/run-config.json") || return 1
-	case "$log_mode" in
-		full) local fixed_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl evidence-artifact-hash.json) ;;
-		none) local fixed_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl) ;;
+	evidence_format=$(v2_r2_evidence_format "$cell") || return 1
+	local fixed_files
+	case "$evidence_format:$log_mode" in
+		jsonl:full)
+			contract="v2-integrated-longrun-evidence-manifest-v1"
+			fixed_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl evidence-artifact-hash.json)
+			;;
+		jsonl:none)
+			contract="v2-integrated-longrun-evidence-manifest-v1"
+			fixed_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl)
+			;;
+		evstream_v3:full)
+			contract="v2-integrated-longrun-evidence-manifest-v2"
+			fixed_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json)
+			;;
+		evstream_v3:none)
+			contract="v2-integrated-longrun-evidence-manifest-v2"
+			fixed_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json)
+			;;
 		*) return 1 ;;
-	esac
+	 esac
 	local fixed_records='[]'
 	local relative path bytes digest
 	for relative in "${fixed_files[@]}"; do
@@ -207,13 +228,14 @@ v2_r2_write_evidence_manifest() {
 	fi
 	local temporary="$output.tmp-$$"
 	jq -n \
-		--arg contract "v2-integrated-longrun-evidence-manifest-v1" \
+		--arg contract "$contract" \
 		--arg cell "$(basename "$cell")" \
 		--arg log_mode "$log_mode" \
+		--arg evidence_format "$evidence_format" \
 		--arg source_revision "$(jq -er '.git_revision' "$cell/run-metadata.json")" \
 		--argjson fixed_files "$fixed_records" --argjson raw_files "$raw_records" \
 		--argjson raw_count "$raw_count" --argjson raw_bytes "$raw_bytes" \
-		'{schema_version: 1, contract: $contract, cell: $cell, log_mode: $log_mode, source_revision: $source_revision,
+		'{schema_version: (if $evidence_format == "evstream_v3" then 2 else 1 end), contract: $contract, cell: $cell, log_mode: $log_mode, evidence_format: $evidence_format, source_revision: $source_revision,
 			fixed_files: $fixed_files, raw_jsonl_files: $raw_count, raw_jsonl_bytes: $raw_bytes,
 		 raw_files: $raw_files}' >"$temporary" || return 1
 	mv -- "$temporary" "$output"
@@ -223,17 +245,26 @@ v2_r2_verify_evidence_manifest() {
 	local cell=$1
 	local manifest="$cell/evidence-manifest.json"
 	[[ -s "$manifest" ]] || return 1
-	local log_mode
+	local log_mode evidence_format expected_contract expected_schema
 	log_mode=$(jq -er '.log_mode' "$cell/run-config.json") || return 1
-	local expected_fixed
-	case "$log_mode" in
-		full) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl evidence-artifact-hash.json | sort) ;;
-		none) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl | sort) ;;
+	evidence_format=$(v2_r2_evidence_format "$cell") || return 1
+	case "$evidence_format" in
+		jsonl) expected_contract="v2-integrated-longrun-evidence-manifest-v1"; expected_schema=1 ;;
+		evstream_v3) expected_contract="v2-integrated-longrun-evidence-manifest-v2"; expected_schema=2 ;;
 		*) return 1 ;;
 	esac
-	jq -e --arg cell "$(basename "$cell")" --arg log_mode "$log_mode" \
-		'.schema_version == 1 and .contract == "v2-integrated-longrun-evidence-manifest-v1" and .cell == $cell and
-			.log_mode == $log_mode and
+	local expected_fixed
+	case "$evidence_format:$log_mode" in
+		jsonl:full) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl evidence-artifact-hash.json | sort) ;;
+		jsonl:none) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl | sort) ;;
+		evstream_v3:full) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json | sort) ;;
+		evstream_v3:none) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json | sort) ;;
+		*) return 1 ;;
+	 esac
+	jq -e --arg cell "$(basename "$cell")" --arg log_mode "$log_mode" --arg evidence_format "$evidence_format" \
+		--arg expected_contract "$expected_contract" --argjson expected_schema "$expected_schema" \
+		'.schema_version == $expected_schema and .contract == $expected_contract and .cell == $cell and
+			.log_mode == $log_mode and .evidence_format == $evidence_format and
 			(.source_revision | test("^[0-9a-f]{40}$")) and (.fixed_files | type) == "array" and
 			(.raw_files | type) == "array" and .raw_jsonl_files == (.raw_files | length) and
 			(if $log_mode == "full" then .raw_jsonl_files > 0 else .raw_jsonl_files == 0 end)' "$manifest" >/dev/null || return 1
@@ -540,18 +571,26 @@ v2_r2_write_attestation() {
 	local manifest_sha status_sha
 	manifest_sha=$(sha256sum -- "$cell/evidence-manifest.json" | awk '{print $1}') || return 1
 	status_sha=$(sha256sum -- "$cell/run-status.json" | awk '{print $1}') || return 1
-	local source_revision binary_sha256 config_sha256 prunegate_sha256
+	local source_revision binary_sha256 config_sha256 prunegate_sha256 evidence_format attestation_contract
 	source_revision=$(jq -er '.git_revision' "$cell/run-metadata.json") || return 1
+	evidence_format=$(v2_r2_evidence_format "$cell") || return 1
+	if [[ "$evidence_format" == "evstream_v3" ]]; then
+		attestation_contract="v2-integrated-longrun-external-attestation-v2"
+	else
+		attestation_contract="v2-integrated-longrun-external-attestation-v1"
+	fi
 	binary_sha256=$(jq -er '.binary_sha256' "$cell/run-metadata.json") || return 1
 	config_sha256=$(jq -er '.config_sha256' "$cell/run-metadata.json") || return 1
 	prunegate_sha256=$(jq -er '.prunegate_sha256' "$cell/run-metadata.json") || return 1
 	jq -n --arg cell "$cell_name" --arg manifest_sha "$manifest_sha" --arg status_sha "$status_sha" \
 		--arg source_revision "$source_revision" --arg binary_sha256 "$binary_sha256" \
 		--arg config_sha256 "$config_sha256" --arg prunegate_sha256 "$prunegate_sha256" \
-		'{schema_version: 1, contract: "v2-integrated-longrun-external-attestation-v1", cell: $cell,
+		--arg evidence_format "$evidence_format" --arg attestation_contract "$attestation_contract" \
+		'{schema_version: (if $evidence_format == "evstream_v3" then 2 else 1 end), contract: $attestation_contract, cell: $cell,
 		 evidence_manifest_sha256: $manifest_sha, run_status_sha256: $status_sha,
 		 source_revision: $source_revision, binary_sha256: $binary_sha256,
 		 config_sha256: $config_sha256, prunegate_sha256: $prunegate_sha256,
+		 evidence_format: $evidence_format,
 		 attestation_scope: "runner-produced evidence manifest and completion status"}' >"$temporary" || return 1
 	mv -- "$temporary" "$output"
 }
@@ -566,15 +605,24 @@ v2_r2_verify_attestation() {
 	local manifest_sha status_sha
 	manifest_sha=$(sha256sum -- "$cell/evidence-manifest.json" | awk '{print $1}') || return 1
 	status_sha=$(sha256sum -- "$cell/run-status.json" | awk '{print $1}') || return 1
-	local source_revision binary_sha256 config_sha256 prunegate_sha256
+	local source_revision binary_sha256 config_sha256 prunegate_sha256 evidence_format expected_contract expected_schema
 	source_revision=$(jq -er '.git_revision' "$cell/run-metadata.json") || return 1
+	evidence_format=$(v2_r2_evidence_format "$cell") || return 1
+	if [[ "$evidence_format" == "evstream_v3" ]]; then
+		expected_contract="v2-integrated-longrun-external-attestation-v2"
+		expected_schema=2
+	else
+		expected_contract="v2-integrated-longrun-external-attestation-v1"
+		expected_schema=1
+	fi
 	binary_sha256=$(jq -er '.binary_sha256' "$cell/run-metadata.json") || return 1
 	config_sha256=$(jq -er '.config_sha256' "$cell/run-metadata.json") || return 1
 	prunegate_sha256=$(jq -er '.prunegate_sha256' "$cell/run-metadata.json") || return 1
 	jq -e --arg cell "$cell_name" --arg manifest_sha "$manifest_sha" --arg status_sha "$status_sha" \
 		--arg source_revision "$source_revision" --arg binary_sha256 "$binary_sha256" \
 		--arg config_sha256 "$config_sha256" --arg prunegate_sha256 "$prunegate_sha256" \
-		'.schema_version == 1 and .contract == "v2-integrated-longrun-external-attestation-v1" and
+		--arg evidence_format "$evidence_format" --arg expected_contract "$expected_contract" --argjson expected_schema "$expected_schema" \
+		'.schema_version == $expected_schema and .contract == $expected_contract and .evidence_format == $evidence_format and
 		 .cell == $cell and .evidence_manifest_sha256 == $manifest_sha and .run_status_sha256 == $status_sha and
 		 .source_revision == $source_revision and .binary_sha256 == $binary_sha256 and
 		 .config_sha256 == $config_sha256 and .prunegate_sha256 == $prunegate_sha256' \
