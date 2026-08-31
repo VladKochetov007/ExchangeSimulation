@@ -525,3 +525,34 @@ contract test, and diff checks pass on `b906705`. A fresh independent Sol-xhigh
 review of this exact candidate is now required. No clean scientific rebuild,
 development cell, parity control, or holdout has run; holdouts
 `619/631/641` remain untouched.
+
+## Timeline gate review — `f444adb` (2026-08-31)
+
+Lagrange (Sol-xhigh) independently reviewed exact commit
+`f444adb9c5313b5950e350b017dc20958d018cb4` and **REJECTED** it before any R2
+cell ran. The review found that the empty-string instrument type did not have
+its own adversarial regression, the end-to-end timeline test advanced only two
+simulated seconds and therefore did not prove later hourly/three-hour/
+six-hour polls or the 24-hour endpoint, and the shell timeline fixture was
+derived from the same production helper as the expected value. These findings
+were valid gate weaknesses, not evidence that the calendar implementation had
+the wrong economic schedule.
+
+Commit `1903679` corrects the gate without changing the registered calendar:
+it adds the empty-type regression, adds a package-local exchange test with an
+independent manual clock/ticker that advances every one-second automation poll
+through 24 hours, and asserts exact first-listing times including the
+intentional `+30h` overlap (listed first at `+18h`, then requested again at
+`+24h` and deduplicated). The shell contract now contains a literal 28-row
+timeline fixture rather than generating the expected answer from production
+code. A separate consistency check confirms that this fixture matches the
+maintained schedule helper, while the adversarial contract mutation still
+rejects an all-at-zero timeline.
+
+Focused calendar tests and the R2 contract pass. The clean full `make test`,
+`go vet ./...`, targeted `go test -race
+./analysis ./cmd/mvanalyze ./cmd/prunegate ./tests`, and diff checks pass on
+`1903679`. This is a gate-hardening correction only; the exact candidate still
+requires fresh independent Sol-xhigh acceptance before a clean binary rebuild
+or development cell. No R2 development, parity, or holdout evidence has run;
+holdouts `619/631/641` remain untouched.
