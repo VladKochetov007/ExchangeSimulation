@@ -140,6 +140,8 @@
   "status": "preregistered",
   "step": 1000000000,
   "venue_ids": [
-    "north"
+    "north",
+    "central",
+    "south"
   ]
 }
