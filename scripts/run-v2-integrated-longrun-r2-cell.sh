@@ -32,6 +32,10 @@ esac
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
+[[ -z "${EXSIM_BINARY_EVIDENCE:-}" ]] || {
+	echo "refusing registered launch with prototype EXSIM_BINARY_EVIDENCE override" >&2
+	exit 1
+}
 v2_r2_acquire_namespace_lock || {
 	echo "could not acquire the R2 evidence namespace lock" >&2
 	exit 1
