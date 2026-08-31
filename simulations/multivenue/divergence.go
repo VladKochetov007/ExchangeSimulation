@@ -151,7 +151,7 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 		s.mu.Lock()
 		s.lastSimTime = simTime
 		s.mu.Unlock()
-		return nil
+		return
 	}
 
 	encoded, err := json.Marshal(payload)
