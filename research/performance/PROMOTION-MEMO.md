@@ -198,3 +198,37 @@ and dev-613 produces more of it. Nothing about the result depends on the cell it
 was discovered in.
 
 This does not extend to the holdouts, which were never read or run.
+
+## 11. F1 ported, and what it does to the baseline
+
+The scientific correctness fix `26fbe7d` ("value cross-margin risk only on
+exposure the account holds") is now on this branch, cherry-picked with `-x`.
+This was authorised so that `buildAccountMarginProfile` can be optimised against
+correct semantics rather than through a defect.
+
+One conflict, resolved in the fix's favour: the perf branch re-queried the
+position manager inside the valuation loop, which both duplicates a lookup and
+bypasses the `held` array whose purpose is to fix which positions the profile is
+valued over.
+
+**Verified active rather than assumed.** At 20 simulated minutes the execution
+hash is *unchanged* (`e1ad48f5f35e0f12`), because the decisions F1 rescues occur
+at t=7201 s and t=21601 s — past that window. Extending to 2h10m:
+
+| build | hash | events |
+| --- | --- | ---: |
+| pre-F1 | `6af9ff69bcff5320` | 9,889,223 |
+| post-F1 | `188c619d2b1f8bfd` | **9,888,615** |
+
+608 fewer events, which is the suppressed-decision noise disappearing. An
+unchanged hash at 20 minutes is a statement about the window, not about the fix.
+
+### New baselines on this branch
+
+| cell | hash (20m) | events |
+| --- | --- | ---: |
+| dev-607 / seed 607 | `e1ad48f5f35e0f12` | 1,568,215 |
+| dev-613 / seed 613 | `0bafcc8093222b0e` | 1,499,069 |
+
+Historical hashes and runs are **not** reinterpreted. Re-baselining applies to
+the next scientific successor candidate only.
