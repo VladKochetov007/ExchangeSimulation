@@ -10,6 +10,7 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	etypes "exchange_sim/types"
 )
 
 // boundaryGateway is deliberately only a message source. The test exercises
@@ -96,6 +97,15 @@ func TestMarketDataReceiptAttestsInboxArrival(t *testing.T) {
 		}
 		if got := binary.BigEndian.Uint64(record[20:28]); got != uint64(17+i) {
 			t.Fatalf("receipt %d sequence = %d, want %d", i, got, 17+i)
+		}
+		messageTypes := []etypes.MDType{etypes.MDSnapshot, etypes.MDTrade}
+		message := &etypes.MarketDataMsg{Type: messageTypes[i], Symbol: "ABC/USD", SeqNum: uint64(17 + i), Timestamp: publishedAt}
+		fingerprint, err := etypes.MarketDataFingerprint(message)
+		if err != nil {
+			t.Fatalf("fingerprint message %d: %v", i, err)
+		}
+		if string(record[28:44]) != string(fingerprint[:]) {
+			t.Fatalf("receipt %d fingerprint does not identify delivered message", i)
 		}
 		if got := int64(binary.BigEndian.Uint64(record[44:52])); got != publishedAt {
 			t.Fatalf("receipt %d publication = %d, want %d", i, got, publishedAt)

@@ -7,6 +7,7 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/simulation"
 	etypes "exchange_sim/types"
 )
 
@@ -27,11 +28,15 @@ func elasticSupplierSnapshot(symbol string, timestamp, bid, ask int64) *actor.Ev
 func TestElasticLiquiditySupplierQuotesOneInventorySensitiveSide(t *testing.T) {
 	gw := newMetaGateway()
 	var decisions []ElasticLiquiditySupplierDecision
+	fingerprint := [16]byte{1, 2, 3}
 	supplier := NewElasticLiquiditySupplier(1, gw, ElasticLiquiditySupplierConfig{
 		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
 		Interval: time.Second, MaxObservationAge: time.Minute,
 		ReferencePrice: 3_000, ReferenceHalfLife: time.Hour,
 		BaseHolding: 0, ElasticityPerPercent: 10, MaxPosition: 100, MaxQuoteQty: 25,
+		ObservationFrontier: func() simulation.MarketDataFrontier {
+			return simulation.MarketDataFrontier{LinkID: 4, Ordinal: 8, DeliveredAt: int64(time.Second), Fingerprint: fingerprint}
+		},
 		DecisionObserver: func(decision ElasticLiquiditySupplierDecision) { decisions = append(decisions, decision) },
 	})
 	now := int64(time.Second)
@@ -54,6 +59,10 @@ func TestElasticLiquiditySupplierQuotesOneInventorySensitiveSide(t *testing.T) {
 	}
 	if decisions[len(decisions)-1].BestBidQty != 100 || decisions[len(decisions)-1].BestAskQty != 100 {
 		t.Fatalf("decision touch depth = (%d, %d), want (100, 100)", decisions[len(decisions)-1].BestBidQty, decisions[len(decisions)-1].BestAskQty)
+	}
+	decision := decisions[len(decisions)-1]
+	if decision.ObservationLinkID != 4 || decision.ObservationOrdinal != 8 || decision.ObservationDeliveredAt != int64(time.Second) || decision.ObservationFingerprint != "01020300000000000000000000000000" {
+		t.Fatalf("decision observation frontier = %+v, want exact delayed-message identity", decision)
 	}
 }
 

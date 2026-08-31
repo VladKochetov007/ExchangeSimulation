@@ -3394,6 +3394,15 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			MaxPosition:          spec.MaxPosition,
 			MaxQuoteQty:          spec.MaxQuoteQty,
 		}
+		liquidityConfig.ObservationFrontier = func() simulation.MarketDataFrontier {
+			provider, ok := gateway.(interface {
+				MarketDataFrontier() simulation.MarketDataFrontier
+			})
+			if !ok {
+				return simulation.MarketDataFrontier{}
+			}
+			return provider.MarketDataFrontier()
+		}
 		if s.Config.RecordElasticLiquiditySupplierDecisions {
 			liquidityConfig.DecisionObserver = elasticLiquidityDecisionObserver
 			liquidityConfig.FillObserver = elasticLiquidityFillObserver

@@ -2,6 +2,7 @@ package multivenue
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"math/big"
@@ -9,6 +10,7 @@ import (
 
 	"exchange_sim/actor"
 	"exchange_sim/exchange"
+	"exchange_sim/simulation"
 )
 
 // ElasticLiquiditySupplierSpec is the serializable roster entry for a bounded
@@ -87,6 +89,7 @@ type ElasticLiquiditySupplierConfig struct {
 	MaxQuoteQty          int64
 	DecisionObserver     func(ElasticLiquiditySupplierDecision)
 	FillObserver         func(ElasticLiquiditySupplierFill)
+	ObservationFrontier  func() simulation.MarketDataFrontier
 }
 
 // ElasticLiquiditySupplierDecision records the local information and action
@@ -94,30 +97,34 @@ type ElasticLiquiditySupplierConfig struct {
 // the authoritative PnL source; Position and MarkPrice make the local action
 // joinable to that economic evidence.
 type ElasticLiquiditySupplierDecision struct {
-	Role                string `json:"role"`
-	ClientID            uint64 `json:"client_id"`
-	Symbol              string `json:"symbol"`
-	DecisionTime        int64  `json:"decision_time"`
-	ObservationTime     int64  `json:"observation_time"`
-	ObservationAge      int64  `json:"observation_age"`
-	ObservationSequence uint64 `json:"observation_sequence"`
-	BestBid             int64  `json:"best_bid"`
-	BestBidQty          int64  `json:"best_bid_qty"`
-	BestAsk             int64  `json:"best_ask"`
-	BestAskQty          int64  `json:"best_ask_qty"`
-	MarkPrice           int64  `json:"mark_price"`
-	ReferencePrice      int64  `json:"reference_price"`
-	Position            int64  `json:"position"`
-	TargetPosition      int64  `json:"target_position"`
-	InventoryLimit      int64  `json:"inventory_limit"`
-	Action              string `json:"action"`
-	Reason              string `json:"reason"`
-	Side                string `json:"side,omitempty"`
-	QuotePrice          int64  `json:"quote_price,omitempty"`
-	QuoteQty            int64  `json:"quote_qty,omitempty"`
-	QuoteOrderID        uint64 `json:"quote_order_id,omitempty"`
-	QuoteRequestID      uint64 `json:"quote_request_id,omitempty"`
-	QuoteSubmittedAt    int64  `json:"quote_submitted_at,omitempty"`
+	Role                   string `json:"role"`
+	ClientID               uint64 `json:"client_id"`
+	Symbol                 string `json:"symbol"`
+	DecisionTime           int64  `json:"decision_time"`
+	ObservationTime        int64  `json:"observation_time"`
+	ObservationAge         int64  `json:"observation_age"`
+	ObservationSequence    uint64 `json:"observation_sequence"`
+	ObservationLinkID      uint32 `json:"observation_link_id"`
+	ObservationOrdinal     uint64 `json:"observation_ordinal"`
+	ObservationDeliveredAt int64  `json:"observation_delivered_at"`
+	ObservationFingerprint string `json:"observation_fingerprint"`
+	BestBid                int64  `json:"best_bid"`
+	BestBidQty             int64  `json:"best_bid_qty"`
+	BestAsk                int64  `json:"best_ask"`
+	BestAskQty             int64  `json:"best_ask_qty"`
+	MarkPrice              int64  `json:"mark_price"`
+	ReferencePrice         int64  `json:"reference_price"`
+	Position               int64  `json:"position"`
+	TargetPosition         int64  `json:"target_position"`
+	InventoryLimit         int64  `json:"inventory_limit"`
+	Action                 string `json:"action"`
+	Reason                 string `json:"reason"`
+	Side                   string `json:"side,omitempty"`
+	QuotePrice             int64  `json:"quote_price,omitempty"`
+	QuoteQty               int64  `json:"quote_qty,omitempty"`
+	QuoteOrderID           uint64 `json:"quote_order_id,omitempty"`
+	QuoteRequestID         uint64 `json:"quote_request_id,omitempty"`
+	QuoteSubmittedAt       int64  `json:"quote_submitted_at,omitempty"`
 }
 
 // ElasticLiquiditySupplierFill joins a fill to the participant's local
@@ -387,13 +394,23 @@ func (s *ElasticLiquiditySupplier) baseDecision(now int64) ElasticLiquiditySuppl
 	if s.observationTime > 0 && now >= s.observationTime {
 		age = now - s.observationTime
 	}
+	var frontier simulation.MarketDataFrontier
+	if s.cfg.ObservationFrontier != nil {
+		frontier = s.cfg.ObservationFrontier()
+	}
+	fingerprint := ""
+	if frontier.Fingerprint != ([16]byte{}) {
+		fingerprint = hex.EncodeToString(frontier.Fingerprint[:])
+	}
 	return ElasticLiquiditySupplierDecision{
 		Role: s.cfg.Role, ClientID: s.cfg.ClientID, Symbol: s.cfg.Symbol,
 		DecisionTime: now, ObservationTime: s.observationTime, ObservationAge: age,
 		BestBid: s.bestBid, BestBidQty: s.bestBidQty, BestAsk: s.bestAsk, BestAskQty: s.bestAskQty,
-		ObservationSequence: s.observationSequence,
-		ReferencePrice:      s.reference,
-		Position:            s.position, InventoryLimit: s.cfg.MaxPosition,
+		ObservationSequence: s.observationSequence, ObservationLinkID: frontier.LinkID,
+		ObservationOrdinal: frontier.Ordinal, ObservationDeliveredAt: frontier.DeliveredAt,
+		ObservationFingerprint: fingerprint,
+		ReferencePrice:         s.reference,
+		Position:               s.position, InventoryLimit: s.cfg.MaxPosition,
 		QuoteOrderID: s.quote.orderID, QuoteRequestID: s.quote.requestID,
 		QuotePrice: s.quote.price, QuoteQty: s.quote.qty, QuoteSubmittedAt: s.quote.submittedAt,
 	}
