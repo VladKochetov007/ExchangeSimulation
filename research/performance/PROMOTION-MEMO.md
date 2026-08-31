@@ -178,3 +178,23 @@ Build the file-layout renderer and differentially verify **per file** rather
 than as one stream. That closes blocker 1 and converts the losslessness result
 from "the content is all there" to "the artifacts are interchangeable", which is
 what an adoption decision actually needs.
+
+## 10. External validity: a second seed and a second config
+
+Every measurement in this campaign used seed 607 on dev-607 until the end. That
+is a single cell, and a result that holds only there is a property of that cell.
+
+Repeated on **dev-613 with seed 613** — a different config and a different seed,
+same 20-minute duration, same build, three rounds:
+
+| | dev-607 / seed 607 | dev-613 / seed 613 |
+| --- | ---: | ---: |
+| replace mode vs JSON | **-20.02 %** (independently graded) | **-23.81 %** |
+| A/A control, same session | -0.89 % | +0.84 % |
+
+The effect generalises and is **larger** on the second cell, which is consistent
+with the mechanism: the saving scales with evidence volume per simulated second,
+and dev-613 produces more of it. Nothing about the result depends on the cell it
+was discovered in.
+
+This does not extend to the holdouts, which were never read or run.
