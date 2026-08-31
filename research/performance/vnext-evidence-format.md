@@ -720,3 +720,45 @@ encoder work — zstd removes 4.79x of it for 2.4 % wall.
 That is a plateau on this path. Further optimisation of the evidence subsystem
 has lower expected value than the diffuse remainder of the simulator, where
 matching is 0.45 % of CPU and map work has no single caller above 1.5 %.
+
+## Pre-registered cost model for the replace-mode hot path
+
+Every profile grounding this campaign was taken on the **JSON** path. After the
+format change the ranking has certainly moved, and the honest way to look is to
+predict first and measure second, so the profile can contradict a stated model
+rather than confirm whatever it happens to show.
+
+Per event, replace mode does exactly this, read off the code rather than
+guessed:
+
+| work | count per event | estimated cost | share of a 24.6 s hour |
+| --- | ---: | ---: | ---: |
+| `binaryEvidence.record` mutex | 1 pair | ~15-20 ns | ~0.35 % |
+| `checkpointSink.observe` mutex | 1 pair | ~15-20 ns | ~0.35 % |
+| `Intern(eventName)` map lookup | 1 | ~22 ns | ~0.4 % |
+| `Intern(venueID)` map lookup | 1 | ~22 ns | ~0.4 % |
+| scratch-to-block payload copy | 1 | ~5 ns (tens of bytes) | ~0.1 % |
+| continuous SHA-256 | 1 | measured | **1.28 %** |
+| frame header append + length patch | 1 | ~5 ns | ~0.1 % |
+
+At 4.64 M events per simulated hour, **no single item exceeds about 1.3 %, and
+the whole enumerated list is roughly 3 %.** The remainder of the run is market
+mechanics.
+
+### The prediction, and what would falsify it
+
+**Prediction: a CPU profile of a replace-mode run will show no evidence-path
+function above ~2 % of CPU, and the evidence subsystem in total below ~5 %.**
+
+If the profile shows any sink or writer function above 5 %, this model is wrong
+and the cause is worth finding — most likely a cost not visible in the per-event
+enumeration, such as block flush behaviour, allocator pressure from the growing
+block buffer, or write-side stalls that the discard-mode measurements hid by
+construction.
+
+Two candidate optimisations follow from the table and are recorded as *not worth
+doing on current evidence*: merging the two mutex pairs into one, and caching
+the interned event-name reference at the call site. Together they price at about
+1.5 %, against an A/A noise floor of 0.06-0.96 %. They are marginal rather than
+free, and neither should be attempted before the profile either confirms the
+model or overturns it.
