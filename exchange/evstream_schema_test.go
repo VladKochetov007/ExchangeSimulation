@@ -276,3 +276,43 @@ func TestSchemaRoundTripRandomised(t *testing.T) {
 		requireJSONPreserved(t, original, decoded)
 	}
 }
+
+func TestRenderPayloadJSONPreservesTypedAndOpaquePayloads(t *testing.T) {
+	cases := []evstream.InterningAppender{
+		fillEvidence{FeeAmount: 1, FeeAsset: "USD", FilledQty: 2, IsFull: true,
+			OrderID: 3, PositionSide: "BOTH", Price: 4, Qty: 5, RealizedPnL: -6,
+			RemainingQty: 7, Role: "maker", Side: "SELL", Symbol: "ABC-PERP", TradeID: 8},
+		bookDeltaEvidence{HiddenQty: 1, Price: 2, Side: "BUY", TotalQty: 3, VisibleQty: 4},
+		bookSnapshotEvidence{Asks: []PriceLevel{{Price: 1, VisibleQty: 2}}, Bids: nil},
+		VenueBalanceEvent{Timestamp: 1, Sequence: 2, TradeID: 3, Bucket: VenueFeeRevenue,
+			Asset: "USD", Reason: "taker_fee"},
+		etypes.BalanceChangeEvent{Timestamp: 1, ClientID: 2, Symbol: "ABC/USD", Reason: "fill",
+			Changes: []etypes.BalanceDelta{{Asset: "USD", Wallet: "spot", Delta: 3}}},
+		etypes.FeeRevenueEvent{Timestamp: 1, Symbol: "ABC/USD", TradeID: 2,
+			TakerFee: 3, MakerFee: 4, Asset: "USD"},
+		etypes.Trade{TradeID: 1, Price: 2, Qty: 3, Side: Buy, TakerOrderID: 4, MakerOrderID: 5},
+		instrumentLogEvent{Symbol: "ABC/USD", Payload: bookDeltaEvidence{
+			HiddenQty: 9, Price: 8, Side: "SELL", TotalQty: 7, VisibleQty: 6}},
+		instrumentLogEvent{Symbol: "ABC/USD", Payload: map[string]any{"a": 1, "b": "two"}},
+	}
+	for index, original := range cases {
+		frame, reader := roundTripFrame(t, original)
+		rendered, err := RenderPayloadJSONVersioned(frame.Header.SchemaID, frame.Header.SchemaVersion, frame.Payload, reader)
+		if err != nil {
+			t.Fatalf("case %d render: %v", index, err)
+		}
+		want, err := json.Marshal(original)
+		if err != nil {
+			t.Fatalf("case %d marshal: %v", index, err)
+		}
+		if !bytes.Equal(rendered, want) {
+			t.Fatalf("case %d rendered %s, want %s", index, rendered, want)
+		}
+	}
+}
+
+func TestRenderPayloadJSONRejectsUnknownSchemaVersion(t *testing.T) {
+	if _, err := RenderPayloadJSONVersioned(SchemaBookDelta, 99, nil, nil); err == nil {
+		t.Fatal("unknown schema version was rendered")
+	}
+}

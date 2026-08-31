@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"exchange_sim/evstream"
 	etypes "exchange_sim/types"
@@ -350,3 +351,134 @@ var (
 	_ evstream.InterningAppender = instrumentLogEvent{}
 	_ evstream.InterningAppender = OpaqueJSON{}
 )
+
+// RenderPayloadJSON reconstructs the canonical JSON payload represented by a
+// binary schema. The versioned form is used by the file-layout renderer; the
+// short form is a convenience for callers rendering the current schema set.
+func RenderPayloadJSON(schemaID uint16, payload []byte, resolve evstream.Resolver) ([]byte, error) {
+	return RenderPayloadJSONVersioned(schemaID, currentSchemaVersion(schemaID), payload, resolve)
+}
+
+// RenderPayloadJSONVersioned is deliberately fail-closed on unknown schema
+// versions. Rendering an empty or guessed payload would turn an evidence loss
+// into a plausible JSON record.
+func RenderPayloadJSONVersioned(schemaID, schemaVersion uint16, payload []byte, resolve evstream.Resolver) ([]byte, error) {
+	switch schemaID {
+	case evstream.SchemaOpaqueJSON:
+		if schemaVersion != 1 {
+			return nil, unsupportedSchemaVersion(schemaID, schemaVersion)
+		}
+		cursor := evstream.NewCursor(payload)
+		body := cursor.Bytes()
+		if err := finishCursor(cursor); err != nil {
+			return nil, err
+		}
+		return body, nil
+
+	case SchemaInstrumentLog:
+		if schemaVersion != 1 {
+			return nil, unsupportedSchemaVersion(schemaID, schemaVersion)
+		}
+		cursor := evstream.NewCursor(payload)
+		symbolRef := cursor.Uint32()
+		innerID := cursor.Uint16()
+		innerVersion := cursor.Uint16()
+		if err := cursor.Err(); err != nil {
+			return nil, err
+		}
+		symbol, ok := resolve.Lookup(symbolRef)
+		if !ok {
+			return nil, evstream.ErrCorrupt
+		}
+		inner, err := RenderPayloadJSONVersioned(innerID, innerVersion, payload[cursor.Offset():], resolve)
+		if err != nil {
+			return nil, err
+		}
+		out := append([]byte(`{"symbol":`), mustMarshalJSON(symbol)...)
+		out = append(out, `,"payload":`...)
+		out = append(out, inner...)
+		return append(out, '}'), nil
+
+	case SchemaFillEvidence:
+		if schemaVersion != 1 {
+			return nil, unsupportedSchemaVersion(schemaID, schemaVersion)
+		}
+		var value fillEvidence
+		if err := DecodeFillEvidence(payload, resolve, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	case SchemaBookDelta:
+		if schemaVersion != 1 {
+			return nil, unsupportedSchemaVersion(schemaID, schemaVersion)
+		}
+		var value bookDeltaEvidence
+		if err := DecodeBookDelta(payload, resolve, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	case SchemaBookSnapshot:
+		if schemaVersion != 1 {
+			return nil, unsupportedSchemaVersion(schemaID, schemaVersion)
+		}
+		var value bookSnapshotEvidence
+		if err := DecodeBookSnapshot(payload, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	case SchemaVenueBalance:
+		var value VenueBalanceEvent
+		if err := DecodeVenueBalanceVersioned(payload, resolve, schemaVersion, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	case etypes.SchemaBalanceChange:
+		if schemaVersion != 1 {
+			return nil, unsupportedSchemaVersion(schemaID, schemaVersion)
+		}
+		var value etypes.BalanceChangeEvent
+		if err := etypes.DecodeBalanceChange(payload, resolve, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	case etypes.SchemaFeeRevenue:
+		if schemaVersion != 1 {
+			return nil, unsupportedSchemaVersion(schemaID, schemaVersion)
+		}
+		var value etypes.FeeRevenueEvent
+		if err := etypes.DecodeFeeRevenue(payload, resolve, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	case etypes.SchemaTrade:
+		if schemaVersion != 1 {
+			return nil, unsupportedSchemaVersion(schemaID, schemaVersion)
+		}
+		var value etypes.Trade
+		if err := etypes.DecodeTrade(payload, &value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	default:
+		return nil, fmt.Errorf("%w: no renderer for schema %d", evstream.ErrCorrupt, schemaID)
+	}
+}
+
+func currentSchemaVersion(schemaID uint16) uint16 {
+	if schemaID == SchemaVenueBalance {
+		return 2
+	}
+	return 1
+}
+
+func unsupportedSchemaVersion(schemaID, version uint16) error {
+	return fmt.Errorf("%w: unsupported schema %d version %d", evstream.ErrCorrupt, schemaID, version)
+}
+
+func mustMarshalJSON(value any) []byte {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return []byte(`""`)
+	}
+	return encoded
+}

@@ -75,8 +75,8 @@ func TestBinarySinkSubstitutesUnencodablePayloadWithoutDroppingTail(t *testing.T
 	t.Setenv("EXSIM_BINARY_EVIDENCE", "file")
 	var output bytes.Buffer
 	sink := &binaryEvidence{writer: evstream.NewWriter(&output, evstream.WriterOptions{})}
-	sink.record(1, 1, "bad", "north", binaryUnencodablePayload{})
-	sink.record(2, 1, "good", "north", map[string]int{"value": 2})
+	sink.record(1, 1, "bad", "north", binaryUnencodablePayload{}, "general.jsonl")
+	sink.record(2, 1, "good", "north", map[string]int{"value": 2}, "general.jsonl")
 	if err := sink.finish(); err != nil {
 		t.Fatalf("finish: %v", err)
 	}

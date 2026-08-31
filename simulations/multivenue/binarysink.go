@@ -52,6 +52,7 @@ func newBinaryEvidence(out interface{ Write([]byte) (int, error) }) *binaryEvide
 // every payload is prefixed with an interned name reference — four bytes,
 // because the set of event names is tiny and closed.
 type sinkEnvelope struct {
+	routeRef uint32
 	eventRef uint32
 	inner    evstream.InterningAppender
 }
@@ -60,6 +61,7 @@ func (e sinkEnvelope) SchemaID() uint16      { return e.inner.SchemaID() }
 func (e sinkEnvelope) SchemaVersion() uint16 { return e.inner.SchemaVersion() }
 
 func (e sinkEnvelope) AppendPayloadInterning(dst []byte, in evstream.Interner) ([]byte, error) {
+	dst = evstream.AppendUint32(dst, e.routeRef)
 	dst = evstream.AppendUint32(dst, e.eventRef)
 	return e.inner.AppendPayloadInterning(dst, in)
 }
@@ -70,7 +72,7 @@ func (e sinkEnvelope) AppendPayloadInterning(dst []byte, in evstream.Interner) (
 // refused, so the stream is complete from the first run and coverage can be
 // raised one family at a time without the sink ever being partly JSON and
 // partly binary at the file level.
-func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venueID string, payload any) error {
+func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venueID string, payload any, routes ...string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.err != nil {
@@ -89,12 +91,19 @@ func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venue
 			return err
 		}
 	}
+	routeRef := uint32(0)
+	if len(routes) > 0 && routes[0] != "" {
+		if routeRef, err = b.writer.Intern(routes[0]); err != nil {
+			b.err = err
+			return err
+		}
+	}
 
 	inner, typed := payload.(evstream.InterningAppender)
 	if !typed {
 		inner = eexchange.OpaqueJSON{Value: payload}
 	}
-	frame := sinkEnvelope{eventRef: eventRef, inner: inner}
+	frame := sinkEnvelope{routeRef: routeRef, eventRef: eventRef, inner: inner}
 	if err := b.writer.AppendInterning(simTime, clientID, venueRef, frame); err != nil {
 		// Preserve the event slot when a payload cannot be encoded. The
 		// substitute is itself canonical and keeps sequence continuity; the

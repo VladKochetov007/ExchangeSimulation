@@ -1949,6 +1949,7 @@ type venueLogEvent struct {
 
 type venueLogger struct {
 	venueID string
+	route   string
 	inner   etypes.Logger
 	// sink observes every event for the divergence locator. It runs whatever
 	// the log mode is, because a run with logging off still has to be
@@ -1957,7 +1958,7 @@ type venueLogger struct {
 }
 
 func (l venueLogger) LogEvent(simTime int64, clientID uint64, eventName string, event any) {
-	l.sink.observe(simTime, clientID, eventName, l.venueID, event)
+	l.sink.observe(simTime, clientID, eventName, l.venueID, event, l.route)
 	if l.inner == nil {
 		return
 	}
@@ -2313,14 +2314,14 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	// point of running with logs off.
 	newLogger := func(name string) (venueLogger, error) {
 		if s.Config.LogMode != "full" {
-			return venueLogger{venueID: id, sink: s.checkpoints}, nil
+			return venueLogger{venueID: id, route: filepath.ToSlash(name), sink: s.checkpoints}, nil
 		}
 		logger, err := feesim.NewJSONLinesLogger(filepath.Join(logDir, name))
 		if err != nil {
 			return venueLogger{}, err
 		}
 		s.loggers = append(s.loggers, logger)
-		return venueLogger{venueID: id, inner: logger, sink: s.checkpoints}, nil
+		return venueLogger{venueID: id, route: filepath.ToSlash(name), inner: logger, sink: s.checkpoints}, nil
 	}
 	var lifecycleLog etypes.Logger
 	estimatedClients := 5 + s.Config.NoiseTraderCount + s.Config.OptionFlowCount + len(s.Config.CrossVenueArbTiers)

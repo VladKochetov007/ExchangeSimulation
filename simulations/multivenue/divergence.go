@@ -79,7 +79,7 @@ type checkpointRecord struct {
 	Unencodable         int64  `json:"unencodable_payloads,omitempty"`
 }
 
-const binaryRepresentation = "evstream_v1"
+const binaryRepresentation = "evstream_v2"
 
 // traceRecord is one line of the narrow trace. Sequence is the sink's own
 // counter, which is the order events actually reached the log and therefore
@@ -147,7 +147,7 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 
 // observe folds one event into the rolling digest and writes a checkpoint
 // whenever simulated time crosses the next boundary.
-func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venueID string, payload any) {
+func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venueID string, payload any, routes ...string) {
 	if s == nil {
 		return
 	}
@@ -155,7 +155,7 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	// replaces the marshal and the per-event digest entirely, so when it is
 	// selected the JSON encoder is never reached.
 	if s.binary != nil {
-		recordErr := s.binary.record(simTime, clientID, eventName, venueID, payload)
+		recordErr := s.binary.record(simTime, clientID, eventName, venueID, payload, routes...)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if recordErr != nil {
