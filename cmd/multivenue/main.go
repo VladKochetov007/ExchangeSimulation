@@ -145,6 +145,7 @@ func run() (err error) {
 	seed := flag.Int64("seed", 0, "override simulation seed (0 keeps config/default)")
 	hedgeMode := flag.String("dealer-hedge", "", "override dealer hedge mode: on or off")
 	logMode := flag.String("log-mode", "", "override raw log mode: full or none")
+	evidenceFormat := flag.String("evidence-format", "", "override evidence format: jsonl or evstream_v3")
 	checkpointInterval := flag.Int("checkpoint-interval-seconds", -1, "override ordered execution checkpoint interval; negative keeps config")
 	cpuProfile := flag.String("cpuprofile", "", "write CPU profile for Sim.Run only")
 	allocProfile := flag.String("allocprofile", "", "write sampled allocation profile after Sim.Run")
@@ -176,6 +177,9 @@ func run() (err error) {
 	}
 	if *logMode != "" {
 		cfg.LogMode = *logMode
+	}
+	if *evidenceFormat != "" {
+		cfg.EvidenceFormat = *evidenceFormat
 	}
 	if *checkpointInterval >= 0 {
 		cfg.CheckpointIntervalSeconds = *checkpointInterval
