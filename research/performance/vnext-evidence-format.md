@@ -662,15 +662,35 @@ be rebuilt from the binary alone and come out byte-identical to what the
 simulator would have written — 1.57 million records, every field, every
 escaping decision, every numeric formatting choice.
 
+### The stronger form of the test, and a caveat on comparing digests
+
+An independent grader ran a better version of this check: instead of comparing
+only the rendered subset against its counterpart, it sorted the **union** of
+(rendered + the 28,193 leftover JSONL) against the whole JSON-mode JSONL. All
+1,597,303 records, bit-identical. That is a superset of the original claim and
+it proves something the original did not: **replace mode does not perturb the
+trajectory**, since both arms produce the same complete record multiset.
+
+The union form is now the reproduction below, and it was re-run after the
+block-granularity digest change: still identical, 1,597,303 on both sides.
+
+**Do not compare sorted-file digests across machines or agents.** `sort` is
+locale-dependent, so two correct runs can produce different orderings of the
+same multiset and therefore different file hashes. The grader's sorted union
+hashed to `32054054...` and mine to `d26b831a...`; the content comparison inside
+one consistent locale is what carries the result. Pin `LC_ALL=C` if a digest is
+wanted as the artifact.
+
 ### Reproduction
 
 ```bash
 EXSIM_BINARY_EVIDENCE=replace ./multivenue -config dev-607.json -duration 20m -seed 607 -logdir bin/
 env -u EXSIM_BINARY_EVIDENCE      ./multivenue -config dev-607.json -duration 20m -seed 607 -logdir json/
-go run ./cmd/evsrender -dir bin/ | sort > rendered.sorted
-# drop the LogEvidenceOnly families, which are never hashed and never binary
-cat json/venues/*/*.jsonl json/venues/*/*/*.jsonl | grep -vE '"event":"(maker_quote_size_decision|noise_flow_phase_decision|liability_hedger_decision|liability_hedger_fill|option_liability_user_decision|maker_inventory_rebalance_decision|maker_inventory_rebalance_fill|option_liability_user_fill)"' | sort > original.sorted
-cmp rendered.sorted original.sorted
+# the union form: no family filter needed, because nothing is excluded
+cat <(go run ./cmd/evsrender -dir bin/) bin/venues/*/*.jsonl bin/venues/*/*/*.jsonl |
+  LC_ALL=C sort > union.sorted
+cat json/venues/*/*.jsonl json/venues/*/*/*.jsonl | LC_ALL=C sort > original.sorted
+cmp union.sorted original.sorted
 ```
 
 ### What is still not proven
