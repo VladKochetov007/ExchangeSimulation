@@ -105,6 +105,20 @@ func TestWriterRejectsAppendAfterClose(t *testing.T) {
 	}
 }
 
+func TestWriterRejectsClientIDThatCannotBeEncoded(t *testing.T) {
+	var output bytes.Buffer
+	writer := evstream.NewWriter(&output, evstream.WriterOptions{})
+	if err := writer.Append(1, evstream.MaxEncodedClientID, 0, corruptionProbe{}); err != nil {
+		t.Fatalf("maximum encodable client ID rejected: %v", err)
+	}
+	if err := writer.Append(2, evstream.MaxEncodedClientID+1, 0, corruptionProbe{}); !errors.Is(err, evstream.ErrClientIDOverflow) {
+		t.Fatalf("overflow client ID error = %v, want ErrClientIDOverflow", err)
+	}
+	if writer.Count() != 1 {
+		t.Fatalf("overflow append advanced frame count to %d, want 1", writer.Count())
+	}
+}
+
 func TestReaderRejectsBytesAfterCompletionTrailer(t *testing.T) {
 	complete := writeCompleteProbeStream(t, 1)
 	complete = append(complete, 0x01)

@@ -93,6 +93,11 @@ const (
 
 	// FirstUserSchema is the lowest id available to callers.
 	FirstUserSchema uint16 = 16
+
+	// MaxEncodedClientID is the largest account identifier representable by
+	// the fixed 32-byte frame header. Writers reject larger IDs rather than
+	// silently changing the identity recovered by a reader.
+	MaxEncodedClientID uint64 = uint64(^uint32(0))
 )
 
 // Codec identifies the block compression applied to stored bytes. It is
@@ -134,6 +139,9 @@ var (
 	// ErrSequence means event_seq was not gap-free and monotonic, which would
 	// make global ordering unrecoverable.
 	ErrSequence = errors.New("evstream: non-monotonic event sequence")
+	// ErrClientIDOverflow means the caller supplied an account ID that cannot
+	// be represented without loss in the canonical frame header.
+	ErrClientIDOverflow = errors.New("evstream: client ID exceeds encoded range")
 )
 
 // FrameHeader is the fixed prefix every frame carries.

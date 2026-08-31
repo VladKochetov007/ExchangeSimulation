@@ -174,6 +174,9 @@ func (w *Writer) AppendInterning(simTS int64, clientID uint64, venueRef uint32,
 	if w.err != nil {
 		return w.err
 	}
+	if clientID > MaxEncodedClientID {
+		return ErrClientIDOverflow
+	}
 	if err := w.ensureHeader(); err != nil {
 		return err
 	}
@@ -199,6 +202,9 @@ func (w *Writer) appendFrame(header FrameHeader, raw []byte, appender ...Payload
 	}
 	if w.err != nil {
 		return w.err
+	}
+	if header.ClientID > MaxEncodedClientID {
+		return ErrClientIDOverflow
 	}
 	if err := w.ensureHeader(); err != nil {
 		return err
