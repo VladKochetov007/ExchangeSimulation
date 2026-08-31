@@ -1896,5 +1896,13 @@ retained as interesting. That covers `MinInt64`/`MaxInt64`/`MaxUint64` edges,
 unicode escaping, and payloads with no encoder — all of which the fast path
 declines rather than guesses at.
 
-The corpus is committed, so the cases the fuzzer found interesting become
-regression tests rather than being rediscovered.
+**Correction to an earlier claim in this file's history:** the commit that added
+this said the interesting corpus is committed and becomes a regression test. It
+is not. Go persists only *failing* inputs to `testdata/`, and there were none;
+the 130 interesting inputs live in the build cache and vanish with it. The
+fuzzer must therefore be re-run to have value — it is not a regression test that
+runs with `go test`.
+
+What does run every time is the seeded corpus in `f.Add`, plus the fixed-corpus
+differential test beside it. Those cover the cases worth pinning: the integer
+extremes, nil versus empty slices, escaped symbols and an unencodable payload.
