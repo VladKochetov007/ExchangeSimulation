@@ -312,6 +312,12 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	return reusable
 }
 
+// replacesRawLog reports whether this sink's binary stream stands in for the
+// raw JSONL. Nil and JSON-path sinks never do.
+func (s *checkpointSink) replacesRawLog() bool {
+	return s != nil && s.binary != nil && binaryEvidenceReplacesRawLog()
+}
+
 func (s *checkpointSink) writeCheckpointLocked(at int64) {
 	if s.checkpoints == nil {
 		return

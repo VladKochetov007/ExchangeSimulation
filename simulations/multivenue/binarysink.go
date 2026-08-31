@@ -45,6 +45,22 @@ func binaryEvidenceEnabled() bool { return os.Getenv("EXSIM_BINARY_EVIDENCE") !=
 // rather than written, which isolates encode-and-hash cost from storage cost.
 func binaryEvidenceDiscards() bool { return os.Getenv("EXSIM_BINARY_EVIDENCE") == "discard" }
 
+// binaryEvidenceReplacesRawLog reports whether the binary stream stands in for
+// the raw JSONL rather than accompanying it.
+//
+// Keeping both is right while the format is under review, because the JSONL is
+// what the binary stream is differentially validated against. It is wrong as a
+// shipped configuration: the sink returns no reusable bytes, so the venue
+// logger marshals every payload a second time and the run writes two complete
+// copies of its own evidence. Measured on dev-607 under log_mode full, that
+// made the binary path 8.18 % SLOWER than JSON and 29 % larger on disk — the
+// speedup measured with logging off does not survive logging on.
+//
+// The choice is explicit rather than inferred because it changes which
+// artefacts a run produces, and an analyzer expecting venue JSONL would
+// otherwise find it silently absent.
+func binaryEvidenceReplacesRawLog() bool { return os.Getenv("EXSIM_BINARY_EVIDENCE") == "replace" }
+
 // newBinaryEvidence starts a binary sink writing to out.
 //
 // The codec is a storage decision and nothing else: the execution hash covers

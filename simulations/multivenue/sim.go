@@ -1965,6 +1965,13 @@ func (l venueLogger) LogEvent(simTime int64, clientID uint64, eventName string, 
 	if l.inner == nil {
 		return
 	}
+	// When the binary stream stands in for the raw log, writing the JSONL as
+	// well would encode every payload twice and store the run's evidence
+	// twice. The binary stream carries the same ordered events, and
+	// RenderPayloadJSON reconstructs the JSON on demand.
+	if l.sink.replacesRawLog() {
+		return
+	}
 	if encoded != nil && l.dataPrefix != nil {
 		if assembler, ok := l.inner.(encodedEventLogger); ok {
 			assembler.LogEncodedEvent(simTime, clientID, eventName, l.dataPrefix, encoded, venueDataSuffix)

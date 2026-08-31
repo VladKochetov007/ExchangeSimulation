@@ -1615,3 +1615,57 @@ Losslessness held at field level under its own reflection test, including
 invalid UTF-8, NUL, emoji, nil-vs-empty and `omitempty`. It also noted the
 binary path *fixes* a JSON-path weakness: the old digest hashed
 `eventName+venueID` unseparated, so `("ab","c")` and `("a","bc")` collide.
+
+## The result that matters: logging on
+
+Every figure in this campaign until now came from `log_mode: none`. That was
+the right isolation for measuring encode-and-hash cost, and it is the wrong
+regime to conclude from: **six of the seven registered configs use
+`log_mode: full`**. The one I optimised and measured is the one barely used.
+
+The independent reproducer predicted the speedup would not carry, because with
+the binary sink on and raw logging on, `observe` returns nil and the venue
+logger marshals the payload a second time for the JSONL. Measured on dev-607,
+seed 607, 20 simulated minutes, both arms writing real evidence:
+
+| arm | median | disk |
+| --- | ---: | ---: |
+| JSON | 9.99-10.04 s | 594,722,408 |
+| binary, dual-write | 10.83 s | 769,457,467 |
+
+**+8.18 % against an A/A of +0.49 %, and 29 % more bytes.** Not "the speedup
+fails to carry" — the binary path is *slower* than the thing it replaces,
+because the run encodes its evidence twice and stores it twice. The prediction
+was right and the reality was worse than the prediction.
+
+### The fix is the design that was always intended
+
+`EXSIM_BINARY_EVIDENCE=replace` lets the binary stream stand in for the JSONL
+rather than accompany it. Keeping both is right while the format is under
+review, because the JSONL is what the binary stream is differentially validated
+against; it was never the shipped configuration. The mode is explicit rather
+than inferred, because it changes which artefacts a run produces and an
+analyzer expecting venue JSONL should not find it silently absent.
+
+| arm | median | disk |
+| --- | ---: | ---: |
+| JSON | 10.21-10.30 s | 594,722,408 |
+| binary, replace | **8.21 s** | **272,576,389** |
+| binary, replace + zstd | 8.63 s | **124,174,797** |
+
+**-19.95 % against an A/A of +0.96 %**, and disk falls 2.18x, or **4.79x** with
+zstd for a further 2.4 % wall.
+
+This is a larger gain than the -15.84 % measured with logging off, and for a
+reason worth stating: with logging off the binary format only replaces the
+encode; with logging on it replaces the encode *and* the write. The headline
+number and the useful number were never the same number, and the useful one is
+bigger.
+
+### What this corrects
+
+The `-15.84 %` figure stands for what it measured and is now the *secondary*
+result. The primary result is `-19.95 %` under full logging, which is the
+regime the research cells actually run in. Any earlier statement that implied
+the campaign's speedup applied to registered runs was measuring the wrong
+configuration.
