@@ -2,7 +2,7 @@
 
 Date: 2026-08-31  
 Scientific branch: `autoresearch/ffa-ecology-gen0`  
-Code/evidence source revision at checkpoint: `ae739027ee8a6d4882948c415c3b4956ca9b8ef9`
+Code/evidence source revision at checkpoint: `750ac9ccb1aa5749ba362bfdf5a57e5f0ffb76a6`
 Pre-correction review target: `779564d7ecd1b00b486c9f18b12c19a16ce496e2`
 
 ## Scope
@@ -66,7 +66,8 @@ attestation name their distinct domains and ordering semantics.
 
 ## Differential and neutrality evidence
 
-The following passed on the clean tree after the correction at `ae73902`:
+The following passed on the clean tree after the correction at `ae73902` and
+launcher hardening at `750ac9`:
 
 - typed evstream round trips, corruption/fail-closed mutations, and the
   unrepresentable client-ID regression;
@@ -110,9 +111,18 @@ constructs a valid binary attestation at a test path and verifies that it is
 accepted while the old JSON-floor symbols are absent from the launcher. The
 correction did not change simulation economics, ordering, or evidence format.
 
-The clean full suite was rerun after the correction and passed. A new fresh
-independent review of the corrected exact tree remains required; the rejection
-of `779564d` is retained and is not silently upgraded.
+The clean full suite was rerun after the correction and after launcher
+hardening, and passed. The rejection of `779564d` is retained and is not
+silently upgraded.
+
+A second fresh Sol-xhigh review examined exact revision `a0cb8e3` and returned
+`ACCEPT WITH NARROWER CLAIM`: acceptance of the code, tests, and evidence
+contract only, not of 24-hour scientific behavior or capacity sufficiency. The
+reviewer confirmed the stale JSON floor was gone and required the registered
+launcher to reject ambient `EXSIM_BINARY_EVIDENCE`; `750ac9` implements that
+fail-closed guard. The final guarded tree still requires one review after this
+small launcher change. Controlled internal renderer use was accepted; public
+untrusted rendering hardening remains outside this campaign gate.
 
 ## Performance feed status
 
