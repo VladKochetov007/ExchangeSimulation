@@ -2,8 +2,8 @@
 
 Date: 2026-08-31  
 Scientific branch: `autoresearch/ffa-ecology-gen0`  
-Source revision at checkpoint: `f170d19`  
-Parent implementation revision: `66f35b5`
+Code/evidence source revision at checkpoint: `ae739027ee8a6d4882948c415c3b4956ca9b8ef9`  
+Pre-correction review target: `779564d7ecd1b00b486c9f18b12c19a16ce496e2`
 
 ## Scope
 
@@ -66,7 +66,7 @@ attestation name their distinct domains and ordering semantics.
 
 ## Differential and neutrality evidence
 
-The following passed on the clean tree at `f170d19`:
+The following passed on the clean tree after the correction at `ae73902`:
 
 - typed evstream round trips, corruption/fail-closed mutations, and the
   unrepresentable client-ID regression;
@@ -94,6 +94,25 @@ R2 contract, archive, and config checks         PASS
 The full test gate took approximately 194 seconds in the multivenue package;
 resource monitoring observed no OOM or swap activity. The current host had
 approximately 27 GiB available RAM and 33 GiB free disk after the gate.
+
+## Independent review and correction
+
+The first fresh Sol-xhigh review examined exact revision `779564d` and
+returned `REJECT`. Its blocking finding was confirmed locally: the registered
+launcher still applied the obsolete JSON-derived free-space floor before it
+consulted the binary capacity attestation. That contradicted this successor
+contract and could reject a binary-authorized launch for a historical storage
+reason.
+
+Commit `ae73902` removed that stale launcher floor, made the binary capacity
+attestation the sole launch-capacity authority, and added a contract test that
+constructs a valid binary attestation at a test path and verifies that it is
+accepted while the old JSON-floor symbols are absent from the launcher. The
+correction did not change simulation economics, ordering, or evidence format.
+
+The clean full suite was rerun after the correction and passed. A new fresh
+independent review of the corrected exact tree remains required; the rejection
+of `779564d` is retained and is not silently upgraded.
 
 ## Performance feed status
 
