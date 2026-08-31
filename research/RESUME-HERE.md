@@ -909,3 +909,18 @@ finish and their contracts pass.
   currently has approximately 28 GiB. Do not lower the floor or launch a
   partial run. No R2 evidence, parity control, archive/prune operation, or
   holdout `619/631/641` has been consumed.
+
+### 2026-08-31 — current stop after safe cache cleanup
+
+- The regenerable Go build/test cache was cleaned without touching research
+  evidence, recovering approximately 4.85 GiB. Free space is now about 32
+  GiB, still below the approximately 51 GiB R2 launch floor. The incomplete
+  derivative-proxy tree and all retained historical evidence remain preserved.
+- The exact corrected code is covered by clean full tests, vet, and targeted
+  race checks. Fresh Sol-xhigh review of the post-correction HEAD remains
+  mandatory, but the reviewer service currently refuses new threads at its
+  limit; prior reviews of superseded commits are not acceptance.
+- Do not lower the capacity floor, compress/delete uncontracted evidence, build
+  promoted binaries, or launch dev-607 while either the reviewer or capacity
+  gate is unresolved. Resume with fresh exact-tree review, then pinned build,
+  only after both gates clear.

@@ -726,3 +726,17 @@ is preserved. The next valid progression is clean gate -> independent review
 -> provenance-pinned build -> dev-607 -> extraction/review -> remaining
 registered development cells and controls; holdouts remain behind explicit
 freeze authorization.
+
+## Append-only operational update: reviewer and capacity stop (2026-08-31)
+
+After the clean gates passed, safe removal of the regenerable Go build/test
+cache recovered approximately 4.85 GiB; current free space is approximately
+32 GiB. This remains below the R2 runner’s evidence-based approximately 51 GiB
+floor. No retained raw evidence, incomplete derivative-proxy tree, historical
+result, or holdout was deleted or altered.
+
+The exact post-correction candidate still needs a fresh independent Sol-xhigh
+review. The review service currently reports its agent-thread limit even after
+all prior review threads completed, so no prior superseded verdict is being
+used as acceptance. Binary rebuild and every R2 cell remain gated on both
+fresh review and safe capacity.
