@@ -176,6 +176,48 @@ func TestBinaryEvidenceProductionPathRunsAndRenders(t *testing.T) {
 	}
 }
 
+func TestBinaryEvidenceExecutionStreamIsLogModeNeutral(t *testing.T) {
+	root := t.TempDir()
+	for _, logMode := range []string{"full", "none"} {
+		dir := filepath.Join(root, logMode)
+		sim, err := NewSim(3*time.Second, Config{
+			LogDir: dir, LogMode: logMode, EvidenceFormat: binaryRepresentation,
+			CheckpointIntervalSeconds: 1, Seed: 101,
+		})
+		if err != nil {
+			t.Fatalf("create %s simulation: %v", logMode, err)
+		}
+		if err := sim.Run(context.Background()); err != nil {
+			t.Fatalf("run %s simulation: %v", logMode, err)
+		}
+		if err := sim.Close(); err != nil {
+			t.Fatalf("close %s simulation: %v", logMode, err)
+		}
+	}
+	fullStream, err := os.ReadFile(filepath.Join(root, "full", "events.evs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	noneStream, err := os.ReadFile(filepath.Join(root, "none", "events.evs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(fullStream, noneStream) {
+		t.Fatal("binary execution stream changed when JSON sidecars were disabled")
+	}
+	fullAttestation, err := os.ReadFile(filepath.Join(root, "full", "binary-evidence-attestation.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	noneAttestation, err := os.ReadFile(filepath.Join(root, "none", "binary-evidence-attestation.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(fullAttestation, noneAttestation) {
+		t.Fatal("binary execution attestation changed when JSON sidecars were disabled")
+	}
+}
+
 func TestBinaryEvidenceDifferentiallyPreservesScientificJSONPayloads(t *testing.T) {
 	inputDir := filepath.Join(t.TempDir(), "binary")
 	if err := os.MkdirAll(filepath.Join(inputDir, "venues", "north"), 0755); err != nil {
