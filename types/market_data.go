@@ -3,7 +3,17 @@ package types
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"sync"
 )
+
+// fingerprintPool reuses the render buffer. The fingerprint is computed once
+// per delivery per participant, so the buffer would otherwise be one of the
+// most frequently allocated objects in the simulator.
+var fingerprintPool = sync.Pool{New: func() any { return make([]byte, 0, 512) }}
+
+func fingerprintScratch() []byte { return fingerprintPool.Get().([]byte)[:0] }
+
+func releaseFingerprintScratch(buf []byte) { fingerprintPool.Put(buf) }
 
 type MarketDataMsg struct {
 	Type      MDType
@@ -20,6 +30,18 @@ func MarketDataFingerprint(msg *MarketDataMsg) ([16]byte, error) {
 	if msg == nil {
 		return [16]byte{}, nil
 	}
+	// The fast path renders the identical bytes without reflection, and
+	// declines whenever anything would make that risky. Profiling put this
+	// function at 3.16 % of simulator CPU, reached entirely from market-data
+	// receipt scheduling, which runs once per delivery per participant.
+	if scratch, ok := appendFingerprintJSON(fingerprintScratch(), msg); ok {
+		digest := sha256.Sum256(scratch)
+		var fingerprint [16]byte
+		copy(fingerprint[:], digest[:])
+		releaseFingerprintScratch(scratch)
+		return fingerprint, nil
+	}
+
 	raw, err := json.Marshal(struct {
 		Type      MDType `json:"type"`
 		Symbol    string `json:"symbol"`
