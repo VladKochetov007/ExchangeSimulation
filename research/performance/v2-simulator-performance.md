@@ -1764,3 +1764,47 @@ proposal to tune the collector on this workload is answered here.
 The execution hash is identical at every setting, which is worth recording on its
 own: the collector is not part of trajectory identity, unlike the
 microarchitecture level.
+
+## -5.00 %: the market-data fingerprint, found by the new profile
+
+The replace-mode profile put `simulation.(*DelayedGateway).scheduleMarketDataReceipt`
+at **8.21 % of CPU**, and `types.MarketDataFingerprint` — reached 100 % from it —
+at **3.16 %**, all of it inside `encoding/json.Marshal`.
+
+The function marshals a five-field envelope with an `any` payload to JSON purely
+to feed SHA-256, and keeps 16 bytes of the digest. It runs **once per market-data
+delivery per participant**, so the venue fan-out multiplies it. It is the same
+marshal-to-hash pattern the binary evidence format removed, in a subsystem that
+was never in this campaign's scope.
+
+**The fix is byte-identity, not a new format.** A payload may implement
+`CanonicalJSONAppender` and render exactly the bytes `encoding/json` would; the
+envelope is assembled by hand around it; and the digest is taken over the same
+bytes as before. Nothing observable changes, so no re-baselining and no
+scientific decision is involved.
+
+The fast path **declines** rather than guesses: a payload with no canonical
+encoder, or a symbol containing anything Go would escape (`<`, `>`, `&`, quotes,
+backslashes, control bytes, non-ASCII) takes the reflection path. Refusing is
+always safe; producing subtly different bytes silently changes an identity that
+feeds delivery evidence and decision attestations.
+
+| | |
+| --- | ---: |
+| wall clock | **-5.00 %** |
+| A/A control, same session | -0.25 % |
+| execution stream hash | **unchanged**, `e1ad48f5f35e0f12` |
+| `market-data-receipts-v2.bin` | byte-identical |
+| `market-data-decisions-v2.bin` | byte-identical |
+| `market-data-evidence-v2.json` | byte-identical |
+| `evidence-artifact-hash.json` | byte-identical |
+
+Verified by differential test over every payload type with `MinInt64`/`MaxInt64`
+/`MaxUint64` edges, nil versus empty slices, and symbols requiring escaping;
+plus the fallback path proven correct for an unknown payload type, which is what
+lets a user add a market-data type without touching this package.
+
+**This is the largest single win in the campaign after the format change itself,
+and it is in core exchange logic rather than in evidence writing.** It exists
+because the profile was retaken after the bottleneck moved. Every earlier
+profile was dominated by evidence serialization, which hid it.
