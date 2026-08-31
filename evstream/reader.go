@@ -1,6 +1,7 @@
 package evstream
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -34,6 +35,10 @@ type ReaderOptions struct {
 	// recognise rather than failing. Frames are length-prefixed precisely so
 	// this is possible; it is what lets an old reader survive a new writer.
 	SkipUnknownSchemas bool
+	// AllowUnterminated permits reading a stream that is still being written.
+	// Finished evidence must use the default false value so a missing tail is
+	// reported rather than interpreted as a shorter successful run.
+	AllowUnterminated bool
 }
 
 // Reader walks a stream, verifying structure as it goes.
@@ -48,26 +53,29 @@ type Reader struct {
 	codec        Codec
 	epoch        uint32
 
-	block       []byte
-	stored      []byte
-	blockHdr    [BlockHeaderSize]byte
-	dict        *Dictionary
-	lastSeq     uint64
-	verify      bool
-	rolling     [sha256.Size]byte
-	hasher      hash.Hash
-	frames      uint64
-	blockFrames uint32
-	streamHdr   bool
+	block             []byte
+	stored            []byte
+	blockHdr          [BlockHeaderSize]byte
+	dict              *Dictionary
+	lastSeq           uint64
+	verify            bool
+	rolling           [sha256.Size]byte
+	hasher            hash.Hash
+	frames            uint64
+	blockFrames       uint32
+	streamHdr         bool
+	terminated        bool
+	allowUnterminated bool
 }
 
 // NewReader validates the stream header and prepares to read blocks.
 func NewReader(in io.Reader, opts ReaderOptions) (*Reader, error) {
 	r := &Reader{
-		in:           in,
-		decompressor: opts.Decompressor,
-		dict:         NewDictionary(),
-		verify:       opts.VerifyHash,
+		in:                in,
+		decompressor:      opts.Decompressor,
+		dict:              NewDictionary(),
+		verify:            opts.VerifyHash,
+		allowUnterminated: opts.AllowUnterminated,
 	}
 	if opts.VerifyHash {
 		r.hasher = sha256.New()
@@ -121,6 +129,9 @@ func (r *Reader) ExecutionHash() [sha256.Size]byte {
 	return out
 }
 
+// Terminated reports whether the reader observed a valid completion trailer.
+func (r *Reader) Terminated() bool { return r.terminated }
+
 // Count returns the number of frames read, including dictionary frames.
 func (r *Reader) Count() uint64 { return r.frames }
 
@@ -135,6 +146,9 @@ func (r *Reader) Range(visit func(Frame) error) error {
 			return err
 		}
 		if !more {
+			if !r.terminated && !r.allowUnterminated {
+				return fmt.Errorf("%w: stream ends without a completion trailer", ErrShortBuffer)
+			}
 			return nil
 		}
 		if err := r.rangeBlock(visit); err != nil {
@@ -154,7 +168,10 @@ func (r *Reader) nextBlock() (bool, error) {
 		}
 		return false, err
 	}
-	if binary.LittleEndian.Uint32(r.blockHdr[0:4]) != BlockMagic {
+	if magic := binary.LittleEndian.Uint32(r.blockHdr[0:4]); magic != BlockMagic {
+		if magic == TrailerMagic {
+			return false, r.readTrailer()
+		}
 		return false, fmt.Errorf("%w: block magic", ErrCorrupt)
 	}
 	uncompressedLen := int(binary.LittleEndian.Uint32(r.blockHdr[4:8]))
@@ -194,6 +211,26 @@ func (r *Reader) nextBlock() (bool, error) {
 	}
 	r.blockFrames = wantFrames
 	return true, nil
+}
+
+func (r *Reader) readTrailer() error {
+	trailer := make([]byte, TrailerSize)
+	copy(trailer, r.blockHdr[:])
+	if _, err := io.ReadFull(r.in, trailer[len(r.blockHdr):]); err != nil {
+		return ErrShortBuffer
+	}
+	declaredFrames := binary.LittleEndian.Uint64(trailer[4:12])
+	if declaredFrames != r.frames {
+		return fmt.Errorf("%w: trailer declares %d frames, read %d", ErrCorrupt, declaredFrames, r.frames)
+	}
+	if r.verify {
+		actual := r.ExecutionHash()
+		if !bytes.Equal(trailer[12:], actual[:]) {
+			return fmt.Errorf("%w: trailer digest does not match frames", ErrCorrupt)
+		}
+	}
+	r.terminated = true
+	return nil
 }
 
 // rangeBlock walks the frames of the decoded block.

@@ -53,6 +53,7 @@ type checkpointSink struct {
 
 	rolling          [32]byte
 	events           int64
+	unencodable      int64
 	nextBound        int64
 	lastSimTime      int64
 	lastCheckpointAt int64
@@ -74,7 +75,11 @@ type checkpointRecord struct {
 	EventCount          int64  `json:"event_count"`
 	ExecutionStreamHash string `json:"execution_stream_hash"`
 	Rolling             string `json:"rolling_hash"`
+	Representation      string `json:"representation,omitempty"`
+	Unencodable         int64  `json:"unencodable_payloads,omitempty"`
 }
+
+const binaryRepresentation = "evstream_v1"
 
 // traceRecord is one line of the narrow trace. Sequence is the sink's own
 // counter, which is the order events actually reached the log and therefore
@@ -93,7 +98,7 @@ type traceRecord struct {
 // newCheckpointSink opens the sink's outputs inside the run directory. A zero
 // interval disables checkpoints; an empty window disables the trace.
 func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64) (*checkpointSink, error) {
-	if intervalSeconds <= 0 && traceFrom >= traceTo {
+	if intervalSeconds <= 0 && traceFrom >= traceTo && !binaryEvidenceEnabled() {
 		return nil, nil
 	}
 	sink := &checkpointSink{
@@ -110,6 +115,9 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 		sink.checkpoints = file
 	}
 	if traceFrom < traceTo {
+		if binaryEvidenceEnabled() {
+			return nil, fmt.Errorf("multivenue: execution trace is unavailable with binary evidence")
+		}
 		file, err := os.Create(filepath.Join(dir, "trace.jsonl"))
 		if err != nil {
 			return nil, fmt.Errorf("multivenue: trace file: %w", err)
@@ -147,14 +155,31 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	// replaces the marshal and the per-event digest entirely, so when it is
 	// selected the JSON encoder is never reached.
 	if s.binary != nil {
-		s.binary.record(simTime, clientID, eventName, venueID, payload)
+		recordErr := s.binary.record(simTime, clientID, eventName, venueID, payload)
 		s.mu.Lock()
+		defer s.mu.Unlock()
+		if recordErr != nil {
+			s.failLocked(fmt.Errorf("record binary evidence: %w", recordErr))
+			return
+		}
+		if s.closed {
+			return
+		}
 		s.lastSimTime = simTime
-		s.mu.Unlock()
+		s.events++
+		if s.firstEvent && s.intervalNano > 0 {
+			s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
+			s.firstEvent = false
+		}
+		if s.intervalNano > 0 && simTime >= s.nextBound {
+			s.writeCheckpointLocked(s.nextBound)
+			s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
+		}
 		return
 	}
 
 	encoded, err := json.Marshal(payload)
+	unencodable := err != nil
 	if err != nil {
 		encoded = []byte(`"unencodable"`)
 	}
@@ -169,6 +194,9 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 		return
 	}
 	s.lastSimTime = simTime
+	if unencodable {
+		s.unencodable++
+	}
 
 	if s.firstEvent && s.intervalNano > 0 {
 		s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
@@ -221,6 +249,14 @@ func (s *checkpointSink) writeCheckpointLocked(at int64) {
 		ExecutionStreamHash: hex.EncodeToString(s.rolling[:]),
 		Rolling:             hex.EncodeToString(s.rolling[:]),
 	}
+	record.Unencodable = s.unencodable
+	if s.binary != nil {
+		record.Representation = binaryRepresentation
+		record.Unencodable = int64(s.binary.unencodableCount())
+		digest := s.binary.executionHash()
+		record.ExecutionStreamHash = hex.EncodeToString(digest[:])
+		record.Rolling = record.ExecutionStreamHash
+	}
 	line, err := json.Marshal(record)
 	if err != nil {
 		s.failLocked(fmt.Errorf("marshal execution checkpoint: %w", err))
@@ -270,7 +306,7 @@ func (s *checkpointSink) close() error {
 	}
 	s.closed = true
 	if s.binary != nil && s.binaryFile == nil {
-		if err := s.binary.flush(); err != nil {
+		if err := s.binary.finish(); err != nil {
 			s.failLocked(fmt.Errorf("flush binary evidence: %w", err))
 		}
 	}
@@ -278,7 +314,7 @@ func (s *checkpointSink) close() error {
 		// Flush the open block, then the buffered writer, then the file: each
 		// layer holds bytes the next has not seen, and skipping one truncates
 		// the stream at a block boundary that looks structurally valid.
-		if err := s.binary.flush(); err != nil {
+		if err := s.binary.finish(); err != nil {
 			s.failLocked(fmt.Errorf("flush binary evidence: %w", err))
 		}
 		if err := s.binaryBuf.Flush(); err != nil {

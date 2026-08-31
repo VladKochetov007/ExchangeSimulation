@@ -187,12 +187,12 @@ func DecodeFeeRevenue(payload []byte, resolve evstream.Resolver, into *FeeRevenu
 
 // --- Trade ---
 
-func (t *Trade) SchemaID() uint16      { return SchemaTrade }
-func (t *Trade) SchemaVersion() uint16 { return 1 }
+func (t Trade) SchemaID() uint16      { return SchemaTrade }
+func (t Trade) SchemaVersion() uint16 { return 1 }
 
 // AppendPayloadInterning writes a trade. Side is an enum on the wire rather
 // than the string its JSON form carries: the set is closed and a byte is exact.
-func (t *Trade) AppendPayloadInterning(dst []byte, _ evstream.Interner) ([]byte, error) {
+func (t Trade) AppendPayloadInterning(dst []byte, _ evstream.Interner) ([]byte, error) {
 	dst = evstream.AppendUint64(dst, t.TradeID)
 	dst = evstream.AppendInt64(dst, t.Price)
 	dst = evstream.AppendInt64(dst, t.Qty)
@@ -250,5 +250,5 @@ func finish(cursor *evstream.Cursor) error {
 var (
 	_ evstream.InterningAppender = BalanceChangeEvent{}
 	_ evstream.InterningAppender = FeeRevenueEvent{}
-	_ evstream.InterningAppender = (*Trade)(nil)
+	_ evstream.InterningAppender = Trade{}
 )

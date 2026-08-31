@@ -70,6 +70,11 @@ const (
 	// BlockMagic marks a block boundary, so a truncated stream is detectable
 	// and a corrupted length cannot be silently mistaken for a valid block.
 	BlockMagic uint32 = 0x42535645 // "EVSB" little-endian
+	// TrailerMagic marks the end of a complete stream. Without a terminator a
+	// stream truncated at a block boundary can look like a valid shorter run.
+	TrailerMagic uint32 = 0x54535645 // "EVST" little-endian
+	// TrailerSize is magic, frame count and the final execution digest.
+	TrailerSize = 4 + 8 + 32
 
 	// FrameHeaderSize is the fixed prefix of every frame.
 	FrameHeaderSize = 32
@@ -306,6 +311,9 @@ func NewCursor(src []byte) *Cursor { return &Cursor{buf: src} }
 
 // Err returns the first error encountered, if any.
 func (c *Cursor) Err() error { return c.err }
+
+// Offset reports how many bytes have been consumed from the cursor.
+func (c *Cursor) Offset() int { return c.pos }
 
 // Remaining reports how many bytes are unread. A decoder should require this
 // to be zero at the end: trailing bytes mean the payload does not match the

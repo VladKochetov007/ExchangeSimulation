@@ -30,8 +30,8 @@ func roundTripFrame(t *testing.T, payload evstream.InterningAppender) (evstream.
 	if err := writer.AppendInterning(1, 2, 0, payload); err != nil {
 		t.Fatalf("append: %v", err)
 	}
-	if err := writer.Flush(); err != nil {
-		t.Fatalf("flush: %v", err)
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close: %v", err)
 	}
 	reader, err := evstream.NewReader(bytes.NewReader(buf.Bytes()), evstream.ReaderOptions{VerifyHash: true})
 	if err != nil {
@@ -138,7 +138,7 @@ func TestBookSnapshotEvidenceRoundTrip(t *testing.T) {
 func TestVenueBalanceRoundTrip(t *testing.T) {
 	for _, original := range []VenueBalanceEvent{
 		{Bucket: VenueFeeRevenue, Asset: "USD", Reason: "taker_fee"},
-		{Timestamp: 7, Bucket: VenueInsuranceFund, Asset: "USD", Symbol: "ABC-PERP",
+		{Timestamp: 7, Sequence: 11, TradeID: 12, Bucket: VenueInsuranceFund, Asset: "USD", Symbol: "ABC-PERP",
 			Reason: "clearance", OldBalance: math.MinInt64, NewBalance: math.MaxInt64, Delta: -1},
 	} {
 		frame, reader := roundTripFrame(t, original)

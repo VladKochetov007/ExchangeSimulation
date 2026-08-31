@@ -26,8 +26,9 @@ type binaryEvidence struct {
 	writer *evstream.Writer
 	// events counts frames the sink was asked to record, which is the figure
 	// comparable to the JSON path's event count.
-	events uint64
-	err    error
+	events      uint64
+	unencodable uint64
+	err         error
 }
 
 // binaryEvidenceEnabled reports whether the binary sink is selected. Read once
@@ -69,23 +70,23 @@ func (e sinkEnvelope) AppendPayloadInterning(dst []byte, in evstream.Interner) (
 // refused, so the stream is complete from the first run and coverage can be
 // raised one family at a time without the sink ever being partly JSON and
 // partly binary at the file level.
-func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venueID string, payload any) {
+func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venueID string, payload any) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.err != nil {
-		return
+		return b.err
 	}
 
 	eventRef, err := b.writer.Intern(eventName)
 	if err != nil {
 		b.err = err
-		return
+		return err
 	}
 	venueRef := uint32(0)
 	if venueID != "" {
 		if venueRef, err = b.writer.Intern(venueID); err != nil {
 			b.err = err
-			return
+			return err
 		}
 	}
 
@@ -93,12 +94,20 @@ func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venue
 	if !typed {
 		inner = eexchange.OpaqueJSON{Value: payload}
 	}
-	if err := b.writer.AppendInterning(simTime, clientID, venueRef,
-		sinkEnvelope{eventRef: eventRef, inner: inner}); err != nil {
-		b.err = err
-		return
+	frame := sinkEnvelope{eventRef: eventRef, inner: inner}
+	if err := b.writer.AppendInterning(simTime, clientID, venueRef, frame); err != nil {
+		// Preserve the event slot when a payload cannot be encoded. The
+		// substitute is itself canonical and keeps sequence continuity; the
+		// failed payload is counted so the run cannot hide its information loss.
+		frame.inner = eexchange.OpaqueJSON{Value: "unencodable"}
+		if retryErr := b.writer.AppendInterning(simTime, clientID, venueRef, frame); retryErr != nil {
+			b.err = retryErr
+			return retryErr
+		}
+		b.unencodable++
 	}
 	b.events++
+	return nil
 }
 
 // executionHash returns the digest over the canonical uncompressed frames. It
@@ -108,6 +117,16 @@ func (b *binaryEvidence) executionHash() [sha256.Size]byte {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.writer.ExecutionHash()
+}
+
+// finish seals the stream with its completion trailer.
+func (b *binaryEvidence) finish() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.err != nil {
+		return b.err
+	}
+	return b.writer.Close()
 }
 
 // flush closes the open block so the bytes written so far are readable.
@@ -125,4 +144,10 @@ func (b *binaryEvidence) count() uint64 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.events
+}
+
+func (b *binaryEvidence) unencodableCount() uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.unencodable
 }

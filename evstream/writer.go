@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash"
 	"hash/crc32"
@@ -62,6 +63,7 @@ const DefaultBlockBytes = 1 << 20
 // what the order should be.
 type Writer struct {
 	out        io.Writer
+	closed     bool
 	compressor BlockCompressor
 	blockBytes int
 
@@ -180,6 +182,9 @@ func (w *Writer) AppendInterning(simTS int64, clientID uint64, venueRef uint32,
 // appendFrame writes a frame whose payload is either supplied directly (the
 // dictionary case) or produced by an appender.
 func (w *Writer) appendFrame(header FrameHeader, raw []byte, appender ...PayloadAppender) error {
+	if w.closed {
+		return errors.New("evstream: append after close")
+	}
 	if w.err != nil {
 		return w.err
 	}
@@ -308,6 +313,32 @@ func (w *Writer) Flush() error {
 		return err
 	}
 	return w.flushBlock()
+}
+
+// Close flushes the final block and writes the completion trailer. The
+// underlying writer remains owned by the caller; this method only seals the
+// evstream so readers can distinguish a complete run from a valid prefix.
+func (w *Writer) Close() error {
+	if w.closed {
+		return nil
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	digest := w.ExecutionHash()
+	trailer := make([]byte, 0, TrailerSize)
+	trailer = AppendUint32(trailer, TrailerMagic)
+	trailer = AppendUint64(trailer, w.seq)
+	trailer = append(trailer, digest[:]...)
+	if n, err := w.out.Write(trailer); err != nil {
+		w.err = err
+		return err
+	} else if n != len(trailer) {
+		w.err = io.ErrShortWrite
+		return w.err
+	}
+	w.closed = true
+	return nil
 }
 
 // ExecutionHash returns the digest over every frame written so far.

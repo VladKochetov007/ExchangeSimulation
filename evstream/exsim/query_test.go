@@ -122,8 +122,8 @@ func buildQueryCorpus(tb testing.TB) *queryCorpus {
 		}
 		lines = append(lines, jsonline)
 	}
-	if err := writer.Flush(); err != nil {
-		tb.Fatalf("flush: %v", err)
+	if err := writer.Close(); err != nil {
+		tb.Fatalf("close: %v", err)
 	}
 
 	return &queryCorpus{
@@ -276,14 +276,14 @@ func BenchmarkQueryASelective(b *testing.B) {
 		start := int64(queryStartTS + int64(queryEvents/2)*queryStepTS)
 		end := start + int64(queryEvents/100)*queryStepTS
 		return evstream.Query{
-				FromTS: start, ToTS: end,
-				Families:   []uint16{SchemaBalanceChange},
-				SymbolRefs: []uint32{c.symbolRefs[2]},
-			}, func(r map[string]any) bool {
-				ts := int64(r["sim_ts"].(float64))
-				return r["event"] == "balance_change" && r["symbol"] == c.symbols[2] &&
-					ts >= start && ts <= end
-			}
+			FromTS: start, ToTS: end,
+			Families:   []uint16{SchemaBalanceChange},
+			SymbolRefs: []uint32{c.symbolRefs[2]},
+		}, func(r map[string]any) bool {
+			ts := int64(r["sim_ts"].(float64))
+			return r["event"] == "balance_change" && r["symbol"] == c.symbols[2] &&
+				ts >= start && ts <= end
+		}
 	})
 }
 

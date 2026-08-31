@@ -202,7 +202,7 @@ const (
 )
 
 func (e VenueBalanceEvent) SchemaID() uint16      { return SchemaVenueBalance }
-func (e VenueBalanceEvent) SchemaVersion() uint16 { return 1 }
+func (e VenueBalanceEvent) SchemaVersion() uint16 { return 2 }
 
 func (e VenueBalanceEvent) AppendPayloadInterning(dst []byte, in evstream.Interner) ([]byte, error) {
 	start := len(dst)
@@ -211,6 +211,8 @@ func (e VenueBalanceEvent) AppendPayloadInterning(dst []byte, in evstream.Intern
 		evstream.SetPresence(dst[start:], venueBalanceSymbolBit)
 	}
 	dst = evstream.AppendInt64(dst, e.Timestamp)
+	dst = evstream.AppendUint64(dst, e.Sequence)
+	dst = evstream.AppendUint64(dst, e.TradeID)
 	dst = evstream.AppendInt64(dst, e.OldBalance)
 	dst = evstream.AppendInt64(dst, e.NewBalance)
 	dst = evstream.AppendInt64(dst, e.Delta)
@@ -230,9 +232,26 @@ func (e VenueBalanceEvent) AppendPayloadInterning(dst []byte, in evstream.Intern
 
 // DecodeVenueBalance reads the payload back.
 func DecodeVenueBalance(payload []byte, resolve evstream.Resolver, into *VenueBalanceEvent) error {
+	return DecodeVenueBalanceVersioned(payload, resolve, 2, into)
+}
+
+// DecodeVenueBalanceVersioned preserves compatibility with the initial
+// prototype while making sequence and trade identity loss impossible in the
+// promoted schema. Version 1 had neither field on the wire; those values are
+// therefore explicitly zero when an old stream is read.
+func DecodeVenueBalanceVersioned(payload []byte, resolve evstream.Resolver, version uint16, into *VenueBalanceEvent) error {
+	if version != 1 && version != 2 {
+		return evstream.ErrCorrupt
+	}
 	cursor := evstream.NewCursor(payload)
 	presence := cursor.Presence(venueBalanceOptionalFields)
 	into.Timestamp = cursor.Int64()
+	into.Sequence = 0
+	into.TradeID = 0
+	if version >= 2 {
+		into.Sequence = cursor.Uint64()
+		into.TradeID = cursor.Uint64()
+	}
 	into.OldBalance = cursor.Int64()
 	into.NewBalance = cursor.Int64()
 	into.Delta = cursor.Int64()
