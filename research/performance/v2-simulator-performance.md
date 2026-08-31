@@ -1849,3 +1849,30 @@ the client has no position in changes *when marks are resolved*, and on a tree
 without F1 that is the semantic repair, not the optimisation. Unblocking is a
 branch decision: port the scientific commit first, or do this work on the
 scientific branch after the freeze.
+
+### Three allocation hypotheses, three failures, and the pattern they make
+
+The profile says allocation and GC are the dominant theme. Three plausible ways
+to act on that were tested and all three lost:
+
+| hypothesis | expectation | measured |
+| --- | --- | ---: |
+| collect less (`GOGC=400`) | fewer marks, faster | **+2.4 %** |
+| collect never (`GOGC=off`) | no marks at all | **+13 %**, 6.2x RSS |
+| stop pre-sizing bounded preview maps | a bounded clone copies ~10 orders, not the whole side, so sizing its maps for the source wastes buckets | **+2.27 %** (A/A +0.02 %) |
+
+The last is the most instructive. `cloneBookForPreviewBounded` sizes its maps to
+`len(source.Orders)` while a bounded clone copies a price-ordered prefix — the
+code's own comment says the median preview copies ten orders. Allocating buckets
+for hundreds to hold ten looks obviously wasteful. It is not: growing a map from
+empty pays rehashing on every growth step, and that costs more than the wasted
+buckets. **One oversized allocation beats several correctly sized ones.**
+
+**The pattern across all three:** re-shaping allocation loses on this workload,
+whether by collecting less, deferring collection, or right-sizing. Every
+allocation-related win in this campaign came instead from **removing the work
+entirely** — deleting the reflection, deleting the JSON, deleting the second
+encode — not from making the same work allocate more cleverly.
+
+That is the rule to carry forward: on this simulator, do not try to allocate
+better. Find the allocation that does not need to exist.
