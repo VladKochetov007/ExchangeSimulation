@@ -27,7 +27,7 @@ func TestCheckpointSinkReportsTransportFailure(t *testing.T) {
 		checkpoints:  &checkpointFailWriter{err: want},
 		firstEvent:   true,
 	}
-	sink.observe(1, 1, "event", "north", map[string]int{"n": 1})
+	sink.observe(1, 1, "event", "north", map[string]int{"n": 1}, "general.jsonl", 1)
 	if err := sink.close(); !errors.Is(err, want) {
 		t.Fatalf("checkpoint close error = %v, want %v", err, want)
 	}
@@ -44,8 +44,8 @@ func TestCheckpointSinkClosesAtRegisteredFinalTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	sink.finalSimTime = 3 * second
-	sink.observe(1*second, 1, "event", "north", map[string]int{"n": 1})
-	sink.observe(2*second, 1, "event", "north", map[string]int{"n": 2})
+	sink.observe(1*second, 1, "event", "north", map[string]int{"n": 1}, "general.jsonl", 1)
+	sink.observe(2*second, 1, "event", "north", map[string]int{"n": 2}, "general.jsonl", 2)
 	if err := sink.close(); err != nil {
 		t.Fatal(err)
 	}

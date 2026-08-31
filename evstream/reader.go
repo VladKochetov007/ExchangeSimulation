@@ -229,6 +229,12 @@ func (r *Reader) readTrailer() error {
 			return fmt.Errorf("%w: trailer digest does not match frames", ErrCorrupt)
 		}
 	}
+	var trailing [1]byte
+	if n, err := io.ReadFull(r.in, trailing[:]); err == nil || n != 0 {
+		return fmt.Errorf("%w: bytes after completion trailer", ErrCorrupt)
+	} else if !errors.Is(err, io.EOF) {
+		return err
+	}
 	r.terminated = true
 	return nil
 }

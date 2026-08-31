@@ -42,6 +42,7 @@ type checkpointSink struct {
 	binary     *binaryEvidence
 	binaryFile *os.File
 	binaryBuf  *bufio.Writer
+	replaceRaw bool
 	mu         sync.Mutex
 
 	intervalNano int64
@@ -79,7 +80,7 @@ type checkpointRecord struct {
 	Unencodable         int64  `json:"unencodable_payloads,omitempty"`
 }
 
-const binaryRepresentation = "evstream_v2"
+const binaryRepresentation = "evstream_v3"
 
 // traceRecord is one line of the narrow trace. Sequence is the sink's own
 // counter, which is the order events actually reached the log and therefore
@@ -98,7 +99,22 @@ type traceRecord struct {
 // newCheckpointSink opens the sink's outputs inside the run directory. A zero
 // interval disables checkpoints; an empty window disables the trace.
 func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64) (*checkpointSink, error) {
-	if intervalSeconds <= 0 && traceFrom >= traceTo && !binaryEvidenceEnabled() {
+	return newCheckpointSinkWithBinary(dir, intervalSeconds, traceFrom, traceTo,
+		binaryEvidenceEnabled(), binaryEvidenceReplacesRawLog(), binaryEvidenceDiscards())
+}
+
+func newCheckpointSinkForFormat(dir string, intervalSeconds int, traceFrom, traceTo int64, format string) (*checkpointSink, error) {
+	effectiveFormat := format
+	if binaryEvidenceEnabled() {
+		effectiveFormat = binaryRepresentation
+	}
+	binaryEnabled := effectiveFormat == binaryRepresentation
+	return newCheckpointSinkWithBinary(dir, intervalSeconds, traceFrom, traceTo,
+		binaryEnabled, binaryEnabled || binaryEvidenceReplacesRawLog(), binaryEvidenceDiscards())
+}
+
+func newCheckpointSinkWithBinary(dir string, intervalSeconds int, traceFrom, traceTo int64, binaryEnabled, replaceRaw, discard bool) (*checkpointSink, error) {
+	if intervalSeconds <= 0 && traceFrom >= traceTo && !binaryEnabled {
 		return nil, nil
 	}
 	sink := &checkpointSink{
@@ -106,6 +122,7 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 		traceFrom:    traceFrom,
 		traceTo:      traceTo,
 		firstEvent:   true,
+		replaceRaw:   replaceRaw,
 	}
 	if intervalSeconds > 0 {
 		file, err := os.Create(filepath.Join(dir, "checkpoints.jsonl"))
@@ -115,7 +132,7 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 		sink.checkpoints = file
 	}
 	if traceFrom < traceTo {
-		if binaryEvidenceEnabled() {
+		if binaryEnabled {
 			return nil, fmt.Errorf("multivenue: execution trace is unavailable with binary evidence")
 		}
 		file, err := os.Create(filepath.Join(dir, "trace.jsonl"))
@@ -124,13 +141,13 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 		}
 		sink.trace = file
 	}
-	if binaryEvidenceEnabled() {
+	if binaryEnabled {
 		// "discard" isolates encode-and-hash cost from storage. On a no-log
 		// config the JSON path writes no raw evidence at all, so a binary sink
 		// that writes a file would be measured against a JSON path doing no
 		// I/O — an unfair comparison in the binary path's disfavour. Discarding
 		// makes the two paths do the same amount of writing, which is none.
-		if binaryEvidenceDiscards() {
+		if discard {
 			sink.binary = newBinaryEvidence(io.Discard)
 		} else {
 			file, err := os.Create(filepath.Join(dir, "events.evs"))
@@ -147,7 +164,7 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 
 // observe folds one event into the rolling digest and writes a checkpoint
 // whenever simulated time crosses the next boundary.
-func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venueID string, payload any, routes ...string) {
+func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venueID string, payload any, route string, sequence uint64) {
 	if s == nil {
 		return
 	}
@@ -155,7 +172,7 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	// replaces the marshal and the per-event digest entirely, so when it is
 	// selected the JSON encoder is never reached.
 	if s.binary != nil {
-		recordErr := s.binary.record(simTime, clientID, eventName, venueID, payload, routes...)
+		recordErr := s.binary.record(simTime, clientID, eventName, venueID, payload, route, sequence)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if recordErr != nil {
@@ -290,6 +307,10 @@ func (s *checkpointSink) failLocked(err error) {
 	if err != nil {
 		s.err = errors.Join(s.err, err)
 	}
+}
+
+func (s *checkpointSink) replacesRawLog() bool {
+	return s != nil && s.binary != nil && s.replaceRaw
 }
 
 // close flushes a final checkpoint so a run that ends between boundaries is

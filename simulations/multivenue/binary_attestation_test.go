@@ -25,8 +25,8 @@ func TestBinarySinkWritesTerminatedStreamAndRealCheckpoint(t *testing.T) {
 		t.Fatalf("new binary sink: %v", err)
 	}
 	sink.finalSimTime = 2_000_000_000
-	sink.observe(1_000_000_000, 7, "event", "north", map[string]int{"value": 1})
-	sink.observe(1_500_000_000, 8, "event", "north", map[string]int{"value": 2})
+	sink.observe(1_000_000_000, 7, "event", "north", map[string]int{"value": 1}, "general.jsonl", 1)
+	sink.observe(1_500_000_000, 8, "event", "north", map[string]int{"value": 2}, "general.jsonl", 2)
 	if err := sink.close(); err != nil {
 		t.Fatalf("close binary sink: %v", err)
 	}
@@ -75,8 +75,12 @@ func TestBinarySinkSubstitutesUnencodablePayloadWithoutDroppingTail(t *testing.T
 	t.Setenv("EXSIM_BINARY_EVIDENCE", "file")
 	var output bytes.Buffer
 	sink := &binaryEvidence{writer: evstream.NewWriter(&output, evstream.WriterOptions{})}
-	sink.record(1, 1, "bad", "north", binaryUnencodablePayload{}, "general.jsonl")
-	sink.record(2, 1, "good", "north", map[string]int{"value": 2}, "general.jsonl")
+	if err := sink.record(1, 1, "bad", "north", binaryUnencodablePayload{}, "general.jsonl", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.record(2, 1, "good", "north", map[string]int{"value": 2}, "general.jsonl", 2); err != nil {
+		t.Fatal(err)
+	}
 	if err := sink.finish(); err != nil {
 		t.Fatalf("finish: %v", err)
 	}

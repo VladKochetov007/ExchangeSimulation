@@ -39,6 +39,11 @@ func binaryEvidenceEnabled() bool { return os.Getenv("EXSIM_BINARY_EVIDENCE") !=
 // rather than written, which isolates encode-and-hash cost from storage cost.
 func binaryEvidenceDiscards() bool { return os.Getenv("EXSIM_BINARY_EVIDENCE") == "discard" }
 
+// binaryEvidenceReplacesRawLog is reserved for the promoted successor format.
+// The benchmark-only environment override keeps the prototype from silently
+// changing the historical JSON evidence contract.
+func binaryEvidenceReplacesRawLog() bool { return os.Getenv("EXSIM_BINARY_EVIDENCE") == "replace" }
+
 // newBinaryEvidence starts a binary sink writing to out.
 func newBinaryEvidence(out interface{ Write([]byte) (int, error) }) *binaryEvidence {
 	return &binaryEvidence{writer: evstream.NewWriter(out, evstream.WriterOptions{})}
@@ -54,6 +59,7 @@ func newBinaryEvidence(out interface{ Write([]byte) (int, error) }) *binaryEvide
 type sinkEnvelope struct {
 	routeRef uint32
 	eventRef uint32
+	sequence uint64
 	inner    evstream.InterningAppender
 }
 
@@ -63,6 +69,7 @@ func (e sinkEnvelope) SchemaVersion() uint16 { return e.inner.SchemaVersion() }
 func (e sinkEnvelope) AppendPayloadInterning(dst []byte, in evstream.Interner) ([]byte, error) {
 	dst = evstream.AppendUint32(dst, e.routeRef)
 	dst = evstream.AppendUint32(dst, e.eventRef)
+	dst = evstream.AppendUint64(dst, e.sequence)
 	return e.inner.AppendPayloadInterning(dst, in)
 }
 
@@ -72,7 +79,7 @@ func (e sinkEnvelope) AppendPayloadInterning(dst []byte, in evstream.Interner) (
 // refused, so the stream is complete from the first run and coverage can be
 // raised one family at a time without the sink ever being partly JSON and
 // partly binary at the file level.
-func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venueID string, payload any, routes ...string) error {
+func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venueID string, payload any, route string, sequence uint64) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.err != nil {
@@ -92,8 +99,8 @@ func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venue
 		}
 	}
 	routeRef := uint32(0)
-	if len(routes) > 0 && routes[0] != "" {
-		if routeRef, err = b.writer.Intern(routes[0]); err != nil {
+	if route != "" {
+		if routeRef, err = b.writer.Intern(route); err != nil {
 			b.err = err
 			return err
 		}
@@ -103,7 +110,7 @@ func (b *binaryEvidence) record(simTime int64, clientID uint64, eventName, venue
 	if !typed {
 		inner = eexchange.OpaqueJSON{Value: payload}
 	}
-	frame := sinkEnvelope{routeRef: routeRef, eventRef: eventRef, inner: inner}
+	frame := sinkEnvelope{routeRef: routeRef, eventRef: eventRef, sequence: sequence, inner: inner}
 	if err := b.writer.AppendInterning(simTime, clientID, venueRef, frame); err != nil {
 		// Preserve the event slot when a payload cannot be encoded. The
 		// substitute is itself canonical and keeps sequence continuity; the

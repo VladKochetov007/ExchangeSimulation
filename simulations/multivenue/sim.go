@@ -3,6 +3,7 @@ package multivenue
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -99,6 +100,10 @@ type Config struct {
 	Provenance
 
 	LogMode string `json:"log_mode"`
+	// EvidenceFormat selects the canonical execution-evidence representation.
+	// jsonl preserves the historical contract; evstream_v3 is the successor
+	// contract whose completed stream can replace the high-volume raw JSONL.
+	EvidenceFormat string `json:"evidence_format,omitempty"`
 	// DatedFutureDeliveryFeePolicy is an analyzer-side declaration retained in
 	// the run config so the strict settlement audit can reconstruct the fee
 	// contract without importing simulator implementation details.
@@ -673,6 +678,12 @@ func (c *Config) normalize() error {
 	}
 	if c.LogMode == "" {
 		c.LogMode = "full"
+	}
+	if c.EvidenceFormat == "" {
+		c.EvidenceFormat = "jsonl"
+	}
+	if c.EvidenceFormat != "jsonl" && c.EvidenceFormat != binaryRepresentation {
+		return fmt.Errorf("multivenue: unsupported evidence format %q", c.EvidenceFormat)
 	}
 	switch c.MakerAnchor {
 	case "", "own_mid", "consensus":
@@ -1888,17 +1899,52 @@ func (s *Sim) closeEvidence() error {
 	if checkpointErr != nil || closeErr != nil || loggerErr != nil {
 		return errors.Join(checkpointErr, closeErr, loggerErr)
 	}
-	// The evidence files are written by several independent loggers and do not
-	// preserve one global causal order. This artifact attests exactly the
-	// persisted JSON-record multiset; the ordered execution hash remains the
-	// checkpoint sink's separate contract. Publish latency first, then the hash,
-	// so the hash is never mistaken for a complete run after a latency failure.
+	// Publish latency before any completion attestation, so a run with a failed
+	// late sidecar cannot be mistaken for complete evidence.
 	if s.latencyTelemetry != nil {
 		if err := s.latencyTelemetry.WriteJSON(filepath.Join(s.Config.LogDir, "latency.json")); err != nil {
 			return fmt.Errorf("write latency evidence: %w", err)
 		}
 	}
-	if s.Config.LogMode == "full" {
+	if s.Config.EvidenceFormat == binaryRepresentation {
+		if s.checkpoints == nil || s.checkpoints.binary == nil {
+			return errors.New("multivenue: binary evidence format has no binary sink")
+		}
+		digest := s.checkpoints.binary.executionHash()
+		binaryArtifact := binaryEvidenceArtifactRecord{
+			Domain:              "canonical_binary_execution_frames",
+			Ordering:            "ordered_stream",
+			EventFrames:         s.checkpoints.binary.count(),
+			StreamFrames:        s.checkpoints.binary.writer.Count(),
+			ExecutionStreamHash: hex.EncodeToString(digest[:]),
+			UnencodablePayloads: s.checkpoints.binary.unencodableCount(),
+		}
+		raw, err := json.MarshalIndent(binaryArtifact, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal binary evidence attestation: %w", err)
+		}
+		if err := simulation.WriteFileAtomically(filepath.Join(s.Config.LogDir, "binary-evidence-attestation.json"), append(raw, '\n')); err != nil {
+			return fmt.Errorf("write binary evidence attestation: %w", err)
+		}
+		if s.Config.LogMode == "full" {
+			sidecarArtifact := evidenceArtifactRecord{
+				Domain:   "persisted_json_log_evidence_only",
+				Ordering: "unordered_multiset",
+				Events:   evidence.Events,
+				Digest:   evidence.Hex(),
+			}
+			raw, err := json.MarshalIndent(sidecarArtifact, "", "  ")
+			if err != nil {
+				return fmt.Errorf("marshal evidence-only attestation: %w", err)
+			}
+			if err := simulation.WriteFileAtomically(filepath.Join(s.Config.LogDir, "evidence-only-artifact-hash.json"), append(raw, '\n')); err != nil {
+				return fmt.Errorf("write evidence-only attestation: %w", err)
+			}
+		}
+	} else if s.Config.LogMode == "full" {
+		// The evidence files are written by several independent loggers and do
+		// not preserve one global causal order. This artifact attests exactly
+		// the historical persisted JSON-record multiset.
 		artifact := evidenceArtifactRecord{
 			Domain:   "persisted_json_records",
 			Ordering: "unordered_multiset",
@@ -1942,15 +1988,32 @@ type evidenceArtifactRecord struct {
 	Digest   string `json:"digest"`
 }
 
+type binaryEvidenceArtifactRecord struct {
+	Domain              string `json:"domain"`
+	Ordering            string `json:"ordering"`
+	EventFrames         uint64 `json:"event_frames"`
+	StreamFrames        uint64 `json:"stream_frames"`
+	ExecutionStreamHash string `json:"execution_stream_hash"`
+	UnencodablePayloads uint64 `json:"unencodable_payloads,omitempty"`
+}
+
 type venueLogEvent struct {
 	VenueID string `json:"venue_id"`
 	Payload any    `json:"payload"`
 }
 
+type sequencedVenueLogEvent struct {
+	VenueID  string `json:"venue_id"`
+	Sequence uint64 `json:"sequence"`
+	Payload  any    `json:"payload"`
+}
+
 type venueLogger struct {
-	venueID string
-	route   string
-	inner   etypes.Logger
+	venueID    string
+	route      string
+	inner      etypes.Logger
+	sequence   *uint64
+	sequenceMu *sync.Mutex
 	// sink observes every event for the divergence locator. It runs whatever
 	// the log mode is, because a run with logging off still has to be
 	// comparable against another run of the same seed.
@@ -1958,8 +2021,20 @@ type venueLogger struct {
 }
 
 func (l venueLogger) LogEvent(simTime int64, clientID uint64, eventName string, event any) {
-	l.sink.observe(simTime, clientID, eventName, l.venueID, event, l.route)
+	if l.sequenceMu != nil {
+		l.sequenceMu.Lock()
+		defer l.sequenceMu.Unlock()
+	}
+	sequence := uint64(0)
+	if l.sequence != nil {
+		(*l.sequence)++
+		sequence = *l.sequence
+	}
+	l.sink.observe(simTime, clientID, eventName, l.venueID, event, l.route, sequence)
 	if l.inner == nil {
+		return
+	}
+	if l.sink.replacesRawLog() {
 		return
 	}
 	l.inner.LogEvent(simTime, clientID, eventName, venueLogEvent{VenueID: l.venueID, Payload: event})
@@ -1970,6 +2045,19 @@ func (l venueLogger) LogEvent(simTime int64, clientID uint64, eventName string, 
 // change the simulated trajectory or logging-on/off execution digest.
 func (l venueLogger) LogEvidenceOnly(simTime int64, clientID uint64, eventName string, event any) {
 	if l.inner == nil {
+		return
+	}
+	if l.sequenceMu != nil {
+		l.sequenceMu.Lock()
+		defer l.sequenceMu.Unlock()
+	}
+	sequence := uint64(0)
+	if l.sequence != nil {
+		(*l.sequence)++
+		sequence = *l.sequence
+	}
+	if l.sink.replacesRawLog() {
+		l.inner.LogEvent(simTime, clientID, eventName, sequencedVenueLogEvent{VenueID: l.venueID, Sequence: sequence, Payload: event})
 		return
 	}
 	l.inner.LogEvent(simTime, clientID, eventName, venueLogEvent{VenueID: l.venueID, Payload: event})
@@ -2023,6 +2111,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	if err := cfg.normalize(); err != nil {
 		return nil, err
 	}
+	if binaryEvidenceEnabled() {
+		cfg.EvidenceFormat = binaryRepresentation
+	}
 	if simTime <= 0 || simTime%cfg.Step != 0 {
 		return nil, fmt.Errorf("multivenue: simulation duration %s must be a positive multiple of step %s", simTime, cfg.Step)
 	}
@@ -2056,6 +2147,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 			"Noise and option-flow rosters are independently seeded per venue and participant index.",
 			"cross_asset_spot_graph adds ABC/USD, CDF/USD, and ABC/CDF spot books; it does not add a triangular-arbitrage actor.",
 			"Raw venue-event logs are controlled by log_mode; greeks.json risk telemetry is always emitted by the command.",
+			"Evidence format is explicit in config; the binary successor uses a terminated evstream_v3 with a canonical uncompressed execution hash.",
 		},
 	}, "", "  ")
 	if err != nil {
@@ -2082,7 +2174,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		SpotIndex: newSpotIndexProvider(cfg.MakerAnchor, "ABC/USD", "ABC-PERP", "CDF/USD", "ABC/CDF"),
 		Venues:    make([]*Venue, 0, len(cfg.VenueIDs)), latencyTelemetry: simulation.NewLatencyStats()}
 	// Built before any venue, because every venue logger carries it.
-	sink, err := newCheckpointSink(cfg.LogDir, cfg.CheckpointIntervalSeconds, cfg.TraceFromNano, cfg.TraceToNano)
+	sink, err := newCheckpointSinkForFormat(cfg.LogDir, cfg.CheckpointIntervalSeconds, cfg.TraceFromNano, cfg.TraceToNano, cfg.EvidenceFormat)
 	if err != nil {
 		return nil, err
 	}
@@ -2312,16 +2404,20 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	// the divergence sink: a run that writes no logs must still be comparable
 	// against another run of the same seed, and that comparison is the whole
 	// point of running with logs off.
+	var evidenceSequence uint64
+	evidenceSequenceMu := &sync.Mutex{}
 	newLogger := func(name string) (venueLogger, error) {
 		if s.Config.LogMode != "full" {
-			return venueLogger{venueID: id, route: filepath.ToSlash(name), sink: s.checkpoints}, nil
+			return venueLogger{venueID: id, route: filepath.ToSlash(name), sink: s.checkpoints,
+				sequence: &evidenceSequence, sequenceMu: evidenceSequenceMu}, nil
 		}
 		logger, err := feesim.NewJSONLinesLogger(filepath.Join(logDir, name))
 		if err != nil {
 			return venueLogger{}, err
 		}
 		s.loggers = append(s.loggers, logger)
-		return venueLogger{venueID: id, route: filepath.ToSlash(name), inner: logger, sink: s.checkpoints}, nil
+		return venueLogger{venueID: id, route: filepath.ToSlash(name), inner: logger, sink: s.checkpoints,
+			sequence: &evidenceSequence, sequenceMu: evidenceSequenceMu}, nil
 	}
 	var lifecycleLog etypes.Logger
 	estimatedClients := 5 + s.Config.NoiseTraderCount + s.Config.OptionFlowCount + len(s.Config.CrossVenueArbTiers)

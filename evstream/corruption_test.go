@@ -97,4 +97,18 @@ func TestWriterRejectsAppendAfterClose(t *testing.T) {
 	if err := writer.Append(1, 1, 0, corruptionProbe{}); err == nil {
 		t.Fatal("append after close was accepted")
 	}
+	if _, err := writer.Intern("late"); err == nil {
+		t.Fatal("intern after close was accepted")
+	}
+	if err := writer.Flush(); err == nil {
+		t.Fatal("flush after close was accepted")
+	}
+}
+
+func TestReaderRejectsBytesAfterCompletionTrailer(t *testing.T) {
+	complete := writeCompleteProbeStream(t, 1)
+	complete = append(complete, 0x01)
+	if _, err := readProbeStream(complete, false); err == nil {
+		t.Fatal("trailing bytes after completion trailer were accepted")
+	}
 }

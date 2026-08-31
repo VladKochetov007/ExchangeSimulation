@@ -118,6 +118,12 @@ func NewWriter(out io.Writer, opts WriterOptions) *Writer {
 // covered by the execution hash rather than living in a side channel that could
 // drift from the events that reference it.
 func (w *Writer) Intern(s string) (uint32, error) {
+	if w.closed {
+		return 0, errors.New("evstream: append after close")
+	}
+	if w.err != nil {
+		return 0, w.err
+	}
 	if id, ok := w.dict.Lookup(s); ok {
 		return id, nil
 	}
@@ -137,6 +143,9 @@ func (w *Writer) Intern(s string) (uint32, error) {
 
 // Append writes one event. venueRef is a dictionary id from Intern, or 0.
 func (w *Writer) Append(simTS int64, clientID uint64, venueRef uint32, payload PayloadAppender) error {
+	if w.closed {
+		return errors.New("evstream: append after close")
+	}
 	if w.err != nil {
 		return w.err
 	}
@@ -159,6 +168,9 @@ func (w *Writer) Append(simTS int64, clientID uint64, venueRef uint32, payload P
 // the stream.
 func (w *Writer) AppendInterning(simTS int64, clientID uint64, venueRef uint32,
 	payload InterningAppender) error {
+	if w.closed {
+		return errors.New("evstream: append after close")
+	}
 	if w.err != nil {
 		return w.err
 	}
@@ -306,6 +318,9 @@ func (w *Writer) flushBlock() error {
 
 // Flush closes the open block. Call before relying on bytes being readable.
 func (w *Writer) Flush() error {
+	if w.closed {
+		return errors.New("evstream: append after close")
+	}
 	if w.err != nil {
 		return w.err
 	}
