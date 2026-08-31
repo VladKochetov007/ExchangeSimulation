@@ -519,14 +519,27 @@ func logFill(ctx executionContext, tradeID uint64, side fillSide) {
 	if ctx.log == nil {
 		return
 	}
-	ctx.log.LogEvent(ctx.timestamp, side.clientID, "OrderFill", fillEvidence{
-		OrderID: side.orderID, Symbol: ctx.book.Symbol, Qty: ctx.exec.Qty,
-		Price: ctx.exec.Price, Side: side.side.String(), PositionSide: side.posSide.String(),
-		FilledQty: side.filledQty, RemainingQty: side.totalQty - side.filledQty,
-		IsFull: side.isFull(), TradeID: tradeID, Role: side.role,
-		FeeAmount: side.fee.Amount, FeeAsset: side.fee.Asset,
-		RealizedPnL: side.realizedPnL, NewSize: side.delta.NewSize,
-		NewEntryPrice: side.delta.NewEntryPrice,
+	// Keep the public logger payload compatible with the established map
+	// contract. The successor binary sink has its own typed schemas and an
+	// opaque JSON fallback, so changing the evidence representation must not
+	// change what custom Logger implementations observe.
+	ctx.log.LogEvent(ctx.timestamp, side.clientID, "OrderFill", map[string]any{
+		"order_id":        side.orderID,
+		"symbol":          ctx.book.Symbol,
+		"qty":             ctx.exec.Qty,
+		"price":           ctx.exec.Price,
+		"side":            side.side.String(),
+		"position_side":   side.posSide.String(),
+		"filled_qty":      side.filledQty,
+		"remaining_qty":   side.totalQty - side.filledQty,
+		"is_full":         side.isFull(),
+		"trade_id":        tradeID,
+		"role":            side.role,
+		"fee_amount":      side.fee.Amount,
+		"fee_asset":       side.fee.Asset,
+		"realized_pnl":    side.realizedPnL,
+		"new_size":        side.delta.NewSize,
+		"new_entry_price": side.delta.NewEntryPrice,
 	})
 }
 

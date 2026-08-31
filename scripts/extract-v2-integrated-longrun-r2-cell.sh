@@ -209,7 +209,7 @@ if [[ "$evidence_format" == "evstream_v3" ]]; then
 	renderer_sha256=$(sha256sum "$renderer" | awk '{print $1}')
 	[[ "$renderer_revision" == "$head_revision" && "$renderer_modified" == false && "$renderer_trimpath" == true && "$renderer_cgo_enabled" == 0 ]] ||
 		fail "renderer is not a clean reproducible build of current HEAD"
-	rendered_dir=$(mktemp -d "${TMPDIR:-/tmp}/v2-r2-render.XXXXXX")
+	rendered_dir=$(mktemp -d)
 	render_report=$("$renderer" -dir "$cell" -out "$rendered_dir") || fail "binary evidence rendering failed"
 	jq -e --argjson event_frames "$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")" \
 		--arg execution_hash "$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
