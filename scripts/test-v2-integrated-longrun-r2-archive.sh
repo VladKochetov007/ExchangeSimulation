@@ -176,7 +176,7 @@ G8_ARCHIVE_OUTPUT=$(GOMAXPROCS=1 MVANALYZE_BIN="$analyzer" \
 		"$v2_r2_output_root/dev-607-g8" --prune-after-verify) ||
 	fail "matching G8 archive/prune fixture was rejected"
 [[ -n "$G8_ARCHIVE_OUTPUT" ]] || fail "matching G8 archive produced no completion output"
-[[ ! -e "$v2_r2_output_root/dev-607-g8/venues/north/events.jsonl" ]] ||
+[[ ! -e "$v2_r2_output_root/dev-607-g8/venues/north/general.jsonl" ]] ||
 	fail "successful G8 archive did not prune its raw fixture"
 
 v2_r2_stage_raw_evidence "$v2_r2_output_root/dev-607-g8" || fail "could not restore G8 fixture for stale-gate test"
@@ -210,7 +210,7 @@ if ! rg -q 'pruning gate revision' "$tmp_root/stale-archive.log"; then
 	sed -n '1,40p' "$tmp_root/stale-archive.log" >&2
 	fail "stale pruning-gate archive failed for an unexpected reason"
 fi
-[[ -e "$v2_r2_output_root/dev-607-g8/venues/north/events.jsonl" ]] ||
+[[ -e "$v2_r2_output_root/dev-607-g8/venues/north/general.jsonl" ]] ||
 	fail "failed G8 provenance check deleted raw evidence"
 v2_r2_cleanup_staged_raw_evidence "$v2_r2_output_root/dev-607-g8" ||
 	fail "stale-gate fixture cleanup failed"
