@@ -640,7 +640,9 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	if event.ClientID != decision.ClientID || decision.Role != state.Role || decision.Symbol != state.configuredSymbol || decision.DecisionTime != event.SimTS {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "decision identity or timestamp mismatch"})
 	}
-	if decision.ObservationAge < 0 || decision.ObservationTime > decision.DecisionTime || decision.DecisionTime-decision.ObservationTime != decision.ObservationAge || decision.ReferencePrice <= 0 || decision.InventoryLimit <= 0 {
+	missingObservation := decision.ObservationTime == 0 && decision.ObservationSequence == 0 && decision.ObservationAge == 0
+	validObservation := missingObservation || (decision.ObservationTime > 0 && decision.ObservationSequence > 0 && decision.ObservationTime <= decision.DecisionTime && decision.DecisionTime-decision.ObservationTime == decision.ObservationAge)
+	if !validObservation || decision.ObservationAge < 0 || decision.ReferencePrice <= 0 || decision.InventoryLimit <= 0 {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "invalid decision bounds or observation time"})
 	}
 	if state.configuredMaxObservationAge <= 0 || decision.ObservationAge > state.configuredMaxObservationAge {
@@ -740,7 +742,18 @@ func (r *CDFLiquidityRunAudit) validateDecisionReceipt(event Event, decision cdf
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision has no receipt evidence"})
 		return
 	}
-	record, exists := evidence.decisions[cdfReceiptDecisionKey{ClientID: decision.ClientID, RequestID: decision.QuoteRequestID}]
+	var record cdfMarketDataDecisionRecord
+	exists := false
+	for key, candidate := range evidence.decisions {
+		if key.ClientID != decision.ClientID || key.RequestID != decision.QuoteRequestID {
+			continue
+		}
+		link := evidence.links[candidate.LinkID]
+		if link.SourceVenue == event.VenueID && link.Role == auditRoleClass(decision.Role) {
+			record, exists = candidate, true
+			break
+		}
+	}
 	if !exists || record.DecisionAt != decision.DecisionTime || record.Price != decision.QuotePrice || record.Qty != decision.QuoteQty {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision is not reconciled to a market-data decision receipt"})
 		return
@@ -866,6 +879,18 @@ func quoteProduct(priceDifference, quantity, basePrecision int64) (int64, bool) 
 		return 0, false
 	}
 	product := new(big.Int).Mul(big.NewInt(priceDifference), big.NewInt(quantity))
+	product.Quo(product, big.NewInt(basePrecision))
+	if !product.IsInt64() {
+		return 0, false
+	}
+	return product.Int64(), true
+}
+
+func signedQuoteProduct(priceDifference, signedQuantity, basePrecision int64) (int64, bool) {
+	if basePrecision <= 0 {
+		return 0, false
+	}
+	product := new(big.Int).Mul(big.NewInt(priceDifference), big.NewInt(signedQuantity))
 	product.Quo(product, big.NewInt(basePrecision))
 	if !product.IsInt64() {
 		return 0, false
@@ -1255,7 +1280,7 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 		}
 		state.RealizedPnL = state.realizedPnL
 		if state.lastPosition != 0 && state.entryPrice > 0 && state.terminalMark > 0 {
-			unrealized, ok := quoteProduct(state.terminalMark-state.entryPrice, state.lastPosition, state.configuredBasePrecision)
+			unrealized, ok := signedQuoteProduct(state.terminalMark-state.entryPrice, state.lastPosition, state.configuredBasePrecision)
 			if !ok {
 				r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "unrealized PnL overflow"})
 			} else {

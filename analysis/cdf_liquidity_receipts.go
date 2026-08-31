@@ -45,7 +45,9 @@ type cdfMarketDataRecord struct {
 	ClientID     uint64
 	LinkID       uint32
 	SymbolID     uint32
+	Type         uint8
 	Sequence     uint64
+	Fingerprint  [16]byte
 	PublishedAt  int64
 	ScheduledAt  int64
 	DeliveredAt  int64
@@ -72,6 +74,7 @@ type cdfReceiptLinkOrdinal struct {
 
 type cdfReceiptDecisionKey struct {
 	ClientID  uint64
+	LinkID    uint32
 	RequestID uint64
 }
 
@@ -171,7 +174,7 @@ func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 		if _, exists := evidence.symbols[record.SymbolID]; !exists {
 			return nil, fmt.Errorf("decision record %d references unknown symbol", offset/cdfMarketDataDecisionBytes)
 		}
-		key := cdfReceiptDecisionKey{ClientID: record.ClientID, RequestID: record.RequestID}
+		key := cdfReceiptDecisionKey{ClientID: record.ClientID, LinkID: record.LinkID, RequestID: record.RequestID}
 		if _, exists := evidence.decisions[key]; exists {
 			return nil, fmt.Errorf("duplicate decision request")
 		}
@@ -211,12 +214,14 @@ func decodeCDFMarketDataRecord(raw []byte, withDelivery bool) cdfMarketDataRecor
 		ClientID:     binary.BigEndian.Uint64(raw[0:8]),
 		LinkID:       binary.BigEndian.Uint32(raw[8:12]),
 		SymbolID:     binary.BigEndian.Uint32(raw[12:16]),
+		Type:         raw[16],
 		Sequence:     binary.BigEndian.Uint64(raw[20:28]),
 		PublishedAt:  int64(binary.BigEndian.Uint64(raw[44:52])),
 		ScheduledAt:  int64(binary.BigEndian.Uint64(raw[52:60])),
 		LinkOrdinal:  binary.BigEndian.Uint64(raw[68:76]),
 		EventOrdinal: binary.BigEndian.Uint64(raw[76:84]),
 	}
+	copy(record.Fingerprint[:], raw[28:44])
 	if withDelivery {
 		record.DeliveredAt = int64(binary.BigEndian.Uint64(raw[60:68]))
 	}
@@ -238,7 +243,7 @@ func decodeCDFMarketDataDecision(raw []byte) cdfMarketDataDecisionRecord {
 }
 
 func validateCDFMarketDataRecord(record cdfMarketDataRecord, evidence *cdfMarketDataEvidence) error {
-	if record.ClientID == 0 || record.LinkID == 0 || record.SymbolID == 0 || record.LinkOrdinal == 0 || record.EventOrdinal == 0 || record.PublishedAt <= 0 || record.ScheduledAt <= 0 {
+	if record.ClientID == 0 || record.LinkID == 0 || record.SymbolID == 0 || record.Type > 6 || record.LinkOrdinal == 0 || record.EventOrdinal == 0 || record.PublishedAt <= 0 || record.ScheduledAt <= 0 {
 		return fmt.Errorf("invalid identity or timestamps")
 	}
 	if _, exists := evidence.links[record.LinkID]; !exists {
@@ -251,5 +256,5 @@ func validateCDFMarketDataRecord(record cdfMarketDataRecord, evidence *cdfMarket
 }
 
 func sameCDFMarketDataSchedule(schedule, receipt cdfMarketDataRecord) bool {
-	return schedule.ClientID == receipt.ClientID && schedule.LinkID == receipt.LinkID && schedule.SymbolID == receipt.SymbolID && schedule.Sequence == receipt.Sequence && schedule.PublishedAt == receipt.PublishedAt && schedule.ScheduledAt == receipt.ScheduledAt
+	return schedule.ClientID == receipt.ClientID && schedule.LinkID == receipt.LinkID && schedule.SymbolID == receipt.SymbolID && schedule.Type == receipt.Type && schedule.Sequence == receipt.Sequence && schedule.Fingerprint == receipt.Fingerprint && schedule.PublishedAt == receipt.PublishedAt && schedule.ScheduledAt == receipt.ScheduledAt
 }
