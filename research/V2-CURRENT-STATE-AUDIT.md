@@ -687,6 +687,21 @@ handling only and does not change successful-run economic state, scheduling,
 RNG consumption, or event ordering.  A clean-source candidate determinism and
 mechanical-gate run remains outstanding before the immutable V2 freeze.
 
+## Append-only operational update: corrected clean gate (2026-08-31)
+
+The corrected code commit is `494d696`, with its state-record documentation in
+`558fe21`. The clean exact-tree mechanical gates now pass: full `GOMAXPROCS=4
+make test`, `go vet ./...`, and targeted race coverage for the analyzer/gate
+packages and `tests`. This does not promote the candidate: Banach rejected the
+predecessor `83dc7b1`, and a fresh independent Sol-xhigh review of the current
+HEAD is still mandatory.
+
+The evidence-capacity preflight intentionally requires approximately 51 GiB
+free from a retained 35,341,880,370-byte complete historical tree with a
+1.5x-plus-2-GiB reserve. The host has approximately 28 GiB free, so the next
+hard stop is external capacity, not a scientific failure. No R2 cell, parity
+control, archive/prune operation, or holdout `619/631/641` has run.
+
 ## Append-only operational update: R2 calendar gate review (2026-08-31)
 
 The current R2 successor must not be inferred from the older freeze-readiness

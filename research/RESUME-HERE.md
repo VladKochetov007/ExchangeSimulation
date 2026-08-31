@@ -894,3 +894,18 @@ finish and their contracts pass.
   gates, obtain independent acceptance, then rebuild pinned Go 1.27 binaries.
   Resolve the measured disk-capacity stop condition before dev-607. Preserve
   the incomplete temporary evidence tree and all historical results.
+
+### 2026-08-31 — corrected clean gate passed; promotion and capacity still block
+
+- The venue/fixture/capacity correction is `494d696`; the append-only state
+  record is pushed in `558fe21`. On the clean exact tree, `GOMAXPROCS=4 make
+  test`, `go vet ./...`, and `GOMAXPROCS=4 go test -race
+  ./analysis ./cmd/mvanalyze ./cmd/prunegate ./tests` all pass. The earlier
+  dirty-suite failure remains only a diagnostic for the clean-worktree guard.
+- Banach's review of `83dc7b1` remains a historical rejection. Fresh
+  independent Sol-xhigh acceptance of exact current HEAD is still required;
+  no binary rebuild or development cell may start before it.
+- The runner’s measured capacity floor is approximately 51 GiB free; the host
+  currently has approximately 28 GiB. Do not lower the floor or launch a
+  partial run. No R2 evidence, parity control, archive/prune operation, or
+  holdout `619/631/641` has been consumed.

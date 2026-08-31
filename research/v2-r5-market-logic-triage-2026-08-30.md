@@ -604,3 +604,17 @@ and fresh independent Sol-xhigh review of exact `494d696` are required before
 binary rebuild or dev-607. The current 28 GiB free space intentionally fails
 the new launch preflight; no evidence was written and holdouts
 `619/631/641` remain untouched.
+
+## Corrected clean mechanical gate — `558fe21` (2026-08-31)
+
+After Banach's rejection of `83dc7b1`, the `494d696` correction was committed
+and the state record pushed as `558fe21`. The clean exact-tree full `make test`
+passed, including all package tests and R2 contract/archive tests. `go vet
+./...` and targeted race coverage for `./analysis ./cmd/mvanalyze
+./cmd/prunegate ./tests` also passed. No experiment or evidence cell ran.
+
+Promotion remains blocked pending fresh independent Sol-xhigh acceptance of
+the exact current HEAD. Independently measured disk capacity is also below the
+runner’s approximately 51 GiB fail-closed floor (about 28 GiB currently
+free), so dev-607 cannot safely launch even after review until capacity is
+resolved. Holdouts `619/631/641` remain untouched.

@@ -397,3 +397,10 @@ parity/archive guard correctly rejected the uncommitted candidate; a clean
 full gate, vet, targeted race check, and fresh exact-tree Sol-xhigh review are
 still required. No binary rebuild, dev cell, parity control, or holdout has
 run from `494d696`; holdouts `619/631/641` remain untouched.
+
+The corrected clean gate completed on documentation commit `558fe21`: full
+`GOMAXPROCS=4 make test`, `go vet ./...`, and targeted race tests pass on the
+exact tree. This does not constitute promotion. Fresh independent Sol-xhigh
+review remains required, and the approximately 51 GiB capacity floor is above
+the host’s approximately 28 GiB free space. No R2 development, parity, or
+holdout evidence has run.
