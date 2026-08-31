@@ -625,3 +625,59 @@ s2, on the evidence: it is a 3.94x reduction for a cost that cannot be
 distinguished from noise. zstd is the right choice when a campaign is
 capacity-bound rather than time-bound, and the 9.7 % is worth naming rather
 than absorbing silently.
+
+## The adoption blocker, removed
+
+`replace` mode makes the binary stream stand in for the venue JSONL, which
+raises the question that decides whether the format can ship: are the typed
+frames enough to rebuild the JSON *exactly*, or only nearly? Nearly is a
+failure — the records are evidence.
+
+`cmd/evsrender` reconstructs the venue log records from `events.evs` alone.
+Measured on dev-607, seed 607, 20 simulated minutes, against a JSON-mode run of
+the same config and seed:
+
+```
+json-mode JSONL lines    1,597,303
+binary frames            1,569,110
+replace-mode JSONL          28,193
+                         ---------
+1,569,110 + 28,193    =  1,597,303
+```
+
+The partition is exact. The 28,193 are `LogEvidenceOnly` events, which are
+excluded from the execution hash by design because they must not perturb the
+digest; they were never in the binary stream and replace mode still writes them.
+The JSONL degrades to an instrumentation-only sidecar rather than disappearing.
+
+Rendering the 1,569,110 hashed events and comparing them against the same events
+from the JSON-mode run, sorted, byte for byte:
+
+**IDENTICAL.** Every rendered line matches a JSON-mode line exactly.
+
+This is a stronger statement than the field-level losslessness the independent
+reproducer verified. That test asked whether each schema preserves its fields
+through a round trip. This asks whether a real run's entire evidence corpus can
+be rebuilt from the binary alone and come out byte-identical to what the
+simulator would have written — 1.57 million records, every field, every
+escaping decision, every numeric formatting choice.
+
+### Reproduction
+
+```bash
+EXSIM_BINARY_EVIDENCE=replace ./multivenue -config dev-607.json -duration 20m -seed 607 -logdir bin/
+env -u EXSIM_BINARY_EVIDENCE      ./multivenue -config dev-607.json -duration 20m -seed 607 -logdir json/
+go run ./cmd/evsrender -dir bin/ | sort > rendered.sorted
+# drop the LogEvidenceOnly families, which are never hashed and never binary
+cat json/venues/*/*.jsonl json/venues/*/*/*.jsonl | grep -vE '"event":"(maker_quote_size_decision|noise_flow_phase_decision|liability_hedger_decision|liability_hedger_fill|option_liability_user_decision|maker_inventory_rebalance_decision|maker_inventory_rebalance_fill|option_liability_user_fill)"' | sort > original.sorted
+cmp rendered.sorted original.sorted
+```
+
+### What is still not proven
+
+The renderer emits one globally ordered stream. It does not reproduce the
+*file layout* — which venue and symbol file each record was written to — because
+that routing lives in the logger tree rather than in the events. An analyzer
+that opens `venues/north/spot/ABC-USD.jsonl` by path still needs either that
+routing rebuilt or a change to read the stream. The content is proven; the
+directory shape is not.
