@@ -2019,8 +2019,25 @@ type manifest struct {
 	VenueIDs      []string  `json:"venue_ids"`
 	Config        Config    `json:"config"`
 	Build         BuildInfo `json:"build"`
-	Notes         []string  `json:"notes"`
+	// EvidenceFormat names the format the run's execution evidence is in when
+	// it is NOT the venue JSONL. Absent means JSONL, so every manifest written
+	// before the binary sink existed stays byte-identical and every existing
+	// consumer keeps reading them.
+	//
+	// It exists because a run whose JSONL was replaced still contains the
+	// LogEvidenceOnly records, so the directory looks like a valid, much
+	// quieter run rather than an unreadable one. Measured against a JSON run of
+	// the same seed, 26 of 32 analyzer metrics then produce wrong output and
+	// exit 0: `viability` reports 0 books and reads as a pass, `conservation`
+	// reports 720 broken chain links that do not exist. A consumer must be able
+	// to detect this rather than infer it.
+	EvidenceFormat string   `json:"evidence_format,omitempty"`
+	Notes          []string `json:"notes"`
 }
+
+// EvidenceFormatEvstream marks a run whose execution evidence is the binary
+// stream rather than the venue JSONL.
+const EvidenceFormatEvstream = "evstream_v1"
 
 // BuildInfo records which build produced a run. Three experiments in this
 // campaign were run against a binary compiled before the fix under test, and
@@ -2046,6 +2063,16 @@ type BuildInfo struct {
 	// GOAMD64 is the amd64 microarchitecture level; empty means the toolchain
 	// default, which is v1.
 	GOAMD64 string `json:"goamd64,omitempty"`
+}
+
+// evidenceFormat reports the run's evidence format for the manifest: empty for
+// the JSONL default, so the field is omitted and existing manifests are
+// unchanged.
+func evidenceFormat() string {
+	if binaryEvidenceEnabled() && binaryEvidenceReplacesRawLog() {
+		return EvidenceFormatEvstream
+	}
+	return ""
 }
 
 // currentBuild reads the version-control stamp Go embeds at build time.
@@ -2102,10 +2129,11 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	// persistent log directories.
 	manifestConfig.LogDir = ""
 	manifestBytes, err := json.MarshalIndent(manifest{
-		SchemaVersion: 2,
-		VenueIDs:      slices.Clone(cfg.VenueIDs),
-		Config:        manifestConfig,
-		Build:         currentBuild(),
+		SchemaVersion:  2,
+		VenueIDs:       slices.Clone(cfg.VenueIDs),
+		Config:         manifestConfig,
+		Build:          currentBuild(),
+		EvidenceFormat: evidenceFormat(),
 		Notes: []string{
 			"Each venue has independent prefunded accounts and local spot-margin borrowing.",
 			latencyNote,

@@ -160,6 +160,20 @@ func Open(dir string) (*Run, error) {
 	for _, row := range run.Report.TerminalAccounts {
 		run.roles[Participant{row.VenueID, row.ClientID}] = RoleGroup(row.Role)
 	}
+	// A run whose venue JSONL was replaced by a binary evidence stream still
+	// has a venues directory, because the LogEvidenceOnly families are still
+	// written there. It therefore reads as a valid but much quieter run, and
+	// every metric below silently produces wrong numbers: measured against a
+	// JSON run of the same seed, 26 of 32 metrics differ while exiting 0,
+	// `viability` reports zero books and reads as a pass, and `conservation`
+	// reports 720 broken chain links that do not exist.
+	//
+	// Refuse rather than analyse. A metric that cannot see the evidence must
+	// say so, not report an absence of findings.
+	if err := refuseUnreadableEvidence(dir); err != nil {
+		return nil, err
+	}
+
 	venues := filepath.Join(dir, "venues")
 	// A run logged with log_mode none has a report and no event logs. That is a
 	// valid run for every report-derived metric, so a missing directory is an
@@ -180,6 +194,32 @@ func Open(dir string) (*Run, error) {
 	}
 	sort.Strings(run.files)
 	return run, nil
+}
+
+// refuseUnreadableEvidence fails a run whose manifest declares an evidence
+// format this package cannot read. A manifest with no such field is the JSONL
+// default and is always readable, so runs written before the field existed are
+// unaffected.
+func refuseUnreadableEvidence(dir string) error {
+	raw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		// A run without a manifest predates provenance recording; it cannot be
+		// in a replaced format, because that format postdates the manifest.
+		return nil
+	}
+	var manifest struct {
+		EvidenceFormat string `json:"evidence_format"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return nil
+	}
+	if manifest.EvidenceFormat == "" {
+		return nil
+	}
+	return fmt.Errorf(
+		"analysis: run %s stores its execution evidence as %q, which this analyzer cannot read; "+
+			"the venue JSONL holds only the evidence-only families, so every metric would report "+
+			"a quieter run rather than an error", dir, manifest.EvidenceFormat)
 }
 
 // Files returns the indexed event logs, sorted so a scan is deterministic.

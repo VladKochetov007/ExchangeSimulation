@@ -239,6 +239,20 @@ func evaluate(run string, manifest *Manifest, scoreboard, logs string, scored ma
 	}
 	report.Status = RunComplete
 
+	// A run whose evidence was written in a format the analyzers cannot read
+	// must never reach SAFE_TO_PRUNE. Its artifacts are produced and non-empty,
+	// so every requirement below passes on numbers derived from a fraction of
+	// the events — `streamhash` counts 28,193 instead of 1,597,303 and still
+	// satisfies "events > 0". Certifying that run would authorise deleting the
+	// only readable copy of evidence the measurements never actually covered.
+	if format := evidenceFormat(extracted); format != "" {
+		report.Missing = append(report.Missing,
+			"evidence is stored as "+format+", which the analyzers cannot read: "+
+				"refusing to certify measurements taken over a fraction of the events")
+		report.Status = MeasurementIncomplete
+		return report
+	}
+
 	contract, known := manifest.Arms[report.Arm]
 	if !known {
 		report.Missing = append(report.Missing, "no contract for this arm: refusing to judge it complete")
@@ -291,6 +305,23 @@ func checkFile(report *Report, path, label, requirement string) {
 	if err := checkRequirement(payload, requirement); err != nil {
 		report.Empty = append(report.Empty, label+" ("+err.Error()+")")
 	}
+}
+
+// evidenceFormat reports a run's declared non-default evidence format, or "" for
+// the JSONL default. A run with no manifest, or an unparseable one, is reported
+// as default here; the artifact checks below are what catch those.
+func evidenceFormat(dir string) string {
+	raw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		return ""
+	}
+	var manifest struct {
+		EvidenceFormat string `json:"evidence_format"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return ""
+	}
+	return manifest.EvidenceFormat
 }
 
 // checkRequirement evaluates the small, deliberately explicit expression

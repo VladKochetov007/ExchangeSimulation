@@ -67,6 +67,32 @@ unfixed code.
 
 ## 5. What blocks promotion
 
+**The blocker is larger than a missing feature, and it was found by review.**
+
+A replace-mode run still writes a venues directory, because the evidence-only
+families go there. So it reads as a *valid but much quieter run* rather than an
+unreadable one. Measured against a JSON run of the same seed, of 32 `mvanalyze`
+metrics: **6 fail loudly, 0 are correct, and 26 are silently different while
+exiting 0.** Reproduced independently:
+
+| metric | JSON | replace |
+| --- | --- | --- |
+| `viability` | books 78, windows 156, viable 156 | **books 0, windows 0** — reads as a pass |
+| `streamhash` | events 1,597,303 | events 28,193, different digest |
+| `conservation` | chain links 720, broken **0** | broken **720**, worst 5.0e14 — a fabricated accounting leak |
+
+And `prunegate` certified such a run: its artifacts exist and are non-empty, so
+`streamhash`'s `events > 0` passes on 28,193 events. That is authorisation to
+delete raw logs for a run whose measurements covered a fraction of the evidence.
+
+**Fixed by failing closed, in three places.** The manifest now records
+`evidence_format`, omitted for the JSONL default so every existing manifest and
+consumer is unchanged. `analysis.Open` refuses a run whose format it cannot
+read, which covers all 56 metrics at their single entry point rather than one by
+one. `prunegate` refuses to certify such a run at all.
+
+The remaining blockers:
+
 1. **File-layout routing.** `cmd/evsrender` emits one globally ordered stream and
    does not reproduce the `venues/<v>/spot/<sym>.jsonl` directory shape, because
    routing lives in the logger tree rather than in the events. Any analyzer that
