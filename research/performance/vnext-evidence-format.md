@@ -588,3 +588,40 @@ old evidence available for differential checking while the format is under
 review — but it means the measured wall-clock gain is the encode-and-hash saving
 only, and does not yet include the write-side saving that retiring the JSONL
 would add.
+
+## Block compression, measured on a real run
+
+Every earlier binary measurement ran uncompressed, because the sink constructed
+`WriterOptions{}` and offered no way to ask for anything else. With the codec
+made configurable, one hour of `dev-607-none`, seed 607, writing real files
+rather than discarding:
+
+| codec | bytes | ratio | elapsed | execution hash |
+| --- | ---: | ---: | ---: | --- |
+| none | 520,087,073 | 1.00x | 21.19 s | `59215e9bfc7da65d` |
+| lz4 | 149,042,164 | 3.49x | 22.31 s | `59215e9bfc7da65d` |
+| s2 | 131,841,722 | 3.94x | 21.38 s | `59215e9bfc7da65d` |
+| zstd | 78,402,501 | **6.63x** | 23.25 s | `59215e9bfc7da65d` |
+
+**All four hashes are identical.** That is the point of hashing uncompressed
+canonical frames, and it is now demonstrated on a real run rather than argued
+from the design. A codec is a storage decision: two runs compressed differently
+are the same run, and a result never has to name its codec.
+
+**s2 is close to free**: 3.94x for +0.9 % wall, inside the A/A noise floor of
+0.06-0.8 %. zstd buys 6.63x for +9.7 %.
+
+Against the JSON baseline the two changes stack. JSONL runs about 1.48 GB per
+simulated hour; binary is 520 MB, and zstd takes it to 78 MB — **18.9x**
+overall. A 24-hour cell falls from roughly 35.5 GB to 1.9 GB.
+
+The cost figures are measured against the uncompressed *binary* arm, both
+writing real files. They are not a comparison against JSON, which this
+particular run did not include.
+
+### Recommended default
+
+s2, on the evidence: it is a 3.94x reduction for a cost that cannot be
+distinguished from noise. zstd is the right choice when a campaign is
+capacity-bound rather than time-bound, and the 9.7 % is worth naming rather
+than absorbing silently.
