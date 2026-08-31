@@ -681,3 +681,42 @@ that routing lives in the logger tree rather than in the events. An analyzer
 that opens `venues/north/spot/ABC-USD.jsonl` by path still needs either that
 routing rebuilt or a change to read the stream. The content is proven; the
 directory shape is not.
+
+## The digest algorithm: measured, and deliberately not changed
+
+The hash is the one part of the format that would be expensive to change after
+promotion, so it was worth pricing before the format freezes rather than after.
+
+`crypto/sha256` on this host runs at **1,650 MB/s** (median of three, isolated
+on a spare core; SHA-NI, which is what `sha256.blockSHANI` in the profile
+means). The stream is 520 MB per simulated hour and a one-hour run takes about
+24.6 s in replace mode, so:
+
+```
+520 MB / 1650 MB/s = 0.315 s  =  1.28 % of wall
+```
+
+**An infinitely fast hash would buy 1.28 %.** BLAKE3 at the 2-3x it typically
+achieves over SHA-NI would save 0.6-0.85 %, which is below this host's A/A noise
+floor. There is no case for changing the digest, and none for an assembly
+implementation of it either: the existing one already dispatches to hardware.
+
+### This supersedes an earlier finding rather than contradicting it
+
+The campaign previously recorded that per-frame SHA-256 was **54-69 % of binary
+encode cost**. That was true of per-frame hashing, which paid call overhead once
+per event. The continuous hasher replaced it with one long-lived hasher over the
+whole stream, moving the regime from overhead-bound to throughput-bound. Same
+algorithm, different economics, and the earlier number should not be quoted as
+if it still described the current design.
+
+### Where the evidence cost now sits
+
+With `replace` mode, the evidence subsystem is: typed encode (small), hashing
+(1.28 %), and the write. **The write is now the largest remaining evidence
+cost**, which is what makes the codec choice matter more than any further
+encoder work — zstd removes 4.79x of it for 2.4 % wall.
+
+That is a plateau on this path. Further optimisation of the evidence subsystem
+has lower expected value than the diffuse remainder of the simulator, where
+matching is 0.45 % of CPU and map work has no single caller above 1.5 %.
