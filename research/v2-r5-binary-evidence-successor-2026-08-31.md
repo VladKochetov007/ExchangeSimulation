@@ -166,3 +166,34 @@ The R2 population amendment and correctness hardening remain subject to the
 fresh independent review. Historical claims remain attached to their original
 JSON revisions. Any later semantic rejection or correction must create a new
 successor revision and must not repair old trajectories offline.
+
+## 2026-08-31 capacity probe outcome
+
+The first isolated, non-cell 24-hour capacity probe was not a valid capacity
+measurement. It used the clean Go 1.27 binary built from revision
+`95596f16fb01c5521836b46693664722409af1a9` and the dev-607 economic
+configuration copied only to redirect its log directory; it did not invoke the
+registered runner and did not consume a holdout. The process exited with status
+1 at the terminal population mark after producing `30,212,381,584` bytes of
+binary-run output. No capacity attestation was issued.
+
+The failure was:
+
+```text
+multivenue: terminal_post_mark participant valuation requires two-sided CDF/USD mark on venue south: no usable price
+```
+
+Retained diagnostic output showed that South's final CDF/USD observation had a
+bid at `444100000` and no ask while the liability hedger still held a short
+position of `300000000` base units. The last South liability snapshot with an
+ask occurred at simulated time `1735733030000000000`; the terminal time was
+`1735776000000000000`, a gap of about 11.9 simulated hours. The failure is
+therefore a durable unpriceable-exposure/market-survival condition, not merely
+the expected transient cancellation at the final ingress boundary.
+
+This probe does not authorize a binary capacity floor or dev-607. It is not a
+registered scientific cell and its incomplete output is not retained as a
+trajectory. The strict terminal accounting contract correctly failed closed;
+the CDF market-collapse mechanism must be independently adjudicated before a
+new capacity measurement or registered cell is attempted. Historical JSON
+results and their verdicts are unchanged.
