@@ -26,6 +26,7 @@ const (
 	MarketDataScheduleRecordBytes = 88
 	MarketDataReceiptRecordBytes  = 88
 	MarketDataDecisionRecordBytes = 96
+	MarketDataActionRecordBytes   = 112
 )
 
 const (
@@ -88,6 +89,28 @@ type MarketDataDecision struct {
 	Frontier    MarketDataFrontier
 }
 
+// MarketDataAction records an actor-facing gateway request that does not
+// necessarily create an order decision: subscriptions and cancellations are
+// included so an auditor can bind every CDF request boundary to its delayed
+// local information set. Symbol is optional for cancellation because the
+// exchange cancel protocol addresses an order ID only.
+type MarketDataAction struct {
+	ClientID    uint64
+	SourceVenue string
+	Link        string
+	Symbol      string
+	RequestType types.RequestType
+	RequestID   uint64
+	OrderID     uint64
+	Side        types.Side
+	OrderType   types.OrderType
+	TimeInForce types.TimeInForce
+	Price       int64
+	Qty         int64
+	DecisionAt  int64
+	Frontier    MarketDataFrontier
+}
+
 type receiptLinkKey struct {
 	SourceVenue string
 	Link        string
@@ -119,6 +142,7 @@ type receiptArtifact struct {
 	Schedules     evidenceFileArtifact   `json:"schedules"`
 	Receipts      evidenceFileArtifact   `json:"receipts"`
 	Decisions     evidenceFileArtifact   `json:"decisions"`
+	Actions       evidenceFileArtifact   `json:"actions,omitempty"`
 	Links         []receiptLinkCatalog   `json:"links"`
 	Symbols       []receiptSymbolCatalog `json:"symbols"`
 }
@@ -171,13 +195,15 @@ type MarketDataReceiptRecorder struct {
 	schedules    *evidenceWriter
 	receipts     *evidenceWriter
 	decisions    *evidenceWriter
+	actions      *evidenceWriter
 
-	links      map[receiptLinkKey]uint32
-	linkRows   []receiptLinkCatalog
-	symbols    map[string]uint32
-	symbolRows []receiptSymbolCatalog
-	frontiers  map[uint32]MarketDataFrontier
-	nextEvent  uint64
+	links           map[receiptLinkKey]uint32
+	linkRows        []receiptLinkCatalog
+	symbols         map[string]uint32
+	symbolRows      []receiptSymbolCatalog
+	frontiers       map[uint32]MarketDataFrontier
+	nextEvent       uint64
+	nextActionEvent uint64
 
 	writeErr  error
 	finalized bool
@@ -202,11 +228,19 @@ func NewMarketDataReceiptRecorder(dir string) (*MarketDataReceiptRecorder, error
 		_ = receipts.close()
 		return nil, fmt.Errorf("create market-data decision sidecar: %w", err)
 	}
+	actions, err := newEvidenceWriter(filepath.Join(dir, "market-data-actions-v2.bin"))
+	if err != nil {
+		_ = schedules.close()
+		_ = receipts.close()
+		_ = decisions.close()
+		return nil, fmt.Errorf("create market-data action sidecar: %w", err)
+	}
 	return &MarketDataReceiptRecorder{
 		manifestPath: filepath.Join(dir, "market-data-evidence-v2.json"),
 		schedules:    schedules,
 		receipts:     receipts,
 		decisions:    decisions,
+		actions:      actions,
 		links:        make(map[receiptLinkKey]uint32),
 		symbols:      make(map[string]uint32),
 		frontiers:    make(map[uint32]MarketDataFrontier),
@@ -364,6 +398,75 @@ func (r *MarketDataReceiptRecorder) RecordDecision(decision MarketDataDecision) 
 	}
 }
 
+// RecordAction appends a request boundary to a separate ledger. Its ordinal
+// is intentionally independent from the legacy schedule/receipt/decision
+// ordinal so existing consumers that know only the original three ledgers see
+// no artificial gaps.
+func (r *MarketDataReceiptRecorder) RecordAction(action MarketDataAction) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.finalized || r.writeErr != nil {
+		return
+	}
+	if action.ClientID == 0 || action.SourceVenue == "" || action.Link == "" || action.RequestID == 0 || action.DecisionAt <= 0 {
+		r.writeErr = fmt.Errorf("market-data action has incomplete identity")
+		return
+	}
+	linkID, registered := r.links[receiptLinkKey{SourceVenue: action.SourceVenue, Link: action.Link}]
+	if !registered {
+		r.writeErr = fmt.Errorf("market-data action references an unregistered link")
+		return
+	}
+	symbolID := uint32(0)
+	if action.Symbol != "" {
+		symbolID = r.symbolIDLocked(action.Symbol)
+	}
+	requestCode := marketDataRequestCode(action.RequestType)
+	if requestCode == 0 {
+		r.writeErr = fmt.Errorf("market-data action has unsupported request type %q", action.RequestType)
+		return
+	}
+	r.nextActionEvent++
+	var raw [MarketDataActionRecordBytes]byte
+	binary.BigEndian.PutUint64(raw[0:8], action.ClientID)
+	binary.BigEndian.PutUint32(raw[8:12], linkID)
+	binary.BigEndian.PutUint32(raw[12:16], symbolID)
+	raw[16] = requestCode
+	raw[17] = byte(action.Side)
+	raw[18] = byte(action.OrderType)
+	raw[19] = byte(action.TimeInForce)
+	binary.BigEndian.PutUint64(raw[20:28], action.RequestID)
+	binary.BigEndian.PutUint64(raw[28:36], uint64(action.DecisionAt))
+	binary.BigEndian.PutUint64(raw[36:44], action.OrderID)
+	binary.BigEndian.PutUint64(raw[44:52], uint64(action.Price))
+	binary.BigEndian.PutUint64(raw[52:60], uint64(action.Qty))
+	binary.BigEndian.PutUint64(raw[60:68], action.Frontier.Ordinal)
+	binary.BigEndian.PutUint64(raw[68:76], uint64(action.Frontier.DeliveredAt))
+	copy(raw[76:92], action.Frontier.Digest[:])
+	binary.BigEndian.PutUint64(raw[104:112], r.nextActionEvent)
+	if err := r.actions.write(raw[:]); err != nil {
+		r.writeErr = fmt.Errorf("write market-data action: %w", err)
+	}
+}
+
+func marketDataRequestCode(requestType types.RequestType) byte {
+	switch requestType {
+	case types.ReqSubscribe:
+		return 1
+	case types.ReqPlaceOrder:
+		return 2
+	case types.ReqCancelOrder:
+		return 3
+	case types.ReqUnsubscribe:
+		return 4
+	default:
+		return 0
+	}
+}
+
 func (r *MarketDataReceiptRecorder) recordIDsLocked(clientID uint64, sourceVenue, link, symbol string) (uint32, uint32, bool) {
 	if clientID == 0 || sourceVenue == "" || link == "" || symbol == "" {
 		r.writeErr = fmt.Errorf("market-data evidence has empty client, source, link, or symbol")
@@ -422,7 +525,7 @@ func (r *MarketDataReceiptRecorder) Finalize(terminalAt int64) error {
 		return r.writeErr
 	}
 	r.finalized = true
-	for _, writer := range []*evidenceWriter{r.schedules, r.receipts, r.decisions} {
+	for _, writer := range []*evidenceWriter{r.schedules, r.receipts, r.decisions, r.actions} {
 		if err := writer.close(); err != nil && r.writeErr == nil {
 			r.writeErr = fmt.Errorf("close market-data evidence sidecar: %w", err)
 		}
@@ -442,6 +545,7 @@ func (r *MarketDataReceiptRecorder) Finalize(terminalAt int64) error {
 		Schedules:     r.schedules.artifact("market-data-schedules-v2.bin"),
 		Receipts:      r.receipts.artifact("market-data-receipts-v2.bin"),
 		Decisions:     r.decisions.artifact("market-data-decisions-v2.bin"),
+		Actions:       r.actions.artifact("market-data-actions-v2.bin"),
 		Links:         links,
 		Symbols:       symbols,
 	}

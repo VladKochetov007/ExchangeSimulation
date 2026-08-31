@@ -14,6 +14,7 @@ import (
 const (
 	cdfMarketDataRecordBytes   = 88
 	cdfMarketDataDecisionBytes = 96
+	cdfMarketDataActionBytes   = 112
 )
 
 type cdfEvidenceFile struct {
@@ -23,11 +24,16 @@ type cdfEvidenceFile struct {
 }
 
 type cdfReceiptManifest struct {
-	Schedules cdfEvidenceFile    `json:"schedules"`
-	Receipts  cdfEvidenceFile    `json:"receipts"`
-	Decisions cdfEvidenceFile    `json:"decisions"`
-	Links     []cdfReceiptLink   `json:"links"`
-	Symbols   []cdfReceiptSymbol `json:"symbols"`
+	SchemaVersion int                `json:"schema_version"`
+	Domain        string             `json:"domain"`
+	Ordering      string             `json:"ordering"`
+	TerminalAt    int64              `json:"terminal_at"`
+	Schedules     cdfEvidenceFile    `json:"schedules"`
+	Receipts      cdfEvidenceFile    `json:"receipts"`
+	Decisions     cdfEvidenceFile    `json:"decisions"`
+	Actions       cdfEvidenceFile    `json:"actions"`
+	Links         []cdfReceiptLink   `json:"links"`
+	Symbols       []cdfReceiptSymbol `json:"symbols"`
 }
 
 type cdfReceiptLink struct {
@@ -70,6 +76,25 @@ type cdfMarketDataDecisionRecord struct {
 	Qty               int64
 }
 
+type cdfMarketDataActionRecord struct {
+	ClientID          uint64
+	LinkID            uint32
+	SymbolID          uint32
+	RequestType       uint8
+	Side              uint8
+	OrderType         uint8
+	TimeInForce       uint8
+	RequestID         uint64
+	DecisionAt        int64
+	OrderID           uint64
+	Price             int64
+	Qty               int64
+	FrontierOrdinal   uint64
+	FrontierDelivered int64
+	FrontierDigest    [16]byte
+	EventOrdinal      uint64
+}
+
 type cdfReceiptLinkOrdinal struct {
 	LinkID      uint32
 	LinkOrdinal uint64
@@ -81,11 +106,18 @@ type cdfReceiptDecisionKey struct {
 	RequestID uint64
 }
 
+type cdfReceiptActionKey struct {
+	ClientID  uint64
+	LinkID    uint32
+	RequestID uint64
+}
+
 type cdfMarketDataEvidence struct {
 	links            map[uint32]cdfReceiptLink
 	symbols          map[uint32]cdfReceiptSymbol
 	receipts         map[cdfReceiptLinkOrdinal]cdfMarketDataRecord
 	decisions        map[cdfReceiptDecisionKey]cdfMarketDataDecisionRecord
+	actions          map[cdfReceiptActionKey]cdfMarketDataActionRecord
 	receiptsByClient map[uint64]int64
 }
 
@@ -98,11 +130,15 @@ func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
 		return nil, fmt.Errorf("decode market-data evidence manifest: %w", err)
 	}
+	if manifest.SchemaVersion != 2 || manifest.Domain != "participant_information_boundary_v2" || manifest.Ordering != "per_link_fifo_schedule_receipt_decision" || manifest.TerminalAt <= 0 {
+		return nil, fmt.Errorf("market-data evidence manifest violates schema contract")
+	}
 	evidence := &cdfMarketDataEvidence{
 		links:            make(map[uint32]cdfReceiptLink, len(manifest.Links)),
 		symbols:          make(map[uint32]cdfReceiptSymbol, len(manifest.Symbols)),
 		receipts:         make(map[cdfReceiptLinkOrdinal]cdfMarketDataRecord),
 		decisions:        make(map[cdfReceiptDecisionKey]cdfMarketDataDecisionRecord),
+		actions:          make(map[cdfReceiptActionKey]cdfMarketDataActionRecord),
 		receiptsByClient: make(map[uint64]int64),
 	}
 	for _, link := range manifest.Links {
@@ -134,6 +170,10 @@ func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 	decisions, err := readCDFEvidenceFile(runDir, manifest.Decisions, cdfMarketDataDecisionBytes)
 	if err != nil {
 		return nil, fmt.Errorf("read market-data decisions: %w", err)
+	}
+	actions, err := readCDFEvidenceFile(runDir, manifest.Actions, cdfMarketDataActionBytes)
+	if err != nil {
+		return nil, fmt.Errorf("read market-data actions: %w", err)
 	}
 	scheduled := make(map[cdfReceiptLinkOrdinal]cdfMarketDataRecord, len(schedules)/cdfMarketDataRecordBytes)
 	for offset := 0; offset < len(schedules); offset += cdfMarketDataRecordBytes {
@@ -169,6 +209,52 @@ func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 	if err := reconstructCDFReceiptDigests(evidence); err != nil {
 		return nil, fmt.Errorf("reconstruct market-data receipt frontiers: %w", err)
 	}
+	var lastActionOrdinal uint64
+	for offset := 0; offset < len(actions); offset += cdfMarketDataActionBytes {
+		record := decodeCDFMarketDataAction(actions[offset : offset+cdfMarketDataActionBytes])
+		if record.ClientID == 0 || record.LinkID == 0 || record.RequestID == 0 || record.DecisionAt <= 0 || record.RequestType < 1 || record.RequestType > 4 || record.EventOrdinal != lastActionOrdinal+1 {
+			return nil, fmt.Errorf("action record %d has invalid identity or bounds", offset/cdfMarketDataActionBytes)
+		}
+		lastActionOrdinal = record.EventOrdinal
+		if _, exists := evidence.links[record.LinkID]; !exists {
+			return nil, fmt.Errorf("action record %d references unknown link", offset/cdfMarketDataActionBytes)
+		}
+		if record.SymbolID != 0 {
+			if _, exists := evidence.symbols[record.SymbolID]; !exists {
+				return nil, fmt.Errorf("action record %d references unknown symbol", offset/cdfMarketDataActionBytes)
+			}
+		}
+		switch record.RequestType {
+		case 1, 4:
+			if record.SymbolID == 0 {
+				return nil, fmt.Errorf("action record %d has no subscription symbol", offset/cdfMarketDataActionBytes)
+			}
+		case 2:
+			if record.SymbolID == 0 || record.Price <= 0 || record.Qty <= 0 {
+				return nil, fmt.Errorf("action record %d has incomplete order fields", offset/cdfMarketDataActionBytes)
+			}
+		case 3:
+			if record.OrderID == 0 {
+				return nil, fmt.Errorf("action record %d has no cancellation order", offset/cdfMarketDataActionBytes)
+			}
+		}
+		if record.FrontierOrdinal == 0 {
+			if record.FrontierDelivered != 0 || record.FrontierDigest != ([16]byte{}) {
+				return nil, fmt.Errorf("action record %d has an incomplete empty frontier", offset/cdfMarketDataActionBytes)
+			}
+		} else {
+			receipt, exists := evidence.receipts[cdfReceiptLinkOrdinal{LinkID: record.LinkID, LinkOrdinal: record.FrontierOrdinal}]
+			latest, latestExists := latestCDFReceiptBefore(evidence.receipts, record.LinkID, record.DecisionAt)
+			if !exists || !latestExists || latest.LinkOrdinal != record.FrontierOrdinal || receipt.DeliveredAt != record.FrontierDelivered || receipt.DeliveredAt > record.DecisionAt || record.FrontierDigest == ([16]byte{}) || receipt.Digest != record.FrontierDigest {
+				return nil, fmt.Errorf("action record %d frontier does not resolve to the latest delivered receipt", offset/cdfMarketDataActionBytes)
+			}
+		}
+		key := cdfReceiptActionKey{ClientID: record.ClientID, LinkID: record.LinkID, RequestID: record.RequestID}
+		if _, exists := evidence.actions[key]; exists {
+			return nil, fmt.Errorf("duplicate market-data action request")
+		}
+		evidence.actions[key] = record
+	}
 	for offset := 0; offset < len(decisions); offset += cdfMarketDataDecisionBytes {
 		record := decodeCDFMarketDataDecision(decisions[offset : offset+cdfMarketDataDecisionBytes])
 		if record.ClientID == 0 || record.LinkID == 0 || record.SymbolID == 0 || record.RequestID == 0 || record.DecisionAt <= 0 || record.FrontierOrdinal == 0 || record.FrontierDelivered <= 0 || record.Price <= 0 || record.Qty <= 0 {
@@ -185,7 +271,8 @@ func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 			return nil, fmt.Errorf("duplicate decision request")
 		}
 		receipt, exists := evidence.receipts[cdfReceiptLinkOrdinal{LinkID: record.LinkID, LinkOrdinal: record.FrontierOrdinal}]
-		if !exists || receipt.DeliveredAt != record.FrontierDelivered || receipt.DeliveredAt > record.DecisionAt || record.FrontierDigest == ([16]byte{}) || receipt.Digest != record.FrontierDigest {
+		latest, latestExists := latestCDFReceiptBefore(evidence.receipts, record.LinkID, record.DecisionAt)
+		if !exists || !latestExists || latest.LinkOrdinal != record.FrontierOrdinal || receipt.DeliveredAt != record.FrontierDelivered || receipt.DeliveredAt > record.DecisionAt || record.FrontierDigest == ([16]byte{}) || receipt.Digest != record.FrontierDigest {
 			return nil, fmt.Errorf("decision frontier does not resolve to a delivered receipt")
 		}
 		evidence.decisions[key] = record
@@ -250,6 +337,28 @@ func decodeCDFMarketDataDecision(raw []byte) cdfMarketDataDecisionRecord {
 	return record
 }
 
+func decodeCDFMarketDataAction(raw []byte) cdfMarketDataActionRecord {
+	record := cdfMarketDataActionRecord{
+		ClientID:          binary.BigEndian.Uint64(raw[0:8]),
+		LinkID:            binary.BigEndian.Uint32(raw[8:12]),
+		SymbolID:          binary.BigEndian.Uint32(raw[12:16]),
+		RequestType:       raw[16],
+		Side:              raw[17],
+		OrderType:         raw[18],
+		TimeInForce:       raw[19],
+		RequestID:         binary.BigEndian.Uint64(raw[20:28]),
+		DecisionAt:        int64(binary.BigEndian.Uint64(raw[28:36])),
+		OrderID:           binary.BigEndian.Uint64(raw[36:44]),
+		Price:             int64(binary.BigEndian.Uint64(raw[44:52])),
+		Qty:               int64(binary.BigEndian.Uint64(raw[52:60])),
+		FrontierOrdinal:   binary.BigEndian.Uint64(raw[60:68]),
+		FrontierDelivered: int64(binary.BigEndian.Uint64(raw[68:76])),
+		EventOrdinal:      binary.BigEndian.Uint64(raw[104:112]),
+	}
+	copy(record.FrontierDigest[:], raw[76:92])
+	return record
+}
+
 func reconstructCDFReceiptDigests(evidence *cdfMarketDataEvidence) error {
 	receiptsByLink := make(map[uint32][]cdfMarketDataRecord)
 	for _, receipt := range evidence.receipts {
@@ -263,6 +372,9 @@ func reconstructCDFReceiptDigests(evidence *cdfMarketDataEvidence) error {
 			if receipt.LinkOrdinal != uint64(index+1) {
 				return fmt.Errorf("link %d receipt ordinal has a gap at %d", linkID, receipt.LinkOrdinal)
 			}
+			if index > 0 && receipt.DeliveredAt < receipts[index-1].DeliveredAt {
+				return fmt.Errorf("link %d receipt delivery is not FIFO", linkID)
+			}
 			raw := encodeCDFMarketDataRecord(receipt)
 			chain := sha256.New()
 			_, _ = chain.Write(previous[:])
@@ -273,6 +385,20 @@ func reconstructCDFReceiptDigests(evidence *cdfMarketDataEvidence) error {
 		}
 	}
 	return nil
+}
+
+func latestCDFReceiptBefore(receipts map[cdfReceiptLinkOrdinal]cdfMarketDataRecord, linkID uint32, decisionAt int64) (cdfMarketDataRecord, bool) {
+	var latest cdfMarketDataRecord
+	found := false
+	for key, receipt := range receipts {
+		if key.LinkID != linkID || receipt.DeliveredAt > decisionAt {
+			continue
+		}
+		if !found || receipt.LinkOrdinal > latest.LinkOrdinal {
+			latest, found = receipt, true
+		}
+	}
+	return latest, found
 }
 
 func encodeCDFMarketDataRecord(record cdfMarketDataRecord) [cdfMarketDataRecordBytes]byte {

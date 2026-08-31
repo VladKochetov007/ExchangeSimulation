@@ -104,6 +104,33 @@ func TestElasticLiquiditySupplierReducesQuoteAfterInventoryFill(t *testing.T) {
 	}
 }
 
+func TestElasticLiquiditySupplierAdmissionHeadroomBoundsBothSides(t *testing.T) {
+	supplier := NewElasticLiquiditySupplier(1, newMetaGateway(), ElasticLiquiditySupplierConfig{
+		InitialBaseBalance: 500, MaxPosition: 500, MaxInventory: 1_000,
+		ReferencePrice: 3_000, ElasticityPerPercent: 100,
+	})
+	if got := supplier.TargetPosition(1); got != 500 {
+		t.Fatalf("low-price target = %d, want gross inventory cap target 500", got)
+	}
+	if got := supplier.TargetPosition(10_000); got != -500 {
+		t.Fatalf("high-price target = %d, want sell-side displacement bound -500", got)
+	}
+	supplier.position = 500
+	if got := supplier.availableBuyInventory(); got != 0 {
+		t.Fatalf("buy headroom at gross cap = %d, want zero", got)
+	}
+	if got := supplier.availableSellInventory(); got != 1_000 {
+		t.Fatalf("sell headroom at gross cap = %d, want 1000", got)
+	}
+	supplier.position = -500
+	if got := supplier.availableBuyInventory(); got != 1_000 {
+		t.Fatalf("buy headroom after full sale = %d, want 1000", got)
+	}
+	if got := supplier.availableSellInventory(); got != 0 {
+		t.Fatalf("sell headroom after full sale = %d, want zero", got)
+	}
+}
+
 func TestElasticLiquiditySupplierWithdrawsOnUnavailableLocalSide(t *testing.T) {
 	gw := newMetaGateway()
 	supplier := NewElasticLiquiditySupplier(1, gw, ElasticLiquiditySupplierConfig{
@@ -126,6 +153,33 @@ func TestElasticLiquiditySupplierWithdrawsOnUnavailableLocalSide(t *testing.T) {
 	supplier.onTick(time.Unix(0, int64(4*time.Second)))
 	if len(gw.requests) != 3 || gw.requests[2].Type != etypes.ReqCancelOrder || gw.requests[2].CancelReq.OrderID != 41 {
 		t.Fatalf("requests after one-sided snapshot = %+v, want withdrawal only", gw.requests)
+	}
+}
+
+func TestElasticLiquiditySupplierWithdrawsStaleQuoteAndWaitsForCancel(t *testing.T) {
+	gw := newMetaGateway()
+	supplier := NewElasticLiquiditySupplier(1, gw, ElasticLiquiditySupplierConfig{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		Interval: time.Second, MaxObservationAge: time.Minute,
+		ReferencePrice: 3_000, ReferenceHalfLife: time.Hour,
+		BaseHolding: 0, ElasticityPerPercent: 10, MaxPosition: 100, MaxQuoteQty: 25,
+	})
+	ctx := context.Background()
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	supplier.HandleEvent(ctx, elasticSupplierSnapshot("CDF/USD", int64(time.Second), 2_699, 2_701))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	orders := gw.orders()
+	if len(orders) != 1 {
+		t.Fatalf("orders before stale withdrawal = %d, want one", len(orders))
+	}
+	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{OrderID: 41, RequestID: orders[0].RequestID}})
+	supplier.onTick(time.Unix(0, int64(62*time.Second)))
+	if len(gw.requests) != 3 || gw.requests[2].Type != etypes.ReqCancelOrder || gw.requests[2].CancelReq.OrderID != 41 || gw.requests[2].CancelReq.RequestID == 0 {
+		t.Fatalf("requests after stale withdrawal = %+v, want one cancellation", gw.requests)
+	}
+	supplier.onTick(time.Unix(0, int64(63*time.Second)))
+	if len(gw.requests) != 3 {
+		t.Fatalf("requests while cancellation is delayed = %+v, want no replacement", gw.requests)
 	}
 }
 

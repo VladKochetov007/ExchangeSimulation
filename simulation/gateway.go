@@ -208,6 +208,7 @@ func (d *DelayedGateway) Send(req exchange.Request) {
 		return
 	}
 	d.recordMarketDataDecision(req)
+	d.recordMarketDataAction(req)
 	if d.scheduler != nil {
 		at, ticket := d.deliveryTime(&d.reqMu, &d.lastReqAt, d.RequestLatency, LatencyRequest)
 		if d.phaseMode.Load() && at <= d.clock.NowUnixNano() {
@@ -461,6 +462,41 @@ func (d *DelayedGateway) recordMarketDataDecision(req exchange.Request) {
 		DecisionAt:  d.clock.NowUnixNano(),
 		Frontier:    frontier,
 	})
+}
+
+func (d *DelayedGateway) recordMarketDataAction(req exchange.Request) {
+	if d.receiptSink == nil || d.clock == nil {
+		return
+	}
+	d.receiptMu.Lock()
+	frontier := d.frontier
+	d.receiptMu.Unlock()
+	action := MarketDataAction{
+		ClientID: d.ID(), SourceVenue: d.receiptSource, Link: d.receiptLink,
+		RequestType: req.Type, DecisionAt: d.clock.NowUnixNano(), Frontier: frontier,
+	}
+	switch req.Type {
+	case exchange.ReqSubscribe, exchange.ReqUnsubscribe:
+		if req.QueryReq == nil {
+			return
+		}
+		action.Symbol, action.RequestID = req.QueryReq.Symbol, req.QueryReq.RequestID
+	case exchange.ReqPlaceOrder:
+		if req.OrderReq == nil {
+			return
+		}
+		action.Symbol, action.RequestID = req.OrderReq.Symbol, req.OrderReq.RequestID
+		action.Side, action.OrderType, action.TimeInForce = req.OrderReq.Side, req.OrderReq.Type, req.OrderReq.TimeInForce
+		action.Price, action.Qty = req.OrderReq.Price, req.OrderReq.Qty
+	case exchange.ReqCancelOrder:
+		if req.CancelReq == nil {
+			return
+		}
+		action.RequestID, action.OrderID = req.CancelReq.RequestID, req.CancelReq.OrderID
+	default:
+		return
+	}
+	d.receiptSink.RecordAction(action)
 }
 
 // EgressBlocked reports that the gateway holds messages whose delivery time

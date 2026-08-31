@@ -146,6 +146,7 @@ type ElasticLiquiditySupplierDecision struct {
 	QuoteQty               int64  `json:"quote_qty,omitempty"`
 	QuoteOrderID           uint64 `json:"quote_order_id,omitempty"`
 	QuoteRequestID         uint64 `json:"quote_request_id,omitempty"`
+	CancelRequestID        uint64 `json:"cancel_request_id,omitempty"`
 	QuoteSubmittedAt       int64  `json:"quote_submitted_at,omitempty"`
 }
 
@@ -196,6 +197,7 @@ type ElasticLiquiditySupplier struct {
 	lastReferenceUpdate int64
 	quote               elasticLiquidityQuote
 	pendingRequestID    uint64
+	cancelRequestID     uint64
 	cancelPending       bool
 	subscribed          bool
 }
@@ -307,11 +309,13 @@ func (s *ElasticLiquiditySupplier) observeCancelled(event actor.OrderCancelledEv
 	}
 	s.quote = elasticLiquidityQuote{}
 	s.cancelPending = false
+	s.cancelRequestID = 0
 }
 
 func (s *ElasticLiquiditySupplier) observeCancelRejected(event actor.OrderCancelRejectedEvent) {
 	if event.OrderID == s.quote.orderID {
 		s.cancelPending = false
+		s.cancelRequestID = 0
 	}
 }
 
@@ -357,12 +361,14 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 
 	if !s.observationUsable(now.UnixNano()) {
 		decision.Action, decision.Reason = s.withdrawIfNeeded("stale_or_missing_observation")
+		decision.CancelRequestID = s.cancelRequestID
 		s.emitDecision(decision)
 		return
 	}
 	mid, available := positiveDomainTwoSidedMidpoint(s.bestBid, s.bestAsk)
 	if !available || s.bestBid >= s.bestAsk {
 		decision.Action, decision.Reason = s.withdrawIfNeeded("one_sided_or_locked_book")
+		decision.CancelRequestID = s.cancelRequestID
 		s.emitDecision(decision)
 		return
 	}
@@ -373,6 +379,7 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 	gap := target - s.position
 	if gap == 0 {
 		decision.Action, decision.Reason = s.withdrawIfNeeded("inventory_at_target")
+		decision.CancelRequestID = s.cancelRequestID
 		s.emitDecision(decision)
 		return
 	}
@@ -383,11 +390,17 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 		desiredSide, desiredPrice = exchange.Sell, s.bestAsk
 	}
 	quantity := abs64(gap)
+	if desiredSide == exchange.Buy {
+		quantity = minInt64(quantity, s.availableBuyInventory())
+	} else {
+		quantity = minInt64(quantity, s.availableSellInventory())
+	}
 	if quantity > s.cfg.MaxQuoteQty {
 		quantity = s.cfg.MaxQuoteQty
 	}
 	if quantity <= 0 || desiredPrice <= 0 {
 		decision.Action, decision.Reason = s.withdrawIfNeeded("limit_or_touch_unavailable")
+		decision.CancelRequestID = s.cancelRequestID
 		s.emitDecision(decision)
 		return
 	}
@@ -400,9 +413,10 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 	}
 	if s.quote.orderID != 0 {
 		s.cancelPending = true
-		s.CancelOrder(s.quote.orderID)
+		s.cancelRequestID = s.CancelOrder(s.quote.orderID)
 		decision.Action, decision.Reason = "cancel", "reprice_for_inventory_or_touch"
 		decision.QuoteOrderID = s.quote.orderID
+		decision.CancelRequestID = s.cancelRequestID
 		s.emitDecision(decision)
 		return
 	}
@@ -413,6 +427,28 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 	decision.Action, decision.Reason = "submit", "inventory_target_gap"
 	decision.QuoteRequestID, decision.QuoteSubmittedAt = requestID, now.UnixNano()
 	s.emitDecision(decision)
+}
+
+func (s *ElasticLiquiditySupplier) availableBuyInventory() int64 {
+	if s.cfg.MaxInventory <= 0 {
+		return math.MaxInt64
+	}
+	available := s.cfg.MaxInventory - s.cfg.InitialBaseBalance - s.position
+	if available < 0 {
+		return 0
+	}
+	return available
+}
+
+func (s *ElasticLiquiditySupplier) availableSellInventory() int64 {
+	if s.cfg.MaxInventory <= 0 {
+		return math.MaxInt64
+	}
+	available := s.cfg.InitialBaseBalance + s.position
+	if available < 0 {
+		return 0
+	}
+	return available
 }
 
 func (s *ElasticLiquiditySupplier) baseDecision(now int64) ElasticLiquiditySupplierDecision {
@@ -447,6 +483,7 @@ func (s *ElasticLiquiditySupplier) baseDecision(now int64) ElasticLiquiditySuppl
 		GrossInventoryLimit: s.cfg.MaxInventory,
 		QuoteOrderID:        s.quote.orderID, QuoteRequestID: s.quote.requestID,
 		QuotePrice: s.quote.price, QuoteQty: s.quote.qty, QuoteSubmittedAt: s.quote.submittedAt,
+		CancelRequestID: s.cancelRequestID,
 	}
 }
 
@@ -459,7 +496,7 @@ func (s *ElasticLiquiditySupplier) withdrawIfNeeded(reason string) (string, stri
 		return "wait", reason
 	}
 	s.cancelPending = true
-	s.CancelOrder(s.quote.orderID)
+	s.cancelRequestID = s.CancelOrder(s.quote.orderID)
 	return "withdraw", reason
 }
 

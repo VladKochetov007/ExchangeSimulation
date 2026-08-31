@@ -40,6 +40,9 @@ type CDFLiquidityRunAudit struct {
 	AcceptedQuoteCount               int64                       `json:"accepted_quote_count"`
 	CompletedQuoteCount              int64                       `json:"completed_quote_count"`
 	CensoredQuoteCount               int64                       `json:"censored_quote_count"`
+	LiveAcceptedQuoteCount           int64                       `json:"live_accepted_quote_count"`
+	PendingSubmissionCount           int64                       `json:"pending_submission_count"`
+	CancelPendingQuoteCount          int64                       `json:"cancel_pending_quote_count"`
 	MeanQuoteLifetimeNs              float64                     `json:"mean_quote_lifetime_ns"`
 	MaxQuoteLifetimeNs               int64                       `json:"max_quote_lifetime_ns"`
 	MeanObservedTouchShare           float64                     `json:"mean_observed_touch_share"`
@@ -69,6 +72,8 @@ type CDFLiquidityRunAudit struct {
 	Valid                            bool                        `json:"valid"`
 
 	expectedHistoricalCountPerVenue int
+	lastDepthSnapshotAt             map[string]int64
+	cancelRequestedByOrder          map[cdfOrderKey]struct{}
 }
 
 // CDFLiquiditySupplierAudit is the per-participant diagnostic vector required
@@ -96,6 +101,9 @@ type CDFLiquiditySupplierAudit struct {
 	AcceptedQuoteCount               int64   `json:"accepted_quote_count"`
 	CompletedQuoteCount              int64   `json:"completed_quote_count"`
 	CensoredQuoteCount               int64   `json:"censored_quote_count"`
+	LiveAcceptedQuoteCount           int64   `json:"live_accepted_quote_count"`
+	PendingSubmissionCount           int64   `json:"pending_submission_count"`
+	CancelPendingQuoteCount          int64   `json:"cancel_pending_quote_count"`
 	WithdrawCount                    int64   `json:"withdraw_count"`
 	CancelCount                      int64   `json:"cancel_count"`
 	RestCount                        int64   `json:"rest_count"`
@@ -110,6 +118,8 @@ type CDFLiquiditySupplierAudit struct {
 	ConfiguredMaxInventory           int64   `json:"configured_max_inventory"`
 	ConfiguredMaxQuoteQty            int64   `json:"configured_max_quote_qty"`
 	ConfiguredMakerFeeBps            int64   `json:"configured_maker_fee_bps"`
+	SupplierVolumeShare              float64 `json:"supplier_volume_share"`
+	TimeWeightedRestingDepthShare    float64 `json:"time_weighted_resting_depth_share"`
 	MaxQuoteQty                      int64   `json:"max_quote_qty"`
 	MaxBorrowed                      int64   `json:"max_borrowed"`
 	BorrowEventCount                 int64   `json:"borrow_event_count"`
@@ -122,47 +132,50 @@ type CDFLiquiditySupplierAudit struct {
 	PnLReconciliationResidual        int64   `json:"pnl_reconciliation_residual"`
 	Valid                            bool    `json:"valid"`
 
-	positionSet                   bool
-	lastPosition                  int64
-	observationAgeTotal           int64
-	observationCount              int64
-	touchShareTotal               float64
-	touchShareCount               int64
-	quoteLifetimeTotal            int64
-	quoteLifetimeCount            int64
-	pendingTouchByRequest         map[uint64]float64
-	configuredBaseAsset           string
-	configuredQuoteAsset          string
-	configuredSymbol              string
-	configuredMaxQuoteQty         int64
-	configuredMaxPosition         int64
-	configuredMaxInventory        int64
-	configuredBasePrecision       int64
-	configuredMaxObservationAge   int64
-	configuredInitialBaseBalance  int64
-	configuredInitialQuoteBalance int64
-	configuredQuotePrecision      int64
-	endowmentRevaluationPnL       int64
-	tradingPnL                    int64
-	entryPrice                    int64
-	realizedPnL                   int64
-	terminalMark                  int64
-	initialAccountSeen            bool
-	terminalAccountSeen           bool
-	maxBorrowed                   int64
-	borrowEventCount              int64
-	maxGrossBaseBalance           int64
-	maxGrossQuoteBalance          int64
-	maxQuoteQty                   int64
-	balanceSnapshotCount          int64
-	lastBalanceSnapshotAt         int64
-	initialSpotNetBalances        map[string]int64
-	terminalSpotNetBalances       map[string]int64
-	fillNetBalanceDeltas          map[string]int64
-	initialMarks                  map[string]int64
-	terminalMarks                 map[string]int64
-	pendingQuoteByRequest         map[uint64]cdfDecisionEvidence
-	receiptRequired               bool
+	positionSet                     bool
+	lastPosition                    int64
+	observationAgeTotal             int64
+	observationCount                int64
+	touchShareTotal                 float64
+	touchShareCount                 int64
+	quoteLifetimeTotal              int64
+	quoteLifetimeCount              int64
+	restingDepthWeightedNumerator   float64
+	restingDepthWeightedDenominator float64
+	pendingTouchByRequest           map[uint64]float64
+	configuredBaseAsset             string
+	configuredQuoteAsset            string
+	configuredSymbol                string
+	configuredMaxQuoteQty           int64
+	configuredMakerFeeBps           int64
+	configuredMaxPosition           int64
+	configuredMaxInventory          int64
+	configuredBasePrecision         int64
+	configuredMaxObservationAge     int64
+	configuredInitialBaseBalance    int64
+	configuredInitialQuoteBalance   int64
+	configuredQuotePrecision        int64
+	endowmentRevaluationPnL         int64
+	tradingPnL                      int64
+	entryPrice                      int64
+	realizedPnL                     int64
+	terminalMark                    int64
+	initialAccountSeen              bool
+	terminalAccountSeen             bool
+	maxBorrowed                     int64
+	borrowEventCount                int64
+	maxGrossBaseBalance             int64
+	maxGrossQuoteBalance            int64
+	maxQuoteQty                     int64
+	balanceSnapshotCount            int64
+	lastBalanceSnapshotAt           int64
+	initialSpotNetBalances          map[string]int64
+	terminalSpotNetBalances         map[string]int64
+	fillNetBalanceDeltas            map[string]int64
+	initialMarks                    map[string]int64
+	terminalMarks                   map[string]int64
+	pendingQuoteByRequest           map[uint64]cdfDecisionEvidence
+	receiptRequired                 bool
 }
 
 // CDFLiquidityVenueAudit separates concentration and side-availability
@@ -285,6 +298,7 @@ type cdfDecisionEvidence struct {
 	QuoteQty               int64  `json:"quote_qty"`
 	QuoteOrderID           uint64 `json:"quote_order_id"`
 	QuoteRequestID         uint64 `json:"quote_request_id"`
+	CancelRequestID        uint64 `json:"cancel_request_id"`
 	QuoteSubmittedAt       int64  `json:"quote_submitted_at"`
 }
 
@@ -399,6 +413,7 @@ type cdfOrderState struct {
 	remainingQty    int64
 	closed          bool
 	closedAt        int64
+	cancelRequested bool
 	touchShare      float64
 	touchShareKnown bool
 }
@@ -416,7 +431,10 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	if r == nil {
 		return nil, fmt.Errorf("cdf liquidity: nil run")
 	}
-	result := &CDFLiquidityRunAudit{}
+	result := &CDFLiquidityRunAudit{
+		lastDepthSnapshotAt:    make(map[string]int64),
+		cancelRequestedByOrder: make(map[cdfOrderKey]struct{}),
+	}
 	config, configErr := loadCDFRunConfig(r)
 	if configErr != nil {
 		result.addCheck(CDFLiquidityCheck{Failure: "missing or malformed run configuration: " + configErr.Error()})
@@ -492,6 +510,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.configuredQuotePrecision = supplierConfig.QuotePrecision
 			state.configuredMaxQuoteQty = supplierConfig.MaxQuoteQty
 			state.ConfiguredMakerFeeBps = supplierConfig.MakerFeeBps
+			state.configuredMakerFeeBps = supplierConfig.MakerFeeBps
 			state.configuredMaxObservationAge = supplierConfig.MaxObservationAge
 			state.configuredInitialBaseBalance = supplierConfig.InitialBaseBalance
 			state.configuredInitialQuoteBalance = supplierConfig.InitialQuoteBalance
@@ -812,6 +831,11 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 		}
 		if decision.QuoteOrderID == 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "withdrawal decision has no order identity"})
+		} else {
+			r.cancelRequestedByOrder[cdfOrderKey{VenueID: event.VenueID, ClientID: decision.ClientID, OrderID: decision.QuoteOrderID}] = struct{}{}
+		}
+		if decision.CancelRequestID == 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "withdrawal decision has no cancellation request identity"})
 		}
 	case "wait":
 	default:
@@ -823,6 +847,37 @@ func (r *CDFLiquidityRunAudit) validateDecisionReceipt(event Event, decision cdf
 	if evidence == nil {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision has no receipt evidence"})
 		return
+	}
+	requestID := decision.QuoteRequestID
+	wantRequestType := uint8(2)
+	if decision.Action == "cancel" || decision.Action == "withdraw" {
+		requestID = decision.CancelRequestID
+		wantRequestType = 3
+	}
+	if decision.Action != "submit" && decision.Action != "cancel" && decision.Action != "withdraw" {
+		return
+	}
+	var action cdfMarketDataActionRecord
+	actionExists := false
+	for key, candidate := range evidence.actions {
+		if key.ClientID != decision.ClientID || key.RequestID != requestID {
+			continue
+		}
+		link := evidence.links[candidate.LinkID]
+		if link.SourceVenue == event.VenueID && link.Role == auditRoleClass(decision.Role) {
+			action, actionExists = candidate, true
+			break
+		}
+	}
+	localDigest, digestErr := decodeFrontierDigest(decision.ObservationDigest)
+	actionFrontierMatches := actionExists && action.LinkID == decision.ObservationLinkID && action.FrontierOrdinal == decision.ObservationOrdinal && action.FrontierDelivered == decision.ObservationDeliveredAt && digestErr == nil && action.FrontierDigest == localDigest
+	symbolMatches := action.SymbolID == 0 || evidence.symbols[action.SymbolID].Symbol == decision.Symbol
+	orderMatches := decision.Action != "submit" || action.Price == decision.QuotePrice && action.Qty == decision.QuoteQty
+	if decision.Action != "submit" {
+		orderMatches = action.OrderID == decision.QuoteOrderID
+	}
+	if !actionExists || action.RequestType != wantRequestType || action.ClientID != decision.ClientID || action.DecisionAt != decision.DecisionTime || !actionFrontierMatches || !symbolMatches || !orderMatches {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier action is not reconciled to a market-data gateway boundary"})
 	}
 	if decision.Action != "submit" {
 		return
@@ -839,9 +894,9 @@ func (r *CDFLiquidityRunAudit) validateDecisionReceipt(event Event, decision cdf
 			break
 		}
 	}
-	localDigest, digestErr := decodeFrontierDigest(decision.ObservationDigest)
-	frontierMatches := exists && record.LinkID == decision.ObservationLinkID && record.FrontierOrdinal == decision.ObservationOrdinal && record.FrontierDelivered == decision.ObservationDeliveredAt && digestErr == nil && record.FrontierDigest == localDigest
-	if !exists || record.DecisionAt != decision.DecisionTime || record.Price != decision.QuotePrice || record.Qty != decision.QuoteQty || !frontierMatches {
+	localDigest, digestErr = decodeFrontierDigest(decision.ObservationDigest)
+	decisionFrontierMatches := exists && record.LinkID == decision.ObservationLinkID && record.FrontierOrdinal == decision.ObservationOrdinal && record.FrontierDelivered == decision.ObservationDeliveredAt && digestErr == nil && record.FrontierDigest == localDigest
+	if !exists || record.DecisionAt != decision.DecisionTime || record.Price != decision.QuotePrice || record.Qty != decision.QuoteQty || !decisionFrontierMatches {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier submit is not reconciled to a market-data decision receipt"})
 	}
 }
@@ -875,8 +930,9 @@ func (r *CDFLiquidityRunAudit) validateDecisionObservation(event Event, decision
 	copy(fingerprint[:], fingerprintRaw)
 	digest, digestErr := decodeFrontierDigest(decision.ObservationDigest)
 	receipt, receiptExists := evidence.receipts[cdfReceiptLinkOrdinal{LinkID: decision.ObservationLinkID, LinkOrdinal: decision.ObservationOrdinal}]
+	latestReceipt, latestReceiptExists := latestCDFReceiptBefore(evidence.receipts, decision.ObservationLinkID, decision.DecisionTime)
 	symbol, symbolExists := evidence.symbols[receipt.SymbolID]
-	if digestErr != nil || !receiptExists || !symbolExists || receipt.ClientID != decision.ClientID || symbol.Symbol != decision.Symbol || receipt.Sequence != decision.ObservationSequence || receipt.PublishedAt != decision.ObservationTime || receipt.DeliveredAt != decision.ObservationDeliveredAt || receipt.DeliveredAt > decision.DecisionTime || receipt.Fingerprint != fingerprint || receipt.Digest != digest {
+	if digestErr != nil || !receiptExists || !latestReceiptExists || latestReceipt.LinkOrdinal != decision.ObservationOrdinal || !symbolExists || receipt.ClientID != decision.ClientID || symbol.Symbol != decision.Symbol || receipt.Sequence != decision.ObservationSequence || receipt.PublishedAt != decision.ObservationTime || receipt.DeliveredAt != decision.ObservationDeliveredAt || receipt.DeliveredAt > decision.DecisionTime || receipt.Fingerprint != fingerprint || receipt.Digest != digest {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision frontier does not match its delayed local observation"})
 	}
 }
@@ -893,6 +949,10 @@ func (r *CDFLiquidityRunAudit) processSupplierFill(event Event, states map[cdfPa
 	if state == nil {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "fill from unregistered supplier"})
 		return
+	}
+	expectedFee, feeOK := expectedCDFMakerFee(fill.Price, fill.Qty, state.configuredBasePrecision, state.configuredMakerFeeBps)
+	if !feeOK || fill.FeeAmount != expectedFee || (expectedFee > 0 && fill.FeeAsset != state.configuredQuoteAsset) {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier fill fee does not match registered maker-fee schedule"})
 	}
 	r.FillCount++
 	state.FillCount++
@@ -1047,6 +1107,17 @@ func quoteProduct(priceDifference, quantity, basePrecision int64) (int64, bool) 
 	return product.Int64(), true
 }
 
+func expectedCDFMakerFee(price, quantity, basePrecision, makerFeeBps int64) (int64, bool) {
+	if price <= 0 || quantity <= 0 || basePrecision <= 0 || makerFeeBps < 0 {
+		return 0, false
+	}
+	notional, ok := etypes.TryMulDiv(price, quantity, basePrecision)
+	if !ok {
+		return 0, false
+	}
+	return etypes.TryMulBps(notional, makerFeeBps)
+}
+
 func signedQuoteProduct(priceDifference, signedQuantity, basePrecision int64) (int64, bool) {
 	if basePrecision <= 0 {
 		return 0, false
@@ -1127,7 +1198,11 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			r.BothAbsentSnapshots++
 		}
 		totalDisplayed := displayedDepth(snapshot.Bids) + displayedDepth(snapshot.Asks)
-		supplierDisplayed := supplierDisplayedDepth(event.VenueID, orders)
+		supplierDepthByClient := supplierDisplayedDepthByClient(event.VenueID, orders)
+		supplierDisplayed := int64(0)
+		for _, depth := range supplierDepthByClient {
+			supplierDisplayed, _ = exactAdd(supplierDisplayed, depth)
+		}
 		if totalDisplayed > 0 {
 			venue.ActiveDepthSnapshotCount++
 			share := float64(supplierDisplayed) / float64(totalDisplayed)
@@ -1137,7 +1212,23 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			if share > 0.75 {
 				venue.SupplierDepthOver75Count++
 			}
+			if previousAt, seen := r.lastDepthSnapshotAt[event.VenueID]; seen {
+				if event.SimTS < previousAt {
+					r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF book snapshots are out of timestamp order"})
+				} else if elapsed := event.SimTS - previousAt; elapsed > 0 {
+					weight := float64(elapsed)
+					denominator := float64(totalDisplayed) * weight
+					for key, state := range states {
+						if key.VenueID != event.VenueID {
+							continue
+						}
+						state.restingDepthWeightedDenominator += denominator
+						state.restingDepthWeightedNumerator += float64(supplierDepthByClient[key.ClientID]) * weight
+					}
+				}
+			}
 		}
+		r.lastDepthSnapshotAt[event.VenueID] = event.SimTS
 	case "OrderAccepted":
 		key := cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}
 		state := states[key]
@@ -1175,7 +1266,8 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 				r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier has more than one live accepted order"})
 			}
 		}
-		order := &cdfOrderState{clientID: event.ClientID, side: accepted.Side, price: accepted.Price, requestID: accepted.RequestID, acceptedAt: event.SimTS, acceptedQty: accepted.Qty, remainingQty: accepted.Qty}
+		_, cancelRequested := r.cancelRequestedByOrder[orderKey]
+		order := &cdfOrderState{clientID: event.ClientID, side: accepted.Side, price: accepted.Price, requestID: accepted.RequestID, acceptedAt: event.SimTS, acceptedQty: accepted.Qty, remainingQty: accepted.Qty, cancelRequested: cancelRequested}
 		if share, ok := state.pendingTouchByRequest[accepted.RequestID]; ok {
 			order.touchShare, order.touchShareKnown = share, true
 			delete(state.pendingTouchByRequest, accepted.RequestID)
@@ -1501,19 +1593,20 @@ func displayedDepth(levels []bookLevel) int64 {
 	return total
 }
 
-func supplierDisplayedDepth(venueID string, orders map[cdfOrderKey]*cdfOrderState) int64 {
-	var total int64
+func supplierDisplayedDepthByClient(venueID string, orders map[cdfOrderKey]*cdfOrderState) map[uint64]int64 {
+	depthByClient := make(map[uint64]int64)
 	for key, order := range orders {
 		if key.VenueID != venueID || order.closed || order.remainingQty <= 0 {
 			continue
 		}
-		var ok bool
-		total, ok = exactAdd(total, order.remainingQty)
+		updated, ok := exactAdd(depthByClient[order.clientID], order.remainingQty)
 		if !ok {
-			return math.MaxInt64
+			depthByClient[order.clientID] = math.MaxInt64
+			continue
 		}
+		depthByClient[order.clientID] = updated
 	}
-	return total
+	return depthByClient
 }
 
 func (r *CDFLiquidityRunAudit) reconcileFills(observed map[cdfFillKey]cdfObservedFill, actual map[cdfFillKey]cdfOrderFillEvidence, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
@@ -1564,6 +1657,13 @@ func (r *CDFLiquidityRunAudit) finalizeOrders(orders map[cdfOrderKey]*cdfOrderSt
 		if !order.closed {
 			state.CensoredQuoteCount++
 			r.CensoredQuoteCount++
+			if order.cancelRequested {
+				state.CancelPendingQuoteCount++
+				r.CancelPendingQuoteCount++
+			} else {
+				state.LiveAcceptedQuoteCount++
+				r.LiveAcceptedQuoteCount++
+			}
 			continue
 		}
 		state.CompletedQuoteCount++
@@ -1588,6 +1688,8 @@ func (r *CDFLiquidityRunAudit) finalizeOrders(orders map[cdfOrderKey]*cdfOrderSt
 		for range state.pendingQuoteByRequest {
 			state.CensoredQuoteCount++
 			r.CensoredQuoteCount++
+			state.PendingSubmissionCount++
+			r.PendingSubmissionCount++
 		}
 	}
 	if lifetimeCount > 0 {
@@ -1624,6 +1726,9 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 			state.MeanObservedTouchShare = state.touchShareTotal / float64(state.touchShareCount)
 			touchTotal += state.touchShareTotal
 			touchCount += state.touchShareCount
+		}
+		if state.restingDepthWeightedDenominator > 0 {
+			state.TimeWeightedRestingDepthShare = state.restingDepthWeightedNumerator / state.restingDepthWeightedDenominator
 		}
 		if state.quoteLifetimeCount > 0 {
 			state.MeanQuoteLifetimeNs = float64(state.quoteLifetimeTotal) / float64(state.quoteLifetimeCount)
@@ -1662,6 +1767,9 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 		state.MaxGrossQuoteBalance = state.maxGrossQuoteBalance
 		if state.configuredMaxInventory <= 0 || state.maxGrossBaseBalance > state.configuredMaxInventory {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier exceeded configured gross base inventory"})
+		}
+		if state.configuredMakerFeeBps < 0 || state.configuredMakerFeeBps > 10_000 {
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier has invalid configured maker fee"})
 		}
 		if state.configuredMaxQuoteQty <= 0 || state.maxQuoteQty > state.configuredMaxQuoteQty {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier exceeded configured quote quantity"})
@@ -1705,13 +1813,17 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 }
 
 func (r *CDFLiquidityRunAudit) finalizeVenueAudits(venueAudits map[string]*CDFLiquidityVenueAudit) {
-	for _, supplier := range r.Suppliers {
+	for index := range r.Suppliers {
+		supplier := &r.Suppliers[index]
 		venue := venueAudits[supplier.VenueID]
 		if venue == nil {
 			venue = &CDFLiquidityVenueAudit{VenueID: supplier.VenueID, ExpectedHistoricalCount: r.expectedHistoricalCountPerVenue}
 			venueAudits[supplier.VenueID] = venue
 		}
 		venue.SupplierVolumeQty, _ = exactAdd(venue.SupplierVolumeQty, supplier.FilledQty)
+		if venue.TotalTradeVolumeQty > 0 {
+			supplier.SupplierVolumeShare = float64(supplier.FilledQty) / float64(venue.TotalTradeVolumeQty)
+		}
 	}
 	for _, venue := range venueAudits {
 		if venue.TotalTradeVolumeQty > 0 {

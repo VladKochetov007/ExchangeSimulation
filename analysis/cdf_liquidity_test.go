@@ -1,6 +1,9 @@
 package analysis
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,7 +29,7 @@ func TestMeasureCDFLiquidityReconstructsBoundedSupplier(t *testing.T) {
 	if audit.SupplierVolumeQty != 5 || audit.TotalTradeVolumeQty != 25 || audit.SupplierVolumeShare != .2 {
 		t.Fatalf("audit volume = %+v", audit)
 	}
-	if audit.Suppliers[0].PnL != 5 || audit.Suppliers[0].TerminalPosition != 5 || audit.Suppliers[0].MaxObservedTouchShare != .5 {
+	if audit.Suppliers[0].PnL != 5 || audit.Suppliers[0].TerminalPosition != 5 || audit.Suppliers[0].MaxObservedTouchShare != .5 || audit.Suppliers[0].SupplierVolumeShare != .2 || audit.Suppliers[0].TimeWeightedRestingDepthShare != .25 {
 		t.Fatalf("supplier diagnostics = %+v", audit.Suppliers[0])
 	}
 	if audit.BalanceSnapshotCount != 2 || audit.BalanceReconciliationResidual != 0 || audit.PnLReconciliationResidual != 0 || audit.TradingPnL != 5 || audit.TradingPnLReconciliationResidual != 0 {
@@ -34,6 +37,32 @@ func TestMeasureCDFLiquidityReconstructsBoundedSupplier(t *testing.T) {
 	}
 	if audit.ExpectedHistoricalCount != 1 || audit.Venues[0].ExpectedHistoricalCount != 1 {
 		t.Fatalf("historical counts = aggregate %d, venue %d", audit.ExpectedHistoricalCount, audit.Venues[0].ExpectedHistoricalCount)
+	}
+}
+
+func TestMeasureCDFLiquiditySeparatesCancelPendingFromLiveQuotes(t *testing.T) {
+	run := writeCDFLiquidityFixture(t, true, false)
+	bookPath := filepath.Join(run.Dir, "venues", "north", "spot", "CDF-USD.jsonl")
+	raw, err := os.ReadFile(bookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutCancellation := strings.Replace(string(raw), cdfFixtureLine(6, 2, "OrderCancelled", `{"order_id":8,"request_id":2,"remaining_qty":4}`)+"\n", "", 1)
+	if withoutCancellation == string(raw) {
+		t.Fatal("fixture cancellation was not found")
+	}
+	if err := os.WriteFile(bookPath, []byte(withoutCancellation), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !audit.Valid || audit.CensoredQuoteCount != 1 || audit.CancelPendingQuoteCount != 1 || audit.LiveAcceptedQuoteCount != 0 || audit.PendingSubmissionCount != 0 {
+		t.Fatalf("terminal quote categories = %+v, want one cancel-pending accepted quote", audit)
+	}
+	if audit.Suppliers[0].CancelPendingQuoteCount != 1 || audit.Suppliers[0].LiveAcceptedQuoteCount != 0 {
+		t.Fatalf("supplier terminal quote categories = %+v", audit.Suppliers[0])
 	}
 }
 
@@ -179,6 +208,117 @@ func TestMeasureCDFLiquidityRejectsObservationDigestMutation(t *testing.T) {
 	}
 }
 
+func TestCDFReceiptEvidenceRejectsOlderValidFrontier(t *testing.T) {
+	dir := writeCDFReceiptContractFixture(t, true)
+	if _, err := readCDFMarketDataEvidence(dir); err == nil || !strings.Contains(err.Error(), "decision frontier") {
+		t.Fatalf("older valid frontier was accepted: %v", err)
+	}
+}
+
+func TestCDFReceiptEvidenceRejectsManifestEnvelopeMutation(t *testing.T) {
+	dir := writeCDFReceiptContractFixture(t, false)
+	manifestPath := filepath.Join(dir, "market-data-evidence-v2.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(raw), `"schema_version": 2`, `"schema_version": 3`, 1)
+	if mutated == string(raw) {
+		t.Fatal("manifest schema version was not found")
+	}
+	if err := os.WriteFile(manifestPath, []byte(mutated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readCDFMarketDataEvidence(dir); err == nil || !strings.Contains(err.Error(), "manifest violates schema contract") {
+		t.Fatalf("manifest envelope mutation was accepted: %v", err)
+	}
+}
+
+func TestMeasureCDFLiquidityRejectsActionIdentityMutation(t *testing.T) {
+	run := writeCDFLiquidityReceiptFixture(t)
+	actionsPath := filepath.Join(run.Dir, "market-data-actions-v2.bin")
+	actions, err := os.ReadFile(actionsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const cancelActionOffset = 2 * simulation.MarketDataActionRecordBytes
+	if len(actions) < cancelActionOffset+44 {
+		t.Fatalf("action fixture has %d bytes, want cancellation record", len(actions))
+	}
+	actions[cancelActionOffset+43] ^= 1
+	if err := os.WriteFile(actionsPath, actions, 0644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(run.Dir, "market-data-evidence-v2.json")
+	manifestRaw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	actionsArtifact, ok := manifest["actions"].(map[string]any)
+	if !ok {
+		t.Fatal("action artifact missing from manifest")
+	}
+	digest := sha256.Sum256(actions)
+	actionsArtifact["digest"] = hex.EncodeToString(digest[:])
+	updatedManifest, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, append(updatedManifest, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.Valid || !hasCDFCheck(audit.Checks, "supplier action is not reconciled to a market-data gateway boundary") {
+		t.Fatalf("action identity mutation audit = %+v, want fail-closed gateway mismatch", audit)
+	}
+}
+
+func writeCDFReceiptContractFixture(t *testing.T, olderFrontier bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	recorder, err := simulation.NewMarketDataReceiptRecorder(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := "north/cdf_elastic_supplier"
+	linkID := recorder.RegisterLink("north", link, "cdf_elastic_supplier")
+	if linkID == 0 {
+		t.Fatal("receipt contract fixture link registration failed")
+	}
+	var firstFrontier simulation.MarketDataFrontier
+	for ordinal := uint64(1); ordinal <= 2; ordinal++ {
+		schedule := simulation.MarketDataSchedule{
+			ClientID: 2, SourceVenue: "north", Link: link, Symbol: "CDF/USD", Type: exchange.MDSnapshot,
+			Sequence: ordinal, Fingerprint: [16]byte{byte(ordinal)}, PublishedAt: int64(ordinal), ScheduledAt: int64(ordinal), LinkOrdinal: ordinal,
+		}
+		if recorder.RecordSchedule(schedule) == 0 {
+			t.Fatal("receipt contract fixture schedule registration failed")
+		}
+		frontier := recorder.RecordReceipt(simulation.MarketDataReceipt{MarketDataSchedule: schedule, DeliveredAt: int64(ordinal)})
+		if ordinal == 1 {
+			firstFrontier = frontier
+		}
+		if ordinal == 2 && olderFrontier {
+			recorder.RecordDecision(simulation.MarketDataDecision{
+				ClientID: 2, SourceVenue: "north", Link: link, Symbol: "CDF/USD", RequestID: 31,
+				Side: exchange.Buy, OrderType: exchange.LimitOrder, TimeInForce: exchange.GTC, Price: 99, Qty: 3, DecisionAt: 3,
+				Frontier: firstFrontier,
+			})
+		}
+	}
+	if err := recorder.Finalize(3); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func TestMeasureCDFLiquidityRejectsGrossInventoryLimitMutation(t *testing.T) {
 	run := writeCDFLiquidityFixture(t, true, false)
 	manifestPath := filepath.Join(run.Dir, "manifest.json")
@@ -217,6 +357,18 @@ func TestMeasureCDFLiquidityConservesNonzeroQuoteFee(t *testing.T) {
 		t.Fatal("fixture fee or terminal balance was not found")
 	}
 	if err := os.WriteFile(generalPath, []byte(mutated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(run.Dir, "manifest.json")
+	manifestRaw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestMutated := strings.Replace(string(manifestRaw), `"max_observation_age":10`, `"max_observation_age":10,"maker_fee_bps":25`, 1)
+	if manifestMutated == string(manifestRaw) {
+		t.Fatal("fixture maker-fee configuration was not found")
+	}
+	if err := os.WriteFile(manifestPath, []byte(manifestMutated), 0644); err != nil {
 		t.Fatal(err)
 	}
 	greeksPath := filepath.Join(run.Dir, "greeks.json")
@@ -397,12 +549,21 @@ func writeCDFLiquidityReceiptFixture(t *testing.T) *Run {
 		qty       int64
 		at        int64
 	}{{1, 99, 5, 1}, {2, 99, 4, 4}} {
+		recorder.RecordAction(simulation.MarketDataAction{
+			ClientID: 2, SourceVenue: "north", Link: link, Symbol: "CDF/USD", RequestType: exchange.ReqPlaceOrder,
+			RequestID: decision.requestID, Side: exchange.Buy, OrderType: exchange.LimitOrder, TimeInForce: exchange.GTC,
+			Price: decision.price, Qty: decision.qty, DecisionAt: decision.at, Frontier: frontier,
+		})
 		recorder.RecordDecision(simulation.MarketDataDecision{
 			ClientID: 2, SourceVenue: "north", Link: link, Symbol: "CDF/USD", RequestID: decision.requestID,
 			Side: exchange.Buy, OrderType: exchange.LimitOrder, TimeInForce: exchange.GTC,
 			Price: decision.price, Qty: decision.qty, DecisionAt: decision.at, Frontier: frontier,
 		})
 	}
+	recorder.RecordAction(simulation.MarketDataAction{
+		ClientID: 2, SourceVenue: "north", Link: link, RequestType: exchange.ReqCancelOrder,
+		RequestID: 3, OrderID: 8, DecisionAt: 6, Frontier: frontier,
+	})
 	if err := recorder.Finalize(6); err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +588,7 @@ func writeCDFLiquidityFixture(t *testing.T, supplier, malformedFill bool) *Run {
 		general += cdfFixtureLine(2, 2, "balance_snapshot", `{"timestamp":2,"client_id":2,"spot_balances":[{"asset":"CDF","free":100,"locked":0,"borrowed":0,"interest":0,"net_asset":100},{"asset":"USD","free":1000,"locked":0,"borrowed":0,"interest":0,"net_asset":1000}],"perp_balances":[],"borrowed":{}}`) + "\n"
 		general += cdfFixtureLine(6, 2, "balance_snapshot", `{"timestamp":6,"client_id":2,"spot_balances":[{"asset":"CDF","free":105,"locked":0,"borrowed":0,"interest":0,"net_asset":105},{"asset":"USD","free":505,"locked":0,"borrowed":0,"interest":0,"net_asset":505}],"perp_balances":[],"borrowed":{}}`) + "\n"
 		general += cdfFixtureLine(4, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":4,"observation_time":1,"observation_age":3,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"submit","reason":"inventory_target_gap","side":"BUY","quote_price":99,"quote_qty":4,"quote_request_id":2,"quote_submitted_at":4}`) + "\n"
-		general += cdfFixtureLine(6, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":6,"observation_time":1,"observation_age":5,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"cancel","reason":"reprice_for_inventory_or_touch","quote_order_id":8}`) + "\n"
+		general += cdfFixtureLine(6, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":6,"observation_time":1,"observation_age":5,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"cancel","reason":"reprice_for_inventory_or_touch","quote_order_id":8,"cancel_request_id":3}`) + "\n"
 	}
 	greeks := fmt.Sprintf(`{"initial_accounts":%s,"terminal_accounts":%s}`, initialAccounts, terminalAccounts)
 	if err := os.WriteFile(filepath.Join(dir, "greeks.json"), []byte(greeks), 0644); err != nil {
@@ -449,6 +610,7 @@ func writeCDFLiquidityFixture(t *testing.T, supplier, malformedFill bool) *Run {
 	}
 	book := cdfFixtureLine(1, 0, "BookSnapshot", `{"bids":[{"price":99,"visible_qty":10,"hidden_qty":0}],"asks":[{"price":101,"visible_qty":10,"hidden_qty":0}]}`) + "\n"
 	book += cdfFixtureLine(2, 2, "OrderAccepted", `{"order_id":7,"client_id":2,"request_id":1,"side":"BUY","type":"LIMIT","time_in_force":"GTC","post_only":true,"price":99,"qty":5}`) + "\n"
+	book += cdfFixtureLine(2, 0, "BookSnapshot", `{"bids":[{"price":99,"visible_qty":10,"hidden_qty":0}],"asks":[{"price":101,"visible_qty":10,"hidden_qty":0}]}`) + "\n"
 	book += cdfFixtureLine(3, 0, "Trade", `{"trade_id":1,"price":99,"qty":5,"side":"SELL","taker_order_id":9}`) + "\n"
 	book += cdfFixtureLine(3, 2, "OrderFill", `{"order_id":7,"trade_id":1,"side":"BUY","price":99,"qty":5,"filled_qty":5,"remaining_qty":0,"is_full":true}`) + "\n"
 	book += cdfFixtureLine(4, 0, "Trade", `{"trade_id":2,"price":99,"qty":20,"side":"SELL","taker_order_id":10}`) + "\n"
