@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	etypes "exchange_sim/types"
 )
 
 // CDFLiquidityRunAudit is an evidence audit for the V2-R2-SV1 participant
@@ -19,90 +21,96 @@ import (
 // intervention can be reconstructed without guessing; it is not a survival
 // score.
 type CDFLiquidityRunAudit struct {
-	SupplierCount            int                         `json:"supplier_count"`
-	DecisionCount            int64                       `json:"decision_count"`
-	FillCount                int64                       `json:"fill_count"`
-	SupplierVolumeQty        int64                       `json:"supplier_volume_qty"`
-	TotalTradeCount          int64                       `json:"total_trade_count"`
-	TotalTradeVolumeQty      int64                       `json:"total_trade_volume_qty"`
-	SupplierVolumeShare      float64                     `json:"supplier_volume_share"`
-	SnapshotCount            int64                       `json:"snapshot_count"`
-	BidAbsentSnapshots       int64                       `json:"bid_absent_snapshots"`
-	AskAbsentSnapshots       int64                       `json:"ask_absent_snapshots"`
-	BothAbsentSnapshots      int64                       `json:"both_absent_snapshots"`
-	BidAbsenceFraction       float64                     `json:"bid_absence_fraction"`
-	AskAbsenceFraction       float64                     `json:"ask_absence_fraction"`
-	SupplierInitialEquity    int64                       `json:"supplier_initial_equity"`
-	SupplierTerminalEquity   int64                       `json:"supplier_terminal_equity"`
-	SupplierPnL              int64                       `json:"supplier_pnl"`
-	AcceptedQuoteCount       int64                       `json:"accepted_quote_count"`
-	CompletedQuoteCount      int64                       `json:"completed_quote_count"`
-	CensoredQuoteCount       int64                       `json:"censored_quote_count"`
-	MeanQuoteLifetimeNs      float64                     `json:"mean_quote_lifetime_ns"`
-	MaxQuoteLifetimeNs       int64                       `json:"max_quote_lifetime_ns"`
-	MeanObservedTouchShare   float64                     `json:"mean_observed_touch_share"`
-	MaxObservedTouchShare    float64                     `json:"max_observed_touch_share"`
-	SubmitCount              int64                       `json:"submit_count"`
-	RestCount                int64                       `json:"rest_count"`
-	CancelCount              int64                       `json:"cancel_count"`
-	WithdrawCount            int64                       `json:"withdraw_count"`
-	TradingSupplierCount     int64                       `json:"trading_supplier_count"`
-	PnLChangingSupplierCount int64                       `json:"pnl_changing_supplier_count"`
-	RealizedPnL              int64                       `json:"realized_pnl"`
-	UnrealizedPnL            int64                       `json:"unrealized_pnl"`
-	MaxBorrowed              int64                       `json:"max_borrowed"`
-	HistoricalSupplierCount  int                         `json:"historical_supplier_count"`
-	ExpectedHistoricalCount  int                         `json:"expected_historical_count"`
-	SupplierDepthOver75Share float64                     `json:"supplier_depth_over_75_share"`
-	MaxSupplierDepthShare    float64                     `json:"max_supplier_depth_share"`
-	Venues                   []CDFLiquidityVenueAudit    `json:"venues"`
-	Suppliers                []CDFLiquiditySupplierAudit `json:"suppliers"`
-	Checks                   []CDFLiquidityCheck         `json:"checks,omitempty"`
-	Valid                    bool                        `json:"valid"`
+	SupplierCount                 int                         `json:"supplier_count"`
+	DecisionCount                 int64                       `json:"decision_count"`
+	FillCount                     int64                       `json:"fill_count"`
+	SupplierVolumeQty             int64                       `json:"supplier_volume_qty"`
+	TotalTradeCount               int64                       `json:"total_trade_count"`
+	TotalTradeVolumeQty           int64                       `json:"total_trade_volume_qty"`
+	SupplierVolumeShare           float64                     `json:"supplier_volume_share"`
+	SnapshotCount                 int64                       `json:"snapshot_count"`
+	BidAbsentSnapshots            int64                       `json:"bid_absent_snapshots"`
+	AskAbsentSnapshots            int64                       `json:"ask_absent_snapshots"`
+	BothAbsentSnapshots           int64                       `json:"both_absent_snapshots"`
+	BidAbsenceFraction            float64                     `json:"bid_absence_fraction"`
+	AskAbsenceFraction            float64                     `json:"ask_absence_fraction"`
+	SupplierInitialEquity         int64                       `json:"supplier_initial_equity"`
+	SupplierTerminalEquity        int64                       `json:"supplier_terminal_equity"`
+	SupplierPnL                   int64                       `json:"supplier_pnl"`
+	AcceptedQuoteCount            int64                       `json:"accepted_quote_count"`
+	CompletedQuoteCount           int64                       `json:"completed_quote_count"`
+	CensoredQuoteCount            int64                       `json:"censored_quote_count"`
+	MeanQuoteLifetimeNs           float64                     `json:"mean_quote_lifetime_ns"`
+	MaxQuoteLifetimeNs            int64                       `json:"max_quote_lifetime_ns"`
+	MeanObservedTouchShare        float64                     `json:"mean_observed_touch_share"`
+	MaxObservedTouchShare         float64                     `json:"max_observed_touch_share"`
+	SubmitCount                   int64                       `json:"submit_count"`
+	RestCount                     int64                       `json:"rest_count"`
+	CancelCount                   int64                       `json:"cancel_count"`
+	WithdrawCount                 int64                       `json:"withdraw_count"`
+	TradingSupplierCount          int64                       `json:"trading_supplier_count"`
+	PnLChangingSupplierCount      int64                       `json:"pnl_changing_supplier_count"`
+	RealizedPnL                   int64                       `json:"realized_pnl"`
+	UnrealizedPnL                 int64                       `json:"unrealized_pnl"`
+	BalanceSnapshotCount          int64                       `json:"balance_snapshot_count"`
+	BalanceReconciliationResidual int64                       `json:"balance_reconciliation_residual"`
+	PnLReconciliationResidual     int64                       `json:"pnl_reconciliation_residual"`
+	MaxBorrowed                   int64                       `json:"max_borrowed"`
+	HistoricalSupplierCount       int                         `json:"historical_supplier_count"`
+	ExpectedHistoricalCount       int                         `json:"expected_historical_count"`
+	SupplierDepthOver75Share      float64                     `json:"supplier_depth_over_75_share"`
+	MaxSupplierDepthShare         float64                     `json:"max_supplier_depth_share"`
+	Venues                        []CDFLiquidityVenueAudit    `json:"venues"`
+	Suppliers                     []CDFLiquiditySupplierAudit `json:"suppliers"`
+	Checks                        []CDFLiquidityCheck         `json:"checks,omitempty"`
+	Valid                         bool                        `json:"valid"`
 }
 
 // CDFLiquiditySupplierAudit is the per-participant diagnostic vector required
 // by the preregistration. Account equity is the PnL source; position and
 // turnover are reconstructed from local evidence.
 type CDFLiquiditySupplierAudit struct {
-	VenueID                string  `json:"venue_id"`
-	Role                   string  `json:"role"`
-	ClientID               uint64  `json:"client_id"`
-	DecisionCount          int64   `json:"decision_count"`
-	FillCount              int64   `json:"fill_count"`
-	FilledQty              int64   `json:"filled_qty"`
-	BuyQty                 int64   `json:"buy_qty"`
-	SellQty                int64   `json:"sell_qty"`
-	InitialEquity          int64   `json:"initial_equity"`
-	TerminalEquity         int64   `json:"terminal_equity"`
-	PnL                    int64   `json:"pnl"`
-	MinPosition            int64   `json:"min_position"`
-	MaxPosition            int64   `json:"max_position"`
-	TerminalPosition       int64   `json:"terminal_position"`
-	InventoryLimit         int64   `json:"inventory_limit"`
-	AcceptedQuoteCount     int64   `json:"accepted_quote_count"`
-	CompletedQuoteCount    int64   `json:"completed_quote_count"`
-	CensoredQuoteCount     int64   `json:"censored_quote_count"`
-	WithdrawCount          int64   `json:"withdraw_count"`
-	CancelCount            int64   `json:"cancel_count"`
-	RestCount              int64   `json:"rest_count"`
-	SubmitCount            int64   `json:"submit_count"`
-	MeanQuoteLifetimeNs    float64 `json:"mean_quote_lifetime_ns"`
-	MaxQuoteLifetimeNs     int64   `json:"max_quote_lifetime_ns"`
-	MeanObservedTouchShare float64 `json:"mean_observed_touch_share"`
-	MaxObservedTouchShare  float64 `json:"max_observed_touch_share"`
-	MeanObservationAgeNs   float64 `json:"mean_observation_age_ns"`
-	MaxObservationAgeNs    int64   `json:"max_observation_age_ns"`
-	ConfiguredMaxPosition  int64   `json:"configured_max_position"`
-	ConfiguredMaxQuoteQty  int64   `json:"configured_max_quote_qty"`
-	MaxQuoteQty            int64   `json:"max_quote_qty"`
-	MaxBorrowed            int64   `json:"max_borrowed"`
-	BorrowEventCount       int64   `json:"borrow_event_count"`
-	MaxGrossBaseBalance    int64   `json:"max_gross_base_balance"`
-	MaxGrossQuoteBalance   int64   `json:"max_gross_quote_balance"`
-	RealizedPnL            int64   `json:"realized_pnl"`
-	UnrealizedPnL          int64   `json:"unrealized_pnl"`
-	Valid                  bool    `json:"valid"`
+	VenueID                       string  `json:"venue_id"`
+	Role                          string  `json:"role"`
+	ClientID                      uint64  `json:"client_id"`
+	DecisionCount                 int64   `json:"decision_count"`
+	FillCount                     int64   `json:"fill_count"`
+	FilledQty                     int64   `json:"filled_qty"`
+	BuyQty                        int64   `json:"buy_qty"`
+	SellQty                       int64   `json:"sell_qty"`
+	InitialEquity                 int64   `json:"initial_equity"`
+	TerminalEquity                int64   `json:"terminal_equity"`
+	PnL                           int64   `json:"pnl"`
+	MinPosition                   int64   `json:"min_position"`
+	MaxPosition                   int64   `json:"max_position"`
+	TerminalPosition              int64   `json:"terminal_position"`
+	InventoryLimit                int64   `json:"inventory_limit"`
+	AcceptedQuoteCount            int64   `json:"accepted_quote_count"`
+	CompletedQuoteCount           int64   `json:"completed_quote_count"`
+	CensoredQuoteCount            int64   `json:"censored_quote_count"`
+	WithdrawCount                 int64   `json:"withdraw_count"`
+	CancelCount                   int64   `json:"cancel_count"`
+	RestCount                     int64   `json:"rest_count"`
+	SubmitCount                   int64   `json:"submit_count"`
+	MeanQuoteLifetimeNs           float64 `json:"mean_quote_lifetime_ns"`
+	MaxQuoteLifetimeNs            int64   `json:"max_quote_lifetime_ns"`
+	MeanObservedTouchShare        float64 `json:"mean_observed_touch_share"`
+	MaxObservedTouchShare         float64 `json:"max_observed_touch_share"`
+	MeanObservationAgeNs          float64 `json:"mean_observation_age_ns"`
+	MaxObservationAgeNs           int64   `json:"max_observation_age_ns"`
+	ConfiguredMaxPosition         int64   `json:"configured_max_position"`
+	ConfiguredMaxQuoteQty         int64   `json:"configured_max_quote_qty"`
+	MaxQuoteQty                   int64   `json:"max_quote_qty"`
+	MaxBorrowed                   int64   `json:"max_borrowed"`
+	BorrowEventCount              int64   `json:"borrow_event_count"`
+	MaxGrossBaseBalance           int64   `json:"max_gross_base_balance"`
+	MaxGrossQuoteBalance          int64   `json:"max_gross_quote_balance"`
+	RealizedPnL                   int64   `json:"realized_pnl"`
+	UnrealizedPnL                 int64   `json:"unrealized_pnl"`
+	BalanceSnapshotCount          int64   `json:"balance_snapshot_count"`
+	BalanceReconciliationResidual int64   `json:"balance_reconciliation_residual"`
+	PnLReconciliationResidual     int64   `json:"pnl_reconciliation_residual"`
+	Valid                         bool    `json:"valid"`
 
 	positionSet                   bool
 	lastPosition                  int64
@@ -122,6 +130,7 @@ type CDFLiquiditySupplierAudit struct {
 	configuredMaxObservationAge   int64
 	configuredInitialBaseBalance  int64
 	configuredInitialQuoteBalance int64
+	configuredQuotePrecision      int64
 	entryPrice                    int64
 	realizedPnL                   int64
 	terminalMark                  int64
@@ -132,6 +141,13 @@ type CDFLiquiditySupplierAudit struct {
 	maxGrossBaseBalance           int64
 	maxGrossQuoteBalance          int64
 	maxQuoteQty                   int64
+	balanceSnapshotCount          int64
+	lastBalanceSnapshotAt         int64
+	initialSpotNetBalances        map[string]int64
+	terminalSpotNetBalances       map[string]int64
+	fillNetBalanceDeltas          map[string]int64
+	initialMarks                  map[string]int64
+	terminalMarks                 map[string]int64
 	pendingQuoteByRequest         map[uint64]cdfDecisionEvidence
 	receiptRequired               bool
 }
@@ -172,6 +188,7 @@ type cdfSupplierConfig struct {
 	BaseAsset           string `json:"base_asset"`
 	QuoteAsset          string `json:"quote_asset"`
 	BasePrecision       int64  `json:"base_precision"`
+	QuotePrecision      int64  `json:"quote_precision"`
 	InitialBaseBalance  int64  `json:"initial_base_balance"`
 	InitialQuoteBalance int64  `json:"initial_quote_balance"`
 	MaxPosition         int64  `json:"max_position"`
@@ -316,10 +333,12 @@ type cdfAssetBalanceEvidence struct {
 	Free     int64  `json:"free"`
 	Locked   int64  `json:"locked"`
 	Borrowed int64  `json:"borrowed"`
+	Interest int64  `json:"interest"`
 	NetAsset int64  `json:"net_asset"`
 }
 
 type cdfBalanceSnapshotEvidence struct {
+	Timestamp    int64                     `json:"timestamp"`
 	ClientID     uint64                    `json:"client_id"`
 	SpotBalances []cdfAssetBalanceEvidence `json:"spot_balances"`
 	PerpBalances []cdfAssetBalanceEvidence `json:"perp_balances"`
@@ -430,7 +449,17 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		states[key] = &CDFLiquiditySupplierAudit{
 			VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID,
 			MinPosition: math.MaxInt64, MaxPosition: math.MinInt64,
-			pendingTouchByRequest: make(map[uint64]float64), pendingQuoteByRequest: make(map[uint64]cdfDecisionEvidence), Valid: true, initialAccountSeen: true,
+			pendingTouchByRequest: make(map[uint64]float64), pendingQuoteByRequest: make(map[uint64]cdfDecisionEvidence),
+			initialSpotNetBalances: make(map[string]int64), fillNetBalanceDeltas: make(map[string]int64), initialMarks: cloneMarks(row.Marks), Valid: true, initialAccountSeen: true,
+		}
+		if err := assignAccountBalances(states[key].initialSpotNetBalances, row.Account.SpotBalances); err != nil {
+			result.addCheck(CDFLiquidityCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "supplier initial spot balances are malformed: " + err.Error()})
+		}
+		if hasNonZeroBalances(row.Account.PerpBalances) {
+			result.addCheck(CDFLiquidityCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "supplier initial account has unsupported nonzero perp balances"})
+		}
+		if hasNonZeroPositions(row.Account.Positions) {
+			result.addCheck(CDFLiquidityCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "supplier initial account has unsupported derivative positions"})
 		}
 		if supplierConfig, configured := configByRole[row.Role]; configured {
 			state := states[key]
@@ -439,6 +468,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.configuredSymbol = supplierConfig.Symbol
 			state.configuredMaxPosition = supplierConfig.MaxPosition
 			state.configuredBasePrecision = supplierConfig.BasePrecision
+			state.configuredQuotePrecision = supplierConfig.QuotePrecision
 			state.configuredMaxQuoteQty = supplierConfig.MaxQuoteQty
 			state.configuredMaxObservationAge = supplierConfig.MaxObservationAge
 			state.configuredInitialBaseBalance = supplierConfig.InitialBaseBalance
@@ -446,7 +476,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.ConfiguredMaxPosition = supplierConfig.MaxPosition
 			state.ConfiguredMaxQuoteQty = supplierConfig.MaxQuoteQty
 			state.receiptRequired = config.RecordMarketDataReceipts && containsString(config.MarketDataReceiptRoles, auditRoleClass(row.Role))
-			if supplierConfig.InitialBaseBalance <= 0 || supplierConfig.InitialQuoteBalance <= 0 || !accountHasNetBalance(row.Account.SpotBalances, supplierConfig.BaseAsset, supplierConfig.InitialBaseBalance) || !accountHasNetBalance(row.Account.SpotBalances, supplierConfig.QuoteAsset, supplierConfig.InitialQuoteBalance) {
+			if supplierConfig.InitialBaseBalance <= 0 || supplierConfig.InitialQuoteBalance <= 0 || supplierConfig.BasePrecision <= 0 || supplierConfig.QuotePrecision <= 0 || !accountHasNetBalance(row.Account.SpotBalances, supplierConfig.BaseAsset, supplierConfig.InitialBaseBalance) || !accountHasNetBalance(row.Account.SpotBalances, supplierConfig.QuoteAsset, supplierConfig.InitialQuoteBalance) {
 				result.addCheck(CDFLiquidityCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "supplier initial capital does not match registered finite balances"})
 			}
 		} else {
@@ -480,6 +510,17 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		state.TerminalEquity = terminalRow.Account.Equity
 		state.terminalAccountSeen = true
 		state.PnL = terminalRow.Account.Equity - row.Account.Equity
+		state.terminalSpotNetBalances = make(map[string]int64)
+		state.terminalMarks = cloneMarks(terminalRow.Marks)
+		if err := assignAccountBalances(state.terminalSpotNetBalances, terminalRow.Account.SpotBalances); err != nil {
+			result.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: row.Role, ClientID: key.ClientID, Failure: "supplier terminal spot balances are malformed: " + err.Error()})
+		}
+		if hasNonZeroBalances(terminalRow.Account.PerpBalances) {
+			result.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: row.Role, ClientID: key.ClientID, Failure: "supplier terminal account has unsupported nonzero perp balances"})
+		}
+		if hasNonZeroPositions(terminalRow.Account.Positions) {
+			result.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: row.Role, ClientID: key.ClientID, Failure: "supplier terminal account has unsupported derivative positions"})
+		}
 		if state.configuredBaseAsset == "" {
 			result.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: row.Role, ClientID: key.ClientID, Failure: "supplier has no configured base asset"})
 		} else if mark := terminalRow.Marks[state.configuredBaseAsset]; mark > 0 {
@@ -558,7 +599,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	}
 	for _, path := range bookFiles {
 		err := r.Scan(ScanOptions{
-			Events: []string{"Trade", "BookSnapshot", "OrderAccepted", "OrderCancelled", "OrderFill"},
+			Events: []string{"Trade", "BookSnapshot", "OrderAccepted", "OrderRejected", "OrderCancelled", "OrderFill"},
 			Files:  []string{path}, FilesSelected: true, Workers: 1,
 		}, func(event Event) {
 			result.processBookEvent(event, states, orders, actualFills, venueAudits)
@@ -571,6 +612,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		result.addCheck(CDFLiquidityCheck{Failure: "no rendered CDF-USD book evidence"})
 	}
 	result.reconcileFills(observedFills, actualFills, states)
+	result.reconcileSupplierBalances(states)
 	result.finalizeOrders(orders, states)
 	result.finalizeSuppliers(states)
 	result.finalizeVenueAudits(venueAudits)
@@ -843,6 +885,9 @@ func (r *CDFLiquidityRunAudit) processSupplierFill(event Event, states map[cdfPa
 	if err := updateSupplierPnL(state, fill); err != nil {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier PnL reconstruction failed: " + err.Error()})
 	}
+	if err := updateSupplierBalanceDeltas(state, fill); err != nil {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier cash/base/fee reconciliation failed: " + err.Error()})
+	}
 	state.lastPosition = fill.PositionAfter
 	if fill.PositionAfter < state.MinPosition {
 		state.MinPosition = fill.PositionAfter
@@ -857,6 +902,49 @@ func (r *CDFLiquidityRunAudit) processSupplierFill(event Event, states map[cdfPa
 	} else {
 		observed[fillKey] = cdfObservedFill{fill: fill, ordinal: event.Ordinal}
 	}
+}
+
+func updateSupplierBalanceDeltas(state *CDFLiquiditySupplierAudit, fill cdfFillEvidence) error {
+	if state.configuredBaseAsset == "" || state.configuredQuoteAsset == "" || state.configuredBasePrecision <= 0 {
+		return fmt.Errorf("missing configured asset pair or base precision")
+	}
+	quoteAmount, ok := quoteProduct(fill.Price, fill.Qty, state.configuredBasePrecision)
+	if !ok {
+		return fmt.Errorf("quote notional overflows fixed-point range")
+	}
+	baseDelta, quoteDelta := int64(0), int64(0)
+	if fill.Side == "BUY" {
+		baseDelta, quoteDelta = fill.Qty, -quoteAmount
+	} else if fill.Side == "SELL" {
+		baseDelta, quoteDelta = -fill.Qty, quoteAmount
+	} else {
+		return fmt.Errorf("unknown fill side %q", fill.Side)
+	}
+	if err := addBalanceDelta(state.fillNetBalanceDeltas, state.configuredBaseAsset, baseDelta); err != nil {
+		return err
+	}
+	if err := addBalanceDelta(state.fillNetBalanceDeltas, state.configuredQuoteAsset, quoteDelta); err != nil {
+		return err
+	}
+	if fill.FeeAmount < 0 {
+		return fmt.Errorf("fee amount is negative")
+	}
+	if fill.FeeAmount == 0 {
+		return nil
+	}
+	if fill.FeeAsset != state.configuredBaseAsset && fill.FeeAsset != state.configuredQuoteAsset {
+		return fmt.Errorf("fee asset %q is outside configured pair", fill.FeeAsset)
+	}
+	return addBalanceDelta(state.fillNetBalanceDeltas, fill.FeeAsset, -fill.FeeAmount)
+}
+
+func addBalanceDelta(balances map[string]int64, asset string, delta int64) error {
+	updated, ok := exactAdd(balances[asset], delta)
+	if !ok {
+		return fmt.Errorf("balance delta for %s overflows", asset)
+	}
+	balances[asset] = updated
+	return nil
 }
 
 func updateSupplierPnL(state *CDFLiquiditySupplierAudit, fill cdfFillEvidence) error {
@@ -1059,6 +1147,24 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			delete(state.pendingTouchByRequest, accepted.RequestID)
 		}
 		orders[orderKey] = order
+	case "OrderRejected":
+		state := states[cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}]
+		if state == nil {
+			return
+		}
+		var rejected struct {
+			RequestID uint64 `json:"request_id"`
+		}
+		if err := decodeRequiredJSON(event.Raw(), &rejected, "request_id"); err != nil || rejected.RequestID == 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed supplier order rejection"})
+			return
+		}
+		if _, exists := state.pendingQuoteByRequest[rejected.RequestID]; !exists {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier order rejection has no matching local submission"})
+			return
+		}
+		delete(state.pendingQuoteByRequest, rejected.RequestID)
+		delete(state.pendingTouchByRequest, rejected.RequestID)
 	case "OrderFill":
 		key := cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}
 		state := states[key]
@@ -1123,39 +1229,95 @@ func (r *CDFLiquidityRunAudit) processBalanceSnapshot(event Event, states map[cd
 		return
 	}
 	var snapshot cdfBalanceSnapshotEvidence
-	if err := decodeRequiredJSON(event.Raw(), &snapshot, "client_id", "spot_balances", "perp_balances", "borrowed"); err != nil {
+	if err := decodeRequiredJSON(event.Raw(), &snapshot, "timestamp", "client_id", "spot_balances", "perp_balances", "borrowed"); err != nil {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed supplier balance snapshot: " + err.Error()})
 		return
 	}
-	if snapshot.ClientID != event.ClientID {
+	if snapshot.ClientID != event.ClientID || snapshot.Timestamp != event.SimTS || snapshot.Timestamp <= 0 {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier balance snapshot identity mismatch"})
 	}
-	for _, balance := range append(snapshot.SpotBalances, snapshot.PerpBalances...) {
-		gross, ok := exactAdd(balance.Free, balance.Locked)
-		if !ok || balance.Borrowed < 0 {
-			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier balance snapshot arithmetic is invalid"})
-			continue
+	if state.lastBalanceSnapshotAt > snapshot.Timestamp {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier balance snapshots are out of timestamp order"})
+	}
+	_, spotBorrowed, spotGross, err := validateCDFBalanceRows(snapshot.SpotBalances)
+	if err != nil {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier spot balance snapshot arithmetic is invalid: " + err.Error()})
+		return
+	}
+	perpNet, perpBorrowed, _, err := validateCDFBalanceRows(snapshot.PerpBalances)
+	if err != nil {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier perp balance snapshot arithmetic is invalid: " + err.Error()})
+		return
+	}
+	for asset, net := range perpNet {
+		if net != 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier balance snapshot has unsupported nonzero perp balance for " + asset})
 		}
-		if balance.Borrowed > state.maxBorrowed {
-			state.maxBorrowed = balance.Borrowed
+	}
+	aggregateBorrowed := make(map[string]int64, len(spotBorrowed)+len(perpBorrowed))
+	for asset, borrowed := range spotBorrowed {
+		if err := addBalanceDelta(aggregateBorrowed, asset, borrowed); err != nil {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier balance snapshot borrowed amount overflows"})
 		}
-		if balance.Asset == state.configuredBaseAsset && gross > state.maxGrossBaseBalance {
-			state.maxGrossBaseBalance = gross
-		}
-		if balance.Asset == state.configuredQuoteAsset && gross > state.maxGrossQuoteBalance {
-			state.maxGrossQuoteBalance = gross
+	}
+	for asset, borrowed := range perpBorrowed {
+		if err := addBalanceDelta(aggregateBorrowed, asset, borrowed); err != nil {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier balance snapshot borrowed amount overflows"})
 		}
 	}
 	for asset, borrowed := range snapshot.Borrowed {
-		if borrowed < 0 {
-			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier borrowed balance is negative"})
+		if borrowed < 0 || aggregateBorrowed[asset] != borrowed {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier balance snapshot borrowed totals do not reconcile"})
 		}
-		if asset == state.configuredBaseAsset || asset == state.configuredQuoteAsset {
-			if borrowed > state.maxBorrowed {
-				state.maxBorrowed = borrowed
-			}
+		if borrowed > state.maxBorrowed {
+			state.maxBorrowed = borrowed
 		}
 	}
+	for asset, borrowed := range aggregateBorrowed {
+		if snapshot.Borrowed[asset] != borrowed {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier balance snapshot omits borrowed asset"})
+		}
+		if borrowed > state.maxBorrowed {
+			state.maxBorrowed = borrowed
+		}
+	}
+	if spotGross[state.configuredBaseAsset] > state.maxGrossBaseBalance {
+		state.maxGrossBaseBalance = spotGross[state.configuredBaseAsset]
+	}
+	if spotGross[state.configuredQuoteAsset] > state.maxGrossQuoteBalance {
+		state.maxGrossQuoteBalance = spotGross[state.configuredQuoteAsset]
+	}
+	state.balanceSnapshotCount++
+	state.lastBalanceSnapshotAt = snapshot.Timestamp
+}
+
+func validateCDFBalanceRows(rows []cdfAssetBalanceEvidence) (map[string]int64, map[string]int64, map[string]int64, error) {
+	netByAsset := make(map[string]int64, len(rows))
+	borrowedByAsset := make(map[string]int64, len(rows))
+	grossByAsset := make(map[string]int64, len(rows))
+	for _, balance := range rows {
+		if balance.Asset == "" {
+			return nil, nil, nil, fmt.Errorf("asset is empty")
+		}
+		if _, exists := netByAsset[balance.Asset]; exists {
+			return nil, nil, nil, fmt.Errorf("duplicate asset %q", balance.Asset)
+		}
+		if balance.Borrowed < 0 {
+			return nil, nil, nil, fmt.Errorf("borrowed amount for %s is negative", balance.Asset)
+		}
+		gross, ok := exactAdd(balance.Free, balance.Locked)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("gross amount for %s overflows", balance.Asset)
+		}
+		expectedNet, ok := exactAdd(gross, -balance.Borrowed)
+		if !ok || expectedNet != balance.NetAsset {
+			return nil, nil, nil, fmt.Errorf("net amount for %s does not equal free plus locked minus borrowed", balance.Asset)
+		}
+		netByAsset[balance.Asset] = balance.NetAsset
+		borrowedByAsset[balance.Asset] = balance.Borrowed
+		grossByAsset[balance.Asset] = gross
+	}
+	return netByAsset, borrowedByAsset, grossByAsset, nil
 }
 
 func (r *CDFLiquidityRunAudit) processBorrow(event Event, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
@@ -1173,6 +1335,109 @@ func (r *CDFLiquidityRunAudit) processBorrow(event Event, states map[cdfParticip
 		return
 	}
 	state.borrowEventCount++
+}
+
+func (r *CDFLiquidityRunAudit) reconcileSupplierBalances(states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
+	for key, state := range states {
+		if state.balanceSnapshotCount == 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier has no balance snapshot evidence"})
+		}
+		expected := make(map[string]int64, len(state.initialSpotNetBalances))
+		for asset, balance := range state.initialSpotNetBalances {
+			expected[asset] = balance
+		}
+		for asset, delta := range state.fillNetBalanceDeltas {
+			if err := addBalanceDelta(expected, asset, delta); err != nil {
+				r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "expected terminal balance overflows"})
+			}
+		}
+		residual := int64(0)
+		assets := make(map[string]struct{}, len(expected)+len(state.terminalSpotNetBalances))
+		for asset := range expected {
+			assets[asset] = struct{}{}
+		}
+		for asset := range state.terminalSpotNetBalances {
+			assets[asset] = struct{}{}
+		}
+		for asset := range assets {
+			expectedBalance, actualBalance := expected[asset], state.terminalSpotNetBalances[asset]
+			if expectedBalance == actualBalance {
+				continue
+			}
+			residual = addAbsoluteDifference(residual, expectedBalance, actualBalance)
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: fmt.Sprintf("terminal %s balance does not reconcile to fills", asset)})
+		}
+		state.BalanceReconciliationResidual = residual
+		state.BalanceSnapshotCount = state.balanceSnapshotCount
+
+		initialValue, initialErr := markedSpotWalletValue(state.initialSpotNetBalances, state.initialMarks, state)
+		terminalValue, terminalErr := markedSpotWalletValue(state.terminalSpotNetBalances, state.terminalMarks, state)
+		if initialErr != nil || terminalErr != nil {
+			err := initialErr
+			if err == nil {
+				err = terminalErr
+			}
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier marked wallet reconciliation failed: " + err.Error()})
+			continue
+		}
+		expectedPnL, ok := exactAdd(terminalValue, -initialValue)
+		if !ok {
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier marked wallet PnL overflows"})
+			continue
+		}
+		residualPnL, ok := exactAdd(state.PnL, -expectedPnL)
+		if !ok {
+			residualPnL = math.MaxInt64
+		}
+		state.PnLReconciliationResidual = residualPnL
+		if residualPnL != 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: fmt.Sprintf("account equity delta %d disagrees with marked wallet delta %d", state.PnL, expectedPnL)})
+		}
+	}
+}
+
+func markedSpotWalletValue(balances map[string]int64, marks map[string]int64, state *CDFLiquiditySupplierAudit) (int64, error) {
+	var total int64
+	for asset, balance := range balances {
+		if balance == 0 {
+			continue
+		}
+		precision := int64(0)
+		switch asset {
+		case state.configuredBaseAsset:
+			precision = state.configuredBasePrecision
+		case state.configuredQuoteAsset:
+			precision = state.configuredQuotePrecision
+		default:
+			return 0, fmt.Errorf("nonzero unconfigured asset %s", asset)
+		}
+		mark := marks[asset]
+		if mark <= 0 || precision <= 0 {
+			return 0, fmt.Errorf("asset %s lacks a positive mark and precision", asset)
+		}
+		value, ok := etypes.TryMulDiv(balance, mark, precision)
+		if !ok {
+			return 0, fmt.Errorf("asset %s value overflows", asset)
+		}
+		total, ok = exactAdd(total, value)
+		if !ok {
+			return 0, fmt.Errorf("wallet value overflows")
+		}
+	}
+	return total, nil
+}
+
+func addAbsoluteDifference(total, expected, actual int64) int64 {
+	difference := new(big.Int).Sub(big.NewInt(expected), big.NewInt(actual))
+	difference.Abs(difference)
+	if !difference.IsInt64() {
+		return math.MaxInt64
+	}
+	updated, ok := exactAdd(total, difference.Int64())
+	if !ok {
+		return math.MaxInt64
+	}
+	return updated
 }
 
 func displayedDepth(levels []bookLevel) int64 {
@@ -1273,6 +1538,12 @@ func (r *CDFLiquidityRunAudit) finalizeOrders(orders map[cdfOrderKey]*cdfOrderSt
 		lifetimeTotal, _ = exactAdd(lifetimeTotal, lifetime)
 		lifetimeCount++
 	}
+	for _, state := range states {
+		for range state.pendingQuoteByRequest {
+			state.CensoredQuoteCount++
+			r.CensoredQuoteCount++
+		}
+	}
 	if lifetimeCount > 0 {
 		r.MeanQuoteLifetimeNs = float64(lifetimeTotal) / float64(lifetimeCount)
 	}
@@ -1337,7 +1608,7 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 		if state.maxBorrowed > 0 || state.borrowEventCount > 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier used unregistered borrowed capital"})
 		}
-		if !state.initialAccountSeen || !state.terminalAccountSeen || state.configuredMaxPosition <= 0 || state.configuredMaxQuoteQty <= 0 || state.configuredBasePrecision <= 0 || state.configuredMaxObservationAge <= 0 || state.configuredInitialBaseBalance <= 0 || state.configuredInitialQuoteBalance <= 0 {
+		if !state.initialAccountSeen || !state.terminalAccountSeen || state.configuredMaxPosition <= 0 || state.configuredMaxQuoteQty <= 0 || state.configuredBasePrecision <= 0 || state.configuredQuotePrecision <= 0 || state.configuredMaxObservationAge <= 0 || state.configuredInitialBaseBalance <= 0 || state.configuredInitialQuoteBalance <= 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier lacks complete finite-capital configuration"})
 		}
 		state.Valid = state.DecisionCount > 0 && state.FillCount > 0 && state.AcceptedQuoteCount > 0 && state.CompletedQuoteCount > 0 && state.initialAccountSeen && state.terminalAccountSeen
@@ -1449,6 +1720,48 @@ func accountHasNetBalance(balances []Balance, asset string, expected int64) bool
 		}
 	}
 	return false
+}
+
+func assignAccountBalances(target map[string]int64, balances []Balance) error {
+	for _, balance := range balances {
+		if balance.Asset == "" {
+			return fmt.Errorf("asset is empty")
+		}
+		if _, exists := target[balance.Asset]; exists {
+			return fmt.Errorf("duplicate asset %q", balance.Asset)
+		}
+		if balance.Borrowed < 0 {
+			return fmt.Errorf("borrowed amount for %s is negative", balance.Asset)
+		}
+		target[balance.Asset] = balance.NetAsset
+	}
+	return nil
+}
+
+func hasNonZeroBalances(balances []Balance) bool {
+	for _, balance := range balances {
+		if balance.NetAsset != 0 || balance.Borrowed != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func hasNonZeroPositions(positions []Position) bool {
+	for _, position := range positions {
+		if position.Size != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneMarks(marks map[string]int64) map[string]int64 {
+	clone := make(map[string]int64, len(marks))
+	for asset, mark := range marks {
+		clone[asset] = mark
+	}
+	return clone
 }
 
 func isCDFSupplierRole(role string) bool {

@@ -23,6 +23,7 @@ type ElasticLiquiditySupplierSpec struct {
 	BaseAsset            string        `json:"base_asset"`
 	QuoteAsset           string        `json:"quote_asset"`
 	BasePrecision        int64         `json:"base_precision"`
+	QuotePrecision       int64         `json:"quote_precision"`
 	InitialBaseBalance   int64         `json:"initial_base_balance"`
 	InitialQuoteBalance  int64         `json:"initial_quote_balance"`
 	Interval             time.Duration `json:"interval"`
@@ -42,8 +43,8 @@ func (s ElasticLiquiditySupplierSpec) validate() error {
 	if s.Symbol == "" || s.BaseAsset == "" || s.QuoteAsset == "" || s.BaseAsset == s.QuoteAsset {
 		return fmt.Errorf("symbol and distinct base/quote assets are required")
 	}
-	if s.BasePrecision <= 0 || s.InitialBaseBalance <= 0 || s.InitialQuoteBalance <= 0 {
-		return fmt.Errorf("initial balances must be positive")
+	if s.BasePrecision <= 0 || s.QuotePrecision <= 0 || s.InitialBaseBalance <= 0 || s.InitialQuoteBalance <= 0 {
+		return fmt.Errorf("precisions and initial balances must be positive")
 	}
 	if s.Interval <= 0 || s.MaxObservationAge <= 0 || s.ReferenceHalfLife <= 0 {
 		return fmt.Errorf("interval, observation age, and reference half-life must be positive")

@@ -132,7 +132,7 @@ func TestElasticLiquiditySupplierWithdrawsOnUnavailableLocalSide(t *testing.T) {
 func testElasticLiquiditySupplierSpec() ElasticLiquiditySupplierSpec {
 	return ElasticLiquiditySupplierSpec{
 		Role: "cdf_elastic_supplier_1", Symbol: "CDF/USD", BaseAsset: "CDF", QuoteAsset: "USD",
-		BasePrecision:      mvBasePrecision,
+		BasePrecision: mvBasePrecision, QuotePrecision: mvQuotePrecision,
 		InitialBaseBalance: 1_000 * mvBasePrecision, InitialQuoteBalance: 500_000_000 * mvQuotePrecision,
 		Interval: time.Second, MaxObservationAge: time.Minute,
 		ReferencePrice: mvCDFBootstrap, ReferenceHalfLife: 4 * time.Hour,
