@@ -91,6 +91,31 @@ consumer is unchanged. `analysis.Open` refuses a run whose format it cannot
 read, which covers all 56 metrics at their single entry point rather than one by
 one. `prunegate` refuses to certify such a run at all.
 
+### The remaining gap, sized rather than estimated
+
+Reconstructing the run directory needs each record routed back to its file. Of
+the 15 venue log files in a dev-607 run:
+
+| files | records | exact order recoverable? |
+| --- | ---: | --- |
+| 12 — `derivatives.jsonl`, `spot/*.jsonl` | 1,530,852 | **yes**: pure hashed records, ordered by the stream's global sequence |
+| 3 — `general.jsonl` | 66,451 | **no** |
+
+`general.jsonl` is the only file where both partitions land: it interleaves
+`maker_state` (hashed, in the stream) with the evidence-only families (not
+hashed, in the JSONL). Binary frames carry a global sequence; the evidence-only
+records carry only `sim_ts`, and the timestamps do not disambiguate — an
+independent count found **3,529 of 3,603 distinct timestamps carry both kinds,
+so 98.3 % of that file's records sit at an ambiguous timestamp.** It is
+recoverable as a multiset and not as an ordered file, and it would fail silently:
+plausible lines in the wrong order, no error.
+
+**The fix is one field and it is not mine to make.** Giving `LogEvidenceOnly`
+records a counter from the same sequence source makes the merge exact. It also
+changes what those 28,193 JSONL lines contain, in both modes — a change to
+written evidence, which is a scientific decision rather than a performance one.
+Recorded here for that decision rather than made.
+
 The remaining blockers:
 
 1. **File-layout routing.** `cmd/evsrender` emits one globally ordered stream and
