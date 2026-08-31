@@ -762,3 +762,59 @@ the interned event-name reference at the call site. Together they price at about
 1.5 %, against an A/A noise floor of 0.06-0.96 %. They are marginal rather than
 free, and neither should be attempted before the profile either confirms the
 model or overturns it.
+
+## The pre-registered model was wrong, and how
+
+The prediction was: no evidence-path function above ~2 % of CPU in replace mode,
+subsystem below ~5 %. An independent profile refuted it. `checkpointSink.observe`
+is **7.1-8.2 % cum**. The attribution:
+
+```
+checkpointSink.observe                     8.20%  cum
+└─ binaryEvidence.record                   7.96%
+   ├─ Writer.AppendInterning               6.56%
+   │  ├─ appendFrame                       3.63%
+   │  │  └─ sha256.Digest.Write            2.69%   <- predicted 1.28%
+   │  ├─ OpaqueJSON.AppendPayloadInterning 1.17%
+   │  └─ typed appenders + misc           ~1.75%
+   └─ Writer.Intern                        1.41%   <- predicted 0.8%
+      └─ Dictionary.Lookup (flat)          1.17%
+```
+
+**Two estimates were wrong, and the second error is the instructive one.**
+
+1. The untyped tail was carried as 6.6 % of events. A census puts it at
+   **2.43 %** (38,103 of 1,568,215): `maker_state` 32,400, `balance_snapshot`
+   5,100, `OrderRejected` 404, `borrow` 97, `instrument_listed` 78,
+   `margin_interest` 24. Completing schema coverage recovers about **1.4 %**,
+   not "most of" the residual marshal cost — two thirds of that cost is
+   `MarketDataFingerprint` in the market-data receipt subsystem, which runs
+   identically in both arms and is not the evidence path at all.
+
+2. **The streaming digest was priced with the wrong instrument.** A 1 MB-block
+   benchmark measured 1,650 MB/s and the conclusion drawn was that a continuous
+   hasher is throughput-bound, giving 1.28 %. The profile says 2.69 %. Writes
+   here are one frame at a time — on the order of 150 bytes — so the cost is
+   partly per-call and buffering overhead, not streaming throughput. A block
+   size chosen for the benchmark's convenience answered a different question
+   than the one asked.
+
+The general form: **an instrument that measures the right operation can still
+measure it under the wrong conditions.** Benchmark at the size the code
+actually uses.
+
+### What the profile makes worth doing, and what it does not
+
+| candidate | measured share | verdict |
+| --- | ---: | --- |
+| per-event `os.Getenv` in `venueLogger.LogEvent` | 1.12 % | **fixed** — resolved once at construction |
+| `Writer.Intern`, two map lookups per event | 1.41 % | declined; removing one is worth ~0.6 %, inside the A/A band |
+| completing schema coverage | ~1.4 % | declined for now; larger than it looks only because it also removes the last reflection from the path |
+| a faster digest | ≤2.69 % | declined; see the digest section, and it is a format-identity change |
+
+The `os.Getenv` call was a regression introduced with replace mode itself: a
+syscall-backed read, on the hottest path in the simulator, of a value that
+cannot change during a run. A direct A/B of the fix returned **-1.21 % against
+an A/A control of +1.63 %**, so the wall-clock effect is **not resolvable on
+this host today** and is not claimed. The change stands on the profile
+attribution and on being obviously correct, not on that measurement.

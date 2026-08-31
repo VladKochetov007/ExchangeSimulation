@@ -76,6 +76,9 @@ type checkpointSink struct {
 	firstEvent       bool
 	err              error
 	closed           bool
+	// replacesRaw is resolved at construction: the binary stream stands in for
+	// the raw JSONL rather than accompanying it.
+	replacesRaw bool
 }
 
 // checkpointRecord is one line of the checkpoint file.
@@ -151,6 +154,7 @@ func newCheckpointSink(dir string, intervalSeconds int, traceFrom, traceTo int64
 		sink.trace = file
 	}
 	if binaryEvidenceEnabled() {
+		sink.replacesRaw = binaryEvidenceReplacesRawLog()
 		// The trace line carries a per-event JSON payload digest and pulls the
 		// symbol and order id out of the marshalled payload. The binary path
 		// produces neither, so a requested trace would silently yield an empty
@@ -314,8 +318,13 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 
 // replacesRawLog reports whether this sink's binary stream stands in for the
 // raw JSONL. Nil and JSON-path sinks never do.
+//
+// The decision is resolved once at construction rather than read per event. As
+// written first, this consulted the environment on every LogEvent, which an
+// independent profile put at 1.12 % of CPU — a syscall-backed lookup of a value
+// that cannot change during a run, on the hottest path in the simulator.
 func (s *checkpointSink) replacesRawLog() bool {
-	return s != nil && s.binary != nil && binaryEvidenceReplacesRawLog()
+	return s != nil && s.replacesRaw
 }
 
 func (s *checkpointSink) writeCheckpointLocked(at int64) {
