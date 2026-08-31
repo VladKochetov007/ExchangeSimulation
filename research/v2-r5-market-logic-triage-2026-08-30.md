@@ -572,3 +572,35 @@ No new plausible risk, matching, lifecycle, or historical-impact finding was
 identified on the active scientific HEAD, so no reproduction or semantic fix
 is warranted. Nothing was merged, the current JSONL evidence contract remains
 in force, and the next performance comparison starts at `6b51e97`.
+
+## Promotion review — `83dc7b1` rejected by Banach (2026-08-31)
+
+Banach (Sol-xhigh) independently reviewed exact clean HEAD
+`83dc7b18ea4381c99a366adc115ef7f09366382a` and **REJECTED** promotion to
+dev-607. The review found that `MeasureCalendar` accepted an empty lifecycle
+`venue_id`, and the extractor required only three venue rows rather than the
+registered exact set `central,north,south`. A renamed or missing venue could
+therefore masquerade as a complete calendar. It also found that the shell
+literal timeline was passed as both fixture and expected argument, while real
+extraction still obtained its expectation from the production helper; the
+claimed independence was not wired into the gate. Finally, only 28 GiB was
+free while a retained full run measured 30,073,924,660 raw JSONL bytes and a
+35,341,880,370-byte complete tree, making the old 5 GiB launch floor unsafe.
+
+Commit `494d696` is the minimal correction. The analyzer now rejects missing
+or empty event venue identity and supports a validated caller-supplied expected
+venue set. The R2 extractor and both activation/integrity predicates require
+exactly the registered three venues; contract tests mutate a venue to renamed
+and empty values. The shell test directly compares its literal normalized
+timeline with the maintained helper, then exercises the timeline checker with
+its default expected value, preserving the all-at-zero mutation. The runner
+now requires capacity derived from the retained full-tree measurement (1.5x
+plus 2 GiB), approximately 51 GiB free, before launch.
+
+Focused calendar/exchange tests and the R2 contract pass. The dirty-tree full
+suite reached all Go/R2 tests but correctly stopped at parity/archive checks;
+those checks require a clean worktree. A clean rerun, vet, targeted race suite,
+and fresh independent Sol-xhigh review of exact `494d696` are required before
+binary rebuild or dev-607. The current 28 GiB free space intentionally fails
+the new launch preflight; no evidence was written and holdouts
+`619/631/641` remain untouched.

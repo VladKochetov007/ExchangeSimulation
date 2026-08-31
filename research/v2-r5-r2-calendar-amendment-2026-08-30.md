@@ -375,3 +375,25 @@ work remains separate and does not alter the R2 calendar or JSONL contract;
 the branch itself records that file-layout routing and promotion gates remain
 open. No active-HEAD semantic finding was reported or reproduced. The next
 incremental performance review begins at `6b51e97`.
+
+## Promotion review — `83dc7b1` rejected by Banach (2026-08-31)
+
+Banach (Sol-xhigh) rejected exact `83dc7b1` before any development cell. The
+calendar analyzer did not bind lifecycle evidence to the exact registered
+`central,north,south` venue set, and accepted empty/renamed venue identity.
+The shell literal timeline was also not connected to the default production
+expectation path: the test passed the same literal as its expected argument,
+while extraction used the schedule helper. The review additionally showed
+that the old 5 GiB disk floor was unsafe: retained full evidence measured
+30,073,924,660 raw JSONL bytes and 35,341,880,370 bytes including the complete
+tree, while the host had only about 28 GiB free.
+
+`494d696` adds reusable expected-venue validation, exact R2 venue predicates,
+missing/empty/renamed venue regressions, an independent literal/helper
+comparison followed by default-path timeline checks, and a measured-capacity
+launch floor of approximately 51 GiB free. Focused tests and the R2 contract
+pass. The dirty full suite is not counted as a pass because its clean-worktree
+parity/archive guard correctly rejected the uncommitted candidate; a clean
+full gate, vet, targeted race check, and fresh exact-tree Sol-xhigh review are
+still required. No binary rebuild, dev cell, parity control, or holdout has
+run from `494d696`; holdouts `619/631/641` remain untouched.

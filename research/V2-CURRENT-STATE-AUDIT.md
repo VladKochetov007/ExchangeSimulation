@@ -686,3 +686,28 @@ remain explicit limitations.  The correction is instrumentation/evidence
 handling only and does not change successful-run economic state, scheduling,
 RNG consumption, or event ordering.  A clean-source candidate determinism and
 mechanical-gate run remains outstanding before the immutable V2 freeze.
+
+## Append-only operational update: R2 calendar gate review (2026-08-31)
+
+The current R2 successor must not be inferred from the older freeze-readiness
+sections above. Exact code commit `494d696` follows Banach's independent
+Sol-xhigh rejection of `83dc7b1`. The rejection was valid and pre-launch: the
+calendar audit accepted empty or renamed venue identities, the shell timeline
+fixture was not connected to the extractor's default helper path, and the
+runner's 5 GiB free-space check was contradicted by retained full-run size.
+
+The correction adds exact `central,north,south` venue binding, empty/missing/
+renamed venue regressions, independent literal/helper timeline comparison and
+default-path testing, and a measured capacity floor of approximately 51 GiB
+free. Focused tests and the R2 contract pass. The dirty full-suite attempt is
+retained only as a diagnostic because the parity/archive tests correctly
+require a clean worktree; clean full, vet, race, and fresh exact-tree review
+remain pending. The host currently has approximately 28 GiB free, so the
+capacity preflight is intentionally a hard stop before dev-607.
+
+No R2 development cell, parity control, archive/prune operation, or holdout
+`619/631/641` has run. The incomplete temporary derivative-proxy evidence tree
+is preserved. The next valid progression is clean gate -> independent review
+-> provenance-pinned build -> dev-607 -> extraction/review -> remaining
+registered development cells and controls; holdouts remain behind explicit
+freeze authorization.

@@ -870,3 +870,27 @@ finish and their contracts pass.
   registered development cells sequentially with disk/RAM monitoring. Do not
   infer completion from host process names and do not consume holdouts before
   the candidate gate qualifies.
+
+### 2026-08-31 — R2 calendar gate remains blocked after independent review
+
+- The active scientific branch is `autoresearch/ffa-ecology-gen0`; code
+  correction `494d696` is pushed. It follows the rejected `83dc7b1` review by
+  Banach (Sol-xhigh), which found unbound/empty venue identity, a shell
+  timeline test that did not exercise the extractor's default expectation,
+  and an unsafe 5 GiB disk launch floor.
+- `494d696` now rejects missing/empty calendar venue identity, binds the exact
+  registered `central,north,south` set in the analyzer/R2 extractor and
+  activation/integrity predicates, compares the literal timeline with the
+  maintained helper before exercising the default checker, and derives the
+  launch floor from retained evidence measurements (approximately 51 GiB
+  free). Focused calendar/exchange tests and the R2 contract pass.
+- A dirty-tree full `make test` reached the Go and R2 contract tests but was
+  correctly rejected by the clean-worktree parity/archive guard; a clean full
+  rerun, vet, targeted race check, and a fresh exact-tree Sol-xhigh review of
+  the post-correction HEAD remain required. Current free space is about 28
+  GiB, so no development cell can safely launch yet. No R2 development,
+  parity, archive/prune, or holdout `619/631/641` evidence has run.
+- Continue: commit/push this append-only state record, run the clean mechanical
+  gates, obtain independent acceptance, then rebuild pinned Go 1.27 binaries.
+  Resolve the measured disk-capacity stop condition before dev-607. Preserve
+  the incomplete temporary evidence tree and all historical results.
