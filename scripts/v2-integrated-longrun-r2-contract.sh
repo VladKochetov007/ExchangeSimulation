@@ -135,9 +135,8 @@ v2_r2_capacity_attestation_path() {
 }
 
 v2_r2_require_binary_capacity_attestation() {
-	local binary=$1 source_revision=$2
-	local attestation expected_binary_sha available_kb required_bytes peak_bytes safety_bytes
-	attestation=$(v2_r2_capacity_attestation_path)
+	local binary=$1 source_revision=$2 attestation=${3:-$(v2_r2_capacity_attestation_path)}
+	local expected_binary_sha available_kb required_bytes peak_bytes safety_bytes
 	[[ -s "$attestation" && ! -L "$attestation" ]] || return 1
 	expected_binary_sha=$(sha256sum -- "$binary" | awk '{print $1}') || return 1
 	peak_bytes=$(jq -er '.peak_output_bytes' "$attestation") || return 1

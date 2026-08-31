@@ -43,6 +43,23 @@ expect_failure v2_r2_require_current_source_revision "$matching_revision" \
 expect_failure v2_r2_require_current_source_revision "$matching_revision" "$matching_revision" \
 	"fedcba9876543210fedcba9876543210fedcba98"
 
+capacity_probe_binary="$tmp_root/capacity-probe"
+cp -- /bin/true "$capacity_probe_binary"
+capacity_probe_attestation="$tmp_root/binary-capacity.json"
+capacity_probe_sha256=$(sha256sum -- "$capacity_probe_binary" | awk '{print $1}')
+jq -n --arg source_revision "$matching_revision" --arg binary_sha256 "$capacity_probe_sha256" \
+	'{schema_version: 1, contract: "v2-integrated-longrun-r2-binary-capacity-v1",
+	 measurement: "full_24h_binary_evidence_capacity_probe", evidence_format: "evstream_v3",
+	 source_revision: $source_revision, binary_sha256: $binary_sha256,
+	 peak_output_bytes: 1, safety_margin_bytes: 2147483648,
+	 required_free_bytes: 2147483649}' >"$capacity_probe_attestation"
+v2_r2_require_binary_capacity_attestation "$capacity_probe_binary" "$matching_revision" "$capacity_probe_attestation" ||
+	fail "a valid binary capacity attestation was rejected"
+if rg -n 'historical_full_tree_bytes|35341880370|required_free_bytes=' \
+	"$root_dir/scripts/run-v2-integrated-longrun-r2-cell.sh" >/dev/null; then
+	fail "registered launcher still contains the obsolete JSON capacity floor"
+fi
+
 v2_r2_acquire_namespace_lock || fail "could not acquire the R2 namespace lock for contention test"
 expect_failure env -u V2_R2_NAMESPACE_LOCK_FD V2_R2_NAMESPACE_LOCK_HELD=true bash -c \
 	"source '$root_dir/scripts/v2-integrated-longrun-r2-contract.sh'; v2_r2_acquire_namespace_lock"
