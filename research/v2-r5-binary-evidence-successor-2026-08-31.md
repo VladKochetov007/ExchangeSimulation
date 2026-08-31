@@ -120,9 +120,16 @@ A second fresh Sol-xhigh review examined exact revision `a0cb8e3` and returned
 contract only, not of 24-hour scientific behavior or capacity sufficiency. The
 reviewer confirmed the stale JSON floor was gone and required the registered
 launcher to reject ambient `EXSIM_BINARY_EVIDENCE`; `750ac9` implements that
-fail-closed guard. The final guarded tree still requires one review after this
-small launcher change. Controlled internal renderer use was accepted; public
+fail-closed guard. Controlled internal renderer use was accepted; public
 untrusted rendering hardening remains outside this campaign gate.
+
+The final fresh Sol-xhigh review examined exact clean revision `cc2b76b` and
+also returned `ACCEPT WITH NARROWER CLAIM`. It independently confirmed that
+the launcher has no JSON capacity floor, that binary attestation is the sole
+capacity authority, and that the ambient prototype override is rejected. Its
+acceptance is limited to code/test/evidence-contract readiness; it does not
+certify 24-hour scientific behavior, market realism, or capacity sufficiency.
+The reviewed tree had no registered development or holdout execution.
 
 ## Performance feed status
 
@@ -134,20 +141,19 @@ preview optimizations were imported with this evidence successor.
 
 ## Remaining promotion gates
 
-The candidate is mechanically complete but not scientifically authorized for
-execution. The following remain open:
+The candidate is mechanically complete and review-accepted for the next gated
+measurement, but it is not yet authorized for scientific cell execution. The
+following remain open:
 
-1. obtain one fresh independent Sol-xhigh review of the exact successor tree,
-   including R2 calendar semantics, correctness hardening, and binary evidence;
-2. build clean provenance-pinned Go 1.27 binaries with `-trimpath` and
+1. build clean provenance-pinned Go 1.27 binaries with `-trimpath` and
    `CGO_ENABLED=0` after review;
-3. run a separately identified, non-cell 24-hour binary capacity probe and
+2. run a separately identified, non-cell 24-hour binary capacity probe and
    publish its measured attestation only after its measurement contract passes;
-4. verify the resulting capacity against current disk/RAM without deleting
+3. verify the resulting capacity against current disk/RAM without deleting
    retained historical evidence;
-5. only after review acceptance and capacity authorization, run registered
+4. only after review acceptance and capacity authorization, run registered
    `dev-607` and extract/review it before `dev-613` or `dev-617`;
-6. do not inspect or consume reserved holdouts `619`, `631`, or `641` before
+5. do not inspect or consume reserved holdouts `619`, `631`, or `641` before
    explicit freeze authorization.
 
 There is currently no binary capacity attestation. Consequently, the
