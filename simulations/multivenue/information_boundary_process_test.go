@@ -47,6 +47,8 @@ type v20HelperResult struct {
 	TermCarryDecisions         int64  `json:"term_carry_decisions"`
 	EvidenceArtifactEvents     int64  `json:"evidence_artifact_events"`
 	EvidenceArtifactDigest     string `json:"evidence_artifact_digest"`
+	BinaryStreamHash           string `json:"binary_stream_hash"`
+	BinaryEventFrames          uint64 `json:"binary_event_frames"`
 }
 
 // TestV20EvidenceHelper deliberately runs in a fresh test process. Parent test
@@ -70,6 +72,12 @@ func TestV20EvidenceHelper(t *testing.T) {
 	}
 	cfg.LogDir = output
 	cfg.LogMode = "none"
+	if os.Getenv("V20_BINARY_EVIDENCE") == "1" {
+		cfg.EvidenceFormat = binaryRepresentation
+		if os.Getenv("V20_BINARY_LOG_MODE") == "full" {
+			cfg.LogMode = "full"
+		}
+	}
 	cfg.Seed = 101
 	cfg.CheckpointIntervalSeconds = 60
 	remoteFeed := os.Getenv("V21_REMOTE_FEED") == "1"
@@ -301,6 +309,21 @@ func TestV20EvidenceHelper(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := v20HelperResult{ExecutionHash: checkpoint.ExecutionHash}
+	if cfg.EvidenceFormat == binaryRepresentation {
+		attestationRaw, err := os.ReadFile(filepath.Join(output, "binary-evidence-attestation.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var attestation binaryEvidenceArtifactRecord
+		if err := json.Unmarshal(attestationRaw, &attestation); err != nil {
+			t.Fatal(err)
+		}
+		if attestation.ExecutionStreamHash == "" || attestation.UnencodablePayloads != 0 {
+			t.Fatalf("invalid binary evidence attestation: %+v", attestation)
+		}
+		result.BinaryStreamHash = attestation.ExecutionStreamHash
+		result.BinaryEventFrames = attestation.EventFrames
+	}
 	if cfg.RecordMarketDataReceipts {
 		audit, err := analysis.AuditMarketDataReceipts(output)
 		if err != nil || !audit.Valid || (!fundingCarryEvidence && !termCarryEvidence && audit.Decisions == 0) {
@@ -570,6 +593,50 @@ func TestV20EvidenceDoesNotChangeExecutionAcrossFreshProcesses(t *testing.T) {
 		left.Schedules != right.Schedules || left.Receipts != right.Receipts || left.Decisions != right.Decisions ||
 		left.ScheduleDigest != right.ScheduleDigest || left.ReceiptDigest != right.ReceiptDigest || left.DecisionDigest != right.DecisionDigest {
 		t.Fatalf("evidence sidecar is not fresh-process/GOMAX deterministic: g1=%+v g4=%+v", left, right)
+	}
+}
+
+func TestBinaryEvidenceIsFreshProcessDeterministicAndNeutral(t *testing.T) {
+	results := make(map[string]v20HelperResult)
+	for _, gomax := range []string{"1", "4"} {
+		for _, logMode := range []string{"none", "full"} {
+			key := "g" + gomax + "/" + logMode
+			output := filepath.Join(t.TempDir(), "run")
+			cmd := exec.Command(os.Args[0], "-test.run=TestV20EvidenceHelper", "--")
+			cmd.Env = append(os.Environ(),
+				"V20_EVIDENCE_HELPER=1",
+				"V20_EVIDENCE_OUTPUT="+output,
+				"V20_BINARY_EVIDENCE=1",
+				"V20_BINARY_LOG_MODE="+logMode,
+				"GOMAXPROCS="+gomax,
+			)
+			raw, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("binary evidence helper GOMAXPROCS=%s log_mode=%s: %v\n%s", gomax, logMode, err, raw)
+			}
+			var result v20HelperResult
+			var encoded string
+			for _, line := range strings.Split(string(raw), "\n") {
+				if strings.HasPrefix(line, "{") {
+					encoded = line
+					break
+				}
+			}
+			if err := json.Unmarshal([]byte(encoded), &result); err != nil {
+				t.Fatalf("decode binary evidence helper output %q: %v", raw, err)
+			}
+			results[key] = result
+		}
+	}
+	wantExecution := results["g1/none"].ExecutionHash
+	wantStream := results["g1/none"].BinaryStreamHash
+	if wantExecution == "" || wantStream == "" {
+		t.Fatalf("binary fresh-process helper produced incomplete identity: %+v", results["g1/none"])
+	}
+	for key, result := range results {
+		if result.ExecutionHash != wantExecution || result.BinaryStreamHash != wantStream || result.BinaryEventFrames == 0 {
+			t.Fatalf("binary identity changed across fresh process/log mode: want execution=%s stream=%s, %s=%+v", wantExecution, wantStream, key, result)
+		}
 	}
 }
 
