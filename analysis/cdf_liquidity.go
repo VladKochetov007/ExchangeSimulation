@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -221,30 +222,34 @@ type CDFLiquidityComparison struct {
 }
 
 type cdfDecisionEvidence struct {
-	Role                string `json:"role"`
-	ClientID            uint64 `json:"client_id"`
-	Symbol              string `json:"symbol"`
-	DecisionTime        int64  `json:"decision_time"`
-	ObservationTime     int64  `json:"observation_time"`
-	ObservationAge      int64  `json:"observation_age"`
-	ObservationSequence uint64 `json:"observation_sequence"`
-	BestBid             int64  `json:"best_bid"`
-	BestBidQty          int64  `json:"best_bid_qty"`
-	BestAsk             int64  `json:"best_ask"`
-	BestAskQty          int64  `json:"best_ask_qty"`
-	MarkPrice           int64  `json:"mark_price"`
-	ReferencePrice      int64  `json:"reference_price"`
-	Position            int64  `json:"position"`
-	TargetPosition      int64  `json:"target_position"`
-	InventoryLimit      int64  `json:"inventory_limit"`
-	Action              string `json:"action"`
-	Reason              string `json:"reason"`
-	Side                string `json:"side"`
-	QuotePrice          int64  `json:"quote_price"`
-	QuoteQty            int64  `json:"quote_qty"`
-	QuoteOrderID        uint64 `json:"quote_order_id"`
-	QuoteRequestID      uint64 `json:"quote_request_id"`
-	QuoteSubmittedAt    int64  `json:"quote_submitted_at"`
+	Role                   string `json:"role"`
+	ClientID               uint64 `json:"client_id"`
+	Symbol                 string `json:"symbol"`
+	DecisionTime           int64  `json:"decision_time"`
+	ObservationTime        int64  `json:"observation_time"`
+	ObservationAge         int64  `json:"observation_age"`
+	ObservationSequence    uint64 `json:"observation_sequence"`
+	ObservationLinkID      uint32 `json:"observation_link_id"`
+	ObservationOrdinal     uint64 `json:"observation_ordinal"`
+	ObservationDeliveredAt int64  `json:"observation_delivered_at"`
+	ObservationFingerprint string `json:"observation_fingerprint"`
+	BestBid                int64  `json:"best_bid"`
+	BestBidQty             int64  `json:"best_bid_qty"`
+	BestAsk                int64  `json:"best_ask"`
+	BestAskQty             int64  `json:"best_ask_qty"`
+	MarkPrice              int64  `json:"mark_price"`
+	ReferencePrice         int64  `json:"reference_price"`
+	Position               int64  `json:"position"`
+	TargetPosition         int64  `json:"target_position"`
+	InventoryLimit         int64  `json:"inventory_limit"`
+	Action                 string `json:"action"`
+	Reason                 string `json:"reason"`
+	Side                   string `json:"side"`
+	QuotePrice             int64  `json:"quote_price"`
+	QuoteQty               int64  `json:"quote_qty"`
+	QuoteOrderID           uint64 `json:"quote_order_id"`
+	QuoteRequestID         uint64 `json:"quote_request_id"`
+	QuoteSubmittedAt       int64  `json:"quote_submitted_at"`
 }
 
 type cdfFillEvidence struct {
@@ -641,9 +646,13 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "decision identity or timestamp mismatch"})
 	}
 	missingObservation := decision.ObservationTime == 0 && decision.ObservationSequence == 0 && decision.ObservationAge == 0
-	validObservation := missingObservation || (decision.ObservationTime > 0 && decision.ObservationSequence > 0 && decision.ObservationTime <= decision.DecisionTime && decision.DecisionTime-decision.ObservationTime == decision.ObservationAge)
+	initialSubscriptionWait := state.DecisionCount == 1 && decision.Action == "wait" && decision.Reason == "subscribe"
+	validObservation := (initialSubscriptionWait && missingObservation) || (!missingObservation && decision.ObservationTime > 0 && decision.ObservationSequence > 0 && decision.ObservationTime <= decision.DecisionTime && decision.DecisionTime-decision.ObservationTime == decision.ObservationAge)
 	if !validObservation || decision.ObservationAge < 0 || decision.ReferencePrice <= 0 || decision.InventoryLimit <= 0 {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "invalid decision bounds or observation time"})
+	}
+	if state.receiptRequired {
+		r.validateDecisionObservation(event, decision, initialSubscriptionWait && missingObservation, receiptEvidence)
 	}
 	if state.configuredMaxObservationAge <= 0 || decision.ObservationAge > state.configuredMaxObservationAge {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "decision observation age exceeds registered delayed-data bound"})
@@ -667,7 +676,7 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	}
 	state.observationAgeTotal, _ = exactAdd(state.observationAgeTotal, decision.ObservationAge)
 	state.observationCount++
-	if decision.Action == "submit" && state.receiptRequired {
+	if state.receiptRequired {
 		r.validateDecisionReceipt(event, decision, receiptEvidence)
 	}
 	switch decision.Action {
@@ -742,6 +751,9 @@ func (r *CDFLiquidityRunAudit) validateDecisionReceipt(event Event, decision cdf
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision has no receipt evidence"})
 		return
 	}
+	if decision.Action != "submit" {
+		return
+	}
 	var record cdfMarketDataDecisionRecord
 	exists := false
 	for key, candidate := range evidence.decisions {
@@ -755,13 +767,40 @@ func (r *CDFLiquidityRunAudit) validateDecisionReceipt(event Event, decision cdf
 		}
 	}
 	if !exists || record.DecisionAt != decision.DecisionTime || record.Price != decision.QuotePrice || record.Qty != decision.QuoteQty {
-		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision is not reconciled to a market-data decision receipt"})
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier submit is not reconciled to a market-data decision receipt"})
+	}
+}
+
+func (r *CDFLiquidityRunAudit) validateDecisionObservation(event Event, decision cdfDecisionEvidence, initialWait bool, evidence *cdfMarketDataEvidence) {
+	if evidence == nil {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision has no receipt evidence"})
 		return
 	}
-	link, linkExists := evidence.links[record.LinkID]
-	symbol, symbolExists := evidence.symbols[record.SymbolID]
-	receipt, receiptExists := evidence.receipts[cdfReceiptLinkOrdinal{LinkID: record.LinkID, LinkOrdinal: record.FrontierOrdinal}]
-	if !linkExists || !symbolExists || !receiptExists || link.SourceVenue != event.VenueID || link.Role != auditRoleClass(decision.Role) || symbol.Symbol != decision.Symbol || receipt.Sequence != decision.ObservationSequence || receipt.PublishedAt != decision.ObservationTime || receipt.DeliveredAt > decision.DecisionTime {
+	link, linkExists := evidence.links[decision.ObservationLinkID]
+	if !linkExists || link.SourceVenue != event.VenueID || link.Role != auditRoleClass(decision.Role) {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision cites an unknown or unrelated observation link"})
+		return
+	}
+	if initialWait {
+		if decision.ObservationLinkID == 0 || decision.ObservationOrdinal != 0 || decision.ObservationDeliveredAt != 0 || decision.ObservationFingerprint != "" {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "initial subscription wait has a nonempty observation frontier"})
+		}
+		return
+	}
+	if decision.ObservationLinkID == 0 || decision.ObservationOrdinal == 0 || decision.ObservationDeliveredAt <= 0 || decision.ObservationFingerprint == "" {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision has an incomplete observation frontier"})
+		return
+	}
+	fingerprintRaw, err := hex.DecodeString(decision.ObservationFingerprint)
+	if err != nil || len(fingerprintRaw) != 16 {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision has an invalid observation fingerprint"})
+		return
+	}
+	var fingerprint [16]byte
+	copy(fingerprint[:], fingerprintRaw)
+	receipt, receiptExists := evidence.receipts[cdfReceiptLinkOrdinal{LinkID: decision.ObservationLinkID, LinkOrdinal: decision.ObservationOrdinal}]
+	symbol, symbolExists := evidence.symbols[receipt.SymbolID]
+	if !receiptExists || !symbolExists || receipt.ClientID != decision.ClientID || symbol.Symbol != decision.Symbol || receipt.Sequence != decision.ObservationSequence || receipt.PublishedAt != decision.ObservationTime || receipt.DeliveredAt != decision.ObservationDeliveredAt || receipt.DeliveredAt > decision.DecisionTime || receipt.Fingerprint != fingerprint {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision frontier does not match its delayed local observation"})
 	}
 }

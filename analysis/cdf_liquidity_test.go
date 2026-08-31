@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"exchange_sim/exchange"
+	"exchange_sim/simulation"
 )
 
 func TestMeasureCDFLiquidityReconstructsBoundedSupplier(t *testing.T) {
@@ -90,6 +93,108 @@ func TestMeasureCDFLiquidityRejectsConfiguredQuoteLimitMutation(t *testing.T) {
 	if audit.Valid || !hasCDFCheck(audit.Checks, "submitted quote exceeds registered maximum quantity") {
 		t.Fatalf("quote-limit mutation audit = %+v, want fail-closed limit rejection", audit)
 	}
+}
+
+func TestMeasureCDFLiquidityRejectsObservationFingerprintMutation(t *testing.T) {
+	run := writeCDFLiquidityReceiptFixture(t)
+	generalPath := filepath.Join(run.Dir, "venues", "north", "general.jsonl")
+	raw, err := os.ReadFile(generalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(raw), `"observation_fingerprint":"01000000000000000000000000000000"`, `"observation_fingerprint":"02000000000000000000000000000000"`, 1)
+	if mutated == string(raw) {
+		t.Fatal("fixture fingerprint was not found")
+	}
+	if err := os.WriteFile(generalPath, []byte(mutated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.Valid || !hasCDFCheck(audit.Checks, "supplier decision frontier does not match its delayed local observation") {
+		t.Fatalf("fingerprint mutation audit = %+v, want fail-closed frontier rejection", audit)
+	}
+}
+
+func TestMeasureCDFLiquidityRejectsObservationOrdinalMutation(t *testing.T) {
+	run := writeCDFLiquidityReceiptFixture(t)
+	generalPath := filepath.Join(run.Dir, "venues", "north", "general.jsonl")
+	raw, err := os.ReadFile(generalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(raw), `"observation_ordinal":1`, `"observation_ordinal":2`, 1)
+	if mutated == string(raw) {
+		t.Fatal("fixture observation ordinal was not found")
+	}
+	if err := os.WriteFile(generalPath, []byte(mutated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.Valid || !hasCDFCheck(audit.Checks, "supplier decision frontier does not match its delayed local observation") {
+		t.Fatalf("ordinal mutation audit = %+v, want fail-closed frontier rejection", audit)
+	}
+}
+
+func writeCDFLiquidityReceiptFixture(t *testing.T) *Run {
+	t.Helper()
+	run := writeCDFLiquidityFixture(t, true, false)
+	generalPath := filepath.Join(run.Dir, "venues", "north", "general.jsonl")
+	raw, err := os.ReadFile(generalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frontierFields := `,"observation_link_id":1,"observation_ordinal":1,"observation_delivered_at":1,"observation_fingerprint":"01000000000000000000000000000000"`
+	updated := strings.ReplaceAll(string(raw), `"observation_sequence":1`, `"observation_sequence":1`+frontierFields)
+	if err := os.WriteFile(generalPath, []byte(updated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(run.Dir, "manifest.json")
+	manifestRaw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := strings.Replace(string(manifestRaw), `"record_market_data_receipts":false`, `"record_market_data_receipts":true,"market_data_receipt_roles":["cdf_elastic_supplier"]`, 1)
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+	recorder, err := simulation.NewMarketDataReceiptRecorder(run.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := "north/cdf_elastic_supplier"
+	if recorder.RegisterLink("north", link, "cdf_elastic_supplier") == 0 {
+		t.Fatal("receipt fixture link registration failed")
+	}
+	schedule := simulation.MarketDataSchedule{
+		ClientID: 2, SourceVenue: "north", Link: link, Symbol: "CDF/USD", Type: exchange.MDSnapshot,
+		Sequence: 1, Fingerprint: [16]byte{1}, PublishedAt: 1, ScheduledAt: 1, LinkOrdinal: 1,
+	}
+	if recorder.RecordSchedule(schedule) == 0 {
+		t.Fatal("receipt fixture schedule registration failed")
+	}
+	frontier := recorder.RecordReceipt(simulation.MarketDataReceipt{MarketDataSchedule: schedule, DeliveredAt: 1})
+	for _, decision := range []struct {
+		requestID uint64
+		price     int64
+		qty       int64
+		at        int64
+	}{{1, 99, 5, 1}, {2, 99, 4, 4}} {
+		recorder.RecordDecision(simulation.MarketDataDecision{
+			ClientID: 2, SourceVenue: "north", Link: link, Symbol: "CDF/USD", RequestID: decision.requestID,
+			Side: exchange.Buy, OrderType: exchange.LimitOrder, TimeInForce: exchange.GTC,
+			Price: decision.price, Qty: decision.qty, DecisionAt: decision.at, Frontier: frontier,
+		})
+	}
+	if err := recorder.Finalize(6); err != nil {
+		t.Fatal(err)
+	}
+	return run
 }
 
 func writeCDFLiquidityFixture(t *testing.T, supplier, malformedFill bool) *Run {
