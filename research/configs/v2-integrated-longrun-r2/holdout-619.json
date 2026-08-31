@@ -174,6 +174,7 @@
   "latent_liquidity": null,
   "latent_liquidity_count": 6,
   "log_mode": "full",
+  "evidence_format": "evstream_v3",
   "long_future_tenor": 43200000000000,
   "long_option_tenor": 43200000000000,
   "maker_anchor": "own_mid",
