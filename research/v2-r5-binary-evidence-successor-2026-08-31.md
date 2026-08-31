@@ -197,3 +197,27 @@ trajectory. The strict terminal accounting contract correctly failed closed;
 the CDF market-collapse mechanism must be independently adjudicated before a
 new capacity measurement or registered cell is attempted. Historical JSON
 results and their verdicts are unchanged.
+
+### Gate adjudication
+
+The focused current-HEAD regressions for missing terminal marks, explicit CDF
+collateral, strict population accounting, and the cross-asset spot graph all
+pass. The source contract therefore behaves as intended: a live CDF exposure
+cannot be assigned a fabricated terminal value after the local executable
+market has been durably one-sided. This is **not a simulator semantic bug** in
+the strict-mark boundary. It is a reachable **market-survival / candidate
+viability failure** under the registered successor configuration.
+
+There is no historical R2 development or holdout trajectory to invalidate. The
+failed probe itself is not evidence for a market-level claim, and no rescore or
+offline repair is appropriate. The prior P6 failures and E-039 remain their
+own historical limitations; they are not rewritten by this observation.
+
+The current promotion path is consequently stopped before capacity attestation
+and before dev-607. Continuing requires one of two explicit scientific
+dispositions: retain the current economics and record this successor as not
+viable for a 24-hour strict-accounting run, or register a new economic
+successor that changes the CDF liquidity ecology (for example, a declared
+opposing supplier policy), with a new preregistration, independent review,
+fresh binaries, and a new capacity measurement. No such economic change has
+been made here.
