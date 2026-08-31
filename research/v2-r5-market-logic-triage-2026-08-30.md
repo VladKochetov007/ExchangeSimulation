@@ -556,3 +556,19 @@ Focused calendar tests and the R2 contract pass. The clean full `make test`,
 requires fresh independent Sol-xhigh acceptance before a clean binary rebuild
 or development cell. No R2 development, parity, or holdout evidence has run;
 holdouts `619/631/641` remain untouched.
+
+## Performance red-team checkpoint — `6b51e97` (2026-08-31)
+
+At the natural pre-promotion checkpoint, `origin/autoresearch/v2-performance-research`
+was fetched and inspected from last-seen `bcb9e91` through exact head
+`6b51e973d4ad32f483ce2b3bf0b05514367efac4`. The new work is performance/VNext
+evidence infrastructure, not a scientific-branch market-logic change. The
+relevant safety correction `052c663` makes analyzers and `prunegate` refuse a
+declared evidence format they cannot read; the binary corpus/rendering work
+also reports unresolved file-layout routing and promotion blockers. The
+fingerprint fast path and allocation/GC measurements are performance-only.
+
+No new plausible risk, matching, lifecycle, or historical-impact finding was
+identified on the active scientific HEAD, so no reproduction or semantic fix
+is warranted. Nothing was merged, the current JSONL evidence contract remains
+in force, and the next performance comparison starts at `6b51e97`.

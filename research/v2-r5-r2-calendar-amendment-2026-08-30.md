@@ -368,3 +368,10 @@ calendar tests, and the R2 contract pass.
 The amendment remains unapproved pending fresh independent Sol-xhigh review
 of exact `1903679`. No clean scientific binaries or development cells have
 been run from this candidate, and holdouts `619/631/641` remain untouched.
+
+The performance red-team checkpoint also advanced from `bcb9e91` through
+`6b51e973d4ad32f483ce2b3bf0b05514367efac4`. Its new binary evidence/analyzer
+work remains separate and does not alter the R2 calendar or JSONL contract;
+the branch itself records that file-layout routing and promotion gates remain
+open. No active-HEAD semantic finding was reported or reproduced. The next
+incremental performance review begins at `6b51e97`.
