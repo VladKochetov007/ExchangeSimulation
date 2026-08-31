@@ -1808,3 +1808,44 @@ lets a user add a market-data type without touching this package.
 and it is in core exchange logic rather than in evidence writing.** It exists
 because the profile was retaken after the bottleneck moved. Every earlier
 profile was dominated by evidence serialization, which hid it.
+
+### Profile after the fingerprint win: what is left, and why each is left
+
+Retaken on the current build, which is the discipline this campaign learned late:
+a change that moves 5 % of the workload invalidates the ranking that motivated it.
+
+| target | cum | status |
+| --- | ---: | --- |
+| `schedulePhaseMarketData` | 7.62 % | near floor — receipt path is now 3.75 %, half of it SHA-256 |
+| `buildAccountMarginProfile` | 6.99 % | **blocked**, see below |
+| `previewMatchExcluding` | 6.24 % | previously rejected: a clone-free preview is a second implementation of matcher traversal |
+| `checkpointSink.observe` | 5.99 % | the evidence sink, already reduced twice |
+| `updateAllPerpPrices` | 5.62 % | not probed |
+| map probing (`matchH2` + `aeshashbody`) | ~8.6 % flat | diffuse: largest single consumer is `OrderBook.FindOrder` at 2.75 %, everything else under 1 % |
+
+**The fingerprint path is now near its floor.** `encoding/json` is gone from it
+entirely; what remains is 50 % SHA-256 and 42 % the hand-written encoder.
+Shrinking the digest would buy about 1.5 % and would change the fingerprint,
+which is an identity in delivery evidence — declined on the same grounds as
+changing the stream digest.
+
+**`buildAccountMarginProfile` is the one with a real prize and it is blocked.**
+It walks every book symbol for one client, which is the shape both of this
+campaign's structural wins had, and a no-op census is the obvious next probe.
+The campaign already rejected the sparse version once, recorded as "blocked by
+market-logic finding F1 — optimizing through it would have silently repaired a
+scientific defect while claiming a performance result".
+
+F1 has since been fixed — on the **scientific** branch (`26fbe7d`). It is not on
+this one:
+
+```
+scientific branch  anyHeld occurrences: 3
+perf branch        anyHeld occurrences: 0
+```
+
+So the block stands here for the original reason. Making the loop skip symbols
+the client has no position in changes *when marks are resolved*, and on a tree
+without F1 that is the semantic repair, not the optimisation. Unblocking is a
+branch decision: port the scientific commit first, or do this work on the
+scientific branch after the freeze.
