@@ -2,6 +2,7 @@ package multivenue
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -48,6 +49,19 @@ type renderPersistedEvent struct {
 	SimTS    int64           `json:"sim_ts"`
 }
 
+type renderRunContract struct {
+	SchemaVersion int `json:"schema_version"`
+	Config        struct {
+		LogMode        string `json:"log_mode"`
+		EvidenceFormat string `json:"evidence_format"`
+	} `json:"config"`
+}
+
+type renderArtifactDigest struct {
+	events int64
+	limbs  [4]uint64
+}
+
 // RenderBinaryEvidence reconstructs the routed venue JSONL layout from a
 // completed evstream_v3 run. The input is never modified. Existing JSONL
 // files are treated as LogEvidenceOnly sidecars and merged by their shared
@@ -71,8 +85,12 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 	if err := prepareEmptyDirectory(outAbs); err != nil {
 		return BinaryRenderReport{}, err
 	}
+	contract, err := readRenderRunContract(inputAbs)
+	if err != nil {
+		return BinaryRenderReport{}, err
+	}
 
-	routes, err := readEvidenceOnlySidecars(filepath.Join(inputAbs, "venues"))
+	routes, sidecarDigest, err := readEvidenceOnlySidecars(filepath.Join(inputAbs, "venues"))
 	if err != nil {
 		return BinaryRenderReport{}, err
 	}
@@ -103,6 +121,9 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 	if !reader.Terminated() {
 		return BinaryRenderReport{}, fmt.Errorf("multivenue: binary evidence has no completion trailer")
 	}
+	if err := validateBinaryAttestation(inputAbs, eventFrames, reader, sidecarDigest, contract.Config.LogMode); err != nil {
+		return BinaryRenderReport{}, err
+	}
 	if err := validateRenderRecords(routes); err != nil {
 		return BinaryRenderReport{}, err
 	}
@@ -116,6 +137,60 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 		Routes:           len(routes),
 		ExecutionHash:    hex.EncodeToString(digest[:]),
 	}, nil
+}
+
+func readRenderRunContract(inputDir string) (renderRunContract, error) {
+	raw, err := os.ReadFile(filepath.Join(inputDir, "manifest.json"))
+	if err != nil {
+		return renderRunContract{}, fmt.Errorf("multivenue: read binary run manifest: %w", err)
+	}
+	var contract renderRunContract
+	if err := json.Unmarshal(raw, &contract); err != nil {
+		return renderRunContract{}, fmt.Errorf("multivenue: decode binary run manifest: %w", err)
+	}
+	if contract.SchemaVersion < 2 || contract.Config.EvidenceFormat != binaryRepresentation {
+		return renderRunContract{}, fmt.Errorf("multivenue: manifest does not declare %s evidence", binaryRepresentation)
+	}
+	if contract.Config.LogMode != "full" && contract.Config.LogMode != "none" {
+		return renderRunContract{}, fmt.Errorf("multivenue: manifest has unsupported log mode %q", contract.Config.LogMode)
+	}
+	return contract, nil
+}
+
+func validateBinaryAttestation(inputDir string, eventFrames uint64, reader *evstream.Reader, sidecarDigest renderArtifactDigest, logMode string) error {
+	raw, err := os.ReadFile(filepath.Join(inputDir, "binary-evidence-attestation.json"))
+	if err != nil {
+		return fmt.Errorf("multivenue: read binary evidence attestation: %w", err)
+	}
+	var attestation binaryEvidenceArtifactRecord
+	if err := json.Unmarshal(raw, &attestation); err != nil {
+		return fmt.Errorf("multivenue: decode binary evidence attestation: %w", err)
+	}
+	digest := reader.ExecutionHash()
+	executionHash := hex.EncodeToString(digest[:])
+	if attestation.Domain != "canonical_binary_execution_frames" || attestation.Ordering != "ordered_stream" ||
+		attestation.EventFrames != eventFrames || attestation.StreamFrames != reader.Count() ||
+		attestation.ExecutionStreamHash != executionHash {
+		return fmt.Errorf("multivenue: binary attestation does not match reconstructed stream")
+	}
+	if attestation.UnencodablePayloads != 0 {
+		return fmt.Errorf("multivenue: binary evidence contains %d unencodable payloads", attestation.UnencodablePayloads)
+	}
+	if logMode == "full" {
+		raw, err := os.ReadFile(filepath.Join(inputDir, "evidence-only-artifact-hash.json"))
+		if err != nil {
+			return fmt.Errorf("multivenue: read evidence-only attestation: %w", err)
+		}
+		var artifact evidenceArtifactRecord
+		if err := json.Unmarshal(raw, &artifact); err != nil {
+			return fmt.Errorf("multivenue: decode evidence-only attestation: %w", err)
+		}
+		if artifact.Domain != "persisted_json_log_evidence_only" || artifact.Ordering != "unordered_multiset" ||
+			artifact.Events != sidecarDigest.events || artifact.Digest != sidecarDigest.hex() {
+			return fmt.Errorf("multivenue: evidence-only attestation does not match sidecars")
+		}
+	}
+	return nil
 }
 
 func renderBinaryFrame(reader *evstream.Reader, frame evstream.Frame) (renderRouteKey, renderRecord, error) {
@@ -163,14 +238,15 @@ func renderBinaryFrame(reader *evstream.Reader, frame evstream.Frame) (renderRou
 	return renderRouteKey{venue: frame.Venue, route: filepath.ToSlash(route)}, renderRecord{sequence: sequence, raw: raw}, nil
 }
 
-func readEvidenceOnlySidecars(venuesDir string) (map[renderRouteKey][]renderRecord, error) {
+func readEvidenceOnlySidecars(venuesDir string) (map[renderRouteKey][]renderRecord, renderArtifactDigest, error) {
 	routes := make(map[renderRouteKey][]renderRecord)
 	if _, err := os.Stat(venuesDir); err != nil {
 		if os.IsNotExist(err) {
-			return routes, nil
+			return routes, renderArtifactDigest{}, nil
 		}
-		return nil, fmt.Errorf("multivenue: inspect venue evidence: %w", err)
+		return nil, renderArtifactDigest{}, fmt.Errorf("multivenue: inspect venue evidence: %w", err)
 	}
+	var digest renderArtifactDigest
 	err := filepath.WalkDir(venuesDir, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -214,6 +290,7 @@ func readEvidenceOnlySidecars(venuesDir string) (map[renderRouteKey][]renderReco
 			if err := addRenderRecord(routes, key, renderRecord{sequence: event.Data.Sequence, raw: raw}); err != nil {
 				return err
 			}
+			digest.add(raw)
 		}
 		if err := scanner.Err(); err != nil {
 			return fmt.Errorf("multivenue: read sidecar %q: %w", relative, err)
@@ -221,9 +298,37 @@ func readEvidenceOnlySidecars(venuesDir string) (map[renderRouteKey][]renderReco
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, renderArtifactDigest{}, err
 	}
-	return routes, nil
+	return routes, digest, nil
+}
+
+func (d *renderArtifactDigest) add(record []byte) {
+	hash := sha256.Sum256(record)
+	var carry uint64
+	for index := 3; index >= 0; index-- {
+		limb := binary.BigEndian.Uint64(hash[index*8 : index*8+8])
+		sum := d.limbs[index] + limb
+		newCarry := uint64(0)
+		if sum < d.limbs[index] {
+			newCarry = 1
+		}
+		sum += carry
+		if sum < carry {
+			newCarry = 1
+		}
+		d.limbs[index] = sum
+		carry = newCarry
+	}
+	d.events++
+}
+
+func (d renderArtifactDigest) hex() string {
+	var encoded [32]byte
+	for index, limb := range d.limbs {
+		binary.BigEndian.PutUint64(encoded[index*8:index*8+8], limb)
+	}
+	return hex.EncodeToString(encoded[:])
 }
 
 func addRenderRecord(routes map[renderRouteKey][]renderRecord, key renderRouteKey, record renderRecord) error {

@@ -2,11 +2,16 @@ package multivenue
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"exchange_sim/exchange"
+	"exchange_sim/simulations/feesim"
+	etypes "exchange_sim/types"
 )
 
 func TestRenderBinaryEvidenceMergesEvidenceOnlySidecarsByVenueSequence(t *testing.T) {
@@ -36,6 +41,7 @@ func TestRenderBinaryEvidenceMergesEvidenceOnlySidecarsByVenueSequence(t *testin
 	if err := os.WriteFile(filepath.Join(venueDir, "general.jsonl"), append(second, '\n'), 0644); err != nil {
 		t.Fatal(err)
 	}
+	writeRenderMetadata(t, inputDir, sink, "full", second)
 
 	outOne := filepath.Join(t.TempDir(), "rendered")
 	report, err := RenderBinaryEvidence(inputDir, outOne)
@@ -141,5 +147,153 @@ func TestConfigRejectsUnknownEvidenceFormat(t *testing.T) {
 	_, err := NewSim(time.Second, Config{LogDir: t.TempDir(), LogMode: "none", EvidenceFormat: "future"})
 	if err == nil {
 		t.Fatal("unknown evidence format accepted")
+	}
+}
+
+func TestBinaryEvidenceDifferentiallyPreservesScientificJSONPayloads(t *testing.T) {
+	inputDir := filepath.Join(t.TempDir(), "binary")
+	if err := os.MkdirAll(filepath.Join(inputDir, "venues", "north"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := []byte(`{"schema_version":2,"config":{"log_mode":"none","evidence_format":"evstream_v3"}}`)
+	if err := os.WriteFile(filepath.Join(inputDir, "manifest.json"), append(manifest, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	legacyDir := t.TempDir()
+	legacyLogger, err := feesim.NewJSONLinesLogger(filepath.Join(legacyDir, "general.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventsFile, err := os.Create(filepath.Join(inputDir, "events.evs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	binarySink := newBinaryEvidence(eventsFile)
+	cases := []struct {
+		name    string
+		simTime int64
+		client  uint64
+		payload any
+	}{
+		{name: "opaque", simTime: 1, client: 7, payload: map[string]any{"z": 3, "a": "one"}},
+		{name: "balance", simTime: 2, client: 8, payload: etypes.BalanceChangeEvent{Timestamp: 2, ClientID: 8, Reason: "fill", Changes: []etypes.BalanceDelta{{Asset: "USD", Wallet: "spot", Delta: 4}}}},
+		{name: "fee", simTime: 3, client: 0, payload: etypes.FeeRevenueEvent{Timestamp: 3, Symbol: "ABC/USD", TradeID: 9, TakerFee: 2, MakerFee: 1, Asset: "USD"}},
+		{name: "trade", simTime: 4, client: 0, payload: etypes.Trade{TradeID: 10, Price: 101, Qty: 2, Side: etypes.Buy, TakerOrderID: 11, MakerOrderID: 12}},
+		{name: "venue_balance", simTime: 5, client: 0, payload: exchange.VenueBalanceEvent{Timestamp: 5, Sequence: 13, TradeID: 14, Bucket: exchange.VenueFeeRevenue, Asset: "USD", Reason: "fee", Symbol: "ABC/USD", OldBalance: 1, NewBalance: 3, Delta: 2}},
+	}
+	for index, testCase := range cases {
+		eventName := "event_" + testCase.name
+		legacyLogger.LogEvent(testCase.simTime, testCase.client, eventName, venueLogEvent{VenueID: "north", Payload: testCase.payload})
+		if err := binarySink.record(testCase.simTime, testCase.client, eventName, "north", testCase.payload, "general.jsonl", uint64(index+1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := legacyLogger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := binarySink.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eventsFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	digest := binarySink.executionHash()
+	attestation, err := json.MarshalIndent(binaryEvidenceArtifactRecord{
+		Domain: "canonical_binary_execution_frames", Ordering: "ordered_stream",
+		EventFrames: binarySink.count(), StreamFrames: binarySink.writer.Count(),
+		ExecutionStreamHash: hex.EncodeToString(digest[:]), UnencodablePayloads: binarySink.unencodableCount(),
+	}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(inputDir, "binary-evidence-attestation.json"), append(attestation, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(t.TempDir(), "rendered")
+	if _, err := RenderBinaryEvidence(inputDir, outDir); err != nil {
+		t.Fatal(err)
+	}
+	legacyRaw, err := os.ReadFile(filepath.Join(legacyDir, "general.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	renderedRaw, err := os.ReadFile(filepath.Join(outDir, "venues", "north", "general.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacyRecords, renderedRecords []struct {
+		ClientID uint64          `json:"client_id"`
+		Data     json.RawMessage `json:"data"`
+		Event    string          `json:"event"`
+		SimTS    int64           `json:"sim_ts"`
+	}
+	if err := decodeJSONLines(legacyRaw, &legacyRecords); err != nil {
+		t.Fatal(err)
+	}
+	if err := decodeJSONLines(renderedRaw, &renderedRecords); err != nil {
+		t.Fatal(err)
+	}
+	if len(legacyRecords) != len(renderedRecords) {
+		t.Fatalf("legacy records=%d rendered records=%d", len(legacyRecords), len(renderedRecords))
+	}
+	for index := range legacyRecords {
+		var oldData, newData struct {
+			VenueID string          `json:"venue_id"`
+			Payload json.RawMessage `json:"payload"`
+		}
+		if err := json.Unmarshal(legacyRecords[index].Data, &oldData); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(renderedRecords[index].Data, &newData); err != nil {
+			t.Fatal(err)
+		}
+		if legacyRecords[index].ClientID != renderedRecords[index].ClientID || legacyRecords[index].Event != renderedRecords[index].Event || legacyRecords[index].SimTS != renderedRecords[index].SimTS || oldData.VenueID != newData.VenueID || !bytes.Equal(oldData.Payload, newData.Payload) {
+			t.Fatalf("record %d differs: old=%s new=%s", index, legacyRecords[index].Data, renderedRecords[index].Data)
+		}
+	}
+}
+
+func decodeJSONLines(raw []byte, target any) error {
+	lines := bytes.Split(bytes.TrimSpace(raw), []byte("\n"))
+	encoded := make([][]byte, len(lines))
+	for index, line := range lines {
+		encoded[index] = line
+	}
+	return json.Unmarshal([]byte("["+string(bytes.Join(encoded, []byte(",")))+"]"), target)
+}
+
+func writeRenderMetadata(t *testing.T, inputDir string, sink *binaryEvidence, logMode string, sidecarRecords ...[]byte) {
+	t.Helper()
+	manifest := []byte(`{"schema_version":2,"config":{"log_mode":"` + logMode + `","evidence_format":"evstream_v3"}}`)
+	if err := os.WriteFile(filepath.Join(inputDir, "manifest.json"), append(manifest, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	digest := sink.executionHash()
+	attestation, err := json.MarshalIndent(binaryEvidenceArtifactRecord{
+		Domain: "canonical_binary_execution_frames", Ordering: "ordered_stream",
+		EventFrames: sink.count(), StreamFrames: sink.writer.Count(),
+		ExecutionStreamHash: hex.EncodeToString(digest[:]), UnencodablePayloads: sink.unencodableCount(),
+	}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(inputDir, "binary-evidence-attestation.json"), append(attestation, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if logMode == "full" {
+		var sidecarDigest renderArtifactDigest
+		for _, record := range sidecarRecords {
+			sidecarDigest.add(record)
+		}
+		artifact, err := json.MarshalIndent(evidenceArtifactRecord{
+			Domain: "persisted_json_log_evidence_only", Ordering: "unordered_multiset",
+			Events: sidecarDigest.events, Digest: sidecarDigest.hex(),
+		}, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(inputDir, "evidence-only-artifact-hash.json"), append(artifact, '\n'), 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

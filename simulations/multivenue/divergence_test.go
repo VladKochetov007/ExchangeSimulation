@@ -153,3 +153,38 @@ func TestMakerQuoteSizeEvidenceBypassesExecutionCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBinaryReplacementKeepsOnlySequencedEvidenceOnlySidecars(t *testing.T) {
+	dir := t.TempDir()
+	inner, err := feesim.NewJSONLinesLogger(dir + "/evidence.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &checkpointSink{binary: newBinaryEvidence(io.Discard), replaceRaw: true}
+	var sequence uint64
+	logger := venueLogger{venueID: "north", route: "general.jsonl", inner: inner, sink: sink, sequence: &sequence}
+	logger.LogEvent(1, 7, "hashed_event", map[string]int{"value": 1})
+	logger.LogEvidenceOnly(2, 8, "sidecar_event", map[string]int{"value": 2})
+	if err := sink.close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := inner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(dir + "/evidence.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record struct {
+		Event string `json:"event"`
+		Data  struct {
+			Sequence uint64 `json:"sequence"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.Event != "sidecar_event" || record.Data.Sequence != 2 {
+		t.Fatalf("sidecar record = %+v, want sidecar_event sequence 2", record)
+	}
+}
