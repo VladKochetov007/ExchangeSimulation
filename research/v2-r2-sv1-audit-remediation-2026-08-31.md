@@ -130,12 +130,35 @@ The short control comparison does not establish market survival: treatment and
 control have the same small initial one-sided absence fraction. The registered
 24-hour survival gate remains untested.
 
-## Promotion boundary
+## Fresh independent review
 
-This checkpoint is **mechanically eligible for independent review**, not yet
-scientifically promoted. The next required gate is one fresh independent
-Sol-xhigh review of the exact tree at `e4b04a4`, supplied with this
-preregistration, the code diff, the rejection/remediation history, and the
-fresh paired-probe audit. A reviewer acceptance is required before running the
-smallest full development cell. No holdout seed 619, 631, or 641 has been
-run, inspected, or consumed.
+The exact tree at `20090976f774330711ce4fc8ddc9b887fca38d3b` was reviewed by a
+fresh independent Sol-xhigh reviewer. The reviewer returned:
+
+**ACCEPT WITH NARROWER SCOPE** — the retained seed-607, five-minute paired
+probe is accepted as a mechanism-activation result only. The reviewer
+independently confirmed the finite roster, bounded position/quote sizes,
+inventory changes, account PnL exposure, unchanged historical supplier
+population, delayed local actor semantics, and concentration measurements.
+
+The reviewer did not authorize a 24-hour campaign. The following blockers must
+be closed before requesting broader scientific scope:
+
+1. receipt/fingerprint binding currently covers submit decisions but not all
+   rest, cancel, and wait decisions, and missing-observation allowance is not
+   restricted to the initial wait;
+2. balance/PnL conservation is not fully asserted by the extractor, and
+   terminal pending submissions are incomplete in censored-request accounting;
+3. CDF-specific receipt/fingerprint mutation tests are missing;
+4. the probe did not exercise post-warm-up one-sided/stale-feed withdrawal,
+   material inventory/capital pressure, depletion, or long-run survival.
+
+The reviewer explicitly found no causal survival improvement in this probe:
+treatment and control had identical CDF volume and side-absence measurements,
+with absence confined to warm-up. These findings narrow the activation claim;
+they do not alter the predecessor R2 negative result. No holdout seed 619, 631,
+or 641 has been run, inspected, or consumed.
+
+This review is a scientific checkpoint, not authorization for the 24-hour
+campaign. The next step is fail-closed extractor/test remediation followed by a
+new independent review of the changed tree.
