@@ -38,6 +38,35 @@ less than a few percent, the whole VNext line was worthless. It yielded 17.29 %.
 | Per-frame SHA-256 was **54–69 %** of binary encode cost | encode with and without hashing | supported |
 | Binary decode is **42.2x** faster than JSON | isolated, three repetitions each | supported |
 | Binary is **2.84x** smaller on real evidence | 304,877 real records | supported |
+
+### The end-to-end result, and the correction that reframes it
+
+| claim | evidence | status |
+|---|---|---|
+| Binary sink is **-19.95 %** wall under `log_mode: full`, replace mode | 3 rounds, A/A +0.96 % | self-measured, not yet independently graded |
+| Binary sink is **-15.84 %** wall under `log_mode: none`, discard mode | 5 rounds, A/A -0.06 % | self-measured; an earlier build graded independently at -13.2 % |
+| Binary sink was **+8.18 %** — a REGRESSION — under `log_mode: full`, dual-write | 3 rounds, A/A +0.49 % | measured, and fixed |
+| A real run's evidence corpus rebuilds **byte-identically** from the binary alone | 1,569,110 records rendered and diffed | supported |
+| On-disk output falls **2.18x**, or **4.79x** with zstd | same config and seed, real files | supported |
+| No codec can change the execution hash | four codecs, identical digest | supported |
+
+**The correction that matters most in this campaign.** Every number published
+before the last day came from `log_mode: none`. **Six of the seven registered
+configs use `log_mode: full`.** In that regime the binary sink was not merely
+less effective — it was *slower than the thing it replaced*, because the sink
+returned no reusable bytes and the venue logger marshalled every payload a
+second time, storing two complete copies of the run's evidence.
+
+An independent reproducer predicted this in one sentence. The prediction was
+recorded as a "design gap" and not tested. It was testable in twenty minutes,
+and testing it turned a headline win into a regression, then — once the
+dual-write was removed — into a larger win than the original claim.
+
+The transferable lesson is not about serialization. **A speedup measured in a
+configuration nobody runs is not a speedup**, and the cheapest way to find that
+out is to measure the configuration people actually run, first, before
+optimising anything.
+
 | The matching engine is **0.45 %** of CPU | CPU profile | supported |
 | A native-language rewrite offers nothing | encoder at MOV speed, hash already on SHA-NI, matching 0.45 % | supported |
 | `bookDeltaEvidence` map→struct: **−8.46 % mallocs, −3.89 % wall** | exact `MemStats`, A/B with A/A control | supported, accepted |
@@ -106,7 +135,30 @@ census and is not one.
 
 ## 5. Independent reproduction status
 
-**None of the performance results have been independently reproduced.** They
+**One build was independently graded; the current build has not been.**
+
+`113189a` was graded from a clean workspace by a separate agent with its own
+harness. It confirmed the wall-clock mechanism (-13.2 % paired against an A/A of
+-0.8 %, sign test p ~ 0.0002), confirmed event-count parity and RSS, confirmed
+field-level losslessness, and confirmed determinism across GOMAXPROCS at both
+5 m and 1 h. It refuted one claim of mine outright ("every binary sample lies
+below every JSON sample", which does not survive a contended host) and
+re-attributed the allocation figure, though that re-attribution was itself
+wrong: it removed a disabled-instrumentation line from the JSON arm only, not
+knowing the binary sink carried an equivalent one. With both guarded the
+original 8.22 % stands, re-measured at 8.30 %.
+
+It found four defects. Three were real and are fixed: a false attestation
+(binary runs wrote `event_count: 0` and an all-zero hash, so any two runs
+compared identical in the tool built to tell runs apart), a stream that
+truncated on an unencodable payload, and an encoding that depended on how the
+caller boxed a value. Its fourth finding — that the speedup would not survive a
+logging run — was the most valuable of all and is discussed above.
+
+Everything after `113189a` is self-graded, including the replace-mode result
+that is now the headline. A second grading pass is open.
+
+**The remaining performance results have not been independently reproduced.** They
 were produced and graded by the same agent, which the research protocol
 explicitly warns against. Two independent adjudications were obtained during
 this campaign, but both were of the *market-logic* findings, not the performance
