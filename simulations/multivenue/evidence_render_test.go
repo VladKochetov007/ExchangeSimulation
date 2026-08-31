@@ -2,6 +2,7 @@ package multivenue
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -147,6 +148,31 @@ func TestConfigRejectsUnknownEvidenceFormat(t *testing.T) {
 	_, err := NewSim(time.Second, Config{LogDir: t.TempDir(), LogMode: "none", EvidenceFormat: "future"})
 	if err == nil {
 		t.Fatal("unknown evidence format accepted")
+	}
+}
+
+func TestBinaryEvidenceProductionPathRunsAndRenders(t *testing.T) {
+	inputDir := filepath.Join(t.TempDir(), "run")
+	sim, err := NewSim(3*time.Second, Config{
+		LogDir: inputDir, LogMode: "full", EvidenceFormat: binaryRepresentation,
+		CheckpointIntervalSeconds: 1, Seed: 101,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sim.Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if err := sim.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	outDir := filepath.Join(t.TempDir(), "rendered")
+	report, err := RenderBinaryEvidence(inputDir, outDir)
+	if err != nil {
+		t.Fatalf("render production path: %v", err)
+	}
+	if report.EventFrames == 0 || report.Routes == 0 || report.ExecutionHash == "" {
+		t.Fatalf("production render report = %+v", report)
 	}
 }
 
