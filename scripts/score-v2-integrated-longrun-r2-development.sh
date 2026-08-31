@@ -9,7 +9,7 @@ source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 output_root=${1:-"$v2_r2_output_root"}
 score="$output_root/development-score.json"
 parity="$output_root/parity-attestation.json"
-contract_version="v2-integrated-longrun-r2-scorer-v1"
+contract_version="v2-integrated-longrun-r2-scorer-v2"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 
 fail() {
@@ -70,6 +70,7 @@ for cell in dev-607 dev-613 dev-617; do
 	require_object "$cell_dir/activation.json"
 	jq -e --arg cell "$cell" --argjson required_artifacts "$required_json" \
 		'.cell == $cell and .seed == (.cell | split("-")[-1] | tonumber) and
+		.evidence_format == "evstream_v3" and
 		.analysis_contract == "v2-integrated-longrun-r2-candidate-v2" and
 		.integrity_contract == "v2-integrated-longrun-r2-candidate-v2" and
 		.activation_contract == "v2-integrated-longrun-r2-candidate-v2" and
@@ -81,6 +82,8 @@ for cell in dev-607 dev-613 dev-617; do
 		(.prunegate_go_version | startswith("go1.27")) and
 		(.analyzer_go_version | type) == "string" and (.simulator_go_version | type) == "string" and
 		.analyzer_vcs_modified == false and .required_artifacts == $required_artifacts and
+		(.renderer_revision | test("^[0-9a-f]{40}$")) and (.renderer_sha256 | test("^[0-9a-f]{64}$")) and
+		(.renderer_go_version | startswith("go1.27")) and
 		.require_exact_replay == true and
 		(.artifact_sha256 | keys) == ($required_artifacts | sort) and
 		all(.artifact_sha256 | to_entries[]; (.value | test("^[0-9a-f]{64}$")))' \
@@ -184,6 +187,7 @@ score_tmp=$(mktemp "$score.tmp-XXXXXX")
 jq -n \
 	--arg contract "$contract_version" \
 	--arg source_revision "$source_revision" \
+	--arg evidence_format "evstream_v3" \
 	--arg analyzer_revision "$analyzer_revision" \
 	--arg simulator_revision "$simulator_revision" \
 	--arg analyzer_sha256 "$analyzer_sha256" \
@@ -198,7 +202,7 @@ jq -n \
 	--slurpfile parity_report "$parity" \
 	'def all_true($objects): (($objects | length) > 0 and all($objects[]; ((. | type) == "object" and (length > 0) and all(to_entries[]; .value == true))));
 	 {
-		schema_version: 1, contract: $contract,
+		 schema_version: 2, contract: $contract, evidence_format: $evidence_format,
 		status: (if (all_true([$cells[].integrity]) and all_true([$cells[].activation]) and
 			all($parity_report[0].predicates | to_entries[]; .value == true) and
 			$parity_report[0].source_revision == $simulator_revision and

@@ -11,6 +11,7 @@ fi
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
+renderer=${EVSRENDER_BIN:-"$root_dir/bin/evsrender"}
 contract_version="v2-integrated-longrun-r2-candidate-v2"
 conservation_tolerance_fixed_units=1000
 calendar_epoch_nano=1735689600000000000
@@ -62,7 +63,17 @@ for sentinel in greeks.json latency.json; do
 	require_file "$cell/$sentinel"
 	require_json_object "$cell/$sentinel"
 done
-for input in manifest.json evidence-artifact-hash.json evidence-manifest.json run-config.json run-metadata.json run-status.json; do
+log_mode=$(jq -er '.log_mode' "$cell/run-config.json")
+evidence_format=$(jq -er '.evidence_format // "jsonl"' "$cell/run-config.json")
+case "$evidence_format" in
+	jsonl) required_inputs=(manifest.json evidence-artifact-hash.json evidence-manifest.json run-config.json run-metadata.json run-status.json) ;;
+	evstream_v3) required_inputs=(manifest.json binary-evidence-attestation.json evidence-manifest.json events.evs run-config.json run-metadata.json run-status.json) ;;
+	*) fail "unsupported evidence format: $evidence_format" ;;
+esac
+if [[ "$evidence_format" == evstream_v3 && "$log_mode" == "full" ]]; then
+	required_inputs+=(evidence-only-artifact-hash.json)
+fi
+for input in "${required_inputs[@]}"; do
 	require_file "$cell/$input"
 	require_json_object "$cell/$input"
 done
@@ -85,21 +96,21 @@ seed=$(jq -er '.seed' "$cell/run-metadata.json")
 config_seed=$(jq -er '.seed' "$cell/run-config.json")
 config_hypothesis=$(jq -er '.hypothesis_id' "$cell/run-config.json")
 config_experiment=$(jq -er '.experiment_id' "$cell/run-config.json")
-log_mode=$(jq -er '.log_mode' "$cell/run-config.json")
 delivery_fee_policy=$(jq -er '.dated_future_delivery_fee_policy' "$cell/run-config.json")
 funding_interval_seconds=$(jq -er '.funding_interval_seconds' "$cell/run-config.json")
 simulation_start_nano=$(jq -er '.simulation_start_nano' "$cell/run-metadata.json")
 simulation_end_nano=$(jq -er '.simulation_end_nano' "$cell/run-metadata.json")
 [[ "$seed" == "$config_seed" ]] || fail "metadata/config seed mismatch"
 [[ "$log_mode" == full ]] || fail "development extraction requires full log mode"
+[[ "$evidence_format" == "evstream_v3" ]] || fail "successor development extraction requires evstream_v3 evidence"
 jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
 	'($simulation_start_nano == 1735689600000000000 and $simulation_end_nano == 1735776000000000000 and
 	 ($simulation_end_nano - $simulation_start_nano) == 86400000000000)' \
 	<<<'null' >/dev/null || fail "run metadata does not use the registered 24-hour horizon"
 jq -e --arg cell "$cell_name" --argjson seed "$seed" --arg experiment "$config_experiment" \
-	'.schema_version == 5 and .runner_contract == "v2-integrated-longrun-r2-runner-v1" and
+	'.schema_version == 6 and .runner_contract == "v2-integrated-longrun-r2-runner-v2" and
 	 .cell == $cell and .seed == $seed and .holdout == false and
-	 .simulated_horizon == "24h" and .log_mode == "full" and
+	 .simulated_horizon == "24h" and .log_mode == "full" and .evidence_format == "evstream_v3" and
 	 .simulation_start_nano == 1735689600000000000 and .simulation_end_nano == 1735776000000000000 and
 	 (.gomaxprocs | type) == "number" and .gomaxprocs == 4 and
 	 .hypothesis_id == "V2-INTEGRATED-LONG-R2-CANDIDATE" and
@@ -164,10 +175,10 @@ manifest_revision=$(jq -er '.build.revision' "$cell/manifest.json")
 # jq -e returns failure for a valid false boolean; this is a provenance value,
 # not a predicate whose false result should abort before the explicit check.
 manifest_modified=$(jq -r '.build.modified' "$cell/manifest.json")
-jq -e --arg revision "$metadata_revision" --argjson seed "$seed" --arg log_mode "$log_mode" \
+	jq -e --arg revision "$metadata_revision" --argjson seed "$seed" --arg log_mode "$log_mode" --arg evidence_format "$evidence_format" \
 	--arg experiment "$config_experiment" \
 	'type == "object" and .schema_version == 2 and .build.revision == $revision and
-	 .build.modified == false and .config.seed == $seed and .config.log_mode == $log_mode and
+	 .build.modified == false and .config.seed == $seed and .config.log_mode == $log_mode and .config.evidence_format == $evidence_format and
 	 .config.experiment_id == $experiment' "$cell/manifest.json" >/dev/null || fail "manifest provenance/config mismatch"
 [[ "$manifest_revision" == "$metadata_revision" && "$manifest_modified" == false ]] || fail "manifest build identity mismatch"
 [[ "$(sha256sum "$cell/run-metadata.json" | awk '{print $1}')" == "$(jq -er '.run_metadata_sha256' "$cell/run-status.json")" ]] || fail "run metadata status hash mismatch"
@@ -178,6 +189,37 @@ jq -e --arg revision "$metadata_revision" --argjson seed "$seed" --arg log_mode 
 [[ "$(sha256sum "$cell/evidence-manifest.json" | awk '{print $1}')" == "$(jq -er '.evidence_manifest_sha256' "$cell/run-status.json")" ]] || fail "evidence manifest status hash mismatch"
 v2_r2_verify_evidence_manifest "$cell" || fail "runner evidence manifest does not match retained raw evidence: $cell"
 v2_r2_verify_attestation "$cell" || fail "external evidence attestation is missing or stale: $cell"
+
+analysis_input_dir="$cell"
+rendered_dir=""
+cleanup_rendered_input() {
+	if [[ -n "$rendered_dir" && -d "$rendered_dir" ]]; then
+		rm -rf -- "$rendered_dir"
+	fi
+}
+trap 'cleanup_raw_stage; cleanup_rendered_input' EXIT
+if [[ "$evidence_format" == "evstream_v3" ]]; then
+	[[ -x "$renderer" ]] || fail "missing binary evidence renderer: $renderer"
+	renderer_go_version=$(v2_r2_binary_go_version "$renderer")
+	v2_r2_is_go_127 "$renderer_go_version" || fail "renderer is not built with the pinned Go 1.27 toolchain: $renderer_go_version"
+	renderer_revision=$(go version -m "$renderer" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
+	renderer_modified=$(go version -m "$renderer" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
+	renderer_trimpath=$(go version -m "$renderer" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
+	renderer_cgo_enabled=$(go version -m "$renderer" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
+	renderer_sha256=$(sha256sum "$renderer" | awk '{print $1}')
+	[[ "$renderer_revision" == "$head_revision" && "$renderer_modified" == false && "$renderer_trimpath" == true && "$renderer_cgo_enabled" == 0 ]] ||
+		fail "renderer is not a clean reproducible build of current HEAD"
+	rendered_dir=$(mktemp -d "${TMPDIR:-/tmp}/v2-r2-render.XXXXXX")
+	render_report=$("$renderer" -dir "$cell" -out "$rendered_dir") || fail "binary evidence rendering failed"
+	jq -e --argjson event_frames "$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")" \
+		--arg execution_hash "$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
+		'.event_frames == $event_frames and .execution_stream_hash == $execution_hash and (.routes | type) == "number"' \
+		<<<"$render_report" >/dev/null || fail "renderer report does not match binary attestation"
+	while IFS= read -r name; do
+		ln -s -- "$cell/$name" "$rendered_dir/$name"
+	done < <(find "$cell" -maxdepth 1 -type f \( -name '*.json' -o -name '*.jsonl' \) -printf '%f\n' | sort)
+	analysis_input_dir="$rendered_dir"
+fi
 
 jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
 	'(.initial_accounts | type == "array" and length > 0 and
@@ -216,9 +258,17 @@ done
 if find "$cell" -maxdepth 1 -type f -name '*.json.tmp-*' -print -quit | grep -q .; then
 	fail "refusing extraction with stale temporary derived evidence in $cell"
 fi
-jq -e '.domain == "persisted_json_records" and .ordering == "unordered_multiset" and
-	 (.events | type) == "number" and .events > 0 and (.digest | test("^[0-9a-f]{64}$"))' \
-	"$cell/evidence-artifact-hash.json" >/dev/null || fail "invalid runtime evidence artifact hash"
+if [[ "$evidence_format" == "evstream_v3" ]]; then
+	jq -e '.domain == "canonical_binary_execution_frames" and .ordering == "ordered_stream" and
+		 (.event_frames | type) == "number" and .event_frames > 0 and
+		 (.stream_frames | type) == "number" and .stream_frames >= .event_frames and
+		 (.execution_stream_hash | test("^[0-9a-f]{64}$")) and (.unencodable_payloads // 0) == 0' \
+		"$cell/binary-evidence-attestation.json" >/dev/null || fail "invalid runtime binary evidence attestation"
+else
+	jq -e '.domain == "persisted_json_records" and .ordering == "unordered_multiset" and
+		 (.events | type) == "number" and .events > 0 and (.digest | test("^[0-9a-f]{64}$"))' \
+		"$cell/evidence-artifact-hash.json" >/dev/null || fail "invalid runtime evidence artifact hash"
+fi
 
 write_metric() {
 	local output=$1
@@ -245,20 +295,32 @@ metrics=(
 for metric in "${metrics[@]}"; do
 	if [[ "$metric" == positions || "$metric" == settlements ]]; then
 		if [[ "$metric" == settlements ]]; then
-			write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -require-exact-replay -delivery-fee-policy "$delivery_fee_policy" -json "$cell" ||
+			write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -require-exact-replay -delivery-fee-policy "$delivery_fee_policy" -json "$analysis_input_dir" ||
 				fail "analyzer metric failed: $metric"
 		else
-				write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -require-exact-replay -json "$cell" ||
+				write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -require-exact-replay -json "$analysis_input_dir" ||
 					fail "analyzer metric failed: $metric"
 		fi
 	elif [[ "$metric" == derivatives ]]; then
-		write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -require-exact-replay -funding-interval-seconds "$funding_interval_seconds" -json "$cell" ||
+		write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -require-exact-replay -funding-interval-seconds "$funding_interval_seconds" -json "$analysis_input_dir" ||
 			fail "analyzer metric failed: $metric"
 	else
-		write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -json "$cell" ||
+		write_metric "$analysis_dir/$metric.json" "$analyzer" -metric "$metric" -json "$analysis_input_dir" ||
 			fail "analyzer metric failed: $metric"
 	fi
 done
+if [[ "$evidence_format" == "evstream_v3" ]]; then
+	rendered_hash=$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")
+	rendered_frames=$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")
+	rendered_tmp=$(mktemp "$analysis_dir/evidenceartifacthash.json.tmp-XXXXXX")
+	jq --arg execution_hash "$rendered_hash" --argjson event_frames "$rendered_frames" \
+		'.result.domain = "rendered_binary_json_records" |
+		 .result.ordering = "venue_sequence_reconstructed" |
+		 .result.source_execution_stream_hash = $execution_hash |
+		 .result.source_binary_event_frames = $event_frames' \
+		"$analysis_dir/evidenceartifacthash.json" >"$rendered_tmp"
+	mv "$rendered_tmp" "$analysis_dir/evidenceartifacthash.json"
+fi
 
 v2_r2_require_calendar_listing_timeline "$analysis_dir/calendar.json" "$expected_calendar_listing_timeline" ||
 	fail "calendar first-listing timeline or per-expiry cardinality does not match the registered policy"
@@ -278,27 +340,27 @@ write_inactive() {
 if [[ "$(jq -r '.record_funding_carry_decisions' "$cell/run-config.json")" != true ]]; then
 	write_inactive fundingcarry record_funding_carry_decisions "registered integrated composition does not enable P4 actor decision receipts"
 else
-	write_metric "$analysis_dir/fundingcarry.json" "$analyzer" -metric fundingcarry -json "$cell" || fail "fundingcarry failed"
+	write_metric "$analysis_dir/fundingcarry.json" "$analyzer" -metric fundingcarry -json "$analysis_input_dir" || fail "fundingcarry failed"
 fi
 if [[ "$(jq -r '.record_term_carry_decisions' "$cell/run-config.json")" != true ]]; then
 	write_inactive termcarry record_term_carry_decisions "registered integrated composition does not enable P5 actor decision receipts"
 else
-	write_metric "$analysis_dir/termcarry.json" "$analyzer" -metric termcarry -json "$cell" || fail "termcarry failed"
+	write_metric "$analysis_dir/termcarry.json" "$analyzer" -metric termcarry -json "$analysis_input_dir" || fail "termcarry failed"
 fi
 if [[ "$(jq -r '.record_dated_term_carry_decisions' "$cell/run-config.json")" != true ]]; then
 	write_inactive datedcarryp5 record_dated_term_carry_decisions "registered integrated composition does not enable P5 dated-carry decision receipts"
 else
-	write_metric "$analysis_dir/datedcarryp5.json" "$analyzer" -metric datedcarryp5 -json "$cell" || fail "datedcarryp5 failed"
+	write_metric "$analysis_dir/datedcarryp5.json" "$analyzer" -metric datedcarryp5 -json "$analysis_input_dir" || fail "datedcarryp5 failed"
 fi
 if [[ "$(jq -r '.record_dated_execution_mandate_decisions' "$cell/run-config.json")" != true ]]; then
 	write_inactive datedmandatep5 record_dated_execution_mandate_decisions "registered integrated composition does not enable P5 dated-execution mandate receipts"
 else
-	write_metric "$analysis_dir/datedmandatep5.json" "$analyzer" -metric datedmandatep5 -json "$cell" || fail "datedmandatep5 failed"
+	write_metric "$analysis_dir/datedmandatep5.json" "$analyzer" -metric datedmandatep5 -json "$analysis_input_dir" || fail "datedmandatep5 failed"
 fi
 if [[ "$(jq -r '.record_perp_maker_replenishment_decisions' "$cell/run-config.json")" != true ]]; then
 	write_inactive perpreplenishment record_perp_maker_replenishment_decisions "registered integrated composition does not enable P3 replenishment receipts"
 else
-	write_metric "$analysis_dir/perpreplenishment.json" "$analyzer" -metric perpreplenishment -json "$cell" || fail "perpreplenishment failed"
+	write_metric "$analysis_dir/perpreplenishment.json" "$analyzer" -metric perpreplenishment -json "$analysis_input_dir" || fail "perpreplenishment failed"
 fi
 
 raw_count=0
@@ -468,13 +530,22 @@ for artifact in "${required[@]}"; do
 	require_json_object "$analysis_dir/$artifact"
 done
 
-runtime_events=$(jq -er '.events' "$cell/evidence-artifact-hash.json")
-runtime_digest=$(jq -er '.digest' "$cell/evidence-artifact-hash.json")
-offline_events=$(jq -er '.result.events' "$analysis_dir/evidenceartifacthash.json")
-offline_digest=$(jq -er '.result.digest' "$analysis_dir/evidenceartifacthash.json")
-[[ "$runtime_events" == "$offline_events" && "$runtime_digest" == "$offline_digest" ]] || fail "runtime/offline evidence digest mismatch"
-jq -e '(.result.domain // "") == "persisted_json_records" and (.result.ordering // "") == "unordered_multiset"' \
-	"$analysis_dir/evidenceartifacthash.json" >/dev/null || fail "offline evidence hash domain mismatch"
+if [[ "$evidence_format" == "evstream_v3" ]]; then
+	runtime_events=$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")
+	runtime_digest=$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")
+	jq -e --arg execution_hash "$runtime_digest" --argjson event_frames "$runtime_events" \
+		'.result.domain == "rendered_binary_json_records" and .result.ordering == "venue_sequence_reconstructed" and
+		 .result.source_execution_stream_hash == $execution_hash and .result.source_binary_event_frames == $event_frames' \
+		"$analysis_dir/evidenceartifacthash.json" >/dev/null || fail "rendered binary evidence hash domain mismatch"
+else
+	runtime_events=$(jq -er '.events' "$cell/evidence-artifact-hash.json")
+	runtime_digest=$(jq -er '.digest' "$cell/evidence-artifact-hash.json")
+	offline_events=$(jq -er '.result.events' "$analysis_dir/evidenceartifacthash.json")
+	offline_digest=$(jq -er '.result.digest' "$analysis_dir/evidenceartifacthash.json")
+	[[ "$runtime_events" == "$offline_events" && "$runtime_digest" == "$offline_digest" ]] || fail "runtime/offline evidence digest mismatch"
+	jq -e '(.result.domain // "") == "persisted_json_records" and (.result.ordering // "") == "unordered_multiset"' \
+		"$analysis_dir/evidenceartifacthash.json" >/dev/null || fail "offline evidence hash domain mismatch"
+fi
 jq -e '.result.domain == "persisted_evidence" and .result.ordering == "unordered_multiset"' \
 	"$analysis_dir/streamhash.json" >/dev/null || fail "stream hash domain mismatch"
 
@@ -499,6 +570,10 @@ jq -n \
 	--argjson analyzer_trimpath true \
 	--arg analyzer_cgo_enabled "$analyzer_cgo_enabled" \
 	--arg analyzer_go_version "$analyzer_go_version" \
+	--arg evidence_format "$evidence_format" \
+	--arg renderer_revision "$renderer_revision" \
+	--arg renderer_sha256 "$renderer_sha256" \
+	--arg renderer_go_version "$renderer_go_version" \
 	--argjson analyzer_modified "$analyzer_modified_json" \
 	--argjson required_artifacts "$required_json" \
 	--argjson artifact_sha256 "$artifact_sha256" \
@@ -518,11 +593,13 @@ jq -n \
 	--arg prunegate_cgo_enabled "$prunegate_cgo_enabled" \
 	--arg prunegate_go_version "$prunegate_go_version" \
 	--arg config_sha256 "$config_sha256" \
-	'{schema_version: 2, cell: $cell, seed: $seed,
+	'{schema_version: 3, cell: $cell, seed: $seed, evidence_format: $evidence_format,
 		analysis_revision: $analysis_revision, analyzer_revision: $analyzer_revision,
 		analyzer_sha256: $analyzer_sha256, analyzer_vcs_modified: $analyzer_modified,
 		analyzer_trimpath: $analyzer_trimpath, analyzer_cgo_enabled: $analyzer_cgo_enabled,
 		analyzer_go_version: $analyzer_go_version,
+		renderer_revision: $renderer_revision, renderer_sha256: $renderer_sha256,
+		renderer_go_version: $renderer_go_version,
 		require_exact_replay: true,
 		simulator_revision: $simulator_revision, simulator_sha256: $simulator_sha256,
 		simulator_trimpath: $simulator_trimpath, simulator_cgo_enabled: $simulator_cgo_enabled,
@@ -534,14 +611,14 @@ jq -n \
 		integrity_contract: $contract, activation_contract: $contract,
 		completion_sentinels: ["greeks.json", "latency.json"], required_artifacts: $required_artifacts,
 		artifact_sha256: $artifact_sha256,
-		runtime_evidence_artifact: {events: $runtime_evidence_events, digest: $runtime_evidence_digest},
+		runtime_evidence_artifact: {representation: $evidence_format, event_frames: $runtime_evidence_events, execution_stream_hash: $runtime_evidence_digest},
 		inactive_contracts: ["fundingcarry", "termcarry", "datedcarryp5", "datedmandatep5", "perpreplenishment"],
 		raw_log_policy: "retained; this extractor has no prune authority"}' >"$metadata_tmp"
 mv "$metadata_tmp" "$analysis_dir/analysis-metadata.json"
 require_json_object "$analysis_dir/analysis-metadata.json"
 jq -e --arg revision "$head_revision" --arg analyzer_revision "$analyzer_revision" \
 	--arg contract "$contract_version" --argjson required_artifacts "$required_json" \
-	'.schema_version == 2 and .analysis_revision == $revision and
+	'.schema_version == 3 and .evidence_format == "evstream_v3" and .analysis_revision == $revision and
 	 .analyzer_revision == $analyzer_revision and .analyzer_vcs_modified == false and
 	 .require_exact_replay == true and
 	 .analysis_contract == $contract and .required_artifacts == $required_artifacts and
