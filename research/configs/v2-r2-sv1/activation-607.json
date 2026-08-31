@@ -19,9 +19,11 @@
     {
       "role": "cdf_elastic_supplier_1",
       "symbol": "CDF/USD",
-      "base_precision": 100000000,
+      "base_asset": "CDF",
+      "quote_asset": "USD",
       "initial_base_balance": 100000000000,
       "initial_quote_balance": 50000000000000,
+      "base_precision": 100000000,
       "interval": 2000000000,
       "max_observation_age": 60000000000,
       "reference_price": 300000000,
@@ -34,6 +36,8 @@
     {
       "role": "cdf_elastic_supplier_2",
       "symbol": "CDF/USD",
+      "base_asset": "CDF",
+      "quote_asset": "USD",
       "base_precision": 100000000,
       "initial_base_balance": 100000000000,
       "initial_quote_balance": 50000000000000,
@@ -49,6 +53,8 @@
     {
       "role": "cdf_elastic_supplier_3",
       "symbol": "CDF/USD",
+      "base_asset": "CDF",
+      "quote_asset": "USD",
       "base_precision": 100000000,
       "initial_base_balance": 100000000000,
       "initial_quote_balance": 50000000000000,
@@ -64,6 +70,8 @@
     {
       "role": "cdf_elastic_supplier_4",
       "symbol": "CDF/USD",
+      "base_asset": "CDF",
+      "quote_asset": "USD",
       "base_precision": 100000000,
       "initial_base_balance": 100000000000,
       "initial_quote_balance": 50000000000000,

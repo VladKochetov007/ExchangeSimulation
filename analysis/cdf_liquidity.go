@@ -1,8 +1,11 @@
 package analysis
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -44,6 +47,14 @@ type CDFLiquidityRunAudit struct {
 	WithdrawCount            int64                       `json:"withdraw_count"`
 	TradingSupplierCount     int64                       `json:"trading_supplier_count"`
 	PnLChangingSupplierCount int64                       `json:"pnl_changing_supplier_count"`
+	RealizedPnL              int64                       `json:"realized_pnl"`
+	UnrealizedPnL            int64                       `json:"unrealized_pnl"`
+	MaxBorrowed              int64                       `json:"max_borrowed"`
+	HistoricalSupplierCount  int                         `json:"historical_supplier_count"`
+	ExpectedHistoricalCount  int                         `json:"expected_historical_count"`
+	SupplierDepthOver75Share float64                     `json:"supplier_depth_over_75_share"`
+	MaxSupplierDepthShare    float64                     `json:"max_supplier_depth_share"`
+	Venues                   []CDFLiquidityVenueAudit    `json:"venues"`
 	Suppliers                []CDFLiquiditySupplierAudit `json:"suppliers"`
 	Checks                   []CDFLiquidityCheck         `json:"checks,omitempty"`
 	Valid                    bool                        `json:"valid"`
@@ -81,17 +92,109 @@ type CDFLiquiditySupplierAudit struct {
 	MaxObservedTouchShare  float64 `json:"max_observed_touch_share"`
 	MeanObservationAgeNs   float64 `json:"mean_observation_age_ns"`
 	MaxObservationAgeNs    int64   `json:"max_observation_age_ns"`
+	ConfiguredMaxPosition  int64   `json:"configured_max_position"`
+	ConfiguredMaxQuoteQty  int64   `json:"configured_max_quote_qty"`
+	MaxQuoteQty            int64   `json:"max_quote_qty"`
+	MaxBorrowed            int64   `json:"max_borrowed"`
+	BorrowEventCount       int64   `json:"borrow_event_count"`
+	MaxGrossBaseBalance    int64   `json:"max_gross_base_balance"`
+	MaxGrossQuoteBalance   int64   `json:"max_gross_quote_balance"`
+	RealizedPnL            int64   `json:"realized_pnl"`
+	UnrealizedPnL          int64   `json:"unrealized_pnl"`
 	Valid                  bool    `json:"valid"`
 
-	positionSet           bool
-	lastPosition          int64
-	observationAgeTotal   int64
-	observationCount      int64
-	touchShareTotal       float64
-	touchShareCount       int64
-	quoteLifetimeTotal    int64
-	quoteLifetimeCount    int64
-	pendingTouchByRequest map[uint64]float64
+	positionSet                   bool
+	lastPosition                  int64
+	observationAgeTotal           int64
+	observationCount              int64
+	touchShareTotal               float64
+	touchShareCount               int64
+	quoteLifetimeTotal            int64
+	quoteLifetimeCount            int64
+	pendingTouchByRequest         map[uint64]float64
+	configuredBaseAsset           string
+	configuredQuoteAsset          string
+	configuredSymbol              string
+	configuredMaxQuoteQty         int64
+	configuredMaxPosition         int64
+	configuredBasePrecision       int64
+	configuredMaxObservationAge   int64
+	configuredInitialBaseBalance  int64
+	configuredInitialQuoteBalance int64
+	entryPrice                    int64
+	realizedPnL                   int64
+	terminalMark                  int64
+	initialAccountSeen            bool
+	terminalAccountSeen           bool
+	maxBorrowed                   int64
+	borrowEventCount              int64
+	maxGrossBaseBalance           int64
+	maxGrossQuoteBalance          int64
+	maxQuoteQty                   int64
+	pendingQuoteByRequest         map[uint64]cdfDecisionEvidence
+	receiptRequired               bool
+}
+
+// CDFLiquidityVenueAudit separates concentration and side-availability
+// diagnostics by venue. Depth concentration is measured over periodic public
+// snapshots with a nonzero displayed book, not over supplier decisions.
+type CDFLiquidityVenueAudit struct {
+	VenueID                     string  `json:"venue_id"`
+	HistoricalSupplierCount     int     `json:"historical_supplier_count"`
+	ExpectedHistoricalCount     int     `json:"expected_historical_count"`
+	SupplierVolumeQty           int64   `json:"supplier_volume_qty"`
+	TotalTradeVolumeQty         int64   `json:"total_trade_volume_qty"`
+	SupplierVolumeShare         float64 `json:"supplier_volume_share"`
+	SnapshotCount               int64   `json:"snapshot_count"`
+	ActiveDepthSnapshotCount    int64   `json:"active_depth_snapshot_count"`
+	SupplierDepthOver75Count    int64   `json:"supplier_depth_over_75_count"`
+	SupplierDepthOver75Fraction float64 `json:"supplier_depth_over_75_fraction"`
+	MaxSupplierDepthShare       float64 `json:"max_supplier_depth_share"`
+	BidAbsentSnapshots          int64   `json:"bid_absent_snapshots"`
+	AskAbsentSnapshots          int64   `json:"ask_absent_snapshots"`
+}
+
+type cdfManifest struct {
+	Config json.RawMessage `json:"config"`
+}
+
+type cdfRunConfig struct {
+	ElasticSupplierCount      int                 `json:"elastic_supplier_count"`
+	ElasticLiquiditySuppliers []cdfSupplierConfig `json:"elastic_liquidity_suppliers"`
+	RecordMarketDataReceipts  bool                `json:"record_market_data_receipts"`
+	MarketDataReceiptRoles    []string            `json:"market_data_receipt_roles"`
+}
+
+type cdfSupplierConfig struct {
+	Role                string `json:"role"`
+	Symbol              string `json:"symbol"`
+	BaseAsset           string `json:"base_asset"`
+	QuoteAsset          string `json:"quote_asset"`
+	BasePrecision       int64  `json:"base_precision"`
+	InitialBaseBalance  int64  `json:"initial_base_balance"`
+	InitialQuoteBalance int64  `json:"initial_quote_balance"`
+	MaxPosition         int64  `json:"max_position"`
+	MaxQuoteQty         int64  `json:"max_quote_qty"`
+	MaxObservationAge   int64  `json:"max_observation_age"`
+}
+
+func loadCDFRunConfig(run *Run) (cdfRunConfig, error) {
+	raw, err := os.ReadFile(filepath.Join(run.Dir, "manifest.json"))
+	if err != nil {
+		return cdfRunConfig{}, fmt.Errorf("read manifest: %w", err)
+	}
+	var manifest cdfManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return cdfRunConfig{}, fmt.Errorf("decode manifest: %w", err)
+	}
+	if len(manifest.Config) == 0 || string(manifest.Config) == "null" {
+		return cdfRunConfig{}, fmt.Errorf("manifest has no configuration")
+	}
+	var config cdfRunConfig
+	if err := json.Unmarshal(manifest.Config, &config); err != nil {
+		return cdfRunConfig{}, fmt.Errorf("decode configuration: %w", err)
+	}
+	return config, nil
 }
 
 // CDFLiquidityCheck identifies one concrete reconstruction failure. Any check
@@ -118,29 +221,30 @@ type CDFLiquidityComparison struct {
 }
 
 type cdfDecisionEvidence struct {
-	Role             string `json:"role"`
-	ClientID         uint64 `json:"client_id"`
-	Symbol           string `json:"symbol"`
-	DecisionTime     int64  `json:"decision_time"`
-	ObservationTime  int64  `json:"observation_time"`
-	ObservationAge   int64  `json:"observation_age"`
-	BestBid          int64  `json:"best_bid"`
-	BestBidQty       int64  `json:"best_bid_qty"`
-	BestAsk          int64  `json:"best_ask"`
-	BestAskQty       int64  `json:"best_ask_qty"`
-	MarkPrice        int64  `json:"mark_price"`
-	ReferencePrice   int64  `json:"reference_price"`
-	Position         int64  `json:"position"`
-	TargetPosition   int64  `json:"target_position"`
-	InventoryLimit   int64  `json:"inventory_limit"`
-	Action           string `json:"action"`
-	Reason           string `json:"reason"`
-	Side             string `json:"side"`
-	QuotePrice       int64  `json:"quote_price"`
-	QuoteQty         int64  `json:"quote_qty"`
-	QuoteOrderID     uint64 `json:"quote_order_id"`
-	QuoteRequestID   uint64 `json:"quote_request_id"`
-	QuoteSubmittedAt int64  `json:"quote_submitted_at"`
+	Role                string `json:"role"`
+	ClientID            uint64 `json:"client_id"`
+	Symbol              string `json:"symbol"`
+	DecisionTime        int64  `json:"decision_time"`
+	ObservationTime     int64  `json:"observation_time"`
+	ObservationAge      int64  `json:"observation_age"`
+	ObservationSequence uint64 `json:"observation_sequence"`
+	BestBid             int64  `json:"best_bid"`
+	BestBidQty          int64  `json:"best_bid_qty"`
+	BestAsk             int64  `json:"best_ask"`
+	BestAskQty          int64  `json:"best_ask_qty"`
+	MarkPrice           int64  `json:"mark_price"`
+	ReferencePrice      int64  `json:"reference_price"`
+	Position            int64  `json:"position"`
+	TargetPosition      int64  `json:"target_position"`
+	InventoryLimit      int64  `json:"inventory_limit"`
+	Action              string `json:"action"`
+	Reason              string `json:"reason"`
+	Side                string `json:"side"`
+	QuotePrice          int64  `json:"quote_price"`
+	QuoteQty            int64  `json:"quote_qty"`
+	QuoteOrderID        uint64 `json:"quote_order_id"`
+	QuoteRequestID      uint64 `json:"quote_request_id"`
+	QuoteSubmittedAt    int64  `json:"quote_submitted_at"`
 }
 
 type cdfFillEvidence struct {
@@ -202,6 +306,27 @@ type cdfSnapshotEvidence struct {
 	Asks []bookLevel `json:"asks"`
 }
 
+type cdfAssetBalanceEvidence struct {
+	Asset    string `json:"asset"`
+	Free     int64  `json:"free"`
+	Locked   int64  `json:"locked"`
+	Borrowed int64  `json:"borrowed"`
+	NetAsset int64  `json:"net_asset"`
+}
+
+type cdfBalanceSnapshotEvidence struct {
+	ClientID     uint64                    `json:"client_id"`
+	SpotBalances []cdfAssetBalanceEvidence `json:"spot_balances"`
+	PerpBalances []cdfAssetBalanceEvidence `json:"perp_balances"`
+	Borrowed     map[string]int64          `json:"borrowed"`
+}
+
+type cdfBorrowEvidence struct {
+	ClientID uint64 `json:"client_id"`
+	Asset    string `json:"asset"`
+	Amount   int64  `json:"amount"`
+}
+
 type cdfParticipantKey struct {
 	VenueID  string
 	ClientID uint64
@@ -222,6 +347,9 @@ type cdfFillKey struct {
 
 type cdfOrderState struct {
 	requestID       uint64
+	clientID        uint64
+	side            string
+	price           int64
 	acceptedAt      int64
 	acceptedQty     int64
 	filledQty       int64
@@ -246,10 +374,45 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		return nil, fmt.Errorf("cdf liquidity: nil run")
 	}
 	result := &CDFLiquidityRunAudit{}
+	config, configErr := loadCDFRunConfig(r)
+	if configErr != nil {
+		result.addCheck(CDFLiquidityCheck{Failure: "missing or malformed run configuration: " + configErr.Error()})
+	}
+	result.ExpectedHistoricalCount = config.ElasticSupplierCount
+	var receiptEvidence *cdfMarketDataEvidence
+	if config.RecordMarketDataReceipts {
+		receiptEvidence, configErr = readCDFMarketDataEvidence(r.Dir)
+		if configErr != nil {
+			result.addCheck(CDFLiquidityCheck{Failure: "missing or malformed market-data receipt evidence: " + configErr.Error()})
+		}
+	}
+	configByRole := make(map[string]cdfSupplierConfig, len(config.ElasticLiquiditySuppliers))
+	for _, supplier := range config.ElasticLiquiditySuppliers {
+		if _, exists := configByRole[supplier.Role]; exists {
+			result.addCheck(CDFLiquidityCheck{Role: supplier.Role, Failure: "duplicate configured liquidity supplier role"})
+			continue
+		}
+		configByRole[supplier.Role] = supplier
+	}
 	states := make(map[cdfParticipantKey]*CDFLiquiditySupplierAudit)
 	initial := make(map[cdfParticipantKey]AccountRow)
 	terminal := make(map[cdfParticipantKey]AccountRow)
+	venueAudits := make(map[string]*CDFLiquidityVenueAudit)
+	historicalByVenue := make(map[string]int)
+	venueAudit := func(venueID string) *CDFLiquidityVenueAudit {
+		if audit := venueAudits[venueID]; audit != nil {
+			return audit
+		}
+		audit := &CDFLiquidityVenueAudit{VenueID: venueID, ExpectedHistoricalCount: config.ElasticSupplierCount}
+		venueAudits[venueID] = audit
+		return audit
+	}
 	for _, row := range r.Report.InitialAccounts {
+		if isHistoricalElasticSupplierRole(row.Role) {
+			result.HistoricalSupplierCount++
+			historicalByVenue[row.VenueID]++
+			venueAudit(row.VenueID).HistoricalSupplierCount++
+		}
 		if !isCDFSupplierRole(row.Role) {
 			continue
 		}
@@ -262,7 +425,27 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		states[key] = &CDFLiquiditySupplierAudit{
 			VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID,
 			MinPosition: math.MaxInt64, MaxPosition: math.MinInt64,
-			pendingTouchByRequest: make(map[uint64]float64), Valid: true,
+			pendingTouchByRequest: make(map[uint64]float64), pendingQuoteByRequest: make(map[uint64]cdfDecisionEvidence), Valid: true, initialAccountSeen: true,
+		}
+		if supplierConfig, configured := configByRole[row.Role]; configured {
+			state := states[key]
+			state.configuredBaseAsset = supplierConfig.BaseAsset
+			state.configuredQuoteAsset = supplierConfig.QuoteAsset
+			state.configuredSymbol = supplierConfig.Symbol
+			state.configuredMaxPosition = supplierConfig.MaxPosition
+			state.configuredBasePrecision = supplierConfig.BasePrecision
+			state.configuredMaxQuoteQty = supplierConfig.MaxQuoteQty
+			state.configuredMaxObservationAge = supplierConfig.MaxObservationAge
+			state.configuredInitialBaseBalance = supplierConfig.InitialBaseBalance
+			state.configuredInitialQuoteBalance = supplierConfig.InitialQuoteBalance
+			state.ConfiguredMaxPosition = supplierConfig.MaxPosition
+			state.ConfiguredMaxQuoteQty = supplierConfig.MaxQuoteQty
+			state.receiptRequired = config.RecordMarketDataReceipts && containsString(config.MarketDataReceiptRoles, auditRoleClass(row.Role))
+			if supplierConfig.InitialBaseBalance <= 0 || supplierConfig.InitialQuoteBalance <= 0 || !accountHasNetBalance(row.Account.SpotBalances, supplierConfig.BaseAsset, supplierConfig.InitialBaseBalance) || !accountHasNetBalance(row.Account.SpotBalances, supplierConfig.QuoteAsset, supplierConfig.InitialQuoteBalance) {
+				result.addCheck(CDFLiquidityCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "supplier initial capital does not match registered finite balances"})
+			}
+		} else {
+			result.addCheck(CDFLiquidityCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "supplier is absent from configured liquidity roster"})
 		}
 	}
 	for _, row := range r.Report.TerminalAccounts {
@@ -290,7 +473,15 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		state := states[key]
 		state.InitialEquity = row.Account.Equity
 		state.TerminalEquity = terminalRow.Account.Equity
+		state.terminalAccountSeen = true
 		state.PnL = terminalRow.Account.Equity - row.Account.Equity
+		if state.configuredBaseAsset == "" {
+			result.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: row.Role, ClientID: key.ClientID, Failure: "supplier has no configured base asset"})
+		} else if mark := terminalRow.Marks[state.configuredBaseAsset]; mark > 0 {
+			state.terminalMark = mark
+		} else {
+			result.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: row.Role, ClientID: key.ClientID, Failure: "terminal supplier mark is unavailable"})
+		}
 		var ok bool
 		result.SupplierInitialEquity, ok = exactAdd(result.SupplierInitialEquity, state.InitialEquity)
 		if !ok {
@@ -307,6 +498,26 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		}
 	}
 	result.SupplierPnL = result.SupplierTerminalEquity - result.SupplierInitialEquity
+	for venueID, count := range historicalByVenue {
+		if count != config.ElasticSupplierCount {
+			result.addCheck(CDFLiquidityCheck{VenueID: venueID, Failure: fmt.Sprintf("historical elastic supplier count %d does not match configured %d", count, config.ElasticSupplierCount)})
+		}
+		for role := range configByRole {
+			found := false
+			for key, state := range states {
+				if key.VenueID == venueID && state.Role == role {
+					found = true
+					break
+				}
+			}
+			if !found {
+				result.addCheck(CDFLiquidityCheck{VenueID: venueID, Role: role, Failure: "configured supplier is missing from initial accounts"})
+			}
+		}
+	}
+	if config.ElasticSupplierCount > 0 && len(historicalByVenue) == 0 {
+		result.addCheck(CDFLiquidityCheck{Failure: "no historical elastic supplier accounts"})
+	}
 
 	generalFiles, bookFiles := make([]string, 0), make([]string, 0)
 	for _, path := range r.Files() {
@@ -322,14 +533,18 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	observedFills := make(map[cdfFillKey]cdfObservedFill)
 	if len(generalFiles) > 0 {
 		err := r.Scan(ScanOptions{
-			Events: []string{"elastic_liquidity_supplier_decision", "elastic_liquidity_supplier_fill"},
+			Events: []string{"elastic_liquidity_supplier_decision", "elastic_liquidity_supplier_fill", "balance_snapshot", "borrow"},
 			Files:  generalFiles, FilesSelected: true, Workers: 1,
 		}, func(event Event) {
 			switch event.Name {
 			case "elastic_liquidity_supplier_decision":
-				result.processDecision(event, states)
+				result.processDecision(event, states, receiptEvidence)
 			case "elastic_liquidity_supplier_fill":
 				result.processSupplierFill(event, states, observedFills)
+			case "balance_snapshot":
+				result.processBalanceSnapshot(event, states)
+			case "borrow":
+				result.processBorrow(event, states)
 			}
 		})
 		if err != nil {
@@ -341,7 +556,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			Events: []string{"Trade", "BookSnapshot", "OrderAccepted", "OrderCancelled", "OrderFill"},
 			Files:  []string{path}, FilesSelected: true, Workers: 1,
 		}, func(event Event) {
-			result.processBookEvent(event, states, orders, actualFills)
+			result.processBookEvent(event, states, orders, actualFills, venueAudits)
 		})
 		if err != nil {
 			return nil, fmt.Errorf("cdf liquidity: scan CDF/USD book %s: %w", path, err)
@@ -353,14 +568,30 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	result.reconcileFills(observedFills, actualFills, states)
 	result.finalizeOrders(orders, states)
 	result.finalizeSuppliers(states)
+	result.finalizeVenueAudits(venueAudits)
+	if result.SupplierCount > 0 {
+		if result.TradingSupplierCount != int64(result.SupplierCount) {
+			result.addCheck(CDFLiquidityCheck{Failure: fmt.Sprintf("only %d of %d suppliers traded", result.TradingSupplierCount, result.SupplierCount)})
+		}
+		if result.CancelCount+result.WithdrawCount == 0 {
+			result.addCheck(CDFLiquidityCheck{Failure: "no supplier cancellation, withdrawal, or repricing evidence"})
+		}
+	}
 	if result.TotalTradeVolumeQty > 0 {
 		result.SupplierVolumeShare = float64(result.SupplierVolumeQty) / float64(result.TotalTradeVolumeQty)
+		if result.SupplierVolumeShare > 0.75 {
+			result.addCheck(CDFLiquidityCheck{Failure: "aggregate supplier volume share exceeds 75 percent"})
+		}
 	}
 	if result.SnapshotCount > 0 {
 		result.BidAbsenceFraction = float64(result.BidAbsentSnapshots) / float64(result.SnapshotCount)
 		result.AskAbsenceFraction = float64(result.AskAbsentSnapshots) / float64(result.SnapshotCount)
 	}
-	result.Valid = len(result.Checks) == 0
+	allSuppliersValid := true
+	for _, supplier := range result.Suppliers {
+		allSuppliersValid = allSuppliersValid && supplier.Valid
+	}
+	result.Valid = len(result.Checks) == 0 && allSuppliersValid && (result.SupplierCount == 0 || result.TradingSupplierCount == int64(result.SupplierCount))
 	return result, nil
 }
 
@@ -391,7 +622,7 @@ func (r *CDFLiquidityRunAudit) addCheck(check CDFLiquidityCheck) {
 	r.Checks = append(r.Checks, check)
 }
 
-func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
+func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit, receiptEvidence *cdfMarketDataEvidence) {
 	var decision cdfDecisionEvidence
 	required := []string{"role", "client_id", "symbol", "decision_time", "observation_time", "observation_age", "best_bid", "best_bid_qty", "best_ask", "best_ask_qty", "mark_price", "reference_price", "position", "target_position", "inventory_limit", "action", "reason"}
 	if err := decodeRequiredJSON(event.Raw(), &decision, required...); err != nil {
@@ -406,11 +637,14 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	}
 	r.DecisionCount++
 	state.DecisionCount++
-	if event.ClientID != decision.ClientID || decision.Role != state.Role || decision.Symbol != "CDF/USD" || decision.DecisionTime != event.SimTS {
+	if event.ClientID != decision.ClientID || decision.Role != state.Role || decision.Symbol != state.configuredSymbol || decision.DecisionTime != event.SimTS {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "decision identity or timestamp mismatch"})
 	}
-	if decision.ObservationAge < 0 || decision.ObservationTime > decision.DecisionTime || decision.ReferencePrice <= 0 || decision.InventoryLimit <= 0 {
+	if decision.ObservationAge < 0 || decision.ObservationTime > decision.DecisionTime || decision.DecisionTime-decision.ObservationTime != decision.ObservationAge || decision.ReferencePrice <= 0 || decision.InventoryLimit <= 0 {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "invalid decision bounds or observation time"})
+	}
+	if state.configuredMaxObservationAge <= 0 || decision.ObservationAge > state.configuredMaxObservationAge {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "decision observation age exceeds registered delayed-data bound"})
 	}
 	if decision.Position < -decision.InventoryLimit || decision.Position > decision.InventoryLimit || decision.TargetPosition < -decision.InventoryLimit || decision.TargetPosition > decision.InventoryLimit {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "decision exceeds inventory limit"})
@@ -423,21 +657,37 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "inventory limit changed during run"})
 	}
 	state.InventoryLimit = decision.InventoryLimit
+	if state.configuredMaxPosition <= 0 || decision.InventoryLimit != state.configuredMaxPosition {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "decision inventory limit disagrees with registered configuration"})
+	}
 	if decision.ObservationAge > state.MaxObservationAgeNs {
 		state.MaxObservationAgeNs = decision.ObservationAge
 	}
 	state.observationAgeTotal, _ = exactAdd(state.observationAgeTotal, decision.ObservationAge)
 	state.observationCount++
+	if decision.Action == "submit" && state.receiptRequired {
+		r.validateDecisionReceipt(event, decision, receiptEvidence)
+	}
 	switch decision.Action {
 	case "submit":
 		state.SubmitCount++
 		r.SubmitCount++
-		if decision.QuoteRequestID == 0 || decision.QuoteOrderID != 0 || !validSide(decision.Side) || decision.QuotePrice <= 0 || decision.QuoteQty <= 0 {
+		if decision.QuoteRequestID == 0 || decision.QuoteOrderID != 0 || decision.ObservationSequence == 0 || !validSide(decision.Side) || decision.QuotePrice <= 0 || decision.QuoteQty <= 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "submit decision has incomplete quote identity"})
 			break
 		}
+		if state.configuredMaxQuoteQty <= 0 || decision.QuoteQty > state.configuredMaxQuoteQty {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "submitted quote exceeds registered maximum quantity"})
+		}
+		if !quoteMatchesObservedTouch(decision) {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "submitted quote is not the observed local touch"})
+		}
+		if decision.QuoteQty > state.maxQuoteQty {
+			state.maxQuoteQty = decision.QuoteQty
+		}
 		if share, ok := decisionTouchShare(decision); ok {
 			state.pendingTouchByRequest[decision.QuoteRequestID] = share
+			state.pendingQuoteByRequest[decision.QuoteRequestID] = decision
 			state.touchShareTotal += share
 			state.touchShareCount++
 			if share > state.MaxObservedTouchShare {
@@ -449,8 +699,17 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	case "rest":
 		state.RestCount++
 		r.RestCount++
-		if decision.QuoteOrderID == 0 || !validSide(decision.Side) || decision.QuotePrice <= 0 || decision.QuoteQty <= 0 {
+		if decision.QuoteOrderID == 0 || decision.ObservationSequence == 0 || !validSide(decision.Side) || decision.QuotePrice <= 0 || decision.QuoteQty <= 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "rest decision has incomplete quote identity"})
+		}
+		if state.configuredMaxQuoteQty <= 0 || decision.QuoteQty > state.configuredMaxQuoteQty {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "resting quote exceeds registered maximum quantity"})
+		}
+		if !quoteMatchesObservedTouch(decision) {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "resting quote is not the observed local touch"})
+		}
+		if decision.QuoteQty > state.maxQuoteQty {
+			state.maxQuoteQty = decision.QuoteQty
 		}
 		if share, ok := decisionTouchShare(decision); ok {
 			state.touchShareTotal += share
@@ -476,6 +735,24 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	}
 }
 
+func (r *CDFLiquidityRunAudit) validateDecisionReceipt(event Event, decision cdfDecisionEvidence, evidence *cdfMarketDataEvidence) {
+	if evidence == nil {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision has no receipt evidence"})
+		return
+	}
+	record, exists := evidence.decisions[cdfReceiptDecisionKey{ClientID: decision.ClientID, RequestID: decision.QuoteRequestID}]
+	if !exists || record.DecisionAt != decision.DecisionTime || record.Price != decision.QuotePrice || record.Qty != decision.QuoteQty {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision is not reconciled to a market-data decision receipt"})
+		return
+	}
+	link, linkExists := evidence.links[record.LinkID]
+	symbol, symbolExists := evidence.symbols[record.SymbolID]
+	receipt, receiptExists := evidence.receipts[cdfReceiptLinkOrdinal{LinkID: record.LinkID, LinkOrdinal: record.FrontierOrdinal}]
+	if !linkExists || !symbolExists || !receiptExists || link.SourceVenue != event.VenueID || link.Role != auditRoleClass(decision.Role) || symbol.Symbol != decision.Symbol || receipt.Sequence != decision.ObservationSequence || receipt.PublishedAt != decision.ObservationTime || receipt.DeliveredAt > decision.DecisionTime {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision frontier does not match its delayed local observation"})
+	}
+}
+
 func (r *CDFLiquidityRunAudit) processSupplierFill(event Event, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit, observed map[cdfFillKey]cdfObservedFill) {
 	var fill cdfFillEvidence
 	required := []string{"role", "client_id", "symbol", "order_id", "trade_id", "timestamp", "side", "price", "qty", "fee_amount", "fee_asset", "is_full", "position_before", "position_after"}
@@ -491,7 +768,7 @@ func (r *CDFLiquidityRunAudit) processSupplierFill(event Event, states map[cdfPa
 	}
 	r.FillCount++
 	state.FillCount++
-	if event.ClientID != fill.ClientID || fill.Role != state.Role || fill.Symbol != "CDF/USD" || fill.Timestamp != event.SimTS || fill.OrderID == 0 || fill.Qty <= 0 || !validSide(fill.Side) {
+	if event.ClientID != fill.ClientID || fill.Role != state.Role || fill.Symbol != state.configuredSymbol || fill.Timestamp != event.SimTS || fill.OrderID == 0 || fill.Qty <= 0 || !validSide(fill.Side) {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier fill identity or bounds mismatch"})
 	}
 	if !state.positionSet {
@@ -511,6 +788,9 @@ func (r *CDFLiquidityRunAudit) processSupplierFill(event Event, states map[cdfPa
 	if expectedAfter != fill.PositionAfter || (state.InventoryLimit > 0 && (fill.PositionAfter < -state.InventoryLimit || fill.PositionAfter > state.InventoryLimit)) {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier fill position-after violates inventory transition"})
 	}
+	if err := updateSupplierPnL(state, fill); err != nil {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier PnL reconstruction failed: " + err.Error()})
+	}
 	state.lastPosition = fill.PositionAfter
 	if fill.PositionAfter < state.MinPosition {
 		state.MinPosition = fill.PositionAfter
@@ -527,7 +807,90 @@ func (r *CDFLiquidityRunAudit) processSupplierFill(event Event, states map[cdfPa
 	}
 }
 
-func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit, orders map[cdfOrderKey]*cdfOrderState, actual map[cdfFillKey]cdfOrderFillEvidence) {
+func updateSupplierPnL(state *CDFLiquiditySupplierAudit, fill cdfFillEvidence) error {
+	if state.configuredBasePrecision <= 0 {
+		return fmt.Errorf("missing positive base precision")
+	}
+	if fill.Price <= 0 || fill.Qty <= 0 {
+		return fmt.Errorf("fill price and quantity must be positive")
+	}
+	positionBefore := fill.PositionBefore
+	quantity := fill.Qty
+	if positionBefore == 0 {
+		state.entryPrice = fill.Price
+	} else if (positionBefore > 0 && fill.Side == "BUY") || (positionBefore < 0 && fill.Side == "SELL") {
+		oldQuantity := absInt64(positionBefore)
+		combinedQuantity, ok := exactAdd(oldQuantity, quantity)
+		if !ok {
+			return fmt.Errorf("position quantity overflow")
+		}
+		weighted := new(big.Int).Mul(big.NewInt(oldQuantity), big.NewInt(state.entryPrice))
+		weighted.Add(weighted, new(big.Int).Mul(big.NewInt(quantity), big.NewInt(fill.Price)))
+		weighted.Quo(weighted, big.NewInt(combinedQuantity))
+		if !weighted.IsInt64() {
+			return fmt.Errorf("entry price overflow")
+		}
+		state.entryPrice = weighted.Int64()
+	} else {
+		closeQuantity := minInt64(absInt64(positionBefore), quantity)
+		priceDifference := fill.Price - state.entryPrice
+		if positionBefore < 0 {
+			priceDifference = -priceDifference
+		}
+		pnl, ok := quoteProduct(priceDifference, closeQuantity, state.configuredBasePrecision)
+		if !ok {
+			return fmt.Errorf("realized PnL overflow")
+		}
+		state.realizedPnL, ok = exactAdd(state.realizedPnL, pnl)
+		if !ok {
+			return fmt.Errorf("realized PnL accumulation overflow")
+		}
+		if quantity > closeQuantity {
+			state.entryPrice = fill.Price
+		} else if quantity == closeQuantity {
+			state.entryPrice = 0
+		}
+	}
+	if fill.FeeAsset == state.configuredQuoteAsset && fill.FeeAmount > 0 {
+		var ok bool
+		state.realizedPnL, ok = exactAdd(state.realizedPnL, -fill.FeeAmount)
+		if !ok {
+			return fmt.Errorf("fee accumulation overflow")
+		}
+	}
+	return nil
+}
+
+func quoteProduct(priceDifference, quantity, basePrecision int64) (int64, bool) {
+	if basePrecision <= 0 || quantity < 0 {
+		return 0, false
+	}
+	product := new(big.Int).Mul(big.NewInt(priceDifference), big.NewInt(quantity))
+	product.Quo(product, big.NewInt(basePrecision))
+	if !product.IsInt64() {
+		return 0, false
+	}
+	return product.Int64(), true
+}
+
+func absInt64(value int64) int64 {
+	if value == math.MinInt64 {
+		return math.MaxInt64
+	}
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
+func minInt64(left, right int64) int64 {
+	if left < right {
+		return left
+	}
+	return right
+}
+
+func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit, orders map[cdfOrderKey]*cdfOrderState, actual map[cdfFillKey]cdfOrderFillEvidence, venueAudits map[string]*CDFLiquidityVenueAudit) {
 	switch event.Name {
 	case "Trade":
 		var trade cdfTradeEvidence
@@ -536,10 +899,19 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			return
 		}
 		r.TotalTradeCount++
+		venue := venueAudits[event.VenueID]
+		if venue == nil {
+			venue = &CDFLiquidityVenueAudit{VenueID: event.VenueID, ExpectedHistoricalCount: r.ExpectedHistoricalCount}
+			venueAudits[event.VenueID] = venue
+		}
 		var ok bool
 		r.TotalTradeVolumeQty, ok = exactAdd(r.TotalTradeVolumeQty, trade.Qty)
 		if !ok {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF trade volume overflow"})
+		}
+		venue.TotalTradeVolumeQty, ok = exactAdd(venue.TotalTradeVolumeQty, trade.Qty)
+		if !ok {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "venue CDF trade volume overflow"})
 		}
 	case "BookSnapshot":
 		if event.ClientID != 0 {
@@ -551,14 +923,34 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			return
 		}
 		r.SnapshotCount++
+		venue := venueAudits[event.VenueID]
+		if venue == nil {
+			venue = &CDFLiquidityVenueAudit{VenueID: event.VenueID, ExpectedHistoricalCount: r.ExpectedHistoricalCount}
+			venueAudits[event.VenueID] = venue
+		}
+		venue.SnapshotCount++
 		if len(snapshot.Bids) == 0 {
 			r.BidAbsentSnapshots++
+			venue.BidAbsentSnapshots++
 		}
 		if len(snapshot.Asks) == 0 {
 			r.AskAbsentSnapshots++
+			venue.AskAbsentSnapshots++
 		}
 		if len(snapshot.Bids) == 0 && len(snapshot.Asks) == 0 {
 			r.BothAbsentSnapshots++
+		}
+		totalDisplayed := displayedDepth(snapshot.Bids) + displayedDepth(snapshot.Asks)
+		supplierDisplayed := supplierDisplayedDepth(event.VenueID, orders)
+		if totalDisplayed > 0 {
+			venue.ActiveDepthSnapshotCount++
+			share := float64(supplierDisplayed) / float64(totalDisplayed)
+			if share > venue.MaxSupplierDepthShare {
+				venue.MaxSupplierDepthShare = share
+			}
+			if share > 0.75 {
+				venue.SupplierDepthOver75Count++
+			}
 		}
 	case "OrderAccepted":
 		key := cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}
@@ -575,12 +967,29 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier order acceptance violates passive bounded quote contract"})
 			return
 		}
+		if state.configuredMaxQuoteQty <= 0 || accepted.Qty > state.configuredMaxQuoteQty {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "accepted quote exceeds registered maximum quantity"})
+		}
+		requested, requestedOK := state.pendingQuoteByRequest[accepted.RequestID]
+		if !requestedOK {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "accepted supplier order has no matching local decision"})
+		} else {
+			if requested.Side != accepted.Side || requested.QuotePrice != accepted.Price || requested.QuoteQty != accepted.Qty {
+				r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "accepted quote disagrees with local decision"})
+			}
+			delete(state.pendingQuoteByRequest, accepted.RequestID)
+		}
 		orderKey := cdfOrderKey{VenueID: event.VenueID, ClientID: event.ClientID, OrderID: accepted.OrderID}
 		if _, exists := orders[orderKey]; exists {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "duplicate supplier order acceptance"})
 			return
 		}
-		order := &cdfOrderState{requestID: accepted.RequestID, acceptedAt: event.SimTS, acceptedQty: accepted.Qty, remainingQty: accepted.Qty}
+		for existingKey, existingOrder := range orders {
+			if existingKey.VenueID == event.VenueID && existingKey.ClientID == event.ClientID && !existingOrder.closed {
+				r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier has more than one live accepted order"})
+			}
+		}
+		order := &cdfOrderState{clientID: event.ClientID, side: accepted.Side, price: accepted.Price, requestID: accepted.RequestID, acceptedAt: event.SimTS, acceptedQty: accepted.Qty, remainingQty: accepted.Qty}
 		if share, ok := state.pendingTouchByRequest[accepted.RequestID]; ok {
 			order.touchShare, order.touchShareKnown = share, true
 			delete(state.pendingTouchByRequest, accepted.RequestID)
@@ -642,6 +1051,94 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 		}
 		order.closed, order.closedAt = true, event.SimTS
 	}
+}
+
+func (r *CDFLiquidityRunAudit) processBalanceSnapshot(event Event, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
+	state := states[cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}]
+	if state == nil {
+		return
+	}
+	var snapshot cdfBalanceSnapshotEvidence
+	if err := decodeRequiredJSON(event.Raw(), &snapshot, "client_id", "spot_balances", "perp_balances", "borrowed"); err != nil {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed supplier balance snapshot: " + err.Error()})
+		return
+	}
+	if snapshot.ClientID != event.ClientID {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier balance snapshot identity mismatch"})
+	}
+	for _, balance := range append(snapshot.SpotBalances, snapshot.PerpBalances...) {
+		gross, ok := exactAdd(balance.Free, balance.Locked)
+		if !ok || balance.Borrowed < 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier balance snapshot arithmetic is invalid"})
+			continue
+		}
+		if balance.Borrowed > state.maxBorrowed {
+			state.maxBorrowed = balance.Borrowed
+		}
+		if balance.Asset == state.configuredBaseAsset && gross > state.maxGrossBaseBalance {
+			state.maxGrossBaseBalance = gross
+		}
+		if balance.Asset == state.configuredQuoteAsset && gross > state.maxGrossQuoteBalance {
+			state.maxGrossQuoteBalance = gross
+		}
+	}
+	for asset, borrowed := range snapshot.Borrowed {
+		if borrowed < 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier borrowed balance is negative"})
+		}
+		if asset == state.configuredBaseAsset || asset == state.configuredQuoteAsset {
+			if borrowed > state.maxBorrowed {
+				state.maxBorrowed = borrowed
+			}
+		}
+	}
+}
+
+func (r *CDFLiquidityRunAudit) processBorrow(event Event, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
+	state := states[cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}]
+	if state == nil {
+		return
+	}
+	var borrow cdfBorrowEvidence
+	if err := decodeRequiredJSON(event.Raw(), &borrow, "client_id", "asset", "amount"); err != nil {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed supplier borrow evidence: " + err.Error()})
+		return
+	}
+	if borrow.ClientID != event.ClientID || borrow.Amount <= 0 {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier borrow evidence has invalid identity or amount"})
+		return
+	}
+	state.borrowEventCount++
+}
+
+func displayedDepth(levels []bookLevel) int64 {
+	var total int64
+	for _, level := range levels {
+		if level.VisibleQty <= 0 {
+			continue
+		}
+		var ok bool
+		total, ok = exactAdd(total, level.VisibleQty)
+		if !ok {
+			return math.MaxInt64
+		}
+	}
+	return total
+}
+
+func supplierDisplayedDepth(venueID string, orders map[cdfOrderKey]*cdfOrderState) int64 {
+	var total int64
+	for key, order := range orders {
+		if key.VenueID != venueID || order.closed || order.remainingQty <= 0 {
+			continue
+		}
+		var ok bool
+		total, ok = exactAdd(total, order.remainingQty)
+		if !ok {
+			return math.MaxInt64
+		}
+	}
+	return total
 }
 
 func (r *CDFLiquidityRunAudit) reconcileFills(observed map[cdfFillKey]cdfObservedFill, actual map[cdfFillKey]cdfOrderFillEvidence, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
@@ -756,12 +1253,43 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 		if state.PnL != 0 {
 			r.PnLChangingSupplierCount++
 		}
-		state.Valid = state.DecisionCount > 0 && state.FillCount > 0 && state.AcceptedQuoteCount > 0 && state.CompletedQuoteCount > 0
+		state.RealizedPnL = state.realizedPnL
+		if state.lastPosition != 0 && state.entryPrice > 0 && state.terminalMark > 0 {
+			unrealized, ok := quoteProduct(state.terminalMark-state.entryPrice, state.lastPosition, state.configuredBasePrecision)
+			if !ok {
+				r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "unrealized PnL overflow"})
+			} else {
+				state.UnrealizedPnL = unrealized
+			}
+		}
+		state.MaxQuoteQty = state.maxQuoteQty
+		state.MaxBorrowed = state.maxBorrowed
+		state.BorrowEventCount = state.borrowEventCount
+		state.MaxGrossBaseBalance = state.maxGrossBaseBalance
+		state.MaxGrossQuoteBalance = state.maxGrossQuoteBalance
+		if state.configuredMaxQuoteQty <= 0 || state.maxQuoteQty > state.configuredMaxQuoteQty {
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier exceeded configured quote quantity"})
+		}
+		if state.maxBorrowed > 0 || state.borrowEventCount > 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier used unregistered borrowed capital"})
+		}
+		if !state.initialAccountSeen || !state.terminalAccountSeen || state.configuredMaxPosition <= 0 || state.configuredMaxQuoteQty <= 0 || state.configuredBasePrecision <= 0 || state.configuredMaxObservationAge <= 0 || state.configuredInitialBaseBalance <= 0 || state.configuredInitialQuoteBalance <= 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier lacks complete finite-capital configuration"})
+		}
+		state.Valid = state.DecisionCount > 0 && state.FillCount > 0 && state.AcceptedQuoteCount > 0 && state.CompletedQuoteCount > 0 && state.initialAccountSeen && state.terminalAccountSeen
 		if state.DecisionCount == 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier has no decision evidence"})
 		}
 		if state.InventoryLimit <= 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier has no positive inventory limit"})
+		}
+		if !state.Valid {
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier activation contract is incomplete"})
+		}
+		r.RealizedPnL, _ = exactAdd(r.RealizedPnL, state.RealizedPnL)
+		r.UnrealizedPnL, _ = exactAdd(r.UnrealizedPnL, state.UnrealizedPnL)
+		if state.MaxBorrowed > r.MaxBorrowed {
+			r.MaxBorrowed = state.MaxBorrowed
 		}
 		r.SupplierVolumeQty, _ = exactAdd(r.SupplierVolumeQty, state.FilledQty)
 		if state.MaxObservedTouchShare > r.MaxObservedTouchShare {
@@ -771,6 +1299,47 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 	}
 	if touchCount > 0 {
 		r.MeanObservedTouchShare = touchTotal / float64(touchCount)
+	}
+}
+
+func (r *CDFLiquidityRunAudit) finalizeVenueAudits(venueAudits map[string]*CDFLiquidityVenueAudit) {
+	for _, supplier := range r.Suppliers {
+		venue := venueAudits[supplier.VenueID]
+		if venue == nil {
+			venue = &CDFLiquidityVenueAudit{VenueID: supplier.VenueID, ExpectedHistoricalCount: r.ExpectedHistoricalCount}
+			venueAudits[supplier.VenueID] = venue
+		}
+		venue.SupplierVolumeQty, _ = exactAdd(venue.SupplierVolumeQty, supplier.FilledQty)
+	}
+	for _, venue := range venueAudits {
+		if venue.TotalTradeVolumeQty > 0 {
+			venue.SupplierVolumeShare = float64(venue.SupplierVolumeQty) / float64(venue.TotalTradeVolumeQty)
+		}
+		if venue.ActiveDepthSnapshotCount > 0 {
+			venue.SupplierDepthOver75Fraction = float64(venue.SupplierDepthOver75Count) / float64(venue.ActiveDepthSnapshotCount)
+		}
+		if venue.SupplierVolumeShare > 0.75 {
+			r.addCheck(CDFLiquidityCheck{VenueID: venue.VenueID, Failure: "supplier volume share exceeds 75 percent"})
+		}
+		if venue.SupplierDepthOver75Fraction > 0.5 {
+			r.addCheck(CDFLiquidityCheck{VenueID: venue.VenueID, Failure: "supplier displayed-depth share exceeds 75 percent for more than half of active snapshots"})
+		}
+		if venue.HistoricalSupplierCount != venue.ExpectedHistoricalCount {
+			r.addCheck(CDFLiquidityCheck{VenueID: venue.VenueID, Failure: fmt.Sprintf("historical supplier count %d does not match configured %d", venue.HistoricalSupplierCount, venue.ExpectedHistoricalCount)})
+		}
+		r.Venues = append(r.Venues, *venue)
+		if venue.MaxSupplierDepthShare > r.MaxSupplierDepthShare {
+			r.MaxSupplierDepthShare = venue.MaxSupplierDepthShare
+		}
+	}
+	sort.Slice(r.Venues, func(i, j int) bool { return r.Venues[i].VenueID < r.Venues[j].VenueID })
+	var activeSnapshots, over75 int64
+	for _, venue := range r.Venues {
+		activeSnapshots += venue.ActiveDepthSnapshotCount
+		over75 += venue.SupplierDepthOver75Count
+	}
+	if activeSnapshots > 0 {
+		r.SupplierDepthOver75Share = float64(over75) / float64(activeSnapshots)
 	}
 }
 
@@ -788,7 +1357,35 @@ func decisionTouchShare(decision cdfDecisionEvidence) (float64, bool) {
 	return float64(decision.QuoteQty) / float64(depth), true
 }
 
+func quoteMatchesObservedTouch(decision cdfDecisionEvidence) bool {
+	if !validSide(decision.Side) || decision.QuotePrice <= 0 || decision.QuoteQty <= 0 {
+		return false
+	}
+	if decision.Side == "BUY" {
+		return decision.QuotePrice == decision.BestBid && decision.QuoteQty <= decision.BestBidQty
+	}
+	return decision.QuotePrice == decision.BestAsk && decision.QuoteQty <= decision.BestAskQty
+}
+
 func validSide(side string) bool { return side == "BUY" || side == "SELL" }
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func accountHasNetBalance(balances []Balance, asset string, expected int64) bool {
+	for _, balance := range balances {
+		if balance.Asset == asset {
+			return balance.NetAsset == expected && balance.Borrowed == 0
+		}
+	}
+	return false
+}
 
 func isCDFSupplierRole(role string) bool {
 	const prefix = "cdf_elastic_supplier_"
@@ -797,4 +1394,24 @@ func isCDFSupplierRole(role string) bool {
 	}
 	_, err := strconv.ParseUint(strings.TrimPrefix(role, prefix), 10, 32)
 	return err == nil
+}
+
+func isHistoricalElasticSupplierRole(role string) bool {
+	const prefix = "elastic_supplier_"
+	if !strings.HasPrefix(role, prefix) {
+		return false
+	}
+	_, err := strconv.ParseUint(strings.TrimPrefix(role, prefix), 10, 32)
+	return err == nil
+}
+
+func auditRoleClass(role string) string {
+	index := strings.LastIndex(role, "_")
+	if index <= 0 || index == len(role)-1 {
+		return role
+	}
+	if _, err := strconv.ParseUint(role[index+1:], 10, 32); err != nil {
+		return role
+	}
+	return role[:index]
 }

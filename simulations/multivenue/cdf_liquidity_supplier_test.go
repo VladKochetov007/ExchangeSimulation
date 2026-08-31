@@ -122,7 +122,7 @@ func TestElasticLiquiditySupplierWithdrawsOnUnavailableLocalSide(t *testing.T) {
 
 func testElasticLiquiditySupplierSpec() ElasticLiquiditySupplierSpec {
 	return ElasticLiquiditySupplierSpec{
-		Role: "cdf_elastic_supplier_1", Symbol: "CDF/USD",
+		Role: "cdf_elastic_supplier_1", Symbol: "CDF/USD", BaseAsset: "CDF", QuoteAsset: "USD",
 		BasePrecision:      mvBasePrecision,
 		InitialBaseBalance: 1_000 * mvBasePrecision, InitialQuoteBalance: 500_000_000 * mvQuotePrecision,
 		Interval: time.Second, MaxObservationAge: time.Minute,
@@ -139,6 +139,17 @@ func TestElasticLiquiditySupplierRosterRequiresDelayedLocalLink(t *testing.T) {
 	}
 	if err := cfg.normalize(); err == nil {
 		t.Fatal("roster without an explicit delayed local link was accepted")
+	}
+}
+
+func TestElasticLiquiditySupplierSpecAcceptsConfiguredAssetPair(t *testing.T) {
+	spec := testElasticLiquiditySupplierSpec()
+	spec.Role = "alt_liquidity_provider_1"
+	spec.Symbol = "ALT/EUR"
+	spec.BaseAsset = "ALT"
+	spec.QuoteAsset = "EUR"
+	if err := spec.validate(); err != nil {
+		t.Fatalf("generic configured asset pair rejected: %v", err)
 	}
 }
 

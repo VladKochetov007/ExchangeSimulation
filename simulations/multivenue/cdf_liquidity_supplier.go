@@ -18,6 +18,8 @@ import (
 type ElasticLiquiditySupplierSpec struct {
 	Role                 string        `json:"role"`
 	Symbol               string        `json:"symbol"`
+	BaseAsset            string        `json:"base_asset"`
+	QuoteAsset           string        `json:"quote_asset"`
 	BasePrecision        int64         `json:"base_precision"`
 	InitialBaseBalance   int64         `json:"initial_base_balance"`
 	InitialQuoteBalance  int64         `json:"initial_quote_balance"`
@@ -32,11 +34,11 @@ type ElasticLiquiditySupplierSpec struct {
 }
 
 func (s ElasticLiquiditySupplierSpec) validate() error {
-	if s.Role == "" || roleClass(s.Role) != "cdf_elastic_supplier" {
-		return fmt.Errorf("role must be a numbered cdf_elastic_supplier, got %q", s.Role)
+	if s.Role == "" || roleClass(s.Role) == s.Role {
+		return fmt.Errorf("role must be a numbered liquidity-supplier role, got %q", s.Role)
 	}
-	if s.Symbol != "CDF/USD" {
-		return fmt.Errorf("symbol must be CDF/USD, got %q", s.Symbol)
+	if s.Symbol == "" || s.BaseAsset == "" || s.QuoteAsset == "" || s.BaseAsset == s.QuoteAsset {
+		return fmt.Errorf("symbol and distinct base/quote assets are required")
 	}
 	if s.BasePrecision <= 0 || s.InitialBaseBalance <= 0 || s.InitialQuoteBalance <= 0 {
 		return fmt.Errorf("initial balances must be positive")
@@ -72,6 +74,8 @@ type ElasticLiquiditySupplierConfig struct {
 	Role                 string
 	ClientID             uint64
 	Symbol               string
+	BaseAsset            string
+	QuoteAsset           string
 	BasePrecision        int64
 	Interval             time.Duration
 	MaxObservationAge    time.Duration
@@ -90,29 +94,30 @@ type ElasticLiquiditySupplierConfig struct {
 // the authoritative PnL source; Position and MarkPrice make the local action
 // joinable to that economic evidence.
 type ElasticLiquiditySupplierDecision struct {
-	Role             string `json:"role"`
-	ClientID         uint64 `json:"client_id"`
-	Symbol           string `json:"symbol"`
-	DecisionTime     int64  `json:"decision_time"`
-	ObservationTime  int64  `json:"observation_time"`
-	ObservationAge   int64  `json:"observation_age"`
-	BestBid          int64  `json:"best_bid"`
-	BestBidQty       int64  `json:"best_bid_qty"`
-	BestAsk          int64  `json:"best_ask"`
-	BestAskQty       int64  `json:"best_ask_qty"`
-	MarkPrice        int64  `json:"mark_price"`
-	ReferencePrice   int64  `json:"reference_price"`
-	Position         int64  `json:"position"`
-	TargetPosition   int64  `json:"target_position"`
-	InventoryLimit   int64  `json:"inventory_limit"`
-	Action           string `json:"action"`
-	Reason           string `json:"reason"`
-	Side             string `json:"side,omitempty"`
-	QuotePrice       int64  `json:"quote_price,omitempty"`
-	QuoteQty         int64  `json:"quote_qty,omitempty"`
-	QuoteOrderID     uint64 `json:"quote_order_id,omitempty"`
-	QuoteRequestID   uint64 `json:"quote_request_id,omitempty"`
-	QuoteSubmittedAt int64  `json:"quote_submitted_at,omitempty"`
+	Role                string `json:"role"`
+	ClientID            uint64 `json:"client_id"`
+	Symbol              string `json:"symbol"`
+	DecisionTime        int64  `json:"decision_time"`
+	ObservationTime     int64  `json:"observation_time"`
+	ObservationAge      int64  `json:"observation_age"`
+	ObservationSequence uint64 `json:"observation_sequence"`
+	BestBid             int64  `json:"best_bid"`
+	BestBidQty          int64  `json:"best_bid_qty"`
+	BestAsk             int64  `json:"best_ask"`
+	BestAskQty          int64  `json:"best_ask_qty"`
+	MarkPrice           int64  `json:"mark_price"`
+	ReferencePrice      int64  `json:"reference_price"`
+	Position            int64  `json:"position"`
+	TargetPosition      int64  `json:"target_position"`
+	InventoryLimit      int64  `json:"inventory_limit"`
+	Action              string `json:"action"`
+	Reason              string `json:"reason"`
+	Side                string `json:"side,omitempty"`
+	QuotePrice          int64  `json:"quote_price,omitempty"`
+	QuoteQty            int64  `json:"quote_qty,omitempty"`
+	QuoteOrderID        uint64 `json:"quote_order_id,omitempty"`
+	QuoteRequestID      uint64 `json:"quote_request_id,omitempty"`
+	QuoteSubmittedAt    int64  `json:"quote_submitted_at,omitempty"`
 }
 
 // ElasticLiquiditySupplierFill joins a fill to the participant's local
@@ -156,6 +161,7 @@ type ElasticLiquiditySupplier struct {
 	bestAsk             int64
 	bestAskQty          int64
 	observationTime     int64
+	observationSequence uint64
 	position            int64
 	reference           int64
 	lastReferenceUpdate int64
@@ -213,6 +219,7 @@ func (s *ElasticLiquiditySupplier) observeSnapshot(event actor.BookSnapshotEvent
 		return
 	}
 	s.bestBid, s.bestBidQty, s.bestAsk, s.bestAskQty, s.observationTime = 0, 0, 0, 0, event.Timestamp
+	s.observationSequence = event.SeqNum
 	if len(event.Snapshot.Bids) > 0 {
 		s.bestBid = event.Snapshot.Bids[0].Price
 		s.bestBidQty = event.Snapshot.Bids[0].VisibleQty
@@ -384,8 +391,9 @@ func (s *ElasticLiquiditySupplier) baseDecision(now int64) ElasticLiquiditySuppl
 		Role: s.cfg.Role, ClientID: s.cfg.ClientID, Symbol: s.cfg.Symbol,
 		DecisionTime: now, ObservationTime: s.observationTime, ObservationAge: age,
 		BestBid: s.bestBid, BestBidQty: s.bestBidQty, BestAsk: s.bestAsk, BestAskQty: s.bestAskQty,
-		ReferencePrice: s.reference,
-		Position:       s.position, InventoryLimit: s.cfg.MaxPosition,
+		ObservationSequence: s.observationSequence,
+		ReferencePrice:      s.reference,
+		Position:            s.position, InventoryLimit: s.cfg.MaxPosition,
 		QuoteOrderID: s.quote.orderID, QuoteRequestID: s.quote.requestID,
 		QuotePrice: s.quote.price, QuoteQty: s.quote.qty, QuoteSubmittedAt: s.quote.submittedAt,
 	}

@@ -756,13 +756,23 @@ func (c *Config) normalize() error {
 			}
 			seenRoles[supplier.Role] = struct{}{}
 		}
-		profile, configured := c.latencyProfileFor("cdf_elastic_supplier")
-		if !configured || profile.zero() {
-			return errors.New("multivenue: elastic liquidity suppliers require an explicit nonzero delayed cdf_elastic_supplier link")
+		classes := make(map[string]struct{}, len(c.ElasticLiquiditySuppliers))
+		for _, supplier := range c.ElasticLiquiditySuppliers {
+			class := roleClass(supplier.Role)
+			classes[class] = struct{}{}
+			profile, configured := c.latencyProfileFor(supplier.Role)
+			if !configured || profile.zero() {
+				return fmt.Errorf("multivenue: elastic liquidity suppliers require an explicit nonzero delayed %s link", class)
+			}
 		}
 		if c.RecordElasticLiquiditySupplierDecisions || c.RecordMarketDataReceipts {
-			if !c.RecordElasticLiquiditySupplierDecisions || !c.RecordMarketDataReceipts || !slices.Contains(c.MarketDataReceiptRoles, "cdf_elastic_supplier") {
-				return errors.New("multivenue: instrumented elastic liquidity suppliers require decisions and cdf_elastic_supplier market-data receipts")
+			if !c.RecordElasticLiquiditySupplierDecisions || !c.RecordMarketDataReceipts {
+				return errors.New("multivenue: instrumented elastic liquidity suppliers require decisions and market-data receipts")
+			}
+			for class := range classes {
+				if !slices.Contains(c.MarketDataReceiptRoles, class) {
+					return fmt.Errorf("multivenue: instrumented elastic liquidity suppliers require %s market-data receipts", class)
+				}
 			}
 		}
 	}
@@ -3365,13 +3375,15 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	}
 	for _, spec := range s.Config.ElasticLiquiditySuppliers {
 		clientID, gateway := venue.connectParticipant(mount, spec.Role, map[string]int64{
-			"CDF": spec.InitialBaseBalance,
-			"USD": spec.InitialQuoteBalance,
+			spec.BaseAsset:  spec.InitialBaseBalance,
+			spec.QuoteAsset: spec.InitialQuoteBalance,
 		}, 0, noiseFee)
 		liquidityConfig := ElasticLiquiditySupplierConfig{
 			Role:                 spec.Role,
 			ClientID:             clientID,
 			Symbol:               spec.Symbol,
+			BaseAsset:            spec.BaseAsset,
+			QuoteAsset:           spec.QuoteAsset,
 			BasePrecision:        spec.BasePrecision,
 			Interval:             spec.Interval,
 			MaxObservationAge:    spec.MaxObservationAge,
