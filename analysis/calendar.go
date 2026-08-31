@@ -8,8 +8,9 @@ import (
 
 // CalendarOptions selects the lifecycle evidence used by the calendar census.
 type CalendarOptions struct {
-	Files         []string
-	FilesSelected bool
+	Files            []string
+	FilesSelected    bool
+	ExpectedVenueIDs []string
 }
 
 // CalendarVenueAudit is the realized derivative calendar for one venue.
@@ -106,6 +107,16 @@ type calendarListingTimeline struct {
 // settlement from exchange-owned lifecycle announcements. It is intentionally
 // independent of symbol grammar except for the announcement's typed expiry.
 func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
+	expectedVenues := make(map[string]struct{}, len(opts.ExpectedVenueIDs))
+	for _, venueID := range opts.ExpectedVenueIDs {
+		if venueID == "" {
+			return nil, fmt.Errorf("calendar: expected venue identity is empty")
+		}
+		if _, exists := expectedVenues[venueID]; exists {
+			return nil, fmt.Errorf("calendar: expected venue identity %q is duplicated", venueID)
+		}
+		expectedVenues[venueID] = struct{}{}
+	}
 	var mu sync.Mutex
 	events := make([]calendarLifecycleEvent, 0)
 	var malformedPayload string
@@ -124,6 +135,14 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 			mu.Lock()
 			if malformedPayload == "" {
 				malformedPayload = fmt.Sprintf("%s:%d %s: %v", event.File, event.Ordinal, event.Name, err)
+			}
+			mu.Unlock()
+			return
+		}
+		if event.VenueID == "" {
+			mu.Lock()
+			if malformedPayload == "" {
+				malformedPayload = fmt.Sprintf("%s:%d %s: missing venue_id", event.File, event.Ordinal, event.Name)
 			}
 			mu.Unlock()
 			return
@@ -288,6 +307,18 @@ func (r *Run) MeasureCalendar(opts CalendarOptions) (*CalendarAudit, error) {
 			state.audit.FuturesSettled++
 		} else {
 			state.audit.OptionsSettled++
+		}
+	}
+	if len(expectedVenues) > 0 {
+		for venueID := range expectedVenues {
+			if _, exists := states[venueID]; !exists {
+				return nil, fmt.Errorf("calendar: expected venue %q has no derivative lifecycle evidence", venueID)
+			}
+		}
+		for venueID := range states {
+			if _, expected := expectedVenues[venueID]; !expected {
+				return nil, fmt.Errorf("calendar: unexpected derivative venue %q", venueID)
+			}
 		}
 	}
 

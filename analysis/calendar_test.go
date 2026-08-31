@@ -98,6 +98,43 @@ func TestMeasureCalendarRejectsMalformedLifecyclePayload(t *testing.T) {
 	}
 }
 
+func TestMeasureCalendarRejectsMissingAndEmptyVenueIdentity(t *testing.T) {
+	cases := []struct {
+		name   string
+		prefix string
+	}{
+		{name: "missing", prefix: `{"sim_ts":1,"client_id":0,"event":"instrument_listed","data":{"payload":{"symbol":"ABC-FUT-3-U4142432f555344","instrument_type":"FUTURE","expiry_nano":3}}}`},
+		{name: "empty", prefix: `{"sim_ts":1,"client_id":0,"event":"instrument_listed","data":{"venue_id":"","payload":{"symbol":"ABC-FUT-3-U4142432f555344","instrument_type":"FUTURE","expiry_nano":3}}}`},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			dir := writeRun(t, Report{}, map[string][]string{"north/lifecycle.jsonl": {testCase.prefix}})
+			run, err := Open(dir)
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			if _, err := run.MeasureCalendar(CalendarOptions{}); err == nil {
+				t.Fatalf("%s venue identity was accepted", testCase.name)
+			}
+		})
+	}
+}
+
+func TestMeasureCalendarRejectsUnexpectedConfiguredVenue(t *testing.T) {
+	dir := writeRun(t, Report{}, map[string][]string{
+		"east/lifecycle.jsonl": {
+			`{"sim_ts":1,"client_id":0,"event":"instrument_listed","data":{"venue_id":"east","payload":{"symbol":"ABC-FUT-3-U4142432f555344","instrument_type":"FUTURE","expiry_nano":3}}}`,
+		},
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := run.MeasureCalendar(CalendarOptions{ExpectedVenueIDs: []string{"north"}}); err == nil {
+		t.Fatal("renamed venue was accepted against the registered venue set")
+	}
+}
+
 func TestMeasureCalendarRejectsMissingNullAndUnknownInstrumentTypes(t *testing.T) {
 	cases := []struct {
 		name    string

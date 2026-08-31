@@ -262,6 +262,8 @@ done
 
 v2_r2_require_calendar_listing_timeline "$analysis_dir/calendar.json" "$expected_calendar_listing_timeline" ||
 	fail "calendar first-listing timeline or per-expiry cardinality does not match the registered policy"
+v2_r2_require_calendar_venue_set "$analysis_dir/calendar.json" ||
+	fail "calendar derivative evidence does not contain exactly the registered central/north/south venues"
 
 write_inactive() {
 	local metric=$1 field=$2 reason=$3
@@ -329,6 +331,7 @@ jq -n --argjson cdf_borrow_events "$cdf_borrow_events" \
 	--argjson expected_calendar_expiries "$expected_calendar_expiries" \
 	--argjson expected_calendar_completed_expiries "$expected_calendar_completed_expiries" \
 	--argjson expected_calendar_listing_timeline "$expected_calendar_listing_timeline" \
+	--argjson expected_calendar_venue_ids "$(v2_r2_expected_calendar_venue_ids)" \
 	--arg contract "$contract_version" \
 	'def r($x): $x[0].result;
 	 {schema_version: 1, result: {contract: $contract,
@@ -342,6 +345,7 @@ jq -n --argjson cdf_borrow_events "$cdf_borrow_events" \
 			zero_price_unavailable_order_rejections: ($price_unavailable_rejections == 0),
 			calendar_behavior_attested: (r($calendar).contract == "calendar-audit-v2" and
 				all(r($calendar).venues[]; .listing_timeline == $expected_calendar_listing_timeline) and
+				(r($calendar).venues | map(.venue_id) | sort) == ($expected_calendar_venue_ids | sort) and
 				r($calendar).futures_expiry_nanos == $expected_calendar_expiries and
 				r($calendar).option_expiry_nanos == $expected_calendar_expiries and
 				r($calendar).shared_expiry_nanos == $expected_calendar_expiries and
@@ -397,6 +401,7 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 	--slurpfile liabilityhedger "$analysis_dir/liabilityhedger.json" \
 	--slurpfile activation "$analysis_dir/activation.json" \
 	--argjson expected_calendar_listing_timeline "$expected_calendar_listing_timeline" \
+	--argjson expected_calendar_venue_ids "$(v2_r2_expected_calendar_venue_ids)" \
 	--arg contract "$contract_version" \
 	'def r($x): $x[0].result;
 	 def field($x; $name): (r($x) | getpath($name | split(".")));
@@ -416,7 +421,7 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 			positions: (count($positions; "contracts") > 0 and count($positions; "exact_replay_checks") > 0 and count($positions; "realized_pnl_checks") > 0 and field_zeroes($positions; ["non_zero_net_contracts", "disagreement", "unrepresentable_open_values", "exact_replay_failures", "realized_pnl_failures", "evidence_failures", "missing_marks", "mark_identity_failures", "missing_terminal_positions", "unexpected_terminal_positions", "terminal_position_mismatches", "terminal_timestamp_failures", "post_terminal_position_updates"])),
 			fill_positions: (zero($fillpositions; "missing_position_update") and zero($fillpositions; "unexpected_position_update") and zero($fillpositions; "price_mismatches") and zero($fillpositions; "malformed_fill_records") and zero($fillpositions; "malformed_position_updates") and zero($fillpositions; "position_chain_failures")),
 			order_lifecycle: field_zeroes($orderlifecycle; ["unknown_fills", "unknown_cancellations", "duplicate_acceptances", "duplicate_terminals", "fills_after_terminal", "fill_quantity_mismatches", "cancel_quantity_mismatches", "client_mismatches", "unlinked_fills", "missing_immediate_terminal", "malformed_accepted_records", "malformed_fill_records", "malformed_cancel_records", "malformed_liquidation_records"]),
-			calendar: (r($calendar).contract == "calendar-audit-v2" and count($calendar; "venues") > 0 and zero($calendar; "duplicate_listings") and zero($calendar; "duplicate_settlements") and zero($calendar; "malformed_derivative_events") and all(r($calendar).venues[]; .listing_timeline == $expected_calendar_listing_timeline)),
+			calendar: (r($calendar).contract == "calendar-audit-v2" and count($calendar; "venues") > 0 and zero($calendar; "duplicate_listings") and zero($calendar; "duplicate_settlements") and zero($calendar; "malformed_derivative_events") and (r($calendar).venues | map(.venue_id) | sort) == ($expected_calendar_venue_ids | sort) and all(r($calendar).venues[]; .listing_timeline == $expected_calendar_listing_timeline)),
 			settlement: (count($settlements; "checks") > 0 and count($settlements; "exact_replay_checks") > 0 and field_zeroes($settlements; ["mismatched", "unpaid", "total_trades_after_expiry", "total_position_updates_after_expiry", "arithmetic_failures", "explicit_unavailable_announcements", "exact_replay_failures", "settlement_event_mismatches", "evidence_failures", "descriptor_conflicts", "settlement_timing_failures", "delivery_fee_mismatches"])),
 			expiry: (count($expiryfills; "expired_contracts") > 0 and count($expiryfills; "settled_contracts") > 0 and zero($expiryfills; "expired_unsettled_contracts") and field_zeroes($expiryfills; ["fills_before_listing", "fills_after_expiry", "malformed_fill_records", "fill_identity_failures", "malformed_lifecycle_records", "malformed_snapshot_records", "settlement_before_listing", "missing_expiry_metadata", "settlement_without_listing", "metadata_mismatches", "snapshot_records_before_listing", "snapshot_records_after_expiry", "nonempty_snapshots_after_expiry"])),
 				derivatives: (count($derivatives; "funding") > 0 and field_zeroes($derivatives; ["funding_broken", "funding_sign_wrong", "funding_misdirected", "funding_undirected", "funding_duplicate_payments", "funding_payment_mismatches", "funding_missing_rates", "funding_missing_settlements", "funding_timing_failures", "funding_evidence_failures", "funding_arithmetic_failures", "funding_settlement_failures", "exercise_broken", "exercise_timing_failures", "exercise_evidence_failures", "holders_mispaid", "worthless_paid", "exercise_arithmetic_failures", "exercise_missing_payouts", "exercise_extra_payouts", "exercise_duplicate_payouts", "exercise_unknown_payouts"])),

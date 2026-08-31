@@ -80,6 +80,12 @@ expected_calendar_timeline=$(cat <<'EOF'
 ]
 EOF
 )
+helper_calendar_timeline=$(v2_r2_expected_calendar_listing_timeline)
+if ! diff -u \
+	<(printf '%s\n' "$expected_calendar_timeline" | jq -S -c .) \
+	<(printf '%s\n' "$helper_calendar_timeline" | jq -S -c .); then
+	fail "literal calendar fixture drifted from the independently maintained policy helper"
+fi
 calendar_fixture="$tmp_root/calendar.json"
 jq -n --argjson timeline "$expected_calendar_timeline" \
 	'($timeline | map(.expiry_nano)) as $expiries |
@@ -88,11 +94,24 @@ jq -n --argjson timeline "$expected_calendar_timeline" \
 		venues: [{listing_timeline: $timeline, futures_listed: 28,
 			options_listed: 280, futures_settled: 23, options_settled: 230}]}}' \
 	>"$calendar_fixture"
-v2_r2_require_calendar_listing_timeline "$calendar_fixture" "$expected_calendar_timeline" ||
+v2_r2_require_calendar_listing_timeline "$calendar_fixture" ||
 	fail "registered first-listing timeline was rejected"
+calendar_venues_fixture="$tmp_root/calendar-venues.json"
+jq -n --argjson timeline "$expected_calendar_timeline" \
+	'{result: {contract: "calendar-audit-v2", venues: [
+		{venue_id: "central", listing_timeline: $timeline},
+		{venue_id: "north", listing_timeline: $timeline},
+		{venue_id: "south", listing_timeline: $timeline}]}}' \
+	>"$calendar_venues_fixture"
+v2_r2_require_calendar_venue_set "$calendar_venues_fixture" ||
+	fail "registered venue set was rejected"
+jq '.result.venues[1].venue_id = "renamed"' "$calendar_venues_fixture" >"$tmp_root/calendar-renamed-venue.json"
+expect_failure v2_r2_require_calendar_venue_set "$tmp_root/calendar-renamed-venue.json"
+jq '.result.venues[1].venue_id = ""' "$calendar_venues_fixture" >"$tmp_root/calendar-empty-venue.json"
+expect_failure v2_r2_require_calendar_venue_set "$tmp_root/calendar-empty-venue.json"
 jq '.result.venues[0].listing_timeline |= map(.future_first_listed_at_nano = 0 | .option_first_listed_at_nano = 0)' \
 	"$calendar_fixture" >"$tmp_root/calendar-all-at-zero.json"
-expect_failure v2_r2_require_calendar_listing_timeline "$tmp_root/calendar-all-at-zero.json" "$expected_calendar_timeline"
+expect_failure v2_r2_require_calendar_listing_timeline "$tmp_root/calendar-all-at-zero.json"
 
 expect_failure env GOMAXPROCS=4 "$root_dir/scripts/run-v2-integrated-longrun-r2-cell.sh" holdout-619 /bin/true
 expect_failure "$root_dir/scripts/extract-v2-integrated-longrun-r2-cell.sh" \

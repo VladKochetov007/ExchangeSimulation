@@ -61,6 +61,22 @@ v2_r2_require_calendar_listing_timeline() {
 		"$calendar_path" >/dev/null
 }
 
+v2_r2_expected_calendar_venue_ids() {
+	printf '%s\n' '["central","north","south"]'
+}
+
+v2_r2_require_calendar_venue_set() {
+	[[ $# -ge 1 && $# -le 2 ]] || return 1
+	local calendar_path=$1
+	local expected_venues=${2:-$(v2_r2_expected_calendar_venue_ids)}
+	jq -e --argjson expected_venues "$expected_venues" \
+		'type == "object" and .result.contract == "calendar-audit-v2" and
+		 (.result.venues | type) == "array" and
+		 (.result.venues | map(.venue_id) | sort) == ($expected_venues | sort) and
+		 all(.result.venues[]; (.venue_id | type) == "string" and length > 0)' \
+		"$calendar_path" >/dev/null
+}
+
 v2_r2_acquire_namespace_lock() {
 	[[ ! -L "$v2_r2_namespace_lock_path" ]] || return 1
 	local inherited_fd=${V2_R2_NAMESPACE_LOCK_FD:-}

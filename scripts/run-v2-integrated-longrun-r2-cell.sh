@@ -83,8 +83,16 @@ v2_r2_require_output_root "$output_root" || {
 # cell before launch would make the directory look reused and fail closed.
 mkdir -p "$output_root"
 available_kb=$(df -Pk "$output_root" | awk 'NR == 2 {print $4}')
-[[ "$available_kb" =~ ^[0-9]+$ && "$available_kb" -ge 5242880 ]] || {
-	echo "refusing long-run launch with less than 5 GiB free on evidence filesystem" >&2
+# The retained full JSON dev-607 reference measured 35,341,880,370 bytes for
+# its complete tree (30,073,924,660 bytes of raw JSONL). R2 adds a larger
+# derivative population, so a 5 GiB floor would permit a run that exhausts the
+# filesystem after launch. Reserve 1.5x the measured complete tree plus 2 GiB
+# for the unmeasured R2 expansion and fixed sidecars.
+historical_full_tree_bytes=35341880370
+required_free_bytes=$((historical_full_tree_bytes * 3 / 2 + 2 * 1024 * 1024 * 1024))
+required_free_kb=$(( (required_free_bytes + 1023) / 1024 ))
+[[ "$available_kb" =~ ^[0-9]+$ && "$available_kb" -ge "$required_free_kb" ]] || {
+	echo "refusing long-run launch with insufficient measured evidence capacity: need at least $((required_free_kb / 1024 / 1024)) GiB free, have $((available_kb / 1024 / 1024)) GiB" >&2
 	exit 1
 }
 binary_revision=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
