@@ -62,8 +62,8 @@ func roundTrip(t *testing.T, events []BalanceChange, compressor evstream.BlockCo
 			t.Fatalf("append: %v", err)
 		}
 	}
-	if err := writer.Flush(); err != nil {
-		t.Fatalf("flush: %v", err)
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close: %v", err)
 	}
 	size := buf.Len()
 
@@ -305,8 +305,8 @@ func TestBookDeltaRoundTrip(t *testing.T) {
 			t.Fatalf("append: %v", err)
 		}
 	}
-	if err := writer.Flush(); err != nil {
-		t.Fatalf("flush: %v", err)
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close: %v", err)
 	}
 
 	reader, err := evstream.NewReader(bytes.NewReader(buf.Bytes()), evstream.ReaderOptions{VerifyHash: true})

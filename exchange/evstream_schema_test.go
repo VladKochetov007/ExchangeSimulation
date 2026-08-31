@@ -30,8 +30,8 @@ func roundTripFrame(t *testing.T, payload evstream.InterningAppender) (evstream.
 	if err := writer.AppendInterning(1, 2, 0, payload); err != nil {
 		t.Fatalf("append: %v", err)
 	}
-	if err := writer.Flush(); err != nil {
-		t.Fatalf("flush: %v", err)
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close: %v", err)
 	}
 	reader, err := evstream.NewReader(bytes.NewReader(buf.Bytes()), evstream.ReaderOptions{VerifyHash: true})
 	if err != nil {

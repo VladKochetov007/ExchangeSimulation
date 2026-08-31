@@ -70,6 +70,14 @@ const (
 	// BlockMagic marks a block boundary, so a truncated stream is detectable
 	// and a corrupted length cannot be silently mistaken for a valid block.
 	BlockMagic uint32 = 0x42535645 // "EVSB" little-endian
+	// TrailerMagic marks the end of a complete stream. Without a terminator a
+	// stream truncated at a block boundary — a killed run, a full disk, a
+	// half-copied file — reads back as a shorter stream that is entirely
+	// valid, because every block it does contain is intact. Corruption was
+	// detectable; a missing tail was not.
+	TrailerMagic uint32 = 0x54535645 // "EVST" little-endian
+	// TrailerSize is magic, frame count and the final execution digest.
+	TrailerSize = 4 + 8 + 32
 
 	// FrameHeaderSize is the fixed prefix of every frame.
 	FrameHeaderSize = 32

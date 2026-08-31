@@ -164,7 +164,7 @@ func encode(events []exsim.BookDelta) ([]byte, *evstream.Index, *evstream.Dictio
 			log.Fatalf("evsbench: append: %v", err)
 		}
 	}
-	if err := writer.Flush(); err != nil {
+	if err := writer.Close(); err != nil {
 		log.Fatalf("evsbench: flush: %v", err)
 	}
 	return buffer.bytes, writer.Index(), writer.Dictionary(), time.Since(started)

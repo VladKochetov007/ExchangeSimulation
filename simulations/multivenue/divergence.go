@@ -384,7 +384,7 @@ func (s *checkpointSink) close() error {
 	}
 	s.closed = true
 	if s.binary != nil && s.binaryFile == nil {
-		if err := s.binary.flush(); err != nil {
+		if err := s.binary.finish(); err != nil {
 			s.failLocked(fmt.Errorf("flush binary evidence: %w", err))
 		}
 	}
@@ -392,7 +392,7 @@ func (s *checkpointSink) close() error {
 		// Flush the open block, then the buffered writer, then the file: each
 		// layer holds bytes the next has not seen, and skipping one truncates
 		// the stream at a block boundary that looks structurally valid.
-		if err := s.binary.flush(); err != nil {
+		if err := s.binary.finish(); err != nil {
 			s.failLocked(fmt.Errorf("flush binary evidence: %w", err))
 		}
 		if err := s.binaryBuf.Flush(); err != nil {

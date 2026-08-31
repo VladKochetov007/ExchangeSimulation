@@ -106,7 +106,7 @@ func BenchmarkEncodeBinary(b *testing.B) {
 				b.Fatal(err)
 			}
 		}
-		if err := writer.Flush(); err != nil {
+		if err := writer.Close(); err != nil {
 			b.Fatal(err)
 		}
 		bytesOut += counter.n
@@ -132,7 +132,7 @@ func benchmarkEncodeCompressed(b *testing.B, compressor evstream.BlockCompressor
 				b.Fatal(err)
 			}
 		}
-		if err := writer.Flush(); err != nil {
+		if err := writer.Close(); err != nil {
 			b.Fatal(err)
 		}
 		bytesOut += counter.n
@@ -193,7 +193,7 @@ func BenchmarkDecodeBinary(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
-	if err := writer.Flush(); err != nil {
+	if err := writer.Close(); err != nil {
 		b.Fatal(err)
 	}
 	stream := buf.Bytes()
@@ -279,7 +279,7 @@ func TestReportSizes(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := writer.Flush(); err != nil {
+		if err := writer.Close(); err != nil {
 			t.Fatal(err)
 		}
 		t.Logf("%-12s %12d %10.1f %12s", size.name, counter.n, float64(counter.n)/benchEvents,
@@ -372,7 +372,7 @@ func BenchmarkEncodeBookDeltaBinary(b *testing.B) {
 				b.Fatal(err)
 			}
 		}
-		if err := writer.Flush(); err != nil {
+		if err := writer.Close(); err != nil {
 			b.Fatal(err)
 		}
 		bytesOut += counter.n

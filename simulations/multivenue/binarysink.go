@@ -173,6 +173,18 @@ func (b *binaryEvidence) executionHash() [sha256.Size]byte {
 	return b.writer.ExecutionHash()
 }
 
+// finish closes the open block and writes the stream trailer, marking the
+// evidence complete. A stream without a trailer is one whose run did not
+// finish, and a reader is meant to be able to tell.
+func (b *binaryEvidence) finish() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.err != nil {
+		return b.err
+	}
+	return b.writer.Close()
+}
+
 // flush closes the open block so the bytes written so far are readable.
 func (b *binaryEvidence) flush() error {
 	b.mu.Lock()

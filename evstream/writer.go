@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash"
 	"hash/crc32"
@@ -61,7 +62,10 @@ const DefaultBlockBytes = 1 << 20
 // access is the caller's job precisely because the caller is the one that knows
 // what the order should be.
 type Writer struct {
-	out        io.Writer
+	out io.Writer
+	// closed guards against appending after the trailer, which would produce a
+	// stream that reads as complete and then has bytes after its own end.
+	closed     bool
 	compressor BlockCompressor
 	blockBytes int
 
@@ -180,6 +184,9 @@ func (w *Writer) AppendInterning(simTS int64, clientID uint64, venueRef uint32,
 // appendFrame writes a frame whose payload is either supplied directly (the
 // dictionary case) or produced by an appender.
 func (w *Writer) appendFrame(header FrameHeader, raw []byte, appender ...PayloadAppender) error {
+	if w.closed {
+		return errors.New("evstream: append after Close")
+	}
 	if w.err != nil {
 		return w.err
 	}
@@ -316,6 +323,31 @@ func (w *Writer) Flush() error {
 // a checkpoint costs one clone and the running digest continues undisturbed.
 // It covers uncompressed canonical bytes, so it is identical whatever codec the
 // stream was stored with and whatever block size was configured.
+// Close flushes the open block and writes the stream trailer, which is what
+// marks the stream complete. A stream without a trailer is a stream whose
+// writer did not finish, and a reader is entitled to say so.
+//
+// It does not close the underlying writer: the caller owns that, and often
+// wants to write an index beside it first.
+func (w *Writer) Close() error {
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	if err := w.ensureHeader(); err != nil {
+		return err
+	}
+	digest := w.ExecutionHash()
+	trailer := make([]byte, 0, TrailerSize)
+	trailer = AppendUint32(trailer, TrailerMagic)
+	trailer = AppendUint64(trailer, w.seq)
+	trailer = append(trailer, digest[:]...)
+	if _, err := w.out.Write(trailer); err != nil {
+		return err
+	}
+	w.closed = true
+	return nil
+}
+
 func (w *Writer) ExecutionHash() [sha256.Size]byte {
 	var out [sha256.Size]byte
 	snapshot, err := w.hasher.(encoding.BinaryMarshaler).MarshalBinary()

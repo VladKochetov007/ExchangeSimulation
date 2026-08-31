@@ -2026,6 +2026,19 @@ type BuildInfo struct {
 	// Modified reports that the working tree had uncommitted changes when the
 	// binary was built, so the revision alone does not identify the source.
 	Modified bool `json:"modified"`
+	// Toolchain identifies how the source was compiled, not just which source
+	// it was. This matters because it is measurable: building the same
+	// revision with GOAMD64=v3 instead of the default produces a different
+	// execution stream hash. The compiler may fuse a multiply and an add into
+	// one FMA instruction with a single rounding, and a float that rounds
+	// differently by one ulp propagates into the digest. Without these fields
+	// a failed reproduction cannot be told apart from a semantic change.
+	GoVersion string `json:"go_version"`
+	GOARCH    string `json:"goarch"`
+	GOOS      string `json:"goos"`
+	// GOAMD64 is the amd64 microarchitecture level; empty means the toolchain
+	// default, which is v1.
+	GOAMD64 string `json:"goamd64,omitempty"`
 }
 
 // currentBuild reads the version-control stamp Go embeds at build time.
@@ -2034,7 +2047,7 @@ func currentBuild() BuildInfo {
 	if !ok {
 		return BuildInfo{Revision: "unknown"}
 	}
-	build := BuildInfo{Revision: "unknown"}
+	build := BuildInfo{Revision: "unknown", GoVersion: info.GoVersion}
 	for _, setting := range info.Settings {
 		switch setting.Key {
 		case "vcs.revision":
@@ -2043,6 +2056,12 @@ func currentBuild() BuildInfo {
 			build.Time = setting.Value
 		case "vcs.modified":
 			build.Modified = setting.Value == "true"
+		case "GOARCH":
+			build.GOARCH = setting.Value
+		case "GOOS":
+			build.GOOS = setting.Value
+		case "GOAMD64":
+			build.GOAMD64 = setting.Value
 		}
 	}
 	return build

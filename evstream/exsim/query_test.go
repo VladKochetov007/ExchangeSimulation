@@ -122,8 +122,8 @@ func buildQueryCorpus(tb testing.TB) *queryCorpus {
 		}
 		lines = append(lines, jsonline)
 	}
-	if err := writer.Flush(); err != nil {
-		tb.Fatalf("flush: %v", err)
+	if err := writer.Close(); err != nil {
+		tb.Fatalf("close: %v", err)
 	}
 
 	return &queryCorpus{
