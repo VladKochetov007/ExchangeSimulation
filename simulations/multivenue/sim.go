@@ -157,6 +157,11 @@ type Config struct {
 	// liability participant's local decisions and fill attestations. These rows
 	// are evidence-only and never feed the actor, scheduler, or execution hash.
 	RecordOptionLiabilityUserDecisions bool `json:"record_option_liability_user_decisions"`
+	// RecordElasticLiquiditySupplierDecisions retains the successor CDF
+	// supplier's local observations, quote lifecycle, and inventory decisions.
+	// These rows are evidence-only and never feed the actor, scheduler, or
+	// execution hash.
+	RecordElasticLiquiditySupplierDecisions bool `json:"record_elastic_liquidity_supplier_decisions,omitempty"`
 	// CheckpointIntervalSeconds writes a rolling digest of the event stream at
 	// each simulated-time boundary, so two runs of one seed can be compared
 	// without retaining their logs. Zero disables it.
@@ -583,6 +588,9 @@ type Config struct {
 	// on ABC/USD, which is where they were when the second spot book turned
 	// out to have nobody who cared about its level.
 	ElasticSupplierSymbols []string `json:"elastic_supplier_symbols"`
+	// ElasticLiquiditySuppliers is a separately funded successor roster. Empty
+	// preserves every historical R2 participant and behavior exactly.
+	ElasticLiquiditySuppliers []ElasticLiquiditySupplierSpec `json:"elastic_liquidity_suppliers,omitempty"`
 
 	// FixedDistanceMakerSymbols and ImbalanceMakerSymbols place those maker
 	// classes on books other than ABC/USD, assigning participants entries in
@@ -730,6 +738,36 @@ func (c *Config) normalize() error {
 	}
 	if c.RecordOptionLiabilityUserDecisions && c.LogMode != "full" {
 		return errors.New("multivenue: option-liability decisions require full persisted evidence")
+	}
+	if c.RecordElasticLiquiditySupplierDecisions && c.LogMode != "full" {
+		return errors.New("multivenue: elastic-liquidity-supplier decisions require full persisted evidence")
+	}
+	if len(c.ElasticLiquiditySuppliers) != 0 {
+		if !c.CrossAssetSpotGraph {
+			return errors.New("multivenue: elastic liquidity suppliers require the cross-asset spot graph")
+		}
+		seenRoles := make(map[string]struct{}, len(c.ElasticLiquiditySuppliers))
+		for _, supplier := range c.ElasticLiquiditySuppliers {
+			if err := supplier.validate(); err != nil {
+				return fmt.Errorf("multivenue: elastic liquidity supplier: %w", err)
+			}
+			if _, exists := seenRoles[supplier.Role]; exists {
+				return fmt.Errorf("multivenue: duplicate elastic liquidity supplier role %q", supplier.Role)
+			}
+			seenRoles[supplier.Role] = struct{}{}
+		}
+		profile, configured := c.latencyProfileFor("cdf_elastic_supplier")
+		if !configured || profile.zero() {
+			return errors.New("multivenue: elastic liquidity suppliers require an explicit nonzero delayed cdf_elastic_supplier link")
+		}
+		if c.RecordElasticLiquiditySupplierDecisions || c.RecordMarketDataReceipts {
+			if !c.RecordElasticLiquiditySupplierDecisions || !c.RecordMarketDataReceipts || !slices.Contains(c.MarketDataReceiptRoles, "cdf_elastic_supplier") {
+				return errors.New("multivenue: instrumented elastic liquidity suppliers require decisions and cdf_elastic_supplier market-data receipts")
+			}
+		}
+	}
+	if c.RecordElasticLiquiditySupplierDecisions && len(c.ElasticLiquiditySuppliers) == 0 {
+		return errors.New("multivenue: elastic-liquidity-supplier evidence requires a non-empty roster")
 	}
 	if c.RecordLiabilityHedgerDecisions && c.LogMode != "full" {
 		return errors.New("multivenue: liability-hedger decisions require full persisted evidence")
@@ -1425,36 +1463,37 @@ type Venue struct {
 	OptionDealerClientID uint64
 	// Singular fields retain the baseline participant for callers written
 	// before configurable rosters. All actors live in the corresponding slice.
-	makerStateLog            venueLogger
-	NoiseTrader              *feesim.RandomTaker
-	NoiseTraders             []*feesim.RandomTaker
-	RoundTripTraders         []*RoundTripTrader
-	Suppliers                []*ElasticSupplier
-	LiabilityHedgers         []*LiabilityHedger
-	CarryArbs                []*CarryArbitrageur
-	FundingCarryArbs         []*FundingCarryArbitrageur
-	TermCarryAllocators      []*TermCarryAllocator
-	DatedExecutionMandates   []*DatedExecutionMandate
-	DatedTermCarryAllocators []*DatedTermCarryAllocator
-	PerpExposureHedgers      []*PerpExposureHedger
-	LatentLiquidity          []*LatentLiquidity
-	MetaorderTraders         []*MetaorderTrader
-	lastTwoSided             map[string]twoSidedMark
-	Microstructure           *MicrostructureStats
-	OptionFlow               *derivsim.OptionTaker
-	OptionFlows              []*derivsim.OptionTaker
-	OptionLiabilityUsers     []*derivsim.OptionLiabilityTaker
-	OptionValueTakers        []*derivsim.OptionValueTaker
-	FutureFlows              []*derivsim.OptionTaker
-	VannaVolgaDesks          []*derivsim.VannaVolgaHedger
-	InitialRisk              *VenueRiskSnapshot
-	RiskTimeline             []VenueRiskSnapshot
-	PreExpiryRisk            []VenueRiskSnapshot
-	TerminalRisk             *VenueRiskSnapshot
-	riskErr                  error
-	riskLastNano             int64
-	optionListedNano         map[string]int64
-	nextClient               uint64
+	makerStateLog             venueLogger
+	NoiseTrader               *feesim.RandomTaker
+	NoiseTraders              []*feesim.RandomTaker
+	RoundTripTraders          []*RoundTripTrader
+	Suppliers                 []*ElasticSupplier
+	ElasticLiquiditySuppliers []*ElasticLiquiditySupplier
+	LiabilityHedgers          []*LiabilityHedger
+	CarryArbs                 []*CarryArbitrageur
+	FundingCarryArbs          []*FundingCarryArbitrageur
+	TermCarryAllocators       []*TermCarryAllocator
+	DatedExecutionMandates    []*DatedExecutionMandate
+	DatedTermCarryAllocators  []*DatedTermCarryAllocator
+	PerpExposureHedgers       []*PerpExposureHedger
+	LatentLiquidity           []*LatentLiquidity
+	MetaorderTraders          []*MetaorderTrader
+	lastTwoSided              map[string]twoSidedMark
+	Microstructure            *MicrostructureStats
+	OptionFlow                *derivsim.OptionTaker
+	OptionFlows               []*derivsim.OptionTaker
+	OptionLiabilityUsers      []*derivsim.OptionLiabilityTaker
+	OptionValueTakers         []*derivsim.OptionValueTaker
+	FutureFlows               []*derivsim.OptionTaker
+	VannaVolgaDesks           []*derivsim.VannaVolgaHedger
+	InitialRisk               *VenueRiskSnapshot
+	RiskTimeline              []VenueRiskSnapshot
+	PreExpiryRisk             []VenueRiskSnapshot
+	TerminalRisk              *VenueRiskSnapshot
+	riskErr                   error
+	riskLastNano              int64
+	optionListedNano          map[string]int64
+	nextClient                uint64
 }
 
 // Participant identifies one independently funded account. It is recorded by
@@ -2278,6 +2317,9 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 		for _, supplier := range venue.Suppliers {
 			runner.AddActor(supplier)
 		}
+		for _, supplier := range venue.ElasticLiquiditySuppliers {
+			runner.AddActor(supplier)
+		}
 		for _, hedger := range venue.LiabilityHedgers {
 			runner.AddActor(hedger)
 		}
@@ -2806,6 +2848,12 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 	perpExposureFillObserver := func(fill PerpExposureHedgerFill) {
 		venue.makerStateLog.LogEvidenceOnly(fill.Timestamp, fill.ClientID, "perp_exposure_hedger_fill", fill)
 	}
+	elasticLiquidityDecisionObserver := func(decision ElasticLiquiditySupplierDecision) {
+		venue.makerStateLog.LogEvidenceOnly(decision.DecisionTime, decision.ClientID, "elastic_liquidity_supplier_decision", decision)
+	}
+	elasticLiquidityFillObserver := func(fill ElasticLiquiditySupplierFill) {
+		venue.makerStateLog.LogEvidenceOnly(fill.Timestamp, fill.ClientID, "elastic_liquidity_supplier_fill", fill)
+	}
 	noiseFlowPhaseObserver := func(decision feesim.RandomTakerDecision) {
 		// L1-P2 timing rows are optional evidence only. They attest a complete
 		// evaluated tick, including a zero-order evaluation, but have no route
@@ -3314,6 +3362,33 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		})
 		supplier.SetTickerFactory(timers)
 		venue.Suppliers = append(venue.Suppliers, supplier)
+	}
+	for _, spec := range s.Config.ElasticLiquiditySuppliers {
+		clientID, gateway := venue.connectParticipant(mount, spec.Role, map[string]int64{
+			"CDF": spec.InitialBaseBalance,
+			"USD": spec.InitialQuoteBalance,
+		}, 0, noiseFee)
+		liquidityConfig := ElasticLiquiditySupplierConfig{
+			Role:                 spec.Role,
+			ClientID:             clientID,
+			Symbol:               spec.Symbol,
+			BasePrecision:        spec.BasePrecision,
+			Interval:             spec.Interval,
+			MaxObservationAge:    spec.MaxObservationAge,
+			ReferencePrice:       spec.ReferencePrice,
+			ReferenceHalfLife:    spec.ReferenceHalfLife,
+			BaseHolding:          spec.BaseHolding,
+			ElasticityPerPercent: spec.ElasticityPerPercent,
+			MaxPosition:          spec.MaxPosition,
+			MaxQuoteQty:          spec.MaxQuoteQty,
+		}
+		if s.Config.RecordElasticLiquiditySupplierDecisions {
+			liquidityConfig.DecisionObserver = elasticLiquidityDecisionObserver
+			liquidityConfig.FillObserver = elasticLiquidityFillObserver
+		}
+		supplier := NewElasticLiquiditySupplier(nextActor(), gateway, liquidityConfig)
+		supplier.SetTickerFactory(timers)
+		venue.ElasticLiquiditySuppliers = append(venue.ElasticLiquiditySuppliers, supplier)
 	}
 
 	if policy := s.Config.CDFLiabilityHedger; policy != nil {
