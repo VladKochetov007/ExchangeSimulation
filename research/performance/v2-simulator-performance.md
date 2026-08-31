@@ -1739,3 +1739,28 @@ removed, a clear structure appears: allocation and GC, fed mostly by market-data
 fan-out. That is a new structural bottleneck and it is the honest answer to
 whether there is more to do here: **there is, and it is not in serialization,
 not in matching, and not in any language choice.**
+
+### GC tuning is a dead end: collecting less is slower
+
+Before attacking allocation, the cheap probe: if GC mark is 8.33 % of CPU, how
+much of it can be bought back by collecting less? `GOGC` answers that without
+writing any code, and the answer is none.
+
+| | wall | RSS | execution hash |
+| --- | ---: | ---: | --- |
+| `GOGC=100` (default) | **7.47 s** | 644,884 KB | `e1ad48f5f35e0f12` |
+| `GOGC=400` | 7.65 s | 1,643,604 KB | `e1ad48f5f35e0f12` |
+| `GOGC=off` | **8.44 s** | 4,003,652 KB | `e1ad48f5f35e0f12` |
+
+**Turning the collector off costs 13 % wall and 6.2x the RSS.** The mark cost is
+not recoverable by marking less: with a multi-gigabyte heap, allocation touches
+progressively colder memory and the locality loss exceeds everything the
+collector was charging. `GOGC=400` is already the wrong direction.
+
+The conclusion is sharper than "reduce allocations": **the cost is in allocating,
+not in collecting**, so the only lever is not creating the objects. Any future
+proposal to tune the collector on this workload is answered here.
+
+The execution hash is identical at every setting, which is worth recording on its
+own: the collector is not part of trajectory identity, unlike the
+microarchitecture level.
