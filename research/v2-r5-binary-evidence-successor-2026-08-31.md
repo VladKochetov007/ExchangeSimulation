@@ -2,7 +2,7 @@
 
 Date: 2026-08-31  
 Scientific branch: `autoresearch/ffa-ecology-gen0`  
-Code/evidence source revision at checkpoint: `ae739027ee8a6d4882948c415c3b4956ca9b8ef9`  
+Code/evidence source revision at checkpoint: `ae739027ee8a6d4882948c415c3b4956ca9b8ef9`
 Pre-correction review target: `779564d7ecd1b00b486c9f18b12c19a16ce496e2`
 
 ## Scope
