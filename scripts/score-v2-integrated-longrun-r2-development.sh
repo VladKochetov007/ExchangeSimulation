@@ -33,7 +33,7 @@ done
 "$root_dir/scripts/check-v2-integrated-longrun-r2-parity.sh" "$output_root" >/dev/null
 require_file "$parity"
 require_object "$parity"
-jq -e '.contract == "v2-integrated-longrun-r2-parity-v1" and
+jq -e '.schema_version == 2 and .contract == "v2-integrated-longrun-r2-parity-v2" and .evidence_format == "evstream_v3" and
 	(.simulator_binary_sha256 | test("^[0-9a-f]{64}$")) and
 	(.simulator_binary_go_version | startswith("go1.27")) and
 	(.analyzer_sha256 | test("^[0-9a-f]{64}$")) and

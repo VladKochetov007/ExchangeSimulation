@@ -58,6 +58,8 @@ matching_binary_sha256=000000000000000000000000000000000000000000000000000000000
 matching_prunegate_sha256=1111111111111111111111111111111111111111111111111111111111111111
 analyzer="$tmp_root/mvanalyze"
 CGO_ENABLED=0 go build -trimpath -o "$analyzer" ./cmd/mvanalyze
+fixture_binary="$tmp_root/evstream-fixture"
+CGO_ENABLED=0 go build -trimpath -o "$fixture_binary" ./scripts/testdata/evstream-fixture
 
 expect_failure v2_r2_require_current_source_revision "$stale_revision" "$current_revision" "$current_revision"
 expect_failure v2_r2_require_current_source_revision "$current_revision" "$current_revision" "$stale_revision"
@@ -78,8 +80,8 @@ write_metadata() {
 		--argjson gomaxprocs "$gomaxprocs" --arg hypothesis_id "$hypothesis_id" \
 		--arg config_sha256 "$config_sha256" --arg binary_sha256 "$matching_binary_sha256" \
 		--arg source_revision "$current_revision" --arg prunegate_sha256 "$matching_prunegate_sha256" \
-		'{schema_version: 5, runner_contract: "v2-integrated-longrun-r2-runner-v1", cell: $cell,
-		 seed: $seed, holdout: false, log_mode: $log_mode, gomaxprocs: $gomaxprocs,
+		'{schema_version: 6, runner_contract: "v2-integrated-longrun-r2-runner-v2", cell: $cell,
+		 seed: $seed, holdout: false, log_mode: $log_mode, evidence_format: "evstream_v3", gomaxprocs: $gomaxprocs,
 		 hypothesis_id: $hypothesis_id, git_revision: $source_revision,
 		 config_sha256: $config_sha256, binary_sha256: $binary_sha256,
 		 binary_vcs_revision: $source_revision, binary_vcs_modified: false,
@@ -94,7 +96,7 @@ write_common_files() {
 	local cell=$1
 	local experiment_id=$2
 	jq -n --arg revision "$current_revision" --arg experiment_id "$experiment_id" \
-		'{build: {revision: $revision, modified: false}, config: {experiment_id: $experiment_id}}' \
+		'{build: {revision: $revision, modified: false}, config: {experiment_id: $experiment_id, evidence_format: "evstream_v3"}}' \
 		>"$cell/manifest.json"
 	jq -n '{initial_accounts: [], terminal_accounts: []}' >"$cell/greeks.json"
 	jq -n '{latency: []}' >"$cell/latency.json"
@@ -129,12 +131,13 @@ write_full_cell() {
 	local hypothesis_id=$4
 	local experiment_id=$5
 	mkdir -p -- "$cell/venues/north"
-	jq '.evidence_format = "jsonl"' "$config" >"$cell/run-config.json"
+	cp -- "$config" "$cell/run-config.json"
 	write_metadata "$cell" 607 full "$gomaxprocs" "$config" "$hypothesis_id"
 	write_common_files "$cell" "$experiment_id"
-	printf '%s\n' '{"event":"archive-test","sequence":1}' >"$cell/venues/north/events.jsonl"
+	printf '%s\n' '{"client_id":607,"data":{"venue_id":"north","sequence":1,"payload":{"fixture":true}},"event":"archive-test-sidecar","sim_ts":1735689600000000000}' >"$cell/venues/north/general.jsonl"
+	"$fixture_binary" -out "$cell/events.evs" -attestation "$cell/binary-evidence-attestation.json" -sequence 2
 	artifact_result=$("$analyzer" -metric evidenceartifacthash -json "$cell")
-	jq -e '.result | select(type == "object")' <<<"$artifact_result" >"$cell/evidence-artifact-hash.json"
+	jq -e '.result | select(type == "object") | .domain = "persisted_json_log_evidence_only" | .ordering = "unordered_multiset"' <<<"$artifact_result" >"$cell/evidence-only-artifact-hash.json"
 	v2_r2_write_evidence_manifest "$cell" || fail "could not create full evidence manifest: $cell"
 	write_status "$cell"
 }
@@ -143,9 +146,10 @@ write_none_cell() {
 	local cell=$1
 	local config=$2
 	mkdir -p -- "$cell/venues"
-	jq '.evidence_format = "jsonl"' "$config" >"$cell/run-config.json"
+	cp -- "$config" "$cell/run-config.json"
 	write_metadata "$cell" 607 none 4 "$config" "V2-INTEGRATED-LONG-R2-CANDIDATE-PARITY"
 	write_common_files "$cell" "v2-integrated-longrun-r2-dev-607-none"
+	"$fixture_binary" -out "$cell/events.evs" -attestation "$cell/binary-evidence-attestation.json" -sequence 2
 	v2_r2_write_evidence_manifest "$cell" || fail "could not create no-log evidence manifest"
 	write_status "$cell"
 }

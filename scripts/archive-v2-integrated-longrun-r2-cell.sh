@@ -114,7 +114,7 @@ else
 	[[ -s "$parity_attestation" ]] || fail "missing completed parity attestation: $parity_attestation"
 	jq -e --arg source_revision "$(jq -er '.git_revision' "$cell/run-metadata.json")" \
 		'any(.controls[]; .cell == "dev-607-g8" and .log_mode == "full" and .gomaxprocs == 8) and
-		 .contract == "v2-integrated-longrun-r2-parity-v1" and
+		 .contract == "v2-integrated-longrun-r2-parity-v2" and
 		 .source_revision == $source_revision and
 		 .predicates.full_evidence_equal == true and
 		 .predicates.ordered_raw_evidence_equal == true and

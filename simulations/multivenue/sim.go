@@ -2044,9 +2044,6 @@ func (l venueLogger) LogEvent(simTime int64, clientID uint64, eventName string, 
 // execution-stream hash. It is reserved for instrumentation which must not
 // change the simulated trajectory or logging-on/off execution digest.
 func (l venueLogger) LogEvidenceOnly(simTime int64, clientID uint64, eventName string, event any) {
-	if l.inner == nil {
-		return
-	}
 	if l.sequenceMu != nil {
 		l.sequenceMu.Lock()
 		defer l.sequenceMu.Unlock()
@@ -2055,6 +2052,9 @@ func (l venueLogger) LogEvidenceOnly(simTime int64, clientID uint64, eventName s
 	if l.sequence != nil {
 		(*l.sequence)++
 		sequence = *l.sequence
+	}
+	if l.inner == nil {
+		return
 	}
 	if l.sink.replacesRawLog() {
 		l.inner.LogEvent(simTime, clientID, eventName, sequencedVenueLogEvent{VenueID: l.venueID, Sequence: sequence, Payload: event})

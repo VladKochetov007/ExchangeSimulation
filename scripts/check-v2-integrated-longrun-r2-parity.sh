@@ -76,6 +76,11 @@ cmp -s "$root_dir/research/configs/v2-integrated-longrun-r2/dev-607-none.json" \
 	"$output_root/dev-607-none/run-config.json" || fail "seed-607 no-log config differs from registry"
 cmp -s "$root_dir/research/configs/v2-integrated-longrun-r2/dev-607.json" \
 	"$output_root/dev-607-g8/run-config.json" || fail "seed-607 g8 config differs from registry"
+evidence_format=$(v2_r2_evidence_format "$output_root/dev-607") || fail "missing parity evidence format"
+[[ "$evidence_format" == "evstream_v3" ]] || fail "parity requires the registered binary evidence format"
+for cell in dev-607 dev-607-none dev-607-g8; do
+	[[ "$(v2_r2_evidence_format "$output_root/$cell")" == "$evidence_format" ]] || fail "parity evidence format differs: $cell"
+done
 for cell in dev-607 dev-607-none dev-607-g8; do
 	cell_dir="$output_root/$cell"
 	[[ -d "$cell_dir" ]] || fail "missing parity cell: $cell"
@@ -90,9 +95,9 @@ for cell in dev-607 dev-607-none dev-607-g8; do
 	done
 done
 
-jq -e '.schema_version == 5 and .runner_contract == "v2-integrated-longrun-r2-runner-v1" and
+jq -e '.schema_version == 6 and .runner_contract == "v2-integrated-longrun-r2-runner-v2" and
 	.cell == "dev-607" and .seed == 607 and .holdout == false and
-	.log_mode == "full" and .gomaxprocs == 4 and
+	.log_mode == "full" and .evidence_format == "evstream_v3" and .gomaxprocs == 4 and
 	.hypothesis_id == "V2-INTEGRATED-LONG-R2-CANDIDATE" and
 	.binary_vcs_modified == false and .binary_trimpath == true and
 	.binary_cgo_enabled == "0" and
@@ -101,9 +106,9 @@ jq -e '.schema_version == 5 and .runner_contract == "v2-integrated-longrun-r2-ru
 	(.config_sha256 | test("^[0-9a-f]{64}$")) and
 	(.binary_sha256 | test("^[0-9a-f]{64}$"))' \
 	"$output_root/dev-607/run-metadata.json" >/dev/null || fail "invalid seed-607 g4 metadata"
-jq -e '.schema_version == 5 and .runner_contract == "v2-integrated-longrun-r2-runner-v1" and
+jq -e '.schema_version == 6 and .runner_contract == "v2-integrated-longrun-r2-runner-v2" and
 	.cell == "dev-607-none" and .seed == 607 and .holdout == false and
-	.log_mode == "none" and .gomaxprocs == 4 and
+	.log_mode == "none" and .evidence_format == "evstream_v3" and .gomaxprocs == 4 and
 	.hypothesis_id == "V2-INTEGRATED-LONG-R2-CANDIDATE-PARITY" and
 	.binary_vcs_modified == false and .binary_trimpath == true and
 	.binary_cgo_enabled == "0" and
@@ -112,9 +117,9 @@ jq -e '.schema_version == 5 and .runner_contract == "v2-integrated-longrun-r2-ru
 	(.config_sha256 | test("^[0-9a-f]{64}$")) and
 	(.binary_sha256 | test("^[0-9a-f]{64}$"))' \
 	"$output_root/dev-607-none/run-metadata.json" >/dev/null || fail "invalid seed-607 no-log metadata"
-jq -e '.schema_version == 5 and .runner_contract == "v2-integrated-longrun-r2-runner-v1" and
+jq -e '.schema_version == 6 and .runner_contract == "v2-integrated-longrun-r2-runner-v2" and
 	.cell == "dev-607-g8" and .seed == 607 and .holdout == false and
-	.log_mode == "full" and .gomaxprocs == 8 and
+	.log_mode == "full" and .evidence_format == "evstream_v3" and .gomaxprocs == 8 and
 	.hypothesis_id == "V2-INTEGRATED-LONG-R2-CANDIDATE" and
 	.binary_vcs_modified == false and .binary_trimpath == true and
 	.binary_cgo_enabled == "0" and
@@ -158,30 +163,32 @@ for file in checkpoints.jsonl greeks.json latency.json; do
 	cmp -s "$output_root/dev-607/$file" "$output_root/dev-607-g8/$file" || fail "$file differs between g4 and g8"
 done
 cmp -s "$output_root/dev-607/run-config.json" "$output_root/dev-607-g8/run-config.json" || fail "full g4/g8 config differs"
-cmp -s "$output_root/dev-607/evidence-artifact-hash.json" "$output_root/dev-607-g8/evidence-artifact-hash.json" || fail "full g4/g8 persisted evidence hash differs"
+cmp -s "$output_root/dev-607/events.evs" "$output_root/dev-607-none/events.evs" || fail "binary execution stream differs between full and no-log"
+cmp -s "$output_root/dev-607/events.evs" "$output_root/dev-607-g8/events.evs" || fail "binary execution stream differs between g4 and g8"
+cmp -s "$output_root/dev-607/binary-evidence-attestation.json" "$output_root/dev-607-none/binary-evidence-attestation.json" || fail "binary attestation differs between full and no-log"
+cmp -s "$output_root/dev-607/binary-evidence-attestation.json" "$output_root/dev-607-g8/binary-evidence-attestation.json" || fail "binary attestation differs between g4 and g8"
 v2_r2_compare_ordered_raw_manifests "$output_root/dev-607" "$output_root/dev-607-g8" ||
 	fail "full g4/g8 ordered raw evidence manifest differs"
 
-[[ ! -e "$output_root/dev-607-none/evidence-artifact-hash.json" ]] || fail "no-log cell contains runtime evidence hash"
+[[ ! -e "$output_root/dev-607-none/evidence-artifact-hash.json" ]] || fail "no-log cell contains legacy runtime evidence hash"
+[[ ! -e "$output_root/dev-607-none/evidence-only-artifact-hash.json" ]] || fail "no-log cell contains evidence-only attestation"
 [[ -d "$output_root/dev-607-none/venues" ]] || fail "no-log cell is missing simulator venue root"
 if find "$output_root/dev-607-none/venues" -type f -name '*.jsonl' -print -quit | grep -q .; then
 	fail "no-log cell contains venue JSONL evidence"
 fi
 
-full_runtime_events=$(jq -er '.events' "$output_root/dev-607/evidence-artifact-hash.json")
-full_runtime_digest=$(jq -er '.digest' "$output_root/dev-607/evidence-artifact-hash.json")
-g8_runtime_events=$(jq -er '.events' "$output_root/dev-607-g8/evidence-artifact-hash.json")
-g8_runtime_digest=$(jq -er '.digest' "$output_root/dev-607-g8/evidence-artifact-hash.json")
+full_runtime_events=$(jq -er '.event_frames' "$output_root/dev-607/binary-evidence-attestation.json")
+full_runtime_digest=$(jq -er '.execution_stream_hash' "$output_root/dev-607/binary-evidence-attestation.json")
+g8_runtime_events=$(jq -er '.event_frames' "$output_root/dev-607-g8/binary-evidence-attestation.json")
+g8_runtime_digest=$(jq -er '.execution_stream_hash' "$output_root/dev-607-g8/binary-evidence-attestation.json")
 [[ "$full_runtime_events" == "$g8_runtime_events" && "$full_runtime_digest" == "$g8_runtime_digest" ]] || fail "full runtime evidence hashes are not equal"
-full_recomputed=$("$analyzer" -metric evidenceartifacthash -json "$output_root/dev-607") || fail "could not recompute g4 raw evidence digest"
-g8_recomputed=$("$analyzer" -metric evidenceartifacthash -json "$output_root/dev-607-g8") || fail "could not recompute g8 raw evidence digest"
-full_recomputed_events=$(jq -er '.result.events' <<<"$full_recomputed") || fail "malformed g4 recomputed raw evidence digest"
-full_recomputed_digest=$(jq -er '.result.digest' <<<"$full_recomputed") || fail "malformed g4 recomputed raw evidence digest"
-g8_recomputed_events=$(jq -er '.result.events' <<<"$g8_recomputed") || fail "malformed g8 recomputed raw evidence digest"
-g8_recomputed_digest=$(jq -er '.result.digest' <<<"$g8_recomputed") || fail "malformed g8 recomputed raw evidence digest"
-[[ "$full_runtime_events" == "$full_recomputed_events" && "$full_runtime_digest" == "$full_recomputed_digest" ]] || fail "runtime/raw evidence digest mismatch: dev-607"
-[[ "$g8_runtime_events" == "$g8_recomputed_events" && "$g8_runtime_digest" == "$g8_recomputed_digest" ]] || fail "runtime/raw evidence digest mismatch: dev-607-g8"
-[[ "$full_recomputed_events" == "$g8_recomputed_events" && "$full_recomputed_digest" == "$g8_recomputed_digest" ]] || fail "independently recomputed g4/g8 raw evidence hashes are not equal"
+full_sidecar_result=$("$analyzer" -metric evidenceartifacthash -json "$output_root/dev-607") || fail "could not recompute g4 evidence-only digest"
+g8_sidecar_result=$("$analyzer" -metric evidenceartifacthash -json "$output_root/dev-607-g8") || fail "could not recompute g8 evidence-only digest"
+full_sidecar_events=$(jq -er '.result.events' <<<"$full_sidecar_result") || fail "malformed g4 evidence-only digest"
+full_sidecar_digest=$(jq -er '.result.digest' <<<"$full_sidecar_result") || fail "malformed g4 evidence-only digest"
+g8_sidecar_events=$(jq -er '.result.events' <<<"$g8_sidecar_result") || fail "malformed g8 evidence-only digest"
+g8_sidecar_digest=$(jq -er '.result.digest' <<<"$g8_sidecar_result") || fail "malformed g8 evidence-only digest"
+[[ "$full_sidecar_events" == "$g8_sidecar_events" && "$full_sidecar_digest" == "$g8_sidecar_digest" ]] || fail "independently recomputed g4/g8 evidence-only hashes are not equal"
 
 source_revision=$(jq -er '.git_revision' "$output_root/dev-607/run-metadata.json")
 v2_r2_require_current_source_revision "$source_revision" "$head_revision" "$analyzer_revision" ||
@@ -212,7 +219,8 @@ done
 mkdir -p "$output_root"
 tmp=$(mktemp "$attestation.tmp-XXXXXX")
 jq -n \
-	--arg contract "v2-integrated-longrun-r2-parity-v1" \
+	--arg contract "v2-integrated-longrun-r2-parity-v2" \
+	--arg evidence_format "$evidence_format" \
 	--arg source_revision "$source_revision" \
 	--arg simulator_binary_sha256 "$binary_sha256" \
 	--arg simulator_binary_go_version "$binary_go_version" \
@@ -227,15 +235,16 @@ jq -n \
 	--arg full_g8_checkpoints "$(sha256sum "$output_root/dev-607-g8/checkpoints.jsonl" | awk '{print $1}')" \
 	--arg greeks_sha256 "$(sha256sum "$output_root/dev-607/greeks.json" | awk '{print $1}')" \
 	--arg latency_sha256 "$(sha256sum "$output_root/dev-607/latency.json" | awk '{print $1}')" \
-	--arg evidence_hash_sha256 "$(sha256sum "$output_root/dev-607/evidence-artifact-hash.json" | awk '{print $1}')" \
-	--arg full_recomputed_events "$full_recomputed_events" \
-	--arg full_recomputed_digest "$full_recomputed_digest" \
-	--arg g8_recomputed_events "$g8_recomputed_events" \
-	--arg g8_recomputed_digest "$g8_recomputed_digest" \
+	--arg binary_attestation_sha256 "$(sha256sum "$output_root/dev-607/binary-evidence-attestation.json" | awk '{print $1}')" \
+	--arg binary_stream_sha256 "$(sha256sum "$output_root/dev-607/events.evs" | awk '{print $1}')" \
+	--arg full_sidecar_events "$full_sidecar_events" \
+	--arg full_sidecar_digest "$full_sidecar_digest" \
+	--arg g8_sidecar_events "$g8_sidecar_events" \
+	--arg g8_sidecar_digest "$g8_sidecar_digest" \
 	--argjson evidence_events "$full_runtime_events" \
 	--arg evidence_digest "$full_runtime_digest" \
 	'{
-		schema_version: 1, contract: $contract, seed: 607, horizon: "24h",
+		schema_version: 2, contract: $contract, evidence_format: $evidence_format, seed: 607, horizon: "24h",
 		source_revision: $source_revision, simulator_revision: $source_revision,
 		simulator_binary_sha256: $simulator_binary_sha256,
 		simulator_binary_go_version: $simulator_binary_go_version,
@@ -247,20 +256,20 @@ jq -n \
 			{cell: "dev-607-none", log_mode: "none", gomaxprocs: 4},
 			{cell: "dev-607-g8", log_mode: "full", gomaxprocs: 8}
 		],
-		exact_equal_domains: ["checkpoints.jsonl", "greeks.json", "latency.json"],
-		full_evidence_equal_domains: ["evidence-artifact-hash.json", "ordered_raw_jsonl", "recomputed_raw_jsonl"],
-		no_log_absence_contract: ["evidence-artifact-hash.json", "venues/*.jsonl"],
+		exact_equal_domains: ["checkpoints.jsonl", "greeks.json", "latency.json", "events.evs", "binary-evidence-attestation.json"],
+		full_evidence_equal_domains: ["events.evs", "binary-evidence-attestation.json", "ordered_evidence_only_jsonl", "recomputed_evidence_only_jsonl"],
+		no_log_absence_contract: ["evidence-artifact-hash.json", "evidence-only-artifact-hash.json", "venues/*.jsonl"],
 		hashes: {
 			full_g4_checkpoints: $full_g4_checkpoints,
 			none_g4_checkpoints: $none_g4_checkpoints,
 			full_g8_checkpoints: $full_g8_checkpoints,
 			greeks: $greeks_sha256, latency: $latency_sha256,
-			full_evidence_artifact_hash: $evidence_hash_sha256
+			binary_attestation: $binary_attestation_sha256, binary_stream: $binary_stream_sha256
 		},
-		full_runtime_evidence: {events: $evidence_events, digest: $evidence_digest},
-		recomputed_raw_evidence: {
-			g4: {events: ($full_recomputed_events | tonumber), digest: $full_recomputed_digest},
-			g8: {events: ($g8_recomputed_events | tonumber), digest: $g8_recomputed_digest}
+		full_runtime_evidence: {event_frames: ($evidence_events | tonumber), execution_stream_hash: $evidence_digest},
+		recomputed_evidence_only: {
+			g4: {events: ($full_sidecar_events | tonumber), digest: $full_sidecar_digest},
+			g8: {events: ($g8_sidecar_events | tonumber), digest: $g8_sidecar_digest}
 		},
 		predicates: {
 				ordered_checkpoints_equal: true,
@@ -281,7 +290,8 @@ else
 	mv "$tmp" "$attestation"
 fi
 require_object "$attestation"
-jq -e '(.simulator_binary_sha256 | test("^[0-9a-f]{64}$")) and
+jq -e '.schema_version == 2 and .contract == "v2-integrated-longrun-r2-parity-v2" and .evidence_format == "evstream_v3" and
+	(.simulator_binary_sha256 | test("^[0-9a-f]{64}$")) and
 	(.simulator_binary_go_version | startswith("go1.27")) and
 	(.analyzer_sha256 | test("^[0-9a-f]{64}$")) and
 	(.analyzer_go_version | startswith("go1.27")) and
