@@ -803,13 +803,31 @@ checkpointSink.observe                     8.20%  cum
 
 **Two estimates were wrong, and the second error is the instructive one.**
 
-1. The untyped tail was carried as 6.6 % of events. A census puts it at
-   **2.43 %** (38,103 of 1,568,215): `maker_state` 32,400, `balance_snapshot`
-   5,100, `OrderRejected` 404, `borrow` 97, `instrument_listed` 78,
-   `margin_interest` 24. Completing schema coverage recovers about **1.4 %**,
-   not "most of" the residual marshal cost — two thirds of that cost is
-   `MarketDataFingerprint` in the market-data receipt subsystem, which runs
-   identically in both arms and is not the evidence path at all.
+1. The untyped tail. This one went wrong twice and the second time was mine to
+   catch. A grader corrected the carried 6.6 % down to **2.43 %**, and I
+   recorded the correction without checking it. The two opaque counters are
+   **disjoint by construction** — a comment in `evstream_schema.go` that I wrote
+   says a sink-level census *cannot see* wrapper-level fallbacks — so counting
+   only `binary.sink[*]` misses the larger half. Verified by running the census
+   myself:
+
+   | tail | events | share of 1,568,215 |
+   | --- | ---: | ---: |
+   | sink-level, outer payload untyped | 38,103 | 2.43 % |
+   | wrapper-level, inner payload untyped | 64,147 | 4.09 % |
+   | **total** | **102,250** | **6.52 %** |
+
+   **The original 6.6 % was right.** What does not change is the CPU
+   conclusion: completing schema coverage still recovers about **1.4 %**,
+   because two thirds of the residual marshal cost is `MarketDataFingerprint`
+   in the market-data receipt subsystem, which runs identically in both arms
+   and is not the evidence path at all.
+
+   The two tails cost wildly different amounts per event — sink-level
+   **2.62 µs**, wrapper-level **0.31 µs**, a factor of 8.4 — so 4.09 % of events
+   carry 0.02 s while 2.43 % carry 0.10 s. The schema worth writing is
+   **`maker_state` (32,400 events)**, then `balance_snapshot` (5,100). The
+   64,147 wrapper-opaque events are barely worth typing.
 
 2. **The streaming digest was priced with the wrong instrument.** A 1 MB-block
    benchmark measured 1,650 MB/s and the conclusion drawn was that a continuous
