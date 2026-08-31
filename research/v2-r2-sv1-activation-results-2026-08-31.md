@@ -41,11 +41,12 @@ Binary SHA-256:
 729622b9eb57fcf76d7476300ae814a6833245f05e80e637c6173650d609672f
 ```
 
-Treatment and paired-control artifacts were written outside the repository:
+Treatment and paired-control artifacts were written outside the repository
+under the operator-selected activation output root. The retained run layout is:
 
-* treatment: `/tmp/v2-r2-sv1-activation-607-validated.W5fGaN/treatment`
-* control: `/tmp/v2-r2-sv1-activation-607-validated.W5fGaN/control`
-* audit: `/tmp/v2-r2-sv1-activation-607-validated.W5fGaN/cdf-liquidity-audit.json`
+* treatment: `<activation-output-root>/treatment`
+* control: `<activation-output-root>/control`
+* audit: `<activation-output-root>/cdf-liquidity-audit.json`
 
 Both arms ran for exactly five simulated minutes with `GOMAXPROCS=4`,
 `log_mode=full`, `evidence_format=evstream_v3`, and strict population
