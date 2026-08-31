@@ -1669,3 +1669,73 @@ result. The primary result is `-19.95 %` under full logging, which is the
 regime the research cells actually run in. Any earlier statement that implied
 the campaign's speedup applied to registered runs was measuring the wrong
 configuration.
+
+## The bottleneck moved: a profile of the replace-mode build
+
+Every profile in this campaign until now was taken on the JSON evidence path.
+After the format change, the ranking is different, and the difference is the
+point: **the evidence subsystem is no longer the largest cost, and no
+application function is.** dev-607, seed 607, 20 simulated minutes, replace mode:
+
+| | flat | cum |
+| --- | ---: | ---: |
+| `runtime.mallocgcSmallScanNoHeader` | 1.81 % | **10.39 %** |
+| `runtime.scanObject` (GC mark) | 4.83 % | 8.33 % |
+| `internal/sync.(*Mutex).Lock` + `Unlock` | **7.00 %** | — |
+| `sha256.blockSHANI` | 3.86 % | — |
+| `aeshashbody` + `maps.ctrlGroup.matchH2` | 5.08 % | — |
+| `PositionManager.PositionsAcrossSides` | 1.21 % | 5.07 % |
+| `encoding/json.structEncoder` | 0.97 % | 4.95 % |
+
+**Allocation and GC together are now the dominant theme**, and the profile says
+where the objects come from. Attribution by allocation site — sampling is sound
+for *which site*, though not for deltas:
+
+| site | flat | cum |
+| --- | ---: | ---: |
+| `actor.(*BaseActor).decodeMarketData` | 9.08 % | 9.08 % |
+| `exchange.cloneBookForPreviewBounded` | 4.62 % | **11.67 %** |
+| `marketdata.(*MDPublisher).publish` | 4.00 % | **11.28 %** |
+| `simulation.(*DelayedGateway).schedulePhaseMarketData` | 3.88 % | **11.13 %** |
+| `simulation.(*EventScheduler).Schedule` | 6.02 % | 6.02 % |
+| `actor.(*BaseActor).decodeResponse` | 4.50 % | 6.69 % |
+| `multivenue.(*binaryEvidence).record` | 3.35 % | 5.61 % |
+| `math/big.nat.make` | 2.46 % | 2.46 % |
+
+**The dominant allocation theme is market-data fan-out, not evidence.** Publish,
+schedule, decode and the preview clone are the top of the list; the binary sink
+is 5.61 %, below all of them.
+
+### Three targets this opens, and what each is worth
+
+1. **Market-data fan-out.** `publish` → `schedulePhaseMarketData` →
+   `decodeMarketData` is one pipeline, and each stage allocates. Every venue
+   fans a snapshot to every subscribed actor, which decodes it into fresh
+   objects. This is the largest allocation theme in the simulator and it has
+   never been attacked.
+
+2. **Mutex traffic at 7.00 % flat.** Traced to the deterministic-phase
+   machinery — `DrainIngress`, `PlaceOrder`, the `DelayedGateway` pumps — not to
+   the evidence sink. It is worth stating plainly that **the earlier estimate in
+   this campaign was wrong by an order of magnitude**: the sink's two mutex
+   pairs were priced at ~0.7 % and dismissed, and mutex operations are 7 % of
+   CPU. They are not the sink's. Whether they are removable is a real question,
+   because the phase barriers already serialise execution — GOMAXPROCS
+   invariance is evidence that ordering does not depend on this locking.
+
+3. **`math/big` inside an actor tick.** `dated_term_carry.go` allocates
+   `big.Int` per call from `processTick`. **Do not replace it with int64**: it is
+   there for exactness in carry economics, and swapping it would trade a silent
+   correctness risk for 2.46 % of allocations. Reusing the values instead of
+   `new(big.Int)` per call preserves the arithmetic exactly and removes the
+   allocations.
+
+### What this means for the campaign's conclusion
+
+The earlier finding stands — matching is 0.45 % of CPU and a native-language
+rewrite buys nothing. But "the remaining profile is diffuse" was **wrong**. It
+was diffuse on the JSON path, where evidence dominated everything. With evidence
+removed, a clear structure appears: allocation and GC, fed mostly by market-data
+fan-out. That is a new structural bottleneck and it is the honest answer to
+whether there is more to do here: **there is, and it is not in serialization,
+not in matching, and not in any language choice.**
