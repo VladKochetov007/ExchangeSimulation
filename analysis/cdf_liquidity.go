@@ -109,6 +109,7 @@ type CDFLiquiditySupplierAudit struct {
 	ConfiguredMaxPosition            int64   `json:"configured_max_position"`
 	ConfiguredMaxInventory           int64   `json:"configured_max_inventory"`
 	ConfiguredMaxQuoteQty            int64   `json:"configured_max_quote_qty"`
+	ConfiguredMakerFeeBps            int64   `json:"configured_maker_fee_bps"`
 	MaxQuoteQty                      int64   `json:"max_quote_qty"`
 	MaxBorrowed                      int64   `json:"max_borrowed"`
 	BorrowEventCount                 int64   `json:"borrow_event_count"`
@@ -207,6 +208,7 @@ type cdfSupplierConfig struct {
 	MaxInventory        int64  `json:"max_inventory"`
 	MaxQuoteQty         int64  `json:"max_quote_qty"`
 	MaxObservationAge   int64  `json:"max_observation_age"`
+	MakerFeeBps         int64  `json:"maker_fee_bps"`
 }
 
 func loadCDFRunConfig(run *Run) (cdfRunConfig, error) {
@@ -489,6 +491,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.configuredBasePrecision = supplierConfig.BasePrecision
 			state.configuredQuotePrecision = supplierConfig.QuotePrecision
 			state.configuredMaxQuoteQty = supplierConfig.MaxQuoteQty
+			state.ConfiguredMakerFeeBps = supplierConfig.MakerFeeBps
 			state.configuredMaxObservationAge = supplierConfig.MaxObservationAge
 			state.configuredInitialBaseBalance = supplierConfig.InitialBaseBalance
 			state.configuredInitialQuoteBalance = supplierConfig.InitialQuoteBalance

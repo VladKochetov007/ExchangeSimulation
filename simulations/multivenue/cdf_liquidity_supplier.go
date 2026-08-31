@@ -35,6 +35,10 @@ type ElasticLiquiditySupplierSpec struct {
 	MaxPosition          int64         `json:"max_position"`
 	MaxInventory         int64         `json:"max_inventory"`
 	MaxQuoteQty          int64         `json:"max_quote_qty"`
+	// MakerFeeBps is charged in quote units on passive fills. Zero preserves
+	// the historical default; successor rosters may register a positive cost
+	// so fee-bearing inventory risk is exercised by the actual exchange.
+	MakerFeeBps int64 `json:"maker_fee_bps,omitempty"`
 }
 
 func (s ElasticLiquiditySupplierSpec) validate() error {
@@ -52,6 +56,9 @@ func (s ElasticLiquiditySupplierSpec) validate() error {
 	}
 	if s.ReferencePrice <= 0 || s.ElasticityPerPercent <= 0 || s.MaxPosition <= 0 || s.MaxInventory <= 0 || s.MaxQuoteQty <= 0 {
 		return fmt.Errorf("reference, elasticity, position, inventory, and quote limits must be positive")
+	}
+	if s.MakerFeeBps < 0 || s.MakerFeeBps > 10_000 {
+		return fmt.Errorf("maker fee must be between 0 and 10000 bps, got %d", s.MakerFeeBps)
 	}
 	if s.BaseHolding < -s.MaxPosition || s.BaseHolding > s.MaxPosition {
 		return fmt.Errorf("base holding %d exceeds position limit %d", s.BaseHolding, s.MaxPosition)

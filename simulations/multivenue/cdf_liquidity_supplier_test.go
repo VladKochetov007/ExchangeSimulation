@@ -137,7 +137,7 @@ func testElasticLiquiditySupplierSpec() ElasticLiquiditySupplierSpec {
 		Interval: time.Second, MaxObservationAge: time.Minute,
 		ReferencePrice: mvCDFBootstrap, ReferenceHalfLife: 4 * time.Hour,
 		BaseHolding: 0, ElasticityPerPercent: 15 * mvBasePrecision,
-		MaxPosition: 500 * mvBasePrecision, MaxInventory: 1_000 * mvBasePrecision, MaxQuoteQty: mvBasePrecision / 2,
+		MaxPosition: 500 * mvBasePrecision, MaxInventory: 1_000 * mvBasePrecision, MaxQuoteQty: mvBasePrecision / 2, MakerFeeBps: 5,
 	}
 }
 
@@ -159,6 +159,16 @@ func TestElasticLiquiditySupplierSpecAcceptsConfiguredAssetPair(t *testing.T) {
 	spec.QuoteAsset = "EUR"
 	if err := spec.validate(); err != nil {
 		t.Fatalf("generic configured asset pair rejected: %v", err)
+	}
+}
+
+func TestElasticLiquiditySupplierSpecRejectsInvalidMakerFee(t *testing.T) {
+	spec := testElasticLiquiditySupplierSpec()
+	for _, fee := range []int64{-1, 10_001} {
+		spec.MakerFeeBps = fee
+		if err := spec.validate(); err == nil {
+			t.Fatalf("maker fee %d was accepted", fee)
+		}
 	}
 }
 

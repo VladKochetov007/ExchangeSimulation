@@ -3374,10 +3374,15 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 		venue.Suppliers = append(venue.Suppliers, supplier)
 	}
 	for _, spec := range s.Config.ElasticLiquiditySuppliers {
+		// Keep the successor fee policy separate from noiseFee so the eight
+		// historical ABC/USD suppliers remain unchanged.
+		supplierFee := exchange.FeeModel(&exchange.PercentageFee{
+			MakerBps: spec.MakerFeeBps, TakerBps: s.Config.TakerFeeBps, InQuote: true,
+		})
 		clientID, gateway := venue.connectParticipant(mount, spec.Role, map[string]int64{
 			spec.BaseAsset:  spec.InitialBaseBalance,
 			spec.QuoteAsset: spec.InitialQuoteBalance,
-		}, 0, noiseFee)
+		}, 0, supplierFee)
 		liquidityConfig := ElasticLiquiditySupplierConfig{
 			Role:                 spec.Role,
 			ClientID:             clientID,
