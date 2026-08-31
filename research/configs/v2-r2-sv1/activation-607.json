@@ -139,6 +139,7 @@
   "snapshot_interval": 1000000000,
   "status": "preregistered",
   "step": 1000000000,
+  "strict_population_accounting": true,
   "venue_ids": [
     "north",
     "central",
