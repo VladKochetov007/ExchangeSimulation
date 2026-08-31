@@ -185,6 +185,37 @@ func Open(dir string) (*Run, error) {
 // Files returns the indexed event logs, sorted so a scan is deterministic.
 func (r *Run) Files() []string { return append([]string(nil), r.files...) }
 
+// OpenRenderedRun reads greeks.json and account reports from reportDir while
+// using the already-rendered routed evidence files below evidenceDir. It is
+// the adapter for binary runs: callers can verify/render events first and then
+// analyze them without copying or rewriting the immutable report.
+func OpenRenderedRun(reportDir, evidenceDir string) (*Run, error) {
+	run, err := Open(reportDir)
+	if err != nil {
+		return nil, err
+	}
+	venues := filepath.Join(evidenceDir, "venues")
+	run.files = nil
+	if _, err := os.Stat(venues); os.IsNotExist(err) {
+		return run, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("analysis: inspect rendered evidence: %w", err)
+	}
+	if err := filepath.WalkDir(venues, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.IsDir() && strings.HasSuffix(path, ".jsonl") {
+			run.files = append(run.files, path)
+		}
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("analysis: index rendered logs: %w", err)
+	}
+	sort.Strings(run.files)
+	return run, nil
+}
+
 // BookFiles selects the log files belonging to one venue's book.
 //
 // Every metric that reads a single book needs this selection, and an empty

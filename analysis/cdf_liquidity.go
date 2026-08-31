@@ -603,15 +603,15 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier fill has no accepted order"})
 			return
 		}
-		if order.closed || fill.Qty <= 0 || fill.FilledQty != fill.Qty || fill.RemainingQty < 0 || (fill.IsFull != (fill.RemainingQty == 0)) {
+		if order.closed || fill.Qty <= 0 || fill.FilledQty <= 0 || fill.RemainingQty < 0 || (fill.IsFull != (fill.RemainingQty == 0)) {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "invalid supplier order fill lifecycle"})
 			return
 		}
-		filledTotal, ok := exactAdd(order.filledQty, fill.FilledQty)
-		if !ok || filledTotal+fill.RemainingQty != order.acceptedQty {
+		expectedFilledTotal, ok := exactAdd(order.filledQty, fill.Qty)
+		if !ok || expectedFilledTotal != fill.FilledQty || fill.FilledQty+fill.RemainingQty != order.acceptedQty {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier fill quantity does not reconcile to accepted order"})
 		}
-		order.filledQty, order.remainingQty = filledTotal, fill.RemainingQty
+		order.filledQty, order.remainingQty = fill.FilledQty, fill.RemainingQty
 		fillKey := cdfFillKey{VenueID: event.VenueID, ClientID: event.ClientID, OrderID: fill.OrderID, TradeID: fill.TradeID}
 		if _, exists := actual[fillKey]; exists {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "duplicate supplier order fill"})
@@ -764,6 +764,9 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier has no positive inventory limit"})
 		}
 		r.SupplierVolumeQty, _ = exactAdd(r.SupplierVolumeQty, state.FilledQty)
+		if state.MaxObservedTouchShare > r.MaxObservedTouchShare {
+			r.MaxObservedTouchShare = state.MaxObservedTouchShare
+		}
 		r.Suppliers = append(r.Suppliers, *state)
 	}
 	if touchCount > 0 {
