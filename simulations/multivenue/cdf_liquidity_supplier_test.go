@@ -133,11 +133,11 @@ func testElasticLiquiditySupplierSpec() ElasticLiquiditySupplierSpec {
 	return ElasticLiquiditySupplierSpec{
 		Role: "cdf_elastic_supplier_1", Symbol: "CDF/USD", BaseAsset: "CDF", QuoteAsset: "USD",
 		BasePrecision: mvBasePrecision, QuotePrecision: mvQuotePrecision,
-		InitialBaseBalance: 1_000 * mvBasePrecision, InitialQuoteBalance: 500_000_000 * mvQuotePrecision,
+		InitialBaseBalance: 500 * mvBasePrecision, InitialQuoteBalance: 500_000_000 * mvQuotePrecision,
 		Interval: time.Second, MaxObservationAge: time.Minute,
 		ReferencePrice: mvCDFBootstrap, ReferenceHalfLife: 4 * time.Hour,
 		BaseHolding: 0, ElasticityPerPercent: 15 * mvBasePrecision,
-		MaxPosition: 1_000 * mvBasePrecision, MaxQuoteQty: mvBasePrecision / 2,
+		MaxPosition: 500 * mvBasePrecision, MaxInventory: 1_000 * mvBasePrecision, MaxQuoteQty: mvBasePrecision / 2,
 	}
 }
 

@@ -33,6 +33,7 @@ type ElasticLiquiditySupplierSpec struct {
 	BaseHolding          int64         `json:"base_holding"`
 	ElasticityPerPercent int64         `json:"elasticity_per_percent"`
 	MaxPosition          int64         `json:"max_position"`
+	MaxInventory         int64         `json:"max_inventory"`
 	MaxQuoteQty          int64         `json:"max_quote_qty"`
 }
 
@@ -49,14 +50,21 @@ func (s ElasticLiquiditySupplierSpec) validate() error {
 	if s.Interval <= 0 || s.MaxObservationAge <= 0 || s.ReferenceHalfLife <= 0 {
 		return fmt.Errorf("interval, observation age, and reference half-life must be positive")
 	}
-	if s.ReferencePrice <= 0 || s.ElasticityPerPercent <= 0 || s.MaxPosition <= 0 || s.MaxQuoteQty <= 0 {
-		return fmt.Errorf("reference, elasticity, position, and quote limits must be positive")
+	if s.ReferencePrice <= 0 || s.ElasticityPerPercent <= 0 || s.MaxPosition <= 0 || s.MaxInventory <= 0 || s.MaxQuoteQty <= 0 {
+		return fmt.Errorf("reference, elasticity, position, inventory, and quote limits must be positive")
 	}
 	if s.BaseHolding < -s.MaxPosition || s.BaseHolding > s.MaxPosition {
 		return fmt.Errorf("base holding %d exceeds position limit %d", s.BaseHolding, s.MaxPosition)
 	}
 	if s.InitialBaseBalance < s.MaxPosition {
-		return fmt.Errorf("initial base balance %d is below position limit %d", s.InitialBaseBalance, s.MaxPosition)
+		return fmt.Errorf("initial base balance %d is below position displacement limit %d", s.InitialBaseBalance, s.MaxPosition)
+	}
+	if s.InitialBaseBalance > s.MaxInventory {
+		return fmt.Errorf("initial base balance %d exceeds gross inventory limit %d", s.InitialBaseBalance, s.MaxInventory)
+	}
+	maximumBaseBalance := new(big.Int).Add(big.NewInt(s.InitialBaseBalance), big.NewInt(s.MaxPosition))
+	if maximumBaseBalance.Cmp(big.NewInt(s.MaxInventory)) > 0 {
+		return fmt.Errorf("initial base balance %d plus position limit %d exceeds gross inventory limit %d", s.InitialBaseBalance, s.MaxPosition, s.MaxInventory)
 	}
 	maximumNotionalBig := new(big.Int).Mul(big.NewInt(s.MaxPosition), big.NewInt(s.ReferencePrice))
 	maximumNotionalBig.Quo(maximumNotionalBig, big.NewInt(s.BasePrecision))
@@ -80,6 +88,7 @@ type ElasticLiquiditySupplierConfig struct {
 	BaseAsset            string
 	QuoteAsset           string
 	BasePrecision        int64
+	InitialBaseBalance   int64
 	Interval             time.Duration
 	MaxObservationAge    time.Duration
 	ReferencePrice       int64
@@ -87,6 +96,7 @@ type ElasticLiquiditySupplierConfig struct {
 	BaseHolding          int64
 	ElasticityPerPercent int64
 	MaxPosition          int64
+	MaxInventory         int64
 	MaxQuoteQty          int64
 	DecisionObserver     func(ElasticLiquiditySupplierDecision)
 	FillObserver         func(ElasticLiquiditySupplierFill)
@@ -109,6 +119,7 @@ type ElasticLiquiditySupplierDecision struct {
 	ObservationOrdinal     uint64 `json:"observation_ordinal"`
 	ObservationDeliveredAt int64  `json:"observation_delivered_at"`
 	ObservationFingerprint string `json:"observation_fingerprint"`
+	ObservationDigest      string `json:"observation_digest"`
 	BestBid                int64  `json:"best_bid"`
 	BestBidQty             int64  `json:"best_bid_qty"`
 	BestAsk                int64  `json:"best_ask"`
@@ -118,6 +129,9 @@ type ElasticLiquiditySupplierDecision struct {
 	Position               int64  `json:"position"`
 	TargetPosition         int64  `json:"target_position"`
 	InventoryLimit         int64  `json:"inventory_limit"`
+	InitialBaseBalance     int64  `json:"initial_base_balance"`
+	GrossInventory         int64  `json:"gross_inventory"`
+	GrossInventoryLimit    int64  `json:"gross_inventory_limit"`
 	Action                 string `json:"action"`
 	Reason                 string `json:"reason"`
 	Side                   string `json:"side,omitempty"`
@@ -201,8 +215,12 @@ func (s *ElasticLiquiditySupplier) TargetPosition(price int64) int64 {
 	if !finite(target) {
 		return s.cfg.BaseHolding
 	}
-	limit := float64(s.cfg.MaxPosition)
-	return int64(math.Max(-limit, math.Min(limit, target)))
+	minimumPosition, maximumPosition := -s.cfg.MaxPosition, s.cfg.MaxPosition
+	if s.cfg.MaxInventory > 0 {
+		minimumPosition = maxInt64(minimumPosition, -s.cfg.InitialBaseBalance)
+		maximumPosition = minInt64(maximumPosition, s.cfg.MaxInventory-s.cfg.InitialBaseBalance)
+	}
+	return int64(math.Max(float64(minimumPosition), math.Min(float64(maximumPosition), target)))
 }
 
 func (s *ElasticLiquiditySupplier) HandleEvent(_ context.Context, event *actor.Event) {
@@ -403,6 +421,11 @@ func (s *ElasticLiquiditySupplier) baseDecision(now int64) ElasticLiquiditySuppl
 	if frontier.Fingerprint != ([16]byte{}) {
 		fingerprint = hex.EncodeToString(frontier.Fingerprint[:])
 	}
+	digest := ""
+	if frontier.Digest != ([16]byte{}) {
+		digest = hex.EncodeToString(frontier.Digest[:])
+	}
+	grossInventory := s.cfg.InitialBaseBalance + s.position
 	return ElasticLiquiditySupplierDecision{
 		Role: s.cfg.Role, ClientID: s.cfg.ClientID, Symbol: s.cfg.Symbol,
 		DecisionTime: now, ObservationTime: s.observationTime, ObservationAge: age,
@@ -410,9 +433,12 @@ func (s *ElasticLiquiditySupplier) baseDecision(now int64) ElasticLiquiditySuppl
 		ObservationSequence: s.observationSequence, ObservationLinkID: frontier.LinkID,
 		ObservationOrdinal: frontier.Ordinal, ObservationDeliveredAt: frontier.DeliveredAt,
 		ObservationFingerprint: fingerprint,
+		ObservationDigest:      digest,
 		ReferencePrice:         s.reference,
 		Position:               s.position, InventoryLimit: s.cfg.MaxPosition,
-		QuoteOrderID: s.quote.orderID, QuoteRequestID: s.quote.requestID,
+		InitialBaseBalance: s.cfg.InitialBaseBalance, GrossInventory: grossInventory,
+		GrossInventoryLimit: s.cfg.MaxInventory,
+		QuoteOrderID:        s.quote.orderID, QuoteRequestID: s.quote.requestID,
 		QuotePrice: s.quote.price, QuoteQty: s.quote.qty, QuoteSubmittedAt: s.quote.submittedAt,
 	}
 }

@@ -3385,6 +3385,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			BaseAsset:            spec.BaseAsset,
 			QuoteAsset:           spec.QuoteAsset,
 			BasePrecision:        spec.BasePrecision,
+			InitialBaseBalance:   spec.InitialBaseBalance,
 			Interval:             spec.Interval,
 			MaxObservationAge:    spec.MaxObservationAge,
 			ReferencePrice:       spec.ReferencePrice,
@@ -3392,6 +3393,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			BaseHolding:          spec.BaseHolding,
 			ElasticityPerPercent: spec.ElasticityPerPercent,
 			MaxPosition:          spec.MaxPosition,
+			MaxInventory:         spec.MaxInventory,
 			MaxQuoteQty:          spec.MaxQuoteQty,
 		}
 		liquidityConfig.ObservationFrontier = func() simulation.MarketDataFrontier {

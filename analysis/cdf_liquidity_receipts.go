@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 const (
@@ -53,6 +54,7 @@ type cdfMarketDataRecord struct {
 	DeliveredAt  int64
 	LinkOrdinal  uint64
 	EventOrdinal uint64
+	Digest       [16]byte
 }
 
 type cdfMarketDataDecisionRecord struct {
@@ -63,6 +65,7 @@ type cdfMarketDataDecisionRecord struct {
 	DecisionAt        int64
 	FrontierOrdinal   uint64
 	FrontierDelivered int64
+	FrontierDigest    [16]byte
 	Price             int64
 	Qty               int64
 }
@@ -163,6 +166,9 @@ func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 		evidence.receipts[key] = record
 		evidence.receiptsByClient[record.ClientID]++
 	}
+	if err := reconstructCDFReceiptDigests(evidence); err != nil {
+		return nil, fmt.Errorf("reconstruct market-data receipt frontiers: %w", err)
+	}
 	for offset := 0; offset < len(decisions); offset += cdfMarketDataDecisionBytes {
 		record := decodeCDFMarketDataDecision(decisions[offset : offset+cdfMarketDataDecisionBytes])
 		if record.ClientID == 0 || record.LinkID == 0 || record.SymbolID == 0 || record.RequestID == 0 || record.DecisionAt <= 0 || record.FrontierOrdinal == 0 || record.FrontierDelivered <= 0 || record.Price <= 0 || record.Qty <= 0 {
@@ -179,7 +185,7 @@ func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 			return nil, fmt.Errorf("duplicate decision request")
 		}
 		receipt, exists := evidence.receipts[cdfReceiptLinkOrdinal{LinkID: record.LinkID, LinkOrdinal: record.FrontierOrdinal}]
-		if !exists || receipt.DeliveredAt != record.FrontierDelivered || receipt.DeliveredAt > record.DecisionAt {
+		if !exists || receipt.DeliveredAt != record.FrontierDelivered || receipt.DeliveredAt > record.DecisionAt || record.FrontierDigest == ([16]byte{}) || receipt.Digest != record.FrontierDigest {
 			return nil, fmt.Errorf("decision frontier does not resolve to a delivered receipt")
 		}
 		evidence.decisions[key] = record
@@ -229,7 +235,7 @@ func decodeCDFMarketDataRecord(raw []byte, withDelivery bool) cdfMarketDataRecor
 }
 
 func decodeCDFMarketDataDecision(raw []byte) cdfMarketDataDecisionRecord {
-	return cdfMarketDataDecisionRecord{
+	record := cdfMarketDataDecisionRecord{
 		ClientID:          binary.BigEndian.Uint64(raw[0:8]),
 		LinkID:            binary.BigEndian.Uint32(raw[8:12]),
 		SymbolID:          binary.BigEndian.Uint32(raw[12:16]),
@@ -240,6 +246,59 @@ func decodeCDFMarketDataDecision(raw []byte) cdfMarketDataDecisionRecord {
 		Price:             int64(binary.BigEndian.Uint64(raw[72:80])),
 		Qty:               int64(binary.BigEndian.Uint64(raw[80:88])),
 	}
+	copy(record.FrontierDigest[:], raw[56:72])
+	return record
+}
+
+func reconstructCDFReceiptDigests(evidence *cdfMarketDataEvidence) error {
+	receiptsByLink := make(map[uint32][]cdfMarketDataRecord)
+	for _, receipt := range evidence.receipts {
+		receiptsByLink[receipt.LinkID] = append(receiptsByLink[receipt.LinkID], receipt)
+	}
+	for linkID, receipts := range receiptsByLink {
+		sort.Slice(receipts, func(i, j int) bool { return receipts[i].LinkOrdinal < receipts[j].LinkOrdinal })
+		var previous [16]byte
+		for index := range receipts {
+			receipt := receipts[index]
+			if receipt.LinkOrdinal != uint64(index+1) {
+				return fmt.Errorf("link %d receipt ordinal has a gap at %d", linkID, receipt.LinkOrdinal)
+			}
+			raw := encodeCDFMarketDataRecord(receipt)
+			chain := sha256.New()
+			_, _ = chain.Write(previous[:])
+			_, _ = chain.Write(raw[:])
+			copy(receipt.Digest[:], chain.Sum(nil))
+			evidence.receipts[cdfReceiptLinkOrdinal{LinkID: linkID, LinkOrdinal: receipt.LinkOrdinal}] = receipt
+			previous = receipt.Digest
+		}
+	}
+	return nil
+}
+
+func encodeCDFMarketDataRecord(record cdfMarketDataRecord) [cdfMarketDataRecordBytes]byte {
+	var raw [cdfMarketDataRecordBytes]byte
+	binary.BigEndian.PutUint64(raw[0:8], record.ClientID)
+	binary.BigEndian.PutUint32(raw[8:12], record.LinkID)
+	binary.BigEndian.PutUint32(raw[12:16], record.SymbolID)
+	raw[16] = record.Type
+	binary.BigEndian.PutUint64(raw[20:28], record.Sequence)
+	copy(raw[28:44], record.Fingerprint[:])
+	binary.BigEndian.PutUint64(raw[44:52], uint64(record.PublishedAt))
+	binary.BigEndian.PutUint64(raw[52:60], uint64(record.ScheduledAt))
+	binary.BigEndian.PutUint64(raw[60:68], uint64(record.DeliveredAt))
+	binary.BigEndian.PutUint64(raw[68:76], record.LinkOrdinal)
+	binary.BigEndian.PutUint64(raw[76:84], record.EventOrdinal)
+	return raw
+}
+
+func decodeFrontierDigest(value string) ([16]byte, error) {
+	var digest [16]byte
+	raw, err := hex.DecodeString(value)
+	if err != nil || len(raw) != len(digest) {
+		return digest, fmt.Errorf("frontier digest must be 16 bytes of hex")
+	}
+	copy(digest[:], raw)
+	return digest, nil
 }
 
 func validateCDFMarketDataRecord(record cdfMarketDataRecord, evidence *cdfMarketDataEvidence) error {

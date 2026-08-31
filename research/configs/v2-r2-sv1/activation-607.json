@@ -21,7 +21,7 @@
       "symbol": "CDF/USD",
       "base_asset": "CDF",
       "quote_asset": "USD",
-      "initial_base_balance": 100000000000,
+      "initial_base_balance": 50000000000,
       "initial_quote_balance": 50000000000000,
       "base_precision": 100000000,
       "quote_precision": 100000,
@@ -31,7 +31,8 @@
       "reference_half_life": 14400000000000,
       "base_holding": 0,
       "elasticity_per_percent": 15000000000,
-      "max_position": 100000000000,
+      "max_position": 50000000000,
+      "max_inventory": 100000000000,
       "max_quote_qty": 50000000
     },
     {
@@ -40,7 +41,7 @@
       "base_asset": "CDF",
       "quote_asset": "USD",
       "base_precision": 100000000,
-      "initial_base_balance": 100000000000,
+      "initial_base_balance": 50000000000,
       "quote_precision": 100000,
       "initial_quote_balance": 50000000000000,
       "interval": 2000000000,
@@ -49,7 +50,8 @@
       "reference_half_life": 14400000000000,
       "base_holding": 0,
       "elasticity_per_percent": 15000000000,
-      "max_position": 100000000000,
+      "max_position": 50000000000,
+      "max_inventory": 100000000000,
       "max_quote_qty": 50000000
     },
     {
@@ -58,7 +60,7 @@
       "base_asset": "CDF",
       "quote_asset": "USD",
       "base_precision": 100000000,
-      "initial_base_balance": 100000000000,
+      "initial_base_balance": 50000000000,
       "quote_precision": 100000,
       "initial_quote_balance": 50000000000000,
       "interval": 2000000000,
@@ -67,7 +69,8 @@
       "reference_half_life": 14400000000000,
       "base_holding": 0,
       "elasticity_per_percent": 15000000000,
-      "max_position": 100000000000,
+      "max_position": 50000000000,
+      "max_inventory": 100000000000,
       "max_quote_qty": 50000000
     },
     {
@@ -76,7 +79,7 @@
       "base_asset": "CDF",
       "quote_asset": "USD",
       "base_precision": 100000000,
-      "initial_base_balance": 100000000000,
+      "initial_base_balance": 50000000000,
       "quote_precision": 100000,
       "initial_quote_balance": 50000000000000,
       "interval": 2000000000,
@@ -85,7 +88,8 @@
       "reference_half_life": 14400000000000,
       "base_holding": 0,
       "elasticity_per_percent": 15000000000,
-      "max_position": 100000000000,
+      "max_position": 50000000000,
+      "max_inventory": 100000000000,
       "max_quote_qty": 50000000
     }
   ],
