@@ -105,6 +105,7 @@ func TestMeasureCalendarRejectsMissingNullAndUnknownInstrumentTypes(t *testing.T
 	}{
 		{name: "missing", payload: `{"symbol":"ABC-FUT-BAD","expiry_nano":3}`},
 		{name: "null", payload: `{"symbol":"ABC-FUT-BAD","instrument_type":null,"expiry_nano":3}`},
+		{name: "empty", payload: `{"symbol":"ABC-FUT-BAD","instrument_type":"","expiry_nano":3}`},
 		{name: "unknown", payload: `{"symbol":"ABC-FUT-BAD","instrument_type":"WARRANT","expiry_nano":3}`},
 	}
 	for _, testCase := range cases {

@@ -47,7 +47,39 @@ v2_r2_acquire_namespace_lock || fail "could not acquire the R2 namespace lock fo
 expect_failure env -u V2_R2_NAMESPACE_LOCK_FD V2_R2_NAMESPACE_LOCK_HELD=true bash -c \
 	"source '$root_dir/scripts/v2-integrated-longrun-r2-contract.sh'; v2_r2_acquire_namespace_lock"
 
-expected_calendar_timeline=$(v2_r2_expected_calendar_listing_timeline)
+expected_calendar_timeline=$(cat <<'EOF'
+[
+  {"expiry_nano":1735696800000000000,"future_first_listed_at_nano":1735689601000000000,"option_first_listed_at_nano":1735689601000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735700400000000000,"future_first_listed_at_nano":1735693200000000000,"option_first_listed_at_nano":1735693200000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735704000000000000,"future_first_listed_at_nano":1735696800000000000,"option_first_listed_at_nano":1735696800000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735707600000000000,"future_first_listed_at_nano":1735700400000000000,"option_first_listed_at_nano":1735700400000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735711200000000000,"future_first_listed_at_nano":1735689601000000000,"option_first_listed_at_nano":1735689601000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735714800000000000,"future_first_listed_at_nano":1735707600000000000,"option_first_listed_at_nano":1735707600000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735718400000000000,"future_first_listed_at_nano":1735711200000000000,"option_first_listed_at_nano":1735711200000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735722000000000000,"future_first_listed_at_nano":1735700400000000000,"option_first_listed_at_nano":1735700400000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735725600000000000,"future_first_listed_at_nano":1735718400000000000,"option_first_listed_at_nano":1735718400000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735729200000000000,"future_first_listed_at_nano":1735722000000000000,"option_first_listed_at_nano":1735722000000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735732800000000000,"future_first_listed_at_nano":1735689601000000000,"option_first_listed_at_nano":1735689601000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735736400000000000,"future_first_listed_at_nano":1735729200000000000,"option_first_listed_at_nano":1735729200000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735740000000000000,"future_first_listed_at_nano":1735732800000000000,"option_first_listed_at_nano":1735732800000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735743600000000000,"future_first_listed_at_nano":1735722000000000000,"option_first_listed_at_nano":1735722000000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735747200000000000,"future_first_listed_at_nano":1735740000000000000,"option_first_listed_at_nano":1735740000000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735750800000000000,"future_first_listed_at_nano":1735743600000000000,"option_first_listed_at_nano":1735743600000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735754400000000000,"future_first_listed_at_nano":1735711200000000000,"option_first_listed_at_nano":1735711200000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735758000000000000,"future_first_listed_at_nano":1735750800000000000,"option_first_listed_at_nano":1735750800000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735761600000000000,"future_first_listed_at_nano":1735754400000000000,"option_first_listed_at_nano":1735754400000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735765200000000000,"future_first_listed_at_nano":1735743600000000000,"option_first_listed_at_nano":1735743600000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735768800000000000,"future_first_listed_at_nano":1735761600000000000,"option_first_listed_at_nano":1735761600000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735772400000000000,"future_first_listed_at_nano":1735765200000000000,"option_first_listed_at_nano":1735765200000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735776000000000000,"future_first_listed_at_nano":1735732800000000000,"option_first_listed_at_nano":1735732800000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735779600000000000,"future_first_listed_at_nano":1735772400000000000,"option_first_listed_at_nano":1735772400000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735783200000000000,"future_first_listed_at_nano":1735776000000000000,"option_first_listed_at_nano":1735776000000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735786800000000000,"future_first_listed_at_nano":1735765200000000000,"option_first_listed_at_nano":1735765200000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735797600000000000,"future_first_listed_at_nano":1735754400000000000,"option_first_listed_at_nano":1735754400000000000,"future_contract_count":1,"option_contract_count":10},
+  {"expiry_nano":1735819200000000000,"future_first_listed_at_nano":1735776000000000000,"option_first_listed_at_nano":1735776000000000000,"future_contract_count":1,"option_contract_count":10}
+]
+EOF
+)
 calendar_fixture="$tmp_root/calendar.json"
 jq -n --argjson timeline "$expected_calendar_timeline" \
 	'($timeline | map(.expiry_nano)) as $expiries |
