@@ -211,23 +211,25 @@ func (w *Writer) appendFrame(header FrameHeader, raw []byte, appender ...Payload
 	length := len(w.frames) - start
 	binary.LittleEndian.PutUint32(w.frames[start:start+4], uint32(length))
 
-	// One continuous digest over the concatenated canonical frames, not a
-	// per-frame chain.
+	// The digest is taken over the concatenated canonical frames, absorbed in
+	// block-sized writes at flush rather than one write per frame.
 	//
 	// The first version reset the hasher, absorbed the previous digest and the
 	// frame, and summed — for every event. Measurement put that at 54 % of
-	// encode cost for a complex event and 68 % for a simple one, making it the
-	// single largest cost in the binary path and larger than the encoding it
-	// was meant to protect.
+	// encode cost for a complex event and 68 % for a simple one.
 	//
-	// Hashing per block would be cheaper still and is wrong: block boundaries
-	// depend on the configured block size, so the digest would depend on a
-	// storage parameter, and this format's central guarantee is that storage
-	// choices cannot change trajectory identity. Streaming every frame into one
-	// long-lived hasher keeps the digest a pure function of the canonical byte
-	// sequence — independent of block size, codec and buffering — while costing
-	// one compression round per 64 bytes instead of two per frame.
-	w.hasher.Write(w.frames[start : start+length])
+	// Streaming each frame into one long-lived hasher fixed that, and an
+	// earlier comment here rejected going further on the grounds that block
+	// boundaries depend on a storage parameter. That reasoning conflated two
+	// different things. A per-block digest that is then chained would indeed
+	// depend on the block size. Absorbing the same bytes into the same
+	// continuous hasher in larger Write calls does not: SHA-256 is a stream, so
+	// Write(a); Write(b) and Write(a||b) produce the identical digest. The
+	// result stays a pure function of the canonical byte sequence, independent
+	// of block size, codec and buffering, and the per-call overhead and the
+	// copy into the hasher's 64-byte staging buffer both disappear. Frames
+	// accumulate in w.frames and are absorbed by flushBlock; ExecutionHash
+	// covers whatever has not been flushed yet.
 
 	w.stats.observe(header)
 	w.frameCount++
@@ -267,6 +269,10 @@ func (w *Writer) flushBlock() error {
 		return nil
 	}
 	uncompressed := w.frames
+	// Absorb the block's frames into the execution digest before the buffer is
+	// handed to a compressor or reset. This is the same byte sequence, in the
+	// same order, that the per-frame version absorbed.
+	w.hasher.Write(uncompressed)
 	stored := uncompressed
 	if w.compressor != nil {
 		var err error
@@ -348,21 +354,35 @@ func (w *Writer) Close() error {
 	return nil
 }
 
+// ExecutionHash returns the digest over every canonical frame written so far,
+// including frames still sitting in the open block. The hasher itself has only
+// absorbed flushed blocks, so the running state is cloned and the unflushed
+// tail absorbed into the clone — the caller gets the digest as of now without
+// the writer's own state depending on when it was asked.
 func (w *Writer) ExecutionHash() [sha256.Size]byte {
 	var out [sha256.Size]byte
 	snapshot, err := w.hasher.(encoding.BinaryMarshaler).MarshalBinary()
 	if err != nil {
-		// The standard library's SHA-256 does not fail here; if a caller
-		// supplies a hasher that does, summing directly is still correct and
-		// only costs the running state.
+		// The standard library's SHA-256 does not fail here. A hasher that
+		// cannot snapshot its state cannot have the unflushed tail absorbed
+		// into a clone, so absorb it into the hasher itself: the digest is
+		// correct, at the cost of the running state, which is the safer of the
+		// two failures.
+		w.hasher.Write(w.frames)
+		w.frames = w.frames[:0]
 		copy(out[:], w.hasher.Sum(nil))
 		return out
 	}
 	clone := sha256.New()
 	if err := clone.(encoding.BinaryUnmarshaler).UnmarshalBinary(snapshot); err != nil {
+		// Same fallback as above: absorb the tail directly rather than return
+		// a digest that silently omits it.
+		w.hasher.Write(w.frames)
+		w.frames = w.frames[:0]
 		copy(out[:], w.hasher.Sum(nil))
 		return out
 	}
+	clone.Write(w.frames)
 	copy(out[:], clone.Sum(nil))
 	return out
 }

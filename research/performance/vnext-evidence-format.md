@@ -818,3 +818,41 @@ cannot change during a run. A direct A/B of the fix returned **-1.21 % against
 an A/A control of +1.63 %**, so the wall-clock effect is **not resolvable on
 this host today** and is not claimed. The change stands on the profile
 attribution and on being obviously correct, not on that measurement.
+
+### The digest is absorbed per block, and my own comment had ruled it out
+
+An earlier comment in `writer.go` rejected hashing at block granularity: "block
+boundaries depend on the configured block size, so the digest would depend on a
+storage parameter." That conflated two different designs. A per-block digest
+that is then *chained* would indeed depend on the block size. Absorbing the same
+bytes into the same continuous hasher in larger `Write` calls does not —
+SHA-256 is a stream, so `Write(a); Write(b)` and `Write(a||b)` are identical.
+
+Frames now accumulate and are absorbed by `flushBlock`; `ExecutionHash` clones
+the running state and absorbs the unflushed tail, so it stays correct at any
+point. **Verified by the strongest available test: the same config and seed
+produce the bit-identical digest before and after —
+`45f0f6826226c46dde4a55c34672ba42bd98970fd4557fa4389d78118dcb6b1b`.**
+
+Measured at **-0.44 % against an A/A control of +1.15 %**, so the effect is the
+predicted size but below what this host resolves today; it is not claimed as a
+measured win. It is accepted because it is provably digest-neutral and strictly
+less work — fewer `Write` calls and no per-frame copy into the hasher's 64-byte
+staging buffer.
+
+### Why the digest cost was under-predicted, settled
+
+An independent bench varied only the `Write` size while hashing one real
+stream's 174,723,743 bytes: 1 MB gives 1,716 MB/s, and the ~111-byte mean frame
+gives 1,367 MB/s. So the write-size penalty is real but only **1.26x**, moving
+the prediction from 1.19 % to 1.50 % against a measured 2.69 %.
+
+**Write size was therefore about 0.3 of the 1.5-point miss, not the miss.** The
+in-situ rate is 174.7 MB / 0.23 s = **760 MB/s, 44 % of the microbenchmark rate
+on the same core**. Stripping the `memmove` still leaves compression at ~878
+MB/s. The gap is working-set and GC pressure — the same profile shows
+`runtime.scanObject` at 8.6 % against a 645 MB RSS.
+
+The lesson is sharper than "benchmark at the right size": **a tight loop over a
+hot buffer on an idle core is the wrong instrument even at the right size.** A
+111-byte benchmark would have reached 1.50 %, still under half the truth.
