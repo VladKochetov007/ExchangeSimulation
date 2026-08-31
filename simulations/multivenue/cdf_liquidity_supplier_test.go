@@ -52,17 +52,22 @@ func TestElasticLiquiditySupplierQuotesOneInventorySensitiveSide(t *testing.T) {
 	if decisions[len(decisions)-1].Side != "BUY" || decisions[len(decisions)-1].QuoteQty != 25 {
 		t.Fatalf("decision = %+v, want inventory-sensitive buy", decisions[len(decisions)-1])
 	}
+	if decisions[len(decisions)-1].BestBidQty != 100 || decisions[len(decisions)-1].BestAskQty != 100 {
+		t.Fatalf("decision touch depth = (%d, %d), want (100, 100)", decisions[len(decisions)-1].BestBidQty, decisions[len(decisions)-1].BestAskQty)
+	}
 }
 
 func TestElasticLiquiditySupplierReducesQuoteAfterInventoryFill(t *testing.T) {
 	gw := newMetaGateway()
 	var decisions []ElasticLiquiditySupplierDecision
+	var fills []ElasticLiquiditySupplierFill
 	supplier := NewElasticLiquiditySupplier(1, gw, ElasticLiquiditySupplierConfig{
 		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
 		Interval: time.Second, MaxObservationAge: time.Minute,
 		ReferencePrice: 3_000, ReferenceHalfLife: time.Hour,
 		BaseHolding: 0, ElasticityPerPercent: 10, MaxPosition: 100, MaxQuoteQty: 100,
 		DecisionObserver: func(decision ElasticLiquiditySupplierDecision) { decisions = append(decisions, decision) },
+		FillObserver:     func(fill ElasticLiquiditySupplierFill) { fills = append(fills, fill) },
 	})
 	ctx := context.Background()
 	supplier.onTick(time.Unix(0, int64(time.Second)))
@@ -81,6 +86,9 @@ func TestElasticLiquiditySupplierReducesQuoteAfterInventoryFill(t *testing.T) {
 	}
 	if supplier.Position() != 25 {
 		t.Fatalf("position = %d, want 25", supplier.Position())
+	}
+	if len(fills) != 1 || !fills[0].IsFull {
+		t.Fatalf("fill evidence = %+v, want one full fill", fills)
 	}
 	if len(decisions) < 2 || decisions[len(decisions)-1].TargetPosition <= decisions[len(decisions)-1].Position {
 		t.Fatalf("post-fill decision = %+v, want remaining inventory gap", decisions[len(decisions)-1])

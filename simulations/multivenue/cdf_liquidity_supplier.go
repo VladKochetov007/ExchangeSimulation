@@ -97,7 +97,9 @@ type ElasticLiquiditySupplierDecision struct {
 	ObservationTime  int64  `json:"observation_time"`
 	ObservationAge   int64  `json:"observation_age"`
 	BestBid          int64  `json:"best_bid"`
+	BestBidQty       int64  `json:"best_bid_qty"`
 	BestAsk          int64  `json:"best_ask"`
+	BestAskQty       int64  `json:"best_ask_qty"`
 	MarkPrice        int64  `json:"mark_price"`
 	ReferencePrice   int64  `json:"reference_price"`
 	Position         int64  `json:"position"`
@@ -128,6 +130,7 @@ type ElasticLiquiditySupplierFill struct {
 	Qty            int64  `json:"qty"`
 	FeeAmount      int64  `json:"fee_amount"`
 	FeeAsset       string `json:"fee_asset"`
+	IsFull         bool   `json:"is_full"`
 	PositionBefore int64  `json:"position_before"`
 	PositionAfter  int64  `json:"position_after"`
 }
@@ -149,7 +152,9 @@ type ElasticLiquiditySupplier struct {
 	*actor.BaseActor
 	cfg                 ElasticLiquiditySupplierConfig
 	bestBid             int64
+	bestBidQty          int64
 	bestAsk             int64
+	bestAskQty          int64
 	observationTime     int64
 	position            int64
 	reference           int64
@@ -207,12 +212,14 @@ func (s *ElasticLiquiditySupplier) observeSnapshot(event actor.BookSnapshotEvent
 	if event.Symbol != s.cfg.Symbol || event.Snapshot == nil {
 		return
 	}
-	s.bestBid, s.bestAsk, s.observationTime = 0, 0, event.Timestamp
+	s.bestBid, s.bestBidQty, s.bestAsk, s.bestAskQty, s.observationTime = 0, 0, 0, 0, event.Timestamp
 	if len(event.Snapshot.Bids) > 0 {
 		s.bestBid = event.Snapshot.Bids[0].Price
+		s.bestBidQty = event.Snapshot.Bids[0].VisibleQty
 	}
 	if len(event.Snapshot.Asks) > 0 {
 		s.bestAsk = event.Snapshot.Asks[0].Price
+		s.bestAskQty = event.Snapshot.Asks[0].VisibleQty
 	}
 }
 
@@ -245,7 +252,7 @@ func (s *ElasticLiquiditySupplier) observeFill(event actor.OrderFillEvent) {
 			Role: s.cfg.Role, ClientID: s.cfg.ClientID, Symbol: event.Symbol,
 			OrderID: event.OrderID, TradeID: event.TradeID, Timestamp: event.Timestamp,
 			Side: event.Side.String(), Price: event.Price, Qty: event.Qty,
-			FeeAmount: event.FeeAmount, FeeAsset: event.FeeAsset,
+			FeeAmount: event.FeeAmount, FeeAsset: event.FeeAsset, IsFull: event.IsFull,
 			PositionBefore: positionBefore, PositionAfter: s.position,
 		})
 	}
@@ -376,8 +383,9 @@ func (s *ElasticLiquiditySupplier) baseDecision(now int64) ElasticLiquiditySuppl
 	return ElasticLiquiditySupplierDecision{
 		Role: s.cfg.Role, ClientID: s.cfg.ClientID, Symbol: s.cfg.Symbol,
 		DecisionTime: now, ObservationTime: s.observationTime, ObservationAge: age,
-		BestBid: s.bestBid, BestAsk: s.bestAsk, ReferencePrice: s.reference,
-		Position: s.position, InventoryLimit: s.cfg.MaxPosition,
+		BestBid: s.bestBid, BestBidQty: s.bestBidQty, BestAsk: s.bestAsk, BestAskQty: s.bestAskQty,
+		ReferencePrice: s.reference,
+		Position:       s.position, InventoryLimit: s.cfg.MaxPosition,
 		QuoteOrderID: s.quote.orderID, QuoteRequestID: s.quote.requestID,
 		QuotePrice: s.quote.price, QuoteQty: s.quote.qty, QuoteSubmittedAt: s.quote.submittedAt,
 	}
