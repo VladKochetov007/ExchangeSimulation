@@ -56,6 +56,7 @@ type checkpointSink struct {
 	events               int64
 	unencodable          int64
 	nextBound            int64
+	pendingCheckpointAt  int64
 	lastSimTime          int64
 	lastCheckpointAt     int64
 	lastCheckpointEvents int64
@@ -170,33 +171,6 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	if s == nil {
 		return
 	}
-	// Binary path: the same ordered sequence encoded as typed frames. It
-	// replaces the marshal and the per-event digest entirely, so when it is
-	// selected the JSON encoder is never reached.
-	if s.binary != nil {
-		recordErr := s.binary.record(simTime, clientID, eventName, venueID, payload, route, sequence)
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if recordErr != nil {
-			s.failLocked(fmt.Errorf("record binary evidence: %w", recordErr))
-			return
-		}
-		if s.closed {
-			return
-		}
-		s.lastSimTime = simTime
-		s.events++
-		if s.firstEvent && s.intervalNano > 0 {
-			s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
-			s.firstEvent = false
-		}
-		if s.intervalNano > 0 && simTime >= s.nextBound {
-			s.writeCheckpointLocked(s.nextBound)
-			s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
-		}
-		return
-	}
-
 	encoded, err := json.Marshal(payload)
 	unencodable := err != nil
 	if err != nil {
@@ -210,6 +184,28 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
+		return
+	}
+	// A boundary is provisional until the first event at a later simulated
+	// timestamp. This prevents multiple ordinary checkpoints at one timestamp
+	// when several events share a scheduler instant, while still including all
+	// events at that instant in the boundary state.
+	s.flushPendingCheckpointBeforeEventLocked(simTime)
+	// Binary path: the same ordered sequence encoded as typed frames. It
+	// replaces the marshal and the per-event digest entirely, so when it is
+	// selected the JSON encoder is never reached.
+	if s.binary != nil {
+		if err := s.binary.record(simTime, clientID, eventName, venueID, payload, route, sequence); err != nil {
+			s.failLocked(fmt.Errorf("record binary evidence: %w", err))
+			return
+		}
+		s.lastSimTime = simTime
+		s.events++
+		if s.firstEvent && s.intervalNano > 0 {
+			s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
+			s.firstEvent = false
+		}
+		s.schedulePendingCheckpointLocked(simTime)
 		return
 	}
 	s.lastSimTime = simTime
@@ -247,8 +243,20 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 		}
 	}
 
+	s.schedulePendingCheckpointLocked(simTime)
+}
+
+func (s *checkpointSink) flushPendingCheckpointBeforeEventLocked(simTime int64) {
+	if s.pendingCheckpointAt == 0 || simTime <= s.pendingCheckpointAt {
+		return
+	}
+	s.writeCheckpointLocked(s.pendingCheckpointAt)
+	s.pendingCheckpointAt = 0
+}
+
+func (s *checkpointSink) schedulePendingCheckpointLocked(simTime int64) {
 	if s.intervalNano > 0 && simTime >= s.nextBound {
-		s.writeCheckpointLocked(s.nextBound)
+		s.pendingCheckpointAt = s.nextBound
 		s.nextBound = simTime - simTime%s.intervalNano + s.intervalNano
 	}
 }
@@ -363,9 +371,14 @@ func (s *checkpointSink) close() error {
 		if finalAt == 0 {
 			finalAt = s.lastSimTime
 		}
-		// Materialize a normal terminal state first. The following final row is
+		// Materialize any pending boundary and then the normal terminal state.
+		// The following final row is
 		// an explicit duplicate, so consumers can require exactly one terminal
 		// attestation without accepting a final row that changes time or state.
+		if s.pendingCheckpointAt > 0 && s.pendingCheckpointAt <= finalAt {
+			s.writeCheckpointLocked(s.pendingCheckpointAt)
+			s.pendingCheckpointAt = 0
+		}
 		s.writeCheckpointLocked(finalAt)
 		s.writeFinalCheckpointLocked(finalAt)
 		if err := s.checkpoints.Close(); err != nil {

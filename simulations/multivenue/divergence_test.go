@@ -46,6 +46,8 @@ func TestCheckpointSinkClosesAtRegisteredFinalTime(t *testing.T) {
 	sink.finalSimTime = 3 * second
 	sink.observe(1*second, 1, "event", "north", map[string]int{"n": 1}, "general.jsonl", 1)
 	sink.observe(2*second, 1, "event", "north", map[string]int{"n": 2}, "general.jsonl", 2)
+	sink.observe(3*second, 1, "event", "north", map[string]int{"n": 3}, "general.jsonl", 3)
+	sink.observe(3*second, 2, "event", "north", map[string]int{"n": 4}, "general.jsonl", 4)
 	if err := sink.close(); err != nil {
 		t.Fatal(err)
 	}
@@ -61,8 +63,13 @@ func TestCheckpointSinkClosesAtRegisteredFinalTime(t *testing.T) {
 		}
 		records = append(records, record)
 	}
-	if len(records) != 3 || records[len(records)-2].SimTime != 3*second || records[len(records)-2].Final || !records[len(records)-1].Final || records[len(records)-1].SimTime != 3*second || records[len(records)-2].EventCount != records[len(records)-1].EventCount || records[len(records)-2].ExecutionStreamHash != records[len(records)-1].ExecutionStreamHash {
+	if len(records) != 3 || records[len(records)-2].SimTime != 3*second || records[len(records)-2].Final || !records[len(records)-1].Final || records[len(records)-1].SimTime != 3*second || records[len(records)-2].EventCount != 4 || records[len(records)-2].EventCount != records[len(records)-1].EventCount || records[len(records)-2].ExecutionStreamHash != records[len(records)-1].ExecutionStreamHash {
 		t.Fatalf("checkpoint closure = %+v, want ordinary/final duplicate at %d", records, 3*second)
+	}
+	for index := 1; index < len(records)-1; index++ {
+		if records[index-1].SimTime >= records[index].SimTime {
+			t.Fatalf("ordinary checkpoints are not strictly increasing: %+v", records)
+		}
 	}
 }
 
