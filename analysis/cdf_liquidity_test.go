@@ -395,16 +395,42 @@ func TestMeasureCDFLiquidityRejectsUnattestedWaitState(t *testing.T) {
 		t.Fatal(err)
 	}
 	unattestedPending := cdfFixtureLine(7, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":7,"observation_time":1,"observation_age":6,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"wait","reason":"order_pending","quote_request_id":99}`) + "\n"
+	acceptedBeforePending := cdfFixtureLine(4, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":4,"observation_time":1,"observation_age":3,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"wait","reason":"order_pending","quote_request_id":1}`) + "\n"
 	unattestedCancel := cdfFixtureLine(8, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":8,"observation_time":1,"observation_age":7,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"wait","reason":"cancel_pending","quote_order_id":8,"cancel_request_id":99}`) + "\n"
-	if err := os.WriteFile(generalPath, append(raw, []byte(unattestedPending+unattestedCancel)...), 0644); err != nil {
+	if err := os.WriteFile(generalPath, append(raw, []byte(unattestedPending+acceptedBeforePending+unattestedCancel)...), 0644); err != nil {
 		t.Fatal(err)
 	}
 	audit, err := run.MeasureCDFLiquidity()
 	if err != nil {
 		t.Fatalf("MeasureCDFLiquidity: %v", err)
 	}
-	if audit.Valid || !hasCDFCheck(audit.Checks, "order-pending wait has no outstanding submission") || !hasCDFCheck(audit.Checks, "cancel-pending wait has no matching live cancellation") {
+	if audit.Valid || !hasCDFCheck(audit.Checks, "order-pending wait has no outstanding submission") || !hasCDFCheck(audit.Checks, "order-pending wait follows an already accepted order") || !hasCDFCheck(audit.Checks, "cancel-pending wait has no matching live cancellation") {
 		t.Fatalf("unattested wait audit = %+v", audit)
+	}
+}
+
+func TestMeasureCDFLiquidityRejectsReorderedFillCancelRace(t *testing.T) {
+	run := writeCDFLiquidityFullFillCancelRaceFixture(t)
+	bookPath := filepath.Join(run.Dir, "venues", "north", "spot", "CDF-USD.jsonl")
+	raw, err := os.ReadFile(bookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fill := cdfFixtureLine(13, 2, "OrderFill", `{"order_id":8,"trade_id":2,"side":"BUY","price":99,"qty":4,"filled_qty":4,"remaining_qty":0,"is_full":true}`) + "\n"
+	rejection := cdfFixtureLine(14, 2, "OrderCancelRejected", `{"request_id":4,"success":false,"error":"ORDER_ALREADY_FILLED"}`) + "\n"
+	reordered := cdfFixtureLine(13, 2, "OrderCancelRejected", `{"request_id":4,"success":false,"error":"ORDER_ALREADY_FILLED"}`) + "\n" + fill
+	if !strings.Contains(string(raw), fill+rejection) {
+		t.Fatal("fill/cancel-rejection sequence was not found")
+	}
+	if err := os.WriteFile(bookPath, []byte(strings.Replace(string(raw), fill+rejection, reordered, 1)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatalf("MeasureCDFLiquidity: %v", err)
+	}
+	if audit.Valid || !hasCDFCheck(audit.Checks, "stale withdrawal has no later matching exchange cancellation outcome") {
+		t.Fatalf("reordered fill/cancel race audit = %+v", audit)
 	}
 }
 

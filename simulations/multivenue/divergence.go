@@ -363,6 +363,10 @@ func (s *checkpointSink) close() error {
 		if finalAt == 0 {
 			finalAt = s.lastSimTime
 		}
+		// Materialize a normal terminal state first. The following final row is
+		// an explicit duplicate, so consumers can require exactly one terminal
+		// attestation without accepting a final row that changes time or state.
+		s.writeCheckpointLocked(finalAt)
 		s.writeFinalCheckpointLocked(finalAt)
 		if err := s.checkpoints.Close(); err != nil {
 			s.failLocked(fmt.Errorf("close execution checkpoints: %w", err))

@@ -61,8 +61,8 @@ func TestCheckpointSinkClosesAtRegisteredFinalTime(t *testing.T) {
 		}
 		records = append(records, record)
 	}
-	if len(records) != 2 || records[len(records)-1].SimTime != 3*second {
-		t.Fatalf("checkpoint closure = %+v, want final time %d", records, 3*second)
+	if len(records) != 3 || records[len(records)-2].SimTime != 3*second || records[len(records)-2].Final || !records[len(records)-1].Final || records[len(records)-1].SimTime != 3*second || records[len(records)-2].EventCount != records[len(records)-1].EventCount || records[len(records)-2].ExecutionStreamHash != records[len(records)-1].ExecutionStreamHash {
+		t.Fatalf("checkpoint closure = %+v, want ordinary/final duplicate at %d", records, 3*second)
 	}
 }
 

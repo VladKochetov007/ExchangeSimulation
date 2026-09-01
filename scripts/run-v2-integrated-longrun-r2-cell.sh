@@ -246,13 +246,7 @@ jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulat
 	echo "greeks report does not attest the registered 24-hour simulated horizon: $output" >&2
 	exit 1
 }
-jq -e -s --argjson simulation_end_nano "$simulation_end_nano" \
-	'. as $checkpoints |
-	 ($checkpoints | length) > 0 and
-	 all($checkpoints[]; .domain == "execution_observations" and .ordering == "ordered_stream" and (.sim_time | type) == "number" and (.event_count | type) == "number") and
-	 all(range(1; ($checkpoints | length)); $checkpoints[. - 1].sim_time < $checkpoints[.].sim_time and $checkpoints[. - 1].event_count < $checkpoints[.].event_count) and
-	 $checkpoints[-1].sim_time == $simulation_end_nano' \
-	"$output/checkpoints.jsonl" >/dev/null || {
+v2_r2_require_checkpoint_stream "$output/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" || {
 	echo "checkpoint stream does not attest the registered 24-hour horizon: $output" >&2
 	exit 1
 }
