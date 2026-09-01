@@ -524,3 +524,44 @@ present and no performance code was imported. A fresh independent Sol-xhigh
 review of exact `2630fbb` remains required before clean pinned binary
 construction or any activation probe. The capacity probe and all registered
 development/holdout cells remain unauthorized.
+
+## Exact-tree review and pinned-build checkpoint — ca5f6e0
+
+The fresh independent Sol-xhigh review of exact `ca5f6e0c8d014145f06f2ca209b35b7ddffc401a`
+returned **ACCEPT WITH NARROWER CLAIM**. It found no source-level blocker to
+the pinned build or capacity probe and confirmed that the tree is suitable only
+for the preregistered development setup sequence. The review does not claim
+24-hour survival, economic viability, holdout readiness, or a repository-wide
+race-clean result. It specifically retains the broad-race timeout as a bounded
+limitation: the unchanged V23 P2 fresh-process test timed out after 600 seconds
+without a race diagnostic, while the focused evidence race passed.
+
+The reviewer confirmed that the R2 calendar/lifecycle and risk hardening are
+preserved, the finite CDF supplier uses delayed local observations without an
+oracle or forced two-sided replenishment, and the `evstream_v3` plus
+extractor/verifier/scorer/parity contracts remain fail-closed and holdout
+isolated. It noted the narrower treatment logging-neutrality scope and the
+remaining common-mode risk between supplier policy and its reconstruction
+audit; neither was judged a blocker to the setup gate.
+
+From that exact clean tree, the five required binaries were built in tmux with
+Go 1.27.0, `GOAMD64=v1`, `CGO_ENABLED=0`, `GOMAXPROCS=4`,
+`-trimpath`, and VCS metadata enabled. Each binary reported
+`vcs.revision=ca5f6e0c8d014145f06f2ca209b35b7ddffc401a`,
+`vcs.modified=false`, and the required Linux/amd64/v1 target. The resulting
+SHA-256 values were:
+
+| binary | SHA-256 |
+|---|---|
+| `multivenue` | `44bbe7eed125c9e4e5d07ef0dd0f361a0e0256e9322e4e0f5e51efa53997941d` |
+| `cdf-liquidity-audit` | `196e225c5a0f1e90d53baf3a88cce5a21286211f287bdd03359431b9dc4dc802` |
+| `mvanalyze` | `7837e5443dd4ab7742008c1753c167af8a79a0541c567d406301563d526507e9` |
+| `evsrender` | `14b162bdda3c823b27ce003059ebfcdad47b2bcad212746d73e9ca5d957b8b98` |
+| `prunegate` | `4b02aab0db85c0429c4de9237ecaa075bcd8d33c8b9bb059bece827f1a15d891` |
+
+Because this record is a documentation-only commit after the reviewed tree,
+these binaries are a recorded successful build checkpoint, not the final
+launch artifacts. The source HEAD must be rebuilt after this record is
+committed so the capacity attestation and every later runner provenance field
+bind to the final documented revision. No capacity probe, development cell,
+freeze action, or holdout access has occurred.
