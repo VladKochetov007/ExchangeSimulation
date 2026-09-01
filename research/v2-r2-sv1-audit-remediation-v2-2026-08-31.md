@@ -376,6 +376,16 @@ evidence and accounting blockers:
   handles reversal at the correct boundary, and includes quote fees; the
   actor admits buy quotes only within finite pre-trade quote-cash headroom.
 
+The depth concentration contract is explicitly liquidity-conditioned rather
+than a time average of a zero-valued empty book:
+
+`sum(nonempty supplier depth × interval) / sum(nonempty total depth × interval)`.
+
+Empty intervals are excluded from that ratio and remain observable through the
+bid/ask absence counters; the left-continuous state is still carried through
+the terminal interval. A hand-calculated active→empty→active→terminal test
+attests both the exclusion and terminal inclusion.
+
 Regression coverage includes the due-without-receipt, post-terminal schedule,
 global ordinal-gap, authentic stale-withdrawal, fixed-point reversal/fee,
 finite quote-cash, sequence-swap, raw-versus-projected hash, and final
@@ -401,3 +411,54 @@ activate stale or one-sided withdrawal, so the next scientific probe must be a
 separate development-only stress configuration that exercises that lifecycle
 through the real delayed gateway and extractor. This checkpoint is not freeze
 authorization and does not support a 24-hour survival claim.
+
+## Sol-xhigh review and real-gateway lifecycle remediation — a2ba491 → d357c52
+
+Helmholtz then reviewed exact `a2ba491` independently at Sol-xhigh and
+rejected promotion. The rejection was narrow and actionable; it did not reopen
+the R2 economic amendment or the finite-supplier design. The required fixes
+were:
+
+* the stale-withdrawal test used a synthetic decision appended to an order that
+  had already been cancelled, so it did not prove a live accepted order,
+  delayed gateway boundary, authentic cancellation outcome, and terminal audit;
+* a full fill cleared the supplier quote but could leave a later cancel
+  rejection permanently stranded in `cancelPending`;
+* the final checkpoint contract did not state how an explicit terminal row may
+  duplicate the last ordinary timestamp/event count;
+* the depth-share formula needed an explicit empty-interval and terminal-state
+  contract plus an active→empty→active hand calculation.
+
+The scientific tree now contains minimal, attributable remediations for all
+four points. A full fill clears the outstanding cancellation request state.
+The CDF analyzer records each stale withdrawal by order and cancellation
+request, then requires an earlier accepted live order and a later exact
+exchange cancellation. The R2 checkpoint validator accepts only one explicit
+terminal duplicate, with the same simulation time, event count, and execution
+stream hash, and still requires the terminal row to be final. The depth metric
+is documented and tested as:
+
+`sum(nonempty supplier depth × interval) / sum(nonempty total depth × interval)`.
+
+The accompanying real-gateway development-only probe uses seed `101`, a
+70-second horizon, two-second snapshots, 500ms delayed supplier data, a
+1.5-second registered observation bound, full evidence, and terminal account
+snapshots. It recorded three configured suppliers, 41 accepted quotes, 39
+completed quote lifecycles, 22 withdrawals, and 41 receipt-reconciled supplier
+decisions. It recorded zero supplier fills, so the activation audit correctly
+remained invalid under its separate `FillCount > 0` activation predicate; this
+probe is lifecycle evidence, not an activation claim. No stale-withdrawal
+reconstruction failure, missing-observation wait failure, or over-age
+pending-wait failure was present.
+
+The probe also removed one raw `OrderCancelled` record corresponding to an
+authentic stale withdrawal. Re-extraction rejected the mutation with
+`stale withdrawal has no later matching exchange cancellation outcome`, then
+restored the original raw book evidence. This closes the specific
+decision→gateway→terminal-audit loop requested by the reviewer.
+
+The performance branch was fetched again at this checkpoint and had no commits
+newer than reviewed `c4434ad`; no performance code was merged. The current
+remediation is not yet accepted for the next scientific gate: focused and clean
+full verification plus one fresh independent review of the resulting exact
+tree remain required. No registered development cell or holdout was run.
