@@ -85,3 +85,30 @@ No CDF activation, survival, kill criterion, or historical claim is inferred
 from this attempt. No holdout was inspected or consumed. The successor remains
 at the pre-activation development gate until the corrected treatment is
 extracted, independently reconstructed, and reviewed.
+
+## Independent review of the correction
+
+An independent Sol-xhigh reviewer inspected the exact clean tree
+`c67fa6938254980f8a14dd1fdee8bb0d96aabd5b` and returned **ACCEPT WITH NARROWER
+CLAIM**. The review confirmed that `events.evs` is routed as binary, JSON
+sidecars remain strict, the archived attempt cannot satisfy the current
+provenance checks, and no R2/SV1 economic code or registered configuration
+changed.
+
+The reviewer noted that the regression exercises the shared validator plus
+static extractor routing rather than a complete extractor fixture, and that
+explicit empty-stream and JSON-symlink cases are not separately represented.
+This is retained as a non-blocking test-scope limitation; the binary validator
+does reject empty streams and symlinks, and the full evidence manifest verifier
+provides the later end-to-end fail-closed check.
+
+The review authorizes only:
+
+1. a clean reproducible rebuild from `c67fa69`;
+2. a fresh capacity measurement bound to the new revision and binary hash;
+3. a fresh `treatment-607` run, followed by independent extraction and
+   verification.
+
+It does not authorize controls, other development seeds, parity, scoring,
+freeze, or holdout actions. The `2f93ace` treatment remains invalid and must
+not be restored into the canonical cell path or scored.

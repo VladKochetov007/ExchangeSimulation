@@ -34,6 +34,7 @@ for sv1_script in \
 	check-v2-r2-sv1-24h-parity.sh \
 	extract-v2-r2-sv1-24h-cell.sh \
 	score-v2-r2-sv1-24h-development.sh \
+	archive-v2-r2-sv1-capacity-probe.sh \
 	verify-v2-r2-sv1-24h-cell.sh; do
 	[[ -x "$root_dir/scripts/$sv1_script" ]] || fail "SV1 script is not executable: $sv1_script"
 	bash -n "$root_dir/scripts/$sv1_script" || fail "SV1 script has invalid shell syntax: $sv1_script"
@@ -51,6 +52,14 @@ expect_failure v2_r2_require_evidence_input_file json "$binary_input_fixture"
 ln -s -- "$binary_input_fixture" "$tmp_root/events-symlink.evs"
 expect_failure v2_r2_require_evidence_input_file binary "$tmp_root/events-symlink.evs"
 expect_failure v2_r2_require_evidence_input_file binary "$tmp_root/missing.evs"
+expect_failure "$root_dir/scripts/archive-v2-r2-sv1-capacity-probe.sh" \
+	"$tmp_root/missing-capacity-attestation.json" /bin/true "$tmp_root/capacity-archive.tar.zst"
+for required_capacity_fragment in \
+	'v2-r2-sv1-capacity-archive-retention-v1' \
+	'refusing to compact a capacity probe for the current source revision'; do
+	rg -F "$required_capacity_fragment" "$root_dir/scripts/archive-v2-r2-sv1-capacity-probe.sh" >/dev/null ||
+		fail "capacity archive script is missing required fragment: $required_capacity_fragment"
+done
 for required_sv1_fragment in \
 	'V2_R2_EXTRACTOR_VARIANT=sv1' \
 	'control_full_no_log_normalized_equal' \
