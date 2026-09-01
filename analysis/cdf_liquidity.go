@@ -813,9 +813,9 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 		if decision.QuoteQty > state.maxQuoteQty {
 			state.maxQuoteQty = decision.QuoteQty
 		}
-		if decision.Side == "BUY" && (decision.QuoteCashAvailable > 0 || decision.QuoteCashRequired > 0) {
+		if decision.Side == "BUY" && state.configuredInitialQuoteBalance > 0 && state.configuredQuotePrecision > 0 {
 			expectedRequired, requiredOK := expectedCDFQuoteRequirement(decision.QuotePrice, decision.QuoteQty, state.configuredBasePrecision, state.configuredMakerFeeBps)
-			if !requiredOK || decision.QuoteCashRequired != expectedRequired || decision.QuoteCashRequired > decision.QuoteCashAvailable {
+			if decision.QuoteCashAvailable <= 0 || decision.QuoteCashRequired <= 0 || !requiredOK || decision.QuoteCashRequired != expectedRequired || decision.QuoteCashRequired > decision.QuoteCashAvailable {
 				r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier buy quote exceeds its attested quote-cash headroom"})
 			}
 		}
