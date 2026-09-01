@@ -207,3 +207,99 @@ semantic cancellation-identity mutation.
 The focused `analysis`, `simulation`, and `simulations/multivenue` suites are
 green at this checkpoint. A clean full `make test` is the next mechanical
 gate; no development or holdout cell has been started.
+
+## Binary evidence neutrality checkpoint — 1db7067
+
+The fresh probe after `1db7067` found and corrected an evidence-contract defect
+that was not visible in the earlier candidate review. `LogEvidenceOnly` records
+share a per-venue route sequence with execution records so the renderer can
+merge them exactly. Those records are persistence metadata, not economic
+execution. Before this checkpoint, enabling the optional sidecars changed the
+route sequence embedded in later binary frames and therefore changed the
+binary execution hash, even when the economic trajectory and checkpoints were
+unchanged.
+
+The correction adds an explicit `evstream.FrameHasher` projection and declares
+the production binary contract as `route_sequence_neutral_v1`. Production
+binary frames retain the route sequence for deterministic reconstruction, while
+the execution digest hashes that field as zero. The default evstream contract
+remains raw-frame hashing, so historical and manually constructed raw streams
+are backward-compatible. The renderer selects the hash projection from the
+attestation before it verifies the completion trailer and rejects unknown
+contracts.
+
+The exact scientific tree tested here is `1db7067ee470d4ee587fff047ede6d5524d14a1c`.
+The asynchronous performance branch was fetched at this checkpoint; it had no
+commit newer than reviewed `c4434ad`. No performance-branch implementation was
+merged.
+
+Mechanical gates on the pushed tree:
+
+* clean `GOMAXPROCS=4 make test` passed all Go packages, integrated long-run
+  contracts, R2 contracts, and both archive suites;
+* `GOMAXPROCS=4 go vet ./...` passed;
+* focused `evstream`, `types`, `exchange`, and `simulations/multivenue` tests
+  passed;
+* targeted race tests passed for `analysis`, `exchange`, `evstream`, and the
+  binary/CDF/render multivenue tests;
+* the full `simulations/multivenue` package passed in 191.854 seconds after the
+  correction.
+
+The clean pinned binaries were built with Go 1.27.0, `CGO_ENABLED=0`,
+`-trimpath`, `-buildvcs=true`, and `vcs.modified=false` at the exact tree above.
+
+| binary | SHA-256 |
+| --- | --- |
+| `multivenue` | `6b5da13729b6246ab6300a276c26486b5b046336857350db007b6a75b62628d4` |
+| `cdf-liquidity-audit` | `28b144c7b5e3a88e055b04ec9e8a67a6097abe46c8cd64c1730100262522f069` |
+| `evsrender` | `1dc12a7606f9f4cc2fd231ad598d7e28c54cadd58ec8cc24cef9340f1f2202ab` |
+
+### Fresh development-only evidence probe
+
+The probe used seed 607 and a five-minute simulated horizon. It ran two
+identical treatment processes, one evidence-off process with all optional
+receipt/decision streams disabled, and the paired no-CDF control. All completed
+successfully. The raw evidence and rendered outputs remain in external scratch
+storage and are not substituted for a registered development campaign.
+
+| artifact | on-a | on-b | evidence-off | no-CDF control |
+| --- | ---: | ---: | ---: | ---: |
+| binary event frames | 150,771 | 150,771 | 150,771 | 148,701 |
+| binary stream frames | 150,851 | 150,851 | 150,851 | 148,780 |
+| normalized execution hash | `254d730774c3dfebb4845d3bf6ace6d4a4f96fd078b7140d9676ede64b6504e0` | same | same | `c56390b966fb954acd6a49d0c7260093b1779c613472f6191cd0f530335e2d58` |
+| checkpoint file hash | `a9bcb53a2ac0febf249966fc962555cbc1b4ecca9fda3ff1ff14102643ee3fc5` | same | same | `fd51f0b2b1c6082c1f90af4b9866ab63f74482c071d0e96ddcb5c16fb9e90a46` |
+
+The two treatment raw streams were byte-identical. The evidence-off raw stream
+was different, as expected from its different sidecar-derived route sequence,
+but its attestation and normalized execution identity were identical to the
+treatment. Rendering passed for treatment A, treatment B, and evidence-off;
+the three compact render reports were byte-identical, and the treatment A/B
+route JSONL files were byte-identical. This establishes fresh-process
+determinism and evidence-neutral execution identity without pretending that
+the stored persistence metadata is identical.
+
+The rebuilt treatment audit was valid. It observed 12 configured CDF suppliers,
+1,800 decisions, 111 supplier fills, 2,400,000,000 raw CDF units of supplier
+volume, and 8.874577955823758% supplier volume share. All 12 suppliers traded
+and changed PnL. The configured 5-bps maker fee was present in actual supplier
+fill records as positive quote-asset fees, and the audit's balance and account
+equity residuals were both zero. The largest supplier resting-depth share was
+22.661106211326726%; no supplier exceeded the 75% concentration threshold.
+The treatment had six bid-absent and six ask-absent snapshots out of 900, or
+`0.006666666666666667` on each side, matching the control. Ordinary flow had no
+withdrawals, so the stale/one-sided withdrawal activation criterion remains
+unproven; the focused delayed-cancellation and stale-withdrawal tests remain
+mechanism-level evidence only.
+
+The fresh audit artifact hash is
+`5a995a7ae7c7c1045122e85cde347aaab99d868377352d87847f9072e6804eb6`.
+
+## Promotion status after neutrality correction
+
+The evidence representation is now mechanically coherent and fresh-process
+neutral, but this is not freeze authorization. The next gate is one fresh
+independent Sol-xhigh review of the exact tree, the explicit hash contract, the
+rendered evidence, and the activation audit. That review must decide whether
+the ordinary-probe absence of withdrawals requires a dedicated development
+stress probe before any larger campaign. No registered dev-607 run and no
+holdout has been consumed.
