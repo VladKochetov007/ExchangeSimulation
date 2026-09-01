@@ -120,3 +120,32 @@ No cells or holdouts were run by the reviewer. The predecessor R2 result stays
 archived as the negative control. The remediation is to add a same-observation
 no-fill counterfactual and target-policy reconstruction, replay the shared
 event ordinal stream, and make configured receipt retention unconditional.
+
+## Remediation checkpoint — 13ad8fd
+
+The exact semantic remediation is now pushed as
+`13ad8fd38e6355969953b497b407f6ad18d78e81`:
+
+* the independent CDF extractor reads the registered reference price, base
+  holding, and elasticity; it recomputes the target-position equation for each
+  actionable quote;
+* after a fill, the activation counterfactual uses the prior actionable
+  position and the current target under the same observation. It counts an
+  inventory response only when the actual side or quantity differs from that
+  no-fill quote, so a market-only target change is not sufficient;
+* the receipt auditor replays the shared schedule/receipt/decision event stream
+  in global ordinal order and requires schedule before receipt and receipt
+  before the decision frontier that cites it;
+* when `evstream_v3` and `record_market_data_receipts` are enabled, evidence
+  manifest construction and verification require all five market-data receipt
+  artifacts by configuration, regardless of whether the manifest was already
+  present. Empty binary ledgers remain representable as zero-record artifacts;
+* temporary archive-contract fixtures include the configured receipt artifacts
+  and explicitly verify that deleting one causes verification failure.
+
+Focused analysis, receipt, and simulation suites pass. The clean
+`GOMAXPROCS=4 make test` gate passes all packages, integrated contracts, R2
+contracts, and archive tests; `go vet ./...` and the targeted race matrix pass
+as well. The causal replay, market-only counterfactual, and missing-ledger
+tests pass. This checkpoint remains below activation authorization pending one
+fresh independent Sol-xhigh review of the exact tree.
