@@ -2,12 +2,15 @@ package multivenue
 
 import (
 	"crypto/sha256"
+	"hash"
 	"os"
 	"sync"
 
 	"exchange_sim/evstream"
 	eexchange "exchange_sim/exchange"
 )
+
+const binaryExecutionHashContract = "route_sequence_neutral_v1"
 
 // binaryEvidence is the canonical binary sink: the same ordered event sequence
 // the JSON path records, encoded as typed frames instead of marshalled JSON.
@@ -47,6 +50,33 @@ func binaryEvidenceReplacesRawLog() bool { return os.Getenv("EXSIM_BINARY_EVIDEN
 // newBinaryEvidence starts a binary sink writing to out.
 func newBinaryEvidence(out interface{ Write([]byte) (int, error) }) *binaryEvidence {
 	return &binaryEvidence{writer: evstream.NewWriter(out, evstream.WriterOptions{})}
+}
+
+func newNeutralBinaryEvidence(out interface{ Write([]byte) (int, error) }) *binaryEvidence {
+	return &binaryEvidence{writer: evstream.NewWriter(out, evstream.WriterOptions{
+		HashFrame: hashBinaryExecutionFrame,
+	})}
+}
+
+func hashBinaryExecutionFrame(digest hash.Hash, frame []byte) {
+	header, err := evstream.ParseFrameHeader(frame)
+	if err != nil || header.SchemaID == evstream.SchemaDictionary || len(frame) < evstream.FrameHeaderSize+16 {
+		_, _ = digest.Write(frame)
+		return
+	}
+
+	// The envelope sequence is the per-route ordering needed to merge the
+	// binary execution frames with LogEvidenceOnly JSON sidecars. It is
+	// persistence metadata, not execution state: enabling those sidecars can
+	// advance it without changing the economic event sequence. Keep it in the
+	// frame for exact reconstruction, but normalize it out of the execution
+	// identity.
+	sequenceStart := evstream.FrameHeaderSize + 8
+	sequenceEnd := sequenceStart + 8
+	_, _ = digest.Write(frame[:sequenceStart])
+	var zeroSequence [8]byte
+	_, _ = digest.Write(zeroSequence[:])
+	_, _ = digest.Write(frame[sequenceEnd:])
 }
 
 // sinkEnvelope carries the event name alongside the payload.

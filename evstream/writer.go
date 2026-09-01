@@ -36,6 +36,13 @@ type BlockDecompressor interface {
 	Decompress(dst, src []byte, uncompressedLen int) ([]byte, error)
 }
 
+// FrameHasher absorbs one complete uncompressed canonical frame into an
+// execution digest. A nil FrameHasher uses the raw frame bytes. Custom
+// hashers are an explicit part of the caller's evidence contract; they may
+// project persistence-only fields out of the digest, but must not mutate the
+// frame.
+type FrameHasher func(hash.Hash, []byte)
+
 // WriterOptions configures a Writer. The zero value writes uncompressed blocks
 // of the default size, which is the configuration whose bytes are the
 // canonical ones.
@@ -49,6 +56,10 @@ type WriterOptions struct {
 	// SchemaEpoch identifies the caller's schema set, recorded in the header so
 	// a reader can refuse a stream written against an incompatible registry.
 	SchemaEpoch uint32
+	// HashFrame overrides the default raw-frame execution digest projection.
+	// The reader must be given the same projection to reproduce the writer's
+	// digest. Nil hashes every canonical frame byte.
+	HashFrame FrameHasher
 }
 
 // DefaultBlockBytes trades compression ratio against reader working set. Large
@@ -66,6 +77,7 @@ type Writer struct {
 	closed     bool
 	compressor BlockCompressor
 	blockBytes int
+	hashFrame  FrameHasher
 
 	// frames accumulates canonical, uncompressed bytes for the open block.
 	frames     []byte
@@ -101,6 +113,7 @@ func NewWriter(out io.Writer, opts WriterOptions) *Writer {
 		out:        out,
 		compressor: opts.Compressor,
 		blockBytes: blockBytes,
+		hashFrame:  opts.HashFrame,
 		frames:     make([]byte, 0, blockBytes+blockBytes/8),
 		hasher:     sha256.New(),
 		dict:       NewDictionary(),
@@ -243,7 +256,11 @@ func (w *Writer) appendFrame(header FrameHeader, raw []byte, appender ...Payload
 	// long-lived hasher keeps the digest a pure function of the canonical byte
 	// sequence — independent of block size, codec and buffering — while costing
 	// one compression round per 64 bytes instead of two per frame.
-	w.hasher.Write(w.frames[start : start+length])
+	if w.hashFrame != nil {
+		w.hashFrame(w.hasher, w.frames[start:start+length])
+	} else {
+		w.hasher.Write(w.frames[start : start+length])
+	}
 
 	w.stats.observe(header)
 	w.frameCount++

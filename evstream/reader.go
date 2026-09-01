@@ -39,6 +39,9 @@ type ReaderOptions struct {
 	// Finished evidence must use the default false value so a missing tail is
 	// reported rather than interpreted as a shorter successful run.
 	AllowUnterminated bool
+	// HashFrame must match the writer's execution digest projection when
+	// VerifyHash is true. Nil hashes every canonical frame byte.
+	HashFrame FrameHasher
 }
 
 // Reader walks a stream, verifying structure as it goes.
@@ -66,6 +69,7 @@ type Reader struct {
 	streamHdr         bool
 	terminated        bool
 	allowUnterminated bool
+	hashFrame         FrameHasher
 }
 
 // NewReader validates the stream header and prepares to read blocks.
@@ -76,6 +80,7 @@ func NewReader(in io.Reader, opts ReaderOptions) (*Reader, error) {
 		dict:              NewDictionary(),
 		verify:            opts.VerifyHash,
 		allowUnterminated: opts.AllowUnterminated,
+		hashFrame:         opts.HashFrame,
 	}
 	if opts.VerifyHash {
 		r.hasher = sha256.New()
@@ -263,7 +268,11 @@ func (r *Reader) rangeBlock(visit func(Frame) error) error {
 		if r.verify {
 			// Mirrors the writer: one continuous digest over concatenated
 			// canonical frames, so the reader reproduces it exactly.
-			r.hasher.Write(frameBytes)
+			if r.hashFrame != nil {
+				r.hashFrame(r.hasher, frameBytes)
+			} else {
+				r.hasher.Write(frameBytes)
+			}
 		}
 
 		if header.SchemaID == SchemaDictionary {

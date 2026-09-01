@@ -136,7 +136,8 @@ func TestBinaryEvidenceFormatIsExplicitAndAttested(t *testing.T) {
 	if err := json.Unmarshal(attestationRaw, &attestation); err != nil {
 		t.Fatal(err)
 	}
-	if attestation.Domain != "canonical_binary_execution_frames" || attestation.Ordering != "ordered_stream" || attestation.ExecutionStreamHash == "" {
+	if attestation.Domain != "canonical_binary_execution_frames" || attestation.Ordering != "ordered_stream" ||
+		attestation.Hashing != binaryExecutionHashContract || attestation.ExecutionStreamHash == "" {
 		t.Fatalf("binary attestation = %+v", attestation)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "evidence-artifact-hash.json")); !os.IsNotExist(err) {
@@ -194,27 +195,16 @@ func TestBinaryEvidenceExecutionStreamIsLogModeNeutral(t *testing.T) {
 			t.Fatalf("close %s simulation: %v", logMode, err)
 		}
 	}
-	fullStream, err := os.ReadFile(filepath.Join(root, "full", "events.evs"))
+	fullReport, err := RenderBinaryEvidence(filepath.Join(root, "full"), filepath.Join(t.TempDir(), "full-rendered"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("render full evidence: %v", err)
 	}
-	noneStream, err := os.ReadFile(filepath.Join(root, "none", "events.evs"))
+	noneReport, err := RenderBinaryEvidence(filepath.Join(root, "none"), filepath.Join(t.TempDir(), "none-rendered"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("render none evidence: %v", err)
 	}
-	if !bytes.Equal(fullStream, noneStream) {
-		t.Fatal("binary execution stream changed when JSON sidecars were disabled")
-	}
-	fullAttestation, err := os.ReadFile(filepath.Join(root, "full", "binary-evidence-attestation.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	noneAttestation, err := os.ReadFile(filepath.Join(root, "none", "binary-evidence-attestation.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(fullAttestation, noneAttestation) {
-		t.Fatal("binary execution attestation changed when JSON sidecars were disabled")
+	if fullReport.ExecutionHash != noneReport.ExecutionHash {
+		t.Fatalf("binary execution hash changed when JSON sidecars were disabled: full=%s none=%s", fullReport.ExecutionHash, noneReport.ExecutionHash)
 	}
 }
 

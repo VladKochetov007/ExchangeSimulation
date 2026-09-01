@@ -148,7 +148,7 @@ func newCheckpointSinkWithBinary(dir string, intervalSeconds int, traceFrom, tra
 		// I/O — an unfair comparison in the binary path's disfavour. Discarding
 		// makes the two paths do the same amount of writing, which is none.
 		if discard {
-			sink.binary = newBinaryEvidence(io.Discard)
+			sink.binary = newNeutralBinaryEvidence(io.Discard)
 		} else {
 			file, err := os.Create(filepath.Join(dir, "events.evs"))
 			if err != nil {
@@ -156,7 +156,7 @@ func newCheckpointSinkWithBinary(dir string, intervalSeconds int, traceFrom, tra
 			}
 			sink.binaryFile = file
 			sink.binaryBuf = bufio.NewWriterSize(file, 1<<20)
-			sink.binary = newBinaryEvidence(sink.binaryBuf)
+			sink.binary = newNeutralBinaryEvidence(sink.binaryBuf)
 		}
 	}
 	return sink, nil

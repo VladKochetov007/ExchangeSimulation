@@ -99,7 +99,18 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 		return BinaryRenderReport{}, fmt.Errorf("multivenue: open binary evidence: %w", err)
 	}
 	defer eventsFile.Close()
-	reader, err := evstream.NewReader(eventsFile, evstream.ReaderOptions{VerifyHash: true})
+	attestation, err := readBinaryAttestation(inputAbs)
+	if err != nil {
+		return BinaryRenderReport{}, err
+	}
+	hashFrame, err := binaryHashFrameForContract(attestation.Hashing)
+	if err != nil {
+		return BinaryRenderReport{}, err
+	}
+	reader, err := evstream.NewReader(eventsFile, evstream.ReaderOptions{
+		VerifyHash: true,
+		HashFrame:  hashFrame,
+	})
 	if err != nil {
 		return BinaryRenderReport{}, fmt.Errorf("multivenue: binary evidence reader: %w", err)
 	}
@@ -121,7 +132,7 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 	if !reader.Terminated() {
 		return BinaryRenderReport{}, fmt.Errorf("multivenue: binary evidence has no completion trailer")
 	}
-	if err := validateBinaryAttestation(inputAbs, eventFrames, reader, sidecarDigest, contract.Config.LogMode); err != nil {
+	if err := validateBinaryAttestation(inputAbs, attestation, eventFrames, reader, sidecarDigest, contract.Config.LogMode); err != nil {
 		return BinaryRenderReport{}, err
 	}
 	if err := validateRenderRecords(routes); err != nil {
@@ -157,15 +168,32 @@ func readRenderRunContract(inputDir string) (renderRunContract, error) {
 	return contract, nil
 }
 
-func validateBinaryAttestation(inputDir string, eventFrames uint64, reader *evstream.Reader, sidecarDigest renderArtifactDigest, logMode string) error {
+func readBinaryAttestation(inputDir string) (binaryEvidenceArtifactRecord, error) {
 	raw, err := os.ReadFile(filepath.Join(inputDir, "binary-evidence-attestation.json"))
 	if err != nil {
-		return fmt.Errorf("multivenue: read binary evidence attestation: %w", err)
+		return binaryEvidenceArtifactRecord{}, fmt.Errorf("multivenue: read binary evidence attestation: %w", err)
 	}
 	var attestation binaryEvidenceArtifactRecord
 	if err := json.Unmarshal(raw, &attestation); err != nil {
-		return fmt.Errorf("multivenue: decode binary evidence attestation: %w", err)
+		return binaryEvidenceArtifactRecord{}, fmt.Errorf("multivenue: decode binary evidence attestation: %w", err)
 	}
+	return attestation, nil
+}
+
+func binaryHashFrameForContract(contract string) (evstream.FrameHasher, error) {
+	switch contract {
+	case "":
+		// Streams written before the explicit hash contract used raw frame
+		// bytes, and remain renderable as historical fixtures.
+		return nil, nil
+	case binaryExecutionHashContract:
+		return hashBinaryExecutionFrame, nil
+	default:
+		return nil, fmt.Errorf("multivenue: unsupported binary execution hash contract %q", contract)
+	}
+}
+
+func validateBinaryAttestation(inputDir string, attestation binaryEvidenceArtifactRecord, eventFrames uint64, reader *evstream.Reader, sidecarDigest renderArtifactDigest, logMode string) error {
 	digest := reader.ExecutionHash()
 	executionHash := hex.EncodeToString(digest[:])
 	if attestation.Domain != "canonical_binary_execution_frames" || attestation.Ordering != "ordered_stream" ||

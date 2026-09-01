@@ -35,7 +35,10 @@ func TestBinarySinkWritesTerminatedStreamAndRealCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read binary stream: %v", err)
 	}
-	reader, err := evstream.NewReader(bytes.NewReader(stream), evstream.ReaderOptions{VerifyHash: true})
+	reader, err := evstream.NewReader(bytes.NewReader(stream), evstream.ReaderOptions{
+		VerifyHash: true,
+		HashFrame:  hashBinaryExecutionFrame,
+	})
 	if err != nil {
 		t.Fatalf("new stream reader: %v", err)
 	}
