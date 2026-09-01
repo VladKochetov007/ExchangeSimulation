@@ -194,6 +194,8 @@ fi
 (( final_available_free_bytes >= minimum_free_bytes )) ||
 	fail "final retained-output free space is below the ${minimum_free_bytes}-byte reserve: $final_available_free_bytes"
 required_free_bytes=$((peak_output_bytes + safety_margin_bytes))
+(( final_available_free_bytes >= required_free_bytes )) ||
+	fail "final retained-output free space is below the measured capacity floor: available=$final_available_free_bytes required=$required_free_bytes"
 attestation_tmp="$attestation.tmp-$$"
 mkdir -p -- "$(dirname -- "$attestation")"
 evidence_manifest_sha256=$(sha256sum -- "$probe_dir/evidence-manifest.json" | awk '{print $1}')

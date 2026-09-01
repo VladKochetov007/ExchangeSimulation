@@ -118,6 +118,10 @@ capacity_probe_attestation="$tmp_root/capacity-attestation-bound.json"
 v2_r2_require_binary_capacity_attestation "$capacity_probe_binary" "$matching_revision" \
 	"$capacity_probe_attestation" "config-for-contract-test" 4 4294967296 ||
 	fail "a config/process-bound binary capacity attestation was rejected"
+jq '.peak_output_bytes = 3000000000 | .required_free_bytes = 5147483648' \
+	"$capacity_probe_attestation" >"$tmp_root/capacity-attestation-insufficient-free-space.json"
+expect_failure v2_r2_require_binary_capacity_attestation "$capacity_probe_binary" "$matching_revision" \
+	"$tmp_root/capacity-attestation-insufficient-free-space.json" "config-for-contract-test" 4 4294967296
 expect_failure v2_r2_require_binary_capacity_attestation "$capacity_probe_binary" "$matching_revision" \
 	"$capacity_probe_attestation" "wrong-config" 4
 expect_failure v2_r2_require_binary_capacity_attestation "$capacity_probe_binary" "$matching_revision" \

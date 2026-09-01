@@ -164,6 +164,7 @@ v2_r2_require_binary_capacity_attestation() {
 			'.config_sha256 == $config_sha256 and .gomaxprocs == $gomaxprocs and .minimum_free_bytes == $minimum_free_bytes and
 			 (.initial_available_free_bytes | type) == "number" and .initial_available_free_bytes >= $minimum_free_bytes and
 			 (.available_free_bytes | type) == "number" and .available_free_bytes >= $minimum_free_bytes and
+			 .available_free_bytes >= (.peak_output_bytes + .safety_margin_bytes) and
 			 (.evidence_manifest_sha256 | type) == "string" and (.evidence_manifest_sha256 | test("^[0-9a-f]{64}$"))' \
 			"$attestation" >/dev/null || return 1
 		local probe_root probe_cell actual_manifest_sha256
