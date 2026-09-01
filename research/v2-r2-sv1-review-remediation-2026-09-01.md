@@ -295,3 +295,26 @@ This remediation changes analyzer/provenance validation only; it does not alter
 CDF actor economics, R2 configuration, historical JSON evidence, or any
 simulation trajectory. The exact successor tree requires a fresh independent
 Sol-xhigh review before the activation probe is retried.
+
+## Fresh exact-tree Sol-xhigh acceptance — 0e42809
+
+Euler completed a fresh independent read-only review of exact
+`0e42809af509aed9733bffcc629c340c71415c44`. The verdict is **ACCEPT for the
+narrowly authorized five-minute seed-607 paired activation probe**. The review
+found no blocker in the finite CDF economics, delayed local reference/target,
+inventory/PnL/withdrawal behavior, independent quote-cash reconstruction,
+venue-sequence ordering, fail-closed evidence handling, output-root boundary,
+provenance, or historical-R2 isolation.
+
+The conditions remain strict: rebuild clean Go 1.27 `linux/amd64/v1` binaries
+from this exact revision; use a fresh external-scratch output root; run only
+the registered five-minute seed-607 treatment/control activation probe; retain
+all artifacts; and stop on any analyzer, provenance, evidence, sequence, or
+boundary failure. This does not authorize `dev-607`, a 24-hour campaign,
+freeze, or any holdout. No cell or holdout was run during the review.
+
+The reviewer noted one nonblocking limitation for later gates: a conservative
+rejection is possible when exchange cancellation and actor-observed fill
+evidence cross timing domains. The retained identical seed-607 trajectory had
+no such crossing, but this limitation must be corrected before broader or
+stress testing if it activates.
