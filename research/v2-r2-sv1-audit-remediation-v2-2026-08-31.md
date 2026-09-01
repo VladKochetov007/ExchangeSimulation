@@ -117,10 +117,11 @@ The clean binaries were built from `ad51e7a` with `/usr/local/go/bin/go`
 
 The development-only paired run used seed 607, a five-minute horizon,
 `GOMAXPROCS=4`, full `evstream_v3` evidence, and the registered treatment and
-no-CDF control configurations. It ran outside the repository at:
+no-CDF control configurations. It ran in an external scratch directory that
+is intentionally not part of the repository.
 
 ```
-/tmp/v2-r2-sv1-activation-ad51e7a-6V1vwl
+external-scratch/v2-r2-sv1-activation-ad51e7a
 ```
 
 The raw evidence remains retained there. It has not been substituted for an
@@ -170,3 +171,39 @@ accepts the candidate, the next development work must still exercise stale or
 one-sided withdrawal, terminal censoring, concentration, determinism, and
 evidence-neutrality before any 24-hour campaign consideration. Holdouts remain
 untouched.
+
+## Post-v2 hardening checkpoint — c6bfcf5
+
+The exact successor implementation checkpoint is now `c6bfcf5`:
+`fix: harden CDF activation evidence boundaries`. It is pushed on the
+successor branch. The performance feed was fetched again at this checkpoint;
+there are still no commits newer than reviewed revision `c4434ad`, and no
+performance-branch code was merged.
+
+The CDF fee schedule is now real configuration rather than an audit-only
+fixture. Each registered successor supplier is wired to its configured maker
+fee, and the extractor recomputes the expected quote-asset fee from price,
+quantity, precision, and registered basis points. Positive fees therefore
+must be visible in fills and in the supplier's balance/PnL reconciliation.
+
+The participant information boundary now includes a separate fixed-width
+gateway-action sidecar. It records subscribe, place, cancel, and unsubscribe
+requests with request identity, order identity where applicable, decision
+time, and the exact delayed-feed frontier. Its own sequence is contiguous and
+validated. CDF submit and cancellation decisions must match the corresponding
+gateway request; missing, reordered, stale-frontier, digest-mutated, or
+identity-mutated action evidence fails closed. The legacy schedule/receipt /
+place-decision contract remains unchanged for existing consumers.
+
+The extractor now separates live accepted quotes, pending submissions, and
+accepted quotes whose cancellation is still pending. It reports per-supplier
+volume share and time-weighted resting-depth share, including zero-depth
+intervals. The actor's quote quantity is bounded by admission-time gross
+inventory headroom on both buy and sell sides. Focused tests cover gross-cap
+boundaries, one-sided withdrawal, stale withdrawal after the configured age,
+delayed cancellation without replacement, action sequence integrity, and a
+semantic cancellation-identity mutation.
+
+The focused `analysis`, `simulation`, and `simulations/multivenue` suites are
+green at this checkpoint. A clean full `make test` is the next mechanical
+gate; no development or holdout cell has been started.
