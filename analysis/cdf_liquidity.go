@@ -169,6 +169,9 @@ type CDFLiquiditySupplierAudit struct {
 	configuredMaxPosition           int64
 	configuredMaxInventory          int64
 	configuredBasePrecision         int64
+	configuredReferencePrice        int64
+	configuredBaseHolding           int64
+	configuredElasticityPerPercent  int64
 	configuredMaxObservationAge     int64
 	configuredInitialBaseBalance    int64
 	configuredInitialQuoteBalance   int64
@@ -195,8 +198,7 @@ type CDFLiquiditySupplierAudit struct {
 	pendingQuoteByRequest           map[uint64]cdfDecisionEvidence
 	lastDecisionAt                  int64
 	lastDecisionOrdinal             int64
-	lastActionableSide              string
-	lastActionableQty               int64
+	lastActionablePosition          int64
 	hasActionableDecision           bool
 	inventoryChangedSinceActionable bool
 	receiptRequired                 bool
@@ -300,19 +302,22 @@ type cdfRunMetadata struct {
 }
 
 type cdfSupplierConfig struct {
-	Role                string `json:"role"`
-	Symbol              string `json:"symbol"`
-	BaseAsset           string `json:"base_asset"`
-	QuoteAsset          string `json:"quote_asset"`
-	BasePrecision       int64  `json:"base_precision"`
-	QuotePrecision      int64  `json:"quote_precision"`
-	InitialBaseBalance  int64  `json:"initial_base_balance"`
-	InitialQuoteBalance int64  `json:"initial_quote_balance"`
-	MaxPosition         int64  `json:"max_position"`
-	MaxInventory        int64  `json:"max_inventory"`
-	MaxQuoteQty         int64  `json:"max_quote_qty"`
-	MaxObservationAge   int64  `json:"max_observation_age"`
-	MakerFeeBps         int64  `json:"maker_fee_bps"`
+	Role                 string `json:"role"`
+	Symbol               string `json:"symbol"`
+	BaseAsset            string `json:"base_asset"`
+	QuoteAsset           string `json:"quote_asset"`
+	BasePrecision        int64  `json:"base_precision"`
+	QuotePrecision       int64  `json:"quote_precision"`
+	InitialBaseBalance   int64  `json:"initial_base_balance"`
+	InitialQuoteBalance  int64  `json:"initial_quote_balance"`
+	MaxPosition          int64  `json:"max_position"`
+	MaxInventory         int64  `json:"max_inventory"`
+	MaxQuoteQty          int64  `json:"max_quote_qty"`
+	MaxObservationAge    int64  `json:"max_observation_age"`
+	ReferencePrice       int64  `json:"reference_price"`
+	BaseHolding          int64  `json:"base_holding"`
+	ElasticityPerPercent int64  `json:"elasticity_per_percent"`
+	MakerFeeBps          int64  `json:"maker_fee_bps"`
 }
 
 func loadCDFRunConfig(run *Run) (cdfRunConfig, error) {
@@ -852,6 +857,9 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.configuredQuotePrecision = supplierConfig.QuotePrecision
 			state.configuredMaxQuoteQty = supplierConfig.MaxQuoteQty
 			state.configuredMakerFeeBps = supplierConfig.MakerFeeBps
+			state.configuredReferencePrice = supplierConfig.ReferencePrice
+			state.configuredBaseHolding = supplierConfig.BaseHolding
+			state.configuredElasticityPerPercent = supplierConfig.ElasticityPerPercent
 			state.configuredMaxObservationAge = supplierConfig.MaxObservationAge
 			state.configuredInitialBaseBalance = supplierConfig.InitialBaseBalance
 			state.configuredInitialQuoteBalance = supplierConfig.InitialQuoteBalance
@@ -1199,17 +1207,27 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 		r.validateDecisionReceipt(event, decision, receiptEvidence)
 	}
 	if decision.Action == "submit" || decision.Action == "rest" {
+		expectedTarget, targetOK := expectedCDFTargetPosition(decision.MarkPrice, decision.ReferencePrice, state)
+		if !targetOK || decision.TargetPosition != expectedTarget {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier target position does not match registered elasticity policy"})
+		}
 		expectedSide, expectedQuantity, expected := expectedCDFInventoryQuote(decision, state)
 		quantityMatches := expected && decision.QuoteQty > 0 && decision.QuoteQty <= expectedQuantity
 		if !expected || decision.Side != expectedSide || !quantityMatches {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier quote does not match its finite inventory target gap"})
 		}
-		if state.inventoryChangedSinceActionable && state.hasActionableDecision && (state.lastActionableSide != decision.Side || state.lastActionableQty != decision.QuoteQty) {
-			state.InventoryResponsiveDecisionCount++
-			r.InventoryResponsiveDecisionCount++
+		if state.inventoryChangedSinceActionable && state.hasActionableDecision {
+			counterfactualGrossInventory, counterfactualGrossOK := exactAdd(state.configuredInitialBaseBalance, state.lastActionablePosition)
+			counterfactualSide, counterfactualQty, counterfactualOK := expectedCDFInventoryQuoteAt(decision.TargetPosition, state.lastActionablePosition, counterfactualGrossInventory, state)
+			counterfactualOK = counterfactualOK && counterfactualGrossOK
+			if !counterfactualOK {
+				r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "inventory response no-fill counterfactual is not reconstructible"})
+			} else if decision.Side != counterfactualSide || decision.QuoteQty != counterfactualQty {
+				state.InventoryResponsiveDecisionCount++
+				r.InventoryResponsiveDecisionCount++
+			}
 		}
-		state.lastActionableSide = decision.Side
-		state.lastActionableQty = decision.QuoteQty
+		state.lastActionablePosition = decision.Position
 		state.hasActionableDecision = true
 		state.inventoryChangedSinceActionable = false
 	}
@@ -1737,6 +1755,13 @@ func absInt64(value int64) int64 {
 
 func minInt64(left, right int64) int64 {
 	if left < right {
+		return left
+	}
+	return right
+}
+
+func maxInt64(left, right int64) int64 {
+	if left > right {
 		return left
 	}
 	return right
@@ -2606,8 +2631,29 @@ func quoteMatchesObservedTouch(decision cdfDecisionEvidence) bool {
 	return decision.QuotePrice == decision.BestAsk && decision.QuoteQty <= decision.BestAskQty
 }
 
+func expectedCDFTargetPosition(markPrice, referencePrice int64, state *CDFLiquiditySupplierAudit) (int64, bool) {
+	if markPrice <= 0 || referencePrice <= 0 || state.configuredReferencePrice <= 0 || state.configuredElasticityPerPercent <= 0 {
+		return 0, false
+	}
+	percentAbove := (float64(markPrice)/float64(referencePrice) - 1) * 100
+	target := float64(state.configuredBaseHolding) - percentAbove*float64(state.configuredElasticityPerPercent)
+	if math.IsNaN(target) || math.IsInf(target, 0) {
+		return 0, false
+	}
+	minimumPosition, maximumPosition := -state.configuredMaxPosition, state.configuredMaxPosition
+	if state.configuredMaxInventory > 0 {
+		minimumPosition = maxInt64(minimumPosition, -state.configuredInitialBaseBalance)
+		maximumPosition = minInt64(maximumPosition, state.configuredMaxInventory-state.configuredInitialBaseBalance)
+	}
+	return int64(math.Max(float64(minimumPosition), math.Min(float64(maximumPosition), target))), true
+}
+
 func expectedCDFInventoryQuote(decision cdfDecisionEvidence, state *CDFLiquiditySupplierAudit) (string, int64, bool) {
-	gapBig := new(big.Int).Sub(big.NewInt(decision.TargetPosition), big.NewInt(decision.Position))
+	return expectedCDFInventoryQuoteAt(decision.TargetPosition, decision.Position, decision.GrossInventory, state)
+}
+
+func expectedCDFInventoryQuoteAt(targetPosition, position, grossInventory int64, state *CDFLiquiditySupplierAudit) (string, int64, bool) {
+	gapBig := new(big.Int).Sub(big.NewInt(targetPosition), big.NewInt(position))
 	if !gapBig.IsInt64() || gapBig.Sign() == 0 || state.configuredMaxInventory <= 0 || state.configuredMaxQuoteQty <= 0 {
 		return "", 0, false
 	}
@@ -2619,9 +2665,9 @@ func expectedCDFInventoryQuote(decision cdfDecisionEvidence, state *CDFLiquidity
 	quantity := absInt64(gap)
 	available := int64(0)
 	if side == "BUY" {
-		available = state.configuredMaxInventory - decision.GrossInventory
+		available = state.configuredMaxInventory - grossInventory
 	} else {
-		available = decision.GrossInventory
+		available = grossInventory
 	}
 	if available <= 0 {
 		return side, 0, false

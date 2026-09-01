@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -233,6 +234,48 @@ func TestMeasureCDFLiquidityRejectsInventoryTargetQuoteMutation(t *testing.T) {
 	}
 	if audit.Valid || !hasCDFCheck(audit.Checks, "supplier quote does not match its finite inventory target gap") {
 		t.Fatalf("inventory target mutation audit = %+v, want fail-closed target-gap rejection", audit)
+	}
+}
+
+func TestMeasureCDFLiquidityDoesNotCountMarketOnlyQuoteChangeAsInventoryResponse(t *testing.T) {
+	run := writeCDFLiquidityFixture(t, true, false)
+
+	generalPath := filepath.Join(run.Dir, "venues", "north", "general.jsonl")
+	general, err := os.ReadFile(generalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldDecision := cdfFixtureLine(4, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":4,"observation_time":1,"observation_age":3,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":96,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"submit","reason":"inventory_target_gap","side":"BUY","quote_price":99,"quote_qty":4,"quote_request_id":2,"quote_submitted_at":4,"quote_cash_available":505,"quote_cash_required":396}`) + "\n"
+	newDecision := cdfFixtureLine(4, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":4,"observation_time":1,"observation_age":3,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":115,"reference_price":100,"position":5,"target_position":-9,"inventory_limit":10,"action":"submit","reason":"inventory_target_gap","side":"SELL","quote_price":101,"quote_qty":5,"quote_request_id":2,"quote_submitted_at":4,"quote_cash_available":505,"quote_cash_required":396}`) + "\n"
+	mutatedGeneral := strings.Replace(string(general), oldDecision, newDecision, 1)
+	if mutatedGeneral == string(general) {
+		t.Fatal("market-only decision mutation was not found")
+	}
+	if err := os.WriteFile(generalPath, []byte(mutatedGeneral), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bookPath := filepath.Join(run.Dir, "venues", "north", "spot", "CDF-USD.jsonl")
+	book, err := os.ReadFile(bookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldAccepted := cdfFixtureLine(5, 2, "OrderAccepted", `{"order_id":8,"client_id":2,"request_id":2,"side":"BUY","type":"LIMIT","time_in_force":"GTC","post_only":true,"price":99,"qty":4}`) + "\n"
+	newAccepted := cdfFixtureLine(5, 2, "OrderAccepted", `{"order_id":8,"client_id":2,"request_id":2,"side":"SELL","type":"LIMIT","time_in_force":"GTC","post_only":true,"price":101,"qty":5}`) + "\n"
+	mutatedBook := strings.Replace(string(book), oldAccepted, newAccepted, 1)
+	if mutatedBook == string(book) {
+		t.Fatal("market-only accepted quote mutation was not found")
+	}
+	if err := os.WriteFile(bookPath, []byte(mutatedBook), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.InventoryResponsiveDecisionCount != 0 || !hasCDFCheck(audit.Checks, "supplier has no inventory-responsive post-fill decision") {
+		t.Fatalf("market-only quote change was counted as inventory response: %+v", audit)
 	}
 }
 
@@ -733,6 +776,43 @@ func TestMeasureCDFLiquidityRequiresReceiptTerminalAnchor(t *testing.T) {
 	}
 }
 
+func TestCDFReceiptEvidenceReplaysGlobalEventOrder(t *testing.T) {
+	run := writeCDFLiquidityReceiptFixture(t)
+	schedulesPath := filepath.Join(run.Dir, "market-data-schedules-v2.bin")
+	receiptsPath := filepath.Join(run.Dir, "market-data-receipts-v2.bin")
+	schedules, err := os.ReadFile(schedulesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipts, err := os.ReadFile(receiptsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schedules) < 84 || len(receipts) < 84 {
+		t.Fatal("receipt fixture is missing global event ordinals")
+	}
+	// Preserve a contiguous ordinal set while making the causal receipt appear
+	// before its schedule. A set-only validator would accept this mutation.
+	binary.BigEndian.PutUint64(schedules[76:84], 2)
+	binary.BigEndian.PutUint64(receipts[76:84], 1)
+	if err := os.WriteFile(schedulesPath, schedules, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(receiptsPath, receipts, 0644); err != nil {
+		t.Fatal(err)
+	}
+	rewriteCDFReceiptArtifactDigest(t, run.Dir, "schedules", schedules)
+	rewriteCDFReceiptArtifactDigest(t, run.Dir, "receipts", receipts)
+
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.Valid || !hasCDFCheck(audit.Checks, "missing or malformed market-data receipt evidence") {
+		t.Fatalf("causal receipt-order mutation survived: %+v", audit)
+	}
+}
+
 func writeCDFReceiptContractFixture(t *testing.T, olderFrontier bool) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -910,7 +990,7 @@ func TestMeasureCDFLiquidityCountsTerminalPendingSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending := cdfFixtureLine(7, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":7,"observation_time":1,"observation_age":6,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"submit","reason":"inventory_target_gap","side":"BUY","quote_price":99,"quote_qty":3,"quote_request_id":3,"quote_submitted_at":7,"quote_cash_available":505,"quote_cash_required":297}`) + "\n"
+	pending := cdfFixtureLine(7, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":7,"observation_time":1,"observation_age":6,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":96,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"submit","reason":"inventory_target_gap","side":"BUY","quote_price":99,"quote_qty":3,"quote_request_id":3,"quote_submitted_at":7,"quote_cash_available":505,"quote_cash_required":297}`) + "\n"
 	if err := os.WriteFile(generalPath, append(raw, []byte(pending)...), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -930,7 +1010,7 @@ func TestMeasureCDFLiquidityClosesRejectedSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	submission := cdfFixtureLine(7, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":7,"observation_time":1,"observation_age":6,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"submit","reason":"inventory_target_gap","side":"BUY","quote_price":99,"quote_qty":3,"quote_request_id":3,"quote_submitted_at":7,"quote_cash_available":505,"quote_cash_required":297}`) + "\n"
+	submission := cdfFixtureLine(7, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":7,"observation_time":1,"observation_age":6,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":96,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"submit","reason":"inventory_target_gap","side":"BUY","quote_price":99,"quote_qty":3,"quote_request_id":3,"quote_submitted_at":7,"quote_cash_available":505,"quote_cash_required":297}`) + "\n"
 	if err := os.WriteFile(generalPath, append(raw, []byte(submission)...), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -1102,7 +1182,7 @@ func writeCDFLiquidityFixture(t *testing.T, supplier, malformedFill bool) *Run {
 		general += cdfFixtureLine(3, 2, "elastic_liquidity_supplier_fill", "{"+fillFields+"}") + "\n"
 		general += cdfFixtureLine(2, 2, "balance_snapshot", `{"timestamp":2,"client_id":2,"spot_balances":[{"asset":"CDF","free":100,"locked":0,"borrowed":0,"interest":0,"net_asset":100},{"asset":"USD","free":1000,"locked":0,"borrowed":0,"interest":0,"net_asset":1000}],"perp_balances":[],"borrowed":{}}`) + "\n"
 		general += cdfFixtureLine(6, 2, "balance_snapshot", `{"timestamp":6,"client_id":2,"spot_balances":[{"asset":"CDF","free":105,"locked":0,"borrowed":0,"interest":0,"net_asset":105},{"asset":"USD","free":505,"locked":0,"borrowed":0,"interest":0,"net_asset":505}],"perp_balances":[],"borrowed":{}}`) + "\n"
-		general += cdfFixtureLine(4, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":4,"observation_time":1,"observation_age":3,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"submit","reason":"inventory_target_gap","side":"BUY","quote_price":99,"quote_qty":4,"quote_request_id":2,"quote_submitted_at":4,"quote_cash_available":505,"quote_cash_required":396}`) + "\n"
+		general += cdfFixtureLine(4, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":4,"observation_time":1,"observation_age":3,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":96,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"submit","reason":"inventory_target_gap","side":"BUY","quote_price":99,"quote_qty":4,"quote_request_id":2,"quote_submitted_at":4,"quote_cash_available":505,"quote_cash_required":396}`) + "\n"
 		general += cdfFixtureLine(6, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":6,"observation_time":1,"observation_age":5,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"cancel","reason":"reprice_for_inventory_or_touch","quote_order_id":8,"cancel_request_id":3}`) + "\n"
 	}
 	greeks := fmt.Sprintf(`{"initial_accounts":%s,"terminal_accounts":%s}`, initialAccounts, terminalAccounts)
@@ -1111,7 +1191,7 @@ func writeCDFLiquidityFixture(t *testing.T, supplier, malformedFill bool) *Run {
 	}
 	config := `{"venue_ids":["north"],"seed":607,"step":1,"log_mode":"full","evidence_format":"jsonl","experiment_id":"cdf-fixture-control","hypothesis_id":"V2-R2-SV1-CDF-LIQUIDITY","elastic_supplier_count":1,"record_market_data_receipts":false,"elastic_liquidity_suppliers":[]}`
 	if supplier {
-		config = `{"venue_ids":["north"],"seed":607,"step":1,"log_mode":"full","evidence_format":"jsonl","experiment_id":"cdf-fixture-treatment","hypothesis_id":"V2-R2-SV1-CDF-LIQUIDITY","elastic_supplier_count":1,"record_market_data_receipts":false,"elastic_liquidity_suppliers":[{"role":"cdf_elastic_supplier_1","symbol":"CDF/USD","base_asset":"CDF","quote_asset":"USD","base_precision":1,"quote_precision":1,"initial_base_balance":100,"initial_quote_balance":1000,"max_position":10,"max_inventory":110,"max_quote_qty":5,"max_observation_age":10}]}`
+		config = `{"venue_ids":["north"],"seed":607,"step":1,"log_mode":"full","evidence_format":"jsonl","experiment_id":"cdf-fixture-treatment","hypothesis_id":"V2-R2-SV1-CDF-LIQUIDITY","elastic_supplier_count":1,"record_market_data_receipts":false,"elastic_liquidity_suppliers":[{"role":"cdf_elastic_supplier_1","symbol":"CDF/USD","base_asset":"CDF","quote_asset":"USD","base_precision":1,"quote_precision":1,"initial_base_balance":100,"initial_quote_balance":1000,"reference_price":100,"base_holding":5,"elasticity_per_percent":1,"max_position":10,"max_inventory":110,"max_quote_qty":5,"max_observation_age":10}]}`
 	}
 	manifest := `{"venue_ids":["north"],"build":{"revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","modified":false,"goos":"linux","goarch":"amd64","goamd64":"v1"},"config":` + config + `}`
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0644); err != nil {

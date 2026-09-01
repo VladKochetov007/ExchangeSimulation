@@ -130,6 +130,7 @@ write_full_cell() {
 	local gomaxprocs=$3
 	local hypothesis_id=$4
 	local experiment_id=$5
+	local empty_digest
 	mkdir -p -- "$cell/venues/north"
 	cp -- "$config" "$cell/run-config.json"
 	write_metadata "$cell" 607 full "$gomaxprocs" "$config" "$hypothesis_id"
@@ -138,6 +139,18 @@ write_full_cell() {
 	"$fixture_binary" -out "$cell/events.evs" -attestation "$cell/binary-evidence-attestation.json" -sequence 2
 	artifact_result=$("$analyzer" -metric evidenceartifacthash -json "$cell")
 	jq -e '.result | select(type == "object") | .domain = "persisted_json_log_evidence_only" | .ordering = "unordered_multiset"' <<<"$artifact_result" >"$cell/evidence-only-artifact-hash.json"
+	: >"$cell/market-data-schedules-v2.bin"
+	: >"$cell/market-data-receipts-v2.bin"
+	: >"$cell/market-data-decisions-v2.bin"
+	: >"$cell/market-data-actions-v2.bin"
+	empty_digest=$(printf '' | sha256sum | awk '{print $1}')
+	jq -n --arg digest "$empty_digest" \
+		'{schema_version: 2, domain: "participant_information_boundary_v2", ordering: "per_link_fifo_schedule_receipt_decision", terminal_at: 1735776000000000000,
+		schedules: {file: "market-data-schedules-v2.bin", records: 0, digest: $digest},
+		receipts: {file: "market-data-receipts-v2.bin", records: 0, digest: $digest},
+		decisions: {file: "market-data-decisions-v2.bin", records: 0, digest: $digest},
+		actions: {file: "market-data-actions-v2.bin", records: 0, digest: $digest}, links: [], symbols: []}' \
+		>"$cell/market-data-evidence-v2.json"
 	v2_r2_write_evidence_manifest "$cell" || fail "could not create full evidence manifest: $cell"
 	write_status "$cell"
 }
@@ -167,6 +180,13 @@ jq -n '{contract: "v2-integrated-longrun-r2-candidate-v2", predicates: {fixture:
 for cell in dev-607 dev-607-none dev-607-g8; do
 	v2_r2_write_attestation "$v2_r2_output_root/$cell" || fail "could not write fixture attestation: $cell"
 done
+
+retention_fixture="$tmp_root/retention-missing"
+cp -a -- "$v2_r2_output_root/dev-607" "$retention_fixture"
+rm -- "$retention_fixture/market-data-actions-v2.bin"
+if v2_r2_verify_evidence_manifest "$retention_fixture" >/dev/null 2>&1; then
+	fail "receipt retention verifier accepted a configured run with a missing action ledger"
+fi
 
 GOMAXPROCS=1 MVANALYZE_BIN="$analyzer" \
 	"$root_dir/scripts/check-v2-integrated-longrun-r2-parity.sh" "$v2_r2_output_root" >/dev/null ||

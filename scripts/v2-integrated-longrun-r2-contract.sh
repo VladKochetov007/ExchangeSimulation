@@ -234,9 +234,10 @@ v2_r2_evidence_format() {
 v2_r2_write_evidence_manifest() {
 	local cell=$1
 	local output="$cell/evidence-manifest.json"
-	local log_mode evidence_format contract
+	local log_mode evidence_format contract record_market_data_receipts
 	log_mode=$(jq -er '.log_mode' "$cell/run-config.json") || return 1
 	evidence_format=$(v2_r2_evidence_format "$cell") || return 1
+	record_market_data_receipts=$(jq -r '.record_market_data_receipts // false' "$cell/run-config.json") || return 1
 	local fixed_files
 	case "$evidence_format:$log_mode" in
 		jsonl:full)
@@ -257,10 +258,14 @@ v2_r2_write_evidence_manifest() {
 			;;
 		*) return 1 ;;
 	 esac
-	if [[ "$evidence_format" == evstream_v3 && -s "$cell/market-data-evidence-v2.json" ]]; then
+	if [[ "$evidence_format" == evstream_v3 && "$record_market_data_receipts" == true ]]; then
 		local receipt_file
 		for receipt_file in market-data-evidence-v2.json market-data-schedules-v2.bin market-data-receipts-v2.bin market-data-decisions-v2.bin market-data-actions-v2.bin; do
-			[[ -s "$cell/$receipt_file" ]] || return 1
+			if [[ "$receipt_file" == *.bin ]]; then
+				[[ -f "$cell/$receipt_file" && ! -L "$cell/$receipt_file" ]] || return 1
+			else
+				[[ -s "$cell/$receipt_file" && ! -L "$cell/$receipt_file" ]] || return 1
+			fi
 			fixed_files+=("$receipt_file")
 		done
 	fi
@@ -268,7 +273,11 @@ v2_r2_write_evidence_manifest() {
 	local relative path bytes digest
 	for relative in "${fixed_files[@]}"; do
 		path="$cell/$relative"
-		[[ -s "$path" ]] || return 1
+		if [[ "$relative" == market-data-*.bin ]]; then
+			[[ -f "$path" && ! -L "$path" ]] || return 1
+		else
+			[[ -s "$path" && ! -L "$path" ]] || return 1
+		fi
 		bytes=$(stat -c '%s' -- "$path") || return 1
 		digest=$(sha256sum -- "$path" | awk '{print $1}') || return 1
 		fixed_records=$(jq -c --arg path "$relative" --arg digest "$digest" --argjson bytes "$bytes" \
@@ -311,9 +320,10 @@ v2_r2_verify_evidence_manifest() {
 	local cell=$1
 	local manifest="$cell/evidence-manifest.json"
 	[[ -s "$manifest" ]] || return 1
-	local log_mode evidence_format expected_contract expected_schema
+	local log_mode evidence_format expected_contract expected_schema record_market_data_receipts
 	log_mode=$(jq -er '.log_mode' "$cell/run-config.json") || return 1
 	evidence_format=$(v2_r2_evidence_format "$cell") || return 1
+	record_market_data_receipts=$(jq -r '.record_market_data_receipts // false' "$cell/run-config.json") || return 1
 	case "$evidence_format" in
 		jsonl) expected_contract="v2-integrated-longrun-evidence-manifest-v1"; expected_schema=1 ;;
 		evstream_v3) expected_contract="v2-integrated-longrun-evidence-manifest-v2"; expected_schema=2 ;;
@@ -327,7 +337,7 @@ v2_r2_verify_evidence_manifest() {
 		evstream_v3:none) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json | sort) ;;
 		*) return 1 ;;
 	esac
-	if [[ "$evidence_format" == evstream_v3 && -s "$cell/market-data-evidence-v2.json" ]]; then
+	if [[ "$evidence_format" == evstream_v3 && "$record_market_data_receipts" == true ]]; then
 		expected_fixed=$(printf '%s\n' "$expected_fixed" market-data-evidence-v2.json market-data-schedules-v2.bin market-data-receipts-v2.bin market-data-decisions-v2.bin market-data-actions-v2.bin | sort)
 	fi
 	jq -e --arg cell "$(basename "$cell")" --arg log_mode "$log_mode" --arg evidence_format "$evidence_format" \

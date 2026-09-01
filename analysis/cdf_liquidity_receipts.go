@@ -129,6 +129,13 @@ type cdfMarketDataEvidence struct {
 	terminalAt       int64
 }
 
+type cdfReplayEvent struct {
+	ordinal     uint64
+	kind        string
+	linkOrdinal cdfReceiptLinkOrdinal
+	frontier    cdfReceiptLinkOrdinal
+}
+
 func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 	manifestRaw, err := os.ReadFile(filepath.Join(runDir, "market-data-evidence-v2.json"))
 	if err != nil {
@@ -327,7 +334,7 @@ func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 		}
 		evidence.decisions[key] = record
 	}
-	if err := validateCDFEventOrdinalContinuity(eventOrdinals); err != nil {
+	if err := validateCDFEventReplay(evidence, eventOrdinals); err != nil {
 		return nil, err
 	}
 	return evidence, nil
@@ -344,11 +351,49 @@ func registerCDFEventOrdinal(ordinals map[uint64]string, ordinal uint64, kind st
 	return nil
 }
 
-func validateCDFEventOrdinalContinuity(ordinals map[uint64]string) error {
-	for expected := uint64(1); expected <= uint64(len(ordinals)); expected++ {
-		if _, exists := ordinals[expected]; !exists {
-			return fmt.Errorf("global event ordinal stream has a gap at %d", expected)
+func validateCDFEventReplay(evidence *cdfMarketDataEvidence, ordinals map[uint64]string) error {
+	events := make([]cdfReplayEvent, 0, len(ordinals))
+	for key, record := range evidence.schedules {
+		events = append(events, cdfReplayEvent{ordinal: record.EventOrdinal, kind: "schedule", linkOrdinal: key})
+	}
+	for key, record := range evidence.receipts {
+		events = append(events, cdfReplayEvent{ordinal: record.EventOrdinal, kind: "receipt", linkOrdinal: key})
+	}
+	for _, record := range evidence.decisions {
+		events = append(events, cdfReplayEvent{
+			ordinal:  record.EventOrdinal,
+			kind:     "decision",
+			frontier: cdfReceiptLinkOrdinal{LinkID: record.LinkID, LinkOrdinal: record.FrontierOrdinal},
+		})
+	}
+	sort.Slice(events, func(i, j int) bool { return events[i].ordinal < events[j].ordinal })
+	scheduled := make(map[cdfReceiptLinkOrdinal]uint64, len(evidence.schedules))
+	received := make(map[cdfReceiptLinkOrdinal]uint64, len(evidence.receipts))
+	for index, event := range events {
+		expectedOrdinal := uint64(index + 1)
+		if event.ordinal != expectedOrdinal {
+			return fmt.Errorf("global event ordinal stream has a gap at %d", expectedOrdinal)
 		}
+		switch event.kind {
+		case "schedule":
+			scheduled[event.linkOrdinal] = event.ordinal
+		case "receipt":
+			scheduleOrdinal, exists := scheduled[event.linkOrdinal]
+			if !exists || scheduleOrdinal >= event.ordinal {
+				return fmt.Errorf("receipt event ordinal %d replays before its schedule", event.ordinal)
+			}
+			received[event.linkOrdinal] = event.ordinal
+		case "decision":
+			receiptOrdinal, exists := received[event.frontier]
+			if !exists || receiptOrdinal >= event.ordinal {
+				return fmt.Errorf("decision event ordinal %d replays before its observation receipt", event.ordinal)
+			}
+		default:
+			return fmt.Errorf("unknown global event kind %q", event.kind)
+		}
+	}
+	if len(events) != len(ordinals) {
+		return fmt.Errorf("global event replay count differs from ordinal catalog")
 	}
 	return nil
 }
