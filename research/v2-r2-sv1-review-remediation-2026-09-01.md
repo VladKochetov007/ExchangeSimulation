@@ -592,3 +592,24 @@ historical R2/R5 evidence, and the failed capacity output were preserved.
 The next capacity attempt must use a fresh root and a binary rebuilt from the
 final documented source revision; the reserve and measured-output floor must
 not be lowered.
+
+## Retention-preserving capacity cleanup — c5d7f56
+
+The host capacity stop was addressed without discarding historical evidence.
+The explicitly stale R5 directory
+`/home/vlad/v2-r5-preserved-dev607-adc4e03-stale-revision` was first archived
+to
+`/home/vlad/v2-r5-preserved-dev607-adc4e03-stale-revision.tar.zst`. The archive
+passed `zstd -t`, normalized 51-member equality, and a full tar content
+comparison against the still-present source. Its SHA-256 is
+`b78524023b68dcab8f36b3d175d5fdb9ad46c86ff034d62a02892744a861e729`; the
+checksum, member list, and comparison log are retained beside the archive.
+Only then was the unpacked duplicate removed, recovering approximately 33 GiB.
+The historical result remains recoverable from the verified archive. The
+incomplete derivative-proxy tree, the failed SV1 capacity output, and all other
+retained evidence were not touched.
+
+The source tree remains clean at `c5d7f56` after this documentation update.
+The next capacity attempt must use a fresh output root and a clean binary built
+from that final documented revision; no capacity attestation has yet been
+published and no development or holdout cell is authorized.
