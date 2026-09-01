@@ -284,7 +284,10 @@ volume, and 8.874577955823758% supplier volume share. All 12 suppliers traded
 and changed PnL. The configured 5-bps maker fee was present in actual supplier
 fill records as positive quote-asset fees, and the audit's balance and account
 equity residuals were both zero. The largest supplier resting-depth share was
-22.661106211326726%; no supplier exceeded the 75% concentration threshold.
+22.661106211326726%; individual supplier shares were approximately 2.56% to
+3.10%, and no supplier exceeded the 75% concentration threshold. This is the
+largest venue-aggregate supplier-depth share, not an individual supplier
+share.
 The treatment had six bid-absent and six ask-absent snapshots out of 900, or
 `0.006666666666666667` on each side, matching the control. Ordinary flow had no
 withdrawals, so the stale/one-sided withdrawal activation criterion remains
@@ -303,3 +306,48 @@ rendered evidence, and the activation audit. That review must decide whether
 the ordinary-probe absence of withdrawals requires a dedicated development
 stress probe before any larger campaign. No registered dev-607 run and no
 holdout has been consumed.
+
+## Independent promotion review — rejection at a60ce0b
+
+Helmholtz performed a fresh independent Sol-xhigh review of the exact pushed
+tree, the binary attestation contract, the rendered probe evidence, and the CDF
+activation audit. The reviewer rejected the candidate for promotion and for a
+24-hour development campaign. This is a rejection of the evidence and
+activation gate, not a rejection of the finite CDF supplier hypothesis. No
+holdout was authorized, inspected, or consumed.
+
+The review identified the following concrete blockers:
+
+* The analyzer rejects every decision whose observation age exceeds the
+  configured maximum, including the actor's deliberately emitted stale-data
+  withdrawal. Therefore the required end-to-end stale withdrawal criterion
+  cannot currently pass; the existing stale test only exercises the actor and
+  not the complete gateway, receipt, frontier, and final-audit path.
+* The neutral execution digest alone does not attest the route sequence used
+  by the renderer. A sequence swap can preserve the normalized digest and the
+  sequence set while changing reconstructed order. The successor contract must
+  attest both normalized economic identity and raw canonical reconstruction
+  identity, and must include a sequence-swap mutation test.
+* Supplier resting-depth shares use the current snapshot as the weight for the
+  preceding interval and omit important empty/current intervals. The contract
+  must specify left- or right-continuous depth semantics, include empty and
+  terminal intervals, and have hand-checkable tests.
+* Terminal receipt validation does not require every schedule due by
+  `TerminalAt` to have a receipt, nor does it validate global event ordinal
+  continuity across schedule, receipt, and decision records. The missing
+  post-terminal schedules observed in the probe are legitimate, but the
+  completeness rule is not enforced.
+* The endpoint checkpoint is a prefix: it has fewer event frames than the
+  completed binary attestation because equal-time final writes are suppressed.
+  The evidence contract must either write an explicit final checkpoint equal to
+  the completed attestation or classify the existing row as a prefix.
+* Focused fixed-point tests are still required for partial fills, long/short
+  closure, reversal, weighted-entry rounding, fees, and quote-capital
+  admission. In addition, the reviewer noted that quote admission is not yet
+  bounded by pre-trade quote headroom; generic exchange borrowing can occur and
+  is rejected only after the fact.
+
+The remediation decision is to reproduce each invariant on the scientific
+tree, add fail-closed regressions, and make minimal attributable fixes before
+another narrow development stress probe. The historical R2 predecessor remains
+archived as a negative control and is not rewritten.
