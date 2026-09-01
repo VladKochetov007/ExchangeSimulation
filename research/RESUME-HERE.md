@@ -924,3 +924,25 @@ finish and their contracts pass.
   promoted binaries, or launch dev-607 while either the reviewer or capacity
   gate is unresolved. Resume with fresh exact-tree review, then pinned build,
   only after both gates clear.
+
+### 2026-09-01 — setup review accepted; superseded capacity retained
+
+- The exact clean successor tree is `41de87bbdb5f26c10c27c884b4cd8688baf756c5`
+  on `feature/r2-cdf-survival-successor`. Its fresh independent Sol-xhigh
+  review returned **ACCEPT WITH NARROWER CLAIM** for setup only. It explicitly
+  did not authorize a survival result, scientific cell, freeze, or holdout.
+- The validated superseded `2f93ace` capacity probe was compacted through the
+  fail-closed retention protocol. The verified archive is
+  `/home/vlad/v2-r2-sv1-capacity-archive-2f93ace-retained.tar.zst`, 4,020,725,425
+  bytes, SHA-256
+  `f80cdcc72ae1b18735b4cf0f4cda88118da4985ce5d6917ce22d30a1249c68e8`; its
+  retained probe payload is 32,929,468,561 bytes and `tar --compare` is clean.
+  The old root and attestation were removed only after all contract checks and
+  receipt binding passed. This is storage retention, not a current capacity
+  attestation or scientific result.
+- Approximately 72 GiB is available now. Re-fetch the asynchronous performance
+  branch at the next natural checkpoint, rebuild all required binaries from the
+  final documented clean HEAD with Go 1.27, and run a fresh current-revision
+  capacity measurement. If that passes, run corrected treatment-607 only;
+  extract and review it before any other development cell. Holdouts
+  `619/631/641` remain untouched.

@@ -740,3 +740,26 @@ review. The review service currently reports its agent-thread limit even after
 all prior review threads completed, so no prior superseded verdict is being
 used as acceptance. Binary rebuild and every R2 cell remain gated on both
 fresh review and safe capacity.
+
+## Append-only operational update: superseded SV1 capacity retained — 2026-09-01
+
+The exact clean setup tree `41de87bbdb5f26c10c27c884b4cd8688baf756c5` received
+a fresh independent Sol-xhigh **ACCEPT WITH NARROWER CLAIM** review. The review
+authorized one narrow storage-retention invocation and did not authorize any
+scientific cell, parity control, freeze, or holdout.
+
+The superseded `2f93ace` capacity probe passed the fail-closed archive
+contract. Its 32,929,468,561 measured bytes are retained in the verified
+4,020,725,425-byte archive
+`/home/vlad/v2-r2-sv1-capacity-archive-2f93ace-retained.tar.zst` with SHA-256
+`f80cdcc72ae1b18735b4cf0f4cda88118da4985ce5d6917ce22d30a1249c68e8`.
+`tar --compare` produced an empty log; the source root and old attestation were
+removed only after archive integrity, provenance, receipt, and exact cleanup
+checks passed. This is a recoverable storage compaction, not a scientific
+outcome or capacity attestation for the current candidate. Approximately
+72 GiB is now available for a new revision-bound capacity measurement.
+
+The current scientific successor remains pre-cell: rebuild the final
+documented HEAD with pinned Go 1.27, measure actual current-revision capacity,
+and only then run corrected treatment-607. Holdouts `619/631/641` remain
+untouched.

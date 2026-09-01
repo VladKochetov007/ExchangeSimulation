@@ -61,3 +61,39 @@ independent review of the exact implementation is required before invoking it.
 The amendment changes storage retention only; it does not alter simulator
 economics, evidence bytes, event ordering, or the registered development
 sequence.
+
+## Verified retention execution — 2026-09-01
+
+The fresh independent Sol-xhigh review of exact tree
+`41de87bbdb5f26c10c27c884b4cd8688baf756c5` returned **ACCEPT WITH NARROWER
+CLAIM** for the setup gate. It authorized one controlled invocation of this
+protocol against the already validated superseded `2f93ace` capacity probe,
+provided no concurrent mutation occurred. No scientific cell, parity control,
+freeze action, or holdout was authorized by that review.
+
+That invocation completed successfully:
+
+```text
+source revision: 2f93ace63fa1577c5d2122dfe207c4e0f369b9ee
+protocol revision: 41de87bbdb5f26c10c27c884b4cd8688baf756c5
+probe bytes: 32929468561
+archive: /home/vlad/v2-r2-sv1-capacity-archive-2f93ace-retained.tar.zst
+archive bytes: 4020725425
+archive sha256: f80cdcc72ae1b18735b4cf0f4cda88118da4985ce5d6917ce22d30a1249c68e8
+comparison: tar_compare_clean
+```
+
+The archive, checksum, member list, empty comparison log, and retention
+receipt are regular files. The receipt records 37 retained source files; the
+tar member listing contains 46 entries including directory entries. `zstd -t`,
+member enumeration, archive checksum binding, and the full content comparison
+all passed. Only after those checks did the protocol remove the exact
+quarantined probe root and its attestation. Both are now absent; the archive
+is the recoverable retained record. No current or historical scientific
+evidence was deleted. The host recovered approximately 33 GiB, leaving about
+72 GiB available for a fresh revision-bound measurement.
+
+This compaction is a storage-retention operation only. It does not authorize a
+binary rebuild, capacity probe, development cell, freeze, or holdout. The next
+valid step is a clean Go 1.27 rebuild from the final documented HEAD followed
+by a new revision-bound capacity measurement.

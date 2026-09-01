@@ -633,3 +633,26 @@ and explicit reserve-triggered failure, and remains a failed measurement—not
 an attestation or scientific cell. No current evidence, calendar config,
 source code, or holdout was changed. Free disk after compaction is
 approximately 80 GiB, with the failed-capacity archive still retained.
+
+## Reviewed retention execution — 41de87b
+
+The fresh independent Sol-xhigh review of the exact clean setup tree
+`41de87bbdb5f26c10c27c884b4cd8688baf756c5` returned **ACCEPT WITH NARROWER
+CLAIM**. It found no blocker to the retention operation, while explicitly
+excluding survival, viability, 24-hour outcome, repository-wide race-clean,
+and holdout claims. It authorized one invocation against only the validated
+superseded `2f93ace` capacity root.
+
+The authorized invocation passed all retention checks. The 32,929,468,561-byte
+probe was retained in
+`/home/vlad/v2-r2-sv1-capacity-archive-2f93ace-retained.tar.zst`, a
+4,020,725,425-byte zstd archive with SHA-256
+`f80cdcc72ae1b18735b4cf0f4cda88118da4985ce5d6917ce22d30a1249c68e8`.
+The archive comparison was empty, and the receipt binds the archive to the
+old revision, old binary, registered configuration, and attestation. The
+source root and old attestation were removed only after validation and are
+recoverable from the verified archive. This does not alter any scientific
+result and does not authorize a cell; no holdout was consumed.
+
+The next candidate must be rebuilt from the final documented HEAD and receive
+a fresh revision-bound capacity attestation before treatment-607.
