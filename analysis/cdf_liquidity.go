@@ -133,6 +133,10 @@ type CDFLiquiditySupplierAudit struct {
 	ConfiguredMaxInventory           int64   `json:"configured_max_inventory"`
 	ConfiguredMaxQuoteQty            int64   `json:"configured_max_quote_qty"`
 	ConfiguredMakerFeeBps            int64   `json:"configured_maker_fee_bps"`
+	ConfiguredReferencePrice         int64   `json:"configured_reference_price"`
+	ConfiguredReferenceHalfLife      int64   `json:"configured_reference_half_life"`
+	ConfiguredBaseHolding            int64   `json:"configured_base_holding"`
+	ConfiguredElasticityPerPercent   int64   `json:"configured_elasticity_per_percent"`
 	SupplierVolumeShare              float64 `json:"supplier_volume_share"`
 	// This is liquidity-conditioned concentration: the supplier-depth integral
 	// divided by total displayed-depth integral over non-empty intervals. Empty
@@ -170,6 +174,7 @@ type CDFLiquiditySupplierAudit struct {
 	configuredMaxInventory          int64
 	configuredBasePrecision         int64
 	configuredReferencePrice        int64
+	configuredReferenceHalfLife     int64
 	configuredBaseHolding           int64
 	configuredElasticityPerPercent  int64
 	configuredMaxObservationAge     int64
@@ -201,6 +206,10 @@ type CDFLiquiditySupplierAudit struct {
 	lastActionablePosition          int64
 	hasActionableDecision           bool
 	inventoryChangedSinceActionable bool
+	reconstructedReference          int64
+	referenceLastValidMarkAt        int64
+	referenceInitialized            bool
+	referenceMarkSeen               bool
 	receiptRequired                 bool
 }
 
@@ -315,6 +324,7 @@ type cdfSupplierConfig struct {
 	MaxQuoteQty          int64  `json:"max_quote_qty"`
 	MaxObservationAge    int64  `json:"max_observation_age"`
 	ReferencePrice       int64  `json:"reference_price"`
+	ReferenceHalfLife    int64  `json:"reference_half_life"`
 	BaseHolding          int64  `json:"base_holding"`
 	ElasticityPerPercent int64  `json:"elasticity_per_percent"`
 	MakerFeeBps          int64  `json:"maker_fee_bps"`
@@ -858,8 +868,11 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.configuredMaxQuoteQty = supplierConfig.MaxQuoteQty
 			state.configuredMakerFeeBps = supplierConfig.MakerFeeBps
 			state.configuredReferencePrice = supplierConfig.ReferencePrice
+			state.configuredReferenceHalfLife = supplierConfig.ReferenceHalfLife
 			state.configuredBaseHolding = supplierConfig.BaseHolding
 			state.configuredElasticityPerPercent = supplierConfig.ElasticityPerPercent
+			state.reconstructedReference = supplierConfig.ReferencePrice
+			state.referenceInitialized = true
 			state.configuredMaxObservationAge = supplierConfig.MaxObservationAge
 			state.configuredInitialBaseBalance = supplierConfig.InitialBaseBalance
 			state.configuredInitialQuoteBalance = supplierConfig.InitialQuoteBalance
@@ -867,6 +880,10 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.ConfiguredMaxInventory = supplierConfig.MaxInventory
 			state.ConfiguredMaxQuoteQty = supplierConfig.MaxQuoteQty
 			state.ConfiguredMakerFeeBps = supplierConfig.MakerFeeBps
+			state.ConfiguredReferencePrice = supplierConfig.ReferencePrice
+			state.ConfiguredReferenceHalfLife = supplierConfig.ReferenceHalfLife
+			state.ConfiguredBaseHolding = supplierConfig.BaseHolding
+			state.ConfiguredElasticityPerPercent = supplierConfig.ElasticityPerPercent
 			state.receiptRequired = config.RecordMarketDataReceipts && containsString(config.MarketDataReceiptRoles, auditRoleClass(row.Role))
 			if supplierConfig.InitialBaseBalance <= 0 || supplierConfig.InitialQuoteBalance <= 0 || supplierConfig.BasePrecision <= 0 || supplierConfig.QuotePrecision <= 0 || !accountHasNetBalance(row.Account.SpotBalances, supplierConfig.BaseAsset, supplierConfig.InitialBaseBalance) || !accountHasNetBalance(row.Account.SpotBalances, supplierConfig.QuoteAsset, supplierConfig.InitialQuoteBalance) {
 				result.addCheck(CDFLiquidityCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "supplier initial capital does not match registered finite balances"})
@@ -1167,6 +1184,7 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	if !validObservation || decision.ObservationAge < 0 || decision.ReferencePrice <= 0 || decision.InventoryLimit <= 0 {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "invalid decision bounds or observation time"})
 	}
+	r.validateCDFReference(event, decision, state)
 	if state.receiptRequired {
 		r.validateDecisionObservation(event, decision, emptyObservationAllowed, receiptEvidence)
 	}
@@ -1207,18 +1225,18 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 		r.validateDecisionReceipt(event, decision, receiptEvidence)
 	}
 	if decision.Action == "submit" || decision.Action == "rest" {
-		expectedTarget, targetOK := expectedCDFTargetPosition(decision.MarkPrice, decision.ReferencePrice, state)
+		expectedTarget, targetOK := expectedCDFTargetPosition(decision.MarkPrice, state.reconstructedReference, state)
 		if !targetOK || decision.TargetPosition != expectedTarget {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier target position does not match registered elasticity policy"})
 		}
 		expectedSide, expectedQuantity, expected := expectedCDFInventoryQuote(decision, state)
-		quantityMatches := expected && decision.QuoteQty > 0 && decision.QuoteQty <= expectedQuantity
+		quantityMatches := expected && decision.QuoteQty == expectedQuantity
 		if !expected || decision.Side != expectedSide || !quantityMatches {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier quote does not match its finite inventory target gap"})
 		}
-		if state.inventoryChangedSinceActionable && state.hasActionableDecision {
+		if expected && decision.Side == expectedSide && quantityMatches && state.inventoryChangedSinceActionable && state.hasActionableDecision {
 			counterfactualGrossInventory, counterfactualGrossOK := exactAdd(state.configuredInitialBaseBalance, state.lastActionablePosition)
-			counterfactualSide, counterfactualQty, counterfactualOK := expectedCDFInventoryQuoteAt(decision.TargetPosition, state.lastActionablePosition, counterfactualGrossInventory, state)
+			counterfactualSide, counterfactualQty, counterfactualOK := expectedCDFInventoryQuoteAtWithCash(decision.TargetPosition, state.lastActionablePosition, counterfactualGrossInventory, decision.QuotePrice, decision.QuoteCashAvailable, state)
 			counterfactualOK = counterfactualOK && counterfactualGrossOK
 			if !counterfactualOK {
 				r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "inventory response no-fill counterfactual is not reconstructible"})
@@ -1362,6 +1380,47 @@ func (r *CDFLiquidityRunAudit) validateWaitState(event Event, decision cdfDecisi
 		}
 	default:
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "unknown supplier wait reason " + decision.Reason})
+	}
+}
+
+func (r *CDFLiquidityRunAudit) validateCDFReference(event Event, decision cdfDecisionEvidence, state *CDFLiquiditySupplierAudit) {
+	if state.configuredReferencePrice <= 0 || state.configuredReferenceHalfLife <= 0 {
+		return
+	}
+	if !state.referenceInitialized {
+		state.reconstructedReference = state.configuredReferencePrice
+		state.referenceInitialized = true
+	}
+
+	if decision.MarkPrice > 0 {
+		observationUsable := decision.ObservationTime > 0 && decision.ObservationSequence > 0 && decision.ObservationAge >= 0 && decision.ObservationAge <= state.configuredMaxObservationAge
+		markActionAllowed := decision.Action == "submit" || decision.Action == "rest" || decision.Action == "cancel" || (decision.Reason == "inventory_at_target" && (decision.Action == "wait" || decision.Action == "withdraw"))
+		midpoint := int64(0)
+		if decision.BestBid > 0 && decision.BestAsk > 0 && decision.BestBid < decision.BestAsk {
+			midpoint = etypes.Midpoint(decision.BestBid, decision.BestAsk)
+		}
+		if !markActionAllowed || !observationUsable || midpoint <= 0 || decision.MarkPrice != midpoint {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier mark does not match its usable local midpoint"})
+		} else {
+			if !state.referenceMarkSeen {
+				state.referenceLastValidMarkAt = decision.DecisionTime
+				state.referenceMarkSeen = true
+			} else {
+				elapsed := decision.DecisionTime - state.referenceLastValidMarkAt
+				if elapsed > 0 {
+					revised, ok := advanceCDFReference(state.reconstructedReference, midpoint, elapsed, state.configuredReferenceHalfLife)
+					if !ok {
+						r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier reference update is outside finite numeric bounds"})
+					} else {
+						state.reconstructedReference = revised
+					}
+				}
+				state.referenceLastValidMarkAt = decision.DecisionTime
+			}
+		}
+	}
+	if decision.ReferencePrice != state.reconstructedReference {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier reference price does not match registered observation update rule"})
 	}
 }
 
@@ -2527,7 +2586,8 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 		if state.maxBorrowed > 0 || state.borrowEventCount > 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier used unregistered borrowed capital"})
 		}
-		if !state.initialAccountSeen || !state.terminalAccountSeen || state.configuredMaxPosition <= 0 || state.configuredMaxInventory <= 0 || state.configuredMaxQuoteQty <= 0 || state.configuredBasePrecision <= 0 || state.configuredQuotePrecision <= 0 || state.configuredMaxObservationAge <= 0 || state.configuredInitialBaseBalance <= 0 || state.configuredInitialQuoteBalance <= 0 {
+		baseHoldingInPositionBounds := state.configuredBaseHolding >= -state.configuredMaxPosition && state.configuredBaseHolding <= state.configuredMaxPosition
+		if !state.initialAccountSeen || !state.terminalAccountSeen || state.configuredMaxPosition <= 0 || state.configuredMaxInventory <= 0 || state.configuredMaxQuoteQty <= 0 || state.configuredBasePrecision <= 0 || state.configuredQuotePrecision <= 0 || state.configuredMaxObservationAge <= 0 || state.configuredInitialBaseBalance <= 0 || state.configuredInitialQuoteBalance <= 0 || state.configuredReferencePrice <= 0 || state.configuredReferenceHalfLife <= 0 || state.configuredElasticityPerPercent <= 0 || !baseHoldingInPositionBounds {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier lacks complete finite-capital configuration"})
 		}
 		state.Valid = state.DecisionCount > 0 && state.FillCount > 0 && state.AcceptedQuoteCount > 0 && state.CompletedQuoteCount > 0 && state.initialAccountSeen && state.terminalAccountSeen
@@ -2632,7 +2692,7 @@ func quoteMatchesObservedTouch(decision cdfDecisionEvidence) bool {
 }
 
 func expectedCDFTargetPosition(markPrice, referencePrice int64, state *CDFLiquiditySupplierAudit) (int64, bool) {
-	if markPrice <= 0 || referencePrice <= 0 || state.configuredReferencePrice <= 0 || state.configuredElasticityPerPercent <= 0 {
+	if markPrice <= 0 || referencePrice <= 0 || state.configuredElasticityPerPercent <= 0 {
 		return 0, false
 	}
 	percentAbove := (float64(markPrice)/float64(referencePrice) - 1) * 100
@@ -2649,10 +2709,10 @@ func expectedCDFTargetPosition(markPrice, referencePrice int64, state *CDFLiquid
 }
 
 func expectedCDFInventoryQuote(decision cdfDecisionEvidence, state *CDFLiquiditySupplierAudit) (string, int64, bool) {
-	return expectedCDFInventoryQuoteAt(decision.TargetPosition, decision.Position, decision.GrossInventory, state)
+	return expectedCDFInventoryQuoteAtWithCash(decision.TargetPosition, decision.Position, decision.GrossInventory, decision.QuotePrice, decision.QuoteCashAvailable, state)
 }
 
-func expectedCDFInventoryQuoteAt(targetPosition, position, grossInventory int64, state *CDFLiquiditySupplierAudit) (string, int64, bool) {
+func expectedCDFInventoryQuoteAtWithCash(targetPosition, position, grossInventory, quotePrice, quoteCashAvailable int64, state *CDFLiquiditySupplierAudit) (string, int64, bool) {
 	gapBig := new(big.Int).Sub(big.NewInt(targetPosition), big.NewInt(position))
 	if !gapBig.IsInt64() || gapBig.Sign() == 0 || state.configuredMaxInventory <= 0 || state.configuredMaxQuoteQty <= 0 {
 		return "", 0, false
@@ -2678,7 +2738,39 @@ func expectedCDFInventoryQuoteAt(targetPosition, position, grossInventory int64,
 	if quantity > state.configuredMaxQuoteQty {
 		quantity = state.configuredMaxQuoteQty
 	}
+	if side == "BUY" && state.configuredInitialQuoteBalance > 0 && state.configuredQuotePrecision > 0 {
+		quantity = maxAffordableCDFQuoteQty(quotePrice, state.configuredBasePrecision, state.configuredMakerFeeBps, quoteCashAvailable, quantity)
+	}
 	return side, quantity, quantity > 0
+}
+
+func maxAffordableCDFQuoteQty(price, basePrecision, makerFeeBps, available, upper int64) int64 {
+	if price <= 0 || available <= 0 || upper <= 0 {
+		return 0
+	}
+	low, high := int64(0), upper
+	for low < high {
+		mid := low + (high-low+1)/2
+		required, ok := expectedCDFQuoteRequirement(price, mid, basePrecision, makerFeeBps)
+		if ok && required <= available {
+			low = mid
+		} else {
+			high = mid - 1
+		}
+	}
+	return low
+}
+
+func advanceCDFReference(previousReference, midpoint, elapsed, halfLife int64) (int64, bool) {
+	if previousReference <= 0 || midpoint <= 0 || elapsed <= 0 || halfLife <= 0 {
+		return 0, false
+	}
+	alpha := 1 - math.Exp(-math.Ln2*float64(elapsed)/float64(halfLife))
+	revised := float64(previousReference) + alpha*(float64(midpoint)-float64(previousReference))
+	if math.IsNaN(revised) || math.IsInf(revised, 0) || revised <= 0 || revised > float64(math.MaxInt64) {
+		return 0, false
+	}
+	return int64(revised), true
 }
 
 func validSide(side string) bool { return side == "BUY" || side == "SELL" }

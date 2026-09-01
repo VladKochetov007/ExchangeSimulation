@@ -149,3 +149,50 @@ contracts, and archive tests; `go vet ./...` and the targeted race matrix pass
 as well. The causal replay, market-only counterfactual, and missing-ledger
 tests pass. This checkpoint remains below activation authorization pending one
 fresh independent Sol-xhigh review of the exact tree.
+
+## Independent Sol-xhigh rejection — f20a0fe
+
+Volta performed the next fresh review of exact
+`f20a0fe4442d3e27c3727df7ee02431349b4d846` and rejected the narrow activation
+probe on two fail-closed scientific-audit blockers. No development cell or
+holdout was run.
+
+First, the CDF extractor checked the target-position equation using the
+decision-emitted reference price, but the CDF roster did not register the
+reference half-life and the extractor did not reconstruct the supplier's
+reference update process. A coordinated mutation of the reference, target,
+and quote could therefore evade the intended policy check.
+
+Second, the no-fill counterfactual was evaluated after accepting any positive
+quote quantity up to the policy maximum. An underquoted actual response could
+therefore be counted as inventory-responsive even though it was not a valid
+supplier action under the registered finite-inventory policy.
+
+The review accepted the prior effective-configuration, delayed-local-data,
+gateway identity, terminal/retention, paired provenance, and historical-R2
+isolation controls. The remediation below addresses only the two reported
+audit gaps and does not alter supplier economics.
+
+## Remediation checkpoint — reference and exact-quote reconstruction
+
+The extractor now records and requires the CDF supplier's registered reference
+price, reference half-life, base holding, and elasticity. For every decision it
+reconstructs the reference state from the initial reference and the actor's
+positive two-sided local midpoint using the same exponential half-life update;
+the emitted reference must equal that independently reconstructed state. A
+positive emitted mark must also be the usable local midpoint and may occur only
+on an actor action path that can legally consume such an observation.
+
+Actionable quote quantities are now exact rather than merely bounded above by
+the policy result. The reconstruction applies the finite gross-inventory and
+maximum-quote caps, then applies the same quote-cash affordability rule and
+maker-fee arithmetic used by the actor. Invalid or underquoted actions are not
+eligible to satisfy the post-fill inventory-response criterion.
+
+New regressions cover coordinated reference/target/quote mutation, missing
+reference-update configuration, underquoted inventory response, and a valid
+market-only change whose capped quote remains identical to the no-fill
+counterfactual. The focused analysis/receipt/simulation gate will be rerun on
+the resulting semantic commit, followed by the clean full gate and one fresh
+independent Sol-xhigh review. No cell or holdout is authorized by this
+checkpoint.
