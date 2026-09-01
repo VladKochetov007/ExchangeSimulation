@@ -29,16 +29,26 @@ following hold:
 - the attestation is valid against the supplied validating binary, source
   revision, configuration hash, process width, and reserve;
 - the attestation source revision differs from the current source revision;
+- the source revision is a real commit and an ancestor of the current HEAD;
+- the probe run metadata, manifest build identity, validating binary VCS
+  identity, and registered treatment configuration independently agree with
+  the attestation;
 - the probe root is present under the dedicated external SV1 capacity
   namespace and its evidence manifest verifies;
+- every probe path is a non-symlink on the probe root's single filesystem;
 - the archive target is external to the repository and source probe root;
-- archive creation, zstd integrity, member enumeration, and full `tar
-  --compare` all pass with no comparison output;
+- archive and sidecar publication uses exclusive temporary files and
+  no-replacement hard-link publication; archive creation, zstd integrity,
+  member enumeration, and full `tar --compare` all pass with no comparison
+  output;
 - the retention receipt, archive checksum, and sidecars are written before the
   exact old probe root and old attestation are removed.
 
-The tool refuses a current-revision probe, symlinked targets, pre-existing
-archives/sidecars, dirty source, and malformed or incomplete attestation data.
+The tool refuses a current-revision probe, non-ancestor or cross-bound
+provenance, symlinked targets, nested mounts, pre-existing archives/sidecars,
+dirty source, and malformed or incomplete attestation data. A failure after
+archive publication leaves the source probe intact; deletion is reached only
+after final archive, sidecar, receipt, and filesystem checks pass.
 This amendment applies only to superseded capacity measurements; the active
 capacity probe for the candidate under test remains unpacked and manifest-
 verifiable for the duration of its gate.

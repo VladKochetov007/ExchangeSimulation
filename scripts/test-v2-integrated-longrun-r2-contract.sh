@@ -56,7 +56,12 @@ expect_failure "$root_dir/scripts/archive-v2-r2-sv1-capacity-probe.sh" \
 	"$tmp_root/missing-capacity-attestation.json" /bin/true "$tmp_root/capacity-archive.tar.zst"
 for required_capacity_fragment in \
 	'v2-r2-sv1-capacity-archive-retention-v1' \
-	'refusing to compact a capacity probe for the current source revision'; do
+	'refusing to compact a capacity probe for the current source revision' \
+	'git -C "$root_dir" merge-base --is-ancestor' \
+	'registered_config=' \
+	'new_temporary_file' \
+	'publish_new_file' \
+	'find -P "$probe_root" -xdev'; do
 	rg -F "$required_capacity_fragment" "$root_dir/scripts/archive-v2-r2-sv1-capacity-probe.sh" >/dev/null ||
 		fail "capacity archive script is missing required fragment: $required_capacity_fragment"
 done
