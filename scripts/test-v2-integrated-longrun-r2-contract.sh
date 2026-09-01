@@ -35,6 +35,7 @@ for sv1_script in \
 	extract-v2-r2-sv1-24h-cell.sh \
 	score-v2-r2-sv1-24h-development.sh \
 	archive-v2-r2-sv1-capacity-probe.sh \
+	test-v2-r2-sv1-capacity-archive.sh \
 	verify-v2-r2-sv1-24h-cell.sh; do
 	[[ -x "$root_dir/scripts/$sv1_script" ]] || fail "SV1 script is not executable: $sv1_script"
 	bash -n "$root_dir/scripts/$sv1_script" || fail "SV1 script has invalid shell syntax: $sv1_script"
@@ -69,6 +70,8 @@ for required_capacity_fragment in \
 	rg -F "$required_capacity_fragment" "$root_dir/scripts/archive-v2-r2-sv1-capacity-probe.sh" >/dev/null ||
 		fail "capacity archive script is missing required fragment: $required_capacity_fragment"
 done
+"$root_dir/scripts/test-v2-r2-sv1-capacity-archive.sh" ||
+	fail "capacity archive executable fixture failed"
 for required_sv1_fragment in \
 	'V2_R2_EXTRACTOR_VARIANT=sv1' \
 	'control_full_no_log_normalized_equal' \
