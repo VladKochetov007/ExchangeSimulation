@@ -1224,11 +1224,13 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	if state.receiptRequired {
 		r.validateDecisionReceipt(event, decision, receiptEvidence)
 	}
-	if decision.Action == "submit" || decision.Action == "rest" {
+	if decision.MarkPrice > 0 {
 		expectedTarget, targetOK := expectedCDFTargetPosition(decision.MarkPrice, state.reconstructedReference, state)
 		if !targetOK || decision.TargetPosition != expectedTarget {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier target position does not match registered elasticity policy"})
 		}
+	}
+	if decision.Action == "submit" || decision.Action == "rest" {
 		expectedSide, expectedQuantity, expected := expectedCDFInventoryQuote(decision, state)
 		quantityMatches := expected && decision.QuoteQty == expectedQuantity
 		if !expected || decision.Side != expectedSide || !quantityMatches {
@@ -1362,6 +1364,10 @@ func (r *CDFLiquidityRunAudit) validateWaitState(event Event, decision cdfDecisi
 	case "stale_or_missing_observation":
 		if decision.QuoteOrderID != 0 || decision.QuoteRequestID != 0 || decision.CancelRequestID != 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "stale-observation wait has outstanding order state"})
+		}
+	case "inventory_at_target", "one_sided_or_locked_book", "limit_or_touch_unavailable", "quote_cash_limit":
+		if decision.QuoteOrderID != 0 || decision.QuoteRequestID != 0 || decision.CancelRequestID != 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "no-action wait has outstanding order state"})
 		}
 	case "order_pending":
 		if decision.QuoteOrderID != 0 || decision.QuoteRequestID == 0 {

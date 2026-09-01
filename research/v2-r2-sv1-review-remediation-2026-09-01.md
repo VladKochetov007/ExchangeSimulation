@@ -213,3 +213,42 @@ only the registered five-minute seed-607 treatment/control activation probe,
 retain complete artifacts, and obtain post-probe independent review. This does
 not authorize `dev-607`, a 24-hour campaign, freeze, or any holdout. No cells
 or holdouts were run during the review.
+
+## Activation-probe analyzer contract finding — c542768
+
+The accepted five-minute seed-607 treatment/control activation probe was run
+from clean Go 1.27 `linux/amd64/v1` binaries built from `c542768`. Both arms
+completed normally and all raw, binary-evidence, receipt, manifest, checkpoint,
+and provenance inputs were retained under:
+
+```
+/home/vlad/external-scratch/v2-r2-sv1-activation-c5427680a1095c8e0e0bcff6a1d0f6228438cf15
+```
+
+The wrapper deliberately did not publish a comparison or activation-provenance
+verdict because the extractor rejected the treatment on a legal actor state:
+`wait` with reason `inventory_at_target` and no outstanding order/request. The
+control audit was valid. The treatment otherwise showed 12 registered
+suppliers, all 12 trading, all 12 with PnL change, all 12 inventory-responsive,
+368 cancellations, and 36 checks. This is an analyzer contract bug activated
+only by this new probe, not evidence that the CDF market failed or survived.
+
+The failed comparison remains preserved at:
+
+```
+/home/vlad/external-scratch/v2-r2-sv1-activation-c5427680a1095c8e0e0bcff6a1d0f6228438cf15/cdf-liquidity-comparison.json.tmp-1818357
+```
+
+The remediation accepts the four registered no-action reasons
+(`inventory_at_target`, `one_sided_or_locked_book`,
+`limit_or_touch_unavailable`, and `quote_cash_limit`) only when order,
+submission, and cancellation identities are empty. Positive-mark target-policy
+validation also now applies to every legal action path, including no-action
+wait/withdraw states, rather than only submission/rest actions. A focused
+regression covers both valid no-action waits and rejection of stale order state.
+
+Classification: **ANALYZER BUG, ACTIVATED IN THE NEW PROBE, NO HISTORICAL IMPACT**.
+No registered development cell, 24-hour campaign, or holdout was consumed; no
+historical result requires rescore or rerun. The corrected analyzer requires a
+fresh exact-tree review and a new activation-probe run before any broader
+development authorization.

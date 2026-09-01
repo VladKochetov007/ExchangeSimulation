@@ -41,6 +41,40 @@ func TestMeasureCDFLiquidityReconstructsBoundedSupplier(t *testing.T) {
 	}
 }
 
+func TestCDFLiquidityAcceptsLegalNoActionWaitReasons(t *testing.T) {
+	legalReasons := []string{
+		"inventory_at_target",
+		"one_sided_or_locked_book",
+		"limit_or_touch_unavailable",
+		"quote_cash_limit",
+	}
+
+	for _, reason := range legalReasons {
+		run := &CDFLiquidityRunAudit{}
+		run.validateWaitState(Event{VenueID: "north", Ordinal: 1}, cdfDecisionEvidence{
+			Role:     "cdf_elastic_supplier_1",
+			ClientID: 2,
+			Action:   "wait",
+			Reason:   reason,
+		}, &CDFLiquiditySupplierAudit{})
+		if len(run.Checks) != 0 {
+			t.Fatalf("wait reason %q was rejected: %+v", reason, run.Checks)
+		}
+	}
+
+	run := &CDFLiquidityRunAudit{}
+	run.validateWaitState(Event{VenueID: "north", Ordinal: 2}, cdfDecisionEvidence{
+		Role:         "cdf_elastic_supplier_1",
+		ClientID:     2,
+		Action:       "wait",
+		Reason:       "inventory_at_target",
+		QuoteOrderID: 8,
+	}, &CDFLiquiditySupplierAudit{})
+	if !hasCDFCheck(run.Checks, "no-action wait has outstanding order state") {
+		t.Fatalf("no-action wait with an outstanding order was accepted: %+v", run.Checks)
+	}
+}
+
 func TestCanonicalCDFComparisonConfigPreservesNonCDFReceiptRoles(t *testing.T) {
 	withCDF, err := canonicalCDFComparisonConfig([]byte(`{"market_data_receipt_roles":["cdf_elastic_supplier","liability_hedger"],"venues":["north"]}`))
 	if err != nil {
