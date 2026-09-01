@@ -763,3 +763,30 @@ The current scientific successor remains pre-cell: rebuild the final
 documented HEAD with pinned Go 1.27, measure actual current-revision capacity,
 and only then run corrected treatment-607. Holdouts `619/631/641` remain
 untouched.
+
+## Append-only operational update: c80 renderer resource correction and retention — 2026-09-01
+
+The pre-c80 SV1 treatment-607 run completed at revision `74be64b`, but its
+first extraction was not a scientific result: the old renderer accumulated
+the full reconstructed event corpus and was stopped at the resource boundary.
+The raw tree was retained in the verified archive
+`/home/vlad/v2-r2-sv1-treatment-607-raw-74be64b-render-fix-retained.tar.zst`
+(source payload 32,929,471,192 bytes; archive SHA-256
+`3142ccbe71aed0be0a79f9cb2fa7117b354a17bc4ec9b1dd596deadf9c1ff81f`).
+
+At c80 (`c80a757f99f7d7c29821dc278d326af3f4669aa2`) the binary renderer was
+corrected to stream bounded sidecar cursors, enforce exact route/global
+sequence reconstruction, and atomically publish staged output. Focused
+multivenue tests and a clean full `make test` passed. The superseded 74be64b
+capacity probe was also retained in
+`/home/vlad/v2-r2-sv1-capacity-archive-74be64b-render-fix-retained.tar.zst`
+(measured payload 32,929,468,561 bytes; archive SHA-256
+`d061bb2f8d8c05e4cd5934b47c45fcc5affa0f6fff7ae53c04a5c4371099392c`), with
+clean tar comparison and source/attestation removal after validation. These
+are historical retention artifacts, not a current capacity attestation.
+
+This correction is evidence handling only and does not change economics,
+actor-visible inputs, scheduling, RNG use, matching, or event ordering. The
+next valid gate is a docs commit, pinned Go 1.27 rebuild, fresh capacity
+measurement bound to the resulting revision, and corrected treatment-607
+rerun/extraction. No additional development cell, freeze, or holdout has run.

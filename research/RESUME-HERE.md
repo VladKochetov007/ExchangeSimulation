@@ -946,3 +946,23 @@ finish and their contracts pass.
   capacity measurement. If that passes, run corrected treatment-607 only;
   extract and review it before any other development cell. Holdouts
   `619/631/641` remain untouched.
+
+### 2026-09-01 — c80 renderer correction and safe evidence compaction
+
+The complete pre-c80 SV1 treatment-607 raw run was retained before cleanup;
+its first extraction was stopped solely because the old binary renderer held
+the full reconstructed event corpus in memory. No derived economic result was
+accepted. The append-only incident record is
+`research/v2-r2-sv1-renderer-resource-incident-2026-09-01.md`.
+
+The c80 correction streams bounded sidecar cursors through exact per-venue
+sequence validation and atomically publishes staged rendered output. Focused
+multivenue tests and a clean full `make test` passed at c80. The raw run and
+superseded capacity probe are now losslessly retained in verified zstd/tar
+archives; their source trees were removed only after member, hash, and
+`tar --compare` contracts passed. The superseded capacity archive is not a
+current attestation. Free space is approximately 65 GiB.
+
+The next gate is therefore c80 documentation commit -> pinned Go 1.27 rebuild
+-> fresh current-revision capacity probe -> treatment-607 rerun and streaming
+extraction. No other development cell, freeze, or holdout has run.
