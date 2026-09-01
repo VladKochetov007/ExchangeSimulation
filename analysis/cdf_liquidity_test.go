@@ -40,6 +40,33 @@ func TestMeasureCDFLiquidityReconstructsBoundedSupplier(t *testing.T) {
 	}
 }
 
+func TestCDFDepthShareUsesNonEmptyIntervalsAndIncludesTerminalInterval(t *testing.T) {
+	state := &CDFLiquiditySupplierAudit{}
+	run := &CDFLiquidityRunAudit{
+		lastDepthSnapshotAt:       map[string]int64{"north": 9},
+		lastDepthTotal:            map[string]int64{"north": 20},
+		lastSupplierDepthByClient: map[string]map[uint64]int64{"north": {7: 10}},
+		terminalAt:                12,
+	}
+	states := map[cdfParticipantKey]*CDFLiquiditySupplierAudit{{VenueID: "north", ClientID: 7}: state}
+	run.lastDepthTotal["north"] = 20
+	run.lastSupplierDepthByClient["north"] = map[uint64]int64{7: 5}
+	run.accumulateDepthInterval("north", 1, 3, states)
+	run.lastDepthTotal["north"] = 0
+	run.lastSupplierDepthByClient["north"] = map[uint64]int64{}
+	run.accumulateDepthInterval("north", 3, 7, states)
+	run.lastDepthTotal["north"] = 20
+	run.lastSupplierDepthByClient["north"] = map[uint64]int64{7: 10}
+	run.accumulateDepthInterval("north", 7, 9, states)
+	run.accumulateTerminalDepth(states)
+	if state.restingDepthWeightedNumerator != 60 || state.restingDepthWeightedDenominator != 140 {
+		t.Fatalf("depth integrals = (%v, %v), want (60, 140) with empty interval excluded", state.restingDepthWeightedNumerator, state.restingDepthWeightedDenominator)
+	}
+	if got := state.restingDepthWeightedNumerator / state.restingDepthWeightedDenominator; got != 3.0/7.0 {
+		t.Fatalf("depth share = %v, want %v", got, 3.0/7.0)
+	}
+}
+
 func TestMeasureCDFLiquiditySeparatesCancelPendingFromLiveQuotes(t *testing.T) {
 	run := writeCDFLiquidityFixture(t, true, false)
 	bookPath := filepath.Join(run.Dir, "venues", "north", "spot", "CDF-USD.jsonl")
@@ -326,7 +353,7 @@ func TestCDFReceiptEvidenceRejectsGlobalEventOrdinalGap(t *testing.T) {
 	}
 }
 
-func TestMeasureCDFLiquidityAllowsAuthenticStaleWithdrawal(t *testing.T) {
+func TestMeasureCDFLiquidityRejectsSyntheticStaleWithdrawalWithoutLiveOrder(t *testing.T) {
 	run := writeCDFLiquidityFixture(t, true, false)
 	generalPath := filepath.Join(run.Dir, "venues", "north", "general.jsonl")
 	raw, err := os.ReadFile(generalPath)
@@ -341,8 +368,8 @@ func TestMeasureCDFLiquidityAllowsAuthenticStaleWithdrawal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !audit.Valid || audit.WithdrawCount != 1 || hasCDFCheck(audit.Checks, "decision observation age exceeds registered delayed-data bound") {
-		t.Fatalf("authentic stale withdrawal audit = %+v", audit)
+	if audit.Valid || !hasCDFCheck(audit.Checks, "stale withdrawal references a supplier order already closed before the decision") || !hasCDFCheck(audit.Checks, "stale withdrawal has no later matching exchange cancellation outcome") {
+		t.Fatalf("synthetic stale withdrawal audit = %+v, want live-order rejection", audit)
 	}
 }
 

@@ -78,6 +78,7 @@ type CDFLiquidityRunAudit struct {
 	lastEventAt                     int64
 	terminalAt                      int64
 	cancelRequestedByOrder          map[cdfOrderKey]struct{}
+	staleWithdrawals                map[cdfOrderKey]cdfStaleWithdrawal
 }
 
 // CDFLiquiditySupplierAudit is the per-participant diagnostic vector required
@@ -123,18 +124,21 @@ type CDFLiquiditySupplierAudit struct {
 	ConfiguredMaxQuoteQty            int64   `json:"configured_max_quote_qty"`
 	ConfiguredMakerFeeBps            int64   `json:"configured_maker_fee_bps"`
 	SupplierVolumeShare              float64 `json:"supplier_volume_share"`
-	TimeWeightedRestingDepthShare    float64 `json:"time_weighted_resting_depth_share"`
-	MaxQuoteQty                      int64   `json:"max_quote_qty"`
-	MaxBorrowed                      int64   `json:"max_borrowed"`
-	BorrowEventCount                 int64   `json:"borrow_event_count"`
-	MaxGrossBaseBalance              int64   `json:"max_gross_base_balance"`
-	MaxGrossQuoteBalance             int64   `json:"max_gross_quote_balance"`
-	RealizedPnL                      int64   `json:"realized_pnl"`
-	UnrealizedPnL                    int64   `json:"unrealized_pnl"`
-	BalanceSnapshotCount             int64   `json:"balance_snapshot_count"`
-	BalanceReconciliationResidual    int64   `json:"balance_reconciliation_residual"`
-	PnLReconciliationResidual        int64   `json:"pnl_reconciliation_residual"`
-	Valid                            bool    `json:"valid"`
+	// This is liquidity-conditioned concentration: the supplier-depth integral
+	// divided by total displayed-depth integral over non-empty intervals. Empty
+	// intervals are represented by the separate absence counters.
+	TimeWeightedRestingDepthShare float64 `json:"time_weighted_resting_depth_share"`
+	MaxQuoteQty                   int64   `json:"max_quote_qty"`
+	MaxBorrowed                   int64   `json:"max_borrowed"`
+	BorrowEventCount              int64   `json:"borrow_event_count"`
+	MaxGrossBaseBalance           int64   `json:"max_gross_base_balance"`
+	MaxGrossQuoteBalance          int64   `json:"max_gross_quote_balance"`
+	RealizedPnL                   int64   `json:"realized_pnl"`
+	UnrealizedPnL                 int64   `json:"unrealized_pnl"`
+	BalanceSnapshotCount          int64   `json:"balance_snapshot_count"`
+	BalanceReconciliationResidual int64   `json:"balance_reconciliation_residual"`
+	PnLReconciliationResidual     int64   `json:"pnl_reconciliation_residual"`
+	Valid                         bool    `json:"valid"`
 
 	positionSet                     bool
 	lastPosition                    int64
@@ -420,9 +424,17 @@ type cdfOrderState struct {
 	remainingQty    int64
 	closed          bool
 	closedAt        int64
+	cancelled       bool
+	cancelRequestID uint64
 	cancelRequested bool
 	touchShare      float64
 	touchShareKnown bool
+}
+
+type cdfStaleWithdrawal struct {
+	decisionAt      int64
+	cancelRequestID uint64
+	ordinal         int64
 }
 
 type cdfObservedFill struct {
@@ -443,6 +455,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		lastDepthTotal:            make(map[string]int64),
 		lastSupplierDepthByClient: make(map[string]map[uint64]int64),
 		cancelRequestedByOrder:    make(map[cdfOrderKey]struct{}),
+		staleWithdrawals:          make(map[cdfOrderKey]cdfStaleWithdrawal),
 	}
 	config, configErr := loadCDFRunConfig(r)
 	if configErr != nil {
@@ -671,6 +684,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	if len(bookFiles) == 0 {
 		result.addCheck(CDFLiquidityCheck{Failure: "no rendered CDF-USD book evidence"})
 	}
+	result.validateStaleWithdrawals(orders, states)
 	if result.terminalAt == 0 {
 		result.terminalAt = result.lastEventAt
 	}
@@ -753,18 +767,20 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	}
 	missingObservation := decision.ObservationTime == 0 && decision.ObservationSequence == 0 && decision.ObservationAge == 0
 	initialSubscriptionWait := state.DecisionCount == 1 && decision.Action == "wait" && decision.Reason == "subscribe"
-	validObservation := (initialSubscriptionWait && missingObservation) || (!missingObservation && decision.ObservationTime > 0 && decision.ObservationSequence > 0 && decision.ObservationTime <= decision.DecisionTime && decision.DecisionTime-decision.ObservationTime == decision.ObservationAge)
+	missingObservationWait := decision.Action == "wait" && (decision.Reason == "stale_or_missing_observation" || decision.Reason == "order_pending" || decision.Reason == "cancel_pending")
+	emptyObservationAllowed := missingObservation && (initialSubscriptionWait || missingObservationWait)
+	validObservation := (emptyObservationAllowed) || (!missingObservation && decision.ObservationTime > 0 && decision.ObservationSequence > 0 && decision.ObservationTime <= decision.DecisionTime && decision.DecisionTime-decision.ObservationTime == decision.ObservationAge)
 	if !validObservation || decision.ObservationAge < 0 || decision.ReferencePrice <= 0 || decision.InventoryLimit <= 0 {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "invalid decision bounds or observation time"})
 	}
 	if state.receiptRequired {
-		r.validateDecisionObservation(event, decision, initialSubscriptionWait && missingObservation, receiptEvidence)
+		r.validateDecisionObservation(event, decision, emptyObservationAllowed, receiptEvidence)
 	}
 	staleWithdrawal := isCDFStaleWithdrawal(decision, state.configuredMaxObservationAge)
 	if decision.Action == "withdraw" && decision.Reason == "stale_or_missing_observation" && !staleWithdrawal {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "stale withdrawal does not exceed registered delayed-data bound"})
 	}
-	if state.configuredMaxObservationAge <= 0 || decision.ObservationAge > state.configuredMaxObservationAge && !staleWithdrawal {
+	if state.configuredMaxObservationAge <= 0 || decision.ObservationAge > state.configuredMaxObservationAge && !staleWithdrawal && !missingObservationWait {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "decision observation age exceeds registered delayed-data bound"})
 	}
 	if decision.Position < -decision.InventoryLimit || decision.Position > decision.InventoryLimit || decision.TargetPosition < -decision.InventoryLimit || decision.TargetPosition > decision.InventoryLimit {
@@ -863,7 +879,15 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 		if decision.QuoteOrderID == 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "withdrawal decision has no order identity"})
 		} else {
-			r.cancelRequestedByOrder[cdfOrderKey{VenueID: event.VenueID, ClientID: decision.ClientID, OrderID: decision.QuoteOrderID}] = struct{}{}
+			orderKey := cdfOrderKey{VenueID: event.VenueID, ClientID: decision.ClientID, OrderID: decision.QuoteOrderID}
+			r.cancelRequestedByOrder[orderKey] = struct{}{}
+			if staleWithdrawal {
+				if _, duplicate := r.staleWithdrawals[orderKey]; duplicate {
+					r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "duplicate stale withdrawal for supplier order"})
+				} else {
+					r.staleWithdrawals[orderKey] = cdfStaleWithdrawal{decisionAt: decision.DecisionTime, cancelRequestID: decision.CancelRequestID, ordinal: event.Ordinal}
+				}
+			}
 		}
 		if decision.CancelRequestID == 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "withdrawal decision has no cancellation request identity"})
@@ -932,7 +956,7 @@ func (r *CDFLiquidityRunAudit) validateDecisionReceipt(event Event, decision cdf
 	}
 }
 
-func (r *CDFLiquidityRunAudit) validateDecisionObservation(event Event, decision cdfDecisionEvidence, initialWait bool, evidence *cdfMarketDataEvidence) {
+func (r *CDFLiquidityRunAudit) validateDecisionObservation(event Event, decision cdfDecisionEvidence, emptyObservationAllowed bool, evidence *cdfMarketDataEvidence) {
 	if evidence == nil {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision has no receipt evidence"})
 		return
@@ -942,7 +966,7 @@ func (r *CDFLiquidityRunAudit) validateDecisionObservation(event Event, decision
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision cites an unknown or unrelated observation link"})
 		return
 	}
-	if initialWait {
+	if emptyObservationAllowed {
 		if decision.ObservationLinkID == 0 || decision.ObservationOrdinal != 0 || decision.ObservationDeliveredAt != 0 || decision.ObservationFingerprint != "" || decision.ObservationDigest != "" {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "initial subscription wait has a nonempty observation frontier"})
 		}
@@ -1386,6 +1410,38 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			return
 		}
 		order.closed, order.closedAt = true, event.SimTS
+		order.cancelled, order.cancelRequestID = true, cancelled.RequestID
+	}
+}
+
+// validateStaleWithdrawals closes the evidence loop across the separate
+// decision and book logs. A reason/age pair is not enough: the order named by
+// a stale withdrawal must have been accepted, still live at the withdrawal,
+// and later closed by the exact cancellation request emitted at that boundary.
+func (r *CDFLiquidityRunAudit) validateStaleWithdrawals(orders map[cdfOrderKey]*cdfOrderState, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
+	for key, withdrawal := range r.staleWithdrawals {
+		order := orders[key]
+		state := states[cdfParticipantKey{VenueID: key.VenueID, ClientID: key.ClientID}]
+		role := ""
+		if state != nil {
+			role = state.Role
+		}
+		addFailure := func(failure string) {
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: role, ClientID: key.ClientID, Ordinal: withdrawal.ordinal, Failure: failure})
+		}
+		if order == nil {
+			addFailure("stale withdrawal has no matching accepted supplier order")
+			continue
+		}
+		if order.acceptedAt <= 0 || order.acceptedAt >= withdrawal.decisionAt {
+			addFailure("stale withdrawal does not follow an accepted live supplier order")
+		}
+		if order.closedAt > 0 && order.closedAt <= withdrawal.decisionAt {
+			addFailure("stale withdrawal references a supplier order already closed before the decision")
+		}
+		if !order.cancelled || order.cancelRequestID != withdrawal.cancelRequestID || order.closedAt <= withdrawal.decisionAt {
+			addFailure("stale withdrawal has no later matching exchange cancellation outcome")
+		}
 	}
 }
 

@@ -227,16 +227,8 @@ jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulat
 	(.terminal_accounts | type == "array" and length > 0 and
 	 all(.[]; .account.timestamp == $simulation_end_nano))' \
 	"$cell/greeks.json" >/dev/null || fail "greeks report does not attest the registered 24-hour horizon"
-jq -e -s --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
-	'. as $checkpoints |
-	 ($checkpoints | length) > 0 and
-	 all($checkpoints[]; .domain == "execution_observations" and .ordering == "ordered_stream" and
-		(.sim_time | type) == "number" and (.event_count | type) == "number" and
-		.sim_time >= $simulation_start_nano and .sim_time <= $simulation_end_nano and .event_count >= 0) and
-	 all(range(1; ($checkpoints | length)); $checkpoints[. - 1].sim_time < $checkpoints[.].sim_time and
-		$checkpoints[. - 1].event_count < $checkpoints[.].event_count) and
-	 $checkpoints[-1].sim_time == $simulation_end_nano' \
-	"$cell/checkpoints.jsonl" >/dev/null || fail "checkpoint stream does not attest the registered 24-hour horizon"
+v2_r2_require_checkpoint_stream "$cell/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" ||
+	fail "checkpoint stream does not attest the registered 24-hour horizon"
 
 for json_file in "$cell"/*.json; do
 	[[ -f "$json_file" ]] || continue

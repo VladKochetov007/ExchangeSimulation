@@ -313,6 +313,12 @@ func (s *ElasticLiquiditySupplier) observeFill(event actor.OrderFillEvent) {
 	}
 	if event.IsFull {
 		s.quote = elasticLiquidityQuote{}
+		// A full fill wins a concurrent cancellation race: the order no longer
+		// exists, so a later cancel rejection must not strand the actor in its
+		// cancel-pending state.
+		s.cancelPending = false
+		s.cancelRequestID = 0
+		s.releaseQuoteReservation()
 	}
 }
 

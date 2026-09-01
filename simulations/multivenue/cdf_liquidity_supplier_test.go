@@ -2,10 +2,15 @@ package multivenue
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"exchange_sim/actor"
+	"exchange_sim/analysis"
 	"exchange_sim/exchange"
 	"exchange_sim/simulation"
 	etypes "exchange_sim/types"
@@ -22,6 +27,29 @@ func elasticSupplierSnapshot(symbol string, timestamp, bid, ask int64) *actor.Ev
 				Asks: []etypes.PriceLevel{{Price: ask, VisibleQty: 100}},
 			},
 		},
+	}
+}
+
+type oneShotMarketSeller struct {
+	*actor.BaseActor
+	triggerAt int64
+	quantity  int64
+	submitted bool
+}
+
+func newOneShotMarketSeller(id uint64, gateway actor.Gateway, triggerAt, quantity int64) *oneShotMarketSeller {
+	seller := &oneShotMarketSeller{BaseActor: actor.NewBaseActor(id, gateway), triggerAt: triggerAt, quantity: quantity}
+	seller.SetHandler(seller)
+	seller.AddTicker(time.Second, seller.onTick)
+	return seller
+}
+
+func (s *oneShotMarketSeller) HandleEvent(context.Context, *actor.Event) {}
+
+func (s *oneShotMarketSeller) onTick(now time.Time) {
+	if !s.submitted && now.UnixNano() >= s.triggerAt {
+		s.SubmitOrderWithTimeInForce("CDF/USD", exchange.Sell, exchange.Market, 0, s.quantity, exchange.IOC)
+		s.submitted = true
 	}
 }
 
@@ -207,6 +235,47 @@ func TestElasticLiquiditySupplierWithdrawsStaleQuoteAndWaitsForCancel(t *testing
 	}
 }
 
+func TestElasticLiquiditySupplierRecoversFromFillCancelRace(t *testing.T) {
+	gw := newMetaGateway()
+	supplier := NewElasticLiquiditySupplier(1, gw, ElasticLiquiditySupplierConfig{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		Interval: time.Second, MaxObservationAge: time.Minute,
+		ReferencePrice: 3_000, ReferenceHalfLife: time.Hour,
+		BaseHolding: 0, ElasticityPerPercent: 10, MaxPosition: 100, MaxQuoteQty: 25,
+	})
+	ctx := context.Background()
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	supplier.HandleEvent(ctx, elasticSupplierSnapshot("CDF/USD", int64(time.Second), 2_699, 2_701))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	orders := gw.orders()
+	if len(orders) != 1 {
+		t.Fatalf("initial orders = %d, want one", len(orders))
+	}
+	order := orders[0]
+	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{OrderID: 41, RequestID: order.RequestID}})
+	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventBookSnapshot, Data: actor.BookSnapshotEvent{
+		Symbol: "CDF/USD", Timestamp: int64(3 * time.Second), Snapshot: &etypes.BookSnapshot{
+			Bids: []etypes.PriceLevel{{Price: 2_699, VisibleQty: 100}},
+		},
+	}})
+	supplier.onTick(time.Unix(0, int64(4*time.Second)))
+	if len(gw.requests) != 3 || gw.requests[2].Type != etypes.ReqCancelOrder {
+		t.Fatalf("requests before concurrent fill = %+v, want cancellation", gw.requests)
+	}
+	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderFilled, Data: actor.OrderFillEvent{
+		OrderID: 41, Symbol: "CDF/USD", Side: exchange.Buy, Qty: 25, Price: 2_699, IsFull: true,
+	}})
+	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderCancelRejected, Data: actor.OrderCancelRejectedEvent{OrderID: 41}})
+	supplier.HandleEvent(ctx, elasticSupplierSnapshot("CDF/USD", int64(5*time.Second), 2_699, 2_701))
+	supplier.onTick(time.Unix(0, int64(6*time.Second)))
+	if len(gw.orders()) != 2 {
+		t.Fatalf("orders after concurrent fill = %+v, want replacement quote", gw.orders())
+	}
+	if supplier.cancelPending || supplier.cancelRequestID != 0 {
+		t.Fatalf("supplier remained cancel-pending after full fill: pending=%t request=%d", supplier.cancelPending, supplier.cancelRequestID)
+	}
+}
+
 func testElasticLiquiditySupplierSpec() ElasticLiquiditySupplierSpec {
 	return ElasticLiquiditySupplierSpec{
 		Role: "cdf_elastic_supplier_1", Symbol: "CDF/USD", BaseAsset: "CDF", QuoteAsset: "USD",
@@ -269,4 +338,195 @@ func TestElasticLiquiditySupplierRosterWiresSeparatelyFromHistoricalSuppliers(t 
 			t.Fatalf("supplier rosters = (%d historical, %d successor), want (8, 1)", len(venue.Suppliers), len(venue.ElasticLiquiditySuppliers))
 		}
 	}
+}
+
+func TestElasticLiquiditySupplierRealGatewayStaleWithdrawalIntegration(t *testing.T) {
+	spec := testElasticLiquiditySupplierSpec()
+	spec.MaxObservationAge = 1500 * time.Millisecond
+	spec.MaxQuoteQty = 2 * mvBasePrecision
+	spec.BaseHolding = 100 * mvBasePrecision
+	dir := t.TempDir()
+	cfg := Config{
+		LogDir: dir, LogMode: "full", Seed: 101, StrictPopulationAccounting: true, CrossAssetSpotGraph: true,
+		SnapshotInterval:         2 * time.Second,
+		RecordMarketDataReceipts: true, MarketDataReceiptRoles: []string{"cdf_elastic_supplier"},
+		RecordElasticLiquiditySupplierDecisions: true,
+		ElasticLiquiditySuppliers:               []ElasticLiquiditySupplierSpec{spec},
+		LatencyProfiles: map[string]LatencyProfile{
+			"cdf_elastic_supplier": {Model: "constant", Delay: 500 * time.Millisecond},
+		},
+	}
+	sim, err := NewSim(70*time.Second, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	venue := sim.Venues[0]
+	timerFactory := simulation.NewSimTimerFactory(venue.scheduler)
+	sim.Runner.AddIdler(timerFactory)
+	clientID, gateway := venue.connectParticipant(venue.Mount, "stale_probe_taker_1", map[string]int64{
+		"CDF": 10 * mvBasePrecision, "USD": 1_000 * mvQuotePrecision,
+	}, 0, &exchange.PercentageFee{TakerBps: 0, InQuote: true})
+	seller := newOneShotMarketSeller(100_000, gateway, venue.clock.NowUnixNano()+11*int64(time.Second), 2*mvBasePrecision)
+	seller.SetTickerFactory(timerFactory)
+	sim.Runner.AddActor(seller)
+	if sim.InitialAccounts, err = sim.capturePopulationAccounts("initial"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sim.Run(context.Background()); err != nil {
+		_ = sim.Close()
+		t.Fatal(err)
+	}
+	if err := sim.Close(); err != nil {
+		t.Fatal(err)
+	}
+	general, err := os.ReadFile(filepath.Join(dir, "venues", "north", "general.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	generalText := string(general)
+	book, err := os.ReadFile(filepath.Join(dir, "venues", "north", "spot", "CDF-USD.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bookText := string(book)
+	accepted := strings.Count(bookText, `"event":"OrderAccepted"`)
+	cancelled := strings.Count(bookText, `"event":"OrderCancelled"`)
+	withdrawn := strings.Count(generalText, `"action":"withdraw"`)
+	if accepted == 0 || cancelled == 0 || withdrawn == 0 {
+		preview := generalText
+		if len(preview) > 4000 {
+			preview = preview[:4000]
+		}
+		matched := make([]string, 0, 12)
+		for _, line := range strings.Split(generalText, "\n") {
+			if strings.Contains(line, "elastic_liquidity_supplier") || strings.Contains(line, "order_accepted") || strings.Contains(line, "OrderAccepted") {
+				matched = append(matched, line)
+				if len(matched) == 12 {
+					break
+				}
+			}
+		}
+		t.Fatalf("accepted=%d cancelled=%d withdrawn=%d cdf_matches=%d general_prefix=%s matches=%s", accepted, cancelled, withdrawn, strings.Count(generalText, "elastic_liquidity_supplier"), preview, strings.Join(matched, "\n"))
+	}
+	t.Logf("stale integration seller client=%d submitted=%t accepted=%d cancelled=%d withdrawn=%d", clientID, seller.submitted, accepted, cancelled, withdrawn)
+	greeks, err := json.Marshal(struct {
+		InitialAccounts  []ParticipantAccountSnapshot `json:"initial_accounts"`
+		TerminalAccounts []ParticipantAccountSnapshot `json:"terminal_accounts"`
+	}{InitialAccounts: sim.InitialAccounts, TerminalAccounts: sim.TerminalAccounts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "greeks.json"), greeks, 0644); err != nil {
+		t.Fatal(err)
+	}
+	auditRun, err := analysis.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit, err := auditRun.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptAudit, err := analysis.AuditMarketDataReceipts(dir)
+	if err != nil || !receiptAudit.Valid || receiptAudit.Decisions == 0 {
+		t.Fatalf("real delayed-gateway receipt audit = %+v, err=%v", receiptAudit, err)
+	}
+	if audit.SupplierCount != 3 || audit.AcceptedQuoteCount == 0 || audit.CompletedQuoteCount == 0 || audit.WithdrawCount == 0 {
+		t.Fatalf("real delayed-gateway stale lifecycle = %+v", audit)
+	}
+	for _, check := range audit.Checks {
+		if strings.HasPrefix(check.Failure, "stale withdrawal") {
+			t.Fatalf("real gateway stale lifecycle was not reconstructed: %+v", audit.Checks)
+		}
+		for _, invalidObservationFailure := range []string{
+			"invalid decision bounds or observation time",
+			"supplier decision has an incomplete observation frontier",
+			"decision observation age exceeds registered delayed-data bound",
+		} {
+			if strings.HasPrefix(check.Failure, invalidObservationFailure) {
+				t.Fatalf("valid fail-closed wait was rejected by the observation contract: %+v", check)
+			}
+		}
+	}
+	mutatedBook, removed := removeOneStaleCancellation(general, book)
+	if !removed {
+		t.Fatal("real gateway fixture has no cancellation matching a stale withdrawal")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "venues", "north", "spot", "CDF-USD.jsonl"), mutatedBook, 0644); err != nil {
+		t.Fatal(err)
+	}
+	mutatedAudit, err := auditRun.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCDFFailurePrefix(mutatedAudit.Checks, "stale withdrawal has no later matching exchange cancellation outcome") {
+		t.Fatalf("missing exchange cancellation was not rejected: %+v", mutatedAudit.Checks)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "venues", "north", "spot", "CDF-USD.jsonl"), book, 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("real gateway stale lifecycle: suppliers=%d accepted=%d completed=%d withdrawals=%d fills=%d receipt_decisions=%d mutation_rejected=true", audit.SupplierCount, audit.AcceptedQuoteCount, audit.CompletedQuoteCount, audit.WithdrawCount, audit.FillCount, receiptAudit.Decisions)
+}
+
+type cdfLogEnvelope struct {
+	ClientID uint64 `json:"client_id"`
+	Event    string `json:"event"`
+	Data     struct {
+		Payload json.RawMessage `json:"payload"`
+	} `json:"data"`
+}
+
+type staleCancellationReference struct {
+	ClientID        uint64
+	OrderID         uint64
+	CancelRequestID uint64
+}
+
+func removeOneStaleCancellation(general, book []byte) ([]byte, bool) {
+	staleOrders := make(map[staleCancellationReference]struct{})
+	for _, line := range strings.Split(string(general), "\n") {
+		var envelope cdfLogEnvelope
+		if err := json.Unmarshal([]byte(line), &envelope); err != nil || envelope.Event != "elastic_liquidity_supplier_decision" {
+			continue
+		}
+		var decision struct {
+			Action          string `json:"action"`
+			Reason          string `json:"reason"`
+			QuoteOrderID    uint64 `json:"quote_order_id"`
+			CancelRequestID uint64 `json:"cancel_request_id"`
+		}
+		if err := json.Unmarshal(envelope.Data.Payload, &decision); err != nil || decision.Action != "withdraw" || decision.Reason != "stale_or_missing_observation" || decision.QuoteOrderID == 0 || decision.CancelRequestID == 0 {
+			continue
+		}
+		staleOrders[staleCancellationReference{ClientID: envelope.ClientID, OrderID: decision.QuoteOrderID, CancelRequestID: decision.CancelRequestID}] = struct{}{}
+	}
+	lines := strings.SplitAfter(string(book), "\n")
+	for index, line := range lines {
+		var envelope cdfLogEnvelope
+		if err := json.Unmarshal([]byte(line), &envelope); err != nil || envelope.Event != "OrderCancelled" {
+			continue
+		}
+		var cancellation struct {
+			OrderID   uint64 `json:"order_id"`
+			RequestID uint64 `json:"request_id"`
+		}
+		if err := json.Unmarshal(envelope.Data.Payload, &cancellation); err != nil {
+			continue
+		}
+		reference := staleCancellationReference{ClientID: envelope.ClientID, OrderID: cancellation.OrderID, CancelRequestID: cancellation.RequestID}
+		if _, exists := staleOrders[reference]; !exists {
+			continue
+		}
+		return []byte(strings.Join(append(lines[:index], lines[index+1:]...), "")), true
+	}
+	return book, false
+}
+
+func hasCDFFailurePrefix(checks []analysis.CDFLiquidityCheck, prefix string) bool {
+	for _, check := range checks {
+		if strings.HasPrefix(check.Failure, prefix) {
+			return true
+		}
+	}
+	return false
 }

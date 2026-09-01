@@ -173,6 +173,33 @@ v2_r2_require_current_source_revision() {
 	v2_r2_require_matching_revision "$source_revision" "$analyzer_revision"
 }
 
+# Checkpoint streams are strictly increasing except for the explicit final
+# attestation, which may repeat the terminal ordinary checkpoint when an event
+# lands exactly on a checkpoint boundary. The repeated row must be identical
+# in state and must be marked final; this keeps the terminal attestation
+# explicit without allowing an arbitrary duplicate in the ordered stream.
+v2_r2_require_checkpoint_stream() {
+	[[ $# -eq 3 ]] || return 1
+	local checkpoints=$1
+	local simulation_start_nano=$2
+	local simulation_end_nano=$3
+	jq -e -s --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
+		'. as $checkpoints |
+		 ($checkpoints | length) > 0 and
+		 all($checkpoints[]; .domain == "execution_observations" and .ordering == "ordered_stream" and
+			(.sim_time | type) == "number" and (.event_count | type) == "number" and
+			.sim_time >= $simulation_start_nano and .sim_time <= $simulation_end_nano and .event_count >= 0) and
+		 all(range(1; ($checkpoints | length));
+			 (($checkpoints[. - 1].sim_time < $checkpoints[.].sim_time and
+			   $checkpoints[. - 1].event_count < $checkpoints[.].event_count) or
+			  ($checkpoints[.].final == true and $checkpoints[. - 1].final != true and
+			   $checkpoints[. - 1].sim_time == $checkpoints[.].sim_time and
+			   $checkpoints[. - 1].event_count == $checkpoints[.].event_count and
+			   $checkpoints[. - 1].execution_stream_hash == $checkpoints[.].execution_stream_hash))) and
+		 $checkpoints[-1].sim_time == $simulation_end_nano and $checkpoints[-1].final == true' \
+		"$checkpoints" >/dev/null
+}
+
 v2_r2_require_attestation_path() {
 	local cell=$1
 	[[ "$cell" == dev-607 || "$cell" == dev-613 || "$cell" == dev-617 ||
