@@ -30,6 +30,28 @@ expect_failure() {
 "$root_dir/scripts/check-v2-integrated-longrun-r2-configs.sh" >/dev/null
 source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 
+for sv1_script in \
+	check-v2-r2-sv1-24h-parity.sh \
+	extract-v2-r2-sv1-24h-cell.sh \
+	score-v2-r2-sv1-24h-development.sh \
+	verify-v2-r2-sv1-24h-cell.sh; do
+	[[ -x "$root_dir/scripts/$sv1_script" ]] || fail "SV1 script is not executable: $sv1_script"
+	bash -n "$root_dir/scripts/$sv1_script" || fail "SV1 script has invalid shell syntax: $sv1_script"
+done
+for required_sv1_fragment in \
+	'V2_R2_EXTRACTOR_VARIANT=sv1' \
+	'control_full_no_log_normalized_equal' \
+	'execution_stream_hash' \
+	'RESERVED_AND_NOT_READ_BY_DEVELOPMENT_SCORER' \
+	'holdout-619'; do
+	rg -F "$required_sv1_fragment" \
+		"$root_dir/scripts/check-v2-r2-sv1-24h-parity.sh" \
+		"$root_dir/scripts/score-v2-r2-sv1-24h-development.sh" \
+		"$root_dir/scripts/extract-v2-integrated-longrun-r2-cell.sh" \
+		"$root_dir/scripts/verify-v2-integrated-longrun-r2-cell.sh" >/dev/null ||
+		fail "SV1 control-plane scripts are missing required fragment: $required_sv1_fragment"
+done
+
 left_manifest_dir="$tmp_root/ordered-left"
 right_manifest_dir="$tmp_root/ordered-right"
 mkdir -p "$left_manifest_dir" "$right_manifest_dir"

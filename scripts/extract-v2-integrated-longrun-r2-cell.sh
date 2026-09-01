@@ -9,10 +9,28 @@ if [[ $# -ne 1 ]]; then
 fi
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
+extractor_variant=${V2_R2_EXTRACTOR_VARIANT:-historical}
+case "$extractor_variant" in
+	historical)
+		contract_script="$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
+		contract_version="v2-integrated-longrun-r2-candidate-v2"
+		expected_config_dir="$root_dir/research/configs/v2-integrated-longrun-r2"
+		expected_runner_contract="v2-integrated-longrun-r2-runner-v2"
+		;;
+	sv1)
+		contract_script="$root_dir/scripts/v2-r2-sv1-24h-contract.sh"
+		contract_version="v2-r2-sv1-24h-candidate-v1"
+		expected_config_dir="$root_dir/research/configs/v2-r2-sv1-24h"
+		expected_runner_contract="v2-r2-sv1-24h-runner-v1"
+		;;
+	*)
+		printf 'integrated long-run extraction failure: unsupported extractor variant: %s\n' "$extractor_variant" >&2
+		exit 2
+		;;
+esac
+source "$contract_script"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 renderer=${EVSRENDER_BIN:-"$root_dir/bin/evsrender"}
-contract_version="v2-integrated-longrun-r2-candidate-v2"
 conservation_tolerance_fixed_units=1000
 calendar_epoch_nano=1735689600000000000
 calendar_hour_nano=3600000000000
@@ -56,7 +74,12 @@ fi
 analyzer_go_version=$(v2_r2_binary_go_version "$analyzer")
 v2_r2_is_go_127 "$analyzer_go_version" || fail "analyzer is not built with the pinned Go 1.27 toolchain: $analyzer_go_version"
 case "$cell_name" in
-	dev-607|dev-613|dev-617) ;;
+	dev-607|dev-613|dev-617)
+		[[ "$extractor_variant" == historical ]] || fail "SV1 extractor cannot accept historical cell: $cell_name"
+		;;
+	treatment-607|treatment-613|treatment-617|control-607|control-613|control-617)
+		[[ "$extractor_variant" == sv1 ]] || fail "historical extractor cannot accept SV1 cell: $cell_name"
+		;;
 	*) fail "extractor accepts only registered full development cells, got $cell_name" ;;
 esac
 for sentinel in greeks.json latency.json; do
@@ -88,7 +111,7 @@ cleanup_raw_stage() {
 trap cleanup_raw_stage EXIT
 v2_r2_stage_raw_evidence "$cell" || fail "raw evidence is neither retained nor covered by a valid archive"
 
-expected_config="$root_dir/research/configs/v2-integrated-longrun-r2/$cell_name.json"
+expected_config="$expected_config_dir/$cell_name.json"
 require_file "$expected_config"
 cmp -s "$expected_config" "$cell/run-config.json" || fail "run config is not byte-identical to registered $cell_name"
 
@@ -108,12 +131,13 @@ jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulat
 	 ($simulation_end_nano - $simulation_start_nano) == 86400000000000)' \
 	<<<'null' >/dev/null || fail "run metadata does not use the registered 24-hour horizon"
 jq -e --arg cell "$cell_name" --argjson seed "$seed" --arg experiment "$config_experiment" \
-	'.schema_version == 6 and .runner_contract == "v2-integrated-longrun-r2-runner-v2" and
+	--arg runner_contract "$expected_runner_contract" --arg hypothesis_id "$config_hypothesis" \
+	'.schema_version == 6 and .runner_contract == $runner_contract and
 	 .cell == $cell and .seed == $seed and .holdout == false and
 	 .simulated_horizon == "24h" and .log_mode == "full" and .evidence_format == "evstream_v3" and
 	 .simulation_start_nano == 1735689600000000000 and .simulation_end_nano == 1735776000000000000 and
 	 (.gomaxprocs | type) == "number" and .gomaxprocs == 4 and
-	 .hypothesis_id == "V2-INTEGRATED-LONG-R2-CANDIDATE" and
+	 .hypothesis_id == $hypothesis_id and
 	 .config_experiment_id == $experiment and
 	 (.config_sha256 | test("^[0-9a-f]{64}$")) and
 	 (.binary_sha256 | test("^[0-9a-f]{64}$")) and

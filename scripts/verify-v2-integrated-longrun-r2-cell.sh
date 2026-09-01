@@ -10,7 +10,13 @@ if [[ $# -ne 1 ]]; then
 fi
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
+verification_variant=${V2_R2_EXTRACTOR_VARIANT:-historical}
+case "$verification_variant" in
+	historical) contract_script="$root_dir/scripts/v2-integrated-longrun-r2-contract.sh" ;;
+	sv1) contract_script="$root_dir/scripts/v2-r2-sv1-24h-contract.sh" ;;
+	*) printf 'integrated long-run verification failure: unsupported verification variant: %s\n' "$verification_variant" >&2; exit 2 ;;
+esac
+source "$contract_script"
 cell=$1
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 
@@ -30,6 +36,7 @@ analysis_dir=$(mktemp -d "$verification_tmp_root/v2-r2-verify.XXXXXX")
 trap 'rm -rf -- "$analysis_dir"' EXIT
 
 if ! V2_ANALYSIS_OUTPUT_DIR="$analysis_dir" MVANALYZE_BIN="$analyzer" \
+	V2_R2_EXTRACTOR_VARIANT="$verification_variant" \
 	"$root_dir/scripts/extract-v2-integrated-longrun-r2-cell.sh" "$cell" >/dev/null; then
 	fail "fresh extraction failed: $(basename "$cell")"
 fi
