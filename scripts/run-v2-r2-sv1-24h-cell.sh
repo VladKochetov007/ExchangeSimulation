@@ -133,7 +133,7 @@ config_provenance_sha256=$(sha256sum "$config_provenance_manifest" | awk '{print
 	echo "registered successor cell requires evstream_v3 evidence (got $evidence_format)" >&2
 	exit 1
 }
-v2_r2_require_binary_capacity_attestation "$binary" "$sim_revision" "" "$config_sha256" 4 || {
+v2_r2_require_binary_capacity_attestation "$binary" "$sim_revision" "" "$config_sha256" 4 $((4 * 1024 * 1024 * 1024)) || {
 	echo "refusing long-run launch without a matching measured binary-evidence capacity attestation" >&2
 	exit 1
 }

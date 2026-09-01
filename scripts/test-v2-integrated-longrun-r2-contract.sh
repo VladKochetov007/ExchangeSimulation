@@ -79,18 +79,35 @@ jq -n --arg source_revision "$matching_revision" --arg binary_sha256 "$capacity_
 	'{schema_version: 1, contract: "v2-integrated-longrun-r2-binary-capacity-v1",
 	 measurement: "full_24h_binary_evidence_capacity_probe", evidence_format: "evstream_v3",
 	 source_revision: $source_revision, binary_sha256: $binary_sha256,
-	 config_sha256: "config-for-contract-test", gomaxprocs: 4,
+	 config_sha256: "config-for-contract-test", gomaxprocs: 4, minimum_free_bytes: 4294967296,
 	 peak_output_bytes: 1, safety_margin_bytes: 2147483648,
 	 required_free_bytes: 2147483649}' >"$capacity_probe_attestation"
 v2_r2_require_binary_capacity_attestation "$capacity_probe_binary" "$matching_revision" "$capacity_probe_attestation" ||
 	fail "a valid binary capacity attestation was rejected"
 v2_r2_require_binary_capacity_attestation "$capacity_probe_binary" "$matching_revision" \
-	"$capacity_probe_attestation" "config-for-contract-test" 4 ||
+	"$capacity_probe_attestation" "config-for-contract-test" 4 4294967296 ||
 	fail "a config/process-bound binary capacity attestation was rejected"
 expect_failure v2_r2_require_binary_capacity_attestation "$capacity_probe_binary" "$matching_revision" \
 	"$capacity_probe_attestation" "wrong-config" 4
 expect_failure v2_r2_require_binary_capacity_attestation "$capacity_probe_binary" "$matching_revision" \
 	"$capacity_probe_attestation" "config-for-contract-test" 8
+expect_failure v2_r2_require_binary_capacity_attestation "$capacity_probe_binary" "$matching_revision" \
+	"$capacity_probe_attestation" "config-for-contract-test" 4 8589934592
+
+sv1_capacity_probe="$root_dir/scripts/run-v2-r2-sv1-24h-capacity-probe.sh"
+ln -s -- "$root_dir" "$tmp_root/repository-link"
+expect_failure env GOMAXPROCS=4 V2_R2_SV1_CAPACITY_ROOT="$root_dir/research/forbidden-capacity-probe" \
+	"$sv1_capacity_probe" /bin/true
+expect_failure env GOMAXPROCS=4 V2_R2_SV1_CAPACITY_ROOT="$tmp_root/repository-link/forbidden-capacity-probe" \
+	"$sv1_capacity_probe" /bin/true
+capacity_preflight_error="$tmp_root/capacity-preflight-error"
+if env GOMAXPROCS=4 V2_R2_SV1_CAPACITY_ROOT="$tmp_root/external-capacity-probe" \
+	"$sv1_capacity_probe" /bin/true >"$tmp_root/capacity-preflight-output" 2>"$capacity_preflight_error"; then
+	fail "capacity probe unexpectedly accepted a non-Go binary"
+fi
+if rg -n 'unbound variable|probe_dir' "$capacity_preflight_error" >/dev/null; then
+	fail "capacity probe failed before its control-plane checks"
+fi
 if rg -n 'historical_full_tree_bytes|35341880370|required_free_bytes=' \
 	"$root_dir/scripts/run-v2-integrated-longrun-r2-cell.sh" >/dev/null; then
 	fail "registered launcher still contains the obsolete JSON capacity floor"

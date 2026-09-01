@@ -13,7 +13,6 @@ binary=${1:-"$root_dir/bin/multivenue"}
 config="$root_dir/research/configs/v2-r2-sv1-24h/treatment-607.json"
 probe_root_requested=${V2_R2_SV1_CAPACITY_ROOT:-"/home/vlad/external-scratch/v2-r2-sv1-24h-capacity-$head_revision"}
 attestation=$(v2_r2_capacity_attestation_path)
-probe_dir="$probe_root/treatment-607"
 horizon=24h
 simulation_start_nano=1735689600000000000
 simulation_end_nano=1735776000000000000
@@ -26,9 +25,24 @@ fail() {
 	exit 1
 }
 
+capacity_free_bytes() {
+	local path=$1 df_output available_bytes
+	df_output=$(df -P -B1 -- "$path") || return 1
+	available_bytes=$(awk 'NR == 2 {print $4}' <<<"$df_output")
+	[[ "$available_bytes" =~ ^[0-9]+$ ]] || return 1
+	printf '%s\n' "$available_bytes"
+}
+
 [[ -x "$binary" && -s "$config" ]] || fail "missing binary or treatment config"
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "scientific worktree is dirty"
 [[ "${GOMAXPROCS:-}" == "$expected_gomaxprocs" ]] || fail "capacity probe requires GOMAXPROCS=$expected_gomaxprocs"
+[[ "$probe_root_requested" == /* && "$probe_root_requested" != */ && "$probe_root_requested" != *$'\n'* && "$probe_root_requested" != *$'\t'* ]] || fail "capacity root must be an absolute, non-empty path"
+probe_root=$(realpath -m -- "$probe_root_requested") || fail "could not resolve capacity probe root"
+case "$probe_root" in
+	"$scientific_root"|"$scientific_root"/*) fail "capacity root resolves inside the scientific repository" ;;
+esac
+[[ ! -e "$probe_root_requested" && ! -L "$probe_root_requested" ]] || fail "capacity probe root already exists: $probe_root_requested"
+[[ ! -e "$attestation" && ! -L "$attestation" ]] || fail "capacity attestation already exists: $attestation"
 binary_revision=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
 binary_modified=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
 binary_trimpath=$(go version -m "$binary" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
@@ -41,13 +55,16 @@ binary_go_version=$(v2_r2_binary_go_version "$binary")
 [[ "$binary_goos" == linux && "$binary_goarch" == amd64 && "$binary_goamd64" == v1 ]] || fail "binary target is not linux/amd64/v1"
 v2_r2_is_go_127 "$binary_go_version" || fail "binary is not Go 1.27: $binary_go_version"
 "$root_dir/scripts/check-v2-r2-sv1-24h-configs.sh" >/dev/null
-[[ "$probe_root_requested" == /* && "$probe_root_requested" != */ && "$probe_root_requested" != *$'\n'* && "$probe_root_requested" != *$'\t'* ]] || fail "capacity root must be an absolute, non-empty path"
-probe_root=$(realpath -m -- "$probe_root_requested") || fail "could not resolve capacity probe root"
-case "$probe_root" in
-	"$scientific_root"|"$scientific_root"/*) fail "capacity root resolves inside the scientific repository" ;;
-esac
-[[ ! -e "$probe_root_requested" && ! -L "$probe_root_requested" ]] || fail "capacity probe root already exists: $probe_root_requested"
-[[ ! -e "$attestation" && ! -L "$attestation" ]] || fail "capacity attestation already exists: $attestation"
+capacity_mount_path="$probe_root"
+while [[ ! -e "$capacity_mount_path" ]]; do
+	parent_path=$(dirname -- "$capacity_mount_path")
+	[[ "$parent_path" != "$capacity_mount_path" ]] || fail "capacity probe root has no existing filesystem ancestor"
+	capacity_mount_path=$parent_path
+done
+[[ -d "$capacity_mount_path" ]] || fail "capacity probe filesystem ancestor is not a directory: $capacity_mount_path"
+initial_available_free_bytes=$(capacity_free_bytes "$capacity_mount_path") || fail "could not measure initial free space"
+(( initial_available_free_bytes >= minimum_free_bytes )) ||
+	fail "initial free space is below the ${minimum_free_bytes}-byte reserve: $initial_available_free_bytes"
 mkdir -p -- "$probe_root"
 [[ "$(realpath -e -- "$probe_root")" == "$probe_root" ]] || fail "capacity probe root canonicalization changed after creation"
 probe_dir="$probe_root/treatment-607"
@@ -58,8 +75,10 @@ cmp -s "$config" "$probe_dir/run-config.json" || fail "registered config is not 
 config_sha256=$(sha256sum "$probe_dir/run-config.json" | awk '{print $1}')
 binary_sha256=$(sha256sum "$binary" | awk '{print $1}')
 jq -n --arg git_revision "$head_revision" --arg binary_sha256 "$binary_sha256" --arg config_sha256 "$config_sha256" \
-	--arg binary_go_version "$binary_go_version" --argjson seed 607 --arg horizon "$horizon" --argjson gomaxprocs "$expected_gomaxprocs" \
-	'{schema_version:1,contract:"v2-r2-sv1-24h-capacity-probe-v1",git_revision:$git_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,binary_go_version:$binary_go_version,gomaxprocs:$gomaxprocs,seed:$seed,simulated_horizon:$horizon,evidence_format:"evstream_v3"}' >"$probe_dir/run-metadata.json"
+	--arg binary_go_version "$binary_go_version" --argjson seed 607 --arg horizon "$horizon" \
+	--argjson gomaxprocs "$expected_gomaxprocs" --argjson minimum_free_bytes "$minimum_free_bytes" \
+	--argjson initial_available_free_bytes "$initial_available_free_bytes" \
+	'{schema_version:1,contract:"v2-r2-sv1-24h-capacity-probe-v1",git_revision:$git_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,binary_go_version:$binary_go_version,gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,seed:$seed,simulated_horizon:$horizon,evidence_format:"evstream_v3"}' >"$probe_dir/run-metadata.json"
 
 stdout_log="$probe_root/simulator.stdout.log"
 stderr_log="$probe_root/simulator.stderr.log"
@@ -71,15 +90,21 @@ set -e
 peak_output_bytes=0
 peak_at=""
 capacity_abort=false
+capacity_abort_reason=""
 while kill -0 "$simulator_pid" 2>/dev/null; do
 	current_bytes=$(du -sb -- "$probe_root" | awk '{print $1}')
 	if (( current_bytes > peak_output_bytes )); then
 		peak_output_bytes=$current_bytes
 		peak_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 	fi
-	available_bytes=$(df -P -B1 -- "$probe_root" | awk 'NR == 2 {print $4}')
-	if [[ "$available_bytes" =~ ^[0-9]+$ ]] && (( available_bytes < minimum_free_bytes )); then
+	if ! available_bytes=$(capacity_free_bytes "$probe_root"); then
 		capacity_abort=true
+		capacity_abort_reason="free-space measurement failed during probe"
+		kill -TERM "$simulator_pid" 2>/dev/null || true
+		break
+	elif (( available_bytes < minimum_free_bytes )); then
+		capacity_abort=true
+		capacity_abort_reason="free space crossed the ${minimum_free_bytes}-byte reserve during probe: $available_bytes"
 		kill -TERM "$simulator_pid" 2>/dev/null || true
 		break
 	fi
@@ -91,7 +116,15 @@ simulator_status=$?
 set -e
 final_output_bytes=$(du -sb -- "$probe_root" | awk '{print $1}')
 (( final_output_bytes > peak_output_bytes )) && peak_output_bytes=$final_output_bytes
-[[ "$capacity_abort" == false && "$simulator_status" == 0 ]] || fail "probe did not complete (status=$simulator_status capacity_abort=$capacity_abort); output retained at $probe_root"
+if ! final_available_free_bytes=$(capacity_free_bytes "$probe_root"); then
+	capacity_abort=true
+	capacity_abort_reason="final free-space measurement failed"
+elif (( final_available_free_bytes < minimum_free_bytes )); then
+	capacity_abort=true
+	capacity_abort_reason="final free space is below the ${minimum_free_bytes}-byte reserve: $final_available_free_bytes"
+fi
+[[ "$capacity_abort" == false && "$simulator_status" == 0 ]] ||
+	fail "probe did not complete (status=$simulator_status capacity_abort=$capacity_abort reason=${capacity_abort_reason:-simulator failure}); output retained at $probe_root"
 
 for required in run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json; do
 	[[ -s "$probe_dir/$required" ]] || fail "completed probe is missing $required"
@@ -104,14 +137,15 @@ v2_r2_require_checkpoint_stream "$probe_dir/checkpoints.jsonl" "$simulation_star
 v2_r2_write_evidence_manifest "$probe_dir" || fail "probe evidence manifest generation failed"
 v2_r2_verify_evidence_manifest "$probe_dir" || fail "probe evidence manifest verification failed"
 
-available_free_bytes=$(df -P -B1 -- "$probe_root" | awk 'NR == 2 {print $4}')
 required_free_bytes=$((peak_output_bytes + safety_margin_bytes))
 attestation_tmp="$attestation.tmp-$$"
 mkdir -p -- "$(dirname -- "$attestation")"
 jq -n --arg source_revision "$head_revision" --arg binary_sha256 "$binary_sha256" \
 	--arg config_sha256 "$config_sha256" --arg probe_root "$probe_root" --arg peak_at "$peak_at" \
 	--argjson peak_output_bytes "$peak_output_bytes" --argjson safety_margin_bytes "$safety_margin_bytes" \
-	--argjson required_free_bytes "$required_free_bytes" --argjson available_free_bytes "$available_free_bytes" --argjson gomaxprocs "$expected_gomaxprocs" \
-	'{schema_version:1,contract:"v2-integrated-longrun-r2-binary-capacity-v1",measurement:"full_24h_binary_evidence_capacity_probe",evidence_format:"evstream_v3",source_revision:$source_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,gomaxprocs:$gomaxprocs,probe_root:$probe_root,peak_output_bytes:$peak_output_bytes,safety_margin_bytes:$safety_margin_bytes,required_free_bytes:$required_free_bytes,available_free_bytes:$available_free_bytes,peak_observed_at:$peak_at}' >"$attestation_tmp"
+	--argjson required_free_bytes "$required_free_bytes" --argjson available_free_bytes "$final_available_free_bytes" \
+	--argjson gomaxprocs "$expected_gomaxprocs" --argjson minimum_free_bytes "$minimum_free_bytes" \
+	--argjson initial_available_free_bytes "$initial_available_free_bytes" \
+	'{schema_version:1,contract:"v2-integrated-longrun-r2-binary-capacity-v1",measurement:"full_24h_binary_evidence_capacity_probe",evidence_format:"evstream_v3",source_revision:$source_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,probe_root:$probe_root,peak_output_bytes:$peak_output_bytes,safety_margin_bytes:$safety_margin_bytes,required_free_bytes:$required_free_bytes,available_free_bytes:$available_free_bytes,peak_observed_at:$peak_at}' >"$attestation_tmp"
 mv -- "$attestation_tmp" "$attestation"
 echo "completed SV1 24-hour binary capacity probe: root=$probe_root peak_bytes=$peak_output_bytes required_free_bytes=$required_free_bytes"
