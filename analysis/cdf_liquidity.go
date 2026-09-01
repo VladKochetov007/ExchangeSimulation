@@ -78,6 +78,8 @@ type CDFLiquidityRunAudit struct {
 	lastEventAt                     int64
 	terminalAt                      int64
 	cancelRequestedByOrder          map[cdfOrderKey]struct{}
+	cancelRequestByOrder            map[cdfOrderKey]uint64
+	pendingCancelWaits              []cdfPendingCancelWait
 	staleWithdrawals                map[cdfOrderKey]cdfStaleWithdrawal
 }
 
@@ -414,24 +416,34 @@ type cdfFillKey struct {
 }
 
 type cdfOrderState struct {
-	requestID       uint64
-	clientID        uint64
-	side            string
-	price           int64
-	acceptedAt      int64
-	acceptedQty     int64
-	filledQty       int64
-	remainingQty    int64
-	closed          bool
-	closedAt        int64
-	cancelled       bool
-	cancelRequestID uint64
-	cancelRequested bool
-	touchShare      float64
-	touchShareKnown bool
+	requestID               uint64
+	clientID                uint64
+	side                    string
+	price                   int64
+	acceptedAt              int64
+	acceptedQty             int64
+	filledQty               int64
+	remainingQty            int64
+	closed                  bool
+	closedAt                int64
+	filled                  bool
+	cancelled               bool
+	cancelRequestID         uint64
+	cancelRejected          bool
+	cancelRejectedRequestID uint64
+	cancelRequested         bool
+	touchShare              float64
+	touchShareKnown         bool
 }
 
 type cdfStaleWithdrawal struct {
+	decisionAt      int64
+	cancelRequestID uint64
+	ordinal         int64
+}
+
+type cdfPendingCancelWait struct {
+	key             cdfOrderKey
 	decisionAt      int64
 	cancelRequestID uint64
 	ordinal         int64
@@ -455,6 +467,8 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		lastDepthTotal:            make(map[string]int64),
 		lastSupplierDepthByClient: make(map[string]map[uint64]int64),
 		cancelRequestedByOrder:    make(map[cdfOrderKey]struct{}),
+		cancelRequestByOrder:      make(map[cdfOrderKey]uint64),
+		pendingCancelWaits:        make([]cdfPendingCancelWait, 0),
 		staleWithdrawals:          make(map[cdfOrderKey]cdfStaleWithdrawal),
 	}
 	config, configErr := loadCDFRunConfig(r)
@@ -669,7 +683,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	}
 	for _, path := range bookFiles {
 		err := r.Scan(ScanOptions{
-			Events: []string{"Trade", "BookSnapshot", "OrderAccepted", "OrderRejected", "OrderCancelled", "OrderFill"},
+			Events: []string{"Trade", "BookSnapshot", "OrderAccepted", "OrderRejected", "OrderCancelled", "OrderCancelRejected", "OrderFill"},
 			Files:  []string{path}, FilesSelected: true, Workers: 1,
 		}, func(event Event) {
 			if event.SimTS > result.lastEventAt {
@@ -684,6 +698,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	if len(bookFiles) == 0 {
 		result.addCheck(CDFLiquidityCheck{Failure: "no rendered CDF-USD book evidence"})
 	}
+	result.validatePendingCancelWaits(orders, states)
 	result.validateStaleWithdrawals(orders, states)
 	if result.terminalAt == 0 {
 		result.terminalAt = result.lastEventAt
@@ -881,6 +896,9 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 		} else {
 			orderKey := cdfOrderKey{VenueID: event.VenueID, ClientID: decision.ClientID, OrderID: decision.QuoteOrderID}
 			r.cancelRequestedByOrder[orderKey] = struct{}{}
+			if decision.CancelRequestID != 0 {
+				r.cancelRequestByOrder[orderKey] = decision.CancelRequestID
+			}
 			if staleWithdrawal {
 				if _, duplicate := r.staleWithdrawals[orderKey]; duplicate {
 					r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "duplicate stale withdrawal for supplier order"})
@@ -893,8 +911,52 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "withdrawal decision has no cancellation request identity"})
 		}
 	case "wait":
+		r.validateWaitState(event, decision, state)
 	default:
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "unknown supplier action " + decision.Action})
+	}
+}
+
+func (r *CDFLiquidityRunAudit) validateWaitState(event Event, decision cdfDecisionEvidence, state *CDFLiquiditySupplierAudit) {
+	orderKey := cdfOrderKey{VenueID: event.VenueID, ClientID: decision.ClientID, OrderID: decision.QuoteOrderID}
+	switch decision.Reason {
+	case "subscribe":
+		if state.DecisionCount != 1 || decision.QuoteOrderID != 0 || decision.QuoteRequestID != 0 || decision.CancelRequestID != 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "subscription wait has outstanding order state"})
+		}
+	case "stale_or_missing_observation":
+		if decision.QuoteOrderID != 0 || decision.QuoteRequestID != 0 || decision.CancelRequestID != 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "stale-observation wait has outstanding order state"})
+		}
+	case "order_pending":
+		if decision.QuoteOrderID != 0 || decision.QuoteRequestID == 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "order-pending wait has invalid request identity"})
+		} else if _, exists := state.pendingQuoteByRequest[decision.QuoteRequestID]; !exists {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "order-pending wait has no outstanding submission"})
+		}
+	case "cancel_pending":
+		requestedCancel, requestExists := r.cancelRequestByOrder[orderKey]
+		if decision.QuoteOrderID == 0 || decision.CancelRequestID == 0 || !requestExists || requestedCancel != decision.CancelRequestID {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "cancel-pending wait has no matching live cancellation"})
+		} else {
+			r.pendingCancelWaits = append(r.pendingCancelWaits, cdfPendingCancelWait{key: orderKey, decisionAt: decision.DecisionTime, cancelRequestID: decision.CancelRequestID, ordinal: event.Ordinal})
+		}
+	default:
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "unknown supplier wait reason " + decision.Reason})
+	}
+}
+
+func (r *CDFLiquidityRunAudit) validatePendingCancelWaits(orders map[cdfOrderKey]*cdfOrderState, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
+	for _, wait := range r.pendingCancelWaits {
+		order := orders[wait.key]
+		state := states[cdfParticipantKey{VenueID: wait.key.VenueID, ClientID: wait.key.ClientID}]
+		role := ""
+		if state != nil {
+			role = state.Role
+		}
+		if order == nil || order.acceptedAt <= 0 || order.acceptedAt > wait.decisionAt || order.closedAt > 0 && order.closedAt <= wait.decisionAt || !order.cancelRequested || r.cancelRequestByOrder[wait.key] != wait.cancelRequestID {
+			r.addCheck(CDFLiquidityCheck{VenueID: wait.key.VenueID, Role: role, ClientID: wait.key.ClientID, Ordinal: wait.ordinal, Failure: "cancel-pending wait has no matching live cancellation"})
+		}
 	}
 }
 
@@ -1388,7 +1450,7 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			actual[fillKey] = fill
 		}
 		if fill.IsFull {
-			order.closed, order.closedAt = true, event.SimTS
+			order.closed, order.closedAt, order.filled = true, event.SimTS, true
 		}
 	case "OrderCancelled":
 		state := states[cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}]
@@ -1411,6 +1473,35 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 		}
 		order.closed, order.closedAt = true, event.SimTS
 		order.cancelled, order.cancelRequestID = true, cancelled.RequestID
+	case "OrderCancelRejected":
+		state := states[cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}]
+		if state == nil {
+			return
+		}
+		var rejected struct {
+			RequestID uint64 `json:"request_id"`
+		}
+		if err := decodeRequiredJSON(event.Raw(), &rejected, "request_id"); err != nil || rejected.RequestID == 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed supplier cancellation rejection"})
+			return
+		}
+		matched := false
+		for key, requestID := range r.cancelRequestByOrder {
+			if key.VenueID != event.VenueID || key.ClientID != event.ClientID || requestID != rejected.RequestID {
+				continue
+			}
+			order := orders[key]
+			if order == nil {
+				r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier cancellation rejection has no matching order"})
+				matched = true
+				continue
+			}
+			order.cancelRejected, order.cancelRejectedRequestID = true, rejected.RequestID
+			matched = true
+		}
+		if !matched {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier cancellation rejection has no matching request"})
+		}
 	}
 }
 
@@ -1439,7 +1530,9 @@ func (r *CDFLiquidityRunAudit) validateStaleWithdrawals(orders map[cdfOrderKey]*
 		if order.closedAt > 0 && order.closedAt <= withdrawal.decisionAt {
 			addFailure("stale withdrawal references a supplier order already closed before the decision")
 		}
-		if !order.cancelled || order.cancelRequestID != withdrawal.cancelRequestID || order.closedAt <= withdrawal.decisionAt {
+		matchingCancellation := order.cancelled && order.cancelRequestID == withdrawal.cancelRequestID && order.closedAt > withdrawal.decisionAt
+		matchingFillRace := order.filled && order.closedAt > withdrawal.decisionAt && order.cancelRejected && order.cancelRejectedRequestID == withdrawal.cancelRequestID
+		if !matchingCancellation && !matchingFillRace {
 			addFailure("stale withdrawal has no later matching exchange cancellation outcome")
 		}
 	}

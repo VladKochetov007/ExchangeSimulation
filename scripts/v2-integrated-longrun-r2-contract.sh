@@ -185,18 +185,21 @@ v2_r2_require_checkpoint_stream() {
 	local simulation_end_nano=$3
 	jq -e -s --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
 		'. as $checkpoints |
-		 ($checkpoints | length) > 0 and
+			 ($checkpoints | length) >= 2 and
 		 all($checkpoints[]; .domain == "execution_observations" and .ordering == "ordered_stream" and
 			(.sim_time | type) == "number" and (.event_count | type) == "number" and
 			.sim_time >= $simulation_start_nano and .sim_time <= $simulation_end_nano and .event_count >= 0) and
-		 all(range(1; ($checkpoints | length));
-			 (($checkpoints[. - 1].sim_time < $checkpoints[.].sim_time and
-			   $checkpoints[. - 1].event_count < $checkpoints[.].event_count) or
-			  ($checkpoints[.].final == true and $checkpoints[. - 1].final != true and
-			   $checkpoints[. - 1].sim_time == $checkpoints[.].sim_time and
-			   $checkpoints[. - 1].event_count == $checkpoints[.].event_count and
-			   $checkpoints[. - 1].execution_stream_hash == $checkpoints[.].execution_stream_hash))) and
-		 $checkpoints[-1].sim_time == $simulation_end_nano and $checkpoints[-1].final == true' \
+			 ($checkpoints | map(select(.final == true)) | length) == 1 and
+			 $checkpoints[-1].final == true and
+			 all(range(1; (($checkpoints | length) - 1));
+				 ($checkpoints[. - 1].final != true and $checkpoints[.].final != true and
+				  $checkpoints[. - 1].sim_time < $checkpoints[.].sim_time and
+				  $checkpoints[. - 1].event_count < $checkpoints[.].event_count)) and
+			 $checkpoints[-2].final != true and
+			 $checkpoints[-2].sim_time == $checkpoints[-1].sim_time and
+			 $checkpoints[-2].event_count == $checkpoints[-1].event_count and
+			 $checkpoints[-2].execution_stream_hash == $checkpoints[-1].execution_stream_hash and
+			 $checkpoints[-1].sim_time == $simulation_end_nano and $checkpoints[-1].final == true' \
 		"$checkpoints" >/dev/null
 }
 

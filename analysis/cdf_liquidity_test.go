@@ -373,6 +373,41 @@ func TestMeasureCDFLiquidityRejectsSyntheticStaleWithdrawalWithoutLiveOrder(t *t
 	}
 }
 
+func TestMeasureCDFLiquidityAcceptsStaleWithdrawalFillCancelRace(t *testing.T) {
+	run := writeCDFLiquidityFullFillCancelRaceFixture(t)
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatalf("MeasureCDFLiquidity: %v", err)
+	}
+	if !audit.Valid || audit.FillCount != 2 || audit.CompletedQuoteCount != 2 {
+		t.Fatalf("fill-wins-cancel-race audit = %+v", audit)
+	}
+	if hasCDFCheck(audit.Checks, "stale withdrawal has no later matching exchange cancellation outcome") {
+		t.Fatalf("legitimate fill-wins-cancel-race was rejected: %+v", audit.Checks)
+	}
+}
+
+func TestMeasureCDFLiquidityRejectsUnattestedWaitState(t *testing.T) {
+	run := writeCDFLiquidityFixture(t, true, false)
+	generalPath := filepath.Join(run.Dir, "venues", "north", "general.jsonl")
+	raw, err := os.ReadFile(generalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unattestedPending := cdfFixtureLine(7, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":7,"observation_time":1,"observation_age":6,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"wait","reason":"order_pending","quote_request_id":99}`) + "\n"
+	unattestedCancel := cdfFixtureLine(8, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":8,"observation_time":1,"observation_age":7,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"wait","reason":"cancel_pending","quote_order_id":8,"cancel_request_id":99}`) + "\n"
+	if err := os.WriteFile(generalPath, append(raw, []byte(unattestedPending+unattestedCancel)...), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatalf("MeasureCDFLiquidity: %v", err)
+	}
+	if audit.Valid || !hasCDFCheck(audit.Checks, "order-pending wait has no outstanding submission") || !hasCDFCheck(audit.Checks, "cancel-pending wait has no matching live cancellation") {
+		t.Fatalf("unattested wait audit = %+v", audit)
+	}
+}
+
 func TestUpdateSupplierPnLHandlesPartialClosureReversalAndFees(t *testing.T) {
 	state := &CDFLiquiditySupplierAudit{configuredBasePrecision: 1, configuredQuoteAsset: "USD"}
 	fills := []cdfFillEvidence{
@@ -729,6 +764,62 @@ func writeCDFLiquidityReceiptFixture(t *testing.T) *Run {
 		t.Fatal(err)
 	}
 	return run
+}
+
+func writeCDFLiquidityFullFillCancelRaceFixture(t *testing.T) *Run {
+	t.Helper()
+	run := writeCDFLiquidityFixture(t, true, false)
+	generalPath := filepath.Join(run.Dir, "venues", "north", "general.jsonl")
+	general, err := os.ReadFile(generalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldCancelDecision := cdfFixtureLine(6, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":6,"observation_time":1,"observation_age":5,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"cancel","reason":"reprice_for_inventory_or_touch","quote_order_id":8,"cancel_request_id":3}`) + "\n"
+	staleWithdrawal := cdfFixtureLine(12, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":12,"observation_time":1,"observation_age":11,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":5,"inventory_limit":10,"action":"withdraw","reason":"stale_or_missing_observation","quote_order_id":8,"cancel_request_id":4}`) + "\n"
+	if !strings.Contains(string(general), oldCancelDecision) {
+		t.Fatal("fixture cancel decision was not found")
+	}
+	general = []byte(strings.Replace(string(general), oldCancelDecision, staleWithdrawal, 1))
+	fillFields := `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","order_id":8,"trade_id":2,"timestamp":13,"side":"BUY","price":99,"qty":4,"fee_amount":0,"fee_asset":"","is_full":true,"position_before":5,"position_after":9}`
+	general = append(general, []byte(cdfFixtureLine(13, 2, "elastic_liquidity_supplier_fill", fillFields)+"\n")...)
+	if err := os.WriteFile(generalPath, general, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	greeksPath := filepath.Join(run.Dir, "greeks.json")
+	greeks, err := os.ReadFile(greeksPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldTerminal := `{"venue_id":"north","client_id":2,"role":"cdf_elastic_supplier_1","marks":{"CDF":100,"USD":1},"account":{"equity":11005,"spot_balances":[{"asset":"CDF","net_asset":105,"borrowed":0},{"asset":"USD","net_asset":505,"borrowed":0}]}}`
+	newTerminal := `{"venue_id":"north","client_id":2,"role":"cdf_elastic_supplier_1","marks":{"CDF":100,"USD":1},"account":{"equity":11009,"spot_balances":[{"asset":"CDF","net_asset":109,"borrowed":0},{"asset":"USD","net_asset":109,"borrowed":0}]}}`
+	if !strings.Contains(string(greeks), oldTerminal) {
+		t.Fatal("fixture terminal account was not found")
+	}
+	if err := os.WriteFile(greeksPath, []byte(strings.Replace(string(greeks), oldTerminal, newTerminal, 1)), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bookPath := filepath.Join(run.Dir, "venues", "north", "spot", "CDF-USD.jsonl")
+	book, err := os.ReadFile(bookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldCancellation := cdfFixtureLine(6, 2, "OrderCancelled", `{"order_id":8,"request_id":2,"remaining_qty":4}`) + "\n"
+	if !strings.Contains(string(book), oldCancellation) {
+		t.Fatal("fixture cancellation was not found")
+	}
+	book = []byte(strings.Replace(string(book), oldCancellation, "", 1))
+	book = append(book, []byte(cdfFixtureLine(13, 2, "OrderFill", `{"order_id":8,"trade_id":2,"side":"BUY","price":99,"qty":4,"filled_qty":4,"remaining_qty":0,"is_full":true}`)+"\n")...)
+	book = append(book, []byte(cdfFixtureLine(14, 2, "OrderCancelRejected", `{"request_id":4,"success":false,"error":"ORDER_ALREADY_FILLED"}`)+"\n")...)
+	if err := os.WriteFile(bookPath, book, 0644); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(run.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reopened
 }
 
 func writeCDFLiquidityFixture(t *testing.T, supplier, malformedFill bool) *Run {

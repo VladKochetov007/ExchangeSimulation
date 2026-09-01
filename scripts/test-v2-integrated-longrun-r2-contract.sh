@@ -52,6 +52,13 @@ printf '%s\n' \
 v2_r2_require_checkpoint_stream "$checkpoint_fixture" 0 10 || fail "exact-terminal final checkpoint was rejected"
 jq '.final = true | .execution_stream_hash = "tampered"' "$checkpoint_fixture" >"$tmp_root/tampered-checkpoints.jsonl"
 expect_failure v2_r2_require_checkpoint_stream "$tmp_root/tampered-checkpoints.jsonl" 0 10
+printf '%s\n' \
+	'{"domain":"execution_observations","ordering":"ordered_stream","sim_time":5,"event_count":1,"execution_stream_hash":"aaa"}' \
+	'{"domain":"execution_observations","ordering":"ordered_stream","sim_time":5,"event_count":1,"execution_stream_hash":"aaa","final":true}' \
+	'{"domain":"execution_observations","ordering":"ordered_stream","sim_time":10,"event_count":2,"execution_stream_hash":"bbb"}' \
+	'{"domain":"execution_observations","ordering":"ordered_stream","sim_time":10,"event_count":2,"execution_stream_hash":"bbb","final":true}' \
+	>"$tmp_root/intermediate-final-checkpoints.jsonl"
+expect_failure v2_r2_require_checkpoint_stream "$tmp_root/intermediate-final-checkpoints.jsonl" 0 10
 
 capacity_probe_binary="$tmp_root/capacity-probe"
 cp -- /bin/true "$capacity_probe_binary"
