@@ -613,3 +613,23 @@ The source tree remains clean at `c5d7f56` after this documentation update.
 The next capacity attempt must use a fresh output root and a clean binary built
 from that final documented revision; no capacity attestation has yet been
 published and no development or holdout cell is authorized.
+
+## Additional verified historical compactions — 43df7ce
+
+To make the measured capacity floor attainable while retaining prior results,
+three non-current unpacked trees were compacted only after archive checksum,
+member-list, and full content-comparison checks:
+
+| retained record | archive | SHA-256 | unpacked space recovered |
+|---|---|---|---:|
+| incomplete R5 derivative proxies | `/home/vlad/v2-r5-deriv-proxies-20260830.tar.zst` | `0f7bd00f4f98842a7f65c85908d60e3f7f3e9be35ffc0cec9944a06d861e5ebd` | ~14 GiB |
+| interrupted R5 V5 world | `/home/vlad/v2-integrated-longrun-candidate-20260828-v5-interrupted-20260829.tar.zst` | `fe6a19afd5d83158d61163b0a0cb04b9091e57ce819265b436ff85c6557c1b32` | ~9.9 GiB |
+| failed SV1 capacity probe | `/home/vlad/v2-r2-sv1-capacity-dbbac47-retained-failure.tar.zst` | `2504095a4e8bc82bbefca92337df27ed0d72e4855c34e8dcadb0b48403e56ee5` | ~21.2 GiB |
+
+The source trees were removed only after their archives passed exact content
+comparison; the archives, checksums, member manifests, and comparison logs are
+retained. The SV1 capacity archive preserves the partial stream, provenance,
+and explicit reserve-triggered failure, and remains a failed measurement—not
+an attestation or scientific cell. No current evidence, calendar config,
+source code, or holdout was changed. Free disk after compaction is
+approximately 80 GiB, with the failed-capacity archive still retained.
