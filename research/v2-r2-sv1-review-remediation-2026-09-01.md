@@ -196,3 +196,20 @@ counterfactual. The focused analysis/receipt/simulation gate will be rerun on
 the resulting semantic commit, followed by the clean full gate and one fresh
 independent Sol-xhigh review. No cell or holdout is authorized by this
 checkpoint.
+
+## Fresh Sol-xhigh acceptance — e35d891
+
+Volta completed a fresh independent review of exact
+`e35d89103107165dc5700876dda49fa0e1462d1b`. The verdict is **ACCEPT for the
+smallest development-only activation probe**. The reviewer found no reachable
+fail-closed blocker in the finite CDF economics, effective configuration and
+paired provenance, delayed receipt/gateway identity, independently replayed
+reference EMA, exact inventory/quote-cash sizing, no-fill counterfactual,
+terminal retention, or historical-R2 isolation.
+
+The acceptance conditions are deliberately narrow: rebuild clean Go 1.27
+`linux/amd64/v1` simulator and analyzer binaries from this exact revision, run
+only the registered five-minute seed-607 treatment/control activation probe,
+retain complete artifacts, and obtain post-probe independent review. This does
+not authorize `dev-607`, a 24-hour campaign, freeze, or any holdout. No cells
+or holdouts were run during the review.
