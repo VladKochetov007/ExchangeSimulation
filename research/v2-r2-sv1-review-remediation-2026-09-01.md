@@ -464,3 +464,25 @@ This remains a setup-only remediation. A fresh independent Sol-xhigh review of
 the exact `6d53a85` tree is required before the pinned Go 1.27 build or any
 capacity probe. No registered cell, freeze authorization, or holdout access is
 authorized.
+
+## Capacity-floor remediation — e421e1c
+
+Commit `e421e1c` closes the remaining capacity-floor mismatch. The probe now
+fails before publishing an attestation if retained-output free space is below
+the measured `peak_output_bytes + safety_margin_bytes` floor, in addition to
+the fixed 4 GiB reserve. The shared SV1 attestation verifier enforces the same
+relationship and therefore cannot accept a claim whose final sample is merely
+above the reserve while below the measured output-plus-margin requirement. The
+contract fixture covers that distinction explicitly.
+
+The exact-tree shell syntax, integrated R2 contract tests, SV1 configuration
+provenance check, and `git diff --check` passed before the commit. A clean
+`GOMAXPROCS=4 make test` followed by `GOMAXPROCS=4 go vet ./...` passed after
+the commit (`GATE_STATUS=0`). The commit is pushed. The performance feed was
+refreshed at `c4434ad32b2344e80a086d7e6ff9a8efcdaa1d7e`; there were no newer
+commits and no performance changes were imported.
+
+This is still a setup-only remediation. It does not authorize the pinned
+binary build, the external capacity probe, a registered cell, freeze
+authorization, or holdout access. The next gate is a fresh independent
+Sol-xhigh review of exact `e421e1c`.
