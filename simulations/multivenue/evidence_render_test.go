@@ -83,6 +83,37 @@ func TestRenderBinaryEvidenceMergesEvidenceOnlySidecarsByVenueSequence(t *testin
 	}
 }
 
+func TestRenderBinaryEvidenceRejectsOutOfOrderSidecarSequence(t *testing.T) {
+	inputDir := t.TempDir()
+	venueDir := filepath.Join(inputDir, "venues", "north")
+	if err := os.MkdirAll(venueDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	eventsFile, err := os.Create(filepath.Join(inputDir, "events.evs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := newNeutralBinaryEvidence(eventsFile)
+	if err := sink.record(3, 7, "third", "north", map[string]int{"value": 3}, "general.jsonl", 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eventsFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second := []byte(`{"client_id":8,"data":{"venue_id":"north","sequence":2,"payload":{"value":2}},"event":"second","sim_ts":2}`)
+	first := []byte(`{"client_id":9,"data":{"venue_id":"north","sequence":1,"payload":{"value":1}},"event":"first","sim_ts":1}`)
+	if err := os.WriteFile(filepath.Join(venueDir, "general.jsonl"), append(append(second, '\n'), append(first, '\n')...), 0644); err != nil {
+		t.Fatal(err)
+	}
+	writeRenderMetadata(t, inputDir, sink, "full", second, first)
+	if _, err := RenderBinaryEvidence(inputDir, filepath.Join(t.TempDir(), "rendered")); err == nil || !strings.Contains(err.Error(), "canonical reconstruction stream") {
+		t.Fatalf("out-of-order sidecar sequence was accepted: %v", err)
+	}
+}
+
 func TestRenderBinaryEvidenceRejectsUnterminatedStream(t *testing.T) {
 	inputDir := t.TempDir()
 	file, err := os.Create(filepath.Join(inputDir, "events.evs"))
