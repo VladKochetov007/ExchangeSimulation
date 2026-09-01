@@ -64,7 +64,7 @@ for required_capacity_fragment in \
 	'publish_new_file' \
 	'ln --no-target-directory' \
 	'require_published_sidecar' \
-	'findmnt -n -l -r -o TARGET' \
+	'findmnt -n -r -o TARGET' \
 	'find -P "$probe_root" -xdev' \
 	'deletion_root='; do
 	rg -F "$required_capacity_fragment" "$root_dir/scripts/archive-v2-r2-sv1-capacity-probe.sh" >/dev/null ||

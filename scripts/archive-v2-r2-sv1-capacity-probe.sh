@@ -70,7 +70,7 @@ require_same_filesystem() {
 require_no_nested_mounts() {
 	local mountpoint canonical_mountpoint
 	local mountpoints
-	mountpoints=$(findmnt -n -l -r -o TARGET) || fail "could not enumerate the mount table"
+	mountpoints=$(findmnt -n -r -o TARGET) || fail "could not enumerate the mount table"
 	while IFS= read -r mountpoint; do
 		[[ -n "$mountpoint" ]] || continue
 		canonical_mountpoint=$(realpath -m -- "$mountpoint") || fail "could not canonicalize mountpoint: $mountpoint"
