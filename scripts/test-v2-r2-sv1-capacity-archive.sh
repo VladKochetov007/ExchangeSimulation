@@ -176,10 +176,12 @@ unlink -- "$archive.members"
 "$archiver" "$attestation" "$validator" "$archive" >"$tmp_root/archive.stdout"
 [[ ! -e "$probe_root" && ! -L "$probe_root" ]] || fail "successful archive retained the source probe root"
 [[ ! -e "$attestation" && ! -L "$attestation" ]] || fail "successful archive retained the source attestation"
-for published in "$archive" "$archive.members" "$archive.sha256" "$archive.compare.log" "$archive.retention.json"; do
+for published in "$archive" "$archive.members" "$archive.sha256" "$archive.retention.json"; do
 	[[ -f "$published" && ! -L "$published" && -s "$published" ]] ||
 		fail "published archive artifact is missing or empty: $published"
 done
+[[ -f "$archive.compare.log" && ! -L "$archive.compare.log" ]] ||
+	fail "published archive comparison log is missing or symlinked"
 zstd -t -- "$archive"
 [[ ! -s "$archive.compare.log" ]] || fail "published archive comparison log is not empty"
 archive_sha256=$(sha256sum -- "$archive" | awk '{print $1}')
