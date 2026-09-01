@@ -61,7 +61,11 @@ for required_capacity_fragment in \
 	'registered_config=' \
 	'new_temporary_file' \
 	'publish_new_file' \
-	'find -P "$probe_root" -xdev'; do
+	'ln --no-target-directory' \
+	'require_published_sidecar' \
+	'findmnt -n -l -r -o TARGET' \
+	'find -P "$probe_root" -xdev' \
+	'deletion_root='; do
 	rg -F "$required_capacity_fragment" "$root_dir/scripts/archive-v2-r2-sv1-capacity-probe.sh" >/dev/null ||
 		fail "capacity archive script is missing required fragment: $required_capacity_fragment"
 done

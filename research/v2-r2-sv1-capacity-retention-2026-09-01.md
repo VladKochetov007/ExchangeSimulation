@@ -45,10 +45,13 @@ following hold:
   exact old probe root and old attestation are removed.
 
 The tool refuses a current-revision probe, non-ancestor or cross-bound
-provenance, symlinked targets, nested mounts, pre-existing archives/sidecars,
-dirty source, and malformed or incomplete attestation data. A failure after
-archive publication leaves the source probe intact; deletion is reached only
-after final archive, sidecar, receipt, and filesystem checks pass.
+provenance, symlinked targets, nested mountpoints (including same-device bind
+mounts found through the mount table), pre-existing archives/sidecars, dirty
+source, and malformed or incomplete attestation data. A failure before the
+cleanup phase leaves the source probe intact. Cleanup first renames the exact
+probe root into a process-specific quarantine and then removes only that
+quarantine; an interruption during deletion may leave the quarantine in place,
+while the complete verified archive remains authoritative.
 This amendment applies only to superseded capacity measurements; the active
 capacity probe for the candidate under test remains unpacked and manifest-
 verifiable for the duration of its gate.

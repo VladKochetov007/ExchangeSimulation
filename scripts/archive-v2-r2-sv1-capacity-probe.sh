@@ -47,9 +47,14 @@ publish_new_file() {
 	local destination_path=$2
 	[[ ! -e "$destination_path" && ! -L "$destination_path" ]] ||
 		fail "publication target appeared or already exists: $destination_path"
-	ln -- "$source_path" "$destination_path" ||
+	ln --no-target-directory -- "$source_path" "$destination_path" ||
 		fail "could not publish without replacement: $destination_path"
 	unlink -- "$source_path" || fail "could not retire temporary file: $source_path"
+}
+
+require_published_sidecar() {
+	local path=$1
+	[[ -f "$path" && ! -L "$path" ]] || fail "published sidecar is missing or symlinked: $path"
 }
 
 require_same_filesystem() {
@@ -60,6 +65,19 @@ require_same_filesystem() {
 		device=$(stat -c '%d' -- "$path") || fail "could not stat probe path: $path"
 		[[ "$device" == "$expected_device" ]] || fail "probe contains a nested mount: $path"
 	done < <(find -P "$probe_root" -xdev -print0)
+}
+
+require_no_nested_mounts() {
+	local mountpoint canonical_mountpoint
+	local mountpoints
+	mountpoints=$(findmnt -n -l -r -o TARGET) || fail "could not enumerate the mount table"
+	while IFS= read -r mountpoint; do
+		[[ -n "$mountpoint" ]] || continue
+		canonical_mountpoint=$(realpath -m -- "$mountpoint") || fail "could not canonicalize mountpoint: $mountpoint"
+		case "$canonical_mountpoint" in
+			"$probe_root"|"$probe_root"/*) fail "probe contains a mountpoint: $canonical_mountpoint" ;;
+		esac
+	done <<<"$mountpoints"
 }
 
 v2_r2_acquire_namespace_lock || fail "could not acquire the SV1 capacity namespace lock"
@@ -143,6 +161,7 @@ jq -e --arg revision "$source_revision" \
 	 .config.experiment_id == "v2-r2-sv1-24h-treatment-607"' \
 	"$probe_cell/manifest.json" >/dev/null || fail "capacity manifest build/config identity is not cross-bound"
 require_same_filesystem
+require_no_nested_mounts
 v2_r2_require_binary_capacity_attestation "$binary" "$source_revision" "$attestation" \
 	"$config_sha256" "$expected_gomaxprocs" "$expected_minimum_free_bytes" ||
 	fail "capacity attestation or retained probe evidence did not validate"
@@ -211,6 +230,9 @@ jq -n \
 publish_new_file "$receipt_tmp" "$archive.retention.json"
 
 zstd -t -- "$archive" || fail "capacity probe archive failed final integrity test"
+for published_sidecar in "$archive" "$archive.members" "$archive.sha256" "$archive.compare.log" "$archive.retention.json"; do
+	require_published_sidecar "$published_sidecar"
+done
 new_temporary_file ".${archive_base}.final-members.XXXXXX"
 final_members_tmp=$temporary_path
 tar --use-compress-program='zstd -q' -tf "$archive" | sort >"$final_members_tmp" || fail "final member enumeration failed"
@@ -233,9 +255,15 @@ jq -e --arg archive "$archive" --arg archive_sha256 "$archive_sha256" --arg sour
 	 .comparison == "tar_compare_clean"' "$archive.retention.json" >/dev/null ||
 	fail "published retention receipt is not cross-bound"
 require_same_filesystem
+require_no_nested_mounts
 
-find -P "$probe_root" -xdev -depth -mindepth 1 -delete
-rmdir -- "$probe_root"
+deletion_root="${probe_root}.deleting.$$"
+[[ ! -e "$deletion_root" && ! -L "$deletion_root" ]] || fail "capacity probe deletion quarantine already exists"
+mv --no-target-directory -- "$probe_root" "$deletion_root" || fail "could not quarantine probe before cleanup"
+if ! find -P "$deletion_root" -xdev -depth -mindepth 1 -delete; then
+	fail "post-archive cleanup was interrupted; quarantine retained at $deletion_root"
+fi
+rmdir -- "$deletion_root" || fail "post-archive cleanup left quarantine at $deletion_root"
 unlink -- "$attestation_real"
-[[ ! -e "$probe_root" && ! -e "$attestation_real" ]] || fail "capacity probe compaction was incomplete"
+[[ ! -e "$probe_root" && ! -e "$deletion_root" && ! -e "$attestation_real" ]] || fail "capacity probe compaction was incomplete"
 echo "compacted superseded SV1 capacity probe: archive=$archive bytes=$probe_bytes sha256=$archive_sha256"
