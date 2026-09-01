@@ -25,8 +25,9 @@ const binaryExecutionHashContract = "route_sequence_neutral_v1"
 // byte of it produced to feed the ordered execution-stream digest, plus 3.61 %
 // hashing it. A ceiling probe put the total addressable share at 17.0-17.9 %.
 type binaryEvidence struct {
-	mu     sync.Mutex
-	writer *evstream.Writer
+	mu      sync.Mutex
+	writer  *evstream.Writer
+	hashing string
 	// events counts frames the sink was asked to record, which is the figure
 	// comparable to the JSON path's event count.
 	events      uint64
@@ -53,7 +54,7 @@ func newBinaryEvidence(out interface{ Write([]byte) (int, error) }) *binaryEvide
 }
 
 func newNeutralBinaryEvidence(out interface{ Write([]byte) (int, error) }) *binaryEvidence {
-	return &binaryEvidence{writer: evstream.NewWriter(out, evstream.WriterOptions{
+	return &binaryEvidence{hashing: binaryExecutionHashContract, writer: evstream.NewWriter(out, evstream.WriterOptions{
 		HashFrame: hashBinaryExecutionFrame,
 	})}
 }
@@ -163,6 +164,12 @@ func (b *binaryEvidence) executionHash() [sha256.Size]byte {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.writer.ExecutionHash()
+}
+
+func (b *binaryEvidence) rawExecutionHash() [sha256.Size]byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.writer.RawExecutionHash()
 }
 
 // finish seals the stream with its completion trailer.

@@ -1960,14 +1960,16 @@ func (s *Sim) closeEvidence() error {
 			return errors.New("multivenue: binary evidence format has no binary sink")
 		}
 		digest := s.checkpoints.binary.executionHash()
+		rawDigest := s.checkpoints.binary.rawExecutionHash()
 		binaryArtifact := binaryEvidenceArtifactRecord{
-			Domain:              "canonical_binary_execution_frames",
-			Ordering:            "ordered_stream",
-			Hashing:             binaryExecutionHashContract,
-			EventFrames:         s.checkpoints.binary.count(),
-			StreamFrames:        s.checkpoints.binary.writer.Count(),
-			ExecutionStreamHash: hex.EncodeToString(digest[:]),
-			UnencodablePayloads: s.checkpoints.binary.unencodableCount(),
+			Domain:                       "canonical_binary_execution_frames",
+			Ordering:                     "ordered_stream",
+			Hashing:                      binaryExecutionHashContract,
+			EventFrames:                  s.checkpoints.binary.count(),
+			StreamFrames:                 s.checkpoints.binary.writer.Count(),
+			ExecutionStreamHash:          hex.EncodeToString(digest[:]),
+			CanonicalExecutionStreamHash: hex.EncodeToString(rawDigest[:]),
+			UnencodablePayloads:          s.checkpoints.binary.unencodableCount(),
 		}
 		raw, err := json.MarshalIndent(binaryArtifact, "", "  ")
 		if err != nil {
@@ -2039,13 +2041,14 @@ type evidenceArtifactRecord struct {
 }
 
 type binaryEvidenceArtifactRecord struct {
-	Domain              string `json:"domain"`
-	Ordering            string `json:"ordering"`
-	Hashing             string `json:"hashing,omitempty"`
-	EventFrames         uint64 `json:"event_frames"`
-	StreamFrames        uint64 `json:"stream_frames"`
-	ExecutionStreamHash string `json:"execution_stream_hash"`
-	UnencodablePayloads uint64 `json:"unencodable_payloads,omitempty"`
+	Domain                       string `json:"domain"`
+	Ordering                     string `json:"ordering"`
+	Hashing                      string `json:"hashing,omitempty"`
+	EventFrames                  uint64 `json:"event_frames"`
+	StreamFrames                 uint64 `json:"stream_frames"`
+	ExecutionStreamHash          string `json:"execution_stream_hash"`
+	CanonicalExecutionStreamHash string `json:"canonical_execution_stream_hash,omitempty"`
+	UnencodablePayloads          uint64 `json:"unencodable_payloads,omitempty"`
 }
 
 type venueLogEvent struct {
@@ -3392,7 +3395,9 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			BaseAsset:            spec.BaseAsset,
 			QuoteAsset:           spec.QuoteAsset,
 			BasePrecision:        spec.BasePrecision,
+			QuotePrecision:       spec.QuotePrecision,
 			InitialBaseBalance:   spec.InitialBaseBalance,
+			InitialQuoteBalance:  spec.InitialQuoteBalance,
 			Interval:             spec.Interval,
 			MaxObservationAge:    spec.MaxObservationAge,
 			ReferencePrice:       spec.ReferencePrice,
@@ -3402,6 +3407,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			MaxPosition:          spec.MaxPosition,
 			MaxInventory:         spec.MaxInventory,
 			MaxQuoteQty:          spec.MaxQuoteQty,
+			MakerFeeBps:          spec.MakerFeeBps,
 		}
 		liquidityConfig.ObservationFrontier = func() simulation.MarketDataFrontier {
 			provider, ok := gateway.(interface {

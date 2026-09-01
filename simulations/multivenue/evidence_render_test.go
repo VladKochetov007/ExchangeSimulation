@@ -3,13 +3,18 @@ package multivenue
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"hash/crc32"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"exchange_sim/evstream"
 	"exchange_sim/exchange"
 	"exchange_sim/simulations/feesim"
 	etypes "exchange_sim/types"
@@ -137,7 +142,7 @@ func TestBinaryEvidenceFormatIsExplicitAndAttested(t *testing.T) {
 		t.Fatal(err)
 	}
 	if attestation.Domain != "canonical_binary_execution_frames" || attestation.Ordering != "ordered_stream" ||
-		attestation.Hashing != binaryExecutionHashContract || attestation.ExecutionStreamHash == "" {
+		attestation.Hashing != binaryExecutionHashContract || attestation.ExecutionStreamHash == "" || attestation.CanonicalExecutionStreamHash == "" {
 		t.Fatalf("binary attestation = %+v", attestation)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "evidence-artifact-hash.json")); !os.IsNotExist(err) {
@@ -206,6 +211,98 @@ func TestBinaryEvidenceExecutionStreamIsLogModeNeutral(t *testing.T) {
 	if fullReport.ExecutionHash != noneReport.ExecutionHash {
 		t.Fatalf("binary execution hash changed when JSON sidecars were disabled: full=%s none=%s", fullReport.ExecutionHash, noneReport.ExecutionHash)
 	}
+}
+
+func TestRenderBinaryEvidenceRejectsRouteSequenceSwapWithValidNormalizedHash(t *testing.T) {
+	inputDir := t.TempDir()
+	eventsPath := filepath.Join(inputDir, "events.evs")
+	eventsFile, err := os.Create(eventsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := newNeutralBinaryEvidence(eventsFile)
+	for index := uint64(1); index <= 2; index++ {
+		if err := sink.record(int64(index), 7, "event", "north", map[string]int{"value": int(index)}, "general.jsonl", index); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := sink.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eventsFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writeRenderMetadata(t, inputDir, sink, "none")
+	if err := swapRouteSequencesAndRepairCRC(eventsPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RenderBinaryEvidence(inputDir, filepath.Join(t.TempDir(), "rendered")); err == nil || !strings.Contains(err.Error(), "canonical reconstruction stream") {
+		t.Fatalf("route-sequence mutation was accepted: %v", err)
+	}
+}
+
+func swapRouteSequencesAndRepairCRC(path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var frameOffsets []int
+	offset := evstream.StreamHeaderSize
+	for offset+evstream.BlockHeaderSize <= len(raw) {
+		magic := binary.LittleEndian.Uint32(raw[offset : offset+4])
+		if magic == evstream.TrailerMagic {
+			break
+		}
+		if magic != evstream.BlockMagic {
+			return fmt.Errorf("unexpected stream block magic at %d", offset)
+		}
+		uncompressedLength := int(binary.LittleEndian.Uint32(raw[offset+4 : offset+8]))
+		storedLength := int(binary.LittleEndian.Uint32(raw[offset+8 : offset+12]))
+		if storedLength != uncompressedLength || offset+evstream.BlockHeaderSize+storedLength > len(raw) {
+			return fmt.Errorf("unexpected block layout at %d", offset)
+		}
+		blockStart := offset + evstream.BlockHeaderSize
+		blockEnd := blockStart + uncompressedLength
+		for frameOffset := blockStart; frameOffset < blockEnd; {
+			header, err := evstream.ParseFrameHeader(raw[frameOffset:blockEnd])
+			if err != nil {
+				return err
+			}
+			frameEnd := frameOffset + int(header.Length)
+			if frameEnd > blockEnd {
+				return fmt.Errorf("frame overruns block")
+			}
+			if header.SchemaID != evstream.SchemaDictionary && frameEnd-frameOffset >= evstream.FrameHeaderSize+16 {
+				frameOffsets = append(frameOffsets, frameOffset+evstream.FrameHeaderSize+8)
+			}
+			frameOffset = frameEnd
+		}
+		crc := crc32.Checksum(raw[blockStart:blockEnd], crc32.MakeTable(crc32.Castagnoli))
+		binary.LittleEndian.PutUint32(raw[offset+16:offset+20], crc)
+		offset = blockEnd
+	}
+	if len(frameOffsets) != 2 {
+		return fmt.Errorf("found %d event frames, want 2", len(frameOffsets))
+	}
+	firstSequence := append([]byte(nil), raw[frameOffsets[0]:frameOffsets[0]+8]...)
+	copy(raw[frameOffsets[0]:frameOffsets[0]+8], raw[frameOffsets[1]:frameOffsets[1]+8])
+	copy(raw[frameOffsets[1]:frameOffsets[1]+8], firstSequence)
+	// Recompute CRCs after the payload mutation. There is one block for this
+	// fixture, but scanning keeps the helper correct if the writer changes its
+	// default block target later.
+	offset = evstream.StreamHeaderSize
+	for offset+evstream.BlockHeaderSize <= len(raw) {
+		if binary.LittleEndian.Uint32(raw[offset:offset+4]) == evstream.TrailerMagic {
+			break
+		}
+		length := int(binary.LittleEndian.Uint32(raw[offset+4 : offset+8]))
+		blockStart := offset + evstream.BlockHeaderSize
+		blockEnd := blockStart + length
+		crc := crc32.Checksum(raw[blockStart:blockEnd], crc32.MakeTable(crc32.Castagnoli))
+		binary.LittleEndian.PutUint32(raw[offset+16:offset+20], crc)
+		offset = blockEnd
+	}
+	return os.WriteFile(path, raw, 0644)
 }
 
 func TestBinaryEvidenceDifferentiallyPreservesScientificJSONPayloads(t *testing.T) {
@@ -327,10 +424,12 @@ func writeRenderMetadata(t *testing.T, inputDir string, sink *binaryEvidence, lo
 		t.Fatal(err)
 	}
 	digest := sink.executionHash()
+	rawDigest := sink.rawExecutionHash()
 	attestation, err := json.MarshalIndent(binaryEvidenceArtifactRecord{
 		Domain: "canonical_binary_execution_frames", Ordering: "ordered_stream",
+		Hashing:     sink.hashing,
 		EventFrames: sink.count(), StreamFrames: sink.writer.Count(),
-		ExecutionStreamHash: hex.EncodeToString(digest[:]), UnencodablePayloads: sink.unencodableCount(),
+		ExecutionStreamHash: hex.EncodeToString(digest[:]), CanonicalExecutionStreamHash: hex.EncodeToString(rawDigest[:]), UnencodablePayloads: sink.unencodableCount(),
 	}, "", "  ")
 	if err != nil {
 		t.Fatal(err)

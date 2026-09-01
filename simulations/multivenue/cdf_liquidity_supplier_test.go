@@ -131,6 +131,30 @@ func TestElasticLiquiditySupplierAdmissionHeadroomBoundsBothSides(t *testing.T) 
 	}
 }
 
+func TestElasticLiquiditySupplierBoundsBuyQuoteByFiniteCash(t *testing.T) {
+	gw := newMetaGateway()
+	var decisions []ElasticLiquiditySupplierDecision
+	supplier := NewElasticLiquiditySupplier(1, gw, ElasticLiquiditySupplierConfig{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		BasePrecision: 1, QuotePrecision: 1, InitialQuoteBalance: 21,
+		Interval: time.Second, MaxObservationAge: time.Minute,
+		ReferencePrice: 100, ReferenceHalfLife: time.Hour,
+		BaseHolding: 0, ElasticityPerPercent: 10, MaxPosition: 100, MaxQuoteQty: 100,
+		MakerFeeBps:      1_000,
+		DecisionObserver: func(decision ElasticLiquiditySupplierDecision) { decisions = append(decisions, decision) },
+	})
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	supplier.HandleEvent(context.Background(), elasticSupplierSnapshot("CDF/USD", int64(time.Second), 10, 12))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	orders := gw.orders()
+	if len(orders) != 1 || orders[0].Qty != 1 {
+		t.Fatalf("cash-bounded quote = %+v, want one unit because 2 units require 22 quote cash", orders)
+	}
+	if len(decisions) == 0 || decisions[len(decisions)-1].QuoteCashAvailable != 21 || decisions[len(decisions)-1].QuoteCashRequired != 11 {
+		t.Fatalf("cash admission evidence = %+v, want available 21 and required 11", decisions)
+	}
+}
+
 func TestElasticLiquiditySupplierWithdrawsOnUnavailableLocalSide(t *testing.T) {
 	gw := newMetaGateway()
 	supplier := NewElasticLiquiditySupplier(1, gw, ElasticLiquiditySupplierConfig{

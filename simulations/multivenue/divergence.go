@@ -52,16 +52,17 @@ type checkpointSink struct {
 	traceTo   int64
 	trace     io.WriteCloser
 
-	rolling          [32]byte
-	events           int64
-	unencodable      int64
-	nextBound        int64
-	lastSimTime      int64
-	lastCheckpointAt int64
-	finalSimTime     int64
-	firstEvent       bool
-	err              error
-	closed           bool
+	rolling              [32]byte
+	events               int64
+	unencodable          int64
+	nextBound            int64
+	lastSimTime          int64
+	lastCheckpointAt     int64
+	lastCheckpointEvents int64
+	finalSimTime         int64
+	firstEvent           bool
+	err                  error
+	closed               bool
 }
 
 // checkpointRecord is one line of the checkpoint file.
@@ -78,6 +79,7 @@ type checkpointRecord struct {
 	Rolling             string `json:"rolling_hash"`
 	Representation      string `json:"representation,omitempty"`
 	Unencodable         int64  `json:"unencodable_payloads,omitempty"`
+	Final               bool   `json:"final,omitempty"`
 }
 
 const binaryRepresentation = "evstream_v3"
@@ -252,10 +254,18 @@ func (s *checkpointSink) observe(simTime int64, clientID uint64, eventName, venu
 }
 
 func (s *checkpointSink) writeCheckpointLocked(at int64) {
+	s.writeCheckpointLockedWithFinal(at, false)
+}
+
+func (s *checkpointSink) writeFinalCheckpointLocked(at int64) {
+	s.writeCheckpointLockedWithFinal(at, true)
+}
+
+func (s *checkpointSink) writeCheckpointLockedWithFinal(at int64, final bool) {
 	if s.checkpoints == nil {
 		return
 	}
-	if at <= s.lastCheckpointAt {
+	if at < s.lastCheckpointAt || (!final && at == s.lastCheckpointAt && s.events <= s.lastCheckpointEvents) {
 		return
 	}
 	record := checkpointRecord{
@@ -267,6 +277,7 @@ func (s *checkpointSink) writeCheckpointLocked(at int64) {
 		Rolling:             hex.EncodeToString(s.rolling[:]),
 	}
 	record.Unencodable = s.unencodable
+	record.Final = final
 	if s.binary != nil {
 		record.Representation = binaryRepresentation
 		record.Unencodable = int64(s.binary.unencodableCount())
@@ -282,6 +293,7 @@ func (s *checkpointSink) writeCheckpointLocked(at int64) {
 	s.writeLineLocked(s.checkpoints, line, "write execution checkpoint")
 	if s.err == nil {
 		s.lastCheckpointAt = at
+		s.lastCheckpointEvents = s.events
 	}
 }
 
@@ -351,7 +363,7 @@ func (s *checkpointSink) close() error {
 		if finalAt == 0 {
 			finalAt = s.lastSimTime
 		}
-		s.writeCheckpointLocked(finalAt)
+		s.writeFinalCheckpointLocked(finalAt)
 		if err := s.checkpoints.Close(); err != nil {
 			s.failLocked(fmt.Errorf("close execution checkpoints: %w", err))
 		}

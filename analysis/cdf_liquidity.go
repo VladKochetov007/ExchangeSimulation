@@ -73,6 +73,10 @@ type CDFLiquidityRunAudit struct {
 
 	expectedHistoricalCountPerVenue int
 	lastDepthSnapshotAt             map[string]int64
+	lastDepthTotal                  map[string]int64
+	lastSupplierDepthByClient       map[string]map[uint64]int64
+	lastEventAt                     int64
+	terminalAt                      int64
 	cancelRequestedByOrder          map[cdfOrderKey]struct{}
 }
 
@@ -179,8 +183,9 @@ type CDFLiquiditySupplierAudit struct {
 }
 
 // CDFLiquidityVenueAudit separates concentration and side-availability
-// diagnostics by venue. Depth concentration is measured over periodic public
-// snapshots with a nonzero displayed book, not over supplier decisions.
+// diagnostics by venue. Point-in-time concentration is measured over periodic
+// public snapshots; time-weighted supplier depth uses the observed book state
+// on each left-continuous interval through terminal time.
 type CDFLiquidityVenueAudit struct {
 	VenueID                     string  `json:"venue_id"`
 	HistoricalSupplierCount     int     `json:"historical_supplier_count"`
@@ -300,6 +305,8 @@ type cdfDecisionEvidence struct {
 	QuoteRequestID         uint64 `json:"quote_request_id"`
 	CancelRequestID        uint64 `json:"cancel_request_id"`
 	QuoteSubmittedAt       int64  `json:"quote_submitted_at"`
+	QuoteCashAvailable     int64  `json:"quote_cash_available"`
+	QuoteCashRequired      int64  `json:"quote_cash_required"`
 }
 
 type cdfFillEvidence struct {
@@ -432,8 +439,10 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		return nil, fmt.Errorf("cdf liquidity: nil run")
 	}
 	result := &CDFLiquidityRunAudit{
-		lastDepthSnapshotAt:    make(map[string]int64),
-		cancelRequestedByOrder: make(map[cdfOrderKey]struct{}),
+		lastDepthSnapshotAt:       make(map[string]int64),
+		lastDepthTotal:            make(map[string]int64),
+		lastSupplierDepthByClient: make(map[string]map[uint64]int64),
+		cancelRequestedByOrder:    make(map[cdfOrderKey]struct{}),
 	}
 	config, configErr := loadCDFRunConfig(r)
 	if configErr != nil {
@@ -446,6 +455,8 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		receiptEvidence, configErr = readCDFMarketDataEvidence(r.Dir)
 		if configErr != nil {
 			result.addCheck(CDFLiquidityCheck{Failure: "missing or malformed market-data receipt evidence: " + configErr.Error()})
+		} else {
+			result.terminalAt = receiptEvidence.terminalAt
 		}
 	}
 	configByRole := make(map[string]cdfSupplierConfig, len(config.ElasticLiquiditySuppliers))
@@ -625,6 +636,9 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			Events: []string{"elastic_liquidity_supplier_decision", "elastic_liquidity_supplier_fill", "balance_snapshot", "borrow"},
 			Files:  generalFiles, FilesSelected: true, Workers: 1,
 		}, func(event Event) {
+			if event.SimTS > result.lastEventAt {
+				result.lastEventAt = event.SimTS
+			}
 			switch event.Name {
 			case "elastic_liquidity_supplier_decision":
 				result.processDecision(event, states, receiptEvidence)
@@ -645,6 +659,9 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			Events: []string{"Trade", "BookSnapshot", "OrderAccepted", "OrderRejected", "OrderCancelled", "OrderFill"},
 			Files:  []string{path}, FilesSelected: true, Workers: 1,
 		}, func(event Event) {
+			if event.SimTS > result.lastEventAt {
+				result.lastEventAt = event.SimTS
+			}
 			result.processBookEvent(event, states, orders, actualFills, venueAudits)
 		})
 		if err != nil {
@@ -654,6 +671,10 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	if len(bookFiles) == 0 {
 		result.addCheck(CDFLiquidityCheck{Failure: "no rendered CDF-USD book evidence"})
 	}
+	if result.terminalAt == 0 {
+		result.terminalAt = result.lastEventAt
+	}
+	result.accumulateTerminalDepth(states)
 	result.reconcileFills(observedFills, actualFills, states)
 	result.reconcileSupplierBalances(states)
 	result.finalizeOrders(orders, states)
@@ -739,7 +760,11 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	if state.receiptRequired {
 		r.validateDecisionObservation(event, decision, initialSubscriptionWait && missingObservation, receiptEvidence)
 	}
-	if state.configuredMaxObservationAge <= 0 || decision.ObservationAge > state.configuredMaxObservationAge {
+	staleWithdrawal := isCDFStaleWithdrawal(decision, state.configuredMaxObservationAge)
+	if decision.Action == "withdraw" && decision.Reason == "stale_or_missing_observation" && !staleWithdrawal {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "stale withdrawal does not exceed registered delayed-data bound"})
+	}
+	if state.configuredMaxObservationAge <= 0 || decision.ObservationAge > state.configuredMaxObservationAge && !staleWithdrawal {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "decision observation age exceeds registered delayed-data bound"})
 	}
 	if decision.Position < -decision.InventoryLimit || decision.Position > decision.InventoryLimit || decision.TargetPosition < -decision.InventoryLimit || decision.TargetPosition > decision.InventoryLimit {
@@ -787,6 +812,12 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 		}
 		if decision.QuoteQty > state.maxQuoteQty {
 			state.maxQuoteQty = decision.QuoteQty
+		}
+		if decision.Side == "BUY" && (decision.QuoteCashAvailable > 0 || decision.QuoteCashRequired > 0) {
+			expectedRequired, requiredOK := expectedCDFQuoteRequirement(decision.QuotePrice, decision.QuoteQty, state.configuredBasePrecision, state.configuredMakerFeeBps)
+			if !requiredOK || decision.QuoteCashRequired != expectedRequired || decision.QuoteCashRequired > decision.QuoteCashAvailable {
+				r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier buy quote exceeds its attested quote-cash headroom"})
+			}
 		}
 		if share, ok := decisionTouchShare(decision); ok {
 			state.pendingTouchByRequest[decision.QuoteRequestID] = share
@@ -1079,9 +1110,10 @@ func updateSupplierPnL(state *CDFLiquiditySupplierAudit, fill cdfFillEvidence) e
 		if !ok {
 			return fmt.Errorf("realized PnL accumulation overflow")
 		}
-		if quantity > closeQuantity {
+		positionQuantity := absInt64(positionBefore)
+		if quantity > positionQuantity {
 			state.entryPrice = fill.Price
-		} else if quantity == closeQuantity {
+		} else if quantity == positionQuantity {
 			state.entryPrice = 0
 		}
 	}
@@ -1116,6 +1148,18 @@ func expectedCDFMakerFee(price, quantity, basePrecision, makerFeeBps int64) (int
 		return 0, false
 	}
 	return etypes.TryMulBps(notional, makerFeeBps)
+}
+
+func expectedCDFQuoteRequirement(price, quantity, basePrecision, makerFeeBps int64) (int64, bool) {
+	notional, ok := quoteProduct(price, quantity, basePrecision)
+	if !ok {
+		return 0, false
+	}
+	fee, ok := expectedCDFMakerFee(price, quantity, basePrecision, makerFeeBps)
+	if !ok {
+		return 0, false
+	}
+	return exactAdd(notional, fee)
 }
 
 func signedQuoteProduct(priceDifference, signedQuantity, basePrecision int64) (int64, bool) {
@@ -1203,6 +1247,15 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 		for _, depth := range supplierDepthByClient {
 			supplierDisplayed, _ = exactAdd(supplierDisplayed, depth)
 		}
+		if previousAt, seen := r.lastDepthSnapshotAt[event.VenueID]; seen {
+			if event.SimTS < previousAt {
+				r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF book snapshots are out of timestamp order"})
+				return
+			}
+			if event.SimTS > previousAt {
+				r.accumulateDepthInterval(event.VenueID, previousAt, event.SimTS, states)
+			}
+		}
 		if totalDisplayed > 0 {
 			venue.ActiveDepthSnapshotCount++
 			share := float64(supplierDisplayed) / float64(totalDisplayed)
@@ -1212,23 +1265,10 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			if share > 0.75 {
 				venue.SupplierDepthOver75Count++
 			}
-			if previousAt, seen := r.lastDepthSnapshotAt[event.VenueID]; seen {
-				if event.SimTS < previousAt {
-					r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF book snapshots are out of timestamp order"})
-				} else if elapsed := event.SimTS - previousAt; elapsed > 0 {
-					weight := float64(elapsed)
-					denominator := float64(totalDisplayed) * weight
-					for key, state := range states {
-						if key.VenueID != event.VenueID {
-							continue
-						}
-						state.restingDepthWeightedDenominator += denominator
-						state.restingDepthWeightedNumerator += float64(supplierDepthByClient[key.ClientID]) * weight
-					}
-				}
-			}
 		}
 		r.lastDepthSnapshotAt[event.VenueID] = event.SimTS
+		r.lastDepthTotal[event.VenueID] = totalDisplayed
+		r.lastSupplierDepthByClient[event.VenueID] = supplierDepthByClient
 	case "OrderAccepted":
 		key := cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}
 		state := states[key]
@@ -1346,6 +1386,43 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			return
 		}
 		order.closed, order.closedAt = true, event.SimTS
+	}
+}
+
+// accumulateDepthInterval applies the book state observed at the left endpoint
+// to [start,end). This makes a snapshot at t authoritative from t until the
+// next snapshot, including the interval ending in an empty book and the final
+// interval ending at the run terminal time.
+func (r *CDFLiquidityRunAudit) accumulateDepthInterval(venueID string, start, end int64, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
+	if end <= start {
+		return
+	}
+	totalDisplayed := r.lastDepthTotal[venueID]
+	if totalDisplayed <= 0 {
+		return
+	}
+	weight := float64(end - start)
+	denominator := float64(totalDisplayed) * weight
+	supplierDepthByClient := r.lastSupplierDepthByClient[venueID]
+	for key, state := range states {
+		if key.VenueID != venueID {
+			continue
+		}
+		state.restingDepthWeightedDenominator += denominator
+		state.restingDepthWeightedNumerator += float64(supplierDepthByClient[key.ClientID]) * weight
+	}
+}
+
+func (r *CDFLiquidityRunAudit) accumulateTerminalDepth(states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
+	if r.terminalAt <= 0 {
+		return
+	}
+	for venueID, snapshotAt := range r.lastDepthSnapshotAt {
+		if r.terminalAt < snapshotAt {
+			r.addCheck(CDFLiquidityCheck{VenueID: venueID, Failure: "CDF terminal time precedes the last book snapshot"})
+			continue
+		}
+		r.accumulateDepthInterval(venueID, snapshotAt, r.terminalAt, states)
 	}
 }
 
@@ -1882,6 +1959,10 @@ func quoteMatchesObservedTouch(decision cdfDecisionEvidence) bool {
 }
 
 func validSide(side string) bool { return side == "BUY" || side == "SELL" }
+
+func isCDFStaleWithdrawal(decision cdfDecisionEvidence, configuredMaxAge int64) bool {
+	return configuredMaxAge > 0 && decision.Action == "withdraw" && decision.Reason == "stale_or_missing_observation" && decision.ObservationTime > 0 && decision.ObservationSequence > 0 && decision.ObservationAge > configuredMaxAge && decision.DecisionTime-decision.ObservationTime == decision.ObservationAge
+}
 
 func containsString(values []string, target string) bool {
 	for _, value := range values {

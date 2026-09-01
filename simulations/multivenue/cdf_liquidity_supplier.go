@@ -96,6 +96,8 @@ type ElasticLiquiditySupplierConfig struct {
 	QuoteAsset           string
 	BasePrecision        int64
 	InitialBaseBalance   int64
+	QuotePrecision       int64
+	InitialQuoteBalance  int64
 	Interval             time.Duration
 	MaxObservationAge    time.Duration
 	ReferencePrice       int64
@@ -105,6 +107,7 @@ type ElasticLiquiditySupplierConfig struct {
 	MaxPosition          int64
 	MaxInventory         int64
 	MaxQuoteQty          int64
+	MakerFeeBps          int64
 	DecisionObserver     func(ElasticLiquiditySupplierDecision)
 	FillObserver         func(ElasticLiquiditySupplierFill)
 	ObservationFrontier  func() simulation.MarketDataFrontier
@@ -148,6 +151,8 @@ type ElasticLiquiditySupplierDecision struct {
 	QuoteRequestID         uint64 `json:"quote_request_id,omitempty"`
 	CancelRequestID        uint64 `json:"cancel_request_id,omitempty"`
 	QuoteSubmittedAt       int64  `json:"quote_submitted_at,omitempty"`
+	QuoteCashAvailable     int64  `json:"quote_cash_available,omitempty"`
+	QuoteCashRequired      int64  `json:"quote_cash_required,omitempty"`
 }
 
 // ElasticLiquiditySupplierFill joins a fill to the participant's local
@@ -200,6 +205,8 @@ type ElasticLiquiditySupplier struct {
 	cancelRequestID     uint64
 	cancelPending       bool
 	subscribed          bool
+	quoteCashAvailable  int64
+	quoteCashReserved   int64
 }
 
 func NewElasticLiquiditySupplier(id uint64, gw actor.Gateway, cfg ElasticLiquiditySupplierConfig) *ElasticLiquiditySupplier {
@@ -207,6 +214,9 @@ func NewElasticLiquiditySupplier(id uint64, gw actor.Gateway, cfg ElasticLiquidi
 		BaseActor: actor.NewBaseActor(id, gw),
 		cfg:       cfg,
 		reference: cfg.ReferencePrice,
+	}
+	if cfg.InitialQuoteBalance > 0 && cfg.QuotePrecision > 0 {
+		supplier.quoteCashAvailable = cfg.InitialQuoteBalance
 	}
 	supplier.SetHandler(supplier)
 	supplier.AddTicker(cfg.Interval, supplier.onTick)
@@ -276,6 +286,8 @@ func (s *ElasticLiquiditySupplier) observeAccepted(event actor.OrderAcceptedEven
 func (s *ElasticLiquiditySupplier) observeRejected(event actor.OrderRejectedEvent) {
 	if event.RequestID == s.pendingRequestID {
 		s.pendingRequestID = 0
+		s.releaseQuoteReservation()
+		s.quote = elasticLiquidityQuote{}
 	}
 }
 
@@ -289,6 +301,7 @@ func (s *ElasticLiquiditySupplier) observeFill(event actor.OrderFillEvent) {
 	} else {
 		s.position -= event.Qty
 	}
+	s.applyQuoteFill(event)
 	if s.cfg.FillObserver != nil {
 		s.cfg.FillObserver(ElasticLiquiditySupplierFill{
 			Role: s.cfg.Role, ClientID: s.cfg.ClientID, Symbol: event.Symbol,
@@ -308,6 +321,7 @@ func (s *ElasticLiquiditySupplier) observeCancelled(event actor.OrderCancelledEv
 		return
 	}
 	s.quote = elasticLiquidityQuote{}
+	s.releaseQuoteReservation()
 	s.cancelPending = false
 	s.cancelRequestID = 0
 }
@@ -398,6 +412,9 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 	if quantity > s.cfg.MaxQuoteQty {
 		quantity = s.cfg.MaxQuoteQty
 	}
+	if desiredSide == exchange.Buy {
+		quantity = minInt64(quantity, s.availableBuyQuote(desiredPrice))
+	}
 	if quantity <= 0 || desiredPrice <= 0 {
 		decision.Action, decision.Reason = s.withdrawIfNeeded("limit_or_touch_unavailable")
 		decision.CancelRequestID = s.cancelRequestID
@@ -405,6 +422,10 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 		return
 	}
 	decision.Side, decision.QuotePrice, decision.QuoteQty = desiredSide.String(), desiredPrice, quantity
+	if desiredSide == exchange.Buy {
+		decision.QuoteCashAvailable = s.quoteCashAvailable
+		decision.QuoteCashRequired, _ = quoteRequirement(desiredPrice, quantity, s.cfg.BasePrecision, s.cfg.MakerFeeBps)
+	}
 	if s.quote.orderID != 0 && s.quote.side == desiredSide && s.quote.price == desiredPrice && s.quote.qty == quantity {
 		decision.Action, decision.Reason = "rest", "quote_unchanged"
 		decision.QuoteOrderID, decision.QuoteRequestID, decision.QuoteSubmittedAt = s.quote.orderID, s.quote.requestID, s.quote.submittedAt
@@ -421,6 +442,17 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 		return
 	}
 
+	if desiredSide == exchange.Buy && !s.quoteAccountingDisabled() {
+		required, ok := quoteRequirement(desiredPrice, quantity, s.cfg.BasePrecision, s.cfg.MakerFeeBps)
+		if !ok || required > s.quoteCashAvailable {
+			decision.Action, decision.Reason = s.withdrawIfNeeded("quote_cash_limit")
+			decision.CancelRequestID = s.cancelRequestID
+			s.emitDecision(decision)
+			return
+		}
+		s.quoteCashAvailable -= required
+		s.quoteCashReserved += required
+	}
 	requestID := s.SubmitPostOnlyOrder(s.cfg.Symbol, desiredSide, desiredPrice, quantity)
 	s.pendingRequestID = requestID
 	s.quote = elasticLiquidityQuote{requestID: requestID, side: desiredSide, price: desiredPrice, qty: quantity, submittedAt: now.UnixNano()}
@@ -449,6 +481,95 @@ func (s *ElasticLiquiditySupplier) availableSellInventory() int64 {
 		return 0
 	}
 	return available
+}
+
+func (s *ElasticLiquiditySupplier) availableBuyQuote(price int64) int64 {
+	if s.quoteAccountingDisabled() {
+		return math.MaxInt64
+	}
+	return maxAffordableQuoteQty(price, s.cfg.BasePrecision, s.cfg.MakerFeeBps, s.quoteCashAvailable, s.cfg.MaxQuoteQty)
+}
+
+func (s *ElasticLiquiditySupplier) quoteAccountingDisabled() bool {
+	return s.cfg.InitialQuoteBalance <= 0 || s.cfg.QuotePrecision <= 0
+}
+
+func (s *ElasticLiquiditySupplier) releaseQuoteReservation() {
+	if s.quoteAccountingDisabled() || s.quoteCashReserved <= 0 {
+		return
+	}
+	s.quoteCashAvailable += s.quoteCashReserved
+	s.quoteCashReserved = 0
+}
+
+func (s *ElasticLiquiditySupplier) applyQuoteFill(event actor.OrderFillEvent) {
+	if s.quoteAccountingDisabled() {
+		return
+	}
+	notional, ok := quoteRequirement(event.Price, event.Qty, s.cfg.BasePrecision, 0)
+	if !ok {
+		return
+	}
+	fee := int64(0)
+	if event.FeeAsset == s.cfg.QuoteAsset && event.FeeAmount > 0 {
+		fee = event.FeeAmount
+	}
+	if event.Side == exchange.Buy {
+		spent, ok := exactQuoteAmount(notional, fee)
+		if !ok || spent > s.quoteCashReserved {
+			s.quoteCashReserved = 0
+		} else {
+			s.quoteCashReserved -= spent
+		}
+	} else if event.Side == exchange.Sell {
+		received, ok := exactQuoteAmount(notional, -fee)
+		if ok {
+			s.quoteCashAvailable += received
+		}
+	}
+	if event.IsFull {
+		s.releaseQuoteReservation()
+	}
+}
+
+func quoteRequirement(price, quantity, basePrecision, makerFeeBps int64) (int64, bool) {
+	if price <= 0 || quantity <= 0 || basePrecision <= 0 || makerFeeBps < 0 {
+		return 0, false
+	}
+	notional := new(big.Int).Mul(big.NewInt(price), big.NewInt(quantity))
+	notional.Quo(notional, big.NewInt(basePrecision))
+	fee := new(big.Int).Mul(new(big.Int).Set(notional), big.NewInt(makerFeeBps))
+	fee.Quo(fee, big.NewInt(10_000))
+	notional.Add(notional, fee)
+	if !notional.IsInt64() {
+		return 0, false
+	}
+	return notional.Int64(), true
+}
+
+func exactQuoteAmount(left, right int64) (int64, bool) {
+	amount := new(big.Int).Add(big.NewInt(left), big.NewInt(right))
+	if !amount.IsInt64() {
+		return 0, false
+	}
+	return amount.Int64(), true
+}
+
+func maxAffordableQuoteQty(price, basePrecision, makerFeeBps, available, upper int64) int64 {
+	if available <= 0 || upper <= 0 {
+		return 0
+	}
+	low, high := int64(0), upper
+	for low < high {
+		mid := low + (high-low+1)/2
+		required, ok := quoteRequirement(price, mid, basePrecision, makerFeeBps)
+		if ok && required <= available {
+			low = mid
+		} else {
+			high = mid - 1
+		}
+	}
+	return low
 }
 
 func (s *ElasticLiquiditySupplier) baseDecision(now int64) ElasticLiquiditySupplierDecision {
@@ -483,7 +604,8 @@ func (s *ElasticLiquiditySupplier) baseDecision(now int64) ElasticLiquiditySuppl
 		GrossInventoryLimit: s.cfg.MaxInventory,
 		QuoteOrderID:        s.quote.orderID, QuoteRequestID: s.quote.requestID,
 		QuotePrice: s.quote.price, QuoteQty: s.quote.qty, QuoteSubmittedAt: s.quote.submittedAt,
-		CancelRequestID: s.cancelRequestID,
+		CancelRequestID:    s.cancelRequestID,
+		QuoteCashAvailable: s.quoteCashAvailable,
 	}
 }
 

@@ -64,6 +64,7 @@ type Reader struct {
 	verify            bool
 	rolling           [sha256.Size]byte
 	hasher            hash.Hash
+	rawHash           hash.Hash
 	frames            uint64
 	blockFrames       uint32
 	streamHdr         bool
@@ -84,6 +85,7 @@ func NewReader(in io.Reader, opts ReaderOptions) (*Reader, error) {
 	}
 	if opts.VerifyHash {
 		r.hasher = sha256.New()
+		r.rawHash = sha256.New()
 	}
 	var header [StreamHeaderSize]byte
 	if _, err := io.ReadFull(in, header[:]); err != nil {
@@ -131,6 +133,17 @@ func (r *Reader) ExecutionHash() [sha256.Size]byte {
 		return out
 	}
 	copy(out[:], r.hasher.Sum(nil))
+	return out
+}
+
+// RawExecutionHash returns the digest over the unprojected canonical frame
+// sequence read so far. It is meaningful only when VerifyHash was enabled.
+func (r *Reader) RawExecutionHash() [sha256.Size]byte {
+	var out [sha256.Size]byte
+	if r.rawHash == nil {
+		return out
+	}
+	copy(out[:], r.rawHash.Sum(nil))
 	return out
 }
 
@@ -268,6 +281,7 @@ func (r *Reader) rangeBlock(visit func(Frame) error) error {
 		if r.verify {
 			// Mirrors the writer: one continuous digest over concatenated
 			// canonical frames, so the reader reproduces it exactly.
+			r.rawHash.Write(frameBytes)
 			if r.hashFrame != nil {
 				r.hashFrame(r.hasher, frameBytes)
 			} else {

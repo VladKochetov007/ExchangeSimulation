@@ -74,6 +74,7 @@ type cdfMarketDataDecisionRecord struct {
 	FrontierDigest    [16]byte
 	Price             int64
 	Qty               int64
+	EventOrdinal      uint64
 }
 
 type cdfMarketDataActionRecord struct {
@@ -115,10 +116,12 @@ type cdfReceiptActionKey struct {
 type cdfMarketDataEvidence struct {
 	links            map[uint32]cdfReceiptLink
 	symbols          map[uint32]cdfReceiptSymbol
+	schedules        map[cdfReceiptLinkOrdinal]cdfMarketDataRecord
 	receipts         map[cdfReceiptLinkOrdinal]cdfMarketDataRecord
 	decisions        map[cdfReceiptDecisionKey]cdfMarketDataDecisionRecord
 	actions          map[cdfReceiptActionKey]cdfMarketDataActionRecord
 	receiptsByClient map[uint64]int64
+	terminalAt       int64
 }
 
 func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
@@ -136,10 +139,12 @@ func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 	evidence := &cdfMarketDataEvidence{
 		links:            make(map[uint32]cdfReceiptLink, len(manifest.Links)),
 		symbols:          make(map[uint32]cdfReceiptSymbol, len(manifest.Symbols)),
+		schedules:        make(map[cdfReceiptLinkOrdinal]cdfMarketDataRecord),
 		receipts:         make(map[cdfReceiptLinkOrdinal]cdfMarketDataRecord),
 		decisions:        make(map[cdfReceiptDecisionKey]cdfMarketDataDecisionRecord),
 		actions:          make(map[cdfReceiptActionKey]cdfMarketDataActionRecord),
 		receiptsByClient: make(map[uint64]int64),
+		terminalAt:       manifest.TerminalAt,
 	}
 	for _, link := range manifest.Links {
 		if link.ID == 0 || link.SourceVenue == "" || link.Link == "" || link.Role == "" {
@@ -175,28 +180,46 @@ func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read market-data actions: %w", err)
 	}
-	scheduled := make(map[cdfReceiptLinkOrdinal]cdfMarketDataRecord, len(schedules)/cdfMarketDataRecordBytes)
+	eventOrdinals := make(map[uint64]string, manifest.Schedules.Records+manifest.Receipts.Records+manifest.Decisions.Records)
+	var lastScheduleEventOrdinal, lastReceiptEventOrdinal, lastDecisionEventOrdinal uint64
 	for offset := 0; offset < len(schedules); offset += cdfMarketDataRecordBytes {
 		record := decodeCDFMarketDataRecord(schedules[offset:offset+cdfMarketDataRecordBytes], false)
 		if err := validateCDFMarketDataRecord(record, evidence); err != nil {
 			return nil, fmt.Errorf("schedule record %d: %w", offset/cdfMarketDataRecordBytes, err)
 		}
+		if err := registerCDFEventOrdinal(eventOrdinals, record.EventOrdinal, "schedule"); err != nil {
+			return nil, err
+		}
+		if record.EventOrdinal <= lastScheduleEventOrdinal {
+			return nil, fmt.Errorf("schedule event ordinal is not strictly increasing")
+		}
+		lastScheduleEventOrdinal = record.EventOrdinal
 		key := cdfReceiptLinkOrdinal{LinkID: record.LinkID, LinkOrdinal: record.LinkOrdinal}
-		if _, exists := scheduled[key]; exists {
+		if _, exists := evidence.schedules[key]; exists {
 			return nil, fmt.Errorf("duplicate schedule link ordinal")
 		}
-		scheduled[key] = record
+		evidence.schedules[key] = record
 	}
 	for offset := 0; offset < len(receipts); offset += cdfMarketDataRecordBytes {
 		record := decodeCDFMarketDataRecord(receipts[offset:offset+cdfMarketDataRecordBytes], true)
 		if err := validateCDFMarketDataRecord(record, evidence); err != nil {
 			return nil, fmt.Errorf("receipt record %d: %w", offset/cdfMarketDataRecordBytes, err)
 		}
+		if err := registerCDFEventOrdinal(eventOrdinals, record.EventOrdinal, "receipt"); err != nil {
+			return nil, err
+		}
 		if record.DeliveredAt < record.ScheduledAt || record.DeliveredAt <= 0 {
 			return nil, fmt.Errorf("receipt delivery precedes schedule")
 		}
+		if record.DeliveredAt > manifest.TerminalAt {
+			return nil, fmt.Errorf("receipt delivery occurs after terminal time")
+		}
+		if record.EventOrdinal <= lastReceiptEventOrdinal {
+			return nil, fmt.Errorf("receipt event ordinal is not strictly increasing")
+		}
+		lastReceiptEventOrdinal = record.EventOrdinal
 		key := cdfReceiptLinkOrdinal{LinkID: record.LinkID, LinkOrdinal: record.LinkOrdinal}
-		schedule, exists := scheduled[key]
+		schedule, exists := evidence.schedules[key]
 		if !exists || !sameCDFMarketDataSchedule(schedule, record) {
 			return nil, fmt.Errorf("receipt has no matching schedule")
 		}
@@ -205,6 +228,13 @@ func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 		}
 		evidence.receipts[key] = record
 		evidence.receiptsByClient[record.ClientID]++
+	}
+	for key, schedule := range evidence.schedules {
+		if schedule.ScheduledAt <= manifest.TerminalAt {
+			if _, exists := evidence.receipts[key]; !exists {
+				return nil, fmt.Errorf("schedule link %d ordinal %d is due by terminal time without a receipt", key.LinkID, key.LinkOrdinal)
+			}
+		}
 	}
 	if err := reconstructCDFReceiptDigests(evidence); err != nil {
 		return nil, fmt.Errorf("reconstruct market-data receipt frontiers: %w", err)
@@ -257,6 +287,13 @@ func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 	}
 	for offset := 0; offset < len(decisions); offset += cdfMarketDataDecisionBytes {
 		record := decodeCDFMarketDataDecision(decisions[offset : offset+cdfMarketDataDecisionBytes])
+		if err := registerCDFEventOrdinal(eventOrdinals, record.EventOrdinal, "decision"); err != nil {
+			return nil, err
+		}
+		if record.EventOrdinal <= lastDecisionEventOrdinal {
+			return nil, fmt.Errorf("decision event ordinal is not strictly increasing")
+		}
+		lastDecisionEventOrdinal = record.EventOrdinal
 		if record.ClientID == 0 || record.LinkID == 0 || record.SymbolID == 0 || record.RequestID == 0 || record.DecisionAt <= 0 || record.FrontierOrdinal == 0 || record.FrontierDelivered <= 0 || record.Price <= 0 || record.Qty <= 0 {
 			return nil, fmt.Errorf("decision record %d has invalid identity or bounds", offset/cdfMarketDataDecisionBytes)
 		}
@@ -277,7 +314,30 @@ func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 		}
 		evidence.decisions[key] = record
 	}
+	if err := validateCDFEventOrdinalContinuity(eventOrdinals); err != nil {
+		return nil, err
+	}
 	return evidence, nil
+}
+
+func registerCDFEventOrdinal(ordinals map[uint64]string, ordinal uint64, kind string) error {
+	if ordinal == 0 {
+		return fmt.Errorf("%s has empty global event ordinal", kind)
+	}
+	if previous, exists := ordinals[ordinal]; exists {
+		return fmt.Errorf("global event ordinal %d is duplicated by %s and %s", ordinal, previous, kind)
+	}
+	ordinals[ordinal] = kind
+	return nil
+}
+
+func validateCDFEventOrdinalContinuity(ordinals map[uint64]string) error {
+	for expected := uint64(1); expected <= uint64(len(ordinals)); expected++ {
+		if _, exists := ordinals[expected]; !exists {
+			return fmt.Errorf("global event ordinal stream has a gap at %d", expected)
+		}
+	}
+	return nil
 }
 
 func readCDFEvidenceFile(runDir string, file cdfEvidenceFile, recordBytes int) ([]byte, error) {
@@ -330,6 +390,7 @@ func decodeCDFMarketDataDecision(raw []byte) cdfMarketDataDecisionRecord {
 		DecisionAt:        int64(binary.BigEndian.Uint64(raw[32:40])),
 		FrontierOrdinal:   binary.BigEndian.Uint64(raw[40:48]),
 		FrontierDelivered: int64(binary.BigEndian.Uint64(raw[48:56])),
+		EventOrdinal:      binary.BigEndian.Uint64(raw[88:96]),
 		Price:             int64(binary.BigEndian.Uint64(raw[72:80])),
 		Qty:               int64(binary.BigEndian.Uint64(raw[80:88])),
 	}

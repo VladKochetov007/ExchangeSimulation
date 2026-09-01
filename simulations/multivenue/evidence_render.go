@@ -24,6 +24,7 @@ type BinaryRenderReport struct {
 	DictionaryFrames uint64 `json:"dictionary_frames"`
 	Routes           int    `json:"routes"`
 	ExecutionHash    string `json:"execution_stream_hash"`
+	CanonicalHash    string `json:"canonical_execution_stream_hash"`
 }
 
 type renderRouteKey struct {
@@ -142,11 +143,13 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 		return BinaryRenderReport{}, err
 	}
 	digest := reader.ExecutionHash()
+	rawDigest := reader.RawExecutionHash()
 	return BinaryRenderReport{
 		EventFrames:      eventFrames,
 		DictionaryFrames: reader.Count() - eventFrames,
 		Routes:           len(routes),
 		ExecutionHash:    hex.EncodeToString(digest[:]),
+		CanonicalHash:    hex.EncodeToString(rawDigest[:]),
 	}, nil
 }
 
@@ -200,6 +203,15 @@ func validateBinaryAttestation(inputDir string, attestation binaryEvidenceArtifa
 		attestation.EventFrames != eventFrames || attestation.StreamFrames != reader.Count() ||
 		attestation.ExecutionStreamHash != executionHash {
 		return fmt.Errorf("multivenue: binary attestation does not match reconstructed stream")
+	}
+	if attestation.CanonicalExecutionStreamHash != "" {
+		rawDigest := reader.RawExecutionHash()
+		canonicalHash := hex.EncodeToString(rawDigest[:])
+		if attestation.CanonicalExecutionStreamHash != canonicalHash {
+			return fmt.Errorf("multivenue: binary attestation does not match canonical reconstruction stream")
+		}
+	} else if attestation.Hashing != "" {
+		return fmt.Errorf("multivenue: binary attestation lacks canonical reconstruction identity")
 	}
 	if attestation.UnencodablePayloads != 0 {
 		return fmt.Errorf("multivenue: binary evidence contains %d unencodable payloads", attestation.UnencodablePayloads)

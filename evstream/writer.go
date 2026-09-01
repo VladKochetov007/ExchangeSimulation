@@ -88,6 +88,7 @@ type Writer struct {
 	seq     uint64
 	rolling [sha256.Size]byte
 	hasher  hash.Hash
+	rawHash hash.Hash
 
 	dict     *Dictionary
 	scratch  []byte
@@ -116,6 +117,7 @@ func NewWriter(out io.Writer, opts WriterOptions) *Writer {
 		hashFrame:  opts.HashFrame,
 		frames:     make([]byte, 0, blockBytes+blockBytes/8),
 		hasher:     sha256.New(),
+		rawHash:    sha256.New(),
 		dict:       NewDictionary(),
 		epoch:      opts.SchemaEpoch,
 	}
@@ -256,6 +258,10 @@ func (w *Writer) appendFrame(header FrameHeader, raw []byte, appender ...Payload
 	// long-lived hasher keeps the digest a pure function of the canonical byte
 	// sequence — independent of block size, codec and buffering — while costing
 	// one compression round per 64 bytes instead of two per frame.
+	if _, err := w.rawHash.Write(w.frames[start : start+length]); err != nil {
+		w.err = err
+		return err
+	}
 	if w.hashFrame != nil {
 		w.hashFrame(w.hasher, w.frames[start:start+length])
 	} else {
@@ -401,6 +407,18 @@ func (w *Writer) ExecutionHash() [sha256.Size]byte {
 		return out
 	}
 	copy(out[:], clone.Sum(nil))
+	return out
+}
+
+// RawExecutionHash returns the digest over the unprojected canonical frame
+// sequence. It remains independent of compression, block size, and any
+// persistence-only projection used by ExecutionHash.
+func (w *Writer) RawExecutionHash() [sha256.Size]byte {
+	var out [sha256.Size]byte
+	if w.rawHash == nil {
+		return out
+	}
+	copy(out[:], w.rawHash.Sum(nil))
 	return out
 }
 

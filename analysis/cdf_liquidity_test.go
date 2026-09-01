@@ -29,7 +29,7 @@ func TestMeasureCDFLiquidityReconstructsBoundedSupplier(t *testing.T) {
 	if audit.SupplierVolumeQty != 5 || audit.TotalTradeVolumeQty != 25 || audit.SupplierVolumeShare != .2 {
 		t.Fatalf("audit volume = %+v", audit)
 	}
-	if audit.Suppliers[0].PnL != 5 || audit.Suppliers[0].TerminalPosition != 5 || audit.Suppliers[0].MaxObservedTouchShare != .5 || audit.Suppliers[0].SupplierVolumeShare != .2 || audit.Suppliers[0].TimeWeightedRestingDepthShare != .25 {
+	if audit.Suppliers[0].PnL != 5 || audit.Suppliers[0].TerminalPosition != 5 || audit.Suppliers[0].MaxObservedTouchShare != .5 || audit.Suppliers[0].SupplierVolumeShare != .2 || audit.Suppliers[0].TimeWeightedRestingDepthShare != .2 {
 		t.Fatalf("supplier diagnostics = %+v", audit.Suppliers[0])
 	}
 	if audit.BalanceSnapshotCount != 2 || audit.BalanceReconciliationResidual != 0 || audit.PnLReconciliationResidual != 0 || audit.TradingPnL != 5 || audit.TradingPnLReconciliationResidual != 0 {
@@ -231,6 +231,138 @@ func TestCDFReceiptEvidenceRejectsManifestEnvelopeMutation(t *testing.T) {
 	}
 	if _, err := readCDFMarketDataEvidence(dir); err == nil || !strings.Contains(err.Error(), "manifest violates schema contract") {
 		t.Fatalf("manifest envelope mutation was accepted: %v", err)
+	}
+}
+
+func TestCDFReceiptEvidenceRequiresReceiptForDueSchedule(t *testing.T) {
+	dir := t.TempDir()
+	recorder, err := simulation.NewMarketDataReceiptRecorder(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := "north/cdf_elastic_supplier"
+	if recorder.RegisterLink("north", link, "cdf_elastic_supplier") == 0 {
+		t.Fatal("receipt fixture link registration failed")
+	}
+	schedule := simulation.MarketDataSchedule{
+		ClientID: 2, SourceVenue: "north", Link: link, Symbol: "CDF/USD", Type: exchange.MDSnapshot,
+		Sequence: 1, Fingerprint: [16]byte{1}, PublishedAt: 1, ScheduledAt: 1, LinkOrdinal: 1,
+	}
+	if recorder.RecordSchedule(schedule) == 0 {
+		t.Fatal("receipt fixture schedule registration failed")
+	}
+	if err := recorder.Finalize(1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readCDFMarketDataEvidence(dir); err == nil || !strings.Contains(err.Error(), "due by terminal time without a receipt") {
+		t.Fatalf("due schedule without receipt was accepted: %v", err)
+	}
+}
+
+func TestCDFReceiptEvidenceAllowsPostTerminalSchedule(t *testing.T) {
+	dir := t.TempDir()
+	recorder, err := simulation.NewMarketDataReceiptRecorder(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := "north/cdf_elastic_supplier"
+	if recorder.RegisterLink("north", link, "cdf_elastic_supplier") == 0 {
+		t.Fatal("receipt fixture link registration failed")
+	}
+	schedule := simulation.MarketDataSchedule{
+		ClientID: 2, SourceVenue: "north", Link: link, Symbol: "CDF/USD", Type: exchange.MDSnapshot,
+		Sequence: 1, Fingerprint: [16]byte{1}, PublishedAt: 2, ScheduledAt: 2, LinkOrdinal: 1,
+	}
+	if recorder.RecordSchedule(schedule) == 0 {
+		t.Fatal("receipt fixture schedule registration failed")
+	}
+	if err := recorder.Finalize(1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readCDFMarketDataEvidence(dir); err != nil {
+		t.Fatalf("post-terminal schedule was rejected: %v", err)
+	}
+}
+
+func TestCDFReceiptEvidenceRejectsGlobalEventOrdinalGap(t *testing.T) {
+	run := writeCDFLiquidityReceiptFixture(t)
+	decisionsPath := filepath.Join(run.Dir, "market-data-decisions-v2.bin")
+	decisions, err := os.ReadFile(decisionsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) < simulation.MarketDataDecisionRecordBytes {
+		t.Fatal("decision fixture is empty")
+	}
+	// The shared schedule/receipt/decision ordinal is deliberately distinct
+	// from the action ledger ordinal. Moving one decision past the stream end
+	// leaves valid record bytes and a valid file digest but creates a global gap.
+	const eventOrdinalOffset = simulation.MarketDataDecisionRecordBytes + 88
+	decisions[eventOrdinalOffset+7] = 5
+	if err := os.WriteFile(decisionsPath, decisions, 0644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(run.Dir, "market-data-evidence-v2.json")
+	manifestRaw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	decisionArtifact := manifest["decisions"].(map[string]any)
+	digest := sha256.Sum256(decisions)
+	decisionArtifact["digest"] = hex.EncodeToString(digest[:])
+	updatedManifest, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, append(updatedManifest, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readCDFMarketDataEvidence(run.Dir); err == nil || !strings.Contains(err.Error(), "global event ordinal stream has a gap") {
+		t.Fatalf("global event ordinal gap was accepted: %v", err)
+	}
+}
+
+func TestMeasureCDFLiquidityAllowsAuthenticStaleWithdrawal(t *testing.T) {
+	run := writeCDFLiquidityFixture(t, true, false)
+	generalPath := filepath.Join(run.Dir, "venues", "north", "general.jsonl")
+	raw, err := os.ReadFile(generalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleWithdrawal := cdfFixtureLine(12, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":12,"observation_time":1,"observation_age":11,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":5,"inventory_limit":10,"action":"withdraw","reason":"stale_or_missing_observation","quote_order_id":8,"cancel_request_id":4}`) + "\n"
+	if err := os.WriteFile(generalPath, append(raw, []byte(staleWithdrawal)...), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !audit.Valid || audit.WithdrawCount != 1 || hasCDFCheck(audit.Checks, "decision observation age exceeds registered delayed-data bound") {
+		t.Fatalf("authentic stale withdrawal audit = %+v", audit)
+	}
+}
+
+func TestUpdateSupplierPnLHandlesPartialClosureReversalAndFees(t *testing.T) {
+	state := &CDFLiquiditySupplierAudit{configuredBasePrecision: 1, configuredQuoteAsset: "USD"}
+	fills := []cdfFillEvidence{
+		{Side: "BUY", Price: 100, Qty: 2, PositionBefore: 0, PositionAfter: 2},
+		{Side: "BUY", Price: 101, Qty: 1, PositionBefore: 2, PositionAfter: 3},
+		{Side: "SELL", Price: 102, Qty: 2, FeeAmount: 3, FeeAsset: "USD", PositionBefore: 3, PositionAfter: 1},
+		{Side: "SELL", Price: 90, Qty: 3, FeeAmount: 2, FeeAsset: "USD", PositionBefore: 1, PositionAfter: -2},
+		{Side: "BUY", Price: 80, Qty: 1, PositionBefore: -2, PositionAfter: -1},
+		{Side: "BUY", Price: 80, Qty: 1, PositionBefore: -1, PositionAfter: 0},
+	}
+	for index, fill := range fills {
+		if err := updateSupplierPnL(state, fill); err != nil {
+			t.Fatalf("fill %d: %v", index, err)
+		}
+	}
+	if state.realizedPnL != 9 || state.entryPrice != 0 {
+		t.Fatalf("fixed-point PnL = %d, entry price = %d; want 9 and 0", state.realizedPnL, state.entryPrice)
 	}
 }
 

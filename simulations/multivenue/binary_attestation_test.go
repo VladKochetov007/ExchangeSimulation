@@ -69,7 +69,7 @@ func TestBinarySinkWritesTerminatedStreamAndRealCheckpoint(t *testing.T) {
 		t.Fatal("binary sink wrote no checkpoint")
 	}
 	last := records[len(records)-1]
-	if last.EventCount != 2 || last.Representation != binaryRepresentation || last.ExecutionStreamHash == "" {
+	if last.EventCount != 2 || last.Representation != binaryRepresentation || last.ExecutionStreamHash == "" || !last.Final {
 		t.Fatalf("checkpoint = %+v, want real binary attestation", last)
 	}
 }

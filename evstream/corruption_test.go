@@ -164,6 +164,29 @@ func TestCustomFrameHashProjectionMatchesWriterAndReader(t *testing.T) {
 	if firstHash != secondHash {
 		t.Fatalf("writer projection hashes differ: %x versus %x", firstHash, secondHash)
 	}
+	firstReader, err := evstream.NewReader(bytes.NewReader(first), evstream.ReaderOptions{
+		VerifyHash: true,
+		HashFrame:  hashIgnoringLastByte,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := firstReader.Range(func(evstream.Frame) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	secondReader, err := evstream.NewReader(bytes.NewReader(second), evstream.ReaderOptions{
+		VerifyHash: true,
+		HashFrame:  hashIgnoringLastByte,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := secondReader.Range(func(evstream.Frame) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if firstReader.RawExecutionHash() == secondReader.RawExecutionHash() {
+		t.Fatal("raw canonical hashes ignored the projected marker")
+	}
 	for _, stream := range [][]byte{first, second} {
 		reader, err := evstream.NewReader(bytes.NewReader(stream), evstream.ReaderOptions{
 			VerifyHash: true,
