@@ -344,3 +344,44 @@ causal reduction in side absence, 24-hour viability, or stressed withdrawal
 behavior. Any broader stress/development run must retain the fail-closed
 boundary and correct the noted timing limitation if it activates. No holdout or
 registered 24-hour development cell was authorized or consumed by this review.
+
+## Independent 24-hour setup rejection — 48279d4 capacity/provenance boundary
+
+Laplace independently reviewed the exact successor setup at
+`48279d4237d8c32bb1b400ef22690fe9acb5e573` before any 24-hour capacity probe or
+registered development cell. The economic and activation contracts were not
+rejected. The review found four fail-closed setup defects: a lexical output-root
+check could be bypassed through a symlinked ancestor; the capacity attestation
+did not bind the registered config hash; the capacity measurement did not bind
+`GOMAXPROCS=4`; and the config checker did not verify the recorded source and
+registered-config hashes from its provenance manifest.
+
+No cell or holdout was run. The exact `48279d4` tree remains a historical
+review input and is not a launch candidate.
+
+## Capacity/provenance remediation — 8784b46
+
+Commit `8784b46d6d48ba78ceefd9a670f409c363ebe4a2` fixes only the four setup
+boundary defects. The capacity probe now canonicalizes the requested external
+root before creation and rejects the scientific repository and all resolved
+descendants, including symlinked ancestors. It requires `GOMAXPROCS=4` and
+records that value in both probe metadata and the retained capacity attestation.
+The registered cell runner passes the normalized config hash and process width
+to the fail-closed attestation verifier; the verifier rejects either mismatch.
+The committed config provenance manifest and checker now bind every immutable
+source config, activation roster, and registered successor config by SHA-256.
+The shared contract test covers successful binding and both config/process
+mismatch failures while retaining compatibility for historical callers that
+use the unbound attestation form.
+
+The clean exact-tree gates passed at `8784b46`: shell syntax, SV1 config
+provenance validation, `git diff --check`, the integrated R2 contract suite,
+`GOMAXPROCS=4 make test`, and `GOMAXPROCS=4 go vet ./...`. The commit is pushed
+to the scientific successor branch. The performance feed was fetched at
+`c4434ad32b2344e80a086d7e6ff9a8efcdaa1d7e`; it has no newer commits and no
+performance code was imported.
+
+This remediation does not authorize a capacity probe, a registered 24-hour
+cell, freeze, or a holdout. The next gate is one fresh independent Sol-xhigh
+review of the exact `8784b46` tree. Only an acceptance may authorize the clean
+Go 1.27 build and one retained external capacity probe.
