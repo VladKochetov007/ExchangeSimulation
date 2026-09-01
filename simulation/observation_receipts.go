@@ -83,6 +83,7 @@ type MarketDataDecision struct {
 	Side        types.Side
 	OrderType   types.OrderType
 	TimeInForce types.TimeInForce
+	PostOnly    bool
 	Price       int64
 	Qty         int64
 	DecisionAt  int64
@@ -105,6 +106,7 @@ type MarketDataAction struct {
 	Side        types.Side
 	OrderType   types.OrderType
 	TimeInForce types.TimeInForce
+	PostOnly    bool
 	Price       int64
 	Qty         int64
 	DecisionAt  int64
@@ -385,6 +387,9 @@ func (r *MarketDataReceiptRecorder) RecordDecision(decision MarketDataDecision) 
 	raw[16] = byte(decision.Side)
 	raw[17] = byte(decision.OrderType)
 	raw[18] = byte(decision.TimeInForce)
+	if decision.PostOnly {
+		raw[19] = 1
+	}
 	binary.BigEndian.PutUint64(raw[24:32], decision.RequestID)
 	binary.BigEndian.PutUint64(raw[32:40], uint64(decision.DecisionAt))
 	binary.BigEndian.PutUint64(raw[40:48], decision.Frontier.Ordinal)
@@ -438,6 +443,9 @@ func (r *MarketDataReceiptRecorder) RecordAction(action MarketDataAction) {
 	raw[17] = byte(action.Side)
 	raw[18] = byte(action.OrderType)
 	raw[19] = byte(action.TimeInForce)
+	if action.PostOnly {
+		raw[92] = 1
+	}
 	binary.BigEndian.PutUint64(raw[20:28], action.RequestID)
 	binary.BigEndian.PutUint64(raw[28:36], uint64(action.DecisionAt))
 	binary.BigEndian.PutUint64(raw[36:44], action.OrderID)

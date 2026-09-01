@@ -257,6 +257,13 @@ v2_r2_write_evidence_manifest() {
 			;;
 		*) return 1 ;;
 	 esac
+	if [[ "$evidence_format" == evstream_v3 && -s "$cell/market-data-evidence-v2.json" ]]; then
+		local receipt_file
+		for receipt_file in market-data-evidence-v2.json market-data-schedules-v2.bin market-data-receipts-v2.bin market-data-decisions-v2.bin market-data-actions-v2.bin; do
+			[[ -s "$cell/$receipt_file" ]] || return 1
+			fixed_files+=("$receipt_file")
+		done
+	fi
 	local fixed_records='[]'
 	local relative path bytes digest
 	for relative in "${fixed_files[@]}"; do
@@ -319,7 +326,10 @@ v2_r2_verify_evidence_manifest() {
 		evstream_v3:full) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json | sort) ;;
 		evstream_v3:none) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json | sort) ;;
 		*) return 1 ;;
-	 esac
+	esac
+	if [[ "$evidence_format" == evstream_v3 && -s "$cell/market-data-evidence-v2.json" ]]; then
+		expected_fixed=$(printf '%s\n' "$expected_fixed" market-data-evidence-v2.json market-data-schedules-v2.bin market-data-receipts-v2.bin market-data-decisions-v2.bin market-data-actions-v2.bin | sort)
+	fi
 	jq -e --arg cell "$(basename "$cell")" --arg log_mode "$log_mode" --arg evidence_format "$evidence_format" \
 		--arg expected_contract "$expected_contract" --argjson expected_schema "$expected_schema" \
 		'.schema_version == $expected_schema and .contract == $expected_contract and .cell == $cell and

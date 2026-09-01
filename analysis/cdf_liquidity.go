@@ -55,6 +55,7 @@ type CDFLiquidityRunAudit struct {
 	WithdrawCount                    int64                       `json:"withdraw_count"`
 	TradingSupplierCount             int64                       `json:"trading_supplier_count"`
 	PnLChangingSupplierCount         int64                       `json:"pnl_changing_supplier_count"`
+	InventoryResponsiveDecisionCount int64                       `json:"inventory_responsive_decision_count"`
 	RealizedPnL                      int64                       `json:"realized_pnl"`
 	UnrealizedPnL                    int64                       `json:"unrealized_pnl"`
 	EndowmentRevaluationPnL          int64                       `json:"endowment_revaluation_pnl"`
@@ -121,6 +122,7 @@ type CDFLiquiditySupplierAudit struct {
 	CancelCount                      int64   `json:"cancel_count"`
 	RestCount                        int64   `json:"rest_count"`
 	SubmitCount                      int64   `json:"submit_count"`
+	InventoryResponsiveDecisionCount int64   `json:"inventory_responsive_decision_count"`
 	MeanQuoteLifetimeNs              float64 `json:"mean_quote_lifetime_ns"`
 	MaxQuoteLifetimeNs               int64   `json:"max_quote_lifetime_ns"`
 	MeanObservedTouchShare           float64 `json:"mean_observed_touch_share"`
@@ -193,6 +195,10 @@ type CDFLiquiditySupplierAudit struct {
 	pendingQuoteByRequest           map[uint64]cdfDecisionEvidence
 	lastDecisionAt                  int64
 	lastDecisionOrdinal             int64
+	lastActionableSide              string
+	lastActionableQty               int64
+	hasActionableDecision           bool
+	inventoryChangedSinceActionable bool
 	receiptRequired                 bool
 }
 
@@ -222,6 +228,9 @@ type cdfManifest struct {
 	Build    struct {
 		Revision string `json:"revision"`
 		Modified bool   `json:"modified"`
+		GOOS     string `json:"goos"`
+		GOARCH   string `json:"goarch"`
+		GOAMD64  string `json:"goamd64"`
 	} `json:"build"`
 }
 
@@ -247,6 +256,9 @@ type CDFLiquidityRunProvenance struct {
 	SourceRevision      string   `json:"source_revision"`
 	SourceModified      bool     `json:"source_modified"`
 	BinarySHA256        string   `json:"binary_sha256"`
+	BinaryGOOS          string   `json:"binary_goos"`
+	BinaryGOARCH        string   `json:"binary_goarch"`
+	BinaryGOAMD64       string   `json:"binary_goamd64,omitempty"`
 	Seed                int64    `json:"seed"`
 	Horizon             string   `json:"horizon"`
 	SimulationStartNano int64    `json:"simulation_start_nano"`
@@ -277,6 +289,9 @@ type cdfRunMetadata struct {
 	SimulationEndNano   int64  `json:"simulation_end_nano"`
 	ConfigSHA256        string `json:"config_sha256"`
 	BinarySHA256        string `json:"binary_sha256"`
+	BinaryGOOS          string `json:"binary_goos"`
+	BinaryGOARCH        string `json:"binary_goarch"`
+	BinaryGOAMD64       string `json:"binary_goamd64,omitempty"`
 	GitRevision         string `json:"git_revision"`
 	ConfigExperimentID  string `json:"config_experiment_id"`
 	HypothesisID        string `json:"hypothesis_id"`
@@ -370,10 +385,13 @@ func loadCDFRunIdentity(run *Run) (cdfRunIdentity, error) {
 	if manifest.Build.Revision == "" || !isRevision(manifest.Build.Revision) || manifest.Build.Modified {
 		return cdfRunIdentity{}, fmt.Errorf("manifest build is missing a clean source revision")
 	}
+	if manifest.Build.GOOS != "linux" || manifest.Build.GOARCH != "amd64" || manifest.Build.GOAMD64 != "v1" {
+		return cdfRunIdentity{}, fmt.Errorf("manifest build is not the registered linux/amd64/v1 target")
+	}
 	if metadata.ConfigSHA256 != hex.EncodeToString(configDigest[:]) || !isDigest(metadata.ConfigSHA256) || !isDigest(metadata.BinarySHA256) {
 		return cdfRunIdentity{}, fmt.Errorf("run metadata does not bind the configuration and binary hashes")
 	}
-	if metadata.GitRevision != manifest.Build.Revision || !isRevision(metadata.GitRevision) || metadata.Seed != config.Seed || metadata.ConfigExperimentID != config.ExperimentID || metadata.HypothesisID != config.HypothesisID || metadata.LogMode != config.LogMode || metadata.EvidenceFormat != config.EvidenceFormat || metadata.SimulationStartNano <= 0 || metadata.SimulationEndNano <= metadata.SimulationStartNano || metadata.SimulatedHorizon == "" {
+	if metadata.GitRevision != manifest.Build.Revision || !isRevision(metadata.GitRevision) || metadata.Seed != config.Seed || metadata.ConfigExperimentID != config.ExperimentID || metadata.HypothesisID != config.HypothesisID || metadata.LogMode != config.LogMode || metadata.EvidenceFormat != config.EvidenceFormat || metadata.BinaryGOOS != manifest.Build.GOOS || metadata.BinaryGOARCH != manifest.Build.GOARCH || metadata.BinaryGOAMD64 != manifest.Build.GOAMD64 || metadata.SimulationStartNano <= 0 || metadata.SimulationEndNano <= metadata.SimulationStartNano || metadata.SimulatedHorizon == "" {
 		return cdfRunIdentity{}, fmt.Errorf("run metadata does not match manifest configuration")
 	}
 	comparisonConfig, err := canonicalCDFComparisonConfig(configRaw)
@@ -386,6 +404,9 @@ func loadCDFRunIdentity(run *Run) (cdfRunIdentity, error) {
 			SourceRevision:      metadata.GitRevision,
 			SourceModified:      manifest.Build.Modified,
 			BinarySHA256:        metadata.BinarySHA256,
+			BinaryGOOS:          metadata.BinaryGOOS,
+			BinaryGOARCH:        metadata.BinaryGOARCH,
+			BinaryGOAMD64:       metadata.BinaryGOAMD64,
 			Seed:                metadata.Seed,
 			Horizon:             metadata.SimulatedHorizon,
 			SimulationStartNano: metadata.SimulationStartNano,
@@ -415,9 +436,25 @@ func canonicalCDFComparisonConfig(raw []byte) (string, error) {
 	for _, name := range []string{
 		"experiment_id", "hypothesis_id", "date", "status", "description",
 		"elastic_liquidity_suppliers", "record_elastic_liquidity_supplier_decisions",
-		"market_data_receipt_roles",
 	} {
 		delete(config, name)
+	}
+	if rawRoles, exists := config["market_data_receipt_roles"]; exists {
+		var roles []string
+		if err := json.Unmarshal(rawRoles, &roles); err != nil {
+			return "", fmt.Errorf("decode market-data receipt roles: %w", err)
+		}
+		filteredRoles := roles[:0]
+		for _, role := range roles {
+			if role != "cdf_elastic_supplier" {
+				filteredRoles = append(filteredRoles, role)
+			}
+		}
+		encodedRoles, err := json.Marshal(filteredRoles)
+		if err != nil {
+			return "", err
+		}
+		config["market_data_receipt_roles"] = encodedRoles
 	}
 	canonical, err := json.Marshal(config)
 	if err != nil {
@@ -748,6 +785,9 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			result.addCheck(CDFLiquidityCheck{Failure: "missing or malformed market-data receipt evidence: " + configErr.Error()})
 		} else {
 			result.terminalAt = receiptEvidence.terminalAt
+			if result.Provenance != nil && result.Provenance.SimulationEndNano != receiptEvidence.terminalAt {
+				result.addCheck(CDFLiquidityCheck{Failure: "market-data receipt terminal time does not equal provenance simulation end"})
+			}
 		}
 	}
 	configByRole := make(map[string]cdfSupplierConfig, len(config.ElasticLiquiditySuppliers))
@@ -1077,7 +1117,7 @@ func CompareCDFLiquidityRuns(treatment, control *Run) (*CDFLiquidityComparison, 
 		comparison.Provenance.Valid = false
 		comparison.Provenance.Failure = "treatment/control configurations differ outside the registered CDF roster and evidence identity fields"
 	}
-	if treatmentIdentity.provenance.Seed != controlIdentity.provenance.Seed || treatmentIdentity.provenance.Horizon != controlIdentity.provenance.Horizon || treatmentIdentity.provenance.SimulationStartNano != controlIdentity.provenance.SimulationStartNano || treatmentIdentity.provenance.SimulationEndNano != controlIdentity.provenance.SimulationEndNano || !sameStrings(treatmentIdentity.provenance.VenueIDs, controlIdentity.provenance.VenueIDs) || treatmentIdentity.provenance.SourceRevision != controlIdentity.provenance.SourceRevision {
+	if treatmentIdentity.provenance.Seed != controlIdentity.provenance.Seed || treatmentIdentity.provenance.Horizon != controlIdentity.provenance.Horizon || treatmentIdentity.provenance.SimulationStartNano != controlIdentity.provenance.SimulationStartNano || treatmentIdentity.provenance.SimulationEndNano != controlIdentity.provenance.SimulationEndNano || !sameStrings(treatmentIdentity.provenance.VenueIDs, controlIdentity.provenance.VenueIDs) || treatmentIdentity.provenance.SourceRevision != controlIdentity.provenance.SourceRevision || treatmentIdentity.provenance.BinarySHA256 != controlIdentity.provenance.BinarySHA256 || treatmentIdentity.provenance.BinaryGOOS != controlIdentity.provenance.BinaryGOOS || treatmentIdentity.provenance.BinaryGOARCH != controlIdentity.provenance.BinaryGOARCH || treatmentIdentity.provenance.BinaryGOAMD64 != controlIdentity.provenance.BinaryGOAMD64 {
 		comparison.Provenance.Valid = false
 		comparison.Provenance.Failure = "treatment/control execution provenance is not paired"
 	}
@@ -1157,6 +1197,21 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	state.observationCount++
 	if state.receiptRequired {
 		r.validateDecisionReceipt(event, decision, receiptEvidence)
+	}
+	if decision.Action == "submit" || decision.Action == "rest" {
+		expectedSide, expectedQuantity, expected := expectedCDFInventoryQuote(decision, state)
+		quantityMatches := expected && decision.QuoteQty > 0 && decision.QuoteQty <= expectedQuantity
+		if !expected || decision.Side != expectedSide || !quantityMatches {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier quote does not match its finite inventory target gap"})
+		}
+		if state.inventoryChangedSinceActionable && state.hasActionableDecision && (state.lastActionableSide != decision.Side || state.lastActionableQty != decision.QuoteQty) {
+			state.InventoryResponsiveDecisionCount++
+			r.InventoryResponsiveDecisionCount++
+		}
+		state.lastActionableSide = decision.Side
+		state.lastActionableQty = decision.QuoteQty
+		state.hasActionableDecision = true
+		state.inventoryChangedSinceActionable = false
 	}
 	switch decision.Action {
 	case "submit":
@@ -1361,10 +1416,15 @@ func (r *CDFLiquidityRunAudit) validateDecisionReceipt(event Event, decision cdf
 	symbol, symbolExists := evidence.symbols[action.SymbolID]
 	symbolMatches := decision.Action != "submit" && action.SymbolID == 0 || symbolExists && symbol.Symbol == decision.Symbol
 	orderMatches := decision.Action != "submit" || action.Price == decision.QuotePrice && action.Qty == decision.QuoteQty
+	orderContractMatches := true
+	if decision.Action == "submit" {
+		expectedSide, sideOK := cdfSideCode(decision.Side)
+		orderContractMatches = sideOK && action.Side == expectedSide && action.OrderType == uint8(etypes.LimitOrder) && action.TimeInForce == uint8(etypes.GTC) && action.PostOnly
+	}
 	if decision.Action != "submit" {
 		orderMatches = action.OrderID == decision.QuoteOrderID
 	}
-	if !actionExists || action.RequestType != wantRequestType || action.ClientID != decision.ClientID || action.DecisionAt != decision.DecisionTime || !actionFrontierMatches || !symbolMatches || !orderMatches {
+	if !actionExists || action.RequestType != wantRequestType || action.ClientID != decision.ClientID || action.DecisionAt != decision.DecisionTime || !actionFrontierMatches || !symbolMatches || !orderMatches || !orderContractMatches {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier action is not reconciled to a market-data gateway boundary"})
 	}
 	if decision.Action != "submit" {
@@ -1384,8 +1444,21 @@ func (r *CDFLiquidityRunAudit) validateDecisionReceipt(event Event, decision cdf
 	}
 	localDigest, digestErr = decodeFrontierDigest(decision.ObservationDigest)
 	decisionFrontierMatches := exists && record.LinkID == decision.ObservationLinkID && record.FrontierOrdinal == decision.ObservationOrdinal && record.FrontierDelivered == decision.ObservationDeliveredAt && digestErr == nil && record.FrontierDigest == localDigest
-	if !exists || record.DecisionAt != decision.DecisionTime || record.Price != decision.QuotePrice || record.Qty != decision.QuoteQty || !decisionFrontierMatches {
+	expectedSide, sideOK := cdfSideCode(decision.Side)
+	decisionContractMatches := sideOK && record.Side == expectedSide && record.OrderType == uint8(etypes.LimitOrder) && record.TimeInForce == uint8(etypes.GTC) && record.PostOnly
+	if !exists || record.DecisionAt != decision.DecisionTime || record.Price != decision.QuotePrice || record.Qty != decision.QuoteQty || !decisionFrontierMatches || !decisionContractMatches {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier submit is not reconciled to a market-data decision receipt"})
+	}
+}
+
+func cdfSideCode(side string) (uint8, bool) {
+	switch side {
+	case "BUY":
+		return uint8(etypes.Buy), true
+	case "SELL":
+		return uint8(etypes.Sell), true
+	default:
+		return 0, false
 	}
 }
 
@@ -1482,6 +1555,8 @@ func (r *CDFLiquidityRunAudit) processSupplierFill(event Event, states map[cdfPa
 	}
 	if expectedAfter != fill.PositionAfter || (state.InventoryLimit > 0 && (fill.PositionAfter < -state.InventoryLimit || fill.PositionAfter > state.InventoryLimit)) {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier fill position-after violates inventory transition"})
+	} else if fill.PositionAfter != fill.PositionBefore {
+		state.inventoryChangedSinceActionable = true
 	}
 	if err := updateSupplierPnL(state, fill); err != nil {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier PnL reconstruction failed: " + err.Error()})
@@ -2408,6 +2483,9 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "trading PnL decomposition exceeds fixed-point rounding allowance"})
 		}
 		state.MaxQuoteQty = state.maxQuoteQty
+		if state.FillCount > 0 && state.InventoryResponsiveDecisionCount == 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier has no inventory-responsive post-fill decision"})
+		}
 		state.MaxBorrowed = state.maxBorrowed
 		state.BorrowEventCount = state.borrowEventCount
 		state.MaxGrossBaseBalance = state.maxGrossBaseBalance
@@ -2526,6 +2604,35 @@ func quoteMatchesObservedTouch(decision cdfDecisionEvidence) bool {
 		return decision.QuotePrice == decision.BestBid && decision.QuoteQty <= decision.BestBidQty
 	}
 	return decision.QuotePrice == decision.BestAsk && decision.QuoteQty <= decision.BestAskQty
+}
+
+func expectedCDFInventoryQuote(decision cdfDecisionEvidence, state *CDFLiquiditySupplierAudit) (string, int64, bool) {
+	gapBig := new(big.Int).Sub(big.NewInt(decision.TargetPosition), big.NewInt(decision.Position))
+	if !gapBig.IsInt64() || gapBig.Sign() == 0 || state.configuredMaxInventory <= 0 || state.configuredMaxQuoteQty <= 0 {
+		return "", 0, false
+	}
+	gap := gapBig.Int64()
+	side := "BUY"
+	if gap < 0 {
+		side = "SELL"
+	}
+	quantity := absInt64(gap)
+	available := int64(0)
+	if side == "BUY" {
+		available = state.configuredMaxInventory - decision.GrossInventory
+	} else {
+		available = decision.GrossInventory
+	}
+	if available <= 0 {
+		return side, 0, false
+	}
+	if quantity > available {
+		quantity = available
+	}
+	if quantity > state.configuredMaxQuoteQty {
+		quantity = state.configuredMaxQuoteQty
+	}
+	return side, quantity, quantity > 0
 }
 
 func validSide(side string) bool { return side == "BUY" || side == "SELL" }

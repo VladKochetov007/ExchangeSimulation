@@ -73,9 +73,9 @@ func main() {
 	analyzerDigest := sha256.Sum256(analyzerRaw)
 	comparison.Provenance.AnalyzerSHA256 = hex.EncodeToString(analyzerDigest[:])
 	comparison.Provenance.AnalyzerSourceRevision, comparison.Provenance.AnalyzerSourceModified = analyzerBuild()
-	if comparison.Provenance.AnalyzerSourceRevision == "unknown" || comparison.Provenance.AnalyzerSourceModified {
+	if comparison.Provenance.AnalyzerSourceRevision == "unknown" || comparison.Provenance.AnalyzerSourceModified || comparison.Provenance.AnalyzerSourceRevision != comparison.Provenance.Treatment.SourceRevision || comparison.Provenance.AnalyzerSourceRevision != comparison.Provenance.Control.SourceRevision {
 		comparison.Provenance.Valid = false
-		comparison.Provenance.Failure = "analyzer binary is not provenance-pinned to a clean source revision"
+		comparison.Provenance.Failure = "analyzer binary is not provenance-pinned to the paired clean source revision"
 		comparison.Valid = false
 	}
 	encoded, err := json.MarshalIndent(comparison, "", "  ")

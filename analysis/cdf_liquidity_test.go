@@ -40,6 +40,28 @@ func TestMeasureCDFLiquidityReconstructsBoundedSupplier(t *testing.T) {
 	}
 }
 
+func TestCanonicalCDFComparisonConfigPreservesNonCDFReceiptRoles(t *testing.T) {
+	withCDF, err := canonicalCDFComparisonConfig([]byte(`{"market_data_receipt_roles":["cdf_elastic_supplier","liability_hedger"],"venues":["north"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutCDF, err := canonicalCDFComparisonConfig([]byte(`{"market_data_receipt_roles":["liability_hedger"],"venues":["north"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withCDF != withoutCDF {
+		t.Fatalf("non-CDF receipt role was discarded: with CDF=%s without CDF=%s", withCDF, withoutCDF)
+	}
+
+	withUnrelatedRoleChange, err := canonicalCDFComparisonConfig([]byte(`{"market_data_receipt_roles":["cdf_elastic_supplier","other_role"],"venues":["north"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withCDF == withUnrelatedRoleChange {
+		t.Fatal("unrelated receipt-role change was removed from comparison identity")
+	}
+}
+
 func TestCDFDepthShareUsesNonEmptyIntervalsAndIncludesTerminalInterval(t *testing.T) {
 	state := &CDFLiquiditySupplierAudit{}
 	run := &CDFLiquidityRunAudit{
@@ -188,6 +210,29 @@ func TestMeasureCDFLiquidityRejectsConfiguredQuoteLimitMutation(t *testing.T) {
 	}
 	if audit.Valid || !hasCDFCheck(audit.Checks, "submitted quote exceeds registered maximum quantity") {
 		t.Fatalf("quote-limit mutation audit = %+v, want fail-closed limit rejection", audit)
+	}
+}
+
+func TestMeasureCDFLiquidityRejectsInventoryTargetQuoteMutation(t *testing.T) {
+	run := writeCDFLiquidityFixture(t, true, false)
+	generalPath := filepath.Join(run.Dir, "venues", "north", "general.jsonl")
+	raw, err := os.ReadFile(generalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(raw), `"target_position":9,"inventory_limit":10`, `"target_position":8,"inventory_limit":10`, 1)
+	if mutated == string(raw) {
+		t.Fatal("inventory target was not found")
+	}
+	if err := os.WriteFile(generalPath, []byte(mutated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.Valid || !hasCDFCheck(audit.Checks, "supplier quote does not match its finite inventory target gap") {
+		t.Fatalf("inventory target mutation audit = %+v, want fail-closed target-gap rejection", audit)
 	}
 }
 
@@ -619,6 +664,75 @@ func TestMeasureCDFLiquidityRejectsActionIdentityMutation(t *testing.T) {
 	}
 }
 
+func TestMeasureCDFLiquidityRejectsGatewayOrderContractMutations(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		field  string
+		offset int
+		value  byte
+	}{
+		{name: "decision side", path: "market-data-decisions-v2.bin", field: "decisions", offset: 16, value: 1},
+		{name: "decision order type", path: "market-data-decisions-v2.bin", field: "decisions", offset: 17, value: 0},
+		{name: "decision time in force", path: "market-data-decisions-v2.bin", field: "decisions", offset: 18, value: 1},
+		{name: "decision timestamp", path: "market-data-decisions-v2.bin", field: "decisions", offset: 32 + 7, value: 2},
+		{name: "post only", path: "market-data-actions-v2.bin", field: "actions", offset: 92, value: 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			run := writeCDFLiquidityReceiptFixture(t)
+			path := filepath.Join(run.Dir, test.path)
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw[test.offset] = test.value
+			if err := os.WriteFile(path, raw, 0644); err != nil {
+				t.Fatal(err)
+			}
+			rewriteCDFReceiptArtifactDigest(t, run.Dir, test.field, raw)
+			audit, err := run.MeasureCDFLiquidity()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if audit.Valid || (!hasCDFCheck(audit.Checks, "supplier action is not reconciled to a market-data gateway boundary") && !hasCDFCheck(audit.Checks, "supplier submit is not reconciled to a market-data decision receipt")) {
+				t.Fatalf("gateway mutation audit = %+v, want fail-closed contract rejection", audit)
+			}
+		})
+	}
+}
+
+func TestMeasureCDFLiquidityRequiresReceiptTerminalAnchor(t *testing.T) {
+	run := writeCDFLiquidityReceiptFixture(t)
+	manifestPath := filepath.Join(run.Dir, "market-data-evidence-v2.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest["terminal_at"] != float64(6) {
+		t.Fatalf("receipt terminal anchor = %v, want 6", manifest["terminal_at"])
+	}
+	manifest["terminal_at"] = float64(5)
+	mutated, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, append(mutated, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.Valid || !hasCDFCheck(audit.Checks, "market-data receipt terminal time does not equal provenance simulation end") {
+		t.Fatalf("terminal anchor mutation audit = %+v, want fail-closed provenance rejection", audit)
+	}
+}
+
 func writeCDFReceiptContractFixture(t *testing.T, olderFrontier bool) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -895,12 +1009,14 @@ func writeCDFLiquidityReceiptFixture(t *testing.T) *Run {
 		recorder.RecordAction(simulation.MarketDataAction{
 			ClientID: 2, SourceVenue: "north", Link: link, Symbol: "CDF/USD", RequestType: exchange.ReqPlaceOrder,
 			RequestID: decision.requestID, Side: exchange.Buy, OrderType: exchange.LimitOrder, TimeInForce: exchange.GTC,
-			Price: decision.price, Qty: decision.qty, DecisionAt: decision.at, Frontier: frontier,
+			PostOnly: true,
+			Price:    decision.price, Qty: decision.qty, DecisionAt: decision.at, Frontier: frontier,
 		})
 		recorder.RecordDecision(simulation.MarketDataDecision{
 			ClientID: 2, SourceVenue: "north", Link: link, Symbol: "CDF/USD", RequestID: decision.requestID,
 			Side: exchange.Buy, OrderType: exchange.LimitOrder, TimeInForce: exchange.GTC,
-			Price: decision.price, Qty: decision.qty, DecisionAt: decision.at, Frontier: frontier,
+			PostOnly: true,
+			Price:    decision.price, Qty: decision.qty, DecisionAt: decision.at, Frontier: frontier,
 		})
 	}
 	recorder.RecordAction(simulation.MarketDataAction{
@@ -997,12 +1113,12 @@ func writeCDFLiquidityFixture(t *testing.T, supplier, malformedFill bool) *Run {
 	if supplier {
 		config = `{"venue_ids":["north"],"seed":607,"step":1,"log_mode":"full","evidence_format":"jsonl","experiment_id":"cdf-fixture-treatment","hypothesis_id":"V2-R2-SV1-CDF-LIQUIDITY","elastic_supplier_count":1,"record_market_data_receipts":false,"elastic_liquidity_suppliers":[{"role":"cdf_elastic_supplier_1","symbol":"CDF/USD","base_asset":"CDF","quote_asset":"USD","base_precision":1,"quote_precision":1,"initial_base_balance":100,"initial_quote_balance":1000,"max_position":10,"max_inventory":110,"max_quote_qty":5,"max_observation_age":10}]}`
 	}
-	manifest := `{"venue_ids":["north"],"build":{"revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","modified":false},"config":` + config + `}`
+	manifest := `{"venue_ids":["north"],"build":{"revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","modified":false,"goos":"linux","goarch":"amd64","goamd64":"v1"},"config":` + config + `}`
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0644); err != nil {
 		t.Fatal(err)
 	}
 	configDigest := sha256.Sum256([]byte(config))
-	metadata := fmt.Sprintf(`{"seed":607,"simulated_horizon":"fixture","simulation_start_nano":1,"simulation_end_nano":6,"config_sha256":"%x","binary_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","git_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config_experiment_id":%q,"hypothesis_id":"V2-R2-SV1-CDF-LIQUIDITY","log_mode":"full","evidence_format":"jsonl"}`, configDigest, func() string {
+	metadata := fmt.Sprintf(`{"seed":607,"simulated_horizon":"fixture","simulation_start_nano":1,"simulation_end_nano":6,"config_sha256":"%x","binary_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","binary_goos":"linux","binary_goarch":"amd64","binary_goamd64":"v1","git_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config_experiment_id":%q,"hypothesis_id":"V2-R2-SV1-CDF-LIQUIDITY","log_mode":"full","evidence_format":"jsonl"}`, configDigest, func() string {
 		if supplier {
 			return "cdf-fixture-treatment"
 		}
@@ -1092,4 +1208,30 @@ func hasCDFCheck(checks []CDFLiquidityCheck, prefix string) bool {
 		}
 	}
 	return false
+}
+
+func rewriteCDFReceiptArtifactDigest(t *testing.T, dir, artifactName string, raw []byte) {
+	t.Helper()
+	manifestPath := filepath.Join(dir, "market-data-evidence-v2.json")
+	manifestRaw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	artifact, ok := manifest[artifactName].(map[string]any)
+	if !ok {
+		t.Fatalf("receipt artifact %q missing from manifest", artifactName)
+	}
+	digest := sha256.Sum256(raw)
+	artifact["digest"] = hex.EncodeToString(digest[:])
+	updatedManifest, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, append(updatedManifest, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
 }

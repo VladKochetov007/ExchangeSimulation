@@ -90,6 +90,9 @@ binary_revision=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs
 binary_modified=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
 binary_trimpath=$(go version -m "$binary" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
 binary_cgo_enabled=$(go version -m "$binary" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
+binary_goos=$(go version -m "$binary" | awk '$1 == "build" && index($2, "GOOS=") == 1 {sub("GOOS=", "", $2); print $2; exit}')
+binary_goarch=$(go version -m "$binary" | awk '$1 == "build" && index($2, "GOARCH=") == 1 {sub("GOARCH=", "", $2); print $2; exit}')
+binary_goamd64=$(go version -m "$binary" | awk '$1 == "build" && index($2, "GOAMD64=") == 1 {sub("GOAMD64=", "", $2); print $2; exit}')
 binary_go_version=$(v2_r2_binary_go_version "$binary")
 prunegate_revision=$(go version -m "$prunegate_binary" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
 prunegate_modified=$(go version -m "$prunegate_binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
@@ -104,8 +107,8 @@ prunegate_go_version=$(v2_r2_binary_go_version "$prunegate_binary")
 	echo "binary is not a clean VCS build (vcs.modified=$binary_modified)" >&2
 	exit 1
 }
-[[ "$binary_trimpath" == "true" && "$binary_cgo_enabled" == "0" ]] || {
-	echo "binary reproducibility settings are not enforced (-trimpath=$binary_trimpath CGO_ENABLED=$binary_cgo_enabled)" >&2
+[[ "$binary_trimpath" == "true" && "$binary_cgo_enabled" == "0" && "$binary_goos" == "linux" && "$binary_goarch" == "amd64" && "$binary_goamd64" == "v1" ]] || {
+	echo "binary reproducibility settings are not enforced (-trimpath=$binary_trimpath CGO_ENABLED=$binary_cgo_enabled target=$binary_goos/$binary_goarch/$binary_goamd64)" >&2
 	exit 1
 }
 v2_r2_is_go_127 "$binary_go_version" || {
@@ -138,9 +141,9 @@ config_experiment=$(jq -er '.experiment_id' "$config")
 holdout=false
 [[ "$cell" == holdout-* ]] && holdout=true
 mkdir -p "$output"
-cp "$config" "$output/run-config.json"
+"$binary" -config "$config" -logdir "$output" -log-mode "$log_mode" -evidence-format "$evidence_format" -write-effective-config "$output/run-config.json"
 cmp -s "$config" "$output/run-config.json" || {
-	echo "registered config copy changed before launch: $cell" >&2
+	echo "registered config is not already the simulator's normalized effective config: $cell" >&2
 	exit 1
 }
 config_sha256=$(sha256sum "$config" | awk '{print $1}')
@@ -176,6 +179,7 @@ jq -n \
 	--arg binary_vcs_modified "$binary_modified" \
 	--arg binary_trimpath "$binary_trimpath" \
 	--arg binary_cgo_enabled "$binary_cgo_enabled" \
+	--arg binary_goos "$binary_goos" --arg binary_goarch "$binary_goarch" --arg binary_goamd64 "$binary_goamd64" \
 	--arg config_hypothesis "$config_hypothesis" \
 	--arg config_experiment "$config_experiment" \
 	'{
@@ -196,6 +200,7 @@ jq -n \
 		  binary_vcs_revision: $binary_vcs_revision, binary_vcs_modified: ($binary_vcs_modified == "true"),
 		  binary_trimpath: ($binary_trimpath == "true"), binary_cgo_enabled: $binary_cgo_enabled,
 		  git_revision: $git_revision, go_version: $go_version, binary_go_version: $binary_go_version,
+		  binary_goos: $binary_goos, binary_goarch: $binary_goarch, binary_goamd64: $binary_goamd64,
 		  gomaxprocs: $gomaxprocs, output_dir: $output_dir,
 		  evidence_manifest_path: $evidence_manifest_path,
 		  external_attestation_path: $external_attestation_path,

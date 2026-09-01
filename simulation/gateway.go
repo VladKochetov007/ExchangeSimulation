@@ -457,6 +457,7 @@ func (d *DelayedGateway) recordMarketDataDecision(req exchange.Request) {
 		Side:        req.OrderReq.Side,
 		OrderType:   req.OrderReq.Type,
 		TimeInForce: req.OrderReq.TimeInForce,
+		PostOnly:    req.OrderReq.PostOnly,
 		Price:       req.OrderReq.Price,
 		Qty:         req.OrderReq.Qty,
 		DecisionAt:  d.clock.NowUnixNano(),
@@ -487,6 +488,7 @@ func (d *DelayedGateway) recordMarketDataAction(req exchange.Request) {
 		}
 		action.Symbol, action.RequestID = req.OrderReq.Symbol, req.OrderReq.RequestID
 		action.Side, action.OrderType, action.TimeInForce = req.OrderReq.Side, req.OrderReq.Type, req.OrderReq.TimeInForce
+		action.PostOnly = req.OrderReq.PostOnly
 		action.Price, action.Qty = req.OrderReq.Price, req.OrderReq.Qty
 	case exchange.ReqCancelOrder:
 		if req.CancelReq == nil {

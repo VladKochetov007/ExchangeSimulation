@@ -67,6 +67,10 @@ type cdfMarketDataDecisionRecord struct {
 	ClientID          uint64
 	LinkID            uint32
 	SymbolID          uint32
+	Side              uint8
+	OrderType         uint8
+	TimeInForce       uint8
+	PostOnly          bool
 	RequestID         uint64
 	DecisionAt        int64
 	FrontierOrdinal   uint64
@@ -93,6 +97,7 @@ type cdfMarketDataActionRecord struct {
 	FrontierOrdinal   uint64
 	FrontierDelivered int64
 	FrontierDigest    [16]byte
+	PostOnly          bool
 	EventOrdinal      uint64
 }
 
@@ -241,7 +246,11 @@ func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 	}
 	var lastActionOrdinal uint64
 	for offset := 0; offset < len(actions); offset += cdfMarketDataActionBytes {
-		record := decodeCDFMarketDataAction(actions[offset : offset+cdfMarketDataActionBytes])
+		raw := actions[offset : offset+cdfMarketDataActionBytes]
+		if raw[92] > 1 || hasNonZeroBytes(raw[93:104]) {
+			return nil, fmt.Errorf("action record %d has invalid post-only/reserved bytes", offset/cdfMarketDataActionBytes)
+		}
+		record := decodeCDFMarketDataAction(raw)
 		if record.ClientID == 0 || record.LinkID == 0 || record.RequestID == 0 || record.DecisionAt <= 0 || record.RequestType < 1 || record.RequestType > 4 || record.EventOrdinal != lastActionOrdinal+1 {
 			return nil, fmt.Errorf("action record %d has invalid identity or bounds", offset/cdfMarketDataActionBytes)
 		}
@@ -286,7 +295,11 @@ func readCDFMarketDataEvidence(runDir string) (*cdfMarketDataEvidence, error) {
 		evidence.actions[key] = record
 	}
 	for offset := 0; offset < len(decisions); offset += cdfMarketDataDecisionBytes {
-		record := decodeCDFMarketDataDecision(decisions[offset : offset+cdfMarketDataDecisionBytes])
+		raw := decisions[offset : offset+cdfMarketDataDecisionBytes]
+		if raw[19] > 1 || hasNonZeroBytes(raw[20:24]) {
+			return nil, fmt.Errorf("decision record %d has invalid post-only/reserved bytes", offset/cdfMarketDataDecisionBytes)
+		}
+		record := decodeCDFMarketDataDecision(raw)
 		if err := registerCDFEventOrdinal(eventOrdinals, record.EventOrdinal, "decision"); err != nil {
 			return nil, err
 		}
@@ -386,6 +399,10 @@ func decodeCDFMarketDataDecision(raw []byte) cdfMarketDataDecisionRecord {
 		ClientID:          binary.BigEndian.Uint64(raw[0:8]),
 		LinkID:            binary.BigEndian.Uint32(raw[8:12]),
 		SymbolID:          binary.BigEndian.Uint32(raw[12:16]),
+		Side:              raw[16],
+		OrderType:         raw[17],
+		TimeInForce:       raw[18],
+		PostOnly:          raw[19] == 1,
 		RequestID:         binary.BigEndian.Uint64(raw[24:32]),
 		DecisionAt:        int64(binary.BigEndian.Uint64(raw[32:40])),
 		FrontierOrdinal:   binary.BigEndian.Uint64(raw[40:48]),
@@ -414,10 +431,20 @@ func decodeCDFMarketDataAction(raw []byte) cdfMarketDataActionRecord {
 		Qty:               int64(binary.BigEndian.Uint64(raw[52:60])),
 		FrontierOrdinal:   binary.BigEndian.Uint64(raw[60:68]),
 		FrontierDelivered: int64(binary.BigEndian.Uint64(raw[68:76])),
+		PostOnly:          raw[92] == 1,
 		EventOrdinal:      binary.BigEndian.Uint64(raw[104:112]),
 	}
 	copy(record.FrontierDigest[:], raw[76:92])
 	return record
+}
+
+func hasNonZeroBytes(raw []byte) bool {
+	for _, value := range raw {
+		if value != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func reconstructCDFReceiptDigests(evidence *cdfMarketDataEvidence) error {

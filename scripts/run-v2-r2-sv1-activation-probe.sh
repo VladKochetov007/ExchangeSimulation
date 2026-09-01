@@ -70,11 +70,17 @@ binary_revision=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs
 binary_modified=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
 binary_trimpath=$(go version -m "$binary" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
 binary_cgo_enabled=$(go version -m "$binary" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
+binary_goos=$(go version -m "$binary" | awk '$1 == "build" && index($2, "GOOS=") == 1 {sub("GOOS=", "", $2); print $2; exit}')
+binary_goarch=$(go version -m "$binary" | awk '$1 == "build" && index($2, "GOARCH=") == 1 {sub("GOARCH=", "", $2); print $2; exit}')
+binary_goamd64=$(go version -m "$binary" | awk '$1 == "build" && index($2, "GOAMD64=") == 1 {sub("GOAMD64=", "", $2); print $2; exit}')
 binary_go_version=$(v2_r2_binary_go_version "$binary")
 audit_revision=$(go version -m "$audit_binary" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
 audit_modified=$(go version -m "$audit_binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
 audit_trimpath=$(go version -m "$audit_binary" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
 audit_cgo_enabled=$(go version -m "$audit_binary" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
+audit_goos=$(go version -m "$audit_binary" | awk '$1 == "build" && index($2, "GOOS=") == 1 {sub("GOOS=", "", $2); print $2; exit}')
+audit_goarch=$(go version -m "$audit_binary" | awk '$1 == "build" && index($2, "GOARCH=") == 1 {sub("GOARCH=", "", $2); print $2; exit}')
+audit_goamd64=$(go version -m "$audit_binary" | awk '$1 == "build" && index($2, "GOAMD64=") == 1 {sub("GOAMD64=", "", $2); print $2; exit}')
 audit_go_version=$(v2_r2_binary_go_version "$audit_binary")
 [[ "$binary_revision" == "$head_revision" && "$binary_modified" == false && "$binary_trimpath" == true && "$binary_cgo_enabled" == 0 ]] || {
 	echo "multivenue binary is not a clean reproducible build of HEAD" >&2
@@ -82,6 +88,10 @@ audit_go_version=$(v2_r2_binary_go_version "$audit_binary")
 }
 [[ "$audit_revision" == "$head_revision" && "$audit_modified" == false && "$audit_trimpath" == true && "$audit_cgo_enabled" == 0 ]] || {
 	echo "CDF analyzer is not a clean reproducible build of HEAD" >&2
+	exit 1
+}
+[[ "$binary_goos" == linux && "$binary_goarch" == amd64 && "$binary_goamd64" == v1 && "$audit_goos" == linux && "$audit_goarch" == amd64 && "$audit_goamd64" == v1 ]] || {
+	echo "activation binaries must attest linux/amd64/v1 (simulator=$binary_goos/$binary_goarch/$binary_goamd64 analyzer=$audit_goos/$audit_goarch/$audit_goamd64)" >&2
 	exit 1
 }
 v2_r2_is_go_127 "$binary_go_version" || { echo "multivenue binary is not Go 1.27: $binary_go_version" >&2; exit 1; }
@@ -112,14 +122,12 @@ control_dir="$output_root/control"
 prepare_arm() {
 	local arm=$1 config=$2
 	mkdir -- "$arm"
-	# The simulator's normalized manifest is the effective scientific config:
-	# only the CLI-defaulted full log mode is added to these explicit inputs.
-	jq '.log_mode = "full"' "$config" >"$arm/run-config.json"
+	"$binary" -config "$config" -logdir "$arm" -log-mode full -evidence-format evstream_v3 -write-effective-config "$arm/run-config.json"
 	local config_sha binary_sha experiment hypothesis
 	config_sha=$(sha256sum -- "$arm/run-config.json" | awk '{print $1}')
 	binary_sha=$(sha256sum -- "$binary" | awk '{print $1}')
-	experiment=$(jq -er '.experiment_id' "$config")
-	hypothesis=$(jq -er '.hypothesis_id' "$config")
+	experiment=$(jq -er '.experiment_id' "$arm/run-config.json")
+	hypothesis=$(jq -er '.hypothesis_id' "$arm/run-config.json")
 	jq -n \
 		--arg cell "v2-r2-sv1-activation-607-$(basename "$arm")" \
 		--argjson seed 607 \
@@ -135,7 +143,8 @@ prepare_arm() {
 		--arg log_mode full \
 		--arg binary_path "$binary" \
 		--arg binary_go_version "$binary_go_version" \
-		--argjson venue_ids "$(jq -c '.venue_ids' "$config")" \
+		--arg binary_goos "$binary_goos" --arg binary_goarch "$binary_goarch" --arg binary_goamd64 "$binary_goamd64" \
+		--argjson venue_ids "$(jq -c '.venue_ids' "$arm/run-config.json")" \
 		'{schema_version: 1, contract: "v2-r2-sv1-activation-provenance-v1",
 		 cell: $cell, seed: $seed, simulated_horizon: $horizon,
 		 simulation_start_nano: $simulation_start_nano, simulation_end_nano: $simulation_end_nano,
@@ -143,6 +152,7 @@ prepare_arm() {
 		 git_revision: $git_revision, config_experiment_id: $experiment,
 		 hypothesis_id: $hypothesis, evidence_format: $evidence_format, log_mode: $log_mode,
 		 venue_ids: $venue_ids, binary_path: $binary_path, binary_go_version: $binary_go_version,
+		 binary_goos: $binary_goos, binary_goarch: $binary_goarch, binary_goamd64: $binary_goamd64,
 		 command: ["multivenue", "-config", "run-config.json", "-duration", $horizon,
 		           "-logdir", ".", "-log-mode", $log_mode, "-evidence-format", $evidence_format]}' \
 		>"$arm/run-metadata.json"
@@ -161,7 +171,7 @@ run_arm() {
 		return 1
 	}
 	jq -e --arg revision "$head_revision" --argjson seed 607 --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
-		'.build.revision == $revision and .build.modified == false and .venue_ids == ["north", "central", "south"] and
+		'.build.revision == $revision and .build.modified == false and .build.goos == "linux" and .build.goarch == "amd64" and .build.goamd64 == "v1" and .venue_ids == ["north", "central", "south"] and
 		 .config.seed == $seed and .config.log_mode == "full" and .config.evidence_format == "evstream_v3"' \
 		"$arm/manifest.json" >/dev/null
 	jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
@@ -191,6 +201,7 @@ jq -e \
 	 .treatment.supplier_count > 0 and .control.supplier_count == 0 and
 	 .treatment.trading_supplier_count == .treatment.supplier_count and
 	 .treatment.pnl_changing_supplier_count == .treatment.supplier_count and
+	 .treatment.inventory_responsive_decision_count > 0 and
 	 (.treatment.cancel_count + .treatment.withdraw_count) > 0 and
 	 all(.treatment.suppliers[]; .max_position <= .configured_max_position and
 		.max_gross_base_balance <= .configured_max_inventory and
@@ -207,8 +218,8 @@ jq -n \
 	--arg output_root "$output_root" \
 	--arg treatment "$treatment_dir" \
 	--arg control "$control_dir" \
-	--arg treatment_config_sha256 "$(sha256sum -- "$treatment_config" | awk '{print $1}')" \
-	--arg control_config_sha256 "$(sha256sum -- "$control_config" | awk '{print $1}')" \
+		--arg treatment_config_sha256 "$(sha256sum -- "$treatment_dir/run-config.json" | awk '{print $1}')" \
+		--arg control_config_sha256 "$(sha256sum -- "$control_dir/run-config.json" | awk '{print $1}')" \
 	--arg binary_sha256 "$(sha256sum -- "$binary" | awk '{print $1}')" \
 	--arg analyzer_sha256 "$(sha256sum -- "$audit_binary" | awk '{print $1}')" \
 	--arg comparison_sha256 "$comparison_sha" \

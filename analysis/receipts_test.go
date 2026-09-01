@@ -62,6 +62,30 @@ func TestAuditMarketDataEvidenceStreamingMatchesBufferedOracle(t *testing.T) {
 	}
 }
 
+func TestAuditMarketDataEvidenceValidatesPostOnlyFlag(t *testing.T) {
+	postOnly := writeEvidenceFixture(t, func(_, _, decisions []byte) {
+		decisions[19] = 1
+	})
+	audit, err := AuditMarketDataReceipts(postOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !audit.Valid {
+		t.Fatalf("valid post-only decision rejected: %+v", audit)
+	}
+
+	invalid := writeEvidenceFixture(t, func(_, _, decisions []byte) {
+		decisions[19] = 2
+	})
+	audit, err = AuditMarketDataReceipts(invalid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.Valid || audit.NonzeroReserved == 0 {
+		t.Fatalf("invalid post-only encoding survived: %+v", audit)
+	}
+}
+
 // Each mutation rewrites every file digest. The auditor must detect broken
 // semantics, not merely a checksum mismatch.
 func TestAuditMarketDataEvidenceCatchesAdversarialMutations(t *testing.T) {
