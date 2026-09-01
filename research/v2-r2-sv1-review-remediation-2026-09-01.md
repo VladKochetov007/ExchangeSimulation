@@ -385,3 +385,41 @@ This remediation does not authorize a capacity probe, a registered 24-hour
 cell, freeze, or a holdout. The next gate is one fresh independent Sol-xhigh
 review of the exact `8784b46` tree. Only an acceptance may authorize the clean
 Go 1.27 build and one retained external capacity probe.
+
+## Fresh setup rejection — 6afe3e5
+
+Kant independently reviewed exact `6afe3e57b8575f2d95a5549f1a7774f2e5405841`
+after the preceding remediation. The source/config/roster/binary/process
+provenance bindings and canonical external-root logic were accepted, but the
+narrow capacity gate was **REJECTED** for two new fail-closed defects. The
+probe expanded an unset `probe_root` under `set -u` before assigning it, so a
+normal invocation terminated before its safety checks. In addition, the 4 GiB
+minimum-free reserve was not enforced before launch, on failed/non-numeric
+poll samples, or after the simulator exited; a nominal attestation could
+therefore be emitted without proving the reserve remained available.
+
+No registered cell or holdout was run. The exact `6afe3e5` tree remains a
+review input, not a launch candidate.
+
+## Capacity reserve remediation — 7763129
+
+Commit `7763129ad2f7c37e969cf39192c8be1a8f3addce` removes the premature
+`probe_root` expansion and moves canonical root validation ahead of output
+creation. It identifies an existing filesystem ancestor and requires a
+numeric free-space reading above the 4 GiB reserve before launch. Every active
+poll now treats a missing or non-numeric `df` result as a hard abort and
+terminates the simulator; crossing the reserve also aborts. A final numeric
+measurement is mandatory and must remain above the reserve before a successful
+attestation can be written. The probe records the initial and final readings,
+reserve, source revision, binary/config hashes, evidence format, and
+`GOMAXPROCS=4`; the SV1 runner binds all of those control values through the
+shared verifier.
+
+The shared contract test now exercises direct and symlinked repository-root
+rejection, verifies the previous unbound-variable path is gone, and covers the
+reserve binding and mismatch rejection. `bash -n`, SV1 config validation,
+`git diff --check`, the clean `GOMAXPROCS=4 make test`, and
+`GOMAXPROCS=4 go vet ./...` pass on `7763129`. The commit is pushed. No pinned
+successor binary has been built and no capacity probe, registered cell,
+freeze, or holdout is authorized until a fresh independent Sol-xhigh review
+accepts this exact tree.
