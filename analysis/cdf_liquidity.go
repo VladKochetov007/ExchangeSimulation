@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 // intervention can be reconstructed without guessing; it is not a survival
 // score.
 type CDFLiquidityRunAudit struct {
+	Provenance                       *CDFLiquidityRunProvenance  `json:"provenance,omitempty"`
 	SupplierCount                    int                         `json:"supplier_count"`
 	DecisionCount                    int64                       `json:"decision_count"`
 	FillCount                        int64                       `json:"fill_count"`
@@ -79,6 +81,9 @@ type CDFLiquidityRunAudit struct {
 	terminalAt                      int64
 	cancelRequestedByOrder          map[cdfOrderKey]struct{}
 	cancelRequestByOrder            map[cdfOrderKey]uint64
+	cancelDecisionByOrder           map[cdfOrderKey]cdfCancelRequestState
+	quoteRequests                   map[cdfRequestKey]cdfQuoteRequestState
+	expectedActionKeys              map[cdfActionKey]struct{}
 	pendingOrderWaits               []cdfPendingOrderWait
 	pendingCancelWaits              []cdfPendingCancelWait
 	staleWithdrawals                map[cdfOrderKey]cdfStaleWithdrawal
@@ -186,6 +191,8 @@ type CDFLiquiditySupplierAudit struct {
 	initialMarks                    map[string]int64
 	terminalMarks                   map[string]int64
 	pendingQuoteByRequest           map[uint64]cdfDecisionEvidence
+	lastDecisionAt                  int64
+	lastDecisionOrdinal             int64
 	receiptRequired                 bool
 }
 
@@ -210,14 +217,71 @@ type CDFLiquidityVenueAudit struct {
 }
 
 type cdfManifest struct {
-	Config json.RawMessage `json:"config"`
+	Config   json.RawMessage `json:"config"`
+	VenueIDs []string        `json:"venue_ids"`
+	Build    struct {
+		Revision string `json:"revision"`
+		Modified bool   `json:"modified"`
+	} `json:"build"`
 }
 
 type cdfRunConfig struct {
+	VenueIDs                  []string            `json:"venue_ids"`
+	Seed                      int64               `json:"seed"`
+	Step                      int64               `json:"step"`
+	LogMode                   string              `json:"log_mode"`
+	EvidenceFormat            string              `json:"evidence_format"`
+	ExperimentID              string              `json:"experiment_id"`
+	HypothesisID              string              `json:"hypothesis_id"`
 	ElasticSupplierCount      int                 `json:"elastic_supplier_count"`
 	ElasticLiquiditySuppliers []cdfSupplierConfig `json:"elastic_liquidity_suppliers"`
 	RecordMarketDataReceipts  bool                `json:"record_market_data_receipts"`
 	MarketDataReceiptRoles    []string            `json:"market_data_receipt_roles"`
+}
+
+// CDFLiquidityRunProvenance binds a reconstructed run to its immutable input
+// and execution metadata. It is separate from economic diagnostics so a valid
+// local reconstruction cannot be mistaken for a valid treatment/control pair.
+type CDFLiquidityRunProvenance struct {
+	ConfigSHA256        string   `json:"config_sha256"`
+	SourceRevision      string   `json:"source_revision"`
+	SourceModified      bool     `json:"source_modified"`
+	BinarySHA256        string   `json:"binary_sha256"`
+	Seed                int64    `json:"seed"`
+	Horizon             string   `json:"horizon"`
+	SimulationStartNano int64    `json:"simulation_start_nano"`
+	SimulationEndNano   int64    `json:"simulation_end_nano"`
+	VenueIDs            []string `json:"venue_ids"`
+	ExperimentID        string   `json:"experiment_id"`
+	HypothesisID        string   `json:"hypothesis_id"`
+	EvidenceFormat      string   `json:"evidence_format"`
+	LogMode             string   `json:"log_mode"`
+	Valid               bool     `json:"valid"`
+	Failure             string   `json:"failure,omitempty"`
+}
+
+type CDFLiquidityComparisonProvenance struct {
+	Treatment              *CDFLiquidityRunProvenance `json:"treatment"`
+	Control                *CDFLiquidityRunProvenance `json:"control"`
+	AnalyzerSHA256         string                     `json:"analyzer_sha256,omitempty"`
+	AnalyzerSourceRevision string                     `json:"analyzer_source_revision,omitempty"`
+	AnalyzerSourceModified bool                       `json:"analyzer_source_modified,omitempty"`
+	Valid                  bool                       `json:"valid"`
+	Failure                string                     `json:"failure,omitempty"`
+}
+
+type cdfRunMetadata struct {
+	Seed                int64  `json:"seed"`
+	SimulatedHorizon    string `json:"simulated_horizon"`
+	SimulationStartNano int64  `json:"simulation_start_nano"`
+	SimulationEndNano   int64  `json:"simulation_end_nano"`
+	ConfigSHA256        string `json:"config_sha256"`
+	BinarySHA256        string `json:"binary_sha256"`
+	GitRevision         string `json:"git_revision"`
+	ConfigExperimentID  string `json:"config_experiment_id"`
+	HypothesisID        string `json:"hypothesis_id"`
+	LogMode             string `json:"log_mode"`
+	EvidenceFormat      string `json:"evidence_format"`
 }
 
 type cdfSupplierConfig struct {
@@ -255,6 +319,150 @@ func loadCDFRunConfig(run *Run) (cdfRunConfig, error) {
 	return config, nil
 }
 
+type cdfRunIdentity struct {
+	provenance       CDFLiquidityRunProvenance
+	comparisonConfig string
+}
+
+func loadCDFRunIdentity(run *Run) (cdfRunIdentity, error) {
+	if run == nil {
+		return cdfRunIdentity{}, fmt.Errorf("nil run")
+	}
+	manifestRaw, err := os.ReadFile(filepath.Join(run.Dir, "manifest.json"))
+	if err != nil {
+		return cdfRunIdentity{}, fmt.Errorf("read manifest: %w", err)
+	}
+	var manifest cdfManifest
+	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+		return cdfRunIdentity{}, fmt.Errorf("decode manifest: %w", err)
+	}
+	var config cdfRunConfig
+	if len(manifest.Config) == 0 || json.Unmarshal(manifest.Config, &config) != nil {
+		return cdfRunIdentity{}, fmt.Errorf("manifest has no valid configuration")
+	}
+	configRaw, err := os.ReadFile(filepath.Join(run.Dir, "run-config.json"))
+	if err != nil {
+		return cdfRunIdentity{}, fmt.Errorf("read run configuration: %w", err)
+	}
+	configDigest := sha256.Sum256(configRaw)
+	manifestConfigCanonical, err := canonicalJSON(manifest.Config)
+	if err != nil {
+		return cdfRunIdentity{}, fmt.Errorf("normalize manifest configuration: %w", err)
+	}
+	runConfigCanonical, err := canonicalJSON(configRaw)
+	if err != nil {
+		return cdfRunIdentity{}, fmt.Errorf("normalize run configuration: %w", err)
+	}
+	if manifestConfigCanonical != runConfigCanonical {
+		return cdfRunIdentity{}, fmt.Errorf("manifest and copied run configuration differ")
+	}
+	metadataRaw, err := os.ReadFile(filepath.Join(run.Dir, "run-metadata.json"))
+	if err != nil {
+		return cdfRunIdentity{}, fmt.Errorf("read run metadata: %w", err)
+	}
+	var metadata cdfRunMetadata
+	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
+		return cdfRunIdentity{}, fmt.Errorf("decode run metadata: %w", err)
+	}
+	if len(manifest.VenueIDs) == 0 || !sameStrings(manifest.VenueIDs, config.VenueIDs) {
+		return cdfRunIdentity{}, fmt.Errorf("manifest and configuration venue IDs differ")
+	}
+	if manifest.Build.Revision == "" || !isRevision(manifest.Build.Revision) || manifest.Build.Modified {
+		return cdfRunIdentity{}, fmt.Errorf("manifest build is missing a clean source revision")
+	}
+	if metadata.ConfigSHA256 != hex.EncodeToString(configDigest[:]) || !isDigest(metadata.ConfigSHA256) || !isDigest(metadata.BinarySHA256) {
+		return cdfRunIdentity{}, fmt.Errorf("run metadata does not bind the configuration and binary hashes")
+	}
+	if metadata.GitRevision != manifest.Build.Revision || !isRevision(metadata.GitRevision) || metadata.Seed != config.Seed || metadata.ConfigExperimentID != config.ExperimentID || metadata.HypothesisID != config.HypothesisID || metadata.LogMode != config.LogMode || metadata.EvidenceFormat != config.EvidenceFormat || metadata.SimulationStartNano <= 0 || metadata.SimulationEndNano <= metadata.SimulationStartNano || metadata.SimulatedHorizon == "" {
+		return cdfRunIdentity{}, fmt.Errorf("run metadata does not match manifest configuration")
+	}
+	comparisonConfig, err := canonicalCDFComparisonConfig(configRaw)
+	if err != nil {
+		return cdfRunIdentity{}, fmt.Errorf("normalize treatment/control configuration: %w", err)
+	}
+	return cdfRunIdentity{
+		provenance: CDFLiquidityRunProvenance{
+			ConfigSHA256:        metadata.ConfigSHA256,
+			SourceRevision:      metadata.GitRevision,
+			SourceModified:      manifest.Build.Modified,
+			BinarySHA256:        metadata.BinarySHA256,
+			Seed:                metadata.Seed,
+			Horizon:             metadata.SimulatedHorizon,
+			SimulationStartNano: metadata.SimulationStartNano,
+			SimulationEndNano:   metadata.SimulationEndNano,
+			VenueIDs:            append([]string(nil), config.VenueIDs...),
+			ExperimentID:        config.ExperimentID,
+			HypothesisID:        config.HypothesisID,
+			EvidenceFormat:      config.EvidenceFormat,
+			LogMode:             config.LogMode,
+			Valid:               true,
+		},
+		comparisonConfig: comparisonConfig,
+	}, nil
+}
+
+func canonicalCDFComparisonConfig(raw []byte) (string, error) {
+	var config map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &config); err != nil || config == nil {
+		if err != nil {
+			return "", err
+		}
+		return "", fmt.Errorf("configuration is not a JSON object")
+	}
+	// These are the preregistered treatment/control differences: identity
+	// labels, the separate CDF roster, its evidence flag, and the extra local
+	// feed role needed to audit that roster. Every economic input remains.
+	for _, name := range []string{
+		"experiment_id", "hypothesis_id", "date", "status", "description",
+		"elastic_liquidity_suppliers", "record_elastic_liquidity_supplier_decisions",
+		"market_data_receipt_roles",
+	} {
+		delete(config, name)
+	}
+	canonical, err := json.Marshal(config)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(canonical)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func canonicalJSON(raw []byte) (string, error) {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", err
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	return string(canonical), nil
+}
+
+func sameStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func isDigest(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func isRevision(value string) bool {
+	return len(value) == 40 && strings.Trim(value, "0123456789abcdef") == ""
+}
+
 // CDFLiquidityCheck identifies one concrete reconstruction failure. Any check
 // makes the audit invalid even when aggregate counts look plausible.
 type CDFLiquidityCheck struct {
@@ -269,13 +477,14 @@ type CDFLiquidityCheck struct {
 // The control side-absence fraction is a matched development diagnostic, not a
 // causal claim beyond the registered seed and horizon.
 type CDFLiquidityComparison struct {
-	Treatment                   *CDFLiquidityRunAudit `json:"treatment"`
-	Control                     *CDFLiquidityRunAudit `json:"control"`
-	ControlBidAbsenceFraction   float64               `json:"control_bid_absence_fraction"`
-	ControlAskAbsenceFraction   float64               `json:"control_ask_absence_fraction"`
-	TreatmentBidAbsenceFraction float64               `json:"treatment_bid_absence_fraction"`
-	TreatmentAskAbsenceFraction float64               `json:"treatment_ask_absence_fraction"`
-	Valid                       bool                  `json:"valid"`
+	Provenance                  CDFLiquidityComparisonProvenance `json:"provenance"`
+	Treatment                   *CDFLiquidityRunAudit            `json:"treatment"`
+	Control                     *CDFLiquidityRunAudit            `json:"control"`
+	ControlBidAbsenceFraction   float64                          `json:"control_bid_absence_fraction"`
+	ControlAskAbsenceFraction   float64                          `json:"control_ask_absence_fraction"`
+	TreatmentBidAbsenceFraction float64                          `json:"treatment_bid_absence_fraction"`
+	TreatmentAskAbsenceFraction float64                          `json:"treatment_ask_absence_fraction"`
+	Valid                       bool                             `json:"valid"`
 }
 
 type cdfDecisionEvidence struct {
@@ -436,9 +645,39 @@ type cdfOrderState struct {
 	cancelRejectedRequestID uint64
 	cancelRejectedAt        int64
 	cancelRejectedOrdinal   int64
+	cancelRejectedReason    string
 	cancelRequested         bool
 	touchShare              float64
 	touchShareKnown         bool
+}
+
+type cdfRequestKey struct {
+	venueID   string
+	clientID  uint64
+	requestID uint64
+}
+
+type cdfQuoteRequestState struct {
+	decisionAt      int64
+	decisionOrdinal int64
+	acceptedAt      int64
+	acceptedOrdinal int64
+	rejectedAt      int64
+	rejectedOrdinal int64
+}
+
+type cdfCancelRequestState struct {
+	requestID  uint64
+	decisionAt int64
+	ordinal    int64
+}
+
+type cdfActionKey struct {
+	clientID    uint64
+	linkID      uint32
+	requestID   uint64
+	requestType uint8
+	orderID     uint64
 }
 
 type cdfStaleWithdrawal struct {
@@ -481,6 +720,9 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		lastSupplierDepthByClient: make(map[string]map[uint64]int64),
 		cancelRequestedByOrder:    make(map[cdfOrderKey]struct{}),
 		cancelRequestByOrder:      make(map[cdfOrderKey]uint64),
+		cancelDecisionByOrder:     make(map[cdfOrderKey]cdfCancelRequestState),
+		quoteRequests:             make(map[cdfRequestKey]cdfQuoteRequestState),
+		expectedActionKeys:        make(map[cdfActionKey]struct{}),
 		pendingOrderWaits:         make([]cdfPendingOrderWait, 0),
 		pendingCancelWaits:        make([]cdfPendingCancelWait, 0),
 		staleWithdrawals:          make(map[cdfOrderKey]cdfStaleWithdrawal),
@@ -488,6 +730,14 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	config, configErr := loadCDFRunConfig(r)
 	if configErr != nil {
 		result.addCheck(CDFLiquidityCheck{Failure: "missing or malformed run configuration: " + configErr.Error()})
+	}
+	if _, statErr := os.Stat(filepath.Join(r.Dir, "run-metadata.json")); statErr == nil {
+		identity, identityErr := loadCDFRunIdentity(r)
+		if identityErr != nil {
+			result.addCheck(CDFLiquidityCheck{Failure: "missing or malformed run provenance: " + identityErr.Error()})
+		} else {
+			result.Provenance = &identity.provenance
+		}
 	}
 	result.expectedHistoricalCountPerVenue = config.ElasticSupplierCount
 	result.ExpectedHistoricalCount = config.ElasticSupplierCount
@@ -561,7 +811,6 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.configuredBasePrecision = supplierConfig.BasePrecision
 			state.configuredQuotePrecision = supplierConfig.QuotePrecision
 			state.configuredMaxQuoteQty = supplierConfig.MaxQuoteQty
-			state.ConfiguredMakerFeeBps = supplierConfig.MakerFeeBps
 			state.configuredMakerFeeBps = supplierConfig.MakerFeeBps
 			state.configuredMaxObservationAge = supplierConfig.MaxObservationAge
 			state.configuredInitialBaseBalance = supplierConfig.InitialBaseBalance
@@ -569,6 +818,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.ConfiguredMaxPosition = supplierConfig.MaxPosition
 			state.ConfiguredMaxInventory = supplierConfig.MaxInventory
 			state.ConfiguredMaxQuoteQty = supplierConfig.MaxQuoteQty
+			state.ConfiguredMakerFeeBps = supplierConfig.MakerFeeBps
 			state.receiptRequired = config.RecordMarketDataReceipts && containsString(config.MarketDataReceiptRoles, auditRoleClass(row.Role))
 			if supplierConfig.InitialBaseBalance <= 0 || supplierConfig.InitialQuoteBalance <= 0 || supplierConfig.BasePrecision <= 0 || supplierConfig.QuotePrecision <= 0 || !accountHasNetBalance(row.Account.SpotBalances, supplierConfig.BaseAsset, supplierConfig.InitialBaseBalance) || !accountHasNetBalance(row.Account.SpotBalances, supplierConfig.QuoteAsset, supplierConfig.InitialQuoteBalance) {
 				result.addCheck(CDFLiquidityCheck{VenueID: row.VenueID, Role: row.Role, ClientID: row.ClientID, Failure: "supplier initial capital does not match registered finite balances"})
@@ -655,6 +905,46 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			}
 		}
 	}
+	if len(config.VenueIDs) == 0 {
+		result.addCheck(CDFLiquidityCheck{Failure: "run configuration has no venue roster"})
+	}
+	expectedVenues := make(map[string]struct{}, len(config.VenueIDs))
+	for _, venueID := range config.VenueIDs {
+		if venueID == "" {
+			result.addCheck(CDFLiquidityCheck{Failure: "run configuration has an empty venue ID"})
+			continue
+		}
+		if _, duplicate := expectedVenues[venueID]; duplicate {
+			result.addCheck(CDFLiquidityCheck{VenueID: venueID, Failure: "run configuration has duplicate venue ID"})
+			continue
+		}
+		expectedVenues[venueID] = struct{}{}
+		if historicalByVenue[venueID] != config.ElasticSupplierCount {
+			result.addCheck(CDFLiquidityCheck{VenueID: venueID, Failure: fmt.Sprintf("historical elastic supplier count %d does not match configured %d", historicalByVenue[venueID], config.ElasticSupplierCount)})
+		}
+		for role := range configByRole {
+			found := false
+			for key, state := range states {
+				if key.VenueID == venueID && state.Role == role {
+					found = true
+					break
+				}
+			}
+			if !found {
+				result.addCheck(CDFLiquidityCheck{VenueID: venueID, Role: role, Failure: "configured supplier is missing from initial accounts"})
+			}
+		}
+	}
+	for venueID := range historicalByVenue {
+		if _, expected := expectedVenues[venueID]; !expected {
+			result.addCheck(CDFLiquidityCheck{VenueID: venueID, Failure: "historical supplier venue is outside the registered venue roster"})
+		}
+	}
+	for key, state := range states {
+		if _, expected := expectedVenues[key.VenueID]; !expected {
+			result.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "CDF supplier venue is outside the registered venue roster"})
+		}
+	}
 	if config.ElasticSupplierCount > 0 && len(historicalByVenue) == 0 {
 		result.addCheck(CDFLiquidityCheck{Failure: "no historical elastic supplier accounts"})
 	}
@@ -712,8 +1002,9 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	if len(bookFiles) == 0 {
 		result.addCheck(CDFLiquidityCheck{Failure: "no rendered CDF-USD book evidence"})
 	}
+	result.validateReceiptActions(receiptEvidence)
 	result.validatePendingCancelWaits(orders, states)
-	result.validatePendingOrderWaits(orders, states)
+	result.validatePendingOrderWaits(states)
 	result.validateStaleWithdrawals(orders, states)
 	if result.terminalAt == 0 {
 		result.terminalAt = result.lastEventAt
@@ -762,14 +1053,35 @@ func CompareCDFLiquidityRuns(treatment, control *Run) (*CDFLiquidityComparison, 
 	if err != nil {
 		return nil, err
 	}
+	treatmentIdentity, err := loadCDFRunIdentity(treatment)
+	if err != nil {
+		return nil, fmt.Errorf("treatment provenance: %w", err)
+	}
+	controlIdentity, err := loadCDFRunIdentity(control)
+	if err != nil {
+		return nil, fmt.Errorf("control provenance: %w", err)
+	}
 	comparison := &CDFLiquidityComparison{
+		Provenance: CDFLiquidityComparisonProvenance{
+			Treatment: &treatmentIdentity.provenance,
+			Control:   &controlIdentity.provenance,
+		},
 		Treatment: treatmentAudit, Control: controlAudit,
 		ControlBidAbsenceFraction:   controlAudit.BidAbsenceFraction,
 		ControlAskAbsenceFraction:   controlAudit.AskAbsenceFraction,
 		TreatmentBidAbsenceFraction: treatmentAudit.BidAbsenceFraction,
 		TreatmentAskAbsenceFraction: treatmentAudit.AskAbsenceFraction,
 	}
-	comparison.Valid = treatmentAudit.Valid && controlAudit.Valid && treatmentAudit.SupplierCount > 0 && controlAudit.SupplierCount == 0
+	comparison.Provenance.Valid = treatmentIdentity.provenance.Valid && controlIdentity.provenance.Valid
+	if treatmentIdentity.comparisonConfig != controlIdentity.comparisonConfig {
+		comparison.Provenance.Valid = false
+		comparison.Provenance.Failure = "treatment/control configurations differ outside the registered CDF roster and evidence identity fields"
+	}
+	if treatmentIdentity.provenance.Seed != controlIdentity.provenance.Seed || treatmentIdentity.provenance.Horizon != controlIdentity.provenance.Horizon || treatmentIdentity.provenance.SimulationStartNano != controlIdentity.provenance.SimulationStartNano || treatmentIdentity.provenance.SimulationEndNano != controlIdentity.provenance.SimulationEndNano || !sameStrings(treatmentIdentity.provenance.VenueIDs, controlIdentity.provenance.VenueIDs) || treatmentIdentity.provenance.SourceRevision != controlIdentity.provenance.SourceRevision {
+		comparison.Provenance.Valid = false
+		comparison.Provenance.Failure = "treatment/control execution provenance is not paired"
+	}
+	comparison.Valid = comparison.Provenance.Valid && treatmentAudit.Valid && controlAudit.Valid && treatmentAudit.SupplierCount > 0 && controlAudit.SupplierCount == 0
 	return comparison, nil
 }
 
@@ -795,6 +1107,10 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	if event.ClientID != decision.ClientID || decision.Role != state.Role || decision.Symbol != state.configuredSymbol || decision.DecisionTime != event.SimTS {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "decision identity or timestamp mismatch"})
 	}
+	if state.lastDecisionAt > 0 && (decision.DecisionTime < state.lastDecisionAt || decision.DecisionTime == state.lastDecisionAt && event.Ordinal <= state.lastDecisionOrdinal) {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decisions are not in causal timestamp order"})
+	}
+	state.lastDecisionAt, state.lastDecisionOrdinal = decision.DecisionTime, event.Ordinal
 	missingObservation := decision.ObservationTime == 0 && decision.ObservationSequence == 0 && decision.ObservationAge == 0
 	initialSubscriptionWait := state.DecisionCount == 1 && decision.Action == "wait" && decision.Reason == "subscribe"
 	missingObservationWait := decision.Action == "wait" && (decision.Reason == "stale_or_missing_observation" || decision.Reason == "order_pending" || decision.Reason == "cancel_pending")
@@ -849,6 +1165,15 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 		if decision.QuoteRequestID == 0 || decision.QuoteOrderID != 0 || decision.ObservationSequence == 0 || !validSide(decision.Side) || decision.QuotePrice <= 0 || decision.QuoteQty <= 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "submit decision has incomplete quote identity"})
 			break
+		}
+		requestKey := cdfRequestKey{venueID: event.VenueID, clientID: decision.ClientID, requestID: decision.QuoteRequestID}
+		if _, exists := r.quoteRequests[requestKey]; exists {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "duplicate supplier order request"})
+		} else {
+			r.quoteRequests[requestKey] = cdfQuoteRequestState{decisionAt: decision.DecisionTime, decisionOrdinal: event.Ordinal}
+		}
+		if state.receiptRequired {
+			r.expectedActionKeys[cdfActionKey{clientID: decision.ClientID, linkID: decision.ObservationLinkID, requestID: decision.QuoteRequestID, requestType: 2}] = struct{}{}
 		}
 		if state.configuredMaxQuoteQty <= 0 || decision.QuoteQty > state.configuredMaxQuoteQty {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "submitted quote exceeds registered maximum quantity"})
@@ -913,6 +1238,10 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 			r.cancelRequestedByOrder[orderKey] = struct{}{}
 			if decision.CancelRequestID != 0 {
 				r.cancelRequestByOrder[orderKey] = decision.CancelRequestID
+				r.cancelDecisionByOrder[orderKey] = cdfCancelRequestState{requestID: decision.CancelRequestID, decisionAt: decision.DecisionTime, ordinal: event.Ordinal}
+				if state.receiptRequired {
+					r.expectedActionKeys[cdfActionKey{clientID: decision.ClientID, linkID: decision.ObservationLinkID, requestID: decision.CancelRequestID, requestType: 3, orderID: decision.QuoteOrderID}] = struct{}{}
+				}
 			}
 			if staleWithdrawal {
 				if _, duplicate := r.staleWithdrawals[orderKey]; duplicate {
@@ -971,26 +1300,30 @@ func (r *CDFLiquidityRunAudit) validatePendingCancelWaits(orders map[cdfOrderKey
 		if state != nil {
 			role = state.Role
 		}
-		if order == nil || order.acceptedAt <= 0 || order.acceptedAt > wait.decisionAt || order.closedAt > 0 && order.closedAt <= wait.decisionAt || !order.cancelRequested || r.cancelRequestByOrder[wait.key] != wait.cancelRequestID {
+		cancel, cancelExists := r.cancelDecisionByOrder[wait.key]
+		if order == nil || order.acceptedAt <= 0 || order.acceptedAt > wait.decisionAt || order.closedAt > 0 && order.closedAt <= wait.decisionAt || !order.cancelRequested || !cancelExists || cancel.requestID != wait.cancelRequestID || cancel.decisionAt > wait.decisionAt || cancel.decisionAt < order.acceptedAt {
 			r.addCheck(CDFLiquidityCheck{VenueID: wait.key.VenueID, Role: role, ClientID: wait.key.ClientID, Ordinal: wait.ordinal, Failure: "cancel-pending wait has no matching live cancellation"})
 		}
 	}
 }
 
-func (r *CDFLiquidityRunAudit) validatePendingOrderWaits(orders map[cdfOrderKey]*cdfOrderState, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
+func (r *CDFLiquidityRunAudit) validatePendingOrderWaits(states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
 	for _, wait := range r.pendingOrderWaits {
-		for key, order := range orders {
-			if key.VenueID != wait.venueID || key.ClientID != wait.clientID || order.requestID != wait.requestID {
-				continue
+		request, requestExists := r.quoteRequests[cdfRequestKey{venueID: wait.venueID, clientID: wait.clientID, requestID: wait.requestID}]
+		if !requestExists {
+			continue
+		}
+		if request.acceptedAt > 0 && request.acceptedAt <= wait.decisionAt || request.rejectedAt > 0 && request.rejectedAt <= wait.decisionAt {
+			state := states[cdfParticipantKey{VenueID: wait.venueID, ClientID: wait.clientID}]
+			role := ""
+			if state != nil {
+				role = state.Role
 			}
-			if order.acceptedAt <= wait.decisionAt {
-				state := states[cdfParticipantKey{VenueID: wait.venueID, ClientID: wait.clientID}]
-				role := ""
-				if state != nil {
-					role = state.Role
-				}
-				r.addCheck(CDFLiquidityCheck{VenueID: wait.venueID, Role: role, ClientID: wait.clientID, Ordinal: wait.ordinal, Failure: "order-pending wait follows an already accepted order"})
+			failure := "order-pending wait follows an already accepted order"
+			if request.rejectedAt > 0 && request.rejectedAt <= wait.decisionAt && (request.acceptedAt == 0 || request.rejectedAt < request.acceptedAt) {
+				failure = "order-pending wait follows an already rejected order"
 			}
+			r.addCheck(CDFLiquidityCheck{VenueID: wait.venueID, Role: role, ClientID: wait.clientID, Ordinal: wait.ordinal, Failure: failure})
 		}
 	}
 }
@@ -1018,12 +1351,15 @@ func (r *CDFLiquidityRunAudit) validateDecisionReceipt(event Event, decision cdf
 		link := evidence.links[candidate.LinkID]
 		if link.SourceVenue == event.VenueID && link.Role == auditRoleClass(decision.Role) {
 			action, actionExists = candidate, true
-			break
+			if candidate.RequestType == wantRequestType {
+				break
+			}
 		}
 	}
 	localDigest, digestErr := decodeFrontierDigest(decision.ObservationDigest)
 	actionFrontierMatches := actionExists && action.LinkID == decision.ObservationLinkID && action.FrontierOrdinal == decision.ObservationOrdinal && action.FrontierDelivered == decision.ObservationDeliveredAt && digestErr == nil && action.FrontierDigest == localDigest
-	symbolMatches := action.SymbolID == 0 || evidence.symbols[action.SymbolID].Symbol == decision.Symbol
+	symbol, symbolExists := evidence.symbols[action.SymbolID]
+	symbolMatches := decision.Action != "submit" && action.SymbolID == 0 || symbolExists && symbol.Symbol == decision.Symbol
 	orderMatches := decision.Action != "submit" || action.Price == decision.QuotePrice && action.Qty == decision.QuoteQty
 	if decision.Action != "submit" {
 		orderMatches = action.OrderID == decision.QuoteOrderID
@@ -1050,6 +1386,25 @@ func (r *CDFLiquidityRunAudit) validateDecisionReceipt(event Event, decision cdf
 	decisionFrontierMatches := exists && record.LinkID == decision.ObservationLinkID && record.FrontierOrdinal == decision.ObservationOrdinal && record.FrontierDelivered == decision.ObservationDeliveredAt && digestErr == nil && record.FrontierDigest == localDigest
 	if !exists || record.DecisionAt != decision.DecisionTime || record.Price != decision.QuotePrice || record.Qty != decision.QuoteQty || !decisionFrontierMatches {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier submit is not reconciled to a market-data decision receipt"})
+	}
+}
+
+func (r *CDFLiquidityRunAudit) validateReceiptActions(evidence *cdfMarketDataEvidence) {
+	if evidence == nil {
+		return
+	}
+	for key, action := range evidence.actions {
+		link := evidence.links[action.LinkID]
+		if link.Role != auditRoleClass("cdf_elastic_supplier_1") {
+			continue
+		}
+		if action.RequestType != 2 && action.RequestType != 3 {
+			continue
+		}
+		identity := cdfActionKey{clientID: key.ClientID, linkID: action.LinkID, requestID: key.RequestID, requestType: action.RequestType, orderID: action.OrderID}
+		if _, expected := r.expectedActionKeys[identity]; !expected {
+			r.addCheck(CDFLiquidityCheck{Role: link.Role, ClientID: key.ClientID, Failure: "market-data gateway action has no matching supplier decision"})
+		}
 	}
 }
 
@@ -1418,6 +1773,17 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			delete(state.pendingQuoteByRequest, accepted.RequestID)
 		}
 		orderKey := cdfOrderKey{VenueID: event.VenueID, ClientID: event.ClientID, OrderID: accepted.OrderID}
+		requestKey := cdfRequestKey{venueID: event.VenueID, clientID: event.ClientID, requestID: accepted.RequestID}
+		request, requestExists := r.quoteRequests[requestKey]
+		if !requestExists {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "accepted supplier order has no causal submit decision"})
+		} else {
+			if event.SimTS < request.decisionAt {
+				r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier order was accepted before its submit decision"})
+			}
+			request.acceptedAt, request.acceptedOrdinal = event.SimTS, event.Ordinal
+			r.quoteRequests[requestKey] = request
+		}
 		if _, exists := orders[orderKey]; exists {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "duplicate supplier order acceptance"})
 			return
@@ -1446,9 +1812,16 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed supplier order rejection"})
 			return
 		}
-		if _, exists := state.pendingQuoteByRequest[rejected.RequestID]; !exists {
+		requestKey := cdfRequestKey{venueID: event.VenueID, clientID: event.ClientID, requestID: rejected.RequestID}
+		request, requestExists := r.quoteRequests[requestKey]
+		if _, exists := state.pendingQuoteByRequest[rejected.RequestID]; !exists && !requestExists {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier order rejection has no matching local submission"})
-			return
+		} else if requestExists {
+			if event.SimTS < request.decisionAt {
+				r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier order was rejected before its submit decision"})
+			}
+			request.rejectedAt, request.rejectedOrdinal = event.SimTS, event.Ordinal
+			r.quoteRequests[requestKey] = request
 		}
 		delete(state.pendingQuoteByRequest, rejected.RequestID)
 		delete(state.pendingTouchByRequest, rejected.RequestID)
@@ -1501,7 +1874,12 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 		key := cdfOrderKey{VenueID: event.VenueID, ClientID: event.ClientID, OrderID: cancelled.OrderID}
 		order := orders[key]
 		if order == nil {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier cancellation has no accepted order"})
 			return
+		}
+		cancel, cancelExists := r.cancelDecisionByOrder[key]
+		if !cancelExists || cancelled.RequestID != cancel.requestID || event.SimTS < cancel.decisionAt {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier cancellation has no matching local request"})
 		}
 		if order.closed || cancelled.RemainingQty != order.remainingQty {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier cancellation does not reconcile order state"})
@@ -1516,8 +1894,10 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 		}
 		var rejected struct {
 			RequestID uint64 `json:"request_id"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
 		}
-		if err := decodeRequiredJSON(event.Raw(), &rejected, "request_id"); err != nil || rejected.RequestID == 0 {
+		if err := decodeRequiredJSON(event.Raw(), &rejected, "request_id", "success", "error"); err != nil || rejected.RequestID == 0 || rejected.Success || rejected.Error == "" {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed supplier cancellation rejection"})
 			return
 		}
@@ -1533,7 +1913,11 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 				continue
 			}
 			order.cancelRejected, order.cancelRejectedRequestID = true, rejected.RequestID
-			order.cancelRejectedAt, order.cancelRejectedOrdinal = event.SimTS, event.Ordinal
+			order.cancelRejectedAt, order.cancelRejectedOrdinal, order.cancelRejectedReason = event.SimTS, event.Ordinal, rejected.Error
+			cancel, cancelExists := r.cancelDecisionByOrder[key]
+			if !cancelExists || event.SimTS < cancel.decisionAt {
+				r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier cancellation rejection has no matching local request"})
+			}
 			matched = true
 		}
 		if !matched {
@@ -1568,7 +1952,7 @@ func (r *CDFLiquidityRunAudit) validateStaleWithdrawals(orders map[cdfOrderKey]*
 			addFailure("stale withdrawal references a supplier order already closed before the decision")
 		}
 		matchingCancellation := order.cancelled && order.cancelRequestID == withdrawal.cancelRequestID && order.closedAt > withdrawal.decisionAt
-		matchingFillRace := order.filled && order.closedAt > withdrawal.decisionAt && order.cancelRejected && order.cancelRejectedRequestID == withdrawal.cancelRequestID && order.cancelRejectedAt > withdrawal.decisionAt && (order.cancelRejectedAt > order.filledAt || order.cancelRejectedAt == order.filledAt && order.cancelRejectedOrdinal > order.filledOrdinal)
+		matchingFillRace := order.filled && order.closedAt > withdrawal.decisionAt && order.cancelRejected && order.cancelRejectedRequestID == withdrawal.cancelRequestID && order.cancelRejectedReason == "ORDER_ALREADY_FILLED" && order.cancelRejectedAt > withdrawal.decisionAt && (order.cancelRejectedAt > order.filledAt || order.cancelRejectedAt == order.filledAt && order.cancelRejectedOrdinal > order.filledOrdinal)
 		if !matchingCancellation && !matchingFillRace {
 			addFailure("stale withdrawal has no later matching exchange cancellation outcome")
 		}

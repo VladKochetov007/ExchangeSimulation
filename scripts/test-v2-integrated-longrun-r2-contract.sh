@@ -44,14 +44,25 @@ expect_failure v2_r2_require_current_source_revision "$matching_revision" "$matc
 	"fedcba9876543210fedcba9876543210fedcba98"
 
 checkpoint_fixture="$tmp_root/exact-terminal-checkpoints.jsonl"
+checkpoint_hash_a=$(printf 'a%.0s' {1..64})
+checkpoint_hash_b=$(printf 'b%.0s' {1..64})
 printf '%s\n' \
-	'{"domain":"execution_observations","ordering":"ordered_stream","sim_time":5,"event_count":1,"execution_stream_hash":"aaa"}' \
-	'{"domain":"execution_observations","ordering":"ordered_stream","sim_time":10,"event_count":2,"execution_stream_hash":"bbb"}' \
-	'{"domain":"execution_observations","ordering":"ordered_stream","sim_time":10,"event_count":2,"execution_stream_hash":"bbb","final":true}' \
+	"{\"domain\":\"execution_observations\",\"ordering\":\"ordered_stream\",\"sim_time\":5,\"event_count\":1,\"execution_stream_hash\":\"$checkpoint_hash_a\"}" \
+	"{\"domain\":\"execution_observations\",\"ordering\":\"ordered_stream\",\"sim_time\":10,\"event_count\":2,\"execution_stream_hash\":\"$checkpoint_hash_b\"}" \
+	"{\"domain\":\"execution_observations\",\"ordering\":\"ordered_stream\",\"sim_time\":10,\"event_count\":2,\"execution_stream_hash\":\"$checkpoint_hash_b\",\"final\":true}" \
 	>"$checkpoint_fixture"
 v2_r2_require_checkpoint_stream "$checkpoint_fixture" 0 10 || fail "exact-terminal final checkpoint was rejected"
 jq '.final = true | .execution_stream_hash = "tampered"' "$checkpoint_fixture" >"$tmp_root/tampered-checkpoints.jsonl"
 expect_failure v2_r2_require_checkpoint_stream "$tmp_root/tampered-checkpoints.jsonl" 0 10
+jq '.execution_stream_hash = 1' "$checkpoint_fixture" >"$tmp_root/non-string-hash-checkpoints.jsonl"
+expect_failure v2_r2_require_checkpoint_stream "$tmp_root/non-string-hash-checkpoints.jsonl" 0 10
+printf '%s\n' \
+	"{\"domain\":\"execution_observations\",\"ordering\":\"ordered_stream\",\"sim_time\":5,\"event_count\":1,\"execution_stream_hash\":\"$checkpoint_hash_a\"}" \
+	"{\"domain\":\"execution_observations\",\"ordering\":\"ordered_stream\",\"sim_time\":10,\"event_count\":2,\"execution_stream_hash\":\"$checkpoint_hash_b\"}" \
+	"{\"domain\":\"execution_observations\",\"ordering\":\"ordered_stream\",\"sim_time\":10,\"event_count\":3,\"execution_stream_hash\":\"$checkpoint_hash_b\"}" \
+	"{\"domain\":\"execution_observations\",\"ordering\":\"ordered_stream\",\"sim_time\":10,\"event_count\":3,\"execution_stream_hash\":\"$checkpoint_hash_b\",\"final\":true}" \
+	>"$tmp_root/repeated-terminal-checkpoints.jsonl"
+expect_failure v2_r2_require_checkpoint_stream "$tmp_root/repeated-terminal-checkpoints.jsonl" 0 10
 printf '%s\n' \
 	'{"domain":"execution_observations","ordering":"ordered_stream","sim_time":5,"event_count":1,"execution_stream_hash":"aaa"}' \
 	'{"domain":"execution_observations","ordering":"ordered_stream","sim_time":5,"event_count":1,"execution_stream_hash":"aaa","final":true}' \

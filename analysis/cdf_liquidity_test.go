@@ -74,7 +74,7 @@ func TestMeasureCDFLiquiditySeparatesCancelPendingFromLiveQuotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	withoutCancellation := strings.Replace(string(raw), cdfFixtureLine(6, 2, "OrderCancelled", `{"order_id":8,"request_id":2,"remaining_qty":4}`)+"\n", "", 1)
+	withoutCancellation := strings.Replace(string(raw), cdfFixtureLine(6, 2, "OrderCancelled", `{"order_id":8,"request_id":3,"remaining_qty":4}`)+"\n", "", 1)
 	if withoutCancellation == string(raw) {
 		t.Fatal("fixture cancellation was not found")
 	}
@@ -134,6 +134,40 @@ func TestCompareCDFLiquidityRunsRejectsInactiveTreatment(t *testing.T) {
 	}
 	if audit.Valid || !hasCDFCheck(audit.Checks, "supplier activation contract is incomplete") {
 		t.Fatalf("inactive treatment audit = %+v, want fail-closed activation rejection", audit)
+	}
+}
+
+func TestCompareCDFLiquidityRunsRejectsUnpairedProvenance(t *testing.T) {
+	treatment := writeCDFLiquidityFixture(t, true, false)
+	control := writeCDFLiquidityFixture(t, false, false)
+	metadataPath := filepath.Join(control.Dir, "run-metadata.json")
+	raw, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(raw), `"seed":607`, `"seed":608`, 1)
+	if mutated == string(raw) {
+		t.Fatal("control seed metadata was not found")
+	}
+	if err := os.WriteFile(metadataPath, []byte(mutated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CompareCDFLiquidityRuns(treatment, control); err == nil || !strings.Contains(err.Error(), "control provenance") {
+		t.Fatalf("unpaired provenance was accepted: %v", err)
+	}
+}
+
+func TestCDFReceiptActionsRejectOrphanSupplierAction(t *testing.T) {
+	audit := &CDFLiquidityRunAudit{expectedActionKeys: make(map[cdfActionKey]struct{})}
+	evidence := &cdfMarketDataEvidence{
+		links: map[uint32]cdfReceiptLink{1: {ID: 1, SourceVenue: "north", Link: "north/cdf_elastic_supplier", Role: "cdf_elastic_supplier"}},
+		actions: map[cdfReceiptActionKey]cdfMarketDataActionRecord{
+			{ClientID: 2, LinkID: 1, RequestID: 99}: {ClientID: 2, LinkID: 1, RequestID: 99, RequestType: 2},
+		},
+	}
+	audit.validateReceiptActions(evidence)
+	if !hasCDFCheck(audit.Checks, "market-data gateway action has no matching supplier decision") {
+		t.Fatalf("orphan supplier action was accepted: %+v", audit.Checks)
 	}
 }
 
@@ -434,6 +468,91 @@ func TestMeasureCDFLiquidityRejectsReorderedFillCancelRace(t *testing.T) {
 	}
 }
 
+func TestMeasureCDFLiquidityRejectsCancellationIdentityMismatch(t *testing.T) {
+	run := writeCDFLiquidityFixture(t, true, false)
+	bookPath := filepath.Join(run.Dir, "venues", "north", "spot", "CDF-USD.jsonl")
+	raw, err := os.ReadFile(bookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(raw), `"request_id":3,"remaining_qty":4`, `"request_id":2,"remaining_qty":4`, 1)
+	if mutated == string(raw) {
+		t.Fatal("fixture cancellation request was not found")
+	}
+	if err := os.WriteFile(bookPath, []byte(mutated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.Valid || !hasCDFCheck(audit.Checks, "supplier cancellation has no matching local request") {
+		t.Fatalf("cancellation identity mutation audit = %+v", audit)
+	}
+}
+
+func TestMeasureCDFLiquidityRejectsWaitAfterOrderRejection(t *testing.T) {
+	run := writeCDFLiquidityFixture(t, true, false)
+	generalPath := filepath.Join(run.Dir, "venues", "north", "general.jsonl")
+	general, err := os.ReadFile(generalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldCancel := cdfFixtureLine(6, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":6,"observation_time":1,"observation_age":5,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"cancel","reason":"reprice_for_inventory_or_touch","quote_order_id":8,"cancel_request_id":3}`) + "\n"
+	wait := cdfFixtureLine(6, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":6,"observation_time":1,"observation_age":5,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"wait","reason":"order_pending","quote_request_id":2}`) + "\n"
+	if !strings.Contains(string(general), oldCancel) {
+		t.Fatal("fixture cancellation decision was not found")
+	}
+	general = []byte(strings.Replace(string(general), oldCancel, wait, 1))
+	bookPath := filepath.Join(run.Dir, "venues", "north", "spot", "CDF-USD.jsonl")
+	book, err := os.ReadFile(bookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldAccepted := cdfFixtureLine(5, 2, "OrderAccepted", `{"order_id":8,"client_id":2,"request_id":2,"side":"BUY","type":"LIMIT","time_in_force":"GTC","post_only":true,"price":99,"qty":4}`) + "\n"
+	if !strings.Contains(string(book), oldAccepted) {
+		t.Fatal("second order acceptance was not found")
+	}
+	book = []byte(strings.Replace(string(book), oldAccepted, "", 1))
+	book = append(book, []byte(cdfFixtureLine(5, 2, "OrderRejected", `{"request_id":2}`)+"\n")...)
+	if err := os.WriteFile(generalPath, general, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bookPath, book, 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.Valid || !hasCDFCheck(audit.Checks, "order-pending wait follows an already rejected order") {
+		t.Fatalf("rejected-order wait audit = %+v", audit)
+	}
+}
+
+func TestMeasureCDFLiquidityRejectsAcceptanceBeforeSubmit(t *testing.T) {
+	run := writeCDFLiquidityFixture(t, true, false)
+	bookPath := filepath.Join(run.Dir, "venues", "north", "spot", "CDF-USD.jsonl")
+	raw, err := os.ReadFile(bookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(raw), `"sim_ts":2`, `"sim_ts":0`, 1)
+	if mutated == string(raw) {
+		t.Fatal("fixture acceptance timestamp was not found")
+	}
+	if err := os.WriteFile(bookPath, []byte(mutated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.Valid || !hasCDFCheck(audit.Checks, "supplier order was accepted before its submit decision") {
+		t.Fatalf("early acceptance audit = %+v", audit)
+	}
+}
+
 func TestUpdateSupplierPnLHandlesPartialClosureReversalAndFees(t *testing.T) {
 	state := &CDFLiquiditySupplierAudit{configuredBasePrecision: 1, configuredQuoteAsset: "USD"}
 	fills := []cdfFillEvidence{
@@ -593,6 +712,7 @@ func TestMeasureCDFLiquidityConservesNonzeroQuoteFee(t *testing.T) {
 	if err := os.WriteFile(manifestPath, []byte(manifestMutated), 0644); err != nil {
 		t.Fatal(err)
 	}
+	syncCDFFixtureProvenance(t, run.Dir)
 	greeksPath := filepath.Join(run.Dir, "greeks.json")
 	greeks, err := os.ReadFile(greeksPath)
 	if err != nil {
@@ -740,6 +860,7 @@ func writeCDFLiquidityReceiptFixture(t *testing.T) *Run {
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0644); err != nil {
 		t.Fatal(err)
 	}
+	syncCDFFixtureProvenance(t, run.Dir)
 	recorder, err := simulation.NewMarketDataReceiptRecorder(run.Dir)
 	if err != nil {
 		t.Fatal(err)
@@ -831,7 +952,7 @@ func writeCDFLiquidityFullFillCancelRaceFixture(t *testing.T) *Run {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldCancellation := cdfFixtureLine(6, 2, "OrderCancelled", `{"order_id":8,"request_id":2,"remaining_qty":4}`) + "\n"
+	oldCancellation := cdfFixtureLine(6, 2, "OrderCancelled", `{"order_id":8,"request_id":3,"remaining_qty":4}`) + "\n"
 	if !strings.Contains(string(book), oldCancellation) {
 		t.Fatal("fixture cancellation was not found")
 	}
@@ -872,11 +993,25 @@ func writeCDFLiquidityFixture(t *testing.T, supplier, malformedFill bool) *Run {
 	if err := os.WriteFile(filepath.Join(dir, "greeks.json"), []byte(greeks), 0644); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"config":{"elastic_supplier_count":1,"record_market_data_receipts":false,"elastic_liquidity_suppliers":[]}}`
+	config := `{"venue_ids":["north"],"seed":607,"step":1,"log_mode":"full","evidence_format":"jsonl","experiment_id":"cdf-fixture-control","hypothesis_id":"V2-R2-SV1-CDF-LIQUIDITY","elastic_supplier_count":1,"record_market_data_receipts":false,"elastic_liquidity_suppliers":[]}`
 	if supplier {
-		manifest = `{"config":{"elastic_supplier_count":1,"record_market_data_receipts":false,"elastic_liquidity_suppliers":[{"role":"cdf_elastic_supplier_1","symbol":"CDF/USD","base_asset":"CDF","quote_asset":"USD","base_precision":1,"quote_precision":1,"initial_base_balance":100,"initial_quote_balance":1000,"max_position":10,"max_inventory":110,"max_quote_qty":5,"max_observation_age":10}]}}`
+		config = `{"venue_ids":["north"],"seed":607,"step":1,"log_mode":"full","evidence_format":"jsonl","experiment_id":"cdf-fixture-treatment","hypothesis_id":"V2-R2-SV1-CDF-LIQUIDITY","elastic_supplier_count":1,"record_market_data_receipts":false,"elastic_liquidity_suppliers":[{"role":"cdf_elastic_supplier_1","symbol":"CDF/USD","base_asset":"CDF","quote_asset":"USD","base_precision":1,"quote_precision":1,"initial_base_balance":100,"initial_quote_balance":1000,"max_position":10,"max_inventory":110,"max_quote_qty":5,"max_observation_age":10}]}`
 	}
+	manifest := `{"venue_ids":["north"],"build":{"revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","modified":false},"config":` + config + `}`
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+	configDigest := sha256.Sum256([]byte(config))
+	metadata := fmt.Sprintf(`{"seed":607,"simulated_horizon":"fixture","simulation_start_nano":1,"simulation_end_nano":6,"config_sha256":"%x","binary_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","git_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config_experiment_id":%q,"hypothesis_id":"V2-R2-SV1-CDF-LIQUIDITY","log_mode":"full","evidence_format":"jsonl"}`, configDigest, func() string {
+		if supplier {
+			return "cdf-fixture-treatment"
+		}
+		return "cdf-fixture-control"
+	}())
+	if err := os.WriteFile(filepath.Join(dir, "run-config.json"), []byte(config), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "run-metadata.json"), []byte(metadata), 0644); err != nil {
 		t.Fatal(err)
 	}
 	venueDir := filepath.Join(dir, "venues", "north", "spot")
@@ -893,7 +1028,7 @@ func writeCDFLiquidityFixture(t *testing.T, supplier, malformedFill bool) *Run {
 	book += cdfFixtureLine(3, 2, "OrderFill", `{"order_id":7,"trade_id":1,"side":"BUY","price":99,"qty":5,"filled_qty":5,"remaining_qty":0,"is_full":true}`) + "\n"
 	book += cdfFixtureLine(4, 0, "Trade", `{"trade_id":2,"price":99,"qty":20,"side":"SELL","taker_order_id":10}`) + "\n"
 	book += cdfFixtureLine(5, 2, "OrderAccepted", `{"order_id":8,"client_id":2,"request_id":2,"side":"BUY","type":"LIMIT","time_in_force":"GTC","post_only":true,"price":99,"qty":4}`) + "\n"
-	book += cdfFixtureLine(6, 2, "OrderCancelled", `{"order_id":8,"request_id":2,"remaining_qty":4}`) + "\n"
+	book += cdfFixtureLine(6, 2, "OrderCancelled", `{"order_id":8,"request_id":3,"remaining_qty":4}`) + "\n"
 	if err := os.WriteFile(filepath.Join(venueDir, "CDF-USD.jsonl"), []byte(book), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -902,6 +1037,41 @@ func writeCDFLiquidityFixture(t *testing.T, supplier, malformedFill bool) *Run {
 		t.Fatal(err)
 	}
 	return run
+}
+
+func syncCDFFixtureProvenance(t *testing.T, dir string) {
+	t.Helper()
+	manifestRaw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Config json.RawMessage `json:"config"`
+	}
+	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "run-config.json"), manifest.Config, 0644); err != nil {
+		t.Fatal(err)
+	}
+	configDigest := sha256.Sum256(manifest.Config)
+	metadataPath := filepath.Join(dir, "run-metadata.json")
+	metadataRaw, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	metadata["config_sha256"] = fmt.Sprintf("%x", configDigest)
+	updated, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metadataPath, append(updated, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func cdfFixtureLine(sequence uint64, clientID uint64, event, payload string) string {
