@@ -50,6 +50,7 @@ minimum_free_bytes=$(jq -er '.minimum_free_bytes | select(type == "number")' "$a
 	fail "capacity attestation has no minimum-free reserve"
 probe_root=$(jq -er '.probe_root | select(type == "string")' "$attestation") ||
 	fail "capacity attestation has no probe root"
+[[ -d "$probe_root" && ! -L "$probe_root" ]] || fail "capacity probe root is missing or symlinked"
 probe_root=$(realpath -e -- "$probe_root") || fail "capacity probe root is not present: $probe_root"
 case "$probe_root" in
 	"$capacity_parent"/v2-r2-sv1-24h-capacity-*) ;;
