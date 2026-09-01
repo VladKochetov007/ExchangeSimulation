@@ -351,3 +351,53 @@ The remediation decision is to reproduce each invariant on the scientific
 tree, add fail-closed regressions, and make minimal attributable fixes before
 another narrow development stress probe. The historical R2 predecessor remains
 archived as a negative control and is not rewritten.
+
+## Review-remediation checkpoint — 2d91202
+
+The exact scientific successor tree is now `2d91202` (`fix: close CDF
+successor review gaps`). The implementation preserves the R2 calendar and
+finite-supplier economics and addresses the independent review's concrete
+evidence and accounting blockers:
+
+* schedule, receipt, and decision sidecars now carry one shared event ordinal;
+  the extractor rejects duplicate, out-of-order, missing, and non-contiguous
+  ordinals and requires every schedule due by terminal time to have a receipt;
+* an authentic stale-data withdrawal is admitted only when the decision proves
+  the registered age bound was exceeded and the actor's declared withdrawal
+  reason is exact; other over-age decisions still fail closed;
+* supplier depth uses the observed left-continuous book state on each interval,
+  including transitions to an empty book and the terminal interval;
+* binary evidence carries both the normalized economic execution identity and
+  a raw canonical reconstruction identity; the renderer rejects a valid-CRC
+  route-sequence mutation that preserves the normalized digest;
+* closing writes an explicit final checkpoint even when the last ordinary
+  checkpoint has the same timestamp as the completed stream;
+* fixed-point supplier PnL now retains entry price through partial close,
+  handles reversal at the correct boundary, and includes quote fees; the
+  actor admits buy quotes only within finite pre-trade quote-cash headroom.
+
+Regression coverage includes the due-without-receipt, post-terminal schedule,
+global ordinal-gap, authentic stale-withdrawal, fixed-point reversal/fee,
+finite quote-cash, sequence-swap, raw-versus-projected hash, and final
+checkpoint cases.
+
+The clean committed mechanical gate passed at this revision:
+
+* `GOMAXPROCS=4 make test`, including all Go packages, both integrated
+  long-run contract suites, both archive suites, and R2 parity/archive
+  regressions;
+* `GOMAXPROCS=4 go vet ./...`;
+* targeted race coverage for `evstream`, `analysis`, and the changed
+  multivenue CDF/binary/render/checkpoint paths;
+* the explicit fresh-process binary evidence determinism/neutrality matrix.
+
+The performance branch was fetched at this semantic checkpoint and still had
+no revision newer than reviewed `c4434ad`; no performance implementation was
+merged. No registered development cell or holdout was run.
+
+A fresh independent Sol-xhigh review of exact `2d91202` is pending. The
+earlier ordinary five-minute probe remains evidence-neutral but did not
+activate stale or one-sided withdrawal, so the next scientific probe must be a
+separate development-only stress configuration that exercises that lifecycle
+through the real delayed gateway and extractor. This checkpoint is not freeze
+authorization and does not support a 24-hour survival claim.
