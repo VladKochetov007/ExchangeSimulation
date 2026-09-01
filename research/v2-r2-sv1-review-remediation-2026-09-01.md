@@ -423,3 +423,44 @@ reserve binding and mismatch rejection. `bash -n`, SV1 config validation,
 successor binary has been built and no capacity probe, registered cell,
 freeze, or holdout is authorized until a fresh independent Sol-xhigh review
 accepts this exact tree.
+
+## Fresh setup rejection — 52d2f38
+
+Fermat independently reviewed exact `52d2f38d4944b269e7bb834dd40bb50dc3fdec27`
+and rejected the narrow rebuild/capacity gate. The prior root, provenance, and
+minimum-free fixes were accepted. Four additional fail-closed issues remained:
+the capacity measurement stopped before the retained evidence manifest and
+attestation were written; the shared verifier did not bind the retained probe
+root, evidence-manifest digest, or reserve samples; an error or wrapper signal
+could leave the simulator running, and reserve-abort termination had no
+escalation; and the capacity probe did not acquire the SV1 namespace lock, so
+two probes could race toward the shared attestation. The reviewer also noted
+that the existing fixture did not exercise those control-plane paths.
+
+No rebuild, capacity probe, registered cell, freeze action, or holdout access
+was authorized. No cell or holdout was run.
+
+## Retained-capacity and supervision remediation — 6d53a85
+
+Commit `6d53a85941c74ec5c08963431155069876dcd1af` closes those four setup
+issues. The probe acquires the SV1 namespace lock before work, installs EXIT
+and signal cleanup traps, supervises the simulator with TERM followed by
+bounded escalation to KILL, and guards both output-size and free-space
+measurements. It measures retained output and free space again after all
+required evidence files and the evidence manifest are written, before building
+the capacity claim. The temporary attestation is validated before publication
+and the published attestation is validated again.
+
+The shared verifier now binds SV1 attestations to a canonical retained probe
+root, the `treatment-607` retained evidence set, its evidence-manifest SHA-256,
+numeric initial/final free-space samples, and the 4 GiB reserve. Contract tests
+cover retained-manifest deletion, direct/symlinked repository-root rejection,
+lock contention, the former unbound-variable path, and required supervision /
+postprocessing guards. The clean `GOMAXPROCS=4 make test`,
+`GOMAXPROCS=4 go vet ./...`, shell syntax, SV1 config provenance, and diff
+checks pass on `6d53a85`; the commit is pushed.
+
+This remains a setup-only remediation. A fresh independent Sol-xhigh review of
+the exact `6d53a85` tree is required before the pinned Go 1.27 build or any
+capacity probe. No registered cell, freeze authorization, or holdout access is
+authorized.
