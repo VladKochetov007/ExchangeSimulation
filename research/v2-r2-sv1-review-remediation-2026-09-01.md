@@ -565,3 +565,30 @@ launch artifacts. The source HEAD must be rebuilt after this record is
 committed so the capacity attestation and every later runner provenance field
 bind to the final documented revision. No capacity probe, development cell,
 freeze action, or holdout access has occurred.
+
+## Capacity probe result — dbbac47 / retained failure
+
+The first full SV1 capacity measurement was launched only after the exact-tree
+review and clean Go 1.27 rebuild. It used `treatment-607`, `evstream_v3`,
+`GOMAXPROCS=4`, and the canonical external root
+`/home/vlad/external-scratch/v2-r2-sv1-24h-capacity-dbbac47c0b8f3496425fdbcac9598d3dae7992e5`.
+The simulator was terminated by the probe at 19:09 wall time with status 143
+when final free space was `4,261,502,976` bytes, below the required
+`4,294,967,296`-byte reserve. The retained partial output measured
+`21,169,232,941` bytes; no capacity attestation was published and the run did
+not produce a completed 24-hour cell.
+
+The partial output remains untouched for audit and contains the probe metadata,
+the partial `events.evs` stream, market-data streams, checkpoints, and
+provenance files. It is a failed capacity measurement, not a scientific
+outcome, and cannot authorize any SV1 cell. No simulator cell, freeze action,
+or holdout was run or read. The failure is attributable to host capacity under
+the current `evstream_v3` contract; it is not evidence against the CDF
+mechanism.
+
+After termination, only the regenerable Go build/test cache was cleaned,
+recovering approximately 5.6 GiB. The incomplete derivative-proxy tree, all
+historical R2/R5 evidence, and the failed capacity output were preserved.
+The next capacity attempt must use a fresh root and a binary rebuilt from the
+final documented source revision; the reserve and measured-output floor must
+not be lowered.
