@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "contract": "v2-r2-sv1-24h-config-provenance-v1",
+  "source_configs": {
+    "dev-607.json": "3fef36431a1a62d5a9b59aeda96798bff033cba8dac88fdebe2c30a73183e7bd",
+    "dev-613.json": "e5134fc9d4af3ab07326ea5bdc5639a965740e5e002bea989980e249108ef253",
+    "dev-617.json": "7d990c4aee55ee2d76b7041001f3fba89819635dec0d0f92c58385850a2de0fa",
+    "dev-607-none.json": "6bddbcdec865ef26e23f169c8f7981a01e026220193986eed553a5637427f6be"
+  },
+  "activation_roster": {
+    "path": "research/configs/v2-r2-sv1/activation-607.json",
+    "sha256": "1c9f1094b2b8619e3ad7965547dc34bf9ee9e134bc349a1f5deaaeb644cf94ff"
+  },
+  "registered_configs": {
+    "control-607-none.json": "9f9e363a6d434003cab9c223e039fd7e850d394e01ed1d52cdcc386210f9ee1d",
+    "control-607.json": "b0c51e32a5811adc60af4bf4def5d521cb94a32ed93a3d22f892daff73fe914d",
+    "control-613.json": "2dd09a40f466b49f36fd6eafe3d91141b0ba3cab16fe237afca76e171de83bc0",
+    "control-617.json": "9347be95ae776f698895e0051bba386bff1d8024b795c0eec8c3e2c13bf6878c",
+    "treatment-607.json": "0e267d1e737ed232564651b8f9e65b137d3f4ddb59235e826633f4b972ae35ae",
+    "treatment-613.json": "aec261dbe10407fe49bdd9ae1b5e4b3c58c85990050f76ceff75f146c2ffcc1c",
+    "treatment-617.json": "f9df3afd4d8e5ffe8a6828d2f7e98ad3d2c7eaf32eda3fce0b11041ce71ec8f2"
+  }
+}

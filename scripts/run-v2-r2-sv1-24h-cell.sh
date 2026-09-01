@@ -40,6 +40,7 @@ v2_r2_acquire_namespace_lock || {
 	exit 1
 }
 config="$root_dir/research/configs/v2-r2-sv1-24h/$config_name"
+config_provenance_manifest="$root_dir/research/v2-r2-sv1-24h-config-provenance.json"
 output_root="$v2_r2_output_root"
 output="$output_root/$cell"
 binary=${2:-"$root_dir/bin/multivenue"}
@@ -50,7 +51,7 @@ simulation_start_nano=1735689600000000000
 simulation_end_nano=1735776000000000000
 head_revision=$(git -C "$root_dir" rev-parse HEAD)
 
-[[ -s "$config" && -x "$binary" && -x "$prunegate_binary" ]] || {
+[[ -s "$config" && -s "$config_provenance_manifest" && -x "$binary" && -x "$prunegate_binary" ]] || {
 	echo "missing SV1 long-run config or executable: $config / $binary / $prunegate_binary" >&2
 	exit 1
 }
@@ -126,11 +127,13 @@ v2_r2_is_go_127 "$prunegate_go_version" || {
 
 log_mode=$(jq -er '.log_mode' "$config")
 evidence_format=$(jq -er '.evidence_format' "$config")
+config_sha256=$(sha256sum "$config" | awk '{print $1}')
+config_provenance_sha256=$(sha256sum "$config_provenance_manifest" | awk '{print $1}')
 [[ "$evidence_format" == "evstream_v3" ]] || {
 	echo "registered successor cell requires evstream_v3 evidence (got $evidence_format)" >&2
 	exit 1
 }
-v2_r2_require_binary_capacity_attestation "$binary" "$sim_revision" || {
+v2_r2_require_binary_capacity_attestation "$binary" "$sim_revision" "" "$config_sha256" 4 || {
 	echo "refusing long-run launch without a matching measured binary-evidence capacity attestation" >&2
 	exit 1
 }
@@ -145,7 +148,6 @@ cmp -s "$config" "$output/run-config.json" || {
 	echo "registered config is not already the simulator's normalized effective config: $cell" >&2
 	exit 1
 }
-config_sha256=$(sha256sum "$config" | awk '{print $1}')
 binary_sha256=$(sha256sum "$binary" | awk '{print $1}')
 jq -n \
 	--arg cell "$cell" \
@@ -156,6 +158,8 @@ jq -n \
 	--arg log_mode "$log_mode" \
 	--arg evidence_format "$evidence_format" \
 	--arg config_sha256 "$config_sha256" \
+	--arg config_provenance_manifest "$config_provenance_manifest" \
+	--arg config_provenance_sha256 "$config_provenance_sha256" \
 	--arg binary_sha256 "$binary_sha256" \
 	--arg git_revision "$sim_revision" \
 	--arg go_version "$(go version)" \
@@ -190,6 +194,8 @@ jq -n \
 		  simulated_horizon: $horizon, log_mode: $log_mode, evidence_format: $evidence_format,
 		  simulation_start_nano: $simulation_start_nano, simulation_end_nano: $simulation_end_nano,
 		  config_sha256: $config_sha256, binary_sha256: $binary_sha256,
+		  config_provenance_manifest: $config_provenance_manifest,
+		  config_provenance_sha256: $config_provenance_sha256,
 		  config_path: $config_path, binary_path: $binary_path,
 		  prunegate_path: $prunegate_path, prunegate_sha256: $prunegate_sha256,
 		  prunegate_vcs_revision: $prunegate_vcs_revision,

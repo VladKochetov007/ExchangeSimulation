@@ -7,10 +7,11 @@ set -euo pipefail
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source "$root_dir/scripts/v2-r2-sv1-24h-contract.sh"
 head_revision=$(git -C "$root_dir" rev-parse HEAD)
+scientific_root=$(realpath -e -- "$root_dir")
 
 binary=${1:-"$root_dir/bin/multivenue"}
 config="$root_dir/research/configs/v2-r2-sv1-24h/treatment-607.json"
-probe_root=${V2_R2_SV1_CAPACITY_ROOT:-"/home/vlad/external-scratch/v2-r2-sv1-24h-capacity-$head_revision"}
+probe_root_requested=${V2_R2_SV1_CAPACITY_ROOT:-"/home/vlad/external-scratch/v2-r2-sv1-24h-capacity-$head_revision"}
 attestation=$(v2_r2_capacity_attestation_path)
 probe_dir="$probe_root/treatment-607"
 horizon=24h
@@ -18,6 +19,7 @@ simulation_start_nano=1735689600000000000
 simulation_end_nano=1735776000000000000
 safety_margin_bytes=$((4 * 1024 * 1024 * 1024))
 minimum_free_bytes=$((4 * 1024 * 1024 * 1024))
+expected_gomaxprocs=4
 
 fail() {
 	echo "SV1 capacity probe failure: $*" >&2
@@ -26,6 +28,7 @@ fail() {
 
 [[ -x "$binary" && -s "$config" ]] || fail "missing binary or treatment config"
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "scientific worktree is dirty"
+[[ "${GOMAXPROCS:-}" == "$expected_gomaxprocs" ]] || fail "capacity probe requires GOMAXPROCS=$expected_gomaxprocs"
 binary_revision=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
 binary_modified=$(go version -m "$binary" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
 binary_trimpath=$(go version -m "$binary" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
@@ -38,10 +41,16 @@ binary_go_version=$(v2_r2_binary_go_version "$binary")
 [[ "$binary_goos" == linux && "$binary_goarch" == amd64 && "$binary_goamd64" == v1 ]] || fail "binary target is not linux/amd64/v1"
 v2_r2_is_go_127 "$binary_go_version" || fail "binary is not Go 1.27: $binary_go_version"
 "$root_dir/scripts/check-v2-r2-sv1-24h-configs.sh" >/dev/null
-[[ ! -e "$probe_root" && ! -L "$probe_root" ]] || fail "capacity probe root already exists: $probe_root"
+[[ "$probe_root_requested" == /* && "$probe_root_requested" != */ && "$probe_root_requested" != *$'\n'* && "$probe_root_requested" != *$'\t'* ]] || fail "capacity root must be an absolute, non-empty path"
+probe_root=$(realpath -m -- "$probe_root_requested") || fail "could not resolve capacity probe root"
+case "$probe_root" in
+	"$scientific_root"|"$scientific_root"/*) fail "capacity root resolves inside the scientific repository" ;;
+esac
+[[ ! -e "$probe_root_requested" && ! -L "$probe_root_requested" ]] || fail "capacity probe root already exists: $probe_root_requested"
 [[ ! -e "$attestation" && ! -L "$attestation" ]] || fail "capacity attestation already exists: $attestation"
-[[ "$probe_root" == /* && "$probe_root" != "$root_dir" && "$probe_root" != "$root_dir"/* ]] || fail "capacity root is inside the scientific repository"
 mkdir -p -- "$probe_root"
+[[ "$(realpath -e -- "$probe_root")" == "$probe_root" ]] || fail "capacity probe root canonicalization changed after creation"
+probe_dir="$probe_root/treatment-607"
 mkdir -- "$probe_dir"
 
 "$binary" -config "$config" -logdir "$probe_dir" -write-effective-config "$probe_dir/run-config.json" >/dev/null 2>"$probe_root/config.stderr.log" || fail "effective-config validation failed"
@@ -49,8 +58,8 @@ cmp -s "$config" "$probe_dir/run-config.json" || fail "registered config is not 
 config_sha256=$(sha256sum "$probe_dir/run-config.json" | awk '{print $1}')
 binary_sha256=$(sha256sum "$binary" | awk '{print $1}')
 jq -n --arg git_revision "$head_revision" --arg binary_sha256 "$binary_sha256" --arg config_sha256 "$config_sha256" \
-	--arg binary_go_version "$binary_go_version" --argjson seed 607 --arg horizon "$horizon" \
-	'{schema_version:1,contract:"v2-r2-sv1-24h-capacity-probe-v1",git_revision:$git_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,binary_go_version:$binary_go_version,seed:$seed,simulated_horizon:$horizon,evidence_format:"evstream_v3"}' >"$probe_dir/run-metadata.json"
+	--arg binary_go_version "$binary_go_version" --argjson seed 607 --arg horizon "$horizon" --argjson gomaxprocs "$expected_gomaxprocs" \
+	'{schema_version:1,contract:"v2-r2-sv1-24h-capacity-probe-v1",git_revision:$git_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,binary_go_version:$binary_go_version,gomaxprocs:$gomaxprocs,seed:$seed,simulated_horizon:$horizon,evidence_format:"evstream_v3"}' >"$probe_dir/run-metadata.json"
 
 stdout_log="$probe_root/simulator.stdout.log"
 stderr_log="$probe_root/simulator.stderr.log"
@@ -102,7 +111,7 @@ mkdir -p -- "$(dirname -- "$attestation")"
 jq -n --arg source_revision "$head_revision" --arg binary_sha256 "$binary_sha256" \
 	--arg config_sha256 "$config_sha256" --arg probe_root "$probe_root" --arg peak_at "$peak_at" \
 	--argjson peak_output_bytes "$peak_output_bytes" --argjson safety_margin_bytes "$safety_margin_bytes" \
-	--argjson required_free_bytes "$required_free_bytes" --argjson available_free_bytes "$available_free_bytes" \
-	'{schema_version:1,contract:"v2-integrated-longrun-r2-binary-capacity-v1",measurement:"full_24h_binary_evidence_capacity_probe",evidence_format:"evstream_v3",source_revision:$source_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,probe_root:$probe_root,peak_output_bytes:$peak_output_bytes,safety_margin_bytes:$safety_margin_bytes,required_free_bytes:$required_free_bytes,available_free_bytes:$available_free_bytes,peak_observed_at:$peak_at}' >"$attestation_tmp"
+	--argjson required_free_bytes "$required_free_bytes" --argjson available_free_bytes "$available_free_bytes" --argjson gomaxprocs "$expected_gomaxprocs" \
+	'{schema_version:1,contract:"v2-integrated-longrun-r2-binary-capacity-v1",measurement:"full_24h_binary_evidence_capacity_probe",evidence_format:"evstream_v3",source_revision:$source_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,gomaxprocs:$gomaxprocs,probe_root:$probe_root,peak_output_bytes:$peak_output_bytes,safety_margin_bytes:$safety_margin_bytes,required_free_bytes:$required_free_bytes,available_free_bytes:$available_free_bytes,peak_observed_at:$peak_at}' >"$attestation_tmp"
 mv -- "$attestation_tmp" "$attestation"
 echo "completed SV1 24-hour binary capacity probe: root=$probe_root peak_bytes=$peak_output_bytes required_free_bytes=$required_free_bytes"
