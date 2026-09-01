@@ -5,7 +5,16 @@ set -euo pipefail
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 tmp_root=$(mktemp -d)
-trap 'rm -rf -- "$tmp_root"' EXIT
+sv1_lock_path=/home/vlad/v2-r2-sv1-24h-development.lock
+sv1_lock_created=false
+sv1_lock_fd=""
+cleanup_sv1_lock() {
+	if [[ "$sv1_lock_created" == true ]]; then
+		flock -u "$sv1_lock_fd" 2>/dev/null || true
+		unlink -- "$sv1_lock_path" 2>/dev/null || true
+	fi
+}
+trap 'cleanup_sv1_lock; rm -rf -- "$tmp_root"' EXIT
 
 fail() {
 	printf 'integrated long-run R2 contract test failure: %s\n' "$*" >&2
@@ -84,6 +93,28 @@ jq -n --arg source_revision "$matching_revision" --arg binary_sha256 "$capacity_
 	 required_free_bytes: 2147483649}' >"$capacity_probe_attestation"
 v2_r2_require_binary_capacity_attestation "$capacity_probe_binary" "$matching_revision" "$capacity_probe_attestation" ||
 	fail "a valid binary capacity attestation was rejected"
+
+capacity_retained_cell="$tmp_root/retained-capacity/treatment-607"
+mkdir -p "$capacity_retained_cell/venues"
+jq -n '{log_mode: "full", evidence_format: "evstream_v3", record_market_data_receipts: false}' \
+	>"$capacity_retained_cell/run-config.json"
+jq -n --arg revision "$matching_revision" '{git_revision: $revision}' >"$capacity_retained_cell/run-metadata.json"
+for retained_json in manifest.json greeks.json latency.json binary-evidence-attestation.json evidence-only-artifact-hash.json; do
+	jq -n '{}' >"$capacity_retained_cell/$retained_json"
+done
+printf '%s\n' '{}' >"$capacity_retained_cell/checkpoints.jsonl"
+printf '%s\n' 'binary-evidence' >"$capacity_retained_cell/events.evs"
+printf '%s\n' '{}' >"$capacity_retained_cell/venues/a.jsonl"
+v2_r2_write_evidence_manifest "$capacity_retained_cell" || fail "could not create retained capacity manifest fixture"
+retained_manifest_sha256=$(sha256sum "$capacity_retained_cell/evidence-manifest.json" | awk '{print $1}')
+jq --arg probe_root "$(dirname -- "$capacity_retained_cell")" --arg evidence_manifest_sha256 "$retained_manifest_sha256" \
+	--argjson initial_available_free_bytes 5000000000 --argjson available_free_bytes 5000000000 \
+	--argjson minimum_free_bytes 4294967296 \
+	'.probe_root = $probe_root | .evidence_manifest_sha256 = $evidence_manifest_sha256 |
+	 .initial_available_free_bytes = $initial_available_free_bytes |
+	 .available_free_bytes = $available_free_bytes | .minimum_free_bytes = $minimum_free_bytes' \
+	"$capacity_probe_attestation" >"$tmp_root/capacity-attestation-bound.json"
+capacity_probe_attestation="$tmp_root/capacity-attestation-bound.json"
 v2_r2_require_binary_capacity_attestation "$capacity_probe_binary" "$matching_revision" \
 	"$capacity_probe_attestation" "config-for-contract-test" 4 4294967296 ||
 	fail "a config/process-bound binary capacity attestation was rejected"
@@ -93,6 +124,10 @@ expect_failure v2_r2_require_binary_capacity_attestation "$capacity_probe_binary
 	"$capacity_probe_attestation" "config-for-contract-test" 8
 expect_failure v2_r2_require_binary_capacity_attestation "$capacity_probe_binary" "$matching_revision" \
 	"$capacity_probe_attestation" "config-for-contract-test" 4 8589934592
+mv "$capacity_retained_cell/evidence-manifest.json" "$tmp_root/evidence-manifest.saved"
+expect_failure v2_r2_require_binary_capacity_attestation "$capacity_probe_binary" "$matching_revision" \
+	"$capacity_probe_attestation" "config-for-contract-test" 4 4294967296
+mv "$tmp_root/evidence-manifest.saved" "$capacity_retained_cell/evidence-manifest.json"
 
 sv1_capacity_probe="$root_dir/scripts/run-v2-r2-sv1-24h-capacity-probe.sh"
 ln -s -- "$root_dir" "$tmp_root/repository-link"
@@ -100,6 +135,20 @@ expect_failure env GOMAXPROCS=4 V2_R2_SV1_CAPACITY_ROOT="$root_dir/research/forb
 	"$sv1_capacity_probe" /bin/true
 expect_failure env GOMAXPROCS=4 V2_R2_SV1_CAPACITY_ROOT="$tmp_root/repository-link/forbidden-capacity-probe" \
 	"$sv1_capacity_probe" /bin/true
+if [[ -e "$sv1_lock_path" || -L "$sv1_lock_path" ]]; then
+	[[ -f "$sv1_lock_path" && ! -L "$sv1_lock_path" ]] || fail "SV1 capacity namespace lock is not a regular file"
+else
+	sv1_lock_created=true
+fi
+exec {sv1_lock_fd}>>"$sv1_lock_path"
+flock -n "$sv1_lock_fd" || fail "could not hold SV1 capacity namespace lock for contention test"
+expect_failure env GOMAXPROCS=4 V2_R2_SV1_CAPACITY_ROOT="$tmp_root/contended-capacity-probe" \
+	"$sv1_capacity_probe" /bin/true
+flock -u "$sv1_lock_fd"
+if [[ "$sv1_lock_created" == true ]]; then
+	unlink -- "$sv1_lock_path"
+	sv1_lock_created=false
+fi
 capacity_preflight_error="$tmp_root/capacity-preflight-error"
 if env GOMAXPROCS=4 V2_R2_SV1_CAPACITY_ROOT="$tmp_root/external-capacity-probe" \
 	"$sv1_capacity_probe" /bin/true >"$tmp_root/capacity-preflight-output" 2>"$capacity_preflight_error"; then
@@ -108,6 +157,14 @@ fi
 if rg -n 'unbound variable|probe_dir' "$capacity_preflight_error" >/dev/null; then
 	fail "capacity probe failed before its control-plane checks"
 fi
+for required_capacity_guard in \
+	'trap cleanup_simulator EXIT' \
+	'kill -KILL' \
+	'retained_output_bytes=$(capacity_directory_bytes' \
+	'v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation_tmp"'; do
+	rg -F "$required_capacity_guard" "$sv1_capacity_probe" >/dev/null ||
+		fail "capacity probe is missing required guard: $required_capacity_guard"
+done
 if rg -n 'historical_full_tree_bytes|35341880370|required_free_bytes=' \
 	"$root_dir/scripts/run-v2-integrated-longrun-r2-cell.sh" >/dev/null; then
 	fail "registered launcher still contains the obsolete JSON capacity floor"

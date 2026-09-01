@@ -161,8 +161,25 @@ v2_r2_require_binary_capacity_attestation() {
 		[[ "$expected_gomaxprocs" =~ ^[0-9]+$ && "$expected_minimum_free_bytes" =~ ^[0-9]+$ ]] || return 1
 		jq -e --arg config_sha256 "$expected_config_sha256" --argjson gomaxprocs "$expected_gomaxprocs" \
 			--argjson minimum_free_bytes "$expected_minimum_free_bytes" \
-			'.config_sha256 == $config_sha256 and .gomaxprocs == $gomaxprocs and .minimum_free_bytes == $minimum_free_bytes' \
+			'.config_sha256 == $config_sha256 and .gomaxprocs == $gomaxprocs and .minimum_free_bytes == $minimum_free_bytes and
+			 (.initial_available_free_bytes | type) == "number" and .initial_available_free_bytes >= $minimum_free_bytes and
+			 (.available_free_bytes | type) == "number" and .available_free_bytes >= $minimum_free_bytes and
+			 (.evidence_manifest_sha256 | type) == "string" and (.evidence_manifest_sha256 | test("^[0-9a-f]{64}$"))' \
 			"$attestation" >/dev/null || return 1
+		local probe_root probe_cell actual_manifest_sha256
+		probe_root=$(jq -er '.probe_root | select(type == "string")' "$attestation") || return 1
+		[[ "$probe_root" == /* && "$probe_root" != */ && "$probe_root" != *$'\n'* && "$probe_root" != *$'\t'* ]] || return 1
+		[[ -d "$probe_root" && ! -L "$probe_root" ]] || return 1
+		[[ "$(realpath -e -- "$probe_root")" == "$probe_root" ]] || return 1
+		probe_cell="$probe_root/treatment-607"
+		[[ -d "$probe_cell" && ! -L "$probe_cell" ]] || return 1
+		for retained in run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl \
+			events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json evidence-manifest.json; do
+			[[ -s "$probe_cell/$retained" && ! -L "$probe_cell/$retained" ]] || return 1
+		done
+		actual_manifest_sha256=$(sha256sum -- "$probe_cell/evidence-manifest.json" | awk '{print $1}') || return 1
+		[[ "$actual_manifest_sha256" == "$(jq -er '.evidence_manifest_sha256' "$attestation")" ]] || return 1
+		v2_r2_verify_evidence_manifest "$probe_cell" || return 1
 	fi
 	available_kb=$(df -Pk "$(dirname -- "$attestation")" | awk 'NR == 2 {print $4}') || return 1
 	[[ "$available_kb" =~ ^[0-9]+$ ]] || return 1

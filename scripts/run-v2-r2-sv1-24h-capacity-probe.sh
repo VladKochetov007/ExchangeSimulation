@@ -33,6 +33,44 @@ capacity_free_bytes() {
 	printf '%s\n' "$available_bytes"
 }
 
+capacity_directory_bytes() {
+	local path=$1 du_output output_bytes
+	du_output=$(du -sb -- "$path") || return 1
+	output_bytes=$(awk 'NR == 1 {print $1}' <<<"$du_output")
+	[[ "$output_bytes" =~ ^[0-9]+$ ]] || return 1
+	printf '%s\n' "$output_bytes"
+}
+
+simulator_pid=""
+terminate_simulator() {
+	local child_pid=${simulator_pid:-}
+	[[ -n "$child_pid" ]] || return 0
+	if kill -0 "$child_pid" 2>/dev/null; then
+		kill -TERM "$child_pid" 2>/dev/null || true
+		for _ in {1..15}; do
+			kill -0 "$child_pid" 2>/dev/null || break
+			sleep 1
+		done
+		if kill -0 "$child_pid" 2>/dev/null; then
+			kill -KILL "$child_pid" 2>/dev/null || true
+		fi
+	fi
+	wait "$child_pid" 2>/dev/null || true
+}
+
+cleanup_simulator() {
+	local exit_status=$?
+	trap - EXIT INT TERM HUP
+	terminate_simulator
+	exit "$exit_status"
+}
+
+trap cleanup_simulator EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+v2_r2_acquire_namespace_lock || fail "could not acquire the SV1 capacity namespace lock"
+
 [[ -x "$binary" && -s "$config" ]] || fail "missing binary or treatment config"
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "scientific worktree is dirty"
 [[ "${GOMAXPROCS:-}" == "$expected_gomaxprocs" ]] || fail "capacity probe requires GOMAXPROCS=$expected_gomaxprocs"
@@ -92,7 +130,12 @@ peak_at=""
 capacity_abort=false
 capacity_abort_reason=""
 while kill -0 "$simulator_pid" 2>/dev/null; do
-	current_bytes=$(du -sb -- "$probe_root" | awk '{print $1}')
+	if ! current_bytes=$(capacity_directory_bytes "$probe_root"); then
+		capacity_abort=true
+		capacity_abort_reason="output-size measurement failed during probe"
+		terminate_simulator
+		break
+	fi
 	if (( current_bytes > peak_output_bytes )); then
 		peak_output_bytes=$current_bytes
 		peak_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -100,12 +143,12 @@ while kill -0 "$simulator_pid" 2>/dev/null; do
 	if ! available_bytes=$(capacity_free_bytes "$probe_root"); then
 		capacity_abort=true
 		capacity_abort_reason="free-space measurement failed during probe"
-		kill -TERM "$simulator_pid" 2>/dev/null || true
+		terminate_simulator
 		break
 	elif (( available_bytes < minimum_free_bytes )); then
 		capacity_abort=true
 		capacity_abort_reason="free space crossed the ${minimum_free_bytes}-byte reserve during probe: $available_bytes"
-		kill -TERM "$simulator_pid" 2>/dev/null || true
+		terminate_simulator
 		break
 	fi
 	sleep 2
@@ -114,8 +157,12 @@ set +e
 wait "$simulator_pid"
 simulator_status=$?
 set -e
-final_output_bytes=$(du -sb -- "$probe_root" | awk '{print $1}')
-(( final_output_bytes > peak_output_bytes )) && peak_output_bytes=$final_output_bytes
+if ! final_output_bytes=$(capacity_directory_bytes "$probe_root"); then
+	capacity_abort=true
+	capacity_abort_reason="final output-size measurement failed"
+else
+	(( final_output_bytes > peak_output_bytes )) && peak_output_bytes=$final_output_bytes
+fi
 if ! final_available_free_bytes=$(capacity_free_bytes "$probe_root"); then
 	capacity_abort=true
 	capacity_abort_reason="final free-space measurement failed"
@@ -137,15 +184,30 @@ v2_r2_require_checkpoint_stream "$probe_dir/checkpoints.jsonl" "$simulation_star
 v2_r2_write_evidence_manifest "$probe_dir" || fail "probe evidence manifest generation failed"
 v2_r2_verify_evidence_manifest "$probe_dir" || fail "probe evidence manifest verification failed"
 
+if ! retained_output_bytes=$(capacity_directory_bytes "$probe_root"); then
+	fail "final retained-output size measurement failed; output retained at $probe_root"
+fi
+(( retained_output_bytes > peak_output_bytes )) && peak_output_bytes=$retained_output_bytes
+if ! final_available_free_bytes=$(capacity_free_bytes "$probe_root"); then
+	fail "final retained-output free-space measurement failed; output retained at $probe_root"
+fi
+(( final_available_free_bytes >= minimum_free_bytes )) ||
+	fail "final retained-output free space is below the ${minimum_free_bytes}-byte reserve: $final_available_free_bytes"
 required_free_bytes=$((peak_output_bytes + safety_margin_bytes))
 attestation_tmp="$attestation.tmp-$$"
 mkdir -p -- "$(dirname -- "$attestation")"
+evidence_manifest_sha256=$(sha256sum -- "$probe_dir/evidence-manifest.json" | awk '{print $1}')
 jq -n --arg source_revision "$head_revision" --arg binary_sha256 "$binary_sha256" \
 	--arg config_sha256 "$config_sha256" --arg probe_root "$probe_root" --arg peak_at "$peak_at" \
+	--arg evidence_manifest_sha256 "$evidence_manifest_sha256" \
 	--argjson peak_output_bytes "$peak_output_bytes" --argjson safety_margin_bytes "$safety_margin_bytes" \
 	--argjson required_free_bytes "$required_free_bytes" --argjson available_free_bytes "$final_available_free_bytes" \
 	--argjson gomaxprocs "$expected_gomaxprocs" --argjson minimum_free_bytes "$minimum_free_bytes" \
 	--argjson initial_available_free_bytes "$initial_available_free_bytes" \
-	'{schema_version:1,contract:"v2-integrated-longrun-r2-binary-capacity-v1",measurement:"full_24h_binary_evidence_capacity_probe",evidence_format:"evstream_v3",source_revision:$source_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,probe_root:$probe_root,peak_output_bytes:$peak_output_bytes,safety_margin_bytes:$safety_margin_bytes,required_free_bytes:$required_free_bytes,available_free_bytes:$available_free_bytes,peak_observed_at:$peak_at}' >"$attestation_tmp"
+	'{schema_version:1,contract:"v2-integrated-longrun-r2-binary-capacity-v1",measurement:"full_24h_binary_evidence_capacity_probe",evidence_format:"evstream_v3",source_revision:$source_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,probe_root:$probe_root,evidence_manifest_sha256:$evidence_manifest_sha256,peak_output_bytes:$peak_output_bytes,safety_margin_bytes:$safety_margin_bytes,required_free_bytes:$required_free_bytes,available_free_bytes:$available_free_bytes,peak_observed_at:$peak_at}' >"$attestation_tmp"
+v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation_tmp" "$config_sha256" "$expected_gomaxprocs" "$minimum_free_bytes" ||
+	fail "generated capacity attestation failed retained-evidence validation; output retained at $probe_root"
 mv -- "$attestation_tmp" "$attestation"
+v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation" "$config_sha256" "$expected_gomaxprocs" "$minimum_free_bytes" ||
+	fail "published capacity attestation failed final validation; output retained at $probe_root"
 echo "completed SV1 24-hour binary capacity probe: root=$probe_root peak_bytes=$peak_output_bytes required_free_bytes=$required_free_bytes"
