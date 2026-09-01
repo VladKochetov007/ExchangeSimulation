@@ -486,3 +486,41 @@ This is still a setup-only remediation. It does not authorize the pinned
 binary build, the external capacity probe, a registered cell, freeze
 authorization, or holdout access. The next gate is a fresh independent
 Sol-xhigh review of exact `e421e1c`.
+
+## SV1 extraction, parity, and scoring checkpoint — 2630fbb
+
+Commit `2630fbb1dc49eff03b33317085fa2cb1f89e34ff` adds the SV1 adapters around
+the shared fail-closed extractor and verifier, the registered seed-607 parity
+contract, and the precommitted six-cell development scorer. The parity schema
+now distinguishes exact treatment G4/G8 equality from normalized execution
+equality for the full/no-log control pair. The scorer records the fixed
+post-warm-up side-availability endpoint in
+`v2-r2-sv1-24h-survival-scoring-amendment-2026-09-01.md`; this is a measurement
+contract only and does not alter economics or instrument populations.
+
+No simulator cell, capacity probe, freeze authorization, or holdout seed was
+run or read. The development scorer refuses existing holdout directories and
+uses the reserved status `RESERVED_AND_NOT_READ_BY_DEVELOPMENT_SCORER`.
+
+Verification on the exact pushed tree:
+
+- `env GOMAXPROCS=4 make test`: PASS; all Go packages, integrated R2/SV1
+  contract tests, and archive tests passed;
+- `env GOMAXPROCS=4 go vet ./...`: PASS;
+- focused `go test ./evstream ./types ./exchange ./simulations/multivenue
+  -count=1`: PASS in 194.776 seconds, including fresh-process evidence
+  determinism and neutrality;
+- narrow `go test -race ./simulations/multivenue -run
+  "Test(V20Evidence|BinaryEvidence)" -count=1`: PASS in 140.481 seconds;
+- the broader targeted race matrix passed all non-multivenue packages but
+  timed out after 600 seconds in the pre-existing
+  `TestV23P2RebalanceEvidenceIsFreshProcessDeterministicAndNeutral` test. It
+  produced no race report or OOM. This is recorded as a bounded test-suite
+  limitation, not as a race pass.
+
+The asynchronous performance branch was fetched again from the recorded
+`c4434ad32b2344e80a086d7e6ff9a8efcdaa1d7e` point; no newer commits were
+present and no performance code was imported. A fresh independent Sol-xhigh
+review of exact `2630fbb` remains required before clean pinned binary
+construction or any activation probe. The capacity probe and all registered
+development/holdout cells remain unauthorized.
