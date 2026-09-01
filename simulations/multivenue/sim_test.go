@@ -136,6 +136,35 @@ func TestConfigAcceptsDocumentedSnakeCaseJSON(t *testing.T) {
 	}
 }
 
+func TestNormalizedConfigMatchesManifestConfiguration(t *testing.T) {
+	t.Setenv("EXSIM_BINARY_EVIDENCE", "")
+	logDir := t.TempDir()
+	input := Config{LogDir: logDir, LogMode: "none", Seed: 607}
+	effective, err := NormalizeConfig(input)
+	if err != nil {
+		t.Fatalf("NormalizeConfig: %v", err)
+	}
+	effective.LogDir = ""
+	sim, err := NewSim(time.Second, input)
+	if err != nil {
+		t.Fatalf("NewSim: %v", err)
+	}
+	if err := sim.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(logDir, "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var written manifest
+	if err := json.Unmarshal(raw, &written); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	if !reflect.DeepEqual(written.Config, effective) {
+		t.Fatalf("manifest configuration differs from normalized input:\nmanifest=%+v\neffective=%+v", written.Config, effective)
+	}
+}
+
 func TestP5ConfigRetainsExplicitFalseFutureFlowAndActorClocks(t *testing.T) {
 	var cfg Config
 	raw := []byte(`{

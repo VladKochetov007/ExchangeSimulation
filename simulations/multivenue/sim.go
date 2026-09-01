@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -2133,6 +2134,9 @@ type manifest struct {
 type BuildInfo struct {
 	Revision string `json:"revision"`
 	Time     string `json:"time"`
+	GOOS     string `json:"goos"`
+	GOARCH   string `json:"goarch"`
+	GOAMD64  string `json:"goamd64,omitempty"`
 	// Modified reports that the working tree had uncommitted changes when the
 	// binary was built, so the revision alone does not identify the source.
 	Modified bool `json:"modified"`
@@ -2142,9 +2146,9 @@ type BuildInfo struct {
 func currentBuild() BuildInfo {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
-		return BuildInfo{Revision: "unknown"}
+		return BuildInfo{Revision: "unknown", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 	}
-	build := BuildInfo{Revision: "unknown"}
+	build := BuildInfo{Revision: "unknown", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 	for _, setting := range info.Settings {
 		switch setting.Key {
 		case "vcs.revision":
@@ -2153,9 +2157,21 @@ func currentBuild() BuildInfo {
 			build.Time = setting.Value
 		case "vcs.modified":
 			build.Modified = setting.Value == "true"
+		case "GOAMD64":
+			build.GOAMD64 = setting.Value
 		}
 	}
 	return build
+}
+
+// NormalizeConfig materializes the exact defaults and validation applied by a
+// simulation run. Callers that persist provenance must hash this result rather
+// than a sparse input file whose omitted fields acquire meaning later.
+func NormalizeConfig(cfg Config) (Config, error) {
+	if err := cfg.normalize(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
 }
 
 // NewSim constructs three exchanges with one local spot/perp/dated-future/

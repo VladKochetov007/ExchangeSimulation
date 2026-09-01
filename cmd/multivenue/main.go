@@ -154,6 +154,7 @@ func run() (err error) {
 	traceProfile := flag.String("traceprofile", "", "write Go execution trace for Sim.Run only")
 	recordReceipts := flag.Bool("record-market-data-receipts", false, "emit V2 participant-information evidence sidecars")
 	receiptRoles := flag.String("market-data-receipt-roles", "", "comma-separated audited role classes; required with -record-market-data-receipts")
+	effectiveConfigPath := flag.String("write-effective-config", "", "write the normalized config after CLI overrides and exit")
 	flag.Parse()
 
 	cfg := multivenue.Config{}
@@ -189,6 +190,24 @@ func run() (err error) {
 		if *receiptRoles != "" {
 			cfg.MarketDataReceiptRoles = strings.Split(*receiptRoles, ",")
 		}
+	}
+	if *effectiveConfigPath != "" {
+		effectiveConfig, normalizeErr := multivenue.NormalizeConfig(cfg)
+		if normalizeErr != nil {
+			return normalizeErr
+		}
+		effectiveConfig.LogDir = ""
+		raw, marshalErr := json.MarshalIndent(effectiveConfig, "", "  ")
+		if marshalErr != nil {
+			return fmt.Errorf("marshal effective config: %w", marshalErr)
+		}
+		if mkdirErr := os.MkdirAll(filepath.Dir(*effectiveConfigPath), 0755); mkdirErr != nil {
+			return fmt.Errorf("create effective config directory: %w", mkdirErr)
+		}
+		if writeErr := os.WriteFile(*effectiveConfigPath, append(raw, '\n'), 0644); writeErr != nil {
+			return fmt.Errorf("write effective config: %w", writeErr)
+		}
+		return nil
 	}
 
 	sim, err := multivenue.NewSim(*duration, cfg)
