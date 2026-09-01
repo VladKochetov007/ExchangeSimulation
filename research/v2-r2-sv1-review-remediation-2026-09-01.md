@@ -318,3 +318,29 @@ rejection is possible when exchange cancellation and actor-observed fill
 evidence cross timing domains. The retained identical seed-607 trajectory had
 no such crossing, but this limitation must be corrected before broader or
 stress testing if it activates.
+
+## Independent post-probe acceptance — d85bfb1
+
+Arendt independently reviewed the completed paired activation artifacts under
+`/home/vlad/external-scratch/v2-r2-sv1-activation-d85bfb1bcac20a8c22b3d2629ecb5da83c17abd3`
+and returned **ACCEPT for the activation probe only**. The review verified the
+exact Go 1.27 `linux/amd64/v1` binary hashes, treatment/control configuration
+identity, all 29 manifest entries per arm, evidence-only sidecar digests,
+terminal evstream anchors, receipt completeness, and the absence of unlisted
+arm files. No files were changed or deleted and no simulator or other cell was
+run during the review.
+
+The treatment contained 12 suppliers, 1,800 decisions, 111 supplier fills,
+416 accepted quotes, 368 cancellations, 12/12 trading suppliers, 12/12 PnL-
+changing suppliers, and 12 independently reconstructed inventory responses.
+Quote-cash, balance, and PnL reconciliation residuals were zero; borrow usage
+was zero. Bid/ask absence was `6/900` per side in both arms and was identified
+as initial warm-up, not a treatment effect. The seven cancellation-pending
+quotes were terminal censoring. The possible delayed fill/cancel timing
+crossing did not activate.
+
+This is an activation finding only. It does not establish survival improvement,
+causal reduction in side absence, 24-hour viability, or stressed withdrawal
+behavior. Any broader stress/development run must retain the fail-closed
+boundary and correct the noted timing limitation if it activates. No holdout or
+registered 24-hour development cell was authorized or consumed by this review.
