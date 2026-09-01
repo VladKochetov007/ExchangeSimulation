@@ -29,6 +29,7 @@ case "$extractor_variant" in
 		;;
 esac
 source "$contract_script"
+source "$root_dir/scripts/v2-r2-evidence-input-contract.sh"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 renderer=${EVSRENDER_BIN:-"$root_dir/bin/evsrender"}
 conservation_tolerance_fixed_units=1000
@@ -58,6 +59,17 @@ require_file() {
 require_json_object() {
 	local path=$1
 	jq -e 'type == "object"' "$path" >/dev/null || fail "malformed JSON object: $path"
+}
+require_evidence_input() {
+	local input_kind=$1
+	local path=$2
+	if ! v2_r2_require_evidence_input_file "$input_kind" "$path"; then
+		case "$input_kind" in
+			binary) fail "missing or invalid binary evidence stream: $path" ;;
+			json) fail "malformed JSON object: $path" ;;
+			*) fail "unsupported evidence input kind: $input_kind" ;;
+		esac
+	fi
 }
 
 v2_r2_require_output_root "$v2_r2_output_root" || fail "R2 output root is not canonical"
@@ -97,8 +109,10 @@ if [[ "$evidence_format" == evstream_v3 && "$log_mode" == "full" ]]; then
 	required_inputs+=(evidence-only-artifact-hash.json)
 fi
 for input in "${required_inputs[@]}"; do
-	require_file "$cell/$input"
-	require_json_object "$cell/$input"
+	case "$input" in
+		events.evs) require_evidence_input binary "$cell/$input" ;;
+		*) require_evidence_input json "$cell/$input" ;;
+	esac
 done
 
 raw_stage_marker="$cell/.raw-evidence-staged.$$"

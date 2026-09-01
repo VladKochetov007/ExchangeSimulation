@@ -38,10 +38,24 @@ for sv1_script in \
 	[[ -x "$root_dir/scripts/$sv1_script" ]] || fail "SV1 script is not executable: $sv1_script"
 	bash -n "$root_dir/scripts/$sv1_script" || fail "SV1 script has invalid shell syntax: $sv1_script"
 done
+[[ -f "$root_dir/scripts/v2-r2-evidence-input-contract.sh" ]] || fail "binary evidence input contract is missing"
+bash -n "$root_dir/scripts/v2-r2-evidence-input-contract.sh" || fail "binary evidence input contract has invalid shell syntax"
+source "$root_dir/scripts/v2-r2-evidence-input-contract.sh"
+binary_input_fixture="$tmp_root/events.evs"
+json_input_fixture="$tmp_root/sidecar.json"
+printf '\000binary-event-stream\n' >"$binary_input_fixture"
+printf '{}\n' >"$json_input_fixture"
+v2_r2_require_evidence_input_file binary "$binary_input_fixture" || fail "binary evidence input was rejected"
+v2_r2_require_evidence_input_file json "$json_input_fixture" || fail "JSON sidecar input was rejected"
+expect_failure v2_r2_require_evidence_input_file json "$binary_input_fixture"
+ln -s -- "$binary_input_fixture" "$tmp_root/events-symlink.evs"
+expect_failure v2_r2_require_evidence_input_file binary "$tmp_root/events-symlink.evs"
+expect_failure v2_r2_require_evidence_input_file binary "$tmp_root/missing.evs"
 for required_sv1_fragment in \
 	'V2_R2_EXTRACTOR_VARIANT=sv1' \
 	'control_full_no_log_normalized_equal' \
 	'execution_stream_hash' \
+	'v2_r2_require_evidence_input_file' \
 	'RESERVED_AND_NOT_READ_BY_DEVELOPMENT_SCORER' \
 	'holdout-619'; do
 	rg -F "$required_sv1_fragment" \
