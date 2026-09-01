@@ -11,6 +11,10 @@ if [[ $# -gt 2 ]]; then
 fi
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+scientific_root=$(realpath -e -- "$root_dir") || {
+	echo "could not resolve scientific repository root" >&2
+	exit 1
+}
 source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
 
 go_bin_dir=/usr/local/go/bin
@@ -110,6 +114,16 @@ output_root=${V2_R2_SV1_ACTIVATION_ROOT:-"/home/vlad/external-scratch/v2-r2-sv1-
 	echo "activation output root must be an absolute, non-empty path" >&2
 	exit 1
 }
+resolved_output_root=$(realpath -m -- "$output_root") || {
+	echo "could not resolve activation output root: $output_root" >&2
+	exit 1
+}
+case "$resolved_output_root" in
+	"$scientific_root"|"$scientific_root"/*)
+		echo "activation output root must remain outside the scientific repository: $output_root" >&2
+		exit 1
+		;;
+esac
 [[ ! -e "$output_root" && ! -L "$output_root" ]] || {
 	echo "refusing to overwrite activation output root: $output_root" >&2
 	exit 1

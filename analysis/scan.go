@@ -24,6 +24,9 @@ type Event struct {
 	VenueID  string
 	Symbol   string
 	File     string
+	// Sequence is the venue-wide persisted event sequence. It is distinct from
+	// Ordinal, which is only the physical line position in one routed file.
+	Sequence uint64
 	// Ordinal is the one-based physical record position in File. It permits
 	// analyzers to distinguish causal order among same-timestamp records in one
 	// persisted log; SimTS alone is not sufficient at lifecycle boundaries.
@@ -71,9 +74,10 @@ type envelope struct {
 }
 
 type dataLayer struct {
-	VenueID string          `json:"venue_id"`
-	Symbol  string          `json:"symbol"`
-	Payload json.RawMessage `json:"payload"`
+	VenueID  string          `json:"venue_id"`
+	Sequence uint64          `json:"sequence"`
+	Symbol   string          `json:"symbol"`
+	Payload  json.RawMessage `json:"payload"`
 }
 
 // ScanOptions narrows a scan before any decoding happens, which is what keeps a
@@ -177,7 +181,7 @@ func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Ev
 		}
 		event := Event{
 			SimTS: env.SimTS, ClientID: env.ClientID, Name: env.Event,
-			VenueID: outer.VenueID, Symbol: outer.Symbol, File: path, Ordinal: ordinal,
+			VenueID: outer.VenueID, Symbol: outer.Symbol, Sequence: outer.Sequence, File: path, Ordinal: ordinal,
 			payload: outer.Payload,
 		}
 		// Unwrap the derivative nesting: an inner payload means the fields sit

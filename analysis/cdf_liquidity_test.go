@@ -75,6 +75,29 @@ func TestCDFLiquidityAcceptsLegalNoActionWaitReasons(t *testing.T) {
 	}
 }
 
+func TestMeasureCDFLiquidityRejectsInflatedQuoteCashHeadroom(t *testing.T) {
+	run := writeCDFLiquidityFixture(t, true, false)
+	generalPath := filepath.Join(run.Dir, "venues", "north", "general.jsonl")
+	raw, err := os.ReadFile(generalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(raw), `"quote_cash_available":505`, `"quote_cash_available":1000`, 1)
+	if mutated == string(raw) {
+		t.Fatal("fixture quote-cash headroom was not found")
+	}
+	if err := os.WriteFile(generalPath, []byte(mutated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatalf("MeasureCDFLiquidity: %v", err)
+	}
+	if audit.Valid || !hasCDFCheck(audit.Checks, "supplier quote-cash headroom does not reconcile to independent ledger") {
+		t.Fatalf("inflated quote-cash headroom was accepted: %+v", audit)
+	}
+}
+
 func TestCanonicalCDFComparisonConfigPreservesNonCDFReceiptRoles(t *testing.T) {
 	withCDF, err := canonicalCDFComparisonConfig([]byte(`{"market_data_receipt_roles":["cdf_elastic_supplier","liability_hedger"],"venues":["north"]}`))
 	if err != nil {
@@ -604,7 +627,7 @@ func TestMeasureCDFLiquidityRejectsSyntheticStaleWithdrawalWithoutLiveOrder(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	staleWithdrawal := cdfFixtureLine(12, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":12,"observation_time":1,"observation_age":11,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":0,"reference_price":100,"position":5,"target_position":5,"inventory_limit":10,"action":"withdraw","reason":"stale_or_missing_observation","quote_order_id":8,"cancel_request_id":4}`) + "\n"
+	staleWithdrawal := cdfFixtureLine(12, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":12,"observation_time":1,"observation_age":11,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":0,"reference_price":100,"position":5,"target_position":5,"inventory_limit":10,"action":"withdraw","reason":"stale_or_missing_observation","quote_order_id":8,"cancel_request_id":4,"quote_cash_available":109}`) + "\n"
 	if err := os.WriteFile(generalPath, append(raw, []byte(staleWithdrawal)...), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -638,9 +661,9 @@ func TestMeasureCDFLiquidityRejectsUnattestedWaitState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	unattestedPending := cdfFixtureLine(7, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":7,"observation_time":1,"observation_age":6,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"wait","reason":"order_pending","quote_request_id":99}`) + "\n"
-	acceptedBeforePending := cdfFixtureLine(4, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":4,"observation_time":1,"observation_age":3,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"wait","reason":"order_pending","quote_request_id":1}`) + "\n"
-	unattestedCancel := cdfFixtureLine(8, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":8,"observation_time":1,"observation_age":7,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"wait","reason":"cancel_pending","quote_order_id":8,"cancel_request_id":99}`) + "\n"
+	unattestedPending := cdfFixtureLine(7, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":7,"observation_time":1,"observation_age":6,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"wait","reason":"order_pending","quote_request_id":99,"quote_cash_available":505}`) + "\n"
+	acceptedBeforePending := cdfFixtureLine(4, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":4,"observation_time":1,"observation_age":3,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"wait","reason":"order_pending","quote_request_id":1,"quote_cash_available":109}`) + "\n"
+	unattestedCancel := cdfFixtureLine(8, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":8,"observation_time":1,"observation_age":7,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"wait","reason":"cancel_pending","quote_order_id":8,"cancel_request_id":99,"quote_cash_available":505}`) + "\n"
 	if err := os.WriteFile(generalPath, append(raw, []byte(unattestedPending+acceptedBeforePending+unattestedCancel)...), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -708,8 +731,8 @@ func TestMeasureCDFLiquidityRejectsWaitAfterOrderRejection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldCancel := cdfFixtureLine(6, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":6,"observation_time":1,"observation_age":5,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"cancel","reason":"reprice_for_inventory_or_touch","quote_order_id":8,"cancel_request_id":3}`) + "\n"
-	wait := cdfFixtureLine(6, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":6,"observation_time":1,"observation_age":5,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"wait","reason":"order_pending","quote_request_id":2}`) + "\n"
+	oldCancel := cdfFixtureLine(6, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":6,"observation_time":1,"observation_age":5,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"cancel","reason":"reprice_for_inventory_or_touch","quote_order_id":8,"cancel_request_id":3,"quote_cash_available":109}`) + "\n"
+	wait := cdfFixtureLine(6, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":6,"observation_time":1,"observation_age":5,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"wait","reason":"order_pending","quote_request_id":2,"quote_cash_available":109}`) + "\n"
 	if !strings.Contains(string(general), oldCancel) {
 		t.Fatal("fixture cancellation decision was not found")
 	}
@@ -1008,6 +1031,7 @@ func TestMeasureCDFLiquidityConservesNonzeroQuoteFee(t *testing.T) {
 	mutated = strings.Replace(mutated, `"fee_asset":""`, `"fee_asset":"USD"`, 1)
 	mutated = strings.Replace(mutated, `"quote_cash_required":495`, `"quote_cash_required":496`, 1)
 	mutated = strings.Replace(mutated, `"quote_cash_available":505`, `"quote_cash_available":504`, 1)
+	mutated = strings.Replace(mutated, `"quote_cash_available":109`, `"quote_cash_available":108`, 1)
 	mutated = strings.Replace(mutated, `"net_asset":505`, `"net_asset":504`, 1)
 	mutated = strings.Replace(mutated, `"free":505`, `"free":504`, 1)
 	if mutated == string(raw) {
@@ -1239,8 +1263,8 @@ func writeCDFLiquidityFullFillCancelRaceFixture(t *testing.T) *Run {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldCancelDecision := cdfFixtureLine(6, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":6,"observation_time":1,"observation_age":5,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"cancel","reason":"reprice_for_inventory_or_touch","quote_order_id":8,"cancel_request_id":3}`) + "\n"
-	staleWithdrawal := cdfFixtureLine(12, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":12,"observation_time":1,"observation_age":11,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":0,"reference_price":100,"position":5,"target_position":5,"inventory_limit":10,"action":"withdraw","reason":"stale_or_missing_observation","quote_order_id":8,"cancel_request_id":4}`) + "\n"
+	oldCancelDecision := cdfFixtureLine(6, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":6,"observation_time":1,"observation_age":5,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"cancel","reason":"reprice_for_inventory_or_touch","quote_order_id":8,"cancel_request_id":3,"quote_cash_available":109}`) + "\n"
+	staleWithdrawal := cdfFixtureLine(12, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":12,"observation_time":1,"observation_age":11,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":0,"reference_price":100,"position":5,"target_position":5,"inventory_limit":10,"action":"withdraw","reason":"stale_or_missing_observation","quote_order_id":8,"cancel_request_id":4,"quote_cash_available":109}`) + "\n"
 	if !strings.Contains(string(general), oldCancelDecision) {
 		t.Fatal("fixture cancel decision was not found")
 	}
@@ -1305,7 +1329,7 @@ func writeCDFLiquidityFixture(t *testing.T, supplier, malformedFill bool) *Run {
 		general += cdfFixtureLine(2, 2, "balance_snapshot", `{"timestamp":2,"client_id":2,"spot_balances":[{"asset":"CDF","free":100,"locked":0,"borrowed":0,"interest":0,"net_asset":100},{"asset":"USD","free":1000,"locked":0,"borrowed":0,"interest":0,"net_asset":1000}],"perp_balances":[],"borrowed":{}}`) + "\n"
 		general += cdfFixtureLine(6, 2, "balance_snapshot", `{"timestamp":6,"client_id":2,"spot_balances":[{"asset":"CDF","free":105,"locked":0,"borrowed":0,"interest":0,"net_asset":105},{"asset":"USD","free":505,"locked":0,"borrowed":0,"interest":0,"net_asset":505}],"perp_balances":[],"borrowed":{}}`) + "\n"
 		general += cdfFixtureLine(4, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":4,"observation_time":1,"observation_age":3,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"submit","reason":"inventory_target_gap","side":"BUY","quote_price":99,"quote_qty":4,"quote_request_id":2,"quote_submitted_at":4,"quote_cash_available":505,"quote_cash_required":396}`) + "\n"
-		general += cdfFixtureLine(6, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":6,"observation_time":1,"observation_age":5,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"cancel","reason":"reprice_for_inventory_or_touch","quote_order_id":8,"cancel_request_id":3}`) + "\n"
+		general += cdfFixtureLine(6, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":6,"observation_time":1,"observation_age":5,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":5,"target_position":9,"inventory_limit":10,"action":"cancel","reason":"reprice_for_inventory_or_touch","quote_order_id":8,"cancel_request_id":3,"quote_cash_available":109}`) + "\n"
 	}
 	greeks := fmt.Sprintf(`{"initial_accounts":%s,"terminal_accounts":%s}`, initialAccounts, terminalAccounts)
 	if err := os.WriteFile(filepath.Join(dir, "greeks.json"), []byte(greeks), 0644); err != nil {

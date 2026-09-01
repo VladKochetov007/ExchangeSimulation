@@ -252,3 +252,46 @@ No registered development cell, 24-hour campaign, or holdout was consumed; no
 historical result requires rescore or rerun. The corrected analyzer requires a
 fresh exact-tree review and a new activation-probe run before any broader
 development authorization.
+
+## Additional independent rejection — e35d891 cash and boundary audit
+
+Hume independently reviewed the immutable `e35d891` tree after the Volta
+acceptance. The review did not inspect the later wait-state correction or
+authorize any run. It rejected activation on two additional fail-closed
+blockers.
+
+First, BUY quote cash was still self-attested: the analyzer used emitted
+`quote_cash_available` both as the affordability input and as the value being
+checked. A coordinated inflated headroom value could therefore make an
+otherwise unaffordable quote appear policy-exact. This is a real analyzer
+contract weakness, not a simulator economic finding, and it has no historical
+impact because no registered cell or holdout had run under SV1.
+
+Second, the activation runner accepted an arbitrary absolute output root,
+including the repository and descendants reached through symlinked parents,
+despite the documented external-output boundary. This is a provenance and
+retention-boundary defect; it does not alter the predecessor result or any
+historical trajectory.
+
+## Remediation checkpoint — independent quote cash and output boundary
+
+The successor analyzer now reconstructs quote cash from the registered initial
+quote balance and the ordered supplier evidence. A BUY submission creates a
+fixed-point reservation; acceptance binds it to an order; rejection or
+cancellation releases it; BUY fills consume reserved cash; SELL fills add net
+quote proceeds; full fills release any remainder. Every emitted
+`quote_cash_available` value must equal the independently reconstructed
+available balance, and missing venue sequence or malformed cash evidence fails
+closed. The cash ledger is separate from the decision-emitted affordability
+claim, and a regression rejects an inflated post-fill headroom mutation.
+
+The activation runner now resolves both the scientific repository and the
+requested output root with `realpath`, rejecting the repository itself and all
+resolved descendants, including paths through symlinked parents. A standalone
+contract test covers the direct and symlink cases before any binary or output
+creation is attempted.
+
+This remediation changes analyzer/provenance validation only; it does not alter
+CDF actor economics, R2 configuration, historical JSON evidence, or any
+simulation trajectory. The exact successor tree requires a fresh independent
+Sol-xhigh review before the activation probe is retried.

@@ -758,6 +758,27 @@ type cdfObservedFill struct {
 	ordinal int64
 }
 
+type cdfCashEvent struct {
+	event Event
+}
+
+type cdfPendingCashReservation struct {
+	side     string
+	reserved int64
+}
+
+type cdfCashOrder struct {
+	remainingReserve int64
+}
+
+type cdfQuoteCashLedger struct {
+	available      int64
+	reserved       int64
+	pendingByID    map[uint64]cdfPendingCashReservation
+	ordersByID     map[uint64]*cdfCashOrder
+	processedFills map[cdfFillKey]struct{}
+}
+
 // MeasureCDFLiquidity reconstructs one rendered evstream run. The caller
 // should first pass the original run through multivenue.RenderBinaryEvidence;
 // this package depends only on the resulting public evidence layout and
@@ -1027,6 +1048,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	orders := make(map[cdfOrderKey]*cdfOrderState)
 	actualFills := make(map[cdfFillKey]cdfOrderFillEvidence)
 	observedFills := make(map[cdfFillKey]cdfObservedFill)
+	cashEvents := make([]cdfCashEvent, 0)
 	if len(generalFiles) > 0 {
 		err := r.Scan(ScanOptions{
 			Events: []string{"elastic_liquidity_supplier_decision", "elastic_liquidity_supplier_fill", "balance_snapshot", "borrow"},
@@ -1037,8 +1059,10 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			}
 			switch event.Name {
 			case "elastic_liquidity_supplier_decision":
+				cashEvents = append(cashEvents, cdfCashEvent{event: event})
 				result.processDecision(event, states, receiptEvidence)
 			case "elastic_liquidity_supplier_fill":
+				cashEvents = append(cashEvents, cdfCashEvent{event: event})
 				result.processSupplierFill(event, states, observedFills)
 			case "balance_snapshot":
 				result.processBalanceSnapshot(event, states)
@@ -1058,12 +1082,14 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			if event.SimTS > result.lastEventAt {
 				result.lastEventAt = event.SimTS
 			}
+			cashEvents = append(cashEvents, cdfCashEvent{event: event})
 			result.processBookEvent(event, states, orders, actualFills, venueAudits)
 		})
 		if err != nil {
 			return nil, fmt.Errorf("cdf liquidity: scan CDF/USD book %s: %w", path, err)
 		}
 	}
+	result.validateQuoteCashHeadroom(cashEvents, states)
 	if len(bookFiles) == 0 {
 		result.addCheck(CDFLiquidityCheck{Failure: "no rendered CDF-USD book evidence"})
 	}
@@ -1156,7 +1182,7 @@ func (r *CDFLiquidityRunAudit) addCheck(check CDFLiquidityCheck) {
 
 func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit, receiptEvidence *cdfMarketDataEvidence) {
 	var decision cdfDecisionEvidence
-	required := []string{"role", "client_id", "symbol", "decision_time", "observation_time", "observation_age", "observation_digest", "best_bid", "best_bid_qty", "best_ask", "best_ask_qty", "mark_price", "reference_price", "position", "target_position", "inventory_limit", "initial_base_balance", "gross_inventory", "gross_inventory_limit", "action", "reason"}
+	required := []string{"role", "client_id", "symbol", "decision_time", "observation_time", "observation_age", "observation_digest", "best_bid", "best_bid_qty", "best_ask", "best_ask_qty", "mark_price", "reference_price", "position", "target_position", "inventory_limit", "initial_base_balance", "gross_inventory", "gross_inventory_limit", "action", "reason", "quote_cash_available"}
 	if err := decodeRequiredJSON(event.Raw(), &decision, required...); err != nil {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed supplier decision: " + err.Error()})
 		return
@@ -1387,6 +1413,260 @@ func (r *CDFLiquidityRunAudit) validateWaitState(event Event, decision cdfDecisi
 	default:
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "unknown supplier wait reason " + decision.Reason})
 	}
+}
+
+func (r *CDFLiquidityRunAudit) validateQuoteCashHeadroom(events []cdfCashEvent, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
+	sort.SliceStable(events, func(left, right int) bool {
+		leftEvent, rightEvent := events[left].event, events[right].event
+		if leftEvent.Sequence != rightEvent.Sequence {
+			return leftEvent.Sequence < rightEvent.Sequence
+		}
+		leftPriority, rightPriority := cdfCashEventPriority(leftEvent.Name), cdfCashEventPriority(rightEvent.Name)
+		if leftPriority != rightPriority {
+			return leftPriority < rightPriority
+		}
+		if leftEvent.SimTS != rightEvent.SimTS {
+			return leftEvent.SimTS < rightEvent.SimTS
+		}
+		if leftEvent.File != rightEvent.File {
+			return leftEvent.File < rightEvent.File
+		}
+		return leftEvent.Ordinal < rightEvent.Ordinal
+	})
+
+	ledgers := make(map[cdfParticipantKey]*cdfQuoteCashLedger, len(states))
+	for key, state := range states {
+		ledgers[key] = &cdfQuoteCashLedger{
+			available:      state.configuredInitialQuoteBalance,
+			pendingByID:    make(map[uint64]cdfPendingCashReservation),
+			ordersByID:     make(map[uint64]*cdfCashOrder),
+			processedFills: make(map[cdfFillKey]struct{}),
+		}
+	}
+
+	for _, cashEvent := range events {
+		event := cashEvent.event
+		key := cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}
+		ledger := ledgers[key]
+		state := states[key]
+		if ledger == nil || state == nil {
+			continue
+		}
+		if event.Sequence == 0 {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "quote-cash ledger event has no venue sequence"})
+			continue
+		}
+
+		switch event.Name {
+		case "elastic_liquidity_supplier_decision":
+			r.processQuoteCashDecision(event, state, ledger)
+		case "OrderAccepted":
+			r.processQuoteCashAccepted(event, state, ledger)
+		case "OrderRejected":
+			r.processQuoteCashRejected(event, state, ledger)
+		case "OrderCancelled":
+			r.processQuoteCashCancelled(event, state, ledger)
+		case "elastic_liquidity_supplier_fill":
+			r.processQuoteCashFill(event, state, ledger)
+		}
+	}
+}
+
+func cdfCashEventPriority(eventName string) int {
+	switch eventName {
+	case "elastic_liquidity_supplier_decision":
+		return 0
+	case "OrderAccepted", "OrderRejected":
+		return 1
+	case "elastic_liquidity_supplier_fill":
+		return 2
+	case "OrderCancelled", "OrderCancelRejected":
+		return 3
+	default:
+		return 4
+	}
+}
+
+func (r *CDFLiquidityRunAudit) processQuoteCashDecision(event Event, state *CDFLiquiditySupplierAudit, ledger *cdfQuoteCashLedger) {
+	var decision cdfDecisionEvidence
+	if err := decodeRequiredJSON(event.Raw(), &decision, "role", "client_id", "action", "quote_cash_available"); err != nil {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed quote-cash decision: " + err.Error()})
+		return
+	}
+	if decision.Role != state.Role || decision.ClientID != event.ClientID {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "quote-cash decision identity mismatch"})
+	}
+	if decision.QuoteCashAvailable < 0 || decision.QuoteCashAvailable != ledger.available {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier quote-cash headroom does not reconcile to independent ledger"})
+	}
+	if decision.Action != "submit" {
+		return
+	}
+	if decision.QuoteRequestID == 0 || !validSide(decision.Side) {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "quote-cash submission has incomplete request identity"})
+		return
+	}
+	if _, exists := ledger.pendingByID[decision.QuoteRequestID]; exists {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "quote-cash submission reuses a request identity"})
+		return
+	}
+	reservation := int64(0)
+	if decision.Side == "BUY" {
+		var ok bool
+		reservation, ok = expectedCDFQuoteCashAmount(decision.QuotePrice, decision.QuoteQty, state.configuredBasePrecision, state.configuredMakerFeeBps)
+		if !ok || decision.QuoteCashRequired != reservation {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier buy reservation is not independently reconstructible"})
+			return
+		}
+		if reservation > ledger.available {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier buy reservation exceeds independently reconstructed cash"})
+			return
+		}
+		ledger.available -= reservation
+		ledger.reserved, _ = exactAdd(ledger.reserved, reservation)
+	}
+	ledger.pendingByID[decision.QuoteRequestID] = cdfPendingCashReservation{side: decision.Side, reserved: reservation}
+}
+
+func (r *CDFLiquidityRunAudit) processQuoteCashAccepted(event Event, state *CDFLiquiditySupplierAudit, ledger *cdfQuoteCashLedger) {
+	var accepted cdfAcceptedEvidence
+	if err := decodeRequiredJSON(event.Raw(), &accepted, "order_id", "request_id", "side", "price", "qty"); err != nil {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed quote-cash acceptance: " + err.Error()})
+		return
+	}
+	pending, exists := ledger.pendingByID[accepted.RequestID]
+	if !exists {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "accepted quote has no independent cash reservation"})
+		return
+	}
+	if accepted.ClientID != 0 && accepted.ClientID != event.ClientID || accepted.OrderID == 0 || !validSide(accepted.Side) || accepted.Qty <= 0 {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "quote-cash acceptance identity is invalid"})
+		return
+	}
+	if _, exists := ledger.ordersByID[accepted.OrderID]; exists {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "quote-cash acceptance reuses an order identity"})
+		return
+	}
+	if pending.side != accepted.Side {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "accepted quote side disagrees with its cash reservation"})
+		return
+	}
+	delete(ledger.pendingByID, accepted.RequestID)
+	ledger.ordersByID[accepted.OrderID] = &cdfCashOrder{remainingReserve: pending.reserved}
+}
+
+func (r *CDFLiquidityRunAudit) processQuoteCashRejected(event Event, state *CDFLiquiditySupplierAudit, ledger *cdfQuoteCashLedger) {
+	var rejected struct {
+		RequestID uint64 `json:"request_id"`
+	}
+	if err := decodeRequiredJSON(event.Raw(), &rejected, "request_id"); err != nil || rejected.RequestID == 0 {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed quote-cash rejection"})
+		return
+	}
+	pending, exists := ledger.pendingByID[rejected.RequestID]
+	if !exists {
+		return
+	}
+	delete(ledger.pendingByID, rejected.RequestID)
+	if pending.reserved > 0 {
+		ledger.available, _ = exactAdd(ledger.available, pending.reserved)
+		ledger.reserved, _ = exactAdd(ledger.reserved, -pending.reserved)
+	}
+}
+
+func (r *CDFLiquidityRunAudit) processQuoteCashCancelled(event Event, state *CDFLiquiditySupplierAudit, ledger *cdfQuoteCashLedger) {
+	var cancelled cdfCancelledEvidence
+	if err := decodeRequiredJSON(event.Raw(), &cancelled, "order_id", "request_id"); err != nil || cancelled.OrderID == 0 {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed quote-cash cancellation"})
+		return
+	}
+	order, exists := ledger.ordersByID[cancelled.OrderID]
+	if !exists {
+		return
+	}
+	if order.remainingReserve > 0 {
+		ledger.available, _ = exactAdd(ledger.available, order.remainingReserve)
+		ledger.reserved, _ = exactAdd(ledger.reserved, -order.remainingReserve)
+	}
+	delete(ledger.ordersByID, cancelled.OrderID)
+}
+
+func (r *CDFLiquidityRunAudit) processQuoteCashFill(event Event, state *CDFLiquiditySupplierAudit, ledger *cdfQuoteCashLedger) {
+	var fill cdfFillEvidence
+	if err := decodeRequiredJSON(event.Raw(), &fill, "order_id", "trade_id", "side", "price", "qty", "is_full", "fee_amount", "fee_asset"); err != nil {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed quote-cash fill: " + err.Error()})
+		return
+	}
+	key := cdfFillKey{VenueID: event.VenueID, ClientID: event.ClientID, OrderID: fill.OrderID, TradeID: fill.TradeID}
+	if _, exists := ledger.processedFills[key]; exists {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "quote-cash fill is duplicated"})
+		return
+	}
+	ledger.processedFills[key] = struct{}{}
+	order := ledger.ordersByID[fill.OrderID]
+	if order == nil || fill.Qty <= 0 || fill.Price <= 0 || fill.FeeAmount < 0 || !validSide(fill.Side) {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "quote-cash fill has no valid live reservation"})
+		return
+	}
+	amount, ok := cdfQuoteCashFillAmount(fill, state)
+	if !ok {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "quote-cash fill amount is not reconstructible"})
+		return
+	}
+	if fill.Side == "BUY" {
+		if order.remainingReserve < amount {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "quote-cash fill exceeds independent reservation"})
+			return
+		}
+		order.remainingReserve -= amount
+		ledger.reserved, _ = exactAdd(ledger.reserved, -amount)
+	} else {
+		ledger.available, ok = exactAdd(ledger.available, amount)
+		if !ok {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "quote-cash sell proceeds overflow"})
+			return
+		}
+	}
+	if fill.IsFull {
+		if order.remainingReserve > 0 {
+			ledger.available, _ = exactAdd(ledger.available, order.remainingReserve)
+			ledger.reserved, _ = exactAdd(ledger.reserved, -order.remainingReserve)
+		}
+		delete(ledger.ordersByID, fill.OrderID)
+	}
+}
+
+func expectedCDFQuoteCashAmount(price, quantity, basePrecision, makerFeeBps int64) (int64, bool) {
+	if price <= 0 || quantity <= 0 || basePrecision <= 0 || makerFeeBps < 0 {
+		return 0, false
+	}
+	notional, ok := etypes.TryMulDiv(price, quantity, basePrecision)
+	if !ok {
+		return 0, false
+	}
+	fee := new(big.Int).Mul(big.NewInt(notional), big.NewInt(makerFeeBps))
+	fee.Quo(fee, big.NewInt(10_000))
+	if !fee.IsInt64() {
+		return 0, false
+	}
+	return exactAdd(notional, fee.Int64())
+}
+
+func cdfQuoteCashFillAmount(fill cdfFillEvidence, state *CDFLiquiditySupplierAudit) (int64, bool) {
+	notional, ok := etypes.TryMulDiv(fill.Price, fill.Qty, state.configuredBasePrecision)
+	if !ok {
+		return 0, false
+	}
+	if fill.FeeAsset == state.configuredQuoteAsset {
+		if fill.Side == "BUY" {
+			return exactAdd(notional, fill.FeeAmount)
+		}
+		if fill.FeeAmount > notional {
+			return 0, false
+		}
+		return notional - fill.FeeAmount, true
+	}
+	return notional, true
 }
 
 func (r *CDFLiquidityRunAudit) validateCDFReference(event Event, decision cdfDecisionEvidence, state *CDFLiquiditySupplierAudit) {
