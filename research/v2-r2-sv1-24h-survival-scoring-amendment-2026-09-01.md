@@ -69,3 +69,29 @@ contract.
 The reserved holdout seeds `619`, `631`, and `641` remain absent and unread by
 the development scorer. A passing development score is not freeze
 authorization and cannot open the holdout boundary.
+
+## Append-only correction — 2026-09-02
+
+Before any SV1 24-hour cell ran, the scorer contract was corrected to
+`v2-r2-sv1-24h-development-scorer-v2` and the survival contract was corrected
+to `v2-r2-sv1-24h-survival-side-availability-v2` at source commit `d980df9`.
+The correction does not change the simulator, calendar, CDF roster, or
+predecessor result.
+
+The scorer now invokes viability with `-viability-judge-life-edges` and
+requires exactly 23 consecutive one-hour windows beginning at the registered
+one-hour warm-up boundary for each of `central`, `north`, and `south`. It
+checks window start/end identity, venue grouping, book window counts, and the
+existing two-sided predicates. Missing, shifted, duplicated, or unexpected
+venue windows fail treatment qualification. The shared jq transformation and
+adversarial fixtures are recorded in
+`scripts/v2-r2-sv1-survival-summary.jq` and
+`scripts/test-v2-r2-sv1-survival-contract.sh`.
+
+The paired no-CDF controls remain required population and evidence controls,
+but their survival outcome is a diagnostic rather than a treatment viability
+gate. This is explicit because the control is expected to provide the
+counterfactual failure mode; the scorer nevertheless retains its complete
+survival record and reports a failed control measurement separately. The
+paired treatment-minus-control survival effect is not claimed by this
+endpoint without a separately registered estimand.
