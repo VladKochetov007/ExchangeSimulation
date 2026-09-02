@@ -93,6 +93,7 @@ test:
 	@$(GOTEST) ./...
 	@./scripts/test-v2-integrated-longrun-contract.sh
 	@./scripts/test-v2-integrated-longrun-r2-contract.sh
+	@./scripts/test-v2-r2-sv1-activation-contract.sh
 	@./scripts/test-v2-r2-sv1-survival-contract.sh
 	@./scripts/test-v2-integrated-longrun-archive.sh
 	@./scripts/test-v2-integrated-longrun-r2-archive.sh
