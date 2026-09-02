@@ -1,0 +1,84 @@
+{
+  "automation_interval": 1000000000,
+  "cdf_liability_hedger": {
+    "decision_interval": 2000000000,
+    "decision_phase_offset": 0,
+    "enabled": true,
+    "max_abs_obligation_qty": 2000000000,
+    "max_request_qty": 100000000,
+    "obligation_interval": 10000000000,
+    "obligation_step_qty": 200000000,
+    "policy_mode": "delivery_liability",
+    "symbol": "CDF/USD"
+  },
+  "checkpoint_interval_seconds": 60,
+  "cross_asset_collateral_marks": true,
+  "cross_asset_spot_graph": true,
+  "description": "V2-R2-SV1B development-only paired no-roster population for activation-643; no CDF elastic roster, no 24h or holdout claim.",
+  "elastic_supplier_count": 8,
+  "elastic_supplier_reference_half_life": 0,
+  "elastic_supplier_units_per_percent": 15000000000,
+  "evidence_format": "evstream_v3",
+  "experiment_id": "v2-r2-sv1b-activation-643-control",
+  "fixed_distance_maker_count": 0,
+  "future_flow_count": 0,
+  "greek_interval": 60000000000,
+  "hypothesis_id": "V2-R2-SV1B-CDF-LIQUIDITY-CONTROL",
+  "imbalance_maker_count": 0,
+  "latency_profiles": {
+    "cdf_elastic_supplier": {
+      "delay": 10000000,
+      "model": "constant"
+    },
+    "liability_hedger": {
+      "delay": 20000000,
+      "market_data_scale": 2,
+      "model": "constant"
+    }
+  },
+  "long_future_tenor": 43200000000000,
+  "long_option_tenor": 43200000000000,
+  "market_data_receipt_roles": [
+    "liability_hedger"
+  ],
+  "noise_funding_lots": 200,
+  "noise_order_qty": 20000000,
+  "noise_target_qty_by_symbol": {
+    "CDF/USD": 20000000,
+    "ABC/CDF": 20000000
+  },
+  "noise_trader_count": 4,
+  "record_liability_hedger_decisions": true,
+  "record_market_data_receipts": true,
+  "r2_expiry_calendar": {
+    "schedules": [
+      {
+        "name": "short",
+        "listing_interval_nano": 3600000000000,
+        "time_to_expiry_nano": 7200000000000
+      },
+      {
+        "name": "medium",
+        "listing_interval_nano": 10800000000000,
+        "time_to_expiry_nano": 21600000000000
+      },
+      {
+        "name": "long",
+        "listing_interval_nano": 21600000000000,
+        "time_to_expiry_nano": 43200000000000
+      }
+    ]
+  },
+  "seed": 643,
+  "short_future_tenor": 7200000000000,
+  "short_option_tenor": 7200000000000,
+  "snapshot_interval": 1000000000,
+  "status": "preregistered",
+  "step": 1000000000,
+  "strict_population_accounting": true,
+  "venue_ids": [
+    "north",
+    "central",
+    "south"
+  ]
+}

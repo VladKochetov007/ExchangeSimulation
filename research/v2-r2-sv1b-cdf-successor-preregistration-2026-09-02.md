@@ -52,16 +52,16 @@ index, or instantaneous cross-venue mark is available to the supplier.
 The roster has four roles per venue. Values below are raw fixed-point units;
 `base_precision = 100,000,000` and `quote_precision = 100,000`. Thus the
 initial base balances are 400--700 CDF, and the initial quote balances are
-$1,800--$2,700. The quote balances are deliberately close to, but above, each
+$1.8--$2.7 million. The quote balances are deliberately close to, but above, each
 role's maximum reference-price position notional (including the registered
 maker fee); they are finite and can bind if the observed price rises.
 
 | role | phase offset | initial CDF | initial USD raw | max position | max inventory | max quote qty | elasticity / % | reference half-life |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `cdf_elastic_supplier_1` | 0 ns | 40,000,000,000 | 180,000,000 | 40,000,000,000 | 80,000,000,000 | 40,000,000 | 12,000,000,000 | 3.0 h |
-| `cdf_elastic_supplier_2` | 500,000,000 ns | 50,000,000,000 | 210,000,000 | 50,000,000,000 | 100,000,000,000 | 50,000,000 | 15,000,000,000 | 4.0 h |
-| `cdf_elastic_supplier_3` | 1,000,000,000 ns | 60,000,000,000 | 240,000,000 | 60,000,000,000 | 120,000,000,000 | 60,000,000 | 18,000,000,000 | 5.0 h |
-| `cdf_elastic_supplier_4` | 1,500,000,000 ns | 70,000,000,000 | 270,000,000 | 70,000,000,000 | 140,000,000,000 | 70,000,000 | 21,000,000,000 | 6.0 h |
+| `cdf_elastic_supplier_1` | 0 ns | 40,000,000,000 | 180,000,000,000 | 40,000,000,000 | 80,000,000,000 | 40,000,000 | 12,000,000,000 | 3.0 h |
+| `cdf_elastic_supplier_2` | 500,000,000 ns | 50,000,000,000 | 210,000,000,000 | 50,000,000,000 | 100,000,000,000 | 50,000,000 | 15,000,000,000 | 4.0 h |
+| `cdf_elastic_supplier_3` | 1,000,000,000 ns | 60,000,000,000 | 240,000,000,000 | 60,000,000,000 | 120,000,000,000 | 60,000,000 | 18,000,000,000 | 5.0 h |
+| `cdf_elastic_supplier_4` | 1,500,000,000 ns | 70,000,000,000 | 270,000,000,000 | 70,000,000,000 | 140,000,000,000 | 70,000,000 | 21,000,000,000 | 6.0 h |
 
 All roles use:
 
@@ -70,6 +70,11 @@ All roles use:
 - `base_precision = 100,000,000`, `quote_precision = 100,000`;
 - `interval = 2,000,000,000 ns`, `max_observation_age = 60,000,000,000 ns`;
 - `maker_fee_bps = 5`.
+
+The zero phase is the explicit default and is omitted from normalized JSON
+because the field is optional; nonzero phase offsets are serialized and
+verified. This preserves a stable canonical representation without weakening
+the registered phase contract.
 
 The role differences are preregistered participant heterogeneity, not
 post-run calibration: finite balance-sheet capacity, inventory elasticity,

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "contract": "v2-r2-sv1b-24h-config-provenance-v1",
+  "candidate": "V2-R2-SV1B-24H-CDF-LIQUIDITY",
+  "predecessor": "V2-R2-SV1",
+  "source_configs": {
+    "dev-607.json": "3fef36431a1a62d5a9b59aeda96798bff033cba8dac88fdebe2c30a73183e7bd",
+    "dev-607-none.json": "6bddbcdec865ef26e23f169c8f7981a01e026220193986eed553a5637427f6be"
+  },
+  "activation_roster": {
+    "path": "research/configs/v2-r2-sv1b/activation-643.json",
+    "sha256": "d9204b2d5a185c9d7285fedcbacca960c67aeba6b8e483d434e841006b037cc2"
+  },
+  "registered_configs": {
+    "control-643-none.json": "1bb69ef8ccbf8b627e469c626dbd8298de88ce58962fa87a9b38ef5169ce5580",
+    "control-643.json": "e59f8dc95e762fc34411eab6179b816a7337257a4ad24ab72ba909931b099c6a",
+    "control-647.json": "7b6438398f8a874172d25406c168a711f513ad3e5a99a9f740054437dd19f09e",
+    "control-653.json": "121b4a2ce93f30234ffd8a44c1e6dd4e6437990e503f1a6309949554bb1a3c30",
+    "treatment-643.json": "c597a43d92847ee88c52f82cee2658e3e29b44128eb8447bbb9678389d2e9e70",
+    "treatment-647.json": "dde08eacae97e6118ed8429c3aa4ca617dac8dbb1550c3f5f7464e51265f0ed3",
+    "treatment-653.json": "bd899d489524a9ca44e8ecddd9d084ba516f56261ec3ae03027e541b9f12c416"
+  },
+  "fresh_development_seeds": [
+    643,
+    647,
+    653
+  ],
+  "activation_seed": 643,
+  "reserved_holdout_seeds": [
+    619,
+    631,
+    641
+  ],
+  "transform": {
+    "full_log_source": "research/configs/v2-integrated-longrun-r2/dev-607.json",
+    "no_log_source": "research/configs/v2-integrated-longrun-r2/dev-607-none.json",
+    "seed_rule": "set source seed to the first three unused odd primes greater than reserved holdout maximum 641",
+    "treatment": "inject the immutable SV1B activation roster and persist supplier decisions/receipts",
+    "control": "remove only the SV1B roster and supplier-decision recording; preserve the paired base configuration"
+  },
+  "generator": {
+    "path": "scripts/render-v2-r2-sv1b-24h-configs.sh",
+    "sha256": "d2e36d5d7386502cdd3e06ac0a5956d1bb00f495d2c82f9ea19ed591a7792a24"
+  },
+  "holdout_policy": "development generator and checker never read or create holdout 619/631/641"
+}
