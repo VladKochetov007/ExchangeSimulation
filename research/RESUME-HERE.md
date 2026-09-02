@@ -1030,3 +1030,38 @@ binary hashes, sidecar hashes, ordering, and simulator economics are
 unchanged, while the shared analyzer scanner, replay, and artifact hash can
 read either storage form. Treatment-607 remains the only active cell; no
 613/617 cell, parity control, freeze, or holdout is authorized yet.
+
+### 2026-09-02 — SV1 population and survival scorer correction
+
+The active successor tree is now `9dcb427` on
+`feature/r2-cdf-survival-successor`. The predecessor R2 candidate remains
+closed as **NON-VIABLE AT THE 24H MARKET-SURVIVAL GATE**. No development cell,
+parity cell, freeze, or holdout has been authorized from this correction.
+
+The code checkpoint `d980df9` corrected the SV1 scorer before any 24-hour cell:
+zero-CDF controls now satisfy a separate population contract, while treatment
+cells alone drive the treatment viability endpoint. Controls are still
+extracted, their survival is retained as a diagnostic, and their exact
+same-seed CDF audit is required; a control's expected market-survival failure
+is not mislabeled as invalid treatment evidence. The typed
+`priceunavailable` artifact, positive/negative inventory bound, and bounded
+calendar option-listing delay are also required by the current v3 extraction
+contract.
+
+The survival contract is now v2: after the registered one-hour warm-up it
+requires exactly 23 consecutive one-hour CDF/USD windows at each of
+`central,north,south`, with exact starts/ends, complete book coverage, and the
+existing two-sided predicates. `mvanalyze` is invoked with life-edge judgment
+enabled. The shared jq contract and adversarial fixtures are in
+`scripts/v2-r2-sv1-survival-summary.jq` and
+`scripts/test-v2-r2-sv1-survival-contract.sh`; the append-only rationale is
+`research/v2-r2-sv1-contract-correction-2026-09-02.md`.
+
+A retained analyzer-only replay of the old raw `treatment-607` trajectory is
+still running under the namespace lock. It is diagnostic only: its raw source
+is `3f73f30`, it is not a matched treatment/control pair, and it cannot
+authorize the successor. Let it finish normally, then run the clean full
+mechanical/race gates. Rebuild clean Go 1.27 binaries and obtain one fresh
+exact-tree Sol-high review before any current-revision capacity measurement or
+new development cell. The performance feed was fetched through `c4434ad` with
+no newer commit; binary-evidence promotion remains deferred.

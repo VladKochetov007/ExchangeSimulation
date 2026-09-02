@@ -861,3 +861,33 @@ sidecar multiset identity, and economic behavior are unchanged. The next
 safe action is a clean pinned rebuild followed by one compressed treatment-607
 extraction; no later development cell, parity control, freeze, or holdout has
 been authorized.
+
+## Append-only operational update: SV1 scorer correction — 2026-09-02
+
+The current successor branch is `feature/r2-cdf-survival-successor` at
+`9dcb427`; the code checkpoint for the scorer correction is `d980df9`. The
+predecessor R2 candidate remains archived as **NON-VIABLE AT THE 24H
+MARKET-SURVIVAL GATE**. No SV1 24-hour cell, parity control, freeze, or holdout
+has been consumed.
+
+The correction is pre-cell and does not change the simulator or CDF roster. It
+separates the positive treatment activation predicate from the intentionally
+empty CDF control population, uses a typed fail-closed `PRICE_UNAVAILABLE`
+artifact for binary evidence, fixes the negative inventory-bound assertion,
+and bounds delayed option listings at the registered 60-second tolerance.
+
+The survival scorer now requires the analyzer's life-edge judgment and exactly
+23 one-hour windows after the one-hour warm-up for every registered CDF/USD
+venue. It checks exact window starts and ends, complete book coverage, and
+side availability both per window and in the aggregate. Control survival
+remains a retained diagnostic; the treatment endpoint and the strict same-seed
+treatment/control audit remain separate. The detailed correction record is
+`research/v2-r2-sv1-contract-correction-2026-09-02.md`.
+
+The retained old-source treatment-607 analyzer-only replay remains active and
+holds the SV1 namespace lock. It cannot be treated as a current result or a
+matched pair. After it exits, the next gates are clean full `make test`, vet,
+targeted race/evidence-contract checks, one fresh exact-tree Sol-high review,
+then a Go 1.27 rebuild and current-revision binary-capacity measurement. The
+performance branch was fetched through `c4434ad`; no newer commit was found,
+and no performance implementation was merged.
