@@ -171,7 +171,7 @@ func Open(dir string) (*Run, error) {
 		if err != nil {
 			return err
 		}
-		if !entry.IsDir() && strings.HasSuffix(path, ".jsonl") {
+		if !entry.IsDir() && isEventLogPath(path) {
 			run.files = append(run.files, path)
 		}
 		return nil
@@ -205,7 +205,7 @@ func OpenRenderedRun(reportDir, evidenceDir string) (*Run, error) {
 		if walkErr != nil {
 			return walkErr
 		}
-		if !entry.IsDir() && strings.HasSuffix(path, ".jsonl") {
+		if !entry.IsDir() && isEventLogPath(path) {
 			run.files = append(run.files, path)
 		}
 		return nil

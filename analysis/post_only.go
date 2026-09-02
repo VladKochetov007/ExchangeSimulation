@@ -387,7 +387,7 @@ func (r *Run) MeasureMakerPassiveRefreshOrdering(options MakerQuoteSizeOptions) 
 		}
 		for _, path := range files {
 			result.BookFiles++
-			canonicalFile := filepath.ToSlash(filepath.Join("venues", book.venueID, "spot", filepath.Base(path)))
+			canonicalFile := filepath.ToSlash(filepath.Join("venues", book.venueID, "spot", logicalEventLogName(path)))
 			for _, item := range expected {
 				if item.file == "" {
 					item.file = canonicalFile

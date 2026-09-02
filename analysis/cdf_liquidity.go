@@ -1038,10 +1038,10 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 
 	generalFiles, bookFiles := make([]string, 0), make([]string, 0)
 	for _, path := range r.Files() {
-		if filepath.Base(path) == "general.jsonl" {
+		if logicalEventLogName(path) == "general.jsonl" {
 			generalFiles = append(generalFiles, path)
 		}
-		if filepath.Base(path) == "CDF-USD.jsonl" {
+		if logicalEventLogName(path) == "CDF-USD.jsonl" {
 			bookFiles = append(bookFiles, path)
 		}
 	}

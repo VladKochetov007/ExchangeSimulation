@@ -3,7 +3,6 @@ package analysis
 import (
 	"fmt"
 	"math/big"
-	"path/filepath"
 	"sort"
 )
 
@@ -169,7 +168,7 @@ func (r *Run) MeasureMarginChecks(opts MarginCheckOptions) (*MarginCheckAudit, e
 	derivativeFiles := make([]string, 0, len(r.files))
 	generalFiles := make([]string, 0, len(r.files))
 	for _, file := range r.files {
-		switch filepath.Base(file) {
+		switch logicalEventLogName(file) {
 		case "derivatives.jsonl":
 			derivativeFiles = append(derivativeFiles, file)
 		case "general.jsonl":

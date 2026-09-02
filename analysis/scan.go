@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"runtime"
 	"sync"
 )
@@ -152,7 +151,7 @@ func (r *Run) Scan(opts ScanOptions, visit func(Event)) error {
 }
 
 func scanFile(path string, keep map[string]bool, needles [][]byte, visit func(Event)) error {
-	file, err := os.Open(path)
+	file, err := openEventLog(path)
 	if err != nil {
 		return err
 	}

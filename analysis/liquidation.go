@@ -2,7 +2,6 @@ package analysis
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
 )
 
@@ -146,7 +145,7 @@ func (r *Run) MeasureLiquidations() (*LiquidationAudit, error) {
 	// long audit reading unrelated spot-book evidence.
 	files := make([]string, 0, len(r.files))
 	for _, file := range r.files {
-		name := filepath.Base(file)
+		name := logicalEventLogName(file)
 		if name == "derivatives.jsonl" || name == "general.jsonl" {
 			files = append(files, file)
 		}

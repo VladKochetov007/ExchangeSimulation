@@ -1,7 +1,6 @@
 package analysis
 
 import (
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -74,7 +73,7 @@ type fillPositionChainKey struct {
 func (r *Run) MeasureFillPositions() (*FillPositionAudit, error) {
 	files := make([]string, 0, len(r.files))
 	for _, file := range r.files {
-		if filepath.Base(file) == "derivatives.jsonl" {
+		if logicalEventLogName(file) == "derivatives.jsonl" {
 			files = append(files, file)
 		}
 	}

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 
 	etypes "exchange_sim/types"
@@ -311,7 +310,7 @@ func ReplayFile(path string, visit ReplayVisitor) (*ReplayDrift, error) {
 
 // ReplayFileWith is ReplayFile with an additional visitor for accepted orders.
 func ReplayFileWith(path string, visit ReplayVisitor, onAccept AcceptVisitor) (*ReplayDrift, error) {
-	file, err := os.Open(path)
+	file, err := openEventLog(path)
 	if err != nil {
 		return nil, err
 	}

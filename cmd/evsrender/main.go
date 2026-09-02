@@ -14,13 +14,16 @@ import (
 
 func main() {
 	inputDir := flag.String("dir", "", "run directory containing events.evs")
-	outputDir := flag.String("out", "", "empty directory receiving venues/<venue>/<route>.jsonl")
+	outputDir := flag.String("out", "", "empty directory receiving reconstructed venue routes")
+	routeCompression := flag.String("route-compression", "none", "route storage: none or zstd (.jsonl.zst)")
 	flag.Parse()
 	if *inputDir == "" || *outputDir == "" {
 		fmt.Fprintln(os.Stderr, "evsrender: -dir and -out are required")
 		os.Exit(2)
 	}
-	report, err := multivenue.RenderBinaryEvidence(*inputDir, *outputDir)
+	report, err := multivenue.RenderBinaryEvidenceWithOptions(*inputDir, *outputDir, multivenue.BinaryRenderOptions{
+		RouteCompression: multivenue.RouteCompression(*routeCompression),
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "evsrender: %v\n", err)
 		os.Exit(1)

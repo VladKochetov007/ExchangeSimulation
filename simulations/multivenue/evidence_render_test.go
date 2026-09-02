@@ -8,12 +8,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 
 	"exchange_sim/evstream"
 	"exchange_sim/exchange"
@@ -55,7 +58,7 @@ func TestRenderBinaryEvidenceMergesEvidenceOnlySidecarsByVenueSequence(t *testin
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	if report.EventFrames != 2 || report.DictionaryFrames == 0 || report.Routes != 1 || report.ExecutionHash == "" {
+	if report.EventFrames != 2 || report.DictionaryFrames == 0 || report.Routes != 1 || report.ExecutionHash == "" || report.RouteCompression != string(RouteCompressionNone) {
 		t.Fatalf("report = %+v", report)
 	}
 	want := []byte(`{"client_id":7,"data":{"venue_id":"north","sequence":1,"payload":{"value":1}},"event":"first","sim_ts":10}` + "\n")
@@ -81,6 +84,35 @@ func TestRenderBinaryEvidenceMergesEvidenceOnlySidecarsByVenueSequence(t *testin
 	}
 	if !bytes.Equal(actual, actualTwo) {
 		t.Fatal("reconstruction is not deterministic")
+	}
+
+	compressedDir := filepath.Join(t.TempDir(), "rendered")
+	compressedReport, err := RenderBinaryEvidenceWithOptions(inputDir, compressedDir, BinaryRenderOptions{
+		RouteCompression: RouteCompressionZstd,
+	})
+	if err != nil {
+		t.Fatalf("compressed render: %v", err)
+	}
+	if compressedReport.RouteCompression != string(RouteCompressionZstd) {
+		t.Fatalf("compressed report = %+v", compressedReport)
+	}
+	compressedFile, err := os.Open(filepath.Join(compressedDir, "venues", "north", "general.jsonl.zst"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder, err := zstd.NewReader(compressedFile, zstd.WithDecoderConcurrency(1))
+	if err != nil {
+		_ = compressedFile.Close()
+		t.Fatal(err)
+	}
+	decoded, err := io.ReadAll(decoder)
+	decoder.Close()
+	_ = compressedFile.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decoded, want) {
+		t.Fatalf("compressed route decoded bytes differ:\n got %s\nwant %s", decoded, want)
 	}
 }
 

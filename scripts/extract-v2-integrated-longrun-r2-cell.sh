@@ -32,6 +32,7 @@ source "$contract_script"
 source "$root_dir/scripts/v2-r2-evidence-input-contract.sh"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 renderer=${EVSRENDER_BIN:-"$root_dir/bin/evsrender"}
+render_route_compression=${V2_R2_RENDER_ROUTE_COMPRESSION:-zstd}
 conservation_tolerance_fixed_units=1000
 calendar_epoch_nano=1735689600000000000
 calendar_hour_nano=3600000000000
@@ -51,6 +52,10 @@ fail() {
 	printf 'integrated long-run extraction failure: %s\n' "$*" >&2
 	exit 1
 }
+case "$render_route_compression" in
+	none|zstd) ;;
+	*) fail "unsupported rendered route compression: $render_route_compression" ;;
+esac
 v2_r2_acquire_namespace_lock || fail "could not acquire the R2 evidence namespace lock"
 require_file() {
 	local path=$1
@@ -248,10 +253,12 @@ if [[ "$evidence_format" == "evstream_v3" ]]; then
 	[[ "$renderer_revision" == "$head_revision" && "$renderer_modified" == false && "$renderer_trimpath" == true && "$renderer_cgo_enabled" == 0 ]] ||
 		fail "renderer is not a clean reproducible build of current HEAD"
 	rendered_dir=$(mktemp -d)
-	render_report=$("$renderer" -dir "$cell" -out "$rendered_dir") || fail "binary evidence rendering failed"
+	render_report=$("$renderer" -dir "$cell" -out "$rendered_dir" -route-compression "$render_route_compression") || fail "binary evidence rendering failed"
 	jq -e --argjson event_frames "$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")" \
 		--arg execution_hash "$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
-		'.event_frames == $event_frames and .execution_stream_hash == $execution_hash and (.routes | type) == "number"' \
+		--arg route_compression "$render_route_compression" \
+		'.event_frames == $event_frames and .execution_stream_hash == $execution_hash and
+		 (.routes | type) == "number" and .route_compression == $route_compression' \
 		<<<"$render_report" >/dev/null || fail "renderer report does not match binary attestation"
 	while IFS= read -r name; do
 		ln -s -- "$cell/$name" "$rendered_dir/$name"
@@ -604,6 +611,7 @@ jq -n \
 	--arg renderer_revision "$renderer_revision" \
 	--arg renderer_sha256 "$renderer_sha256" \
 	--arg renderer_go_version "$renderer_go_version" \
+	--arg renderer_route_compression "$render_route_compression" \
 	--argjson analyzer_modified "$analyzer_modified_json" \
 	--argjson required_artifacts "$required_json" \
 	--argjson artifact_sha256 "$artifact_sha256" \
@@ -629,7 +637,7 @@ jq -n \
 		analyzer_trimpath: $analyzer_trimpath, analyzer_cgo_enabled: $analyzer_cgo_enabled,
 		analyzer_go_version: $analyzer_go_version,
 		renderer_revision: $renderer_revision, renderer_sha256: $renderer_sha256,
-		renderer_go_version: $renderer_go_version,
+		renderer_go_version: $renderer_go_version, renderer_route_compression: $renderer_route_compression,
 		require_exact_replay: true,
 		simulator_revision: $simulator_revision, simulator_sha256: $simulator_sha256,
 		simulator_trimpath: $simulator_trimpath, simulator_cgo_enabled: $simulator_cgo_enabled,
@@ -647,10 +655,12 @@ jq -n \
 mv "$metadata_tmp" "$analysis_dir/analysis-metadata.json"
 require_json_object "$analysis_dir/analysis-metadata.json"
 jq -e --arg revision "$head_revision" --arg analyzer_revision "$analyzer_revision" \
-	--arg contract "$contract_version" --argjson required_artifacts "$required_json" \
+	--arg contract "$contract_version" --arg renderer_route_compression "$render_route_compression" \
+	--argjson required_artifacts "$required_json" \
 	'.schema_version == 3 and .evidence_format == "evstream_v3" and .analysis_revision == $revision and
 	 .analyzer_revision == $analyzer_revision and .analyzer_vcs_modified == false and
 	 .require_exact_replay == true and
+	 .renderer_route_compression == $renderer_route_compression and
 	 .analysis_contract == $contract and .required_artifacts == $required_artifacts and
 	 (.artifact_sha256 | keys) == ($required_artifacts | sort) and
 	all(.artifact_sha256 | to_entries[]; (.value | test("^[0-9a-f]{64}$"))) and

@@ -142,5 +142,5 @@ func pathHasSymbol(path, venueID, symbol string) bool {
 
 // symbolFromPath recovers the instrument from a book log's filename.
 func symbolFromPath(path string) string {
-	return strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	return strings.TrimSuffix(logicalEventLogName(path), ".jsonl")
 }

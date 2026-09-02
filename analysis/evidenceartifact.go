@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"runtime"
 	"sync"
 )
@@ -123,7 +122,7 @@ func (r *Run) MeasureEvidenceArtifactHash() (*EvidenceArtifactHash, error) {
 }
 
 func hashEvidenceFile(path string) (artifactSum256, error) {
-	file, err := os.Open(path)
+	file, err := openEventLog(path)
 	if err != nil {
 		return artifactSum256{}, err
 	}

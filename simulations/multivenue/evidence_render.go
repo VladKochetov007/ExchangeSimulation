@@ -21,8 +21,26 @@ type BinaryRenderReport struct {
 	EventFrames      uint64 `json:"event_frames"`
 	DictionaryFrames uint64 `json:"dictionary_frames"`
 	Routes           int    `json:"routes"`
+	RouteCompression string `json:"route_compression"`
 	ExecutionHash    string `json:"execution_stream_hash"`
 	CanonicalHash    string `json:"canonical_execution_stream_hash"`
+}
+
+// RouteCompression controls how reconstructed route files are stored. It is a
+// storage choice only: the renderer validates and hashes the same JSON records
+// before they are compressed, and the analysis package can read either form.
+type RouteCompression string
+
+const (
+	RouteCompressionNone RouteCompression = "none"
+	RouteCompressionZstd RouteCompression = "zstd"
+)
+
+// BinaryRenderOptions makes renderer storage policy explicit at the adapter
+// boundary. The default remains uncompressed JSONL for compatibility with
+// existing callers and fixtures.
+type BinaryRenderOptions struct {
+	RouteCompression RouteCompression
 }
 
 type renderRouteKey struct {
@@ -67,8 +85,24 @@ type renderArtifactDigest struct {
 // per-venue sequence; missing, duplicate, or out-of-order records fail closed.
 // outDir must be empty or absent and must not be inside inputDir.
 func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
+	return RenderBinaryEvidenceWithOptions(inputDir, outDir, BinaryRenderOptions{
+		RouteCompression: RouteCompressionNone,
+	})
+}
+
+// RenderBinaryEvidenceWithOptions reconstructs routed evidence using the
+// requested route storage policy. RouteCompressionZstd writes one independent
+// zstd stream per route with a .jsonl.zst suffix; the logical route remains
+// the original .jsonl path for sequence and symbol semantics.
+func RenderBinaryEvidenceWithOptions(inputDir, outDir string, options BinaryRenderOptions) (BinaryRenderReport, error) {
 	if inputDir == "" || outDir == "" {
 		return BinaryRenderReport{}, fmt.Errorf("multivenue: input and output directories are required")
+	}
+	if options.RouteCompression == "" {
+		options.RouteCompression = RouteCompressionNone
+	}
+	if options.RouteCompression != RouteCompressionNone && options.RouteCompression != RouteCompressionZstd {
+		return BinaryRenderReport{}, fmt.Errorf("multivenue: unsupported route compression %q", options.RouteCompression)
 	}
 	inputAbs, err := canonicalRenderPath(inputDir, false)
 	if err != nil {
@@ -94,7 +128,7 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 		return BinaryRenderReport{}, err
 	}
 	defer func() { _ = sidecars.close() }()
-	rendered, err := newRenderOutput(outAbs)
+	rendered, err := newRenderOutput(outAbs, options.RouteCompression)
 	if err != nil {
 		return BinaryRenderReport{}, err
 	}
@@ -158,6 +192,7 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 		EventFrames:      eventFrames,
 		DictionaryFrames: reader.Count() - eventFrames,
 		Routes:           rendered.routeCount(),
+		RouteCompression: string(options.RouteCompression),
 		ExecutionHash:    hex.EncodeToString(digest[:]),
 		CanonicalHash:    hex.EncodeToString(rawDigest[:]),
 	}, nil

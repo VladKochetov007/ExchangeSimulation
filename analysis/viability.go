@@ -278,7 +278,7 @@ func symbolFromSpotFile(path string) string {
 	if filepath.Base(filepath.Clean(directory)) != "spot" {
 		return ""
 	}
-	return strings.ReplaceAll(strings.TrimSuffix(file, ".jsonl"), "-", "/")
+	return strings.ReplaceAll(strings.TrimSuffix(logicalEventLogName(file), ".jsonl"), "-", "/")
 }
 
 // bestWithDepth returns the best present price, its resting depth, and an

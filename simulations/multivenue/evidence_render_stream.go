@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 // renderSidecarCursor keeps only the next LogEvidenceOnly record from one
@@ -262,30 +265,64 @@ func (s *renderSidecars) close() error {
 }
 
 type renderRouteOutput struct {
-	file   *os.File
-	writer *bufio.Writer
+	file       *os.File
+	writer     *bufio.Writer
+	compressor io.WriteCloser
 }
 
 type renderOutput struct {
-	outputDir    string
-	stageDir     string
-	routes       map[renderRouteKey]*renderRouteOutput
-	nextVenueSeq map[string]uint64
-	closed       bool
-	committed    bool
+	outputDir        string
+	stageDir         string
+	routeCompression RouteCompression
+	routes           map[renderRouteKey]*renderRouteOutput
+	nextVenueSeq     map[string]uint64
+	closed           bool
+	committed        bool
 }
 
-func newRenderOutput(outputDir string) (*renderOutput, error) {
+func newRenderOutput(outputDir string, routeCompression RouteCompression) (*renderOutput, error) {
 	stageDir, err := os.MkdirTemp(filepath.Dir(outputDir), "."+filepath.Base(outputDir)+"-render-")
 	if err != nil {
 		return nil, fmt.Errorf("multivenue: create render staging directory: %w", err)
 	}
 	return &renderOutput{
-		outputDir:    outputDir,
-		stageDir:     stageDir,
-		routes:       make(map[renderRouteKey]*renderRouteOutput),
-		nextVenueSeq: make(map[string]uint64),
+		outputDir:        outputDir,
+		stageDir:         stageDir,
+		routeCompression: routeCompression,
+		routes:           make(map[renderRouteKey]*renderRouteOutput),
+		nextVenueSeq:     make(map[string]uint64),
 	}, nil
+}
+
+func (o *renderOutput) routePath(key renderRouteKey) string {
+	route := filepath.FromSlash(key.route)
+	if o.routeCompression == RouteCompressionZstd {
+		route += ".zst"
+	}
+	return filepath.Join(o.stageDir, "venues", key.venue, route)
+}
+
+func newRenderRouteOutput(path string, compression RouteCompression) (*renderRouteOutput, error) {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if err != nil {
+		return nil, err
+	}
+	output := &renderRouteOutput{file: file}
+	if compression == RouteCompressionZstd {
+		compressor, compressorErr := zstd.NewWriter(file,
+			zstd.WithEncoderLevel(zstd.SpeedFastest),
+			zstd.WithEncoderConcurrency(1),
+		)
+		if compressorErr != nil {
+			_ = file.Close()
+			return nil, compressorErr
+		}
+		output.compressor = compressor
+		output.writer = bufio.NewWriterSize(compressor, 64*1024)
+		return output, nil
+	}
+	output.writer = bufio.NewWriterSize(file, 64*1024)
+	return output, nil
 }
 
 func (o *renderOutput) append(key renderRouteKey, record renderRecord) error {
@@ -308,20 +345,20 @@ func (o *renderOutput) append(key renderRouteKey, record renderRecord) error {
 	}
 	routeOutput, ok := o.routes[key]
 	if !ok {
-		path := filepath.Join(o.stageDir, "venues", key.venue, filepath.FromSlash(key.route))
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+		path := o.routePath(key)
+		var err error
+		routeOutput, err = newRenderRouteOutput(path, o.routeCompression)
 		if err != nil {
 			if os.IsNotExist(err) {
 				if mkdirErr := os.MkdirAll(filepath.Dir(path), 0755); mkdirErr != nil {
 					return fmt.Errorf("multivenue: create rendered route directory %q: %w", key.route, mkdirErr)
 				}
-				file, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+				routeOutput, err = newRenderRouteOutput(path, o.routeCompression)
 			}
 			if err != nil {
 				return fmt.Errorf("multivenue: create rendered route %q: %w", key.route, err)
 			}
 		}
-		routeOutput = &renderRouteOutput{file: file, writer: bufio.NewWriterSize(file, 64*1024)}
 		o.routes[key] = routeOutput
 	}
 	if _, err := routeOutput.writer.Write(record.raw); err != nil {
@@ -354,6 +391,11 @@ func (o *renderOutput) close() error {
 		routeOutput := o.routes[key]
 		if err := routeOutput.writer.Flush(); err != nil {
 			closeErr = errors.Join(closeErr, err)
+		}
+		if routeOutput.compressor != nil {
+			if err := routeOutput.compressor.Close(); err != nil {
+				closeErr = errors.Join(closeErr, err)
+			}
 		}
 		if err := routeOutput.file.Close(); err != nil {
 			closeErr = errors.Join(closeErr, err)
