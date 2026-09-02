@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,8 +51,8 @@ func TestCDFSupplierRemovalCounterfactualUsesSideSpecificResidualDepth(t *testin
 	}
 	venueAudits := map[string]*CDFLiquidityVenueAudit{}
 	orders := map[cdfOrderKey]*cdfOrderState{
-		{VenueID: "north", ClientID: 7, OrderID: 11}: {clientID: 7, side: "BUY", remainingQty: 10},
-		{VenueID: "north", ClientID: 7, OrderID: 12}: {clientID: 7, side: "SELL", remainingQty: 5},
+		{VenueID: "north", ClientID: 7, OrderID: 11}: {clientID: 7, side: "BUY", price: 99, remainingQty: 10},
+		{VenueID: "north", ClientID: 7, OrderID: 12}: {clientID: 7, side: "SELL", price: 101, remainingQty: 5},
 	}
 	run.processBookEvent(Event{
 		Name: "BookSnapshot", VenueID: "north", ClientID: 0, SimTS: 1, Ordinal: 1,
@@ -90,8 +91,133 @@ func TestCDFSupplierRemovalCounterfactualRejectsSupplierDepthAboveAggregateSide(
 	if run.SupplierRemovalInvalidSnapshots != 1 || run.SupplierRemovalCounterfactualValid {
 		t.Fatalf("invalid removal projection = %+v", run)
 	}
-	if !hasCDFCheck(run.Checks, "supplier displayed depth exceeds") {
+	if !hasCDFCheck(run.Checks, "supplier displayed depth does not match exact public price levels") {
 		t.Fatalf("missing depth mismatch check: %+v", run.Checks)
+	}
+}
+
+func TestCDFSupplierRemovalCounterfactualRejectsSameSideDifferentPrice(t *testing.T) {
+	run := &CDFLiquidityRunAudit{MinimumExecutableQty: 1}
+	venueAudits := map[string]*CDFLiquidityVenueAudit{}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		{VenueID: "north", ClientID: 7, OrderID: 11}: {clientID: 7, side: "BUY", price: 100, remainingQty: 5},
+	}
+	run.processBookEvent(Event{
+		Name: "BookSnapshot", VenueID: "north", ClientID: 0, SimTS: 1, Ordinal: 1,
+		payload: json.RawMessage(`{"bids":[{"price":99,"visible_qty":5}],"asks":[]}`),
+	}, nil, orders, nil, venueAudits)
+	run.finalizeVenueAudits(venueAudits)
+	if run.SupplierRemovalInvalidSnapshots != 1 || run.SupplierRemovalCounterfactualValid {
+		t.Fatalf("different-price supplier projection = %+v, want invalid counterfactual", run)
+	}
+	if !hasCDFCheck(run.Checks, "supplier displayed depth does not match exact public price levels") {
+		t.Fatalf("missing exact-price mismatch check: %+v", run.Checks)
+	}
+}
+
+func TestCDFSupplierRemovalCounterfactualAcceptsExactDuplicatePriceLevels(t *testing.T) {
+	run := &CDFLiquidityRunAudit{MinimumExecutableQty: 1}
+	venueAudits := map[string]*CDFLiquidityVenueAudit{}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		{VenueID: "north", ClientID: 7, OrderID: 11}: {clientID: 7, side: "BUY", price: 99, remainingQty: 5},
+	}
+	run.processBookEvent(Event{
+		Name: "BookSnapshot", VenueID: "north", ClientID: 0, SimTS: 1, Ordinal: 1,
+		payload: json.RawMessage(`{"bids":[{"price":99,"visible_qty":2},{"price":99,"visible_qty":3}],"asks":[]}`),
+	}, nil, orders, nil, venueAudits)
+	run.finalizeVenueAudits(venueAudits)
+	if run.SupplierRemovalInvalidSnapshots != 0 || !run.SupplierRemovalCounterfactualValid {
+		t.Fatalf("exact-price supplier projection = %+v, want valid counterfactual", run)
+	}
+}
+
+func TestCDFLiquidityReportsSideSpecificSupplierDominance(t *testing.T) {
+	run := &CDFLiquidityRunAudit{MinimumExecutableQty: 1}
+	venueAudits := map[string]*CDFLiquidityVenueAudit{}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		{VenueID: "north", ClientID: 7, OrderID: 11}: {clientID: 7, side: "BUY", price: 99, remainingQty: 10},
+		{VenueID: "north", ClientID: 7, OrderID: 12}: {clientID: 7, side: "SELL", price: 101, remainingQty: 1},
+	}
+	run.processBookEvent(Event{
+		Name: "BookSnapshot", VenueID: "north", ClientID: 0, SimTS: 1, Ordinal: 1,
+		payload: json.RawMessage(`{"bids":[{"price":99,"visible_qty":10}],"asks":[{"price":101,"visible_qty":10}]}`),
+	}, nil, orders, nil, venueAudits)
+	run.finalizeVenueAudits(venueAudits)
+	if run.SupplierBidDepthOver75Count != 1 || run.SupplierBidDepthOver75Fraction != 1 || run.SupplierOnlyBidSnapshotCount != 1 {
+		t.Fatalf("bid-side concentration = %+v, want fully supplier-controlled bid side", run)
+	}
+	if run.SupplierAskDepthOver75Count != 0 || run.SupplierOnlyAskSnapshotCount != 0 {
+		t.Fatalf("ask-side concentration = %+v, want non-dominant ask side", run)
+	}
+}
+
+func TestCDFRemovalCounterfactualRequiresSupplierPresenceCoverage(t *testing.T) {
+	run := &CDFLiquidityRunAudit{SupplierCount: 1, SnapshotCount: 1, SupplierRemovalSnapshotCount: 1}
+	venueAudits := map[string]*CDFLiquidityVenueAudit{
+		"north": {VenueID: "north", SnapshotCount: 1, SupplierRemovalSnapshotCount: 1},
+	}
+	run.finalizeVenueAudits(venueAudits)
+	if run.SupplierRemovalCounterfactualValid || run.Venues[0].SupplierRemovalCounterfactualValid {
+		t.Fatalf("vacuous removal coverage was accepted: %+v", run)
+	}
+}
+
+func TestCDFDepthProjectionRejectsMalformedAndOverflowLevels(t *testing.T) {
+	if _, _, ok := displayedDepthByPrice([]bookLevel{{Price: 99, VisibleQty: -1}}); ok {
+		t.Fatal("negative visible depth was accepted")
+	}
+	if _, _, ok := displayedDepthByPrice([]bookLevel{{Price: 0, VisibleQty: 1}}); ok {
+		t.Fatal("non-positive visible price was accepted")
+	}
+	if _, _, ok := displayedDepthByPrice([]bookLevel{{Price: 99, VisibleQty: math.MaxInt64}, {Price: 99, VisibleQty: 1}}); ok {
+		t.Fatal("price-level depth overflow was accepted")
+	}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		{VenueID: "north", ClientID: 7, OrderID: 1}: {side: "BUY", price: 99, remainingQty: math.MaxInt64},
+		{VenueID: "north", ClientID: 7, OrderID: 2}: {side: "BUY", price: 99, remainingQty: 1},
+	}
+	if _, _, _, ok := supplierDisplayedDepthByPrice("north", orders); ok {
+		t.Fatal("supplier depth overflow was accepted")
+	}
+}
+
+func TestCDFLiquiditySeparatesNoFillEvidenceFromActivation(t *testing.T) {
+	run := writeCDFLiquidityFixture(t, true, false)
+	generalPath := filepath.Join(run.Dir, "venues", "north", "general.jsonl")
+	withoutFill := cdfFixtureLine(1, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":1,"observation_time":1,"observation_age":0,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":0,"target_position":9,"inventory_limit":10,"action":"submit","reason":"inventory_target_gap","side":"BUY","quote_price":99,"quote_qty":5,"quote_request_id":1,"quote_submitted_at":1,"quote_cash_available":1000,"quote_cash_required":495}`) + "\n"
+	withoutFill += cdfFixtureLine(2, 2, "balance_snapshot", `{"timestamp":2,"client_id":2,"spot_balances":[{"asset":"CDF","free":100,"locked":0,"borrowed":0,"interest":0,"net_asset":100},{"asset":"USD","free":1000,"locked":0,"borrowed":0,"interest":0,"net_asset":1000}],"perp_balances":[],"borrowed":{}}`) + "\n"
+	withoutFill += cdfFixtureLine(6, 2, "balance_snapshot", `{"timestamp":6,"client_id":2,"spot_balances":[{"asset":"CDF","free":100,"locked":0,"borrowed":0,"interest":0,"net_asset":100},{"asset":"USD","free":1000,"locked":0,"borrowed":0,"interest":0,"net_asset":1000}],"perp_balances":[],"borrowed":{}}`) + "\n"
+	if err := os.WriteFile(generalPath, []byte(withoutFill), 0644); err != nil {
+		t.Fatal(err)
+	}
+	greeksPath := filepath.Join(run.Dir, "greeks.json")
+	greeks, err := os.ReadFile(greeksPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	greeks = []byte(strings.Replace(string(greeks), `"equity":11005`, `"equity":11000`, 1))
+	greeks = []byte(strings.Replace(string(greeks), `"net_asset":105`, `"net_asset":100`, 1))
+	greeks = []byte(strings.Replace(string(greeks), `"net_asset":505`, `"net_asset":1000`, 1))
+	if err := os.WriteFile(greeksPath, greeks, 0644); err != nil {
+		t.Fatal(err)
+	}
+	bookPath := filepath.Join(run.Dir, "venues", "north", "spot", "CDF-USD.jsonl")
+	withoutFillBook := cdfFixtureLine(1, 0, "BookSnapshot", `{"bids":[{"price":99,"visible_qty":10,"hidden_qty":0}],"asks":[{"price":101,"visible_qty":10,"hidden_qty":0}]}`) + "\n"
+	withoutFillBook += cdfFixtureLine(2, 2, "OrderAccepted", `{"order_id":7,"client_id":2,"request_id":1,"side":"BUY","type":"LIMIT","time_in_force":"GTC","post_only":true,"price":99,"qty":5}`) + "\n"
+	withoutFillBook += cdfFixtureLine(2, 0, "BookSnapshot", `{"bids":[{"price":99,"visible_qty":10,"hidden_qty":0}],"asks":[{"price":101,"visible_qty":10,"hidden_qty":0}]}`) + "\n"
+	if err := os.WriteFile(bookPath, []byte(withoutFillBook), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run, err = Open(run.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !audit.Valid || audit.ActivationSatisfied || !audit.EvidenceValid || audit.TradingSupplierCount != 0 {
+		t.Fatalf("no-fill audit = %+v, want valid evidence and inactive treatment", audit)
 	}
 }
 
@@ -417,7 +543,7 @@ func TestCDFRestDecisionMatchesExchangeRemainingQuantity(t *testing.T) {
 	})
 }
 
-func TestCompareCDFLiquidityRunsRejectsInactiveTreatment(t *testing.T) {
+func TestCompareCDFLiquidityRunsRejectsMalformedInactiveTreatmentEvidence(t *testing.T) {
 	treatment := writeCDFLiquidityFixture(t, true, false)
 	generalPath := filepath.Join(treatment.Dir, "venues", "north", "general.jsonl")
 	if err := os.WriteFile(generalPath, []byte(cdfFixtureLine(1, 2, "elastic_liquidity_supplier_decision", `{"role":"cdf_elastic_supplier_1","client_id":2,"symbol":"CDF/USD","decision_time":1,"observation_time":1,"observation_age":0,"observation_sequence":1,"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100,"reference_price":100,"position":0,"target_position":5,"inventory_limit":10,"action":"submit","reason":"inventory_target_gap","side":"BUY","quote_price":99,"quote_qty":5,"quote_request_id":1,"quote_submitted_at":1}`)+"\n"), 0644); err != nil {
@@ -433,8 +559,8 @@ func TestCompareCDFLiquidityRunsRejectsInactiveTreatment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if audit.Valid || !hasCDFCheck(audit.Checks, "supplier activation contract is incomplete") {
-		t.Fatalf("inactive treatment audit = %+v, want fail-closed activation rejection", audit)
+	if audit.Valid || audit.EvidenceValid || audit.ActivationSatisfied || !hasCDFCheck(audit.Checks, "malformed supplier decision") {
+		t.Fatalf("malformed inactive treatment audit = %+v, want invalid evidence without an activation claim", audit)
 	}
 }
 
@@ -575,7 +701,7 @@ func TestMeasureCDFLiquidityDoesNotCountMarketOnlyQuoteChangeAsInventoryResponse
 	if err != nil {
 		t.Fatal(err)
 	}
-	if audit.InventoryResponsiveDecisionCount != 0 || !hasCDFCheck(audit.Checks, "supplier has no inventory-responsive post-fill decision") {
+	if audit.InventoryResponsiveDecisionCount != 0 {
 		t.Fatalf("market-only quote change was counted as inventory response: %+v", audit)
 	}
 }
