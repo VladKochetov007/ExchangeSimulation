@@ -277,6 +277,10 @@ for seed in 607 613 617; do
 	"$cdf_audit" -treatment "$treatment" -control "$control" >"$audit_tmp"
 	audit_status=$?
 	set -e
+	if [[ "$audit_status" -ne 0 ]]; then
+		mv "$audit_tmp" "$audit_path.invalid"
+		fail "CDF audit exited nonzero for seed $seed; retained invalid output at $audit_path.invalid"
+	fi
 	if ! jq -e 'type == "object"' "$audit_tmp" >/dev/null; then
 		mv "$audit_tmp" "$audit_path.invalid"
 		fail "CDF audit did not produce a JSON comparison for seed $seed (status $audit_status)"

@@ -51,7 +51,7 @@ derived_artifacts=(
 	termcarry.json datedcarryp5.json perpreplenishment.json activation.json integrity.json analysis-metadata.json
 )
 if [[ "$verification_variant" == sv1 ]]; then
-	derived_artifacts+=(cdfliquidity.json)
+	derived_artifacts+=(cdfliquidity.json priceunavailable.json)
 fi
 
 for artifact in "${derived_artifacts[@]}"; do

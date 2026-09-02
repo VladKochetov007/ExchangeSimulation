@@ -14,6 +14,13 @@ v2_r2_capacity_attestation_path() {
 	printf '%s\n' '/home/vlad/v2-r2-sv1-24h-binary-capacity-20260901-v1.json'
 }
 
+# SV1 promotion is tied to the installed Go 1.27.0 toolchain, not to an
+# unbounded future 1.27 patch. Historical R2 callers retain the shared prefix
+# predicate because their archived identities predate this successor contract.
+v2_r2_is_go_127() {
+	[[ "$1" == "go1.27.0" ]]
+}
+
 v2_r2_require_attestation_path() {
 	local cell=$1
 	case "$cell" in
