@@ -108,7 +108,7 @@ else
 fi
 require_file "$parity"
 require_object "$parity"
-jq -e '.schema_version == 1 and .contract == $parity_contract and
+jq -e --arg parity_contract "$v2_r2_sv1_parity_contract" '.schema_version == 1 and .contract == $parity_contract and
 	.evidence_format == "evstream_v3" and
 	.exact_equal_domains == ["checkpoints.jsonl", "greeks.json", "latency.json", "events.evs", "binary-evidence-attestation.json", "ordered_raw_manifest"] and
 	.control_normalized_equal_domains == ["checkpoints.jsonl", "greeks.json", "latency.json", "execution_event_frames", "execution_stream_frames", "execution_stream_hash"] and
@@ -479,9 +479,9 @@ jq -n --arg contract "$contract_version" --arg candidate "$candidate_id" \
 				"Numerical anti-cheating diagnostics are provisional; qualitative anti-cheating review remains pending and is required before freeze authorization."
 			],
 			cells: $cells,
-			artifacts: {
-				cdf_audits: ["cdf-liquidity-607.json", "cdf-liquidity-613.json", "cdf-liquidity-617.json"],
-				survival_summaries: ["survival-treatment-607.json", "survival-control-607.json", "survival-treatment-613.json", "survival-control-613.json", "survival-treatment-617.json", "survival-control-617.json"],
+				artifacts: {
+					cdf_audits: ($development_seeds | map("cdf-liquidity-\(.).json")),
+					survival_summaries: ($development_seeds | map(["survival-treatment-\(.).json", "survival-control-\(.).json"]) | add),
 				parity: "parity-attestation.json",
 				paired_survival_effects: $paired_effects
 			}
@@ -494,6 +494,6 @@ jq -e --arg contract "$contract_version" --argjson holdouts '[619,631,641]' \
 	 .reserved_holdout_seeds == $holdouts and
 	 .holdout_status == "RESERVED_AND_NOT_READ_BY_DEVELOPMENT_SCORER" and
 		(.predicates | keys) == ["anti_cheating_diagnostics", "cdf_audit_contract", "control_survival_measurement_valid", "control_survival_predicate_diagnostic", "holdout_access_policy_enforced", "holdout_outputs_absent", "mechanical_and_artifact_contract", "measurement_contract", "paired_survival_effect_identified", "paired_survival_measurement_valid", "paired_treatment_not_worse", "parity_attested", "post_warmup_cdf_side_availability_treatment", "strict_terminal_valuation_control_diagnostic", "strict_terminal_valuation_treatment", "terminal_measurement_control", "terminal_measurement_treatment", "treatment_survival_measurement_valid"] and
-	 .predicates.parity_attested == true and .predicates.holdout_outputs_absent == true and .predicates.holdout_access_policy_enforced == true' --arg parity_contract "$v2_r2_sv1_parity_contract" "$score" >/dev/null ||
+	 .predicates.parity_attested == true and .predicates.holdout_outputs_absent == true and .predicates.holdout_access_policy_enforced == true' "$score" >/dev/null ||
 	fail "development score self-check failed"
 printf 'scored SV1 development: %s\n' "$(jq -r '.status' "$score")"

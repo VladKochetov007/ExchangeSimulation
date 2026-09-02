@@ -9,16 +9,16 @@
   },
   "activation_roster": {
     "path": "research/configs/v2-r2-sv1b/activation-643.json",
-    "sha256": "d9204b2d5a185c9d7285fedcbacca960c67aeba6b8e483d434e841006b037cc2"
+    "sha256": "26e8b2cae8f0179bd6b936ac5ddaa9311b93a3322531fbe9b9240749fedee12d"
   },
   "registered_configs": {
     "control-643-none.json": "1bb69ef8ccbf8b627e469c626dbd8298de88ce58962fa87a9b38ef5169ce5580",
     "control-643.json": "e59f8dc95e762fc34411eab6179b816a7337257a4ad24ab72ba909931b099c6a",
     "control-647.json": "7b6438398f8a874172d25406c168a711f513ad3e5a99a9f740054437dd19f09e",
     "control-653.json": "121b4a2ce93f30234ffd8a44c1e6dd4e6437990e503f1a6309949554bb1a3c30",
-    "treatment-643.json": "c597a43d92847ee88c52f82cee2658e3e29b44128eb8447bbb9678389d2e9e70",
-    "treatment-647.json": "dde08eacae97e6118ed8429c3aa4ca617dac8dbb1550c3f5f7464e51265f0ed3",
-    "treatment-653.json": "bd899d489524a9ca44e8ecddd9d084ba516f56261ec3ae03027e541b9f12c416"
+    "treatment-643.json": "05c7f8625540e0ee7e7eb10c9ecf3fb70b83670e2bccd36a541147b41c769605",
+    "treatment-647.json": "bdb04e8646a0b40d980c434b2c44b5db58fad0d6d20cff9b5b9c4a84de977de7",
+    "treatment-653.json": "2a92784631705daf4190942a39e0df4bb2468bb7761a5a36ea6274ba35ec6d97"
   },
   "fresh_development_seeds": [
     643,

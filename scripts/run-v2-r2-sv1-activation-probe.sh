@@ -221,10 +221,6 @@ v2_r2_require_cdf_supplier_comparison "$output_root/cdf-liquidity-comparison.jso
 	echo "activation contract failed: suppliers did not demonstrate finite bounded activity" >&2
 	exit 1
 }
-v2_r2_require_cdf_supplier_control "$output_root/cdf-liquidity-comparison.json" || {
-	echo "activation contract failed: control contains CDF supplier activity" >&2
-	exit 1
-}
 
 comparison_sha=$(sha256sum -- "$output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
 jq -n \

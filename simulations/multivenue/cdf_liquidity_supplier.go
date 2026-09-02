@@ -36,6 +36,11 @@ type ElasticLiquiditySupplierSpec struct {
 	MaxPosition          int64         `json:"max_position"`
 	MaxInventory         int64         `json:"max_inventory"`
 	MaxQuoteQty          int64         `json:"max_quote_qty"`
+	// MaxLossQuote is a finite quote-denominated loss budget. Zero preserves
+	// the historical supplier contract; the SV1B roster must register a
+	// positive budget so the participant can withdraw when its marked equity
+	// deteriorates.
+	MaxLossQuote int64 `json:"max_loss_quote,omitempty"`
 	// MakerFeeBps is charged in quote units on passive fills. Zero preserves
 	// the historical default; successor rosters may register a positive cost
 	// so fee-bearing inventory risk is exercised by the actual exchange.
@@ -63,6 +68,9 @@ func (s ElasticLiquiditySupplierSpec) validate() error {
 	}
 	if s.MakerFeeBps < 0 || s.MakerFeeBps > 10_000 {
 		return fmt.Errorf("maker fee must be between 0 and 10000 bps, got %d", s.MakerFeeBps)
+	}
+	if s.MaxLossQuote < 0 {
+		return fmt.Errorf("maximum loss budget must not be negative, got %d", s.MaxLossQuote)
 	}
 	if s.BaseHolding < -s.MaxPosition || s.BaseHolding > s.MaxPosition {
 		return fmt.Errorf("base holding %d exceeds position limit %d", s.BaseHolding, s.MaxPosition)
@@ -112,6 +120,7 @@ type ElasticLiquiditySupplierConfig struct {
 	MaxPosition          int64
 	MaxInventory         int64
 	MaxQuoteQty          int64
+	MaxLossQuote         int64
 	MakerFeeBps          int64
 	DecisionObserver     func(ElasticLiquiditySupplierDecision)
 	FillObserver         func(ElasticLiquiditySupplierFill)
@@ -158,7 +167,16 @@ type ElasticLiquiditySupplierDecision struct {
 	CancelRequestID        uint64 `json:"cancel_request_id,omitempty"`
 	QuoteSubmittedAt       int64  `json:"quote_submitted_at,omitempty"`
 	QuoteCashAvailable     int64  `json:"quote_cash_available,omitempty"`
+	QuoteCashReserved      int64  `json:"quote_cash_reserved"`
 	QuoteCashRequired      int64  `json:"quote_cash_required,omitempty"`
+	InitialEquityQuote     int64  `json:"initial_equity_quote"`
+	EquityQuote            int64  `json:"equity_quote"`
+	PeakEquityQuote        int64  `json:"peak_equity_quote"`
+	LossFromInitialQuote   int64  `json:"loss_from_initial_quote"`
+	DrawdownQuote          int64  `json:"drawdown_quote"`
+	MaxLossQuote           int64  `json:"max_loss_quote"`
+	EquityAvailable        bool   `json:"equity_available"`
+	RiskLimitTriggered     bool   `json:"risk_limit_triggered"`
 }
 
 // ElasticLiquiditySupplierFill joins a fill to the participant's local
@@ -196,23 +214,31 @@ type elasticLiquidityQuote struct {
 // local observation disappears.
 type ElasticLiquiditySupplier struct {
 	*actor.BaseActor
-	cfg                 ElasticLiquiditySupplierConfig
-	bestBid             int64
-	bestBidQty          int64
-	bestAsk             int64
-	bestAskQty          int64
-	observationTime     int64
-	observationSequence uint64
-	position            int64
-	reference           int64
-	lastReferenceUpdate int64
-	quote               elasticLiquidityQuote
-	pendingRequestID    uint64
-	cancelRequestID     uint64
-	cancelPending       bool
-	subscribed          bool
-	quoteCashAvailable  int64
-	quoteCashReserved   int64
+	cfg                  ElasticLiquiditySupplierConfig
+	bestBid              int64
+	bestBidQty           int64
+	bestAsk              int64
+	bestAskQty           int64
+	observationTime      int64
+	observationSequence  uint64
+	position             int64
+	reference            int64
+	lastReferenceUpdate  int64
+	quote                elasticLiquidityQuote
+	pendingRequestID     uint64
+	cancelRequestID      uint64
+	cancelPending        bool
+	subscribed           bool
+	quoteCashAvailable   int64
+	quoteCashReserved    int64
+	initialEquityQuote   int64
+	equityQuote          int64
+	peakEquityQuote      int64
+	lossFromInitialQuote int64
+	drawdownQuote        int64
+	equityInitialized    bool
+	equityUnavailable    bool
+	riskLimitTriggered   bool
 }
 
 func NewElasticLiquiditySupplier(id uint64, gw actor.Gateway, cfg ElasticLiquiditySupplierConfig) *ElasticLiquiditySupplier {
@@ -224,6 +250,7 @@ func NewElasticLiquiditySupplier(id uint64, gw actor.Gateway, cfg ElasticLiquidi
 	if cfg.InitialQuoteBalance > 0 && cfg.QuotePrecision > 0 {
 		supplier.quoteCashAvailable = cfg.InitialQuoteBalance
 	}
+	supplier.initializeMarkedEquity()
 	supplier.SetHandler(supplier)
 	supplier.AddTickerWithOffset(cfg.Interval, cfg.DecisionPhaseOffset, supplier.onTick)
 	return supplier
@@ -395,6 +422,16 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 		s.emitDecision(decision)
 		return
 	}
+	if s.riskLimitTriggered || s.equityUnavailable {
+		reason := "loss_limit"
+		if s.equityUnavailable {
+			reason = "equity_unavailable"
+		}
+		decision.Action, decision.Reason = s.withdrawIfNeeded(reason)
+		decision.CancelRequestID = s.cancelRequestID
+		s.emitDecision(decision)
+		return
+	}
 
 	if !s.observationUsable(now.UnixNano()) {
 		decision.Action, decision.Reason = s.withdrawIfNeeded("stale_or_missing_observation")
@@ -410,9 +447,26 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 		return
 	}
 	s.reviseReference(mid, now.UnixNano())
+	decision = s.baseDecision(now.UnixNano())
 	decision.MarkPrice, decision.ReferencePrice = mid, s.reference
 	target := s.TargetPosition(mid)
 	decision.TargetPosition = target
+	if !s.updateMarkedRisk(mid) {
+		decision = s.baseDecision(now.UnixNano())
+		decision.MarkPrice, decision.ReferencePrice, decision.TargetPosition = mid, s.reference, target
+		decision.Action, decision.Reason = s.withdrawIfNeeded("equity_unavailable")
+		decision.CancelRequestID = s.cancelRequestID
+		s.emitDecision(decision)
+		return
+	}
+	decision = s.baseDecision(now.UnixNano())
+	decision.MarkPrice, decision.ReferencePrice, decision.TargetPosition = mid, s.reference, target
+	if s.riskLimitTriggered {
+		decision.Action, decision.Reason = s.withdrawIfNeeded("loss_limit")
+		decision.CancelRequestID = s.cancelRequestID
+		s.emitDecision(decision)
+		return
+	}
 	gap := target - s.position
 	if gap == 0 {
 		decision.Action, decision.Reason = s.withdrawIfNeeded("inventory_at_target")
@@ -630,7 +684,92 @@ func (s *ElasticLiquiditySupplier) baseDecision(now int64) ElasticLiquiditySuppl
 		QuotePrice: s.quote.price, QuoteQty: s.quote.qty, QuoteSubmittedAt: s.quote.submittedAt,
 		CancelRequestID:    s.cancelRequestID,
 		QuoteCashAvailable: s.quoteCashAvailable,
+		QuoteCashReserved:  s.quoteCashReserved,
+		InitialEquityQuote: s.initialEquityQuote, EquityQuote: s.equityQuote,
+		PeakEquityQuote: s.peakEquityQuote, LossFromInitialQuote: s.lossFromInitialQuote,
+		DrawdownQuote: s.drawdownQuote, MaxLossQuote: s.cfg.MaxLossQuote,
+		EquityAvailable:    s.cfg.MaxLossQuote > 0 && s.equityInitialized && !s.equityUnavailable,
+		RiskLimitTriggered: s.riskLimitTriggered,
 	}
+}
+
+func (s *ElasticLiquiditySupplier) initializeMarkedEquity() {
+	if s.cfg.MaxLossQuote <= 0 {
+		return
+	}
+	equity, ok := s.markedEquityQuote(s.cfg.ReferencePrice)
+	if !ok {
+		s.equityUnavailable = true
+		return
+	}
+	s.initialEquityQuote, s.equityQuote, s.peakEquityQuote = equity, equity, equity
+	s.equityInitialized = true
+}
+
+func (s *ElasticLiquiditySupplier) updateMarkedRisk(mid int64) bool {
+	if s.cfg.MaxLossQuote <= 0 {
+		return true
+	}
+	if s.equityUnavailable {
+		return false
+	}
+	equity, ok := s.markedEquityQuote(mid)
+	if !ok {
+		s.equityUnavailable = true
+		return false
+	}
+	if !s.equityInitialized {
+		s.initialEquityQuote, s.peakEquityQuote = equity, equity
+		s.equityInitialized = true
+	}
+	s.equityQuote = equity
+	if equity > s.peakEquityQuote {
+		s.peakEquityQuote = equity
+	}
+	var differenceOK bool
+	s.lossFromInitialQuote, differenceOK = positiveDifference(s.initialEquityQuote, equity)
+	if !differenceOK {
+		s.equityUnavailable = true
+		return false
+	}
+	s.drawdownQuote, differenceOK = positiveDifference(s.peakEquityQuote, equity)
+	if !differenceOK {
+		s.equityUnavailable = true
+		return false
+	}
+	if s.lossFromInitialQuote >= s.cfg.MaxLossQuote || s.drawdownQuote >= s.cfg.MaxLossQuote {
+		s.riskLimitTriggered = true
+	}
+	return true
+}
+
+func (s *ElasticLiquiditySupplier) markedEquityQuote(mid int64) (int64, bool) {
+	if mid <= 0 || s.cfg.BasePrecision <= 0 {
+		return 0, false
+	}
+	grossInventory, ok := exactQuoteAmount(s.cfg.InitialBaseBalance, s.position)
+	if !ok || grossInventory < 0 {
+		return 0, false
+	}
+	notional := new(big.Int).Mul(big.NewInt(grossInventory), big.NewInt(mid))
+	notional.Quo(notional, big.NewInt(s.cfg.BasePrecision))
+	equity := new(big.Int).Add(notional, big.NewInt(s.quoteCashAvailable))
+	equity.Add(equity, big.NewInt(s.quoteCashReserved))
+	if !equity.IsInt64() {
+		return 0, false
+	}
+	return equity.Int64(), true
+}
+
+func positiveDifference(larger, smaller int64) (int64, bool) {
+	difference := new(big.Int).Sub(big.NewInt(larger), big.NewInt(smaller))
+	if difference.Sign() <= 0 {
+		return 0, true
+	}
+	if !difference.IsInt64() {
+		return 0, false
+	}
+	return difference.Int64(), true
 }
 
 func (s *ElasticLiquiditySupplier) observationUsable(now int64) bool {

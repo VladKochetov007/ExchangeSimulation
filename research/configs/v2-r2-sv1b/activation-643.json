@@ -34,6 +34,7 @@
       "max_position": 40000000000,
       "max_inventory": 80000000000,
       "max_quote_qty": 40000000,
+      "max_loss_quote": 30000000000,
       "maker_fee_bps": 5
     },
     {
@@ -55,6 +56,7 @@
       "max_position": 50000000000,
       "max_inventory": 100000000000,
       "max_quote_qty": 50000000,
+      "max_loss_quote": 36000000000,
       "maker_fee_bps": 5
     },
     {
@@ -76,6 +78,7 @@
       "max_position": 60000000000,
       "max_inventory": 120000000000,
       "max_quote_qty": 60000000,
+      "max_loss_quote": 42000000000,
       "maker_fee_bps": 5
     },
     {
@@ -97,6 +100,7 @@
       "max_position": 70000000000,
       "max_inventory": 140000000000,
       "max_quote_qty": 70000000,
+      "max_loss_quote": 48000000000,
       "maker_fee_bps": 5
     }
   ],

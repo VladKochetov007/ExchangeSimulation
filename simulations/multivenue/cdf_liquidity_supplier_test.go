@@ -3,6 +3,7 @@ package multivenue
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,6 +92,77 @@ func TestElasticLiquiditySupplierQuotesOneInventorySensitiveSide(t *testing.T) {
 	decision := decisions[len(decisions)-1]
 	if decision.ObservationLinkID != 4 || decision.ObservationOrdinal != 8 || decision.ObservationDeliveredAt != int64(time.Second) || decision.ObservationFingerprint != "01020300000000000000000000000000" {
 		t.Fatalf("decision observation frontier = %+v, want exact delayed-message identity", decision)
+	}
+}
+
+func TestElasticLiquiditySupplierWithdrawsAfterMarkedLossBudget(t *testing.T) {
+	gateway := newMetaGateway()
+	var decisions []ElasticLiquiditySupplierDecision
+	supplier := NewElasticLiquiditySupplier(1, gateway, ElasticLiquiditySupplierConfig{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		BaseAsset: "CDF", QuoteAsset: "USD", BasePrecision: 1, QuotePrecision: 1,
+		InitialBaseBalance: 100, InitialQuoteBalance: 1_000,
+		Interval: time.Second, MaxObservationAge: time.Minute,
+		ReferencePrice: 100, ReferenceHalfLife: time.Hour,
+		BaseHolding: 0, ElasticityPerPercent: 10, MaxPosition: 100,
+		MaxInventory: 200, MaxQuoteQty: 25, MaxLossQuote: 500,
+		DecisionObserver: func(decision ElasticLiquiditySupplierDecision) { decisions = append(decisions, decision) },
+	})
+	if !supplier.equityInitialized || supplier.initialEquityQuote != 11_000 {
+		t.Fatalf("initial marked equity = (%t, %d), want initialized at 11000", supplier.equityInitialized, supplier.initialEquityQuote)
+	}
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	supplier.HandleEvent(context.Background(), elasticSupplierSnapshot("CDF/USD", int64(time.Second), 89, 91))
+	// Model the supplier's filled base inventory and spent quote cash before
+	// presenting an adverse delayed local mark.
+	supplier.position = 10
+	supplier.quoteCashAvailable = 0
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+
+	if len(decisions) != 2 {
+		t.Fatalf("decisions = %d, want subscription and risk response", len(decisions))
+	}
+	decision := decisions[len(decisions)-1]
+	if decision.Action != "wait" || decision.Reason != "loss_limit" {
+		t.Fatalf("risk decision = %+v, want fail-closed loss-limit wait", decision)
+	}
+	if !decision.EquityAvailable || !decision.RiskLimitTriggered || decision.MarkPrice != 90 {
+		t.Fatalf("risk state = %+v, want available triggered state at midpoint 90", decision)
+	}
+	if decision.EquityQuote != 9_900 || decision.LossFromInitialQuote != 1_100 || decision.DrawdownQuote != 1_100 {
+		t.Fatalf("marked loss = %+v, want equity=9900 loss/drawdown=1100", decision)
+	}
+	encoded, err := json.Marshal(decision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"quote_cash_reserved", "initial_equity_quote", "equity_quote", "peak_equity_quote", "loss_from_initial_quote", "drawdown_quote", "max_loss_quote", "equity_available", "risk_limit_triggered"} {
+		if _, ok := fields[field]; !ok {
+			t.Fatalf("risk decision omitted required field %q: %s", field, encoded)
+		}
+	}
+}
+
+func TestPositiveDifferenceFailsClosedOnOverflow(t *testing.T) {
+	if difference, ok := positiveDifference(math.MaxInt64, math.MinInt64); ok || difference != 0 {
+		t.Fatalf("positive difference overflow = (%d, %t), want (0, false)", difference, ok)
+	}
+}
+
+func TestElasticLiquiditySupplierRejectsNegativeLossBudget(t *testing.T) {
+	spec := ElasticLiquiditySupplierSpec{
+		Role: "cdf_elastic_supplier_1", Symbol: "CDF/USD", BaseAsset: "CDF", QuoteAsset: "USD",
+		BasePrecision: 1, QuotePrecision: 1, InitialBaseBalance: 100, InitialQuoteBalance: 10_000,
+		Interval: time.Second, MaxObservationAge: time.Minute, ReferencePrice: 100,
+		ReferenceHalfLife: time.Hour, ElasticityPerPercent: 10, MaxPosition: 50,
+		MaxInventory: 150, MaxQuoteQty: 10, MaxLossQuote: -1,
+	}
+	if err := spec.validate(); err == nil || !strings.Contains(err.Error(), "maximum loss budget") {
+		t.Fatalf("negative loss budget validation error = %v", err)
 	}
 }
 

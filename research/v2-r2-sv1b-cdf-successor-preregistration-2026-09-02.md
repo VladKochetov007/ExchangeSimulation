@@ -56,12 +56,12 @@ $1.8--$2.7 million. The quote balances are deliberately close to, but above, eac
 role's maximum reference-price position notional (including the registered
 maker fee); they are finite and can bind if the observed price rises.
 
-| role | phase offset | initial CDF | initial USD raw | max position | max inventory | max quote qty | elasticity / % | reference half-life |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `cdf_elastic_supplier_1` | 0 ns | 40,000,000,000 | 180,000,000,000 | 40,000,000,000 | 80,000,000,000 | 40,000,000 | 12,000,000,000 | 3.0 h |
-| `cdf_elastic_supplier_2` | 500,000,000 ns | 50,000,000,000 | 210,000,000,000 | 50,000,000,000 | 100,000,000,000 | 50,000,000 | 15,000,000,000 | 4.0 h |
-| `cdf_elastic_supplier_3` | 1,000,000,000 ns | 60,000,000,000 | 240,000,000,000 | 60,000,000,000 | 120,000,000,000 | 60,000,000 | 18,000,000,000 | 5.0 h |
-| `cdf_elastic_supplier_4` | 1,500,000,000 ns | 70,000,000,000 | 270,000,000,000 | 70,000,000,000 | 140,000,000,000 | 70,000,000 | 21,000,000,000 | 6.0 h |
+| role | phase offset | initial CDF | initial USD raw | max position | max inventory | max quote qty | max loss budget | elasticity / % | reference half-life |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `cdf_elastic_supplier_1` | 0 ns | 40,000,000,000 | 180,000,000,000 | 40,000,000,000 | 80,000,000,000 | 40,000,000 | 30,000,000,000 | 12,000,000,000 | 3.0 h |
+| `cdf_elastic_supplier_2` | 500,000,000 ns | 50,000,000,000 | 210,000,000,000 | 50,000,000,000 | 100,000,000,000 | 50,000,000 | 36,000,000,000 | 15,000,000,000 | 4.0 h |
+| `cdf_elastic_supplier_3` | 1,000,000,000 ns | 60,000,000,000 | 240,000,000,000 | 60,000,000,000 | 120,000,000,000 | 60,000,000 | 42,000,000,000 | 18,000,000,000 | 5.0 h |
+| `cdf_elastic_supplier_4` | 1,500,000,000 ns | 70,000,000,000 | 270,000,000,000 | 70,000,000,000 | 140,000,000,000 | 70,000,000 | 48,000,000,000 | 21,000,000,000 | 6.0 h |
 
 All roles use:
 
@@ -70,6 +70,16 @@ All roles use:
 - `base_precision = 100,000,000`, `quote_precision = 100,000`;
 - `interval = 2,000,000,000 ns`, `max_observation_age = 60,000,000,000 ns`;
 - `maker_fee_bps = 5`.
+
+Each role also registers a positive `max_loss_quote` budget equal to 10% of
+its initial endowment marked at the declared 300,000,000 reference price:
+`initial_quote_balance + initial_base_balance * reference_price /
+base_precision`. The actor marks that endowment only with its delayed local
+CDF/USD midpoint, carries quote cash reserved by live orders into equity, and
+withdraws permanently for the run when either loss from initial equity or
+peak-to-current drawdown reaches the budget. Arithmetic failure is a separate
+fail-closed `equity_unavailable` state. This budget is a participant risk
+constraint, not a target for CDF price, spread, volume, or survival.
 
 The zero phase is the explicit default and is omitted from normalized JSON
 because the field is optional; nonzero phase offsets are serialized and
@@ -115,7 +125,9 @@ following in treatment:
 4. inventory changes alter a supplier's target side or quantity;
 5. at least one quote is cancelled, withdrawn, or repriced for a local
    observation, inventory, risk, or unavailable-side reason;
-6. no supplier borrows, receives capital/inventory replenishment, or is forced
+6. at least one successor decision exposes the marked-equity state and its
+   risk-limit flag remains false until a valid budget breach, if any;
+7. no supplier borrows, receives capital/inventory replenishment, or is forced
    to maintain two-sided quotes.
 
 The typed audit must pass its finite-capital, inventory, delayed-observation,
@@ -141,6 +153,8 @@ SV1B is rejected if any of the following occurs:
   interface;
 - the supplier is structurally forced to quote both sides or to replace a
   withdrawn quote.
+- the successor’s positive loss budget is absent, ignored by the policy, or
+  can be reset after a loss without a newly declared participant state.
 
 The numerical audit is necessary but is not a qualitative anti-cheating
 verdict. Before any freeze decision, an independent reviewer must inspect the

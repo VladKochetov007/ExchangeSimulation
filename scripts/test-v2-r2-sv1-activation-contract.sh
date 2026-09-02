@@ -89,4 +89,24 @@ if jq '.result.supplier_count = 1' "$temp_root/control-cdfliquidity.json" >"$tem
 	exit 1
 fi
 
+jq -n \
+	--argjson treatment "$(jq '.result' "$cdf_audit_fixture")" \
+	--argjson control "$(jq '.result' "$temp_root/control-cdfliquidity.json")" \
+	'{valid: true, provenance: {valid: true}, treatment: $treatment, control: $control}' \
+	>"$temp_root/comparison-cdfliquidity.json"
+v2_r2_require_cdf_supplier_comparison "$temp_root/comparison-cdfliquidity.json" 2 || {
+	echo "valid top-level treatment/control CDF comparison was rejected" >&2
+	exit 1
+}
+if jq '.treatment.pnl_changing_supplier_count = 0' "$temp_root/comparison-cdfliquidity.json" >"$temp_root/comparison-no-pnl.json" &&
+	v2_r2_require_cdf_supplier_comparison "$temp_root/comparison-no-pnl.json" 2; then
+	echo "top-level comparison accepted non-PnL treatment activity" >&2
+	exit 1
+fi
+if jq '.control.supplier_count = 1' "$temp_root/comparison-cdfliquidity.json" >"$temp_root/comparison-control-activity.json" &&
+	v2_r2_require_cdf_supplier_comparison "$temp_root/comparison-control-activity.json" 2; then
+	echo "top-level comparison accepted CDF control activity" >&2
+	exit 1
+fi
+
 echo "V2-R2-SV1 activation output boundary contract: pass"

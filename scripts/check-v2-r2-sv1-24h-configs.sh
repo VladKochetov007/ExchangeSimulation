@@ -60,6 +60,14 @@ done < <(jq -r '.registered_configs | to_entries[] | [.key,.value] | @tsv' "$pro
 
 calendar='[{"name":"short","listing_interval_nano":3600000000000,"time_to_expiry_nano":7200000000000},{"name":"medium","listing_interval_nano":10800000000000,"time_to_expiry_nano":21600000000000},{"name":"long","listing_interval_nano":21600000000000,"time_to_expiry_nano":43200000000000}]'
 jq -e '.elastic_liquidity_suppliers | type == "array" and length == 4' "$activation_config" >/dev/null || fail "activation roster must contain four suppliers"
+if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1B-* ]]; then
+	jq -e '
+		all(.elastic_liquidity_suppliers[];
+			(.max_loss_quote | type) == "number" and .max_loss_quote > 0 and
+			.max_loss_quote == ((.initial_quote_balance +
+				((.initial_base_balance * .reference_price) / .base_precision)) / 10))
+	' "$activation_config" >/dev/null || fail "SV1B roster must register a 10 percent marked-equity loss budget"
+fi
 roster=$(jq -c '.elastic_liquidity_suppliers' "$activation_config")
 
 for seed in "${v2_r2_sv1_seeds[@]}"; do

@@ -3,7 +3,7 @@ set -euo pipefail
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 filter="$root_dir/scripts/v2-r2-sv1-paired-survival.jq"
-temp_root=$(mktemp -d "${TMPDIR:-/tmp}/sv1-paired-survival.XXXXXX")
+temp_root=$(mktemp -d "${TMPDIR:-$root_dir}/sv1-paired-survival.XXXXXX")
 trap 'rm -rf -- "$temp_root"' EXIT
 
 fail() {

@@ -4,7 +4,7 @@ set -euo pipefail
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 filter="$root_dir/scripts/v2-r2-sv1-terminal-measurement.jq"
 end_nano=1735776000000000000
-fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/sv1-terminal-contract.XXXXXX")
+fixture_dir=$(mktemp -d "${TMPDIR:-$root_dir}/sv1-terminal-contract.XXXXXX")
 trap 'rm -rf -- "$fixture_dir"' EXIT
 
 fail() {
