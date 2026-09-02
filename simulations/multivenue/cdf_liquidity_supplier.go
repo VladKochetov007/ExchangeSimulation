@@ -150,6 +150,7 @@ type ElasticLiquiditySupplierDecision struct {
 	BestAsk                int64  `json:"best_ask"`
 	BestAskQty             int64  `json:"best_ask_qty"`
 	MarkPrice              int64  `json:"mark_price"`
+	RiskMarkPrice          int64  `json:"risk_mark_price"`
 	ReferencePrice         int64  `json:"reference_price"`
 	Position               int64  `json:"position"`
 	TargetPosition         int64  `json:"target_position"`
@@ -236,6 +237,7 @@ type ElasticLiquiditySupplier struct {
 	peakEquityQuote      int64
 	lossFromInitialQuote int64
 	drawdownQuote        int64
+	riskMarkPrice        int64
 	equityInitialized    bool
 	equityUnavailable    bool
 	riskLimitTriggered   bool
@@ -672,6 +674,7 @@ func (s *ElasticLiquiditySupplier) baseDecision(now int64) ElasticLiquiditySuppl
 		DecisionTime: now, ObservationTime: s.observationTime, ObservationAge: age,
 		DecisionPhaseOffset: int64(s.cfg.DecisionPhaseOffset),
 		BestBid:             s.bestBid, BestBidQty: s.bestBidQty, BestAsk: s.bestAsk, BestAskQty: s.bestAskQty,
+		RiskMarkPrice:       s.riskMarkPrice,
 		ObservationSequence: s.observationSequence, ObservationLinkID: frontier.LinkID,
 		ObservationOrdinal: frontier.Ordinal, ObservationDeliveredAt: frontier.DeliveredAt,
 		ObservationFingerprint: fingerprint,
@@ -703,6 +706,7 @@ func (s *ElasticLiquiditySupplier) initializeMarkedEquity() {
 		return
 	}
 	s.initialEquityQuote, s.equityQuote, s.peakEquityQuote = equity, equity, equity
+	s.riskMarkPrice = s.cfg.ReferencePrice
 	s.equityInitialized = true
 }
 
@@ -723,6 +727,7 @@ func (s *ElasticLiquiditySupplier) updateMarkedRisk(mid int64) bool {
 		s.equityInitialized = true
 	}
 	s.equityQuote = equity
+	s.riskMarkPrice = mid
 	if equity > s.peakEquityQuote {
 		s.peakEquityQuote = equity
 	}

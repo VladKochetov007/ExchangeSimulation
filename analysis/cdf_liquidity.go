@@ -56,6 +56,10 @@ type CDFLiquidityRunAudit struct {
 	TradingSupplierCount             int64                       `json:"trading_supplier_count"`
 	PnLChangingSupplierCount         int64                       `json:"pnl_changing_supplier_count"`
 	InventoryResponsiveDecisionCount int64                       `json:"inventory_responsive_decision_count"`
+	RiskStateDecisionCount           int64                       `json:"risk_state_decision_count"`
+	RiskLimitTriggeredDecisionCount  int64                       `json:"risk_limit_triggered_decision_count"`
+	MaxObservedLossFromInitialQuote  int64                       `json:"max_observed_loss_from_initial_quote"`
+	MaxObservedDrawdownQuote         int64                       `json:"max_observed_drawdown_quote"`
 	RealizedPnL                      int64                       `json:"realized_pnl"`
 	UnrealizedPnL                    int64                       `json:"unrealized_pnl"`
 	EndowmentRevaluationPnL          int64                       `json:"endowment_revaluation_pnl"`
@@ -124,6 +128,10 @@ type CDFLiquiditySupplierAudit struct {
 	RestCount                        int64   `json:"rest_count"`
 	SubmitCount                      int64   `json:"submit_count"`
 	InventoryResponsiveDecisionCount int64   `json:"inventory_responsive_decision_count"`
+	RiskStateDecisionCount           int64   `json:"risk_state_decision_count"`
+	RiskLimitTriggeredDecisionCount  int64   `json:"risk_limit_triggered_decision_count"`
+	MaxObservedLossFromInitialQuote  int64   `json:"max_observed_loss_from_initial_quote"`
+	MaxObservedDrawdownQuote         int64   `json:"max_observed_drawdown_quote"`
 	MeanQuoteLifetimeNs              float64 `json:"mean_quote_lifetime_ns"`
 	MaxQuoteLifetimeNs               int64   `json:"max_quote_lifetime_ns"`
 	MeanObservedTouchShare           float64 `json:"mean_observed_touch_share"`
@@ -133,6 +141,7 @@ type CDFLiquiditySupplierAudit struct {
 	ConfiguredMaxPosition            int64   `json:"configured_max_position"`
 	ConfiguredMaxInventory           int64   `json:"configured_max_inventory"`
 	ConfiguredMaxQuoteQty            int64   `json:"configured_max_quote_qty"`
+	ConfiguredMaxLossQuote           int64   `json:"configured_max_loss_quote"`
 	ConfiguredMakerFeeBps            int64   `json:"configured_maker_fee_bps"`
 	ConfiguredReferencePrice         int64   `json:"configured_reference_price"`
 	ConfiguredReferenceHalfLife      int64   `json:"configured_reference_half_life"`
@@ -170,6 +179,7 @@ type CDFLiquiditySupplierAudit struct {
 	configuredQuoteAsset            string
 	configuredSymbol                string
 	configuredMaxQuoteQty           int64
+	configuredMaxLossQuote          int64
 	configuredMakerFeeBps           int64
 	configuredMaxPosition           int64
 	configuredMaxInventory          int64
@@ -183,6 +193,14 @@ type CDFLiquiditySupplierAudit struct {
 	configuredInitialBaseBalance    int64
 	configuredInitialQuoteBalance   int64
 	configuredQuotePrecision        int64
+	lastRiskInitialEquity           int64
+	lastRiskEquity                  int64
+	lastRiskPeakEquity              int64
+	lastRiskLossFromInitial         int64
+	lastRiskDrawdown                int64
+	lastRiskMarkPrice               int64
+	riskStateSeen                   bool
+	riskLimitSeen                   bool
 	endowmentRevaluationPnL         int64
 	tradingPnL                      int64
 	entryPrice                      int64
@@ -324,6 +342,7 @@ type cdfSupplierConfig struct {
 	MaxPosition          int64  `json:"max_position"`
 	MaxInventory         int64  `json:"max_inventory"`
 	MaxQuoteQty          int64  `json:"max_quote_qty"`
+	MaxLossQuote         int64  `json:"max_loss_quote"`
 	MaxObservationAge    int64  `json:"max_observation_age"`
 	DecisionPhaseOffset  int64  `json:"decision_phase_offset"`
 	ReferencePrice       int64  `json:"reference_price"`
@@ -561,6 +580,7 @@ type cdfDecisionEvidence struct {
 	BestAsk                int64  `json:"best_ask"`
 	BestAskQty             int64  `json:"best_ask_qty"`
 	MarkPrice              int64  `json:"mark_price"`
+	RiskMarkPrice          int64  `json:"risk_mark_price"`
 	ReferencePrice         int64  `json:"reference_price"`
 	Position               int64  `json:"position"`
 	TargetPosition         int64  `json:"target_position"`
@@ -578,7 +598,16 @@ type cdfDecisionEvidence struct {
 	CancelRequestID        uint64 `json:"cancel_request_id"`
 	QuoteSubmittedAt       int64  `json:"quote_submitted_at"`
 	QuoteCashAvailable     int64  `json:"quote_cash_available"`
+	QuoteCashReserved      int64  `json:"quote_cash_reserved"`
 	QuoteCashRequired      int64  `json:"quote_cash_required"`
+	InitialEquityQuote     int64  `json:"initial_equity_quote"`
+	EquityQuote            int64  `json:"equity_quote"`
+	PeakEquityQuote        int64  `json:"peak_equity_quote"`
+	LossFromInitialQuote   int64  `json:"loss_from_initial_quote"`
+	DrawdownQuote          int64  `json:"drawdown_quote"`
+	MaxLossQuote           int64  `json:"max_loss_quote"`
+	EquityAvailable        bool   `json:"equity_available"`
+	RiskLimitTriggered     bool   `json:"risk_limit_triggered"`
 }
 
 type cdfFillEvidence struct {
@@ -922,6 +951,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.configuredBasePrecision = supplierConfig.BasePrecision
 			state.configuredQuotePrecision = supplierConfig.QuotePrecision
 			state.configuredMaxQuoteQty = supplierConfig.MaxQuoteQty
+			state.configuredMaxLossQuote = supplierConfig.MaxLossQuote
 			state.configuredMakerFeeBps = supplierConfig.MakerFeeBps
 			state.configuredReferencePrice = supplierConfig.ReferencePrice
 			state.configuredReferenceHalfLife = supplierConfig.ReferenceHalfLife
@@ -936,6 +966,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.ConfiguredMaxPosition = supplierConfig.MaxPosition
 			state.ConfiguredMaxInventory = supplierConfig.MaxInventory
 			state.ConfiguredMaxQuoteQty = supplierConfig.MaxQuoteQty
+			state.ConfiguredMaxLossQuote = supplierConfig.MaxLossQuote
 			state.ConfiguredMakerFeeBps = supplierConfig.MakerFeeBps
 			state.ConfiguredReferencePrice = supplierConfig.ReferencePrice
 			state.ConfiguredReferenceHalfLife = supplierConfig.ReferenceHalfLife
@@ -1219,7 +1250,7 @@ func (r *CDFLiquidityRunAudit) addCheck(check CDFLiquidityCheck) {
 
 func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit, receiptEvidence *cdfMarketDataEvidence) {
 	var decision cdfDecisionEvidence
-	required := []string{"role", "client_id", "symbol", "decision_time", "observation_time", "observation_age", "observation_digest", "best_bid", "best_bid_qty", "best_ask", "best_ask_qty", "mark_price", "reference_price", "position", "target_position", "inventory_limit", "initial_base_balance", "gross_inventory", "gross_inventory_limit", "action", "reason", "quote_cash_available"}
+	required := []string{"role", "client_id", "symbol", "decision_time", "decision_phase_offset_nanos", "observation_time", "observation_age", "observation_digest", "best_bid", "best_bid_qty", "best_ask", "best_ask_qty", "mark_price", "reference_price", "position", "target_position", "inventory_limit", "initial_base_balance", "gross_inventory", "gross_inventory_limit", "action", "reason", "quote_cash_available"}
 	if err := decodeRequiredJSON(event.Raw(), &decision, required...); err != nil {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed supplier decision: " + err.Error()})
 		return
@@ -1229,6 +1260,13 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	if state == nil {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "decision from unregistered supplier"})
 		return
+	}
+	if state.configuredMaxLossQuote > 0 {
+		riskRequired := []string{"risk_mark_price", "quote_cash_reserved", "initial_equity_quote", "equity_quote", "peak_equity_quote", "loss_from_initial_quote", "drawdown_quote", "max_loss_quote", "equity_available", "risk_limit_triggered"}
+		if err := decodeRequiredJSON(event.Raw(), &decision, riskRequired...); err != nil {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "malformed supplier marked-risk state: " + err.Error()})
+			return
+		}
 	}
 	r.DecisionCount++
 	state.DecisionCount++
@@ -1289,6 +1327,9 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	state.observationCount++
 	if state.receiptRequired {
 		r.validateDecisionReceipt(event, decision, receiptEvidence)
+	}
+	if state.configuredMaxLossQuote > 0 {
+		r.validateMarkedRiskDecision(event, decision, state)
 	}
 	if decision.MarkPrice > 0 {
 		expectedTarget, targetOK := expectedCDFTargetPosition(decision.MarkPrice, state.reconstructedReference, state)
@@ -1459,6 +1500,126 @@ func (r *CDFLiquidityRunAudit) validateWaitState(event Event, decision cdfDecisi
 	}
 }
 
+func (r *CDFLiquidityRunAudit) validateMarkedRiskDecision(event Event, decision cdfDecisionEvidence, state *CDFLiquiditySupplierAudit) {
+	wasRiskStateSeen := state.riskStateSeen
+	state.RiskStateDecisionCount++
+	r.RiskStateDecisionCount++
+	state.riskStateSeen = true
+	addFailure := func(failure string) {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: failure})
+	}
+	if decision.MaxLossQuote != state.configuredMaxLossQuote || decision.MaxLossQuote <= 0 {
+		addFailure("supplier decision maximum loss budget disagrees with registered configuration")
+	}
+	initialEquity, initialOK := expectedCDFInitialEquity(state)
+	if !initialOK || decision.InitialEquityQuote != initialEquity {
+		addFailure("supplier decision initial marked equity is not reconstructible from registered endowment")
+	}
+	if decision.RiskMarkPrice <= 0 {
+		addFailure("supplier decision has no positive risk mark")
+	}
+	if decision.QuoteCashAvailable < 0 || decision.QuoteCashReserved < 0 {
+		addFailure("supplier decision exposes negative quote cash state")
+	}
+	if state.riskLimitSeen && !decision.RiskLimitTriggered {
+		addFailure("supplier risk-limit flag is not monotonic")
+	}
+	if !decision.EquityAvailable {
+		if decision.Reason != "equity_unavailable" || decision.RiskLimitTriggered {
+			addFailure("unavailable supplier equity has an invalid decision state")
+		}
+		return
+	}
+	if decision.Reason == "equity_unavailable" {
+		addFailure("available supplier equity is labeled unavailable")
+	}
+	expectedEquity, equityOK := expectedCDFMarkedEquity(decision, state)
+	if !equityOK || decision.EquityQuote != expectedEquity {
+		addFailure("supplier decision marked equity does not reconcile to cash, inventory, and risk mark")
+		return
+	}
+	if decision.PeakEquityQuote < decision.EquityQuote {
+		addFailure("supplier peak marked equity is below current equity")
+	}
+	loss, lossOK := positiveQuoteDifference(decision.InitialEquityQuote, decision.EquityQuote)
+	drawdown, drawdownOK := positiveQuoteDifference(decision.PeakEquityQuote, decision.EquityQuote)
+	if !lossOK || decision.LossFromInitialQuote != loss {
+		addFailure("supplier loss from initial equity is not exact")
+	}
+	if !drawdownOK || decision.DrawdownQuote != drawdown {
+		addFailure("supplier marked-equity drawdown is not exact")
+	}
+	if wasRiskStateSeen {
+		if decision.InitialEquityQuote != state.lastRiskInitialEquity || decision.PeakEquityQuote < state.lastRiskPeakEquity {
+			addFailure("supplier marked-risk baseline or peak changed during the run")
+		}
+	}
+	thresholdReached := lossOK && drawdownOK && (loss >= state.configuredMaxLossQuote || drawdown >= state.configuredMaxLossQuote)
+	if thresholdReached && !decision.RiskLimitTriggered {
+		addFailure("supplier risk-limit flag omitted after registered loss budget was reached")
+	}
+	if decision.RiskLimitTriggered && (decision.Action != "wait" && decision.Action != "withdraw" || decision.Reason != "loss_limit") {
+		addFailure("supplier risk-limit decision did not withdraw or wait with loss-limit reason")
+	}
+	if decision.RiskLimitTriggered {
+		state.riskLimitSeen = true
+		state.RiskLimitTriggeredDecisionCount++
+		r.RiskLimitTriggeredDecisionCount++
+	}
+	state.lastRiskInitialEquity = decision.InitialEquityQuote
+	state.lastRiskEquity = decision.EquityQuote
+	state.lastRiskPeakEquity = decision.PeakEquityQuote
+	state.lastRiskLossFromInitial = decision.LossFromInitialQuote
+	state.lastRiskDrawdown = decision.DrawdownQuote
+	state.lastRiskMarkPrice = decision.RiskMarkPrice
+	if decision.LossFromInitialQuote > state.MaxObservedLossFromInitialQuote {
+		state.MaxObservedLossFromInitialQuote = decision.LossFromInitialQuote
+	}
+	if decision.DrawdownQuote > state.MaxObservedDrawdownQuote {
+		state.MaxObservedDrawdownQuote = decision.DrawdownQuote
+	}
+}
+
+func expectedCDFInitialEquity(state *CDFLiquiditySupplierAudit) (int64, bool) {
+	if state.configuredInitialQuoteBalance <= 0 || state.configuredInitialBaseBalance < 0 || state.configuredReferencePrice <= 0 || state.configuredBasePrecision <= 0 {
+		return 0, false
+	}
+	baseNotional, ok := etypes.TryMulDiv(state.configuredInitialBaseBalance, state.configuredReferencePrice, state.configuredBasePrecision)
+	if !ok {
+		return 0, false
+	}
+	return exactAdd(state.configuredInitialQuoteBalance, baseNotional)
+}
+
+func expectedCDFMarkedEquity(decision cdfDecisionEvidence, state *CDFLiquiditySupplierAudit) (int64, bool) {
+	if decision.RiskMarkPrice <= 0 || decision.QuoteCashAvailable < 0 || decision.QuoteCashReserved < 0 || state.configuredBasePrecision <= 0 {
+		return 0, false
+	}
+	grossInventory, ok := exactAdd(state.configuredInitialBaseBalance, decision.Position)
+	if !ok || grossInventory < 0 {
+		return 0, false
+	}
+	notional := new(big.Int).Mul(big.NewInt(grossInventory), big.NewInt(decision.RiskMarkPrice))
+	notional.Quo(notional, big.NewInt(state.configuredBasePrecision))
+	equity := new(big.Int).Add(notional, big.NewInt(decision.QuoteCashAvailable))
+	equity.Add(equity, big.NewInt(decision.QuoteCashReserved))
+	if !equity.IsInt64() {
+		return 0, false
+	}
+	return equity.Int64(), true
+}
+
+func positiveQuoteDifference(larger, smaller int64) (int64, bool) {
+	difference := new(big.Int).Sub(big.NewInt(larger), big.NewInt(smaller))
+	if difference.Sign() <= 0 {
+		return 0, true
+	}
+	if !difference.IsInt64() {
+		return 0, false
+	}
+	return difference.Int64(), true
+}
+
 func (r *CDFLiquidityRunAudit) validateQuoteCashHeadroom(events []cdfCashEvent, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
 	sort.SliceStable(events, func(left, right int) bool {
 		leftEvent, rightEvent := events[left].event, events[right].event
@@ -1533,7 +1694,11 @@ func cdfCashEventPriority(eventName string) int {
 
 func (r *CDFLiquidityRunAudit) processQuoteCashDecision(event Event, state *CDFLiquiditySupplierAudit, ledger *cdfQuoteCashLedger) {
 	var decision cdfDecisionEvidence
-	if err := decodeRequiredJSON(event.Raw(), &decision, "role", "client_id", "action", "quote_cash_available"); err != nil {
+	required := []string{"role", "client_id", "action", "quote_cash_available"}
+	if state.configuredMaxLossQuote > 0 {
+		required = append(required, "quote_cash_reserved")
+	}
+	if err := decodeRequiredJSON(event.Raw(), &decision, required...); err != nil {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "malformed quote-cash decision: " + err.Error()})
 		return
 	}
@@ -1542,6 +1707,9 @@ func (r *CDFLiquidityRunAudit) processQuoteCashDecision(event Event, state *CDFL
 	}
 	if decision.QuoteCashAvailable < 0 || decision.QuoteCashAvailable != ledger.available {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier quote-cash headroom does not reconcile to independent ledger"})
+	}
+	if state.configuredMaxLossQuote > 0 && (decision.QuoteCashReserved < 0 || decision.QuoteCashReserved != ledger.reserved) {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier reserved quote cash does not reconcile to independent ledger"})
 	}
 	if decision.Action != "submit" {
 		return
@@ -2925,6 +3093,10 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "trading PnL decomposition exceeds fixed-point rounding allowance"})
 		}
 		state.MaxQuoteQty = state.maxQuoteQty
+		state.ConfiguredMaxLossQuote = state.configuredMaxLossQuote
+		if state.configuredMaxLossQuote > 0 && !state.riskStateSeen {
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier has no marked-risk decision state"})
+		}
 		if state.FillCount > 0 && state.InventoryResponsiveDecisionCount == 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier has no inventory-responsive post-fill decision"})
 		}
@@ -2970,6 +3142,12 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 			r.MaxBorrowed = state.MaxBorrowed
 		}
 		r.SupplierVolumeQty, _ = exactAdd(r.SupplierVolumeQty, state.FilledQty)
+		if state.MaxObservedLossFromInitialQuote > r.MaxObservedLossFromInitialQuote {
+			r.MaxObservedLossFromInitialQuote = state.MaxObservedLossFromInitialQuote
+		}
+		if state.MaxObservedDrawdownQuote > r.MaxObservedDrawdownQuote {
+			r.MaxObservedDrawdownQuote = state.MaxObservedDrawdownQuote
+		}
 		if state.MaxObservedTouchShare > r.MaxObservedTouchShare {
 			r.MaxObservedTouchShare = state.MaxObservedTouchShare
 		}

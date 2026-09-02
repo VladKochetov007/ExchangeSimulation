@@ -41,6 +41,54 @@ func TestMeasureCDFLiquidityReconstructsBoundedSupplier(t *testing.T) {
 	}
 }
 
+func TestCDFMarkedRiskAuditReconstructsReservedCashAndStaleMark(t *testing.T) {
+	state := &CDFLiquiditySupplierAudit{
+		VenueID: "north", Role: "cdf_elastic_supplier_1", ClientID: 2,
+		configuredInitialBaseBalance: 100, configuredInitialQuoteBalance: 1_000,
+		configuredReferencePrice: 100, configuredBasePrecision: 1,
+		configuredMaxLossQuote: 1_000,
+	}
+	audit := &CDFLiquidityRunAudit{}
+	decision := cdfDecisionEvidence{
+		InitialEquityQuote: 11_000, EquityQuote: 11_000, PeakEquityQuote: 11_000,
+		LossFromInitialQuote: 0, DrawdownQuote: 0, MaxLossQuote: 1_000,
+		RiskMarkPrice: 100, QuoteCashAvailable: 1_000, QuoteCashReserved: 0,
+		Position: 0, EquityAvailable: true, Action: "wait", Reason: "subscribe",
+	}
+	audit.validateMarkedRiskDecision(Event{VenueID: "north", ClientID: 2, SimTS: 1, Ordinal: 1}, decision, state)
+	if len(audit.Checks) != 0 {
+		t.Fatalf("initial marked-risk state rejected: %+v", audit.Checks)
+	}
+	decision = cdfDecisionEvidence{
+		InitialEquityQuote: 11_000, EquityQuote: 11_005, PeakEquityQuote: 11_005,
+		LossFromInitialQuote: 0, DrawdownQuote: 0, MaxLossQuote: 1_000,
+		RiskMarkPrice: 100, QuoteCashAvailable: 505, QuoteCashReserved: 0,
+		Position: 5, EquityAvailable: true, Action: "submit", Reason: "inventory_target_gap",
+	}
+	audit.validateMarkedRiskDecision(Event{VenueID: "north", ClientID: 2, SimTS: 4, Ordinal: 2}, decision, state)
+	if len(audit.Checks) != 0 {
+		t.Fatalf("post-fill marked-risk state rejected: %+v", audit.Checks)
+	}
+	decision = cdfDecisionEvidence{
+		InitialEquityQuote: 11_000, EquityQuote: 10_609, PeakEquityQuote: 11_005,
+		LossFromInitialQuote: 391, DrawdownQuote: 396, MaxLossQuote: 1_000,
+		RiskMarkPrice: 100, QuoteCashAvailable: 109, QuoteCashReserved: 0,
+		Position: 5, EquityAvailable: true, Action: "wait", Reason: "stale_or_missing_observation",
+	}
+	audit.validateMarkedRiskDecision(Event{VenueID: "north", ClientID: 2, SimTS: 12, Ordinal: 3}, decision, state)
+	if len(audit.Checks) != 0 {
+		t.Fatalf("stale-observation marked-risk state rejected: %+v", audit.Checks)
+	}
+	if state.RiskStateDecisionCount != 3 || state.MaxObservedLossFromInitialQuote != 391 || state.MaxObservedDrawdownQuote != 396 {
+		t.Fatalf("risk diagnostics = %+v, want three states and exact loss/drawdown", state)
+	}
+	decision.QuoteCashReserved = 1
+	audit.validateMarkedRiskDecision(Event{VenueID: "north", ClientID: 2, SimTS: 13, Ordinal: 4}, decision, state)
+	if !hasCDFCheck(audit.Checks, "supplier decision marked equity does not reconcile") {
+		t.Fatalf("reserved-cash mutation was accepted: %+v", audit.Checks)
+	}
+}
+
 func TestCDFLiquidityAcceptsLegalNoActionWaitReasons(t *testing.T) {
 	legalReasons := []string{
 		"inventory_at_target",
@@ -1458,7 +1506,7 @@ func cdfFixtureLine(sequence uint64, clientID uint64, event, payload string) str
 		if strings.Contains(payload, `"position":5`) {
 			position = 5
 		}
-		payload = strings.TrimSuffix(payload, "}") + fmt.Sprintf(`,"observation_digest":"","initial_base_balance":100,"gross_inventory":%d,"gross_inventory_limit":110}`, 100+position)
+		payload = strings.TrimSuffix(payload, "}") + fmt.Sprintf(`,"decision_phase_offset_nanos":0,"observation_digest":"","initial_base_balance":100,"gross_inventory":%d,"gross_inventory_limit":110,"quote_cash_reserved":0}`, 100+position)
 	}
 	return fmt.Sprintf(`{"client_id":%d,"data":{"venue_id":"north","sequence":%d,"payload":%s},"event":"%s","sim_ts":%d}`, clientID, sequence, payload, event, sequence)
 }

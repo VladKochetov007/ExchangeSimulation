@@ -126,7 +126,7 @@ func TestElasticLiquiditySupplierWithdrawsAfterMarkedLossBudget(t *testing.T) {
 	if decision.Action != "wait" || decision.Reason != "loss_limit" {
 		t.Fatalf("risk decision = %+v, want fail-closed loss-limit wait", decision)
 	}
-	if !decision.EquityAvailable || !decision.RiskLimitTriggered || decision.MarkPrice != 90 {
+	if !decision.EquityAvailable || !decision.RiskLimitTriggered || decision.MarkPrice != 90 || decision.RiskMarkPrice != 90 {
 		t.Fatalf("risk state = %+v, want available triggered state at midpoint 90", decision)
 	}
 	if decision.EquityQuote != 9_900 || decision.LossFromInitialQuote != 1_100 || decision.DrawdownQuote != 1_100 {
@@ -140,7 +140,7 @@ func TestElasticLiquiditySupplierWithdrawsAfterMarkedLossBudget(t *testing.T) {
 	if err := json.Unmarshal(encoded, &fields); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"quote_cash_reserved", "initial_equity_quote", "equity_quote", "peak_equity_quote", "loss_from_initial_quote", "drawdown_quote", "max_loss_quote", "equity_available", "risk_limit_triggered"} {
+	for _, field := range []string{"risk_mark_price", "quote_cash_reserved", "initial_equity_quote", "equity_quote", "peak_equity_quote", "loss_from_initial_quote", "drawdown_quote", "max_loss_quote", "equity_available", "risk_limit_triggered"} {
 		if _, ok := fields[field]; !ok {
 			t.Fatalf("risk decision omitted required field %q: %s", field, encoded)
 		}
