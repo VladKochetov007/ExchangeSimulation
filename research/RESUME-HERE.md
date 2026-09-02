@@ -1067,3 +1067,35 @@ mechanical/race gates. Rebuild clean Go 1.27 binaries and obtain one fresh
 exact-tree Sol-high review before any current-revision capacity measurement or
 new development cell. The performance feed was fetched through `c4434ad` with
 no newer commit; binary-evidence promotion remains deferred.
+
+### 2026-09-02 — fail-closed SV1 measurement amendment
+
+The successor tree is now `74bb3a8` on
+`feature/r2-cdf-survival-successor`. An independent Sol-xhigh specification
+critic identified that a failed or malformed survival derivation could be
+classified as an ordinary economic negative, and that a malformed control
+terminal measurement could escape the evidence status. This was corrected
+before any SV1 24-hour cell by `v2-r2-sv1-24h-development-scorer-v3`.
+
+The scorer now separates terminal/survival measurement validity from endpoint
+truth. Every primary treatment and control cell must produce valid terminal and
+survival measurements; a valid false control endpoint remains diagnostic and
+does not gate treatment viability. Missing or malformed measurement makes the
+development score `INVALID_DEVELOPMENT_EVIDENCE`. The classification matrix is
+isolated in `scripts/v2-r2-sv1-score-classification.jq` and covered by
+`scripts/test-v2-r2-sv1-score-contract.sh`. The append-only record is
+`research/v2-r2-sv1-scoring-correction-2026-09-02.md`.
+
+The focused Go packages, activation contract, exact-window survival contract,
+score matrix, shell syntax, and diff check pass at this tree. The earlier
+targeted race invocation remains a non-passing diagnostic because the
+fresh-process multivenue test exceeded its ten-minute Go test timeout; no race
+was reported before timeout. The retained analyzer-only replay still runs
+under the namespace lock against the old `3f73f30` source trajectory and is not
+an accepted result.
+
+Three additional independent Sol-xhigh reviews of the full scientific
+direction are in progress. They have no authority to edit the tree or consume
+holdouts. The next gate remains replay completion, clean full tests/vet/race
+and evidence checks, then one formal exact-tree promotion review before a
+pinned Go 1.27 build, capacity measurement, or matched development cells.

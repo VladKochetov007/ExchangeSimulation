@@ -892,3 +892,30 @@ targeted race/evidence-contract checks, one fresh exact-tree Sol-high review,
 then a Go 1.27 rebuild and current-revision binary-capacity measurement. The
 performance branch was fetched through `c4434ad`; no newer commit was found,
 and no performance implementation was merged.
+
+## Append-only operational update: fail-closed SV1 measurement amendment — 2026-09-02
+
+Commit `74bb3a8` promotes the pre-campaign scorer to
+`v2-r2-sv1-24h-development-scorer-v3` after an independent Sol-xhigh critic
+found a validity/outcome conflation. A failed or malformed survival derivation
+could previously become a treatment `NON-VIABLE` result, while an invalid
+control derivation could be ignored. Control endpoint failure itself remains a
+valid counterfactual diagnostic when it is measured; controls are not required
+to survive for treatment viability.
+
+The corrected contract requires valid terminal and survival measurements for all
+six primary development cells. It evaluates strict terminal valuation and
+post-warm-up survival as treatment outcomes, while retaining control endpoint
+truth as diagnostics. The pure classification filter and adversarial matrix
+test are `scripts/v2-r2-sv1-score-classification.jq` and
+`scripts/test-v2-r2-sv1-score-contract.sh`. No simulator economics, calendar,
+roster, historical result, or holdout policy changed. The append-only rationale
+is `research/v2-r2-sv1-scoring-correction-2026-09-02.md`.
+
+At this checkpoint the focused Go packages and all three SV1 contract fixtures
+pass; the previous broad race command timed out in the fresh-process
+multivenue test at ten minutes and is not recorded as a pass. The retained
+old-source analyzer-only replay remains active and diagnostic only. Three new
+independent Sol-xhigh direction reviews are pending; formal exact-tree
+promotion review, clean full gates, pinned build, capacity, matched
+development, freeze, and holdout validation remain unopened.
