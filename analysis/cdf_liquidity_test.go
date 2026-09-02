@@ -89,12 +89,45 @@ func TestCDFMarkedRiskAuditReconstructsReservedCashAndStaleMark(t *testing.T) {
 	}
 }
 
+func TestCDFMarkedRiskAuditRejectsPrematureLossLimit(t *testing.T) {
+	state := &CDFLiquiditySupplierAudit{
+		VenueID: "north", Role: "cdf_elastic_supplier_1", ClientID: 2,
+		configuredInitialBaseBalance: 100, configuredInitialQuoteBalance: 1_000,
+		configuredReferencePrice: 100, configuredBasePrecision: 1,
+		configuredMaxLossQuote: 1_000,
+	}
+	audit := &CDFLiquidityRunAudit{}
+	audit.validateMarkedRiskDecision(Event{VenueID: "north", ClientID: 2, SimTS: 1, Ordinal: 1}, cdfDecisionEvidence{
+		InitialEquityQuote: 11_000, EquityQuote: 10_900, PeakEquityQuote: 11_000,
+		LossFromInitialQuote: 100, DrawdownQuote: 100, MaxLossQuote: 1_000,
+		RiskMarkPrice: 100, QuoteCashAvailable: 900, Position: 0,
+		EquityAvailable: true, Action: "wait", Reason: "loss_limit", RiskLimitTriggered: true,
+	}, state)
+	if !hasCDFCheck(audit.Checks, "supplier risk-limit flag was set before") {
+		t.Fatalf("premature risk-limit flag was accepted: %+v", audit.Checks)
+	}
+}
+
+func TestExpectedCDFInventoryQuoteRespectsMinimumExecutableQty(t *testing.T) {
+	state := &CDFLiquiditySupplierAudit{
+		configuredMaxInventory: 200, configuredMaxQuoteQty: 100,
+		configuredMinimumExecutableQty: 10, configuredBasePrecision: 1,
+	}
+	if side, quantity, ok := expectedCDFInventoryQuoteAtWithCash(5, 0, 100, 100, 10_000, state); ok || side != "BUY" || quantity != 0 {
+		t.Fatalf("sub-minimum expected quote = (%s, %d, %t), want BUY/0/false", side, quantity, ok)
+	}
+	if side, quantity, ok := expectedCDFInventoryQuoteAtWithCash(10, 0, 100, 100, 10_000, state); !ok || side != "BUY" || quantity != 10 {
+		t.Fatalf("minimum expected quote = (%s, %d, %t), want BUY/10/true", side, quantity, ok)
+	}
+}
+
 func TestCDFLiquidityAcceptsLegalNoActionWaitReasons(t *testing.T) {
 	legalReasons := []string{
 		"inventory_at_target",
 		"one_sided_or_locked_book",
 		"limit_or_touch_unavailable",
 		"quote_cash_limit",
+		"below_minimum_executable_qty",
 	}
 
 	for _, reason := range legalReasons {

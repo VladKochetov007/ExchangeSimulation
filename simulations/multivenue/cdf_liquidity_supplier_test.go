@@ -287,6 +287,35 @@ func TestElasticLiquiditySupplierBoundsBuyQuoteByFiniteCash(t *testing.T) {
 	}
 }
 
+func TestElasticLiquiditySupplierDoesNotSubmitBelowMinimumExecutableQty(t *testing.T) {
+	gateway := newMetaGateway()
+	var decisions []ElasticLiquiditySupplierDecision
+	supplier := NewElasticLiquiditySupplier(1, gateway, ElasticLiquiditySupplierConfig{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		Interval: time.Second, MaxObservationAge: time.Minute,
+		ReferencePrice: 100, ReferenceHalfLife: time.Hour,
+		BaseHolding: 0, ElasticityPerPercent: 5, MaxPosition: 100, MaxQuoteQty: 100,
+		MinimumExecutableQty: 10,
+		DecisionObserver:     func(decision ElasticLiquiditySupplierDecision) { decisions = append(decisions, decision) },
+	})
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	supplier.HandleEvent(context.Background(), elasticSupplierSnapshot("CDF/USD", int64(time.Second), 98, 100))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	if len(gateway.orders()) != 0 {
+		t.Fatalf("sub-minimum orders = %+v, want no submission", gateway.orders())
+	}
+	if len(decisions) == 0 || decisions[len(decisions)-1].Action != "wait" || decisions[len(decisions)-1].Reason != "below_minimum_executable_qty" {
+		t.Fatalf("sub-minimum decision = %+v, want explicit executable floor", decisions)
+	}
+
+	supplier.cfg.ElasticityPerPercent = 10
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	orders := gateway.orders()
+	if len(orders) != 1 || orders[0].Qty < supplier.cfg.MinimumExecutableQty {
+		t.Fatalf("minimum-sized order = %+v, want one executable quote", orders)
+	}
+}
+
 func TestElasticLiquiditySupplierWithdrawsOnUnavailableLocalSide(t *testing.T) {
 	gw := newMetaGateway()
 	supplier := NewElasticLiquiditySupplier(1, gw, ElasticLiquiditySupplierConfig{

@@ -37,18 +37,20 @@ write_outcome_fixture() {
 	local name=$1 status=$2 code=$3 sealed=$4 risk=$5 population=$6 error=${7:-}
 	if [[ -n "$error" ]]; then
 		jq -n --arg status "$status" --arg code "$code" --arg error "$error" \
+			--arg stage "terminal_risk_capture" --arg failure_venue_id "north" --arg failure_symbol "CDF/USD" \
 			--argjson sealed "$sealed" --argjson risk "$risk" --argjson population "$population" \
-			'{schema_version: 1, status: $status, code: $code, phase: "terminal_post_mark",
+			'{schema_version: 2, status: $status, code: $code, phase: "terminal_post_mark",
 			 simulation_start_nano: 10, simulation_end_nano: 20,
 			 strict_population_accounting: true, evidence_format: "evstream_v3",
 			 evidence_sealed: $sealed, terminal_risk_captured: $risk,
-			 terminal_population_captured: $population, error: $error}' \
+			 terminal_population_captured: $population, stage: $stage, failure_at_nano: 20,
+			 failure_venue_id: $failure_venue_id, failure_symbol: $failure_symbol, error: $error}' \
 			>"$fixture_dir/$name.json"
 		return
 	fi
 	jq -n --arg status "$status" --arg code "$code" \
 		--argjson sealed "$sealed" --argjson risk "$risk" --argjson population "$population" \
-		'{schema_version: 1, status: $status, code: $code, phase: "terminal_post_mark",
+			'{schema_version: 2, status: $status, code: $code, phase: "terminal_post_mark",
 		 simulation_start_nano: 10, simulation_end_nano: 20,
 		 strict_population_accounting: true, evidence_format: "evstream_v3",
 		 evidence_sealed: $sealed, terminal_risk_captured: $risk,

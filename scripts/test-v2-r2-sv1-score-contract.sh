@@ -14,6 +14,7 @@ classify() {
 	local all_treatment_terminal_valid=$3 all_treatment_survival_valid=$4
 	local all_cdf_contract_valid=$5 all_anticheating_valid=$6
 	local all_paired_effect_valid=$7 all_paired_effect_identified=$8
+	local terminal_failure_seen=${9:-false} all_terminal_diagnostic_valid=${10:-true}
 	jq -n \
 		--argjson all_cells_valid "$all_cells_valid" \
 		--argjson all_measurements_valid "$all_measurements_valid" \
@@ -23,6 +24,8 @@ classify() {
 		--argjson all_anticheating_valid "$all_anticheating_valid" \
 		--argjson all_paired_effect_valid "$all_paired_effect_valid" \
 		--argjson all_paired_effect_identified "$all_paired_effect_identified" \
+		--argjson terminal_failure_seen "$terminal_failure_seen" \
+		--argjson all_terminal_diagnostic_valid "$all_terminal_diagnostic_valid" \
 		-f "$filter"
 }
 
@@ -44,3 +47,5 @@ expect_status invalid-mechanical-evidence INVALID_DEVELOPMENT_EVIDENCE false tru
 expect_status invalid-cdf-audit INVALID_DEVELOPMENT_EVIDENCE true true true true false true true true
 expect_status valid-evidence-no-paired-effect NON-VIABLE_AT_24H_MARKET_SURVIVAL_GATE true true true true true true true false
 expect_status invalid-paired-effect-measurement INVALID_DEVELOPMENT_EVIDENCE true true true true true false false false
+expect_status valid-terminal-failure-negative NON-VIABLE_AT_24H_MARKET_SURVIVAL_GATE true true false true false false true true true true
+expect_status invalid-terminal-failure-diagnostic INVALID_DEVELOPMENT_EVIDENCE true true false true false false true true true false

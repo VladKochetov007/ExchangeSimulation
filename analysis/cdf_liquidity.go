@@ -1536,7 +1536,7 @@ func (r *CDFLiquidityRunAudit) validateWaitState(event Event, decision cdfDecisi
 		if decision.QuoteOrderID != 0 || decision.QuoteRequestID != 0 || decision.CancelRequestID != 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "stale-observation wait has outstanding order state"})
 		}
-	case "inventory_at_target", "one_sided_or_locked_book", "limit_or_touch_unavailable", "quote_cash_limit":
+	case "inventory_at_target", "one_sided_or_locked_book", "limit_or_touch_unavailable", "quote_cash_limit", "below_minimum_executable_qty":
 		if decision.QuoteOrderID != 0 || decision.QuoteRequestID != 0 || decision.CancelRequestID != 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "no-action wait has outstanding order state"})
 		}
@@ -1617,6 +1617,9 @@ func (r *CDFLiquidityRunAudit) validateMarkedRiskDecision(event Event, decision 
 	thresholdReached := lossOK && drawdownOK && (loss >= state.configuredMaxLossQuote || drawdown >= state.configuredMaxLossQuote)
 	if thresholdReached && !decision.RiskLimitTriggered {
 		addFailure("supplier risk-limit flag omitted after registered loss budget was reached")
+	}
+	if decision.RiskLimitTriggered && !thresholdReached {
+		addFailure("supplier risk-limit flag was set before the registered loss budget was reached")
 	}
 	if decision.RiskLimitTriggered && (decision.Action != "wait" && decision.Action != "withdraw" || decision.Reason != "loss_limit") {
 		addFailure("supplier risk-limit decision did not withdraw or wait with loss-limit reason")
@@ -3439,6 +3442,9 @@ func expectedCDFInventoryQuoteAtWithCash(targetPosition, position, grossInventor
 	}
 	if side == "BUY" && state.configuredInitialQuoteBalance > 0 && state.configuredQuotePrecision > 0 {
 		quantity = maxAffordableCDFQuoteQty(quotePrice, state.configuredBasePrecision, state.configuredMakerFeeBps, quoteCashAvailable, quantity)
+	}
+	if state.configuredMinimumExecutableQty > 0 && quantity < state.configuredMinimumExecutableQty {
+		return side, 0, false
 	}
 	return side, quantity, quantity > 0
 }

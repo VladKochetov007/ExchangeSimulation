@@ -322,6 +322,55 @@ v2_r2_evidence_format() {
 	jq -er '.evidence_format // "jsonl"' "$cell/run-config.json"
 }
 
+# A typed economic endpoint is accepted as a terminal-failure measurement only
+# when its provenance says that the price error arose at the terminal capture
+# fixed point. The runner and verifier both call this predicate so a generic or
+# scheduled price error cannot enter the diagnostic-negative evidence profile.
+v2_r2_terminal_failure_outcome_present() {
+	local cell=$1 start end
+	[[ "${v2_r2_sv1_require_terminal_outcome:-false}" == true ]] || return 1
+	[[ -s "$cell/run-metadata.json" && -s "$cell/terminal-outcome.json" ]] || return 1
+	start=$(jq -er '.simulation_start_nano' "$cell/run-metadata.json") || return 1
+	end=$(jq -er '.simulation_end_nano' "$cell/run-metadata.json") || return 1
+	config_strict=$(jq -er '.strict_population_accounting' "$cell/run-config.json") || return 1
+	jq -e --argjson start "$start" --argjson end "$end" --argjson strict "$config_strict" '
+		type == "object" and .schema_version == 2 and .status == "terminal_failure" and
+		(.code == "PRICE_UNAVAILABLE" or .code == "PRICE_DOMAIN_ERROR") and
+		.phase == "terminal_post_mark" and .simulation_start_nano == $start and
+		.simulation_end_nano == $end and .evidence_format == "evstream_v3" and
+		(.strict_population_accounting | type) == "boolean" and .strict_population_accounting == $strict and
+		(.evidence_sealed | type) == "boolean" and (.terminal_risk_captured | type) == "boolean" and
+		(.terminal_population_captured | type) == "boolean" and
+		.evidence_sealed == true and .terminal_risk_captured == false and
+		.terminal_population_captured == false and
+		(.stage == "terminal_risk_capture" or .stage == "terminal_population_capture") and
+		(.failure_at_nano | type) == "number" and .failure_at_nano == $end and
+		(.failure_venue_id | type) == "string" and (.failure_venue_id | length) > 0 and
+		(.failure_symbol | type) == "string" and (.failure_symbol | length) > 0 and
+		(.error | type) == "string" and (.error | length) > 0 and
+		((.evidence_seal_error // "") == "")' "$cell/terminal-outcome.json" >/dev/null
+}
+
+v2_r2_terminal_completed_outcome_present() {
+	local cell=$1 start end
+	[[ "${v2_r2_sv1_require_terminal_outcome:-false}" == true ]] || return 1
+	[[ -s "$cell/run-metadata.json" && -s "$cell/terminal-outcome.json" ]] || return 1
+	start=$(jq -er '.simulation_start_nano' "$cell/run-metadata.json") || return 1
+	end=$(jq -er '.simulation_end_nano' "$cell/run-metadata.json") || return 1
+	config_strict=$(jq -er '.strict_population_accounting' "$cell/run-config.json") || return 1
+	jq -e --argjson start "$start" --argjson end "$end" --argjson strict "$config_strict" '
+		type == "object" and .schema_version == 2 and .status == "completed" and
+		.code == "COMPLETED" and .phase == "terminal_post_mark" and
+		.simulation_start_nano == $start and .simulation_end_nano == $end and
+		.evidence_format == "evstream_v3" and .evidence_sealed == true and
+		(.strict_population_accounting | type) == "boolean" and .strict_population_accounting == $strict and
+		.terminal_risk_captured == true and
+		(.strict_population_accounting == false or .terminal_population_captured == true) and
+		(has("error") | not) and (has("evidence_seal_error") | not) and
+		(has("stage") | not) and (has("failure_at_nano") | not) and
+		(has("failure_venue_id") | not) and (has("failure_symbol") | not)' "$cell/terminal-outcome.json" >/dev/null
+}
+
 v2_r2_write_evidence_manifest() {
 	local cell=$1
 	local output="$cell/evidence-manifest.json"
@@ -329,7 +378,15 @@ v2_r2_write_evidence_manifest() {
 	log_mode=$(jq -er '.log_mode' "$cell/run-config.json") || return 1
 	evidence_format=$(v2_r2_evidence_format "$cell") || return 1
 	record_market_data_receipts=$(jq -r '.record_market_data_receipts // false' "$cell/run-config.json") || return 1
-	local fixed_files
+	local fixed_files terminal_required=false terminal_failure=false
+	if [[ "${v2_r2_sv1_require_terminal_outcome:-false}" == true ]]; then
+		terminal_required=true
+		if v2_r2_terminal_failure_outcome_present "$cell"; then
+			terminal_failure=true
+		elif ! v2_r2_terminal_completed_outcome_present "$cell"; then
+			return 1
+		fi
+	fi
 	case "$evidence_format:$log_mode" in
 		jsonl:full)
 			contract="v2-integrated-longrun-evidence-manifest-v1"
@@ -349,6 +406,27 @@ v2_r2_write_evidence_manifest() {
 			;;
 		*) return 1 ;;
 	 esac
+	if [[ "$terminal_required" == true ]]; then
+		case "$evidence_format:$log_mode" in
+			evstream_v3:full)
+				contract="v2-integrated-longrun-evidence-manifest-v3"
+				if [[ "$terminal_failure" == true ]]; then
+					fixed_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json terminal-outcome.json)
+				else
+					fixed_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json terminal-outcome.json)
+				fi
+				;;
+			evstream_v3:none)
+				contract="v2-integrated-longrun-evidence-manifest-v3"
+				if [[ "$terminal_failure" == true ]]; then
+					fixed_files=(run-config.json run-metadata.json manifest.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json terminal-outcome.json)
+				else
+					fixed_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json terminal-outcome.json)
+				fi
+				;;
+			*) return 1 ;;
+		 esac
+	fi
 	if [[ "$evidence_format" == evstream_v3 && "$record_market_data_receipts" == true ]]; then
 		local receipt_file
 		for receipt_file in market-data-evidence-v2.json market-data-schedules-v2.bin market-data-receipts-v2.bin market-data-decisions-v2.bin market-data-actions-v2.bin; do
@@ -401,7 +479,7 @@ v2_r2_write_evidence_manifest() {
 		--arg source_revision "$(jq -er '.git_revision' "$cell/run-metadata.json")" \
 		--argjson fixed_files "$fixed_records" --argjson raw_files "$raw_records" \
 		--argjson raw_count "$raw_count" --argjson raw_bytes "$raw_bytes" \
-		'{schema_version: (if $evidence_format == "evstream_v3" then 2 else 1 end), contract: $contract, cell: $cell, log_mode: $log_mode, evidence_format: $evidence_format, source_revision: $source_revision,
+		'{schema_version: (if $contract == "v2-integrated-longrun-evidence-manifest-v3" then 3 elif $evidence_format == "evstream_v3" then 2 else 1 end), contract: $contract, cell: $cell, log_mode: $log_mode, evidence_format: $evidence_format, source_revision: $source_revision,
 			fixed_files: $fixed_files, raw_jsonl_files: $raw_count, raw_jsonl_bytes: $raw_bytes,
 		 raw_files: $raw_files}' >"$temporary" || return 1
 	mv -- "$temporary" "$output"
@@ -415,17 +493,44 @@ v2_r2_verify_evidence_manifest() {
 	log_mode=$(jq -er '.log_mode' "$cell/run-config.json") || return 1
 	evidence_format=$(v2_r2_evidence_format "$cell") || return 1
 	record_market_data_receipts=$(jq -r '.record_market_data_receipts // false' "$cell/run-config.json") || return 1
+	local terminal_required=false terminal_failure=false
+	if [[ "${v2_r2_sv1_require_terminal_outcome:-false}" == true ]]; then
+		terminal_required=true
+		if v2_r2_terminal_failure_outcome_present "$cell"; then
+			terminal_failure=true
+		elif ! v2_r2_terminal_completed_outcome_present "$cell"; then
+			return 1
+		fi
+	fi
 	case "$evidence_format" in
 		jsonl) expected_contract="v2-integrated-longrun-evidence-manifest-v1"; expected_schema=1 ;;
-		evstream_v3) expected_contract="v2-integrated-longrun-evidence-manifest-v2"; expected_schema=2 ;;
+		evstream_v3)
+			if [[ "$terminal_required" == true ]]; then
+				expected_contract="v2-integrated-longrun-evidence-manifest-v3"; expected_schema=3
+			else
+				expected_contract="v2-integrated-longrun-evidence-manifest-v2"; expected_schema=2
+			fi
+			;;
 		*) return 1 ;;
 	esac
 	local expected_fixed
 	case "$evidence_format:$log_mode" in
 		jsonl:full) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl evidence-artifact-hash.json | sort) ;;
 		jsonl:none) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl | sort) ;;
-		evstream_v3:full) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json | sort) ;;
-		evstream_v3:none) expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json | sort) ;;
+		evstream_v3:full)
+			if [[ "$terminal_required" == true ]]; then
+				expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json terminal-outcome.json | sort)
+			else
+				expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json | sort)
+			fi
+			;;
+		evstream_v3:none)
+			if [[ "$terminal_required" == true ]]; then
+				expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json terminal-outcome.json | sort)
+			else
+				expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json | sort)
+			fi
+			;;
 		*) return 1 ;;
 	esac
 	if [[ "$evidence_format" == evstream_v3 && "$record_market_data_receipts" == true ]]; then
@@ -741,27 +846,36 @@ v2_r2_write_attestation() {
 	local manifest_sha status_sha
 	manifest_sha=$(sha256sum -- "$cell/evidence-manifest.json" | awk '{print $1}') || return 1
 	status_sha=$(sha256sum -- "$cell/run-status.json" | awk '{print $1}') || return 1
-	local source_revision binary_sha256 config_sha256 prunegate_sha256 evidence_format attestation_contract
+	local source_revision binary_sha256 config_sha256 prunegate_sha256 evidence_format attestation_contract terminal_outcome_sha256=""
 	source_revision=$(jq -er '.git_revision' "$cell/run-metadata.json") || return 1
 	evidence_format=$(v2_r2_evidence_format "$cell") || return 1
 	if [[ "$evidence_format" == "evstream_v3" ]]; then
-		attestation_contract="v2-integrated-longrun-external-attestation-v2"
+		if [[ "${v2_r2_sv1_require_terminal_outcome:-false}" == true ]]; then
+			attestation_contract="v2-integrated-longrun-external-attestation-v3"
+		else
+			attestation_contract="v2-integrated-longrun-external-attestation-v2"
+		fi
 	else
 		attestation_contract="v2-integrated-longrun-external-attestation-v1"
 	fi
 	binary_sha256=$(jq -er '.binary_sha256' "$cell/run-metadata.json") || return 1
 	config_sha256=$(jq -er '.config_sha256' "$cell/run-metadata.json") || return 1
 	prunegate_sha256=$(jq -er '.prunegate_sha256' "$cell/run-metadata.json") || return 1
+	if [[ "$attestation_contract" == "v2-integrated-longrun-external-attestation-v3" ]]; then
+		terminal_outcome_sha256=$(sha256sum -- "$cell/terminal-outcome.json" | awk '{print $1}') || return 1
+	fi
 	jq -n --arg cell "$cell_name" --arg manifest_sha "$manifest_sha" --arg status_sha "$status_sha" \
 		--arg source_revision "$source_revision" --arg binary_sha256 "$binary_sha256" \
 		--arg config_sha256 "$config_sha256" --arg prunegate_sha256 "$prunegate_sha256" \
 		--arg evidence_format "$evidence_format" --arg attestation_contract "$attestation_contract" \
-		'{schema_version: (if $evidence_format == "evstream_v3" then 2 else 1 end), contract: $attestation_contract, cell: $cell,
+		--arg terminal_outcome_sha256 "$terminal_outcome_sha256" \
+		'{schema_version: (if $attestation_contract == "v2-integrated-longrun-external-attestation-v3" then 3 elif $evidence_format == "evstream_v3" then 2 else 1 end), contract: $attestation_contract, cell: $cell,
 		 evidence_manifest_sha256: $manifest_sha, run_status_sha256: $status_sha,
 		 source_revision: $source_revision, binary_sha256: $binary_sha256,
 		 config_sha256: $config_sha256, prunegate_sha256: $prunegate_sha256,
 		 evidence_format: $evidence_format,
-		 attestation_scope: "runner-produced evidence manifest and completion status"}' >"$temporary" || return 1
+		 attestation_scope: "runner-produced evidence manifest and completion status"} |
+		 (if $terminal_outcome_sha256 == "" then . else . + {terminal_outcome_sha256: $terminal_outcome_sha256} end)' >"$temporary" || return 1
 	mv -- "$temporary" "$output"
 }
 
@@ -775,12 +889,17 @@ v2_r2_verify_attestation() {
 	local manifest_sha status_sha
 	manifest_sha=$(sha256sum -- "$cell/evidence-manifest.json" | awk '{print $1}') || return 1
 	status_sha=$(sha256sum -- "$cell/run-status.json" | awk '{print $1}') || return 1
-	local source_revision binary_sha256 config_sha256 prunegate_sha256 evidence_format expected_contract expected_schema
+	local source_revision binary_sha256 config_sha256 prunegate_sha256 evidence_format expected_contract expected_schema terminal_outcome_sha256=""
 	source_revision=$(jq -er '.git_revision' "$cell/run-metadata.json") || return 1
 	evidence_format=$(v2_r2_evidence_format "$cell") || return 1
 	if [[ "$evidence_format" == "evstream_v3" ]]; then
-		expected_contract="v2-integrated-longrun-external-attestation-v2"
-		expected_schema=2
+		if [[ "${v2_r2_sv1_require_terminal_outcome:-false}" == true ]]; then
+			expected_contract="v2-integrated-longrun-external-attestation-v3"
+			expected_schema=3
+		else
+			expected_contract="v2-integrated-longrun-external-attestation-v2"
+			expected_schema=2
+		fi
 	else
 		expected_contract="v2-integrated-longrun-external-attestation-v1"
 		expected_schema=1
@@ -788,13 +907,18 @@ v2_r2_verify_attestation() {
 	binary_sha256=$(jq -er '.binary_sha256' "$cell/run-metadata.json") || return 1
 	config_sha256=$(jq -er '.config_sha256' "$cell/run-metadata.json") || return 1
 	prunegate_sha256=$(jq -er '.prunegate_sha256' "$cell/run-metadata.json") || return 1
+	if [[ "$expected_contract" == "v2-integrated-longrun-external-attestation-v3" ]]; then
+		terminal_outcome_sha256=$(sha256sum -- "$cell/terminal-outcome.json" | awk '{print $1}') || return 1
+	fi
 	jq -e --arg cell "$cell_name" --arg manifest_sha "$manifest_sha" --arg status_sha "$status_sha" \
 		--arg source_revision "$source_revision" --arg binary_sha256 "$binary_sha256" \
 		--arg config_sha256 "$config_sha256" --arg prunegate_sha256 "$prunegate_sha256" \
 		--arg evidence_format "$evidence_format" --arg expected_contract "$expected_contract" --argjson expected_schema "$expected_schema" \
+		--arg terminal_outcome_sha256 "$terminal_outcome_sha256" \
 		'.schema_version == $expected_schema and .contract == $expected_contract and .evidence_format == $evidence_format and
 		 .cell == $cell and .evidence_manifest_sha256 == $manifest_sha and .run_status_sha256 == $status_sha and
 		 .source_revision == $source_revision and .binary_sha256 == $binary_sha256 and
-		 .config_sha256 == $config_sha256 and .prunegate_sha256 == $prunegate_sha256' \
+		 .config_sha256 == $config_sha256 and .prunegate_sha256 == $prunegate_sha256 and
+		 (if $expected_contract == "v2-integrated-longrun-external-attestation-v3" then .terminal_outcome_sha256 == $terminal_outcome_sha256 else (has("terminal_outcome_sha256") | not) end)' \
 		"$attestation" >/dev/null
 }

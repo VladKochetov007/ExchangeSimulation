@@ -52,7 +52,7 @@ derived_artifacts=(
 	derivatives.json liquidations.json marginchecks.json optionsurface.json optionliabilityp6.json
 	optionvaluetakerp6.json vannavolgap6.json exposure.json hedging.json makerrefresh.json makerquotesize.json
 	makerrebalance.json postonly.json liabilityhedger.json perpsignals.json datedmandatep5.json fundingcarry.json
-	termcarry.json datedcarryp5.json perpreplenishment.json activation.json integrity.json analysis-metadata.json
+	termcarry.json datedcarryp5.json perpreplenishment.json activation.json integrity.json analysis-metadata.json terminalfailure.json
 )
 if [[ "$verification_variant" == sv1 ]]; then
 	derived_artifacts+=(cdfliquidity.json priceunavailable.json)

@@ -18,24 +18,115 @@ import (
 	"strings"
 	"time"
 
+	"exchange_sim/simulation"
 	"exchange_sim/simulations/multivenue"
 )
 
 type greekOutput struct {
-	SchemaVersion    int                                       `json:"schema_version"`
-	InitialRisk      map[string]multivenue.VenueRiskSnapshot   `json:"initial_risk"`
-	RiskTimeline     map[string][]multivenue.VenueRiskSnapshot `json:"risk_timeline"`
-	PreExpiryRisk    map[string][]multivenue.VenueRiskSnapshot `json:"pre_expiry_risk"`
-	TerminalRisk     map[string]multivenue.VenueRiskSnapshot   `json:"terminal_risk"`
-	Microstructure   []multivenue.MicrostructureStats          `json:"microstructure"`
-	Metaorders       []multivenue.MetaorderRecord              `json:"metaorders,omitempty"`
-	CarryActivity    []multivenue.CarryActivity                `json:"carry_activity,omitempty"`
-	RouterReports    []multivenue.CrossVenueArbReport          `json:"router_reports,omitempty"`
-	InitialAccounts  []multivenue.ParticipantAccountSnapshot   `json:"initial_accounts,omitempty"`
-	TerminalAccounts []multivenue.ParticipantAccountSnapshot   `json:"terminal_accounts,omitempty"`
-	VenueLedgers     []multivenue.VenueLedger                  `json:"venue_ledgers,omitempty"`
-	RequestBudgets   []multivenue.RequestBudgetReport          `json:"request_budgets,omitempty"`
-	Caveats          []string                                  `json:"caveats"`
+	SchemaVersion              int                                       `json:"schema_version"`
+	ReportStatus               string                                    `json:"report_status"`
+	TerminalValuationAvailable bool                                      `json:"terminal_valuation_available"`
+	InitialRisk                map[string]multivenue.VenueRiskSnapshot   `json:"initial_risk"`
+	RiskTimeline               map[string][]multivenue.VenueRiskSnapshot `json:"risk_timeline"`
+	PreExpiryRisk              map[string][]multivenue.VenueRiskSnapshot `json:"pre_expiry_risk"`
+	TerminalRisk               map[string]multivenue.VenueRiskSnapshot   `json:"terminal_risk"`
+	TerminalOutcome            *multivenue.TerminalOutcome               `json:"terminal_outcome,omitempty"`
+	Microstructure             []multivenue.MicrostructureStats          `json:"microstructure"`
+	Metaorders                 []multivenue.MetaorderRecord              `json:"metaorders,omitempty"`
+	CarryActivity              []multivenue.CarryActivity                `json:"carry_activity,omitempty"`
+	RouterReports              []multivenue.CrossVenueArbReport          `json:"router_reports,omitempty"`
+	InitialAccounts            []multivenue.ParticipantAccountSnapshot   `json:"initial_accounts,omitempty"`
+	TerminalAccounts           []multivenue.ParticipantAccountSnapshot   `json:"terminal_accounts,omitempty"`
+	VenueLedgers               []multivenue.VenueLedger                  `json:"venue_ledgers,omitempty"`
+	RequestBudgets             []multivenue.RequestBudgetReport          `json:"request_budgets,omitempty"`
+	Caveats                    []string                                  `json:"caveats"`
+}
+
+func terminalFailureDiagnostic(outcome multivenue.TerminalOutcome) bool {
+	if outcome.Status != "terminal_failure" || !outcome.EvidenceSealed || outcome.EvidenceSealError != "" {
+		return false
+	}
+	if outcome.Code != "PRICE_UNAVAILABLE" && outcome.Code != "PRICE_DOMAIN_ERROR" {
+		return false
+	}
+	if outcome.Stage != "terminal_risk_capture" && outcome.Stage != "terminal_population_capture" {
+		return false
+	}
+	return outcome.FailureAtNano == outcome.SimulationEndNano &&
+		outcome.FailureVenueID != "" && outcome.FailureSymbol != ""
+}
+
+func buildGreekOutput(sim *multivenue.Sim, terminalOutcome *multivenue.TerminalOutcome) (greekOutput, error) {
+	output := greekOutput{
+		SchemaVersion:              7,
+		ReportStatus:               "complete_terminal_valuation",
+		TerminalValuationAvailable: true,
+		InitialRisk:                make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
+		RiskTimeline:               make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
+		PreExpiryRisk:              make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
+		TerminalRisk:               make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
+		TerminalOutcome:            terminalOutcome,
+		Microstructure:             make([]multivenue.MicrostructureStats, 0, len(sim.Venues)),
+		Caveats: []string{
+			"Venues are independently funded. A configured cross-venue router has one local account per venue; it models neither asset transfer nor atomic legs.",
+			"Greek timeline rows are recomputed from exchange-owned option positions and the atomic underlying mark paired with each option premium. They are not actor-local quote-cache measurements.",
+			"The option model uses flat IV and its stored underlying-mark forward proxy; vega is local model sensitivity, not realized vega PnL.",
+			"Terminal marked equity includes wallet debt exactly once, futures-style entry-to-mark PnL, and signed option market value. It is captured after the final phase fixed point and before venue shutdown.",
+			"Expiry-pre-settlement rows preserve marked account state. Use the final positive-time-to-expiry timeline row for expiring option gamma and vega because those Greeks are undefined at expiry.",
+		},
+	}
+	if terminalOutcome != nil {
+		output.ReportStatus = "partial_terminal_failure"
+		output.TerminalValuationAvailable = false
+	}
+	for _, venue := range sim.Venues {
+		if venue.InitialRisk == nil {
+			return greekOutput{}, fmt.Errorf("venue %s missing initial risk snapshot", venue.ID)
+		}
+		if terminalOutcome == nil && venue.TerminalRisk == nil {
+			return greekOutput{}, fmt.Errorf("venue %s missing terminal risk snapshot", venue.ID)
+		}
+		output.InitialRisk[venue.ID] = *venue.InitialRisk
+		output.RiskTimeline[venue.ID] = append([]multivenue.VenueRiskSnapshot(nil), venue.RiskTimeline...)
+		output.PreExpiryRisk[venue.ID] = append([]multivenue.VenueRiskSnapshot(nil), venue.PreExpiryRisk...)
+		if terminalOutcome == nil {
+			output.TerminalRisk[venue.ID] = *venue.TerminalRisk
+		}
+		if venue.Microstructure != nil {
+			output.Microstructure = append(output.Microstructure, *venue.Microstructure)
+		}
+		for _, arb := range venue.CarryArbs {
+			output.CarryActivity = append(output.CarryActivity, arb.Activity(venue.ID))
+		}
+		for _, trader := range venue.MetaorderTraders {
+			output.Metaorders = append(output.Metaorders, trader.Records()...)
+		}
+	}
+	output.InitialAccounts = append([]multivenue.ParticipantAccountSnapshot(nil), sim.InitialAccounts...)
+	if terminalOutcome == nil {
+		output.TerminalAccounts = append([]multivenue.ParticipantAccountSnapshot(nil), sim.TerminalAccounts...)
+	}
+	output.VenueLedgers = sim.CaptureVenueLedgers()
+	output.RequestBudgets = sim.CaptureRequestBudgets()
+	for _, router := range sim.Routers {
+		output.RouterReports = append(output.RouterReports, router.Report())
+	}
+	return output, nil
+}
+
+func writeGreekOutput(logDir string, sim *multivenue.Sim, terminalOutcome *multivenue.TerminalOutcome) error {
+	output, err := buildGreekOutput(sim, terminalOutcome)
+	if err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := simulation.WriteFileAtomically(filepath.Join(logDir, "greeks.json"), append(raw, '\n')); err != nil {
+		return err
+	}
+	return nil
 }
 
 type runProfiles struct {
@@ -238,7 +329,12 @@ func run() (err error) {
 	if runErr != nil {
 		sealErr := sim.Close()
 		closed = true
-		outcomeErr := multivenue.WriteTerminalOutcome(*logDir, sim.TerminalOutcomeFor(runErr, sealErr))
+		outcome := sim.TerminalOutcomeFor(runErr, sealErr)
+		outcomeErr := multivenue.WriteTerminalOutcome(*logDir, outcome)
+		if sealErr == nil && outcomeErr == nil && terminalFailureDiagnostic(outcome) {
+			partialReportErr := writeGreekOutput(*logDir, sim, &outcome)
+			return errors.Join(runErr, partialReportErr)
+		}
 		return errors.Join(runErr, sealErr, outcomeErr)
 	}
 	sealErr := sim.Close()
@@ -250,51 +346,7 @@ func run() (err error) {
 	if err := multivenue.WriteTerminalOutcome(*logDir, sim.TerminalOutcomeFor(nil, nil)); err != nil {
 		return err
 	}
-	output := greekOutput{
-		SchemaVersion:  6,
-		InitialRisk:    make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
-		RiskTimeline:   make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
-		PreExpiryRisk:  make(map[string][]multivenue.VenueRiskSnapshot, len(sim.Venues)),
-		TerminalRisk:   make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),
-		Microstructure: make([]multivenue.MicrostructureStats, 0, len(sim.Venues)),
-		Caveats: []string{
-			"Venues are independently funded. A configured cross-venue router has one local account per venue; it models neither asset transfer nor atomic legs.",
-			"Greek timeline rows are recomputed from exchange-owned option positions and the atomic underlying mark paired with each option premium. They are not actor-local quote-cache measurements.",
-			"The option model uses flat IV and its stored underlying-mark forward proxy; vega is local model sensitivity, not realized vega PnL.",
-			"Terminal marked equity includes wallet debt exactly once, futures-style entry-to-mark PnL, and signed option market value. It is captured after the final phase fixed point and before venue shutdown.",
-			"Expiry-pre-settlement rows preserve marked account state. Use the final positive-time-to-expiry timeline row for expiring option gamma and vega because those Greeks are undefined at expiry.",
-		},
-	}
-	for _, venue := range sim.Venues {
-		if venue.InitialRisk == nil || venue.TerminalRisk == nil {
-			return fmt.Errorf("venue %s missing initial or terminal risk snapshot", venue.ID)
-		}
-		output.InitialRisk[venue.ID] = *venue.InitialRisk
-		output.RiskTimeline[venue.ID] = append([]multivenue.VenueRiskSnapshot(nil), venue.RiskTimeline...)
-		output.PreExpiryRisk[venue.ID] = append([]multivenue.VenueRiskSnapshot(nil), venue.PreExpiryRisk...)
-		output.TerminalRisk[venue.ID] = *venue.TerminalRisk
-		if venue.Microstructure != nil {
-			output.Microstructure = append(output.Microstructure, *venue.Microstructure)
-		}
-		for _, arb := range venue.CarryArbs {
-			output.CarryActivity = append(output.CarryActivity, arb.Activity(venue.ID))
-		}
-		for _, trader := range venue.MetaorderTraders {
-			output.Metaorders = append(output.Metaorders, trader.Records()...)
-		}
-	}
-	output.InitialAccounts = append([]multivenue.ParticipantAccountSnapshot(nil), sim.InitialAccounts...)
-	output.TerminalAccounts = append([]multivenue.ParticipantAccountSnapshot(nil), sim.TerminalAccounts...)
-	output.VenueLedgers = sim.CaptureVenueLedgers()
-	output.RequestBudgets = sim.CaptureRequestBudgets()
-	for _, router := range sim.Routers {
-		output.RouterReports = append(output.RouterReports, router.Report())
-	}
-	b, err := json.MarshalIndent(output, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(*logDir, "greeks.json"), b, 0644); err != nil {
+	if err := writeGreekOutput(*logDir, sim, nil); err != nil {
 		return err
 	}
 	log.Printf("done: sim=%s wall=%s logs=%s", *duration, time.Since(started).Round(time.Second), *logDir)

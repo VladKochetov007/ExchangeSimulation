@@ -124,6 +124,7 @@ type ElasticLiquiditySupplierConfig struct {
 	MaxPosition          int64
 	MaxInventory         int64
 	MaxQuoteQty          int64
+	MinimumExecutableQty int64
 	MaxLossQuote         int64
 	MakerFeeBps          int64
 	DecisionObserver     func(ElasticLiquiditySupplierDecision)
@@ -500,6 +501,12 @@ func (s *ElasticLiquiditySupplier) onTick(now time.Time) {
 	}
 	if quantity <= 0 || desiredPrice <= 0 {
 		decision.Action, decision.Reason = s.withdrawIfNeeded("limit_or_touch_unavailable")
+		decision.CancelRequestID = s.cancelRequestID
+		s.emitDecision(decision)
+		return
+	}
+	if s.cfg.MinimumExecutableQty > 0 && quantity < s.cfg.MinimumExecutableQty {
+		decision.Action, decision.Reason = s.withdrawIfNeeded("below_minimum_executable_qty")
 		decision.CancelRequestID = s.cancelRequestID
 		s.emitDecision(decision)
 		return

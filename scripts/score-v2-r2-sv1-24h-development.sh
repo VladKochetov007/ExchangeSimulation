@@ -96,7 +96,7 @@ required_artifacts=(
 	optionsurface.json optionliabilityp6.json optionvaluetakerp6.json vannavolgap6.json
 	exposure.json hedging.json makerrefresh.json makerquotesize.json makerrebalance.json
 	postonly.json liabilityhedger.json perpsignals.json datedmandatep5.json fundingcarry.json
-	termcarry.json datedcarryp5.json perpreplenishment.json activation.json integrity.json calendar.json cdfliquidity.json priceunavailable.json
+	termcarry.json datedcarryp5.json perpreplenishment.json activation.json integrity.json calendar.json cdfliquidity.json priceunavailable.json terminalfailure.json
 )
 if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
 	required_artifacts+=(terminal-outcome.json)
@@ -161,6 +161,33 @@ terminal_mark_valid() {
 	return 1
 }
 
+terminal_failure_diagnostic_valid() {
+	local cell=$1
+	if ! jq -e --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
+		-f "$terminal_outcome_filter" "$cell/terminal-outcome.json" >/dev/null; then
+		return 1
+	fi
+	jq -e '
+		.status == "terminal_failure" and
+		(.code == "PRICE_UNAVAILABLE" or .code == "PRICE_DOMAIN_ERROR") and
+		.evidence_sealed == true and .terminal_risk_captured == false and
+		.terminal_population_captured == false' "$cell/terminal-outcome.json" >/dev/null || return 1
+	jq -e '
+		type == "object" and .schema_version == 1 and
+		.result.status == "VALID_TERMINAL_ECONOMIC_FAILURE" and
+		.result.terminal_valuation_available == false and
+		.result.raw_evidence_contract_valid == true and
+		.result.evidence_manifest_verified == true and
+		.result.external_attestation_verified == true and
+		.result.checkpoint_contract_valid == true and
+		.result.terminal_outcome.status == "terminal_failure"' \
+		"$cell/terminalfailure.json" >/dev/null
+}
+
+terminal_failure_present() {
+	jq -e '.status == "terminal_failure"' "$1/terminal-outcome.json" >/dev/null
+}
+
 write_survival_summary() {
 	local cell=$1 seed=$2 output=$3 raw=$4
 	local temporary
@@ -220,6 +247,8 @@ all_paired_effect_identified=false
 strict_paired_effect_count=0
 pair_effect_records='[]'
 all_cells_valid=true
+all_terminal_diagnostic_valid=true
+terminal_failure_seen=false
 
 for seed in "${v2_r2_sv1_seeds[@]}"; do
 	for population in treatment control; do
@@ -252,20 +281,35 @@ for seed in "${v2_r2_sv1_seeds[@]}"; do
 			declared=$(jq -er --arg file "$file" '.artifact_sha256[$file]' "$cell/analysis-metadata.json")
 			[[ "$actual" == "$declared" ]] || fail "artifact hash mismatch: $population-$seed/$file"
 		done
-		if ! jq -e 'all(.predicates | to_entries[]; .value == true)' "$cell/integrity.json" >/dev/null ||
-			! jq -e --arg population "$population" --argjson expected "$expected_cdf_supplier_count" '
-				(.result.predicates | keys) == ["calendar_behavior_attested", "cdf_liquidity_population_contract", "zero_price_unavailable_order_rejections"] and
-				.result.predicates.cdf_liquidity_population_contract == true and
-				.result.cdf_liquidity.valid == true and
-				.result.cdf_liquidity.population == $population and
-				.result.cdf_liquidity.expected_supplier_count == $expected and
-				.result.cdf_liquidity.supplier_count == $expected and
-				(.result.observed.cdf_liquidity_activation_observed | type) == "boolean" and
-				.result.observed.cdf_liquidity_activation_observed == ($population == "treatment") and
-				all(.result.predicates | to_entries[]; .value == true)' "$cell/activation.json" >/dev/null ||
-			! jq -e '.result.valid == true and (.result.malformed_order_rejected_count // 0) == 0 and
-				(.result.price_unavailable_order_rejections | type) == "number"' "$cell/priceunavailable.json" >/dev/null; then
-			all_cells_valid=false
+		if terminal_failure_present "$cell"; then
+			terminal_failure_seen=true
+			if ! terminal_failure_diagnostic_valid "$cell" ||
+				! jq -e '.status == "terminal_failure_diagnostic" and .terminal_valuation_available == false and
+					.predicates.terminal_failure_endpoint == true' "$cell/integrity.json" >/dev/null; then
+				all_cells_valid=false
+				all_terminal_diagnostic_valid=false
+			fi
+		else
+			if ! jq -e 'all(.predicates | to_entries[]; .value == true)' "$cell/integrity.json" >/dev/null ||
+				! jq -e --arg population "$population" --argjson expected "$expected_cdf_supplier_count" '
+					(.result.predicates | keys) == ["calendar_behavior_attested", "cdf_liquidity_population_contract", "zero_price_unavailable_order_rejections"] and
+					.result.predicates.cdf_liquidity_population_contract == true and
+					.result.cdf_liquidity.valid == true and
+					.result.cdf_liquidity.population == $population and
+					.result.cdf_liquidity.expected_supplier_count == $expected and
+					.result.cdf_liquidity.supplier_count == $expected and
+					(.result.observed.cdf_liquidity_activation_observed | type) == "boolean" and
+					.result.observed.cdf_liquidity_activation_observed == ($population == "treatment") and
+					all(.result.predicates | to_entries[]; .value == true)' "$cell/activation.json" >/dev/null ||
+				! jq -e '.result.valid == true and (.result.malformed_order_rejected_count // 0) == 0 and
+					(.result.price_unavailable_order_rejections | type) == "number"' "$cell/priceunavailable.json" >/dev/null; then
+				all_cells_valid=false
+			fi
+			if ! jq -e '.result.status == "NO_TERMINAL_FAILURE" and .result.terminal_valuation_available == true' \
+				"$cell/terminalfailure.json" >/dev/null; then
+				all_cells_valid=false
+				all_terminal_diagnostic_valid=false
+			fi
 		fi
 		if ! terminal_measurement_valid "$cell"; then
 			if [[ "$population" == treatment ]]; then
@@ -312,6 +356,33 @@ for seed in "${v2_r2_sv1_seeds[@]}"; do
 	control="$output_root/control-$seed"
 	audit_path="$output_root/cdf-liquidity-$seed.json"
 	[[ ! -e "$audit_path" && ! -L "$audit_path" ]] || fail "refusing to overwrite CDF audit: $audit_path"
+	terminal_pair_diagnostic_valid=true
+	if terminal_failure_present "$treatment" || terminal_failure_present "$control"; then
+		for diagnostic_cell in "$treatment" "$control"; do
+			if terminal_failure_present "$diagnostic_cell" && ! terminal_failure_diagnostic_valid "$diagnostic_cell"; then
+				terminal_pair_diagnostic_valid=false
+			fi
+		done
+		[[ "$terminal_pair_diagnostic_valid" == true ]] || {
+			all_cells_valid=false
+			all_terminal_diagnostic_valid=false
+		}
+		treatment_terminal_status=$(jq -r '.status' "$treatment/terminal-outcome.json")
+		control_terminal_status=$(jq -r '.status' "$control/terminal-outcome.json")
+		jq -n --argjson seed "$seed" --arg contract "$contract_version" \
+			--arg treatment_status "$treatment_terminal_status" --arg control_status "$control_terminal_status" \
+			--argjson diagnostic_valid "$terminal_pair_diagnostic_valid" \
+			'{schema_version: 1, contract: $contract, seed: $seed, status: "UNAVAILABLE_TERMINAL_FAILURE",
+			 valid: false, measurement_valid: $diagnostic_valid,
+			 treatment_terminal_status: $treatment_status, control_terminal_status: $control_status,
+			 terminal_failure_diagnostic_valid: $diagnostic_valid,
+			 claim_scope: "paired CDF account audit unavailable because at least one arm lacked terminal valuation"}' \
+			>"$audit_path"
+		audit_contract_valid=false
+		audit_anticheating_valid=false
+		all_cdf_contract_valid=false
+		all_anticheating_valid=false
+	else
 	audit_tmp=$(mktemp "$audit_path.tmp-XXXXXX")
 	set +e
 	"$cdf_audit" -treatment "$treatment" -control "$control" >"$audit_tmp"
@@ -368,6 +439,7 @@ for seed in "${v2_r2_sv1_seeds[@]}"; do
 		'.seed == ($seed | tonumber) and .valid == true and
 			.treatment.supplier_count > 0 and .control.supplier_count == 0' "$audit_path" >/dev/null; then
 		all_cells_valid=false
+	fi
 	fi
 
 	paired_effect_path="$output_root/paired-survival-$seed.json"
@@ -432,9 +504,11 @@ classification=$(jq -n \
 	--argjson all_treatment_survival_valid "$all_treatment_survival_valid" \
 	--argjson all_cdf_contract_valid "$all_cdf_contract_valid" \
 	--argjson all_anticheating_valid "$all_anticheating_valid" \
-	--argjson all_paired_effect_valid "$all_paired_effect_valid" \
-	--argjson all_paired_effect_identified "$all_paired_effect_identified" \
-	-f "$score_classification_filter") || fail "could not classify development score"
+		--argjson all_paired_effect_valid "$all_paired_effect_valid" \
+		--argjson all_paired_effect_identified "$all_paired_effect_identified" \
+		--argjson terminal_failure_seen "$terminal_failure_seen" \
+		--argjson all_terminal_diagnostic_valid "$all_terminal_diagnostic_valid" \
+		-f "$score_classification_filter") || fail "could not classify development score"
 jq -n --arg contract "$contract_version" --arg candidate "$candidate_id" \
 	--arg predecessor "$predecessor_id" --arg source_revision "$raw_source_revision" \
 	--arg raw_source_revision "$raw_source_revision" --arg analysis_revision "$analysis_revision" \
@@ -455,6 +529,8 @@ jq -n --arg contract "$contract_version" --arg candidate "$candidate_id" \
 	--argjson all_paired_effect_valid "$all_paired_effect_valid" \
 	--argjson all_paired_effect_not_worse "$all_paired_effect_not_worse" \
 	--argjson all_paired_effect_identified "$all_paired_effect_identified" \
+	--argjson terminal_failure_seen "$terminal_failure_seen" \
+	--argjson all_terminal_diagnostic_valid "$all_terminal_diagnostic_valid" \
 	--argjson strict_paired_effect_count "$strict_paired_effect_count" \
 	--argjson expected_roster "$registered_roster_count" \
 	--argjson development_seeds "$development_seeds_json" \
@@ -489,8 +565,10 @@ jq -n --arg contract "$contract_version" --arg candidate "$candidate_id" \
 				anti_cheating_diagnostics: $all_anticheating_valid,
 				paired_survival_measurement_valid: $all_paired_effect_valid,
 				paired_treatment_not_worse: $all_paired_effect_not_worse,
-				paired_survival_effect_identified: $all_paired_effect_identified,
-				parity_attested: true,
+					paired_survival_effect_identified: $all_paired_effect_identified,
+					terminal_failure_seen: $terminal_failure_seen,
+					terminal_diagnostic_contract: $all_terminal_diagnostic_valid,
+					parity_attested: true,
 				holdout_outputs_absent: true,
 				holdout_access_policy_enforced: true
 			},
@@ -524,7 +602,7 @@ jq -e --arg contract "$contract_version" --argjson holdouts '[619,631,641]' \
 	'.schema_version == 1 and .contract == $contract and
 	 .reserved_holdout_seeds == $holdouts and
 	 .holdout_status == "RESERVED_AND_NOT_READ_BY_DEVELOPMENT_SCORER" and
-		(.predicates | keys) == ["anti_cheating_diagnostics", "cdf_audit_contract", "control_survival_measurement_valid", "control_survival_predicate_diagnostic", "holdout_access_policy_enforced", "holdout_outputs_absent", "mechanical_and_artifact_contract", "measurement_contract", "paired_survival_effect_identified", "paired_survival_measurement_valid", "paired_treatment_not_worse", "parity_attested", "post_warmup_cdf_side_availability_treatment", "strict_terminal_valuation_control_diagnostic", "strict_terminal_valuation_treatment", "terminal_measurement_control", "terminal_measurement_treatment", "treatment_survival_measurement_valid"] and
+		(.predicates | keys) == ["anti_cheating_diagnostics", "cdf_audit_contract", "control_survival_measurement_valid", "control_survival_predicate_diagnostic", "holdout_access_policy_enforced", "holdout_outputs_absent", "mechanical_and_artifact_contract", "measurement_contract", "paired_survival_effect_identified", "paired_survival_measurement_valid", "paired_treatment_not_worse", "parity_attested", "post_warmup_cdf_side_availability_treatment", "strict_terminal_valuation_control_diagnostic", "strict_terminal_valuation_treatment", "terminal_diagnostic_contract", "terminal_failure_seen", "terminal_measurement_control", "terminal_measurement_treatment", "treatment_survival_measurement_valid"] and
 	 .predicates.parity_attested == true and .predicates.holdout_outputs_absent == true and .predicates.holdout_access_policy_enforced == true' "$score" >/dev/null ||
 	fail "development score self-check failed"
 printf 'scored SV1 development: %s\n' "$(jq -r '.status' "$score")"

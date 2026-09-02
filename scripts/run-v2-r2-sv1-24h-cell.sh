@@ -247,14 +247,7 @@ set +e
 	>"$stdout_log" 2>"$stderr_log"
 status=$?
 set -e
-if [[ "$status" -ne 0 ]]; then
-	echo "integrated long-run simulator failed with status $status: $output" >&2
-	exit "$status"
-fi
-if [[ ! -s "$output/greeks.json" || ! -s "$output/latency.json" ]]; then
-	echo "simulator exited without both completion sentinels: $output" >&2
-	exit 1
-fi
+terminal_failure=false
 if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
 	[[ -s "$output/terminal-outcome.json" ]] || {
 		echo "simulator exited without typed terminal outcome: $output" >&2
@@ -262,7 +255,54 @@ if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
 	}
 	jq -e --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
 		-f "$root_dir/scripts/v2-r2-sv1-terminal-outcome.jq" "$output/terminal-outcome.json" >/dev/null || {
-		echo "typed terminal outcome is invalid: $output" >&2
+		 echo "typed terminal outcome is invalid: $output" >&2
+		exit 1
+	}
+	outcome_status=$(jq -er '.status' "$output/terminal-outcome.json")
+	case "$outcome_status:$status" in
+		completed:0) ;;
+		terminal_failure:0)
+			echo "terminal failure outcome requires a nonzero simulator exit: $output" >&2
+			exit 1
+			;;
+		terminal_failure:*) terminal_failure=true ;;
+		*)
+			echo "simulator status $status is inconsistent with typed terminal outcome $outcome_status: $output" >&2
+			exit 1
+			;;
+	esac
+elif [[ "$status" -ne 0 ]]; then
+	echo "integrated long-run simulator failed with status $status: $output" >&2
+	exit "$status"
+fi
+if [[ ! -s "$output/latency.json" ]]; then
+	echo "simulator exited without latency completion sentinel: $output" >&2
+	exit 1
+fi
+if [[ "$terminal_failure" == true ]]; then
+	[[ -s "$output/greeks.json" ]] || {
+		echo "terminal failure is missing its partial report: $output" >&2
+		exit 1
+	}
+	jq -e --slurpfile outcome "$output/terminal-outcome.json" '
+		type == "object" and .schema_version == 7 and
+		.report_status == "partial_terminal_failure" and .terminal_valuation_available == false and
+		(.initial_accounts | type) == "array" and (.initial_accounts | length) > 0 and
+		((.terminal_accounts // []) | type) == "array" and ((.terminal_accounts // []) | length) == 0 and
+		((.terminal_risk // {}) | type) == "object" and ((.terminal_risk // {}) | length) == 0 and
+		(.terminal_outcome | type) == "object" and .terminal_outcome == $outcome[0]' \
+		"$output/greeks.json" >/dev/null || {
+		echo "partial terminal-failure report is not explicitly valuation-incomplete: $output" >&2
+		exit 1
+	}
+else
+	if [[ ! -s "$output/greeks.json" ]]; then
+		echo "simulator exited without greeks completion sentinel: $output" >&2
+		exit 1
+	fi
+	jq -e '.schema_version == 7 and .report_status == "complete_terminal_valuation" and .terminal_valuation_available == true' \
+		"$output/greeks.json" >/dev/null || {
+		echo "greeks report does not attest complete terminal valuation: $output" >&2
 		exit 1
 	}
 fi
@@ -283,15 +323,17 @@ jq -e 'type == "object"' "$output/latency.json" >/dev/null || {
 	echo "malformed latency completion sentinel: $output" >&2
 	exit 1
 }
-jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
-	'(.initial_accounts | type == "array" and length > 0 and
-	 all(.[]; .account.timestamp == $simulation_start_nano)) and
-	(.terminal_accounts | type == "array" and length > 0 and
-	 all(.[]; .account.timestamp == $simulation_end_nano))' \
-	"$output/greeks.json" >/dev/null || {
-	echo "greeks report does not attest the registered 24-hour simulated horizon: $output" >&2
-	exit 1
-}
+if [[ "$terminal_failure" != true ]]; then
+	jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
+		'(.initial_accounts | type == "array" and length > 0 and
+		 all(.[]; .account.timestamp == $simulation_start_nano)) and
+		(.terminal_accounts | type == "array" and length > 0 and
+		 all(.[]; .account.timestamp == $simulation_end_nano))' \
+		"$output/greeks.json" >/dev/null || {
+		echo "greeks report does not attest the registered 24-hour simulated horizon: $output" >&2
+		exit 1
+	}
+fi
 v2_r2_require_checkpoint_stream "$output/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" || {
 	echo "checkpoint stream does not attest the registered 24-hour horizon: $output" >&2
 	exit 1
@@ -306,32 +348,70 @@ v2_r2_write_evidence_manifest "$output" || {
 	exit 1
 }
 status_tmp="$output/run-status.json.tmp-$$"
-jq -n \
-	--argjson exit_status "$status" \
-	--arg cell "$cell" \
-	--arg horizon "$horizon" \
-	--argjson simulation_start_nano "$simulation_start_nano" \
-	--argjson simulation_end_nano "$simulation_end_nano" \
-	--arg run_metadata_sha256 "$run_metadata_sha256_after" \
-	--arg manifest_sha256 "$(sha256sum "$output/manifest.json" | awk '{print $1}')" \
-	--arg greeks_sha256 "$(sha256sum "$output/greeks.json" | awk '{print $1}')" \
-	--arg latency_sha256 "$(sha256sum "$output/latency.json" | awk '{print $1}')" \
-	--arg checkpoints_sha256 "$(sha256sum "$output/checkpoints.jsonl" | awk '{print $1}')" \
-	--arg evidence_manifest_sha256 "$(sha256sum "$output/evidence-manifest.json" | awk '{print $1}')" \
-	--argjson sentinels "$v2_r2_sv1_completion_sentinels" \
-	--arg terminal_outcome_sha256 "$(if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then sha256sum "$output/terminal-outcome.json" | awk '{print $1}'; fi)" \
-	'{schema_version: 1, cell: $cell, exit_status: $exit_status,
-	  completion_verified: true, simulated_horizon: $horizon,
-	  simulation_start_nano: $simulation_start_nano, simulation_end_nano: $simulation_end_nano,
-	  completion_sentinels: $sentinels,
-	  run_metadata_sha256: $run_metadata_sha256,
-	  manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256,
-	  latency_sha256: $latency_sha256, checkpoints_sha256: $checkpoints_sha256,
-	  evidence_manifest_sha256: $evidence_manifest_sha256} |
-	 (if $terminal_outcome_sha256 == "" then . else . + {terminal_outcome_sha256: $terminal_outcome_sha256} end)' >"$status_tmp"
+if [[ "$terminal_failure" == true ]]; then
+	jq -n \
+		--argjson exit_status "$status" \
+		--arg cell "$cell" \
+		--arg horizon "$horizon" \
+		--argjson simulation_start_nano "$simulation_start_nano" \
+		--argjson simulation_end_nano "$simulation_end_nano" \
+		--arg run_metadata_sha256 "$run_metadata_sha256_after" \
+		--arg manifest_sha256 "$(sha256sum "$output/manifest.json" | awk '{print $1}')" \
+		--arg greeks_sha256 "$(sha256sum "$output/greeks.json" | awk '{print $1}')" \
+		--arg latency_sha256 "$(sha256sum "$output/latency.json" | awk '{print $1}')" \
+		--arg checkpoints_sha256 "$(sha256sum "$output/checkpoints.jsonl" | awk '{print $1}')" \
+		--arg evidence_manifest_sha256 "$(sha256sum "$output/evidence-manifest.json" | awk '{print $1}')" \
+		--arg terminal_outcome_sha256 "$(sha256sum "$output/terminal-outcome.json" | awk '{print $1}')" \
+		--argjson sentinels "$v2_r2_sv1_completion_sentinels" \
+		--arg code "$(jq -er '.code' "$output/terminal-outcome.json")" \
+		--arg stage "$(jq -er '.stage' "$output/terminal-outcome.json")" \
+		--argjson failure_at_nano "$(jq -er '.failure_at_nano' "$output/terminal-outcome.json")" \
+		--arg failure_venue_id "$(jq -er '.failure_venue_id' "$output/terminal-outcome.json")" \
+		--arg failure_symbol "$(jq -er '.failure_symbol' "$output/terminal-outcome.json")" \
+		'{schema_version: 1, cell: $cell, exit_status: $exit_status,
+		  completion_verified: false, terminal_failure_verified: true, simulated_horizon: $horizon,
+		  simulation_start_nano: $simulation_start_nano, simulation_end_nano: $simulation_end_nano,
+		  completion_sentinels: $sentinels,
+		  run_metadata_sha256: $run_metadata_sha256,
+		  manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256,
+		  latency_sha256: $latency_sha256, checkpoints_sha256: $checkpoints_sha256,
+		  evidence_manifest_sha256: $evidence_manifest_sha256,
+		  terminal_outcome_sha256: $terminal_outcome_sha256,
+		  terminal_failure_code: $code, terminal_failure_stage: $stage,
+		  terminal_failure_at_nano: $failure_at_nano, terminal_failure_venue_id: $failure_venue_id,
+		  terminal_failure_symbol: $failure_symbol}' >"$status_tmp"
+else
+	jq -n \
+		--argjson exit_status "$status" \
+		--arg cell "$cell" \
+		--arg horizon "$horizon" \
+		--argjson simulation_start_nano "$simulation_start_nano" \
+		--argjson simulation_end_nano "$simulation_end_nano" \
+		--arg run_metadata_sha256 "$run_metadata_sha256_after" \
+		--arg manifest_sha256 "$(sha256sum "$output/manifest.json" | awk '{print $1}')" \
+		--arg greeks_sha256 "$(sha256sum "$output/greeks.json" | awk '{print $1}')" \
+		--arg latency_sha256 "$(sha256sum "$output/latency.json" | awk '{print $1}')" \
+		--arg checkpoints_sha256 "$(sha256sum "$output/checkpoints.jsonl" | awk '{print $1}')" \
+		--arg evidence_manifest_sha256 "$(sha256sum "$output/evidence-manifest.json" | awk '{print $1}')" \
+		--argjson sentinels "$v2_r2_sv1_completion_sentinels" \
+		--arg terminal_outcome_sha256 "$(if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then sha256sum "$output/terminal-outcome.json" | awk '{print $1}'; fi)" \
+		'{schema_version: 1, cell: $cell, exit_status: $exit_status,
+		  completion_verified: true, simulated_horizon: $horizon,
+		  simulation_start_nano: $simulation_start_nano, simulation_end_nano: $simulation_end_nano,
+		  completion_sentinels: $sentinels,
+		  run_metadata_sha256: $run_metadata_sha256,
+		  manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256,
+		  latency_sha256: $latency_sha256, checkpoints_sha256: $checkpoints_sha256,
+		  evidence_manifest_sha256: $evidence_manifest_sha256} |
+		 (if $terminal_outcome_sha256 == "" then . else . + {terminal_outcome_sha256: $terminal_outcome_sha256} end)' >"$status_tmp"
+fi
 mv "$status_tmp" "$output/run-status.json"
 v2_r2_write_attestation "$output" || {
 	echo "failed to write external evidence attestation: $output" >&2
 	exit 1
 }
-echo "completed SV1 24-hour cell: $output"
+if [[ "$terminal_failure" == true ]]; then
+	echo "recorded valid terminal-failure diagnostic for SV1 24-hour cell: $output"
+else
+	echo "completed SV1 24-hour cell: $output"
+fi

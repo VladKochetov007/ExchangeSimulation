@@ -1876,8 +1876,12 @@ type TerminalOutcome struct {
 	Status                     string `json:"status"`
 	Code                       string `json:"code"`
 	Phase                      string `json:"phase"`
+	Stage                      string `json:"stage,omitempty"`
 	SimulationStartNano        int64  `json:"simulation_start_nano"`
 	SimulationEndNano          int64  `json:"simulation_end_nano"`
+	FailureAtNano              int64  `json:"failure_at_nano,omitempty"`
+	FailureVenueID             string `json:"failure_venue_id,omitempty"`
+	FailureSymbol              string `json:"failure_symbol,omitempty"`
 	StrictPopulationAccounting bool   `json:"strict_population_accounting"`
 	EvidenceFormat             string `json:"evidence_format"`
 	EvidenceSealed             bool   `json:"evidence_sealed"`
@@ -1887,13 +1891,117 @@ type TerminalOutcome struct {
 	EvidenceSealError          string `json:"evidence_seal_error,omitempty"`
 }
 
+type valuationMarkFailure struct {
+	Phase   string
+	VenueID string
+	Symbol  string
+	Cause   error
+}
+
+func (e *valuationMarkFailure) Error() string {
+	return fmt.Sprintf("%s valuation mark for %s on venue %s: %v", e.Phase, e.Symbol, e.VenueID, e.Cause)
+}
+
+func (e *valuationMarkFailure) Unwrap() error {
+	return e.Cause
+}
+
+type riskCaptureFailure struct {
+	Stage         string
+	FailureAtNano int64
+	VenueID       string
+	Symbol        string
+	Cause         error
+}
+
+func (e *riskCaptureFailure) Error() string {
+	return fmt.Sprintf("%s at %d for venue %s symbol %s: %v", e.Stage, e.FailureAtNano, e.VenueID, e.Symbol, e.Cause)
+}
+
+func (e *riskCaptureFailure) Unwrap() error {
+	return e.Cause
+}
+
+func decorateRiskCaptureFailure(stage string, atNano int64, venueID string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var markFailure *valuationMarkFailure
+	symbol := ""
+	if errors.As(err, &markFailure) {
+		if venueID == "" {
+			venueID = markFailure.VenueID
+		}
+		symbol = markFailure.Symbol
+	}
+	return &riskCaptureFailure{
+		Stage:         stage,
+		FailureAtNano: atNano,
+		VenueID:       venueID,
+		Symbol:        symbol,
+		Cause:         err,
+	}
+}
+
+func venueRiskFailureStage(phase string) string {
+	switch phase {
+	case "terminal_post_mark":
+		return "terminal_risk_capture"
+	case "post_derivative_mark":
+		return "scheduled_risk_capture"
+	case "pre_expiry":
+		return "pre_expiry_risk_capture"
+	default:
+		return phase
+	}
+}
+
+func populationRiskFailureStage(phase string) string {
+	if phase == "terminal_post_mark" {
+		return "terminal_population_capture"
+	}
+	return phase + "_population_capture"
+}
+
+func containsJoinedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if _, joined := err.(interface{ Unwrap() []error }); joined {
+		return true
+	}
+	if unwrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return containsJoinedError(unwrapped.Unwrap())
+	}
+	return false
+}
+
+func terminalEconomicFailure(err error, terminalNano int64) (*riskCaptureFailure, bool) {
+	if err == nil || containsJoinedError(err) {
+		return nil, false
+	}
+	var failure *riskCaptureFailure
+	var markFailure *valuationMarkFailure
+	if !errors.As(err, &failure) ||
+		(failure.Stage != "terminal_risk_capture" && failure.Stage != "terminal_population_capture") ||
+		failure.FailureAtNano != terminalNano || failure.VenueID == "" || failure.Symbol == "" ||
+		!errors.As(failure.Cause, &markFailure) ||
+		markFailure.Phase != "terminal_post_mark" || markFailure.VenueID != failure.VenueID ||
+		markFailure.Symbol != failure.Symbol ||
+		(!errors.Is(markFailure.Cause, etypes.ErrNoPrice) && !errors.Is(markFailure.Cause, etypes.ErrPriceDomain)) {
+		return nil, false
+	}
+	return failure, true
+}
+
 // TerminalOutcomeFor classifies the typed endpoint without changing simulator
 // state. PRICE_UNAVAILABLE and PRICE_DOMAIN_ERROR are distinct from a generic
 // software failure so a reviewer can decide whether a control endpoint is a
 // meaningful economic negative or invalid evidence.
 func (s *Sim) TerminalOutcomeFor(runErr, evidenceSealErr error) TerminalOutcome {
+	evidenceSealed := s.closed && s.closeErr == nil && evidenceSealErr == nil
 	outcome := TerminalOutcome{
-		SchemaVersion:              1,
+		SchemaVersion:              2,
 		Status:                     "completed",
 		Code:                       "COMPLETED",
 		Phase:                      "terminal_post_mark",
@@ -1901,7 +2009,7 @@ func (s *Sim) TerminalOutcomeFor(runErr, evidenceSealErr error) TerminalOutcome 
 		SimulationEndNano:          s.terminalNano,
 		StrictPopulationAccounting: s.Config.StrictPopulationAccounting,
 		EvidenceFormat:             s.Config.EvidenceFormat,
-		EvidenceSealed:             evidenceSealErr == nil,
+		EvidenceSealed:             evidenceSealed,
 		TerminalPopulationCaptured: !s.Config.StrictPopulationAccounting || len(s.TerminalAccounts) > 0,
 	}
 	if len(s.Venues) > 0 {
@@ -1915,13 +2023,19 @@ func (s *Sim) TerminalOutcomeFor(runErr, evidenceSealErr error) TerminalOutcome 
 	}
 	if runErr != nil || evidenceSealErr != nil {
 		outcome.Status = "terminal_failure"
+		failure, terminalFailure := terminalEconomicFailure(runErr, s.terminalNano)
 		switch {
-		case errors.Is(runErr, etypes.ErrNoPrice):
-			outcome.Code = "PRICE_UNAVAILABLE"
-		case errors.Is(runErr, etypes.ErrPriceDomain):
-			outcome.Code = "PRICE_DOMAIN_ERROR"
-		case evidenceSealErr != nil && runErr == nil:
+		case evidenceSealErr != nil:
 			outcome.Code = "EVIDENCE_SEAL_FAILURE"
+		case terminalFailure:
+			outcome.Code = "PRICE_UNAVAILABLE"
+			if errors.Is(failure.Cause, etypes.ErrPriceDomain) {
+				outcome.Code = "PRICE_DOMAIN_ERROR"
+			}
+			outcome.Stage = failure.Stage
+			outcome.FailureAtNano = failure.FailureAtNano
+			outcome.FailureVenueID = failure.VenueID
+			outcome.FailureSymbol = failure.Symbol
 		default:
 			outcome.Code = "SIMULATION_FAILURE"
 		}
@@ -1931,6 +2045,8 @@ func (s *Sim) TerminalOutcomeFor(runErr, evidenceSealErr error) TerminalOutcome 
 		if evidenceSealErr != nil {
 			outcome.EvidenceSealError = evidenceSealErr.Error()
 		}
+		outcome.TerminalRiskCaptured = false
+		outcome.TerminalPopulationCaptured = false
 	}
 	return outcome
 }
@@ -3503,6 +3619,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			MaxPosition:          spec.MaxPosition,
 			MaxInventory:         spec.MaxInventory,
 			MaxQuoteQty:          spec.MaxQuoteQty,
+			MinimumExecutableQty: spec.MinimumExecutableQty,
 			MaxLossQuote:         spec.MaxLossQuote,
 			MakerFeeBps:          spec.MakerFeeBps,
 		}
@@ -3909,7 +4026,7 @@ func (s *Sim) capturePopulationAccounts(phase string) ([]ParticipantAccountSnaps
 		venue.recordTwoSidedMarks(valuedSpotSymbols(s.Config.CrossAssetSpotGraph), now)
 		spec, markSource, err := populationValuationSpec(venue, phase, s.Config.CrossAssetSpotGraph, now, maxStaleness)
 		if err != nil {
-			return nil, err
+			return nil, decorateRiskCaptureFailure(populationRiskFailureStage(phase), now, venue.ID, err)
 		}
 		marks := make(map[string]int64, len(spec.AssetMarks))
 		for asset, mark := range spec.AssetMarks {
@@ -3918,7 +4035,8 @@ func (s *Sim) capturePopulationAccounts(phase string) ([]ParticipantAccountSnaps
 		for _, participant := range venue.Participants {
 			account, err := venue.Exchange.MarkedAccount(participant.ClientID, spec)
 			if err != nil {
-				return nil, fmt.Errorf("multivenue: %s participant %s/%d marked account: %w", phase, venue.ID, participant.ClientID, err)
+				return nil, decorateRiskCaptureFailure(populationRiskFailureStage(phase), now, venue.ID,
+					fmt.Errorf("multivenue: %s participant %s/%d marked account: %w", phase, venue.ID, participant.ClientID, err))
 			}
 			rows = append(rows, ParticipantAccountSnapshot{
 				Participant: participant,
@@ -4135,10 +4253,10 @@ func (v *Venue) valuationMark(symbol string, now, maxStaleness int64) (int64, bo
 // rather than being collapsed into an unavailable mark.
 func requirePositiveUSDValuationMark(phase, symbol, venueID string, mark int64, available bool) error {
 	if !available {
-		return fmt.Errorf("multivenue: %s participant valuation requires two-sided %s mark on venue %s: %w", phase, symbol, venueID, etypes.ErrNoPrice)
+		return &valuationMarkFailure{Phase: phase, VenueID: venueID, Symbol: symbol, Cause: etypes.ErrNoPrice}
 	}
 	if mark <= 0 {
-		return fmt.Errorf("multivenue: %s participant valuation has present out-of-domain %s mark on venue %s: %w", phase, symbol, venueID, etypes.ErrPriceDomain)
+		return &valuationMarkFailure{Phase: phase, VenueID: venueID, Symbol: symbol, Cause: etypes.ErrPriceDomain}
 	}
 	return nil
 }
@@ -4230,17 +4348,22 @@ func populationValuationSpec(venue *Venue, phase string, crossAssetSpotGraph boo
 	}, markSource, nil
 }
 
-func captureVenueRisk(venue *Venue, phase string) (*VenueRiskSnapshot, error) {
+func captureVenueRisk(venue *Venue, phase string) (snapshot *VenueRiskSnapshot, captureErr error) {
 	if venue == nil || venue.Exchange == nil || venue.OptionDealer == nil || venue.OptionDealerClientID == 0 {
 		return nil, errors.New("multivenue: incomplete venue risk capture")
 	}
+	now := venue.Exchange.Clock.NowUnixNano()
+	defer func() {
+		if captureErr != nil {
+			captureErr = decorateRiskCaptureFailure(venueRiskFailureStage(phase), now, venue.ID, captureErr)
+		}
+	}()
 	// Dealer risk is captured on the automation tick and at shutdown, so it can
 	// land in the instant between a maker's cancel and its replacement. Reuse
 	// the same bounded-staleness mark the population accounts use rather than
 	// silently valuing ABC at zero. The one exception is the initial snapshot:
 	// it precedes all book activity and is explicitly valued from the configured
 	// bootstrap manifest, not from an absent book or implicit numeric sentinel.
-	now := venue.Exchange.Clock.NowUnixNano()
 	spotMid := int64(mvBootstrapPrice)
 	accountMarkSource := "bootstrap_manifest_initial"
 	if phase != "initial" {
@@ -4262,7 +4385,7 @@ func captureVenueRisk(venue *Venue, phase string) (*VenueRiskSnapshot, error) {
 			accountMarkSource = "two_sided_ABC_USD_mid"
 		}
 		if err := requirePositiveUSDValuationMark(phase, "ABC/USD", venue.ID, spotMid, ok); err != nil {
-			return nil, fmt.Errorf("multivenue: venue %s dealer risk capture: %w", venue.ID, err)
+			return nil, err
 		}
 	}
 	marks := map[string]etypes.AssetValuationMark{
@@ -4272,7 +4395,7 @@ func captureVenueRisk(venue *Venue, phase string) (*VenueRiskSnapshot, error) {
 	if clientRequiresAssetMark(venue, venue.OptionDealerClientID, "CDF") {
 		cdf, cdfOK, _ := venue.valuationMark("CDF/USD", now, venueRiskMarkStaleness)
 		if err := requirePositiveUSDValuationMark(phase, "CDF/USD", venue.ID, cdf, cdfOK); err != nil {
-			return nil, fmt.Errorf("multivenue: venue %s dealer risk capture: %w", venue.ID, err)
+			return nil, err
 		}
 		marks["CDF"] = etypes.AssetValuationMark{Price: cdf, Precision: mvBasePrecision}
 	}
@@ -4280,7 +4403,7 @@ func captureVenueRisk(venue *Venue, phase string) (*VenueRiskSnapshot, error) {
 		ReportAsset: "USD", ReportPrecision: mvQuotePrecision, AssetMarks: marks,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("multivenue: venue %s marked dealer account: %w", venue.ID, err)
+		return nil, err
 	}
 	profile, positions, err := exchangeGreekRisk(venue, account, phase)
 	if err != nil {
@@ -4375,7 +4498,9 @@ func exchangeGreekRisk(venue *Venue, account etypes.MarkedAccountSnapshot, phase
 		}
 		forward, err := option.UnderlyingMark()
 		if err != nil {
-			return derivsim.GreekProfile{}, nil, fmt.Errorf("multivenue: venue %s option %s underlying mark: %w", venue.ID, option.Symbol(), err)
+			return derivsim.GreekProfile{}, nil, &valuationMarkFailure{
+				Phase: phase, VenueID: venue.ID, Symbol: option.UnderlyingSymbol(), Cause: err,
+			}
 		}
 		yearsLeft := float64(timeToExpiry) / float64(365*24*time.Hour)
 		// The exchange marks with the instrument's own volatility, not with

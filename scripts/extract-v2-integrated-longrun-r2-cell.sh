@@ -118,10 +118,9 @@ case "$extractor_variant:$cell_name" in
 		;;
 	*) fail "extractor accepts only registered full development cells, got $cell_name" ;;
 esac
-for sentinel in greeks.json latency.json; do
-	require_file "$cell/$sentinel"
-	require_json_object "$cell/$sentinel"
-done
+terminal_failure=false
+require_file "$cell/latency.json"
+require_json_object "$cell/latency.json"
 log_mode=$(jq -er '.log_mode' "$cell/run-config.json")
 evidence_format=$(jq -er '.evidence_format // "jsonl"' "$cell/run-config.json")
 case "$evidence_format" in
@@ -174,7 +173,25 @@ if [[ "$extractor_variant" == sv1 && "$v2_r2_sv1_require_terminal_outcome" == tr
 	jq -e --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
 		-f "$terminal_outcome_filter" "$cell/terminal-outcome.json" >/dev/null ||
 		fail "invalid typed terminal outcome"
+	if [[ "$(jq -er '.status' "$cell/terminal-outcome.json")" == terminal_failure ]]; then
+		terminal_failure=true
+	fi
 fi
+require_file "$cell/greeks.json"
+require_json_object "$cell/greeks.json"
+if [[ "$terminal_failure" == true ]]; then
+	jq -e --slurpfile outcome "$cell/terminal-outcome.json" '
+		type == "object" and .schema_version == 7 and
+		.report_status == "partial_terminal_failure" and .terminal_valuation_available == false and
+		(.initial_accounts | type) == "array" and (.initial_accounts | length) > 0 and
+		((.terminal_accounts // []) | type) == "array" and ((.terminal_accounts // []) | length) == 0 and
+		((.terminal_risk // {}) | type) == "object" and ((.terminal_risk // {}) | length) == 0 and
+		(.terminal_outcome | type) == "object" and .terminal_outcome == $outcome[0]' \
+		"$cell/greeks.json" >/dev/null || fail "partial terminal-failure report is not explicitly valuation-incomplete"
+fi
+jq -e '(.schema_version == 7 and .report_status == "complete_terminal_valuation" and .terminal_valuation_available == true) or
+	(.schema_version == 7 and .report_status == "partial_terminal_failure" and .terminal_valuation_available == false)' \
+	"$cell/greeks.json" >/dev/null || fail "greeks report has an unknown valuation completeness state"
 jq -e --arg cell "$cell_name" --argjson seed "$seed" --arg experiment "$config_experiment" \
 	--arg runner_contract "$expected_runner_contract" --arg hypothesis_id "$config_hypothesis" \
 	--argjson completion_sentinels "$completion_sentinels" \
@@ -191,18 +208,44 @@ jq -e --arg cell "$cell_name" --argjson seed "$seed" --arg experiment "$config_e
 	 (.git_revision | test("^[0-9a-f]{40}$")) and
 	 .completion_sentinels == $completion_sentinels' \
 	"$cell/run-metadata.json" >/dev/null || fail "invalid run metadata contract"
-	jq -e --arg cell "$cell_name" --argjson completion_sentinels "$completion_sentinels" \
-	'.cell == $cell and .exit_status == 0 and .completion_verified == true and
-	 .simulated_horizon == "24h" and .completion_sentinels == $completion_sentinels and
-	 (.run_metadata_sha256 | test("^[0-9a-f]{64}$")) and
-	 (.manifest_sha256 | test("^[0-9a-f]{64}$")) and
-	 (.greeks_sha256 | test("^[0-9a-f]{64}$")) and
-	(.latency_sha256 | test("^[0-9a-f]{64}$")) and
-	(.checkpoints_sha256 | test("^[0-9a-f]{64}$")) and
-	(.simulation_start_nano | type) == "number" and (.simulation_end_nano | type) == "number" and
-	.simulation_start_nano == 1735689600000000000 and .simulation_end_nano == 1735776000000000000 and
-	(.evidence_manifest_sha256 | test("^[0-9a-f]{64}$"))' \
-	"$cell/run-status.json" >/dev/null || fail "invalid run status contract"
+	if [[ "$terminal_failure" == true ]]; then
+		jq -e --arg cell "$cell_name" --argjson completion_sentinels "$completion_sentinels" \
+			--arg code "$(jq -er '.code' "$cell/terminal-outcome.json")" \
+			--arg stage "$(jq -er '.stage' "$cell/terminal-outcome.json")" \
+			--argjson failure_at_nano "$(jq -er '.failure_at_nano' "$cell/terminal-outcome.json")" \
+			--arg failure_venue_id "$(jq -er '.failure_venue_id' "$cell/terminal-outcome.json")" \
+			--arg failure_symbol "$(jq -er '.failure_symbol' "$cell/terminal-outcome.json")" \
+			'.cell == $cell and (.exit_status | type) == "number" and .exit_status != 0 and
+			 .completion_verified == false and .terminal_failure_verified == true and
+			 .simulated_horizon == "24h" and .completion_sentinels == $completion_sentinels and
+			 (.run_metadata_sha256 | test("^[0-9a-f]{64}$")) and
+			 (.manifest_sha256 | test("^[0-9a-f]{64}$")) and
+			 (.greeks_sha256 | test("^[0-9a-f]{64}$")) and
+			 (.latency_sha256 | test("^[0-9a-f]{64}$")) and
+			 (.checkpoints_sha256 | test("^[0-9a-f]{64}$")) and
+			 (.simulation_start_nano | type) == "number" and (.simulation_end_nano | type) == "number" and
+			 .simulation_start_nano == 1735689600000000000 and .simulation_end_nano == 1735776000000000000 and
+			 (.evidence_manifest_sha256 | test("^[0-9a-f]{64}$")) and
+			 (.terminal_outcome_sha256 | test("^[0-9a-f]{64}$")) and
+			 .terminal_failure_code == $code and .terminal_failure_stage == $stage and
+			 .terminal_failure_at_nano == $failure_at_nano and
+			 .terminal_failure_venue_id == $failure_venue_id and .terminal_failure_symbol == $failure_symbol' \
+			"$cell/run-status.json" >/dev/null || fail "invalid terminal-failure run status contract"
+	else
+		jq -e --arg cell "$cell_name" --argjson completion_sentinels "$completion_sentinels" \
+		'.cell == $cell and .exit_status == 0 and .completion_verified == true and
+		 .simulated_horizon == "24h" and .completion_sentinels == $completion_sentinels and
+		 (.run_metadata_sha256 | test("^[0-9a-f]{64}$")) and
+		 (.manifest_sha256 | test("^[0-9a-f]{64}$")) and
+		 (.greeks_sha256 | test("^[0-9a-f]{64}$")) and
+		(.latency_sha256 | test("^[0-9a-f]{64}$")) and
+		(.checkpoints_sha256 | test("^[0-9a-f]{64}$")) and
+		(.simulation_start_nano | type) == "number" and (.simulation_end_nano | type) == "number" and
+		.simulation_start_nano == 1735689600000000000 and .simulation_end_nano == 1735776000000000000 and
+		(.evidence_manifest_sha256 | test("^[0-9a-f]{64}$")) and
+		(has("terminal_failure_verified") | not)' \
+		"$cell/run-status.json" >/dev/null || fail "invalid run status contract"
+	fi
 if [[ "$extractor_variant" == sv1 && "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
 	jq -e '(.terminal_outcome_sha256 | test("^[0-9a-f]{64}$"))' "$cell/run-status.json" >/dev/null ||
 		fail "run status lacks terminal outcome hash"
@@ -303,12 +346,14 @@ if [[ "$evidence_format" == "evstream_v3" ]]; then
 	analysis_input_dir="$rendered_dir"
 fi
 
-jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
-	'(.initial_accounts | type == "array" and length > 0 and
-	 all(.[]; .account.timestamp == $simulation_start_nano)) and
-	(.terminal_accounts | type == "array" and length > 0 and
-	 all(.[]; .account.timestamp == $simulation_end_nano))' \
-	"$cell/greeks.json" >/dev/null || fail "greeks report does not attest the registered 24-hour horizon"
+if [[ "$terminal_failure" != true ]]; then
+	jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
+		'(.initial_accounts | type == "array" and length > 0 and
+		 all(.[]; .account.timestamp == $simulation_start_nano)) and
+		(.terminal_accounts | type == "array" and length > 0 and
+		 all(.[]; .account.timestamp == $simulation_end_nano))' \
+		"$cell/greeks.json" >/dev/null || fail "greeks report does not attest the registered 24-hour horizon"
+fi
 v2_r2_require_checkpoint_stream "$cell/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" ||
 	fail "checkpoint stream does not attest the registered 24-hour horizon"
 
@@ -324,7 +369,7 @@ derived_artifacts=(
 	optionvaluetakerp6.json vannavolgap6.json exposure.json hedging.json makerrefresh.json
 	makerquotesize.json makerrebalance.json postonly.json liabilityhedger.json perpsignals.json
 	datedmandatep5.json fundingcarry.json termcarry.json datedcarryp5.json perpreplenishment.json
-	activation.json integrity.json analysis-metadata.json
+	activation.json integrity.json analysis-metadata.json terminalfailure.json
 )
 if [[ "$extractor_variant" == sv1 ]]; then
 	derived_artifacts+=(cdfliquidity.json priceunavailable.json)
@@ -335,6 +380,24 @@ done
 if find "$cell" -maxdepth 1 -type f -name '*.json.tmp-*' -print -quit | grep -q .; then
 	fail "refusing extraction with stale temporary derived evidence in $cell"
 fi
+
+required=(
+	observationreceipts.json frontiervectors.json mechanical.json conservation.json
+	positions.json fillpositions.json orderlifecycle.json lifecycle.json settlements.json
+	expiryfills.json evidenceartifacthash.json streamhash.json arbitrage.json crossvenue.json
+	roleaudit.json ecology.json derivatives.json liquidations.json marginchecks.json
+	optionsurface.json optionliabilityp6.json optionvaluetakerp6.json vannavolgap6.json
+	exposure.json hedging.json makerrefresh.json makerquotesize.json makerrebalance.json
+	postonly.json liabilityhedger.json perpsignals.json datedmandatep5.json fundingcarry.json
+	termcarry.json datedcarryp5.json perpreplenishment.json activation.json integrity.json calendar.json
+)
+if [[ "$extractor_variant" == sv1 ]]; then
+	required+=(cdfliquidity.json priceunavailable.json terminalfailure.json)
+	if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
+		required+=(terminal-outcome.json)
+	fi
+fi
+
 if [[ "$evidence_format" == "evstream_v3" ]]; then
 	jq -e '.domain == "canonical_binary_execution_frames" and .ordering == "ordered_stream" and
 		 (.event_frames | type) == "number" and .event_frames > 0 and
@@ -372,6 +435,188 @@ metrics=(
 if [[ "$extractor_variant" == sv1 ]]; then
 	metrics+=(cdfliquidity priceunavailable)
 fi
+
+write_terminal_unavailable_metric() {
+	local metric=$1 temporary
+	temporary=$(mktemp "$analysis_dir/$metric.json.tmp-XXXXXX")
+	jq -n --arg metric "$metric" \
+		'{schema_version: 1, result: {status: "UNAVAILABLE_TERMINAL_FAILURE", metric: $metric,
+		 terminal_valuation_available: false,
+		 reason: "typed terminal economic failure prevented terminal account valuation",
+		 observations: 0}}' >"$temporary"
+	mv "$temporary" "$analysis_dir/$metric.json"
+	require_json_object "$analysis_dir/$metric.json"
+}
+
+write_terminal_failure_artifacts() {
+	local outcome_json expected_supplier_count population raw_count=0
+	local price_unavailable_rejections=0 raw_file count temporary
+	outcome_json=$(jq -c '.' "$cell/terminal-outcome.json")
+	expected_supplier_count=$(jq -er '((.elastic_liquidity_suppliers // []) | length) * (.venue_ids | length)' "$cell/run-config.json")
+	if (( expected_supplier_count > 0 )); then
+		population=treatment
+	else
+		population=control
+	fi
+	while IFS= read -r -d '' raw_file; do
+		raw_count=$((raw_count + 1))
+		count=$(jq -c '
+			def payload: (.data.payload // .data // {});
+			select((.event // "") == "OrderRejected" and
+				((payload.error // payload.payload.error // .data.error // .error // "") == "PRICE_UNAVAILABLE")) | 1' \
+			"$raw_file" | wc -l)
+		price_unavailable_rejections=$((price_unavailable_rejections + count))
+	done < <(find "$cell/venues" -type f -name '*.jsonl' -print0 | sort -z)
+	(( raw_count > 0 )) || fail "terminal failure has no raw JSONL evidence"
+
+	for metric in "${metrics[@]}"; do
+		write_terminal_unavailable_metric "$metric"
+	done
+
+	temporary=$(mktemp "$analysis_dir/cdfliquidity.json.tmp-XXXXXX")
+	jq -n --arg population "$population" --argjson expected "$expected_supplier_count" \
+		--argjson outcome "$outcome_json" \
+		'{schema_version: 1, result: {status: "UNAVAILABLE_TERMINAL_FAILURE", valid: false,
+		 measurement_valid: false, terminal_valuation_available: false,
+		 population: $population, expected_supplier_count: $expected, supplier_count: null,
+		 decision_count: null, fill_count: null, checks: ["terminal economic failure prevented paired CDF account reconciliation"],
+		 terminal_outcome: $outcome}}' >"$temporary"
+	mv "$temporary" "$analysis_dir/cdfliquidity.json"
+
+	temporary=$(mktemp "$analysis_dir/priceunavailable.json.tmp-XXXXXX")
+	jq -n --argjson rejections "$price_unavailable_rejections" --argjson outcome "$outcome_json" \
+		'{schema_version: 1, result: {status: "TERMINAL_FAILURE_DIAGNOSTIC", valid: true,
+		 measurement_valid: true, terminal_valuation_available: false,
+		 price_unavailable_order_rejections: $rejections, malformed_order_rejected_count: 0,
+		 terminal_outcome: $outcome}}' >"$temporary"
+	mv "$temporary" "$analysis_dir/priceunavailable.json"
+
+	temporary=$(mktemp "$analysis_dir/evidenceartifacthash.json.tmp-XXXXXX")
+	jq -n --arg execution_hash "$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
+		--argjson event_frames "$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")" \
+		'{schema_version: 1, result: {domain: "rendered_binary_json_records",
+		 ordering: "venue_sequence_reconstructed", source_execution_stream_hash: $execution_hash,
+		 source_binary_event_frames: $event_frames, status: "TERMINAL_FAILURE_DIAGNOSTIC"}}' >"$temporary"
+	mv "$temporary" "$analysis_dir/evidenceartifacthash.json"
+
+	temporary=$(mktemp "$analysis_dir/streamhash.json.tmp-XXXXXX")
+	jq -n --arg execution_hash "$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
+		--argjson event_frames "$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")" \
+		'{schema_version: 1, result: {domain: "persisted_evidence", ordering: "unordered_multiset",
+		 events: $event_frames, digest: $execution_hash, status: "TERMINAL_FAILURE_DIAGNOSTIC"}}' >"$temporary"
+	mv "$temporary" "$analysis_dir/streamhash.json"
+
+	temporary=$(mktemp "$analysis_dir/activation.json.tmp-XXXXXX")
+	jq -n --arg contract "$contract_version" --arg population "$population" \
+		--argjson expected "$expected_supplier_count" --argjson rejections "$price_unavailable_rejections" \
+		--argjson outcome "$outcome_json" \
+		'{schema_version: 1, result: {contract: $contract, status: "terminal_failure_diagnostic",
+		 terminal_valuation_available: false, terminal_outcome: $outcome,
+		 cdf_liquidity: {valid: false, population: $population, expected_supplier_count: $expected,
+		  supplier_count: null, activation_observed: false, measurement_valid: false},
+		 observed: {cdf_liquidity_activation_observed: false, price_unavailable_order_rejections: $rejections},
+		 predicates: {cdf_liquidity_population_contract: false,
+		  zero_price_unavailable_order_rejections: ($rejections == 0), calendar_behavior_attested: false}}}' >"$temporary"
+	mv "$temporary" "$analysis_dir/activation.json"
+
+	temporary=$(mktemp "$analysis_dir/integrity.json.tmp-XXXXXX")
+	jq -n --arg contract "$contract_version" --argjson outcome "$outcome_json" \
+		'{schema_version: 1, contract: $contract, status: "terminal_failure_diagnostic",
+		 terminal_valuation_available: false, terminal_measurement_valid: true,
+		 terminal_outcome: $outcome, predicates: {terminal_failure_endpoint: true},
+		 unavailable_metrics: ["standard_integrity", "calendar", "risk", "settlement", "cdf_liquidity"]}' >"$temporary"
+	mv "$temporary" "$analysis_dir/integrity.json"
+
+	temporary=$(mktemp "$analysis_dir/terminalfailure.json.tmp-XXXXXX")
+	jq -n --arg contract "$contract_version" --argjson outcome "$outcome_json" \
+		--argjson raw_count "$raw_count" --argjson event_frames "$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")" \
+		'{schema_version: 1, result: {contract: $contract, status: "VALID_TERMINAL_ECONOMIC_FAILURE",
+		 terminal_valuation_available: false, terminal_outcome: $outcome,
+		 raw_evidence_contract_valid: true, evidence_manifest_verified: true,
+		 external_attestation_verified: true, checkpoint_contract_valid: true,
+		 standard_metrics: "not_run", raw_jsonl_files: $raw_count, event_frames: $event_frames,
+		 claim_scope: "typed terminal failure diagnostic; no terminal valuation claim"}}' >"$temporary"
+	mv "$temporary" "$analysis_dir/terminalfailure.json"
+
+	runtime_events=$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")
+	runtime_digest=$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")
+	analyzer_revision=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
+	analyzer_modified=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
+	analyzer_sha256=$(sha256sum "$analyzer" | awk '{print $1}')
+	analyzer_trimpath=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "-trimpath=") == 1 {sub("-trimpath=", "", $2); print $2; exit}')
+	analyzer_cgo_enabled=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "CGO_ENABLED=") == 1 {sub("CGO_ENABLED=", "", $2); print $2; exit}')
+	[[ "$analyzer_revision" == "$head_revision" && "$analyzer_modified" == false && "$analyzer_trimpath" == true && "$analyzer_cgo_enabled" == 0 ]] ||
+		fail "analyzer is not a clean reproducible build of current HEAD"
+	analyzer_modified_json=false
+	[[ "$analyzer_modified" == true ]] && analyzer_modified_json=true
+	required_json=$(printf '%s\n' "${required[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
+	artifact_sha256=$(for artifact in "${required[@]}"; do
+		printf '%s\t%s\n' "$artifact" "$(sha256sum "$analysis_dir/$artifact" | awk '{print $1}')"
+	done | jq -Rn 'reduce inputs as $line ({}; ($line | split("\t")) as $parts | .[$parts[0]] = $parts[1])')
+	temporary=$(mktemp "$analysis_dir/analysis-metadata.json.tmp-XXXXXX")
+	jq -n \
+		--arg analysis_revision "$head_revision" --arg analyzer_revision "$analyzer_revision" \
+		--arg analyzer_sha256 "$analyzer_sha256" --argjson analyzer_trimpath true \
+		--arg analyzer_cgo_enabled "$analyzer_cgo_enabled" --arg analyzer_go_version "$analyzer_go_version" \
+		--arg evidence_format "$evidence_format" --arg renderer_revision "$renderer_revision" \
+		--arg renderer_sha256 "$renderer_sha256" --arg renderer_go_version "$renderer_go_version" \
+		--arg renderer_route_compression "$render_route_compression" --arg source_revision_mode "$source_revision_mode" \
+		--arg raw_source_revision "$metadata_revision" --argjson analyzer_modified "$analyzer_modified_json" \
+		--argjson required_artifacts "$required_json" --argjson artifact_sha256 "$artifact_sha256" \
+		--argjson runtime_evidence_events "$runtime_events" --arg runtime_evidence_digest "$runtime_digest" \
+		--arg contract "$contract_version" --arg cell "$cell_name" --argjson seed "$seed" \
+		--arg simulator_revision "$metadata_revision" --arg simulator_sha256 "$simulator_sha256" \
+		--argjson simulator_trimpath true --arg simulator_cgo_enabled "$binary_cgo_enabled" \
+		--arg simulator_go_version "$simulator_go_version" --arg prunegate_revision "$prunegate_revision" \
+		--arg prunegate_sha256 "$prunegate_sha256" --argjson prunegate_trimpath true \
+		--argjson prunegate_cgo_enabled "$prunegate_cgo_enabled" --arg prunegate_go_version "$prunegate_go_version" \
+		--arg config_sha256 "$config_sha256" --argjson completion_sentinels "$completion_sentinels" \
+		'{schema_version: 3, cell: $cell, seed: $seed, evidence_format: $evidence_format,
+		 analysis_revision: $analysis_revision, analyzer_revision: $analyzer_revision,
+		 analyzer_sha256: $analyzer_sha256, analyzer_vcs_modified: $analyzer_modified,
+		 analyzer_trimpath: $analyzer_trimpath, analyzer_cgo_enabled: $analyzer_cgo_enabled,
+		 analyzer_go_version: $analyzer_go_version, renderer_revision: $renderer_revision,
+		 renderer_sha256: $renderer_sha256, renderer_go_version: $renderer_go_version,
+		 renderer_route_compression: $renderer_route_compression, source_revision_mode: $source_revision_mode,
+		 raw_source_revision: $raw_source_revision, require_exact_replay: true,
+		 simulator_revision: $simulator_revision, simulator_sha256: $simulator_sha256,
+		 simulator_trimpath: $simulator_trimpath, simulator_cgo_enabled: $simulator_cgo_enabled,
+		 simulator_go_version: $simulator_go_version, prunegate_revision: $prunegate_revision,
+		 prunegate_sha256: $prunegate_sha256, prunegate_trimpath: $prunegate_trimpath,
+		 prunegate_cgo_enabled: $prunegate_cgo_enabled, prunegate_go_version: $prunegate_go_version,
+		 config_sha256: $config_sha256, analysis_contract: $contract, integrity_contract: $contract,
+		 activation_contract: $contract, completion_sentinels: $completion_sentinels,
+		 required_artifacts: $required_artifacts, artifact_sha256: $artifact_sha256,
+		 runtime_evidence_artifact: {representation: $evidence_format, event_frames: $runtime_evidence_events,
+		  execution_stream_hash: $runtime_evidence_digest}, terminal_failure_diagnostic: true,
+		 inactive_contracts: ["fundingcarry", "termcarry", "datedcarryp5", "datedmandatep5", "perpreplenishment"],
+		 raw_log_policy: "retained; this extractor has no prune authority"}' >"$temporary"
+	mv "$temporary" "$analysis_dir/analysis-metadata.json"
+	require_json_object "$analysis_dir/analysis-metadata.json"
+	jq -e --arg revision "$head_revision" --arg analyzer_revision "$analyzer_revision" \
+		--arg contract "$contract_version" --arg renderer_route_compression "$render_route_compression" \
+		--arg source_revision_mode "$source_revision_mode" --arg raw_source_revision "$metadata_revision" \
+		--argjson completion_sentinels "$completion_sentinels" --argjson required_artifacts "$required_json" \
+		'.schema_version == 3 and .evidence_format == "evstream_v3" and .analysis_revision == $revision and
+		 .analyzer_revision == $analyzer_revision and .analyzer_vcs_modified == false and
+		 .require_exact_replay == true and .renderer_route_compression == $renderer_route_compression and
+		 .source_revision_mode == $source_revision_mode and .raw_source_revision == $raw_source_revision and
+		 .analysis_contract == $contract and .required_artifacts == $required_artifacts and
+		 .completion_sentinels == $completion_sentinels and
+		 (.artifact_sha256 | keys) == ($required_artifacts | sort) and
+		 all(.artifact_sha256 | to_entries[]; (.value | test("^[0-9a-f]{64}$"))) and
+		 (.raw_log_policy | type) == "string"' "$analysis_dir/analysis-metadata.json" >/dev/null ||
+		fail "terminal-failure analysis metadata self-check failed"
+	v2_r2_verify_evidence_manifest "$cell" || fail "raw evidence changed during terminal-failure extraction: $cell"
+	v2_r2_verify_attestation "$cell" || fail "external attestation changed during terminal-failure extraction: $cell"
+	printf 'extracted terminal economic failure diagnostic: %s\n' "$cell"
+}
+
+if [[ "$terminal_failure" == true ]]; then
+	write_terminal_failure_artifacts
+	exit 0
+fi
+
 for metric in "${metrics[@]}"; do
 	if [[ "$metric" == positions || "$metric" == settlements ]]; then
 		if [[ "$metric" == settlements ]]; then
@@ -687,8 +932,18 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 mv "$integrity_tmp" "$analysis_dir/integrity.json"
 require_json_object "$analysis_dir/integrity.json"
 jq -e '(.predicates | keys) == ["activation", "calendar", "conservation", "derivatives", "expiry", "exposure", "fill_positions", "frontier_vectors", "hedging", "late_path", "liability_hedger", "liquidations", "maker_quote_size", "maker_rebalance", "maker_refresh", "margin", "mechanical", "observation_receipts", "option_liability", "option_surface", "option_value_taker", "order_lifecycle", "position_rounding", "positions", "post_only", "settlement", "vanna_volga"] and
-	all(.predicates | to_entries[]; .value == true)' "$analysis_dir/integrity.json" >/dev/null ||
+   all(.predicates | to_entries[]; .value == true)' "$analysis_dir/integrity.json" >/dev/null ||
 	fail "one or more fail-closed integrity predicates failed"
+
+terminalfailure_tmp=$(mktemp "$analysis_dir/terminalfailure.json.tmp-XXXXXX")
+jq -n --arg contract "$contract_version" --slurpfile outcome "$analysis_dir/terminal-outcome.json" \
+	'{schema_version: 1, result: {contract: $contract, status: "NO_TERMINAL_FAILURE",
+	 terminal_valuation_available: true, terminal_outcome: $outcome[0],
+	 raw_evidence_contract_valid: true, evidence_manifest_verified: true,
+	 external_attestation_verified: true, checkpoint_contract_valid: true,
+	 standard_metrics: "complete", claim_scope: "complete terminal valuation"}}' >"$terminalfailure_tmp"
+mv "$terminalfailure_tmp" "$analysis_dir/terminalfailure.json"
+require_json_object "$analysis_dir/terminalfailure.json"
 
 required=(
 	observationreceipts.json frontiervectors.json mechanical.json conservation.json
@@ -701,7 +956,7 @@ required=(
 	termcarry.json datedcarryp5.json perpreplenishment.json activation.json integrity.json calendar.json
 )
 if [[ "$extractor_variant" == sv1 ]]; then
-	required+=(cdfliquidity.json priceunavailable.json)
+	required+=(cdfliquidity.json priceunavailable.json terminalfailure.json)
 	if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
 		required+=(terminal-outcome.json)
 	fi
@@ -777,6 +1032,7 @@ jq -n \
 	--arg prunegate_cgo_enabled "$prunegate_cgo_enabled" \
 	--arg prunegate_go_version "$prunegate_go_version" \
 	--arg config_sha256 "$config_sha256" \
+	--argjson completion_sentinels "$completion_sentinels" \
 	'{schema_version: 3, cell: $cell, seed: $seed, evidence_format: $evidence_format,
 		analysis_revision: $analysis_revision, analyzer_revision: $analyzer_revision,
 		analyzer_sha256: $analyzer_sha256, analyzer_vcs_modified: $analyzer_modified,
@@ -794,7 +1050,7 @@ jq -n \
 		prunegate_go_version: $prunegate_go_version,
 		config_sha256: $config_sha256, analysis_contract: $contract,
 		integrity_contract: $contract, activation_contract: $contract,
-		completion_sentinels: ["greeks.json", "latency.json"], required_artifacts: $required_artifacts,
+			completion_sentinels: $completion_sentinels, required_artifacts: $required_artifacts,
 		artifact_sha256: $artifact_sha256,
 		runtime_evidence_artifact: {representation: $evidence_format, event_frames: $runtime_evidence_events, execution_stream_hash: $runtime_evidence_digest},
 		inactive_contracts: ["fundingcarry", "termcarry", "datedcarryp5", "datedmandatep5", "perpreplenishment"],
@@ -804,14 +1060,16 @@ require_json_object "$analysis_dir/analysis-metadata.json"
 jq -e --arg revision "$head_revision" --arg analyzer_revision "$analyzer_revision" \
 	--arg contract "$contract_version" --arg renderer_route_compression "$render_route_compression" \
 	--arg source_revision_mode "$source_revision_mode" --arg raw_source_revision "$metadata_revision" \
+	--argjson completion_sentinels "$completion_sentinels" \
 	--argjson required_artifacts "$required_json" \
 	'.schema_version == 3 and .evidence_format == "evstream_v3" and .analysis_revision == $revision and
 	 .analyzer_revision == $analyzer_revision and .analyzer_vcs_modified == false and
 	 .require_exact_replay == true and
 	 .renderer_route_compression == $renderer_route_compression and
-	 .source_revision_mode == $source_revision_mode and .raw_source_revision == $raw_source_revision and
-	 .analysis_contract == $contract and .required_artifacts == $required_artifacts and
-	 (.artifact_sha256 | keys) == ($required_artifacts | sort) and
+		 .source_revision_mode == $source_revision_mode and .raw_source_revision == $raw_source_revision and
+		 .analysis_contract == $contract and .required_artifacts == $required_artifacts and
+		 .completion_sentinels == $completion_sentinels and
+		 (.artifact_sha256 | keys) == ($required_artifacts | sort) and
 	all(.artifact_sha256 | to_entries[]; (.value | test("^[0-9a-f]{64}$"))) and
 	(.raw_log_policy | type) == "string"' "$analysis_dir/analysis-metadata.json" >/dev/null ||
 	fail "analysis metadata self-check failed"

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "contract": "v2-r2-sv1b-24h-config-provenance-v2",
+  "contract": "v2-r2-sv1b-24h-config-provenance-v3",
   "candidate": "V2-R2-SV1B-24H-CDF-LIQUIDITY",
   "predecessor": "V2-R2-SV1",
   "source_configs": {
@@ -40,7 +40,7 @@
   },
   "generator": {
     "path": "scripts/render-v2-r2-sv1b-24h-configs.sh",
-    "sha256": "bd76391c417655e04800a30fede3820cc8a5d964310f91722a2551827a48e7cb"
+    "sha256": "8daae10ae24aafa051db81e1f77a8e9c3178dc061404d7aaa8e1c228f04e18dd"
   },
   "withdrawal_measurement": {
     "path": "research/v2-r2-sv1b-withdrawal-measurement-amendment-2026-09-02.md",
