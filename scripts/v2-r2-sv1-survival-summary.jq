@@ -25,7 +25,11 @@
 		viable,
 		snapshots,
 		empty_side_snapshots,
-		observed_empty_side_share: (if .snapshots > 0 then (.empty_side_snapshots / .snapshots) else null end)
+			observed_empty_side_share: (if .snapshots > 0 then (.empty_side_snapshots / .snapshots) else null end)
+	})),
+	window_metrics: ($windows | sort_by(.venue_id, .start) | map({
+		venue_id, start, end, snapshots, empty_side_snapshots,
+		empty_side_share: (if .snapshots > 0 then (.empty_side_snapshots / .snapshots) else null end)
 	})),
 	observed_windows: ($windows | length),
 	predicates: {

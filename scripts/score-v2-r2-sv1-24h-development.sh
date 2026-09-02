@@ -16,7 +16,7 @@ score="$output_root/development-score.json"
 parity="$output_root/parity-attestation.json"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 cdf_audit=${CDF_LIQUIDITY_AUDIT_BIN:-"$root_dir/bin/cdf-liquidity-audit"}
-contract_version="v2-r2-sv1-24h-development-scorer-v4"
+contract_version="v2-r2-sv1-24h-development-scorer-v5"
 survival_contract="v2-r2-sv1-24h-survival-side-availability-v2"
 simulation_start_nano=1735689600000000000
 simulation_end_nano=1735776000000000000
@@ -28,6 +28,7 @@ max_empty_side_share=0.02
 survival_summary_filter="$root_dir/scripts/v2-r2-sv1-survival-summary.jq"
 score_classification_filter="$root_dir/scripts/v2-r2-sv1-score-classification.jq"
 terminal_measurement_filter="$root_dir/scripts/v2-r2-sv1-terminal-measurement.jq"
+paired_survival_filter="$root_dir/scripts/v2-r2-sv1-paired-survival.jq"
 
 fail() {
 	printf 'SV1 development scorer failure: %s\n' "$*" >&2
@@ -62,6 +63,7 @@ v2_r2_require_output_root "$output_root" || fail "scorer root is not the canonic
 [[ -r "$survival_summary_filter" ]] || fail "missing survival summary contract: $survival_summary_filter"
 [[ -r "$score_classification_filter" ]] || fail "missing score classification contract: $score_classification_filter"
 [[ -r "$terminal_measurement_filter" ]] || fail "missing terminal measurement contract: $terminal_measurement_filter"
+[[ -r "$paired_survival_filter" ]] || fail "missing paired survival contract: $paired_survival_filter"
 [[ ! -e "$score" && ! -L "$score" ]] || fail "refusing to overwrite precommitted score: $score"
 for holdout in holdout-619 holdout-631 holdout-641; do
 	[[ ! -e "$output_root/$holdout" && ! -L "$output_root/$holdout" ]] ||
@@ -179,6 +181,11 @@ all_control_survival_valid=true
 all_control_survival_measurement_valid=true
 all_cdf_contract_valid=true
 all_anticheating_valid=true
+all_paired_effect_valid=true
+all_paired_effect_not_worse=true
+all_paired_effect_identified=false
+strict_paired_effect_count=0
+pair_effect_records='[]'
 all_cells_valid=true
 
 for seed in 607 613 617; do
@@ -317,8 +324,40 @@ for seed in 607 613 617; do
 
 	if ! jq -e --arg seed "$seed" \
 		'.seed == ($seed | tonumber) and .valid == true and
-		 .treatment.supplier_count > 0 and .control.supplier_count == 0' "$audit_path" >/dev/null; then
+			.treatment.supplier_count > 0 and .control.supplier_count == 0' "$audit_path" >/dev/null; then
 		all_cells_valid=false
+	fi
+
+	paired_effect_path="$output_root/paired-survival-$seed.json"
+	[[ ! -e "$paired_effect_path" && ! -L "$paired_effect_path" &&
+		! -e "$paired_effect_path.invalid" && ! -L "$paired_effect_path.invalid" ]] ||
+		fail "refusing to overwrite paired survival effect: $paired_effect_path"
+	paired_effect_tmp=$(mktemp "$paired_effect_path.tmp-XXXXXX")
+	if [[ -s "$output_root/survival-treatment-$seed.json" && -s "$output_root/survival-control-$seed.json" ]] &&
+		jq -n --slurpfile treatment "$output_root/survival-treatment-$seed.json" \
+			--slurpfile control "$output_root/survival-control-$seed.json" --argjson seed "$seed" \
+			-f "$paired_survival_filter" >"$paired_effect_tmp"; then
+		mv "$paired_effect_tmp" "$paired_effect_path"
+	else
+		jq -n --argjson seed "$seed" \
+			'{schema_version: 1, contract: "v2-r2-sv1-24h-paired-survival-effect-v1", seed: $seed, invalid: true, failure: "matched treatment/control survival summaries are missing or malformed"}' \
+			>"$paired_effect_path.invalid"
+		all_paired_effect_valid=false
+		all_paired_effect_not_worse=false
+		continue
+	fi
+	pair_effect_record=$(jq -c '.' "$paired_effect_path")
+	pair_effect_records=$(jq -c --argjson record "$pair_effect_record" '. + [$record]' <<<"$pair_effect_records")
+	if ! jq -e '.predicates.matched_measurements_valid == true' "$paired_effect_path" >/dev/null; then
+		all_paired_effect_valid=false
+		all_paired_effect_not_worse=false
+		continue
+	fi
+	if ! jq -e '.predicates.treatment_not_worse == true' "$paired_effect_path" >/dev/null; then
+		all_paired_effect_not_worse=false
+	fi
+	if jq -e '.predicates.strict_aggregate_reduction == true' "$paired_effect_path" >/dev/null; then
+		strict_paired_effect_count=$((strict_paired_effect_count + 1))
 	fi
 done
 
@@ -328,6 +367,9 @@ if [[ "$all_treatment_terminal_measurement_valid" != true ||
 	"$all_treatment_survival_measurement_valid" != true ||
 	"$all_control_survival_measurement_valid" != true ]]; then
 	all_measurements_valid=false
+fi
+if [[ "$all_paired_effect_valid" == true && "$all_paired_effect_not_worse" == true && "$strict_paired_effect_count" -ge 2 ]]; then
+	all_paired_effect_identified=true
 fi
 
 parity_sha256=$(sha256sum "$parity" | awk '{print $1}')
@@ -347,6 +389,8 @@ classification=$(jq -n \
 	--argjson all_treatment_survival_valid "$all_treatment_survival_valid" \
 	--argjson all_cdf_contract_valid "$all_cdf_contract_valid" \
 	--argjson all_anticheating_valid "$all_anticheating_valid" \
+	--argjson all_paired_effect_valid "$all_paired_effect_valid" \
+	--argjson all_paired_effect_identified "$all_paired_effect_identified" \
 	-f "$score_classification_filter") || fail "could not classify development score"
 jq -n --arg contract "$contract_version" --arg candidate "V2-R2-SV1" \
 	--arg predecessor "R2" --arg source_revision "$raw_source_revision" \
@@ -364,7 +408,13 @@ jq -n --arg contract "$contract_version" --arg candidate "V2-R2-SV1" \
 	--argjson all_control_survival_valid "$all_control_survival_valid" \
 	--argjson all_control_survival_measurement_valid "$all_control_survival_measurement_valid" \
 	--argjson all_cdf_contract_valid "$all_cdf_contract_valid" \
-	--argjson all_anticheating_valid "$all_anticheating_valid" --argjson expected_roster "$registered_roster_count" \
+	--argjson all_anticheating_valid "$all_anticheating_valid" \
+	--argjson all_paired_effect_valid "$all_paired_effect_valid" \
+	--argjson all_paired_effect_not_worse "$all_paired_effect_not_worse" \
+	--argjson all_paired_effect_identified "$all_paired_effect_identified" \
+	--argjson strict_paired_effect_count "$strict_paired_effect_count" \
+	--argjson expected_roster "$registered_roster_count" \
+	--argjson paired_effects "$pair_effect_records" \
 	--argjson holdouts '[619,631,641]' \
 	--argjson classification "$classification" \
 	'(
@@ -392,6 +442,9 @@ jq -n --arg contract "$contract_version" --arg candidate "V2-R2-SV1" \
 				control_survival_predicate_diagnostic: $all_control_survival_valid,
 				cdf_audit_contract: $all_cdf_contract_valid,
 				anti_cheating_diagnostics: $all_anticheating_valid,
+				paired_survival_measurement_valid: $all_paired_effect_valid,
+				paired_treatment_not_worse: $all_paired_effect_not_worse,
+				paired_survival_effect_identified: $all_paired_effect_identified,
 				parity_attested: true,
 				holdout_outputs_absent: true,
 				holdout_access_policy_enforced: true
@@ -401,14 +454,16 @@ jq -n --arg contract "$contract_version" --arg candidate "V2-R2-SV1" \
 				"A non-viable status preserves a valid negative successor result and does not rewrite predecessor R2.",
 				"An invalid-evidence status is not an economic negative result.",
 				"Every primary treatment and control cell must produce valid terminal and survival measurements; a valid false control predicate remains diagnostic rather than gating treatment viability.",
-				"Treatment qualification uses treatment terminal valuation and survival only; control population and endpoint outcomes remain diagnostics.",
-				"The paired treatment-minus-control survival effect is not identified by this scorer unless a separately registered endpoint supplies an estimand and threshold."
+				"The absolute treatment survival endpoint and the matched total intervention effect are separate predicates.",
+				"The paired estimand is the control-minus-treatment aggregate CDF/USD empty-side share; treatment must be no worse in every fresh pair and strictly lower in at least two of three pairs.",
+				"The control removes the CDF roster, so this is a total population intervention effect and does not isolate supplier policy from registered population or scheduler topology."
 			],
 			cells: $cells,
 			artifacts: {
 				cdf_audits: ["cdf-liquidity-607.json", "cdf-liquidity-613.json", "cdf-liquidity-617.json"],
 				survival_summaries: ["survival-treatment-607.json", "survival-control-607.json", "survival-treatment-613.json", "survival-control-613.json", "survival-treatment-617.json", "survival-control-617.json"],
-				parity: "parity-attestation.json"
+				parity: "parity-attestation.json",
+				paired_survival_effects: $paired_effects
 			}
 		}
 	)' >"$score_tmp" || fail "could not construct development score"
@@ -418,7 +473,7 @@ jq -e --arg contract "$contract_version" --argjson holdouts '[619,631,641]' \
 	'.schema_version == 1 and .contract == $contract and
 	 .reserved_holdout_seeds == $holdouts and
 	 .holdout_status == "RESERVED_AND_NOT_READ_BY_DEVELOPMENT_SCORER" and
-		(.predicates | keys) == ["anti_cheating_diagnostics", "cdf_audit_contract", "control_survival_measurement_valid", "control_survival_predicate_diagnostic", "holdout_access_policy_enforced", "holdout_outputs_absent", "mechanical_and_artifact_contract", "measurement_contract", "parity_attested", "post_warmup_cdf_side_availability_treatment", "strict_terminal_valuation_control_diagnostic", "strict_terminal_valuation_treatment", "terminal_measurement_control", "terminal_measurement_treatment", "treatment_survival_measurement_valid"] and
+		(.predicates | keys) == ["anti_cheating_diagnostics", "cdf_audit_contract", "control_survival_measurement_valid", "control_survival_predicate_diagnostic", "holdout_access_policy_enforced", "holdout_outputs_absent", "mechanical_and_artifact_contract", "measurement_contract", "paired_survival_effect_identified", "paired_survival_measurement_valid", "paired_treatment_not_worse", "parity_attested", "post_warmup_cdf_side_availability_treatment", "strict_terminal_valuation_control_diagnostic", "strict_terminal_valuation_treatment", "terminal_measurement_control", "terminal_measurement_treatment", "treatment_survival_measurement_valid"] and
 	 .predicates.parity_attested == true and .predicates.holdout_outputs_absent == true and .predicates.holdout_access_policy_enforced == true' "$score" >/dev/null ||
 	fail "development score self-check failed"
 printf 'scored SV1 development: %s\n' "$(jq -r '.status' "$score")"

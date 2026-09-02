@@ -38,7 +38,8 @@ render_summary() {
 render_summary "$temp_root/valid.json" "$temp_root/valid-summary.json"
 jq -e '
 	(.predicates | all(to_entries[]; .value == true)) and
-	.predicates.exact_post_warmup_window_coverage == true' "$temp_root/valid-summary.json" >/dev/null
+	.predicates.exact_post_warmup_window_coverage == true and
+	(.window_metrics | length) == 69' "$temp_root/valid-summary.json" >/dev/null
 
 jq '.result.windows |= .[:-1]' "$temp_root/valid.json" >"$temp_root/missing-window.json"
 render_summary "$temp_root/missing-window.json" "$temp_root/missing-window-summary.json"
