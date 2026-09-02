@@ -36,6 +36,7 @@ type ElasticLiquiditySupplierSpec struct {
 	MaxPosition          int64         `json:"max_position"`
 	MaxInventory         int64         `json:"max_inventory"`
 	MaxQuoteQty          int64         `json:"max_quote_qty"`
+	MinimumExecutableQty int64         `json:"minimum_executable_qty,omitempty"`
 	// MaxLossQuote is a finite quote-denominated loss budget. Zero preserves
 	// the historical supplier contract; the SV1B roster must register a
 	// positive budget so the participant can withdraw when its marked equity
@@ -71,6 +72,9 @@ func (s ElasticLiquiditySupplierSpec) validate() error {
 	}
 	if s.MaxLossQuote < 0 {
 		return fmt.Errorf("maximum loss budget must not be negative, got %d", s.MaxLossQuote)
+	}
+	if s.MinimumExecutableQty < 0 || (s.MaxLossQuote > 0 && s.MinimumExecutableQty <= 0) {
+		return fmt.Errorf("minimum executable quantity must be positive for bounded-risk rosters and never negative, got %d", s.MinimumExecutableQty)
 	}
 	if s.BaseHolding < -s.MaxPosition || s.BaseHolding > s.MaxPosition {
 		return fmt.Errorf("base holding %d exceeds position limit %d", s.BaseHolding, s.MaxPosition)

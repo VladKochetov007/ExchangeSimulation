@@ -39,6 +39,7 @@ max_empty_side_share=0.02
 survival_summary_filter="$root_dir/scripts/v2-r2-sv1-survival-summary.jq"
 score_classification_filter="$root_dir/scripts/v2-r2-sv1-score-classification.jq"
 terminal_measurement_filter="$root_dir/scripts/v2-r2-sv1-terminal-measurement.jq"
+terminal_outcome_filter="$root_dir/scripts/v2-r2-sv1-terminal-outcome.jq"
 paired_survival_filter="$root_dir/scripts/v2-r2-sv1-paired-survival.jq"
 
 fail() {
@@ -97,6 +98,9 @@ required_artifacts=(
 	postonly.json liabilityhedger.json perpsignals.json datedmandatep5.json fundingcarry.json
 	termcarry.json datedcarryp5.json perpreplenishment.json activation.json integrity.json calendar.json cdfliquidity.json priceunavailable.json
 )
+if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
+	required_artifacts+=(terminal-outcome.json)
+fi
 required_json=$(printf '%s\n' "${required_artifacts[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
 
 if [[ -e "$parity" || -L "$parity" ]]; then
@@ -120,9 +124,19 @@ jq -e --arg parity_contract "$v2_r2_sv1_parity_contract" '.schema_version == 1 a
 registered_roster_count=$(jq -er '(.elastic_liquidity_suppliers | length) * (.venue_ids | length)' \
 	"$v2_r2_sv1_config_dir/treatment-$primary_seed.json")
 [[ "$registered_roster_count" =~ ^[0-9]+$ && "$registered_roster_count" -gt 0 ]] || fail "invalid registered CDF roster count"
+minimum_executable_qty=$(jq -er '
+	[.elastic_liquidity_suppliers[] | (.minimum_executable_qty // 0)] | unique |
+	if length == 1 then .[0] else error("inconsistent minimum executable quantity") end
+' "$v2_r2_sv1_config_dir/treatment-$primary_seed.json")
+[[ "$minimum_executable_qty" =~ ^[0-9]+$ ]] || fail "invalid registered minimum executable CDF depth"
 
 terminal_measurement_valid() {
 	local cell=$1
+	if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
+		jq -e --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
+			-f "$terminal_outcome_filter" "$cell/terminal-outcome.json" >/dev/null
+		return $?
+	fi
 	if jq -e --argjson end "$simulation_end_nano" -f "$terminal_measurement_filter" "$cell/greeks.json" >/dev/null; then
 		return 0
 	fi
@@ -132,6 +146,10 @@ terminal_measurement_valid() {
 terminal_mark_valid() {
 	local cell=$1
 	terminal_measurement_valid "$cell" || return 1
+	if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]] &&
+		! jq -e '.status == "completed" and .code == "COMPLETED"' "$cell/terminal-outcome.json" >/dev/null; then
+		return 1
+	fi
 	if jq -e '
 		all(.terminal_accounts[];
 			.mark_source == "two_sided_ABC_USD_and_CDF_USD_mid" and
@@ -150,10 +168,12 @@ write_survival_summary() {
 		--argjson window_nano "$survival_window_nano" --argjson expected_windows "$survival_expected_windows" \
 		--argjson required_venues '["central", "north", "south"]' \
 		--argjson max_empty "$max_empty_side_share" \
+		--argjson min_side_depth "$minimum_executable_qty" \
 		-f "$survival_summary_filter" "$raw" >"$temporary" &&
 		jq -e '.schema_version == 1 and .contract == $contract and
 			(.venues | length) == 3 and (.predicates | keys) == ["aggregate_two_sided_98pct", "cdf_books_present", "exact_post_warmup_window_coverage", "no_persistent_one_sided_window", "post_warmup_snapshots_present"] and
-			(.venues | all(.[]; (.snapshots | type) == "number" and (.empty_side_snapshots | type) == "number"))' \
+			(.minimum_executable_side_depth | type) == "number" and .minimum_executable_side_depth == $min_side_depth and
+			(.venues | all(.[]; (.snapshots | type) == "number" and (.empty_side_snapshots | type) == "number" and (.qualified_empty_side_snapshots | type) == "number"))' \
 			--arg contract "$survival_contract" "$temporary" >/dev/null; then
 		mv "$temporary" "$output"
 		return 0
@@ -171,7 +191,7 @@ run_survival_metric() {
 	local raw status
 	raw=$(mktemp "$output.raw-XXXXXX")
 	set +e
-	"$analyzer" -metric viability -json -viability-window 3600 -viability-start "$survival_start_seconds" -viability-judge-life-edges "$cell" >"$raw"
+	"$analyzer" -metric viability -json -viability-window 3600 -viability-start "$survival_start_seconds" -viability-judge-life-edges -viability-min-side-depth "$minimum_executable_qty" "$cell" >"$raw"
 	status=$?
 	set -e
 	if [[ "$status" -ne 0 || ! -s "$raw" ]] || ! write_survival_summary "$cell" "$seed" "$output" "$raw"; then

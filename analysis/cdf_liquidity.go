@@ -34,8 +34,14 @@ type CDFLiquidityRunAudit struct {
 	BidAbsentSnapshots               int64                       `json:"bid_absent_snapshots"`
 	AskAbsentSnapshots               int64                       `json:"ask_absent_snapshots"`
 	BothAbsentSnapshots              int64                       `json:"both_absent_snapshots"`
+	QualifiedBidAbsentSnapshots      int64                       `json:"qualified_bid_absent_snapshots"`
+	QualifiedAskAbsentSnapshots      int64                       `json:"qualified_ask_absent_snapshots"`
+	QualifiedBothAbsentSnapshots     int64                       `json:"qualified_both_absent_snapshots"`
 	BidAbsenceFraction               float64                     `json:"bid_absence_fraction"`
 	AskAbsenceFraction               float64                     `json:"ask_absence_fraction"`
+	QualifiedBidAbsenceFraction      float64                     `json:"qualified_bid_absence_fraction"`
+	QualifiedAskAbsenceFraction      float64                     `json:"qualified_ask_absence_fraction"`
+	MinimumExecutableQty             int64                       `json:"minimum_executable_qty"`
 	SupplierInitialEquity            int64                       `json:"supplier_initial_equity"`
 	SupplierTerminalEquity           int64                       `json:"supplier_terminal_equity"`
 	SupplierPnL                      int64                       `json:"supplier_pnl"`
@@ -141,6 +147,7 @@ type CDFLiquiditySupplierAudit struct {
 	ConfiguredMaxPosition            int64   `json:"configured_max_position"`
 	ConfiguredMaxInventory           int64   `json:"configured_max_inventory"`
 	ConfiguredMaxQuoteQty            int64   `json:"configured_max_quote_qty"`
+	ConfiguredMinimumExecutableQty   int64   `json:"configured_minimum_executable_qty"`
 	ConfiguredMaxLossQuote           int64   `json:"configured_max_loss_quote"`
 	ConfiguredMakerFeeBps            int64   `json:"configured_maker_fee_bps"`
 	ConfiguredReferencePrice         int64   `json:"configured_reference_price"`
@@ -179,6 +186,7 @@ type CDFLiquiditySupplierAudit struct {
 	configuredQuoteAsset            string
 	configuredSymbol                string
 	configuredMaxQuoteQty           int64
+	configuredMinimumExecutableQty  int64
 	configuredMaxLossQuote          int64
 	configuredMakerFeeBps           int64
 	configuredMaxPosition           int64
@@ -251,6 +259,9 @@ type CDFLiquidityVenueAudit struct {
 	MaxSupplierDepthShare       float64 `json:"max_supplier_depth_share"`
 	BidAbsentSnapshots          int64   `json:"bid_absent_snapshots"`
 	AskAbsentSnapshots          int64   `json:"ask_absent_snapshots"`
+	QualifiedBidAbsentSnapshots int64   `json:"qualified_bid_absent_snapshots"`
+	QualifiedAskAbsentSnapshots int64   `json:"qualified_ask_absent_snapshots"`
+	MinimumExecutableQty        int64   `json:"minimum_executable_qty"`
 }
 
 type cdfManifest struct {
@@ -342,6 +353,7 @@ type cdfSupplierConfig struct {
 	MaxPosition          int64  `json:"max_position"`
 	MaxInventory         int64  `json:"max_inventory"`
 	MaxQuoteQty          int64  `json:"max_quote_qty"`
+	MinimumExecutableQty int64  `json:"minimum_executable_qty"`
 	MaxLossQuote         int64  `json:"max_loss_quote"`
 	MaxObservationAge    int64  `json:"max_observation_age"`
 	DecisionPhaseOffset  int64  `json:"decision_phase_offset"`
@@ -897,6 +909,15 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			continue
 		}
 		configByRole[supplier.Role] = supplier
+		if supplier.MinimumExecutableQty < 0 {
+			result.addCheck(CDFLiquidityCheck{Role: supplier.Role, Failure: "configured minimum executable quantity is negative"})
+		} else if supplier.MinimumExecutableQty > 0 {
+			if result.MinimumExecutableQty == 0 {
+				result.MinimumExecutableQty = supplier.MinimumExecutableQty
+			} else if result.MinimumExecutableQty != supplier.MinimumExecutableQty {
+				result.addCheck(CDFLiquidityCheck{Role: supplier.Role, Failure: "configured minimum executable quantity is inconsistent across suppliers"})
+			}
+		}
 	}
 	states := make(map[cdfParticipantKey]*CDFLiquiditySupplierAudit)
 	initial := make(map[cdfParticipantKey]AccountRow)
@@ -907,7 +928,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		if audit := venueAudits[venueID]; audit != nil {
 			return audit
 		}
-		audit := &CDFLiquidityVenueAudit{VenueID: venueID, ExpectedHistoricalCount: config.ElasticSupplierCount}
+		audit := &CDFLiquidityVenueAudit{VenueID: venueID, ExpectedHistoricalCount: config.ElasticSupplierCount, MinimumExecutableQty: result.MinimumExecutableQty}
 		venueAudits[venueID] = audit
 		return audit
 	}
@@ -951,6 +972,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.configuredBasePrecision = supplierConfig.BasePrecision
 			state.configuredQuotePrecision = supplierConfig.QuotePrecision
 			state.configuredMaxQuoteQty = supplierConfig.MaxQuoteQty
+			state.configuredMinimumExecutableQty = supplierConfig.MinimumExecutableQty
 			state.configuredMaxLossQuote = supplierConfig.MaxLossQuote
 			state.configuredMakerFeeBps = supplierConfig.MakerFeeBps
 			state.configuredReferencePrice = supplierConfig.ReferencePrice
@@ -966,6 +988,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.ConfiguredMaxPosition = supplierConfig.MaxPosition
 			state.ConfiguredMaxInventory = supplierConfig.MaxInventory
 			state.ConfiguredMaxQuoteQty = supplierConfig.MaxQuoteQty
+			state.ConfiguredMinimumExecutableQty = supplierConfig.MinimumExecutableQty
 			state.ConfiguredMaxLossQuote = supplierConfig.MaxLossQuote
 			state.ConfiguredMakerFeeBps = supplierConfig.MakerFeeBps
 			state.ConfiguredReferencePrice = supplierConfig.ReferencePrice
@@ -1191,6 +1214,8 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	if result.SnapshotCount > 0 {
 		result.BidAbsenceFraction = float64(result.BidAbsentSnapshots) / float64(result.SnapshotCount)
 		result.AskAbsenceFraction = float64(result.AskAbsentSnapshots) / float64(result.SnapshotCount)
+		result.QualifiedBidAbsenceFraction = float64(result.QualifiedBidAbsentSnapshots) / float64(result.SnapshotCount)
+		result.QualifiedAskAbsenceFraction = float64(result.QualifiedAskAbsentSnapshots) / float64(result.SnapshotCount)
 	}
 	allSuppliersValid := true
 	for _, supplier := range result.Suppliers {
@@ -2359,7 +2384,7 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 		r.SnapshotCount++
 		venue := venueAudits[event.VenueID]
 		if venue == nil {
-			venue = &CDFLiquidityVenueAudit{VenueID: event.VenueID, ExpectedHistoricalCount: r.ExpectedHistoricalCount}
+			venue = &CDFLiquidityVenueAudit{VenueID: event.VenueID, ExpectedHistoricalCount: r.ExpectedHistoricalCount, MinimumExecutableQty: r.MinimumExecutableQty}
 			venueAudits[event.VenueID] = venue
 		}
 		venue.SnapshotCount++
@@ -2373,6 +2398,21 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 		}
 		if len(snapshot.Bids) == 0 && len(snapshot.Asks) == 0 {
 			r.BothAbsentSnapshots++
+		}
+		bidDepth := displayedDepth(snapshot.Bids)
+		askDepth := displayedDepth(snapshot.Asks)
+		bidQualified := r.MinimumExecutableQty <= 0 || bidDepth >= r.MinimumExecutableQty
+		askQualified := r.MinimumExecutableQty <= 0 || askDepth >= r.MinimumExecutableQty
+		if !bidQualified {
+			r.QualifiedBidAbsentSnapshots++
+			venue.QualifiedBidAbsentSnapshots++
+		}
+		if !askQualified {
+			r.QualifiedAskAbsentSnapshots++
+			venue.QualifiedAskAbsentSnapshots++
+		}
+		if !bidQualified && !askQualified {
+			r.QualifiedBothAbsentSnapshots++
 		}
 		totalDisplayed := displayedDepth(snapshot.Bids) + displayedDepth(snapshot.Asks)
 		supplierDepthByClient := supplierDisplayedDepthByClient(event.VenueID, orders)
@@ -3117,7 +3157,7 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier used unregistered borrowed capital"})
 		}
 		baseHoldingInPositionBounds := state.configuredBaseHolding >= -state.configuredMaxPosition && state.configuredBaseHolding <= state.configuredMaxPosition
-		if !state.initialAccountSeen || !state.terminalAccountSeen || state.configuredMaxPosition <= 0 || state.configuredMaxInventory <= 0 || state.configuredMaxQuoteQty <= 0 || state.configuredBasePrecision <= 0 || state.configuredQuotePrecision <= 0 || state.configuredMaxObservationAge <= 0 || state.configuredInitialBaseBalance <= 0 || state.configuredInitialQuoteBalance <= 0 || state.configuredReferencePrice <= 0 || state.configuredReferenceHalfLife <= 0 || state.configuredElasticityPerPercent <= 0 || !baseHoldingInPositionBounds {
+		if !state.initialAccountSeen || !state.terminalAccountSeen || state.configuredMaxPosition <= 0 || state.configuredMaxInventory <= 0 || state.configuredMaxQuoteQty <= 0 || state.configuredBasePrecision <= 0 || state.configuredQuotePrecision <= 0 || state.configuredMaxObservationAge <= 0 || state.configuredInitialBaseBalance <= 0 || state.configuredInitialQuoteBalance <= 0 || state.configuredReferencePrice <= 0 || state.configuredReferenceHalfLife <= 0 || state.configuredElasticityPerPercent <= 0 || state.configuredMaxLossQuote > 0 && state.configuredMinimumExecutableQty <= 0 || !baseHoldingInPositionBounds {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier lacks complete finite-capital configuration"})
 		}
 		state.Valid = state.DecisionCount > 0 && state.FillCount > 0 && state.AcceptedQuoteCount > 0 && state.CompletedQuoteCount > 0 && state.initialAccountSeen && state.terminalAccountSeen
@@ -3163,7 +3203,7 @@ func (r *CDFLiquidityRunAudit) finalizeVenueAudits(venueAudits map[string]*CDFLi
 		supplier := &r.Suppliers[index]
 		venue := venueAudits[supplier.VenueID]
 		if venue == nil {
-			venue = &CDFLiquidityVenueAudit{VenueID: supplier.VenueID, ExpectedHistoricalCount: r.expectedHistoricalCountPerVenue}
+			venue = &CDFLiquidityVenueAudit{VenueID: supplier.VenueID, ExpectedHistoricalCount: r.expectedHistoricalCountPerVenue, MinimumExecutableQty: r.MinimumExecutableQty}
 			venueAudits[supplier.VenueID] = venue
 		}
 		venue.SupplierVolumeQty, _ = exactAdd(venue.SupplierVolumeQty, supplier.FilledQty)

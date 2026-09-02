@@ -65,8 +65,11 @@ if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1B-* ]]; then
 		all(.elastic_liquidity_suppliers[];
 			(.max_loss_quote | type) == "number" and .max_loss_quote > 0 and
 			.max_loss_quote == ((.initial_quote_balance +
-				((.initial_base_balance * .reference_price) / .base_precision)) / 10))
-	' "$activation_config" >/dev/null || fail "SV1B roster must register a 10 percent marked-equity loss budget"
+				((.initial_base_balance * .reference_price) / .base_precision)) / 10) and
+			(.minimum_executable_qty | type) == "number" and
+			.minimum_executable_qty == (.base_precision / 1000) and
+			.minimum_executable_qty <= .max_quote_qty)
+	' "$activation_config" >/dev/null || fail "SV1B roster must register a 10 percent marked-equity loss budget and venue minimum executable depth"
 fi
 roster=$(jq -c '.elastic_liquidity_suppliers' "$activation_config")
 

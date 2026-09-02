@@ -1,13 +1,13 @@
 def aggregate_empty_side_share:
 	([.venues[] | .snapshots] | add) as $snapshots |
-	([.venues[] | .empty_side_snapshots] | add) as $empty |
+	([.venues[] | (.qualified_empty_side_snapshots // .empty_side_snapshots)] | add) as $empty |
 	if ($snapshots | type) == "number" and $snapshots > 0
 	then ($empty / $snapshots)
 	else null
 	end;
 
 def maximum_window_empty_side_share:
-	([.window_metrics[] | .empty_side_share] | map(select(type == "number"))) as $shares |
+	([.window_metrics[] | (.qualified_empty_side_share // .empty_side_share)] | map(select(type == "number"))) as $shares |
 	if ($shares | length) > 0 then ($shares | max) else null end;
 
 ($treatment[0]) as $treatment_summary |

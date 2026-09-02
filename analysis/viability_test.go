@@ -102,6 +102,35 @@ func TestViabilitySeparatesWindowsAndCountsClasses(t *testing.T) {
 	}
 }
 
+func TestViabilitySeparatesDustDepthFromRawSidePresence(t *testing.T) {
+	run := viabilityRun(t)
+	result, err := run.MeasureViability(ViabilityOptions{
+		WindowNanos:  5_000_000_000,
+		MinSideDepth: 100,
+	})
+	if err != nil {
+		t.Fatalf("measure: %v", err)
+	}
+	if got := result.Windows[0].EmptySideSnapshots; got != 0 {
+		t.Fatalf("raw one-sided snapshots = %d, want 0 for a two-sided dust book", got)
+	}
+	if got := result.Windows[0].QualifiedEmptySideSnapshots; got != 1 {
+		t.Fatalf("qualified one-sided snapshots = %d, want 1 for a below-floor book", got)
+	}
+	if got := result.Windows[1].QualifiedEmptySideSnapshots; got != 1 {
+		t.Fatalf("qualified one-sided snapshots in empty-side window = %d, want 1", got)
+	}
+	if got := result.BookSummaries[0].QualifiedEmptySideSnapshots; got != 2 {
+		t.Fatalf("qualified whole-book absence = %d, want 2", got)
+	}
+}
+
+func TestViabilityRejectsNegativeMinimumSideDepth(t *testing.T) {
+	if _, err := viabilityRun(t).MeasureViability(ViabilityOptions{MinSideDepth: -1}); err == nil {
+		t.Fatal("negative minimum side depth was accepted")
+	}
+}
+
 func TestViabilityStartNanosAppliesAnExplicitWarmupBoundary(t *testing.T) {
 	run := viabilityRun(t)
 	result, err := run.MeasureViability(ViabilityOptions{WindowNanos: 5_000_000_000, StartNanos: 10_000_000_000})

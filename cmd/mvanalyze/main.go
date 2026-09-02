@@ -171,6 +171,7 @@ func main() {
 	viabilityThresholds := flag.String("viability-thresholds", "", "path to a JSON list of per-book viability thresholds, matched by symbol glob in order")
 	judgeLifeEdges := flag.Bool("viability-judge-life-edges", false, "judge the windows a book lists and settles in, which are partial by construction")
 	minTouchDepth := flag.Float64("viability-min-touch-depth", 0, "smallest median touch depth in base units a viable window may show; zero disables")
+	minSideDepth := flag.Int64("viability-min-side-depth", 0, "minimum aggregate visible-plus-hidden side depth for viability; zero uses presence only")
 	tickSize := flag.Int64("tick", 10_000, "book tick size, for the spread in ticks")
 	walkSizes := flag.String("walk-sizes", "", "comma-separated order sizes in base units, for the walkable fraction")
 	asJSON := flag.Bool("json", false, "emit JSON instead of a table")
@@ -1288,7 +1289,7 @@ func main() {
 					if w.Snapshots == 0 {
 						return false
 					}
-					return float64(w.EmptySideSnapshots)/float64(w.Snapshots) > thresholdsFor(w.Symbol).MaxEmptySideShare
+					return float64(w.QualifiedEmptySideSnapshots)/float64(w.Snapshots) > thresholdsFor(w.Symbol).MaxEmptySideShare
 				}},
 				{Name: "concentrated_flow", Breached: func(w analysis.MarketWindow) bool {
 					return w.TopRoleVolumeShare > thresholdsFor(w.Symbol).MaxRoleShare
@@ -1306,10 +1307,11 @@ func main() {
 				rules[i] = judged(rule)
 			}
 			result, err := run.MeasureViability(analysis.ViabilityOptions{
-				WindowNanos: int64(*viabilityWindow * 1e9),
-				StartNanos:  int64(*viabilityStart * 1e9),
-				TickSize:    *tickSize,
-				Rules:       rules,
+				WindowNanos:  int64(*viabilityWindow * 1e9),
+				StartNanos:   int64(*viabilityStart * 1e9),
+				TickSize:     *tickSize,
+				MinSideDepth: *minSideDepth,
+				Rules:        rules,
 			})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)

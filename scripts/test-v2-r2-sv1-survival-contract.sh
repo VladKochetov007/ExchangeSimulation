@@ -32,6 +32,7 @@ render_summary() {
 		--argjson start_nano "$start_nano" --argjson window_nano "$window_nano" \
 		--argjson required_venues '["central", "north", "south"]' \
 		--argjson expected_windows "$expected_windows" --argjson max_empty 0.02 \
+		--argjson min_side_depth 0 \
 		-f "$summary_filter" "$input" >"$output"
 }
 

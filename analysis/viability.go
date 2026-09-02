@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -33,6 +34,11 @@ type ViabilityOptions struct {
 	// TickSize converts spreads to ticks. Zero leaves the spread in quote
 	// units, which is not comparable across instruments.
 	TickSize int64
+	// MinSideDepth is the minimum visible-plus-hidden quantity that makes each
+	// side executable for the one-sided-book rule. Zero preserves the
+	// historical presence-only measurement. This is a measurement contract,
+	// not an actor or matching rule.
+	MinSideDepth int64
 	// Rules decide whether a window is viable. They are supplied rather than
 	// built in because what counts as a living market depends on the
 	// instrument, the venue and the question: an option chain that trades once
@@ -74,9 +80,10 @@ type MarketWindow struct {
 	Snapshots int `json:"snapshots"`
 	// EmptySideSnapshots counts publications with no bid or no ask. A book that
 	// is one-sided cannot be traded on that side at any price.
-	EmptySideSnapshots int          `json:"empty_side_snapshots"`
-	SpreadTicks        Distribution `json:"spread_ticks"`
-	TouchDepth         Distribution `json:"touch_depth"`
+	EmptySideSnapshots          int          `json:"empty_side_snapshots"`
+	QualifiedEmptySideSnapshots int          `json:"qualified_empty_side_snapshots"`
+	SpreadTicks                 Distribution `json:"spread_ticks"`
+	TouchDepth                  Distribution `json:"touch_depth"`
 
 	// FirstForBook and LastForBook mark the window a book appears in first and
 	// last. A contract that listed part way through a window, or settled part
@@ -120,10 +127,11 @@ type BookViability struct {
 	// These are whole-book unions/totals, unlike a single MarketWindow. They
 	// make a predeclared non-collapse floor inspectable without pretending a
 	// later-selected healthy window represents the full run.
-	TakerRoles         int `json:"taker_roles"`
-	MakerRoles         int `json:"maker_roles"`
-	Snapshots          int `json:"snapshots"`
-	EmptySideSnapshots int `json:"empty_side_snapshots"`
+	TakerRoles                  int `json:"taker_roles"`
+	MakerRoles                  int `json:"maker_roles"`
+	Snapshots                   int `json:"snapshots"`
+	EmptySideSnapshots          int `json:"empty_side_snapshots"`
+	QualifiedEmptySideSnapshots int `json:"qualified_empty_side_snapshots"`
 	// FirstBreachWindow is the index of the earliest window this book failed,
 	// or minus one if it never did. A market that dies in cycle seven and one
 	// that was never alive are different failures.
@@ -141,14 +149,15 @@ type windowKey struct {
 }
 
 type windowAccumulator struct {
-	trades          int
-	volume          int64
-	takerRoleVolume map[string]int64
-	makerRoles      map[string]struct{}
-	snapshots       int
-	emptySide       int
-	spread          []float64
-	touchDepth      []float64
+	trades             int
+	volume             int64
+	takerRoleVolume    map[string]int64
+	makerRoles         map[string]struct{}
+	snapshots          int
+	emptySide          int
+	qualifiedEmptySide int
+	spread             []float64
+	touchDepth         []float64
 }
 
 func newWindowAccumulator() *windowAccumulator {
@@ -160,6 +169,9 @@ func newWindowAccumulator() *windowAccumulator {
 
 // MeasureViability walks a run and reports the corridor window by window.
 func (r *Run) MeasureViability(opts ViabilityOptions) (*Viability, error) {
+	if opts.MinSideDepth < 0 {
+		return nil, fmt.Errorf("viability: minimum side depth must not be negative")
+	}
 	var mu sync.Mutex
 	windows := make(map[windowKey]*windowAccumulator)
 	at := func(key windowKey) *windowAccumulator {
@@ -243,15 +255,16 @@ func (r *Run) MeasureViability(opts ViabilityOptions) (*Viability, error) {
 		mu.Lock()
 		accumulator := at(key)
 		accumulator.snapshots++
-		if len(bids) == 0 || len(asks) == 0 {
-			accumulator.emptySide++
-			mu.Unlock()
-			return
-		}
 		bestBid, bidDepth, bidOK := bestWithDepth(bids, true)
 		bestAsk, askDepth, askOK := bestWithDepth(asks, false)
 		if !bidOK || !askOK || bestBid > bestAsk {
 			accumulator.emptySide++
+		}
+		if !bidOK || !askOK || bestBid > bestAsk ||
+			(opts.MinSideDepth > 0 && (bidDepth < opts.MinSideDepth || askDepth < opts.MinSideDepth)) {
+			accumulator.qualifiedEmptySide++
+		}
+		if !bidOK || !askOK || bestBid > bestAsk {
 			mu.Unlock()
 			return
 		}
@@ -358,9 +371,10 @@ func summariseViability(windows map[windowKey]*windowAccumulator, opts Viability
 			MakerRoles: len(accumulator.makerRoles),
 			Snapshots:  accumulator.snapshots,
 
-			EmptySideSnapshots: accumulator.emptySide,
-			SpreadTicks:        Describe(accumulator.spread),
-			TouchDepth:         Describe(accumulator.touchDepth),
+			EmptySideSnapshots:          accumulator.emptySide,
+			QualifiedEmptySideSnapshots: accumulator.qualifiedEmptySide,
+			SpreadTicks:                 Describe(accumulator.spread),
+			TouchDepth:                  Describe(accumulator.touchDepth),
 		}
 		if accumulator.volume > 0 {
 			top := int64(0)
@@ -415,6 +429,7 @@ func summariseViability(windows map[windowKey]*windowAccumulator, opts Viability
 		summary.Trades += window.Trades
 		summary.Snapshots += window.Snapshots
 		summary.EmptySideSnapshots += window.EmptySideSnapshots
+		summary.QualifiedEmptySideSnapshots += window.QualifiedEmptySideSnapshots
 		for role := range accumulator.takerRoleVolume {
 			summaryTakerRoles[book][role] = struct{}{}
 		}
