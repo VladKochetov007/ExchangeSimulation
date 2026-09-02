@@ -300,6 +300,9 @@ jq '.result.venues[0].listing_timeline[0].option_first_listed_at_nano += 3000000
 	"$calendar_fixture" >"$tmp_root/calendar-delayed-option.json"
 v2_r2_require_calendar_listing_timeline "$tmp_root/calendar-delayed-option.json" ||
 	fail "a price-gated option listing delay was rejected"
+jq '.result.venues[0].listing_timeline[0].option_first_listed_at_nano = 1735689662000000000' \
+	"$calendar_fixture" >"$tmp_root/calendar-option-too-late.json"
+expect_failure v2_r2_require_calendar_listing_timeline "$tmp_root/calendar-option-too-late.json"
 jq '.result.venues[0].listing_timeline[0].option_first_listed_at_nano = 1735689600000000000' \
 	"$calendar_fixture" >"$tmp_root/calendar-option-before-due.json"
 expect_failure v2_r2_require_calendar_listing_timeline "$tmp_root/calendar-option-before-due.json"

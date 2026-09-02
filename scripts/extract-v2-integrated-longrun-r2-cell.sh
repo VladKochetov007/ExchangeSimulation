@@ -459,6 +459,7 @@ jq_args=(
 	--argjson expected_calendar_expiries "$expected_calendar_expiries"
 	--argjson expected_calendar_completed_expiries "$expected_calendar_completed_expiries"
 	--argjson expected_calendar_listing_timeline "$expected_calendar_listing_timeline"
+	--argjson max_option_listing_delay_nano "$(v2_r2_calendar_option_listing_max_delay_nano)"
 	--argjson expected_calendar_venue_ids "$(v2_r2_expected_calendar_venue_ids)"
 	--arg contract "$contract_version"
 )
@@ -602,7 +603,8 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 	--slurpfile liabilityhedger "$analysis_dir/liabilityhedger.json" \
 	--slurpfile activation "$analysis_dir/activation.json" \
 	--argjson expected_calendar_listing_timeline "$expected_calendar_listing_timeline" \
-	--argjson expected_calendar_venue_ids "$(v2_r2_expected_calendar_venue_ids)" \
+		--argjson max_option_listing_delay_nano "$(v2_r2_calendar_option_listing_max_delay_nano)" \
+		--argjson expected_calendar_venue_ids "$(v2_r2_expected_calendar_venue_ids)" \
 	--arg contract "$contract_version" \
 	--arg extractor_variant "$extractor_variant" \
 	"$(v2_r2_calendar_listing_timeline_jq_definition)"'def r($x): $x[0].result;

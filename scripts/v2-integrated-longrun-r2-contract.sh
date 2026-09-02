@@ -50,6 +50,15 @@ v2_r2_expected_calendar_listing_timeline() {
 	printf '%s\n' "$output"
 }
 
+# Option chains are price-gated because their strike grid is fixed at first
+# listing. The registered one-second automation poll and the observed startup
+# price-gating delay are retained, but a finite bound prevents an option from
+# being deferred for nearly its entire contractual life while still passing a
+# mere "before expiry" check.
+v2_r2_calendar_option_listing_max_delay_nano() {
+	printf '%s\n' 60000000000
+}
+
 v2_r2_calendar_listing_timeline_jq_definition() {
 	cat <<'EOF'
 def calendar_listing_timeline_matches($actual; $expected):
@@ -63,10 +72,11 @@ def calendar_listing_timeline_matches($actual; $expected):
 				$actual[$index].future_first_listed_at_nano == $expected[$index].future_first_listed_at_nano and
 				$actual[$index].future_contract_count == 1 and
 				$actual[$index].option_contract_count == 10 and
-				($actual[$index].option_first_listed_at_nano | type) == "number" and
-				(if ($actual[$index].option_first_listed_at_nano | type) == "number" then
-					$actual[$index].option_first_listed_at_nano >= $expected[$index].option_first_listed_at_nano and
-					$actual[$index].option_first_listed_at_nano < $actual[$index].expiry_nano and
+					($actual[$index].option_first_listed_at_nano | type) == "number" and
+					(if ($actual[$index].option_first_listed_at_nano | type) == "number" then
+						$actual[$index].option_first_listed_at_nano >= $expected[$index].option_first_listed_at_nano and
+						$actual[$index].option_first_listed_at_nano <= ($expected[$index].option_first_listed_at_nano + $max_option_listing_delay_nano) and
+						$actual[$index].option_first_listed_at_nano < $actual[$index].expiry_nano and
 					($actual[$index].option_first_listed_at_nano | tostring | test("^[0-9]+000000000$"))
 				else false end)
 			) catch false)
@@ -78,12 +88,15 @@ v2_r2_require_calendar_listing_timeline() {
 	[[ $# -ge 1 && $# -le 2 ]] || return 1
 	local calendar_path=$1
 	local expected_timeline=${2:-$(v2_r2_expected_calendar_listing_timeline)}
+	local max_option_listing_delay_nano
+	max_option_listing_delay_nano=$(v2_r2_calendar_option_listing_max_delay_nano)
 	local filter
 	filter="$(v2_r2_calendar_listing_timeline_jq_definition)"
 	filter+='type == "object" and .result.contract == "calendar-audit-v2" and
 		 (.result.venues | type) == "array" and (.result.venues | length) > 0 and
 		 all(.result.venues[]; calendar_listing_timeline_matches(.listing_timeline; $expected_timeline))'
 	jq -e --argjson expected_timeline "$expected_timeline" \
+		--argjson max_option_listing_delay_nano "$max_option_listing_delay_nano" \
 		"$filter" \
 		"$calendar_path" >/dev/null
 }
