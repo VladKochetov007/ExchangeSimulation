@@ -66,6 +66,19 @@ if jq '.result.pnl_changing_supplier_count = 0' "$cdf_audit_fixture" >"$temp_roo
 	exit 1
 fi
 
+jq '.result.risk_state_decision_count = 2 |
+	.result.suppliers |= map(. + {configured_max_loss_quote: 10, risk_state_decision_count: 1})' \
+	"$cdf_audit_fixture" >"$temp_root/marked-risk.json"
+v2_r2_require_cdf_supplier_activation "$temp_root/marked-risk.json" 2 || {
+	echo "complete marked-risk CDF activity was rejected" >&2
+	exit 1
+}
+if jq '.result.risk_state_decision_count = 0' "$temp_root/marked-risk.json" >"$temp_root/missing-marked-risk.json" &&
+	v2_r2_require_cdf_supplier_activation "$temp_root/missing-marked-risk.json" 2; then
+	echo "positive-budget CDF activity without aggregate marked-risk state was accepted" >&2
+	exit 1
+fi
+
 jq -n ' {
 		run: "control-fixture",
 		result: {

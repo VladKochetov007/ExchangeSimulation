@@ -314,6 +314,10 @@ for seed in "${v2_r2_sv1_seeds[@]}"; do
 		.treatment.pnl_changing_supplier_count == .treatment.supplier_count and
 		.treatment.inventory_responsive_decision_count > 0 and
 		(.treatment.cancel_count + .treatment.withdraw_count) > 0 and
+		((any(.treatment.suppliers[]; (.configured_max_loss_quote // 0) > 0) | not) or
+			(.treatment.risk_state_decision_count | type) == "number" and
+			.treatment.risk_state_decision_count > 0 and
+			all(.treatment.suppliers[]; (.configured_max_loss_quote // 0) > 0 and .risk_state_decision_count > 0)) and
 		.treatment.max_borrowed == 0 and
 		(.treatment.supplier_volume_share <= 0.75) and
 		(.treatment.supplier_depth_over_75_share <= 0.5) and

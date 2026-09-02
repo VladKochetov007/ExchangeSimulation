@@ -100,6 +100,10 @@ v2_r2_require_cdf_supplier_activation() {
 		.result.pnl_changing_supplier_count == .result.supplier_count and
 		.result.inventory_responsive_decision_count > 0 and
 		(.result.cancel_count + .result.withdraw_count) > 0 and
+		((any(.result.suppliers[]; (.configured_max_loss_quote // 0) > 0) | not) or
+			(.result.risk_state_decision_count | type) == "number" and
+			.result.risk_state_decision_count > 0 and
+			all(.result.suppliers[]; (.configured_max_loss_quote // 0) > 0 and .risk_state_decision_count > 0)) and
 		.result.max_borrowed == 0 and
 		.result.supplier_volume_share <= 0.75 and
 		.result.supplier_depth_over_75_share <= 0.5 and
@@ -156,6 +160,10 @@ v2_r2_require_cdf_supplier_comparison() {
 		.treatment.pnl_changing_supplier_count == .treatment.supplier_count and
 		.treatment.inventory_responsive_decision_count > 0 and
 		(.treatment.cancel_count + .treatment.withdraw_count) > 0 and
+		((any(.treatment.suppliers[]; (.configured_max_loss_quote // 0) > 0) | not) or
+			(.treatment.risk_state_decision_count | type) == "number" and
+			.treatment.risk_state_decision_count > 0 and
+			all(.treatment.suppliers[]; (.configured_max_loss_quote // 0) > 0 and .risk_state_decision_count > 0)) and
 		.treatment.max_borrowed == 0 and
 		(.treatment.suppliers | length) == $expected_supplier_count and
 		all(.treatment.suppliers[];
