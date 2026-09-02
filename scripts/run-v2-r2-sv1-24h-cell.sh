@@ -24,7 +24,7 @@ case "$cell" in
 			exit 2
 		}
 		config_name="treatment-${v2_r2_sv1_parity_seed}.json"
-		expected_gomaxprocs=4
+		expected_gomaxprocs=8
 		;;
 	control-*-none)
 		[[ "$cell" == "control-${v2_r2_sv1_parity_seed}-none" ]] || {
@@ -151,11 +151,19 @@ log_mode=$(jq -er '.log_mode' "$config")
 evidence_format=$(jq -er '.evidence_format' "$config")
 config_sha256=$(sha256sum "$config" | awk '{print $1}')
 config_provenance_sha256=$(sha256sum "$config_provenance_manifest" | awk '{print $1}')
+capacity_attestation=$(v2_r2_capacity_attestation_path_for_config "$config" "$expected_gomaxprocs") || {
+	echo "registered cell $cell has no exact production capacity attestation identity" >&2
+	exit 1
+}
+capacity_probe_cell=$(v2_r2_capacity_probe_cell_for_config "$config" "$expected_gomaxprocs") || {
+	echo "registered cell $cell has no exact production capacity probe identity" >&2
+	exit 1
+}
 [[ "$evidence_format" == "evstream_v3" ]] || {
 	echo "registered successor cell requires evstream_v3 evidence (got $evidence_format)" >&2
 	exit 1
 }
-v2_r2_require_binary_capacity_attestation "$binary" "$sim_revision" "" "" 4 $((4 * 1024 * 1024 * 1024)) true "$config_sha256" || {
+v2_r2_require_binary_capacity_attestation "$binary" "$sim_revision" "$capacity_attestation" "$config_sha256" "$expected_gomaxprocs" $((4 * 1024 * 1024 * 1024)) true || {
 	echo "refusing long-run launch without a matching measured binary-evidence capacity attestation" >&2
 	exit 1
 }
@@ -200,6 +208,8 @@ jq -n \
 	--arg output_dir "$output" \
 	--arg evidence_manifest_path "$output/evidence-manifest.json" \
 	--arg external_attestation_path "$v2_r2_attestation_root/$cell.json" \
+	--arg capacity_attestation_path "$capacity_attestation" \
+	--arg capacity_probe_cell "$capacity_probe_cell" \
 	--argjson holdout "$holdout" \
 	--arg binary_path "$binary" \
 	--arg config_path "$config" \
@@ -232,6 +242,8 @@ jq -n \
 		  git_revision: $git_revision, go_version: $go_version, binary_go_version: $binary_go_version,
 		  binary_goos: $binary_goos, binary_goarch: $binary_goarch, binary_goamd64: $binary_goamd64,
 		  gomaxprocs: $gomaxprocs, output_dir: $output_dir,
+		  capacity_attestation_path: $capacity_attestation_path,
+		  capacity_probe_cell: $capacity_probe_cell,
 		  evidence_manifest_path: $evidence_manifest_path,
 		  external_attestation_path: $external_attestation_path,
 		  command: ["multivenue", "-config", "run-config.json", "-duration", $horizon, "-logdir", $output_dir, "-log-mode", $log_mode, "-evidence-format", $evidence_format],

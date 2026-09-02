@@ -40,10 +40,18 @@ jq -e --argjson expected_configs "$expected_files_json" \
 	--arg candidate "$v2_r2_sv1_candidate_id" \
 	'.schema_version == 1 and .contract == $provenance_contract and
 	 ($require_candidate == false or .candidate == $candidate) and
-	 (.source_configs | keys | sort) == $expected_sources and
-	 .activation_roster.path == $activation_path and
-	 (.registered_configs | keys | sort) == $expected_configs and
-	 ($require_generator == false or ((.generator.path | type) == "string" and (.generator.sha256 | test("^[0-9a-f]{64}$"))))' "$provenance_manifest" >/dev/null || fail "invalid config provenance manifest"
+		 (.source_configs | keys | sort) == $expected_sources and
+		 .activation_roster.path == $activation_path and
+		 (.registered_configs | keys | sort) == $expected_configs and
+		 ($require_generator == false or ((.generator.path | type) == "string" and (.generator.sha256 | test("^[0-9a-f]{64}$"))))' "$provenance_manifest" >/dev/null || fail "invalid config provenance manifest"
+if [[ "$v2_r2_sv1_require_generator_metadata" == true ]]; then
+	generator_path=$(jq -er '.generator.path | select(type == "string")' "$provenance_manifest") || fail "config provenance omits generator path"
+	[[ "$generator_path" == "scripts/render-v2-r2-sv1b-24h-configs.sh" ]] || fail "config provenance names an unexpected generator"
+	generator_file="$root_dir/$generator_path"
+	[[ -f "$generator_file" && ! -L "$generator_file" ]] || fail "config generator is missing or symlinked"
+	generator_sha=$(sha256sum "$generator_file" | awk '{print $1}')
+	[[ "$generator_sha" == "$(jq -er '.generator.sha256' "$provenance_manifest")" ]] || fail "config generator hash mismatch"
+fi
 if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1B-* ]]; then
 	withdrawal_measurement_path=$(jq -er '.withdrawal_measurement.path' "$provenance_manifest") || fail "SV1B provenance omits withdrawal measurement amendment"
 	[[ "$withdrawal_measurement_path" == "research/v2-r2-sv1b-withdrawal-measurement-amendment-2026-09-02.md" ]] || fail "SV1B provenance names an unexpected withdrawal measurement amendment"
@@ -57,18 +65,36 @@ if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1B-* ]]; then
 	[[ -s "$diagnostics_file" && ! -L "$diagnostics_file" ]] || fail "missing activation diagnostic amendment"
 	diagnostics_sha=$(sha256sum "$diagnostics_file" | awk '{print $1}')
 	[[ "$diagnostics_sha" == "$(jq -er '.activation_diagnostics.sha256' "$provenance_manifest")" ]] || fail "activation diagnostic amendment hash mismatch"
-	measurement_config_path="${v2_r2_sv1_capacity_measurement_config#"$root_dir/"}"
-	launch_config_path="${v2_r2_sv1_capacity_launch_config#"$root_dir/"}"
-	jq -e --arg measurement_config_path "$measurement_config_path" --arg launch_config_path "$launch_config_path" \
-		--arg probe_cell "$v2_r2_capacity_probe_cell" --arg contract "v2-integrated-longrun-r2-binary-capacity-v1" \
-		--argjson measurement_seed "$v2_r2_sv1_capacity_measurement_seed" \
-		'.capacity_calibration.calibration_only == true and
-		 .capacity_calibration.measurement_config_path == $measurement_config_path and
-		 .capacity_calibration.launch_config_path == $launch_config_path and
-		 .capacity_calibration.measurement_seed == $measurement_seed and
-		 .capacity_calibration.probe_cell == $probe_cell and
-		 .capacity_calibration.contract == $contract' "$provenance_manifest" >/dev/null ||
-		fail "SV1B capacity calibration provenance does not match the registered dedicated workload"
+	preregistration_path=$(jq -er '.preregistration.path | select(type == "string")' "$provenance_manifest") || fail "SV1B provenance omits preregistration"
+	[[ "$preregistration_path" == "research/v2-r2-sv1b-cdf-successor-preregistration-2026-09-02.md" ]] || fail "SV1B provenance names an unexpected preregistration"
+	preregistration_file="$root_dir/$preregistration_path"
+	[[ -s "$preregistration_file" && ! -L "$preregistration_file" ]] || fail "missing SV1B preregistration"
+	preregistration_sha=$(sha256sum "$preregistration_file" | awk '{print $1}')
+	[[ "$preregistration_sha" == "$(jq -er '.preregistration.sha256' "$provenance_manifest")" ]] || fail "SV1B preregistration hash mismatch"
+	capacity_cases='[]'
+	capacity_case_names=(control-643-none.json control-643.json control-647.json control-653.json treatment-643.json treatment-647.json treatment-653.json)
+	for config_name in "${capacity_case_names[@]}"; do
+		capacity_config="$config_dir/$config_name"
+		capacity_seed=$(jq -er '.seed' "$capacity_config") || fail "capacity case config has no seed: $config_name"
+		capacity_attestation_path=$(v2_r2_capacity_attestation_path_for_config "$capacity_config" 4) || fail "capacity case has no G4 attestation identity: $config_name"
+		capacity_probe_cell=$(v2_r2_capacity_probe_cell_for_config "$capacity_config" 4) || fail "capacity case has no G4 probe identity: $config_name"
+		capacity_case=$(jq -cn --arg config_path "${capacity_config#"$root_dir/"}" --arg config_sha256 "$(sha256sum "$capacity_config" | awk '{print $1}')" \
+			--arg attestation_path "$capacity_attestation_path" --arg probe_cell "$capacity_probe_cell" --argjson seed "$capacity_seed" \
+			'{config_path:$config_path,config_sha256:$config_sha256,measurement_seed:$seed,gomaxprocs:4,attestation_path:$attestation_path,probe_cell:$probe_cell}')
+		capacity_cases=$(jq -c --argjson case "$capacity_case" '. + [$case]' <<<"$capacity_cases")
+	done
+	capacity_config="$config_dir/treatment-643.json"
+	capacity_attestation_path=$(v2_r2_capacity_attestation_path_for_config "$capacity_config" 8) || fail "capacity case has no G8 attestation identity"
+	capacity_probe_cell=$(v2_r2_capacity_probe_cell_for_config "$capacity_config" 8) || fail "capacity case has no G8 probe identity"
+	capacity_case=$(jq -cn --arg config_path "${capacity_config#"$root_dir/"}" --arg config_sha256 "$(sha256sum "$capacity_config" | awk '{print $1}')" \
+		--arg attestation_path "$capacity_attestation_path" --arg probe_cell "$capacity_probe_cell" \
+		'{config_path:$config_path,config_sha256:$config_sha256,measurement_seed:643,gomaxprocs:8,attestation_path:$attestation_path,probe_cell:$probe_cell}')
+	capacity_cases=$(jq -c --argjson case "$capacity_case" '. + [$case]' <<<"$capacity_cases")
+	jq -e --arg contract "v2-r2-sv1b-24h-binary-capacity-v2" --argjson cases "$capacity_cases" \
+		'.capacity_calibration.contract == $contract and .capacity_calibration.mode == "exact_registered_production_configs" and
+		 .capacity_calibration.calibration_only == false and .capacity_calibration.minimum_free_bytes == 4294967296 and
+		 .capacity_calibration.safety_margin_bytes == 4294967296 and .capacity_calibration.measurement_cases == $cases' \
+		"$provenance_manifest" >/dev/null || fail "SV1B capacity provenance does not enumerate every exact production workload"
 fi
 source_dir="$root_dir/research/configs/v2-integrated-longrun-r2"
 while IFS=$'\t' read -r relative expected_sha; do

@@ -8,6 +8,7 @@ root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 config_dir="$root_dir/research/configs/v2-r2-sv1b-24h"
 source_dir="$root_dir/research/configs/v2-integrated-longrun-r2"
 activation_config="$root_dir/research/configs/v2-r2-sv1b/activation-643.json"
+source "$root_dir/scripts/v2-r2-sv1b-24h-contract.sh"
 normalizer=${V2_R2_SV1B_CONFIG_NORMALIZER_BIN:-"$root_dir/bin/multivenue"}
 candidate="V2-R2-SV1B-24H-CDF-LIQUIDITY"
 control_hypothesis="V2-R2-SV1B-24H-CDF-LIQUIDITY-CONTROL"
@@ -95,7 +96,35 @@ no_log_source_hash=$(sha256sum "$source_dir/dev-607-none.json" | awk '{print $1}
 roster_hash=$(sha256sum "$activation_config" | awk '{print $1}')
 generator_hash=$(sha256sum "$root_dir/scripts/render-v2-r2-sv1b-24h-configs.sh" | awk '{print $1}')
 withdrawal_measurement_hash=$(sha256sum "$withdrawal_measurement_file" | awk '{print $1}')
+preregistration_path="research/v2-r2-sv1b-cdf-successor-preregistration-2026-09-02.md"
+preregistration_file="$root_dir/$preregistration_path"
+[[ -s "$preregistration_file" && ! -L "$preregistration_file" ]] || {
+	echo "missing SV1B preregistration: $preregistration_file" >&2
+	exit 1
+}
+preregistration_hash=$(sha256sum "$preregistration_file" | awk '{print $1}')
 registered_configs=$(for path in "$config_dir"/*.json; do printf '%s\t%s\n' "$(basename -- "$path")" "$(sha256sum -- "$path" | awk '{print $1}')"; done | jq -Rn '[inputs | split("\t") | {(.[0]): .[1]}] | add')
+capacity_case_names=(control-643-none.json control-643.json control-647.json control-653.json treatment-643.json treatment-647.json treatment-653.json)
+capacity_cases='[]'
+for config_name in "${capacity_case_names[@]}"; do
+	config_path="$config_dir/$config_name"
+	seed=$(jq -er '.seed' "$config_path")
+	for gomaxprocs in 4; do
+		attestation_path=$(v2_r2_capacity_attestation_path_for_config "$config_path" "$gomaxprocs")
+		probe_cell=$(v2_r2_capacity_probe_cell_for_config "$config_path" "$gomaxprocs")
+		capacity_case=$(jq -cn --arg config_path "${config_path#"$root_dir/"}" --arg config_sha256 "$(sha256sum "$config_path" | awk '{print $1}')" \
+			--arg attestation_path "$attestation_path" --arg probe_cell "$probe_cell" --argjson seed "$seed" --argjson gomaxprocs "$gomaxprocs" \
+			'{config_path:$config_path,config_sha256:$config_sha256,measurement_seed:$seed,gomaxprocs:$gomaxprocs,attestation_path:$attestation_path,probe_cell:$probe_cell}')
+		capacity_cases=$(jq -c --argjson case "$capacity_case" '. + [$case]' <<<"$capacity_cases")
+	done
+done
+config_path="$config_dir/treatment-643.json"
+attestation_path=$(v2_r2_capacity_attestation_path_for_config "$config_path" 8)
+probe_cell=$(v2_r2_capacity_probe_cell_for_config "$config_path" 8)
+capacity_case=$(jq -cn --arg config_path "${config_path#"$root_dir/"}" --arg config_sha256 "$(sha256sum "$config_path" | awk '{print $1}')" \
+	--arg attestation_path "$attestation_path" --arg probe_cell "$probe_cell" \
+	'{config_path:$config_path,config_sha256:$config_sha256,measurement_seed:643,gomaxprocs:8,attestation_path:$attestation_path,probe_cell:$probe_cell}')
+capacity_cases=$(jq -c --argjson case "$capacity_case" '. + [$case]' <<<"$capacity_cases")
 jq -n \
 	--arg candidate "$candidate" \
 	--arg source_hash "$source_hash" \
@@ -106,7 +135,10 @@ jq -n \
 	--arg generator_hash "$generator_hash" \
 	--arg withdrawal_measurement_path "$withdrawal_measurement_path" \
 	--arg withdrawal_measurement_hash "$withdrawal_measurement_hash" \
+	--arg preregistration_path "$preregistration_path" \
+	--arg preregistration_hash "$preregistration_hash" \
 	--argjson registered_configs "$registered_configs" \
+	--argjson capacity_cases "$capacity_cases" \
 	'{schema_version: 1,
 	 contract: "v2-r2-sv1b-24h-config-provenance-v3",
 	 candidate: $candidate,
@@ -126,6 +158,15 @@ jq -n \
 	 },
 	 generator: {path: $generator_path, sha256: $generator_hash},
 	 withdrawal_measurement: {path: $withdrawal_measurement_path, sha256: $withdrawal_measurement_hash},
+	 preregistration: {path: $preregistration_path, sha256: $preregistration_hash},
+	 capacity_calibration: {
+		 contract: "v2-r2-sv1b-24h-binary-capacity-v2",
+		 mode: "exact_registered_production_configs",
+		 calibration_only: false,
+		 minimum_free_bytes: 4294967296,
+		 safety_margin_bytes: 4294967296,
+		 measurement_cases: $capacity_cases
+	 },
 	 holdout_policy: "development generator and checker never read or create holdout 619/631/641"
 	}' >"$provenance"
 

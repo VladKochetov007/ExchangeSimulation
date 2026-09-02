@@ -192,6 +192,19 @@ v2_r2_capacity_attestation_path() {
 	printf '%s\n' '/home/vlad/v2-integrated-longrun-r2-binary-capacity-v1.json'
 }
 
+# Successor namespaces may bind capacity evidence to each registered
+# production configuration and process width. Historical namespaces retain the
+# single attestation identity above.
+v2_r2_capacity_attestation_path_for_config() {
+	[[ $# -eq 2 ]] || return 1
+	v2_r2_capacity_attestation_path
+}
+
+v2_r2_capacity_probe_cell_for_config() {
+	[[ $# -eq 2 ]] || return 1
+	printf '%s\n' "${v2_r2_capacity_probe_cell:-treatment-607}"
+}
+
 v2_r2_require_binary_capacity_attestation() {
 	local binary=$1 source_revision=$2 attestation=${3:-$(v2_r2_capacity_attestation_path)}
 	# Successor callers may bind the measured configuration, process width, and
@@ -200,7 +213,8 @@ v2_r2_require_binary_capacity_attestation() {
 	local expected_config_sha256=${4:-} expected_gomaxprocs=${5:-} expected_minimum_free_bytes=${6:-}
 	local expected_launch_config_sha256=${8:-}
 	local require_live_free_capacity=${7:-true}
-	local expected_binary_sha available_kb required_bytes peak_bytes safety_bytes
+	local expected_binary_sha available_kb required_bytes peak_bytes safety_bytes capacity_contract
+	capacity_contract=${v2_r2_sv1_capacity_attestation_contract:-v2-integrated-longrun-r2-binary-capacity-v1}
 	[[ -s "$attestation" && ! -L "$attestation" ]] || return 1
 	expected_binary_sha=$(sha256sum -- "$binary" | awk '{print $1}') || return 1
 	peak_bytes=$(jq -er '.peak_output_bytes' "$attestation") || return 1
@@ -209,8 +223,8 @@ v2_r2_require_binary_capacity_attestation() {
 	[[ "$peak_bytes" =~ ^[0-9]+$ && "$safety_bytes" =~ ^[0-9]+$ && "$required_bytes" =~ ^[0-9]+$ ]] || return 1
 	[[ "$safety_bytes" -ge $((2 * 1024 * 1024 * 1024)) ]] || return 1
 	[[ "$required_bytes" == $((peak_bytes + safety_bytes)) ]] || return 1
-	jq -e --arg source_revision "$source_revision" --arg binary_sha256 "$expected_binary_sha" \
-		'.schema_version == 1 and .contract == "v2-integrated-longrun-r2-binary-capacity-v1" and
+	jq -e --arg source_revision "$source_revision" --arg binary_sha256 "$expected_binary_sha" --arg contract "$capacity_contract" \
+		'.schema_version == 1 and .contract == $contract and
 			 .measurement == "full_24h_binary_evidence_capacity_probe" and
 			 .evidence_format == "evstream_v3" and .source_revision == $source_revision and
 			 .binary_sha256 == $binary_sha256 and
@@ -236,15 +250,26 @@ v2_r2_require_binary_capacity_attestation() {
 			 .available_free_bytes >= (.peak_output_bytes + .safety_margin_bytes) and
 			 (.evidence_manifest_sha256 | type) == "string" and (.evidence_manifest_sha256 | test("^[0-9a-f]{64}$"))' \
 			"$attestation" >/dev/null || return 1
-		local probe_root probe_cell actual_manifest_sha256
+		local probe_root probe_cell actual_manifest_sha256 measurement_config_path measured_log_mode
 		probe_root=$(jq -er '.probe_root | select(type == "string")' "$attestation") || return 1
 		[[ "$probe_root" == /* && "$probe_root" != */ && "$probe_root" != *$'\n'* && "$probe_root" != *$'\t'* ]] || return 1
 		[[ -d "$probe_root" && ! -L "$probe_root" ]] || return 1
 		[[ "$(realpath -e -- "$probe_root")" == "$probe_root" ]] || return 1
-			probe_cell="$probe_root/${v2_r2_capacity_probe_cell:-treatment-607}"
+		measurement_config_path=$(jq -er '.measurement_config_path | select(type == "string" and length > 0)' "$attestation") || return 1
+		probe_cell=$(v2_r2_capacity_probe_cell_for_config "$measurement_config_path" "$expected_gomaxprocs") || return 1
 		[[ -d "$probe_cell" && ! -L "$probe_cell" ]] || return 1
-		for retained in run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl \
-			events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json evidence-manifest.json; do
+		measured_log_mode=$(jq -er '.log_mode | select(. == "full" or . == "none")' "$probe_cell/run-config.json") || return 1
+		local retained_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl \
+			events.evs binary-evidence-attestation.json evidence-manifest.json)
+		if [[ "$measured_log_mode" == full ]]; then
+			retained_files+=(evidence-only-artifact-hash.json)
+		else
+			[[ ! -e "$probe_cell/evidence-only-artifact-hash.json" && ! -L "$probe_cell/evidence-only-artifact-hash.json" ]] || return 1
+		fi
+		if [[ "${v2_r2_sv1_require_terminal_outcome:-false}" == true ]]; then
+			retained_files+=(terminal-outcome.json)
+		fi
+		for retained in "${retained_files[@]}"; do
 			[[ -s "$probe_cell/$retained" && ! -L "$probe_cell/$retained" ]] || return 1
 		done
 		actual_manifest_sha256=$(sha256sum -- "$probe_cell/evidence-manifest.json" | awk '{print $1}') || return 1

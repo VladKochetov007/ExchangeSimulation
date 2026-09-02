@@ -40,7 +40,7 @@
   },
   "generator": {
     "path": "scripts/render-v2-r2-sv1b-24h-configs.sh",
-    "sha256": "8daae10ae24aafa051db81e1f77a8e9c3178dc061404d7aaa8e1c228f04e18dd"
+    "sha256": "3cf6e670392435e9bf74be8e8b1f886fb4c3fbd92f25f75b7ceb0d74f6266e98"
   },
   "withdrawal_measurement": {
     "path": "research/v2-r2-sv1b-withdrawal-measurement-amendment-2026-09-02.md",
@@ -50,13 +50,82 @@
     "path": "research/v2-r2-sv1b-activation-diagnostics-amendment-2026-09-02.md",
     "sha256": "655846a58b1371632809481d00af656dc531a599bd023403ab558b68bcd1f892"
   },
+  "preregistration": {
+    "path": "research/v2-r2-sv1b-cdf-successor-preregistration-2026-09-02.md",
+    "sha256": "e8c31ff47c7cfbd8227a8c7edec1e062b9317a948b1a80da071cab3e9c159026"
+  },
   "capacity_calibration": {
-    "measurement_config_path": "research/configs/v2-r2-sv1b/activation-643.json",
-    "measurement_seed": 643,
-    "launch_config_path": "research/configs/v2-r2-sv1b-24h/treatment-643.json",
-    "probe_cell": "capacity-activation-643",
-    "contract": "v2-integrated-longrun-r2-binary-capacity-v1",
-    "calibration_only": true
+    "contract": "v2-r2-sv1b-24h-binary-capacity-v2",
+    "mode": "exact_registered_production_configs",
+    "calibration_only": false,
+    "minimum_free_bytes": 4294967296,
+    "safety_margin_bytes": 4294967296,
+    "measurement_cases": [
+      {
+        "config_path": "research/configs/v2-r2-sv1b-24h/control-643-none.json",
+        "config_sha256": "1bb69ef8ccbf8b627e469c626dbd8298de88ce58962fa87a9b38ef5169ce5580",
+        "measurement_seed": 643,
+        "gomaxprocs": 4,
+        "attestation_path": "/home/vlad/v2-r2-sv1b-24h-binary-capacity-20260902-v2-control-643-none-g4.json",
+        "probe_cell": "capacity-control-643-none-g4"
+      },
+      {
+        "config_path": "research/configs/v2-r2-sv1b-24h/control-643.json",
+        "config_sha256": "e59f8dc95e762fc34411eab6179b816a7337257a4ad24ab72ba909931b099c6a",
+        "measurement_seed": 643,
+        "gomaxprocs": 4,
+        "attestation_path": "/home/vlad/v2-r2-sv1b-24h-binary-capacity-20260902-v2-control-643-g4.json",
+        "probe_cell": "capacity-control-643-g4"
+      },
+      {
+        "config_path": "research/configs/v2-r2-sv1b-24h/control-647.json",
+        "config_sha256": "7b6438398f8a874172d25406c168a711f513ad3e5a99a9f740054437dd19f09e",
+        "measurement_seed": 647,
+        "gomaxprocs": 4,
+        "attestation_path": "/home/vlad/v2-r2-sv1b-24h-binary-capacity-20260902-v2-control-647-g4.json",
+        "probe_cell": "capacity-control-647-g4"
+      },
+      {
+        "config_path": "research/configs/v2-r2-sv1b-24h/control-653.json",
+        "config_sha256": "121b4a2ce93f30234ffd8a44c1e6dd4e6437990e503f1a6309949554bb1a3c30",
+        "measurement_seed": 653,
+        "gomaxprocs": 4,
+        "attestation_path": "/home/vlad/v2-r2-sv1b-24h-binary-capacity-20260902-v2-control-653-g4.json",
+        "probe_cell": "capacity-control-653-g4"
+      },
+      {
+        "config_path": "research/configs/v2-r2-sv1b-24h/treatment-643.json",
+        "config_sha256": "309a5fddaf0eec99970932b6ddfc8699e3f5bf7873fc9227653b3b54d715dd21",
+        "measurement_seed": 643,
+        "gomaxprocs": 4,
+        "attestation_path": "/home/vlad/v2-r2-sv1b-24h-binary-capacity-20260902-v2-treatment-643-g4.json",
+        "probe_cell": "capacity-treatment-643-g4"
+      },
+      {
+        "config_path": "research/configs/v2-r2-sv1b-24h/treatment-647.json",
+        "config_sha256": "2baaf8429cdb41d2146bc15a1f2788f8b329a3509f7e46f554fe29e5c663c4c9",
+        "measurement_seed": 647,
+        "gomaxprocs": 4,
+        "attestation_path": "/home/vlad/v2-r2-sv1b-24h-binary-capacity-20260902-v2-treatment-647-g4.json",
+        "probe_cell": "capacity-treatment-647-g4"
+      },
+      {
+        "config_path": "research/configs/v2-r2-sv1b-24h/treatment-653.json",
+        "config_sha256": "639cf9adadb0c623854b097fd7159571069a2bb0483f9927ae4da1b1613c17b9",
+        "measurement_seed": 653,
+        "gomaxprocs": 4,
+        "attestation_path": "/home/vlad/v2-r2-sv1b-24h-binary-capacity-20260902-v2-treatment-653-g4.json",
+        "probe_cell": "capacity-treatment-653-g4"
+      },
+      {
+        "config_path": "research/configs/v2-r2-sv1b-24h/treatment-643.json",
+        "config_sha256": "309a5fddaf0eec99970932b6ddfc8699e3f5bf7873fc9227653b3b54d715dd21",
+        "measurement_seed": 643,
+        "gomaxprocs": 8,
+        "attestation_path": "/home/vlad/v2-r2-sv1b-24h-binary-capacity-20260902-v2-treatment-643-g8.json",
+        "probe_cell": "capacity-treatment-643-g8"
+      }
+    ]
   },
   "holdout_policy": "development generator and checker never read or create holdout 619/631/641"
 }
