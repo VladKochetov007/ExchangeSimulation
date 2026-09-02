@@ -54,6 +54,29 @@ v2_r2_require_cdf_supplier_activation() {
 			.min_position != .max_position and .inventory_responsive_decision_count > 0 and
 			.max_observation_age_ns > 0 and .max_borrowed == 0 and .borrow_event_count == 0 and
 			.max_position <= .configured_max_position and
-			.max_position >= (-.configured_max_position) and
+			.min_position >= (-.configured_max_position) and
 			.max_quote_qty <= .configured_max_quote_qty)' "$audit_path" >/dev/null
+}
+
+# A paired control intentionally has no CDF supplier roster. Its typed audit
+# must still be valid and prove that no supplier activity was smuggled into the
+# control through role discovery or stale event routing. This is a population
+# contract, not an activation predicate: a valid control reports
+# cdf_liquidity_activation_observed=false in activation.json.
+v2_r2_require_cdf_supplier_control() {
+	local audit_path=$1
+	[[ -s "$audit_path" ]] || return 1
+	jq -e '
+		type == "object" and (.result | type) == "object" and
+		.result.valid == true and .result.supplier_count == 0 and
+		.result.decision_count == 0 and .result.fill_count == 0 and
+		.result.trading_supplier_count == 0 and
+		.result.pnl_changing_supplier_count == 0 and
+		.result.inventory_responsive_decision_count == 0 and
+		.result.cancel_count == 0 and .result.withdraw_count == 0 and
+		.result.max_borrowed == 0 and
+		(.result.checks | type) == "array" and (.result.checks | length) == 0 and
+		(.result.venues | type) == "array" and (.result.venues | length) == 3 and
+		(.result.suppliers | type) == "array" and (.result.suppliers | length) == 0
+	' "$audit_path" >/dev/null
 }

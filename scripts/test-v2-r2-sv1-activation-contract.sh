@@ -50,6 +50,11 @@ v2_r2_require_cdf_supplier_activation "$cdf_audit_fixture" 2 || {
 	echo "valid CDF activity without borrowing was rejected" >&2
 	exit 1
 }
+jq '.result.suppliers[0].min_position = -3' "$cdf_audit_fixture" >"$temp_root/negative-inventory.json"
+if v2_r2_require_cdf_supplier_activation "$temp_root/negative-inventory.json" 2; then
+	echo "supplier below its configured lower inventory bound was accepted" >&2
+	exit 1
+fi
 if jq '.result.suppliers[0].borrow_event_count = 1' "$cdf_audit_fixture" >"$temp_root/borrowed.json" &&
 	v2_r2_require_cdf_supplier_activation "$temp_root/borrowed.json" 2; then
 	echo "unregistered CDF borrowing was accepted" >&2
@@ -58,6 +63,29 @@ fi
 if jq '.result.pnl_changing_supplier_count = 0' "$cdf_audit_fixture" >"$temp_root/no-pnl.json" &&
 	v2_r2_require_cdf_supplier_activation "$temp_root/no-pnl.json" 2; then
 	echo "non-PnL CDF activity was accepted" >&2
+	exit 1
+fi
+
+jq -n ' {
+		run: "control-fixture",
+		result: {
+			valid: true, supplier_count: 0, decision_count: 0, fill_count: 0,
+			trading_supplier_count: 0, pnl_changing_supplier_count: 0,
+			inventory_responsive_decision_count: 0, cancel_count: 0, withdraw_count: 0,
+			max_borrowed: 0, checks: [], venues: [
+				{supplier_depth_over_75_fraction: 0},
+				{supplier_depth_over_75_fraction: 0},
+				{supplier_depth_over_75_fraction: 0}
+			], suppliers: []
+		}
+	}' >"$temp_root/control-cdfliquidity.json"
+v2_r2_require_cdf_supplier_control "$temp_root/control-cdfliquidity.json" || {
+	echo "valid no-CDF control audit was rejected" >&2
+	exit 1
+}
+if jq '.result.supplier_count = 1' "$temp_root/control-cdfliquidity.json" >"$temp_root/control-with-supplier.json" &&
+	v2_r2_require_cdf_supplier_control "$temp_root/control-with-supplier.json"; then
+	echo "CDF activity was accepted in a no-CDF control" >&2
 	exit 1
 fi
 
