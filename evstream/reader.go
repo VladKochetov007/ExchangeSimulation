@@ -42,7 +42,20 @@ type ReaderOptions struct {
 	// HashFrame must match the writer's execution digest projection when
 	// VerifyHash is true. Nil hashes every canonical frame byte.
 	HashFrame FrameHasher
+	// MaxStoredBlockBytes bounds the stored payload allocated for one block.
+	// Zero uses DefaultMaxBlockBytes. A limit is checked from the fixed block
+	// header before the reader consumes payload bytes.
+	MaxStoredBlockBytes int
+	// MaxUncompressedBlockBytes bounds the decoded block allocated for one
+	// block. Zero uses DefaultMaxBlockBytes.
+	MaxUncompressedBlockBytes int
 }
+
+// DefaultMaxBlockBytes is the fail-closed per-block allocation bound used by
+// readers and indexed readers. It is deliberately larger than the writer's
+// default target while keeping malformed evidence from requesting GiB-scale
+// allocations from a 32-bit length field.
+const DefaultMaxBlockBytes = 64 << 20
 
 // Reader walks a stream, verifying structure as it goes.
 //
@@ -56,32 +69,47 @@ type Reader struct {
 	codec        Codec
 	epoch        uint32
 
-	block             []byte
-	stored            []byte
-	blockHdr          [BlockHeaderSize]byte
-	dict              *Dictionary
-	lastSeq           uint64
-	verify            bool
-	rolling           [sha256.Size]byte
-	hasher            hash.Hash
-	rawHash           hash.Hash
-	frames            uint64
-	blockFrames       uint32
-	streamHdr         bool
-	terminated        bool
-	allowUnterminated bool
-	hashFrame         FrameHasher
+	block                []byte
+	stored               []byte
+	blockHdr             [BlockHeaderSize]byte
+	dict                 *Dictionary
+	lastSeq              uint64
+	verify               bool
+	rolling              [sha256.Size]byte
+	hasher               hash.Hash
+	rawHash              hash.Hash
+	frames               uint64
+	blockFrames          uint32
+	streamHdr            bool
+	terminated           bool
+	allowUnterminated    bool
+	hashFrame            FrameHasher
+	maxStoredBytes       int
+	maxUncompressedBytes int
 }
 
 // NewReader validates the stream header and prepares to read blocks.
 func NewReader(in io.Reader, opts ReaderOptions) (*Reader, error) {
+	maxStoredBytes := opts.MaxStoredBlockBytes
+	if maxStoredBytes == 0 {
+		maxStoredBytes = DefaultMaxBlockBytes
+	}
+	maxUncompressedBytes := opts.MaxUncompressedBlockBytes
+	if maxUncompressedBytes == 0 {
+		maxUncompressedBytes = DefaultMaxBlockBytes
+	}
+	if maxStoredBytes < 0 || maxUncompressedBytes < 0 {
+		return nil, fmt.Errorf("evstream: block limits must not be negative")
+	}
 	r := &Reader{
-		in:                in,
-		decompressor:      opts.Decompressor,
-		dict:              NewDictionary(),
-		verify:            opts.VerifyHash,
-		allowUnterminated: opts.AllowUnterminated,
-		hashFrame:         opts.HashFrame,
+		in:                   in,
+		decompressor:         opts.Decompressor,
+		dict:                 NewDictionary(),
+		verify:               opts.VerifyHash,
+		allowUnterminated:    opts.AllowUnterminated,
+		hashFrame:            opts.HashFrame,
+		maxStoredBytes:       maxStoredBytes,
+		maxUncompressedBytes: maxUncompressedBytes,
 	}
 	if opts.VerifyHash {
 		r.hasher = sha256.New()
@@ -192,14 +220,19 @@ func (r *Reader) nextBlock() (bool, error) {
 		}
 		return false, fmt.Errorf("%w: block magic", ErrCorrupt)
 	}
-	uncompressedLen := int(binary.LittleEndian.Uint32(r.blockHdr[4:8]))
-	storedLen := int(binary.LittleEndian.Uint32(r.blockHdr[8:12]))
+	uncompressedLen64 := uint64(binary.LittleEndian.Uint32(r.blockHdr[4:8]))
+	storedLen64 := uint64(binary.LittleEndian.Uint32(r.blockHdr[8:12]))
 	wantFrames := binary.LittleEndian.Uint32(r.blockHdr[12:16])
 	wantCRC := binary.LittleEndian.Uint32(r.blockHdr[16:20])
 
-	if uncompressedLen < 0 || storedLen < 0 {
-		return false, fmt.Errorf("%w: negative block length", ErrCorrupt)
+	if uncompressedLen64 > uint64(r.maxUncompressedBytes) {
+		return false, fmt.Errorf("%w: uncompressed block length %d exceeds limit %d", ErrCorrupt, uncompressedLen64, r.maxUncompressedBytes)
 	}
+	if storedLen64 > uint64(r.maxStoredBytes) {
+		return false, fmt.Errorf("%w: stored block length %d exceeds limit %d", ErrCorrupt, storedLen64, r.maxStoredBytes)
+	}
+	uncompressedLen := int(uncompressedLen64)
+	storedLen := int(storedLen64)
 	r.stored = growTo(r.stored, storedLen)
 	if _, err := io.ReadFull(r.in, r.stored[:storedLen]); err != nil {
 		return false, ErrShortBuffer

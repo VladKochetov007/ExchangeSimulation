@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // LiabilityHedgerAudit independently reconstructs V2-4 L0's stated delivery
@@ -1227,15 +1228,17 @@ func liabilityHedgerEvidence(dir string) (map[liabilityHedgerReceiptKey][]liabil
 }
 
 func liabilityHedgerActorFiles(r *Run, venueIDs []string) []string {
-	available := make(map[string]struct{}, len(r.files))
-	for _, path := range r.files {
-		available[path] = struct{}{}
-	}
 	files := make([]string, 0, len(venueIDs))
 	for _, venueID := range venueIDs {
-		path := filepath.Join(r.Dir, "venues", venueID, "general.jsonl")
-		if _, ok := available[path]; ok {
-			files = append(files, path)
+		canonical := filepath.Join(r.Dir, "venues", venueID, "general.jsonl")
+		matches := make([]string, 0, 1)
+		for _, path := range r.files {
+			if strings.TrimSuffix(path, ".zst") == canonical {
+				matches = append(matches, path)
+			}
+		}
+		if len(matches) == 1 {
+			files = append(files, matches[0])
 		}
 	}
 	sort.Strings(files)
@@ -1260,10 +1263,10 @@ func liabilityHedgerBookFiles(r *Run, venueIDs []string) []string {
 func liabilityHedgerHasCanonicalBookFile(r *Run, venueID string) bool {
 	canonical := filepath.Join(r.Dir, "venues", venueID, "spot", "CDF-USD.jsonl")
 	matches := r.BookFiles(venueID, "CDF-USD")
-	if len(matches) != 1 || matches[0] != canonical {
+	if len(matches) != 1 || strings.TrimSuffix(matches[0], ".zst") != canonical {
 		return false
 	}
-	info, err := os.Lstat(canonical)
+	info, err := os.Lstat(matches[0])
 	return err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0
 }
 

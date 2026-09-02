@@ -290,7 +290,7 @@ func (w *Writer) ensureHeader() error {
 	}
 	header[12] = byte(codec)
 	binary.LittleEndian.PutUint32(header[16:20], w.epoch)
-	if _, err := w.out.Write(header[:]); err != nil {
+	if _, err := writeExact(w.out, header[:]); err != nil {
 		w.err = err
 		return err
 	}
@@ -326,11 +326,11 @@ func (w *Writer) flushBlock() error {
 	// the compressor's output, and holds whatever codec was used.
 	binary.LittleEndian.PutUint32(header[16:20], crc32.Checksum(uncompressed, crcTable))
 
-	if _, err := w.out.Write(header[:]); err != nil {
+	if _, err := writeExact(w.out, header[:]); err != nil {
 		w.err = err
 		return err
 	}
-	if _, err := w.out.Write(stored); err != nil {
+	if _, err := writeExact(w.out, stored); err != nil {
 		w.err = err
 		return err
 	}
@@ -374,15 +374,23 @@ func (w *Writer) Close() error {
 	trailer = AppendUint32(trailer, TrailerMagic)
 	trailer = AppendUint64(trailer, w.seq)
 	trailer = append(trailer, digest[:]...)
-	if n, err := w.out.Write(trailer); err != nil {
+	if _, err := writeExact(w.out, trailer); err != nil {
 		w.err = err
 		return err
-	} else if n != len(trailer) {
-		w.err = io.ErrShortWrite
-		return w.err
 	}
 	w.closed = true
 	return nil
+}
+
+func writeExact(out io.Writer, data []byte) (int, error) {
+	n, err := out.Write(data)
+	if err != nil {
+		return n, err
+	}
+	if n != len(data) {
+		return n, io.ErrShortWrite
+	}
+	return n, nil
 }
 
 // ExecutionHash returns the digest over every frame written so far.

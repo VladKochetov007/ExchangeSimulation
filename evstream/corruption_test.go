@@ -2,8 +2,10 @@ package evstream_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"hash"
+	"io"
 	"testing"
 
 	"exchange_sim/evstream"
@@ -23,6 +25,146 @@ func (markerProbe) SchemaID() uint16      { return evstream.FirstUserSchema }
 func (markerProbe) SchemaVersion() uint16 { return 1 }
 func (p markerProbe) AppendPayload(dst []byte) []byte {
 	return append(dst, p.marker)
+}
+
+type countingReader struct {
+	*bytes.Reader
+	bytesRead int
+}
+
+func (r *countingReader) Read(dst []byte) (int, error) {
+	read, err := r.Reader.Read(dst)
+	r.bytesRead += read
+	return read, err
+}
+
+func oversizedBlockHeader(t *testing.T, uncompressedLen, storedLen uint32) []byte {
+	t.Helper()
+	stream := make([]byte, evstream.StreamHeaderSize+evstream.BlockHeaderSize)
+	copy(stream[:8], evstream.Magic)
+	binary.LittleEndian.PutUint16(stream[8:10], evstream.FormatMajor)
+	binary.LittleEndian.PutUint32(stream[evstream.StreamHeaderSize:], evstream.BlockMagic)
+	binary.LittleEndian.PutUint32(stream[evstream.StreamHeaderSize+4:], uncompressedLen)
+	binary.LittleEndian.PutUint32(stream[evstream.StreamHeaderSize+8:], storedLen)
+	return stream
+}
+
+func TestReaderRejectsOversizedBlockBeforePayloadRead(t *testing.T) {
+	tooLarge := uint32(evstream.DefaultMaxBlockBytes + 1)
+	tests := []struct {
+		name            string
+		uncompressedLen uint32
+		storedLen       uint32
+		maxUncompressed int
+		maxStored       int
+	}{
+		{name: "uncompressed", uncompressedLen: tooLarge, storedLen: tooLarge},
+		{name: "stored", uncompressedLen: 1, storedLen: tooLarge},
+		{name: "configured-stored", uncompressedLen: 1, storedLen: 9, maxStored: 8, maxUncompressed: 8},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			input := oversizedBlockHeader(t, testCase.uncompressedLen, testCase.storedLen)
+			counting := &countingReader{Reader: bytes.NewReader(input)}
+			reader, err := evstream.NewReader(counting, evstream.ReaderOptions{
+				MaxStoredBlockBytes:       testCase.maxStored,
+				MaxUncompressedBlockBytes: testCase.maxUncompressed,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := reader.Range(func(evstream.Frame) error { return nil }); !errors.Is(err, evstream.ErrCorrupt) {
+				t.Fatalf("oversized block error = %v, want ErrCorrupt", err)
+			}
+			wantBytesRead := evstream.StreamHeaderSize + evstream.BlockHeaderSize
+			if counting.bytesRead != wantBytesRead {
+				t.Fatalf("reader consumed %d bytes before rejecting length, want %d", counting.bytesRead, wantBytesRead)
+			}
+		})
+	}
+}
+
+type countingReaderAt struct {
+	data  []byte
+	reads int
+}
+
+func (reader *countingReaderAt) ReadAt(dst []byte, offset int64) (int, error) {
+	reader.reads++
+	return copy(dst, reader.data[offset:]), nil
+}
+
+func TestIndexedReaderRejectsOversizedDescriptorBeforeRead(t *testing.T) {
+	source := &countingReaderAt{data: make([]byte, evstream.BlockHeaderSize)}
+	reader := evstream.NewIndexedReader(source, evstream.CodecNone, evstream.NewDictionary(), nil)
+	err := reader.RangeSelected([]evstream.BlockDescriptor{{StoredLen: uint32(evstream.DefaultMaxBlockBytes + 1)}}, evstream.Query{}, func(evstream.Frame) error {
+		return nil
+	})
+	if !errors.Is(err, evstream.ErrCorrupt) {
+		t.Fatalf("oversized indexed descriptor error = %v, want ErrCorrupt", err)
+	}
+	if source.reads != 0 {
+		t.Fatalf("indexed reader performed %d source reads before rejecting descriptor", source.reads)
+	}
+}
+
+func TestReadIndexRejectsOversizedDescriptorCountBeforeBodyRead(t *testing.T) {
+	header := make([]byte, 8)
+	binary.LittleEndian.PutUint32(header[0:4], evstream.IndexMagic)
+	maxDescriptors := uint32((evstream.DefaultMaxIndexBytes - 8) / evstream.BlockDescriptorSize)
+	binary.LittleEndian.PutUint32(header[4:8], maxDescriptors+1)
+	if _, err := evstream.ReadIndex(bytes.NewReader(header)); !errors.Is(err, evstream.ErrCorrupt) {
+		t.Fatalf("oversized index error = %v, want ErrCorrupt", err)
+	}
+}
+
+type shortWriteSink struct {
+	shortCall int
+	calls     int
+}
+
+func (sink *shortWriteSink) Write(data []byte) (int, error) {
+	sink.calls++
+	if sink.calls == sink.shortCall {
+		return len(data) - 1, nil
+	}
+	return len(data), nil
+}
+
+func TestWriterRejectsShortWrites(t *testing.T) {
+	for _, shortCall := range []int{1, 2, 3, 4} {
+		t.Run("write-"+string(rune('0'+shortCall)), func(t *testing.T) {
+			sink := &shortWriteSink{shortCall: shortCall}
+			writer := evstream.NewWriter(sink, evstream.WriterOptions{BlockBytes: 256})
+			appendErr := writer.Append(1, 1, 0, corruptionProbe{value: 1})
+			if shortCall == 1 {
+				if !errors.Is(appendErr, io.ErrShortWrite) {
+					t.Fatalf("append error = %v, want io.ErrShortWrite", appendErr)
+				}
+			} else if appendErr != nil {
+				t.Fatalf("append error = %v", appendErr)
+			}
+			closeErr := writer.Close()
+			if !errors.Is(closeErr, io.ErrShortWrite) {
+				t.Fatalf("close error = %v, want io.ErrShortWrite", closeErr)
+			}
+			if sink.calls < shortCall {
+				t.Fatalf("only %d writes reached, wanted short write call %d", sink.calls, shortCall)
+			}
+		})
+	}
+}
+
+func TestIndexWriteToRejectsShortWrite(t *testing.T) {
+	sink := &shortWriteSink{shortCall: 1}
+	index := evstream.Index{Blocks: []evstream.BlockDescriptor{{Offset: 32}}}
+	written, err := index.WriteTo(sink)
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("index write error = %v, want io.ErrShortWrite", err)
+	}
+	if want := int64(8 + evstream.BlockDescriptorSize - 1); written != want {
+		t.Fatalf("index reported %d bytes, want %d", written, want)
+	}
 }
 
 func hashIgnoringLastByte(digest hash.Hash, frame []byte) {

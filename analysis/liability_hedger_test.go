@@ -56,6 +56,43 @@ func TestLiabilityHedgerEventFilesExcludeUnrelatedBooks(t *testing.T) {
 	}
 }
 
+func TestLiabilityHedgerEventFilesSelectCompressedRoutes(t *testing.T) {
+	run := &Run{Dir: "/run", files: []string{
+		"/run/venues/north/general.jsonl.zst",
+		"/run/venues/north/spot/CDF-USD.jsonl.zst",
+		"/run/venues/north/spot/ABC-USD.jsonl.zst",
+		"/run/venues/south/general.jsonl.zst",
+	}}
+	got := liabilityHedgerEventFiles(run, []string{"north"})
+	want := []string{
+		"/run/venues/north/general.jsonl.zst",
+		"/run/venues/north/spot/CDF-USD.jsonl.zst",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("compressed liability event files = %v, want %v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("compressed liability event files = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestLiabilityHedgerCanonicalBookAcceptsCompressedRoute(t *testing.T) {
+	dir := t.TempDir()
+	bookPath := filepath.Join(dir, "venues", "north", "spot", "CDF-USD.jsonl.zst")
+	if err := os.MkdirAll(filepath.Dir(bookPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bookPath, []byte("compressed evidence placeholder"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := &Run{Dir: dir, files: []string{bookPath}}
+	if !liabilityHedgerHasCanonicalBookFile(run, "north") {
+		t.Fatalf("compressed canonical book route was rejected: %v", run.files)
+	}
+}
+
 func TestLiabilityHedgerAuditRejectsAdversarialLifecycleJoins(t *testing.T) {
 	tests := []struct {
 		name  string

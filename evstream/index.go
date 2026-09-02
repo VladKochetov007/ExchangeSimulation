@@ -44,6 +44,11 @@ type BlockDescriptor struct {
 // BlockDescriptorSize is fixed so an index is a flat array.
 const BlockDescriptorSize = 64
 
+// DefaultMaxIndexBytes bounds the body allocated while loading an index. An
+// index is auxiliary evidence, so a corrupt descriptor count must not be able
+// to turn a small sidecar into an unbounded allocation request.
+const DefaultMaxIndexBytes = 64 << 20
+
 // IndexMagic marks a persisted index.
 const IndexMagic uint32 = 0x58444945 // "EIDX"
 
@@ -223,7 +228,7 @@ func (ix *Index) WriteTo(w io.Writer) (int64, error) {
 	for _, block := range ix.Blocks {
 		buf = AppendDescriptor(buf, block)
 	}
-	n, err := w.Write(buf)
+	n, err := writeExact(w, buf)
 	return int64(n), err
 }
 
@@ -237,6 +242,10 @@ func ReadIndex(r io.Reader) (*Index, error) {
 		return nil, ErrBadMagic
 	}
 	count := binary.LittleEndian.Uint32(header[4:8])
+	maxDescriptors := uint64((DefaultMaxIndexBytes - 8) / BlockDescriptorSize)
+	if uint64(count) > maxDescriptors {
+		return nil, fmt.Errorf("%w: index descriptor count %d exceeds limit %d", ErrCorrupt, count, maxDescriptors)
+	}
 	body := make([]byte, int(count)*BlockDescriptorSize)
 	if _, err := io.ReadFull(r, body); err != nil {
 		return nil, ErrShortBuffer
@@ -370,6 +379,12 @@ func (r *IndexedReader) RangeSelected(blocks []BlockDescriptor, q Query, visit f
 }
 
 func (r *IndexedReader) readBlock(d BlockDescriptor) error {
+	if d.StoredLen > uint32(DefaultMaxBlockBytes) {
+		return fmt.Errorf("%w: indexed stored block length %d exceeds limit %d", ErrCorrupt, d.StoredLen, DefaultMaxBlockBytes)
+	}
+	if d.UncompressedLen > uint32(DefaultMaxBlockBytes) {
+		return fmt.Errorf("%w: indexed uncompressed block length %d exceeds limit %d", ErrCorrupt, d.UncompressedLen, DefaultMaxBlockBytes)
+	}
 	total := BlockHeaderSize + int(d.StoredLen)
 	r.stored = growTo(r.stored, total)
 	if _, err := r.source.ReadAt(r.stored[:total], int64(d.Offset)); err != nil {
