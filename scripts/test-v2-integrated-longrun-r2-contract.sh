@@ -86,6 +86,8 @@ for required_sv1_fragment in \
 		"$root_dir/scripts/verify-v2-integrated-longrun-r2-cell.sh" >/dev/null ||
 		fail "SV1 control-plane scripts are missing required fragment: $required_sv1_fragment"
 done
+rg -F -- "-name '*.bin'" "$root_dir/scripts/extract-v2-integrated-longrun-r2-cell.sh" >/dev/null ||
+	fail "SV1 extractor does not route instrumented binary sidecars into the rendered input namespace"
 
 left_manifest_dir="$tmp_root/ordered-left"
 right_manifest_dir="$tmp_root/ordered-right"

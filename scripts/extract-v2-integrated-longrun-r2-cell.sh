@@ -268,9 +268,11 @@ if [[ "$evidence_format" == "evstream_v3" ]]; then
 		'.event_frames == $event_frames and .execution_stream_hash == $execution_hash and
 		 (.routes | type) == "number" and .route_compression == $route_compression' \
 		<<<"$render_report" >/dev/null || fail "renderer report does not match binary attestation"
+	# Report-derived metrics also consume the immutable instrumented market-data
+	# sidecars. Link them into the rendered input namespace without copying them.
 	while IFS= read -r name; do
 		ln -s -- "$cell/$name" "$rendered_dir/$name"
-	done < <(find "$cell" -maxdepth 1 -type f \( -name '*.json' -o -name '*.jsonl' \) -printf '%f\n' | sort)
+	done < <(find "$cell" -maxdepth 1 -type f \( -name '*.json' -o -name '*.jsonl' -o -name '*.bin' \) -printf '%f\n' | sort)
 	analysis_input_dir="$rendered_dir"
 fi
 
