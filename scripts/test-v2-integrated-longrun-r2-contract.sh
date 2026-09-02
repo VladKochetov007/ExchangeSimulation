@@ -296,6 +296,19 @@ jq -n --argjson timeline "$expected_calendar_timeline" \
 	>"$calendar_fixture"
 v2_r2_require_calendar_listing_timeline "$calendar_fixture" ||
 	fail "registered first-listing timeline was rejected"
+jq '.result.venues[0].listing_timeline[0].option_first_listed_at_nano += 3000000000' \
+	"$calendar_fixture" >"$tmp_root/calendar-delayed-option.json"
+v2_r2_require_calendar_listing_timeline "$tmp_root/calendar-delayed-option.json" ||
+	fail "a price-gated option listing delay was rejected"
+jq '.result.venues[0].listing_timeline[0].option_first_listed_at_nano = 1735689600000000000' \
+	"$calendar_fixture" >"$tmp_root/calendar-option-before-due.json"
+expect_failure v2_r2_require_calendar_listing_timeline "$tmp_root/calendar-option-before-due.json"
+jq '.result.venues[0].listing_timeline[0].option_first_listed_at_nano = .result.venues[0].listing_timeline[0].expiry_nano' \
+	"$calendar_fixture" >"$tmp_root/calendar-option-at-expiry.json"
+expect_failure v2_r2_require_calendar_listing_timeline "$tmp_root/calendar-option-at-expiry.json"
+jq '.result.venues[0].listing_timeline[0].option_first_listed_at_nano += 500000000' \
+	"$calendar_fixture" >"$tmp_root/calendar-option-off-grid.json"
+expect_failure v2_r2_require_calendar_listing_timeline "$tmp_root/calendar-option-off-grid.json"
 calendar_venues_fixture="$tmp_root/calendar-venues.json"
 jq -n --argjson timeline "$expected_calendar_timeline" \
 	'{result: {contract: "calendar-audit-v2", venues: [
