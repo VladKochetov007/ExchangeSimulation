@@ -814,3 +814,34 @@ After the documentation commit, rebuild the exact final tree with Go 1.27 and
 run a fresh binary-evidence capacity measurement. The performance feed remains
 deferred at `c4434ad` with no newer commits observed; no performance patch was
 merged.
+
+## Append-only operational update: treatment-607 extraction resource boundary — 2026-09-02
+
+The exact `3f73f3043c2cb04f01c9acfa86eed132cfadff11` SV1 `treatment-607`
+trajectory completed successfully under the registered binary-evidence
+contract. The current attestation was rebuilt from the retained raw cell after
+the stale `74be64b` attestation was preserved under a historical filename.
+This establishes a retained raw trajectory, not an accepted scientific result.
+
+The first disk-backed extraction failed at the CDF route with `no space left on
+device`; a second run was stopped at 6.96 GiB of transient staging with 319 MiB
+free. A RAM-backed temporary-filesystem retry was stopped at 16.81 GiB with
+16 MiB remaining.
+The renderer used approximately 12 MiB RSS and no OOM occurred. All transient
+trees were cleaned by the extractor's failure trap. The raw cell and its
+attestation are unchanged, and no derived metric was accepted. The detailed
+record is `research/v2-r2-sv1-extraction-resource-incident-2026-09-02.md`.
+
+Explicit quarantine cleanup removed 67 stale, regenerable system-temporary test/render/
+build directories totaling 2,723,549,184 bytes. Retained archives, private
+objective snapshots, current capacity evidence, raw treatment evidence, and
+incident logs were preserved. The full rendered JSONL footprint is now known
+to be approximately 16.81 GiB, so the active capacity probe must be compacted
+through the validated retention contract before extraction can complete.
+
+The next operation is a documentation successor commit followed by lossless
+compaction of the already-passed `3f73f30` capacity probe. Treatment extraction
+will use an exact clean `3f73f30` worktree to preserve the cell's source
+identity. No other development cell, parity control, freeze, or holdout is
+authorized until treatment-607 extraction, verification, and independent
+review pass.

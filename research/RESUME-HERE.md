@@ -989,3 +989,29 @@ The next exact-tree step is this documentation commit, then a fresh pinned
 Go 1.27 rebuild and revision-bound binary capacity probe. The performance
 branch still has no commit newer than reviewed `c4434ad`; no performance code
 was imported.
+
+### 2026-09-02 — treatment-607 raw run retained; extraction resource boundary
+
+- The current `3f73f3043c2cb04f01c9acfa86eed132cfadff11` Go 1.27 binary run for
+  SV1 `treatment-607` completed with exit status zero. Its raw evstream and
+  sidecars remain retained, and the current external attestation was rebuilt
+  after preserving the stale `74be64b` attestation under its historical name.
+  No economic result is accepted yet.
+- Three extraction attempts reached the renderer only after contract hashing.
+  Disk staging failed at approximately 4.19 GiB and later 6.96 GiB; a
+  RAM-backed staging reached approximately 16.81 GiB. Each attempt was
+  stopped or failed before exhaustion and its transient staging was cleaned.
+  The renderer RSS stayed near 12 MiB. The exact incident is recorded in
+  `research/v2-r2-sv1-extraction-resource-incident-2026-09-02.md`.
+- Cleanup removed 67 explicitly named stale system-temporary derived test/render/build
+  trees (2,723,549,184 bytes). The preserved derived archive, private
+  objective snapshots, capacity probe, raw treatment evidence, and incident
+  logs were not removed. This cleanup is not a scientific deletion.
+- The complete rendered JSONL tree is materially larger than the prior estimate
+  and cannot coexist with the active capacity probe under the present disk
+  budget. After this documentation commit, compact the already-passed current
+  capacity probe using the validated retention script. Then derive treatment
+  from an exact clean `3f73f30` worktree so its existing source identity stays
+  valid. Do not launch `treatment-613`, `treatment-617`, parity controls, or any
+  holdout until treatment-607 extraction, verification, and independent review
+  pass.
