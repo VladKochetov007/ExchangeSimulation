@@ -132,6 +132,38 @@ func TestElasticLiquiditySupplierReducesQuoteAfterInventoryFill(t *testing.T) {
 	}
 }
 
+func TestElasticLiquiditySupplierTracksPartialFillRemainingQuantity(t *testing.T) {
+	gw := newMetaGateway()
+	var decisions []ElasticLiquiditySupplierDecision
+	supplier := NewElasticLiquiditySupplier(1, gw, ElasticLiquiditySupplierConfig{
+		Role: "cdf_elastic_supplier_1", ClientID: 7, Symbol: "CDF/USD",
+		Interval: time.Second, MaxObservationAge: time.Minute,
+		ReferencePrice: 3_000, ReferenceHalfLife: time.Hour,
+		BaseHolding: 0, ElasticityPerPercent: 10, MaxPosition: 100, MaxQuoteQty: 100,
+		DecisionObserver: func(decision ElasticLiquiditySupplierDecision) { decisions = append(decisions, decision) },
+	})
+	ctx := context.Background()
+	supplier.onTick(time.Unix(0, int64(time.Second)))
+	supplier.HandleEvent(ctx, elasticSupplierSnapshot("CDF/USD", int64(time.Second), 2_699, 2_701))
+	supplier.onTick(time.Unix(0, int64(2*time.Second)))
+	order := gw.orders()[0]
+	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderAccepted, Data: actor.OrderAcceptedEvent{OrderID: 41, RequestID: order.RequestID}})
+	supplier.HandleEvent(ctx, &actor.Event{Type: actor.EventOrderPartialFill, Data: actor.OrderFillEvent{
+		OrderID: 41, Symbol: "CDF/USD", Side: exchange.Buy, Qty: 4, Price: 2_699, IsFull: false,
+	}})
+	if supplier.quote.qty != order.Qty-4 {
+		t.Fatalf("remaining quote quantity = %d, want %d", supplier.quote.qty, order.Qty-4)
+	}
+	supplier.HandleEvent(ctx, elasticSupplierSnapshot("CDF/USD", int64(3*time.Second), 2_699, 2_701))
+	supplier.onTick(time.Unix(0, int64(4*time.Second)))
+	if len(gw.orders()) != 1 {
+		t.Fatalf("orders after partial fill = %+v, want no replacement while the original order remains live", gw.orders())
+	}
+	if len(decisions) < 2 || decisions[len(decisions)-1].Action != "rest" || decisions[len(decisions)-1].QuoteOrderID != 41 || decisions[len(decisions)-1].QuoteQty != order.Qty-4 {
+		t.Fatalf("post-partial decision = %+v, want rest at exchange remaining quantity", decisions[len(decisions)-1])
+	}
+}
+
 func TestElasticLiquiditySupplierAdmissionHeadroomBoundsBothSides(t *testing.T) {
 	supplier := NewElasticLiquiditySupplier(1, newMetaGateway(), ElasticLiquiditySupplierConfig{
 		InitialBaseBalance: 500, MaxPosition: 500, MaxInventory: 1_000,

@@ -301,6 +301,7 @@ func (s *ElasticLiquiditySupplier) observeFill(event actor.OrderFillEvent) {
 	} else {
 		s.position -= event.Qty
 	}
+	s.updateQuoteRemainingAfterFill(event)
 	s.applyQuoteFill(event)
 	if s.cfg.FillObserver != nil {
 		s.cfg.FillObserver(ElasticLiquiditySupplierFill{
@@ -319,6 +320,16 @@ func (s *ElasticLiquiditySupplier) observeFill(event actor.OrderFillEvent) {
 		s.cancelPending = false
 		s.cancelRequestID = 0
 		s.releaseQuoteReservation()
+	}
+}
+
+func (s *ElasticLiquiditySupplier) updateQuoteRemainingAfterFill(event actor.OrderFillEvent) {
+	if event.IsFull || event.Qty >= s.quote.qty {
+		s.quote.qty = 0
+		return
+	}
+	if event.Qty > 0 {
+		s.quote.qty -= event.Qty
 	}
 }
 

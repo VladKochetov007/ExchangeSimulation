@@ -88,6 +88,7 @@ type CDFLiquidityRunAudit struct {
 	pendingOrderWaits               []cdfPendingOrderWait
 	pendingCancelWaits              []cdfPendingCancelWait
 	staleWithdrawals                map[cdfOrderKey]cdfStaleWithdrawal
+	restDecisions                   []cdfRestDecision
 }
 
 // CDFLiquiditySupplierAudit is the per-participant diagnostic vector required
@@ -701,6 +702,37 @@ type cdfOrderState struct {
 	cancelRequested         bool
 	touchShare              float64
 	touchShareKnown         bool
+	remainingUpdates        []cdfOrderRemainingUpdate
+}
+
+type cdfOrderRemainingUpdate struct {
+	ordinal      int64
+	remainingQty int64
+	closed       bool
+}
+
+type cdfRestDecision struct {
+	key      cdfOrderKey
+	role     string
+	ordinal  int64
+	side     string
+	price    int64
+	quantity int64
+}
+
+func (order *cdfOrderState) remainingAt(ordinal int64) (int64, bool, bool) {
+	var latest cdfOrderRemainingUpdate
+	found := false
+	for _, update := range order.remainingUpdates {
+		if update.ordinal <= ordinal && (!found || update.ordinal > latest.ordinal) {
+			latest = update
+			found = true
+		}
+	}
+	if !found {
+		return 0, false, false
+	}
+	return latest.remainingQty, latest.closed, true
 }
 
 type cdfRequestKey struct {
@@ -1089,6 +1121,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			return nil, fmt.Errorf("cdf liquidity: scan CDF/USD book %s: %w", path, err)
 		}
 	}
+	result.validateRestDecisionQuantities(orders, states)
 	result.validateQuoteCashHeadroom(cashEvents, states)
 	if len(bookFiles) == 0 {
 		result.addCheck(CDFLiquidityCheck{Failure: "no rendered CDF-USD book evidence"})
@@ -1323,6 +1356,10 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	case "rest":
 		state.RestCount++
 		r.RestCount++
+		r.restDecisions = append(r.restDecisions, cdfRestDecision{
+			key:  cdfOrderKey{VenueID: event.VenueID, ClientID: decision.ClientID, OrderID: decision.QuoteOrderID},
+			role: decision.Role, ordinal: event.Ordinal, side: decision.Side, price: decision.QuotePrice, quantity: decision.QuoteQty,
+		})
 		if decision.QuoteOrderID == 0 || decision.ObservationSequence == 0 || !validSide(decision.Side) || decision.QuotePrice <= 0 || decision.QuoteQty <= 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "rest decision has incomplete quote identity"})
 		}
@@ -2239,7 +2276,7 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			}
 		}
 		_, cancelRequested := r.cancelRequestedByOrder[orderKey]
-		order := &cdfOrderState{clientID: event.ClientID, side: accepted.Side, price: accepted.Price, requestID: accepted.RequestID, acceptedAt: event.SimTS, acceptedQty: accepted.Qty, remainingQty: accepted.Qty, cancelRequested: cancelRequested}
+		order := &cdfOrderState{clientID: event.ClientID, side: accepted.Side, price: accepted.Price, requestID: accepted.RequestID, acceptedAt: event.SimTS, acceptedQty: accepted.Qty, remainingQty: accepted.Qty, cancelRequested: cancelRequested, remainingUpdates: []cdfOrderRemainingUpdate{{ordinal: event.Ordinal, remainingQty: accepted.Qty}}}
 		if share, ok := state.pendingTouchByRequest[accepted.RequestID]; ok {
 			order.touchShare, order.touchShareKnown = share, true
 			delete(state.pendingTouchByRequest, accepted.RequestID)
@@ -2306,6 +2343,7 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			order.closed, order.closedAt, order.filled = true, event.SimTS, true
 			order.filledAt, order.filledOrdinal = event.SimTS, event.Ordinal
 		}
+		order.remainingUpdates = append(order.remainingUpdates, cdfOrderRemainingUpdate{ordinal: event.Ordinal, remainingQty: order.remainingQty, closed: order.closed})
 	case "OrderCancelled":
 		state := states[cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}]
 		if state == nil {
@@ -2332,6 +2370,7 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 		}
 		order.closed, order.closedAt = true, event.SimTS
 		order.cancelled, order.cancelRequestID = true, cancelled.RequestID
+		order.remainingUpdates = append(order.remainingUpdates, cdfOrderRemainingUpdate{ordinal: event.Ordinal, remainingQty: order.remainingQty, closed: true})
 	case "OrderCancelRejected":
 		state := states[cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}]
 		if state == nil {
@@ -2400,6 +2439,32 @@ func (r *CDFLiquidityRunAudit) validateStaleWithdrawals(orders map[cdfOrderKey]*
 		matchingFillRace := order.filled && order.closedAt > withdrawal.decisionAt && order.cancelRejected && order.cancelRejectedRequestID == withdrawal.cancelRequestID && order.cancelRejectedReason == "ORDER_ALREADY_FILLED" && order.cancelRejectedAt > withdrawal.decisionAt && (order.cancelRejectedAt > order.filledAt || order.cancelRejectedAt == order.filledAt && order.cancelRejectedOrdinal > order.filledOrdinal)
 		if !matchingCancellation && !matchingFillRace {
 			addFailure("stale withdrawal has no later matching exchange cancellation outcome")
+		}
+	}
+}
+
+func (r *CDFLiquidityRunAudit) validateRestDecisionQuantities(orders map[cdfOrderKey]*cdfOrderState, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
+	for _, decision := range r.restDecisions {
+		state := states[cdfParticipantKey{VenueID: decision.key.VenueID, ClientID: decision.key.ClientID}]
+		role := decision.role
+		if state != nil {
+			role = state.Role
+		}
+		addFailure := func(failure string) {
+			r.addCheck(CDFLiquidityCheck{VenueID: decision.key.VenueID, Role: role, ClientID: decision.key.ClientID, Ordinal: decision.ordinal, Failure: failure})
+		}
+		order := orders[decision.key]
+		if order == nil {
+			addFailure("rest decision has no matching accepted supplier order")
+			continue
+		}
+		remaining, closed, found := order.remainingAt(decision.ordinal)
+		if !found || closed || remaining <= 0 {
+			addFailure("rest decision does not name a live exchange order")
+			continue
+		}
+		if order.side != decision.side || order.price != decision.price || remaining != decision.quantity {
+			addFailure("rest decision quantity does not match exchange remaining order state")
 		}
 	}
 }

@@ -196,6 +196,42 @@ func TestCompareCDFLiquidityRunsRequiresSeparateRoster(t *testing.T) {
 	}
 }
 
+func TestCDFRestDecisionMatchesExchangeRemainingQuantity(t *testing.T) {
+	key := cdfOrderKey{VenueID: "north", ClientID: 2, OrderID: 7}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		key: {
+			clientID: 2, side: "BUY", price: 99,
+			remainingUpdates: []cdfOrderRemainingUpdate{
+				{ordinal: 2, remainingQty: 10},
+				{ordinal: 4, remainingQty: 6},
+			},
+		},
+	}
+	states := map[cdfParticipantKey]*CDFLiquiditySupplierAudit{
+		{VenueID: "north", ClientID: 2}: {Role: "cdf_elastic_supplier_1"},
+	}
+
+	t.Run("remaining quantity accepted", func(t *testing.T) {
+		audit := &CDFLiquidityRunAudit{restDecisions: []cdfRestDecision{{
+			key: key, role: "cdf_elastic_supplier_1", ordinal: 5, side: "BUY", price: 99, quantity: 6,
+		}}}
+		audit.validateRestDecisionQuantities(orders, states)
+		if len(audit.Checks) != 0 {
+			t.Fatalf("valid remaining quantity produced checks: %+v", audit.Checks)
+		}
+	})
+
+	t.Run("stale quantity rejected", func(t *testing.T) {
+		audit := &CDFLiquidityRunAudit{restDecisions: []cdfRestDecision{{
+			key: key, role: "cdf_elastic_supplier_1", ordinal: 5, side: "BUY", price: 99, quantity: 10,
+		}}}
+		audit.validateRestDecisionQuantities(orders, states)
+		if !hasCDFCheck(audit.Checks, "rest decision quantity does not match exchange remaining order state") {
+			t.Fatalf("stale remaining quantity was accepted: %+v", audit.Checks)
+		}
+	})
+}
+
 func TestCompareCDFLiquidityRunsRejectsInactiveTreatment(t *testing.T) {
 	treatment := writeCDFLiquidityFixture(t, true, false)
 	generalPath := filepath.Join(treatment.Dir, "venues", "north", "general.jsonl")
