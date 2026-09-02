@@ -39,7 +39,10 @@ v2_r2_sv1_activation_output_prefix="v2-r2-sv1b-activation"
 v2_r2_sv1_capacity_attestation="/home/vlad/v2-r2-sv1b-24h-binary-capacity-20260902-v1.json"
 v2_r2_sv1_capacity_probe_prefix="v2-r2-sv1b-24h-capacity"
 v2_r2_sv1_capacity_probe_contract="v2-r2-sv1b-24h-capacity-probe-v1"
-v2_r2_capacity_probe_cell="treatment-643"
+v2_r2_sv1_capacity_measurement_config="$root_dir/research/configs/v2-r2-sv1b/activation-643.json"
+v2_r2_sv1_capacity_measurement_seed=643
+v2_r2_sv1_capacity_launch_config="$root_dir/research/configs/v2-r2-sv1b-24h/treatment-643.json"
+v2_r2_capacity_probe_cell="capacity-activation-643"
 
 # Keep SV1B's exact Go toolchain requirement and all fail-closed activity
 # predicates from the accepted SV1 contract.

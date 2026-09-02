@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Measure actual 24-hour evstream_v3 storage for the SV1 treatment before any
-# registered development cell. The probe is not a scientific result and is
-# retained so its capacity claim can be independently audited.
+# Measure actual 24-hour evstream_v3 storage in a dedicated calibration world.
+# The probe is not a scientific result and is retained so its capacity claim
+# can be independently audited. SV1B deliberately does not use a registered
+# treatment trajectory as the capacity workload.
 set -euo pipefail
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -17,7 +18,9 @@ scientific_root=$(realpath -e -- "$root_dir")
 
 binary=${1:-"$root_dir/bin/multivenue"}
 primary_seed="${v2_r2_sv1_seeds[0]}"
-config="$v2_r2_sv1_config_dir/treatment-$primary_seed.json"
+launch_config="${v2_r2_sv1_capacity_launch_config:-$v2_r2_sv1_config_dir/treatment-$primary_seed.json}"
+measurement_seed="${v2_r2_sv1_capacity_measurement_seed:-$primary_seed}"
+config="${v2_r2_sv1_capacity_measurement_config:-$v2_r2_sv1_config_dir/treatment-$primary_seed.json}"
 probe_root_requested=${V2_R2_SV1_CAPACITY_ROOT:-"/home/vlad/external-scratch/${v2_r2_sv1_capacity_probe_prefix}-$head_revision"}
 attestation=$(v2_r2_capacity_attestation_path)
 horizon=24h
@@ -78,7 +81,10 @@ trap 'exit 143' TERM
 
 v2_r2_acquire_namespace_lock || fail "could not acquire the SV1 capacity namespace lock"
 
-[[ -x "$binary" && -s "$config" ]] || fail "missing binary or treatment config"
+[[ -x "$binary" && -s "$config" && -s "$launch_config" ]] || fail "missing binary or capacity configuration"
+if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	[[ "$config" != "$launch_config" ]] || fail "SV1B capacity measurement must use a dedicated calibration config"
+fi
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "scientific worktree is dirty"
 [[ "${GOMAXPROCS:-}" == "$expected_gomaxprocs" ]] || fail "capacity probe requires GOMAXPROCS=$expected_gomaxprocs"
 [[ "$probe_root_requested" == /* && "$probe_root_requested" != */ && "$probe_root_requested" != *$'\n'* && "$probe_root_requested" != *$'\t'* ]] || fail "capacity root must be an absolute, non-empty path"
@@ -118,13 +124,19 @@ mkdir -- "$probe_dir"
 "$binary" -config "$config" -logdir "$probe_dir" -write-effective-config "$probe_dir/run-config.json" >/dev/null 2>"$probe_root/config.stderr.log" || fail "effective-config validation failed"
 cmp -s "$config" "$probe_dir/run-config.json" || fail "registered config is not normalized"
 config_sha256=$(sha256sum "$probe_dir/run-config.json" | awk '{print $1}')
+launch_config_sha256=$(sha256sum "$launch_config" | awk '{print $1}')
+measurement_config_path=${config#"$root_dir/"}
+launch_config_path=${launch_config#"$root_dir/"}
+calibration_only=false
+[[ "$config" != "$launch_config" ]] && calibration_only=true
 binary_sha256=$(sha256sum "$binary" | awk '{print $1}')
 jq -n --arg git_revision "$head_revision" --arg binary_sha256 "$binary_sha256" --arg config_sha256 "$config_sha256" \
-	--arg binary_go_version "$binary_go_version" --argjson seed "$primary_seed" --arg horizon "$horizon" \
+	--arg launch_config_sha256 "$launch_config_sha256" --arg measurement_config_path "$measurement_config_path" \
+	--arg launch_config_path "$launch_config_path" --arg binary_go_version "$binary_go_version" --argjson seed "$measurement_seed" --arg horizon "$horizon" \
 	--argjson gomaxprocs "$expected_gomaxprocs" --argjson minimum_free_bytes "$minimum_free_bytes" \
 	--argjson initial_available_free_bytes "$initial_available_free_bytes" \
-	--arg contract "$v2_r2_sv1_capacity_probe_contract" \
-	'{schema_version:1,contract:$contract,git_revision:$git_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,binary_go_version:$binary_go_version,gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,seed:$seed,simulated_horizon:$horizon,evidence_format:"evstream_v3"}' >"$probe_dir/run-metadata.json"
+	--arg contract "$v2_r2_sv1_capacity_probe_contract" --argjson calibration_only "$calibration_only" \
+	'{schema_version:1,contract:$contract,git_revision:$git_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,measurement_config_path:$measurement_config_path,launch_config_sha256:$launch_config_sha256,launch_config_path:$launch_config_path,calibration_only:$calibration_only,binary_go_version:$binary_go_version,gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,seed:$seed,simulated_horizon:$horizon,evidence_format:"evstream_v3"}' >"$probe_dir/run-metadata.json"
 
 stdout_log="$probe_root/simulator.stdout.log"
 stderr_log="$probe_root/simulator.stderr.log"
@@ -184,7 +196,7 @@ fi
 for required in run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json; do
 	[[ -s "$probe_dir/$required" ]] || fail "completed probe is missing $required"
 done
-jq -e --arg revision "$head_revision" --argjson seed "$primary_seed" \
+jq -e --arg revision "$head_revision" --argjson seed "$measurement_seed" \
 	'.build.revision == $revision and .build.modified == false and .config.seed == $seed and .config.evidence_format == "evstream_v3"' "$probe_dir/manifest.json" >/dev/null || fail "probe manifest provenance mismatch"
 jq -e --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
 	'(.initial_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $start)) and (.terminal_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $end))' "$probe_dir/greeks.json" >/dev/null || fail "probe greeks do not attest the 24-hour horizon"
@@ -208,16 +220,19 @@ attestation_tmp="$attestation.tmp-$$"
 mkdir -p -- "$(dirname -- "$attestation")"
 evidence_manifest_sha256=$(sha256sum -- "$probe_dir/evidence-manifest.json" | awk '{print $1}')
 jq -n --arg source_revision "$head_revision" --arg binary_sha256 "$binary_sha256" \
-	--arg config_sha256 "$config_sha256" --arg probe_root "$probe_root" --arg peak_at "$peak_at" \
+	--arg config_sha256 "$config_sha256" --arg launch_config_sha256 "$launch_config_sha256" \
+	--arg measurement_config_path "$measurement_config_path" --arg launch_config_path "$launch_config_path" \
+	--arg probe_root "$probe_root" --arg peak_at "$peak_at" \
 	--arg evidence_manifest_sha256 "$evidence_manifest_sha256" \
 	--argjson peak_output_bytes "$peak_output_bytes" --argjson safety_margin_bytes "$safety_margin_bytes" \
 	--argjson required_free_bytes "$required_free_bytes" --argjson available_free_bytes "$final_available_free_bytes" \
 	--argjson gomaxprocs "$expected_gomaxprocs" --argjson minimum_free_bytes "$minimum_free_bytes" \
-	--argjson initial_available_free_bytes "$initial_available_free_bytes" \
-	'{schema_version:1,contract:"v2-integrated-longrun-r2-binary-capacity-v1",measurement:"full_24h_binary_evidence_capacity_probe",evidence_format:"evstream_v3",source_revision:$source_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,probe_root:$probe_root,evidence_manifest_sha256:$evidence_manifest_sha256,peak_output_bytes:$peak_output_bytes,safety_margin_bytes:$safety_margin_bytes,required_free_bytes:$required_free_bytes,available_free_bytes:$available_free_bytes,peak_observed_at:$peak_at}' >"$attestation_tmp"
-v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation_tmp" "$config_sha256" "$expected_gomaxprocs" "$minimum_free_bytes" ||
+	--argjson initial_available_free_bytes "$initial_available_free_bytes" --argjson measurement_seed "$measurement_seed" \
+	--argjson calibration_only "$calibration_only" \
+	'{schema_version:1,contract:"v2-integrated-longrun-r2-binary-capacity-v1",measurement:"full_24h_binary_evidence_capacity_probe",evidence_format:"evstream_v3",source_revision:$source_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,measurement_config_path:$measurement_config_path,measurement_seed:$measurement_seed,launch_config_sha256:$launch_config_sha256,launch_config_path:$launch_config_path,calibration_only:$calibration_only,gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,probe_root:$probe_root,evidence_manifest_sha256:$evidence_manifest_sha256,peak_output_bytes:$peak_output_bytes,safety_margin_bytes:$safety_margin_bytes,required_free_bytes:$required_free_bytes,available_free_bytes:$available_free_bytes,peak_observed_at:$peak_at}' >"$attestation_tmp"
+v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation_tmp" "$config_sha256" "$expected_gomaxprocs" "$minimum_free_bytes" true "$launch_config_sha256" ||
 	fail "generated capacity attestation failed retained-evidence validation; output retained at $probe_root"
 mv -- "$attestation_tmp" "$attestation"
-v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation" "$config_sha256" "$expected_gomaxprocs" "$minimum_free_bytes" ||
+v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation" "$config_sha256" "$expected_gomaxprocs" "$minimum_free_bytes" true "$launch_config_sha256" ||
 	fail "published capacity attestation failed final validation; output retained at $probe_root"
 echo "completed SV1 24-hour binary capacity probe: root=$probe_root peak_bytes=$peak_output_bytes required_free_bytes=$required_free_bytes"

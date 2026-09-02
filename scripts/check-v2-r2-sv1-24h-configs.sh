@@ -51,6 +51,24 @@ if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1B-* ]]; then
 	[[ -s "$withdrawal_measurement_file" && ! -L "$withdrawal_measurement_file" ]] || fail "missing withdrawal measurement amendment"
 	withdrawal_measurement_sha=$(sha256sum "$withdrawal_measurement_file" | awk '{print $1}')
 	[[ "$withdrawal_measurement_sha" == "$(jq -er '.withdrawal_measurement.sha256' "$provenance_manifest")" ]] || fail "withdrawal measurement amendment hash mismatch"
+	diagnostics_path=$(jq -er '.activation_diagnostics.path' "$provenance_manifest") || fail "SV1B provenance omits activation diagnostic amendment"
+	[[ "$diagnostics_path" == "research/v2-r2-sv1b-activation-diagnostics-amendment-2026-09-02.md" ]] || fail "SV1B provenance names an unexpected activation diagnostic amendment"
+	diagnostics_file="$root_dir/$diagnostics_path"
+	[[ -s "$diagnostics_file" && ! -L "$diagnostics_file" ]] || fail "missing activation diagnostic amendment"
+	diagnostics_sha=$(sha256sum "$diagnostics_file" | awk '{print $1}')
+	[[ "$diagnostics_sha" == "$(jq -er '.activation_diagnostics.sha256' "$provenance_manifest")" ]] || fail "activation diagnostic amendment hash mismatch"
+	measurement_config_path="${v2_r2_sv1_capacity_measurement_config#"$root_dir/"}"
+	launch_config_path="${v2_r2_sv1_capacity_launch_config#"$root_dir/"}"
+	jq -e --arg measurement_config_path "$measurement_config_path" --arg launch_config_path "$launch_config_path" \
+		--arg probe_cell "$v2_r2_capacity_probe_cell" --arg contract "v2-integrated-longrun-r2-binary-capacity-v1" \
+		--argjson measurement_seed "$v2_r2_sv1_capacity_measurement_seed" \
+		'.capacity_calibration.calibration_only == true and
+		 .capacity_calibration.measurement_config_path == $measurement_config_path and
+		 .capacity_calibration.launch_config_path == $launch_config_path and
+		 .capacity_calibration.measurement_seed == $measurement_seed and
+		 .capacity_calibration.probe_cell == $probe_cell and
+		 .capacity_calibration.contract == $contract' "$provenance_manifest" >/dev/null ||
+		fail "SV1B capacity calibration provenance does not match the registered dedicated workload"
 fi
 source_dir="$root_dir/research/configs/v2-integrated-longrun-r2"
 while IFS=$'\t' read -r relative expected_sha; do

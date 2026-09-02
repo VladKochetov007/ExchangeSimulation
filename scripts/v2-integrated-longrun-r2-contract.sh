@@ -198,6 +198,7 @@ v2_r2_require_binary_capacity_attestation() {
 	# minimum-free reserve; historical callers retain the original two-argument
 	# source/binary capacity contract.
 	local expected_config_sha256=${4:-} expected_gomaxprocs=${5:-} expected_minimum_free_bytes=${6:-}
+	local expected_launch_config_sha256=${8:-}
 	local require_live_free_capacity=${7:-true}
 	local expected_binary_sha available_kb required_bytes peak_bytes safety_bytes
 	[[ -s "$attestation" && ! -L "$attestation" ]] || return 1
@@ -216,12 +217,20 @@ v2_r2_require_binary_capacity_attestation() {
 			 (.peak_output_bytes | type) == "number" and (.safety_margin_bytes | type) == "number" and
 			 (.required_free_bytes | type) == "number" and .required_free_bytes == (.peak_output_bytes + .safety_margin_bytes)' \
 		"$attestation" >/dev/null || return 1
-	if [[ -n "$expected_config_sha256" ]]; then
+	if [[ -n "$expected_config_sha256" || -n "$expected_launch_config_sha256" ]]; then
 		[[ "$require_live_free_capacity" == true || "$require_live_free_capacity" == false ]] || return 1
 		[[ "$expected_gomaxprocs" =~ ^[0-9]+$ && "$expected_minimum_free_bytes" =~ ^[0-9]+$ ]] || return 1
-		jq -e --arg config_sha256 "$expected_config_sha256" --argjson gomaxprocs "$expected_gomaxprocs" \
+		if [[ -n "$expected_launch_config_sha256" ]]; then
+			[[ "$expected_launch_config_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+			[[ -z "$expected_config_sha256" || "$expected_config_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+		fi
+		jq -e --arg config_sha256 "$expected_config_sha256" --arg launch_config_sha256 "$expected_launch_config_sha256" --argjson gomaxprocs "$expected_gomaxprocs" \
 			--argjson minimum_free_bytes "$expected_minimum_free_bytes" \
-			'.config_sha256 == $config_sha256 and .gomaxprocs == $gomaxprocs and .minimum_free_bytes == $minimum_free_bytes and
+			'($config_sha256 == "" or .config_sha256 == $config_sha256) and
+			 ($launch_config_sha256 == "" or
+				(.launch_config_sha256 == $launch_config_sha256 and .calibration_only == true and
+				 (.measurement_config_path | type) == "string" and (.launch_config_path | type) == "string")) and
+			 .gomaxprocs == $gomaxprocs and .minimum_free_bytes == $minimum_free_bytes and
 			 (.initial_available_free_bytes | type) == "number" and .initial_available_free_bytes >= $minimum_free_bytes and
 			 (.available_free_bytes | type) == "number" and .available_free_bytes >= $minimum_free_bytes and
 			 .available_free_bytes >= (.peak_output_bytes + .safety_margin_bytes) and
