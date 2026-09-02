@@ -1099,3 +1099,28 @@ direction are in progress. They have no authority to edit the tree or consume
 holdouts. The next gate remains replay completion, clean full tests/vet/race
 and evidence checks, then one formal exact-tree promotion review before a
 pinned Go 1.27 build, capacity measurement, or matched development cells.
+
+## Append-only operational update: cancellation-confirmed withdrawal measurement — 2026-09-02
+
+Commit `025f8ba` records SV1B withdrawal activation only after an accepted live
+order receives its matching exchange `OrderCancelled` outcome. The follow-up
+interval starts at confirmed cancellation, not at the supplier's request, and
+an exact-boundary resubmit is conservative replacement evidence. Same-time
+cross-file ordering requires venue-wide event sequence; line ordinals are not
+used as a causal tie-breaker. The aggregate and per-supplier audit retain both
+qualified and terminal-censored withdrawal counts.
+
+The amendment is bound into the SV1B config-provenance manifest at contract v2,
+and the activation fixture now rejects missing qualified-withdrawal evidence.
+Focused Go packages, the new cancellation-clock/boundary/sequence regressions,
+all SV1 contract fixtures, `git diff --check`, and a clean full `make test`
+passed at this commit. The dirty-tree full-test attempt failed only at the
+intentional clean-worktree archive/parity guard; the subsequent clean run passed
+all archive and parity checks. No simulator cell, parity cell, freeze, or
+holdout was run. The performance branch was fetched through `c4434ad` with no
+new commit.
+
+The next promotion question is terminal-failure handling: a sealed typed
+`PRICE_UNAVAILABLE`/`PRICE_DOMAIN_ERROR` control endpoint must remain a valid
+diagnostic negative without being accepted as a completed terminal valuation,
+while generic simulation or evidence-seal failures remain invalid evidence.

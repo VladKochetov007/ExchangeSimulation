@@ -919,3 +919,34 @@ old-source analyzer-only replay remains active and diagnostic only. Three new
 independent Sol-xhigh direction reviews are pending; formal exact-tree
 promotion review, clean full gates, pinned build, capacity, matched
 development, freeze, and holdout validation remain unopened.
+
+## Append-only operational update: cancellation-confirmed withdrawal measurement — 2026-09-02
+
+The exact successor HEAD is `025f8ba448e7905a5ffb2390bfb4060c73ba8e24` on
+`feature/r2-cdf-survival-successor`, pushed to the origin. This checkpoint does
+not change the CDF actor, calendar, matching, risk, or predecessor R2 result.
+
+The SV1B audit now reconstructs supplier withdrawal episodes from the complete
+event lifecycle. It requires an accepted order, the matching cancellation
+request, and a later actual `OrderCancelled` record. A replacement is any later
+submit at or before one registered supplier interval after confirmed
+cancellation; terminally incomplete intervals are recorded as censored. Event
+sequence is used for same-timestamp records, while routed-file ordinals are not
+treated as comparable. The amendment is retained at
+`research/v2-r2-sv1b-withdrawal-measurement-amendment-2026-09-02.md` and its
+SHA-256 is bound by the v2 config-provenance manifest.
+
+Validation completed: focused `evstream`, `types`, `exchange`, `analysis`, and
+`simulations/multivenue` tests; explicit cancellation-clock, boundary-submit,
+fill-race, unconfirmed-acceptance, and same-time-sequence regressions; all SV1
+shell contract fixtures; `git diff --check`; and clean `GOMAXPROCS=2 make test`
+with both archive/parity suites passing. No registered development cell,
+parity cell, freeze, or holdout was consumed. The performance red-team branch
+was fetched through `c4434ad`; no newer commit was available.
+
+The remaining pre-promotion protocol gap is explicit handling of a sealed typed
+economic terminal failure. The current runner/extractor still assumes
+`greeks.json` and exit status zero, so a control that ends in genuine
+`PRICE_UNAVAILABLE` can be rejected before its valid negative endpoint is
+measured. This must be resolved as a separate fail-closed protocol amendment;
+generic software failure and unsealed evidence must remain invalid.
