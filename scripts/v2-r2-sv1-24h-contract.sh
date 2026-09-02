@@ -126,7 +126,7 @@ v2_r2_require_cdf_supplier_activation() {
 		return 1
 	fi
 	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
-		jq -e '
+		if ! jq -e '
 			.result.supplier_removal_counterfactual_valid == true and
 			.result.supplier_removal_snapshot_count == .result.snapshot_count and
 			(.result.supplier_removal_bid_absence_fraction | type) == "number" and
@@ -138,7 +138,9 @@ v2_r2_require_cdf_supplier_activation() {
 				.supplier_removal_snapshot_count == .snapshot_count and
 				(.supplier_removal_bid_absence_fraction | type) == "number" and
 				(.supplier_removal_ask_absence_fraction | type) == "number")
-		' "$audit_path" >/dev/null
+			' "$audit_path" >/dev/null; then
+			return 1
+		fi
 	fi
 }
 
@@ -169,7 +171,7 @@ v2_r2_require_cdf_supplier_comparison() {
 	local comparison_path=$1 expected_supplier_count=$2
 	[[ -s "$comparison_path" ]] || return 1
 	[[ "$expected_supplier_count" =~ ^[1-9][0-9]*$ ]] || return 1
-	jq -e --argjson expected_supplier_count "$expected_supplier_count" --argjson require_no_replacement "$v2_r2_sv1_require_no_replacement_withdrawal" '
+	if ! jq -e --argjson expected_supplier_count "$expected_supplier_count" --argjson require_no_replacement "$v2_r2_sv1_require_no_replacement_withdrawal" '
 		type == "object" and .valid == true and
 		(.provenance.valid // false) == true and
 		(.treatment | type) == "object" and (.control | type) == "object" and
@@ -198,5 +200,24 @@ v2_r2_require_cdf_supplier_comparison() {
 			.max_position <= .configured_max_position and
 			.min_position >= (-.configured_max_position) and
 			.max_gross_base_balance <= .configured_max_inventory and
-			.max_quote_qty <= .configured_max_quote_qty)' "$comparison_path" >/dev/null
+			.max_quote_qty <= .configured_max_quote_qty)' "$comparison_path" >/dev/null; then
+		return 1
+	fi
+	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+		if ! jq -e '
+			.treatment.supplier_removal_counterfactual_valid == true and
+			.treatment.supplier_removal_snapshot_count == .treatment.snapshot_count and
+			(.treatment.supplier_removal_bid_absence_fraction | type) == "number" and
+			(.treatment.supplier_removal_ask_absence_fraction | type) == "number" and
+			(.treatment.supplier_time_weighted_resting_depth_share | type) == "number" and
+			.treatment.supplier_time_weighted_resting_depth_share <= 0.75 and
+			all(.treatment.venues[];
+				.supplier_removal_counterfactual_valid == true and
+				.supplier_removal_snapshot_count == .snapshot_count and
+				(.supplier_removal_bid_absence_fraction | type) == "number" and
+				(.supplier_removal_ask_absence_fraction | type) == "number")
+		' "$comparison_path" >/dev/null; then
+			return 1
+		fi
+	fi
 }
