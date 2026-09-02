@@ -96,6 +96,7 @@ test:
 	@./scripts/test-v2-r2-sv1-activation-contract.sh
 	@./scripts/test-v2-r2-sv1-survival-contract.sh
 	@./scripts/test-v2-r2-sv1-score-contract.sh
+	@./scripts/test-v2-r2-sv1-terminal-contract.sh
 	@./scripts/test-v2-integrated-longrun-archive.sh
 	@./scripts/test-v2-integrated-longrun-r2-archive.sh
 

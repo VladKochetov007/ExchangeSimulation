@@ -16,7 +16,7 @@ score="$output_root/development-score.json"
 parity="$output_root/parity-attestation.json"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 cdf_audit=${CDF_LIQUIDITY_AUDIT_BIN:-"$root_dir/bin/cdf-liquidity-audit"}
-contract_version="v2-r2-sv1-24h-development-scorer-v3"
+contract_version="v2-r2-sv1-24h-development-scorer-v4"
 survival_contract="v2-r2-sv1-24h-survival-side-availability-v2"
 simulation_start_nano=1735689600000000000
 simulation_end_nano=1735776000000000000
@@ -27,6 +27,7 @@ survival_expected_windows=23
 max_empty_side_share=0.02
 survival_summary_filter="$root_dir/scripts/v2-r2-sv1-survival-summary.jq"
 score_classification_filter="$root_dir/scripts/v2-r2-sv1-score-classification.jq"
+terminal_measurement_filter="$root_dir/scripts/v2-r2-sv1-terminal-measurement.jq"
 
 fail() {
 	printf 'SV1 development scorer failure: %s\n' "$*" >&2
@@ -60,6 +61,7 @@ v2_r2_acquire_namespace_lock || fail "could not acquire the SV1 namespace lock"
 v2_r2_require_output_root "$output_root" || fail "scorer root is not the canonical SV1 evidence root"
 [[ -r "$survival_summary_filter" ]] || fail "missing survival summary contract: $survival_summary_filter"
 [[ -r "$score_classification_filter" ]] || fail "missing score classification contract: $score_classification_filter"
+[[ -r "$terminal_measurement_filter" ]] || fail "missing terminal measurement contract: $terminal_measurement_filter"
 [[ ! -e "$score" && ! -L "$score" ]] || fail "refusing to overwrite precommitted score: $score"
 for holdout in holdout-619 holdout-631 holdout-641; do
 	[[ ! -e "$output_root/$holdout" && ! -L "$output_root/$holdout" ]] ||
@@ -108,16 +110,7 @@ registered_roster_count=$(jq -er '(.elastic_liquidity_suppliers | length) * (.ve
 
 terminal_measurement_valid() {
 	local cell=$1
-	if jq -e --argjson end "$simulation_end_nano" '
-		(.terminal_accounts | type) == "array" and (.terminal_accounts | length) > 0 and
-		all(.terminal_accounts[];
-			.phase == "terminal_post_mark" and
-			(.account | type) == "object" and
-			.account.timestamp == $end and
-			(.mark_source | type) == "string" and
-			(.marks | type) == "object" and
-			(.marks.CDF | type) == "number" and .marks.CDF > 0 and
-			(.marks.USD | type) == "number" and .marks.USD > 0)' "$cell/greeks.json" >/dev/null; then
+	if jq -e --argjson end "$simulation_end_nano" -f "$terminal_measurement_filter" "$cell/greeks.json" >/dev/null; then
 		return 0
 	fi
 	return 1
@@ -128,7 +121,8 @@ terminal_mark_valid() {
 	terminal_measurement_valid "$cell" || return 1
 	if jq -e '
 		all(.terminal_accounts[];
-			.mark_source == "two_sided_ABC_USD_and_CDF_USD_mid")' "$cell/greeks.json" >/dev/null; then
+			.mark_source == "two_sided_ABC_USD_and_CDF_USD_mid" and
+			.marks.CDF > 0 and .marks.USD > 0)' "$cell/greeks.json" >/dev/null; then
 		return 0
 	fi
 	return 1
