@@ -24,3 +24,36 @@ v2_r2_require_attestation_path() {
 	[[ ! -L "$v2_r2_attestation_root/$cell.json" ]] || return 1
 	[[ "$(realpath -m -- "$v2_r2_attestation_root/$cell.json")" == "$v2_r2_attestation_root/$cell.json" ]]
 }
+
+# The SV1 supplier is funded by its registered endowment. Collateral borrowing
+# is therefore an anti-cheating failure, not an activation requirement. This
+# predicate is deliberately derived from the typed CDF audit rather than from
+# a raw-event grep so activation and accounting use the same evidence path.
+v2_r2_require_cdf_supplier_activation() {
+	local audit_path=$1 expected_supplier_count=$2
+	[[ -s "$audit_path" ]] || return 1
+	[[ "$expected_supplier_count" =~ ^[1-9][0-9]*$ ]] || return 1
+	jq -e --argjson expected_supplier_count "$expected_supplier_count" '
+		type == "object" and (.result | type) == "object" and
+		.result.valid == true and
+		(.result.supplier_count | type) == "number" and
+		.result.supplier_count == $expected_supplier_count and
+		.result.decision_count > 0 and .result.fill_count > 0 and
+		.result.trading_supplier_count == .result.supplier_count and
+		.result.pnl_changing_supplier_count == .result.supplier_count and
+		.result.inventory_responsive_decision_count > 0 and
+		(.result.cancel_count + .result.withdraw_count) > 0 and
+		.result.max_borrowed == 0 and
+		.result.supplier_volume_share <= 0.75 and
+		.result.supplier_depth_over_75_share <= 0.5 and
+		(.result.venues | type) == "array" and (.result.venues | length) == 3 and
+		all(.result.venues[]; .supplier_depth_over_75_fraction <= 0.5) and
+		(.result.suppliers | type) == "array" and (.result.suppliers | length) == $expected_supplier_count and
+		all(.result.suppliers[];
+			.valid == true and .fill_count > 0 and .pnl != 0 and
+			.min_position != .max_position and .inventory_responsive_decision_count > 0 and
+			.max_observation_age_ns > 0 and .max_borrowed == 0 and .borrow_event_count == 0 and
+			.max_position <= .configured_max_position and
+			.max_position >= (-.configured_max_position) and
+			.max_quote_qty <= .configured_max_quote_qty)' "$audit_path" >/dev/null
+}

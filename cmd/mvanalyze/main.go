@@ -129,7 +129,7 @@ func (p *analyzerProfiles) Stop() {
 }
 
 func main() {
-	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrefresh, makerrebalance, perpreplenishment, liabilityhedger, optionliabilityp6, optionvaluetakerp6, vannavolgap6, fundingcarry, termcarry, termcarryp4chain, termcarryp4pair, datedcarryp5, datedcarryp5pair, datedmandatep5, termcarrylifecycle, perpexposurehedger, perpexposurerisk, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, calendar, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
+	metric := flag.String("metric", "roles", "roles, postonly, makerquotesize, makerrefresh, makerrebalance, perpreplenishment, liabilityhedger, cdfliquidity, optionliabilityp6, optionvaluetakerp6, vannavolgap6, fundingcarry, termcarry, termcarryp4chain, termcarryp4pair, datedcarryp5, datedcarryp5pair, datedmandatep5, termcarrylifecycle, perpexposurehedger, perpexposurerisk, perpsignals, noiseflowphase, stalls, triangular, stylized, flow, impact, bookshape, sweep, sweepimpact, mechanical, spacing, resting, viability, lifecycle, calendar, hedging, conservation, positions, fillpositions, settlements, expiryfills, orderlifecycle, arbitrage, crossvenue, roleaudit, ecology, liquidations, marginchecks, derivatives, streamhash, evidencehash, evidenceartifacthash, basis, optionsurface, exposure, reaction, observationreceipts, frontiervectors")
 	postOnlyRoles := flag.String("post-only-roles", "", "comma-separated participant role groups for post-only activity")
 	postOnlySymbols := flag.String("post-only-symbols", "", "comma-separated symbols for post-only activity")
 	venue := flag.String("venue", "north", "venue for book-level metrics")
@@ -388,6 +388,19 @@ func main() {
 					result.ReceiptAuditValid, result.MissingReceipts, result.ReceiptMismatches, result.FutureReceiptUse,
 					result.DecisionFieldMismatches, result.OutcomeFieldMismatches, result.MissingOutcomes, result.DuplicateOutcomes,
 					result.FeeMismatches, result.SelfFills, result.NonReducingFills, result.Valid)
+			})
+		case "cdfliquidity":
+			result, err := run.MeasureCDFLiquidity()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+				os.Exit(1)
+			}
+			emit(dir, result, *asJSON, func() {
+				fmt.Printf("%-22s suppliers %d decisions %d fills %d traded %d pnl-changing %d inventory-responsive %d cancel/withdraw %d/%d borrowed %d valid %t\n",
+					dir, result.SupplierCount, result.DecisionCount, result.FillCount,
+					result.TradingSupplierCount, result.PnLChangingSupplierCount,
+					result.InventoryResponsiveDecisionCount, result.CancelCount,
+					result.WithdrawCount, result.MaxBorrowed, result.Valid)
 			})
 		case "optionliabilityp6":
 			result, err := run.MeasureOptionLiability()

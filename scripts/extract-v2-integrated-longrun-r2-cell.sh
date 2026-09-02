@@ -19,7 +19,7 @@ case "$extractor_variant" in
 		;;
 	sv1)
 		contract_script="$root_dir/scripts/v2-r2-sv1-24h-contract.sh"
-		contract_version="v2-r2-sv1-24h-candidate-v1"
+		contract_version="v2-r2-sv1-24h-candidate-v2"
 		expected_config_dir="$root_dir/research/configs/v2-r2-sv1-24h"
 		expected_runner_contract="v2-r2-sv1-24h-runner-v1"
 		;;
@@ -299,6 +299,9 @@ derived_artifacts=(
 	datedmandatep5.json fundingcarry.json termcarry.json datedcarryp5.json perpreplenishment.json
 	activation.json integrity.json analysis-metadata.json
 )
+if [[ "$extractor_variant" == sv1 ]]; then
+	derived_artifacts+=(cdfliquidity.json)
+fi
 for artifact in "${derived_artifacts[@]}"; do
 	[[ ! -e "$analysis_dir/$artifact" && ! -e "$analysis_dir/$artifact.err" ]] || fail "refusing to overwrite existing derived evidence: $analysis_dir/$artifact"
 done
@@ -339,6 +342,9 @@ metrics=(
 	optionvaluetakerp6 vannavolgap6 exposure hedging makerrefresh makerquotesize
 	makerrebalance postonly liabilityhedger perpsignals
 )
+if [[ "$extractor_variant" == sv1 ]]; then
+	metrics+=(cdfliquidity)
+fi
 for metric in "${metrics[@]}"; do
 	if [[ "$metric" == positions || "$metric" == settlements ]]; then
 		if [[ "$metric" == settlements ]]; then
@@ -413,6 +419,7 @@ fi
 raw_count=0
 cdf_borrow_events=0
 price_unavailable_rejections=0
+cdf_liquidity_activation_observed=false
 [[ -d "$cell/venues" ]] || fail "missing raw venue evidence directory"
 while IFS= read -r -d '' raw_file; do
 	raw_count=$((raw_count + 1))
@@ -433,55 +440,112 @@ done < <(find "$cell/venues" -type f -name '*.jsonl' -print0 | sort -z)
 
 activation_tmp=$(mktemp "$analysis_dir/activation.json.tmp-XXXXXX")
 activation_filter="$(v2_r2_calendar_listing_timeline_jq_definition)"
-activation_filter+='def r($x): $x[0].result;
+jq_args=(
+	-n --argjson cdf_borrow_events "$cdf_borrow_events"
+	--argjson price_unavailable_rejections "$price_unavailable_rejections"
+	--argjson enabled_cross_asset_spot_graph "$(jq -er '.cross_asset_spot_graph' "$cell/run-config.json")"
+	--argjson enabled_cross_asset_collateral_marks "$(jq -er '.cross_asset_collateral_marks' "$cell/run-config.json")"
+	--slurpfile calendar "$analysis_dir/calendar.json"
+	--argjson expected_calendar_expiries "$expected_calendar_expiries"
+	--argjson expected_calendar_completed_expiries "$expected_calendar_completed_expiries"
+	--argjson expected_calendar_listing_timeline "$expected_calendar_listing_timeline"
+	--argjson expected_calendar_venue_ids "$(v2_r2_expected_calendar_venue_ids)"
+	--arg contract "$contract_version"
+)
+if [[ "$extractor_variant" == sv1 ]]; then
+	expected_cdf_supplier_count=$(jq -er '((.elastic_liquidity_suppliers // []) | length) * (.venue_ids | length)' "$cell/run-config.json")
+	[[ "$expected_cdf_supplier_count" =~ ^[1-9][0-9]*$ ]] || fail "SV1 config has no registered CDF supplier roster"
+	v2_r2_require_cdf_supplier_activation "$analysis_dir/cdfliquidity.json" "$expected_cdf_supplier_count" ||
+		fail "SV1 CDF liquidity activation contract not satisfied"
+	cdf_liquidity_activation_observed=true
+	jq_args+=(--slurpfile cdf_liquidity "$analysis_dir/cdfliquidity.json")
+	activation_filter+='def r($x): $x[0].result;
 	 {schema_version: 1, result: {contract: $contract,
-		cdf_collateral_borrowing: {events: $cdf_borrow_events,
-			enabled_cross_asset_spot_graph: $enabled_cross_asset_spot_graph,
-			enabled_cross_asset_collateral_marks: $enabled_cross_asset_collateral_marks},
-		price_unavailable_order_rejections: $price_unavailable_rejections,
-		calendar: (r($calendar)),
-		predicates: {cdf_collateral_borrowing_observed: ($cdf_borrow_events > 0 and
-			$enabled_cross_asset_spot_graph and $enabled_cross_asset_collateral_marks),
-			zero_price_unavailable_order_rejections: ($price_unavailable_rejections == 0),
-			calendar_behavior_attested: (r($calendar).contract == "calendar-audit-v2" and
-				all(r($calendar).venues[]; calendar_listing_timeline_matches(.listing_timeline; $expected_calendar_listing_timeline)) and
-				(r($calendar).venues | map(.venue_id) | sort) == ($expected_calendar_venue_ids | sort) and
-				r($calendar).futures_expiry_nanos == $expected_calendar_expiries and
-				r($calendar).option_expiry_nanos == $expected_calendar_expiries and
-				r($calendar).shared_expiry_nanos == $expected_calendar_expiries and
-				(r($calendar).venues | length) == 3 and
-				all(r($calendar).venues[];
-					.futures_expiry_nanos == $expected_calendar_expiries and
-					.option_expiry_nanos == $expected_calendar_expiries and
-					.shared_expiry_nanos == $expected_calendar_expiries and
-					.futures_listed == 28 and .options_listed == 280 and
-					.futures_settled == 23 and .options_settled == 230 and
-					.future_expiry_cycles == 23 and .option_expiry_cycles == 23 and
-					.duplicate_future_listings == 0 and .duplicate_option_listings == 0 and
-					.duplicate_future_settlements == 0 and .duplicate_option_settlements == 0 and
-					.settlement_without_listing == 0 and .settlement_before_listing == 0 and
-					.malformed_derivative_events == 0 and
-					.max_simultaneous_future_expiries >= 3 and
-					.max_simultaneous_option_expiries >= 3 and
-					.future_expiry_cycles == ($expected_calendar_completed_expiries | length) and
-					.option_expiry_cycles == ($expected_calendar_completed_expiries | length)))}}}'
-jq -n --argjson cdf_borrow_events "$cdf_borrow_events" \
-	--argjson price_unavailable_rejections "$price_unavailable_rejections" \
-	--argjson enabled_cross_asset_spot_graph "$(jq -er '.cross_asset_spot_graph' "$cell/run-config.json")" \
-	--argjson enabled_cross_asset_collateral_marks "$(jq -er '.cross_asset_collateral_marks' "$cell/run-config.json")" \
-	--slurpfile calendar "$analysis_dir/calendar.json" \
-	--argjson expected_calendar_expiries "$expected_calendar_expiries" \
-	--argjson expected_calendar_completed_expiries "$expected_calendar_completed_expiries" \
-	--argjson expected_calendar_listing_timeline "$expected_calendar_listing_timeline" \
-	--argjson expected_calendar_venue_ids "$(v2_r2_expected_calendar_venue_ids)" \
-	--arg contract "$contract_version" \
-	"$activation_filter" >"$activation_tmp"
+	 cdf_collateral_borrowing: {events: $cdf_borrow_events,
+		 enabled_cross_asset_spot_graph: $enabled_cross_asset_spot_graph,
+		 enabled_cross_asset_collateral_marks: $enabled_cross_asset_collateral_marks},
+	 cdf_liquidity: {valid: r($cdf_liquidity).valid, supplier_count: r($cdf_liquidity).supplier_count,
+		 decision_count: r($cdf_liquidity).decision_count, fill_count: r($cdf_liquidity).fill_count,
+		 trading_supplier_count: r($cdf_liquidity).trading_supplier_count,
+		 pnl_changing_supplier_count: r($cdf_liquidity).pnl_changing_supplier_count,
+		 inventory_responsive_decision_count: r($cdf_liquidity).inventory_responsive_decision_count,
+		 cancel_count: r($cdf_liquidity).cancel_count, withdraw_count: r($cdf_liquidity).withdraw_count,
+		 max_borrowed: r($cdf_liquidity).max_borrowed, checks: (r($cdf_liquidity).checks // [] | length)},
+	 price_unavailable_order_rejections: $price_unavailable_rejections,
+	 calendar: (r($calendar)),
+		 predicates: {cdf_liquidity_activation_observed: $cdf_liquidity_activation_observed,
+		 zero_price_unavailable_order_rejections: ($price_unavailable_rejections == 0),
+		 calendar_behavior_attested: (r($calendar).contract == "calendar-audit-v2" and
+			 all(r($calendar).venues[]; calendar_listing_timeline_matches(.listing_timeline; $expected_calendar_listing_timeline)) and
+			 (r($calendar).venues | map(.venue_id) | sort) == ($expected_calendar_venue_ids | sort) and
+			 r($calendar).futures_expiry_nanos == $expected_calendar_expiries and
+			 r($calendar).option_expiry_nanos == $expected_calendar_expiries and
+			 r($calendar).shared_expiry_nanos == $expected_calendar_expiries and
+			 (r($calendar).venues | length) == 3 and
+			 all(r($calendar).venues[];
+				 .futures_expiry_nanos == $expected_calendar_expiries and
+				 .option_expiry_nanos == $expected_calendar_expiries and
+				 .shared_expiry_nanos == $expected_calendar_expiries and
+				 .futures_listed == 28 and .options_listed == 280 and
+				 .futures_settled == 23 and .options_settled == 230 and
+				 .future_expiry_cycles == 23 and .option_expiry_cycles == 23 and
+				 .duplicate_future_listings == 0 and .duplicate_option_listings == 0 and
+				 .duplicate_future_settlements == 0 and .duplicate_option_settlements == 0 and
+				 .settlement_without_listing == 0 and .settlement_before_listing == 0 and
+				 .malformed_derivative_events == 0 and
+				 .max_simultaneous_future_expiries >= 3 and
+				 .max_simultaneous_option_expiries >= 3 and
+				 .future_expiry_cycles == ($expected_calendar_completed_expiries | length) and
+				 .option_expiry_cycles == ($expected_calendar_completed_expiries | length)))}}}'
+	jq_args+=(--argjson cdf_liquidity_activation_observed "$cdf_liquidity_activation_observed")
+else
+	activation_filter+='def r($x): $x[0].result;
+	 {schema_version: 1, result: {contract: $contract,
+	 cdf_collateral_borrowing: {events: $cdf_borrow_events,
+		 enabled_cross_asset_spot_graph: $enabled_cross_asset_spot_graph,
+		 enabled_cross_asset_collateral_marks: $enabled_cross_asset_collateral_marks},
+	 price_unavailable_order_rejections: $price_unavailable_rejections,
+	 calendar: (r($calendar)),
+	 predicates: {cdf_collateral_borrowing_observed: ($cdf_borrow_events > 0 and
+		 $enabled_cross_asset_spot_graph and $enabled_cross_asset_collateral_marks),
+		 zero_price_unavailable_order_rejections: ($price_unavailable_rejections == 0),
+		 calendar_behavior_attested: (r($calendar).contract == "calendar-audit-v2" and
+			 all(r($calendar).venues[]; calendar_listing_timeline_matches(.listing_timeline; $expected_calendar_listing_timeline)) and
+			 (r($calendar).venues | map(.venue_id) | sort) == ($expected_calendar_venue_ids | sort) and
+			 r($calendar).futures_expiry_nanos == $expected_calendar_expiries and
+			 r($calendar).option_expiry_nanos == $expected_calendar_expiries and
+			 r($calendar).shared_expiry_nanos == $expected_calendar_expiries and
+			 (r($calendar).venues | length) == 3 and
+			 all(r($calendar).venues[];
+				 .futures_expiry_nanos == $expected_calendar_expiries and
+				 .option_expiry_nanos == $expected_calendar_expiries and
+				 .shared_expiry_nanos == $expected_calendar_expiries and
+				 .futures_listed == 28 and .options_listed == 280 and
+				 .futures_settled == 23 and .options_settled == 230 and
+				 .future_expiry_cycles == 23 and .option_expiry_cycles == 23 and
+				 .duplicate_future_listings == 0 and .duplicate_option_listings == 0 and
+				 .duplicate_future_settlements == 0 and .duplicate_option_settlements == 0 and
+				 .settlement_without_listing == 0 and .settlement_before_listing == 0 and
+				 .malformed_derivative_events == 0 and
+				 .max_simultaneous_future_expiries >= 3 and
+				 .max_simultaneous_option_expiries >= 3 and
+				 .future_expiry_cycles == ($expected_calendar_completed_expiries | length) and
+				 .option_expiry_cycles == ($expected_calendar_completed_expiries | length)))}}}'
+fi
+jq "${jq_args[@]}" "$activation_filter" >"$activation_tmp"
 mv "$activation_tmp" "$analysis_dir/activation.json"
 require_json_object "$analysis_dir/activation.json"
-jq -e '(.result.predicates | length) == 3 and
-	(.result.predicates | keys) == ["calendar_behavior_attested", "cdf_collateral_borrowing_observed", "zero_price_unavailable_order_rejections"] and
-	all(.result.predicates | to_entries[]; .value == true)' "$analysis_dir/activation.json" >/dev/null ||
-	fail "candidate activation contract not satisfied"
+if [[ "$extractor_variant" == sv1 ]]; then
+	jq -e '(.result.predicates | length) == 3 and
+		(.result.predicates | keys) == ["calendar_behavior_attested", "cdf_liquidity_activation_observed", "zero_price_unavailable_order_rejections"] and
+		all(.result.predicates | to_entries[]; .value == true)' "$analysis_dir/activation.json" >/dev/null ||
+		fail "SV1 candidate activation contract not satisfied"
+	else
+	jq -e '(.result.predicates | length) == 3 and
+		(.result.predicates | keys) == ["calendar_behavior_attested", "cdf_collateral_borrowing_observed", "zero_price_unavailable_order_rejections"] and
+		all(.result.predicates | to_entries[]; .value == true)' "$analysis_dir/activation.json" >/dev/null ||
+		fail "candidate activation contract not satisfied"
+fi
 
 integrity_tmp=$(mktemp "$analysis_dir/integrity.json.tmp-XXXXXX")
 jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
@@ -514,6 +578,7 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 	--argjson expected_calendar_listing_timeline "$expected_calendar_listing_timeline" \
 	--argjson expected_calendar_venue_ids "$(v2_r2_expected_calendar_venue_ids)" \
 	--arg contract "$contract_version" \
+	--arg extractor_variant "$extractor_variant" \
 	"$(v2_r2_calendar_listing_timeline_jq_definition)"'def r($x): $x[0].result;
 	 def field($x; $name): (r($x) | getpath($name | split(".")));
 	 def count($x; $name): (field($x; $name) // 0) as $value | if ($value | type) == "array" then ($value | length) elif ($value | type) == "number" then $value else 0 end;
@@ -549,7 +614,7 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 			option_surface: (count($optionsurface; "points") > 0),
 			exposure: (count($exposure; "risk_samples") > 0),
 			hedging: (count($hedging; "profiles") > 0),
-			activation: (r($activation).predicates.cdf_collateral_borrowing_observed == true and r($activation).predicates.zero_price_unavailable_order_rejections == true),
+			activation: (if $extractor_variant == "sv1" then r($activation).predicates.cdf_liquidity_activation_observed == true and r($activation).predicates.zero_price_unavailable_order_rejections == true else r($activation).predicates.cdf_collateral_borrowing_observed == true and r($activation).predicates.zero_price_unavailable_order_rejections == true end),
 			late_path: (count($lifecycle; "funding") > 0 and count($lifecycle; "settlement_rounds") > 0 and count($settlements; "checks") > 0 and count($expiryfills; "expired_contracts") > 0)
 		},
 		observed: {
@@ -574,6 +639,9 @@ required=(
 	postonly.json liabilityhedger.json perpsignals.json datedmandatep5.json fundingcarry.json
 	termcarry.json datedcarryp5.json perpreplenishment.json activation.json integrity.json calendar.json
 )
+if [[ "$extractor_variant" == sv1 ]]; then
+	required+=(cdfliquidity.json)
+fi
 for artifact in "${required[@]}"; do
 	require_file "$analysis_dir/$artifact"
 	require_json_object "$analysis_dir/$artifact"

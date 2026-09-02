@@ -75,7 +75,7 @@ required_artifacts=(
 	optionsurface.json optionliabilityp6.json optionvaluetakerp6.json vannavolgap6.json
 	exposure.json hedging.json makerrefresh.json makerquotesize.json makerrebalance.json
 	postonly.json liabilityhedger.json perpsignals.json datedmandatep5.json fundingcarry.json
-	termcarry.json datedcarryp5.json perpreplenishment.json activation.json integrity.json calendar.json
+	termcarry.json datedcarryp5.json perpreplenishment.json activation.json integrity.json calendar.json cdfliquidity.json
 )
 required_json=$(printf '%s\n' "${required_artifacts[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
 
@@ -192,7 +192,7 @@ for seed in 607 613 617; do
 		require_file "$cell/analysis-metadata.json"
 		require_file "$cell/integrity.json"
 		require_file "$cell/activation.json"
-		jq -e --arg cell "$population-$seed" --argjson seed "$seed" --arg contract "v2-r2-sv1-24h-candidate-v1" \
+		jq -e --arg cell "$population-$seed" --argjson seed "$seed" --arg contract "v2-r2-sv1-24h-candidate-v2" \
 			--argjson required "$required_json" \
 			'.schema_version == 3 and .cell == $cell and .seed == $seed and
 			 .evidence_format == "evstream_v3" and .analysis_contract == $contract and
@@ -209,7 +209,8 @@ for seed in 607 613 617; do
 			[[ "$actual" == "$declared" ]] || fail "artifact hash mismatch: $population-$seed/$file"
 		done
 		if ! jq -e 'all(.predicates | to_entries[]; .value == true)' "$cell/integrity.json" >/dev/null ||
-			! jq -e '.result.predicates | length == 3 and all(to_entries[]; .value == true)' "$cell/activation.json" >/dev/null; then
+			! jq -e '(.result.predicates | keys) == ["calendar_behavior_attested", "cdf_liquidity_activation_observed", "zero_price_unavailable_order_rejections"] and
+				.result.cdf_liquidity.valid == true and all(.result.predicates | to_entries[]; .value == true)' "$cell/activation.json" >/dev/null; then
 			all_cells_valid=false
 		fi
 		if ! terminal_mark_valid "$cell"; then

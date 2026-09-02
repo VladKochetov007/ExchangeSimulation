@@ -50,6 +50,9 @@ derived_artifacts=(
 	makerrebalance.json postonly.json liabilityhedger.json perpsignals.json datedmandatep5.json fundingcarry.json
 	termcarry.json datedcarryp5.json perpreplenishment.json activation.json integrity.json analysis-metadata.json
 )
+if [[ "$verification_variant" == sv1 ]]; then
+	derived_artifacts+=(cdfliquidity.json)
+fi
 
 for artifact in "${derived_artifacts[@]}"; do
 	original="$cell/$artifact"
