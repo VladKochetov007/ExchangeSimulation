@@ -22,67 +22,69 @@ import (
 // intervention can be reconstructed without guessing; it is not a survival
 // score.
 type CDFLiquidityRunAudit struct {
-	Provenance                       *CDFLiquidityRunProvenance  `json:"provenance,omitempty"`
-	SupplierCount                    int                         `json:"supplier_count"`
-	DecisionCount                    int64                       `json:"decision_count"`
-	FillCount                        int64                       `json:"fill_count"`
-	SupplierVolumeQty                int64                       `json:"supplier_volume_qty"`
-	TotalTradeCount                  int64                       `json:"total_trade_count"`
-	TotalTradeVolumeQty              int64                       `json:"total_trade_volume_qty"`
-	SupplierVolumeShare              float64                     `json:"supplier_volume_share"`
-	SnapshotCount                    int64                       `json:"snapshot_count"`
-	BidAbsentSnapshots               int64                       `json:"bid_absent_snapshots"`
-	AskAbsentSnapshots               int64                       `json:"ask_absent_snapshots"`
-	BothAbsentSnapshots              int64                       `json:"both_absent_snapshots"`
-	QualifiedBidAbsentSnapshots      int64                       `json:"qualified_bid_absent_snapshots"`
-	QualifiedAskAbsentSnapshots      int64                       `json:"qualified_ask_absent_snapshots"`
-	QualifiedBothAbsentSnapshots     int64                       `json:"qualified_both_absent_snapshots"`
-	BidAbsenceFraction               float64                     `json:"bid_absence_fraction"`
-	AskAbsenceFraction               float64                     `json:"ask_absence_fraction"`
-	QualifiedBidAbsenceFraction      float64                     `json:"qualified_bid_absence_fraction"`
-	QualifiedAskAbsenceFraction      float64                     `json:"qualified_ask_absence_fraction"`
-	MinimumExecutableQty             int64                       `json:"minimum_executable_qty"`
-	SupplierInitialEquity            int64                       `json:"supplier_initial_equity"`
-	SupplierTerminalEquity           int64                       `json:"supplier_terminal_equity"`
-	SupplierPnL                      int64                       `json:"supplier_pnl"`
-	AcceptedQuoteCount               int64                       `json:"accepted_quote_count"`
-	CompletedQuoteCount              int64                       `json:"completed_quote_count"`
-	CensoredQuoteCount               int64                       `json:"censored_quote_count"`
-	LiveAcceptedQuoteCount           int64                       `json:"live_accepted_quote_count"`
-	PendingSubmissionCount           int64                       `json:"pending_submission_count"`
-	CancelPendingQuoteCount          int64                       `json:"cancel_pending_quote_count"`
-	MeanQuoteLifetimeNs              float64                     `json:"mean_quote_lifetime_ns"`
-	MaxQuoteLifetimeNs               int64                       `json:"max_quote_lifetime_ns"`
-	MeanObservedTouchShare           float64                     `json:"mean_observed_touch_share"`
-	MaxObservedTouchShare            float64                     `json:"max_observed_touch_share"`
-	SubmitCount                      int64                       `json:"submit_count"`
-	RestCount                        int64                       `json:"rest_count"`
-	CancelCount                      int64                       `json:"cancel_count"`
-	WithdrawCount                    int64                       `json:"withdraw_count"`
-	TradingSupplierCount             int64                       `json:"trading_supplier_count"`
-	PnLChangingSupplierCount         int64                       `json:"pnl_changing_supplier_count"`
-	InventoryResponsiveDecisionCount int64                       `json:"inventory_responsive_decision_count"`
-	RiskStateDecisionCount           int64                       `json:"risk_state_decision_count"`
-	RiskLimitTriggeredDecisionCount  int64                       `json:"risk_limit_triggered_decision_count"`
-	MaxObservedLossFromInitialQuote  int64                       `json:"max_observed_loss_from_initial_quote"`
-	MaxObservedDrawdownQuote         int64                       `json:"max_observed_drawdown_quote"`
-	RealizedPnL                      int64                       `json:"realized_pnl"`
-	UnrealizedPnL                    int64                       `json:"unrealized_pnl"`
-	EndowmentRevaluationPnL          int64                       `json:"endowment_revaluation_pnl"`
-	TradingPnL                       int64                       `json:"trading_pnl"`
-	TradingPnLReconciliationResidual int64                       `json:"trading_pnl_reconciliation_residual"`
-	BalanceSnapshotCount             int64                       `json:"balance_snapshot_count"`
-	BalanceReconciliationResidual    int64                       `json:"balance_reconciliation_residual"`
-	PnLReconciliationResidual        int64                       `json:"pnl_reconciliation_residual"`
-	MaxBorrowed                      int64                       `json:"max_borrowed"`
-	HistoricalSupplierCount          int                         `json:"historical_supplier_count"`
-	ExpectedHistoricalCount          int                         `json:"expected_historical_count"`
-	SupplierDepthOver75Share         float64                     `json:"supplier_depth_over_75_share"`
-	MaxSupplierDepthShare            float64                     `json:"max_supplier_depth_share"`
-	Venues                           []CDFLiquidityVenueAudit    `json:"venues"`
-	Suppliers                        []CDFLiquiditySupplierAudit `json:"suppliers"`
-	Checks                           []CDFLiquidityCheck         `json:"checks,omitempty"`
-	Valid                            bool                        `json:"valid"`
+	Provenance                        *CDFLiquidityRunProvenance  `json:"provenance,omitempty"`
+	SupplierCount                     int                         `json:"supplier_count"`
+	DecisionCount                     int64                       `json:"decision_count"`
+	FillCount                         int64                       `json:"fill_count"`
+	SupplierVolumeQty                 int64                       `json:"supplier_volume_qty"`
+	TotalTradeCount                   int64                       `json:"total_trade_count"`
+	TotalTradeVolumeQty               int64                       `json:"total_trade_volume_qty"`
+	SupplierVolumeShare               float64                     `json:"supplier_volume_share"`
+	SnapshotCount                     int64                       `json:"snapshot_count"`
+	BidAbsentSnapshots                int64                       `json:"bid_absent_snapshots"`
+	AskAbsentSnapshots                int64                       `json:"ask_absent_snapshots"`
+	BothAbsentSnapshots               int64                       `json:"both_absent_snapshots"`
+	QualifiedBidAbsentSnapshots       int64                       `json:"qualified_bid_absent_snapshots"`
+	QualifiedAskAbsentSnapshots       int64                       `json:"qualified_ask_absent_snapshots"`
+	QualifiedBothAbsentSnapshots      int64                       `json:"qualified_both_absent_snapshots"`
+	BidAbsenceFraction                float64                     `json:"bid_absence_fraction"`
+	AskAbsenceFraction                float64                     `json:"ask_absence_fraction"`
+	QualifiedBidAbsenceFraction       float64                     `json:"qualified_bid_absence_fraction"`
+	QualifiedAskAbsenceFraction       float64                     `json:"qualified_ask_absence_fraction"`
+	MinimumExecutableQty              int64                       `json:"minimum_executable_qty"`
+	SupplierInitialEquity             int64                       `json:"supplier_initial_equity"`
+	SupplierTerminalEquity            int64                       `json:"supplier_terminal_equity"`
+	SupplierPnL                       int64                       `json:"supplier_pnl"`
+	AcceptedQuoteCount                int64                       `json:"accepted_quote_count"`
+	CompletedQuoteCount               int64                       `json:"completed_quote_count"`
+	CensoredQuoteCount                int64                       `json:"censored_quote_count"`
+	LiveAcceptedQuoteCount            int64                       `json:"live_accepted_quote_count"`
+	PendingSubmissionCount            int64                       `json:"pending_submission_count"`
+	CancelPendingQuoteCount           int64                       `json:"cancel_pending_quote_count"`
+	MeanQuoteLifetimeNs               float64                     `json:"mean_quote_lifetime_ns"`
+	MaxQuoteLifetimeNs                int64                       `json:"max_quote_lifetime_ns"`
+	MeanObservedTouchShare            float64                     `json:"mean_observed_touch_share"`
+	MaxObservedTouchShare             float64                     `json:"max_observed_touch_share"`
+	SubmitCount                       int64                       `json:"submit_count"`
+	RestCount                         int64                       `json:"rest_count"`
+	CancelCount                       int64                       `json:"cancel_count"`
+	WithdrawCount                     int64                       `json:"withdraw_count"`
+	WithdrawalWithoutReplacementCount int64                       `json:"withdrawal_without_replacement_count"`
+	CensoredWithdrawalCount           int64                       `json:"censored_withdrawal_count"`
+	TradingSupplierCount              int64                       `json:"trading_supplier_count"`
+	PnLChangingSupplierCount          int64                       `json:"pnl_changing_supplier_count"`
+	InventoryResponsiveDecisionCount  int64                       `json:"inventory_responsive_decision_count"`
+	RiskStateDecisionCount            int64                       `json:"risk_state_decision_count"`
+	RiskLimitTriggeredDecisionCount   int64                       `json:"risk_limit_triggered_decision_count"`
+	MaxObservedLossFromInitialQuote   int64                       `json:"max_observed_loss_from_initial_quote"`
+	MaxObservedDrawdownQuote          int64                       `json:"max_observed_drawdown_quote"`
+	RealizedPnL                       int64                       `json:"realized_pnl"`
+	UnrealizedPnL                     int64                       `json:"unrealized_pnl"`
+	EndowmentRevaluationPnL           int64                       `json:"endowment_revaluation_pnl"`
+	TradingPnL                        int64                       `json:"trading_pnl"`
+	TradingPnLReconciliationResidual  int64                       `json:"trading_pnl_reconciliation_residual"`
+	BalanceSnapshotCount              int64                       `json:"balance_snapshot_count"`
+	BalanceReconciliationResidual     int64                       `json:"balance_reconciliation_residual"`
+	PnLReconciliationResidual         int64                       `json:"pnl_reconciliation_residual"`
+	MaxBorrowed                       int64                       `json:"max_borrowed"`
+	HistoricalSupplierCount           int                         `json:"historical_supplier_count"`
+	ExpectedHistoricalCount           int                         `json:"expected_historical_count"`
+	SupplierDepthOver75Share          float64                     `json:"supplier_depth_over_75_share"`
+	MaxSupplierDepthShare             float64                     `json:"max_supplier_depth_share"`
+	Venues                            []CDFLiquidityVenueAudit    `json:"venues"`
+	Suppliers                         []CDFLiquiditySupplierAudit `json:"suppliers"`
+	Checks                            []CDFLiquidityCheck         `json:"checks,omitempty"`
+	Valid                             bool                        `json:"valid"`
 
 	expectedHistoricalCountPerVenue int
 	lastDepthSnapshotAt             map[string]int64
@@ -98,6 +100,7 @@ type CDFLiquidityRunAudit struct {
 	pendingOrderWaits               []cdfPendingOrderWait
 	pendingCancelWaits              []cdfPendingCancelWait
 	staleWithdrawals                map[cdfOrderKey]cdfStaleWithdrawal
+	supplierActions                 []cdfSupplierAction
 	restDecisions                   []cdfRestDecision
 }
 
@@ -105,56 +108,59 @@ type CDFLiquidityRunAudit struct {
 // by the preregistration. Account equity is the PnL source; position and
 // turnover are reconstructed from local evidence.
 type CDFLiquiditySupplierAudit struct {
-	VenueID                          string  `json:"venue_id"`
-	Role                             string  `json:"role"`
-	ClientID                         uint64  `json:"client_id"`
-	DecisionCount                    int64   `json:"decision_count"`
-	FillCount                        int64   `json:"fill_count"`
-	FilledQty                        int64   `json:"filled_qty"`
-	BuyQty                           int64   `json:"buy_qty"`
-	SellQty                          int64   `json:"sell_qty"`
-	InitialEquity                    int64   `json:"initial_equity"`
-	TerminalEquity                   int64   `json:"terminal_equity"`
-	PnL                              int64   `json:"pnl"`
-	EndowmentRevaluationPnL          int64   `json:"endowment_revaluation_pnl"`
-	TradingPnL                       int64   `json:"trading_pnl"`
-	TradingPnLReconciliationResidual int64   `json:"trading_pnl_reconciliation_residual"`
-	MinPosition                      int64   `json:"min_position"`
-	MaxPosition                      int64   `json:"max_position"`
-	TerminalPosition                 int64   `json:"terminal_position"`
-	InventoryLimit                   int64   `json:"inventory_limit"`
-	AcceptedQuoteCount               int64   `json:"accepted_quote_count"`
-	CompletedQuoteCount              int64   `json:"completed_quote_count"`
-	CensoredQuoteCount               int64   `json:"censored_quote_count"`
-	LiveAcceptedQuoteCount           int64   `json:"live_accepted_quote_count"`
-	PendingSubmissionCount           int64   `json:"pending_submission_count"`
-	CancelPendingQuoteCount          int64   `json:"cancel_pending_quote_count"`
-	WithdrawCount                    int64   `json:"withdraw_count"`
-	CancelCount                      int64   `json:"cancel_count"`
-	RestCount                        int64   `json:"rest_count"`
-	SubmitCount                      int64   `json:"submit_count"`
-	InventoryResponsiveDecisionCount int64   `json:"inventory_responsive_decision_count"`
-	RiskStateDecisionCount           int64   `json:"risk_state_decision_count"`
-	RiskLimitTriggeredDecisionCount  int64   `json:"risk_limit_triggered_decision_count"`
-	MaxObservedLossFromInitialQuote  int64   `json:"max_observed_loss_from_initial_quote"`
-	MaxObservedDrawdownQuote         int64   `json:"max_observed_drawdown_quote"`
-	MeanQuoteLifetimeNs              float64 `json:"mean_quote_lifetime_ns"`
-	MaxQuoteLifetimeNs               int64   `json:"max_quote_lifetime_ns"`
-	MeanObservedTouchShare           float64 `json:"mean_observed_touch_share"`
-	MaxObservedTouchShare            float64 `json:"max_observed_touch_share"`
-	MeanObservationAgeNs             float64 `json:"mean_observation_age_ns"`
-	MaxObservationAgeNs              int64   `json:"max_observation_age_ns"`
-	ConfiguredMaxPosition            int64   `json:"configured_max_position"`
-	ConfiguredMaxInventory           int64   `json:"configured_max_inventory"`
-	ConfiguredMaxQuoteQty            int64   `json:"configured_max_quote_qty"`
-	ConfiguredMinimumExecutableQty   int64   `json:"configured_minimum_executable_qty"`
-	ConfiguredMaxLossQuote           int64   `json:"configured_max_loss_quote"`
-	ConfiguredMakerFeeBps            int64   `json:"configured_maker_fee_bps"`
-	ConfiguredReferencePrice         int64   `json:"configured_reference_price"`
-	ConfiguredReferenceHalfLife      int64   `json:"configured_reference_half_life"`
-	ConfiguredBaseHolding            int64   `json:"configured_base_holding"`
-	ConfiguredElasticityPerPercent   int64   `json:"configured_elasticity_per_percent"`
-	SupplierVolumeShare              float64 `json:"supplier_volume_share"`
+	VenueID                           string  `json:"venue_id"`
+	Role                              string  `json:"role"`
+	ClientID                          uint64  `json:"client_id"`
+	DecisionCount                     int64   `json:"decision_count"`
+	FillCount                         int64   `json:"fill_count"`
+	FilledQty                         int64   `json:"filled_qty"`
+	BuyQty                            int64   `json:"buy_qty"`
+	SellQty                           int64   `json:"sell_qty"`
+	InitialEquity                     int64   `json:"initial_equity"`
+	TerminalEquity                    int64   `json:"terminal_equity"`
+	PnL                               int64   `json:"pnl"`
+	EndowmentRevaluationPnL           int64   `json:"endowment_revaluation_pnl"`
+	TradingPnL                        int64   `json:"trading_pnl"`
+	TradingPnLReconciliationResidual  int64   `json:"trading_pnl_reconciliation_residual"`
+	MinPosition                       int64   `json:"min_position"`
+	MaxPosition                       int64   `json:"max_position"`
+	TerminalPosition                  int64   `json:"terminal_position"`
+	InventoryLimit                    int64   `json:"inventory_limit"`
+	AcceptedQuoteCount                int64   `json:"accepted_quote_count"`
+	CompletedQuoteCount               int64   `json:"completed_quote_count"`
+	CensoredQuoteCount                int64   `json:"censored_quote_count"`
+	LiveAcceptedQuoteCount            int64   `json:"live_accepted_quote_count"`
+	PendingSubmissionCount            int64   `json:"pending_submission_count"`
+	CancelPendingQuoteCount           int64   `json:"cancel_pending_quote_count"`
+	WithdrawCount                     int64   `json:"withdraw_count"`
+	CancelCount                       int64   `json:"cancel_count"`
+	RestCount                         int64   `json:"rest_count"`
+	SubmitCount                       int64   `json:"submit_count"`
+	WithdrawalWithoutReplacementCount int64   `json:"withdrawal_without_replacement_count"`
+	CensoredWithdrawalCount           int64   `json:"censored_withdrawal_count"`
+	InventoryResponsiveDecisionCount  int64   `json:"inventory_responsive_decision_count"`
+	RiskStateDecisionCount            int64   `json:"risk_state_decision_count"`
+	RiskLimitTriggeredDecisionCount   int64   `json:"risk_limit_triggered_decision_count"`
+	MaxObservedLossFromInitialQuote   int64   `json:"max_observed_loss_from_initial_quote"`
+	MaxObservedDrawdownQuote          int64   `json:"max_observed_drawdown_quote"`
+	MeanQuoteLifetimeNs               float64 `json:"mean_quote_lifetime_ns"`
+	MaxQuoteLifetimeNs                int64   `json:"max_quote_lifetime_ns"`
+	MeanObservedTouchShare            float64 `json:"mean_observed_touch_share"`
+	MaxObservedTouchShare             float64 `json:"max_observed_touch_share"`
+	MeanObservationAgeNs              float64 `json:"mean_observation_age_ns"`
+	MaxObservationAgeNs               int64   `json:"max_observation_age_ns"`
+	ConfiguredMaxPosition             int64   `json:"configured_max_position"`
+	ConfiguredMaxInventory            int64   `json:"configured_max_inventory"`
+	ConfiguredMaxQuoteQty             int64   `json:"configured_max_quote_qty"`
+	ConfiguredMinimumExecutableQty    int64   `json:"configured_minimum_executable_qty"`
+	ConfiguredIntervalNs              int64   `json:"configured_interval_ns"`
+	ConfiguredMaxLossQuote            int64   `json:"configured_max_loss_quote"`
+	ConfiguredMakerFeeBps             int64   `json:"configured_maker_fee_bps"`
+	ConfiguredReferencePrice          int64   `json:"configured_reference_price"`
+	ConfiguredReferenceHalfLife       int64   `json:"configured_reference_half_life"`
+	ConfiguredBaseHolding             int64   `json:"configured_base_holding"`
+	ConfiguredElasticityPerPercent    int64   `json:"configured_elasticity_per_percent"`
+	SupplierVolumeShare               float64 `json:"supplier_volume_share"`
 	// This is liquidity-conditioned concentration: the supplier-depth integral
 	// divided by total displayed-depth integral over non-empty intervals. Empty
 	// intervals are represented by the separate absence counters.
@@ -187,6 +193,7 @@ type CDFLiquiditySupplierAudit struct {
 	configuredSymbol                string
 	configuredMaxQuoteQty           int64
 	configuredMinimumExecutableQty  int64
+	configuredIntervalNs            int64
 	configuredMaxLossQuote          int64
 	configuredMakerFeeBps           int64
 	configuredMaxPosition           int64
@@ -354,6 +361,7 @@ type cdfSupplierConfig struct {
 	MaxInventory         int64  `json:"max_inventory"`
 	MaxQuoteQty          int64  `json:"max_quote_qty"`
 	MinimumExecutableQty int64  `json:"minimum_executable_qty"`
+	Interval             int64  `json:"interval"`
 	MaxLossQuote         int64  `json:"max_loss_quote"`
 	MaxObservationAge    int64  `json:"max_observation_age"`
 	DecisionPhaseOffset  int64  `json:"decision_phase_offset"`
@@ -728,6 +736,7 @@ type cdfOrderState struct {
 	side                    string
 	price                   int64
 	acceptedAt              int64
+	acceptedSequence        uint64
 	acceptedQty             int64
 	filledQty               int64
 	remainingQty            int64
@@ -738,6 +747,7 @@ type cdfOrderState struct {
 	filledOrdinal           int64
 	cancelled               bool
 	cancelRequestID         uint64
+	cancelledSequence       uint64
 	cancelRejected          bool
 	cancelRejectedRequestID uint64
 	cancelRejectedAt        int64
@@ -814,6 +824,16 @@ type cdfStaleWithdrawal struct {
 	ordinal         int64
 }
 
+type cdfSupplierAction struct {
+	key             cdfParticipantKey
+	action          string
+	orderID         uint64
+	cancelRequestID uint64
+	decisionAt      int64
+	sequence        uint64
+	ordinal         int64
+}
+
 type cdfPendingCancelWait struct {
 	key             cdfOrderKey
 	decisionAt      int64
@@ -875,6 +895,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		pendingOrderWaits:         make([]cdfPendingOrderWait, 0),
 		pendingCancelWaits:        make([]cdfPendingCancelWait, 0),
 		staleWithdrawals:          make(map[cdfOrderKey]cdfStaleWithdrawal),
+		supplierActions:           make([]cdfSupplierAction, 0),
 	}
 	config, configErr := loadCDFRunConfig(r)
 	if configErr != nil {
@@ -973,6 +994,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.configuredQuotePrecision = supplierConfig.QuotePrecision
 			state.configuredMaxQuoteQty = supplierConfig.MaxQuoteQty
 			state.configuredMinimumExecutableQty = supplierConfig.MinimumExecutableQty
+			state.configuredIntervalNs = supplierConfig.Interval
 			state.configuredMaxLossQuote = supplierConfig.MaxLossQuote
 			state.configuredMakerFeeBps = supplierConfig.MakerFeeBps
 			state.configuredReferencePrice = supplierConfig.ReferencePrice
@@ -989,6 +1011,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.ConfiguredMaxInventory = supplierConfig.MaxInventory
 			state.ConfiguredMaxQuoteQty = supplierConfig.MaxQuoteQty
 			state.ConfiguredMinimumExecutableQty = supplierConfig.MinimumExecutableQty
+			state.ConfiguredIntervalNs = supplierConfig.Interval
 			state.ConfiguredMaxLossQuote = supplierConfig.MaxLossQuote
 			state.ConfiguredMakerFeeBps = supplierConfig.MakerFeeBps
 			state.ConfiguredReferencePrice = supplierConfig.ReferencePrice
@@ -1191,6 +1214,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	if result.terminalAt == 0 {
 		result.terminalAt = result.lastEventAt
 	}
+	result.measureWithdrawalsWithoutReplacement(states, orders)
 	result.accumulateTerminalDepth(states)
 	result.reconcileFills(observedFills, actualFills, states)
 	result.reconcileSupplierBalances(states)
@@ -1295,6 +1319,17 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	}
 	r.DecisionCount++
 	state.DecisionCount++
+	if decision.Action == "submit" || (decision.Action == "withdraw" && decision.QuoteOrderID != 0) {
+		r.supplierActions = append(r.supplierActions, cdfSupplierAction{
+			key:             key,
+			action:          decision.Action,
+			orderID:         decision.QuoteOrderID,
+			cancelRequestID: decision.CancelRequestID,
+			decisionAt:      decision.DecisionTime,
+			sequence:        event.Sequence,
+			ordinal:         event.Ordinal,
+		})
+	}
 	if event.ClientID != decision.ClientID || decision.Role != state.Role || decision.Symbol != state.configuredSymbol || decision.DecisionTime != event.SimTS {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "decision identity or timestamp mismatch"})
 	}
@@ -2491,7 +2526,7 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			}
 		}
 		_, cancelRequested := r.cancelRequestedByOrder[orderKey]
-		order := &cdfOrderState{clientID: event.ClientID, side: accepted.Side, price: accepted.Price, requestID: accepted.RequestID, acceptedAt: event.SimTS, acceptedQty: accepted.Qty, remainingQty: accepted.Qty, cancelRequested: cancelRequested, remainingUpdates: []cdfOrderRemainingUpdate{{ordinal: event.Ordinal, remainingQty: accepted.Qty}}}
+		order := &cdfOrderState{clientID: event.ClientID, side: accepted.Side, price: accepted.Price, requestID: accepted.RequestID, acceptedAt: event.SimTS, acceptedSequence: event.Sequence, acceptedQty: accepted.Qty, remainingQty: accepted.Qty, cancelRequested: cancelRequested, remainingUpdates: []cdfOrderRemainingUpdate{{ordinal: event.Ordinal, remainingQty: accepted.Qty}}}
 		if share, ok := state.pendingTouchByRequest[accepted.RequestID]; ok {
 			order.touchShare, order.touchShareKnown = share, true
 			delete(state.pendingTouchByRequest, accepted.RequestID)
@@ -2584,7 +2619,7 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			return
 		}
 		order.closed, order.closedAt = true, event.SimTS
-		order.cancelled, order.cancelRequestID = true, cancelled.RequestID
+		order.cancelled, order.cancelRequestID, order.cancelledSequence = true, cancelled.RequestID, event.Sequence
 		order.remainingUpdates = append(order.remainingUpdates, cdfOrderRemainingUpdate{ordinal: event.Ordinal, remainingQty: order.remainingQty, closed: true})
 	case "OrderCancelRejected":
 		state := states[cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}]
@@ -2656,6 +2691,93 @@ func (r *CDFLiquidityRunAudit) validateStaleWithdrawals(orders map[cdfOrderKey]*
 			addFailure("stale withdrawal has no later matching exchange cancellation outcome")
 		}
 	}
+}
+
+// measureWithdrawalsWithoutReplacement distinguishes a genuine liquidity
+// withdrawal from an ordinary cancel/requote. A withdrawal qualifies only when
+// the supplier remains without a later submit for one complete registered
+// decision interval after the exchange confirms removal. Withdrawals too close
+// to the terminal boundary are censored instead of being treated as evidence
+// of persistent withdrawal.
+func (r *CDFLiquidityRunAudit) measureWithdrawalsWithoutReplacement(states map[cdfParticipantKey]*CDFLiquiditySupplierAudit, orders map[cdfOrderKey]*cdfOrderState) {
+	if len(r.supplierActions) == 0 {
+		return
+	}
+	sort.SliceStable(r.supplierActions, func(i, j int) bool {
+		if r.supplierActions[i].ordinal != r.supplierActions[j].ordinal {
+			return r.supplierActions[i].ordinal < r.supplierActions[j].ordinal
+		}
+		if r.supplierActions[i].key.VenueID != r.supplierActions[j].key.VenueID {
+			return r.supplierActions[i].key.VenueID < r.supplierActions[j].key.VenueID
+		}
+		return r.supplierActions[i].key.ClientID < r.supplierActions[j].key.ClientID
+	})
+	submits := make(map[cdfParticipantKey][]cdfSupplierAction)
+	for _, action := range r.supplierActions {
+		if action.action == "submit" {
+			submits[action.key] = append(submits[action.key], action)
+		}
+	}
+	for key := range submits {
+		sort.SliceStable(submits[key], func(i, j int) bool {
+			left, right := submits[key][i], submits[key][j]
+			if left.decisionAt != right.decisionAt {
+				return left.decisionAt < right.decisionAt
+			}
+			if left.sequence != 0 && right.sequence != 0 && left.sequence != right.sequence {
+				return left.sequence < right.sequence
+			}
+			return left.ordinal < right.ordinal
+		})
+	}
+	for _, action := range r.supplierActions {
+		if action.action != "withdraw" {
+			continue
+		}
+		state := states[action.key]
+		if state == nil || state.configuredIntervalNs <= 0 {
+			continue
+		}
+		order := orders[cdfOrderKey{VenueID: action.key.VenueID, ClientID: action.key.ClientID, OrderID: action.orderID}]
+		if order == nil || order.acceptedAt <= 0 || !cdfEvidenceAfter(action.decisionAt, action.sequence, order.acceptedAt, order.acceptedSequence) || !order.cancelled || order.cancelRequestID != action.cancelRequestID || !cdfEvidenceAfter(order.closedAt, order.cancelledSequence, action.decisionAt, action.sequence) {
+			continue
+		}
+		deadline, ok := exactAdd(order.closedAt, state.configuredIntervalNs)
+		if !ok {
+			r.addCheck(CDFLiquidityCheck{VenueID: action.key.VenueID, Role: state.Role, ClientID: action.key.ClientID, Ordinal: action.ordinal, Failure: "withdrawal interval overflows fixed-point timestamp"})
+			continue
+		}
+		if r.terminalAt < deadline {
+			state.CensoredWithdrawalCount++
+			r.CensoredWithdrawalCount++
+			continue
+		}
+		replacementWithinInterval := false
+		for _, candidate := range submits[action.key] {
+			if !cdfEvidenceAfter(candidate.decisionAt, candidate.sequence, action.decisionAt, action.sequence) {
+				continue
+			}
+			if candidate.decisionAt <= deadline {
+				replacementWithinInterval = true
+			}
+			break
+		}
+		if !replacementWithinInterval {
+			state.WithdrawalWithoutReplacementCount++
+			r.WithdrawalWithoutReplacementCount++
+		}
+	}
+}
+
+// cdfEvidenceAfter orders lifecycle events from different routed files. A
+// same-timestamp edge is accepted only when both records carry the
+// venue-wide sequence; physical line ordinals are not comparable across
+// files.
+func cdfEvidenceAfter(laterAt int64, laterSequence uint64, earlierAt int64, earlierSequence uint64) bool {
+	if laterAt != earlierAt {
+		return laterAt > earlierAt
+	}
+	return laterSequence != 0 && earlierSequence != 0 && laterSequence > earlierSequence
 }
 
 func (r *CDFLiquidityRunAudit) validateRestDecisionQuantities(orders map[cdfOrderKey]*cdfOrderState, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
@@ -3134,6 +3256,7 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 		}
 		state.MaxQuoteQty = state.maxQuoteQty
 		state.ConfiguredMaxLossQuote = state.configuredMaxLossQuote
+		state.ConfiguredIntervalNs = state.configuredIntervalNs
 		if state.configuredMaxLossQuote > 0 && !state.riskStateSeen {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier has no marked-risk decision state"})
 		}
@@ -3157,7 +3280,7 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier used unregistered borrowed capital"})
 		}
 		baseHoldingInPositionBounds := state.configuredBaseHolding >= -state.configuredMaxPosition && state.configuredBaseHolding <= state.configuredMaxPosition
-		if !state.initialAccountSeen || !state.terminalAccountSeen || state.configuredMaxPosition <= 0 || state.configuredMaxInventory <= 0 || state.configuredMaxQuoteQty <= 0 || state.configuredBasePrecision <= 0 || state.configuredQuotePrecision <= 0 || state.configuredMaxObservationAge <= 0 || state.configuredInitialBaseBalance <= 0 || state.configuredInitialQuoteBalance <= 0 || state.configuredReferencePrice <= 0 || state.configuredReferenceHalfLife <= 0 || state.configuredElasticityPerPercent <= 0 || state.configuredMaxLossQuote > 0 && state.configuredMinimumExecutableQty <= 0 || !baseHoldingInPositionBounds {
+		if !state.initialAccountSeen || !state.terminalAccountSeen || state.configuredMaxPosition <= 0 || state.configuredMaxInventory <= 0 || state.configuredMaxQuoteQty <= 0 || state.configuredBasePrecision <= 0 || state.configuredQuotePrecision <= 0 || state.configuredMaxObservationAge <= 0 || state.configuredInitialBaseBalance <= 0 || state.configuredInitialQuoteBalance <= 0 || state.configuredReferencePrice <= 0 || state.configuredReferenceHalfLife <= 0 || state.configuredElasticityPerPercent <= 0 || state.configuredMaxLossQuote > 0 && (state.configuredMinimumExecutableQty <= 0 || state.configuredIntervalNs <= 0) || !baseHoldingInPositionBounds {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier lacks complete finite-capital configuration"})
 		}
 		state.Valid = state.DecisionCount > 0 && state.FillCount > 0 && state.AcceptedQuoteCount > 0 && state.CompletedQuoteCount > 0 && state.initialAccountSeen && state.terminalAccountSeen

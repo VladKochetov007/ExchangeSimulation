@@ -44,6 +44,14 @@ jq -e --argjson expected_configs "$expected_files_json" \
 	 .activation_roster.path == $activation_path and
 	 (.registered_configs | keys | sort) == $expected_configs and
 	 ($require_generator == false or ((.generator.path | type) == "string" and (.generator.sha256 | test("^[0-9a-f]{64}$"))))' "$provenance_manifest" >/dev/null || fail "invalid config provenance manifest"
+if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1B-* ]]; then
+	withdrawal_measurement_path=$(jq -er '.withdrawal_measurement.path' "$provenance_manifest") || fail "SV1B provenance omits withdrawal measurement amendment"
+	[[ "$withdrawal_measurement_path" == "research/v2-r2-sv1b-withdrawal-measurement-amendment-2026-09-02.md" ]] || fail "SV1B provenance names an unexpected withdrawal measurement amendment"
+	withdrawal_measurement_file="$root_dir/$withdrawal_measurement_path"
+	[[ -s "$withdrawal_measurement_file" && ! -L "$withdrawal_measurement_file" ]] || fail "missing withdrawal measurement amendment"
+	withdrawal_measurement_sha=$(sha256sum "$withdrawal_measurement_file" | awk '{print $1}')
+	[[ "$withdrawal_measurement_sha" == "$(jq -er '.withdrawal_measurement.sha256' "$provenance_manifest")" ]] || fail "withdrawal measurement amendment hash mismatch"
+fi
 source_dir="$root_dir/research/configs/v2-integrated-longrun-r2"
 while IFS=$'\t' read -r relative expected_sha; do
 	[[ "$relative" != *[/:]* && "$relative" == *.json ]] || fail "unsafe source config identity: $relative"

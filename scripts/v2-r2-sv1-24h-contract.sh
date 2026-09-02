@@ -21,6 +21,7 @@ v2_r2_sv1_predecessor_id="R2"
 v2_r2_sv1_runner_contract="v2-r2-sv1-24h-runner-v1"
 v2_r2_sv1_require_terminal_outcome=false
 v2_r2_sv1_completion_sentinels='["greeks.json", "latency.json"]'
+v2_r2_sv1_require_no_replacement_withdrawal=false
 v2_r2_sv1_experiment_prefix="v2-r2-sv1-24h"
 v2_r2_sv1_config_provenance_contract="v2-r2-sv1-24h-config-provenance-v1"
 v2_r2_sv1_config_dir="$root_dir/research/configs/v2-r2-sv1-24h"
@@ -92,7 +93,7 @@ v2_r2_require_cdf_supplier_activation() {
 	local audit_path=$1 expected_supplier_count=$2
 	[[ -s "$audit_path" ]] || return 1
 	[[ "$expected_supplier_count" =~ ^[1-9][0-9]*$ ]] || return 1
-	jq -e --argjson expected_supplier_count "$expected_supplier_count" '
+	jq -e --argjson expected_supplier_count "$expected_supplier_count" --argjson require_no_replacement "$v2_r2_sv1_require_no_replacement_withdrawal" '
 		type == "object" and (.result | type) == "object" and
 		.result.valid == true and
 		(.result.supplier_count | type) == "number" and
@@ -106,7 +107,10 @@ v2_r2_require_cdf_supplier_activation() {
 			(.result.risk_state_decision_count | type) == "number" and
 			.result.risk_state_decision_count > 0 and
 			all(.result.suppliers[]; (.configured_max_loss_quote // 0) > 0 and .risk_state_decision_count > 0)) and
-		.result.max_borrowed == 0 and
+			.result.max_borrowed == 0 and
+			(($require_no_replacement | not) or
+				(.result.withdrawal_without_replacement_count | type) == "number" and
+				.result.withdrawal_without_replacement_count > 0) and
 		.result.supplier_volume_share <= 0.75 and
 		.result.supplier_depth_over_75_share <= 0.5 and
 		(.result.venues | type) == "array" and (.result.venues | length) == 3 and
@@ -148,7 +152,7 @@ v2_r2_require_cdf_supplier_comparison() {
 	local comparison_path=$1 expected_supplier_count=$2
 	[[ -s "$comparison_path" ]] || return 1
 	[[ "$expected_supplier_count" =~ ^[1-9][0-9]*$ ]] || return 1
-	jq -e --argjson expected_supplier_count "$expected_supplier_count" '
+	jq -e --argjson expected_supplier_count "$expected_supplier_count" --argjson require_no_replacement "$v2_r2_sv1_require_no_replacement_withdrawal" '
 		type == "object" and .valid == true and
 		(.provenance.valid // false) == true and
 		(.treatment | type) == "object" and (.control | type) == "object" and
@@ -167,6 +171,9 @@ v2_r2_require_cdf_supplier_comparison() {
 			.treatment.risk_state_decision_count > 0 and
 			all(.treatment.suppliers[]; (.configured_max_loss_quote // 0) > 0 and .risk_state_decision_count > 0)) and
 		.treatment.max_borrowed == 0 and
+		(($require_no_replacement | not) or
+			(.treatment.withdrawal_without_replacement_count | type) == "number" and
+			.treatment.withdrawal_without_replacement_count > 0) and
 		(.treatment.suppliers | length) == $expected_supplier_count and
 		all(.treatment.suppliers[];
 			.valid == true and .fill_count > 0 and .pnl != 0 and

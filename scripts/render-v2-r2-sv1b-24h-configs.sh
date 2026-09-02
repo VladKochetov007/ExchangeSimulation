@@ -84,10 +84,17 @@ provenance="$root_dir/research/v2-r2-sv1b-24h-config-provenance.json"
 	echo "refusing to overwrite config provenance manifest: $provenance" >&2
 	exit 1
 }
+withdrawal_measurement_path="research/v2-r2-sv1b-withdrawal-measurement-amendment-2026-09-02.md"
+withdrawal_measurement_file="$root_dir/$withdrawal_measurement_path"
+[[ -s "$withdrawal_measurement_file" && ! -L "$withdrawal_measurement_file" ]] || {
+	echo "missing withdrawal measurement amendment: $withdrawal_measurement_file" >&2
+	exit 1
+}
 source_hash=$(sha256sum "$source_dir/dev-607.json" | awk '{print $1}')
 no_log_source_hash=$(sha256sum "$source_dir/dev-607-none.json" | awk '{print $1}')
 roster_hash=$(sha256sum "$activation_config" | awk '{print $1}')
 generator_hash=$(sha256sum "$root_dir/scripts/render-v2-r2-sv1b-24h-configs.sh" | awk '{print $1}')
+withdrawal_measurement_hash=$(sha256sum "$withdrawal_measurement_file" | awk '{print $1}')
 registered_configs=$(for path in "$config_dir"/*.json; do printf '%s\t%s\n' "$(basename -- "$path")" "$(sha256sum -- "$path" | awk '{print $1}')"; done | jq -Rn '[inputs | split("\t") | {(.[0]): .[1]}] | add')
 jq -n \
 	--arg candidate "$candidate" \
@@ -97,9 +104,11 @@ jq -n \
 	--arg roster_hash "$roster_hash" \
 	--arg generator_path "scripts/render-v2-r2-sv1b-24h-configs.sh" \
 	--arg generator_hash "$generator_hash" \
+	--arg withdrawal_measurement_path "$withdrawal_measurement_path" \
+	--arg withdrawal_measurement_hash "$withdrawal_measurement_hash" \
 	--argjson registered_configs "$registered_configs" \
 	'{schema_version: 1,
-	 contract: "v2-r2-sv1b-24h-config-provenance-v1",
+	 contract: "v2-r2-sv1b-24h-config-provenance-v2",
 	 candidate: $candidate,
 	 predecessor: "V2-R2-SV1",
 	 source_configs: {"dev-607.json": $source_hash, "dev-607-none.json": $no_log_source_hash},
@@ -116,6 +125,7 @@ jq -n \
 		control: "remove only the SV1B roster and supplier-decision recording; preserve the paired base configuration"
 	 },
 	 generator: {path: $generator_path, sha256: $generator_hash},
+	 withdrawal_measurement: {path: $withdrawal_measurement_path, sha256: $withdrawal_measurement_hash},
 	 holdout_policy: "development generator and checker never read or create holdout 619/631/641"
 	}' >"$provenance"
 

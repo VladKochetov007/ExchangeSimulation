@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "contract": "v2-r2-sv1b-24h-config-provenance-v1",
+  "contract": "v2-r2-sv1b-24h-config-provenance-v2",
   "candidate": "V2-R2-SV1B-24H-CDF-LIQUIDITY",
   "predecessor": "V2-R2-SV1",
   "source_configs": {
@@ -40,7 +40,11 @@
   },
   "generator": {
     "path": "scripts/render-v2-r2-sv1b-24h-configs.sh",
-    "sha256": "d2e36d5d7386502cdd3e06ac0a5956d1bb00f495d2c82f9ea19ed591a7792a24"
+    "sha256": "bd76391c417655e04800a30fede3820cc8a5d964310f91722a2551827a48e7cb"
+  },
+  "withdrawal_measurement": {
+    "path": "research/v2-r2-sv1b-withdrawal-measurement-amendment-2026-09-02.md",
+    "sha256": "31acb8c4902f978a1ca79d2f7a93b43ea7ca1d2cf5f1689f44c8b307f140cba6"
   },
   "holdout_policy": "development generator and checker never read or create holdout 619/631/641"
 }

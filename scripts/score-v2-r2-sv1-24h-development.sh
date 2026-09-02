@@ -356,6 +356,11 @@ for seed in "${v2_r2_sv1_seeds[@]}"; do
 		audit_contract_valid=true
 		audit_anticheating_valid=true
 	fi
+	if [[ "$audit_contract_valid" == true && "$v2_r2_sv1_require_no_replacement_withdrawal" == true ]] &&
+		! jq -e '(.treatment.withdrawal_without_replacement_count | type) == "number" and .treatment.withdrawal_without_replacement_count > 0' "$audit_path" >/dev/null; then
+		audit_contract_valid=false
+		audit_anticheating_valid=false
+	fi
 	[[ "$audit_contract_valid" == true ]] || all_cdf_contract_valid=false
 	[[ "$audit_anticheating_valid" == true ]] || all_anticheating_valid=false
 

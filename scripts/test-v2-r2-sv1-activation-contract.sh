@@ -28,6 +28,7 @@ jq -n ' {
 			valid: true, supplier_count: 2, decision_count: 4, fill_count: 2,
 			trading_supplier_count: 2, pnl_changing_supplier_count: 2,
 			inventory_responsive_decision_count: 4, cancel_count: 1, withdraw_count: 1,
+			withdrawal_without_replacement_count: 2,
 			max_borrowed: 0, supplier_volume_share: 0.2, supplier_depth_over_75_share: 0.1,
 			venues: [
 				{supplier_depth_over_75_fraction: 0.1},
@@ -76,6 +77,17 @@ v2_r2_require_cdf_supplier_activation "$temp_root/marked-risk.json" 2 || {
 if jq '.result.risk_state_decision_count = 0' "$temp_root/marked-risk.json" >"$temp_root/missing-marked-risk.json" &&
 	v2_r2_require_cdf_supplier_activation "$temp_root/missing-marked-risk.json" 2; then
 	echo "positive-budget CDF activity without aggregate marked-risk state was accepted" >&2
+	exit 1
+fi
+
+source "$root_dir/scripts/v2-r2-sv1b-24h-contract.sh"
+v2_r2_require_cdf_supplier_activation "$cdf_audit_fixture" 2 || {
+	echo "SV1B activity with a qualified withdrawal was rejected" >&2
+	exit 1
+}
+if jq 'del(.result.withdrawal_without_replacement_count)' "$cdf_audit_fixture" >"$temp_root/missing-withdrawal.json" &&
+	v2_r2_require_cdf_supplier_activation "$temp_root/missing-withdrawal.json" 2; then
+	echo "SV1B activity without a qualified withdrawal was accepted" >&2
 	exit 1
 fi
 

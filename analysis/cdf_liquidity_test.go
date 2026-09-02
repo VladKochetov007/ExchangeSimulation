@@ -195,6 +195,56 @@ func TestCDFDepthShareUsesNonEmptyIntervalsAndIncludesTerminalInterval(t *testin
 	}
 }
 
+func TestCDFWithdrawalWithoutReplacementUsesCompleteFollowUpInterval(t *testing.T) {
+	key := cdfParticipantKey{VenueID: "north", ClientID: 7}
+	boundaryKey := cdfParticipantKey{VenueID: "south", ClientID: 8}
+	state := &CDFLiquiditySupplierAudit{Role: "cdf_elastic_supplier_1", configuredIntervalNs: 2}
+	boundaryState := &CDFLiquiditySupplierAudit{Role: "cdf_elastic_supplier_2", configuredIntervalNs: 2}
+	run := &CDFLiquidityRunAudit{
+		terminalAt: 10,
+		supplierActions: []cdfSupplierAction{
+			{key: key, action: "withdraw", orderID: 11, cancelRequestID: 101, decisionAt: 1, sequence: 11, ordinal: 1},
+			{key: key, action: "submit", decisionAt: 2, sequence: 12, ordinal: 2},
+			{key: key, action: "withdraw", orderID: 12, cancelRequestID: 102, decisionAt: 5, sequence: 13, ordinal: 3},
+			{key: key, action: "withdraw", orderID: 13, cancelRequestID: 103, decisionAt: 9, sequence: 14, ordinal: 4},
+			{key: key, action: "withdraw", orderID: 14, cancelRequestID: 104, decisionAt: 3, sequence: 15, ordinal: 5},
+			{key: key, action: "withdraw", orderID: 15, cancelRequestID: 105, decisionAt: 2, sequence: 16, ordinal: 6},
+			{key: boundaryKey, action: "withdraw", orderID: 16, cancelRequestID: 106, decisionAt: 4, sequence: 26, ordinal: 7},
+			{key: boundaryKey, action: "submit", decisionAt: 7, sequence: 28, ordinal: 8},
+		},
+	}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		{VenueID: key.VenueID, ClientID: key.ClientID, OrderID: 11}:                 {acceptedAt: 0, cancelled: true, cancelRequestID: 101, cancelledSequence: 21, closedAt: 3},
+		{VenueID: key.VenueID, ClientID: key.ClientID, OrderID: 12}:                 {acceptedAt: 4, acceptedSequence: 10, cancelled: true, cancelRequestID: 102, cancelledSequence: 23, closedAt: 7},
+		{VenueID: key.VenueID, ClientID: key.ClientID, OrderID: 13}:                 {acceptedAt: 8, acceptedSequence: 9, cancelled: true, cancelRequestID: 103, cancelledSequence: 24, closedAt: 10},
+		{VenueID: key.VenueID, ClientID: key.ClientID, OrderID: 14}:                 {filled: true, filledAt: 4, closedAt: 4},
+		{VenueID: key.VenueID, ClientID: key.ClientID, OrderID: 15}:                 {acceptedAt: 1, acceptedSequence: 20, cancelled: true, cancelRequestID: 105, cancelledSequence: 22, closedAt: 9},
+		{VenueID: boundaryKey.VenueID, ClientID: boundaryKey.ClientID, OrderID: 16}: {acceptedAt: 3, acceptedSequence: 25, cancelled: true, cancelRequestID: 106, cancelledSequence: 27, closedAt: 5},
+	}
+	run.measureWithdrawalsWithoutReplacement(map[cdfParticipantKey]*CDFLiquiditySupplierAudit{key: state, boundaryKey: boundaryState}, orders)
+	if state.WithdrawalWithoutReplacementCount != 1 || state.CensoredWithdrawalCount != 2 {
+		t.Fatalf("withdrawal follow-up diagnostics = %+v, want one qualified and two censored", state)
+	}
+	if boundaryState.WithdrawalWithoutReplacementCount != 0 || boundaryState.CensoredWithdrawalCount != 0 {
+		t.Fatalf("boundary-time replacement diagnostics = %+v, want no withdrawal without replacement", boundaryState)
+	}
+	if run.WithdrawalWithoutReplacementCount != 1 || run.CensoredWithdrawalCount != 2 {
+		t.Fatalf("aggregate withdrawal follow-up diagnostics = %+v", run)
+	}
+}
+
+func TestCDFEvidenceAfterRequiresVenueSequenceForSameTimestamp(t *testing.T) {
+	if !cdfEvidenceAfter(10, 12, 10, 11) {
+		t.Fatal("later venue sequence was not ordered after the earlier event")
+	}
+	if cdfEvidenceAfter(10, 0, 10, 0) {
+		t.Fatal("same-timestamp events without sequence were treated as ordered")
+	}
+	if cdfEvidenceAfter(10, 0, 10, 11) {
+		t.Fatal("same-timestamp event without later sequence was treated as ordered")
+	}
+}
+
 func TestMeasureCDFLiquiditySeparatesCancelPendingFromLiveQuotes(t *testing.T) {
 	run := writeCDFLiquidityFixture(t, true, false)
 	bookPath := filepath.Join(run.Dir, "venues", "north", "spot", "CDF-USD.jsonl")
