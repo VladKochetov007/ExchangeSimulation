@@ -70,11 +70,11 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 	if inputDir == "" || outDir == "" {
 		return BinaryRenderReport{}, fmt.Errorf("multivenue: input and output directories are required")
 	}
-	inputAbs, err := filepath.Abs(inputDir)
+	inputAbs, err := canonicalRenderPath(inputDir, false)
 	if err != nil {
 		return BinaryRenderReport{}, fmt.Errorf("multivenue: input path: %w", err)
 	}
-	outAbs, err := filepath.Abs(outDir)
+	outAbs, err := canonicalRenderPath(outDir, true)
 	if err != nil {
 		return BinaryRenderReport{}, fmt.Errorf("multivenue: output path: %w", err)
 	}
@@ -99,9 +99,9 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 		return BinaryRenderReport{}, err
 	}
 	defer rendered.cleanup()
-	eventsFile, err := os.Open(filepath.Join(inputAbs, "events.evs"))
+	eventsFile, err := openRenderRegularFile(filepath.Join(inputAbs, "events.evs"), "open binary evidence")
 	if err != nil {
-		return BinaryRenderReport{}, fmt.Errorf("multivenue: open binary evidence: %w", err)
+		return BinaryRenderReport{}, err
 	}
 	defer eventsFile.Close()
 	attestation, err := readBinaryAttestation(inputAbs)
@@ -164,9 +164,9 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 }
 
 func readRenderRunContract(inputDir string) (renderRunContract, error) {
-	raw, err := os.ReadFile(filepath.Join(inputDir, "manifest.json"))
+	raw, err := readRenderRegularFile(filepath.Join(inputDir, "manifest.json"), "read binary run manifest")
 	if err != nil {
-		return renderRunContract{}, fmt.Errorf("multivenue: read binary run manifest: %w", err)
+		return renderRunContract{}, err
 	}
 	var contract renderRunContract
 	if err := json.Unmarshal(raw, &contract); err != nil {
@@ -182,9 +182,9 @@ func readRenderRunContract(inputDir string) (renderRunContract, error) {
 }
 
 func readBinaryAttestation(inputDir string) (binaryEvidenceArtifactRecord, error) {
-	raw, err := os.ReadFile(filepath.Join(inputDir, "binary-evidence-attestation.json"))
+	raw, err := readRenderRegularFile(filepath.Join(inputDir, "binary-evidence-attestation.json"), "read binary evidence attestation")
 	if err != nil {
-		return binaryEvidenceArtifactRecord{}, fmt.Errorf("multivenue: read binary evidence attestation: %w", err)
+		return binaryEvidenceArtifactRecord{}, err
 	}
 	var attestation binaryEvidenceArtifactRecord
 	if err := json.Unmarshal(raw, &attestation); err != nil {
@@ -227,9 +227,9 @@ func validateBinaryAttestation(inputDir string, attestation binaryEvidenceArtifa
 		return fmt.Errorf("multivenue: binary evidence contains %d unencodable payloads", attestation.UnencodablePayloads)
 	}
 	if logMode == "full" {
-		raw, err := os.ReadFile(filepath.Join(inputDir, "evidence-only-artifact-hash.json"))
+		raw, err := readRenderRegularFile(filepath.Join(inputDir, "evidence-only-artifact-hash.json"), "read evidence-only attestation")
 		if err != nil {
-			return fmt.Errorf("multivenue: read evidence-only attestation: %w", err)
+			return err
 		}
 		var artifact evidenceArtifactRecord
 		if err := json.Unmarshal(raw, &artifact); err != nil {
@@ -317,15 +317,24 @@ func (d renderArtifactDigest) hex() string {
 }
 
 func prepareEmptyDirectory(path string) error {
-	info, err := os.Stat(path)
+	if err := rejectRenderPathSymlinks(path); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		if err := os.MkdirAll(path, 0755); err != nil {
 			return fmt.Errorf("multivenue: create render output: %w", err)
+		}
+		if err := validateRenderOutputDirectory(path); err != nil {
+			return err
 		}
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("multivenue: inspect render output: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("multivenue: render output is a symlink")
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("multivenue: render output is not a directory")

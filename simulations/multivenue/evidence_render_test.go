@@ -10,6 +10,7 @@ import (
 	"hash/crc32"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -111,6 +112,95 @@ func TestRenderBinaryEvidenceRejectsOutOfOrderSidecarSequence(t *testing.T) {
 	writeRenderMetadata(t, inputDir, sink, "full", second, first)
 	if _, err := RenderBinaryEvidence(inputDir, filepath.Join(t.TempDir(), "rendered")); err == nil || !strings.Contains(err.Error(), "canonical reconstruction stream") {
 		t.Fatalf("out-of-order sidecar sequence was accepted: %v", err)
+	}
+}
+
+func TestRenderBinaryEvidenceRejectsSymlinkedOutputAlias(t *testing.T) {
+	inputDir := t.TempDir()
+	outputParent := t.TempDir()
+	outputAlias := filepath.Join(outputParent, "rendered")
+	if err := os.Symlink(inputDir, outputAlias); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RenderBinaryEvidence(inputDir, outputAlias); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlinked output alias was accepted: %v", err)
+	}
+}
+
+func TestRenderBinaryEvidenceRejectsSymlinkedOutputParent(t *testing.T) {
+	inputDir := t.TempDir()
+	outputTarget := t.TempDir()
+	outputParent := filepath.Join(t.TempDir(), "parent")
+	if err := os.Symlink(outputTarget, outputParent); err != nil {
+		t.Fatal(err)
+	}
+	outputDir := filepath.Join(outputParent, "rendered")
+	if _, err := RenderBinaryEvidence(inputDir, outputDir); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlinked output parent was accepted: %v", err)
+	}
+}
+
+func TestRenderBinaryEvidenceRejectsSymlinkedSidecar(t *testing.T) {
+	inputDir := t.TempDir()
+	venueDir := filepath.Join(inputDir, "venues", "north")
+	if err := os.MkdirAll(venueDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	eventsFile, err := os.Create(filepath.Join(inputDir, "events.evs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := newNeutralBinaryEvidence(eventsFile)
+	if err := sink.record(1, 7, "event", "north", map[string]int{"value": 1}, "general.jsonl", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if err := eventsFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writeRenderMetadata(t, inputDir, sink, "none")
+	externalSidecar := filepath.Join(t.TempDir(), "general.jsonl")
+	if err := os.WriteFile(externalSidecar, []byte("not used\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(externalSidecar, filepath.Join(venueDir, "general.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RenderBinaryEvidence(inputDir, filepath.Join(t.TempDir(), "rendered")); err == nil || !strings.Contains(err.Error(), "reject symlink") {
+		t.Fatalf("symlinked sidecar was accepted: %v", err)
+	}
+}
+
+func TestRenderDirectoryPublicationDoesNotReplaceExistingDestination(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("renameat2 no-replacement contract is registered for linux/amd64")
+	}
+	parentDir := t.TempDir()
+	sourceDir := filepath.Join(parentDir, "source")
+	destinationDir := filepath.Join(parentDir, "destination")
+	if err := os.MkdirAll(sourceDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(destinationDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(destinationDir, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("preserve"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "rendered"), []byte("source"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := renameRenderDirectoryNoReplace(sourceDir, destinationDir); err == nil {
+		t.Fatal("publication replaced an existing destination")
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("existing destination was not preserved: %v", err)
+	}
+	if _, err := os.Stat(sourceDir); err != nil {
+		t.Fatalf("source directory disappeared after rejected publication: %v", err)
 	}
 }
 

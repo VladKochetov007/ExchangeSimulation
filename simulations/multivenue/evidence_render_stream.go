@@ -57,15 +57,25 @@ type renderSidecars struct {
 
 func openRenderSidecars(venuesDir string) (*renderSidecars, error) {
 	sidecars := &renderSidecars{byVenue: make(map[string]*renderSidecarHeap)}
-	if _, err := os.Stat(venuesDir); err != nil {
+	venuesInfo, err := os.Lstat(venuesDir)
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return sidecars, nil
 		}
 		return nil, fmt.Errorf("multivenue: inspect venue evidence: %w", err)
 	}
-	err := filepath.WalkDir(venuesDir, func(path string, entry os.DirEntry, walkErr error) error {
+	if venuesInfo.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("multivenue: venue evidence directory is a symlink")
+	}
+	if !venuesInfo.IsDir() {
+		return nil, fmt.Errorf("multivenue: venue evidence path is not a directory")
+	}
+	err = filepath.WalkDir(venuesDir, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("multivenue: reject symlink in venue evidence %q", path)
 		}
 		if entry.IsDir() || filepath.Ext(path) != ".jsonl" {
 			return nil
@@ -85,9 +95,9 @@ func openRenderSidecars(venuesDir string) (*renderSidecars, error) {
 		if err := validateRoute(route); err != nil {
 			return fmt.Errorf("multivenue: sidecar %q: %w", relative, err)
 		}
-		file, err := os.Open(path)
+		file, err := openRenderRegularFile(path, fmt.Sprintf("open sidecar %q", relative))
 		if err != nil {
-			return fmt.Errorf("multivenue: open sidecar %q: %w", relative, err)
+			return err
 		}
 		cursor := &renderSidecarCursor{
 			key:     renderRouteKey{venue: venue, route: route},
@@ -356,6 +366,9 @@ func (o *renderOutput) commit() error {
 	if err := o.close(); err != nil {
 		return err
 	}
+	if err := validateRenderOutputDirectory(o.outputDir); err != nil {
+		return err
+	}
 	venuesDir := filepath.Join(o.stageDir, "venues")
 	if _, err := os.Stat(venuesDir); errors.Is(err, os.ErrNotExist) {
 		o.committed = true
@@ -363,7 +376,16 @@ func (o *renderOutput) commit() error {
 	} else if err != nil {
 		return fmt.Errorf("multivenue: inspect rendered staging directory: %w", err)
 	}
-	if err := os.Rename(venuesDir, filepath.Join(o.outputDir, "venues")); err != nil {
+	destination := filepath.Join(o.outputDir, "venues")
+	if _, err := os.Lstat(destination); err == nil {
+		return fmt.Errorf("multivenue: refusing to replace rendered evidence destination")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("multivenue: inspect rendered evidence destination: %w", err)
+	}
+	if err := rejectRenderPathSymlinks(venuesDir); err != nil {
+		return err
+	}
+	if err := renameRenderDirectoryNoReplace(venuesDir, destination); err != nil {
 		return fmt.Errorf("multivenue: install rendered evidence: %w", err)
 	}
 	o.committed = true
