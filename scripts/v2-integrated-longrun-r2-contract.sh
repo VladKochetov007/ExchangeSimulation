@@ -232,7 +232,7 @@ v2_r2_require_binary_capacity_attestation() {
 		[[ "$probe_root" == /* && "$probe_root" != */ && "$probe_root" != *$'\n'* && "$probe_root" != *$'\t'* ]] || return 1
 		[[ -d "$probe_root" && ! -L "$probe_root" ]] || return 1
 		[[ "$(realpath -e -- "$probe_root")" == "$probe_root" ]] || return 1
-		probe_cell="$probe_root/treatment-607"
+			probe_cell="$probe_root/${v2_r2_capacity_probe_cell:-treatment-607}"
 		[[ -d "$probe_cell" && ! -L "$probe_cell" ]] || return 1
 		for retained in run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl \
 			events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json evidence-manifest.json; do

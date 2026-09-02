@@ -22,7 +22,7 @@ write_summary() {
 write_summary "$temp_root/treatment.json" 0
 write_summary "$temp_root/control.json" 4
 jq -n -e --slurpfile treatment "$temp_root/treatment.json" --slurpfile control "$temp_root/control.json" \
-	--argjson seed 643 -f "$filter" >"$temp_root/effect.json"
+	--argjson seed 643 --arg contract v2-r2-sv1-24h-paired-survival-effect-v1 -f "$filter" >"$temp_root/effect.json"
 jq -e '
 	.predicates.matched_measurements_valid and
 	.predicates.treatment_not_worse and
@@ -32,7 +32,7 @@ jq -e '
 
 write_summary "$temp_root/treatment-worse.json" 5
 jq -n -e --slurpfile treatment "$temp_root/treatment-worse.json" --slurpfile control "$temp_root/control.json" \
-	--argjson seed 647 -f "$filter" >"$temp_root/worse-effect.json"
+	--argjson seed 647 --arg contract v2-r2-sv1-24h-paired-survival-effect-v1 -f "$filter" >"$temp_root/worse-effect.json"
 jq -e '
 	.predicates.matched_measurements_valid and
 	(.predicates.treatment_not_worse | not) and

@@ -5,13 +5,20 @@
 set -euo pipefail
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-source "$root_dir/scripts/v2-r2-sv1-24h-contract.sh"
+source "$root_dir/scripts/v2-r2-sv1-contract-loader.sh"
+contract_script=$(v2_r2_select_sv1_contract "$root_dir") || {
+	echo "SV1 capacity probe received an unregistered contract path" >&2
+	exit 1
+}
+source "$contract_script"
+export V2_R2_SV1_CONTRACT_SCRIPT="$contract_script"
 head_revision=$(git -C "$root_dir" rev-parse HEAD)
 scientific_root=$(realpath -e -- "$root_dir")
 
 binary=${1:-"$root_dir/bin/multivenue"}
-config="$root_dir/research/configs/v2-r2-sv1-24h/treatment-607.json"
-probe_root_requested=${V2_R2_SV1_CAPACITY_ROOT:-"/home/vlad/external-scratch/v2-r2-sv1-24h-capacity-$head_revision"}
+primary_seed="${v2_r2_sv1_seeds[0]}"
+config="$v2_r2_sv1_config_dir/treatment-$primary_seed.json"
+probe_root_requested=${V2_R2_SV1_CAPACITY_ROOT:-"/home/vlad/external-scratch/${v2_r2_sv1_capacity_probe_prefix}-$head_revision"}
 attestation=$(v2_r2_capacity_attestation_path)
 horizon=24h
 simulation_start_nano=1735689600000000000
@@ -105,7 +112,7 @@ initial_available_free_bytes=$(capacity_free_bytes "$capacity_mount_path") || fa
 	fail "initial free space is below the ${minimum_free_bytes}-byte reserve: $initial_available_free_bytes"
 mkdir -p -- "$probe_root"
 [[ "$(realpath -e -- "$probe_root")" == "$probe_root" ]] || fail "capacity probe root canonicalization changed after creation"
-probe_dir="$probe_root/treatment-607"
+probe_dir="$probe_root/$v2_r2_capacity_probe_cell"
 mkdir -- "$probe_dir"
 
 "$binary" -config "$config" -logdir "$probe_dir" -write-effective-config "$probe_dir/run-config.json" >/dev/null 2>"$probe_root/config.stderr.log" || fail "effective-config validation failed"
@@ -113,10 +120,11 @@ cmp -s "$config" "$probe_dir/run-config.json" || fail "registered config is not 
 config_sha256=$(sha256sum "$probe_dir/run-config.json" | awk '{print $1}')
 binary_sha256=$(sha256sum "$binary" | awk '{print $1}')
 jq -n --arg git_revision "$head_revision" --arg binary_sha256 "$binary_sha256" --arg config_sha256 "$config_sha256" \
-	--arg binary_go_version "$binary_go_version" --argjson seed 607 --arg horizon "$horizon" \
+	--arg binary_go_version "$binary_go_version" --argjson seed "$primary_seed" --arg horizon "$horizon" \
 	--argjson gomaxprocs "$expected_gomaxprocs" --argjson minimum_free_bytes "$minimum_free_bytes" \
 	--argjson initial_available_free_bytes "$initial_available_free_bytes" \
-	'{schema_version:1,contract:"v2-r2-sv1-24h-capacity-probe-v1",git_revision:$git_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,binary_go_version:$binary_go_version,gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,seed:$seed,simulated_horizon:$horizon,evidence_format:"evstream_v3"}' >"$probe_dir/run-metadata.json"
+	--arg contract "$v2_r2_sv1_capacity_probe_contract" \
+	'{schema_version:1,contract:$contract,git_revision:$git_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,binary_go_version:$binary_go_version,gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,seed:$seed,simulated_horizon:$horizon,evidence_format:"evstream_v3"}' >"$probe_dir/run-metadata.json"
 
 stdout_log="$probe_root/simulator.stdout.log"
 stderr_log="$probe_root/simulator.stderr.log"
@@ -176,7 +184,7 @@ fi
 for required in run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json evidence-only-artifact-hash.json; do
 	[[ -s "$probe_dir/$required" ]] || fail "completed probe is missing $required"
 done
-jq -e --arg revision "$head_revision" --argjson seed 607 \
+jq -e --arg revision "$head_revision" --argjson seed "$primary_seed" \
 	'.build.revision == $revision and .build.modified == false and .config.seed == $seed and .config.evidence_format == "evstream_v3"' "$probe_dir/manifest.json" >/dev/null || fail "probe manifest provenance mismatch"
 jq -e --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
 	'(.initial_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $start)) and (.terminal_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $end))' "$probe_dir/greeks.json" >/dev/null || fail "probe greeks do not attest the 24-hour horizon"

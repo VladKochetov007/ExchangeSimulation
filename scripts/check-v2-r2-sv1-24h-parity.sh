@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify the registered SV1 seed-607 treatment G8 and control no-log parity
+# Verify the registered SV1 treatment G8 and control no-log parity
 # pairs. Treatment and control are different economic populations and are
 # never compared as if their trajectories should be identical.
 set -euo pipefail
@@ -15,7 +15,13 @@ if [[ "$#" -gt 1 ]]; then
 fi
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-source "$root_dir/scripts/v2-r2-sv1-24h-contract.sh"
+source "$root_dir/scripts/v2-r2-sv1-contract-loader.sh"
+contract_script=$(v2_r2_select_sv1_contract "$root_dir") || {
+	echo "SV1 parity checker received an unregistered contract path" >&2
+	exit 1
+}
+source "$contract_script"
+export V2_R2_SV1_CONTRACT_SCRIPT="$contract_script"
 output_root="$v2_r2_output_root"
 if [[ "$#" -eq 1 ]]; then
 	output_root=$1
@@ -25,10 +31,11 @@ analyzer="$root_dir/bin/mvanalyze"
 if [[ -n "$(printenv MVANALYZE_BIN 2>/dev/null || true)" ]]; then
 	analyzer=$(printenv MVANALYZE_BIN)
 fi
-treatment_cell="$output_root/treatment-607"
-treatment_g8_cell="$output_root/treatment-607-g8"
-control_cell="$output_root/control-607"
-control_none_cell="$output_root/control-607-none"
+parity_seed="${v2_r2_sv1_parity_seed}"
+treatment_cell="$output_root/treatment-$parity_seed"
+treatment_g8_cell="$output_root/treatment-$parity_seed-g8"
+control_cell="$output_root/control-$parity_seed"
+control_none_cell="$output_root/control-$parity_seed-none"
 
 fail() {
 	printf 'SV1 parity failure: %s\n' "$*" >&2
@@ -77,10 +84,10 @@ for cell in "$treatment_cell" "$treatment_g8_cell" "$control_cell" "$control_non
 	v2_r2_stage_raw_evidence "$cell" || fail "raw evidence is not retained for $(basename "$cell")"
 done
 
-cmp -s "$root_dir/research/configs/v2-r2-sv1-24h/treatment-607.json" "$treatment_cell/run-config.json" || fail "treatment config differs from registry"
+cmp -s "$v2_r2_sv1_config_dir/treatment-$parity_seed.json" "$treatment_cell/run-config.json" || fail "treatment config differs from registry"
 cmp -s "$treatment_cell/run-config.json" "$treatment_g8_cell/run-config.json" || fail "treatment G4/G8 config differs"
-cmp -s "$root_dir/research/configs/v2-r2-sv1-24h/control-607.json" "$control_cell/run-config.json" || fail "control config differs from registry"
-cmp -s "$root_dir/research/configs/v2-r2-sv1-24h/control-607-none.json" "$control_none_cell/run-config.json" || fail "control no-log config differs from registry"
+cmp -s "$v2_r2_sv1_config_dir/control-$parity_seed.json" "$control_cell/run-config.json" || fail "control config differs from registry"
+cmp -s "$v2_r2_sv1_config_dir/control-$parity_seed-none.json" "$control_none_cell/run-config.json" || fail "control no-log config differs from registry"
 
 validate_cell() {
 	local cell=$1 expected_name=$2 expected_seed=$3 expected_log_mode=$4 expected_gomaxprocs=$5 expected_hypothesis=$6
@@ -90,8 +97,8 @@ validate_cell() {
 	v2_r2_verify_evidence_manifest "$cell" || fail "evidence manifest mismatch: $(basename "$cell")"
 	v2_r2_verify_attestation "$cell" || fail "external attestation mismatch: $(basename "$cell")"
 	jq -e --arg cell "$expected_name" --argjson seed "$expected_seed" --arg log_mode "$expected_log_mode" \
-		--arg hypothesis "$expected_hypothesis" --argjson gomaxprocs "$expected_gomaxprocs" \
-		'.schema_version == 6 and .runner_contract == "v2-r2-sv1-24h-runner-v1" and .cell == $cell and
+		--arg hypothesis "$expected_hypothesis" --arg runner_contract "$v2_r2_sv1_runner_contract" --argjson gomaxprocs "$expected_gomaxprocs" \
+		'.schema_version == 6 and .runner_contract == $runner_contract and .cell == $cell and
 		 .seed == $seed and .holdout == false and .simulated_horizon == "24h" and
 		 .log_mode == $log_mode and .evidence_format == "evstream_v3" and .gomaxprocs == $gomaxprocs and
 		 .hypothesis_id == $hypothesis and .binary_vcs_modified == false and .binary_trimpath == true and
@@ -110,10 +117,10 @@ validate_cell() {
 		fail "invalid manifest identity: $(basename "$cell")"
 }
 
-validate_cell "$treatment_cell" treatment-607 607 full 4 V2-R2-SV1-CDF-LIQUIDITY-24H
-validate_cell "$treatment_g8_cell" treatment-607-g8 607 full 8 V2-R2-SV1-CDF-LIQUIDITY-24H
-validate_cell "$control_cell" control-607 607 full 4 V2-R2-SV1-CDF-LIQUIDITY-24H-CONTROL
-validate_cell "$control_none_cell" control-607-none 607 none 4 V2-R2-SV1-CDF-LIQUIDITY-24H-CONTROL
+validate_cell "$treatment_cell" "treatment-$parity_seed" "$parity_seed" full 4 "$v2_r2_sv1_run_hypothesis_id"
+validate_cell "$treatment_g8_cell" "treatment-$parity_seed-g8" "$parity_seed" full 8 "$v2_r2_sv1_run_hypothesis_id"
+validate_cell "$control_cell" "control-$parity_seed" "$parity_seed" full 4 "${v2_r2_sv1_run_hypothesis_id}-CONTROL"
+validate_cell "$control_none_cell" "control-$parity_seed-none" "$parity_seed" none 4 "${v2_r2_sv1_run_hypothesis_id}-CONTROL"
 
 compare_exact_pair() {
 	local left=$1 right=$2 label=$3
@@ -190,12 +197,15 @@ jq -n --arg source_revision "$source_revision" --arg analyzer_revision "$analyze
 	--arg control_stream_sha256 "$(sha256sum "$control_cell/events.evs" | awk '{print $1}')" \
 	--argjson treatment_events "$treatment_events" --arg treatment_digest "$treatment_digest" \
 	--argjson control_events "$control_events" --arg control_digest "$control_digest" \
+	--arg parity_contract "$v2_r2_sv1_parity_contract" --argjson parity_seed "$parity_seed" \
+	--arg treatment_name "$(basename "$treatment_cell")" --arg treatment_g8_name "$(basename "$treatment_g8_cell")" \
+	--arg control_name "$(basename "$control_cell")" --arg control_none_name "$(basename "$control_none_cell")" \
 	'{
-		schema_version: 1, contract: "v2-r2-sv1-24h-parity-v1", evidence_format: "evstream_v3", seed: 607, horizon: "24h",
+		schema_version: 1, contract: $parity_contract, evidence_format: "evstream_v3", seed: $parity_seed, horizon: "24h",
 		source_revision: $source_revision, analyzer_revision: $analyzer_revision, analyzer_sha256: $analyzer_sha256,
 		analyzer_go_version: $analyzer_go_version, simulator_binary_sha256: $simulator_binary_sha256,
 		prunegate_sha256: $prunegate_sha256,
-		pairs: {treatment_g4_g8: ["treatment-607", "treatment-607-g8"], control_full_no_log: ["control-607", "control-607-none"]},
+		pairs: {treatment_g4_g8: [$treatment_name, $treatment_g8_name], control_full_no_log: [$control_name, $control_none_name]},
 		exact_equal_domains: ["checkpoints.jsonl", "greeks.json", "latency.json", "events.evs", "binary-evidence-attestation.json", "ordered_raw_manifest"],
 		control_normalized_equal_domains: ["checkpoints.jsonl", "greeks.json", "latency.json", "execution_event_frames", "execution_stream_frames", "execution_stream_hash"],
 		no_log_absence_contract: ["evidence-artifact-hash.json", "evidence-only-artifact-hash.json", "venues/*.jsonl"],
@@ -217,7 +227,7 @@ else
 	mv -- "$tmp_attestation" "$attestation"
 fi
 require_object "$attestation"
-jq -e '.schema_version == 1 and .contract == "v2-r2-sv1-24h-parity-v1" and .evidence_format == "evstream_v3" and
+jq -e --arg contract "$v2_r2_sv1_parity_contract" '.schema_version == 1 and .contract == $contract and .evidence_format == "evstream_v3" and
 		.exact_equal_domains == ["checkpoints.jsonl", "greeks.json", "latency.json", "events.evs", "binary-evidence-attestation.json", "ordered_raw_manifest"] and
 		.control_normalized_equal_domains == ["checkpoints.jsonl", "greeks.json", "latency.json", "execution_event_frames", "execution_stream_frames", "execution_stream_hash"] and
 		 (.predicates | keys) == ["control_full_no_log_normalized_equal", "evidence_only_reconstruction_equal", "no_log_evidence_absent", "ordered_raw_evidence_equal", "source_and_build_identity_equal", "treatment_g4_g8_equal"] and

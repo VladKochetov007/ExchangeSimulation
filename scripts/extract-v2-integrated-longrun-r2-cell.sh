@@ -9,6 +9,7 @@ if [[ $# -ne 1 ]]; then
 fi
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+source "$root_dir/scripts/v2-r2-sv1-contract-loader.sh"
 extractor_variant=${V2_R2_EXTRACTOR_VARIANT:-historical}
 case "$extractor_variant" in
 	historical)
@@ -18,10 +19,10 @@ case "$extractor_variant" in
 		expected_runner_contract="v2-integrated-longrun-r2-runner-v2"
 		;;
 	sv1)
-		contract_script="$root_dir/scripts/v2-r2-sv1-24h-contract.sh"
-		contract_version="v2-r2-sv1-24h-candidate-v3"
-		expected_config_dir="$root_dir/research/configs/v2-r2-sv1-24h"
-		expected_runner_contract="v2-r2-sv1-24h-runner-v1"
+		contract_script=$(v2_r2_select_sv1_contract "$root_dir") || {
+			printf 'integrated long-run extraction failure: unregistered SV1 contract path\n' >&2
+			exit 1
+		}
 		;;
 	*)
 		printf 'integrated long-run extraction failure: unsupported extractor variant: %s\n' "$extractor_variant" >&2
@@ -29,6 +30,14 @@ case "$extractor_variant" in
 		;;
 esac
 source "$contract_script"
+if [[ "$extractor_variant" == sv1 ]]; then
+	export V2_R2_SV1_CONTRACT_SCRIPT="$contract_script"
+fi
+if [[ "$extractor_variant" == sv1 ]]; then
+	contract_version="$v2_r2_sv1_candidate_contract_version"
+	expected_config_dir="$v2_r2_sv1_config_dir"
+	expected_runner_contract="$v2_r2_sv1_runner_contract"
+fi
 source "$root_dir/scripts/v2-r2-evidence-input-contract.sh"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 renderer=${EVSRENDER_BIN:-"$root_dir/bin/evsrender"}
@@ -96,12 +105,11 @@ fi
 [[ -x "$analyzer" ]] || fail "missing analyzer: $analyzer"
 analyzer_go_version=$(v2_r2_binary_go_version "$analyzer")
 v2_r2_is_go_127 "$analyzer_go_version" || fail "analyzer is not built with the pinned Go 1.27 toolchain: $analyzer_go_version"
-case "$cell_name" in
-	dev-607|dev-613|dev-617)
-		[[ "$extractor_variant" == historical ]] || fail "SV1 extractor cannot accept historical cell: $cell_name"
-		;;
-	treatment-607|treatment-613|treatment-617|control-607|control-613|control-617)
-		[[ "$extractor_variant" == sv1 ]] || fail "historical extractor cannot accept SV1 cell: $cell_name"
+case "$extractor_variant:$cell_name" in
+	historical:dev-607|historical:dev-613|historical:dev-617) ;;
+	sv1:treatment-*|sv1:control-*)
+		[[ "$cell_name" =~ ^(treatment|control)-([0-9]+)$ ]] || fail "extractor accepts only primary SV1B cells: $cell_name"
+		v2_r2_sv1_is_registered_seed "${BASH_REMATCH[2]}" || fail "unregistered SV1 development seed: $cell_name"
 		;;
 	*) fail "extractor accepts only registered full development cells, got $cell_name" ;;
 esac

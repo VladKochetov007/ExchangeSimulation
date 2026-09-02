@@ -10,13 +10,17 @@ if [[ $# -ne 1 ]]; then
 fi
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+source "$root_dir/scripts/v2-r2-sv1-contract-loader.sh"
 verification_variant=${V2_R2_EXTRACTOR_VARIANT:-historical}
 case "$verification_variant" in
 	historical) contract_script="$root_dir/scripts/v2-integrated-longrun-r2-contract.sh" ;;
-	sv1) contract_script="$root_dir/scripts/v2-r2-sv1-24h-contract.sh" ;;
+	sv1) contract_script=$(v2_r2_select_sv1_contract "$root_dir") || { printf 'integrated long-run verification failure: unregistered SV1 contract path\n' >&2; exit 1; } ;;
 	*) printf 'integrated long-run verification failure: unsupported verification variant: %s\n' "$verification_variant" >&2; exit 2 ;;
 esac
 source "$contract_script"
+if [[ "$verification_variant" == sv1 ]]; then
+	export V2_R2_SV1_CONTRACT_SCRIPT="$contract_script"
+fi
 cell=$1
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 

@@ -15,7 +15,13 @@ scientific_root=$(realpath -e -- "$root_dir") || {
 	echo "could not resolve scientific repository root" >&2
 	exit 1
 }
-source "$root_dir/scripts/v2-integrated-longrun-r2-contract.sh"
+source "$root_dir/scripts/v2-r2-sv1-contract-loader.sh"
+contract_script=$(v2_r2_select_sv1_contract "$root_dir") || {
+	echo "activation probe received an unregistered SV1 contract path" >&2
+	exit 1
+}
+source "$contract_script"
+export V2_R2_SV1_CONTRACT_SCRIPT="$contract_script"
 
 go_bin_dir=/usr/local/go/bin
 [[ -x "$go_bin_dir/go" ]] || go_bin_dir=$(dirname -- "$(command -v go)")
@@ -37,9 +43,9 @@ head_revision=$(git -C "$root_dir" rev-parse HEAD)
 	exit 1
 }
 
-config_dir="$root_dir/research/configs/v2-r2-sv1"
-treatment_config="$config_dir/activation-607.json"
-control_config="$config_dir/activation-607-control.json"
+activation_seed="$v2_r2_sv1_activation_seed"
+treatment_config="$v2_r2_sv1_activation_config"
+control_config="$v2_r2_sv1_activation_control_config"
 binary=${1:-"$root_dir/bin/multivenue"}
 audit_binary=${2:-"$root_dir/bin/cdf-liquidity-audit"}
 [[ -x "$binary" && -x "$audit_binary" && -s "$treatment_config" && -s "$control_config" ]] || {
@@ -47,8 +53,8 @@ audit_binary=${2:-"$root_dir/bin/cdf-liquidity-audit"}
 	exit 1
 }
 
-[[ "$(jq -er '.seed' "$treatment_config")" == 607 && "$(jq -er '.seed' "$control_config")" == 607 ]] || {
-	echo "activation probe is restricted to development seed 607" >&2
+[[ "$(jq -er '.seed' "$treatment_config")" == "$activation_seed" && "$(jq -er '.seed' "$control_config")" == "$activation_seed" ]] || {
+	echo "activation probe seed differs from the registered development activation seed: $activation_seed" >&2
 	exit 1
 }
 [[ "$(jq -er '.evidence_format' "$treatment_config")" == evstream_v3 && "$(jq -er '.evidence_format' "$control_config")" == evstream_v3 ]] || {
@@ -109,7 +115,7 @@ v2_r2_acquire_namespace_lock || {
 horizon=5m
 simulation_start_nano=1735689600000000000
 simulation_end_nano=1735689900000000000
-output_root=${V2_R2_SV1_ACTIVATION_ROOT:-"/home/vlad/external-scratch/v2-r2-sv1-activation-$head_revision"}
+output_root=${V2_R2_SV1_ACTIVATION_ROOT:-"/home/vlad/external-scratch/${v2_r2_sv1_activation_output_prefix}-${activation_seed}-${head_revision}"}
 [[ "$output_root" == /* && "$output_root" != */ && "$output_root" != *$'\n'* && "$output_root" != *$'\t'* ]] || {
 	echo "activation output root must be an absolute, non-empty path" >&2
 	exit 1
@@ -143,8 +149,8 @@ prepare_arm() {
 	experiment=$(jq -er '.experiment_id' "$arm/run-config.json")
 	hypothesis=$(jq -er '.hypothesis_id' "$arm/run-config.json")
 	jq -n \
-		--arg cell "v2-r2-sv1-activation-607-$(basename "$arm")" \
-		--argjson seed 607 \
+		--arg cell "${v2_r2_sv1_activation_output_prefix}-${activation_seed}-$(basename "$arm")" \
+		--argjson seed "$activation_seed" \
 		--arg horizon "$horizon" \
 		--argjson simulation_start_nano "$simulation_start_nano" \
 		--argjson simulation_end_nano "$simulation_end_nano" \
@@ -159,7 +165,8 @@ prepare_arm() {
 		--arg binary_go_version "$binary_go_version" \
 		--arg binary_goos "$binary_goos" --arg binary_goarch "$binary_goarch" --arg binary_goamd64 "$binary_goamd64" \
 		--argjson venue_ids "$(jq -c '.venue_ids' "$arm/run-config.json")" \
-		'{schema_version: 1, contract: "v2-r2-sv1-activation-provenance-v1",
+		--arg contract "$v2_r2_sv1_activation_contract" \
+		'{schema_version: 1, contract: $contract,
 		 cell: $cell, seed: $seed, simulated_horizon: $horizon,
 		 simulation_start_nano: $simulation_start_nano, simulation_end_nano: $simulation_end_nano,
 		 config_sha256: $config_sha256, binary_sha256: $binary_sha256,
@@ -184,7 +191,7 @@ run_arm() {
 		echo "activation arm did not produce all completion evidence: $arm" >&2
 		return 1
 	}
-	jq -e --arg revision "$head_revision" --argjson seed 607 --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
+	jq -e --arg revision "$head_revision" --argjson seed "$activation_seed" --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
 		'.build.revision == $revision and .build.modified == false and .build.goos == "linux" and .build.goarch == "amd64" and .build.goamd64 == "v1" and .venue_ids == ["north", "central", "south"] and
 		 .config.seed == $seed and .config.log_mode == "full" and .config.evidence_format == "evstream_v3"' \
 		"$arm/manifest.json" >/dev/null
@@ -209,25 +216,19 @@ run_arm "$control_dir"
 comparison_tmp="$output_root/cdf-liquidity-comparison.json.tmp-$$"
 "$audit_binary" -treatment "$treatment_dir" -control "$control_dir" >"$comparison_tmp"
 mv -- "$comparison_tmp" "$output_root/cdf-liquidity-comparison.json"
-jq -e \
-	'.valid == true and .provenance.valid == true and
-	 .treatment.valid == true and .control.valid == true and
-	 .treatment.supplier_count > 0 and .control.supplier_count == 0 and
-	 .treatment.trading_supplier_count == .treatment.supplier_count and
-	 .treatment.pnl_changing_supplier_count == .treatment.supplier_count and
-	 .treatment.inventory_responsive_decision_count > 0 and
-	 (.treatment.cancel_count + .treatment.withdraw_count) > 0 and
-	 all(.treatment.suppliers[]; .max_position <= .configured_max_position and
-		.max_gross_base_balance <= .configured_max_inventory and
-		.max_quote_qty <= .configured_max_quote_qty)' \
-	"$output_root/cdf-liquidity-comparison.json" >/dev/null || {
+expected_supplier_count=$(jq -er '(.elastic_liquidity_suppliers | length) * (.venue_ids | length)' "$treatment_config")
+v2_r2_require_cdf_supplier_comparison "$output_root/cdf-liquidity-comparison.json" "$expected_supplier_count" || {
 	echo "activation contract failed: suppliers did not demonstrate finite bounded activity" >&2
+	exit 1
+}
+v2_r2_require_cdf_supplier_control "$output_root/cdf-liquidity-comparison.json" || {
+	echo "activation contract failed: control contains CDF supplier activity" >&2
 	exit 1
 }
 
 comparison_sha=$(sha256sum -- "$output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
 jq -n \
-	--arg contract "v2-r2-sv1-activation-pair-v1" \
+	--arg contract "$v2_r2_sv1_activation_pair_contract" \
 	--arg candidate "$head_revision" \
 	--arg output_root "$output_root" \
 	--arg treatment "$treatment_dir" \
@@ -237,7 +238,7 @@ jq -n \
 	--arg binary_sha256 "$(sha256sum -- "$binary" | awk '{print $1}')" \
 	--arg analyzer_sha256 "$(sha256sum -- "$audit_binary" | awk '{print $1}')" \
 	--arg comparison_sha256 "$comparison_sha" \
-	--argjson seed 607 --arg horizon "$horizon" \
+	--argjson seed "$activation_seed" --arg horizon "$horizon" \
 	'{schema_version: 1, contract: $contract, candidate_revision: $candidate,
 	 seed: $seed, simulated_horizon: $horizon, output_root: $output_root,
 	 treatment_dir: $treatment, control_dir: $control,

@@ -10,14 +10,25 @@ if [[ $# -gt 1 ]]; then
 fi
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-source "$root_dir/scripts/v2-r2-sv1-24h-contract.sh"
+source "$root_dir/scripts/v2-r2-sv1-contract-loader.sh"
+contract_script=$(v2_r2_select_sv1_contract "$root_dir") || {
+	printf 'SV1 development scorer failure: unregistered contract path\n' >&2
+	exit 1
+}
+source "$contract_script"
+export V2_R2_SV1_CONTRACT_SCRIPT="$contract_script"
 output_root=${1:-"$v2_r2_output_root"}
 score="$output_root/development-score.json"
 parity="$output_root/parity-attestation.json"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 cdf_audit=${CDF_LIQUIDITY_AUDIT_BIN:-"$root_dir/bin/cdf-liquidity-audit"}
-contract_version="v2-r2-sv1-24h-development-scorer-v5"
-survival_contract="v2-r2-sv1-24h-survival-side-availability-v2"
+contract_version="$v2_r2_sv1_scorer_contract"
+survival_contract="$v2_r2_sv1_survival_contract"
+paired_effect_contract="$v2_r2_sv1_paired_effect_contract"
+candidate_id="$v2_r2_sv1_candidate_id"
+predecessor_id="$v2_r2_sv1_predecessor_id"
+primary_seed="${v2_r2_sv1_seeds[0]}"
+development_seeds_json=$(printf '%s\n' "${v2_r2_sv1_seeds[@]}" | jq -Rsc 'split("\n") | map(select(length > 0) | tonumber)')
 simulation_start_nano=1735689600000000000
 simulation_end_nano=1735776000000000000
 survival_start_nano=1735693200000000000
@@ -90,14 +101,14 @@ required_json=$(printf '%s\n' "${required_artifacts[@]}" | jq -Rsc 'split("\n") 
 
 if [[ -e "$parity" || -L "$parity" ]]; then
 	"$root_dir/scripts/check-v2-r2-sv1-24h-parity.sh" --verify-existing "$output_root" >/dev/null ||
-		fail "existing seed-607 parity attestation did not recompute exactly"
+		fail "existing seed-$primary_seed parity attestation did not recompute exactly"
 else
 	"$root_dir/scripts/check-v2-r2-sv1-24h-parity.sh" "$output_root" >/dev/null ||
-		fail "seed-607 parity controls are not valid"
+		fail "seed-$primary_seed parity controls are not valid"
 fi
 require_file "$parity"
 require_object "$parity"
-jq -e '.schema_version == 1 and .contract == "v2-r2-sv1-24h-parity-v1" and
+jq -e '.schema_version == 1 and .contract == $parity_contract and
 	.evidence_format == "evstream_v3" and
 	.exact_equal_domains == ["checkpoints.jsonl", "greeks.json", "latency.json", "events.evs", "binary-evidence-attestation.json", "ordered_raw_manifest"] and
 	.control_normalized_equal_domains == ["checkpoints.jsonl", "greeks.json", "latency.json", "execution_event_frames", "execution_stream_frames", "execution_stream_hash"] and
@@ -107,7 +118,7 @@ jq -e '.schema_version == 1 and .contract == "v2-r2-sv1-24h-parity-v1" and
 	fail "invalid SV1 parity attestation"
 
 registered_roster_count=$(jq -er '(.elastic_liquidity_suppliers | length) * (.venue_ids | length)' \
-	"$root_dir/research/configs/v2-r2-sv1-24h/treatment-607.json")
+	"$v2_r2_sv1_config_dir/treatment-$primary_seed.json")
 [[ "$registered_roster_count" =~ ^[0-9]+$ && "$registered_roster_count" -gt 0 ]] || fail "invalid registered CDF roster count"
 
 terminal_measurement_valid() {
@@ -188,7 +199,7 @@ strict_paired_effect_count=0
 pair_effect_records='[]'
 all_cells_valid=true
 
-for seed in 607 613 617; do
+for seed in "${v2_r2_sv1_seeds[@]}"; do
 	for population in treatment control; do
 		cell="$output_root/$population-$seed"
 		expected_cdf_supplier_count=$(jq -er '((.elastic_liquidity_suppliers // []) | length) * (.venue_ids | length)' "$cell/run-config.json")
@@ -203,7 +214,7 @@ for seed in 607 613 617; do
 		require_file "$cell/analysis-metadata.json"
 		require_file "$cell/integrity.json"
 		require_file "$cell/activation.json"
-		jq -e --arg cell "$population-$seed" --arg population "$population" --argjson seed "$seed" --arg contract "v2-r2-sv1-24h-candidate-v3" \
+		jq -e --arg cell "$population-$seed" --arg population "$population" --argjson seed "$seed" --arg contract "$v2_r2_sv1_candidate_contract_version" \
 			--argjson required "$required_json" \
 			'.schema_version == 3 and .cell == $cell and .seed == $seed and
 			 .evidence_format == "evstream_v3" and .analysis_contract == $contract and
@@ -336,11 +347,12 @@ for seed in 607 613 617; do
 	if [[ -s "$output_root/survival-treatment-$seed.json" && -s "$output_root/survival-control-$seed.json" ]] &&
 		jq -n --slurpfile treatment "$output_root/survival-treatment-$seed.json" \
 			--slurpfile control "$output_root/survival-control-$seed.json" --argjson seed "$seed" \
+			--arg contract "$paired_effect_contract" \
 			-f "$paired_survival_filter" >"$paired_effect_tmp"; then
 		mv "$paired_effect_tmp" "$paired_effect_path"
 	else
-		jq -n --argjson seed "$seed" \
-			'{schema_version: 1, contract: "v2-r2-sv1-24h-paired-survival-effect-v1", seed: $seed, invalid: true, failure: "matched treatment/control survival summaries are missing or malformed"}' \
+		jq -n --argjson seed "$seed" --arg contract "$paired_effect_contract" \
+			'{schema_version: 1, contract: $contract, seed: $seed, invalid: true, failure: "matched treatment/control survival summaries are missing or malformed"}' \
 			>"$paired_effect_path.invalid"
 		all_paired_effect_valid=false
 		all_paired_effect_not_worse=false
@@ -373,12 +385,12 @@ if [[ "$all_paired_effect_valid" == true && "$all_paired_effect_not_worse" == tr
 fi
 
 parity_sha256=$(sha256sum "$parity" | awk '{print $1}')
-raw_source_revision=$(jq -er '.raw_source_revision' "$output_root/treatment-607/analysis-metadata.json")
-analysis_revision=$(jq -er '.analysis_revision' "$output_root/treatment-607/analysis-metadata.json")
-analyzer_revision=$(jq -er '.analyzer_revision' "$output_root/treatment-607/analysis-metadata.json")
-simulator_revision=$(jq -er '.simulator_revision' "$output_root/treatment-607/analysis-metadata.json")
-analyzer_sha256=$(jq -er '.analyzer_sha256' "$output_root/treatment-607/analysis-metadata.json")
-simulator_sha256=$(jq -er '.simulator_sha256' "$output_root/treatment-607/analysis-metadata.json")
+raw_source_revision=$(jq -er '.raw_source_revision' "$output_root/treatment-$primary_seed/analysis-metadata.json")
+analysis_revision=$(jq -er '.analysis_revision' "$output_root/treatment-$primary_seed/analysis-metadata.json")
+analyzer_revision=$(jq -er '.analyzer_revision' "$output_root/treatment-$primary_seed/analysis-metadata.json")
+simulator_revision=$(jq -er '.simulator_revision' "$output_root/treatment-$primary_seed/analysis-metadata.json")
+analyzer_sha256=$(jq -er '.analyzer_sha256' "$output_root/treatment-$primary_seed/analysis-metadata.json")
+simulator_sha256=$(jq -er '.simulator_sha256' "$output_root/treatment-$primary_seed/analysis-metadata.json")
 
 mkdir -p -- "$output_root"
 score_tmp=$(mktemp "$score.tmp-XXXXXX")
@@ -392,8 +404,8 @@ classification=$(jq -n \
 	--argjson all_paired_effect_valid "$all_paired_effect_valid" \
 	--argjson all_paired_effect_identified "$all_paired_effect_identified" \
 	-f "$score_classification_filter") || fail "could not classify development score"
-jq -n --arg contract "$contract_version" --arg candidate "V2-R2-SV1" \
-	--arg predecessor "R2" --arg source_revision "$raw_source_revision" \
+jq -n --arg contract "$contract_version" --arg candidate "$candidate_id" \
+	--arg predecessor "$predecessor_id" --arg source_revision "$raw_source_revision" \
 	--arg raw_source_revision "$raw_source_revision" --arg analysis_revision "$analysis_revision" \
 	--arg analyzer_revision "$analyzer_revision" --arg analyzer_sha256 "$analyzer_sha256" \
 	--arg simulator_revision "$simulator_revision" --arg simulator_sha256 "$simulator_sha256" \
@@ -414,6 +426,8 @@ jq -n --arg contract "$contract_version" --arg candidate "V2-R2-SV1" \
 	--argjson all_paired_effect_identified "$all_paired_effect_identified" \
 	--argjson strict_paired_effect_count "$strict_paired_effect_count" \
 	--argjson expected_roster "$registered_roster_count" \
+	--argjson development_seeds "$development_seeds_json" \
+	--arg qualitative_review_status "PENDING_INDEPENDENT_POST_RUN_REVIEW" \
 	--argjson paired_effects "$pair_effect_records" \
 	--argjson holdouts '[619,631,641]' \
 	--argjson classification "$classification" \
@@ -427,7 +441,7 @@ jq -n --arg contract "$contract_version" --arg candidate "V2-R2-SV1" \
 			 analysis_revision: $analysis_revision, analyzer_revision: $analyzer_revision, analyzer_sha256: $analyzer_sha256,
 			simulator_revision: $simulator_revision, simulator_sha256: $simulator_sha256,
 			parity_attestation_sha256: $parity_sha256, registered_cdf_supplier_count: $expected_roster,
-			development_seeds: [607,613,617], reserved_holdout_seeds: $holdouts,
+			development_seeds: $development_seeds, reserved_holdout_seeds: $holdouts,
 			holdout_status: "RESERVED_AND_NOT_READ_BY_DEVELOPMENT_SCORER",
 			predicates: {
 				mechanical_and_artifact_contract: $all_cells_valid,
@@ -449,6 +463,11 @@ jq -n --arg contract "$contract_version" --arg candidate "V2-R2-SV1" \
 				holdout_outputs_absent: true,
 				holdout_access_policy_enforced: true
 			},
+			anti_cheating_review: {
+				numerical_diagnostics_valid: $all_anticheating_valid,
+				qualitative_review_status: $qualitative_review_status,
+				required_before_freeze: true
+			},
 			interpretation: [
 				"A viable development candidate is not freeze authorization.",
 				"A non-viable status preserves a valid negative successor result and does not rewrite predecessor R2.",
@@ -456,7 +475,8 @@ jq -n --arg contract "$contract_version" --arg candidate "V2-R2-SV1" \
 				"Every primary treatment and control cell must produce valid terminal and survival measurements; a valid false control predicate remains diagnostic rather than gating treatment viability.",
 				"The absolute treatment survival endpoint and the matched total intervention effect are separate predicates.",
 				"The paired estimand is the control-minus-treatment aggregate CDF/USD empty-side share; treatment must be no worse in every fresh pair and strictly lower in at least two of three pairs.",
-				"The control removes the CDF roster, so this is a total population intervention effect and does not isolate supplier policy from registered population or scheduler topology."
+				"The control removes the CDF roster, so this is a total population intervention effect and does not isolate supplier policy from registered population or scheduler topology.",
+				"Numerical anti-cheating diagnostics are provisional; qualitative anti-cheating review remains pending and is required before freeze authorization."
 			],
 			cells: $cells,
 			artifacts: {
@@ -474,6 +494,6 @@ jq -e --arg contract "$contract_version" --argjson holdouts '[619,631,641]' \
 	 .reserved_holdout_seeds == $holdouts and
 	 .holdout_status == "RESERVED_AND_NOT_READ_BY_DEVELOPMENT_SCORER" and
 		(.predicates | keys) == ["anti_cheating_diagnostics", "cdf_audit_contract", "control_survival_measurement_valid", "control_survival_predicate_diagnostic", "holdout_access_policy_enforced", "holdout_outputs_absent", "mechanical_and_artifact_contract", "measurement_contract", "paired_survival_effect_identified", "paired_survival_measurement_valid", "paired_treatment_not_worse", "parity_attested", "post_warmup_cdf_side_availability_treatment", "strict_terminal_valuation_control_diagnostic", "strict_terminal_valuation_treatment", "terminal_measurement_control", "terminal_measurement_treatment", "treatment_survival_measurement_valid"] and
-	 .predicates.parity_attested == true and .predicates.holdout_outputs_absent == true and .predicates.holdout_access_policy_enforced == true' "$score" >/dev/null ||
+	 .predicates.parity_attested == true and .predicates.holdout_outputs_absent == true and .predicates.holdout_access_policy_enforced == true' --arg parity_contract "$v2_r2_sv1_parity_contract" "$score" >/dev/null ||
 	fail "development score self-check failed"
 printf 'scored SV1 development: %s\n' "$(jq -r '.status' "$score")"

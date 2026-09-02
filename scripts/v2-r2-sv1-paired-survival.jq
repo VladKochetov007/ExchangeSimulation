@@ -18,7 +18,7 @@ def maximum_window_empty_side_share:
 ($control_summary | maximum_window_empty_side_share) as $control_max_window_share |
 {
 	schema_version: 1,
-	contract: "v2-r2-sv1-24h-paired-survival-effect-v1",
+	contract: $contract,
 	seed: $seed,
 	measurement: {
 		treatment_valid: ($treatment_summary.schema_version == 1 and ($treatment_summary.predicates | type) == "object" and ($treatment_share | type) == "number"),

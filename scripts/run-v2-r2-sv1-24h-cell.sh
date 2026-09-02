@@ -5,22 +5,46 @@
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 3 ]]; then
-	echo "usage: $0 treatment-607|treatment-613|treatment-617|control-607|control-613|control-617|treatment-607-g8|control-607-none [multivenue-binary] [prunegate-binary]" >&2
+	echo "usage: $0 treatment-SEED|control-SEED|treatment-PARITY_SEED-g8|control-PARITY_SEED-none [multivenue-binary] [prunegate-binary]" >&2
 	exit 2
 fi
 cell=$1
+root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+source "$root_dir/scripts/v2-r2-sv1-contract-loader.sh"
+contract_script=$(v2_r2_select_sv1_contract "$root_dir") || {
+	echo "SV1 runner received an unregistered contract path" >&2
+	exit 1
+}
+source "$contract_script"
+export V2_R2_SV1_CONTRACT_SCRIPT="$contract_script"
 case "$cell" in
-	treatment-607|treatment-613|treatment-617|control-607|control-613|control-617)
+	treatment-*-g8)
+		[[ "$cell" == "treatment-${v2_r2_sv1_parity_seed}-g8" ]] || {
+			echo "unregistered SV1 parity cell: $cell" >&2
+			exit 2
+		}
+		config_name="treatment-${v2_r2_sv1_parity_seed}.json"
+		expected_gomaxprocs=4
+		;;
+	control-*-none)
+		[[ "$cell" == "control-${v2_r2_sv1_parity_seed}-none" ]] || {
+			echo "unregistered SV1 parity cell: $cell" >&2
+			exit 2
+		}
 		config_name="$cell.json"
 		expected_gomaxprocs=4
 		;;
-	control-607-none)
-		config_name="control-607-none.json"
+	treatment-*|control-*)
+		[[ "$cell" =~ ^(treatment|control)-([0-9]+)$ ]] || {
+			echo "unregistered SV1 development cell: $cell" >&2
+			exit 2
+		}
+		v2_r2_sv1_is_registered_seed "${BASH_REMATCH[2]}" || {
+			echo "unregistered SV1 development seed: $cell" >&2
+			exit 2
+		}
+		config_name="$cell.json"
 		expected_gomaxprocs=4
-		;;
-	treatment-607-g8)
-		config_name="treatment-607.json"
-		expected_gomaxprocs=8
 		;;
 	holdout-619|holdout-631|holdout-641)
 		echo "refusing reserved holdout in development runner; use a separately pinned post-freeze protocol" >&2
@@ -29,8 +53,6 @@ case "$cell" in
 	*) echo "unregistered SV1 long-run cell: $cell" >&2; exit 2 ;;
 esac
 
-root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-source "$root_dir/scripts/v2-r2-sv1-24h-contract.sh"
 [[ -z "${EXSIM_BINARY_EVIDENCE:-}" ]] || {
 	echo "refusing registered launch with prototype EXSIM_BINARY_EVIDENCE override" >&2
 	exit 1
@@ -39,8 +61,8 @@ v2_r2_acquire_namespace_lock || {
 	echo "could not acquire the R2 evidence namespace lock" >&2
 	exit 1
 }
-config="$root_dir/research/configs/v2-r2-sv1-24h/$config_name"
-config_provenance_manifest="$root_dir/research/v2-r2-sv1-24h-config-provenance.json"
+config="$v2_r2_sv1_config_dir/$config_name"
+config_provenance_manifest="$v2_r2_sv1_config_provenance_manifest"
 output_root="$v2_r2_output_root"
 output="$output_root/$cell"
 binary=${2:-"$root_dir/bin/multivenue"}
@@ -164,6 +186,8 @@ jq -n \
 	--arg git_revision "$sim_revision" \
 	--arg go_version "$(go version)" \
 	--arg binary_go_version "$binary_go_version" \
+	--arg runner_contract "$v2_r2_sv1_runner_contract" \
+	--arg experiment_prefix "$v2_r2_sv1_experiment_prefix" \
 	--arg prunegate_path "$prunegate_binary" \
 	--arg prunegate_sha256 "$(sha256sum "$prunegate_binary" | awk '{print $1}')" \
 	--arg prunegate_vcs_revision "$prunegate_revision" \
@@ -186,8 +210,8 @@ jq -n \
 	--arg config_hypothesis "$config_hypothesis" \
 	--arg config_experiment "$config_experiment" \
 	'{
-		  schema_version: 6, runner_contract: "v2-r2-sv1-24h-runner-v1",
-		  experiment_id: ("v2-r2-sv1-24h-" + $cell),
+		  schema_version: 6, runner_contract: $runner_contract,
+		  experiment_id: ($experiment_prefix + "-" + $cell),
 		  config_experiment_id: $config_experiment,
 		  hypothesis_id: $config_hypothesis,
 		  cell: $cell, seed: $seed, holdout: $holdout,
