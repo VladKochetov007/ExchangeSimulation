@@ -19,7 +19,7 @@ case "$extractor_variant" in
 		;;
 	sv1)
 		contract_script="$root_dir/scripts/v2-r2-sv1-24h-contract.sh"
-		contract_version="v2-r2-sv1-24h-candidate-v2"
+		contract_version="v2-r2-sv1-24h-candidate-v3"
 		expected_config_dir="$root_dir/research/configs/v2-r2-sv1-24h"
 		expected_runner_contract="v2-r2-sv1-24h-runner-v1"
 		;;
@@ -300,7 +300,7 @@ derived_artifacts=(
 	activation.json integrity.json analysis-metadata.json
 )
 if [[ "$extractor_variant" == sv1 ]]; then
-	derived_artifacts+=(cdfliquidity.json)
+	derived_artifacts+=(cdfliquidity.json priceunavailable.json)
 fi
 for artifact in "${derived_artifacts[@]}"; do
 	[[ ! -e "$analysis_dir/$artifact" && ! -e "$analysis_dir/$artifact.err" ]] || fail "refusing to overwrite existing derived evidence: $analysis_dir/$artifact"
@@ -343,7 +343,7 @@ metrics=(
 	makerrebalance postonly liabilityhedger perpsignals
 )
 if [[ "$extractor_variant" == sv1 ]]; then
-	metrics+=(cdfliquidity)
+	metrics+=(cdfliquidity priceunavailable)
 fi
 for metric in "${metrics[@]}"; do
 	if [[ "$metric" == positions || "$metric" == settlements ]]; then
@@ -430,13 +430,23 @@ while IFS= read -r -d '' raw_file; do
 			((payload.amount // 0) | number_value) > 0 and
 			((payload.collateral_used // 0) | number_value) > 0) | 1' "$raw_file" | wc -l)
 	cdf_borrow_events=$((cdf_borrow_events + count))
-	count=$(jq -c '
-		def payload: (.data.payload // .data // {});
-		select(.event == "OrderRejected" and
-			((payload.error // payload.payload.error // .data.error // .error // "") == "PRICE_UNAVAILABLE")) | 1' "$raw_file" | wc -l)
-	price_unavailable_rejections=$((price_unavailable_rejections + count))
+	if [[ "$extractor_variant" != sv1 ]]; then
+		count=$(jq -c '
+			def payload: (.data.payload // .data // {});
+			select(.event == "OrderRejected" and
+				((payload.error // payload.payload.error // .data.error // .error // "") == "PRICE_UNAVAILABLE")) | 1' "$raw_file" | wc -l)
+		price_unavailable_rejections=$((price_unavailable_rejections + count))
+	fi
 done < <(find "$cell/venues" -type f -name '*.jsonl' -print0 | sort -z)
 [[ "$raw_count" -gt 0 ]] || fail "no raw JSONL evidence files found"
+if [[ "$extractor_variant" == sv1 ]]; then
+	jq -e '.result.valid == true and
+		(.result.price_unavailable_order_rejections | type) == "number" and
+		(.result.malformed_order_rejected_count // 0) == 0' \
+		"$analysis_dir/priceunavailable.json" >/dev/null ||
+		fail "typed PRICE_UNAVAILABLE rejection audit is invalid"
+	price_unavailable_rejections=$(jq -er '.result.price_unavailable_order_rejections' "$analysis_dir/priceunavailable.json")
+fi
 
 activation_tmp=$(mktemp "$analysis_dir/activation.json.tmp-XXXXXX")
 activation_filter="$(v2_r2_calendar_listing_timeline_jq_definition)"
@@ -454,18 +464,32 @@ jq_args=(
 )
 if [[ "$extractor_variant" == sv1 ]]; then
 	expected_cdf_supplier_count=$(jq -er '((.elastic_liquidity_suppliers // []) | length) * (.venue_ids | length)' "$cell/run-config.json")
-	[[ "$expected_cdf_supplier_count" =~ ^[1-9][0-9]*$ ]] || fail "SV1 config has no registered CDF supplier roster"
-	v2_r2_require_cdf_supplier_activation "$analysis_dir/cdfliquidity.json" "$expected_cdf_supplier_count" ||
-		fail "SV1 CDF liquidity activation contract not satisfied"
-	cdf_liquidity_activation_observed=true
+	[[ "$expected_cdf_supplier_count" =~ ^[0-9]+$ ]] || fail "SV1 config has an invalid CDF supplier roster count"
+	cdf_liquidity_population="control"
+	cdf_liquidity_population_contract=false
+	if [[ "$expected_cdf_supplier_count" -gt 0 ]]; then
+		v2_r2_require_cdf_supplier_activation "$analysis_dir/cdfliquidity.json" "$expected_cdf_supplier_count" ||
+			fail "SV1 treatment CDF liquidity activation contract not satisfied"
+		cdf_liquidity_population="treatment"
+		cdf_liquidity_population_contract=true
+		cdf_liquidity_activation_observed=true
+	else
+		v2_r2_require_cdf_supplier_control "$analysis_dir/cdfliquidity.json" ||
+			fail "SV1 control CDF population contract not satisfied"
+		cdf_liquidity_population_contract=true
+	fi
 	jq_args+=(--slurpfile cdf_liquidity "$analysis_dir/cdfliquidity.json")
+	jq_args+=(--arg cdf_liquidity_population "$cdf_liquidity_population")
+	jq_args+=(--argjson expected_cdf_supplier_count "$expected_cdf_supplier_count")
+	jq_args+=(--argjson cdf_liquidity_population_contract "$cdf_liquidity_population_contract")
 	activation_filter+='def r($x): $x[0].result;
 	 {schema_version: 1, result: {contract: $contract,
 	 cdf_collateral_borrowing: {events: $cdf_borrow_events,
 		 enabled_cross_asset_spot_graph: $enabled_cross_asset_spot_graph,
 		 enabled_cross_asset_collateral_marks: $enabled_cross_asset_collateral_marks},
-	 cdf_liquidity: {valid: r($cdf_liquidity).valid, supplier_count: r($cdf_liquidity).supplier_count,
-		 decision_count: r($cdf_liquidity).decision_count, fill_count: r($cdf_liquidity).fill_count,
+		 cdf_liquidity: {valid: r($cdf_liquidity).valid, population: $cdf_liquidity_population,
+			expected_supplier_count: $expected_cdf_supplier_count, supplier_count: r($cdf_liquidity).supplier_count,
+			 decision_count: r($cdf_liquidity).decision_count, fill_count: r($cdf_liquidity).fill_count,
 		 trading_supplier_count: r($cdf_liquidity).trading_supplier_count,
 		 pnl_changing_supplier_count: r($cdf_liquidity).pnl_changing_supplier_count,
 		 inventory_responsive_decision_count: r($cdf_liquidity).inventory_responsive_decision_count,
@@ -473,8 +497,9 @@ if [[ "$extractor_variant" == sv1 ]]; then
 		 max_borrowed: r($cdf_liquidity).max_borrowed, checks: (r($cdf_liquidity).checks // [] | length)},
 	 price_unavailable_order_rejections: $price_unavailable_rejections,
 	 calendar: (r($calendar)),
-		 predicates: {cdf_liquidity_activation_observed: $cdf_liquidity_activation_observed,
-		 zero_price_unavailable_order_rejections: ($price_unavailable_rejections == 0),
+		 observed: {cdf_liquidity_activation_observed: $cdf_liquidity_activation_observed},
+		 predicates: {cdf_liquidity_population_contract: $cdf_liquidity_population_contract,
+			 zero_price_unavailable_order_rejections: ($price_unavailable_rejections == 0),
 		 calendar_behavior_attested: (r($calendar).contract == "calendar-audit-v2" and
 			 all(r($calendar).venues[]; calendar_listing_timeline_matches(.listing_timeline; $expected_calendar_listing_timeline)) and
 			 (r($calendar).venues | map(.venue_id) | sort) == ($expected_calendar_venue_ids | sort) and
@@ -537,9 +562,10 @@ mv "$activation_tmp" "$analysis_dir/activation.json"
 require_json_object "$analysis_dir/activation.json"
 if [[ "$extractor_variant" == sv1 ]]; then
 	jq -e '(.result.predicates | length) == 3 and
-		(.result.predicates | keys) == ["calendar_behavior_attested", "cdf_liquidity_activation_observed", "zero_price_unavailable_order_rejections"] and
+		(.result.predicates | keys) == ["calendar_behavior_attested", "cdf_liquidity_population_contract", "zero_price_unavailable_order_rejections"] and
+		(.result.observed.cdf_liquidity_activation_observed | type) == "boolean" and
 		all(.result.predicates | to_entries[]; .value == true)' "$analysis_dir/activation.json" >/dev/null ||
-		fail "SV1 candidate activation contract not satisfied"
+		fail "SV1 population activation contract not satisfied"
 	else
 	jq -e '(.result.predicates | length) == 3 and
 		(.result.predicates | keys) == ["calendar_behavior_attested", "cdf_collateral_borrowing_observed", "zero_price_unavailable_order_rejections"] and
@@ -614,7 +640,7 @@ jq -n --argjson tolerance "$conservation_tolerance_fixed_units" \
 			option_surface: (count($optionsurface; "points") > 0),
 			exposure: (count($exposure; "risk_samples") > 0),
 			hedging: (count($hedging; "profiles") > 0),
-			activation: (if $extractor_variant == "sv1" then r($activation).predicates.cdf_liquidity_activation_observed == true and r($activation).predicates.zero_price_unavailable_order_rejections == true else r($activation).predicates.cdf_collateral_borrowing_observed == true and r($activation).predicates.zero_price_unavailable_order_rejections == true end),
+		activation: (if $extractor_variant == "sv1" then r($activation).predicates.cdf_liquidity_population_contract == true and r($activation).predicates.zero_price_unavailable_order_rejections == true else r($activation).predicates.cdf_collateral_borrowing_observed == true and r($activation).predicates.zero_price_unavailable_order_rejections == true end),
 			late_path: (count($lifecycle; "funding") > 0 and count($lifecycle; "settlement_rounds") > 0 and count($settlements; "checks") > 0 and count($expiryfills; "expired_contracts") > 0)
 		},
 		observed: {
@@ -640,7 +666,7 @@ required=(
 	termcarry.json datedcarryp5.json perpreplenishment.json activation.json integrity.json calendar.json
 )
 if [[ "$extractor_variant" == sv1 ]]; then
-	required+=(cdfliquidity.json)
+	required+=(cdfliquidity.json priceunavailable.json)
 fi
 for artifact in "${required[@]}"; do
 	require_file "$analysis_dir/$artifact"
