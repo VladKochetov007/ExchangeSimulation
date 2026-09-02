@@ -845,3 +845,19 @@ will use an exact clean `3f73f30` worktree to preserve the cell's source
 identity. No other development cell, parity control, freeze, or holdout is
 authorized until treatment-607 extraction, verification, and independent
 review pass.
+
+## Append-only operational update: bounded route storage — 2026-09-02
+
+The prior 16.81 GiB rendered-tree statement was a RAM-backed staging ceiling,
+not a completed reconstruction. An exact-`3f73f30` disk attempt later reached
+34.99 GB of transient staging and was stopped with approximately 1.22 GB free;
+no derived result was accepted and the raw treatment cell was unchanged.
+
+Commit `df1057d` adds an explicit zstd route-storage option and teaches the
+shared analyzer scan, replay, and persisted-record hash to read `.jsonl.zst`
+routes. The existing uncompressed renderer remains the compatibility default.
+This is evidence storage only: event sequence, canonical binary hashes,
+sidecar multiset identity, and economic behavior are unchanged. The next
+safe action is a clean pinned rebuild followed by one compressed treatment-607
+extraction; no later development cell, parity control, freeze, or holdout has
+been authorized.

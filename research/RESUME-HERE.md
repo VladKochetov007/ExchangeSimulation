@@ -1015,3 +1015,18 @@ was imported.
   valid. Do not launch `treatment-613`, `treatment-617`, parity controls, or any
   holdout until treatment-607 extraction, verification, and independent review
   pass.
+
+### 2026-09-02 — bounded rendered-route storage
+
+The earlier 16.81 GiB renderer figure was a RAM-backed retry ceiling, not a
+completed full-tree size. A later exact-`3f73f30` disk attempt reached 34.99 GB
+of transient staging before being stopped at approximately 1.22 GB free; it
+also produced no derived result. The append-only correction is in
+`research/v2-r2-sv1-extraction-resource-incident-2026-09-02.md`.
+
+The analyzer/renderer adapter now supports independently compressed zstd route
+streams (`df1057d`). Compression is below the evidence contract: canonical
+binary hashes, sidecar hashes, ordering, and simulator economics are
+unchanged, while the shared analyzer scanner, replay, and artifact hash can
+read either storage form. Treatment-607 remains the only active cell; no
+613/617 cell, parity control, freeze, or holdout is authorized yet.

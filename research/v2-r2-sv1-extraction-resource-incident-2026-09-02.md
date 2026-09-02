@@ -59,3 +59,25 @@ worktree with the full renderer staging available on disk. This preserves the
 cell's source-revision identity while allowing the append-only incident record
 to advance the active branch. No additional development cell, parity control,
 freeze action, or holdout access is authorized by this incident.
+
+## Resource-boundary addendum — 2026-09-02
+
+The 16.81 GiB figure above was the capacity reached by the RAM-backed retry,
+not the size of a completed rendered tree. That retry stopped with 16 MiB
+remaining and therefore cannot be used as a full-tree estimate.
+
+A later disk-backed attempt from the exact clean `3f73f30` worktree reached
+34.99 GB of renderer staging before it was stopped with approximately 1.22 GB
+free. It also did not complete and produced no accepted derived evidence.
+The exact staging directory was removed after the stop; the raw treatment cell
+was unchanged. The earlier disk attempts and their retained logs remain
+historical incident evidence.
+
+The bounded follow-up is now explicit: render each route as an independent
+zstd stream and make the analyzer consume compressed routes through the same
+JSON-record scanner/replay contract. The uncompressed renderer remains
+available for compatibility. This storage adapter is implemented and pushed
+as `df1057d`; it does not alter binary execution hashes, sidecar multiset
+hashes, event ordering, or simulator economics. The next extraction will use
+the compressed route mode, then retain the derived results only after the
+existing fail-closed checks complete.
