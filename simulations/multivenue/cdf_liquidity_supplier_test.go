@@ -351,6 +351,16 @@ func TestElasticLiquiditySupplierSpecRejectsInvalidMakerFee(t *testing.T) {
 	}
 }
 
+func TestElasticLiquiditySupplierSpecRejectsInvalidDecisionPhase(t *testing.T) {
+	spec := testElasticLiquiditySupplierSpec()
+	for _, phase := range []time.Duration{-time.Nanosecond, time.Second} {
+		spec.DecisionPhaseOffset = phase
+		if err := spec.validate(); err == nil {
+			t.Fatalf("decision phase %s was accepted", phase)
+		}
+	}
+}
+
 func TestElasticLiquiditySupplierRosterWiresSeparatelyFromHistoricalSuppliers(t *testing.T) {
 	cfg := Config{
 		LogDir: t.TempDir(), CrossAssetSpotGraph: true,

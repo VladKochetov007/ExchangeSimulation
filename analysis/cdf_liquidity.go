@@ -179,6 +179,7 @@ type CDFLiquiditySupplierAudit struct {
 	configuredBaseHolding           int64
 	configuredElasticityPerPercent  int64
 	configuredMaxObservationAge     int64
+	configuredDecisionPhaseOffset   int64
 	configuredInitialBaseBalance    int64
 	configuredInitialQuoteBalance   int64
 	configuredQuotePrecision        int64
@@ -324,6 +325,7 @@ type cdfSupplierConfig struct {
 	MaxInventory         int64  `json:"max_inventory"`
 	MaxQuoteQty          int64  `json:"max_quote_qty"`
 	MaxObservationAge    int64  `json:"max_observation_age"`
+	DecisionPhaseOffset  int64  `json:"decision_phase_offset"`
 	ReferencePrice       int64  `json:"reference_price"`
 	ReferenceHalfLife    int64  `json:"reference_half_life"`
 	BaseHolding          int64  `json:"base_holding"`
@@ -545,6 +547,7 @@ type cdfDecisionEvidence struct {
 	ClientID               uint64 `json:"client_id"`
 	Symbol                 string `json:"symbol"`
 	DecisionTime           int64  `json:"decision_time"`
+	DecisionPhaseOffset    int64  `json:"decision_phase_offset_nanos"`
 	ObservationTime        int64  `json:"observation_time"`
 	ObservationAge         int64  `json:"observation_age"`
 	ObservationSequence    uint64 `json:"observation_sequence"`
@@ -927,6 +930,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			state.reconstructedReference = supplierConfig.ReferencePrice
 			state.referenceInitialized = true
 			state.configuredMaxObservationAge = supplierConfig.MaxObservationAge
+			state.configuredDecisionPhaseOffset = supplierConfig.DecisionPhaseOffset
 			state.configuredInitialBaseBalance = supplierConfig.InitialBaseBalance
 			state.configuredInitialQuoteBalance = supplierConfig.InitialQuoteBalance
 			state.ConfiguredMaxPosition = supplierConfig.MaxPosition
@@ -1230,6 +1234,9 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	state.DecisionCount++
 	if event.ClientID != decision.ClientID || decision.Role != state.Role || decision.Symbol != state.configuredSymbol || decision.DecisionTime != event.SimTS {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "decision identity or timestamp mismatch"})
+	}
+	if decision.DecisionPhaseOffset != state.configuredDecisionPhaseOffset {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision phase offset disagrees with registered configuration"})
 	}
 	if state.lastDecisionAt > 0 && (decision.DecisionTime < state.lastDecisionAt || decision.DecisionTime == state.lastDecisionAt && event.Ordinal <= state.lastDecisionOrdinal) {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decisions are not in causal timestamp order"})

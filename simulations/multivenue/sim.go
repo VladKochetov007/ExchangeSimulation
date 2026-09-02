@@ -3415,6 +3415,7 @@ func (s *Sim) addVenue(id string, venueIndex int, clock *simulation.SimulatedClo
 			InitialBaseBalance:   spec.InitialBaseBalance,
 			InitialQuoteBalance:  spec.InitialQuoteBalance,
 			Interval:             spec.Interval,
+			DecisionPhaseOffset:  spec.DecisionPhaseOffset,
 			MaxObservationAge:    spec.MaxObservationAge,
 			ReferencePrice:       spec.ReferencePrice,
 			ReferenceHalfLife:    spec.ReferenceHalfLife,

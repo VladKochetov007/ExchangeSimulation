@@ -27,6 +27,7 @@ type ElasticLiquiditySupplierSpec struct {
 	InitialBaseBalance   int64         `json:"initial_base_balance"`
 	InitialQuoteBalance  int64         `json:"initial_quote_balance"`
 	Interval             time.Duration `json:"interval"`
+	DecisionPhaseOffset  time.Duration `json:"decision_phase_offset,omitempty"`
 	MaxObservationAge    time.Duration `json:"max_observation_age"`
 	ReferencePrice       int64         `json:"reference_price"`
 	ReferenceHalfLife    time.Duration `json:"reference_half_life"`
@@ -53,6 +54,9 @@ func (s ElasticLiquiditySupplierSpec) validate() error {
 	}
 	if s.Interval <= 0 || s.MaxObservationAge <= 0 || s.ReferenceHalfLife <= 0 {
 		return fmt.Errorf("interval, observation age, and reference half-life must be positive")
+	}
+	if s.DecisionPhaseOffset < 0 || s.DecisionPhaseOffset >= s.Interval {
+		return fmt.Errorf("decision phase offset must be in [0, interval), got %s for interval %s", s.DecisionPhaseOffset, s.Interval)
 	}
 	if s.ReferencePrice <= 0 || s.ElasticityPerPercent <= 0 || s.MaxPosition <= 0 || s.MaxInventory <= 0 || s.MaxQuoteQty <= 0 {
 		return fmt.Errorf("reference, elasticity, position, inventory, and quote limits must be positive")
@@ -99,6 +103,7 @@ type ElasticLiquiditySupplierConfig struct {
 	QuotePrecision       int64
 	InitialQuoteBalance  int64
 	Interval             time.Duration
+	DecisionPhaseOffset  time.Duration
 	MaxObservationAge    time.Duration
 	ReferencePrice       int64
 	ReferenceHalfLife    time.Duration
@@ -122,6 +127,7 @@ type ElasticLiquiditySupplierDecision struct {
 	ClientID               uint64 `json:"client_id"`
 	Symbol                 string `json:"symbol"`
 	DecisionTime           int64  `json:"decision_time"`
+	DecisionPhaseOffset    int64  `json:"decision_phase_offset_nanos"`
 	ObservationTime        int64  `json:"observation_time"`
 	ObservationAge         int64  `json:"observation_age"`
 	ObservationSequence    uint64 `json:"observation_sequence"`
@@ -219,7 +225,7 @@ func NewElasticLiquiditySupplier(id uint64, gw actor.Gateway, cfg ElasticLiquidi
 		supplier.quoteCashAvailable = cfg.InitialQuoteBalance
 	}
 	supplier.SetHandler(supplier)
-	supplier.AddTicker(cfg.Interval, supplier.onTick)
+	supplier.AddTickerWithOffset(cfg.Interval, cfg.DecisionPhaseOffset, supplier.onTick)
 	return supplier
 }
 
@@ -610,7 +616,8 @@ func (s *ElasticLiquiditySupplier) baseDecision(now int64) ElasticLiquiditySuppl
 	return ElasticLiquiditySupplierDecision{
 		Role: s.cfg.Role, ClientID: s.cfg.ClientID, Symbol: s.cfg.Symbol,
 		DecisionTime: now, ObservationTime: s.observationTime, ObservationAge: age,
-		BestBid: s.bestBid, BestBidQty: s.bestBidQty, BestAsk: s.bestAsk, BestAskQty: s.bestAskQty,
+		DecisionPhaseOffset: int64(s.cfg.DecisionPhaseOffset),
+		BestBid:             s.bestBid, BestBidQty: s.bestBidQty, BestAsk: s.bestAsk, BestAskQty: s.bestAskQty,
 		ObservationSequence: s.observationSequence, ObservationLinkID: frontier.LinkID,
 		ObservationOrdinal: frontier.Ordinal, ObservationDeliveredAt: frontier.DeliveredAt,
 		ObservationFingerprint: fingerprint,
