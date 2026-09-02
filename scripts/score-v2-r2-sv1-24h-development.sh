@@ -141,6 +141,7 @@ write_survival_summary() {
 	if jq -e --arg cell "$(basename "$cell")" --argjson seed "$seed" \
 		--arg contract "$survival_contract" --argjson start_nano "$survival_start_nano" \
 		--argjson window_nano "$survival_window_nano" --argjson expected_windows "$survival_expected_windows" \
+		--argjson required_venues '["central", "north", "south"]' \
 		--argjson max_empty "$max_empty_side_share" \
 		-f "$survival_summary_filter" "$raw" >"$temporary" &&
 		jq -e '.schema_version == 1 and .contract == $contract and

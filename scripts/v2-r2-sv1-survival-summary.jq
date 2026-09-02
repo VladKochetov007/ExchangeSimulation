@@ -6,6 +6,8 @@
 	venue_id: .[0].venue_id,
 	spans: (map({start, end}) | sort_by(.start))
 })) as $window_groups |
+($books | map(.venue_id) | sort) as $book_venues |
+($window_groups | map(.venue_id) | sort) as $window_venues |
 {
 	schema_version: 1,
 	contract: $contract,
@@ -16,6 +18,7 @@
 	window_nano: $window_nano,
 	expected_windows_per_venue: $expected_windows,
 	max_empty_side_share: $max_empty,
+	observed_window_venues: $window_venues,
 	venues: ($books | map({
 		venue_id,
 		windows,
@@ -26,10 +29,11 @@
 	})),
 	observed_windows: ($windows | length),
 	predicates: {
-		cdf_books_present: (($books | length) == 3 and (($books | map(.venue_id) | sort) == ["central", "north", "south"])),
+		cdf_books_present: (($books | length) == ($required_venues | length) and $book_venues == $required_venues),
 		post_warmup_snapshots_present: (all($books[]; .snapshots > 0)),
-		exact_post_warmup_window_coverage: (($windows | length) == ($expected_windows * 3) and
-			($window_groups | length) == 3 and
+			exact_post_warmup_window_coverage: (($windows | length) == ($expected_windows * ($required_venues | length)) and
+				($window_groups | length) == ($required_venues | length) and
+				$window_venues == $required_venues and
 			all($window_groups[]; (.spans | map(.start)) == $expected_starts and
 				all(.spans[]; .end == (.start + $window_nano))) and
 			all($books[]; .windows == $expected_windows)),

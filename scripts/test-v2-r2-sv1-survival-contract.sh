@@ -30,6 +30,7 @@ render_summary() {
 	jq -e --arg cell "fixture" --argjson seed 607 \
 		--arg contract "v2-r2-sv1-24h-survival-side-availability-v2" \
 		--argjson start_nano "$start_nano" --argjson window_nano "$window_nano" \
+		--argjson required_venues '["central", "north", "south"]' \
 		--argjson expected_windows "$expected_windows" --argjson max_empty 0.02 \
 		-f "$summary_filter" "$input" >"$output"
 }
@@ -61,5 +62,11 @@ jq '.result.windows += [{symbol: "CDF/USD", venue_id: "west", start: 17356932000
 render_summary "$temp_root/extra-venue.json" "$temp_root/extra-venue-summary.json"
 jq -e '.predicates.exact_post_warmup_window_coverage == false and .predicates.cdf_books_present == true' \
 	"$temp_root/extra-venue-summary.json" >/dev/null
+
+jq '.result.windows |= map(.venue_id |= (if . == "central" then "east" elif . == "north" then "west" else "up" end))' \
+	"$temp_root/valid.json" >"$temp_root/relabelled-venues.json"
+render_summary "$temp_root/relabelled-venues.json" "$temp_root/relabelled-venues-summary.json"
+jq -e '.predicates.exact_post_warmup_window_coverage == false and .predicates.cdf_books_present == true and .observed_window_venues == ["east", "up", "west"]' \
+	"$temp_root/relabelled-venues-summary.json" >/dev/null
 
 echo "V2-R2-SV1 survival summary contract: pass"
