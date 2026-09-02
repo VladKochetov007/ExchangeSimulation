@@ -140,6 +140,7 @@ v2_r2_require_binary_capacity_attestation() {
 	# minimum-free reserve; historical callers retain the original two-argument
 	# source/binary capacity contract.
 	local expected_config_sha256=${4:-} expected_gomaxprocs=${5:-} expected_minimum_free_bytes=${6:-}
+	local require_live_free_capacity=${7:-true}
 	local expected_binary_sha available_kb required_bytes peak_bytes safety_bytes
 	[[ -s "$attestation" && ! -L "$attestation" ]] || return 1
 	expected_binary_sha=$(sha256sum -- "$binary" | awk '{print $1}') || return 1
@@ -158,6 +159,7 @@ v2_r2_require_binary_capacity_attestation() {
 			 (.required_free_bytes | type) == "number" and .required_free_bytes == (.peak_output_bytes + .safety_margin_bytes)' \
 		"$attestation" >/dev/null || return 1
 	if [[ -n "$expected_config_sha256" ]]; then
+		[[ "$require_live_free_capacity" == true || "$require_live_free_capacity" == false ]] || return 1
 		[[ "$expected_gomaxprocs" =~ ^[0-9]+$ && "$expected_minimum_free_bytes" =~ ^[0-9]+$ ]] || return 1
 		jq -e --arg config_sha256 "$expected_config_sha256" --argjson gomaxprocs "$expected_gomaxprocs" \
 			--argjson minimum_free_bytes "$expected_minimum_free_bytes" \
@@ -182,9 +184,11 @@ v2_r2_require_binary_capacity_attestation() {
 		[[ "$actual_manifest_sha256" == "$(jq -er '.evidence_manifest_sha256' "$attestation")" ]] || return 1
 		v2_r2_verify_evidence_manifest "$probe_cell" || return 1
 	fi
-	available_kb=$(df -Pk "$(dirname -- "$attestation")" | awk 'NR == 2 {print $4}') || return 1
-	[[ "$available_kb" =~ ^[0-9]+$ ]] || return 1
-	[[ $((available_kb * 1024)) -ge "$required_bytes" ]]
+	if [[ "$require_live_free_capacity" == true ]]; then
+		available_kb=$(df -Pk "$(dirname -- "$attestation")" | awk 'NR == 2 {print $4}') || return 1
+		[[ "$available_kb" =~ ^[0-9]+$ ]] || return 1
+		[[ $((available_kb * 1024)) -ge "$required_bytes" ]]
+	fi
 }
 
 v2_r2_require_matching_revision() {

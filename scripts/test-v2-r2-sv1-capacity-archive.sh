@@ -135,6 +135,13 @@ restore_attestation() {
 	cp -- "$tmp_root/valid-attestation.json" "$attestation"
 }
 
+make_live_capacity_impossible_for_archive() {
+	jq '.peak_output_bytes = 199999999999999 | .required_free_bytes = (.peak_output_bytes + .safety_margin_bytes) |
+		.initial_available_free_bytes = .required_free_bytes | .available_free_bytes = .required_free_bytes' \
+		"$attestation" >"$tmp_root/high-recorded-capacity.json"
+	mv -- "$tmp_root/high-recorded-capacity.json" "$attestation"
+}
+
 jq --arg current_revision "$(git -C "$root_dir" rev-parse HEAD)" \
 	'.source_revision = $current_revision' "$attestation" >"$tmp_root/current-revision.json"
 mv -- "$tmp_root/current-revision.json" "$attestation"
@@ -173,6 +180,7 @@ expect_failure "$archiver" "$attestation" "$validator" "$archive"
 require_fixture_intact
 unlink -- "$archive.members"
 
+make_live_capacity_impossible_for_archive
 "$archiver" "$attestation" "$validator" "$archive" >"$tmp_root/archive.stdout"
 [[ ! -e "$probe_root" && ! -L "$probe_root" ]] || fail "successful archive retained the source probe root"
 [[ ! -e "$attestation" && ! -L "$attestation" ]] || fail "successful archive retained the source attestation"

@@ -162,8 +162,12 @@ jq -e --arg revision "$source_revision" \
 	"$probe_cell/manifest.json" >/dev/null || fail "capacity manifest build/config identity is not cross-bound"
 require_same_filesystem
 require_no_nested_mounts
+# The source probe's recorded reserve was already measured and is validated
+# above. Requiring that live reserve again would make compaction impossible
+# because this very source tree occupies the measured capacity. Launchers keep
+# the default live-capacity check; compaction validates only historical evidence.
 v2_r2_require_binary_capacity_attestation "$binary" "$source_revision" "$attestation" \
-	"$config_sha256" "$expected_gomaxprocs" "$expected_minimum_free_bytes" ||
+	"$config_sha256" "$expected_gomaxprocs" "$expected_minimum_free_bytes" false ||
 	fail "capacity attestation or retained probe evidence did not validate"
 
 attestation_real=$(realpath -e -- "$attestation") || fail "could not resolve attestation"
