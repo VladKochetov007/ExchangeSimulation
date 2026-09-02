@@ -867,8 +867,9 @@ been authorized.
 The current successor branch is `feature/r2-cdf-survival-successor` at
 `9dcb427`; the code checkpoint for the scorer correction is `d980df9`. The
 predecessor R2 candidate remains archived as **NON-VIABLE AT THE 24H
-MARKET-SURVIVAL GATE**. No SV1 24-hour cell, parity control, freeze, or holdout
-has been consumed.
+MARKET-SURVIVAL GATE**. The retained old-source treatment-607 trajectory is
+diagnostic only; no accepted current-revision SV1 pair, additional cell,
+parity control, freeze, or holdout has been consumed.
 
 The correction is pre-cell and does not change the simulator or CDF roster. It
 separates the positive treatment activation predicate from the intentionally

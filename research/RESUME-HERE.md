@@ -1035,8 +1035,10 @@ read either storage form. Treatment-607 remains the only active cell; no
 
 The active successor tree is now `9dcb427` on
 `feature/r2-cdf-survival-successor`. The predecessor R2 candidate remains
-closed as **NON-VIABLE AT THE 24H MARKET-SURVIVAL GATE**. No development cell,
-parity cell, freeze, or holdout has been authorized from this correction.
+closed as **NON-VIABLE AT THE 24H MARKET-SURVIVAL GATE**. The retained
+old-source treatment-607 trajectory is diagnostic only; no accepted
+current-revision development pair, additional cell, parity cell, freeze, or
+holdout has been authorized from this correction.
 
 The code checkpoint `d980df9` corrected the SV1 scorer before any 24-hour cell:
 zero-CDF controls now satisfy a separate population contract, while treatment

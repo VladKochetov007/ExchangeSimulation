@@ -7,7 +7,7 @@ Predecessor: R2, retained as **NON-VIABLE AT THE 24H MARKET-SURVIVAL GATE**
 
 This is an append-only successor record. It does not reopen the predecessor,
 rewrite historical results, change the registered CDF economics, or authorize
-a development cell or holdout.
+an additional/current-revision development cell or holdout.
 
 ## Research-controller sanity check
 
