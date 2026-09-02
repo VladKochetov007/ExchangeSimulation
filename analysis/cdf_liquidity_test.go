@@ -41,6 +41,60 @@ func TestMeasureCDFLiquidityReconstructsBoundedSupplier(t *testing.T) {
 	}
 }
 
+func TestCDFSupplierRemovalCounterfactualUsesSideSpecificResidualDepth(t *testing.T) {
+	run := &CDFLiquidityRunAudit{
+		MinimumExecutableQty:      3,
+		lastDepthSnapshotAt:       make(map[string]int64),
+		lastDepthTotal:            make(map[string]int64),
+		lastSupplierDepthByClient: make(map[string]map[uint64]int64),
+	}
+	venueAudits := map[string]*CDFLiquidityVenueAudit{}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		{VenueID: "north", ClientID: 7, OrderID: 11}: {clientID: 7, side: "BUY", remainingQty: 10},
+		{VenueID: "north", ClientID: 7, OrderID: 12}: {clientID: 7, side: "SELL", remainingQty: 5},
+	}
+	run.processBookEvent(Event{
+		Name: "BookSnapshot", VenueID: "north", ClientID: 0, SimTS: 1, Ordinal: 1,
+		payload: json.RawMessage(`{"bids":[{"price":99,"visible_qty":12}],"asks":[{"price":101,"visible_qty":9}]}`),
+	}, nil, orders, nil, venueAudits)
+	run.finalizeVenueAudits(venueAudits)
+	if run.SupplierRemovalSnapshotCount != 1 || run.SupplierRemovalInvalidSnapshots != 0 || !run.SupplierRemovalCounterfactualValid {
+		t.Fatalf("removal validity = %+v", run)
+	}
+	if run.SupplierRemovalBidAbsentSnapshots != 0 || run.SupplierRemovalAskAbsentSnapshots != 0 || run.SupplierRemovalOneSidedSnapshots != 0 {
+		t.Fatalf("raw residual side availability = %+v", run)
+	}
+	if run.SupplierRemovalQualifiedBidAbsentSnapshots != 1 || run.SupplierRemovalQualifiedAskAbsentSnapshots != 0 || run.SupplierRemovalQualifiedBothAbsentSnapshots != 0 {
+		t.Fatalf("qualified residual side availability = %+v", run)
+	}
+	if len(run.Venues) != 1 || run.Venues[0].SupplierRemovalQualifiedBidAbsenceFraction != 1 {
+		t.Fatalf("venue residual diagnostics = %+v", run.Venues)
+	}
+}
+
+func TestCDFSupplierRemovalCounterfactualRejectsSupplierDepthAboveAggregateSide(t *testing.T) {
+	run := &CDFLiquidityRunAudit{
+		lastDepthSnapshotAt:       make(map[string]int64),
+		lastDepthTotal:            make(map[string]int64),
+		lastSupplierDepthByClient: make(map[string]map[uint64]int64),
+	}
+	venueAudits := map[string]*CDFLiquidityVenueAudit{}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		{VenueID: "north", ClientID: 7, OrderID: 11}: {clientID: 7, side: "BUY", remainingQty: 5},
+	}
+	run.processBookEvent(Event{
+		Name: "BookSnapshot", VenueID: "north", ClientID: 0, SimTS: 1, Ordinal: 1,
+		payload: json.RawMessage(`{"bids":[{"price":99,"visible_qty":4}],"asks":[]}`),
+	}, nil, orders, nil, venueAudits)
+	run.finalizeVenueAudits(venueAudits)
+	if run.SupplierRemovalInvalidSnapshots != 1 || run.SupplierRemovalCounterfactualValid {
+		t.Fatalf("invalid removal projection = %+v", run)
+	}
+	if !hasCDFCheck(run.Checks, "supplier displayed depth exceeds") {
+		t.Fatalf("missing depth mismatch check: %+v", run.Checks)
+	}
+}
+
 func TestCDFMarkedRiskAuditReconstructsReservedCashAndStaleMark(t *testing.T) {
 	state := &CDFLiquiditySupplierAudit{
 		VenueID: "north", Role: "cdf_elastic_supplier_1", ClientID: 2,

@@ -29,11 +29,20 @@ jq -n ' {
 			trading_supplier_count: 2, pnl_changing_supplier_count: 2,
 			inventory_responsive_decision_count: 4, cancel_count: 1, withdraw_count: 1,
 			withdrawal_without_replacement_count: 2,
-			max_borrowed: 0, supplier_volume_share: 0.2, supplier_depth_over_75_share: 0.1,
+			max_borrowed: 0, snapshot_count: 1, supplier_volume_share: 0.2, supplier_depth_over_75_share: 0.1,
+			supplier_time_weighted_resting_depth_share: 0.2,
+			supplier_removal_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
+			supplier_removal_bid_absence_fraction: 0, supplier_removal_ask_absence_fraction: 0,
 			venues: [
-				{supplier_depth_over_75_fraction: 0.1},
-				{supplier_depth_over_75_fraction: 0.1},
-				{supplier_depth_over_75_fraction: 0.1}
+				{snapshot_count: 1, supplier_depth_over_75_fraction: 0.1,
+					supplier_removal_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
+					supplier_removal_bid_absence_fraction: 0, supplier_removal_ask_absence_fraction: 0},
+				{snapshot_count: 1, supplier_depth_over_75_fraction: 0.1,
+					supplier_removal_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
+					supplier_removal_bid_absence_fraction: 0, supplier_removal_ask_absence_fraction: 0},
+				{snapshot_count: 1, supplier_depth_over_75_fraction: 0.1,
+					supplier_removal_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
+					supplier_removal_bid_absence_fraction: 0, supplier_removal_ask_absence_fraction: 0}
 			],
 			suppliers: [
 				{valid: true, fill_count: 1, pnl: 1, min_position: 0, max_position: 1,
@@ -85,6 +94,16 @@ v2_r2_require_cdf_supplier_activation "$cdf_audit_fixture" 2 || {
 	echo "SV1B activity with a qualified withdrawal was rejected" >&2
 	exit 1
 }
+if jq '.result.supplier_removal_counterfactual_valid = false' "$cdf_audit_fixture" >"$temp_root/missing-removal-diagnostic.json" &&
+	v2_r2_require_cdf_supplier_activation "$temp_root/missing-removal-diagnostic.json" 2; then
+	echo "SV1B activity without a valid supplier-removal diagnostic was accepted" >&2
+	exit 1
+fi
+if jq '.result.supplier_time_weighted_resting_depth_share = 0.8' "$cdf_audit_fixture" >"$temp_root/dominant-depth.json" &&
+	v2_r2_require_cdf_supplier_activation "$temp_root/dominant-depth.json" 2; then
+	echo "SV1B activity with dominant time-weighted supplier depth was accepted" >&2
+	exit 1
+fi
 if jq 'del(.result.withdrawal_without_replacement_count)' "$cdf_audit_fixture" >"$temp_root/missing-withdrawal.json" &&
 	v2_r2_require_cdf_supplier_activation "$temp_root/missing-withdrawal.json" 2; then
 	echo "SV1B activity without a qualified withdrawal was accepted" >&2

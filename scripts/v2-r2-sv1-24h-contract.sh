@@ -93,7 +93,7 @@ v2_r2_require_cdf_supplier_activation() {
 	local audit_path=$1 expected_supplier_count=$2
 	[[ -s "$audit_path" ]] || return 1
 	[[ "$expected_supplier_count" =~ ^[1-9][0-9]*$ ]] || return 1
-	jq -e --argjson expected_supplier_count "$expected_supplier_count" --argjson require_no_replacement "$v2_r2_sv1_require_no_replacement_withdrawal" '
+	if ! jq -e --argjson expected_supplier_count "$expected_supplier_count" --argjson require_no_replacement "$v2_r2_sv1_require_no_replacement_withdrawal" '
 		type == "object" and (.result | type) == "object" and
 		.result.valid == true and
 		(.result.supplier_count | type) == "number" and
@@ -122,7 +122,24 @@ v2_r2_require_cdf_supplier_activation() {
 			.max_observation_age_ns > 0 and .max_borrowed == 0 and .borrow_event_count == 0 and
 			.max_position <= .configured_max_position and
 			.min_position >= (-.configured_max_position) and
-			.max_quote_qty <= .configured_max_quote_qty)' "$audit_path" >/dev/null
+			.max_quote_qty <= .configured_max_quote_qty)' "$audit_path" >/dev/null; then
+		return 1
+	fi
+	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+		jq -e '
+			.result.supplier_removal_counterfactual_valid == true and
+			.result.supplier_removal_snapshot_count == .result.snapshot_count and
+			(.result.supplier_removal_bid_absence_fraction | type) == "number" and
+			(.result.supplier_removal_ask_absence_fraction | type) == "number" and
+			(.result.supplier_time_weighted_resting_depth_share | type) == "number" and
+			.result.supplier_time_weighted_resting_depth_share <= 0.75 and
+			all(.result.venues[];
+				.supplier_removal_counterfactual_valid == true and
+				.supplier_removal_snapshot_count == .snapshot_count and
+				(.supplier_removal_bid_absence_fraction | type) == "number" and
+				(.supplier_removal_ask_absence_fraction | type) == "number")
+		' "$audit_path" >/dev/null
+	fi
 }
 
 # A paired control intentionally has no CDF supplier roster. Its typed audit
