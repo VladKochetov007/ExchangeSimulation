@@ -109,6 +109,16 @@ expect_failure v2_r2_require_current_source_revision "$matching_revision" \
 expect_failure v2_r2_require_current_source_revision "$matching_revision" "$matching_revision" \
 	"fedcba9876543210fedcba9876543210fedcba98"
 
+current_analysis_revision=$(git -C "$root_dir" rev-parse HEAD)
+prior_analysis_revision=$(git -C "$root_dir" rev-parse HEAD^)
+[[ "$(v2_r2_resolve_analysis_source_mode "$root_dir" "$current_analysis_revision" "$current_analysis_revision" false "")" == same_revision ]] ||
+	fail "same-revision analysis mode was rejected"
+expect_failure v2_r2_resolve_analysis_source_mode "$root_dir" "$current_analysis_revision" "$current_analysis_revision" true ""
+[[ "$(v2_r2_resolve_analysis_source_mode "$root_dir" "$prior_analysis_revision" "$current_analysis_revision" true "$prior_analysis_revision")" == analyzer_only_replay ]] ||
+	fail "ancestor analyzer-only replay mode was rejected"
+expect_failure v2_r2_resolve_analysis_source_mode "$root_dir" "$prior_analysis_revision" "$current_analysis_revision" false ""
+expect_failure v2_r2_resolve_analysis_source_mode "$root_dir" "$prior_analysis_revision" "$current_analysis_revision" true "$current_analysis_revision"
+
 checkpoint_fixture="$tmp_root/exact-terminal-checkpoints.jsonl"
 checkpoint_hash_a=$(printf 'a%.0s' {1..64})
 checkpoint_hash_b=$(printf 'b%.0s' {1..64})

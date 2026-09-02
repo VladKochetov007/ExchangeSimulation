@@ -130,6 +130,24 @@ v2_r2_is_go_127() {
 	[[ "$1" == go1.27* ]]
 }
 
+v2_r2_resolve_analysis_source_mode() {
+	[[ $# -eq 5 ]] || return 1
+	local root_dir=$1 metadata_revision=$2 head_revision=$3 analyzer_only_replay=$4 raw_source_revision=$5
+	[[ "$metadata_revision" =~ ^[0-9a-f]{40}$ && "$head_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+	case "$analyzer_only_replay" in
+		true|false) ;;
+		*) return 1 ;;
+	esac
+	if [[ "$metadata_revision" == "$head_revision" ]]; then
+		[[ "$analyzer_only_replay" == false && -z "$raw_source_revision" ]] || return 1
+		printf '%s\n' same_revision
+		return 0
+	fi
+	[[ "$analyzer_only_replay" == true && "$raw_source_revision" == "$metadata_revision" ]] || return 1
+	git -C "$root_dir" merge-base --is-ancestor "$metadata_revision" "$head_revision" || return 1
+	printf '%s\n' analyzer_only_replay
+}
+
 v2_r2_capacity_attestation_path() {
 	printf '%s\n' '/home/vlad/v2-integrated-longrun-r2-binary-capacity-v1.json'
 }

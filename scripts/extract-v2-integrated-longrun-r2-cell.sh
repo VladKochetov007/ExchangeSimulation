@@ -33,6 +33,8 @@ source "$root_dir/scripts/v2-r2-evidence-input-contract.sh"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 renderer=${EVSRENDER_BIN:-"$root_dir/bin/evsrender"}
 render_route_compression=${V2_R2_RENDER_ROUTE_COMPRESSION:-zstd}
+analyzer_only_replay=${V2_R2_ANALYZER_ONLY_REPLAY:-false}
+raw_source_revision=${V2_R2_RAW_SOURCE_REVISION:-}
 conservation_tolerance_fixed_units=1000
 calendar_epoch_nano=1735689600000000000
 calendar_hour_nano=3600000000000
@@ -55,6 +57,10 @@ fail() {
 case "$render_route_compression" in
 	none|zstd) ;;
 	*) fail "unsupported rendered route compression: $render_route_compression" ;;
+esac
+case "$analyzer_only_replay" in
+	true|false) ;;
+	*) fail "V2_R2_ANALYZER_ONLY_REPLAY must be true or false" ;;
 esac
 v2_r2_acquire_namespace_lock || fail "could not acquire the R2 evidence namespace lock"
 require_file() {
@@ -180,10 +186,12 @@ jq -e --arg cell "$cell_name" \
 head_revision=$(git -C "$root_dir" rev-parse HEAD)
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "source worktree is dirty"
 metadata_revision=$(jq -er '.git_revision' "$cell/run-metadata.json")
-# The simulator and analyzer are one frozen measurement implementation. An
-# analyzer-only change after a development cell ran would make the derived
-# result post hoc, even if its output is internally self-consistent.
-[[ "$metadata_revision" == "$head_revision" ]] || fail "run source revision is not the current analysis revision"
+# A retained raw cell may be replayed by a descendant analyzer only when the
+# operator declares that no simulator trajectory is being rerun. The old
+# simulator and gate binaries remain independently bound to the raw metadata.
+source_revision_mode=$(v2_r2_resolve_analysis_source_mode \
+	"$root_dir" "$metadata_revision" "$head_revision" "$analyzer_only_replay" "$raw_source_revision") ||
+	fail "raw source revision is not valid for this analysis mode"
 
 simulator_binary=$(jq -er '.binary_path' "$cell/run-metadata.json")
 require_file "$simulator_binary"
@@ -612,6 +620,8 @@ jq -n \
 	--arg renderer_sha256 "$renderer_sha256" \
 	--arg renderer_go_version "$renderer_go_version" \
 	--arg renderer_route_compression "$render_route_compression" \
+	--arg source_revision_mode "$source_revision_mode" \
+	--arg raw_source_revision "$metadata_revision" \
 	--argjson analyzer_modified "$analyzer_modified_json" \
 	--argjson required_artifacts "$required_json" \
 	--argjson artifact_sha256 "$artifact_sha256" \
@@ -638,6 +648,7 @@ jq -n \
 		analyzer_go_version: $analyzer_go_version,
 		renderer_revision: $renderer_revision, renderer_sha256: $renderer_sha256,
 		renderer_go_version: $renderer_go_version, renderer_route_compression: $renderer_route_compression,
+		source_revision_mode: $source_revision_mode, raw_source_revision: $raw_source_revision,
 		require_exact_replay: true,
 		simulator_revision: $simulator_revision, simulator_sha256: $simulator_sha256,
 		simulator_trimpath: $simulator_trimpath, simulator_cgo_enabled: $simulator_cgo_enabled,
@@ -656,11 +667,13 @@ mv "$metadata_tmp" "$analysis_dir/analysis-metadata.json"
 require_json_object "$analysis_dir/analysis-metadata.json"
 jq -e --arg revision "$head_revision" --arg analyzer_revision "$analyzer_revision" \
 	--arg contract "$contract_version" --arg renderer_route_compression "$render_route_compression" \
+	--arg source_revision_mode "$source_revision_mode" --arg raw_source_revision "$metadata_revision" \
 	--argjson required_artifacts "$required_json" \
 	'.schema_version == 3 and .evidence_format == "evstream_v3" and .analysis_revision == $revision and
 	 .analyzer_revision == $analyzer_revision and .analyzer_vcs_modified == false and
 	 .require_exact_replay == true and
 	 .renderer_route_compression == $renderer_route_compression and
+	 .source_revision_mode == $source_revision_mode and .raw_source_revision == $raw_source_revision and
 	 .analysis_contract == $contract and .required_artifacts == $required_artifacts and
 	 (.artifact_sha256 | keys) == ($required_artifacts | sort) and
 	all(.artifact_sha256 | to_entries[]; (.value | test("^[0-9a-f]{64}$"))) and
