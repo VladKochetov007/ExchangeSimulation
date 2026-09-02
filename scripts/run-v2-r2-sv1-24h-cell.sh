@@ -187,6 +187,7 @@ jq -n \
 	--arg go_version "$(go version)" \
 	--arg binary_go_version "$binary_go_version" \
 	--arg runner_contract "$v2_r2_sv1_runner_contract" \
+	--argjson completion_sentinels "$v2_r2_sv1_completion_sentinels" \
 	--arg experiment_prefix "$v2_r2_sv1_experiment_prefix" \
 	--arg prunegate_path "$prunegate_binary" \
 	--arg prunegate_sha256 "$(sha256sum "$prunegate_binary" | awk '{print $1}')" \
@@ -234,7 +235,7 @@ jq -n \
 		  evidence_manifest_path: $evidence_manifest_path,
 		  external_attestation_path: $external_attestation_path,
 		  command: ["multivenue", "-config", "run-config.json", "-duration", $horizon, "-logdir", $output_dir, "-log-mode", $log_mode, "-evidence-format", $evidence_format],
-		  completion_sentinels: ["greeks.json", "latency.json"],
+		  completion_sentinels: $completion_sentinels,
 		  raw_log_policy: "retained until every registered SV1 evidence contract passes"
 		}' >"$output/run-metadata.json"
 run_metadata_sha256_before=$(sha256sum "$output/run-metadata.json" | awk '{print $1}')
@@ -253,6 +254,17 @@ fi
 if [[ ! -s "$output/greeks.json" || ! -s "$output/latency.json" ]]; then
 	echo "simulator exited without both completion sentinels: $output" >&2
 	exit 1
+fi
+if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
+	[[ -s "$output/terminal-outcome.json" ]] || {
+		echo "simulator exited without typed terminal outcome: $output" >&2
+		exit 1
+	}
+	jq -e --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
+		-f "$root_dir/scripts/v2-r2-sv1-terminal-outcome.jq" "$output/terminal-outcome.json" >/dev/null || {
+		echo "typed terminal outcome is invalid: $output" >&2
+		exit 1
+	}
 fi
 jq -e 'type == "object" and (.build.revision | type) == "string" and
 	.build.revision == $revision and .build.modified == false and
@@ -306,7 +318,8 @@ jq -n \
 	--arg latency_sha256 "$(sha256sum "$output/latency.json" | awk '{print $1}')" \
 	--arg checkpoints_sha256 "$(sha256sum "$output/checkpoints.jsonl" | awk '{print $1}')" \
 	--arg evidence_manifest_sha256 "$(sha256sum "$output/evidence-manifest.json" | awk '{print $1}')" \
-	--argjson sentinels '["greeks.json", "latency.json"]' \
+	--argjson sentinels "$v2_r2_sv1_completion_sentinels" \
+	--arg terminal_outcome_sha256 "$(if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then sha256sum "$output/terminal-outcome.json" | awk '{print $1}'; fi)" \
 	'{schema_version: 1, cell: $cell, exit_status: $exit_status,
 	  completion_verified: true, simulated_horizon: $horizon,
 	  simulation_start_nano: $simulation_start_nano, simulation_end_nano: $simulation_end_nano,
@@ -314,7 +327,8 @@ jq -n \
 	  run_metadata_sha256: $run_metadata_sha256,
 	  manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256,
 	  latency_sha256: $latency_sha256, checkpoints_sha256: $checkpoints_sha256,
-	  evidence_manifest_sha256: $evidence_manifest_sha256}' >"$status_tmp"
+	  evidence_manifest_sha256: $evidence_manifest_sha256} |
+	 (if $terminal_outcome_sha256 == "" then . else . + {terminal_outcome_sha256: $terminal_outcome_sha256} end)' >"$status_tmp"
 mv "$status_tmp" "$output/run-status.json"
 v2_r2_write_attestation "$output" || {
 	echo "failed to write external evidence attestation: $output" >&2

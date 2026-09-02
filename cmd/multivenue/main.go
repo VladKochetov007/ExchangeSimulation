@@ -236,12 +236,20 @@ func run() (err error) {
 	profiles.Stop()
 	profilesStopped = true
 	if runErr != nil {
-		return runErr
+		sealErr := sim.Close()
+		closed = true
+		outcomeErr := multivenue.WriteTerminalOutcome(*logDir, sim.TerminalOutcomeFor(runErr, sealErr))
+		return errors.Join(runErr, sealErr, outcomeErr)
 	}
-	if err := sim.Close(); err != nil {
-		return fmt.Errorf("seal evidence: %w", err)
-	}
+	sealErr := sim.Close()
 	closed = true
+	if sealErr != nil {
+		outcomeErr := multivenue.WriteTerminalOutcome(*logDir, sim.TerminalOutcomeFor(nil, sealErr))
+		return errors.Join(fmt.Errorf("seal evidence: %w", sealErr), outcomeErr)
+	}
+	if err := multivenue.WriteTerminalOutcome(*logDir, sim.TerminalOutcomeFor(nil, nil)); err != nil {
+		return err
+	}
 	output := greekOutput{
 		SchemaVersion:  6,
 		InitialRisk:    make(map[string]multivenue.VenueRiskSnapshot, len(sim.Venues)),

@@ -38,9 +38,14 @@ if [[ "$extractor_variant" == sv1 ]]; then
 	expected_config_dir="$v2_r2_sv1_config_dir"
 	expected_runner_contract="$v2_r2_sv1_runner_contract"
 fi
+completion_sentinels='["greeks.json", "latency.json"]'
+if [[ "$extractor_variant" == sv1 ]]; then
+	completion_sentinels="$v2_r2_sv1_completion_sentinels"
+fi
 source "$root_dir/scripts/v2-r2-evidence-input-contract.sh"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 renderer=${EVSRENDER_BIN:-"$root_dir/bin/evsrender"}
+terminal_outcome_filter="$root_dir/scripts/v2-r2-sv1-terminal-outcome.jq"
 render_route_compression=${V2_R2_RENDER_ROUTE_COMPRESSION:-zstd}
 analyzer_only_replay=${V2_R2_ANALYZER_ONLY_REPLAY:-false}
 raw_source_revision=${V2_R2_RAW_SOURCE_REVISION:-}
@@ -163,8 +168,16 @@ jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulat
 	'($simulation_start_nano == 1735689600000000000 and $simulation_end_nano == 1735776000000000000 and
 	 ($simulation_end_nano - $simulation_start_nano) == 86400000000000)' \
 	<<<'null' >/dev/null || fail "run metadata does not use the registered 24-hour horizon"
+if [[ "$extractor_variant" == sv1 && "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
+	require_file "$cell/terminal-outcome.json"
+	require_json_object "$cell/terminal-outcome.json"
+	jq -e --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
+		-f "$terminal_outcome_filter" "$cell/terminal-outcome.json" >/dev/null ||
+		fail "invalid typed terminal outcome"
+fi
 jq -e --arg cell "$cell_name" --argjson seed "$seed" --arg experiment "$config_experiment" \
 	--arg runner_contract "$expected_runner_contract" --arg hypothesis_id "$config_hypothesis" \
+	--argjson completion_sentinels "$completion_sentinels" \
 	'.schema_version == 6 and .runner_contract == $runner_contract and
 	 .cell == $cell and .seed == $seed and .holdout == false and
 	 .simulated_horizon == "24h" and .log_mode == "full" and .evidence_format == "evstream_v3" and
@@ -176,11 +189,11 @@ jq -e --arg cell "$cell_name" --argjson seed "$seed" --arg experiment "$config_e
 	 (.binary_sha256 | test("^[0-9a-f]{64}$")) and
 	 .binary_trimpath == true and .binary_cgo_enabled == "0" and
 	 (.git_revision | test("^[0-9a-f]{40}$")) and
-	 .completion_sentinels == ["greeks.json", "latency.json"]' \
+	 .completion_sentinels == $completion_sentinels' \
 	"$cell/run-metadata.json" >/dev/null || fail "invalid run metadata contract"
-jq -e --arg cell "$cell_name" \
+	jq -e --arg cell "$cell_name" --argjson completion_sentinels "$completion_sentinels" \
 	'.cell == $cell and .exit_status == 0 and .completion_verified == true and
-	 .simulated_horizon == "24h" and .completion_sentinels == ["greeks.json", "latency.json"] and
+	 .simulated_horizon == "24h" and .completion_sentinels == $completion_sentinels and
 	 (.run_metadata_sha256 | test("^[0-9a-f]{64}$")) and
 	 (.manifest_sha256 | test("^[0-9a-f]{64}$")) and
 	 (.greeks_sha256 | test("^[0-9a-f]{64}$")) and
@@ -190,6 +203,12 @@ jq -e --arg cell "$cell_name" \
 	.simulation_start_nano == 1735689600000000000 and .simulation_end_nano == 1735776000000000000 and
 	(.evidence_manifest_sha256 | test("^[0-9a-f]{64}$"))' \
 	"$cell/run-status.json" >/dev/null || fail "invalid run status contract"
+if [[ "$extractor_variant" == sv1 && "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
+	jq -e '(.terminal_outcome_sha256 | test("^[0-9a-f]{64}$"))' "$cell/run-status.json" >/dev/null ||
+		fail "run status lacks terminal outcome hash"
+	[[ "$(sha256sum "$cell/terminal-outcome.json" | awk '{print $1}')" == "$(jq -er '.terminal_outcome_sha256' "$cell/run-status.json")" ]] ||
+		fail "terminal outcome status hash mismatch"
+fi
 
 head_revision=$(git -C "$root_dir" rev-parse HEAD)
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "source worktree is dirty"
@@ -681,6 +700,9 @@ required=(
 )
 if [[ "$extractor_variant" == sv1 ]]; then
 	required+=(cdfliquidity.json priceunavailable.json)
+	if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
+		required+=(terminal-outcome.json)
+	fi
 fi
 for artifact in "${required[@]}"; do
 	require_file "$analysis_dir/$artifact"

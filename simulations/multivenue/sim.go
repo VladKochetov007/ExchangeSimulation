@@ -1862,9 +1862,88 @@ type Sim struct {
 	marketDataReceipts *simulation.MarketDataReceiptRecorder
 	frontierVectors    *simulation.DecisionFrontierVectorRecorder
 	terminalNano       int64
+	startNano          int64
 	closeMu            sync.Mutex
 	closed             bool
 	closeErr           error
+}
+
+// TerminalOutcome is the typed lifecycle endpoint for a simulation. A
+// terminal failure is an observed economic outcome, not a successful terminal
+// valuation; consumers must inspect Status and Code before using any metrics.
+type TerminalOutcome struct {
+	SchemaVersion              int    `json:"schema_version"`
+	Status                     string `json:"status"`
+	Code                       string `json:"code"`
+	Phase                      string `json:"phase"`
+	SimulationStartNano        int64  `json:"simulation_start_nano"`
+	SimulationEndNano          int64  `json:"simulation_end_nano"`
+	StrictPopulationAccounting bool   `json:"strict_population_accounting"`
+	EvidenceFormat             string `json:"evidence_format"`
+	EvidenceSealed             bool   `json:"evidence_sealed"`
+	TerminalRiskCaptured       bool   `json:"terminal_risk_captured"`
+	TerminalPopulationCaptured bool   `json:"terminal_population_captured"`
+	Error                      string `json:"error,omitempty"`
+	EvidenceSealError          string `json:"evidence_seal_error,omitempty"`
+}
+
+// TerminalOutcomeFor classifies the typed endpoint without changing simulator
+// state. PRICE_UNAVAILABLE and PRICE_DOMAIN_ERROR are distinct from a generic
+// software failure so a reviewer can decide whether a control endpoint is a
+// meaningful economic negative or invalid evidence.
+func (s *Sim) TerminalOutcomeFor(runErr, evidenceSealErr error) TerminalOutcome {
+	outcome := TerminalOutcome{
+		SchemaVersion:              1,
+		Status:                     "completed",
+		Code:                       "COMPLETED",
+		Phase:                      "terminal_post_mark",
+		SimulationStartNano:        s.startNano,
+		SimulationEndNano:          s.terminalNano,
+		StrictPopulationAccounting: s.Config.StrictPopulationAccounting,
+		EvidenceFormat:             s.Config.EvidenceFormat,
+		EvidenceSealed:             evidenceSealErr == nil,
+		TerminalPopulationCaptured: !s.Config.StrictPopulationAccounting || len(s.TerminalAccounts) > 0,
+	}
+	if len(s.Venues) > 0 {
+		outcome.TerminalRiskCaptured = true
+		for _, venue := range s.Venues {
+			if venue == nil || venue.TerminalRisk == nil {
+				outcome.TerminalRiskCaptured = false
+				break
+			}
+		}
+	}
+	if runErr != nil || evidenceSealErr != nil {
+		outcome.Status = "terminal_failure"
+		switch {
+		case errors.Is(runErr, etypes.ErrNoPrice):
+			outcome.Code = "PRICE_UNAVAILABLE"
+		case errors.Is(runErr, etypes.ErrPriceDomain):
+			outcome.Code = "PRICE_DOMAIN_ERROR"
+		case evidenceSealErr != nil && runErr == nil:
+			outcome.Code = "EVIDENCE_SEAL_FAILURE"
+		default:
+			outcome.Code = "SIMULATION_FAILURE"
+		}
+		if runErr != nil {
+			outcome.Error = runErr.Error()
+		}
+		if evidenceSealErr != nil {
+			outcome.EvidenceSealError = evidenceSealErr.Error()
+		}
+	}
+	return outcome
+}
+
+// WriteTerminalOutcome publishes the typed endpoint with replacement-safe
+// atomic publication. The caller must invoke Sim.Close before marking the
+// outcome sealed.
+func WriteTerminalOutcome(logDir string, outcome TerminalOutcome) error {
+	raw, err := json.MarshalIndent(outcome, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal terminal outcome: %w", err)
+	}
+	return simulation.WriteFileAtomically(filepath.Join(logDir, "terminal-outcome.json"), append(raw, '\n'))
 }
 
 // Run starts all venue automation under one context and drives the common
@@ -2240,7 +2319,7 @@ func NewSim(simTime time.Duration, cfg Config) (*Sim, error) {
 	})
 	runner.AddIdler(timers)
 
-	sim := &Sim{Config: cfg, Runner: runner, terminalNano: start + int64(simTime),
+	sim := &Sim{Config: cfg, Runner: runner, startNano: start, terminalNano: start + int64(simTime),
 		SpotIndex: newSpotIndexProvider(cfg.MakerAnchor, "ABC/USD", "ABC-PERP", "CDF/USD", "ABC/CDF"),
 		Venues:    make([]*Venue, 0, len(cfg.VenueIDs)), latencyTelemetry: simulation.NewLatencyStats()}
 	// Built before any venue, because every venue logger carries it.

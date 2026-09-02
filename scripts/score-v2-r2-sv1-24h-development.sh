@@ -133,9 +133,11 @@ minimum_executable_qty=$(jq -er '
 terminal_measurement_valid() {
 	local cell=$1
 	if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
-		jq -e --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
-			-f "$terminal_outcome_filter" "$cell/terminal-outcome.json" >/dev/null
-		return $?
+		if jq -e --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
+			-f "$terminal_outcome_filter" "$cell/terminal-outcome.json" >/dev/null; then
+			return 0
+		fi
+		return 1
 	fi
 	if jq -e --argjson end "$simulation_end_nano" -f "$terminal_measurement_filter" "$cell/greeks.json" >/dev/null; then
 		return 0
