@@ -17,13 +17,15 @@ parity="$output_root/parity-attestation.json"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 cdf_audit=${CDF_LIQUIDITY_AUDIT_BIN:-"$root_dir/bin/cdf-liquidity-audit"}
 contract_version="v2-r2-sv1-24h-development-scorer-v2"
-survival_contract="v2-r2-sv1-24h-survival-side-availability-v1"
+survival_contract="v2-r2-sv1-24h-survival-side-availability-v2"
 simulation_start_nano=1735689600000000000
 simulation_end_nano=1735776000000000000
 survival_start_nano=1735693200000000000
 survival_start_seconds=1735693200
 survival_window_nano=3600000000000
+survival_expected_windows=23
 max_empty_side_share=0.02
+survival_summary_filter="$root_dir/scripts/v2-r2-sv1-survival-summary.jq"
 
 fail() {
 	printf 'SV1 development scorer failure: %s\n' "$*" >&2
@@ -55,6 +57,7 @@ require_clean_binary() {
 
 v2_r2_acquire_namespace_lock || fail "could not acquire the SV1 namespace lock"
 v2_r2_require_output_root "$output_root" || fail "scorer root is not the canonical SV1 evidence root"
+[[ -r "$survival_summary_filter" ]] || fail "missing survival summary contract: $survival_summary_filter"
 [[ ! -e "$score" && ! -L "$score" ]] || fail "refusing to overwrite precommitted score: $score"
 for holdout in holdout-619 holdout-631 holdout-641; do
 	[[ ! -e "$output_root/$holdout" && ! -L "$output_root/$holdout" ]] ||
@@ -122,28 +125,11 @@ write_survival_summary() {
 	temporary=$(mktemp "$output.tmp-XXXXXX")
 	if jq -e --arg cell "$(basename "$cell")" --argjson seed "$seed" \
 		--arg contract "$survival_contract" --argjson start_nano "$survival_start_nano" \
-		--argjson window_nano "$survival_window_nano" --argjson max_empty "$max_empty_side_share" \
-		'
-		.result as $result |
-		($result.windows // [] | map(select(.symbol == "CDF/USD"))) as $windows |
-		($result.book_summaries // [] | map(select(.symbol == "CDF/USD")) | sort_by(.venue_id)) as $books |
-		{
-			schema_version: 1, contract: $contract, cell: $cell, seed: $seed,
-			metric: "viability", start_nano: $start_nano, window_nano: $window_nano,
-			max_empty_side_share: $max_empty,
-			venues: ($books | map({venue_id, windows, viable, snapshots, empty_side_snapshots,
-				observed_empty_side_share: (if .snapshots > 0 then (.empty_side_snapshots / .snapshots) else null end)})),
-			observed_windows: ($windows | length),
-			predicates: {
-				cdf_books_present: (($books | length) == 3 and (($books | map(.venue_id) | sort) == ["central", "north", "south"])),
-				post_warmup_snapshots_present: (all($books[]; .snapshots > 0)),
-				aggregate_two_sided_98pct: (all($books[]; (.snapshots > 0 and (.empty_side_snapshots / .snapshots) <= $max_empty))),
-				no_persistent_one_sided_window: (all($windows[]; (.snapshots > 0 and (.empty_side_snapshots / .snapshots) <= $max_empty)))
-			},
-			viability_result_shape: {books: ($result.books // 0), windows: ($result.windows | length)}
-		}' "$raw" >"$temporary" &&
+		--argjson window_nano "$survival_window_nano" --argjson expected_windows "$survival_expected_windows" \
+		--argjson max_empty "$max_empty_side_share" \
+		-f "$survival_summary_filter" "$raw" >"$temporary" &&
 		jq -e '.schema_version == 1 and .contract == $contract and
-			(.venues | length) == 3 and (.predicates | keys) == ["aggregate_two_sided_98pct", "cdf_books_present", "no_persistent_one_sided_window", "post_warmup_snapshots_present"] and
+			(.venues | length) == 3 and (.predicates | keys) == ["aggregate_two_sided_98pct", "cdf_books_present", "exact_post_warmup_window_coverage", "no_persistent_one_sided_window", "post_warmup_snapshots_present"] and
 			(.venues | all(.[]; (.snapshots | type) == "number" and (.empty_side_snapshots | type) == "number"))' \
 			--arg contract "$survival_contract" "$temporary" >/dev/null; then
 		mv "$temporary" "$output"
@@ -162,7 +148,7 @@ run_survival_metric() {
 	local raw status
 	raw=$(mktemp "$output.raw-XXXXXX")
 	set +e
-	"$analyzer" -metric viability -json -viability-window 3600 -viability-start "$survival_start_seconds" "$cell" >"$raw"
+	"$analyzer" -metric viability -json -viability-window 3600 -viability-start "$survival_start_seconds" -viability-judge-life-edges "$cell" >"$raw"
 	status=$?
 	set -e
 	if [[ "$status" -ne 0 || ! -s "$raw" ]] || ! write_survival_summary "$cell" "$seed" "$output" "$raw"; then

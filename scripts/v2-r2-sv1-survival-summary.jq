@@ -1,0 +1,40 @@
+.result as $result |
+($result.windows // [] | map(select(.symbol == "CDF/USD"))) as $windows |
+($result.book_summaries // [] | map(select(.symbol == "CDF/USD")) | sort_by(.venue_id)) as $books |
+([range(0; $expected_windows)] | map($start_nano + . * $window_nano)) as $expected_starts |
+($windows | group_by(.venue_id) | map({
+	venue_id: .[0].venue_id,
+	spans: (map({start, end}) | sort_by(.start))
+})) as $window_groups |
+{
+	schema_version: 1,
+	contract: $contract,
+	cell: $cell,
+	seed: $seed,
+	metric: "viability",
+	start_nano: $start_nano,
+	window_nano: $window_nano,
+	expected_windows_per_venue: $expected_windows,
+	max_empty_side_share: $max_empty,
+	venues: ($books | map({
+		venue_id,
+		windows,
+		viable,
+		snapshots,
+		empty_side_snapshots,
+		observed_empty_side_share: (if .snapshots > 0 then (.empty_side_snapshots / .snapshots) else null end)
+	})),
+	observed_windows: ($windows | length),
+	predicates: {
+		cdf_books_present: (($books | length) == 3 and (($books | map(.venue_id) | sort) == ["central", "north", "south"])),
+		post_warmup_snapshots_present: (all($books[]; .snapshots > 0)),
+		exact_post_warmup_window_coverage: (($windows | length) == ($expected_windows * 3) and
+			($window_groups | length) == 3 and
+			all($window_groups[]; (.spans | map(.start)) == $expected_starts and
+				all(.spans[]; .end == (.start + $window_nano))) and
+			all($books[]; .windows == $expected_windows)),
+		aggregate_two_sided_98pct: (all($books[]; (.snapshots > 0 and (.empty_side_snapshots / .snapshots) <= $max_empty))),
+		no_persistent_one_sided_window: (all($windows[]; (.snapshots > 0 and (.empty_side_snapshots / .snapshots) <= $max_empty)))
+	},
+	viability_result_shape: {books: ($result.books // 0), windows: ($result.windows | length)}
+}
