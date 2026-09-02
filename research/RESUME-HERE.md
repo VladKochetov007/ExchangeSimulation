@@ -966,3 +966,26 @@ current attestation. Free space is approximately 65 GiB.
 The next gate is therefore c80 documentation commit -> pinned Go 1.27 rebuild
 -> fresh current-revision capacity probe -> treatment-607 rerun and streaming
 extraction. No other development cell, freeze, or holdout has run.
+
+### 2026-09-02 — renderer publication review accepted with narrower claim
+
+An independent Sol-xhigh review of exact code HEAD
+`362ebe4d75b1fe4638e79e48b3a074bdf6dbf741` returned **ACCEPT WITH NARROWER
+CLAIM**. The prior conditional renderer blockers are closed for the
+registered Linux/amd64 workflow: canonical/symlink-safe paths, regular-file
+metadata and sidecar checks, final output revalidation, and atomic
+`renameat2(RENAME_NOREPLACE)` publication are now covered by code and
+regressions. The full clean `make test` at this exact code tree also passed.
+
+The reviewer’s narrower limitations remain binding: renderer memory is
+event-count independent only for the fixed registered route universe,
+publication is Linux/amd64-only, and quiescent private evidence is assumed
+during rendering. This clears the renderer/mechanical promotion boundary only;
+it does not authorize a capacity result, development cell, freeze, or holdout.
+The review record is
+`research/reviews/v2-r2-sv1-renderer-publication-review-2026-09-02.md`.
+
+The next exact-tree step is this documentation commit, then a fresh pinned
+Go 1.27 rebuild and revision-bound binary capacity probe. The performance
+branch still has no commit newer than reviewed `c4434ad`; no performance code
+was imported.

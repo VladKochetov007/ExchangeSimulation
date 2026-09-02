@@ -790,3 +790,27 @@ actor-visible inputs, scheduling, RNG use, matching, or event ordering. The
 next valid gate is a docs commit, pinned Go 1.27 rebuild, fresh capacity
 measurement bound to the resulting revision, and corrected treatment-607
 rerun/extraction. No additional development cell, freeze, or holdout has run.
+
+## Append-only operational update: renderer review accepted — 2026-09-02
+
+The independent Sol-xhigh review of exact code HEAD
+`362ebe4d75b1fe4638e79e48b3a074bdf6dbf741` returned **ACCEPT WITH NARROWER
+CLAIM** for the controlled renderer/mechanical path. It found no remaining
+blocker after the c80 follow-up: path canonicalization and symlink rejection,
+regular-file checks, venue-tree traversal checks, final output revalidation,
+and Linux/amd64 atomic no-replacement publication all pass the reviewed
+regressions. The complete clean `GOMAXPROCS=4 make test` also passed at this
+code tree.
+
+The acceptance is deliberately narrow. Renderer memory is bounded in event
+count only for the fixed registered route universe; publication is supported
+only on Linux/amd64; and rendering assumes a quiescent private evidence
+namespace rather than defending against a hostile same-UID file replacement
+race. The review does not authorize capacity, a scientific cell, a freeze, or
+holdout access. Full details are in
+`research/reviews/v2-r2-sv1-renderer-publication-review-2026-09-02.md`.
+
+After the documentation commit, rebuild the exact final tree with Go 1.27 and
+run a fresh binary-evidence capacity measurement. The performance feed remains
+deferred at `c4434ad` with no newer commits observed; no performance patch was
+merged.
