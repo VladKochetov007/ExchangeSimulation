@@ -1026,3 +1026,29 @@ still required. No cell, capacity probe, freeze, or holdout has been run.
 The performance red-team branch was fetched again at this checkpoint; it has
 no commit after `c4434ad`, and no performance code was merged. Holdouts `619`,
 `631`, and `641` remain untouched.
+
+## Append-only operational update: clean promotion gates — 2026-09-03
+
+Commit `a3f48458df2e9869987367334f57bae82fea4fae` is the exact current pushed
+HEAD. It repairs only the historical SV1 capacity-archive test fixture: the
+synthetic config-bound attestation now includes its required measurement
+configuration path and explicit `treatment-607` probe cell. This preserves
+the stricter validator and leaves all R2/SV1 economics unchanged.
+
+The clean full `GOMAXPROCS=2 make test` passed, including all Go packages,
+integrated R2 contracts, SV1 activation/survival/score/terminal fixtures, and
+both archive suites. Clean `go vet ./...`, focused package tests, the named
+risk/valuation/CDF/lifecycle/terminal `-race` subset, the explicit binary
+evidence contract tests, and the core fresh-process binary determinism and
+evidence-neutrality test all passed.
+
+The complete targeted race command was allowed its registered 20-minute
+timeout and ended nonzero in the pre-existing
+`TestV25P3eEvidenceIsFreshProcessDeterministicAndNeutral` helper. Its stack
+showed a child-process wait and no race report; it is not a pass. The named
+subset is the bounded positive race result, while the broad timeout remains a
+documented limitation for promotion review. No current-revision simulator,
+activation, capacity, development, freeze, or holdout run occurred. The
+performance feed was fetched through `c4434ad` with no newer commit and no
+performance code was merged. Holdouts `619`, `631`, and `641` remain
+untouched.

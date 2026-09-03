@@ -1191,3 +1191,30 @@ full test and the remaining static/race/evidence/determinism gates are still
 required. No activation, capacity probe, development cell, freeze, or holdout
 has run. The performance branch remains reviewed through `c4434ad` with no
 newer commit, and no performance implementation was imported.
+
+## Append-only operational update: clean promotion gates — 2026-09-03
+
+The capacity-archive fixture regression exposed by the first clean gate was
+fixed in `a3f4845` by completing its synthetic attestation with the already
+required measurement-config and probe-cell bindings. The fixture then passed
+on a clean tree, including revision mismatch, config mismatch, symlink,
+corrupted-stream, archive-collision, and successful superseded-retention
+checks.
+
+At `a3f4845`, clean `GOMAXPROCS=2 make test` passed all Go packages and all
+integrated/SV1 contract and archive fixtures. `go vet ./...` passed. The
+focused `evstream`, `types`, `exchange`, and `simulations/multivenue` suite
+passed. A named `-race` subset covering risk/valuation, CDF supplier,
+terminal-failure, lifecycle, and event-stream regressions passed, as did the
+explicit binary evidence contract subset and the core fresh-process binary
+determinism/evidence-neutrality test.
+
+The broader `-race` invocation over those four packages remains a recorded
+non-pass: after 20 minutes it timed out inside the existing
+`TestV25P3eEvidenceIsFreshProcessDeterministicAndNeutral` helper, with no race
+diagnostic. This is retained as a test-duration limitation, not reclassified
+as success. No source or economic change was made in response. The exact
+tree is clean and pushed; no activation, capacity measurement, development
+cell, freeze, or holdout has run. The next gate is one fresh exact-tree
+independent Sol-xhigh review, followed by a clean pinned Go 1.27 build only if
+that review accepts the complete successor scope.
