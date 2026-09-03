@@ -104,27 +104,40 @@ preregistration_file="$root_dir/$preregistration_path"
 }
 preregistration_hash=$(sha256sum "$preregistration_file" | awk '{print $1}')
 registered_configs=$(for path in "$config_dir"/*.json; do printf '%s\t%s\n' "$(basename -- "$path")" "$(sha256sum -- "$path" | awk '{print $1}')"; done | jq -Rn '[inputs | split("\t") | {(.[0]): .[1]}] | add')
-capacity_case_names=(control-643-none.json control-643.json control-647.json control-653.json treatment-643.json treatment-647.json treatment-653.json)
+activation_diagnostics_path="research/v2-r2-sv1b-activation-diagnostics-amendment-2026-09-02.md"
+activation_diagnostics_file="$root_dir/$activation_diagnostics_path"
+[[ -s "$activation_diagnostics_file" && ! -L "$activation_diagnostics_file" ]] || {
+	echo "missing activation diagnostics amendment: $activation_diagnostics_file" >&2
+	exit 1
+}
+activation_diagnostics_hash=$(sha256sum "$activation_diagnostics_file" | awk '{print $1}')
+capacity_order_path="research/v2-r2-sv1b-activation-capacity-order-amendment-2026-09-03.md"
+capacity_order_file="$root_dir/$capacity_order_path"
+[[ -s "$capacity_order_file" && ! -L "$capacity_order_file" ]] || {
+	echo "missing activation/capacity ordering amendment: $capacity_order_file" >&2
+	exit 1
+}
+capacity_order_hash=$(sha256sum "$capacity_order_file" | awk '{print $1}')
+authorized_launch_config_hashes=$(for config_name in "${v2_r2_sv1_capacity_authorized_launch_config_names[@]}"; do
+	sha256sum -- "$config_dir/$config_name" | awk '{print $1}'
+done | jq -Rsc 'split("\n") | map(select(length > 0))')
 capacity_cases='[]'
-for config_name in "${capacity_case_names[@]}"; do
-	config_path="$config_dir/$config_name"
-	seed=$(jq -er '.seed' "$config_path")
-	for gomaxprocs in 4; do
-		attestation_path=$(v2_r2_capacity_attestation_path_for_config "$config_path" "$gomaxprocs")
-		probe_cell=$(v2_r2_capacity_probe_cell_for_config "$config_path" "$gomaxprocs")
-		capacity_case=$(jq -cn --arg config_path "${config_path#"$root_dir/"}" --arg config_sha256 "$(sha256sum "$config_path" | awk '{print $1}')" \
-			--arg attestation_path "$attestation_path" --arg probe_cell "$probe_cell" --argjson seed "$seed" --argjson gomaxprocs "$gomaxprocs" \
-			'{config_path:$config_path,config_sha256:$config_sha256,measurement_seed:$seed,gomaxprocs:$gomaxprocs,attestation_path:$attestation_path,probe_cell:$probe_cell}')
-		capacity_cases=$(jq -c --argjson case "$capacity_case" '. + [$case]' <<<"$capacity_cases")
-	done
+capacity_case_specs=(
+	"$config_dir/treatment-643.json|4|production_treatment_g4"
+	"$config_dir/control-643.json|4|production_control_g4"
+	"$config_dir/treatment-643.json|8|production_treatment_g8"
+)
+for capacity_case_spec in "${capacity_case_specs[@]}"; do
+	IFS='|' read -r capacity_config gomaxprocs capacity_role <<<"$capacity_case_spec"
+	capacity_config_path="${capacity_config#"$root_dir/"}"
+	capacity_measurement_sha=$(sha256sum "$capacity_config" | awk '{print $1}')
+	attestation_path=$(v2_r2_capacity_attestation_path_for_config "$capacity_config" "$gomaxprocs")
+	probe_cell=$(v2_r2_capacity_probe_cell_for_config "$capacity_config" "$gomaxprocs")
+	capacity_case=$(jq -cn --arg config_path "$capacity_config_path" --arg measurement_config_sha256 "$capacity_measurement_sha" \
+		--arg attestation_path "$attestation_path" --arg probe_cell "$probe_cell" --arg role "$capacity_role" --argjson gomaxprocs "$gomaxprocs" \
+		'{config_path:$config_path,measurement_config_sha256:$measurement_config_sha256,measurement_seed:659,source_seed:643,gomaxprocs:$gomaxprocs,attestation_path:$attestation_path,probe_cell:$probe_cell,role:$role}')
+	capacity_cases=$(jq -c --argjson case "$capacity_case" '. + [$case]' <<<"$capacity_cases")
 done
-config_path="$config_dir/treatment-643.json"
-attestation_path=$(v2_r2_capacity_attestation_path_for_config "$config_path" 8)
-probe_cell=$(v2_r2_capacity_probe_cell_for_config "$config_path" 8)
-capacity_case=$(jq -cn --arg config_path "${config_path#"$root_dir/"}" --arg config_sha256 "$(sha256sum "$config_path" | awk '{print $1}')" \
-	--arg attestation_path "$attestation_path" --arg probe_cell "$probe_cell" \
-	'{config_path:$config_path,config_sha256:$config_sha256,measurement_seed:643,gomaxprocs:8,attestation_path:$attestation_path,probe_cell:$probe_cell}')
-capacity_cases=$(jq -c --argjson case "$capacity_case" '. + [$case]' <<<"$capacity_cases")
 jq -n \
 	--arg candidate "$candidate" \
 	--arg source_hash "$source_hash" \
@@ -135,12 +148,17 @@ jq -n \
 	--arg generator_hash "$generator_hash" \
 	--arg withdrawal_measurement_path "$withdrawal_measurement_path" \
 	--arg withdrawal_measurement_hash "$withdrawal_measurement_hash" \
+	--arg activation_diagnostics_path "$activation_diagnostics_path" \
+	--arg activation_diagnostics_hash "$activation_diagnostics_hash" \
 	--arg preregistration_path "$preregistration_path" \
 	--arg preregistration_hash "$preregistration_hash" \
+	--arg capacity_order_path "$capacity_order_path" \
+	--arg capacity_order_hash "$capacity_order_hash" \
 	--argjson registered_configs "$registered_configs" \
 	--argjson capacity_cases "$capacity_cases" \
+	--argjson authorized_launch_config_hashes "$authorized_launch_config_hashes" \
 	'{schema_version: 1,
-	 contract: "v2-r2-sv1b-24h-config-provenance-v3",
+		 contract: "v2-r2-sv1b-24h-config-provenance-v4",
 	 candidate: $candidate,
 	 predecessor: "V2-R2-SV1",
 	 source_configs: {"dev-607.json": $source_hash, "dev-607-none.json": $no_log_source_hash},
@@ -158,13 +176,22 @@ jq -n \
 	 },
 	 generator: {path: $generator_path, sha256: $generator_hash},
 	 withdrawal_measurement: {path: $withdrawal_measurement_path, sha256: $withdrawal_measurement_hash},
+	 activation_diagnostics: {path: $activation_diagnostics_path, sha256: $activation_diagnostics_hash},
 	 preregistration: {path: $preregistration_path, sha256: $preregistration_hash},
-	 capacity_calibration: {
-		 contract: "v2-r2-sv1b-24h-binary-capacity-v2",
-		 mode: "exact_registered_production_configs",
-		 calibration_only: false,
-		 minimum_free_bytes: 4294967296,
-		 safety_margin_bytes: 4294967296,
+	 capacity_ordering: {path: $capacity_order_path, sha256: $capacity_order_hash},
+		 capacity_calibration: {
+			 contract: "v2-r2-sv1b-24h-binary-capacity-v4",
+			 mode: "production_capacity_measurement",
+			 calibration_only: true,
+			 capacity_only_seed: 659,
+			 source_config_seed: 643,
+			 minimum_free_bytes: 4294967296,
+			 safety_margin_bytes: 4294967296,
+			 memory_limit_bytes: 21474836480,
+			 gomemlimit_bytes: 19327352832,
+			 measurement_config_path: "research/configs/v2-r2-sv1b-24h/treatment-643.json",
+		 launch_config_path: "research/configs/v2-r2-sv1b-24h/treatment-643.json",
+		 authorized_launch_config_sha256: $authorized_launch_config_hashes,
 		 measurement_cases: $capacity_cases
 	 },
 	 holdout_policy: "development generator and checker never read or create holdout 619/631/641"

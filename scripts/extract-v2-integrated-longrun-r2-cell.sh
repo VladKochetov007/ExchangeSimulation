@@ -161,8 +161,8 @@ funding_interval_seconds=$(jq -er '.funding_interval_seconds' "$cell/run-config.
 simulation_start_nano=$(jq -er '.simulation_start_nano' "$cell/run-metadata.json")
 simulation_end_nano=$(jq -er '.simulation_end_nano' "$cell/run-metadata.json")
 [[ "$seed" == "$config_seed" ]] || fail "metadata/config seed mismatch"
-[[ "$log_mode" == full ]] || fail "development extraction requires full log mode"
-[[ "$evidence_format" == "evstream_v3" ]] || fail "successor development extraction requires evstream_v3 evidence"
+	[[ "$log_mode" == full || "$log_mode" == none ]] || fail "unsupported development log mode: $log_mode"
+	[[ "$evidence_format" == "evstream_v3" ]] || fail "successor development extraction requires evstream_v3 evidence"
 jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
 	'($simulation_start_nano == 1735689600000000000 and $simulation_end_nano == 1735776000000000000 and
 	 ($simulation_end_nano - $simulation_start_nano) == 86400000000000)' \
@@ -177,27 +177,42 @@ if [[ "$extractor_variant" == sv1 && "$v2_r2_sv1_require_terminal_outcome" == tr
 		terminal_failure=true
 	fi
 fi
-require_file "$cell/greeks.json"
-require_json_object "$cell/greeks.json"
-if [[ "$terminal_failure" == true ]]; then
-	jq -e --slurpfile outcome "$cell/terminal-outcome.json" '
-		type == "object" and .schema_version == 7 and
+	greeks_present=false
+	if [[ -s "$cell/greeks.json" ]]; then
+		[[ -f "$cell/greeks.json" && ! -L "$cell/greeks.json" ]] || fail "greeks completion sentinel is symlinked"
+		require_json_object "$cell/greeks.json"
+		greeks_present=true
+	elif [[ "$terminal_failure" != true || "$log_mode" != none ]]; then
+		fail "missing greeks completion sentinel"
+	fi
+	if [[ "$terminal_failure" == true ]]; then
+		if [[ "$greeks_present" == true ]]; then
+		jq -e --slurpfile outcome "$cell/terminal-outcome.json" '
+			type == "object" and .schema_version == 7 and
 		.report_status == "partial_terminal_failure" and .terminal_valuation_available == false and
 		(.initial_accounts | type) == "array" and (.initial_accounts | length) > 0 and
 		((.terminal_accounts // []) | type) == "array" and ((.terminal_accounts // []) | length) == 0 and
 		((.terminal_risk // {}) | type) == "object" and ((.terminal_risk // {}) | length) == 0 and
 		(.terminal_outcome | type) == "object" and .terminal_outcome == $outcome[0]' \
-		"$cell/greeks.json" >/dev/null || fail "partial terminal-failure report is not explicitly valuation-incomplete"
-fi
-jq -e '(.schema_version == 7 and .report_status == "complete_terminal_valuation" and .terminal_valuation_available == true) or
-	(.schema_version == 7 and .report_status == "partial_terminal_failure" and .terminal_valuation_available == false)' \
-	"$cell/greeks.json" >/dev/null || fail "greeks report has an unknown valuation completeness state"
-jq -e --arg cell "$cell_name" --argjson seed "$seed" --arg experiment "$config_experiment" \
+			"$cell/greeks.json" >/dev/null || fail "partial terminal-failure report is not explicitly valuation-incomplete"
+		fi
+	elif [[ "$greeks_present" == true ]]; then
+		jq -e '(.schema_version == 7 and .report_status == "complete_terminal_valuation" and .terminal_valuation_available == true)' \
+			"$cell/greeks.json" >/dev/null || fail "greeks report has an unknown valuation completeness state"
+	fi
+
+	if [[ "$analysis_dir" != "$cell" && "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
+		[[ ! -e "$analysis_dir/terminal-outcome.json" && ! -L "$analysis_dir/terminal-outcome.json" ]] ||
+			fail "analysis output already contains terminal outcome metadata"
+		cp -- "$cell/terminal-outcome.json" "$analysis_dir/terminal-outcome.json" ||
+			fail "could not stage immutable terminal outcome metadata for analysis"
+	fi
+jq -e --arg cell "$cell_name" --argjson seed "$seed" --arg log_mode "$log_mode" --arg experiment "$config_experiment" \
 	--arg runner_contract "$expected_runner_contract" --arg hypothesis_id "$config_hypothesis" \
 	--argjson completion_sentinels "$completion_sentinels" \
 	'.schema_version == 6 and .runner_contract == $runner_contract and
 	 .cell == $cell and .seed == $seed and .holdout == false and
-	 .simulated_horizon == "24h" and .log_mode == "full" and .evidence_format == "evstream_v3" and
+		 .simulated_horizon == "24h" and .log_mode == $log_mode and .evidence_format == "evstream_v3" and
 	 .simulation_start_nano == 1735689600000000000 and .simulation_end_nano == 1735776000000000000 and
 	 (.gomaxprocs | type) == "number" and .gomaxprocs == 4 and
 	 .hypothesis_id == $hypothesis_id and
@@ -220,7 +235,6 @@ jq -e --arg cell "$cell_name" --argjson seed "$seed" --arg experiment "$config_e
 			 .simulated_horizon == "24h" and .completion_sentinels == $completion_sentinels and
 			 (.run_metadata_sha256 | test("^[0-9a-f]{64}$")) and
 			 (.manifest_sha256 | test("^[0-9a-f]{64}$")) and
-			 (.greeks_sha256 | test("^[0-9a-f]{64}$")) and
 			 (.latency_sha256 | test("^[0-9a-f]{64}$")) and
 			 (.checkpoints_sha256 | test("^[0-9a-f]{64}$")) and
 			 (.simulation_start_nano | type) == "number" and (.simulation_end_nano | type) == "number" and
@@ -231,7 +245,7 @@ jq -e --arg cell "$cell_name" --argjson seed "$seed" --arg experiment "$config_e
 			 .terminal_failure_at_nano == $failure_at_nano and
 			 .terminal_failure_venue_id == $failure_venue_id and .terminal_failure_symbol == $failure_symbol' \
 			"$cell/run-status.json" >/dev/null || fail "invalid terminal-failure run status contract"
-	else
+		else
 		jq -e --arg cell "$cell_name" --argjson completion_sentinels "$completion_sentinels" \
 		'.cell == $cell and .exit_status == 0 and .completion_verified == true and
 		 .simulated_horizon == "24h" and .completion_sentinels == $completion_sentinels and
@@ -245,8 +259,15 @@ jq -e --arg cell "$cell_name" --argjson seed "$seed" --arg experiment "$config_e
 		(.evidence_manifest_sha256 | test("^[0-9a-f]{64}$")) and
 		(has("terminal_failure_verified") | not)' \
 		"$cell/run-status.json" >/dev/null || fail "invalid run status contract"
-	fi
-if [[ "$extractor_variant" == sv1 && "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
+		fi
+		if [[ "$greeks_present" == true ]]; then
+			jq -e '(.greeks_sha256 | test("^[0-9a-f]{64}$"))' "$cell/run-status.json" >/dev/null ||
+				fail "terminal-failure run status has an invalid greeks hash"
+		else
+			jq -e '(has("greeks_sha256") | not)' "$cell/run-status.json" >/dev/null ||
+				fail "no-log terminal-failure status unexpectedly claims a greeks artifact"
+		fi
+	if [[ "$extractor_variant" == sv1 && "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
 	jq -e '(.terminal_outcome_sha256 | test("^[0-9a-f]{64}$"))' "$cell/run-status.json" >/dev/null ||
 		fail "run status lacks terminal outcome hash"
 	[[ "$(sha256sum "$cell/terminal-outcome.json" | awk '{print $1}')" == "$(jq -er '.terminal_outcome_sha256' "$cell/run-status.json")" ]] ||
@@ -304,7 +325,9 @@ manifest_modified=$(jq -r '.build.modified' "$cell/manifest.json")
 [[ "$manifest_revision" == "$metadata_revision" && "$manifest_modified" == false ]] || fail "manifest build identity mismatch"
 [[ "$(sha256sum "$cell/run-metadata.json" | awk '{print $1}')" == "$(jq -er '.run_metadata_sha256' "$cell/run-status.json")" ]] || fail "run metadata status hash mismatch"
 [[ "$(sha256sum "$cell/manifest.json" | awk '{print $1}')" == "$(jq -er '.manifest_sha256' "$cell/run-status.json")" ]] || fail "manifest status hash mismatch"
-[[ "$(sha256sum "$cell/greeks.json" | awk '{print $1}')" == "$(jq -er '.greeks_sha256' "$cell/run-status.json")" ]] || fail "greeks status hash mismatch"
+	if [[ "$greeks_present" == true ]]; then
+		[[ "$(sha256sum "$cell/greeks.json" | awk '{print $1}')" == "$(jq -er '.greeks_sha256' "$cell/run-status.json")" ]] || fail "greeks status hash mismatch"
+	fi
 [[ "$(sha256sum "$cell/latency.json" | awk '{print $1}')" == "$(jq -er '.latency_sha256' "$cell/run-status.json")" ]] || fail "latency status hash mismatch"
 [[ "$(sha256sum "$cell/checkpoints.jsonl" | awk '{print $1}')" == "$(jq -er '.checkpoints_sha256' "$cell/run-status.json")" ]] || fail "checkpoint status hash mismatch"
 [[ "$(sha256sum "$cell/evidence-manifest.json" | awk '{print $1}')" == "$(jq -er '.evidence_manifest_sha256' "$cell/run-status.json")" ]] || fail "evidence manifest status hash mismatch"
@@ -319,6 +342,7 @@ cleanup_rendered_input() {
 	fi
 }
 trap 'cleanup_raw_stage; cleanup_rendered_input' EXIT
+runtime_canonical_digest=""
 if [[ "$evidence_format" == "evstream_v3" ]]; then
 	[[ -x "$renderer" ]] || fail "missing binary evidence renderer: $renderer"
 	renderer_go_version=$(v2_r2_binary_go_version "$renderer")
@@ -334,8 +358,10 @@ if [[ "$evidence_format" == "evstream_v3" ]]; then
 	render_report=$("$renderer" -dir "$cell" -out "$rendered_dir" -route-compression "$render_route_compression") || fail "binary evidence rendering failed"
 	jq -e --argjson event_frames "$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")" \
 		--arg execution_hash "$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
+		--arg canonical_hash "$(jq -er '.canonical_execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
 		--arg route_compression "$render_route_compression" \
 		'.event_frames == $event_frames and .execution_stream_hash == $execution_hash and
+		 .canonical_execution_stream_hash == $canonical_hash and
 		 (.routes | type) == "number" and .route_compression == $route_compression' \
 		<<<"$render_report" >/dev/null || fail "renderer report does not match binary attestation"
 	# Report-derived metrics also consume the immutable instrumented market-data
@@ -400,9 +426,13 @@ fi
 
 if [[ "$evidence_format" == "evstream_v3" ]]; then
 	jq -e '.domain == "canonical_binary_execution_frames" and .ordering == "ordered_stream" and
+		 .hashing == "route_sequence_neutral_v1" and
 		 (.event_frames | type) == "number" and .event_frames > 0 and
 		 (.stream_frames | type) == "number" and .stream_frames >= .event_frames and
-		 (.execution_stream_hash | test("^[0-9a-f]{64}$")) and (.unencodable_payloads // 0) == 0' \
+		 (.execution_stream_hash | test("^[0-9a-f]{64}$")) and
+		 (.canonical_execution_stream_hash | type) == "string" and
+		 (.canonical_execution_stream_hash | test("^[0-9a-f]{64}$")) and
+		 (.unencodable_payloads // 0) == 0' \
 		"$cell/binary-evidence-attestation.json" >/dev/null || fail "invalid runtime binary evidence attestation"
 else
 	jq -e '.domain == "persisted_json_records" and .ordering == "unordered_multiset" and
@@ -505,19 +535,25 @@ write_terminal_failure_artifacts() {
 		 terminal_outcome: $outcome}}' >"$temporary"
 	mv "$temporary" "$analysis_dir/priceunavailable.json"
 
-	temporary=$(mktemp "$analysis_dir/evidenceartifacthash.json.tmp-XXXXXX")
-	jq -n --arg execution_hash "$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
-		--argjson event_frames "$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")" \
-		'{schema_version: 1, result: {domain: "rendered_binary_json_records",
-		 ordering: "venue_sequence_reconstructed", source_execution_stream_hash: $execution_hash,
-		 source_binary_event_frames: $event_frames, status: "TERMINAL_FAILURE_DIAGNOSTIC"}}' >"$temporary"
+		temporary=$(mktemp "$analysis_dir/evidenceartifacthash.json.tmp-XXXXXX")
+		jq -n --arg execution_hash "$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
+			--arg canonical_hash "$(jq -er '.canonical_execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
+			--argjson event_frames "$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")" \
+			'{schema_version: 1, result: {domain: "rendered_binary_json_records",
+			 ordering: "venue_sequence_reconstructed", source_execution_stream_hash: $execution_hash,
+			 source_canonical_execution_stream_hash: $canonical_hash,
+			 source_binary_event_frames: $event_frames, status: "TERMINAL_FAILURE_DIAGNOSTIC"}}' >"$temporary"
 	mv "$temporary" "$analysis_dir/evidenceartifacthash.json"
 
-	temporary=$(mktemp "$analysis_dir/streamhash.json.tmp-XXXXXX")
-	jq -n --arg execution_hash "$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
-		--argjson event_frames "$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")" \
-		'{schema_version: 1, result: {domain: "persisted_evidence", ordering: "unordered_multiset",
-		 events: $event_frames, digest: $execution_hash, status: "TERMINAL_FAILURE_DIAGNOSTIC"}}' >"$temporary"
+		temporary=$(mktemp "$analysis_dir/streamhash.json.tmp-XXXXXX")
+		jq -n --arg execution_hash "$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
+			--arg canonical_hash "$(jq -er '.canonical_execution_stream_hash' "$cell/binary-evidence-attestation.json")" \
+			--argjson event_frames "$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")" \
+			--argjson stream_frames "$(jq -er '.stream_frames' "$cell/binary-evidence-attestation.json")" \
+			'{schema_version: 1, result: {domain: "canonical_binary_execution_frames", ordering: "ordered_stream", hashing: "route_sequence_neutral_v1",
+			 event_frames: $event_frames, stream_frames: $stream_frames, execution_stream_hash: $execution_hash,
+			 canonical_execution_stream_hash: $canonical_hash,
+			 status: "TERMINAL_FAILURE_DIAGNOSTIC"}}' >"$temporary"
 	mv "$temporary" "$analysis_dir/streamhash.json"
 
 	temporary=$(mktemp "$analysis_dir/activation.json.tmp-XXXXXX")
@@ -552,8 +588,9 @@ write_terminal_failure_artifacts() {
 		 claim_scope: "typed terminal failure diagnostic; no terminal valuation claim"}}' >"$temporary"
 	mv "$temporary" "$analysis_dir/terminalfailure.json"
 
-	runtime_events=$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")
-	runtime_digest=$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")
+		runtime_events=$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")
+		runtime_digest=$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")
+		runtime_canonical_digest=$(jq -er '.canonical_execution_stream_hash' "$cell/binary-evidence-attestation.json")
 	analyzer_revision=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
 	analyzer_modified=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
 	analyzer_sha256=$(sha256sum "$analyzer" | awk '{print $1}')
@@ -577,7 +614,8 @@ write_terminal_failure_artifacts() {
 		--arg renderer_route_compression "$render_route_compression" --arg source_revision_mode "$source_revision_mode" \
 		--arg raw_source_revision "$metadata_revision" --argjson analyzer_modified "$analyzer_modified_json" \
 		--argjson required_artifacts "$required_json" --argjson artifact_sha256 "$artifact_sha256" \
-		--argjson runtime_evidence_events "$runtime_events" --arg runtime_evidence_digest "$runtime_digest" \
+			--argjson runtime_evidence_events "$runtime_events" --arg runtime_evidence_digest "$runtime_digest" \
+			--arg runtime_canonical_digest "$runtime_canonical_digest" \
 		--arg contract "$contract_version" --arg cell "$cell_name" --argjson seed "$seed" \
 		--arg simulator_revision "$metadata_revision" --arg simulator_sha256 "$simulator_sha256" \
 		--argjson simulator_trimpath true --arg simulator_cgo_enabled "$binary_cgo_enabled" \
@@ -601,8 +639,8 @@ write_terminal_failure_artifacts() {
 		 config_sha256: $config_sha256, analysis_contract: $contract, integrity_contract: $contract,
 		 activation_contract: $contract, completion_sentinels: $completion_sentinels,
 		 required_artifacts: $required_artifacts, artifact_sha256: $artifact_sha256,
-		 runtime_evidence_artifact: {representation: $evidence_format, event_frames: $runtime_evidence_events,
-		  execution_stream_hash: $runtime_evidence_digest}, terminal_failure_diagnostic: true,
+			runtime_evidence_artifact: {representation: $evidence_format, event_frames: $runtime_evidence_events,
+			 execution_stream_hash: $runtime_evidence_digest, canonical_execution_stream_hash: $runtime_canonical_digest}, terminal_failure_diagnostic: true,
 		 inactive_contracts: ["fundingcarry", "termcarry", "datedcarryp5", "datedmandatep5", "perpreplenishment"],
 		 raw_log_policy: "retained; this extractor has no prune authority"}' >"$temporary"
 	mv "$temporary" "$analysis_dir/analysis-metadata.json"
@@ -650,12 +688,14 @@ for metric in "${metrics[@]}"; do
 done
 if [[ "$evidence_format" == "evstream_v3" ]]; then
 	rendered_hash=$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")
+	rendered_canonical_hash=$(jq -er '.canonical_execution_stream_hash' "$cell/binary-evidence-attestation.json")
 	rendered_frames=$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")
 	rendered_tmp=$(mktemp "$analysis_dir/evidenceartifacthash.json.tmp-XXXXXX")
-	jq --arg execution_hash "$rendered_hash" --argjson event_frames "$rendered_frames" \
+	jq --arg execution_hash "$rendered_hash" --arg canonical_hash "$rendered_canonical_hash" --argjson event_frames "$rendered_frames" \
 		'.result.domain = "rendered_binary_json_records" |
 		 .result.ordering = "venue_sequence_reconstructed" |
 		 .result.source_execution_stream_hash = $execution_hash |
+		 .result.source_canonical_execution_stream_hash = $canonical_hash |
 		 .result.source_binary_event_frames = $event_frames' \
 		"$analysis_dir/evidenceartifacthash.json" >"$rendered_tmp"
 	mv "$rendered_tmp" "$analysis_dir/evidenceartifacthash.json"
@@ -779,8 +819,9 @@ if [[ "$extractor_variant" == sv1 ]]; then
 			 decision_count: r($cdf_liquidity).decision_count, fill_count: r($cdf_liquidity).fill_count,
 		 trading_supplier_count: r($cdf_liquidity).trading_supplier_count,
 			 pnl_changing_supplier_count: r($cdf_liquidity).pnl_changing_supplier_count,
-			 inventory_responsive_decision_count: r($cdf_liquidity).inventory_responsive_decision_count,
-			 risk_state_decision_count: r($cdf_liquidity).risk_state_decision_count,
+				 inventory_responsive_decision_count: r($cdf_liquidity).inventory_responsive_decision_count,
+				 risk_state_decision_count: r($cdf_liquidity).risk_state_decision_count,
+				 fresh_risk_state_decision_count: r($cdf_liquidity).fresh_risk_state_decision_count,
 				 risk_limit_triggered_decision_count: r($cdf_liquidity).risk_limit_triggered_decision_count,
 				 max_observed_loss_from_initial_quote: r($cdf_liquidity).max_observed_loss_from_initial_quote,
 				 max_observed_drawdown_quote: r($cdf_liquidity).max_observed_drawdown_quote,
@@ -791,16 +832,31 @@ if [[ "$extractor_variant" == sv1 ]]; then
 			 supplier_volume_share: r($cdf_liquidity).supplier_volume_share,
 			 supplier_depth_over_75_share: r($cdf_liquidity).supplier_depth_over_75_share,
 			 supplier_time_weighted_resting_depth_share: r($cdf_liquidity).supplier_time_weighted_resting_depth_share,
-			 supplier_removal_counterfactual_valid: r($cdf_liquidity).supplier_removal_counterfactual_valid,
-			 supplier_removal_snapshot_count: r($cdf_liquidity).supplier_removal_snapshot_count,
-			 supplier_removal_bid_absence_fraction: r($cdf_liquidity).supplier_removal_bid_absence_fraction,
-			 supplier_removal_ask_absence_fraction: r($cdf_liquidity).supplier_removal_ask_absence_fraction,
-			 supplier_removal_qualified_bid_absence_fraction: r($cdf_liquidity).supplier_removal_qualified_bid_absence_fraction,
-			 supplier_removal_qualified_ask_absence_fraction: r($cdf_liquidity).supplier_removal_qualified_ask_absence_fraction,
+				 supplier_removal_counterfactual_valid: r($cdf_liquidity).supplier_removal_counterfactual_valid,
+				 supplier_removal_time_weighted_counterfactual_valid: r($cdf_liquidity).supplier_removal_time_weighted_counterfactual_valid,
+				 supplier_removal_snapshot_count: r($cdf_liquidity).supplier_removal_snapshot_count,
+				 supplier_removal_observed_duration_ns: r($cdf_liquidity).supplier_removal_observed_duration_ns,
+				 supplier_removal_bid_absence_duration_ns: r($cdf_liquidity).supplier_removal_bid_absence_duration_ns,
+				 supplier_removal_ask_absence_duration_ns: r($cdf_liquidity).supplier_removal_ask_absence_duration_ns,
+				 supplier_removal_qualified_bid_absence_duration_ns: r($cdf_liquidity).supplier_removal_qualified_bid_absence_duration_ns,
+				 supplier_removal_qualified_ask_absence_duration_ns: r($cdf_liquidity).supplier_removal_qualified_ask_absence_duration_ns,
+				 supplier_removal_bid_absence_fraction: r($cdf_liquidity).supplier_removal_bid_absence_fraction,
+				 supplier_removal_ask_absence_fraction: r($cdf_liquidity).supplier_removal_ask_absence_fraction,
+				 supplier_removal_qualified_bid_absence_fraction: r($cdf_liquidity).supplier_removal_qualified_bid_absence_fraction,
+				 supplier_removal_qualified_ask_absence_fraction: r($cdf_liquidity).supplier_removal_qualified_ask_absence_fraction,
+				 supplier_removal_bid_absence_active_time_fraction: r($cdf_liquidity).supplier_removal_bid_absence_active_time_fraction,
+				 supplier_removal_ask_absence_active_time_fraction: r($cdf_liquidity).supplier_removal_ask_absence_active_time_fraction,
+				 supplier_removal_qualified_bid_absence_active_time_fraction: r($cdf_liquidity).supplier_removal_qualified_bid_absence_active_time_fraction,
+				 supplier_removal_qualified_ask_absence_active_time_fraction: r($cdf_liquidity).supplier_removal_qualified_ask_absence_active_time_fraction,
 			 supplier_removal_one_sided_snapshots: r($cdf_liquidity).supplier_removal_one_sided_snapshots,
-			 venues: (r($cdf_liquidity).venues | map({venue_id, supplier_volume_share, supplier_depth_over_75_fraction,
+				 venues: (r($cdf_liquidity).venues | map({venue_id, supplier_volume_share, supplier_depth_over_75_fraction,
 				 supplier_time_weighted_resting_depth_share, supplier_removal_counterfactual_valid,
-				 supplier_removal_snapshot_count, supplier_removal_bid_absence_fraction,
+				 supplier_removal_time_weighted_counterfactual_valid, supplier_removal_snapshot_count,
+				 supplier_removal_observed_duration_ns, supplier_removal_bid_absence_duration_ns,
+				 supplier_removal_ask_absence_duration_ns, supplier_removal_qualified_bid_absence_duration_ns,
+				 supplier_removal_qualified_ask_absence_duration_ns, supplier_removal_bid_absence_active_time_fraction,
+				 supplier_removal_ask_absence_active_time_fraction, supplier_removal_qualified_bid_absence_active_time_fraction,
+				 supplier_removal_qualified_ask_absence_active_time_fraction, supplier_removal_bid_absence_fraction,
 				 supplier_removal_ask_absence_fraction, supplier_removal_qualified_bid_absence_fraction,
 				 supplier_removal_qualified_ask_absence_fraction, supplier_removal_one_sided_snapshots})),
 			 checks: (r($cdf_liquidity).checks // [] | length)},
@@ -966,12 +1022,21 @@ jq -e '(.predicates | keys) == ["activation", "calendar", "conservation", "deriv
 	fail "one or more fail-closed integrity predicates failed"
 
 terminalfailure_tmp=$(mktemp "$analysis_dir/terminalfailure.json.tmp-XXXXXX")
-jq -n --arg contract "$contract_version" --slurpfile outcome "$analysis_dir/terminal-outcome.json" \
-	'{schema_version: 1, result: {contract: $contract, status: "NO_TERMINAL_FAILURE",
-	 terminal_valuation_available: true, terminal_outcome: $outcome[0],
-	 raw_evidence_contract_valid: true, evidence_manifest_verified: true,
-	 external_attestation_verified: true, checkpoint_contract_valid: true,
-	 standard_metrics: "complete", claim_scope: "complete terminal valuation"}}' >"$terminalfailure_tmp"
+if [[ "$extractor_variant" == sv1 && "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
+	jq -n --arg contract "$contract_version" --slurpfile outcome "$analysis_dir/terminal-outcome.json" \
+		'{schema_version: 1, result: {contract: $contract, status: "NO_TERMINAL_FAILURE",
+		 terminal_valuation_available: true, terminal_outcome: $outcome[0],
+		 raw_evidence_contract_valid: true, evidence_manifest_verified: true,
+		 external_attestation_verified: true, checkpoint_contract_valid: true,
+		 standard_metrics: "complete", claim_scope: "complete terminal valuation"}}' >"$terminalfailure_tmp"
+else
+	jq -n --arg contract "$contract_version" \
+		'{schema_version: 1, result: {contract: $contract, status: "NO_TERMINAL_FAILURE",
+		 terminal_valuation_available: true, terminal_outcome: null,
+		 raw_evidence_contract_valid: true, evidence_manifest_verified: true,
+		 external_attestation_verified: true, checkpoint_contract_valid: true,
+		 standard_metrics: "complete", claim_scope: "complete terminal valuation"}}' >"$terminalfailure_tmp"
+fi
 mv "$terminalfailure_tmp" "$analysis_dir/terminalfailure.json"
 require_json_object "$analysis_dir/terminalfailure.json"
 
@@ -999,10 +1064,14 @@ done
 if [[ "$evidence_format" == "evstream_v3" ]]; then
 	runtime_events=$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")
 	runtime_digest=$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")
+	runtime_canonical_digest=$(jq -er '.canonical_execution_stream_hash' "$cell/binary-evidence-attestation.json")
 	jq -e --arg execution_hash "$runtime_digest" --argjson event_frames "$runtime_events" \
 		'.result.domain == "rendered_binary_json_records" and .result.ordering == "venue_sequence_reconstructed" and
 		 .result.source_execution_stream_hash == $execution_hash and .result.source_binary_event_frames == $event_frames' \
 		"$analysis_dir/evidenceartifacthash.json" >/dev/null || fail "rendered binary evidence hash domain mismatch"
+	jq -e --arg canonical_hash "$runtime_canonical_digest" \
+		'.result.source_canonical_execution_stream_hash == $canonical_hash' \
+		"$analysis_dir/evidenceartifacthash.json" >/dev/null || fail "rendered binary canonical hash domain mismatch"
 else
 	runtime_events=$(jq -er '.events' "$cell/evidence-artifact-hash.json")
 	runtime_digest=$(jq -er '.digest' "$cell/evidence-artifact-hash.json")
@@ -1012,8 +1081,17 @@ else
 	jq -e '(.result.domain // "") == "persisted_json_records" and (.result.ordering // "") == "unordered_multiset"' \
 		"$analysis_dir/evidenceartifacthash.json" >/dev/null || fail "offline evidence hash domain mismatch"
 fi
-jq -e '.result.domain == "persisted_evidence" and .result.ordering == "unordered_multiset"' \
-	"$analysis_dir/streamhash.json" >/dev/null || fail "stream hash domain mismatch"
+	if [[ "$terminal_failure" == true ]]; then
+		jq -e '.result.domain == "canonical_binary_execution_frames" and .result.ordering == "ordered_stream" and
+			.result.hashing == "route_sequence_neutral_v1" and
+			(.result.event_frames | type) == "number" and (.result.stream_frames | type) == "number" and
+			(.result.execution_stream_hash | test("^[0-9a-f]{64}$")) and
+			(.result.canonical_execution_stream_hash | test("^[0-9a-f]{64}$"))' \
+			"$analysis_dir/streamhash.json" >/dev/null || fail "terminal stream hash domain mismatch"
+	else
+		jq -e '.result.domain == "persisted_evidence" and .result.ordering == "unordered_multiset"' \
+			"$analysis_dir/streamhash.json" >/dev/null || fail "stream hash domain mismatch"
+	fi
 
 analyzer_revision=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "vcs.revision=") == 1 {sub("vcs.revision=", "", $2); print $2; exit}')
 analyzer_modified=$(go version -m "$analyzer" | awk '$1 == "build" && index($2, "vcs.modified=") == 1 {sub("vcs.modified=", "", $2); print $2; exit}')
@@ -1048,6 +1126,7 @@ jq -n \
 	--argjson artifact_sha256 "$artifact_sha256" \
 	--argjson runtime_evidence_events "$runtime_events" \
 	--arg runtime_evidence_digest "$runtime_digest" \
+	--arg runtime_canonical_digest "$runtime_canonical_digest" \
 	--arg contract "$contract_version" \
 	--arg cell "$cell_name" \
 	--argjson seed "$seed" \
@@ -1082,7 +1161,8 @@ jq -n \
 		integrity_contract: $contract, activation_contract: $contract,
 			completion_sentinels: $completion_sentinels, required_artifacts: $required_artifacts,
 		artifact_sha256: $artifact_sha256,
-		runtime_evidence_artifact: {representation: $evidence_format, event_frames: $runtime_evidence_events, execution_stream_hash: $runtime_evidence_digest},
+		runtime_evidence_artifact: ({representation: $evidence_format, event_frames: $runtime_evidence_events, execution_stream_hash: $runtime_evidence_digest} +
+			(if $runtime_canonical_digest == "" then {} else {canonical_execution_stream_hash: $runtime_canonical_digest} end)),
 		inactive_contracts: ["fundingcarry", "termcarry", "datedcarryp5", "datedmandatep5", "perpreplenishment"],
 		raw_log_policy: "retained; this extractor has no prune authority"}' >"$metadata_tmp"
 mv "$metadata_tmp" "$analysis_dir/analysis-metadata.json"

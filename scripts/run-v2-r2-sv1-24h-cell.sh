@@ -147,6 +147,32 @@ v2_r2_is_go_127 "$prunegate_go_version" || {
 	exit 1
 }
 
+binary_sha256=$(sha256sum "$binary" | awk '{print $1}')
+activation_provenance_sha256=""
+measurement_config_sha256=""
+capacity_measurement_config_path=""
+capacity_attestation_sha256=""
+review_attestation_path=""
+review_attestation_sha256=""
+gomemlimit_bytes=0
+minimum_free_bytes=0
+if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	activation_provenance=$(v2_r2_sv1_activation_provenance_path "$head_revision") || {
+		echo "could not resolve accepted SV1B activation provenance path" >&2
+		exit 1
+	}
+	v2_r2_require_sv1b_activation_provenance "$activation_provenance" "$head_revision" "$binary_sha256" || {
+		echo "refusing registered SV1B cell before accepted activation provenance" >&2
+		exit 1
+	}
+	activation_provenance_sha256=$(sha256sum -- "$activation_provenance" | awk '{print $1}')
+	review_attestation_path=$(jq -er '.review_attestation_path | select(type == "string")' "$activation_provenance") || {
+		echo "activation provenance omits the exact-tree review attestation path" >&2
+		exit 1
+	}
+	review_attestation_sha256=$(sha256sum -- "$review_attestation_path" | awk '{print $1}')
+fi
+
 log_mode=$(jq -er '.log_mode' "$config")
 evidence_format=$(jq -er '.evidence_format' "$config")
 config_sha256=$(sha256sum "$config" | awk '{print $1}')
@@ -159,14 +185,35 @@ capacity_probe_cell=$(v2_r2_capacity_probe_cell_for_config "$config" "$expected_
 	echo "registered cell $cell has no exact production capacity probe identity" >&2
 	exit 1
 }
+if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	capacity_measurement_config_path=$(jq -er '.measurement_config_path | select(type == "string" and length > 0)' "$capacity_attestation") || {
+		echo "capacity attestation omits its measured configuration path" >&2
+		exit 1
+	}
+	[[ "$capacity_measurement_config_path" != /* && "$capacity_measurement_config_path" != */* && "$capacity_measurement_config_path" != *$'\n'* && "$capacity_measurement_config_path" != *$'\t'* ]] || {
+		echo "capacity measurement configuration path is unsafe: $capacity_measurement_config_path" >&2
+		exit 1
+	}
+	capacity_measurement_config="$root_dir/$capacity_measurement_config_path"
+	[[ -s "$capacity_measurement_config" && ! -L "$capacity_measurement_config" ]] || {
+		echo "capacity measurement configuration is not readable: $capacity_measurement_config_path" >&2
+		exit 1
+	}
+	measurement_config_sha256=$(sha256sum -- "$capacity_measurement_config" | awk '{print $1}')
+fi
 [[ "$evidence_format" == "evstream_v3" ]] || {
 	echo "registered successor cell requires evstream_v3 evidence (got $evidence_format)" >&2
 	exit 1
 }
-v2_r2_require_binary_capacity_attestation "$binary" "$sim_revision" "$capacity_attestation" "$config_sha256" "$expected_gomaxprocs" $((4 * 1024 * 1024 * 1024)) true || {
+v2_r2_require_binary_capacity_attestation "$binary" "$sim_revision" "$capacity_attestation" "" "$expected_gomaxprocs" $((4 * 1024 * 1024 * 1024)) true "$config_sha256" "${v2_r2_sv1_capacity_memory_limit_bytes:-}" "$measurement_config_sha256" "$activation_provenance_sha256" || {
 	echo "refusing long-run launch without a matching measured binary-evidence capacity attestation" >&2
 	exit 1
 }
+capacity_attestation_sha256=$(sha256sum -- "$capacity_attestation" | awk '{print $1}')
+if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	gomemlimit_bytes=${v2_r2_sv1_activation_gomemlimit_bytes:-$((v2_r2_sv1_capacity_memory_limit_bytes - 2 * 1024 * 1024 * 1024))}
+	minimum_free_bytes=${v2_r2_sv1_activation_minimum_free_bytes:-$((4 * 1024 * 1024 * 1024))}
+fi
 seed=$(jq -er '.seed' "$config")
 config_hypothesis=$(jq -er '.hypothesis_id' "$config")
 config_experiment=$(jq -er '.experiment_id' "$config")
@@ -178,7 +225,6 @@ cmp -s "$config" "$output/run-config.json" || {
 	echo "registered config is not already the simulator's normalized effective config: $cell" >&2
 	exit 1
 }
-binary_sha256=$(sha256sum "$binary" | awk '{print $1}')
 jq -n \
 	--arg cell "$cell" \
 	--argjson seed "$seed" \
@@ -204,12 +250,17 @@ jq -n \
 	--arg prunegate_trimpath "$prunegate_trimpath" \
 	--arg prunegate_cgo_enabled "$prunegate_cgo_enabled" \
 	--arg prunegate_go_version "$prunegate_go_version" \
-	--argjson gomaxprocs "$GOMAXPROCS" \
+		--argjson gomaxprocs "$GOMAXPROCS" \
+		--argjson memory_limit_bytes "${v2_r2_sv1_capacity_memory_limit_bytes:-0}" \
+		--argjson gomemlimit_bytes "$gomemlimit_bytes" --argjson minimum_free_bytes "$minimum_free_bytes" \
 	--arg output_dir "$output" \
 	--arg evidence_manifest_path "$output/evidence-manifest.json" \
 	--arg external_attestation_path "$v2_r2_attestation_root/$cell.json" \
-	--arg capacity_attestation_path "$capacity_attestation" \
-	--arg capacity_probe_cell "$capacity_probe_cell" \
+		--arg capacity_attestation_path "$capacity_attestation" \
+		--arg capacity_attestation_sha256 "$capacity_attestation_sha256" \
+		--arg capacity_probe_cell "$capacity_probe_cell" \
+		--arg activation_provenance_sha256 "$activation_provenance_sha256" \
+		--arg review_attestation_path "$review_attestation_path" --arg review_attestation_sha256 "$review_attestation_sha256" \
 	--argjson holdout "$holdout" \
 	--arg binary_path "$binary" \
 	--arg config_path "$config" \
@@ -241,9 +292,13 @@ jq -n \
 		  binary_trimpath: ($binary_trimpath == "true"), binary_cgo_enabled: $binary_cgo_enabled,
 		  git_revision: $git_revision, go_version: $go_version, binary_go_version: $binary_go_version,
 		  binary_goos: $binary_goos, binary_goarch: $binary_goarch, binary_goamd64: $binary_goamd64,
-		  gomaxprocs: $gomaxprocs, output_dir: $output_dir,
-		  capacity_attestation_path: $capacity_attestation_path,
-		  capacity_probe_cell: $capacity_probe_cell,
+			  gomaxprocs: $gomaxprocs, memory_limit_bytes: $memory_limit_bytes,
+			  gomemlimit_bytes: $gomemlimit_bytes, minimum_free_bytes: $minimum_free_bytes, output_dir: $output_dir,
+			  capacity_attestation_path: $capacity_attestation_path, capacity_attestation_sha256: $capacity_attestation_sha256,
+			  capacity_probe_cell: $capacity_probe_cell,
+			  activation_provenance_sha256: (if $activation_provenance_sha256 == "" then null else $activation_provenance_sha256 end),
+			  review_attestation_path: (if $review_attestation_path == "" then null else $review_attestation_path end),
+			  review_attestation_sha256: (if $review_attestation_sha256 == "" then null else $review_attestation_sha256 end),
 		  evidence_manifest_path: $evidence_manifest_path,
 		  external_attestation_path: $external_attestation_path,
 		  command: ["multivenue", "-config", "run-config.json", "-duration", $horizon, "-logdir", $output_dir, "-log-mode", $log_mode, "-evidence-format", $evidence_format],
@@ -254,11 +309,100 @@ run_metadata_sha256_before=$(sha256sum "$output/run-metadata.json" | awk '{print
 
 stdout_log="$output_root/$cell.simulator.stdout.log"
 stderr_log="$output_root/$cell.simulator.stderr.log"
+simulator_peak_rss_bytes=0
+simulator_peak_rss_at=""
+simulator_initial_free_bytes=0
+simulator_final_free_bytes=0
+resource_guard_failed=false
+resource_guard_reason=""
+capacity_free_bytes() {
+	local path=$1 df_output available_bytes
+	df_output=$(df -P -B1 -- "$path") || return 1
+	available_bytes=$(awk 'NR == 2 {print $4}' <<<"$df_output")
+	[[ "$available_bytes" =~ ^[0-9]+$ ]] || return 1
+	printf '%s\n' "$available_bytes"
+}
+run_simulator_with_memory_guard() {
+	if [[ "${v2_r2_sv1_candidate_id:-}" != V2-R2-SV1B-* ]]; then
+		"$binary" -config "$output/run-config.json" -duration "$horizon" -logdir "$output" -log-mode "$log_mode" -evidence-format "$evidence_format" \
+			>"$stdout_log" 2>"$stderr_log"
+		return $?
+	fi
+	local memory_limit_bytes=${v2_r2_sv1_capacity_memory_limit_bytes:-0}
+	local gomemlimit_bytes=${v2_r2_sv1_activation_gomemlimit_bytes:-$((memory_limit_bytes - 2 * 1024 * 1024 * 1024))}
+	local minimum_free_bytes=${v2_r2_sv1_activation_minimum_free_bytes:-$((4 * 1024 * 1024 * 1024))}
+	[[ "$memory_limit_bytes" =~ ^[1-9][0-9]*$ && "$gomemlimit_bytes" =~ ^[1-9][0-9]*$ && "$minimum_free_bytes" =~ ^[1-9][0-9]*$ ]] || return 125
+	(( gomemlimit_bytes < memory_limit_bytes )) || return 125
+	command -v prlimit >/dev/null 2>&1 || {
+		resource_guard_failed=true
+		resource_guard_reason="prlimit is unavailable"
+		return 125
+	}
+	if ! simulator_initial_free_bytes=$(capacity_free_bytes "$output"); then
+		resource_guard_failed=true
+		resource_guard_reason="initial free-space measurement failed"
+		return 125
+	fi
+	simulator_final_free_bytes="$simulator_initial_free_bytes"
+	if (( simulator_initial_free_bytes < minimum_free_bytes )); then
+		resource_guard_failed=true
+		resource_guard_reason="initial free space is below the ${minimum_free_bytes}-byte reserve: $simulator_initial_free_bytes"
+		return 125
+	fi
+	env GOMAXPROCS="$GOMAXPROCS" GOMEMLIMIT="${gomemlimit_bytes}B" prlimit --as="$memory_limit_bytes" -- \
+		"$binary" -config "$output/run-config.json" -duration "$horizon" -logdir "$output" -log-mode "$log_mode" -evidence-format "$evidence_format" \
+		>"$stdout_log" 2>"$stderr_log" &
+	local simulator_pid=$! rss_kib rss_bytes
+	while kill -0 "$simulator_pid" 2>/dev/null; do
+		rss_kib=$(awk '$1 == "VmRSS:" {print $2; exit}' "/proc/$simulator_pid/status" 2>/dev/null)
+		if [[ "$rss_kib" =~ ^[0-9]+$ ]]; then
+			rss_bytes=$((rss_kib * 1024))
+			if (( rss_bytes > simulator_peak_rss_bytes )); then
+				simulator_peak_rss_bytes=$rss_bytes
+				simulator_peak_rss_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+			fi
+			if (( rss_bytes > memory_limit_bytes )); then
+				echo "SV1B simulator RSS crossed the ${memory_limit_bytes}-byte safety limit: $rss_bytes" >&2
+				resource_guard_failed=true
+				resource_guard_reason="simulator RSS crossed the ${memory_limit_bytes}-byte safety limit: $rss_bytes"
+				kill -TERM "$simulator_pid" 2>/dev/null || true
+				wait "$simulator_pid" 2>/dev/null || true
+				return 137
+			fi
+		elif [[ -d "/proc/$simulator_pid" ]]; then
+			echo "SV1B simulator RSS could not be measured while it was running" >&2
+			resource_guard_failed=true
+			resource_guard_reason="simulator RSS could not be measured while it was running"
+			kill -TERM "$simulator_pid" 2>/dev/null || true
+			wait "$simulator_pid" 2>/dev/null || true
+			return 125
+		fi
+		if ! simulator_final_free_bytes=$(capacity_free_bytes "$output"); then
+			resource_guard_failed=true
+			resource_guard_reason="free-space measurement failed while the simulator was running"
+			kill -TERM "$simulator_pid" 2>/dev/null || true
+			wait "$simulator_pid" 2>/dev/null || true
+			return 125
+		fi
+		if (( simulator_final_free_bytes < minimum_free_bytes )); then
+			resource_guard_failed=true
+			resource_guard_reason="free space crossed the ${minimum_free_bytes}-byte reserve: $simulator_final_free_bytes"
+			kill -TERM "$simulator_pid" 2>/dev/null || true
+			wait "$simulator_pid" 2>/dev/null || true
+			return 125
+		fi
+		sleep 1
+	done
+	wait "$simulator_pid"
+}
 set +e
-"$binary" -config "$output/run-config.json" -duration "$horizon" -logdir "$output" -log-mode "$log_mode" -evidence-format "$evidence_format" \
-	>"$stdout_log" 2>"$stderr_log"
+run_simulator_with_memory_guard
 status=$?
 set -e
+if [[ "$resource_guard_failed" == true ]]; then
+	echo "SV1B resource guard failed for $cell: $resource_guard_reason" >&2
+	exit 1
+fi
 terminal_failure=false
 if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
 	[[ -s "$output/terminal-outcome.json" ]] || {
@@ -292,21 +436,23 @@ if [[ ! -s "$output/latency.json" ]]; then
 	exit 1
 fi
 if [[ "$terminal_failure" == true ]]; then
-	[[ -s "$output/greeks.json" ]] || {
-		echo "terminal failure is missing its partial report: $output" >&2
-		exit 1
-	}
-	jq -e --slurpfile outcome "$output/terminal-outcome.json" '
+	if [[ "$log_mode" == full || -s "$output/greeks.json" ]]; then
+		[[ -s "$output/greeks.json" ]] || {
+			echo "terminal failure is missing its partial report: $output" >&2
+			exit 1
+		}
+		jq -e --slurpfile outcome "$output/terminal-outcome.json" '
 		type == "object" and .schema_version == 7 and
 		.report_status == "partial_terminal_failure" and .terminal_valuation_available == false and
 		(.initial_accounts | type) == "array" and (.initial_accounts | length) > 0 and
 		((.terminal_accounts // []) | type) == "array" and ((.terminal_accounts // []) | length) == 0 and
 		((.terminal_risk // {}) | type) == "object" and ((.terminal_risk // {}) | length) == 0 and
 		(.terminal_outcome | type) == "object" and .terminal_outcome == $outcome[0]' \
-		"$output/greeks.json" >/dev/null || {
-		echo "partial terminal-failure report is not explicitly valuation-incomplete: $output" >&2
-		exit 1
-	}
+			"$output/greeks.json" >/dev/null || {
+			echo "partial terminal-failure report is not explicitly valuation-incomplete: $output" >&2
+			exit 1
+		}
+	fi
 else
 	if [[ ! -s "$output/greeks.json" ]]; then
 		echo "simulator exited without greeks completion sentinel: $output" >&2
@@ -327,10 +473,12 @@ jq -e 'type == "object" and (.build.revision | type) == "string" and
 	echo "manifest provenance/config identity mismatch: $output" >&2
 	exit 1
 }
-jq -e 'type == "object"' "$output/greeks.json" >/dev/null || {
-	echo "malformed greeks completion sentinel: $output" >&2
-	exit 1
-}
+if [[ -s "$output/greeks.json" ]]; then
+	jq -e 'type == "object"' "$output/greeks.json" >/dev/null || {
+		echo "malformed greeks completion sentinel: $output" >&2
+		exit 1
+	}
+fi
 jq -e 'type == "object"' "$output/latency.json" >/dev/null || {
 	echo "malformed latency completion sentinel: $output" >&2
 	exit 1
@@ -361,6 +509,10 @@ v2_r2_write_evidence_manifest "$output" || {
 }
 status_tmp="$output/run-status.json.tmp-$$"
 if [[ "$terminal_failure" == true ]]; then
+	greeks_sha256=""
+	if [[ -s "$output/greeks.json" ]]; then
+		greeks_sha256=$(sha256sum "$output/greeks.json" | awk '{print $1}')
+	fi
 	jq -n \
 		--argjson exit_status "$status" \
 		--arg cell "$cell" \
@@ -369,11 +521,14 @@ if [[ "$terminal_failure" == true ]]; then
 		--argjson simulation_end_nano "$simulation_end_nano" \
 		--arg run_metadata_sha256 "$run_metadata_sha256_after" \
 		--arg manifest_sha256 "$(sha256sum "$output/manifest.json" | awk '{print $1}')" \
-		--arg greeks_sha256 "$(sha256sum "$output/greeks.json" | awk '{print $1}')" \
+		--arg greeks_sha256 "$greeks_sha256" \
 		--arg latency_sha256 "$(sha256sum "$output/latency.json" | awk '{print $1}')" \
 		--arg checkpoints_sha256 "$(sha256sum "$output/checkpoints.jsonl" | awk '{print $1}')" \
 		--arg evidence_manifest_sha256 "$(sha256sum "$output/evidence-manifest.json" | awk '{print $1}')" \
-		--arg terminal_outcome_sha256 "$(sha256sum "$output/terminal-outcome.json" | awk '{print $1}')" \
+			--arg terminal_outcome_sha256 "$(sha256sum "$output/terminal-outcome.json" | awk '{print $1}')" \
+			--argjson peak_rss_bytes "$simulator_peak_rss_bytes" --arg peak_rss_at "$simulator_peak_rss_at" \
+			--argjson initial_free_bytes "$simulator_initial_free_bytes" --argjson final_free_bytes "$simulator_final_free_bytes" \
+			--argjson resource_guard_failed "$resource_guard_failed" --arg resource_guard_reason "$resource_guard_reason" \
 		--argjson sentinels "$v2_r2_sv1_completion_sentinels" \
 		--arg code "$(jq -er '.code' "$output/terminal-outcome.json")" \
 		--arg stage "$(jq -er '.stage' "$output/terminal-outcome.json")" \
@@ -385,13 +540,17 @@ if [[ "$terminal_failure" == true ]]; then
 		  simulation_start_nano: $simulation_start_nano, simulation_end_nano: $simulation_end_nano,
 		  completion_sentinels: $sentinels,
 		  run_metadata_sha256: $run_metadata_sha256,
-		  manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256,
+		  manifest_sha256: $manifest_sha256,
 		  latency_sha256: $latency_sha256, checkpoints_sha256: $checkpoints_sha256,
 		  evidence_manifest_sha256: $evidence_manifest_sha256,
 		  terminal_outcome_sha256: $terminal_outcome_sha256,
-		  terminal_failure_code: $code, terminal_failure_stage: $stage,
+			  peak_rss_bytes: $peak_rss_bytes, peak_rss_observed_at: $peak_rss_at,
+			  initial_available_free_bytes: $initial_free_bytes, final_available_free_bytes: $final_free_bytes,
+			  resource_guard_failed: $resource_guard_failed, resource_guard_reason: $resource_guard_reason,
+			  terminal_failure_code: $code, terminal_failure_stage: $stage,
 		  terminal_failure_at_nano: $failure_at_nano, terminal_failure_venue_id: $failure_venue_id,
-		  terminal_failure_symbol: $failure_symbol}' >"$status_tmp"
+		  terminal_failure_symbol: $failure_symbol} |
+		  (if $greeks_sha256 == "" then . else . + {greeks_sha256: $greeks_sha256} end)' >"$status_tmp"
 else
 	jq -n \
 		--argjson exit_status "$status" \
@@ -405,16 +564,22 @@ else
 		--arg latency_sha256 "$(sha256sum "$output/latency.json" | awk '{print $1}')" \
 		--arg checkpoints_sha256 "$(sha256sum "$output/checkpoints.jsonl" | awk '{print $1}')" \
 		--arg evidence_manifest_sha256 "$(sha256sum "$output/evidence-manifest.json" | awk '{print $1}')" \
-		--argjson sentinels "$v2_r2_sv1_completion_sentinels" \
+			--argjson sentinels "$v2_r2_sv1_completion_sentinels" \
+			--argjson peak_rss_bytes "$simulator_peak_rss_bytes" --arg peak_rss_at "$simulator_peak_rss_at" \
+			--argjson initial_free_bytes "$simulator_initial_free_bytes" --argjson final_free_bytes "$simulator_final_free_bytes" \
+			--argjson resource_guard_failed "$resource_guard_failed" --arg resource_guard_reason "$resource_guard_reason" \
 		--arg terminal_outcome_sha256 "$(if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then sha256sum "$output/terminal-outcome.json" | awk '{print $1}'; fi)" \
 		'{schema_version: 1, cell: $cell, exit_status: $exit_status,
 		  completion_verified: true, simulated_horizon: $horizon,
 		  simulation_start_nano: $simulation_start_nano, simulation_end_nano: $simulation_end_nano,
 		  completion_sentinels: $sentinels,
 		  run_metadata_sha256: $run_metadata_sha256,
-		  manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256,
-		  latency_sha256: $latency_sha256, checkpoints_sha256: $checkpoints_sha256,
-		  evidence_manifest_sha256: $evidence_manifest_sha256} |
+			  manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256,
+			  latency_sha256: $latency_sha256, checkpoints_sha256: $checkpoints_sha256,
+			  evidence_manifest_sha256: $evidence_manifest_sha256,
+			  peak_rss_bytes: $peak_rss_bytes, peak_rss_observed_at: $peak_rss_at,
+			  initial_available_free_bytes: $initial_free_bytes, final_available_free_bytes: $final_free_bytes,
+			  resource_guard_failed: $resource_guard_failed, resource_guard_reason: $resource_guard_reason} |
 		 (if $terminal_outcome_sha256 == "" then . else . + {terminal_outcome_sha256: $terminal_outcome_sha256} end)' >"$status_tmp"
 fi
 mv "$status_tmp" "$output/run-status.json"
@@ -424,6 +589,9 @@ v2_r2_write_attestation "$output" || {
 }
 if [[ "$terminal_failure" == true ]]; then
 	echo "recorded valid terminal-failure diagnostic for SV1 24-hour cell: $output"
+	# A typed terminal failure is retained as a diagnostic, but it is not a
+	# successful cell for orchestration or freeze progression.
+	exit 1
 else
 	echo "completed SV1 24-hour cell: $output"
 fi

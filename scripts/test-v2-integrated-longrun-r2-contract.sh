@@ -176,10 +176,13 @@ printf '%s\n' 'binary-evidence' >"$capacity_retained_cell/events.evs"
 printf '%s\n' '{}' >"$capacity_retained_cell/venues/a.jsonl"
 v2_r2_write_evidence_manifest "$capacity_retained_cell" || fail "could not create retained capacity manifest fixture"
 retained_manifest_sha256=$(sha256sum "$capacity_retained_cell/evidence-manifest.json" | awk '{print $1}')
-jq --arg probe_root "$(dirname -- "$capacity_retained_cell")" --arg evidence_manifest_sha256 "$retained_manifest_sha256" \
+jq --arg probe_root "$(dirname -- "$capacity_retained_cell")" --arg probe_cell "treatment-607" \
+	--arg measurement_config_path "research/configs/v2-integrated-longrun-r2/dev-607.json" \
+	--arg evidence_manifest_sha256 "$retained_manifest_sha256" \
 	--argjson initial_available_free_bytes 5000000000 --argjson available_free_bytes 5000000000 \
 	--argjson minimum_free_bytes 4294967296 \
-	'.probe_root = $probe_root | .evidence_manifest_sha256 = $evidence_manifest_sha256 |
+	'.probe_root = $probe_root | .probe_cell = $probe_cell | .measurement_config_path = $measurement_config_path |
+	 .evidence_manifest_sha256 = $evidence_manifest_sha256 |
 	 .initial_available_free_bytes = $initial_available_free_bytes |
 	 .available_free_bytes = $available_free_bytes | .minimum_free_bytes = $minimum_free_bytes' \
 	"$capacity_probe_attestation" >"$tmp_root/capacity-attestation-bound.json"

@@ -64,6 +64,9 @@ type renderPersistedEvent struct {
 	Data     renderEventData `json:"data"`
 	Event    string          `json:"event"`
 	SimTS    int64           `json:"sim_ts"`
+	// EventSeq preserves the global evstream ordering in reconstructed JSON.
+	// Evidence-only sidecars predate this field and leave it omitted.
+	EventSeq uint64 `json:"event_seq,omitempty"`
 }
 
 type renderRunContract struct {
@@ -314,8 +317,9 @@ func renderBinaryFrame(reader *evstream.Reader, frame evstream.Frame) (renderRou
 			Sequence: sequence,
 			Payload:  payload,
 		},
-		Event: eventName,
-		SimTS: frame.Header.SimTS,
+		Event:    eventName,
+		SimTS:    frame.Header.SimTS,
+		EventSeq: frame.Header.Seq,
 	})
 	if err != nil {
 		return renderRouteKey{}, renderRecord{}, fmt.Errorf("multivenue: frame %d JSON rendering: %w", frame.Header.Seq, err)

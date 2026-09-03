@@ -107,6 +107,33 @@ audit_go_version=$(v2_r2_binary_go_version "$audit_binary")
 v2_r2_is_go_127 "$binary_go_version" || { echo "multivenue binary is not Go 1.27: $binary_go_version" >&2; exit 1; }
 v2_r2_is_go_127 "$audit_go_version" || { echo "CDF analyzer is not Go 1.27: $audit_go_version" >&2; exit 1; }
 
+review_attestation=$(v2_r2_sv1b_review_attestation_path "$head_revision") || {
+	echo "could not resolve the exact-tree SV1B review attestation path" >&2
+	exit 1
+}
+v2_r2_require_sv1b_review_attestation "$review_attestation" "$head_revision" || {
+	echo "activation probe requires an accepted independent review of the exact candidate tree" >&2
+	exit 1
+}
+review_attestation_sha256=$(sha256sum -- "$review_attestation" | awk '{print $1}')
+activation_gomaxprocs=${v2_r2_sv1_activation_gomaxprocs:-2}
+activation_memory_limit_bytes=${v2_r2_sv1_activation_memory_limit_bytes:-$((20 * 1024 * 1024 * 1024))}
+activation_gomemlimit_bytes=${v2_r2_sv1_activation_gomemlimit_bytes:-$((18 * 1024 * 1024 * 1024))}
+activation_minimum_free_bytes=${v2_r2_sv1_activation_minimum_free_bytes:-$((4 * 1024 * 1024 * 1024))}
+[[ "$activation_gomaxprocs" =~ ^[1-9][0-9]*$ && "$activation_memory_limit_bytes" =~ ^[1-9][0-9]*$ &&
+	"$activation_gomemlimit_bytes" =~ ^[1-9][0-9]*$ && "$activation_minimum_free_bytes" =~ ^[1-9][0-9]*$ ]] || {
+	echo "activation resource policy is not positive and integral" >&2
+	exit 1
+}
+(( activation_gomemlimit_bytes < activation_memory_limit_bytes )) || {
+	echo "activation GOMEMLIMIT must remain below the hard address-space ceiling" >&2
+	exit 1
+}
+command -v prlimit >/dev/null 2>&1 || {
+	echo "activation probe requires prlimit for the hard address-space ceiling" >&2
+	exit 1
+}
+
 v2_r2_acquire_namespace_lock || {
 	echo "could not acquire the R2 evidence namespace lock" >&2
 	exit 1
@@ -136,14 +163,66 @@ esac
 }
 mkdir -p -- "$(dirname -- "$output_root")"
 mkdir -- "$output_root"
+[[ "$(realpath -e -- "$output_root")" == "$(realpath -m -- "$output_root")" ]] || {
+	echo "activation output root canonicalization changed after creation" >&2
+	exit 1
+}
 treatment_dir="$output_root/treatment"
 control_dir="$output_root/control"
+
+activation_free_bytes() {
+	local path=$1 df_output available_bytes
+	df_output=$(df -P -B1 -- "$path") || return 1
+	available_bytes=$(awk 'NR == 2 {print $4}' <<<"$df_output")
+	[[ "$available_bytes" =~ ^[0-9]+$ ]] || return 1
+	printf '%s\n' "$available_bytes"
+}
+
+activation_process_rss_bytes() {
+	local process_id=$1 rss_kib
+	rss_kib=$(awk '$1 == "VmRSS:" {print $2; exit}' "/proc/$process_id/status" 2>/dev/null)
+	[[ "$rss_kib" =~ ^[0-9]+$ ]] || return 1
+	printf '%s\n' "$((rss_kib * 1024))"
+}
+
+simulator_pid=""
+terminate_simulator() {
+	local child_pid=${simulator_pid:-}
+	[[ "$child_pid" =~ ^[1-9][0-9]*$ ]] || return 0
+	if kill -0 "$child_pid" 2>/dev/null; then
+		kill -TERM "$child_pid" 2>/dev/null || true
+		for _ in {1..15}; do
+			kill -0 "$child_pid" 2>/dev/null || break
+			sleep 1
+		done
+		if kill -0 "$child_pid" 2>/dev/null; then
+			kill -KILL "$child_pid" 2>/dev/null || true
+		fi
+	fi
+	wait "$child_pid" 2>/dev/null || true
+	simulator_pid=""
+}
+
+cleanup_simulator() {
+	local exit_status=$?
+	trap - EXIT INT TERM HUP
+	terminate_simulator
+	exit "$exit_status"
+}
+
+trap cleanup_simulator EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 prepare_arm() {
 	local arm=$1 config=$2
 	mkdir -- "$arm"
 	"$binary" -config "$config" -logdir "$arm" -log-mode full -evidence-format evstream_v3 -write-effective-config "$arm/run-config.json"
 	local config_sha binary_sha experiment hypothesis
+	if ! cmp -s -- "$config" "$arm/run-config.json"; then
+		echo "effective activation config differs from registered source config: $config" >&2
+		return 1
+	fi
 	config_sha=$(sha256sum -- "$arm/run-config.json" | awk '{print $1}')
 	binary_sha=$(sha256sum -- "$binary" | awk '{print $1}')
 	experiment=$(jq -er '.experiment_id' "$arm/run-config.json")
@@ -161,9 +240,15 @@ prepare_arm() {
 		--arg hypothesis "$hypothesis" \
 		--arg evidence_format evstream_v3 \
 		--arg log_mode full \
-		--arg binary_path "$binary" \
-		--arg binary_go_version "$binary_go_version" \
-		--arg binary_goos "$binary_goos" --arg binary_goarch "$binary_goarch" --arg binary_goamd64 "$binary_goamd64" \
+			--arg binary_path "$binary" \
+			--arg review_attestation_path "$review_attestation" \
+			--arg review_attestation_sha256 "$review_attestation_sha256" \
+			--arg binary_go_version "$binary_go_version" \
+			--arg binary_goos "$binary_goos" --arg binary_goarch "$binary_goarch" --arg binary_goamd64 "$binary_goamd64" \
+			--argjson gomaxprocs "$activation_gomaxprocs" \
+			--argjson memory_limit_bytes "$activation_memory_limit_bytes" \
+			--argjson gomemlimit_bytes "$activation_gomemlimit_bytes" \
+			--argjson minimum_free_bytes "$activation_minimum_free_bytes" \
 		--argjson venue_ids "$(jq -c '.venue_ids' "$arm/run-config.json")" \
 		--arg contract "$v2_r2_sv1_activation_contract" \
 		'{schema_version: 1, contract: $contract,
@@ -172,8 +257,11 @@ prepare_arm() {
 		 config_sha256: $config_sha256, binary_sha256: $binary_sha256,
 		 git_revision: $git_revision, config_experiment_id: $experiment,
 		 hypothesis_id: $hypothesis, evidence_format: $evidence_format, log_mode: $log_mode,
-		 venue_ids: $venue_ids, binary_path: $binary_path, binary_go_version: $binary_go_version,
-		 binary_goos: $binary_goos, binary_goarch: $binary_goarch, binary_goamd64: $binary_goamd64,
+			 venue_ids: $venue_ids, binary_path: $binary_path, binary_go_version: $binary_go_version,
+			 binary_goos: $binary_goos, binary_goarch: $binary_goarch, binary_goamd64: $binary_goamd64,
+			 review_attestation_path: $review_attestation_path, review_attestation_sha256: $review_attestation_sha256,
+			 gomaxprocs: $gomaxprocs, memory_limit_bytes: $memory_limit_bytes,
+			 gomemlimit_bytes: $gomemlimit_bytes, minimum_free_bytes: $minimum_free_bytes,
 		 command: ["multivenue", "-config", "run-config.json", "-duration", $horizon,
 		           "-logdir", ".", "-log-mode", $log_mode, "-evidence-format", $evidence_format]}' \
 		>"$arm/run-metadata.json"
@@ -185,11 +273,78 @@ run_arm() {
 	metadata_sha_before=$(sha256sum -- "$arm/run-metadata.json" | awk '{print $1}')
 	local stdout_log="$output_root/$(basename "$arm").stdout.log"
 	local stderr_log="$output_root/$(basename "$arm").stderr.log"
-	if "$binary" -config "$arm/run-config.json" -duration "$horizon" -logdir "$arm" -log-mode full -evidence-format evstream_v3 \
-		>"$stdout_log" 2>"$stderr_log"; then
-		status=0
+	simulator_peak_rss_bytes=0
+	simulator_peak_rss_at=""
+	simulator_initial_free_bytes=$(activation_free_bytes "$output_root") || {
+		echo "could not measure activation free space before launching $arm" >&2
+		return 1
+	}
+	simulator_final_free_bytes="$simulator_initial_free_bytes"
+	resource_guard_failed=false
+	resource_guard_reason=""
+	if (( simulator_initial_free_bytes < activation_minimum_free_bytes )); then
+		echo "activation free space is below the ${activation_minimum_free_bytes}-byte reserve before launching $arm" >&2
+		return 1
+	fi
+	env GOMAXPROCS="$activation_gomaxprocs" GOMEMLIMIT="${activation_gomemlimit_bytes}B" prlimit --as="$activation_memory_limit_bytes" -- \
+		"$binary" -config "$arm/run-config.json" -duration "$horizon" -logdir "$arm" -log-mode full -evidence-format evstream_v3 \
+		>"$stdout_log" 2>"$stderr_log" &
+	simulator_pid=$!
+	while kill -0 "$simulator_pid" 2>/dev/null; do
+		if ! current_rss_bytes=$(activation_process_rss_bytes "$simulator_pid"); then
+			resource_guard_failed=true
+			resource_guard_reason="simulator RSS measurement failed while $arm was running"
+			terminate_simulator
+			break
+		fi
+		if (( current_rss_bytes > simulator_peak_rss_bytes )); then
+			simulator_peak_rss_bytes=$current_rss_bytes
+			simulator_peak_rss_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+		fi
+		if (( current_rss_bytes > activation_memory_limit_bytes )); then
+			resource_guard_failed=true
+			resource_guard_reason="simulator RSS crossed the ${activation_memory_limit_bytes}-byte ceiling: $current_rss_bytes"
+			terminate_simulator
+			break
+		fi
+		if ! simulator_final_free_bytes=$(activation_free_bytes "$output_root"); then
+			resource_guard_failed=true
+			resource_guard_reason="activation free-space measurement failed while $arm was running"
+			terminate_simulator
+			break
+		fi
+		if (( simulator_final_free_bytes < activation_minimum_free_bytes )); then
+			resource_guard_failed=true
+			resource_guard_reason="activation free space crossed the ${activation_minimum_free_bytes}-byte reserve: $simulator_final_free_bytes"
+			terminate_simulator
+			break
+		fi
+		sleep 1
+	done
+	if [[ -n "$simulator_pid" ]]; then
+		if wait "$simulator_pid"; then
+			status=0
+		else
+			status=$?
+		fi
+		simulator_pid=""
 	else
-		status=$?
+		status=125
+	fi
+	if ! simulator_final_free_bytes=$(activation_free_bytes "$output_root"); then
+		resource_guard_failed=true
+		resource_guard_reason="final activation free-space measurement failed"
+	else
+		if (( simulator_final_free_bytes < activation_minimum_free_bytes )); then
+			resource_guard_failed=true
+			resource_guard_reason="final activation free space is below the ${activation_minimum_free_bytes}-byte reserve: $simulator_final_free_bytes"
+		fi
+	fi
+	mv -- "$stdout_log" "$arm/simulator.stdout.log"
+	mv -- "$stderr_log" "$arm/simulator.stderr.log"
+	if [[ "$resource_guard_failed" == true ]]; then
+		echo "activation resource guard failed for $arm: $resource_guard_reason" >&2
+		return 1
 	fi
 	[[ -s "$arm/terminal-outcome.json" ]] || {
 		echo "activation arm did not produce a typed terminal outcome: $arm" >&2
@@ -251,16 +406,22 @@ run_arm() {
 		--arg greeks_sha256 "$(sha256sum -- "$arm/greeks.json" | awk '{print $1}')" \
 		--arg latency_sha256 "$(sha256sum -- "$arm/latency.json" | awk '{print $1}')" \
 		--arg checkpoints_sha256 "$(sha256sum -- "$arm/checkpoints.jsonl" | awk '{print $1}')" \
-		--arg binary_attestation_sha256 "$(sha256sum -- "$arm/binary-evidence-attestation.json" | awk '{print $1}')" \
-		--arg evidence_manifest_sha256 "$evidence_manifest_sha256" \
-		'{schema_version: 2, contract: "v2-r2-sv1b-activation-arm-status-v1", arm: $arm,
+			--arg binary_attestation_sha256 "$(sha256sum -- "$arm/binary-evidence-attestation.json" | awk '{print $1}')" \
+			--arg evidence_manifest_sha256 "$evidence_manifest_sha256" \
+			--argjson peak_rss_bytes "$simulator_peak_rss_bytes" --arg peak_rss_at "$simulator_peak_rss_at" \
+			--argjson initial_free_bytes "$simulator_initial_free_bytes" --argjson final_free_bytes "$simulator_final_free_bytes" \
+			--argjson resource_guard_failed "$resource_guard_failed" --arg resource_guard_reason "$resource_guard_reason" \
+			'{schema_version: 2, contract: "v2-r2-sv1b-activation-arm-status-v1", arm: $arm,
 		 exit_status: $exit_status, completion_verified: ($terminal_failure | not),
 		 terminal_failure_verified: $terminal_failure, terminal_outcome_status: $outcome_status,
 		 terminal_outcome_sha256: $terminal_outcome_sha256, run_metadata_sha256: $run_metadata_sha256,
 		 manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256,
 		 latency_sha256: $latency_sha256, checkpoints_sha256: $checkpoints_sha256,
-		 binary_attestation_sha256: $binary_attestation_sha256,
-		 evidence_manifest_sha256: $evidence_manifest_sha256}' >"$run_status_tmp" || return 1
+			  binary_attestation_sha256: $binary_attestation_sha256,
+			  evidence_manifest_sha256: $evidence_manifest_sha256,
+			  peak_rss_bytes: $peak_rss_bytes, peak_rss_observed_at: $peak_rss_at,
+			  initial_available_free_bytes: $initial_free_bytes, final_available_free_bytes: $final_free_bytes,
+			  resource_guard_failed: $resource_guard_failed, resource_guard_reason: $resource_guard_reason}' >"$run_status_tmp" || return 1
 	mv -- "$run_status_tmp" "$arm/run-status.json"
 }
 
@@ -280,6 +441,16 @@ write_pair_provenance() {
 	local treatment_terminal_status_json=null control_terminal_status_json=null
 	local treatment_status_sha256="" control_status_sha256=""
 	local treatment_terminal_outcome_sha256="" control_terminal_outcome_sha256=""
+	local treatment_artifacts='[]' control_artifacts='[]' candidate_tree_sha256
+	local treatment_source_config_path control_source_config_path
+	local treatment_source_config_sha256 control_source_config_sha256
+	candidate_tree_sha256=$(v2_r2_sv1b_git_tree_sha256 "$head_revision") || return 1
+	treatment_source_config_path=$(realpath -e -- "$treatment_config") || return 1
+	control_source_config_path=$(realpath -e -- "$control_config") || return 1
+	treatment_source_config_sha256=$(sha256sum -- "$treatment_source_config_path" | awk '{print $1}')
+	control_source_config_sha256=$(sha256sum -- "$control_source_config_path" | awk '{print $1}')
+	treatment_artifacts=$(v2_r2_sv1b_artifact_records "$treatment_dir" 2>/dev/null || printf '[]\n')
+	control_artifacts=$(v2_r2_sv1b_artifact_records "$control_dir" 2>/dev/null || printf '[]\n')
 	if [[ -s "$treatment_dir/run-status.json" ]]; then
 		treatment_terminal_status_json=$(jq -c '.terminal_outcome_status' "$treatment_dir/run-status.json") || return 1
 		treatment_status_sha256=$(sha256sum -- "$treatment_dir/run-status.json" | awk '{print $1}')
@@ -307,12 +478,25 @@ write_pair_provenance() {
 		--argjson treatment_terminal_status "$treatment_terminal_status_json" \
 		--argjson control_terminal_status "$control_terminal_status_json" \
 		--arg treatment_status_sha256 "$treatment_status_sha256" \
-		--arg control_status_sha256 "$control_status_sha256" \
-		--arg treatment_terminal_outcome_sha256 "$treatment_terminal_outcome_sha256" \
-		--arg control_terminal_outcome_sha256 "$control_terminal_outcome_sha256" \
-		'{schema_version: 2, contract: $contract, candidate_revision: $candidate,
+			--arg control_status_sha256 "$control_status_sha256" \
+			--arg treatment_terminal_outcome_sha256 "$treatment_terminal_outcome_sha256" \
+			--arg control_terminal_outcome_sha256 "$control_terminal_outcome_sha256" \
+			--arg candidate_tree_sha256 "$candidate_tree_sha256" \
+			--arg review_attestation_path "$review_attestation" \
+			--arg review_attestation_sha256 "$review_attestation_sha256" \
+			--arg simulator_binary_path "$binary" --arg analyzer_binary_path "$audit_binary" \
+			--argjson treatment_artifacts "$treatment_artifacts" --argjson control_artifacts "$control_artifacts" \
+			--arg treatment_source_config_path "$treatment_source_config_path" --arg control_source_config_path "$control_source_config_path" \
+			--arg treatment_source_config_sha256 "$treatment_source_config_sha256" --arg control_source_config_sha256 "$control_source_config_sha256" \
+			'{schema_version: 3, contract: $contract, candidate_revision: $candidate,
 		 seed: $seed, simulated_horizon: $horizon, output_root: $output_root,
-		 treatment_dir: $treatment, control_dir: $control,
+			 candidate_tree_sha256: $candidate_tree_sha256,
+			 treatment_dir: $treatment, control_dir: $control,
+			 treatment_source_config_path: $treatment_source_config_path, control_source_config_path: $control_source_config_path,
+			 treatment_source_config_sha256: $treatment_source_config_sha256, control_source_config_sha256: $control_source_config_sha256,
+			 simulator_binary_path: $simulator_binary_path, analyzer_binary_path: $analyzer_binary_path,
+			 review_attestation_path: $review_attestation_path, review_attestation_sha256: $review_attestation_sha256,
+			 comparison_path: ($output_root + "/cdf-liquidity-comparison.json"),
 		 treatment_config_sha256: $treatment_config_sha256, control_config_sha256: $control_config_sha256,
 		 simulator_binary_sha256: $binary_sha256, analyzer_binary_sha256: $analyzer_sha256,
 		 comparison_sha256: (if $comparison_sha256 == "" then null else $comparison_sha256 end),
@@ -322,7 +506,10 @@ write_pair_provenance() {
 		 treatment_run_status_sha256: $treatment_status_sha256,
 		 control_run_status_sha256: $control_status_sha256,
 		 treatment_terminal_outcome_sha256: $treatment_terminal_outcome_sha256,
-		 control_terminal_outcome_sha256: $control_terminal_outcome_sha256,
+			 control_terminal_outcome_sha256: $control_terminal_outcome_sha256,
+			 treatment_artifacts: $treatment_artifacts, control_artifacts: $control_artifacts,
+			 resource_policy: {gomaxprocs: $activation_gomaxprocs, memory_limit_bytes: $activation_memory_limit_bytes,
+			   gomemlimit_bytes: $activation_gomemlimit_bytes, minimum_free_bytes: $activation_minimum_free_bytes},
 		 holdouts_consumed: false,
 		 scope: "development-only mechanism activation; not a 24-hour survival claim"}' \
 		>"$provenance_tmp" || return 1
@@ -356,7 +543,10 @@ if [[ "$treatment_terminal_status" != completed || "$control_terminal_status" !=
 	comparison_sha=$(sha256sum -- "$output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
 	write_pair_provenance "UNAVAILABLE_TERMINAL_FAILURE" false "$comparison_sha"
 	echo "activation probe recorded typed terminal failure; no economic activation verdict: $output_root"
-	exit 0
+	# A typed terminal failure is retained evidence, but it is not a successful
+	# activation probe. Propagate failure so callers cannot promote it by exit
+	# status alone.
+	exit 1
 fi
 
 comparison_tmp="$output_root/cdf-liquidity-comparison.json.tmp-$$"

@@ -71,30 +71,46 @@ if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1B-* ]]; then
 	[[ -s "$preregistration_file" && ! -L "$preregistration_file" ]] || fail "missing SV1B preregistration"
 	preregistration_sha=$(sha256sum "$preregistration_file" | awk '{print $1}')
 	[[ "$preregistration_sha" == "$(jq -er '.preregistration.sha256' "$provenance_manifest")" ]] || fail "SV1B preregistration hash mismatch"
+	capacity_order_path=$(jq -er '.capacity_ordering.path | select(type == "string")' "$provenance_manifest") || fail "SV1B provenance omits capacity-order amendment"
+	[[ "$capacity_order_path" == "research/v2-r2-sv1b-activation-capacity-order-amendment-2026-09-03.md" ]] || fail "SV1B provenance names an unexpected capacity-order amendment"
+	capacity_order_file="$root_dir/$capacity_order_path"
+	[[ -s "$capacity_order_file" && ! -L "$capacity_order_file" ]] || fail "missing capacity-order amendment"
+	capacity_order_sha=$(sha256sum "$capacity_order_file" | awk '{print $1}')
+	[[ "$capacity_order_sha" == "$(jq -er '.capacity_ordering.sha256' "$provenance_manifest")" ]] || fail "capacity-order amendment hash mismatch"
 	capacity_cases='[]'
-	capacity_case_names=(control-643-none.json control-643.json control-647.json control-653.json treatment-643.json treatment-647.json treatment-653.json)
-	for config_name in "${capacity_case_names[@]}"; do
-		capacity_config="$config_dir/$config_name"
-		capacity_seed=$(jq -er '.seed' "$capacity_config") || fail "capacity case config has no seed: $config_name"
-		capacity_attestation_path=$(v2_r2_capacity_attestation_path_for_config "$capacity_config" 4) || fail "capacity case has no G4 attestation identity: $config_name"
-		capacity_probe_cell=$(v2_r2_capacity_probe_cell_for_config "$capacity_config" 4) || fail "capacity case has no G4 probe identity: $config_name"
-		capacity_case=$(jq -cn --arg config_path "${capacity_config#"$root_dir/"}" --arg config_sha256 "$(sha256sum "$capacity_config" | awk '{print $1}')" \
-			--arg attestation_path "$capacity_attestation_path" --arg probe_cell "$capacity_probe_cell" --argjson seed "$capacity_seed" \
-			'{config_path:$config_path,config_sha256:$config_sha256,measurement_seed:$seed,gomaxprocs:4,attestation_path:$attestation_path,probe_cell:$probe_cell}')
+	capacity_case_specs=(
+		"$config_dir/treatment-643.json|4|capacity_only_seed_659_treatment_g4"
+		"$config_dir/control-643.json|4|capacity_only_seed_659_control_g4"
+		"$config_dir/treatment-643.json|8|capacity_only_seed_659_treatment_g8"
+	)
+	for capacity_case_spec in "${capacity_case_specs[@]}"; do
+		IFS='|' read -r capacity_config gomaxprocs capacity_role <<<"$capacity_case_spec"
+		capacity_config_path="${capacity_config#"$root_dir/"}"
+		capacity_measurement_sha=$(sha256sum "$capacity_config" | awk '{print $1}')
+		capacity_attestation_path=$(v2_r2_capacity_attestation_path_for_config "$capacity_config" "$gomaxprocs") || fail "production capacity case has no attestation identity: $capacity_config G$gomaxprocs"
+		capacity_probe_cell=$(v2_r2_capacity_probe_cell_for_config "$capacity_config" "$gomaxprocs") || fail "production capacity case has no probe identity: $capacity_config G$gomaxprocs"
+		capacity_case=$(jq -cn --arg config_path "$capacity_config_path" --arg measurement_config_sha256 "$capacity_measurement_sha" \
+			--arg attestation_path "$capacity_attestation_path" --arg probe_cell "$capacity_probe_cell" --arg role "$capacity_role" --argjson gomaxprocs "$gomaxprocs" \
+			'{config_path:$config_path,measurement_config_sha256:$measurement_config_sha256,measurement_seed:659,source_seed:643,gomaxprocs:$gomaxprocs,attestation_path:$attestation_path,probe_cell:$probe_cell,role:$role}')
 		capacity_cases=$(jq -c --argjson case "$capacity_case" '. + [$case]' <<<"$capacity_cases")
 	done
-	capacity_config="$config_dir/treatment-643.json"
-	capacity_attestation_path=$(v2_r2_capacity_attestation_path_for_config "$capacity_config" 8) || fail "capacity case has no G8 attestation identity"
-	capacity_probe_cell=$(v2_r2_capacity_probe_cell_for_config "$capacity_config" 8) || fail "capacity case has no G8 probe identity"
-	capacity_case=$(jq -cn --arg config_path "${capacity_config#"$root_dir/"}" --arg config_sha256 "$(sha256sum "$capacity_config" | awk '{print $1}')" \
-		--arg attestation_path "$capacity_attestation_path" --arg probe_cell "$capacity_probe_cell" \
-		'{config_path:$config_path,config_sha256:$config_sha256,measurement_seed:643,gomaxprocs:8,attestation_path:$attestation_path,probe_cell:$probe_cell}')
-	capacity_cases=$(jq -c --argjson case "$capacity_case" '. + [$case]' <<<"$capacity_cases")
-	jq -e --arg contract "v2-r2-sv1b-24h-binary-capacity-v2" --argjson cases "$capacity_cases" \
-		'.capacity_calibration.contract == $contract and .capacity_calibration.mode == "exact_registered_production_configs" and
-		 .capacity_calibration.calibration_only == false and .capacity_calibration.minimum_free_bytes == 4294967296 and
-		 .capacity_calibration.safety_margin_bytes == 4294967296 and .capacity_calibration.measurement_cases == $cases' \
-		"$provenance_manifest" >/dev/null || fail "SV1B capacity provenance does not enumerate every exact production workload"
+	launch_config_path="${v2_r2_sv1_capacity_launch_config#"$root_dir/"}"
+	authorized_launch_config_hashes=$(for config_name in "${v2_r2_sv1_capacity_authorized_launch_config_names[@]}"; do
+		sha256sum -- "$config_dir/$config_name" | awk '{print $1}'
+	done | jq -Rsc 'split("\n") | map(select(length > 0))')
+	jq -e --arg contract "$v2_r2_sv1_capacity_attestation_contract" --arg mode "production_capacity_measurement" \
+		--arg measurement_config_path "${v2_r2_sv1_capacity_measurement_config#"$root_dir/"}" --arg launch_config_path "$launch_config_path" \
+		--argjson authorized "$authorized_launch_config_hashes" --argjson cases "$capacity_cases" \
+		'.capacity_calibration.contract == $contract and .capacity_calibration.mode == $mode and
+			 .capacity_calibration.calibration_only == true and .capacity_calibration.minimum_free_bytes == 4294967296 and
+			 .capacity_calibration.safety_margin_bytes == 4294967296 and .capacity_calibration.memory_limit_bytes == 21474836480 and
+			 .capacity_calibration.gomemlimit_bytes == 19327352832 and .capacity_calibration.capacity_only_seed == 659 and
+			 .capacity_calibration.source_config_seed == 643 and
+			 .capacity_calibration.measurement_config_path == $measurement_config_path and
+		 .capacity_calibration.launch_config_path == $launch_config_path and
+		 .capacity_calibration.authorized_launch_config_sha256 == $authorized and
+		 .capacity_calibration.measurement_cases == $cases' "$provenance_manifest" >/dev/null ||
+		fail "SV1B capacity provenance does not bind activation calibration to the registered launch set"
 fi
 source_dir="$root_dir/research/configs/v2-integrated-longrun-r2"
 while IFS=$'\t' read -r relative expected_sha; do

@@ -7,6 +7,11 @@ source "$root_dir/scripts/v2-r2-sv1-24h-contract.sh"
 temp_root=$(mktemp -d)
 trap 'rm -rf -- "$temp_root"' EXIT
 
+rg -F 'cmp -s -- "$config" "$arm/run-config.json"' "$runner" >/dev/null || {
+	echo "activation runner does not enforce byte-identical registered config" >&2
+	exit 1
+}
+
 assert_rejected() {
 	local output_root=$1
 	local stdout_log="$temp_root/runner.stdout" stderr_log="$temp_root/runner.stderr"
@@ -31,47 +36,81 @@ jq -n ' {
 			inventory_responsive_decision_count: 4, cancel_count: 1, withdraw_count: 1,
 			withdrawal_without_replacement_count: 2,
 			max_borrowed: 0, snapshot_count: 1, supplier_volume_share: 0.2, supplier_depth_over_75_share: 0.1,
+			supplier_depth_over_75_active_time_fraction: 0.1,
+			supplier_bid_depth_over_75_active_time_fraction: 0.1,
+			supplier_ask_depth_over_75_active_time_fraction: 0.1,
+			risk_state_decision_count: 2,
+			fresh_risk_state_decision_count: 2,
 			supplier_time_weighted_resting_depth_share: 0.2,
 			supplier_bid_time_weighted_resting_depth_share: 0.2,
 			supplier_ask_time_weighted_resting_depth_share: 0.2,
 			supplier_only_bid_time_weighted_fraction: 0.1,
 			supplier_only_ask_time_weighted_fraction: 0.1,
-			supplier_removal_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
+			supplier_removal_counterfactual_valid: true, supplier_removal_time_weighted_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
+			supplier_removal_observed_duration_ns: 1, supplier_removal_bid_absence_duration_ns: 0, supplier_removal_ask_absence_duration_ns: 0,
+			supplier_removal_qualified_bid_absence_duration_ns: 0, supplier_removal_qualified_ask_absence_duration_ns: 0,
 			supplier_removal_bid_absence_fraction: 0, supplier_removal_ask_absence_fraction: 0,
+			supplier_removal_bid_absence_active_time_fraction: 0, supplier_removal_ask_absence_active_time_fraction: 0,
+			supplier_removal_qualified_bid_absence_active_time_fraction: 0, supplier_removal_qualified_ask_absence_active_time_fraction: 0,
 			venues: [
 				{snapshot_count: 1, supplier_depth_over_75_fraction: 0.1,
+					supplier_depth_over_75_active_time_fraction: 0.1,
+					supplier_bid_depth_over_75_active_time_fraction: 0.1,
+					supplier_ask_depth_over_75_active_time_fraction: 0.1,
 					supplier_bid_depth_over_75_fraction: 0.1, supplier_ask_depth_over_75_fraction: 0.1,
 					supplier_bid_time_weighted_resting_depth_share: 0.2, supplier_ask_time_weighted_resting_depth_share: 0.2,
 					supplier_only_bid_time_weighted_fraction: 0.1, supplier_only_ask_time_weighted_fraction: 0.1,
-					supplier_removal_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
+					supplier_removal_counterfactual_valid: true, supplier_removal_time_weighted_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
+					supplier_removal_observed_duration_ns: 1, supplier_removal_bid_absence_duration_ns: 0, supplier_removal_ask_absence_duration_ns: 0,
+					supplier_removal_qualified_bid_absence_duration_ns: 0, supplier_removal_qualified_ask_absence_duration_ns: 0,
 					supplier_removal_bid_absence_fraction: 0, supplier_removal_ask_absence_fraction: 0},
 				{snapshot_count: 1, supplier_depth_over_75_fraction: 0.1,
+					supplier_depth_over_75_active_time_fraction: 0.1,
+					supplier_bid_depth_over_75_active_time_fraction: 0.1,
+					supplier_ask_depth_over_75_active_time_fraction: 0.1,
 					supplier_bid_depth_over_75_fraction: 0.1, supplier_ask_depth_over_75_fraction: 0.1,
 					supplier_bid_time_weighted_resting_depth_share: 0.2, supplier_ask_time_weighted_resting_depth_share: 0.2,
 					supplier_only_bid_time_weighted_fraction: 0.1, supplier_only_ask_time_weighted_fraction: 0.1,
-					supplier_removal_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
+					supplier_removal_counterfactual_valid: true, supplier_removal_time_weighted_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
+					supplier_removal_observed_duration_ns: 1, supplier_removal_bid_absence_duration_ns: 0, supplier_removal_ask_absence_duration_ns: 0,
+					supplier_removal_qualified_bid_absence_duration_ns: 0, supplier_removal_qualified_ask_absence_duration_ns: 0,
 					supplier_removal_bid_absence_fraction: 0, supplier_removal_ask_absence_fraction: 0},
 				{snapshot_count: 1, supplier_depth_over_75_fraction: 0.1,
+					supplier_depth_over_75_active_time_fraction: 0.1,
+					supplier_bid_depth_over_75_active_time_fraction: 0.1,
+					supplier_ask_depth_over_75_active_time_fraction: 0.1,
 					supplier_bid_depth_over_75_fraction: 0.1, supplier_ask_depth_over_75_fraction: 0.1,
 					supplier_bid_time_weighted_resting_depth_share: 0.2, supplier_ask_time_weighted_resting_depth_share: 0.2,
 					supplier_only_bid_time_weighted_fraction: 0.1, supplier_only_ask_time_weighted_fraction: 0.1,
-					supplier_removal_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
+					supplier_removal_counterfactual_valid: true, supplier_removal_time_weighted_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
+					supplier_removal_observed_duration_ns: 1, supplier_removal_bid_absence_duration_ns: 0, supplier_removal_ask_absence_duration_ns: 0,
+					supplier_removal_qualified_bid_absence_duration_ns: 0, supplier_removal_qualified_ask_absence_duration_ns: 0,
 					supplier_removal_bid_absence_fraction: 0, supplier_removal_ask_absence_fraction: 0}
 			],
 			suppliers: [
 				{valid: true, evidence_valid: true, activation_satisfied: true, anti_cheating_satisfied: true,
 				 fill_caused_risk_transition: true, trading_pnl: 1, fill_count: 1, pnl: 1, min_position: 0, max_position: 1,
-				 inventory_responsive_decision_count: 2, max_observation_age_ns: 1,
+					inventory_responsive_decision_count: 2, max_observation_age_ns: 1,
+					 configured_max_loss_quote: 10, risk_state_decision_count: 1, fresh_risk_state_decision_count: 1,
 				 max_borrowed: 0, borrow_event_count: 0, max_position: 1,
 				 configured_max_position: 2, max_quote_qty: 1, configured_max_quote_qty: 2},
 				{valid: true, evidence_valid: true, activation_satisfied: true, anti_cheating_satisfied: true,
 				 fill_caused_risk_transition: true, trading_pnl: -1, fill_count: 1, pnl: -1, min_position: -1, max_position: 0,
-				 inventory_responsive_decision_count: 2, max_observation_age_ns: 1,
+					inventory_responsive_decision_count: 2, max_observation_age_ns: 1,
+					 configured_max_loss_quote: 10, risk_state_decision_count: 1, fresh_risk_state_decision_count: 1,
 				 max_borrowed: 0, borrow_event_count: 0, max_position: 1,
 				 configured_max_position: 2, max_quote_qty: 1, configured_max_quote_qty: 2}
 			]
 		}
 	}' >"$cdf_audit_fixture"
+jq '
+	.result.venues |= map(. + {
+		supplier_removal_bid_absence_active_time_fraction: 0,
+		supplier_removal_ask_absence_active_time_fraction: 0,
+		supplier_removal_qualified_bid_absence_active_time_fraction: 0,
+		supplier_removal_qualified_ask_absence_active_time_fraction: 0
+	})' "$cdf_audit_fixture" >"$temp_root/cdfliquidity-with-time-weighted-removal.json"
+mv -- "$temp_root/cdfliquidity-with-time-weighted-removal.json" "$cdf_audit_fixture"
 v2_r2_require_cdf_supplier_activation "$cdf_audit_fixture" 2 || {
 	echo "valid CDF activity without borrowing was rejected" >&2
 	exit 1
@@ -123,6 +162,11 @@ v2_r2_require_cdf_supplier_activation "$cdf_audit_fixture" 2 || {
 	echo "SV1B activity with a qualified withdrawal was rejected" >&2
 	exit 1
 }
+if jq '.result.suppliers |= map(del(.configured_max_loss_quote, .risk_state_decision_count))' "$cdf_audit_fixture" >"$temp_root/missing-loss-budget.json" &&
+	v2_r2_require_cdf_supplier_activation "$temp_root/missing-loss-budget.json" 2; then
+	echo "SV1B activity without a positive loss budget was accepted" >&2
+	exit 1
+fi
 if jq '.result.supplier_removal_counterfactual_valid = false' "$cdf_audit_fixture" >"$temp_root/missing-removal-diagnostic.json" &&
 	v2_r2_require_cdf_supplier_activation "$temp_root/missing-removal-diagnostic.json" 2; then
 	echo "SV1B activity without a valid supplier-removal diagnostic was accepted" >&2
@@ -195,7 +239,7 @@ if jq '.treatment.pnl_changing_supplier_count = 0' "$temp_root/comparison-cdfliq
 	echo "top-level comparison accepted non-PnL treatment activity" >&2
 	exit 1
 fi
-if jq '.treatment.venues[0].supplier_bid_depth_over_75_fraction = 1' "$temp_root/comparison-cdfliquidity.json" >"$temp_root/comparison-one-venue-dominance.json" &&
+if jq '.treatment.venues[0].supplier_bid_depth_over_75_active_time_fraction = 1' "$temp_root/comparison-cdfliquidity.json" >"$temp_root/comparison-one-venue-dominance.json" &&
 	v2_r2_require_cdf_supplier_comparison "$temp_root/comparison-one-venue-dominance.json" 2; then
 	echo "comparison accepted one-venue supplier dominance hidden by aggregate metrics" >&2
 	exit 1

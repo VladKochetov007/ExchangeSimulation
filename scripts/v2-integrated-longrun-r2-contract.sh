@@ -212,6 +212,9 @@ v2_r2_require_binary_capacity_attestation() {
 	# source/binary capacity contract.
 	local expected_config_sha256=${4:-} expected_gomaxprocs=${5:-} expected_minimum_free_bytes=${6:-}
 	local expected_launch_config_sha256=${8:-}
+	local expected_memory_limit_bytes=${9:-}
+	local expected_measurement_config_sha256=${10:-}
+	local expected_activation_provenance_sha256=${11:-}
 	local require_live_free_capacity=${7:-true}
 	local expected_binary_sha available_kb required_bytes peak_bytes safety_bytes capacity_contract
 	capacity_contract=${v2_r2_sv1_capacity_attestation_contract:-v2-integrated-longrun-r2-binary-capacity-v1}
@@ -228,9 +231,14 @@ v2_r2_require_binary_capacity_attestation() {
 			 .measurement == "full_24h_binary_evidence_capacity_probe" and
 			 .evidence_format == "evstream_v3" and .source_revision == $source_revision and
 			 .binary_sha256 == $binary_sha256 and
-			 (.peak_output_bytes | type) == "number" and (.safety_margin_bytes | type) == "number" and
-			 (.required_free_bytes | type) == "number" and .required_free_bytes == (.peak_output_bytes + .safety_margin_bytes)' \
-		"$attestation" >/dev/null || return 1
+				 (.peak_output_bytes | type) == "number" and (.safety_margin_bytes | type) == "number" and
+				 (.required_free_bytes | type) == "number" and .required_free_bytes == (.peak_output_bytes + .safety_margin_bytes)' \
+			"$attestation" >/dev/null || return 1
+	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+		jq -e --argjson capacity_seed "${v2_r2_sv1_capacity_measurement_seed:-0}" \
+			'.capacity_only == true and .measurement_seed == $capacity_seed and .source_config_seed == 643 and
+			 .measurement_seed != .source_config_seed' "$attestation" >/dev/null || return 1
+	fi
 	if [[ -n "$expected_config_sha256" || -n "$expected_launch_config_sha256" ]]; then
 		[[ "$require_live_free_capacity" == true || "$require_live_free_capacity" == false ]] || return 1
 		[[ "$expected_gomaxprocs" =~ ^[0-9]+$ && "$expected_minimum_free_bytes" =~ ^[0-9]+$ ]] || return 1
@@ -238,26 +246,80 @@ v2_r2_require_binary_capacity_attestation() {
 			[[ "$expected_launch_config_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
 			[[ -z "$expected_config_sha256" || "$expected_config_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
 		fi
-		jq -e --arg config_sha256 "$expected_config_sha256" --arg launch_config_sha256 "$expected_launch_config_sha256" --argjson gomaxprocs "$expected_gomaxprocs" \
-			--argjson minimum_free_bytes "$expected_minimum_free_bytes" \
+		if [[ -n "$expected_memory_limit_bytes" ]]; then
+			[[ "$expected_memory_limit_bytes" =~ ^[1-9][0-9]*$ ]] || return 1
+		fi
+		if [[ -n "$expected_measurement_config_sha256" ]]; then
+			[[ "$expected_measurement_config_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+		fi
+		if [[ -n "$expected_activation_provenance_sha256" ]]; then
+			[[ "$expected_activation_provenance_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+		fi
+		jq -e --arg config_sha256 "$expected_config_sha256" --arg launch_config_sha256 "$expected_launch_config_sha256" \
+			--arg measurement_config_sha256 "$expected_measurement_config_sha256" \
+			--arg activation_provenance_sha256 "$expected_activation_provenance_sha256" --argjson gomaxprocs "$expected_gomaxprocs" \
+			--argjson minimum_free_bytes "$expected_minimum_free_bytes" --arg memory_limit_bytes "$expected_memory_limit_bytes" \
 			'($config_sha256 == "" or .config_sha256 == $config_sha256) and
-			 ($launch_config_sha256 == "" or
-				(.launch_config_sha256 == $launch_config_sha256 and .calibration_only == true and
-				 (.measurement_config_path | type) == "string" and (.launch_config_path | type) == "string")) and
+				($measurement_config_sha256 == "" or
+					((.measurement_config_sha256 | type) == "string" and
+					 (.measurement_config_sha256 | test("^[0-9a-f]{64}$")) and
+					 .measurement_config_sha256 == $measurement_config_sha256)) and
+				($activation_provenance_sha256 == "" or
+					((.activation_provenance_sha256 | type) == "string" and
+					 (.activation_provenance_sha256 | test("^[0-9a-f]{64}$")) and
+					 .activation_provenance_sha256 == $activation_provenance_sha256)) and
+				($launch_config_sha256 == "" or
+				(.calibration_only == true and
+					(.launch_config_sha256 | type) == "string" and
+					(.primary_launch_config_sha256 | type) == "string" and
+					.primary_launch_config_sha256 == .launch_config_sha256 and
+					(.authorized_launch_config_sha256 | type) == "array" and
+					all(.authorized_launch_config_sha256[]; type == "string" and test("^[0-9a-f]{64}$")) and
+					(.authorized_launch_config_sha256 | index($launch_config_sha256)) != null and
+					(.measurement_config_path | type) == "string" and (.launch_config_path | type) == "string")) and
 			 .gomaxprocs == $gomaxprocs and .minimum_free_bytes == $minimum_free_bytes and
+				(if $memory_limit_bytes == "" then true else
+					((.memory_limit_bytes | type) == "number" and .memory_limit_bytes == ($memory_limit_bytes | tonumber) and
+					 (.gomemlimit_bytes | type) == "number" and .gomemlimit_bytes == (.memory_limit_bytes - 2147483648) and
+					 .gomemlimit_bytes > 0 and
+					 (.peak_rss_bytes | type) == "number" and .peak_rss_bytes > 0 and .peak_rss_bytes <= .memory_limit_bytes)
+			 end) and
 			 (.initial_available_free_bytes | type) == "number" and .initial_available_free_bytes >= $minimum_free_bytes and
 			 (.available_free_bytes | type) == "number" and .available_free_bytes >= $minimum_free_bytes and
 			 .available_free_bytes >= (.peak_output_bytes + .safety_margin_bytes) and
 			 (.evidence_manifest_sha256 | type) == "string" and (.evidence_manifest_sha256 | test("^[0-9a-f]{64}$"))' \
 			"$attestation" >/dev/null || return 1
-		local probe_root probe_cell actual_manifest_sha256 measurement_config_path measured_log_mode
+		local probe_root probe_cell probe_cell_name actual_manifest_sha256 measurement_config_path measured_log_mode
+		local launch_config_path measurement_config_abs launch_config_abs actual_measurement_config_sha256 actual_launch_config_sha256
+		local measured_seed measured_start_nano measured_end_nano measured_config_sha256
 		probe_root=$(jq -er '.probe_root | select(type == "string")' "$attestation") || return 1
 		[[ "$probe_root" == /* && "$probe_root" != */ && "$probe_root" != *$'\n'* && "$probe_root" != *$'\t'* ]] || return 1
 		[[ -d "$probe_root" && ! -L "$probe_root" ]] || return 1
 		[[ "$(realpath -e -- "$probe_root")" == "$probe_root" ]] || return 1
 		measurement_config_path=$(jq -er '.measurement_config_path | select(type == "string" and length > 0)' "$attestation") || return 1
-		probe_cell=$(v2_r2_capacity_probe_cell_for_config "$measurement_config_path" "$expected_gomaxprocs") || return 1
+		probe_cell_name=$(v2_r2_capacity_probe_cell_for_config "$measurement_config_path" "$expected_gomaxprocs") || return 1
+		[[ "$probe_cell_name" != /* && "$probe_cell_name" != */* && "$probe_cell_name" != *$'\n'* && "$probe_cell_name" != *$'\t'* ]] || return 1
+		[[ "$(jq -er '.probe_cell | select(type == "string")' "$attestation")" == "$probe_cell_name" ]] || return 1
+		probe_cell="$probe_root/$probe_cell_name"
 		[[ -d "$probe_cell" && ! -L "$probe_cell" ]] || return 1
+		[[ "$(realpath -e -- "$probe_cell")" == "$probe_cell" ]] || return 1
+		if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+			[[ "$measurement_config_path" != /* && "$measurement_config_path" != */ && "$measurement_config_path" != *$'\n'* && "$measurement_config_path" != *$'\t'* ]] || return 1
+			measurement_config_abs="$root_dir/$measurement_config_path"
+			[[ -f "$measurement_config_abs" && ! -L "$measurement_config_abs" ]] || return 1
+			[[ "$(realpath -e -- "$measurement_config_abs")" == "$measurement_config_abs" ]] || return 1
+			actual_measurement_config_sha256=$(sha256sum -- "$measurement_config_abs" | awk '{print $1}') || return 1
+			[[ "$actual_measurement_config_sha256" == "$(jq -er '.measurement_config_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$attestation")" ]] || return 1
+			launch_config_path=$(jq -er '.launch_config_path | select(type == "string" and length > 0)' "$attestation") || return 1
+			[[ "$launch_config_path" != /* && "$launch_config_path" != */ && "$launch_config_path" != *$'\n'* && "$launch_config_path" != *$'\t'* ]] || return 1
+			v2_r2_capacity_attestation_path_for_config "$launch_config_path" "$expected_gomaxprocs" >/dev/null || return 1
+			launch_config_abs="$root_dir/$launch_config_path"
+			[[ -f "$launch_config_abs" && ! -L "$launch_config_abs" ]] || return 1
+			[[ "$(realpath -e -- "$launch_config_abs")" == "$launch_config_abs" ]] || return 1
+			actual_launch_config_sha256=$(sha256sum -- "$launch_config_abs" | awk '{print $1}') || return 1
+			[[ "$actual_launch_config_sha256" == "$(jq -er '.launch_config_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$attestation")" ]] || return 1
+			[[ "$(jq -er '.primary_launch_config_sha256' "$attestation")" == "$actual_launch_config_sha256" ]] || return 1
+		fi
 		measured_log_mode=$(jq -er '.log_mode | select(. == "full" or . == "none")' "$probe_cell/run-config.json") || return 1
 		local retained_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl \
 			events.evs binary-evidence-attestation.json evidence-manifest.json)
@@ -272,6 +334,32 @@ v2_r2_require_binary_capacity_attestation() {
 		for retained in "${retained_files[@]}"; do
 			[[ -s "$probe_cell/$retained" && ! -L "$probe_cell/$retained" ]] || return 1
 		done
+		if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+			measured_seed=$(jq -er '.measurement_seed | select(type == "number")' "$attestation") || return 1
+			measured_start_nano=$(jq -er '.simulation_start_nano | select(type == "number")' "$attestation") || return 1
+			measured_end_nano=$(jq -er '.simulation_end_nano | select(type == "number")' "$attestation") || return 1
+			measured_config_sha256=$(sha256sum -- "$probe_cell/run-config.json" | awk '{print $1}') || return 1
+			[[ "$measured_config_sha256" == "$(jq -er '.config_sha256' "$attestation")" ]] || return 1
+			jq -e --argjson seed "$measured_seed" --arg log_mode "$measured_log_mode" \
+				'.seed == $seed and .log_mode == $log_mode and .evidence_format == "evstream_v3"' \
+				"$probe_cell/run-config.json" >/dev/null || return 1
+			jq -e --arg revision "$source_revision" --argjson seed "$measured_seed" --arg log_mode "$measured_log_mode" \
+				'.schema_version >= 2 and .build.revision == $revision and .build.modified == false and
+				 .config.seed == $seed and .config.log_mode == $log_mode and .config.evidence_format == "evstream_v3"' \
+				"$probe_cell/manifest.json" >/dev/null || return 1
+			jq -e --argjson start "$measured_start_nano" --argjson end "$measured_end_nano" \
+				'.schema_version == 7 and .report_status == "complete_terminal_valuation" and
+				 .terminal_valuation_available == true and
+				 (.initial_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $start)) and
+				 (.terminal_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $end))' \
+				"$probe_cell/greeks.json" >/dev/null || return 1
+			if [[ "${v2_r2_sv1_require_terminal_outcome:-false}" == true ]]; then
+				jq -e --argjson start "$measured_start_nano" --argjson end "$measured_end_nano" \
+					-f "$root_dir/scripts/v2-r2-sv1-terminal-outcome.jq" "$probe_cell/terminal-outcome.json" >/dev/null || return 1
+				[[ "$(jq -er '.status' "$probe_cell/terminal-outcome.json")" == completed ]] || return 1
+			fi
+			v2_r2_require_checkpoint_stream "$probe_cell/checkpoints.jsonl" "$measured_start_nano" "$measured_end_nano" || return 1
+		fi
 		actual_manifest_sha256=$(sha256sum -- "$probe_cell/evidence-manifest.json" | awk '{print $1}') || return 1
 		[[ "$actual_manifest_sha256" == "$(jq -er '.evidence_manifest_sha256' "$attestation")" ]] || return 1
 		v2_r2_verify_evidence_manifest "$probe_cell" || return 1
@@ -560,7 +648,11 @@ v2_r2_verify_evidence_manifest() {
 			;;
 		evstream_v3:none)
 			if [[ "$terminal_required" == true ]]; then
-				expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json terminal-outcome.json | sort)
+				if [[ "$terminal_failure" == true ]]; then
+					expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json terminal-outcome.json | sort)
+				else
+					expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json terminal-outcome.json | sort)
+				fi
 			else
 				expected_fixed=$(printf '%s\n' run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json | sort)
 			fi

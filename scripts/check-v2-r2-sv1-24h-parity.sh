@@ -91,9 +91,16 @@ cmp -s "$v2_r2_sv1_config_dir/control-$parity_seed-none.json" "$control_none_cel
 
 validate_cell() {
 	local cell=$1 expected_name=$2 expected_seed=$3 expected_log_mode=$4 expected_gomaxprocs=$5 expected_hypothesis=$6
-	for file in run-config.json run-metadata.json run-status.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json evidence-manifest.json; do
+	for file in run-config.json run-metadata.json run-status.json manifest.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json evidence-manifest.json; do
 		require_file "$cell/$file"
 	done
+	if [[ "$v2_r2_sv1_require_terminal_outcome" == true ]]; then
+		require_file "$cell/terminal-outcome.json"
+	fi
+	# Successful parity cells must be fully valued. Keeping this explicit makes
+	# a future terminal-failure/no-log contract distinguishable from a complete
+	# no-log control rather than silently accepting an incomplete report.
+	require_file "$cell/greeks.json"
 	v2_r2_verify_evidence_manifest "$cell" || fail "evidence manifest mismatch: $(basename "$cell")"
 	v2_r2_verify_attestation "$cell" || fail "external attestation mismatch: $(basename "$cell")"
 	jq -e --arg cell "$expected_name" --argjson seed "$expected_seed" --arg log_mode "$expected_log_mode" \
@@ -106,9 +113,9 @@ validate_cell() {
 		 (.binary_sha256 | test("^[0-9a-f]{64}$")) and (.config_sha256 | test("^[0-9a-f]{64}$")) and
 		 (.prunegate_sha256 | test("^[0-9a-f]{64}$"))' "$cell/run-metadata.json" >/dev/null ||
 		fail "invalid run metadata: $(basename "$cell")"
-	jq -e --arg name "$expected_name" \
+		jq -e --arg name "$expected_name" --argjson completion_sentinels "$v2_r2_sv1_completion_sentinels" \
 		'.exit_status == 0 and .completion_verified == true and .cell == $name and
-		 .simulated_horizon == "24h" and .completion_sentinels == ["greeks.json", "latency.json"] and
+			 .simulated_horizon == "24h" and .completion_sentinels == $completion_sentinels and
 		 (.run_metadata_sha256 | test("^[0-9a-f]{64}$")) and (.evidence_manifest_sha256 | test("^[0-9a-f]{64}$"))' \
 		"$cell/run-status.json" >/dev/null || fail "invalid run status: $(basename "$cell")"
 	jq -e --arg revision "$head_revision" --argjson seed "$expected_seed" --arg log_mode "$expected_log_mode" \

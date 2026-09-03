@@ -18,8 +18,15 @@ scientific_root=$(realpath -e -- "$root_dir")
 
 binary=${1:-"$root_dir/bin/multivenue"}
 primary_seed="${v2_r2_sv1_seeds[0]}"
-config="${v2_r2_sv1_capacity_measurement_config:-$v2_r2_sv1_config_dir/treatment-$primary_seed.json}"
-launch_config="${v2_r2_sv1_capacity_launch_config:-$config}"
+config="${V2_R2_SV1_CAPACITY_CONFIG:-${v2_r2_sv1_capacity_measurement_config:-$v2_r2_sv1_config_dir/treatment-$primary_seed.json}}"
+launch_config="${V2_R2_SV1_CAPACITY_LAUNCH_CONFIG:-${v2_r2_sv1_capacity_launch_config:-$config}}"
+if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* && -z "${V2_R2_SV1_CAPACITY_LAUNCH_CONFIG:-}" ]]; then
+	case "$(basename -- "$config")" in
+		control-*) launch_config="$v2_r2_sv1_config_dir/control-643.json" ;;
+		treatment-*) launch_config="$v2_r2_sv1_config_dir/treatment-643.json" ;;
+		*) : ;;
+	esac
+fi
 configured_measurement_seed="${v2_r2_sv1_capacity_measurement_seed:-$primary_seed}"
 probe_root_requested=${V2_R2_SV1_CAPACITY_ROOT:-"/home/vlad/external-scratch/${v2_r2_sv1_capacity_probe_prefix}-$head_revision"}
 horizon=24h
@@ -28,11 +35,21 @@ simulation_end_nano=1735776000000000000
 safety_margin_bytes=$((4 * 1024 * 1024 * 1024))
 minimum_free_bytes=$((4 * 1024 * 1024 * 1024))
 expected_gomaxprocs=${V2_R2_SV1_CAPACITY_GOMAXPROCS:-${GOMAXPROCS:-4}}
+memory_limit_bytes=${v2_r2_sv1_capacity_memory_limit_bytes:-0}
+gomemlimit_bytes=0
+memory_validation_arg=""
 
 fail() {
 	echo "SV1 capacity probe failure: $*" >&2
 	exit 1
 }
+
+if [[ "$memory_limit_bytes" =~ ^[1-9][0-9]*$ ]]; then
+	gomemlimit_bytes=$((memory_limit_bytes - 2 * 1024 * 1024 * 1024))
+	(( gomemlimit_bytes > 0 )) || fail "configured capacity memory limit leaves no Go heap reserve"
+	memory_validation_arg="$memory_limit_bytes"
+	command -v prlimit >/dev/null 2>&1 || fail "SV1B capacity probe requires prlimit for the hard address-space ceiling"
+fi
 
 capacity_free_bytes() {
 	local path=$1 df_output available_bytes
@@ -48,6 +65,14 @@ capacity_directory_bytes() {
 	output_bytes=$(awk 'NR == 1 {print $1}' <<<"$du_output")
 	[[ "$output_bytes" =~ ^[0-9]+$ ]] || return 1
 	printf '%s\n' "$output_bytes"
+}
+
+capacity_process_rss_bytes() {
+	local process_id=$1 rss_kib
+	[[ "$process_id" =~ ^[1-9][0-9]*$ ]] || return 1
+	rss_kib=$(awk '$1 == "VmRSS:" {print $2; exit}' "/proc/$process_id/status" 2>/dev/null)
+	[[ "$rss_kib" =~ ^[0-9]+$ ]] || return 1
+	printf '%s\n' "$((rss_kib * 1024))"
 }
 
 simulator_pid=""
@@ -82,12 +107,18 @@ v2_r2_acquire_namespace_lock || fail "could not acquire the SV1 capacity namespa
 
 [[ -x "$binary" && -s "$config" && -s "$launch_config" ]] || fail "missing binary or capacity configuration"
 if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
-	[[ "$(realpath -m -- "$config")" == "$(realpath -m -- "$launch_config")" ]] ||
-		fail "SV1B capacity measurement and launch configurations must be the same registered production config"
+	[[ "$(realpath -e -- "$config")" == "$v2_r2_sv1_config_dir/$(basename -- "$config")" ]] ||
+		fail "SV1B capacity measurement must use a registered production configuration"
+	[[ "$(realpath -e -- "$launch_config")" == "$(realpath -e -- "$config")" ]] ||
+		fail "SV1B capacity launch binding must equal the measured production configuration"
+	[[ "$memory_limit_bytes" =~ ^[1-9][0-9]*$ ]] || fail "SV1B capacity probe has no positive RSS safety limit"
 fi
 [[ -z "$(git -C "$root_dir" status --porcelain --untracked-files=all)" ]] || fail "scientific worktree is dirty"
 [[ "${GOMAXPROCS:-}" == "$expected_gomaxprocs" ]] || fail "capacity probe requires GOMAXPROCS=$expected_gomaxprocs"
 [[ "$expected_gomaxprocs" =~ ^[1-9][0-9]*$ ]] || fail "capacity probe process width is not integral"
+if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	[[ "$expected_gomaxprocs" == 4 || "$expected_gomaxprocs" == 8 ]] || fail "SV1B capacity probe width must be 4 or 8"
+fi
 [[ "$probe_root_requested" == /* && "$probe_root_requested" != */ && "$probe_root_requested" != *$'\n'* && "$probe_root_requested" != *$'\t'* ]] || fail "capacity root must be an absolute, non-empty path"
 probe_root=$(realpath -m -- "$probe_root_requested") || fail "could not resolve capacity probe root"
 case "$probe_root" in
@@ -116,11 +147,30 @@ done
 initial_available_free_bytes=$(capacity_free_bytes "$capacity_mount_path") || fail "could not measure initial free space"
 (( initial_available_free_bytes >= minimum_free_bytes )) ||
 	fail "initial free space is below the ${minimum_free_bytes}-byte reserve: $initial_available_free_bytes"
-log_mode=$(jq -er '.log_mode | select(. == "full" or . == "none")' "$config") || fail "registered capacity config has no supported log mode"
-evidence_format=$(jq -er '.evidence_format' "$config") || fail "registered capacity config has no evidence format"
+if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	log_mode=full
+	evidence_format=evstream_v3
+else
+	log_mode=$(jq -er '.log_mode | select(. == "full" or . == "none")' "$config") || fail "registered capacity config has no supported log mode"
+	evidence_format=$(jq -er '.evidence_format' "$config") || fail "registered capacity config has no evidence format"
+fi
 [[ "$evidence_format" == evstream_v3 ]] || fail "capacity probe requires evstream_v3"
-measurement_seed=$(jq -er '.seed' "$config") || fail "registered capacity config has no seed"
-[[ "$measurement_seed" == "$configured_measurement_seed" ]] || fail "capacity measurement seed does not match the registered configuration"
+source_config_seed=$(jq -er '.seed' "$config") || fail "registered capacity config has no seed"
+measurement_seed="$source_config_seed"
+capacity_only=false
+if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+	measurement_seed="${V2_R2_SV1_CAPACITY_SEED:-$configured_measurement_seed}"
+	[[ "$measurement_seed" == "$configured_measurement_seed" ]] || fail "capacity-only measurement seed does not match the registered capacity contract"
+	[[ "$source_config_seed" == 643 && "$measurement_seed" == 659 && "$measurement_seed" != "$source_config_seed" ]] ||
+		fail "SV1B capacity measurement must use the preregistered seed-659 override over source seed 643"
+	capacity_only=true
+else
+	[[ "$measurement_seed" == "$configured_measurement_seed" ]] || fail "capacity measurement seed does not match the registered configuration"
+fi
+seed_override_args=()
+if [[ "$measurement_seed" != "$source_config_seed" ]]; then
+	seed_override_args=(-seed "$measurement_seed")
+fi
 attestation=$(v2_r2_capacity_attestation_path_for_config "$config" "$expected_gomaxprocs") ||
 	fail "registered capacity configuration has no capacity attestation identity"
 probe_cell_name=$(v2_r2_capacity_probe_cell_for_config "$config" "$expected_gomaxprocs") ||
@@ -131,15 +181,39 @@ mkdir -p -- "$probe_root"
 probe_dir="$probe_root/$probe_cell_name"
 mkdir -- "$probe_dir"
 
-"$binary" -config "$config" -logdir "$probe_dir" -write-effective-config "$probe_dir/run-config.json" >/dev/null 2>"$probe_root/config.stderr.log" || fail "effective-config validation failed"
-cmp -s "$config" "$probe_dir/run-config.json" || fail "registered config is not normalized"
+	"$binary" -config "$config" "${seed_override_args[@]}" -logdir "$probe_dir" -log-mode "$log_mode" -evidence-format "$evidence_format" \
+	-write-effective-config "$probe_dir/run-config.json" >/dev/null 2>"$probe_root/config.stderr.log" || fail "effective-config validation failed"
+jq -e --arg log_mode "$log_mode" --arg evidence_format "$evidence_format" \
+	--argjson measurement_seed "$measurement_seed" \
+	'.log_mode == $log_mode and .evidence_format == $evidence_format and .seed == $measurement_seed' \
+	"$probe_dir/run-config.json" >/dev/null || fail "effective capacity configuration is incomplete"
 config_sha256=$(sha256sum "$probe_dir/run-config.json" | awk '{print $1}')
+measurement_config_sha256=$(sha256sum "$config" | awk '{print $1}')
 launch_config_sha256=$(sha256sum "$launch_config" | awk '{print $1}')
 measurement_config_path=${config#"$root_dir/"}
 launch_config_path=${launch_config#"$root_dir/"}
 calibration_only=false
-[[ "$config" != "$launch_config" ]] && calibration_only=true
+[[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]] && calibration_only=true
+authorized_launch_config_sha256='[]'
+if [[ "$calibration_only" == true ]]; then
+	for authorized_name in "${v2_r2_sv1_capacity_authorized_launch_config_names[@]}"; do
+		[[ "$authorized_name" != */* && "$authorized_name" == *.json ]] || fail "unsafe authorized launch config name: $authorized_name"
+		authorized_path="$v2_r2_sv1_config_dir/$authorized_name"
+		[[ -s "$authorized_path" && ! -L "$authorized_path" ]] || fail "authorized launch config is missing: $authorized_name"
+	done
+	authorized_launch_config_sha256=$(for authorized_name in "${v2_r2_sv1_capacity_authorized_launch_config_names[@]}"; do
+		sha256sum -- "$v2_r2_sv1_config_dir/$authorized_name" | awk '{print $1}'
+	done | jq -Rsc 'split("\n") | map(select(length > 0))')
+fi
 binary_sha256=$(sha256sum "$binary" | awk '{print $1}')
+if [[ "$calibration_only" == true ]]; then
+	activation_provenance=$(v2_r2_sv1_activation_provenance_path "$head_revision") || fail "could not resolve accepted SV1B activation provenance path"
+	v2_r2_require_sv1b_activation_provenance "$activation_provenance" "$head_revision" "$binary_sha256" ||
+		fail "refusing capacity calibration before accepted SV1B activation provenance"
+	activation_provenance_sha256=$(sha256sum -- "$activation_provenance" | awk '{print $1}')
+else
+	activation_provenance_sha256=""
+fi
 jq -n --arg git_revision "$head_revision" --arg binary_sha256 "$binary_sha256" --arg config_sha256 "$config_sha256" \
 	--arg launch_config_sha256 "$launch_config_sha256" --arg measurement_config_path "$measurement_config_path" \
 	--arg launch_config_path "$launch_config_path" --arg binary_go_version "$binary_go_version" --arg log_mode "$log_mode" \
@@ -147,18 +221,33 @@ jq -n --arg git_revision "$head_revision" --arg binary_sha256 "$binary_sha256" -
 	--argjson gomaxprocs "$expected_gomaxprocs" --argjson minimum_free_bytes "$minimum_free_bytes" \
 	--argjson initial_available_free_bytes "$initial_available_free_bytes" \
 	--arg contract "$v2_r2_sv1_capacity_probe_contract" --argjson calibration_only "$calibration_only" \
+	--argjson authorized_launch_config_sha256 "$authorized_launch_config_sha256" \
+	--arg activation_provenance_sha256 "$activation_provenance_sha256" --argjson memory_limit_bytes "$memory_limit_bytes" \
+	--argjson gomemlimit_bytes "$gomemlimit_bytes" \
+	--argjson capacity_only "$capacity_only" --argjson source_config_seed "$source_config_seed" \
 	--arg probe_cell "$probe_cell_name" \
-	'{schema_version:2,contract:$contract,git_revision:$git_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,measurement_config_path:$measurement_config_path,launch_config_sha256:$launch_config_sha256,launch_config_path:$launch_config_path,calibration_only:$calibration_only,binary_go_version:$binary_go_version,gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,seed:$seed,simulated_horizon:$horizon,log_mode:$log_mode,evidence_format:$evidence_format,simulation_start_nano:1735689600000000000,simulation_end_nano:1735776000000000000,probe_cell:$probe_cell}' >"$probe_dir/run-metadata.json"
+	'{schema_version:2,contract:$contract,git_revision:$git_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,measurement_config_sha256:$measurement_config_sha256,measurement_config_path:$measurement_config_path,primary_launch_config_sha256:$launch_config_sha256,launch_config_sha256:$launch_config_sha256,launch_config_path:$launch_config_path,authorized_launch_config_sha256:$authorized_launch_config_sha256,calibration_only:$calibration_only,capacity_only:$capacity_only,source_config_seed:$source_config_seed,activation_provenance_sha256:(if $activation_provenance_sha256 == "" then null else $activation_provenance_sha256 end),memory_limit_bytes:$memory_limit_bytes,gomemlimit_bytes:$gomemlimit_bytes,binary_go_version:$binary_go_version,gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,seed:$seed,simulated_horizon:$horizon,log_mode:$log_mode,evidence_format:$evidence_format,simulation_start_nano:1735689600000000000,simulation_end_nano:1735776000000000000,probe_cell:$probe_cell}' >"$probe_dir/run-metadata.json"
 
 stdout_log="$probe_root/simulator.stdout.log"
 stderr_log="$probe_root/simulator.stderr.log"
+run_simulator() {
+	if [[ "$memory_limit_bytes" =~ ^[1-9][0-9]*$ ]]; then
+			env GOMAXPROCS="$expected_gomaxprocs" GOMEMLIMIT="${gomemlimit_bytes}B" prlimit --as="$memory_limit_bytes" -- \
+				"$binary" -config "$probe_dir/run-config.json" "${seed_override_args[@]}" -duration "$horizon" -logdir "$probe_dir" -log-mode "$log_mode" -evidence-format "$evidence_format" \
+			>"$stdout_log" 2>"$stderr_log" &
+	else
+			"$binary" -config "$probe_dir/run-config.json" "${seed_override_args[@]}" -duration "$horizon" -logdir "$probe_dir" -log-mode "$log_mode" -evidence-format "$evidence_format" \
+			>"$stdout_log" 2>"$stderr_log" &
+	fi
+	simulator_pid=$!
+}
 set +e
-"$binary" -config "$probe_dir/run-config.json" -duration "$horizon" -logdir "$probe_dir" -log-mode full -evidence-format evstream_v3 \
-	>"$stdout_log" 2>"$stderr_log" &
-simulator_pid=$!
+run_simulator
 set -e
 peak_output_bytes=0
 peak_at=""
+peak_rss_bytes=0
+peak_rss_at=""
 capacity_abort=false
 capacity_abort_reason=""
 while kill -0 "$simulator_pid" 2>/dev/null; do
@@ -171,6 +260,24 @@ while kill -0 "$simulator_pid" 2>/dev/null; do
 	if (( current_bytes > peak_output_bytes )); then
 		peak_output_bytes=$current_bytes
 		peak_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+	fi
+	if [[ "$memory_limit_bytes" =~ ^[1-9][0-9]*$ ]]; then
+		if ! current_rss_bytes=$(capacity_process_rss_bytes "$simulator_pid"); then
+			capacity_abort=true
+			capacity_abort_reason="simulator RSS measurement failed during probe"
+			terminate_simulator
+			break
+		fi
+		if (( current_rss_bytes > peak_rss_bytes )); then
+			peak_rss_bytes=$current_rss_bytes
+			peak_rss_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+		fi
+		if (( current_rss_bytes > memory_limit_bytes )); then
+			capacity_abort=true
+			capacity_abort_reason="simulator RSS crossed the ${memory_limit_bytes}-byte reserve: $current_rss_bytes"
+			terminate_simulator
+			break
+		fi
 	fi
 	if ! available_bytes=$(capacity_free_bytes "$probe_root"); then
 		capacity_abort=true
@@ -204,6 +311,9 @@ elif (( final_available_free_bytes < minimum_free_bytes )); then
 fi
 [[ "$capacity_abort" == false && "$simulator_status" == 0 ]] ||
 	fail "probe did not complete (status=$simulator_status capacity_abort=$capacity_abort reason=${capacity_abort_reason:-simulator failure}); output retained at $probe_root"
+if [[ "$memory_limit_bytes" =~ ^[1-9][0-9]*$ ]]; then
+	(( peak_rss_bytes > 0 )) || fail "probe completed without a simulator RSS sample; output retained at $probe_root"
+fi
 
 required_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl events.evs binary-evidence-attestation.json)
 if [[ "$log_mode" == full ]]; then
@@ -244,21 +354,25 @@ attestation_tmp="$attestation.tmp-$$"
 mkdir -p -- "$(dirname -- "$attestation")"
 evidence_manifest_sha256=$(sha256sum -- "$probe_dir/evidence-manifest.json" | awk '{print $1}')
 jq -n --arg source_revision "$head_revision" --arg binary_sha256 "$binary_sha256" \
-	--arg config_sha256 "$config_sha256" --arg launch_config_sha256 "$launch_config_sha256" \
-	--arg measurement_config_path "$measurement_config_path" --arg launch_config_path "$launch_config_path" \
+	--arg config_sha256 "$config_sha256" --arg measurement_config_sha256 "$measurement_config_sha256" \
+	--arg launch_config_sha256 "$launch_config_sha256" --arg measurement_config_path "$measurement_config_path" --arg launch_config_path "$launch_config_path" \
 	--arg probe_root "$probe_root" --arg peak_at "$peak_at" --arg evidence_format "$evidence_format" \
 	--arg evidence_manifest_sha256 "$evidence_manifest_sha256" \
 	--argjson peak_output_bytes "$peak_output_bytes" --argjson safety_margin_bytes "$safety_margin_bytes" \
 	--argjson required_free_bytes "$required_free_bytes" --argjson available_free_bytes "$final_available_free_bytes" \
 	--argjson gomaxprocs "$expected_gomaxprocs" --argjson minimum_free_bytes "$minimum_free_bytes" \
 	--argjson initial_available_free_bytes "$initial_available_free_bytes" --argjson measurement_seed "$measurement_seed" \
-	--argjson calibration_only "$calibration_only" --arg log_mode "$log_mode" --arg probe_cell "$probe_cell_name" \
+	--argjson calibration_only "$calibration_only" --argjson authorized_launch_config_sha256 "$authorized_launch_config_sha256" \
+	--arg activation_provenance_sha256 "$activation_provenance_sha256" --argjson memory_limit_bytes "$memory_limit_bytes" \
+	--argjson gomemlimit_bytes "$gomemlimit_bytes" \
+	--argjson capacity_only "$capacity_only" --argjson source_config_seed "$source_config_seed" \
+	--argjson peak_rss_bytes "$peak_rss_bytes" --arg peak_rss_at "$peak_rss_at" --arg log_mode "$log_mode" --arg probe_cell "$probe_cell_name" \
 	--arg contract "${v2_r2_sv1_capacity_attestation_contract:-v2-integrated-longrun-r2-binary-capacity-v1}" \
 	--argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
-	'{schema_version:1,contract:$contract,measurement:"full_24h_binary_evidence_capacity_probe",evidence_format:$evidence_format,log_mode:$log_mode,source_revision:$source_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,measurement_config_path:$measurement_config_path,measurement_seed:$measurement_seed,launch_config_sha256:$launch_config_sha256,launch_config_path:$launch_config_path,calibration_only:$calibration_only,gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,probe_root:$probe_root,probe_cell:$probe_cell,evidence_manifest_sha256:$evidence_manifest_sha256,peak_output_bytes:$peak_output_bytes,safety_margin_bytes:$safety_margin_bytes,required_free_bytes:$required_free_bytes,available_free_bytes:$available_free_bytes,peak_observed_at:$peak_at,simulation_start_nano:$simulation_start_nano,simulation_end_nano:$simulation_end_nano}' >"$attestation_tmp"
-	v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation_tmp" "$config_sha256" "$expected_gomaxprocs" "$minimum_free_bytes" true ||
+	'{schema_version:1,contract:$contract,measurement:"full_24h_binary_evidence_capacity_probe",evidence_format:$evidence_format,log_mode:$log_mode,source_revision:$source_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,measurement_config_sha256:$measurement_config_sha256,measurement_config_path:$measurement_config_path,measurement_seed:$measurement_seed,source_config_seed:$source_config_seed,capacity_only:$capacity_only,primary_launch_config_sha256:$launch_config_sha256,launch_config_sha256:$launch_config_sha256,launch_config_path:$launch_config_path,authorized_launch_config_sha256:$authorized_launch_config_sha256,calibration_only:$calibration_only,activation_provenance_sha256:(if $activation_provenance_sha256 == "" then null else $activation_provenance_sha256 end),gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,memory_limit_bytes:$memory_limit_bytes,gomemlimit_bytes:$gomemlimit_bytes,peak_rss_bytes:$peak_rss_bytes,peak_rss_observed_at:$peak_rss_at,probe_root:$probe_root,probe_cell:$probe_cell,evidence_manifest_sha256:$evidence_manifest_sha256,peak_output_bytes:$peak_output_bytes,safety_margin_bytes:$safety_margin_bytes,required_free_bytes:$required_free_bytes,available_free_bytes:$final_available_free_bytes,peak_observed_at:$peak_at,simulation_start_nano:$simulation_start_nano,simulation_end_nano:$simulation_end_nano}' >"$attestation_tmp"
+	v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation_tmp" "" "$expected_gomaxprocs" "$minimum_free_bytes" true "$launch_config_sha256" "$memory_validation_arg" "$measurement_config_sha256" "$activation_provenance_sha256" ||
 	fail "generated capacity attestation failed retained-evidence validation; output retained at $probe_root"
 mv -- "$attestation_tmp" "$attestation"
-	v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation" "$config_sha256" "$expected_gomaxprocs" "$minimum_free_bytes" true ||
+v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation" "" "$expected_gomaxprocs" "$minimum_free_bytes" true "$launch_config_sha256" "$memory_validation_arg" "$measurement_config_sha256" "$activation_provenance_sha256" ||
 	fail "published capacity attestation failed final validation; output retained at $probe_root"
 echo "completed SV1 24-hour binary capacity probe: root=$probe_root peak_bytes=$peak_output_bytes required_free_bytes=$required_free_bytes"

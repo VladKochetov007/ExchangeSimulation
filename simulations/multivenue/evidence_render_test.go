@@ -61,10 +61,10 @@ func TestRenderBinaryEvidenceMergesEvidenceOnlySidecarsByVenueSequence(t *testin
 	if report.EventFrames != 2 || report.DictionaryFrames == 0 || report.Routes != 1 || report.ExecutionHash == "" || report.RouteCompression != string(RouteCompressionNone) {
 		t.Fatalf("report = %+v", report)
 	}
-	want := []byte(`{"client_id":7,"data":{"venue_id":"north","sequence":1,"payload":{"value":1}},"event":"first","sim_ts":10}` + "\n")
+	want := []byte(`{"client_id":7,"data":{"venue_id":"north","sequence":1,"payload":{"value":1}},"event":"first","sim_ts":10,"event_seq":4}` + "\n")
 	want = append(want, second...)
 	want = append(want, '\n')
-	want = append(want, []byte(`{"client_id":9,"data":{"venue_id":"north","sequence":3,"payload":{"value":3}},"event":"third","sim_ts":30}`)...)
+	want = append(want, []byte(`{"client_id":9,"data":{"venue_id":"north","sequence":3,"payload":{"value":3}},"event":"third","sim_ts":30,"event_seq":6}`)...)
 	want = append(want, '\n')
 	actual, err := os.ReadFile(filepath.Join(outOne, "venues", "north", "general.jsonl"))
 	if err != nil {

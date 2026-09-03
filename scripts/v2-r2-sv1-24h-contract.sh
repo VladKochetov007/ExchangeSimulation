@@ -21,6 +21,7 @@ v2_r2_sv1_predecessor_id="R2"
 v2_r2_sv1_runner_contract="v2-r2-sv1-24h-runner-v1"
 v2_r2_sv1_require_terminal_outcome=false
 v2_r2_sv1_completion_sentinels='["greeks.json", "latency.json"]'
+v2_r2_sv1_require_positive_loss_budget=false
 v2_r2_sv1_require_no_replacement_withdrawal=false
 v2_r2_sv1_experiment_prefix="v2-r2-sv1-24h"
 v2_r2_sv1_config_provenance_contract="v2-r2-sv1-24h-config-provenance-v1"
@@ -93,7 +94,7 @@ v2_r2_require_cdf_supplier_activation() {
 	local audit_path=$1 expected_supplier_count=$2
 	[[ -s "$audit_path" ]] || return 1
 	[[ "$expected_supplier_count" =~ ^[1-9][0-9]*$ ]] || return 1
-	if ! jq -e --argjson expected_supplier_count "$expected_supplier_count" --argjson require_no_replacement "$v2_r2_sv1_require_no_replacement_withdrawal" '
+	if ! jq -e --argjson expected_supplier_count "$expected_supplier_count" --argjson require_no_replacement "$v2_r2_sv1_require_no_replacement_withdrawal" --argjson require_positive_loss_budget "$v2_r2_sv1_require_positive_loss_budget" '
 		type == "object" and (.result | type) == "object" and
 		.result.valid == true and
 		.result.evidence_valid == true and
@@ -106,25 +107,36 @@ v2_r2_require_cdf_supplier_activation() {
 		.result.pnl_changing_supplier_count == .result.supplier_count and
 		.result.inventory_responsive_decision_count > 0 and
 		(.result.cancel_count + .result.withdraw_count) > 0 and
-		((any(.result.suppliers[]; (.configured_max_loss_quote // 0) > 0) | not) or
-			(.result.risk_state_decision_count | type) == "number" and
+		((($require_positive_loss_budget or
+			any(.result.suppliers[]; (.configured_max_loss_quote | type) == "number" and .configured_max_loss_quote > 0)) | not) or
+			((.result.risk_state_decision_count | type) == "number" and
 			.result.risk_state_decision_count > 0 and
-			all(.result.suppliers[]; (.configured_max_loss_quote // 0) > 0 and .risk_state_decision_count > 0)) and
+			(.result.fresh_risk_state_decision_count | type) == "number" and
+			.result.fresh_risk_state_decision_count > 0 and
+			all(.result.suppliers[]; (.configured_max_loss_quote | type) == "number" and .configured_max_loss_quote > 0 and .risk_state_decision_count > 0 and .fresh_risk_state_decision_count > 0))) and
 			.result.max_borrowed == 0 and
 			(($require_no_replacement | not) or
 				(.result.withdrawal_without_replacement_count | type) == "number" and
 				.result.withdrawal_without_replacement_count > 0) and
 		.result.supplier_volume_share <= 0.75 and
-		.result.supplier_depth_over_75_share <= 0.5 and
+		(.result.supplier_depth_over_75_active_time_fraction | type) == "number" and
+		.result.supplier_depth_over_75_active_time_fraction <= 0.5 and
+		(.result.supplier_bid_depth_over_75_active_time_fraction | type) == "number" and
+		.result.supplier_bid_depth_over_75_active_time_fraction <= 0.5 and
+		(.result.supplier_ask_depth_over_75_active_time_fraction | type) == "number" and
+		.result.supplier_ask_depth_over_75_active_time_fraction <= 0.5 and
 		.result.supplier_bid_time_weighted_resting_depth_share <= 0.75 and
 		.result.supplier_ask_time_weighted_resting_depth_share <= 0.75 and
 		.result.supplier_only_bid_time_weighted_fraction <= 0.5 and
 		.result.supplier_only_ask_time_weighted_fraction <= 0.5 and
 		(.result.venues | type) == "array" and (.result.venues | length) == 3 and
 		all(.result.venues[];
-			.supplier_depth_over_75_fraction <= 0.5 and
-			.supplier_bid_depth_over_75_fraction <= 0.5 and
-			.supplier_ask_depth_over_75_fraction <= 0.5 and
+			(.supplier_depth_over_75_active_time_fraction | type) == "number" and
+			.supplier_depth_over_75_active_time_fraction <= 0.5 and
+			(.supplier_bid_depth_over_75_active_time_fraction | type) == "number" and
+			.supplier_bid_depth_over_75_active_time_fraction <= 0.5 and
+			(.supplier_ask_depth_over_75_active_time_fraction | type) == "number" and
+			.supplier_ask_depth_over_75_active_time_fraction <= 0.5 and
 			.supplier_bid_time_weighted_resting_depth_share <= 0.75 and
 			.supplier_ask_time_weighted_resting_depth_share <= 0.75 and
 			.supplier_only_bid_time_weighted_fraction <= 0.5 and
@@ -144,14 +156,35 @@ v2_r2_require_cdf_supplier_activation() {
 	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
 		if ! jq -e '
 			.result.supplier_removal_counterfactual_valid == true and
+			.result.supplier_removal_time_weighted_counterfactual_valid == true and
 			.result.supplier_removal_snapshot_count == .result.snapshot_count and
+			(.result.supplier_removal_observed_duration_ns | type) == "number" and
+			.result.supplier_removal_observed_duration_ns > 0 and
+			(.result.supplier_removal_bid_absence_active_time_fraction | type) == "number" and
+			.result.supplier_removal_bid_absence_active_time_fraction >= 0 and .result.supplier_removal_bid_absence_active_time_fraction <= 1 and
+			(.result.supplier_removal_ask_absence_active_time_fraction | type) == "number" and
+			.result.supplier_removal_ask_absence_active_time_fraction >= 0 and .result.supplier_removal_ask_absence_active_time_fraction <= 1 and
+			(.result.supplier_removal_qualified_bid_absence_active_time_fraction | type) == "number" and
+			.result.supplier_removal_qualified_bid_absence_active_time_fraction >= 0 and .result.supplier_removal_qualified_bid_absence_active_time_fraction <= 1 and
+			.result.supplier_removal_qualified_bid_absence_active_time_fraction <= 0.5 and
+			(.result.supplier_removal_qualified_ask_absence_active_time_fraction | type) == "number" and
+			.result.supplier_removal_qualified_ask_absence_active_time_fraction >= 0 and .result.supplier_removal_qualified_ask_absence_active_time_fraction <= 1 and
+			.result.supplier_removal_qualified_ask_absence_active_time_fraction <= 0.5 and
 			(.result.supplier_removal_bid_absence_fraction | type) == "number" and
 			(.result.supplier_removal_ask_absence_fraction | type) == "number" and
 			(.result.supplier_time_weighted_resting_depth_share | type) == "number" and
 			.result.supplier_time_weighted_resting_depth_share <= 0.75 and
 			all(.result.venues[];
 				.supplier_removal_counterfactual_valid == true and
+				.supplier_removal_time_weighted_counterfactual_valid == true and
 				.supplier_removal_snapshot_count == .snapshot_count and
+				(.supplier_removal_observed_duration_ns | type) == "number" and .supplier_removal_observed_duration_ns > 0 and
+				(.supplier_removal_bid_absence_active_time_fraction | type) == "number" and .supplier_removal_bid_absence_active_time_fraction >= 0 and .supplier_removal_bid_absence_active_time_fraction <= 1 and
+				(.supplier_removal_ask_absence_active_time_fraction | type) == "number" and .supplier_removal_ask_absence_active_time_fraction >= 0 and .supplier_removal_ask_absence_active_time_fraction <= 1 and
+			(.supplier_removal_qualified_bid_absence_active_time_fraction | type) == "number" and .supplier_removal_qualified_bid_absence_active_time_fraction >= 0 and .supplier_removal_qualified_bid_absence_active_time_fraction <= 1 and
+			.supplier_removal_qualified_bid_absence_active_time_fraction <= 0.5 and
+			(.supplier_removal_qualified_ask_absence_active_time_fraction | type) == "number" and .supplier_removal_qualified_ask_absence_active_time_fraction >= 0 and .supplier_removal_qualified_ask_absence_active_time_fraction <= 1 and
+			.supplier_removal_qualified_ask_absence_active_time_fraction <= 0.5 and
 				(.supplier_removal_bid_absence_fraction | type) == "number" and
 				(.supplier_removal_ask_absence_fraction | type) == "number")
 			' "$audit_path" >/dev/null; then
@@ -188,7 +221,7 @@ v2_r2_require_cdf_supplier_comparison() {
 	local comparison_path=$1 expected_supplier_count=$2
 	[[ -s "$comparison_path" ]] || return 1
 	[[ "$expected_supplier_count" =~ ^[1-9][0-9]*$ ]] || return 1
-	if ! jq -e --argjson expected_supplier_count "$expected_supplier_count" --argjson require_no_replacement "$v2_r2_sv1_require_no_replacement_withdrawal" '
+	if ! jq -e --argjson expected_supplier_count "$expected_supplier_count" --argjson require_no_replacement "$v2_r2_sv1_require_no_replacement_withdrawal" --argjson require_positive_loss_budget "$v2_r2_sv1_require_positive_loss_budget" '
 		type == "object" and .valid == true and
 		(.provenance.valid // false) == true and
 		(.treatment | type) == "object" and (.control | type) == "object" and
@@ -204,22 +237,33 @@ v2_r2_require_cdf_supplier_comparison() {
 		.treatment.pnl_changing_supplier_count == .treatment.supplier_count and
 		.treatment.inventory_responsive_decision_count > 0 and
 		(.treatment.cancel_count + .treatment.withdraw_count) > 0 and
-		((any(.treatment.suppliers[]; (.configured_max_loss_quote // 0) > 0) | not) or
-			(.treatment.risk_state_decision_count | type) == "number" and
+		((($require_positive_loss_budget or
+			any(.treatment.suppliers[]; (.configured_max_loss_quote | type) == "number" and .configured_max_loss_quote > 0)) | not) or
+			((.treatment.risk_state_decision_count | type) == "number" and
 			.treatment.risk_state_decision_count > 0 and
-			all(.treatment.suppliers[]; (.configured_max_loss_quote // 0) > 0 and .risk_state_decision_count > 0)) and
+			(.treatment.fresh_risk_state_decision_count | type) == "number" and
+			.treatment.fresh_risk_state_decision_count > 0 and
+			all(.treatment.suppliers[]; (.configured_max_loss_quote | type) == "number" and .configured_max_loss_quote > 0 and .risk_state_decision_count > 0 and .fresh_risk_state_decision_count > 0))) and
 		.treatment.max_borrowed == 0 and
 		.treatment.supplier_volume_share <= 0.75 and
-		.treatment.supplier_depth_over_75_share <= 0.5 and
+		(.treatment.supplier_depth_over_75_active_time_fraction | type) == "number" and
+		.treatment.supplier_depth_over_75_active_time_fraction <= 0.5 and
+		(.treatment.supplier_bid_depth_over_75_active_time_fraction | type) == "number" and
+		.treatment.supplier_bid_depth_over_75_active_time_fraction <= 0.5 and
+		(.treatment.supplier_ask_depth_over_75_active_time_fraction | type) == "number" and
+		.treatment.supplier_ask_depth_over_75_active_time_fraction <= 0.5 and
 		.treatment.supplier_bid_time_weighted_resting_depth_share <= 0.75 and
 		.treatment.supplier_ask_time_weighted_resting_depth_share <= 0.75 and
 		.treatment.supplier_only_bid_time_weighted_fraction <= 0.5 and
 		.treatment.supplier_only_ask_time_weighted_fraction <= 0.5 and
 		(.treatment.venues | type) == "array" and (.treatment.venues | length) == 3 and
 		all(.treatment.venues[];
-			.supplier_depth_over_75_fraction <= 0.5 and
-			.supplier_bid_depth_over_75_fraction <= 0.5 and
-			.supplier_ask_depth_over_75_fraction <= 0.5 and
+			(.supplier_depth_over_75_active_time_fraction | type) == "number" and
+			.supplier_depth_over_75_active_time_fraction <= 0.5 and
+			(.supplier_bid_depth_over_75_active_time_fraction | type) == "number" and
+			.supplier_bid_depth_over_75_active_time_fraction <= 0.5 and
+			(.supplier_ask_depth_over_75_active_time_fraction | type) == "number" and
+			.supplier_ask_depth_over_75_active_time_fraction <= 0.5 and
 			.supplier_bid_time_weighted_resting_depth_share <= 0.75 and
 			.supplier_ask_time_weighted_resting_depth_share <= 0.75 and
 			.supplier_only_bid_time_weighted_fraction <= 0.5 and
@@ -242,14 +286,35 @@ v2_r2_require_cdf_supplier_comparison() {
 	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
 		if ! jq -e '
 			.treatment.supplier_removal_counterfactual_valid == true and
+			.treatment.supplier_removal_time_weighted_counterfactual_valid == true and
 			.treatment.supplier_removal_snapshot_count == .treatment.snapshot_count and
+			(.treatment.supplier_removal_observed_duration_ns | type) == "number" and
+			.treatment.supplier_removal_observed_duration_ns > 0 and
+			(.treatment.supplier_removal_bid_absence_active_time_fraction | type) == "number" and
+			.treatment.supplier_removal_bid_absence_active_time_fraction >= 0 and .treatment.supplier_removal_bid_absence_active_time_fraction <= 1 and
+			(.treatment.supplier_removal_ask_absence_active_time_fraction | type) == "number" and
+			.treatment.supplier_removal_ask_absence_active_time_fraction >= 0 and .treatment.supplier_removal_ask_absence_active_time_fraction <= 1 and
+			(.treatment.supplier_removal_qualified_bid_absence_active_time_fraction | type) == "number" and
+			.treatment.supplier_removal_qualified_bid_absence_active_time_fraction >= 0 and .treatment.supplier_removal_qualified_bid_absence_active_time_fraction <= 1 and
+			.treatment.supplier_removal_qualified_bid_absence_active_time_fraction <= 0.5 and
+			(.treatment.supplier_removal_qualified_ask_absence_active_time_fraction | type) == "number" and
+			.treatment.supplier_removal_qualified_ask_absence_active_time_fraction >= 0 and .treatment.supplier_removal_qualified_ask_absence_active_time_fraction <= 1 and
+			.treatment.supplier_removal_qualified_ask_absence_active_time_fraction <= 0.5 and
 			(.treatment.supplier_removal_bid_absence_fraction | type) == "number" and
 			(.treatment.supplier_removal_ask_absence_fraction | type) == "number" and
 			(.treatment.supplier_time_weighted_resting_depth_share | type) == "number" and
 			.treatment.supplier_time_weighted_resting_depth_share <= 0.75 and
 			all(.treatment.venues[];
 				.supplier_removal_counterfactual_valid == true and
+				.supplier_removal_time_weighted_counterfactual_valid == true and
 				.supplier_removal_snapshot_count == .snapshot_count and
+				(.supplier_removal_observed_duration_ns | type) == "number" and .supplier_removal_observed_duration_ns > 0 and
+				(.supplier_removal_bid_absence_active_time_fraction | type) == "number" and .supplier_removal_bid_absence_active_time_fraction >= 0 and .supplier_removal_bid_absence_active_time_fraction <= 1 and
+				(.supplier_removal_ask_absence_active_time_fraction | type) == "number" and .supplier_removal_ask_absence_active_time_fraction >= 0 and .supplier_removal_ask_absence_active_time_fraction <= 1 and
+			(.supplier_removal_qualified_bid_absence_active_time_fraction | type) == "number" and .supplier_removal_qualified_bid_absence_active_time_fraction >= 0 and .supplier_removal_qualified_bid_absence_active_time_fraction <= 1 and
+			.supplier_removal_qualified_bid_absence_active_time_fraction <= 0.5 and
+			(.supplier_removal_qualified_ask_absence_active_time_fraction | type) == "number" and .supplier_removal_qualified_ask_absence_active_time_fraction >= 0 and .supplier_removal_qualified_ask_absence_active_time_fraction <= 1 and
+			.supplier_removal_qualified_ask_absence_active_time_fraction <= 0.5 and
 				(.supplier_removal_bid_absence_fraction | type) == "number" and
 				(.supplier_removal_ask_absence_fraction | type) == "number")
 		' "$comparison_path" >/dev/null; then
