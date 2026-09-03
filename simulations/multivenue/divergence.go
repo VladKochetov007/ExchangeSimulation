@@ -366,6 +366,11 @@ func (s *checkpointSink) close() error {
 		}
 		s.binaryFile = nil
 	}
+	if s.binary != nil {
+		if unencodable := s.binary.unencodableCount(); unencodable != 0 {
+			s.failLocked(fmt.Errorf("binary evidence contains %d unencodable payload(s)", unencodable))
+		}
+	}
 	if s.checkpoints != nil {
 		finalAt := s.finalSimTime
 		if finalAt == 0 {

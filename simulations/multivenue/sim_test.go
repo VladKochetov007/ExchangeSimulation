@@ -70,6 +70,26 @@ func TestCloseSuppressesEvidenceArtifactAfterCheckpointFailure(t *testing.T) {
 	}
 }
 
+func TestCloseRejectsUnencodableBinaryEvidence(t *testing.T) {
+	t.Setenv("EXSIM_BINARY_EVIDENCE", "file")
+	dir := t.TempDir()
+	sink, err := newCheckpointSinkForFormat(dir, 0, 0, 0, binaryRepresentation)
+	if err != nil {
+		t.Fatalf("new binary sink: %v", err)
+	}
+	sink.observe(1, 1, "unencodable", "north", binaryUnencodablePayload{}, "general.jsonl", 1)
+	sim := &Sim{
+		Config:      Config{EvidenceFormat: binaryRepresentation, LogMode: "none", LogDir: dir},
+		checkpoints: sink,
+	}
+	if err := sim.Close(); err == nil || !strings.Contains(err.Error(), "unencodable payload") {
+		t.Fatalf("Close error = %v, want unencodable binary evidence failure", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "binary-evidence-attestation.json")); !os.IsNotExist(err) {
+		t.Fatalf("binary attestation exists after failed close: %v", err)
+	}
+}
+
 func TestNewSimRejectsEvidenceDirectoryReuse(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "stale-completion.json"), []byte("{}\n"), 0o644); err != nil {
