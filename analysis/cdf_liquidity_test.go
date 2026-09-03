@@ -185,6 +185,35 @@ func TestCDFLiquidityAntiCheatingRejectsSingleVenueDominance(t *testing.T) {
 	}
 }
 
+func TestCDFLiquidityAntiCheatingRejectsSupplierRequiredExecutableDepth(t *testing.T) {
+	base := CDFLiquidityRunAudit{
+		SupplierCount:                            1,
+		SupplierPresentSnapshotCount:             1,
+		SupplierPresenceTimeWeightedFraction:     1,
+		SupplierRemovalCounterfactualValid:       true,
+		SupplierVolumeShare:                      .2,
+		SupplierDepthOver75ActiveTimeFraction:    .2,
+		SupplierBidDepthOver75ActiveTimeFraction: .2,
+		SupplierAskDepthOver75ActiveTimeFraction: .2,
+		SupplierOnlyBidFraction:                  .2,
+		SupplierOnlyAskFraction:                  .2,
+		Suppliers:                                []CDFLiquiditySupplierAudit{{AntiCheatingSatisfied: true}},
+		Venues: []CDFLiquidityVenueAudit{{
+			VenueID: "north", SupplierRemovalCounterfactualValid: true,
+		}},
+	}
+	base.SupplierRemovalQualifiedBidAbsenceActiveTimeFraction = .6
+	if base.computeAntiCheatingSatisfied() {
+		t.Fatal("supplier-required executable bid depth was accepted")
+	}
+
+	base.SupplierRemovalQualifiedBidAbsenceActiveTimeFraction = 0
+	base.Venues[0].SupplierRemovalQualifiedAskAbsenceActiveTimeFraction = .6
+	if base.computeAntiCheatingSatisfied() {
+		t.Fatal("supplier-required executable ask depth was accepted")
+	}
+}
+
 func TestCDFRemovalCounterfactualRequiresSupplierPresenceCoverage(t *testing.T) {
 	run := &CDFLiquidityRunAudit{SupplierCount: 1, SnapshotCount: 1, SupplierRemovalSnapshotCount: 1}
 	venueAudits := map[string]*CDFLiquidityVenueAudit{

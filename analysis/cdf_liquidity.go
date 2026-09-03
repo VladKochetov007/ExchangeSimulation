@@ -4568,7 +4568,8 @@ func (r *CDFLiquidityRunAudit) computeAntiCheatingSatisfied() bool {
 	if !r.SupplierRemovalCounterfactualValid || r.SupplierPresentSnapshotCount == 0 || r.SupplierPresenceTimeWeightedFraction <= 0 || r.requirePositiveLossBudget && !r.SupplierRemovalTimeWeightedCounterfactualValid {
 		return false
 	}
-	if r.SupplierVolumeShare > 0.75 || r.SupplierDepthOver75ActiveTimeFraction > 0.5 || r.SupplierBidDepthOver75ActiveTimeFraction > 0.5 || r.SupplierAskDepthOver75ActiveTimeFraction > 0.5 || r.SupplierOnlyBidFraction > 0.5 || r.SupplierOnlyAskFraction > 0.5 {
+	if r.SupplierVolumeShare > 0.75 || r.SupplierDepthOver75ActiveTimeFraction > 0.5 || r.SupplierBidDepthOver75ActiveTimeFraction > 0.5 || r.SupplierAskDepthOver75ActiveTimeFraction > 0.5 || r.SupplierOnlyBidFraction > 0.5 || r.SupplierOnlyAskFraction > 0.5 ||
+		r.SupplierRemovalQualifiedBidAbsenceActiveTimeFraction > 0.5 || r.SupplierRemovalQualifiedAskAbsenceActiveTimeFraction > 0.5 {
 		return false
 	}
 	for _, venue := range r.Venues {
@@ -4581,7 +4582,9 @@ func (r *CDFLiquidityRunAudit) computeAntiCheatingSatisfied() bool {
 			venue.SupplierBidTimeWeightedRestingDepthShare > 0.75 ||
 			venue.SupplierAskTimeWeightedRestingDepthShare > 0.75 ||
 			venue.SupplierOnlyBidTimeWeightedFraction > 0.5 ||
-			venue.SupplierOnlyAskTimeWeightedFraction > 0.5 {
+			venue.SupplierOnlyAskTimeWeightedFraction > 0.5 ||
+			venue.SupplierRemovalQualifiedBidAbsenceActiveTimeFraction > 0.5 ||
+			venue.SupplierRemovalQualifiedAskAbsenceActiveTimeFraction > 0.5 {
 			return false
 		}
 	}
