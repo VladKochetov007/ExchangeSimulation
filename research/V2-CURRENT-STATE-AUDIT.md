@@ -985,3 +985,44 @@ one fresh independent Sol-xhigh review of this exact tree. No review
 attestation exists yet, so activation and capacity are still unauthorized.
 The performance feed remains at `c4434ad` with no newer commit; no performance
 implementation was merged. Holdouts `619`, `631`, and `641` remain untouched.
+
+## Append-only operational update: SV1B promotion-gate hardening — 2026-09-03
+
+The exact current scientific HEAD is `5f8740682782769161ebbbfc27afcff9f6cd703e`
+on `feature/r2-cdf-survival-successor`, pushed to origin. Commit `5b0f5d4`
+first bound both seed-643 activation source configs to explicit full
+`evstream_v3` evidence; commit `5f87406` then hardened the promotion protocol
+around that binding. The R2 calendar/lifecycle semantics, finite CDF supplier,
+historical ABC/USD roster, predecessor negative boundary, and holdout policy
+are unchanged.
+
+The successor now has two independent review boundaries. Before build and
+activation, the exact-tree review must cover R2 calendar, correctness
+hardening, binary evidence, CDF supplier, activation/capacity protocol, parity
+controls, and historical boundaries. After the paired five-minute seed-643
+activation, a separate reviewer must inspect the actual immutable activation
+provenance and accept activation, diagnostics, evidence, resource guards,
+provenance bindings, and the historical boundary. Capacity-only seed-659
+measurements and registered development remain closed until that second review.
+
+The capacity/development runners now enforce the same registered resource
+policy: 90% CPU ceiling with recorded host/allowed counts and first-CPU
+affinity, hard 20 GiB address-space/RSS limit, 18 GiB `GOMEMLIMIT`, 4 GiB free
+reserve, bounded child termination, and a post-exit disk measurement before
+sealing. Capacity roots include HEAD, configured seed, role, and GOMAXPROCS so
+the treatment/control G4 and treatment G8 cases cannot collide. Capacity
+attestations require exact equality with the seven registered launch-config
+hashes and bind both review artifacts plus activation provenance.
+
+One `make test` launched before these edits completed only through the
+intentional dirty-tree archive/parity rejection and exited nonzero; because its
+worktree was modified concurrently, it is explicitly invalidated and supplies
+no current-tree test conclusion. The focused shell/config/evidence fixtures,
+syntax checks, JSON parsing, and `git diff --check` pass at `5f87406`. A clean
+full `make test`, vet, targeted race/evidence/determinism checks, exact-tree
+independent review, pinned build, activation, and post-activation review are
+still required. No cell, capacity probe, freeze, or holdout has been run.
+
+The performance red-team branch was fetched again at this checkpoint; it has
+no commit after `c4434ad`, and no performance code was merged. Holdouts `619`,
+`631`, and `641` remain untouched.

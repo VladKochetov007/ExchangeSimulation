@@ -1161,3 +1161,33 @@ independent Sol-xhigh review of this exact tree. Only an accepted review may
 authorize the pinned Go 1.27 build and the five-minute activation probe.
 Capacity, 24-hour development, freeze, and holdout execution remain closed;
 holdouts `619`, `631`, and `641` have not been consumed.
+
+## Append-only operational update: SV1B promotion-gate hardening — 2026-09-03
+
+Commits `5b0f5d4` and `5f87406` are the current pushed successor checkpoint,
+with `5f87406` at `HEAD`. The activation treatment and no-CDF control now bind
+explicit `log_mode=full` and `evidence_format=evstream_v3` source bytes. The
+config checker binds both activation paths and hashes, so the activation probe
+cannot silently use a default or inferred evidence mode.
+
+The promotion contract now requires the complete exact-tree pre-review scope,
+and a separate post-activation independent Sol-xhigh review before any
+capacity or development launch. That post-review must bind the immutable
+activation provenance path/hash and accept activation evidence, CDF diagnostics,
+binary evidence, resource guards, provenance, and the historical boundary.
+Capacity authorization also binds the exact seven-config launch hash set,
+source/effective configuration hashes, the host CPU policy, and distinct
+per-case roots. The registered policy is a hard 20 GiB process ceiling, 18 GiB
+`GOMEMLIMIT`, 4 GiB free-space reserve, and affinity to the first
+`floor(0.9*host_cpus)` CPUs; guarded children receive bounded TERM/grace/KILL
+handling and a final free-space measurement before sealing evidence.
+
+A full `make test` launched at the preceding clean checkpoint overlapped later
+source edits and exited through the intentional dirty-worktree archive/parity
+guard. It is therefore invalidated evidence, not a test pass or failure of the
+current tree. The current tree has passing shell contract/config checks, focused
+SV1 fixtures, JSON validation, shell syntax, and `git diff --check`; a clean
+full test and the remaining static/race/evidence/determinism gates are still
+required. No activation, capacity probe, development cell, freeze, or holdout
+has run. The performance branch remains reviewed through `c4434ad` with no
+newer commit, and no performance implementation was imported.
