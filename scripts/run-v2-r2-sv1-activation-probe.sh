@@ -120,6 +120,15 @@ activation_gomaxprocs=${v2_r2_sv1_activation_gomaxprocs:-2}
 activation_memory_limit_bytes=${v2_r2_sv1_activation_memory_limit_bytes:-$((20 * 1024 * 1024 * 1024))}
 activation_gomemlimit_bytes=${v2_r2_sv1_activation_gomemlimit_bytes:-$((18 * 1024 * 1024 * 1024))}
 activation_minimum_free_bytes=${v2_r2_sv1_activation_minimum_free_bytes:-$((4 * 1024 * 1024 * 1024))}
+IFS=$'\t' read -r activation_host_cpu_count activation_allowed_cpu_count activation_cpu_affinity < <(v2_r2_sv1b_cpu_policy) || {
+	echo "could not establish the registered CPU affinity policy" >&2
+	exit 1
+}
+command -v taskset >/dev/null 2>&1 || {
+	echo "activation probe requires taskset for the CPU ceiling" >&2
+	exit 1
+}
+activation_cpu_launch_prefix=(taskset --cpu-list "$activation_cpu_affinity")
 [[ "$activation_gomaxprocs" =~ ^[1-9][0-9]*$ && "$activation_memory_limit_bytes" =~ ^[1-9][0-9]*$ &&
 	"$activation_gomemlimit_bytes" =~ ^[1-9][0-9]*$ && "$activation_minimum_free_bytes" =~ ^[1-9][0-9]*$ ]] || {
 	echo "activation resource policy is not positive and integral" >&2
@@ -245,10 +254,12 @@ prepare_arm() {
 			--arg review_attestation_sha256 "$review_attestation_sha256" \
 			--arg binary_go_version "$binary_go_version" \
 			--arg binary_goos "$binary_goos" --arg binary_goarch "$binary_goarch" --arg binary_goamd64 "$binary_goamd64" \
-			--argjson gomaxprocs "$activation_gomaxprocs" \
-			--argjson memory_limit_bytes "$activation_memory_limit_bytes" \
-			--argjson gomemlimit_bytes "$activation_gomemlimit_bytes" \
-			--argjson minimum_free_bytes "$activation_minimum_free_bytes" \
+				--argjson gomaxprocs "$activation_gomaxprocs" \
+				--argjson memory_limit_bytes "$activation_memory_limit_bytes" \
+				--argjson gomemlimit_bytes "$activation_gomemlimit_bytes" \
+				--argjson host_cpu_count "$activation_host_cpu_count" --argjson allowed_cpu_count "$activation_allowed_cpu_count" \
+				--argjson cpu_limit_percent "$v2_r2_sv1_cpu_limit_percent" --arg cpu_affinity "$activation_cpu_affinity" \
+				--argjson minimum_free_bytes "$activation_minimum_free_bytes" \
 		--argjson venue_ids "$(jq -c '.venue_ids' "$arm/run-config.json")" \
 		--arg contract "$v2_r2_sv1_activation_contract" \
 		'{schema_version: 1, contract: $contract,
@@ -260,8 +271,10 @@ prepare_arm() {
 			 venue_ids: $venue_ids, binary_path: $binary_path, binary_go_version: $binary_go_version,
 			 binary_goos: $binary_goos, binary_goarch: $binary_goarch, binary_goamd64: $binary_goamd64,
 			 review_attestation_path: $review_attestation_path, review_attestation_sha256: $review_attestation_sha256,
-			 gomaxprocs: $gomaxprocs, memory_limit_bytes: $memory_limit_bytes,
-			 gomemlimit_bytes: $gomemlimit_bytes, minimum_free_bytes: $minimum_free_bytes,
+				 gomaxprocs: $gomaxprocs, memory_limit_bytes: $memory_limit_bytes,
+				 gomemlimit_bytes: $gomemlimit_bytes, host_cpu_count: $host_cpu_count,
+				 allowed_cpu_count: $allowed_cpu_count, cpu_limit_percent: $cpu_limit_percent,
+				 cpu_affinity: $cpu_affinity, minimum_free_bytes: $minimum_free_bytes,
 		 command: ["multivenue", "-config", "run-config.json", "-duration", $horizon,
 		           "-logdir", ".", "-log-mode", $log_mode, "-evidence-format", $evidence_format]}' \
 		>"$arm/run-metadata.json"
@@ -286,7 +299,7 @@ run_arm() {
 		echo "activation free space is below the ${activation_minimum_free_bytes}-byte reserve before launching $arm" >&2
 		return 1
 	fi
-	env GOMAXPROCS="$activation_gomaxprocs" GOMEMLIMIT="${activation_gomemlimit_bytes}B" prlimit --as="$activation_memory_limit_bytes" -- \
+	"${activation_cpu_launch_prefix[@]}" env GOMAXPROCS="$activation_gomaxprocs" GOMEMLIMIT="${activation_gomemlimit_bytes}B" prlimit --as="$activation_memory_limit_bytes" -- \
 		"$binary" -config "$arm/run-config.json" -duration "$horizon" -logdir "$arm" -log-mode full -evidence-format evstream_v3 \
 		>"$stdout_log" 2>"$stderr_log" &
 	simulator_pid=$!
@@ -509,7 +522,9 @@ write_pair_provenance() {
 			 control_terminal_outcome_sha256: $control_terminal_outcome_sha256,
 			 treatment_artifacts: $treatment_artifacts, control_artifacts: $control_artifacts,
 			 resource_policy: {gomaxprocs: $activation_gomaxprocs, memory_limit_bytes: $activation_memory_limit_bytes,
-			   gomemlimit_bytes: $activation_gomemlimit_bytes, minimum_free_bytes: $activation_minimum_free_bytes},
+			   gomemlimit_bytes: $activation_gomemlimit_bytes, host_cpu_count: $activation_host_cpu_count,
+			   allowed_cpu_count: $activation_allowed_cpu_count, cpu_limit_percent: $v2_r2_sv1_cpu_limit_percent,
+			   cpu_affinity: $activation_cpu_affinity, minimum_free_bytes: $activation_minimum_free_bytes},
 		 holdouts_consumed: false,
 		 scope: "development-only mechanism activation; not a 24-hour survival claim"}' \
 		>"$provenance_tmp" || return 1

@@ -37,7 +37,11 @@ v2_r2_sv1_activation_hypothesis_prefix="V2-R2-SV1B-CDF-LIQUIDITY"
 v2_r2_sv1_activation_contract="v2-r2-sv1b-activation-provenance-v2"
 v2_r2_sv1_activation_pair_contract="v2-r2-sv1b-activation-pair-v3"
 v2_r2_sv1_activation_output_prefix="v2-r2-sv1b-activation"
-v2_r2_sv1_review_contract="v2-r2-sv1b-independent-review-v1"
+v2_r2_sv1_review_contract="v2-r2-sv1b-independent-review-v2"
+v2_r2_sv1_activation_review_contract="v2-r2-sv1b-activation-review-v1"
+v2_r2_sv1_cpu_limit_percent=90
+v2_r2_sv1_review_scope='["r2_calendar", "correctness_hardening", "binary_evidence", "cdf_supplier", "activation_protocol", "capacity_protocol", "parity_controls", "historical_boundary"]'
+v2_r2_sv1_activation_review_scope='["activation_evidence", "cdf_activation", "binary_evidence", "resource_guards", "provenance_binding", "historical_boundary"]'
 v2_r2_sv1_capacity_attestation="/home/vlad/v2-r2-sv1b-24h-binary-capacity-20260903-v4-capacity-seed-659-treatment-g4.json"
 v2_r2_sv1_capacity_probe_prefix="v2-r2-sv1b-24h-capacity"
 v2_r2_sv1_capacity_attestation_contract="v2-r2-sv1b-24h-binary-capacity-v4"
@@ -68,6 +72,22 @@ v2_r2_sv1b_review_attestation_path() {
 	printf '%s\n' "${V2_R2_SV1B_REVIEW_ATTESTATION:-/home/vlad/external-scratch/v2-r2-sv1b-review-${head_revision}/review-attestation.json}"
 }
 
+v2_r2_sv1b_activation_review_attestation_path() {
+	local head_revision=${1:-$(git -C "$root_dir" rev-parse HEAD)}
+	[[ "$head_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+	printf '%s\n' "${V2_R2_SV1B_ACTIVATION_REVIEW_ATTESTATION:-/home/vlad/external-scratch/v2-r2-sv1b-activation-review-${v2_r2_sv1_activation_seed}-${head_revision}/review-attestation.json}"
+}
+
+v2_r2_sv1b_cpu_policy() {
+	local host_cpu_count allowed_cpu_count
+	command -v nproc >/dev/null 2>&1 || return 1
+	host_cpu_count=$(nproc --all) || return 1
+	[[ "$host_cpu_count" =~ ^[1-9][0-9]*$ ]] || return 1
+	allowed_cpu_count=$((host_cpu_count * v2_r2_sv1_cpu_limit_percent / 100))
+	(( allowed_cpu_count > 0 )) || allowed_cpu_count=1
+	printf '%s\t%s\t0-%s\n' "$host_cpu_count" "$allowed_cpu_count" "$((allowed_cpu_count - 1))"
+}
+
 v2_r2_sv1b_git_tree_sha256() {
 	[[ $# -eq 1 ]] || return 1
 	local revision=$1
@@ -92,14 +112,56 @@ v2_r2_require_sv1b_review_attestation() {
 	actual_report_sha256=$(sha256sum -- "$report_path" | awk '{print $1}') || return 1
 	[[ "$actual_report_sha256" == "$report_sha256" ]] || return 1
 	jq -e --arg contract "$v2_r2_sv1_review_contract" --arg revision "$expected_revision" --arg tree_sha256 "$expected_tree_sha256" \
-		--arg report_sha256 "$report_sha256" '
+		--arg report_sha256 "$report_sha256" --argjson required_scope "$v2_r2_sv1_review_scope" '
 		type == "object" and .schema_version == 1 and .contract == $contract and
 		.reviewed_revision == $revision and .reviewed_tree_sha256 == $tree_sha256 and
 		.review_type == "independent_sol_xhigh" and .verdict == "ACCEPTED_FOR_ACTIVATION" and
 		.reviewed_worktree_clean == true and .holdouts_consumed == false and
 		(.reviewer | type == "string" and length > 0) and
 		(.reviewed_scope | type == "array" and length > 0) and
-		(["r2_calendar", "correctness_hardening", "binary_evidence"] - .reviewed_scope | length == 0) and
+		(($required_scope - .reviewed_scope) | length == 0) and
+		.review_report_sha256 == $report_sha256' "$review_path" >/dev/null
+}
+
+v2_r2_require_sv1b_activation_review_attestation() {
+	[[ $# -eq 3 ]] || return 1
+	local review_path=$1 expected_revision=$2 activation_provenance_path=$3
+	local report_path report_sha256 actual_report_sha256 expected_tree_sha256 reviewed_tree_sha256 activation_provenance_sha256
+	[[ "$review_path" == /* && "$review_path" != */ && "$review_path" != *$'\n'* && "$review_path" != *$'\t'* ]] || return 1
+	[[ "$activation_provenance_path" == /* && "$activation_provenance_path" != */ && "$activation_provenance_path" != *$'\n'* && "$activation_provenance_path" != *$'\t'* ]] || return 1
+	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+	[[ -f "$review_path" && ! -L "$review_path" && "$(realpath -e -- "$review_path")" == "$review_path" ]] || return 1
+	[[ -f "$activation_provenance_path" && ! -L "$activation_provenance_path" && "$(realpath -e -- "$activation_provenance_path")" == "$activation_provenance_path" ]] || return 1
+	expected_tree_sha256=$(v2_r2_sv1b_git_tree_sha256 "$expected_revision") || return 1
+	activation_provenance_sha256=$(sha256sum -- "$activation_provenance_path" | awk '{print $1}') || return 1
+	jq -e '
+		type == "object" and .schema_version == 3 and
+		.status == "ACTIVATION_CONTRACT_SATISFIED" and .activation_satisfied == true and
+		.holdouts_consumed == false and .treatment_runner_status == 0 and .control_runner_status == 0 and
+		.treatment_terminal_status == "completed" and .control_terminal_status == "completed"' \
+		"$activation_provenance_path" >/dev/null || return 1
+	reviewed_tree_sha256=$(jq -er '.reviewed_tree_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$review_path") || return 1
+	[[ "$reviewed_tree_sha256" == "$expected_tree_sha256" ]] || return 1
+	report_path=$(jq -er '.review_report_path | select(type == "string")' "$review_path") || return 1
+	report_sha256=$(jq -er '.review_report_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$review_path") || return 1
+	[[ "$report_path" == /* && "$report_path" != */ && "$report_path" != *$'\n'* && "$report_path" != *$'\t'* ]] || return 1
+	[[ "$review_path" != "$root_dir"/* && "$report_path" != "$root_dir"/* ]] || return 1
+	[[ -f "$report_path" && ! -L "$report_path" && "$(realpath -e -- "$report_path")" == "$report_path" ]] || return 1
+	actual_report_sha256=$(sha256sum -- "$report_path" | awk '{print $1}') || return 1
+	[[ "$actual_report_sha256" == "$report_sha256" ]] || return 1
+	jq -e --arg contract "$v2_r2_sv1_activation_review_contract" --arg revision "$expected_revision" \
+		--arg tree_sha256 "$expected_tree_sha256" --arg activation_path "$activation_provenance_path" \
+		--arg activation_sha256 "$activation_provenance_sha256" --arg report_sha256 "$report_sha256" \
+		--argjson required_scope "$v2_r2_sv1_activation_review_scope" '
+		type == "object" and .schema_version == 1 and .contract == $contract and
+		.reviewed_revision == $revision and .reviewed_tree_sha256 == $tree_sha256 and
+		.review_type == "independent_sol_xhigh" and .verdict == "ACCEPTED_FOR_CAPACITY" and
+		.reviewed_worktree_clean == true and .holdouts_consumed == false and
+		(.reviewer | type == "string" and length > 0) and
+		(.reviewed_scope | type == "array" and length > 0) and
+		(($required_scope - .reviewed_scope) | length == 0) and
+		.activation_provenance_path == $activation_path and
+		.activation_provenance_sha256 == $activation_sha256 and
 		.review_report_sha256 == $report_sha256' "$review_path" >/dev/null
 }
 
@@ -146,11 +208,13 @@ v2_r2_require_sv1b_activation_provenance() {
 	local expected_tree_sha256 actual_sha256 treatment_artifacts control_artifacts
 	local expected_treatment_config expected_control_config treatment_config_path control_config_path
 	local treatment_source_config_sha256 control_source_config_sha256
+	local expected_host_cpu_count expected_allowed_cpu_count expected_cpu_affinity
 	[[ "$provenance_path" == /* && "$provenance_path" != */ && "$provenance_path" != *$'\n'* && "$provenance_path" != *$'\t'* ]] || return 1
 	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_binary_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
 	[[ -f "$provenance_path" && ! -L "$provenance_path" ]] || return 1
 	[[ "$(realpath -e -- "$provenance_path")" == "$provenance_path" ]] || return 1
 	expected_tree_sha256=$(v2_r2_sv1b_git_tree_sha256 "$expected_revision") || return 1
+	IFS=$'\t' read -r expected_host_cpu_count expected_allowed_cpu_count expected_cpu_affinity < <(v2_r2_sv1b_cpu_policy) || return 1
 	output_root=$(jq -er '.output_root | select(type == "string")' "$provenance_path") || return 1
 	treatment_dir=$(jq -er '.treatment_dir | select(type == "string")' "$provenance_path") || return 1
 	control_dir=$(jq -er '.control_dir | select(type == "string")' "$provenance_path") || return 1
@@ -181,6 +245,12 @@ v2_r2_require_sv1b_activation_provenance() {
 	jq -e 'type == "object" and .valid == true and .evidence_valid == true and .activation_satisfied == true and .anti_cheating_satisfied == true' "$comparison_path" >/dev/null || return 1
 	jq -e --arg contract "$v2_r2_sv1_activation_pair_contract" --arg revision "$expected_revision" \
 		--arg tree_sha256 "$expected_tree_sha256" --argjson seed "$v2_r2_sv1_activation_seed" \
+		--argjson expected_host_cpu_count "$expected_host_cpu_count" --argjson expected_allowed_cpu_count "$expected_allowed_cpu_count" \
+		--argjson expected_cpu_limit_percent "$v2_r2_sv1_cpu_limit_percent" --arg expected_cpu_affinity "$expected_cpu_affinity" \
+		--argjson expected_activation_gomaxprocs "$v2_r2_sv1_activation_gomaxprocs" \
+		--argjson expected_memory_limit_bytes "$v2_r2_sv1_activation_memory_limit_bytes" \
+		--argjson expected_gomemlimit_bytes "$v2_r2_sv1_activation_gomemlimit_bytes" \
+		--argjson expected_minimum_free_bytes "$v2_r2_sv1_activation_minimum_free_bytes" \
 		--arg binary_sha256 "$expected_binary_sha256" '
 		type == "object" and .schema_version == 3 and .contract == $contract and
 		.candidate_revision == $revision and .candidate_tree_sha256 == $tree_sha256 and .seed == $seed and
@@ -196,7 +266,16 @@ v2_r2_require_sv1b_activation_provenance() {
 		(.treatment_run_status_sha256 | type) == "string" and (.treatment_run_status_sha256 | test("^[0-9a-f]{64}$")) and
 		(.control_run_status_sha256 | type) == "string" and (.control_run_status_sha256 | test("^[0-9a-f]{64}$")) and
 		(.treatment_artifacts | type) == "array" and (.treatment_artifacts | length) > 0 and
-		(.control_artifacts | type) == "array" and (.control_artifacts | length) > 0' "$provenance_path" >/dev/null || return 1
+		(.control_artifacts | type) == "array" and (.control_artifacts | length) > 0 and
+		(.resource_policy | type) == "object" and
+		.resource_policy.gomaxprocs == $expected_activation_gomaxprocs and
+		.resource_policy.memory_limit_bytes == $expected_memory_limit_bytes and
+		.resource_policy.gomemlimit_bytes == $expected_gomemlimit_bytes and
+		.resource_policy.minimum_free_bytes == $expected_minimum_free_bytes and
+		.resource_policy.host_cpu_count == $expected_host_cpu_count and
+		.resource_policy.allowed_cpu_count == $expected_allowed_cpu_count and
+		.resource_policy.cpu_limit_percent == $expected_cpu_limit_percent and
+		.resource_policy.cpu_affinity == $expected_cpu_affinity' "$provenance_path" >/dev/null || return 1
 	expected_treatment_config=$(realpath -e -- "$v2_r2_sv1_activation_config") || return 1
 	expected_control_config=$(realpath -e -- "$v2_r2_sv1_activation_control_config") || return 1
 	treatment_config_path=$(jq -er '.treatment_source_config_path | select(type == "string")' "$provenance_path") || return 1

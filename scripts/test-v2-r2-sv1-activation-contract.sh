@@ -3,6 +3,7 @@ set -euo pipefail
 
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 runner="$root_dir/scripts/run-v2-r2-sv1-activation-probe.sh"
+cell_runner="$root_dir/scripts/run-v2-r2-sv1-24h-cell.sh"
 source "$root_dir/scripts/v2-r2-sv1-24h-contract.sh"
 temp_root=$(mktemp -d)
 trap 'rm -rf -- "$temp_root"' EXIT
@@ -11,7 +12,6 @@ rg -F 'cmp -s -- "$config" "$arm/run-config.json"' "$runner" >/dev/null || {
 	echo "activation runner does not enforce byte-identical registered config" >&2
 	exit 1
 }
-
 assert_rejected() {
 	local output_root=$1
 	local stdout_log="$temp_root/runner.stdout" stderr_log="$temp_root/runner.stderr"
@@ -158,6 +158,25 @@ if jq '.result.risk_state_decision_count = 0' "$temp_root/marked-risk.json" >"$t
 fi
 
 source "$root_dir/scripts/v2-r2-sv1b-24h-contract.sh"
+for required_guard in 'terminate_simulator()' 'kill -KILL' 'final free-space measurement failed after the simulator exited'; do
+	rg -F "$required_guard" "$cell_runner" >/dev/null || {
+		echo "SV1 cell runner is missing required resource guard: $required_guard" >&2
+		exit 1
+	}
+done
+IFS=$'\t' read -r test_host_cpu_count test_allowed_cpu_count test_cpu_affinity < <(v2_r2_sv1b_cpu_policy)
+[[ "$test_host_cpu_count" =~ ^[1-9][0-9]*$ && "$test_allowed_cpu_count" =~ ^[1-9][0-9]*$ && "$test_cpu_affinity" =~ ^0-[0-9]+$ ]] || {
+	echo "SV1B CPU policy is not a bounded affinity range" >&2
+	exit 1
+}
+(( test_allowed_cpu_count * 100 <= test_host_cpu_count * v2_r2_sv1_cpu_limit_percent )) || {
+	echo "SV1B CPU affinity exceeds its registered CPU ceiling" >&2
+	exit 1
+}
+command -v taskset >/dev/null 2>&1 || {
+	echo "taskset is required by the SV1B resource contract" >&2
+	exit 1
+}
 v2_r2_require_cdf_supplier_activation "$cdf_audit_fixture" 2 || {
 	echo "SV1B activity with a qualified withdrawal was rejected" >&2
 	exit 1
@@ -180,6 +199,57 @@ fi
 if jq 'del(.result.withdrawal_without_replacement_count)' "$cdf_audit_fixture" >"$temp_root/missing-withdrawal.json" &&
 	v2_r2_require_cdf_supplier_activation "$temp_root/missing-withdrawal.json" 2; then
 	echo "SV1B activity without a qualified withdrawal was accepted" >&2
+	exit 1
+fi
+
+review_revision=$(git -C "$root_dir" rev-parse HEAD)
+review_tree_sha256=$(v2_r2_sv1b_git_tree_sha256 "$review_revision")
+review_report="$temp_root/tree-review.md"
+printf '%s\n' 'independent exact-tree review fixture' >"$review_report"
+review_report_sha256=$(sha256sum -- "$review_report" | awk '{print $1}')
+review_attestation="$temp_root/tree-review-attestation.json"
+jq -n --arg revision "$review_revision" --arg tree_sha256 "$review_tree_sha256" \
+	--arg report_path "$review_report" --arg report_sha256 "$review_report_sha256" \
+	--arg contract "$v2_r2_sv1_review_contract" --argjson reviewed_scope "$v2_r2_sv1_review_scope" \
+	'{schema_version:1,contract:$contract,reviewed_revision:$revision,reviewed_tree_sha256:$tree_sha256,
+	 review_type:"independent_sol_xhigh",verdict:"ACCEPTED_FOR_ACTIVATION",reviewed_worktree_clean:true,
+	 holdouts_consumed:false,reviewer:"fixture-reviewer",reviewed_scope:$reviewed_scope,
+	 review_report_path:$report_path,review_report_sha256:$report_sha256}' >"$review_attestation"
+v2_r2_require_sv1b_review_attestation "$review_attestation" "$review_revision" || {
+	echo "complete exact-tree review attestation fixture was rejected" >&2
+	exit 1
+}
+jq '.reviewed_scope |= map(select(. != "cdf_supplier"))' "$review_attestation" >"$temp_root/tree-review-missing-scope.json"
+if v2_r2_require_sv1b_review_attestation "$temp_root/tree-review-missing-scope.json" "$review_revision"; then
+	echo "review attestation missing CDF scope was accepted" >&2
+	exit 1
+fi
+
+activation_provenance_fixture="$temp_root/activation-provenance.json"
+jq -n '{schema_version:3,status:"ACTIVATION_CONTRACT_SATISFIED",activation_satisfied:true,
+	 holdouts_consumed:false,treatment_runner_status:0,control_runner_status:0,
+	 treatment_terminal_status:"completed",control_terminal_status:"completed"}' >"$activation_provenance_fixture"
+activation_review_report="$temp_root/activation-review.md"
+printf '%s\n' 'independent activation-evidence review fixture' >"$activation_review_report"
+activation_review_report_sha256=$(sha256sum -- "$activation_review_report" | awk '{print $1}')
+activation_review_attestation="$temp_root/activation-review-attestation.json"
+jq -n --arg revision "$review_revision" --arg tree_sha256 "$review_tree_sha256" \
+	--arg activation_path "$activation_provenance_fixture" \
+	--arg activation_sha256 "$(sha256sum -- "$activation_provenance_fixture" | awk '{print $1}')" \
+	--arg report_path "$activation_review_report" --arg report_sha256 "$activation_review_report_sha256" \
+	--arg contract "$v2_r2_sv1_activation_review_contract" --argjson reviewed_scope "$v2_r2_sv1_activation_review_scope" \
+	'{schema_version:1,contract:$contract,reviewed_revision:$revision,reviewed_tree_sha256:$tree_sha256,
+	 review_type:"independent_sol_xhigh",verdict:"ACCEPTED_FOR_CAPACITY",reviewed_worktree_clean:true,
+	 holdouts_consumed:false,reviewer:"fixture-activation-reviewer",reviewed_scope:$reviewed_scope,
+	 activation_provenance_path:$activation_path,activation_provenance_sha256:$activation_sha256,
+	 review_report_path:$report_path,review_report_sha256:$report_sha256}' >"$activation_review_attestation"
+v2_r2_require_sv1b_activation_review_attestation "$activation_review_attestation" "$review_revision" "$activation_provenance_fixture" || {
+	echo "complete post-activation review attestation fixture was rejected" >&2
+	exit 1
+}
+jq '.verdict = "ACCEPTED_FOR_ACTIVATION"' "$activation_review_attestation" >"$temp_root/activation-review-wrong-verdict.json"
+if v2_r2_require_sv1b_activation_review_attestation "$temp_root/activation-review-wrong-verdict.json" "$review_revision" "$activation_provenance_fixture"; then
+	echo "post-activation review with the pre-activation verdict was accepted" >&2
 	exit 1
 fi
 

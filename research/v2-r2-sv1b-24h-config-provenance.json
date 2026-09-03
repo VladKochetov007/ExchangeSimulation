@@ -44,7 +44,7 @@
   },
   "generator": {
     "path": "scripts/render-v2-r2-sv1b-24h-configs.sh",
-    "sha256": "fe039def4c121f8a8a29e826d435ea14b97f29f78bea69c214af621436295dd3"
+    "sha256": "24b2bb8c9aadad98ba157fde6a12e12ea62507b1f0b91d9e4d0949f152735470"
   },
   "withdrawal_measurement": {
     "path": "research/v2-r2-sv1b-withdrawal-measurement-amendment-2026-09-02.md",
@@ -60,12 +60,14 @@
   },
   "capacity_ordering": {
     "path": "research/v2-r2-sv1b-activation-capacity-order-amendment-2026-09-03.md",
-    "sha256": "0c67bb224244ac29bd090830d1f92eb5c71320b6b285f854d11b3f967d96372b"
+    "sha256": "11612d57e848f9debd9efee107610c3438dd9800fe9cf5f6fdd008a584477c52"
   },
-  "capacity_calibration": {
-    "contract": "v2-r2-sv1b-24h-binary-capacity-v4",
-    "mode": "production_capacity_measurement",
-    "calibration_only": true,
+	"capacity_calibration": {
+		"contract": "v2-r2-sv1b-24h-binary-capacity-v4",
+		"mode": "production_capacity_measurement",
+		"calibration_only": true,
+		"cpu_limit_percent": 90,
+		"cpu_affinity_policy": "first_floor(0.9*host_cpus)",
     "capacity_only_seed": 659,
     "source_config_seed": 643,
     "minimum_free_bytes": 4294967296,

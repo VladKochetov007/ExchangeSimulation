@@ -215,8 +215,11 @@ v2_r2_require_binary_capacity_attestation() {
 	local expected_memory_limit_bytes=${9:-}
 	local expected_measurement_config_sha256=${10:-}
 	local expected_activation_provenance_sha256=${11:-}
+	local expected_activation_review_attestation_sha256=${12:-}
 	local require_live_free_capacity=${7:-true}
 	local expected_binary_sha available_kb required_bytes peak_bytes safety_bytes capacity_contract
+	local expected_authorized_launch_config_sha256='[]'
+	local expected_cpu_affinity="" expected_host_cpu_count=0 expected_allowed_cpu_count=0
 	capacity_contract=${v2_r2_sv1_capacity_attestation_contract:-v2-integrated-longrun-r2-binary-capacity-v1}
 	[[ -s "$attestation" && ! -L "$attestation" ]] || return 1
 	expected_binary_sha=$(sha256sum -- "$binary" | awk '{print $1}') || return 1
@@ -237,7 +240,7 @@ v2_r2_require_binary_capacity_attestation() {
 	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
 		jq -e --argjson capacity_seed "${v2_r2_sv1_capacity_measurement_seed:-0}" \
 			'.capacity_only == true and .measurement_seed == $capacity_seed and .source_config_seed == 643 and
-			 .measurement_seed != .source_config_seed' "$attestation" >/dev/null || return 1
+				 .measurement_seed != .source_config_seed' "$attestation" >/dev/null || return 1
 	fi
 	if [[ -n "$expected_config_sha256" || -n "$expected_launch_config_sha256" ]]; then
 		[[ "$require_live_free_capacity" == true || "$require_live_free_capacity" == false ]] || return 1
@@ -255,29 +258,58 @@ v2_r2_require_binary_capacity_attestation() {
 		if [[ -n "$expected_activation_provenance_sha256" ]]; then
 			[[ "$expected_activation_provenance_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
 		fi
+		if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
+			[[ -n "$expected_activation_provenance_sha256" && "$expected_activation_provenance_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+			[[ -n "$expected_activation_review_attestation_sha256" && "$expected_activation_review_attestation_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+			local authorized_name authorized_path
+			for authorized_name in "${v2_r2_sv1_capacity_authorized_launch_config_names[@]}"; do
+				[[ "$authorized_name" != */* && "$authorized_name" == *.json ]] || return 1
+				authorized_path="$v2_r2_sv1_config_dir/$authorized_name"
+				[[ -s "$authorized_path" && ! -L "$authorized_path" ]] || return 1
+			done
+			expected_authorized_launch_config_sha256=$(for authorized_name in "${v2_r2_sv1_capacity_authorized_launch_config_names[@]}"; do
+				sha256sum -- "$v2_r2_sv1_config_dir/$authorized_name" | awk '{print $1}'
+			done | jq -Rsc 'split("\n") | map(select(length > 0))') || return 1
+			IFS=$'\t' read -r expected_host_cpu_count expected_allowed_cpu_count expected_cpu_affinity < <(v2_r2_sv1b_cpu_policy) || return 1
+			command -v taskset >/dev/null 2>&1 || return 1
+		fi
 		jq -e --arg config_sha256 "$expected_config_sha256" --arg launch_config_sha256 "$expected_launch_config_sha256" \
 			--arg measurement_config_sha256 "$expected_measurement_config_sha256" \
-			--arg activation_provenance_sha256 "$expected_activation_provenance_sha256" --argjson gomaxprocs "$expected_gomaxprocs" \
+			--arg activation_provenance_sha256 "$expected_activation_provenance_sha256" \
+			--arg activation_review_attestation_sha256 "$expected_activation_review_attestation_sha256" \
+			--argjson expected_authorized_launch_config_sha256 "$expected_authorized_launch_config_sha256" \
+			--arg expected_cpu_affinity "$expected_cpu_affinity" --argjson expected_host_cpu_count "$expected_host_cpu_count" \
+			--argjson expected_allowed_cpu_count "$expected_allowed_cpu_count" --argjson expected_cpu_limit_percent "${v2_r2_sv1_cpu_limit_percent:-0}" \
+			--argjson gomaxprocs "$expected_gomaxprocs" \
 			--argjson minimum_free_bytes "$expected_minimum_free_bytes" --arg memory_limit_bytes "$expected_memory_limit_bytes" \
 			'($config_sha256 == "" or .config_sha256 == $config_sha256) and
 				($measurement_config_sha256 == "" or
 					((.measurement_config_sha256 | type) == "string" and
 					 (.measurement_config_sha256 | test("^[0-9a-f]{64}$")) and
 					 .measurement_config_sha256 == $measurement_config_sha256)) and
-				($activation_provenance_sha256 == "" or
-					((.activation_provenance_sha256 | type) == "string" and
-					 (.activation_provenance_sha256 | test("^[0-9a-f]{64}$")) and
-					 .activation_provenance_sha256 == $activation_provenance_sha256)) and
-				($launch_config_sha256 == "" or
-				(.calibration_only == true and
+					($activation_provenance_sha256 == "" or
+						((.activation_provenance_sha256 | type) == "string" and
+						 (.activation_provenance_sha256 | test("^[0-9a-f]{64}$")) and
+						 .activation_provenance_sha256 == $activation_provenance_sha256)) and
+					($activation_review_attestation_sha256 == "" or
+						((.activation_review_attestation_sha256 | type) == "string" and
+						 (.activation_review_attestation_sha256 | test("^[0-9a-f]{64}$")) and
+						 .activation_review_attestation_sha256 == $activation_review_attestation_sha256)) and
+					($launch_config_sha256 == "" or
+					(.calibration_only == true and
 					(.launch_config_sha256 | type) == "string" and
 					(.primary_launch_config_sha256 | type) == "string" and
 					.primary_launch_config_sha256 == .launch_config_sha256 and
-					(.authorized_launch_config_sha256 | type) == "array" and
-					all(.authorized_launch_config_sha256[]; type == "string" and test("^[0-9a-f]{64}$")) and
-					(.authorized_launch_config_sha256 | index($launch_config_sha256)) != null and
-					(.measurement_config_path | type) == "string" and (.launch_config_path | type) == "string")) and
-			 .gomaxprocs == $gomaxprocs and .minimum_free_bytes == $minimum_free_bytes and
+						(.authorized_launch_config_sha256 | type) == "array" and
+						all(.authorized_launch_config_sha256[]; type == "string" and test("^[0-9a-f]{64}$")) and
+						(($expected_authorized_launch_config_sha256 | length) == 0 or
+							.authorized_launch_config_sha256 == $expected_authorized_launch_config_sha256) and
+						(.authorized_launch_config_sha256 | index($launch_config_sha256)) != null and
+						(.measurement_config_path | type) == "string" and (.launch_config_path | type) == "string")) and
+				 (($expected_cpu_affinity == "") or
+					(.host_cpu_count == $expected_host_cpu_count and .allowed_cpu_count == $expected_allowed_cpu_count and
+					 .cpu_limit_percent == $expected_cpu_limit_percent and .cpu_affinity == $expected_cpu_affinity)) and
+				 .gomaxprocs == $gomaxprocs and .minimum_free_bytes == $minimum_free_bytes and
 				(if $memory_limit_bytes == "" then true else
 					((.memory_limit_bytes | type) == "number" and .memory_limit_bytes == ($memory_limit_bytes | tonumber) and
 					 (.gomemlimit_bytes | type) == "number" and .gomemlimit_bytes == (.memory_limit_bytes - 2147483648) and
@@ -289,9 +321,9 @@ v2_r2_require_binary_capacity_attestation() {
 			 .available_free_bytes >= (.peak_output_bytes + .safety_margin_bytes) and
 			 (.evidence_manifest_sha256 | type) == "string" and (.evidence_manifest_sha256 | test("^[0-9a-f]{64}$"))' \
 			"$attestation" >/dev/null || return 1
-		local probe_root probe_cell probe_cell_name actual_manifest_sha256 measurement_config_path measured_log_mode
-		local launch_config_path measurement_config_abs launch_config_abs actual_measurement_config_sha256 actual_launch_config_sha256
-		local measured_seed measured_start_nano measured_end_nano measured_config_sha256
+			local probe_root probe_cell probe_cell_name actual_manifest_sha256 measurement_config_path measured_log_mode
+			local launch_config_path measurement_config_abs launch_config_abs actual_measurement_config_sha256 actual_launch_config_sha256
+			local measured_seed measured_start_nano measured_end_nano measured_config_sha256
 		probe_root=$(jq -er '.probe_root | select(type == "string")' "$attestation") || return 1
 		[[ "$probe_root" == /* && "$probe_root" != */ && "$probe_root" != *$'\n'* && "$probe_root" != *$'\t'* ]] || return 1
 		[[ -d "$probe_root" && ! -L "$probe_root" ]] || return 1
@@ -319,6 +351,21 @@ v2_r2_require_binary_capacity_attestation() {
 			actual_launch_config_sha256=$(sha256sum -- "$launch_config_abs" | awk '{print $1}') || return 1
 			[[ "$actual_launch_config_sha256" == "$(jq -er '.launch_config_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' "$attestation")" ]] || return 1
 			[[ "$(jq -er '.primary_launch_config_sha256' "$attestation")" == "$actual_launch_config_sha256" ]] || return 1
+			local activation_provenance_path activation_review_attestation_path actual_activation_provenance_sha256 actual_activation_review_sha256
+			activation_provenance_path=$(jq -er '.activation_provenance_path | select(type == "string")' "$attestation") || return 1
+			[[ "$activation_provenance_path" == /* && "$activation_provenance_path" != */ && "$activation_provenance_path" != *$'\n'* && "$activation_provenance_path" != *$'\t'* ]] || return 1
+			[[ -f "$activation_provenance_path" && ! -L "$activation_provenance_path" && "$(realpath -e -- "$activation_provenance_path")" == "$activation_provenance_path" ]] || return 1
+			actual_activation_provenance_sha256=$(sha256sum -- "$activation_provenance_path" | awk '{print $1}') || return 1
+			[[ "$actual_activation_provenance_sha256" == "$(jq -er '.activation_provenance_sha256' "$attestation")" ]] || return 1
+			[[ "$actual_activation_provenance_sha256" == "$expected_activation_provenance_sha256" ]] || return 1
+			v2_r2_require_sv1b_activation_provenance "$activation_provenance_path" "$source_revision" "$expected_binary_sha" || return 1
+			activation_review_attestation_path=$(jq -er '.activation_review_attestation_path | select(type == "string")' "$attestation") || return 1
+			[[ "$activation_review_attestation_path" == /* && "$activation_review_attestation_path" != */ && "$activation_review_attestation_path" != *$'\n'* && "$activation_review_attestation_path" != *$'\t'* ]] || return 1
+			[[ -f "$activation_review_attestation_path" && ! -L "$activation_review_attestation_path" && "$(realpath -e -- "$activation_review_attestation_path")" == "$activation_review_attestation_path" ]] || return 1
+			actual_activation_review_sha256=$(sha256sum -- "$activation_review_attestation_path" | awk '{print $1}') || return 1
+			[[ "$actual_activation_review_sha256" == "$(jq -er '.activation_review_attestation_sha256' "$attestation")" ]] || return 1
+			[[ "$actual_activation_review_sha256" == "$expected_activation_review_attestation_sha256" ]] || return 1
+			v2_r2_require_sv1b_activation_review_attestation "$activation_review_attestation_path" "$source_revision" "$activation_provenance_path" || return 1
 		fi
 		measured_log_mode=$(jq -er '.log_mode | select(. == "full" or . == "none")' "$probe_cell/run-config.json") || return 1
 		local retained_files=(run-config.json run-metadata.json manifest.json greeks.json latency.json checkpoints.jsonl \

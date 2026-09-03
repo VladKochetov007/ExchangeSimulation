@@ -26,15 +26,21 @@ For one exact scientific HEAD and one clean, pinned binary set:
 3. run only the paired five-minute seed-643 activation probe;
 4. require an accepted `ACTIVATION_CONTRACT_SATISFIED` provenance artifact for
    the exact HEAD and simulator binary hash;
-5. measure capacity using a separate full-log 24-hour production-shaped
+5. obtain a separate independent review of the actual paired activation
+   evidence. This review must be tied to the immutable activation provenance
+   hash and must accept the activation, CDF diagnostics, binary evidence,
+   resource guards, and provenance bindings before capacity is measured;
+6. measure capacity using a separate full-log 24-hour production-shaped
    workload. The workload uses the registered `treatment-643.json` or
    `control-643.json` configuration structure, but overrides the simulator seed
    to the preregistered non-scientific capacity-only seed `659`, at
-   `GOMAXPROCS=4`; repeat the treatment at `GOMAXPROCS=8`;
-6. bind each calibration attestation to its source configuration hash, the
-   complete registered SV1B production launch-configuration hash set, and the
-   accepted activation provenance hash;
-7. only then run the registered development cells and their registered
+   `GOMAXPROCS=4`; repeat the treatment at `GOMAXPROCS=8`. Every process is
+   restricted to the first `floor(0.9 * host_cpus)` CPUs by `taskset`, and the
+   measured host/allowed CPU counts and affinity are retained in metadata;
+7. bind each calibration attestation to its source configuration hash, the
+   complete registered SV1B production launch-configuration hash set, both
+   accepted review artifacts, and the accepted activation provenance hash;
+8. only then run the registered development cells and their registered
    controls/parity cells.
 
 The capacity workload is deliberately not seed 643 and is not a scored
@@ -65,20 +71,32 @@ activation probe:
 
 `research/configs/v2-r2-sv1b/activation-643.json`
 
+The paired no-CDF activation control is:
+
+`research/configs/v2-r2-sv1b/activation-643-control.json`
+
 The attestation must list all seven registered SV1B launch configuration
 hashes, including the no-log parity control. Each capacity run uses
 `log_mode=full` and `evidence_format=evstream_v3`; the no-log parity control is
-not a capacity measurement case. The measured effective seed-659 run-config
-hash is retained separately from the registered source-config hash.
+not a capacity measurement case. Both activation source files explicitly carry
+full logging, `evstream_v3`, and receipt recording, and the activation runner
+requires byte-identical effective configs. The measured effective seed-659
+run-config hash is retained separately from the registered source-config hash.
 
 The capacity runner must:
 
 - refuse a dirty source tree, a non-pinned binary, or an unaccepted activation
   provenance artifact;
+- refuse capacity and development launch until the separate post-activation
+  Sol-xhigh attestation is accepted for the exact activation provenance;
 - retain the complete probe root and never overwrite an existing attestation;
 - enforce at least 4 GiB free space plus a 4 GiB safety margin;
 - use a hard 20 GiB simulator address-space/RSS ceiling and a lower 18 GiB
   `GOMEMLIMIT` guard;
+- enforce the registered CPU-affinity ceiling and terminate a guarded child
+  with `TERM`, a bounded grace period, then `KILL` if necessary;
+- remeasure free space after child exit and before sealing any capacity or
+  development status;
 - record peak RSS and output size in the attestation;
 - fail closed if the probe cell is not rooted under the attested probe root;
 - publish no attestation after a failed, incomplete, or terminal-failure run.

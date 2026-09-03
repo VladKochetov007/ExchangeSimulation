@@ -237,10 +237,15 @@ for required_capacity_guard in \
 	'trap cleanup_simulator EXIT' \
 	'kill -KILL' \
 	'retained_output_bytes=$(capacity_directory_bytes' \
-	'v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation_tmp"'; do
+	'v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation_tmp"' \
+	'capacity_role=${capacity_config_name%.json}' \
+	'activation_review_attestation_path'; do
 	rg -F "$required_capacity_guard" "$sv1_capacity_probe" >/dev/null ||
 		fail "capacity probe is missing required guard: $required_capacity_guard"
 done
+rg -F 'authorized_launch_config_sha256 == $expected_authorized_launch_config_sha256' \
+	"$root_dir/scripts/v2-integrated-longrun-r2-contract.sh" >/dev/null ||
+	fail "capacity validator does not enforce the exact registered launch hash set"
 if rg -n 'historical_full_tree_bytes|35341880370|required_free_bytes=' \
 	"$root_dir/scripts/run-v2-integrated-longrun-r2-cell.sh" >/dev/null; then
 	fail "registered launcher still contains the obsolete JSON capacity floor"

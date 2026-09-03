@@ -28,7 +28,6 @@ if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* && -z "${V2_R2_SV1_CAPACITY_
 	esac
 fi
 configured_measurement_seed="${v2_r2_sv1_capacity_measurement_seed:-$primary_seed}"
-probe_root_requested=${V2_R2_SV1_CAPACITY_ROOT:-"/home/vlad/external-scratch/${v2_r2_sv1_capacity_probe_prefix}-$head_revision"}
 horizon=24h
 simulation_start_nano=1735689600000000000
 simulation_end_nano=1735776000000000000
@@ -38,6 +37,13 @@ expected_gomaxprocs=${V2_R2_SV1_CAPACITY_GOMAXPROCS:-${GOMAXPROCS:-4}}
 memory_limit_bytes=${v2_r2_sv1_capacity_memory_limit_bytes:-0}
 gomemlimit_bytes=0
 memory_validation_arg=""
+capacity_config_name=$(basename -- "$config")
+capacity_role=${capacity_config_name%.json}
+probe_root_requested=${V2_R2_SV1_CAPACITY_ROOT:-"/home/vlad/external-scratch/${v2_r2_sv1_capacity_probe_prefix}-${head_revision}-seed-${configured_measurement_seed}-${capacity_role}-g${expected_gomaxprocs}"}
+host_cpu_count=0
+allowed_cpu_count=0
+cpu_affinity=""
+cpu_launch_prefix=()
 
 fail() {
 	echo "SV1 capacity probe failure: $*" >&2
@@ -118,6 +124,10 @@ fi
 [[ "$expected_gomaxprocs" =~ ^[1-9][0-9]*$ ]] || fail "capacity probe process width is not integral"
 if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
 	[[ "$expected_gomaxprocs" == 4 || "$expected_gomaxprocs" == 8 ]] || fail "SV1B capacity probe width must be 4 or 8"
+	IFS=$'\t' read -r host_cpu_count allowed_cpu_count cpu_affinity < <(v2_r2_sv1b_cpu_policy) ||
+		fail "could not establish the registered CPU affinity policy"
+	command -v taskset >/dev/null 2>&1 || fail "SV1B capacity probe requires taskset for the CPU ceiling"
+	cpu_launch_prefix=(taskset --cpu-list "$cpu_affinity")
 fi
 [[ "$probe_root_requested" == /* && "$probe_root_requested" != */ && "$probe_root_requested" != *$'\n'* && "$probe_root_requested" != *$'\t'* ]] || fail "capacity root must be an absolute, non-empty path"
 probe_root=$(realpath -m -- "$probe_root_requested") || fail "could not resolve capacity probe root"
@@ -195,6 +205,9 @@ launch_config_path=${launch_config#"$root_dir/"}
 calibration_only=false
 [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]] && calibration_only=true
 authorized_launch_config_sha256='[]'
+activation_provenance_path=""
+activation_review_attestation_path=""
+activation_review_attestation_sha256=""
 if [[ "$calibration_only" == true ]]; then
 	for authorized_name in "${v2_r2_sv1_capacity_authorized_launch_config_names[@]}"; do
 		[[ "$authorized_name" != */* && "$authorized_name" == *.json ]] || fail "unsafe authorized launch config name: $authorized_name"
@@ -210,7 +223,13 @@ if [[ "$calibration_only" == true ]]; then
 	activation_provenance=$(v2_r2_sv1_activation_provenance_path "$head_revision") || fail "could not resolve accepted SV1B activation provenance path"
 	v2_r2_require_sv1b_activation_provenance "$activation_provenance" "$head_revision" "$binary_sha256" ||
 		fail "refusing capacity calibration before accepted SV1B activation provenance"
+	activation_provenance_path="$activation_provenance"
 	activation_provenance_sha256=$(sha256sum -- "$activation_provenance" | awk '{print $1}')
+	activation_review_attestation_path=$(v2_r2_sv1b_activation_review_attestation_path "$head_revision") ||
+		fail "could not resolve the post-activation review attestation path"
+	v2_r2_require_sv1b_activation_review_attestation "$activation_review_attestation_path" "$head_revision" "$activation_provenance" ||
+		fail "refusing capacity calibration before independent review of the activation evidence"
+	activation_review_attestation_sha256=$(sha256sum -- "$activation_review_attestation_path" | awk '{print $1}')
 else
 	activation_provenance_sha256=""
 fi
@@ -222,21 +241,24 @@ jq -n --arg git_revision "$head_revision" --arg binary_sha256 "$binary_sha256" -
 	--argjson initial_available_free_bytes "$initial_available_free_bytes" \
 	--arg contract "$v2_r2_sv1_capacity_probe_contract" --argjson calibration_only "$calibration_only" \
 	--argjson authorized_launch_config_sha256 "$authorized_launch_config_sha256" \
-	--arg activation_provenance_sha256 "$activation_provenance_sha256" --argjson memory_limit_bytes "$memory_limit_bytes" \
+	--arg activation_provenance_path "$activation_provenance_path" --arg activation_provenance_sha256 "$activation_provenance_sha256" \
+	--arg activation_review_attestation_path "$activation_review_attestation_path" --arg activation_review_attestation_sha256 "$activation_review_attestation_sha256" \
+	--argjson memory_limit_bytes "$memory_limit_bytes" \
 	--argjson gomemlimit_bytes "$gomemlimit_bytes" \
+	--argjson host_cpu_count "$host_cpu_count" --argjson allowed_cpu_count "$allowed_cpu_count" --argjson cpu_limit_percent "${v2_r2_sv1_cpu_limit_percent:-0}" --arg cpu_affinity "$cpu_affinity" \
 	--argjson capacity_only "$capacity_only" --argjson source_config_seed "$source_config_seed" \
 	--arg probe_cell "$probe_cell_name" \
-	'{schema_version:2,contract:$contract,git_revision:$git_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,measurement_config_sha256:$measurement_config_sha256,measurement_config_path:$measurement_config_path,primary_launch_config_sha256:$launch_config_sha256,launch_config_sha256:$launch_config_sha256,launch_config_path:$launch_config_path,authorized_launch_config_sha256:$authorized_launch_config_sha256,calibration_only:$calibration_only,capacity_only:$capacity_only,source_config_seed:$source_config_seed,activation_provenance_sha256:(if $activation_provenance_sha256 == "" then null else $activation_provenance_sha256 end),memory_limit_bytes:$memory_limit_bytes,gomemlimit_bytes:$gomemlimit_bytes,binary_go_version:$binary_go_version,gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,seed:$seed,simulated_horizon:$horizon,log_mode:$log_mode,evidence_format:$evidence_format,simulation_start_nano:1735689600000000000,simulation_end_nano:1735776000000000000,probe_cell:$probe_cell}' >"$probe_dir/run-metadata.json"
+	'{schema_version:2,contract:$contract,git_revision:$git_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,measurement_config_sha256:$measurement_config_sha256,measurement_config_path:$measurement_config_path,primary_launch_config_sha256:$launch_config_sha256,launch_config_sha256:$launch_config_sha256,launch_config_path:$launch_config_path,authorized_launch_config_sha256:$authorized_launch_config_sha256,calibration_only:$calibration_only,capacity_only:$capacity_only,source_config_seed:$source_config_seed,activation_provenance_path:(if $activation_provenance_path == "" then null else $activation_provenance_path end),activation_provenance_sha256:(if $activation_provenance_sha256 == "" then null else $activation_provenance_sha256 end),activation_review_attestation_path:(if $activation_review_attestation_path == "" then null else $activation_review_attestation_path end),activation_review_attestation_sha256:(if $activation_review_attestation_sha256 == "" then null else $activation_review_attestation_sha256 end),memory_limit_bytes:$memory_limit_bytes,gomemlimit_bytes:$gomemlimit_bytes,binary_go_version:$binary_go_version,gomaxprocs:$gomaxprocs,host_cpu_count:$host_cpu_count,allowed_cpu_count:$allowed_cpu_count,cpu_limit_percent:$cpu_limit_percent,cpu_affinity:$cpu_affinity,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,seed:$seed,simulated_horizon:$horizon,log_mode:$log_mode,evidence_format:$evidence_format,simulation_start_nano:1735689600000000000,simulation_end_nano:1735776000000000000,probe_cell:$probe_cell}' >"$probe_dir/run-metadata.json"
 
 stdout_log="$probe_root/simulator.stdout.log"
 stderr_log="$probe_root/simulator.stderr.log"
 run_simulator() {
 	if [[ "$memory_limit_bytes" =~ ^[1-9][0-9]*$ ]]; then
-			env GOMAXPROCS="$expected_gomaxprocs" GOMEMLIMIT="${gomemlimit_bytes}B" prlimit --as="$memory_limit_bytes" -- \
+			"${cpu_launch_prefix[@]}" env GOMAXPROCS="$expected_gomaxprocs" GOMEMLIMIT="${gomemlimit_bytes}B" prlimit --as="$memory_limit_bytes" -- \
 				"$binary" -config "$probe_dir/run-config.json" "${seed_override_args[@]}" -duration "$horizon" -logdir "$probe_dir" -log-mode "$log_mode" -evidence-format "$evidence_format" \
 			>"$stdout_log" 2>"$stderr_log" &
 	else
-			"$binary" -config "$probe_dir/run-config.json" "${seed_override_args[@]}" -duration "$horizon" -logdir "$probe_dir" -log-mode "$log_mode" -evidence-format "$evidence_format" \
+			"${cpu_launch_prefix[@]}" "$binary" -config "$probe_dir/run-config.json" "${seed_override_args[@]}" -duration "$horizon" -logdir "$probe_dir" -log-mode "$log_mode" -evidence-format "$evidence_format" \
 			>"$stdout_log" 2>"$stderr_log" &
 	fi
 	simulator_pid=$!
@@ -363,16 +385,19 @@ jq -n --arg source_revision "$head_revision" --arg binary_sha256 "$binary_sha256
 	--argjson gomaxprocs "$expected_gomaxprocs" --argjson minimum_free_bytes "$minimum_free_bytes" \
 	--argjson initial_available_free_bytes "$initial_available_free_bytes" --argjson measurement_seed "$measurement_seed" \
 	--argjson calibration_only "$calibration_only" --argjson authorized_launch_config_sha256 "$authorized_launch_config_sha256" \
-	--arg activation_provenance_sha256 "$activation_provenance_sha256" --argjson memory_limit_bytes "$memory_limit_bytes" \
+	--arg activation_provenance_path "$activation_provenance_path" --arg activation_provenance_sha256 "$activation_provenance_sha256" \
+	--arg activation_review_attestation_path "$activation_review_attestation_path" --arg activation_review_attestation_sha256 "$activation_review_attestation_sha256" \
+	--argjson memory_limit_bytes "$memory_limit_bytes" \
 	--argjson gomemlimit_bytes "$gomemlimit_bytes" \
 	--argjson capacity_only "$capacity_only" --argjson source_config_seed "$source_config_seed" \
 	--argjson peak_rss_bytes "$peak_rss_bytes" --arg peak_rss_at "$peak_rss_at" --arg log_mode "$log_mode" --arg probe_cell "$probe_cell_name" \
+	--argjson host_cpu_count "$host_cpu_count" --argjson allowed_cpu_count "$allowed_cpu_count" --argjson cpu_limit_percent "${v2_r2_sv1_cpu_limit_percent:-0}" --arg cpu_affinity "$cpu_affinity" \
 	--arg contract "${v2_r2_sv1_capacity_attestation_contract:-v2-integrated-longrun-r2-binary-capacity-v1}" \
 	--argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
-	'{schema_version:1,contract:$contract,measurement:"full_24h_binary_evidence_capacity_probe",evidence_format:$evidence_format,log_mode:$log_mode,source_revision:$source_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,measurement_config_sha256:$measurement_config_sha256,measurement_config_path:$measurement_config_path,measurement_seed:$measurement_seed,source_config_seed:$source_config_seed,capacity_only:$capacity_only,primary_launch_config_sha256:$launch_config_sha256,launch_config_sha256:$launch_config_sha256,launch_config_path:$launch_config_path,authorized_launch_config_sha256:$authorized_launch_config_sha256,calibration_only:$calibration_only,activation_provenance_sha256:(if $activation_provenance_sha256 == "" then null else $activation_provenance_sha256 end),gomaxprocs:$gomaxprocs,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,memory_limit_bytes:$memory_limit_bytes,gomemlimit_bytes:$gomemlimit_bytes,peak_rss_bytes:$peak_rss_bytes,peak_rss_observed_at:$peak_rss_at,probe_root:$probe_root,probe_cell:$probe_cell,evidence_manifest_sha256:$evidence_manifest_sha256,peak_output_bytes:$peak_output_bytes,safety_margin_bytes:$safety_margin_bytes,required_free_bytes:$required_free_bytes,available_free_bytes:$final_available_free_bytes,peak_observed_at:$peak_at,simulation_start_nano:$simulation_start_nano,simulation_end_nano:$simulation_end_nano}' >"$attestation_tmp"
-	v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation_tmp" "" "$expected_gomaxprocs" "$minimum_free_bytes" true "$launch_config_sha256" "$memory_validation_arg" "$measurement_config_sha256" "$activation_provenance_sha256" ||
+	'{schema_version:1,contract:$contract,measurement:"full_24h_binary_evidence_capacity_probe",evidence_format:$evidence_format,log_mode:$log_mode,source_revision:$source_revision,binary_sha256:$binary_sha256,config_sha256:$config_sha256,measurement_config_sha256:$measurement_config_sha256,measurement_config_path:$measurement_config_path,measurement_seed:$measurement_seed,source_config_seed:$source_config_seed,capacity_only:$capacity_only,primary_launch_config_sha256:$launch_config_sha256,launch_config_sha256:$launch_config_sha256,launch_config_path:$launch_config_path,authorized_launch_config_sha256:$authorized_launch_config_sha256,calibration_only:$calibration_only,activation_provenance_path:(if $activation_provenance_path == "" then null else $activation_provenance_path end),activation_provenance_sha256:(if $activation_provenance_sha256 == "" then null else $activation_provenance_sha256 end),activation_review_attestation_path:(if $activation_review_attestation_path == "" then null else $activation_review_attestation_path end),activation_review_attestation_sha256:(if $activation_review_attestation_sha256 == "" then null else $activation_review_attestation_sha256 end),gomaxprocs:$gomaxprocs,host_cpu_count:$host_cpu_count,allowed_cpu_count:$allowed_cpu_count,cpu_limit_percent:$cpu_limit_percent,cpu_affinity:$cpu_affinity,minimum_free_bytes:$minimum_free_bytes,initial_available_free_bytes:$initial_available_free_bytes,memory_limit_bytes:$memory_limit_bytes,gomemlimit_bytes:$gomemlimit_bytes,peak_rss_bytes:$peak_rss_bytes,peak_rss_observed_at:$peak_rss_at,probe_root:$probe_root,probe_cell:$probe_cell,evidence_manifest_sha256:$evidence_manifest_sha256,peak_output_bytes:$peak_output_bytes,safety_margin_bytes:$safety_margin_bytes,required_free_bytes:$required_free_bytes,available_free_bytes:$final_available_free_bytes,peak_observed_at:$peak_at,simulation_start_nano:$simulation_start_nano,simulation_end_nano:$simulation_end_nano}' >"$attestation_tmp"
+	v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation_tmp" "" "$expected_gomaxprocs" "$minimum_free_bytes" true "$launch_config_sha256" "$memory_validation_arg" "$measurement_config_sha256" "$activation_provenance_sha256" "$activation_review_attestation_sha256" ||
 	fail "generated capacity attestation failed retained-evidence validation; output retained at $probe_root"
 mv -- "$attestation_tmp" "$attestation"
-v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation" "" "$expected_gomaxprocs" "$minimum_free_bytes" true "$launch_config_sha256" "$memory_validation_arg" "$measurement_config_sha256" "$activation_provenance_sha256" ||
+v2_r2_require_binary_capacity_attestation "$binary" "$head_revision" "$attestation" "" "$expected_gomaxprocs" "$minimum_free_bytes" true "$launch_config_sha256" "$memory_validation_arg" "$measurement_config_sha256" "$activation_provenance_sha256" "$activation_review_attestation_sha256" ||
 	fail "published capacity attestation failed final validation; output retained at $probe_root"
 echo "completed SV1 24-hour binary capacity probe: root=$probe_root peak_bytes=$peak_output_bytes required_free_bytes=$required_free_bytes"

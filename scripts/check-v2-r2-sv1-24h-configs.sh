@@ -102,7 +102,8 @@ if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1B-* ]]; then
 		--arg measurement_config_path "${v2_r2_sv1_capacity_measurement_config#"$root_dir/"}" --arg launch_config_path "$launch_config_path" \
 		--argjson authorized "$authorized_launch_config_hashes" --argjson cases "$capacity_cases" \
 		'.capacity_calibration.contract == $contract and .capacity_calibration.mode == $mode and
-			 .capacity_calibration.calibration_only == true and .capacity_calibration.minimum_free_bytes == 4294967296 and
+				 .capacity_calibration.calibration_only == true and .capacity_calibration.minimum_free_bytes == 4294967296 and
+				 .capacity_calibration.cpu_limit_percent == 90 and .capacity_calibration.cpu_affinity_policy == "first_floor(0.9*host_cpus)" and
 			 .capacity_calibration.safety_margin_bytes == 4294967296 and .capacity_calibration.memory_limit_bytes == 21474836480 and
 			 .capacity_calibration.gomemlimit_bytes == 19327352832 and .capacity_calibration.capacity_only_seed == 659 and
 			 .capacity_calibration.source_config_seed == 643 and

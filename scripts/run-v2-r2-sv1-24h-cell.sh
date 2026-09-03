@@ -154,8 +154,14 @@ capacity_measurement_config_path=""
 capacity_attestation_sha256=""
 review_attestation_path=""
 review_attestation_sha256=""
+activation_review_attestation_path=""
+activation_review_attestation_sha256=""
 gomemlimit_bytes=0
 minimum_free_bytes=0
+host_cpu_count=0
+allowed_cpu_count=0
+cpu_affinity=""
+cpu_launch_prefix=()
 if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
 	activation_provenance=$(v2_r2_sv1_activation_provenance_path "$head_revision") || {
 		echo "could not resolve accepted SV1B activation provenance path" >&2
@@ -171,6 +177,24 @@ if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
 		exit 1
 	}
 	review_attestation_sha256=$(sha256sum -- "$review_attestation_path" | awk '{print $1}')
+	activation_review_attestation_path=$(v2_r2_sv1b_activation_review_attestation_path "$sim_revision") || {
+		echo "could not resolve the post-activation review attestation path" >&2
+		exit 1
+	}
+	v2_r2_require_sv1b_activation_review_attestation "$activation_review_attestation_path" "$sim_revision" "$activation_provenance" || {
+		echo "refusing SV1B cell before independent review of activation evidence" >&2
+		exit 1
+	}
+	activation_review_attestation_sha256=$(sha256sum -- "$activation_review_attestation_path" | awk '{print $1}')
+	IFS=$'\t' read -r host_cpu_count allowed_cpu_count cpu_affinity < <(v2_r2_sv1b_cpu_policy) || {
+		echo "could not establish the registered CPU affinity policy" >&2
+		exit 1
+	}
+	command -v taskset >/dev/null 2>&1 || {
+		echo "SV1B cell runner requires taskset for the CPU ceiling" >&2
+		exit 1
+	}
+	cpu_launch_prefix=(taskset --cpu-list "$cpu_affinity")
 fi
 
 log_mode=$(jq -er '.log_mode' "$config")
@@ -205,7 +229,7 @@ fi
 	echo "registered successor cell requires evstream_v3 evidence (got $evidence_format)" >&2
 	exit 1
 }
-v2_r2_require_binary_capacity_attestation "$binary" "$sim_revision" "$capacity_attestation" "" "$expected_gomaxprocs" $((4 * 1024 * 1024 * 1024)) true "$config_sha256" "${v2_r2_sv1_capacity_memory_limit_bytes:-}" "$measurement_config_sha256" "$activation_provenance_sha256" || {
+v2_r2_require_binary_capacity_attestation "$binary" "$sim_revision" "$capacity_attestation" "" "$expected_gomaxprocs" $((4 * 1024 * 1024 * 1024)) true "$config_sha256" "${v2_r2_sv1_capacity_memory_limit_bytes:-}" "$measurement_config_sha256" "$activation_provenance_sha256" "$activation_review_attestation_sha256" || {
 	echo "refusing long-run launch without a matching measured binary-evidence capacity attestation" >&2
 	exit 1
 }
@@ -253,14 +277,17 @@ jq -n \
 		--argjson gomaxprocs "$GOMAXPROCS" \
 		--argjson memory_limit_bytes "${v2_r2_sv1_capacity_memory_limit_bytes:-0}" \
 		--argjson gomemlimit_bytes "$gomemlimit_bytes" --argjson minimum_free_bytes "$minimum_free_bytes" \
+		--argjson host_cpu_count "$host_cpu_count" --argjson allowed_cpu_count "$allowed_cpu_count" \
+		--argjson cpu_limit_percent "${v2_r2_sv1_cpu_limit_percent:-0}" --arg cpu_affinity "$cpu_affinity" \
 	--arg output_dir "$output" \
 	--arg evidence_manifest_path "$output/evidence-manifest.json" \
 	--arg external_attestation_path "$v2_r2_attestation_root/$cell.json" \
 		--arg capacity_attestation_path "$capacity_attestation" \
 		--arg capacity_attestation_sha256 "$capacity_attestation_sha256" \
-		--arg capacity_probe_cell "$capacity_probe_cell" \
-		--arg activation_provenance_sha256 "$activation_provenance_sha256" \
-		--arg review_attestation_path "$review_attestation_path" --arg review_attestation_sha256 "$review_attestation_sha256" \
+			--arg capacity_probe_cell "$capacity_probe_cell" \
+			--arg activation_provenance_sha256 "$activation_provenance_sha256" \
+			--arg review_attestation_path "$review_attestation_path" --arg review_attestation_sha256 "$review_attestation_sha256" \
+			--arg activation_review_attestation_path "$activation_review_attestation_path" --arg activation_review_attestation_sha256 "$activation_review_attestation_sha256" \
 	--argjson holdout "$holdout" \
 	--arg binary_path "$binary" \
 	--arg config_path "$config" \
@@ -293,12 +320,16 @@ jq -n \
 		  git_revision: $git_revision, go_version: $go_version, binary_go_version: $binary_go_version,
 		  binary_goos: $binary_goos, binary_goarch: $binary_goarch, binary_goamd64: $binary_goamd64,
 			  gomaxprocs: $gomaxprocs, memory_limit_bytes: $memory_limit_bytes,
-			  gomemlimit_bytes: $gomemlimit_bytes, minimum_free_bytes: $minimum_free_bytes, output_dir: $output_dir,
+			  gomemlimit_bytes: $gomemlimit_bytes, host_cpu_count: $host_cpu_count,
+			  allowed_cpu_count: $allowed_cpu_count, cpu_limit_percent: $cpu_limit_percent,
+			  cpu_affinity: $cpu_affinity, minimum_free_bytes: $minimum_free_bytes, output_dir: $output_dir,
 			  capacity_attestation_path: $capacity_attestation_path, capacity_attestation_sha256: $capacity_attestation_sha256,
 			  capacity_probe_cell: $capacity_probe_cell,
 			  activation_provenance_sha256: (if $activation_provenance_sha256 == "" then null else $activation_provenance_sha256 end),
 			  review_attestation_path: (if $review_attestation_path == "" then null else $review_attestation_path end),
 			  review_attestation_sha256: (if $review_attestation_sha256 == "" then null else $review_attestation_sha256 end),
+			  activation_review_attestation_path: (if $activation_review_attestation_path == "" then null else $activation_review_attestation_path end),
+			  activation_review_attestation_sha256: (if $activation_review_attestation_sha256 == "" then null else $activation_review_attestation_sha256 end),
 		  evidence_manifest_path: $evidence_manifest_path,
 		  external_attestation_path: $external_attestation_path,
 		  command: ["multivenue", "-config", "run-config.json", "-duration", $horizon, "-logdir", $output_dir, "-log-mode", $log_mode, "-evidence-format", $evidence_format],
@@ -322,6 +353,36 @@ capacity_free_bytes() {
 	[[ "$available_bytes" =~ ^[0-9]+$ ]] || return 1
 	printf '%s\n' "$available_bytes"
 }
+
+simulator_pid=""
+terminate_simulator() {
+	local child_pid=${simulator_pid:-}
+	[[ "$child_pid" =~ ^[1-9][0-9]*$ ]] || return 0
+	if kill -0 "$child_pid" 2>/dev/null; then
+		kill -TERM "$child_pid" 2>/dev/null || true
+		for _ in {1..15}; do
+			kill -0 "$child_pid" 2>/dev/null || break
+			sleep 1
+		done
+		if kill -0 "$child_pid" 2>/dev/null; then
+			kill -KILL "$child_pid" 2>/dev/null || true
+		fi
+	fi
+	wait "$child_pid" 2>/dev/null || true
+	simulator_pid=""
+}
+
+cleanup_simulator() {
+	local exit_status=$?
+	trap - EXIT INT TERM HUP
+	terminate_simulator
+	exit "$exit_status"
+}
+
+trap cleanup_simulator EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 run_simulator_with_memory_guard() {
 	if [[ "${v2_r2_sv1_candidate_id:-}" != V2-R2-SV1B-* ]]; then
 		"$binary" -config "$output/run-config.json" -duration "$horizon" -logdir "$output" -log-mode "$log_mode" -evidence-format "$evidence_format" \
@@ -349,10 +410,11 @@ run_simulator_with_memory_guard() {
 		resource_guard_reason="initial free space is below the ${minimum_free_bytes}-byte reserve: $simulator_initial_free_bytes"
 		return 125
 	fi
-	env GOMAXPROCS="$GOMAXPROCS" GOMEMLIMIT="${gomemlimit_bytes}B" prlimit --as="$memory_limit_bytes" -- \
+	"${cpu_launch_prefix[@]}" env GOMAXPROCS="$GOMAXPROCS" GOMEMLIMIT="${gomemlimit_bytes}B" prlimit --as="$memory_limit_bytes" -- \
 		"$binary" -config "$output/run-config.json" -duration "$horizon" -logdir "$output" -log-mode "$log_mode" -evidence-format "$evidence_format" \
 		>"$stdout_log" 2>"$stderr_log" &
-	local simulator_pid=$! rss_kib rss_bytes
+	simulator_pid=$!
+	local rss_kib rss_bytes
 	while kill -0 "$simulator_pid" 2>/dev/null; do
 		rss_kib=$(awk '$1 == "VmRSS:" {print $2; exit}' "/proc/$simulator_pid/status" 2>/dev/null)
 		if [[ "$rss_kib" =~ ^[0-9]+$ ]]; then
@@ -365,35 +427,46 @@ run_simulator_with_memory_guard() {
 				echo "SV1B simulator RSS crossed the ${memory_limit_bytes}-byte safety limit: $rss_bytes" >&2
 				resource_guard_failed=true
 				resource_guard_reason="simulator RSS crossed the ${memory_limit_bytes}-byte safety limit: $rss_bytes"
-				kill -TERM "$simulator_pid" 2>/dev/null || true
-				wait "$simulator_pid" 2>/dev/null || true
+				terminate_simulator
 				return 137
 			fi
 		elif [[ -d "/proc/$simulator_pid" ]]; then
 			echo "SV1B simulator RSS could not be measured while it was running" >&2
-			resource_guard_failed=true
-			resource_guard_reason="simulator RSS could not be measured while it was running"
-			kill -TERM "$simulator_pid" 2>/dev/null || true
-			wait "$simulator_pid" 2>/dev/null || true
-			return 125
+				resource_guard_failed=true
+				resource_guard_reason="simulator RSS could not be measured while it was running"
+				terminate_simulator
+				return 125
 		fi
 		if ! simulator_final_free_bytes=$(capacity_free_bytes "$output"); then
-			resource_guard_failed=true
-			resource_guard_reason="free-space measurement failed while the simulator was running"
-			kill -TERM "$simulator_pid" 2>/dev/null || true
-			wait "$simulator_pid" 2>/dev/null || true
-			return 125
+				resource_guard_failed=true
+				resource_guard_reason="free-space measurement failed while the simulator was running"
+				terminate_simulator
+				return 125
 		fi
 		if (( simulator_final_free_bytes < minimum_free_bytes )); then
-			resource_guard_failed=true
-			resource_guard_reason="free space crossed the ${minimum_free_bytes}-byte reserve: $simulator_final_free_bytes"
-			kill -TERM "$simulator_pid" 2>/dev/null || true
-			wait "$simulator_pid" 2>/dev/null || true
-			return 125
+				resource_guard_failed=true
+				resource_guard_reason="free space crossed the ${minimum_free_bytes}-byte reserve: $simulator_final_free_bytes"
+				terminate_simulator
+				return 125
 		fi
 		sleep 1
 	done
-	wait "$simulator_pid"
+	local simulator_status
+	if wait "$simulator_pid"; then
+		simulator_status=0
+	else
+		simulator_status=$?
+	fi
+	simulator_pid=""
+	if ! simulator_final_free_bytes=$(capacity_free_bytes "$output"); then
+		resource_guard_failed=true
+		resource_guard_reason="final free-space measurement failed after the simulator exited"
+	elif (( simulator_final_free_bytes < minimum_free_bytes )); then
+		resource_guard_failed=true
+		resource_guard_reason="final free space is below the ${minimum_free_bytes}-byte reserve: $simulator_final_free_bytes"
+	fi
+	[[ "$resource_guard_failed" == false ]] || return 125
+	return "$simulator_status"
 }
 set +e
 run_simulator_with_memory_guard
