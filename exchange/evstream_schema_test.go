@@ -120,8 +120,11 @@ func TestBookSnapshotEvidenceRoundTrip(t *testing.T) {
 		{Asks: nil, Bids: []PriceLevel{}},
 		{Asks: []PriceLevel{}, Bids: []PriceLevel{}},
 		{
-			Asks: []PriceLevel{{Price: 1, VisibleQty: 2, HiddenQty: 3}},
-			Bids: []PriceLevel{{Price: math.MinInt64}, {Price: math.MaxInt64, VisibleQty: -1}},
+			Asks:           []PriceLevel{{Price: 1, VisibleQty: 2, HiddenQty: 3}},
+			Bids:           []PriceLevel{{Price: math.MinInt64}, {Price: math.MaxInt64, VisibleQty: -1}},
+			SourceSequence: 17,
+			PublicAsks:     []PriceLevel{{Price: 1, VisibleQty: 2}},
+			PublicBids:     []PriceLevel{{Price: math.MinInt64}},
 		},
 	} {
 		frame, _ := roundTripFrame(t, original)
@@ -326,12 +329,16 @@ func TestHighVolumeTypedPayloadsPreserveLegacyJSONShape(t *testing.T) {
 		{
 			name: "book snapshot",
 			typed: bookSnapshotEvidence{
-				Asks: []PriceLevel{{Price: 101, VisibleQty: 7, HiddenQty: 2}},
-				Bids: []PriceLevel{},
+				Asks:       []PriceLevel{{Price: 101, VisibleQty: 7, HiddenQty: 2}},
+				Bids:       []PriceLevel{},
+				PublicAsks: []PriceLevel{{Price: 101, VisibleQty: 7}},
+				PublicBids: []PriceLevel{},
 			},
 			old: map[string]any{
-				"bids": []PriceLevel{},
-				"asks": []PriceLevel{{Price: 101, VisibleQty: 7, HiddenQty: 2}},
+				"bids":        []PriceLevel{},
+				"asks":        []PriceLevel{{Price: 101, VisibleQty: 7, HiddenQty: 2}},
+				"public_bids": []PriceLevel{},
+				"public_asks": []PriceLevel{{Price: 101, VisibleQty: 7}},
 			},
 		},
 		{

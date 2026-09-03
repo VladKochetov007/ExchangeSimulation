@@ -9,8 +9,11 @@ package exchange
 // sides are intentionally distinct in the binary schema, matching JSON null
 // versus [].
 type bookSnapshotEvidence struct {
-	Asks []PriceLevel `json:"asks"`
-	Bids []PriceLevel `json:"bids"`
+	Asks           []PriceLevel `json:"asks"`
+	Bids           []PriceLevel `json:"bids"`
+	SourceSequence uint64       `json:"source_sequence,omitempty"`
+	PublicAsks     []PriceLevel `json:"public_asks"`
+	PublicBids     []PriceLevel `json:"public_bids"`
 }
 
 // bookDeltaEvidence contains both public and hidden quantities. The public

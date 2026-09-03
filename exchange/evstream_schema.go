@@ -127,28 +127,40 @@ func DecodeBookDelta(payload []byte, resolve evstream.Resolver, into *bookDeltaE
 // --- bookSnapshotEvidence ---
 
 const (
-	snapshotOptionalFields = 2
-	snapshotAsksBit        = 0
-	snapshotBidsBit        = 1
+	snapshotV1OptionalFields = 2
+	snapshotAsksBit          = 0
+	snapshotBidsBit          = 1
+	snapshotV3OptionalFields = 4
+	snapshotPublicAsksBit    = 2
+	snapshotPublicBidsBit    = 3
 )
 
 func (b bookSnapshotEvidence) SchemaID() uint16      { return SchemaBookSnapshot }
-func (b bookSnapshotEvidence) SchemaVersion() uint16 { return 1 }
+func (b bookSnapshotEvidence) SchemaVersion() uint16 { return 3 }
 
 // AppendPayloadInterning writes both sides. Each carries a presence bit, so a
 // nil side and an empty one stay distinguishable exactly as JSON's null and []
 // are.
 func (b bookSnapshotEvidence) AppendPayloadInterning(dst []byte, _ evstream.Interner) ([]byte, error) {
 	start := len(dst)
-	dst = append(dst, make([]byte, evstream.PresenceBits(snapshotOptionalFields))...)
+	dst = append(dst, make([]byte, evstream.PresenceBits(snapshotV3OptionalFields))...)
 	if b.Asks != nil {
 		evstream.SetPresence(dst[start:], snapshotAsksBit)
 	}
 	if b.Bids != nil {
 		evstream.SetPresence(dst[start:], snapshotBidsBit)
 	}
+	if b.PublicAsks != nil {
+		evstream.SetPresence(dst[start:], snapshotPublicAsksBit)
+	}
+	if b.PublicBids != nil {
+		evstream.SetPresence(dst[start:], snapshotPublicBidsBit)
+	}
+	dst = evstream.AppendUint64(dst, b.SourceSequence)
 	dst = appendLevels(dst, b.Asks)
-	return appendLevels(dst, b.Bids), nil
+	dst = appendLevels(dst, b.Bids)
+	dst = appendLevels(dst, b.PublicAsks)
+	return appendLevels(dst, b.PublicBids), nil
 }
 
 func appendLevels(dst []byte, levels []PriceLevel) []byte {
@@ -166,10 +178,34 @@ func appendLevels(dst []byte, levels []PriceLevel) []byte {
 
 // DecodeBookSnapshot reads the payload back.
 func DecodeBookSnapshot(payload []byte, into *bookSnapshotEvidence) error {
+	return DecodeBookSnapshotVersioned(payload, 3, into)
+}
+
+// DecodeBookSnapshotVersioned retains compatibility with schema v1 and v2.
+// Schema v3 additionally carries the exact public projection, because a capped
+// god-view snapshot can contain hidden levels that consume slots before the
+// public publisher reaches its own twenty-level boundary.
+func DecodeBookSnapshotVersioned(payload []byte, schemaVersion uint16, into *bookSnapshotEvidence) error {
 	cursor := evstream.NewCursor(payload)
-	presence := cursor.Presence(snapshotOptionalFields)
+	optionalFields := snapshotV1OptionalFields
+	if schemaVersion == 3 {
+		optionalFields = snapshotV3OptionalFields
+	}
+	presence := cursor.Presence(optionalFields)
+	into.SourceSequence = 0
+	into.PublicAsks = nil
+	into.PublicBids = nil
+	if schemaVersion == 2 || schemaVersion == 3 {
+		into.SourceSequence = cursor.Uint64()
+	} else if schemaVersion != 1 {
+		return unsupportedSchemaVersion(SchemaBookSnapshot, schemaVersion)
+	}
 	into.Asks = readLevels(cursor, presence.Has(snapshotAsksBit), into.Asks)
 	into.Bids = readLevels(cursor, presence.Has(snapshotBidsBit), into.Bids)
+	if schemaVersion == 3 {
+		into.PublicAsks = readLevels(cursor, presence.Has(snapshotPublicAsksBit), into.PublicAsks)
+		into.PublicBids = readLevels(cursor, presence.Has(snapshotPublicBidsBit), into.PublicBids)
+	}
 	return finishCursor(cursor)
 }
 
@@ -418,12 +454,19 @@ func RenderPayloadJSONVersioned(schemaID, schemaVersion uint16, payload []byte, 
 		}
 		return json.Marshal(value)
 	case SchemaBookSnapshot:
-		if schemaVersion != 1 {
+		if schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3 {
 			return nil, unsupportedSchemaVersion(schemaID, schemaVersion)
 		}
 		var value bookSnapshotEvidence
-		if err := DecodeBookSnapshot(payload, &value); err != nil {
+		if err := DecodeBookSnapshotVersioned(payload, schemaVersion, &value); err != nil {
 			return nil, err
+		}
+		if schemaVersion < 3 {
+			return json.Marshal(struct {
+				Asks           []PriceLevel `json:"asks"`
+				Bids           []PriceLevel `json:"bids"`
+				SourceSequence uint64       `json:"source_sequence,omitempty"`
+			}{Asks: value.Asks, Bids: value.Bids, SourceSequence: value.SourceSequence})
 		}
 		return json.Marshal(value)
 	case SchemaVenueBalance:

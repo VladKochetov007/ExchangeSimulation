@@ -148,12 +148,12 @@ func containsMDType(types []etypes.MDType, target etypes.MDType) bool {
 	return false
 }
 
-func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, timestamp int64) {
+func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, timestamp int64) uint64 {
 	p.mu.Lock()
 	subs := p.Subscriptions[symbol]
 	if len(subs) == 0 {
 		p.mu.Unlock()
-		return
+		return 0
 	}
 
 	p.seqNum++
@@ -201,6 +201,7 @@ func (p *MDPublisher) Publish(symbol string, mdType etypes.MDType, data any, tim
 		}
 	}
 	p.mu.Unlock()
+	return seqNum
 }
 
 // cloneMarketDataData gives each subscriber independent ownership of mutable

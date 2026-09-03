@@ -456,15 +456,19 @@ func (e *DefaultExchange) logSnapshots() {
 	for _, symbol := range symbols {
 		book := e.Books[symbol]
 		// Subscribers get the displayed book; loggers keep the god view.
-		e.MDPublisher.Publish(symbol, MDSnapshot, &BookSnapshot{
+		publicSnapshot := BookSnapshot{
 			Bids: book.Bids.GetPublicSnapshot(),
 			Asks: book.Asks.GetPublicSnapshot(),
-		}, timestamp)
+		}
+		sourceSequence := e.MDPublisher.Publish(symbol, MDSnapshot, &publicSnapshot, timestamp)
 
 		if log := e.getLogger(symbol); log != nil {
 			log.LogEvent(timestamp, 0, "BookSnapshot", bookSnapshotEvidence{
-				Bids: book.Bids.GetSnapshot(),
-				Asks: book.Asks.GetSnapshot(),
+				Bids:           book.Bids.GetSnapshot(),
+				Asks:           book.Asks.GetSnapshot(),
+				SourceSequence: sourceSequence,
+				PublicBids:     publicSnapshot.Bids,
+				PublicAsks:     publicSnapshot.Asks,
 			})
 		}
 	}

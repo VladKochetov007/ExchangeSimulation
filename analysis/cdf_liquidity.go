@@ -22,144 +22,183 @@ import (
 // intervention can be reconstructed without guessing; it is not a survival
 // score.
 type CDFLiquidityRunAudit struct {
-	Provenance                                  *CDFLiquidityRunProvenance  `json:"provenance,omitempty"`
-	SupplierCount                               int                         `json:"supplier_count"`
-	DecisionCount                               int64                       `json:"decision_count"`
-	FillCount                                   int64                       `json:"fill_count"`
-	SupplierVolumeQty                           int64                       `json:"supplier_volume_qty"`
-	TotalTradeCount                             int64                       `json:"total_trade_count"`
-	TotalTradeVolumeQty                         int64                       `json:"total_trade_volume_qty"`
-	SupplierVolumeShare                         float64                     `json:"supplier_volume_share"`
-	SnapshotCount                               int64                       `json:"snapshot_count"`
-	BidAbsentSnapshots                          int64                       `json:"bid_absent_snapshots"`
-	AskAbsentSnapshots                          int64                       `json:"ask_absent_snapshots"`
-	BothAbsentSnapshots                         int64                       `json:"both_absent_snapshots"`
-	QualifiedBidAbsentSnapshots                 int64                       `json:"qualified_bid_absent_snapshots"`
-	QualifiedAskAbsentSnapshots                 int64                       `json:"qualified_ask_absent_snapshots"`
-	QualifiedBothAbsentSnapshots                int64                       `json:"qualified_both_absent_snapshots"`
-	BidAbsenceFraction                          float64                     `json:"bid_absence_fraction"`
-	AskAbsenceFraction                          float64                     `json:"ask_absence_fraction"`
-	QualifiedBidAbsenceFraction                 float64                     `json:"qualified_bid_absence_fraction"`
-	QualifiedAskAbsenceFraction                 float64                     `json:"qualified_ask_absence_fraction"`
-	SupplierRemovalSnapshotCount                int64                       `json:"supplier_removal_snapshot_count"`
-	SupplierRemovalBidAbsentSnapshots           int64                       `json:"supplier_removal_bid_absent_snapshots"`
-	SupplierRemovalAskAbsentSnapshots           int64                       `json:"supplier_removal_ask_absent_snapshots"`
-	SupplierRemovalBothAbsentSnapshots          int64                       `json:"supplier_removal_both_absent_snapshots"`
-	SupplierRemovalQualifiedBidAbsentSnapshots  int64                       `json:"supplier_removal_qualified_bid_absent_snapshots"`
-	SupplierRemovalQualifiedAskAbsentSnapshots  int64                       `json:"supplier_removal_qualified_ask_absent_snapshots"`
-	SupplierRemovalQualifiedBothAbsentSnapshots int64                       `json:"supplier_removal_qualified_both_absent_snapshots"`
-	SupplierRemovalOneSidedSnapshots            int64                       `json:"supplier_removal_one_sided_snapshots"`
-	SupplierRemovalInvalidSnapshots             int64                       `json:"supplier_removal_invalid_snapshots"`
-	SupplierRemovalBidAbsenceFraction           float64                     `json:"supplier_removal_bid_absence_fraction"`
-	SupplierRemovalAskAbsenceFraction           float64                     `json:"supplier_removal_ask_absence_fraction"`
-	SupplierRemovalQualifiedBidAbsenceFraction  float64                     `json:"supplier_removal_qualified_bid_absence_fraction"`
-	SupplierRemovalQualifiedAskAbsenceFraction  float64                     `json:"supplier_removal_qualified_ask_absence_fraction"`
-	SupplierRemovalCounterfactualValid          bool                        `json:"supplier_removal_counterfactual_valid"`
-	MinimumExecutableQty                        int64                       `json:"minimum_executable_qty"`
-	SupplierInitialEquity                       int64                       `json:"supplier_initial_equity"`
-	SupplierTerminalEquity                      int64                       `json:"supplier_terminal_equity"`
-	SupplierPnL                                 int64                       `json:"supplier_pnl"`
-	AcceptedQuoteCount                          int64                       `json:"accepted_quote_count"`
-	CompletedQuoteCount                         int64                       `json:"completed_quote_count"`
-	CensoredQuoteCount                          int64                       `json:"censored_quote_count"`
-	LiveAcceptedQuoteCount                      int64                       `json:"live_accepted_quote_count"`
-	PendingSubmissionCount                      int64                       `json:"pending_submission_count"`
-	CancelPendingQuoteCount                     int64                       `json:"cancel_pending_quote_count"`
-	MeanQuoteLifetimeNs                         float64                     `json:"mean_quote_lifetime_ns"`
-	MaxQuoteLifetimeNs                          int64                       `json:"max_quote_lifetime_ns"`
-	MeanObservedTouchShare                      float64                     `json:"mean_observed_touch_share"`
-	MaxObservedTouchShare                       float64                     `json:"max_observed_touch_share"`
-	SubmitCount                                 int64                       `json:"submit_count"`
-	RestCount                                   int64                       `json:"rest_count"`
-	CancelCount                                 int64                       `json:"cancel_count"`
-	WithdrawCount                               int64                       `json:"withdraw_count"`
-	WithdrawalWithoutReplacementCount           int64                       `json:"withdrawal_without_replacement_count"`
-	CensoredWithdrawalCount                     int64                       `json:"censored_withdrawal_count"`
-	TradingSupplierCount                        int64                       `json:"trading_supplier_count"`
-	PnLChangingSupplierCount                    int64                       `json:"pnl_changing_supplier_count"`
-	InventoryResponsiveDecisionCount            int64                       `json:"inventory_responsive_decision_count"`
-	RiskStateDecisionCount                      int64                       `json:"risk_state_decision_count"`
-	RiskLimitTriggeredDecisionCount             int64                       `json:"risk_limit_triggered_decision_count"`
-	MaxObservedLossFromInitialQuote             int64                       `json:"max_observed_loss_from_initial_quote"`
-	MaxObservedDrawdownQuote                    int64                       `json:"max_observed_drawdown_quote"`
-	RealizedPnL                                 int64                       `json:"realized_pnl"`
-	UnrealizedPnL                               int64                       `json:"unrealized_pnl"`
-	EndowmentRevaluationPnL                     int64                       `json:"endowment_revaluation_pnl"`
-	TradingPnL                                  int64                       `json:"trading_pnl"`
-	TradingPnLReconciliationResidual            int64                       `json:"trading_pnl_reconciliation_residual"`
-	BalanceSnapshotCount                        int64                       `json:"balance_snapshot_count"`
-	BalanceReconciliationResidual               int64                       `json:"balance_reconciliation_residual"`
-	PnLReconciliationResidual                   int64                       `json:"pnl_reconciliation_residual"`
-	MaxBorrowed                                 int64                       `json:"max_borrowed"`
-	HistoricalSupplierCount                     int                         `json:"historical_supplier_count"`
-	ExpectedHistoricalCount                     int                         `json:"expected_historical_count"`
-	SupplierDepthOver75Share                    float64                     `json:"supplier_depth_over_75_share"`
-	MaxSupplierDepthShare                       float64                     `json:"max_supplier_depth_share"`
-	SupplierTimeWeightedRestingDepthShare       float64                     `json:"supplier_time_weighted_resting_depth_share"`
-	SupplierBidTimeWeightedRestingDepthShare    float64                     `json:"supplier_bid_time_weighted_resting_depth_share"`
-	SupplierAskTimeWeightedRestingDepthShare    float64                     `json:"supplier_ask_time_weighted_resting_depth_share"`
-	SupplierPresentSnapshotCount                int64                       `json:"supplier_present_snapshot_count"`
-	SupplierBidPresenceSnapshotCount            int64                       `json:"supplier_bid_presence_snapshot_count"`
-	SupplierAskPresenceSnapshotCount            int64                       `json:"supplier_ask_presence_snapshot_count"`
-	SupplierPresenceSnapshotFraction            float64                     `json:"supplier_presence_snapshot_fraction"`
-	SupplierBidPresenceSnapshotFraction         float64                     `json:"supplier_bid_presence_snapshot_fraction"`
-	SupplierAskPresenceSnapshotFraction         float64                     `json:"supplier_ask_presence_snapshot_fraction"`
-	SupplierBidDepthOver75Count                 int64                       `json:"supplier_bid_depth_over_75_count"`
-	SupplierAskDepthOver75Count                 int64                       `json:"supplier_ask_depth_over_75_count"`
-	SupplierBidDepthOver75Fraction              float64                     `json:"supplier_bid_depth_over_75_fraction"`
-	SupplierAskDepthOver75Fraction              float64                     `json:"supplier_ask_depth_over_75_fraction"`
-	BidDepthAvailableSnapshotCount              int64                       `json:"bid_depth_available_snapshot_count"`
-	AskDepthAvailableSnapshotCount              int64                       `json:"ask_depth_available_snapshot_count"`
-	SupplierOnlyBidSnapshotCount                int64                       `json:"supplier_only_bid_snapshot_count"`
-	SupplierOnlyAskSnapshotCount                int64                       `json:"supplier_only_ask_snapshot_count"`
-	SupplierOnlyBidFraction                     float64                     `json:"supplier_only_bid_fraction"`
-	SupplierOnlyAskFraction                     float64                     `json:"supplier_only_ask_fraction"`
-	SupplierPresenceTimeWeightedFraction        float64                     `json:"supplier_presence_time_weighted_fraction"`
-	SupplierBidPresenceTimeWeightedFraction     float64                     `json:"supplier_bid_presence_time_weighted_fraction"`
-	SupplierAskPresenceTimeWeightedFraction     float64                     `json:"supplier_ask_presence_time_weighted_fraction"`
-	SupplierOnlyBidTimeWeightedFraction         float64                     `json:"supplier_only_bid_time_weighted_fraction"`
-	SupplierOnlyAskTimeWeightedFraction         float64                     `json:"supplier_only_ask_time_weighted_fraction"`
-	Venues                                      []CDFLiquidityVenueAudit    `json:"venues"`
-	Suppliers                                   []CDFLiquiditySupplierAudit `json:"suppliers"`
-	Checks                                      []CDFLiquidityCheck         `json:"checks,omitempty"`
-	EvidenceValid                               bool                        `json:"evidence_valid"`
-	ActivationSatisfied                         bool                        `json:"activation_satisfied"`
-	AntiCheatingSatisfied                       bool                        `json:"anti_cheating_satisfied"`
-	Valid                                       bool                        `json:"valid"`
+	Provenance                                           *CDFLiquidityRunProvenance  `json:"provenance,omitempty"`
+	SupplierCount                                        int                         `json:"supplier_count"`
+	DecisionCount                                        int64                       `json:"decision_count"`
+	FillCount                                            int64                       `json:"fill_count"`
+	SupplierVolumeQty                                    int64                       `json:"supplier_volume_qty"`
+	TotalTradeCount                                      int64                       `json:"total_trade_count"`
+	TotalTradeVolumeQty                                  int64                       `json:"total_trade_volume_qty"`
+	SupplierVolumeShare                                  float64                     `json:"supplier_volume_share"`
+	SnapshotCount                                        int64                       `json:"snapshot_count"`
+	BidAbsentSnapshots                                   int64                       `json:"bid_absent_snapshots"`
+	AskAbsentSnapshots                                   int64                       `json:"ask_absent_snapshots"`
+	BothAbsentSnapshots                                  int64                       `json:"both_absent_snapshots"`
+	QualifiedBidAbsentSnapshots                          int64                       `json:"qualified_bid_absent_snapshots"`
+	QualifiedAskAbsentSnapshots                          int64                       `json:"qualified_ask_absent_snapshots"`
+	QualifiedBothAbsentSnapshots                         int64                       `json:"qualified_both_absent_snapshots"`
+	BidAbsenceFraction                                   float64                     `json:"bid_absence_fraction"`
+	AskAbsenceFraction                                   float64                     `json:"ask_absence_fraction"`
+	QualifiedBidAbsenceFraction                          float64                     `json:"qualified_bid_absence_fraction"`
+	QualifiedAskAbsenceFraction                          float64                     `json:"qualified_ask_absence_fraction"`
+	SupplierRemovalSnapshotCount                         int64                       `json:"supplier_removal_snapshot_count"`
+	SupplierRemovalBidAbsentSnapshots                    int64                       `json:"supplier_removal_bid_absent_snapshots"`
+	SupplierRemovalAskAbsentSnapshots                    int64                       `json:"supplier_removal_ask_absent_snapshots"`
+	SupplierRemovalBothAbsentSnapshots                   int64                       `json:"supplier_removal_both_absent_snapshots"`
+	SupplierRemovalQualifiedBidAbsentSnapshots           int64                       `json:"supplier_removal_qualified_bid_absent_snapshots"`
+	SupplierRemovalQualifiedAskAbsentSnapshots           int64                       `json:"supplier_removal_qualified_ask_absent_snapshots"`
+	SupplierRemovalQualifiedBothAbsentSnapshots          int64                       `json:"supplier_removal_qualified_both_absent_snapshots"`
+	SupplierRemovalOneSidedSnapshots                     int64                       `json:"supplier_removal_one_sided_snapshots"`
+	SupplierRemovalInvalidSnapshots                      int64                       `json:"supplier_removal_invalid_snapshots"`
+	SupplierRemovalBidAbsenceFraction                    float64                     `json:"supplier_removal_bid_absence_fraction"`
+	SupplierRemovalAskAbsenceFraction                    float64                     `json:"supplier_removal_ask_absence_fraction"`
+	SupplierRemovalQualifiedBidAbsenceFraction           float64                     `json:"supplier_removal_qualified_bid_absence_fraction"`
+	SupplierRemovalQualifiedAskAbsenceFraction           float64                     `json:"supplier_removal_qualified_ask_absence_fraction"`
+	SupplierRemovalObservedDuration                      int64                       `json:"supplier_removal_observed_duration_ns"`
+	SupplierRemovalBidAbsenceDuration                    int64                       `json:"supplier_removal_bid_absence_duration_ns"`
+	SupplierRemovalAskAbsenceDuration                    int64                       `json:"supplier_removal_ask_absence_duration_ns"`
+	SupplierRemovalQualifiedBidAbsenceDuration           int64                       `json:"supplier_removal_qualified_bid_absence_duration_ns"`
+	SupplierRemovalQualifiedAskAbsenceDuration           int64                       `json:"supplier_removal_qualified_ask_absence_duration_ns"`
+	SupplierRemovalBidAbsenceActiveTimeFraction          float64                     `json:"supplier_removal_bid_absence_active_time_fraction"`
+	SupplierRemovalAskAbsenceActiveTimeFraction          float64                     `json:"supplier_removal_ask_absence_active_time_fraction"`
+	SupplierRemovalQualifiedBidAbsenceActiveTimeFraction float64                     `json:"supplier_removal_qualified_bid_absence_active_time_fraction"`
+	SupplierRemovalQualifiedAskAbsenceActiveTimeFraction float64                     `json:"supplier_removal_qualified_ask_absence_active_time_fraction"`
+	SupplierRemovalCounterfactualValid                   bool                        `json:"supplier_removal_counterfactual_valid"`
+	SupplierRemovalTimeWeightedCounterfactualValid       bool                        `json:"supplier_removal_time_weighted_counterfactual_valid"`
+	MinimumExecutableQty                                 int64                       `json:"minimum_executable_qty"`
+	SupplierInitialEquity                                int64                       `json:"supplier_initial_equity"`
+	SupplierTerminalEquity                               int64                       `json:"supplier_terminal_equity"`
+	SupplierPnL                                          int64                       `json:"supplier_pnl"`
+	AcceptedQuoteCount                                   int64                       `json:"accepted_quote_count"`
+	CompletedQuoteCount                                  int64                       `json:"completed_quote_count"`
+	CensoredQuoteCount                                   int64                       `json:"censored_quote_count"`
+	LiveAcceptedQuoteCount                               int64                       `json:"live_accepted_quote_count"`
+	PendingSubmissionCount                               int64                       `json:"pending_submission_count"`
+	CancelPendingQuoteCount                              int64                       `json:"cancel_pending_quote_count"`
+	MeanQuoteLifetimeNs                                  float64                     `json:"mean_quote_lifetime_ns"`
+	MaxQuoteLifetimeNs                                   int64                       `json:"max_quote_lifetime_ns"`
+	MeanObservedTouchShare                               float64                     `json:"mean_observed_touch_share"`
+	MaxObservedTouchShare                                float64                     `json:"max_observed_touch_share"`
+	SubmitCount                                          int64                       `json:"submit_count"`
+	RestCount                                            int64                       `json:"rest_count"`
+	CancelCount                                          int64                       `json:"cancel_count"`
+	WithdrawCount                                        int64                       `json:"withdraw_count"`
+	WithdrawalWithoutReplacementCount                    int64                       `json:"withdrawal_without_replacement_count"`
+	CensoredWithdrawalCount                              int64                       `json:"censored_withdrawal_count"`
+	TradingSupplierCount                                 int64                       `json:"trading_supplier_count"`
+	PnLChangingSupplierCount                             int64                       `json:"pnl_changing_supplier_count"`
+	InventoryResponsiveDecisionCount                     int64                       `json:"inventory_responsive_decision_count"`
+	RiskStateDecisionCount                               int64                       `json:"risk_state_decision_count"`
+	FreshRiskStateDecisionCount                          int64                       `json:"fresh_risk_state_decision_count"`
+	RiskLimitTriggeredDecisionCount                      int64                       `json:"risk_limit_triggered_decision_count"`
+	MaxObservedLossFromInitialQuote                      int64                       `json:"max_observed_loss_from_initial_quote"`
+	MaxObservedDrawdownQuote                             int64                       `json:"max_observed_drawdown_quote"`
+	RealizedPnL                                          int64                       `json:"realized_pnl"`
+	UnrealizedPnL                                        int64                       `json:"unrealized_pnl"`
+	EndowmentRevaluationPnL                              int64                       `json:"endowment_revaluation_pnl"`
+	TradingPnL                                           int64                       `json:"trading_pnl"`
+	TradingPnLReconciliationResidual                     int64                       `json:"trading_pnl_reconciliation_residual"`
+	BalanceSnapshotCount                                 int64                       `json:"balance_snapshot_count"`
+	BalanceReconciliationResidual                        int64                       `json:"balance_reconciliation_residual"`
+	PnLReconciliationResidual                            int64                       `json:"pnl_reconciliation_residual"`
+	MaxBorrowed                                          int64                       `json:"max_borrowed"`
+	HistoricalSupplierCount                              int                         `json:"historical_supplier_count"`
+	ExpectedHistoricalCount                              int                         `json:"expected_historical_count"`
+	SupplierDepthOver75Share                             float64                     `json:"supplier_depth_over_75_share"`
+	SupplierDepthOver75ActiveTimeFraction                float64                     `json:"supplier_depth_over_75_active_time_fraction"`
+	MaxSupplierDepthShare                                float64                     `json:"max_supplier_depth_share"`
+	SupplierTimeWeightedRestingDepthShare                float64                     `json:"supplier_time_weighted_resting_depth_share"`
+	SupplierBidTimeWeightedRestingDepthShare             float64                     `json:"supplier_bid_time_weighted_resting_depth_share"`
+	SupplierAskTimeWeightedRestingDepthShare             float64                     `json:"supplier_ask_time_weighted_resting_depth_share"`
+	SupplierPresentSnapshotCount                         int64                       `json:"supplier_present_snapshot_count"`
+	SupplierBidPresenceSnapshotCount                     int64                       `json:"supplier_bid_presence_snapshot_count"`
+	SupplierAskPresenceSnapshotCount                     int64                       `json:"supplier_ask_presence_snapshot_count"`
+	SupplierPresenceSnapshotFraction                     float64                     `json:"supplier_presence_snapshot_fraction"`
+	SupplierBidPresenceSnapshotFraction                  float64                     `json:"supplier_bid_presence_snapshot_fraction"`
+	SupplierAskPresenceSnapshotFraction                  float64                     `json:"supplier_ask_presence_snapshot_fraction"`
+	SupplierBidDepthOver75Count                          int64                       `json:"supplier_bid_depth_over_75_count"`
+	SupplierAskDepthOver75Count                          int64                       `json:"supplier_ask_depth_over_75_count"`
+	SupplierBidDepthOver75Fraction                       float64                     `json:"supplier_bid_depth_over_75_fraction"`
+	SupplierAskDepthOver75Fraction                       float64                     `json:"supplier_ask_depth_over_75_fraction"`
+	SupplierBidDepthOver75ActiveTimeFraction             float64                     `json:"supplier_bid_depth_over_75_active_time_fraction"`
+	SupplierAskDepthOver75ActiveTimeFraction             float64                     `json:"supplier_ask_depth_over_75_active_time_fraction"`
+	BidDepthAvailableSnapshotCount                       int64                       `json:"bid_depth_available_snapshot_count"`
+	AskDepthAvailableSnapshotCount                       int64                       `json:"ask_depth_available_snapshot_count"`
+	SupplierOnlyBidSnapshotCount                         int64                       `json:"supplier_only_bid_snapshot_count"`
+	SupplierOnlyAskSnapshotCount                         int64                       `json:"supplier_only_ask_snapshot_count"`
+	SupplierOnlyBidFraction                              float64                     `json:"supplier_only_bid_fraction"`
+	SupplierOnlyAskFraction                              float64                     `json:"supplier_only_ask_fraction"`
+	SupplierPresenceTimeWeightedFraction                 float64                     `json:"supplier_presence_time_weighted_fraction"`
+	SupplierBidPresenceTimeWeightedFraction              float64                     `json:"supplier_bid_presence_time_weighted_fraction"`
+	SupplierAskPresenceTimeWeightedFraction              float64                     `json:"supplier_ask_presence_time_weighted_fraction"`
+	SupplierOnlyBidTimeWeightedFraction                  float64                     `json:"supplier_only_bid_time_weighted_fraction"`
+	SupplierOnlyAskTimeWeightedFraction                  float64                     `json:"supplier_only_ask_time_weighted_fraction"`
+	Venues                                               []CDFLiquidityVenueAudit    `json:"venues"`
+	Suppliers                                            []CDFLiquiditySupplierAudit `json:"suppliers"`
+	Checks                                               []CDFLiquidityCheck         `json:"checks,omitempty"`
+	EvidenceValid                                        bool                        `json:"evidence_valid"`
+	ActivationSatisfied                                  bool                        `json:"activation_satisfied"`
+	AntiCheatingSatisfied                                bool                        `json:"anti_cheating_satisfied"`
+	Valid                                                bool                        `json:"valid"`
 
-	expectedHistoricalCountPerVenue          int
-	lastDepthSnapshotAt                      map[string]int64
-	lastDepthTotal                           map[string]int64
-	lastDepthBySide                          map[string]cdfDepthSides
-	lastSupplierDepthByClient                map[string]map[uint64]int64
-	lastSupplierDepthByClientSide            map[string]map[uint64]cdfDepthSides
-	lastSupplierDepthBySide                  map[string]cdfDepthSides
-	depthStatsByVenue                        map[string]*cdfDepthIntervalStats
-	depthEvidenceInvalid                     map[string]bool
-	supplierRestingDepthWeightedNumerator    float64
-	totalRestingDepthWeightedDenominator     float64
-	supplierBidRestingDepthWeightedNumerator float64
-	supplierAskRestingDepthWeightedNumerator float64
-	bidRestingDepthWeightedDenominator       float64
-	askRestingDepthWeightedDenominator       float64
-	observedDepthDuration                    int64
-	supplierPresentDepthDuration             int64
-	supplierBidPresentDepthDuration          int64
-	supplierAskPresentDepthDuration          int64
-	supplierOnlyBidDepthDuration             int64
-	supplierOnlyAskDepthDuration             int64
-	lastEventAt                              int64
-	terminalAt                               int64
-	cancelRequestedByOrder                   map[cdfOrderKey]struct{}
-	cancelRequestByOrder                     map[cdfOrderKey]uint64
-	cancelDecisionByOrder                    map[cdfOrderKey]cdfCancelRequestState
-	quoteRequests                            map[cdfRequestKey]cdfQuoteRequestState
-	expectedActionKeys                       map[cdfActionKey]struct{}
-	pendingOrderWaits                        []cdfPendingOrderWait
-	pendingCancelWaits                       []cdfPendingCancelWait
-	staleWithdrawals                         map[cdfOrderKey]cdfStaleWithdrawal
-	supplierActions                          []cdfSupplierAction
-	restDecisions                            []cdfRestDecision
+	expectedHistoricalCountPerVenue            int
+	lastDepthSnapshotAt                        map[string]int64
+	lastDepthTotal                             map[string]int64
+	lastDepthBySide                            map[string]cdfDepthSides
+	lastSupplierDepthByClient                  map[string]map[uint64]int64
+	lastSupplierDepthByClientSide              map[string]map[uint64]cdfDepthSides
+	lastSupplierDepthBySide                    map[string]cdfDepthSides
+	lastSupplierDepthByPrice                   map[string]cdfDepthPriceSides
+	publicDepthByVenue                         map[string]cdfPublicDepthState
+	depthStatsByVenue                          map[string]*cdfDepthIntervalStats
+	depthEvidenceInvalid                       map[string]bool
+	supplierRestingDepthWeightedNumerator      float64
+	totalRestingDepthWeightedDenominator       float64
+	supplierBidRestingDepthWeightedNumerator   float64
+	supplierAskRestingDepthWeightedNumerator   float64
+	bidRestingDepthWeightedDenominator         float64
+	askRestingDepthWeightedDenominator         float64
+	observedDepthDuration                      int64
+	activeDepthDuration                        int64
+	supplierDepthOver75Duration                int64
+	bidDepthActiveDuration                     int64
+	askDepthActiveDuration                     int64
+	supplierBidDepthOver75Duration             int64
+	supplierAskDepthOver75Duration             int64
+	supplierPresentDepthDuration               int64
+	supplierBidPresentDepthDuration            int64
+	supplierAskPresentDepthDuration            int64
+	supplierOnlyBidDepthDuration               int64
+	supplierOnlyAskDepthDuration               int64
+	supplierRemovalObservedDuration            int64
+	supplierRemovalBidAbsenceDuration          int64
+	supplierRemovalAskAbsenceDuration          int64
+	supplierRemovalQualifiedBidAbsenceDuration int64
+	supplierRemovalQualifiedAskAbsenceDuration int64
+	lastEventAt                                int64
+	terminalAt                                 int64
+	requirePositiveLossBudget                  bool
+	cancelRequestedByOrder                     map[cdfOrderKey]struct{}
+	cancelRequestByOrder                       map[cdfOrderKey]uint64
+	cancelDecisionByOrder                      map[cdfOrderKey]cdfCancelRequestState
+	quoteRequests                              map[cdfRequestKey]cdfQuoteRequestState
+	expectedActionKeys                         map[cdfActionKey]struct{}
+	pendingOrderWaits                          []cdfPendingOrderWait
+	pendingCancelWaits                         []cdfPendingCancelWait
+	staleWithdrawals                           map[cdfOrderKey]cdfStaleWithdrawal
+	supplierActions                            []cdfSupplierAction
+	restDecisions                              []cdfRestDecision
+	publicSnapshots                            map[int64][]cdfPublicSnapshot
+}
+
+// cdfPublicSnapshot is the participant-visible projection of one logged CDF
+// book publication. The source sequence is the market-data publisher sequence,
+// not the venue-log sequence; retaining both identities prevents a receipt
+// fingerprint from being validated against an unrelated log line.
+type cdfPublicSnapshot struct {
+	sequence    uint64
+	publishedAt int64
+	snapshot    etypes.BookSnapshot
 }
 
 // CDFLiquiditySupplierAudit is the per-participant diagnostic vector required
@@ -198,6 +237,7 @@ type CDFLiquiditySupplierAudit struct {
 	CensoredWithdrawalCount           int64   `json:"censored_withdrawal_count"`
 	InventoryResponsiveDecisionCount  int64   `json:"inventory_responsive_decision_count"`
 	RiskStateDecisionCount            int64   `json:"risk_state_decision_count"`
+	FreshRiskStateDecisionCount       int64   `json:"fresh_risk_state_decision_count"`
 	RiskLimitTriggeredDecisionCount   int64   `json:"risk_limit_triggered_decision_count"`
 	MaxObservedLossFromInitialQuote   int64   `json:"max_observed_loss_from_initial_quote"`
 	MaxObservedDrawdownQuote          int64   `json:"max_observed_drawdown_quote"`
@@ -321,62 +361,81 @@ type CDFLiquiditySupplierAudit struct {
 // public snapshots; time-weighted supplier depth uses the observed book state
 // on each left-continuous interval through terminal time.
 type CDFLiquidityVenueAudit struct {
-	VenueID                                     string  `json:"venue_id"`
-	HistoricalSupplierCount                     int     `json:"historical_supplier_count"`
-	ExpectedHistoricalCount                     int     `json:"expected_historical_count"`
-	SupplierVolumeQty                           int64   `json:"supplier_volume_qty"`
-	TotalTradeVolumeQty                         int64   `json:"total_trade_volume_qty"`
-	SupplierVolumeShare                         float64 `json:"supplier_volume_share"`
-	SnapshotCount                               int64   `json:"snapshot_count"`
-	ActiveDepthSnapshotCount                    int64   `json:"active_depth_snapshot_count"`
-	SupplierDepthOver75Count                    int64   `json:"supplier_depth_over_75_count"`
-	SupplierDepthOver75Fraction                 float64 `json:"supplier_depth_over_75_fraction"`
-	SupplierBidDepthOver75Count                 int64   `json:"supplier_bid_depth_over_75_count"`
-	SupplierAskDepthOver75Count                 int64   `json:"supplier_ask_depth_over_75_count"`
-	SupplierBidDepthOver75Fraction              float64 `json:"supplier_bid_depth_over_75_fraction"`
-	SupplierAskDepthOver75Fraction              float64 `json:"supplier_ask_depth_over_75_fraction"`
-	BidDepthAvailableSnapshotCount              int64   `json:"bid_depth_available_snapshot_count"`
-	AskDepthAvailableSnapshotCount              int64   `json:"ask_depth_available_snapshot_count"`
-	MaxSupplierDepthShare                       float64 `json:"max_supplier_depth_share"`
-	MaxSupplierBidDepthShare                    float64 `json:"max_supplier_bid_depth_share"`
-	MaxSupplierAskDepthShare                    float64 `json:"max_supplier_ask_depth_share"`
-	SupplierTimeWeightedRestingDepthShare       float64 `json:"supplier_time_weighted_resting_depth_share"`
-	SupplierBidTimeWeightedRestingDepthShare    float64 `json:"supplier_bid_time_weighted_resting_depth_share"`
-	SupplierAskTimeWeightedRestingDepthShare    float64 `json:"supplier_ask_time_weighted_resting_depth_share"`
-	SupplierPresentSnapshotCount                int64   `json:"supplier_present_snapshot_count"`
-	SupplierBidPresenceSnapshotCount            int64   `json:"supplier_bid_presence_snapshot_count"`
-	SupplierAskPresenceSnapshotCount            int64   `json:"supplier_ask_presence_snapshot_count"`
-	SupplierPresenceSnapshotFraction            float64 `json:"supplier_presence_snapshot_fraction"`
-	SupplierBidPresenceSnapshotFraction         float64 `json:"supplier_bid_presence_snapshot_fraction"`
-	SupplierAskPresenceSnapshotFraction         float64 `json:"supplier_ask_presence_snapshot_fraction"`
-	SupplierOnlyBidSnapshotCount                int64   `json:"supplier_only_bid_snapshot_count"`
-	SupplierOnlyAskSnapshotCount                int64   `json:"supplier_only_ask_snapshot_count"`
-	SupplierOnlyBidFraction                     float64 `json:"supplier_only_bid_fraction"`
-	SupplierOnlyAskFraction                     float64 `json:"supplier_only_ask_fraction"`
-	SupplierPresenceTimeWeightedFraction        float64 `json:"supplier_presence_time_weighted_fraction"`
-	SupplierBidPresenceTimeWeightedFraction     float64 `json:"supplier_bid_presence_time_weighted_fraction"`
-	SupplierAskPresenceTimeWeightedFraction     float64 `json:"supplier_ask_presence_time_weighted_fraction"`
-	SupplierOnlyBidTimeWeightedFraction         float64 `json:"supplier_only_bid_time_weighted_fraction"`
-	SupplierOnlyAskTimeWeightedFraction         float64 `json:"supplier_only_ask_time_weighted_fraction"`
-	BidAbsentSnapshots                          int64   `json:"bid_absent_snapshots"`
-	AskAbsentSnapshots                          int64   `json:"ask_absent_snapshots"`
-	QualifiedBidAbsentSnapshots                 int64   `json:"qualified_bid_absent_snapshots"`
-	QualifiedAskAbsentSnapshots                 int64   `json:"qualified_ask_absent_snapshots"`
-	SupplierRemovalSnapshotCount                int64   `json:"supplier_removal_snapshot_count"`
-	SupplierRemovalBidAbsentSnapshots           int64   `json:"supplier_removal_bid_absent_snapshots"`
-	SupplierRemovalAskAbsentSnapshots           int64   `json:"supplier_removal_ask_absent_snapshots"`
-	SupplierRemovalBothAbsentSnapshots          int64   `json:"supplier_removal_both_absent_snapshots"`
-	SupplierRemovalQualifiedBidAbsentSnapshots  int64   `json:"supplier_removal_qualified_bid_absent_snapshots"`
-	SupplierRemovalQualifiedAskAbsentSnapshots  int64   `json:"supplier_removal_qualified_ask_absent_snapshots"`
-	SupplierRemovalQualifiedBothAbsentSnapshots int64   `json:"supplier_removal_qualified_both_absent_snapshots"`
-	SupplierRemovalOneSidedSnapshots            int64   `json:"supplier_removal_one_sided_snapshots"`
-	SupplierRemovalInvalidSnapshots             int64   `json:"supplier_removal_invalid_snapshots"`
-	SupplierRemovalBidAbsenceFraction           float64 `json:"supplier_removal_bid_absence_fraction"`
-	SupplierRemovalAskAbsenceFraction           float64 `json:"supplier_removal_ask_absence_fraction"`
-	SupplierRemovalQualifiedBidAbsenceFraction  float64 `json:"supplier_removal_qualified_bid_absence_fraction"`
-	SupplierRemovalQualifiedAskAbsenceFraction  float64 `json:"supplier_removal_qualified_ask_absence_fraction"`
-	SupplierRemovalCounterfactualValid          bool    `json:"supplier_removal_counterfactual_valid"`
-	MinimumExecutableQty                        int64   `json:"minimum_executable_qty"`
+	VenueID                                              string  `json:"venue_id"`
+	HistoricalSupplierCount                              int     `json:"historical_supplier_count"`
+	ExpectedHistoricalCount                              int     `json:"expected_historical_count"`
+	SupplierVolumeQty                                    int64   `json:"supplier_volume_qty"`
+	TotalTradeVolumeQty                                  int64   `json:"total_trade_volume_qty"`
+	SupplierVolumeShare                                  float64 `json:"supplier_volume_share"`
+	SnapshotCount                                        int64   `json:"snapshot_count"`
+	ActiveDepthSnapshotCount                             int64   `json:"active_depth_snapshot_count"`
+	SupplierDepthOver75Count                             int64   `json:"supplier_depth_over_75_count"`
+	SupplierDepthOver75Fraction                          float64 `json:"supplier_depth_over_75_fraction"`
+	SupplierDepthOver75ActiveTimeFraction                float64 `json:"supplier_depth_over_75_active_time_fraction"`
+	ActiveDepthDuration                                  int64   `json:"active_depth_duration_ns"`
+	SupplierDepthOver75Duration                          int64   `json:"supplier_depth_over_75_duration_ns"`
+	SupplierBidDepthOver75Count                          int64   `json:"supplier_bid_depth_over_75_count"`
+	SupplierAskDepthOver75Count                          int64   `json:"supplier_ask_depth_over_75_count"`
+	SupplierBidDepthOver75Fraction                       float64 `json:"supplier_bid_depth_over_75_fraction"`
+	SupplierAskDepthOver75Fraction                       float64 `json:"supplier_ask_depth_over_75_fraction"`
+	SupplierBidDepthOver75ActiveTimeFraction             float64 `json:"supplier_bid_depth_over_75_active_time_fraction"`
+	SupplierAskDepthOver75ActiveTimeFraction             float64 `json:"supplier_ask_depth_over_75_active_time_fraction"`
+	BidDepthActiveDuration                               int64   `json:"bid_depth_active_duration_ns"`
+	AskDepthActiveDuration                               int64   `json:"ask_depth_active_duration_ns"`
+	SupplierBidDepthOver75Duration                       int64   `json:"supplier_bid_depth_over_75_duration_ns"`
+	SupplierAskDepthOver75Duration                       int64   `json:"supplier_ask_depth_over_75_duration_ns"`
+	BidDepthAvailableSnapshotCount                       int64   `json:"bid_depth_available_snapshot_count"`
+	AskDepthAvailableSnapshotCount                       int64   `json:"ask_depth_available_snapshot_count"`
+	MaxSupplierDepthShare                                float64 `json:"max_supplier_depth_share"`
+	MaxSupplierBidDepthShare                             float64 `json:"max_supplier_bid_depth_share"`
+	MaxSupplierAskDepthShare                             float64 `json:"max_supplier_ask_depth_share"`
+	SupplierTimeWeightedRestingDepthShare                float64 `json:"supplier_time_weighted_resting_depth_share"`
+	SupplierBidTimeWeightedRestingDepthShare             float64 `json:"supplier_bid_time_weighted_resting_depth_share"`
+	SupplierAskTimeWeightedRestingDepthShare             float64 `json:"supplier_ask_time_weighted_resting_depth_share"`
+	SupplierPresentSnapshotCount                         int64   `json:"supplier_present_snapshot_count"`
+	SupplierBidPresenceSnapshotCount                     int64   `json:"supplier_bid_presence_snapshot_count"`
+	SupplierAskPresenceSnapshotCount                     int64   `json:"supplier_ask_presence_snapshot_count"`
+	SupplierPresenceSnapshotFraction                     float64 `json:"supplier_presence_snapshot_fraction"`
+	SupplierBidPresenceSnapshotFraction                  float64 `json:"supplier_bid_presence_snapshot_fraction"`
+	SupplierAskPresenceSnapshotFraction                  float64 `json:"supplier_ask_presence_snapshot_fraction"`
+	SupplierOnlyBidSnapshotCount                         int64   `json:"supplier_only_bid_snapshot_count"`
+	SupplierOnlyAskSnapshotCount                         int64   `json:"supplier_only_ask_snapshot_count"`
+	SupplierOnlyBidFraction                              float64 `json:"supplier_only_bid_fraction"`
+	SupplierOnlyAskFraction                              float64 `json:"supplier_only_ask_fraction"`
+	SupplierPresenceTimeWeightedFraction                 float64 `json:"supplier_presence_time_weighted_fraction"`
+	SupplierBidPresenceTimeWeightedFraction              float64 `json:"supplier_bid_presence_time_weighted_fraction"`
+	SupplierAskPresenceTimeWeightedFraction              float64 `json:"supplier_ask_presence_time_weighted_fraction"`
+	SupplierOnlyBidTimeWeightedFraction                  float64 `json:"supplier_only_bid_time_weighted_fraction"`
+	SupplierOnlyAskTimeWeightedFraction                  float64 `json:"supplier_only_ask_time_weighted_fraction"`
+	BidAbsentSnapshots                                   int64   `json:"bid_absent_snapshots"`
+	AskAbsentSnapshots                                   int64   `json:"ask_absent_snapshots"`
+	QualifiedBidAbsentSnapshots                          int64   `json:"qualified_bid_absent_snapshots"`
+	QualifiedAskAbsentSnapshots                          int64   `json:"qualified_ask_absent_snapshots"`
+	SupplierRemovalSnapshotCount                         int64   `json:"supplier_removal_snapshot_count"`
+	SupplierRemovalBidAbsentSnapshots                    int64   `json:"supplier_removal_bid_absent_snapshots"`
+	SupplierRemovalAskAbsentSnapshots                    int64   `json:"supplier_removal_ask_absent_snapshots"`
+	SupplierRemovalBothAbsentSnapshots                   int64   `json:"supplier_removal_both_absent_snapshots"`
+	SupplierRemovalQualifiedBidAbsentSnapshots           int64   `json:"supplier_removal_qualified_bid_absent_snapshots"`
+	SupplierRemovalQualifiedAskAbsentSnapshots           int64   `json:"supplier_removal_qualified_ask_absent_snapshots"`
+	SupplierRemovalQualifiedBothAbsentSnapshots          int64   `json:"supplier_removal_qualified_both_absent_snapshots"`
+	SupplierRemovalOneSidedSnapshots                     int64   `json:"supplier_removal_one_sided_snapshots"`
+	SupplierRemovalInvalidSnapshots                      int64   `json:"supplier_removal_invalid_snapshots"`
+	SupplierRemovalBidAbsenceFraction                    float64 `json:"supplier_removal_bid_absence_fraction"`
+	SupplierRemovalAskAbsenceFraction                    float64 `json:"supplier_removal_ask_absence_fraction"`
+	SupplierRemovalQualifiedBidAbsenceFraction           float64 `json:"supplier_removal_qualified_bid_absence_fraction"`
+	SupplierRemovalQualifiedAskAbsenceFraction           float64 `json:"supplier_removal_qualified_ask_absence_fraction"`
+	SupplierRemovalObservedDuration                      int64   `json:"supplier_removal_observed_duration_ns"`
+	SupplierRemovalBidAbsenceDuration                    int64   `json:"supplier_removal_bid_absence_duration_ns"`
+	SupplierRemovalAskAbsenceDuration                    int64   `json:"supplier_removal_ask_absence_duration_ns"`
+	SupplierRemovalQualifiedBidAbsenceDuration           int64   `json:"supplier_removal_qualified_bid_absence_duration_ns"`
+	SupplierRemovalQualifiedAskAbsenceDuration           int64   `json:"supplier_removal_qualified_ask_absence_duration_ns"`
+	SupplierRemovalBidAbsenceActiveTimeFraction          float64 `json:"supplier_removal_bid_absence_active_time_fraction"`
+	SupplierRemovalAskAbsenceActiveTimeFraction          float64 `json:"supplier_removal_ask_absence_active_time_fraction"`
+	SupplierRemovalQualifiedBidAbsenceActiveTimeFraction float64 `json:"supplier_removal_qualified_bid_absence_active_time_fraction"`
+	SupplierRemovalQualifiedAskAbsenceActiveTimeFraction float64 `json:"supplier_removal_qualified_ask_absence_active_time_fraction"`
+	SupplierRemovalCounterfactualValid                   bool    `json:"supplier_removal_counterfactual_valid"`
+	SupplierRemovalTimeWeightedCounterfactualValid       bool    `json:"supplier_removal_time_weighted_counterfactual_valid"`
+	MinimumExecutableQty                                 int64   `json:"minimum_executable_qty"`
 }
 
 type cdfManifest struct {
@@ -793,8 +852,19 @@ type cdfTradeEvidence struct {
 }
 
 type cdfSnapshotEvidence struct {
-	Bids []bookLevel `json:"bids"`
-	Asks []bookLevel `json:"asks"`
+	Bids           []bookLevel `json:"bids"`
+	Asks           []bookLevel `json:"asks"`
+	SourceSequence uint64      `json:"source_sequence"`
+	PublicBids     []bookLevel `json:"public_bids"`
+	PublicAsks     []bookLevel `json:"public_asks"`
+}
+
+type cdfBookDeltaEvidence struct {
+	Side       string `json:"side"`
+	Price      int64  `json:"price"`
+	VisibleQty int64  `json:"visible_qty"`
+	HiddenQty  int64  `json:"hidden_qty"`
+	TotalQty   int64  `json:"total_qty"`
 }
 
 type cdfAssetBalanceEvidence struct {
@@ -872,21 +942,52 @@ type cdfDepthSides struct {
 	Ask int64
 }
 
+type cdfDepthPriceSides struct {
+	Bid map[int64]int64
+	Ask map[int64]int64
+}
+
+// cdfPublicDepthState is the displayed book reconstructed from the initial
+// snapshot and the absolute BookDelta level updates that follow it. A snapshot
+// remains the checkpoint: any disagreement invalidates the interval metrics
+// instead of silently trusting either representation.
+type cdfPublicDepthState struct {
+	bids        map[int64]int64
+	asks        map[int64]int64
+	initialized bool
+}
+
+func positiveDomainTwoSidedMidpoint(bid, ask int64) (int64, bool) {
+	if bid <= 0 || ask <= 0 || bid > ask {
+		return 0, false
+	}
+	return etypes.Midpoint(bid, ask), true
+}
+
 type cdfDepthIntervalStats struct {
-	ObservedDuration                  int64
-	SupplierPresentDuration           int64
-	SupplierBidPresentDuration        int64
-	SupplierAskPresentDuration        int64
-	SupplierOnlyBidDuration           int64
-	SupplierOnlyAskDuration           int64
-	BidDepthOver75Duration            int64
-	AskDepthOver75Duration            int64
-	TotalDepthWeightedDenominator     float64
-	SupplierDepthWeightedNumerator    float64
-	BidDepthWeightedDenominator       float64
-	AskDepthWeightedDenominator       float64
-	SupplierBidDepthWeightedNumerator float64
-	SupplierAskDepthWeightedNumerator float64
+	ObservedDuration                   int64
+	RemovalObservedDuration            int64
+	RemovalBidAbsenceDuration          int64
+	RemovalAskAbsenceDuration          int64
+	RemovalQualifiedBidAbsenceDuration int64
+	RemovalQualifiedAskAbsenceDuration int64
+	ActiveDepthDuration                int64
+	SupplierPresentDuration            int64
+	SupplierBidPresentDuration         int64
+	SupplierAskPresentDuration         int64
+	SupplierOnlyBidDuration            int64
+	SupplierOnlyAskDuration            int64
+	BidDepthOver75Duration             int64
+	AskDepthOver75Duration             int64
+	SupplierDepthOver75Duration        int64
+	BidDepthActiveDuration             int64
+	AskDepthActiveDuration             int64
+	TotalDepthWeightedDenominator      float64
+	SupplierDepthWeightedNumerator     float64
+	BidDepthWeightedDenominator        float64
+	AskDepthWeightedDenominator        float64
+	SupplierBidDepthWeightedNumerator  float64
+	SupplierAskDepthWeightedNumerator  float64
 }
 
 type cdfOrderRemainingUpdate struct {
@@ -1020,6 +1121,8 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		lastSupplierDepthByClient:     make(map[string]map[uint64]int64),
 		lastSupplierDepthByClientSide: make(map[string]map[uint64]cdfDepthSides),
 		lastSupplierDepthBySide:       make(map[string]cdfDepthSides),
+		lastSupplierDepthByPrice:      make(map[string]cdfDepthPriceSides),
+		publicDepthByVenue:            make(map[string]cdfPublicDepthState),
 		depthStatsByVenue:             make(map[string]*cdfDepthIntervalStats),
 		depthEvidenceInvalid:          make(map[string]bool),
 		cancelRequestedByOrder:        make(map[cdfOrderKey]struct{}),
@@ -1031,11 +1134,13 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 		pendingCancelWaits:            make([]cdfPendingCancelWait, 0),
 		staleWithdrawals:              make(map[cdfOrderKey]cdfStaleWithdrawal),
 		supplierActions:               make([]cdfSupplierAction, 0),
+		publicSnapshots:               make(map[int64][]cdfPublicSnapshot),
 	}
 	config, configErr := loadCDFRunConfig(r)
 	if configErr != nil {
 		result.addCheck(CDFLiquidityCheck{Failure: "missing or malformed run configuration: " + configErr.Error()})
 	}
+	result.requirePositiveLossBudget = strings.HasPrefix(config.HypothesisID, "V2-R2-SV1B-")
 	if _, statErr := os.Stat(filepath.Join(r.Dir, "run-metadata.json")); statErr == nil {
 		identity, identityErr := loadCDFRunIdentity(r)
 		if identityErr != nil {
@@ -1065,6 +1170,9 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 			continue
 		}
 		configByRole[supplier.Role] = supplier
+		if result.requirePositiveLossBudget && supplier.MaxLossQuote <= 0 {
+			result.addCheck(CDFLiquidityCheck{Role: supplier.Role, Failure: "SV1B supplier must have a positive marked-equity loss budget"})
+		}
 		if supplier.MinimumExecutableQty < 0 {
 			result.addCheck(CDFLiquidityCheck{Role: supplier.Role, Failure: "configured minimum executable quantity is negative"})
 		} else if supplier.MinimumExecutableQty > 0 {
@@ -1305,6 +1413,16 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	actualFills := make(map[cdfFillKey]cdfOrderFillEvidence)
 	observedFills := make(map[cdfFillKey]cdfObservedFill)
 	cashEvents := make([]cdfCashEvent, 0)
+	for _, path := range bookFiles {
+		err := r.Scan(ScanOptions{
+			Events: []string{"BookSnapshot"}, Files: []string{path}, FilesSelected: true, Workers: 1,
+		}, func(event Event) {
+			result.indexPublicCDFSnapshot(event)
+		})
+		if err != nil {
+			return nil, fmt.Errorf("cdf liquidity: index public CDF snapshots %s: %w", path, err)
+		}
+	}
 	if len(generalFiles) > 0 {
 		err := r.Scan(ScanOptions{
 			Events: []string{"elastic_liquidity_supplier_decision", "elastic_liquidity_supplier_fill", "balance_snapshot", "borrow"},
@@ -1332,7 +1450,7 @@ func (r *Run) MeasureCDFLiquidity() (*CDFLiquidityRunAudit, error) {
 	}
 	for _, path := range bookFiles {
 		err := r.Scan(ScanOptions{
-			Events: []string{"Trade", "BookSnapshot", "OrderAccepted", "OrderRejected", "OrderCancelled", "OrderCancelRejected", "OrderFill"},
+			Events: []string{"Trade", "BookSnapshot", "BookDelta", "OrderAccepted", "OrderRejected", "OrderCancelled", "OrderCancelRejected", "OrderFill"},
 			Files:  []string{path}, FilesSelected: true, Workers: 1,
 		}, func(event Event) {
 			if event.SimTS > result.lastEventAt {
@@ -1434,6 +1552,16 @@ func (r *CDFLiquidityRunAudit) addCheck(check CDFLiquidityCheck) {
 	r.Checks = append(r.Checks, check)
 }
 
+func (r *CDFLiquidityRunAudit) addCheckedInt64(target *int64, delta int64, check CDFLiquidityCheck) bool {
+	updated, ok := exactAdd(*target, delta)
+	if !ok {
+		r.addCheck(check)
+		return false
+	}
+	*target = updated
+	return true
+}
+
 func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit, receiptEvidence *cdfMarketDataEvidence) {
 	var decision cdfDecisionEvidence
 	required := []string{"role", "client_id", "symbol", "decision_time", "decision_phase_offset_nanos", "observation_time", "observation_age", "observation_digest", "best_bid", "best_bid_qty", "best_ask", "best_ask_qty", "mark_price", "reference_price", "position", "target_position", "inventory_limit", "initial_base_balance", "gross_inventory", "gross_inventory_limit", "action", "reason", "quote_cash_available"}
@@ -1520,7 +1648,12 @@ func (r *CDFLiquidityRunAudit) processDecision(event Event, states map[cdfPartic
 	if decision.ObservationAge > state.MaxObservationAgeNs {
 		state.MaxObservationAgeNs = decision.ObservationAge
 	}
-	state.observationAgeTotal, _ = exactAdd(state.observationAgeTotal, decision.ObservationAge)
+	if !r.addCheckedInt64(&state.observationAgeTotal, decision.ObservationAge, CDFLiquidityCheck{
+		VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal,
+		Failure: "supplier observation-age total overflows",
+	}) {
+		return
+	}
 	state.observationCount++
 	if state.receiptRequired {
 		r.validateDecisionReceipt(event, decision, receiptEvidence)
@@ -1715,6 +1848,23 @@ func (r *CDFLiquidityRunAudit) validateMarkedRiskDecision(event Event, decision 
 	if decision.RiskMarkPrice <= 0 {
 		addFailure("supplier decision has no positive risk mark")
 	}
+	freshRiskMark := false
+	if decision.MarkPrice > 0 {
+		localMidpoint, midpointAvailable := positiveDomainTwoSidedMidpoint(decision.BestBid, decision.BestAsk)
+		if !midpointAvailable || localMidpoint != decision.MarkPrice || decision.RiskMarkPrice != decision.MarkPrice {
+			addFailure("supplier fresh risk mark does not reconcile to the observed local midpoint")
+		} else {
+			freshRiskMark = true
+		}
+	} else {
+		expectedRiskMark := state.configuredReferencePrice
+		if wasRiskStateSeen {
+			expectedRiskMark = state.lastRiskMarkPrice
+		}
+		if expectedRiskMark <= 0 || decision.RiskMarkPrice != expectedRiskMark {
+			addFailure("supplier stale risk mark does not follow the last accepted local mark")
+		}
+	}
 	if decision.QuoteCashAvailable < 0 || decision.QuoteCashReserved < 0 {
 		addFailure("supplier decision exposes negative quote cash state")
 	}
@@ -1735,8 +1885,12 @@ func (r *CDFLiquidityRunAudit) validateMarkedRiskDecision(event Event, decision 
 		addFailure("supplier decision marked equity does not reconcile to cash, inventory, and risk mark")
 		return
 	}
-	if decision.PeakEquityQuote < decision.EquityQuote {
-		addFailure("supplier peak marked equity is below current equity")
+	expectedPeakEquity := decision.EquityQuote
+	if wasRiskStateSeen && state.lastRiskPeakEquity > expectedPeakEquity {
+		expectedPeakEquity = state.lastRiskPeakEquity
+	}
+	if decision.PeakEquityQuote != expectedPeakEquity {
+		addFailure("supplier peak marked equity is not the reconstructed running maximum")
 	}
 	loss, lossOK := positiveQuoteDifference(decision.InitialEquityQuote, decision.EquityQuote)
 	drawdown, drawdownOK := positiveQuoteDifference(decision.PeakEquityQuote, decision.EquityQuote)
@@ -1772,6 +1926,10 @@ func (r *CDFLiquidityRunAudit) validateMarkedRiskDecision(event Event, decision 
 	state.lastRiskLossFromInitial = decision.LossFromInitialQuote
 	state.lastRiskDrawdown = decision.DrawdownQuote
 	state.lastRiskMarkPrice = decision.RiskMarkPrice
+	if freshRiskMark {
+		state.FreshRiskStateDecisionCount++
+		r.FreshRiskStateDecisionCount++
+	}
 	if decision.LossFromInitialQuote > state.MaxObservedLossFromInitialQuote {
 		state.MaxObservedLossFromInitialQuote = decision.LossFromInitialQuote
 	}
@@ -1934,8 +2092,13 @@ func (r *CDFLiquidityRunAudit) processQuoteCashDecision(event Event, state *CDFL
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier buy reservation exceeds independently reconstructed cash"})
 			return
 		}
+		updatedReserved, reservedOK := exactAdd(ledger.reserved, reservation)
+		if !reservedOK {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier reserved quote cash overflows"})
+			return
+		}
 		ledger.available -= reservation
-		ledger.reserved, _ = exactAdd(ledger.reserved, reservation)
+		ledger.reserved = updatedReserved
 	}
 	ledger.pendingByID[decision.QuoteRequestID] = cdfPendingCashReservation{side: decision.Side, reserved: reservation}
 }
@@ -1979,11 +2142,16 @@ func (r *CDFLiquidityRunAudit) processQuoteCashRejected(event Event, state *CDFL
 	if !exists {
 		return
 	}
-	delete(ledger.pendingByID, rejected.RequestID)
 	if pending.reserved > 0 {
-		ledger.available, _ = exactAdd(ledger.available, pending.reserved)
-		ledger.reserved, _ = exactAdd(ledger.reserved, -pending.reserved)
+		updatedAvailable, availableOK := exactAdd(ledger.available, pending.reserved)
+		updatedReserved, reservedOK := exactSub(ledger.reserved, pending.reserved)
+		if !availableOK || !reservedOK {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier quote-cash rejection overflows its independent ledger"})
+			return
+		}
+		ledger.available, ledger.reserved = updatedAvailable, updatedReserved
 	}
+	delete(ledger.pendingByID, rejected.RequestID)
 }
 
 func (r *CDFLiquidityRunAudit) processQuoteCashCancelled(event Event, state *CDFLiquiditySupplierAudit, ledger *cdfQuoteCashLedger) {
@@ -1997,8 +2165,13 @@ func (r *CDFLiquidityRunAudit) processQuoteCashCancelled(event Event, state *CDF
 		return
 	}
 	if order.remainingReserve > 0 {
-		ledger.available, _ = exactAdd(ledger.available, order.remainingReserve)
-		ledger.reserved, _ = exactAdd(ledger.reserved, -order.remainingReserve)
+		updatedAvailable, availableOK := exactAdd(ledger.available, order.remainingReserve)
+		updatedReserved, reservedOK := exactSub(ledger.reserved, order.remainingReserve)
+		if !availableOK || !reservedOK {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier quote-cash cancellation overflows its independent ledger"})
+			return
+		}
+		ledger.available, ledger.reserved = updatedAvailable, updatedReserved
 	}
 	delete(ledger.ordersByID, cancelled.OrderID)
 }
@@ -2030,8 +2203,13 @@ func (r *CDFLiquidityRunAudit) processQuoteCashFill(event Event, state *CDFLiqui
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "quote-cash fill exceeds independent reservation"})
 			return
 		}
+		updatedReserved, reservedOK := exactSub(ledger.reserved, amount)
+		if !reservedOK {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier quote-cash fill reservation underflows"})
+			return
+		}
 		order.remainingReserve -= amount
-		ledger.reserved, _ = exactAdd(ledger.reserved, -amount)
+		ledger.reserved = updatedReserved
 	} else {
 		ledger.available, ok = exactAdd(ledger.available, amount)
 		if !ok {
@@ -2041,8 +2219,13 @@ func (r *CDFLiquidityRunAudit) processQuoteCashFill(event Event, state *CDFLiqui
 	}
 	if fill.IsFull {
 		if order.remainingReserve > 0 {
-			ledger.available, _ = exactAdd(ledger.available, order.remainingReserve)
-			ledger.reserved, _ = exactAdd(ledger.reserved, -order.remainingReserve)
+			updatedAvailable, availableOK := exactAdd(ledger.available, order.remainingReserve)
+			updatedReserved, reservedOK := exactSub(ledger.reserved, order.remainingReserve)
+			if !availableOK || !reservedOK {
+				r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "completed supplier quote-cash fill overflows its independent ledger"})
+				return
+			}
+			ledger.available, ledger.reserved = updatedAvailable, updatedReserved
 		}
 		delete(ledger.ordersByID, fill.OrderID)
 	}
@@ -2287,9 +2470,109 @@ func (r *CDFLiquidityRunAudit) validateDecisionObservation(event Event, decision
 	receipt, receiptExists := evidence.receipts[cdfReceiptLinkOrdinal{LinkID: decision.ObservationLinkID, LinkOrdinal: decision.ObservationOrdinal}]
 	latestReceipt, latestReceiptExists := latestCDFReceiptBefore(evidence.receipts, decision.ObservationLinkID, decision.DecisionTime)
 	symbol, symbolExists := evidence.symbols[receipt.SymbolID]
-	if digestErr != nil || !receiptExists || !latestReceiptExists || latestReceipt.LinkOrdinal != decision.ObservationOrdinal || !symbolExists || receipt.ClientID != decision.ClientID || symbol.Symbol != decision.Symbol || receipt.Sequence != decision.ObservationSequence || receipt.PublishedAt != decision.ObservationTime || receipt.DeliveredAt != decision.ObservationDeliveredAt || receipt.DeliveredAt > decision.DecisionTime || receipt.Fingerprint != fingerprint || receipt.Digest != digest {
+	if digestErr != nil || !receiptExists || !latestReceiptExists || latestReceipt.LinkOrdinal != decision.ObservationOrdinal || !symbolExists || receipt.ClientID != decision.ClientID || symbol.Symbol != decision.Symbol || receipt.Type != uint8(etypes.MDSnapshot) || receipt.Sequence != decision.ObservationSequence || receipt.PublishedAt != decision.ObservationTime || receipt.DeliveredAt != decision.ObservationDeliveredAt || receipt.DeliveredAt > decision.DecisionTime || receipt.Fingerprint != fingerprint || receipt.Digest != digest {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision frontier does not match its delayed local observation"})
+		return
 	}
+	publicSnapshot, publicSnapshotFound := r.publicCDFSnapshotForReceipt(receipt, symbol.Symbol)
+	if !publicSnapshotFound {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision receipt is not reconstructible from a retained public CDF snapshot"})
+		return
+	}
+	if !decisionObservationMatchesPublicSnapshot(decision, publicSnapshot) {
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: decision.Role, ClientID: decision.ClientID, Ordinal: event.Ordinal, Failure: "supplier decision market observation does not match the retained public CDF snapshot"})
+	}
+}
+
+func (r *CDFLiquidityRunAudit) indexPublicCDFSnapshot(event Event) {
+	if event.Name != "BookSnapshot" {
+		return
+	}
+	var snapshot cdfSnapshotEvidence
+	if err := decodeRequiredJSON(event.Raw(), &snapshot, "bids", "asks", "public_bids", "public_asks"); err != nil {
+		return
+	}
+	public, ok := publicCDFSnapshot(snapshot)
+	if !ok || snapshot.SourceSequence == 0 || event.SimTS <= 0 {
+		return
+	}
+	r.publicSnapshots[event.SimTS] = append(r.publicSnapshots[event.SimTS], cdfPublicSnapshot{
+		sequence: snapshot.SourceSequence, publishedAt: event.SimTS, snapshot: public,
+	})
+}
+
+func publicCDFSnapshot(snapshot cdfSnapshotEvidence) (etypes.BookSnapshot, bool) {
+	public := etypes.BookSnapshot{
+		Bids: make([]etypes.PriceLevel, 0, len(snapshot.PublicBids)),
+		Asks: make([]etypes.PriceLevel, 0, len(snapshot.PublicAsks)),
+	}
+	for _, levels := range [][]bookLevel{snapshot.PublicBids, snapshot.PublicAsks} {
+		for _, level := range levels {
+			if level.Price <= 0 || level.VisibleQty < 0 || level.HiddenQty < 0 {
+				return etypes.BookSnapshot{}, false
+			}
+		}
+	}
+	for _, level := range snapshot.PublicBids {
+		if level.VisibleQty > 0 {
+			public.Bids = append(public.Bids, etypes.PriceLevel{Price: level.Price, VisibleQty: level.VisibleQty})
+		}
+	}
+	for _, level := range snapshot.PublicAsks {
+		if level.VisibleQty > 0 {
+			public.Asks = append(public.Asks, etypes.PriceLevel{Price: level.Price, VisibleQty: level.VisibleQty})
+		}
+	}
+	return public, true
+}
+
+func (r *CDFLiquidityRunAudit) publicCDFSnapshotForReceipt(receipt cdfMarketDataRecord, symbol string) (etypes.BookSnapshot, bool) {
+	for _, candidate := range r.publicSnapshots[receipt.PublishedAt] {
+		if candidate.sequence != receipt.Sequence || candidate.publishedAt != receipt.PublishedAt {
+			continue
+		}
+		fingerprint, err := etypes.MarketDataFingerprint(&etypes.MarketDataMsg{
+			Type: etypes.MDSnapshot, Symbol: symbol, SeqNum: candidate.sequence,
+			Timestamp: candidate.publishedAt, Data: &candidate.snapshot,
+		})
+		if err == nil && fingerprint == receipt.Fingerprint {
+			return candidate.snapshot, true
+		}
+	}
+	return etypes.BookSnapshot{}, false
+}
+
+func decisionObservationMatchesPublicSnapshot(decision cdfDecisionEvidence, snapshot etypes.BookSnapshot) bool {
+	bestBid, bestBidQty := int64(0), int64(0)
+	for _, level := range snapshot.Bids {
+		if level.VisibleQty <= 0 || (bestBid != 0 && level.Price < bestBid) {
+			continue
+		}
+		if level.Price == bestBid {
+			bestBidQty += level.VisibleQty
+			continue
+		}
+		bestBid, bestBidQty = level.Price, level.VisibleQty
+	}
+	bestAsk, bestAskQty := int64(0), int64(0)
+	for _, level := range snapshot.Asks {
+		if level.VisibleQty <= 0 || (bestAsk != 0 && level.Price > bestAsk) {
+			continue
+		}
+		if level.Price == bestAsk {
+			bestAskQty += level.VisibleQty
+			continue
+		}
+		bestAsk, bestAskQty = level.Price, level.VisibleQty
+	}
+	if decision.BestBid != bestBid || decision.BestBidQty != bestBidQty || decision.BestAsk != bestAsk || decision.BestAskQty != bestAskQty {
+		return false
+	}
+	expectedMark, markAvailable := positiveDomainTwoSidedMidpoint(bestBid, bestAsk)
+	if !markAvailable {
+		expectedMark = 0
+	}
+	return decision.MarkPrice == expectedMark
 }
 
 func (r *CDFLiquidityRunAudit) processSupplierFill(event Event, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit, observed map[cdfFillKey]cdfObservedFill) {
@@ -2322,11 +2605,22 @@ func (r *CDFLiquidityRunAudit) processSupplierFill(event Event, states map[cdfPa
 	}
 	expectedAfter := fill.PositionBefore
 	if fill.Side == "BUY" {
-		expectedAfter, _ = exactAdd(expectedAfter, fill.Qty)
-		state.BuyQty, _ = exactAdd(state.BuyQty, fill.Qty)
+		var ok bool
+		expectedAfter, ok = exactAdd(expectedAfter, fill.Qty)
+		if !ok || !r.addCheckedInt64(&state.BuyQty, fill.Qty, CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier buy quantity total overflows"}) {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier buy position transition overflows"})
+			return
+		}
+	} else if fill.Side == "SELL" {
+		var ok bool
+		expectedAfter, ok = exactSub(expectedAfter, fill.Qty)
+		if !ok || !r.addCheckedInt64(&state.SellQty, fill.Qty, CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier sell quantity total overflows"}) {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier sell position transition overflows"})
+			return
+		}
 	} else {
-		expectedAfter, _ = exactAdd(expectedAfter, -fill.Qty)
-		state.SellQty, _ = exactAdd(state.SellQty, fill.Qty)
+		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier fill has an unknown side"})
+		return
 	}
 	if expectedAfter != fill.PositionAfter || (state.InventoryLimit > 0 && (fill.PositionAfter < -state.InventoryLimit || fill.PositionAfter > state.InventoryLimit)) {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier fill position-after violates inventory transition"})
@@ -2346,7 +2640,9 @@ func (r *CDFLiquidityRunAudit) processSupplierFill(event Event, states map[cdfPa
 	if fill.PositionAfter > state.MaxPosition {
 		state.MaxPosition = fill.PositionAfter
 	}
-	state.FilledQty, _ = exactAdd(state.FilledQty, fill.Qty)
+	if !r.addCheckedInt64(&state.FilledQty, fill.Qty, CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "supplier filled quantity total overflows"}) {
+		return
+	}
 	fillKey := cdfFillKey{VenueID: event.VenueID, ClientID: fill.ClientID, OrderID: fill.OrderID, TradeID: fill.TradeID}
 	if _, exists := observed[fillKey]; exists {
 		r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: fill.Role, ClientID: fill.ClientID, Ordinal: event.Ordinal, Failure: "duplicate supplier fill evidence"})
@@ -2410,7 +2706,10 @@ func updateSupplierPnL(state *CDFLiquiditySupplierAudit, fill cdfFillEvidence) e
 	if positionBefore == 0 {
 		state.entryPrice = fill.Price
 	} else if (positionBefore > 0 && fill.Side == "BUY") || (positionBefore < 0 && fill.Side == "SELL") {
-		oldQuantity := absInt64(positionBefore)
+		oldQuantity, magnitudeOK := absInt64(positionBefore)
+		if !magnitudeOK {
+			return fmt.Errorf("position magnitude overflows fixed-point range")
+		}
 		combinedQuantity, ok := exactAdd(oldQuantity, quantity)
 		if !ok {
 			return fmt.Errorf("position quantity overflow")
@@ -2423,10 +2722,20 @@ func updateSupplierPnL(state *CDFLiquiditySupplierAudit, fill cdfFillEvidence) e
 		}
 		state.entryPrice = weighted.Int64()
 	} else {
-		closeQuantity := minInt64(absInt64(positionBefore), quantity)
-		priceDifference := fill.Price - state.entryPrice
+		positionMagnitude, magnitudeOK := absInt64(positionBefore)
+		if !magnitudeOK {
+			return fmt.Errorf("position magnitude overflows fixed-point range")
+		}
+		closeQuantity := minInt64(positionMagnitude, quantity)
+		priceDifference, priceDifferenceOK := exactSub(fill.Price, state.entryPrice)
+		if !priceDifferenceOK {
+			return fmt.Errorf("price difference overflows fixed-point range")
+		}
 		if positionBefore < 0 {
-			priceDifference = -priceDifference
+			priceDifference, priceDifferenceOK = exactSub(0, priceDifference)
+			if !priceDifferenceOK {
+				return fmt.Errorf("signed price difference overflows fixed-point range")
+			}
 		}
 		pnl, ok := quoteProduct(priceDifference, closeQuantity, state.configuredBasePrecision)
 		if !ok {
@@ -2436,7 +2745,7 @@ func updateSupplierPnL(state *CDFLiquiditySupplierAudit, fill cdfFillEvidence) e
 		if !ok {
 			return fmt.Errorf("realized PnL accumulation overflow")
 		}
-		positionQuantity := absInt64(positionBefore)
+		positionQuantity := positionMagnitude
 		if quantity > positionQuantity {
 			state.entryPrice = fill.Price
 		} else if quantity == positionQuantity {
@@ -2500,14 +2809,14 @@ func signedQuoteProduct(priceDifference, signedQuantity, basePrecision int64) (i
 	return product.Int64(), true
 }
 
-func absInt64(value int64) int64 {
+func absInt64(value int64) (int64, bool) {
 	if value == math.MinInt64 {
-		return math.MaxInt64
+		return 0, false
 	}
 	if value < 0 {
-		return -value
+		return -value, true
 	}
-	return value
+	return value, true
 }
 
 func minInt64(left, right int64) int64 {
@@ -2524,7 +2833,150 @@ func maxInt64(left, right int64) int64 {
 	return right
 }
 
+func (r *CDFLiquidityRunAudit) beginDepthEvent(venueID string, eventAt int64, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
+	r.ensureDepthStateMaps()
+	if r.depthEvidenceInvalid[venueID] {
+		return
+	}
+	previousAt, seen := r.lastDepthSnapshotAt[venueID]
+	if !seen {
+		return
+	}
+	if eventAt < previousAt {
+		r.addCheck(CDFLiquidityCheck{VenueID: venueID, Failure: "CDF book events are out of timestamp order"})
+		r.markDepthEvidenceInvalid(venueID, eventAt)
+		return
+	}
+	if eventAt > previousAt {
+		r.accumulateDepthInterval(venueID, previousAt, eventAt, states)
+	}
+}
+
+func (r *CDFLiquidityRunAudit) finishDepthEvent(venueID string, eventAt int64, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit, orders map[cdfOrderKey]*cdfOrderState) {
+	r.ensureDepthStateMaps()
+	if r.depthEvidenceInvalid[venueID] {
+		return
+	}
+	state, initialized := r.publicDepthByVenue[venueID]
+	if !initialized || !state.initialized {
+		return
+	}
+	supplierBid, supplierAsk, supplierByClient, supplierOK := supplierDisplayedDepthByPrice(venueID, orders)
+	if !supplierOK {
+		r.addCheck(CDFLiquidityCheck{VenueID: venueID, Failure: "supplier displayed depth cannot be reconstructed after CDF book event"})
+		r.markDepthEvidenceInvalid(venueID, eventAt)
+		return
+	}
+	supplierDepthByClient, clientsOK := supplierDepthByClientTotal(supplierByClient)
+	if !clientsOK {
+		r.addCheck(CDFLiquidityCheck{VenueID: venueID, Failure: "supplier per-client displayed depth overflows after CDF book event"})
+		r.markDepthEvidenceInvalid(venueID, eventAt)
+		return
+	}
+	// A lifecycle log can precede its matching BookDelta at the same timestamp
+	// (cancellation is the important case). Defer the residual check to the next
+	// interval boundary; the public replay is already exact at that boundary.
+	r.lastDepthSnapshotAt[venueID] = eventAt
+	r.lastSupplierDepthByPrice[venueID] = cdfDepthPriceSides{Bid: supplierBid.byPrice, Ask: supplierAsk.byPrice}
+	r.lastSupplierDepthByClientSide[venueID] = supplierByClient
+	r.lastSupplierDepthBySide[venueID] = cdfDepthSides{Bid: supplierBid.total, Ask: supplierAsk.total}
+	r.lastSupplierDepthByClient[venueID] = supplierDepthByClient
+}
+
+func (r *CDFLiquidityRunAudit) applyPublicDepthSnapshot(venueID string, bidByPrice map[int64]int64, bidDepth int64, askByPrice map[int64]int64, askDepth int64, ordinal int64) bool {
+	r.ensureDepthStateMaps()
+	previous := r.publicDepthByVenue[venueID]
+	if previous.initialized && (!sameDepthByPrice(previous.bids, bidByPrice) || !sameDepthByPrice(previous.asks, askByPrice)) {
+		r.addCheck(CDFLiquidityCheck{VenueID: venueID, Ordinal: ordinal, Failure: "CDF public snapshot disagrees with replayed BookDelta state"})
+		r.markDepthEvidenceInvalid(venueID, r.lastDepthSnapshotAt[venueID])
+		return false
+	}
+	r.publicDepthByVenue[venueID] = cdfPublicDepthState{
+		bids:        bidByPrice,
+		asks:        askByPrice,
+		initialized: true,
+	}
+	totalDepth, totalOK := exactAdd(bidDepth, askDepth)
+	if !totalOK {
+		return false
+	}
+	r.lastDepthTotal[venueID] = totalDepth
+	r.lastDepthBySide[venueID] = cdfDepthSides{Bid: bidDepth, Ask: askDepth}
+	return true
+}
+
+func (r *CDFLiquidityRunAudit) applyPublicDepthDelta(venueID string, delta cdfBookDeltaEvidence) bool {
+	r.ensureDepthStateMaps()
+	state := r.publicDepthByVenue[venueID]
+	if !state.initialized {
+		r.addCheck(CDFLiquidityCheck{VenueID: venueID, Failure: "CDF BookDelta appears before an authoritative public snapshot"})
+		r.markDepthEvidenceInvalid(venueID, r.lastDepthSnapshotAt[venueID])
+		return false
+	}
+	levels := state.bids
+	if delta.Side == "SELL" {
+		levels = state.asks
+	}
+	if delta.VisibleQty == 0 {
+		delete(levels, delta.Price)
+	} else {
+		levels[delta.Price] = delta.VisibleQty
+	}
+	if delta.Side == "BUY" {
+		state.bids = levels
+	} else {
+		state.asks = levels
+	}
+	bidDepth, bidOK := sumDisplayedDepth(state.bids)
+	askDepth, askOK := sumDisplayedDepth(state.asks)
+	if !bidOK || !askOK {
+		r.addCheck(CDFLiquidityCheck{VenueID: venueID, Failure: "CDF BookDelta replay depth overflows"})
+		r.markDepthEvidenceInvalid(venueID, r.lastDepthSnapshotAt[venueID])
+		return false
+	}
+	totalDepth, totalOK := exactAdd(bidDepth, askDepth)
+	if !totalOK {
+		r.addCheck(CDFLiquidityCheck{VenueID: venueID, Failure: "CDF BookDelta replay total depth overflows"})
+		r.markDepthEvidenceInvalid(venueID, r.lastDepthSnapshotAt[venueID])
+		return false
+	}
+	r.publicDepthByVenue[venueID] = state
+	r.lastDepthTotal[venueID] = totalDepth
+	r.lastDepthBySide[venueID] = cdfDepthSides{Bid: bidDepth, Ask: askDepth}
+	return true
+}
+
+func sumDisplayedDepth(byPrice map[int64]int64) (int64, bool) {
+	var total int64
+	for price, quantity := range byPrice {
+		if price <= 0 || quantity <= 0 {
+			return 0, false
+		}
+		var ok bool
+		total, ok = exactAdd(total, quantity)
+		if !ok {
+			return 0, false
+		}
+	}
+	return total, true
+}
+
+func sameDepthByPrice(left, right map[int64]int64) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for price, quantity := range left {
+		if right[price] != quantity {
+			return false
+		}
+	}
+	return true
+}
+
 func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit, orders map[cdfOrderKey]*cdfOrderState, actual map[cdfFillKey]cdfOrderFillEvidence, venueAudits map[string]*CDFLiquidityVenueAudit) {
+	r.beginDepthEvent(event.VenueID, event.SimTS, states)
+	defer r.finishDepthEvent(event.VenueID, event.SimTS, states, orders)
+
 	switch event.Name {
 	case "Trade":
 		var trade cdfTradeEvidence
@@ -2547,13 +2999,36 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 		if !ok {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "venue CDF trade volume overflow"})
 		}
-	case "BookSnapshot":
-		if event.ClientID != 0 {
+	case "BookDelta":
+		var delta cdfBookDeltaEvidence
+		if event.ClientID != 0 || decodeRequiredJSON(event.Raw(), &delta, "side", "price", "visible_qty", "hidden_qty", "total_qty") != nil {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "malformed CDF book delta evidence"})
 			return
 		}
+		if delta.Price <= 0 || delta.VisibleQty < 0 || delta.HiddenQty < 0 || delta.TotalQty < 0 || !validSide(delta.Side) {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF book delta has invalid side, price, or quantity"})
+			return
+		}
+		levelTotal, totalOK := exactAdd(delta.VisibleQty, delta.HiddenQty)
+		if !totalOK || levelTotal != delta.TotalQty {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF book delta quantities do not reconcile"})
+			return
+		}
+		if !r.applyPublicDepthDelta(event.VenueID, delta) {
+			return
+		}
+	case "BookSnapshot":
 		var snapshot cdfSnapshotEvidence
 		if err := decodeRequiredJSON(event.Raw(), &snapshot, "bids", "asks"); err != nil {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "malformed CDF book snapshot: " + err.Error()})
+			return
+		}
+		// A public snapshot at the exchange's level cap cannot prove that a
+		// later removal will expose an unlogged deeper level. Rejecting the
+		// interval is safer than presenting a capped prefix as exact depth.
+		if len(snapshot.Bids) >= snapshotDepthLimit || len(snapshot.Asks) >= snapshotDepthLimit {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF public snapshot reaches the level cap; exact depth replay is unavailable"})
+			r.markDepthEvidenceInvalid(event.VenueID, event.SimTS)
 			return
 		}
 		r.SnapshotCount++
@@ -2574,19 +3049,16 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 		if len(snapshot.Bids) == 0 && len(snapshot.Asks) == 0 {
 			r.BothAbsentSnapshots++
 		}
-		r.ensureDepthStateMaps()
-		if previousAt, seen := r.lastDepthSnapshotAt[event.VenueID]; seen {
-			if event.SimTS < previousAt {
-				r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF book snapshots are out of timestamp order"})
-				r.markDepthEvidenceInvalid(event.VenueID, event.SimTS)
-				return
-			}
-			if event.SimTS > previousAt && !r.depthEvidenceInvalid[event.VenueID] {
-				r.accumulateDepthInterval(event.VenueID, previousAt, event.SimTS, states)
-			}
-		}
 		bidByPrice, bidDepth, bidDepthOK := displayedDepthByPrice(snapshot.Bids)
 		askByPrice, askDepth, askDepthOK := displayedDepthByPrice(snapshot.Asks)
+		if !bidDepthOK || !askDepthOK || !r.applyPublicDepthSnapshot(event.VenueID, bidByPrice, bidDepth, askByPrice, askDepth, event.Ordinal) {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF book snapshot depth cannot be reconciled to BookDelta replay"})
+			r.recordInvalidSupplierRemovalSnapshot(venueAudits[event.VenueID])
+			return
+		}
+		if event.ClientID != 0 {
+			return
+		}
 		bidQualified := r.MinimumExecutableQty <= 0 || bidDepth >= r.MinimumExecutableQty
 		askQualified := r.MinimumExecutableQty <= 0 || askDepth >= r.MinimumExecutableQty
 		if !bidQualified {
@@ -2606,7 +3078,7 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 		supplierDisplayed, supplierTotalOK := exactAdd(supplierBidDisplayed, supplierAskDisplayed)
 		residualBid, residualBidOK := residualDisplayedDepth(bidByPrice, supplierBid.byPrice)
 		residualAsk, residualAskOK := residualDisplayedDepth(askByPrice, supplierAsk.byPrice)
-		if !bidDepthOK || !askDepthOK || !totalDepthOK {
+		if !totalDepthOK {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "CDF book snapshot depth cannot be reconstructed safely"})
 			r.recordInvalidSupplierRemovalSnapshot(venue)
 			r.markDepthEvidenceInvalid(event.VenueID, event.SimTS)
@@ -2631,6 +3103,13 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 		if supplierByClient == nil {
 			supplierByClient = make(map[uint64]cdfDepthSides)
 		}
+		_, supplierClientTotalsOK := supplierDepthByClientTotal(supplierByClient)
+		if !supplierClientTotalsOK {
+			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Ordinal: event.Ordinal, Failure: "supplier per-client displayed depth overflows"})
+			r.recordInvalidSupplierRemovalSnapshot(venue)
+			r.markDepthEvidenceInvalid(event.VenueID, event.SimTS)
+			return
+		}
 		if totalDisplayed > 0 {
 			venue.ActiveDepthSnapshotCount++
 			share := float64(supplierDisplayed) / float64(totalDisplayed)
@@ -2641,12 +3120,6 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 				venue.SupplierDepthOver75Count++
 			}
 		}
-		r.lastDepthSnapshotAt[event.VenueID] = event.SimTS
-		r.lastDepthTotal[event.VenueID] = totalDisplayed
-		r.lastDepthBySide[event.VenueID] = cdfDepthSides{Bid: bidDepth, Ask: askDepth}
-		r.lastSupplierDepthByClientSide[event.VenueID] = supplierByClient
-		r.lastSupplierDepthBySide[event.VenueID] = cdfDepthSides{Bid: supplierBidDisplayed, Ask: supplierAskDisplayed}
-		r.lastSupplierDepthByClient[event.VenueID] = supplierDepthByClientTotal(supplierByClient)
 	case "OrderAccepted":
 		key := cdfParticipantKey{VenueID: event.VenueID, ClientID: event.ClientID}
 		state := states[key]
@@ -2749,7 +3222,8 @@ func (r *CDFLiquidityRunAudit) processBookEvent(event Event, states map[cdfParti
 			return
 		}
 		expectedFilledTotal, ok := exactAdd(order.filledQty, fill.Qty)
-		if !ok || expectedFilledTotal != fill.FilledQty || fill.FilledQty+fill.RemainingQty != order.acceptedQty {
+		reportedAcceptedTotal, reportedAcceptedOK := exactAdd(fill.FilledQty, fill.RemainingQty)
+		if !ok || !reportedAcceptedOK || expectedFilledTotal != fill.FilledQty || reportedAcceptedTotal != order.acceptedQty {
 			r.addCheck(CDFLiquidityCheck{VenueID: event.VenueID, Role: state.Role, ClientID: event.ClientID, Ordinal: event.Ordinal, Failure: "supplier fill quantity does not reconcile to accepted order"})
 		}
 		order.filledQty, order.remainingQty = fill.FilledQty, fill.RemainingQty
@@ -2988,66 +3462,151 @@ func (r *CDFLiquidityRunAudit) accumulateDepthInterval(venueID string, start, en
 	if r.depthEvidenceInvalid[venueID] {
 		return
 	}
-	weight := float64(end - start)
-	intervalDuration := end - start
+	intervalDuration, durationOK := exactSub(end, start)
+	if !durationOK || intervalDuration <= 0 {
+		r.addCheck(CDFLiquidityCheck{VenueID: venueID, Failure: "CDF depth interval duration overflows"})
+		r.markDepthEvidenceInvalid(venueID, end)
+		return
+	}
+	weight := float64(intervalDuration)
 	stats := r.depthStatsByVenue[venueID]
 	if stats == nil {
 		stats = &cdfDepthIntervalStats{}
 		r.depthStatsByVenue[venueID] = stats
 	}
-	stats.ObservedDuration, _ = exactAdd(stats.ObservedDuration, intervalDuration)
-	r.observedDepthDuration, _ = exactAdd(r.observedDepthDuration, intervalDuration)
+	addDuration := func(target *int64, name string) bool {
+		if !r.addCheckedInt64(target, intervalDuration, CDFLiquidityCheck{VenueID: venueID, Failure: "CDF " + name + " duration overflows"}) {
+			r.markDepthEvidenceInvalid(venueID, end)
+			return false
+		}
+		return true
+	}
+	if !addDuration(&stats.ObservedDuration, "observed depth") || !addDuration(&r.observedDepthDuration, "aggregate observed depth") {
+		return
+	}
 	publicSides := r.lastDepthBySide[venueID]
 	supplierSides := r.lastSupplierDepthBySide[venueID]
+	publicDepth, publicDepthKnown := r.publicDepthByVenue[venueID]
+	supplierDepth, supplierDepthKnown := r.lastSupplierDepthByPrice[venueID]
+	if !publicDepthKnown || !publicDepth.initialized || !supplierDepthKnown || supplierDepth.Bid == nil || supplierDepth.Ask == nil {
+		r.addCheck(CDFLiquidityCheck{VenueID: venueID, Failure: "CDF depth interval lacks a complete public/supplier price reconstruction"})
+		r.markDepthEvidenceInvalid(venueID, end)
+		return
+	}
+	supplierDisplayed, supplierDisplayedOK := exactAdd(supplierSides.Bid, supplierSides.Ask)
+	if !supplierDisplayedOK {
+		r.addCheck(CDFLiquidityCheck{VenueID: venueID, Failure: "supplier displayed depth overflows"})
+		r.markDepthEvidenceInvalid(venueID, end)
+		return
+	}
+	residualBid, residualBidOK := residualDisplayedDepth(publicDepth.bids, supplierDepth.Bid)
+	residualAsk, residualAskOK := residualDisplayedDepth(publicDepth.asks, supplierDepth.Ask)
+	expectedResidualBid, expectedBidOK := exactSub(publicSides.Bid, supplierSides.Bid)
+	expectedResidualAsk, expectedAskOK := exactSub(publicSides.Ask, supplierSides.Ask)
+	if !residualBidOK || !residualAskOK || !expectedBidOK || !expectedAskOK || residualBid != expectedResidualBid || residualAsk != expectedResidualAsk {
+		r.addCheck(CDFLiquidityCheck{VenueID: venueID, Failure: "supplier removal residual depth is negative or overflows between snapshots"})
+		r.markDepthEvidenceInvalid(venueID, end)
+		return
+	}
+	addRemovalDuration := func(statsTarget, aggregateTarget *int64, name string) bool {
+		if !addDuration(statsTarget, "supplier-removal "+name) || !addDuration(aggregateTarget, "aggregate supplier-removal "+name) {
+			return false
+		}
+		return true
+	}
+	if !addRemovalDuration(&stats.RemovalObservedDuration, &r.supplierRemovalObservedDuration, "observed") {
+		return
+	}
+	if residualBid <= 0 {
+		if !addRemovalDuration(&stats.RemovalBidAbsenceDuration, &r.supplierRemovalBidAbsenceDuration, "bid-absence") {
+			return
+		}
+	}
+	if residualAsk <= 0 {
+		if !addRemovalDuration(&stats.RemovalAskAbsenceDuration, &r.supplierRemovalAskAbsenceDuration, "ask-absence") {
+			return
+		}
+	}
+	bidRemovalQualified := r.MinimumExecutableQty <= 0 || residualBid >= r.MinimumExecutableQty
+	askRemovalQualified := r.MinimumExecutableQty <= 0 || residualAsk >= r.MinimumExecutableQty
+	if !bidRemovalQualified {
+		if !addRemovalDuration(&stats.RemovalQualifiedBidAbsenceDuration, &r.supplierRemovalQualifiedBidAbsenceDuration, "qualified-bid-absence") {
+			return
+		}
+	}
+	if !askRemovalQualified {
+		if !addRemovalDuration(&stats.RemovalQualifiedAskAbsenceDuration, &r.supplierRemovalQualifiedAskAbsenceDuration, "qualified-ask-absence") {
+			return
+		}
+	}
 	if supplierSides.Bid > 0 || supplierSides.Ask > 0 {
-		stats.SupplierPresentDuration, _ = exactAdd(stats.SupplierPresentDuration, intervalDuration)
-		r.supplierPresentDepthDuration, _ = exactAdd(r.supplierPresentDepthDuration, intervalDuration)
+		if !addDuration(&stats.SupplierPresentDuration, "supplier-present") || !addDuration(&r.supplierPresentDepthDuration, "aggregate supplier-present") {
+			return
+		}
 	}
 	if supplierSides.Bid > 0 {
-		stats.SupplierBidPresentDuration, _ = exactAdd(stats.SupplierBidPresentDuration, intervalDuration)
-		r.supplierBidPresentDepthDuration, _ = exactAdd(r.supplierBidPresentDepthDuration, intervalDuration)
+		if !addDuration(&stats.SupplierBidPresentDuration, "supplier-bid-present") || !addDuration(&r.supplierBidPresentDepthDuration, "aggregate supplier-bid-present") {
+			return
+		}
 	}
 	if supplierSides.Ask > 0 {
-		stats.SupplierAskPresentDuration, _ = exactAdd(stats.SupplierAskPresentDuration, intervalDuration)
-		r.supplierAskPresentDepthDuration, _ = exactAdd(r.supplierAskPresentDepthDuration, intervalDuration)
+		if !addDuration(&stats.SupplierAskPresentDuration, "supplier-ask-present") || !addDuration(&r.supplierAskPresentDepthDuration, "aggregate supplier-ask-present") {
+			return
+		}
 	}
 	if supplierSides.Bid > 0 && supplierSides.Bid == publicSides.Bid {
-		stats.SupplierOnlyBidDuration, _ = exactAdd(stats.SupplierOnlyBidDuration, intervalDuration)
-		r.supplierOnlyBidDepthDuration, _ = exactAdd(r.supplierOnlyBidDepthDuration, intervalDuration)
+		if !addDuration(&stats.SupplierOnlyBidDuration, "supplier-only-bid") || !addDuration(&r.supplierOnlyBidDepthDuration, "aggregate supplier-only-bid") {
+			return
+		}
 	}
 	if supplierSides.Ask > 0 && supplierSides.Ask == publicSides.Ask {
-		stats.SupplierOnlyAskDuration, _ = exactAdd(stats.SupplierOnlyAskDuration, intervalDuration)
-		r.supplierOnlyAskDepthDuration, _ = exactAdd(r.supplierOnlyAskDepthDuration, intervalDuration)
-	}
-	if publicSides.Bid > 0 && float64(supplierSides.Bid)/float64(publicSides.Bid) > 0.75 {
-		stats.BidDepthOver75Duration, _ = exactAdd(stats.BidDepthOver75Duration, intervalDuration)
-	}
-	if publicSides.Ask > 0 && float64(supplierSides.Ask)/float64(publicSides.Ask) > 0.75 {
-		stats.AskDepthOver75Duration, _ = exactAdd(stats.AskDepthOver75Duration, intervalDuration)
+		if !addDuration(&stats.SupplierOnlyAskDuration, "supplier-only-ask") || !addDuration(&r.supplierOnlyAskDepthDuration, "aggregate supplier-only-ask") {
+			return
+		}
 	}
 	totalDisplayed := r.lastDepthTotal[venueID]
 	if totalDisplayed > 0 {
+		if !addDuration(&stats.ActiveDepthDuration, "active depth") || !addDuration(&r.activeDepthDuration, "aggregate active depth") {
+			return
+		}
+		if float64(supplierDisplayed)/float64(totalDisplayed) > 0.75 {
+			if !addDuration(&stats.SupplierDepthOver75Duration, "total-depth dominance") || !addDuration(&r.supplierDepthOver75Duration, "aggregate total-depth dominance") {
+				return
+			}
+		}
 		denominator := float64(totalDisplayed) * weight
 		stats.TotalDepthWeightedDenominator += denominator
-		stats.SupplierDepthWeightedNumerator += float64(supplierSides.Bid+supplierSides.Ask) * weight
-		if publicSides.Bid > 0 {
-			stats.BidDepthWeightedDenominator += float64(publicSides.Bid) * weight
-			stats.SupplierBidDepthWeightedNumerator += float64(supplierSides.Bid) * weight
-		}
-		if publicSides.Ask > 0 {
-			stats.AskDepthWeightedDenominator += float64(publicSides.Ask) * weight
-			stats.SupplierAskDepthWeightedNumerator += float64(supplierSides.Ask) * weight
-		}
-		r.supplierRestingDepthWeightedNumerator += float64(supplierSides.Bid+supplierSides.Ask) * weight
+		stats.SupplierDepthWeightedNumerator += float64(supplierDisplayed) * weight
+		r.supplierRestingDepthWeightedNumerator += float64(supplierDisplayed) * weight
 		r.totalRestingDepthWeightedDenominator += denominator
-		if publicSides.Bid > 0 {
-			r.supplierBidRestingDepthWeightedNumerator += float64(supplierSides.Bid) * weight
-			r.bidRestingDepthWeightedDenominator += float64(publicSides.Bid) * weight
+	}
+	if publicSides.Bid > 0 {
+		if !addDuration(&stats.BidDepthActiveDuration, "bid-active") || !addDuration(&r.bidDepthActiveDuration, "aggregate bid-active") {
+			return
 		}
-		if publicSides.Ask > 0 {
-			r.supplierAskRestingDepthWeightedNumerator += float64(supplierSides.Ask) * weight
-			r.askRestingDepthWeightedDenominator += float64(publicSides.Ask) * weight
+		if float64(supplierSides.Bid)/float64(publicSides.Bid) > 0.75 {
+			if !addDuration(&stats.BidDepthOver75Duration, "bid-dominance") || !addDuration(&r.supplierBidDepthOver75Duration, "aggregate bid-dominance") {
+				return
+			}
 		}
+		stats.BidDepthWeightedDenominator += float64(publicSides.Bid) * weight
+		stats.SupplierBidDepthWeightedNumerator += float64(supplierSides.Bid) * weight
+		r.supplierBidRestingDepthWeightedNumerator += float64(supplierSides.Bid) * weight
+		r.bidRestingDepthWeightedDenominator += float64(publicSides.Bid) * weight
+	}
+	if publicSides.Ask > 0 {
+		if !addDuration(&stats.AskDepthActiveDuration, "ask-active") || !addDuration(&r.askDepthActiveDuration, "aggregate ask-active") {
+			return
+		}
+		if float64(supplierSides.Ask)/float64(publicSides.Ask) > 0.75 {
+			if !addDuration(&stats.AskDepthOver75Duration, "ask-dominance") || !addDuration(&r.supplierAskDepthOver75Duration, "aggregate ask-dominance") {
+				return
+			}
+		}
+		stats.AskDepthWeightedDenominator += float64(publicSides.Ask) * weight
+		stats.SupplierAskDepthWeightedNumerator += float64(supplierSides.Ask) * weight
+		r.supplierAskRestingDepthWeightedNumerator += float64(supplierSides.Ask) * weight
+		r.askRestingDepthWeightedDenominator += float64(publicSides.Ask) * weight
 	}
 	supplierDepthByClient := r.lastSupplierDepthByClient[venueID]
 	supplierDepthByClientSide := r.lastSupplierDepthByClientSide[venueID]
@@ -3226,7 +3785,11 @@ func (r *CDFLiquidityRunAudit) reconcileSupplierBalances(states map[cdfParticipa
 			if expectedBalance == actualBalance {
 				continue
 			}
-			residual = addAbsoluteDifference(residual, expectedBalance, actualBalance)
+			var residualOK bool
+			residual, residualOK = addAbsoluteDifference(residual, expectedBalance, actualBalance)
+			if !residualOK {
+				r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "balance reconciliation residual overflows"})
+			}
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: fmt.Sprintf("terminal %s balance does not reconcile to fills", asset)})
 		}
 		state.BalanceReconciliationResidual = residual
@@ -3253,7 +3816,8 @@ func (r *CDFLiquidityRunAudit) reconcileSupplierBalances(states map[cdfParticipa
 		}
 		residualPnL, ok := exactSub(state.PnL, expectedPnL)
 		if !ok {
-			residualPnL = math.MaxInt64
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier PnL reconciliation residual overflows"})
+			continue
 		}
 		state.PnLReconciliationResidual = residualPnL
 		if residualPnL != 0 {
@@ -3301,17 +3865,13 @@ func markedSpotWalletValue(balances map[string]int64, marks map[string]int64, st
 	return total, nil
 }
 
-func addAbsoluteDifference(total, expected, actual int64) int64 {
+func addAbsoluteDifference(total, expected, actual int64) (int64, bool) {
 	difference := new(big.Int).Sub(big.NewInt(expected), big.NewInt(actual))
 	difference.Abs(difference)
 	if !difference.IsInt64() {
-		return math.MaxInt64
+		return 0, false
 	}
-	updated, ok := exactAdd(total, difference.Int64())
-	if !ok {
-		return math.MaxInt64
-	}
-	return updated
+	return exactAdd(total, difference.Int64())
 }
 
 type cdfDepthProjection struct {
@@ -3343,14 +3903,6 @@ func displayedDepthByPrice(levels []bookLevel) (map[int64]int64, int64, bool) {
 		}
 	}
 	return byPrice, total, true
-}
-
-func displayedDepth(levels []bookLevel) int64 {
-	_, total, ok := displayedDepthByPrice(levels)
-	if !ok {
-		return math.MaxInt64
-	}
-	return total
 }
 
 func residualDisplayedDepth(publicByPrice, supplierByPrice map[int64]int64) (int64, bool) {
@@ -3407,6 +3959,12 @@ func (r *CDFLiquidityRunAudit) ensureDepthStateMaps() {
 	if r.lastSupplierDepthBySide == nil {
 		r.lastSupplierDepthBySide = make(map[string]cdfDepthSides)
 	}
+	if r.lastSupplierDepthByPrice == nil {
+		r.lastSupplierDepthByPrice = make(map[string]cdfDepthPriceSides)
+	}
+	if r.publicDepthByVenue == nil {
+		r.publicDepthByVenue = make(map[string]cdfPublicDepthState)
+	}
 	if r.depthStatsByVenue == nil {
 		r.depthStatsByVenue = make(map[string]*cdfDepthIntervalStats)
 	}
@@ -3424,6 +3982,8 @@ func (r *CDFLiquidityRunAudit) markDepthEvidenceInvalid(venueID string, snapshot
 	r.lastSupplierDepthBySide[venueID] = cdfDepthSides{}
 	r.lastSupplierDepthByClient[venueID] = map[uint64]int64{}
 	r.lastSupplierDepthByClientSide[venueID] = map[uint64]cdfDepthSides{}
+	r.lastSupplierDepthByPrice[venueID] = cdfDepthPriceSides{}
+	r.publicDepthByVenue[venueID] = cdfPublicDepthState{}
 }
 
 func (r *CDFLiquidityRunAudit) recordSupplierPresenceSnapshot(venue *CDFLiquidityVenueAudit, supplierBid, supplierAsk, publicBid, publicAsk, supplierTotal int64) {
@@ -3559,32 +4119,16 @@ func supplierDisplayedDepthByPrice(venueID string, orders map[cdfOrderKey]*cdfOr
 	return bid, ask, byClient, true
 }
 
-func supplierDepthByClientTotal(byClient map[uint64]cdfDepthSides) map[uint64]int64 {
+func supplierDepthByClientTotal(byClient map[uint64]cdfDepthSides) (map[uint64]int64, bool) {
 	totals := make(map[uint64]int64, len(byClient))
 	for clientID, sides := range byClient {
 		total, ok := exactAdd(sides.Bid, sides.Ask)
 		if !ok {
-			total = math.MaxInt64
+			return nil, false
 		}
 		totals[clientID] = total
 	}
-	return totals
-}
-
-func supplierDisplayedDepthByClient(venueID string, orders map[cdfOrderKey]*cdfOrderState) map[uint64]int64 {
-	depthByClient := make(map[uint64]int64)
-	for key, order := range orders {
-		if key.VenueID != venueID || order.closed || order.remainingQty <= 0 {
-			continue
-		}
-		updated, ok := exactAdd(depthByClient[order.clientID], order.remainingQty)
-		if !ok {
-			depthByClient[order.clientID] = math.MaxInt64
-			continue
-		}
-		depthByClient[order.clientID] = updated
-	}
-	return depthByClient
+	return totals, true
 }
 
 func (r *CDFLiquidityRunAudit) reconcileFills(observed map[cdfFillKey]cdfObservedFill, actual map[cdfFillKey]cdfOrderFillEvidence, states map[cdfParticipantKey]*CDFLiquiditySupplierAudit) {
@@ -3651,7 +4195,9 @@ func (r *CDFLiquidityRunAudit) finalizeOrders(orders map[cdfOrderKey]*cdfOrderSt
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "negative quote lifetime"})
 			continue
 		}
-		state.quoteLifetimeTotal, _ = exactAdd(state.quoteLifetimeTotal, lifetime)
+		if !r.addCheckedInt64(&state.quoteLifetimeTotal, lifetime, CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier quote-lifetime total overflows"}) {
+			continue
+		}
 		state.quoteLifetimeCount++
 		if lifetime > state.MaxQuoteLifetimeNs {
 			state.MaxQuoteLifetimeNs = lifetime
@@ -3659,7 +4205,9 @@ func (r *CDFLiquidityRunAudit) finalizeOrders(orders map[cdfOrderKey]*cdfOrderSt
 		if lifetime > r.MaxQuoteLifetimeNs {
 			r.MaxQuoteLifetimeNs = lifetime
 		}
-		lifetimeTotal, _ = exactAdd(lifetimeTotal, lifetime)
+		if !r.addCheckedInt64(&lifetimeTotal, lifetime, CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "aggregate quote-lifetime total overflows"}) {
+			continue
+		}
 		lifetimeCount++
 	}
 	for _, state := range states {
@@ -3733,9 +4281,13 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 			state.TradingPnLReconciliationResidual, decompositionOK = exactAdd(state.TradingPnL, -tradingDecomposition)
 		}
 		if !decompositionOK {
-			state.TradingPnLReconciliationResidual = math.MaxInt64
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier trading PnL decomposition overflows"})
+			state.TradingPnLReconciliationResidual = 0
 		}
-		if absInt64(state.TradingPnLReconciliationResidual) > state.FillCount+2 {
+		residualMagnitude, residualMagnitudeOK := absInt64(state.TradingPnLReconciliationResidual)
+		if !residualMagnitudeOK {
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier trading PnL residual magnitude overflows"})
+		} else if residualMagnitude > state.FillCount+2 {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "trading PnL decomposition exceeds fixed-point rounding allowance"})
 		}
 		state.MaxQuoteQty = state.maxQuoteQty
@@ -3743,6 +4295,10 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 		state.ConfiguredIntervalNs = state.configuredIntervalNs
 		if state.configuredMaxLossQuote > 0 && !state.riskStateSeen {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier has no marked-risk decision state"})
+		}
+		lossBudgetValid := !r.requirePositiveLossBudget || state.configuredMaxLossQuote > 0
+		if !lossBudgetValid {
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "SV1B supplier has no positive marked-equity loss budget"})
 		}
 		// A fill without a later inventory response is a valid measured negative
 		// activation outcome. It must not be relabeled as malformed evidence.
@@ -3762,7 +4318,10 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 		if state.maxBorrowed > 0 || state.borrowEventCount > 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier used unregistered borrowed capital"})
 		}
-		baseHoldingInPositionBounds := state.configuredBaseHolding >= -state.configuredMaxPosition && state.configuredBaseHolding <= state.configuredMaxPosition
+		baseHoldingInPositionBounds := false
+		if state.configuredMaxPosition > 0 {
+			baseHoldingInPositionBounds = state.configuredBaseHolding >= -state.configuredMaxPosition && state.configuredBaseHolding <= state.configuredMaxPosition
+		}
 		if !state.initialAccountSeen || !state.terminalAccountSeen || state.configuredMaxPosition <= 0 || state.configuredMaxInventory <= 0 || state.configuredMaxQuoteQty <= 0 || state.configuredBasePrecision <= 0 || state.configuredQuotePrecision <= 0 || state.configuredMaxObservationAge <= 0 || state.configuredInitialBaseBalance <= 0 || state.configuredInitialQuoteBalance <= 0 || state.configuredReferencePrice <= 0 || state.configuredReferenceHalfLife <= 0 || state.configuredElasticityPerPercent <= 0 || state.configuredMaxLossQuote > 0 && (state.configuredMinimumExecutableQty <= 0 || state.configuredIntervalNs <= 0) || !baseHoldingInPositionBounds {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier lacks complete finite-capital configuration"})
 		}
@@ -3772,29 +4331,51 @@ func (r *CDFLiquidityRunAudit) finalizeSuppliers(states map[cdfParticipantKey]*C
 		if state.InventoryLimit <= 0 {
 			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier has no positive inventory limit"})
 		}
-		state.EvidenceValid = state.DecisionCount > 0 && state.initialAccountSeen && state.terminalAccountSeen && state.InventoryLimit > 0
+		state.EvidenceValid = state.DecisionCount > 0 && state.initialAccountSeen && state.terminalAccountSeen && state.InventoryLimit > 0 && lossBudgetValid
 		state.Valid = state.EvidenceValid
 		state.FillCausedRiskTransition = state.FillCount > 0 && (state.tradingPnL != 0 || state.realizedPnL != 0 || state.UnrealizedPnL != 0 || state.MinPosition != state.MaxPosition)
-		state.ActivationSatisfied = state.EvidenceValid && state.FillCount > 0 && state.AcceptedQuoteCount > 0 && state.CompletedQuoteCount > 0 && state.InventoryResponsiveDecisionCount > 0 && state.FillCausedRiskTransition && state.CancelCount+state.WithdrawCount > 0
-		state.AntiCheatingSatisfied = state.configuredMaxInventory > 0 && state.maxGrossBaseBalance <= state.configuredMaxInventory && state.configuredMaxQuoteQty > 0 && state.maxQuoteQty <= state.configuredMaxQuoteQty && state.maxBorrowed == 0 && state.configuredMaxPosition > 0
+		withdrawalCount, withdrawalCountOK := exactAdd(state.CancelCount, state.WithdrawCount)
+		if !withdrawalCountOK {
+			r.addCheck(CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "supplier cancellation/withdrawal count overflows"})
+		}
+		state.ActivationSatisfied = state.EvidenceValid && state.FillCount > 0 && state.AcceptedQuoteCount > 0 && state.CompletedQuoteCount > 0 && state.InventoryResponsiveDecisionCount > 0 && state.FillCausedRiskTransition && withdrawalCountOK && withdrawalCount > 0
+		state.AntiCheatingSatisfied = lossBudgetValid && state.configuredMaxInventory > 0 && state.maxGrossBaseBalance <= state.configuredMaxInventory && state.configuredMaxQuoteQty > 0 && state.maxQuoteQty <= state.configuredMaxQuoteQty && state.maxBorrowed == 0 && state.configuredMaxPosition > 0
 		if state.FillCount > 0 {
 			r.TradingSupplierCount++
 		}
 		if state.TradingPnL != 0 {
 			r.PnLChangingSupplierCount++
 		}
-		r.RealizedPnL, _ = exactAdd(r.RealizedPnL, state.RealizedPnL)
-		r.UnrealizedPnL, _ = exactAdd(r.UnrealizedPnL, state.UnrealizedPnL)
-		r.EndowmentRevaluationPnL, _ = exactAdd(r.EndowmentRevaluationPnL, state.EndowmentRevaluationPnL)
-		r.TradingPnL, _ = exactAdd(r.TradingPnL, state.TradingPnL)
-		r.TradingPnLReconciliationResidual, _ = exactAdd(r.TradingPnLReconciliationResidual, state.TradingPnLReconciliationResidual)
-		r.BalanceSnapshotCount, _ = exactAdd(r.BalanceSnapshotCount, state.BalanceSnapshotCount)
-		r.BalanceReconciliationResidual, _ = exactAdd(r.BalanceReconciliationResidual, state.BalanceReconciliationResidual)
-		r.PnLReconciliationResidual, _ = exactAdd(r.PnLReconciliationResidual, state.PnLReconciliationResidual)
+		if !r.addCheckedInt64(&r.RealizedPnL, state.RealizedPnL, CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "aggregate realized PnL overflows"}) {
+			continue
+		}
+		if !r.addCheckedInt64(&r.UnrealizedPnL, state.UnrealizedPnL, CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "aggregate unrealized PnL overflows"}) {
+			continue
+		}
+		if !r.addCheckedInt64(&r.EndowmentRevaluationPnL, state.EndowmentRevaluationPnL, CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "aggregate endowment revaluation PnL overflows"}) {
+			continue
+		}
+		if !r.addCheckedInt64(&r.TradingPnL, state.TradingPnL, CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "aggregate trading PnL overflows"}) {
+			continue
+		}
+		if !r.addCheckedInt64(&r.TradingPnLReconciliationResidual, state.TradingPnLReconciliationResidual, CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "aggregate trading PnL residual overflows"}) {
+			continue
+		}
+		if !r.addCheckedInt64(&r.BalanceSnapshotCount, state.BalanceSnapshotCount, CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "aggregate balance snapshot count overflows"}) {
+			continue
+		}
+		if !r.addCheckedInt64(&r.BalanceReconciliationResidual, state.BalanceReconciliationResidual, CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "aggregate balance residual overflows"}) {
+			continue
+		}
+		if !r.addCheckedInt64(&r.PnLReconciliationResidual, state.PnLReconciliationResidual, CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "aggregate PnL residual overflows"}) {
+			continue
+		}
 		if state.MaxBorrowed > r.MaxBorrowed {
 			r.MaxBorrowed = state.MaxBorrowed
 		}
-		r.SupplierVolumeQty, _ = exactAdd(r.SupplierVolumeQty, state.FilledQty)
+		if !r.addCheckedInt64(&r.SupplierVolumeQty, state.FilledQty, CDFLiquidityCheck{VenueID: key.VenueID, Role: state.Role, ClientID: key.ClientID, Failure: "aggregate supplier volume overflows"}) {
+			continue
+		}
 		if state.MaxObservedLossFromInitialQuote > r.MaxObservedLossFromInitialQuote {
 			r.MaxObservedLossFromInitialQuote = state.MaxObservedLossFromInitialQuote
 		}
@@ -3819,7 +4400,9 @@ func (r *CDFLiquidityRunAudit) finalizeVenueAudits(venueAudits map[string]*CDFLi
 			venue = &CDFLiquidityVenueAudit{VenueID: supplier.VenueID, ExpectedHistoricalCount: r.expectedHistoricalCountPerVenue, MinimumExecutableQty: r.MinimumExecutableQty}
 			venueAudits[supplier.VenueID] = venue
 		}
-		venue.SupplierVolumeQty, _ = exactAdd(venue.SupplierVolumeQty, supplier.FilledQty)
+		if !r.addCheckedInt64(&venue.SupplierVolumeQty, supplier.FilledQty, CDFLiquidityCheck{VenueID: supplier.VenueID, Role: supplier.Role, ClientID: supplier.ClientID, Failure: "venue supplier volume overflows"}) {
+			continue
+		}
 		if venue.TotalTradeVolumeQty > 0 {
 			supplier.SupplierVolumeShare = float64(supplier.FilledQty) / float64(venue.TotalTradeVolumeQty)
 		}
@@ -3845,6 +4428,26 @@ func (r *CDFLiquidityRunAudit) finalizeVenueAudits(venueAudits map[string]*CDFLi
 			venue.SupplierAskDepthOver75Fraction = float64(venue.SupplierAskDepthOver75Count) / float64(venue.AskDepthAvailableSnapshotCount)
 		}
 		if stats := r.depthStatsByVenue[venue.VenueID]; stats != nil {
+			venue.SupplierRemovalObservedDuration = stats.RemovalObservedDuration
+			venue.SupplierRemovalBidAbsenceDuration = stats.RemovalBidAbsenceDuration
+			venue.SupplierRemovalAskAbsenceDuration = stats.RemovalAskAbsenceDuration
+			venue.SupplierRemovalQualifiedBidAbsenceDuration = stats.RemovalQualifiedBidAbsenceDuration
+			venue.SupplierRemovalQualifiedAskAbsenceDuration = stats.RemovalQualifiedAskAbsenceDuration
+			venue.ActiveDepthDuration = stats.ActiveDepthDuration
+			venue.SupplierDepthOver75Duration = stats.SupplierDepthOver75Duration
+			venue.BidDepthActiveDuration = stats.BidDepthActiveDuration
+			venue.AskDepthActiveDuration = stats.AskDepthActiveDuration
+			venue.SupplierBidDepthOver75Duration = stats.BidDepthOver75Duration
+			venue.SupplierAskDepthOver75Duration = stats.AskDepthOver75Duration
+			if stats.ActiveDepthDuration > 0 {
+				venue.SupplierDepthOver75ActiveTimeFraction = float64(stats.SupplierDepthOver75Duration) / float64(stats.ActiveDepthDuration)
+			}
+			if stats.BidDepthActiveDuration > 0 {
+				venue.SupplierBidDepthOver75ActiveTimeFraction = float64(stats.BidDepthOver75Duration) / float64(stats.BidDepthActiveDuration)
+			}
+			if stats.AskDepthActiveDuration > 0 {
+				venue.SupplierAskDepthOver75ActiveTimeFraction = float64(stats.AskDepthOver75Duration) / float64(stats.AskDepthActiveDuration)
+			}
 			if stats.TotalDepthWeightedDenominator > 0 {
 				venue.SupplierTimeWeightedRestingDepthShare = stats.SupplierDepthWeightedNumerator / stats.TotalDepthWeightedDenominator
 			}
@@ -3861,6 +4464,12 @@ func (r *CDFLiquidityRunAudit) finalizeVenueAudits(venueAudits map[string]*CDFLi
 				venue.SupplierOnlyBidTimeWeightedFraction = float64(stats.SupplierOnlyBidDuration) / float64(stats.ObservedDuration)
 				venue.SupplierOnlyAskTimeWeightedFraction = float64(stats.SupplierOnlyAskDuration) / float64(stats.ObservedDuration)
 			}
+			if stats.RemovalObservedDuration > 0 {
+				venue.SupplierRemovalBidAbsenceActiveTimeFraction = float64(stats.RemovalBidAbsenceDuration) / float64(stats.RemovalObservedDuration)
+				venue.SupplierRemovalAskAbsenceActiveTimeFraction = float64(stats.RemovalAskAbsenceDuration) / float64(stats.RemovalObservedDuration)
+				venue.SupplierRemovalQualifiedBidAbsenceActiveTimeFraction = float64(stats.RemovalQualifiedBidAbsenceDuration) / float64(stats.RemovalObservedDuration)
+				venue.SupplierRemovalQualifiedAskAbsenceActiveTimeFraction = float64(stats.RemovalQualifiedAskAbsenceDuration) / float64(stats.RemovalObservedDuration)
+			}
 		}
 		if venue.SupplierRemovalSnapshotCount > 0 {
 			venue.SupplierRemovalBidAbsenceFraction = float64(venue.SupplierRemovalBidAbsentSnapshots) / float64(venue.SupplierRemovalSnapshotCount)
@@ -3870,6 +4479,7 @@ func (r *CDFLiquidityRunAudit) finalizeVenueAudits(venueAudits map[string]*CDFLi
 		}
 		presenceCoverage := r.SupplierCount == 0 || venue.SupplierPresentSnapshotCount > 0 && venue.SupplierPresenceTimeWeightedFraction > 0
 		venue.SupplierRemovalCounterfactualValid = venue.SupplierRemovalSnapshotCount == venue.SnapshotCount && venue.SupplierRemovalInvalidSnapshots == 0 && venue.SnapshotCount > 0 && presenceCoverage
+		venue.SupplierRemovalTimeWeightedCounterfactualValid = venue.SupplierRemovalCounterfactualValid && venue.SupplierRemovalObservedDuration > 0
 		if venue.HistoricalSupplierCount != venue.ExpectedHistoricalCount {
 			r.addCheck(CDFLiquidityCheck{VenueID: venue.VenueID, Failure: fmt.Sprintf("historical supplier count %d does not match configured %d", venue.HistoricalSupplierCount, venue.ExpectedHistoricalCount)})
 		}
@@ -3882,10 +4492,12 @@ func (r *CDFLiquidityRunAudit) finalizeVenueAudits(venueAudits map[string]*CDFLi
 	var activeSnapshots, over75 int64
 	var removalSnapshots, removalInvalid int64
 	for _, venue := range r.Venues {
-		activeSnapshots += venue.ActiveDepthSnapshotCount
-		over75 += venue.SupplierDepthOver75Count
-		removalSnapshots += venue.SupplierRemovalSnapshotCount
-		removalInvalid += venue.SupplierRemovalInvalidSnapshots
+		if !r.addCheckedInt64(&activeSnapshots, venue.ActiveDepthSnapshotCount, CDFLiquidityCheck{VenueID: venue.VenueID, Failure: "aggregate active-depth snapshot count overflows"}) ||
+			!r.addCheckedInt64(&over75, venue.SupplierDepthOver75Count, CDFLiquidityCheck{VenueID: venue.VenueID, Failure: "aggregate depth-dominance count overflows"}) ||
+			!r.addCheckedInt64(&removalSnapshots, venue.SupplierRemovalSnapshotCount, CDFLiquidityCheck{VenueID: venue.VenueID, Failure: "aggregate removal snapshot count overflows"}) ||
+			!r.addCheckedInt64(&removalInvalid, venue.SupplierRemovalInvalidSnapshots, CDFLiquidityCheck{VenueID: venue.VenueID, Failure: "aggregate invalid-removal count overflows"}) {
+			return
+		}
 	}
 	if activeSnapshots > 0 {
 		r.SupplierDepthOver75Share = float64(over75) / float64(activeSnapshots)
@@ -3902,6 +4514,15 @@ func (r *CDFLiquidityRunAudit) finalizeVenueAudits(venueAudits map[string]*CDFLi
 	}
 	if r.AskDepthAvailableSnapshotCount > 0 {
 		r.SupplierAskDepthOver75Fraction = float64(r.SupplierAskDepthOver75Count) / float64(r.AskDepthAvailableSnapshotCount)
+	}
+	if r.activeDepthDuration > 0 {
+		r.SupplierDepthOver75ActiveTimeFraction = float64(r.supplierDepthOver75Duration) / float64(r.activeDepthDuration)
+	}
+	if r.bidDepthActiveDuration > 0 {
+		r.SupplierBidDepthOver75ActiveTimeFraction = float64(r.supplierBidDepthOver75Duration) / float64(r.bidDepthActiveDuration)
+	}
+	if r.askDepthActiveDuration > 0 {
+		r.SupplierAskDepthOver75ActiveTimeFraction = float64(r.supplierAskDepthOver75Duration) / float64(r.askDepthActiveDuration)
 	}
 	if r.totalRestingDepthWeightedDenominator > 0 {
 		r.SupplierTimeWeightedRestingDepthShare = r.supplierRestingDepthWeightedNumerator / r.totalRestingDepthWeightedDenominator
@@ -3925,18 +4546,44 @@ func (r *CDFLiquidityRunAudit) finalizeVenueAudits(venueAudits map[string]*CDFLi
 		r.SupplierRemovalQualifiedBidAbsenceFraction = float64(r.SupplierRemovalQualifiedBidAbsentSnapshots) / float64(r.SupplierRemovalSnapshotCount)
 		r.SupplierRemovalQualifiedAskAbsenceFraction = float64(r.SupplierRemovalQualifiedAskAbsentSnapshots) / float64(r.SupplierRemovalSnapshotCount)
 	}
+	r.SupplierRemovalObservedDuration = r.supplierRemovalObservedDuration
+	r.SupplierRemovalBidAbsenceDuration = r.supplierRemovalBidAbsenceDuration
+	r.SupplierRemovalAskAbsenceDuration = r.supplierRemovalAskAbsenceDuration
+	r.SupplierRemovalQualifiedBidAbsenceDuration = r.supplierRemovalQualifiedBidAbsenceDuration
+	r.SupplierRemovalQualifiedAskAbsenceDuration = r.supplierRemovalQualifiedAskAbsenceDuration
+	if r.SupplierRemovalObservedDuration > 0 {
+		r.SupplierRemovalBidAbsenceActiveTimeFraction = float64(r.SupplierRemovalBidAbsenceDuration) / float64(r.SupplierRemovalObservedDuration)
+		r.SupplierRemovalAskAbsenceActiveTimeFraction = float64(r.SupplierRemovalAskAbsenceDuration) / float64(r.SupplierRemovalObservedDuration)
+		r.SupplierRemovalQualifiedBidAbsenceActiveTimeFraction = float64(r.SupplierRemovalQualifiedBidAbsenceDuration) / float64(r.SupplierRemovalObservedDuration)
+		r.SupplierRemovalQualifiedAskAbsenceActiveTimeFraction = float64(r.SupplierRemovalQualifiedAskAbsenceDuration) / float64(r.SupplierRemovalObservedDuration)
+	}
 	r.SupplierRemovalCounterfactualValid = removalSnapshots == r.SnapshotCount && removalInvalid == 0 && r.SnapshotCount > 0 && (r.SupplierCount == 0 || r.SupplierPresentSnapshotCount > 0 && r.SupplierPresenceTimeWeightedFraction > 0)
+	r.SupplierRemovalTimeWeightedCounterfactualValid = r.SupplierRemovalCounterfactualValid && r.SupplierRemovalObservedDuration > 0
 }
 
 func (r *CDFLiquidityRunAudit) computeAntiCheatingSatisfied() bool {
 	if r.SupplierCount == 0 {
 		return true
 	}
-	if !r.SupplierRemovalCounterfactualValid || r.SupplierPresentSnapshotCount == 0 || r.SupplierPresenceTimeWeightedFraction <= 0 {
+	if !r.SupplierRemovalCounterfactualValid || r.SupplierPresentSnapshotCount == 0 || r.SupplierPresenceTimeWeightedFraction <= 0 || r.requirePositiveLossBudget && !r.SupplierRemovalTimeWeightedCounterfactualValid {
 		return false
 	}
-	if r.SupplierVolumeShare > 0.75 || r.SupplierDepthOver75Share > 0.5 || r.SupplierBidDepthOver75Fraction > 0.5 || r.SupplierAskDepthOver75Fraction > 0.5 || r.SupplierOnlyBidFraction > 0.5 || r.SupplierOnlyAskFraction > 0.5 {
+	if r.SupplierVolumeShare > 0.75 || r.SupplierDepthOver75ActiveTimeFraction > 0.5 || r.SupplierBidDepthOver75ActiveTimeFraction > 0.5 || r.SupplierAskDepthOver75ActiveTimeFraction > 0.5 || r.SupplierOnlyBidFraction > 0.5 || r.SupplierOnlyAskFraction > 0.5 {
 		return false
+	}
+	for _, venue := range r.Venues {
+		if !venue.SupplierRemovalCounterfactualValid ||
+			venue.SupplierVolumeShare > 0.75 ||
+			venue.SupplierDepthOver75ActiveTimeFraction > 0.5 ||
+			venue.SupplierBidDepthOver75ActiveTimeFraction > 0.5 ||
+			venue.SupplierAskDepthOver75ActiveTimeFraction > 0.5 ||
+			venue.SupplierTimeWeightedRestingDepthShare > 0.75 ||
+			venue.SupplierBidTimeWeightedRestingDepthShare > 0.75 ||
+			venue.SupplierAskTimeWeightedRestingDepthShare > 0.75 ||
+			venue.SupplierOnlyBidTimeWeightedFraction > 0.5 ||
+			venue.SupplierOnlyAskTimeWeightedFraction > 0.5 {
+			return false
+		}
 	}
 	for _, supplier := range r.Suppliers {
 		if !supplier.AntiCheatingSatisfied {
@@ -4001,7 +4648,10 @@ func expectedCDFInventoryQuoteAtWithCash(targetPosition, position, grossInventor
 	if gap < 0 {
 		side = "SELL"
 	}
-	quantity := absInt64(gap)
+	quantity, magnitudeOK := absInt64(gap)
+	if !magnitudeOK {
+		return side, 0, false
+	}
 	available := int64(0)
 	if side == "BUY" {
 		available = state.configuredMaxInventory - grossInventory

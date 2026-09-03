@@ -14,6 +14,7 @@ import (
 
 	"exchange_sim/exchange"
 	"exchange_sim/simulation"
+	etypes "exchange_sim/types"
 )
 
 func TestMeasureCDFLiquidityReconstructsBoundedSupplier(t *testing.T) {
@@ -31,7 +32,7 @@ func TestMeasureCDFLiquidityReconstructsBoundedSupplier(t *testing.T) {
 	if audit.SupplierVolumeQty != 5 || audit.TotalTradeVolumeQty != 25 || audit.SupplierVolumeShare != .2 {
 		t.Fatalf("audit volume = %+v", audit)
 	}
-	if audit.Suppliers[0].PnL != 5 || audit.Suppliers[0].TerminalPosition != 5 || audit.Suppliers[0].MaxObservedTouchShare != .5 || audit.Suppliers[0].SupplierVolumeShare != .2 || audit.Suppliers[0].TimeWeightedRestingDepthShare != .2 {
+	if audit.Suppliers[0].PnL != 5 || audit.Suppliers[0].TerminalPosition != 5 || audit.Suppliers[0].MaxObservedTouchShare != .5 || audit.Suppliers[0].SupplierVolumeShare != .2 || audit.Suppliers[0].TimeWeightedRestingDepthShare != .09 {
 		t.Fatalf("supplier diagnostics = %+v", audit.Suppliers[0])
 	}
 	if audit.BalanceSnapshotCount != 2 || audit.BalanceReconciliationResidual != 0 || audit.PnLReconciliationResidual != 0 || audit.TradingPnL != 5 || audit.TradingPnLReconciliationResidual != 0 {
@@ -151,6 +152,39 @@ func TestCDFLiquidityReportsSideSpecificSupplierDominance(t *testing.T) {
 	}
 }
 
+func TestCDFLiquidityAntiCheatingRejectsSingleVenueDominance(t *testing.T) {
+	base := CDFLiquidityRunAudit{
+		SupplierCount:                            1,
+		SupplierPresentSnapshotCount:             1,
+		SupplierPresenceTimeWeightedFraction:     1,
+		SupplierRemovalCounterfactualValid:       true,
+		SupplierVolumeShare:                      .2,
+		SupplierDepthOver75Share:                 .2,
+		SupplierDepthOver75ActiveTimeFraction:    .2,
+		SupplierBidDepthOver75Fraction:           .2,
+		SupplierAskDepthOver75Fraction:           .2,
+		SupplierBidDepthOver75ActiveTimeFraction: .2,
+		SupplierAskDepthOver75ActiveTimeFraction: .2,
+		SupplierOnlyBidFraction:                  .2,
+		SupplierOnlyAskFraction:                  .2,
+		Suppliers:                                []CDFLiquiditySupplierAudit{{AntiCheatingSatisfied: true}},
+		Venues: []CDFLiquidityVenueAudit{
+			{VenueID: "central", SupplierRemovalCounterfactualValid: true, SupplierVolumeShare: .2, SupplierDepthOver75ActiveTimeFraction: .6},
+			{VenueID: "north", SupplierRemovalCounterfactualValid: true, SupplierVolumeShare: .2},
+			{VenueID: "south", SupplierRemovalCounterfactualValid: true, SupplierVolumeShare: .2},
+		},
+	}
+	if base.computeAntiCheatingSatisfied() {
+		t.Fatal("single-venue supplier dominance was hidden by aggregate diagnostics")
+	}
+
+	base.Venues[0].SupplierDepthOver75ActiveTimeFraction = 0
+	base.Venues[0].SupplierBidTimeWeightedRestingDepthShare = .8
+	if base.computeAntiCheatingSatisfied() {
+		t.Fatal("single-venue side time-weighted dominance was accepted")
+	}
+}
+
 func TestCDFRemovalCounterfactualRequiresSupplierPresenceCoverage(t *testing.T) {
 	run := &CDFLiquidityRunAudit{SupplierCount: 1, SnapshotCount: 1, SupplierRemovalSnapshotCount: 1}
 	venueAudits := map[string]*CDFLiquidityVenueAudit{
@@ -243,6 +277,7 @@ func TestCDFMarkedRiskAuditReconstructsReservedCashAndStaleMark(t *testing.T) {
 		InitialEquityQuote: 11_000, EquityQuote: 11_005, PeakEquityQuote: 11_005,
 		LossFromInitialQuote: 0, DrawdownQuote: 0, MaxLossQuote: 1_000,
 		RiskMarkPrice: 100, QuoteCashAvailable: 505, QuoteCashReserved: 0,
+		BestBid: 99, BestBidQty: 10, BestAsk: 101, BestAskQty: 10, MarkPrice: 100,
 		Position: 5, EquityAvailable: true, Action: "submit", Reason: "inventory_target_gap",
 	}
 	audit.validateMarkedRiskDecision(Event{VenueID: "north", ClientID: 2, SimTS: 4, Ordinal: 2}, decision, state)
@@ -259,13 +294,113 @@ func TestCDFMarkedRiskAuditReconstructsReservedCashAndStaleMark(t *testing.T) {
 	if len(audit.Checks) != 0 {
 		t.Fatalf("stale-observation marked-risk state rejected: %+v", audit.Checks)
 	}
-	if state.RiskStateDecisionCount != 3 || state.MaxObservedLossFromInitialQuote != 391 || state.MaxObservedDrawdownQuote != 396 {
-		t.Fatalf("risk diagnostics = %+v, want three states and exact loss/drawdown", state)
+	if state.RiskStateDecisionCount != 3 || state.FreshRiskStateDecisionCount != 1 || state.MaxObservedLossFromInitialQuote != 391 || state.MaxObservedDrawdownQuote != 396 {
+		t.Fatalf("risk diagnostics = %+v, want three states, one fresh mark, and exact loss/drawdown", state)
 	}
 	decision.QuoteCashReserved = 1
 	audit.validateMarkedRiskDecision(Event{VenueID: "north", ClientID: 2, SimTS: 13, Ordinal: 4}, decision, state)
 	if !hasCDFCheck(audit.Checks, "supplier decision marked equity does not reconcile") {
 		t.Fatalf("reserved-cash mutation was accepted: %+v", audit.Checks)
+	}
+}
+
+func TestCDFSupplierRemovalCounterfactualReportsElapsedTime(t *testing.T) {
+	run := &CDFLiquidityRunAudit{
+		MinimumExecutableQty:          3,
+		lastDepthSnapshotAt:           make(map[string]int64),
+		lastDepthTotal:                make(map[string]int64),
+		lastDepthBySide:               make(map[string]cdfDepthSides),
+		lastSupplierDepthByClient:     make(map[string]map[uint64]int64),
+		lastSupplierDepthByClientSide: make(map[string]map[uint64]cdfDepthSides),
+		lastSupplierDepthBySide:       make(map[string]cdfDepthSides),
+		depthStatsByVenue:             make(map[string]*cdfDepthIntervalStats),
+		depthEvidenceInvalid:          make(map[string]bool),
+		terminalAt:                    12,
+	}
+	venueAudits := map[string]*CDFLiquidityVenueAudit{}
+	orders := map[cdfOrderKey]*cdfOrderState{
+		{VenueID: "north", ClientID: 7, OrderID: 11}: {clientID: 7, side: "BUY", price: 99, remainingQty: 10},
+	}
+	bookSnapshot := func(at int64, bidQty int64) {
+		run.processBookEvent(Event{
+			Name: "BookSnapshot", VenueID: "north", ClientID: 0, SimTS: at, Ordinal: at,
+			payload: json.RawMessage(fmt.Sprintf(`{"bids":[{"price":99,"visible_qty":%d}],"asks":[{"price":101,"visible_qty":10}]}`, bidQty)),
+		}, nil, orders, nil, venueAudits)
+	}
+	bookSnapshot(1, 10)
+	orders[cdfOrderKey{VenueID: "north", ClientID: 7, OrderID: 11}].remainingQty = 0
+	bookSnapshot(3, 10)
+	bookSnapshot(12, 10)
+	run.finalizeVenueAudits(venueAudits)
+	if run.SupplierRemovalSnapshotCount != 3 || run.SupplierRemovalBidAbsentSnapshots != 1 {
+		t.Fatalf("snapshot removal diagnostics = %+v", run)
+	}
+	if run.SupplierRemovalObservedDuration != 11 || run.SupplierRemovalBidAbsenceDuration != 2 || run.SupplierRemovalQualifiedBidAbsenceDuration != 2 {
+		t.Fatalf("elapsed removal diagnostics = %+v", run)
+	}
+	if run.SupplierRemovalBidAbsenceActiveTimeFraction != 2.0/11.0 || run.SupplierRemovalQualifiedBidAbsenceActiveTimeFraction != 2.0/11.0 {
+		t.Fatalf("elapsed removal fractions = %+v", run)
+	}
+	if len(run.Venues) != 1 || run.Venues[0].SupplierRemovalObservedDuration != 11 || run.Venues[0].SupplierRemovalBidAbsenceDuration != 2 || !run.Venues[0].SupplierRemovalTimeWeightedCounterfactualValid || !run.SupplierRemovalTimeWeightedCounterfactualValid {
+		t.Fatalf("venue elapsed removal diagnostics = %+v", run.Venues)
+	}
+}
+
+func TestCDFDepthReplayUsesBookDeltasBetweenSnapshots(t *testing.T) {
+	run := &CDFLiquidityRunAudit{MinimumExecutableQty: 3, terminalAt: 10}
+	venueAudits := make(map[string]*CDFLiquidityVenueAudit)
+	bookEvent := func(at int64, ordinal int64, name, payload string) {
+		run.processBookEvent(Event{
+			Name: name, VenueID: "north", ClientID: 0, SimTS: at, Ordinal: ordinal,
+			payload: json.RawMessage(payload),
+		}, nil, nil, nil, venueAudits)
+	}
+	bookEvent(1, 1, "BookSnapshot", `{"bids":[{"price":99,"visible_qty":10,"hidden_qty":0}],"asks":[{"price":101,"visible_qty":10,"hidden_qty":0}]}`)
+	bookEvent(3, 2, "BookDelta", `{"side":"BUY","price":99,"visible_qty":0,"hidden_qty":0,"total_qty":0}`)
+	bookEvent(5, 3, "BookSnapshot", `{"bids":[],"asks":[{"price":101,"visible_qty":10,"hidden_qty":0}]}`)
+	run.accumulateTerminalDepth(nil)
+	run.finalizeVenueAudits(venueAudits)
+	venue := run.Venues[0]
+	if run.observedDepthDuration != 9 || run.bidDepthActiveDuration != 2 || run.askDepthActiveDuration != 9 {
+		t.Fatalf("delta replay durations = observed %d, bid %d, ask %d; want 9, 2, 9", run.observedDepthDuration, run.bidDepthActiveDuration, run.askDepthActiveDuration)
+	}
+	if venue.SupplierRemovalInvalidSnapshots != 0 || run.SupplierRemovalInvalidSnapshots != 0 {
+		t.Fatalf("valid delta replay was marked invalid: run=%+v venue=%+v", run, venue)
+	}
+
+	mismatch := &CDFLiquidityRunAudit{MinimumExecutableQty: 3, terminalAt: 5}
+	mismatchVenues := make(map[string]*CDFLiquidityVenueAudit)
+	processMismatch := func(at int64, ordinal int64, name, payload string) {
+		mismatch.processBookEvent(Event{
+			Name: name, VenueID: "north", ClientID: 0, SimTS: at, Ordinal: ordinal,
+			payload: json.RawMessage(payload),
+		}, nil, nil, nil, mismatchVenues)
+	}
+	processMismatch(1, 1, "BookSnapshot", `{"bids":[{"price":99,"visible_qty":10,"hidden_qty":0}],"asks":[{"price":101,"visible_qty":10,"hidden_qty":0}]}`)
+	processMismatch(3, 2, "BookDelta", `{"side":"BUY","price":99,"visible_qty":0,"hidden_qty":0,"total_qty":0}`)
+	processMismatch(5, 3, "BookSnapshot", `{"bids":[{"price":99,"visible_qty":10,"hidden_qty":0}],"asks":[{"price":101,"visible_qty":10,"hidden_qty":0}]}`)
+	if !hasCDFCheck(mismatch.Checks, "CDF public snapshot disagrees with replayed BookDelta state") || mismatch.Valid {
+		t.Fatalf("snapshot/delta mismatch was accepted: %+v", mismatch)
+	}
+}
+
+func TestCDFDepthReplayRejectsCappedPublicSnapshot(t *testing.T) {
+	run := &CDFLiquidityRunAudit{}
+	venueAudits := make(map[string]*CDFLiquidityVenueAudit)
+	levels := make([]bookLevel, snapshotDepthLimit)
+	for index := range levels {
+		levels[index] = bookLevel{Price: int64(100 + index), VisibleQty: 1}
+	}
+	payload, err := json.Marshal(map[string]any{"bids": levels, "asks": []bookLevel{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.processBookEvent(Event{
+		Name: "BookSnapshot", VenueID: "north", ClientID: 0, SimTS: 1, Ordinal: 1,
+		payload: payload,
+	}, nil, nil, nil, venueAudits)
+	if !run.depthEvidenceInvalid["north"] || !hasCDFCheck(run.Checks, "CDF public snapshot reaches the level cap") {
+		t.Fatalf("capped public snapshot was not rejected: %+v", run)
 	}
 }
 
@@ -285,6 +420,52 @@ func TestCDFMarkedRiskAuditRejectsPrematureLossLimit(t *testing.T) {
 	}, state)
 	if !hasCDFCheck(audit.Checks, "supplier risk-limit flag was set before") {
 		t.Fatalf("premature risk-limit flag was accepted: %+v", audit.Checks)
+	}
+}
+
+func TestCDFMarkedRiskAuditRejectsLocalMarkSubstitution(t *testing.T) {
+	state := &CDFLiquiditySupplierAudit{
+		configuredInitialBaseBalance: 100, configuredInitialQuoteBalance: 1_000,
+		configuredReferencePrice: 100, configuredBasePrecision: 1,
+		configuredMaxLossQuote: 1_000,
+	}
+	audit := &CDFLiquidityRunAudit{}
+	audit.validateMarkedRiskDecision(Event{VenueID: "north", ClientID: 2, SimTS: 1, Ordinal: 1}, cdfDecisionEvidence{
+		InitialEquityQuote: 11_000, EquityQuote: 11_000, PeakEquityQuote: 11_000,
+		MaxLossQuote: 1_000, RiskMarkPrice: 99, MarkPrice: 100,
+		BestBid: 99, BestBidQty: 10, BestAsk: 101, BestAskQty: 10,
+		QuoteCashAvailable: 1_000, Position: 0, EquityAvailable: true,
+		Action: "wait", Reason: "subscribe",
+	}, state)
+	if !hasCDFCheck(audit.Checks, "supplier fresh risk mark does not reconcile") {
+		t.Fatalf("substituted local mark was accepted: %+v", audit.Checks)
+	}
+}
+
+func TestCDFMarkedRiskAuditRejectsFabricatedPeak(t *testing.T) {
+	state := &CDFLiquiditySupplierAudit{
+		configuredInitialBaseBalance: 100, configuredInitialQuoteBalance: 1_000,
+		configuredReferencePrice: 100, configuredBasePrecision: 1,
+		configuredMaxLossQuote: 1_000,
+	}
+	audit := &CDFLiquidityRunAudit{}
+	validDecision := cdfDecisionEvidence{
+		InitialEquityQuote: 11_000, EquityQuote: 11_000, PeakEquityQuote: 11_000,
+		MaxLossQuote: 1_000, RiskMarkPrice: 100, QuoteCashAvailable: 1_000,
+		Position: 0, EquityAvailable: true, Action: "wait", Reason: "subscribe",
+	}
+	audit.validateMarkedRiskDecision(Event{VenueID: "north", ClientID: 2, SimTS: 1, Ordinal: 1}, validDecision, state)
+	if len(audit.Checks) != 0 {
+		t.Fatalf("valid baseline marked-risk state rejected: %+v", audit.Checks)
+	}
+	audit.validateMarkedRiskDecision(Event{VenueID: "north", ClientID: 2, SimTS: 2, Ordinal: 2}, cdfDecisionEvidence{
+		InitialEquityQuote: 11_000, EquityQuote: 10_900, PeakEquityQuote: 11_010,
+		LossFromInitialQuote: 100, DrawdownQuote: 110, MaxLossQuote: 1_000,
+		RiskMarkPrice: 100, QuoteCashAvailable: 900, Position: 0,
+		EquityAvailable: true, Action: "wait", Reason: "stale_or_missing_observation",
+	}, state)
+	if !hasCDFCheck(audit.Checks, "supplier peak marked equity is not the reconstructed running maximum") {
+		t.Fatalf("fabricated running peak was accepted: %+v", audit.Checks)
 	}
 }
 
@@ -386,18 +567,38 @@ func TestCDFDepthShareUsesNonEmptyIntervalsAndIncludesTerminalInterval(t *testin
 	run := &CDFLiquidityRunAudit{
 		lastDepthSnapshotAt:       map[string]int64{"north": 9},
 		lastDepthTotal:            map[string]int64{"north": 20},
+		lastDepthBySide:           map[string]cdfDepthSides{"north": {Bid: 20}},
 		lastSupplierDepthByClient: map[string]map[uint64]int64{"north": {7: 10}},
-		terminalAt:                12,
+		lastSupplierDepthBySide:   map[string]cdfDepthSides{"north": {Bid: 5}},
+		lastSupplierDepthByPrice: map[string]cdfDepthPriceSides{"north": {
+			Bid: map[int64]int64{99: 5}, Ask: map[int64]int64{},
+		}},
+		publicDepthByVenue: map[string]cdfPublicDepthState{"north": {
+			bids: map[int64]int64{99: 20}, asks: map[int64]int64{}, initialized: true,
+		}},
+		terminalAt: 12,
 	}
 	states := map[cdfParticipantKey]*CDFLiquiditySupplierAudit{{VenueID: "north", ClientID: 7}: state}
 	run.lastDepthTotal["north"] = 20
+	run.lastDepthBySide["north"] = cdfDepthSides{Bid: 20}
+	run.publicDepthByVenue["north"] = cdfPublicDepthState{bids: map[int64]int64{99: 20}, asks: map[int64]int64{}, initialized: true}
 	run.lastSupplierDepthByClient["north"] = map[uint64]int64{7: 5}
+	run.lastSupplierDepthBySide["north"] = cdfDepthSides{Bid: 5}
+	run.lastSupplierDepthByPrice["north"] = cdfDepthPriceSides{Bid: map[int64]int64{99: 5}, Ask: map[int64]int64{}}
 	run.accumulateDepthInterval("north", 1, 3, states)
 	run.lastDepthTotal["north"] = 0
+	run.lastDepthBySide["north"] = cdfDepthSides{}
+	run.publicDepthByVenue["north"] = cdfPublicDepthState{bids: map[int64]int64{}, asks: map[int64]int64{}, initialized: true}
 	run.lastSupplierDepthByClient["north"] = map[uint64]int64{}
+	run.lastSupplierDepthBySide["north"] = cdfDepthSides{}
+	run.lastSupplierDepthByPrice["north"] = cdfDepthPriceSides{Bid: map[int64]int64{}, Ask: map[int64]int64{}}
 	run.accumulateDepthInterval("north", 3, 7, states)
 	run.lastDepthTotal["north"] = 20
+	run.lastDepthBySide["north"] = cdfDepthSides{Bid: 20}
+	run.publicDepthByVenue["north"] = cdfPublicDepthState{bids: map[int64]int64{99: 20}, asks: map[int64]int64{}, initialized: true}
 	run.lastSupplierDepthByClient["north"] = map[uint64]int64{7: 10}
+	run.lastSupplierDepthBySide["north"] = cdfDepthSides{Bid: 10}
+	run.lastSupplierDepthByPrice["north"] = cdfDepthPriceSides{Bid: map[int64]int64{99: 10}, Ask: map[int64]int64{}}
 	run.accumulateDepthInterval("north", 7, 9, states)
 	run.accumulateTerminalDepth(states)
 	if state.restingDepthWeightedNumerator != 60 || state.restingDepthWeightedDenominator != 140 {
@@ -405,6 +606,64 @@ func TestCDFDepthShareUsesNonEmptyIntervalsAndIncludesTerminalInterval(t *testin
 	}
 	if got := state.restingDepthWeightedNumerator / state.restingDepthWeightedDenominator; got != 3.0/7.0 {
 		t.Fatalf("depth share = %v, want %v", got, 3.0/7.0)
+	}
+}
+
+func TestCDFDepthDominanceUsesActiveTimeNotSnapshotFrequency(t *testing.T) {
+	run := &CDFLiquidityRunAudit{
+		lastDepthSnapshotAt:       map[string]int64{"north": 9},
+		lastDepthTotal:            map[string]int64{"north": 20},
+		lastDepthBySide:           map[string]cdfDepthSides{"north": {Bid: 20}},
+		lastSupplierDepthByClient: map[string]map[uint64]int64{"north": {7: 20}},
+		lastSupplierDepthBySide:   map[string]cdfDepthSides{"north": {Bid: 20}},
+		lastSupplierDepthByPrice: map[string]cdfDepthPriceSides{"north": {
+			Bid: map[int64]int64{99: 20}, Ask: map[int64]int64{},
+		}},
+		publicDepthByVenue: map[string]cdfPublicDepthState{"north": {
+			bids: map[int64]int64{99: 20}, asks: map[int64]int64{}, initialized: true,
+		}},
+		terminalAt:           12,
+		depthStatsByVenue:    make(map[string]*cdfDepthIntervalStats),
+		depthEvidenceInvalid: make(map[string]bool),
+	}
+	states := map[cdfParticipantKey]*CDFLiquiditySupplierAudit{
+		{VenueID: "north", ClientID: 7}: {},
+	}
+
+	// The first active interval is below the dominance threshold, the second
+	// is empty, and the final active interval is dominant. Their durations are
+	// intentionally unequal so snapshot-count and active-time fractions differ.
+	run.lastDepthTotal["north"] = 20
+	run.lastDepthBySide["north"] = cdfDepthSides{Bid: 20}
+	run.publicDepthByVenue["north"] = cdfPublicDepthState{bids: map[int64]int64{99: 20}, asks: map[int64]int64{}, initialized: true}
+	run.lastSupplierDepthByClient["north"] = map[uint64]int64{7: 10}
+	run.lastSupplierDepthBySide["north"] = cdfDepthSides{Bid: 10}
+	run.lastSupplierDepthByPrice["north"] = cdfDepthPriceSides{Bid: map[int64]int64{99: 10}, Ask: map[int64]int64{}}
+	run.accumulateDepthInterval("north", 1, 3, states)
+	run.lastDepthTotal["north"] = 0
+	run.lastDepthBySide["north"] = cdfDepthSides{}
+	run.publicDepthByVenue["north"] = cdfPublicDepthState{bids: map[int64]int64{}, asks: map[int64]int64{}, initialized: true}
+	run.lastSupplierDepthByClient["north"] = map[uint64]int64{}
+	run.lastSupplierDepthBySide["north"] = cdfDepthSides{}
+	run.lastSupplierDepthByPrice["north"] = cdfDepthPriceSides{Bid: map[int64]int64{}, Ask: map[int64]int64{}}
+	run.accumulateDepthInterval("north", 3, 9, states)
+	run.lastDepthTotal["north"] = 20
+	run.lastDepthBySide["north"] = cdfDepthSides{Bid: 20}
+	run.publicDepthByVenue["north"] = cdfPublicDepthState{bids: map[int64]int64{99: 20}, asks: map[int64]int64{}, initialized: true}
+	run.lastSupplierDepthByClient["north"] = map[uint64]int64{7: 20}
+	run.lastSupplierDepthBySide["north"] = cdfDepthSides{Bid: 20}
+	run.lastSupplierDepthByPrice["north"] = cdfDepthPriceSides{Bid: map[int64]int64{99: 20}, Ask: map[int64]int64{}}
+	run.accumulateTerminalDepth(states)
+
+	run.finalizeVenueAudits(map[string]*CDFLiquidityVenueAudit{
+		"north": {VenueID: "north"},
+	})
+	venue := run.Venues[0]
+	if venue.ActiveDepthDuration != 5 || venue.SupplierDepthOver75Duration != 3 || venue.SupplierDepthOver75ActiveTimeFraction != 3.0/5.0 {
+		t.Fatalf("total dominance duration/fraction = (%d, %d, %v), want (5, 3, %v)", venue.ActiveDepthDuration, venue.SupplierDepthOver75Duration, venue.SupplierDepthOver75ActiveTimeFraction, 3.0/5.0)
+	}
+	if venue.BidDepthActiveDuration != 5 || venue.SupplierBidDepthOver75Duration != 3 || venue.SupplierBidDepthOver75ActiveTimeFraction != 3.0/5.0 {
+		t.Fatalf("bid dominance duration/fraction = (%d, %d, %v), want (5, 3, %v)", venue.BidDepthActiveDuration, venue.SupplierBidDepthOver75Duration, venue.SupplierBidDepthOver75ActiveTimeFraction, 3.0/5.0)
 	}
 }
 
@@ -778,7 +1037,22 @@ func TestMeasureCDFLiquidityRejectsObservationFingerprintMutation(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutated := strings.Replace(string(raw), `"observation_fingerprint":"01000000000000000000000000000000"`, `"observation_fingerprint":"02000000000000000000000000000000"`, 1)
+	const fingerprintPrefix = `"observation_fingerprint":"`
+	prefixStart := strings.Index(string(raw), fingerprintPrefix)
+	if prefixStart < 0 {
+		t.Fatal("fixture fingerprint field was not found")
+	}
+	valueStart := prefixStart + len(fingerprintPrefix)
+	valueEndRelative := strings.IndexByte(string(raw)[valueStart:], '"')
+	if valueEndRelative < 0 {
+		t.Fatal("fixture fingerprint value was not terminated")
+	}
+	valueEnd := valueStart + valueEndRelative
+	mutatedValue := "00000000000000000000000000000000"
+	if string(raw)[valueStart:valueEnd] == mutatedValue {
+		mutatedValue = "ffffffffffffffffffffffffffffffff"
+	}
+	mutated := string(raw)[:valueStart] + mutatedValue + string(raw)[valueEnd:]
 	if mutated == string(raw) {
 		t.Fatal("fixture fingerprint was not found")
 	}
@@ -791,6 +1065,29 @@ func TestMeasureCDFLiquidityRejectsObservationFingerprintMutation(t *testing.T) 
 	}
 	if audit.Valid || !hasCDFCheck(audit.Checks, "supplier decision frontier does not match its delayed local observation") {
 		t.Fatalf("fingerprint mutation audit = %+v, want fail-closed frontier rejection", audit)
+	}
+}
+
+func TestMeasureCDFLiquidityRejectsFabricatedPublicObservation(t *testing.T) {
+	run := writeCDFLiquidityReceiptFixture(t)
+	generalPath := filepath.Join(run.Dir, "venues", "north", "general.jsonl")
+	raw, err := os.ReadFile(generalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(raw), `"best_bid":99,"best_bid_qty":10,"best_ask":101,"best_ask_qty":10,"mark_price":100`, `"best_bid":98,"best_bid_qty":9,"best_ask":102,"best_ask_qty":11,"mark_price":100`, 1)
+	if mutated == string(raw) {
+		t.Fatal("fixture public observation was not found")
+	}
+	if err := os.WriteFile(generalPath, []byte(mutated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := run.MeasureCDFLiquidity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.Valid || !hasCDFCheck(audit.Checks, "supplier decision market observation does not match") {
+		t.Fatalf("fabricated public observation was accepted: %+v", audit)
 	}
 }
 
@@ -1533,7 +1830,17 @@ func writeCDFLiquidityReceiptFixture(t *testing.T) *Run {
 	if err != nil {
 		t.Fatal(err)
 	}
-	frontierFields := `,"observation_link_id":1,"observation_ordinal":1,"observation_delivered_at":1,"observation_fingerprint":"01000000000000000000000000000000"`
+	publicFingerprint, err := etypes.MarketDataFingerprint(&etypes.MarketDataMsg{
+		Type: etypes.MDSnapshot, Symbol: "CDF/USD", SeqNum: 1, Timestamp: 1,
+		Data: &etypes.BookSnapshot{
+			Bids: []etypes.PriceLevel{{Price: 99, VisibleQty: 10}},
+			Asks: []etypes.PriceLevel{{Price: 101, VisibleQty: 10}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	frontierFields := fmt.Sprintf(`,"observation_link_id":1,"observation_ordinal":1,"observation_delivered_at":1,"observation_fingerprint":"%s"`, hex.EncodeToString(publicFingerprint[:]))
 	updated := strings.ReplaceAll(string(raw), `"observation_sequence":1`, `"observation_sequence":1`+frontierFields)
 	if err := os.WriteFile(generalPath, []byte(updated), 0644); err != nil {
 		t.Fatal(err)
@@ -1558,7 +1865,7 @@ func writeCDFLiquidityReceiptFixture(t *testing.T) *Run {
 	}
 	schedule := simulation.MarketDataSchedule{
 		ClientID: 2, SourceVenue: "north", Link: link, Symbol: "CDF/USD", Type: exchange.MDSnapshot,
-		Sequence: 1, Fingerprint: [16]byte{1}, PublishedAt: 1, ScheduledAt: 1, LinkOrdinal: 1,
+		Sequence: 1, Fingerprint: publicFingerprint, PublishedAt: 1, ScheduledAt: 1, LinkOrdinal: 1,
 	}
 	if recorder.RecordSchedule(schedule) == 0 {
 		t.Fatal("receipt fixture schedule registration failed")
@@ -1764,6 +2071,30 @@ func syncCDFFixtureProvenance(t *testing.T, dir string) {
 }
 
 func cdfFixtureLine(sequence uint64, clientID uint64, event, payload string) string {
+	if event == "BookSnapshot" {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(payload), &fields); err == nil {
+			var bids, asks []bookLevel
+			if json.Unmarshal(fields["bids"], &bids) == nil && json.Unmarshal(fields["asks"], &asks) == nil {
+				publicLevels := func(levels []bookLevel) []etypes.PriceLevel {
+					public := make([]etypes.PriceLevel, 0, len(levels))
+					for _, level := range levels {
+						if level.VisibleQty > 0 {
+							public = append(public, etypes.PriceLevel{Price: level.Price, VisibleQty: level.VisibleQty})
+						}
+					}
+					return public
+				}
+				publicBids, _ := json.Marshal(publicLevels(bids))
+				publicAsks, _ := json.Marshal(publicLevels(asks))
+				fields["source_sequence"] = json.RawMessage(fmt.Sprintf("%d", sequence))
+				fields["public_bids"], fields["public_asks"] = publicBids, publicAsks
+				if encoded, marshalErr := json.Marshal(fields); marshalErr == nil {
+					payload = string(encoded)
+				}
+			}
+		}
+	}
 	if event == "elastic_liquidity_supplier_decision" {
 		position := int64(0)
 		if strings.Contains(payload, `"position":5`) {
