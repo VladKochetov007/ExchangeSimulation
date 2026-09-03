@@ -215,6 +215,15 @@ v2_r2_require_cdf_supplier_comparison() {
 		.treatment.supplier_ask_time_weighted_resting_depth_share <= 0.75 and
 		.treatment.supplier_only_bid_time_weighted_fraction <= 0.5 and
 		.treatment.supplier_only_ask_time_weighted_fraction <= 0.5 and
+		(.treatment.venues | type) == "array" and (.treatment.venues | length) == 3 and
+		all(.treatment.venues[];
+			.supplier_depth_over_75_fraction <= 0.5 and
+			.supplier_bid_depth_over_75_fraction <= 0.5 and
+			.supplier_ask_depth_over_75_fraction <= 0.5 and
+			.supplier_bid_time_weighted_resting_depth_share <= 0.75 and
+			.supplier_ask_time_weighted_resting_depth_share <= 0.75 and
+			.supplier_only_bid_time_weighted_fraction <= 0.5 and
+			.supplier_only_ask_time_weighted_fraction <= 0.5) and
 		(($require_no_replacement | not) or
 			(.treatment.withdrawal_without_replacement_count | type) == "number" and
 			.treatment.withdrawal_without_replacement_count > 0) and

@@ -195,6 +195,11 @@ if jq '.treatment.pnl_changing_supplier_count = 0' "$temp_root/comparison-cdfliq
 	echo "top-level comparison accepted non-PnL treatment activity" >&2
 	exit 1
 fi
+if jq '.treatment.venues[0].supplier_bid_depth_over_75_fraction = 1' "$temp_root/comparison-cdfliquidity.json" >"$temp_root/comparison-one-venue-dominance.json" &&
+	v2_r2_require_cdf_supplier_comparison "$temp_root/comparison-one-venue-dominance.json" 2; then
+	echo "comparison accepted one-venue supplier dominance hidden by aggregate metrics" >&2
+	exit 1
+fi
 if jq '.control.supplier_count = 1' "$temp_root/comparison-cdfliquidity.json" >"$temp_root/comparison-control-activity.json" &&
 	v2_r2_require_cdf_supplier_comparison "$temp_root/comparison-control-activity.json" 2; then
 	echo "top-level comparison accepted CDF control activity" >&2
