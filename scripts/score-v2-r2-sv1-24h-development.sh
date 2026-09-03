@@ -249,6 +249,7 @@ pair_effect_records='[]'
 all_cells_valid=true
 all_terminal_diagnostic_valid=true
 terminal_failure_seen=false
+campaign_identity_metadata=""
 
 for seed in "${v2_r2_sv1_seeds[@]}"; do
 	for population in treatment control; do
@@ -276,6 +277,11 @@ for seed in "${v2_r2_sv1_seeds[@]}"; do
 			 all(.artifact_sha256 | to_entries[]; .value | test("^[0-9a-f]{64}$"))' \
 			--arg head_revision "$head_revision" "$cell/analysis-metadata.json" >/dev/null ||
 			fail "invalid analysis metadata: $population-$seed"
+		if [[ -z "$campaign_identity_metadata" ]]; then
+			campaign_identity_metadata="$cell/analysis-metadata.json"
+		elif ! v2_r2_require_campaign_provenance_match "$campaign_identity_metadata" "$cell/analysis-metadata.json"; then
+			fail "development cells do not share one simulator/analyzer provenance identity: $population-$seed"
+		fi
 		for file in "${required_artifacts[@]}"; do
 			actual=$(sha256sum "$cell/$file" | awk '{print $1}')
 			declared=$(jq -er --arg file "$file" '.artifact_sha256[$file]' "$cell/analysis-metadata.json")

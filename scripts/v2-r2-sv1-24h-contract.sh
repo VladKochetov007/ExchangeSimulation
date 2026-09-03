@@ -248,3 +248,56 @@ v2_r2_require_cdf_supplier_comparison() {
 		fi
 	fi
 }
+
+# A scored campaign is one provenance unit even though each cell has its own
+# seed and economic configuration. Compare the identities that must not vary
+# across cells; config hashes and cell/seed labels remain deliberately outside
+# this projection.
+v2_r2_campaign_provenance_identity() {
+	[[ $# -eq 1 && -s "$1" ]] || return 1
+	jq -ce '
+		select(
+		type == "object" and
+		(.analysis_revision | type) == "string" and
+		(.raw_source_revision | type) == "string" and
+		(.analysis_contract | type) == "string" and
+		(.evidence_format | type) == "string" and
+		(.analyzer_revision | type) == "string" and
+		(.analyzer_sha256 | type) == "string" and
+		(.analyzer_vcs_modified | type) == "boolean" and
+		(.analyzer_trimpath | type) == "boolean" and
+		(.analyzer_cgo_enabled | type) == "string" and
+		(.analyzer_go_version | type) == "string" and
+		(.renderer_revision | type) == "string" and
+		(.renderer_sha256 | type) == "string" and
+		(.renderer_go_version | type) == "string" and
+		(.renderer_route_compression | type) == "string" and
+		(.simulator_revision | type) == "string" and
+		(.simulator_sha256 | type) == "string" and
+		(.simulator_trimpath | type) == "boolean" and
+		(.simulator_cgo_enabled | type) == "string" and
+		(.simulator_go_version | type) == "string" and
+		(.prunegate_revision | type) == "string" and
+		(.prunegate_sha256 | type) == "string" and
+		(.prunegate_trimpath | type) == "boolean" and
+		(.prunegate_cgo_enabled | type) == "string" and
+		(.prunegate_go_version | type) == "string"
+		) |
+		{
+			analysis_revision, raw_source_revision, analysis_contract, evidence_format,
+			analyzer_revision, analyzer_sha256, analyzer_vcs_modified, analyzer_trimpath,
+			analyzer_cgo_enabled, analyzer_go_version, renderer_revision, renderer_sha256,
+			renderer_go_version, renderer_route_compression, simulator_revision,
+			simulator_sha256, simulator_trimpath, simulator_cgo_enabled, simulator_go_version,
+			prunegate_revision, prunegate_sha256, prunegate_trimpath, prunegate_cgo_enabled,
+			prunegate_go_version
+		}' "$1"
+}
+
+v2_r2_require_campaign_provenance_match() {
+	[[ $# -eq 2 ]] || return 1
+	local reference=$1 candidate=$2 reference_identity candidate_identity
+	reference_identity=$(v2_r2_campaign_provenance_identity "$reference") || return 1
+	candidate_identity=$(v2_r2_campaign_provenance_identity "$candidate") || return 1
+	[[ "$reference_identity" == "$candidate_identity" ]]
+}

@@ -162,6 +162,25 @@ if jq '.result.supplier_count = 1' "$temp_root/control-cdfliquidity.json" >"$tem
 	exit 1
 fi
 
+jq -n '{
+	analysis_revision: "revision", raw_source_revision: "revision", analysis_contract: "contract",
+	evidence_format: "evstream_v3", analyzer_revision: "revision", analyzer_sha256: "a",
+	analyzer_vcs_modified: false, analyzer_trimpath: true, analyzer_cgo_enabled: "0", analyzer_go_version: "go1.27.0",
+	renderer_revision: "revision", renderer_sha256: "b", renderer_go_version: "go1.27.0", renderer_route_compression: "none",
+	simulator_revision: "revision", simulator_sha256: "c", simulator_trimpath: true, simulator_cgo_enabled: "0", simulator_go_version: "go1.27.0",
+	prunegate_revision: "revision", prunegate_sha256: "d", prunegate_trimpath: true, prunegate_cgo_enabled: "0", prunegate_go_version: "go1.27.0"
+}' >"$temp_root/provenance-a.json"
+cp -- "$temp_root/provenance-a.json" "$temp_root/provenance-b.json"
+v2_r2_require_campaign_provenance_match "$temp_root/provenance-a.json" "$temp_root/provenance-b.json" || {
+	echo "identical campaign provenance was rejected" >&2
+	exit 1
+}
+if jq '.simulator_sha256 = "different"' "$temp_root/provenance-b.json" >"$temp_root/mixed-provenance.json" &&
+	v2_r2_require_campaign_provenance_match "$temp_root/provenance-a.json" "$temp_root/mixed-provenance.json"; then
+	echo "mixed simulator provenance was accepted" >&2
+	exit 1
+fi
+
 jq -n \
 	--argjson treatment "$(jq '.result' "$cdf_audit_fixture")" \
 	--argjson control "$(jq '.result' "$temp_root/control-cdfliquidity.json")" \
