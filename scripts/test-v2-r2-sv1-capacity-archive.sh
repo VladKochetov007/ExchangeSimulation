@@ -110,6 +110,8 @@ jq -n \
 	 minimum_free_bytes: $minimum_free_bytes,
 	 initial_available_free_bytes: 50000000000, available_free_bytes: 50000000000,
 	 probe_root: $probe_root,
+	 measurement_config_path: "research/configs/v2-r2-sv1-24h/treatment-607.json",
+	 probe_cell: "treatment-607",
 	 evidence_manifest_sha256: "PLACEHOLDER",
 	 peak_output_bytes: 1, safety_margin_bytes: $safety_margin_bytes,
 	 required_free_bytes: $required_free_bytes}' \
