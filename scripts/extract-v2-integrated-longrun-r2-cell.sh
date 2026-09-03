@@ -450,7 +450,7 @@ write_terminal_unavailable_metric() {
 
 write_terminal_failure_artifacts() {
 	local outcome_json expected_supplier_count population raw_count=0
-	local price_unavailable_rejections=0 raw_file count temporary
+	local price_unavailable_rejections=0 raw_file price_metric_tmp temporary
 	outcome_json=$(jq -c '.' "$cell/terminal-outcome.json")
 	expected_supplier_count=$(jq -er '((.elastic_liquidity_suppliers // []) | length) * (.venue_ids | length)' "$cell/run-config.json")
 	if (( expected_supplier_count > 0 )); then
@@ -458,16 +458,30 @@ write_terminal_failure_artifacts() {
 	else
 		population=control
 	fi
-	while IFS= read -r -d '' raw_file; do
-		raw_count=$((raw_count + 1))
-		count=$(jq -c '
-			def payload: (.data.payload // .data // {});
-			select((.event // "") == "OrderRejected" and
-				((payload.error // payload.payload.error // .data.error // .error // "") == "PRICE_UNAVAILABLE")) | 1' \
-			"$raw_file" | wc -l)
-		price_unavailable_rejections=$((price_unavailable_rejections + count))
-	done < <(find "$cell/venues" -type f -name '*.jsonl' -print0 | sort -z)
-	(( raw_count > 0 )) || fail "terminal failure has no raw JSONL evidence"
+	if [[ -d "$cell/venues" ]]; then
+		while IFS= read -r -d '' raw_file; do
+			raw_count=$((raw_count + 1))
+		done < <(find "$cell/venues" -type f -name '*.jsonl' -print0 | sort -z)
+	fi
+	# Terminal diagnostics must use the same rendered evidence namespace as the
+	# ordinary metrics. In particular, binary execution frames can contain the
+	# only OrderRejected record, while raw JSONL may be absent in no-log mode.
+	price_metric_tmp=$(mktemp "$analysis_dir/priceunavailable-source-XXXXXX")
+	if ! "$analyzer" -metric priceunavailable -json "$analysis_input_dir" >"$price_metric_tmp" 2>"$price_metric_tmp.err"; then
+		mv "$price_metric_tmp" "$analysis_dir/priceunavailable-source.invalid"
+		mv "$price_metric_tmp.err" "$analysis_dir/priceunavailable-source.error"
+		fail "typed PRICE_UNAVAILABLE diagnostic failed on rendered evidence"
+	fi
+	if ! jq -e '.result.valid == true and
+		(.result.order_rejected_count | type) == "number" and
+		(.result.price_unavailable_order_rejections | type) == "number" and
+		(.result.malformed_order_rejected_count // 0) == 0' "$price_metric_tmp" >/dev/null; then
+		mv "$price_metric_tmp" "$analysis_dir/priceunavailable-source.invalid"
+		mv "$price_metric_tmp.err" "$analysis_dir/priceunavailable-source.error"
+		fail "typed PRICE_UNAVAILABLE diagnostic is invalid on rendered evidence"
+	fi
+	price_unavailable_rejections=$(jq -er '.result.price_unavailable_order_rejections' "$price_metric_tmp")
+	rm -f -- "$price_metric_tmp" "$price_metric_tmp.err"
 
 	for metric in "${metrics[@]}"; do
 		write_terminal_unavailable_metric "$metric"
@@ -569,7 +583,7 @@ write_terminal_failure_artifacts() {
 		--argjson simulator_trimpath true --arg simulator_cgo_enabled "$binary_cgo_enabled" \
 		--arg simulator_go_version "$simulator_go_version" --arg prunegate_revision "$prunegate_revision" \
 		--arg prunegate_sha256 "$prunegate_sha256" --argjson prunegate_trimpath true \
-		--argjson prunegate_cgo_enabled "$prunegate_cgo_enabled" --arg prunegate_go_version "$prunegate_go_version" \
+		--arg prunegate_cgo_enabled "$prunegate_cgo_enabled" --arg prunegate_go_version "$prunegate_go_version" \
 		--arg config_sha256 "$config_sha256" --argjson completion_sentinels "$completion_sentinels" \
 		'{schema_version: 3, cell: $cell, seed: $seed, evidence_format: $evidence_format,
 		 analysis_revision: $analysis_revision, analyzer_revision: $analyzer_revision,

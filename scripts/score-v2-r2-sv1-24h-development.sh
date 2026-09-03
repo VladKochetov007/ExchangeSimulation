@@ -22,6 +22,8 @@ score="$output_root/development-score.json"
 parity="$output_root/parity-attestation.json"
 analyzer=${MVANALYZE_BIN:-"$root_dir/bin/mvanalyze"}
 cdf_audit=${CDF_LIQUIDITY_AUDIT_BIN:-"$root_dir/bin/cdf-liquidity-audit"}
+renderer=${EVSRENDER_BIN:-"$root_dir/bin/evsrender"}
+render_route_compression=${V2_R2_RENDER_ROUTE_COMPRESSION:-zstd}
 contract_version="$v2_r2_sv1_scorer_contract"
 survival_contract="$v2_r2_sv1_survival_contract"
 paired_effect_contract="$v2_r2_sv1_paired_effect_contract"
@@ -87,6 +89,11 @@ head_revision=$(git -C "$root_dir" rev-parse HEAD)
 "$root_dir/scripts/check-v2-r2-sv1-24h-configs.sh" >/dev/null
 require_clean_binary "$analyzer" analyzer
 require_clean_binary "$cdf_audit" cdf-liquidity-audit
+require_clean_binary "$renderer" renderer
+case "$render_route_compression" in
+	none|zstd) ;;
+	*) fail "unsupported rendered route compression: $render_route_compression" ;;
+esac
 
 required_artifacts=(
 	observationreceipts.json frontiervectors.json mechanical.json conservation.json
@@ -217,17 +224,45 @@ run_survival_metric() {
 	local cell=$1 seed=$2 output="$output_root/survival-$(basename "$cell").json"
 	[[ ! -e "$output" && ! -L "$output" && ! -e "$output.invalid" && ! -L "$output.invalid" ]] ||
 		fail "refusing to overwrite survival measurement: $output"
-	local raw status
+	local raw status analysis_input_dir="$cell" rendered_dir="" render_report expected_event_frames expected_execution_hash
+	if [[ "$(jq -er '.evidence_format' "$cell/run-metadata.json")" == "evstream_v3" ]]; then
+		rendered_dir=$(mktemp -d)
+		if ! render_report=$("$renderer" -dir "$cell" -out "$rendered_dir" -route-compression "$render_route_compression"); then
+			rm -rf -- "$rendered_dir"
+			return 1
+		fi
+		expected_event_frames=$(jq -er '.event_frames' "$cell/binary-evidence-attestation.json")
+		expected_execution_hash=$(jq -er '.execution_stream_hash' "$cell/binary-evidence-attestation.json")
+		if ! jq -e --argjson event_frames "$expected_event_frames" --arg execution_hash "$expected_execution_hash" \
+			--arg route_compression "$render_route_compression" \
+			'.event_frames == $event_frames and .execution_stream_hash == $execution_hash and .route_compression == $route_compression' \
+			<<<"$render_report" >/dev/null; then
+			rm -rf -- "$rendered_dir"
+			return 1
+		fi
+		while IFS= read -r name; do
+			ln -s -- "$cell/$name" "$rendered_dir/$name"
+		done < <(find "$cell" -maxdepth 1 -type f \( -name '*.json' -o -name '*.jsonl' -o -name '*.bin' \) -printf '%f\n' | sort)
+		analysis_input_dir="$rendered_dir"
+	fi
 	raw=$(mktemp "$output.raw-XXXXXX")
-	set +e
-	"$analyzer" -metric viability -json -viability-window 3600 -viability-start "$survival_start_seconds" -viability-judge-life-edges -viability-min-side-depth "$minimum_executable_qty" "$cell" >"$raw"
-	status=$?
-	set -e
-	if [[ "$status" -ne 0 || ! -s "$raw" ]] || ! write_survival_summary "$cell" "$seed" "$output" "$raw"; then
+	if "$analyzer" -metric viability -json -viability-window 3600 -viability-start "$survival_start_seconds" -viability-judge-life-edges -viability-min-side-depth "$minimum_executable_qty" "$analysis_input_dir" >"$raw"; then
+		status=0
+	else
+		status=$?
+	fi
+	if [[ "$status" -ne 0 || ! -s "$raw" ]]; then
 		mv "$raw" "$output.raw.invalid"
+		[[ -z "$rendered_dir" ]] || rm -rf -- "$rendered_dir"
+		return 1
+	fi
+	if ! write_survival_summary "$cell" "$seed" "$output" "$raw"; then
+		mv "$raw" "$output.raw.invalid"
+		[[ -z "$rendered_dir" ]] || rm -rf -- "$rendered_dir"
 		return 1
 	fi
 	rm -f -- "$raw"
+	[[ -z "$rendered_dir" ]] || rm -rf -- "$rendered_dir"
 }
 
 pair_records='[]'
@@ -405,38 +440,9 @@ for seed in "${v2_r2_sv1_seeds[@]}"; do
 	mv "$audit_tmp" "$audit_path"
 	audit_contract_valid=false
 	audit_anticheating_valid=false
-	if jq -e --argjson expected "$registered_roster_count" '
-		.valid == true and .provenance.valid == true and
-		.treatment.valid == true and .control.valid == true and
-		.treatment.supplier_count == $expected and .control.supplier_count == 0 and
-		.treatment.trading_supplier_count == .treatment.supplier_count and
-		.treatment.pnl_changing_supplier_count == .treatment.supplier_count and
-		.treatment.inventory_responsive_decision_count > 0 and
-		(.treatment.cancel_count + .treatment.withdraw_count) > 0 and
-		((any(.treatment.suppliers[]; (.configured_max_loss_quote // 0) > 0) | not) or
-			(.treatment.risk_state_decision_count | type) == "number" and
-			.treatment.risk_state_decision_count > 0 and
-			all(.treatment.suppliers[]; (.configured_max_loss_quote // 0) > 0 and .risk_state_decision_count > 0)) and
-		.treatment.max_borrowed == 0 and
-		(.treatment.supplier_volume_share <= 0.75) and
-		(.treatment.supplier_depth_over_75_share <= 0.5) and
-		(.treatment.venues | length) == 3 and
-		all(.treatment.venues[]; .supplier_depth_over_75_fraction <= 0.5) and
-		(.treatment.suppliers | length) == $expected and
-		all(.treatment.suppliers[];
-			.valid == true and .fill_count > 0 and .pnl != 0 and
-			.inventory_responsive_decision_count > 0 and
-			.max_position <= .configured_max_position and
-			.min_position >= -.configured_max_position and
-			.max_quote_qty <= .configured_max_quote_qty and
-			.max_borrowed == 0)' "$audit_path" >/dev/null; then
+	if v2_r2_require_cdf_supplier_comparison "$audit_path" "$registered_roster_count"; then
 		audit_contract_valid=true
 		audit_anticheating_valid=true
-	fi
-	if [[ "$audit_contract_valid" == true && "$v2_r2_sv1_require_no_replacement_withdrawal" == true ]] &&
-		! jq -e '(.treatment.withdrawal_without_replacement_count | type) == "number" and .treatment.withdrawal_without_replacement_count > 0' "$audit_path" >/dev/null; then
-		audit_contract_valid=false
-		audit_anticheating_valid=false
 	fi
 	[[ "$audit_contract_valid" == true ]] || all_cdf_contract_valid=false
 	[[ "$audit_anticheating_valid" == true ]] || all_anticheating_valid=false
