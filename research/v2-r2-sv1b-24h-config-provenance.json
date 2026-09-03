@@ -9,7 +9,11 @@
   },
   "activation_roster": {
     "path": "research/configs/v2-r2-sv1b/activation-643.json",
-    "sha256": "ef590e11a8a7ada56e068de1b01aadaa6e9dabde6202ed29c2924b6a5d0fc932"
+    "sha256": "2c53145ab8b9862f7dfe52c807e6a231d1949adfe80cac34890dc4b7d0ca34f0"
+  },
+  "activation_control": {
+    "path": "research/configs/v2-r2-sv1b/activation-643-control.json",
+    "sha256": "f86b1750f6d8c51042ce8e32c97a820724d09e5b31e5592847950ae4cb7ed49d"
   },
   "registered_configs": {
     "control-643-none.json": "1bb69ef8ccbf8b627e469c626dbd8298de88ce58962fa87a9b38ef5169ce5580",
@@ -40,7 +44,7 @@
   },
   "generator": {
     "path": "scripts/render-v2-r2-sv1b-24h-configs.sh",
-    "sha256": "a8c8807a23fcd038aeb17be473b2d81e0e27805cee172297ab8ed411af5d8695"
+    "sha256": "fe039def4c121f8a8a29e826d435ea14b97f29f78bea69c214af621436295dd3"
   },
   "withdrawal_measurement": {
     "path": "research/v2-r2-sv1b-withdrawal-measurement-amendment-2026-09-02.md",

@@ -8,6 +8,7 @@ root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 config_dir="$root_dir/research/configs/v2-r2-sv1b-24h"
 source_dir="$root_dir/research/configs/v2-integrated-longrun-r2"
 activation_config="$root_dir/research/configs/v2-r2-sv1b/activation-643.json"
+activation_control_config="$root_dir/research/configs/v2-r2-sv1b/activation-643-control.json"
 source "$root_dir/scripts/v2-r2-sv1b-24h-contract.sh"
 normalizer=${V2_R2_SV1B_CONFIG_NORMALIZER_BIN:-"$root_dir/bin/multivenue"}
 candidate="V2-R2-SV1B-24H-CDF-LIQUIDITY"
@@ -16,7 +17,10 @@ date="2026-09-02"
 seeds=(643 647 653)
 
 [[ -d "$config_dir" ]] || mkdir -p -- "$config_dir"
-[[ -s "$activation_config" ]] || { echo "missing SV1B activation roster: $activation_config" >&2; exit 1; }
+[[ -s "$activation_config" && -s "$activation_control_config" ]] || {
+	echo "missing SV1B activation pair: $activation_config $activation_control_config" >&2
+	exit 1
+}
 [[ -s "$source_dir/dev-607.json" && -s "$source_dir/dev-607-none.json" ]] || {
 	echo "missing accepted R2 source configs" >&2
 	exit 1
@@ -94,6 +98,7 @@ withdrawal_measurement_file="$root_dir/$withdrawal_measurement_path"
 source_hash=$(sha256sum "$source_dir/dev-607.json" | awk '{print $1}')
 no_log_source_hash=$(sha256sum "$source_dir/dev-607-none.json" | awk '{print $1}')
 roster_hash=$(sha256sum "$activation_config" | awk '{print $1}')
+activation_control_hash=$(sha256sum "$activation_control_config" | awk '{print $1}')
 generator_hash=$(sha256sum "$root_dir/scripts/render-v2-r2-sv1b-24h-configs.sh" | awk '{print $1}')
 withdrawal_measurement_hash=$(sha256sum "$withdrawal_measurement_file" | awk '{print $1}')
 preregistration_path="research/v2-r2-sv1b-cdf-successor-preregistration-2026-09-02.md"
@@ -123,9 +128,9 @@ authorized_launch_config_hashes=$(for config_name in "${v2_r2_sv1_capacity_autho
 done | jq -Rsc 'split("\n") | map(select(length > 0))')
 capacity_cases='[]'
 capacity_case_specs=(
-	"$config_dir/treatment-643.json|4|production_treatment_g4"
-	"$config_dir/control-643.json|4|production_control_g4"
-	"$config_dir/treatment-643.json|8|production_treatment_g8"
+	"$config_dir/treatment-643.json|4|capacity_only_seed_659_treatment_g4"
+	"$config_dir/control-643.json|4|capacity_only_seed_659_control_g4"
+	"$config_dir/treatment-643.json|8|capacity_only_seed_659_treatment_g8"
 )
 for capacity_case_spec in "${capacity_case_specs[@]}"; do
 	IFS='|' read -r capacity_config gomaxprocs capacity_role <<<"$capacity_case_spec"
@@ -144,6 +149,8 @@ jq -n \
 	--arg no_log_source_hash "$no_log_source_hash" \
 	--arg roster_path "research/configs/v2-r2-sv1b/activation-643.json" \
 	--arg roster_hash "$roster_hash" \
+	--arg activation_control_path "research/configs/v2-r2-sv1b/activation-643-control.json" \
+	--arg activation_control_hash "$activation_control_hash" \
 	--arg generator_path "scripts/render-v2-r2-sv1b-24h-configs.sh" \
 	--arg generator_hash "$generator_hash" \
 	--arg withdrawal_measurement_path "$withdrawal_measurement_path" \
@@ -163,6 +170,7 @@ jq -n \
 	 predecessor: "V2-R2-SV1",
 	 source_configs: {"dev-607.json": $source_hash, "dev-607-none.json": $no_log_source_hash},
 	 activation_roster: {path: $roster_path, sha256: $roster_hash},
+	 activation_control: {path: $activation_control_path, sha256: $activation_control_hash},
 	 registered_configs: $registered_configs,
 	 fresh_development_seeds: [643, 647, 653],
 	 activation_seed: 643,

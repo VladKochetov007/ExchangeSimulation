@@ -19,6 +19,7 @@
   "elastic_supplier_reference_half_life": 0,
   "elastic_supplier_units_per_percent": 15000000000,
   "evidence_format": "evstream_v3",
+  "log_mode": "full",
   "experiment_id": "v2-r2-sv1b-activation-643-control",
   "fixed_distance_maker_count": 0,
   "future_flow_count": 0,

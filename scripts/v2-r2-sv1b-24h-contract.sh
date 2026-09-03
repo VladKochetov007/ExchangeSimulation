@@ -145,6 +145,7 @@ v2_r2_require_sv1b_activation_provenance() {
 	local output_root treatment_dir control_dir comparison_path review_path analyzer_path simulator_path
 	local expected_tree_sha256 actual_sha256 treatment_artifacts control_artifacts
 	local expected_treatment_config expected_control_config treatment_config_path control_config_path
+	local treatment_source_config_sha256 control_source_config_sha256
 	[[ "$provenance_path" == /* && "$provenance_path" != */ && "$provenance_path" != *$'\n'* && "$provenance_path" != *$'\t'* ]] || return 1
 	[[ "$expected_revision" =~ ^[0-9a-f]{40}$ && "$expected_binary_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
 	[[ -f "$provenance_path" && ! -L "$provenance_path" ]] || return 1
@@ -202,12 +203,14 @@ v2_r2_require_sv1b_activation_provenance() {
 	control_config_path=$(jq -er '.control_source_config_path | select(type == "string")' "$provenance_path") || return 1
 	[[ "$treatment_config_path" == "$expected_treatment_config" && "$control_config_path" == "$expected_control_config" ]] || return 1
 	[[ -s "$treatment_config_path" && ! -L "$treatment_config_path" && -s "$control_config_path" && ! -L "$control_config_path" ]] || return 1
+	treatment_source_config_sha256=$(sha256sum -- "$treatment_config_path" | awk '{print $1}') || return 1
+	control_source_config_sha256=$(sha256sum -- "$control_config_path" | awk '{print $1}') || return 1
 	jq -e --argjson seed "$v2_r2_sv1_activation_seed" \
 		'.seed == $seed and .evidence_format == "evstream_v3" and .log_mode == "full"' "$treatment_config_path" >/dev/null || return 1
 	jq -e --argjson seed "$v2_r2_sv1_activation_seed" \
 		'.seed == $seed and .evidence_format == "evstream_v3" and .log_mode == "full"' "$control_config_path" >/dev/null || return 1
-	jq -e --arg treatment_config_sha256 "$(sha256sum -- "$treatment_config_path" | awk '{print $1}')" \
-		--arg control_config_sha256 "$(sha256sum -- "$control_config_path" | awk '{print $1}')" \
+	jq -e --arg treatment_config_sha256 "$treatment_source_config_sha256" \
+		--arg control_config_sha256 "$control_source_config_sha256" \
 		'.treatment_source_config_sha256 == $treatment_config_sha256 and .control_source_config_sha256 == $control_config_sha256' \
 		"$provenance_path" >/dev/null || return 1
 	for arm in treatment control; do

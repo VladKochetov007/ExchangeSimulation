@@ -120,6 +120,12 @@ while IFS=$'\t' read -r relative expected_sha; do
 done < <(jq -r '.source_configs | to_entries[] | [.key,.value] | @tsv' "$provenance_manifest")
 activation_sha=$(sha256sum "$activation_config" | awk '{print $1}')
 [[ "$activation_sha" == "$(jq -er '.activation_roster.sha256' "$provenance_manifest")" ]] || fail "activation roster hash mismatch"
+activation_control_path=$(jq -er '.activation_control.path | select(type == "string")' "$provenance_manifest") || fail "SV1B provenance omits activation control"
+[[ "$activation_control_path" == "research/configs/v2-r2-sv1b/activation-643-control.json" ]] || fail "SV1B provenance names an unexpected activation control"
+activation_control_file="$root_dir/$activation_control_path"
+[[ -s "$activation_control_file" && ! -L "$activation_control_file" ]] || fail "missing activation control"
+activation_control_sha=$(sha256sum "$activation_control_file" | awk '{print $1}')
+[[ "$activation_control_sha" == "$(jq -er '.activation_control.sha256' "$provenance_manifest")" ]] || fail "activation control hash mismatch"
 while IFS=$'\t' read -r relative expected_sha; do
 	[[ "$relative" != */* && "$relative" == *.json ]] || fail "unsafe registered config identity: $relative"
 	path="$config_dir/$relative"
@@ -128,6 +134,10 @@ done < <(jq -r '.registered_configs | to_entries[] | [.key,.value] | @tsv' "$pro
 
 calendar='[{"name":"short","listing_interval_nano":3600000000000,"time_to_expiry_nano":7200000000000},{"name":"medium","listing_interval_nano":10800000000000,"time_to_expiry_nano":21600000000000},{"name":"long","listing_interval_nano":21600000000000,"time_to_expiry_nano":43200000000000}]'
 jq -e '.elastic_liquidity_suppliers | type == "array" and length == 4' "$activation_config" >/dev/null || fail "activation roster must contain four suppliers"
+for activation_pair_config in "$activation_config" "$activation_control_file"; do
+	jq -e '.seed == 643 and .log_mode == "full" and .evidence_format == "evstream_v3" and .record_market_data_receipts == true' "$activation_pair_config" >/dev/null ||
+		fail "activation pair config is not explicit full-log evstream evidence: $activation_pair_config"
+done
 if [[ "$v2_r2_sv1_candidate_id" == V2-R2-SV1B-* ]]; then
 	jq -e '
 		all(.elastic_liquidity_suppliers[];
