@@ -96,6 +96,9 @@ v2_r2_require_cdf_supplier_activation() {
 	if ! jq -e --argjson expected_supplier_count "$expected_supplier_count" --argjson require_no_replacement "$v2_r2_sv1_require_no_replacement_withdrawal" '
 		type == "object" and (.result | type) == "object" and
 		.result.valid == true and
+		.result.evidence_valid == true and
+		.result.activation_satisfied == true and
+		.result.anti_cheating_satisfied == true and
 		(.result.supplier_count | type) == "number" and
 		.result.supplier_count == $expected_supplier_count and
 		.result.decision_count > 0 and .result.fill_count > 0 and
@@ -113,11 +116,24 @@ v2_r2_require_cdf_supplier_activation() {
 				.result.withdrawal_without_replacement_count > 0) and
 		.result.supplier_volume_share <= 0.75 and
 		.result.supplier_depth_over_75_share <= 0.5 and
+		.result.supplier_bid_time_weighted_resting_depth_share <= 0.75 and
+		.result.supplier_ask_time_weighted_resting_depth_share <= 0.75 and
+		.result.supplier_only_bid_time_weighted_fraction <= 0.5 and
+		.result.supplier_only_ask_time_weighted_fraction <= 0.5 and
 		(.result.venues | type) == "array" and (.result.venues | length) == 3 and
-		all(.result.venues[]; .supplier_depth_over_75_fraction <= 0.5) and
+		all(.result.venues[];
+			.supplier_depth_over_75_fraction <= 0.5 and
+			.supplier_bid_depth_over_75_fraction <= 0.5 and
+			.supplier_ask_depth_over_75_fraction <= 0.5 and
+			.supplier_bid_time_weighted_resting_depth_share <= 0.75 and
+			.supplier_ask_time_weighted_resting_depth_share <= 0.75 and
+			.supplier_only_bid_time_weighted_fraction <= 0.5 and
+			.supplier_only_ask_time_weighted_fraction <= 0.5) and
 		(.result.suppliers | type) == "array" and (.result.suppliers | length) == $expected_supplier_count and
 		all(.result.suppliers[];
-			.valid == true and .fill_count > 0 and .pnl != 0 and
+			.valid == true and .evidence_valid == true and .activation_satisfied == true and
+			.anti_cheating_satisfied == true and .fill_caused_risk_transition == true and
+			.fill_count > 0 and .trading_pnl != 0 and
 			.min_position != .max_position and .inventory_responsive_decision_count > 0 and
 			.max_observation_age_ns > 0 and .max_borrowed == 0 and .borrow_event_count == 0 and
 			.max_position <= .configured_max_position and
@@ -154,7 +170,8 @@ v2_r2_require_cdf_supplier_control() {
 	[[ -s "$audit_path" ]] || return 1
 	jq -e '
 		type == "object" and (.result | type) == "object" and
-		.result.valid == true and .result.supplier_count == 0 and
+		.result.valid == true and .result.evidence_valid == true and
+		.result.anti_cheating_satisfied == true and .result.supplier_count == 0 and
 		.result.decision_count == 0 and .result.fill_count == 0 and
 		.result.trading_supplier_count == 0 and
 		.result.pnl_changing_supplier_count == 0 and
@@ -175,7 +192,9 @@ v2_r2_require_cdf_supplier_comparison() {
 		type == "object" and .valid == true and
 		(.provenance.valid // false) == true and
 		(.treatment | type) == "object" and (.control | type) == "object" and
-		.treatment.valid == true and .control.valid == true and
+		.treatment.valid == true and .treatment.evidence_valid == true and
+		.treatment.activation_satisfied == true and .treatment.anti_cheating_satisfied == true and
+		.control.valid == true and .control.evidence_valid == true and .control.anti_cheating_satisfied == true and
 		.treatment.supplier_count == $expected_supplier_count and .control.supplier_count == 0 and
 		.control.decision_count == 0 and .control.fill_count == 0 and
 		.control.trading_supplier_count == 0 and .control.pnl_changing_supplier_count == 0 and
@@ -190,12 +209,20 @@ v2_r2_require_cdf_supplier_comparison() {
 			.treatment.risk_state_decision_count > 0 and
 			all(.treatment.suppliers[]; (.configured_max_loss_quote // 0) > 0 and .risk_state_decision_count > 0)) and
 		.treatment.max_borrowed == 0 and
+		.treatment.supplier_volume_share <= 0.75 and
+		.treatment.supplier_depth_over_75_share <= 0.5 and
+		.treatment.supplier_bid_time_weighted_resting_depth_share <= 0.75 and
+		.treatment.supplier_ask_time_weighted_resting_depth_share <= 0.75 and
+		.treatment.supplier_only_bid_time_weighted_fraction <= 0.5 and
+		.treatment.supplier_only_ask_time_weighted_fraction <= 0.5 and
 		(($require_no_replacement | not) or
 			(.treatment.withdrawal_without_replacement_count | type) == "number" and
 			.treatment.withdrawal_without_replacement_count > 0) and
 		(.treatment.suppliers | length) == $expected_supplier_count and
 		all(.treatment.suppliers[];
-			.valid == true and .fill_count > 0 and .pnl != 0 and
+			.valid == true and .evidence_valid == true and .activation_satisfied == true and
+			.anti_cheating_satisfied == true and .fill_caused_risk_transition == true and
+			.fill_count > 0 and .trading_pnl != 0 and
 			.inventory_responsive_decision_count > 0 and
 			.max_position <= .configured_max_position and
 			.min_position >= (-.configured_max_position) and

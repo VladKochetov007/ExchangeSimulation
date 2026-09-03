@@ -25,31 +25,47 @@ cdf_audit_fixture="$temp_root/cdfliquidity.json"
 jq -n ' {
 		run: "contract-fixture",
 		result: {
-			valid: true, supplier_count: 2, decision_count: 4, fill_count: 2,
+			valid: true, evidence_valid: true, activation_satisfied: true, anti_cheating_satisfied: true,
+			supplier_count: 2, decision_count: 4, fill_count: 2,
 			trading_supplier_count: 2, pnl_changing_supplier_count: 2,
 			inventory_responsive_decision_count: 4, cancel_count: 1, withdraw_count: 1,
 			withdrawal_without_replacement_count: 2,
 			max_borrowed: 0, snapshot_count: 1, supplier_volume_share: 0.2, supplier_depth_over_75_share: 0.1,
 			supplier_time_weighted_resting_depth_share: 0.2,
+			supplier_bid_time_weighted_resting_depth_share: 0.2,
+			supplier_ask_time_weighted_resting_depth_share: 0.2,
+			supplier_only_bid_time_weighted_fraction: 0.1,
+			supplier_only_ask_time_weighted_fraction: 0.1,
 			supplier_removal_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
 			supplier_removal_bid_absence_fraction: 0, supplier_removal_ask_absence_fraction: 0,
 			venues: [
 				{snapshot_count: 1, supplier_depth_over_75_fraction: 0.1,
+					supplier_bid_depth_over_75_fraction: 0.1, supplier_ask_depth_over_75_fraction: 0.1,
+					supplier_bid_time_weighted_resting_depth_share: 0.2, supplier_ask_time_weighted_resting_depth_share: 0.2,
+					supplier_only_bid_time_weighted_fraction: 0.1, supplier_only_ask_time_weighted_fraction: 0.1,
 					supplier_removal_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
 					supplier_removal_bid_absence_fraction: 0, supplier_removal_ask_absence_fraction: 0},
 				{snapshot_count: 1, supplier_depth_over_75_fraction: 0.1,
+					supplier_bid_depth_over_75_fraction: 0.1, supplier_ask_depth_over_75_fraction: 0.1,
+					supplier_bid_time_weighted_resting_depth_share: 0.2, supplier_ask_time_weighted_resting_depth_share: 0.2,
+					supplier_only_bid_time_weighted_fraction: 0.1, supplier_only_ask_time_weighted_fraction: 0.1,
 					supplier_removal_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
 					supplier_removal_bid_absence_fraction: 0, supplier_removal_ask_absence_fraction: 0},
 				{snapshot_count: 1, supplier_depth_over_75_fraction: 0.1,
+					supplier_bid_depth_over_75_fraction: 0.1, supplier_ask_depth_over_75_fraction: 0.1,
+					supplier_bid_time_weighted_resting_depth_share: 0.2, supplier_ask_time_weighted_resting_depth_share: 0.2,
+					supplier_only_bid_time_weighted_fraction: 0.1, supplier_only_ask_time_weighted_fraction: 0.1,
 					supplier_removal_counterfactual_valid: true, supplier_removal_snapshot_count: 1,
 					supplier_removal_bid_absence_fraction: 0, supplier_removal_ask_absence_fraction: 0}
 			],
 			suppliers: [
-				{valid: true, fill_count: 1, pnl: 1, min_position: 0, max_position: 1,
+				{valid: true, evidence_valid: true, activation_satisfied: true, anti_cheating_satisfied: true,
+				 fill_caused_risk_transition: true, trading_pnl: 1, fill_count: 1, pnl: 1, min_position: 0, max_position: 1,
 				 inventory_responsive_decision_count: 2, max_observation_age_ns: 1,
 				 max_borrowed: 0, borrow_event_count: 0, max_position: 1,
 				 configured_max_position: 2, max_quote_qty: 1, configured_max_quote_qty: 2},
-				{valid: true, fill_count: 1, pnl: -1, min_position: -1, max_position: 0,
+				{valid: true, evidence_valid: true, activation_satisfied: true, anti_cheating_satisfied: true,
+				 fill_caused_risk_transition: true, trading_pnl: -1, fill_count: 1, pnl: -1, min_position: -1, max_position: 0,
 				 inventory_responsive_decision_count: 2, max_observation_age_ns: 1,
 				 max_borrowed: 0, borrow_event_count: 0, max_position: 1,
 				 configured_max_position: 2, max_quote_qty: 1, configured_max_quote_qty: 2}
@@ -75,6 +91,19 @@ if jq '.result.pnl_changing_supplier_count = 0' "$cdf_audit_fixture" >"$temp_roo
 	echo "non-PnL CDF activity was accepted" >&2
 	exit 1
 fi
+if jq '.result.pnl_changing_supplier_count = 2 |
+	.result.suppliers |= map(.pnl = 100 | .trading_pnl = 0)' "$cdf_audit_fixture" >"$temp_root/endowment-revaluation-only.json" &&
+	v2_r2_require_cdf_supplier_activation "$temp_root/endowment-revaluation-only.json" 2; then
+	echo "endowment-only CDF revaluation was accepted as trading activation" >&2
+	exit 1
+fi
+for field in evidence_valid activation_satisfied anti_cheating_satisfied; do
+	if jq --arg field "$field" '.result[$field] = false' "$cdf_audit_fixture" >"$temp_root/missing-$field.json" &&
+		v2_r2_require_cdf_supplier_activation "$temp_root/missing-$field.json" 2; then
+		echo "CDF activity with $field=false was accepted" >&2
+		exit 1
+	fi
+done
 
 jq '.result.risk_state_decision_count = 2 |
 	.result.suppliers |= map(. + {configured_max_loss_quote: 10, risk_state_decision_count: 1})' \
@@ -113,7 +142,7 @@ fi
 jq -n ' {
 		run: "control-fixture",
 		result: {
-			valid: true, supplier_count: 0, decision_count: 0, fill_count: 0,
+			valid: true, evidence_valid: true, anti_cheating_satisfied: true, supplier_count: 0, decision_count: 0, fill_count: 0,
 			trading_supplier_count: 0, pnl_changing_supplier_count: 0,
 			inventory_responsive_decision_count: 0, cancel_count: 0, withdraw_count: 0,
 			max_borrowed: 0, checks: [], venues: [
