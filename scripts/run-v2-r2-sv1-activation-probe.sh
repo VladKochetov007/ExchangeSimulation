@@ -181,12 +181,38 @@ prepare_arm() {
 
 run_arm() {
 	local arm=$1
-	local metadata_sha_before
+	local metadata_sha_before status terminal_failure=false outcome_status
 	metadata_sha_before=$(sha256sum -- "$arm/run-metadata.json" | awk '{print $1}')
 	local stdout_log="$output_root/$(basename "$arm").stdout.log"
 	local stderr_log="$output_root/$(basename "$arm").stderr.log"
-	"$binary" -config "$arm/run-config.json" -duration "$horizon" -logdir "$arm" -log-mode full -evidence-format evstream_v3 \
-		>"$stdout_log" 2>"$stderr_log"
+	if "$binary" -config "$arm/run-config.json" -duration "$horizon" -logdir "$arm" -log-mode full -evidence-format evstream_v3 \
+		>"$stdout_log" 2>"$stderr_log"; then
+		status=0
+	else
+		status=$?
+	fi
+	[[ -s "$arm/terminal-outcome.json" ]] || {
+		echo "activation arm did not produce a typed terminal outcome: $arm" >&2
+		return 1
+	}
+	if ! jq -e --argjson start "$simulation_start_nano" --argjson end "$simulation_end_nano" \
+		-f "$root_dir/scripts/v2-r2-sv1-terminal-outcome.jq" "$arm/terminal-outcome.json" >/dev/null; then
+		echo "activation arm produced an invalid typed terminal outcome: $arm" >&2
+		return 1
+	fi
+	outcome_status=$(jq -er '.status' "$arm/terminal-outcome.json") || return 1
+	case "$outcome_status:$status" in
+		completed:0) ;;
+		terminal_failure:0)
+			echo "activation terminal failure did not propagate a nonzero status: $arm" >&2
+			return 1
+			;;
+		terminal_failure:*) terminal_failure=true ;;
+		*)
+			echo "activation exit status $status is inconsistent with typed outcome $outcome_status: $arm" >&2
+			return 1
+			;;
+	esac
 	[[ -s "$arm/greeks.json" && -s "$arm/latency.json" && -s "$arm/manifest.json" && -s "$arm/checkpoints.jsonl" && -s "$arm/events.evs" && -s "$arm/binary-evidence-attestation.json" ]] || {
 		echo "activation arm did not produce all completion evidence: $arm" >&2
 		return 1
@@ -194,54 +220,170 @@ run_arm() {
 	jq -e --arg revision "$head_revision" --argjson seed "$activation_seed" --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
 		'.build.revision == $revision and .build.modified == false and .build.goos == "linux" and .build.goarch == "amd64" and .build.goamd64 == "v1" and .venue_ids == ["north", "central", "south"] and
 		 .config.seed == $seed and .config.log_mode == "full" and .config.evidence_format == "evstream_v3"' \
-		"$arm/manifest.json" >/dev/null
+		"$arm/manifest.json" >/dev/null || return 1
 	jq -e --argjson simulation_start_nano "$simulation_start_nano" --argjson simulation_end_nano "$simulation_end_nano" \
+		--argjson terminal_failure "$terminal_failure" \
 		'(.initial_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $simulation_start_nano)) and
-		 (.terminal_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $simulation_end_nano))' \
-		"$arm/greeks.json" >/dev/null
-	v2_r2_require_checkpoint_stream "$arm/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano"
+		 (if $terminal_failure then
+			((.terminal_accounts // []) | type == "array" and length == 0) and
+			((.terminal_risk // {}) | type == "object" and length == 0) and
+			.report_status == "partial_terminal_failure" and .terminal_valuation_available == false
+		 else
+			(.terminal_accounts | type == "array" and length > 0 and all(.[]; .account.timestamp == $simulation_end_nano)) and
+			.report_status == "complete_terminal_valuation" and .terminal_valuation_available == true
+		 end)' "$arm/greeks.json" >/dev/null || return 1
+	v2_r2_require_checkpoint_stream "$arm/checkpoints.jsonl" "$simulation_start_nano" "$simulation_end_nano" || return 1
 	[[ "$metadata_sha_before" == "$(sha256sum -- "$arm/run-metadata.json" | awk '{print $1}')" ]] || {
 		echo "activation metadata changed during simulation: $arm" >&2
 		return 1
 	}
-	v2_r2_write_evidence_manifest "$arm"
-	v2_r2_verify_evidence_manifest "$arm"
+	v2_r2_write_evidence_manifest "$arm" || return 1
+	v2_r2_verify_evidence_manifest "$arm" || return 1
+	local run_status_tmp="$arm/run-status.json.tmp-$$"
+	local terminal_outcome_sha256 evidence_manifest_sha256
+	terminal_outcome_sha256=$(sha256sum -- "$arm/terminal-outcome.json" | awk '{print $1}')
+	evidence_manifest_sha256=$(sha256sum -- "$arm/evidence-manifest.json" | awk '{print $1}')
+	jq -n --arg arm "$(basename "$arm")" --argjson exit_status "$status" \
+		--arg outcome_status "$outcome_status" --argjson terminal_failure "$terminal_failure" \
+		--arg terminal_outcome_sha256 "$terminal_outcome_sha256" \
+		--arg run_metadata_sha256 "$metadata_sha_before" \
+		--arg manifest_sha256 "$(sha256sum -- "$arm/manifest.json" | awk '{print $1}')" \
+		--arg greeks_sha256 "$(sha256sum -- "$arm/greeks.json" | awk '{print $1}')" \
+		--arg latency_sha256 "$(sha256sum -- "$arm/latency.json" | awk '{print $1}')" \
+		--arg checkpoints_sha256 "$(sha256sum -- "$arm/checkpoints.jsonl" | awk '{print $1}')" \
+		--arg binary_attestation_sha256 "$(sha256sum -- "$arm/binary-evidence-attestation.json" | awk '{print $1}')" \
+		--arg evidence_manifest_sha256 "$evidence_manifest_sha256" \
+		'{schema_version: 2, contract: "v2-r2-sv1b-activation-arm-status-v1", arm: $arm,
+		 exit_status: $exit_status, completion_verified: ($terminal_failure | not),
+		 terminal_failure_verified: $terminal_failure, terminal_outcome_status: $outcome_status,
+		 terminal_outcome_sha256: $terminal_outcome_sha256, run_metadata_sha256: $run_metadata_sha256,
+		 manifest_sha256: $manifest_sha256, greeks_sha256: $greeks_sha256,
+		 latency_sha256: $latency_sha256, checkpoints_sha256: $checkpoints_sha256,
+		 binary_attestation_sha256: $binary_attestation_sha256,
+		 evidence_manifest_sha256: $evidence_manifest_sha256}' >"$run_status_tmp" || return 1
+	mv -- "$run_status_tmp" "$arm/run-status.json"
 }
 
 prepare_arm "$treatment_dir" "$treatment_config"
 prepare_arm "$control_dir" "$control_config"
+set +e
 run_arm "$treatment_dir"
+treatment_run_status=$?
 run_arm "$control_dir"
+control_run_status=$?
+set -e
 
-comparison_tmp="$output_root/cdf-liquidity-comparison.json.tmp-$$"
-"$audit_binary" -treatment "$treatment_dir" -control "$control_dir" >"$comparison_tmp"
-mv -- "$comparison_tmp" "$output_root/cdf-liquidity-comparison.json"
-expected_supplier_count=$(jq -er '(.elastic_liquidity_suppliers | length) * (.venue_ids | length)' "$treatment_config")
-v2_r2_require_cdf_supplier_comparison "$output_root/cdf-liquidity-comparison.json" "$expected_supplier_count" || {
-	echo "activation contract failed: suppliers did not demonstrate finite bounded activity" >&2
-	exit 1
-}
-
-comparison_sha=$(sha256sum -- "$output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
-jq -n \
-	--arg contract "$v2_r2_sv1_activation_pair_contract" \
-	--arg candidate "$head_revision" \
-	--arg output_root "$output_root" \
-	--arg treatment "$treatment_dir" \
-	--arg control "$control_dir" \
+write_pair_provenance() {
+	local pair_status=$1 activation_satisfied=$2 comparison_sha=""
+	[[ $# -ge 3 ]] && comparison_sha=$3
+	local provenance_tmp="$output_root/activation-provenance.json.tmp-$$"
+	local treatment_terminal_status_json=null control_terminal_status_json=null
+	local treatment_status_sha256="" control_status_sha256=""
+	local treatment_terminal_outcome_sha256="" control_terminal_outcome_sha256=""
+	if [[ -s "$treatment_dir/run-status.json" ]]; then
+		treatment_terminal_status_json=$(jq -c '.terminal_outcome_status' "$treatment_dir/run-status.json") || return 1
+		treatment_status_sha256=$(sha256sum -- "$treatment_dir/run-status.json" | awk '{print $1}')
+		treatment_terminal_outcome_sha256=$(jq -r '.terminal_outcome_sha256' "$treatment_dir/run-status.json") || return 1
+	fi
+	if [[ -s "$control_dir/run-status.json" ]]; then
+		control_terminal_status_json=$(jq -c '.terminal_outcome_status' "$control_dir/run-status.json") || return 1
+		control_status_sha256=$(sha256sum -- "$control_dir/run-status.json" | awk '{print $1}')
+		control_terminal_outcome_sha256=$(jq -r '.terminal_outcome_sha256' "$control_dir/run-status.json") || return 1
+	fi
+	jq -n \
+		--arg contract "$v2_r2_sv1_activation_pair_contract" \
+		--arg candidate "$head_revision" \
+		--arg output_root "$output_root" \
+		--arg treatment "$treatment_dir" \
+		--arg control "$control_dir" \
 		--arg treatment_config_sha256 "$(sha256sum -- "$treatment_dir/run-config.json" | awk '{print $1}')" \
 		--arg control_config_sha256 "$(sha256sum -- "$control_dir/run-config.json" | awk '{print $1}')" \
-	--arg binary_sha256 "$(sha256sum -- "$binary" | awk '{print $1}')" \
-	--arg analyzer_sha256 "$(sha256sum -- "$audit_binary" | awk '{print $1}')" \
-	--arg comparison_sha256 "$comparison_sha" \
-	--argjson seed "$activation_seed" --arg horizon "$horizon" \
-	'{schema_version: 1, contract: $contract, candidate_revision: $candidate,
-	 seed: $seed, simulated_horizon: $horizon, output_root: $output_root,
-	 treatment_dir: $treatment, control_dir: $control,
-	 treatment_config_sha256: $treatment_config_sha256, control_config_sha256: $control_config_sha256,
-	 simulator_binary_sha256: $binary_sha256, analyzer_binary_sha256: $analyzer_sha256,
-	 comparison_sha256: $comparison_sha256, holdouts_consumed: false,
-	 scope: "development-only mechanism activation; not a 24-hour survival claim"}' \
-	>"$output_root/activation-provenance.json"
+		--arg binary_sha256 "$(sha256sum -- "$binary" | awk '{print $1}')" \
+		--arg analyzer_sha256 "$(sha256sum -- "$audit_binary" | awk '{print $1}')" \
+		--arg comparison_sha256 "$comparison_sha" \
+		--argjson seed "$activation_seed" --arg horizon "$horizon" \
+		--arg pair_status "$pair_status" --argjson activation_satisfied "$activation_satisfied" \
+		--argjson treatment_run_status "$treatment_run_status" --argjson control_run_status "$control_run_status" \
+		--argjson treatment_terminal_status "$treatment_terminal_status_json" \
+		--argjson control_terminal_status "$control_terminal_status_json" \
+		--arg treatment_status_sha256 "$treatment_status_sha256" \
+		--arg control_status_sha256 "$control_status_sha256" \
+		--arg treatment_terminal_outcome_sha256 "$treatment_terminal_outcome_sha256" \
+		--arg control_terminal_outcome_sha256 "$control_terminal_outcome_sha256" \
+		'{schema_version: 2, contract: $contract, candidate_revision: $candidate,
+		 seed: $seed, simulated_horizon: $horizon, output_root: $output_root,
+		 treatment_dir: $treatment, control_dir: $control,
+		 treatment_config_sha256: $treatment_config_sha256, control_config_sha256: $control_config_sha256,
+		 simulator_binary_sha256: $binary_sha256, analyzer_binary_sha256: $analyzer_sha256,
+		 comparison_sha256: (if $comparison_sha256 == "" then null else $comparison_sha256 end),
+		 status: $pair_status, activation_satisfied: $activation_satisfied,
+		 treatment_runner_status: $treatment_run_status, control_runner_status: $control_run_status,
+		 treatment_terminal_status: $treatment_terminal_status, control_terminal_status: $control_terminal_status,
+		 treatment_run_status_sha256: $treatment_status_sha256,
+		 control_run_status_sha256: $control_status_sha256,
+		 treatment_terminal_outcome_sha256: $treatment_terminal_outcome_sha256,
+		 control_terminal_outcome_sha256: $control_terminal_outcome_sha256,
+		 holdouts_consumed: false,
+		 scope: "development-only mechanism activation; not a 24-hour survival claim"}' \
+		>"$provenance_tmp" || return 1
+	mv -- "$provenance_tmp" "$output_root/activation-provenance.json"
+}
 
-echo "completed V2-R2-SV1 activation probe: $output_root"
+if [[ "$treatment_run_status" -ne 0 || "$control_run_status" -ne 0 ]]; then
+	write_pair_provenance "INVALID_ARM_EVIDENCE" false
+	echo "activation probe rejected malformed or generic arm evidence; see $output_root" >&2
+	exit 1
+fi
+
+if ! treatment_terminal_status=$(jq -er '.terminal_outcome_status' "$treatment_dir/run-status.json") ||
+	! control_terminal_status=$(jq -er '.terminal_outcome_status' "$control_dir/run-status.json"); then
+	write_pair_provenance "INVALID_ARM_EVIDENCE" false
+	echo "activation probe could not read typed terminal arm status; see $output_root" >&2
+	exit 1
+fi
+
+if [[ "$treatment_terminal_status" != completed || "$control_terminal_status" != completed ]]; then
+	comparison_tmp="$output_root/cdf-liquidity-comparison.json.tmp-$$"
+	jq -n --arg contract "$v2_r2_sv1_activation_contract" --argjson seed "$activation_seed" \
+		--arg treatment_status "$treatment_terminal_status" --arg control_status "$control_terminal_status" \
+		'{schema_version: 2, contract: $contract, seed: $seed, status: "UNAVAILABLE_TERMINAL_FAILURE",
+		 valid: false, evidence_valid: true, activation_satisfied: false,
+		 anti_cheating_satisfied: false, measurement_valid: true,
+		 treatment_terminal_status: $treatment_status, control_terminal_status: $control_status,
+		 reason: "typed terminal failure prevents a complete paired activation comparison"}' \
+		>"$comparison_tmp"
+	mv -- "$comparison_tmp" "$output_root/cdf-liquidity-comparison.json"
+	comparison_sha=$(sha256sum -- "$output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
+	write_pair_provenance "UNAVAILABLE_TERMINAL_FAILURE" false "$comparison_sha"
+	echo "activation probe recorded typed terminal failure; no economic activation verdict: $output_root"
+	exit 0
+fi
+
+comparison_tmp="$output_root/cdf-liquidity-comparison.json.tmp-$$"
+if "$audit_binary" -treatment "$treatment_dir" -control "$control_dir" >"$comparison_tmp"; then
+	audit_status=0
+else
+	audit_status=$?
+fi
+if [[ "$audit_status" -ne 0 ]] || ! jq -e 'type == "object"' "$comparison_tmp" >/dev/null; then
+	mv -- "$comparison_tmp" "$output_root/cdf-liquidity-comparison.json.invalid"
+	write_pair_provenance "INVALID_AUDIT_EVIDENCE" false
+	echo "activation probe rejected malformed CDF audit evidence; see $output_root" >&2
+	exit 1
+fi
+mv -- "$comparison_tmp" "$output_root/cdf-liquidity-comparison.json"
+expected_supplier_count=$(jq -er '(.elastic_liquidity_suppliers | length) * (.venue_ids | length)' "$treatment_config")
+activation_satisfied=false
+if v2_r2_require_cdf_supplier_comparison "$output_root/cdf-liquidity-comparison.json" "$expected_supplier_count"; then
+	activation_satisfied=true
+fi
+
+comparison_sha=$(sha256sum -- "$output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
+if [[ "$activation_satisfied" == true ]]; then
+	write_pair_provenance "ACTIVATION_CONTRACT_SATISFIED" true "$comparison_sha"
+	echo "completed V2-R2-SV1 activation probe: $output_root"
+	exit 0
+fi
+write_pair_provenance "ACTIVATION_CONTRACT_NOT_SATISFIED" false "$comparison_sha"
+echo "activation contract not satisfied: suppliers did not demonstrate finite bounded activity" >&2
+exit 1
