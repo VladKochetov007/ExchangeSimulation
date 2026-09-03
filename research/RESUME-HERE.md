@@ -1124,3 +1124,40 @@ The next promotion question is terminal-failure handling: a sealed typed
 `PRICE_UNAVAILABLE`/`PRICE_DOMAIN_ERROR` control endpoint must remain a valid
 diagnostic negative without being accepted as a completed terminal valuation,
 while generic simulation or evidence-seal failures remain invalid evidence.
+
+## Append-only operational update: SV1B activation/capacity provenance checkpoint — 2026-09-03
+
+Commit `d45aad4b089be035fa637cc049f81dce5072e020` is the current pushed
+SV1B successor checkpoint. It preserves the R2 calendar/lifecycle semantics,
+the finite CDF supplier intervention, the eight historical ABC/USD suppliers,
+and the predecessor R2 negative boundary. It changes only the activation and
+capacity execution contract, binary-evidence reconstruction metadata, and
+their tests/documentation; no scientific cell or holdout was launched.
+
+The capacity ordering amendment is now explicit and preregistered:
+independent exact-tree review -> pinned build -> paired five-minute seed-643
+activation -> accepted activation provenance -> capacity-only seed-659
+production-shaped 24-hour measurements (treatment/control G4 and treatment G8)
+-> registered development cells. Capacity outputs are calibration-only and
+cannot substitute for seed-643 evidence. The capacity manifest binds the
+source seed, effective measurement seed, source/launch hashes for all seven
+registered configs, activation provenance, hard 20 GiB address-space/RSS
+ceiling, 18 GiB GOMEMLIMIT, and 4 GiB free-space reserve.
+
+Activation provenance now binds exact source/effective config bytes, exact
+treatment/control artifact manifests, terminal status, accepted review
+identity, binary hashes, and the resource policy. The activation runner fails
+before execution if normalization changes either registered source config.
+The reconstructed binary evidence now carries global `event_seq` in rendered
+records. Focused `analysis` and `simulations/multivenue` tests passed, as did
+the activation and integrated contract fixtures, config provenance checker,
+shell syntax, and `git diff --check`. The performance branch was fetched
+through `c4434ad`; no newer commit was present and no performance code was
+imported.
+
+The exact tree is clean and pushed. The next gate is a clean full `make test`,
+`go vet ./...`, targeted race/evidence/determinism checks, then one fresh
+independent Sol-xhigh review of this exact tree. Only an accepted review may
+authorize the pinned Go 1.27 build and the five-minute activation probe.
+Capacity, 24-hour development, freeze, and holdout execution remain closed;
+holdouts `619`, `631`, and `641` have not been consumed.

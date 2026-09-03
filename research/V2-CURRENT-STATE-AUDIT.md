@@ -950,3 +950,38 @@ economic terminal failure. The current runner/extractor still assumes
 `PRICE_UNAVAILABLE` can be rejected before its valid negative endpoint is
 measured. This must be resolved as a separate fail-closed protocol amendment;
 generic software failure and unsealed evidence must remain invalid.
+
+## Append-only operational update: SV1B activation/capacity provenance checkpoint — 2026-09-03
+
+The current scientific successor checkpoint is pushed at
+`d45aad4b089be035fa637cc049f81dce5072e020` on
+`feature/r2-cdf-survival-successor`. The predecessor R2 candidate remains
+archived as **NON-VIABLE AT THE 24H MARKET-SURVIVAL GATE**. This checkpoint
+does not alter the R2 calendar, the finite CDF participant model, historical
+ABC/USD suppliers, or any holdout assignment.
+
+The operational contradiction identified by the independent review feed is
+resolved by the preregistered activation/capacity ordering amendment
+`research/v2-r2-sv1b-activation-capacity-order-amendment-2026-09-03.md`.
+The only permitted order is exact-tree independent review, pinned binary
+build, paired five-minute activation on seed 643, accepted activation
+provenance, capacity-only seed 659 measurements using production-shaped seed
+643 configurations, and only then registered development. The three capacity
+cases are treatment G4, control G4, and treatment G8; they are not scored
+scientific trajectories. The full seven-config launch hash set is retained in
+`research/v2-r2-sv1b-24h-config-provenance.json`.
+
+Commit `d45aad4` also binds activation artifacts to exact registered source
+config bytes and fails immediately if the simulator's effective activation
+config differs. It records and verifies exact artifact manifests, terminal
+completion, review/binary/resource provenance, live disk/RSS guards, and
+global `event_seq` in reconstructed binary evidence. Validation at the dirty
+checkpoint passed focused Go tests, activation/integrated shell contracts,
+the SV1B config checker, shell syntax, and `git diff --check`; no simulator
+cell, capacity probe, freeze, or holdout was run.
+
+The next gate is the clean full test/vet/race/evidence/determinism suite, then
+one fresh independent Sol-xhigh review of this exact tree. No review
+attestation exists yet, so activation and capacity are still unauthorized.
+The performance feed remains at `c4434ad` with no newer commit; no performance
+implementation was merged. Holdouts `619`, `631`, and `641` remain untouched.
