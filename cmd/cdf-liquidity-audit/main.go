@@ -76,6 +76,9 @@ func main() {
 	if comparison.Provenance.AnalyzerSourceRevision == "unknown" || comparison.Provenance.AnalyzerSourceModified || comparison.Provenance.AnalyzerSourceRevision != comparison.Provenance.Treatment.SourceRevision || comparison.Provenance.AnalyzerSourceRevision != comparison.Provenance.Control.SourceRevision {
 		comparison.Provenance.Valid = false
 		comparison.Provenance.Failure = "analyzer binary is not provenance-pinned to the paired clean source revision"
+		comparison.EvidenceValid = false
+		comparison.ActivationSatisfied = false
+		comparison.AntiCheatingSatisfied = false
 		comparison.Valid = false
 	}
 	encoded, err := json.MarshalIndent(comparison, "", "  ")

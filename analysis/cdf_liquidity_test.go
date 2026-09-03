@@ -282,6 +282,14 @@ func TestCDFLiquiditySeparatesNoFillEvidenceFromActivation(t *testing.T) {
 	if !audit.Valid || audit.ActivationSatisfied || !audit.EvidenceValid || audit.TradingSupplierCount != 0 {
 		t.Fatalf("no-fill audit = %+v, want valid evidence and inactive treatment", audit)
 	}
+	control := writeCDFLiquidityFixture(t, false, false)
+	comparison, err := CompareCDFLiquidityRuns(run, control)
+	if err != nil {
+		t.Fatalf("CompareCDFLiquidityRuns: %v", err)
+	}
+	if !comparison.Valid || !comparison.EvidenceValid || comparison.ActivationSatisfied || !comparison.AntiCheatingSatisfied {
+		t.Fatalf("no-fill comparison = %+v, want valid evidence but inactive treatment", comparison)
+	}
 }
 
 func TestCDFMarkedRiskAuditReconstructsReservedCashAndStaleMark(t *testing.T) {
@@ -793,6 +801,48 @@ func TestCompareCDFLiquidityRunsRequiresSeparateRoster(t *testing.T) {
 	if !comparison.Valid || comparison.Control.SupplierCount != 0 || comparison.Treatment.SupplierCount != 1 {
 		t.Fatalf("comparison = %+v", comparison)
 	}
+	if !comparison.EvidenceValid || !comparison.ActivationSatisfied || !comparison.AntiCheatingSatisfied {
+		t.Fatalf("comparison validation = %+v, want all pair-level predicates true", comparison)
+	}
+	encoded, err := json.Marshal(comparison)
+	if err != nil {
+		t.Fatalf("marshal comparison: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatalf("decode serialized comparison: %v", err)
+	}
+	for _, field := range []string{"evidence_valid", "activation_satisfied", "anti_cheating_satisfied"} {
+		value, ok := fields[field]
+		if !ok {
+			t.Fatalf("serialized comparison omitted required pair-level field %q: %s", field, encoded)
+		}
+		var valid bool
+		if err := json.Unmarshal(value, &valid); err != nil || !valid {
+			t.Fatalf("serialized comparison field %q = %s, want true", field, value)
+		}
+	}
+}
+
+func TestCDFLiquidityComparisonSerializesContractFixture(t *testing.T) {
+	treatment := writeCDFLiquidityFixture(t, true, false)
+	control := writeCDFLiquidityFixture(t, false, false)
+	comparison, err := CompareCDFLiquidityRuns(treatment, control)
+	if err != nil {
+		t.Fatalf("CompareCDFLiquidityRuns: %v", err)
+	}
+	if !comparison.Valid || !comparison.EvidenceValid || !comparison.ActivationSatisfied || !comparison.AntiCheatingSatisfied {
+		t.Fatalf("comparison validation = %+v, want a valid activated pair", comparison)
+	}
+	encoded, err := json.MarshalIndent(comparison, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal comparison: %v", err)
+	}
+	if outputPath := os.Getenv("EXSIM_CDF_COMPARISON_OUTPUT"); outputPath != "" {
+		if err := os.WriteFile(outputPath, append(encoded, '\n'), 0644); err != nil {
+			t.Fatalf("write comparison contract fixture: %v", err)
+		}
+	}
 }
 
 func TestCDFRestDecisionMatchesExchangeRemainingQuantity(t *testing.T) {
@@ -849,6 +899,14 @@ func TestCompareCDFLiquidityRunsRejectsMalformedInactiveTreatmentEvidence(t *tes
 	}
 	if audit.Valid || audit.EvidenceValid || audit.ActivationSatisfied || !hasCDFCheck(audit.Checks, "malformed supplier decision") {
 		t.Fatalf("malformed inactive treatment audit = %+v, want invalid evidence without an activation claim", audit)
+	}
+	control := writeCDFLiquidityFixture(t, false, false)
+	comparison, err := CompareCDFLiquidityRuns(treatment, control)
+	if err != nil {
+		t.Fatalf("CompareCDFLiquidityRuns: %v", err)
+	}
+	if comparison.Valid || comparison.EvidenceValid || comparison.ActivationSatisfied || comparison.AntiCheatingSatisfied {
+		t.Fatalf("malformed treatment comparison = %+v, want all pair-level predicates false", comparison)
 	}
 }
 

@@ -283,6 +283,15 @@ v2_r2_require_cdf_supplier_comparison() {
 			.max_quote_qty <= .configured_max_quote_qty)' "$comparison_path" >/dev/null; then
 		return 1
 	fi
+	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]] &&
+		! jq -e '
+			type == "object" and
+			(.evidence_valid | type) == "boolean" and .evidence_valid == true and
+			(.activation_satisfied | type) == "boolean" and .activation_satisfied == true and
+			(.anti_cheating_satisfied | type) == "boolean" and .anti_cheating_satisfied == true
+		' "$comparison_path" >/dev/null; then
+		return 1
+	fi
 	if [[ "${v2_r2_sv1_candidate_id:-}" == V2-R2-SV1B-* ]]; then
 		if ! jq -e '
 			.treatment.supplier_removal_counterfactual_valid == true and

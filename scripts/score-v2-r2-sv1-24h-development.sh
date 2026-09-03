@@ -40,6 +40,7 @@ survival_expected_windows=23
 max_empty_side_share=0.02
 survival_summary_filter="$root_dir/scripts/v2-r2-sv1-survival-summary.jq"
 score_classification_filter="$root_dir/scripts/v2-r2-sv1-score-classification.jq"
+cdf_comparison_identity_filter="$root_dir/scripts/v2-r2-sv1-cdf-comparison-identity.jq"
 terminal_measurement_filter="$root_dir/scripts/v2-r2-sv1-terminal-measurement.jq"
 terminal_outcome_filter="$root_dir/scripts/v2-r2-sv1-terminal-outcome.jq"
 paired_survival_filter="$root_dir/scripts/v2-r2-sv1-paired-survival.jq"
@@ -447,9 +448,7 @@ for seed in "${v2_r2_sv1_seeds[@]}"; do
 	[[ "$audit_contract_valid" == true ]] || all_cdf_contract_valid=false
 	[[ "$audit_anticheating_valid" == true ]] || all_anticheating_valid=false
 
-	if ! jq -e --arg seed "$seed" \
-		'.seed == ($seed | tonumber) and .valid == true and
-			.treatment.supplier_count > 0 and .control.supplier_count == 0' "$audit_path" >/dev/null; then
+	if ! jq -e --argjson expected_seed "$seed" -f "$cdf_comparison_identity_filter" "$audit_path" >/dev/null; then
 		all_cells_valid=false
 	fi
 	fi

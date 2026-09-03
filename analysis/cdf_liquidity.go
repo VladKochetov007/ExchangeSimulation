@@ -745,6 +745,9 @@ type CDFLiquidityComparison struct {
 	ControlAskAbsenceFraction   float64                          `json:"control_ask_absence_fraction"`
 	TreatmentBidAbsenceFraction float64                          `json:"treatment_bid_absence_fraction"`
 	TreatmentAskAbsenceFraction float64                          `json:"treatment_ask_absence_fraction"`
+	EvidenceValid               bool                             `json:"evidence_valid"`
+	ActivationSatisfied         bool                             `json:"activation_satisfied"`
+	AntiCheatingSatisfied       bool                             `json:"anti_cheating_satisfied"`
 	Valid                       bool                             `json:"valid"`
 }
 
@@ -1544,7 +1547,10 @@ func CompareCDFLiquidityRuns(treatment, control *Run) (*CDFLiquidityComparison, 
 		comparison.Provenance.Valid = false
 		comparison.Provenance.Failure = "treatment/control execution provenance is not paired"
 	}
-	comparison.Valid = comparison.Provenance.Valid && treatmentAudit.Valid && controlAudit.Valid && treatmentAudit.SupplierCount > 0 && controlAudit.SupplierCount == 0
+	comparison.EvidenceValid = comparison.Provenance.Valid && treatmentAudit.EvidenceValid && controlAudit.EvidenceValid
+	comparison.Valid = comparison.EvidenceValid && treatmentAudit.Valid && controlAudit.Valid && treatmentAudit.SupplierCount > 0 && controlAudit.SupplierCount == 0
+	comparison.ActivationSatisfied = comparison.Valid && treatmentAudit.ActivationSatisfied
+	comparison.AntiCheatingSatisfied = comparison.Valid && treatmentAudit.AntiCheatingSatisfied && controlAudit.AntiCheatingSatisfied
 	return comparison, nil
 }
 

@@ -298,7 +298,8 @@ fi
 jq -n \
 	--argjson treatment "$(jq '.result' "$cdf_audit_fixture")" \
 	--argjson control "$(jq '.result' "$temp_root/control-cdfliquidity.json")" \
-	'{valid: true, provenance: {valid: true}, treatment: $treatment, control: $control}' \
+	'{valid: true, evidence_valid: true, activation_satisfied: true, anti_cheating_satisfied: true,
+	 provenance: {valid: true}, treatment: $treatment, control: $control}' \
 	>"$temp_root/comparison-cdfliquidity.json"
 v2_r2_require_cdf_supplier_comparison "$temp_root/comparison-cdfliquidity.json" 2 || {
 	echo "valid top-level treatment/control CDF comparison was rejected" >&2
@@ -317,6 +318,126 @@ fi
 if jq '.control.supplier_count = 1' "$temp_root/comparison-cdfliquidity.json" >"$temp_root/comparison-control-activity.json" &&
 	v2_r2_require_cdf_supplier_comparison "$temp_root/comparison-control-activity.json" 2; then
 	echo "top-level comparison accepted CDF control activity" >&2
+	exit 1
+fi
+
+# Generate the comparison with the real analysis producer, then pass that
+# serialized output through the complete SV1B activation-provenance validator.
+# The reduced fixture above protects the comparison predicate; this fixture
+# protects the producer-to-provenance boundary that consumes its JSON schema.
+serialized_comparison="$temp_root/serialized-cdf-comparison.json"
+EXSIM_CDF_COMPARISON_OUTPUT="$serialized_comparison" GOMAXPROCS=2 \
+	go test -count=1 ./analysis -run '^TestCDFLiquidityComparisonSerializesContractFixture$' >/dev/null || {
+	echo "analysis could not produce the serialized CDF comparison fixture" >&2
+	exit 1
+}
+jq -e 'type == "object" and .valid == true and .evidence_valid == true and .activation_satisfied == true and .anti_cheating_satisfied == true' \
+	"$serialized_comparison" >/dev/null || {
+	echo "analysis serialized CDF comparison is missing an accepted pair predicate" >&2
+	exit 1
+}
+jq -e --argjson expected_seed 607 -f "$root_dir/scripts/v2-r2-sv1-cdf-comparison-identity.jq" \
+	"$serialized_comparison" >/dev/null || {
+	echo "development scorer seed identity rejected the real serialized CDF comparison" >&2
+	exit 1
+}
+if jq '.provenance.treatment.seed = 608' "$serialized_comparison" >"$temp_root/comparison-wrong-paired-seed.json" &&
+	jq -e --argjson expected_seed 607 -f "$root_dir/scripts/v2-r2-sv1-cdf-comparison-identity.jq" \
+		"$temp_root/comparison-wrong-paired-seed.json" >/dev/null; then
+	echo "development scorer seed identity accepted a mismatched treatment seed" >&2
+	exit 1
+fi
+
+full_output_root="$temp_root/full-activation-output"
+mkdir -p -- "$full_output_root/treatment" "$full_output_root/control"
+cp -- "$v2_r2_sv1_activation_config" "$full_output_root/treatment/run-config.json"
+cp -- "$v2_r2_sv1_activation_control_config" "$full_output_root/control/run-config.json"
+for arm in treatment control; do
+	jq -n --arg arm "$arm" '{arm:$arm,exit_status:0,completion_verified:true,
+		terminal_failure_verified:false,terminal_outcome_status:"completed",
+		resource_guard_failed:false}' >"$full_output_root/$arm/run-status.json"
+done
+cp -- "$serialized_comparison" "$full_output_root/cdf-liquidity-comparison.json"
+fixture_true_binary=$(type -P true) || {
+	echo "could not locate an executable true binary for the provenance fixture" >&2
+	exit 1
+}
+cp -- "$fixture_true_binary" "$temp_root/sv1b-simulator"
+cp -- "$fixture_true_binary" "$temp_root/sv1b-analyzer"
+chmod 0755 -- "$temp_root/sv1b-simulator" "$temp_root/sv1b-analyzer"
+fixture_simulator_sha256=$(sha256sum -- "$temp_root/sv1b-simulator" | awk '{print $1}')
+fixture_analyzer_sha256=$(sha256sum -- "$temp_root/sv1b-analyzer" | awk '{print $1}')
+fixture_treatment_config_sha256=$(sha256sum -- "$v2_r2_sv1_activation_config" | awk '{print $1}')
+fixture_control_config_sha256=$(sha256sum -- "$v2_r2_sv1_activation_control_config" | awk '{print $1}')
+fixture_treatment_status_sha256=$(sha256sum -- "$full_output_root/treatment/run-status.json" | awk '{print $1}')
+fixture_control_status_sha256=$(sha256sum -- "$full_output_root/control/run-status.json" | awk '{print $1}')
+fixture_comparison_sha256=$(sha256sum -- "$full_output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
+fixture_review_report="$temp_root/full-review.md"
+printf '%s\n' 'independent exact-tree review fixture for serialized comparison' >"$fixture_review_report"
+fixture_review_report_sha256=$(sha256sum -- "$fixture_review_report" | awk '{print $1}')
+fixture_review="$temp_root/full-review-attestation.json"
+jq -n --arg revision "$review_revision" --arg tree_sha256 "$review_tree_sha256" \
+	--arg report_path "$fixture_review_report" --arg report_sha256 "$fixture_review_report_sha256" \
+	--arg contract "$v2_r2_sv1_review_contract" --argjson reviewed_scope "$v2_r2_sv1_review_scope" \
+	'{schema_version:1,contract:$contract,reviewed_revision:$revision,reviewed_tree_sha256:$tree_sha256,
+	 review_type:"independent_sol_xhigh",verdict:"ACCEPTED_FOR_ACTIVATION",reviewed_worktree_clean:true,
+	 holdouts_consumed:false,reviewer:"fixture-serialized-comparison-reviewer",reviewed_scope:$reviewed_scope,
+	 review_report_path:$report_path,review_report_sha256:$report_sha256}' >"$fixture_review"
+IFS=$'\t' read -r fixture_host_cpu_count fixture_allowed_cpu_count fixture_cpu_affinity < <(v2_r2_sv1b_cpu_policy)
+fixture_treatment_artifacts=$(v2_r2_sv1b_artifact_records "$full_output_root/treatment")
+fixture_control_artifacts=$(v2_r2_sv1b_artifact_records "$full_output_root/control")
+fixture_activation_provenance="$temp_root/full-activation-provenance.json"
+jq -n --arg contract "$v2_r2_sv1_activation_pair_contract" --arg revision "$review_revision" \
+	--arg tree_sha256 "$review_tree_sha256" --arg output_root "$full_output_root" \
+	--arg treatment_dir "$full_output_root/treatment" --arg control_dir "$full_output_root/control" \
+	--arg comparison_path "$full_output_root/cdf-liquidity-comparison.json" \
+	--arg review_path "$fixture_review" --arg review_sha256 "$(sha256sum -- "$fixture_review" | awk '{print $1}')" \
+	--arg simulator_path "$temp_root/sv1b-simulator" --arg analyzer_path "$temp_root/sv1b-analyzer" \
+	--arg simulator_sha256 "$fixture_simulator_sha256" --arg analyzer_sha256 "$fixture_analyzer_sha256" \
+	--arg comparison_sha256 "$fixture_comparison_sha256" --arg treatment_source_config_path "$(realpath -e -- "$v2_r2_sv1_activation_config")" \
+	--arg control_source_config_path "$(realpath -e -- "$v2_r2_sv1_activation_control_config")" \
+	--arg treatment_source_config_sha256 "$fixture_treatment_config_sha256" --arg control_source_config_sha256 "$fixture_control_config_sha256" \
+	--arg treatment_config_sha256 "$fixture_treatment_config_sha256" --arg control_config_sha256 "$fixture_control_config_sha256" \
+	--arg treatment_status_sha256 "$fixture_treatment_status_sha256" --arg control_status_sha256 "$fixture_control_status_sha256" \
+	--argjson treatment_artifacts "$fixture_treatment_artifacts" --argjson control_artifacts "$fixture_control_artifacts" \
+	--argjson host_cpu_count "$fixture_host_cpu_count" --argjson allowed_cpu_count "$fixture_allowed_cpu_count" \
+	--arg cpu_affinity "$fixture_cpu_affinity" \
+	'{schema_version:3,contract:$contract,candidate_revision:$revision,candidate_tree_sha256:$tree_sha256,
+	 seed:643,simulated_horizon:"fixture",output_root:$output_root,treatment_dir:$treatment_dir,control_dir:$control_dir,
+	 treatment_source_config_path:$treatment_source_config_path,control_source_config_path:$control_source_config_path,
+	 treatment_source_config_sha256:$treatment_source_config_sha256,control_source_config_sha256:$control_source_config_sha256,
+	 simulator_binary_path:$simulator_path,analyzer_binary_path:$analyzer_path,
+	 review_attestation_path:$review_path,review_attestation_sha256:$review_sha256,comparison_path:$comparison_path,
+	 treatment_config_sha256:$treatment_config_sha256,control_config_sha256:$control_config_sha256,
+	 simulator_binary_sha256:$simulator_sha256,analyzer_binary_sha256:$analyzer_sha256,comparison_sha256:$comparison_sha256,
+	 status:"ACTIVATION_CONTRACT_SATISFIED",activation_satisfied:true,holdouts_consumed:false,
+	 treatment_runner_status:0,control_runner_status:0,treatment_terminal_status:"completed",control_terminal_status:"completed",
+	 treatment_run_status_sha256:$treatment_status_sha256,control_run_status_sha256:$control_status_sha256,
+	 treatment_terminal_outcome_sha256:"",control_terminal_outcome_sha256:"",
+	 treatment_artifacts:$treatment_artifacts,control_artifacts:$control_artifacts,
+	 resource_policy:{gomaxprocs:2,memory_limit_bytes:21474836480,gomemlimit_bytes:19327352832,
+		minimum_free_bytes:4294967296,host_cpu_count:$host_cpu_count,allowed_cpu_count:$allowed_cpu_count,
+		cpu_limit_percent:90,cpu_affinity:$cpu_affinity}}' >"$fixture_activation_provenance"
+v2_r2_require_sv1b_activation_provenance "$fixture_activation_provenance" "$review_revision" "$fixture_simulator_sha256" || {
+	echo "full activation provenance rejected the real serialized CDF comparison" >&2
+	exit 1
+}
+jq 'del(.activation_satisfied)' "$full_output_root/cdf-liquidity-comparison.json" >"$temp_root/comparison-missing-pair-field.json"
+mv -- "$temp_root/comparison-missing-pair-field.json" "$full_output_root/cdf-liquidity-comparison.json"
+fixture_comparison_sha256=$(sha256sum -- "$full_output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
+jq --arg comparison_sha256 "$fixture_comparison_sha256" '.comparison_sha256 = $comparison_sha256' \
+	"$fixture_activation_provenance" >"$temp_root/full-activation-provenance-missing-pair-field.json"
+if v2_r2_require_sv1b_activation_provenance "$temp_root/full-activation-provenance-missing-pair-field.json" "$review_revision" "$fixture_simulator_sha256"; then
+	echo "full activation provenance accepted a serialized comparison missing activation_satisfied" >&2
+	exit 1
+fi
+cp -- "$serialized_comparison" "$full_output_root/cdf-liquidity-comparison.json"
+fixture_comparison_sha256=$(sha256sum -- "$full_output_root/cdf-liquidity-comparison.json" | awk '{print $1}')
+jq --arg comparison_sha256 "$fixture_comparison_sha256" '.comparison_sha256 = $comparison_sha256' \
+	"$fixture_activation_provenance" >"$temp_root/full-activation-provenance-restored.json"
+jq '.activation_satisfied = false' "$temp_root/full-activation-provenance-restored.json" >"$temp_root/full-activation-provenance-false-pair-field.json"
+if v2_r2_require_sv1b_activation_provenance "$temp_root/full-activation-provenance-false-pair-field.json" "$review_revision" "$fixture_simulator_sha256"; then
+	echo "full activation provenance accepted a serialized comparison with activation_satisfied=false" >&2
 	exit 1
 fi
 
