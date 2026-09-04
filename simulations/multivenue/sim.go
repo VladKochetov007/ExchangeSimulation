@@ -2011,7 +2011,27 @@ func (l venueLogger) LogEvidenceOnly(simTime int64, clientID uint64, eventName s
 	if l.inner == nil {
 		return
 	}
-	l.inner.LogEvent(simTime, clientID, eventName, venueLogEvent{VenueID: l.venueID, Payload: event})
+	// The ordering key is what makes a run directory reconstructible from the
+	// binary stream plus these records. Without it the two partitions merge
+	// back as a multiset but not as an ordered file, and the failure is silent:
+	// plausible lines in the wrong order with no error.
+	afterEvent, ordinal := l.sink.markEvidenceOnly()
+	l.inner.LogEvent(simTime, clientID, eventName, evidenceOnlyLogEvent{
+		VenueID:    l.venueID,
+		AfterEvent: afterEvent,
+		Ordinal:    ordinal,
+		Payload:    event,
+	})
+}
+
+// evidenceOnlyLogEvent is the venue envelope for a record that never enters the
+// execution digest. It carries the ordering key that hashed events get from
+// their sequence.
+type evidenceOnlyLogEvent struct {
+	VenueID    string `json:"venue_id"`
+	AfterEvent int64  `json:"after_event"`
+	Ordinal    int64  `json:"evidence_ordinal"`
+	Payload    any    `json:"payload"`
 }
 
 type manifest struct {

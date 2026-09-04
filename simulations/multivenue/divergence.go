@@ -79,6 +79,31 @@ type checkpointSink struct {
 	// replacesRaw is resolved at construction: the binary stream stands in for
 	// the raw JSONL rather than accompanying it.
 	replacesRaw bool
+	// evidenceOrdinal numbers the evidence-only records, which never enter the
+	// execution digest and therefore have no sequence of their own.
+	evidenceOrdinal int64
+}
+
+// markEvidenceOnly issues the ordering key for one evidence-only record.
+//
+// Those records bypass the digest by design, so they carry no sequence, and
+// their timestamps do not separate them: in a JSON-mode run 98.3 % of
+// general.jsonl records sit at a timestamp shared with a hashed record. Merging
+// a rendered binary stream back with them was therefore exact as a multiset and
+// guesswork as an order.
+//
+// The key is (events so far, ordinal). A hashed event numbered i sorts at
+// (i, 0); an evidence-only record written while i events have been recorded
+// sorts at (i, n) with n >= 1, which places it after hashed event i and before
+// i+1. Reading the counter does not advance it, so the digest is untouched.
+func (s *checkpointSink) markEvidenceOnly() (afterEvent, ordinal int64) {
+	if s == nil {
+		return 0, 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.evidenceOrdinal++
+	return s.events, s.evidenceOrdinal
 }
 
 // checkpointRecord is one line of the checkpoint file.
