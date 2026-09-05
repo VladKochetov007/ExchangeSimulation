@@ -335,11 +335,12 @@ func addRenderRecord(routes map[renderRouteKey][]renderRecord, key renderRouteKe
 	if key.venue == "" || record.sequence == 0 {
 		return fmt.Errorf("multivenue: incomplete rendered evidence record")
 	}
-	for _, existing := range routes[key] {
-		if existing.sequence == record.sequence {
-			return fmt.Errorf("multivenue: duplicate venue sequence %s/%s#%d", key.venue, key.route, record.sequence)
-		}
-	}
+	// Duplicate sequences are caught by validateRenderRecords, which uses a
+	// set and checks across the whole venue rather than one route. Repeating
+	// the check here as a linear scan of everything appended so far made the
+	// render quadratic: 5m took 7.8 s and 20m took 132.9 s, 17x the wall for
+	// 4.3x the records, and a 24-hour run does 5184x the comparison work of
+	// a 20-minute one.
 	routes[key] = append(routes[key], record)
 	return nil
 }
