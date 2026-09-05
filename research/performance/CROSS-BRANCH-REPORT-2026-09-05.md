@@ -84,15 +84,25 @@ hashes declared `unordered_multiset`, so it does not care what order records are
 folded in, and the per-venue sequence contract was enforced with a set holding
 every sequence where a bitmap answers the same questions in one bit each.
 
-| run | peak RSS before | after | wall before | after |
-| --- | ---: | ---: | ---: | ---: |
-| 5m | 223 MB | 13.8 MB | 1.06 s | 0.99 s |
-| 20m | 922 MB | 12.7 MB | 4.80 s | 4.22 s |
-| 60m | 2.60 GB | 14.2 MB | 14.75 s | 12.83 s |
+| run | frames | peak RSS before | after | wall before | after |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 5m | 382,498 | 223 MB | 13.8 MB | 1.06 s | 0.99 s |
+| 20m | 1,640,870 | 922 MB | 12.7 MB | 4.80 s | 4.22 s |
+| 60m | 4,859,415 | 2.60 GB | 14.2 MB | 14.75 s | 12.83 s |
+| 6h | 26,682,865 | **15.14 GB** | **21.9 MB** | 83.7 s | 77.3 s |
 
-Memory is flat rather than linear, so the 62 GB extrapolation no longer applies.
-Output is byte-identical at all three sizes — 15 of 15 files, up to 4,942,251
-records, same event frame counts, route counts and execution hashes.
+Output is byte-identical at every size — 15 of 15 files, 27,173,903 records at
+six hours, same event frame counts, route counts and execution hashes.
+
+The six-hour point is what makes this more than an extrapolation. The buffered
+renderer needs 15.14 GB there, which scales to about 60 GB at 24 hours and so
+confirms the earlier estimate rather than softening it. The streaming renderer
+needs 21.9 MB, a 690x reduction, and its slow growth from 14.2 MB is the
+sequence bitmap and nothing else.
+
+It also tests the invariant the merge rests on at 16x the scale it was measured
+at. Rendering now refuses a route whose sequences go backwards rather than
+assuming they cannot, and across 26,682,865 frames the check never fired.
 
 ## 3. Two analyzer metrics answered differently every time — fixed
 
@@ -236,9 +246,11 @@ they give every record a per-venue sequence, which subsumes it.
 ## 6. Live uncertainties
 
 - Nothing further is known to block a 24-hour binary render: it is linear in
-  time and flat in memory (§2). That is an extrapolation from one hour, not a
-  measurement at 24, and the 30 GB of `events.evs` such a run emits is still a
-  storage question this does not touch.
+  time and flat in memory, measured out to six hours (§2). The remaining
+  extrapolation is 4x, not 24x. The 30 GB of `events.evs` such a run emits is
+  still a storage question this does not touch, and their own 24-hour probe
+  failed on a market-survival condition before reaching a terminal attestation,
+  which is a different problem and not this one.
 - Whether the markout tie convention should be written order at all (§3). This
   matters far less now that fills are marked against their own book — the
   remaining ties are between trades in one instrument — but it is still an
@@ -286,8 +298,9 @@ the figure has moved by four orders of magnitude (§9). That is a larger change
 to the scientific record than anything else here, and it is the one thing this
 branch cannot check for itself, because it does not own those conclusions.
 
-After that, an actual 24-hour render, to replace the extrapolation in §2 with a
-measurement.
+After that, a 24-hour render. The remaining gap is a 4x extrapolation from the
+six-hour measurement, and the run that would close it is the one their capacity
+probe could not finish for unrelated reasons.
 
 ## 9. The reaction metric marks fills against the wrong instrument
 
