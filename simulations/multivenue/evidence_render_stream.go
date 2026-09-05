@@ -132,7 +132,7 @@ func (s *evidenceOnlySidecars) emitBefore(key renderRouteKey, sequence uint64, w
 		if err := seen.observe(key, record.sequence); err != nil {
 			return err
 		}
-		if err := writers.write(key, record.raw); err != nil {
+		if err := writers.write(key, record.sequence, record.raw); err != nil {
 			return err
 		}
 		reader.loaded = false
@@ -165,7 +165,7 @@ func (s *evidenceOnlySidecars) drain(writers *routeWriters, seen *venueSequences
 			if err := seen.observe(key, record.sequence); err != nil {
 				return err
 			}
-			if err := writers.write(key, record.raw); err != nil {
+			if err := writers.write(key, record.sequence, record.raw); err != nil {
 				return err
 			}
 			reader.loaded = false
@@ -189,6 +189,13 @@ type routeWriters struct {
 	dest    string
 	buffers map[renderRouteKey]*bufio.Writer
 	files   map[renderRouteKey]*os.File
+	// last is the sequence most recently written to each route. The merge
+	// produces sorted output only because both its inputs are sorted, and that
+	// is a property of the writer this reader has no control over. The buffered
+	// renderer sorted each route and so could not be wrong about it; this one
+	// checks instead of assuming, because a route written out of order is a
+	// plausible-looking file with no error attached.
+	last map[renderRouteKey]uint64
 }
 
 func newRouteWriters(dest string) *routeWriters {
@@ -196,10 +203,20 @@ func newRouteWriters(dest string) *routeWriters {
 		dest:    dest,
 		buffers: map[renderRouteKey]*bufio.Writer{},
 		files:   map[renderRouteKey]*os.File{},
+		last:    map[renderRouteKey]uint64{},
 	}
 }
 
-func (w *routeWriters) write(key renderRouteKey, raw []byte) error {
+func (w *routeWriters) write(key renderRouteKey, sequence uint64, raw []byte) error {
+	if previous, written := w.last[key]; written && sequence <= previous {
+		return fmt.Errorf("multivenue: rendered route %s/%s went backwards, sequence %d after %d",
+			key.venue, key.route, sequence, previous)
+	}
+	w.last[key] = sequence
+	return w.append(key, raw)
+}
+
+func (w *routeWriters) append(key renderRouteKey, raw []byte) error {
 	out, ok := w.buffers[key]
 	if !ok {
 		path := filepath.Join(w.dest, "venues", key.venue, filepath.FromSlash(key.route))

@@ -86,3 +86,40 @@ func TestRenderRejectsAZeroSequence(t *testing.T) {
 		t.Fatalf("expected a zero sequence to be refused, got %v", err)
 	}
 }
+
+// The streaming merge emits sorted output only because both its inputs are
+// sorted. That is a property of the writer, not something the reader controls,
+// so it is checked rather than assumed: a route written out of order is a
+// plausible-looking file that no other check would reject.
+func TestRenderRejectsARouteThatGoesBackwards(t *testing.T) {
+	writers := newRouteWriters(t.TempDir())
+	key := renderRouteKey{venue: "north", route: "general.jsonl"}
+	if err := writers.write(key, 2, []byte("{}")); err != nil {
+		t.Fatalf("write 2: %v", err)
+	}
+	err := writers.write(key, 1, []byte("{}"))
+	if err == nil {
+		t.Fatal("a route that went backwards was accepted")
+	}
+	if !strings.Contains(err.Error(), "went backwards, sequence 1 after 2") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := writers.write(key, 2, []byte("{}")); err == nil {
+		t.Fatal("a repeated sequence on one route was accepted")
+	}
+	writers.abort()
+}
+
+// Routes are independent: one going forward must not constrain another.
+func TestRenderTracksRoutesIndependently(t *testing.T) {
+	writers := newRouteWriters(t.TempDir())
+	if err := writers.write(renderRouteKey{venue: "north", route: "general.jsonl"}, 9, []byte("{}")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := writers.write(renderRouteKey{venue: "north", route: "derivatives.jsonl"}, 1, []byte("{}")); err != nil {
+		t.Fatalf("a second route was constrained by the first: %v", err)
+	}
+	if err := writers.close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}

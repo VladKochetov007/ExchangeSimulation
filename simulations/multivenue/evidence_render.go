@@ -131,7 +131,7 @@ func RenderBinaryEvidence(inputDir, outDir string) (BinaryRenderReport, error) {
 		if err := seen.observe(key, record.sequence); err != nil {
 			return err
 		}
-		if err := writers.write(key, record.raw); err != nil {
+		if err := writers.write(key, record.sequence, record.raw); err != nil {
 			return err
 		}
 		eventFrames++
