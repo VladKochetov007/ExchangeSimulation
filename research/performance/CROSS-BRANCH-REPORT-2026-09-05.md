@@ -439,3 +439,39 @@ not reproduce it, and nothing in the evidence says why.
 What is established: the failure is not a property of this code at 24 hours on
 the default cell. What is not established: which of the three differences causes
 it. Deciding that is worth more than the capacity number it was blocking.
+
+## 11. GOAMD64 is not the explanation, and the hash divergence is now quantified at 24 hours
+
+§10 left three candidates for why their probe failed where this run did not, and
+named the toolchain as the leading one. The compiler version could not be tested
+— only `go1.26.7` is installed — but the codegen level could, because this
+campaign already showed `GOAMD64=v3` fuses multiply-add and changes the
+execution hash at three minutes.
+
+The same 24-hour cell, same source, same seed, built at each level:
+
+| | `GOAMD64=v1` (default) | `GOAMD64=v3` |
+| --- | --- | --- |
+| simulation | exit 0, `sim=24h0m0s`, wall 15m30s | exit 0, `sim=24h0m0s`, wall 15m26s |
+| event frames | 96,241,273 | **96,241,273** |
+| `events.evs` | 17,434,418,871 bytes | 17,434,421,574 bytes |
+| execution hash | `2806c51c…b26dc` | **`2f00c608…a001f`** |
+
+**The market-survival gate passes under both.** So codegen does not explain
+their probe's failure, and the toolchain hypothesis survives only as the
+compiler *version*, which remains untested. The candidates are now the Go
+version, the seed their note does not record, and their copied configuration.
+
+What the ablation does establish is a much tighter characterisation of the
+divergence than the three-minute observation this campaign recorded. The two
+streams first differ at byte 12,584,428 of 17.4 GB — 0.072% in, so within the
+opening minutes of simulated time — and never reconverge. Yet across
+twenty-four simulated hours they produce **exactly the same number of events**,
+and their total sizes differ by 2,703 bytes, 0.0000155%.
+
+The drift is numerical, not structural. No event is added, dropped or reordered;
+values move in the last bits and the digest that covers them moves with it. That
+is the worst shape this could take for a reproduction check: two builds of one
+revision agree on everything a person would look at and disagree on the one
+number the attestation compares. Without `GOAMD64` in the manifest — and it is
+not there — a failed reproduction is indistinguishable from a semantic change.
