@@ -132,8 +132,76 @@ byte-identical, execution hash unchanged, differential-fuzzed against the
 reflection path for 24.2M executions.
 
 It cherry-picks onto `230e78f` with only a file that does not exist there
-conflicting, and their full suite is green with it applied. A paired A/B on
-their branch to confirm the figure in their configuration has not been run yet.
+conflicting, and their full suite is green with it applied.
+
+Measured on their branch, 24 paired rounds with the arm order alternating by
+round parity, dev-607/seed 607/20m in **JSON mode**:
+
+| | |
+| --- | --- |
+| base median | 19.355 s |
+| ported median | 18.980 s |
+| paired delta | median **-1.52%**, mean -1.62%, range -5.12% to +5.70% |
+| ported faster in | 22 of 24 rounds |
+| execution hash | `fb16fc252a051ced` in both arms |
+
+The pairing holds up under the checks that would break it. Splitting by which
+arm ran first gives -1.46% (12 rounds, base first) against -1.85% (12 rounds,
+ported first), so there is no material order effect for the alternation to have
+missed; splitting by time gives -1.77% for rounds 1-12 against -1.49% for
+13-24, so there is no drift.
+
+An A/A control of 12 rounds in the same session, same binary in both arms, gives
+a median of `-0.31%` and a mean of `+0.28%`, with the second arm faster in 7 of
+12 rounds — directionless, as a control should be. Per-round noise is large: the
+A/A median absolute delta is 1.15%, comparable to the effect itself, so the
+median alone would not carry this claim. The sign test does: 22 of 24 in one
+direction is `p ~ 1.8e-5`, against 7 of 12 for the control. The effect is real
+and small.
+
+That is a third of the -5.00% claimed here, and the two figures are not in
+conflict: the original was measured in **replace mode**, where the profile put
+`MarketDataFingerprint` at 3.16% of CPU precisely because the JSON evidence
+encoding it competes with had been removed. Measuring it in JSON mode
+understates it by construction. So the transferability question is about
+`evstream_v3` mode, which is the configuration their campaign will ship.
+
+Measured there, 16 paired rounds, same alternation:
+
+| | |
+| --- | --- |
+| base median | 14.747 s |
+| ported median | 14.466 s |
+| paired delta | median **-2.01%**, mean -2.13%, range -5.30% to +1.09% |
+| ported faster in | 15 of 16 rounds |
+| base-first / ported-first | -2.00% / -2.10%, so again no order effect |
+| execution hash | `c172d74803571a17` in both arms |
+
+An A/A control of 10 rounds in the same mode and session gives a median of
+`-0.16%`, a mean of `-0.24%` and a median absolute delta of 0.50%, with the
+second arm faster in 7 of 10 — directionless. The effect is four times that
+floor and 15 of 16 rounds is `p ~ 2.6e-4`, so this is the cleaner of the two
+measurements.
+
+**The -5.00% measured on this branch does not transfer to theirs; on their code
+the same patch is worth about 2%.** A profile of both baselines says exactly why:
+
+| branch | mode | `MarketDataFingerprint` | measured gain |
+| --- | --- | --- | ---: |
+| this branch at `43f86f2^` | replace | 0.60 s, 5.52% cum | -5.00% |
+| `230e78f` | evstream_v3 | 0.63 s, 3.26% cum | -2.01% |
+
+The function costs **the same absolute time on both branches**. It is a smaller
+fraction of theirs because their run does roughly 1.8x the total CPU work. Each
+gain sits at or below its own function's share, so nothing here exceeds its
+ceiling and the mechanism survives intact — what does not transfer is the
+percentage, because a percentage is a property of the denominator.
+
+That also retracts a suspicion raised while measuring this: -5.00% looked
+impossible against the 3.16% this campaign recorded for the same function, and
+the resolution is that 3.16% was an under-sampled figure. A fresh profile of
+that same commit puts it at 5.52%. The commit message's number should be read as
+one sample, not as the function's cost.
 
 ## 5. What of this branch's work is superseded
 
@@ -183,3 +251,56 @@ fix, and the renderer complexity fix. Nothing is merged into
 A paired A/B of the fingerprint port on their branch, with an A/A control in the
 same session, to state the -5.00% in their configuration rather than transfer it
 from this one.
+
+## 9. The reaction metric marks fills against the wrong instrument
+
+Spot records carry no symbol in their data layer; only the derivative nesting
+does, and both branches' scanners unwrap only that. `reaction` keys books on
+`markKey{event.VenueID, event.Symbol}` with no fallback, and `mvanalyze` invokes
+it over every venue file. So all three spot books of a venue share the key
+`{venue, ""}`: ABC/USD trades near 50.00, CDF/USD trades near 3.00 and ABC/CDF
+trades occupy one price tape, and the price one horizon after a maker's fill is
+whichever book happened to trade next.
+
+`(3.00 - 50.00) / 50.00 x 10000 = -9400 bps` is the scale of the error, and a
+live dev-607/seed 607/20m measurement on the scientific branch reports per-role
+markouts of `-36,992` and `-24,514` bps — magnitudes no maker on a spot book
+can produce. The `f2_baseline_101` scoreboard artifact was checked only for the
+empty-symbol book, which it has, with 2,324,523 observations under
+`{central, ""}`; its markout values were not re-derived here.
+
+`mvanalyze` runs six metrics with no file narrowing — `makerquotesize`,
+`makerrefresh`, `basis`, `reaction`, `roles` and `lifecycle` — and `reaction` is
+the only one of them that keys a book on a symbol with no fallback. `basis` and
+`lifecycle` return early on an empty symbol, `roles` falls back to the fill's
+symbol, and both maker-quote metrics fall back to `symbolFromSpotFile`. Every
+other book-keyed analyzer guards it too. `arbitrage`, `crossvenue`
+and `triangular` fall back to `symbolFromPath(event.File)`; `post_only` to
+`symbolFromSpotFile`; `hedging`, `roleaudit`, `viability`, `term_carry_p4`,
+`exposure` and `options_p6` to a payload symbol; `surface` rejects anything that
+is not an option. `reaction` was the only one with no fallback, so this is an
+omission against a convention the package applies everywhere else, not a design
+choice. The fix uses the majority form.
+
+On a fixture where the foreign book sorts first, the markout reads **+9400.000
+bps before and -1.000 bps after**.
+
+This also reframes §3. The tie order mattered by thousands of basis points
+*because* the tied candidates were different instruments. Making the metric
+reproducible was necessary and was not sufficient.
+
+### Pre-registered predictions for the real-data check
+
+Stated before measuring on dev-607/seed 607/20m, so the check can fail:
+
+1. The lag arm currently reports `mean 0.0000s, p50 0.0000s, min 0.0000s`
+   because a pooled tape almost always has an order from *some* book at the same
+   instant. After the fix the pooled lag should rise above zero.
+2. Per-role markout magnitudes should fall from tens of thousands of basis
+   points to plausible ones, since a fill is no longer marked against a book at
+   a different price level.
+3. Fill counts should not change at all: the fix does not touch which records
+   are fills.
+
+A result that leaves the lag at zero, or leaves markouts in the tens of
+thousands, falsifies the diagnosis rather than confirming it.
