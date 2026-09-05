@@ -40,7 +40,7 @@ not, so their rebuilt tree cannot be byte-compared against the historical
 format without normalising it first. Analyzers ignore the extra field, so
 nothing is broken; the attestation is simply weaker than it could be.
 
-## 2. Their renderer was quadratic — fixed, 28x at 20 minutes and 76x at an hour
+## 2. Their renderer was quadratic and held the whole run in memory — both fixed
 
 `simulations/multivenue/evidence_render.go`, `addRenderRecord`, re-checked the
 per-venue sequence contract by scanning every record already appended to the
@@ -69,13 +69,30 @@ All 15 output files are byte-identical to the previous renderer's and the
 execution hash is unchanged at `afe320fe…0895`. Four tests now cover the
 contract directly.
 
-Peak RSS is untouched by this and is the **second, separate blocker**: it is
-linear in frames because the renderer holds the whole rendered run before
-writing any of it, and 2.6 GB at one hour extrapolates to roughly 62 GB at
-24 hours — the total RAM of the machine these runs are measured on. Rendering a
-24-hour run is now fast enough and still will not fit. A streaming merge would
-not need to hold it; this branch's superseded renderer held only the
-evidence-only records, some tens of thousands of lines.
+Peak RSS was untouched by that and was the second, separate blocker: linear in
+frames, because the renderer held the whole rendered run before writing any of
+it. 2.6 GB at one hour extrapolates to roughly 62 GB at 24 hours, the total RAM
+of the machine these runs are measured on — fast enough and still not fitting.
+
+**Also fixed, as a streaming merge.** Frames arrive in per-route sequence order
+and each sidecar file is written in sequence order, so both inputs are already
+sorted. Measured on a real run: of 1,640,870 frames across 15 routes, zero
+arrive out of order within a route or within a venue, and zero of 28,193 sidecar
+lines are out of order within their file. Two structures made the buffering look
+necessary and did not — the evidence-only digest is an addition of per-record
+hashes declared `unordered_multiset`, so it does not care what order records are
+folded in, and the per-venue sequence contract was enforced with a set holding
+every sequence where a bitmap answers the same questions in one bit each.
+
+| run | peak RSS before | after | wall before | after |
+| --- | ---: | ---: | ---: | ---: |
+| 5m | 223 MB | 13.8 MB | 1.06 s | 0.99 s |
+| 20m | 922 MB | 12.7 MB | 4.80 s | 4.22 s |
+| 60m | 2.60 GB | 14.2 MB | 14.75 s | 12.83 s |
+
+Memory is flat rather than linear, so the 62 GB extrapolation no longer applies.
+Output is byte-identical at all three sizes — 15 of 15 files, up to 4,942,251
+records, same event frame counts, route counts and execution hashes.
 
 ## 3. Two analyzer metrics answered differently every time — fixed
 
@@ -218,9 +235,10 @@ they give every record a per-venue sequence, which subsumes it.
 
 ## 6. Live uncertainties
 
-- Peak render RSS is linear in frames and untouched, so a 24-hour render is now
-  fast enough and still does not fit in memory (§2). A streaming merge is the
-  obvious answer and is not written.
+- Nothing further is known to block a 24-hour binary render: it is linear in
+  time and flat in memory (§2). That is an extrapolation from one hour, not a
+  measurement at 24, and the 30 GB of `events.evs` such a run emits is still a
+  storage question this does not touch.
 - Whether the markout tie convention should be written order at all (§3). This
   matters far less now that fills are marked against their own book — the
   remaining ties are between trades in one instrument — but it is still an
@@ -268,8 +286,8 @@ the figure has moved by four orders of magnitude (§9). That is a larger change
 to the scientific record than anything else here, and it is the one thing this
 branch cannot check for itself, because it does not own those conclusions.
 
-After that, a streaming render. It is the only remaining blocker to a 24-hour
-binary run: rendering is now fast enough and still needs roughly 62 GB (§2).
+After that, an actual 24-hour render, to replace the extrapolation in §2 with a
+measurement.
 
 ## 9. The reaction metric marks fills against the wrong instrument
 
