@@ -153,8 +153,27 @@ That is not a fix: between `95596f1`, the revision the probe used, and
 `230e78f`, the diff is two documentation files and no code. The difference is in
 the setup, and `GOAMD64` is ruled out — see below. The remaining candidates are
 the compiler version (the note says Go 1.27; these runs used `go1.26.7`), the
-seed the note does not record, and the copied configuration. This was measured
-before this branch's 138 commits, so it may no longer characterise this head.
+seed the note does not record, and the copied configuration.
+
+**Re-measured on this head.** The first run was against `230e78f`, 138 commits
+behind, which include the CDF depth and concentration work — exactly the
+mechanism the probe failed on — so the result could not be assumed to carry.
+Run again on `a666d02` with an unpatched build of this branch:
+
+| | `230e78f` | `a666d02` |
+| --- | --- | --- |
+| simulation | exit 0, `sim=24h0m0s` | exit 0, `sim=24h0m0s`, wall 18m0s |
+| event frames | 96,241,273 | 96,241,273 |
+| `events.evs` | 17,434,418,871 B | 18,006,037,027 B |
+| execution hash | `2806c51c…b26dc` | `f8bc3bc4…` |
+
+**The failure does not reproduce here either.** The condition the capacity gate
+is blocked on is not a property of this code at 24 hours on the default cell.
+
+The event frame count is identical across those 138 commits while the stream is
+3.3% larger, which is what schema changes adding fields to frames would look
+like rather than a moved trajectory. That is an observation, not a claim — it
+was not chased, and nothing above depends on it.
 
 **The toolchain moves the hash without moving anything else.** The same revision
 and seed run for 24 simulated hours at `GOAMD64=v3` hashes `2f00c608…a001f`
