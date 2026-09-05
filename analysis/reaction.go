@@ -73,6 +73,23 @@ type Reaction struct {
 	UndefinedMarkouts int `json:"undefined_markouts"`
 }
 
+// reactionBookSymbol names the book a record belongs to.
+//
+// Spot records carry no symbol in their data layer; only the derivative nesting
+// does. Keying on event.Symbol alone therefore collapses every spot book of a
+// venue into one series: on dev-607 that puts ABC/USD trades near 50.00 and
+// CDF/USD trades near 3.00 on a single price tape, so the price one horizon
+// after a maker's fill is whichever instrument happened to trade next and the
+// markout compares two different instruments. The book log's own filename is
+// the book, which is how arbitrage, crossvenue and triangular already recover
+// it; reaction was the only book-keyed metric with no fallback.
+func reactionBookSymbol(event Event) string {
+	if event.Symbol != "" {
+		return event.Symbol
+	}
+	return symbolFromPath(event.File)
+}
+
 // MeasureReaction computes delivered reaction lag and maker markouts.
 func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 	horizon := opts.HorizonSeconds
@@ -147,7 +164,7 @@ func (r *Run) MeasureReaction(opts ReactionOptions) (*Reaction, error) {
 		FilesSelected: opts.FilesSelected,
 	}
 	if err := r.Scan(scan, func(event Event) {
-		key := markKey{event.VenueID, event.Symbol}
+		key := markKey{event.VenueID, reactionBookSymbol(event)}
 		switch event.Name {
 		case "BookDelta":
 			mu.Lock()
