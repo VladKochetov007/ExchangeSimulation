@@ -40,7 +40,7 @@ not, so their rebuilt tree cannot be byte-compared against the historical
 format without normalising it first. Analyzers ignore the extra field, so
 nothing is broken; the attestation is simply weaker than it could be.
 
-## 2. Their renderer was quadratic — fixed, 25.2x
+## 2. Their renderer was quadratic — fixed, 28x at 20 minutes and 76x at an hour
 
 `simulations/multivenue/evidence_render.go`, `addRenderRecord`, re-checked the
 per-venue sequence contract by scanning every record already appended to the
