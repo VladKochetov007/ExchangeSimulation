@@ -3,6 +3,7 @@ package analysis
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"testing"
 )
 
@@ -118,5 +119,71 @@ func TestRestingRoleOrderIsReproducibleOverTiedMedians(t *testing.T) {
 				t.Fatalf("run %d orders tied medians differently: %v vs %v", attempt, got, want)
 			}
 		}
+	}
+}
+
+// symbolless renders a record the way the spot books actually write one: no
+// symbol anywhere in the data layer, so the book is only knowable from the file.
+func symbolless(event string, ts int64, client uint64, payload map[string]any) string {
+	raw, err := json.Marshal(map[string]any{
+		"client_id": client,
+		"event":     event,
+		"sim_ts":    ts,
+		"data":      map[string]any{"venue_id": "north", "payload": payload},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return string(raw)
+}
+
+// A venue's spot books are separate markets at unrelated price levels. Keying
+// them on a symbol the spot records do not carry put all of them on one price
+// tape, so a maker's markout was measured against whichever instrument traded
+// next: an ABC/USD fill near 50.00 marked against a CDF/USD trade near 3.00
+// reads as a 9400 bps loss that never happened.
+func TestReactionKeepsSpotBooksApartWhenRecordsCarryNoSymbol(t *testing.T) {
+	const horizonNano = int64(1e9)
+	// The maker's own book is named so that it sorts *after* the foreign one.
+	// Without that the pooled tape happens to present the right trade first and
+	// the bug hides behind alphabetical luck.
+	own := []string{
+		symbolless("OrderFill", 0, 7, map[string]any{
+			"price": 5000000000, "qty": 10, "side": "BUY", "role": "maker",
+		}),
+		symbolless("Trade", horizonNano, 0, map[string]any{
+			"price": 5000500000, "qty": 1, "side": "BUY",
+		}),
+	}
+	// A different market entirely, two orders of magnitude away, trading at the
+	// same instant, in a file that sorts first.
+	foreign := []string{
+		symbolless("Trade", horizonNano, 0, map[string]any{
+			"price": 300000000, "qty": 1, "side": "BUY",
+		}),
+	}
+
+	dir := writeRun(t, Report{}, map[string][]string{
+		"north/spot/ZZZ-USD.jsonl": own,
+		"north/spot/AAA-USD.jsonl": foreign,
+	})
+	run, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open run: %v", err)
+	}
+	reaction, err := run.MeasureReaction(ReactionOptions{HorizonSeconds: 1, MaxReactionSeconds: 30})
+	if err != nil {
+		t.Fatalf("measure reaction: %v", err)
+	}
+	if len(reaction.Adverse) != 1 {
+		t.Fatalf("expected one maker row, got %d: %+v", len(reaction.Adverse), reaction.Adverse)
+	}
+	// The maker bought at 5000000000 and its own book traded at 5000500000: a
+	// 1 bps move in the maker's favour, so the markout is -1 bps. Marked
+	// against the foreign book at 300000000 it reads about +9400.
+	const want = -1.0
+	got := reaction.Adverse[0].MeanMarkoutBps
+	if math.Abs(got-want) > 0.001 {
+		t.Fatalf("markout %.3f bps, want %.3f: the fill was marked against another book", got, want)
 	}
 }

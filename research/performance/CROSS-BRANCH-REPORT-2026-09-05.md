@@ -224,21 +224,24 @@ they give every record a per-venue sequence, which subsumes it.
 
 ## 7. Reproduction
 
+`WORK` is any scratch directory outside the repository, and `SCI` a worktree of
+the scientific branch.
+
 ```bash
 # independent verification of their reconstruction
-git worktree add --detach /tmp/sci github/autoresearch/ffa-ecology-gen0
-cd /tmp/sci && go build -o /tmp/mv ./cmd/multivenue && go build -o /tmp/evsrender ./cmd/evsrender
+git worktree add --detach "$SCI" github/autoresearch/ffa-ecology-gen0
+cd "$SCI" && go build -o "$WORK/mv" ./cmd/multivenue && go build -o "$WORK/evsrender" ./cmd/evsrender
 CFG=research/configs/v2-integrated-longrun/dev-607.json
-/tmp/mv -config $CFG -duration 20m -seed 607 -logdir /tmp/json
-/tmp/mv -config $CFG -duration 20m -seed 607 -evidence-format evstream_v3 -logdir /tmp/bin
-/tmp/evsrender -dir /tmp/bin -out /tmp/rebuilt
-for f in $(cd /tmp/json && find venues -name '*.jsonl'); do
-  cmp /tmp/json/$f <(sed -E 's/("data":\{"venue_id":"[^"]*",)"sequence":[0-9]+,/\1/' /tmp/rebuilt/$f)
+"$WORK/mv" -config $CFG -duration 20m -seed 607 -logdir "$WORK/json"
+"$WORK/mv" -config $CFG -duration 20m -seed 607 -evidence-format evstream_v3 -logdir "$WORK/bin"
+"$WORK/evsrender" -dir "$WORK/bin" -out "$WORK/rebuilt"
+for f in $(cd "$WORK/json" && find venues -name '*.jsonl'); do
+  cmp "$WORK/json/$f" <(sed -E 's/("data":\{"venue_id":"[^"]*",)"sequence":[0-9]+,/\1/' "$WORK/rebuilt/$f")
 done
 
 # the analyzer determinism survey
-for i in 1 2 3 4 5; do ./bin/mvanalyze -metric reaction /tmp/json > /tmp/r$i; done
-md5sum /tmp/r* | awk '{print $1}' | sort -u | wc -l   # 5 before the fix, 1 after
+for i in 1 2 3 4 5; do ./bin/mvanalyze -metric reaction "$WORK/json" > "$WORK/r$i"; done
+md5sum "$WORK"/r* | awk '{print $1}' | sort -u | wc -l   # 5 before the fix, 1 after
 ```
 
 The four commits are on `perf/ffa-gen0-port`, applied to `230e78f` in review
@@ -304,3 +307,33 @@ Stated before measuring on dev-607/seed 607/20m, so the check can fail:
 
 A result that leaves the lag at zero, or leaves markouts in the tens of
 thousands, falsifies the diagnosis rather than confirming it.
+
+### Outcome: two confirmed, one falsified
+
+Measured on dev-607/seed 607/20m.
+
+| role | before | after |
+| --- | ---: | ---: |
+| `cdf_spot_maker` | -37,763.985 bps | **-4.477 bps** |
+| `imbalance_maker` | -31,305.874 bps | **-4.009 bps** |
+| `fixed_distance_maker` | -24,940.754 bps | **-3.417 bps** |
+| `abc_cdf_spot_maker` | -1,159.630 bps | **-1.570 bps** |
+| `spot_maker` | — | -0.340 bps |
+| `futures_maker` (derivative) | 3.463 bps | 3.463 bps |
+| `option_dealer` (derivative) | -8,985.718 bps | -8,985.718 bps |
+
+Prediction 2 holds: spot markouts fall to single-digit basis points, and pooled
+markout goes from `-13,950.28` to `-762.26` bps. Prediction 3 holds: every fill
+count is unchanged. The derivative rows are bit-identical, which is the control
+that matters — those records carry a symbol, so the fix must not touch them, and
+it does not. The book table gains exactly the six rows it should: 72 to 78, with
+the `""` bucket replaced by `ABC-USD`, `CDF-USD` and `ABC-CDF` in each of three
+venues.
+
+**Prediction 1 is falsified.** The lag arm is bit-identical either way —
+312,597 observations and a pooled mean of `3.199007028218441e-06` seconds before
+and after. The lag was never zero because books were pooled; it is zero because
+orders arrive within microseconds of the book changes they follow, which the
+simulator's phase structure makes true within a single book as well. That is a
+separate emptiness in this metric's lag arm and the book key does not touch it.
+It is recorded here rather than quietly dropped.
