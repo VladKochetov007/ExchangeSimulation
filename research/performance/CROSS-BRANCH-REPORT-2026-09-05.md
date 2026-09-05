@@ -90,6 +90,7 @@ every sequence where a bitmap answers the same questions in one bit each.
 | 20m | 1,640,870 | 922 MB | 12.7 MB | 4.80 s | 4.22 s |
 | 60m | 4,859,415 | 2.60 GB | 14.2 MB | 14.75 s | 12.83 s |
 | 6h | 26,682,865 | **15.14 GB** | **21.9 MB** | 83.7 s | 77.3 s |
+| 24h | 96,241,273 | not attempted, ~60 GB | **47 MB** | — | **285.6 s** |
 
 Output is byte-identical at every size — 15 of 15 files, 27,173,903 records at
 six hours, same event frame counts, route counts and execution hashes.
@@ -245,12 +246,11 @@ they give every record a per-venue sequence, which subsumes it.
 
 ## 6. Live uncertainties
 
-- Nothing further is known to block a 24-hour binary render: it is linear in
-  time and flat in memory, measured out to six hours (§2). The remaining
-  extrapolation is 4x, not 24x. The 30 GB of `events.evs` such a run emits is
-  still a storage question this does not touch, and their own 24-hour probe
-  failed on a market-survival condition before reaching a terminal attestation,
-  which is a different problem and not this one.
+- Nothing blocks a 24-hour binary render. It is measured, not extrapolated
+  (§2, §10): 4 minutes 46 seconds and 47 MB.
+- Why their 24-hour probe failed and this one did not is open (§10). The
+  toolchain is the leading candidate and is not recorded in the manifest, so
+  the artifacts cannot settle it.
 - Whether the markout tie convention should be written order at all (§3). This
   matters far less now that fills are marked against their own book — the
   remaining ties are between trades in one instrument — but it is still an
@@ -298,9 +298,10 @@ the figure has moved by four orders of magnitude (§9). That is a larger change
 to the scientific record than anything else here, and it is the one thing this
 branch cannot check for itself, because it does not own those conclusions.
 
-After that, a 24-hour render. The remaining gap is a 4x extrapolation from the
-six-hour measurement, and the run that would close it is the one their capacity
-probe could not finish for unrelated reasons.
+After that, the same 24-hour cell built with the Go toolchain their probe used.
+That is the one experiment that would separate a toolchain-dependent
+market-survival outcome from a configuration difference, and the answer changes
+whether a scientific gate can be trusted across build environments.
 
 ## 9. The reaction metric marks fills against the wrong instrument
 
@@ -384,3 +385,57 @@ orders arrive within microseconds of the book changes they follow, which the
 simulator's phase structure makes true within a single book as well. That is a
 separate emptiness in this metric's lag arm and the book key does not touch it.
 It is recorded here rather than quietly dropped.
+
+## 10. A 24-hour run completes, and their capacity probe's failure does not reproduce
+
+Their `2026-08-31 capacity probe outcome` note records a 24-hour run exiting
+with status 1 at the terminal population mark:
+
+```text
+multivenue: terminal_post_mark participant valuation requires two-sided CDF/USD
+mark on venue south: no usable price
+```
+
+It calls this "a durable unpriceable-exposure/market-survival condition, not
+merely the expected transient cancellation at the final ingress boundary", and
+blocks a new capacity measurement on adjudicating it.
+
+Run here on dev-607/seed 607 for 24 hours in `evstream_v3` mode, it does not
+happen:
+
+| | |
+| --- | --- |
+| simulation | exit 0, `done: sim=24h0m0s wall=15m30s`, peak RSS 1.65 GB |
+| `events.evs` | 17,434,418,871 bytes; whole run directory 23 GB |
+| render | exit 0, **4 min 45.63 s**, peak RSS **47 MB** |
+| reconstructed | 96,241,273 event frames, 15 routes, 98,181,443 records, 32 GB |
+| execution hash | `2806c51c30039e46ed4f9cf5ab0fe7f6e03f0b958e957fed90768187493b26dc` |
+
+**This is not a fix, and must not be read as one.** Between `95596f1`, the
+revision their probe used, and `230e78f`, the head this ran on, the diff is two
+documentation files and 159 insertions. Zero lines of code. The binary that
+succeeded is the binary that failed.
+
+So the difference is in how the two runs were set up, and the candidates are:
+
+- **The Go toolchain.** Their note says Go 1.27; this used `go1.26.7`. This
+  campaign has already shown the toolchain changes the trajectory —
+  `GOAMD64=v3` fuses multiply-add, shifts `log_variance` by two ulp and changes
+  the execution hash. A compiler version can do the same, and a market-survival
+  outcome sits downstream of exactly those floating-point paths. Only one
+  toolchain is installed here, so this was not testable.
+- **The seed.** Their note does not record which seed the probe used. This ran
+  seed 607.
+- **The configuration.** Their note says the dev-607 config was "copied only to
+  redirect its log directory". This used the in-tree file unmodified.
+
+**The artifacts cannot distinguish these.** Their manifest records
+`config.seed` but no `go_version`, `GOARCH`, `GOOS` or `GOAMD64` — checked
+directly on this run's `manifest.json`. That is the provenance gap §7 of the
+promotion memo already described, and here it is load-bearing: a scientific gate
+was declared blocked on a durable market-survival mechanism, the same code does
+not reproduce it, and nothing in the evidence says why.
+
+What is established: the failure is not a property of this code at 24 hours on
+the default cell. What is not established: which of the three differences causes
+it. Deciding that is worth more than the capacity number it was blocking.
