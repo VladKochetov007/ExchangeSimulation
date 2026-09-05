@@ -218,9 +218,21 @@ they give every record a per-venue sequence, which subsumes it.
 
 ## 6. Live uncertainties
 
-- Whether the markout tie convention should be written order at all (§3).
-- Peak render RSS is linear in frames and untouched (§2).
-- The -5.00% figure is measured on this branch, not theirs (§4).
+- Peak render RSS is linear in frames and untouched, so a 24-hour render is now
+  fast enough and still does not fit in memory (§2). A streaming merge is the
+  obvious answer and is not written.
+- Whether the markout tie convention should be written order at all (§3). This
+  matters far less now that fills are marked against their own book — the
+  remaining ties are between trades in one instrument — but it is still an
+  unspecified choice.
+- The lag arm of `reaction` reports a pooled mean of 3.2 microseconds and did
+  not move when the books were separated (§9). Nothing here explains what it is
+  supposed to measure on a simulator whose orders arrive in the same instant as
+  the changes they follow; that question belongs to whoever owns the metric.
+- Every markout figure the campaign has published for a spot maker was computed
+  against a pooled tape. The corrected values are single-digit basis points
+  where the old ones were tens of thousands, so any conclusion that rested on
+  spot maker markout needs re-deriving. Nothing in this report does.
 
 ## 7. Reproduction
 
@@ -251,9 +263,13 @@ fix, and the renderer complexity fix. Nothing is merged into
 
 ## 8. Next experiment with the highest information gain
 
-A paired A/B of the fingerprint port on their branch, with an A/A control in the
-same session, to state the -5.00% in their configuration rather than transfer it
-from this one.
+Re-derive whichever published results depended on spot-maker markout, now that
+the figure has moved by four orders of magnitude (§9). That is a larger change
+to the scientific record than anything else here, and it is the one thing this
+branch cannot check for itself, because it does not own those conclusions.
+
+After that, a streaming render. It is the only remaining blocker to a 24-hour
+binary run: rendering is now fast enough and still needs roughly 62 GB (§2).
 
 ## 9. The reaction metric marks fills against the wrong instrument
 
