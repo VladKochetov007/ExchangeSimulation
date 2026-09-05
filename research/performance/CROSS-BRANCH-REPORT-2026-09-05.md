@@ -248,9 +248,11 @@ they give every record a per-venue sequence, which subsumes it.
 
 - Nothing blocks a 24-hour binary render. It is measured, not extrapolated
   (§2, §10): 4 minutes 46 seconds and 47 MB.
-- Why their 24-hour probe failed and this one did not is open (§10). The
-  toolchain is the leading candidate and is not recorded in the manifest, so
-  the artifacts cannot settle it.
+- Why their 24-hour probe failed and this one did not is open (§10). GOAMD64 is
+  ruled out (§11); the compiler version, their unrecorded seed and their copied
+  configuration remain. Runs made from `perf/ffa-gen0-port` now record the
+  toolchain, so this class of question is answerable from the artifacts going
+  forward — but not retrospectively, for runs already made.
 - Whether the markout tie convention should be written order at all (§3). This
   matters far less now that fills are marked against their own book — the
   remaining ties are between trades in one instrument — but it is still an
@@ -473,5 +475,17 @@ The drift is numerical, not structural. No event is added, dropped or reordered;
 values move in the last bits and the digest that covers them moves with it. That
 is the worst shape this could take for a reproduction check: two builds of one
 revision agree on everything a person would look at and disagree on the one
-number the attestation compares. Without `GOAMD64` in the manifest — and it is
-not there — a failed reproduction is indistinguishable from a semantic change.
+number the attestation compares. Without `GOAMD64` in the manifest a failed
+reproduction is indistinguishable from a semantic change.
+
+**Now recorded.** `BuildInfo` on `perf/ffa-gen0-port` carries `go_version`,
+`goarch`, `goos` and `goamd64`, with `goamd64` omitted when the toolchain does
+not report it so older manifests are unchanged. Verified on real runs — the two
+builds that hash differently now produce manifests that say why:
+
+| build | `go_version` | `goamd64` | hash at 3m |
+| --- | --- | --- | --- |
+| default | `go1.26.7-X:nodwarf5` | `v1` | `86a638893507181d` |
+| `GOAMD64=v3` | `go1.26.7-X:nodwarf5` | `v3` | `f519f4502065ce6f` |
+
+Provenance only: no semantics change and no execution hash moves.
