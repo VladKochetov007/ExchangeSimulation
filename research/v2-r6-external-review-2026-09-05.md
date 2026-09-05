@@ -231,6 +231,35 @@ none of the three. A hash comparison answers "were these bytes produced the same
 way", not "did the simulation do the same thing", and only a content-level
 comparison like this one separates them.
 
+### 230e78f was not log-mode neutral, and this branch fixed it
+
+`dev-607-none` is the logging parity control — `log_mode: none`, the `record_*`
+recorders off, described in the config as "no economic treatment". Its whole
+purpose is to show that logging does not perturb the trajectory, so its
+execution hash must equal `dev-607`'s.
+
+Four fresh 20-minute runs, seed 607:
+
+| revision | `dev-607` | `dev-607-none` | neutral |
+| --- | --- | --- | --- |
+| `230e78f` | `afe320fe…` | `cda604d6…` | **no** |
+| `a666d02` | `4504d198…` | `4504d198…` | yes |
+
+All four produce 1,640,870 event frames. On `230e78f` turning logging off changed
+the digest, so the parity control was not a parity control there: a cell and its
+own control were different trajectories. Something in the 138 commits fixed it,
+and this branch holds the invariant.
+
+The consequence is archaeological rather than actionable — it is already fixed
+here — but it bears on anything concluded on `230e78f` or earlier that used the
+parity cell as a control or as a logging-neutrality check.
+
+For completeness, the branch these commits came from holds the invariant in both
+of its modes: `dev-607` and `dev-607-none` hash `b1f5e3a8…` in JSON mode and
+`e1ad48f5…` in replace mode.
+
+### Scope
+
 The scope is narrow and worth stating: dev-607, seed 607, twenty minutes. The
 CDF depth, concentration and activation work in those commits changes gates,
 audits and recording here and does not touch the trajectory — which most likely
