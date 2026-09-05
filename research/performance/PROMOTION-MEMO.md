@@ -225,10 +225,17 @@ unchanged hash at 20 minutes is a statement about the window, not about the fix.
 
 ### New baselines on this branch
 
-| cell | hash (20m) | events |
-| --- | --- | ---: |
-| dev-607 / seed 607 | `e1ad48f5f35e0f12` | 1,568,215 |
-| dev-613 / seed 613 | `0bafcc8093222b0e` | 1,499,069 |
+The two modes hash different canonical bytes, so a cell has two hashes and a
+hash quoted without its mode is ambiguous. An earlier revision of this table
+quoted one figure per cell; that was the **binary** digest in both rows.
+
+| cell | JSON-mode hash (20m) | binary-mode hash (20m) | events |
+| --- | --- | --- | ---: |
+| dev-607 / seed 607 | `b1f5e3a8881e873b` | `e1ad48f5f35e0f12` | 1,568,215 |
+| dev-613 / seed 613 | not re-measured | `0bafcc8093222b0e` | 1,499,069 |
+
+Measured at `c4434ad` and again at `b5c2a25`, both modes, same values: the
+evidence-only ordering key moves neither digest.
 
 Historical hashes and runs are **not** reinterpreted. Re-baselining applies to
 the next scientific successor candidate only.

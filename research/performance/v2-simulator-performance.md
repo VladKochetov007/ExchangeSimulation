@@ -1752,6 +1752,10 @@ writing any code, and the answer is none.
 | `GOGC=400` | 7.65 s | 1,643,604 KB | `e1ad48f5f35e0f12` |
 | `GOGC=off` | **8.44 s** | 4,003,652 KB | `e1ad48f5f35e0f12` |
 
+These are binary-mode digests. The same cell in JSON mode hashes
+`b1f5e3a8881e873b`: the two modes cover different canonical bytes, so a hash
+quoted without its mode does not identify a run.
+
 **Turning the collector off costs 13 % wall and 6.2x the RSS.** The mark cost is
 not recoverable by marking less: with a multi-gigabyte heap, allocation touches
 progressively colder memory and the locality loss exceeds everything the
