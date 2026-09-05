@@ -106,7 +106,14 @@ func (r *RestingPlacement) RolesByDistance() []string {
 		names = append(names, name)
 	}
 	sort.Slice(names, func(i, j int) bool {
-		return r.ByRole[names[i]].DistanceTicks.Median > r.ByRole[names[j]].DistanceTicks.Median
+		left, right := r.ByRole[names[i]], r.ByRole[names[j]]
+		if left.DistanceTicks.Median != right.DistanceTicks.Median {
+			return left.DistanceTicks.Median > right.DistanceTicks.Median
+		}
+		// The names come from map iteration, which Go randomises. Without a
+		// total order two classes at the same median swap places between runs
+		// over the same evidence.
+		return names[i] < names[j]
 	})
 	return names
 }
