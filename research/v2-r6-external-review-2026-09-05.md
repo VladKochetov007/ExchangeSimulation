@@ -208,6 +208,36 @@ housekeeping, and it is an argument for recording them even though this branch
 already does — a reader comparing two runs needs to know that frame-count
 agreement is not evidence of equivalence.
 
+### And the hash moves on an evidence-format change too
+
+Rendering both 20-minute runs and comparing them record by record settles what
+the differing hash actually represents:
+
+| | |
+| --- | --- |
+| records compared | 1,669,063 |
+| value differences on fields present in both | **0** |
+| new field occurrences | 1,922,654, all of them one field: `event_seq` |
+
+Across those 138 commits, on this cell, every pre-existing field of every record
+holds the same value, no event appears or disappears, and nothing is reordered.
+One field was added to every event type. The 4.0% byte growth and the entirely
+different execution hash are explained by that field alone.
+
+**So the hash moved between two revisions whose simulated trajectory is
+identical.** It conflates three different causes — a semantic change, a
+toolchain change, and an evidence-format change — while the frame counts detect
+none of the three. A hash comparison answers "were these bytes produced the same
+way", not "did the simulation do the same thing", and only a content-level
+comparison like this one separates them.
+
+The scope is narrow and worth stating: dev-607, seed 607, twenty minutes. The
+CDF depth, concentration and activation work in those commits changes gates,
+audits and recording here and does not touch the trajectory — which most likely
+means this cell never reaches the conditions those gates bind on, not that the
+work is inert. If dev-607 is being used to exercise CDF survival behaviour, that
+is worth knowing.
+
 **The toolchain moves the hash without moving anything else.** The same revision
 and seed run for 24 simulated hours at `GOAMD64=v3` hashes `2f00c608…a001f`
 where the default hashes `2806c51c…b26dc`. Both emitted exactly 96,241,273 event
