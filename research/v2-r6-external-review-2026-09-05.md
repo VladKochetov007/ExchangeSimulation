@@ -170,10 +170,43 @@ Run again on `a666d02` with an unpatched build of this branch:
 **The failure does not reproduce here either.** The condition the capacity gate
 is blocked on is not a property of this code at 24 hours on the default cell.
 
+### The attestation's frame counts cannot detect a semantic change
+
 The event frame count is identical across those 138 commits while the stream is
-3.3% larger, which is what schema changes adding fields to frames would look
-like rather than a moved trajectory. That is an observation, not a claim — it
-was not chased, and nothing above depends on it.
+3.3% larger. That was first recorded as a curiosity; it is not one.
+
+Re-run at 20 minutes, same config and seed, unpatched builds of both revisions:
+
+| | `230e78f` | `a666d02` |
+| --- | ---: | ---: |
+| event frames | 1,640,870 | 1,640,870 |
+| stream frames | 1,640,940 | 1,640,940 |
+| `events.evs` | 294,335,937 B | 306,079,525 B |
+| execution hash | `afe320fe…` | `4504d198…` |
+
+Identical at 20 minutes and at 24 hours. The count is structurally determined by
+the configuration rather than by the economics, so 138 commits of CDF depth,
+concentration and activation work move it by zero.
+
+`validateBinaryAttestation` compares `EventFrames` and `StreamFrames`. Both are
+therefore **integrity checks — did the stream survive intact — with essentially
+no power to detect a semantic change.** The one field that does move is the
+execution hash, and §11 shows the hash also moves for a pure `GOAMD64` rebuild
+with nothing semantic behind it.
+
+So the two fields fail in opposite directions and neither separates the case
+that matters:
+
+| | moves on a semantic change | moves on a toolchain change |
+| --- | --- | --- |
+| frame counts | no | no |
+| execution hash | yes | yes |
+
+Nothing in the attestation distinguishes "the science changed" from "the build
+changed". That is what makes the toolchain fields load-bearing rather than
+housekeeping, and it is an argument for recording them even though this branch
+already does — a reader comparing two runs needs to know that frame-count
+agreement is not evidence of equivalence.
 
 **The toolchain moves the hash without moving anything else.** The same revision
 and seed run for 24 simulated hours at `GOAMD64=v3` hashes `2f00c608…a001f`
