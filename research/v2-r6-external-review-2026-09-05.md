@@ -137,6 +137,24 @@ point restated: the fix makes this metric reproducible across revisions, and
 without it a comparison between two branches measures the tie order as much as
 it measures the simulation.
 
+**And it is not one cell, nor one sign.** The same before/after on the other two
+development cells, each at its own seed:
+
+| cell | role | before | after |
+| --- | --- | ---: | ---: |
+| dev-613 | `cdf_spot_maker` | -19,973.165 bps | -3.979 bps |
+| dev-613 | `fixed_distance_maker` | -15,601.116 bps | -2.867 bps |
+| dev-613 | `abc_cdf_spot_maker` | 161.072 bps | 0.433 bps |
+| dev-617 | `cdf_spot_maker` | **+68,800.736 bps** | -6.515 bps |
+| dev-617 | `fixed_distance_maker` | +18,778.950 bps | -2.525 bps |
+| dev-617 | `abc_cdf_spot_maker` | 1,526.707 bps | 1.216 bps |
+
+Fill counts are unchanged in every row. The sign is not stable either: dev-607
+and dev-613 read strongly negative and dev-617 strongly positive, because the
+answer depends on which foreign book happened to trade next. Across the three
+cells the defective metric spans -37,540 to +68,801 basis points — a +688%
+markout on a spot maker — and every corrected value falls within ±7 bps.
+
 **Consequence for the record:** every published spot-maker markout was computed
 against a pooled tape. Anything resting on that figure needs re-deriving. This
 branch does not do that, because those are not its conclusions.
