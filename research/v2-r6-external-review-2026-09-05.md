@@ -258,14 +258,32 @@ For completeness, the branch these commits came from holds the invariant in both
 of its modes: `dev-607` and `dev-607-none` hash `b1f5e3a8…` in JSON mode and
 `e1ad48f5…` in replace mode.
 
-### Scope
+### It is not one cell: no development cell shows a trajectory difference
 
-The scope is narrow and worth stating: dev-607, seed 607, twenty minutes. The
-CDF depth, concentration and activation work in those commits changes gates,
-audits and recording here and does not touch the trajectory — which most likely
-means this cell never reaches the conditions those gates bind on, not that the
-work is inert. If dev-607 is being used to exercise CDF survival behaviour, that
-is worth knowing.
+dev-607 was checked first, so the obvious question is whether it is unusual. It
+is not. Every non-holdout cell, each at its own seed, 20 minutes, rendered and
+compared record by record between the two revisions:
+
+| cell | seed | records | value differences on shared fields | new fields |
+| --- | ---: | ---: | ---: | --- |
+| dev-607 | 607 | 1,669,063 | 0 | `event_seq` only |
+| dev-613 | 613 | 1,600,210 | 0 | `event_seq` only |
+| dev-617 | 617 | 1,607,487 | 0 | `event_seq` only |
+
+Zero, on all three. Across those 138 commits the CDF depth, concentration and
+activation work changes gates, audits and recording, and does not move the
+simulated trajectory on any cell available here.
+
+That is compatible with the work being exactly right — defensive gates and
+fail-closed paths *should* be inert on runs that never violate them, and their
+value is in what they would reject. What it means is that none of these cells
+demonstrates the behaviour those gates exist to govern, so none of them can
+serve as evidence that the gates do what they are meant to do.
+
+**The holdouts are the gap and they were not touched.** 619, 631 and 641 are
+excluded by operator instruction; they were neither read nor run. If the CDF
+survival mechanism binds anywhere in this campaign, that is where to look, and
+this report cannot say whether it does.
 
 **The toolchain moves the hash without moving anything else.** The same revision
 and seed run for 24 simulated hours at `GOAMD64=v3` hashes `2f00c608…a001f`
